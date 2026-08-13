@@ -1135,9 +1135,9 @@ export class MinionProj extends Entity {
       game.playSfxFiles([Math.random() < 0.1 ? 'NPC_Killed_61' : 'NPC_Killed_59'], 1, this.cx, this.cy);
     }
     // 黑暗捅人（:46835-46860——仅本地玩家侧）----
-    const lit = (() => {
+    const lit: { c: number; p: number } = (() => {
       const lg = (game as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } | null }).lighting;
-      if (!lg) return 1; // 无光照引擎(探针)视作亮,不触发
+      if (!lg) return { c: 1, p: 1 }; // 无光照引擎(探针)视作亮,不触发
       const at = (wx: number, wy: number) => {
         const [r, g, b] = lg.lightAt(Math.floor(wx / 16), Math.floor(wy / 16));
         return Math.hypot(r, g, b) / 255; // Lighting.GetColor().ToVector3().Length()
@@ -1304,6 +1304,12 @@ export class MinionProj extends Entity {
     ctx.imageSmoothingEnabled = false;
     if (this.rot !== 0) ctx.rotate(this.rot); // 龙链旋转（rotation=vel 方向+PI/2）
     else if (this.facing < 0) ctx.scale(-1, 1); // spriteDirection 翻转（随从+哨兵通用）
+    if (this.projId === 653) {
+      // 同伴方块：SetDefaults scale=0.8（:6740）+ rotation 独立累计（cubeRot,
+      // rotation+=vx/20——不走龙链 rot,直接套用）;34×34 单帧
+      if (this.cubeRot !== 0) ctx.rotate(this.cubeRot);
+      ctx.scale(0.8, 0.8);
+    }
     if (img) {
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
     } else {

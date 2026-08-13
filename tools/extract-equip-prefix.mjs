@@ -117,6 +117,10 @@ const ACCESSORY = new Set([
   // DefaultToInfoAccessory(DefaultToAccessory 内部 accessory=true;Item.cs:48234/:48229)
   ...scanCaseFields(itemSrc, ['\\bDefaultToInfoAccessory\\s*\\(']).keys(),
   ...scanCaseFields(itemSrc, ['\\bDefaultToAccessory\\s*\\(']).keys(),
+  // 1456 反编译伪影补全:手机 3124/贝壳手机 5358-5361 的 case 块缺辅助调用
+  // (Item.cs :29000 仅 useStyle=4;游戏内确为可装备信息饰品,
+  //  Player.RefreshInfoAccsFromItemType :12353-12394 将其列为全开 12 项的 OR 源)
+  3124, 5358, 5359, 5360, 5361,
 ]);
 const VANITY = new Set(scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys());
 const STATS = {};

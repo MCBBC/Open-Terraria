@@ -21,7 +21,7 @@ export function moonPhase(dayCount: number): number {
 }
 
 /** SetBackColor 五段昼夜曲线(Main.cs:62889-63362 主体)→ [R,G,B] 0-255 */
-export function setBackColor(mainTime: number, isDay: boolean, phase: number): [number, number, number] {
+export function setBackColor(mainTime: number, isDay: boolean, phase: number, bloodMoon = false): [number, number, number] {
   let r: number, g: number, b: number;
   if (isDay) {
     if (mainTime < 13500) {
@@ -41,7 +41,16 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number): [
     }
   } else {
     const t = mainTime - 54000;
-    if (t < 16200) {
+    if (bloodMoon) {
+      // ★血月夜曲线（Main.cs:62945-62961）：R=75→35 红移夜
+      if (t < 16200) {
+        const p = 1 - t / 16200;
+        r = 75 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
+      } else {
+        const p = (t / 32400 - 0.5) * 2;
+        r = 35 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
+      }
+    } else if (t < 16200) {
       // 入夜(18:00-23:00)
       const p = 1 - t / 16200;
       r = 30 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
@@ -51,8 +60,8 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number): [
       r = 20 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
     }
   }
-  // 月相地板(Main.cs:63230-63266):每通道下限
-  const floor = MOON_FLOOR[phase % 8];
+  // 月相地板(Main.cs:63230-63266):每通道下限；血月恒 25（:63266-63277）
+  const floor = bloodMoon ? 25 : MOON_FLOOR[phase % 8];
   r = Math.max(r, floor); g = Math.max(g, floor); b = Math.max(b, floor);
   return [Math.min(255, r), Math.min(255, g), Math.min(255, b)];
 }
@@ -71,10 +80,13 @@ export function tileColor(bg: readonly [number, number, number]): [number, numbe
 /** 一次调用得到天空光种子(0-1 RGB)。eclipse=true 时按 Main.cs:63282-63305 压暗：
  *  eclipseLight = min(1, 白天 Main.time/1242)（约 25 游戏秒到满暗）；R×(1-0.925L)
  *  G×(1-0.96L) B×(1-1.0L)——蓝色通道清零、红色保留 7.5% 的血红暮色 */
-export function skySeed(timeOfDay: number, dayCount: number, eclipse = false): [number, number, number] {
-  const isDay = timeOfDay > 0.25 && timeOfDay < 0.75;
+export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bloodMoon = false, moonPhaseNow?: number): [number, number, number] {
+  // ★昼夜窗口对齐 Clock（DAWN=0.1875/DUSK=0.8125，昼 4:30-19:30）——曾用
+  // (0.25,0.75) 两端各差 1.5h，18:00-19:30 天空光差 ~4.4 倍
+  const isDay = timeOfDay > 0.1875 && timeOfDay < 0.8125;
   const t = toVanillaTime(timeOfDay, isDay);
-  let bg = setBackColor(t, isDay, moonPhase(dayCount));
+  void dayCount;
+  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon);
   if (eclipse && isDay) {
     const L = Math.min(1, t / 1242);
     bg = [
@@ -140,9 +152,11 @@ export class FlickerClock {
 
   /** 微光火把色(TorchID ShimmerTorchLight:48-62;num/num2 由 mouseTextColor 派生钳 0-1) */
   shimmerTorchColor(): [number, number, number] {
-    const num = Math.min(1, Math.max(0, (this.mouseTextColor - 190) / 65));
-    const num2 = 1 - num;
-    return [num * 0.9, num2 * 0.55, num * 1.2];
+    // ★原版公式（TorchID.cs:48-62）：num=clamp(0.9+(270-mt)/900)、
+    // num2=clamp(0.9+(270-mt)/125)（恒=1）→ r=num*0.9、g=0.55、b=num*1.2
+    // ——近常量微摆；曾误读成 (mt-190)/65 三角波大幅摆动
+    const num = Math.min(1, Math.max(0, 0.9 + (270 - this.mouseTextColor) / 900));
+    return [num * 0.9, 0.55, num * 1.2];
   }
 
   discoColor(): [number, number, number] {

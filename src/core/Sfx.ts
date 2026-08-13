@@ -37,6 +37,7 @@ export type SfxName =
   | 'gunHandgun'   // SoundID.Item41 手枪族 164/219/1255/1929/2269/2270
   | 'record'      // SoundID.Item166（八音盒录音完成，Player.cs:15054）
   | 'mirror'      // SoundID.Item6（魔镜族 UseSound：Magic/Ice Mirror/Cell Phone/Shellphone :42297 族）
+  | 'bombFuse'    // SoundID.BombFuse = CreateTrackable("fuse")（SoundID.cs:1153，引信嘶声循环 0.2 音量）
   | 'conch';      // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
@@ -94,6 +95,7 @@ const WAV_MAP: Record<SfxName, string[]> = {
   gunHandgun: ['Item_41'],
   record: ['Item_166'],
   mirror: ['Item_6'],
+  bombFuse: ['Fuse'],   // Content/Sounds/Custom/fuse.xnb → Fuse.wav（自提取，1.42s 循环）
   conch: ['Item_64'],
   // 以下无原版素材，走合成
   drink: ['Item_3'],  // SoundID.Item3(药水饮用/回忆药水起始音;素材曾缺走合成兜底)
@@ -209,6 +211,32 @@ export class Sfx {
   playFiles(files: string[], vol = 1, x?: number, y?: number): boolean {
     if (!files.length) return false;
     return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol, x, y);
+  }
+
+  /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound 语义，AI_016 :44276 引信嘶声）:
+   *  返回句柄 {stop, setPos}——setPos 按距离衰减刷新音量（ProjectileAudioTracker
+   *  跟随弹体）。缓冲未就绪返回 null（调用方下 tick 重试即可）。 */
+  startTrackedLoop(name: SfxName, vol: number, x: number, y: number): { stop(): void; setPos(px: number, py: number): void } | null {
+    const list = WAV_MAP[name];
+    if (!list || !list.length) return null;
+    const ctx = this.ensure();
+    if (!ctx) return null;
+    const buf = this.ensureBuffer(list[0]);
+    if (!buf) return null;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    const g = ctx.createGain();
+    g.gain.value = this.atten(vol, x, y) * this.master;
+    src.connect(g).connect(ctx.destination);
+    src.start();
+    return {
+      stop: () => { try { src.stop(); } catch { /* 已停 */ } g.disconnect(); },
+      setPos: (px: number, py: number) => {
+        g.gain.value = this.atten(vol, px, py) * this.master;
+      },
+    };
   }
 
   /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底） */

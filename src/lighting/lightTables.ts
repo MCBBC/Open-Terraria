@@ -54,7 +54,7 @@ export const NON_VISIBLE_PADDING = 18;
 /** 裂砖 → 0.80 衰减档(TileID.cs:183: CrackedBricks = {481,482,483}) */
 export const CRACKED_SHEETS = new Set([481, 482, 483]);
 /** 透光墙(Main.cs:10487-10503 wallLight 全表)——天空光可穿过的墙(0=无墙含在内由调用方处理) */
-export const WALL_LIGHT = new Set([21, 318, 106, 317, 107, 138, 140, 141, 139, 145, 150, 152, 245, 315, 168]);
+export const WALL_LIGHT = new Set([21, 318, 106, 317, 107, 138, 140, 141, 139, 145, 150, 152, 245, 315, 168, 73, 227]); // +73 云墙/227 降雪墙特例
 
 // ---- 火把色(TorchID.cs:134-161 _lights 全表;0-1 RGB) ----
 export const TORCH_COLORS: ReadonlyArray<readonly [number, number, number]> = [
@@ -83,8 +83,10 @@ export const TORCH_COLORS: ReadonlyArray<readonly [number, number, number]> = [
   [0.3, 0.78, 1.2],    // 22 蘑菇
   [1, 1, 1],           // 23 微光(动态,见 SkyColor)
 ];
-/** 蜡烛/吊灯/篝火等闪烁幅度来源的 sheet 集(燃烧类光源) */
-export const FLICKER_SHEETS = new Set([33, 49, 92, 93, 174, 34, 149, 95, 100, 126, 173, 564, 215, 405, 4]);
+/** ★闪烁族收敛（TileLightScanner 原版仅三 case 用 Next(28,42)*0.005+(270-mt)/700 系：
+ *  405(:1033-1067)/215(:1073-1162)/592(:1171-1181)——曾把火把(4)/蜡烛(33)/灯(34)/49/
+ *  92/93/95/100/126/149/173/174/564 全部误抬 +0.16~0.32 常量（照明半径 +3 格） */
+export const FLICKER_SHEETS = new Set([405, 215, 592]);
 /** 蘑菇组发光 sheet(TileLightScanner.cs:2938 case 70/71/72/190/348/349/528/578；
  *  R=0 B=1 G=0.2+num11/2 的呼吸蓝光,与 FLICKER_SHEETS 三通道叠加不同) */
 export const MUSHROOM_GLOW_SHEETS = new Set([70, 71, 72, 190, 348, 349, 528, 578]);
@@ -94,13 +96,16 @@ export const WALL_EMISSIVE: Record<number, readonly [number, number, number]> = 
   33: [0.09, 0.0525, 0.24],     // 恶魔砖墙
   44: [0.15, 0.15, 0.15],       // 彩虹砖(静态近似;动态 disco 见 phase2)
   137: [0.5, 0.25, 0.05],       // 岩浆瀑布墙
-  153: [0.6, 0.12, 0.6],        // 紫水晶宝石灯墙
-  154: [0.6, 0.12, 0.6],
-  155: [0.6, 0.42, 0.06],       // 琥珀
-  156: [0.09, 0.6, 0.24],       // 祖母绿
-  164: [0.09, 0.24, 0.6],       // 蓝宝石
-  165: [0.6, 0.06, 0.09],       // 红宝石
-  166: [0.42, 0.42, 0.6],       // 钻石
+  // ★宝石灯墙七条 1:1（TileLightScanner.cs:248-273：Amethyst=0.6/0/0.6、Topaz=0.6/0.6/0、
+  //   Amber=0.6/0.3/0、Ruby=0.6/0/0、Diamond=0.6/0.6/0.6、Emerald=0/0.6/0、
+  //   Sapphire=0/0/0.6——原表 id 与宝石名错位一档连锁错）
+  153: [0.6, 0.3, 0],            // Amber 琥珀（CS:270-273）
+  154: [0.6, 0, 0.6],            // Amethyst 紫水晶（CS:248-251）
+  155: [0.6, 0.6, 0.6],          // Diamond 钻石（CS:265-268）
+  156: [0, 0.6, 0],              // Emerald 祖母绿（CS:259-261）
+  164: [0.6, 0, 0],              // Ruby 红宝石（CS:262-264）
+  165: [0, 0, 0.6],              // Sapphire 蓝宝石（CS:256-258）
+  166: [0.6, 0.6, 0],            // Topaz 黄玉（CS:252-255）
   174: [0.2975, 0, 0],          // 猩红砖墙(仅 R)
   175: [0.075, 0.15, 0.4],      // 蘑菇护板
   176: [0.1, 0.1, 0.1],         // 火星导管
@@ -114,5 +119,6 @@ export const WALL_EMISSIVE: Record<number, readonly [number, number, number]> = 
   357: [0.15, 0.27, 0.3],       // 水母墙
 };
 
-// ---- 月相地板(Main.cs:63230-63266;索引 = dayCount%8,相位序 Empty→Full→Empty) ----
-export const MOON_FLOOR = [11, 13, 15, 17, 19, 17, 15, 13];
+// ---- 月相地板(Main.cs:63230-63242;索引 = MoonPhase 枚举 Full=0…Empty=4,
+//      序列 19,17,15,13,11,13,15,17——曾整体倒置致满月夜拿最暗地板) ----
+export const MOON_FLOOR = [19, 17, 15, 13, 11, 13, 15, 17];

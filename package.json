@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "start": "vite build && vite preview",
-    "e2e": "node scripts/run-e2e.mjs"
+    "e2e": "node scripts/run-e2e.mjs",
+    "test:audit": "vitest run tests/atlas-lint.test.ts tests/extract-audit.test.ts",
+    "prebuild": "npm run test:audit"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3"

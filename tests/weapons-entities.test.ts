@@ -142,6 +142,18 @@ describe('细剑族（aiStyle 161）', () => {
     run(s, hooks, 2);
     expect(s.dead).toBe(true); // 16t Kill
   });
+
+  it('左刺镜像锚定（AI_161 :44997 spriteDirection=-1；绘制角 Main.cs:32444 −π/4×sd）', () => {
+    const { hooks, player } = makeHooks();
+    const s = new SpearProj(-1, 0, 2.1, 13, 5, 4, 938);
+    run(s, hooks, 10);
+    expect(s.dead).toBe(false);
+    // 左刺：cx 向左偏移 spd×(t-1)（修复前方向/镜像缺失会让贴图指向错误侧）
+    expect(Math.abs(s.cx - player.cx - (-2.1 * 9))).toBeLessThan(1.5);
+    expect(Math.abs(s.cy - player.cy)).toBeLessThan(1.5);
+    run(s, hooks, 7);
+    expect(s.dead).toBe(true); // t=16 消失（useAnimation 13 后仍补足 16t）
+  });
 });
 
 describe('手雷（aiStyle 16）', () => {

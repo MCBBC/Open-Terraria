@@ -3706,6 +3706,12 @@ void CrimPlaceHeartsGen()
     }   // cs:14331：全组结束后一次性放心（普通世界 !flipInfections）
 }
 Checkpoint("corruption");
+if (Environment.GetEnvironmentVariable("GHOST_DUMP") != null) {
+    var gbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, gbuf, 0, gbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("GHOST_DUMP"), gbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("GHOST_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    return;
+}
 
 
 // ================= Pass 30 Lakes（cs:14613-14755 + SonOfLakinater cs:80354）=================

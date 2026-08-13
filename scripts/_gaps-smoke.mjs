@@ -85,6 +85,22 @@ const res = await page.evaluate(async () => {
   (g).netCatchCritter(mf2);
   out.mfTeleported = mf2.dead || Math.abs(mf2.x - p0.x) + Math.abs(mf2.y - p0.y) > 8;
 
+  // ---- ②c 城镇史莱姆家族：684 铜盔变身 + 670/681 链实体可构造 ----
+  const slimeBefore = g.entities.npcs.filter((n) => !n.dead && n.npcKey === 'town_slime_squire').length;
+  // 造一只蓝史莱姆(1) 敌怪 + 扔铜盔 89 的掉落实体 → 落其上
+  const blueSlime = Enemy.fromVanilla(1, g.player.cx + 100, g.player.cy - 16);
+  if (blueSlime) g.entities.add(blueSlime, 'enemies');
+  const invKey = (await import('/src/data/items.ts')).VANILLA_ITEM_KEY_BY_ID[89];
+  const helmet = g.spawnDrop(blueSlime.cx, blueSlime.cy, invKey, 1, 0, 0);
+  await new Promise(r => setTimeout(r, 1500));
+  out.squireSpawned = g.entities.npcs.filter((n) => !n.dead && n.npcKey === 'town_slime_squire').length - slimeBefore;
+  out.copperUnlocked = !!g.world.flags.unlockedSlimeCopperSpawn;
+  // 670/681 实体构造（json 条目生效验证）
+  const nerdy = new (await import('/src/entities/TownNPC.ts')).TownNPC('town_slime_blue', g.player.cx + 40, g.player.cy - 20);
+  out.blueConstructs = !nerdy.dead && nerdy.vanillaId === 670;
+  g.entities.add(nerdy, 'npcs');
+  out.six70Frames = (await import('/src/data/vanillaNpcs.ts')).TOWN_NPC_IDS['town_slime_blue'].extra;
+
   // ---- ③ 狙击镜扩圈字段 ----
   out.scopeNum3Default = g.vanillaSpawner.scopeNum3;
 
@@ -104,6 +120,10 @@ eq('旗贴图 56px', res.extras.f40, 56);
 eq('桨贴图 60px', res.extras.f41, 60);
 eq('帆4贴图 142px', res.extras.f45, 142);
 eq('狙击镜默认 0', res.scopeNum3Default, 0);
+eq('684 铜盔变身侍从史莱姆', res.squireSpawned, 1);
+eq('unlockedSlimeCopperSpawn 置位', res.copperUnlocked, true);
+eq('670 书呆子实体可构造', res.blueConstructs, true);
+eq('extra=6（ExtraFramesCount）', res.six70Frames, 6);
 if (errs.length) fails.push(...errs.slice(0, 4));
 console.log(JSON.stringify({ res, fails }, null, 2));
 await browser.close();

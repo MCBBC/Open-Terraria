@@ -18,6 +18,11 @@ export interface OptionsData {
   resourceBarStyle: 'classic' | 'fancy'; // 资源条样式（PlayerResourceSetsManager2：'New' Fancy 金框为原版 1.4.4+ 默认 / 'Default' Classic 朴素）
   /** 小地图边框皮肤（MinimapFrameManager：config.json "MinimapFrame" 字符串键，默认 Default） */
   minimapFrame: 'Default' | 'Golden' | 'Remix' | 'Sticks' | 'StoneGold' | 'TwigLeaf' | 'Leaf' | 'Retro' | 'Valkyrie';
+  /** 玩家对决开关（Player.hostile 的持久化镜像——原版 hostile 纯会话态不存档;
+   *  本仓单机无进服概念,进游戏时从 options 灌入 Player.hostile,便于常开） */
+  pvpEnabled: boolean;
+  /** 队伍 0-5（Player.team,PlayerTeamID）——镜像角色档 team,UI 可运行时改并回写角色档 */
+  pvpTeam: number;
 }
 
 const KEY = 'sandboxworld.options';
@@ -28,6 +33,8 @@ export class OptionsStore {
     sfxVol: 1,
     uiScale: 1,
     devMode: false,
+    pvpEnabled: false,
+    pvpTeam: 0,
     lang: DEFAULT_LANG,
     smartCursorMode: 'toggle',
     smartAxeAfterPickaxe: false,

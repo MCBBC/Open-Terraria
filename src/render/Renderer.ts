@@ -111,6 +111,7 @@ import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
+import { mountFallbackColor } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
@@ -4061,9 +4062,15 @@ export class Renderer {
       ctx.rotate(cart.rotation);
       ctx.translate(-p.cx, -(p.y + p.h));
     }
+    // ---- 坐骑身后层（Mount.Draw backTexture :5500：先于玩家本体绘制）----
+    const mnt = p.ridingMount ? p.mount : null;
+    if (mnt) this.drawMountLayer(ctx, p, mnt, 'back');
     // 跨台阶时用渲染补偿高度（从旧高度缓升），消除物理瞬移的顿挫感；
     // 联机远端叠加 netOffset（原版 Player.netOffset 平滑收敛，本地玩家恒 0）
-    ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + gfxOff + p.netOffY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
+    // 坐骑骑姿抬升（PlayerDrawSet :425-426 mountOffSet=HeightOffsetVisual →
+    // Position.Y -= playerYOffsets[frame]：玩家精灵整体上移坐到坐骑背上）
+    const mOff = mnt ? mnt.playerOffset : 0;
+    ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + gfxOff + p.netOffY - mOff); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
     // ---- 翅膀层（PlayerDrawLayers.cs:695/738：身后，先于身体绘制）----
@@ -4101,7 +4108,7 @@ export class Renderer {
       if (doll) {
         let row = 0; // 0 站立
         if (useRow >= 0) row = useRow;
-        else if (cart) row = 3;  // 坐骑 BodyFrame=3（Player.cs:36059 bodyFrame=Height*mount.BodyFrame）
+        else if (cart || mnt) row = mnt ? mnt.bodyFrame : 3;  // 坐骑 BodyFrame（Player.cs:36059 bodyFrame=Height*mount.BodyFrame；全坐骑=3）
         else if (Math.abs(p.vx) > 0.3 && p.onGround) {
           // ★行走循环优先于静持行——原版 PlayerFrame（cs:36012 静持 vs :36178
           // velocity.X!=0 走路）静持行确实在前，但原版身体/腿是【分图层】：静持只钉
@@ -4145,7 +4152,7 @@ export class Renderer {
       if (useRow >= 0) {
         const rowFrame = af['Player_' + (useRow === 0 ? 12 : useRow === 4 ? 14 : 19 + useRow)];
         frame = rowFrame ?? idle;
-      } else if (cart) {
+      } else if (cart || mnt) {
         frame = af['Player_21'] ?? idle;  // bodyFrame 行 3 → 动作帧池 21（收势/坐姿）
       } else if (Math.abs(p.vx) > 0.3 && p.onGround) {
         // ★行走循环优先于静持行（与纸娃娃路径同因：原版身体/腿分图层，静持只钉
@@ -4188,6 +4195,8 @@ export class Renderer {
     }
 
     ctx.restore();
+    // ---- 坐骑身前层（Mount.Draw frontTexture：玩家本体之后绘制）----
+    if (mnt) this.drawMountLayer(ctx, p, mnt, 'front');
     // ---- 矿车车身（Mount.Draw frontTexture :5500/5826-5835 1:1）----
     // 锚点 = 玩家位 + (w/2 + XOffset*dir, h/2 + YOffset(13) + PlayerOffset(8))，
     // 源矩形 = (0, 帧高*frame, 50, 帧高)、origin = (25, 帧高/2)；轮组 3 帧×12t。
@@ -4219,6 +4228,63 @@ export class Renderer {
     }
 
     void world;
+  }
+
+  /** 坐骑贴图叠画（Mount.Draw :5500-5560 主体 1:1）。
+   *  锚点 = 玩家底心 + (XOffset×dir, -(42+heightBoost)/2 + YOffset + PlayerOffset)
+   *  （原版 Position + (width/2 + XOffset, height/2 + YOffset + PlayerOffset)，height 为
+   *  mounted 盒 42+heightBoost、bottom 锚定——本仓玩家盒恒 42，按底心换算）；
+   *  源矩形 = (0, 帧高×frame, 全宽, 帧高)，origin = (宽/2, 帧高/2)，朝向翻转随 facing。
+   *  贴图不可得坐骑（MOUNT_TEXTURE_OK=false：马匹/滚轴鞋/Chillet 等 Extra 表缺）→
+   *  色块近似（胶囊体）并保留能力生效——登记于 vanilla-mounts.json textureOk */
+  private drawMountLayer(ctx: CanvasRenderingContext2D, p: Player,
+    mnt: import('../entities/Mounts').MountInstance, layer: 'back' | 'front') {
+    const tex = mnt.textures;
+    const main = layer === 'back' ? tex.back : tex.front;
+    const extra = layer === 'back' ? tex.backExtra : tex.frontExtra;
+    if (this.atlas && main) {
+      const img = this.atlas.ensureVImage(main);
+      if (img) {
+        const d = mnt.data!;
+        const frames = Math.max(1, d.totalFrames ?? 1);
+        const fh = Math.floor(img.height / frames);
+        const fr = Math.min(frames - 1, Math.max(0, mnt.frame));
+        const xOff = (d.xOffset ?? 0) * (p.facing < 0 ? -1 : 1);
+        const anchorX = p.x + p.w / 2 + xOff;
+        const anchorY = p.y + p.h - (42 + (d.heightBoost ?? 0)) / 2 + (d.yOffset ?? 0) + mnt.playerOffset;
+        ctx.save();
+        ctx.translate(anchorX, anchorY);
+        if (p.facing < 0) ctx.scale(-1, 1);
+        ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+        // 副层（蜜蜂翅膀 Mount_BeeWings / Scutlix 眼族）：同锚错位 1px 叠画
+        if (extra) {
+          const ex = this.atlas.ensureVImage(extra);
+          if (ex) {
+            const efh = Math.floor(ex.height / frames);
+            const efr = layer === 'front' ? fr : Math.min(frames - 1, Math.max(0, mnt.frameExtra));
+            ctx.drawImage(ex, 0, efr * efh, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+          }
+        }
+        ctx.restore();
+        return;
+      }
+    }
+    // 色块近似：贴图缺表的坐骑（约 32/64）——胶囊体 + 朝向头部
+    if (layer === 'back') return;    // 近似体单层即可，避免双层叠深
+    const d = mnt.data!;
+    const bodyH = 42 + (d.heightBoost ?? 0) - 20;
+    const bodyW = Math.max(24, Math.min(56, bodyH * 1.3));
+    const cx = p.x + p.w / 2, cy = p.y + p.h - bodyH / 2 + mnt.playerOffset;
+    ctx.save();
+    ctx.fillStyle = mountFallbackColor(mnt.type);
+    ctx.globalAlpha *= 0.9;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, bodyW / 2, bodyH / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx + p.facing * bodyW * 0.45, cy - bodyH * 0.25, bodyW * 0.16, bodyH * 0.16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   /** use 期间 bodyFrame 行（Player.cs:35874-35990，itemAnimation>0 分支逐 useStyle）。

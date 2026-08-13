@@ -20,6 +20,8 @@ export interface Appearance {
   /** 硬核角色已消亡（Player.cs:38255 HardcoreDeathPenalty 的本仓持久化标记：
    *  死亡后置 true → respawnPlayer 拒绝重生 + 角色列表灰显；原版直接删 .plr 档） */
   hardcoreDead?: boolean;
+  /** 队伍 0-5（Player.cs:53809 存档 byte team——原版持久化;hostile 不存档纯会话态） */
+  team?: number;
 }
 
 /** 死亡是否掉全部物品（Player.cs:38254 DropItems(gemsOnly=false)：中核 1 / 硬核 2；
@@ -60,6 +62,7 @@ export function defaultAppearance(name = ''): Appearance {
     skinVariant: 0,
     ...structuredClone(DEFAULT_COLORS),
     difficulty: 0,
+    team: 0,
   };
 }
 
@@ -86,6 +89,7 @@ export function validateAppearance(a: Partial<Appearance> | null | undefined): A
     pantsColor: c(a.pantsColor, d.pantsColor),
     shoeColor: c(a.shoeColor, d.shoeColor),
     difficulty: ([0, 1, 2, 3] as number[]).includes(a.difficulty as number) ? (a.difficulty as Difficulty) : 0,
+  team: (typeof a.team === 'number' && a.team >= 0 && a.team <= 5) ? Math.trunc(a.team) : 0,
     hardcoreDead: a.hardcoreDead === true ? true : undefined,   // 硬核消亡标记（旧数据缺省未消亡）
   };
 }

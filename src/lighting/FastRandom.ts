@@ -25,6 +25,9 @@ export class FastRandom {
     return new FastRandom(FastRandom.nextSeed(mod) ^ this.seed);
   }
 
+/** 仅推进种子不取值（TileLightScanner.Update :58-61 每周期 NextSeed 语义） */
+  reseed(): void { this.seed = FastRandom.nextSeed(this.seed); }
+
   /** NextBits(b)(L47-51):前进一步并取高 b 位 */
   private nextBits(bits: number): number {
     this.seed = FastRandom.nextSeed(this.seed);

@@ -584,15 +584,16 @@ function splitCoins(num: number, rng: RNG): ResolvedDrop[] {
 }
 
 // ============ 心/星（NPCLoot_DropCommonLifeAndMana :80332 1:1） ============
+// :80334/:80345 closestPlayer.RollLuck(6/2)——带幸运双掷（曾用裸随机丢 luck 语义）
 export function rollHeartsAndStars(ctx: NpcDropCtx): ResolvedDrop[] {
   const drops: ResolvedDrop[] = [];
   if (ctx.type !== 16 && ctx.type !== 81 && ctx.type !== 121
     && ctx.lifeMax > 1 && ctx.damage > 0) {
-    if (ctx.rng.int(0, 5) === 0) { // RollLuck(6)==0
+    if (rollLuck(ctx, 6, 1)) {
       if (ctx.rng.int(0, 1) === 0 && ctx.mana < ctx.manaMax) drops.push({ id: 184, n: 1 });
       else if (ctx.rng.int(0, 1) === 0 && ctx.hp < ctx.hpMax) drops.push({ id: 58, n: 1 });
     }
-    if (ctx.rng.int(0, 1) === 0 && ctx.mana < ctx.manaMax) drops.push({ id: 184, n: 1 }); // RollLuck(2)==0
+    if (rollLuck(ctx, 2, 1) && ctx.mana < ctx.manaMax) drops.push({ id: 184, n: 1 });
   }
   return drops;
 }
@@ -616,8 +617,16 @@ export function rollBossPotionsAndHearts(ctx: NpcDropCtx): ResolvedDrop[] {
 }
 
 // ============ 掉落初速度（Item.cs:49325-49337） ============
-export function dropVelocity(rng: RNG): { vx: number; vy: number } {
-  return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-40, -15) * 0.1 };
+// :49328-49329 vx=Next(-30,31)*0.1 / vy=Next(-40,-15)*0.1（闭区间口 Next(-40,-15)=[-40,-16]，
+// 曾写成 [-40,-15] 差 0.1）；:49330-49333 859/4743 恒零速；:49334-49337 520/521/星云拾取
+// 族（ItemID.cs:1110 NebulaPickup={3453,3454,3455}）双向 Next(-30,31)
+const NEBULA_PICKUP = new Set([3453, 3454, 3455]);
+export function dropVelocity(rng: RNG, id?: number): { vx: number; vy: number } {
+  if (id === 859 || id === 4743) return { vx: 0, vy: 0 };
+  if (id === 520 || id === 521 || (id !== undefined && NEBULA_PICKUP.has(id))) {
+    return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-30, 30) * 0.1 };
+  }
+  return { vx: rng.int(-30, 30) * 0.1, vy: rng.int(-40, -16) * 0.1 };
 }
 
 export { SLIME_BODY };

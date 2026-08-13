@@ -94,7 +94,7 @@ function hitEnemies(
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
   for (const ent of game.enemies()) {
-    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     // 反射源命中（Projectile.cs:12050-12060）：按 projId 查 CanBeReflected 白名单——
@@ -107,7 +107,7 @@ function hitEnemies(
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
     playEnemyHitSound(game, e);
-    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit); // 裸 kb（0.65 自造已摘）——hurt 内原版管线
+    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     applyProjStatus(me.projId, e as unknown as Record<string, number>);
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
@@ -1087,20 +1087,34 @@ export class FlailProj extends Entity {
 
 // ================= 手雷/炸弹/炸药（aiStyle 16，AI_016 引信爆炸） =================
 
+/** AI_016 全族分类表（Projectile.cs 权威行号） */
+/** 粘性族（SetDefaults tileCollide=false + AI_016 :44325 贴附扫描） */
+const STICKY_PROJ = new Set([37, 397, 470]);
+/** 炸药棍族（Kill :74943 视觉/PrepareBombToBlow 250×250/半径 7/反弹 ×0.8/摩擦追加 ×0.99） */
+const DYN_PROJ = new Set([29, 470, 637]);
+/** 炸弹族（Kill :74881 视觉/PrepareBombToBlow 128×128 dmg100/半径 4） */
+const BOMB_PROJ = new Set([28, 37, 516]);
+/** 手雷族（不破坏地形；PrepareBombToBlow 128×128 用物品伤害） */
+const NADE_PROJ = new Set([30, 397, 517]);
+/** IsABombWithFuse（ProjectileID.cs:183——引信嘶声循环族；手雷族不在内！） */
+const FUSE_SOUND_PROJ = new Set([28, 37, 516, 29, 470, 637]);
+
 export class GrenadeProj extends Entity {
-  // 碰撞盒 1:1（Projectile.SetDefaults :846-869）：炸弹 28=22×22 / 炸药棍 29=10×10 /
-  // 手雷 30=14×14——此前统一 14×14（雷管判定盒虚大 2 倍）
+  // 碰撞盒 1:1（Projectile.SetDefaults :846-869/:938/:4508/:5173/:5584/:5592/:6571）：
+  // 28/37/516=22×22 / 29/470/637=10×10 / 30/397/517=14×14——此前统一 14×14
   w = 14; h = 14;
   vx: number;
   vy: number;
   damage: number;
   projId: number;
-  /** 引信 timeLeft 1:1（SetDefaults :10348-10372）：炸弹 28=180 / 炸药棍 29=300 /
-   *  手雷 30=180——此前误写 150/135/180（引信时长不对的根源） */
+  /** 引信 timeLeft 1:1（SetDefaults :10348-10408）：炸弹/手雷族 180、炸药棍族
+   *  {29,470,637}=300——此前误写 150/135/180 */
   fuse: number;
   onExplode!: (x: number, y: number, damage: number) => void;
   private rot = 0;
   dead = false;
+  /** 引信嘶声循环句柄（AI_016 :44276-44281 PlayTrackedLoopedSound；Kill :67373 Stop） */
+  private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, fuse: number,
     projId: number, onExplode: (x: number, y: number, damage: number) => void) {
@@ -1111,7 +1125,7 @@ export class GrenadeProj extends Entity {
     this.fuse = fuse;
     this.projId = projId;
     this.onExplode = onExplode;
-    const hb = projId === 28 ? 22 : projId === 29 ? 10 : 14;
+    const hb = BOMB_PROJ.has(projId) ? 22 : DYN_PROJ.has(projId) ? 10 : 14;
     this.w = hb; this.h = hb;
   }
 
@@ -1121,38 +1135,101 @@ export class GrenadeProj extends Entity {
     drawProj(r, cam, this, this.projId, this.rot, '#408040', 1, -1);
   }
 
+  /** 死亡清理：停引信嘶声（Kill :67373-67377 GetActiveSound?.Stop()） */
+  destroy(): void {
+    this.fuseSnd?.stop();
+    this.fuseSnd = null;
+  }
+
   fixedUpdate(_dt: number, game: GameHooks) {
-    // 旋转 = 滚动（AI_016 :44913 rotation += velocity.X × 0.1；28/29/30 不在排除表）——
-    // 此前自造 speed×0.03 全程自旋，与原版"落地滚、空中缓摆"不符
-    this.rot += this.vx * 0.1;
+    const st = game.world.store;
+    // ---- 引信嘶声循环（AI_016 :44276：IsABombWithFuse 且 timeLeft>1；0.2 音量跟踪弹体）----
+    if (FUSE_SOUND_PROJ.has(this.projId) && this.fuse > 1) {
+      // 首播可能缓冲未就绪返回 null → 每 tick 重试直至挂上（原版同帧不保证）
+      if (!this.fuseSnd) {
+        this.fuseSnd = game.startTrackedLoop?.('bombFuse', 0.2, this.cx, this.cy) ?? null;
+      } else {
+        this.fuseSnd.setPos(this.cx, this.cy);
+      }
+    }
+    // ---- 接触引爆（Projectile.Damage :12330-12340 碰 NPC / :13533-13541 碰玩家：
+    //      timeLeft 钳 3 → 3 tick 后炸）----
+    {
+      const pl = game.player;
+      if (pl && !pl.dead
+        && this.x < pl.x + pl.w && this.x + this.w > pl.x
+        && this.y < pl.y + pl.h && this.y + this.h > pl.y
+        && this.fuse > 3) this.fuse = 3;
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
+        if (e.dead) continue;
+        if (this.x < e.x + e.w && this.x + this.w > e.x
+          && this.y < e.y + e.h && this.y + this.h > e.y) { this.fuse = Math.min(this.fuse, 3); break; }
+      }
+    }
+    // ---- 引信倒数 → 爆（PrepareBombToBlow 在 timeLeft≤3 置 alpha=255 隐形本体，此处直接爆）----
     if (--this.fuse <= 0) {
       this.dead = true;
+      this.destroy();
       this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage);
       return;
     }
-    // AI_016：重力 0.2/tick（:44897 velocity.Y += 0.2f；曾误用 0.3）+ 弹跳。
-    // 碰撞探测用「底边中点」而非中心——中心探测会让弹体在地面沉降 ~4px 嵌入
+    // 旋转 = 滚动（AI_016 :44909-44915 rotation += velocity.X × 0.1；本族不在排除表）
+    this.rot += this.vx * 0.1;
+    // ---- 粘性族（AI_016 :44325-44390）：tileCollide=false 不碰块反弹；
+    //      盒外扩 ±1..+2 格扫实心（跳过平台），4px 内缩重叠 → velocity=(0,-0.2) 贴附 ----
+    if (STICKY_PROJ.has(this.projId)) {
+      const x0 = Math.max(0, Math.floor(this.x / TILE) - 1);
+      const x1 = Math.min(st.w, Math.floor((this.x + this.w) / TILE) + 2);
+      const y0 = Math.max(0, Math.floor(this.y / TILE) - 1);
+      const y1 = Math.min(st.h, Math.floor((this.y + this.h) / TILE) + 2);
+      let stuck = false;
+      for (let i = x0; i < x1 && !stuck; i++) {
+        for (let j = y0; j < y1 && !stuck; j++) {
+          if (!st.inBounds(i, j) || !st.isActive(i, j) || !st.isSolid(i, j) || st.isPlatform(i, j)) continue;
+          if (this.x + this.w - 4 > i * TILE && this.x + 4 < i * TILE + TILE
+            && this.y + this.h - 4 > j * TILE && this.y + 4 < j * TILE + TILE) stuck = true;
+        }
+      }
+      if (stuck) { this.vx = 0; this.vy = -0.2; }  // 贴附：抵消重力悬停（:44376-44377）
+      else this.vy = Math.min(this.vy + 0.2, 16);   // 未贴住时照常重力
+      this.x += this.vx;
+      this.y += this.vy;
+      if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
+      return;
+    }
+    // ---- 普通族物理：重力 0.2（:44897）+ 反弹（tile 碰撞响应 :18339-18357） ----
     this.vy = Math.min(this.vy + 0.2, 16);
+    const lastVx = this.vx, lastVy = this.vy;
     let nx = this.x + this.vx;
     let ny = this.y + this.vy;
-    const st = game.world.store;
     const solidAt = (px: number, py: number) => {
       const tx = Math.floor(px / TILE);
       const ty = Math.floor(py / TILE);
       return st.inBounds(tx, ty) && st.isSolid(tx, ty);
     };
+    // 撞墙（X 阻挡）：vx = lastVx × -0.4（炸药棍族再 ×0.8）（:18344-18350）
     if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, this.y + this.h - 1)) {
-      this.vx *= -0.85; nx = this.x;
+      this.vx = lastVx * -0.4;
+      if (DYN_PROJ.has(this.projId)) this.vx *= 0.8;
+      nx = this.x;
     }
+    // 落地（Y 阻挡）：lastVy>0.7 才反弹 vy = lastVy × -0.4（炸药棍族 ×0.8）（:18351-18357）；
+    // 否则贴地 vy=0 + 滚动摩擦 vx×0.97（炸药棍族追加 ×0.99，|vx|<0.01 归零）（:44888-44895）
     if (solidAt(nx + this.w / 2, ny + this.h - 1)) {
-      if (this.vy > 1) { this.vy = -this.vy * 0.5; } else { this.vy = 0; }
-      // 着地滚动摩擦（:44888 velocity.X × 0.97；雷管 29 追加 ×0.99）；曾 0.92 停太急
-      this.vx *= this.projId === 29 ? 0.96 : 0.97;
+      if (lastVy > 0.7) {
+        this.vy = lastVy * -0.4;
+        if (DYN_PROJ.has(this.projId)) this.vy *= 0.8;
+      } else {
+        this.vy = 0;
+        this.vx *= DYN_PROJ.has(this.projId) ? 0.97 * 0.99 : 0.97;
+        if (Math.abs(this.vx) < 0.01) this.vx = 0;
+      }
       ny = this.y;
     }
     this.x = nx;
     this.y = ny;
-    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) this.dead = true;
+    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
   }
 }
 

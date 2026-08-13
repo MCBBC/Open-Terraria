@@ -348,11 +348,11 @@ export class TrapShot extends Entity {
     if (!this.reflected) {
       const trapProjId = TRAP_PROJ_ID[this.kind];
       for (const ent of game.enemies()) {
-        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
         if (e.dead || !overlaps(e)) continue;
         // 反射源命中（Projectile.cs:12050-12060）：友方炮弹/雪球可反射（aiStyle2）
         if (trapProjId !== undefined && tryReflectProjectile(this, trapProjId, e, game)) return;
-        if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game)) {
+        if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true)) {
           playEnemyHitSound(game, e);
           game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
         }
@@ -408,10 +408,10 @@ export class TrapShot extends Entity {
   private blastDamage(game: GameHooks, cx: number, cy: number, r: number): void {
     const box = { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r };
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
-      if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game)) {
+      if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true)) {
         playEnemyHitSound(game, e);
         game.addDamageNumber(cx, cy, this.damage, false, '#FFD060');
       }

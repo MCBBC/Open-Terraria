@@ -1419,6 +1419,18 @@ export class VanillaSpawner {
       }
     }
 
+    // ---- 酒保（L1565-1568）：!savedBartender && DD2Event.ReadyToFindBartender
+    //      （= NPC.downedBoss2，DD2Event.cs:87——世吞/克脑已败）&& !AnyNPCs(579) &&
+    //      1/80 && !waterTile → 579 BartenderUnconscious（触碰 → Transform 550，
+    //      NPC.cs:19806-19809；savedBartender 由解救置位）。2026-08-13 前整链缺失
+    //      = 酒馆老板不可达（除 debug），补齐 ----
+    // （NPC.downedBoss2 = 世吞 13 / 克脑 266 任一已败——双旗判，同 dryad 门惯例）
+    if (!this.world.flags['savedBartender']
+      && !!(this.world.flags['downed_13'] || this.world.flags['downed_266'])
+      && !any(579) && N(80) && !this.waterTile) {
+      return D(579);
+    }
+
     // ---- 蜘蛛巢（L1568-1587）：(墙 62 || spawnSpider) && CheckToSpawnSpider ----
     const wall = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
     if (wall === 62 || this.spawnSpider) {

@@ -147,6 +147,11 @@ export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {
                                         //  :19077-19091 → 679 + unlockedSlimeOldSpawn 置位 WF:1410）
   zoologist: { id: 633, extra: 9 },   // BestiaryGirl
   princess: { id: 663, extra: 7 },
+  // 城镇宠物三只（NPCID.Sets.IsTownPet 含本三只+全部城镇史莱姆；帧数取自
+  // Main.cs:65994 npcFrameCount 权威表：637 猫 28 / 638 狗 28 / 656 兔 27）
+  town_cat: { id: 637, extra: 0 },
+  town_dog: { id: 638, extra: 0 },
+  town_bunny: { id: 656, extra: 0 },
   travelling_merchant: { id: 368, extra: 10 },  // 旅行商人（上午随机到访，黄昏离场）
   skeleton_merchant: { id: 453, extra: 9 },     // 骷髅商（洞穴随机出现，随 timeLeft 消失）
 };

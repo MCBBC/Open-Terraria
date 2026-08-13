@@ -6,6 +6,7 @@ import { Entity } from './Entity';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
+import { canHit } from '../physics/LineOfSight';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -92,6 +93,9 @@ export interface ArrowOpts {
   tumble?: boolean;
   /** 平飞期姿态锁定（48/54/93/520/599 前 20t atan2 姿态） */
   tumblePoseLock?: boolean;
+  /** 泰拉刃光束 985（aiStyle 191）：减速 ×0.94(>8) / 近墙阻尼 / 25t 消亡 /
+   *  全程淡出 / 绿光——AI_191_TrueNightsEdge 985 分支（Projectile.cs:39241+） */
+  terra?: boolean;
 }
 
 /** SetDefaults 提取的 extraUpdates 表（Projectile.cs 各 type 段，0=缺省）：
@@ -155,6 +159,12 @@ export class Arrow extends Entity {
   tumbleRot = 0;
   /** 已存活 tick（延迟重力/追踪门用） */
   age = 0;
+  // ---- 泰拉刃光束 985（aiStyle 191）专属态 ----
+  terra = false;
+  /** localAI[0] 计时（25t 消亡 + 淡出分母） */
+  terraT = 0;
+  /** localAI[1] 近墙减速标记 */
+  terraWall = false;
   /** 已反射（原版 Projectile.reflected：反射源命中后置位，防重复反射；
    *  反射后弹体转 hostile——不再入下方敌怪判定，改走 hitPlayer 伤玩家） */
   reflected = false;
@@ -200,6 +210,7 @@ export class Arrow extends Entity {
     this.maxFall = opts?.maxFall ?? 16;
     this.tumble = opts?.tumble ?? false;
     this.tumblePoseLock = opts?.tumblePoseLock ?? false;
+    this.terra = opts?.terra ?? false;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -207,6 +218,42 @@ export class Arrow extends Entity {
     // 曾双变换把箭甩出屏幕,表现为"箭隐形但能命中")
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
+    // 泰拉刃光束 985 独占（DrawProj_TerraBlade2Shot Main.cs:27670-27712）：
+    // Frame(1,4) 四帧 170×170（帧 0 主体/帧 3 白芯）；多层镜像叠画：
+    // 蓝(45,124,205)×2 对称 ±π/8 张开 + 绿白内芯 ×2 + 绿(34,177,76) ×2
+    // ±0.25 收拢 + 黄绿(181,230,29) + 帧 3 白芯三层递缩——ai[0]=0（未传参）
+    // 时各 ±ai0 项归零对称；旋转角=velocity 角（无 +π/2，贴图正交）。
+    // 淡出 = Remap(localAI[0],0,25,1,0)
+    if (this.terra) {
+      const img = projSprite(985);
+      if (!img || !img.complete || img.naturalWidth === 0) return;
+      const fw = img.naturalWidth, fh = img.naturalHeight / 4;
+      const fade = Math.max(0, 1 - this.terraT / 25);
+      const num = Math.min(1, this.terraT / 30);            // Remap(t,0,30,0,1)
+      const spread = 1 - num;
+      const rot = Math.atan2(this.vy, this.vx);
+      const layer = (sy: number, a: number, angOff: number, frame: number, flipV: boolean) => {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, a * fade));
+        ctx.translate(this.cx, this.cy);
+        ctx.rotate(rot + angOff);
+        if (flipV) ctx.scale(1, -1);
+        ctx.drawImage(img, 0, frame * fh, fw, fh, -fw / 2 * sy, -fh / 2 * sy, fw * sy, fh * sy);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      };
+      ctx.imageSmoothingEnabled = false;
+      layer(0.95, 0.5, Math.PI / 8 * spread, 0, false);            // 蓝镜像对（±π/8×spread）
+      layer(0.95, 0.5, -Math.PI / 8 * spread, 0, true);
+      layer(1, 0.12, 0, 0, false);                                 // 绿白内芯（color5 近似）
+      layer(1, 0.3, Math.PI / 4 * 0.25 * spread, 0, false);        // 绿 ±0.25 收拢
+      layer(1, 0.3, -Math.PI / 4 * 0.25 * spread, 0, true);
+      layer(0.975, 0.5, Math.PI / 4 * 0.15 * spread, 0, false);    // 黄绿主芯
+      layer(1, 0.6, Math.PI / 4 * 0.05 * spread, 3, false);        // 帧 3 白芯三层
+      layer(0.8, 0.5, -0.05, 3, false);
+      layer(0.6, 0.4, -0.1, 3, false);
+      return;
+    }
     // 翻滚态用累积角（aiStyle 2）；48/54/93/520/599 平飞期姿态锁定 atan2
     const tumbling = this.tumble && !(this.tumblePoseLock && this.age <= this.gravDelay);
     const ang = tumbling ? this.tumbleRot : Math.atan2(this.vy, this.vx);
@@ -294,6 +341,33 @@ export class Arrow extends Entity {
     if (this.tumble) {
       this.tumbleRot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx >= 0 ? 1 : -1);
     }
+    // 泰拉刃光束 985（AI_191 :39248-39263 + 985 减速段 :39340-39377）：
+    // 25t 消亡（ai[1]=0 → num4=25）；>8 速 ×0.94 减速；前方 110px 扇形探视线
+    // 失败 → localAI[1]=1（×0.8 仍 >8 时 / ×0.88 双阻尼）；淡出 + 绿光 + 尘
+    if (this.terra) {
+      this.terraT++;
+      if (this.terraT >= 25) { this.killNow(game); return; }
+      const stT = world.store;
+      this.lightRGB = [0.25, 0.86, 0.38];    // Color(64,220,96)（:39382）
+      if (Math.hypot(this.vx, this.vy) > 0.5 && Math.random() < 0.6) {
+        game.spawnParticles(this.cx, this.cy, '#7CE81E', 1, 1.2, { life: 18 });
+      }
+      if (Math.hypot(this.vx, this.vy) > 8) {
+        this.vx *= 0.94; this.vy *= 0.94;
+        if (!this.terraWall) {
+          const rot = Math.atan2(this.vy, this.vx);
+          let clear = false;
+          for (let k = -1; k <= 1 && !clear; k += 0.5) {
+            const a = rot + k * (Math.PI / 4) * 0.25;
+            clear = canHit(stT, this.cx, this.cy, 0, 0,
+              this.cx + Math.cos(a) * 110, this.cy + Math.sin(a) * 110, 0, 0);
+          }
+          if (!clear) this.terraWall = true;
+        }
+        if (this.terraWall && Math.hypot(this.vx, this.vy) > 8) { this.vx *= 0.8; this.vy *= 0.8; }
+        if (this.terraWall) { this.vx *= 0.88; this.vy *= 0.88; }
+      }
+    }
     // 专家追踪（Projectile.cs:54330-54345 275/276 / :23307-23316 277：
     // v=(v*(weight-1)+dirToPlayer*speed)/weight；<floor 或 >cap 归一）
     if (this.homing) {
@@ -374,7 +448,7 @@ export class Arrow extends Entity {
     if (hitCritters(this, game)) { this.killNow(game); return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         // 反射源（419 旋刃冲刺等 reflectsProjectiles 置标）：命中前先走反射
@@ -426,7 +500,7 @@ export class Arrow extends Entity {
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
         playEnemyHitSound(game, e);
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit);
+        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
         // 502 喵刀弹命中：无特效音/无计数消亡（全库唯一 PlaySound(37) 在撞块

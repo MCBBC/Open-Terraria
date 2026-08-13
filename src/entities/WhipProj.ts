@@ -236,14 +236,14 @@ export class WhipProj extends Entity {
         Math.sign(p.x - this.x) * 2, 'playerProj');
       for (const ent of game.enemies()) {
         const e = ent as unknown as { id: number; dead: boolean; x: number; y: number; w: number; h: number;
-          hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean } & import('./WhipTag').WhipTagged;
+          hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean } & import('./WhipTag').WhipTagged;
         if (e.dead || this.hitSet.has(e.id)) continue; // localNPCHitCooldown=-1 每敌一次
         // myRect 置于控制点中心后与敌 AABB 求交（:14487-14493；18×18 → 半宽 9）
         if (p.x - 9 >= e.x + e.w || p.x + 9 <= e.x || p.y - 9 >= e.y + e.h || p.y + 9 <= e.y) continue;
         this.hitSet.add(e.id);
         const dmg = this.dmgNow; // 当前鞭伤（已含召唤乘区+护穿；衰减链前）
         const wpOwner = this.ownerRef();
-        e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0); // kby=0 原版管线; ⑥ :12068
+        e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0, false, 0, true); // kby=0 原版管线; ⑥ :12068
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
         // 武器浸剂(StatusNPC:10559 门含 whip:IsAWhip)——鞭命中同享药剂 debuff

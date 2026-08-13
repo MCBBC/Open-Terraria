@@ -35,9 +35,12 @@ for (const m of mainSrc.matchAll(/lightPet\[(\d+)\] = true;/g)) lightPet.add(+m[
 const lines = itemSrc.split('\n');
 let pets = {};
 let curCases = [];
-let block = null; // { buff, shoot, consumable }
+let block = null; // { buff, shoot, consumable, damage }
 const flush = () => {
-  if (block && curCases.length && block.buff != null && block.shoot != null && !block.consumable) {
+  // ★ damage>0 = 召唤杖/武器（buffType=随从 buff + shoot=随从弹——与宠物同模式，
+  //   唯一区分 = 宠物恒 damage=0；曾漏此门混入 24 件召唤杖假阳性）
+  if (block && curCases.length && block.buff != null && block.shoot != null && !block.consumable
+    && (block.damage ?? 0) === 0) {
     for (const id of curCases) {
       pets[id] = { buff: block.buff, proj: block.shoot, light: lightPet.has(block.buff) ? 1 : 0 };
     }
@@ -46,7 +49,7 @@ const flush = () => {
 };
 const startBlock = () => {
   flush();
-  block = { buff: null, shoot: null, consumable: false };
+  block = { buff: null, shoot: null, consumable: false, damage: null };
 };
 for (const line of lines) {
   const t = line.trim();
@@ -59,7 +62,7 @@ for (const line of lines) {
   if (t === 'default:') {
     flush();
     curCases = [];
-    block = { buff: null, shoot: null, consumable: false };
+    block = { buff: null, shoot: null, consumable: false, damage: null };
     continue;
   }
   const bm = t.match(/^buffType = (\d+);$/);
@@ -69,6 +72,8 @@ for (const line of lines) {
   // DefaultToVanitypet(projId, buffId)（:47549——参数序与直赋值相反）
   const pm = t.match(/^DefaultToVanitypet\((\d+), (\d+)\);$/);
   if (pm && block) { block.shoot = +pm[1]; block.buff = +pm[2]; continue; }
+  const dm = t.match(/^damage = (\d+);$/);
+  if (dm && block) { block.damage = +dm[1]; continue; }
   if (t === 'consumable = true;' && block) { block.consumable = true; continue; }
   if (t.startsWith('break;') || t.startsWith('return;')) {
     flush();

@@ -1,5 +1,5 @@
 // 系统覆盖补齐（星星雨/陨石/生日派对）核心数学验证
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { nightStarfallBoost } from '../src/entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../src/world/MeteorFall';
 import { partyNaturalAttempt, partyIsUp, newPartyState, partyCheckNight } from '../src/world/wiring/party';
@@ -210,5 +210,52 @@ describe('梳妆台更衣窗 / 人体模型挂物族登记', () => {
     expect(FURNITURE_TILE_KIND.has(TILE_BY_KEY['v_269_womannequin_legacy'])).toBe(false);
     expect(TILE_DEFS[TILE_BY_KEY['v_128_mannequin_legacy']]?.vanilla?.sheet).toBe(128);
     expect(TILE_DEFS[TILE_BY_KEY['v_269_womannequin_legacy']]?.vanilla?.sheet).toBe(269);
+  });
+});
+
+// ============ 心情报告 l10n 渲染探针（TownNPCMood_<NPC> 分节 + {BiomeName}/{NPCName} 替换） ============
+import { readFileSync } from 'node:fs';
+import { languageManager } from '../src/i18n/LanguageManager';
+import { Lang } from '../src/i18n/Lang';
+import { happinessFace, happinessPct } from '../src/ui/NpcDialog';
+
+// 真实 zh-Hans 包注入（bestiary-ui.test.ts 同款先例）
+beforeAll(() => {
+  languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json', 'utf8')));
+});
+
+describe('心情报告 l10n 渲染（AddHappinessReportText）', () => {
+  /** Game.happinessLineText 同式渲染 */
+  const render = (l: { key: string; biomeNameKey?: string; npcId?: number }): string => {
+    let s = Lang.text(l.key);
+    if (l.biomeNameKey !== undefined) s = s.replace('{BiomeName}', Lang.text(`TownNPCMoodBiomes.${l.biomeNameKey}`));
+    if (l.npcId !== undefined) s = s.replace('{NPCName}', Lang.npcName(l.npcId) ?? '');
+    return s;
+  };
+  it('全部 25 个有偏好 NPC 的分节键存在于 zh-Hans 包（TownNPCMood_<Internal>）', () => {
+    for (const id of [22, 17, 588, 633, 441, 124, 209, 142, 207, 19, 178, 20, 228, 227,
+      369, 229, 353, 38, 107, 54, 108, 18, 208, 550, 160, 663]) {
+      expect(Lang.has(`TownNPCMood_${{ 22: 'Guide', 17: 'Merchant', 588: 'Golfer', 633: 'BestiaryGirl', 441: 'TaxCollector', 124: 'Mechanic', 209: 'Cyborg', 142: 'SantaClaus', 207: 'DyeTrader', 19: 'ArmsDealer', 178: 'Steampunker', 20: 'Dryad', 228: 'WitchDoctor', 227: 'Painter', 369: 'Angler', 229: 'Pirate', 353: 'Stylist', 38: 'Demolitionist', 107: 'GoblinTinkerer', 54: 'Clothier', 108: 'Wizard', 18: 'Nurse', 208: 'PartyGirl', 550: 'DD2Bartender', 160: 'Truffle', 663: 'Princess' }[id]}.Content`)).toBe(true);
+    }
+  });
+  it('报告行渲染后无残留占位符且非空（含替换）', () => {
+    const r = computeHappiness({ ...baseHappy, npcsInHouse: 1, nearby: [18], zones: { ...baseHappy.zones, forest: true } });
+    for (const line of r.report) {
+      const t = render(line);
+      expect(t.length, line.key).toBeGreaterThan(2);
+      expect(t, line.key).not.toContain('{');
+    }
+    // 快乐度按钮标签（UI.NPCCheckHappiness）
+    expect(Lang.text('UI.NPCCheckHappiness')).toBe('快乐度');
+  });
+  it('价格百分比与表情档位（Main.cs:41235-41243：≤0.82/≤1/≤1.1/其余 4 帧）', () => {
+    expect(happinessPct(1)).toBe('100%');
+    expect(happinessPct(0.75)).toBe('75%');
+    expect(happinessPct(1.5)).toBe('150%');
+    expect(happinessFace(0.75).cls).toBe('best');
+    expect(happinessFace(0.82).cls).toBe('best');
+    expect(happinessFace(0.94).cls).toBe('good');
+    expect(happinessFace(1.06).cls).toBe('ok');
+    expect(happinessFace(1.5).cls).toBe('bad');
   });
 });

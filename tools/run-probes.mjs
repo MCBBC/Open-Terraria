@@ -23,6 +23,7 @@ const PROBES = [
   { name: 'shortsword', file: 'scripts/_shortsword-probe.mjs', timeoutMs: 240_000 },
   { name: 'usereach', file: 'scripts/_usereach-probe.mjs', timeoutMs: 240_000 },
   { name: 'invariants', file: 'scripts/_invariants-probe.mjs', timeoutMs: 300_000 },
+  { name: 'pause-export', file: 'scripts/_pause-export-probe.mjs', timeoutMs: 240_000 },
 ];
 
 const argv = process.argv.slice(2);

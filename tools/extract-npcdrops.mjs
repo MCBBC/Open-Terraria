@@ -656,7 +656,14 @@ const values = {};
     const end = i + 1 < marks.length ? marks[i + 1].at : marks[i].at + 4000;
     const seg = body.slice(marks[i].at, end);
     const v = seg.match(/value = (\d+(?:\.\d+)?)f?;/);  // 25f / 5000f 浮点字面量
-    if (v) values[marks[i].id] = Math.round(parseFloat(v[1]));
+    if (v) { values[marks[i].id] = Math.round(parseFloat(v[1])); continue; }
+    // buyPrice/SetShopValues 形态（boss value=Item.buyPrice,extract-npcvalue.mjs 同源;
+    // 旧只认裸字面量 → 世花/石巨人等 15 怪每次重跑丢失,2026-08-13 补齐防再犯）
+    let v2 = seg.match(/value = Item\.buyPrice\(([\d\s,]+)\)/) || seg.match(/SetShopValues\([^,]+, (?:Item\.)?(?:buyPrice|sellPrice)\(([\d\s,]+)\)\)/);
+    if (v2) {
+      const args = (v2[1] || v2[2]).split(',').map((x) => Number(x.trim()));
+      values[marks[i].id] = args.reduce((acc, x) => acc * 100 + x, 0) * 100 ** (4 - args.length);
+    }
   }
   // SetDefaultsFromNetId 负 id 变体（case -N: 块内的 value = Xf;——史莱姆变体专属值，
   // -1=100/-3=3/-4=10000/-5=10/-6=20…变体掉钱走这张表而非 type 表）。
@@ -678,16 +685,26 @@ const slimeBody = {};
   const src = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria.GameContent.ItemDropRules/SlimeBodyItemDropRule.cs', 'utf8');
   // switch 在 CanDrop 之后（本文件方法序）：从 switch 起切到文件尾
   const body = src.slice(src.indexOf('switch (itemId)'));
-  const caseRe = /case (\d+):/g;
-  const marks = [];
+  // ★ 多 case 堆叠分组（case 11:/case 12:/.../case 3347: → 同一 min/max）：
+  //   逐 case 切段会把组员丢了（只留组内最后一个 case）——改为前向合并：
+  //   连续 case 标签归组，组内首个赋值段归属全部组员
+  const tokens = [];
+  const re = /case (\d+):|amountDroppedMinimum = (\d+);|amountDroppedMaximum = (\d+);/g;
   let m;
-  while ((m = caseRe.exec(body))) marks.push({ id: Number(m[1]), at: m.index });
-  for (let i = 0; i < marks.length; i++) {
-    const end = i + 1 < marks.length ? marks[i + 1].at : body.length;
-    const seg = body.slice(marks[i].at, end);
-    const mn = seg.match(/amountDroppedMinimum = (\d+);/);
-    const mx = seg.match(/amountDroppedMaximum = (\d+);/);
-    if (mn && mx) slimeBody[marks[i].id] = [Number(mn[1]), Number(mx[1])];
+  while ((m = re.exec(body))) {
+    if (m[1] !== undefined) tokens.push({ t: 'case', id: Number(m[1]) });
+    else if (m[2] !== undefined) tokens.push({ t: 'min', v: Number(m[2]) });
+    else tokens.push({ t: 'max', v: Number(m[3]) });
+  }
+  let pendingCases = [];
+  for (const tk of tokens) {
+    if (tk.t === 'case') { pendingCases.push(tk.id); continue; }
+    // 赋值 token：若当前组已有 min，本 token 是 max → 提交整组
+    if (tk.t === 'min') { pendingCases._min = tk.v; continue; }
+    if (tk.t === 'max' && pendingCases._min !== undefined) {
+      for (const id of pendingCases) slimeBody[id] = [pendingCases._min, tk.v];
+      pendingCases = [];
+    }
   }
 }
 

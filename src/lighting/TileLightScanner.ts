@@ -57,7 +57,7 @@ export function specialTileLight(
         const d = flicker.demonTorch;
         return [1 - d * 0.1, 0.3 - d * 0.2, 0.5 + d * 0.2];
       }
-      return LANTERN_LIGHT[st] ?? [0.7, 0.65, 0.55];
+      return LANTERN_LIGHT[st] ?? [1, 1, 1]; // ★default (1,1,1)（CS:2903-2907——曾 0.7/0.65/0.55）
     }
     case 126:
       if (frameX < 36) {
@@ -75,8 +75,10 @@ export function specialTileLight(
       return [r, g, b];
     }
     case 209:
-      if (frameX === 234 || frameX === 252) return [0.42, 0.2, 0.65];   // 传送门 1 紫 ×0.65
-      if (frameX === 306 || frameX === 324) return [0.65, 0.26, 0];     // 传送门 2 橙 ×0.65
+      // ★GetPortalColor(p,0)×0.65（CS:432-447）：portal0=橙 (0.650,0.306,0)、
+      // portal1=青 (0.130,0.588,0.650)——曾两档色写反
+      if (frameX === 234 || frameX === 252) return [0.65, 0.306, 0];
+      if (frameX === 306 || frameX === 324) return [0.13, 0.588, 0.65];
       return null;
     case 84: {
       const style = Math.floor(frameX / 18);
@@ -154,9 +156,12 @@ export class TileLightScanner {
 
   /** ExportTo(:17-43)+ GetTileLight(:89-108):向工作图播种 mask 与颜色 */
   exportTo(w: ScannerWorld, map: LightMap, rx: number, ry: number, perFrame: PerFrameLight[]): void {
+        this.random.reseed(); // Update() :58-61 每周期换种子（恢复真闪烁）
     const st = w.store;
     map.clear();
-    const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse);
+    const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse,
+      !!(w.clock as { bloodMoon?: boolean }).bloodMoon,
+      (w.clock as { moonPhase?: number }).moonPhase);
     // 地狱脉动(ApplyHellLight:3266-3271)
     const hellV = 0.55 + Math.sin(performance.now() * 0.002) * 0.08; // GlobalTimeWrappedHourly 近似
     const hellR = hellV, hellG = hellV * 0.6, hellB = hellV * 0.2;
@@ -211,7 +216,9 @@ export class TileLightScanner {
         }
         // ③ 发光 tile(:103-106)
         const type = st.type[i];
-        if (type !== 0 && (st.wire[i] & TileStore.WIRE_ACTUATED) === 0) {
+        // ★原版门是 tile.active()（:103）——致动只置 inActive 不清 type → 致动火把/
+        // 蜡烛仍发光；曾加 !actuated 门致致动即熄灭
+        if (type !== 0) {
           const d = TILE_DEFS[type];
           const sheet = d?.vanilla?.sheet ?? -1;
           // 蘑菇雕像 349 门控(:2940):frameX<36 的 style 完全不发光——
@@ -232,9 +239,8 @@ export class TileLightScanner {
                   const c = TORCH_COLORS[style] ?? TORCH_COLORS[0];
                   [er, eg, eb] = c;
                 }
-                // 蜡烛/篝火族闪烁(:1034-1036:localRand.Next(28,42)*0.005+(270-mouseTextColor)/700)
-                const f = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 700;
-                er += f; eg += f; eb += f;
+                // ★火把原版无闪烁（:1536-1542 纯 TorchColor）——曾误加 /700 系
+                // 抬亮 0.16~0.32（照明半径 +3 格）
               } else if (MUSHROOM_GLOW_SHEETS.has(sheet)) {
                 // 蘑菇组发光（TileLightScanner.cs:2938-2960 case 70/71/72/190/348/349/528/578）：
                 //   R=0、B=1，G=0.2+num11/2；num11=Next(28,42)*0.005+(270-mouseTextColor)/1000
@@ -258,8 +264,14 @@ export class TileLightScanner {
             lr = Math.max(lr, sp[0]); lg = Math.max(lg, sp[1]); lb = Math.max(lb, sp[2]);
           }
         }
-        // ④ 液体光(:107;岩浆发光,水/蜂蜜不发光)
-        if (st.liquid[i] > 0 && st.liquidType[i] === 2) {
+        // ④ 液体光(:107-151)：岩浆（:116-131 num=0.55+(270-mt)/900）与
+        //    微光（:133-151 num2/num3 双通道）发光，水/蜂蜜不发光
+        if (st.liquid[i] > 0 && st.liquidType[i] === 4) {
+          // 微光液体（ApplyLiquidLight:133-151）：R=0.6num2、G=0.25num3、B=0.9num2
+          const n2 = 0.7 + (270 - osc) / 900;
+          const n3 = 0.7 + (270 - osc) / 125;
+          lr = Math.max(lr, n2 * 0.6); lg = Math.max(lg, n3 * 0.25); lb = Math.max(lb, n2 * 0.9);
+        } else if (st.liquid[i] > 0 && st.liquidType[i] === 2) {
           lr = Math.max(lr, lavaV); lg = Math.max(lg, lavaV * 0.6); lb = Math.max(lb, lavaV * 0.2);
         }
         map.r[li] = lr; map.g[li] = lg; map.b[li] = lb;

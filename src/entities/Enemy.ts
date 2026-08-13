@@ -144,6 +144,9 @@ export class Enemy extends Entity {
   /** 雕像产怪（Wiring.cs:2480 SpawnedFromStatue）：value=0 不掉钱、
    *  肉前集合不掉战利品、StatueSpawnedDropRarity 概率门（NPCLoot :79648-79654） */
   spawnedFromStatue = false;
+  /** NPC.AnyInteractions（NPC.cs:5431 playerInteraction[who] 任一 true）——本仓 hurt 调用方
+   *  全为玩家武器/弹幕/荆棘链 → hurt 生效即等价玩家交互；雕像门 :79651 消费 */
+  playerInteracted = false;
   /** 鞭 tag（Projectile.ApplyTag → npc.whipTimeLeft 系）：剩余 tick 与附加伤害
    *  （240t=4 秒；随从命中被 tag 敌伤害 +whipTagDmg） */
   whipTagT = 0;
@@ -5733,7 +5736,7 @@ export class Enemy extends Entity {
   }
 
   /** 受击。返回是否死亡 */
-  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0): boolean {
+  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0, fromPlayer = false): boolean {
     // pierce 语义（Projectile.cs:11903-11907/13152-13155 Damage_PVE）：
     //   0   = 近战/荆棘等非弹幕 → 命中设免疫 10t（原版 immune[owner] 默认档）；
     //   1   = 单发弹（maxPenetrate==1，flag3）→ **无视免疫且命中后不设帧**
@@ -5794,6 +5797,12 @@ export class Enemy extends Entity {
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
     this.hp -= dmg;
+    // DPS 计累计(Projectile.cs:12817-12818/Player.cs:20165-20168 两调用点均
+    // accDreamCatcher 门禁+fromPlayer 标记;全仓伤害漏斗单点收口)
+    if (fromPlayer) {
+      const pl = game.player as Player | null;
+      pl?.addDPS(dmg);
+    }
     this.iframes = pierce === 1 ? 0 : 10; // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
     // 击退管线（N:82144-82236 1:1）：五段软封顶 8/10/12/14/16（超出段 ×0.9/0.8/
@@ -5976,7 +5985,7 @@ export class Enemy extends Entity {
         const spawn = (id: number, n: number): ItemDrop | null => {
           const key = VANILLA_ITEM_KEY_BY_ID[id];
           if (!key) { unmapped(id); return null; }
-          const v = dropVelocity(rng);
+          const v = dropVelocity(rng, id);
           const drop = game.spawnDrop(this.cx, this.cy, key, n, v.vx, v.vy);
           // 心(58)/星(184) 标记为 pickup：触碰回血/回蓝，不进背包
           if (drop) {

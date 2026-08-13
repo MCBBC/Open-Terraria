@@ -92,6 +92,9 @@ export const enum UnlockState {
   DropsWithRates = 4,
 }
 
+/** 图鉴免门总开关（true=恒最高档；详见 BestiaryTracker.unlockState 注） */
+export const UNLOCK_ALL = true;
+
 type Source =
   | { t: 'kill'; credit: string; quick: boolean; full: number }
   | { t: 'sight'; credit: string }
@@ -228,8 +231,13 @@ export class BestiaryTracker {
     return false;
   }
 
-  /** 条目解锁档（各 UIInfoProvider.GetEntryUICollectionInfo 的数据层等价） */
+  /** 条目解锁档（各 UIInfoProvider.GetEntryUICollectionInfo 的数据层等价）。
+   *  ★UNLOCK_ALL（2026-08-13 用户拍板）——图鉴作纯参考书,恒最高档,完全免门。
+   *  偏离原版：原版 5 档击杀门（CommonEnemyUICollectionInfoProvider
+   *  .GetUnlockStateByKillCount,BestiaryEntryUnlockState）+金宠/目击/对话门;
+   *  击杀计数与完成度条仍按真实 kills/sights 统计显示,仅不再遮挡内容。 */
   unlockState(entry: BestiaryEntryDef): UnlockState {
+    if (UNLOCK_ALL) return UnlockState.DropsWithRates;
     let state = UnlockState.NotKnown;
     for (const s of entry.sources) {
       const st = s.t === 'kill'

@@ -71,6 +71,11 @@ export interface GameHooks {
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
+  /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound——AI_016 引信嘶声等；
+   *  返回句柄 stop/setPos；Game 实现 = Sfx.startTrackedLoop，缺省无循环音） */
+  startTrackedLoop?(
+    name: string, vol: number, x: number, y: number,
+  ): { stop(): void; setPos(px: number, py: number): void } | null;
   /** 矿车碾过压板轨道（Minecart.HitTrackSwitch → Wiring.HitSwitch，Minecart.cs:1287-1294）。
    *  Game 实现：路由到 Wiring.hitSwitch（压板/轨道族直接 TripWire） */
   hitTrackSwitch?(i: number, j: number): void;

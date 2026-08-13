@@ -12,11 +12,19 @@ const ITEM_RARE = vanillaRareJson as Record<string, number>;
  *  逐像素乘 IngameOptions 面板色 (33,15,91)×0.685(颜色乘法:XNA Color*float 同时乘 RGB 与 A)。
  *  返回 dataURL;素材未载(首次打开竞态)返回 null,调用方保留兜底底色 */
 let invBgTinted: HTMLCanvasElement | null = null;
-function invBgDataUrl(w: number, h: number): string | null {
+/** 模块级预载(首次打开面板时大概率已就绪;未就绪由 invBgEnsure 的 onload 回补) */
+let invBgImg: HTMLImageElement | null = null;
+function invBgEnsure(): HTMLImageElement | null {
   if (typeof Image === 'undefined') return null;
-  const img = new Image();
-  img.src = 'sprites/vanilla/Inventory_Back13.png';
-  if (!img.complete || img.naturalWidth === 0) return null;
+  if (!invBgImg) {
+    invBgImg = new Image();
+    invBgImg.src = 'sprites/vanilla/Inventory_Back13.png';
+  }
+  return invBgImg;
+}
+function invBgDataUrl(w: number, h: number): string | null {
+  const img = invBgEnsure();
+  if (!img || !img.complete || img.naturalWidth === 0) return null;
   if (!invBgTinted) {
     const t = document.createElement('canvas');
     t.width = img.naturalWidth; t.height = img.naturalHeight;
@@ -2613,13 +2621,17 @@ export class UI {
     // 原版像素面板底:Inventory_Back13 九宫(Utils.DrawInvBG :2672+:2681,
     // IngameOptions.Draw 面板色 (33,15,91)×0.685)逐像素乘色后按角 10px 合成;
     // 素材懒加载竞态(首次打开未就绪)时保留兜底底色,下次打开生效
-    requestAnimationFrame(() => {
+    const applyBg = () => {
+      if (!panel.isConnected) return; // 面板已关(素材加载慢于关闭)
       const url = invBgDataUrl(panel.offsetWidth, panel.offsetHeight);
       if (url) {
         panel.style.backgroundImage = `url(${url})`;
         panel.classList.remove('fallback-bg');
       }
-    });
+    };
+    requestAnimationFrame(applyBg);
+    const img = invBgEnsure();
+    if (img && !img.complete) img.addEventListener('load', applyBg, { once: true });
     return panel;
   }
 

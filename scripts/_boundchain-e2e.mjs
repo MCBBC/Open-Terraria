@@ -118,6 +118,83 @@ const res = await page.evaluate(async () => {
   ok('⑤ 存档快照含 bound wizard/mechanic', !!wizSave && wizSave.bound === true && !!mechSave && mechSave.bound === true);
   ok('⑤ 解救后的哥布林无 bound 标', npcsSec.find(n => n.key === 'goblin_tinkerer')?.bound !== true);
 
+  // ---- ⑥ 579 酒保链（downedBoss2 门 + 1/80）----
+  const { TownNPC } = await import('/src/entities/TownNPC.ts');
+  g.world.flags['downed_13'] = true;
+  delete g.world.flags['savedBartender'];
+  let hit579 = 0;
+  for (let k = 0; k < 4000; k++) {
+    const e = vs.spawn(g.player.cx, g.player.cy, new RNG(k * 7919 + 7), 30, 18);
+    if (e && e.vanillaId === 579) hit579++;
+  }
+  ok('⑥ spawner 579 酒保链命中', hit579 > 0);
+  g.world.flags['savedBartender'] = true;
+  let hit579b = 0;
+  for (let k = 0; k < 4000; k++) {
+    const e = vs.spawn(g.player.cx, g.player.cy, new RNG(k * 7919 + 7), 30, 18);
+    if (e && e.vanillaId === 579) hit579b++;
+  }
+  ok('⑥ savedBartender 后链绝迹', hit579b === 0);
+
+  // ---- ⑦ 579→tavernkeep 转换 + 解救 + 入驻门 ----
+  const e579 = Enemy.fromVanilla(579, 0, 0);
+  vs.currentSpawnX = px + 6; vs.currentSpawnY = py;
+  ok('⑦ 579→tavernkeep bound 转换', g.trySpawnBoundTownNpc(e579) === true
+    && g.entities.npcs.some(n2 => !n2.dead && n2.npcKey === 'tavernkeep' && n2.bound === true));
+  const tk = g.entities.npcs.find(n2 => n2.npcKey === 'tavernkeep' && n2.bound);
+  g.freeBoundNpc(tk);
+  ok('⑦ 解救写 savedBartender 且入驻门开', g.world.flags['savedBartender'] === true
+    && g.townNpcSpawnAllowed('tavernkeep') === true);
+
+  // ---- ⑧ santa 门 = downedFrost && xMas（曾漏 downedFrost）----
+  const xMas0 = g.world.clock.xMas;
+  g.world.clock.xMas = true;
+  delete g.world.flags['downedFrost'];
+  ok('⑧ xMas 但未胜霜军团 → santa 拒绝', g.townNpcSpawnAllowed('santa_claus') === false);
+  g.world.flags['downedFrost'] = true;
+  ok('⑧ downedFrost+xMas → santa 放行', g.townNpcSpawnAllowed('santa_claus') === true);
+  g.world.clock.xMas = xMas0;
+
+  // ---- ⑨ angler 重生门（savedAngler）----
+  ok('⑨ savedAngler 已置(解救过渔夫或睡渔夫在场) → angler 门开',
+    g.townNpcSpawnAllowed('angler') === !!g.world.flags['savedAngler']);
+
+  // ---- ⑩ 公主门 = 24 NPC 全在场（含 angler/tavernkeep）----
+  const need = ['merchant', 'nurse', 'dryad', 'arms_dealer', 'guide', 'demolitionist',
+    'clothier', 'steampunker', 'dyer', 'party_girl', 'cyborg', 'painter', 'witch_doctor',
+    'pirate', 'stylist', 'goblin_tinkerer', 'wizard', 'mechanic', 'truffle',
+    'tax_collector', 'golfer', 'zoologist', 'angler', 'tavernkeep'];
+  for (const key of need) {
+    if (!g.entities.npcs.some(n2 => n2 instanceof TownNPC && !n2.dead && n2.npcKey === key)) {
+      g.entities.add(new TownNPC(key, g.player.cx, g.player.cy), 'npcs');
+    }
+  }
+  g.world.flags['savedAngler'] = true;
+  ok('⑩ 24 全在场 → 公主门开', g.townNpcSpawnAllowed('princess') === true);
+  // 缺一即关：挪走 tavernkeep
+  const tkAlive = g.entities.npcs.find(n2 => n2.npcKey === 'tavernkeep' && !n2.dead);
+  tkAlive.dead = true;
+  ok('⑩ 缺酒保 → 公主门关', g.townNpcSpawnAllowed('princess') === false);
+
+  // ---- ⑪ unlocked* 永久旗（到访一次 SpawnAllowed 直通）----
+  ok('⑪ 无钱无旗 → 商人拒绝', g.townNpcSpawnAllowed('merchant') === false);
+  g.world.flags.unlockedMerchantSpawn = true;
+  ok('⑪ unlockedMerchantSpawn → 商人直通（死亡后花光钱也回归）', g.townNpcSpawnAllowed('merchant') === true);
+  delete g.world.flags.unlockedMerchantSpawn;
+
+  // ---- ⑫ 许可证商店门（图鉴 25%/45%）----
+  ok('⑫ 新世界图鉴 <25% → 狗证不上架', g.shopCondOk('bestiary25') === false);
+  ok('⑫ 新世界图鉴 <45% → 兔证不上架', g.shopCondOk('bestiary45') === false);
+
+  // ---- ⑬ 宠物入驻链（boughtCat → 免房流浪生成）----
+  delete g.world.flags.unlockedMerchantSpawn;
+  const catsBefore = g.entities.npcs.filter(n2 => n2.npcKey === 'town_cat').length;
+  g.world.flags.boughtCat = true;
+  g.updateTownNpcArrival();
+  const catsAfter = g.entities.npcs.filter(n2 => !n2.dead && n2.npcKey === 'town_cat');
+  ok('⑬ boughtCat → 猫咪入驻（免房）', catsBefore === 0 && catsAfter.length === 1 && !catsAfter[0].home);
+  ok('⑬ 猫 TownNPC 渲染数据可达(json 条目)', catsAfter[0]?.vanillaId === 637);
+
   return out;
 });
 

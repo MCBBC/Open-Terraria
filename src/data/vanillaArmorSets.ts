@@ -15,6 +15,9 @@ export interface ArmorSetBonus {
   critRanged?: number;
   critMagic?: number;
   noKnockback?: boolean;
+  runAccMul?: number;      // runAcceleration *=（暗影套 1.75,:26195-26201）
+  maxRunMul?: number;      // maxRunSpeed *=（暗影套 1.15）
+  runSlowMul?: number;     // runSlowdown *=（暗影套 1.75）
   fireWalk?: boolean;
   frostBurn?: boolean;     // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
   ammoCost80?: boolean;
@@ -49,7 +52,10 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   '7|7|7': { critRanged: 10, name: 'Bone' },
   // 巫师帽 14 + 长袍：魔法暴 +10
   '14|58|*': { critMagic: 10, name: 'Wizard' },
-  // 暗影 (5|74)：C# 仅置 shadowArmor 旗标（:15842，行为型 engine）——数值不加虚构
+  // 暗影 (5|74)：shadowArmor 旗标（:15842）→ 移动四参数加成（:26195-26201,
+  // 2026-08-13 接入移动模型:runAcc×1.75/maxRun×1.15/accRun×1.15/runSlow×1.75）
+  '5|5|5': { runAccMul: 1.75, maxRunMul: 1.15, runSlowMul: 1.75 },      // 暗影（102/101/100）
+  '74|48|44': { runAccMul: 1.75, maxRunMul: 1.15, runSlowMul: 1.75 },   // 远古暗影（956/957/958,同 :15842 旗标）
   // 丛林 (76|8)(49|45) 2×2×2=8 种组合全配（:15873-15877 manaCost-=0.16f）
   '8|8|8': { manaCostMul: 0.84, name: 'Jungle' },
   '76|8|8': { manaCostMul: 0.84, name: 'Jungle' },

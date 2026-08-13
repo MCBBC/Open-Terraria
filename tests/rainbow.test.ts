@@ -1,0 +1,129 @@
+// 彩虹枪（1260 → 弹 250/251，aiStyle 46）1:1 回归：
+//   · 250 隐形头：每 2t 铺一片 251（localAI[0]>4→3）；ai[0]>30 后 vy+=0.5 拱弧；
+//     速度恒归一 15.95；撞块即亡；timeLeft 钳 2400
+//   · 251 段：首帧锁方向；alpha 淡入 10t→0（全显）→末 10t 淡出；life 2400（≈40s）；
+//     命中 = 穿透 -1 + 【全段共享】静态 10t 冷却（usesIDStaticNPCImmunity）
+import { describe, it, expect } from 'vitest';
+import { RainbowBolt, RainbowSegment, _setRainbowClock } from '../src/entities/RainbowProj';
+import { Arrow } from '../src/entities/Arrow';
+import { World } from '../src/world/World';
+import { TILE } from '../src/core/constants';
+import type { GameHooks } from '../src/entities/types';
+
+const TICK_MS = 1000 / 60;
+/** 假钟：仅显式 tick() 推进（每 fixedUpdate 一拍） */
+function fakeClock() {
+  let t = 0;
+  _setRainbowClock(() => t);
+  return { tick: (n = 1) => { t += n * TICK_MS; }, reset: () => { t = 0; } };
+}
+
+function makeGame(w: World, list: unknown[] = [], projectiles: unknown[] = []) {
+  return {
+    world: w,
+    player: null as unknown,
+    enemies: () => list,
+    entities: { nextId: 1, add: (e: unknown, b: string) => { (b === 'projectiles' ? projectiles : list).push(e); } },
+    playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {},
+    spawnParticles: () => {}, addDamageNumber: () => {}, spawnDrop: () => null,
+    damagePlayer: () => {}, critters: () => [], notifyInventoryChanged: () => {},
+    onEnemyKilled: () => {}, spawnEnemy: () => {}, cutTile: () => {},
+  } as unknown as GameHooks;
+}
+
+function emptyWorld(): World {
+  const w = new World(200, 200, 30, 'open');
+  for (let x = 0; x < 200; x++) w.store.setTileSilent(x, 100, 1, 0, 0);
+  return w;
+}
+
+describe('彩虹枪弹链 250/251', () => {
+  it('隐形头每 2t 铺段，恒速 15.95，30t 后拱弧下坠，撞块即亡', () => {
+    const w = emptyWorld();
+    const projectiles: unknown[] = [];
+    const game = makeGame(w, [], projectiles);
+    const bolt = new RainbowBolt(50 * TILE, 80 * TILE, 16, 0, 45, 2.5);
+    projectiles.push(bolt);
+    for (let t = 0; t < 4; t++) bolt.fixedUpdate(1, game);
+    expect(projectiles.filter((p) => p instanceof RainbowSegment).length).toBe(0);
+    bolt.fixedUpdate(1, game);
+    expect(projectiles.filter((p) => p instanceof RainbowSegment).length).toBe(1); // 第 5 tick 首片（localAI[0]>4）
+    const sp = Math.hypot(bolt.vx, bolt.vy);
+    expect(sp).toBeCloseTo(15.95, 2);                  // 速度恒归一
+    for (let t = 0; t < 30 && !bolt.dead; t++) bolt.fixedUpdate(1, game);
+    expect(bolt.vy).toBeGreaterThan(0);                // ai0>30 → vy+=0.5 拱弧
+    // 一路铺段
+    const segs = projectiles.filter((p) => p instanceof RainbowSegment).length;
+    expect(segs).toBeGreaterThanOrEqual(15);
+    // 撞块即亡（bolt 最终撞 y=100 地面）
+    for (let t = 0; t < 600 && !bolt.dead; t++) bolt.fixedUpdate(1, game);
+    expect(bolt.dead).toBe(true);
+  });
+
+  it('段淡入 10t→全显，2400t 寿命；静态免疫：同敌 10t 内只吃一段', () => {
+    const ck = fakeClock();
+    const w = emptyWorld();
+    const list: unknown[] = [];
+    const game = makeGame(w, list);
+    let hits = 0;
+    list.push({ id: 1, x: 50 * TILE, y: 80 * TILE, w: 24, h: 18, dead: false,
+      hurt: () => { hits++; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
+    const seg = new RainbowSegment(50 * TILE, 80 * TILE, 1, 0, 45, 2.5);
+    seg.fixedUpdate(1, game);
+    ck.tick();
+    expect(seg.alpha).toBe(230);                       // 淡入第 2t：255−25
+    expect(hits).toBe(1);                              // 首帧即伤害（穿透 -1 无门）
+    // 两段同 tick 同敌 → 静态免疫只结算一次（共享钟不被双段重复衰减）
+    const seg2 = new RainbowSegment(50 * TILE, 80 * TILE, 1, 0, 45, 2.5);
+    seg2.fixedUpdate(1, game);
+    expect(hits).toBe(1);
+    // 5t 内仍免疫
+    for (let t = 0; t < 5; t++) { seg.fixedUpdate(1, game); seg2.fixedUpdate(1, game); ck.tick(); }
+    expect(hits).toBe(1);
+    // 满 10t 后可再命中
+    for (let t = 0; t < 6; t++) { seg.fixedUpdate(1, game); ck.tick(); }
+    expect(hits).toBe(2);
+    // 淡入完成 → 全显
+    for (let t = 0; t < 8; t++) { seg.fixedUpdate(1, game); ck.tick(); }
+    expect(seg.alpha).toBe(0);
+    expect(seg.dead).toBe(false);
+    _setRainbowClock(null);
+  });
+});
+
+describe('泰拉刃光束 985（aiStyle 191，terra 模式）', () => {
+  it('减速 ×0.94(>8)、25t 消亡、绿光', () => {
+    const w = new World(200, 200, 30, 'open');   // 全空世界（无地面干扰）
+    const projectiles: unknown[] = [];
+    const game = makeGame(w, [], projectiles);
+    const beam = new Arrow(50 * TILE, 80 * TILE, 12, 0, 85, 6.5, 985, null,
+      { grav: 0, life: 90, pierce: 3, terra: true });
+    const sp0 = Math.hypot(beam.vx, beam.vy);
+    beam.fixedUpdate(1, game);
+    const sp1 = Math.hypot(beam.vx, beam.vy);
+    expect(sp1).toBeLessThan(sp0);                       // >8 → ×0.94
+    expect(beam.lightRGB).toEqual([0.25, 0.86, 0.38]);   // Color(64,220,96)
+    for (let t = 0; t < 23 && !beam.dead; t++) beam.fixedUpdate(1, game);
+    expect(beam.dead).toBe(false);
+    beam.fixedUpdate(1, game);
+    expect(beam.dead).toBe(true);                        // 第 25t 消亡（非 timeLeft 90）
+    expect(beam.terraT).toBe(25);
+  });
+
+  it('近墙扇形探测失败 → 双阻尼额外减速', () => {
+    const w = new World(200, 200, 30, 'open');
+    for (let y = 0; y < 200; y++) w.store.setTileSilent(57, y, 1, 0, 0);   // 正前方墙列（x=57=912px）
+    const game = makeGame(w, [], []);
+    const beam = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985, null,
+      { grav: 0, life: 90, pierce: 3, terra: true });
+    // 探测窗 110px 沿速度方向（水平）：cx 804+110=914 → 越过 912px 墙列
+    for (let t = 0; t < 3 && !beam.terraWall; t++) beam.fixedUpdate(1, game);
+    expect(beam.terraWall).toBe(true);                   // 视线探测命中墙 → localAI[1]=1
+    const open = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985, null,
+      { grav: 0, life: 90, pierce: 3, terra: true });
+    const game2 = makeGame(new World(200, 200, 30, 'open'), [], []);
+    for (let t = 0; t < 4; t++) open.fixedUpdate(1, game2);
+    expect(open.terraWall).toBe(false);                  // 空世界无墙
+    expect(Math.hypot(beam.vx, beam.vy)).toBeLessThan(Math.hypot(open.vx, open.vy)); // 双阻尼
+  });
+});

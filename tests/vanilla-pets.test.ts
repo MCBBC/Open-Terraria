@@ -4,13 +4,13 @@ import { petInfoOfVid } from '../src/data/vanillaPets';
 import equipJson from '../src/data/vanilla-equip.json';
 
 describe('vanilla-pets 提取表', () => {
-  it('总数与 vanity/light 分布（86 = 79 vanity + 7 light）', () => {
+  it('总数与 vanity/light 分布（62 = 55 vanity + 7 light；damage>0 召唤杖已排除）', () => {
     let vanity = 0, light = 0;
     for (const k of Object.keys(require0())) {
       const p = petInfoOfVid(+k)!;
       if (p.light) light++; else vanity++;
     }
-    expect(vanity).toBe(79);
+    expect(vanity).toBe(55);
     expect(light).toBe(7);
   });
 
@@ -20,6 +20,16 @@ describe('vanilla-pets 提取表', () => {
     // 4952 Fairy Bell 族光宠（buff 156? 按表断言 light=true 即可——抽任一 light 项）
     const lights = Object.entries(require0()).filter(([, v]) => v.light);
     expect(lights.length).toBe(7);
+  });
+
+  it('★ 不变量：每条 buff ∈ Main.vanityPet ∪ lightPet（假阳性防线——曾混入 24 件召唤杖）', () => {
+    // Pygmy Staff 1157（buff=49 Pygmies 非 pet 表）必须已被 damage 门排除
+    expect(petInfoOfVid(1157)).toBeNull();
+    expect(petInfoOfVid(1309)).toBeNull();   // Slime Staff
+    for (const [, v] of Object.entries(require0())) {
+      const info = v as { buff: number };
+      expect(info.buff).toBeGreaterThan(0);
+    }
   });
 
   it('DefaultToVanitypet 变体族抽检（4960 → buff317/proj934——参数序 projId,buffID）', () => {

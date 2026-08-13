@@ -39,20 +39,23 @@ const pixel = await page.evaluate(async () => {
   c.width = img.naturalWidth; c.height = img.naturalHeight;
   const x = c.getContext('2d');
   x.drawImage(img, 0, 0);
-  const corner = x.getImageData(5, 5, 1, 1).data;
+  // 像素结构采样:边框像素(1,1,贴图外缘框线)vs 内部(w/2,h/2)——
+  // Inventory_Back13 近平板,可见像素框在外缘 1-2px;另采 alpha 验证乘色(0.685×255≈175)
+  const border = x.getImageData(1, 1, 1, 1).data;
   const center = x.getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data;
   return {
     exists: true, hasBg: true, btns, hasExport,
     w: c.width, h: c.height,
-    corner: [...corner].slice(0, 4), center: [...center].slice(0, 4),
+    corner: [...border].slice(0, 4), center: [...center].slice(0, 4),
   };
 });
 console.log(JSON.stringify(pixel));
 check('Esc 打开暂停面板', pixel.exists === true);
 check('面板为像素九宫 dataURL', pixel.hasBg === true, `${pixel.w}×${pixel.h}`);
-check('九宫结构(角≠中心像素)', pixel.hasBg && JSON.stringify(pixel.corner) !== JSON.stringify(pixel.center),
-  `corner=${JSON.stringify(pixel.corner)} center=${JSON.stringify(pixel.center)}`);
-check('面板色系偏蓝紫(b>r)', pixel.corner ? pixel.corner[2] > pixel.corner[0] : false, `rgb=${pixel.corner?.slice(0, 3)}`);
+check('像素框线(边框≠内部像素)', pixel.hasBg && JSON.stringify(pixel.corner) !== JSON.stringify(pixel.center),
+  `border=${JSON.stringify(pixel.corner)} center=${JSON.stringify(pixel.center)}`);
+check('乘色半透(α≈175=(33,15,91)×0.685)', pixel.center ? Math.abs(pixel.center[3] - 175) <= 10 : false, `alpha=${pixel.center?.[3]}`);
+check('面板色系偏蓝紫(b>r)', pixel.center ? pixel.center[2] > pixel.center[0] : false, `rgb=${pixel.center?.slice(0, 3)}`);
 check('导出存档按钮存在', pixel.hasExport === true, `按钮=[${pixel.btns?.join('|')}]`);
 
 // ---- 2) 点击导出 → 捕获 <a download> 文件名 ----

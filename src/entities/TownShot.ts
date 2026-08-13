@@ -74,9 +74,9 @@ export class TownShot extends Entity {
     if (game.world.store.isSolid(tx, ty)) { this.dead = true; return; }
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
-        hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
-      if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game)) {
+      if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false)) {
         playEnemyHitSound(game, e);
         game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
       }

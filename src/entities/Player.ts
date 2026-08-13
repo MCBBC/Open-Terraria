@@ -12,6 +12,7 @@ import { BuffState, BuffType } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
+import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } from '../stats/InfoAccs';
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
@@ -25,6 +26,7 @@ import { mainExpertMode, mainDifficulty, getAttackDamageScaledByDifficulty, scal
 import type { Enemy } from './Enemy';
 import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
 import { TRACK_SHEET } from '../data/grappleHooks';
+import { MountInstance } from './Mounts';
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -67,6 +69,13 @@ export class Player extends Entity {
   /** 调试：无敌 + 无限魔力（F2 切换，原版无）——damage() 早退 + 每 tick 血蓝回满
    *  （回满兜住 DoT/溺水/摔落等直改 hp 的路径）。仅本地调试语义，不入存档 */
   debugGod = false;
+  /** 玩家对决开关（Player.cs:2436 hostile，会话态不存档——仅网络同步，进服默认 false） */
+  hostile = false;
+  /** 队伍 0-5（Player.cs:1312 team，PlayerTeamID：0 无/1 红/2 绿/3 蓝/4 黄/5 粉紫；存档持久） */
+  team = 0;
+  /** 上一 tick PvP 死亡标记（Player.cs:1250 pvpDeath：KillMe 时若 pvp 置位——
+   *  死亡不掉钱 + 复活满血/300t 无敌/跳过 Boss 延迟，:38208/:38321/:37223/:38388） */
+  lastPvpDeath = false;
   hp = 100;
   /** 最近一次伤害死因（PlayerDeathReason 语义子集）——死亡瞬间由 Game 消费生成原版死亡文本 */
   lastDamageCause: import('../i18n/RandomText').DeathCause | null = null;
@@ -151,6 +160,57 @@ export class Player extends Entity {
    *  效果实装（:9790-9802）：311 镰鞭=鞭攻速+35%、308 剑鞭=+25%、314 荆棘鞭=+12%
    *  ——Game 鞭 useTime 结算读取；312/365 登记持续期（效果端暂不接） */
   whipBuffs: Record<number, number> = {};
+  // ---- 信息显示运行态(Player.cs 对应字段) ----
+  /** 各信息显示开关(Player.hideInfo[13] :776;按下标=图标序,随存档;
+   *  唯一交互=背包界面点图标切换,Main.cs:46547-46573) */
+  hideInfo: boolean[] = new Array(13).fill(false);
+  /** 击杀计数行"最近击杀"(Player.lastCreatureHit :2458;命中写入 :20175/:43750) */
+  lastCreatureHit = -1;
+  /** 渔情行粘性缓存(Player.displayedFishingInfo :2498;浮漂在水时保持旧值) */
+  displayedFishingInfo = '';
+  /** 秒表速度滑动窗口(Player.speedSlice :1292,长 60;窗口长随速度变化) */
+  speedSlice = new Float32Array(60);
+  /** 雷达/稀有生物节流(Player.accThirdEyeCounter/Number、accCritterGuideCounter/Number :2462-2474) */
+  accThirdEyeCounter = 0; accThirdEyeNumber = 0;
+  accCritterGuideCounter = 0; accCritterGuideNumber = -1;
+  /** 缓存的雷达敌数/稀有生物名(节流刷新间用旧值) */
+  accThirdEyeCount = 0; accCritterGuideText: string | null = null;
+  // ---- DPS 计(Player.cs:2488-2496 字段 + :53290-53353 addDPS/checkDPSTime/getDPS) ----
+  /** dpsDamage/dpsStart/dpsEnd/dpsLastHit/dpsStarted;墙钟 3 秒窗口,停手自动归 N/A */
+  private dpsDamage = 0;
+  private dpsStart = 0; private dpsEnd = 0; private dpsLastHit = 0;
+  private dpsStarted = false;
+  /** addDPS(:53301-53309)——命中伤害累计;accDreamCatcher 门禁在调用侧(原版两调用点均门禁:
+   *  Projectile.cs:12817/Player.cs:20165),此处同样收口 */
+  addDPS(dmg: number): void {
+    if (!this.equipStats.infoAccs.accDreamCatcher) return;
+    const now = Date.now();
+    if (!this.dpsStarted) {
+      this.dpsStarted = true;
+      this.dpsDamage = 0;
+      this.dpsStart = now;
+      this.dpsEnd = now;
+    }
+    this.dpsLastHit = now;
+    this.dpsDamage += dmg;
+    this.dpsEnd = now;
+  }
+  /** checkDPSTime(:53319-53327):距上次命中 ≥3 秒 → 停表 */
+  private checkDPSTime(): void {
+    if (this.dpsStarted && Date.now() - this.dpsLastHit >= 3000) this.dpsStarted = false;
+  }
+  /** getDPS(:53328-53353):窗口归一,elapsed 下限 1s,>3s 重均并把起点重置为 now-1s */
+  getDPS(): number {
+    this.checkDPSTime();
+    if (!this.dpsStarted) return 0;
+    const elapsed = Math.max(1, (this.dpsEnd - this.dpsStart) / 1000);
+    const dps = this.dpsDamage / elapsed;
+    if (elapsed > 3) {
+      this.dpsDamage = Math.round(dps);
+      this.dpsStart = this.dpsEnd - 1000;
+    }
+    return Math.floor(dps);
+  }
   /** 右键集火目标（MinionAttackTargetNPC，Player.cs:48952：召唤杖右键指定，
    *  随从索敌优先；-1=无。失效：死亡或离玩家 >3000px——随从侧判定） */
   minionTargetId = -1;
@@ -199,6 +259,12 @@ export class Player extends Entity {
   ridingCart = false;
   /** 当前所骑矿车（渲染层叠画车身/倾角用；Game 挂载） */
   cart: import('./Minecart').Minecart | null = null;
+  /** 坐骑实例（Mount.cs Mount 1:1：非矿车坐骑状态机/能量/帧态；矿车族由 Minecart 接管） */
+  mount = new MountInstance();
+  /** 骑乘中（非矿车坐骑；渲染/物理分支消费——原版 mount.Active && !mount.Cart） */
+  get ridingMount(): boolean { return this.mount.active && !this.mount.isCart; }
+  /** 游泳族坐骑门（坐骑 buff 的 ignoreWater 语义：海龟 131/猪鲨崽 168/熔岩鲨 265） */
+  get ridingMountSwimFree(): boolean { return this.ridingMount && this.mount.swimFree; }
 
   constructor(x: number, y: number, inv: Inventory) {
     super();
@@ -255,6 +321,7 @@ export class Player extends Entity {
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
+    infoAccs: InfoAccGates;  // 信息饰品门禁(DrawInfoAccs)
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
     quiver: boolean;
@@ -275,6 +342,7 @@ export class Player extends Entity {
     minionKB: number;      // minionKB += N
     sentrySlots: number;   // maxTurrets += N
     fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
+    runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
     whipRange: number;     // whipRangeMultiplier += X
     whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
     summonSet: SummonSetFx | null;
@@ -298,6 +366,7 @@ export class Player extends Entity {
     let critMelee = 0, critRanged = 0, critMagic = 0;
     let move = 0, meleeSpeed = 0, runSpeed = 0;
     let fish = 0;             // fishingSkill（钓具配饰+渔夫甲）
+    let setRunAccMul = 1, setMaxRunMul = 1, setRunSlowMul = 1;   // 暗影套移动四参数(:26195)
     // 魔力回复直值（ApplyEquipFunctional if-chain :14379-14383——魔力斗篷 982 专属）
     let manaRegenBonus = 0, manaRegenDelayBonus = 0;
     let extraFall = 0, lavaMax = 0, armorPen = 0, rocketBoots = 0;
@@ -316,6 +385,7 @@ export class Player extends Entity {
     let beetleDef = false;
     let flipper = false, longInvince = false, spikedBoots = false;
   let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
+  const infoAccs: InfoAccGates = emptyInfoAccGates(); // 信息饰品门禁(RefreshInfoAccs :12198)
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false, autoReuseGlove = false;
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
@@ -332,6 +402,8 @@ export class Player extends Entity {
       const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       if (accVid === 267) killGuide = true;
       else if (accVid === 1307) killClothier = true;
+      // 信息饰品门禁(Player.cs:12486 UpdateEquips→RefreshInfoAccsFromItemType)
+      if (accVid > 0) refreshInfoAccsFromItemType(infoAccs, accVid);
       // 翅膀（Item.wingSlot>0 → WingStatsInitializer 全字段；多翅膀取首个）
       const wingSlot = statOfInternal(s.id)?.wing;
       if (wingSlot && wingSlot > 0 && !wing) {
@@ -489,6 +561,9 @@ export class Player extends Entity {
       if (sb.critRanged) critRanged += sb.critRanged;
       if (sb.critMagic) critMagic += sb.critMagic;
       if (sb.noKnockback) noKnockback = true;
+      if (sb.runAccMul) setRunAccMul = sb.runAccMul;      // 暗影套 :26195-26201
+      if (sb.maxRunMul) setMaxRunMul = sb.maxRunMul;
+      if (sb.runSlowMul) setRunSlowMul = sb.runSlowMul;
       if (sb.fireWalk) fireWalk = true;
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.ammoCost80) ammoSave = true;
@@ -529,6 +604,7 @@ export class Player extends Entity {
       jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots,
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
+      infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
       arrowDmg, ammoSave, kbGlove, autoReuseGlove, yoyoString,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
@@ -539,6 +615,7 @@ export class Player extends Entity {
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
+      runAccMul: setRunAccMul, maxRunMul: setMaxRunMul, runSlowMul: setRunSlowMul,
       setBonus: sb, manaCostMul,
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
       whipSpd: summonSet?.whipSpd ?? 1,
@@ -710,6 +787,7 @@ export class Player extends Entity {
   fixedUpdate(dt: number, game: GameHooks) {
     const world = game.world;
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
+    this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
 
@@ -1008,8 +1086,8 @@ export class Player extends Entity {
     // flag = getGoodWorld && !flag（鱼鳃在 ftw 下反而水下不淹、水上淹）
     if (this.buffs.gills) drown = world.seedFlags.getGoodWorld ? !drown : false;
     if (this.shimmering) drown = false;  // :22950-22952 微光化不淹
-    // mount.Type==4 史莱姆鞍豁免（:22953）：坐骑系统未实装（引擎级缺口），
-    // 实装后在此补 `if (this.mountType === 4) drown = false;`
+    // mount.Type==4 海龟坐骑免淹（:22953）——坐骑系统已实装，接线
+    if (this.ridingMount && this.mount.type === 4) drown = false;
     if (this.equipStats.merman) {        // :22957-22964 accMerman：水中不耗气并人鱼化
       if (drown) this.merman = true;
       drown = false;
@@ -1116,6 +1194,16 @@ export class Player extends Entity {
       this.fallStartY = null;
       return;
     }
+    // ---- 非矿车坐骑每 tick 维护（Mount.cs 1:1）----
+    // 能量/疲劳恢复 + 地面飞行时量回充（:26538 ResetFlightTime）+ hover 起始
+    //（:26416）+ 帧态机分派（:35745-35790）。冻结/石化/蛛网控场强制下坐（:26556）
+    if (this.ridingMount) {
+      if (this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned)) {
+        this.mount.dismount(this, game);
+      } else {
+        this.mount.upkeep(this);
+      }
+    }
     const ix = this.inputX;
     // 冲刺滑行期（dashDelay<0）常规加速/摩擦/限速整体跳过——Run 各分支 dashDelay>=0 门
     // （Player.cs:19559/:19575/:19675/:19705），速度由 DashMovement 阻尼段独占
@@ -1129,21 +1217,30 @@ export class Player extends Entity {
       // :19705 !slow&&!burned）。Chilled（:19485）压 accRun=maxRun 取消爬坡。
       const slowDebuff = this.buffs.has(BuffType.Slow) || this.buffs.has(BuffType.Burning);
       const chilled = this.buffs.has(BuffType.Chilled);
-      let maxRun = PLAYER_WALK_MAX * speedMult * (this.inWater ? 0.55 : 1);
+      const mnt = this.ridingMount ? this.mount : null;   // 坐骑参数接管（Player.cs:26310-26334）
+      // 游泳族坐骑（海龟 131/猪鲨崽 168/熔岩鲨 265 buff 的 ignoreWater）水下不降速
+      let maxRun = PLAYER_WALK_MAX * speedMult * (this.inWater && !(mnt?.swimFree) ? 0.55 : 1);
       let accRun = this.equipStats.accRunSpeed || 6;   // accRunSpeed 定值不随 moveSpeed(:25695 只乘 maxRunSpeed——旧误乘 speedMult,2026-08-13 修)
       if (chilled) accRun = maxRun;                       // :19485
+      if (mnt) {
+        // :26329-26331：mounted 时 maxRun=RunSpeed / accRun=DashSpeed / runAcc=Acceleration
+        //（CanUseWings 族走 Math.max 分支省略——本仓坐骑恒禁翼）。
+        //  RunSpeed 含每坐骑特例（蜜蜂空中+4×(1-疲劳)、猪鲨崽空中+13.5、游泳态→swimSpeed）
+        maxRun = mnt.runSpeed();
+        accRun = mnt.dashSpeed;
+      }
       if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
         const ws = wingStatOf(this.equipStats.wing.logic);
         const hoverDownMove = this.inputDown && this.inputJump && ws.hover && this.wingTime > 0;
         maxRun = Math.max(maxRun, hoverDownMove && ws.hoverSpeed > 0 ? ws.hoverSpeed : ws.accSpeed);
         accRun = maxRun;                                  // 翼空中横移上限覆盖(原 WingAirLogicTweaks)
       }
-      // 暗影套 runAcceleration×1.75/maxRun×1.15（:26195-26201）待套装引擎批接,登记
-      let runSlow = RUN_SLOWDOWN;
+      let runSlow = RUN_SLOWDOWN * this.equipStats.runSlowMul;   // 暗影套 ×1.75(:26195-26201)
       // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）
-      if (duneBoost) { maxRun *= 1.75; accRun *= 1.75; }
-      const runAcc = RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
-      const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0;
+      if (duneBoost && !mnt) { maxRun *= 1.75; accRun *= 1.75; }
+      const runAcc = mnt ? mnt.acceleration
+        : RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
+      const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0 && !mnt;
       if (ix !== 0) {
         this.facing = ix;
         const canRamp = this.vy === 0 || wingAir;          // 爬坡门（地面或翼飞行）
@@ -1210,7 +1307,10 @@ export class Player extends Entity {
       this.fallStartY = null;
     } else
     // 跳跃 / 游泳
-    if (this.inWater) {
+    // 游泳族坐骑（海龟/猪鲨崽/海盗船/熔岩鲨：坐骑 buff 的 ignoreWater，Player.cs:9592-9608）
+    // 浸水走干燥分支——水下不降速（Run 段已豁免 0.55 系数）、正常重力与跳跃（+5 高/+2.5 速
+    // 在 Mount.JumpHeight/JumpSpeed 的 frameState==4 支线），帧态机自行切游泳帧
+    if (this.inWater && !this.ridingMountSwimFree) {
       // ---- 水面行走（WaterWalkingBoots/LavaWaders 族，Player.WaterWalk 语义近似）----
       // 装备后落向液面时站在液面（vy 清零、可正常行走/起跳/重置空中能力）；
       // 按 ↓ 下潜。waterWalk2（水上漂靴）同效。
@@ -1252,11 +1352,21 @@ export class Player extends Entity {
       }
     } else {
       const gd = this.gravDir;
+      // 坐骑跳跃参数（Player.cs:19307-19308：mounted 时 jumpHeight/jumpSpeed 取
+      // Mount.JumpHeight/JumpSpeed——含驯鹿/兔兔的水平速度加成与游泳态 +5/+2.5 支线）
+      const mnt2 = this.ridingMount ? this.mount : null;   // 本块作用域（mnt2 在水平块,2026-08-13 补声明）
+      const mJumpSpd = mnt2 ? mnt2.jumpSpeed(this.vx) : PLAYER_JUMP_SPEED + this.equipStats.jumpSpd;
+      const mJumpTicks = mnt2 ? mnt2.jumpHeight(this.vx) : PLAYER_JUMP_TICKS;
+      // 史莱姆鞍族 constantJump（Mount.AutoJump → Player.autoJump :18603）：地面移动中自动连跳
+      const autoJumpNow = !!mnt2?.autoJump;
       if (this.inputJump && this.onGround) {
         // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）；
         // 重力倒置时方向取反（gravDir，Player.cs:3207 全部 vy 乘 gravDir 语义）
-        this.vy = -(PLAYER_JUMP_SPEED + this.equipStats.jumpSpd) * gd;
-        this.jumpHold = PLAYER_JUMP_TICKS;
+        this.vy = -mJumpSpd * gd;
+        this.jumpHold = mJumpTicks;
+      } else if (autoJumpNow && this.onGround && this.inputX !== 0 && this.vy === 0) {
+        this.vy = -mJumpSpd * gd;
+        this.jumpHold = mJumpTicks;
       }
       if (this.inputJump && this.jumpHold > 0) {
         this.vy -= 0.22;
@@ -1268,7 +1378,8 @@ export class Player extends Entity {
       // 空中再按跳（持续按住 + 段数剩余 + 未在急升中）→ 消费一段；各段速度原版梯度近似
       const eq = this.equipStats;
       if (this.onGround) this.extraJumps = [...eq.jumpOpts]; // 落地重置段数
-      if (!this.onGround && this.inputJump && this.extraJumps.length > 0 && this.vy > -2 && this.extraJumpCd <= 0) {
+      // 坐骑封段（Mount.BlockExtraJumps，Player.cs:25730）：大多数坐骑禁多段跳
+      if (!this.onGround && !mnt2?.blockExtraJumps && this.inputJump && this.extraJumps.length > 0 && this.vy > -2 && this.extraJumpCd <= 0) {
         const opt = this.extraJumps.shift()!;
         const mult = opt === 'Fart' ? 1.28 : (opt === 'Sandstorm' || opt === 'Blizzard') ? 1.18 : 1.0;
         this.vy = -PLAYER_JUMP_SPEED * mult * (eq.jumpBoost ? 1.25 : 1);
@@ -1276,9 +1387,37 @@ export class Player extends Entity {
         this.extraJumpCd = 8; // 防同帧连段
       }
       if (this.extraJumpCd > 0) this.extraJumpCd--;
+      // ---- 坐骑飞行族接管（Player.cs:26637-26700 的 else-if 链 1:1）----
+      // usesHover（UFO/蜜蜂/猪鲨崽/巫婆扫帚/熔岩鲨(水中)）→ Mount.Hover 接管 vy
+      //（flyTime→疲劳双池，疲劳满失升力）；非 hover 飞行坐骑（驯鹿/猪龙）→ 按住跳
+      // 消耗 flyTime 爬升（0.1/tick、上限 -jumpSpeed×1.5），耗尽重力/3 缓降。
+      // 两者独占 vy：下方翅膀/火箭靴段与重力段全部跳过（原版同链互斥）。
+      let mountFlight = false;
+      if (mnt2) {
+        if (mnt2.canHover(this)) {
+          mnt2.hover(this);
+          mountFlight = true;
+        } else if (mnt2.canFly(this) && this.inputJump && this.jumpHold === 0) {
+          if (mnt2.flight()) {
+            let js = mJumpSpd;
+            if (mnt2.type === 50) js *= 0.5;               // 史后坐骑爬升减半（:26660）
+            if (this.vy > 0) this.vy -= 0.1 * 5;          // 下落中反抽 5×（:26672）
+            else if (this.vy > -js * 1.5) this.vy -= 0.1;
+            if (this.vy < -js * 1.5) this.vy = -js * 1.5;
+          } else {
+            // 能量耗尽缓降（:26683-26696）：重力/3 + 终端 maxFallSpeed/3
+            this.vy += GRAVITY / 3 * gd;
+            const cap = MAX_FALL_SPEED / 3 * gd;
+            this.vy = gd === 1 ? Math.min(this.vy, cap) : Math.max(this.vy, -cap);
+          }
+          mountFlight = true;
+        }
+      }
       // ---- 翅膀/火箭靴/飞毯 1:1（Player.Update :26388-27092 + WingMovement :21746 +
       //      CarpetMovement :21568 + RocketBoots :26548-26628）----
-      const wings = eq.wing ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
+      // 坐骑禁翼禁靴（Player.cs:26316-26322：mount.Active → rocketBoots=0、
+      // CanUseWings 假族 wings=0——本仓坐骑恒属禁翼族）
+      const wings = eq.wing && !mnt2 ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
       const hoverDown = this.inputDown;            // TryingToHoverDown（保持态近似省略）
       const JS = PLAYER_JUMP_SPEED;                // jumpSpeed 基准（原版 5.301 系按本地尺度）
       // 落地重置（原版 :26169 地面块 + :26490 vy==0&&releaseJump 语义并入）
@@ -1328,7 +1467,7 @@ export class Player extends Entity {
           this.rocketTime = 0;
         }
         // ---- 火箭靴（:26548-26628）：翅膀不可用（无翅或时间尽）才接管 ----
-        if (!flying && (this.wingTime <= 0 || wings === 0) && eq.rocketBoots > 0
+        if (!flying && !mnt2 && (this.wingTime <= 0 || wings === 0) && eq.rocketBoots > 0
           && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease) {
           if (this.rocketTime > 0) {
             this.rocketTime--;
@@ -1350,7 +1489,7 @@ export class Player extends Entity {
         } else if (!flying) {
           // ---- 飞毯（CarpetMovement :21568-21602）：条件=无多段跳余量/jumpHold 空/
           //      vy≠0/火箭靴未在用/翅膀时间尽；效果=vy 钳到 -(gravity+ε) 抵消重力 ----
-          if (eq.carpet && this.extraJumps.length === 0 && this.jumpHold === 0
+          if (eq.carpet && !mnt2 && this.extraJumps.length === 0 && this.jumpHold === 0
             && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {
             if (this.inputJump && this.canCarpet) { this.canCarpet = false; this.carpetTime = 300; }
             if (this.carpetTime > 0 && this.inputJump) {
@@ -1461,6 +1600,12 @@ export class Player extends Entity {
       if (gliding) {
         grav = GRAVITY / 3;
         if (this.vy > MAX_FALL_SPEED / 3) this.vy = MAX_FALL_SPEED / 3;
+      }
+      // 坐骑飞行族已独占 vy（上方 Hover/Flight 段）——重力段整体让位（原版 :26637
+      // else-if 链互斥语义）；悬停免摔（Hover :3450 fallStart 每帧重置）
+      if (mountFlight) {
+        grav = 0;
+        this.fallStartY = null;
       }
       // 重力倒置（gravDir，R7）：方向取反（Player.cs:3207 vy×gravDir 全局语义近似）
       this.vy = gd === 1
@@ -1720,10 +1865,13 @@ export class Player extends Entity {
       const feetLiq = world.store.liquid[world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 1) / TILE))];
       const landedInWater = feetLiq > 60 || this.inWater;
       if (landedInWater) { /* 落水缓冲：不计摔伤 */ }
-      else if (fallTiles > 25 + this.equipStats.extraFall
+      else if (fallTiles > 25 + this.equipStats.extraFall + (this.ridingMount ? this.mount.extraFall : 0)
         && !(this.equipStats.wing || this.hasHorseshoe || this.equipStats.noFallDmg)) {
-        const safeT = 25 + this.equipStats.extraFall;
-        const dmg = Math.max(1, Math.round((fallTiles - safeT) * 10));
+        const safeT = 25 + this.equipStats.extraFall + (this.ridingMount ? this.mount.extraFall : 0);
+        // 坐骑摔伤系数（Player.cs:25081 num17 *= mount.FallDamage）：兔兔 0.8/史莱姆 0.5/
+        // 独角兽 0.2/蜥蜴 0.2/飞行族 0；extraFall 起步豁免（:25011 mount.ExtraFall）
+        let dmg = Math.max(1, Math.round((fallTiles - safeT) * 10));
+        if (this.ridingMount) dmg = Math.max(1, Math.round(dmg * this.mount.fallDamageFactor));
         this.lastDamageCause = { kind: 'fell' };
         this.damage(dmg, this.cx, this.y - 10);
         game.playSfx('hurt');
@@ -2231,6 +2379,10 @@ export class Player extends Entity {
   runningOnSand = false;
   /** 上一 tick 的世界 store 引用（fixedUpdate 缓存；dashWallAhead 探测用） */
   private lastStore: import('../world/TileStore').TileStore | null = null;
+  /** 坐骑探测用世界（MountedPlayerView.store：fixedUpdate 帧首刷新） */
+  get store() { return this.lastStore; }
+  /** 上一 tick 的跳跃输入（Mount.tryStartHover 的 releaseUp 边沿门 :26416） */
+  prevInputJump = false;
   /** 重力方向（R7：1 普通 / -1 倒置——重力药水 buff 18 激活时按 Up 切换，Player.gravDir）
    *  倒置 = 重力/跳跃/落点起点全部取反；onGround 由 hitHead 近似（天花板当地板） */
   gravDir: 1 | -1 = 1;

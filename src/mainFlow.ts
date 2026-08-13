@@ -178,6 +178,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         ui.showClothesWindow(appearance, async (a) => {
           selectedAppearance = a;
           g.player.appearance = a;
+          if (typeof a.team === 'number') g.player.team = a.team;
           g.net?.resendAppearance();
           if (selectedCharId != null) await charStore.update(selectedCharId, a);
           ui.toast(Lang.text('Mods.SandboxWorld.ClothesWindow.Changed'));
@@ -200,6 +201,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function applyAppearance(g: Game) {
     if (selectedAppearance) {
       g.player.appearance = selectedAppearance;
+      if (typeof selectedAppearance.team === 'number') g.player.team = selectedAppearance.team;
       g.net?.resendAppearance();
     }
   }
@@ -794,6 +796,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     importWld,
     quitToMenu,
     doSave,
+    doExportSave,
     openSettings,
     openBestiary,
     get game() { return game; },

@@ -34,9 +34,12 @@ import {
 } from '../world/MoonEvent';
 import {
   TOWER_KEY, TOWER_ZONE_RADIUS, isTowerId, isTowerMinion,
-  triggerLunarApocalypse, onTowerKilled,
+  triggerLunarApocalypse, onTowerKilled, updateLunarApocalypse,
   towerBoltTarget, onTowerBoltHit, tickMoonLordCountdown, type LunarHost,
 } from '../world/LunarEvent';
+import {
+  dawnEclipseRoll, useSolarTablet, endEclipseAtDusk, type EclipseHost,
+} from '../world/Eclipse';
 import {
   updateTime as dd2UpdateTime, checkProgress as dd2CheckProgress, reportLoss as dd2ReportLoss,
   stopInvasion as dd2StopInvasion, summonCrystalDirect as dd2SummonCrystalDirect,
@@ -186,6 +189,7 @@ import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
+import { RainbowBolt } from '../entities/RainbowProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
@@ -196,8 +200,9 @@ import { golferShopScoreGates } from '../world/golf/golferShop';
 import { MeteorChunk } from '../entities/MeteorChunk';
 import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
-import { computeHappiness, npcMoodCategory, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
+import { computeHappiness, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
 import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
+import { mountOfItem, isCartMount } from '../entities/Mounts';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
@@ -366,6 +371,7 @@ type RecallKind = 'spawn' | 'ocean' | 'hell';
 /** 永久升级/特殊消耗品使用集(UpdatePermanentBoosters 族+特殊单品) */
 const PERMANENT_USE_VIDS = new Set([
   3335, 5337, 5338, 5339, 5341, 5342, 5043, 2756, 4870, 678, 1326, 5335, 1133, 4988, 3601,
+  4829, 4830, 4910,   // 宠物许可证（猫/狗/兔，Player.cs:44730-44745 ItemCheck_UsePetLicenses）
 ]);
 function dropVanillaId(d: ItemDrop): number {
   return slotVanillaId(d.itemId);
@@ -1267,6 +1273,39 @@ export class Game implements GameHooks {
     this.minecart = null;
   }
 
+  /** 坐骑召唤（Player.cs:42095：item.mountType != -1 且 flag2 → mount.SetMount）。
+   *  召唤物不消耗；再召同型 = 下坐（Player.cs:5768 TryToDismount 链） */
+  private useMountItem(vanillaItemId: number): boolean {
+    const mountId = mountOfItem(vanillaItemId);
+    if (mountId < 0) return false;
+    const p = this.player;
+    // 矿车族召唤物仍走轨道上车链（Minecart.ts 已接 MountID.Cart 路径，不回退）
+    if (isCartMount(mountId)) { this.tryQuickMinecart(); return true; }
+    if (p.ridingMount) {
+      // 已骑乘：同型下坐；异型换骑（SetMount :6194-6204 先 ClearBuff 再上）
+      if (p.mount.type === mountId) { this.tryDismountMount(); return true; }
+    }
+    if (p.ridingCart) return true;                    // 车上换坐骑需先下车（QuickMount 语义）
+    if (!p.mount.setMount(mountId, p, this)) return false;
+    // 起坐音效（Item.UseSound：鞍族 Item_25 / 胡萝卜 Item_79 / 猪龙 Item_80 / 史莱姆 Item_81）
+    const snd: Record<number, string> = {
+      0: 'Item_25', 1: 'Item_79', 2: 'Item_80', 3: 'Item_81', 4: 'Item_25', 5: 'Item_8',
+    };
+    this.playSfxFile(snd[mountId] ?? 'Item_25', 0.8, p.x, p.y);
+    p.useTime = 20;                                   // useAnimation 20（Item.cs 鞍族）
+    return true;
+  }
+
+  /** 下坐（Mount.TryDismount :6124：空间不足失败 → DoFailedDismountDust 尘 10） */
+  private tryDismountMount(): void {
+    const p = this.player;
+    if (!p.ridingMount) return;
+    if (!p.mount.tryDismount(p)) {
+      this.spawnParticles(p.cx, p.cy, '#C8C8C8', 10, 1.2);
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.MountDismountBlocked'));
+    }
+  }
+
   /** QuickMinecart（Player.cs:5796-5827）：射程内取视线可达的最近轨道格上车 */
   private tryQuickMinecart(): void {
     if (this.minecart) return;
@@ -1965,6 +2004,7 @@ export class Game implements GameHooks {
     const flagByKey: Record<string, string> = {
       goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
       stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
+      tavernkeep: 'savedBartender',   // 醉酒酒保 579 解救 → Transform 550（:19806）
       angler: 'savedAngler',   // NPC.savedAngler（睡渔夫 376 解救 → 渔夫 369 入镇）
       // 老城镇史莱姆（绑缚 685 → TransformElderSlime :19077-19091 → 679 +
       // unlockedSlimeOldSpawn=true，WF:1410 随存档）——走 flags 即自动持久化，
@@ -2945,6 +2985,11 @@ export class Game implements GameHooks {
     // ---- 月总倒计时（Main.cs:64437-64459：四塔全灭 → StartImpendingDoom(3600)，
     //      每 tick -1，归零 SpawnOnPlayer(最近玩家, 398)）----
     if (tickMoonLordCountdown(w)) this.spawnMoonLordOnPlayer();
+    // ---- 天启态每帧巡检（WorldGen.cs:71523 UpdateWorld 内 UpdateLunarApocalypse，
+    //      每帧执行）：场上无对应塔 NPC → TowerActive 置 false；四塔全灭且无 398
+    //      → StartImpendingDoom。除塔被击杀（onLunarTowerKilled）外还覆盖塔被
+    //      清场/驱散等非击杀退场——此前只挂在击杀链上，退场不触发 doom ----
+    updateLunarApocalypse(w, (id) => this.hasNpcId(id), this.lunarHost());
     // MoonLordShake 震屏滤镜（Main.cs:64437-64447 1:1）：倒计时>0 时
     // num5 = clamp(sin(cd/60×0.5)×2, 0, 1) × (0.75 − 0.5×cd/MaxMoonLordCountdown)
     // 作为滤镜强度（激活点 = 玩家位置）；归零/无倒计时自动解除（renderer 侧脉冲近似）
@@ -3222,15 +3267,13 @@ export class Game implements GameHooks {
         }
         // 入侵冷却递减（Main.cs:64846-64849；1.4.5.6 无置位点，仅保留语义）
         if (w.invasionDelay > 0) w.invasionDelay--;
-        // 日食自然 roll（Main.cs:64898-64920）：hardMode && downedMechBossAny &&
-        // 1/20 → eclipse=true + 公告 LegacyMisc.20（remix 的 misc.106 无对应世界）。
-        // 原版与当日哥布林/海盗 roll 互斥（同一段 if/else）——命中日食则跳过入侵 roll。
-        // stopEvents 压掉整段（StartDay 头部 stopEvents → return，:64893-64895）
-        const mechAny = !!(w.flags['downed_125'] || w.flags['downed_126']
-          || w.flags['downed_127'] || w.flags['downed_134']);
-        if (!stopEvents && w.flags.hardMode && mechAny && Math.random() < 1 / 20) {
-          w.clock.eclipse = true;
-          this.newText(Lang.misc(20), 50, 255, 130);   // ChatColors.World
+        // 日食自然 roll（Main.cs:64899-64920，实现在 world/Eclipse.ts dawnEclipseRoll）：
+        // hardMode && downedMechBossAny && 1/20 → eclipse=true + misc[20] 公告 +
+        // 两晷冷却清零（:64901-64902）+ 成就 2。原版与当日哥布林/海盗 roll 互斥
+        // （同一段 if/else）——命中日食则跳过入侵 roll（stopEvents 压掉整段，
+        // StartDay 头部 stopEvents → return，:64893-64898）
+        if (dawnEclipseRoll(w, stopEvents, Math.random, this.eclipseHost()) === 'eclipse') {
+          // 命中：else 分支（入侵 roll）不可达（Main.cs:64920 if/else 结构）
         } else if (!stopEvents) {
           // 月事件进行中则整段 return（Main.cs:64922-64926 snowMoon||pumpkinMoon||DD2）
           if (!moonEventActive(w) && !w.oldOnesArmy.ongoing) {
@@ -3283,11 +3326,10 @@ export class Game implements GameHooks {
         mysticLogs.startNight(this.fairyCtx());
         // · :64711-64712 prioritizedTownNPCType=0/checkForSpawns=0——本仓入驻走
         //   tickCount %7200 模型（上方注），无计数器可清 → 不适用
-        // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
-        // UpdateTime_StartNight 内位于血月 roll 之前）；
-        // 成就：挺过日食（event 3，旗在清除前求值）
-        if (w.clock.eclipse) this.achievements.notifyProgressionEvent(3);
-        w.clock.eclipse = false;
+        // 夜幕：日食清除（Main.cs:64721-64725——日食全天持续，入夜即结束；
+        // 实现在 world/Eclipse.ts endEclipseAtDusk，位于血月 roll 之前）；
+        // 成就：挺过日食（event 3，旗在清除前求值 :64722-64724）
+        endEclipseAtDusk(w, this.eclipseHost());
         // 灯笼夜入夜兑现（Main.cs:64709 = LanternNight.CheckNight → NaturalAttempt）：
         // 首胜预约 NextNightIsLanternNight 或月总已杀后的 1/14 自然 roll（冷却 5-10 夜）
         LanternNight.checkNight(this.lanternCtx());
@@ -4216,6 +4258,12 @@ export class Game implements GameHooks {
       // 骑乘中不拦使用路径（原版矿车不在 MountID.Sets.DontHoldItems{55,56,61}
       // MountID.cs:27——车上照常挥击/挖掘/放置/交互；此前整段 return 是简化禁用）
     }
+    // R（坐骑键）：骑乘非矿车坐骑 → 下坐（Player.TryToDismount :5768-5776；
+    //  下坐失败=空间不足，DoFailedDismountDust 尘 10）
+    if (inp.down('KeyR') && !this.cartKeyLatch && this.player.ridingMount) {
+      this.cartKeyLatch = true;
+      this.tryDismountMount();
+    }
     // R（坐骑键）：未骑乘 + 附近有轨道 → QuickMinecart 上车（Player.cs:5796-5827：
     // 射程内取最近轨道格 + CanHitLine 视线门）
     if (inp.down('KeyR') && !this.cartKeyLatch && this.trackTile !== 0) {
@@ -4354,6 +4402,8 @@ export class Game implements GameHooks {
           // 502 喵刀猫（Projectile.cs:5460 AI_008）：前 20t 平飞后重力 0.2（:22656）、
           // timeLeft 默认 180、落地弹跳（Arrow.meowBounceOff）
           const meow = cwMelee.shoot === 502;
+          // 985 泰拉刃光束（aiStyle 191）：25t 减速消亡 + 独占分层绘制（Arrow terra 模式）
+          const terra = cwMelee.shoot === 985;
           this.entities.add(new Arrow(
             this.player.cx + Math.cos(ang2) * 14, this.player.cy - 4 + Math.sin(ang2) * 14,
             // ⑨ melee 弹速 /meleeSpeed（P:46431-46434 speed/=meleeSpeed——审计 §1/§9）
@@ -4361,7 +4411,8 @@ export class Game implements GameHooks {
             Math.sin(ang2) * cwMelee.shootSpeed / this.player.attackSpeedMult,
             this.swing.dmg ?? 1, this.swing.kb ?? 3, cwMelee.shoot, null,
             { grav: meow ? 0.2 : projGravity(cwMelee.shoot), gravDelay: meow ? 19 : -1,
-              life: meow ? 180 : (pd?.timeLeft ?? 600), pierce: pen }), 'projectiles');
+              life: meow ? 180 : (pd?.timeLeft ?? 600), pierce: pen,
+              ...(terra ? { grav: 0, terra: true } : {}) }), 'projectiles');
         }
       }
       this.mining = null;
@@ -4494,6 +4545,12 @@ export class Game implements GameHooks {
           }
           return;                                     // 目标格实心：不消耗不放出
         }
+      }
+      // 坐骑召唤物（Item.cs `mountType = N` 37 件：驯鹿铃铛 1914/绒毛胡萝卜 2428/
+      // 带鳞松果 2429/粘鞍 2430/硬鞍 2491/花蜜 2502…）：左键使用即上/下坐（Player.cs:42095）
+      if (mountOfItem(viIdFromKey(heldDef.key) ?? -1) >= 0) {
+        this.useMountItem(viIdFromKey(heldDef.key)!);
+        return;
       }
       this.useSwing(heldDef, Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2));
       // 召唤道具（原版左键使用）
@@ -4646,6 +4703,23 @@ export class Game implements GameHooks {
           consume(); p.useTime = 30; this.sfx.play('drink');
           break;
         }
+        case 3628: { // 同伴方块（Item.cs:32679-32691：useStyle 4/shoot 653/buff 191）
+          // 使用：Item_8 声 + AddBuff(191, 3600)（宠物 buff 标准时长）；
+          // BuffHandle_SpawnPetIfNeeded（Player.cs:10634）——无存活 653 时在玩家中心生成。
+          // 光宠物不占随从槽（noSlot）,不消耗
+          this.playSfxFiles(['Item_8'], 1, p.cx, p.cy); // UseSound=Item8（:32688）
+          p.buffs.apply(BuffType.CompanionCube, 3600 / 60);
+          const has = this.entities.projectiles.some((e) => e instanceof MinionProj && !e.dead && (e as MinionProj).projId === 653);
+          if (!has) {
+            const owner = p;
+            const cube = new MinionProj(owner.cx, owner.cy, 653, 0, 0, false, 0, true,
+              () => (owner.dead ? null : owner));
+            cube.noSlot = true;
+            this.entities.add(cube, 'projectiles');
+          }
+          p.useTime = 20;
+          break;
+        }
         case 1326: // 混乱之杖（Player.cs:44861-44913）
         case 5335: { // 和谐之杖（:44902+,type!=1326 直接 return=免费传送）
           // 1:1：首次传送**无任何代价**；ChaosState(88) 360t 每次使用刷新（:44913）；
@@ -4687,6 +4761,38 @@ export class Game implements GameHooks {
           }
           p.useTime = 30;
           break;
+        case 4829:
+        case 4830:
+        case 4910: {
+          // 宠物许可证（Player.cs:44730-44745 ItemCheck_UsePetLicenses →
+          // LicenseOrExchangePet :44720-44728 → NPC.UnlockOrExchangePet :81640+）：
+          // ①首次使用 → bought* 置位 + 「已发送许可证」公告 + 消耗；
+          // ②已购且宠物在场 → RerollVariation 换外观变体（变体系统未实装，公告备案）
+          //   + 消耗；③已购但宠物不在场 → 不触发不消耗（LicenseOrExchangePet 门外）。
+          // 使用动画/时长 = Item.cs:39512-39524（useStyle 4/consumable/useTime 45/Item92）
+          const petOf: Record<number, [flag: string, pet: number, text: string]> = {
+            4829: ['boughtCat', 637, 'Misc.LicenseCatUsed'],
+            4830: ['boughtDog', 638, 'Misc.LicenseDogUsed'],
+            4910: ['boughtBunny', 656, 'Misc.LicenseBunnyUsed'],
+          };
+          const [flagKey, petId, textKey] = petOf[pvid]!;
+          const petHere = this.entities.npcs.some(
+            (n) => n instanceof TownNPC && !n.dead && n.vanillaId === petId);
+          if (!this.world.flags[flagKey] || petHere) {
+            if (!this.world.flags[flagKey]) {
+              this.world.flags[flagKey] = true;   // 入驻链门（Main.cs:65383-65391）
+              this.newText(Lang.text(textKey) ?? '', 50, 125, 255);
+            } else {
+              // RerollVariationForNPCType → 本仓无 townNpcVariationIndex 变体系统，
+              // 公告"换装失败"语义近似（原版换皮成功/失败二掷——备案）
+              this.newText(Lang.text('Misc.PetExchangeFail') ?? '', 50, 125, 255);
+            }
+            consume();
+          }
+          p.useTime = 45;
+          this.playSfxFiles(['Item_92'], 1, p.cx, p.cy);   // UseSound=Item92（:39520）
+          break;
+        }
         case 3601: { // 天界印记(:43348-43360)→WorldGen.StartImpendingDoom(720):月总倒计时
           const s = this.world.lunarEvent;
           s.moonLordCountdownMax = 720;
@@ -4970,11 +5076,10 @@ export class Game implements GameHooks {
       this.input.mouseDown = false;
     } else if (heldDef && heldDef.key === 'vi_2767_solar_tablet'
       && inp.mouseDown && this.player.useTime === 0) {
-      // 日耀碑牌（Player.cs:43308/51431：dayTime && !eclipse && hardMode 才可用，
-      // 成功 → Main.eclipse=true + Lang.misc[20] 公告；非白天/已日食/肉前静默不可用）
-      if (this.world.flags.hardMode && this.world.clock.isDay && !this.world.clock.eclipse) {
-        this.world.clock.eclipse = true;
-        this.newText(Lang.misc(20), 50, 255, 130);   // ChatColors.World
+      // 日耀碑牌（Player.cs:43308-43328/51431：dayTime && !eclipse && hardMode 才可用，
+      // 成功 → Main.eclipse=true + Lang.misc[20] 公告；非白天/已日食/肉前静默不可用——
+      // 门判定与公告在 world/Eclipse.ts useSolarTablet）
+      if (useSolarTablet(this.world, this.eclipseHost())) {
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 60;
         this.cb.onInventoryChanged();
@@ -5243,17 +5348,21 @@ export class Game implements GameHooks {
       case 'grenade': {
         // AI_016 引信 timeLeft 1:1（SetDefaults :10348-10372）：炸弹 28=180 / 炸药棍
         // 29=300 / 手雷 30=180——曾误写 150/135（引信时长与原版不符的根源）
-        const fuse = cw.shoot === 29 ? 300 : 180;
-        // 爆炸伤害（PrepareBombToBlow :44134-44145）：炸弹28=100/炸药棍29=250；
-        // 手雷 30 用物品伤害（不低于 60）
-        const dmg = cw.shoot === 28 ? 100 : cw.shoot === 29 ? 250 : Math.max(cw.damage, 60);
+        // 引信 1:1（SetDefaults :10348-10408）：炸药棍族 {29,470,637}=300,余 180
+        const fuse = cw.shoot === 470 || cw.shoot === 637 || cw.shoot === 29 ? 300 : 180;
+        // 爆炸伤害（PrepareBombToBlow :44134-44145）：炸弹族 {28,37,516}=100 /
+        // 炸药棍族 {29,470,637}=250；手雷族 {30,397,517} 用物品伤害（不低于 60）
+        const dmg = cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 ? 100
+          : cw.shoot === 29 || cw.shoot === 470 || cw.shoot === 637 ? 250
+            : Math.max(cw.damage, 60);
         // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
         // 29/470/637=7；**手雷族(30 等)不在 ExplodeTiles 判定表内=不破坏地形**
         const er = Game.EXPLODE_RADIUS[cw.shoot] ?? 0;
         // 实体伤害盒(PrepareBombToBlow Projectile.cs:44125-44220,非 Kill 还原图):
         // 炸弹族 128×128 盒半宽 64 / 炸药棍族 250×250 半宽 125 / 手雷 22×22 半宽 11
         // ——与地形破坏半径【无关】;旧值 11/100 致炸弹 AoE 几乎炸不到实体(2026-08-13 修)
-        const hurtBox = cw.shoot === 29 ? 125 : cw.shoot === 28 ? 64 : 11;
+        const hurtBox = cw.shoot === 29 || cw.shoot === 470 || cw.shoot === 637 ? 125
+          : cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 ? 64 : 11;
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0), cw.shoot)), 'projectiles'); // ⑥+⑧
@@ -5442,6 +5551,21 @@ export class Game implements GameHooks {
         }
         this.player.mana -= cwCost;
         const pd = projectileData(cw.shoot);
+        // 彩虹枪 250（aiStyle 46）：专用弹链——隐形飞行头铺 251 彩虹段（40s 持续
+        // 伤害带），通用 Arrow 无法表达铺段/恒速拱弧/静态免疫
+        if (cw.shoot === 250) {
+          const bolt = new RainbowBolt(px, py,
+            Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+            cw.damage, cw.knockback);
+          bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          bolt.critChance = critTotal;
+          this.entities.add(bolt, 'projectiles');
+          this.player.useTime = cw.useTime;
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');
+          this.input.mouseDown = false;
+          break;
+        }
         let pen = pd?.penetrate ?? 1;
         if (pen < 0) pen = 3;
         pen = Math.max(1, Math.min(pen, 3));
@@ -8309,7 +8433,7 @@ export class Game implements GameHooks {
     //     (scale3 noGrav vel×5 + scale2 vel×3) + gore 61-64×8(scale1.5 vel±1.5)
     //   此前所有类型共用一套弱视觉且火粒子无重力缺失(用户报"没火焰粒子")。
     //   dust 31=烟(灰) / dust 6=火把焰(黄橙闪烁) / gore 61-64=烟团碎片
-    const big = projId === 29;
+    const big = projId === 29 || projId === 470 || projId === 637;
     const nSmoke = big ? 50 : 20;
     const nFire = big ? 40 : 10;
     this.spawnParticles(cx, cy, '#9A9A9A', nSmoke, 1.4,
@@ -8892,7 +9016,7 @@ export class Game implements GameHooks {
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1); // 0.65 自造已摘（glove×2/Titan×1.5=P:52477-52498）
-      const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit); // kby=0 走原版 X/Y 语义
+      const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit, 0, true); // kby=0 走原版 X/Y 语义;fromPlayer=DPS 计(Player.cs:20165)
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
       if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
@@ -8941,7 +9065,8 @@ export class Game implements GameHooks {
           : picked.vanillaId === 686 ? 'town_slime_clumsy'
           : picked.vanillaId === 354 ? 'stylist'
             : picked.vanillaId === 589 ? 'golfer'
-              : picked.vanillaId === 123 ? 'mechanic' : null;
+              : picked.vanillaId === 579 ? 'tavernkeep'
+                : picked.vanillaId === 123 ? 'mechanic' : null;
     if (!boundKey) return false;
     if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === boundKey)) return true;
     // 落位：currentSpawnY = 落脚实心面（findSpawnTile 向下找的首个实心格，与
@@ -9159,14 +9284,18 @@ export class Game implements GameHooks {
   // ================= 城镇 NPC 入驻系统（Main.UpdateTime_SpawnTownNPCs :65021 +
   // WorldGen.SpawnTownNPC :5345 / SpawnHomelessNPC :4992 语义；房屋判定 Housing.ts） =================
 
-  /** 各 NPC 入驻条件（NPC.SpawnAllowed_* , NPC.cs:7046-7170 1:1） */
+  /** 各 NPC 入驻条件（NPC.SpawnAllowed_* , NPC.cs:7046-7170 1:1）。
+   *  五个 SpawnAllowed_* 首位都查 unlocked* 旗（到访一次即永久置位，WorldGen.cs
+   *  :5510-5560 生成点 switch；随存档）——曾漏：商人到访后花光钱再死亡就永不回归 */
   private townNpcSpawnAllowed(key: string): boolean {
     const p = this.player;
+    const uf = this.world.flags;
     switch (key) {
       case 'guide':
         return true;
       case 'merchant': {
-        // SpawnAllowed_Merchant：玩家硬币合计 ≥ 5000 铜（50 银；71铜/72银/73金/74铂全计）
+        // SpawnAllowed_Merchant：unlockedMerchantSpawn 或 玩家硬币合计 ≥ 5000 铜（50 银）
+        if (uf.unlockedMerchantSpawn) return true;
         let copper = 0;
         for (const s of p.inv.slots) {
           if (!s) continue;
@@ -9178,10 +9307,11 @@ export class Game implements GameHooks {
         return false;
       }
       case 'nurse':
-        // SpawnAllowed_Nurse：statLifeMax/20 > 5（用过生命水晶，生命上限 >100）
-        return Math.floor(p.maxHp / 20) > 5;
+        // SpawnAllowed_Nurse：unlockedNurseSpawn 或 statLifeMax/20 > 5（用过生命水晶）
+        return !!uf.unlockedNurseSpawn || Math.floor(p.maxHp / 20) > 5;
       case 'arms_dealer': {
-        // SpawnAllowed_ArmsDealer：背包有子弹系物品（ammo/useAmmo == AmmoID.Bullet 14）
+        // SpawnAllowed_ArmsDealer：unlockedArmsDealerSpawn 或 背包有子弹系物品
+        if (uf.unlockedArmsDealerSpawn) return true;
         for (const s of p.inv.slots) {
           if (!s) continue;
           const def = ITEM_DEFS[s.id];
@@ -9193,7 +9323,8 @@ export class Game implements GameHooks {
         return false;
       }
       case 'demolitionist': {
-        // SpawnAllowed_Demolitionist：背包有炸弹系物品（ItemsThatCountAsBombs 表近似）
+        // SpawnAllowed_Demolitionist：unlockedDemolitionistSpawn 或 背包有炸弹系物品
+        if (uf.unlockedDemolitionistSpawn) return true;
         const bombKeys = new Set(['vi_166_bomb', 'vi_167_dynamite', 'vi_168_grenade',
           'vi_4423_scarab_bomb', 'vi_4824_wet_bomb', 'vi_453_bomb_statue']);
         return p.inv.slots.some((s) => s && bombKeys.has(ITEM_DEFS[s.id]?.key ?? ''));
@@ -9224,17 +9355,26 @@ export class Game implements GameHooks {
         // 自然触发走海盗 roll（hardMode + altarCount>0）
         return !!this.world.flags['downedPirates'];
       case 'santa_claus':
-        // 圣诞老人(cs:65277)：圣诞季（现实日期 12/15-31，checkXMas）
-        return this.world.clock.xMas;
+        // 圣诞老人(cs:65277)：霜军团已胜（NPC.downedFrost——雪军团入侵胜利置位，
+        // Game 入侵胜利块 flags.downedFrost）**且**圣诞季（xMas）——曾漏 downedFrost
+        return !!this.world.flags['downedFrost'] && this.world.clock.xMas;
+      case 'tavernkeep':
+        // 酒保(cs:65283)：savedBartender（579 醉酒酒保链解救置位，:1565/:19806）
+        return !!this.world.flags['savedBartender'];
+      case 'angler':
+        // 渔夫(cs:65292)：savedAngler（睡渔夫 376 解救置位）——解救后死亡的重生门
+        return !!this.world.flags['savedAngler'];
       case 'zoologist':
         // 动物学家(cs:65375)：图鉴完成度 ≥10%（Main.GetBestiaryProgressReport = 已解锁条目/
         // 总条目；数据层 data/Bestiary.ts。原版另有 vampireSeed 世界分支——种子系统未实装）
         return this.world.bestiary.completion().percent >= 0.1;
       case 'party_girl':
-        // 派对女孩(cs:65249-65253)：每轮 1/40 重掷（另需在场 NPC ≥20，见优先级链）
-        return Math.random() < 1 / 40;
+        // 派对女孩(cs:65249-65253)：unlockedPartyGirlSpawn 直通（十周年/醉酒世界
+        // 置位，普通种子恒假）或每轮 1/40 重掷（另需在场 NPC ≥20，见优先级链）
+        return !!this.world.flags.unlockedPartyGirlSpawn || Math.random() < 1 / 40;
       case 'dyer': {
-        // SpawnAllowed_DyeTrader（cs:7096）：背包有染料/染料物（dye>0 或 1107-1120/3385-3388）
+        // SpawnAllowed_DyeTrader（cs:7096）：unlockedDyeTraderSpawn 或 背包有染料/染料物
+        if (uf.unlockedDyeTraderSpawn) return true;
         for (const s of p.inv.slots) {
           if (!s) continue;
           const def = ITEM_DEFS[s.id];
@@ -9257,11 +9397,12 @@ export class Game implements GameHooks {
       case 'golfer':
         return !!this.world.flags['savedGolfer'];
       case 'princess': {
-        // 公主(cs:65241 flag9)：下列全部在场才解锁
+        // 公主(cs:65241-65252 flag9)：下列全部在场才解锁（Main.cs num2-num27 全 26
+        // 计数器——含渔夫 369 与酒保 550，2026-08-13 补齐）
         const all = ['merchant', 'nurse', 'dryad', 'arms_dealer', 'guide', 'demolitionist',
           'clothier', 'steampunker', 'dyer', 'party_girl', 'cyborg', 'painter', 'witch_doctor',
           'pirate', 'stylist', 'goblin_tinkerer', 'wizard', 'mechanic', 'truffle',
-          'tax_collector', 'golfer', 'zoologist'];
+          'tax_collector', 'golfer', 'zoologist', 'angler', 'tavernkeep'];
         return all.every((k) => this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === k));
       }
       default:
@@ -9308,6 +9449,8 @@ export class Game implements GameHooks {
     const merchantHere = has('merchant');
     const allow = (key: string) => this.townNpcSpawnAllowed(key);
     const n = npcs.length; // num40：在场城镇 NPC 总数（含守卫老人，原版同）
+    // 严格按 Main.cs:65458-65570 num42 优先链原序（2026-08-13 对齐：补 angler
+    // 369/酒保 550、造型师归位到裁缝后、史莱姆第二轮按 :65557-65574 原序重排）
     const prio: Array<[string, boolean]> = [
       ['guide', !has('guide')],
       ['merchant', !merchantHere && allow('merchant')],
@@ -9320,31 +9463,39 @@ export class Game implements GameHooks {
       ['witch_doctor', !has('witch_doctor') && allow('witch_doctor')],
       ['steampunker', !has('steampunker') && allow('steampunker')],
       ['mechanic', !has('mechanic') && allow('mechanic')],
-      ['stylist', !has('stylist') && allow('stylist')],
+      ['angler', !has('angler') && allow('angler')],            // :65489（369）
       ['cyborg', !has('cyborg') && allow('cyborg')],
       ['pirate', !has('pirate') && allow('pirate')],
       ['clothier', !has('clothier') && allow('clothier')],
+      ['stylist', !has('stylist') && allow('stylist')],         // :65506（354，裁缝后）
       ['dyer', !has('dyer') && n >= 4 && allow('dyer')],
       ['painter', !has('painter') && n >= 8],
       ['party_girl', !has('party_girl') && n >= 20 && allow('party_girl')],
       ['santa_claus', !has('santa_claus') && allow('santa_claus')],
+      ['tavernkeep', !has('tavernkeep') && allow('tavernkeep')],  // :65516（550）
       ['golfer', !has('golfer') && allow('golfer')],
       ['tax_collector', !has('tax_collector') && allow('tax_collector')],
       ['truffle', !has('truffle') && allow('truffle')],
       ['zoologist', !has('zoologist') && allow('zoologist')],
       ['princess', !has('princess') && allow('princess')],
-      // ---- 城镇史莱姆族第二轮（Main.cs:65391-65422 + :65557）：解锁旗 → 可到访；
-      //  678 酷酷史莱姆真派对放行（:65274-65278，unlockedSlimeGreenSpawn 同放行），
-      //  到访置旗（WorldGen.cs:5542-5544 case 678） ----
-      ['town_slime_blue', !has('town_slime_blue') && !!this.world.flags.unlockedSlimeBlueSpawn],
-      ['town_slime_old', !has('town_slime_old') && !!this.world.flags.unlockedSlimeOldSpawn],
-      ['town_slime_clumsy', !has('town_slime_clumsy') && !!this.world.flags.unlockedSlimePurpleSpawn],
-      ['town_slime_diva', !has('town_slime_diva') && !!this.world.flags.unlockedSlimeRainbowSpawn],
-      ['town_slime_red', !has('town_slime_red') && !!this.world.flags.unlockedSlimeRedSpawn],
-      ['town_slime_yellow', !has('town_slime_yellow') && !!this.world.flags.unlockedSlimeYellowSpawn],
+      // ---- 城镇史莱姆族第二轮（Main.cs:65391-65422 + :65557-65574 原序：
+      //  铜侍从 684 → 蓝 670 → 酷 678 → 老 679 → 紫 680 → 红 682 → 黄 683 → 彩虹 681；
+      //  兔 656/猫 637/狗 638 的 bought* 旗依赖许可证商店未实装，登记缺失）----
       ['town_slime_squire', !has('town_slime_squire') && !!this.world.flags.unlockedSlimeCopperSpawn],
+      ['town_slime_blue', !has('town_slime_blue') && !!this.world.flags.unlockedSlimeBlueSpawn],
       ['town_slime_cool', !has('town_slime_cool')
         && (!!this.partyState.genuineParty || !!this.world.flags.unlockedSlimeGreenSpawn)],  // :65274 真派对门
+      ['town_slime_old', !has('town_slime_old') && !!this.world.flags.unlockedSlimeOldSpawn],
+      ['town_slime_clumsy', !has('town_slime_clumsy') && !!this.world.flags.unlockedSlimePurpleSpawn],
+      ['town_slime_red', !has('town_slime_red') && !!this.world.flags.unlockedSlimeRedSpawn],
+      ['town_slime_yellow', !has('town_slime_yellow') && !!this.world.flags.unlockedSlimeYellowSpawn],
+      ['town_slime_diva', !has('town_slime_diva') && !!this.world.flags.unlockedSlimeRainbowSpawn],
+      // ---- 宠物三只（:65567-65574 序：兔 656 → 猫 637 → 狗 638；bought* 旗由
+      //  许可证使用置位——Chest.cs:3265-3280 动物学家进货：4829 无门/4830 图鉴
+      //  ≥25%/4910 ≥45%；NPCID.Sets.IsTownPet 含宠物+全部城镇史莱姆=免房入住）----
+      ['town_bunny', !has('town_bunny') && !!this.world.flags.boughtBunny],
+      ['town_cat', !has('town_cat') && !!this.world.flags.boughtCat],
+      ['town_dog', !has('town_dog') && !!this.world.flags.boughtDog],
     ];
     const pick = prio.find(([, ok]) => ok)?.[0];
     if (!pick) return;
@@ -9354,8 +9505,57 @@ export class Game implements GameHooks {
     const id = TOWN_NPC_IDS[pick].id;
     const house = findFreeHouse(st, homes, this.world.spawnX, this.world.spawnY, id);
     const name = Lang.npcName(id) ?? pick;
+    // NPCID.Sets.IsTownPet（NPCID.cs:4444）= 宠物三只+全部城镇史莱姆：WorldGen.
+    // IsThereASpawnablePrioritizedTownNPC(:4855) 对本集免房放行——无房时在出生点
+    // 附近流浪生成（不设 home），不占用 SpawnHomelessNPC 的白天/有家锚点门
+    const TOWN_PET_KEYS = new Set(['town_bunny', 'town_cat', 'town_dog',
+      'town_slime_blue', 'town_slime_cool', 'town_slime_old', 'town_slime_clumsy',
+      'town_slime_diva', 'town_slime_red', 'town_slime_yellow', 'town_slime_squire']);
+    if (!house && TOWN_PET_KEYS.has(pick)) {
+      const ax = this.world.spawnX + (Math.random() < 0.5 ? -1 : 1) * (20 + Math.floor(Math.random() * 40));
+      if (ax > 3 && ax < st.w - 4) {
+        let ay = Math.max(4, this.world.spawnY - 20);
+        const limit = Math.min(st.h - 3, this.world.spawnY + 20);
+        while (ay < limit && !st.isSolid(ax, ay)) ay++;
+        if (ay < limit) {
+          const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
+          this.entities.add(npc, 'npcs');
+          this.newText(Lang.text('Announcement.HasArrived', name), 50, 125, 255);
+        }
+      }
+      return;
+    }
+    // 松露人特判（WorldGen.CheckSpecialTownNPCSpawningConditions :4919-4946）：
+    // unlockedTruffleSpawn 未置时房间须整体在地表（roomY2 ≤ worldSurface），
+    // 且房内蘑菇族 tile（70 草/71 植/72 树/528 藤）≥ SceneMetrics.
+    // MushroomTileThreshold(=100)——此前按全域找房（备案），现 1:1；不满足则本轮跳过
+    if (house && pick === 'truffle') {
+      const MUSH = [TILE_BY_KEY['v_70_mushroom_grass_block'], TILE_BY_KEY['v_71_mushroom_plant'],
+        TILE_BY_KEY['v_72_mushroom_tree'], TILE_BY_KEY['v_528_mushroom_vines']].filter(
+        (v): v is number => v !== undefined);
+      let mush = 0;
+      let roomBottom = 0;
+      for (const ti of house.tiles) {
+        const ty = Math.floor(ti / st.w);
+        if (ty > roomBottom) roomBottom = ty;
+        if (MUSH.includes(st.type[ti])) mush++;
+      }
+      const surfOk = !!this.world.flags.unlockedTruffleSpawn
+        || roomBottom <= Math.floor(this.world.groundLevel);
+      if (!surfOk || mush < 100) return;   // 房不合格：本轮放弃（下轮重试）
+    }
     if (house) {
-      // SpawnTownNPC：房间合格且无人 → 生成在房内、安家（Announcement.HasArrived）
+      // SpawnTownNPC：房间合格且无人 → 生成在房内、安家（Announcement.HasArrived）。
+      // 到访一次即写 unlocked* 永久旗（WorldGen.cs:5510-5560 生成点 switch——
+      // 商人/护士/军火/爆破/染料/松露/派对/公主/酷史莱姆的 SpawnAllowed 直通门）
+      const ARRIVE_UNLOCK_FLAG: Record<string, string> = {
+        merchant: 'unlockedMerchantSpawn', nurse: 'unlockedNurseSpawn',
+        arms_dealer: 'unlockedArmsDealerSpawn', demolitionist: 'unlockedDemolitionistSpawn',
+        dyer: 'unlockedDyeTraderSpawn', truffle: 'unlockedTruffleSpawn',
+        party_girl: 'unlockedPartyGirlSpawn', princess: 'unlockedPrincessSpawn',
+        town_slime_cool: 'unlockedSlimeGreenSpawn',
+      };
+      if (ARRIVE_UNLOCK_FLAG[pick]) this.world.flags[ARRIVE_UNLOCK_FLAG[pick]] = true;
       const npc = new TownNPC(pick, house.standX * TILE + 8, (house.standY + 1) * TILE);
       npc.home = { x: house.standX, y: house.standY };
       npc.leashHome = true;
@@ -9509,6 +9709,7 @@ export class Game implements GameHooks {
   private static readonly BOUND_TOWN_NPC_ID: Record<string, number> = {
     goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354,
     golfer: 589, tax_collector: 534, town_slime_old: 685, town_slime_clumsy: 686,
+    tavernkeep: 579,   // BartenderUnconscious（SpawnAnNPC :1565 链；触碰 Transform 550）
   };
 
   /** NPC.HasSpecialEventText（NPC.cs:96081-96105 1:1）：五环境态按原版顺序各 1/3
@@ -10187,6 +10388,10 @@ export class Game implements GameHooks {
       case 'eclipse': return !!this.world.clock.eclipse; // 日食（电子人 774 等）
       case 'party': return partyIsUp(this.partyState);   // 派对进行中（派对商品族）
       case 'lanternNight': return LanternNight.lanternsUp; // 灯笼夜（派对女孩 4702 放飞灯笼）
+      // 动物学家图鉴门（Chest.cs:3265-3280：狗狗许可证 4830 ≥25% / 兔兔许可证
+      // 4910 ≥45%；猫咪许可证 4829 无门）——提取器未捕获，shopstock 手工补条
+      case 'bestiary25': return this.world.bestiary.completion().percent >= 0.25;
+      case 'bestiary45': return this.world.bestiary.completion().percent >= 0.45;
       default: return false;
     }
   }
@@ -11040,6 +11245,8 @@ export class Game implements GameHooks {
     // 旗帜击杀记账（BannerSystem.AddNPCKillBy :193-216——达标公告+掉一面旗;原版
     // claimable+对话领取,本仓自动授予近似,登记）
     if (enemy && enemy.vanillaId != null) {
+      // 计数器行"最近击杀"(Player.lastCreatureHit :2458;写入点 Player.cs:20175/:43750)
+      this.player.lastCreatureHit = enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId;
       const grant = recordBannerKill(this.world.bannerKills, enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
       if (grant) {
         const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
@@ -11424,6 +11631,14 @@ export class Game implements GameHooks {
   }
 
   // ================= 星璇塔 / 天界入侵（LunarEvent.ts 宿主回调侧） =================
+
+  /** EclipseHost：公告/成就（world/Eclipse.ts 保持纯逻辑，不反向依赖 Game） */
+  private eclipseHost(): EclipseHost {
+    return {
+      broadcast: (text, r, g, b) => this.newText(text, r, g, b),
+      notifyProgressionEvent: (n) => this.achievements.notifyProgressionEvent(n),
+    };
+  }
 
   /** LunarHost：造塔/广播/清教徒（LunarEvent 保持纯逻辑，不反向依赖 Game） */
   private lunarHost(): LunarHost {
@@ -12074,6 +12289,11 @@ export class Game implements GameHooks {
 
   playSfx(name: string, vol?: number, x?: number, y?: number) {
     this.sfx.play(name as SfxName, vol ?? 1, x, y);
+  }
+
+  /** PlayTrackedLoopedSound 实现（GameHooks.startTrackedLoop——AI_016 引信嘶声） */
+  startTrackedLoop(name: string, vol: number, x: number, y: number) {
+    return this.sfx.startTrackedLoop(name as SfxName, vol, x, y);
   }
 
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number) {

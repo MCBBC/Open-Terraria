@@ -135,6 +135,12 @@ export interface SceneFlags {
   honeyBlockCount: number;
   /** PartyMonolithCount（cs:621 = _tileCounts[455]）：消费生日派对视觉（登记） */
   partyMonolithCount: number;
+  /** ---- 金属探测器（SceneMetrics.cs:22/152 BestOreType/BestOrePosition；
+   *      UpdateOreFinder cs:883-918,优先级表 Main.cs:6355-6391）----
+   *  bestOreSheet=-1 = 附近无珍宝;消费 DrawInfoAccs Treasure 行 */
+  bestOreSheet: number;
+  bestOreX: number;
+  bestOreY: number;
 }
 
 export const EMPTY_SCENE: SceneFlags = {
@@ -150,7 +156,25 @@ export const EMPTY_SCENE: SceneFlags = {
   hasSunflower: false,
   zoneGranite: false, zoneMarble: false, zoneHive: false, zoneGemCave: false,
   behindBackwall: false, shimmerTileCount: 0, honeyBlockCount: 0, partyMonolithCount: 0,
+  bestOreSheet: -1, bestOreX: 0, bestOreY: 0,
 };
+
+/** tileOreFinderPriority(Main.cs:6355-6391 全 34 条字面量) */
+const ORE_FINDER_PRIORITY: Record<number, number> = {
+  28: 100, 407: 150, 404: 150, 7: 200, 166: 210, 6: 220, 167: 230, 9: 240,
+  168: 250, 8: 260, 169: 270, 22: 300, 204: 310, 37: 400, 21: 500, 467: 500,
+  441: 500, 468: 500, 12: 550, 665: 550, 639: 550, 107: 600, 221: 610, 108: 620,
+  222: 630, 111: 640, 223: 650, 129: 675, 211: 700, 227: 750, 656: 760, 701: 760,
+  751: 770, 752: 770, 236: 810, 702: 810,
+};
+
+/** isValidForOreFinder(SceneMetrics.cs:904-918):227(宝石)限 272≤fx≤374、
+ *  129(宝石钻石族变体)限 fx≥324;其余恒真 */
+function isValidForOreFinder(sheet: number, fx: number): boolean {
+  if (sheet === 227) return fx >= 272 && fx <= 374;
+  if (sheet === 129) return fx >= 324;
+  return true;
+}
 
 const countSet = (counts: Map<number, number>, set: Set<number>): number => {
   let n = 0;
@@ -183,6 +207,8 @@ export function scanScene(
   const counts = new Map<number, number>();
   let sunflower = 0;
   let oceanSand = 0;
+  // 金属探测器累加器(BestOre 三元组 + 优先级/距离;SceneMetrics.cs:152)
+  let bestOreP = 0, bestOreD = Infinity, bestOreS = -1, bestOrePx = 0, bestOrePy = 0;
   // 液量计数（ScanTiles cs:361-366）：只计 !active()（无实心 tile）格的液体，
   // 实心格内液体不进 _liquidCounts——shimmerTileCount 的口径来源
   let shimmerLiquid = 0;
@@ -199,6 +225,17 @@ export function scanScene(
       }
       const t = st.type[i];
       counts.set(t, (counts.get(t) ?? 0) + 1);
+      // 金属探测器(UpdateOreFinder cs:883-902:优先级 ≥ 当前 且 合法则取距离
+      // 平方小者——同优先级取近,高级别直接顶替;isValidForOreFinder cs:904-918)
+      {
+        const pr = ORE_FINDER_PRIORITY[t] ?? 0;
+        if (pr > 0 && isValidForOreFinder(t, st.frameX[i]) && pr >= bestOreP) {
+          const d = (x - tileX) ** 2 + (y - tileY) ** 2;
+          if (pr > bestOreP || d < bestOreD) {
+            bestOreP = pr; bestOreD = d; bestOreS = t; bestOrePx = x; bestOrePy = y;
+          }
+        }
+      }
       if (t === SUNFLOWER) sunflower++;
       // isDesertBiomeSand && oceanDepths（SceneMetrics L376-380）：只有普通沙族在
       // 海洋深度带内才计海洋沙；邪恶/神圣沙与沙岩砖族不是 isDesertBiomeSand
@@ -311,5 +348,6 @@ export function scanScene(
     shimmerTileCount,
     honeyBlockCount,
     partyMonolithCount,
+    bestOreSheet: bestOreS, bestOreX: bestOrePx, bestOreY: bestOrePy,
   };
 }

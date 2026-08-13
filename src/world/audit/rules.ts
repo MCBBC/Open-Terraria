@@ -42,6 +42,37 @@ function rectIntact(st: TileStore, type: number, ax: number, ay: number, w: numb
   return true;
 }
 
+/** 残片查找(R1 同判定,供清扫 pass 复用——单一事实源防两处漂移):
+ *  返回所有"不属于任何完整 w×h 同类矩形"的多格 framed 活跃格。
+ *  onlyKeys 限定类型(清扫只处理可清除的破损物体,原版保留形态不在此列) */
+export function findFragments(st: TileStore, onlyKeys?: ReadonlySet<string>): Array<{ x: number; y: number; key: string; type: number }> {
+  const out: Array<{ x: number; y: number; key: string; type: number }> = [];
+  const multi = collectMultiDefs().filter((m) => !onlyKeys || onlyKeys.has(m.key));
+  const byType = new Map(multi.map((m) => [m.type, m]));
+  for (let y = 0; y < st.h; y++) {
+    for (let x = 0; x < st.w; x++) {
+      const t = st.type[st.idx(x, y)];
+      const m = byType.get(t);
+      if (!m) continue;
+      let ok = false;
+      for (let ay = y; ay > y - m.h && !ok; ay--) {
+        for (let ax = x; ax > x - m.w; ax--) {
+          let full = true;
+          for (let dy = 0; dy < m.h && full; dy++) {
+            for (let dx = 0; dx < m.w; dx++) {
+              const nx = ax + dx, ny = ay + dy;
+              if (nx < 0 || ny < 0 || nx >= st.w || ny >= st.h || st.type[st.idx(nx, ny)] !== t) { full = false; break; }
+            }
+          }
+          if (full) { ok = true; break; }
+        }
+      }
+      if (!ok) out.push({ x, y, key: m.key, type: t });
+    }
+  }
+  return out;
+}
+
 export const RULE_R1_MULTITILE: AuditRule = {
   id: 'R1',
   title: 'framed-multitile-incomplete',

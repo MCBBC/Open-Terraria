@@ -175,7 +175,6 @@ export interface SaveData {
   /** 图鉴统计（BestiaryUnlocksTracker——原版随世界文件持久化 WorldFile.cs:3399/3405；
    *  旧档缺省=空三桶） */
   bestiary?: import('../data/Bestiary').BestiarySave;
-  bannerKills?: Record<number, number>;
 }
 
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
@@ -225,6 +224,8 @@ export interface SaveMeta {
   };
   /** CultistRitual.delay（WF:1340/:2192；缺省 86400 = delayStart） */
   cultistDelay?: number;
+  /** 旗击杀计数（BannerSystem.killCount;旧档缺省空） */
+  bannerKills?: Record<number, number>;
   /** 渔夫任务链世界段（SaveData.angler 同形；旧档缺省=索引 0/空名单） */
   angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */

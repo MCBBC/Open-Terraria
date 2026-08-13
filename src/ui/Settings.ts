@@ -281,6 +281,36 @@ export class SettingsPanel {
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartAxeAfterPickaxe'), () => d.smartAxeAfterPickaxe, (v) => void options.set('smartAxeAfterPickaxe', v)),
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartBlocks'), () => d.smartBlocksEnabled, (v) => void options.set('smartBlocksEnabled', v)),
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartHoldRelease'), () => d.smartHoldCanReleaseMidUse, (v) => void options.set('smartHoldCanReleaseMidUse', v)),
+        // 玩家对决（Player.hostile;原版仅联机显示该 UI——Main.cs:2982 ShouldPVPDraw,
+        // 单机常驻为调试便利,联机语义由协议同步压制）
+        this.toggle(Lang.text('Mods.SandboxWorld.Settings.Pvp'), () => d.pvpEnabled, (v) => {
+          void options.set('pvpEnabled', v);
+          const p = this.game?.player;
+          if (p) p.hostile = v;
+        }),
+        // 队伍 0-5（Player.team;点击循环切换,显示色块+序号）
+        (() => {
+          const row = document.createElement('div');
+          row.className = 'sw-set-row';
+          const span = document.createElement('span');
+          span.textContent = Lang.text('Mods.SandboxWorld.Settings.PvpTeam');
+          const btn = document.createElement('button');
+          const render = () => {
+            const t = Math.max(0, Math.min(5, this.game?.player?.team ?? d.pvpTeam));
+            btn.textContent = `${t} ▮`;
+            btn.style.color = TEAM_COLORS[t] ? `rgb(${TEAM_COLORS[t][0]},${TEAM_COLORS[t][1]},${TEAM_COLORS[t][2]})` : '#fff';
+          };
+          btn.addEventListener('click', () => {
+            const p = this.game?.player;
+            const next = (((p?.team ?? d.pvpTeam) + 1) % 6);
+            void options.set('pvpTeam', next);
+            if (p) p.team = next;
+            render();
+          });
+          render();
+          row.append(span, btn);
+          return row;
+        })(),
       );
       const hint = document.createElement('div');
       hint.className = 'sw-set-hint';

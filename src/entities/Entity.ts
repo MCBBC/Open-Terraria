@@ -60,12 +60,14 @@ export abstract class Entity {
   }
 }
 
-/** 就地剔除 dead 实体(保持顺序,零分配) */
+/** 就地剔除 dead 实体(保持顺序,零分配)。带 destroy() 的实体(如 GrenadeProj
+ *  的引信循环音句柄)在剔除时清理——fixedUpdate 早退分支已自行调用,此处兜底 */
 function compact(list: Entity[]): void {
   let w = 0;
   for (let r = 0; r < list.length; r++) {
     const e = list[r];
-    if (!e.dead) list[w++] = e;
+    if (!e.dead) { list[w++] = e; continue; }
+    (e as { destroy?: () => void }).destroy?.();
   }
   list.length = w;
 }

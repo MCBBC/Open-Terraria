@@ -1312,15 +1312,20 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   } else if (e.ai0 === 1) {
     // ---- 直追(:39031-39069):(5.5|8)+距/100 速,50 步进;断视线→0 ----
-    const tx = p.cx - e.cx, ty = (is405 ? p.cy : p.y) - e.cy;   // 421 瞄 player.Top
+    // 421 瞄 player.Top（:39032-39035 if type==421 → vector = player.Top - center）；
+    // 405/467 瞄 player.Center
+    const is421 = e.vanillaId === 421;
+    const tx = p.cx - e.cx, ty = (is421 ? p.y : p.cy) - e.cy;
     const d = Math.hypot(tx, ty);
     const spd = (is405 ? 8 : 5.5) + d / 100;
     const n = d || 1;
     e.vx = (e.vx * 49 + (tx / n) * spd) / 50;
     e.vy = (e.vy * 49 + (ty / n) * spd) / 50;
     if (!los) { e.ai0 = 0; e.ai1 = 0; }
-    // 421 吸附门:近 40px 且场上无同族吸附中(:39052-39068)
-    if (!is405 && d < 40
+    // 421 专属吸附门（:39052-39068 if type==421 && num<40）：近 40px 且场上无同族
+    // 吸附中才钉上。467 致命球（日食怪，同 aiStyle 85）**不**吸附——此前误写成
+    // !is405 导致致命球钉头 + 每 tick 灌 Obstructed(163)
+    if (is421 && d < 40
       && !enemies(game).some((o) => o !== e && !o.dead && o.vanillaId === 421 && o.ai0 === 5)) {
       e.x = p.cx - e.w / 2; e.y = p.y - e.h;        // Center=player.Top
       e.vx = 0; e.vy = 0;

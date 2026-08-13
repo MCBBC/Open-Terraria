@@ -50,12 +50,12 @@ export class MagicProj extends Entity {
     // 小动物:一击致死并消耗弹体(近战挥砍同语义)
     if (hitCritters(this, game)) { this.dead = true; return; }
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; dead: boolean; def?: { hitSound?: string[] } };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; dead: boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         playEnemyHitSound(game, e);
         const crit = Math.random() < this.critChance; // 暴击链（P:52512——曾恒 false）
-        e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game);
+        e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true);
         game.addDamageNumber(this.x, this.y, this.damage, false, '#C080FF');
         this.dead = true;
         return;
