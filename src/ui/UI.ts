@@ -155,23 +155,27 @@ const CSS = `
 .sw-toast { position:fixed; left:50%; top:64px; transform:translateX(-50%);
   background:rgba(20,16,28,0.9); color:#ffe8a0; padding:8px 18px; border-radius:6px;
   border:1px solid #6a5a8a; font-size:14px; transition:opacity 0.4s; pointer-events:none; }
-/** 成就解锁弹窗(原版 InGamePopups.AchievementUnlockedPopup + Tracker :38-52):
- *  底部居中、距底 40px、多条向上堆叠;库存蓝底 (64,109,164)×0.5(hover ×0.75);
- *  64px 成就图标(Achievements.png 8/行 66px 栅格)+ Achievement_Borders 边框;
- *  标题右对齐于图标左;300t 寿命(0.5s 淡入/末 0.25s 淡出) */
+/** 成就解锁弹窗(原版 InGamePopups.AchievementUnlockedPopup :13-148 + Tracker :38-52):
+ *  底部居中、距底 40px;条高 ≈(标题高+10)×1.1(约 31px 细条);
+ *  库存蓝底 (64,109,164)×0.5(hover ×0.75);图标【在右】,
+ *  64px 栅格帧按 num3=num×0.3≈0.33 缩 → 屏显 ≈21px,距条右缘 ≈33px(:107);
+ *  Achievement_Borders 72px 同 0.33 缩 ≈24px 覆盖(origin (4,h/2) :112);
+ *  标题右对齐于图标左 10px(:110,anchorx=1);300t=5s 寿命(前 30t 淡入/末 15t 淡出)。
+ *  多条堆叠:PushAnchor 每条上移 50×opacity(:89)≈ 50px 音高(31px 条 + 19px 空) */
 .sw-ach-wrap { position:fixed; left:0; right:0; bottom:40px; display:flex;
-  flex-direction:column; align-items:center; gap:6px; pointer-events:none; z-index:60; }
-.sw-ach { pointer-events:auto; display:flex; align-items:center; gap:10px; direction:rtl;
+  flex-direction:column; align-items:center; gap:19px; pointer-events:none; z-index:60; }
+.sw-ach { pointer-events:auto; display:inline-flex; align-items:center;
   background:rgba(64,109,164,0.5); border:1px solid #1a1a2e; border-radius:4px;
-  padding:6px 10px; cursor:pointer; transition:opacity 0.25s, transform 0.5s;
+  padding:5px 33px 5px 10px; cursor:pointer; transition:opacity 0.25s, transform 0.25s;
   animation:sw-ach-in 0.5s ease-out; }
 .sw-ach:hover { background:rgba(64,109,164,0.75); }
-.sw-ach.out { opacity:0 !important; transform:translateY(8px); }
-.sw-ach .ttl { direction:ltr; color:#ffe8a0; font-size:14px; text-shadow:1px 1px 0 #000;
-  white-space:nowrap; }
-.sw-ach .icn { width:64px; height:64px; position:relative; flex:0 0 auto; direction:ltr; }
-.sw-ach .icn img { width:64px; height:64px; image-rendering:pixelated; position:absolute;
-  left:0; top:0; }
+.sw-ach.out { opacity:0 !important; transform:translateY(10px); }
+.sw-ach .ttl { color:#ffe8a0; font-size:14px; line-height:21px; text-shadow:1px 1px 0 #000;
+  white-space:nowrap; text-align:right; margin-right:10px; }
+.sw-ach .icn { width:21px; height:21px; position:relative; flex:0 0 auto; overflow:hidden; }
+.sw-ach .icn .sheet { position:absolute; image-rendering:pixelated; }
+.sw-ach .icn .bdr { position:absolute; width:24px; height:24px; image-rendering:pixelated;
+  left:-1.5px; top:-1.5px; }
 @keyframes sw-ach-in { from { opacity:0; transform:translateY(12px) scale(0.9); } }
 .sw-tooltip { position:fixed; background:rgba(10,8,16,0.95); border:1px solid #6a5a8a; border-radius:4px;
   padding:6px 10px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:260px; }
@@ -2473,8 +2477,9 @@ export class UI {
     }, 2500);
   }
 
-  /** 成就解锁弹窗(原版 AchievementUnlockedPopup:底部居中 40px/5s/蓝底图标条)。
-   *  name → ACH_ICON_INDEX 取图标栅格位;点击关闭(原版跳成就页,成就 UI 未接 GAP) */
+  /** 成就解锁弹窗(原版 InGamePopups.AchievementUnlockedPopup:细条蓝底/图标在右
+   *  ≈21px/标题右对齐其左;5s 淡入淡出)。name → ACH_ICON_INDEX 栅格取帧;
+   *  点击关闭(原版跳成就页,成就页 UI 未接 GAP) */
   achievementPopup(name: string, title: string) {
     if (!this.achWrapEl) {
       this.achWrapEl = el('div', 'sw-ach-wrap');
@@ -2484,22 +2489,19 @@ export class UI {
     card.title = title;
     const ttl = el('span', 'ttl', title);
     const icn = el('div', 'icn');
+    // 栅格帧 64px → 屏显 21px:整表 ×0.33 缩放后按帧偏移定位(等价原版 0.3×num 缩放)
+    const K = 21 / 64;
     const idx = ACH_ICON_INDEX[name] ?? 0;
     const f = achIconFrame(idx);
-    const img = el('img') as HTMLImageElement;
-    img.src = 'sprites/vanilla/Achievements.png';
-    img.style.objectPosition = `-${f.x}px -${f.y}px`;
-    img.style.objectFit = 'none';
-    img.style.width = 'auto'; img.style.height = 'auto';
-    // 栅格偏移:用内层 canvas 式裁切——object-position 需元素与源同尺寸,改用 clip-path 兜底
-    img.style.clipPath = `inset(${f.y}px 0 0 ${f.x}px)`;
-    img.style.transform = `translate(${-f.x}px, ${-f.y}px)`;
-    const bdr = el('img') as HTMLImageElement;
+    const sheet = el('img', 'sheet') as HTMLImageElement;
+    sheet.src = 'sprites/vanilla/Achievements.png';
+    sheet.style.width = `${1054 * K}px`;
+    sheet.style.height = `${1186 * K}px`;
+    sheet.style.left = `${-f.x * K}px`;
+    sheet.style.top = `${-f.y * K}px`;
+    const bdr = el('img', 'bdr') as HTMLImageElement;
     bdr.src = 'sprites/vanilla/Achievement_Borders.png';
-    bdr.style.width = '72px'; bdr.style.height = '72px';
-    bdr.style.position = 'absolute'; bdr.style.left = '-4px'; bdr.style.top = '-4px';
-    bdr.style.zIndex = '1';
-    icn.appendChild(img); icn.appendChild(bdr);
+    icn.appendChild(sheet); icn.appendChild(bdr);
     card.appendChild(ttl); card.appendChild(icn);
     const kill = () => {
       card.classList.add('out');

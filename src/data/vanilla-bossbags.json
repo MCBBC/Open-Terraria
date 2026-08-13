@@ -1,2036 +1,1492 @@
 {
  "bags": {
-  "3318": [
-   {
-    "t": "branch",
-    "i": 3318
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "if",
-    "n": 2
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2430
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2493
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "randVar",
-    "a": 256,
-    "b": 259
-   },
-   {
-    "t": "dedup"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "useVar": true
-   },
-   {
-    "t": "spawn",
-    "useVar": true
-   },
-   {
-    "t": "if",
-    "n": 2
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2610
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "else"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2585
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 998
-   },
-   {
-    "t": "if",
-    "n": 30
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1309
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 3090
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   }
-  ],
-  "3319": [
-   {
-    "t": "branch",
-    "i": 3319
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2112
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 30
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1299
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "crimItem",
-    "evil": 880,
-    "good": 56
-   },
-   {
-    "t": "varAdd",
-    "roll": 21,
-    "base": 10
-   },
-   {
-    "t": "varAddMore",
-    "roll": 21,
-    "base": 10
-   },
-   {
-    "t": "varAddMore",
-    "roll": 21,
-    "base": 10
-   },
-   {
-    "t": "spawn",
-    "useCrimItem": true,
-    "useVar": true
-   },
-   {
-    "t": "crimItem",
-    "evil": 2171,
-    "good": 59
-   },
-   {
-    "t": "varAdd",
-    "roll": 3,
-    "base": 1
-   },
-   {
-    "t": "spawn",
-    "useCrimItem": true,
-    "useVar": true
-   },
-   {
-    "t": "varAdd",
-    "roll": 31,
-    "base": 20
-   },
-   {
-    "t": "spawn",
-    "id": 47,
-    "useVar": true
-   },
-   {
-    "t": "spawn",
-    "id": 3097
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   }
-  ],
-  "3320": [
-   {
-    "t": "branch",
-    "i": 3320
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 15,
-    "b": 30
-   },
-   {
-    "t": "master"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 110,
-    "b": 136
-   },
-   {
-    "t": "spawn",
-    "id": 56,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "else"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 80,
-    "b": 111
-   },
-   {
-    "t": "spawn",
-    "id": 56,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "master"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 30,
-    "b": 51
-   },
-   {
-    "t": "spawn",
-    "id": 86,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "else"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 20,
-    "b": 41
-   },
-   {
-    "t": "spawn",
-    "id": 86,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 20
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 994
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2111
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 3224
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   }
-  ],
-  "3321": [
-   {
-    "t": "branch",
-    "i": 3321
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 20,
-    "b": 46
-   },
-   {
-    "t": "master"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 110,
-    "b": 136
-   },
-   {
-    "t": "spawn",
-    "id": 880,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "else"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 80,
-    "b": 111
-   },
-   {
-    "t": "spawn",
-    "id": 880,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "master"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 30,
-    "b": 51
-   },
-   {
-    "t": "spawn",
-    "id": 1329,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "else"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "randVar",
-    "a": 20,
-    "b": 41
-   },
-   {
-    "t": "spawn",
-    "id": 1329,
-    "useVar": true
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2104
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 20
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3060
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 3223
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   }
-  ],
-  "3322": [
-   {
-    "t": "branch",
-    "i": 3322
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2108
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "randVar",
-    "a": 0,
-    "b": 3
-   },
-   {
-    "t": "switchVar"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "varId",
-    "id": 1121
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "varId",
-    "id": 1123
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "varId",
-    "id": 2888
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "useVar": true
-   },
-   {
-    "t": "spawn",
-    "id": 3333
-   },
-   {
-    "t": "if",
-    "n": 3
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1132
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 9
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1170
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 9
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2502
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 9
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 5483
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 1129
-   },
-   {
-    "t": "spawn",
-    "lo": 842,
-    "hi": 845,
-    "randId": true
-   },
-   {
-    "t": "spawn",
-    "id": 1130,
-    "lo": 10,
-    "hi": 31
-   },
-   {
-    "t": "spawn",
-    "id": 2431,
-    "lo": 17,
-    "hi": 31
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   }
-  ],
-  "3323": [
-   {
-    "t": "branch",
-    "i": 3323
-   },
-   {
-    "t": "spawn",
-    "id": 3245
-   },
-   {
-    "t": "switch",
-    "n": 3
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 1281
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 1273
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": -1
-   },
-   {
-    "t": "spawn",
-    "id": 1313
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3324": [
-   {
-    "t": "branch",
-    "i": 3324
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2105
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 367
-   },
-   {
-    "t": "noExtraAcc"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3335
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "randVar",
-    "a": 0,
-    "b": 4
-   },
-   {
-    "t": "idMap",
-    "map": {
-     "0": 489,
-     "1": 490,
-     "2": 491,
-     "3": 2998
+  "3318": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 2430,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 2,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2493,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "idFrom": [
+      256,
+      259
+     ],
+     "conds": []
+    },
+    {
+     "idFrom": [
+      256,
+      259
+     ],
+     "dedup2": true,
+     "conds": []
+    },
+    {
+     "idFrom": [
+      256,
+      259
+     ],
+     "conds": []
+    },
+    {
+     "id": 2610,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 2,
+       "pair": 3,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2585,
+     "conds": [
+      {
+       "t": "chanceElse",
+       "pair": 3,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 998,
+     "conds": []
+    },
+    {
+     "id": 1309,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 30,
+       "pair": 4,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3090,
+     "conds": []
     }
-   },
-   {
-    "t": "spawn",
-    "useVar": true
-   },
-   {
-    "t": "switch",
-    "n": 4
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 514
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 426
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "spawn",
-    "id": 434
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 3
-   },
-   {
-    "t": "spawn",
-    "id": 4912
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   }
-  ],
-  "3325": [
-   {
-    "t": "branch",
-    "i": 3325
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2113
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 548,
-    "lo": 25,
-    "hi": 41
-   },
-   {
-    "t": "spawn",
-    "id": 1225,
-    "lo": 20,
-    "hi": 36
-   },
-   {
-    "t": "spawn",
-    "id": 3355
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3326": [
-   {
-    "t": "branch",
-    "i": 3326
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2106
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 549,
-    "lo": 25,
-    "hi": 41
-   },
-   {
-    "t": "spawn",
-    "id": 1225,
-    "lo": 20,
-    "hi": 36
-   },
-   {
-    "t": "spawn",
-    "id": 3354
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3327": [
-   {
-    "t": "branch",
-    "i": 3327
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2107
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 547,
-    "lo": 25,
-    "hi": 41
-   },
-   {
-    "t": "spawn",
-    "id": 1225,
-    "lo": 20,
-    "hi": 36
-   },
-   {
-    "t": "spawn",
-    "id": 3356
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3328": [
-   {
-    "t": "branch",
-    "i": 3328
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2109
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 1141
-   },
-   {
-    "t": "spawn",
-    "id": 3336
-   },
-   {
-    "t": "if",
-    "n": 15
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1182
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 20
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1305
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 2
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1157
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 10
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3021
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "switch",
-    "n": 8
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 758
-   },
-   {
-    "t": "spawn",
-    "id": 771,
-    "lo": 50,
-    "hi": 151
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 1255
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "spawn",
-    "id": 788
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 3
-   },
-   {
-    "t": "spawn",
-    "id": 1178
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 4
-   },
-   {
-    "t": "spawn",
-    "id": 1259
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 5
-   },
-   {
-    "t": "spawn",
-    "id": 1155
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 6
-   },
-   {
-    "t": "spawn",
-    "id": 3018
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 7
-   },
-   {
-    "t": "spawn",
-    "id": 5477
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3329": [
-   {
-    "t": "branch",
-    "i": 3329
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "spawn",
-    "id": 3337
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2110
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 3
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 1294
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "switch",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 1258
-   },
-   {
-    "t": "spawn",
-    "id": 1261,
-    "lo": 60,
-    "hi": 181
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 1122
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "spawn",
-    "id": 899
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 3
-   },
-   {
-    "t": "spawn",
-    "id": 1248
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 4
-   },
-   {
-    "t": "spawn",
-    "id": 1295
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 5
-   },
-   {
-    "t": "spawn",
-    "id": 1296
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": -1
-   },
-   {
-    "t": "spawn",
-    "id": 1297
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 2218,
-    "lo": 18,
-    "hi": 24
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3330": [
-   {
-    "t": "branch",
-    "i": 3330
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "spawn",
-    "id": 3367
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2588
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 10
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2609
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "switch",
-    "n": 6
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 5526
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 2624
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "spawn",
-    "id": 2622
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 3
-   },
-   {
-    "t": "spawn",
-    "id": 2621
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 4
-   },
-   {
-    "t": "spawn",
-    "id": 5478
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 5
-   },
-   {
-    "t": "remix"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 157
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "else"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 2623
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3331": [
-   {
-    "t": "branch",
-    "i": 3331
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3372
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "3332": [
-   {
-    "t": "branch",
-    "i": 3332
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3373
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 10
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4469
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "noItem",
-    "id": 3384
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3384
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 3460,
-    "lo": 90,
-    "hi": 111
-   },
-   {
-    "t": "spawn",
-    "id": 1131
-   },
-   {
-    "t": "spawn",
-    "id": 3577
-   },
-   {
-    "t": "spawn",
-    "id": 4954
-   },
-   {
-    "t": "pick2",
-    "ids": [
-     3063,
-     3389,
-     3065,
-     1553,
-     3930,
-     3541,
-     3570,
-     3571,
-     3569,
-     5480
-    ]
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "TAIL"
-   }
-  ],
-  "3860": [
-   {
-    "t": "branch",
-    "i": 3860
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3863
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "switch",
-    "n": 4
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 3859
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 3827
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "spawn",
-    "id": 3870
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": -1
-   },
-   {
-    "t": "spawn",
-    "id": 3858
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 4
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 3883
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "id": 3817,
-    "lo": 30,
-    "hi": 51
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "4782": [
-   {
-    "t": "branch",
-    "i": 4782
-   },
-   {
-    "t": "devArmor"
-   },
-   {
-    "t": "spawn",
-    "id": 4989
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4784
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 10
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4823
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 20
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4715
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 4
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4778,
-    "stack": 3
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 20
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 5075
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "switch",
-    "n": 4
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 4923
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 4952
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "spawn",
-    "id": 4953
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 3
-   },
-   {
-    "t": "spawn",
-    "id": 4914
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   }
-  ],
-  "4957": [
-   {
-    "t": "branch",
-    "i": 4957
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4987
-   },
-   {
-    "t": "spawn",
-    "id": 4986,
-    "lo": 25,
-    "hi": 76
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4959
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 2
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4981
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 3
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4758
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 2
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 4980
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "randVar",
-    "a": 4982,
-    "b": 4985
-   },
-   {
-    "t": "randVar",
-    "a": 4982,
-    "b": 4985
-   },
-   {
-    "t": "dedup"
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "spawn",
-    "useVar": true
-   },
-   {
-    "t": "spawn",
-    "useVar": true
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "TAIL"
-   }
-  ],
-  "5111": [
-   {
-    "t": "branch",
-    "i": 5111
-   },
-   {
-    "t": "spawn",
-    "id": 5100
-   },
-   {
-    "t": "if",
-    "n": 7
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 5109
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 14
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 5385
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 3
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 5098
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 3
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 5101
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "if",
-    "n": 3
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "spawn",
-    "id": 5113
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "switch",
-    "n": 4
-   },
-   {
-    "t": "blockOpen"
-   },
-   {
-    "t": "branch",
-    "i": 0
-   },
-   {
-    "t": "spawn",
-    "id": 5117
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 1
-   },
-   {
-    "t": "spawn",
-    "id": 5118
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 2
-   },
-   {
-    "t": "spawn",
-    "id": 5119
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "branch",
-    "i": 3
-   },
-   {
-    "t": "spawn",
-    "id": 5095
-   },
-   {
-    "t": "end"
-   },
-   {
-    "t": "blockClose"
-   },
-   {
-    "t": "end"
-   }
-  ]
+   ]
+  },
+  "3319": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 2112,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1299,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 30,
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "crim": true,
+     "evil": 880,
+     "good": 56,
+     "conds": []
+    },
+    {
+     "crim": true,
+     "evil": 2171,
+     "good": 59,
+     "conds": [],
+     "stackVar": true
+    },
+    {
+     "id": 47,
+     "stackVar": true,
+     "conds": [],
+     "stackExpr": [
+      [
+       21,
+       10
+      ],
+      [
+       21,
+       10
+      ],
+      [
+       21,
+       10
+      ],
+      [
+       3,
+       1
+      ],
+      [
+       31,
+       20
+      ]
+     ]
+    },
+    {
+     "id": 3097,
+     "conds": []
+    }
+   ]
+  },
+  "3320": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 56,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "master",
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 56,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "chanceElse",
+       "pair": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 86,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "master",
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 86,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "chanceElse",
+       "pair": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 994,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 20,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2111,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3224,
+     "conds": []
+    }
+   ]
+  },
+  "3321": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 880,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "master",
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 880,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "chanceElse",
+       "pair": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1329,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "master",
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1329,
+     "stackVar": true,
+     "conds": [
+      {
+       "t": "chanceElse",
+       "pair": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2104,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3060,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 20,
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3223,
+     "conds": []
+    }
+   ]
+  },
+  "3322": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 2108,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "maskIds": [
+      1121,
+      1123,
+      2888
+     ],
+     "maskRoll": 3,
+     "conds": []
+    },
+    {
+     "id": 3333,
+     "conds": []
+    },
+    {
+     "id": 1132,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 3,
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1170,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 9,
+       "pair": 3,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2502,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 9,
+       "pair": 4,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 5483,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 9,
+       "pair": 5,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1129,
+     "conds": []
+    },
+    {
+     "idFrom": [
+      842,
+      845
+     ],
+     "conds": []
+    },
+    {
+     "id": 1130,
+     "lo": 10,
+     "hi": 31,
+     "conds": []
+    },
+    {
+     "id": 2431,
+     "lo": 17,
+     "hi": 31,
+     "conds": []
+    }
+   ]
+  },
+  "3323": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 3245,
+     "conds": []
+    },
+    {
+     "id": 1281,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1273,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1313,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    }
+   ]
+  },
+  "3324": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 2105,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 367,
+     "conds": []
+    },
+    {
+     "id": 3335,
+     "conds": [
+      {
+       "t": "noExtra",
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "maskIds": [
+      489,
+      490,
+      491,
+      2998
+     ],
+     "maskRoll": 4,
+     "conds": []
+    },
+    {
+     "id": 514,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 3
+      }
+     ]
+    },
+    {
+     "id": 426,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 3
+      }
+     ]
+    },
+    {
+     "id": 434,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 3
+      }
+     ]
+    },
+    {
+     "id": 4912,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 3,
+       "depth": 3
+      }
+     ]
+    }
+   ]
+  },
+  "3325": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 2113,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 548,
+     "lo": 25,
+     "hi": 41,
+     "conds": []
+    },
+    {
+     "id": 1225,
+     "lo": 20,
+     "hi": 36,
+     "conds": []
+    },
+    {
+     "id": 3355,
+     "conds": []
+    }
+   ]
+  },
+  "3326": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 2106,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 549,
+     "lo": 25,
+     "hi": 41,
+     "conds": []
+    },
+    {
+     "id": 1225,
+     "lo": 20,
+     "hi": 36,
+     "conds": []
+    },
+    {
+     "id": 3354,
+     "conds": []
+    }
+   ]
+  },
+  "3327": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 2107,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 547,
+     "lo": 25,
+     "hi": 41,
+     "conds": []
+    },
+    {
+     "id": 1225,
+     "lo": 20,
+     "hi": 36,
+     "conds": []
+    },
+    {
+     "id": 3356,
+     "conds": []
+    }
+   ]
+  },
+  "3328": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 2109,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 1141,
+     "conds": []
+    },
+    {
+     "id": 3336,
+     "conds": []
+    },
+    {
+     "id": 1182,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 15,
+       "pair": 2,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 1305,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 20,
+       "pair": 3,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 1157,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 2,
+       "pair": 4,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 3021,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 10,
+       "pair": 5,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 758,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 771,
+     "lo": 50,
+     "hi": 151,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1255,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 788,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1178,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 3,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1259,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 4,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1155,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 5,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3018,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 6,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 5477,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 7,
+       "depth": 2
+      }
+     ]
+    }
+   ]
+  },
+  "3329": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 3337,
+     "conds": []
+    },
+    {
+     "id": 2110,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 1294,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 3,
+       "pair": 2,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 1258,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1261,
+     "lo": 60,
+     "hi": 181,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1122,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 899,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1248,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 3,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1295,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 4,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1296,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 5,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 1297,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 5,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2218,
+     "lo": 18,
+     "hi": 24,
+     "conds": []
+    }
+   ]
+  },
+  "3330": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 3367,
+     "conds": []
+    },
+    {
+     "id": 2588,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 2609,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 10,
+       "pair": 2,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 5526,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2624,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2622,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2621,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 3,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 5478,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 4,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 157,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 5,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 2623,
+     "conds": [
+      {
+       "t": "chanceElse",
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    }
+   ]
+  },
+  "3331": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 3372,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    }
+   ]
+  },
+  "3332": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 3373,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 4469,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 10,
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3384,
+     "conds": [
+      {
+       "t": "noItem",
+       "id": 3384,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3460,
+     "lo": 90,
+     "hi": 111,
+     "conds": []
+    },
+    {
+     "id": 1131,
+     "conds": []
+    },
+    {
+     "id": 3577,
+     "conds": []
+    },
+    {
+     "id": 4954,
+     "conds": []
+    },
+    {
+     "pick2": [
+      3063,
+      3389,
+      3065,
+      1553,
+      3930,
+      3541,
+      3570,
+      3571,
+      3569,
+      5480
+     ],
+     "conds": []
+    }
+   ]
+  },
+  "3860": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 3863,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 3859,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3827,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3870,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3858,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 3883,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 4,
+       "pair": 2,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 3817,
+     "lo": 30,
+     "hi": 51,
+     "conds": []
+    }
+   ]
+  },
+  "4782": {
+   "devArmor": true,
+   "spawns": [
+    {
+     "id": 4989,
+     "conds": []
+    },
+    {
+     "id": 4784,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 4823,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 10,
+       "pair": 2,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 4715,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 20,
+       "pair": 3,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 4778,
+     "stack": 3,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 4,
+       "pair": 4,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 5075,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 20,
+       "pair": 5,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 4923,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 4952,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 4953,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 4914,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 3,
+       "depth": 2
+      }
+     ]
+    }
+   ]
+  },
+  "4957": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 4987,
+     "conds": []
+    },
+    {
+     "id": 4986,
+     "lo": 25,
+     "hi": 76,
+     "conds": []
+    },
+    {
+     "id": 4959,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 4981,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 2,
+       "pair": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 4758,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 3,
+       "pair": 3,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 4980,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 2,
+       "pair": 4,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "idFrom": [
+      4982,
+      4985
+     ],
+     "conds": []
+    },
+    {
+     "idFrom": [
+      4982,
+      4985
+     ],
+     "dedup2": true,
+     "conds": []
+    },
+    {
+     "idFrom": [
+      4982,
+      4985
+     ],
+     "conds": []
+    }
+   ]
+  },
+  "5111": {
+   "devArmor": false,
+   "spawns": [
+    {
+     "id": 5100,
+     "conds": []
+    },
+    {
+     "id": 5109,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 7,
+       "pair": 1,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 5385,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 14,
+       "pair": 2,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 5098,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 3,
+       "pair": 3,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 5101,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 3,
+       "pair": 4,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 5113,
+     "conds": [
+      {
+       "t": "chance",
+       "n": 3,
+       "pair": 5,
+       "depth": 1
+      }
+     ]
+    },
+    {
+     "id": 5117,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 0,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 5118,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 1,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 5119,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 2,
+       "depth": 2
+      }
+     ]
+    },
+    {
+     "id": 5095,
+     "conds": [
+      {
+       "t": "sw",
+       "k": 0,
+       "branch": 3,
+       "depth": 2
+      }
+     ]
+    }
+   ]
+  }
  },
  "coinMap": {
   "3318": 50,

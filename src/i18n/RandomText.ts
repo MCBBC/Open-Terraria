@@ -61,34 +61,63 @@ export function randomPlayerName(): string {
 
 // ===================== 死亡文本（Lang.cs:1010-1132 CreateDeathMessage） =====================
 
-/** 死因（PlayerDeathReason._sourceOtherIndex 语义子集） */
+/** 死因（PlayerDeathReason._sourceOtherIndex 全表，Lang.cs:1055-1128） */
 export type DeathCause =
-  | { kind: 'npc'; name: string }   // 敌怪击杀 → DeathSource.NPC
-  | { kind: 'fell' }                // other=0  Fell_1..9
-  | { kind: 'drowned' }             // other=1  Drowned_1..7
-  | { kind: 'lava' }                // other=2  Lava_1..5
-  | { kind: 'default' }             // other=3/255 → Default 包裹 / Slain
-  ;
+  | { kind: 'npc'; name: string }   // 凶手 NPC（proj/player 杀手未实现→归 npc）
+  | { kind: 'fell' }                // other=0  Fell_1..9（:25085 摔落）
+  | { kind: 'drowned' }             // other=1  Drowned_1..7（:22989）
+  | { kind: 'lava' }                // other=2  Lava_1..5（:27392）
+  | { kind: 'defaultWrap' }         // other=3  DeathText.Default 包裹 generic（:28514 地块接触伤害）
+  | { kind: 'slain' }               // other=4/255 → Slain
+  | { kind: 'petrified' }           // other=5  Petrified_1..4（:24929/:25067 石化摔落）
+  | { kind: 'stabbed' }             // other=6  Stabbed
+  | { kind: 'suffocated' }          // other=7  Suffocated_1..2（:19146 沙埋）
+  | { kind: 'burned' }              // other=8  Burned_1..4（:19154/:19201 灼烧/着火 DoT——含炽热狱石/陨石）
+  | { kind: 'poisoned' }            // other=9  Poisoned（:19193）
+  | { kind: 'electrocuted' }        // other=10 Electrocuted_1..4（:19197）
+  | { kind: 'triedToEscape' }       // other=11 TriedToEscape（:22050 WoF 舌距>3000px）
+  | { kind: 'tongued' }             // other=12 WasLicked_1..2（:19150 舌锁 DoT / :22054 墙抵世界缘）
+  | { kind: 'teleportFail' }        // other=13 Teleport_1（混沌传送杖）
+  | { kind: 'inferno' }             // other=16 Inferno（:9938 狱火药水）
+  | { kind: 'diedInTheDark' }       // other=17 DiedInTheDark
+  | { kind: 'starved' }             // other=18 Starved_1..3（:19175 饥荒种子）
+  | { kind: 'space' }               // other=19 Space_1..5（:23799，{1}=世界名）
+  | { kind: 'teamTank' }            // other=20 TeamTank（:37751 圣骑士盾伤害转移）
+  | { kind: 'underground' }         // other=21 Underground_1..5（:23831，{1}=世界名）
+  | { kind: 'vampire' };            // other=22 VampireBurningInDaylight_1..6（:19189，{1}=世界名）
 
 const rand1 = (n: number) => 1 + Math.floor(Math.random() * n);
 
-/** Lang.CreateDeathMessage 1:1（我们可触发的死因子集 + 全表保留） */
-export function createDeathText(playerName: string, cause: DeathCause): string {
-  const generic = Lang.randomFrom('DeathTextGeneric', '{0}被杀死了').replace('{0}', playerName);
+/** Lang.CreateDeathMessage 1:1（Lang.cs:1010-1132 全分支；generic {0}=玩家 {1}=世界名） */
+export function createDeathText(playerName: string, cause: DeathCause, worldName = ''): string {
+  const generic = Lang.randomFrom('DeathTextGeneric', '{0}被杀死了')
+    .replace('{0}', playerName).replace('{1}', worldName);
+  const one = (key: string, vars: string[] = [playerName, worldName]) =>
+    Lang.text(key).replace(/\{(\d)\}/g, (_, i) => vars[+i] ?? '');
   switch (cause.kind) {
     case 'npc':
-      // DeathSource.NPC："{generic}，凶手是{npc}。"
       return Lang.text('DeathSource.NPC').replace('{0}', generic).replace('{1}', cause.name);
-    case 'fell':
-      return Lang.text(`DeathText.Fell_${rand1(9)}`).replace('{0}', playerName);
-    case 'drowned':
-      return Lang.text(`DeathText.Drowned_${rand1(7)}`).replace('{0}', playerName);
-    case 'lava':
-      return Lang.text(`DeathText.Lava_${rand1(5)}`).replace('{0}', playerName);
-    case 'default':
-    default:
-      // other=255 → Slain（与 generic 同义，取原版键）
-      return Lang.text('DeathText.Slain').replace('{0}', playerName);
+    case 'fell': return one(`DeathText.Fell_${rand1(9)}`);
+    case 'drowned': return one(`DeathText.Drowned_${rand1(7)}`);
+    case 'lava': return one(`DeathText.Lava_${rand1(5)}`);
+    case 'defaultWrap': return one('DeathText.Default', [generic]);
+    case 'slain': return one('DeathText.Slain');
+    case 'petrified': return one(`DeathText.Petrified_${rand1(4)}`);
+    case 'stabbed': return one('DeathText.Stabbed');
+    case 'suffocated': return one(`DeathText.Suffocated_${rand1(2)}`);
+    case 'burned': return one(`DeathText.Burned_${rand1(4)}`);
+    case 'poisoned': return one('DeathText.Poisoned');
+    case 'electrocuted': return one(`DeathText.Electrocuted_${rand1(4)}`);
+    case 'triedToEscape': return one('DeathText.TriedToEscape');
+    case 'tongued': return one(`DeathText.WasLicked_${rand1(2)}`);
+    case 'teleportFail': return one('DeathText.Teleport_1');
+    case 'inferno': return one('DeathText.Inferno');
+    case 'diedInTheDark': return one('DeathText.DiedInTheDark');
+    case 'starved': return one(`DeathText.Starved_${rand1(3)}`);
+    case 'space': return one(`DeathText.Space_${rand1(5)}`);
+    case 'teamTank': return one('DeathText.TeamTank');
+    case 'underground': return one(`DeathText.Underground_${rand1(5)}`);
+    case 'vampire': return one(`DeathText.VampireBurningInDaylight_${rand1(6)}`);
   }
 }
 

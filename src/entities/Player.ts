@@ -705,7 +705,10 @@ export class Player extends Entity {
       // ——故不进 damage(),死亡原因仍是 ByOther 默认包
       const dot = this.buffs.consumeDotChunk();
       if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46', true);
-      if (this.hp <= 0) this.lastDamageCause = { kind: 'default' }; // DoT 致死=默认死亡包
+      // DoT 致死（:19142-19156）：suffocating→ByOther(7)；tongued 已在自身路径；其余一律
+      // Burned(8)——原版 else 分支不区分火/毒/流血（含炽热狱石/陨石的灼烧与着火）
+      if (this.hp <= 0) this.lastDamageCause = this.buffs.has(BuffType.Suffocation)
+        ? { kind: 'suffocated' } : { kind: 'burned' };
     }
     // 恐慌项链加速窗口倒计时
     if (this.panicTime > 0) this.panicTime -= dt;
@@ -1977,8 +1980,8 @@ export class Player extends Entity {
       if (chunk > 0) {
         this.hp = Math.max(0, this.hp - chunk);
         game.addDamageNumber(this.cx, this.y, chunk, false, '#FF3C46', true);
-        // :19144-19149 statLife<=0 → KillMe(ByOther(12))——该死因文案包未移植，走默认包
-        if (this.hp <= 0) this.lastDamageCause = { kind: 'default' };
+        // :19144-19149 statLife<=0 → KillMe(ByOther(12)) WasLicked
+        if (this.hp <= 0) this.lastDamageCause = { kind: 'tongued' };
       }
     }
     //  ③ 舌距 >3000px（:22044-22048）/ 墙抵世界两侧（:22049-22052）→ KillMe(1000)
@@ -2163,7 +2166,7 @@ export class Player extends Entity {
       // KillMe(ByOther 21, 10.0):直死——绕过防御/无敌帧(不走 damage()),
       // hp 归零后由 fixedUpdate 尾部统一结算(死亡音/墓碑),最迟次 tick 生效
       this.hp = 0;
-      this.lastDamageCause = { kind: 'default' }; // 死因 21 文案包暂以 Default 近似
+      this.lastDamageCause = { kind: 'underground' }; // ByOther(21) Underground_1..5
       this.y = hPx - B;
       this.vy = 0;
     }
@@ -2323,7 +2326,7 @@ export class Player extends Entity {
     let blocked = false;
     const dmg = TOUCH_IMMEDIATE.get(ht.type);
     if (dmg !== undefined) {
-      this.lastDamageCause = { kind: 'default' }; // PlayerDeathReason.ByOther(3) → 默认包
+      this.lastDamageCause = { kind: 'defaultWrap' }; // ByOther(3) → DeathText.Default 包裹 generic
       if (!this.damage(dmg, this.cx, this.y - 10, false)) {
         blocked = true;
       } else {

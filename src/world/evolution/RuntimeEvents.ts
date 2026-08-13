@@ -7,8 +7,9 @@
 //      ★任务台账曾写 jewelBeetleChance——1.4.5.6 原文无该字段（1405 亦无），实际
 //      五件套为 fireFly×3 + butterfly + stinkBug，以原文为准。
 //   ② CultistRitual（CultistRitual.cs 全文）：地牢拜月教石碑 437 自然重生计时。
-//      Main.cs:64427 每帧 UpdateTime；delay 随存档（WorldFile.cs:114/163
-//      _tempCultistDelay），recheck 为运行时静态位不落盘。
+//      Main.cs:64427 每帧 UpdateTime；delay 随存档（WorldFile.cs:1340 写 / :2192 读，
+//      缺省 86400 = delayStart——新世界 ResetTempsToDayTime WF:1018 / v108 前旧档
+//      WF:2188 同值），recheck 为运行时静态位不落盘。
 //   ③ MysticLogFairiesEvent（MysticLogFairiesEvent.cs 全文）：倒木（tile 488）桩
 //      附近夜放仙女。Main.cs:64710 StartNight / :64433 每帧 UpdateTime /
 //      WorldGen.cs:3303 OnWorldLoad StartWorld / :49866 KillTile FallenLogDestroyed。

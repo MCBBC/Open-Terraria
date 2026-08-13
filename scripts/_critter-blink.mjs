@@ -27,43 +27,35 @@ const out = await page.evaluate(() => {
   // 点名生成（走 debugSpawnNpc = Enemy 路径）+ 环境自然刷（本地 Critter 路径）
   for (let i = 0; i < 4; i++) g.debugSpawnNpc(356, (ptx - 8 + i * 5) * T, (gy - 6) * T, false);  // 蝴蝶
   for (let i = 0; i < 4; i++) g.debugSpawnNpc(355, (ptx - 8 + i * 5) * T, (gy - 6) * T, false);  // 萤火虫
-  const track = new Map();   // id → {x,y,info}
+  const track = new Map();   // id → {x,y,vy}
   const events = [];
-  const collect = () => {
-    const list = [];
-    for (const b of ['critters', 'enemies']) {
-      for (const ent of g.entities[b]) {
-        const e = ent;
-        if (e.dead) continue;
-        const isFly = e.vanillaId === 355 || e.vanillaId === 356 || e.vanillaId === 444
-          || (e.def && (e.def.key === 'butterfly' || e.def.key === 'firefly' || e.def.key === 'gold_butterfly'));
-        if (!isFly) continue;
-        list.push(e);
-      }
-    }
-    return list;
-  };
-  for (let t = 0; t < 1800; t++) {
-    g.player.x = ptx * T; g.player.y = (gy - 4) * T; g.player.vx = 0; g.player.vy = 0;
+  const T0 = performance.now();
+  // 缓存实体引用（点名 8 只;环境自然刷的后续并入一次）
+  let subjects = [...g.entities.critters, ...g.entities.enemies].filter((e) => !e.dead
+    && (e.vanillaId === 355 || e.vanillaId === 356 || e.vanillaId === 444));
+  for (let t = 0; t < 600; t++) {
+    if (t % 30 === 0) { g.player.x = ptx * T; g.player.y = (gy - 4) * T; g.player.vx = 0; g.player.vy = 0; }
     g.fixedUpdate(1 / 60);
-    for (const e of collect()) {
+    if (performance.now() - T0 > 45000) { events.push({ t, note: 'TIMEBOX', at: t }); break; }
+    if (t === 300) subjects = [...g.entities.critters, ...g.entities.enemies].filter((e) => !e.dead
+      && (e.vanillaId === 355 || e.vanillaId === 356 || e.vanillaId === 444));
+    for (const e of subjects) {
+      if (e.dead) continue;
       const prev = track.get(e.id);
       if (prev) {
         const jump = Math.hypot(e.x - prev.x, e.y - prev.y);
         if (jump > 24) {
           events.push({
             t, id: e.id, cls: e.constructor.name, vid: e.vanillaId ?? null,
-            key: e.def?.key ?? null, jump: Math.round(jump),
-            dy: Math.round(e.y - prev.y),
+            jump: Math.round(jump), dy: Math.round(e.y - prev.y),
             vyBefore: +prev.vy.toFixed(2), vyAfter: +e.vy.toFixed(2),
             onGround: !!e.onGround, x: Math.round(e.x / T - ptx), y: Math.round(e.y / T - gy),
           });
-          if (events.length > 40) break;
         }
       }
       track.set(e.id, { x: e.x, y: e.y, vy: e.vy });
     }
-    if (events.length > 40) break;
+    if (events.length > 30) break;
   }
   return { events, tracked: track.size, ptx, gy };
 });

@@ -365,7 +365,7 @@ export function moonLeechAI(e: Enemy, game: GameHooks, _player: Player | null) {
 // ---------------------------------------------------------------------------
 /** CultistRitual.CheckFloor(CultistRitual.cs:88-124 1:1):i∈{-5,-3,3,5} → x=tileX+i*2,
  *  y 自 tileY-5 向下扫至 +11,取首个"实心/平台 且上方 3 格净空"的点;不足 4 点 → null */
-function ritualCheckFloor(game: GameHooks, cx: number, cy: number): Array<{ x: number; y: number }> | null {
+export function ritualCheckFloor(game: GameHooks, cx: number, cy: number): Array<{ x: number; y: number }> | null {
   const pts: Array<{ x: number; y: number }> = [];
   const tx = Math.floor(cx / TILE), ty = Math.floor(cy / TILE);
   for (const i of [-5, -3, 3, 5]) {
@@ -442,7 +442,9 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
         if (j === 11) ty = y;
       }
       const cultist = spawnPart(game, e, 439);
-      if (cultist) {
+      // NPC.cs:38881 石碑召出 439 → CultistRitual.TabletDestroyed()(delay=43200 重置,
+      // 打完一轮 24 游戏时后才再出现)
+      if (cultist) (game as unknown as { cultistTabletDestroyed?: () => void }).cultistTabletDestroyed?.();
         cultist.x = tx * TILE + 10 - cultist.w / 2;
         cultist.y = ty * TILE - cultist.h;              // 原版顶锚 y=tileY*16-2,本仓落底对齐
         cultist.facing = Math.sign(e.cx - (tx * TILE + 10)) || 1;

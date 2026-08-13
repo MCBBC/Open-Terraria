@@ -2943,13 +2943,17 @@ export class Game implements GameHooks {
     // CultistRitual.UpdateTime（Main.cs:64427 每帧位）。房主权威——访客不跑世界事件计时
     if (!this.net || this.net.policy.isHost) {
       // TabletDestroyed 账（NPC.cs:38881）：石碑召出 439 的同一帧置 delay=43200。
+      // 前置门先判（石碑只可能出现在 hardMode+石巨人+骷髅王之后的世界）省一次全实体扫；
       // 原版调用点在 AI_083a 内部，此处以石碑 ai0==-1（"已召邪教徒"标记）边沿等价
       // 捕获，每块石碑只记一次（WeakSet 去重）
-      for (const en of this.entities.enemies) {
-        const tab = en as Enemy;
-        if (tab.vanillaId === 437 && tab.ai0 === -1 && !this._cultistTabletDone.has(tab)) {
-          this._cultistTabletDone.add(tab);
-          cultistTabletDestroyed(w);
+      if (w.flags.hardMode && w.flags['downed_245']
+        && (w.flags.downedSkeletron || w.flags['downed_35'])) {
+        for (const en of this.entities.enemies) {
+          const tab = en as Enemy;
+          if (tab.vanillaId === 437 && tab.ai0 === -1 && !this._cultistTabletDone.has(tab)) {
+            this._cultistTabletDone.add(tab);
+            cultistTabletDestroyed(w);
+          }
         }
       }
       if (cultistRitualUpdateTime(w, w.dayRate(), this.cultistCtx())) {
@@ -12286,8 +12290,9 @@ export class Game implements GameHooks {
   private handlePlayerDeath() {
     const p = this.player;
     // 死亡文本（Lang.CreateDeathMessage 1:1：generic/摔落/溺水/岩浆/凶手 NPC）
-    const cause = p.lastDamageCause ?? { kind: 'default' } as const;
-    const deathText = createDeathText(this.playerName(), cause);
+    // other=255（无凶手/无特定源）→ Slain（Lang.cs:1124-1126）
+    const cause = p.lastDamageCause ?? { kind: 'slain' } as const;
+    const deathText = createDeathText(this.playerName(), cause, this.world?.name ?? '');
     // 原版 Player.cs:38312-38313:死亡消息走消息列,色 (225,25,25)
     this.newText(deathText, 225, 25, 25);
     // 红色粉碎粒子：身体范围多层爆散，喷溅落地反弹/停驻后缓慢淡出（约 5 秒）
