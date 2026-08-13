@@ -1,7 +1,7 @@
 // 原版 pass 3 "Ocean Sand"(L4962) + pass 33 "Beaches"(L6639) 移植。
 // Ocean Sand:海滩区地表按深度随机走铺沙(50-200),顺手记录金字塔候选;
 // Beaches:从海滩边缘挖出斜坡海盆( TuneOceanDepth 深度曲线),灌水,清墙,盆底铺沙。
-// 原版固定 tile 常量按 4200 宽设计,此处按 w/4200 线性缩放保持比例(大世界 = 精确原版)。
+// 原版固定 tile 常量(220/260/275/50/30 与深度曲线阈值)按 1456 源码为**宽度无关**固定值。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -59,56 +59,58 @@ export function runOceanSandPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 }
 
-/** TuneOceanDepth(L11682):逐列深度增量曲线,阈值按世界宽度比例缩放 */
-function tuneOceanDepth(rng: RNG, count: number, depth: number, van: number, floridaStyle: boolean): number {
+/** TuneOceanDepth(cs:27104-27249):逐列深度增量曲线。阈值 3/6/9/15/50/75/100/125/
+ *  150/175/200/230/235/240/245/255 与增量系数全部**与世界宽度无关**(固定常量)。
+ *  曾按 w/4200 缩放阈值(注释还写反成"大世界=精确原版"——恰只有 4200 宽精确) */
+function tuneOceanDepth(rng: RNG, count: number, depth: number, floridaStyle: boolean): number {
   const inc = (f: number) => depth + rng.int(10, 19) * f;
-  const t = (n: number) => Math.max(1, Math.floor(n * van));
   if (!floridaStyle) {
-    if (count < t(3)) return inc(0.2);
-    if (count < t(6)) return inc(0.15);
-    if (count < t(9)) return inc(0.1);
-    if (count < t(15)) return inc(0.07);
-    if (count < t(50)) return inc(0.05);
-    if (count < t(75)) return inc(0.04);
-    if (count < t(100)) return inc(0.03);
-    if (count < t(125)) return inc(0.02);
-    if (count < t(150)) return inc(0.01);
-    if (count < t(175)) return inc(0.005);
-    if (count < t(200)) return inc(0.001);
-    if (count < t(230)) return inc(0.01);
-    if (count < t(235)) return inc(0.05);
-    if (count < t(240)) return inc(0.1);
-    if (count < t(245)) return inc(0.05);
-    if (count < t(255)) return inc(0.01);
+    if (count < 3) return inc(0.2);
+    if (count < 6) return inc(0.15);
+    if (count < 9) return inc(0.1);
+    if (count < 15) return inc(0.07);
+    if (count < 50) return inc(0.05);
+    if (count < 75) return inc(0.04);
+    if (count < 100) return inc(0.03);
+    if (count < 125) return inc(0.02);
+    if (count < 150) return inc(0.01);
+    if (count < 175) return inc(0.005);
+    if (count < 200) return inc(0.001);
+    if (count < 230) return inc(0.01);
+    if (count < 235) return inc(0.05);
+    if (count < 240) return inc(0.1);
+    if (count < 245) return inc(0.05);
+    if (count < 255) return inc(0.01);
     return depth;
   }
-  // florida 变体:同阈值曲线,近岸增量极小、远岸陡增(L11719-11748)
-  if (count < t(3)) return inc(0.001);
-  if (count < t(6)) return inc(0.002);
-  if (count < t(9)) return inc(0.004);
-  if (count < t(15)) return inc(0.007);
-  if (count < t(50)) return inc(0.01);
-  if (count < t(75)) return inc(0.014);
-  if (count < t(100)) return inc(0.019);
-  if (count < t(125)) return inc(0.027);
-  if (count < t(150)) return inc(0.038);
-  if (count < t(175)) return inc(0.052);
-  if (count < t(200)) return inc(0.08);
-  if (count < t(230)) return inc(0.12);
-  if (count < t(235)) return inc(0.16);
-  if (count < t(240)) return inc(0.27);
-  if (count < t(245)) return inc(0.43);
-  if (count < t(255)) return inc(0.6);
+  // florida 变体:同阈值曲线,近岸增量极小、远岸陡增(cs:27177-27231)
+  if (count < 3) return inc(0.001);
+  if (count < 6) return inc(0.002);
+  if (count < 9) return inc(0.004);
+  if (count < 15) return inc(0.007);
+  if (count < 50) return inc(0.01);
+  if (count < 75) return inc(0.014);
+  if (count < 100) return inc(0.019);
+  if (count < 125) return inc(0.027);
+  if (count < 150) return inc(0.038);
+  if (count < 175) return inc(0.052);
+  if (count < 200) return inc(0.08);
+  if (count < 230) return inc(0.12);
+  if (count < 235) return inc(0.16);
+  if (count < 240) return inc(0.27);
+  if (count < 245) return inc(0.43);
+  if (count < 255) return inc(0.6);
   return depth;
 }
 
-/** Beaches:挖海盆灌水(L6639-6728) */
+/** Beaches:挖海盆灌水(cs:14958-15120)。
+ *  海洋固定常量(GenVars.cs 赋值 WorldGen.cs:11211-11213 + cs:14959/14994/15054)
+ *  全部**与宽度无关**:220/260/275/50/30——曾按 w/4200 缩放(中/大世界水线/边缘
+ *  带/深度曲线全偏) */
 export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w;
-  const van = w / 4200;
-  const sc = (n: number) => Math.max(1, Math.floor(n * van)); // C# (int) 截断
-  const oceanWaterMin = sc(220), oceanWaterMax = sc(260), forcedJungleLen = sc(275), minSand = sc(50);
-  const edgeWall = Math.max(4, Math.floor(30 * van));
+  const oceanWaterMin = 220, oceanWaterMax = 260, forcedJungleLen = 275, minSand = 50;
+  const edgeWall = 30;
 
   let floridaL = false, floridaR = false;
   if (rng.next() < 0.25) {
@@ -129,11 +131,12 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
       const waterY = surfY + rng.int(1, 4);
       let count = 0, depth = 1;
       for (let x = waterX - 1; x >= 0; x--) {
-        if (x > edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, van, floridaL); }
+        if (x > edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, floridaL); }
         else depth += 1;
         const pad = rng.int(15, 19);
-        const yEnd = Math.trunc(waterY + depth + pad); // C# (int) 截断——浮点直比会多挖一行
-        for (let y = 0; y < yEnd && y < st.h; y++) {
+        // cs:15009:(double)k < j + num6 + num9 —— 纯 double 比较,depth 累积小数
+        // 部分几乎恒 >0 → 每列多挖一行(曾 Math.trunc 截断,海盆底每列浅一格)
+        for (let y = 0; y < waterY + depth + pad && y < st.h; y++) {
           const i = st.idx(x, y);
           if (y < waterY + depth * 0.75 - 3) {
             // 原版仅 active(false)（cs:15014）——保留 type 幽灵（曾清零，
@@ -164,11 +167,11 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
       const waterY = surfY + rng.int(1, 4);
       let count = 0, depth = 1;
       for (let x = waterX; x < w; x++) {
-        if (x < w - edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, van, floridaR); }
+        if (x < w - edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, floridaR); }
         else depth += 1;
         const pad = rng.int(15, 19);
-        const yEnd = Math.trunc(waterY + depth + pad); // C# (int) 截断——浮点直比会多挖一行
-        for (let y = 0; y < yEnd && y < st.h; y++) {
+        // cs:15069:(double)k < l + num11 + num9 —— 同左侧纯 double 比较(勿截断)
+        for (let y = 0; y < waterY + depth + pad && y < st.h; y++) {
           const i = st.idx(x, y);
           if (y < waterY + depth * 0.75 - 3) {
             // 原版仅 active(false)（cs:15014）——保留 type 幽灵（曾清零，
@@ -260,8 +263,8 @@ function shellPile(st: TileStore, rng: RNG, X: number, Y: number, worldSurface: 
     }
     cx += vx; cy += vy;
     vx += rng.next() * 0.2 - 0.1; vy += rng.next() * 0.2 - 0.1;
-    vx = Math.max(-0.3, Math.min(0.3, vx));           // Utils.Clamp
-    vy = Math.max(0.5, Math.min(1.0, vy));
+    // cs:10414-10415 原版此处是两条裸 `Utils.Clamp(...)` 语句——泛型方法**返回值被
+    // 丢弃**,实际不钳制(原版笔误型 no-op;1405 同款)。曾当真钳制 → 堆心漂移被回拉
   }
   return true;
 }
@@ -275,9 +278,12 @@ export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
   const spawn = (x: number, y: number) => shellPile(st, rng, x, y, gs.worldSurface);
   // ---- 左侧（cs:16399-16450）----
   if (rng.int(0, 1) === 0) {                          // genRand.Next(2)==0
-    // 水线接触点盒扫描（cs:16404-16413）：活性沙 + 上方空且无液 + 海侧（左）邻格有水
-    for (let j = gs.shellStartXLeft - 20; j <= gs.shellStartXLeft + 20; j++) {
-      for (let k = gs.shellStartYLeft - 10; k <= gs.shellStartYLeft + 10; k++) {
+    // 水线接触点盒扫描（cs:16404-16413）：活性沙 + 上方空且无液 + 海侧（左）邻格有水。
+    // cs:16402-16403 先冻结局部副本再定界——盒恒定,命中只写回 gs(曾用活值做循环
+    // 边界,命中即伸缩扫描盒 → 落点集分叉)
+    const boxL = { x: gs.shellStartXLeft, y: gs.shellStartYLeft };
+    for (let j = boxL.x - 20; j <= boxL.x + 20; j++) {
+      for (let k = boxL.y - 10; k <= boxL.y + 10; k++) {
         if (!st.inBounds(j, k) || !st.inBounds(j - 1, k) || !st.inBounds(j, k - 1)) continue;
         const i = st.idx(j, k);
         if (st.flags[i] && st.type[i] === T.SAND
@@ -301,8 +307,9 @@ export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   // ---- 右侧（cs:16451-16501）：镜像；邻格判海侧（右 = j+1）----
   if (rng.int(0, 1) === 0) {
-    for (let j = gs.shellStartXRight - 20; j <= gs.shellStartXRight + 20; j++) {
-      for (let k = gs.shellStartYRight - 10; k <= gs.shellStartYRight + 10; k++) {
+    const boxR = { x: gs.shellStartXRight, y: gs.shellStartYRight };
+    for (let j = boxR.x - 20; j <= boxR.x + 20; j++) {
+      for (let k = boxR.y - 10; k <= boxR.y + 10; k++) {
         if (!st.inBounds(j, k) || !st.inBounds(j + 1, k) || !st.inBounds(j, k - 1)) continue;
         const i = st.idx(j, k);
         if (st.flags[i] && st.type[i] === T.SAND

@@ -37,22 +37,28 @@ await page.evaluate(() => {
 await new Promise((r) => setTimeout(r, 200));
 await page.screenshot({ path: '/tmp/sw-combat-font.png' });
 
-// 像素断言:玩家上方 80×40 区域应有彩色字形像素(非纯背景)
-const pixels = await page.evaluate(() => {
+// 像素断言:逐条飘字 bbox 采样。★主色调断言曾两次假通过——先被玩家 sprite、
+// 再被不透明天空背景淹没。改用**红系字形像素计数**:三条飘字本色均红系
+// (#FF7060/#FF8040/#FF3C46),天空/泥土背景几乎无红;漏染色(全白)时=0
+const perText = await page.evaluate(() => {
   const g = window.__swGame;
-  const canvas = g.renderer.canvas;
-  const ctx = canvas.getContext('2d');
-  const [sx, sy] = g.camera.worldToScreen(g.player.cx, g.player.y - 30);
-  const data = ctx.getImageData(Math.floor(sx) - 60, Math.floor(sy) - 30, 140, 60).data;
-  let lit = 0, mid = 0, colors = new Set();
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] > 100 && (data[i] > 80 || data[i + 1] > 80 || data[i + 2] > 80)) {
-      lit++;
-      if (data[i + 3] > 200) mid++;      // 近不透明像素占比(抗锯齿会产生大量中间 alpha)
-      colors.add((data[i] >> 5) + ',' + (data[i + 1] >> 5) + ',' + (data[i + 2] >> 5));
+  const ctx = g.renderer.canvas.getContext('2d');
+  return g.dmgNumbers.map((d) => {
+    const [sx, sy] = g.camera.worldToScreen(d.x, d.y);
+    const data = ctx.getImageData(Math.floor(sx) - 30, Math.floor(sy) - 14, 60, 28).data;
+    let lit = 0, solid = 0, redPx = 0, whitePx = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const [r, gg, b, a] = [data[i], data[i + 1], data[i + 2], data[i + 3]];
+      if (a > 150 && r > 60 && Math.abs(r - gg) + Math.abs(r - b) > 40) {
+        // 彩色像素(排除灰/白/黑):字形本体或染色影层
+        lit++;
+        if (a > 220) solid++;
+        if (r >= 180 && r >= gg + 60 && r >= b + 60) redPx++;      // 红系字形
+        if (r > 220 && gg > 220 && b > 220) whitePx++;              // 未染色的白字形(抓漏染)
+      }
     }
-  }
-  return { lit, solid: mid / Math.max(1, lit), colors: colors.size };
+    return { lit, solidRatio: Math.round((solid / Math.max(1, lit)) * 100) / 100, redPx, whitePx };
+  });
 });
 // 位图字形:近不透明像素占比应 >0.9(整数缩放二值 alpha;monospace 抗锯齿仅 ~0.6)
 const A = [];
@@ -62,9 +68,13 @@ ok('spawn-3', spawnRes === 3, { spawnRes });
 // 勿用 Resource Timing(启动期资源已塞满其 250 条缓冲,新条目不记录=假阴性)
 const fontLoaded = requests.some((u) => u.includes('Combat_Text_p22.png'));
 ok('font-texture-loaded', fontLoaded, { fontLoaded, reqs: requests.length });
-ok('glyph-pixels', pixels.lit > 50, pixels);
-ok('glyph-bitmap-shape', pixels.solid > 0.9, { solid: Math.round(pixels.solid * 100) / 100 });
-ok('glyph-colors', pixels.colors >= 3, pixels);   // 普通红/暴击橙/DoT 深红至少三色调
+// 每条飘字:有彩色字形像素 + 位图形状(二值 alpha)+ 红系染色存在 + 无白字形
+perText.forEach((p, i) => {
+  ok(`t${i}-pixels`, p.lit > 20, { lit: p.lit });
+  ok(`t${i}-bitmap-shape`, p.solidRatio > 0.9, { solid: p.solidRatio });
+  ok(`t${i}-tinted-red`, p.redPx > 10, { redPx: p.redPx });
+  ok(`t${i}-no-white-glyph`, p.whitePx < p.redPx, { redPx: p.redPx, whitePx: p.whitePx });
+});
 const failed = A.filter((a) => !a.pass);
 console.log(JSON.stringify({ asserts: A, failed: failed.length, errors: errors.slice(0, 3) }, null, 1));
 await browser.close();

@@ -120,7 +120,7 @@ import { scanLuckScene, rollLuck } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
 import { pickMusic, newMusicState, bossMusicFor, BOSS_MUSIC, MUSIC, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
-import { resetGorePool } from '../entities/GorePiece';
+import { resetGorePool, liveGorePieces } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
@@ -1119,7 +1119,7 @@ export class Game implements GameHooks {
       if (!s) continue;
       const d = ITEM_DEFS[s.id];
       const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
-      if (vid === 938) return true;
+      if (vid === 938 || vid === 3998) return true;
     }
     return false;
   }
@@ -1562,7 +1562,7 @@ export class Game implements GameHooks {
     // 强制下坐 + PlayerNoSpaceTeleport（就近可容盒传送）——曾只弹 toast
     this.mountNoSpaceCount++;
     if (this.mountNoSpaceCount < 3) {
-      this.sfx.play('dig', 0.7, p.cx, p.cy);
+      this.sfx.play('dig', 1, p.cx, p.cy);
       this.spawnParticles(p.cx, p.cy, '#C8C8C8', 10 + this.mountNoSpaceCount * 20, 1.2);
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.MountDismountBlocked'));
       return;
@@ -2009,7 +2009,9 @@ export class Game implements GameHooks {
     // 滴水溅落音钩子（Gore.cs :971-984：落地 Drip_0/1 随机、入水 Drip_2、位置 +8；
     // 带坐标走 2500px 距离衰减，flag4 水型已在 NatureParticles 内静音）
     natureParticles.onDripSplash = (x, y, wet) => {
-      this.sfx.playFiles(wet ? ['Drip_2'] : ['Drip_0', 'Drip_1'], 1, x, y);
+      // 音量 0.5：LegacySoundPlayer.cs:1356 case 39 专属 `Volume = num2 * 0.5f`
+      // （其余 SoundID 均为 num2 原值）——原版滴水恒半量，此前传 1 偏大一倍
+      this.sfx.playFiles(wet ? ['Drip_2'] : ['Drip_0', 'Drip_1'], 0.5, x, y);
     };
     // ---- 天气系统接线：状态机已在 world.weather（存档/wld 导入回填）；
     //  天空云联动 + 雨滴/沙尘渲染器 attach；hooks 字段每帧由 fixedUpdate 刷新 ----
@@ -2135,6 +2137,7 @@ export class Game implements GameHooks {
         if (key) this.spawnDrop(px, py, key, 1);
       },
       setBlackout: (on) => { this.blackout = on; },
+      onBestiaryUnlock: (netId) => { w.bestiary.registerSight(netId); },  // :37109-37116 记 664
     });
     // 1456 AddWater/WaterCheck 尾部 KillTile（液体冲毁火把等）：走 breakTile（掉落+音效+帧刷新）
     this.liquid.killTile = (x, y) => {
@@ -2153,7 +2156,7 @@ export class Game implements GameHooks {
       const lo = Math.min(a, b), hi = Math.max(a, b);
       if (lo < 1 || hi > 4 || lo === hi) return; // 同类/越界不发声
       const px = x * TILE + 8, py = y * TILE + 8;   // :4582 x*16+count*8（count 取 1）
-      if (hi === 4) { this.sfx.play('shimmerSplash', 0.75, px, py); return; }
+      if (hi === 4) { this.sfx.play('shimmerSplash', 1, px, py); return; }
       const name = lo === 1 && hi === 2 ? 'liquidWaterLava'
         : lo === 1 && hi === 3 ? 'liquidHoneyWater' : 'liquidHoneyLava';
       this.sfx.play(name, 1, px, py);
@@ -3091,7 +3094,7 @@ export class Game implements GameHooks {
               b.clubHit(shot.vx, shot.vy, club.rough, below);
               this.sfx.play('tink', 0.8, b.cx, b.cy);   // Item126 击球音（:49550）
             }
-            this.sfx.play('throw', 0.7, this.player.cx, this.player.cy); // Item1 挥杆音（:49528）
+            this.sfx.play('throw', 1, this.player.cx, this.player.cy); // Item1 挥杆音（:49528）
             this.golfAim = false; this.golfAimBall = null;
             this.renderer.golfPower = null;
             this.player.useTime = 42; // useAnimation 12 + 后摇 30（:49561-49567）
@@ -4233,11 +4236,14 @@ export class Game implements GameHooks {
       if (vid === 184 || vid === 1735 || vid === 1868 || vid === 4143) { const n = jit(90, 111); lit(0.1 * n, 0.1 * n, 0.5 * n); continue; }
       if (vid === 522) { const n = jit(90, 111); lit(0.5 * n, 1 * n, 0.1 * n); continue; }
       if (vid === 1332) { const n = jit(90, 111); lit(1 * n, 1 * n, 0.1 * n); continue; }
-      // 四柱魂（:1372-1386 ×Main.essScale——本仓未跟踪，×1 近似）
-      if (vid === 3456) { lit(0.2, 0.4, 0.5); continue; }
-      if (vid === 3457) { lit(0.4, 0.2, 0.5); continue; }
-      if (vid === 3458) { lit(0.5, 0.4, 0.2); continue; }
-      if (vid === 3459) { lit(0.2, 0.2, 0.5); continue; }
+      // 四柱魂（:1372-1386 ×Main.essScale 三角波 0.7-1.0——FlickerClock.essScale 同构）
+      {
+        const ess = this.lighting.clock.essScale;
+        if (vid === 3456) { lit(0.2 * ess, 0.4 * ess, 0.5 * ess); continue; }
+        if (vid === 3457) { lit(0.4 * ess, 0.2 * ess, 0.5 * ess); continue; }
+        if (vid === 3458) { lit(0.5 * ess, 0.4 * ess, 0.2 * ess); continue; }
+        if (vid === 3459) { lit(0.2 * ess, 0.2 * ess, 0.5 * ess); continue; }
+      }
       if (vid === 3822) { lit(0.1, 0.3, 0.1); continue; }
       // 彩凝胶（:1970-1976 段）与凝胶块（:2679-2677 段）
       if (vid === 1970) { lit(0.75, 0, 0.75); continue; }
@@ -4303,6 +4309,12 @@ export class Game implements GameHooks {
       this.lighting.addLight(
         Math.floor(this.player.cx / TILE), Math.floor(this.player.cy / TILE), 1.8, 0.4, 1.2);
     }
+    // gore 16/17 火苗点光（Gore.Update 尾段 :1078-1101：light>0 时以中心格 AddLight
+    // light*scale，16 号通道 (1,0.8,0.3)、17 号 (0.3,0.6,1)——衰减通道在 GorePiece 内算好）
+    for (const gp of liveGorePieces()) {
+      const l = gp.lightRGB();
+      if (l && this.world.store.inBounds(l.tx, l.ty)) this.lighting.addLight(l.tx, l.ty, l.r, l.g, l.b);
+    }
     this.lighting.compute(w.clock.dayFactor);
 
     // ---- 粒子与飘字 ----
@@ -4346,7 +4358,7 @@ export class Game implements GameHooks {
         const e = ent as Enemy;
         if (e.key !== 'zombie' && e.key !== 'magma_zombie') continue;
         if (Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) < TILE * 30) {
-          this.sfx.playWav('zombie', 0.6, e.cx, e.cy);
+          this.sfx.playWav('zombie', 1, e.cx, e.cy);
           break;
         }
       }
@@ -4809,17 +4821,20 @@ export class Game implements GameHooks {
     }
     if (inp.rightDown) {
       // 抚摸宠物（Main.cs:37404：右键悬停宠物投射物 → PetAnimal → HandleSpecialEvent
-      // 21 PET_THE_PET）。命中宠物/光宠（光标世界点 32px 内）即消费右键——优先级高于
-      // 地块交互（原版 petting 判定在 TileInteraction 之前）
+      // 21 PET_THE_PET）。命中宠物/光宠（光标世界点 32px 内）+ 玩家交互距离门
+      // （IsProjectileInteractableAndInInteractionRange :22874-22886 = 宠物格在
+      // TileReachCheckSettings.Simple 射程内——inTileRange 同款盒）才消费右键——
+      // 优先级高于地块交互（原版 petting 判定在 TileInteraction 之前）
       {
         const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         const pet = [this.petFollower, this.lightPetFollower].find(
-          (f) => f && !f.dead && Math.hypot(f.cx - wx, f.cy - wy) < 32);
+          (f) => f && !f.dead && Math.hypot(f.cx - wx, f.cy - wy) < 32
+          && this.inTileRange(Math.floor(f.cx / TILE), Math.floor(f.cy / TILE)));
         if (pet) {
           this.achievements.handleSpecialEvent(21,
             { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
           this.spawnParticles(pet.cx, pet.y, '#FF90B0', 4, 1.2, { life: 40 }); // 爱心尘近似
-          this.sfx.play('menuTick', 0.5);
+          this.sfx.play('menuTick', 1);
           this.input.rightDown = false;
         }
       }
@@ -4916,14 +4931,14 @@ export class Game implements GameHooks {
         this.swingTileCutSet.clear();
         // ★ 真刃系旋斩弧五剑（Player.cs:48265-48317 各专属出生链——先于下方通用
         // shoot 门：368/1826 无 shootSpeed 会被饿死；弧弹自带命中，不再走 Arrow）
-        if (cwMelee && [972, 973, 982, 983, 997, 933].includes(cwMelee.shoot)) {
+        const arcVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');
+        const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
+          + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
+        if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 933].includes(cwMelee.shoot)) {
           const angT = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           this.player.facing = Math.cos(angT) > 0 ? 1 : -1;   // 发射型面向鼠标（:46578）
           const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 20;
           const scaleT = ps?.size ?? 1;
-          const arcVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');
-          const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
-            + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
           const mkArc = (projId: number, dmg: number) => {
             const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), this.player.facing, scaleT);
             arc.critChance = arcCrit;
@@ -5849,7 +5864,7 @@ export class Game implements GameHooks {
           }
         }
         this.player.useTime = 15;   // useTime/useAnimation 15（:35427-35428）
-        this.sfx.play('throw', 0.6, this.player.cx, this.player.cy); // UseSound Item1（:35426）
+        this.sfx.play('throw', 1, this.player.cx, this.player.cy); // UseSound Item1（:35426）
         this.input.mouseDown = false;
       }
       // ---- 高尔夫哨 4095（Item.cs:35739-35749：useStyle 4/useTime 10/UseSound Item128；
@@ -6123,7 +6138,7 @@ export class Game implements GameHooks {
         const whipAtk = Math.min(3, 1 + swb * owner.equipStats.whipSpd);
         this.player.useTime = Math.max(1, Math.round(whip.useTime / whipAtk));
         whipObj.bonusTagDmg = ps?.tagdmg ?? 0; // I:567 bonusTagDamage
-        this.sfx.playWav('whipCrack', 0.9, owner.cx, owner.cy); // DefaultToWhip UseSound=Item152（鞭响）
+        this.sfx.playWav('whipCrack', 1, owner.cx, owner.cy); // DefaultToWhip UseSound=Item152（鞭响）
         this.input.mouseDown = false;
         break;
       }
@@ -6138,7 +6153,7 @@ export class Game implements GameHooks {
           if (head && !head.dead) {
             head.extendDragon(this);
             this.player.useTime = cw.useTime;
-            this.sfx.playWav('summon', 0.9, this.player.cx, this.player.cy);
+            this.sfx.playWav('summon', 1, this.player.cx, this.player.cy);
             this.input.mouseDown = false;
             break;
           }
@@ -6165,7 +6180,7 @@ export class Game implements GameHooks {
             { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
         }
         this.player.useTime = cw.useTime;
-        this.sfx.playWav('summon', 0.9, this.player.cx, this.player.cy); // 召唤杖 UseSound=Item44
+        this.sfx.playWav('summon', 1, this.player.cx, this.player.cy); // 召唤杖 UseSound=Item44
         this.input.mouseDown = false;
         break;
       }
@@ -6520,7 +6535,7 @@ export class Game implements GameHooks {
         p.lastDamageCause = { kind: 'defaultWrap' };  // 祭坛锤反噬:ByOther(3) 同族(applyTouchDamage)
         p.damage(dmg, p.cx - p.facing * 8, p.cy, false);
         this.addDamageNumber(p.cx, p.y, dmg, false, '#B080FF');
-        this.sfx.play('hit', 0.8);
+        this.sfx.play('hit', 1);
       }
       return;
     }
@@ -8409,7 +8424,7 @@ export class Game implements GameHooks {
     if (oa.ongoing) {
       // RequestToSkipWaitTime（:31948-31950）：波间 >60t 且水晶在座 → 直接跳到 60t
       if (dd2RequestToSkipWaitTime(oa, this.dd2Host(), tx, ty)) {
-        this.sfx.play('killed', 0.8, tx * TILE + 8, ty * TILE + 8);  // SoundID.NPCDeath7
+        this.sfx.play('killed', 1, tx * TILE + 8, ty * TILE + 8);  // SoundID.NPCDeath7
       }
       this.input.rightDown = false;
       return;
@@ -11367,7 +11382,7 @@ export class Game implements GameHooks {
         const row = r.infoAccs.state.rows[r.infoAccHover];
         if (row) {
           p.hideInfo[row.hideIndex] = !p.hideInfo[row.hideIndex];
-          this.sfx.play('menuTick', 0.8);
+          this.sfx.play('menuTick', 1);
         }
         this._infoAccClickLatch = true;
       }
@@ -12735,7 +12750,7 @@ export class Game implements GameHooks {
     if (!this.player.inv.miscEquips[slot]) return;
     if (slot === 0) this.petHidden = !this.petHidden;
     else this.lightPetHidden = !this.lightPetHidden;
-    this.sfx.play('menuTick', 0.6);   // UI 点击 Sound 12（Main.cs:40688）
+    this.sfx.play('menuTick', 1);   // UI 点击 Sound 12（Main.cs:40688）
   }
 
   /** 装备钩爪发射（miscEquips[4]，移动端虚拟键）。方向 = 摇杆轴或角色朝向。
@@ -12790,7 +12805,7 @@ export class Game implements GameHooks {
     const maxInflight = Math.max(1, stats.quickMax - latched);
     if (inflight >= maxInflight) return false;         // :6013-6015
     p.updateBlacklistedTilesForGrappling();            // :6018
-    this.sfx.play('throw', 0.9);                       // :6019 item.UseSound = Item1
+    this.sfx.play('throw', 1);                       // :6019 item.UseSound = Item1
     // :6041-6044 总数门 → 杀最旧
     if (oldest && latched + inflight >= stats.quickTotal) oldest.kill();
     // :6057-6065 双钩交替

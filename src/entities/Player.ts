@@ -828,19 +828,22 @@ export class Player extends Entity {
 
   /** 坐骑能力维护上下文（Mount.updateMountEffects 用）：Scutlix 索敌候选（CanBeChasedBy
    *  口径过滤）+ 视线门 + 眼激光发射桶 + 猪鲨崽天气视图（Player.cs:25373 UpdateEffects
-   *  :4884-4930/:4996-5003 对应数据源） */
+   *  :4884-4930/:4996-5003 对应数据源）。索敌候选惰性组装——仅 Scutlix（9）消费 */
   private mountEffectsCtx(game: GameHooks): import('./Mounts').MountEffectsCtx {
     const st = this.lastStore;
-    const targets: import('./Mounts').ScutlixTarget[] = [];
-    for (const e of game.enemies()) {
-      const n = e as { x: number; y: number; w: number; h: number; dead: boolean;
-        maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
-      // NPC.CanBeChasedBy（NPC.cs:28334：active && chaseable && lifeMax>5 && !friendly && !immortal）
-      if (n.dead || n.maxHp <= 5 || n.def?.friendly || n.def?.critter) continue;
-      if (n.x === undefined || n.w === undefined) continue;
-      targets.push({ x: n.x, y: n.y, w: n.w, h: n.h });
-    }
     const raining = !!game.world.weather?.raining;
+    const needTargets = this.mount.type === 9;
+    const targets: import('./Mounts').ScutlixTarget[] = [];
+    if (needTargets) {
+      for (const e of game.enemies()) {
+        const n = e as { x: number; y: number; w: number; h: number; dead: boolean;
+          maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
+        // NPC.CanBeChasedBy（NPC.cs:28334：active && chaseable && lifeMax>5 && !friendly && !immortal）
+        if (n.dead || n.maxHp <= 5 || n.def?.friendly || n.def?.critter) continue;
+        if (n.x === undefined || n.w === undefined) continue;
+        targets.push({ x: n.x, y: n.y, w: n.w, h: n.h });
+      }
+    }
     return {
       scutlixTargets: targets,
       los: (cx, cy, t) => !!st && canHitLine(st, cx, cy, 0, 0, t.x, t.y, t.w, t.h),
@@ -1070,7 +1073,7 @@ export class Player extends Entity {
     if (this.shimmering) {
       this.shimmerTransparency = Math.min(0.8, this.shimmerTransparency + 0.015);
     } else if (this.shimmerTransparency > 0) {
-      if (this.shimmerTransparency >= 0.8) game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      if (this.shimmerTransparency >= 0.8) game.playSfx('shimmerSplash', 1, this.cx, this.cy);
       this.shimmerTransparency = Math.max(0, this.shimmerTransparency - 0.015);
     }
     // TryToShimmerUnstuck（:28377-28389）：timeShimmering 钳 0-7200（shimmering +1/
@@ -2780,7 +2783,7 @@ export class Player extends Entity {
     this.buffs.remove(BuffType.Shimmered); // :28406 ClearBuff(353)——传送即解除微光化
     this.iframes = Math.max(this.iframes, PLAYER_IFRAME_TICKS);
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
-    game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+    game.playSfx('shimmerSplash', 1, this.cx, this.cy);
   }
 
   /** ApplyTouchDamage（Player.cs:28507）1:1:直接伤害(护甲结算)→灼烧/流血 buff→

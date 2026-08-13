@@ -424,6 +424,9 @@ const FRACTAL_PROFILES: Record<number, { len: number; color: [number, number, nu
   4956: { len: 86, color: [178, 255, 180] },
 };
 
+/** 档案键集（测试用） */
+export const FRACTAL_KEYS = Object.keys(FRACTAL_PROFILES).map(Number);
+
 /** GetRandomProfileIndex（:170-180）：档案表随机，命中 4956 重掷一次 */
 export function randomFractalProfile(excludeZenith = true): number {
   const keys = Object.keys(FRACTAL_PROFILES).map(Number);
@@ -462,12 +465,12 @@ export class ZenithSword extends Entity {
     this.ai1 = profile;
   }
 
-  /** GetLerpValue(from,to,t,clamped) 语义 */
+  /** GetLerpValue(from,to,t,clamped) 语义——线性后钳 [0,1]（递减区间 from>to 同式，
+   *  曾按 min/max 早退写反：900→0 区间 t≥900 应得 0 非 1） */
   private static lerpV(a: number, b: number, t: number): number {
-    if (t <= Math.min(a, b)) return 0;
-    if (t >= Math.max(a, b)) return 1;
-    if (a > b) return (t - a) / (b - a);   // 递减区间
-    return (t - a) / (b - a);
+    if (a === b) return t >= a ? 1 : 0;
+    const v = (t - a) / (b - a);
+    return Math.max(0, Math.min(1, v));
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {

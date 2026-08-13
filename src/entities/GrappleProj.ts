@@ -199,7 +199,7 @@ export class GrappleProj extends Entity {
     }
     if (count > this.stats.maxLatched && oldest) oldest.kill();   // :49852-49854
     // :49856-49862 音效 + 速度清零 + 态翻转 + 吸附到格中心
-    game.playSfx('dig', 0.8, i * TILE, j * TILE);         // SoundEngine.PlaySound(0, …)
+    game.playSfx('dig', 1, i * TILE, j * TILE);         // SoundEngine.PlaySound(0, …)
     this.vx = 0;
     this.vy = 0;
     this.ai0 = GRAPPLE_LATCH;

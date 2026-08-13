@@ -34,8 +34,24 @@
     "corruption|15495552 850dec6c ebf023dd 05990685",
     "lakes|e852e01d f6259b95 ebf023dd 73ed031a",
     "slush|42529415 f6259b95 ebf023dd 73ed031a",
-    "dungeon|42529415 f6259b95 ebf023dd 73ed031a",
-    "mcopenings|74b26f9c 311873cc ebf023dd 73ed031a",
-    "beaches|92a84b88 83ab97f4 552ec5ad 8dd6c3f2"
+    "dungeonL|fdf20b64 f6691d2d 57393cc0 a649274d",
+    "dungeonE|234e68f4 85ca3e8c 1d723efa b35f8e52",
+    "dungeonPD|234e68f4 85ca3e8c 1d723efa b35f8e52",
+    "dungeonPi|9e4e2f6c 904fa46c cf0d5fa2 22f95d7a",
+    "dungeonS|38ba2428 a531a04d cf0d5fa2 22f95d7a",
+    "dungeonD|47e7787c 45da598d cf0d5fa2 22f95d7a",
+    "dungeonW|47e7787c 45da598d f7d47feb 22f95d7a",
+    "dungeonP|4754a7d4 12f119d5 f7d47feb 22f95d7a",
+    "dungeonC|d6fb7024 57228c85 f7d47feb 22f95d7a",
+    "dungeonB|6844760b e65f9005 f7d47feb 22f95d7a",
+    "dungeonG|2f64dc4b e430df75 f7d47feb 22f95d7a",
+    "dungeonI|444d640d dfa839c4 f7d47feb 22f95d7a",
+    "dungeonT|79437381 96aa6dac f7d47feb 22f95d7a",
+    "dungeonF|12ebc59c a4cabab4 f7d47feb 22f95d7a",
+    "dungeonPa|eb38d1e9 dc29563c f7d47feb 22f95d7a",
+    "dungeonBa|7a68dc59 fe55f0a4 f7d47feb 22f95d7a",
+    "dungeon|7a68dc59 fe55f0a4 f7d47feb 22f95d7a",
+    "mcopenings|a30b3523 ea2b7a2c f7d47feb 22f95d7a",
+    "beaches|bbb7416b 7a697734 0eff450b 114c2b15"
   ]
 }

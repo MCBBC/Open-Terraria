@@ -161,11 +161,12 @@ export function openResearchPanel(game: Game): void {
   (document.querySelector('.sw-root') ?? document.body).appendChild(panel);
   escHandler = (e) => { if (e.code === 'Escape') closeResearchPanel(); };
   window.addEventListener('keydown', escHandler);
-  game.sfx.play('menuTick', 0.6);
+  game.sfx.play('menuTick', 1);
 }
 
 export function closeResearchPanel(): void {
-  if (window.__swGame) window.__swGame.input.uiBlocking = false;
+  (window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame
+    ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = false);
   panel?.remove();
   panel = null;
   if (escHandler) { window.removeEventListener('keydown', escHandler); escHandler = null; }

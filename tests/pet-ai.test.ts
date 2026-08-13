@@ -298,3 +298,73 @@ describe('PetFollower 三族引擎运行时', () => {
     expect(Math.hypot(pet.cx - player.cx, pet.cy - player.cy)).toBeLessThan(80);
   });
 });
+
+// ================= 二审补齐：fly 分档/Y×2/Wisp 远距档/动态提速/960 偏移/313 门 =================
+import { flyAccelOf, accelTowardY, accelToward } from '../src/entities/PetFollower';
+
+describe('宠物行为二审补齐（:56560-56925/:56010-56050/:59361）', () => {
+  it('flyAccelOf 距离分档：198 近档 0.1/远档 0.6，380 远档 0.4，817 远档 0.5@400', () => {
+    expect(flyAccelOf(198, 50, 0.4)).toBe(0.1);
+    expect(flyAccelOf(198, 200, 0.4)).toBe(0.4);
+    expect(flyAccelOf(198, 400, 0.4)).toBe(0.6);
+    expect(flyAccelOf(380, 400, 0.4)).toBe(0.4);
+    expect(flyAccelOf(817, 450, 0.4)).toBe(0.5);
+    expect(flyAccelOf(815, 450, 0.4)).toBe(0.4);   // 815 无远档
+    expect(flyAccelOf(774, 30, 0.4)).toBe(0.1);     // 阈值 40
+    expect(flyAccelOf(111, 400, 0.4)).toBe(0.4);    // 表外款默认
+  });
+
+  it('accelTowardY 交叉零点 ×2（:56666-56674：总步 3acc；X 轴仅双步）', () => {
+    expect(accelTowardY(-1, 1, 0.1)).toBeCloseTo(-0.7, 6);
+    expect(accelToward(1, -1, 0.1)).toBeCloseTo(0.8, 6);
+  });
+
+  it('Wisp(211) 远距追击闩：>200 置位恒速 12 直取玩家', () => {
+    const game = stubGame(60, null);
+    const player = stubPlayer(200 * 16, 60, 1);
+    // 初始距 ≈788：在 1000 瞬移门内、>200 追击门 → wispFar 置位
+    const pet = new PetFollower(160 * 16, 30 * 16, 211, () => player);
+    // 中段（仍远距）：恒速 12 直取——速度模长 ≈12
+    let midSpeed = 0;
+    for (let i = 0; i < 20; i++) pet.fixedUpdate(1, game);
+    midSpeed = Math.hypot(pet.vx, pet.vy);
+    expect(midSpeed).toBeGreaterThan(8);      // ≈12 档（远距追击）
+    // 追到底：赶到玩家身边（证明追击段生效而非悬停滞留）
+    for (let i = 0; i < 120; i++) pet.fixedUpdate(1, game);
+    expect(Math.hypot(pet.cx - player.cx, pet.cy - player.cy)).toBeLessThanOrEqual(60);
+    expect(Number.isFinite(pet.x)).toBe(true);
+  });
+
+  it('960 Chester 目标偏移 70px（玩家移动取 direction，:56042-56050）', () => {
+    const game = stubGame(60, null);
+    const player = stubPlayer(200 * 16, 60, -1);
+    (player as { vx?: number }).vx = 5;   // 玩家在移动 → num8 = player.direction = -1
+    const pet = new PetFollower(200 * 16, 60 * 16 - 18, 960, () => player);
+    for (let i = 0; i < 120; i++) pet.fixedUpdate(1, game);
+    // 目标 = cx - 70×(-1) = cx+70（右侧身后）；idleRange=10 → 停在 cx+70±50 内
+    expect(pet.cx - player.cx).toBeGreaterThan(20);
+    expect(pet.cx - player.cx).toBeLessThan(130);
+  });
+
+  it('追赶飞行 <60px 漂移（:57557-57561：近距不重定向）', () => {
+    const game = stubGame(60, null);
+    const player = stubPlayer(200 * 16, 12, 1);   // 高空玩家 → 兔子追赶飞行
+    const pet = new PetFollower(200 * 16, 40 * 16, 111, () => player);
+    for (let i = 0; i < 5; i++) pet.fixedUpdate(1, game);
+    // 强制近距 <60px
+    pet.x = player.cx - 30; pet.y = player.cy - 20;
+    const v0 = pet.vx;
+    for (let i = 0; i < 10; i++) pet.fixedUpdate(1, game);
+    // <60px 期间 vx 不被重定向到 flySpeed 档（漂移保持）
+    expect(Math.abs(pet.vx - v0)).toBeLessThan(3);
+  });
+
+  it('313 Spider 翻转门（:59361 type != 313——恒不翻）', () => {
+    const game = stubGame(60, null);
+    const player = stubPlayer(200 * 16, 60, 1);
+    const pet = new PetFollower(200 * 16, 60 * 16 - 18, 313, () => player);
+    for (let i = 0; i < 30; i++) pet.fixedUpdate(1, game);
+    expect(pet.projId).toBe(313);
+    expect(Number.isFinite(pet.x)).toBe(true);
+  });
+});

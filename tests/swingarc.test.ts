@@ -3,7 +3,7 @@
 //   · TrueNightsEdgeSlash 973：锚定伸长 76px / 旋进 / 寿命 ai1+65=97 / t≥80 清伤
 //   · NightsEdgeFly（273 飞斩）：10t 起前漂 + ai1=30 消亡 + 旋进
 import { describe, it, expect } from 'vitest';
-import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly } from '../src/entities/SwingArc';
+import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS } from '../src/entities/SwingArc';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -81,3 +81,34 @@ describe('永夜刃飞斩（273 第二发 |ai0|<0.2 分支）', () => {
     expect(fly.dead).toBe(true);                       // ai1=30
   });
 });
+
+describe('Zenith 933（AI_182 FinalFractal）', () => {
+  it('椭圆轨道绕锚点 + 计数 120 消亡 + 档案光照', () => {
+    const game = makeGame(new World(200, 200, 30, 'open'));
+    const z = new ZenithSword(owner, owner.cx + 400, owner.cy, 190, 757);   // 泰拉档案
+    z.fixedUpdate(1, game);
+    expect(z.lightRGB).toBeTruthy();
+    const c0x = z.cx, c0y = z.cy;
+    let guard = 0;
+    while (!z.dead && guard++ < 500) z.fixedUpdate(1, game);
+    expect(z.dead).toBe(true);                          // counter ≥120 消亡
+    // 轨道：中途位置偏离初始（椭圆旋转）
+    expect(Math.hypot(z.cx - c0x, z.cy - c0y)).toBeGreaterThan(1);
+  });
+
+  it('慢速剑计数更快（GetLerpValue(900,0,|vel|×2) 反比）', () => {
+    const game = makeGame(new World(200, 200, 30, 'open'));
+    const fast = new ZenithSword(owner, owner.cx + 4000, owner.cy, 190, 4956);  // |vel|=2000
+    const slow = new ZenithSword(owner, owner.cx + 20, owner.cy, 190, 4956);    // |vel|=10
+    fast.fixedUpdate(1, game); slow.fixedUpdate(1, game);
+    expect(slow['counter']).toBeGreaterThan(fast['counter']);   // 慢 → lv=1 → num=2
+  });
+
+  it('档案表随机不落在 4956 之外缺项；randomFractalProfile 命中表内', () => {
+    for (let i = 0; i < 50; i++) {
+      const id = randomFractalProfile();
+      expect(FRACTAL_KEYS).toContain(id);
+    }
+  });
+});
+

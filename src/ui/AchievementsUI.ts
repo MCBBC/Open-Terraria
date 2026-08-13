@@ -180,7 +180,7 @@ export function openAchievementsPanel(game: Game): void {
   openPanel = panel;
   openEscHandler = (e) => { if (e.code === 'Escape') closeAchievementsPanel(); };
   window.addEventListener('keydown', openEscHandler);
-  game.sfx.play('menuTick', 0.6);
+  game.sfx.play('menuTick', 1);
 }
 
 export function closeAchievementsPanel(): void {

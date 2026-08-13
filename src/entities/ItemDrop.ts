@@ -126,7 +126,7 @@ export class ItemDrop extends Entity {
             game.addDamageNumber(player.cx, player.y, 100, false, '#4080FF');
           }
           this.dead = true;
-          game.playSfx('pickup', 0.75); // 原版 SoundID 7 Grab
+          game.playSfx('pickup', 1); // 原版 SoundID 7 Grab
           return;
         }
         const before = this.stack;
@@ -249,7 +249,7 @@ export class ItemDrop extends Entity {
     const liqType = st.liquidType[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
     const wasWater = this.inWater;
     this.inWater = li > 80 && (liqType === 1 || liqType === 3);
-    if (this.inWater && !wasWater && this.vy > 1.2) game.playSfx('splash', 0.35);
+    if (this.inWater && !wasWater && this.vy > 1.2) game.playSfx('splash', 1);
     if (this.shimmerWet && !this.shimmered) {
       this.updateShimmer(game);
     } else if (this.shimmerTime > 0) {
@@ -333,7 +333,7 @@ export class ItemDrop extends Entity {
         this.shimmered = true;    // 上浮漂浮
         this.shimmerTime = 1;
         this.vx *= 0.1; this.vy *= 0.1;
-        game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+        game.playSfx('shimmerSplash', 1, this.cx, this.cy);
         return;
       }
     }
@@ -351,7 +351,7 @@ export class ItemDrop extends Entity {
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1832-1836 type=0
       else this.shimmerTime = 1;                                   // :1948-1951 共尾
       this.vx *= 0.1; this.vy *= 0.1;                              // :1958
-      game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
       return;
     }
     // 560 史莱姆王冠（:1838-1854）：雨未进行 → 触发史莱姆雨并消耗 1 个
@@ -362,7 +362,7 @@ export class ItemDrop extends Entity {
       this.stack--;
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1845-1848
       else this.shimmered = true;                                  // :1850-1853
-      game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
       return;
     }
     // makeNPC 瓶中小动物（:1855-1877）：逐个放生（上限 min(stack, 空闲 NPC 槽, 50)），
@@ -383,7 +383,7 @@ export class ItemDrop extends Entity {
       if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1873-1876
       else this.shimmerTime = 1;
       this.vx *= 0.1; this.vy *= 0.1;
-      game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
       return;
     }
     this.tryDecraft(game, vid);   // :1878 else-if 链末端
@@ -422,7 +422,7 @@ export class ItemDrop extends Entity {
     this.stack -= outcome.consumed;              // :1927 stack -= 次数×createStack
     if (this.stack <= 0) { this.stack = 0; this.dead = true; }
     else this.shimmerTime = 1;                   // :1936 剩余 stack 保留并重置浸入进度
-    game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+    game.playSfx('shimmerSplash', 1, this.cx, this.cy);
     return true;
   }
 

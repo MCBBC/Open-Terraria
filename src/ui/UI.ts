@@ -744,7 +744,7 @@ export class UI {
         const cur = this.game.player.inv.slots[i];
         if (cur) {
           cur.favorited = !cur.favorited;
-          this.game.sfx.play('menuTick', 0.5);
+          this.game.sfx.play('menuTick', 1);
           this.refreshAll();
           return;
         }
@@ -814,7 +814,7 @@ export class UI {
     else if (where === 'dye') inv.dye[i] = tmp ?? null;
     else if (where === 'misc') inv.miscEquips[i] = tmp ?? null;
     else inv.miscDyes[i] = tmp ?? null;
-    this.game.sfx.play('menuTick', 0.6);
+    this.game.sfx.play('menuTick', 1);
     // 成就：装备态检查（AchievementsHelper.HandleOnEquip）
     this.game.achNotifyEquipChanged();
   }
@@ -858,7 +858,7 @@ export class UI {
       // 无箱→垃圾桶（覆盖旧内容，OverrideLeftClick cursorOverride 6 :689-706）
       inv.trash = cur;
       inv.slots[i] = null;
-      this.game.sfx.play('menuTick', 0.5);
+      this.game.sfx.play('menuTick', 1);
       this.refreshAll();
       return;
     }
@@ -1657,7 +1657,7 @@ export class UI {
           e.stopPropagation();
           if (this.game.player.inv.currentLoadout === k) return;
           this.game.player.inv.trySwitchingLoadout(k);
-          this.game.sfx.play('menuTick', 0.6); // SoundID 12（TrySwitchingLoadout）
+          this.game.sfx.play('menuTick', 1); // SoundID 12（TrySwitchingLoadout）
           // 切套白闪（GetColorByLoadout :2554-2559：Remap(dt,0,30,0.5,0)³→白）
           // ★ class 必须播完即摘：display:none→block 会使 CSS 动画重播，
           //   残留 class 会导致此后每次打开背包全体槽位白闪
@@ -2772,7 +2772,7 @@ export class UI {
   initInGame() {
     // 原版左下角消息列(Main.NewText → LegacyChatMonitor;NewText 播 SoundID 12)
     this.chatMonitor?.clear();
-    this.chatMonitor = new ChatMonitor(this.root, () => UISfx.sfx.play('menuTick', 0.6));
+    this.chatMonitor = new ChatMonitor(this.root, () => UISfx.sfx.play('menuTick', 1));
     // 回放进世界前缓冲的消息(如新世界出生时的 NPC 入驻公告)
     for (const [t, r, g, b, width] of this.chatPending) this.chatMonitor.message(t, r, g, b, width);
     this.chatPending = [];

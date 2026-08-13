@@ -1705,7 +1705,10 @@ export class Renderer {
     const fh = img.naturalHeight / rows;
     const sh = Math.floor(fh);
     const sw = img.naturalWidth;
-    // Gore.GetAlpha（:1486）：opacity = (255 - alpha)/255
+    // Gore.GetAlpha（:1486）：opacity = (255 - alpha)/255；
+    // 16/17 火苗（:1487-1490 返回 Color(255,255,255,0)）——XNA 预乘混合 A=0 即加性
+    // 全亮（1405 同处取场景光照 RGB，Gore.cs:1164-1174；此处从 1456）→ canvas 'lighter'
+    ctx.globalCompositeOperation = p.additive ? 'lighter' : 'source-over';
     ctx.globalAlpha = Math.max(0, (255 - p.alpha) / 255);
     if (p.rotation === 0 && p.scale === 1) {
       // 直绘路径（Main.cs:21706-21742 原点即贴图中心：落点 + 尺寸/2）
@@ -4611,10 +4614,15 @@ export class Renderer {
           if (ar || icon) {
             const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
             // 持位（ApplyHoldStyle dir=1 空间；offX 正=身前，offY 从 p.y 起算）：
-            //  1 默认 = (fw/2+2, 24)（:49720）；2 雨伞 = (-16, 22)（:49764）、
-            //  其余 = (6, 16) 旋 -0.79（:49777）；3 = (-2, 中心-fh/2)（:49790）；
-            //  6 = (8, 38+头饰)（:49833）；8 = (6, 28+头饰)（:49851）。rot 恒 0（除 2 的 else）
+            //  1 默认 = (fw/2+2, 24)（:49720）；荧光棒族 282/286/3112/4776/5643 再
+            //  X-2·dir、Y+4（:49657-49663；3002 黏性荧光棒不在表内）；2 雨伞 =
+            //  (-16, 22)（:49764）、其余 = (6, 16) 旋 -0.79（:49777）；3 = (-2, 中心-fh/2)
+            //  （:49790）；6 = (8, 38+头饰)（:49833）；8 = (6, 28+头饰)（:49851）。
+            //  rot 恒 0（除 2 的 else）。
             let offX = fw * 0.5 + 2, offY = 24, rot = 0;
+            if (hs === 1 && vid >= 0 && (vid === 282 || vid === 286 || vid === 3112 || vid === 4776 || vid === 5643)) {
+              offX = fw * 0.5; offY = 28;   // (fw/2+2-2, 24+4)
+            }
             if (hs === 2) {
               if (vid === 946 || vid === 4707) { offX = -16; offY = 22; }
               else { offX = 6; offY = 16; rot = -0.79; }

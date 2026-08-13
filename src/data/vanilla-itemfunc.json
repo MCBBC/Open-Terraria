@@ -14683,5 +14683,10 @@
  "2674": {
   "bait": 15,
   "consumable": 1
+ },
+ "2422": {
+  "fishingPole": 25,
+  "melee": 1,
+  "autoReuse": 1
  }
 }

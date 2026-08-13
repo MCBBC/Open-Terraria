@@ -534,6 +534,50 @@ item({ key: 'vi_2287_winter_cape', name: '', value: 1 });
 item({ key: 'vi_1179_chlorophyte_bullet', name: '', value: 1 });
 item({ key: 'vi_4766_world_globe', name: '', value: 1 });
 item({ key: 'vi_4954_celestial_starboard', name: '', value: 1 });
+// ---- 原版翅膀全量注册（vanilla-itemstats wing 槽 47 只补齐 42 缺——
+// 属性链 wingSlot→wingStatOf 1:1 已备，图标 atlas 全覆盖；2026-08-13 ----
+item({ key: 'vi_492_恶魔之翼', name: '', value: 1 });
+item({ key: 'vi_493_天使之翼', name: '', value: 1 });
+item({ key: 'vi_665_red的翅膀', name: '', value: 1 });
+item({ key: 'vi_748_jetpack', name: '', value: 1 });
+item({ key: 'vi_749_蝴蝶之翼', name: '', value: 1 });
+item({ key: 'vi_761_仙灵之翼', name: '', value: 1 });
+item({ key: 'vi_785_鸟妖之翼', name: '', value: 1 });
+item({ key: 'vi_786_骨之翼', name: '', value: 1 });
+item({ key: 'vi_821_烈焰之翼', name: '', value: 1 });
+item({ key: 'vi_822_冰冻之翼', name: '', value: 1 });
+item({ key: 'vi_823_幽灵之翼', name: '', value: 1 });
+item({ key: 'vi_948_蒸汽朋克之翼', name: '', value: 1 });
+item({ key: 'vi_1162_叶之翼', name: '', value: 1 });
+item({ key: 'vi_1165_蝙蝠之翼', name: '', value: 1 });
+item({ key: 'vi_1515_蜜蜂之翼', name: '', value: 1 });
+item({ key: 'vi_1583_dtownswings', name: '', value: 1 });
+item({ key: 'vi_1584_will的翅膀', name: '', value: 1 });
+item({ key: 'vi_1585_crowno的翅膀', name: '', value: 1 });
+item({ key: 'vi_1586_cenx的翅膀', name: '', value: 1 });
+item({ key: 'vi_1797_褴褛仙灵之翼', name: '', value: 1 });
+item({ key: 'vi_1830_阴森之翼', name: '', value: 1 });
+item({ key: 'vi_1866_hoverboard', name: '', value: 1 });
+item({ key: 'vi_1871_喜庆之翼', name: '', value: 1 });
+item({ key: 'vi_2280_甲虫之翼', name: '', value: 1 });
+item({ key: 'vi_2494_鳍翼', name: '', value: 1 });
+item({ key: 'vi_2609_猪龙鱼之翼', name: '', value: 1 });
+item({ key: 'vi_2770_蛾怪之翼', name: '', value: 1 });
+item({ key: 'vi_3228_lazure的屏障台', name: '', value: 1 });
+item({ key: 'vi_3580_yoraiz0r的魔法', name: '', value: 1 });
+item({ key: 'vi_3582_jim的翅膀', name: '', value: 1 });
+item({ key: 'vi_3588_skiphs的爪子', name: '', value: 1 });
+item({ key: 'vi_3592_loki的翅膀', name: '', value: 1 });
+item({ key: 'vi_3883_双足翼龙之翼', name: '', value: 1 });
+item({ key: 'vi_3924_arkhalis的飞翼', name: '', value: 1 });
+item({ key: 'vi_3928_leinfors的卷缠斗篷', name: '', value: 1 });
+item({ key: 'vi_4746_safeman的毛毯斗篷', name: '', value: 1 });
+item({ key: 'vi_4823_女皇之翼', name: '', value: 1 });
+item({ key: 'vi_5586_鸡骨翅膀', name: '', value: 1 });
+item({ key: 'vi_5627_花栗鼠斗篷', name: '', value: 1 });
+item({ key: 'vi_5659_英雄翅膀', name: '', value: 1 });
+item({ key: 'vi_5686_卡兹默德斯之翼', name: '', value: 1 });
+item({ key: 'vi_6140_露娜的符文妖精翅膀', name: '', value: 1 });
 item({ key: 'vi_4730_ghostar_s_infinity_eight', name: '', value: 1 });
 item({ key: 'vi_4758_blade_staff', name: '', value: 1 });
 item({ key: 'vi_4765_tree_globe', name: '', value: 1 });
@@ -1121,6 +1165,7 @@ import { TILE_KEY_BY_SHEET } from './tiles';
 }
 
 // ---- 钓鱼链物品补齐(2026-08-13:饵/竿/药水/渔获——此前正常玩法无法抛竿,B26 断链) ----
+item({ key: 'vi_2422_hotline_fishing_hook', name: '', maxStack: 1, value: 1 }); // 熔线钓钩(Hotline Fishing Hook——岩浆钓三源之一,:19230/:19375-19378)
 item({ key: 'vi_1992_f1992', name: '', maxStack: 999, value: 1 }); // 饵(黑蜻蜓)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2001_f2001', name: '', maxStack: 999, value: 1 }); // 饵(紫蜻蜓)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2002_f2002', name: '', maxStack: 999, value: 1 }); // 饵(红蜻蜓?)——数值/名走 itemfunc+l10n 链

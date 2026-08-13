@@ -314,7 +314,7 @@ describe('玩家浸微光（buff 353 + 穿墙下坠 + 脱困传送，Player.cs:2
     expect(p.inShimmer).toBe(true);
     expect(p.shimmering).toBe(true);          // y=36 < UnderworldLayer(=h-200=56) → buff 353 生效
     expect(p.timeShimmering).toBe(1);
-    expect(p.damage(9999, p.cx, p.cy)).toBe(false); // Hurt :37591-37595 直接 0
+    expect(p.damage(9999, p.cx, p.cy)).toBe(0); // Hurt :37591-37595 免伤——damage() 返回数值 0=未受伤（2026-08-13 重构 false→0，曾 .toBe(false) 陈旧断言）
     // 强制走脱困（≥1200 且有输入）：传送到池外无微光落点
     p.timeShimmering = 1200;
     p.inputX = 1;

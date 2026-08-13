@@ -189,7 +189,7 @@ export class TownNPC extends Entity {
       if (world.store.liquid[si] > 30 && world.store.liquidType[si] === 4) {
         this.shimmered = true;
         game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
-        game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+        game.playSfx('shimmerSplash', 1, this.cx, this.cy);
         if (this.home) {
           this.x = this.home.x * TILE + 8 - this.w / 2;
           this.y = this.home.y * TILE - this.h;
@@ -597,7 +597,7 @@ export class TownNPC extends Entity {
           if (doorType === DOOR_OPEN) closeDoorTile(st, this.doorX, this.doorY);
           else if (doorType === GATE_OPEN) {
             // 高门关门（原版 54266-54274：ShiftTallGate(closing:true)，tile 389 → 388）
-            shiftTallGate(st, this.doorX, this.doorY, true, () => game.playSfx('door_close', 0.8, this.cx, this.cy));
+            shiftTallGate(st, this.doorX, this.doorY, true, () => game.playSfx('door_close', 1, this.cx, this.cy));
           }
         }
         this.closeDoor = false;
@@ -620,12 +620,12 @@ export class TownNPC extends Entity {
         if (opened && before !== st.type[st.idx(x, y)]) {
           this.closeDoor = true;
           this.doorX = x; this.doorY = y;
-          game.playSfx('door_open', 0.8, this.cx, this.cy);
+          game.playSfx('door_open', 1, this.cx, this.cy);
         }
         return;
       }
       if (t === TILE_BY_KEY_DOOR_TILES['tall_gate_closed']) {
-        const anchor = shiftTallGate(st, x, y, false, () => game.playSfx('door_open', 0.8, this.cx, this.cy));
+        const anchor = shiftTallGate(st, x, y, false, () => game.playSfx('door_open', 1, this.cx, this.cy));
         if (anchor) {
           this.closeDoor = true;
           this.doorX = anchor[0]; this.doorY = anchor[1];

@@ -1152,7 +1152,7 @@ export class FlailProj extends Entity {
   /** 撞墙反馈（Collision.HitTiles 尘 + SoundID 0 挖掘音——:41045 num2>0 门） */
   private hitTileFx(game: GameHooks, hx: number, hy: number): void {
     game.spawnParticles(hx + this.w / 2, hy + this.h / 2, '#A09080', 3, 1.5, { life: 14, size: 2 });
-    game.playSfx('dig', 0.5, hx + this.w / 2, hy + this.h / 2);
+    game.playSfx('dig', 1, hx + this.w / 2, hy + this.h / 2);
   }
 }
 

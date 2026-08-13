@@ -232,74 +232,6 @@ export function runDungeonPass(
   const s1x = ri(25, 29) + 0.0, s1y = ri(20, 24) + 0.0;
   const s2x = ri(35, 49) + 0.0, s2y = ri(10, 14) + 0.0;
   let num = Math.trunc(w / 60); num += rn(Math.trunc(num / 3));          // cs:353-355 num += Next(0, num/3)
-  posX = x0; posY = y0;
-  bounds.set(x0, y0, x0, y0);
-  const isDW = (v: number): boolean => v > 0 && DG_DUNGEON_WALLS.has(v);   // 墙 id 即原版 id
-  const isDT = (t: number): boolean => {
-    const sh = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
-    return sh > 0 && DG_DUNGEON_TILES.has(sh);
-  };
-  const inW = (x: number, y: number, fluff: number): boolean =>
-    x >= fluff && x < w - fluff && y >= fluff && y < h - fluff;
-  const wallAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0);
-  const actAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.flags[st.idx(x, y)] : 0);
-  const typAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.type[st.idx(x, y)] : 0);
-  dgLayout(num);
-  // cs:374-396：最高已生成房 InnerBounds 顶部中心回写
-  {
-    const ib = rooms[0].inner;
-    let bx = (ib.L + ib.R) / 2, by = ib.T;
-    for (let i = 1; i < rooms.length; i++) {
-      if (!rooms[i].generated) continue;
-      const b2 = rooms[i].inner;
-      const cx = (b2.L + b2.R) / 2, cy = b2.T;
-      if (cy < by) { bx = cx; by = cy; }
-    }
-    posX = Math.trunc(bx); posY = Math.trunc(by); topX = Math.trunc(bx);
-  }
-  snap('dungeonL');
-  // —— 爬升入口大厅（cs:398-449）——
-  entOnSurface = false;
-  {
-    let roomDelay = 5, guard = 100;
-    while (!entOnSurface) {
-      guard--;
-      if (guard <= 0) break;
-      if (roomDelay > 0) roomDelay--;
-      if (roomDelay === 0 && rn(5) === 0 && posY > ws + 100) {
-        roomDelay = 10;
-        const sx = posX, sy = posY;
-        dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 });
-        dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
-        posX = sx; posY = sy;
-      }
-      dgEntHall(raw());
-    }
-  }
-  dgEntrance(raw(), entSeed);
-  snap('dungeonE');
-  for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
-  for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);
-  snap('dungeonPD');
-  dgEarly(); snap('dungeonPi');
-  dgSpikes(); snap('dungeonS');
-  dgDoorsF(); snap('dungeonD');
-  dgWallVariants(); snap('dungeonW');
-  dgPlatforms(); snap('dungeonP');
-  dgBiomeChests(); snap('dungeonC');
-  dgBookshelves(); snap('dungeonB');
-  dgBasicChests(); snap('dungeonG');
-  bounds.inflate(25);
-  dgLights(); snap('dungeonI');
-  dgTraps(); snap('dungeonT');
-  dgFurniture(); snap('dungeonF');
-  dgPaintings(); snap('dungeonPa');
-  dgBanners(); snap('dungeonBa');
-  snap('dungeon');
-  // —— GenState 回填（消费端：Pyramids 回避带 / 刷怪门槛 / 老头锚）——
-  gs.generatingDungeonPositionX = topX;
-  gs.dungeonY = dungeonY;
-  gs.dungeonEntX = dungeonX; gs.dungeonEntY = dungeonY;
 
   // ================= 基础谓词（DungeonUtils / WorldGen 门禁同构）=================
   function dgSolid(x: number, y: number): boolean {
@@ -2311,6 +2243,74 @@ export function runDungeonPass(
       placeSimple(x, y, TILE_BY_KEY['banner']);
     }
   }
+  posX = x0; posY = y0;
+  bounds.set(x0, y0, x0, y0);
+  const isDW = (v: number): boolean => v > 0 && DG_DUNGEON_WALLS.has(v);   // 墙 id 即原版 id
+  const isDT = (t: number): boolean => {
+    const sh = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+    return sh > 0 && DG_DUNGEON_TILES.has(sh);
+  };
+  const inW = (x: number, y: number, fluff: number): boolean =>
+    x >= fluff && x < w - fluff && y >= fluff && y < h - fluff;
+  const wallAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0);
+  const actAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.flags[st.idx(x, y)] : 0);
+  const typAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.type[st.idx(x, y)] : 0);
+  dgLayout(num);
+  // cs:374-396：最高已生成房 InnerBounds 顶部中心回写
+  {
+    const ib = rooms[0].inner;
+    let bx = (ib.L + ib.R) / 2, by = ib.T;
+    for (let i = 1; i < rooms.length; i++) {
+      if (!rooms[i].generated) continue;
+      const b2 = rooms[i].inner;
+      const cx = (b2.L + b2.R) / 2, cy = b2.T;
+      if (cy < by) { bx = cx; by = cy; }
+    }
+    posX = Math.trunc(bx); posY = Math.trunc(by); topX = Math.trunc(bx);
+  }
+  snap('dungeonL');
+  // —— 爬升入口大厅（cs:398-449）——
+  entOnSurface = false;
+  {
+    let roomDelay = 5, guard = 100;
+    while (!entOnSurface) {
+      guard--;
+      if (guard <= 0) break;
+      if (roomDelay > 0) roomDelay--;
+      if (roomDelay === 0 && rn(5) === 0 && posY > ws + 100) {
+        roomDelay = 10;
+        const sx = posX, sy = posY;
+        dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 });
+        dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
+        posX = sx; posY = sy;
+      }
+      dgEntHall(raw());
+    }
+  }
+  dgEntrance(raw(), entSeed);
+  snap('dungeonE');
+  for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
+  for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);
+  snap('dungeonPD');
+  dgEarly(); snap('dungeonPi');
+  dgSpikes(); snap('dungeonS');
+  dgDoorsF(); snap('dungeonD');
+  dgWallVariants(); snap('dungeonW');
+  dgPlatforms(); snap('dungeonP');
+  dgBiomeChests(); snap('dungeonC');
+  dgBookshelves(); snap('dungeonB');
+  dgBasicChests(); snap('dungeonG');
+  bounds.inflate(25);
+  dgLights(); snap('dungeonI');
+  dgTraps(); snap('dungeonT');
+  dgFurniture(); snap('dungeonF');
+  dgPaintings(); snap('dungeonPa');
+  dgBanners(); snap('dungeonBa');
+  snap('dungeon');
+  // —— GenState 回填（消费端：Pyramids 回避带 / 刷怪门槛 / 老头锚）——
+  gs.generatingDungeonPositionX = topX;
+  gs.dungeonY = dungeonY;
+  gs.dungeonEntX = dungeonX; gs.dungeonEntY = dungeonY;
 }
 export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true, styleRowH?: number, styleColW?: number): boolean {
   const def = TILE_DEFS[tile];

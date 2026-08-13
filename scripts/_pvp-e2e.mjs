@@ -33,6 +33,16 @@ const check = (name, ok, extra = '') => {
   ok ? pass++ : fail++;
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 泵帧（_roomprobe 既有模式：headless 后台页 rAF 被节流,网路收发/代理模拟需手动驱动）
+const pump = (page, n = 1) => page.evaluate(async (k) => {
+  const g = window.__swGame;
+  for (let i = 0; i < k; i++) {
+    try { g.fixedUpdate(1 / 60); g.postUpdate(); } catch (e) { return 'ERR ' + e.message; }
+    await new Promise((r) => setTimeout(r, 15));
+  }
+  return g.tickCount;
+}, n);
+const pump2 = async (n = 1) => { for (let i = 0; i < n; i++) { await pump(pageA); await pump(pageB); } };
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
@@ -55,6 +65,10 @@ check('pvp 房创建', !!room.ok, room.error ?? '');
 
 const pageA = await mkPage();
 const pageB = await mkPage();
+// 房主先本地建世界再进房（joinNetGame 房主链需要已加载 world——_roomprobe 同款流程;
+// 直接裸 join 房主页 tickCount=0 游戏循环不跑,实踩）
+await pageA.evaluate(() => window.__swFlow.newWorld('', 4200, 1200));
+await pageA.waitForFunction(() => !!window.__swGame && !!window.__swGame.world, { timeout: 300000 }).catch(() => {});
 const hostUrl = `ws://127.0.0.1:${PORT}/${room.code}?token=${encodeURIComponent(room.hostToken)}`;
 const guestUrl = `ws://127.0.0.1:${PORT}/${room.code}`;
 const joinA = await pageA.evaluate(async (u) => {
@@ -87,7 +101,7 @@ const platform = async (page, who) => page.evaluate((w) => {
 const platB = await platform(pageB, 'B');
 const platA = await platform(pageA, 'A');
 check('双方平台落位存活', !platA.dead && !platB.dead, JSON.stringify({ platA, platB }));
-await sleep(700); // msg13 双向同步
+await pump2(20); // msg13 双向同步
 
 // ---- 场景准备：双 hostile 异队 + 贴身站位 ----
 const setupA = await pageA.evaluate(async () => {
@@ -108,21 +122,23 @@ const setupB = await pageB.evaluate(() => {
   return { slot: g.net.mySlot, x: g.player.x, y: g.player.y };
 });
 check('A 拿到近战手持物', setupA.heldId >= 0, `heldId=${setupA.heldId}`);
-await sleep(600); // msg13 双向同步
+await pump2(20); // msg13 双向同步
 
 // A 贴到 B 左侧 14px（B 的 msg13 权威位）
 const teleA = await pageA.evaluate((bpos) => {
   const g = window.__swGame;
   g.player.x = bpos.x - 14; g.player.y = bpos.y;
   g.player.vx = 0; g.player.vy = 0;
+  const rps = [...g.net.players.entries()].map(([sl, r]) => ({ sl, active: r.active, x: Math.round(r.x), fresh: r.fresh, hostile: r.hostile, team: r.team }));
   return {
+    ticks: g.tickCount,
     proxies: g.remotePlayerProxies.length, bProxyX: g.remotePlayerProxies[0]?.x ?? -1,
     playersSize: g.net.players.size, mySlot: g.net.mySlot, isHost: g.net.policy.isHost,
-    playerKeys: [...g.net.players.keys()],
+    rps,
   };
 }, setupB).catch((e) => ({ err: String(e) }));
 check('A 侧 B 代理存在', (teleA.proxies ?? 0) >= 1, JSON.stringify(teleA));
-await sleep(600);
+await pump2(20);
 const diagB = await pageB.evaluate(() => ({
   playersSize: window.__swGame.net.players.size, mySlot: window.__swGame.net.mySlot,
   playerKeys: [...window.__swGame.net.keys?.() ?? []],
@@ -139,10 +155,14 @@ const swing = await pageA.evaluate(() => {
   g.swing = { item: held.id, dmg: 25, kb: 4, t: 12, dur: 16, useStyle: 1 };
   g.updateSwingHits();
   const sent = g.swing ? 'swing-alive' : 'swing-consumed';
-  return { sent, bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x };
+  return {
+    sent, bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,
+    swingHits: g.swingHitSet.size, hostile: g.player.hostile, pvpRoom: g.net.policy.pvpAllowed,
+  };
 }).catch((e) => ({ err: String(e) }));
 check('① A 挥击执行', !swing.err, JSON.stringify(swing));
-await sleep(800);
+await pump2(10);
+await sleep(400); // WS 往返
 const bHit = await pageB.evaluate(() => {
   const g = window.__swGame;
   return { hp: g.player.hp, ifr: g.player.iframes, cause: JSON.stringify(g.player.lastDamageCause) };
@@ -152,7 +172,8 @@ check('① B 掉血（本地结算）', dmgTaken > 0, `hp ${bHp0}→${bHit.hp}`)
 check('① B 死因=player', bHit.cause.includes('"kind":"player"'), bHit.cause);
 check('① B 无敌帧=8t', bHit.ifr > 0 && bHit.ifr <= 8, `ifr=${bHit.ifr}`);
 // msg16 回报：A 代理 hp 同步
-await sleep(800);
+await pump2(10);
+await sleep(400);
 const aSync = await pageA.evaluate(() => ({
   proxyHp: window.__swGame.remotePlayerProxies[0]?.hp ?? -1,
   bHp: -1,
@@ -162,29 +183,29 @@ check('① msg16 回报 → A 代理 hp 同步', Math.abs(aSync.proxyHp - bHpNow
 
 // ② 同队免疫
 await pageA.evaluate(() => { const g = window.__swGame; g.player.team = 2; g.net.sendPvpState(); });
-await sleep(500);
+await pump2(6); await sleep(300);
 const hpSame = await pageB.evaluate(() => window.__swGame.player.hp);
 await pageA.evaluate(() => {
   const g = window.__swGame;
   g.net.sendStrikePlayer(g.net.players.keys().next().value ?? 0, 30, 1, 0, -1, 0);
 });
-await sleep(500);
+await pump2(6); await sleep(300);
 const bSame = await pageB.evaluate(() => window.__swGame.player.hp);
 check('② 同队免疫（不掉血）', bSame === hpSame, `${hpSame}→${bSame}`);
 
 // ③ 单侧 hostile 免疫：A 关 hostile 再打
 await pageA.evaluate(() => { const g = window.__swGame; g.player.team = 1; g.player.hostile = false; g.net.sendPvpState(); });
-await sleep(500);
+await pump2(6); await sleep(300);
 const hpGate0 = await pageB.evaluate(() => window.__swGame.player.hp);
 await pageA.evaluate(() => {
   const g = window.__swGame;
   for (const s of g.net.players.keys()) g.net.sendStrikePlayer(s, 30, 1, 0, -1, 0);
 });
-await sleep(500);
+await pump2(6); await sleep(300);
 const bGate = await pageB.evaluate(() => window.__swGame.player.hp);
 check('③ A 关 hostile 后攻击免疫', bGate === hpGate0, `${hpGate0}→${bGate}`);
 await pageA.evaluate(() => { window.__swGame.player.hostile = true; window.__swGame.net.sendPvpState(); });
-await sleep(400);
+await pump2(6); await sleep(300);
 
 // ④ 弹幕链：A 朝 B 位置射友好箭（pvpOn → bit6）
 const hpBefore4 = await pageB.evaluate(() => window.__swGame.player.hp);
@@ -193,19 +214,49 @@ await pageB.evaluate(() => { window.__swGame.player.iframes = 0; });
 const arrowShot = await pageA.evaluate(async (bp) => {
   const g = window.__swGame;
   const { Arrow } = await import('/src/entities/Arrow.ts');
-  // A 的弹从 A 手上出发朝 B（vx=1 缓飞保证差分广播）
-  const a = new Arrow(g.player.x + 10, g.player.y, 1, 0, 30, 3, 1, null);
+  // 直接生成在 B 代理身上（vx=0.5 维持差分广播防静止跳帧）
+  const bpr = g.remotePlayerProxies[0];
+  if (!bpr) return { err: 'no proxy' };
+  const a = new Arrow(bpr.x, bpr.y, 0.5, 0, 30, 3, 1, null);
   a.noSlot = false;
   g.entities.add(a, 'projectiles');
-  return { id: a.id, ok: !a.dead };
+  return { id: a.id, ok: !a.dead, bx: bpr.x, by: bpr.y };
 }, bPos2).catch((e) => ({ err: String(e) }));
 check('④ A 射出 PvP 弹', !arrowShot.err, JSON.stringify(arrowShot));
-await sleep(1500);
+await pump2(30); await sleep(500); // 弹幕差分广播 + 傀儡命中
 const bProj = await pageB.evaluate(() => ({
   hp: window.__swGame.player.hp,
   cause: JSON.stringify(window.__swGame.player.lastDamageCause),
 }));
 check('④ 弹幕链 B 命中（掉血）', bProj.hp < hpBefore4, `${hpBefore4}→${bProj.hp}`);
+const pupDiag = await pageB.evaluate(() => {
+  const g = window.__swGame;
+  const pups = [...g.netProjPuppets.entries()].map(([id, pu]) => ({
+    id, pvp: pu.pvp, owner: pu.ownerSlot, kind7: pu.kind7,
+    x: Math.round(pu.p.x), y: Math.round(pu.p.y), dmg: pu.p.damage, immune: pu.pvpImmuneT,
+  }));
+  const owner0 = g.net.players.get(0);
+  return {
+    pups,
+    p0: owner0 ? { active: owner0.active, hostile: owner0.hostile, team: owner0.team } : null,
+    me: { hostile: g.player.hostile, team: g.player.team, x: Math.round(g.player.x), y: Math.round(g.player.y) },
+  };
+});
+console.log('pupDiag:', JSON.stringify(pupDiag));
+const projDiagA = await pageA.evaluate((arrowId) => {
+  const g = window.__swGame;
+  const list = g.entities.projectiles;
+  const arrow = list.find((e) => e.id === arrowId);
+  const last = g.netProjLast.get(arrowId);
+  return {
+    projCount: list.length, arrowAlive: !!arrow && !arrow.dead,
+    ax: arrow ? Math.round(arrow.x) : -1, ay: arrow ? Math.round(arrow.y) : -1,
+    lastX: last ? Math.round(last.x) : null, lastT: last ? last.t : null,
+    tick: g.tickCount, hostile: g.player.hostile, pvpRoom: g.net.policy.pvpAllowed,
+    netProjLastSize: g.netProjLast.size,
+  };
+}, arrowShot.id);
+console.log('projDiagA:', JSON.stringify(projDiagA));
 
 // ⑤ 爆炸链：A 在 B 脚下引爆
 await pageB.evaluate(() => { window.__swGame.player.iframes = 0; });
@@ -216,7 +267,7 @@ const bPos5 = await pageB.evaluate(() => ({
 await pageA.evaluate((pos) => {
   window.__swGame.explodeAt(pos.tx, pos.ty, 60, 3, false, undefined, 0, 28);
 }, bPos5);
-await sleep(900);
+await pump2(10); await sleep(400);
 const bBoom = await pageB.evaluate(() => ({
   hp: window.__swGame.player.hp,
   cause: JSON.stringify(window.__swGame.player.lastDamageCause),
@@ -230,12 +281,12 @@ await pageB.evaluate(() => {
   g.player.hp = 5; g.player.iframes = 0;
   g.net.syncHp();
 });
-await sleep(400);
+await pump2(4); await sleep(300);
 const bSlot = await pageB.evaluate(() => window.__swGame.net.mySlot);
 await pageA.evaluate((slot) => {
   window.__swGame.net.sendStrikePlayer(slot, 50, 1, 0, -1, 0);
 }, bSlot);
-await sleep(900);
+await pump(pageB, 10); await sleep(400);
 const bDead = await pageB.evaluate(() => {
   const g = window.__swGame;
   return {

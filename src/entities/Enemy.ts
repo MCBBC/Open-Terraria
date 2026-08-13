@@ -6343,9 +6343,11 @@ export class Enemy extends Entity {
       else game.playSfx('killed', 1, this.cx, this.cy);
       // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →
       // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece
-      // （位置/速度/ai 门 1:1，Gore.NewGore 随机扰动在 GorePiece.newGore 内）。
-      // 无表项 = 原版只出尘不出块（史莱姆族等）→ 只走下方彩色粒子近似
-      spawnNpcDeathGore(this, game, Math.sign(kbx) || 1);
+      // （位置/速度/ai 门/gates 守卫/post 后处理 1:1，Gore.NewGore 随机扰动在
+      // GorePiece.newGore 内）。spriteDirection = 本仓 facing（同符号约定，表内
+      // `spriteDirection != -1` 类镜像分支门用）。无表项 = 原版只出尘不出块
+      // （史莱姆族等）→ 只走下方彩色粒子近似
+      spawnNpcDeathGore(this, game, Math.sign(kbx) || 1, this.facing);
       // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
       // （兼作原版 HitEffect 的血尘近似，与 gore 碎块叠加）
       const [c1, c2, c3] = this.def.gore;

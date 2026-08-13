@@ -126,7 +126,8 @@ export class Bobber extends Entity {
   private fishingPower(p: Player, game?: GameHooks): number {
     let base = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0)
       + p.equipStats.fishingSkill;
-    if (p.equipStats.waterWalk) base += 5;  // canFloatInWater 漂浮态（:41546-41549;waterWalk 族=漂浮资格）   // 装备侧渔力（钓具族+渔夫甲+软糖虫,:12549-12556/:13022-13027/:12451）
+    if (p.equipStats.waterWalk) base += 5;  // canFloatInWater 漂浮态（:41546-41549;waterWalk 族=漂浮资格）
+    if ((p as unknown as { isSitting?: boolean }).isSitting) base += 5;  // 坐姿（:41550-41553）   // 装备侧渔力（钓具族+渔夫甲+软糖虫,:12549-12556/:13022-13027/:12451）
     if (p.buffs.has(BuffType.Tipsy)) base += 5;                  // buff 25 :41542-41545
     if (game) {
       const w = game.world as World;
@@ -172,7 +173,7 @@ export class Bobber extends Entity {
         // 此处把中心对齐到入液行中部，保证 FishingCheck 的 Center/16 坐标落在液格内
         const rowY = Math.floor((this.y + this.h) / TILE);
         this.y = rowY * TILE + (TILE - this.h) / 2;
-        game.playSfx('splash', 0.6);
+        game.playSfx('splash', 1);
       } else if (liqType === 'lava') {
         // 岩浆：无熔线钓钩配饰则浮标烧毁（accLavaFishing 门）
         const canLava = this.ownerLavaOk();
@@ -300,7 +301,9 @@ export class Bobber extends Entity {
     });
     if (this.catchId > 0 || this.catchEnemy > 0) {
       this.openBiteWindow(level);                     // :19348/:19362
-      game.playSfx('splash', 0.8);
+      game.playSfx('splash', 1);
+      // 声呐药水音效（Projectile.cs:19340-19346 SoundID Item9——文字已接、音效 2026-08-13 补）
+      if (p.buffs.has(BuffType.Sonar)) game.playSfxFile?.('Item_9', 0.8, this.cx, this.cy);
       game.spawnParticles(this.cx, this.cy, this.catchEnemy > 0 ? '#C04040' : '#80B8FF',
         6, 1.5, { life: 24 });
       return;

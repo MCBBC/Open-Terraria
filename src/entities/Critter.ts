@@ -194,7 +194,7 @@ export class Critter extends Entity {  stepUp = true; // 原版 NPC 全体走 Co
     // NPC.Transform(:81850)：贴底重定位（脚底对齐落点）；新实体微光化渐显
     const e = game.spawnNpcByVanilla?.(to, this.cx, this.y + this.h);
     if (e) { e.spawnAlpha = 254; e.alphaFade = true; }
-    game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+    game.playSfx('shimmerSplash', 1, this.cx, this.cy);
     return true;
   }
 

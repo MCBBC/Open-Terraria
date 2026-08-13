@@ -16,7 +16,9 @@ export interface ArmorSetBonus {
   critMagic?: number;
   noKnockback?: boolean;
   runAccMul?: number;      // runAcceleration *=（暗影套 1.75,:26195-26201）
-  endurance?: number;      // 受伤 ×(1-N)（日曜套 0.12,:16224）
+  endurance?: number;
+  dmgMinion?: number;   // minionDamage +=
+  meleeSpd?: number;    // meleeSpeed +=      // 受伤 ×(1-N)（日曜套 0.12,:16224）
   solar?: boolean;         // 日曜护盾 3 层引擎（每层该次受伤 ×0.2,:37699;每 3s 回 1,:16227）
   dashType?: number;       // 冲撞档（日曜 3,:16288-16294）
   maxRunMul?: number;      // maxRunSpeed *=（暗影套 1.15）
@@ -81,4 +83,25 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   // 头 156 面具 → ghostHurt（伤害强化 engine 未接，登记）
   '101|66|55': { ghostHeal: true, dmgMagic: -0.4, name: 'SpectreHealing' },
   '156|66|55': { ghostHurt: true, name: 'SpectreDamage' },
+};
+
+// ---- DD2 盔甲散件主属性（Player.cs:12709-12810 胸/腿件——头盔哨兵位已由 SUMMON_GEAR 承载,
+// 此处补齐魔伤/近战暴/远程暴/魔耗/移速等此前缺失的字段,2026-08-13） ----
+export const DD2_PIECE_FX: Record<number, Partial<ArmorSetBonus>> = {
+  3798: { dmgMagic: 0.1, dmgMinion: 0.2 },
+  3799: { dmgMinion: 0.1, critMagic: 20, move: 0.2 },
+  3801: { dmgMinion: 0.15 },
+  3802: { dmgMinion: 0.15, critMelee: 15, move: 0.15 },
+  3804: { dmgMinion: 0.2 },
+  3805: { dmgMinion: 0.1, move: 0.2 },
+  3807: { dmgMinion: 0.2 },
+  3808: { dmgMinion: 0.1, critMelee: 15, move: 0.2 },
+  3872: { dmgMinion: 0.3 },
+  3873: { dmgMinion: 0.2, critMelee: 20, move: 0.2 },
+  3875: { dmgMinion: 0.25, dmgMagic: 0.1, manaCostMul: 0.85 },
+  3876: { dmgMinion: 0.2, critMagic: 25, move: 0.2 },
+  3878: { dmgMinion: 0.25, ammoCost80: True },
+  3879: { dmgMinion: 0.25, critRanged: 10, move: 0.2 },
+  3881: { meleeSpd: 0.2, critMelee: 5, dmgMinion: 0.2 },
+  3882: { dmgMinion: 0.2, critMelee: 20, move: 0.3 },
 };

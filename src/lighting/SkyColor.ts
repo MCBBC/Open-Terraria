@@ -115,6 +115,10 @@ export class FlickerClock {
   /** Disco RGB:6 相循环,每通道步进 7/帧(0-255) */
   discoR = 255; discoG = 0; discoB = 0;
   private discoStyle = 0;
+  /** Main.essScale（Main.cs:602 初值 1、:61705-61713 ±0.01/帧钳 0.7-1.0，绘制帧推进）——
+   *  四柱魂掉落光/夜爬虫光乘区 */
+  essScale = 1;
+  private essDir = -1;
   /** Main.timeForVisualEffects（Main.cs:17110 每帧 +1，钳 216000）——微光波形/瓶中物动画时钟 */
   timeForVisualEffects = 0;
   /** 水母笼动画态（Main.cs:16470-16530 jellyfishCageMode[3,25]：0 静息/1 起跳/2 高亮/3 落回
@@ -159,6 +163,11 @@ export class FlickerClock {
       case 4: this.discoR += STEP; if (this.discoR >= 255) { this.discoR = 255; this.discoStyle = 5; } break;
       case 5: this.discoB -= STEP; if (this.discoB <= 0) { this.discoB = 0; this.discoStyle = 0; } break;
     }
+
+    // essScale 三角波（Main.cs:61705-61713）
+    this.essScale += this.essDir * 0.01;
+    if (this.essScale > 1) { this.essScale = 1; this.essDir = -1; }
+    else if (this.essScale < 0.7) { this.essScale = 0.7; this.essDir = 1; }
 
     // timeForVisualEffects（:17110-17112）
     if (++this.timeForVisualEffects >= 216000) this.timeForVisualEffects = 0;

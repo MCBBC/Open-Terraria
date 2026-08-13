@@ -83,10 +83,16 @@ export function scanBannerNpcs(
 }
 
 /** 旗 buff 乘区（ItemID.Sets.BannerStrength:普通族 1.0 → 伤 ×1.5/受伤 ×0.75,
- *  专家 ×2/×0.5;DD2 3837-3846 族 0.2 档本批不区分,登记） */
-export function bannerDamageMult(expert: boolean): number {
+ *  专家 ×2/×0.5;DD2 族(itemId 3837-3846)0.2 档 → ×1.1/×0.917,专家 ×1.2/×0.833
+ *  ——2026-08-13 区分,itemId 参数=旗的对应物品 id） */
+const DD2_BANNER_ITEMS = new Set([3837, 3838, 3839, 3840, 3841, 3842, 3843, 3844, 3845, 3846]);
+export function bannerDamageMult(expert: boolean, itemId = 0): number {
+  const dd2 = DD2_BANNER_ITEMS.has(itemId);
+  if (dd2) return expert ? 1.2 : 1.1;
   return expert ? 2 : 1.5;
 }
-export function bannerReceivedMult(expert: boolean): number {
+export function bannerReceivedMult(expert: boolean, itemId = 0): number {
+  const dd2 = DD2_BANNER_ITEMS.has(itemId);
+  if (dd2) return expert ? 0.833 : 0.917;
   return expert ? 0.5 : 0.75;
 }

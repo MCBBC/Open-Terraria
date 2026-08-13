@@ -40,6 +40,8 @@ type PetFamily = 'ground' | 'fly' | 'hover';
 interface OwnerRef {
   x: number; y: number; w: number; h: number;
   cx: number; cy: number; facing: number; dead: boolean;
+  /** 玩家速度（动态提速门 :57540/:59145 消费） */
+  vx?: number; vy?: number;
 }
 
 interface PetAiEntry {
@@ -107,19 +109,6 @@ function resolveParams(projId: number): PetParams | null {
 }
 
 // ===================== 共享小工具 =====================
-/** 原版加速趋近模式（Projectile.cs 各宠物分支通用写法）：
- *  cur < want → +=acc（反向时再 +=acc）；cur > want → -=acc（对称） */
-function accelToward(cur: number, want: number, acc: number): number {
-  if (cur < want) {
-    cur += acc;
-    if (acc > 0.05 && cur < 0) cur += acc;
-  } else if (cur > want) {
-    cur -= acc;
-    if (acc > 0.05 && cur > 0) cur -= acc;
-  }
-  return cur;
-}
-
 /** 实体盒是否嵌入实心块（越界视作实心——追赶飞行落回门的嵌块判定） */
 function solidAtBox(st: { inBounds(c: number, r: number): boolean; isSolid(c: number, r: number): boolean },
   x: number, y: number, w: number, h: number): boolean {
@@ -146,6 +135,51 @@ function jumpPick(st: { inBounds(c: number, r: number): boolean; isSolid(c: numb
 
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
+/** 原版加速趋近模式（Projectile.cs 各宠物分支通用写法）：
+ *  cur < want → +=acc（反向时再 +=acc）；cur > want → -=acc（对称） */
+export function accelToward(cur: number, want: number, acc: number): number {
+  if (cur < want) {
+    cur += acc;
+    if (acc > 0.05 && cur < 0) cur += acc;
+  } else if (cur > want) {
+    cur -= acc;
+    if (acc > 0.05 && cur > 0) cur -= acc;
+  }
+  return cur;
+}
+
+/** fly 族 Y 轴加速（:56666-56674）：交叉零点时额外步 ×2（vy += num41 后再
+ *  velocity.Y<0 时 += num41*2 —— 总步 3×acc；X 轴无此倍率） */
+export function accelTowardY(cur: number, want: number, acc: number): number {
+  if (cur < want) {
+    cur += acc;
+    if (acc > 0.05 && cur < 0) cur += acc * 2;
+  } else if (cur > want) {
+    cur -= acc;
+    if (acc > 0.05 && cur > 0) cur -= acc * 2;
+  }
+  return cur;
+}
+
+/** fly 族距离分档加速度（:56560-56640，仅宠物款）：[近阈值, 近档] + [远阈值, 远档]
+ *  ——先判 < 近阈值再判 > 远阈值（同 d 不同时成立，后者覆盖）。表外款默认 0.4 */
+const FLY_ACCEL_TIERS: Record<number, { near?: [number, number]; far?: [number, number] }> = {
+  380:  { near: [100, 0.1], far: [300, 0.4] },   // :56596-56605
+  198:  { near: [100, 0.1], far: [300, 0.6] },   // :56611-56619（886 非宠物不入表）
+  815:  { near: [100, 0.1] },                     // :56581-56590（无远档）
+  817:  { near: [100, 0.1], far: [400, 0.5] },    // :56581-56593（815 排除远档）
+  774:  { near: [40, 0.1], far: [300, 0.6] },     // :56626-56634
+  1046: { near: [40, 0.1], far: [300, 0.6] },     // :56626-56634
+};
+export function flyAccelOf(projId: number, d: number, fallback: number): number {
+  const t = FLY_ACCEL_TIERS[projId];
+  if (!t) return fallback;
+  let acc = fallback;
+  if (t.near && d < t.near[0]) acc = t.near[1];
+  if (t.far && d > t.far[0]) acc = t.far[1];
+  return acc;
+}
+
 // ===================== 实体 =====================
 export class PetFollower extends Entity {
   /** 原版宠物全体走 Collision.StepUp（AI_026 :59280 / AI_067 :47756） */
@@ -166,6 +200,8 @@ export class PetFollower extends Entity {
   private animTick = 0;
   /** aiStyle 67 滚动角（rotation += vx/roll） */
   private rollRot = 0;
+  /** Wisp(211) 远距追击闩（原版 localAI[0]，:56867-56925） */
+  private wispFar = false;
 
   constructor(x: number, y: number, public readonly projId: number,
     private ownerRef: () => OwnerRef | null) {
@@ -213,11 +249,17 @@ export class PetFollower extends Entity {
     // 追赶飞行态（无重力直取玩家；AI_026 :57447-57610）
     if (this.flying) {
       const want = dist || 1;
-      const flySpeed = e.flySpeed ?? D.flySpeed ?? 10;
+      // ★ 玩家高速动态提速（:57540-57543）：num111 = max(num111, |玩家速度|)——
+      //  玩家冲刺/坠落时宠物追赶速度跟随抬高
+      const pSpeed = Math.abs(p.vx ?? 0) + Math.abs(p.vy ?? 0);
+      const flySpeed = Math.max(e.flySpeed ?? D.flySpeed ?? 10, pSpeed);
       const flyAccel = e.flyAccel ?? D.flyAccel ?? 0.2;
-      const tx = (dx0 / want) * flySpeed, ty = (dy0 / want) * flySpeed;
-      this.vx = accelToward(this.vx, tx, flyAccel);
-      this.vy = accelToward(this.vy, ty, flyAccel);
+      // ★ <60px 保持当前速度漂移（:57557-57561 num109<60 → 目标速度=当前速度）
+      if (dist >= 60) {
+        const tx = (dx0 / want) * flySpeed, ty = (dy0 / want) * flySpeed;
+        this.vx = accelToward(this.vx, tx, flyAccel);
+        this.vy = accelToward(this.vy, ty, flyAccel);
+      }
       this.x += this.vx; this.y += this.vy;
       // 落回地面门（:57556-57562）：距玩家 < landRange、玩家落地、宠物不高于玩家脚、
       // 宠物未嵌块 → 退出飞行（vy 钳 ≥ -6）
@@ -240,11 +282,25 @@ export class PetFollower extends Entity {
     }
 
     // ---- 地面行走（:59187-59221）----
-    const targetX = pcx + (e.followDx ?? 0) * p.facing;
+    // ★ 动态目标偏移：960 Chester（:56042-56050）= 玩家身后 70px（玩家移动时取
+    //  direction、静止取方位）；1027 GlowPine（:56014-56018）= 玩家朝向反侧 28px
+    let targetX: number;
+    if (this.projId === 960) {
+      const dir = (p.vx ?? 0) !== 0 ? p.facing : Math.sign(pcx - this.cx) || p.facing;
+      targetX = pcx - 70 * dir;
+    } else if (this.projId === 1027) {
+      targetX = pcx - 28 * p.facing;
+    } else {
+      targetX = pcx + (e.followDx ?? 0) * p.facing;
+    }
     const dxs = targetX - this.cx;
     const idleRange = e.idleRange ?? D.idleRange ?? 85;
     const accel = e.accel ?? D.accel ?? 0.08;
-    const maxSpeed = e.maxSpeed ?? D.maxSpeed ?? 6.5;
+    // ★ 玩家高速动态提速（:59145-59148）：num182 = max(num182, |玩家速度|) 且
+    //  抬升时 num181=0.3——玩家冲刺时地面宠物步速/加速跟随
+    const pSpeedG = Math.abs(p.vx ?? 0) + Math.abs(p.vy ?? 0);
+    const baseMax = e.maxSpeed ?? D.maxSpeed ?? 6.5;
+    const maxSpeed = Math.max(baseMax, pSpeedG);
     if (dxs < -idleRange) {
       this.vx = this.vx > -3.5 ? this.vx - accel : this.vx - accel * 0.25;
     } else if (dxs > idleRange) {
@@ -306,6 +362,24 @@ export class PetFollower extends Entity {
     const brake = e.brake ?? F.brake ?? 50;
     const mode = e.brakeMode ?? 'damp';
     let acc: number;
+    // ★ Wisp(211) 远距追击档（:56867-56925）：localAI[0] 闩——>200 置位；追击中
+    //  恒速 12 直取（<12 直接取位移）；脱离门 = 距 <10 且玩家近乎静止(|v|<12) 且
+    //  玩家着地/飞行坐骑。此前只建模近档 → 玩家跑远 Wisp 明显滞后
+    if (this.projId === 211) {
+      const pSpeed = Math.abs(p.vx ?? 0) + Math.abs(p.vy ?? 0);
+      if (!this.wispFar && d > 200) this.wispFar = true;
+      if (this.wispFar) {
+        if (d < 10 && pSpeed < 12 && ((p.vy ?? 0) === 0)) this.wispFar = false;
+        else {
+          const k = d < 12 ? 1 : 12 / (d || 1);
+          this.vx = dx * k; this.vy = dy * k;
+          this.x += this.vx; this.y += this.vy;
+          if (this.vx > 0.5) this.dir = -1;
+          else if (this.vx < -0.5) this.dir = 1;
+          return;   // 追击段独立收尾（原版分支 return :56921）
+        }
+      }
+    }
     if (d < brake) {
       switch (mode) {
         case 'direct':   // 199(:57021)/211(:56892)：贴身直接取位移
@@ -326,13 +400,13 @@ export class PetFollower extends Entity {
     } else {
       const spd = (e.farSpeed !== undefined && e.farDist !== undefined && d > e.farDist)
         ? e.farSpeed : (e.speed ?? F.speed ?? 14);
-      acc = (e.farAccel !== undefined && d > 300) ? e.farAccel : (e.accel ?? F.accel ?? 0.4);
+      acc = (e.farAccel !== undefined && d > 300) ? e.farAccel : flyAccelOf(this.projId, d, e.accel ?? F.accel ?? 0.4);
       const k = spd / (d || 1);
       dx *= k; dy *= k;
     }
     if (acc > 0) {
       this.vx = accelToward(this.vx, dx, acc);
-      this.vy = accelToward(this.vy, dy, acc);
+      this.vy = accelTowardY(this.vy, dy, acc);   // Y 轴交叉零点 ×2（:56666-56674）
     }
     this.x += this.vx; this.y += this.vy;
     // 贴身钳 vy（:56537-56542，配合"玩家落地且宠物未嵌块"条件近似）
@@ -461,11 +535,13 @@ export class PetFollower extends Entity {
     const useStrip = Number.isFinite(fh) && fh >= 1 && (frames <= 1 || img.height >= frames);
     const sx = 0, sy = useStrip ? Math.round(this.frame * fh) : 0;
     const sw = img.width, sh = useStrip ? Math.round(fh) : img.height;
-    // 翻转 = 原版 spriteDirection（flipSign 映射：+1 朝右翻、-1 朝左翻、0 不翻）
+    // 翻转 = 原版 spriteDirection（flipSign 映射：+1 朝右翻、-1 朝左翻、0 不翻）；
+    // ★ 313 Spider 例外（:59361 `type != 313` 门——原版跳过 spriteDirection 赋值，恒不翻）
     const face = this.params.e.faceFrom === 'player'
       ? (this.ownerRef()?.facing ?? 1)
       : this.dir;
-    const flip = (this.params.e.flipSign ?? 0) !== 0
+    const flip = this.projId !== 313
+      && (this.params.e.flipSign ?? 0) !== 0
       && this.params.e.flipSign === Math.sign(face || 1);
     ctx.save();
     ctx.translate(this.cx, this.cy);

@@ -25,6 +25,8 @@ export interface TorchGodHost {
   dropVanillaItem: (vanillaId: number, px: number, py: number) => void;
   /** 黑暗视野开关（buff 80 Blackout → updateLightDecay ×0.85） */
   setBlackout: (on: boolean) => void;
+  /** 图鉴记账回调（:37109-37116——火把神条目 664 解锁） */
+  onBestiaryUnlock?: (netId: number) => void;
 }
 
 const TORCH_UNLIT_OFFSET = 66;
@@ -32,6 +34,7 @@ const MAX_ATTACKS = 200;
 
 export class TorchGodEvent {
   active = false;
+  onBestiaryUnlock?: (netId: number) => void;
   /** torchGodCooldown（:17926 结束后 3600） */
   cooldown = 0;
   attacks = 0;
@@ -123,6 +126,9 @@ export class TorchGodEvent {
     this.active = false;
     this.host.setBlackout(false);
     this.cooldown = 3600;
+    // 图鉴记账（Player.cs:37109-37116:已用恩惠/带 unlockedBiomeTorches 进世界 →
+    // 立即记 664 火把神条目——bestiary 条目永不解锁的根因,2026-08-13 补）
+    this.onBestiaryUnlock?.(664);
     if (dropFavor && this.attacks >= 95) {
       const p = this.host.playerTile();
       if (p) this.host.dropVanillaItem(5043, p.x * 16, p.y * 16);

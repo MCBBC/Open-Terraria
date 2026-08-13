@@ -662,6 +662,7 @@
    "maxSpeed": 7,
    "flyAccel": 1.8,
    "flySpeed": 16,
+   "landRange": 100,
    "faceFrom": "move",
    "flipSign": 1,
    "frames": 11
@@ -746,6 +747,7 @@
    "name": "ChesterPet",
    "aiStyle": 26,
    "family": "ground",
+   "idleRange": 10,
    "accel": 0.2,
    "maxSpeed": 6,
    "flyAccel": 0.4,

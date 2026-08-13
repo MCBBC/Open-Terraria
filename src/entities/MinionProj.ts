@@ -929,7 +929,7 @@ export class MinionProj extends Entity {
             }
             void boom;
             game.spawnParticles(ecx, ecy, '#FFB040', 18, 4, { life: 36 });
-            game.playSfx('explode', 0.8, this.cx, this.cy);
+            game.playSfx('explosion', 1, this.cx, this.cy);
           }
         }
         return;

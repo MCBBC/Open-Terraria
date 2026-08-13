@@ -26,7 +26,7 @@ export type SfxName =
   | 'liquidWaterLava'   // 水岩浆（TileChangeType.LavaWater）
   | 'liquidHoneyWater'  // 水蜂蜜
   | 'liquidHoneyLava'   // 岩浆蜂蜜
-  | 'shimmerSplash'     // 微光×3：原版即 PlaySound(19,…,4) = Splash_4（音量 ×0.75）
+  | 'shimmerSplash'     // 微光×3：原版即 PlaySound(19,…,4) = Splash_4（case 19 style 4 音量 ×0.75，FILE_CASE_VOL 统一乘）
   // ---- 雕像宝箱怪三轨（SoundID.cs:1105/1107/1109 CreateTrackable，Sounds/Custom/）----
   | 'statueMimicScare'  // 唤醒惊吓（AI_126 :43878，音量 0.8）
   | 'statueMimicJump'   // 跳跃（:43892/:43900，音量 0.3）
@@ -75,7 +75,8 @@ const WAV_MAP: Record<SfxName, string[]> = {
   hurt: ['Player_Hit_0', 'Player_Hit_1', 'Player_Hit_2'],
   killed: ['NPC_Killed_1', 'NPC_Killed_2', 'NPC_Killed_3'],
   pkilled: ['Player_Killed'],
-  zombie: ['Zombie_1', 'Zombie_2', 'Zombie_3', 'Zombie_4', 'Zombie_5', 'Zombie_6'],
+  // case 14 默认变体组 Main.rand.Next(3)（LegacySoundPlayer.cs:816）；音量 ×0.4 见 FILE_CASE_VOL
+  zombie: ['Zombie_0', 'Zombie_1', 'Zombie_2'],
   roar: ['Roar_0', 'Roar_1'],
   pickup: ['Grab'],
   dig: ['Dig_0', 'Dig_1', 'Dig_2'],
@@ -133,6 +134,47 @@ const WAV_MAP: Record<SfxName, string[]> = {
   // 以下无原版素材，走合成
   drink: ['Item_3'],  // SoundID.Item3(药水饮用/回忆药水起始音;素材曾缺走合成兜底)
 };
+
+/** 原版专属音量修正表（LegacySoundPlayer.PlaySound 各 case 内对 num2 的修正系数，
+ *  Terarria1456/Terraria.Audio/LegacySoundPlayer.cs）。
+ *  键 = wav 文件名（含变体号）；playWavFile 单点统一乘——playWav（逻辑名）、
+ *  playFiles（per-NPC HitSound/DeathSound）、playSfxFile/playUseSound（Item_N 直播）
+ *  全路径自动生效。未登记 = 1.0（绝大多数 case 无专属修正，调用方传 1 即原版语义）。 */
+const FILE_CASE_VOL: Record<string, number> = (() => {
+  const m: Record<string, number> = {};
+  // case 14 ZombieMoan（:792-824）：默认组恒 ×0.4（:818）
+  m.Zombie_0 = 0.4; m.Zombie_1 = 0.4; m.Zombie_2 = 0.4;
+  // case 3 NPCHit（:645-671）：style 20-54 ×0.5（:648）、55/56 ×0.5（:660）、57 ×0.6（:656）；1-19 无修正
+  for (let s = 20; s <= 54; s++) m[`NPC_Hit_${s}`] = 0.5;
+  m.NPC_Hit_55 = 0.5; m.NPC_Hit_56 = 0.5; m.NPC_Hit_57 = 0.6;
+  // case 4 NPCKilled（:672-694）：style 23-57 ×0.5（:675）、61/62 ×0.6（:679/:683）
+  for (let s = 23; s <= 57; s++) m[`NPC_Killed_${s}`] = 0.5;
+  m.NPC_Killed_61 = 0.6; m.NPC_Killed_62 = 0.6;
+  // case 2 Item（:519-643）：styles 53 ×0.75/55 ×0.75×0.75（:555-561）、37 ×0.5（:567）、
+  //   52 ×0.35（:571）、157 ×0.7/158 ×0.8/159 ×0.75（:573-578/:587）、156 ×0.6（:625）、
+  //   26/35/47 ×0.75（:634-637）、116/123 ×0.5（:536/:529）、124/125 ×0.65（:533）、
+  //   129 ×0.6（:525）、176 ×0.9（:521）
+  const itemVol: [number, number][] = [
+    [26, 0.75], [35, 0.75], [47, 0.75], [37, 0.5], [52, 0.35], [53, 0.75],
+    [55, 0.5625], [116, 0.5], [123, 0.5], [124, 0.65], [125, 0.65], [129, 0.6],
+    [156, 0.6], [157, 0.7], [158, 0.8], [159, 0.75], [176, 0.9],
+  ];
+  for (const [s, v] of itemVol) m[`Item_${s}`] = v;
+  // case 19 Splash（:870-909）：styles 2/3 ×0.75（:876-879）、4/5 ×0.75（:880-883，微光/岩浆对）
+  m.Splash_2 = 0.75; m.Splash_3 = 0.75; m.Splash_4 = 0.75; m.Splash_5 = 0.75;
+  // case 29 Zombie 怪物声（:1007-1049）：24-87 ×0.5、88-91 ×0.7、92 ×0.5、93-99 ×0.4、
+  //   100/101 ×0.25、102/103 ×0.4、104 ×0.55
+  for (let s = 24; s <= 87; s++) m[`Zombie_${s}`] = 0.5;
+  for (let s = 88; s <= 91; s++) m[`Zombie_${s}`] = 0.7;
+  m.Zombie_92 = 0.5;
+  for (let s = 93; s <= 99; s++) m[`Zombie_${s}`] = 0.4;
+  m.Zombie_100 = 0.25; m.Zombie_101 = 0.25;
+  m.Zombie_102 = 0.4; m.Zombie_103 = 0.4; m.Zombie_104 = 0.55;
+  // case 26 Mummy（:968-976）Zombie_3/4 ×0.9；case 30 Duck（:1101-1122）Zombie_10-12 ×0.75
+  m.Zombie_3 = 0.9; m.Zombie_4 = 0.9;
+  m.Zombie_10 = 0.75; m.Zombie_11 = 0.75; m.Zombie_12 = 0.75;
+  return m;
+})();
 
 export class Sfx {
   private ctx: AudioContext | null = null;
@@ -363,13 +405,15 @@ export class Sfx {
     return this.startLoopFile(file, vol, base);
   }
 
-  /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底） */
+  /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底）。
+   *  vol 语义 = 原版 volumeScale（调用方传 1 = 原版默认）；原版各 case 的专属
+   *  音量修正（FILE_CASE_VOL）在此单点统一乘，调用方无需手传修正系数 */
   playWavFile(file: string, vol = 1, x?: number, y?: number): boolean {
     const ctx = this.ensure();
     if (!ctx) return false;
     const v = this.atten(vol, x, y);
     if (v <= 0) return false;
-    vol = v;
+    vol = v * (FILE_CASE_VOL[file] ?? 1);
     const buf = this.ensureBuffer(file);
     if (!buf) return false;
     const src = ctx.createBufferSource();

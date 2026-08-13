@@ -7,6 +7,13 @@
    "idMax": 282,
    "n": 7,
    "line": 85626,
+   "ai": [
+    {
+     "slot": 1,
+     "value": 1345,
+     "not": false
+    }
+   ],
    "post": [
     [
      "sm",
@@ -678,8 +685,8 @@
    "line": 90176,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -688,8 +695,8 @@
    "line": 90177,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -734,8 +741,8 @@
    "line": 90189,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -744,8 +751,8 @@
    "line": 90190,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -754,8 +761,8 @@
    "line": 90191,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -764,8 +771,8 @@
    "line": 90192,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   }
@@ -812,8 +819,8 @@
    "line": 90189,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -822,8 +829,8 @@
    "line": 90190,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -832,8 +839,8 @@
    "line": 90191,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -842,8 +849,8 @@
    "line": 90192,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   }
@@ -1324,8 +1331,8 @@
    "line": 90176,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -1334,8 +1341,8 @@
    "line": 90177,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -1380,8 +1387,8 @@
    "line": 90189,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -1390,8 +1397,8 @@
    "line": 90190,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -1400,8 +1407,8 @@
    "line": 90191,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   },
@@ -1410,8 +1417,8 @@
    "line": 90192,
    "gates": [
     {
-     "k": "skip",
-     "reason": "!redhat"
+     "k": "redhat",
+     "not": true
     }
    ]
   }
@@ -10078,7 +10085,6 @@
    "scaleExpr": "scale",
    "fx": 0.5,
    "fy": 0.5,
-   "oy": -30,
    "id": 574,
    "line": 85159
   },
@@ -10101,7 +10107,6 @@
    "scaleExpr": "scale",
    "fx": 0.5,
    "fy": 0.5,
-   "oy": -30,
    "id": 574,
    "line": 85162
   },
@@ -13322,6 +13327,29 @@
      "vs",
      {
       "de": 4
+     }
+    ],
+    [
+     "ps",
+     {
+      "ox": -20,
+      "oy": -240,
+      "rwx": [
+       0,
+       1
+      ],
+      "rwy": [
+       0,
+       1
+      ],
+      "jx": [
+       0,
+       40
+      ],
+      "jy": [
+       0,
+       220
+      ]
      }
     ]
    ]
@@ -17630,7 +17658,20 @@
    "fy": 0.5,
    "id": 1218,
    "line": 82833,
-   "loop": 8
+   "loop": 8,
+   "post": [
+    [
+     "vs",
+     {
+      "hdm": [
+       0.75,
+       6.75
+      ],
+      "my": -3.45,
+      "ay": 0.45
+     }
+    ]
+   ]
   },
   {
    "vx": 0,
@@ -17639,7 +17680,20 @@
    "fy": 0.5,
    "id": 1218,
    "line": 82841,
-   "loop": 3
+   "loop": 3,
+   "post": [
+    [
+     "vs",
+     {
+      "hdm": [
+       0.6,
+       5.3999999999999995
+      ],
+      "my": -2.95,
+      "ay": 0.45
+     }
+    ]
+   ]
   }
  ],
  "668": [
@@ -18880,19 +18934,47 @@
  "688": [
   {
    "id": 1388,
-   "line": 87114
+   "line": 87114,
+   "ai": [
+    {
+     "slot": 2,
+     "value": 1,
+     "not": false
+    }
+   ]
   },
   {
    "id": 1388,
-   "line": 87115
+   "line": 87115,
+   "ai": [
+    {
+     "slot": 2,
+     "value": 1,
+     "not": false
+    }
+   ]
   },
   {
    "id": 1389,
-   "line": 87116
+   "line": 87116,
+   "ai": [
+    {
+     "slot": 2,
+     "value": 1,
+     "not": false
+    }
+   ]
   },
   {
    "id": 1390,
-   "line": 87117
+   "line": 87117,
+   "ai": [
+    {
+     "slot": 2,
+     "value": 1,
+     "not": false
+    }
+   ]
   },
   {
    "id": 1386,
@@ -19011,13 +19093,15 @@
  "694": [
   {
    "scaleExpr": "scale",
+   "fx": 0.5,
+   "fy": 0.5,
    "rwx": [
     0,
-    0.5
+    0
    ],
    "rwy": [
     0,
-    0.5
+    0
    ],
    "id": 1008,
    "line": 89580,
@@ -19025,13 +19109,15 @@
   },
   {
    "scaleExpr": "scale",
+   "fx": 0.5,
+   "fy": 0.5,
    "rwx": [
     0,
-    0.5
+    0
    ],
    "rwy": [
     0,
-    0.5
+    0
    ],
    "id": 1007,
    "line": 89584,
@@ -19293,25 +19379,12 @@
   "unresolvedCount": 0,
   "defaultEntryCount": 3,
   "gatedEntryCount": 126,
-  "postEntryCount": 257,
+  "postEntryCount": 259,
   "posExprCount": 2,
   "velExprCount": 0,
   "unresolved": [],
   "unresolvedGates": [],
-  "unresolvablePost": [
-   {
-    "line": 82834,
-    "stmt": "Main.gore[num35].velocity = new Vector2((float)Main.rand.Next(1, 10) * 0.3f * 2.5f * (float)hitDirection, 0f - (3f + (float)Main.rand.Next(4) * 0.3f))"
-   },
-   {
-    "line": 82842,
-    "stmt": "Main.gore[num37].velocity = new Vector2((float)Main.rand.Next(1, 10) * 0.3f * 2f * (float)hitDirection, 0f - (2.5f + (float)Main.rand.Next(4) * 0.3f))"
-   },
-   {
-    "line": 84569,
-    "stmt": "Main.gore[num195].position = new Vector2(position.X - 20f + ((float)width + 40f) * Main.rand.NextFloat(), position.Y - 240f + (float)(height + 240 - 20) * Main.rand.NextFloat())"
-   }
-  ],
+  "unresolvablePost": [],
   "defaultEntries": [
    {
     "line": 90865,

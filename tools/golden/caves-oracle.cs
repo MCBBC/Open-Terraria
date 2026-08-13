@@ -4040,9 +4040,6 @@ Checkpoint("dungeonE");
 for (int i = 0; i < dgRooms.Count; i++) if (dgRooms[i].Generated) DgRoomPlatformsDoors(dgRooms[i]);
 for (int i = 0; i < dgHalls.Count; i++) if (dgHalls[i].Generated) DgHallPlatformsDoors(dgHalls[i]);
 Checkpoint("dungeonPD");
-int dbgMinT = 9999, dbgMaxB = 0;
-    foreach (var rmv in dgRooms) { dbgMinT = Math.Min(dbgMinT, rmv.Inner.T); dbgMaxB = Math.Max(dbgMaxB, rmv.Inner.B); }
-    Console.WriteLine($"DBG dungeon: y0={dgY0} bounds=({dgBounds.L},{dgBounds.T},{dgBounds.R},{dgBounds.B}) roomT={dbgMinT} roomB={dbgMaxB} posY={dgPosY} dungeonY={dgDungeonY} rooms={dgRooms.Count} halls={dgHalls.Count}");
 DgEarly(); Checkpoint("dungeonPi");     // DungeonGlobalEarlyDualDungeonFeatures（Default → 仅 pit 陷阱循环）
 DgSpikes(); Checkpoint("dungeonS");     // DungeonGlobalSpikes
 DgDoorsF(); Checkpoint("dungeonD");     // DungeonGlobalDoors

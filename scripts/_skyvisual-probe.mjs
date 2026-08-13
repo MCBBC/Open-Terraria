@@ -36,6 +36,10 @@ await page.click('[data-act=create]');
 await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 240000 });
 await new Promise(r => setTimeout(r, 2500));
 
+const shots = {};
+await page.exposeFunction('__skySnap', async (name) => {
+  shots[name] = await page.screenshot({ type: 'png' });
+});
 const res = await page.evaluate(async () => {
   const g = window.__swGame;
   const wait = (ms) => new Promise(r => setTimeout(r, ms));
@@ -64,9 +68,20 @@ const res = await page.evaluate(async () => {
   out.rainBudget = g.world.weather.rippleBudget(g.renderer.canvas.width);
   await wait(1500);
   out.ripplesSpawned = g.world.weather.ripples.length > 0;
+  await window.__skySnap('rain-ripples');
   g.world.weather.stopRain(true);
   await wait(1200);
   out.ripplesClearedAfterRain = g.world.weather.ripples.length === 0;
+
+  // ===== 1.5 回开阔地表 + 正午（视觉截图需要露天亮天空） =====
+  let surfY = -1;
+  for (let ty = 10; ty < g.world.h - 200; ty++) {
+    if (st.inBounds(Math.floor(g.world.spawnX), ty) && !st.isSolid(Math.floor(g.world.spawnX), ty)
+      && st.isSolid(Math.floor(g.world.spawnX), ty + 1)) { surfY = ty; break; }
+  }
+  if (surfY > 0) { p0.x = g.world.spawnX * 16; p0.y = (surfY - 3) * 16; p0.vx = 0; p0.vy = 0; }
+  g.world.clock.timeOfDay = 0.5;   // 正午
+  await wait(600);
 
   // ===== 2. 月塔天空近距门：贴脸生成塔 NPC → 激活；拉远 → 关门淡出 =====
   const px = Math.floor(p0.x / 16), py = Math.floor(p0.y / 16) - 8;
@@ -76,6 +91,8 @@ const res = await page.evaluate(async () => {
   out.nebulaActiveNear = sky.towerSky?.nebula?.active ?? null;
   out.nebulaFadeNear = +(sky.towerSky?.nebula?.fade ?? -1).toFixed(3);
   out.towerCloudMul = +sky.towerCloudAlphaMul().toFixed(3);   // GetCloudAlpha < 1
+  await wait(2500);                                           // 淡入到满
+  await window.__skySnap('tower-sky');
   if (tower) { tower.x = (px + 500) * 16; }                    // 拉远 8000px
   await wait(700);
   out.nebulaActiveFar = sky.towerSky?.nebula?.active ?? null;
@@ -84,14 +101,18 @@ const res = await page.evaluate(async () => {
   const ml = g.spawnNpcByVanilla(398, px * 16, (py - 10) * 16);
   out.mlSpawned = !!ml;
   if (ml) {
+    ml.bInit = true;            // 越过 AI 首帧初始化（否则 ai0 被重置 -1）
     ml.hp = 1;
     ml.ai0 = 2; ml.ai1 = 120;   // 死亡演出段（>60 每 3t 出爆炎）
     await wait(900);
     out.explosionsDuringDeath = (sky.dramaExplosions?.length ?? 0) > 0;
+    ml.ai1 = 500;               // 进白光请求段（≥480 → (ai1-480)/120）
+    await wait(400);
+    out.whiteningMidDeath = +(sky.dramaWhitening ?? -1).toFixed(3);
+    await window.__skySnap('ml-death');
     ml.ai1 = 595;               // 逼近终死线 600
     await wait(1500);           // 自行跨线 → ThrowPieces（或消失兜底）
     out.piecesAfterDeath = sky.dramaPieces?.length ?? -1;
-    out.whitening = +(sky.dramaWhitening ?? -1).toFixed(3);
   }
 
   // ===== 4/5. 纯函数侧（稀有云门 + 全族表）——vitest 已覆盖，此处运行时抽样 =====
@@ -108,6 +129,11 @@ const res = await page.evaluate(async () => {
   await wait(1200);
   return out;
 });
+for (const [k, buf] of Object.entries(shots)) {
+  const fs = await import('node:fs');
+  fs.writeFileSync(`/tmp/skyprobe-${k}.png`, buf);
+}
+console.log('SHOTS:', Object.keys(shots).join(','));
 console.log(JSON.stringify(res, null, 2));
 console.log('PAGE_ERRORS:', JSON.stringify(errs.slice(0, 8), null, 2));
 await browser.close();

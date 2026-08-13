@@ -105,11 +105,12 @@ const CANDELABRA_LIGHT_34: Record<number, [number, number, number]> = {
   70: [0.843137, 0.686275, 0.960784],
 };
 
-/** 蜡烛族样式光公共分发（33/93/100/173/34）：表查 + 动态样式（demon/hsl/shimmer/paint） */
+/** 蜡烛族样式光公共分发（33/93/100/173/34/42）：表查 + 动态样式（demon/hsl/shimmer/paint）。
+ *  ctx 缺省（4 参单测形态）时 shimmer 档退回 default 色一一其余动态档不依赖坐标 */
 function candleFamilyLight(
   style: number, table: Record<number, [number, number, number]>,
   dyn: { paint: number; demon: number; hsl: number; shimmer: number },
-  def: [number, number, number], flicker: FlickerClock, ctx: SpecialLightCtx,
+  def: [number, number, number], flicker: FlickerClock, ctx?: SpecialLightCtx,
 ): [number, number, number] | null {
   if (style === dyn.paint) return [0.37, 0.8, 1];
   if (style === dyn.demon) return flicker.demonTorchColor();
@@ -119,7 +120,8 @@ function candleFamilyLight(
     return [c[0] * 1.2, c[1] * 1.2, c[2] * 1.2];
   }
   if (style === dyn.shimmer) {
-    // GetShimmerBaseColor(x,y)*1.5 钳 0-1
+    // GetShimmerBaseColor(x,y)*1.5 钳 0-1（需格坐标——无 ctx 的纯帧调用退 default）
+    if (!ctx) return def;
     const s = flicker.shimmerBaseColor(ctx.x, ctx.y);
     return [Math.min(1, s[0] * 1.5), Math.min(1, s[1] * 1.5), Math.min(1, s[2] * 1.5)];
   }
@@ -144,7 +146,7 @@ export function specialTileLight(
       // 灯笼（TileLightScanner case 42）：frameX!=0（灭档 18）不发光；style=frameY/36。
       // 54 条样式表（:2240-2567 逐 case 提取）+ 动态档：7/9 灯笼专属 demonTorch 调制、
       // 28 paint、32 demon、37 hsl、49 shimmer×1.5；default (1,1,1)（CS:2903-2907）
-      if (frameX !== 0 || !ctx) return null;
+      if (frameX !== 0) return null;
       const LANTERN_LIGHT_42: Record<number, [number, number, number]> = {
         0: [0.7, 0.65, 0.55], 1: [0.9, 0.75, 0.6], 2: [0.8, 0.6, 0.6], 3: [0.65, 0.5, 0.2],
         4: [0.5, 0.7, 0.4], 5: [0.9, 0.4, 0.2], 6: [0.7, 0.75, 0.3], 8: [0.75, 0.6, 0.3],
@@ -208,21 +210,21 @@ export function specialTileLight(
     }
     // ---- 蜡烛/吊灯/烛台/挂灯四族（frameX/frameY 门 + 样式表，cs:1215/2240/1517/1822） ----
     case 33:
-      if (frameX !== 0 || !ctx) return null;
+      if (frameX !== 0) return null;
       return candleFamilyLight(Math.floor(frameY / 22), CANDLE_LIGHT_33,
         { paint: 19, demon: 25, hsl: 30, shimmer: 42 }, [1, 0.95, 0.65], flicker, ctx);
     case 93:
-      if (frameX !== 0 || !ctx) return null;
+      if (frameX !== 0) return null;
       return candleFamilyLight(Math.floor(frameY / 54), LAMP_LIGHT_93,
         { paint: 19, demon: 23, hsl: 31, shimmer: 43 }, [1, 0.97, 0.85], flicker, ctx);
     case 100:
     case 173:
-      if (frameX >= 36 || !ctx) return null;
+      if (frameX >= 36) return null;
       return candleFamilyLight(Math.floor(frameY / 36), LAMP_LIGHT_100,
         { paint: 19, demon: 25, hsl: 31, shimmer: 43 }, [1, 0.95, 0.65], flicker, ctx);
     case 34: {
       // frameX%108<54 门（右半熄灭）；style = frameY/54 + 37*(frameX/108)（cs:1822-2128）
-      if (frameX % 108 >= 54 || !ctx) return null;
+      if (frameX % 108 >= 54) return null;
       return candleFamilyLight(Math.floor(frameY / 54) + 37 * Math.floor(frameX / 108),
         CANDELABRA_LIGHT_34,
         { paint: 24, demon: 32, hsl: 37, shimmer: 49 }, [1, 0.95, 0.8], flicker, ctx);

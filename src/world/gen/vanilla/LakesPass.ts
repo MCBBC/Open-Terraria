@@ -23,9 +23,19 @@ const SAND = TILE_BY_KEY['sand']!;
 const CRIMSTONE = TILE_BY_KEY['v_203_crimstone_block'] ?? -1;
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block'] ?? -1;  // 原版 25=黑檀石（曾误当 chest）
 
-/** WillWaterPlacedHereStayPut 近似：下方实心且自身无液体 → 水放得住 */
+/** WillWaterPlacedHereStayPut 1:1（cs:79059-79067）：下/左/右三格全部满足
+ *  (active && tileSolid && !tileSolidTop) || liquid==255 才放得住。
+ *  tileSolidTop≈!platform（本仓口径，与 TileCleanupPass 一致；湖腔语境下
+ *  出现的全是自然地形 tile，platform 族不参与，判定等价） */
 function willWaterStayPut(st: TileStore, x: number, y: number): boolean {
-  return !!st.inBounds(x, y + 1) && !!st.flags[st.idx(x, y + 1)] && st.liquid[st.idx(x, y)] === 0;
+  const ok = (xx: number, yy: number) => {
+    if (!st.inBounds(xx, yy)) return false;
+    const i = st.idx(xx, yy);
+    if (st.liquid[i] === 255) return true;
+    const d = TILE_DEFS[st.type[i]];
+    return !!st.flags[i] && !!d?.solid && !d?.platform;
+  };
+  return ok(x, y + 1) && ok(x - 1, y) && ok(x + 1, y);
 }
 
 /** SonOfLakinater（L48516）：向下蜿蜒湖腔。lava 恒 false（getGoodWorld 不支持） */
@@ -118,8 +128,10 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
 /** pass 31 Lakes（L6450-6560）：num3 = Next(n*3, n*6) 次尝试（n=w/4200），上限 maxLakes-1 */
 export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w } = st;
-  const n = Math.floor(w / 4200);
-  const tries = rng.int(n * 3, n * 6 - 1);             // Next(n*3, n*6)
+  // cs:14619-14620：double 先乘后截——Next((int)(w/4200*3), (int)(w/4200*6))。
+  // 曾 n=floor(w/4200) 整数化再乘（6400 宽原版 Next(4,9) vs 复刻 [3,5]）
+  const n = w / 4200;
+  const tries = rng.int(Math.floor(n * 3), Math.floor(n * 6) - 1);
   const beachAvoid = 275 + 5 + 40 + 20;                // lakesBeachAvoidance = beachSandRandomCenter(320)+20
   const maxLakes = 50;
   const lakeX: number[] = [];
@@ -179,7 +191,9 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (y > gs.worldSurface - 50) { bad = true; break; }
       }
       if (bad) continue;
-      if (y - anchor <= 10) continue;
+      // cs:14716 `if (num5 - num7 <= 10) { …放置块… }`——下沉 ≤10 格（平坦位）才
+      // 进入放置路径；曾把门写反成 `<= 10 continue`（湖只落在崎岖位,根因级反转）
+      if (y - anchor > 10) continue;
       // ±60 顶部 20 格净空（无块无墙）
       for (let dx = -60; dx <= 60 && !bad; dx++) {
         const ty = y - 20;
@@ -195,16 +209,11 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       if (solidN < 121 * 121 * 0.8) continue;
-      // 非地下沙漠 ±8（无记录区间，墙 187/216/217 近似）
-      let inDesert = false;
-      for (let dx = -8; dx <= 8 && !inDesert; dx++) {
-        for (let dy = -8; dy <= 8; dy++) {
-          if (!st.inBounds(x + dx, y + dy)) continue;
-          const wl = st.wall[st.idx(x + dx, y + dy)];
-          if (wl === 187 || wl === 216 || wl === 217) { inDesert = true; break; }
-        }
-      }
-      if (inDesert) continue;
+      // 非地下沙漠（cs:14740-14742）：!UndergroundDesertLocation.Intersects(
+      // Rectangle(x-8, y-8, 16, 16)) 才放——原版记录的矩形，直接用 gs 数据
+      // （曾以蜂窝墙 187/216/217 反推区域 = 沙丘区墙未及处误收 → 沙漠内出湖）
+      const ud = gs.undergroundDesert;
+      if (ud && x + 8 > ud.x0 && x - 8 < ud.x1 && y + 8 > ud.y0 && y - 8 < ud.y1) continue;
       sonOfLakinater(st, rng, gs, x, y, 1);
       lakeX.push(x);
       break;

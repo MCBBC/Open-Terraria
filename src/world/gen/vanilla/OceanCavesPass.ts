@@ -46,14 +46,16 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
   let steep = true;   // flag:初期陡降
 
   while (radius > MIN_R && life > 0) {
-    const big = radius >= MIN_R + 2 && life >= 20;
-    // ★flag3/flag4 每轮重置(cs:76756-76757):竖井/水柱是"每轮一次"而非"每洞一次"
+    // ★flag3/flag4/flag5 每轮重置(cs:76756-76758)
     let firstShaft = true;   // flag3:本轮中心列竖井一次
     let firstWater = true;   // flag4:本轮中心列水柱一次
-    // 离开海滩带(越过 beachDistance-50)后每步 ×0.96(cs:76746;flag2 地牢穿越本仓库恒 false)
+    // 离开海滩带(越过 beachDistance-50)后每步 ×0.96(cs:76760-76764;flag2 恒 false)
     if (vx > gs.beachDistance - 50 && vx < w - gs.beachDistance + 50) {
       radius *= 0.96; life *= 0.96;
     }
+    // ★big 判定在衰减**之后**(cs:76765-76767:先 ×0.96 再比 num6+2/20)——衰减跨阈
+    // 的收尾轮原版立即转 small;曾放在循环首衰减前,多刻 264 腔体标记
+    const big = radius >= MIN_R + 2 && life >= 20;
     if (steep) { radius -= 0.01 + rng.next() * 0.01; life -= 0.5; }
     else { radius -= 0.02 + rng.next() * 0.02; life -= 1; }
     if (big) treasure = { x: Math.floor(vx), y: Math.floor(vy) };
@@ -72,11 +74,13 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
         } else if (dist < radius * 1.5 + 1 && st.type[ti] !== CAVITY) {   // 壳层门(cs:76822)独立于 flag5
           if (y < vy) {
             if ((dirX < 0 && x < vx) || (dirX > 0 && x > vx)) {
+              // ★上半壳只写 type 不激活(cs:76834/:76839)——原空气/海水格保持幽灵;
+              //  仅下半壳 cs:76849 显式 active(true)(曾 setTileSilent 固化成实心)
               if (dist < radius * 1.1 + 1) {
-                st.setTileSilent(x, y, HARDSAND);
+                st.type[ti] = HARDSAND;
                 if (st.liquid[ti] === 255) st.setWallSilent(x, y, 0);
               } else if (st.type[ti] !== HARDSAND) {
-                st.setTileSilent(x, y, SAND);
+                st.type[ti] = SAND;
               }
             }
           } else if ((dirX < 0 && x < i) || (dirX > 0 && x > i)) {
@@ -144,7 +148,9 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
       if (!big) {
         if (dirY < 0) dirY *= 0.95;
         dirY += 0.04;
-      } else if (vy < j + 30) {
+      // ★cs:76965 中档档条件 = (worldSurface*4+rockLevel)/5(与 j 无关;j+30 只在
+      //  cs:76938 陡降退出条件里,曾混用至此 → 提前制动、蠕虫下潜变浅)
+      } else if (vy < (gs.worldSurface * 4 + gs.rockLevel) / 5) {
         if (dirY < 0) dirY *= 0.97;
         dirY += 0.02;
       } else if (dirY > -0.1) {

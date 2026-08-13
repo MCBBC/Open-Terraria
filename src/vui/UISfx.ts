@@ -10,8 +10,8 @@ export const UISfx = {
     return instance;
   },
   /** 原版菜单音：hover=Menu_Tick(12)、主菜单点击=Menu_Open(10)、普通 UI 点击=Menu_Tick */
-  hover() { this.sfx.play('menuTick', 0.5); },
-  click() { this.sfx.play('menuTick', 0.8); },
-  menuOpen() { this.sfx.play('menuOpen', 0.9); },
-  menuClose() { this.sfx.play('menuClose', 0.9); },
+  hover() { this.sfx.play('menuTick', 1); },
+  click() { this.sfx.play('menuTick', 1); },
+  menuOpen() { this.sfx.play('menuOpen', 1); },
+  menuClose() { this.sfx.play('menuClose', 1); },
 };

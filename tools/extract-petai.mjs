@@ -170,7 +170,7 @@ const g = {};
   {
     const m = /else if \(type == (\d+) && !flag11\)\s*\{\s*num = (\d+);/.exec(AI026.text);
     if (!m) throw new Error('AI_026 idleRange 后缀组（960）未找到');
-    petOv[+m[1]] = { ...(petOv[+m[1]] || {}), idleRange: +m[2] };
+    idleOv[+m[1]] = +m[2];
   }
   for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num = (\d+);/g)) {
     idleOv[+value[1]] = +value[2];

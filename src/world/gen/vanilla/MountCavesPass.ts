@@ -85,8 +85,10 @@ export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
         gs.mCaveX[gs.numMCaves] = x;
         gs.mCaveY[gs.numMCaves] = y;
         gs.numMCaves++;
+        // cs:11877-11878:break 在 !flag 内——近沙时**不**break,继续向下列扫
+        // 下一个活性格再查(曾无条件 break,近沙列被提前放弃 → 山丘少放/错位)
+        break;
       }
-      break; // 原版无论放没放都 break 出列扫描
     }
   }
 }

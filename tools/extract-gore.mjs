@@ -336,6 +336,7 @@ function negateGates(gates) {
   for (const g of gates) {
     if (g.op) out.push({ ...g, op: NEG_OP[g.op] ?? g.op });
     else if (g.k === 'shim') out.push({ k: 'shim', not: !g.not });
+    else if (g.k === 'redhat') out.push({ k: 'redhat', not: !g.not });
     else out.push({ k: 'skip', reason: `!${g.k}` });   // 不可取反 → 运行时恒假（登记用）
   }
   return out;
@@ -362,6 +363,7 @@ function makeGuard(kind, cond) {
     exclude: t.exclude.size ? t.exclude : null,
     bounds: { lt: t.lt, lte: t.lte, gt: t.gt, gte: t.gte },
     life: parseLife(cond),
+    ai: parseAiGates(cond),
     gates: g.gates,
     gateFree: g.freeTypes,
     staticTypes: g.staticTypes.size ? g.staticTypes : null,
@@ -376,6 +378,7 @@ function pushCtx(guard) {
     id: ctxSeq, kind: guard?.kind ?? null, cond: guard?.cond ?? null,
     types: guard?.types ?? null, exclude: guard?.exclude ?? null,
     bounds: guard?.bounds ?? null, life: guard?.life ?? null,
+    ai: guard?.ai?.length ? guard.ai : null,
     gates: guard?.gates ?? [], gateFree: guard?.gateFree ?? null,
     staticTypes: guard?.staticTypes ?? null, loopGates: guard?.loopGates ?? [],
     party: guard?.party ?? false, gateUnknown: guard?.gateUnknown ?? [],
@@ -529,6 +532,11 @@ function normalizeForArith(expr, t) {
 
 /** 单 type 值下的 id 求值 → {kind:id|range|ids} | null */
 function evalIdForType(expr, t, callLine, typeCtxId) {
+  // 纯数字代数（循环变量已代换成常数的 `728 + 3` 等）→ 常数折叠
+  if (/^[\d\s+\-*/().]+$/.test(stripCasts(String(expr)))) {
+    const v = evalArith(stripCasts(String(expr)));
+    if (v != null && Number.isInteger(v)) return { kind: 'id', id: v };
+  }
   const e = evalIdExpr(expr);
   if (e) {
     if (e.kind === 'id' || e.kind === 'range' || e.kind === 'ids') return e;
@@ -625,21 +633,86 @@ function idFields(e) {
  * 单位轴系数解析：`width / 2f` / `(float)width * 0.35f` / 常数 → {k, dim}
  * dim ∈ 'w' | 'h' | null（运行时 k*[w|h] 或 k 常数）
  */
-function coeffOf(kexpr) {
-  const s = stripCasts(String(kexpr))
-    .replace(/\bwidth\b/g, 'W').replace(/\bheight\b/g, 'H');
-  const hasW = s.includes('W'), hasH = s.includes('H');
-  if (!hasW && !hasH) {
-    const v = evalArith(s);
-    return v == null ? null : { k: v, dim: null };
+/** 线性求值（width/height 为基）：`width * 0.35f + 40f` → {kw, kh, c} | null */
+function linearOf(expr) {
+  const s = stripCasts(String(expr)).replace(/\bwidth\b/g, 'W').replace(/\bheight\b/g, 'H');
+  const toks = [];
+  let rest = s;
+  let m;
+  while (rest.length) {
+    if (/^\s/.test(rest)) { rest = rest.slice(1); continue; }
+    if ((m = rest.match(/^(-?\d+\.?\d*)/))) { toks.push({ t: 'n', v: [0, 0, +m[1]] }); rest = rest.slice(m[1].length); continue; }
+    if ((m = rest.match(/^([WH])/))) { toks.push({ t: 's', v: m[1] === 'W' ? [1, 0, 0] : [0, 1, 0] }); rest = rest.slice(1); continue; }
+    if ((m = rest.match(/^([-+*/()])/))) { toks.push({ t: m[1] }); rest = rest.slice(1); continue; }
+    return null;
   }
-  if (hasW && hasH) return null;
-  const dim = hasW ? 'w' : 'h';
-  const v = evalArith(s.replace(/[WH]/g, '1'));
-  return v == null ? null : { k: v, dim };
+  let pos = 0;
+  const peek = () => toks[pos];
+  const eat = (t) => { if (toks[pos] && toks[pos].t === t) { pos++; return true; } return false; };
+  const add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const mul = (a, b) => [a[0] * b[2], a[1] * b[2], a[2] * (b[0] + b[1] ? NaN : b[2])];
+  const div = (a, b) => b[0] || b[1] ? null : [a[0] / b[2], a[1] / b[2], a[2] / b[2]];
+  const isScalar = (a) => a[0] === 0 && a[1] === 0;
+  function additive() {
+    let v = mult();
+    while (v && peek() && (peek().t === '+' || peek().t === '-')) {
+      const op = peek().t; pos++;
+      const r = mult();
+      if (!r) return null;
+      v = op === '+' ? add(v, r) : sub(v, r);
+    }
+    return v;
+  }
+  function mult() {
+    let v = unary();
+    while (v && peek() && (peek().t === '*' || peek().t === '/')) {
+      const op = peek().t; pos++;
+      const r = unary();
+      if (!r) return null;
+      if (op === '*') { if (!isScalar(r)) return null; v = mul(v, r); }
+      else { if (!isScalar(r) || r[2] === 0) return null; v = div(v, r); }
+      if (v.some(Number.isNaN)) return null;
+    }
+    return v;
+  }
+  function unary() {
+    if (eat('-')) { const v = unary(); return v ? [-v[0], -v[1], -v[2]] : null; }
+    if (eat('+')) return unary();
+    if (eat('(')) { const v = additive(); return eat(')') ? v : null; }
+    const t = peek();
+    if (t && (t.t === 'n' || t.t === 's')) { pos++; return t.v; }
+    return null;
+  }
+  const out = additive();
+  if (!out || pos !== toks.length || out.some(Number.isNaN)) return null;
+  return { kw: out[0], kh: out[1], c: out[2] };
 }
 
-/** 单个轴项 → { off, f, r:[a,b] } | null（dim ∈ 'w'|'h'；f=尺寸分数；r=随机尺寸分数域） */
+/** 系数 → {k, c, dim}（dim ∈ 'w'|'h'|null；c = 伴随常数项） */
+function coeffOf(kexpr) {
+  const l = linearOf(kexpr);
+  if (!l) return null;
+  if (l.kw !== 0 && l.kh !== 0) return null;
+  if (l.kw === 0 && l.kh === 0) return { k: 0, c: l.c, dim: null };
+  return { k: l.kw !== 0 ? l.kw : l.kh, c: l.c, dim: l.kw !== 0 ? 'w' : 'h' };
+}
+
+/** `Main.rand.Next(a,b)`/`Next(n)` 常数链乘 → [lo, hi] | null（`Next(1,10)*0.3f*2.5f` 等） */
+function nextRange(t) {
+  const chainMag = (s) => {
+    let mag = 1;
+    for (const c of (s ?? '').matchAll(/([\d.]+)[fFdD]?/g)) mag *= +c[1];
+    return mag;
+  };
+  let m = t.match(/^(?:\(float\)\s*)?Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)((?:\s*\*\s*-?[\d.]+[fFdD]?)*)$/);
+  if (m) { const g = chainMag(m[3]); return [+m[1] * g, (+m[2] - 1) * g]; }
+  m = t.match(/^(?:\(float\)\s*)?Main\.rand\.Next\((\d+)\)((?:\s*\*\s*-?[\d.]+[fFdD]?)*)$/);
+  if (m) { const g = chainMag(m[2]); return [0, (+m[1] - 1) * g]; }
+  return null;
+}
+
+/** 单个轴项 → { off, f, r:[a,b], j:[a,b] } | null（dim ∈ 'w'|'h'） */
 function axisTerm(t, dim) {
   let term = t.trim();
   // 首项一元符号（splitTerms 只拆后续分隔符）
@@ -651,33 +724,40 @@ function axisTerm(t, dim) {
     ...(r.off != null ? { off: r.off * sgn } : {}),
     ...(r.f != null ? { f: r.f * sgn } : {}),
     ...(r.r != null ? { r: sgn > 0 ? r.r : [sgn * r.r[1], sgn * r.r[0]] } : {}),
+    ...(r.j != null ? { j: sgn > 0 ? r.j : [sgn * r.j[1], sgn * r.j[0]] } : {}),
   });
   if ((m = term.match(/^-?\d+\.?\d*[fFdD]?$/))) return { off: parseFloat(term.replace(/[fFdD]$/, '')) * sgn };
-  // `(<和式>) * 常数` → 递归缩放（vector30 的 (float)(-w + (int)(w*u))*0.5 等；子串严格变短防环）
-  if ((m = term.match(/^\((.+)\)\s*\*\s*(.+)$/))) {
+  // `(<和式>)` [× 常数] → 递归缩放（vector30 的 (float)(-w + (int)(w*u))*0.5 等；子串严格变短防环）
+  if ((m = term.match(/^\((.+)\)(?:\s*\*\s*(.+))?$/))) {
     const inner = axisExpr(m[1], dim);
-    const c = coeffOf(m[2]);
-    if (!inner || !c || c.dim != null) return null;
-    if (inner.off == null && inner.f == null && inner.r == null) return null;
-    return scale({
-      ...(inner.off != null ? { off: inner.off * c.k } : {}),
-      ...(inner.f != null ? { f: inner.f * c.k } : {}),
-      ...(inner.r != null ? { r: [inner.r[0] * c.k, inner.r[1] * c.k] } : {}),
-    });
+    const c = m[2] != null ? coeffOf(m[2]) : { k: 1, c: 0, dim: null };
+    if (inner && c && c.dim == null
+      && (inner.off != null || inner.f != null || inner.r != null || inner.j != null)) {
+      return scale({
+        ...(inner.off != null ? { off: inner.off * c.k } : {}),
+        ...(inner.f != null ? { f: inner.f * c.k } : {}),
+        ...(inner.r != null ? { r: [inner.r[0] * c.k, inner.r[1] * c.k] } : {}),
+        ...(inner.j != null ? { j: [inner.j[0] * c.k, inner.j[1] * c.k] } : {}),
+      });
+    }
+    // 缩放失败 → 落到后续专项模式（`<和式> * NextFloat()` 等）
   }
-  // 尺寸线性项
+  // 尺寸线性项（可带伴随常数：`width + 40f`）
   const c = coeffOf(term);
   if (c) {
-    if (c.dim === dim) return scale({ f: c.k });
-    if (c.dim == null) return scale({ off: c.k });
+    if (c.dim === dim) return scale({ ...(c.k ? { f: c.k } : {}), ...(c.c ? { off: c.c } : {}) });
+    if (c.dim == null) return scale({ off: c.c });
     return null;
   }
-  // `<尺寸式> * Main.rand.NextFloat()` → 随机分数域
+  // `<尺寸式> * Main.rand.NextFloat()` → 随机分数域 + 伴随常数抖动（(w+40)*u → r[0,1]+j[0,40]）
   if ((m = term.match(/^(.+?)\s*\*\s*Main\.rand\.NextFloat\(\)$/))) {
     const cc = coeffOf(m[1]);
     if (!cc || cc.dim !== dim) return null;
-    return scale({ r: [0, cc.k] });
+    return scale({ ...(cc.k ? { r: [0, cc.k] } : {}), ...(cc.c ? { j: [0, cc.c] } : {}) });
   }
+  // `Next(a,b)*C…` → 常数抖动域
+  const nr = nextRange(term);
+  if (nr) return scale({ j: nr });
   // `(int)((float)width * Main.rand.NextFloat())` → 随机分数域 [0,1]（截断粒度 ≤1px，近似）
   if ((m = stripCasts(term).match(/^\(\s*(width|height)\s*\*\s*Main\.rand\.NextFloat\(\)\s*\)$/))) {
     if (m[1] !== dimName) return null;
@@ -703,23 +783,25 @@ function axisTerm(t, dim) {
   return null;
 }
 
-/** 轴分量编译 → { off, f, r:[a,b] } | null（空表达式 = 无偏移） */
+/** 轴分量编译 → { off, f, r:[a,b], j:[a,b] } | null（空表达式 = 无偏移） */
 function axisExpr(expr, dim) {
   const body = stripCasts(String(expr)).trim();
   if (!body) return {};
   const terms = splitTerms(body);
-  const out = { off: 0, f: 0, r: null };
+  const out = { off: 0, f: 0, r: null, j: null };
   for (const { t, sign } of terms) {
     const r = axisTerm(t, dim);
     if (!r) return null;
     if (r.off != null) out.off += sign * r.off;
     if (r.f != null) out.f += sign * r.f;
     if (r.r) out.r = addRange(out.r, sign > 0 ? r.r : [sign * r.r[1], sign * r.r[0]]);
+    if (r.j) out.j = addRange(out.j, sign > 0 ? r.j : [sign * r.j[1], sign * r.j[0]]);
   }
   const res = {};
   if (out.off) res.off = +out.off.toFixed(4);
   if (out.f) res.f = +out.f.toFixed(4);
   if (out.r) res.r = [+out.r[0].toFixed(4), +out.r[1].toFixed(4)];
+  if (out.j) res.j = [+out.j[0].toFixed(4), +out.j[1].toFixed(4)];
   return res;
 }
 
@@ -809,6 +891,7 @@ function posTermIR(term, callLine, seen) {
       if (r.off != null) out[`o${axis}`] = r.off;
       if (r.f != null) out[`f${axis}`] = r.f;
       if (r.r) out[axis === 'x' ? 'rwx' : 'rwy'] = r.r;
+      if (r.j) out[axis === 'x' ? 'jx' : 'jy'] = r.j;
     }
     return out;
   }
@@ -914,16 +997,17 @@ function compileVel(expr, callLine) {
       let mm;
       if ((mm = t.match(/^(-?[\d.]+)[fF]?$/))) { out[`v${axis}`] = +mm[1]; return true; }
       if (t === 'hitDirection') { out.hd = 1; return true; }
-      // `Next(a,b) * C * (float)hitDirection` → 随机幅值 × 击退方向
-      if ((mm = t.match(/^\(float\)\s*Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)\s*\*\s*([\d.]+)[fF]?\s*\*\s*\(float\)\s*hitDirection$/))
-        || (mm = t.match(/^Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)\s*\*\s*([\d.]+)[fF]?\s*\*\s*\(float\)\s*hitDirection$/))) {
-        const lo = +mm[1] * +mm[3], hi = (+mm[2] - 1) * +mm[3];
-        out.hdm = [lo, hi];
+      // `Next(a,b) * C… * (float)hitDirection` → 随机幅值 × 击退方向
+      if ((mm = t.match(/^(?:\(float\)\s*)?Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)((?:\s*\*\s*-?[\d.]+[fFdD]?)+)\s*\*\s*\(float\)\s*hitDirection$/))) {
+        let mag = 1;
+        for (const cc of mm[3].matchAll(/([\d.]+)[fFdD]?/g)) mag *= +cc[1];
+        out.hdm = [+mm[1] * mag, (+mm[2] - 1) * mag];
         return true;
       }
-      if ((mm = t.match(/^\(float\)\s*Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)\s*\*\s*([\d.]+)[fF]?$/))
-        || (mm = t.match(/^Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)\s*\*\s*([\d.]+)[fF]?$/))) {
-        const lo = +mm[1] * +mm[3], hi = (+mm[2] - 1) * +mm[3];
+      if ((mm = t.match(/^(?:\(float\)\s*)?Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)((?:\s*\*\s*-?[\d.]+[fFdD]?)*)$/)) && mm[3]) {
+        let mag = 1;
+        for (const cc of mm[3].matchAll(/([\d.]+)[fFdD]?/g)) mag *= +cc[1];
+        const lo = +mm[1] * mag, hi = (+mm[2] - 1) * mag;
         out[`m${axis}`] = +((lo + hi) / 2).toFixed(4);
         out[`a${axis}`] = +((hi - lo) / 2).toFixed(4);
         return true;
@@ -944,10 +1028,17 @@ function compileVel(expr, callLine) {
         out[`a${axis}`] = +((+mm[1]) / 2).toFixed(4);
         return true;
       }
-      // `0f - (3f + Next(4)*0.3f)` 之类复合 → 项式代数
+      // `0f - (3f + Next(4)*0.3f)` 之类复合 → 项式代数（off ± j 抖动域折叠成 m/a）
       const ax = axisExpr(t, axis === 'x' ? 'w' : 'h');
       if (!ax || ax.f != null || ax.r != null) return false;
-      if (ax.off != null) { out[`v${axis}`] = ax.off; return true; }
+      if (ax.off != null && ax.j == null) { out[`v${axis}`] = ax.off; return true; }
+      if (ax.j != null) {
+        const lo = (ax.off ?? 0) + Math.min(ax.j[0], ax.j[1]);
+        const hi = (ax.off ?? 0) + Math.max(ax.j[0], ax.j[1]);
+        out[`m${axis}`] = +((lo + hi) / 2).toFixed(4);
+        out[`a${axis}`] = +((hi - lo) / 2).toFixed(4);
+        return true;
+      }
       return false;
     };
     void comp;
@@ -1291,12 +1382,14 @@ function handleGoreCall(callee, args, lineNo, segLoopN = 1, lhs = null) {
     unresolvedGates.push({ line: lineNo, cond: `${lg.var} ${lg.op} ${lg.v}` });
   }
 
-  // 循环变量展开：pos/vel/scale 表达式引用循环域 ≤8 的变量 → 逐值生成条目（loop 归 1）
+  // 循环变量展开：pos/vel/scale/id 表达式引用循环域 ≤8 的变量 → 逐值生成条目（loop 归 1）
   const posRaw = String(a.Position ?? 'position');
   const velRaw = String(a.Velocity ?? 'velocity');
   const sclRaw = String(a.Scale ?? '');
+  const typeRaw = String(a.Type);
   const unrollVars = [...r.loopMap.entries()].filter(([v, n]) => n >= 1 && n <= 8
-    && (new RegExp(`\\b${v}\\b`).test(posRaw) || new RegExp(`\\b${v}\\b`).test(velRaw) || new RegExp(`\\b${v}\\b`).test(sclRaw)));
+    && (new RegExp(`\\b${v}\\b`).test(posRaw) || new RegExp(`\\b${v}\\b`).test(velRaw)
+      || new RegExp(`\\b${v}\\b`).test(sclRaw) || new RegExp(`\\b${v}\\b`).test(typeRaw)));
   let variants = [{}];
   let unrollCount = 1;
   if (unrollVars.length) {
@@ -1312,16 +1405,15 @@ function handleGoreCall(callee, args, lineNo, segLoopN = 1, lhs = null) {
   }
 
   const emit = (sub) => {
-    const posExprStr = Object.keys(sub).length
-      ? posRaw.replace(/\b([A-Za-z_]\w*)\b/g, (w) => sub[w] ?? w)
-      : posRaw;
-    const velExprStr = Object.keys(sub).length
-      ? velRaw.replace(/\b([A-Za-z_]\w*)\b/g, (w) => sub[w] ?? w)
-      : velRaw;
-    const sclExprStr = Object.keys(sub).length
-      ? sclRaw.replace(/\b([A-Za-z_]\w*)\b/g, (w) => sub[w] ?? w)
-      : sclRaw;
-    emitCallEntry(callee, { Position: posExprStr, Velocity: velExprStr, Scale: sclExprStr, Type: a.Type }, lineNo, r, lhs);
+    const sub1 = (raw) => (Object.keys(sub).length
+      ? raw.replace(/\b([A-Za-z_]\w*)\b/g, (w) => sub[w] ?? w)
+      : raw);
+    emitCallEntry(callee, {
+      Position: sub1(posRaw),
+      Velocity: sub1(velRaw),
+      Scale: sub1(sclRaw),
+      Type: sub1(typeRaw),
+    }, lineNo, r, lhs);
   };
   for (const sub of variants) emit(sub);
 }
@@ -1350,11 +1442,10 @@ function emitCallEntry(callee, a, lineNo, r, lhs) {
   const perfect = callee === 'Gore.NewGorePerfect' ? { perfect: true } : {};
   const base = { ...velFields, ...scaleFields, ...posFields, ...perfect };
 
-  // id 表达式直接引用外层循环变量（如 `num343`）= 每次迭代取一个具体 id，
-  // 区间/候选已编码迭代序列 → loop 归 1，防运行时重复随机取样
+  // id 表达式仍引用外层循环变量（未展开的场景：循环域 >8 或嵌套过深）→ loop 归 1，
+  // 防运行时重复随机取样（展开过的调用此处不再命中）
   if (r.loopN > 1 && [...r.loopMap.keys()].some((v) => new RegExp(`\\b${v}\\b`).test(String(a.Type)))) r.loopN = 1;
 
-  let e = null;
   let perType = null;
   let fields = null;
 
