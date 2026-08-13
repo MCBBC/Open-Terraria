@@ -68,6 +68,33 @@ export class ItemDrop extends Entity {
     // 寿命（10 分钟）
     if (this.age > 60 * 600) { this.dead = true; return; }
 
+    // 铜物品落在可转化史莱姆上（WorldItem.GetPickedUpByMonsters_Special :1160-1191）：
+    // 铜盔 89 / 铜短剑 3507 且未解锁 → 命中 {1 蓝史莱姆, 302 蒙面, 333-336 缎带} →
+    // TransformCopperSlime（侍从史莱姆 684 + unlockedSlimeCopperSpawn，NPC.cs:19099-19121）
+    // 并消耗 1 个（:1186-1190）
+    if ((this.age & 3) === 0) {
+      const cVid = vanillaIdOfItem(this.itemId);
+      if ((cVid === 89 || cVid === 3507)) {
+        const flags = (game.world as unknown as { flags: Record<string, boolean> }).flags ?? {};
+        if (!flags['unlockedSlimeCopperSpawn']) {
+          for (const n of game.enemies()) {
+            const e = n as { dead?: boolean; vanillaId?: number; x: number; y: number; w: number; h: number };
+            if (e.dead || e.vanillaId == null) continue;
+            const id = e.vanillaId;
+            if (id !== 1 && id !== 302 && (id < 333 || id > 336)) continue;
+            if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+            flags['unlockedSlimeCopperSpawn'] = true;
+            e.dead = true;   // Transform 原位换体
+            game.spawnParticles?.(e.x + e.w / 2, e.y + e.h / 2, '#E8A060', 10, 1.5, { life: 24 });
+            game.spawnNpcByVanilla?.(684, e.x, e.y);
+            this.stack--;
+            if (this.stack <= 0) { this.stack = 0; this.dead = true; }
+            break;
+          }
+        }
+      }
+    }
+
     const player = (game as unknown as { player: Player }).player;
     let beingGrabbed = false;
     if (player && !player.dead && this.age > PICKUP_DELAY && this.age > this.noGrabDelay) {

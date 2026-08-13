@@ -115,6 +115,8 @@ export enum BuffType {
   Stoned = 82,      // 石化(156,美杜莎 480 蓄力直击 NPC.cs:56885-56888)：封全部输入
   ChaosState = 83,  // 混沌状态(88,混乱之杖 1326 :44913 AddBuff(88,360) 每次使用刷新)：
                     //   buff 期内再传送 → statLife-=max/7 可致死(:44904-44913,死因 13/14/15)
+  CompanionCube = 84, // 同伴方块(191,item 3628 使用授予 3600t;BuffHandle :10634
+                    //   SpawnPetIfNeeded 653):光宠物 buff——活则投影续命,玩家死清旗
                     //   （:24942 control* 清零,frozen 同段）+ 变身瞬间 Hurt(20×难度,ByOther(5))
                     //   （:24924-24931,死因=DeathText.Petrified 碎成渣）
                     //   AddBuff(32,720t) 授予（NPC.cs:44609-44616）
@@ -215,6 +217,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Frozen]: { vanillaBuff: 47, descKey: 'BuffDescription.Frozen', fallbackName: '冰冻' },
   [BuffType.Stoned]: { vanillaBuff: 156, descKey: 'BuffDescription.Stoned', fallbackName: '石化' },
   [BuffType.ChaosState]: { vanillaBuff: 88, descKey: 'BuffDescription.ChaosState', fallbackName: '混沌状态' },
+  [BuffType.CompanionCube]: { vanillaBuff: 191, descKey: 'BuffDescription.CompanionCube', fallbackName: '同伴方块' },
   // 食物三档：描述用原版 BuffDescription.WellFed*（"全面提升属性"语义一致，12 语言现成）
   [BuffType.WellFed]: { vanillaBuff: 26, descKey: 'BuffDescription.WellFed', fallbackName: '饱腹' },
   [BuffType.WellFed2]: { vanillaBuff: 206, descKey: 'BuffDescription.WellFed2', fallbackName: '很饱' },
@@ -290,6 +293,27 @@ const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
   campfireAccum = 0;
+  /** 本仓已实装的 debuff 集（Main.debuff 表 ∩ BuffType：环境伤害/控速/DoT 族——
+   *  魔力眩晕 94 亦在原版 debuff 表，护士可清） */
+  static readonly DEBUFFS = new Set<BuffType>([
+    BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
+    BuffType.Chilled, BuffType.Weak, BuffType.Slow, BuffType.ManaSickness, BuffType.Poisoned,
+  ]);
+  /** 活跃 debuff 计数（Main.GetNurseHealCost :39466-39472 的 +100/个 段：
+   *  buffTime>60 且 Main.debuff；NurseCannotRemoveDebuff 排除表未实装，登记） */
+  debuffCount(minSeconds = 0): number {
+    let n = 0;
+    for (const [bt, sec] of this.active) {
+      if (BuffState.DEBUFFS.has(bt) && sec > minSeconds) n++;
+    }
+    return n;
+  }
+  /** 清全部 debuff（护士治疗 NPCChatText_DoNurseHeal 语义） */
+  clearDebuffs(): void {
+    for (const bt of [...this.active.keys()]) {
+      if (BuffState.DEBUFFS.has(bt)) this.active.delete(bt);
+    }
+  }
   /** 狼人回复独立累加器（:11496 lifeRegen++ 恒 0.5 HP/s，与篝火强度/节拍无关） */
   werewolfAccum = 0;
   lanternAccum = 0;

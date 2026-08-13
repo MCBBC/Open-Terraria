@@ -88,6 +88,13 @@ for (const id of [...eqPet, ...eqLight]) {
 console.log(`提取宠物物品 ${Object.keys(pets).length} 件（vanity ${Object.keys(pets).filter(k => !pets[k].light).length} / light ${Object.keys(pets).filter(k => pets[k].light).length}）`);
 console.log(`Main.vanityPet 表 ${vanityPet.size} 项 / lightPet 表 ${lightPet.size} 项`);
 if (eqOnly.length) console.log(`equip.json 有而本表无（非 buffType+shoot 模式，多为 DefaultTo* 变体）: ${eqOnly.join(', ')}`);
+// ★ 强不变量：每条 buff 必须落在 vanityPet ∪ lightPet 表内（否则为解析假阳性）
+const bad = Object.entries(pets).filter(([, v]) => !vanityPet.has(v.buff) && !lightPet.has(v.buff));
+if (bad.length) {
+  console.error(`不变量违反（buff 不在宠物表 = 假阳性）: ${JSON.stringify(bad)}`);
+  process.exit(1);
+}
+console.log('不变量校验 ✓ 每条 buff ∈ vanityPet ∪ lightPet');
 
 writeFileSync(OUT, JSON.stringify(pets, null, 0));
 console.log(`写入 ${OUT}`);

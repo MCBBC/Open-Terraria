@@ -11,6 +11,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { BuffType } from '../stats/Buffs';
 import { canHit } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
@@ -193,6 +194,13 @@ export class MinionProj extends Entity {
   foxAimX = 0; foxAimY = 0;
   private foxT = 0;
   private pounceCd = 0;
+  // ---- 同伴方块 653（AI_067,Projectile.cs:46657/46804-46860/47055-47830）----
+  private cubeA0 = 0;     // ai[0]：0 地面跟随 / 1 归位悬浮
+  private cubeLai0 = 0;    // localAI[0]：岩浆尖叫计数 0..20（近主清零 :47088）
+  private cubeLai1 = 0;    // localAI[1]：黑暗计数 -3600..120（阈值后捅人）
+  private cubeRot = 0;     // rotation（+=vx/20 :46805；贴靠时 AngleTowards 0）
+  /** _CompanionCubeScreamCooldown[owner]（静态 float[256]——单人取模块级等价） */
+  private static cubeScreamCd = 0;
 
   // ---- 旗舰家族分支（行号见各方法注释；均在通用运动前 return）----
 
@@ -721,6 +729,7 @@ export class MinionProj extends Entity {
     void dt;
     this.age++;
     if (this.attackFlash > 0) this.attackFlash--;
+    if (this.projId === 653) { this.companionCubeStep(game); return; }
     if (this.sentry) {
       if (--this.life <= 0) { this.dead = true; return; }
       // 落地（AI_130 尾部 :65420：tileCollide=true + velocity.Y += 0.2）
@@ -1095,6 +1104,171 @@ export class MinionProj extends Entity {
     void TILE;
   }
 
+  /** 同伴方块 653（AI_067 的 light-pet 路径,Projectile.cs 1:1）：
+   *  · 生命期（:46657-46662）：buff 191 活 → 续命；玩家死/无 buff → 消失
+   *  · 特殊段（:46804-46860）：rot+=vx/20；岩浆内 lai0++（≥20 且尖叫冷却归零 →
+   *    NPCDeath59/61 叫一声,冷却 3600t）；全黑（自身+玩家格光照 <0.15）lai1++ 否则
+   *    递减（钳 -3600..120）；超过阈值 且玩家静止/无无敌 → 1/5 尖叫(Item16)否则
+   *    捅人 Hurt(3, ByOther(6)) + 无敌帧清零（免疫穿透）——死因 DeathText.Stabbed
+   *  · 跟随（:47407+/47055+）：vector=玩家中心；>300px 或 |dy|>300 → ai0=1 悬浮直飞
+   *    （tileCollide=false,加速 0.2,近主 <200 且主落地且头顶净空 → 回地面态）；
+   *    地面态：贴主（|dx|<150 摩停下,rot→0）否则水平加速 0.5/上限 4(玩家速钳制),
+   *    |vx|>3 触发跳跃,目标高出 48px 按距离表起跳（-6..-16）,湿身 vy×2 */
+  private companionCubeStep(game: import('./types').GameHooks): void {
+    const owner = this.ownerRef();
+    const w = game.world;
+    const st = w.store;
+    // ---- 生命期（:46657-46662 companionCube 旗= buff 191）----
+    if (!owner || owner.dead || !owner.buffs.has(BuffType.CompanionCube)) { this.dead = true; return; }
+    this.w = 30; this.h = 30; // SetDefaults（:6733-6741）
+
+    // ---- 特殊段（:46804-46860）----
+    this.cubeRot += this.vx / 20;
+    if (MinionProj.cubeScreamCd > 0) MinionProj.cubeScreamCd--;
+    // 岩浆计数（:46812-46827）
+    const cti = st.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16));
+    if (st.liquid[cti] > 0 && st.liquidType[cti] === 2) this.cubeLai0++;
+    else this.cubeLai0--;
+    this.cubeLai0 = Math.max(0, Math.min(20, this.cubeLai0));
+    if (this.cubeLai0 >= 20 && MinionProj.cubeScreamCd === 0) {
+      MinionProj.cubeScreamCd = 3600;
+      game.playSfxFiles([Math.random() < 0.1 ? 'NPC_Killed_61' : 'NPC_Killed_59'], 1, this.cx, this.cy);
+    }
+    // 黑暗捅人（:46835-46860——仅本地玩家侧）----
+    const lit = (() => {
+      const lg = (game as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } | null }).lighting;
+      if (!lg) return 1; // 无光照引擎(探针)视作亮,不触发
+      const at = (wx: number, wy: number) => {
+        const [r, g, b] = lg.lightAt(Math.floor(wx / 16), Math.floor(wy / 16));
+        return Math.hypot(r, g, b) / 255; // Lighting.GetColor().ToVector3().Length()
+      };
+      return { c: at(this.cx, this.cy), p: at(owner.cx, owner.cy) };
+    })();
+    if (lit.c < 0.15 && lit.p < 0.15) this.cubeLai1++;
+    else if (this.cubeLai1 > 0) this.cubeLai1--;
+    this.cubeLai1 = Math.max(-3600, Math.min(120, this.cubeLai1));
+    const pSpeed = Math.abs(owner.vx) + Math.abs(owner.vy);
+    if (this.cubeLai1 > 30 + Math.floor(Math.random() * 90) && owner.iframes <= 0 && pSpeed === 0) {
+      if (Math.random() < 0.2) {
+        game.playSfxFiles(['Item_16'], 1, this.cx, this.cy);
+        this.cubeLai1 = -600;
+      } else {
+        game.playSfxFiles(['Item_1'], 1, this.cx, this.cy);
+        owner.lastDamageCause = { kind: 'stabbed' };
+        owner.damage(3, this.cx, this.cy, false);
+        owner.iframes = 0; // :46857-46858 immune=false/immuneTime=0（穿透无敌）
+        this.cubeLai1 = -300 - Math.floor(Math.random() * 30) * 10;
+      }
+    }
+
+    // ---- 跟随核心（light-pet 族,flag12=false 路径）----
+    let vx = this.vx, vy = this.vy;
+    const pcx = owner.cx, pcy = owner.cy;
+    const dpx = pcx - this.cx, dpy = pcy - this.cy;
+    const distP = Math.hypot(dpx, dpy);
+    if (distP > 2000) { // :47414 超远直传
+      this.x = pcx - this.w / 2; this.y = pcy - this.h / 2;
+      vx = 0; vy = 0;
+    }
+    // 目标（:46718 vector=player.Center;653 仅覆写 X=player.Center.X=同值）
+    let tx = pcx, ty = pcy;
+    if (this.cubeA0 === 0) {
+      if (distP > 300 || Math.abs(dpy) > 300) { this.cubeA0 = 1; } // :47413 num3/num4=300
+    } else {
+      // ---- 悬浮归位态 ai0=1（:47050-47160）----
+      // tileCollide=false；加速 0.2 逼近;近主 <200 且主落地且自身净空 → 回地面态
+      if (distP < 200 && owner.vy === 0 && this.y + this.h <= owner.y + owner.h
+        && !st.isSolid(Math.floor(this.cx / 16), Math.floor(this.cy / 16))) {
+        this.cubeA0 = 0;
+        if (vy < -6) vy = -6;
+      }
+      if (distP >= 60) {
+        const num19 = Math.max(10, pSpeed);
+        const spx = (dpx / (distP || 1)) * num19, spy = (dpy / (distP || 1)) * num19;
+        const acc = 0.2, acc15 = acc * 1.5;
+        if (vx < spx) { vx += acc; if (vx < 0) vx += acc15; }
+        else if (vx > spx) { vx -= acc; if (vx > 0) vx -= acc15; }
+        if (vy < spy) { vy += acc; if (vy < 0) vy += acc15; }
+        else if (vy > spy) { vy -= acc; if (vy > 0) vy -= acc15; }
+      } else {
+        this.cubeLai0 = 0; // :47088 近主清零（与岩浆计数共用槽）
+      }
+      if (vx !== 0) this.facing = vx > 0 ? 1 : -1;
+      this.x += vx; this.y += vy;
+      this.vx = vx; this.vy = vy;
+      return;
+    }
+    // ---- 地面态 ai0=0（:47407+/47536+）----
+    // 目标下探（:47458-47465 最多 20 格找地面）
+    for (let k = 0; k < 20; k++) {
+      if (st.isSolid(Math.floor(tx / 16), Math.floor(ty / 16))) break;
+      ty += 16;
+    }
+    // 目标视线截断（:47468 TileCollision 5% 步进近似——遇实心停在墙前）
+    {
+      const dx = tx - pcx, dy2 = ty - pcy;
+      let nx = pcx, ny = pcy;
+      for (let t = 0.05; t <= 1.001; t += 0.05) {
+        const sx = pcx + dx * t, sy = pcy + dy2 * t;
+        if (st.isSolid(Math.floor(sx / 16), Math.floor(sy / 16))) break;
+        nx = sx; ny = sy;
+      }
+      tx = nx; ty = ny;
+    }
+    const dtx = tx - this.cx, dty = ty - this.cy;
+    const distT = Math.hypot(dtx, dty);
+    // :47446 贴身且玩家更近 → 以自身为锚（防抖）
+    if (distT < 32 && distP < distT) { tx = this.cx; ty = this.cy; }
+    // 水平步进参数（:47496-47537 num34/35/36/37）
+    let acc = 0.5, vmax = 4, clamp = 4, accSlow = 0.1;
+    {
+      const ps = Math.abs(owner.vx) + Math.abs(owner.vy);
+      if (ps > 0 && ps < clamp) clamp = ps; // 653 特例（:47536-47543）
+    }
+    const num41 = tx - this.cx;
+    let jumpGate = false;
+    if (Math.abs(num41) < 150) { // 653 贴靠（:47589-47595）
+      // rotation → 0（AngleTowards 0.2）
+      this.cubeRot = angleTowards(this.cubeRot, 0, 0.2);
+      vx *= 0.9;
+      if (Math.abs(vx) < 0.1) vx = 0;
+    } else if (Math.abs(num41) > 5) { // :47597-47610
+      if (num41 < 0) { vx -= (vx > -vmax ? acc : accSlow); if (num41 < 0 && vx > 0) vx -= accSlow; }
+      else { vx += (vx < vmax ? acc : accSlow); if (num41 > 0 && vx < 0) vx += accSlow; }
+      if (Math.abs(vx) > 3) jumpGate = true; // :47695 653 跳跃门
+    } else {
+      vx *= 0.9;
+      if (Math.abs(vx) < acc * 2) vx = 0;
+    }
+    vx = Math.max(-clamp, Math.min(clamp, vx));
+    if (vx !== 0) this.facing = vx > 0 ? 1 : -1;
+    // 重力 + 碰撞（tileCollide=true）
+    vy = Math.min(vy + 0.3, MAX_FALL_SPEED);
+    this.vx = vx; this.vy = vy;
+    moveAndCollide(this, w, vx, vy);
+    const onGround = this.onGround;
+    if (onGround && vy === 0) {
+      // 跳跃梯（:47751-47760 按 2/5 格上方障碍选 -5.1..-11.1）
+      if (jumpGate) {
+        const fx = Math.floor((this.x + this.w / 2) / 16) + this.facing + Math.round(vx);
+        const fy = Math.floor((this.y + this.h / 2) / 16);
+        const solid = (oy: number) => st.isSolid(fx, fy + oy);
+        if (!solid(-1) && !solid(-2)) this.vy = -5.1;
+        else if (!solid(-2)) this.vy = -7.1;
+        else if (solid(-5)) this.vy = -11.1;
+        else if (solid(-4)) this.vy = -10.1;
+        else this.vy = -9.1;
+      }
+      // 目标高出 48px → 距离表起跳（:47765-47808）
+      if (ty - this.cy < -48) {
+        const d = -(ty - this.cy);
+        this.vy = d < 60 ? -6 : d < 80 ? -7 : d < 100 ? -8 : d < 120 ? -9
+          : d < 140 ? -10 : d < 160 ? -11 : d < 190 ? -12 : d < 210 ? -13
+          : d < 270 ? -14 : d < 310 ? -15 : -16;
+      }
+    }
+  }
+
   draw(r: import('../render/Renderer').Renderer): void {
     // 世界坐标绘制（Renderer 实体循环在世界变换内）——投射物贴图懒加载通道同 Arrow。
     // 原版投射物贴图是竖向多帧行（projFrames 表）：按帧高切片，1:1 像素尺寸。
@@ -1248,4 +1422,13 @@ function countStormTigerGems(game: GameHooks): number {
     if (m instanceof MinionProj && !m.dead && m.projId === 831) n++;
   }
   return n;
+}
+
+/** MathHelper.AngleTowards（:47591 cubeRot 用）：向 target 步进 maxAngle（最短弧） */
+function angleTowards(cur: number, target: number, maxAngle: number): number {
+  let d = target - cur;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  const step = Math.max(-maxAngle, Math.min(maxAngle, d));
+  return cur + step;
 }

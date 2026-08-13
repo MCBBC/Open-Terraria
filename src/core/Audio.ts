@@ -16,7 +16,10 @@ interface Track {
 export class AudioSystem {
   private ac: AudioContext | null = null;
   private pool = new Map<number, Track>();
-  private buffers = new Map<number, AudioBuffer>();
+  /** 解码 PCM 常驻上限:每首 mp3 解码后 30-45MB,104 首全驻 = GB 级;
+   *  保留最近 MAX_BUFFERS 首(Map 迭代序=LRU),超限淘汰最旧并重解码(可接受) */
+  private static readonly MAX_BUFFERS = 3;
+  private buffers = new Map<number, AudioBuffer | null>();
   private decoding = new Set<number>();
   /** 目标曲目（≈原版 Main.curMusic；0 = 静音） */
   curMusic = 0;
@@ -40,7 +43,7 @@ export class AudioSystem {
     return this.ac;
   }
 
-  /** 解码缓存（每曲一次；解码失败标记 null 防重复请求） */
+  /** 解码缓存（每曲一次；解码失败标记 null 防重复请求;LRU 上限 MAX_BUFFERS） */
   private async buffer(id: number): Promise<AudioBuffer | null> {
     const hit = this.buffers.get(id);
     if (hit !== undefined) return hit;
@@ -51,12 +54,32 @@ export class AudioSystem {
       if (!r.ok) throw new Error(String(r.status));
       const buf = await this.ac!.decodeAudioData(await r.arrayBuffer());
       this.buffers.set(id, buf);
+      this.evictOld();
       return buf;
     } catch {
-      this.buffers.set(id, null as unknown as AudioBuffer); // 永久失败标记
+      this.buffers.set(id, null); // 永久失败标记(体积零,不参与淘汰)
       return null;
     } finally {
       this.decoding.delete(id);
+    }
+  }
+
+  /** LRU 淘汰:超限后删最旧的可淘汰条目(非失败哨兵、非 pool 播放中)。
+   *  一轮全扫收集候选再删,避免 refresh-continue 式死循环(全部不可淘汰时);
+   *  只删 Map 条目,已建的 AudioBufferSourceNode 仍引用旧 buffer(播放不受影响),
+   *  之后 track() 重建才需重解码。pool 只存交叉淡化中的曲目(tickFade 停播即
+   *  移出),故候选不足降到上限的情形可忽略 */
+  private evictOld(): void {
+    if (this.buffers.size <= AudioSystem.MAX_BUFFERS) return;
+    const evictable: number[] = [];
+    for (const [id, buf] of this.buffers) {
+      if (buf === null) continue;        // 失败哨兵:零体积,清了会重发 404
+      if (this.pool.has(id)) continue;   // 播放/淡化中:track() 不可失源
+      evictable.push(id);
+    }
+    for (const id of evictable) {
+      if (this.buffers.size <= AudioSystem.MAX_BUFFERS) break;
+      this.buffers.delete(id);
     }
   }
 

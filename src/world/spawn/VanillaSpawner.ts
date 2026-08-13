@@ -641,8 +641,7 @@ export class VanillaSpawner {
    *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似) */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
-    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false,
-    wofActive = false): { spawnRate: number; maxSpawns: number } {
+    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false): { spawnRate: number; maxSpawns: number } {
     // ZoneWaterCandle 先落字段（SetSpawnFlags L308 语义）：同一值既改刷怪率（:637/:650）
     // 也供 SpawnAnNPC 的 399/87/86 水蜡烛加重支——Game 每帧先 getSpawnRate 后 spawn
     this.zoneWaterCandle = waterCandle;
@@ -667,14 +666,9 @@ export class VanillaSpawner {
     }
     const underworldY = (w.store.h - 200) * 16;
     if (playerYpx > underworldY) {
-      // L393-396：地狱 maxSpawns×2
+      // L393-396：地狱 maxSpawns×2。（L668-673 肉山战 ×3/×0.3 压制不移植：
+      // 我方 trySpawnEnemy 在 Boss 在场时整体 return,压制强度已覆盖）
       maxSpawns = Math.floor(maxSpawns * 2);
-      // L668-673：肉山战进行中（wofNPCIndex>=0）且玩家在地狱 → spawnRate×3 / max×0.3
-      // （WoF 期间地狱刷怪大幅压制,防止干扰战斗）——此前缺失
-      if (wofActive) {
-        spawnRate = Math.floor(spawnRate * 3);
-        maxSpawns = Math.max(1, Math.floor(maxSpawns * 0.3));
-      }
     } else if (playerYpx > w.rockLevel * 16 + sHeightPx) {
       // L402-407：洞穴层 spawnRate×0.4 / max×1.9
       spawnRate = Math.floor(spawnRate * 0.4);
@@ -1947,6 +1941,12 @@ export class VanillaSpawner {
       if (this.dayTime && this.world.clock.hourFloat < 16.5 && !N(3)) {
         return D([671, 672, 673, 674, 675][rng.int(0, 4)]);
       }
+      return this.spawnFrog(rng);
+    }
+    // case 60 落脚开关（NPC.cs:2249-2270 友好轮丛林草落脚）：白天 2/3 鹦鹉族 /
+    // 其余 SpawnFrog——补 ZoneJungle 旗外的丛林草落脚覆盖（zone 边缘带）
+    if (this.spawnFriendlyCycle && this.surfaceSpawn && t === T.JUNGLE_GRASS) {
+      if (this.dayTime && !N(3)) return D([671, 672, 673, 674, 675][rng.int(0, 4)]);
       return this.spawnFrog(rng);
     }
     // L3741 蜂巢块 225 落脚（tile 门，区别于 L3832 蜂巢墙 86）：1/2 →

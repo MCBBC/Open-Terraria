@@ -44,6 +44,8 @@ export interface FlowHandle {
   importWld(buf: Uint8Array): Promise<void>;
   quitToMenu(): void;
   doSave(): void;
+  /** 导出存档为文件(自有 JSON 格式,与 __swFlow.loadJson 闭环) */
+  doExportSave(): void;
   openSettings(inGame: boolean): void;
   openBestiary(): void;
   game: Game | null;
@@ -719,6 +721,29 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     });
   }
 
+  /** 导出存档:同一序列化链(saveClient),产物落盘为 .sbw.json 下载——
+   *  与 __swFlow.loadJson / 世界槽位导入互为闭环,便于备份与跨机迁移 */
+  function doExportSave() {
+    if (!game) return;
+    saveClient.ensure();
+    void saveClient.save(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
+      const name = (game!.world.name ?? 'world').replace(/\s+/g, '_');
+      const d = new Date();
+      const p = (n: number) => String(n).padStart(2, '0');
+      const filename = `${name}-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.sbw.json`;
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.Exported', filename));
+    }).catch((e) => {
+      console.error('export save failed', e);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+    });
+  }
+
   // KvStore 延迟引入避免顶层副作用顺序问题
   async function kvSetCompat(json: string): Promise<string> {
     const { kvSet } = await import('./save/KvStore');
@@ -735,6 +760,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     importWld,
     quitToMenu,
     doSave,
+    doExportSave,
     backToTitle: showTitle,
     devMode: () => devMode,
     joinGame: (ip: string) => joinRoom(ip.includes(':') ? `ws://${ip}` : `ws://${ip}:7777`), // 旧桥（直连 URL）

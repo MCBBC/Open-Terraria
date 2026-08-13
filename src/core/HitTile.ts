@@ -65,7 +65,9 @@ export class HitTile {
    *  语义,衰减速率（每 2 tick 一档）超过铜镐 15t 冷却的积累速率 = 永远凑不满
    *  100 = 镐斧全体无法挖掘（2026-08-13 铜镐实锤） */
   update() {
-    for (const [key, e] of [...this.data]) {
+    // Map 迭代中删除"当前条目"是安全的(迭代器已越过它),无需整表快照拷贝
+    // ——此前 [...this.data] 每 tick 拷最多 500 条的分配税
+    for (const [key, e] of this.data) {
       e.ttl--;
       if (e.ttl <= 1) this.data.delete(key);
     }

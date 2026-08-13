@@ -8,7 +8,6 @@
 //   升级套件（5289 解锁 UsingSuperCart）：20 / 20 / 0.1 / 15 / 5.15
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
-import { PLAYER_WALK_MAX } from '../core/constants';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import {
@@ -233,7 +232,7 @@ export class Minecart extends Entity {
     {
       const spd = Math.hypot(this.vx, this.vy);
       if (spd > 4) {
-        const ratio = spd / PLAYER_WALK_MAX;   // velocity.Length()/maxRunSpeed
+        const ratio = spd / p.maxRunSpeed;     // velocity.Length()/maxRunSpeed（动态 stat：buff/配饰乘区）
         let rx = this.x, ry = this.y, rw = p.w, rh = p.h;
         if (this.vx < -1) rx -= 15;
         if (this.vx > 1) rw += 15;

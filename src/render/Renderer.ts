@@ -2884,7 +2884,7 @@ export class Renderer {
     const lai3 = e.lai3;
     const r = lai3 > 0 ? lai3 / 36 : 0;                 // num6（红雾进度）
     const r2 = r * r;                                   // num3
-    const r1 = lai3 > 0 ? remap(lai3, 0, 20, 0, 1) : 0; // 紫电 Remap
+    const r1 = lai3 > 0 ? Math.max(0, Math.min(1, lai3 / 20)) : 0; // 紫电 Remap(lai3,0,20,0,1)
     let num7 = 0;
     if (e.ai0 === 7 || e.ai0 === 8) {
       // Remap(ai1,20,60,0,2)（:26265）区外钳制

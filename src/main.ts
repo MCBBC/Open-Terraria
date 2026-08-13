@@ -143,6 +143,7 @@ window.addEventListener('keydown', (e) => {
             game!.paused = false;
           },
           onSave: () => flow.doSave(),
+          onExport: () => flow.doExportSave(),
           onSettings: () => flow.openSettings(true),
           onBestiary: () => flow.openBestiary(),
           onQuit: () => {

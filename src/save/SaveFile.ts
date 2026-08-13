@@ -73,6 +73,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
+    bannerKills: world.bannerKills,   // BannerSystem.killCount（BannerSystem.cs:32 随存档）
     // 挂物族存放物（内部 id；serializeSave 内过稳定 id 表）
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
@@ -147,6 +148,7 @@ export function saveWorldOnly(world: World): string {
     fastForwardTimeToDawn: world.fastForwardTimeToDawn,
     fastForwardTimeToDusk: world.fastForwardTimeToDusk,
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
+    bannerKills: world.bannerKills,   // BannerSystem.killCount（BannerSystem.cs:32 随存档）
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
   };
@@ -267,6 +269,7 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   if (data.savedOreTiers != null) world.savedOreTiers = { ...data.savedOreTiers }; // 旧档缺省 -1 未砸过
   if (data.shadowOrbCount != null) world.shadowOrbCount = data.shadowOrbCount;      // 旧档缺省 0
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
+  if (data.bannerKills) world.bannerKills = data.bannerKills;   // 旗击杀计数（旧档缺省=空）
   world.chests = v3Chests;      // v3 id 翻译+locked 透传
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags;

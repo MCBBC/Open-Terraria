@@ -1701,11 +1701,22 @@ export class Game implements GameHooks {
     // 懒加载晚到的【图块/墙表】→ 全量标脏重烘焙:出生点子集预载后,远行遇到
     // 新类型时 vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正。
     // 必须按文件名过滤——图标/NPC/弹幕贴图不进 chunk，此前任何 vimage 晚到都
-    // invalidateAll（后台补齐 6059 张图标 = 6059 次全图重烘焙标记，进图后持续帧尖峰）
+    // invalidateAll（后台补齐 6059 张图标 = 6059 次全图重烘焙标记，进图后持续帧尖峰）。
+    // 再加 500ms 合批去抖:进新生态的表到达风暴(765 Tiles_*+368 Wall_*)期间
+    // N 张表晚到只触发一次 invalidateAll——dirtyQueue 有 Set 去重,不去抖则是
+    // 同一批 chunk 被 N 次扫全图+释放循环(O(n²) ×N 次空转)
     if (this.atlas) {
+      let chunkInvalidateTimer: ReturnType<typeof setTimeout> | 0 = 0;
+      const scheduleChunkInvalidate = () => {
+        if (chunkInvalidateTimer) return;
+        chunkInvalidateTimer = setTimeout(() => {
+          chunkInvalidateTimer = 0;
+          this.chunks.invalidateAll();
+        }, 500);
+      };
       this.atlas.onVImageLoaded = (file: string) => {
         if (file.startsWith('vanilla/Tiles_') || file.startsWith('vanilla/Wall_')) {
-          this.chunks.invalidateAll();
+          scheduleChunkInvalidate();
         }
         // 物品图标图集晚到 → 标记 UI 待刷（fixedUpdate 节流后刷背包/快捷栏/宝箱，
         // 把空图标升格为原版图标——否则图标未就绪时 paintSlot 写空 src，直到下次
@@ -3797,16 +3808,17 @@ export class Game implements GameHooks {
     // 火把火苗：视内点燃火把随机飘出火星（火点在格顶上方 20px 精灵的火焰处）
     this.emitTorchSparks();
     this.emitTileParticles();
+    // 地形碰撞：目标位置实心则反弹（冲击大）或停驻地表（冲击小，重力归零缓慢淡出）
+    // st/solidAt 提循环外(此前每粒子重建闭包,数百粒子/帧的分配税)
+    const st = this.world.store;
+    const solidAt = (x: number, y: number) => {
+      const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+    };
     for (const p of this.particles) {
       p.life--;
       p.vy += p.grav ?? 0.12;
       if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; } // 空气阻力：喷溅后缓慢减速飘散
-      // 地形碰撞：目标位置实心则反弹（冲击大）或停驻地表（冲击小，重力归零缓慢淡出）
-      const st = this.world.store;
-      const solidAt = (x: number, y: number) => {
-        const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
-        return st.inBounds(tx, ty) && st.isSolid(tx, ty);
-      };
       let nx = p.x + p.vx;
       if (solidAt(nx, p.y)) { p.vx *= -0.4; nx = p.x; }
       let ny = p.y + p.vy;
@@ -7267,7 +7279,12 @@ export class Game implements GameHooks {
         ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
           || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
         : sheet === 467 && style === 13;
-      if (chest.locked || styleLocked) {
+      if (!styleLocked && chest.locked) {
+        // 陈旧数据旗标（导入存档脏数据）：样式不在锁定集 → 原版 IsLocked=false 视为
+        // 未锁，清旗标直开（防误走解锁分支把金箱帧错转到木箱）
+        chest.locked = false;
+      }
+      if (styleLocked) {
       let keyVid = 327;              // 默认金钥匙（num78 初值，:32688）
       let frameDelta = 36;           // 解锁帧回退
       let event = 0;                 // 成就事件（0=无）
@@ -7287,7 +7304,9 @@ export class Game implements GameHooks {
         this.input.rightDown = false;
         return;
       }
-      if (!this.consumeVanillaItem(keyVid)) {
+      // ★ 暗影钥匙 329 可重复使用（Player.cs:32716 flag16=num78!=329 → stack-- 只
+      //   在非 329 时执行；bank4 分支 :32750 同门）——只验持有不消耗
+      if (keyVid === 329 ? this.countVanillaItem(329) <= 0 : !this.consumeVanillaItem(keyVid)) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestLocked'));
         this.input.rightDown = false;
         return;
@@ -7958,11 +7977,13 @@ export class Game implements GameHooks {
     }
   }
 
-  /** 全图扫描测重板/感应器登记(读档/生成后一次);增量维护见 worldReadyListener */
+  /** 全图扫描测重板/感应器/间歇泉登记(读档/生成后一次);增量维护见 onTileChanged */
   private scanTriggerTiles(): void {
     const st = this.world.store;
     this.triggerTiles428.clear();
     this.triggerTiles423.clear();
+    this.geyserTiles.clear();
+    this.geyserCd.clear(); // 冷却表一并清——geyserTiles 不清则会残留上一世界的索引
     const s428 = TILE_BY_KEY['v_428_weightedpressureplate'] ?? 0;
     const s423 = TILE_BY_KEY['v_423_logicsensor'] ?? 0;
     const s443 = TILE_BY_KEY['v_443_geyser'] ?? 0;
@@ -7978,6 +7999,9 @@ export class Game implements GameHooks {
       else this.triggerTiles428.delete(i);
       if (t === s423) this.triggerTiles423.add(i);
       else this.triggerTiles423.delete(i);
+      // 间歇泉:放置/移除即时跟进(此前漏此分支——放置的 geyser 永不喷发)
+      if (t === s443) this.geyserTiles.add(i);
+      else { this.geyserTiles.delete(i); this.geyserCd.delete(i); }
     });
   }
 
@@ -9033,8 +9057,7 @@ export class Game implements GameHooks {
       p.buffs.has(BuffType.Calming), p.buffs.has(BuffType.Battle),
       townNPCs, w.clock.isDay,
       !!this.scene?.zoneCorrupt || !!this.scene?.zoneCrimson,
-      !!w.clock.bloodMoon,
-      this.boss?.vanillaId === 113 && !this.boss.dead);   // wofNPCIndex>=0（:668 地狱压制门）
+      !!w.clock.bloodMoon);
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
@@ -9310,9 +9333,22 @@ export class Game implements GameHooks {
       ['truffle', !has('truffle') && allow('truffle')],
       ['zoologist', !has('zoologist') && allow('zoologist')],
       ['princess', !has('princess') && allow('princess')],
+      // ---- 城镇史莱姆族第二轮（Main.cs:65391-65422 + :65557）：解锁旗 → 可到访；
+      //  678 酷酷史莱姆真派对放行（:65274-65278，unlockedSlimeGreenSpawn 同放行），
+      //  到访置旗（WorldGen.cs:5542-5544 case 678） ----
+      ['town_slime_blue', !has('town_slime_blue') && !!this.world.flags.unlockedSlimeBlueSpawn],
+      ['town_slime_old', !has('town_slime_old') && !!this.world.flags.unlockedSlimeOldSpawn],
+      ['town_slime_clumsy', !has('town_slime_clumsy') && !!this.world.flags.unlockedSlimePurpleSpawn],
+      ['town_slime_diva', !has('town_slime_diva') && !!this.world.flags.unlockedSlimeRainbowSpawn],
+      ['town_slime_red', !has('town_slime_red') && !!this.world.flags.unlockedSlimeRedSpawn],
+      ['town_slime_yellow', !has('town_slime_yellow') && !!this.world.flags.unlockedSlimeYellowSpawn],
+      ['town_slime_squire', !has('town_slime_squire') && !!this.world.flags.unlockedSlimeCopperSpawn],
+      ['town_slime_cool', !has('town_slime_cool')
+        && (!!this.partyState.genuineParty || !!this.world.flags.unlockedSlimeGreenSpawn)],  // :65274 真派对门
     ];
     const pick = prio.find(([, ok]) => ok)?.[0];
     if (!pick) return;
+    if (pick === 'town_slime_cool') this.world.flags.unlockedSlimeGreenSpawn = true;  // WorldGen.cs:5543
 
     // ③ 入住 / 流浪生成（askingNpcId = 待生成者，占用豁免/同房避让用）
     const id = TOWN_NPC_IDS[pick].id;
@@ -10582,16 +10618,42 @@ export class Game implements GameHooks {
   }
 
   /** 护士治疗:费用 = 缺失生命 × 0.75 铜(下限 3);满血拒绝 */
+  /** Main.GetNurseHealCost（Main.cs:39463-39511）1:1：(缺血 + 100×可移除 debuff)
+   *  × 进度倍率链（石头人200/世花150/三王100/困难60/骷髅王|蜂后25/世吞|克脑10/
+   *  EoC 3）× 专家 2 ×（折扣 0.8 未实装——discountAvailable 恒 false，登记） */
+  private nurseHealCost(): number {
+    const p = this.player;
+    const f = this.world.flags;
+    let num = p.maxHp - p.hp;
+    // 可移除 debuff：buffTime>60 且非 NurseCannotRemoveDebuff 表——本仓 debuff 族
+    // 全部可移除（该排除表多为 boss 专属 debuff，未实装，登记）
+    num += 100 * p.buffs.debuffCount(60);
+    if (f['downed_245']) num *= 200;        // Golem
+    else if (f['downed_262']) num *= 150;   // Plantera
+    else if (f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']) num *= 100;
+    else if (f.hardMode) num *= 60;
+    else if (f.downedSkeletron || f['downed_222']) num *= 25;   // Boss3 | QueenBee
+    else if (f['downed_13'] || f['downed_14'] || f['downed_15']) num *= 10;  // EoW/BoC
+    else if (f['downed_4']) num *= 3;       // EoC
+    if (this.world.isExpert) num *= 2;
+    return Math.floor(num);
+  }
+
   private nurseHeal() {
     const p = this.player;
-    if (p.hp >= p.maxHp) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealthy')); return; }
-    const cost = Math.max(3, Math.round((p.maxHp - p.hp) * 0.75));
-    if (this.coinsOwned() < cost || !this.spendCopper(cost)) {
+    if (p.hp >= p.maxHp && p.buffs.debuffCount(60) === 0) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealthy'));
+      return;
+    }
+    const cost = this.nurseHealCost();
+    if (cost <= 0 || this.coinsOwned() < cost || !this.spendCopper(cost)) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
       return;
     }
     p.hp = p.maxHp;
+    p.buffs.clearDebuffs();   // 护士同时清 debuff（NPCChatText_DoNurseHeal 语义）
     this.sfx.play('drink');
+    this.cb.onBuffsChanged?.();
     this.cb.onInventoryChanged();
     this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealed'));
     // 成就：护士付费累计（AchievementsHelper.HandleNurseService → FREQUENT_FLYER
@@ -10985,6 +11047,15 @@ export class Game implements GameHooks {
         this.newText(`${name} 旗帜已就绪!`, 250, 250, 0);
         this.spawnDrop(this.player.cx, this.player.cy, 'place_v_91_banners', 1, 0, -3, banner);
       }
+    }
+    // 史莱姆王死亡砸出书呆子史莱姆 670（NPC.cs:80206-80222 case 50 + ViolentlySpawnNerdySlime
+    //  :80317-80330）：!unlockedSlimeBlueSpawn → 置旗 + 原地上抛生成
+    if (enemy && enemy.vanillaId === 50 && !this.world.flags.unlockedSlimeBlueSpawn) {
+      this.world.flags.unlockedSlimeBlueSpawn = true;
+      const nerdy = new TownNPC('town_slime_blue', enemy.cx, enemy.cy - 20);
+      nerdy.vy = -3 - Math.random() * 3;
+      this.entities.add(nerdy, 'npcs');
+      this.cb.onToast?.(Lang.npcName(670) ?? '书呆子史莱姆加入了小镇！');
     }
     // 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount≥150 且场上无王 → 召王）
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {

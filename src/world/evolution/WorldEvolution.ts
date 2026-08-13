@@ -1553,8 +1553,13 @@ export class WorldEvolution {
     const variation = Math.floor(Math.random() * 3);
     const t = S(165);
     if (!t) return;
-    st.setTile(x, y, t, variation * 18, 0);
-    st.setTile(x, y + 1, t, variation * 18, 18);
+    // 冰族专属列（GetDesiredStalagtiteStyle :38800-38808）：147/161→0、163→594、
+    // 164→540、200→648（锚=调用方 SNOW_FAMILY 格的上方实心，sheet 直查）
+    const anchor = this.solidTile(x, y - 1) ? sheetOf(this.typeAt(x, y - 1)) : 0;
+    const base = anchor === 147 || anchor === 161 ? 0
+      : anchor === 163 ? 594 : anchor === 164 ? 540 : 648;
+    st.setTile(x, y, t, base + variation * 18, 0);
+    st.setTile(x, y + 1, t, base + variation * 18, 18);
   }
 
   /** GrowWeb（cs:74141-74175）：1/10 + ±2-3 内有实心 → 放蛛网 51 */

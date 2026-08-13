@@ -96,6 +96,8 @@ export interface SaveData {
   /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:1340 写/:2192 读；
    *  旧档缺省 86400 = delayStart，v108 前原版旧档同值 WF:2188） */
   cultistDelay?: number;
+  /** 旗击杀计数（BannerSystem.killCount;BannerSystem.cs:32 随存档——旧档缺省空） */
+  bannerKills?: Record<number, number>;
   /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WorldFile.cs:1329-1335/
    *  2147-2161；anglerQuestFinished 运行时态不存——读档 loadTempInfo 重置 WF:628-629） */
   angler?: { quest: number; whoFinishedToday: string[] };
@@ -173,6 +175,7 @@ export interface SaveData {
   /** 图鉴统计（BestiaryUnlocksTracker——原版随世界文件持久化 WorldFile.cs:3399/3405；
    *  旧档缺省=空三桶） */
   bestiary?: import('../data/Bestiary').BestiarySave;
+  bannerKills?: Record<number, number>;
 }
 
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
@@ -366,6 +369,7 @@ export function serializeSave(
     weather: meta.weather,
     events,
     bestiary: meta.bestiary,
+    bannerKills: meta.bannerKills,
     idScheme: 'sheet',
   };
   return JSON.stringify(data);

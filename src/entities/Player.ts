@@ -2103,6 +2103,11 @@ export class Player extends Entity {
   // 输入状态由 Game 每帧写入
   inputX = 0;
   inputJump = false;
+  /** Player.maxRunSpeed（常规跑速上限 stat，:25695 base 3 × moveSpeed 乘区；
+   *  水中/蜂蜜等场景折扣不在此列——矿车撞击速比等按 stat 口径消费） */
+  get maxRunSpeed(): number {
+    return PLAYER_WALK_MAX * this.buffs.moveSpeedMult * this.equipStats.moveMult;
+  }
   // ---- 钩爪（AI_007 + GrappleMovement 1:1）----
   /** 本 tick 锚点表（原版 player.grappling[10] + grapCount，Player.cs:2608/:2828）：
    *  GrappleProj 挂墙/锚定段每帧登记（Projectile.cs:49797-49801/:49954-49957），

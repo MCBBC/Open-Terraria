@@ -62,6 +62,8 @@ function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, px: n
 export class ChunkCache {
   chunks = new Map<number, ChunkPair>();
   dirtyQueue: number[] = [];
+  /** dirtyQueue 伴生去重集——includes O(n)(invalidateAll 时 O(n²));Set 化后入队 O(1) */
+  private dirtySet = new Set<number>();
   sheets: Map<number, TileSheetEntry>;
   world: World;
   autotiler: AutoTiler | null;
@@ -82,13 +84,20 @@ export class ChunkCache {
   /** 释放全部 chunk 画布 GPU 背板并清表(退出世界必须调用)。
    *  detached canvas 的回收依赖 GC 且明显滞后——连续多次读档累积数百 MB
    *  显存,最终 contextlost/contextrestored 风暴卡死(2026-08-10 trace 实证) */
+  /** 释放一对 chunk 画布的 GPU 背板(width=0 即刻归还,detached canvas 等 GC 则明显滞后)。
+   *  所有丢弃旧画布的路径(标脏重建/LRU 淘汰/全量标脏/退出)都必须先过这里——
+   *  漏掉任一处 = 慢性显存劣化,与 2026-08-10 contextlost 风暴同机制 */
+  private releasePair(pair: ChunkPair | undefined): void {
+    if (!pair) return;
+    pair.wall.width = 0; pair.wall.height = 0;
+    pair.tile.width = 0; pair.tile.height = 0;
+  }
+
   dispose(): void {
-    for (const pair of this.chunks.values()) {
-      pair.wall.width = 0; pair.wall.height = 0;
-      pair.tile.width = 0; pair.tile.height = 0;
-    }
+    for (const pair of this.chunks.values()) this.releasePair(pair);
     this.chunks.clear();
     this.dirtyQueue.length = 0;
+    this.dirtySet.clear();
     this.animChunksBySheet.clear();
     this.animChunksByWall.clear();
   }
@@ -112,8 +121,15 @@ export class ChunkCache {
   markDirty(cx: number, cy: number) {
     const k = ChunkCache.key(cx, cy);
     if (!this.chunks.has(k)) return; // 未生成的 chunk 惰性创建
+    this.releasePair(this.chunks.get(k)); // 旧画布丢弃前先释放,防 detached canvas 积压
     this.chunks.set(k, undefined as unknown as ChunkPair); // 标记删除，重绘时重建
-    if (!this.dirtyQueue.includes(k)) this.dirtyQueue.push(k);
+    this.enqueueDirty(k);
+  }
+
+  private enqueueDirty(k: number) {
+    if (this.dirtySet.has(k)) return;
+    this.dirtySet.add(k);
+    this.dirtyQueue.push(k);
   }
 
   /** 区域标脏（tile 范围）：供树冠等大范围精灵清理使用 */
@@ -137,12 +153,13 @@ export class ChunkCache {
   }
 
   /** 全量标脏(atlas 懒加载晚到的新表 → 已烘焙的 chunk 里可能烤了 fallback)。
-   *  4/帧 的 flushDirty 会逐步重烘焙,dirtyQueue.includes 去重防重复入队 */
+   *  4/帧 的 flushDirty 会逐步重烘焙,dirtySet 去重防重复入队 */
   invalidateAll(): void {
     for (const k of this.chunks.keys()) {
       if (this.chunks.get(k) === undefined) continue; // 已是待重建哨兵
+      this.releasePair(this.chunks.get(k)); // 同 markDirty:旧画布丢弃前释放
       this.chunks.set(k, undefined as unknown as ChunkPair);
-      if (!this.dirtyQueue.includes(k)) this.dirtyQueue.push(k);
+      this.enqueueDirty(k);
     }
   }
 
@@ -153,6 +170,7 @@ export class ChunkCache {
     const t0 = performance.now();
     while (this.dirtyQueue.length && n < maxN) {
       const k = this.dirtyQueue.shift()!;
+      this.dirtySet.delete(k);
       const cx = k & 0xffff, cy = (k >> 16) & 0xffff;
       if (this.chunks.get(k) !== undefined) continue; // 已重建
       this.get(cx, cy);
@@ -200,6 +218,7 @@ export class ChunkCache {
     while (this.chunks.size > ChunkCache.MAX_CHUNKS) {
       const oldest = this.chunks.keys().next().value as number | undefined;
       if (oldest === undefined) break;
+      this.releasePair(this.chunks.get(oldest)); // 淘汰画布同样释放,防 detached 积压
       this.chunks.delete(oldest);
     }
     return c;

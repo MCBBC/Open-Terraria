@@ -77,13 +77,17 @@ function outerCaseSegments(src) {
   return out;
 }
 const CASE_SEGMENTS = outerCaseSegments(itemSrc);
-/** 扫描字段赋值（field = N;）与辅助方法调用（DefaultToMinecart(N)） */
+/** 扫描字段赋值（field = N;）与辅助方法调用（DefaultToMinecart(N)）。
+ *  存在性模式（无捕获组，如 DefaultToInfoAccessory() 辅助族）→ 恒记 1：
+ *  1456 的信息饰品 22 件走 DefaultToInfoAccessory(24,18|28)(Item.cs:1561+，内部
+ *  DefaultToAccessory :48229 才设 accessory=true)——此前只认字面 `accessory = true;`
+ *  全部漏提，导致 statOfInternal null → Inventory.armorAccepts 拒收（装备不了） */
 function scanCaseFields(src, patterns) {
   const out = new Map(); // itemId -> 值
   for (const [id, seg] of CASE_SEGMENTS) {
     for (const p of patterns) {
       const f = seg.match(new RegExp(p));
-      if (f) { out.set(id, +f[1]); break; }
+      if (f) { out.set(id, f[1] !== undefined ? +f[1] : 1); break; }
     }
   }
   return out;
@@ -108,7 +112,12 @@ const LEGS = new Set(LEGS_SLOT.keys());
 const DEFENSE = scanCaseFields(itemSrc, ['\\bdefense\\s*=\\s*(\\d+);']);
 // 生命回复（Item.lifeRegen 字段——再生手环族；GrantArmorBenefits :12700 lifeRegen += armorPiece.lifeRegen）
 const LIFEREGEN = scanCaseFields(itemSrc, ['\\blifeRegen\\s*=\\s*(\\d+);']);
-const ACCESSORY = new Set(scanCaseFields(itemSrc, ['\\baccessory\\s*=\\s*true;']).keys());
+const ACCESSORY = new Set([
+  ...scanCaseFields(itemSrc, ['\\baccessory\\s*=\\s*true;']).keys(),
+  // DefaultToInfoAccessory(DefaultToAccessory 内部 accessory=true;Item.cs:48234/:48229)
+  ...scanCaseFields(itemSrc, ['\\bDefaultToInfoAccessory\\s*\\(']).keys(),
+  ...scanCaseFields(itemSrc, ['\\bDefaultToAccessory\\s*\\(']).keys(),
+]);
 const VANITY = new Set(scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys());
 const STATS = {};
 const setStat = (vid, patch) => { STATS[vid] = { ...(STATS[vid] ?? {}), ...patch }; };
