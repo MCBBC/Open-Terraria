@@ -360,7 +360,7 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
     //   （ZombieMoan wav 未提取 → 略，登记）
     if (e.lai2 === 0) {
       e.lai2 = 1;
-      game.playSfxFiles(['Zombie_1'], 1, e.cx, e.cy);
+      game.playSfxFiles(['NPC_Hit_1'], 1, e.cx, e.cy);
       game.spawnParticles(e.cx, e.cy, '#A03050', 20, 2);
       game.playSfxFiles(['Zombie_2'], 0.8, e.cx, e.cy);
     }

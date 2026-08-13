@@ -965,7 +965,7 @@ export class Game implements GameHooks {
           p, seen: this.tickCount,
           pvp: (s.kind & 0x40) !== 0,
           ownerSlot: s.netId >>> 24,
-          kind7: s.kind & 0x7f,
+          kind7: s.kind & 0x3f,   // ★0x3f（bit6=PvP 位勿入 kind 值）
           enchant: s.aux & 15,
         };
         this.netProjPuppets.set(s.netId, pup);
@@ -992,8 +992,10 @@ export class Game implements GameHooks {
   private netMakeProj(s: ProjSnap): Entity | null {
     // v5：bit7 = hostile（原版 Projectile.hostile，kind0/2/3 携带——Arrow 敌弹/Dart 射击怪/
     // TrapShot 机关；服务器剥除非房主置位）——访客端据此本地结算 Damage_EVP（见 netPuppetProjContact）
+    // ★掩码必须 0x3f：bit6 已是 v7 PvP 位,0x7f 会令 kind=0x40 的弹 switch 落空建不出傀儡
+    // （_pvp-e2e 实抓：B 收到快照但 pups 空）
     const hostile = (s.kind & 0x80) !== 0;
-    switch (s.kind & 0x7f) {
+    switch (s.kind & 0x3f) {
       case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1, null, { hostile });
       case 1: return new Boomerang(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1); // WeaponProj 族共用 drawProj(projId) 渲染，取代表类重建
       case 2: { const d = new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0); d.hostile = hostile; return d; }
@@ -5552,8 +5554,10 @@ export class Game implements GameHooks {
         const ay = this.player.cy - 4 + Math.sin(ang) * 14;
         // 回收掉落：仅木箭（原版燃烧箭 Kill 不掉；子弹/飞镖不可回收）
         const dropKey = projId === 1 ? ammoDef.key : null;
+        // grav 按弹型：子弹(aiStyle 1)直线 0 / 投掷·手雷族 0.3（AI_001 无通用重力，
+        // 此前缺省 0.3 → 子弹全程抛物线下坠未对齐）；箭默认 0.3 由 projGravity 给出
         const bowArrow = new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
-          damage, knockback, projId, dropKey);
+          damage, knockback, projId, dropKey, { grav: projGravity(projId) });
         bowArrow.frostEligible = true; // 冰霜盔甲引擎(ranged 门)
         // 暴击链（审计 §6）：rangedCrit(装备/套装/词缀67-68配饰/buff) + 武器&弹药 item.crit
         const bowVid2 = bowVid ?? (heldDef?.vid ?? -1);
@@ -5571,7 +5575,7 @@ export class Game implements GameHooks {
             for (let i2 = 1; i2 < n; i2++) {
               const pvx = Math.cos(ang) * speed + (Math.random() * 2 * sg[3] - sg[3]) * sg[2] * 20;
               const pvy = Math.sin(ang) * speed + (Math.random() * 2 * sg[3] - sg[3]) * sg[2] * 20;
-              const pa = new Arrow(ax, ay, pvx, pvy, damage, knockback, projId, null);
+              const pa = new Arrow(ax, ay, pvx, pvy, damage, knockback, projId, null, { grav: projGravity(projId) });
               pa.critBonus = bowArrow.critBonus;
               this.entities.add(pa, 'projectiles');
             }
@@ -5940,7 +5944,11 @@ export class Game implements GameHooks {
             );
             bob.poleVid = fm ? +fm[1] : 0; // 血肉抛竿 4325 敌怪概率判定用
             bob.baitVid = baitVid;          // IsLavaBait 三源判定用（Projectile.cs:19230）
-            bob.projId = bobberProjIdFor(bob.poleVid);  // 浮标弹型（ProjLight 光结算用）
+            // 弹型 = 浮漂饰品覆写优先（ItemCheck :46551-46553：fishingPole>0 且
+            // overrideFishingBobber>-1 → projToShoot = 覆写值），否则竿自带 shoot
+            bob.projId = this.player.equipStats.overrideFishingBobber > -1
+              ? this.player.equipStats.overrideFishingBobber
+              : bobberProjIdFor(bob.poleVid);
             this.entities.add(bob, 'projectiles');
             this.sfx.play('throw');
             // 成就：抛竿（Player.cs:48652 HandleSpecialEvent(7) → THROWING_LINES）

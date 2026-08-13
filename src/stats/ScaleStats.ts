@@ -34,7 +34,7 @@ export const GDL = {
 } as const;
 
 /** float32（C# float 字面量/强转位）。JS number 是 float64，在原版显式 (float) 处对齐 */
-const f32 = (v: number): number => Math.fround(v);
+export const f32 = (v: number): number => Math.fround(v);
 
 /** C# Math.Round(double)（默认 MidpointRounding.ToEven 银行家舍入：.5 → 就近偶数；
  *  JS Math.round 是 .5 远离零舍入，逐半值处会差 1） */
@@ -271,6 +271,12 @@ export interface ScaleStatsWorld {
   hardMode: boolean;
   /** Main.getGoodWorld */
   getGoodWorld: boolean;
+  /** Main.tenthAnniversaryWorld（celebrationmk10）——SetDefaults 尾段体型调整用 */
+  tenthAnniversaryWorld: boolean;
+  /** Main.remixWorld（don't dig up）——getGood 39-41 子分支 */
+  remixWorld: boolean;
+  /** Main.zenithWorld（getfixedboi = SeedFlags.everything）——SetDefaults 尾段 lifeMax 预调整 */
+  zenithWorld: boolean;
   /** NPC.downedPlantBoss（ExpertHardmode 段 :18462 +20 阈值） */
   downedPlantBoss: boolean;
   /** NPC.AnyNPCs(type)（Tweaks/ExpertHardmode 的 getGoodWorld 联动门） */
@@ -281,7 +287,9 @@ export interface ScaleStatsWorld {
 
 /** 经典档缺省上下文（未绑定世界时用——数值与原版 Main 未加载世界时一致走 Classic） */
 export const CLASSIC_SCALE_WORLD: ScaleStatsWorld = {
-  difficulty: GDL.CLASSIC, hardMode: false, getGoodWorld: false, downedPlantBoss: false,
+  difficulty: GDL.CLASSIC, hardMode: false, getGoodWorld: false,
+  tenthAnniversaryWorld: false, remixWorld: false, zenithWorld: false,
+  downedPlantBoss: false,
   anyNpc: () => false, activePlayerCount: 1,
 };
 
@@ -304,10 +312,110 @@ export function scaleStatsWorldOf(
     difficulty: mainDifficulty(world),
     hardMode: !!world.flags?.hardMode,
     getGoodWorld: !!world.seedFlags?.getGoodWorld,
+    tenthAnniversaryWorld: !!world.seedFlags?.tenthAnniversary,
+    remixWorld: !!world.seedFlags?.remix,                 // Main.remixWorld = don't dig up
+    zenithWorld: !!world.seedFlags?.everything,            // Main.zenithWorld = getfixedboi
     downedPlantBoss: !!world.flags?.['downed_262'],
     anyNpc,
     activePlayerCount: 1,   // 单机（NPC.GetActivePlayerCount :18518 netMode==0 → 1）
   };
+}
+
+// ---------------------------------------------------------------------------
+// SetDefaults 尾段种子档调整族（NPC.cs:17774-17785 调用链）：
+//   zenith(getfixedboi) :17774-17777 → getGood(FTW) :17778-17781 →
+//   tenthAnniversary :17782-17785（getGood 与十周年【else-if 互斥】）。
+//   全部先于 ScaleStats(:17791)——本层 lifeMax/defense/damage 增量仍吃 ScaleStats
+//   难度乘区（原版同序）；defDamage/defDefense/defLifeMax 快照在 :17749-17751
+//   （本层【前】）——调用侧 baseDamage 用未调基值即对齐。
+//   ★命中分支尾部回写 width/height ×scaleNew（:18025-18026/:17861-17862）=【扩盒】，
+//   与专家档 Tweaks"只缩贴图不扩盒"（ScaleStats 之后 :18187 等）语义相反。
+//   备案（本仓无对应路径）：SetDefaults 入口 FTW sizeScaleOverride 膨胀
+//   (o+o²)/2（:8362-8366，fromVanilla 无 scale 参数）；图鉴假人还原 scale 不扩盒
+//   （:18020-18023/:17856-17859）；canDisplayBuffs=false（245-248 :17945/:17950/:17955，
+//   无 NPC buff 图标渲染）。
+// ---------------------------------------------------------------------------
+
+/** 种子调整原值 bundle（= SetDefaults 主体已写好的 npc 原始字段，逐字段原地改） */
+export interface SeedAdjustStats {
+  type: number;
+  scale: number;
+  lifeMax: number;
+  defense: number;
+  damage: number;
+}
+
+/** getZenithSeedAdjustmentsBeforeEverything（:17865-17872）：
+ *  (uint)(type-125)<=6（=125-131）或 139 → lifeMax×0.8（(double) 截断）。
+ *  先于 getGood（getfixedboi 两层都吃） */
+function zenithSeedAdjustments(s: SeedAdjustStats): void {
+  const t = s.type;
+  if ((t >= 125 && t <= 131) || t === 139) s.lifeMax = Math.trunc(s.lifeMax * 0.8);
+}
+
+/** getGoodAdjustments（:17874-18027，FTW）。返回是否命中分支（=扩盒门；
+ *  else :18014-18016 提前 return 不扩盒）。scale 乘按 (float) 逐处对齐；
+ *  lifeMax/defense/damage 走 (double)×(int) 截断 */
+function getGoodAdjustments(s: SeedAdjustStats, remixWorld: boolean): boolean {
+  const t = s.type;
+  if (t === 13) { s.scale = f32(s.scale * f32(1.35)); s.defense += 2; }
+  else if (t === 14 || t === 15) { s.scale = f32(s.scale * f32(1.4)); s.defense += 2; }
+  else if (t === 39 || t === 40 || t === 41) {
+    s.lifeMax += 100; s.defense += 2; s.damage += 4;
+    s.scale = 1.1;                                    // :17897 赋值（非乘法）
+    if (remixWorld) { s.lifeMax += 50; s.scale = f32(s.scale * f32(1.2)); s.defense += 4; }
+  }
+  else if (t === 35) { s.scale = f32(s.scale * f32(1.25)); }
+  else if (t === 36) { s.scale = f32(s.scale * f32(1.15)); }
+  else if (t === 113 || t === 114) {
+    s.scale = f32(s.scale * f32(0.65));
+    s.lifeMax = Math.trunc(s.lifeMax * 1.5);          // (double)
+    s.defense += 3;
+  }
+  else if (t === 115 || t === 116) { s.scale = f32(s.scale * f32(1.4)); }
+  else if (t === 118) { s.damage += 10; s.defense += 14; s.lifeMax *= 3; }   // :17933-17938
+  else if (t === 222) { s.scale = f32(s.scale * f32(1.2)); }
+  else if (t === 245 || t === 246 || t === 247 || t === 248) { s.scale = f32(s.scale * f32(0.5)); }
+  else if (t === 249) { s.scale = f32(s.scale * f32(0.5)); }                 // 无 canDisplayBuffs
+  else if (t === 262) { s.scale = f32(s.scale * f32(1.3)); }
+  else if (t === 266) {
+    s.defense = Math.trunc(s.defense * 1.5);          // (double)
+    s.damage = Math.trunc(s.damage * 1.2);            // (double)
+    s.scale = f32(s.scale * f32(1.1));
+  }
+  else if (t === 125 || t === 126) { s.scale = f32(s.scale * f32(0.8)); }
+  else if (t >= 127 && t <= 131) { s.scale = f32(s.scale * f32(1.1)); }
+  else if (t >= 134 && t <= 136) { s.scale = f32(s.scale * f32(1.3)); }
+  else if (t === 139) { s.scale = f32(s.scale * f32(1.6)); }
+  else return false;
+  return true;
+}
+
+/** getTenthAnniversaryAdjustments（:17795-17863，celebrationmk10）：列族 scale×0.5。
+ *  尾部扩盒【无条件】执行（无 else-return）——未列族二次乘盒是原版真实行为：
+ *  scale=1 族恒等无感，scale≠1 未列族（史莱姆王 50 等 38 条）真放大（122→152） */
+function tenthAnniversaryAdjustments(s: SeedAdjustStats): boolean {
+  const t = s.type;
+  if (t === 4 || (t >= 13 && t <= 15) || t === 266 || t === 267 || t === 35 || t === 36
+    || t === 222 || (t >= 113 && t <= 116) || (t >= 134 && t <= 136) || t === 139
+    || t === 125 || t === 126 || (t >= 127 && t <= 131) || t === 370 || t === 636
+    || t === 422 || t === 493 || t === 507 || t === 517) {
+    s.scale = f32(s.scale * f32(0.5));
+  }
+  return true;
+}
+
+/** SetDefaults 尾段种子档调整入口（:17774-17785）。原值逐字段原地改；
+ *  返回是否【扩盒】——调用侧用调整后 scale 对已基扩盒的 width/height 二次
+ *  (int) 乘（:18025-18026/:17861-17862） */
+export function applySeedAdjustments(
+  s: SeedAdjustStats,
+  ctx: Pick<ScaleStatsWorld, 'zenithWorld' | 'getGoodWorld' | 'tenthAnniversaryWorld' | 'remixWorld'>,
+): boolean {
+  if (ctx.zenithWorld) zenithSeedAdjustments(s);                              // :17774-17777
+  if (ctx.getGoodWorld) return getGoodAdjustments(s, ctx.remixWorld);         // :17778-17781
+  if (ctx.tenthAnniversaryWorld) return tenthAnniversaryAdjustments(s);       // :17782-17885
+  return false;
 }
 
 // ---------------------------------------------------------------------------

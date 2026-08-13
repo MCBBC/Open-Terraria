@@ -213,9 +213,10 @@ export function runGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
 function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void {
   if (!st.inBounds(x0, y0) || st.flags[st.idx(x0, y0)]) return;
   const gox = x0 - 100, goy = y0 - 100;             // 200×200 magma 图
-  const pres = new Float64Array(200 * 200);
-  const res = new Float64Array(200 * 200);
-  const mact = new Uint8Array(200 * 200);
+  // let:轮末 Utils.Swap 引用交换(GraniteBiome.cs:186)
+  let pres = new Float64Array(200 * 200);
+  let res = new Float64Array(200 * 200);
+  let mact = new Uint8Array(200 * 200);
   for (let a = 0; a < 200; a++) {
     for (let b = 0; b < 200; b++) {
       res[a * 200 + b] = solidTileAt(st, a + gox, b + goy) ? 4 : 1;
@@ -225,12 +226,16 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
   const NVX = [-Math.SQRT1_2, -1, -Math.SQRT1_2, 0, 0, 0, Math.SQRT1_2, 1, Math.SQRT1_2];
   const NVY = [-Math.SQRT1_2, 0, Math.SQRT1_2, -1, 0, 1, -Math.SQRT1_2, 0, Math.SQRT1_2];
   let x3 = 100, x4 = 100, y3 = 100, y4 = 100;
-  const tPres = new Float64Array(200 * 200);
-  const tRes = new Float64Array(200 * 200);
-  const tAct = new Uint8Array(200 * 200);
+  // ★原版双缓冲稀疏写+轮末 Swap(GraniteBiome.cs:47-49/:186-187):target 在
+  //  BuildMagmaMap 时全新(全 0),循环只写被激活/过压力门的格,轮末交换数组引用——
+  //  本轮未写格保留 **i-2 轮**值。曾每轮 tPres.set(pres) 全量刷新 → 未写格保留
+  //  i-1 轮值,CA 边界低压力格行为分叉
+  const tPres0 = new Float64Array(200 * 200);
+  const tRes0 = new Float64Array(200 * 200);
+  const tAct0 = new Uint8Array(200 * 200);
+  let tPres = tPres0, tRes = tRes0, tAct = tAct0;
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   for (let it = 0; it < 300; it++) {
-    tPres.set(pres); tRes.set(res); tAct.set(mact);
     for (let j = x3; j <= x4; j++) {
       for (let k = y3; k <= y4; k++) {
         const ji = j * 200 + k;
@@ -245,7 +250,8 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
             if (pres[ji]! > 0.01 && !mact[ni]) {
               if (l === -1) x3 = clamp(j + l, 1, x3); else x4 = clamp(j + l, x4, 198);
               if (m === -1) y3 = clamp(k + m, 1, y3); else y4 = clamp(k + m, y4, 198);
-              tAct[ni] = 1;
+              // ToFlow(:31):保压/保阻,置 active——稀疏写下须整格写入 target
+              tPres[ni] = pres[ni]!; tRes[ni] = res[ni]!; tAct[ni] = 1;
             }
             sum += np;
             vx += np * NVX[vi]!; vy += np * NVY[vi]!;
@@ -261,8 +267,13 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
         }
       }
     }
-    if (it < 2) { tPres[100 * 200 + 100] = 25; tAct[100 * 200 + 100] = 1; }
-    pres.set(tPres); res.set(tRes); mact.set(tAct);
+    // CreateFlow(25.0) 默认 resistance=0(:34)——中心注入须清 tRes(曾残留初值
+    // 1/4,中心压差差一个量级并外传全图)
+    if (it < 2) { tPres[100 * 200 + 100] = 25; tRes[100 * 200 + 100] = 0; tAct[100 * 200 + 100] = 1; }
+    // Utils.Swap(引用交换,零拷贝)
+    let tp = pres; pres = tPres; tPres = tp;
+    tp = res; res = tRes; tRes = tp;
+    let tq = mact; mact = tAct; tAct = tq;
   }
   // ShouldUseLava：中心线 ≤ lavaLine-30 免岩浆；±50 内有冰雪/薄冰(161-163)/200 拒绝
   const useLava = (() => {

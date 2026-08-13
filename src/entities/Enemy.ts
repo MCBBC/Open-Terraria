@@ -61,6 +61,7 @@ import {
   scaleStats, getAttackDamageForProjectiles, type ScalingStats,
   GDL, remap, mainDifficulty, mainExpertMode, getAttackDamageCappedAtMaster,
   getKnockbackMultiplierScaledByDifficulty,
+  scaleStatsWorld, applySeedAdjustments, type SeedAdjustStats, f32,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { spawnNpcDeathGore } from './GorePiece';
@@ -516,11 +517,28 @@ export class Enemy extends Entity {
     // 原版"承受比例"语义——缺省 1f（NPC.cs:8449 SetDefaults 默认 knockBackResist=1,
     // JSON 提取表只写显式赋值,无字段的 137 只（克眼仆从等）此前落 0.5 吃半击退,2026-08-13 修正）
     const rawKb = v.knockBackResist ?? 1;
+    // ---- SetDefaults 尾段种子档调整（NPC.cs:17774-17785，ScaleStats :17791 之前）----
+    // zenith(getfixedboi)→getGood(FTW)→tenthAnniversary（else-if 互斥）。命中分支
+    // 扩盒（★与专家档 Tweaks"只缩贴图不扩盒"语义相反），详 ScaleStats.applySeedAdjustments 头注。
+    const seedS: SeedAdjustStats = {
+      type: id, scale: v.scale ?? 1, lifeMax: v.lifeMax, defense: v.defense, damage: v.damage,
+    };
+    const seedBox = applySeedAdjustments(seedS, scaleStatsWorld());
+    // 碰撞盒：:17745 基扩盒 (int)(w×scale) 之后，种子档命中分支再 (int)(w×scaleNew)
+    // （:18025-18026/:17861-17862）——按原文两级 (int) 截断重算（不沿用下方 round
+    // 基盒，s≠1 族 113/114/134-136 差 1px）；未命中走既有 round 路径
+    const vScale = v.scale ?? 1;
+    const boxW = seedBox
+      ? Math.trunc(f32(Math.trunc(f32(v.width * vScale)) * f32(seedS.scale)))
+      : Math.round(v.width * vScale);
+    const boxH = seedBox
+      ? Math.trunc(f32(Math.trunc(f32(v.height * vScale)) * f32(seedS.scale)))
+      : Math.round(v.height * vScale);
     const ss: ScalingStats = {
-      type: id, lifeMax: v.lifeMax, damage: v.damage, value: npcValueOf(id),
-      defense: v.defense, knockBackResist: rawKb,
+      type: id, lifeMax: seedS.lifeMax, damage: seedS.damage, value: npcValueOf(id),
+      defense: seedS.defense, knockBackResist: rawKb,
       boss: VANILLA_BOSS_IDS.has(id), friendly: !!v.friendly, townNPC: !!v.townNPC,
-      scale: v.scale ?? 1, difficulty: 0,
+      scale: seedS.scale, difficulty: 0,
     };
     scaleStats(ss);
     e.difficulty = ss.difficulty;          // npc.difficulty（AI 段 GetAttackDamage_* 消费）
@@ -534,7 +552,7 @@ export class Enemy extends Entity {
       name: v.name, hp: ss.lifeMax, damage: rawDamage !== 0 ? ss.damage : 0, defense: ss.defense,
       // 原版 knockBackResist="承受击退的比例"（0=免疫 Boss、0.5=吃一半、1=全额）
       knockbackResist: kbr,
-      width: Math.round(v.width * (v.scale ?? 1)), height: Math.round(v.height * (v.scale ?? 1)), flying,
+      width: boxW, height: boxH, flying,
       boss: VANILLA_BOSS_IDS.has(id),
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
@@ -550,12 +568,16 @@ export class Enemy extends Entity {
     // 恒 0，与旧归零语义一致）
     e.hp = ss.lifeMax;
     e.maxHp = ss.lifeMax;
-    // 碰撞盒乘 npc.scale(NPC.cs:17747-17748 width/height=(int)(×scale))——
+    // 碰撞盒乘 npc.scale(NPC.cs:17745-17747 width/height=(int)(×scale))——
     // 史莱姆王/毁灭者 1.25、血肉墙 1.2:此前未乘,贴图放大了盒子没放大,
-    // 判定区比视觉小一圈(与渲染 scale 不一致的"盒贴图不匹配"来源)
-    const vScale = v.scale ?? 1;
-    e.w = Math.round(v.width * vScale);
-    e.h = Math.round(v.height * vScale);
+    // 判定区比视觉小一圈(与渲染 scale 不一致的"盒贴图不匹配"来源)。
+    // 种子档命中族（boxW/boxH）已含 :18025/:17862 二次扩盒
+    e.w = boxW;
+    e.h = boxH;
+    // 渲染乘区同步（Renderer.ts drawEnemy :2213 = vanilla.scale × vanillaScale）：
+    // 注入"种子档总 scale / 基 scale"比值，使贴图与扩盒后的碰撞盒一致
+    // （113=0.65、134-136=1.3、39-41=1.1[remix 1.32]）
+    if (seedBox) e.vanillaScale = seedS.scale / vScale;
     e.spawnAlpha = v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255）
     // alpha=255 = 出生全透明渐显标记（13-15 世吞 / 134-136 毁灭者；其余 alpha 为
     // 静态不透明度,勿动）：置 alphaFade 交渐显路径逐 tick 减回 0。EoW 族保持原版

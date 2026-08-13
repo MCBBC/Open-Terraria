@@ -27,6 +27,16 @@ function setBrick(st: TileStore, x: number, y: number): void {
   st.type[i] = BRICK; st.flags[i] = 1; st.liquid[i] = 0; st.liquidType[i] = 0;
 }
 
+/** SolidTile(i, j)（cs:70155）：active + tileSolid + !tileSolidTop + 非半砖 + slope 0。
+ *  与 SolidTile2（cs:70178，祭坛锚点门用）差一个 tileSolidTop（平台）条件,勿合并。 */
+function solidTileST(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const j = st.idx(x, y);
+  if (!st.flags[j]) return false;
+  const d = TILE_DEFS[st.type[j]];
+  return !!d && d.solid && !d.platform && !st.half[j] && st.slope[j] === 0;
+}
+
 export function runTemplePass(
   st: TileStore, rng: RNG, gs: GenState,
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
@@ -36,7 +46,9 @@ export function runTemplePass(
   // 种子点(cs:15917-15992):y = Next(rockLayer, maxTilesY-600)(rockLayer 先钳 ≤ h-601);
   // x = ((NextDouble()*num3+0.1)*-dungeonSide+0.5)*w,num3 起 0.25,每 1e6 次失败
   // num3 = min(0.35, num3+0.05) 递增(cs:15978-15989);落点须为丛林草 60(cs:15972)。
-  // num3==0.35 后再失败 10 轮放弃(不作原版地表补救 cs:15995+,直接返回)。
+  // num3==0.35 后再失败 10 轮放弃——★T7(cs:15992-16001):失败后原版**无条件**
+  // 强制补建 makeTemple(maxTilesX - generatingDungeonPositionX, rockLayer + 100)
+  // (remix 分支除外,本仓不支持),不缺席(见下方 sx<0 分支)。
   let sx = -1, sy = -1;
   {
     let band = 0.25, fails = 0, giveups = 0;
@@ -57,9 +69,15 @@ export function runTemplePass(
       }
     }
   }
-  if (sx < 0) return;
+  // ★T7(cs:15992-16001):种子点失败时原版无条件强制补建——锚点
+  //   (maxTilesX - generatingDungeonPositionX, rockLayer + 100)。此前直接
+  //   return,异常种子/丛林草缺失时神庙整体缺席(祭坛+神庙箱+木刺全失)。
+  if (sx < 0) {
+    sx = st.w - gs.generatingDungeonPositionX;
+    sy = Math.floor(gs.rockLevel) + 100;
+  }
   // ---- 房间链(L17185-17231):重投至与全部旧房不相交;overlap 每次相交测试 1% 递增 ----
-  const roomCount = rng.int(Math.max(2, Math.floor(10 * s)), Math.floor(16 * s) - 1);
+  let roomCount = rng.int(Math.max(2, Math.floor(10 * s)), Math.floor(16 * s) - 1);
   const rooms: Room[] = [];
   let dir = rng.next() < 0.5 ? 1 : -1;   // num2
   const startDir = dir;                   // num3
@@ -78,11 +96,17 @@ export function runTemplePass(
       let rw = rng.int(25, 49);
       let rh = Math.min(rng.int(20, 34), rw);
       let baseY = cy;
-      if (last) {
+      // ★T4(cs:33648-33659):UnderworldLayer 截断——num16+70 >= UnderworldLayer-10
+      //   (本仓 UnderworldLayer = h-200,Main.cs:2863)命中时 num2=i+1(cs:33651)
+      //   提前终结房间链并换大房间尺寸;cs:33677-33680 if(flag2) break 跳过相交
+      //   重投。此前缺失,房间链可一路沉入地狱层。
+      const uwCut = baseY + 70 >= (st.h - 200) - 10;
+      if (last || uwCut) {
         const w0 = rng.int(55, 64), h0 = rng.int(45, 49);
         rw = Math.floor(w0 * 1.6);
         rh = Math.floor(Math.min(h0, w0) * 1.35);
         baseY += rng.int(5, 9);
+        if (uwCut) roomCount = n + 1;   // num2 = i + 1(cs:33651)
       }
       if (runStep > runLen) {
         // 换向下沉
@@ -95,6 +119,8 @@ export function runTemplePass(
       }
       rect = { x: rx - Math.floor(rw / 2), y: ry - Math.floor(rh / 2), w: rw, h: rh };
       ok = true;
+      // cs:33677-33680:if (flag2) break——地狱截断房直接采纳,跳过与旧房的相交重投
+      if (uwCut) break;
       for (const o of rooms) {
         if (inter(rect, o)) ok = false;
         if (rng.int(0, 99) === 0) overlap++;
@@ -269,7 +295,9 @@ export function runTemplePass(
     }
   };
   for (let x = ox0; x < ox1; x++) for (let y = oy0; y < oy1; y++) outerTempled(x, y);
-  for (let x = ox1; x >= ox0; x--) for (let y = oy0; y < Math.floor(oy1 / 2); y++) outerTempled(x, y);
+  // ★T1(cs:34064-34073):第二遍 y 为完整区间 num58..num59——曾误写 floor(oy1/2)
+  //   作上界,该遍下半区几乎空转,封壳出现单侧缺口
+  for (let x = ox1; x >= ox0; x--) for (let y = oy0; y < oy1; y++) outerTempled(x, y);
   for (let y = oy0; y < oy1; y++) for (let x = ox0; x < ox1; x++) outerTempled(x, y);
   for (let y = oy1; y >= oy0; y--) for (let x = ox0; x < ox1; x++) outerTempled(x, y);
   // ---- 入口隧道(L17500-17527):固定高度、固定间隔下沉,穿出神庙即停 ----
@@ -278,6 +306,7 @@ export function runTemplePass(
   const tunH = rng.int(2, 4);
   const dropEvery = rng.int(9, 13);
   let tick = 0;
+  let tunDeep = sy;   // num74(cs:34100):入口隧道挖砖最深行——门位扫描上界
   for (;;) {
     tick++;
     if (tick >= dropEvery) { tick = 0; ey--; }
@@ -290,17 +319,31 @@ export function runTemplePass(
       const i = st.idx(xi, y);
       if (st.wall[i] === 87 || (st.flags[i] && st.type[i] === BRICK)) inside = true;
       if (st.flags[i] && st.type[i] === BRICK) {
+        if (y > tunDeep) tunDeep = y;   // ★T3(cs:34131-34133):记录最深挖砖行
         st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
       }
     }
     if (!inside) break;
   }
+  tunDeep += 2;   // num74 += 2(cs:34136)
   // ---- 门框(L17528-17578):柱/洞/门 tile 10 style 11 ----
   const i1 = sx;
   let jy = sy;
   if (!st.inBounds(i1, jy)) return;
-  while (jy < st.h - 2 && !st.flags[st.idx(i1, jy)]) jy++;
-  jy -= 4;   // j1
+  // ★T3(cs:34139-34149):门位向下扫实心,上界=隧道挖砖最深行 num74;到顶仍空则
+  //   ClearEverything + 强制铺 226 兜底(cs:34145-34148)。此前用"jy < h-2"作
+  //   无关上界且无兜底——门框可能悬空或扫描跑穿神庙底。
+  while (!st.flags[st.idx(i1, jy)]) {
+    jy++;
+    if (jy >= tunDeep) {
+      jy = tunDeep;
+      const i = st.idx(i1, jy);
+      st.type[i] = BRICK; st.flags[i] = 1; st.wall[i] = 0;
+      st.slope[i] = 0; st.half[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0;
+      break;
+    }
+  }
+  jy -= 4;   // num81 -= 4（原 j1）
   if (jy < 2) return;
   let yUp = jy;
   while (yUp > 1 && ((st.flags[st.idx(i1, yUp)] && st.type[st.idx(i1, yUp)] === BRICK) || st.wall[st.idx(i1, yUp)] === 87)) yUp--;
@@ -442,6 +485,99 @@ export function runTemplePass(
     }
   }
   gs.lAltarX = altarX; gs.lAltarY = altarY;
+  // ---- 尾部木刺 232 预算段（cs:34315-34483 1:1）：num111 = 房数×1.1×(1±25%)。
+  //      每轮随机选一间 → 房内随机点（须墙 87 且空），Next(2) 定竖/横走线方向,
+  //      沿该向找首个实心后回退一格,以落点为心 ±(3..9) 方框把【贴走线面】的实心格
+  //      转 232（SolidTile 且反向邻格非实心才转;排除框内见门/祭坛）;单轮有放置
+  //      才扣预算,连续 1000 轮无放置也扣预算。★T2:此前整段缺失——全仓 232 只有
+  //      引用没有放置,神庙木刺为零,本段即其唯一放置源。drunkWorldGen 的三处
+  //      ±2 加刺分支本仓世界类型不支持,跳过。
+  {
+    const SPIKE = TILE_BY_KEY['v_232_wooden_spike']!;
+    const DOOR_T = TILE_BY_KEY['door_closed']!;
+    let budget = rooms.length * 1.1;
+    budget *= 1 + rng.int(-25, 25) * 0.01;                 // cs:34315-34316
+    let fails = 0;                                         // num113
+    while (budget > 0) {
+      fails++;
+      const room = rooms[rng.int(0, rooms.length - 1)];    // num115 = Next(num2)
+      let px = rng.int(room.x, room.x + room.w - 1);       // num116
+      let py = rng.int(room.y, room.y + room.h - 1);       // num117
+      if (st.inBounds(px, py) && st.wall[st.idx(px, py)] === 87 && !st.flags[st.idx(px, py)]) {
+        let placed = false;                                // flag6
+        if (rng.int(0, 1) === 0) {
+          // 竖直走线（cs:34335-34390）：排除框查门 10 **与** 祭坛 237（cs:34349-34358）
+          const d = rng.int(0, 1) === 0 ? 1 : -1;          // num118
+          while (st.inBounds(px, py) && !st.flags[st.idx(px, py)]) py += d;
+          py -= d;
+          let flip = rng.int(0, 1);                        // num119
+          const rad = rng.int(3, 9);                       // num120 = Next(3,10)
+          let clear = true;
+          scan: for (let xx = px - rad; xx < px + rad; xx++) {
+            for (let yy = py - rad; yy < py + rad; yy++) {
+              if (!st.inBounds(xx, yy)) continue;
+              const k = st.idx(xx, yy);
+              if (st.flags[k] && (st.type[k] === DOOR_T || st.type[k] === ALTAR)) { clear = false; break scan; }
+            }
+          }
+          if (clear) {
+            for (let xx = px - rad; xx < px + rad; xx++) {
+              for (let yy = py - rad; yy < py + rad; yy++) {
+                if (!st.inBounds(xx, yy)) continue;
+                const k = st.idx(xx, yy);
+                // 反向邻格实心 = 本格被埋,不转（cs:34366）
+                if (!solidTileST(st, xx, yy) || st.type[k] === SPIKE || solidTileST(st, xx, yy - d)) continue;
+                st.type[k] = SPIKE;                        // 原格已实心,仅改 type
+                placed = true;
+                const eyy = flip === 0 ? yy - 1 : yy + 1;  // 朝走线面外伸一格(cs:34369-34379)
+                if (st.inBounds(xx, eyy)) {
+                  const ke = st.idx(xx, eyy);
+                  st.type[ke] = SPIKE; st.flags[ke] = 1;
+                }
+                flip++; if (flip > 1) flip = 0;
+              }
+            }
+          }
+          if (placed) { fails = 0; budget -= 1; }
+        } else {
+          // 水平走线（cs:34393-34476）：排除框只查门 10,不查祭坛——原版不对称,
+          // 勿"补全"（cs:34417-34423）
+          const d = rng.int(0, 1) === 0 ? 1 : -1;          // num125
+          while (st.inBounds(px, py) && !st.flags[st.idx(px, py)]) px += d;
+          px -= d;
+          let flip = rng.int(0, 1);                        // num126
+          const rad = rng.int(3, 9);                       // num127
+          let clear = true;
+          scan: for (let xx = px - rad; xx < px + rad; xx++) {
+            for (let yy = py - rad; yy < py + rad; yy++) {
+              if (!st.inBounds(xx, yy)) continue;
+              const k = st.idx(xx, yy);
+              if (st.flags[k] && st.type[k] === DOOR_T) { clear = false; break scan; }
+            }
+          }
+          if (clear) {
+            for (let xx = px - rad; xx < px + rad; xx++) {
+              for (let yy = py - rad; yy < py + rad; yy++) {
+                if (!st.inBounds(xx, yy)) continue;
+                const k = st.idx(xx, yy);
+                if (!solidTileST(st, xx, yy) || st.type[k] === SPIKE || solidTileST(st, xx - d, yy)) continue;
+                st.type[k] = SPIKE;
+                placed = true;
+                const exx = flip === 0 ? xx - 1 : xx + 1;
+                if (st.inBounds(exx, yy)) {
+                  const ke = st.idx(exx, yy);
+                  st.type[ke] = SPIKE; st.flags[ke] = 1;
+                }
+                flip++; if (flip > 1) flip = 0;
+              }
+            }
+          }
+          if (placed) { fails = 0; budget -= 1; }
+        }
+      }
+      if (fails > 1000) { fails = 0; budget -= 1; }        // cs:34480-34484
+    }
+  }
   // ---- templePart2（1456 cs:34497-34685）1:1 五段：陷阱 → 宝箱 → 雕像 → 家具 → 挂饰 ----
   // 顺序对齐原版：宝箱在尖刺陷阱段**之后**（旧版反序且公式为房数×1.1×(1±25%)）
   templePart2(st, rng, gs, chests, rooms);
@@ -485,8 +621,12 @@ function templePart2(
     tTop = Math.min(tTop, r.y); tBottom = Math.max(tBottom, r.y + r.h);
   }
   const tRooms = rooms.length;
-  const lx = Math.floor(tLeft), rx = Math.ceil(tRight) - 1;
-  const ty = Math.floor(tTop), by = Math.ceil(tBottom) - 1;
+  // ★T5(cs:34047-34050 + cs:34487-34491):原版先把房间 bbox 四侧各外扩 10
+  //   （num56-=10/num57+=10/num58-=10/num59+=10）再写入 GenVars.tLeft/tRight/
+  //   tTop/tBottom 供 templePart2 采样。此前用未外扩 bbox——箱/雕像/家具/挂饰
+  //   采样域每侧短 10 格。
+  const lx = Math.floor(tLeft) - 10, rx = Math.ceil(tRight) - 1 + 10;
+  const ty = Math.floor(tTop) - 10, by = Math.ceil(tBottom) - 1 + 10;
 
   // ---- 1. 尖刺陷阱（cs:34497-34519）：预算 = 房数×1.9×(1±15%) ----
   {
@@ -511,9 +651,10 @@ function templePart2(
     while (budget > 0) {
       const x2 = rng.int(lx, rx);
       const y2 = rng.int(ty, by);
-      // 祭坛 ±3 格回避（原版由保护结构承担；防宝箱贴祭坛抢右键交互）
-      const nearAltar = gs.lAltarX >= 0 && Math.abs(x2 - gs.lAltarX) <= 3 && Math.abs(y2 - gs.lAltarY) <= 3;
-      if (!nearAltar && st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
+      // ★T6:已删除自制"祭坛±3 回避"前置门——原版 cs:34531-34538 无此门,真正排除
+      //   在 AddBuriedChest 内部（cs:35992-35999,以落地行 k 为锚 5×5 查
+      //   Boulders/26/237 拒）;本仓 placeBuriedChest 已带等价检查。
+      if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
         if (placeBuriedChest(st, rng, gs, chests, x2, y2, { style: 16, loot: 'vi_1293_lihzahrd_power_cell' })) {
           budget -= 1;
           fails = 0;

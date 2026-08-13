@@ -103,21 +103,20 @@ export interface ArrowOpts {
   star?: { targetY: number };
 }
 
-/** SetDefaults 提取的 extraUpdates 表（Projectile.cs 各 type 段，0=缺省）：
- *  与生命/穿透同属【按弹型】属性，故在 Arrow 内按 projId 缺省注入而非每个
- *  spawn 点手写——83 眼激光（WoF 之眼 + 双子雷神之眼）共用同一 SetDefaults */
-const PROJ_EXTRA_UPDATES: Record<number, number> = {
-  83: 2, // Projectile.cs:1369（width 4/aiStyle 1/penetrate 3/extraUpdates 2/scale 1.7）
-};
+/** extraUpdates：已并入 vanilla-projectiles.json（tools/extract-projectiles.mjs
+ *  NUM_FIELDS 提取，249 款非 0；83 眼激光=2 等原先手工条目同源于 SetDefaults） */
 
 export class Arrow extends Entity {
-  w = 10; h = 10; // 原版 SetDefaults type 1：width/height = 10
+  w = 10; h = 10; // 原版 SetDefaults type 1：width/height = 10；构造器按弹型覆写
   vx: number;
   vy: number;
   damage: number;
   knockback: number;
   /** 原版投射物类型（1=木箭 2=燃烧箭，PickAmmo projToShoot = ammo.shoot） */
   projId: number;
+  /** 绘制 scale（SetDefaults scale 字段；绘制尺寸 = 贴图原生 × scale，
+   *  与判定盒 w/h 无关——子弹 14 是 2×20 曳光条 × 1.2，曾误画成 10×100） */
+  drawScale = 1;
   /** 回收掉落的 item key（null = 不回收，如燃烧箭） */
   dropKey: string | null;
   grav: number;
@@ -218,6 +217,11 @@ export class Arrow extends Entity {
     this.knockback = knockback;
     this.projId = projId;
     this.dropKey = dropKey;
+    // 判定盒/绘制 scale 按弹型取 SetDefaults（子弹 14 = 4×4 hitbox；箭 1 = 10×10）
+    const pd0 = projectileData(projId);
+    if (pd0?.width) this.w = pd0.width;
+    if (pd0?.height) this.h = pd0.height;
+    this.drawScale = pd0?.scale ?? 1;
     this.grav = opts?.grav ?? 0.3;
     this.life = opts?.life ?? 1200;
     this.pierce = opts?.pierce ?? 1;
@@ -227,7 +231,7 @@ export class Arrow extends Entity {
     this.thornBounce = opts?.thornBounce ?? false;
     this.gravDelay = opts?.gravDelay ?? -1;
     this.homing = opts?.homing ?? null;
-    this.extraUpdates = opts?.extraUpdates ?? PROJ_EXTRA_UPDATES[projId] ?? 0;
+    this.extraUpdates = opts?.extraUpdates ?? pd0?.extraUpdates ?? 0;   // 子弹 14=1(2 步/tick)、高速弹 207=2
     this.drag = opts?.drag ?? 1;
     this.maxFall = opts?.maxFall ?? 16;
     this.tumble = opts?.tumble ?? false;
@@ -344,7 +348,12 @@ export class Arrow extends Entity {
     if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
     if (img && img.complete && img.naturalWidth > 0) {
-      ctx.drawImage(img, -this.w / 2, -this.w / 2, this.w, this.w * (img.naturalHeight / img.naturalWidth));
+      // 原生尺寸 × SetDefaults scale（与判定盒 w/h 解耦）：子弹 14 = 2×20×1.2
+      // 曳光条；箭 1 = 14×32 贴图 × 1。曾统一拉成 w×w 宽 → 100px 巨型子弹/箭偏小
+      const s = this.drawScale;
+      ctx.drawImage(img,
+        -img.naturalWidth * s / 2, -img.naturalHeight * s / 2,
+        img.naturalWidth * s, img.naturalHeight * s);
     } else {
       // 贴图未就绪：短线兜底
       ctx.strokeStyle = this.projId === 2 ? '#FFB060' : '#D8C8A0';

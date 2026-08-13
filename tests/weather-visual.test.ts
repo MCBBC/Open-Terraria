@@ -5,7 +5,7 @@
 // SceneState.cs :105-115（月塔门）/ SceneMetrics.cs :276-282/921-928（WithinRangeOfNPC）。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  pickCloudType, rollRareCloud, pickAmbientFamily, towerSkyActive,
+  pickCloudType, rollRareCloud, pickAmbientFamily, towerSkyActive, moonLordSkyIntensity,
   AMBIENT_FAMILY_PARAMS, AMBIENT_GROUP_SPEC,
   type AmbientSpawnInput, type RareCloudFlags,
 } from '../src/render/SkyRenderer';
@@ -305,8 +305,7 @@ describe('稀有云 RollRareCloud（Cloud.cs:183-227）', () => {
 });
 
 // ---------- 月塔天空激活门（SceneState.cs:105-115 + SceneMetrics.cs:921-928） ----------
-describe('月塔天空激活门 towerSkyActive', () => {
-  it('塔近距门：距离²≤4000² 即激活（NPCEventZoneRadius）', () => {
+describe('月塔天空激活门 towerSkyActive', () => {  it('塔近距门：距离²≤4000² 即激活（NPCEventZoneRadius）', () => {
     expect(towerSkyActive(true, -1, 1, true)).toBe(true);    // 近塔
     expect(towerSkyActive(false, -1, 1, false)).toBe(false); // 远离且无器件
   });
@@ -321,6 +320,17 @@ describe('月塔天空激活门 towerSkyActive', () => {
     expect(towerSkyActive(false, 3, 3, false)).toBe(true);
     // familyIndex 只有 0-3（渲染侧只对四族求值）——月总柱 type 4 与任何族都不相等
     for (let idx = 0; idx < 4; idx++) expect(towerSkyActive(false, 4, idx, false)).toBe(false);
+  });
+});
+
+// ---------- 月总天空渐暗强度（MoonLordSky + SceneMetrics.cs:297-305） ----------
+describe('月总天空渐暗 moonLordSkyIntensity', () => {
+  it('贴身 3000px 内全黑幕；6000px 外归零（SmoothStep 钳位线性）', () => {
+    expect(moonLordSkyIntensity(0)).toBe(1);
+    expect(moonLordSkyIntensity(3000)).toBe(1);
+    expect(moonLordSkyIntensity(4500)).toBeCloseTo(0.5, 5);
+    expect(moonLordSkyIntensity(6000)).toBe(0);
+    expect(moonLordSkyIntensity(9000)).toBe(0);
   });
 });
 

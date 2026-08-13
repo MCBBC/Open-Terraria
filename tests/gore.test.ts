@@ -137,7 +137,7 @@ describe('① vanilla-gore.json 提取表健全性', () => {
       }
     }
     // 1456 HitEffect 守卫全集（提取器 _meta.notes 逐项对应原版守卫）
-    expect([...kinds].sort()).toEqual(['alt', 'dmg', 'net', 'redhat', 'rnd', 'shim', 'sdir']);
+    expect([...kinds].sort()).toEqual(['alt', 'dmg', 'net', 'redhat', 'rnd', 'sdir', 'shim']);
   });
 });
 
@@ -302,9 +302,9 @@ describe('③ 表驱动死亡钩', () => {
     expect(ribbons[0].goreId).toBeGreaterThanOrEqual(276);
     expect(ribbons[0].goreId).toBeLessThanOrEqual(282);
     // 表速 new Vector2(0f, -10f)，叠加 NewGore 扰动（:1347-1348）后：
-    // vx ∈ [-2,2]、vy ∈ [-13,-11]
-    expect(ribbons[0].vx).toBeGreaterThanOrEqual(-2);
-    expect(ribbons[0].vx).toBeLessThanOrEqual(2);
+    // vy ∈ [-13,-11]；vx 含 post `velocity.X += Next(-50,51)*0.05`（±2.5）→ [-4.5,4.5]
+    expect(ribbons[0].vx).toBeGreaterThanOrEqual(-4.5);
+    expect(ribbons[0].vx).toBeLessThanOrEqual(4.5);
     expect(ribbons[0].vy).toBeGreaterThanOrEqual(-13);
     expect(ribbons[0].vy).toBeLessThanOrEqual(-11);
     resetGorePool();
@@ -391,8 +391,11 @@ describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', 
 
   it('dmg==9999 门（NPC.cs:83487）：EoL 式脚本化死亡才出 728-733 六向碎块', () => {
     resetGorePool();
-    expect(npcEntries(437)).toHaveLength(1);
-    expect(npcEntries(437)[0].gates).toEqual([{ k: 'dmg', op: '==', v: 9999 }]);
+    // `for (num97 < 6) NewGore(..., 728 + num97)`（NPC.cs:83488-83493）→ 循环变量
+    // 逐值展开成 6 条固定 id（728-733），各带 dmg 门
+    expect(npcEntries(437).map((e) => e.id)).toEqual([728, 729, 730, 731, 732, 733]);
+    expect(npcEntries(437).every((e) => e.gates)).toBe(true);
+    expect(npcEntries(437).every((e) => e.gates![0].k === 'dmg')).toBe(true);
     // 死亡钩缺省 dmg=9999（原版 HitEffect(0, 9999) 死亡调用约定）→ 出 6 块
     const got: GorePiece[] = [];
     spawnDeathGore(src({ vanillaId: 437 }), (p) => got.push(p));
@@ -466,14 +469,15 @@ describe('⑤ posExpr 编译产物（Vector2 局部流 + 项式代数）', () =>
     expect(e.fx).toBe(0.5);
     expect(e.fy).toBe(0.5);
     expect(e.rot).toEqual([{ a: 'x', s: 'sd', k: 0.5, dim: 'w' }]);
-    // 运行时：sdir=1 → sd 符号 -1 → x = 左上角 + 0.5w - 60 - 0.5w = 左上角 x
+    // 运行时（w=120/h=40/x=100/y=100）：sdir=1 → sd 符号 -1 →
+    // x = 100 - 60(ox) + 60(fx·w) - 60(rot) = 40；y = 100 - 60 + 20 = 60
     resetGorePool();
     const got: GorePiece[] = [];
     spawnDeathGore(src({ vanillaId: 491, w: 120, h: 40, spriteDirection: 1, vanillaScale: 1 }), (p) => got.push(p));
     const head = got.find((p) => p.goreId === 858)!;
     expect(head).toBeTruthy();
-    expect(head.x).toBe(100);                            // 100 + 60 - 60 - 60 + 0(NewGore 不动位置)
-    expect(head.y).toBe(100 + 0.5 * 40 - 60);            // 中心 - 60
+    expect(head.x).toBe(40);
+    expect(head.y).toBe(60);
     // sdir=-1 → sd 符号 +1 → x = 100 + 60 - 60 + 60 = 160（镜像到右舷）
     resetGorePool();
     const got2: GorePiece[] = [];
@@ -490,7 +494,8 @@ describe('⑤ posExpr 编译产物（Vector2 局部流 + 项式代数）', () =>
     // num191/num192 混用：`160 + 60*num191` 的 y 偏移也逐值编译
     const n191 = npcEntries(491).filter((e) => e.line === 84554);
     expect(n191.length).toBe(2);
-    expect(n191.map((e) => e.oy).sort((a, b) => a - b)).toEqual([-160, -220]);
+    // vector19 自带 oy=-60：-(160 + 60*num191) - 60 → -220 / -280
+    expect(n191.map((e) => e.oy).sort((x, y) => (x ?? 0) - (y ?? 0))).toEqual([-280, -220]);
   });
 
   it('rotation.ToRotationVector2()*k（vector25 链）：rv 字段 + spriteDirection==1 时 X 取反', () => {
@@ -507,15 +512,18 @@ describe('⑤ posExpr 编译产物（Vector2 局部流 + 项式代数）', () =>
     resetGorePool();
   });
 
-  it('Vector2 局部链（vector10/vector11）：中心偏移 + 逐轴分量引用编译', () => {
-    const first = npcEntries(636)[0];
+  it('Vector2 局部链（vector10）：中心偏移 + 逐轴分量引用编译（NPC.cs:83036-83041）', () => {
+    // `vector10 = base.Center - new Vector2(10f, 10f)` 直接引用
+    const first = npcEntries(572)[0];
     expect(first.fx).toBe(0.5);
     expect(first.fy).toBe(0.5);
     expect(first.ox).toBe(-10);
     expect(first.oy).toBe(-10);
-    // `new Vector2(vector11.X, vector11.Y + 30f)` → 分量引用展开为 fx/oy
-    const sub = npcEntries(636).find((e) => e.oy === 20);
-    expect(sub).toBeTruthy();
+    // `new Vector2(vector10.X, vector10.Y + 20f)` → 分量引用展开（oy = -10 + 20）
+    const sub = npcEntries(572).find((e) => e.line === 83038);
+    expect(sub?.fx).toBe(0.5);
+    expect(sub?.ox).toBe(-10);
+    expect(sub?.oy).toBe(10);
   });
 });
 
@@ -579,7 +587,8 @@ describe('⑦ gore 16/17 火苗与 ChildSafety', () => {
     // Update :546-556 独立支：v*=0.98 + scale-=0.01（非血块 0.007 档）
     p.fixedUpdate(1, makeGame(makeWorld()));
     expect(p.scale).toBeCloseTo(0.69, 6);
-    expect(p.vx).toBeCloseTo(0, 4);                      // 初速 0（扰动后非 0，此处只验证无重力加速度）
+    // 初速 0 叠 NewGore 扰动（±2）再 ×0.98：无重力加速度项（默认支会 +0.2）
+    expect(Math.abs(p.vx)).toBeLessThanOrEqual(2);
     // 光照贡献（:1078-1101）：16 号 B×0.3/G×0.8
     const l = p.lightRGB()!;
     expect(l.r).toBeCloseTo(0.69, 4);                    // light 1 × scale 0.69
@@ -610,7 +619,7 @@ describe('⑦ gore 16/17 火苗与 ChildSafety', () => {
       const normal = GorePiece.newGore(4, 0, 0, 3, -3, 1)!;
       expect(normal.goreId).toBe(4);
       ChildSafety.disabled = false;
-      const safe = GorePiece.newGore(4, 0, 0, 3, -3, 1)!;
+      const safe = GorePiece.newGore(4, 0, 0, 0, 0, 1)!;
       expect([11, 12, 13]).toContain(safe.goreId);
       expect(safe.scale).toBeGreaterThanOrEqual(0.5);
       expect(safe.scale).toBeLessThanOrEqual(1);

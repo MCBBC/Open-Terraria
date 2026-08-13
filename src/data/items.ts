@@ -312,6 +312,18 @@ item({ key: 'vi_298_shine_potion', name: '', value: 1 });
 item({ key: 'vi_5007_dead_man_s_sweater', name: '', value: 1 });
 item({ key: 'vi_117_meteorite_bar', name: '', value: 1 });
 item({ key: 'vi_186_breathing_reed', name: '', value: 1 });
+// ---- 浮漂饰品 5139-5146（Item.cs:41803-41840 DefaultToAccessory + glowMask 318-324）：
+//      装备 → accFishingBobber（fishingSkill+10，Player.cs:12552-12554/:14121-14124）
+//      + 浮标弹型覆写（UpdateFishingBobber :36244-36272 → overrideFishingBobber=986-993；
+//      ItemCheck :46551-46553 抛竿时 projToShoot 改走覆写）----
+item({ key: 'vi_5139_classic_bobber', name: '', value: 1, maxStack: 1 });
+item({ key: 'vi_5140_amber_bobber', name: '', value: 1, maxStack: 1 });
+item({ key: 'vi_5141_orange_bobber', name: '', value: 1, maxStack: 1 });
+item({ key: 'vi_5142_green_bobber', name: '', value: 1, maxStack: 1 });
+item({ key: 'vi_5143_blue_bobber', name: '', value: 1, maxStack: 1 });
+item({ key: 'vi_5144_pink_bobber', name: '', value: 1, maxStack: 1 });
+item({ key: 'vi_5145_purple_bobber', name: '', value: 1, maxStack: 1 });
+item({ key: 'vi_5146_rainbow_bobber', name: '', value: 1, maxStack: 1 });
 // ---- 呼吸族（CheckDrowning 装备链，2026-08 补齐；stats/装备归属/图标全走 vanilla 数据自动接线）----
 item({ key: 'vi_250_fish_bowl', name: '', value: 1 });            // 鱼缸头盔：戴着恒淹（:22917）
 item({ key: 'vi_4275_gold_goldfish_bowl', name: '', value: 1 });  // 金金鱼缸：同上

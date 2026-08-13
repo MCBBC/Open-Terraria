@@ -18,6 +18,7 @@ import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { accFxOfInternal } from '../data/vanillaAccFx';
 import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
+import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
@@ -373,6 +374,8 @@ export class Player extends Entity {
     minionKB: number;      // minionKB += N
     sentrySlots: number;   // maxTurrets += N
     fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
+    /** 浮漂饰品弹型覆写（Player.overrideFishingBobber :1920；-1=无，986-993=5139-5146） */
+    overrideFishingBobber: number;
     runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
     enduranceEq: number; solarSet: boolean;   // 日曜套(:16224-16295)
     whipRange: number;     // whipRangeMultiplier += X
@@ -400,6 +403,7 @@ export class Player extends Entity {
     let fish = 0;             // fishingSkill（钓具配饰+渔夫甲）
     let setRunAccMul = 1, setMaxRunMul = 1, setRunSlowMul = 1;   // 暗影套移动四参数(:26195)
     let setEndurance = 0, solarSet = false;   // 日曜套(:16224-16295)
+    let setManaCostMul = 1;   // DD2 散件魔耗乘区(:12770-12775)
     // 魔力回复直值（ApplyEquipFunctional if-chain :14379-14383——魔力斗篷 982 专属）
     let manaRegenBonus = 0, manaRegenDelayBonus = 0;
     let extraFall = 0, lavaMax = 0, armorPen = 0, rocketBoots = 0;
@@ -417,6 +421,7 @@ export class Player extends Entity {
     let shroomiteSet = false, vortexSet = false, nebulaSet = false, beetleOff = false;
     let beetleDef = false;
     let flipper = false, longInvince = false, spikedBoots = false;
+    let bobberOverride = -1;   // Player.overrideFishingBobber（:1920 初值 -1；浮漂饰品覆写）
   let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
   const infoAccs: InfoAccGates = emptyInfoAccGates(); // 信息饰品门禁(RefreshInfoAccs :12198)
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
@@ -435,6 +440,12 @@ export class Player extends Entity {
       const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       if (accVid === 267) killGuide = true;
       else if (accVid === 1307) killClothier = true;
+      // 浮漂饰品 5139-5146（Player.cs:14121-14124 accFishingBobber → fishingSkill+10
+      // :12552-12554；UpdateFishingBobber :36244-36272 → overrideFishingBobber=986+(vid-5139)）
+      if (accVid >= 5139 && accVid <= 5146) {
+        fish += 10;
+        bobberOverride = Math.max(bobberOverride, 986 + (accVid - 5139));
+      }
       // 信息饰品门禁(Player.cs:12486 UpdateEquips→RefreshInfoAccsFromItemType)
       if (accVid > 0) refreshInfoAccsFromItemType(infoAccs, accVid);
       // 翅膀（Item.wingSlot>0 → WingStatsInitializer 全字段；多翅膀取首个）
@@ -581,6 +592,25 @@ export class Player extends Entity {
     beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(this.inv.armor[i]);
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
+    // DD2 盔甲散件主属性（DD2_PIECE_FX——Player.cs:12709-12810 胸/腿件逐件扫描,2026-08-13）
+    for (let _i = 0; _i < 3; _i++) {
+      const _fx = DD2_PIECE_FX[hVid + bVid + lVid]; void _fx;
+      break;
+    }
+    const dd2Vids = [hVid, bVid, lVid];
+    for (const _v of dd2Vids) {
+      const _d = DD2_PIECE_FX[_v];
+      if (!_d) continue;
+      if (_d.dmgMagic) dmgMagic += _d.dmgMagic;
+      if (_d.dmgMinion) minionDmg += _d.dmgMinion;
+      if (_d.critMagic) critMagic += _d.critMagic;
+      if (_d.critMelee) critMelee += _d.critMelee;
+      if (_d.critRanged) critRanged += _d.critRanged;
+      if (_d.move) move += _d.move;
+      if (_d.meleeSpd) meleeSpeed += _d.meleeSpd;
+      if (_d.manaCostMul) setManaCostMul *= _d.manaCostMul;
+      if (_d.ammoCost80) ammoSave = true;
+    }
     const sb = activeArmorSetBonus(this);
     if (sb) {
       if (sb.def) def += sb.def;
@@ -604,6 +634,7 @@ export class Player extends Entity {
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.ammoCost80) ammoSave = true;
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
+    manaCostMul *= setManaCostMul;   // DD2 散件魔耗乘区并入(2026-08-13)
     }
     // 召唤系套装（SUMMON_SET 槽序键；散件效果已在上扫，此处只叠套装层）
     const summonSet = (() => {
@@ -651,6 +682,7 @@ export class Player extends Entity {
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
+      overrideFishingBobber: bobberOverride,   // 浮漂饰品弹型覆写（:1920/-1=无）
       runAccMul: setRunAccMul, maxRunMul: setMaxRunMul, runSlowMul: setRunSlowMul,
       enduranceEq: setEndurance, solarSet,
       setBonus: sb, manaCostMul,

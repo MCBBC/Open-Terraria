@@ -98,6 +98,16 @@ const platform = async (page, who) => page.evaluate((w) => {
   g.player.fallStartY = null;
   return { x: g.player.x, y: g.player.y, dead: g.player.dead };
 }, who);
+// B 预埋弹幕同步钩子计数（区分"没收到"vs"收到没建傀儡"）
+await pageB.evaluate(() => {
+  const g = window.__swGame;
+  const orig = g.net.hooks.onProjectileSync;
+  g.net.hooks.onProjectileSync = (snaps) => {
+    window.__pvpSawProj = (window.__pvpSawProj ?? 0) + (snaps ? snaps.length : 0);
+    window.__pvpSawProjFrames = (window.__pvpSawProjFrames ?? 0) + 1;
+    if (orig) orig(snaps);
+  };
+});
 const platB = await platform(pageB, 'B');
 const platA = await platform(pageA, 'A');
 check('双方平台落位存活', !platA.dead && !platB.dead, JSON.stringify({ platA, platB }));
@@ -152,8 +162,8 @@ const swing = await pageA.evaluate(() => {
   const g = window.__swGame;
   const held = g.player.inv.heldItem();
   if (!held) return { err: 'no held' };
-  g.swing = { item: held.id, dmg: 25, kb: 4, t: 12, dur: 16, useStyle: 1 };
-  g.updateSwingHits();
+  g.swing = { item: held.id, dmg: 25, kb: 4, t: 16, dur: 16, useStyle: 1 };
+  for (let i = 0; i < 14; i++) g.updateSwingHits(); // 相位扫描（真实挥击扫过全程）
   const sent = g.swing ? 'swing-alive' : 'swing-consumed';
   return {
     sent, bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,
@@ -223,6 +233,16 @@ const arrowShot = await pageA.evaluate(async (bp) => {
   return { id: a.id, ok: !a.dead, bx: bpr.x, by: bpr.y };
 }, bPos2).catch((e) => ({ err: String(e) }));
 check('④ A 射出 PvP 弹', !arrowShot.err, JSON.stringify(arrowShot));
+// 逐帧快照定位箭的死亡时刻（曾整支消失且从未进差分基准表）
+for (let step = 0; step < 6; step++) {
+  await pump(pageA, 1);
+  const snap = await pageA.evaluate((arrowId) => {
+    const g = window.__swGame;
+    const a = g.entities.projectiles.find((e) => e.id === arrowId);
+    return { t: g.tickCount, alive: !!a && !a.dead, x: a ? Math.round(a.x) : -1, y: a ? Math.round(a.y) : -1, dead: a ? a.dead : null, inLast: g.netProjLast.has(arrowId) };
+  }, arrowShot.id);
+  console.log(`  arrow@t${step}:`, JSON.stringify(snap));
+}
 await pump2(30); await sleep(500); // 弹幕差分广播 + 傀儡命中
 const bProj = await pageB.evaluate(() => ({
   hp: window.__swGame.player.hp,
@@ -243,6 +263,7 @@ const pupDiag = await pageB.evaluate(() => {
   };
 });
 console.log('pupDiag:', JSON.stringify(pupDiag));
+console.log('B sawProj:', await pageB.evaluate(() => ({ n: window.__pvpSawProj ?? 0, frames: window.__pvpSawProjFrames ?? 0 })));
 const projDiagA = await pageA.evaluate((arrowId) => {
   const g = window.__swGame;
   const list = g.entities.projectiles;

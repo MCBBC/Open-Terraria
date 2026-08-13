@@ -33,13 +33,12 @@ function nextInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min));
 }
 
-/** 鱼竿物品 id → 浮标弹型（原版两处合成：
- *  Item.cs SetDefaults :23001 `shoot = 361 + type - 2291`（竿 2291-2296 → 361-366）、
- *  2289 显式 360 / 4325 血肉竿 760 / 4442 热钓竿 775；
- *  Player.UpdateFishingBobber :36244-36272 竿 5139-5146 覆写 986-993
- *  ——987-993 即七色发光浮漂，light=1+glowMask 318+） */
+/** 鱼竿物品 id → 浮标弹型（Item.cs SetDefaults :23001 `shoot = 361 + type - 2291`
+ *  （竿 2291-2296 → 361-366）、2289 显式 360 / 4325 血肉竿 760 / 4442 热钓竿 775。
+ *  ★5139-5146 不是钓竿而是【浮漂饰品】（Item.cs:41803-41840 DefaultToAccessory）——
+ *  其弹型覆写走装备链 overrideFishingBobber（Player.UpdateFishingBobber :36244-36272
+ *  → 986-993；ItemCheck :46551-46553 抛竿改用覆写值），不经本函数） */
 export function bobberProjIdFor(poleVid: number): number {
-  if (poleVid >= 5139 && poleVid <= 5146) return 986 + (poleVid - 5139);
   if (poleVid >= 2291 && poleVid <= 2296) return 361 + (poleVid - 2291);
   if (poleVid === 2289) return 360;
   if (poleVid === 4325) return 760;

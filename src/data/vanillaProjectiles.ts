@@ -11,6 +11,10 @@ export interface ProjectileData {
   timeLeft?: number;
   damage?: number;
   light?: number;
+  /** 绘制 scale（SetDefaults，196 款非 1；绘制尺寸 = 贴图原生 × scale，非判定盒宽） */
+  scale?: number;
+  /** 每帧额外子步（SetDefaults，249 款非 0；总步数 = 1+extraUpdates——子弹 14=1、高速弹 207=2） */
+  extraUpdates?: number;
   friendly?: boolean;
   melee?: boolean;
   ranged?: boolean;

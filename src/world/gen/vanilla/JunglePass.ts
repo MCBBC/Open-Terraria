@@ -118,8 +118,13 @@ function generateTunnelToSurface(st: TileStore, rng: RNG, gs: GenState, i: numbe
     if (count > 10 && rng.int(0, 49) < count) {
       count = 0;
       const side = rng.next() < 0.5 ? 2 : -2;   // 原版 num4 默认 -2、Next(2)==0 才 +2(JunglePass.cs:178-182),曾写反
+      // ★mudWall=true(JunglePass.cs:54 置位、:59 才复位):隧道段整体在 mudWall 期,
+      //   分支洞穴 TileRunner(type=-1)同样走 WorldGen.cs:77233 铺墙分支——每过
+      //   `l>worldSurface && wall(k,l-1)!=2` 的格耗 1 颗 Next(3),过阈值再耗
+      //   1 颗 Next(-10,11),铺丛林墙 15/64。漏传则隧道分支洞穴零掷骰零铺墙,
+      //   流位整体前移(TileRunner.mudWall 分支已按原版实现,见 TileRunner.ts:119)
       tileRunner(st, rng, gs, Math.floor(px), Math.floor(py), {
-        strength: rng.int(3, 19), steps: rng.int(10, 99), type: -1, speedX: side,
+        strength: rng.int(3, 19), steps: rng.int(10, 99), type: -1, speedX: side, mudWall: true,
       });
     }
     px += vx; py += vy;

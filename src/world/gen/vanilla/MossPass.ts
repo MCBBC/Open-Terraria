@@ -31,8 +31,19 @@ const DUNGEON_TILES = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
 const MOSS_SHEETS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 const SHIMMER_SAFETY = 150;            // shimmerSafetyDistance（WorldGen.cs:4104）
 
-const isSolidTile = (st: TileStore, x: number, y: number): boolean =>
-  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;
+/** WorldGen.SolidTile（cs:70155-70172）1:1：active && tileSolid && !tileSolidTop &&
+ *  !halfBrick && slope==0（生成期无 inActive）。写法同源 CaveWallsPass.solidAt。
+ *  ★M1/M2：旧版只查 flags+def.solid，丢 half/slope/solidTop——Spread.Moss(:3516) 与
+ *  countTiles(:9584) 的"实心"判定与原版 SolidTile 分叉（half/slope 是逐格状态，
+ *  不可按 id 预计算，必须逐格全谓词判定） */
+const isSolidTile = (st: TileStore, x: number, y: number): boolean => {
+  if (!st.inBounds(x, y)) return true;   // Main.tile 索引器 null → true（SolidTile catch 语义）
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d) return false;
+  return !!d.solid && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
+};
 
 /** setMoss（cs:9838-9844）：按 x 三分世界选 mossType 槽 → 全局 mossWall/mossTile。
  *  本仓用返回值传递（GenVars 全局位） */

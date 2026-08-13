@@ -38,14 +38,18 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
   if (hutTile === undefined || hutTile < 0) return spots;
   const hutWall = HUT_WALLS[hutIdx];
 
-  // cs:16065-16068:num3 = Next(7,12) × w/4200(裸 double),循环条件是浮点比较
-  //   i < num3——非整数倍时按 ceil 计(如 6300 宽 7×1.5=10.5 → 11 座,勿 floor)
-  const num3 = rng.int(7, 11) * (w / 4200);
+  // ★J1(cs:16063-16066):掷骰顺序 x → y → 数量。原版
+  //   num=Next(40,w-40)、num2=Next((ws+rl)/2,h-400)、num3=Next(7,12)×w/4200。
+  //   此前先数量后 x,y,整 pass 掷骰流错位。
+  //   num3 为裸 double,循环条件是浮点比较 i < num3——非整数倍时按 ceil 计
+  //   (如 6300 宽 7×1.5=10.5 → 11 座,勿 floor)
   let x = rng.int(40, w - 41);
   let y = rng.int(Math.floor((gs.worldSurface + gs.rockLevel) / 2), h - 401);
+  const num3 = rng.int(7, 11) * (w / 4200);
   let retries = 0;
   for (let i = 0; i < num3; i++) {
     let placed = false;
+    let abandoned = false;
     while (!placed) {
       retries++;
       // 地牢异侧半区(cs:16071-16076)
@@ -54,7 +58,13 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
       y = rng.int(Math.floor((gs.worldSurface + gs.rockLevel) / 2), h - 401);
       const halfW = rng.int(2, 3);  // num5
       const halfH = rng.int(2, 3);  // num6
-      if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)] || st.type[st.idx(x, y)] !== JUNGLE_GRASS) continue;
+      if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)] || st.type[st.idx(x, y)] !== JUNGLE_GRASS) {
+        // ★J2(cs:16204-16207):放弃分支挂在 type==60 判断的 **else** 上——重试超
+        //   w*10 时 i++ 额外消耗名额(for 再 ++)并 break。此前放在排除扫描的
+        //   bad 分支、只 break 不扣名额:挂载位置与名额语义双偏。
+        if (retries > w * 10) { retries = 0; abandoned = true; break; }
+        continue;
+      }
       // ±30 步进 3 排除扫描(cs:16088-16102)
       let bad = false;
       for (let jx = x - 30; jx < x + 30 && !bad; jx += 3) {
@@ -65,10 +75,7 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
           if (wl === 86 || wl === 87) bad = true;
         }
       }
-      if (bad) {
-        if (retries > w * 10) { retries = 0; break; } // 放弃本座(cs:16205)
-        continue;
-      }
+      if (bad) continue;
       // 实体壳(cs:16116-16127)
       for (let lx = x - halfW - 1; lx <= x + halfW + 1; lx++) {
         for (let ly = y - halfH - 1; ly <= y + halfH + 1; ly++) {
@@ -126,6 +133,7 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
       retries = 0;
       placed = true;
     }
+    if (abandoned) i++;   // ★J2:原版 i++ 使放弃额外消耗一个名额(cs:16205)
   }
   return spots;
 }
@@ -140,6 +148,15 @@ export function runJungleChestsPass(
       for (let dx = -1; dx <= 1; dx++) {
         for (let dy = 0; dy <= 2; dy++) {
           if (st.inBounds(s.x + dx, s.y + dy)) st.setTileSilent(s.x + dx, s.y + dy, 0);
+        }
+      }
+      // ★J3(cs:17324-17332):第二次放置前对 3×4(含地面行 y+3)统一 slope(0)/
+      //   halfBrick(false)——落地行残留半砖/坡面会顶掉第二次 AddBuriedChest。
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = 0; dy <= 3; dy++) {
+          if (!st.inBounds(s.x + dx, s.y + dy)) continue;
+          const i = st.idx(s.x + dx, s.y + dy);
+          st.slope[i] = 0; st.half[i] = 0;
         }
       }
       placeBuriedChest(st, rng, gs, chests, s.x, s.y, { style: 10, loot: main, flags: { ivy: true } });

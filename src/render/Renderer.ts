@@ -5578,7 +5578,8 @@ export class Renderer {
     const spel = buffs.has(BuffType.Spelunker);
     const dang = buffs.has(BuffType.Dangersense);
     const biomeS = buffs.has(BuffType.BiomeSight);
-    if (!spel && !dang && !biomeS) return;
+    const hunter = buffs.has(BuffType.Hunter);
+    if (!spel && !dang && !biomeS && !hunter) return;
     const st = world.store;
     const pulse = 0.22 + 0.14 * Math.sin(performance.now() / 180);
     const tx0 = Math.max(0, Math.floor((cam.x - viewW / 2 / z) / ts) - 1);
@@ -5604,6 +5605,25 @@ export class Renderer {
       }
     }
     ctx.globalAlpha = 1;
+    // Hunter 药水（Player.cs:9719 detectCreature——屏内小动物+敌怪画红框,2026-08-13 接）
+    if (hunter) {
+      const pulseH = 0.35 + 0.15 * Math.sin(performance.now() / 200);
+      ctx.globalAlpha = pulseH;
+      ctx.strokeStyle = '#FF6060';
+      ctx.lineWidth = 1.5;
+      const camLeft = cam.x - viewW / 2 / z, camTop = cam.y - viewH / 2 / z;
+      for (const ent of this.game.entities.critters) {
+        if ((ent as { dead?: boolean }).dead) continue;
+        const e = ent as { x: number; y: number; w: number; h: number };
+        ctx.strokeRect((e.x - camLeft) * z, (e.y - camTop) * z, e.w * z, e.h * z);
+      }
+      for (const ent of this.game.entities.enemies) {
+        if ((ent as { dead?: boolean }).dead) continue;
+        const e = ent as { x: number; y: number; w: number; h: number };
+        ctx.strokeRect((e.x - camLeft) * z, (e.y - camTop) * z, e.w * z, e.h * z);
+      }
+      ctx.globalAlpha = 1;
+    }
   }
 
   private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock, entities: Entity[] = []) {

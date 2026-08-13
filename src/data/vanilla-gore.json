@@ -8993,9 +8993,49 @@
    "vx": 0,
    "vy": 0,
    "scaleExpr": "scale",
-   "idMin": 469,
-   "idMax": 475,
-   "n": 7,
+   "id": 469,
+   "line": 85744
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 470,
+   "line": 85744
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 471,
+   "line": 85744
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 472,
+   "line": 85744
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 473,
+   "line": 85744
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 474,
+   "line": 85744
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 475,
    "line": 85744
   }
  ],
@@ -9326,18 +9366,63 @@
    "vx": 0,
    "vy": 0,
    "scaleExpr": "scale",
-   "idMin": 508,
-   "idMax": 512,
-   "n": 5,
+   "id": 508,
    "line": 85773
   },
   {
    "vx": 0,
    "vy": 0,
    "scaleExpr": "scale",
-   "idMin": 509,
-   "idMax": 512,
-   "n": 4,
+   "id": 509,
+   "line": 85773
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 510,
+   "line": 85773
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 511,
+   "line": 85773
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 512,
+   "line": 85773
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 509,
+   "line": 85777
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 510,
+   "line": 85777
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 511,
+   "line": 85777
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "scaleExpr": "scale",
+   "id": 512,
    "line": 85777
   }
  ],
@@ -11496,9 +11581,87 @@
    "fy": 0.5,
    "ox": -10,
    "oy": -10,
-   "idMin": 728,
-   "idMax": 733,
-   "n": 6,
+   "id": 728,
+   "line": 83491,
+   "gates": [
+    {
+     "k": "dmg",
+     "op": "==",
+     "v": 9999
+    }
+   ]
+  },
+  {
+   "de": 5,
+   "fx": 0.5,
+   "fy": 0.5,
+   "ox": -10,
+   "oy": -10,
+   "id": 729,
+   "line": 83491,
+   "gates": [
+    {
+     "k": "dmg",
+     "op": "==",
+     "v": 9999
+    }
+   ]
+  },
+  {
+   "de": 5,
+   "fx": 0.5,
+   "fy": 0.5,
+   "ox": -10,
+   "oy": -10,
+   "id": 730,
+   "line": 83491,
+   "gates": [
+    {
+     "k": "dmg",
+     "op": "==",
+     "v": 9999
+    }
+   ]
+  },
+  {
+   "de": 5,
+   "fx": 0.5,
+   "fy": 0.5,
+   "ox": -10,
+   "oy": -10,
+   "id": 731,
+   "line": 83491,
+   "gates": [
+    {
+     "k": "dmg",
+     "op": "==",
+     "v": 9999
+    }
+   ]
+  },
+  {
+   "de": 5,
+   "fx": 0.5,
+   "fy": 0.5,
+   "ox": -10,
+   "oy": -10,
+   "id": 732,
+   "line": 83491,
+   "gates": [
+    {
+     "k": "dmg",
+     "op": "==",
+     "v": 9999
+    }
+   ]
+  },
+  {
+   "de": 5,
+   "fx": 0.5,
+   "fy": 0.5,
+   "ox": -10,
+   "oy": -10,
+   "id": 733,
    "line": 83491,
    "gates": [
     {
@@ -19375,10 +19538,10 @@
   "callsHitSkipped": 4,
   "callsPartySkipped": 14,
   "npcIds": 555,
-  "entryCount": 2328,
+  "entryCount": 2346,
   "unresolvedCount": 0,
   "defaultEntryCount": 3,
-  "gatedEntryCount": 126,
+  "gatedEntryCount": 131,
   "postEntryCount": 259,
   "posExprCount": 2,
   "velExprCount": 0,

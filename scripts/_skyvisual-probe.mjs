@@ -27,12 +27,17 @@ if (!hasChar) {
 await page.click('.sw-item');
 await page.waitForFunction(() => document.querySelector('.sw-list-title')?.textContent === '选择世界', { timeout: 10000 });
 await new Promise(r => setTimeout(r, 700));
-await page.click('.sw-list-footer [data-act=new]');
-await page.waitForSelector('.sw-wc-panel', { timeout: 10000 });
-await new Promise(r => setTimeout(r, 500));
-await page.click('[data-g=size] .sw-wc-opt');
-await new Promise(r => setTimeout(r, 200));
-await page.click('[data-act=create]');
+const worldItem = await page.evaluate(() => !!document.querySelector('.sw-list-panel .sw-item'));
+if (worldItem) {
+  await page.click('.sw-list-panel .sw-item');   // 复用已有世界（跳过生成）
+} else {
+  await page.click('.sw-list-footer [data-act=new]');
+  await page.waitForSelector('.sw-wc-panel', { timeout: 10000 });
+  await new Promise(r => setTimeout(r, 500));
+  await page.click('[data-g=size] .sw-wc-opt');
+  await new Promise(r => setTimeout(r, 200));
+  await page.click('[data-act=create]');
+}
 await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 240000 });
 await new Promise(r => setTimeout(r, 2500));
 

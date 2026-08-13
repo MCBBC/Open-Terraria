@@ -6,6 +6,11 @@
 //   2. ThinIce(cs:21825-21854 + ThinIceBiome.cs):雪原水面上薄冰斑 162——
 //      50×50 扫描门禁(雪>泥 且 雪>泥+石,无蜂巢)→ Circle 半径 14→6 递减 + Blotches(4)。
 //      数量 ThinIcePatchCount 3-5 ×WorldWidth。
+//   2.5 EnchantedSword(cs:21858-21908 + EnchantedSwordBiome.cs):附魔剑圣地——
+//      Slime(20,0.8-1.3) 水潭洞穴 + Mound(14,14) 中央土丘 + InnerOutline 铺草 +
+//      花墙 68 + 藤蔓 382 + 1/3 竖井(Blotches(2,0.2)+沙硬化 397)+ 土丘剑。
+//      重试 while(num15++ <= maxTilesX),掷序 Y→Next(2)→X;洞穴中心在 origin.Y+20。
+//      数量 SwordShrineAttempts 1-2 ×WorldWidth,放置概率 0.5(cs:21886 取反门)。
 //   3. CampsiteBiome(cs:21915-21936 + CampsiteBiome.cs):
 //      露营地标——Slime 形状(num=Next(6,10))拍平的硬化沙/土墙平台 + 金币堆帐篷 +
 //      倒木 186 + 未点燃篝火 215。墙类型按地表材质(沙漠→171/冰雪→40/丛林→204-207/
@@ -151,6 +156,29 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
     }
   }
 
+  // ---- 2.5 Enchanted Sword Shrines(cs:21858-21908 + EnchantedSwordBiome.cs)----
+  // ★原版在 MicroBiomes pass 内、ThinIce 与 Campsite 之间注册(cs:21858-21908)——
+  //   曾拆在独立 SwordShrinePass(结构槽,微群系之前执行)= 管线错位 + 逻辑近似
+  //   (洞穴中心放种子点上方 10-20 格,原版是 origin.Y+20 **下方**)。2026-08-13 归位重写。
+  //   SecretSeed.Variations.noSurfaceNoSwordShrines 门(cs:21858)无对应变体,恒启用
+  //   (普通世界行为一致);errorWorld 分支(cs:21879-21882/21890)未建模。
+  {
+    const swordAttempts = rng.int(scW(1), scW(2));   // SwordShrineAttempts 1-2 ×WorldWidth
+    for (let i = 0; i < swordAttempts; i++) {
+      // !(NextDouble < SwordShrinePlacementChance 0.5) 才放置(cs:21886)——注意极性
+      if (!(rng.next() < 0.5)) {
+        // 重试 while (num15++ <= maxTilesX)(cs:21888):最多 w+1 次,掷序 Y→Next(2)→X
+        for (let t = 0; t <= w; t++) {
+          const oy = Math.floor(gs.worldSurface) + rng.int(50, 99);   // Next(50, 100)
+          const ox = rng.int(0, 1) === 0                               // Next(2) == 0 → 左 30%
+            ? rng.int(50, Math.floor(w * 0.3) - 1)                     // Next(50, w*0.3)
+            : rng.int(Math.floor(w * 0.7), w - 51);                    // Next(w*0.7, w-50)
+          if (placeEnchantedSwordShrine(st, rng, protectedRects, ox, oy)) break;
+        }
+      }
+    }
+  }
+
   // ---- 3. Campsites(cs:21915-21936,最多 1000 次尝试;cs:21914 notTheBees 门)----
   const campOk = !gs.seedFlags.notTheBees || gs.seedFlags.remix;
   const campCount = campOk
@@ -290,8 +318,12 @@ function placeCampsite(st: TileStore, rng: RNG, protectedRects: Rect[], ox: numb
       // Blotches(Apply:先掷 1 次 NextDouble 丢弃,再判 chance=1.0;矩形 x[1-n2,n2-1] y[1-n2,0])
       rng.next();
       rng.next();
+      // ★四连掷(Modifiers.cs:129-132):num/num2/num3/num4 依序 Next(1-_minX,1)/
+      //   Next(0,_maxX)/Next(1-_minY,1)/Next(0,_maxY)。campsite 传 Blotches(num2,num2,
+      //   num2,1,1.0)(cs:68)→ _maxY=1,第 4 掷 Next(0,1) 恒 0 但**必耗 1 样本**
+      //   ——曾硬编码 by1=0 漏掷,每形状格少耗 1 骰,后续 RNG 流整体前移
       const bx0 = rng.int(1 - num2, 0), bx1 = rng.int(0, num2 - 1);
-      const by0 = rng.int(1 - num2, 0), by1 = 0;
+      const by0 = rng.int(1 - num2, 0), by1 = rng.int(0, 0);
       for (let bi = bx0; bi <= bx1; bi++) {
         for (let bj = by0; bj <= by1; bj++) {
           const px = ox + dx + bi, py = oy + dy + bj;
@@ -327,9 +359,12 @@ function placeCampsite(st: TileStore, rng: RNG, protectedRects: Rect[], ox: numb
     if (!found) return false;
   }
   const num4 = groundY - 1;
-  const flag = rng.next() < 0.5; // Next() % 2 == 0
-  // 金币堆帐篷(cs:76-88,1/10 跳过)
-  if (Math.trunc(rng.next() * 10) !== 0) {
+  // ★裸 Next() 的 int 取模位谓词(CampsiteBiome.cs:75 `Next() % 2 == 0`)——RNG.vanilla
+  //   直通 UnifiedRandom.next()(= C# Next() 裸 int32)。曾译 `next()<0.5`(NextDouble
+  //   高位)判定面同概率但逐种子结果不同,帐篷朝向/倒木/篝火三处连锁错位
+  const flag = rng.vanilla.next() % 2 === 0;
+  // 金币堆帐篷(cs:76-88,1/10 跳过)——`Next() % 10 != 0` 位谓词(cs:76)
+  if (rng.vanilla.next() % 10 !== 0) {
     const num5 = rng.int(1, 3); // Next(1,4)
     const num6 = flag ? 4 : -Math.trunc(num / 2);
     for (let m = 0; m < num5; m++) {
@@ -342,14 +377,14 @@ function placeCampsite(st: TileStore, rng: RNG, protectedRects: Rect[], ox: numb
       }
     }
   }
-  // 倒木 186(cs:89-93,1/10 跳过)
+  // 倒木 186(cs:89-93,1/10 跳过)——`Next() % 10 != 0` 位谓词(cs:90)
   const num8 = (num - 3) * (flag ? -1 : 1);
-  if (Math.trunc(rng.next() * 10) !== 0) {
+  if (rng.vanilla.next() % 10 !== 0) {
     const px = ox + num8;
     placeLargePile(st, px, num4);
   }
-  // 篝火 215(cs:94-113,1/10 跳过;frameY+36 = 未点燃行)
-  if (Math.trunc(rng.next() * 10) !== 0) {
+  // 篝火 215(cs:94-113,1/10 跳过;frameY+36 = 未点燃行)——`Next() % 10 != 0`(cs:94)
+  if (rng.vanilla.next() % 10 !== 0) {
     let ok = true;
     for (let dx = 0; dx < 3 && ok; dx++) {
       for (let dy = -1; dy <= 0; dy++) {

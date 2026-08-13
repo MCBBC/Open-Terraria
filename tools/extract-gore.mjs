@@ -1490,8 +1490,6 @@ function emitCallEntry(callee, a, lineNo, r, lhs) {
     goreIdx.set(lhs, emitted);
     goreAlias.set(lhs, lhs);
   }
-  activeGoreEntries = emitted;
-  void e;
 }
 
 // ============ 手工补丁：守卫链为排除式(`type != N` + return)的收尾支 ============

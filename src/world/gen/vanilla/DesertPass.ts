@@ -685,13 +685,26 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   const T751 = TILE_BY_KEY['v_751_sleeping_digtoise']!;
   const T484 = TILE_BY_KEY['v_484_rolling_cactus']!;
   const T187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
-  /** 底行锚、向上 fh 行的物件放置（forced 语义：flag 已保证锚区净空，直接落格） */
-  const placeDeco = (x: number, yBottom: number, tile: number, fw: number, fh: number, bx: number) => {
-    for (let dx = 0; dx < fw; dx++) {
-      for (let dy = 0; dy < fh; dy++) {
-        const ax = x + dx, ay = yBottom - dy;
-        if (!st.inBounds(ax, ay)) return;
-        st.setTileSilent(ax, ay, tile, bx + dx * 18, dy * 18);
+  /** Place2x2 语义（WorldGen.cs:51431-51445）：锚=**右下格**——先 x--/y-- 再写，
+   *  占 (ax-1..ax)×(ay-1..ay)，frameX=列*18，frameY=style*36+行*18（行 0=顶行）。
+   *  曾自制"底行锚向上展开"按左上原点落格 → 整件右移一列且顶/底帧颠倒 */
+  const place2x2 = (ax: number, ay: number, tile: number, style: number) => {
+    for (let k = 0; k < 2; k++) {
+      for (let l = 0; l < 2; l++) {
+        const cx = ax - 1 + k, cy = ay - 1 + l;
+        if (!st.inBounds(cx, cy)) return;
+        st.setTileSilent(cx, cy, tile, k * 18, style * 36 + l * 18);
+      }
+    }
+  };
+  /** Place3x2 语义（WorldGen.cs:52196-52240）：列 ax-1..ax+1，行 ay-1(帧 0)/ay(帧 18)，
+   *  frameX=style*54+列*18（flag 单行分支不适用 187 沙漠锚） */
+  const place3x2 = (ax: number, ay: number, tile: number, style: number) => {
+    for (let k = 0; k < 3; k++) {
+      for (let l = 0; l < 2; l++) {
+        const cx = ax - 1 + k, cy = ay - 1 + l;
+        if (!st.inBounds(cx, cy)) return;
+        st.setTileSilent(cx, cy, tile, style * 54 + k * 18, l * 18);
       }
     }
   };
@@ -713,10 +726,10 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       }
       if (flag && rng.int(0, 19) === 0) {      // Next(20)==0 → 485/751
         const style = rng.int(0, 3);           // style = Next(4)
-        if (rng.int(0, 29) === 0) placeDeco(px, py - 1, T751, 2, 2, 0);        // Next(30)==0 → 751
-        else placeDeco(px, py - 1, T485, 2, 2, style * 36);
+        if (rng.int(0, 29) === 0) place2x2(px, py - 1, T751, 0);        // Next(30)==0 → 751
+        else place2x2(px, py - 1, T485, style);
       } else if (flag && rng.int(0, 4) === 0) {          // 484
-        placeDeco(px, py - 1, T484, 2, 2, 0);
+        place2x2(px, py - 1, T484, 0);
       } else if ((flag !== flag2) && rng.int(0, 4) === 0) {
         // 165 冰凌（DesertHive.cs:491 → WorldGen.PlaceTile(165) → PlaceTight）：
         // 改走 placeTight（ShimmerPass 1:1 完整移植）——按邻接材质分派（396/397 →
@@ -725,7 +738,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         // 且冰列 fx=0 画进地下沙漠（沙岩区出蓝冰锥）。锚点 = py+(flag?-1:+1)（:491）
         placeTight(st, rng, px, py + (flag ? -1 : 1));
       } else if (flag && rng.int(0, 4) === 0) {          // 187：style 29+Next(6)（此前漏掷）
-        placeDeco(px, py - 1, T187, 3, 2, (29 + rng.int(0, 5)) * 54);
+        place3x2(px, py - 1, T187, 29 + rng.int(0, 5));
       }
     }
   }

@@ -436,7 +436,10 @@ export class VanillaSpawner {
       if (map.dmg != null) e.def.damage = map.dmg;
       if (map.def != null) e.def.defense = map.def;
     } else if (ov?.scale != null) {
-      e.vanillaScale = ov.scale;
+      // 原版链 SetDefaultsFromNetId → SetDefaults(WithScale(o))（:8327-8330）：
+      // sizeScale 赋值后 getGood 仍再乘（:17874 在 :17727-17742 之后）——
+      // 与 fromVanilla 注入的种子档比值相乘（未命中族 vanillaScale=1 恒等不变）
+      e.vanillaScale = ov.scale * e.vanillaScale;
     }
     // SetDefaultsFromNetId 覆盖 color/alpha（L7633+：color = new Color(...) / alpha = N）
     if (ov?.color) e.colorRGBA = [ov.color[0], ov.color[1], ov.color[2], ov.color[3] ?? 255];

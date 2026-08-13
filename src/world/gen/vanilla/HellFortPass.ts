@@ -1,13 +1,14 @@
-// 原版 HellFort(L16550-16930)1:1 移植。
+// 原版 AddHellHouses(cs:32299-32337) + HellFort(cs:33008-33331)1:1 移植
+// (旧注释 L16550/L16068 系 1405 行号,以 1456 cs: 为准)。
 // 5 列(左右界数组,列宽 8-20/中央 ±4-10)× 10 行(层高 6-12)房间网格塔;
 // 占用 = 2 轮侧翼(1/3 概率,双列同行标记 + 单列随机走)+ 中央列 [num1..num2] 跨度;
 // 边缘格实心砖(75 黑曜石 4/5 或 76 狱石),内部墙(14/13)+清空;
-// 门 style19(列间 1/3 + 左右外门)/平台 style13(层间 + 顶层口);恶魔火把独立 pass(L16095)。
+// 门洞 style19 参数(列间 1/3 + 左右外门;PlaceTile 该几何恒 return false,实际从不出门)/
+// 平台 style13(层间 + 顶层口);恶魔火把独立 pass(cs:32334-32379)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY } from '../../../data/tiles';
-import { placeDoorClosed } from '../../Door';
 
 const OBS_BRICK = TILE_BY_KEY['v_75_obsidian_brick']!;
 const HELL_BRICK = TILE_BY_KEY['v_76_hellstone_brick'] ?? OBS_BRICK;
@@ -18,24 +19,30 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const hellTop = h - 200;
   if (hellTop >= h - 60) return;
-  // AddHellHouses(L16068):中间 50% 扫描,上空下实地表;放完 i += Next(30,130)
-  let i = Math.floor(w * 0.25);
-  const endX = Math.floor(w * 0.75);
-  while (i < endX - 30) {
-    // 找落点:从 h-40 向上找"上空下实"
-    let j = -1;
-    for (let y = h - 40; y > hellTop; y--) {
-      if (!st.flags[st.idx(i, y)] && st.liquid[st.idx(i, y)] === 0 && st.flags[st.idx(i, y + 1)]) { j = y; break; }
-    }
-    if (j > 0) {
-      const tileType = rng.next() < 0.8 ? OBS_BRICK : HELL_BRICK;
+  // AddHellHouses(cs:32299-32318):for 逐列 i=100..w-100,正常世界只处理中间 50%
+  // (num..w-num;drunk/remix 秘密种子域反转,不移植)。**只有成功建成才**跳格
+  // i += Next(30,130)(再 1/10 追加 Next(0,200));找不到落点仅靠 for 自增 i+1
+  // 扫下一列——旧实现改成 while 无论成败都跳格+耗骰,塔数量级直接错(H1);
+  // 有效起点域到 w-num(=0.75w),旧 endX-30 截尾同批修正
+  const num = Math.floor(w * 0.25);
+  for (let i = 100; i < w - 100; i++) {
+    if (i < num || i > w - num) continue;
+    // 找落点(cs:32307-32310):从 h-40 向上跳过 active/液体格,首格空气即塔底锚点。
+    // 原版无下界(旧实现自制 y>hellTop 下界已删,H4)
+    let j = h - 40;
+    while (st.flags[st.idx(i, j)] || st.liquid[st.idx(i, j)] > 0) j--;
+    if (st.flags[st.idx(i, j + 1)]) {
+      // 塔体材质(cs:32311-32317):Next(75,77) 掷底再被 Next(5)>0(4/5)覆盖为 75,
+      // 净 9/10 黑曜石砖——旧实现单掷 0.8 概率骰,概率与耗骰数均偏
+      let tileType = rng.int(75, 76) === 75 ? OBS_BRICK : HELL_BRICK;
+      if (rng.nextInt(5) > 0) tileType = OBS_BRICK;
       const wallType = tileType === OBS_BRICK ? 14 : 13;
       hellFort(st, rng, i, j, tileType, wallType);
+      i += rng.int(30, 129); // cs:32331:Next(30,130)
+      if (rng.nextInt(10) === 0) i += rng.int(0, 199); // cs:32332-32335
     }
-    i += rng.int(30, 129);
-    if (rng.next() < 0.1) i += rng.int(0, 199);
   }
-  // ---- 恶魔火把(L16095-16136):200×(w/4200) 个,贴砖放置,±8 内无其他火把 ----
+  // ---- 恶魔火把(cs:32334-32379):200×(w/4200) 个,贴砖放置,±8 内无其他火把 ----
   const torchCount = Math.floor(200 * Math.floor(w / 4200));
   for (let n = 0; n < torchCount; n++) {
     let tries = 0, placed = false;
@@ -62,7 +69,9 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       if (near) { if (tries > 1000) break; else continue; }
-      st.setTileSilent(x + side, y, TORCH, 7 * 36, 0);
+      // cs:59863-59865 PlaceTile case4:只写 frameY=22*style,frameX 不动(=0);
+      // style=7(恶魔火把)→ frameY=154。旧实现把 style 写进 frameX 属轴写反(H3)
+      st.setTileSilent(x + side, y, TORCH, 0, 22 * 7);
       placed = true;
     }
   }
@@ -178,9 +187,10 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
           const ti = st.idx(colR[c], y);
           st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = wallType;
         }
-        if (st.inBounds(colR[c], rowB[r] - 3)) {
-          placeDoorClosed(st, colR[c], rowB[r] - 3, 19);
-        }
+        // 原版此处 PlaceTile(col,rowB-1,10,mute,forced:false,style19)(cs:33091):
+        // case10(cs:59867-59906)分支 A 需 j-3 实心(室内已清空,不成立)、
+        // 分支 B 需 j+1/j+2 空(rowB 是地板砖 active,不成立)→ cs:59900 直接
+        // return false——原版地狱塔只留 3 格门洞从不出门,强放门已删(H2)
       }
     }
   }
@@ -215,9 +225,7 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
           const ti = st.idx(colR[c], y);
           st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = wallType;
         }
-        if (st.inBounds(colR[c], rowB[r] - 3)) {
-          placeDoorClosed(st, colR[c], rowB[r] - 3, 19);
-        }
+        // 同上:原版 PlaceTile(cs:33157)该几何下 return false,只留门洞(H2)
       }
     }
   }
@@ -249,9 +257,7 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
             const ti = st.idx(colL[c], y);
             st.type[ti] = 0; st.flags[ti] = 0;
           }
-          if (st.inBounds(colL[c], rowB[r] - 3)) {
-            placeDoorClosed(st, colL[c], rowB[r] - 3, 19);
-          }
+          // 原版 PlaceTile(cs:33196)同几何 return false,门洞保留无门(H2)
         }
       }
       break;
@@ -285,9 +291,7 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
             const ti = st.idx(colR[c], y);
             st.type[ti] = 0; st.flags[ti] = 0;
           }
-          if (st.inBounds(colR[c], rowB[r] - 3)) {
-            placeDoorClosed(st, colR[c], rowB[r] - 3, 19);
-          }
+          // 原版 PlaceTile(cs:33236)同几何 return false,门洞保留无门(H2)
         }
       }
       break;

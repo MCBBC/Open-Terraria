@@ -240,7 +240,11 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
   // 结构保护图近似(无全局 StructureMap):主巢 ±50(padding 5)与蜂蜜斑 16×16 互斥
   const protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
   let placed = 0;
-  for (let n = 0; n < count * 100 && placed < count; n++) {
+  // 原版驱动(WorldGen.cs:16011-16015):外层预算 num3=10000 **固定**(与巢数无关;
+  // 曾 count*100 = 巢少时预算骤减)
+  let budget10000 = 10000;
+  while (placed < count && budget10000 > 0) {
+    budget10000--;
     // 原版 RandomWorldPoint((ws+rl)>>1, 20, 300, 20)（WorldGen.cs:16028，cs:27255
     // 参数序 top,right,bottom,left）：X∈[20,w-21]，Y∈[(ws+rl)/2, h-300]。
     // 此前 right=20/bottom=300 安反轴——横向两侧各砍 300 格（丛林边缘蜂巢绝迹）、
@@ -248,6 +252,24 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     const x = rng.int(20, st.w - 21);
     const y = rng.int(yMin, st.h - 301);
     if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) continue;
+    // ★HiveBiome.Place 前置门(HiveBiome.cs:37-45,此前缺失——主巢可叠既有蜂巢/
+    // 蜂蜜斑、可贴丛林神庙生成):
+    // (a) structures.CanPlace(±50 矩形)——对既有保护区(前巢/斑)的交叠自查
+    if (protectedRects.some((p) => p.x0 < x + 50 && x - 50 < p.x1 && p.y0 < y + 50 && y - 50 < p.y1)) continue;
+    // (b) TooCloseToImportantLocations(:295-321:±150 步进 10,活性蜥蜴砖 226
+    //     或墙 83/3/87 → 弃;神庙 pass 先于蜂巢,此门在原版是活的)
+    let tooClose = false;
+    for (let ti = x - 150; ti < x + 150 && !tooClose; ti += 10) {
+      if (ti <= 0 || ti > st.w - 1) continue;
+      for (let tj = y - 150; tj < y + 150; tj += 10) {
+        if (tj <= 0 || tj > st.h - 1) continue;
+        const tii = st.idx(ti, tj);
+        if ((st.flags[tii] && st.type[tii] === LIHARD) || st.wall[tii] === 83 || st.wall[tii] === 3 || st.wall[tii] === 87) {
+          tooClose = true; break;
+        }
+      }
+    }
+    if (tooClose) continue;
     // 原版验证:半径 15 圆内实心中 60/59 占比 ≥75% 且 60 ≥2
     let solid = 0, mudOrGrass = 0, grass = 0;
     for (let dx = -15; dx <= 15; dx++) {
@@ -309,6 +331,10 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       gs.larvaX.push(lx);
       gs.larvaY.push(ly);
     }
+    // ★AddProtectedStructure(±50, padding 5)(HiveBiome.cs:124,Place 返回**前**):
+    //   原版主巢先注册保护区,驱动(WorldGen.cs:16036-16053)才掷蜂蜜斑——斑与本巢
+    //   互斥。曾把注册放在斑循环之后 → 斑可落主巢正中
+    protectedRects.push({ x0: x - 45, y0: y - 45, x1: x + 55, y1: y + 55 });
     // ★cs:16036-16053:主巢落成后是"蜂蜜斑"(HoneyPatchBiome)而非卫星巢——
     //   目标数 Next(5)、预算 10000、每次先掷半径 NextDouble*60+30 再掷角度
     //   NextDouble*2π,y 无压缩;落点横向 50 边距内或放置失败则不计
@@ -322,7 +348,6 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       budget--;
       if (hx > 50 && hx < st.w - 50 && placeHoneyPatch(st, rng, gs, protectedRects, hx, hy)) done++;
     }
-    protectedRects.push({ x0: x - 45, y0: y - 45, x1: x + 55, y1: y + 55 });   // AddProtectedStructure(±50, padding 5)
     placed++;
   }
 }

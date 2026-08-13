@@ -18,7 +18,6 @@ export interface ArmorSetBonus {
   runAccMul?: number;      // runAcceleration *=（暗影套 1.75,:26195-26201）
   endurance?: number;
   dmgMinion?: number;   // minionDamage +=
-  meleeSpd?: number;    // meleeSpeed +=      // 受伤 ×(1-N)（日曜套 0.12,:16224）
   solar?: boolean;         // 日曜护盾 3 层引擎（每层该次受伤 ×0.2,:37699;每 3s 回 1,:16227）
   dashType?: number;       // 冲撞档（日曜 3,:16288-16294）
   maxRunMul?: number;      // maxRunSpeed *=（暗影套 1.15）
@@ -100,7 +99,7 @@ export const DD2_PIECE_FX: Record<number, Partial<ArmorSetBonus>> = {
   3873: { dmgMinion: 0.2, critMelee: 20, move: 0.2 },
   3875: { dmgMinion: 0.25, dmgMagic: 0.1, manaCostMul: 0.85 },
   3876: { dmgMinion: 0.2, critMagic: 25, move: 0.2 },
-  3878: { dmgMinion: 0.25, ammoCost80: True },
+  3878: { dmgMinion: 0.25, ammoCost80: true },
   3879: { dmgMinion: 0.25, critRanged: 10, move: 0.2 },
   3881: { meleeSpd: 0.2, critMelee: 5, dmgMinion: 0.2 },
   3882: { dmgMinion: 0.2, critMelee: 20, move: 0.3 },

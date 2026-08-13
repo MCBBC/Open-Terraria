@@ -355,6 +355,12 @@ function remap(value: number, fromMin: number, fromMax: number, toMin: number, t
   return toMin + (toMax - toMin) * lerpValueClamped(fromMin, fromMax, value);
 }
 
+/** MoonLordSkyIntensity（SceneMetrics.cs:297-305）：1 − SmoothStep(3000,6000, 玩家距 398 核)。
+ *  Utils.SmoothStep（Utils.cs:126-130）= 钳位线性（非 Hermite 平滑）。 */
+export function moonLordSkyIntensity(distancePx: number): number {
+  return 1 - Math.max(0, Math.min(1, (distancePx - 3000) / 3000));
+}
+
 // ================= 月塔天空族（Nebula/Solar/Stardust/Vortex Sky 1:1） =================
 
 type TowerFamily = 'vortex' | 'nebula' | 'stardust' | 'solar';
@@ -2340,6 +2346,23 @@ export class SkyRenderer {
       const v = this.sunVisibilities(dayTimeTicks, isDay, clock.eclipse, this.atmoValue(camY),
         this.weatherRef?.cloudAlpha ?? 0);
       this.drawSunflareGradientBand(ctx, viewW, viewH, camY - viewH / 2, v.sunset, v.sunrise);
+    }
+
+    // ---- 月总天空渐暗（MoonLordSky.cs:63-70 + SceneState.cs:109 + SceneMetrics.cs:286-302）：
+    //      398 在场即激活（ClosestNPCPosition[398] != Zero），强度 = 1 − SmoothStep(3000,6000,距核)。
+    //      距核取上一帧戏剧扫描缓存（drawAmbience 段更新，1 帧滞后无感） ----
+    {
+      const ml = this.dramaCore;
+      const pl = this.frameCtx?.player;
+      if (ml && pl) {
+        const inten = moonLordSkyIntensity(Math.hypot(pl.cx - ml.cx, pl.cy - ml.cy));
+        if (inten > 0.001) {
+          ctx.save();
+          ctx.fillStyle = `rgba(0,0,0,${inten.toFixed(4)})`;
+          ctx.fillRect(0, 0, viewW, viewH);
+          ctx.restore();
+        }
+      }
     }
 
     // ---- 天幕流星绘制（AmbientSky 天空实体层：画在天空底色之后=原版 SkyManager 层序；

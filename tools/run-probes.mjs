@@ -119,7 +119,7 @@ try {
     process.stdout.write(`▶ ${p.name} … `);
     const r = await runOne(p);
     results.push(r);
-    console.log(r.timedOut ? 'TIMEOUT' : r.fail > 0 ? `FAIL(${r.fail})` : `PASS(${r.pass})`);
+    console.log(r.timedOut ? 'TIMEOUT' : r.fail > 0 ? `FAIL(${r.fail})` : r.status !== 0 ? `ERROR(exit=${r.status})` : `PASS(${r.pass})`);
   }
 } finally {
   if (serverProc) await killServer();
@@ -131,6 +131,6 @@ console.log('\n===== 探针汇总 =====');
 for (const r of [...results].sort((a, b) => b.fail - a.fail || b.timedOut - a.timedOut)) {
   console.log(`${(r.timedOut ? '⏱' : r.fail > 0 ? '✗' : '✓').padEnd(2)} ${r.name.padEnd(16)} ${r.tail ?? `exit=${r.status}`}`);
 }
-const bad = results.filter((r) => r.fail > 0 || r.timedOut).length;
+const bad = results.filter((r) => r.fail > 0 || r.timedOut || r.status !== 0).length;
 console.log(bad ? `\n${bad} 个探针未过` : '\n全部通过 ✓');
 process.exit(bad ? 1 : 0);

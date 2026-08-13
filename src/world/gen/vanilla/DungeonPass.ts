@@ -244,7 +244,15 @@ export function runDungeonPass(
     return true;
   }
 
-  // GetHighestProtectionTypeFromPoint（:1704）——Legacy 房形状数据恒空 → 基类 Walls/None
+  // GetHighestProtectionTypeFromPoint（DungeonUtils.cs:1704-1724）。
+  // ★2026-08-13 逐源核实：Legacy 管线（LegacyDungeonLayoutProvider）只调 GenerateRoom/
+  //   GenerateHall、从不调 CalculateRoom/CalculateHall → LegacyDungeonRoom.calculated 恒 false
+  //   且 _outerShapeData/_innerShapeData 恒空（LegacyDungeonRoom.cs:252-259 仅 !generating 时
+  //   填充）→ GetProtectionTypeFromPoint（:56-67）走 `!_outerShapeData.Contains(...)` 恒返
+  //   ProtectionType.None。即原版 Legacy 地牢对走廊/挖空 **无任何房间保护**（TilesAndWalls
+  //   分支在 Legacy 房型上不可达——覆写至多返 Walls）。本仓 prot() 返 Walls（外框内）是
+  //   "同值重刷跳过"级近似：下游三循环仅用它跳过 chWall(chWall 写的就是同一 wall 值)，
+  //   与原版 None 的最终方块态零差；保持现状不改（按审计要求补内框保护反而会偏离原版）。
   function prot(x: number, y: number, list: DRoom[]): number {
     let p = 0;
     for (const rm of list) {
@@ -465,12 +473,17 @@ export function runDungeonPass(
     const f13 = py < rock + 100.0;
     const f14 = px < w / 2 && px > n13;
     const f15 = px > w / 2 && px < n14;
+    // ★D2 残留偏差（2026-08-13 复核）：原版该 else-if 链只写 zero=(num2,0)/zero=(0,num2)
+    //   （LegacyDungeonHall.cs:524-673，zero2 不重算），下游 startDirection/lastDungeonHall/
+    //   走廊截停判定全部取 zero（正向）。本仓 sd=-z2 约定下水平四支必须写 z2x=-num2；
+    //   旧代码写 z2x=num2 使 sdX 反号→"贴边强制反向"走廊被 sdX>0&&px>w-100 当帧截停成
+    //   1 步残段，且 lastDungeonHall 存反号破坏下条走廊防回头（:501 比对）。
     if (!s.forceX) {
       if (px > w - 200) {
-        num2 = -1; z2x = num2; z2y = 0; vx = num2; vy = 0;
+        num2 = -1; z2x = -num2; z2y = 0; vx = num2; vy = 0;
         if (hrn(3) === 0) vy = hrn(2) === 0 ? -0.20000000298023224 : 0.20000000298023224;
       } else if (px < 200.0) {
-        num2 = 1; z2x = num2; z2y = 0; vx = num2; vy = 0;
+        num2 = 1; z2x = -num2; z2y = 0; vx = num2; vy = 0;
         if (hrn(3) === 0) vy = hrn(2) === 0 ? -0.20000000298023224 : 0.20000000298023224;
       } else if (py >= num6) {
         num2 = -1; nnum++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
@@ -487,10 +500,10 @@ export function runDungeonPass(
           vx = hrn(2) === 0 ? hri(20, 49) * 0.01 : hri(20, 49) * 0.01;   // ★反编译原样：else 同号（:628-633）
         }
       } else if (f14) {
-        num2 = -1; z2y = 0; z2x = num2; vy = 0; vx = num2;
+        num2 = -1; z2y = 0; z2x = -num2; vy = 0; vx = num2;
         if (hrn(3) === 0) vy = hrn(2) === 0 ? -0.20000000298023224 : 0.20000000298023224;
       } else if (f15) {
-        num2 = 1; z2y = 0; z2x = num2; vy = 0; vx = num2;
+        num2 = 1; z2y = 0; z2x = -num2; vy = 0; vx = num2;
         if (hrn(3) === 0) vy = hrn(2) === 0 ? -0.20000000298023224 : 0.20000000298023224;
       }
     }
@@ -1163,7 +1176,11 @@ export function runDungeonPass(
           if (okA && okB && okC && okD2 && okE) {
             n5++;
             let n11 = ri(5, 12);
-            const c1x = round === 0 ? wx - 1 : wx, c1y = round === 0 ? wy : wy - 1;
+            // ★D8（2026-08-13 复核）：首段起点 = 命中格本身。原版 num8/num12 在命中判定后
+            //   不预偏移（DungeonGlobalSpikes.cs:66-72/:163-170），while 条件查"步进方向下一格"
+            //   支撑、放置"当前格"（:73-96/:170-193）→ 首刺落在命中格，再向两侧延伸。旧代码
+            //   先 -1 使整段尖刺列（含 2-3 层带）整体错位一格、丢命中格尖刺。
+            const c1x = wx, c1y = wy;
             spikeRun(round, c1x, c1y, wx, wy, d, n11, -1);
             n11 = ri(5, 12);
             const c2x = round === 0 ? x + 1 : wx, c2y = round === 0 ? wy : oy + 1;

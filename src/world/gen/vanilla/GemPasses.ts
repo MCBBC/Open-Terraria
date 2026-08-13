@@ -20,8 +20,10 @@ import { placeTight } from './ShimmerPass';
 
 const EXPOSED = TILE_BY_KEY['v_178_gems']!;   // tile 178
 const STONE = TILE_BY_KEY['stone']!;
-/** Gemmable（WorldGen.cs:3762-3769）：石/沙/雪/泥/蘑菇草/雪砖/冰 */
-const GEMMABLE = idsByVanillaSheet(1, 40, 59, 60, 70, 147, 161);
+/** Gemmable（WorldGen.cs:3762-3769）：0/1/40/59/60/70/147/161。
+ *  ★0（泥土）也是 Gemmable：谓词 `type!=0&&type!=1&&…` 对 type==0 短路为假 →
+ *  直接落到 return true——洞腔内泥土与石头同概率被 randGemTile 替换，曾漏 0 */
+const GEMMABLE = idsByVanillaSheet(0, 1, 40, 59, 60, 70, 147, 161);
 /** 冰系落脚（:20846）：雪砖/冰/薄冰/雪 147/161/162/224 */
 const ICE_FLOOR = idsByVanillaSheet(147, 161, 162, 224);
 /** countTiles 的 ice 计数只认 147/161（nextCount cs:9542：不含 162/224） */
@@ -67,7 +69,17 @@ const ANCHOR_BANNED = idsByVanillaSheet(10, 138, 484, 664, 665, 711, 712, 713, 7
 const TYPE_380 = idsByVanillaSheet(380);
 
 /** ValidAnchorForMultiDirectionalTile（:60321）：dir 0=上锚 1=下锚 2=左锚 3=右锚。
- *  生成期无 inActive；slope 原版编码 1/2=底坡 3/4=顶坡，left=2|4 right=1|3。 */
+ *  生成期无 inActive；slope 原版编码（Tile.cs:320-350）：topSlope()=1|2、
+ *  bottomSlope()=3|4——旧注释"1/2=底坡 3/4=顶坡"整体写反（代码同病，已一并纠正）；
+ *  leftSlope()=2|4、rightSlope()=1|3（仓库原本即对）。 */
+/** PlatformProperTopFrame（cs:70197-70209）：平台 frameX/PlatformFrameWidth()
+ *  ∈[0,7]∪[12,16]∪[25,26] 视为"顶帧"。PlatformFrameWidth()=_data[19].
+ *  CoordinateFullWidth（TileObjectData.cs:5112）=(16+2)×1=18——Tiles_19.png
+ *  486px=27 帧×18px 实证。 */
+function platformProperTopFrame(frameX: number): boolean {
+  const n = Math.floor(frameX / 18);
+  return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
+}
 function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): boolean {
   if (!st.inBounds(x, y)) return true; // Main.tile 索引器 null 防御 → true（随后 tileSolid 门拦截）
   const i = st.idx(x, y);
@@ -78,15 +90,21 @@ function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): b
   if (!d) return false;
   const solid = d.solid, platform = d.platform;
   const half = st.half[i] === 1, sl = st.slope[i];
-  const topSlope = sl === 3 || sl === 4, bottomSlope = sl === 1 || sl === 2;
+  // ★G1：topSlope/bottomSlope 原来整体写反（旧 3|4/1|2）——Tile.cs:320-350 实为
+  //   topSlope()=1|2、bottomSlope()=3|4，方向基带随之纠正
+  const topSlope = sl === 1 || sl === 2, bottomSlope = sl === 3 || sl === 4;
   const leftSlope = sl === 2 || sl === 4, rightSlope = sl === 1 || sl === 3;
   if (dir === 0) {
-    // SolidTileAllowTopSlope（:60399）：(tileSolid||380) && ((!平台&&!底坡)||(平台&&半砖))
+    // SolidTileAllowTopSlope（cs:70325）：(tileSolid||380) && ((!平台&&!底坡)||(平台&&半砖))
     return (solid || TYPE_380.has(t)) && ((!platform && !bottomSlope) || (platform && half));
   }
   if (dir === 1) {
-    // SolidTileAllowBottomSlope：（tileSolid||tileSolidTop近似平台）&&!顶坡&&!半砖
-    return (solid || platform) && !topSlope && !half;
+    // SolidTileAllowBottomSlope（cs:70211-70229）：(tileSolid||tileSolidTop近似平台) &&
+    //  (!topSlope || (平台 && PlatformProperTopFrame(frameX))) && !半砖 && !inActive。
+    //  ★G7：平台顶帧豁免曾缺失（只写 !topSlope 一刀切）——平台带顶坡时，frameX
+    //  落在顶帧段仍可作下锚（cs:70223）
+    return (solid || platform)
+      && (!topSlope || (platform && platformProperTopFrame(st.frameX[i]))) && !half;
   }
   if (dir === 2) {
     // SolidTileAllowLeftSlope：tileSolid && !半砖 && !右坡 && !平台
@@ -122,19 +140,39 @@ function checkMultiDirAnchor(st: TileStore, i: number, j: number): number {
 /** 方向基带（TileFrame case 178 :85844-85882 的 num22 switch） */
 const GEM_DIR_BASE: Record<number, number> = { 0: 0, 1: 54, 2: 108, 3: 162 };
 
-/** 放 1 格暴露晶簇（= PlaceTile 178 分支 + SquareTileFrame case 178 合并）：
- *  frameY = 方向基带 + 变体（Next(3)*18）——晶簇朝向锚点方向，悬空感消除 */
+/** 放 1 格暴露晶簇（= PlaceTile 178 分支 + SquareTileFrame→TileFrameImportant case 178
+ *  合并，掷骰序 1:1）：
+ *  ① PlaceTile（cs:59717-59725）：CheckAndAdjust 通过才放置（失败不放置不掷骰），
+ *     frameX=style*18、frameY=Next(3)*18（roll1）；
+ *  ② SquareTileFrame(cs:80924)→TileFrame(i,j,resetFrame=true)：178 是 tileFrameImportant
+ *     （Main.cs:7362）→ TileFrameImportant case 178（cs:85843-85882）**无条件**再掷
+ *     num21=Next(3)*18（roll2；resetFrame=true 恒走 genRand 分支）。roll1∈{0,18,36}
+ *     恒落在 dir0 带宽 [0,36] → num22=-1 保留 roll1；dir1/2/3 基带错位 → 覆写为
+ *     基带+roll2。★G3：此前只掷 1 骰，每颗宝石少掷 1 骰，全链 RNG 流分叉。
+ *  邻域 8 格 TileFrame(resetFrame=false)：num21=frameY%54 无掷骰，且 178 非实心、
+ *  不改变邻格锚定 → 不存在"邻域触发的第三掷"（cs:85844-85880 判定结论，免补）。 */
 function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
   const dir = checkMultiDirAnchor(st, x, y);
-  if (dir < 0) return;
-  st.setTile(x, y, EXPOSED, style * 18, GEM_DIR_BASE[dir] + rng.nextInt(3) * 18);
+  if (dir < 0) return;                       // CheckAndAdjust 失败：不放置、不掷骰
+  const roll1 = rng.nextInt(3) * 18;         // ① cs:59724
+  st.setTile(x, y, EXPOSED, style * 18, roll1);
+  const roll2 = rng.nextInt(3) * 18;         // ② cs:85855（resetFrame=true 无条件掷）
+  if (dir !== 0) st.frameY[st.idx(x, y)] = GEM_DIR_BASE[dir] + roll2; // num22 基带覆写
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============
-/** solid LUT(countTiles 洪水逐格判定;定义同源=原判定式逐 id 预计算) */
-const SOLID_LUT = new Uint8Array(TILE_DEFS.length);
-for (let _i = 0; _i < TILE_DEFS.length; _i++) {
-  if (TILE_DEFS[_i]?.solid) SOLID_LUT[_i] = 1;
+/** WorldGen.SolidTile（cs:70155-70172）1:1：active && tileSolid && !tileSolidTop &&
+ *  !halfBrick && slope==0 && !inActive（生成期 inActive 恒 false，wire bit32 免检）。
+ *  写法同源 CaveWallsPass.solidAt（去其 pass 头 tileSolid 覆写表——本文件无覆写）。
+ *  ★G4：旧 SOLID_LUT 只查 def.solid，丢 half/slope/solidTop——且 half/slope 是逐格
+ *  状态、本就不可按 id 预计算；Spread.Gem(:3597)/countTiles(:9584) 均回归逐格判定 */
+function solidTileAt(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;       // Main.tile 索引器 null → true（SolidTile catch 语义）
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d) return false;
+  return !!d.solid && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
 }
 
 export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
@@ -191,7 +229,7 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (ICE_COUNT.has(st.type[ii])) ice++;
         else if (st.type[ii] === STONE) rock++;
       }
-      if (!st.flags[ii] || !SOLID_LUT[st.type[ii]]) {
+      if (!solidTileAt(st, x, y)) {           // cs:9584 !SolidTile(x,y) → 计数+扩散
         air++;
         // 四邻入栈(与原 push 顺序一致,pop 取尾 = 下邻先访)。
         // 栈深上界 = 4×300(air≤300,超即 break,仅 air 格入栈)+1 < 4096,无需增长
@@ -235,7 +273,7 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
         const ii = st.idx(x, y);
         if (seen.has(ii)) continue;
         seen.add(ii);
-        if (st.flags[ii] || st.wall[ii] !== 0) {
+        if (solidTileAt(st, x, y) || st.wall[ii] !== 0) { // cs:3597 SolidTile||wall!=0
           if (!st.flags[ii]) continue;                    // 空气+有墙：零操作零掷
           if (GEMMABLE.has(st.type[ii])) st.type[ii] = randGemTileId();
           for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
@@ -268,7 +306,8 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (y < 0 || y >= st.h) continue;
     const minX = gs.snowMinX?.[y] ?? gs.snowOriginLeft;
     const maxX = gs.snowMaxX?.[y] ?? gs.snowOriginRight;
-    if (maxX <= minX) continue;
+    // cs:20851：x 掷骰**无条件**（snowMinX/MaxX 只填到 lavaLine-140，未填带读默认 0
+    // 仍掷，Next(0,0)=0）——旧 `maxX<=minX continue` 吞掉必掷一骰，RNG 流分叉
     const x = rng.nextIntRange(minX, maxX);
     const ii = st.idx(x, y);
     if (!st.flags[ii] || !ICE_FLOOR.has(st.type[ii])) continue;

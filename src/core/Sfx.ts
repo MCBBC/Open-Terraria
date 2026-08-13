@@ -140,7 +140,7 @@ const WAV_MAP: Record<SfxName, string[]> = {
  *  键 = wav 文件名（含变体号）；playWavFile 单点统一乘——playWav（逻辑名）、
  *  playFiles（per-NPC HitSound/DeathSound）、playSfxFile/playUseSound（Item_N 直播）
  *  全路径自动生效。未登记 = 1.0（绝大多数 case 无专属修正，调用方传 1 即原版语义）。 */
-const FILE_CASE_VOL: Record<string, number> = (() => {
+export const FILE_CASE_VOL: Record<string, number> = (() => {
   const m: Record<string, number> = {};
   // case 14 ZombieMoan（:792-824）：默认组恒 ×0.4（:818）
   m.Zombie_0 = 0.4; m.Zombie_1 = 0.4; m.Zombie_2 = 0.4;
