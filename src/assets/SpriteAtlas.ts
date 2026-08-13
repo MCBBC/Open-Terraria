@@ -55,6 +55,11 @@ export interface DrawRect { img: HTMLImageElement | HTMLCanvasElement; sx: numbe
 // 磁盘上不存在(真文件 0-80 + 独立命名的 NPC_Head_Boss_N)= 每次进图 40 个 404。
 export const VANILLA_MISC = [
   // ① chunk 烘焙族
+  // 开关换 tile 对(全部跨表,开门/开栅态世界生成极罕见→表常未载→重烘跳格=消失~1s;
+  // 2026-08-13 用户报地牢门,全族排查:门 10↔11/高门 388↔389/活板门 387↔386/格栅 557↔558)
+  'vanilla/Tiles_10.png', 'vanilla/Tiles_11.png',
+  'vanilla/Tiles_386.png', 'vanilla/Tiles_387.png', 'vanilla/Tiles_388.png', 'vanilla/Tiles_389.png',
+  'vanilla/Tiles_557.png', 'vanilla/Tiles_558.png',
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Tops_${i}.png`),
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Branches_${i}.png`),
   ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),

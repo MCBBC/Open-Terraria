@@ -1503,6 +1503,148 @@ for (const [npcId, list] of Object.entries(MANUAL_PATCHES)) {
   entries.get(+npcId).push(...list);
 }
 
+// ============ 屏幕锚定网格尘幕（WoF NPC.cs:88307-88327）→ 结构化 screenGrid ============
+// 残留 posExpr 的唯一来源：肉山（113）死亡屏幕级血尘扫掠。Position =
+// new Vector2(<x条带变量>, <y外层循环变量>)，两层循环的界/步依赖运行时相机态
+// （Main.screenPosition / Main.screenWidth）+ npc 位——通用 Position 编译器不覆盖，
+// 在此按源结构解析后编译为 screenGrid 字段（运行时以相机快照求值，见
+// GorePiece.spawnDeathGore 的屏幕坐标档）。解析失败 → 保留 posExpr 原文（安全回退）。
+//
+// 源结构（:88303-88327）：
+//   if (!(Main.player[Main.myPlayer].position.Y / 16f > (float)(Main.maxTilesY - 250))) return;
+//   int num589 = (int)Main.screenPosition.Y;
+//   int num590 = num589 + Main.screenWidth;          ← 原版拿屏宽当纵向跨度的怪癖
+//   int num591 = (int)position.X;
+//   if (direction > 0) num591 -= 80;
+//   int num592 = num591 + 140;
+//   int num593 = num591;
+//   for (int num594 = num589; num594 < num590; num594 += 50) {
+//     for (; num593 < num592; num593 += 46) { …dust…; Gore.NewGore(Position:
+//       new Vector2(num593, num594), Velocity: (Next(-80,81)*0.1, Next(-60,21)*0.1), Type: Next(140,143)); }
+//     num593 = num591;
+//   }
+
+/** 逻辑行花括号深度（相对值累积，用于定位 if 块范围） */
+const lineBraceDelta = logical.map((l) => {
+  let d = 0;
+  for (const c of l.text) { if (c === '{') d++; else if (c === '}') d--; }
+  return d;
+});
+
+/** 局部变量在 callLine 前最近一次赋值的表达式文本 */
+function localExprAt(name, callLine) {
+  const hist = (locals.get(name) ?? []).filter((h) => h.line <= callLine);
+  return hist.length ? hist[hist.length - 1].valExpr : null;
+}
+
+/** `if (type == N) { …; return; }` 早退块（守卫行 → 块尾行）：块内含 return ⇒ 其后
+ *  同支代码不归 N。取 callLine 前最近的一个（前面的同型守卫属于更外层支，不适用）。
+ *  返回 null = 无此构造。 */
+function earlyReturnBlock(npcId, beforeLine) {
+  let found = null;
+  for (let i = 0; i < logical.length; i++) {
+    const l = logical[i];
+    if (l.line >= beforeLine) break;
+    const m = l.text.trim().match(/^if\s*\(\s*type\s*==\s*(\d+)\s*\)\s*$/);
+    if (!m || +m[1] !== npcId) continue;
+    let d = 0, hasReturn = false, end = -1;
+    for (let j = i; j < logical.length; j++) {
+      d += lineBraceDelta[j];
+      if (/\breturn\b/.test(logical[j].text)) hasReturn = true;
+      if (j > i && d <= 0) { end = logical[j].line; break; }
+    }
+    if (hasReturn && end > 0) found = { guardLine: l.line, blockEndLine: end };
+  }
+  return found;
+}
+
+/** posExpr → screenGrid（各常量逐项从源文本/赋值流解析；任一项不符 → null） */
+function compileScreenGrid(entry) {
+  const pm = String(entry.posExpr ?? '').match(/^new Vector2\(\s*([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)\s*\)$/);
+  if (!pm) return null;
+  const callLine = entry.line ?? 0;
+  const [, xVar, yVar] = pm;
+  // 外层循环头：for (int <yVar> = <y0>; <yVar> < <y1>; <yVar> += <yStep>)
+  let om = null;
+  for (const l of logical) {
+    if (l.line > callLine) break;
+    om = l.text.trim().match(new RegExp(
+      `for\\s*\\(\\s*(?:int\\s+)?${yVar}\\s*=\\s*([A-Za-z_]\\w*)\\s*;\\s*${yVar}\\s*<\\s*([A-Za-z_]\\w*)\\s*;\\s*${yVar}\\s*\\+=\\s*(\\d+)`))
+      ?? om;
+  }
+  if (!om) return null;
+  const [, y0Name, y1Name, yStep] = om;
+  if (!/^\(int\)Main\.screenPosition\.Y$/.test(localExprAt(y0Name, callLine) ?? '')) return null;
+  if (!new RegExp(`^${y0Name}\\s*\\+\\s*Main\\.screenWidth$`).test(localExprAt(y1Name, callLine) ?? '')) return null;
+  // 内层循环头：for (; <xVar> < <x1>; <xVar> += <xStep>)
+  let im = null;
+  for (const l of logical) {
+    if (l.line > callLine) break;
+    im = l.text.trim().match(new RegExp(`for\\s*\\(\\s*;\\s*${xVar}\\s*<\\s*([A-Za-z_]\\w*)\\s*;\\s*${xVar}\\s*\\+=\\s*(\\d+)`))
+      ?? im;
+  }
+  if (!im) return null;
+  const [, x1Name, xStep] = im;
+  // xVar 初值链（可经一层局部别名）→ (int)position.X
+  const xv = localExprAt(xVar, callLine) ?? '';
+  const x0Name = /^([A-Za-z_]\w*)$/.test(xv) ? xv : xVar;
+  if (!/^\(int\)position\.X$/.test(localExprAt(x0Name, callLine) ?? '')) return null;
+  const xm = (localExprAt(x1Name, callLine) ?? '').match(new RegExp(`^${x0Name}\\s*\\+\\s*(\\d+)$`));
+  if (!xm) return null;
+  const xSpan = +xm[1];
+  // direction>0 时 x0 左移（`if (direction > 0) … <x0> -= K`）
+  let dirShift = 0;
+  for (let i = 0; i < logical.length; i++) {
+    const l = logical[i];
+    if (l.line >= callLine) break;
+    if (!/^if\s*\(\s*direction\s*>\s*0\s*\)/.test(l.text.trim())) continue;
+    for (let j = i + 1; j < Math.min(i + 6, logical.length); j++) {
+      const sm = logical[j].text.trim().match(new RegExp(`^${x0Name}\\s*-=\\s*(\\d+)`));
+      if (sm) { dirShift = -+sm[1]; break; }
+      if (lineBraceDelta[j] < 0) break;
+    }
+  }
+  // 深度门（:88303）：玩家 tileY > maxTilesY - K
+  let gateTiles = null;
+  for (const l of logical) {
+    if (l.line > callLine) break;
+    const gm = l.text.match(/Main\.player\[Main\.myPlayer\]\.position\.Y\s*\/\s*16f\s*>\s*\(float\)\(Main\.maxTilesY\s*-\s*(\d+)\)/);
+    if (gm) gateTiles = +gm[1];
+  }
+  const grid = { yStep: +yStep, ySpan: 'screenWidth', xSpan, xStep: +xStep };
+  if (dirShift) grid.dirShift = dirShift;
+  if (gateTiles != null) { grid.gate = 'playerDeepHell'; grid.gateTiles = gateTiles; }
+  return grid;
+}
+
+// 应用：posExpr 残留条目 → screenGrid；其后按早退块剔除误摊 npc
+let screenGridCompiled = 0;
+let earlyReturnDropped = 0;
+for (const [npcId, list] of entries) {
+  for (const e of list) {
+    if (!e.posExpr) continue;
+    const grid = compileScreenGrid(e);
+    if (!grid) continue;
+    delete e.posExpr;
+    e.screenGrid = grid;
+    screenGridCompiled++;
+    // 早退排除：同支 npc（与本调用点同 line 的表项所归 npc = 守卫链 else-if 支的
+    // 并集∩交集）中，若先有 `if (type == N) {…; return;}`，则 N 不出该支此后的条目。
+    // 仅限同支——其他分支的同 id 早退块与本调用点无控制流关系，不得外溢。
+    const anchor = e.line ?? 0;
+    for (const other of entries.keys()) {
+      if (other === npcId) continue;
+      const ol = entries.get(other);
+      if (!ol.some((x) => (x.line ?? 0) === anchor)) continue;      // 非同支 → 不动
+      const er = earlyReturnBlock(other, anchor);
+      if (!er || anchor <= er.blockEndLine) continue;
+      const before = ol.length;
+      entries.set(other, ol.filter((x) => (x.line ?? 0) <= er.blockEndLine));
+      earlyReturnDropped += before - entries.get(other).length;
+    }
+  }
+}
+
 // ============ 贴图尺寸表（出现过的 gore id） ============
 const idsSeen = new Set();
 for (const list of entries.values()) {
@@ -1537,6 +1679,8 @@ const out = {
     postEntryCount: countField((e) => (e.post?.length ?? 0) > 0),
     posExprCount: countField((e) => !!e.posExpr),
     velExprCount: countField((e) => !!e.velExpr),
+    screenGridCount: countField((e) => !!e.screenGrid),
+    earlyReturnDropped,
     unresolved,
     unresolvedGates,
     unresolvablePost,
@@ -1565,9 +1709,13 @@ const out = {
       '  (spriteDirection!=1?1:-1)）；dc=[rx,ry] 椭圆盘随机偏移（Utils.cs:1269）',
       'vel 新字段：dc=[rx,ry] 椭圆盘速度；de=均匀随机方向定速；rv=[k,flip]=rotation.ToRotationVector2()',
       '  ×k（flip 奇数次=spriteDirection==1 时 X 取反）；hdm=[lo,hi]=随机幅值×击退方向',
-      '残留 posExpr（2 条，npc 113/114）：肉山屏幕级尘幕 `new Vector2(num593, num594)`——',
-      '  num594 依赖 Main.screenPosition 行扫（NPC.cs:88308-88326），非 NPC 相对坐标不可编译，',
-      '  运行时回退左上角；见 _meta.unresolved 系列（均 0 = 全部可求值）',
+      'screenGrid = 屏幕锚定网格尘幕（WoF :88307-88327）：yStep=外层行步/ySpan=纵向跨度来源',
+      '  （screenWidth——原版拿屏宽当纵向跨度的怪癖照搬）/xSpan+xStep=条带宽与列步/dirShift=',
+      '  direction>0 时 x0 偏移/gate=playerDeepHell（玩家 tileY>maxTilesY-gateTiles 门）。常量逐项',
+      '  从源 for 头与赋值流解析（compileScreenGrid，解析失败回退 posExpr 原文）；运行时以相机',
+      '  快照（GorePiece.setGoreScreen）求值，每网格格一枚 gore（原版另有 5 尘/格走尘系统）',
+      '早退排除：`if (type == 114) {…; return;}`（:88291-88298）后的嘴部四件+尘幕网格不归 114',
+      '  （守卫链不建模 return，此前误摊给 113|114 双方；仅对该调用点定点剔除，不改全局语义）',
       'tex = gore 贴图 {w,h}（IHDR 直读）；缺图 id 运行时回退 32px 碰撞盒（Gore.cs:999）',
     ],
     tex,

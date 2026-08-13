@@ -32,6 +32,7 @@ const SUPPORTED: Record<number, string> = {
   203: 'betsysCurseT', // BetsysCurse:受击无视 40 防(:81922)
   189: 'daybreakT',    // Daybreak:单层 100 HP/s(层数模型登记 GAP)
   30: 'bleedT',        // Bleeding:-24 = 12 HP/s(:92598)
+  137: 'slimedT',      // Slimed:着火段叠 +4 HP/s（:92623-92624 drippingSlime）
   375: 'hemorrhageT',  // Hemorrhage:-200 = 100 HP/s(:92610)
   169: 'javelinT',     // BoneJavelin:单层 3 HP/s(层数模型 GAP)
   337: 'spikeT',       // TentacleSpike:单层 3 HP/s(层数模型 GAP)
@@ -45,6 +46,17 @@ type StatusEnemy = { [field: string]: number | undefined };
  *  同 mut 组 = 互斥分支(单掷骰按累积概率选一,必中其一或全落空) */
 export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy): void {
   if (projId === undefined || projId < 0) return;
+  // ---- 提取器无法入表的两块手工特例（StatusNPC :10905-10915 / :10995-11002）----
+  // type 15（魔球族,cs:10908-10914）：remixWorld → 323 否则 24；1/2 掷，300t=5s。
+  //  remix 秘密种子未跟踪恒 false → 基档 24（OnFire 5s）
+  if (projId === 15 && Math.random() < 0.5) {
+    if (5 > (enemy.onFireT ?? 0)) enemy.onFireT = 5;
+  }
+  // type 85（彩虹魔棒弹,cs:10998-11001）：ai0==1 → 324(Frostburn2) 否则 323(OnFire3)，
+  // 1200t=20s。实体 ai0 门未接——默认 323 档（彩虹魔棒常态档）；ai0==1 分支登记
+  if (projId === 85) {
+    if (20 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 20;
+  }
   const entries = TABLE[String(projId)];
   if (!entries) return;
   let pendingMut: { id: number; roll: number } | null = null;
@@ -85,6 +97,22 @@ export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
   if (!frostBurn) return;
   const sec = 5 + Math.floor(Math.random() * 11); // 60×Next(5,15)t
   if (sec > (enemy.frostburn2T ?? 0)) enemy.frostburn2T = sec;
+}
+
+/** 岩浆石/火焰护手——近战【弹幕】命中（StatusNPC :10866-10869：melee 门，
+ *  1/7 → OnFire3 360t=6s）。挥砍侧是另一公式（applyMagmaStoneSwing） */
+export function applyMagmaStoneProj(magmaStone: boolean, enemy: StatusEnemy): void {
+  if (!magmaStone || Math.random() >= 1 / 7) return;
+  if (6 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 6;
+}
+
+/** 岩浆石/火焰护手——近战【挥砍】命中（Player.cs:6184-6198 三段掷）：
+ *  1/4 → 360t=6s；否则 1/2 → 240t=4s；否则 60t=1s */
+export function applyMagmaStoneSwing(magmaStone: boolean, enemy: StatusEnemy): void {
+  if (!magmaStone) return;
+  const r = Math.random();
+  const sec = r < 0.25 ? 6 : r < 0.625 ? 4 : 1;
+  if (sec > (enemy.onFire3T ?? 0)) enemy.onFire3T = sec;
 }
 
 export function applyMeleeImbue(

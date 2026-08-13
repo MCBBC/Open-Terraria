@@ -22,7 +22,7 @@ import type { Player } from './Player';
 import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { canHit, canHitLine } from '../physics/LineOfSight';
-import { getKnockbackMultiplierScaledByDifficulty } from '../stats/ScaleStats';
+import { getKnockbackMultiplierScaledByDifficulty, getAttackDamageForProjectiles } from '../stats/ScaleStats';
 
 /** :57462-57471 flag8=false 全表（NPC.cs:57468）。flag8 的两处下游消费：
  *  ① 攻门段 :60383 `… && flag8`——表内型**不攻门**（Psycho 466/Possessed 469/
@@ -591,4 +591,150 @@ export function fritzPounceStep(e: Enemy, p: Player | null): void {
   if (drop > 80) e.vy -= 1.5;                                         // :57691-57692
   if (drop > 100) e.vy -= 1.5;                                        // :57695-57696
   if (Math.abs(e.vx) > 7) e.vx = e.vx < 0 ? -7 : 7;                   // :57699-57709
+}
+
+// ---------------------------------------------------------------------------
+// 425 风暴潜水员（AI_003_Fighters 内 type==425 专属段，NPC.cs:58865-59013）
+//   原版与横向移动链（:57799-58598，fighterMoveStep）是两段独立 if/else-if 阶梯
+//   ——425 两段都命中（链上 num84=6 档 + 本段喷包/蓄力），故 hook 在
+//   fighterMoveStep 之后、重力/碰撞之前。
+// ---------------------------------------------------------------------------
+
+/** 425 ai[3] 瞄准蓄力状态机（NPC.cs:58968-59006 计数节奏，纯函数）：
+ *  负段 = 冷却 +1/t；0..30 蓄力带按 aim ±1 钳 [0,30]；满蓄 30 → 发射（fired）
+ *  并进 31；31..40 放射后渐灭段 +1/t，到 40 重置 −150（= num118 − num120 =
+ *  30−180）。出生初值 −120（:58868-58872，经 localAI[3]==0 门）由调用方置入。
+ *  渲染侧 Renderer.npcGlowSparkleEnvelope 消费 e.ai3（opacity=Remap(ai3,0,15,0,1)
+ *  蓄力渐亮、num=GetLerpValue(0,30)×GetLerpValue(36,30) 放射后 30→36 渐灭）——
+ *  Main.cs:25632 枪口星芒即读 ai[3]，AI 侧必须按本节奏维护。 */
+export function stormDiverAimStep(ai3: number, aim: boolean): { ai3: number; fired: boolean } {
+  const CHARGE = 30, DECAY = 10, COOLDOWN = 180;                      // num118/num119/num120（:58968-58969）
+  if (ai3 < 0) return { ai3: ai3 + 1, fired: false };                 // :58970-58972 冷却回摆
+  if (ai3 > CHARGE) {                                                 // :58976-58980 放射段（≥31）
+    const next = ai3 + 1;
+    return { ai3: next >= CHARGE + DECAY ? CHARGE - COOLDOWN : next, fired: false };
+  }
+  const v = Math.max(0, Math.min(CHARGE, ai3 + (aim ? 1 : -1)));      // :58970-58975 蓄力带 ±1
+  if (v === CHARGE) return { ai3: CHARGE + 1, fired: true };          // :58981-58984 满蓄发射 → 31
+  return { ai3: v, fired: false };
+}
+
+/** Utils.GetChaseResults（Utils.cs:619-661）1:1。runnerVelocity 为零 → 直飞用时
+ *  距离/速度；否则二次方程 a=s²−v² / b=2·dot(Δ, v) / c=−|Δ|²（Δ=追者−逃者），
+ *  无实根/双负根 → 拦截失败返回 null，双正根取小、一正一负取大。返回拦截速度
+ *  （模长 = chaserSpeed）。 */
+function getChaseResults(
+  chaserX: number, chaserY: number, chaserSpeed: number,
+  runnerX: number, runnerY: number, runnerVx: number, runnerVy: number,
+): { x: number; y: number } | null {
+  if (chaserX === runnerX && chaserY === runnerY) return { x: 0, y: 0 };
+  if (chaserSpeed <= 0) return null;
+  const dx = chaserX - runnerX, dy = chaserY - runnerY;               // value（:638）
+  const dist = Math.hypot(dx, dy);                                    // num
+  const runnerSpeed = Math.hypot(runnerVx, runnerVy);                 // num2
+  let t: number;
+  if (runnerSpeed === 0) {
+    t = dist / chaserSpeed;                                           // :644-646
+  } else {
+    const a = chaserSpeed * chaserSpeed - runnerSpeed * runnerSpeed;  // :650
+    const b = 2 * (dx * runnerVx + dy * runnerVy);                    // :651
+    const c = -dist * dist;                                           // :652
+    const disc = b * b - 4 * a * c;                                   // SolveQuadratic（:692-705）
+    if (disc < 0) return null;
+    let r1: number, r2: number;
+    if (disc > 0) {
+      const s = Math.sqrt(disc);
+      r1 = (-b + s) / (2 * a);
+      r2 = (-b - s) / (2 * a);
+    } else {
+      r1 = r2 = -b / (2 * a);
+    }
+    if (r1 < 0 && r2 < 0) return null;                                // :655-655
+    t = r1 > 0 && r2 > 0 ? Math.min(r1, r2) : Math.max(r1, r2);       // :656-661
+  }
+  const ix = runnerX + runnerVx * t, iy = runnerY + runnerVy * t;     // InterceptionPosition
+  return { x: (ix - chaserX) / t, y: (iy - chaserY) / t };            // ChaserVelocity
+}
+
+/** 425 专属段（NPC.cs:58865-59013）。调用点 = Enemy.fighterAI 内 fighterMoveStep 之后：
+ *  - localAI[3]==0 出生门 → ai3=−120（2s 起手延迟，:58868-58872）；
+ *  - 落地清 ai2（喷包态复位，:58873-58876）；空中 ai2==1 → 喷包伺服（保持玩家横向
+ *    300px、纵向 20px 死区，0.3 步进钳横 7 纵 8，:58877-58928）+ 1/3 喷口尘
+ *    （:58929-58942）+ 同族挤开（:58944-58963）；
+ *  - 起飞门：玩家顶高于自身 ≥100px 且视线通 → vy=−5、ai2=1（:58949-58963）；
+ *  - ai3 蓄力（stormDiverAimStep）：aim = |dy|≤|dx| && 距离<800 && CanHitLine
+ *    （:58970-58975）；满蓄自枪口 Center+(direction*30, 2) 发 4× 弹 577——直瞄 20 速，
+ *    拦截成功（玩家速度×0.5/2 领先量）改半速 10，首发精确其余 ±0.8 抖动
+ *    （:58983-59013）。 */
+export function stormDiverStep(e: Enemy, game: GameHooks, player: Player | null): void {
+  if (e.vanillaId !== 425) return;
+  if (e.lai3 === 0) { e.lai3 = 1; e.ai3 = -120; }                     // :58868-58872 出生门
+  if (e.vy === 0) e.ai2 = 0;                                          // :58873-58876 落地复位喷包态
+  const st = game.world.store;
+  if (player && !player.dead) {
+    if (e.vy !== 0 && e.ai2 === 1) {
+      // ---- 喷包空中伺服（:58877-58928）----
+      // 注：本分支原版另置 spriteDirection=-direction（:58879）；FindFrame case 425
+      //（:71003-71005）对全部帧恒置同式 → 等价"贴图恒反向"，属绘制层登记项（S 侧），
+      // 此处不翻 facing 以免起降瞬间往返镜像。
+      if (canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
+        const num115 = player.cx - e.facing * 300 - e.cx;             // :58887 横向期望（保持 300px）
+        const num116 = player.y + player.h - (e.y + e.h);             // :58888 Bottom 差
+        if (num115 < 0 && e.vx > 0) e.vx *= 0.9;                      // :58889-58893 逆期望阻尼
+        else if (num115 > 0 && e.vx < 0) e.vx *= 0.9;
+        if (num115 < 0 && e.vx > -7) e.vx -= 0.3;                     // :58894-58897
+        else if (num115 > 0 && e.vx < 7) e.vx += 0.3;
+        if (e.vx > 7) e.vx = 7;                                       // :58898-58903 钳横 7
+        if (e.vx < -7) e.vx = -7;
+        if (num116 < -20 && e.vy > 0) e.vy *= 0.8;                    // :58904-58908 纵向死区 20px
+        else if (num116 > 20 && e.vy < 0) e.vy *= 0.8;
+        if (num116 < -20 && e.vy > -8) e.vy -= 0.3;                   // :58909-58912
+        else if (num116 > 20 && e.vy < 8) e.vy += 0.3;
+      }
+      if (Math.floor(Math.random() * 3) === 0) {                      // :58929-58942 喷口尘（1/3）
+        game.spawnParticles(
+          e.cx - e.facing * 14 - 4, e.cy - 8 - 4, '#FFB060', 1, 0.6,
+          { life: 26, damp: 0.94 });
+      }
+      // ---- 同族挤开（:58944-58963，Manhattan < width → ±0.15 推离）----
+      for (const o of game.enemies() as Enemy[]) {
+        if (o === e || o.dead || o.vanillaId !== 425) continue;
+        if (Math.abs(e.x - o.x) + Math.abs(e.y - o.y) < e.w) {
+          e.vx += e.x < o.x ? -0.15 : 0.15;                           // :58952-58958
+          e.vy += e.y < o.y ? -0.15 : 0.15;                           // :58959-58962
+        }
+      }
+    } else if (player.cy + 100 < e.y                                  // :58950 Center.Y+100 < position.Y
+      && canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
+      e.vy = -5;                                                      // :58961-58962 起飞
+      e.ai2 = 1;
+    }
+    // ---- ai3 瞄准蓄力（:58968-59006）----
+    const dx = player.cx - e.cx, dy = player.cy - e.cy;
+    const dist = Math.hypot(dx, dy);
+    const aim = Math.abs(dy) <= Math.abs(dx)                          // :58971-58972 目标大致水平
+      && dist < 800                                                   // :58973 距离门
+      && canHitLine(st, e.cx, e.cy, 0, 0, player.cx, player.cy, 0, 0); // :58974 CanHitLine(center,0,0→center,0,0)
+    const step = stormDiverAimStep(e.ai3, aim);
+    e.ai3 = step.ai3;
+    if (step.fired) {
+      // :58983-58985 枪口 = Center + (direction*30, 2)
+      const mx = e.cx + e.facing * 30, my = e.cy + 2;
+      const num121 = 20;                                              // :58986 弹速
+      const num122 = 2;                                               // :58994 拦截档除数
+      let vx = 0, vy = 0;                                             // vector28 直瞄（:58987-58990）
+      const dd = Math.hypot(player.cx - mx, player.cy - my) || 1;
+      vx = ((player.cx - mx) / dd) * num121;
+      vy = ((player.cy - my) / dd) * num121;
+      const chase = getChaseResults(                                  // :58991-58997 领先半速拦截
+        mx, my, num121, player.cx, player.cy, player.vx * 0.5 / num122, player.vy * 0.5 / num122);
+      if (chase) { vx = chase.x / num122; vy = chase.y / num122; }
+      const dmg = getAttackDamageForProjectiles(75, 50, e.difficulty); // :58998 GetAttackDamage_ForProjectiles(75,50)
+      for (let i = 0; i < 4; i++) {                                   // :58999-59012 四连发
+        const jx = i !== 0 ? (Math.random() * 1.6 - 0.8) : 0;         // 首发精确，其余 ±0.8
+        const jy = i !== 0 ? (Math.random() * 1.6 - 0.8) : 0;
+        e.spawnHostileProj(game, mx, my, vx + jx, vy + jy, dmg, 577); // :59012 proj 577（kb 1）
+      }
+    }
+  }
 }

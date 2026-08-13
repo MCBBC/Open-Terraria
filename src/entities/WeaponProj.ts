@@ -12,7 +12,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitCritters, hitTownNpcs, playEnemyHitSound, tryReflectProjectile } from './projTargets';
-import { applyProjStatus, applyMeleeImbue, applyFrostBurn } from './projStatus';
+import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 
@@ -113,12 +113,14 @@ function hitEnemies(
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
     // 时长 Player.cs:6141-6171;挥砍侧同表在 Game 挥击结算）
     if (me.meleeProj) {
-      const pl = game.player as unknown as { buffs: { has: (b: never) => boolean }; equipStats: { frostBurn: boolean } };
+      const pl = game.player as unknown as { buffs: { has: (b: never) => boolean }; equipStats: { frostBurn: boolean; magmaStone: boolean } };
       applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
         () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
           ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
       // 冰霜盔甲引擎(melee 门,:93712)
       applyFrostBurn(pl.equipStats.frostBurn, e as unknown as Record<string, number>);
+      // 岩浆石/火焰护手（melee 门,:10866 1/7 → OnFire3 6s）
+      applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
     }
     game.addDamageNumber(self.x + self.w / 2, self.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
     // 配重球（counterWeight 装备时悠悠球命中落配重：YoyoBag 语义近似——

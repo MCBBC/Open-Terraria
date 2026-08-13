@@ -24,6 +24,17 @@ export function projSprite(projId: number): HTMLImageElement | null {
   return img;
 }
 
+/** 预热弹幕贴图(2026-08-13,用户报"发射阶段回退兜底,过一会才正确"):
+ *  懒加载下首发射击时表未就绪会先画短线兜底。进图/背包变化时把武器/弹药的
+ *  shoot 链先 kick 掉(占位即触发加载,缓存 Map 去重),发射时已就绪 */
+export function prefetchProjectiles(ids: Iterable<number>): void {
+  if (typeof Image === 'undefined') return;
+  for (const id of ids) {
+    if (!Number.isInteger(id) || id <= 0) continue;
+    projSprite(id);
+  }
+}
+
 /** Main.projFrames（Main.cs:8392 起全 275 条非 1 帧赋值，tools 内联提取）：
  *  未列入的恒 1 帧。投射物贴图是【竖向多帧行】——帧高 = 图高/帧数，
  *  整图绘制会把多帧压成胶片条（史莱姆随从 266 曾 12 帧压成一坨） */
@@ -105,6 +116,18 @@ export interface ArrowOpts {
 
 /** extraUpdates：已并入 vanilla-projectiles.json（tools/extract-projectiles.mjs
  *  NUM_FIELDS 提取，249 款非 0；83 眼激光=2 等原先手工条目同源于 SetDefaults） */
+
+/** 旋转模式（scripts/_projrot-audit.mjs 对 AI_001 type 链逐分支提取 + 非 aiStyle1
+ *  特例）：默认 'up' = 贴图朝上（AI_001 尾部默认 atan2+π/2，:54877——箭/子弹）；
+ *  下表 = 贴图【朝右】的弹型（rotation=atan2(vy,vx)，向左运动时按原版
+ *  spriteDirection 水平镜像，食人鱼 AI 即 :26122-26140 模式）：
+ *  16 魔法飞弹头（113 Magic Missile，AI_009 :54039 ToRotation；54×54 方图头朝右）、
+ *  34 Flamelash 火鞭（218，AI_020 族 ToRotation；48×384 八帧行按帧行切片）、
+ *  190 食人鱼（aiStyle 39，1156 食人鱼枪；曾恒 +π/2 → 鱼 90° 侧翻）、
+ *  837（AI_001 显式 MIRROR 分支 :54715，1313 骷髅头法书 shoot）、
+ *  1023（AI_001 仅 wiggle :54743，基姿态 0 朝右，5460 发射器） */
+const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023]);
+export { PROJ_ROT_RIGHT };
 
 export class Arrow extends Entity {
   w = 10; h = 10; // 原版 SetDefaults type 1：width/height = 10；构造器按弹型覆写
@@ -343,17 +366,30 @@ export class Arrow extends Entity {
     }
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
-    ctx.rotate(ang + Math.PI / 2); // 原版贴图纵向：rotation = atan2+π/2（AI_001 L54877）
+    // 朝右贴图族（PROJ_ROT_RIGHT）：rotation=atan2(vy,vx)（vanilla :26122-26140 模式），
+    // 向左运动水平镜像（spriteDirection 语义）；其余默认朝上 atan2+π/2（AI_001 L54877）
+    const rightArt = PROJ_ROT_RIGHT.has(this.projId);
+    if (rightArt && this.vx < 0) {
+      ctx.scale(-1, 1);              // 先镜像再旋转（R(π−ang)∘M ≡ 原版 flip+atan2(−vy,−vx)）
+      ctx.rotate(Math.PI - ang);
+    } else {
+      ctx.rotate(rightArt ? ang : ang + Math.PI / 2);
+    }
     // 502 朝向（:22659-22665）：spriteDirection=sign(vx)——贴图在旋转坐标系内水平镜像
     if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
-    if (img && img.complete && img.naturalWidth > 0) {
+    // 多帧行（190 食人鱼 4 帧/837 3 帧）按帧行切片防胶片压扁；单帧走整图
+    const frames = projFrameCount(this.projId);
+    const frameImg = frames > 1 ? projFrameImg(this.projId, Math.floor(this.age / 5) % frames) : null;
+    const drawImg = frameImg ?? img;
+    if (drawImg && (drawImg as HTMLImageElement).complete !== false
+      && (drawImg.width > 0 || (drawImg as HTMLImageElement).naturalWidth > 0)) {
       // 原生尺寸 × SetDefaults scale（与判定盒 w/h 解耦）：子弹 14 = 2×20×1.2
       // 曳光条；箭 1 = 14×32 贴图 × 1。曾统一拉成 w×w 宽 → 100px 巨型子弹/箭偏小
       const s = this.drawScale;
-      ctx.drawImage(img,
-        -img.naturalWidth * s / 2, -img.naturalHeight * s / 2,
-        img.naturalWidth * s, img.naturalHeight * s);
+      const iw = drawImg.width || (drawImg as HTMLImageElement).naturalWidth;
+      const ih = drawImg.height || (drawImg as HTMLImageElement).naturalHeight;
+      ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
     } else {
       // 贴图未就绪：短线兜底
       ctx.strokeStyle = this.projId === 2 ? '#FFB060' : '#D8C8A0';

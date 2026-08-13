@@ -82,20 +82,21 @@ import {
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
 import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../data/tiles';
-import { furnitureStyleBase } from '../world/FurnitureStyle';
+import { framedCellFrame } from '../world/FurnitureStyle';
 import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
   furnitureTryBreak, furnitureTakeFirst, dollPlace, hatRackPlace, removeFurnitureAt,
-  furnitureSlotCount, fitsFurniture, type FurnitureKind,
+  furnitureSlotCount, fitsFurniture, critterAnchorPlace, critterAnchorBreakDrop,
+  type FurnitureKind,
 } from '../world/FurnitureItems';
-import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemUseSoundWav } from '../data/itemUseSound';
-import { applyFrostBurn } from '../entities/projStatus';
+import { applyFrostBurn, applyMagmaStoneSwing } from '../entities/projStatus';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
@@ -120,7 +121,7 @@ import { scanLuckScene, rollLuck } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
 import { pickMusic, newMusicState, bossMusicFor, BOSS_MUSIC, MUSIC, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
-import { resetGorePool, liveGorePieces } from '../entities/GorePiece';
+import { resetGorePool, liveGorePieces, setGoreScreen } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
@@ -187,7 +188,8 @@ import type { GameHooks } from '../entities/types';
 import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
-import { Arrow } from '../entities/Arrow';
+import { Arrow, prefetchProjectiles } from '../entities/Arrow';
+import { prefetchTrapProjectiles } from '../entities/Dart';
 import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
@@ -217,6 +219,7 @@ import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
 import type { DropExtras } from '../drops/NpcDrops';
 import { npcValueOf } from '../drops/NpcDrops';
+import { VanillaDust } from '../fx/VanillaDust';
 import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
 
 const FIXED_DT = 1 / 60;
@@ -657,6 +660,8 @@ export class Game implements GameHooks {
   // 弹药
   particles: Particle[] = [];
   dmgNumbers: DamageNumber[] = [];
+  /** 原版 Dust 池（翅膀尘埃批引入；DrawDust 语义见 Renderer.drawVanillaDust） */
+  readonly vanillaDust = new VanillaDust();
 
   // 敌人生成
   boss: Enemy | null = null;
@@ -1181,7 +1186,8 @@ export class Game implements GameHooks {
       if (!s) continue;
       const d = ITEM_DEFS[s.id];
       const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
-      if (vid === 903) { magmaStone = true; break; }
+      // 岩浆石 1322 / 火焰护手 1343（Player.cs:14787-14790/:14758-14766——曾误查 903）
+      if (vid === 1322 || vid === 1343) { magmaStone = true; break; }
     }
     return { frostBurn: proxy.equipStats.frostBurn, magmaStone };
   }
@@ -1771,6 +1777,7 @@ export class Game implements GameHooks {
       this.autotiler = new AutoTiler(atlas);
     }
     this.renderer = new Renderer(this.assets, atlas);
+    this.renderer.vanillaDust = this.vanillaDust;   // DrawDust 双 pass 消费（lit/全亮）
     this.renderer.attach(root);
     // 音效按需加载（2026-08-10）：不在此预读——播放未命中时后台 fetch+decode、
     // 首播合成兜底；常用战斗/交互声在世界就绪后小集合预热（见 afterWorldLoad），
@@ -1963,6 +1970,27 @@ export class Game implements GameHooks {
       ids[k] = id !== undefined ? id : null;
     }
     return ids;
+  }
+
+  /** 预热背包全部武器/弹药的弹幕贴图(2026-08-13,用户报"发射阶段回退兜底,
+   *  过一会才是正确贴图"):懒加载下首发射击时 Projectile_{id} 未就绪会先画短线
+   *  兜底。projId 链 = 弹药 shoot ?? 武器 shoot(fire 路径同式)——背包+装备槽
+   *  全扫(≤78 格);afterWorldLoad 与 onInventoryChanged(mainFlow)各调一次,
+   *  拾取新弹药/换装自动覆盖 */
+  prefetchInvProjectiles(): void {
+    const ids = new Set<number>();
+    const scan = (it: { id: number } | null | undefined) => {
+      if (!it) return;
+      const def = ITEM_DEFS[it.id];
+      if (!def) return;
+      const vid = def.vid ?? viIdFromKey(def.key);
+      if (!Number.isFinite(vid)) return;
+      const shoot = itemCombat(vid)?.shoot;
+      if (shoot && shoot > 0) ids.add(shoot);
+    };
+    for (const s of this.player.inv.slots) scan(s);
+    for (const a of this.player.inv.armor) scan(a);
+    if (ids.size) prefetchProjectiles(ids);
   }
 
   /** 全图液体沉降（薄封装 → settleWorldLiquids，主线程 fallback 与 worker 共用同一实现）。
@@ -2206,6 +2234,8 @@ export class Game implements GameHooks {
     this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.PICK], 1);
     this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.AXE], 1);
     this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
+    this.prefetchInvProjectiles();
+    prefetchTrapProjectiles();
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.sfx.suppress = false;                            // 解除载入静音门
@@ -2929,6 +2959,18 @@ export class Game implements GameHooks {
     player.itemUseTurn = !!itemCombat(player.inv.heldItem()?.id ?? -1)?.useTurn;
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
+    // 原版 Dust 步进（UpdateDust :423——customData 跟随差值 = 主角本 tick 位移；
+    // 视口世界矩形用于屏底清除）+ 逐尘光照推 LightingEngine
+    {
+      const vz = this.camera.zoom;
+      const vw = this.renderer.canvas.width / vz, vh = this.renderer.canvas.height / vz;
+      this.vanillaDust.update(this.camera.x - vw / 2, this.camera.y - vh / 2, vw, vh,
+        player.x - player.oldX, player.y - player.oldY);
+      for (const l of this.vanillaDust.lights) {
+        const tx = Math.floor(l.x / TILE), ty = Math.floor(l.y / TILE);
+        if (this.world.store.inBounds(tx, ty)) this.lighting.addLight(tx, ty, l.r, l.g, l.b);
+      }
+    }
     // 成就：跑动里程（HandleRunning Player.cs:27925：flag32 && velocity.Y==0——
     // 仅着地跑动计入，空中位移不算）
     if (player.onGround) this.achNotifyRunning(Math.abs(player.x - achPxBefore));
@@ -3989,6 +4031,12 @@ export class Game implements GameHooks {
     this.camera.follow(player.cx, player.cy);
     this.camera.easeZoom();
     this.camera.clamp();
+    // Main.screenPosition/screenWidth/Height 快照（视区左上角世界坐标 + 画布尺寸）——
+    // gore 屏幕坐标档（肉山死亡尘幕 NPC.cs:88307-88327）的求值源，实体 tick 前注入
+    setGoreScreen(
+      this.camera.x - this.camera.viewW / (2 * this.camera.zoom),
+      this.camera.y - this.camera.viewH / (2 * this.camera.zoom),
+      this.camera.viewW, this.camera.viewH);
     this.chunks.flushDirty();
     this.chunks.advanceAnim(); // 动画陈设（制冰机/固化机/篝火/熔炉等）：换帧 tick 重建含动画 chunk
     tickEmotes();
@@ -4885,6 +4933,14 @@ export class Game implements GameHooks {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
         }
         this.input.rightDown = false;
+      } else if (heldDef?.tile && PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
+        // PlaceTileOnAltUse 族右键放置（Player.cs:42842-42847 altFunctionUse==2 →
+        // doPlacementAction）：捕获小动物 → 锚桩 724（tryPlace 内登记 TECritterAnchor
+        // 等价记录）。不消费 rightDown：按住连放由 tryPlace 的 useTime 门节流
+        // （autoReuse，DefaultToCapturedCritter :47614）；放置失败（占位/无支撑）
+        // 落空即可，不透传 interactAt
+        this.tryPlace(tx, ty, heldDef);
+        return;
       } else {
         this.interactAt(tx, ty);
       }
@@ -5160,7 +5216,11 @@ export class Game implements GameHooks {
       this.tryPlaceWall(tx, ty, heldDef);
       return;
     }
-    if (heldDef?.tile && !inp.rightDown) {
+    // PlaceTileOnAltUse 族（ItemID.cs:155：捕获小动物 tile 724 / 风筝 tile 723）左键
+    // 不放置——放置只在右键（下方 rightDown 段），左键保留各自使用语义（放生/放飞，
+    // Player.cs:42842-42847 altFunctionUse==2 才 doPlacementAction）
+    if (heldDef?.tile && !inp.rightDown
+      && !PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
       this.tryPlace(tx, ty, heldDef);
       return;
     }
@@ -6893,6 +6953,21 @@ export class Game implements GameHooks {
       if (fbr.result === 'blocked') return;
       // 'break'：空物 → 落入下方 object/普通清除路径，记录在清除点移除
     }
+    // 锚桩 724（KillTile_DropItems :63739-63744 DropItemForTileBreak）：存物随破
+    //  同击掉落 + 碎块（与挂物族两段式 pop 不同）；tile 本体无掉落
+    //  （GetItemDrop case 723/724 WorldGen.cs:66141-66145 break——drop:null 语义），
+    //  故此整支路拦截在 1×1 通用路径之前，防 place_v_724_critter_anchor 幽灵掉落
+    if (type === TILE_BY_KEY['v_724_critter_anchor']) {
+      const stored = critterAnchorBreakDrop(this.world.furnitureItems, x, y);
+      if (stored) {
+        this.spawnDrop(x * TILE + 8, y * TILE, ITEM_DEFS[stored.id].key, stored.stack, 0, -2);
+      }
+      removeFurnitureAt(this.world.furnitureItems, x, y);
+      st.setTile(x, y, 0);
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+      this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
+      return;
+    }
     // object：找锚点整体移除。锚点 = 命中格 (2w-1)×(2h-1) 邻域内同类型、帧相位为 (0,0)
     // （fv%(w*18)==0 且 fyv%(h*18)==0，兼容 style 偏移）、且 w×h 框包含命中格的候选中
     // 帧最小的格——两个同款物体紧邻时也能选对所属的那件（全局最小帧会误选隔壁那件）；
@@ -7755,21 +7830,13 @@ export class Game implements GameHooks {
         const px = tx + dx2, py = ty + dy2;
         // 原版多格家具：帧用 18px 步长偏移（与 .wld 原生一致，渲染端直用）。
         // 原版帧语义（TileObject.Place L74-102）：frameY 从【顶行 = 0】向下递增；
-        // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确
-        if (def.vanilla?.sheet === 91) {
-          // 旗帜帧 = SceneMetrics 解码逆写（:420-443:frameX/18−21+行×111;贴图
-          // 1998×162=111 格宽/3 段。FurnitureStyle 表的 54 步制与解码不合——
-          // 放置旗解码失活的根因,2026-08-13 逆写修复）
-          const b = itemDef.placeStyle ?? 0;
-          let row = 0;
-          while (row < 3 && (b + 21 - 111 * row) * 18 >= 1998) row++;
-          const fx = Math.max(0, (b + 21 - 111 * row) * 18);
-          st.setTile(px, py, tileId, fx, row * 54 + dy2 * 18);
-        } else if (isVanillaStyle) {
-          // placeStyle → 样式基偏移:权威布局表(FurnitureStyle.ts;竖排族写 Y,
-          // 旧公式 style*fw*18 一刀切会把灯笼/蜡烛/吊灯等写成非法帧)
-          const [bx2, by2] = furnitureStyleBase(def.vanilla?.sheet ?? -1, itemDef.placeStyle ?? 0, def.vanilla?.fw ?? 1);
-          st.setTile(px, py, tileId, bx2 + dx2 * 18, by2 + dy2 * 18);
+        // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确。
+        // 单格帧合成统一走 framedCellFrame（旗帜 91 逆写 / 竖排族布局表 / 通用
+        // style*fw*18）——tests/cage-placement 用同一入口做放置帧锚端到端断言
+        if (isVanillaStyle) {
+          const [fx2, fy2] = framedCellFrame(
+            def.vanilla?.sheet ?? -1, def.vanilla?.fw ?? 1, itemDef.placeStyle ?? 0, dx2, dy2);
+          st.setTile(px, py, tileId, fx2, fy2);
         } else {
           st.setTile(px, py, tileId, dx2, dy2);
         }
@@ -7810,6 +7877,14 @@ export class Game implements GameHooks {
         x: tx, y: ty, kind: fKind,
         slots: new Array(furnitureSlotCount(fKind)).fill(null),
       });
+    }
+    // 锚桩 724（TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook :43-58）：
+    // 放置即把手持捕获小动物写入 TE（InsertItem(itemType)）——等价记录槽 0 直接
+    // 落手持物，消耗走下方通用的 inv.removeAt（consumable 语义）。拴绳小动物本体
+    // （LeashedEntity 族）未实装 → GAP ③ render/CritterCage.ts
+    if (tileId === TILE_BY_KEY['v_724_critter_anchor']) {
+      const held = this.player.inv.heldItem();
+      if (held) critterAnchorPlace(this.world.furnitureItems, tx, ty, held);
     }
     // 陷阱(137)朝向 = 放置时玩家面朝方向（Player.cs:40209 PlaceThing_Tiles_PlaceIt_SpinTraps：
     // direction==1 → frameX += 18）。全样式通用（frameY=种类，frameX=方向）；放置后不可再调向
@@ -10021,6 +10096,8 @@ export class Game implements GameHooks {
       if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
       // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
       applyFrostBurn(this.player.equipStats.frostBurn, e as unknown as Record<string, number>);
+      // 岩浆石/火焰护手（Player.cs:6184-6198 三段掷：1/4→6s / 3/8→4s / 3/8→1s OnFire3）
+      applyMagmaStoneSwing(this.player.equipStats.magmaStone, e as unknown as Record<string, number>);
       if (this.player.buffs.has(BuffType.ImbueParty)) {
         this.spawnParticles(e.cx, e.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 });
       }
@@ -10187,9 +10264,25 @@ export class Game implements GameHooks {
     });
     // downedBoss3 双键（骷髅王击杀链写 downed_35，旧档/导入可能写 downedSkeletron——
     // 此前只传 downedSkeletron 恒 false，地牢守卫池永不切换、绑缚三人组 685 门不开）
+    // 双地牢越界（NPC.cs:313 = dualDungeonsSeed && insideUnbreakableWalls && 档位比较）：
+    // 扫描态由 Player.updateUnbreakableWallScan 维护（内部 20t 冷却幂等）；
+    // DangerousDungeonCurse.cs 双表 1:1——needs=所在区档 / can=进度可安全档
+    this.player.updateUnbreakableWallScan(w);
+    const ddNeeds = this.scene?.zoneTemple ? 5 : this.scene?.zoneHallow ? 4
+      : this.scene?.zoneDungeon ? 3 : this.scene?.zoneJungle ? 2
+        : (this.scene?.zoneCrimson || this.scene?.zoneCorrupt) ? 1 : 0;
+    const ddCan = (w.flags['downed_134'] || w.flags['downed_125'] || w.flags['downed_127']
+      || w.flags['downed_657']) ? 5
+      : (w.flags.downedSkeletron || w.flags['downed_35'] || w.flags.hardMode) ? 4
+        : w.flags['downed_222'] ? 3
+          : (w.flags['downed_13'] || w.flags['downed_266']) ? 2
+            : (w.flags.downedSlimeKing || w.flags['downed_50'] || w.flags['downed_4']
+              || w.flags.downedEyeOfCthulhu) ? 1 : 0;
     this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon,
       !!(w.flags.downedSkeletron || w.flags['downed_35']),
-      invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck);
+      invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck,
+      !!w.seedFlags?.everything && this.player.insideUnbreakableWalls && ddCan < ddNeeds,
+      partyIsUp(this.partyState));
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
     this.vanillaSpawner.setWeather(
       w.weather.cloudAlpha,
@@ -10231,7 +10324,9 @@ export class Game implements GameHooks {
       p.buffs.has(BuffType.Calming), p.buffs.has(BuffType.Battle),
       townNPCs, w.clock.isDay,
       !!this.scene?.zoneCorrupt || !!this.scene?.zoneCrimson,
-      !!w.clock.bloodMoon);
+      !!w.clock.bloodMoon,
+      p.buffs.has(BuffType.Invisibility),          // 隐身（:611-615）
+      p.equipStats.anglerSetSpawnReduction);       // 渔夫套（:627-630）
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
@@ -12602,7 +12697,9 @@ export class Game implements GameHooks {
         const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
         const name = Lang.npcName(bannerItemId(banner) ? (enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId) : enemy.vanillaId);
         this.newText(`${name} 旗帜已就绪!`, 250, 250, 0);
-        this.spawnDrop(this.player.cx, this.player.cy, 'place_v_91_banners', 1, 0, -3, banner);
+        const _bannerItemVid = bannerItemId(banner);
+        const _bannerKey = VANILLA_ITEM_KEY_BY_ID[_bannerItemVid] ?? 'place_v_91_banners';
+        this.spawnDrop(this.player.cx, this.player.cy, _bannerKey, 1, 0, -3, banner);
       }
     }
     // 史莱姆王死亡砸出书呆子史莱姆 670（NPC.cs:80206-80222 case 50 + ViolentlySpawnNerdySlime

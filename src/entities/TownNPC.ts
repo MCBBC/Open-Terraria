@@ -68,6 +68,10 @@ export class TownNPC extends Entity {
   // ---- 自卫攻击（AI_007 攻击态 ai[0]=10/12/14/15,NPC.cs:54747-55538）----
   /** 当前攻击态(0 空闲 / 10 近战弹 / 12 弓 / 14 魔法 / 15 挥击) */
   private atkState = 0;
+  /** ai[0] 攻击态只读（AI_007 :54747 起的 10/12/14/15；原版同值）——渲染侧消费：
+   *  drawPartyHat 海盗帽位修正（Main.cs:27001-27008 的 229 ai[0]==12 门）。
+   *  坐姿 ai[0]==5 未建模，恒不出（见 Renderer.drawPartyHat 的 num6 GAP 注） */
+  get attackState(): number { return this.atkState; }
   /** ai[1]:态倒计时(AttackTime) */
   private atkTimer = 0;
   /** localAI[1]:触发冷却(flag31 门) */

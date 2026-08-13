@@ -5,6 +5,7 @@ import { Clock } from '../world/World';
 import { Clock as ClockVal } from '../world/World';
 import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
+import { UnifiedRandom } from '../core/rng';
 
 // 天空关键色 [时刻, 顶色, 底色]（时刻 0-1）
 const SKY_KEYS: Array<[number, string, string]> = [
@@ -325,6 +326,15 @@ export function towerSkyActive(nearTower: boolean, monolithType: number, familyI
   if (nearTower) return true;
   return !anyTowerNear && monolithType === familyIndex;             // :111-115
 }
+
+/** VirtualCamera（Terraria.Graphics/VirtualCamera.cs:5-14）：Center=Player.Center、
+ *  Position=Center−Size/2、Size=(Main.maxScreenW, maxScreenH)。HiDef 档下
+ *  maxScreenW/H = 4096（Main.cs:3753-3755）——即出生域是**以玩家为中心的 4096×4096
+ *  虚拟视口**，与真实渲染视口尺寸无关（Reach 档才退回 MaxWorldViewSize）。
+ *  消费点：各族构造器 `Position.X = vcam.Position.X ± …/ + Size.X + 100`（:195-199 等）
+ *  与 EOC BeginZigZag/BeginChasingPlayer（:1266-1282）。 */
+const VIRTUAL_CAM_SIZE = 4096;
+const VIRTUAL_CAM_HALF = VIRTUAL_CAM_SIZE / 2;
 
 /** FadingSkyEntity（AmbientSky.cs:88-184）本仓表示（全族） */
 interface AmbientEnt {
@@ -699,14 +709,25 @@ class DramaExplosion {
   }
 }
 
-/** UnifiedRandom(seed) 的确定性替身（ThrowPieces 四件散射角序列按种子定）。
- *  非 .NET 位级同源（MS RNG 内部状态不公开），只保证同种子同序列（登记）。 */
-function seededRandom(seed: number): () => number {
-  let s = (seed <= 0 ? 1 : seed) >>> 0;
-  return () => {
-    s = (Math.imul(s ^ 0x9e3779b9, 25214903917) + 11) >>> 0;
-    return s / 0x100000000;
-  };
+/** MoonlordDeathDrama.ThrowPieces（:231-242）的种子 RNG：原版 `new UnifiedRandom(DramaSeed)`
+ *  + `r.NextFloat()`×8（每件散射角+角速度各一次，顺序 = spine/shoulder/torso/head）。
+ *  NextFloat = (float)NextDouble()（Utils.cs:1201-1204）→ Math.fround 镜像 C# double→float
+ *  收缩；后续 float 算术（×(π/2)−π/4+π / ×6..12 / ×0.1−0.05）逐运算 fround = 位级同源。
+ *  （原近似实现非 .NET 位级，已退役——见 git 历史。） */
+const F_PI_2 = Math.fround(Math.PI / 2);
+const F_PI_4 = Math.fround(Math.PI / 4);
+/** 单件散射参数（angle = UnitY.RotatedBy 的弧度、rotV = 角速度）——纯函数供测试对拍 */
+export function moonlordThrowSeq(seed: number): Array<{ angle: number; rotV: number }> {
+  const rng = new UnifiedRandom(seed);
+  const nextFloat = () => Math.fround(rng.nextDouble());          // (float)NextDouble
+  const out: Array<{ angle: number; rotV: number }> = [];
+  for (let i = 0; i < 4; i++) {
+    const angle = Math.fround(
+      Math.fround(Math.fround(Math.fround(nextFloat()) * F_PI_2) - F_PI_4) + Math.PI);
+    const rotV = Math.fround(Math.fround(Math.fround(nextFloat()) * 0.1) - 0.05);
+    out.push({ angle, rotV });
+  }
+  return out;
 }
 
 // ================= 晨昏耀斑贴图（Misc/Sunflare/*） =================
@@ -766,6 +787,8 @@ export interface SkyFrameCtx {
     lavaLine: number;
     crimson: boolean;
     flags: Record<string, boolean>;
+    /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；稀有云门消费 theConstant/tenthAnniversary） */
+    seedFlags?: { theConstant?: boolean; tenthAnniversary?: boolean };
     store: {
       inBounds(x: number, y: number): boolean;
       isSolid(x: number, y: number): boolean;
@@ -1365,9 +1388,6 @@ export class SkyRenderer {
   private ambFrame = 0;
   /** AmbienceServer._updatesUntilNextAttempt */
   private ambNextAttempt = 0;
-  /** 绘制帧缓存（spawn 用相机/视口） */
-  private ambViewW = 1920;
-  private ambViewH = 1080;
   /** 族贴图缓存（texKey → Image，首用懒加载） */
   private ambTexCache = new Map<string, HTMLImageElement>();
   /** NPC.butterflyChance（NPC.cs:94583-94599 每日黎明掷）——按 dayCount 重掷 */
@@ -1455,10 +1475,13 @@ export class SkyRenderer {
     const dir: 1 | -1 = spec.randomDir
       ? (Math.floor(r() * 2) !== 0 ? -1 : 1)
       : (wind > 0 ? 1 : -1);
-    // VirtualCamera（VirtualCamera.cs:9-13）= 玩家中心 ± Size/2；原版 Size=Main.maxScreen
-    // 4096（Main.cs:3754）——本仓以实际视口近似（登记：远端生成距离略近）
-    const px = this.amb.playerX, halfW = this.ambViewW / 2, halfH = this.ambViewH / 2;
-    const edgeX = dir > 0 ? px - halfW - 100 : px + halfW + 100;   // :452-459
+    // VirtualCamera（VirtualCamera.cs:5-14）：Position = 玩家中心 − 2048、Size = 4096²
+    // （Main.cs:3753-3755 HiDef 档）——出生域以玩家为锚，与渲染视口无关
+    const px = this.amb.playerX;
+    const vcamX = px - VIRTUAL_CAM_HALF;                       // vcam.Position.X
+    const vcamY = this.amb.playerY - VIRTUAL_CAM_HALF;         // vcam.Position.Y
+    // :452-459（各族同构）：Effects==None（顺风）→ 左沿外 100；Flip → 右沿(Position.X+Size.X)外 100
+    const edgeX = dir > 0 ? vcamX - 100 : vcamX + VIRTUAL_CAM_SIZE + 100;
     const mk = (sx: number, sy: number, d: number, l: number, key: string, rows: number, variant: number) =>
       this.mkAmbient(kind, sx, sy, d, dir, l, camX, camY, key, rows, variant);
     const randLife = () => (spec.life[0] + Math.floor(r() * (spec.life[1] - spec.life[0]))) * 60;
@@ -1470,13 +1493,13 @@ export class SkyRenderer {
       const life = randLife();                                      // :1263/:1281 Next(18,31)*60
       let e: AmbientEnt;
       if (Math.floor(r() * 4) !== 0) {
-        // BeginZigZag :1260-1276：方向掷（1 = 左侧入屏右飞）；y=相机顶、x 对侧屏外
+        // BeginZigZag :1260-1276：方向掷（1 = 左侧入屏右飞）；y=虚拟相机顶、x 对侧域外
         const d: 1 | -1 = Math.floor(r() * 2) === 1 ? 1 : -1;
-        e = mk(d === 1 ? camX - halfW - 100 : camX + halfW + 100, camY - halfH, depth, life, t.key, t.rows, t.variant);
+        e = mk(d === 1 ? vcamX - 100 : vcamX + VIRTUAL_CAM_SIZE + 100, vcamY, depth, life, t.key, t.rows, t.variant);
         e.state = 1; e.dir = d; e.waviness = 1 + r();               // :1265
       } else {
-        // BeginChasingPlayer :1278-1283：相机矩形内均匀随机点
-        e = mk(camX - halfW + r() * halfW * 2, camY - halfH + r() * halfH * 2, depth, life, t.key, t.rows, t.variant);
+        // BeginChasingPlayer :1278-1283：虚拟相机 4096² 域内均匀随机点
+        e = mk(vcamX + r() * VIRTUAL_CAM_SIZE, vcamY + r() * VIRTUAL_CAM_SIZE, depth, life, t.key, t.rows, t.variant);
         e.state = 2;
       }
       this.ambEntities.push(e);
@@ -1640,8 +1663,6 @@ export class SkyRenderer {
   drawAmbience(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
     camX: number, camY: number, dtMs = 16.7): void {
     if (this.fx.surfaceY <= 0) return;   // 未进世界（fx 未注入）
-    this.ambViewW = viewW;
-    this.ambViewH = viewH;
     const ticks = Math.max(1, Math.round(dtMs / (1000 / 60)));
     const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
     const moonlord = this.moonLordPresent();   // :1362-1369 月总天空冲突 → Ambience 禁出
@@ -1682,7 +1703,8 @@ export class SkyRenderer {
       this.ambEntities = this.ambEntities.filter((e) => !e.dead);
     }
     // 月总死亡戏剧（DrawPieces/DrawExplosions Main.cs:62711-62712：WoF/背景碎块之后、
-    // NPC 缓存之前 = tile 之前——本仓 pre-world 变换段等价；白闪在 drawWorldFx）
+    // NPC 缓存之前 = tile 之前——本仓 pre-world 变换段等价；白闪走帧尾
+    // drawMoonlordWhiteFlash（Renderer 7c' 段））
     this.drawMoonlordDrama(ctx, camX, camY, viewW, viewH, this.frameCtx?.z ?? 1);
     if (!this.ambEntities.length) return;
     // atmo（Game.updateWeather 同公式，Main.cs:62622）——CommonDraw :76 color × atmo
@@ -1709,7 +1731,6 @@ export class SkyRenderer {
       //  常规 = Lerp(bg, 白, BrightnessLerper)（:165-168）；
       //  gastropod = Lerp(bg, (102,0,63), 0.75)（:658 + Colors.cs:39）；
       //  hellbats = Lerp(白, 灰, Depth/15)（:871，无 atmo 乘）
-      //  群系背景层 alpha 乘子（Vulture/Seagulls/Bats/EOC 族 ×bgAlphaFrontLayer）无对应态，按 1 近似（登记）
       let cr: number, cg: number, cb: number;
       if (e.kind === 'gastropod') {
         cr = sr + (102 - sr) * 0.75; cg = sg * 0.25; cb = sb + (63 - sb) * 0.75;
@@ -1720,7 +1741,11 @@ export class SkyRenderer {
         const b = e.brightness;
         cr = sr + (255 - sr) * b; cg = sg + (255 - sg) * b; cb = sb + (255 - sb) * b;
       }
-      const alpha = Math.min(1, e.opacity * (e.grayDepthFade ? 1 : atmo));
+      // 群系前景背景层 alpha 乘子（各族 GetColor 覆盖 ×Main.bgAlphaFrontLayer[i]，索引语义
+      //  = Main.cs:58951-59030 的 bgStyle 槽：0/10-12 森林系 1 腐化 2 沙漠 3 丛林 4 海洋
+      //  5/13/14 善恶沙漠 6 神圣 7 雪原 8 猩红 9 蘑菇——与 BiomeBackground.bgStyle 同表）
+      const alpha = Math.min(1, e.opacity * (e.grayDepthFade ? 1 : atmo)
+        * this.familyBiomeAlphaMul(e.kind));
       if (alpha <= 0.01) continue;
       ctx.save();
       ctx.globalAlpha = alpha;
@@ -1738,6 +1763,33 @@ export class SkyRenderer {
 
   /** Renderer.render 每帧一行注入；null = 未进世界（各子系统自静默） */
   frameCtx: SkyFrameCtx | null = null;
+
+  /** Main.bgAlphaFrontLayer 等价源（BiomeBackground.alphaFront，逐 bgStyle 槽的渐变 alpha；
+   *  Renderer 初始化时 attachBiomeBg 注入）。null = 未注入（菜单等），乘子按 1。 */
+  private bgAlphaFront: ArrayLike<number> | null = null;
+  attachBiomeBgAlpha(front: ArrayLike<number>): void {
+    this.bgAlphaFront = front;
+  }
+  private bgFront(i: number): number {
+    const a = this.bgAlphaFront;
+    return a ? (a[i] ?? 0) : 1;
+  }
+
+  /** 各族 GetColor 的群系前景层乘子（AmbientSky.cs 六族覆盖 1:1；其余族无覆盖 = 1）：
+   *  Pegasus×[6]（:334 神圣）/ Vulture×max([2],[5],[13],[14])（:383-385 沙漠系）/
+   *  Seagulls×[4]（:556 海洋）/ Bats×Utils.Max([3],[0],[10],[11],[12])（:987 丛林+森林系）/
+   *  Crimera×[8]（:1198 猩红）/ EOS×[1]（:1222 腐化）。索引槽语义见 Main.cs:58951-59030。 */
+  private familyBiomeAlphaMul(kind: AmbientFamily): number {
+    switch (kind) {
+      case 'pegasus': return this.bgFront(6);
+      case 'vulture': return Math.max(this.bgFront(2), this.bgFront(5), this.bgFront(13), this.bgFront(14));
+      case 'seagulls': return this.bgFront(4);
+      case 'bats': return Math.max(this.bgFront(3), this.bgFront(0), this.bgFront(10), this.bgFront(11), this.bgFront(12));
+      case 'crimera': return this.bgFront(8);
+      case 'eos': return this.bgFront(1);
+      default: return 1;
+    }
+  }
 
   /** 族贴图首用懒加载（texKey → Image；未就绪调用方跳帧自愈） */
   private ambTex(key: string): HTMLImageElement | null {
@@ -1936,7 +1988,9 @@ export class SkyRenderer {
    *  的 6/10/8/12 速；角速度 ±0.05）。种子 = Main.rand.Next(100)（NPC.cs:83496 调用点） */
   private throwMoonlordPieces(cx: number, cy: number, seed: number): void {
     if (this.dramaPieces.length > 0) return;   // 一次死亡一组
-    const r = seededRandom(seed);
+    // 位级同源序列（moonlordThrowSeq）：UnifiedRandom(DramaSeed) 的 NextFloat×8。
+    // 速度 = UnitY.RotatedBy(angle) × spd——RotatedBy 内部 (float)Math.Cos/Sin（C# double
+    // 三角后收缩 float），此处以 fround(cos(angle))×spd 镜像。
     const defs: Array<[DramaPieceKind, number, number, number, number, number]> = [
       // [件, originX, originY, 距核心偏移x, 偏移y, 速度]
       ['spine', 64, 150, 0, 50, 6],        // :235
@@ -1944,12 +1998,14 @@ export class SkyRenderer {
       ['torso', 192, 252, 0, 0, 8],        // :239
       ['head', 138, 185, 0, -200, 12],     // :241
     ];
-    for (const [kind, ox, oy, dx, dy, spd] of defs) {
-      const ang = r() * (Math.PI / 2) - Math.PI / 4 + Math.PI;
+    const seq = moonlordThrowSeq(seed);
+    defs.forEach(([kind, ox, oy, dx, dy, spd], i) => {
+      const { angle, rotV } = seq[i];
+      const dirX = Math.fround(Math.cos(angle));
+      const dirY = Math.fround(Math.sin(angle));
       this.dramaPieces.push(new DramaPiece(kind, cx + dx, cy + dy,
-        Math.cos(ang) * spd, Math.sin(ang) * spd, ox, oy,
-        r() * 0.1 - 0.05));
-    }
+        Math.fround(dirX * spd), Math.fround(dirY * spd), ox, oy, rotV));
+    });
   }
 
   /** AddExplosion（:244-247）：7 帧爆炎，帧速 Next(2,4) */
@@ -2099,15 +2155,22 @@ export class SkyRenderer {
   }
 
   /** DrawLensFlare（:368-541）：太阳↔屏心轴上的镜头光斑串。
-   *  原版为 Immediate 模式 shader（Main.cs:61760 末段后处理）；本仓在世界变换段
-   *  恒等变换绘制（登记：层级偏早、无 SunVisibilityPixel 遮挡采样） */
+   *  原版为 Immediate 模式 shader（Main.cs:61760 末段后处理），强度经
+   *  SunVisibilityPixel（HorizonHelper.UpdateSunVisibility 产出的 1×1 遮挡 alpha，
+   *  miscShaderData.UseImage1 → shader 内乘光斑色）调制；本仓在世界变换段恒等变换
+   *  绘制，遮挡调制以 sunVisibility 乘 intensity（登记：层级偏早）。 */
   private drawLensFlare(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
     sunset: number, sunrise: number, celestial: number): void {
     const sun = this.sunScreen;
     if (!sun) return;
-    // AdjustIntensity（:393-408）：intensity = temporal³ × celestial（无 sunScorch）
-    const num = (sunrise * celestial) ** 3 * celestial;
-    const num2 = (sunset * celestial) ** 3 * celestial;
+    // SunVisibilityEnabled 门（HorizonHelper.cs:42 = _targetUpToDate）：首帧采样未就绪
+    // 时不画光斑（原版同）——进世界后第二帧起生效
+    if (!this.sunVisSampled) return;
+    // AdjustIntensity（:393-408）：intensity = temporal³ × celestial（无 sunScorch），
+    //  再 × 遮挡可见度（原版在 shader 采样 SunVisibilityPixel alpha）
+    const occ = this.sunVisibility;
+    const num = (sunrise * celestial) ** 3 * celestial * occ;
+    const num2 = (sunset * celestial) ** 3 * celestial * occ;
     if (num <= 0.01 && num2 <= 0.01) return;
     const cx = viewW / 2, cy = viewH / 2;
     const baseRot = Math.atan2(cy - sun.y, cx - sun.x) + sun.y * 0.001;   // :46-49
@@ -2231,26 +2294,75 @@ export class SkyRenderer {
   }
 
   /** 世界变换段绘制（Renderer.render 2d' 区一行调用）：涟漪（世界坐标）+
-   *  月总死亡白闪 / 晨昏镜头光斑（恒等变换全屏） */
+   *  晨昏镜头光斑（恒等变换全屏）。月总死亡白闪已挪帧尾（见 drawMoonlordWhiteFlash） */
   drawWorldFx(ctx: CanvasRenderingContext2D, camX: number, camY: number,
     z: number, viewW: number, viewH: number): void {
     if (!this.frameCtx) return;
     this.updateRipples();
     this.drawRipples(ctx);
-    this.drawMoonlordWhitening(ctx, viewW, viewH);
     if (this.sunScreen) {
+      // SunVisibilityPixel 采样（HorizonHelper.UpdateSunVisibility Main.cs:61769 帧末语义：
+      // 本帧采样值下一帧生效——故先画后采，drawLensFlare 读的是上一帧值）
+      this.sampleSunVisibility(camX, camY, z, viewW, viewH);
       const dayTimeTicks = this.lastDayTimeTicks;
       const v = this.sunVisibilities(dayTimeTicks, dayTimeTicks > 0, this.lastEclipse,
         this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0);
       this.drawLensFlare(ctx, viewW, viewH, v.sunset, v.sunrise, v.celestial);
     }
-    void camX; void camY; void z;
+  }
+
+  /** 月总死亡白闪帧尾出口（MoonlordDeathDrama.DrawWhite Main.cs:61763：ScreenDarkness
+   *  .DrawFront 之后、ScreenObstruction.Draw 之前 = 几乎帧末）。2026-08-13 挪正：此前
+   *  挂在 drawWorldFx（Renderer 2d' 世界变换段 = tile 上实体下），白闪被实体/光照合成
+   *  压掉。Renderer 7c/7c-bis 之间调用（drawMoonLordShake 后、ScreenObstruction 前） */
+  drawMoonlordWhiteFlash(ctx: CanvasRenderingContext2D, viewW: number, viewH: number): void {
+    this.drawMoonlordWhitening(ctx, viewW, viewH);
   }
 
   /** atmo（Game.updateWeather 同公式，Main.cs:62622） */
   private atmoValue(camY: number): number {
     return Math.max(0, Math.min(1,
       (camY / 16 - (65 + 10 * (this.fx.worldW / 4200) ** 2)) / Math.max(1, this.fx.surfaceY / 16 / 5)));
+  }
+
+  // ================= SunVisibilityPixel 遮挡采样（HorizonHelper.cs:42-80） =================
+
+  /** 上一帧采样值（DrawLensFlare 消费；= 原版 _pixelTarget 1×1 alpha） */
+  private sunVisibility = 1;
+  /** 采样就绪标记（= 原版 _targetUpToDate / SunVisibilityEnabled；首帧 false → 不画光斑） */
+  private sunVisSampled = false;
+
+  /**
+   * UpdateSunVisibility（HorizonHelper.cs:46-80）：以太阳屏位为中心、边长
+   * 128×RenderZoom 的方域从上一帧渲染目标降采样到 1×1 alpha（blend = dest×(1−srcA)
+   * 累乘 ⇒ 值 = 域内前景覆盖率的取反），供 LensFlare shader 调制光斑强度——
+   * 太阳被地形/前景内容遮挡时镜头光斑随之衰减。
+   * 载体差异：原版 screenTarget 的天空画在独立 skyTarget（采样域开空处 alpha≈0）；
+   * 本仓主画布天空不透明、无独立前景 alpha 通道，无法直接读 alpha——以采样域内
+   * **实心 tile 覆盖率**代位（语义等价：地形遮阳 → 衰减；NPC/水面/背景层不采，
+   * 它们在原版 alpha 通道中占比亦小，且光斑只在晨昏地表可见时段活跃）。
+   * 屏幕域 128px → 世界域 128/z px（RenderZoom 以主缩放代位）。
+   */
+  private sampleSunVisibility(camX: number, camY: number, z: number,
+    viewW: number, viewH: number): void {
+    const sun = this.sunScreen;
+    const world = this.frameCtx?.world;
+    if (!sun || !world) { this.sunVisSampled = false; return; }
+    const half = 64 / z;
+    const wx = camX + (sun.x - viewW / 2) / z;
+    const wy = camY + (sun.y - viewH / 2) / z;
+    const st = world.store;
+    const x0 = Math.floor((wx - half) / 16), x1 = Math.floor((wx + half) / 16);
+    const y0 = Math.floor((wy - half) / 16), y1 = Math.floor((wy + half) / 16);
+    let solid = 0, total = 0;
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        total++;                                    // 界外格按"未遮挡"计（原版采样透明区）
+        if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) solid++;
+      }
+    }
+    this.sunVisibility = total > 0 ? Math.max(0, Math.min(1, 1 - solid / total)) : 1;
+    this.sunVisSampled = true;
   }
 
   /** 最近一帧白天 tick / 日食（sky.draw 写入；镜头光斑复用可见性） */
@@ -2281,8 +2393,11 @@ export class SkyRenderer {
           downedBoss3: !!(wf['downed_35'] || wf['downedSkeletron']),
           hardMode: !!wf['hardMode'],
           crimson: !!this.frameCtx?.world?.crimson,
-          // 饥荒/十周年世界类型本仓无对应（drunk 系世界生成未移植）——恒 false（登记）
-          dontStarveWorld: false, tenthAnniversaryWorld: false,
+          // 饥荒/十周年世界（SeedEasterEggs.parseSeed 文本种子：the constant 系 /
+          //  celebrationmk10 及哈希值 5162021/5162011，WorldGenerationOptions.cs:66-90
+          //  + WorldSeedOption_DontStarve/Anniversary.cs）——旗标经 world.seedFlags 落地
+          dontStarveWorld: !!this.frameCtx?.world?.seedFlags?.theConstant,
+          tenthAnniversaryWorld: !!this.frameCtx?.world?.seedFlags?.tenthAnniversary,
         };
       }
     }

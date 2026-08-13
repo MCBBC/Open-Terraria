@@ -16,6 +16,12 @@
 //   展示罐 698（1×2）    TEDeadCellsDisplayJar.cs  FitsJar: 任何 stack>0（:126-129）
 //     —— 展示罐与物品框同构（无专属物品交互，FitsJar 只看 stack），复杂度不高于物品框，
 //        故一并移植（决策：移植，不备案跳过）
+//   锚桩 724（1×1）      TECritterAnchor.cs（TELeashedEntityAnchorWithItem 子类）
+//     —— 1.4.4+ 捕获小动物拴绳锚桩：TE 存物品 id（WriteExtraData short itemType），
+//        放置钩 PlaceFromPlayerPlacementHook :43-58 直接写手持物（InsertItem →
+//        RespawnLeashedEntity 生成拴绳小动物）。等价记录见文末 critter_anchor 段；
+//        ★刻意不入 FURNITURE_TILE_KIND（右键放入/取出与两段式破坏都是挂物族语义，
+//        锚桩原版无 OnPlayerInteraction、破坏 = 同击掉物+碎块，走 Game 侧专用分支）
 //
 // 槽位布局（镜像原版 WriteExtraData 持久化形状）：
 //   单槽族（框/架/盘/罐）：slots[0]
@@ -32,7 +38,7 @@ import { vanillaStatOfVid } from '../data/vanillaItemStats';
 import { equipKindOfVid } from '../data/vanillaEquip';
 
 /** 挂物族类别 */
-export type FurnitureKind = 'item_frame' | 'weapon_rack' | 'display_doll' | 'hat_rack' | 'food_platter' | 'display_jar';
+export type FurnitureKind = 'item_frame' | 'weapon_rack' | 'display_doll' | 'hat_rack' | 'food_platter' | 'display_jar' | 'critter_anchor';
 
 /** 槽位内物品实例（id 为内部 item id；prefix 为重铸词缀，0/缺省=无） */
 export interface FurnitureSlotItem {
@@ -104,6 +110,9 @@ export function furnitureAnchor(st: FurnitureStoreView, kind: FurnitureKind, x: 
     case 'display_jar': return [x, y - Math.floor((fy % 36) / 18)];
     case 'display_doll': return [x - (fx % 36 !== 0 ? 1 : 0), y - Math.floor(fy / 18)];
     case 'hat_rack': return [x - Math.floor((fx % 54) / 18), y - Math.floor(fy / 18)];
+    // TECritterAnchor.IsTileValidForEntity（TECritterAnchor.cs:23-31）：1×1，TE 即挂
+    // 在命中格本身，无帧归一
+    case 'critter_anchor': return [x, y];
   }
 }
 
@@ -273,6 +282,9 @@ export function fitsFurniture(kind: FurnitureKind, vid: number): boolean {
     case 'food_platter': return fitsFoodPlatter(vid);
     case 'hat_rack': return fitsHatRack(vid);
     case 'display_doll': return fitsDisplayDoll(vid);
+    // 锚桩无右键放入语义（TECritterAnchor 无 OnPlayerInteraction；FitsItem :48-51
+    // 仅 OnWorldLoaded 存档校验用，放置链由物品侧 createTile=724 结构性保证）
+    case 'critter_anchor': return false;
   }
 }
 
@@ -478,4 +490,48 @@ export function furnitureFromSave(entries: FurnitureSaveEntry[] | undefined, map
     out.push({ x: e.x, y: e.y, kind: e.kind, slots });
   }
   return out;
+}
+
+// ============================================================================
+// TECritterAnchor（tile 724 捕获小动物锚桩，1.4.4+）——TE 等价的专用存取
+//   原版链：放置捕获小动物物品（DefaultToCapturedCritter createTile=724）→
+//     TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook（:43-58）把手持物
+//     写入 TE（InsertItem :60-64 → RespawnLeashedEntity 生成拴绳小动物）；
+//     破坏 → KillTile_DropItems :63739-63744 DropItemForTileBreak（同击掉物+碎块，
+//     与物品框两段式 pop 不同），tile 本体无掉落（GetItemDrop case 723/724
+//     WorldGen.cs:66141-66145 break）。
+//   本仓等价：furnitureItems 里 kind='critter_anchor' 的单槽记录（持久化走
+//   serialize furniture 段对 kind 透传，无需改存档）；拴绳小动物本体
+//   （LeashedEntity 族 + Main.cs:17895/22163 消费）未实装 → GAP ③ 见 render/CritterCage.ts
+// ============================================================================
+
+/** 放置：写入手持捕获物（InsertItem 1:1）。锚桩 1×1，锚点 = 放置格本身 */
+export function critterAnchorPlace(
+  records: FurnitureItemRecord[], x: number, y: number,
+  item: { id: number; stack: number; prefix?: number },
+): FurnitureItemRecord {
+  removeFurnitureAt(records, x, y);
+  const rec: FurnitureItemRecord = {
+    x, y, kind: 'critter_anchor',
+    slots: [{ id: item.id, stack: 1, prefix: item.prefix }],
+  };
+  records.push(rec);
+  return rec;
+}
+
+/** 命中格 → 锚桩记录（1×1 无归一） */
+export function critterAnchorAt(records: FurnitureItemRecord[], x: number, y: number): FurnitureItemRecord | undefined {
+  return records.find((r) => r.x === x && r.y === y && r.kind === 'critter_anchor');
+}
+
+/**
+ * 破坏：取出并存清空存物（DropItemForTileBreak :28-40——itemType>0 才掉）。
+ * @returns 被掉落的存物（null = 空桩/无记录）；调用方随后清格 + removeFurnitureAt
+ */
+export function critterAnchorBreakDrop(records: FurnitureItemRecord[], x: number, y: number): FurnitureSlot {
+  const rec = critterAnchorAt(records, x, y);
+  if (!rec) return null;
+  const item = rec.slots[0];
+  rec.slots[0] = null;
+  return item;
 }

@@ -21,6 +21,7 @@ import {
   type ZoneInput,
 } from '../data/vanillaFishing';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ITEM_DEFS } from '../data/items';
 import { VI_ID } from '../data/itemKeys';
 import type { World } from '../world/World';
 import { BuffType } from '../stats/Buffs';
@@ -242,7 +243,10 @@ export class Bobber extends Entity {
     for (const d of (game as unknown as { entities?: { drops?: Array<{ itemId?: number; x: number; y: number; dead: boolean }> } })
       .entities?.drops ?? []) {
       if (d.dead || d.itemId === undefined) continue;
-      const key = VANILLA_ITEM_KEY_BY_ID[this.getItemId(d)] ?? '';
+      const _d = d as { itemId: number; dead: boolean; x: number; y: number };
+      const _key = ITEM_DEFS[_d.itemId]?.key ?? '';
+      if (_key !== 'vi_4608_chum_bucket') continue;
+      const key = _key;
       if (key !== 'vi_4608_chum_bucket') continue;
       if (Math.abs(d.x - this.cx) < 15 * 16 && Math.abs(d.y - this.cy) < 15 * 16) chums++;
     }

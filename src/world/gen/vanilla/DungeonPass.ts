@@ -305,7 +305,12 @@ export function runDungeonPass(
       bounds.upd(posX, posY);
       s--;
       if (roomDelay > 0) roomDelay--;
-      if (roomDelay === 0 && rn(3) === 0) {
+      // ★LegacyDungeonLayoutProvider.cs:61 `(roomDelay == 0) & (Next(3) == 0)` 是
+      //  非短路 &——roomDelay>0 时也**照耗**一颗 Next(3)(曾 && 短路少耗;oracle
+      //  同款偏差已在 caves-oracle.cs 同步修正)。TS 禁 bool &,先掷后判语义等价。
+      //  入口循环(DungeonCrawler.cs:426)才是 && 短路,勿混
+      const roomRoll = rn(3);
+      if (roomDelay === 0 && roomRoll === 0) {
         roomDelay = 5;
         if (rn(2) === 0) {
           const sx = posX, sy = posY;
@@ -1492,7 +1497,14 @@ export function runDungeonPass(
       }
       if (!free) continue;
       for (let a = 0; a < 2; a++) {
-        for (let b = -1; b <= 0; b++) chTile(st.idx(px + a, py + b), chestTile, false);
+        for (let b = -1; b <= 0; b++) {
+          const ti = st.idx(px + a, py + b);
+          chTile(ti, chestTile, false);
+          // PlaceChestDirect 帧式（:57864-57903）：顶行 fy=0 / 底行 fy=18；
+          // 列 fx=36*style / 18+36*style。★此前不写帧=残留旧帧,宝箱单格贴图错乱
+          st.frameX[ti] = 36 * style + a * 18;
+          st.frameY[ti] = b === -1 ? 0 : 18;
+        }
       }
       dgChestLoot(num7, num10, flag9, flag10);
       chests.push({ x: px, y: py - 1, locked: flag10, items: dgLootItems(num10) });
@@ -1764,13 +1776,22 @@ export function runDungeonPass(
             }
           }
           if (placed) break;
-          // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）
+          // 灯笼（Place1x2Top :46694：上方实心且下方净空 → 42 两格）
           const aboveSheet = TILE_DEFS[typAt(x, cy - 1)]?.vanilla?.sheet ?? -1;
           const aboveSolid = TILE_DEFS[typAt(x, cy - 1)]?.solid ?? false;
           if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !DG_SOLID_TOP.has(aboveSheet)
             && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
+            // 灯笼样式按墙变体三档（Lights :109-118）：wall==variants[1]/[2] 换档,余用 [0]
+            const wl = wallAt(x, cy);
+            const lStyle = wl === wallVariants[1] ? lantern[1] : wl === wallVariants[2] ? lantern[2] : lantern[0];
             chTile(st.idx(x, cy), LANTERN, false);
             chTile(st.idx(x, cy + 1), LANTERN, false);
+            // Place1x2Top 帧式（:46711-46717）：frameY=style*36（下格 +18）、frameX=0（亮档；
+            // 灭档 frameX=18 由 dgSwitch 2/3 掷写）。★此前不写帧=残留砖帧,样式全丢
+            st.frameY[st.idx(x, cy)] = lStyle * 36;
+            st.frameY[st.idx(x, cy + 1)] = lStyle * 36 + 18;
+            st.frameX[st.idx(x, cy)] = 0;
+            st.frameX[st.idx(x, cy + 1)] = 0;
             placed = true; ncount = 0; num4++;
             dgSwitch(x, cy);
           }
@@ -1788,8 +1809,21 @@ export function runDungeonPass(
     }
     const sheet = TILE_DEFS[typAt(x, y - 1)]?.vanilla?.sheet ?? -1;
     if (!(inW(x, y - 1, 0) && actAt(x, y - 1) !== 0 && TILE_DEFS[typAt(x, y - 1)]?.solid && !DG_SOLID_TOP.has(sheet))) return false;
+    // PlaceChand 帧式（:52753-52824）：样式=蓝/绿/粉地牢吊灯 placeStyle 27/28/29
+    //（Item.cs:25748-25757 `27 + type - 2652`，chandelierItemType 2652+theme）。
+    // 页列 num2=108*(style/36)（27-29 无分页=0）、行基 num3=style*54（分页修正同式）；
+    // 三列 fx=num2+{0,18,36}、三行 fy=num3+{0,18,36}。★此前不写帧=残留砖帧
+    const style = 27 + theme;
+    const n2 = Math.floor(style / 36) * 108;
+    let n3 = style * 54;
+    if (n2 >= 108) n3 -= 54 * Math.floor(n2 / 108) * 37;
     for (let a = x - 1; a < x + 2; a++) {
-      for (let b = y; b < y + 3; b++) chTile(st.idx(a, b), CHANDELIER, false);
+      for (let b = y; b < y + 3; b++) {
+        const ti = st.idx(a, b);
+        chTile(ti, CHANDELIER, false);
+        st.frameX[ti] = n2 + (a - (x - 1)) * 18;
+        st.frameY[ti] = n3 + (b - y) * 18;
+      }
     }
     return true;
   }
@@ -1808,7 +1842,25 @@ export function runDungeonPass(
         if (actAt(a, b) === 0) { st.flags[st.idx(a, b)] = 1; st.type[st.idx(a, b)] = DSWITCH; }
       }
       if (actAt(a, b) === 0) continue;
-      rn(3);                                                   // frameX=18（不入哈希）
+      // L 形红线逐格铺（Lights_GenerateSwitch :173-185）：横一步铺线、纵一步铺线，
+      // 三连 wire 写直到灯位（含开关格、不含灯格）——原版 Main.tile.wire(true)=红线。
+      // ★此前只放开关不铺线：开关无信号源=死件（用户报告"灯和开关配套但没连线"）
+      let wa = a, wb = b;
+      while (wa !== x || wb !== y) {
+        if (inW(wa, wb, 0)) st.wire[st.idx(wa, wb)] |= TileStore.WIRE_RED;
+        if (wa > x) wa--;
+        if (wa < x) wa++;
+        if (inW(wa, wb, 0)) st.wire[st.idx(wa, wb)] |= TileStore.WIRE_RED;
+        if (wb > y) wb--;
+        if (wb < y) wb++;
+        if (inW(wa, wb, 0)) st.wire[st.idx(wa, wb)] |= TileStore.WIRE_RED;
+      }
+      // 2/3 灯初始灭档（:186-190）：frameX=18 绝对写——灯笼 1×2 全格=亮灭档在 X；
+      // 吊灯中心列本就 num2+18=18（27-29 无分页）→ 原版同款无操作,照抄不"修"
+      if (rn(3) > 0) {
+        st.frameX[st.idx(x, y)] = 18;
+        st.frameX[st.idx(x, y + 1)] = 18;
+      }
       break;
     }
   }

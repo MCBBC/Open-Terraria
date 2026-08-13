@@ -8158,6 +8158,7 @@
     "aiStyle": 102,
     "width": 30,
     "height": 76,
+    "noGravity": true,
     "HitSound": "NPCHit23",
     "DeathSound": "NPCDeath39"
   },

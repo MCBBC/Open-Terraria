@@ -523,7 +523,8 @@ export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chest
   // 洞穴箱:35-40 × 面积缩放(Configuration.json CaveChestCount ScaleWith:WorldArea)。
   // ★WorldGenRange.GetRandom(WorldGenRange.cs:34-57):先缩放边界再 (int) 截断 →
   //   Next((int)(35s), (int)(40s)+1)。曾"先掷后乘+Math.round"(C10 同款旧公式)
-  const target = rng.int(Math.trunc(35 * (w * h) / 5040000), Math.trunc(40 * (w * h) / 5040000));
+  const target = gs.caveChestCount >= 0 ? gs.caveChestCount
+    : rng.int(Math.trunc(35 * (w * h) / 5040000), Math.trunc(40 * (w * h) / 5040000));
   let fail = 10000;
   for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);
@@ -541,7 +542,10 @@ export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chest
  *  必须在 hellPass + 地狱屋之后调用(原版 Underworld(cs:13697) < Buried Chests(cs:17066)) */
 export function runUnderworldChestsPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w, h } = st;
-  const target = Math.round(rng.int(10, 15) * (w / 4200));
+  // gs 预掷优先(cs:17082 流位);回退公式同步 WorldGenRange 化(先缩放后截,
+  // 曾 Math.round(rng.int(10,15)*(w/4200)) 旧式)
+  const target = gs.underworldChestCount >= 0 ? gs.underworldChestCount
+    : rng.int(Math.trunc(10 * (w / 4200)), Math.trunc(15 * (w / 4200)));
   let fail = 10000;
   for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);

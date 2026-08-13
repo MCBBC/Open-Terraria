@@ -12,6 +12,7 @@ export type SfxName =
   | 'bowShoot'   // 原版 SoundID.Item5（弓弦，Item.cs case 99 UseSound）
   | 'throw'      // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
   | 'explosion'  // 原版 SoundID.Item14（爆炸通用：手雷/炸弹/炸药/巨石,Projectile.cs 20+ 处）
+  | 'rocketJet' | 'starboardJet'  // 原版 SoundID.Item13/Item24（妖精翅 4/星璇悬浮板 45 喷射音）
   | 'beeSummon'  // 原版 SoundID.Item173（Abeemination 蜂后召唤音，Player.cs:43185——Boss 召唤音唯一非 Roar 例外）
   | 'thunder'   // 原版 SoundID 43（Thunder_0-5，NewLightning 的 thunderDelay 归零时播）
   | 'mech'       // 原版 SoundID 28（Mech_0：器件右键切换音，Player.cs:31762/31799/31803）
@@ -97,6 +98,8 @@ const WAV_MAP: Record<SfxName, string[]> = {
   menuTick: ['Menu_Tick'],
   throw: ['Item_1'],
   explosion: ['Item_14'],
+  rocketJet: ['Item_13'],  // SoundID.Item13（妖精翅 4 飞行喷射音，WingFrame :29034）
+  starboardJet: ['Item_24'], // SoundID.Item24（星璇悬浮板 45 喷射音，:29716）
   // 2026-08-13 修正：素材提取管线把 Sounds/Custom/ 拍平进 public/sounds/ 根目录，
   // 此前带 'Custom/' 前缀的 fetch 恒 404（failed 静默无声）——改用平铺名
   dd2Flameburst: ['dd2_flameburst_tower_shot_0', 'dd2_flameburst_tower_shot_1', 'dd2_flameburst_tower_shot_2'],

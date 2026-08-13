@@ -2,9 +2,10 @@
 // 原版小动物是 NPC(NPCID.Squirrel 等),任何伤害即死——近战挥砍已覆盖
 // (Game 挥砍段"小动物:任何挥击一击致死"),弹幕此前漏判,箭射松鼠无效果。
 import type { GameHooks } from './types';
-import { BuffType } from '../stats/Buffs';
+import { BuffType, buffTypeByVanilla, type BuffState } from '../stats/Buffs';
 import { projectileData } from '../data/vanillaProjectiles';
 import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
+import statusPlayerJson from '../data/vanilla-statusplayer.json';
 
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
@@ -208,39 +209,146 @@ export function tryReflectProjectile(
   return true;
 }
 
-/** 敌弹命中玩家的状态授予(原版 Projectile.StatusPlayer :11450+,仅在
- *  hitPlayer 返回 true 即 Hurt>0 后调用)。本仓库已实装弹型登记:
- *   348 FrostWave —— Chilled(46) 300/600t(:11554-11557) + Frozen(47)
- *                    概率 20/40/60t 三级(:11558-11567)
- *   349 FrostShard —— Chilled(46) 1/3→600t、否则 1/2→300t(:11580-11588)
- *  其余弹型的 debuff 链(毒/诅咒/灵液/暗影焰等)随对应批次逐条接入。 */
-export function statusPlayer(game: GameHooks, projId: number): void {
-  const p = game.player;
-  switch (projId) {
-    case 276: {
-      // 毒种子命中（Projectile.cs:11527-11535）：专家必中 Next(120,540)t；
-      // 经典 50% Next(180,420)t → buff 20 Poison
-      const t = mainExpertMode(game.world)
-        ? 120 + Math.floor(Math.random() * 421)
-        : (Math.random() < 0.5 ? 180 + Math.floor(Math.random() * 241) : 0);
-      if (t > 0) p.buffs.apply(BuffType.Poisoned, t / 60);
-      break;
+/** 敌弹命中玩家的状态授予(原版 Projectile.StatusPlayer :11450-11722 **全量**,
+ *  仅在 hitPlayer 返回 true 即 Hurt>0 且未死后调用——调用点 Game.ts 敌弹命中段)。
+ *  数值表 = tools/extract-statusplayer.mjs 从 1456 源码提取的 AST
+ *  (src/data/vanilla-statusplayer.json,48 弹型/42 块/零跳过,提取带护栏):
+ *   1078 陨石碎块 → OnFire(24) 300-599t（:11456-11458）
+ *   285 纳米弹 → Confused(31) 1/3→180t 否则 60t,双块(!hostile 块 :11622-11631)
+ *   1048 配重球 → Poisoned(20)+Stinky(120) 各 600t（:11471-11474）
+ *   669 麦酒 → Confused(31) 1/20 → 120-300t（:11476-11478）
+ *   119/359 冰晶刃/冰晶杖 → Frostburn2(324) 240/420t（:11480-11486）
+ *   188 火焰陷阱 → OnFire3(323) 1200t（:11488-11490）
+ *   472 黑隐士吐网 → Webbed(149) 30-149t（:11492-11494）
+ *   961 鹿角怪冰锥 → Frozen(47) 20t（:11496-11498）
+ *   467 异教徒火球 → OnFire(24) 30-149t（:11500-11502）
+ *   581 星旋酸弹 → VortexDebuff(164) 专家 300-539t/经典 50% 360-719t（:11504-11514）
+ *   687 贝蒂吐息 → OnFire(24) 420-600t（:11515-11517）
+ *   258 火球 → OnFire(24) 50% → 300-420t（:11519-11521）
+ *   572 蝾螈喷毒 → Poisoned(20) 2/3 → 120-239t（:11523-11525）
+ *   276 世纪之花毒种子 → Poisoned(20) 专家必中/经典 50%（:11527-11535）
+ *   436 脑部干扰弹 → Confused(31) Next(5)>=2 → 300t（:11538-11540）
+ *   435 火星炮塔弹 → Electrified(144) 2/3 → 300t（:11542-11544）
+ *   682 DD2 萤火虫电击 → WitheredWeapon(196) 300t（:11546-11548）
+ *   437 千兆电枪矛 → Electrified(144) 240-480t（:11550-11552）
+ *   348 霜涛 → Chilled(46) 1/2→600/300t + Frozen(47) 三级顺序掷骰（:11554-11576）
+ *   349 霜晶 → Chilled(46) 1/3→600t、否则 1/2→300t（:11580-11588）
+ *   399-402 燃烧瓶族(!hostile 自伤) → OnFire(24) 180-360t（:11591-11593）
+ *   55 刺球 / 719 蜂后刺针 → Poisoned(20) 1/3→600t 否则专家 60-299t（:11595-11604）
+ *   44 恶魔镰刀 → Darkness(22) 1/3 → 900t（:11606-11608）
+ *   293 迷失之魂 → Blackout(80) 120-360t（:11610-11612）
+ *   299 暗影焰 → Cursed(23) 240t（:11614-11616）
+ *   82 燃烧箭 → OnFire(24) 1/3 → 420t（:11618-11620）
+ *   96 诅咒焰/101 恶魔眼火 → CursedInferno(39) 三级顺序掷骰（:11633-11647）
+ *   288 金浴 → Ichor(69) 900t（:11648-11650）
+ *   253 霜球(!hostile) → Frostburn2(324) 600t（:11652-11654）
+ *   291/292 地狱火 → OnFire(24) 480-900t（:11656-11658）
+ *   98 毒镖/1073 史莱姆毒镖 → Poisoned(20) 600t（:11660-11662）
+ *   1053 熔岩巨砾 → OnFire(24) 300t（:11664-11666）
+ *   184 毒镖陷阱 → Poisoned(20) 900t（:11668-11670）
+ *   980 毒液镖陷阱 → Venom(70) 300t（:11672-11674）
+ *   290 暗影光束 → Slow(32) 300-900t（:11676-11678）
+ *   174 冰锥 → Chilled(46) 1200t + !frozen 门 Frozen 两级（:11680-11690）
+ *   257 霜束 → Chilled(46) 2700t + !frozen 门 Frozen 1/5→60t（:11692-11698）
+ *   177 冰水喷吐 → Chilled(46) 1500t + !frozen 门 Frozen 30-119t（:11700-11706）
+ *   128 冰爆 → Frostburn(44) 1/3 → 360t（:11708-11710）
+ *   176 丛林尖刺 → Poisoned(20) 1/4→1200t 否则 1/2→300t（:11712-11720）
+ *  GAP：ApplyBuffTo 的 trap&&deadMansSweater 减半(:11729-11733)——"死人毛衣"
+ *  配件未移植；creativeGodMode 入口门(:11452-11454)——创意上帝模式字段未建模。
+ *  玩家侧 buff 免疫链(buffImmune,黑曜石皮防火等)在 BuffState.apply 无门,
+ *  独立缺口登记(Player.AddBuff :5088-5092 buffImmune 早退)。 */
+
+/** AST 条件原子：{r:[K,cmp,阈值?]} = Main.rand.Next(K) 与阈值比较(eq/ne/ge)；
+ *  {expert:1} = Main.expertMode；{hostile:0} = !hostile；{frozen:0} = !player.frozen */
+interface SPCond { r?: [number, 'eq' | 'ne' | 'ge', number?]; expert?: 1; hostile?: 0; frozen?: 0 }
+/** AST 门/链节点：g=外层门(全 atom 成立进 t/i,否则进 e) / i=else-if 链(首全成 arm,
+ *  全落空进 e) / a=顺序全执行 */
+interface SPNode {
+  g?: SPCond[];
+  i?: Array<{ g?: SPCond[]; t: SPElem }>;
+  a?: SPElem[];
+  e?: SPElem;
+}
+/** AST 叶子：ApplyBuffTo(player, b, d)（b 为原版 buff id，d 见 spDurTicks） */
+interface SPLeaf {
+  g?: SPCond[];
+  b: number;
+  d: number | { n: [number, number]; m?: number };
+}
+type SPElem = SPNode | SPLeaf;
+const SP_TABLE = statusPlayerJson as unknown as Record<string, SPElem>;
+
+/** Main.rand.Next(K)：含头不含尾的整数掷骰（Math.random()×K 取整精确等价） */
+const spNext = (k: number): number => Math.floor(Math.random() * k);
+
+/** 求值上下文：hostile=弹体敌对标志(Damage_EVP 路径恒 true,爆炸自伤路径 false)；
+ *  expert=专家难度；frozen=player.frozen 两源(buff 47 :9749 / 微光化 353 :11382) */
+interface SPCtx { hostile: boolean; expert: boolean; frozen: boolean }
+
+/** 条件门求值：原子逐个判,任一不成立即 false */
+function spGateOk(atoms: SPCond[] | undefined, ctx: SPCtx): boolean {
+  if (!atoms || !atoms.length) return true;
+  for (const at of atoms) {
+    if (at.r) {
+      const [k, cmp, thr = 0] = at.r;
+      const v = spNext(k);
+      if (cmp === 'eq' ? v !== thr : cmp === 'ne' ? v === thr : v < (thr ?? 0)) return false;
+    } else if (at.expert) {
+      if (!ctx.expert) return false;
+    } else if (at.hostile === 0) {
+      if (ctx.hostile) return false;
+    } else if (at.frozen === 0) {
+      if (ctx.frozen) return false;
     }
-    case 348:
-      p.buffs.apply(BuffType.Chilled, (Math.random() < 0.5 ? 300 : 600) / 60);
-      if (Math.random() < 2 / 3) {
-        const r = Math.random();
-        const t = r < 1 / 16 ? 60 : r < 1 / 12 ? 40 : r < 1 / 8 ? 20 : 0;
-        if (t > 0) p.buffs.apply(BuffType.Frozen, t / 60);
-      }
-      break;
-    case 349: {
-      const r = Math.random();
-      if (r < 1 / 3) p.buffs.apply(BuffType.Chilled, 600 / 60);
-      else if (r < 0.5) p.buffs.apply(BuffType.Chilled, 300 / 60);
-      break;
-    }
-    default:
-      break;
   }
+  return true;
+}
+
+/** 时长求值：常量=tick 数；{n:[a,b]}=Next(a,b)；{n,m:60}=60×Next(a,b)（含头不含尾） */
+function spDurTicks(d: SPLeaf['d']): number {
+  if (typeof d === 'number') return d;
+  const v = d.n[0] + Math.floor(Math.random() * (d.n[1] - d.n[0]));
+  return d.m ? d.m * v : v;
+}
+
+/** AST 求值：命中后按原版逐块顺序掷骰并 AddBuff(max 合并由 BuffState.apply 保证)。
+ *  未实装 buff（buffTypeByVanilla 查无）静默跳过——登记见 Buffs.ts 枚举注释 */
+function spEval(node: SPElem, ctx: SPCtx, buffs: BuffState): void {
+  if ('b' in node) {
+    // 叶子可带外层门(如 436 的 Next(5)>=2),门不过即整叶跳过
+    if (node.g && !spGateOk(node.g, ctx)) return;
+    const t = buffTypeByVanilla(node.b);
+    if (t === undefined) return;
+    buffs.apply(t, spDurTicks(node.d) / 60);
+    return;
+  }
+  if (node.g && !spGateOk(node.g, ctx)) {
+    if (node.e) spEval(node.e, ctx, buffs);
+    return;
+  }
+  if (node.i) {
+    for (const arm of node.i) {
+      if (spGateOk(arm.g, ctx)) { spEval(arm.t, ctx, buffs); return; }
+    }
+    if (node.e) spEval(node.e, ctx, buffs);
+    return;
+  }
+  if (node.a) {
+    for (const child of node.a) spEval(child, ctx, buffs);
+  }
+}
+
+/** 敌弹命中玩家 → debuff 结算（Projectile.StatusPlayer :11450-11722 全量,表驱动）。
+ *  hostile 缺省 true = Damage_EVP 调用点语义（:13708 门禁 hostile 弹才走到这里）；
+ *  爆炸/自伤路径（BombsHurtPlayers :13944-13983,无 hostile 门）应显式传弹体
+ *  实际 hostile 标志（如燃烧瓶族 399-402 的 !hostile 分支 :11591-11593）。 */
+export function statusPlayer(game: GameHooks, projId: number, hostile = true): void {
+  const p = game.player;
+  const node = SP_TABLE[String(projId)];
+  if (!node) return;
+  spEval(node, {
+    hostile,
+    expert: mainExpertMode(game.world),
+    frozen: p.buffs.has(BuffType.Frozen) || p.shimmering, // :9749 / :11382 双源
+  }, p.buffs);
 }

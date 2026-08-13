@@ -1,6 +1,7 @@
 // DOM overlay UI：主菜单 / HUD 快捷栏 / 背包+配饰栏 / 合成 / 宝箱 / Buff栏 / 暂停 / Tooltip / Toast
 import type { Game } from '../core/Game';
-import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
 import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
@@ -724,8 +725,17 @@ export class UI {
       e.stopPropagation();
       e.preventDefault();
       if (e.button === 2) {
-        // 右键（ItemSlot.RightClick :1496-1571）：装备物一键装备，否则拆 1 个到光标
+        // 右键（ItemSlot.RightClick :1496-1571）：开包物优先开包，装备物一键装备，否则拆半到光标
         const cur = this.slotContent(where, i);
+        // 开包门（:1514-1527）：context==0（背包格，含快捷栏）&& OpenableBag &&
+        // mouseItem 空或不可叠（!Item.CanStack）→ mouseRightRelease 边沿开包。
+        // DOM mousedown 即边沿；hit 须先于装备/拆半分支（原版同序 return）
+        if (cur && where === 'inv'
+          && (!this.heldStack || this.heldStack.id !== cur.id)
+          && OPENABLE_BAG_VIDS.has(vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? ''))) {
+          this.tryOpenContainer(cur, i);
+          return;
+        }
         if (!this.heldStack && cur && cur.stack === 1 && this.canSwapEquip(cur.id)) {
           this.swapEquipItem(cur, where, i);
           this.refreshAll();
@@ -933,6 +943,31 @@ export class UI {
     if (this.heldStack) this.heldStack.stack += cur.stack;
     else this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; // 保留词缀+实例样式
     this.refreshAll();
+  }
+
+  /** 右键开包（ItemSlot.TryOpenContainer :1642-1660 + Player.Open* 1:1）：
+   *  掷骰 → 产出入包（装不下落地 = GetOrDropItem :6813-6826 noGrabDelay 语义）→
+   *  stack-- → SoundEngine.PlaySound(7)（Sfx 'pickup' = Grab.wav）。宝藏袋族
+   *  （BOSS_BAG_IDS）走 Game 持用左键链，本方法回落 false 不动它 */
+  private tryOpenContainer(cur: { id: number; stack: number }, i: number): void {
+    const game = this.game;
+    const inv = game.player.inv;
+    const vid = vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '');
+    const px = game.player.cx, py = game.player.cy;
+    const opened = openBagItem(vid, (id, n) => {
+      const key = VANILLA_ITEM_KEY_BY_ID[id];
+      if (!key) return;                       // vanilla.json 缺条目防御（bagItemIdRegistered 可查）
+      const iid = ITEM_BY_KEY[key];
+      if (iid === undefined) return;
+      const left = inv.add(iid, n ?? 1);
+      if (left > 0) game.spawnDrop(px, py, key, left, 0, -2); // 溢出落地（:6817-6820）
+    }, { hardMode: !!game.world.flags.hardMode });            // OpenPresent :6654 硬模式门读档
+    if (opened) {
+      inv.removeAt(i, 1);                      // item.stack--（:1651-1655，归零由 Inventory 处理）
+      game.sfx.play('pickup', 1);              // PlaySound(7) = Grab（:1656）
+      game.cb.onInventoryChanged?.();          // 掉落物拾取链同款 UI 刷新
+      this.refreshAll();
+    }
   }
 
   /** 右键：拆半到光标 */

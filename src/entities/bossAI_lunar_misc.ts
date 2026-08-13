@@ -42,7 +42,7 @@ import type { Player } from './Player';
 import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { BuffType } from '../stats/Buffs';
 import { moveAndCollide } from '../physics/TileCollision';
-import { spawnPart, losClear } from './bossAI';
+import { spawnPart, losClear, enemySpawnChain, addEnemy } from './bossAI';
 import { Arrow } from './Arrow';
 import { projFrameImg } from './Arrow';
 import { Entity } from './Entity';
@@ -1609,6 +1609,176 @@ export function solarSlimeAI(e: Enemy, game: GameHooks, _player: Player | null) 
 /** 519 火尘首帧门(localAI[0] 复用) */
 function lai0Of(e: Enemy): number { return lunarLocalAI(e)[0]; }
 function setLai0(e: Enemy, v: number): void { lunarLocalAI(e)[0] = v; }
+
+// ---------------------------------------------------------------------------
+// AI_006 爬尾虫族 412/413/414（NPC.cs:51357-52671 的 412 专属段，1.4.5.6 1:1）
+//   头 412 首帧自建 30 段链（29×413 身 + 1×414 尾，:51764-51785 num35=30），
+//   全链 realLife=头（:51770/:51782——受击传导扣头 10000 总血，段不可单杀）；
+//   空泳追击环（flag3 恒 true :51955-51957）：玩家下方 15 格内有地面 → 目标改为
+//   地面上方 800px 悬停线，|dx|<500 时再沿速度向外推 ±600px 环绕（:52187-52196）；
+//   玩家悬空（下方无地）→ 直追且提速 10/0.3 → 14/0.5（:52197-52199）；
+//   速度带钳 [0.7n,1.3n]（:52209-52220）；同族头分离（:52225-52244，60/200 或
+//   400/1000）；段链收缩 linkDist = width+6（:52304-52306）；头火尘双粒（:52050-52067）。
+//   段完整性 + 414 红闪原版由各段独立跑 AI_006 承担；本仓段（wormBody）跳过 AI
+//   分发 → 头循环代行（:51807-51818 身/尾查前段 / :51850-51861 头/身查下段）。
+// ---------------------------------------------------------------------------
+
+/** 414 尾受击红闪一步（NPC.cs:52026-52047 纯函数化，仅 type 414）：
+ *  受击 → localAI[3]=3；localAI[2]>0 每 tick −16、过零翻 −128；负段 +16 回 0；
+ *  归零且 localAI[3]>0 → 重发 128 并消耗一发。渲染侧
+ *  Renderer.npcGlowCrawltipedeFlash 消费 e.lai2（n=trunc，负段 n=128+trunc，
+ *  RGB=(255-n,n,n)、A=255-n）——AI 侧必须按本节奏写 lai2，否则 Glow_159 红闪
+ *  永不触发。 */
+export function crawltipedeFlashStep(
+  lai2: number, lai3: number, justHit: boolean,
+): { lai2: number; lai3: number } {
+  if (justHit) lai3 = 3;                                              // :52028-52030 受击装填 3 发
+  if (lai2 > 0) {
+    lai2 -= 16;                                                       // :52031-52033 正段衰减
+    if (lai2 === 0) lai2 = -128;                                      // :52034-52036 过零翻转
+  } else if (lai2 < 0) {
+    lai2 += 16;                                                       // :52039-52041 负段回升
+  } else if (lai3 > 0) {
+    lai2 = 128;                                                       // :52042-52046 归零且有存货 → 重发
+    lai3 -= 1;
+  }
+  return { lai2, lai3 };
+}
+
+export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null): void {
+  if (!e.bInit) {
+    e.bInit = true;
+    // :51764-51785 头首帧建链：num35=30 段（末段 414，其余 413）
+    const segs = enemySpawnChain(e, 30);
+    e.realLifeHost = e;
+    for (const s of segs) { s.realLifeHost = e; addEnemy(game, s); }
+  }
+  const st = game.world.store;
+  // ---- 段完整性与 414 红闪（原版各段独立自查，头循环代行）----
+  if (!e.wormNext || e.wormNext.dead) { e.die(game); return; }        // :51850-51861 头下段失效自灭
+  for (let s = e.wormNext; s; s = s.wormNext) {
+    if (s.dead) continue;
+    const prevDead = !s.wormFollow || s.wormFollow.dead;              // :51807-51818（413/414）
+    const nextDead = s.vanillaId === 413 && (!s.wormNext || s.wormNext.dead); // :51850-51861（413）
+    if (prevDead || nextDead) { s.die(game); continue; }              // 同 tick 逐段级联
+    if (s.vanillaId === 414) {                                        // :52026-52047 尾段红闪
+      const f = crawltipedeFlashStep(s.lai2, s.lai3, s.justHit);
+      s.lai2 = f.lai2; s.lai3 = f.lai3;
+    }
+  }
+  // 无目标：缓漂（与 Enemy.wormAI 同近似，原版 TargetClosest 指向死亡槽位照飞）
+  if (!player) {
+    e.vx *= 0.97; e.vy *= 0.97;
+    e.x += e.vx; e.y += e.vy;
+    e.visAngle = Math.atan2(e.vy, e.vx) + Math.PI * 0.5;
+    return;
+  }
+  // ---- 头火尘双粒（:52050-52067：Center + (rotation−π/2)±8 ± rotation 向量×16，
+  //      位居舵机/rotation 赋值之前 → 读上一 tick 的 rotation，与本处取值一致）----
+  {
+    const fw = e.visAngle - Math.PI * 0.5;                            // (rotation − π/2).ToRotationVector2()
+    const mv = e.visAngle;                                            // rotation.ToRotationVector2()
+    game.spawnParticles(
+      e.cx + Math.cos(fw) * 8 + Math.cos(mv) * 16,
+      e.cy + Math.sin(fw) * 8 + Math.sin(mv) * 16,
+      '#FF9A3C', 1, 0.4, { life: 26, damp: 0.94 });
+    game.spawnParticles(
+      e.cx + Math.cos(fw) * 8 - Math.cos(mv) * 16,
+      e.cy + Math.sin(fw) * 8 - Math.sin(mv) * 16,
+      '#FF9A3C', 1, 0.4, { life: 26, damp: 0.94 });
+  }
+  // ---- 412 目标覆写（:52176-52285）----
+  let num46 = 10, num47 = 0.3;                                        // :52177-52178 基础速/加速
+  let tx = player.cx, ty = player.cy;                                 // num49/num50 初值（:52173-52175）
+  const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
+  let groundRow = -1;                                                 // num51：玩家下方首个实心行
+  let found = false;                                                  // WorldGen.SolidTile2（null→true）
+  for (let dx = -2; dx <= 2 && !found; dx++) {                        // :52182-52185 列 ±2 × 下 15 格
+    for (let dy = 0; dy <= 15; dy++) {
+      if (!st.inBounds(ptx + dx, pty + dy) || st.isSolid(ptx + dx, pty + dy)) {
+        groundRow = pty + dy;
+        found = true;
+        break;
+      }
+    }
+  }
+  let sepDist = 60, sepPush = 200;                                    // num60/num61（:52222-52223）
+  if (groundRow > 0) {
+    const hoverY = groundRow * TILE - 800;                            // :52189 num56 = num51×16 − 800
+    if (player.y > hoverY) {                                          // :52190 玩家顶低于悬停线
+      ty = hoverY;                                                    // :52192 目标改悬停线
+      if (Math.abs(e.cx - player.cx) < 500) {                         // :52193
+        tx = e.vx > 0 ? player.cx + 600 : player.cx - 600;            // :52194 沿速度向外推 600px 环绕
+      }
+    }
+    sepDist = 400; sepPush = 1000;                                    // :52224-52226 有地 → 分离加强
+  } else {
+    num46 = 14; num47 = 0.5;                                          // :52197-52199 玩家悬空 → 直追提速
+  }
+  // ---- 速度带钳 [0.7n, 1.3n]（:52209-52220，舵机前的存量速度）----
+  const spd = Math.hypot(e.vx, e.vy);
+  if (spd > 0) {
+    if (spd > num46 * 1.3) { e.vx = (e.vx / spd) * num46 * 1.3; e.vy = (e.vy / spd) * num46 * 1.3; }
+    else if (spd < num46 * 0.7) { e.vx = (e.vx / spd) * num46 * 0.7; e.vy = (e.vy / spd) * num46 * 0.7; }
+  }
+  // ---- 同族头分离（:52229-52244）：目标点沿远离方向推 sepPush ----
+  for (const o of enemies(game)) {
+    if (o === e || o.dead || o.vanillaId !== 412) continue;
+    const d = Math.hypot(o.cx - e.cx, o.cy - e.cy);
+    if (d > 0.01 && d < sepDist) {
+      tx -= ((o.cx - e.cx) / d) * sepPush;
+      ty -= ((o.cy - e.cy) / d) * sepPush;
+    }
+  }
+  // ---- 16px 量化（:52288-52294）----
+  const dxq = Math.floor(tx / TILE) * TILE - Math.floor(e.cx / TILE) * TILE;
+  const dyq = Math.floor(ty / TILE) * TILE - Math.floor(e.cy / TILE) * TILE;
+  // ---- 期望速度向量（:52390-52393 num68 = num46/num63）----
+  const dist = Math.hypot(dxq, dyq) || 1;
+  const ax = Math.abs(dxq), ay = Math.abs(dyq);                       // num66/num67
+  const wantX = (dxq / dist) * num46, wantY = (dyq / dist) * num46;
+  const step = num47;
+  // ---- 舵机（:52505-52577 的 !flag8 分支；flag8 仅 87/454/621 置位，412 恒 false）----
+  if ((e.vx > 0 && wantX > 0) || (e.vx < 0 && wantX < 0)
+    || (e.vy > 0 && wantY > 0) || (e.vy < 0 && wantY < 0)) {
+    if (e.vx < wantX) e.vx += step; else if (e.vx > wantX) e.vx -= step;
+    if (e.vy < wantY) e.vy += step; else if (e.vy > wantY) e.vy -= step;
+    if (Math.abs(wantY) < num46 * 0.2 && ((e.vx > 0 && wantX < 0) || (e.vx < 0 && wantX > 0))) {
+      if (e.vy > 0) e.vy += step * 2; else e.vy -= step * 2;
+    }
+    if (Math.abs(wantX) < num46 * 0.2 && ((e.vy > 0 && wantY < 0) || (e.vy < 0 && wantY > 0))) {
+      if (e.vx > 0) e.vx += step * 2; else e.vx -= step * 2;
+    }
+  } else if (ax > ay) {
+    if (e.vx < wantX) e.vx += step * 1.1; else if (e.vx > wantX) e.vx -= step * 1.1;
+    if (Math.abs(e.vx) + Math.abs(e.vy) < num46 * 0.5) {
+      if (e.vy > 0) e.vy += step; else e.vy -= step;
+    }
+  } else {
+    if (e.vy < wantY) e.vy += step * 1.1; else if (e.vy > wantY) e.vy -= step * 1.1;
+    if (Math.abs(e.vx) + Math.abs(e.vy) < num46 * 0.5) {
+      if (e.vx > 0) e.vx += step; else e.vx -= step;
+    }
+  }
+  e.facing = e.vx > 0 ? 1 : -1;
+  e.visAngle = Math.atan2(e.vy, e.vx) + Math.PI * 0.5;                // :52593-52595
+  // ---- 位移（noTileCollide 直积分）----
+  e.x += e.vx; e.y += e.vy;
+  // ---- 段链收缩跟随（:52266-52330，num64 = width+6）----
+  for (let s = e.wormNext; s && !s.dead; s = s.wormNext) {
+    const fx = s.wormFollow!;
+    const dxC = fx.cx - s.cx, dyC = fx.cy - s.cy;
+    const d = Math.hypot(dxC, dyC);
+    if (d > 0.01) {
+      const shrink = (d - (s.w + 6)) / d;                             // :52304-52306
+      s.x += dxC * shrink;
+      s.y += dyC * shrink;
+      s.visAngle = Math.atan2(dyC, dxC) + Math.PI * 0.5;              // :52303
+    }
+    s.facing = dxC < 0 ? 1 : -1;
+    s.vx = 0; s.vy = 0;                                               // :52312 velocity = Zero
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 环绕球投射物 539/574(Projectile.cs:5864-5878 SetDefaults + AI_102 :32040-32280)

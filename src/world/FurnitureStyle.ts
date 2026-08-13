@@ -51,3 +51,20 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     default: return [style * fw * 18, 0];
   }
 }
+
+/**
+ * 多格 framed 物件【单格】帧（= Game.tryPlace vanilla-style 分支与放置测试共用）：
+ *  样式基偏移（furnitureStyleBase）+ 格内 18px 列/行步长；旗帜 91 例外走
+ *  SceneMetrics 逆写（tryPlace 原内联逻辑逐字提取，行为不变）。
+ *  原版帧语义（TileObject.Place L74-102）：frameY 从顶行 0 向下递增，
+ *  dx/dy 为物件内偏移（dx=0,dy=0 即顶行锚格）
+ */
+export function framedCellFrame(sheet: number, fw: number, style: number, dx: number, dy: number): [number, number] {
+  if (sheet === 91) {
+    let row = 0;
+    while (row < 3 && (style + 21 - 111 * row) * 18 >= 1998) row++;
+    return [Math.max(0, (style + 21 - 111 * row) * 18), row * 54 + dy * 18];
+  }
+  const [bx, by] = furnitureStyleBase(sheet, style, fw);
+  return [bx + dx * 18, by + dy * 18];
+}

@@ -391,6 +391,62 @@
    "durMax": 120
   }
  ],
+ "390": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 120,
+   "durMax": 240
+  }
+ ],
+ "391": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 120,
+   "durMax": 240
+  }
+ ],
+ "392": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 120,
+   "durMax": 240
+  }
+ ],
+ "399": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "400": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "401": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "402": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
  "476": [
   {
    "buff": 151,
@@ -771,6 +827,30 @@
    "chance": 1,
    "durMin": 300,
    "durMax": 300
+  }
+ ],
+ "1107": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "1108": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "1109": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
   }
  ]
 }

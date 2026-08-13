@@ -17,7 +17,7 @@ import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
 import { TileStore } from '../TileStore';
 import { mainExpertMode } from '../../stats/ScaleStats';
-import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollLuck } from '../../stats/Luck';
+import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollBadLuck, rollLuck } from '../../stats/Luck';
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
 export interface LunarSpawnCtx {
@@ -322,12 +322,20 @@ export class VanillaSpawner {
   moonBossCap = false;
   /** 星璇塔 Zone 上下文（null=不在塔区）；invaders 语义（SetSpawnFlags :315-318）由此驱动 */
   lunar: LunarSpawnCtx | null = null;
+  /** tresspassingDualDungeon（NPC.cs:313）：getfixedboi 玩家置身双地牢不可破墙内
+   *  （Player.insideUnbreakableWalls）且 DangerousDungeonCurse 进度档 < 所在区档——
+   *  Game 侧比较后传入（Player.updateUnbreakableWallScan 维护扫描态） */
+  trespassDual = false;
+  /** BirthdayParty.PartyIsUp（Game 的 partyState 求值后传入——微光小动物链消费） */
+  partyUp = false;
   setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean,
     invaders = false, activeIds: Set<number> = new Set(),
     moonEvent: MoonEventSpawnCtx | null = null,
     lunar: LunarSpawnCtx | null = null,
     playerLifeMax = 0,
-    playerLuck = 0): void {
+    playerLuck = 0,
+    trespassDual = false,
+    partyUp = false): void {
     this.ZoneDungeon = zoneDungeon;
     this.downedBoss3 = downedSkeletron;
     this.invaders = invaders;
@@ -336,6 +344,8 @@ export class VanillaSpawner {
     this.lunar = lunar;
     this.playerLifeMax = playerLifeMax;
     this.playerLuck = playerLuck;
+    this.trespassDual = trespassDual;
+    this.partyUp = partyUp;
     // SetSpawnFlags :315-319：任一塔 Zone → invaders=true && ignoreSafeWalls=true
     // （Game 侧 lunar 仅在任一塔 Zone 时非 null → 直接等价）
     this.ignoreSafeWalls = lunar != null;
@@ -344,7 +354,21 @@ export class VanillaSpawner {
     this.moonBossCap = moonEvent != null && moonEvent.bossSlotSum >= 1 * MOON_BOSS_CAP_SLOTS;
   }
 
-  /** 天气注入（Game 每 15 tick 下发）：cloudAlpha（雨强度，雪原刷怪修正）与沙尘暴态（怪池） */
+  /** 天气注入（Game 每 15 tick 下发）：cloudAlpha（雨强度，雪原刷怪修正）与沙尘暴态（怪池）。
+   *
+   *  ★雨旗语义警示（2026-08-13 审计定案，勿改）：本文件十余处雨门读
+   *  `this.world.weather.raining`（= 原版 Main.raining 全局旗）是 **1:1**——
+   *  NPC.Spawner.SetSpawnFlags（NPC.cs:282）`raining = Main.raining`，刷怪链
+   *  全部雨门（:1865/:1939/:2289/:2381-2445/:4094/:4099…）读的都是这个全局位，
+   *  ★不读 player.ZoneRain。SceneMetrics.ZoneRain（= Main.raining &&
+   *  SurfaceAtmospherics，SceneMetrics.cs:700）带地表深度门，只供天气渲染/
+   *  环境音/流星（WorldGen.cs:71934）消费——把刷怪雨门改读 zoneRain 会让地下
+   *  玩家在雨天丢雨限定怪（冰雪高仑 243/雨云怪 250 等），属对原版的偏离。
+   *
+   *  反之 zoneSandstorm 必须走 SceneMetrics 派生位：NPC.cs:302
+   *  `ZoneSandstorm = player.ZoneSandstorm`（= ZoneDesert && SurfaceAtmospherics &&
+   *  Sandstorm.Happening，SceneMetrics.cs:701）——接线侧应传 scene.zoneSandstorm
+   *  （勿再用 zoneDesert && 浅于地表+30 的近似） */
   rainCloudAlpha = 0;
   sandstormHappening = false;
   zoneSandstorm = false;
@@ -663,11 +687,13 @@ export class VanillaSpawner {
    *  defaultSpawnRate=600 / defaultMaxSpawns=5（L6108/6110）。
    *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
    *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed 均已实现（:581-642）；
-   *  隐身/仙女倍率未实现（依赖 stealth/luck 子系统，登记 docs/spawn-parity-gaps.md）。
+   *  隐身（buff 10，药水 297）×1.2/×0.8 已接（:611-615）；渔夫套 ×1.3/×0.7 已接（:627-630）。
+   *  仙女 isNearFairy 倍率未实现（:653-656，依赖仙女随从实体），登记。
    *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似) */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
-    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false): { spawnRate: number; maxSpawns: number } {
+    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false,
+    invis = false, anglerSet = false): { spawnRate: number; maxSpawns: number } {
     // ZoneWaterCandle 先落字段（SetSpawnFlags L308 语义）：同一值既改刷怪率（:637/:650）
     // 也供 SpawnAnNPC 的 399/87/86 水蜡烛加重支——Game 每帧先 getSpawnRate 后 spawn
     this.zoneWaterCandle = waterCandle;
@@ -793,6 +819,11 @@ export class VanillaSpawner {
       if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.7);
       else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.9);
     }
+    // L611-615：隐身药水（buff 10）×1.2 / ×0.8
+    if (invis) {
+      spawnRate = Math.floor(spawnRate * 1.2);
+      maxSpawns = Math.floor(maxSpawns * 0.8);
+    }
     // L617-620：镇静药水（calmed）×1.65 / ×0.6
     if (calmed) {
       spawnRate = Math.floor(spawnRate * 1.65);
@@ -802,6 +833,11 @@ export class VanillaSpawner {
     if (sunflower) {
       spawnRate = Math.floor(spawnRate * 1.2);
       maxSpawns = Math.floor(maxSpawns * 0.8);
+    }
+    // L627-630：渔夫套装（anglerSetSpawnReduction）×1.3 / ×0.7
+    if (anglerSet) {
+      spawnRate = Math.floor(spawnRate * 1.3);
+      maxSpawns = Math.floor(maxSpawns * 0.7);
     }
     // L632-635：战斗药水（enemySpawns）×0.5 / ×2
     if (battle) {
@@ -1457,6 +1493,46 @@ export class VanillaSpawner {
       && rollBadLuckExtreme(this.playerLuck, 25, () => rng.next()) === 0 && !any(690)
       && this.isGoodPlaceForAStatueMimic()) {
       return D(690);
+    }
+    // ---- 双地牢越界（NPC.cs:1482-1494）：tresspassingDualDungeon &&
+    //      RollBadLuck(15)==0 → hardMode 82（地牢骷髅）：316（诅咒骷髅头）。
+    //      tresspassing = getfixedboi 玩家置身不可破墙内（Player.insideUnbreakableWalls，
+    //      UpdateUnbreakableWallScan 维护）且 DangerousDungeonCurse 进度档 < 所在区档
+    //      （DangerousDungeonCurse.cs 双表：needs=区档 Temple5/Hallow4/Dungeon3/
+    //      Jungle2/Evil1；can=进度档 downedMechAny|QueenSlime5/downedBoss3|hardMode4/
+    //      QueenBee3/downedBoss2 2/SlimeKing|Boss1 1）——Game 侧比较后传入 ----
+    if (this.trespassDual && rollBadLuck(this.playerLuck, 15, () => rng.next()) === 0) {
+      return D(this.hardMode ? 82 : 316);
+    }
+    // ---- 微光墙落脚小动物链（NPC.cs:1495-1560）：num=落脚上格墙；墙 244（Shimmer）
+    //      或 落脚格/上二格任一为 244 时走微光区小动物表。!remixWorld 门（:1495）。
+    //      goldCritterChance=400（NPC.cs:5976）；侏儒档 GetGnomeChance 基档 10
+    //      （:5281-5303；skyblock lowTiles 子档未建模备案，remix/2 被链首门短路） ----
+    if ((st.wall[st.idx(this.spawnTileX, this.spawnTileY - 1)] === 244
+      || st.wall[st.idx(this.spawnTileX, this.spawnTileY - 2)] === 244
+      || st.wall[st.idx(this.spawnTileX, this.spawnTileY)] === 244)
+      && !this.world.seedFlags?.remix) {
+      const gold = () => rollLuck(this.playerLuck, 400, () => rng.next()) === 0;
+      if (this.waterTile) return D(gold() ? 592 : 55);      // 金金鱼 / 金鱼
+      if (this.spawnTileY > this.world.groundLevel) {        // Main.worldSurface（地下）
+        if (N(3)) return D(gold() ? 447 : 300);              // 金蛙 / 蛙（Next(3)==0）
+        if (N(2)) return D(359);                             // 359（Next(2)==0）
+        if (gold()) return D(448);                           // 金鼠
+        if (!N(3)) return D(357);                            // 鼠（Next(3)!=0；1/3 轮落空）
+        return null;                                         // 原版地下链可无产出落出
+      }
+      if (rollLuck(this.playerLuck, 1 + 10 / 10, () => rng.next()) === 0) {
+        const g = D(624);                                    // 侏儒：timeLeft×10（:1533）
+        if (g) g.despawnTimer *= 10;
+        return g;
+      }
+      if (gold()) return D(443);                             // 金鸟
+      if (gold()) return D(539);                             // 金松鼠
+      if (this.world.clock.halloween && !N(3)) return D(303); // 万圣黑猫
+      if (this.world.clock.xMas && !N(3)) return D(337);     // 圣诞节日小动物
+      if (this.partyUp && !N(3)) return D(540);              // 派对小动物
+      if (N(3)) return D(rng.next() < 0.5 ? 299 : 538);      // 鸟/松鼠 SelectRandom
+      return D(46);                                          // 兔
     }
     // ---- 酒保（L1565-1568）：!savedBartender && DD2Event.ReadyToFindBartender
     //      （= NPC.downedBoss2，DD2Event.cs:87——世吞/克脑已败）&& !AnyNPCs(579) &&

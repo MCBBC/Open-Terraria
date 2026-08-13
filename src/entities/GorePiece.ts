@@ -21,6 +21,9 @@
 //   出生：Gore.NewGore（:1306-1482）——vy -= rand(10,31)*0.1 / vx += rand(-20,21)*0.1
 //   随机扰动（:1347-1348）、ChildSafety 替换（:1339-1345）、粘滞/时档（:1361-1374）、
 //   600 槽池（:1328-1340）。
+//   屏幕坐标档（screenGrid）：肉山死亡屏幕级尘幕（NPC.cs:88307-88327）——位置依赖
+//   Main.screenPosition（相机态），提取器编译为结构化网格域，运行时以
+//   setGoreScreen 注入的相机快照求值（玩家深度门 playerDeepHell 同源）。
 //   落叶(SpecialAI 3)/滴水族不出自 HitEffect，由 render/NatureParticles 独占。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
@@ -103,6 +106,23 @@ export function goreNetModeValue(): number {
   return goreNetMode;
 }
 
+/**
+ * Main.screenPosition / screenWidth / screenHeight 相机快照——屏幕坐标档表项
+ * （screenGrid，WoF 死亡屏幕级尘幕 NPC.cs:88307-88327）的唯一位置源。Game 每帧
+ * 相机定位后注入；未注入（菜单/纯逻辑测试）= null → 该档表项静默跳过。
+ * 语义：x/y = 视区左上角世界坐标（Main.screenPosition），w/h = 画布像素尺寸
+ * （Main.screenWidth/Height——原版以屏宽当日幕纵向跨度，怪癖在求值侧照搬）。
+ */
+let goreScreen: { x: number; y: number; w: number; h: number } | null = null;
+let goreScreenSet = false;
+export function setGoreScreen(x: number, y: number, w: number, h: number): void {
+  goreScreen = { x, y, w, h };
+  goreScreenSet = true;
+}
+export function goreScreenValue(): { x: number; y: number; w: number; h: number } | null {
+  return goreScreenSet ? goreScreen : null;
+}
+
 /** vanilla-gore.json 表项（字段语义见提取器 _meta.notes） */
 export interface GoreGate {
   k: 'alt' | 'sdir' | 'dmg' | 'shim' | 'net' | 'rnd' | 'redhat' | 'skip';
@@ -130,6 +150,32 @@ export type GorePostOp =
   | ['al', number | 'npc']
   | ['ro', number]
   | ['ps', Record<string, unknown>];
+
+/** 屏幕锚定网格尘幕域（WoF NPC.cs:88307-88327，提取器 compileScreenGrid 产物）：
+ *  外层 y 自 (int)Main.screenPosition.Y 起、步 yStep、跨度 ySpan（原版拿屏宽当
+ *  纵向跨度的怪癖）；内层 x 自 (int)npc.position.X（direction>0 时 +dirShift）起、
+ *  宽 xSpan、步 xStep。每格一枚 gore（id/速度逐格重采样）。 */
+export interface GoreScreenGrid {
+  yStep: number;
+  ySpan: 'screenWidth';
+  xSpan: number;
+  xStep: number;
+  /** direction>0 时 x0 偏移（:88310-88313 -= 80） */
+  dirShift?: number;
+  /** 深度门（:88303）：玩家 tileY > maxTilesY − gateTiles 才出 */
+  gate?: 'playerDeepHell';
+  gateTiles?: number;
+}
+
+/** 屏幕坐标档求值输入（spawnNpcDeathGore 自动组装；直调 spawnDeathGore 的测试可省略） */
+export interface GoreSpawnCtx {
+  /** 相机快照（setGoreScreen 注入；null = 未注入 → screenGrid 档跳过） */
+  screen: { x: number; y: number; w: number; h: number } | null;
+  /** 玩家 tileY（playerDeepHell 门；NPC.position.Y/16） */
+  playerTileY?: number;
+  /** maxTilesY（world.store.h） */
+  maxTilesY?: number;
+}
 
 export interface GoreSpawnEntry {
   id?: number | null;
@@ -163,6 +209,8 @@ export interface GoreSpawnEntry {
   /** Unit 轴 × 系数再按 NPC rotation 旋转（(-UnitY*50).RotatedBy(rotation) 等） */
   rot?: GoreRotTerm[];
   scale?: number; scaleExpr?: string;
+  /** 屏幕锚定网格域（Position 依赖 Main.screenPosition 的编译产物；与 pos 互斥） */
+  screenGrid?: GoreScreenGrid;
   /** 未编译的原文（登记用） */
   posExpr?: string; velExpr?: string; expr?: string;
   /** 原版 ai[N]==V 门（不满足跳过该条） */
@@ -647,14 +695,48 @@ function applyPost(g: GorePiece, e: GoreSpawnEntry, s: GoreNpcSource): void {
   (g as unknown as { resizeBox(): void }).resizeBox();
 }
 
-/** 按表炸出某 NPC 的全部死亡 gore；add = 实体入桶回调。返回生成数 */
-export function spawnDeathGore(s: GoreNpcSource, add: (p: GorePiece) => void): number {
+/** 屏幕锚定网格尘幕（NPC.cs:88307-88327 两层循环 1:1）：
+ *  外层 y 自屏顶世界坐标起、步 yStep、纵向跨度 = 屏宽（原版怪癖）；内层 x 自
+ *  npc 位（direction>0 时 +dirShift）起、宽 xSpan、步 xStep。逐格采样 id/速度。 */
+function spawnScreenGridGore(e: GoreSpawnEntry, s: GoreNpcSource,
+  add: (p: GorePiece) => void, ctx?: GoreSpawnCtx): number {
+  const g = e.screenGrid;
+  if (!g) return 0;
+  const scr = ctx?.screen ?? null;
+  if (!scr) return 0;                          // 相机快照未注入（菜单/纯逻辑测试）→ 静默跳过
+  if (g.gate === 'playerDeepHell') {           // :88303 玩家深于 maxTilesY-250
+    const pt = ctx?.playerTileY, mt = ctx?.maxTilesY;
+    if (pt == null || mt == null || !(pt > mt - (g.gateTiles ?? 250))) return 0;
+  }
+  let x0 = Math.trunc(s.x);                    // :88309 (int)position.X
+  if ((s.direction ?? s.spriteDirection ?? 1) > 0 && g.dirShift) x0 += g.dirShift;  // :88310-88313
+  const y0 = Math.trunc(scr.y);                // :88307 (int)Main.screenPosition.Y
+  const ySpan = g.ySpan === 'screenWidth' ? scr.w : scr.h;
+  const scale = e.scale ?? (e.scaleExpr === 'scale' ? s.vanillaScale : 1);
+  let n = 0;
+  for (let y = y0; y < y0 + ySpan; y += g.yStep) {
+    for (let x = x0; x < x0 + g.xSpan; x += g.xStep) {
+      const type = entryId(e, s);
+      if (type == null || type < 0) continue;
+      const vel = entryVel(e, s);
+      const piece = GorePiece.newGore(type, x, y, vel.vx, vel.vy, scale, !!e.perfect);
+      if (piece) { applyPost(piece, e, s); add(piece); n++; }
+    }
+  }
+  return n;
+}
+
+/** 按表炸出某 NPC 的全部死亡 gore；add = 实体入桶回调。ctx = 屏幕坐标档求值输入
+ *  （spawnNpcDeathGore 自动组装；直调本函数的测试无 screenGrid 档时可省略） */
+export function spawnDeathGore(s: GoreNpcSource, add: (p: GorePiece) => void,
+  ctx?: GoreSpawnCtx): number {
   if (s.vanillaId == null) return 0;
   const list = deathGoreFor(s.vanillaId);
   let n = 0;
   for (const e of list) {
     if (!aiGateOk(e, s)) continue;
     if (!goreGatesOk(e, s)) continue;
+    if (e.screenGrid) { n += spawnScreenGridGore(e, s, add, ctx); continue; }
     const times = e.loop ?? 1;
     for (let k = 0; k < times; k++) {
       const type = entryId(e, s);
@@ -687,5 +769,11 @@ export function spawnNpcDeathGore(
     direction: npc.direction ?? spriteDirection ?? npc.spriteDirection ?? 1,
     dmg: npc.dmg ?? 9999,
   };
-  return spawnDeathGore(src, (p) => add.add!(p, 'props'));
+  // 屏幕坐标档（screenGrid）求值输入：相机快照 + 深度门读数
+  const ctx: GoreSpawnCtx = {
+    screen: goreScreenValue(),
+    playerTileY: game.player ? game.player.y / 16 : undefined,
+    maxTilesY: game.world?.store?.h,
+  };
+  return spawnDeathGore(src, (p) => add.add!(p, 'props'), ctx);
 }

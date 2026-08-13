@@ -924,6 +924,21 @@ export const TILE_KEY_BY_SHEET = new Map<number, string>();
   }
 }
 
+// ===================== 开门砍切白名单（原版 OpenDoor cs:37698-37724 1:1） =====================
+// 侧列仅许 tileCut / 165 洞穴装饰 / IsADripTile，其余实心才拒绝开门；可砍格随后碎掉。
+// Main.tileCut 全表 38 项（Main.cs:7312-7754）；IsADripTile（TileID.cs:157）。
+// Game.ts 另有 TILE_CUT_VANILLA 同表副本（挥击消费）——改此表须两处同步，待其战区安静后合并。
+export const TILE_CUT_SHEETS = new Set<number>([
+  654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655,
+  71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485,
+]);
+const DOOR_SMASH_SHEETS = new Set<number>([165, 373, 374, 375, 461, 709]);
+/** 内部 tile id → 开门时是否可砍切放行（原版 OpenDoor 侧列判定） */
+export function doorSmashable(internalId: number): boolean {
+  const sh = TILE_DEFS[internalId]?.vanilla?.sheet ?? -1;
+  return TILE_CUT_SHEETS.has(sh) || DOOR_SMASH_SHEETS.has(sh);
+}
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });

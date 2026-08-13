@@ -4150,7 +4150,7 @@ void DgLayout(int steps)
         dgBounds.Upd(dgPosX, dgPosY);
         steps--;
         if (roomDelay > 0) roomDelay--;
-        if (roomDelay == 0 && (int)r.Next(3) == 0)
+        if ((roomDelay == 0) & ((int)r.Next(3) == 0))   /* 1456 LegacyDungeonLayoutProvider.cs:61: 非短路and, roomDelay>0 照耗一骰 */
         {
             roomDelay = 5;
             if ((int)r.Next(2) == 0)

@@ -755,6 +755,22 @@ function placeChests(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, r
 // ---------- pass 主体 ----------
 /** 地下小屋 pass(UndergroundHousesAndBuriedChests 的 CaveHouse 段,cs:17153-17192
  *  + 沙漠追加段 cs:17193-17219) */
+/** pass 59 头四计数连掷(cs:17081-17084,序=CaveHouse→Underworld→CaveChest→
+ *  AdditionalDesert)——本仓 pass 拆分后各消费 pass 流位分散,由本函数在管线中
+ *  第一个消费 pass 之前统一预掷暂存 gs(WorldGen.ts 接线)。四枚均为
+ *  WorldGenRange.GetRandom(WorldGenRange.cs:34-57:先缩放边界再截断):
+ *  CaveHouse/CaveChest=35-40×WorldArea、Underworld=10-15×WorldWidth/4200、
+ *  AdditionalDesert=2-2×WorldArea(恒掷一骰)。幂等:已预掷(≥0)直接返回。 */
+export function rollHouseChestCounts(st: TileStore, rng: RNG, gs: GenState): void {
+  if (gs.caveHouseCount >= 0) return;
+  const area = (st.w * st.h) / 5040000;
+  const wsc = st.w / 4200;
+  gs.caveHouseCount = rng.int(Math.trunc(35 * area), Math.trunc(40 * area));
+  gs.underworldChestCount = rng.int(Math.trunc(10 * wsc), Math.trunc(15 * wsc));
+  gs.caveChestCount = rng.int(Math.trunc(35 * area), Math.trunc(40 * area));
+  gs.desertHouseCount = rng.int(Math.trunc(2 * area), Math.trunc(2 * area));
+}
+
 export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w, h } = st;
   // CaveHouseCount 35-40 × WorldArea/5040000(Configuration.json)。WorldGenRange.
@@ -762,14 +778,14 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
   // ScaleValue(:42-57)先按面积缩放边界再 (int) 截断——即
   // Next((int)(35*s), (int)(40*s)+1)。旧实现"先掷后乘 + Math.round",分布不同(C10)。
   // 另:原版 pass 头连掷四枚(cs:17081-17084:CaveHouseCount→UnderworldChestCount→
-  // CaveChestCount→AdditionalDesertHouseCount);本仓拆分后 UnderworldChestCount/
-  // CaveChestCount 归 BuriedChestsPass 侧掷(runBuriedChestsPass/runUnderworldChestsPass,
-  // WorldGen.ts:711/:785),此处只掷本 pass 拥有的两枚,勿在此重复掷。
+  // CaveChestCount→AdditionalDesertHouseCount);由 rollHouseChestCounts 在管线里
+  // **先于**本 pass 统一预掷(WorldGen.ts 接线),本 pass 只消费 gs 暂存值
+  // (探针直调未预掷时回退自掷)。
   const s = (w * h) / 5040000;
-  const count = rng.int(Math.trunc(35 * s), Math.trunc(40 * s));
+  const count = gs.caveHouseCount >= 0 ? gs.caveHouseCount : rng.int(Math.trunc(35 * s), Math.trunc(40 * s));
   // 第 4 个 WorldGenRange：AdditionalDesertHouseCount（2-2 × WorldArea，
   // Configuration.json）——GetRandom 恒消费一次 Next（cs:17084）
-  const desertHouses = rng.int(2, 2);
+  const desertHouses = gs.desertHouseCount >= 0 ? gs.desertHouseCount : rng.int(2, 2);
   let bastCount = 0;        // GenVars.extraBastStatueCount
   // extraBastStatueCountMax(WorldGen.cs:11490-11499)= 2+尺寸档:大(≥8400)+2、
   // 中(≥6400)+1、小 +0——旧实现硬编码 2,仅小世界正确(C7)

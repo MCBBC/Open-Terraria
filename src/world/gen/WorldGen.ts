@@ -318,7 +318,7 @@ import { runHellFortPass } from './vanilla/HellFortPass';
 import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
 import { runStatuesPass } from './vanilla/StatuesPass';
 import { runJungleShrinePass, runJungleChestsPass } from './vanilla/JungleShrinePass';
-import { runCaveHousesPass } from './vanilla/CaveHousePass';
+import { runCaveHousesPass, rollHouseChestCounts } from './vanilla/CaveHousePass';
 import { runOceanCavesPass, runUnderwaterChestsPass } from './vanilla/OceanCavesPass';
 import { runHellforgesPass } from './vanilla/HellforgesPass';
 import { runCorruptionPass, runAltarsPass } from './vanilla/CorruptionPass';
@@ -707,6 +707,11 @@ function vanillaStructures({ store, rng, world }: GenCtx) {
   runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
   const shrineSpots = runJungleShrinePass(store, rng, gs);  // 丛林神龛(壳+腔+火把+金字塔顶)
   runStatuesPass(store, rng, gs);                           // 雕像 73 序+陷阱雕像接线
+  // ★pass 59 头四计数连掷(cs:17081-17084:CaveHouse→Underworld→CaveChest→
+  //  AdditionalDesert)——pass 拆分后各消费 pass 流位分散,统一在此(第一个消费
+  //  pass 之前)预掷暂存 gs;此前 CaveChest→CaveHouse→AdditionalDesert 逐段自掷,
+  //  序与流位均偏
+  rollHouseChestCounts(store, rng, gs);
   runBuriedChestsPass(store, rng, gs, world.chests); // Buried Chests(洞穴金/冰箱/沙箱;地狱箱已拆到地狱箱 pass)
   runCaveHousesPass(store, rng, gs, world.chests);   // 地下小屋七主题(木/冰/丛林/沙/花岗岩/大理石/蘑菇)
   runSurfaceChestsPass(store, rng, gs, world.chests); // Surface Chests(地表木箱;只放一次——曾双调致密度翻倍)

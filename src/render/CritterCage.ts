@@ -18,16 +18,31 @@
 //   (族,样式,槽位) 种子化的确定性 RNG 复刻同一状态机（联机/测试可重放），转移结构
 //   （段帧域/持帧时长/概率分支/回卷）与原版逐行对应。
 // GAP 登记：
-//   ① 放置链：原版无"捕获"机制——笼=普通家具放置（Player.cs PlaceThing_Tiles →
-//      TileObject.CanPlace/Place），物种身份 = tile type 本身（每物种独立 tile id），
-//      placeStyle 恒 0，frameX/frameY 只存物体列/行偏移（TileObjectData.cs:2690-2710
-//      Style6x3/Style3x2），动画纯渲染侧。本仓 tryPlace 的 vanilla-style 通用分支
-//      （Game.ts:7347-7352）已能正确放置——缺的是笼族物品的 tile: 链接（items.ts
-//      归属，~85 条 vi_ 条目待补）；1.4.5 通用笼 tile 724（TECritterAnchor
-//      TileEntity 存物品 id，Item.cs:47613-47626）需 TileEntity 系统另立项。
+//   ① 放置链（已闭环）：原版无"捕获"机制——笼=普通家具放置（Player.cs
+//      PlaceThing_Tiles → TileObject.CanPlace/Place），物种身份 = tile type 本身
+//      （每物种独立 tile id），placeStyle 恒 0，frameX/frameY 只存物体列/行偏移
+//      （TileObjectData.cs:2690-2710 Style6x3/Style3x2 + :3658-3710 Style2x2 罐缸族），
+//      动画纯渲染侧。笼/缸物品 tile: 链接 92 条全量已接（items.ts CAGE_ITEM_SHEET
+//      表，Item.cs createTile 赋值段提取 + TEdit items.json createTile 列 92/92
+//      交叉吻合；itemfunc 只覆盖 5 条直赋），放置走 tryPlace vanilla-style 通用
+//      分支（单格帧合成 = world/FurnitureStyle.ts framedCellFrame）。
+//      ★注意：坊间"空笼右键野生小动物入笼"机制不存在于原版——笼由捕获小动物
+//      物品 + 玻璃水族箱合成（Recipe 链），放置前物种身份已在物品侧确定。
 //   ② Main.squirrelCageFrameOrange（Main.cs:13692-13825）有独立状态机但
 //      TileDrawing 全部 10 张松鼠笼（276/413/414/606-612）只读 squirrelCageFrame
 //      （TileDrawing.cs:5793-5803）——Orange 机无消费方，不实装。
+//   ③ tile 724 CritterAnchor（1.4.4+ 捕获小动物锚桩）放置链已接、拴绳本体未实装：
+//      原版 = DefaultToCapturedCritter（Item.cs:47613-47626，93 件 createTile=724 +
+//      makeNPC）右键放置（ItemID.Sets.PlaceTileOnAltUse ItemID.cs:155；左键 = 放生
+//      ItemCheck_ReleaseCritter Player.cs:43377）→ TECritterAnchor（TileEntity）存
+//      物品 id → LeashedEntity 系统在锚桩周遭生成拴绳小动物（Main.cs:17895
+//      UpdateEntities / :22163 DrawEntities；LeashedCritter + 20 个 *LeashedCritter
+//      AI 类，anchorStyle 0-4 = 放置帧档）。本仓等价：93 件物品 → tile 724 +
+//      placeStyle=anchorStyle（items.ts CRITTER_ANCHOR_* 表）；TE 存储以
+//      world/FurnitureItems.ts 'critter_anchor' 单槽记录近似（随世界存档持久化），
+//      放置/破坏链见 Game.ts tryPlace/breakTile 专用分支；【未实装】= 拴绳小动物
+//      实体（游走 AI + 绳索绘制）——全量需 LeashedEntity.Registry + 逐族 AI，
+//      另立项。
 import { tileAnim } from './TileAnim';
 
 /** Main.cageFrames（Main.cs:1499）：每族 25 个独立槽位帧态 */

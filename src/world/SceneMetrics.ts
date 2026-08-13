@@ -1,6 +1,6 @@
 // 原版环境判定（SceneMetrics.cs 1:1 精简核）：
 // 玩家中心 169×124 tile 采样计数（ZoneScanSize = 1920/16+49 × 120/16+49, SceneMetrics.cs:12-16）
-// → 阈值聚合（L24-64/L603-670）→ Zone 标志（CalculateZones L673-697）。
+// → 阈值聚合（L24-64/L603-670）→ Zone 标志（CalculateZones L673-708）。
 // BGM 选择链(Music.ts)与群系背景(BiomeBackground)共用本份结果。
 import { TILE_DEFS } from '../data/tiles';
 import type { World } from './World';
@@ -53,6 +53,12 @@ const MUSHROOM_THRESHOLD = 100;
 const METEOR_THRESHOLD = 75;
 const DUNGEON_THRESHOLD = 250;
 const GRAVEYARD_THRESHOLD = 28;
+/** ShimmerTileThreshold（SceneMetrics.cs:21 =300）：EnoughTilesForShimmer（:252）=
+ *  窗口内非实心格微光液计数 ≥300 → ZoneShimmer 三条件之一（:707）。
+ *  注意传送塔微光门读的是 EnoughTilesForShimmer 本身（TeleportPylonsSystem.cs:308），
+ *  与 ZoneShimmer（另需深度带+非地牢）不同——TeleportPylons.ts 现读 shimmerTileCount
+ *  即此语义，勿改成 zoneShimmer */
+const SHIMMER_TILE_THRESHOLD = 300;
 /** GraveyardTileMin（SceneMetrics.cs:62 =16）：不做 Zone 判定（阈值是 28）——只驱动
  *  HasSunflower 压制门（:628-631）与视觉强度分级下界（SceneState.UpdateGraveyard :415-418
  *  GetLerpValue(16,36,count)，消费端 Game.updateWeather 已按 16/36 字面实现） */
@@ -128,9 +134,29 @@ export interface SceneFlags {
   behindBackwall: boolean;
   /** ShimmerTileCount（cs:601 = _liquidCounts[Shimmer]）：窗口内非实心格的微光
    *  液格数（ScanTiles cs:361-366 只在 !active() 格计液）→ EnoughTilesForShimmer
-   *  ≥300 → ZoneShimmer（cs:708，另需 worldSurface+84<Y<maxTilesY-396 且非地牢）。
-   *  消费：TeleportPylons 微光传送塔、BGM。ZoneShimmer 位本仓未派生（登记） */
+   *  ≥300 → ZoneShimmer（cs:707，另需 worldSurface+84<Y<maxTilesY-396 且非地牢）。
+   *  消费：TeleportPylons 微光传送塔（EnoughTilesForShimmer 直读，勿混用 zoneShimmer）、BGM */
   shimmerTileCount: number;
+  /** SurfaceAtmospherics（cs:695 = WorldGen.IsSurfaceForAtmospherics :10991-11001）：
+   *  普通世界 = 玩家 tileY ≤ worldSurface（地表及以上）；remix 世界 = rockLayer <
+   *  tileY < maxTilesY-350，且 remix+ZoneDungeon 时强制 false（:697-699）。
+   *  消费：Main.cs:11508 风声轨门 / :12972 地表雪粒子门（渲染侧，接线清单） */
+  surfaceAtmospherics: boolean;
+  /** ZoneRain（cs:700 = Main.raining && SurfaceAtmospherics；:703-705 ZoneSandstorm
+   *  成立时强制 false）。地下玩家此位恒 false——天气渲染/环境音消费，刷怪侧
+   *  ★不读此位（NPC.Spawner.SetSpawnFlags NPC.cs:282 的 raining = Main.raining
+   *  全局旗，VanillaSpawner 直读 weather.raining 即 1:1，勿改） */
+  zoneRain: boolean;
+  /** ZoneSandstorm（cs:701 = ZoneDesert && SurfaceAtmospherics && Sandstorm.Happening）。
+   *  消费：SceneState.cs:104 沙漠风声门（接线清单） */
+  zoneSandstorm: boolean;
+  /** UndergroundForShimmering（cs:706 = worldSurface+84 < tileY < maxTilesY-396）——
+   *  ZoneShimmer 的深度带条件，独立位照抄 */
+  undergroundForShimmering: boolean;
+  /** ZoneShimmer（cs:707 = EnoughTilesForShimmer && UndergroundForShimmering &&
+   *  !ZoneDungeon）。消费：Player.cs:16557 → 玩家微光区行为（入水判定 :39584 等）、
+   *  BGM/图鉴上下文（接线清单） */
+  zoneShimmer: boolean;
   /** HoneyBlockCount（cs:601 = _tileCounts[229]）：消费 SceneState 蜂蜜块环境光效（登记） */
   honeyBlockCount: number;
   /** PartyMonolithCount（cs:621 = _tileCounts[455]）：消费生日派对视觉（登记） */
@@ -156,6 +182,8 @@ export const EMPTY_SCENE: SceneFlags = {
   hasSunflower: false,
   zoneGranite: false, zoneMarble: false, zoneHive: false, zoneGemCave: false,
   behindBackwall: false, shimmerTileCount: 0, honeyBlockCount: 0, partyMonolithCount: 0,
+  surfaceAtmospherics: false, zoneRain: false, zoneSandstorm: false,
+  undergroundForShimmering: false, zoneShimmer: false,
   bestOreSheet: -1, bestOreX: 0, bestOreY: 0,
 };
 
@@ -306,6 +334,23 @@ export function scanScene(
   const oceanTop = (worldSurface + rockLevel) / 2 + 40;
   const zoneBeach = tileY <= oceanTop && (tileX < BEACH_DISTANCE || tileX > w - BEACH_DISTANCE);
 
+  // ---- 天气/微光三件套（CalculateZones cs:695-708 1:1，2026-08-13 派生）----
+  // SurfaceAtmospherics（cs:695 = WorldGen.IsSurfaceForAtmospherics WorldGen.cs:10991-11001）：
+  // remix 世界 rockLayer < y < maxTilesY-350；普通世界 y ≤ worldSurface（地表及以上）。
+  // cs:697-699：remix && ZoneDungeon → 强制 false
+  const remixWorld = !!world.seedFlags?.remix;
+  const surfaceAtmospherics = (remixWorld && zoneDungeon)
+    ? false
+    : (remixWorld ? (tileY > rockLevel && tileY < h - 350) : tileY <= worldSurface);
+  // cs:700-705：ZoneRain = Main.raining && SurfaceAtmospherics；ZoneSandstorm =
+  // ZoneDesert && SurfaceAtmospherics && Sandstorm.Happening，成立时 ZoneRain 置 false
+  const zoneSandstorm = zoneDesert && surfaceAtmospherics && !!world.weather.sandstorm.happening;
+  const zoneRain = world.weather.raining && surfaceAtmospherics && !zoneSandstorm;
+  // cs:706-707：深度带 worldSurface+84 < y < maxTilesY-396（严格不等，无取整）；
+  // ZoneShimmer = EnoughTilesForShimmer && UndergroundForShimmering && !ZoneDungeon
+  const undergroundForShimmering = tileY > worldSurface + 84 && tileY < h - 396;
+  const zoneShimmer = shimmerTileCount >= SHIMMER_TILE_THRESHOLD && undergroundForShimmering && !zoneDungeon;
+
   return {
     tileX, tileY,
     belowSurface,
@@ -346,6 +391,11 @@ export function scanScene(
     zoneGemCave,
     behindBackwall,
     shimmerTileCount,
+    surfaceAtmospherics,
+    zoneRain,
+    zoneSandstorm,
+    undergroundForShimmering,
+    zoneShimmer,
     honeyBlockCount,
     partyMonolithCount,
     bestOreSheet: bestOreS, bestOreX: bestOrePx, bestOreY: bestOrePy,

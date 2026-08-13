@@ -4,6 +4,7 @@ import { Entity } from './Entity';
 import { hitPlayer, playEnemyHitSound, projOverlap, tryReflectProjectile } from './projTargets';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';
+import { prefetchProjectiles } from './Arrow';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -104,6 +105,21 @@ const TRAP_SHOT_STYLE: Record<string, {
   // ai[0] 1..10 → 2 尘 + 1/5 gore，ai[0]>10 → Kill
   toiletPop: { w: 2, h: 2, color: '#8AC7F0', grav: 0, life: 3600, invisible: true },
 };
+
+/** 电路机关弹幕全族预热(2026-08-13,用户问"电路触发有没有风险"):机关弹幕全部
+ *  固定枚举(TRAP_SHOT_STYLE 表驱动,22 张),进图预热后机关首次触发零兜底窗口
+ *  ( TrapShot.draw 走 ensureVImage,未预热时首次触发有 ~百ms 色块兜底) */
+export function prefetchTrapProjectiles(): void {
+  const ids: number[] = [];
+  for (const s of Object.values(TRAP_SHOT_STYLE)) {
+    for (const f of [s.proj, ...(s.projs ?? [])]) {
+      if (!f) continue;
+      const m = /Projectile_(\d+)\.png$/.exec(f);
+      if (m) ids.push(parseInt(m[1], 10));
+    }
+  }
+  prefetchProjectiles(ids);
+}
 
 /** TrapShot 弹种（DeviceCtx.shootProjectile kind 共用） */
 export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt'

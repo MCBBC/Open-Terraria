@@ -57,6 +57,11 @@ export interface WeatherCtx {
   /** 玩家在雪原带（SceneMetrics.ZoneSnow，SceneMetrics.cs:682）——暴风雪双轨门
    *  （SceneState.cs:101 flag = ZoneRain && ZoneSnow）；缺省 false */
   zoneSnow?: boolean;
+  /** SceneMetrics.ZoneRain（SceneMetrics.cs:700 = Main.raining && SurfaceAtmospherics；
+   *  cs:703-705 ZoneSandstorm 成立时置 false）——暴风雪双轨门的雨半边（SceneState.cs:102
+   *  flag = ZoneRain && ZoneSnow）。地下玩家恒 false → 暴风雪环境音静默。
+   *  缺省 undefined 时回退 this.raining（= 接线前的旧行为，露天近似） */
+  zoneRain?: boolean;
   /** 玩家在背景墙后（SceneMetrics.BehindBackwall，:671 wall>0）——室外强度
    *  outsideWeatherEffectIntensity 门（:190-191 向 1.1/-0.1 以 0.005/tick 逼近）；
    *  缺省 false（露天） */
@@ -337,9 +342,10 @@ export class WeatherState {
     // 室外强度（SceneState.cs:190-191）：露天 1.1 / 墙内 -0.1，0.005/tick 逼近后钳 0-1
     this.outsideWeatherEffect = Math.max(0, Math.min(1,
       WeatherState.moveTowards(this.outsideWeatherEffect, ctx.behindBackwall ? -0.1 : 1.1, 0.005 * dayRate)));
-    // 暴风雪轨渐入（SceneState.cs:252）：flag = ZoneRain && ZoneSnow（:101）→ ±0.01/tick
-    // ZoneRain = Main.raining && SurfaceAtmospherics（SceneMetrics.cs:700）——atmo≈1 的露天近似
-    const blizzard = this.raining && (ctx.zoneSnow ?? false);
+    // 暴风雪轨渐入（SceneState.cs:252）：flag = ZoneRain && ZoneSnow（:101-102）→ ±0.01/tick
+    // ZoneRain = Main.raining && SurfaceAtmospherics（SceneMetrics.cs:700）——ctx.zoneRain
+    // 由 SceneMetrics 派生（接线清单）；缺省回退 this.raining（旧露天近似）
+    const blizzard = (ctx.zoneRain ?? this.raining) && (ctx.zoneSnow ?? false);
     this.blizzardSoundVolume = WeatherState.moveTowards(
       this.blizzardSoundVolume, blizzard ? 1 : 0, 0.01 * dayRate);
     ctx.onAmbience?.(this.loopVolumes(ctx.atmo));

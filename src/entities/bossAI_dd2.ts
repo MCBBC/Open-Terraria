@@ -99,6 +99,12 @@ import { GDL } from '../stats/ScaleStats';
 const localAI = new WeakMap<Enemy, number[]>();
 /** 491 渲染帧源（localAI[3] 0..63 循环，:40971-40974）——渲染侧只读访问 */
 export const dutchmanAnim = (e: Enemy): number => localAI.get(e)?.[3] ?? 0;
+/** 568/569 枯萎兽渲染态只读（渲染侧不落 localAI 字段 → 同 dutchmanAnim 出口）：
+ *  [0]=localAI[0] 灵气计数（死亡紫魂环驱动，Main.cs:26130 num322；
+ *  AI_107 灵气态每 tick +1，cs:63882）/ [1]=localAI[3] 出生计数（出生紫雾门，
+ *  Main.cs:25899，AI_107 出膛渐显 0→60） */
+export const witherBeastLocal = (e: Enemy): [number, number] =>
+  [localAI.get(e)?.[0] ?? 0, localAI.get(e)?.[3] ?? 0];
 
 export const dd2LocalAI = (e: Enemy): number[] => {
   let a = localAI.get(e);

@@ -47,6 +47,7 @@ export interface AccFx {
   jumpSpd?: number;      // jumpSpeedBoost（蛙腿族 +1.6）
   longInvince?: number;  // 无敌帧翻倍（十字项链/星星面纱）
   treasureMagnet?: number; // 宝藏磁石：拾取范围 +
+  magmaStone?: number;     // 岩浆石 1322/火焰护手 1343：近战命中点燃（:14764/:14787-14790）
   goldRing?: number;     // 金戒指族：钱币拾取范围
   luckyCoin?: number;    // 幸运币：近战命中掉钱
   discount?: number;     // 折扣卡：商店/重铸 8 折

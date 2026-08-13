@@ -676,35 +676,74 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       if (st.type[i] === SAND && (!s1 || !s2)) st.type[i] = HARDSAND;
     }
   }
-  // 第二遍：396 顶部装饰（485/751/484/165/187，DesertHive.cs:466-496）——原版
-  // PlaceTile forced 放置，此前只消耗掷骰不落格（纯视觉缺失）。锚点/帧布局金标
-  // 实证（12345世界.wld）：2x2 物件底行贴 396 顶（485 fx=style*36、751/484 fx=0），
-  // 187 横排 style*54（fx 756/774/792 = style14 三列）；165 金标只见倒挂形
-  //（fy=0 在顶行，贴 396 下方），地面形帧分支原版有随机帧此处近似固定帧。
+  // 第二遍：396 顶部装饰（485/751/484/165/187，DesertHive.cs:466-496）。
+  // ★forced 只放行 PlaceTile 入口门（EmptyTile），各放置函数仍带自有门禁——
+  // 此前两侧均无条件落格且锚点列偏 1，2026-08-13 新骰值下对拍出 13988 格分叉。
+  // 1456 派发链（PlaceTile :59366）逐项对齐：
+  //   485 → PlaceObject（TileObjectData.cs:3511：Origin(0,1)/2x2/SolidTile 双底锚/
+  //         RandomStyleRange=4）→ 占 (px..px+1)×(py-2..py-1)；CanPlace 先掷 1×Next(4)
+  //         （genRand≡Main.rand，WorldGen.cs:4391——RandomStyleRange>0 成败都掷），
+  //         门禁=放置区 4 格全空且无液体（LavaPlacement 默认 NotAllowed，
+  //         TileObjectData.cs:1768）+(px,py)/(px+1,py) 双底锚实心。
+  //   751/484 → Place2x2（WorldGen.cs:51352）：先 x--/y-- 再写 → 占
+  //         (px-1..px)×(py-2..py-1)；门禁=2x2 区全空+(px-1,py)/(px,py) 双底实心。
+  //   187 → Place3x2（WorldGen.cs:52097）：占 (px-1..px+1)×(py-2..py-1)；门禁=
+  //         3x2 区全空+三列底实心+底非 Boulders（:39005，TileID.cs:195）。
+  //   165 → PlaceTight（placeTight 1:1，Next(2)+Next(3) 恒掷）。
+  // 注：SolidTile2/blockType()==0 的 slope==0 半砖位以"坡度不建模"近似（与既有
+  // SmoothSlope 哈希无关省略同源约定）；tileTable 区内无表类省略。
   const T485 = TILE_BY_KEY['v_485_antlion_larva']!;
   const T751 = TILE_BY_KEY['v_751_sleeping_digtoise']!;
   const T484 = TILE_BY_KEY['v_484_rolling_cactus']!;
   const T187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
-  /** Place2x2 语义（WorldGen.cs:51431-51445）：锚=**右下格**——先 x--/y-- 再写，
-   *  占 (ax-1..ax)×(ay-1..ay)，frameX=列*18，frameY=style*36+行*18（行 0=顶行）。
-   *  曾自制"底行锚向上展开"按左上原点落格 → 整件右移一列且顶/底帧颠倒 */
+  const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+  const freeAt = (x: number, y: number) => inW(x, y) && st.flags[st.idx(x, y)] === 0;
+  const dryAt = (x: number, y: number) => inW(x, y) && st.liquid[st.idx(x, y)] === 0;
+  /** Place2x2（WorldGen.cs:51352-51445）1:1：锚=右下格，先 x--/y-- 再写，
+   *  占 (ax-1..ax)×(ay-1..ay)；门禁=2x2 区全空+双底列 nactive&&(solid||tileTable) */
   const place2x2 = (ax: number, ay: number, tile: number, style: number) => {
+    if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return;   // 原版 x<5||x>max-5
+    for (let k = 0; k < 2; k++) {
+      for (let l = 0; l < 2; l++) if (!freeAt(ax - 1 + k, ay - 1 + l)) return;
+      if (!solidAt(ax - 1 + k, ay + 1)) return;                 // 底列逐列核
+    }
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) {
-        const cx = ax - 1 + k, cy = ay - 1 + l;
-        if (!st.inBounds(cx, cy)) return;
-        st.setTileSilent(cx, cy, tile, k * 18, style * 36 + l * 18);
+        st.setTileSilent(ax - 1 + k, ay - 1 + l, tile, k * 18, style * 36 + l * 18);
       }
     }
   };
-  /** Place3x2 语义（WorldGen.cs:52196-52240）：列 ax-1..ax+1，行 ay-1(帧 0)/ay(帧 18)，
-   *  frameX=style*54+列*18（flag 单行分支不适用 187 沙漠锚） */
+  /** Place3x2（WorldGen.cs:52097-52240）1:1：占 (ax-1..ax+1)×(ay-1..ay)；
+   *  flag2 门禁=3x2 区全空+三列底 SolidTile2+187 专属底 Boulders 禁——任一失败整组不放 */
   const place3x2 = (ax: number, ay: number, tile: number, style: number) => {
+    if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return;
+    for (let k = -1; k <= 1; k++) {
+      if (!freeAt(ax + k, ay - 1) || !freeAt(ax + k, ay)) return;
+      const bi = st.idx(ax + k, ay + 1);
+      if (st.flags[bi] && BOULDERS.has(st.type[bi]!)) return;    // InvalidTileForPiles
+      if (!solidAt(ax + k, ay + 1)) return;
+    }
     for (let k = 0; k < 3; k++) {
       for (let l = 0; l < 2; l++) {
-        const cx = ax - 1 + k, cy = ay - 1 + l;
-        if (!st.inBounds(cx, cy)) return;
-        st.setTileSilent(cx, cy, tile, style * 54 + k * 18, l * 18);
+        st.setTileSilent(ax - 1 + k, ay - 1 + l, tile, style * 54 + k * 18, l * 18);
+      }
+    }
+  };
+  /** PlaceObject→TileObjectData[485] 1:1：Origin(0,1) → 占 (ax..ax+1)×(ay-1..ay)。
+   *  CanPlace 先掷 1×Next(4)（RandomStyleRange=4，成败都掷）；门禁=4 格全空且无
+   *  液体+双底锚 active&&solid（FlattenAnchors=false→blockType()==0 坡度近似为平） */
+  const place485 = (ax: number, ay: number, style: number) => {
+    rng.int(0, 3);                            // CanPlace 的 RandomStyleRange 掷
+    if (ax < 5 || ax + 2 > W - 5 || ay - 1 < 5 || ay + 1 > H - 5) return;
+    for (let k = 0; k < 2; k++) {
+      for (let l = 0; l < 2; l++) {
+        if (!freeAt(ax + k, ay - 1 + l) || !dryAt(ax + k, ay - 1 + l)) return;
+      }
+    }
+    if (!solidAt(ax, ay + 1) || !solidAt(ax + 1, ay + 1)) return;
+    for (let k = 0; k < 2; k++) {
+      for (let l = 0; l < 2; l++) {
+        st.setTileSilent(ax + k, ay - 1 + l, T485, k * 18, style * 36 + l * 18);
       }
     }
   };
@@ -727,17 +766,16 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       if (flag && rng.int(0, 19) === 0) {      // Next(20)==0 → 485/751
         const style = rng.int(0, 3);           // style = Next(4)
         if (rng.int(0, 29) === 0) place2x2(px, py - 1, T751, 0);        // Next(30)==0 → 751
-        else place2x2(px, py - 1, T485, style);
+        else place485(px, py - 1, style);      // 485：PlaceObject 链（含 RandomStyleRange 掷）
       } else if (flag && rng.int(0, 4) === 0) {          // 484
         place2x2(px, py - 1, T484, 0);
       } else if ((flag !== flag2) && rng.int(0, 4) === 0) {
         // 165 冰凌（DesertHive.cs:491 → WorldGen.PlaceTile(165) → PlaceTight）：
-        // 改走 placeTight（ShimmerPass 1:1 完整移植）——按邻接材质分派（396/397 →
-        // 沙岩列 378+var*18）并输出正确帧序（倒挂 0/18、地面 36/54、单格 72/90）。
-        // ★旧实现误用 placeDeco（底锚上行帧分配）：倒挂形帧行颠倒（尖上座下+4px 缝）
-        // 且冰列 fx=0 画进地下沙漠（沙岩区出蓝冰锥）。锚点 = py+(flag?-1:+1)（:491）
+        // placeTight（ShimmerPass 1:1）按邻接材质分派（396/397 → 沙岩列 378+var*18），
+        // 帧序倒挂 0/18、地面 36/54、单格 72/90（地面形顶格列=x 勿偏）。
+        // 锚点 = py+(flag?-1:+1)（:491）
         placeTight(st, rng, px, py + (flag ? -1 : 1));
-      } else if (flag && rng.int(0, 4) === 0) {          // 187：style 29+Next(6)（此前漏掷）
+      } else if (flag && rng.int(0, 4) === 0) {          // 187：style 29+Next(6)
         place3x2(px, py - 1, T187, 29 + rng.int(0, 5));
       }
     }

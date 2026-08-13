@@ -31,6 +31,7 @@ import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
 import { TRACK_SHEET } from '../data/grappleHooks';
 import { canHitLine } from '../physics/LineOfSight';
 import { TownShot } from './TownShot';
+import { hslToRgb } from '../player/Appearance';
 import {
   MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind,
 } from './Mounts';
@@ -46,6 +47,48 @@ const SAND_FLOOR_IDS = new Set<number>([
   'v_402_hallow_hardened_sand_block', 'v_400_corrupt_sandstone_block',
   'v_401_crimson_sandstone_block', 'v_403_hallow_sandstone_block',
 ].map((k) => TILE_BY_KEY[k] ?? 0).filter((id) => id > 0));
+
+/** 十字章免疫族：物品 id → 免疫的 vanilla buff id 列表
+ *  （Player.cs:14911-15003 buffImmune 逐件赋值全表）。
+ *  885 抛光剂→30 流血 / 886 维生素→36 破甲 / 887 牛黄→20 中毒 / 888 创可贴→22 沉默 /
+ *  889 快速时钟→32 缓慢 / 890 三折地图→35 蛛网 / 891 眼罩→23 黑暗 / 892 护腕→33 虚弱 /
+ *  893 药用绷带→31 困惑 / 3781 袖珍镜→156 石化 / 901 反诅咒→33+36 / 902 扩音器→30+20 /
+ *  903 计划→32+31 / 904 十字章护身符→35+23+22 / 5354 反光墨镜→22+156 /
+ *  1921 暖手宝→46+47 冰寒冰冻 / 1612 十字章盾→十项全免 / 1613 十字章守护→46+十项 */
+const IMMUNE_ACC: Record<number, number[]> = {
+  885: [30], 886: [36], 887: [20], 888: [22],
+  889: [32], 890: [35], 891: [23], 892: [33], 893: [31],
+  3781: [156],
+  901: [33, 36], 902: [30, 20], 903: [32, 31], 904: [35, 23, 22],
+  5354: [22, 156], 1921: [46, 47],
+  1612: [33, 36, 30, 20, 32, 31, 35, 23, 22, 156],
+  1613: [46, 33, 36, 30, 20, 32, 31, 35, 23, 22, 156],
+};
+
+/** UnbreakableWallScan.InsideUnbreakableWalls（UnbreakableWallScan.cs:47-66）：
+ *  8 向射线各 250 格，遇墙 350（UnbreakableBlockWall，双地牢不可破墙）记方向位；
+ *  随后 8 次环形移位检查——任一次低 5 位全零即 false（≈5 个连续方向命中才算
+ *  被墙包围）。★LineScan 的 `wallColor()>=16` 门（双地牢按进度分层涂色）本仓
+ *  未建模 → 墙 350 即命中（备案：分层色阶不区分，越界判定略偏宽，外部
+ *  DangerousDungeonCurse 进度档比较仍完整把关） */
+function insideUnbreakableWallsScan(st: import('../world/TileStore').TileStore, px: number, py: number): boolean {
+  const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+  let num = 0;
+  for (let i = 0; i < 8; i++) {
+    let x = px, y = py, n = 0, hit = false;
+    while (n < 250) {                                   // ScanDistance :19
+      if (x < 0 || y < 0 || x >= st.w || y >= st.h) { hit = false; break; }
+      if (st.wall[st.idx(x, y)] === 350) { hit = true; break; }
+      n++; x += dirs[i][0]; y += dirs[i][1];
+    }
+    if (hit) num |= 1 << i;
+  }
+  for (let j = 0; j < 8; j++) {
+    if ((num & 0x1F) === 0) return false;
+    num = ((num << 1) & 0xFF) | (num >> 7);
+  }
+  return true;
+}
 
 export class Player extends Entity {
   w = 20; h = 42;        // 原版 Player 构造(Player.cs:55083-55084 width=20 height=42;
@@ -272,8 +315,28 @@ export class Player extends Entity {
   private prevDown = false;
   private downTapT = 0;
   private sharpenedCd = 0;
-  /** BOC 受击脉冲（fixedUpdate 消费：buff 321 + 困惑近敌） */
+  /** BOC 受击脉冲（fixedUpdate 内消费：buff 321 + 困惑近敌） */
   bocPulse = 0;
+  /** 原版 Player.insideUnbreakableWalls（Player.cs:2678；UpdateUnbreakableWallScan
+   *  :28125-28141 更新）：getfixedboi 双地牢不可破墙内的越界判定——刷怪链
+   *  tresspassingDualDungeon（NPC.cs:313）消费。普通世界恒 false */
+  insideUnbreakableWalls = false;
+  private uwScanCd = 0;
+  private uwScanX = 0;
+  private uwScanY = 0;
+  /** UpdateUnbreakableWallScan（Player.cs:28125-28141）：Main.dualDungeonsSeed 门
+   *  （getfixedboi）+ 20t 冷却/256px 移动重扫；扫描=UnbreakableWallScan.cs。
+   *  Game 刷怪周期调用（内部冷却幂等） */
+  updateUnbreakableWallScan(world: import('../world/World').World, force = false): void {
+    if (!world.seedFlags?.everything) return;   // Main.dualDungeonsSeed（:28127-28129）
+    if (force || --this.uwScanCd <= 0
+      || Math.hypot(this.cx - this.uwScanX, this.cy - this.uwScanY) >= 256) {
+      this.insideUnbreakableWalls = insideUnbreakableWallsScan(
+        world.store, Math.floor(this.cx / 16), Math.floor(this.cy / 16));
+      this.uwScanCd = 20;                       // UnbreakableWallRescanPeriod :2970
+      this.uwScanX = this.cx; this.uwScanY = this.cy;
+    }
+  }
   /** 睡眠（PlayerSleepingHelper SH:155-191：脚侧悬停右键入睡；床失效/移动输入/挥武器唤醒。
    *  ★受伤不唤醒（StopSleeping 全调用点仅 5 处，SH:98-131）。睡熟阈值 120t（SH:11） */
   sleeping = false;
@@ -352,6 +415,7 @@ export class Player extends Entity {
     rocketBoots: number; autoJump: boolean; fireWalk: boolean;
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
     frostBurn: boolean;   // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
+    anglerSetSpawnReduction: boolean;   // 渔夫套：生成环 ×1.3/×0.7（NPC.cs:627-630）
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
     jumpOpts: string[];
     wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
@@ -361,6 +425,7 @@ export class Player extends Entity {
     infoAccs: InfoAccGates;  // 信息饰品门禁(DrawInfoAccs)
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
+    magmaStone: boolean;   // 近战命中点燃（岩浆石/火焰护手；StatusNPC:10866/Player.cs:6184）
     quiver: boolean;
     moltenQuiver: boolean;
     arrowStack: number;      // 箭袋 additiveStack（仅箭，:14785）
@@ -416,6 +481,8 @@ export class Player extends Entity {
     let extraFall = 0, lavaMax = 0, armorPen = 0, rocketBoots = 0;
     let autoJump = false, fireWalk = false, noKnockback = false, noFallDmg = false;
     let frostBurn = false; // 冰霜盔甲 46 套装引擎
+    let anglerSetSpawnReduction = false;   // Player.anglerSetSpawnReduction（:2672）
+    const immuneBuffs = new Set<number>(); // Player.buffImmune（十字章族装备扫描累积）
     let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
     const jumpSet = new Set<string>();
     let wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
@@ -433,6 +500,7 @@ export class Player extends Entity {
   const infoAccs: InfoAccGates = emptyInfoAccGates(); // 信息饰品门禁(RefreshInfoAccs :12198)
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false, autoReuseGlove = false;
+    let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
@@ -453,6 +521,9 @@ export class Player extends Entity {
         fish += 10;
         bobberOverride = Math.max(bobberOverride, 986 + (accVid - 5139));
       }
+      // 十字章免疫族（Player.cs:14911-15003 buffImmune 逐件赋值——vanilla buff id）
+      const immune = IMMUNE_ACC[accVid];
+      if (immune) immune.forEach((b) => immuneBuffs.add(b));
       // 信息饰品门禁(Player.cs:12486 UpdateEquips→RefreshInfoAccsFromItemType)
       if (accVid > 0) refreshInfoAccsFromItemType(infoAccs, accVid);
       // 翅膀（Item.wingSlot>0 → WingStatsInitializer 全字段；多翅膀取首个）
@@ -518,6 +589,7 @@ export class Player extends Entity {
         if (fx.kbGlove) kbGlove = true;
         if (fx.autoReuseGlove) autoReuseGlove = true;   // 力量手套族：近战自动连挥
         if (fx.yoyoString) yoyoString = true;
+        if (fx.magmaStone) magmaStone = true;   // 岩浆石 1322/火焰护手 1343（:14764/:14787-14790）
         if (fx.tileSpeed) tileSpeed = true;
         if (fx.wallSpeed) wallSpeed = true;
         if (fx.tileRange) tileRange = true;
@@ -640,6 +712,7 @@ export class Player extends Entity {
       if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
       if (sb.fireWalk) fireWalk = true;
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
+      if (sb.anglerSet) anglerSetSpawnReduction = true;   // 渔夫套生成环（NPC.cs:627-630）
       if (sb.ammoCost80) ammoSave = true;
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     manaCostMul *= setManaCostMul;   // DD2 散件魔耗乘区并入(2026-08-13)
@@ -673,6 +746,7 @@ export class Player extends Entity {
       extraFall, lavaMax, armorPen, rocketBoots,
       autoJump, fireWalk, noKnockback, noFallDmg, desertBoots,
       frostBurn,
+      anglerSetSpawnReduction,   // 渔夫套生成环（NPC.cs:627-630）
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
@@ -680,7 +754,7 @@ export class Player extends Entity {
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
-      arrowDmg, ammoSave, kbGlove, autoReuseGlove, yoyoString,
+      arrowDmg, ammoSave, kbGlove, autoReuseGlove, yoyoString, magmaStone,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
@@ -700,6 +774,15 @@ export class Player extends Entity {
       summonSet,
       divingHelm, merman, arcticDivingGear, jellyfishGlow,
     };
+    // buffImmune 刷新（Player.cs:14911-15003 装备段 + :9576-9578 黑曜石皮 buff 段；
+    // buff 103 水行族授予的 24/323/67 依赖 103 buff 跟踪，登记）。空集路径 O(1) 清零
+    const immuneDirty = immuneBuffs.size > 0
+      || this.buffs.immuneVanilla.size > 0
+      || this.buffs.has(BuffType.ObsidianSkin);
+    if (immuneDirty) {
+      this.buffs.immuneVanilla = new Set(immuneBuffs);
+      if (this.buffs.has(BuffType.ObsidianSkin)) this.buffs.immuneVanilla.add(24);   // :9577
+    }
   }
   get maxHp(): number {
     // 生命力药水（Lifeforce :9883）：statLifeMax2 += statLifeMax/5/20*20 → +20%（按 20 取整）
@@ -908,9 +991,21 @@ export class Player extends Entity {
     const world = game.world;
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
+    this.oldX = this.x; this.oldY = this.y;   // oldPosition（尘埃 customData 跟随差值）
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
     this.miscCounter++;
+    // AdvancedShadows 历史环（翅膀 45 彩虹拖尾；尾插保持 ≤31）
+    this.advancedShadows.push({ x: this.x, y: this.y });
+    if (this.advancedShadows.length > 31) this.advancedShadows.shift();
+    // itemFlame（LegacyPlayerRenderer :493-502：仅翅膀 22 在用时每 5t 重掷）
+    if (this.equipStats.wing?.logic === 22 && --this.itemFlameCount <= 0) {
+      this.itemFlameCount = 5;
+      for (let i = 0; i < 7; i++) {
+        this.itemFlamePos[i].x = ((Math.random() * 21 | 0) - 10) * 0.15;   // Next(-10,11)×0.15
+        this.itemFlamePos[i].y = ((Math.random() * 10 | 0) - 10) * 0.35;   // Next(-10,1)×0.35
+      }
+    }
 
     // 调试无敌（F2）：每 tick 血蓝回满——兜住 DoT/溺水/摔落等直改 hp 的路径
     // （战斗伤害已由 damage() 早退拦截）；同时保证不会走到下方 hp<=0 死亡结算
@@ -919,7 +1014,10 @@ export class Player extends Entity {
       this.mana = this.maxMana;
     }
 
-    // Buff tick：自然回复 / 环境 DoT（负值=持续伤害,原版 lifeRegen 路径:无视防御与无敌帧）
+    // Buff tick：自然回复 / 环境 DoT（负值=持续伤害,原版 lifeRegen 路径:无视防御与无敌帧）。
+    // 感电移动惩罚开关先行写入（Player.cs:18900 controlLeft||controlRight）——inputX
+    // 已由 Game.fixedUpdate 注入（Game.ts:2890 → :2931），此处读到的即本帧输入
+    this.buffs.electrifiedMoving = this.inputX !== 0;
     const buffHeal = this.buffs.tick(dt);
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
     else if (buffHeal < 0 && this.hp > 0) {
@@ -1697,6 +1795,8 @@ export class Player extends Entity {
         });
         this.wingFrame = this.wingFrameScratch.frame;
         this.wingFrameCounter = this.wingFrameScratch.counter;
+        // 翅膀尘埃/音效（WingAirVisuals :30284 + WingFrame 各分支尘 + 滑翔尘 :26914+）
+        this.wingFx(game, wings, wingsLogic, flying, glide, !!this.wingFrameScratch.justSwitched);
       }
       // ---- 冲刺 1:1（DashMovement :20769-21265 + DoCommonDashHandle :21267-21323）----
       // 1=忍者足具/水晶刺客（纯位移） 2=克苏鲁护盾（冲撞 30+反弹）。
@@ -2424,9 +2524,12 @@ export class Player extends Entity {
       if (this.damage(dmg, wall.cx, wall.cy)) {
         game.playSfx('hurt');
         game.addDamageNumber(this.cx, this.y, this.damagePreview(dmg), false, '#FF5050');
-        // :22005 noKnockback=false——舌击无视钴盾族免击退，沿墙推进方向弹开
-        this.vx = (wall.facing >= 0 ? 1 : -1) * 3.4;
-        this.vy = -3;
+        // :22005 noKnockback=false——舌击无视钴盾族免击退，沿墙推进方向弹开。
+        // 原版走 Hurt(hitDirection=墙 direction)（:22007）→ 击退段 = 固定
+        // velocity.X = 4.5×direction / velocity.Y = -3.5（Player.cs:37910-37912）
+        this.vx = (wall.facing >= 0 ? 1 : -1) * 4.5;
+        this.vy = -3.5;
+        this.fallStartY = this.y;   // fallStart 重置（:37912 同段）
       }
     }
     // :22009-22012 未 gross 且身处地狱带（>h-250 格）且在墙嘴 ±MaxWorldViewSize.X
@@ -2533,6 +2636,305 @@ export class Player extends Entity {
    *  其余按翼型参数表（num 恒减/num2 下落减速/num5 上升微推/num4 jumpSpeed 区间
    *  系数/num3 上升帽系数），上升帽 = -jumpSpeed×num3（1.5~4.5 按翼型）；
    *  hover 下落无左右移时 wingTime 消耗减半（×0.5） */
+  /** 翅膀喷尘/喷射音（WingAirVisuals :30284-30547 + WingFrame 各分支尘 :29031+/
+   *  :29337+/:29845+/:29730+/:30025+ + 滑翔段尘 :26914+/:26958+ + 47/49/50 三函数
+   *  :30063-30270）。原版 Main.rand.Next(a,b)=[a,b)；本批 Dust 池缺省（无 Game）
+   *  时静默跳过。 */
+  private wingFx(game: GameHooks, wings: number, wingsLogic: number,
+    flying: boolean, glide: boolean, justSwitched: boolean): void {
+    const D = game.vanillaDust;
+    const dir = this.facing;
+    const cx = this.cx, top = this.y, half = this.h / 2;
+    const cxOff = (back: number, front: number) => cx + (dir === 1 ? back : front);
+    const Next = (a: number, b: number) => a + (Math.random() * (b - a) | 0);
+    const dirF = () => Math.random() * 2 - 1;   // NextFloatDirection
+    const airOk = this.vy !== 0 && !this.ridingMount
+      && !this.grappleProjs.some((g) => g.latched)
+      && !(this.inWater && !!this.equipStats.flipper);   // ShouldDrawWings :30271
+    const mk = (x: number, y: number, w: number, h: number, type: number,
+      alpha = 0, scale = 1, color: import('../fx/VanillaDust').DustColor | null = null,
+      vx = 0, vy = 0) => D ? D.spawn(x, y, w, h, type, vx, vy, alpha, color, scale) : null;
+
+    // ---- WingAirVisuals（flag19 时每 tick；:30284-30547）----
+    if (flying) {
+      if (wings === 10 && Next(0, 2) === 0) {
+        const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 76, 50, 0.6);
+        if (d) { d.fadeIn = 1.1; d.noGravity = true; d.noLight = true; d.vx *= 0.3; d.vy *= 0.3; }
+      }
+      if (wings === 34 && Next(0, 2) === 0) {
+        const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 261, 50, 0.6);
+        if (d) { d.fadeIn = 1.1; d.noGravity = true; d.noLight = true; d.noLightEmittance = wingsLogic !== wings; d.vx *= 0.3; d.vy *= 0.3; }
+      }
+      if (wings === 51 && Next(0, 2) === 0) {
+        const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 261, 50, 0.6, { r: 230, g: 130, b: 55, a: 255 });
+        if (d) { d.fadeIn = 1.1; d.noGravity = true; d.noLight = true; d.noLightEmittance = wingsLogic !== wings; d.vx *= 0.3; d.vy *= 0.3; }
+      }
+      if (wings === 9 && Next(0, 2) === 0) {
+        const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 6, 200, 2);
+        if (d) { d.noGravity = true; d.vx *= 0.3; d.vy *= 0.3; }
+      }
+      if (wings === 6 && Next(0, 4) === 0) {   // :30343-30351（落体尘）
+        const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 55, 200);
+        if (d) { d.vx *= 0.3; d.vy *= 0.3; }
+      }
+      if (wings === 5 && Next(0, 3) === 0) {   // :30364-30371
+        const d = mk(cx + (dir === 1 ? -30 : 6), top, 18, this.h, 58, 255, 1.2);
+        if (d) { d.vx *= 0.3; d.vy *= 0.3; }
+      }
+      if (wings === 26) {                       // :30374-30400（每 tick 主尘 + 1/2 副尘）
+        let d = mk(cx + (dir === 1 ? -30 : 6), top, 18, this.h, 217, 100, 1.4);
+        if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx; d.vy = d.vy / 4 - this.vy; }
+        if (Next(0, 2) === 0) {
+          d = mk(cx + (dir === 1 ? 12 : -24), top, 12, this.h / 2, 217, 100, 1.4);
+          if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx; d.vy = d.vy / 4 - this.vy; }
+        }
+      }
+      if (wings === 37) {                       // :30409-30452
+        let d = mk(cx + (dir === 1 ? -30 : 6), top, 24, this.h, 31, 100);
+        if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx / 2; d.vy = d.vy / 4 - this.vy / 2; }
+        if (Next(0, 3) === 0) {
+          d = mk(cx + (dir === 1 ? 12 : -24), top, 16, this.h / 2, 31, 100);
+          if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx / 2; d.vy = d.vy / 4 - this.vy / 2; }
+        }
+      }
+      if (wings === 29 && Next(0, 3) === 0) {   // :30454-30467
+        const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 6, 100, 2.4);
+        if (d) { d.noGravity = true; d.vx *= 0.3; d.vy *= 0.3; if (Next(0, 10) === 0) d.fadeIn = 2; }
+      }
+      if (wings === 31) {                       // :30469-30546（86/240 四门）
+        if (Next(0, 6) === 0) {
+          const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 86);
+          if (d) { d.noGravity = true; d.fadeIn = 1.2; d.vx *= 0.2; d.vy *= 0.2; d.noLight = true; }
+        }
+        if (Next(0, 3) === 0) {
+          const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 240, 200, 1.2);
+          if (d) { d.noGravity = true; d.vx *= 0.2; d.vy *= 0.2; }
+        }
+        if (Next(0, 2) === 0) {
+          if (Next(0, 6) === 0) {
+            const d = mk(cx + (dir === 1 ? 12 : -24), top, 12, this.h / 2, 86);
+            if (d) { d.noGravity = true; d.fadeIn = 1.2; d.vx *= 0.2; d.vy *= 0.2; d.noLight = true; }
+          }
+          if (Next(0, 3) === 0) {
+            const d = mk(cx + (dir === 1 ? 12 : -24), top, 12, this.h / 2, 240, 200, 1.2);
+            if (d) { d.noGravity = true; d.vx *= 0.2; d.vy *= 0.2; }
+          }
+        }
+      }
+    }
+
+    // ---- Wings 4 妖精翅喷射（:29031-29086，分支内每 tick）----
+    if (wings === 4 && (flying || this.jumpHold > 0)) {
+      if (--this.rocketDelay2 <= 0) {
+        game.playSfxAt?.('rocketJet', this.x, this.y);
+        this.rocketDelay2 = 60;
+      }
+      const num = this.inputUp ? 4 : 2;         // TryingToHoverUp 档（:29037）
+      for (let i = 0; i < num; i++) {
+        let x = cx + (dir > 0 ? -26 : 16);      // :29046-29052
+        let y = top + this.h - 18;
+        if (i === 1 || i === 3) { x = cx + (dir > 0 ? -20 : 8); y += 6; }
+        if (i > 1) y += this.vy;
+        const d = mk(x, y, 8, 8, 6, 100, 1.75);
+        if (d) {
+          d.noGravity = true;
+          d.vx *= 0.1;
+          d.vy = d.vy * 1 + 2 - this.vy * 0.3;
+          if (num === 4) d.vy += 6;
+        }
+      }
+    }
+
+    // ---- Wings 30 日耀喷射双环（:29337-29377，flag2 门）----
+    const flag2 = flying || this.jumpHold > 0 || (this.vy !== 0 && this.inputJump);
+    if (wings === 30 && flag2) {
+      for (let j = 0; j < 4; j++) {
+        if (Next(0, 4) === 0) {
+          const a = -0.74539816 + Math.PI / 8 * j + 0.03 * j;
+          const px = cx + Math.cos(a) * (-dir * 20), py = this.cy + Math.sin(a) * 20;
+          const d = mk(cx, this.cy, 0, 0, 229, 100, 0.8);
+          if (d) {
+            const dx = px - cx, dy = py - this.cy, len = Math.hypot(dx, dy) || 1;
+            d.x = px; d.y = py;
+            d.vx = dx / len * 2; d.vy = dy / len * 2;
+            d.noGravity = true; d.noLightEmittance = wingsLogic !== wings;
+            if (Next(0, 10) !== 0) { d.followPlayer = true; d.followOnce = true; } else d.fadeIn = 0.5;
+          }
+        }
+      }
+      for (let k = 0; k < 4; k++) {
+        if (Next(0, 8) === 0) {
+          const a = -0.7053982 + Math.PI / 8 * k + 0.03 * k;
+          let px = cx + Math.cos(a) * (dir * 20) - dir * 16;
+          let py = this.cy + Math.sin(a) * 24;
+          const d = mk(cx, this.cy, 0, 0, 229, 100, 0.5);
+          if (d) {
+            const dx = px - (cx - dir * 16), dy = py - this.cy, len = Math.hypot(dx, dy) || 1;
+            d.vx = dx / len * 2; d.vy = dy / len * 2;
+            px += d.vx * 5; py += d.vy * 5;
+            d.x = px; d.y = py;
+            d.noGravity = true; d.noLightEmittance = wingsLogic !== wings;
+            if (Next(0, 10) !== 0) { d.followPlayer = true; d.followOnce = true; } else d.fadeIn = 0.5;
+          }
+        }
+      }
+    }
+
+    // ---- Wings 33 星尘眼色尘（:29845-29904，flag9 门）----
+    const flag9 = flag2;
+    if (wings === 33 && flag9) {
+      const eye = this.appearance?.eyeColor ?? { r: 105, g: 90, b: 75 };
+      const mx = Math.max(eye.r, eye.g, eye.b), mn = Math.min(eye.r, eye.g, eye.b);
+      let hue = 0;   // rgbToHsl(...).X
+      if (mx !== mn) {
+        const dlt = mx - mn;
+        hue = mx === eye.r ? ((eye.g - eye.b) / dlt + (eye.g < eye.b ? 6 : 0))
+          : mx === eye.g ? (eye.b - eye.r) / dlt + 2
+            : (eye.r - eye.g) / dlt + 4;
+        hue /= 6;
+      }
+      const [cr, cg, cb] = hslToRgb(hue, 1, 0.5);
+      const num32 = dir !== 1 ? -4 : 0;
+      for (let m = 0; m < 2; m++) {
+        const d = mk(this.x + (m === 0 ? num32 : this.w + num32), this.y + this.h,
+          this.w, this.h, 182, 127, 1, { r: cr, g: cg, b: cb, a: 255 }, this.vx, this.vy);
+        if (!d) break;
+        d.noGravity = true; d.fadeIn = 1; d.noLight = true; d.noLightEmittance = wingsLogic !== wings;
+        d.followPlayer = true; d.followOnce = true;
+        d.vx = d.vx + (m === 0 ? -2 : 2) - this.vx * 0.3;
+        d.vy = d.vy + 2 - this.vy * 0.3;
+        // CloneDust（:29889-29897）：scale/fadeIn ×0.65、白化
+        const c = mk(d.x, d.y, 0, 0, 182, 127, d.scale * 0.65, { r: 255, g: 255, b: 255, a: 255 });
+        if (c) {
+          c.noGravity = true; c.noLight = true; c.noLightEmittance = wingsLogic !== wings;
+          c.fadeIn = d.fadeIn * 0.65; c.vx = d.vx; c.vy = d.vy;
+          c.followPlayer = true; c.followOnce = true;
+        }
+      }
+    }
+
+    // ---- Wings 45 星璇悬浮板（:29707-29740 门内：喷射音 + 星尘）----
+    if (wings === 45 && airOk) {
+      if (this.wingTime > 0 && --this.rocketDelay2 <= 0) {
+        game.playSfxAt?.('starboardJet', this.x, this.y);
+        this.rocketDelay2 = 30;
+      }
+      if (Next(0, 8) === 0) {
+        // CenteredRectangle(Bottom−(0,10), 40×24)（:29735）
+        const d = mk(cx - 20, this.y + this.h - 10 - 12, 40, 24, 43, 0, 0.2);
+        if (d) { d.fadeIn = 0.4; d.vx = (d.vx + this.vx) * 0.35; d.vy = (d.vy + this.vy) * 0.35; }
+      }
+    }
+
+    // ---- Wings 47/49/50 十一帧族三函数（:30063-30270）----
+    if ((wings === 47 || wings === 49 || wings === 50) && this.wingFrame !== 0) {
+      const numTbl: Record<number, number> = { 1: 0, 2: 0, 3: 0.5, 4: 1, 5: 1, 6: 0.5, 7: 0, 8: -0.5, 9: -1, 10: -0.5 };
+      const num = numTbl[this.wingFrame] ?? 0;
+      if (wings === 47) {   // ChickenBonesWingDust :30063-30141
+        const col = { r: 50, g: 120, b: 255, a: 200 };
+        if (justSwitched && this.wingFrame === 6 && this.inputJump) {
+          for (let i = 0; i < 8; i++) {
+            const vx0 = (i < 4 ? -25 : -5) * dir, vy0 = 20;
+            const d = mk(cx - 5 + vx0, this.cy - 5 + vy0, 10, 10, 264, 0, 1.1 * (1 + 0.25 * dirF()), col);
+            if (d) {
+              const xo = d.x - cx - vx0;
+              d.y += xo * 2;
+              d.noGravity = true; d.noLight = true; d.noLightEmittance = wingsLogic !== wings;
+              d.vx = xo * 0.5; d.vy = 3;
+              d.followPlayer = true; d.followOnce = true;
+            }
+          }
+        }
+        if (Next(0, 6) === 0) {
+          const d = mk(cx - 15 - 30 * dir, this.cy - 25, 30, 50, 264, 0, 1.1 * (1 + 0.25 * dirF()), col);
+          if (d) {
+            d.noGravity = true; d.noLight = true; d.noLightEmittance = wingsLogic !== wings;
+            d.vx = d.vx * 0.1 + this.vx * 0.3 * Math.random();
+            d.vy = d.vy * 0.1 + num * 2 + this.vy * 0.3 * Math.random();
+            d.y += num * 2;
+            d.followPlayer = true; d.followOnce = true;
+          }
+        }
+      }
+      if (wings === 49) {   // HeroicisWingDust :30143-30204（光照门 z 恒 1 近似：
+        //                 读侧光照 API 未暴露——亮环境等价，暗环境少尘，登记）
+        const col = { r: 255, g: 255, b: 255, a: 200 };
+        if (justSwitched && this.wingFrame === 6 && this.inputJump) {
+          for (let i = 0; i < 8; i++) {
+            const vx0 = (i < 4 ? -20 : -10) * dir, vy0 = 15;
+            const d = mk(cx - 2.5 + vx0, this.cy - 2.5 + vy0, 5, 5, 264, 0, 0.6 * (1 + 0.45 * dirF()), col);
+            if (d) {
+              const xo = d.x - cx - vx0;
+              d.y += xo * 2;
+              d.noGravity = true; d.noLight = true; d.noLightEmittance = wingsLogic !== wings;
+              d.vx = xo * 0.5; d.vy = 2;
+              d.followPlayer = true; d.followOnce = true;
+            }
+          }
+        }
+        if (Next(0, 6) === 0) {
+          const d = mk(cx - 15 - 30 * dir, this.cy - 20, 30, 40, 264, 0, 0.6 * (1 + 0.45 * dirF()), col);
+          if (d) {
+            d.noGravity = true; d.noLight = true; d.noLightEmittance = wingsLogic !== wings;
+            d.vx = d.vx * 0.1 + this.vx * 0.3 * Math.random();
+            d.vy = d.vy * 0.1 + num * 1.5 + this.vy * 0.3 * Math.random();
+            d.y += num * 2;
+            d.followPlayer = true; d.followOnce = true;
+          }
+        }
+      }
+      if (wings === 50) {   // KazzymodusWingDust :30205-30270
+        const col = { r: 50, g: 120, b: 255, a: 200 };
+        if (justSwitched && this.wingFrame === 1) {
+          const y0 = -20;
+          for (let i = 0; i < 16; i++) {
+            const nx = (i < 4 ? -25 : -5) * dir;
+            const d = mk(cx + nx - 15, this.cy + y0 - 5, 30, 10, 6, 100, 1.2, col);
+            if (d) { d.vx = dirF() * 5; d.vy = dirF() * 2; d.fadeIn = 1.2; d.noGravity = true; d.noLightEmittance = wingsLogic !== wings; }
+          }
+        }
+        if (Next(0, 4) === 0) {
+          const flag = Next(0, 2) === 0;
+          const nx = dir * (flag ? -30 : 10);
+          const y2 = this.wingFrame === 1 ? -25 : -5;
+          const d = mk(cx + nx - 12.5, this.cy + y2 - 10, 25, 20, 6, 100, 1.2, col);
+          if (d) { d.vx = dirF() * 2.5; d.vy = Math.random() * 3; d.fadeIn = 1.2; d.noGravity = true; d.noLightEmittance = wingsLogic !== wings; }
+        }
+      }
+    }
+
+    // ---- Wings 29 下落烟（generic 尾段 :30025-30040，!flap && vy≠0）----
+    if (wings === 29 && !flying && this.jumpHold === 0 && this.vy !== 0 && Next(0, 5) === 0) {
+      const d = mk(cxOff(-40, 4), top + half - 15, 30, 30, 6, 100, 2.4);
+      if (d) { d.noGravity = true; d.vx *= 0.3; d.vy *= 0.3; if (Next(0, 10) === 0) d.fadeIn = 2; }
+    }
+
+    // ---- 滑翔段尘 26/37（:26914-26970，glide 门内）----
+    if (glide) {
+      if (wings === 26) {
+        let d = mk(cx + (dir === 1 ? -30 : 6), top, 18, this.h, 217, 100, 1.4);
+        if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx; d.vy = d.vy / 4 - this.vy; }
+        if (Next(0, 2) === 0) {
+          d = mk(cx + (dir === 1 ? 12 : -24), top, 12, this.h / 2, 217, 100, 1.4);
+          if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx; d.vy = d.vy / 4 - this.vy; }
+        }
+      }
+      if (wings === 37) {
+        let d = mk(cx + (dir === 1 ? -30 : 6), top, 24, this.h, 31, 100);
+        if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx / 2; d.vy = d.vy / 4 - this.vy / 2; }
+        if (Next(0, 3) === 0) {
+          d = mk(cx + (dir === 1 ? 12 : -24), top, 16, this.h / 2, 31, 100);
+          if (d) { d.noGravity = true; d.noLight = true; d.vx = d.vx / 4 - this.vx / 2; d.vy = d.vy / 4 - this.vy / 2; }
+        }
+      }
+    }
+
+    // ---- Wings 28 空中微光（:29071-29076：Bottom AddLight(0.3,0.1,0.4)）----
+    if (wings === 28 && airOk && wingsLogic === wings) {
+      game.addLightAt?.(cx, this.y + this.h, 0.3, 0.1, 0.4);
+    }
+  }
+
   private wingMovement(wings: number, hoverDown: boolean, JS: number): void {
     if (wings === 4 && this.inputUp) {
       // wingsLogic 4 + TryingToHoverUp（:21748-21782）
@@ -2594,6 +2996,15 @@ export class Player extends Entity {
   private wingFrameScratch: WingFrameState = { frame: 0, counter: 0 };
   /** Main.miscCounter 近似（每 tick +1；翅膀 28 绘制帧 miscCounter/5%4 消费） */
   miscCounter = 0;
+  /** AdvancedShadows 位置历史环（≤31 项，翅膀 45 彩虹拖尾 :2901 消费；每 tick 尾插） */
+  advancedShadows: Array<{ x: number; y: number }> = [];
+  /** itemFlame（LegacyPlayerRenderer :493-502：每 5t 重掷 7 组，仅翅膀 22 在用时更新；
+   *  绘制端 :683-694 消费 (X, −Y)×0.5 偏移） */
+  itemFlameCount = 5;
+  itemFlamePos: Array<{ x: number; y: number }> = Array.from({ length: 7 }, () => ({ x: 0, y: 0 }));
+  /** 上一 tick 左上角（原版 oldPosition；customData=Player 尘埃跟随差值用） */
+  oldX = 0;
+  oldY = 0;
 
   /** 飞毯滑翔剩余 tick（CarpetMovement carpetTime=300） */
   carpetTime = 0;
@@ -2832,12 +3243,18 @@ export class Player extends Entity {
     // 魔力手铐（magicCuffs :37678）：受伤回蓝 = 原始伤害 1:1（防前数值）
     if (eq.magicCuffs) this.mana = Math.min(this.maxMana, this.mana + dmg);
     // 击退（钴护盾族 noKnockback 免疫；坐骑冲刺态免击退——UpdateEffects
-    // :4962/:4968 |vx| > DashSpeed-RunSpeed/2 时 mountedPlayer.noKnockback=true）
+    // :4962/:4968 |vx| > DashSpeed-RunSpeed/2 时 mountedPlayer.noKnockback=true）。
+    // 原版 Player.Hurt 击退段（Player.cs:37908-37912）：固定 velocity.X = 4.5×hitDirection、
+    // velocity.Y = -3.5——【不按攻击方武器 kb 缩放】（NPC.knockBack 只作用于敌怪端
+    // StrikeNPC），hitDirection=0 的伤害（岩浆/窒息/摔落）整段跳过。同段
+    // fallStart = position.Y/16（:37912）：击退弹起从受击高度重新累计摔伤。
+    // 旧近似 dir*3.4/-3 已按原版数值修正（2026-08-13）
     if (knockback && !eq.noKnockback
       && !(this.ridingMount && this.mount.dashNoKnockback(this.vx))) {
       const dir = this.cx < srcX ? -1 : 1;
-      this.vx = dir * 3.4;
-      this.vy = -3;
+      this.vx = dir * 4.5;   // Player.cs:37910
+      this.vy = -3.5;        // Player.cs:37911
+      this.fallStartY = this.y;  // fallStart = position.Y/16（:37912，像素口径同源）
     }
     return reduction;
   }

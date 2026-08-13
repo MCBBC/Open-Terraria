@@ -268,6 +268,13 @@ export class BiomeBackground {
   }
   private caveBackTreeX: number[] | null = null;
 
+  /** Main.bgAlphaFrontLayer[style] 等价读数（只读引用；AmbientSky.GetColor 六族乘子等
+   *  下游消费源）。槽语义 = Main.cs:58951-59030，与上方 bgStyle 常量表一致。
+   *  （AmbientSky 实体与背景层共用同一渐变态，避免双状态机漂移。） */
+  frontLayer(): ArrayLike<number> {
+    return this.alphaFront;
+  }
+
   /** 每帧状态推进：风格切换延迟 + alpha 渐变（UpdateBGVisibility ±0.05/帧，:63534/:63594） */
   update(world: World, scene: SceneFlags, dtMs: number) {
     this.seedFor(world);

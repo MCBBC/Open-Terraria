@@ -25,7 +25,12 @@ const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [
   [/^fortheworthy$/i, (f) => { f.getGoodWorld = true; }],
   [/^(05162020|drunkworld)$/i, (f) => { f.drunkWorld = true; }],
   [/^notraps$/i, (f) => { f.noTraps = true; }],
+  // 饥荒世界（Main.dontStarveWorld 消费源 = 稀有云 1/25 直通门 Cloud.cs:139/215-223）：
+  // WorldSeedOption_DontStarve.SpecialSeedNames = {constant, theconstant, eye4aneye, eyeforaneye}
   [/^(theconstant|constant|eye4aneye|eyeforaneye)$/i, (f) => { f.theConstant = true; }],
+  // 十周年世界（Main.tenthAnniversaryWorld 消费源 = 稀有云 1/25+1/3 直通/范围收窄
+  // Cloud.cs:139-146/189）：WorldSeedOption_Anniversary.SpecialSeedNames = {celebrationmk10}
+  // + SpecialSeedValues = {5162021, 5162011}（TranslateSeed 数字种子直出）
   [/^(celebrationmk10|5162021|5162011)$/i, (f) => { f.tenthAnniversary = true; }],
   [/^dontdigup$/i, (f) => { f.remix = true; }],
   [/^getfixedboi$/i, (f) => { f.everything = true; f.drunkWorld = true; f.getGoodWorld = true; f.notTheBees = true; }],
@@ -33,7 +38,10 @@ const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [
 ];
 
 export function parseSeed(rawSeed: string): { flags: SeedFlags; seedText: string; /** UI 展示用特殊世界名（无则 null） */ specialName: string | null } {
-  const normalized = rawSeed.replace(/[\s._-]/g, '').toLowerCase();
+  // 归一化 = WorldGenerationOptions.GetOptionFromSeedText :69：
+  // `Regex.Replace(processedSeed.ToLower(), "[^a-z0-9]+", "")`——去全部非字母数字
+  // （"celebration mk10!" → "celebrationmk10" 亦命中；旧实现只剥 空格/._- 窄一档）
+  const normalized = rawSeed.toLowerCase().replace(/[^a-z0-9]+/g, '');
   const flags: SeedFlags = {};
   for (const [re, apply] of TABLE) {
     if (re.test(normalized)) {

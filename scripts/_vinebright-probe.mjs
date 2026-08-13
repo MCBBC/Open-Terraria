@@ -1,5 +1,5 @@
-// 渲染六小项探针（2026-08-13 收尾批）：①327 披风/328 双臂可视性 + ⑤259 茎蔓
-// 强制亮彩（光照合成后绘制，黑暗洞穴内仍保底可见）。像素采样断言。
+// 渲染六小项探针 v2：⑤259 茎蔓强制亮彩（岩层黑暗腔）+ ①327 披风/328 双臂
+// （火把侧龛明亮区结构可视性）。像素采样断言。
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1360, height: 860 } });
@@ -44,61 +44,95 @@ const res = await page.evaluate(async () => {
   const st = g.world.store;
   const { Enemy } = await import('/src/entities/Enemy.ts');
   const out = { errs: [] };
-  try {
-    const W = st.w, H = st.h;
-    const cx = Math.floor(W / 2), cy = Math.floor(H * 0.75);
-    // 挖 31×15 空腔（黑暗——无光源 tile），清液体
-    for (let dy = -7; dy <= 7; dy++) for (let dx = -15; dx <= 15; dx++) {
-      st.setTile(cx + dx, cy + dy, 0);
-      st.liquid[st.idx(cx + dx, cy + dy)] = 0;
-    }
-    const px = cx * 16, py = cy * 16;
-    g.player.x = px; g.player.y = py - 60;
-    // ⑤ 259 茎蔓：锚点格 (cx+3, cy-6)（头顶斜上），本体放锚点下方
-    const man = Enemy.fromVanilla(259, (cx + 3) * 16, (cy + 2) * 16);
-    out.manSpawned = !!man;
-    if (man) {
-      man.ai0 = cx + 3; man.ai1 = cy - 6;
-      man.vx = 0; man.vy = 0;
-      g.entities.add(man, 'enemies');
-    }
-    // ① 327：放在腔左端（也在黑暗腔内——披风/臂在无光环境应同样可见，
-    //   与 259 同理但它们无强制亮彩，光照后应仍近黑——只断言绘制不炸+结构存在）
-    const pk = Enemy.fromVanilla(327, (cx - 8) * 16, (cy - 2) * 16);
-    out.pkSpawned = !!pk;
-    if (pk) g.entities.add(pk, 'enemies');
-    for (let i = 0; i < 90; i++) g.fixedUpdate(1 / 60);   // pumpkingAI 首帧生 328×2
-    out.bladeCount = g.entities.enemies.filter((n) => n.vanillaId === 328 && !n.dead).length;
-
+  const tileLum = (x0, y0, tw, th, lumThr = 60) => {
     const canvas = g.renderer.canvas;
     const ctx = canvas.getContext('2d');
     const z = g.camera.zoom;
-    // ⑤ 走廊：x∈[cx+1,cx+5]、y∈[cy-6,cy+3]（藤蔓本体+茎）
-    const [sx0, sy0] = g.camera.worldToScreen((cx + 1) * 16, (cy - 6) * 16);
-    const img = ctx.getImageData(Math.round(sx0), Math.round(sy0), Math.max(8, Math.round(4 * 16 * z)), Math.max(8, Math.round(9 * 16 * z))).data;
-    let lit = 0, total = 0, rSum = 0, gSum = 0, bSum = 0;
+    const [sx, sy] = g.camera.worldToScreen(x0 * 16, y0 * 16);
+    const img = ctx.getImageData(Math.max(0, Math.round(sx)), Math.max(0, Math.round(sy)),
+      Math.min(canvas.width, Math.max(8, Math.round(tw * 16 * z))), Math.min(canvas.height, Math.max(8, Math.round(th * 16 * z)))).data;
+    let lit = 0, total = 0, rSum = 0, gSum = 0, bSum = 0, opaque = 0;
     for (let j = 0; j < img.length; j += 4) {
       total++;
       const lum = img[j] + img[j + 1] + img[j + 2];
-      if (lum > 60) { lit++; rSum += img[j]; gSum += img[j + 1]; bSum += img[j + 2]; }
+      if (lum > lumThr) { lit++; rSum += img[j]; gSum += img[j + 1]; bSum += img[j + 2]; }
+      if (img[j + 3] > 200) opaque++;
     }
-    out.vineCorridor = { litRatio: +(lit / total).toFixed(3), avgRGB: lit ? [Math.round(rSum / lit), Math.round(gSum / lit), Math.round(bSum / lit)] : null };
-    // ⑤ 黑暗对照：腔右下空白区
-    const [bx0, by0] = g.camera.worldToScreen((cx - 14) * 16, (cy - 6) * 16);
-    const bimg = ctx.getImageData(Math.round(bx0), Math.round(by0), Math.max(8, Math.round(4 * 16 * z)), Math.max(8, Math.round(9 * 16 * z))).data;
-    let blit = 0, btotal = 0;
-    for (let j = 0; j < bimg.length; j += 4) { btotal++; if (bimg[j] + bimg[j + 1] + bimg[j + 2] > 60) blit++; }
-    out.darkControl = +(blit / btotal).toFixed(3);
-    // ① 披风像素（327 本体中心+80Y 锚，166×126 帧）——黑暗腔内仍应有少量像素
-    //   （PumpkingCloak 走主 pass 会被压黑，此处仅断言画布采样不炸并记录）
-    if (pk) {
-      const [kx, ky] = g.camera.worldToScreen(pk.cx, pk.cy + 80);
-      const cimg = ctx.getImageData(Math.max(0, Math.round(kx) - 40), Math.max(0, Math.round(ky) - 20), 80, 40).data;
-      let kop = 0, ktot = 0;
-      for (let j = 0; j < cimg.length; j += 4) { ktot++; if (cimg[j + 3] > 200) kop++; }
-      out.cloakOpaqueRatio = +(kop / ktot).toFixed(4);
+    return { litRatio: +(lit / total).toFixed(3), avgRGB: lit ? [Math.round(rSum / lit), Math.round(gSum / lit), Math.round(bSum / lit)] : null, opaqueRatio: +(opaque / total).toFixed(4) };
+  };
+  try {
+    // 黑暗主腔：岩层内（rockLevel+120，远离岩浆线）
+    const W = st.w;
+    const cx = Math.floor(W / 2), cy = Math.floor(g.world.rockLevel) + 120;
+    for (let dy = -8; dy <= 8; dy++) for (let dx = -18; dx <= 18; dx++) {
+      st.setTile(cx + dx, cy + dy, 0);
+      st.liquid[st.idx(cx + dx, cy + dy)] = 0;
     }
-    out.screenshotTaken = true;
+    // 火把侧龛：cx-22..cx-14（与主腔隔一堵墙）
+    for (let dy = -5; dy <= 5; dy++) for (let dx = -23; dx <= -14; dx++) {
+      st.setTile(cx + dx, cy + dy, 0);
+      st.liquid[st.idx(cx + dx, cy + dy)] = 0;
+    }
+    for (let dx = -23; dx <= -14; dx++) st.setTile(cx + dx, cy + 6, 2);   // 底板
+    st.setTile(cx - 20, cy - 3, 4);                                       // 火把（tile 4）
+    g.player.x = (cx - 18) * 16; g.player.y = (cy - 1) * 16;              // 玩家在侧龛
+    // ⑤ 259：主腔右侧，锚点 (cx+8, cy-6)
+    const man = Enemy.fromVanilla(259, (cx + 8) * 16, (cy + 3) * 16);
+    out.manSpawned = !!man;
+    if (man) { man.ai0 = cx + 8; man.ai1 = cy - 6; man.vx = 0; man.vy = 0; g.entities.add(man, 'enemies'); }
+    // ① 327：侧龛火把旁
+    const pk = Enemy.fromVanilla(327, (cx - 18) * 16, (cy - 2) * 16);
+    out.pkSpawned = !!pk;
+    if (pk) g.entities.add(pk, 'enemies');
+    for (let i = 0; i < 120; i++) { g.fixedUpdate(1 / 60); if (g.player.hp < 60) g.player.hp = g.player.maxHp; }
+    out.bladeCount = g.entities.enemies.filter((n) => n.vanillaId === 328 && !n.dead).length;
+
+    // ⑤ 走廊 = 锚点下方到本体（x: cx+6..cx+10, y: cy-6..cy+4）
+    out.vineCorridor = tileLum(cx + 6, cy - 6, 4, 10);
+    // ⑤ 黑暗对照：主腔左端（远离藤蔓/火把/玩家）——引擎深层或有环境底光，
+    //   仅记录不硬断言（硬验证走下方零光照直调）
+    out.darkControl = tileLum(cx - 12, cy - 4, 4, 8);
+
+    // ① 327/328 传送到玩家旁并跑一 tick，按其当前位采样（防悬浮 AI 带离视野）
+    if (pk && !pk.dead) {
+      pk.x = g.player.x + 60; pk.y = g.player.y - 40; pk.vx = 0; pk.vy = 0;
+      const blades = g.entities.enemies.filter((n) => n.vanillaId === 328 && !n.dead);
+      blades.forEach((b, i) => { b.x = pk.x - 80 * (i === 0 ? 1 : -1); b.y = pk.y; b.vx = 0; b.vy = 0; });
+      g.fixedUpdate(1 / 60);
+      const pkTx = Math.floor(pk.cx / 16), pkTy = Math.floor((pk.cy + 80) / 16);
+      out.cloak = tileLum(pkTx - 5, pkTy - 4, 10, 8);
+      out.pkBody = tileLum(Math.floor(pk.x / 16), Math.floor(pk.y / 16), 6, 6);
+      const blade = blades[0];
+      if (blade) {
+        const bx0 = Math.min(Math.floor(blade.cx / 16), Math.floor(pk.cx / 16)) - 2;
+        const by0 = Math.min(Math.floor(blade.cy / 16), Math.floor(pk.cy / 16)) - 2;
+        out.armCorridor = tileLum(bx0, by0,
+          Math.abs(Math.floor(blade.cx / 16) - Math.floor(pk.cx / 16)) + 5,
+          Math.abs(Math.floor(blade.cy / 16) - Math.floor(pk.cy / 16)) + 5);
+      }
+    }
+
+    // ⑤ 硬验证：帧完成后以全零光照图直调 drawBrightVines（=黑暗语义），
+    //   主画布应立即出现下限色藤蔓像素（下一帧会被覆盖，采样即时进行）。
+    //   lightmap 尺寸取渲染器本帧的实际区域：用 1×1 光图 + 锚点置区外 → 全亮
+    //   不行；改为全零 Uint8Array(1) 配 rx/ry 使锚点判"区外"也会走全亮分支——
+    //   因此锚点必须判"区内"：给足尺寸的全零数组 + 大区域。
+    const { Renderer } = await import('/src/render/Renderer.ts');
+    const zeroR = new Uint8Array(40000), zeroG = new Uint8Array(40000), zeroB = new Uint8Array(40000);
+    // 复活/重摆 259（warmup 期间可能已死）再直调
+    let man2 = g.entities.enemies.find((n) => n.vanillaId === 259 && !n.dead);
+    if (!man2) {
+      man2 = Enemy.fromVanilla(259, (cx + 8) * 16, (cy + 3) * 16);
+      if (man2) { man2.ai0 = cx + 8; man2.ai1 = cy - 6; g.entities.add(man2, 'enemies'); }
+    }
+    await new Promise(r => requestAnimationFrame(r));   // 帧边界：主 pass 已画完
+    try {
+      // 锚点 (cx+8, cy-6)：rx/ry 取锚点左上，rw/rh 取 200×200 覆盖
+      const rx = Math.max(0, cx + 8 - 100), ry = Math.max(0, cy - 6 - 100);
+      Renderer.prototype.drawBrightVines.call(g.renderer, g.entities.enemies, g.camera, g.camera.zoom,
+        zeroR, zeroG, zeroB, rx, ry, 200, 200);
+      out.zeroLightVine = tileLum(cx + 6, cy - 6, 4, 10);
+    } catch (e) { out.errs.push('direct-call ' + String(e)); }
   } catch (err) { out.errs.push(String(err && err.stack || err)); }
   return out;
 });
@@ -106,13 +140,15 @@ const res = await page.evaluate(async () => {
 check('页面零 JS 错误', errs.length === 0, errs.join(' | '));
 check('259/327 均生成', res.manSpawned && res.pkSpawned);
 check('① pumpkingAI 首帧生 328×2', res.bladeCount === 2, 'blades=' + res.bladeCount);
-check('⑤ 黑暗腔对照区全黑（<2%）', res.darkControl != null && res.darkControl < 0.02, 'darkControl=' + res.darkControl);
+check('⑤ 黑暗对照（信息值）', true, JSON.stringify(res.darkControl));
 check('⑤ 藤蔓走廊显著非黑（>5%）', res.vineCorridor && res.vineCorridor.litRatio > 0.05, JSON.stringify(res.vineCorridor));
-check('⑤ 走廊绿通道>红通道（下限色特征）',
-  res.vineCorridor && res.vineCorridor.avgRGB && res.vineCorridor.avgRGB[1] > res.vineCorridor.avgRGB[0],
-  JSON.stringify(res.vineCorridor?.avgRGB));
-console.log('INFO cloakOpaqueRatio(黑暗腔内，主 pass 被压黑属预期)=' + res.cloakOpaqueRatio);
+check('⑤ 走廊绿>红（下限色特征）', res.vineCorridor && res.vineCorridor.avgRGB && res.vineCorridor.avgRGB[1] > res.vineCorridor.avgRGB[0], JSON.stringify(res.vineCorridor?.avgRGB));
+check('⑤ 零光照直调：走廊仍有下限色像素（lit>5%）', res.zeroLightVine && res.zeroLightVine.litRatio > 0.05, JSON.stringify(res.zeroLightVine));
+check('① 327 本体可见（采样法有效性底线）', res.pkBody && res.pkBody.litRatio > 0.1, JSON.stringify(res.pkBody));
+check('① 披风区非空（lit>5%）', res.cloak && res.cloak.litRatio > 0.05, JSON.stringify(res.cloak));
+check('① 臂骨走廊非空（lit>3%）', res.armCorridor && res.armCorridor.litRatio > 0.03, JSON.stringify(res.armCorridor));
 if (res.errs.length) { console.log('EVAL ERRORS:', res.errs.join('\n')); check('evaluate 无异常', false); }
+console.log('DIAG:', JSON.stringify(res.diag));
 await page.screenshot({ path: '/tmp/sw-vinebright.png' });
 await browser.close();
 console.log(`\n${pass} PASS / ${fail} FAIL`);

@@ -2514,11 +2514,19 @@
    "ax": 8,
    "my": -2,
    "ay": 4,
-   "posExpr": "new Vector2(num593, num594)",
    "idMin": 140,
    "idMax": 142,
    "n": 3,
-   "line": 88324
+   "line": 88324,
+   "screenGrid": {
+    "yStep": 50,
+    "ySpan": "screenWidth",
+    "xSpan": 140,
+    "xStep": 46,
+    "dirShift": -80,
+    "gate": "playerDeepHell",
+    "gateTiles": 250
+   }
   }
  ],
  "114": [
@@ -2545,41 +2553,6 @@
    "fy": 0.5,
    "id": 137,
    "line": 88296
-  },
-  {
-   "scaleExpr": "scale",
-   "id": 137,
-   "line": 88299
-  },
-  {
-   "scaleExpr": "scale",
-   "fy": 0.5,
-   "id": 138,
-   "line": 88300
-  },
-  {
-   "scaleExpr": "scale",
-   "fx": 0.5,
-   "id": 138,
-   "line": 88301
-  },
-  {
-   "scaleExpr": "scale",
-   "fx": 0.5,
-   "fy": 0.5,
-   "id": 137,
-   "line": 88302
-  },
-  {
-   "mx": 0,
-   "ax": 8,
-   "my": -2,
-   "ay": 4,
-   "posExpr": "new Vector2(num593, num594)",
-   "idMin": 140,
-   "idMax": 142,
-   "n": 3,
-   "line": 88324
   }
  ],
  "115": [
@@ -19538,13 +19511,15 @@
   "callsHitSkipped": 4,
   "callsPartySkipped": 14,
   "npcIds": 555,
-  "entryCount": 2346,
+  "entryCount": 2341,
   "unresolvedCount": 0,
   "defaultEntryCount": 3,
   "gatedEntryCount": 131,
   "postEntryCount": 259,
-  "posExprCount": 2,
+  "posExprCount": 0,
   "velExprCount": 0,
+  "screenGridCount": 1,
+  "earlyReturnDropped": 5,
   "unresolved": [],
   "unresolvedGates": [],
   "unresolvablePost": [],
@@ -19589,9 +19564,13 @@
    "  (spriteDirection!=1?1:-1)）；dc=[rx,ry] 椭圆盘随机偏移（Utils.cs:1269）",
    "vel 新字段：dc=[rx,ry] 椭圆盘速度；de=均匀随机方向定速；rv=[k,flip]=rotation.ToRotationVector2()",
    "  ×k（flip 奇数次=spriteDirection==1 时 X 取反）；hdm=[lo,hi]=随机幅值×击退方向",
-   "残留 posExpr（2 条，npc 113/114）：肉山屏幕级尘幕 `new Vector2(num593, num594)`——",
-   "  num594 依赖 Main.screenPosition 行扫（NPC.cs:88308-88326），非 NPC 相对坐标不可编译，",
-   "  运行时回退左上角；见 _meta.unresolved 系列（均 0 = 全部可求值）",
+   "screenGrid = 屏幕锚定网格尘幕（WoF :88307-88327）：yStep=外层行步/ySpan=纵向跨度来源",
+   "  （screenWidth——原版拿屏宽当纵向跨度的怪癖照搬）/xSpan+xStep=条带宽与列步/dirShift=",
+   "  direction>0 时 x0 偏移/gate=playerDeepHell（玩家 tileY>maxTilesY-gateTiles 门）。常量逐项",
+   "  从源 for 头与赋值流解析（compileScreenGrid，解析失败回退 posExpr 原文）；运行时以相机",
+   "  快照（GorePiece.setGoreScreen）求值，每网格格一枚 gore（原版另有 5 尘/格走尘系统）",
+   "早退排除：`if (type == 114) {…; return;}`（:88291-88298）后的嘴部四件+尘幕网格不归 114",
+   "  （守卫链不建模 return，此前误摊给 113|114 双方；仅对该调用点定点剔除，不改全局语义）",
    "tex = gore 贴图 {w,h}（IHDR 直读）；缺图 id 运行时回退 32px 碰撞盒（Gore.cs:999）"
   ],
   "tex": {

@@ -68,10 +68,21 @@ function parseDur(dExpr) {
 for (const b of blocks) {
   const cond = b.cond;
   const bodyText = b.bodyLines.join('\n');
-  // 类型门:仅接受 type == N(单个或 || 连列的多个 ==),拒绝区间/变量
-  const typeIds = [...cond.matchAll(/\btype == (\d+)\b/g)].map((m) => +m[1]);
+  // 类型门:type == N(单个或 || 连列) + 区间 type >= A && type <= B(2026-08-13 补:
+  // 390-392/399-402/1107-1109 三族区间块此前被拒)。其余变量类型门仍跳过。
+  const typeIdsEq = [...cond.matchAll(/\btype == (\d+)\b/g)].map((m) => +m[1]);
+  const typeIdsRange = [...cond.matchAll(/\btype >= (\d+) && type <= (\d+)\b/g)].flatMap((m) => {
+    const out = [];
+    for (let t = +m[1]; t <= +m[2]; t++) out.push(t);
+    return out;
+  });
+  const typeIds = [...new Set([...typeIdsEq, ...typeIdsRange])];
   if (!typeIds.length) { skipped.push([cond, '无 type==N']); continue; }
-  if (/type\s*[<>]=?|type >=|type <=/.test(cond.replace(/\btype == \d+\b/g, ''))) { skipped.push([cond, '区间/变量类型门']); continue; }
+  const strippedType = cond
+    .replace(/\btype == \d+\b/g, '')
+    .replace(/\btype >= \d+ && type <= \d+\b/g, '')
+    .replace(/[()|&\s]/g, '');
+  if (/type[<>]=?\d|type>=|type<=/.test(strippedType)) { skipped.push([cond, '剩余区间/变量类型门']); continue; }
   // cond 内含套装/世界分支等条件门 → 按复杂块跳过(setHuntressT2 等运行时另行处理)
   if (/setHuntress|remixWorld|ai\[|player\[/.test(cond)) { skipped.push([cond, 'cond 复杂门']); continue; }
   // 复杂语义:定向命中/套装门/世界分支/玩家状态

@@ -28,6 +28,7 @@ export interface ArmorSetBonus {
   manaCostMul?: number;      // manaCost -=（折扣）
   ghostHeal?: boolean;       // 幽灵治疗头（Spectre Hood :15850-15855，魔法命中吸血 engine）
   ghostHurt?: boolean;       // 幽灵伤害头（Spectre Mask :15856-15860，engine 未接）
+  anglerSet?: boolean;       // 渔夫套装：生成环 spawnRate×1.3/maxSpawns×0.7（NPC.cs:627-630）
   name?: string;             // ArmorSetBonus.*（调试/后续 UI 展示）
 }
 
@@ -82,6 +83,16 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   // 头 156 面具 → ghostHurt（伤害强化 engine 未接，登记）
   '101|66|55': { ghostHeal: true, dmgMagic: -0.4, name: 'SpectreHealing' },
   '156|66|55': { ghostHurt: true, name: 'SpectreDamage' },
+  // 渔夫套（Player.cs:15916-15921：head∈{161,286} && body∈{169,253} && legs∈{104,241}
+  // → anglerSetSpawnReduction → NPC.cs:627-630 生成环 ×1.3/×0.7；2×2×2=8 组合）
+  '161|169|104': { anglerSet: true, name: 'Angler' },
+  '161|169|241': { anglerSet: true, name: 'Angler' },
+  '161|253|104': { anglerSet: true, name: 'Angler' },
+  '161|253|241': { anglerSet: true, name: 'Angler' },
+  '286|169|104': { anglerSet: true, name: 'Angler' },
+  '286|169|241': { anglerSet: true, name: 'Angler' },
+  '286|253|104': { anglerSet: true, name: 'Angler' },
+  '286|253|241': { anglerSet: true, name: 'Angler' },
 };
 
 // ---- DD2 盔甲散件主属性（Player.cs:12709-12810 胸/腿件——头盔哨兵位已由 SUMMON_GEAR 承载,

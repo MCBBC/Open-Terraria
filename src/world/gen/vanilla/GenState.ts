@@ -102,6 +102,13 @@ export interface GenState {
   hellChestItems: number[] | null; // 每世界乱序 [274,220,112,218,3019]（首只地狱箱时掷）
   hellChestIdx: number;            // 地狱箱主件序游标（成功一只 +1,循环）
   jungleItemIdx: number;           // 常春藤箱主件序游标（JungleItemCount）
+  /** pass 59 头连掷四计数(cs:17081-17084,CaveHouse→Underworld→CaveChest→
+   *  AdditionalDesert 序)——本仓 pass 拆分后由 rollHouseChestCounts 预掷暂存,
+   *  三个消费 pass 读此取值;-1=未预掷(探针直调回退自掷) */
+  caveHouseCount: number;
+  underworldChestCount: number;
+  caveChestCount: number;
+  desertHouseCount: number;
   gennedMahoganyWands: boolean;    // 活桃花心木法杖对已给过标记（GenVars.gennedLivingMahoganyWands）
   generatedShadowKey: boolean;     // GenVars.generatedShadowKey（cs:36598：首只必给后 1/3）
   generatedRamRune: boolean;       // GenVars.generatedRamRune（cs:36604：首只必给后 1/8）
@@ -155,6 +162,7 @@ export function newGenState(w: number, h: number): GenState {
     desertHiveHigh: h, desertHiveLow: 0, desertHiveLeft: w, desertHiveRight: 0,
     jungleHut: 0,
     hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
+    caveHouseCount: -1, underworldChestCount: -1, caveChestCount: -1, desertHouseCount: -1,
     generatedShadowKey: false, generatedRamRune: false,
     orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）
     logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）

@@ -58,7 +58,7 @@ const out = await p.evaluate(async () => {
   const sy = g.world.spawnY;
   const r1 = buildHouse(g.world.spawnX - 6, sy - 10);
   res.room1 = !!checkRoom(st, r1.doorX, r1.doorY);
-  // DEBUG
+  // 锚点窗单查：出生点锚点 ±10 内应直接命中第一间房（ffh 站位）
   const _d = findFreeHouse(st, [], g.world.spawnX, g.world.spawnY, 22);
   res.debug = { spawn: [g.world.spawnX, g.world.spawnY], door1: [r1.doorX, r1.doorY],
     room1raw: checkRoom(st, r1.doorX, r1.doorY), ffh: _d && { x: _d.standX, y: _d.standY } };

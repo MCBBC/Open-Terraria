@@ -60,6 +60,12 @@ export interface GameHooks {
   ): void;
   /** 拾取物品后刷新 UI（掉落物实体调用） */
   notifyInventoryChanged(): void;
+  /** 原版 Dust 池（翅膀尘埃批引入；Game 本体实例化，缺省 = 不生成） */
+  vanillaDust?: import('../fx/VanillaDust').VanillaDust;
+  /** 世界坐标光源（翅膀 28 的 Bottom 微光等实体侧 AddLight） */
+  addLightAt?(x: number, y: number, r: number, g: number, b: number): void;
+  /** 位置衰减音效（实体侧 SoundEngine.PlaySound）——name 走 SfxName */
+  playSfxAt?(name: import('../core/Sfx').SfxName, x: number, y: number): void;
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；x/y/w/h = 弹体命中盒） */
   onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number): void;
   /** 粉末云实效（净化粉 proj 10 / 邪恶粉 11 / 猩红粉 463，Projectile.cs:22399-22533

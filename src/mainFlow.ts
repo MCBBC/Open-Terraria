@@ -163,7 +163,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function makeGame(): Game {
     const g = new Game(root, {
       onWorldReady: () => { ui.hideProgress(); enterGame(g); maybeDev(g); applyAppearance(g); },
-      onInventoryChanged: () => ui.refreshAll(),
+      onInventoryChanged: () => { g.prefetchInvProjectiles(); ui.refreshAll(); },
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
       onAchievementPopup: (name, title) => ui.achievementPopup(name, title),

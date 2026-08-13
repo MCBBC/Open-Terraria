@@ -40,6 +40,33 @@ export interface WingDraw {
   alwaysAir?: boolean;
   /** 帧来源：wingFrame（默认）／miscCounter/5%4（28 独立动画） */
   drawFrameFrom?: 'miscCounter';
+  /** 47/49：锚点按身体帧行走 OffsetsPlayerHeadgear（:810-816） */
+  headgearRow?: boolean;
+  /** 主纹理全亮族（硬编码绘制色，光照合成后绘制）：
+   *  - 'white'      28(:714 Lerp t=1)/44(:1032)/45(:729) Color(255³,255)
+   *  - 'c250a100'   34(:766)/40(:859) Color(250³,100)
+   *  - 'luna'       51(:781) GetLunaGlowColor=(255³,100)×脉冲(:185-190)×免疫 */
+  mainGlow?: 'white' | 'c250a100' | 'luna';
+  /** 44：主纹理取 Extra_171 着色器层（PlayerRainbowWings RT + HallowBoss 着色器；
+   *  HLSL 不在反编译源 → 直画层贴图，与女皇 Extra_157 先例同法） */
+  rainbowLayer?: boolean;
+  /** 叠画（第二 pass，全亮族合成后绘制；硬编码色见各 kind 注释行号） */
+  overlay?: {
+    kind: 'plain'      // 单帧同切片叠画（file/tint/alpha）
+      | 'flames7'      // 22：ItemFlame_1866×7 火焰簇（:676-699，逐 i (250−10i,150−10i)）
+      | 'extra38'      // 28：Extra[38] 半白 Lerp(colorArmorBody,White,0.5)（:713-722，光采样）
+      | 'jitter2'      // 43：×2 随机 ±1.25（:1004-1015，(230³,60)）
+      | 'immune'       // 50：免疫色双画（:930-940）
+      | 'betsy'        // 40：8 片程序化摆动（:854-896，(250³,100)）
+      | 'trail45'      // 45：Projectile_250 彩虹拖尾（:2901-2961，White A=64 族）
+      | 'arkhalis';    // 38：GlowMask[251]×underShirtColor（:1044-1048）；影子环 A=0 死画
+    /** 叠画贴图（vanilla/ 前缀文件名；plain/jitter2/immune/arkhalis 用） */
+    file?: string;
+    /** RGB 均一色调 0-255（plain/jitter2） */
+    tint?: number;
+    /** alpha 0-255（plain） */
+    alpha?: number;
+  };
 }
 
 const GENERIC_ANCHOR: [number, number] = [-9, -19];
@@ -49,26 +76,38 @@ const DRAW_TABLE: Record<number, WingDraw> = {
   // generic 偏移微调（PlayerDrawLayers.cs:935-957）
   5:  { frames: 4, anchor: [-5, -23] },   // num13=4, num12=-4
   12: { frames: 4, anchor: [-10, -20] },  // num13=-1, num12=-1
-  27: { frames: 4, anchor: [-6, -19] },   // num13=3
+  27: { frames: 4, anchor: [-6, -19], overlay: { kind: 'plain', file: 'Glow_92.png', tint: 255, alpha: 127 } },  // :1027-1033
+  30: { frames: 4, anchor: GENERIC_ANCHOR, overlay: { kind: 'plain', file: 'Glow_181.png', tint: 255, alpha: 127 } }, // :1038-1043
+  38: { frames: 4, anchor: GENERIC_ANCHOR, overlay: { kind: 'arkhalis', file: 'Glow_251.png' } }, // :1044-1048
   41: { frames: 4, anchor: [-10, -19] },  // num13=-1
-  43: { frames: 7, anchor: [-14, -26] },  // num13=-5, num12=-7, num14=7
-  44: { frames: 7, anchor: GENERIC_ANCHOR }, // num14=7（偏移默认）
+  43: { frames: 7, anchor: [-14, -26], overlay: { kind: 'jitter2', file: 'Glow_272.png', tint: 230, alpha: 60 } }, // :1004-1015
   // 特殊绘制分支
-  22: { frames: 7, anchor: [-9, 5],   alwaysAir: true },   // vector3=(−9,+26)（:674）
-  28: { frames: 4, anchor: [0, -2],   alwaysAir: true, drawFrameFrom: 'miscCounter' }, // (0,+19)（:710）
-  34: { frames: 6, anchor: [-4, -21], alwaysAir: true },   // Size/2−4·dir（:757）
+  22: { frames: 7, anchor: [-9, 5],   alwaysAir: true, overlay: { kind: 'flames7' } },        // :674 + :676-699
+  23: { frames: 4, anchor: GENERIC_ANCHOR, overlay: { kind: 'plain', file: 'Flame_8.png', tint: 200, alpha: 200 } }, // :1016-1023
+  28: { frames: 4, anchor: [0, -2],   alwaysAir: true, drawFrameFrom: 'miscCounter', mainGlow: 'white', overlay: { kind: 'extra38' } }, // :705-722
+  34: { frames: 6, anchor: [-4, -21], alwaysAir: true, mainGlow: 'c250a100' },  // :752-768
   39: { frames: 6, anchor: [-6, -28], alwaysAir: true },   // (−6,−7)（:901）
-  45: { frames: 6, anchor: [0, 1],    alwaysAir: true },   // (0,+22)（:732）
+  44: { frames: 7, anchor: GENERIC_ANCHOR, mainGlow: 'white', rainbowLayer: true },           // :1029-1035
+  45: { frames: 6, anchor: [0, 1],    alwaysAir: true, mainGlow: 'white', overlay: { kind: 'trail45' } }, // :726-746
   48: { frames: 8, anchor: [0, -21],  alwaysAir: true },   // Size/2+(4,0)−4·dir（:845）
-  51: { frames: 8, anchor: [0, -15] },                     // (0,+6)（:786）
-  47: { frames: 11, anchor: [-3, -20] },                   // headgear 站立行近似（:810）
-  49: { frames: 11, anchor: [-3, -20] },                   // 同 47（:831）
-  50: { frames: 11, anchor: [-4, -19] },                   // vector−4·dir（:926）
-  40: { frames: 14, anchor: [-4, -21] },                   // (−4,0)（:866）程序化绘制偏差→单帧
+  51: { frames: 8, anchor: [0, -15], mainGlow: 'luna' },   // (0,+6)（:786）
+  47: { frames: 11, anchor: [-3, -20], overlay: { kind: 'plain', file: 'Glow_366.png', tint: 255, alpha: 180 }, headgearRow: true }, // :810-825
+  49: { frames: 11, anchor: [-3, -20], headgearRow: true },// 同 47 无叠画（:831-842）
+  50: { frames: 11, anchor: [-4, -19], overlay: { kind: 'immune' } },  // :923-940
+  40: { frames: 14, anchor: [-4, -21], overlay: { kind: 'betsy' } },   // :854-896
 };
 
 export function wingDrawOf(slot: number): WingDraw {
   return DRAW_TABLE[slot] ?? { frames: 4, anchor: GENERIC_ANCHOR };
+}
+
+/** Main.OffsetsPlayerHeadgear（Main.cs:504-525，20 行仅 0/2 两值）：行 ∈
+ *  {7,8,9,14,15,16} 为 0，其余 2。47/49 锚 Y = hy−22（:810-816）→ −22 / −20 */
+export const HEADGEAR_ZERO_ROWS = new Set([7, 8, 9, 14, 15, 16]);
+/** 47/49 锚点按身体帧行修正（anchor[1] = hy − 22） */
+export function wingAnchorForRow(d: WingDraw, row: number): [number, number] {
+  if (!d.headgearRow) return d.anchor;
+  return [d.anchor[0], (HEADGEAR_ZERO_ROWS.has(row) ? 0 : 2) - 22];
 }
 
 // ===================== 帧状态机（Player.cs WingFrame :29002-30045） =====================
@@ -76,6 +115,9 @@ export function wingDrawOf(slot: number): WingDraw {
 export interface WingFrameState {
   frame: number;
   counter: number;
+  /** 47/49/50 帧推进瞬间的单 tick 标记（ChickenBones/Heroicis/Kazzymodus 尘爆用，
+   *  :29528/:29595/:29667 justSwitched——每次 stepWingFrame 先清零） */
+  justSwitched?: boolean;
 }
 
 /** 帧推进输入（Player 侧逐字段对齐原版同名字段） */
@@ -116,6 +158,7 @@ const clampFrame = (f: number, max: number) => (f >= 0 && f < max ? f : 0);
  * 纯函数：状态经 state 引用修改。
  */
 export function stepWingFrame(slot: number, st: WingFrameState, i: WingFrameInput): void {
+  st.justSwitched = false;
   // ---- WingFrame 主干（:29002+）----
   switch (slot) {
     case 4: {
@@ -257,6 +300,7 @@ export function stepWingFrame(slot: number, st: WingFrameState, i: WingFrameInpu
       st.counter++;
       if (st.counter >= rate) {
         st.counter = 0;
+        st.justSwitched = true;          // :29528/:29595/:29667
         if (slot === 50) {
           if (st.frame === 1) st.frame = 3;
           else if (st.frame === 2 && flag3) st.frame = 1;

@@ -149,6 +149,44 @@ export enum BuffType {
   Confused = 90,      // 困惑(31)：控制反转（:24683-24690 四键轮换,含原版 Up←Right 怪癖）
   Ichor = 91,         // 灵液(69)：防御 -15（ResetEffects statDefense -= 15）
   BrokenArmor = 92,   // 破甲(36)：防御减半（:25704 statDefense /= 2；301 类弹 PvP）
+  Electrified = 93,   // 感电(144)：DoT 4 HP/s（lifeRegen-8 :18899），按住左/右移动时
+                      //   额外 16 HP/s（:18900-18903 lifeRegen-32）。授予链 =
+                      //   火星炮塔弹 435（2/3 必中 300t，Projectile.cs:11542-11545）/
+                      //   千兆电枪矛 437（240-480t，:11550-11553）。★144 非任务面
+                      //   疑似的 146（146=向日葵光环）；Cursed 是另一 debuff 23（禁用
+                      //   道具），勿与 CursedInferno 39 混淆
+  Invisibility = 94,  // 隐身(10)：生成环 spawnRate×1.2/maxSpawns×0.8（NPC.cs:611-615）
+                      //   ——授予链 = 隐身药水 297（10800t=3min）。敌怪索敌无视未移植
+                      //   （stealth 子系统登记）
+  // ---- R10 敌弹 StatusPlayer 全量批（Projectile.StatusPlayer :11450-11722 授予链，
+  //      表驱动结算 = entities/projTargets.ts statusPlayer + data/vanilla-statusplayer.json）----
+  Darkness = 95,      // 黑暗(22)：blind=true（Player.cs:11318-11321）→ 光衰减 air/solid
+                      //   ×0.95（LightingEngine.cs:185-189）+ GlobalBrightness 1.2→1.0
+                      //   （Lighting.cs:112-115）。授予 = 恶魔镰刀 44 命中 1/3 → 900t
+                      //   （Projectile.cs:11606-11608）。光衰减消费点 lightTables.ts 未接
+                      //   （blackout 参数已留位、blind 无参数），登记
+  Cursed = 96,        // 诅咒(23)：noItems=true + cursed=true（:11326-11330）→ 封禁道具
+                      //   使用（消费 :5757/:5964/:52017，含自动连发）。授予 = 暗影焰弹
+                      //   299 直中 240t（:11614-11616）。道具门消费点在 Player 使用链，
+                      //   未接（本条目先作 debuff 登记/护士可清），登记
+  Blackout = 97,      // 熄灯(80)：blackout=true（:11322-11325）→ 光衰减 air/solid ×0.85
+                      //   （LightingEngine.cs:190-194）。授予 = 迷失之魂 293 命中
+                      //   60×Next(2,7)=120-360t（:11610-11612）。lightTables 的
+                      //   blackoutOn 参数当前只接 Torch God 事件标志，buff 源未并入，登记
+  Webbed = 98,        // 结网(149)：webbed=true + 本帧 velocity 清零（:11458-11476）+
+                      //   jumpHeight/gravity/moveSpeed/dash 归零 + noKnockback + 摘钩。
+                      //   授予 = 黑隐士吐网 472 命中 Next(30,150)=30-149t（:11492-11494）。
+                      //   moveSpeed=0 已接 moveSpeedMult（:11471）；velocity/重力/跳跃/
+                      //   冲刺/免击退侧需 Player 物理段消费，登记
+  VortexDebuff = 99,  // 星旋减益(164)：vortexDebuff=true（:11426-11429）→ gravity=0
+                      //   （:24161-24164）+ 每帧 vy=vy×0.8+cos(Center.X 模 120 相位)×1
+                      //   （:27854-27857，竖向正弦漂浮）。授予 = 星旋酸弹 581（专家
+                      //   Next(300,540)/经典 50% Next(360,720)，:11504-11514）。
+                      //   玩家物理段无载体，登记
+  WitheredWeapon = 100, // 枯萎武器(196)：witheredWeapon=true（:11442-11445）→
+                      //   melee/ranged/magic/minion/rangedMult 伤害全 ×0.5
+                      //   （:25712-25719）。授予 = DD2 萤火虫电击 682 直中 300t
+                      //   （:11546-11548）。伤害链消费点在 Player.damageMult，登记
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -254,6 +292,15 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Confused]: { vanillaBuff: 31, descKey: 'BuffDescription.Confused', fallbackName: '困惑' },
   [BuffType.Ichor]: { vanillaBuff: 69, descKey: 'BuffDescription.Ichor', fallbackName: '灵液' },
   [BuffType.BrokenArmor]: { vanillaBuff: 36, descKey: 'BuffDescription.BrokenArmor', fallbackName: '破甲' },
+  [BuffType.Electrified]: { vanillaBuff: 144, descKey: 'BuffDescription.Electrified', fallbackName: '感电' },
+  [BuffType.Invisibility]: { vanillaBuff: 10, descKey: 'BuffDescription.Invisibility', fallbackName: '隐身' },
+  // 敌弹 StatusPlayer 批（描述全走原版 BuffDescription 键，同 Chilled/Venom 先例）
+  [BuffType.Darkness]: { vanillaBuff: 22, descKey: 'BuffDescription.Darkness', fallbackName: '黑暗' },
+  [BuffType.Cursed]: { vanillaBuff: 23, descKey: 'BuffDescription.Cursed', fallbackName: '诅咒' },
+  [BuffType.Blackout]: { vanillaBuff: 80, descKey: 'BuffDescription.Blackout', fallbackName: '熄灯' },
+  [BuffType.Webbed]: { vanillaBuff: 149, descKey: 'BuffDescription.Webbed', fallbackName: '结网' },
+  [BuffType.VortexDebuff]: { vanillaBuff: 164, descKey: 'BuffDescription.VortexDebuff', fallbackName: '星旋减益' },
+  [BuffType.WitheredWeapon]: { vanillaBuff: 196, descKey: 'BuffDescription.WitheredWeapon', fallbackName: '枯萎武器' },
 };
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
@@ -267,10 +314,19 @@ const BUFF_NO_SAVE = new Set([
   199, 205, 213, 214, 215, 263, 271, 320, 321, 322, 325, 335, 348, 353, 355,
   366, 385, 386,
 ]);
-/** vanilla buff id → 本仓 BuffType 反查（存档恢复用） */
+/** vanilla buff id → 本仓 BuffType 反查（存档恢复 + statusPlayer 授予链共用）。
+ *  ★Object.keys 恒返回【字符串】——必须 Number() 还原枚举数值键，否则
+ *  BuffState.active 的 Map 以 '93' 存键，has(BuffType.X)/get(BuffType.X) 的
+ *  数值键查找全部落空（感电授予/读档恢复 buff 一律失效）。2026-08-13 修复 */
 const BUFF_TYPE_BY_VANILLA = new Map<number, BuffType>(
-  (Object.keys(BUFF_DEFS) as unknown as BuffType[]).map((t) => [BUFF_DEFS[t].vanillaBuff, t]),
+  (Object.keys(BUFF_DEFS) as unknown as BuffType[]).map((t) => [BUFF_DEFS[t].vanillaBuff, Number(t)]),
 );
+/** vanilla buff id → BuffType 反查（导出版）。消费方 = 按原版 buff id 表驱动的授予链：
+ *  敌弹 StatusPlayer（projTargets.statusPlayer，data/vanilla-statusplayer.json 的 b 字段）。
+ *  未实装 buff 返回 undefined，调用方静默跳过 */
+export function buffTypeByVanilla(v: number): BuffType | undefined {
+  return BUFF_TYPE_BY_VANILLA.get(v);
+}
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
 export function buffName(t: BuffType): string {
@@ -299,22 +355,27 @@ const DOT_CHUNK: Partial<Record<BuffType, number>> = {
   [BuffType.Suffocation]: 5,
 };
 
-/** 环境 DoT 表（NaturalLifeRegen :18779-18911 的 onFire→burned→suffocating 顺序，
- *  速率 = lifeRegen 负项 / 2 = HP/s）。每个 DoT 结算前先清零正 lifeRegen——
- *  恢复类 buff 不能抵消 DoT（tick 内消费） */
+/** 环境 DoT 表（NaturalLifeRegen Player.cs:18775-18904 原版求值顺序 1:1：
+ *  poisoned→venom→onFire→onFire3→onFrostBurn→onFrostBurn2→onFire2→burned→
+ *  suffocating→electrified；速率 = lifeRegen 负项 / 2 = HP/s）。每个 DoT 结算前
+ *  先清零正 lifeRegen——恢复类 buff 不能抵消 DoT（tick 内消费）。
+ *  ★每段另伴 lifeRegenTime=0（爬坡计时清零）与 drippingSlime 翻倍（:18782 等）——
+ *  前者由 damage() 的 sinceHurt=0 近似；后者依赖 Slimed(137) buff 未移植，登记 GAP */
 const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
-  [BuffType.OnFire, -4],      // lifeRegen-8（:18793，vampireSeed 分支未移植）
-  [BuffType.Burning, -30],    // lifeRegen-60（:18862，另 moveSpeed×0.5 在 moveSpeedMult）
-  [BuffType.Suffocation, -20], // lifeRegen-40（:18889）
-  [BuffType.Poisoned, -2],    // lifeRegen-4 → 2 HP/s（Player.cs:18795 poisoned 分支）
-  // PvP debuff 族（NaturalLifeRegen 同段顺序：onFire3→onFrostBurn→onFrostBurn2→
-  // onFire2→…→venom 在 poisoned 之后:18791）
+  [BuffType.Poisoned, -2],    // lifeRegen-4（:18782）
+  [BuffType.Venom, -15],      // lifeRegen-30（:18791）
+  [BuffType.OnFire, -4],      // lifeRegen-8（:18811，vampireSeed 分支未移植）
   [BuffType.OnFire3, -4],     // lifeRegen-8（:18824）
   [BuffType.Frostburn, -8],   // lifeRegen-16（:18837）
   [BuffType.Frostburn2, -8],  // lifeRegen-16（:18850）
-  [BuffType.CursedInferno, -12], // lifeRegen-24（:18850 onFire2 段）
-  [BuffType.Venom, -15],      // lifeRegen-30（:18791）
+  [BuffType.CursedInferno, -12], // lifeRegen-24（:18862 onFire2 段）
+  [BuffType.Burning, -30],    // lifeRegen-60（:18875，另 moveSpeed×0.5 在 moveSpeedMult）
+  [BuffType.Suffocation, -20], // lifeRegen-40（:18889）
+  [BuffType.Electrified, -4], // lifeRegen-8（:18899）；移动加成见 ELECTRIFIED_MOVE_EXTRA
 ];
+/** Electrified 移动惩罚（Player.cs:18900-18903：controlLeft||controlRight 时
+ *  lifeRegen 额外 -32 → +16 HP/s）——tick 前由 Player.fixedUpdate 写入开关 */
+const ELECTRIFIED_MOVE_EXTRA = -16;
 
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
@@ -327,9 +388,16 @@ export class BuffState {
   static readonly DEBUFFS = new Set<BuffType>([
     BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
     BuffType.Chilled, BuffType.Weak, BuffType.Slow, BuffType.ManaSickness, BuffType.Poisoned,
+    BuffType.Stoned,    // Main.debuff[156]=true（Main.cs:8842）；156 不在
+                        // NurseCannotRemoveDebuff 排除表 → 石化可被护士计价清除
     // PvP debuff 族（原版 Main.debuff 表成员,护士可清）
     BuffType.Venom, BuffType.CursedInferno, BuffType.OnFire3, BuffType.Frostburn,
     BuffType.Frostburn2, BuffType.Confused, BuffType.Ichor, BuffType.BrokenArmor,
+    BuffType.Electrified,  // Main.debuff[144]=true（Main.cs:8847）——感电可被护士清除
+    // 敌弹 StatusPlayer 批（Main.debuff 全员 true：22/23=Main.cs:8805-8806、
+    // 80=:8827、149=:8841、164=:8846、196=:8850；均不在护士排除表）
+    BuffType.Darkness, BuffType.Cursed, BuffType.Blackout, BuffType.Webbed,
+    BuffType.VortexDebuff, BuffType.WitheredWeapon,
   ]);
   /** 活跃 debuff 计数（Main.GetNurseHealCost :39466-39472 的 +100/个 段：
    *  buffTime>60 且 Main.debuff；NurseCannotRemoveDebuff 排除表未实装，登记） */
@@ -348,13 +416,24 @@ export class BuffState {
   }
   /** 狼人回复独立累加器（:11496 lifeRegen++ 恒 0.5 HP/s，与篝火强度/节拍无关） */
   werewolfAccum = 0;
+  /** 感电移动加成开关（Player.cs:18900 controlLeft||controlRight → lifeRegen 额外
+   *  -32）：Player.fixedUpdate 在 buffs.tick 前按本帧 inputX!==0 写入（inputX 由
+   *  Game.ts:2890 先于 :2931 fixedUpdate 注入，即原版 Update 时序的当帧输入） */
+  electrifiedMoving = false;
   lanternAccum = 0;
   /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */
   campfireHeal = 1;
   /** 心灯(lifeRegen+2 = 1 HP/s,Player.cs:12247):Game 扫描写入 0/1 */
   lanternHeal = 0;
   /** AddBuff 语义（Player.cs:5138-5150）：同类取 max 不缩短——浸入类 buff 可每帧无脑续期 */
+  /** Player.buffImmune（Player.cs:1398 数组语义子集）：vanilla buff id 集合。
+   *  装备扫描（十字章族 885-904/1612/1613/1921/3781/5354）与 buff 驱动
+   *  （黑曜石皮 1 → 免 24）每帧刷新；apply 门 = AddBuff :5052/:5068 */
+  immuneVanilla = new Set<number>();
   apply(type: BuffType, durationSec: number) {
+    // buffImmune 门（AddBuff :5052——免疫则直接 return，不掉已有同类 buff）
+    const vb = BUFF_DEFS[type]?.vanillaBuff;
+    if (vb !== undefined && this.immuneVanilla.has(vb)) return;
     const cur = this.active.get(type);
     if (cur === undefined || cur < durationSec) this.active.set(type, durationSec);
   }
@@ -424,7 +503,11 @@ export class BuffState {
     for (const [t, hpPerSec] of ENV_DOTS) {
       if (!this.active.has(t)) continue;
       if (heal > 0) heal = 0;                       // :18781 等 if (lifeRegen > 0) lifeRegen = 0
-      const d = this.rateAccum(t, hpPerSec, dt);
+      // Electrified 移动惩罚（Player.cs:18900-18903：controlLeft||controlRight 时
+      // lifeRegen 额外 -32 = 16 HP/s）——仅感电段专属，逐 tick 生效
+      let rate = hpPerSec;
+      if (t === BuffType.Electrified && this.electrifiedMoving) rate += ELECTRIFIED_MOVE_EXTRA;
+      const d = this.rateAccum(t, rate, dt);
       dots += d;
       heal += d;
     }
@@ -482,6 +565,8 @@ export class BuffState {
     if (this.active.has(BuffType.Burning)) m *= 0.5;         // Burning moveSpeed *= 0.5（:18886）
     if (this.active.has(BuffType.Slow)) m *= 0.5;            // Slow moveSpeed /= 2（:25653-25655）
     if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
+    if (this.active.has(BuffType.Webbed)) m = 0;             // Webbed moveSpeed = 0（:11471，
+                                                             // 赋值非乘算——后续食物 += 档照加，原版同序）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
     if (this.active.has(BuffType.Werewolf)) m *= 1.05;      // 狼人 moveSpeed += 0.05（:11498）

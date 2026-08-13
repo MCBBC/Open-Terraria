@@ -24,10 +24,22 @@ for (const seed of SEEDS) {
     const g = window.__swGame;
     const st = g.world.store;
     const dx = g.world.dungeonX, dy = g.world.dungeonY;
-    // BFS 灌水:门 tile(内部 id 17 关/18 开,tiles.ts:34)视为可通行(原版门可开,不是墙);
-    // 断言 = 最深"地牢墙开放格"(竖井/房厅挖空格自带地牢墙,天然洞穴没有)
+    // BFS 灌水:门(17/18)可开;**地牢墙+非主题砖的实心格可挖通**(尖刺 48/木刺 232/
+    // 裂砖=原版陷阱带,激活走廊侧 1-2 格是 DungeonGlobalSpikes 原版行为,玩家挖穿);
+    // 主题砖实心=结构封堵(堵塔 bug 特征)仍拦截。断言=最深"地牢墙开放格"
     const DOOR = new Set([17, 18]);
-    const passable = (i) => !st.flags[i] || DOOR.has(st.type[i]);
+    const dWallSet = (ww) => (ww >= 7 && ww <= 9) || (ww >= 94 && ww <= 99);
+    // 主题砖 = 采样窗内"地牢墙+实心"的众数 type
+    const hist = {};
+    for (let x = dx - 50; x <= dx + 50; x++) {
+      for (let y = dy; y < Math.min(st.h - 2, dy + 150); y++) {
+        const ii = st.idx(x, y);
+        if (st.flags[ii] && dWallSet(st.wall[ii])) hist[st.type[ii]] = (hist[st.type[ii]] || 0) + 1;
+      }
+    }
+    const brickType = +Object.entries(hist).sort((a, b) => b[1] - a[1])[0][0];
+    const passable = (i) => !st.flags[i] || DOOR.has(st.type[i])
+      || (dWallSet(st.wall[i]) && st.type[i] !== brickType);
     const startY = dy - 1;
     const startI = st.idx(dx, startY);
     const startOpen = passable(startI);

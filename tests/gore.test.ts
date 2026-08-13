@@ -107,22 +107,38 @@ describe('① vanilla-gore.json 提取表健全性', () => {
     expect(one[0].ai).toEqual([{ slot: 1, value: 1345, not: false }]);
   });
 
-  it('提取残留清单：0 个不可求值 id/守卫/后处理；posExpr 仅 WoF 屏幕扫描 2 条', () => {
+  it('提取残留清单：0 个不可求值 id/守卫/后处理/位置表达式；WoF 屏幕网格已结构化', () => {
     const meta = (goreJson as unknown as { _meta: Record<string, unknown> })._meta;
     expect(meta.unresolved).toEqual([]);
     expect(meta.unresolvedGates).toEqual([]);
     expect(meta.unresolvablePost).toEqual([]);
     expect(meta.unresolvedCount).toBe(0);
     expect(meta.velExprCount).toBe(0);
-    expect(meta.posExprCount).toBe(2);
-    // 残留两条均为肉山屏幕级尘幕扫描（num593/594 依赖 Main.screenPosition，非 NPC 相对）
+    // WoF 屏幕级尘幕（num593/594 依赖 Main.screenPosition）已由提取器
+    // compileScreenGrid 编译为 screenGrid 域（NPC.cs:88307-88327），posExpr 清零
+    expect(meta.posExprCount).toBe(0);
+    expect(meta.screenGridCount).toBe(1);
     const residual: string[] = [];
     for (const [k, list] of Object.entries(TABLE)) {
       if (k === '_meta') continue;
       for (const e of list as GoreSpawnEntry[]) if (e.posExpr) residual.push(`${k}:${e.posExpr}`);
     }
-    expect(residual.every((r) => r.includes('num593'))).toBe(true);
-    expect(new Set(residual.map((r) => r.split(':')[0]))).toEqual(new Set(['113', '114']));
+    expect(residual).toEqual([]);
+  });
+
+  it('WoF 屏幕网格尘幕域常量对拍源码（NPC.cs:88307-88327）且仅 113 持有', () => {
+    const curtain = npcEntries(113).filter((e) => e.screenGrid);
+    expect(curtain.length).toBe(1);
+    expect(curtain[0].screenGrid).toEqual({
+      yStep: 50, ySpan: 'screenWidth', xSpan: 140, xStep: 46, dirShift: -80,
+      gate: 'playerDeepHell', gateTiles: 250,
+    });
+    expect(curtain[0].idMin).toBe(140);
+    expect(curtain[0].idMax).toBe(142);
+    // 早退排除（:88291-88298 `if (type == 114) {…; return;}`）：114 只剩 4 件眼 gore，
+    // 不再误摊嘴部四件 + 尘幕网格
+    expect(npcEntries(114).filter((e) => e.screenGrid)).toEqual([]);
+    expect(npcEntries(114).map((e) => e.id)).toEqual([137, 139, 139, 137]);
   });
 
   it('结构化 gates 全表可运行时求值（无 skip 残留门）', () => {

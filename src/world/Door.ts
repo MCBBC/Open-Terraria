@@ -4,7 +4,7 @@
 //   开门 frameX = 72*列 + (direction==-1 ? 36 : 0)（%72 后 0/36 为锚点列、18/54 为右侧列）。
 // 本项目曾误用 frameX = style*54（横排），越界导致门贴图不可见/错位。
 import type { TileStore } from './TileStore';
-import { T, TILE_BY_KEY } from '../data/tiles';
+import { T, TILE_BY_KEY, doorSmashable } from '../data/tiles';
 
 /** 关门锚点帧（顶格）：[frameX, frameY] */
 export function doorClosedFrame(style: number, variant = 0): [number, number] {
@@ -55,10 +55,15 @@ export function openDoor(st: TileStore, x: number, y: number, direction: number)
   const ai = st.idx(x, ay);
   const style = doorStyleOf(st.frameX[ai], st.frameY[ai]);
   const col = Math.floor(style / 36), row = style % 36;
-  // 目标侧列须为空（原版只砍草藤类，这里保守要求空格）
+  // 目标侧列仅许可砍切格（原版 OpenDoor cs:37698-37715：!tileCut && !=165 && !drip 才失败），
+  // 可砍格随后碎掉（:37717-37724 KillTile）。★曾保守要求全空=蛛网堵门永远打不开（偏差）
   const clearX = direction === -1 ? x - 1 : x + 1;
   for (let dy = 0; dy < 3; dy++) {
-    if (st.get(clearX, ay + dy) !== 0) return false;
+    const t = st.get(clearX, ay + dy);
+    if (t !== 0 && !doorSmashable(t)) return false;
+  }
+  for (let dy = 0; dy < 3; dy++) {
+    if (st.get(clearX, ay + dy) !== 0) st.setTile(clearX, ay + dy, 0); // KillTile 近似（砍切类 drop 均 null）
   }
   // 开门占 2 列：direction==-1 锚点左移一格、frameX+36（原版 num1/x 逻辑）
   const ax = direction === -1 ? x - 1 : x;

@@ -1203,7 +1203,10 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
     // 原版头生成 GetDestroyerSegmentsCount(:51339-51346: getGoodWorld?100:80) 身段
     // (135) + 1 尾(136)(2026-08-13 对齐:曾 79+1 差一;FTW 100 段同批补)
     const segs = enemySpawnChain(e, (game.world.seedFlags?.getGoodWorld ? 100 : 80) + 1);
-    for (const s of segs) addEnemy(game, s);
+    // realLife 共享生命建链（:50206-50227）:全链 ai[3]=头 → 段受击传导扣头
+    // 80000 总血、段 hp 镜像（StrikeNPC :82132-82137）——节不可单独打死
+    e.realLifeHost = e;
+    for (const s of segs) { s.realLifeHost = e; addEnemy(game, s); }
   }
   // ---- 出生链门淡入（AI_037 :50162-50182，1:1）----
   // 头 134 恒过；段 135/136 须前段 spawnAlpha<128 才启动——渐显沿链向尾传播

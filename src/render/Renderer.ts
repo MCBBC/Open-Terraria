@@ -49,7 +49,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { renderEnv } from './VanillaTiler';
-import { drawTileFlames } from './TileFlames';
+import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -130,8 +130,9 @@ import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
-import { dutchmanAnim } from '../entities/bossAI_dd2';
+import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
 import { wingDrawOf, wingDrawFrame } from '../data/vanillaWingVisuals';
+import { VanillaDust } from '../fx/VanillaDust';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
@@ -853,6 +854,9 @@ export class Renderer {
     this.ctx = this.canvas.getContext('2d')!;
     this.lightCanvas = document.createElement('canvas');
     this.lightCtx = this.lightCanvas.getContext('2d')!;
+    // 群系前景层 alpha（≈Main.bgAlphaFrontLayer）注入天空渲染器——AmbientSky.GetColor
+    // 六族乘子（Pegasus×神圣槽 等，AmbientSky.cs:334/:383/:556/:987/:1198/:1222）消费源
+    this.sky.attachBiomeBgAlpha(this.biomeBg.frontLayer());
     window.addEventListener('resize', this.onResize);
     this.resize();
   }
@@ -1138,7 +1142,8 @@ export class Renderer {
       this.weatherFx.draw(this, world);
     }
 
-    // 2d''.7 天空深化批世界内绘制：雨点落水涟漪（世界坐标）+ 月总死亡白闪/晨昏镜头光斑（全屏）
+    // 2d''.7 天空深化批世界内绘制：雨点落水涟漪（世界坐标）+ 晨昏镜头光斑（全屏）
+    //      （月总死亡白闪已挪帧尾 7c' 段，Main.cs:61763）
     this.sky.drawWorldFx(ctx, cam.x, cam.y, z, viewW, viewH);
 
     // 3.5 入驻旗帜（Main.cs:40152 DrawNPCHousesInWorld：有家 NPC 在家坐标上方
@@ -1171,11 +1176,11 @@ export class Renderer {
       const eb = this.emoteSheet();
       if (eb) drawEmotes(this.ctx, eb);
     }
-    this.drawPlayer(player, world, swing);
+    this.drawPlayer(player, world, swing, flicker);
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
     // 挥舞动画 = msg13 useItem 位派生的 swingNet（对齐本地 swing 参数形状））
-    for (const rp of this.remotePlayers) { this.drawPlayer(rp, world, rp.swingNet); }
+    for (const rp of this.remotePlayers) { this.drawPlayer(rp, world, rp.swingNet, flicker); }
     // PvP 头顶血条（备案偏差：原版无玩家头顶名/血条——仅悬停提示与地图头像边框；
     // 真联机 PvP 下"谁是可攻击目标"是核心信息，按计划以头顶条替代）。
     // 仅 hostile 目标显示（同队/非 hostile 玩家无条），队伍色描边 + 原版血条同款
@@ -1215,6 +1220,10 @@ export class Renderer {
     //     原版 ~550 尘+110 gore，且死亡触发点只在渲染侧可得）
     this.stepWoFDeathFx();
     ctx.globalAlpha = 1;
+
+    // 5c. 原版 Dust lit pass（DrawDust :38266——DrawGore 之后；乘光族画在
+    //     合成前，全屏 compositeLight 逐像素乘光 ≈ 原版逐尘 Lighting.GetColor）
+    this.drawVanillaDustPass(false, cam);
 
     // 6. 挖掘/放置光标：挖掘中黄色填充随进度加深（半透明黄 → 破坏完成时最深）
     if (hover) {
@@ -1262,6 +1271,14 @@ export class Renderer {
     //     主 pass 跳过该族，下限色 (max(R,100),max(G,150),255) 不被全屏乘光压掉
     this.drawBrightVines(entities, cam, z, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
+    // 7d. 原版 Dust 全亮 pass（type 6/15/59-64 强制 White :38406——不受光照，
+    //     合成后直画 = GetColor(White) 等价）
+    this.drawVanillaDustPass(true, cam);
+
+    // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
+    //     不受光照；drawPlayer 收集、此处消费）
+    this.flushWingGlow(cam, z);
+
     // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画，
     //     颜色手动乘该格光照（Lighting.GetColor 语义）
     if (hover?.smart) {
@@ -1271,6 +1288,12 @@ export class Renderer {
 
     // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
     this.drawMoonLordShake(ctx, cam, viewW, viewH);
+
+    // 7c'. 月总死亡白闪（MoonlordDeathDrama.DrawWhite Main.cs:61763：帧尾——
+    //     ScreenDarkness（=光照合成 7 段）之后、ScreenObstruction 之前）。2026-08-13
+    //     挪正：此前挂 sky.drawWorldFx（2d' 世界变换段 = tile 上实体下），白闪被
+    //     实体绘制与全屏乘光压掉
+    this.sky.drawMoonlordWhiteFlash(ctx, viewW, viewH);
 
     // 7c-bis. ScreenObstruction 遮屏（ScreenObstruction.cs 1:1）：星云头蟹 421 头顶吸附
     // 授 Obstructed(163) → headcovered → 目标 0.95/步进 0.3 的黑幕逼近，玩家矩形开孔
@@ -1728,6 +1751,82 @@ export class Renderer {
     ctx.drawImage(img, 0, p.row * sh, sw, sh, -sw / 2, -sh / 2, sw, sh);
     ctx.restore();
     void z;
+  }
+
+  // ===================== 原版 Dust 绘制（Main.DrawDust :38266-38436）=====================
+  /** Game 侧注入（Game 构造后赋值；缺省 = 无尘） */
+  vanillaDust: import('../fx/VanillaDust').VanillaDust | null = null;
+  /** 8×8 像素重着色暂存（GetAlpha 常色精确化：261/6/264 等非 255 通道） */
+  private dustScratch: HTMLCanvasElement | null = null;
+  private dustScratch2: HTMLCanvasElement | null = null;
+
+  /** DrawDust 单尘（屏幕空间，经 worldToScreen + zoom）。fullbright pass 画在
+   *  光照合成后（= 原版 type 6/15/59-64 强制 White :38406）；lit pass 画在合成前
+   *  （逐像素乘光 ≈ 原版逐尘取光）。两段共用本体（GetAlpha）+ 自定义色
+   *  （GetColor :2773 加性钳位）双 pass。屏外矩形（±1000/±1050）外尘直接失活
+   *  （:38272-38284 Intersects 语义） */
+  private drawVanillaDustPass(fullbright: boolean, cam: Camera): void {
+    const vd = this.vanillaDust;
+    if (!vd) return;
+    const img = this.atlas?.ensureVImage('vanilla/Dust.png');
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const ctx = this.ctx;
+    // 剔除矩形（:38268-38269：视口外扩 ±1000/±1050，世界坐标）
+    const worldW = cam.viewW / cam.zoom, worldH = cam.viewH / cam.zoom;
+    const left = cam.x - worldW / 2 - 1000, top = cam.y - worldH / 2 - 1050;
+    const s1 = (this.dustScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    const s2 = (this.dustScratch2 ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    const c1 = s1.getContext('2d', { willReadFrequently: true })!;
+    const c2 = s2.getContext('2d', { willReadFrequently: true })!;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const d of vd.each(fullbright)) {
+      if (d.x < left || d.x > left + worldW + 2000 || d.y < top || d.y > top + worldH + 2100) {
+        d.active = false;   // :38424-38430 出界失活
+        continue;
+      }
+      const [px, py] = cam.worldToScreen(d.x, d.y);
+      const { rgb, a } = VanillaDust.alphaOf(d);
+      if (a <= 0.004 && !d.color) continue;
+      // 本体 pass（GetAlpha 精确通道）
+      c1.clearRect(0, 0, 8, 8);
+      c1.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+      const id = c1.getImageData(0, 0, 8, 8);
+      for (let i = 0; i < id.data.length; i += 4) {
+        id.data[i] = id.data[i] * rgb;
+        id.data[i + 1] = id.data[i + 1] * rgb;
+        id.data[i + 2] = id.data[i + 2] * rgb;
+        id.data[i + 3] = id.data[i + 3] * a;
+      }
+      c1.putImageData(id, 0, 0);
+      ctx.save();
+      ctx.translate(px, py);
+      if (d.rotation) ctx.rotate(d.rotation);
+      if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+      ctx.drawImage(s1, -4, -4);
+      ctx.restore();
+      // 自定义色 pass（GetColor :2773：clamp(color.ch − (255 − base.ch)) 后再乘贴图）
+      const cp = VanillaDust.colorPass(d, rgb, a);
+      if (cp && (cp.a > 0.004)) {
+        c2.clearRect(0, 0, 8, 8);
+        c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+        const id2 = c2.getImageData(0, 0, 8, 8);
+        for (let i = 0; i < id2.data.length; i += 4) {
+          id2.data[i] = id2.data[i] * cp.r;
+          id2.data[i + 1] = id2.data[i + 1] * cp.g;
+          id2.data[i + 2] = id2.data[i + 2] * cp.b;
+          id2.data[i + 3] = id2.data[i + 3] * cp.a;
+        }
+        c2.putImageData(id2, 0, 0);
+        ctx.save();
+        ctx.translate(px, py);
+        if (d.rotation) ctx.rotate(d.rotation);
+        if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+        ctx.drawImage(s2, -4, -4);
+        ctx.restore();
+      }
+    }
+    ctx.restore();
   }
 
   /** 小动物：原版 NPC 纵向帧条动画（移动时循环全帧，静止首帧；贴图默认朝左镜像） */
@@ -2297,6 +2396,9 @@ export class Renderer {
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
         // 回填实际贴图底边（世界 y），供 drawHealthBar 定位兜底（见 Enemy.spriteBottomWorld 注释）
         e.spriteBottomWorld = (grounded ? e.y + e.h : e.cy) + (anchorY + eocOff + r.sh);
+        // 568/569 出生态紫雾（本体绘制层，先于本体画——Main.cs:26060-26076 拷贝循环
+        // 在 vector72 本体 draw 之前）
+        if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherBirth(ctx, e, r, scale);
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
         //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA
@@ -2374,6 +2476,8 @@ export class Renderer {
         ctx.globalCompositeOperation = 'source-over';
         // 星璇塔护盾半球（在精灵之后叠画，对齐原版 DrawNPC 尾段顺序）
         if (isTowerId(e.vanillaId)) this.drawTowerShield(e, world);
+        // 568/569 死亡紫魂环（Main.cs:26130-26155：Extra_89 ×16 @400，镜像变换外）
+        if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherSoulRing(e);
         return;
       }
       return; // 表未加载完成：本帧不画（下帧懒加载完成）
@@ -2718,13 +2822,45 @@ export class Renderer {
     return !!e.vanilla?.noGravity;
   }
 
+  /** 568/569 出生态紫雾参数（Main.cs:25899-25907 对轨道族的出生覆写）：
+   *  localAI[3]<60 期间 num299=3 / num301=8 / num300=1−(lai3/60)²（拷贝随出生收敛到
+   *  盒心）。拷贝色链（:26061-26076）：npcColor→Lerp(紫,0.5)→GetAlpha→Lerp(紫,1)
+   *  ＝紫(127,0,255,0) 全覆盖（A 恒 0 → 加性）再 ×(1−num300)=num315²——故拷贝
+   *  强度 = num315²，与本体渐显同步。返回 null = 出生完成（非出生态，不画雾）。 */
+  static npcWitherBirthParams(lai3: number): { count: number; radius: number; fade: number } | null {
+    if (lai3 >= 60) return null;
+    const num315 = lai3 / 60;
+    const num300 = 1 - num315 * num315;
+    return { count: 3, radius: 8 * num300, fade: num315 * num315 };
+  }
+
+  /** 568/569 死亡紫魂环参数（Main.cs:26130-26155：localAI[0]>0 期间 Extra_89 ×16 份
+   *  @半径 400×num323）。alpha15 = (cos(lai0·2π/60)·0.5+0.5)×32 截字节（60t 脉动）；
+   *  color47 = Color(180,90,255,alpha15)×0.75 → RGB(135,67,191)、A=alpha15×0.75；
+   *  lai0<60 段再 ×GetLerpValue(0,60) 且 num323=Lerp(1,0.5,1−lerp²)（环由 0.5 膨到 1）。
+   *  num324 = lai0×0.0041887905（=π/750）慢旋；每份极角 = num324+2π·i/16，旋转再 +π。
+   *  逐份画在 Extra_89 中心锚（origin=size/2），SpriteEffects.None。 */
+  static npcSoulRingParams(lai0: number): {
+    count: number; radius: number; angle0: number; scale: number; alpha: number;
+  } | null {
+    if (lai0 <= 0) return null;
+    const alpha15 = Math.trunc((Math.cos(lai0 * (Math.PI * 2) / 60) * 0.5 + 0.5) * 32);
+    let a = (alpha15 * 0.75) / 255;
+    let scale = 1;
+    if (lai0 < 60) {
+      const lerp3 = Renderer.glowLerpValue(0, 60, lai0);
+      a *= lerp3;
+      scale = 1 - 0.5 * (1 - lerp3 * lerp3);   // MathHelper.Lerp(1, 0.5, 1−lerp²)
+    }
+    return { count: 16, radius: 400 * scale, angle0: lai0 * 0.0041887905, scale, alpha: a };
+  }
+
   /** 轨道族逐帧参数（Main.cs:25826-25829 num299/num300/num302 初值 + 各 case 覆写 +
    *  :26091/:26108/:26123 半径公式）。tSec=GlobalTimeWrappedHourly；lai3 供 568/569
    *  出生门（:26116 localAI[3]>=60，未过返回 null）。ai2 仅 661 消费，按原版
    *  Clamp(0,50)（NPC.cs:45253）钳界。
-   *  【登记】本仓 AI_107(ImprovedWalkers) 未承载 localAI[3] 出生计时（lai3 恒 0），
-   *  drawNpcGlow 对 568/569 按出生完成态 60 代入；出生 3 份紫雾收敛（:25899-25907）
-   *  属本体绘制层，未接。 */
+   *  568/569 的 lai3 由 witherBeastLocal 出膛取（AI_107 出膛渐显 0→60）；出生态
+   *  本体绘制层的 3 份紫雾见 npcWitherBirthParams/drawWitherBirth。 */
   static npcGlowOrbitParams(
     id: number, tSec: number, ai2: number, lai3 = 60,
   ): { count: number; num300: number; radius: number; phase: number } | null {
@@ -2812,10 +2948,9 @@ export class Renderer {
   /** 160/209 城镇 NPC 微光/派对变体贴图档（Main.cs:25769/:25783）：
    *  - 160 松露人：townNpcVariationIndex==1（微光态）→ Glow_352，否则 Glow_166
    *  - 209 电子人：常态 Glow_167；微光态按 altTexture 选 Glow_350（≠1）/Glow_351（==1）
-   *  返回 null = 该 id 无变体链。【登记】城镇 NPC 走 drawTownNPC（TownNPC 类），
-   *  不经过 drawNpcGlow → 本链当前仅作 1:1 备案，接通需 drawTownNPC 侧挂 glow 层
-   *  （该函数非本批所有权范围）；160 的 shimmerTransparency RGB 衰减（:25771-25776）
-   *  TownNPC 未承载该字段，亦登记。 */
+   *  返回 null = 该 id 无变体链。已接通：drawTownNPC 本体后按本档 'lighter' 叠画
+   *  （Color(128−α/2,×3,0)，α=城镇 NPC 静态 0）；160 的 shimmerTransparency
+   *  RGB 衰减（:25771-25776）TownNPC 未承载该字段，登记。 */
   static npcGlowVariantTex(id: number, shimmered: boolean, altTexture: number): string | null {
     if (id === 160) return shimmered ? 'vanilla/Glow_352.png' : 'vanilla/Glow_166.png';
     if (id === 209) return shimmered ? (altTexture !== 1 ? 'vanilla/Glow_350.png' : 'vanilla/Glow_351.png') : 'vanilla/Glow_167.png';
@@ -2888,7 +3023,7 @@ export class Renderer {
       // Bottom+4 不同源，故不沿用 bx/by，按 noGravity 自行换算盒心。
       const prm = Renderer.npcGlowOrbitParams(
         e.vanillaId ?? -1, performance.now() / 1000, e.ai2,
-        (e.vanillaId === 568 || e.vanillaId === 569) ? 60 : e.lai3,
+        (e.vanillaId === 568 || e.vanillaId === 569) ? witherBeastLocal(e)[1] : e.lai3,
       );
       if (prm) {
         const cfg = Renderer.NPC_GLOW_ORBIT[e.vanillaId ?? -1]!;
@@ -4059,6 +4194,69 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** 568/569 出生态紫雾（Main.cs:25899-25907 参数 + 拷贝循环 :26060-26076）：
+   *  localAI[3]<60 期间 3 份【本体贴图】拷贝绕盒心收敛（num301×num300=8→0），
+   *  加性紫(127,0,255,0)×num315²（A 恒 0 → 'lighter'，同轨道族 copyFade 惯例）。
+   *  调用点在 drawEnemy 本体 drawImage 之前（原版拷贝循环先于 vector72 本体层）
+   *  → 本体压住紫雾。num47=−3 的整体上移与轨道族共用（:25898）。 */
+  private drawWitherBirth(
+    ctx: CanvasRenderingContext2D,
+    e: Enemy,
+    r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+    scale: number,
+  ) {
+    const prm = Renderer.npcWitherBirthParams(witherBeastLocal(e)[1]);
+    if (!prm) return;
+    const mist = this.tintedSprite(`npc${e.vanillaId}:birth`, r, [127, 0, 255]);
+    const cy = -e.h / 2 / scale - 3 / scale;   // 盒心（地面型原点在盒底）+ num47(-3)
+    const prevOp = ctx.globalCompositeOperation;
+    const prevA = ctx.globalAlpha;
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < prm.count; i++) {
+      const ang = (i / prm.count) * Math.PI * 2;
+      const dx = (Math.cos(ang) * prm.radius) / scale;
+      const dy = (Math.sin(ang) * prm.radius) / scale;
+      ctx.globalAlpha = Math.max(0, Math.min(1, prm.fade));
+      ctx.drawImage(mist, 0, 0, mist.width, mist.height,
+        -r.sw / 2 + dx, cy - r.sh / 2 + dy, r.sw, r.sh);
+    }
+    ctx.globalCompositeOperation = prevOp;
+    ctx.globalAlpha = prevA;
+  }
+
+  /** 568/569 死亡紫魂环（Main.cs:26130-26155）：localAI[0]>0（灵气态计数，AI_107
+   *  cs:63882 每 tick +1）期间 Extra_89 ×16 份 @半径 400×num323 绕盒心慢旋
+   *  （num324=π/750·lai0），每份旋转 = 极角+π、中心锚、SpriteEffects.None——
+   *  故在实体镜像变换外画（drawEnemy ctx.restore 之后，同 drawTowerShield 段）。
+   *  色 = (180,90,255,A)×0.75（A 有值 → 普通 alpha 混合，非加性）。 */
+  private drawWitherSoulRing(e: Enemy) {
+    if (!this.atlas) return;
+    const prm = Renderer.npcSoulRingParams(witherBeastLocal(e)[0]);
+    if (!prm) return;
+    const img = this.atlas.ensureVImage('vanilla/Extra_89.png');
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const ctx = this.ctx;
+    const soul = this.tintedSprite('extra89soul', {
+      img, sx: 0, sy: 0, sw: img.naturalWidth, sh: img.naturalHeight,
+    }, [135, 67, 191]);   // (180,90,255)×0.75 截整
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (let i = 0; i < prm.count; i++) {
+      const ang = prm.angle0 + (Math.PI * 2 * i) / prm.count;
+      const px = e.cx + Math.cos(ang) * prm.radius;
+      const py = e.cy + Math.sin(ang) * prm.radius;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, prm.alpha));
+      ctx.translate(px, py);
+      ctx.rotate(ang + Math.PI);
+      ctx.scale(prm.scale, prm.scale);
+      ctx.drawImage(soul, -soul.width / 2, -soul.height / 2);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   /** AI_013 植物/攀爬者族茎蔓（Main.cs:22433-22514 1:1）：从 NPC 中心向锚点格
    *  中心（ai0/ai1 各 ×16+8）逐段画 Chain 贴图——步长 28px、距锚 <40px 时尾段
    *  缩短对齐（259/260 真菌球为 12/20）；整链 rotation=atan2(dy,dx)-π/2（贴图
@@ -4604,8 +4802,13 @@ export class Renderer {
    *  史莱姆派对贴图与微光档） */
 
   // ---- 派对帽（Main.cs:26814-27089 DrawNPCExtras Extra[72] 1:1）----
-  // NPCFramingGroup（NPCID.cs:4875：默认 0；18/20/208/178/124/353→1；369→2；160→3；城镇史莱姆 670/678-684→7）
-  private static readonly HAT_FRAMING_GROUP: Record<number, number> = { 18: 1, 20: 1, 208: 1, 178: 1, 124: 1, 353: 1, 369: 2, 160: 3, 670: 7, 678: 7, 679: 7, 680: 7, 681: 7, 682: 7, 683: 7, 684: 7 };
+  // NPCFramingGroup（NPCID.cs:4875：默认 0；18/20/208/178/124/353/633→1；369→2；
+  // 160→3；宠物 637→4 / 638→5 / 656→6（每组帧数 28/28/26）；城镇史莱姆 670/678-684→7）
+  private static readonly HAT_FRAMING_GROUP: Record<number, number> = {
+    18: 1, 20: 1, 208: 1, 178: 1, 124: 1, 353: 1, 633: 1, 369: 2, 160: 3,
+    637: 4, 638: 5, 656: 6,
+    670: 7, 678: 7, 679: 7, 680: 7, 681: 7, 682: 7, 683: 7, 684: 7,
+  };
   /** TownNPCsFramingGroups（NPCID.cs:4879-4928：8 组，值域 −6..+6——按帧行号的帽 Y 微调） */
   private static readonly HAT_FRAME_GROUPS: number[][] = [
     [0, 0, 0, -2, -2, -2, 0, 0, 0, 0, -2, -2, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],          // 0（26）
@@ -4633,6 +4836,52 @@ export class Renderer {
     if (id === 178 || id === 208 || id === 369) return 1;
     return 0;
   }
+
+  /** 城镇史莱姆集（NPCID.Sets.IsTownSlime NPCID.cs:4446：670/678-684；绑缚态
+   *  685/686 不在）——帽位 num5 取反 + 专属 num3/num4 档（Main.cs:26901-26928） */
+  private static readonly HAT_TOWN_SLIME = new Set([670, 678, 679, 680, 681, 682, 683, 684]);
+
+  /** num3 逐 type 档 + 帧修正（Main.cs:26845-26887：公主 663=1；宠物三档——
+   *  637 猫基准 6（帧 19/22-27 −2、11-15 +2）、638 狗 12、656 兔基准 6（帧 1-3 −2、
+   *  18-25 −4、8 −2）；城镇史莱姆（num5 另取反）：default 1、670/679 −1、681 −2、
+   *  682 −1(num4+2)、683 −1(num4−2)、684 −4）。帧号 = frame.Y/帧高。
+   *  返回 [num3, num4]。 */
+  static hatNum3(id: number, frame: number): [number, number] {
+    if (id === 663) return [1, 0];
+    if (id === 637) {
+      let v = 6;
+      if (frame === 19 || (frame >= 22 && frame <= 27)) v -= 2;   // 20/21 不在表内
+      else if (frame >= 11 && frame <= 15) v += 2;
+      return [v, 0];
+    }
+    if (id === 638) return [12, 0];
+    if (id === 656) {
+      let v = 6;
+      if (frame >= 1 && frame <= 3) v -= 2;
+      else if (frame >= 18 && frame <= 25) v -= 4;
+      else if (frame === 8) v -= 2;
+      return [v, 0];
+    }
+    if (Renderer.HAT_TOWN_SLIME.has(id)) {
+      if (id === 670 || id === 679) return [-1, 0];
+      if (id === 681) return [-2, 0];
+      if (id === 682) return [-1, 2];
+      if (id === 683) return [-1, -2];
+      if (id === 684) return [-4, 0];
+      return [1, 0];   // 678/680 与 default
+    }
+    return [0, 0];
+  }
+
+  /** 攻击/坐姿态 X 修正（Main.cs:27001-27008）：海盗 229 攻击态 ai[0]==12 → −4×dir；
+   *  酒保 550 坐姿 ai[0]==5 → +7×dir。仓内映射：229 = TownNPC.attackState 12
+   *  （TOWN_ATTACK_TYPE[229]=1 弓 → atkState 12，AI_007 :55902 同 ai[0] 值）；
+   *  550 坐姿未建模（ai0 恒 0）→ 分支值 1:1 备案待接 */
+  static hatStateOffsetX(id: number, ai0: number): number {
+    if (id === 229 && ai0 === 12) return -4;
+    if (id === 550 && ai0 === 5) return 7;
+    return 0;
+  }
   /** GetPartyHatColor（NPC.cs:67246-67269：name+whoAmI+moonPhase → 5 色格）；
    *  色格映射 Main.cs:26824-26838（1→0 蓝/2→16 粉/3→17 青/4→18 紫/5→19 白） */
   private static partyHatCell(name: string, whoAmI: number, moonPhase: number, isDay: boolean): number {
@@ -4657,16 +4906,24 @@ export class Renderer {
     const num = n.frame; // frame.Y / frame.Height
     const group = Renderer.HAT_FRAME_GROUPS[Renderer.HAT_FRAMING_GROUP[n.vanillaId] ?? 0]
       ?? Renderer.HAT_FRAME_GROUPS[0];
-    const num3 = n.vanillaId === 663 ? 1 : 0; // 公主头部前伸（Main.cs:26845-26848）
+    // num3/num4 逐 type 档 + 宠物帧修正（Main.cs:26845-26887，含宠物 637/638/656
+    // 三分支——E 批曾略；663 公主头部前伸亦并入）
+    const [hatNum3, num4] = Renderer.hatNum3(n.vanillaId, num);
     let num5 = n.facing; // spriteDirection（facing>0=朝右=镜像同体块）
-    let num4 = 0;
-    let hatNum3 = num3;
-    if (n.vanillaId === 682) { num5 = -num5; hatNum3 = -1; num4 = 2; } // IsTownSlime（:26901-26928，仅 682 在库）
+    // 城镇史莱姆帽位随胖体翻转（Main.cs:26903 num5*=−1）
+    if (Renderer.HAT_TOWN_SLIME.has(n.vanillaId)) num5 = -num5;
+    // 攻击/坐姿 X 修正（Main.cs:27001-27008）：229 弓态 −4×dir / 550 坐姿 +7×dir
+    const stateX = Renderer.hatStateOffsetX(n.vanillaId, n.attackState);
     const cell = Renderer.partyHatCell(n.givenName, n.id, world.clock.moonPhase ?? 0, world.clock.isDay);
     const W = 38, H = 34; // Extra_72 格 40×36 −2 边缘（:26840-26841）
-    // vector 装配（:26961-27065）：-(0,h)+(-2*num5,0) → +num3*num5 → +array[num] → +HatOffsetY → +num7*num5 → +4*num5
-    const vx = -2 * num5 + hatNum3 * num5 + Renderer.hatXOffset(n.vanillaId) * num5 + 4 * num5;
+    // vector 装配（:26961-27065）：-(0,h)+(-2*num5,0) → +num3*num5 → +array[num] → +HatOffsetY
+    //   → +态修正×num5 → +num7*num5 → +4*num5（态修正在 num7 之前，:27001-27008 段）
+    const vx = -2 * num5 + hatNum3 * num5
+      + stateX * num5 + Renderer.hatXOffset(n.vanillaId) * num5 + 4 * num5;
     const vy = -(n.h) + (group[num] ?? group[0]) + num4 + (Renderer.HAT_OFFSET_Y[n.vanillaId] ?? 0);
+    // 【登记 GAP】num6 坐姿 Y 修正（:26963-26987：ai[0]==5 时 −4，637 猫 −12 / 663
+    // −8 / 38 −8 / 124 −2 / 108·178 −6）——TownNPC 未建模坐椅子态（ai0 无 5 值），
+    // 分支暂不接；坐姿接入时按此表补
     // origin = (W/2, H-12)（:27009）→ drawImage 左上 = (vx − W/2, vy − (H−12))
     ctx.drawImage(sheet, cell * 40, 0, 40, 36, vx - W / 2, vy - (H - 12), W, H);
   }
@@ -4721,6 +4978,29 @@ export class Renderer {
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
+        // ---- 160/209 Glow 变体档（Main.cs:25769-25799，S 备案 npcGlowVariantTex 接通）----
+        //      城镇 NPC 不经 drawNpcGlow → 本体后挂同档 Glow：Color(128−α/2,×3,0)
+        //      A=0 → 'lighter' 加性（'128a2' 同款表达式）；160 松露人微光态 Glow_352、
+        //      209 电子人微光态按 altTexture 选 Glow_350(≠1)/Glow_351(==1)。α=城镇 NPC
+        //      静态 0 → 128/255；shimmerTransparency RGB 衰减（:25771-25776）未承载（登记）。
+        //      表布局与 NPC 表同构 → 帧 = 当前 townSheet 行（微光档案表帧高可异于本体，
+        //      故按 Glow 表自身高/帧数切片，行号取 n.frame）
+        const glowTex = n.bound ? null : Renderer.npcGlowVariantTex(n.vanillaId, n.shimmered, n.altTexture);
+        if (glowTex) {
+          const gi = this.atlas.ensureVImage(glowTex);
+          if (gi && gi.complete && gi.naturalWidth) {
+            const gCount = townSheetFrameCount(n.vanillaId);
+            const gfh = Math.max(1, Math.floor(gi.height / gCount));
+            const gIdx = Math.min(gCount - 1, Math.max(0, n.frame));
+            const op = ctx.globalCompositeOperation;
+            const ga = ctx.globalAlpha;
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = 128 / 255;   // (128 − α/2)/255，α=0
+            ctx.drawImage(gi, 0, gIdx * gfh, gi.width, gfh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
+            ctx.globalCompositeOperation = op;
+            ctx.globalAlpha = ga;
+          }
+        }
         if (this.scene?.partyUp && world) this.drawPartyHat(ctx, n, world);
         ctx.filter = 'none';
         ctx.restore();
@@ -4739,7 +5019,308 @@ export class Renderer {
 
   /** swing 形状（Game.swing / 远端 swingNet 同构）。
    *  useStyle 分族 + aim（useStyle 5/13 的瞄准角）由 Game.useSwing 写入 */
-  private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null) {
+  /** 身体帧行复算（47/49 锚点行修正用——与下方纸娃娃/legacy 行选择同规则，
+   *  独立复算避免改动并行会话在改的帧选择主体） */
+  private playerBodyRow(p: Player,
+    swing: { useStyle?: number } | null, staticHoldStyle: number,
+    mnt: unknown): number {
+    const useRow = swing ? this.useStyleBodyRow(swing as never, p) : -1;
+    if (useRow >= 0) return useRow;
+    if (mnt || p.ridingCart) return 3;
+    if (Math.abs(p.vx) > 0.3 && p.onGround) return 6 + Math.floor(p.animTime / 6) % 14;
+    if (staticHoldStyle === 2) return 2;
+    if (staticHoldStyle === 4 && p.onGround) return 0;
+    if (staticHoldStyle) return 3;
+    if (!p.onGround) return p.vy < 0 ? 1 : 4;
+    return 0;
+  }
+
+  /** 全亮翅膀绘制队列（mainGlow 主纹理 + 全部叠画；光照合成后 flush） */
+  private wingGlowQueue: Array<{
+    p: Player; slot: number; fr: number; anchor: [number, number];
+    wx: number; wy: number;
+  }> = [];
+  /** 均一色调 scratch（叠画 tint 精确化：RGB×tint/255 + A×alpha/255） */
+  private wingTintScratch: HTMLCanvasElement | null = null;
+
+  /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z) */
+  private flushWingGlow(cam: Camera, z: number): void {
+    if (!this.wingGlowQueue.length) return;
+    const atlas = this.atlas;
+    const ctx = this.ctx;
+    if (!atlas) { this.wingGlowQueue.length = 0; return; }
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const e of this.wingGlowQueue) {
+      const d = wingDrawOf(e.slot);
+      const [sx, sy] = cam.worldToScreen(e.wx, e.wy);
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.scale(e.p.facing * z, z);
+      ctx.translate(e.anchor[0], e.anchor[1]);
+      // ---- 全亮主纹理 ----
+      const mainTex = d.rainbowLayer ? atlas.ensureVImage('vanilla/Extra_171.png')
+        : atlas.ensureVImage(`vanilla/Wings_${e.slot}.png`);
+      if (d.mainGlow && mainTex && mainTex.naturalWidth > 0) {
+        const fh = Math.floor(mainTex.naturalHeight / d.frames);
+        let a = 1, tint = 1;
+        if (d.mainGlow === 'c250a100') { tint = 250 / 255; a = 100 / 255; }
+        else if (d.mainGlow === 'luna') {
+          // GetLunaGlowColor :185-190：(255³,100)×Remap(WrappedLerp(miscCounter%100/100))×免疫
+          const lerp = (e.p.miscCounter % 100) / 100;
+          const wrap = lerp < 0.5 ? lerp * 2 : (1 - lerp) * 2;   // WrappedLerp(0,1,t)
+          const pulse = 0.85 + 0.15 * Math.min(1, Math.max(0, wrap));
+          tint = 1; a = (100 / 255) * pulse;
+          if (e.p.iframes > 0 && e.p.iframes % 6 < 2) a *= 0.45;
+        }
+        if (tint >= 0.999) {
+          ctx.globalAlpha = a;
+          ctx.drawImage(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
+            -mainTex.naturalWidth / 2, -fh / 2, mainTex.naturalWidth, fh);
+        } else {
+          const sc = this.tintSlice(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh, tint, 1);
+          if (sc) {
+            ctx.globalAlpha = a;
+            ctx.drawImage(sc, -mainTex.naturalWidth / 2, -fh / 2);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+      // ---- 叠画 ----
+      const ov = d.overlay;
+      if (ov) this.drawWingOverlay(e.p, e.slot, d, e.fr, cam);
+    }
+    ctx.restore();
+    this.wingGlowQueue.length = 0;
+  }
+
+  /** 均一色调 scratch：绘制 (img, sx, sy, sw, sh) → tint×RGB / 返回临时画布 */
+  private tintSlice(img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    tint: number, alphaMul: number): HTMLCanvasElement | null {
+    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+    sctx.clearRect(0, 0, sw, sh);
+    sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    if (tint < 0.999 || alphaMul < 0.999) {
+      const id = sctx.getImageData(0, 0, sw, sh);
+      for (let i = 0; i < id.data.length; i += 4) {
+        id.data[i] *= tint; id.data[i + 1] *= tint; id.data[i + 2] *= tint;
+        id.data[i + 3] *= alphaMul;
+      }
+      sctx.putImageData(id, 0, 0);
+    }
+    return sc;
+  }
+
+  /** DrawStarboardRainbowTrail（:2901-2961）：翅膀 45 的 Projectile_250 彩虹拖尾。
+   *  AdvancedShadows 位置历史（≤31）逐段拉伸绘制：scale(1.7, |dx|/贴图高)、
+   *  rotation=π/2·direction、alpha=(((1−i/n)²·min(|dx|/4,1)·0.5)²)·(64/255)·路径系数，
+   *  每段另画 0.25/0.5/0.75 三份插值拷贝。屏幕空间（flush 内调用） */
+  private drawStarboardTrail(p: Player, cam: Camera): void {
+    const atlas = this.atlas;
+    if (!atlas) return;
+    const img = atlas.ensureVImage('vanilla/Projectile_250.png');
+    const hist = p.advancedShadows;
+    const n = Math.min(hist.length - 1, 30);
+    if (!img || img.naturalWidth === 0 || n < 1) return;
+    const ctx = this.ctx;
+    // 路径系数 num4 = clamp(总程/160, 0, 1)（:2909-2913）
+    let total = 0;
+    for (let i = n; i > 0; i--) {
+      total += Math.hypot(hist[i].x - hist[i - 1].x, hist[i].y - hist[i - 1].y);
+    }
+    const num4 = Math.min(1, total / 160);
+    if (num4 <= 0) return;
+    const off = { x: 10, y: p.h - 4 };   // DefaultSize×(0.5,1)+(0,−4)（:2924-2928）
+    const texH = img.naturalHeight;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (let i = n; i > 0; i--) {
+      const pos = cam.worldToScreen(hist[i].x + off.x, hist[i].y + off.y);
+      const pos2 = cam.worldToScreen(hist[i - 1].x + off.x, hist[i - 1].y + off.y);
+      const dx = Math.abs(pos2[0] - pos[0]);
+      let a = 1 - i / n;
+      a *= a;
+      a *= Math.min(Math.max(dx / 4, 0), 1);
+      a *= 0.5;
+      a *= a;
+      const alpha = a * (64 / 255) * num4;
+      if (alpha <= 0.004) continue;
+      const z = cam.zoom;
+      const scale = { x: 1.7, y: dx / texH };
+      const rot = Math.PI / 2 * p.facing;
+      const drawSeg = (x: number, y: number) => {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(x, y);
+        ctx.rotate(rot);
+        ctx.scale(scale.x * z, scale.y * z);
+        ctx.drawImage(img, -img.naturalWidth / 2, -texH / 2);
+        ctx.restore();
+      };
+      drawSeg(pos[0], pos[1]);
+      for (let t = 0.25; t < 1; t += 0.25) {
+        drawSeg(pos[0] + (pos2[0] - pos[0]) * t, pos[1] + (pos2[1] - pos[1]) * t);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** Wings 40 Betsy 程序化摆动（:854-896）：空气帧 k=0..7（cycle 4）/地面帧 k=8..13
+   *  （cycle 3），每片偏移 = 轨道摆动(miscCounterNormalized)+速度反拖(×−1.5)+
+   *  朝向外推(×3)，帧格 W−2/H−2 中心锚，色 (250³,100)。flush 内（局部空间） */
+  private drawBetsyWings(p: Player, slot: number, _fr: number): void {
+    const atlas = this.atlas;
+    if (!atlas) return;
+    const img = atlas.ensureVImage(`vanilla/Wings_${slot}.png`);
+    if (!img || img.naturalWidth === 0) return;
+    const ctx = this.ctx;
+    const k0 = p.vy === 0 ? 8 : 0, k1 = p.vy === 0 ? 14 : 8;
+    const cyc = p.vy === 0 ? 3 : 4;
+    const mcn = p.miscCounter / 300;   // miscCounterNormalized :3241
+    const fw = img.naturalWidth, fh14 = Math.floor(img.naturalHeight / 14);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (let k = k0; k < k1; k++) {
+      const num10 = (k - k0) % cyc;
+      const ang = (mcn * (2 + num10) + num10 * 0.5) * Math.PI * 2;
+      // (0, 0.5).RotatedBy(ang) × (num10+1)（:882-884）——向量 (0,0.5) 旋转 ang
+      const wx = -Math.sin(ang) * 0.5 * (num10 + 1);
+      const wy = Math.cos(ang) * 0.5 * (num10 + 1);
+      const px = wx + p.vx * -1.5 * (num10 / cyc) + 3;   // zero.X = direction×3 → 局部 3
+      const py = wy + p.vy * -1.5 * (num10 / cyc);
+      ctx.globalAlpha = 100 / 255;
+      ctx.drawImage(img, 0, k * fh14, fw - 2, fh14 - 2,
+        px - (fw - 2) / 2, py - (fh14 - 2) / 2, fw - 2, fh14 - 2);
+    }
+    ctx.restore();
+  }
+
+  /** 翅膀叠画（flush 内调用，局部空间已镜像+锚点平移） */
+  private drawWingOverlay(p: Player, slot: number, d: import('../data/vanillaWingVisuals').WingDraw,
+    fr: number, cam: Camera): void {
+    const atlas = this.atlas;
+    if (!atlas || !d.overlay) return;
+    const ctx = this.ctx;
+    const notGrappling = !p.grappleProjs.some((g) => g.latched);
+    const ov = d.overlay;
+    const slice = (file: string) => {
+      const img = atlas.ensureVImage(`vanilla/${file}`);
+      if (!img || img.naturalWidth === 0) return null;
+      const fh = Math.floor(img.naturalHeight / d.frames);
+      return { img, fh, sy: fr * fh, sw: img.naturalWidth, sh: fh };
+    };
+    switch (ov.kind) {
+      case 'plain': {   // 23/27/30/47：单帧同切片（硬编码 tint/alpha）
+        const s = slice(ov.file ?? '');
+        if (!s) return;
+        const tint = (ov.tint ?? 255) / 255, a = (ov.alpha ?? 255) / 255;
+        const sc = this.tintSlice(s.img, 0, s.sy, s.sw, s.sh, tint, 1);
+        if (sc) {
+          ctx.save();
+          ctx.globalAlpha = a;
+          ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
+          ctx.restore();
+        }
+        break;
+      }
+      case 'flames7': { // 22：ItemFlame_1866×7（:676-699，色 (250−10i)³ alpha (150−10i)）
+        if (!notGrappling) return;
+        const s = slice('ItemFlame_1866.png');
+        if (!s) return;
+        for (let i = 0; i < 7; i++) {
+          // vector4 = (itemFlamePos.X, −itemFlamePos.Y) × 0.5（:684-687）
+          const jx = p.itemFlamePos[i].x * 0.5, jy = -p.itemFlamePos[i].y * 0.5;
+          const tint = (250 - i * 10) / 255, a = (150 - i * 10) / 255;
+          const sc = this.tintSlice(s.img, 0, s.sy, s.sw, s.sh - 2, tint, 1);
+          if (sc) {
+            ctx.save();
+            ctx.translate(jx, jy);
+            ctx.globalAlpha = a;
+            ctx.drawImage(sc, -s.sw / 2, -(s.sh - 2) / 2);
+            ctx.restore();
+          }
+        }
+        break;
+      }
+      case 'extra38': { // 28：Extra[38] Lerp(colorArmorBody, White, 0.5)（:713-722）
+        const s = slice('Extra_38.png');
+        if (!s) return;
+        const mcFr = Math.floor(p.miscCounter / 5) % 4;   // Frame(1,4,0,miscCounter/5%4)
+        const sc = this.tintSlice(s.img, 0, mcFr * s.sh, s.sw - 2, s.sh - 2, 1, 1);
+        if (sc) {
+          ctx.save();
+          // Lerp(colorArmorBody, White, 0.5)（:721）= tint 0.5×光+0.5——读侧光照采样
+          // API 未暴露 → 取满档（亮环境 1:1 等价；暗环境叠画比原版偏亮，登记）
+          ctx.globalAlpha = 1;
+          ctx.drawImage(sc, -(s.sw - 2) / 2, -(s.sh - 2) / 2);
+          ctx.restore();
+        }
+        break;
+      }
+      case 'jitter2': { // 43：×2 随机 ±1.25（:1004-1015，(230³,60)）
+        const s = slice(ov.file ?? '');
+        if (!s) return;
+        const tint = (ov.tint ?? 255) / 255, a = (ov.alpha ?? 255) / 255;
+        const sc = this.tintSlice(s.img, 0, s.sy, s.sw, s.sh, tint, 1);
+        if (sc) {
+          ctx.save();
+          ctx.globalAlpha = a;
+          for (let l = 0; l < 2; l++) {
+            const jx = (Math.random() * 20 - 10) * 0.125, jy = (Math.random() * 20 - 10) * 0.125;
+            ctx.drawImage(sc, jx - s.sw / 2, jy - s.sh / 2);
+          }
+          ctx.restore();
+        }
+        break;
+      }
+      case 'immune': {  // 50：免疫色双画（:930-940，GetImmuneAlphaPure(White)）
+        const s = slice(`Wings_${slot}.png`);
+        if (!s) return;
+        const a = p.iframes > 0 && p.iframes % 6 < 2 ? 0.45 : 1;
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.drawImage(s.img, 0, s.sy, s.sw, s.sh, -s.sw / 2, -s.sh / 2, s.sw, s.sh);
+        ctx.restore();
+        break;
+      }
+      case 'betsy': {   // 40：8 片程序化摆动（:854-896）
+        this.drawBetsyWings(p, slot, fr);
+        break;
+      }
+      case 'trail45': { // 45：拖尾（:2901；4 向轨道残影 (70,70,70,0)·f 的 A=0 死画
+        this.drawStarboardTrail(p, cam);   //  原样跳过 :741-746）
+        break;
+      }
+      case 'arkhalis': { // 38：GlowMask[251]×underShirtColor（:1044-1048；影子环 A=0 跳过）
+        const s = slice(ov.file ?? '');
+        if (!s) return;
+        const c = p.appearance?.undershirtColor ?? { r: 160, g: 90, b: 0 };
+        const img = s.img;
+        const sc = (this.wingTintScratch ??= (() => { const cc = document.createElement('canvas'); cc.width = 8; cc.height = 8; return cc; })());
+        if (sc.width !== s.sw || sc.height !== s.sh) { sc.width = s.sw; sc.height = s.sh; }
+        const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+        sctx.clearRect(0, 0, s.sw, s.sh);
+        sctx.drawImage(img, 0, s.sy, s.sw, s.sh, 0, 0, s.sw, s.sh);
+        const id = sctx.getImageData(0, 0, s.sw, s.sh);
+        for (let i = 0; i < id.data.length; i += 4) {
+          id.data[i] = id.data[i] * c.r / 255;
+          id.data[i + 1] = id.data[i + 1] * c.g / 255;
+          id.data[i + 2] = id.data[i + 2] * c.b / 255;
+        }
+        sctx.putImageData(id, 0, 0);
+        ctx.save();
+        ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
+        ctx.restore();
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null, flicker: FlickerClock | null = null) {
     const ctx = this.ctx;
     if (p.dead) return;
     // ---- 手持物（PlayerDrawLayers.cs:3857 门槛）：itemAnimation>0 || (holdStyle!=0) ----
@@ -4794,6 +5375,13 @@ export class Renderer {
             } else if (icon) {
               ctx.drawImage(icon, 0, -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
             }
+            // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
+            // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）。
+            // 与本体同变换（本 save 块内），dest 即本体矩形；水下门已在上方
+            // （!p.inWater = noWet 熄灭语义）
+            if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
+              drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: -fh, w: ar.sw, h: ar.sh }, flicker);
+            }
             ctx.restore();
           }
         }
@@ -4801,7 +5389,7 @@ export class Renderer {
     }
     // 挥舞动画（工具）：人物身后图层——挥砍弧大部分在身体轮廓外，身后不遮挡
     if (swing && swing.item >= 0 && ITEM_DEFS[swing.item]?.tool) {
-      this.drawUseItem(ctx, p, swing);
+      this.drawUseItem(ctx, p, swing, flicker);
     }
 
     // 无敌帧闪烁：半透明而非消失（主角本体永不全隐）
@@ -4837,13 +5425,16 @@ export class Renderer {
     ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + gfxOff + p.netOffY - mOff); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
-    // ---- 翅膀层（DrawPlayer_09_Wings :655：身后，先于身体绘制）----
+    // ---- 翅膀层（DrawPlayer_09_Wings :655-1040：身后，先于身体绘制）----
     // 表驱动（src/data/vanillaWingVisuals.ts）：逐款切帧数 num14（generic=4，曾误写 7/6）
     // + 局部锚点（基底 = Position+(w/2, h−bodyFrame.Height/2)+(0,7) → 脚底局部 (0,−21)，
     // 逐款 offset (num13−9, num12+2)·directions；镜像空间 X 局部值 = num13−9）。
     // 翻转 = 外层 scale(facing,1)（曾内层再镜像一次 → facing=-1 时抵消永不翻转）；
     // 朝向偏移在镜像空间直接取表值，勿再乘世界坐标（曾把 p.cx 叠进局部空间 → 翅膀画到
     // 2× 世界坐标处屏幕外，此为"背后没翅膀"的根因）。
+    // 主纹理分两族：lit 族（generic colorArmorBody 等）合成前画（乘光=原版 GetColor）；
+    // 全亮族（mainGlow：28/34/40/44/45/51 硬编码色）与全部叠画入 wingGlowQueue
+    // 合成后绘制（原版 DrawData 常色不受光照——合成前画会被全屏乘光压暗=偏差）。
     {
       // wings（绘制侧）随坐骑清零（Player.cs:26316-26322：禁翼族 wings=wingsLogic=0）
       const wingSlot = p.equipStats.wing && !mnt ? p.equipStats.wing.logic : 0;
@@ -4855,16 +5446,32 @@ export class Renderer {
           || (p.vy !== 0 && !p.grappleProjs.some((g) => g.latched)
             && !(p.inWater && !!p.equipStats.flipper));
         if (alwaysOk) {
-          const wt = this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
-          if (wt) {
-            const fh = Math.floor(wt.naturalHeight / d.frames);
-            const fr = wingDrawFrame(wingSlot, { frame: p.wingFrame, counter: 0 }, p.miscCounter);
-            // （光照染色待接：compositeLight 全屏 multiply 已覆盖翅膀——无独立 tint 需要）
-            ctx.save();
-            ctx.translate(d.anchor[0], d.anchor[1]);
-            ctx.drawImage(wt, 0, fr * fh, wt.naturalWidth, fh,
-              -wt.naturalWidth / 2, -fh / 2, wt.naturalWidth, fh);
-            ctx.restore();
+          const fr = wingDrawFrame(wingSlot, { frame: p.wingFrame, counter: 0 }, p.miscCounter);
+          // 47/49 锚点按身体帧行（OffsetsPlayerHeadgear；行复算与下方纸娃娃同规则）
+          const anchor = d.headgearRow
+            ? wingAnchorForRow(d, this.playerBodyRow(p, swing, staticHoldStyle, mnt))
+            : d.anchor;
+          // lit 主纹理（合成前）：generic/22/23/27/30/38/39/43/47/48/49/50 + rainbowLayer
+          if (!d.mainGlow && d.overlay?.kind !== 'betsy') {
+            const tex = d.rainbowLayer
+              ? this.atlas.ensureVImage('vanilla/Extra_171.png')
+              : this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
+            if (tex && tex.naturalWidth > 0) {
+              const fh = Math.floor(tex.naturalHeight / d.frames);
+              ctx.save();
+              ctx.translate(anchor[0], anchor[1]);
+              ctx.drawImage(tex, 0, fr * fh, tex.naturalWidth, fh,
+                -tex.naturalWidth / 2, -fh / 2, tex.naturalWidth, fh);
+              ctx.restore();
+            }
+          }
+          // 全亮主纹理 + 叠画 → 合成后队列
+          if (d.mainGlow || d.overlay) {
+            this.wingGlowQueue.push({
+              p, slot: wingSlot, fr, anchor,
+              wx: p.cx - p.facing * 2.5 + p.netOffX,
+              wy: p.y + p.h + p.stepRenderY + gfxOff + p.netOffY - mOff,
+            });
           }
         }
       }
@@ -4998,7 +5605,7 @@ export class Renderer {
     // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住。
     // noGraphic 族(短剑 noUseGraphic=true)不画物品贴图——投射物即本体,双画=两个贴图
     if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool && !swing.noGraphic) {
-      this.drawUseItem(ctx, p, swing);
+      this.drawUseItem(ctx, p, swing, flicker);
     }
 
     void world;
@@ -5205,7 +5812,7 @@ export class Renderer {
    *  坐标约定：全部按 direction=+1 推导（offX 正=身前），朝左靠镜像空间翻转；
    *  offY 从 p.y（碰撞盒顶）起算；旋转 origin = 底角（PlayerDrawLayers.cs:3260）。
    *  图层：工具/武器挥砍在身体之前调用（身后），使用类托举在身体之后调用（身前） */
-  private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean }) {
+  private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean }, flicker: FlickerClock | null = null) {
     const ar = this.atlasIcon(swing.item);
     const icon = ar ? null : this.itemIcon(swing.item);
     const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
@@ -5378,6 +5985,14 @@ export class Renderer {
       ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOY, ar.sw, ar.sh);
     } else if (icon) {
       ctx.drawImage(icon, drawOX, -14, 14, 14);
+    }
+    // 手持火苗（PlayerDrawLayers.cs:3519-3561 挥舞分支同接）：flame 物品在武器贴图
+    // 之上叠 ItemFlame_{id}（与本体同变换，dest = drawOX/drawOY 本体矩形）
+    if (ar && this.atlas) {
+      const fvid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+      if (fvid >= 0 && FLAME_ITEMS.has(fvid)) {
+        drawHeldItemFlame(ctx, this.atlas, fvid, p.facing, { x: drawOX, y: drawOY, w: ar.sw, h: ar.sh }, flicker);
+      }
     }
     ctx.restore();
   }
@@ -6160,6 +6775,52 @@ export class Renderer {
   }
 
   /** 全屏地图：半透明背景 + 完整世界图 + 边框 + 操作提示；支持拖动/缩放 */
+  /** 全屏地图卷轴（Images/Map.png 928×248）目标矩形四档修正（Main.cs:54860-54923 1:1
+   *  纯函数）。基线 num26 = maxTilesX/840 × mapFullscreenScale，再按世界宽四档
+   *  （8400 大/6400 中大/6300 中/4200 小）乘缩放系数并平移贴图目标矩形——原版把
+   *  卷轴画在地图内容【之下】且四周外扩露出羊皮纸饰纹，各档外扩量是逐尺寸手调的
+   *  魔数（40.6/38.8/39.8/37.3 横向、5/3.85/4.08/1.7 纵向、宽高各 −8.045..−26.69/
+   *  −6.92..+0.12），此前按地图矩形整幅等比画 → 饰纹被地图压住、比例失衡。
+   *  入参：worldW = maxTilesX；zoom = mapFullscreenScale；mapX/mapY = 地图内容绘制
+   *  原点（vanilla num/num2）；texW/texH = Map.png 原始尺寸。 */
+  static fullMapScrollRect(
+    worldW: number, zoom: number, mapX: number, mapY: number, texW: number, texH: number,
+  ): { x: number; y: number; w: number; h: number } {
+    let k = (worldW / 840) * zoom;      // num26（:54860-54861）
+    let x = mapX;                        // num27 = num（:54862）
+    let y = mapY;                        // num28 = num2（:54863）
+    let w = texW, h = texH;              // num29/num30 = Map.Width()/Height()（:54864-54865）
+    if (worldW === 8400) {               // :54866-54879
+      k *= 0.999;
+      x -= 40.6 * k;
+      y = mapY - 5 * k;
+      w = (texW - 8.045) * k;
+      h = (texH + 0.12) * k;
+      if (k < 1.2) h += 1;
+    } else if (worldW === 6400) {       // :54880-54893
+      k *= 1.09;
+      x -= 38.8 * k;
+      y = mapY - 3.85 * k;
+      w = (texW - 13.6) * k;
+      h = (texH - 6.92) * k;
+      if (k < 1.2) h += 2;
+    } else if (worldW === 6300) {       // :54894-54907
+      k *= 1.09;
+      x -= 39.8 * k;
+      y = mapY - 4.08 * k;
+      w = (texW - 26.69) * k;
+      h = (texH - 6.92) * k;
+      if (k < 1.2) h += 2;
+    } else if (worldW === 4200) {       // :54908-54917
+      k *= 0.998;
+      x -= 37.3 * k;
+      y -= 1.7 * k;
+      w = (texW - 16) * k;
+      h = (texH - 8.31) * k;
+    }
+    return { x, y, w, h };
+  }
+
   drawFullMap(ctx: CanvasRenderingContext2D, world: World, mouseX: number, mouseY: number, mouseDown: boolean, entities: Entity[] = []) {
     const fm = this.fullMap;
     const viewW = ctx.canvas.width, viewH = ctx.canvas.height;
@@ -6208,12 +6869,14 @@ export class Renderer {
       ctx.fillRect(0, 0, viewW, viewH);
     }
     // 卷轴底图（原版 Images/Map.png 928×248 羊皮纸，Main.cs:54923：地图内容【之下】
-    // 整幅绘制——destRect 与地图区同位同缩放，羊皮纸边缘饰纹在地图缩放留边处露出；
+    // 绘制——目标矩形走 fullMapScrollRect 四档修正偏移（:54860-54918 按世界宽
+    // 8400/6400/6300/4200 手调的外扩魔数），羊皮纸边缘饰纹在地图缩放留边处露出；
     // 地图探索未达区域在卷轴上呈现纸张色而非纯蓝）
     const scroll = this.atlas ? this.atlas.vui('Map.png') : null;
     if (scroll && scroll.img instanceof HTMLImageElement && scroll.img.complete && scroll.img.naturalWidth > 0) {
+      const sr = Renderer.fullMapScrollRect(world.w, fm.zoom, cx0, cy0, scroll.sw, scroll.sh);
       ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
-      ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, cx0, cy0, mapW, mapH);
+      ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, sr.x, sr.y, sr.w, sr.h);
     }
     ctx.imageSmoothingEnabled = fm.zoom >= 1;
     ctx.drawImage(this.minimap!.canvas, cx0, cy0, mapW, mapH);

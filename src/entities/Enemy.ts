@@ -41,6 +41,7 @@ import {
   cultistArcherStandbyAI, cultistArcherWake, phantomAI, bigMimicAI,
   mothronAI, mothronEggAI, babyMothronAI, graniteElementalAI,
   starCellAI, smallStarCellAI, flowInvaderAI, nebulaFloaterAI, solarSlimeAI,
+  crawltipedeAI,
 } from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
@@ -48,7 +49,7 @@ import { openDoor } from '../world/Door';
 import {
   fighterMoveStep, chaosElementalStep, swampThingAmbushStep, attemptToFindTeleportSpot,
   psychoStealthStep, nailheadHitScatter, butcherKbStep, possessedStep, fritzPounceStep,
-  FIGHTER_NO_DOOR,
+  stormDiverStep, FIGHTER_NO_DOOR,
 } from './fighterFamilies';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
@@ -84,6 +85,26 @@ export function mouseTextColorApprox(): number {
   const t = visEffectFrames();
   const p = t % 130;
   return p < 65 ? 190 + p : 255 - (p - 65);
+}
+/** 661 帝皇蝶离神圣渐隐一步（NPC.cs:45240-45263 纯函数化，仅 type 661）：
+ *  fading（目标失效 / 中心距 ≥300 / 目标玩家不在神圣，:45244-45252）→ ai2 +1，
+ *  否则 −1，钳 [0, cap]（cap=50 常态；目标不在神圣抬到 60，:45242/:45250）；
+ *  opacity = GetLerpValue(60, cap/2, ai2)（:45263）——ai2 ≤ cap/2 全显，
+ *  cap/2→60 线性渐隐；ai2 ≥ 60 → despawn（active=false，:45254-45261）。
+ *  渲染侧 Renderer.npcGlowOrbitParams 同源消费 ai2（轨道环半径 2+ai2 /
+ *  num300 下限 GetLerpValue(0,60,ai2) / 相位 0→3）。 */
+export function lacewingFadeStep(
+  ai2: number, fading: boolean, cap: number,
+): { ai2: number; opacity: number; despawn: boolean } {
+  const DESPAWN = 60;                                                // num3（cs:45240）
+  const next = Math.max(0, Math.min(cap, ai2 + (fading ? 1 : -1)));   // cs:45253 Clamp(±1, 0, num4)
+  if (next >= DESPAWN) return { ai2: next, opacity: 0, despawn: true };
+  const from = DESPAWN, to = cap / 2;                                // cs:45263 GetLerpValue(60, num4/2, ·)
+  let opacity: number;
+  if (next <= to) opacity = 1;                                       // 反向区间：≤to 全显
+  else if (next >= from) opacity = 0;
+  else opacity = (next - from) / (to - from);
+  return { ai2: next, opacity, despawn: false };
 }
 // 原生 def 覆盖表(钱币/凝胶/火把/晶状体→本地键)已随本地物品退役移除:
 // 全量 vi_ 注册(VANILLA_ITEM_KEY_BY_ID)直接覆盖;236 曾误当 Lens(实为 Black Lens)
@@ -716,7 +737,9 @@ export class Enemy extends Entity {
    *  Hemorrhage(375)=-200=100HP/s(:92610)。骨标(169)/触手刺(337)/血腥屠夫(344)
    *  =层数模型(附着弹 598/971/975 每 6/6/8 lifeRegen,:92740/:92761/:92788)——
    *  repo 无附着弹计数,取单层 3/3/4 HP/s 近似,层数叠加登记 GAP(同 Daybreak)。
-   *  137 Slimed(摩擦)/151 SoulDrain(吸血源判定)/183 StardustBleed(鞭 tag)非 DoT 不设 */
+   *  137 Slimed = 着火段叠加 DoT（见 onFireT 块）;151 SoulDrain 依赖魂镰 3006、
+   *  183 StardustBleed 依赖星尘细胞实体——双依赖登记 GAP */
+  slimedT = 0;
   bleedT = 0;      bleedDoT = 0;
   hemorrhageT = 0; hemorrhageDoT = 0;
   javelinT = 0;    javelinDoT = 0;
@@ -738,21 +761,52 @@ export class Enemy extends Entity {
    *  直接用玩家坐标差算位移向量的族（AI_005 蜂群/AI_013 植物/AI_056 地牢之魂）
    *  原版不读 direction，同样不反转（勿在这些族接 confused）。 */
   get confused(): boolean { return this.confusedT > 0; }
+  /** oldTarget 等效（NPC.cs:6374 `public int target = -1;` + :8472/:91442 每帧
+   *  `oldTarget = target;`）：-1=从未索过敌 → 首次 seekDirX 必转身（原版 oldTarget=-1
+   *  使 :78553 门失效）；首次后恒 0（单人 target 槽位）→ 门生效 */
+  hadTarget = false;
   /** TargetClosest + confused 反转（NPC.cs:78555-78572）：返回朝玩家的水平方向。
    *  无玩家时保持现方向（原版 TargetClosest 无目标不重算） */
   seekDirX(player: Player | null): number {
     if (!player) return this.facing;
-    // ⑫-2 aggro 不转身门（NPC.cs:78447-78452 TargetClosest 尾段）：玩家未挥击
-    // （itemAnimation≈useTime）&& aggro<0（潜行）&& 有效距离 > (双方尺寸和/4+800)
-    // && 非 Boss → 保留旧朝向（潜行侧袭不被察觉）；否则正常面向玩家。
-    // ★单人下这就是 aggro 的全部消费位（TargetClosest 的多玩家选距在单人退化）
-    const agg = (player as unknown as { aggro?: number }).aggro ?? 0;
-    if (agg < 0 && player.useTime <= 0 && !this.def.boss) {
-      const eff = Math.hypot(player.cx - this.cx, player.cy - this.cy) - agg;
-      if (eff > (player.w + player.h + this.w + this.h) / 4 + 800) return this.facing;
+    // ⑫-2 aggro 不转身门（NPC.cs:78549-78561 SetTargetTrackingValues faceTarget 段，
+    //  普通 TargetClosest :78456 的 283 处 AI 调用均走此段）：
+    //    bool flag = oldTarget >= 0 && oldTarget <= 254;      （:78553）
+    //    bool num   = player.itemAnimation == 0 && player.aggro < 0;  （:78552）
+    //    bool flag2 = !boss;                                  （:78554）
+    //    if (!(num && flag && flag2)) { direction = …; directionY = …; }  （:78555-78561）
+    //  → 玩家未挥击 && aggro<0（潜行）&& 曾索过敌 && 非 Boss：整段保留旧朝向。
+    //  ★此段【无距离检查】；带 `num8 > 尺寸和/4+800` 距离门的是
+    //  TargetClosestUpgraded(:78447-78452) 与 ShouldFaceTarget(:78318-78337)——
+    //  两者在 1.4.5.6 本体源码中【零调用点】（mod API 面）。旧实现误取该距离门，
+    //  已按实际调用路径对齐移除（2026-08-13）。
+    //  itemAnimation==0 窗代理 = itemAnimTicks<=0 && useTime<=0（Player.ts:1353/:2264
+    //  同口径；原版 itemAnimation 为挥舞动画窗，非挥砍武器由 useTime 代）
+    const itemAnimZero = player.itemAnimTicks <= 0 && player.useTime <= 0;
+    if (itemAnimZero && player.aggro < 0 && this.hadTarget && !this.def.boss) {
+      return this.facing;
     }
+    this.hadTarget = true;   // 本次生效=原版 AI 后 target=0，下一帧 oldTarget 门激活
     const raw = player.cx > this.cx ? 1 : -1;
     return this.confused ? -raw : raw;
+  }
+  /** 原版索敌有效距离（NPC.cs:78485-78492 TryTrackingTarget——TargetClosest 选距）：
+   *    num  = |player.cx - npc.cx| + |player.cy - npc.cy|  （曼哈顿距离，非欧氏）
+   *    num -= player.aggro                                  （:78491）
+   *    if (player.npcTypeNoAggro[type] && direction != 0) num += 1000;  （:78493-78496）
+   *  aggro<0（潜行装/变态刀）→ 有效距离拉长 → 索敌门更难命中（敌人"看不见"）。
+   *  同式变体：TargetClosestUpgraded :78375（欧氏）/NPCUtils.SearchForTarget
+   *  :78230（欧氏）——后两者本体无调用点；以曼哈顿版为准。
+   *  ★单人下 TargetClosest 的选距循环退化（仅一名玩家恒选它），本方法在本仓的
+   *  落点是各 AI 族近似索敌门（canTargetPlayerAt）——原版索敌本身无距离概念 */
+  effectiveTargetDist(player: Player): number {
+    const num = Math.abs(player.cx - this.cx) + Math.abs(player.cy - this.cy);
+    return num - player.aggro;
+  }
+  /** 各 AI 族索敌门统一入口：有效距离（已按原版减 aggro）< range。
+   *  接线现状：flyAI 恶魔眼式 18 格门（原版无此门，为仓内近似；见 flyAI 注） */
+  canTargetPlayerAt(player: Player, range: number): boolean {
+    return this.effectiveTargetDist(player) < range;
   }
   /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
    *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
@@ -924,7 +978,12 @@ export class Enemy extends Entity {
         // 冲刺计时合法冻结;传 null 会让 aiT 照走、状态机停摆 → 首冲时长翻倍)
         case 4: this.eocAI(game, (game as unknown as { player: Player }).player ?? null); break; // AI_004 克苏鲁之眼（NPC.cs:19909）
         case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
-        case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
+        case 6:
+          // AI_006 蠕虫族（头）；412 爬尾虫走专属核（bossAI_lunar_misc：
+          // 30 段链 + 空泳追击环 + 414 尾受击红闪 localAI[2] 状态机，cs:51357-52671）
+          if (this.vanillaId === 412) crawltipedeAI(this, game, p);
+          else this.wormAI(game, p);
+          break;
         case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
         case 10: this.cursedSkullAI(game, p); break;                     // AI_010 诅咒头骨（地牢飞行族）
         case 11:
@@ -1128,10 +1187,13 @@ export class Enemy extends Entity {
     }
     // onFire DoT（NPC.cs:92619:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
     // Oiled(:93728)使 onFire/onFire2/onFire3/frostburn/frostburn2/shadowFlame 六系翻倍
+    // Slimed(137,：92623)在 onFire 段再叠 -8 → +4 HP/s（凝胶易燃）；slimedT 独立递减
     const oiledMul = this.oiledT > 0 ? 2 : 1;
+    if (this.slimedT > 0) this.slimedT -= dt;
     if (this.onFireT > 0) {
       this.onFireT -= dt;
       this.onFireDoT += 4 * dt * oiledMul;
+      if (this.slimedT > 0) this.onFireDoT += 4 * dt;   // drippingSlime 叠伤（:92623-92624）
       if (this.onFireDoT >= 1) {
         const n = Math.floor(this.onFireDoT);
         this.onFireDoT -= n;
@@ -2049,6 +2111,10 @@ export class Enemy extends Entity {
     // 横向移动逐族表（NPC.cs:57799-58800 else-if 链 1:1，fighterFamilies.ts）——
     // 取代一期固定档（加速 0.1 / 限速 ±1）；射击族（:58719 排除表）链上无分支
     fighterMoveStep(this, dir, player);
+    // 425 风暴潜水员专属段（NPC.cs:58865-59013，原版独立第二段 if/else-if 阶梯，
+    // 位于移动链之后/重力之前）：喷包伺服 + 起飞门 + ai3 瞄准蓄力（stormDiverAimStep
+    // 计数节奏）——ai3 专用于蓄力，不再与任何通用计数共用（Renderer.npcGlowSparkleEnvelope 消费）
+    stormDiverStep(this, game, player);
     // 原版跳跃判定用碰撞前的速度符号（NPC 碰撞在 AI 之后）——
     // 此处必须先捕获再碰撞，否则撞墙清零 vx 后 movingInto 恒假、战士永不跳墙
     const vxSign = this.vx > 0 ? 1 : this.vx < 0 ? -1 : 0;
@@ -4064,12 +4130,15 @@ export class Enemy extends Entity {
    *  0.26-3.0 每 60-179 帧重选（近距 90-239 帧）；平滑 v=(v*59+目标)/60（cs:45231 系数 60）；
    *  垂直避障：向下 4 格实心/液体 → 反向，向上 30 格无实心 → 反向；collideX → vx×-0.2 翻 ai0；
    *  主动避敌（每 15 帧 cs:45395-45427）：100px 内敌怪叠加反向速度（上限 16）。
-   *  （661 帝皇蝶离神圣渐隐、356 花色变体/catchItem 在掉落与虫网侧，不在 AI 内） */
-  private butterflyAI(game: GameHooks, _player: Player | null) {
+   *  ★661 帝皇蝶 ai2 = 离神圣渐隐计数（cs:45253，专用——见 lacewingFadeStep），
+   *  漂移重选计时对该 id 移 lai0（= 原版 localAI[0]，:45312-45315 本就是族漂移计时），
+   *  其余蝴蝶族 ai2 沿用漂移计时不变。 */
+  private butterflyAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     if (!this.aiInit) { this.aiInit = true; this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; }
+    const isLacewing = this.vanillaId === 661;
     // ---- 点光（AI_065_Butterflies，cs:45233-45241 / :45448-45453）----
-    if (this.vanillaId === 661) {
+    if (isLacewing) {
       // :45233-45237 光皇蝴蝶：hslToRgb(GlobalTimeWrappedHourly×0.33 % 1, 1, 0.5)×0.3
       //  + 白 0.1。GlobalTimeWrappedHourly 1 游戏小时 = 54000 帧 → 色相周期 ≈163636 帧
       const [hr, hg, hb] = hslToRgb((visEffectFrames() / 54000) * 0.33, 1, 0.5);
@@ -4077,13 +4146,33 @@ export class Enemy extends Entity {
     } else if (this.vanillaId === 653) {
       this.lightRGB = [0.6, 0.3, 0.1];      // :45448-45453 地狱蝴蝶恒亮 + 尘 6 号 1/60
     }
-    // 漂移目标重选
-    if (this.ai2 <= 0) {
+    // ---- 661 渐隐计数（cs:45235-45291，段内 return = 原版 active=false 消散）----
+    if (isLacewing) {
+      let cap = 50;                                            // num4（cs:45242）
+      // cs:45244-45247：目标失效或中心距 ≥300 → 渐隐（本仓目标=主角，死亡由分发传 null）
+      let fading = !player
+        || Math.hypot(player.cx - this.cx, player.cy - this.cy) >= 300;
+      // cs:45248-45252：非 remix 世界（本仓无 remix）且目标玩家不在神圣 → 上限抬 60 且渐隐
+      if (player && !game.scene?.zoneHallow) { cap = 60; fading = true; }
+      const f = lacewingFadeStep(this.ai2, fading, cap);
+      this.ai2 = f.ai2;
+      if (f.despawn) { this.dead = true; return; }             // cs:45254-45262
+      this.spawnAlpha = Math.round((1 - f.opacity) * 255);     // cs:45263 Opacity → alpha
+      this.dontTakeDamage = this.ai2 >= cap / 2;               // cs:45290 渐隐过半不可击
+      if (this.ai2 > 0 && Math.floor(Math.random() * 5) === 0) {
+        // cs:45264-45289 尘 267 双份（彩虹原色 + 半幅白叠）→ 单粒近似
+        game.spawnParticles(this.cx, this.cy, '#E8B0FF', 1, 0.5, { life: 30, damp: 0.94 });
+      }
+    }
+    // 漂移目标重选（661 计时在 lai0 = 原版 localAI[0]；其余族沿用 ai2）
+    const driftGet = (): number => (isLacewing ? this.lai0 : this.ai2);
+    const driftSet = (v: number): void => { if (isLacewing) this.lai0 = v; else this.ai2 = v; };
+    if (driftGet() <= 0) {
       this.ai0 = (Math.random() * 2 - 1) * (0.26 + Math.random() * 2.74);
       this.ai1 = (Math.random() * 2 - 1) * (0.26 + Math.random() * 2.74);
-      this.ai2 = 60 + Math.floor(Math.random() * 120);
+      driftSet(60 + Math.floor(Math.random() * 120));
     }
-    this.ai2 -= 1;
+    driftSet(driftGet() - 1);
     // 避敌（每 15 帧）
     if (this.aiT % 15 === 0) {
       for (const o of game.enemies()) {
@@ -4123,7 +4212,7 @@ export class Enemy extends Entity {
     if (this.hitWall) {
       this.vx = oldVx * -0.2;
       this.ai0 = -this.ai0;
-      this.ai2 = 0;
+      driftSet(0);
     }
   }
 
@@ -5513,14 +5602,18 @@ export class Enemy extends Entity {
     // 游荡时自主调整航向（朝巡航点平滑转向、到点即换新目标、撞墙自动绕开）；
     // 玩家进入索敌范围后：朝向玩家明显加速逼近；脱离后回落游荡。
     const dist = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
-    const aggro = 18 * 16; // 18 格索敌
+    const aggro = 18 * 16; // 18 格索敌（仓内近似门——原版 aiStyle 2 无距离索敌）
     // 卡墙脱困：追击中持续撞墙/贴地/顶头 → 暂时退回游荡重新选航向（冷却内不再贴脸），
     // 防止顶在崖壁/坑洞里原地抖动
     if (this.stuckCd > 0) this.stuckCd--;
     if (this.state === 1 && (this.hitWall || this.onGround || this.hitHead)) {
       if (++this.stuckT > 18) { this.stuckT = 0; this.stuckCd = 45; this.state = 0; this.target = null; }
     } else this.stuckT = 0;
-    if (player && dist < aggro && this.stuckCd === 0) {
+    // 索敌门走统一入口 canTargetPlayerAt：有效距离按原版公式减 player.aggro
+    // （NPC.cs:78485-78492）——潜行装（星璇 -1200/蘑菇矿 -750/变态刀 -750）拉远
+    // 索敌，脱潜（挥击/移出潜行）恢复正常。★原版 aiStyle 2 飞行族索敌无距离门
+    // （TargetClosest 无条件锁定唯一玩家），18 格为仓内近似，仅门内挂 aggro 消费
+    if (player && this.canTargetPlayerAt(player, aggro) && this.stuckCd === 0) {
       // ---- 追击：朝向玩家，加速逼近 ----
       const dx = player.cx - this.cx, dy = player.cy - this.cy;
       const d = dist || 1;
