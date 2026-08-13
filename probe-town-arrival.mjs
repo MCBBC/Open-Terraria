@@ -28,7 +28,10 @@ const out = await p.evaluate(async () => {
   g.updateTownNpcArrival();
   res.afterCoinsNoHouse = list();
 
-  // ③ 造两间房（12×6 内部，木墙 93，木壳，门+火把+桌+椅）
+  // ③ 造两间房（12×6 内部，木墙 93，木壳，门+火把+桌+椅）。
+  // 2026-08-13 锚点窗对齐（QuickFindHome WorldGen.cs:5665-5727）：入驻锚点 =
+  // 已安家 NPC 的 home 随机取一（冷启回退出生点），findFreeHouse 只搜锚点 ±10 窗——
+  // 房必须构造在"锚点链"逐跳 ±10 内，不能再按全图扫描假设任意远放房
   const st = g.world.store;
   const DOOR = T.DOOR_CLOSED, TORCH = T.TORCH, WOOD = T.WOOD;
   const TABLE = TILE_BY_KEY['table'], CHAIR = TILE_BY_KEY['chair'];
@@ -47,18 +50,23 @@ const out = await p.evaluate(async () => {
     st.setTileSilent(x0 + 2, yTop + 5, TORCH);
     st.setTileSilent(x0 + 4, yTop + 5, TABLE);
     st.setTileSilent(x0 + 6, yTop + 5, CHAIR);
+    return { doorX: x0 + 12, doorY: yTop + 2 };
   };
-  const sy = g.world.spawnY;
-  buildHouse(g.world.spawnX + 20, sy - 10);
-  buildHouse(g.world.spawnX + 40, sy - 10);
-  // 房屋判定单测：两间房都应有效
   const { checkRoom } = await import('/src/world/Housing.ts');
-  res.room1 = !!checkRoom(st, g.world.spawnX + 20 + 12, sy - 10 + 2);
-  res.room2 = !!checkRoom(st, g.world.spawnX + 40 + 12, sy - 10 + 2);
+  // 第一间：门锚落在出生点 ±10 窗内（冷启锚点 = 出生点）→ 向导可发现
+  const sy = g.world.spawnY;
+  const r1 = buildHouse(g.world.spawnX - 6, sy - 10);
+  res.room1 = !!checkRoom(st, r1.doorX, r1.doorY);
 
   // 入驻轮①：向导入住第一间房
   g.updateTownNpcArrival();
   res.afterGuideHomed = list();
+  // 第二间：门锚挂在向导 home ±10 窗内（下一轮锚点 = 已安家 home 随机取一）
+  const gh = res.afterGuideHomed.find((n) => n.key === 'guide');
+  const r2 = buildHouse(gh.home[0] - 22, gh.home[1] - 12);
+  res.room2 = !!checkRoom(st, r2.doorX, r2.doorY);
+  res.guideHome = gh.home;
+
   // 入驻轮②：商人入住第二间房
   g.updateTownNpcArrival();
   res.afterMerchant = list();

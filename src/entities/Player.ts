@@ -76,6 +76,9 @@ export class Player extends Entity {
   /** 调试：无敌 + 无限魔力（F2 切换，原版无）——damage() 早退 + 每 tick 血蓝回满
    *  （回满兜住 DoT/溺水/摔落等直改 hp 的路径）。仅本地调试语义，不入存档 */
   debugGod = false;
+  shieldRaised = false;      // 格挡盾举起(:31263)
+  shieldParryTimeLeft = 0;  // 格挡窗口(:30981 >0 面敌免疫+反伤2×)
+  shieldParryCd = 0;        // 降盾冷却(:31276 15t)
   /** 玩家对决开关（Player.cs:2436 hostile，会话态不存档——仅网络同步，进服默认 false） */
   hostile = false;
   /** 队伍 0-5（Player.cs:1312 team，PlayerTeamID：0 无/1 红/2 绿/3 蓝/4 黄/5 粉紫；存档持久） */
@@ -379,7 +382,8 @@ export class Player extends Entity {
     /** 浮漂饰品弹型覆写（Player.overrideFishingBobber :1920；-1=无，986-993=5139-5146） */
     overrideFishingBobber: number;
     runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
-    enduranceEq: number; solarSet: boolean;   // 日曜套(:16224-16295)
+    enduranceEq: number; solarSet: boolean;
+    shieldItem?: boolean;   // 日曜套(:16224-16295)
     whipRange: number;     // whipRangeMultiplier += X
     whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
     summonSet: SummonSetFx | null;
@@ -403,7 +407,8 @@ export class Player extends Entity {
     let critMelee = 0, critRanged = 0, critMagic = 0;
     let move = 0, meleeSpeed = 0, runSpeed = 0;
     let fish = 0;             // fishingSkill（钓具配饰+渔夫甲）
-    let setRunAccMul = 1, setMaxRunMul = 1, setRunSlowMul = 1;   // 暗影套移动四参数(:26195)
+    let setRunAccMul = 1, setMaxRunMul = 1, setRunSlowMul = 1;
+    let shieldItem = false;   // 暗影套移动四参数(:26195)
     let setEndurance = 0, solarSet = false;   // 日曜套(:16224-16295)
     let setManaCostMul = 1;   // DD2 散件魔耗乘区(:12770-12775)
     // 魔力回复直值（ApplyEquipFunctional if-chain :14379-14383——魔力斗篷 982 专属）
@@ -467,7 +472,8 @@ export class Player extends Entity {
         if (fx.mana) mana += fx.mana;
         if (fx.life) life += fx.life;
         if (fx.move) move += fx.move;
-        if (fx.fish) fish += fx.fish;   // 钓具族+渔夫甲 fishingSkill（:12549-12556/:14115-14140/:13022-13027）
+        if (fx.fish) fish += fx.fish;
+        if (fx.shield) shieldItem = true;   // 钓具族+渔夫甲 fishingSkill（:12549-12556/:14115-14140/:13022-13027）
         if (fx.meleeSpd) meleeSpeed += fx.meleeSpd;
         if (fx.runSpeed) runSpeed = Math.max(runSpeed, fx.runSpeed);
         if (fx.dmgMelee) dmgMelee += fx.dmgMelee;
@@ -687,6 +693,7 @@ export class Player extends Entity {
       overrideFishingBobber: bobberOverride,   // 浮漂饰品弹型覆写（:1920/-1=无）
       runAccMul: setRunAccMul, maxRunMul: setMaxRunMul, runSlowMul: setRunSlowMul,
       enduranceEq: setEndurance, solarSet,
+      shieldItem,
       setBonus: sb, manaCostMul,
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
       whipSpd: summonSet?.whipSpd ?? 1,
@@ -2782,6 +2789,25 @@ export class Player extends Entity {
     const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
     // 日曜护盾（:37699-37720:套装在场且有层 → 消耗 1 层,该次伤 ×0.2+solarCounter 清零;
     // 反击 608 弹/冲撞命中消耗登记未接）
+    // 格挡盾反击（:30979 CanParryAgainst+:30910-30920 消费——shieldParryTimeLeft>0
+    // 且面向来敌 → 免伤+反伤 2×(kb 5)。shouldGuard = 按住下键,2026-08-13 简化实现:
+    // 装备盾族+按住 Down → 格挡态;格挡中受击=反伤,降盾后 15t 冷却）
+    const shouldGuard = this.inputDown && !!this.equipStats.shieldItem;
+    if (shouldGuard !== this.shieldRaised) {
+      this.shieldRaised = shouldGuard;
+      if (shouldGuard) {
+        if (this.shieldParryCd === 0) this.shieldParryTimeLeft = 1;  // :31268
+        this.useTime = 0;
+      } else {
+        this.shieldParryCd = 15;   // :31276
+        this.shieldParryTimeLeft = 0;
+      }
+    }
+    if (this.shieldParryTimeLeft > 0) {
+      this.shieldParryTimeLeft++;
+      if (this.shieldParryTimeLeft > 20) this.shieldParryTimeLeft = 0;  // :31250
+    }
+    if (this.shieldParryCd > 0) this.shieldParryCd--;
     let solarConsumed = false;
     if (this.equipStats.solarSet && this.solarShields > 0) {
       solarConsumed = true;

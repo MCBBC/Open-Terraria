@@ -94,3 +94,62 @@ describe('ScoreRoom 共用房（占用豁免 + 站位避让）', () => {
     expect(scoreRoom(w.store, room, [{ x: 102, y: 102 }], 22).score).toBe(-1);
   });
 });
+
+// ================= 入驻找房锚点窗（QuickFindHome WorldGen.cs:5665-5727） =================
+// 原版只对锚点校验：锚点 → ±1 → ±10 螺旋（:5684-5691），窗外结构（地下神庙/地牢
+// 等生成房）永不成为候选——findFreeHouse 的门枚举必须限锚点 ±10 窗内
+import { T } from '../src/data/tiles';
+import { findFreeHouse } from '../src/world/Housing';
+import type { TileStore as TileStoreT } from '../src/world/TileStore';
+
+/** 一套合格房：10×6 内室 + 木墙(wallHouse 4)围一圈 + 左壁 3 格门 + 工作台/椅/火把。
+ *  返回门顶格（checkRoom 门锚语义）；x0/y0 = 内室左上角 */
+function buildHouse(st: TileStoreT, x0: number, y0: number): { doorX: number; doorY: number } {
+  for (let x = x0 - 1; x <= x0 + 10; x++) {
+    for (let y = y0 - 1; y <= y0 + 6; y++) {
+      const border = x === x0 - 1 || x === x0 + 10 || y === y0 - 1 || y === y0 + 6;
+      st.setWallSilent(x, y, 4);
+      st.setTileSilent(x, y, border ? T.WOOD : 0);
+    }
+  }
+  for (let dy = 0; dy < 3; dy++) st.setTileSilent(x0 - 1, y0 + 3 + dy, T.DOOR_CLOSED);
+  st.setTileSilent(x0 + 1, y0 + 5, T.WORKBENCH);                       // 桌（sheet 18）
+  st.setTileSilent(x0 + 3, y0 + 5, TILE_BY_KEY['chair']!);             // 椅
+  st.setTileSilent(x0 + 5, y0 + 5, T.TORCH);                           // 灯
+  return { doorX: x0 - 1, doorY: y0 + 3 };
+}
+
+describe('入驻找房锚点窗（QuickFindHome ±10）', () => {
+  it('地下深处（锚点 ±100 外）的完美房不被入住；同一房在近锚点下可入住（对照证明房本身合格）', () => {
+    const w = new World(300, 300, 42, 'anchor-win');
+    const st = w.store;
+    buildHouse(st, 220, 250); // 地下深处：距锚点 (100,150) 远超 ±100
+    // 锚点在出生点（冷启 LastFoundHouse 兜底口径）：远处房不可见
+    expect(findFreeHouse(st, [], 100, 150, 22)).toBeNull();
+    // 锚点移到该房旁（= 已安家 NPC 的 home 落在此）：同一间房即可见——
+    // 证明 null 是窗裁剪所致而非房不合格
+    expect(findFreeHouse(st, [], 224, 253, 22)).not.toBeNull();
+  });
+
+  it('锚点 ±10 内放房 → 被入住，站位落在房内', () => {
+    const w = new World(300, 300, 42, 'anchor-near');
+    const st = w.store;
+    buildHouse(st, 95, 147); // 门顶 (94,150)：距锚点 (100,150) 恰在 ±10 窗内
+    const house = findFreeHouse(st, [], 100, 150, 22);
+    expect(house).not.toBeNull();
+    expect(house!.standX).toBeGreaterThanOrEqual(95);
+    expect(house!.standX).toBeLessThanOrEqual(104);
+    expect(house!.standY).toBe(152); // 地板上一行（内室底 y=152）
+  });
+
+  it('窗边界 1:1：门锚恰在 anchor±10 内可见，anchor±11 外不可见', () => {
+    const w = new World(300, 300, 42, 'anchor-edge');
+    const st = w.store;
+    buildHouse(st, 91, 147);  // 门列 x=90 = 100-10 → 含（原版 k<=homeX+num 闭区间）
+    expect(findFreeHouse(st, [], 100, 150, 22)).not.toBeNull();
+    const w2 = new World(300, 300, 42, 'anchor-edge2');
+    const st2 = w2.store;
+    buildHouse(st2, 90, 147); // 门列 x=89 = 100-11 → 窗外（内室仍在窗内但无门锚）
+    expect(findFreeHouse(st2, [], 100, 150, 22)).toBeNull();
+  });
+});

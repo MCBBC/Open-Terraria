@@ -1065,7 +1065,9 @@ export class Game implements GameHooks {
       const rolled = Math.max(1, Math.round(dmg * (1 + (Math.random() * 30 - 15) / 100)));
       p.lastDamageCause = { kind: 'projectile', name: Lang.projectileName(projType) ?? 'Explosives' };
       const pvpHit = projType !== 108 && projType !== 1002;
-      if (p.damage(rolled, rp.x, rp.y, true, pvpHit)) {
+      // ★走 damagePlayer 而非直调 p.damage：死亡结算块（pvpDeath 计数/不掉钱/复活
+      // 计时）挂在 damagePlayer 尾部——直调会绕过,_pvp-e2e 实抓"炸死无计数"）
+      if (this.damagePlayer(rolled, rp.x, rp.y, undefined, false, pvpHit)) {
         this.playSfx('hit', 1, p.cx, p.cy);
         if (!p.dead && p.hp > 0) statusPlayer(this, projType);
       }
@@ -10025,6 +10027,11 @@ export class Game implements GameHooks {
     // 不对 proxy 扣血（proxy.hp 由被击端 msg16 回报刷新）。门禁：pvpAllowed 房 +
     // 自己 hostile + 对方 hostile/异队（InOpposingTeam）——与 Damage_PVP :13506-13510
     // 同构（原版 :43409 同队门 team!=0&&equal）
+    if (typeof window !== 'undefined') {
+      const w = window as unknown as { __pvpCond?: number[][] };
+      (w.__pvpCond ??= []).push([this.net?.active ? 1 : 0, this.net?.policy?.pvpAllowed ? 1 : 0,
+        this.player.hostile ? 1 : 0, isNet ? 1 : 0]);
+    }
     if (this.net?.active && this.net.policy.pvpAllowed && this.player.hostile && !isNet) {
       if (typeof window !== 'undefined') {
         const w = window as unknown as { __pvpSw?: number[] };
@@ -10470,6 +10477,15 @@ export class Game implements GameHooks {
     const homes = npcs.filter((n) => n.home)
       .map((n) => ({ x: n.home!.x, y: n.home!.y, npcId: n.vanillaId }));
     const st = this.world.store;
+    // 入驻锚点（SpawnHomelessNPC :5014-5033）：已安家 townNPC 的 home 随机取一——
+    // 原版房表口径 townNPC && type!=37 && !homeless（含宠物：宠物 townNPC=true，
+    // NPC.cs:17145；本仓 homes 即"有 home 的 TownNPC"，old_man 不入驻无 home 同口径）；
+    // 冷启（世界无任何已安家 NPC）回退出生点（原版静态 LastFoundHouse(0,0) 必失败后
+    // 走 randomNext homes，无家可取时 :5041 直接 return——本仓出生点兜底保证第一间
+    // 出生点旁的房可被发现，见 findFreeHouse ±10 窗注释）
+    const pickAnchor = (): { x: number; y: number } =>
+      homes.length > 0 ? homes[Math.floor(Math.random() * homes.length)]
+        : { x: this.world.spawnX, y: this.world.spawnY };
 
     // ①' 被绑巫师【不补放】（2026-08-13 对齐原版）：106 BoundWizard 唯一来源 =
     // SpawnAnNPC 三人组链（NPC.cs:1999-2002，hardMode && 1/20 && 洞穴层深处门），
@@ -10483,8 +10499,9 @@ export class Game implements GameHooks {
     // 会被塞进同一间空房叠在一点（读档/新世界 7200 tick 后必现）
     for (const n of npcs) {
       if (n.home || n.bound || n.npcKey === 'old_man') continue;
-      const house = findFreeHouse(st, homes, this.world.spawnX, this.world.spawnY, n.vanillaId);
-      if (!house) break;
+      const anchor = pickAnchor();
+      const house = findFreeHouse(st, homes, anchor.x, anchor.y, n.vanillaId);
+      if (!house) continue; // 该锚点 ±10 窗内无房：NPC 留 homeless，下一 NPC 换锚点重试（锚点各异不整体放弃）
       n.home = { x: house.standX, y: house.standY };
       n.leashHome = true; // 有家者白天在家附近游走
       homes.push({ x: house.standX, y: house.standY, npcId: n.vanillaId });
@@ -10549,9 +10566,13 @@ export class Game implements GameHooks {
     if (!pick) return;
     if (pick === 'town_slime_cool') this.world.flags.unlockedSlimeGreenSpawn = true;  // WorldGen.cs:5543
 
-    // ③ 入住 / 流浪生成（askingNpcId = 待生成者，占用豁免/同房避让用）
+    // ③ 入住 / 流浪生成（askingNpcId = 待生成者，占用豁免/同房避让用）。
+    // 锚点同 ①（pickAnchor：已安家 home 随机取一/冷启出生点）——原版此处为
+    // SpawnTownNPC(LastFoundHouse) 失败后走 :5014-5033 randomNext homes，
+    // 新 NPC 落锚点后经 QuickFindHome(:5135) 在锚点 ±10 窗内找房
     const id = TOWN_NPC_IDS[pick].id;
-    const house = findFreeHouse(st, homes, this.world.spawnX, this.world.spawnY, id);
+    const anchor = pickAnchor();
+    const house = findFreeHouse(st, homes, anchor.x, anchor.y, id);
     const name = Lang.npcName(id) ?? pick;
     // NPCID.Sets.IsTownPet（NPCID.cs:4444）= 宠物三只+全部城镇史莱姆：WorldGen.
     // IsThereASpawnablePrioritizedTownNPC(:4855) 对本集免房放行——无房时在出生点
@@ -10614,11 +10635,11 @@ export class Game implements GameHooks {
       // 无人入住（无锚点）则不生成——新世界只有向导（WorldGen.cs:20036 出生）
       if (!this.world.clock.isDay || homes.length === 0) return;
       if (npcs.some((n) => !n.home)) return;
-      const anchor = homes[Math.floor(Math.random() * homes.length)];
-      const ax = anchor.x + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
+      const homeAnchor = homes[Math.floor(Math.random() * homes.length)];  // 同 pickAnchor 口径（此处已保证 homes 非空）
+      const ax = homeAnchor.x + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
       if (ax < 3 || ax > st.w - 4) return;
-      let ay = Math.max(4, anchor.y - 20);
-      const limit = Math.min(st.h - 3, anchor.y + 20);
+      let ay = Math.max(4, homeAnchor.y - 20);
+      const limit = Math.min(st.h - 3, homeAnchor.y + 20);
       while (ay < limit && !st.isSolid(ax, ay)) ay++;
       if (ay >= limit) return;
       const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
@@ -12378,7 +12399,19 @@ export class Game implements GameHooks {
       //  ① thorns 链:反=实际受伤×num2(荆棘药水 1/海龟套 2)钳 1000
       //  ② cactusThorns:仙人掌套定值 15/专家 30/大师 45（不乘伤害）
       if (attacker && contactOnly && !attacker.dead) {
-        const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-30932
+            // 格挡盾反击（Player.cs:30910-30920 CanParryAgainst:shieldParryTimeLeft>0
+    // 且面向来敌 → 本次免伤 + 反伤 2×(kb 5),清格挡窗口）
+    if (attacker && contactOnly && p.shieldParryTimeLeft > 0) {
+      const facing = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? -1 : 1;
+      if (p.facing === facing) {
+        p.shieldParryTimeLeft = 0;
+        const reflect = Math.max(1, Math.round(dmg * 2));
+        attacker.hurt(reflect, -facing * 5, -2, this);
+        this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#FFD080');
+        return;   // 完全免伤
+      }
+    }
+const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-30932
         if (p.thornsActive) {
           const num2 = (p.buffs.hasThorns ? 1 : 0) + (p.turtleSet ? 1 : 0);   // :30911-30916
           // Main.DamageVar :65597-65620（±15% + luck 重掷——曾裸随机丢重掷段）
@@ -14674,7 +14707,28 @@ export class Game implements GameHooks {
       this.entities.all(),
       this.particles, this.dmgNumbers,
       this.swing, hover,
-      this.boss ? { name: this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) ?? this.boss.def.name : this.boss.def.name, hp: this.boss.hp, maxHp: this.boss.maxHp, cx: this.boss.cx, cy: this.boss.cy } : null,
+      // Boss 血条数据：EoW 族（13-15）走原版聚合条（EaterOfWorldsProgressBar
+      // :29-45:全场段 HP 之和 ÷ 恒定分母 (段数+2)×150——打身体段总条同步降,
+      // 锚死自动换段续显）,其余 boss 单锚 hp
+      this.boss ? (() => {
+        const bv = this.boss!.vanillaId ?? 0;
+        const base = {
+          name: this.boss!.vanillaId != null ? Lang.npcName(this.boss!.vanillaId) ?? this.boss!.def.name : this.boss!.def.name,
+          cx: this.boss!.cx, cy: this.boss!.cy,
+        };
+        if (bv >= 13 && bv <= 15) {
+          let hp = 0, segs = 0, denom = 0;
+          for (const en of this.entities.enemies as Enemy[]) {
+            const e = en as Enemy;
+            if (e.dead || e.vanillaId == null || e.vanillaId < 13 || e.vanillaId > 15) continue;
+            hp += Math.max(0, e.hp);
+            segs++;
+            denom = Math.max(denom, e.eowChainMax);
+          }
+          return { ...base, hp, maxHp: (denom || segs) * 150 };
+        }
+        return { ...base, hp: this.boss!.hp, maxHp: this.boss!.maxHp };
+      })() : null,
       this.input.mouseX, this.input.mouseY, this.input.mouseDown,
       this.mining ? Math.min(1, this.mining.progress / this.hardnessCache) : 0,
       this.lighting.clock, // FlickerClock：资源条亮度/呼吸（mouseTextColor/cursorScale）

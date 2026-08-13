@@ -28,6 +28,8 @@
 //    DeadMans 候选的 structures.CanPlace(GeneralPlacementTiles, pad 10)跳过
 //  - Main.tileDungeon 用 dungeon 砖 tile 近似(41/43/44),容器用 chest 族 key 近似
 //  - DeadMans 候选枚举用栅格扫描替代 Main.chest 下标序(候选集相同,掷骰总数一致)
+//  - 剑冢 ShapeData 枚举序:.NET HashSet<Point16> 不可移植,藤蔓(382)/铺草(3/73)
+//    两步按行主序近似——掷骰总数一致,逐格落点可能分叉
 //  - TurnGoldChestIntoDeadMansChest 的 1/3 战利品前插(Item 5007)无 chest sink,掷骰保留、
 //    写入跳过
 import { TileStore, LIQUID_TYPE } from '../../TileStore';

@@ -16,7 +16,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart, addEnemy, shoot, losClear } from './bossAI';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear } from './bossAI';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
 import { deerclopsAI } from './bossAI_deerclops';
@@ -125,19 +125,18 @@ const STATUE_DROP_RARITY: Record<number, number> = {
  *  与 1456 SetDefaults boss=true 全集逐块对齐（2026-08-13 整体 review 复核）：
  *  4 EoC / 35 骷髅王 / 50 史莱姆王 / 113 血肉墙 / 125,126 双子 / 127 Prime /
  *  134 毁灭者 / 222 蜂后 / 245 石巨人 / 262 世纪之花 / 266 克脑 / 370 猪鲨 /
- *  395 火星飞碟(:13993) / 398 月总核心 / 439 异教徒 / 636 光皇 / 657 史莱姆皇后 /
- *  668 鹿角怪 / 13-15 世吞三段（原版 :79225 动态置位）。
- *  ★曾在集合里的 68 地牢守卫(:9584 无 boss 位)、325 哀木/327 南瓜王(:13047)、
- *  345 冰女王/346 圣诞坦克(:13301)——SetDefaults 均无 boss=true，已移除：
- *  月事件 Boss 只有波次进度与掉落（占 Boss 槽会误播"已被击败"/误写 downed/误
- *  发 Boss 药水），地牢守卫击杀原版完全静默。396/397(月总头/手,:14029 有 boss 位)
- *  与 664(:17333 语义存疑)暂不补入——月总以 398 锚定单槽，补入需先审击杀流。 */
-/** 原版 SetDefaults boss=true 全量对账（NPC.cs 提取,2026-08-13）:
- *  4/35/50/113/125/126/127/134/222/245/262/266/370/395/`396/397`/398/439/578/
- *  636/657/`664`/668。★曾缺 396/397（月总头/手）与 664（附魔日晷族 Boss?——
- *  实为 Plantera 二阶段前的腐化宝箱怪?以源码为准保留）+578(帝寒骏马?):
- *  缺失会令部件离屏消散（EoW 14/15 同款 bug 隐患）
- *  （注：块注释体内勿出现 `星斜` 序列，强调记号用反引号） */
+ *  395 火星飞碟(:13993) / 396/397 月总头手 / 398 月总核心 / 439 异教徒 /
+ *  578 DD2 闪电甲虫 T3 / 636 光皇 / 657 史莱姆皇后 / 664 火把神 / 668 鹿角怪。
+ *  13-15 世吞三段：原版 :79225 动态置位(仅头实时 boss=true),本仓恒含 13 供
+ *  boss 槽/掉落锚定。★68 地牢守卫(:9584 无 boss 位)、325 哀木/327 南瓜王
+ *  (:13047)、345 冰女王/346 圣诞坦克(:13301)——SetDefaults 均无 boss=true,
+ *  不入本集合（月事件 Boss 只有波次进度与掉落,占槽会误播"已被击败"误写
+ *  downed）。396/397/578/664 已随消散审计补入（EoW 14/15 同款离屏消散隐患,
+ *  见 NO_DESPAWN_IDS 注释）;boss 槽接管点已审：仅联机傀儡(:906)/F6 调试
+ *  (:13085)/显式召唤链——事件怪(578/664)与月总部件无通用接管,补入无副作用 */
+/** 原版 SetDefaults boss=true 全量对账（NPC.cs 逐 case 提取,2026-08-13）:
+ *  4/35/50/113/125/126/127/134/222/245/262/266/370/395/396/397/398/439/578/
+ *  636/657/664/668（另含本仓语义位 13） */
 export const VANILLA_BOSS_IDS = new Set([
   4, 13, 35, 50, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 396, 397, 398,
   439, 578, 636, 657, 664, 668,
@@ -207,6 +206,10 @@ export class Enemy extends Entity {
   // ---- 蠕虫多段体（AI_006，NPC.cs:18046）：头 aiStyle 6，编号约定 头+1=身 头+2=尾 ----
   /** 链上紧随本段的一段（头 → 身×n → 尾） */
   wormNext: Enemy | null = null;
+  /** EoW 链总段数（头+体+尾,EaterOfWorldsProgressBar 恒定分母用——
+   *  原版 maxLife = (GetEaterOfWorldsSegmentsCount()+2)×150,玩家杀段不缩分母;
+   *  spawnWormChain 写入全链各段,断链拆分时各自继承原值） */
+  eowChainMax = 0;
   /** 本段跟随的前一段（非空 = 本段是身体段，跳过 AI 只做跟随） */
   wormFollow: Enemy | null = null;
   /** 上一 tick 位置（段跟随用：段复制前一段的旧位置 = 经典贪吃蛇链） */
@@ -510,6 +513,10 @@ export class Enemy extends Entity {
   static spawnWormChain(head: Enemy, segCount: number): Enemy[] {
     const segs: Enemy[] = [];
     const bodyId = head.vanillaId! + 1, tailId = head.vanillaId! + 2;
+    // EoW 族记链总段数（血条恒定分母,EaterOfWorldsProgressBar :30-33;
+    // 毁灭者族不消费,统一写入无副作用）
+    const chainTotal = segCount + 1;
+    head.eowChainMax = chainTotal;
     let prev = head;
     for (let k = 0; k < segCount; k++) {
       const id = k === segCount - 1 ? tailId : bodyId;
@@ -518,6 +525,7 @@ export class Enemy extends Entity {
       s.wormFollow = prev;
       prev.wormNext = s;
       prev = s;
+      s.eowChainMax = chainTotal;
       segs.push(s);
     }
     return segs;
@@ -608,10 +616,12 @@ export class Enemy extends Entity {
     // alpha=255 = 出生全透明渐显标记（13-15 世吞 / 134-136 毁灭者；其余 alpha 为
     // 静态不透明度,勿动）：置 alphaFade 交渐显路径逐 tick 减回 0。EoW 族保持原版
     // 初值 255（AI_006 尾段 :52650-52670 移动门 -42/t，见 fixedUpdate 渐显段）；
-    // 其余 alpha=255 族沿用 254 起步走 -1/t 近似
+    // 134-136 毁灭者同保 255 但【不置 alphaFade】——AI_037 链门淡入（头恒过/
+    // 段须前段<128、无条件 -42/t+红尘 182，:50162-50182，destroyerAI 内）接管，
+    // 通用 -1/t 近似对其已退役；其余 alpha=255 族沿用 254 起步走 -1/t 近似
     if (e.spawnAlpha >= 255) {
-      e.alphaFade = true;
-      e.spawnAlpha = (id >= 13 && id <= 15) ? 255 : 254;
+      if (id >= 134 && id <= 136) { /* 保持 255 初值，AI_037 链门淡入接管 */ }
+      else { e.alphaFade = true; e.spawnAlpha = (id >= 13 && id <= 15) ? 255 : 254; }
     }
     e.colorRGBA = v.color ? [v.color[0], v.color[1], v.color[2], v.color[3] ?? 255] : null; // 原版 color 字段
     // 266 克脑 SetDefaults :12372 dontTakeDamage=true——一阶段（爬行者存活）不可击，
@@ -1054,6 +1064,11 @@ export class Enemy extends Entity {
     this.updateNpcCastLights();
     this.updateNpcTrailLights();
     this.updateNpcDebuffLights();
+    // 毁灭者族段光：原版 AI_037 每段独立发光，本仓身/尾 wormBody 跳过 AI 分发 →
+    // 全族三 id（134/135/136）统一在此结算（含头，防与 destroyerAI 双写）
+    if (this.vanillaId === 134 || this.vanillaId === 135 || this.vanillaId === 136) {
+      destroyerSegmentLight(this, game);
+    }
 
     // ---- EoW 出生渐显（AI_006 尾段 1:1，NPC.cs:52650-52670；须在 AI 分发后跑——
     //      原版位移门 `(position - oldPosition).Length() > 2` 量的是本 tick 位移，

@@ -1174,6 +1174,29 @@ export function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX
  *  FTW ×1.2 :50359-50363);
  *  白天/玩家死:加速下坠,过岩石层整链消散;体节 135 探针随机激光 100。
  *  段链 80 段(原版 GetDestroyerSegmentsCount;链距 44px)由头驱动收缩跟随。 */
+/** :50299-50306 毁灭者族段光：!flag2（未嵌实心/液体）且非 135 段 ai[2]==1 →
+ *  Center (0.3,0.1,0.05)（钻地段不发光）。原版 AI_037 对头 134/身 135/尾 136
+ *  每段独立生效；本仓身/尾为 wormBody 跳过 AI 分发 → 由 Enemy 共享尾段对全族
+ *  三 id 统一调用（头亦经此，防双写）。flag2 扫描 = AABB 外扩 1-2 格内实心块或
+ *  液体>64 与本体盒相交（:50278-50298） */
+export function destroyerSegmentLight(e: Enemy, game: GameHooks): void {
+  const st = game.world.store;
+  let buried = false;
+  const tx0 = Math.max(0, Math.floor(e.x / TILE) - 1), tx1 = Math.min(st.w - 1, Math.floor((e.x + e.w) / TILE) + 2);
+  const ty0 = Math.max(0, Math.floor(e.y / TILE) - 1), ty1 = Math.min(st.h - 1, Math.floor((e.y + e.h) / TILE) + 2);
+  for (let x = tx0; x <= tx1 && !buried; x++) {
+    for (let y = ty0; y <= ty1; y++) {
+      const i = st.idx(x, y);
+      if ((st.flags[i] && st.isSolid(x, y)) || st.liquid[i] > 64) {
+        if (e.x + e.w > x * TILE && e.x < x * TILE + 16 && e.y + e.h > y * TILE && e.y < y * TILE + 16) { buried = true; break; }
+      }
+    }
+  }
+  if (!buried && !(e.vanillaId === 135 && e.ai2 === 1)) {
+    e.lightRGB = [0.3, 0.1, 0.05];
+  }
+}
+
 export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) {
     e.bInit = true;
@@ -1182,6 +1205,26 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
     const segs = enemySpawnChain(e, (game.world.seedFlags?.getGoodWorld ? 100 : 80) + 1);
     for (const s of segs) addEnemy(game, s);
   }
+  // ---- 出生链门淡入（AI_037 :50162-50182，1:1）----
+  // 头 134 恒过；段 135/136 须前段 spawnAlpha<128 才启动——渐显沿链向尾传播
+  // （阈值 128 非 85，勿抄 EoW 门）。门内 alpha≠0 时 2 颗 182 号红尘（NewDust
+  // alpha=100、scale 2、noGravity/noLight；贴图采样 (255,33,34) 纯红）→ 无条件
+  // -42 钳 0（255→0 共 7 tick 现身）。原版每段独立跑 AI_037，本仓段链由头驱动
+  // → 头循环逐段执行（头先段后，与原版 whoAmI 顺序一致）
+  const fadeNpc = (n: Enemy) => {
+    if (n.dead) return;
+    const prev = n.wormFollow;
+    if (n.vanillaId !== 134 && (!prev || prev.spawnAlpha >= 128)) return;
+    if (n.spawnAlpha !== 0) {
+      game.spawnParticles(
+        n.x + Math.random() * n.w, n.y + Math.random() * n.h,
+        '#FF2122', 2, 0, { life: 40, size: 2 },
+      );
+    }
+    n.spawnAlpha = Math.max(0, n.spawnAlpha - 42);
+  };
+  fadeNpc(e);
+  for (let s = e.wormNext; s; s = s.wormNext) fadeNpc(s);
   const st = game.world.store;
   // 接地判定(flag2):AABB 外扩 1-2 格内实心块或液体>64(:50278-50298)
   let buried = false;
@@ -1194,12 +1237,6 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
         if (e.x + e.w > x * TILE && e.x < x * TILE + 16 && e.y + e.h > y * TILE && e.y < y * TILE + 16) { buried = true; break; }
       }
     }
-  }
-
-  // 点光(:50299-50306)：!flag2（未嵌实心/液体）且非 135 段 ai[2]==1 →
-  // Center (0.3,0.1,0.05)（钻地段不发光）
-  if (!buried && !(e.vanillaId === 135 && e.ai2 === 1)) {
-    e.lightRGB = [0.3, 0.1, 0.05];
   }
 
   // 白天/玩家死(:50337-50356):vy+1,地表下再+1 且空中钳提到 32(num18);过岩石层

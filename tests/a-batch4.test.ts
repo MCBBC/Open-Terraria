@@ -294,6 +294,45 @@ describe('A4-4 毁灭者激光概率公式（NPC.cs:50206-50241）', () => {
 });
 
 // ===========================================================================
+// 4b. 毁灭者出生链门淡入（AI_037 :50162-50182）
+//     头恒过 / 段须前段 alpha<128（沿链传播，128 非 85）→ 无条件 -42 钳 0
+// ===========================================================================
+describe('A4-4b 毁灭者链门淡入（NPC.cs:50162-50182）', () => {
+  it('fromVanilla：134-136 保持原版 255 初值且不置通用 alphaFade（AI_037 接管）', () => {
+    for (const id of [134, 135, 136]) {
+      const e = Enemy.fromVanilla(id, 0, 0)!;
+      expect(e.spawnAlpha).toBe(255);        // SetDefaults alpha 原值
+      expect(e.alphaFade).toBe(false);       // 通用 -1/t 近似对毁灭者已退役
+    }
+  });
+  it('头无条件 -42/t；段等前段 <128 才启动（链式传播）→ 40t 全链现身', () => {
+    const w = emptyWorld();
+    const list: unknown[] = [];
+    const game = makeGame(w, list);
+    const head = Enemy.fromVanilla(134, 100 * TILE, 100 * TILE)!;
+    list.push(head);
+    const p = fakePlayer(105 * TILE, 100 * TILE);
+    destroyerAI(head, game, p);                        // 首帧：建链 + 头第一步
+    const seg1 = head.wormNext!, seg2 = seg1.wormNext!;
+    expect(head.spawnAlpha).toBe(213);                 // 255-42（头恒过）
+    expect(seg1.spawnAlpha).toBe(255);                 // 头 213 ≥ 128 → 门未开
+    destroyerAI(head, game, p);
+    destroyerAI(head, game, p);
+    destroyerAI(head, game, p);                        // 第 4 tick：头 129→87 < 128
+    expect(head.spawnAlpha).toBe(87);
+    expect(seg1.spawnAlpha).toBe(213);                 // 本 tick seg1 门开 → 一步
+    expect(seg2.spawnAlpha).toBe(255);                 // seg1 213 ≥ 128 → seg2 仍等
+    for (let t = 0; t < 40; t++) destroyerAI(head, game, p);
+    expect(head.spawnAlpha).toBe(0);                   // -42 钳 0（255→0 共 7 tick）
+    expect(seg1.spawnAlpha).toBe(0);
+    expect(seg2.spawnAlpha).toBe(0);
+    destroyerAI(head, game, p);                        // 已现身：恒 0 不回退
+    expect(head.spawnAlpha).toBe(0);
+    expect(seg1.spawnAlpha).toBe(0);
+  });
+});
+
+// ===========================================================================
 // 5. 猪鲨爆裂泡泡 371（StrikeNPC cs:82102-82107 / aiStyle 70 :35180-35194）
 // ===========================================================================
 describe('A4-5 爆裂泡泡 371 受击即爆（cs:82102-82107）', () => {

@@ -658,7 +658,8 @@ function templePart2(
       //   在 AddBuriedChest 内部（cs:35992-35999,以落地行 k 为锚 5×5 查
       //   Boulders/26/237 拒）;本仓 placeBuriedChest 已带等价检查。
       if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
-        if (placeBuriedChest(st, rng, gs, chests, x2, y2, { style: 16, loot: 'vi_1293_lihzahrd_power_cell' })) {
+        // notNearOtherChests:true(cs:34532 原版实参)
+        if (placeBuriedChest(st, rng, gs, chests, x2, y2, { style: 16, loot: 'vi_1293_lihzahrd_power_cell', notNearOtherChests: true })) {
           budget -= 1;
           fails = 0;
         }

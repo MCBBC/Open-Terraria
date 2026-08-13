@@ -352,24 +352,32 @@ function floodRoom(st: TileStore, sx: number, sy: number): Room | null {
 }
 
 /**
- * 全图找一间无人入住的合格房屋（房间枚举为本仓库自有——原版无"全图找房"，
- * QuickFindHome 是对既有 home 的单房校验；房内站位选择 = ScoreRoom 1:1）。
- * 多房择优：取 ScoreRoom 分最高者，同分取离锚点近（原版单房无此维度）。
+ * 锚点 ±10 窗口内找一间无人入住的合格房屋。原版 QuickFindHome（WorldGen.cs:5665-
+ * 5727）只对锚点校验：锚点自身（:5674 home-1）→ home±1（:5677-5682）→ home±10
+ * 螺旋（:5684-5691），窗外不搜索——锚点 ±1 精查已由全格窗口覆盖（±10 窗含 ±1），
+ * 螺旋的步长 2 粗采样不重刻（打分制需全格门锚，最小实现对齐）。
+ * 房间枚举/多房打分为本仓库自有——原版 StartRoomCheck 自单点泛洪（SpawnTownNPC
+ * :5345-5358 锚点须正好落在房内才成功），无多房择优；泛洪填充本身不受窗限制，
+ * 与原版 CheckRoom 一致。多房择优：取 ScoreRoom 分最高者，同分取离锚点近。
+ * 锚点来源（调用方负责，SpawnHomelessNPC :5014-5033 语义）：已安家 NPC 的 home
+ * 随机取一；冷启无安家者回退出生点。
  * occupied = 已入住 NPC 的 home tile 列表（npcId 供同房豁免判定）。
  * askingNpcId = 申请入住者（ScoreRoom 占用豁免 + 共用房避让）。
  */
 export function findFreeHouse(
   st: TileStore, occupied: Array<{ x: number; y: number; npcId?: number }>,
-  nearX?: number, nearY?: number, askingNpcId = -1,
+  anchorX: number, anchorY: number, askingNpcId = -1,
 ): Room | null {
-  const anchorX = nearX ?? Math.floor(st.w / 2);
-  const anchorY = nearY ?? 0;
   let best: Room | null = null;
   let bestScore = 0;
   let bestD = Infinity;
-  for (let y = 3; y < st.h - 4; y++) {
+  // QuickFindHome :5684-5691 ±10 螺旋窗：候选门锚必须落在窗内；世界边缘按原
+  // 扫描边界（x∈[3,w-4)、y∈[3,h-4)）裁剪
+  const x0 = Math.max(3, anchorX - 10), x1 = Math.min(st.w - 4, anchorX + 10);
+  const y0 = Math.max(3, anchorY - 10), y1 = Math.min(st.h - 5, anchorY + 10);
+  for (let y = y0; y <= y1; y++) {
     const row = y * st.w;
-    for (let x = 3; x < st.w - 3; x++) {
+    for (let x = x0; x <= x1; x++) {
       const t = st.type[row + x];
       if (!isDoorType(t)) continue;
       const room = checkRoom(st, x, y);

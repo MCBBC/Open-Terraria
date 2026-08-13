@@ -1288,6 +1288,9 @@ import { TILE_KEY_BY_SHEET } from './tiles';
   void filled;
 }
 
+// 格挡盾族（Player.cs:31254-31280 shield 旗标 + :30979 CanParryAgainst——2026-08-13）
+item({ key: 'vi_3823_brand_of_the_inferno', name: '', maxStack: 1, value: 1 });
+item({ key: 'vi_4760_sergeants_united_shield', name: '', maxStack: 1, value: 1 });
 // ---- 钓鱼链物品补齐(2026-08-13:饵/竿/药水/渔获——此前正常玩法无法抛竿,B26 断链) ----
 item({ key: 'vi_2422_hotline_fishing_hook', name: '', maxStack: 1, value: 1 }); // 熔线钓钩(Hotline Fishing Hook——岩浆钓三源之一,:19230/:19375-19378)
 item({ key: 'vi_1992_f1992', name: '', maxStack: 999, value: 1 }); // 饵(黑蜻蜓)——数值/名走 itemfunc+l10n 链

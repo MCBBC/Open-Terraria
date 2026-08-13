@@ -489,7 +489,8 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
         st.liquid[i] = 0; st.liquidType[i] = 0;
         if (solidTile(st, cx, cy + 1) && rng.int(0, 2) === 0) {
           if (rng.int(0, 14) === 0) {
-            placeBuriedChest(st, rng, gs, chests, cx, cy, { style: 15, loot: 'vi_939_web_slinger' });
+            // notNearOtherChests:true(cs:3708 原版实参)——±25×±8 已有 BasicChest 则拒
+            placeBuriedChest(st, rng, gs, chests, cx, cy, { style: 15, loot: 'vi_939_web_slinger', notNearOtherChests: true });
           } else {
             placePot(st, rng, cx, cy, rng.int(19, 20));
           }

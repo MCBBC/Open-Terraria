@@ -520,9 +520,10 @@ export function placeBuriedChest(
 export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w, h } = st;
   const yMin = Math.floor((gs.worldSurfaceHigh + 20 + gs.rockLevel) / 2);
-  // 洞穴箱:35-40 × 面积缩放(Configuration.json CaveChestCount ScaleWith:WorldArea;
-  // 小世界(4200×1200=5040000)= 1.0 → 35-40;中 ×2.29;大 ×4.0)
-  const target = Math.round(rng.int(35, 40) * (w * h) / 5040000);
+  // 洞穴箱:35-40 × 面积缩放(Configuration.json CaveChestCount ScaleWith:WorldArea)。
+  // ★WorldGenRange.GetRandom(WorldGenRange.cs:34-57):先缩放边界再 (int) 截断 →
+  //   Next((int)(35s), (int)(40s)+1)。曾"先掷后乘+Math.round"(C10 同款旧公式)
+  const target = rng.int(Math.trunc(35 * (w * h) / 5040000), Math.trunc(40 * (w * h) / 5040000));
   let fail = 10000;
   for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);

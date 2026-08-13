@@ -112,16 +112,15 @@ check('双方平台落位存活', !platA.dead && !platB.dead, JSON.stringify({ p
 await pump2(20); // msg13 双向同步
 
 // ---- 场景准备：双 hostile 异队 + 贴身站位 ----
-const setupA = await pageA.evaluate(async () => {
+const setupA = await pageA.evaluate(() => {
   const g = window.__swGame;
-  const { ITEM_BY_KEY } = await import('/src/data/items.ts');
-  // 近战手持物：铜短剑 vi_ 键反查，退化 torch（swing.dmg 显式给值,任意非 magic 即可）
-  let heldId = ITEM_BY_KEY['vi_3507_copper_shortsword'] ?? -1;
-  if (heldId < 0) heldId = ITEM_BY_KEY['torch'] ?? -1;
+  // ★不塞物品——dev 模块 HMR fork 致 items.ts 多实例（同键不同内部 id,探针/主流程/
+  // Game 三视图互不一致）。默认手持物是游戏侧自洽 id；swing.dmg 由探针显式给出,
+  // 任意非网非魔法手持即可过近战门
   g.player.hostile = true; g.player.team = 1; g.player.facing = 1;
-  if (heldId >= 0) { g.player.inv.slots[0] = { id: heldId, stack: 1 }; g.player.inv.selected = 0; }
   g.net.sendPvpState();
-  return { heldId, slot: g.net.mySlot };
+  const held = g.player.inv.heldItem();
+  return { held: held ? held.id : -1, selected: g.player.inv.selected, slot: g.net.mySlot };
 });
 const setupB = await pageB.evaluate(() => {
   const g = window.__swGame;
@@ -129,7 +128,7 @@ const setupB = await pageB.evaluate(() => {
   g.net.sendPvpState();
   return { slot: g.net.mySlot, x: g.player.x, y: g.player.y };
 });
-check('A 拿到近战手持物', setupA.heldId >= 0, `heldId=${setupA.heldId}`);
+check('A 有默认手持物', setupA.held >= 0, JSON.stringify(setupA));
 await pump2(20); // msg13 双向同步
 
 // A 贴到 B 左侧 14px（B 的 msg13 权威位）
@@ -193,7 +192,9 @@ const swing = await pageA.evaluate(async () => {
       else if (phase === 2) { if (g.player.facing === -1) bx -= Math.floor(bw * 1.4 - bw); bw = Math.floor(bw * 1.4); by += Math.floor(bh * 0.5); bh = Math.floor(bh * 1.1); }
       boxes.push({ pAnim, box: [Math.round(bx), Math.round(by), bw, bh] });
     }
-    boxDebug = { sprW, sprH, boxes, rpBox: rp0 ? [rp0.x, rp0.y, rp0.w, rp0.h] : null, facing: g.player.facing };
+    boxDebug = { sprW, sprH, boxes, rpBox: rp0 ? [rp0.x, rp0.y, rp0.w, rp0.h] : null, facing: g.player.facing,
+      heldDef: ITEM_DEFS[held.id] ? { key: ITEM_DEFS[held.id].key, vid: ITEM_DEFS[held.id].vid } : null,
+      heldId: held.id };
   } catch (e) { boxDebug = { err: String(e) }; }
   return {
     sent44: sent44.length, first: sent44[0] ?? null,
@@ -205,7 +206,7 @@ const swing = await pageA.evaluate(async () => {
     },
     boxDebug,
     bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,
-    stageSw: window.__pvpSw ?? null,
+    stageSw: window.__pvpSw ?? null, cond: window.__pvpCond?.slice(-6) ?? null,
   };
   const sent = g.swing ? 'swing-alive' : 'swing-consumed';
   return {

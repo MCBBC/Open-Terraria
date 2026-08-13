@@ -198,6 +198,7 @@ export function runDungeonPass(
   const bannerStyles = [10, 11, 12, 13, 14, 15];
   const skewed = rn(4) === 0;         // cs:274 useSkewedDungeonEntranceHalls
   const doorStyle = theme === 0 ? 16 : theme === 1 ? 17 : 18;  // Item 1411-1413 placeStyle
+  const platformStyle = theme === 0 ? 6 : theme === 1 ? 8 : 7; // Item 1384-1386 placeStyle(蓝6/绿8/粉7)
   // —— 状态（DungeonData/GenVars）——
   const rooms: DRoom[] = [];
   const halls: DHall[] = [];
@@ -1322,10 +1323,17 @@ export function runDungeonPass(
     const above = TILE_DEFS[typAt(i2, j2 - 2)];
     if (!(actAt(i2, j2 - 2) !== 0 && above?.solid)) return;
     if (!dgSolid(i2, j2 + 2)) return;
+    // PlaceDoor 1:1(:31938-31958):style→帧映射 frameX=54*(style/36)、
+    // frameY=54*(style%36);三格 frameY 递增 18,每格独立 frameX=base+Next(3)*18。
+    // ★此前 style 参数被完全忽略(帧不写)= 全部退化木门(style 0)——
+    // 用户报告"地牢门是木门"根因(2026-08-13)
+    const fx0 = 54 * Math.floor(style / 36);
+    const fy0 = 54 * (style % 36);
     for (let k = -1; k <= 1; k++) {
       const ti = st.idx(i2, j2 + k);
       st.flags[ti] = 1; st.type[ti] = DOOR;
-      rn(3);                                    // frameX = Next(3)*18
+      st.frameX[ti] = fx0 + rn(3) * 18;
+      st.frameY[ti] = fy0 + (k + 1) * 18;
     }
   }
 
@@ -1424,11 +1432,13 @@ export function runDungeonPass(
       let qx = x + 1;
       while (inW(px, py, 0) && actAt(px, py) === 0) {
         chTile(st.idx(px, py), PLATFORM, false);
+        st.frameY[st.idx(px, py)] = 18 * platformStyle; // DungeonGlobalPlatforms:158
         px--;
         if (px <= 10) break;
       }
       while (inW(qx, py, 0) && actAt(qx, py) === 0) {
         chTile(st.idx(qx, py), PLATFORM, false);
+        st.frameY[st.idx(qx, py)] = 18 * platformStyle;
         qx++;
         if (qx >= w - 10) break;
       }
@@ -1676,7 +1686,8 @@ export function runDungeonPass(
             if (k > 5) {
               let n10 = ri(1, 3);
               while (n10 > 0) {
-                chTile(st.idx(x, y), PLATFORM, false);         // frameY=18*shelfStyle（不入哈希）
+                chTile(st.idx(x, y), PLATFORM, false);
+                st.frameY[st.idx(x, y)] = 18 * platformStyle; // frameY=18*tileStyle(DungeonGlobalPlatforms:158)
                 if (flag3) {
                   placeSimple(x, y - 1, BOOKS);
                   if (rn(50) === 0 && y > (ws + rock) / 2.0) { /* waterbolt 帧 */ }
