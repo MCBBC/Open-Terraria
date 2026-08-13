@@ -58,6 +58,16 @@ export const enum PAINT_ID {
 /** 油漆有效上限（含 31 废弃位，byte 域完整 5bit） */
 export const PAINT_MAX = 31;
 
+/** paint id → RGB 预展开表（paintColor 的数组直查版，热循环用；下标 0-31） */
+export const PAINT_RGB: ReadonlyArray<readonly [number, number, number]> = (() => {
+  const t: Array<readonly [number, number, number]> = [];
+  for (let i = 0; i <= PAINT_MAX; i++) {
+    const [r, g, b] = paintColor(i);
+    t.push([r, g, b]);
+  }
+  return t;
+})();
+
 /**
  * 油漆 id → RGBA（WorldGen.cs:43948-44061 paintColor 逐行 1:1）。
  * 注意：深层漆(13-24)与浅层(1-12)在此表同 RGB——深/浅差异在渲染端覆盖强度
@@ -168,4 +178,59 @@ export function mapPaintColor(
 export function paintCss(paint: number): string {
   const [r, g, b] = paintColor(paint);
   return `rgb(${r},${g},${b})`;
+}
+
+// ===================== 涂刷原语（WorldGen.cs 1:1） =====================
+
+/** paintEffect（WorldGen.cs:44091-44112）的尘效钩子：newPaint==0 时用 oldColor 取色。
+ *  实现：10 颗尘（DustID 143），一半 noGravity scale*1.2、一半 scale*0.5。
+ *  Game 侧接 spawnParticles；null = 无尘（测试/生成期） */
+export type PaintDustHook = (x: number, y: number, newPaint: number, oldPaint: number) => void;
+
+export interface PaintableStore {
+  paint: Uint8Array;
+  paintWall: Uint8Array;
+  wall: Uint16Array;
+  flags: Uint8Array;
+  setPaint(x: number, y: number, v: number): void;
+  setPaintWall(x: number, y: number, v: number): void;
+  inBounds(x: number, y: number): boolean;
+  idx(x: number, y: number): number;
+}
+
+/**
+ * WorldGen.paintTile（WorldGen.cs:44137-44159）逐行 1:1：
+ * 非活性格 / 已同色 → false（不消耗油漆，Player.ApplyPaint :41357 同守卫）；
+ * 尘效先于写入（:44149-44152），写 color 后广播（单机无 netMode）。
+ */
+export function paintTile(
+  st: PaintableStore, x: number, y: number, color: number, dust: PaintDustHook | null = null,
+): boolean {
+  if (!st.inBounds(x, y)) return false; // Main.tile[x,y] 越界等价（C# null 检查）
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;                 // :44140 !tile.active()
+  const b = st.paint[i];                          // :44144 tile.color()
+  if (b === color) return false;                  // :44145-44148
+  if (dust) dust(x, y, color, b);                 // :44149-44152 paintEffect
+  st.setPaint(x, y, color);                       // :44153 tile.color(color)
+  return true;
+}
+
+/** WorldGen.paintWall（WorldGen.cs:44257-44279）逐行 1:1（写入先于尘效，与 paintTile 反序） */
+export function paintWall(
+  st: PaintableStore, x: number, y: number, color: number, dust: PaintDustHook | null = null,
+): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (st.wall[i] === 0) return false;             // :44260 tile.wall == 0
+  const b = st.paintWall[i];                      // :44264 tile.wallColor()
+  if (b === color) return false;                  // :44265-44268
+  st.setPaintWall(x, y, color);                   // :44269 tile.wallColor(color)
+  if (dust) dust(x, y, color, b);                 // :44274-44277 paintEffect
+  return true;
+}
+
+/** paintEffect（WorldGen.cs:44091-44112）：色 0 时回退旧色取 dust 色 */
+export function paintDustColor(newPaint: number, oldPaint: number): readonly [number, number, number, number] {
+  return paintColor(newPaint === 0 ? oldPaint : newPaint); // :44093-44097
 }

@@ -445,21 +445,29 @@ export function runTemplePass(
   // ---- templePart2（1456 cs:34497-34685）1:1 五段：陷阱 → 宝箱 → 雕像 → 家具 → 挂饰 ----
   // 顺序对齐原版：宝箱在尖刺陷阱段**之后**（旧版反序且公式为房数×1.1×(1±25%)）
   templePart2(st, rng, gs, chests, rooms);
-  // ---- LihzahrdAltar 终保 pass（cs:21753-21791 1:1）：重放祭坛 6 格 + 正下方
-  //      三格强制 226 地板（防悬空最终保险；原版为独立 pass，此处并入末尾等效）；
-  //      顺带 cs:21744-21746：祭坛正下方木刺 232 → 226
-  if (altarX >= 0) {
-    for (let dx = 0; dx <= 2; dx++) {
-      for (let dy = 0; dy <= 1; dy++) {
-        if (st.inBounds(altarX + dx, altarY + dy)) {
-          st.setTileSilent(altarX + dx, altarY + dy, ALTAR, dx * 18, dy * 18);
-        }
+  // 注：LihzahrdAltar 终保 pass（cs:21753-21791）原版是 TileCleanup(21327) 之后、
+  // MicroBiomes(21785) 之前的独立 pass（Pots/Traps/TileCleanup 可能扰动祭坛后再
+  // 重放）。2026-08-13 前并入本函数末尾（执行位≈15911），已外提为
+  // runLihzahrdAltarPass 独立槽位（WorldGen.ts「蜥蜴祭坛」槽）。
+}
+
+/** LihzahrdAltar 终保 pass（cs:21753-21791 1:1）：重放祭坛 6 格 + 正下方三格
+ *  强制 226 地板（slope/halfBrick/liquid 复位）——原版注册序在 TileCleanup(21327)
+ *  之后，对中途 Pots/Traps/TileCleanup 的祭坛扰动做最终回滚（顺带达成
+ *  cs:21744-21746 的 232→226；TileCleanupPass ⑪ 段同效双保险）。 */
+export function runLihzahrdAltarPass(st: TileStore, gs: GenState): void {
+  const altarX = gs.lAltarX, altarY = gs.lAltarY;
+  if (altarX < 0) return;   // 无神庙世界（Skyblock 等）跳过
+  for (let dx = 0; dx <= 2; dx++) {
+    for (let dy = 0; dy <= 1; dy++) {
+      if (st.inBounds(altarX + dx, altarY + dy)) {
+        st.setTileSilent(altarX + dx, altarY + dy, ALTAR, dx * 18, dy * 18);
       }
-      const bj = st.inBounds(altarX + dx, altarY + 2) ? st.idx(altarX + dx, altarY + 2) : -1;
-      if (bj >= 0) {
-        st.type[bj] = BRICK; st.flags[bj] = 1;
-        st.slope[bj] = 0; st.half[bj] = 0; st.liquid[bj] = 0;
-      }
+    }
+    const bj = st.inBounds(altarX + dx, altarY + 2) ? st.idx(altarX + dx, altarY + 2) : -1;
+    if (bj >= 0) {
+      st.type[bj] = BRICK; st.flags[bj] = 1;
+      st.slope[bj] = 0; st.half[bj] = 0; st.liquid[bj] = 0;
     }
   }
 }

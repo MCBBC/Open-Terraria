@@ -21,7 +21,7 @@ import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummon
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
-import { mainExpertMode, getAttackDamageScaledByDifficulty, scaleStatsWorld, GDL } from '../stats/ScaleStats';
+import { mainExpertMode, mainDifficulty, getAttackDamageScaledByDifficulty, scaleStatsWorld, GDL } from '../stats/ScaleStats';
 import type { Enemy } from './Enemy';
 import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
 import { TRACK_SHEET } from '../data/grappleHooks';
@@ -71,6 +71,8 @@ export class Player extends Entity {
   hp = 100;
   /** 最近一次伤害死因（PlayerDeathReason 语义子集）——死亡瞬间由 Game 消费生成原版死亡文本 */
   lastDamageCause: import('../i18n/RandomText').DeathCause | null = null;
+  /** 上一 tick 石化态（:24941 lastStoned——变身过渡检测） */
+  lastStoned = false;
   inv: Inventory;
   /** 玩家储物（原版 Player.cs:1468-1474 Chest.CreateBank(-2..-5)，各 40 槽）：
    *  [0]=bank 存钱罐(29) / [1]=bank2 保险箱(97) / [2]=bank3 守护者熔炉(463) /
@@ -1063,8 +1065,24 @@ export class Player extends Entity {
     // ★必须在水平积分（下方 const ix = this.inputX 消费点）之前执行：矿车/装备聚合
     // 重写曾把清零挪进 else-if 链的 shimmering 物理分支（位于积分之后）——清零形同
     // 虚设,微光中仍可自由行走（2026-08 回归）
-    if (this.buffs.has(BuffType.Frozen) || this.shimmering) {
+    if (this.buffs.has(BuffType.Frozen) || this.shimmering || this.buffs.has(BuffType.Stoned)) {
+      // 石化(156)与冰冻同段清输入（:24942 control* 清零——石化还额外清 useItem/useTile,
+      // 我们输入模型只有四键,同 frozen 处理）
       this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false;
+    }
+    // 石化变身瞬间（:24924-24931 stoned != lastStoned 过渡）： Hurt(20×敌伤倍率, ByOther(5))
+    // + SoundID 0 + 20 尘——死因 = DeathText.Petrified_1..4（"X碎成渣了"）
+    {
+      const stonedNow = this.buffs.has(BuffType.Stoned);
+      if (stonedNow !== this.lastStoned) {
+        if (stonedNow) {
+          this.lastDamageCause = { kind: 'petrified' };
+          this.damage(getAttackDamageScaledByDifficulty(20, mainDifficulty(game.world)), this.cx, this.cy - 10, false);
+          game.playSfx('hurt');
+          game.spawnParticles(this.cx, this.cy, '#9A8FA0', 20, 2.2);
+        }
+        this.lastStoned = stonedNow;
+      }
     }
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
     //（原版 Player.Update :27783-27850 的 TrackCollision 段替代常规移动链）。

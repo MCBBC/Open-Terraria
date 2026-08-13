@@ -64,6 +64,13 @@ export interface ItemDef {
     rod?: boolean;        // 致动魔杖:手动翻转致动状态
     grand?: boolean;      // 宏伟蓝图:拖拽批量(R 键切模式)
   };
+  /** 油漆 id（Item.paint，Item.cs:118；SetDefaults 13374-13535/21168-21185 赋值）。
+   *  1073-1099 → 1-27、1966/1967/1968 → 28/29/30（PaintID.cs）。0/缺省=非油漆。
+   *  Item 上无 paintWall 字段——刷墙/刷块由工具决定（Player.cs:41236/:41254） */
+  paint?: number;
+  /** 油漆工具族（Player.cs PlaceThing_Paintbrush/Roller/Scrapper :41254/:41236/:41152）：
+   *  brush=1071/1543 刷方块、roller=1072/1544 刷墙、scraper=1100/1545 清除 */
+  paintTool?: 'brush' | 'roller' | 'scraper';
   desc?: string;
 }
 
@@ -766,6 +773,32 @@ for (const [fnVid, fnStyle] of FOUNTAIN_ITEM_STYLE) {
   fnDef.maxStack = 99;
 }
 void 0;
+
+// ---- 油漆物品 Item.paint / Item.paintTool（Item.cs SetDefaults 1:1）：
+//  油漆 1073-1099 → PaintID 1-27（:13374-13535，含深层 13-24），
+//  棕/暗影/负相 1966/1967/1968 → 28/29/30（:21168-21185）。
+//  工具族 paintTool（Player.cs PlaceThing 分派 :41152/:41236/:41254）：1071/1543 刷、
+//  1072/1544 滚、1100/1545 刮（IsPaintScraper 集 ItemID.cs:254）。涂层 4668/5344 走
+//  paintCoating 位（Item.cs:38471/:42387）——涂层系统未建，不在本表 ----
+const PAINT_ITEM_TABLE: ReadonlyArray<readonly [number, number]> = [
+  ...Array.from({ length: 27 }, (_, i) => [1073 + i, i + 1] as const),   // 1073-1099 → 1-27
+  [1966, 28], [1967, 29], [1968, 30],
+];
+for (const [vid, p] of PAINT_ITEM_TABLE) {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
+  if (d) d.paint = p;
+}
+const PAINT_TOOL_TABLE: ReadonlyArray<readonly [number, NonNullable<ItemDef['paintTool']>]> = [
+  [1071, 'brush'], [1543, 'brush'],
+  [1072, 'roller'], [1544, 'roller'],
+  [1100, 'scraper'], [1545, 'scraper'],
+];
+for (const [vid, t] of PAINT_TOOL_TABLE) {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
+  if (d) d.paintTool = t;
+}
 
 // ---- 宝石系统：gemcorn 4851-4857（Item.cs createTile=590 宝石树苗，style=宝石序号；
 // 种在石/苔上必须地下长成宝石树，见 growSaplings）----

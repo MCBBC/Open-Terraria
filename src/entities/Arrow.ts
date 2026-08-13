@@ -160,6 +160,21 @@ export class Arrow extends Entity {
   reflected = false;
   /** 穿透投射物的同敌免疫表（敌人 id 集合） */
   private hitSet = new Set<number>();
+  // ---- 喵刀弹 502（Meowmere Cat）专属态 ----
+  /** ai[0]：弹跳+命中共享计数（0..5，≥5 消亡）——弹跳 :18169 递增/命中 :16794
+   *  递增同槽（先到 5 者杀弹，喵叫音高 style=5+ai0 随之爬升） */
+  meowCount = 0;
+  /** localNPCHitCooldown 同敌再命中冷却（SetDefaults :5466-5468 = 10t） */
+  private meowHitCd = new Map<number, number>();
+  /** oldPos 拖尾环（彩虹拖尾 Main.cs:32495-32513 沿 oldPos 逐段绘制，N=10） */
+  private meowTrail: number[] = [];
+  /** 迪斯科 RGB（DoUpdate_AnimateDiscoRGB Main.cs:19441 六段 ±7/帧；初值 R=255） */
+  private discoR = 255;
+  private discoG = 0;
+  private discoB = 0;
+  private discoStyle = 0;
+  /** 弹体点光（Game 实体光扫读 lightRGB——同 Enemy 约定） */
+  lightRGB: [number, number, number] | null = null;
   dead = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
@@ -196,9 +211,37 @@ export class Arrow extends Entity {
     const tumbling = this.tumble && !(this.tumblePoseLock && this.age <= this.gravDelay);
     const ang = tumbling ? this.tumbleRot : Math.atan2(this.vy, this.vx);
     const img = projSprite(this.projId);
+    // 喵刀弹 502 彩虹拖尾（Main.cs:32495-32513）：Projectile_250.png（14×32）沿
+    // oldPos 逐段——旋转=段向-π/2、纵向拉伸=段长/32、alpha=127/255×(1-i/N)，
+    // 画在【本体之前】（原版在本体绘制后叠画，此处先画拖尾再本体等效）
+    if (this.projId === 502 && this.meowTrail.length >= 4) {
+      const streak = projSprite(250);
+      if (streak && streak.complete && streak.naturalWidth > 0) {
+        const N = this.meowTrail.length / 2;
+        for (let i = N - 1; i > 0; i--) {
+          const x1 = this.meowTrail[i * 2], y1 = this.meowTrail[i * 2 + 1];
+          const x2 = this.meowTrail[(i - 1) * 2], y2 = this.meowTrail[(i - 1) * 2 + 1];
+          const segLen = Math.hypot(x2 - x1, y2 - y1);
+          if (segLen < 0.01) continue;
+          const segAng = Math.atan2(y2 - y1, x2 - x1) - Math.PI / 2;
+          ctx.save();
+          ctx.translate(x1 + this.w / 2, y1 + this.h / 2);
+          ctx.rotate(segAng);
+          ctx.imageSmoothingEnabled = false;
+          ctx.globalAlpha = (127 / 255) * (1 - i / N);
+          // origin (w/2, 0)：段起点为锚、沿段向拉伸到段长（scaleY=段长/贴图高）
+          ctx.drawImage(streak, -streak.naturalWidth / 2, 0,
+            streak.naturalWidth, Math.max(1, segLen));
+          ctx.restore();
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     ctx.rotate(ang + Math.PI / 2); // 原版贴图纵向：rotation = atan2+π/2（AI_001 L54877）
+    // 502 朝向（:22659-22665）：spriteDirection=sign(vx)——贴图在旋转坐标系内水平镜像
+    if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.drawImage(img, -this.w / 2, -this.w / 2, this.w, this.w * (img.naturalHeight / img.naturalWidth));
@@ -275,6 +318,24 @@ export class Arrow extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
+    // 喵刀弹 502：迪斯科点光（Projectile.cs:22613-22621 (Disco+0.5)/2）+ 拖尾采样
+    if (this.projId === 502) {
+      const n = 7;   // DoUpdate_AnimateDiscoRGB（Main.cs:19441-19496 六段 ±7/帧）
+      switch (this.discoStyle) {
+        case 0: this.discoG = Math.min(255, this.discoG + n); if (this.discoG >= 255) this.discoStyle++; break;
+        case 1: this.discoR = Math.max(0, this.discoR - n); if (this.discoR <= 0) this.discoStyle++; break;
+        case 2: this.discoB = Math.min(255, this.discoB + n); if (this.discoB >= 255) this.discoStyle++; break;
+        case 3: this.discoG = Math.max(0, this.discoG - n); if (this.discoG <= 0) this.discoStyle++; break;
+        case 4: this.discoR = Math.min(255, this.discoR + n); if (this.discoR >= 255) this.discoStyle++; break;
+        default: this.discoB = Math.max(0, this.discoB - n); if (this.discoB <= 0) this.discoStyle = 0; break;
+      }
+      this.lightRGB = [(0.5 + this.discoR / 255) / 2, (0.5 + this.discoG / 255) / 2, (0.5 + this.discoB / 255) / 2];
+      this.meowTrail.push(this.x, this.y);
+      if (this.meowTrail.length > 20) this.meowTrail.splice(0, this.meowTrail.length - 20);   // oldPos 10 点
+      for (const [k, v] of this.meowHitCd) {
+        if (v <= 1) this.meowHitCd.delete(k); else this.meowHitCd.set(k, v - 1);
+      }
+    }
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (!world.store.inBounds(tx, ty)) { this.killNow(game); return; }
@@ -287,6 +348,9 @@ export class Arrow extends Entity {
       if (!world.store.isSolid(tx, ty)) return;
       // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
       if (this.bounce && this.bounceOff(game)) return;
+      // 喵刀弹 502（AI_008 弹跳档 :18165-18206）：tink 音 + ai[0] 计数 ≥5 消亡；
+      // 全速翻面（无 ×0.9 衰减——type 15 才有 ×0.8），同 hitSet 语义无
+      if (this.projId === 502 && this.meowBounceOff(game)) return;
       // 荆棘球 277 专属档（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
       // 仅入撞 |vy|>3 竖弹 ×0.9（贴地滚动）
       if (this.thornBounce && this.thornBounceOff(game)) return;
@@ -321,7 +385,13 @@ export class Arrow extends Entity {
           this.hitSet.clear();        // 转敌对后命中表作废
           return;
         }
-        if (this.hitSet.has(e.id)) continue; // 穿透弹已命中过此敌
+        // 502 喵刀弹：localNPCHitCooldown=10t 同敌再命中（穿透弹 hitSet 是永久免疫，
+        // 502 是"同一敌 10t 冷却后可再咬"——SetDefaults :5466-5468）
+        if (this.projId === 502) {
+          const cd = this.meowHitCd.get(e.id) ?? 0;
+          if (cd > 0) continue;
+          this.meowHitCd.set(e.id, 10);
+        } else if (this.hitSet.has(e.id)) continue; // 穿透弹已命中过此敌
         // ★鞭 tag（WhipTagEffect.CanRunHitEffects :73-84：MinionShot/SentryShot 弹幕吃
         //   tag——随从/哨兵射出的箭 whipTagShot 置标时走 resolveWhipTagHit 统一结算：
         //   ModifyTaggedHit tag 加伤+TagCrit 暴击（WhipTagEffect.cs:58-70）、OnTaggedHit
@@ -359,6 +429,17 @@ export class Arrow extends Entity {
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
+        // 502 喵刀弹命中喵叫（Damage_EVP :16794-16806）：ai[0] 1..5 递增，
+        // PlaySound(37=Meowmere, style 5+ai0)——LegacySoundPlayer :567/:1329：
+        // Item_57/58 随机，音量 ×0.5×style×0.05（style 6-10 → 0.15-0.25），
+        // 音高扰动 ±0.4 由双素材随机近似；第 5 命中后消亡
+        if (this.projId === 502) {
+          this.meowCount = Math.min(5, this.meowCount + 1);
+          const style = 5 + this.meowCount;
+          game.playSfxFiles([Math.random() < 0.5 ? 'Item_57' : 'Item_58'],
+            0.5 * style * 0.05, this.cx, this.cy);
+          if (this.meowCount >= 5) { this.killNow(game); return; }
+        }
         // ---- 吸血链（Projectile.cs:12877-12892 on-hit 段）----
         // 吸血鬼飞刀 304 → vampireHeal（:12879-12882，!moonLeech 门）；
         // 魔法弹 + 幽灵套 ghostHeal → ghostHeal（:12883-12888，canGhostHeal 全 true
@@ -421,5 +502,28 @@ export class Arrow extends Entity {
       bounced = true;
     }
     return bounced;
+  }
+
+  /** 喵刀弹 502 弹跳档（Projectile.cs:18165-18206）：tink（SoundID.Item10）+
+   *  ai[0]++ ≥5 消亡；全速翻面（vx/vx 直接取负，无 ×0.9 衰减）。
+   *  返回 true = 已弹开/已消亡（调用方 return）。 */
+  private meowBounceOff(game: GameHooks): boolean {
+    const st = game.world.store;
+    const solidAt = (px: number, py: number) => {
+      const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+      return st.inBounds(t0, t1) && st.isSolid(t0, t1);
+    };
+    this.meowCount++;
+    game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);   // SoundID.Item10 tink
+    if (this.meowCount >= 5) { this.killNow(game); return true; }
+    if (!solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+      this.x -= this.vx;
+      this.vx = -this.vx;
+    }
+    if (!solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+      this.y -= this.vy;
+      this.vy = -this.vy;
+    }
+    return true;
   }
 }

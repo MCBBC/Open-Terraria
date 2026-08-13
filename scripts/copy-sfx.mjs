@@ -42,6 +42,9 @@ const FILES = [
   // （AI_117 :47619 Item170 招式衔接 / :47666 Item172 冲刺起手 / 弹 814 出生
   //  Item171 :53562）——2026-08-13 补入
   'Item_150', 'Item_170', 'Item_171', 'Item_172',
+  // 喵刀弹 502 命中喵叫（SoundID 37 Meowmere = LegacySoundPlayer :1329 的
+  // SoundItem[57..58]，音量 ×0.5×style×0.05 音高扰动 ±0.4）
+  'Item_57', 'Item_58',
 ];
 
 // ---- Sounds/Custom/ 追加（展平名进 CUSTOM2，防与上方 FILES 混淆） ----

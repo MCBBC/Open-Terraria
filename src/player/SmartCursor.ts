@@ -168,6 +168,10 @@ export interface SmartCursorEnv {
   occupants: Array<{ x: number; y: number; w: number; h: number }>;
   /** 是否正在按住使用键（controlUseItem）——锁清理与 Hold 模式语义用 */
   controlUseItem: boolean;
+  /** 当前背包油漆 id（SmartCursorHelper.cs:167-181 TryFindingPaintInplayerInventory 的
+   *  paintLookup；仅手持刷/滚（1071/1543/1072/1544）时由 FindPaintOrCoating 取值，
+   *  刮刀不查——缺省 0 = 三油漆策略目标集恒空，1:1） */
+  paintLookup?: number;
   /** 钩爪锚点集（SmartCursorHelper.cs:106-115 _grappleTargets：player.grappling 表
    *  各锚 Center 的 tile 坐标）。Step_Pickaxe_MineSolids 射线终点/免挖集用；缺省空集 */
   grappleAnchors?: Pt[];
@@ -371,9 +375,11 @@ interface HeldSemantics {
   createTileSheet: number | null;
   createWall: number | null;
   placeStyle: number;
+  /** 背包油漆 id（env.paintLookup；SmartCursorHelper.cs:93 装配） */
+  paintLookup: number;
 }
 
-function heldSemantics(held: SmartCursorHeld): HeldSemantics {
+function heldSemantics(held: SmartCursorHeld, paintLookup = 0): HeldSemantics {
   const def = held.def;
   const tool = held.tool;
   return {
@@ -385,6 +391,7 @@ function heldSemantics(held: SmartCursorHeld): HeldSemantics {
     createTileSheet: def?.tile != null ? sheetOf(TILE_BY_KEY[def.tile] ?? -1) : null,
     createWall: def?.wallId != null ? def.wallId : null,
     placeStyle: def?.placeStyle ?? 0,
+    paintLookup,
   };
 }
 
@@ -430,7 +437,7 @@ export class SmartCursor {
     if (!used) return; // :69-72
 
     const st = env.st;
-    const sem = heldSemantics(env.held);
+    const sem = heldSemantics(env.held, env.paintLookup ?? 0);
     const s = env.settings;
     // :82-87 tileTarget 钳到世界 [10, max-10]
     const raw = { x: Math.floor(env.mouse.x / 16), y: Math.floor(env.mouse.y / 16) };
@@ -1358,35 +1365,98 @@ export class SmartCursor {
     if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
   }
 
-  // ---- 油漆三策略：依赖油漆系统（Tile.color / Tile.paintCoating / Main.tileColor）未建，
-  //      等价语义 = 目标集恒空（原版各策略以 tile.color != selectedColor 为扫描主条件，
-  //      无 color 数据则无候选）。恢复时机：接入 tile paint 通道后按下列行号补全 ----
-  //      Step_PaintRoller  :767-807（item 1072/1544，扫描 paint != 0）
-  //      Step_PaintBrush   :722-765（item 1071/1543，扫描 paint == 0）
-  //      Step_PaintScrapper:668-720（item 1100/1545，扫描 paint != 0）
+  // ---- 油漆三策略（SmartCursorHelper.cs:668-807）1:1。涂层（paintCoating）系统未建——
+  //      原版条件里的 fullbrightBlock/invisibleBlock/fullbrightWall/invisibleWall 项恒
+  //      false（本仓无涂层位），paintLookup==0 时刷/滚两策略目标集恒空（:724/:769 外门） ----
 
-  /** :767-807 PaintRoller——no-op（见上：油漆系统依赖） */
-  private stepPaintRoller(
-    _env: SmartCursorEnv, sem: HeldSemantics, _reach: Region,
-    _set: (x: number, y: number) => void, _taken: () => boolean,
-  ): void {
-    void sem; void PAINT_ROLLER_ITEMS;
-  }
-
-  /** :722-765 PaintBrush——no-op（见上：油漆系统依赖） */
-  private stepPaintBrush(
-    _env: SmartCursorEnv, sem: HeldSemantics, _reach: Region,
-    _set: (x: number, y: number) => void, _taken: () => boolean,
-  ): void {
-    void sem; void PAINT_BRUSH_ITEMS;
-  }
-
-  /** :668-720 PaintScrapper——no-op（见上：油漆系统依赖） */
+  /** :668-720 Step_PaintScrapper——扫描可及区，"有方块漆/墙漆/长苔藓 184"的格为目标，
+   *  取离鼠标最近（:700-712 num2 距离 = 格中心*16+8 到 mouse） */
   private stepPaintScrapper(
-    _env: SmartCursorEnv, sem: HeldSemantics, _reach: Region,
-    _set: (x: number, y: number) => void, _taken: () => boolean,
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
-    void sem; void PAINT_SCRAPER_ITEMS;
+    const vid = sem.vid ?? -1;
+    if (!PAINT_SCRAPER_ITEMS.has(vid) || taken()) return; // :670 IsPaintScraper + focused!=-1
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const k = st.idx(i, j);
+        const active = st.flags[k] !== 0 && st.type[k] !== 0;
+        let flag = false;
+        if (active) { // :681-687
+          flag ||= st.paint[k] > 0;                 // tile.color() > 0
+          flag ||= sheetOf(st.type[k]) === 184;     // tile.type == 184（长苔藓）
+        }
+        if (st.wall[k] > 0) {                       // :688-693
+          flag ||= st.paintWall[k] > 0;             // wallColor() > 0
+        }
+        if (flag) targets.push({ x: i, y: j });     // :694-697
+      }
+    }
+    const point = nearestOf(targets, env.mouse);     // :700-712
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y);                         // :713-717
+    }
+  }
+
+  /** :722-765 Step_PaintBrush——手持刷（1071/1543）且背包有油漆；目标 = active 且
+   *  颜色 != 目标漆 的格（涂层项恒 false）；取最近 */
+  private stepPaintBrush(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const vid = sem.vid ?? -1;
+    if (!PAINT_BRUSH_ITEMS.has(vid) || sem.paintLookup === 0 || taken()) return; // :724
+    const st = env.st;
+    const paintLookup = sem.paintLookup;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const k = st.idx(i, j);
+        // :738 active && (paintLookup!=0 && color()!=paintLookup | 涂层项)
+        if (st.flags[k] !== 0 && st.type[k] !== 0 && st.paint[k] !== paintLookup) {
+          targets.push({ x: i, y: j });
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);     // :745-757
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y);                         // :758-762
+    }
+  }
+
+  /** :767-807 Step_PaintRoller——手持滚（1072/1544）且背包有油漆；目标 = 有墙且
+   *  墙前无实心遮挡（:781 !active || !tileSolid || tileSolidTop）且墙色 != 目标漆；取最近 */
+  private stepPaintRoller(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const vid = sem.vid ?? -1;
+    if (!PAINT_ROLLER_ITEMS.has(vid) || sem.paintLookup === 0 || taken()) return; // :769
+    const st = env.st;
+    const paintLookup = sem.paintLookup;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const k = st.idx(i, j);
+        const t = st.type[k];
+        const active = st.flags[k] !== 0 && t !== 0;
+        // :781 wall>0 && (!active || !tileSolid || tileSolidTop) && 墙色 != 目标漆
+        if (st.wall[k] > 0
+          && (!active || !tileSolidType(t) || tileSolidTopType(t))
+          && st.paintWall[k] !== paintLookup) {
+          targets.push({ x: i, y: j });
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);     // :787-799
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y);                         // :800-804
+    }
   }
 
   /** :2032-2157 橡实（item 27）：草面 + 上方净空 + 相邻同类地面 */

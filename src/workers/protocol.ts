@@ -12,6 +12,8 @@ export interface TileBuffers {
   frameX: ArrayBuffer; frameY: ArrayBuffer;
   wall: ArrayBuffer; liquid: ArrayBuffer; liquidType: ArrayBuffer;
   half: ArrayBuffer; slope: ArrayBuffer; wire: ArrayBuffer;
+  /** 油漆双通道（0-31，原版 Tile.cs:609-617/:365-373；旧包可缺省——TileStore 以全零补齐） */
+  paint?: ArrayBuffer; paintWall?: ArrayBuffer;
   /** 战争迷雾（旧包可缺省——fromPacket 以全零补齐；saveGame 不持久化 explored） */
   explored?: ArrayBuffer;
 }

@@ -121,5 +121,29 @@ export default defineConfig({
     hmr: NO_HMR ? false : undefined,
   },
   cacheDir: process.env.SW_CACHE ?? 'node_modules/.vite',
-  plugins: [vanillaAtlasAuto(), l10nAuditAuto()],
+  plugins: [vanillaAtlasAuto(), l10nAuditAuto(), atlasLintAuto()],
 });
+
+/** 素材自洽 lint(tools/atlas-lint.mjs 的 vite 钩子;照搬 l10nAuditAuto 双消费:
+ *  dev 警告 / build 阻断;vitest 不走钩子,由 tests/atlas-lint.test.ts 锁定)。 */
+function atlasLintAuto(): Plugin {
+  return {
+    name: 'atlas-lint-auto',
+    async configureServer() {
+      const { auditAtlas } = await import('./tools/atlas-lint.mjs');
+      const r = auditAtlas();
+      for (const e of r.errors) console.warn(`[atlas-lint] ERROR ${e.rule} sheet=${e.sheet ?? '-'} ${e.msg}`);
+      for (const w of r.warns) console.warn(`[atlas-lint] warn ${w.rule} ${w.key ?? ''} sheet=${w.sheet ?? '-'} ${w.msg}`);
+      if (r.errors.length) console.warn(`[atlas-lint] ${r.errors.length} error —— 构建将阻断`);
+    },
+    async buildStart() {
+      const { auditAtlas } = await import('./tools/atlas-lint.mjs');
+      const r = auditAtlas();
+      if (r.errors.length) {
+        throw new Error(`[atlas-lint] ${r.errors.length} 处 error(素材自洽)——先修再构建:\n` +
+          r.errors.map((e) => `  ${e.rule} sheet=${e.sheet ?? '-'} ${e.key ?? ''} ${e.msg}`).join('\n'));
+      }
+      console.log(`[atlas-lint] 753 表全自洽 ✓ (${r.warns} warn)`);
+    },
+  };
+}

@@ -7,6 +7,7 @@ import { swayBakeSkip } from './WindSway';
 import { TILE_ANIM_RATE, tileAnim, animYOffset, campfireYOffset } from './TileAnim';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
+import { paintColor } from '../world/Paint';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
 import type { World } from '../world/World';
@@ -22,6 +23,40 @@ const TILE_RULES: Record<number, string> = {
 export interface ChunkPair {
   wall: HTMLCanvasElement;   // 背景墙层（水画在它之上）
   tile: HTMLCanvasElement;   // 前景 tile/物体层（画在水之上）
+}
+
+// ---- 油漆乘色着色画布（ChunkCache 静态烘焙消费，world/Paint.applyPaintTint） ----
+// 原版走 GPU shader（TilePaintSystemV2.cs:69-82）；Canvas 2D 用三段合成等价实现：
+//   ① 摘出待着色区域 → ② multiply（负相 30 用 difference 反转）填色 →
+//   ③ destination-in 按原区域 alpha 裁回（multiply 会把透明像素变成实色，必须裁）
+// 全局单例：每 chunk 烘焙是串行的，16×16 复用零分配
+const tintCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+if (tintCanvas) { tintCanvas.width = TILE; tintCanvas.height = TILE; }
+const tintCtx = tintCanvas ? tintCanvas.getContext('2d') : null;
+
+/** 对 canvas 的 (px,py) 16×16 区域按 paint 着色（就地回写） */
+function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, px: number, py: number, paint: number): void {
+  if (!tintCtx || !tintCanvas) return;
+  tintCtx.globalCompositeOperation = 'source-over';
+  tintCtx.clearRect(0, 0, TILE, TILE);
+  tintCtx.drawImage(src, px, py, TILE, TILE, 0, 0, TILE, TILE);
+  if (paint === 30) {
+    // 负相漆：difference × 白 = 反转（MapHelper.MapColor :1849-1851 同式）
+    tintCtx.globalCompositeOperation = 'difference';
+    tintCtx.fillStyle = '#ffffff';
+  } else {
+    // 其余：multiply × paintColor = 逐通道乘色（白漆 26 乘白 ≡ 原色，自然等价）
+    tintCtx.globalCompositeOperation = 'multiply';
+    const [tr, tg, tb] = paintColor(paint);
+    tintCtx.fillStyle = `rgb(${tr},${tg},${tb})`;
+  }
+  tintCtx.fillRect(0, 0, TILE, TILE);
+  tintCtx.globalCompositeOperation = 'destination-in';
+  tintCtx.drawImage(src, px, py, TILE, TILE, 0, 0, TILE, TILE);
+  tintCtx.globalCompositeOperation = 'source-over';
+  // 不 clearRect 直接覆盖回写：着色像素与本区域原内容 alpha 完全一致，
+  // source-over 叠加即替换色值；clearRect 反而会打穿邻格溢出的跨格精灵
+  ctx.drawImage(tintCanvas, px, py);
 }
 
 export class ChunkCache {
@@ -196,6 +231,7 @@ export class ChunkCache {
     tile.width = CHUNK * TILE; tile.height = CHUNK * TILE;
     let ctx = wall.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
+    const wctx = ctx; // 墙层上下文（tile 层重赋 ctx 后油漆 pass 仍需引用）
     const st = this.world.store;
     const x0 = cx * CHUNK, y0 = cy * CHUNK;
 
@@ -352,6 +388,23 @@ export class ChunkCache {
       }
     }
     ctx.globalAlpha = 1; // 致动幽灵 alpha 复位(防影响后续 pass)
+
+    // ---- 油漆乘色 pass：墙层 + tile 层分别着色 ----
+    // 原版 tile/wall 各自经 tileShader 按格取 paint（TilePaintSystemV2）；
+    // Canvas 等价实现见 tintRegion（乘色模型见 world/Paint.applyPaintTint 注释）。
+    // ★ 等价边界：原版按"绘制调用"着色（多格物件整张贴图随锚格上色）；
+    //   本实现按 16×16 格区域着色——涂多格家具/树只有被涂格区域显色（登记）
+    for (let ly = 0; ly < CHUNK; ly++) {
+      for (let lx = 0; lx < CHUNK; lx++) {
+        const x = x0 + lx, y = y0 + ly;
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        const pw = st.paintWall[i];
+        if (pw > 0 && st.wall[i] !== 0) tintRegion(wctx, wall, lx * TILE, ly * TILE, pw);
+        const pt = st.paint[i];
+        if (pt > 0 && st.flags[i] && st.type[i] !== 0) tintRegion(ctx, tile, lx * TILE, ly * TILE, pt);
+      }
+    }
 
     // ---- 第三遍：半砖（halfBrick）——主绘制后清掉上半 8px ----
     // VanillaTiler blend/auto/style 三路径已按原版源矩形裁剪（源 y+8 高-8）；

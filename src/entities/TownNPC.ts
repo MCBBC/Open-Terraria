@@ -200,6 +200,42 @@ export class TownNPC extends Entity {
       const dx = this.home.x * TILE + 8 - this.cx;
       if (Math.abs(dx) > TILE) wantDir = Math.sign(dx);
     }
+    // ---- 回家传送（AI_007_TownEntities_TeleportToHome :56063-56086 + 触发 :53828-53856）：
+    //  flag = 雨天||夜间||日食||史莱姆雨（= 该回家的状态）；且当前不在家休息位；
+    //  双矩形视野门（玩家屏±safeRange 不与 NPC 位置/home 位置相交）→ 静默传回家
+    //  （无 dust 无音效，纯 position 改写）。本仓"好休息位"近似=家 ±4 格内 ----
+    if (this.home) {
+      const flag = world.weather.raining || !world.clock.isDay
+        || !!world.clock.eclipse || !!world.weather.slimeRain;
+      const nearHome = Math.abs(this.cx - (this.home.x * TILE + 8)) < 4 * TILE
+        && Math.abs(this.cy - (this.home.y * TILE)) < 4 * TILE;
+      if (flag && !nearHome) {
+        const pl = (game as unknown as { player: { x: number; y: number; w: number; h: number; dead: boolean } | null }).player;
+        const screenR = 42 * TILE;   // 屏幕半宽+safeRange 近似（1360/16/2×1.52≈64? 取保守值 42 格=见不到）
+        const farFromNpc = !pl || pl.dead
+          || Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) > screenR;
+        const homePx = { x: this.home.x * TILE + 8, y: this.home.y * TILE };
+        const farFromHome = !pl || pl.dead
+          || Math.hypot(pl.x + pl.w / 2 - homePx.x, pl.y + pl.h / 2 - homePx.y) > screenR;
+        if (farFromNpc && farFromHome) {
+          // 三列落位（:56066-56085：home-1/home/home+1，头顶净空即收；全堵=放弃）
+          for (const off of [0, -1, 1]) {
+            const hx = this.home.x + off, hy = this.home.y;
+            let clear = true;
+            for (let ax = hx - 1; ax <= hx + 1 && clear; ax++) {
+              for (let ay = hy - 3; ay <= hy - 1; ay++) {
+                if (world.store.inBounds(ax, ay) && world.store.isSolid(ax, ay)) { clear = false; break; }
+              }
+            }
+            if (!clear) continue;
+            this.x = hx * TILE + 8 - this.w / 2;
+            this.y = hy * TILE - this.h - 0.1;
+            this.vx = 0; this.vy = 0;
+            break;
+          }
+        }
+      }
+    }
 
     // ---- 自卫攻击（AI_007 攻击态 ：54747-55538;攻击中站定替代游走）----
     if (this.attackUpdate(world, game)) wantDir = 0;

@@ -77,7 +77,9 @@ export type DeathCause =
   | { kind: 'electrocuted' }        // other=10 Electrocuted_1..4（:19197）
   | { kind: 'triedToEscape' }       // other=11 TriedToEscape（:22050 WoF 舌距>3000px）
   | { kind: 'tongued' }             // other=12 WasLicked_1..2（:19150 舌锁 DoT / :22054 墙抵世界缘）
-  | { kind: 'teleportFail' }        // other=13 Teleport_1（混沌传送杖）
+  | { kind: 'teleportFail' }        // other=13 Teleport_1（混沌传送杖首次/默认）
+  | { kind: 'teleportFailMale' }    // other=14 Teleport_2_Male（:44906-44908 Next(2)==0 侧）
+  | { kind: 'teleportFailFemale' }  // other=15 Teleport_2_Female
   | { kind: 'inferno' }             // other=16 Inferno（:9938 狱火药水）
   | { kind: 'diedInTheDark' }       // other=17 DiedInTheDark
   | { kind: 'starved' }             // other=18 Starved_1..3（:19175 饥荒种子）
@@ -111,6 +113,8 @@ export function createDeathText(playerName: string, cause: DeathCause, worldName
     case 'triedToEscape': return one('DeathText.TriedToEscape');
     case 'tongued': return one(`DeathText.WasLicked_${rand1(2)}`);
     case 'teleportFail': return one('DeathText.Teleport_1');
+    case 'teleportFailMale': return one('DeathText.Teleport_2_Male');
+    case 'teleportFailFemale': return one('DeathText.Teleport_2_Female');
     case 'inferno': return one('DeathText.Inferno');
     case 'diedInTheDark': return one('DeathText.DiedInTheDark');
     case 'starved': return one(`DeathText.Starved_${rand1(3)}`);

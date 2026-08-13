@@ -626,7 +626,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   }
   const phase2 = e.ai3 === 1 || e.ai3 === 3; // AI_120_HallowBoss_IsInPhase2 :46179
   const b = baseOf(e);
-  // :47296-47301 二阶段防御 ×1.2(ShouldEmpressBeEnraged 白天暴怒分支按任务不实现:白天不逃不暴怒)
+  // :47296-47301 二阶段防御 ×1.2;白天暴怒（flag4,:47296 段 damage=9999——wiki"白天必秒杀"）
+  // ——2026-08-13 接通:白天召唤女皇不再无风险
+  const dayEnrage = game.world.clock.isDay;
+  e.def.damage = dayEnrage ? 9999 : b.dmg;
   e.def.defense = Math.floor(phase2 ? b.def * 1.2 : b.def);
 
   // 目标失效/超 6400px → 淡出退场(:46437-46444/:46595 num36=13;此后只有 13 态不触 player)

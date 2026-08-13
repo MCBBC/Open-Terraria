@@ -18,6 +18,8 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     half: st.half.buffer as ArrayBuffer,
     slope: st.slope.buffer as ArrayBuffer,
     wire: st.wire.buffer as ArrayBuffer,
+    paint: st.paint.buffer as ArrayBuffer,
+    paintWall: st.paintWall.buffer as ArrayBuffer,
   };
   const packet: WorldPacket = {
     w: st.w, h: st.h, seed: world.seed, name: world.name,

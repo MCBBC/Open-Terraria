@@ -94,6 +94,7 @@ export class SaveClient {
       wall: st.wall.buffer, liquid: st.liquid.buffer,
       liquidType: st.liquidType.buffer, wire: st.wire.buffer,
       half: st.half.buffer, slope: st.slope.buffer,
+      paint: st.paint.buffer, paintWall: st.paintWall.buffer,   // 油漆双通道（WF:1474-1491）
     };
     const promise = new Promise<string>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });

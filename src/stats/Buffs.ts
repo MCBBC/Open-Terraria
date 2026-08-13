@@ -112,6 +112,9 @@ export enum BuffType {
   BrainOfConfusionBuff = 72,
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
   Slow = 81,        // 缓慢(32)：moveSpeed ÷2（:25653-25655）——鹿角怪咆哮 800px 内
+  Stoned = 82,      // 石化(156,美杜莎 480 蓄力直击 NPC.cs:56885-56888)：封全部输入
+                    //   （:24942 control* 清零,frozen 同段）+ 变身瞬间 Hurt(20×难度,ByOther(5))
+                    //   （:24924-24931,死因=DeathText.Petrified 碎成渣）
                     //   AddBuff(32,720t) 授予（NPC.cs:44609-44616）
   Shimmered = 77,   // 微光化(353,浸微光每 tick 刷新)：frozen 封输入+免伤+穿墙下坠——
                     //   语义由 Player.shimmering 字段承载（:11381-11419），本条目仅作
@@ -208,6 +211,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // 描述直接用原版 BuffDescription（12 语言现成，语义一致，同 Honey 先例）
   [BuffType.Chilled]: { vanillaBuff: 46, descKey: 'BuffDescription.Chilled', fallbackName: '冰寒' },
   [BuffType.Frozen]: { vanillaBuff: 47, descKey: 'BuffDescription.Frozen', fallbackName: '冰冻' },
+  [BuffType.Stoned]: { vanillaBuff: 156, descKey: 'BuffDescription.Stoned', fallbackName: '石化' },
   // 食物三档：描述用原版 BuffDescription.WellFed*（"全面提升属性"语义一致，12 语言现成）
   [BuffType.WellFed]: { vanillaBuff: 26, descKey: 'BuffDescription.WellFed', fallbackName: '饱腹' },
   [BuffType.WellFed2]: { vanillaBuff: 206, descKey: 'BuffDescription.WellFed2', fallbackName: '很饱' },

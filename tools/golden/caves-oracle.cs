@@ -267,10 +267,11 @@ double gvWorldSurfaceLow = num5w, gvWorldSurfaceHigh = num6w;
 double gvRockLayerLow = num7w, gvRockLayerHigh = num8w;
 double gvWorldSurface = num3w, gvRockLayer = num4w;
 Checkpoint("terrain");
-if (Environment.GetEnvironmentVariable("TERRAIN_ONLY") == "1") { Console.WriteLine("TERRAIN_ONLY exit"); return; }
+
 if (Environment.GetEnvironmentVariable("TRACE_COLS") != null) File.WriteAllText(Environment.GetEnvironmentVariable("TRACE_COLS"), string.Join("\n", TraceCols));
 
 Console.WriteLine($"terrain ok: worldSurface={worldSurface} rockLayer={rockLayer} waterLine={waterLine} lavaLine={lavaLine}");
+if (Environment.GetEnvironmentVariable("TERRAIN_ONLY") == "1") { Console.WriteLine("TERRAIN_ONLY exit"); return; }
 
 // ================= 原语 =================
 bool mudWallFlag = false;

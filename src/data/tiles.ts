@@ -71,7 +71,7 @@ def({ key: 'flower', name: '花', decor: true, framed: true, opacity: 0, pick: 0
 def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1AC454', drop: 27, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#BAA854', blend: true, drop: 169, vanilla: { sheet: 53, frame: 'blend' } });
 def({ key: 'snow', name: '雪块', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 593, vanilla: { sheet: 147, frame: 'blend' } });
-def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#A37451', drop: 27, vanilla: { sheet: 20, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#A37451', drop: 27, vanilla: { sheet: 20, frame: 'style', fw: 1, fh: 2 } }); // fh:2=原版 TileObjectData Width1/Height2+frameSize[1,2](2026-08-13 atlas-lint ATL-06 裁决;此前 fh:1 错)
 def({ key: 'ash', name: '灰烬块', solid: true, opacity: 1, pick: 0, mapColor: '#44444C', blend: true, drop: 3, vanilla: { sheet: 57, frame: 'auto' } });
 
 // ===================== 原版素材图块（terraria-assets + TEdit 数据） =====================

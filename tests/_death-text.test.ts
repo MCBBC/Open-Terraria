@@ -14,7 +14,7 @@ import { Lang } from '../src/i18n/Lang';
       { kind: 'defaultWrap' }, { kind: 'slain' }, { kind: 'petrified' },
       { kind: 'stabbed' }, { kind: 'suffocated' }, { kind: 'burned' },
       { kind: 'poisoned' }, { kind: 'electrocuted' }, { kind: 'triedToEscape' },
-      { kind: 'tongued' }, { kind: 'teleportFail' }, { kind: 'inferno' },
+      { kind: 'tongued' }, { kind: 'teleportFail' }, { kind: 'teleportFailMale' }, { kind: 'teleportFailFemale' }, { kind: 'inferno' },
       { kind: 'diedInTheDark' }, { kind: 'starved' }, { kind: 'space' },
       { kind: 'teamTank' }, { kind: 'underground' }, { kind: 'vampire' },
     ];

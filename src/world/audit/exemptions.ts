@@ -11,14 +11,17 @@ export const MULTITILE_EXEMPT: ReadonlySet<string> = new Set([
   // (SpriteAtlas.VanillaTileMeta.frameSize 仅 3 个 tile 多 style)。
   // 移除条件:R1 支持按 style 的变尺寸矩阵。
   'v_165_cave_decos', 'v_185_small_decos', 'v_233_jungle_large_plants',
-  // ---- 以下为 def 尺寸与权威 frameSize 存量错配,经 atlas-lint ATL-06 裁决 ----
-  // (tests/atlas-lint.test.ts 同步锁豁免内容;数据修正后必须同步删除)
-  // 树苗 sheet 20:def fw1/fh1 vs frameSize[1,2]——待裁决
-  // 'acorn_sapling',
-  // 丛林高草 sheet 74:def fh2 vs frameSize[1,1]——待裁决
-  // 'v_74_jungle_tall_plants',
-  // 宝石树苗 sheet 590:def fw3(带宽 54px 标记,有意)vs frameSize[1,2]——待裁决
-  // 'v_590_gem_saplings',
-  // 灯笼 sheet 93:def w1/h6 vs fw1/fh3 vs frameSize[1,3] 三方不一致——待裁决
-  // 'v_93_lamps',
+  // ---- atlas-lint ATL-06 裁决(2026-08-13,逐条对 TileObjectData.cs): ----
+  // acorn_sapling(sheet 20):def fh1 → 已修 fh2(ObjectData Width1/Height2+frameSize[1,2]),不豁免。
+  // 丛林高草 sheet 74:原版 Style1x1Plant_Height34——占格 1×1、贴图 34px 跨两格视觉;
+  //   repo def fh:2 是放置便利(放置端按 2 格植),视觉等效。移除条件:放置端改 1×1。
+  'v_74_jungle_tall_plants',
+  // 宝石树苗 sheet 590:原版 Width1/Height2 × 3 style 横排(StyleMultiplier=3);
+  //   repo def fw:3=有意"带宽 54px"标记(成长判定 frameX/54 取宝石序号,:72924)。
+  //   移除条件:成长判定改按 style 求值。
+  'v_590_gem_saplings',
+  // 灯笼 sheet 93:原版 Width1/Height3(frameSize[1,3]);repo def w:1/h:6 是
+  //   "占格 3 + 样式行 3"的内部双轴语义(亮灭档在 X 样式在 Y——2026-08 灯笼竖排轴
+  //   教训),fw/fh=1×3 与渲染帧一致。移除条件:w/h 语义并入 vanilla.fw/fh。
+  'v_93_lamps',
 ]);

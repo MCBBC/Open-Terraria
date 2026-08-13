@@ -550,7 +550,7 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ---- 出生显形(:39302-39335 472 / :39337-39360 521) ----
   if (x[3] < 120) {
     if (x[3] === 0) {
-      game.playSfx('roar', 0.3, e.cx, e.cy);             // SoundID.Item8
+      game.playSfxFiles?.(['Item_8'], 0.5, e.cx, e.cy); // :39307 SoundID.Item8（原 roar 为错键）
       if (player) e.facing = e.seekDirX(player);
       e.vx += e.facing * 2;
       if (!big) game.spawnParticles(e.cx, e.cy - 18, '#7A4BD0', 20, 4, { life: 30 });

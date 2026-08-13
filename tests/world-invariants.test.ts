@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { auditWorld, formatViolations, collectMultiDefs, ALL_RULES } from '../src/world/audit';
+import { generateWorld } from '../src/world/gen/WorldGen';
 import { MULTITILE_EXEMPT } from '../src/world/audit/exemptions';
 
 const BOULDER = TILE_BY_KEY['v_138_boulder']!;
@@ -108,4 +109,29 @@ describe('不变量扫描器·合成用例', () => {
       expect(r.id).toBeTruthy();
     }
   });
+});
+
+
+// ---- 集成组:真实世界生成后全图扫描(默认单种子,SW_AUDIT_SEEDS 扩展) ----
+const SEEDS = (process.env.SW_AUDIT_SEEDS ?? '9293480').split(',');
+
+describe('不变量扫描器·集成(真实生成世界)', () => {
+  for (const seed of SEEDS) {
+    it(`种子 ${seed}:error 零违规 + 基数护栏`, async () => {
+      const world = await generateWorld({ width: 4200, height: 1200, seedText: seed, evil: 0 });
+      const rep = auditWorld(world.store);
+      const errs = rep.violations.filter((v) => v.severity === 'error');
+      if (errs.length) console.error(formatViolations({ ...rep, violations: errs }));
+      expect(errs).toEqual([]);
+      // 基数护栏:扫描器静默失效(规则空转/扫描窗错)必翻
+      expect(rep.scannedCells).toBeGreaterThan(4_000_000);
+      // 关键类型在场(巨石/桌/门——缺一种=生成端漂移)
+      const multi = collectMultiDefs();
+      const boulder = multi.find((m) => m.key === 'v_138_boulder')!;
+      let boulders = 0;
+      for (let i = 0; i < world.store.type.length; i++) if (world.store.type[i] === boulder.type) boulders++;
+      expect(boulders % 4, `巨石格数 ${boulders} 应为 4 的倍数(2×2 完整)`).toBe(0);
+      expect(boulders).toBeGreaterThan(0);
+    }, 300_000);
+  }
 });

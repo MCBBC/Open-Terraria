@@ -3,6 +3,7 @@
 import { Entity } from './Entity';
 import { entityNet } from '../net/entitySyncHooks';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { paintColor } from '../world/Paint';
 import { liquidCollision } from '../stats/TouchDamage';
 import { updateNpcLiquid, getWaterLine } from './npcLiquid';
 import type { GameHooks } from './types';
@@ -15,7 +16,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart, addEnemy, shoot } from './bossAI';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart, addEnemy, shoot, losClear } from './bossAI';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
 import { deerclopsAI } from './bossAI_deerclops';
@@ -1262,6 +1263,9 @@ export class Enemy extends Entity {
     }
     // 重力+碰撞（原版经由 NPC 碰撞；水中位移减速由 wet→liqFactor 统一承担）
     this.groundPhysics(game, 0, 0.12, 1);
+    // AI_001 尾部颜色渐变（NPC.cs:60971 起为 slime(type 1) 专属段；
+    // 此前误挂在 zombieAI——守卫 vanillaId!==1 使其全程空转，移回 slimeAI）
+    this.slimeColorTick(game);
   }
 
   private zombieAI(game: GameHooks, player: Player | null) {
@@ -1288,11 +1292,12 @@ export class Enemy extends Entity {
     this.vx += dir * 0.08;
     this.vx = Math.max(-0.9, Math.min(0.9, this.vx));
     this.groundPhysics(game, 0);
-    this.slimeColorTick();
+    this.slimeColorTick(game); // 守卫 vanillaId!==1：僵尸走此路径为 no-op（1:1）
   }
 
-  // ---- AI_001 颜色渐变（NPC.cs:60973-61105）：每 tick (c*19+target)/20 向目标色靠拢 ----
-  // ai[1] = 体内物品 id → 目标色表（蛆/凝胶/铂金币等占位色的 1:1 表）；踩油漆色 lerp 暂缺（无油漆系统）
+  // ---- AI_001 颜色渐变（NPC.cs:60971-61105）：每 tick (c*19+target)/20 向目标色靠拢 ----
+  // 优先级（:60971-60984）：底边下方一格踩到油漆（color>0 且 !=30 负相）→ 向油漆色 lerp
+  //  （flag 置位，体内物品色本轮不生效）；无油漆时才回落 ai[1] 体内物品目标色表。
   private static SLIME_ITEM_COLORS: Record<number, [number, number, number, number]> = {
     751: [185, 235, 255, 100], 2: [169, 125, 93, 150], 3: [128, 128, 128, 150], 9: [229, 149, 93, 150],
     150: [193, 202, 203, 100], 3086: [59, 28, 136, 150], 3081: [138, 145, 170, 150], 147: [189, 159, 139, 150],
@@ -1302,8 +1307,34 @@ export class Enemy extends Entity {
     365: [22, 119, 125, 100], 1105: [205, 30, 199, 100], 366: [173, 15, 13, 100], 1106: [91, 90, 119, 100],
   };
 
-  private slimeColorTick() {
-    if (this.vanillaId !== 1 || this.ai1 <= 0 || !this.colorRGBA) return;
+  private slimeColorTick(game: GameHooks) {
+    if (this.vanillaId !== 1 || !this.colorRGBA) return;
+    // ---- 踩油漆扫描（NPC.cs:60973-60983）----
+    // j 自 floor(Left.X/16) 至 floor(Right.X/16)（含端点，跨格史莱姆每格各 lerp一次）；
+    // num10 = floor((Bottom.Y+1)/16)（底边下一格）；门槛 = SolidTile3（:70470-70489
+    // active && !inActive && tileSolid && !tileSolidTop）&& color>0 && color!=30（负相不吃）
+    const st = game.world.store;
+    let flag = false;
+    const ty = Math.floor((this.y + this.h + 1) / TILE);
+    for (let j = Math.floor(this.x / TILE); j <= Math.floor((this.x + this.w) / TILE); j++) {
+      if (!st.inBounds(j, ty)) continue;
+      const i = st.idx(j, ty);
+      const t = st.type[i];
+      // SolidTile3：非活性格/已致动/非实心/平台（tileSolidTop）都不算立足点
+      if (!(st.flags[i] && t !== 0)) continue;
+      if (st.wire[i] & 32) continue;                       // inActive（致动缩入）
+      const d = TILE_DEFS[t];
+      if (!d?.solid || d.platform) continue;
+      const pc = st.paint[i];
+      if (pc > 0 && pc !== 30) {
+        const c = paintColor(pc);                          // WorldGen.paintColor :60979
+        for (let k = 0; k < 3; k++) this.colorRGBA[k] = (this.colorRGBA[k] * 19 + c[k]) / 20;
+        this.colorRGBA[3] = (this.colorRGBA[3] * 19 + 100) / 20; // :60980 alpha 目标恒 100
+        flag = true;
+      }
+    }
+    // ---- 体内物品色（NPC.cs:60984-61086：ai[1]>0 且本轮无踩漆才生效） ----
+    if (this.ai1 <= 0 || flag) return;
     const t = Enemy.SLIME_ITEM_COLORS[this.ai1];
     if (!t) return;
     for (let k = 0; k < 3; k++) this.colorRGBA[k] = (this.colorRGBA[k] * 19 + t[k]) / 20;
@@ -1384,6 +1415,83 @@ export class Enemy extends Entity {
    *  移动：本仓各 AI 自带积分——wet 时经 moveAndCollide 走 liqFactor（461/586 水 0.5；
    *  620 DD2 全速 1），与原版 UpdateCollision 语义一致。
    *  @returns true = 本 tick 已接管（调用方跳过行走/重力） */
+  /** 美杜莎 480 蓄力石化（NPC.cs:56751-56889 1:1）。返回 true = 蓄力中（本 tick 接管 AI）。
+   *  ai2 语义：>0 冷却递减 / 0 待机判定起手 / <0 蓄力（-(num23+num25)→0）；蓄力两段
+   *  均阻尼 vx 0.9，被挑空(|vy|超阈)或受击打断回 num21；走完回 num22。
+   *  低血(<1/3)：num21 180→120 / num22 300→240 / num23 180→240 / num24 60→90。
+   *  发石化窗（ai2 ≥ -num23 段）：双相对视 + 距<700 + (贴脸<30 或 45°锥) + 三路视线
+   *  任一通 → AddBuff(156, num24+剩余蓄力)（:56885-56888）——变身伤害/死因在 Player 过渡段 */
+  private medusaChargeStep(game: GameHooks, player: Player): boolean {
+    const lowHp = this.hp < this.maxHp / 3;
+    const num21 = lowHp ? 120 : 180;   // 打断冷却
+    const num22 = lowHp ? 240 : 300;   // 放完冷却
+    const num23 = lowHp ? 240 : 180;   // 发石化窗长度
+    const num24 = lowHp ? 90 : 60;     // buff 基础时长
+    const num25 = 20;                  // 起手辉光段
+    if (this.ai2 > 0) {
+      this.ai2 -= 1;
+    } else if (this.ai2 === 0) {
+      // 待机起手判定（:56764-56771）：正对玩家 + 站地 + <900 + 视线
+      const facing = (player.cx < this.cx && this.facing < 0) || (player.cx > this.cx && this.facing > 0);
+      if (facing && this.vy === 0 && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 900
+        && losClear(game, Math.floor(this.cx / TILE), Math.floor(this.cy / TILE),
+          Math.floor(player.cx / TILE), Math.floor(player.cy / TILE))) {
+        this.ai2 = -(num23 + num25);
+      }
+    } else {
+      // 蓄力两段（:56778-56889）：打断/推进
+      this.vx *= 0.9;
+      if (this.vy < -2 || this.vy > 4 || this.justHitT > 0) {
+        this.ai2 = num21;
+      } else {
+        this.ai2 += 1;
+        if (this.ai2 === 0) this.ai2 = num22;
+      }
+      const rem = this.ai2 + num23 + num25;      // 起手辉光段计时（:56798 num26）
+      if (rem === 1) game.playSfxFile?.('Item_17', 1, this.cx, this.cy); // SoundID 4-17(充能)
+      if (rem < num25 && rem > 0) {
+        // 充能尘（:56801-56813 尘 228 头顶环）+ 头顶光照
+        const hx = this.cx + this.facing * 6, hy = this.y + 6;
+        game.spawnParticles(hx, hy, '#E8A040', 2, 1.6);
+      }
+      if (this.ai2 >= -num23) {
+        // 发石化窗（:56835-56888）：尘 + 直击判定
+        const n29 = this.ai2 + num23;
+        if (n29 < 180 && n29 > 0 && (Math.random() < 1 / 3 || this.ai2 % 3 === 0)) {
+          const hx = this.cx + this.facing * 10, hy = this.y + 10;
+          game.spawnParticles(hx, hy, '#E8A040', 1, 2.4);
+        }
+        if (!player.dead && !player.buffs.has(BuffType.Stoned)) {
+          const dx = player.cx - this.cx, dy = player.cy - this.cy;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 700) {
+            let hit = dist < 30;                                    // 贴脸必中（:56866）
+            if (!hit) {
+              // 45° 锥（:56870-56877）：|单位向量 X| > cos(45°) → 视为正面
+              const ux = dx / dist;
+              hit = ux > 0.7071 || ux < -0.7071;
+            }
+            const mutualFacing = (player.cx < this.cx && this.facing < 0 && player.facing > 0)
+              || (player.cx > this.cx && this.facing > 0 && player.facing < 0);
+            if (hit && mutualFacing) {
+              // 三路视线任一通（:56880-56882：头/上 16px/下 8px）
+              const sees = (ox: number, oy: number) => losClear(game,
+                Math.floor((this.cx + ox) / TILE), Math.floor((this.cy + oy) / TILE),
+                Math.floor(player.cx / TILE), Math.floor(player.cy / TILE));
+              if (sees(0, 0) || sees(0, -16) || sees(0, 8)) {
+                player.buffs.apply(BuffType.Stoned, (num24 + Math.trunc(-this.ai2)) / 60);
+              }
+            }
+          }
+        }
+      }
+      // 蓄力期接管 AI_003 余段（原版两段末尾 return）
+      this.x += this.vx; this.y += this.vy;
+      return true;
+    }
+    return false;
+  }
+
   private wetSwimStep(game: GameHooks, player: Player | null, mode: 461 | 586 | 620): boolean {
     if (!this.wet) {
       // ---- 出水复原（461 :56409-56440 / 586 :56536-56558）----
@@ -1456,6 +1564,13 @@ export class Enemy extends Entity {
     // （cs:57732，位于其后）之前，wet 时整段接管本 tick——故 hook 在函数最前
     if (this.vanillaId === 461 || this.vanillaId === 586) {
       if (this.wetSwimStep(game, player, this.vanillaId as 461 | 586)) return;
+    }
+    // 美杜莎 480 蓄力石化（NPC.cs:56751-56889,位于 AI_003 通用行走之后——行走段先跑,
+    //  蓄力期行走被本块 velocity.X*=0.9 阻尼近似）。ai2: >0 冷却递减 / 0 蓄机判定 /
+    //  <-(num23+num25) 起手辉光 / >=-num23 发石化窗;贴脸|45°锥内|双向对视|视线通→
+    //  AddBuff(156, num24+剩余蓄力)——变身瞬间伤害/死因在 Player 石化过渡段
+    if (this.vanillaId === 480 && player) {
+      if (this.medusaChargeStep(game, player)) return;
     }
     // ---- 白天地表驱散（cs:57732-57775 + NotDiscouraged :60694）：
     // 白天 && y<worldSurface && 类型不在昼行豁免表 → 停止索敌 + EncourageDespawn(10)，

@@ -164,6 +164,32 @@ export class Inventory {
     return this.slots[this.selected];
   }
 
+  /** 该槽位是否为油漆（Item.PaintOrCoating，Item.cs:334-344）。
+   *  涂层（paintCoating 4668/5344）系统未建——本仓 PaintOrCoating 仅 paint>0，涂层惰性 */
+  private isPaintSlot(i: number): boolean {
+    const s = this.slots[i];
+    return !!s && s.stack > 0 && (ITEM_DEFS[s.id]?.paint ?? 0) > 0;
+  }
+
+  /** FindPaintOrCoating（Player.cs:41272-41289）1:1：弹药栏 54-57 优先，
+   *  再全包 0-57。返回油漆所在槽位下标；无油漆 -1 */
+  findPaintSlot(): number {
+    for (let i = AMMO_START; i < AMMO_START + AMMO_SLOTS; i++) {
+      if (this.isPaintSlot(i)) return i;
+    }
+    for (let i = 0; i < INV_SIZE; i++) {
+      if (this.isPaintSlot(i)) return i;
+    }
+    return -1;
+  }
+
+  /** 手持油漆工具时的当前油漆 id（SmartCursorHelper.cs:167-181
+   *  TryFindingPaintInplayerInventory 的 paintLookup；无油漆 0） */
+  heldPaintLookup(): number {
+    const i = this.findPaintSlot();
+    return i < 0 ? 0 : (ITEM_DEFS[this.slots[i]!.id]?.paint ?? 0);
+  }
+
   heldDef() {
     const it = this.heldItem();
     return it ? ITEM_DEFS[it.id] : null;

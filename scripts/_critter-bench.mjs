@@ -2,6 +2,7 @@
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000 });
 const page = await browser.newPage();
+page.on("console", (m) => console.log("[page]", m.text()));
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
 await page.goto(`${process.env.SW_ORIGIN ?? 'http://localhost:5199'}/?play=small`, { waitUntil: 'domcontentloaded', timeout: 90000 });
@@ -26,7 +27,7 @@ const out = await page.evaluate(() => {
     return { label, ms: Math.round(performance.now() - s), per: +((performance.now() - s) / n).toFixed(1) };
   };
   const r = [];
-  r.push(bench('baseline', 50));
+    console.log("bench start");  r.push(bench('baseline', 50));
   for (let i = 0; i < 4; i++) g.debugSpawnNpc(356, (ptx - 8 + i * 5) * T, (gy - 6) * T, false);
   r.push(bench('+4 butterflies', 50));
   for (let i = 0; i < 4; i++) g.debugSpawnNpc(355, (ptx - 8 + i * 5) * T, (gy - 6) * T, false);

@@ -8,6 +8,7 @@ export type SfxName =
   | 'hit' | 'hurt' | 'pickup' | 'dig' | 'place' | 'drink' | 'chop' | 'splash'
   | 'killed' | 'pkilled' | 'zombie' | 'roar' | 'coin' | 'door_open' | 'door_close' | 'tink' | 'shatter' | 'drown'
   | 'menuOpen' | 'menuClose' | 'menuTick'
+  | 'unlock'
   | 'bowShoot'   // 原版 SoundID.Item5（弓弦，Item.cs case 99 UseSound）
   | 'throw'      // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
   | 'explosion'  // 原版 SoundID.Item14（爆炸通用：手雷/炸弹/炸药/巨石,Projectile.cs 20+ 处）
@@ -61,6 +62,7 @@ const WAV_MAP: Record<SfxName, string[]> = {
   // 菜单 UI（原版 id 10=Menu_Open / id 11=Menu_Close / id 12=Menu_Tick）
   menuOpen: ['Menu_Open'],
   menuClose: ['Menu_Close'],
+  unlock: ['Unlock'],   // SoundID 22 Unlock（神庙钥匙开锁 WorldGen.cs:37627/金钥匙:37628）
   menuTick: ['Menu_Tick'],
   throw: ['Item_1'],
   explosion: ['Item_14'],

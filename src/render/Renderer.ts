@@ -114,6 +114,7 @@ import type { Player } from '../entities/Player';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
+import { mapPaintColor, PAINT_RGB } from '../world/Paint';
 import { Enemy } from '../entities/Enemy';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -494,6 +495,20 @@ export interface DamageNumber {
   rotation?: number;
 }
 
+/** 小地图恒忽略油漆的墙集（MapHelper.GetWallType :1993-2005：21/88-93/168/241）。
+ *  这些是自带渐变/特殊贴图的墙（天然/地牢分段墙族），原版在地图上不吃漆 */
+const MAP_WALL_NO_PAINT = new Set([21, 88, 89, 90, 91, 92, 93, 168, 241]);
+
+/** 小地图恒忽略油漆的 tile sheet（MapHelper.GetTileType :1965-1968：num==160 → newColor=0） */
+const MAP_TILE_NO_PAINT_SHEET = 160;
+
+/** 内部 tile id → 原版 sheet（redrawAll 热循环直查；-1 = 无映射） */
+const TILE_SHEET_OF: Readonly<Int16Array> = (() => {
+  const a = new Int16Array(TILE_DEFS.length);
+  for (let i = 0; i < TILE_DEFS.length; i++) a[i] = TILE_DEFS[i]?.vanilla?.sheet ?? -1;
+  return a;
+})();
+
 export class Minimap {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -519,7 +534,20 @@ export class Minimap {
   colorFor(x: number, y: number): string | null {
     const st = this.world.store;
     const i = st.idx(x, y);
-    const hex = (c: number[]): string => `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`;
+    const hex = (c: ReadonlyArray<number>): string => `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`;
+    // MapHelper.MapColor（:1812-1863）油漆换色：先取基础色，paint>0 时按漆调制。
+    // 豁免表：tile sheet 160 恒忽略漆（:1965-1968）；墙 21/88-93/168/241 恒忽略（:1993-2005）
+    const paintTile = (rgb: ReadonlyArray<number>): ReadonlyArray<number> => {
+      const p = st.paint[i];
+      const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
+      if (p > 0 && sheet !== MAP_TILE_NO_PAINT_SHEET) return mapPaintColor(false, [rgb[0], rgb[1], rgb[2]], p);
+      return rgb;
+    };
+    const paintWall = (rgb: ReadonlyArray<number>): ReadonlyArray<number> => {
+      const p = st.paintWall[i];
+      if (p > 0 && !MAP_WALL_NO_PAINT.has(st.wall[i])) return mapPaintColor(true, [rgb[0], rgb[1], rgb[2]], p);
+      return rgb;
+    };
     if (st.flags[i] && st.type[i] !== 0) {
       // 自研像素方块（F2 图片导入）：RGB 编码在 frameX/Y——与 redrawAll 的
       // PIXEL_ART_TILE 分支同公式。增量路径（flushDirty→colorFor）此前漏掉此分支，
@@ -531,7 +559,7 @@ export class Minimap {
       const d = TILE_DEFS[st.type[i]];
       if (d?.vanilla?.sheet !== undefined) {
         const vc = vanillaTileMapColor(d.vanilla.sheet);
-        if (vc) return hex(vc);
+        if (vc) return hex(paintTile(vc));
       }
       return d ? d.mapColor : '#808080';
     }
@@ -542,8 +570,14 @@ export class Minimap {
     }
     if (st.wall[i] !== 0) {
       const vc = vanillaWallMapColor(st.wall[i]);
-      if (vc) return hex(vc);
-      return WALL_DEFS[st.wall[i]]?.mapColor ?? '#2E2E2E';
+      if (vc) return hex(paintWall(vc));
+      const mc = WALL_DEFS[st.wall[i]]?.mapColor;
+      if (mc) {
+        // 画布回落色 '#RRGGBB' → 数组过油漆（legacy 自定义墙，MapColor :1854 默认分支）
+        const v = parseInt(mc.slice(1), 16);
+        return hex(paintWall([(v >> 16) & 255, (v >> 8) & 255, v & 255]));
+      }
+      return '#2E2E2E';
     }
     // 背景：天空渐变（y<世界面）/ 土层底 / 石层底（MapHelper GetBackgroundType）
     if (y < Math.max(1, this.world.groundLevel)) return hex(vanillaSkyColor(y, Math.max(1, this.world.groundLevel)));
@@ -595,8 +629,34 @@ export class Minimap {
     const lut = this._mapLUT;
     const img = ctx.createImageData(world.w, world.h);
     const buf = new Uint32Array(img.data.buffer);
-    const { type, wall, liquid, liquidType, frameX, frameY } = st;
+    const { type, wall, liquid, liquidType, frameX, frameY, paint, paintWall } = st;
     const surf = Math.max(1, world.groundLevel), rock = Math.max(surf + 1, world.rockLevel);
+    // MapHelper.GetMapTileXnaColor（:1865-1882）：colorLookup[type] 后过 MapColor 换漆。
+    // ABGR 打包直算（热循环零分配）：默认分支 = paintColor × max(r,g,b)（:1854-1861）
+    const mapPaintPacked = (packed: number, colorType: number, isWall: boolean): number => {
+      const r = packed & 255, g = (packed >>> 8) & 255, b = (packed >>> 16) & 255;
+      if (colorType === 29) { // ShadowPaint :1832-1839（num3 = 两次交换后的中位通道）
+        let n = r / 255, n2 = g / 255, n3 = b / 255;
+        if (n2 > n) { const t = n; n = n2; n2 = t; }
+        if (n3 > n) { const t = n; n = n3; n3 = t; }
+        const sc = n3 * 0.3;
+        const c = PAINT_RGB[colorType];
+        const nr = (c[0] * sc) | 0, ng = (c[1] * sc) | 0, nb = (c[2] * sc) | 0;
+        return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
+      }
+      if (colorType === 30) { // NegativePaint :1840-1853（墙半幅反转）
+        if (isWall) {
+          const nr = ((255 - r) * 0.5) | 0, ng = ((255 - g) * 0.5) | 0, nb = ((255 - b) * 0.5) | 0;
+          return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
+        }
+        const nr = 255 - r, ng = 255 - g, nb = 255 - b;
+        return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
+      }
+      const n6 = Math.max(r, g, b) / 255; // :1856 num = 最大通道
+      const c = PAINT_RGB[colorType];
+      const nr = (c[0] * n6) | 0, ng = (c[1] * n6) | 0, nb = (c[2] * n6) | 0;
+      return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
+    };
     for (let y = 0; y < world.h; y++) {
       // 背景（无 tile/液体/墙）：天空渐变（y<世界面，CalcSkyGradient lerp）/ 土层底 / 石层底
       const skyC = vanillaSkyColor(y, surf);
@@ -613,7 +673,12 @@ export class Minimap {
             buf[i] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
             continue;
           }
-          buf[i] = lut.tiles[t] ?? lut.tiles[0]; continue;
+          let c = lut.tiles[t] ?? lut.tiles[0];
+          // GetTileType :1962-1972：sheet 160 恒 newColor=0（不吃漆）
+          if (paint[i] > 0 && TILE_SHEET_OF[t] !== MAP_TILE_NO_PAINT_SHEET) {
+            c = mapPaintPacked(c, paint[i], false);
+          }
+          buf[i] = c; continue;
         }
         if (liquid[i] > 32) {
           const lt = liquidType[i];
@@ -621,7 +686,16 @@ export class Minimap {
           continue;
         }
         const wl = wall[i];
-        buf[i] = wl !== 0 ? (lut.walls[wl] ?? lut.walls[0]) : bg;
+        if (wl !== 0) {
+          let c = lut.walls[wl] ?? lut.walls[0];
+          // GetWallType :1993-2005：墙 21/88-93/168/241 恒 newColor=0（不吃漆）
+          if (paintWall[i] > 0 && !MAP_WALL_NO_PAINT.has(wl)) {
+            c = mapPaintPacked(c, paintWall[i], true);
+          }
+          buf[i] = c;
+        } else {
+          buf[i] = bg;
+        }
       }
     }
     ctx.putImageData(img, 0, 0);

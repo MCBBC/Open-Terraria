@@ -141,3 +141,27 @@ export function shiftTallGate(
   sfx?.('door_open'); // 高门恒播 SoundID 8 不分开关(WorldGen.cs:51786);旧'door'非法名经 as 断言静默失效
   return [x, anchorY];
 }
+
+/** WorldGen.IsLockedDoor（cs:69248-69255）：门 10 且 frameY∈[594,646]（style 11
+ *  神庙锁门段）且 frameX<54（关闭态）——开锁消耗神庙钥匙 1141（Player.cs:32332-32357） */
+export function isLockedDoor(st: TileStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  return st.type[i] === 10 && st.frameY[i] >= 594 && st.frameY[i] <= 646 && st.frameX[i] < 54;
+}
+
+/** WorldGen.UnlockDoor（cs:37613-37640）：向上扫锁段顶格（frameY==594），三格
+ *  frameY += 54（移出 [594,646] 锁区 → 变普通可开关门）+ 播 SoundID 22 */
+export function unlockDoor(st: TileStore, x: number, y: number, sfx?: (n: string) => void): boolean {
+  if (!isLockedDoor(st, x, y)) return false;
+  let top = y;
+  while (st.frameY[st.idx(x, top)] !== 594) {
+    top--;
+    if (top <= 0 || st.frameY[st.idx(x, top)] < 594) return false;
+  }
+  for (let k = top; k <= top + 2; k++) {
+    const i = st.idx(x, k);
+    st.frameY[i] += 54;
+  }
+  sfx?.('unlock');
+  return true;
+}

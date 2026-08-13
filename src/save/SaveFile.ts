@@ -288,6 +288,7 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   const tyT = st.type, tyF = st.flags, tyFX = st.frameX, tyFY = st.frameY;
   const tyW = st.wall, tyWr = st.wire, tyH = st.half, tySl = st.slope;
   const tyLt = st.liquidType, tyLq = st.liquid;
+  const tyP = st.paint, tyPw = st.paintWall;
   const nAll = tyT.length;
   // tiles(v3:RLE 里的 type 是稳定 id,查 INTERNAL_OF_STABLE 还原;v2 旧档=内部下标直读)
   {
@@ -380,6 +381,32 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       const end = Math.min(i + run + 1, nAll);
       for (; i < end; i++) tyLt[i] = v;
+    }
+  }
+  // 油漆双通道（WF:1474-1491 独立字节位；旧档缺字段 → 全 0 = 无漆）。
+  // 值域 0-31 与 5bit 位域等价，解码后钳 &31 防脏数据越出 PaintID 域
+  {
+    const u8 = b64ToBytes(data.paint ?? '');
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) tyP[i] = v & 31;
+    }
+  }
+  {
+    const u8 = b64ToBytes(data.paintWall ?? '');
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) tyPw[i] = v & 31;
     }
   }
   // liquid

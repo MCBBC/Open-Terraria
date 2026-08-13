@@ -1791,3 +1791,155 @@ export function runGlowingMushroomPlantsPass(st: TileStore, rng: RNG, gs: GenSta
     }
   }
 }
+
+// ===================== SunflowersPart2（cs:20043-20084）1:1 =====================
+// 普通种子向日葵的唯一生成来源（SpreadingGrass pass 18349-18460 的"Sunflowers"
+// 段实为 remix 专属 18460-18559，普通世界零向日葵；2026-08-13 前整 pass 缺失 =
+// 生成世界草地上永不长向日葵）。注册序：GrassWalls(19734) → SpawnStarterNPCs
+// （19830，十周年专属→普通种子 no-op）→ 本 pass(20043) → Trees(20085)。
+
+const SUNFLOWER_T = TILE_BY_KEY['v_27_sunflower']!;
+
+/** WorldGen.PlaceSunflower（cs:53650-53686）1:1：2 列×4 行向日葵块。
+ *  净空 = 2×4 区域非活跃且无墙；地面 = 下方两格 nactive 整砖且 ∈ {2, 109}。
+ *  帧模式：上两行（l<=-2）共用一次 Next(3) 款式；下两行每格独立 Next(3)。
+ *  frameY = (l+3)*18（0..54）。inheritPaint 不适用（生成期地面无漆，恒 no-op）。
+ *  OOB ≙ 原版 null Tile（不活跃、无墙，净空通过）；写入时 OOB 跳过。 */
+function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number, y: number): void {
+  if (y > gs.worldSurface - 1) return;   // （remix 恒假，不入判定）
+  const air = (cx: number, cy: number): boolean => {
+    if (!st.inBounds(cx, cy)) return true;
+    const i = st.idx(cx, cy);
+    return !st.flags[i] && st.wall[i] === 0;
+  };
+  let flag = true;
+  for (let i = x; i < x + 2; i++) {
+    for (let j = y - 3; j < y + 1; j++) {
+      if (!air(i, j)) flag = false;
+    }
+    if (!st.inBounds(i, y + 1)) { flag = false; continue; }
+    const gi = st.idx(i, y + 1);
+    if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0
+      || (SHEET[st.type[gi]] !== 2 && SHEET[st.type[gi]] !== 109)) flag = false;
+  }
+  if (!flag) return;
+  const styleTop = rng.int(0, 2);        // Next(3)——上两行共用
+  for (let k = 0; k < 2; k++) {
+    for (let l = -3; l < 1; l++) {
+      const fx = k * 18 + (l <= -2 ? styleTop : rng.int(0, 2)) * 36;
+      if (st.inBounds(x + k, y + l)) {
+        st.setTileSilent(x + k, y + l, SUNFLOWER_T, fx, (l + 3) * 18);
+      }
+    }
+  }
+}
+
+/** SunflowersPart2 主体：w*0.002 次带状扫描。每次：中心列 Next(w)，带宽
+ *  [c-Next(10)-7, c+Next(10)+7] 钳界；列内自上而下扫到首格活跃止，草 2 上方
+ *  空气 → PlaceTile(27)（→ case 27 → PlaceSunflower + SquareTileFrame；
+ *  SquareTileFrame 对完整写入的 2×4 块为恒 no-op，未移植）。 */
+export function runSunflowersPart2Pass(st: TileStore, rng: RNG, gs: GenState): void {
+  const count = Math.floor(st.w * 0.002);
+  const ws = Math.floor(gs.worldSurface);
+  for (let i = 0; i < count; i++) {
+    const c = rng.nextInt(st.w);                       // Next(w)
+    const lo = Math.max(0, c - rng.nextInt(10) - 7);   // Next(10)
+    const hi = Math.min(st.w - 1, c + rng.nextInt(10) + 7);
+    for (let j = lo; j <= hi; j++) {
+      for (let k = 1; k < ws - 1; k++) {
+        const ji = st.idx(j, k);
+        if (st.flags[ji] && SHEET[st.type[ji]] === 2 && !st.flags[st.idx(j, k - 1)]) {
+          placeSunflower(st, rng, gs, j, k - 1);
+        }
+        if (st.flags[ji]) break;                       // 列内首格活跃即止
+      }
+    }
+  }
+}
+
+// ===================== JunglePlantsPart2（cs:20310-20337）1:1 =====================
+// 地表丛林大株植物 233（PlaceJunglePlant 的 233 两分支）。注册序：
+// GlowingMushroomPlants…JunglePlants(20267，我方"地表植物"槽) → 本 pass(20310)
+// → Vines(20338)。2026-08-13 前整段缺失 = 丛林地表无大株植物。
+
+const JUNGLE_LARGE = TILE_BY_KEY['v_233_jungle_large_plants']!;
+
+/** PlaceJunglePlant（cs:47785-47960）对 type 233 的 1:1。styleY==0 走 3×2 分支
+ *  （cs:47872-47928，frameX=54*styleX+{0,18,36}），styleY>0 走 2×2 分支
+ *  （cs:47790-47840，frameX=36*styleX+{0,18}、frameY=36 起）。
+ *  容忍活跃格白名单（两分支同表）：{61,703,62,69,655,74} ∪ {185 且 frameY==0}；
+ *  净空通过先 KillTile 白名单格再写块。地面 = 放置列正下方 nactive 整砖且
+ *  type==60。inheritPaint 恒 no-op（生成期无漆）。返回是否成块（主循环
+ *  失败回退用）。 */
+function placeJunglePlant233(
+  st: TileStore, x: number, y: number, styleX: number, styleY: number,
+): boolean {
+  const dxLo = -1, dxHi = styleY > 0 ? 0 : 1;   // 2×2 分支 x-1..x；3×2 分支 x-1..x+1
+  const inB = (cx: number, cy: number) => st.inBounds(cx, cy);
+  let ok = true;
+  for (let dx = dxLo; dx <= dxHi; dx++) {
+    for (let dy = -1; dy <= 0; dy++) {
+      if (!inB(x + dx, y + dy)) { ok = false; continue; }
+      const ni = st.idx(x + dx, y + dy);
+      if (st.flags[ni]) {
+        const s = SHEET[st.type[ni]];
+        const tolerated = s === 61 || s === 703 || s === 62 || s === 69 || s === 655 || s === 74
+          || (s === 185 && st.frameY[ni] === 0);
+        if (!tolerated) ok = false;
+      }
+    }
+    const gx = x + dx;
+    if (!inB(gx, y + 1) || !solidTile(st, gx, y + 1) || SHEET[st.type[st.idx(gx, y + 1)]] !== 60) {
+      ok = false;
+    }
+  }
+  if (!ok) return false;
+  for (let dx = dxLo; dx <= dxHi; dx++) {
+    for (let dy = -1; dy <= 0; dy++) {
+      if (inB(x + dx, y + dy) && st.flags[st.idx(x + dx, y + dy)]) {
+        st.setTileSilent(x + dx, y + dy, 0, 0, 0);   // KillTile（active=false+type=0）
+      }
+    }
+  }
+  if (styleY > 0) {
+    const fx0 = 36 * styleX;
+    for (let dx = -1; dx <= 0; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        if (!inB(x + dx, y + dy)) continue;
+        st.setTileSilent(x + dx, y + dy, JUNGLE_LARGE, fx0 + (dx + 1) * 18, 36 + (dy + 1) * 18);
+      }
+    }
+  } else {
+    const fx0 = 54 * styleX;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        if (!inB(x + dx, y + dy)) continue;
+        st.setTileSilent(x + dx, y + dy, JUNGLE_LARGE, fx0 + (dx + 1) * 18, (dy + 1) * 18);
+      }
+    }
+  }
+  return true;
+}
+
+/** JunglePlantsPart2 主体：w*100 次尝试。每次列 = Next(40, w/2-40)，地牢在左
+ *  （dungeonSide<=-1 ≙ DungeonSide.Left=-1）则 +w/2 取另一半（丛林侧）；起始行
+ *  Next(h-300) 向下扫到首格活跃；若为丛林草 60 → 行上移一格 PlaceJunglePlant
+ *  （233, Next(8), 0），失败（落点非 233）回退 (233, Next(12), 1)。 */
+export function runJunglePlantsPart2Pass(st: TileStore, rng: RNG, gs: GenState): void {
+  const w = st.w;
+  for (let i = 0; i < w * 100; i++) {
+    let num = rng.int(40, Math.floor(w / 2) - 41);      // Next(40, w/2-40)
+    if (gs.dungeonSide <= -1) num += Math.floor(w / 2);
+    let j = rng.nextInt(st.h - 300);                    // Next(h-300)
+    while (!st.flags[st.idx(num, j)] && j < st.h - 300) j++;
+    const ji = st.idx(num, j);
+    if (st.flags[ji] && SHEET[st.type[ji]] === 60) {
+      j--;
+      placeJunglePlant233(st, num, j, rng.int(0, 7), 0);            // Next(8)
+      const ti = st.inBounds(num, j) ? st.idx(num, j) : -1;
+      if (ti < 0 || !st.flags[ti] || SHEET[st.type[ti]] !== 233) {
+        placeJunglePlant233(st, num, j, rng.int(0, 11), 1);         // Next(12)
+      }
+    }
+  }
+}

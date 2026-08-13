@@ -9,6 +9,7 @@ import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
+import { getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 import { mainExpertMode } from '../stats/ScaleStats';
@@ -421,7 +422,7 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.hp > e.maxHp / 2) {
     // ---- 一阶段(:32020-32133) ----
     e.def.defense = 36;                       // :32028
-    e.def.damage = 50;                        // GetAttackDamage_ScaledByDifficulty(50) 经典 = 50
+    e.def.damage = getAttackDamageScaledByDifficulty(50, e.difficulty ?? 0); // :32026 C/E/M=50/100/150(旧写死经典档,2026-08-13 修)
     if (flag50) { e.def.defense *= 2; e.def.damage *= 2; }   // :32030-32034 暴怒防/接触伤 ×2
     l[1] += 1;                                // :32034
     for (const th of [0.9, 0.8, 0.7, 0.6]) if (e.hp < e.maxHp * th) l[1] += 1;
@@ -468,7 +469,7 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
   } else {
     // ---- 二阶段(血≤50%,:32134-32237) ----
     e.def.defense = 10;                       // :32134
-    e.def.damage = 70;                        // GetAttackDamage_ScaledByDifficulty(70) 经典 = 70
+    e.def.damage = getAttackDamageScaledByDifficulty(70, e.difficulty ?? 0); // :32134 C/E/M=70/140/210(旧写死经典档)
     if (flag50) { e.def.defense *= 4; e.def.damage *= 2; }   // :32136-32140 暴怒防 ×4/接触伤 ×2
     // 首次进二阶段:触须 264×8(:32144-32154;getGoodWorld +6=14)
     if (l[0] === 1) {

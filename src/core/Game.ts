@@ -16,7 +16,7 @@ import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { Clock, World, ChestData, deathCoinKeepFraction } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
-import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
+import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDoor } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle } from '../world/Torch';
 import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, WALL_HOUSE } from '../world/Housing';
@@ -54,6 +54,7 @@ import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonS
 import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
+import { paintTile, paintWall, paintDustColor, type PaintDustHook } from '../world/Paint';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import {
   attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith,
@@ -88,7 +89,7 @@ import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { applyFrostBurn } from '../entities/projStatus';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
-import { dropsAllItemsOnDeath, dropsCoinsOnDeath } from '../player/Appearance';
+import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
 const BUFF_BY_VANILLA = new Map<number, BuffType>();
 for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
@@ -4026,6 +4027,10 @@ export class Game implements GameHooks {
       wireToolMode: this.wireToolMode,
       occupants,
       controlUseItem: !!inp.mouseDown,
+      // 油漆 lookup（SmartCursorHelper.cs:167-181 TryFindingPaintInplayerInventory：
+      // 仅手持刷/滚（1071/1543/1072/1544）才查 FindPaintOrCoating；刮刀不查）
+      paintLookup: (heldDef?.paintTool === 'brush' || heldDef?.paintTool === 'roller')
+        ? p.inv.heldPaintLookup() : 0,
       // 钩爪锚点集（SmartCursorHelper.cs:106-115 _grappleTargets：现役锚点 Center 的
       // tile 坐标——镐链射线终点/免挖集；AI_007 实装后由玩家锚点表收集）
       grappleAnchors: p.grappleAnchorTiles(),
@@ -4297,16 +4302,22 @@ export class Game implements GameHooks {
         if (cwMelee?.shoot && cwMelee.shootSpeed != null) {
           const ang2 = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           const pd = projectileData(cwMelee.shoot);
+          // 穿透取投射物表原值（2026-08-13：去 min-3 钳——喵刀 502 penetrate=5 被
+          // 钳成 3 违背原版；-1（无限）沿用 3 近似）
           let pen = pd?.penetrate ?? 1;
           if (pen < 0) pen = 3;
-          pen = Math.max(1, Math.min(pen, 3));
+          pen = Math.max(1, pen);
+          // 502 喵刀猫（Projectile.cs:5460 AI_008）：前 20t 平飞后重力 0.2（:22656）、
+          // timeLeft 默认 180、落地弹跳（Arrow.meowBounceOff）
+          const meow = cwMelee.shoot === 502;
           this.entities.add(new Arrow(
             this.player.cx + Math.cos(ang2) * 14, this.player.cy - 4 + Math.sin(ang2) * 14,
             // ⑨ melee 弹速 /meleeSpeed（P:46431-46434 speed/=meleeSpeed——审计 §1/§9）
             Math.cos(ang2) * cwMelee.shootSpeed / this.player.attackSpeedMult,
             Math.sin(ang2) * cwMelee.shootSpeed / this.player.attackSpeedMult,
             this.swing.dmg ?? 1, this.swing.kb ?? 3, cwMelee.shoot, null,
-            { grav: projGravity(cwMelee.shoot), life: pd?.timeLeft ?? 600, pierce: pen }), 'projectiles');
+            { grav: meow ? 0.2 : projGravity(cwMelee.shoot), gravDelay: meow ? 19 : -1,
+              life: meow ? 180 : (pd?.timeLeft ?? 600), pierce: pen }), 'projectiles');
         }
       }
       this.mining = null;
@@ -4357,6 +4368,14 @@ export class Game implements GameHooks {
           return;
         }
       }
+    }
+
+    // 油漆三件套（Player.cs PlaceThing :38923-38925——先于 Tiles/Walls 分派；
+    //  Paintbrush :41254 / PaintRoller :41236 / PaintScrapper :41152）。左键，
+    //  目标格可被占用（与电路工具同权，且不进 noBuilding 门）
+    if (heldDef?.paintTool && inp.mouseDown && !inp.rightDown) {
+      this.tryUsePaintTool(tx, ty, heldDef);
+      return;
     }
 
     // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手/宏伟蓝图):左键,目标格可被占用
@@ -4566,18 +4585,36 @@ export class Game implements GameHooks {
         }
         case 1326: // 混乱之杖(:44861-44900):传送鼠标点+混乱 debuff+扣血
         case 5335: { // 和谐之杖(:44902+):传送鼠标点无代价
-          // ChaosState(debuff 88):混乱之杖冷却门——本仓无 buff 88,以 400t 本地
-          // 冷却近似(:44865 debuffTime 内拒绝再次传送)
+          // ChaosState(debuff 88) 400t 本地冷却近似。原版语义（:44865-44913）:
+          // 首次传送扣 max/6(:44889);混沌期内**允许再传送**但扣 max/7 且可致死
+          // （:44904-44913 statLife-=max/7;<=0 → KillMe(ByOther(13) 或性别 14/15)）
+          // ——此前实现为"混沌期拒绝传送",2026-08-13 按 /goal 对齐(补传送死链)
           if (pvid === 1326) {
-            if (p.chaosStateT > 0) break;
+            const inChaos = p.chaosStateT > 0;
             p.chaosStateT = 400;
+            this.teleportToMouse();
+            if (inChaos) {
+              const cost = Math.floor(p.maxHp / 7);
+              p.lastDamageCause = { kind: 'teleportFail' };
+              p.hp -= cost; // 无下限——可致死（原版 KillMe 语义）
+              this.addDamageNumber(p.cx, p.y, cost, false, '#B040FF');
+              if (p.hp <= 0) {
+                // :44906-44908 Next(2)==0 → 13（Teleport_1）;否则 Male?14:15（Teleport_2）
+                if (Math.random() < 0.5) {
+                  const fem = FEMALE_VARIANTS.includes(p.appearance?.skinVariant ?? 0);
+                  p.lastDamageCause = { kind: fem ? 'teleportFailFemale' : 'teleportFailMale' };
+                }
+                p.hp = 0;
+              }
+            } else {
+              const cost = Math.max(1, Math.floor(p.maxHp / 6)); // :44889 首传代价
+              p.hp = Math.max(1, p.hp - cost);
+              this.addDamageNumber(p.cx, p.y, cost, false, '#B040FF');
+            }
+            p.useTime = 20;
+            break;
           }
           this.teleportToMouse();
-          if (pvid === 1326) {
-            const cost = Math.max(1, Math.floor(p.maxHp / 6)); // :44889 生命代价
-            p.hp = Math.max(1, p.hp - cost);
-            this.addDamageNumber(p.cx, p.y, cost, false, '#B040FF');
-          }
           p.useTime = 20;
           break;
         }
@@ -4923,7 +4960,10 @@ export class Game implements GameHooks {
       const mg = heldDef.magic;
       // 魔力花族：耗魔 -8%（manaCost -= 0.08，Player.cs:14040）；不足时自动喝蓝
       // 魔力花族 -8% + 丛林套 manaCostMul（:14040 / :15878）
-      const mgCost = Math.trunc(mg.manaCost * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul); // ⑪ CheckMana 截断无下限（P:51728）
+      // ⑪+⑧ 词缀 mcst（I:562 round——cw 链 5374 已接,此 mg 直射链 2026-08-13 补）
+      const psM = this.heldPrefixStat();
+      const mgCost = Math.trunc(Math.round(mg.manaCost * (psM?.mcst ?? 1))
+        * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul);
       if (this.player.mana < mgCost) {
         if (!(this.player.equipStats.manaFlower && this.tryAutoManaPotion() && this.player.mana >= mgCost)) {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
@@ -6377,6 +6417,148 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
     }
+  }
+
+  /**
+   * 油漆三件套使用（Player.cs 1:1）：
+   *  - PlaceThing 分派序 :38923-38925（先于 Tiles/Walls，且不在 noBuilding 门内）
+   *  - PlaceThing_Paintbrush :41254-41270：1071/1543，目标格 active → TryPainting(tile 通道)
+   *  - PlaceThing_PaintRoller :41236-41252：1072/1544，目标格 wall>0 → TryPainting(wall 通道)
+   *  - PlaceThing_PaintScrapper :41152-41234：1100/1545（IsPaintScraper 集 ItemID.cs:254），
+   *    TryScrapping :41215-41234 先 tile 后 wall 清除（不消耗物品）；LongMoss :41166-41213
+   *    对 tile 184 KillTile + 1/9 掉苔藓（4349+frameX/22，6-10 档特例 4377/4378/4389/5127/5128）
+   *  - TryPainting/ApplyPaint :41291-41369：FindPaintOrCoating（弹药栏 54-57 优先）取油漆，
+   *    成功改色才扣 1 个；同色格不消耗（paintTile/paintWall 的 b==color 守卫）
+   *  冷却：useTime 10（Item.cs:13354-13373/13536-13545；Spectre 1543-1545 :18571-18583
+   *  useTime 同 10 且 tileBoost+3）× tileSpeed/wallSpeed（ApplyItemTime :4221-4230）。
+   *  涂层（paintCoating 4668/5344）系统未建——涂层物品不在 FindPaintSlot 判定内，惰性。
+   */
+  private tryUsePaintTool(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
+    if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
+    const st = this.world.store;
+    if (!st.inBounds(tx, ty)) return;
+    // IsInTileInteractionRange(Simple, tileBoost + blockRange)（:41154/:41238/:41256）：
+    // Spectre 三件套 tileBoost+=3（Item.cs:18583）；blockRange 同铺砖铺墙公式
+    const spectre = itemDef.vid === 1543 || itemDef.vid === 1544 || itemDef.vid === 1545;
+    const tb = (spectre ? 3 : 0)
+      + (this.player.equipStats.tileRange ? 3 : 0)
+      + (this.player.buffs.has(BuffType.Builder) ? 1 : 0);
+    if (!this.inTileRange(tx, ty, tb)) return;
+    const p = this.player;
+    const i0 = st.idx(tx, ty);
+    const paintDust: PaintDustHook = (x, y, np, op) => {
+      // paintEffect（WorldGen.cs:44091-44112）：10 颗尘，半数 noGravity×1.2、半数×0.5
+      const [r, g, b] = paintDustColor(np, op);
+      const col = `rgb(${r},${g},${b})`;
+      for (let k = 0; k < 10; k++) {
+        this.spawnParticles(x * TILE + Math.random() * TILE, y * TILE + Math.random() * TILE,
+          col, 1, k % 2 === 0 ? 1.2 : 0.5, { life: 40, size: 1 });
+      }
+    };
+    const useAnimation = 15; // Item.cs useAnimation 15（三件套与 Spectre 同值）
+    const useTimeBase = 10;  // Item.cs useTime 10
+    // ApplyItemTime(sItem, tileSpeed/wallSpeed)（Player.cs:4221-4230）：useTime×乘子，下限 1；
+    //  同时驱动 useStyle 1 挥动动画（useAnimation 15，autoReuse 持按链式重启）
+    const applyItemTime = (multiplier: number) => {
+      p.useTime = Math.max(1, Math.round(useTimeBase * multiplier));
+      this.swing = { t: useAnimation, dur: useAnimation, item: p.inv.heldItem()?.id ?? 0 };
+      this.swingHitSet.clear();
+      this.swingTileCutSet.clear();
+    };
+
+    if (itemDef.paintTool === 'brush') {
+      // :41262 目标格必须 active
+      if (!(st.flags[i0] && st.type[i0] !== 0)) return;
+      if (p.useTime > 0) return; // :41265 ItemTimeIsZero && itemAnimation>0 && controlUseItem
+      applyItemTime(this.paintTileSpeed());
+      this.tryPainting(tx, ty, false, paintDust);
+      return;
+    }
+    if (itemDef.paintTool === 'roller') {
+      // :41244 目标格必须有墙
+      if (st.wall[i0] === 0) return;
+      if (p.useTime > 0) return;
+      applyItemTime(this.paintWallSpeed());
+      this.tryPainting(tx, ty, true, paintDust);
+      return;
+    }
+    // scraper
+    // TryScrapping :41218——两通道均无漆 → 直接返回（不挥动不耗冷却）
+    const hasPaint = (st.wall[i0] > 0 && st.paintWall[i0] > 0)
+      || ((st.flags[i0] && st.type[i0] !== 0) && st.paint[i0] > 0);
+    if (hasPaint) {
+      if (p.useTime > 0) return;
+      // :41225-41232 先 tile 后 wall；成功才 ApplyItemTime（tileSpeed/wallSpeed 各自）
+      if (paintTile(st, tx, ty, 0, paintDust)) {
+        applyItemTime(this.paintTileSpeed());
+      } else if (paintWall(st, tx, ty, 0, paintDust)) {
+        applyItemTime(this.paintWallSpeed());
+      } else {
+        p.useTime = 0; // 双原语都未改色（理论不可达）——不耗冷却
+      }
+      return;
+    }
+    // LongMoss :41166-41213：tile 184 → KillTile + 1/9 苔藓掉落
+    if (st.type[i0] === (TILE_BY_KEY['v_184_moss_plants'] ?? -1) && st.flags[i0]) {
+      if (p.useTime > 0) return;
+      const frameX = st.frameX[i0];
+      this.breakTile(tx, ty, true);                  // WorldGen.KillTile :41179（含掉落链）
+      const i1 = st.idx(tx, ty);
+      if (st.flags[i1] && st.type[i1] !== 0) return; // :41180-41183 仍 active → 中止
+      applyItemTime(1);                              // ApplyItemTime(sItem)（:41184，无乘子）
+      // :41189-41212 1/9 掉苔藓：4349+frameX/22，6-10 档特例
+      if (Math.floor(Math.random() * 9) === 0) {
+        const col = Math.floor(frameX / 22);
+        let mossVid = 4349 + col;
+        switch (col) {
+          case 6: mossVid = 4377; break;
+          case 7: mossVid = 4378; break;
+          case 8: mossVid = 4389; break;
+          case 9: mossVid = 5127; break;
+          case 10: mossVid = 5128; break;
+        }
+        const mossKey = VANILLA_ITEM_KEY_BY_ID[mossVid];
+        const mossId = mossKey !== undefined ? ITEM_BY_KEY[mossKey] : undefined;
+        if (mossId !== undefined) {
+          p.inv.add(mossId, 1);
+          this.cb.onInventoryChanged();
+        }
+      }
+    }
+  }
+
+  /** TryPainting/ApplyPaint（Player.cs:41291-41369）：paintingAWall 分通道，
+   *  FindPaintOrCoating 取油漆，改色成功扣 1 个（同色不扣） */
+  private tryPainting(tx: number, ty: number, paintingAWall: boolean, dust: PaintDustHook) {
+    const st = this.world.store;
+    const inv = this.player.inv;
+    const slot = inv.findPaintSlot();
+    if (slot < 0) return;                    // FindPaintOrCoating → null（:41293-41294）
+    const paint = ITEM_DEFS[inv.slots[slot]!.id]?.paint ?? 0;
+    if (paint === 0) return;
+    if (paintingAWall) {
+      // :41344 wallColor()!=paint && paintWall(...) → stack--
+      if (st.paintWall[st.idx(tx, ty)] !== paint && paintWall(st, tx, ty, paint, dust)) {
+        inv.removeAt(slot, 1);
+        this.cb.onInventoryChanged();
+      }
+    } else {
+      // :41357 color()!=paint && paintTile(...) → stack--
+      if (st.paint[st.idx(tx, ty)] !== paint && paintTile(st, tx, ty, paint, dust)) {
+        inv.removeAt(slot, 1);
+        this.cb.onInventoryChanged();
+      }
+    }
+  }
+
+  /** Player.tileSpeed（Player.cs:2338 = 1f；Builder 药水/便携水泥机族 +25%，:9842） */
+  private paintTileSpeed(): number {
+    return this.player.equipStats.tileRange != null || this.player.buffs.has(BuffType.Builder) ? 0.75 : 1;
+  }
+
+  /** Player.wallSpeed（Player.cs:2336 = 1f；同上 +25% 加速档） */
+  private paintWallSpeed(): number {
+    return this.player.equipStats.wallSpeed || this.player.buffs.has(BuffType.Builder) ? 0.75 : 1;
   }
 
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
@@ -8141,6 +8323,25 @@ export class Game implements GameHooks {
    *  帧算法/样式保留/方向锚点见 world/Door.ts（原版 OpenDoor L22384 / CloseDoor L15901 语义） */
   private toggleDoor(x: number, y: number, open: boolean) {
     const st = this.world.store;
+    // 神庙锁门（IsLockedDoor cs:69248）：开锁消耗神庙钥匙 1141（Player.cs:32332-32357）
+    // ——消耗+UnlockDoor（frameY 三格 +54 出锁区）后继续开门;无钥匙拒绝。
+    // 2026-08-13:此前锁门无锁语义,世花前可自由进出神庙（拜祭坛/开箱绕过进度门）
+    // 锁段向上扫三格：IsLockedDoor 只认顶格帧段（frameY∈[594,646]）,而 interactAt
+    // 的点击坐标不归一到门主格——点中/底格也须命中锁（原版 SmartInteract 归一,此处扫描等价）
+    let lockY = -1;
+    for (let dy2 = 0; dy2 < 3; dy2++) {
+      if (isLockedDoor(st, x, y - dy2)) { lockY = y - dy2; break; }
+    }
+    if (open && lockY >= 0) {
+      const keyIid = invIndexOfVanilla(1141);
+      if (keyIid < 0 || this.player.inv.countOf(keyIid) <= 0) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedTempleKey'));
+        this.input.rightDown = false;
+        return;
+      }
+      this.player.inv.remove(keyIid, 1);
+      unlockDoor(st, x, lockY, (n) => this.sfx.play(n as 'unlock'));
+    }
     if (open) {
       const dir = this.player.facing >= 0 ? 1 : -1;
       if (!openDoor(st, x, y, dir) && !openDoor(st, x, y, -dir)) return;
@@ -8579,6 +8780,15 @@ export class Game implements GameHooks {
       w.weather.sandstorm.happening,
       !!this.scene?.zoneDesert && p.cy / 16 < w.groundLevel + 30,
     );
+    // 狙击镜扩圈（GetSpawnArea :846-862）：手持 1254/1299 或装备 1299 → num3 档
+    {
+      const heldV = viIdFromKey(ITEM_DEFS[p.inv.heldItem()?.id ?? -1]?.key ?? '') ?? -1;
+      const scopeAcc = p.inv.equippedAccessories()
+        .some((id) => viIdFromKey(ITEM_DEFS[id]?.key ?? '') === 1299);
+      this.vanillaSpawner.scopeNum3 = (heldV === 1254 || heldV === 1299 || scopeAcc)
+        ? (heldV === 1254 && scopeAcc ? 1.25 : (heldV === 1254 || heldV === 1299) ? 1.5 : 2.0)
+        : 0;
+    }
     // TrySpawnAnNPC L23：nearbyActiveNPCs >= maxSpawns 拒绝
     // （原版 nearbyActiveNPCs = 附近 NPC 的 npcSlots 加权和；我们的怪全部由 spawner 生成
     //  在玩家附近，直接全量求和。蠕虫段也是独立 NPC，原版同样计入）
