@@ -1509,7 +1509,7 @@ export class Renderer {
    *  alpha（:45417 Brightness）。蠕虫段不画（头部血条代表全链）；毁灭者原版为
    *  全链共享一条（destroyerHB 平滑），此处近似画在头下。专家档克脑 266 不画
    *  （Main.cs:45321 `(!expertMode || type != 266)` 门——有四镜像在,血条会穿帮）。 */
-  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow'] }, expert = false) {
+  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow']; spriteBottomWorld?: number }, expert = false) {
     const hp = e.hp, maxHp = e.maxHp;
     if (hp <= 0 || hp >= maxHp) return;
     if (e.wormFollow) return;
@@ -1521,7 +1521,11 @@ export class Renderer {
     const vid = e.vanillaId ?? 0;
     const scale = Renderer.HB_BIG_SCALE.has(vid) ? 1.5 : 1;
     const x = e.cx - 18 * scale;
-    const y = e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0);
+    // 原版条位 = 盒底+10+NPCAddHeight（其前提是贴图底≈盒底+4）。中心锚+显式
+    // 下移的贴图（EoC +23/+30 等）底边远低于盒底 → 取 max(盒底基准, 贴图底+6)
+    // 保持原版"条悬在贴图底下方 ~6px"的相对关系（2026-08-13 "血条在眼球内"修复）
+    const y = Math.max(e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0),
+      e.spriteBottomWorld ? e.spriteBottomWorld + 6 : -Infinity);
     const fill = Math.max(0, Math.min(36, Math.floor((36 * hp) / maxHp)));  // num2
     // 光照 alpha（Brightness = 中心格最大通道/255；8 档量化控 tint 缓存规模）
     let aQ = 1;
@@ -2012,6 +2016,7 @@ export class Renderer {
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
         else if (stR === 103) ctx.rotate(e.visAngle);  // AI_103 沙鲨族:rotation=vy*dir*0.1 钳±0.2(cs:42765)
         else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
+        else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection 仍镜像
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
@@ -2027,6 +2032,8 @@ export class Renderer {
         const pad = grounded ? this.spriteBottomPad(r, `npc${e.vanillaId}:f${frameIdx}`) : 0;
         const anchorY = grounded ? -r.sh + pad : -r.sh / 2;
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
+        // 回填实际贴图底边（世界 y），供 drawHealthBar 定位兜底（见 Enemy.spriteBottomWorld 注释）
+        e.spriteBottomWorld = (grounded ? e.y + e.h : e.cy) + (anchorY + eocOff + r.sh);
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
         //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA

@@ -1506,7 +1506,7 @@ export function nebulaFloaterAI(e: Enemy, game: GameHooks, player: Player | null
     // ---- 消散段(:41582-41601):3t 倒数后 active=false ----
     if (lai[3] === 0) {
       lai[3] = 1; e.ai3 = 3;
-      game.playSfx('menu_open', 0.4, e.cx, e.cy);     // SoundID.Item8
+      game.playSfx('menuOpen', 0.4, e.cx, e.cy);     // 消散音（原键名 menu_open 拼错恒静音）
       game.spawnParticles(e.cx, e.cy, '#C060FF', 20, 3, { life: 40 });
     }
     e.ai3 -= 1;
@@ -1531,13 +1531,15 @@ export function nebulaFloaterAI(e: Enemy, game: GameHooks, player: Player | null
     e.vx *= 0.98; e.vy *= 0.98;                       // 视线内滞空缓降(:41615-41618)
     hover = true;
   }
-  // ---- 瞬移执行段(:41620-41644):起终双段尘爆 ----
+  // ---- 瞬移执行段(:41620-41644)：起终双端 Item8 + 尘 242 各 20（scale2.5 初速 ×3）----
   if (e.ai2 !== 0 && e.ai3 !== 0) {
+    game.playSfxFiles?.(['Item_8'], 1, e.cx, e.cy);   // :41620 旧位置
     game.spawnParticles(e.cx, e.cy, '#C060FF', 20, 3, { life: 40 });
     e.x = e.ai2 * 16 - e.w / 2;                       // Center=(ai[2]*16, ai[3]*16)
     e.y = e.ai3 * 16 - e.h / 2;
     e.vx = 0; e.vy = 0;
     e.ai2 = 0; e.ai3 = 0;
+    game.playSfxFiles?.(['Item_8'], 1, e.cx, e.cy);   // :41633 新位置
     game.spawnParticles(e.cx, e.cy, '#C060FF', 20, 3, { life: 40 });
   }
   // ---- 瞬移周期(:41646-41693) ----

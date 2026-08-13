@@ -62,6 +62,10 @@ import {
 } from '../world/wiring/devices';
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, partyNaturalAttempt, type PartyState } from '../world/wiring/party';
 import { LanternNight } from '../world/LanternNight';
+import {
+  setFireFlyChance, cultistRitualUpdateTime, cultistTabletDestroyed,
+  mysticLogs, type CultistHost, type FairyHost,
+} from '../world/evolution/RuntimeEvents';
 import type { SaveData } from '../save/serialize';
 import { placePortal as placePortalAt, portalRegistry, clearPortals, type Portal } from '../entities/Portal';
 import {
@@ -1152,6 +1156,19 @@ export class Game implements GameHooks {
   private musicState: MusicState = newMusicState();
   /** 派对态（BirthdayParty 精简核：ManualParty；派对纪念碑 455 驱动） */
   private partyState: PartyState = newPartyState();
+  // ---- 运行时审计台账六缺口的新增运行时位 ----
+  /** NPC.freeCake（NPC.cs:6020 静态位）：生日派对开张置位（BirthdayParty.cs:106），
+   *  派对女孩首次对话赠切片蛋糕后清零（ConditionalDialogue.FreeCakeDialogue），
+   *  入夜 StartNight 清零（Main.cs:64704）。运行时态不落盘（同原版） */
+  freeCake = false;
+  /** NPC.EoCKilledToday / WoFKilledToday（NPC.cs:6541/6543 私有静态位）：同日双杀
+   *  EoC(4)+WoF(113) 掉 Badger's Hat 5004（NPC.cs:79800-79814）；入夜
+   *  ResetBadgerHatTime 清零（Main.cs:64703）。运行时态不落盘（原版不入 WorldFile） */
+  private eocKilledToday = false;
+  private wofKilledToday = false;
+  /** 已记 TabletDestroyed 账的石碑（CultistRitual.TabletDestroyed，NPC.cs:38881——
+   *  石碑 ai0==-1 边沿去重；实体死亡随 WeakSet 自动回收） */
+  private _cultistTabletDone = new WeakSet<Enemy>();
   private lastMusic = -1;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
@@ -1760,6 +1777,7 @@ export class Game implements GameHooks {
     clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
     partyWorldClear(this.partyState);
     LanternNight.worldClear();      // LanternNight.WorldClear（Main.cs:51656）：运行时态不进存档
+    mysticLogs.worldClear();        // MysticLogFairiesEvent.WorldClear（WorldGen.cs:6958）：仙女事件态复位
     this.golfState.worldClear();    // GolfState.WorldClear（GolfState.cs:69-76）：轨迹记录/跟踪态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备 = 原版经典开局三件套（铜镐 3509/铜斧 3506/铜短剑 3507），其余一概不给——
@@ -1817,6 +1835,9 @@ export class Game implements GameHooks {
     }
     // 昼夜事件基线：季节旗标 + 时钟快照
     this.checkSeasonal();
+    // MysticLogFairiesEvent.StartWorld（WorldGen.cs:3303 OnWorldLoad）：读图/新世界
+    // 扫一次倒木桩（StartNight 会重扫，此为入夜前的首扫）
+    mysticLogs.startWorld(this.fairyCtx());
     this._lastClockT = this.world.clock.timeOfDay;
     // 成就：解锁 toast（原版走 Steam 弹窗，本作用 toast 反馈）+ 进世界基线
     this.achievements.onUnlock = (name) => {
@@ -1946,6 +1967,10 @@ export class Game implements GameHooks {
       goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
       stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
       angler: 'savedAngler',   // NPC.savedAngler（睡渔夫 376 解救 → 渔夫 369 入镇）
+      // 老城镇史莱姆（绑缚 685 → TransformElderSlime :19077-19091 → 679 +
+      // unlockedSlimeOldSpawn=true，WF:1410 随存档）——走 flags 即自动持久化，
+      // SpawnAnNPC 三人组链的 !unlockedSlimeOldSpawn 门随之关闭
+      town_slime_old: 'unlockedSlimeOldSpawn',
     };
     const flag = flagByKey[npc.npcKey];
     if (flag) this.world.flags[flag] = true;
@@ -2893,17 +2918,38 @@ export class Game implements GameHooks {
     //      真灯笼不再满足 LanternsCanPersist（血月/入侵/月总倒计时/刷出 Boss）即提前收场。
     //      入夜 CheckNight / 黎明 CheckMorning 在下方昼夜事件 crossing 段触发。
     //      UpdateTime 尾段其余子系统处置（Main.cs:64427-64434，逐一核实）：
-    //      · CultistRitual.UpdateTime（:64427 / CultistRitual.cs:20-47）——真缺口：
-    //        地牢拜月教徒 437 自然重生计时（hardMode && downedGolemBoss && downedBoss3，
-    //        delay/recheck 每帧按 dayRate 递减，recheck 到 0 掷 TrySpawning(dungeonX/Y)）；
-    //        本仓 437 无自然出生入口，教徒链 437→438→439 仅 AI 移植（entities/Enemy.ts:788），
-    //        补齐需 delay/recheck 存档位 + 地牢锚 → 台账登记待移植
+    //      · CultistRitual.UpdateTime（:64427 / CultistRitual.cs:20-47）——已接：
+    //        地牢拜月教石碑 437 自然重生计时（hardMode && downedGolemBoss && downedBoss3，
+    //        delay/recheck 每帧按 dayRate 递减，双零掷 TrySpawning(dungeonX/Y)）；
+    //        delay 随存档（WF:114/163 → World.cultistDelay），TabletDestroyed 账在下方
+    //        石碑 ai0==-1 边沿捕获（NPC.cs:38881）
+    //      · MysticLogFairiesEvent.UpdateTime（:64433）——已接：倒木桩夜放仙女
+    //        （StartNight 开闸 + 扫桩在 DUSK 块）
     //      · CreditsRollEvent.UpdateTime（:64432）——月总死亡制作名单倒计时递减，
     //        纯客户端演出数值（消费端 = 滤镜/联机包）→ 不适用
     //      · PylonSystem.Update（:64434 / TeleportPylonsSystem.cs:29-42）——列表更新冷却
     //        = int.MaxValue，实际语义 = 首帧建表 + TE 放置/拆除时 RequestImmediateUpdate
     //        （:45-52）即时重建；本仓 TeleportPylons.ts:64 按需等价 → 不适用 ----
     LanternNight.updateTime(this.lanternCtx());
+    // CultistRitual.UpdateTime（Main.cs:64427 每帧位）。房主权威——访客不跑世界事件计时
+    if (!this.net || this.net.policy.isHost) {
+      // TabletDestroyed 账（NPC.cs:38881）：石碑召出 439 的同一帧置 delay=43200。
+      // 原版调用点在 AI_083a 内部，此处以石碑 ai0==-1（"已召邪教徒"标记）边沿等价
+      // 捕获，每块石碑只记一次（WeakSet 去重）
+      for (const en of this.entities.enemies) {
+        const tab = en as Enemy;
+        if (tab.vanillaId === 437 && tab.ai0 === -1 && !this._cultistTabletDone.has(tab)) {
+          this._cultistTabletDone.add(tab);
+          cultistTabletDestroyed(w);
+        }
+      }
+      if (cultistRitualUpdateTime(w, w.dayRate(), this.cultistCtx())) {
+        // 重生日志：TrySpawning 命中（437 已在地牢锚落位）
+        console.info(`[cultist] 神秘石碑 437 自然重生 @ dungeon (${w.dungeonX}, ${w.dungeonY}), delay=${w.cultistDelay}`);
+      }
+      // MysticLogFairiesEvent.UpdateTime（Main.cs:64433 每帧位）
+      mysticLogs.updateTime(w, w.dayRate(), this.fairyCtx());
+    }
 
     // ---- Boss 逻辑 ----
     bossBlock: if (this.boss) {
@@ -2975,6 +3021,21 @@ export class Game implements GameHooks {
           // 星璇塔触发（NPC.cs:80194-80197：教徒 439 死 → TriggerLunarApocalypse——
           // downed_439 通用置位处直接追加，四塔就位 + 满盾 + misc[43] 公告）
           if (this.boss.vanillaId === 439) this.triggerLunarApocalypse();
+          // Badger's Hat 同日双杀（DoDeathEvents_DropBossPotionsAndHearts 尾段，
+          // NPC.cs:79800-79814）：type==4 置 EoCKilledToday / type==113 置 WoFKilledToday
+          // （:79805-79811）；双旗齐 → ResetBadgerHatTime + 掉 5004 Badger's Hat
+          // （:79812-79814）。记账为运行时态，入夜 StartNight 清零（Main.cs:64703）
+          if (this.boss.vanillaId === 4) this.eocKilledToday = true;
+          else if (this.boss.vanillaId === 113) this.wofKilledToday = true;
+          if (this.eocKilledToday && this.wofKilledToday) {
+            this.eocKilledToday = false;
+            this.wofKilledToday = false;
+            const hat = VI(5004);
+            if (hat && ITEM_BY_KEY[hat] !== undefined) {
+              this.spawnDrop(this.boss.cx, this.boss.cy, hat, 1);
+              this.newText(Lang.itemName(5004) ?? 'Badger’s Hat', 255, 220, 120);
+            }
+          }
         }
         // 骷髅王战斗结束（无论胜负）且未击败 → 守卫老人次日重新出现在地牢门口
         // （原版：老人在诅咒时消失，骷髅王离场/未被击败后重新生成；击败后转为裁缝）
@@ -3083,8 +3144,8 @@ export class Game implements GameHooks {
         // 派对女孩在场 + 冷却 + 1/10 → 在场 ≥5 NPC 时开生日派对。
         // RNG 消费点已接：原版 StartDay 序 = BirthdayParty.CheckMorning(:64853) 先于
         // LanternNight.CheckMorning(:64854)（本仓两调用均在 DAWN 块内，掷骰走
-        // Math.random，无顺序敏感）；NaturalAttempt 另置 NPC.freeCake=true(:106) 未随置位
-        // ——消费端（ConditionalDialogue.cs:45-51 蛋糕对话/联机位）未移植，死位登记
+        // Math.random，无顺序敏感）；NaturalAttempt 另置 NPC.freeCake=true(:106)——
+        // 已随置位（消费端 = 派对女孩蛋糕对话 townNpcChat，入夜 StartNight 清零）
         {
           const town = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead)
             .map((n) => (n as TownNPC).npcKey);
@@ -3096,7 +3157,12 @@ export class Game implements GameHooks {
             rng: Math.random,
             int: (a, b) => a + Math.floor(Math.random() * (b - a + 1)),
           });
-          if (msg) ann(msg, 255, 0, 160);
+          if (msg) {
+            ann(msg, 255, 0, 160);
+            // BirthdayParty.cs:106：派对开张置 NPC.freeCake（全 NPC 静态位）——派对女孩
+            // 首次对话赠切片蛋糕 3750（ConditionalDialogue.FreeCakeDialogue，仅注册于 208）
+            this.freeCake = true;
+          }
           // 成就：派对进行中（BirthdayParty.CheckForAchievement → prog 25）
           if (partyIsUp(this.partyState)) this.achievements.notifyProgressionEvent(25);
         }
@@ -3146,15 +3212,21 @@ export class Game implements GameHooks {
         //   = worldSurface>50（Main.cs:2861），本仓生成器恒有地表（lanternCtx 旁
         //   hasWorldSurface 同式判 groundLevel>50），守卫永不触发 → 跳过
         // · :64703 ResetBadgerHatTime（NPC.cs:79740-79744）= EoCKilledToday/WoFKilledToday
-        //   清零（同日双杀 EoC+WoF 掉 Badger's Hat，NPC.cs:79800-79814）——掉落链未移植
-        //   → 台账登记
-        // · :64704 NPC.freeCake=false（生日派对开时置位，BirthdayParty.cs:106）——消费端
-        //   未移植，死位登记（见上方 DAWN 块 partyNaturalAttempt 注）
-        // · :64706 setFireFlyChance（NPC.cs:94557-94610：每夜掷萤火虫/蝴蝶/椿象生成概率，
-        //   1/3 的夜萤火虫直接归零）——消费端 VanillaSpawner 用固定代表值 30
-        //   （spawn/VanillaSpawner.ts:1968）→ 台账登记
+        //   清零（同日双杀 EoC+WoF 掉 Badger's Hat 5004，NPC.cs:79800-79814；记账在
+        //   Boss 逻辑块，双杀即掷）——已接
+        this.eocKilledToday = false;
+        this.wofKilledToday = false;
+        // · :64704 NPC.freeCake=false（生日派对开时置位 BirthdayParty.cs:106，消费端 =
+        //   派对女孩蛋糕对话 townNpcChat）——已接
+        this.freeCake = false;
+        // · :64706 setFireFlyChance（NPC.cs:94557-94610：每夜掷萤火虫/蝴蝶/椿象概率，
+        //   1/9 高发夜 / 1/3 绝迹夜 / 其余 10-59）——已接（落 World 五字段随存档，
+        //   消费端 VanillaSpawner 萤火虫/蝴蝶/椿象分支）
+        setFireFlyChance(w);
         // · :64710 mysticLogsEvent.StartNight（MysticLogFairiesEvent.cs:34-41：夜放仙女 +
-        //   全图扫原木桩）——仙女事件系统未移植 → 台账登记
+        //   全图扫倒木桩）——已接（RuntimeEvents.ts mysticLogs，UpdateTime 位在下方
+        //   LanternNight.updateTime 旁）
+        mysticLogs.startNight(this.fairyCtx());
         // · :64711-64712 prioritizedTownNPCType=0/checkForSpawns=0——本仓入驻走
         //   tickCount %7200 模型（上方注），无计数器可清 → 不适用
         // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
@@ -5629,6 +5701,12 @@ export class Game implements GameHooks {
       this.achievements.handleMining();
     }
     const def = TILE_DEFS[type];
+
+    // 倒木（KillTile type 488 → mysticLogsEvent.FallenLogDestroyed，WorldGen.cs:49866）：
+    // 仙女事件桩表重扫（桩被拆当夜不再出仙女；StartNight 亦会重扫）
+    if (type === TILE_BY_KEY['v_488_fallen_log']) {
+      mysticLogs.fallenLogDestroyed(this.fairyCtx());
+    }
 
     // 树：砍树干 → 整棵树倒下（自有树 + 导入的原版树族）
     if (type === T.TREE) {
@@ -8459,6 +8537,15 @@ export class Game implements GameHooks {
       moonCounts.set(en.vanillaId, (moonCounts.get(en.vanillaId) ?? 0) + 1);
       if (MOON_BOSS_IDS.has(en.vanillaId)) moonBossSlotSum += en.vanilla?.npcSlots ?? 1;
     }
+    // bound TownNPC → 绑缚原版 id 登记（原版被缚 NPC 本体就是 105/106/123/354/589/685
+    // 类型，AnyNPCs 直接可见；本仓 bound 态以 TownNPC 近似 → 反查登记，使三人组链的
+    // !AnyNPCs(105/106/685) 场上唯一门与机械师/造型师/高尔夫球手各支同语义）
+    for (const n of this.entities.npcs) {
+      const tn = n as TownNPC;
+      if (!(tn instanceof TownNPC) || tn.dead || !tn.bound) continue;
+      const boundId = Game.BOUND_TOWN_NPC_ID[tn.npcKey];
+      if (boundId !== undefined) activeIds.add(boundId);
+    }
     const moonCtx = w.moonEvent.kind !== 0
       ? { kind: w.moonEvent.kind, wave: w.moonEvent.waveNumber, counts: moonCounts, bossSlotSum: moonBossSlotSum }
       : null;
@@ -8527,6 +8614,24 @@ export class Game implements GameHooks {
       const sm = new TownNPC('skeleton_merchant', this.vanillaSpawner.currentSpawnX * TILE + 8, (this.vanillaSpawner.currentSpawnY + 1) * TILE);
       this.entities.add(sm, 'npcs');
       return;
+    }
+    // 绑缚三人组（NPC.cs:1994-2005）：105 BoundGoblin / 106 BoundWizard /
+    // 685 BoundTownSlimeOld——原版为独立被缚 NPC 类型，本仓以 bound TownNPC 近似
+    // （同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体）。已在场（含生成期
+    // placeBoundRescueNpcs 放置的 bound 态）则跳过——activeIds 的反查登记通常已在上游
+    // 拦下，此处双保险
+    {
+      const trioKey = picked.vanillaId === 105 ? 'goblin_tinkerer'
+        : picked.vanillaId === 106 ? 'wizard'
+          : picked.vanillaId === 685 ? 'town_slime_old' : null;
+      if (trioKey) {
+        if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === trioKey)) return;
+        const tn = new TownNPC(trioKey, this.vanillaSpawner.currentSpawnX * TILE + 8,
+          (this.vanillaSpawner.currentSpawnY + 1) * TILE);
+        tn.bound = true;
+        this.entities.add(tn, 'npcs');
+        return;
+      }
     }
     // 放置：原版 SpawnNPC 直接落位；水生/蠕虫分支由链内返回的怪自带 AI 处理落脚
     const st = w.store;
@@ -8889,6 +8994,16 @@ export class Game implements GameHooks {
     588: 'Golfer', 633: 'BestiaryGirl', 663: 'Princess',
   };
 
+  /** bound TownNPC npcKey → 绑缚态原版 NPC id（本仓 bound 近似的反查表）：
+   *  105 BoundGoblin（NPCID.cs:11275）/ 106 BoundWizard(:11277)/ 123 BoundMechanic /
+   *  354 WebbedStylist / 589 GolferRescue / 534 DemonTaxCollector（酷刑者）/
+   *  685 BoundTownSlimeOld(:12435)。trySpawnEnemy 把 bound TownNPC 登记进 activeIds，
+   *  使 SpawnAnNPC 各被缚支的 !AnyNPCs(id) 场上唯一门成立 */
+  private static readonly BOUND_TOWN_NPC_ID: Record<string, number> = {
+    goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354,
+    golfer: 589, tax_collector: 534, town_slime_old: 685,
+  };
+
   /** NPC.HasSpecialEventText（NPC.cs:96081-96105 1:1）：五环境态按原版顺序各 1/3
    *  掷骰，命中且语言包有 "<Cat>SpecialText.<Event>" 池 → 随机一条。
    *  墓园（ZoneGraveyard）→ 派对（PartyIsUp；HasNoPartyText 表未移植——本表 NPC
@@ -8931,6 +9046,16 @@ export class Game implements GameHooks {
     if (!(HOMELESS_FIRST.has(npc.vanillaId) && !npc.home)) {
       const special = this.npcSpecialEventText(npc);
       if (special) return special;
+    }
+    // FreeCakeDialogue（ConditionalDialogue.cs:42-61，GetChat 头部 nextDialogue 先行，
+    // 仅注册于派对女孩 208 :115）：生日派对开张（NPC.freeCake=true，BirthdayParty.cs:106）
+    // 后首次对话 → 蛋糕台词（PartyGirlSpecialText.Cake1-3）+ 直接入包切片蛋糕 3750
+    // （EntitySource_Gift / QuickSpawnItem）+ 清旗（联机 msg51 广播位不适用单机）
+    if (npc.vanillaId === 208 && this.freeCake) {
+      this.freeCake = false;
+      const cake = VI(3750);
+      if (cake && ITEM_BY_KEY[cake] !== undefined) this.player.inv.add(ITEM_BY_KEY[cake], 1);
+      return Lang.specialText('PartyGirlSpecialText.Cake') ?? Lang.text('LegacyDialog.140');
     }
     if (npc.vanillaId === 17) {
       // 商人(NPC.cs:95077-95105)
@@ -9557,6 +9682,68 @@ export class Game implements GameHooks {
 
   /** 灯笼夜概率/状态入口（供调试与对话/天气消费方读） */
   get lanternsUp(): boolean { return LanternNight.lanternsUp; }
+
+  /** CultistRitual 宿主上下文（RuntimeEvents.CultistHost）——437 自然重生链 */
+  private cultistCtx(): CultistHost {
+    const w = this.world;
+    return {
+      world: w,
+      dungeonX: w.dungeonX,
+      dungeonY: w.dungeonY,
+      hardMode: !!w.flags.hardMode,
+      downedGolem: !!w.flags['downed_245'],                 // NPC.downedGolemBoss
+      downedBoss3: !!(w.flags.downedSkeletron || w.flags['downed_35']),
+      anyTablet: () => this.entities.enemies.some((n) => {
+        const en = n as Enemy;
+        return !en.dead && en.vanillaId === 437;
+      }),
+      // NPC.AnyDanger（NPC.cs:81040+）：月总倒计时/入侵/月事件/旧军/活跃 Boss。
+      // DangerThatPreventsOtherDangers 小集合未跟踪（近似面，登记 RuntimeEvents.ts）
+      anyDanger: () => w.lunarEvent.moonLordCountdown > 0 || w.invasionType > 0
+        || w.moonEvent.kind !== 0 || w.oldOnesArmy.ongoing
+        || this.entities.enemies.some((n) => !((n as Enemy).dead) && (n as Enemy).def.boss),
+      // WorldGen.PlayerLOS 近似（WorldEvolution.playerLOS 同款：50 格内视为可见）
+      playerLOS: (x, y) => {
+        const p = this.player;
+        return !p.dead && Math.abs(Math.floor(p.cx / TILE) - x) < 50
+          && Math.abs(Math.floor(p.cy / TILE) - y) < 40;
+      },
+      // NPC.NewNPC(new EntitySource_WorldEvent(), x, y, 437)——底部锚点已由
+      // RuntimeEvents 换算（(y-4)*16-8），此处只落位
+      spawnTablet: (x, y) => {
+        const e = Enemy.fromVanilla(437, x, y);
+        if (!e) return false;
+        e.id = this.entities.nextId++;
+        this.entities.add(e, 'enemies');
+        return true;
+      },
+    };
+  }
+
+  /** MysticLogFairiesEvent 宿主上下文（RuntimeEvents.FairyHost）——倒木夜放仙女 */
+  private fairyCtx(): FairyHost {
+    const w = this.world;
+    return {
+      world: w,
+      maxRaining: w.weather.maxRaining,   // Main.maxRaining（不雨时为 0，:123 初值）
+      bloodMoon: !!w.clock.bloodMoon,
+      moonLordCountdown: w.lunarEvent.moonLordCountdown,
+      snowMoon: w.moonEvent.kind === MOON_KIND_FROST,
+      pumpkinMoon: w.moonEvent.kind === MOON_KIND_PUMPKIN,
+      invasionType: w.invasionType,
+      playerLOS: (x, y) => {
+        const p = this.player;
+        return !p.dead && Math.abs(Math.floor(p.cx / TILE) - x) < 50
+          && Math.abs(Math.floor(p.cy / TILE) - y) < 40;
+      },
+      spawnFairy: (id, x, y) => {
+        const e = Enemy.fromVanilla(id, x, y);
+        if (!e) return;
+        e.id = this.entities.nextId++;
+        this.entities.add(e, 'critters');   // 仙女族（583-585）= 小动物桶，不计怪上限
+      },
+    };
+  }
 
   private openNpcShop() {
     const npc = this.dialogNpc;

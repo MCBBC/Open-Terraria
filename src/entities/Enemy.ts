@@ -554,6 +554,11 @@ export class Enemy extends Entity {
   facing = 1;
   aiT = 0;               // 通用 AI 计时
   state = 0;             // 行为状态
+  /** 渲染层回填：本帧实际绘制的贴图底边（世界 y）。血条定位用——原版条在
+   *  盒底+10 的前提是"贴图底≈盒底+4"，中心锚+显式下移（如 EoC +23/+30）会
+   *  破坏该前提 → 条会扎进贴图（2026-08-13 用户报"血条在眼球内"）。
+   *  drawHealthBar 以 max(盒底+10, 贴图底+6) 兜底。仅渲染消费，AI/存档无关 */
+  spriteBottomWorld = 0;
   phase = 1;             // Boss 阶段
   target: { x: number; y: number } | null = null;
   squash = 0;            // 史莱姆挤压动画 -1..1
@@ -4207,8 +4212,8 @@ export class Enemy extends Entity {
         }
       }
       if (!clear) continue;
-      // 视线（CanHitLine 本体→玩家）
-      if (!canHit(st, this.cx, this.cy, pp.cx, pp.cy)) continue;
+      // 视线（CanHitLine 本体→玩家；point 重载按 0×0 盒）
+      if (!canHit(st, this.cx, this.cy, 0, 0, pp.cx, pp.cy, 0, 0)) continue;
       const cloud = new SquidCloud(x * TILE + 8, y * TILE + 8);
       (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(cloud, 'projectiles');
       return;

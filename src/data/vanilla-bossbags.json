@@ -1,0 +1,2068 @@
+{
+ "3318": [
+  {
+   "t": "if",
+   "n": 2
+  },
+  {
+   "t": "spawn",
+   "id": 2430
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2493
+  },
+  {
+   "t": "randVar",
+   "a": 256,
+   "b": 259
+  },
+  {
+   "t": "unparsed",
+   "src": "int num9;"
+  },
+  {
+   "t": "dedup"
+  },
+  {
+   "t": "spawn",
+   "useVar": true
+  },
+  {
+   "t": "spawn",
+   "useVar": true
+  },
+  {
+   "t": "if",
+   "n": 2
+  },
+  {
+   "t": "spawn",
+   "id": 2610
+  },
+  {
+   "t": "else"
+  },
+  {
+   "t": "spawn",
+   "id": 2585
+  },
+  {
+   "t": "spawn",
+   "id": 998
+  },
+  {
+   "t": "if",
+   "n": 30
+  },
+  {
+   "t": "spawn",
+   "id": 1309
+  },
+  {
+   "t": "spawn",
+   "id": 3090
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3319": [
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2112
+  },
+  {
+   "t": "if",
+   "n": 30
+  },
+  {
+   "t": "spawn",
+   "id": 1299
+  },
+  {
+   "t": "crimItem",
+   "evil": 880,
+   "good": 56
+  },
+  {
+   "t": "varAdd",
+   "roll": 21,
+   "base": 10
+  },
+  {
+   "t": "varAddMore",
+   "roll": 21,
+   "base": 10
+  },
+  {
+   "t": "varAddMore",
+   "roll": 21,
+   "base": 10
+  },
+  {
+   "t": "spawn",
+   "useCrimItem": true,
+   "useVar": true
+  },
+  {
+   "t": "unparsed",
+   "src": "item = (short)(WorldGen.crimson ? 2171 : 59);"
+  },
+  {
+   "t": "unparsed",
+   "src": "num7 = Main.rand.Next(3) + 1;"
+  },
+  {
+   "t": "spawn",
+   "useCrimItem": true,
+   "useVar": true
+  },
+  {
+   "t": "unparsed",
+   "src": "num7 = Main.rand.Next(31) + 20;"
+  },
+  {
+   "t": "spawn",
+   "id": 47,
+   "useVar": true
+  },
+  {
+   "t": "spawn",
+   "id": 3097
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3320": [
+  {
+   "t": "randVar",
+   "a": 15,
+   "b": 30
+  },
+  {
+   "t": "unparsed",
+   "src": "if (masterMode)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num4 = Main.rand.Next(110, 136);"
+  },
+  {
+   "t": "spawn",
+   "id": 56,
+   "useVar": true
+  },
+  {
+   "t": "else"
+  },
+  {
+   "t": "unparsed",
+   "src": "num4 = Main.rand.Next(80, 111);"
+  },
+  {
+   "t": "spawn",
+   "id": 56,
+   "useVar": true
+  },
+  {
+   "t": "unparsed",
+   "src": "if (masterMode)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num4 = Main.rand.Next(30, 51);"
+  },
+  {
+   "t": "spawn",
+   "id": 86,
+   "useVar": true
+  },
+  {
+   "t": "else"
+  },
+  {
+   "t": "unparsed",
+   "src": "num4 = Main.rand.Next(20, 41);"
+  },
+  {
+   "t": "spawn",
+   "id": 86,
+   "useVar": true
+  },
+  {
+   "t": "if",
+   "n": 20
+  },
+  {
+   "t": "spawn",
+   "id": 994
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2111
+  },
+  {
+   "t": "spawn",
+   "id": 3224
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3321": [
+  {
+   "t": "randVar",
+   "a": 20,
+   "b": 46
+  },
+  {
+   "t": "unparsed",
+   "src": "if (masterMode)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num3 = Main.rand.Next(110, 136);"
+  },
+  {
+   "t": "spawn",
+   "id": 880,
+   "useVar": true
+  },
+  {
+   "t": "else"
+  },
+  {
+   "t": "unparsed",
+   "src": "num3 = Main.rand.Next(80, 111);"
+  },
+  {
+   "t": "spawn",
+   "id": 880,
+   "useVar": true
+  },
+  {
+   "t": "unparsed",
+   "src": "if (masterMode)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num3 = Main.rand.Next(30, 51);"
+  },
+  {
+   "t": "spawn",
+   "id": 1329,
+   "useVar": true
+  },
+  {
+   "t": "else"
+  },
+  {
+   "t": "unparsed",
+   "src": "num3 = Main.rand.Next(20, 41);"
+  },
+  {
+   "t": "spawn",
+   "id": 1329,
+   "useVar": true
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2104
+  },
+  {
+   "t": "if",
+   "n": 20
+  },
+  {
+   "t": "spawn",
+   "id": 3060
+  },
+  {
+   "t": "spawn",
+   "id": 3223
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3322": [
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2108
+  },
+  {
+   "t": "unparsed",
+   "src": "int num5 = Main.rand.Next(3);"
+  },
+  {
+   "t": "unparsed",
+   "src": "switch (num5)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num5 = 1121;"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "num5 = 1123;"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "num5 = 2888;"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "useVar": true
+  },
+  {
+   "t": "spawn",
+   "id": 3333
+  },
+  {
+   "t": "if",
+   "n": 3
+  },
+  {
+   "t": "spawn",
+   "id": 1132
+  },
+  {
+   "t": "if",
+   "n": 9
+  },
+  {
+   "t": "spawn",
+   "id": 1170
+  },
+  {
+   "t": "if",
+   "n": 9
+  },
+  {
+   "t": "spawn",
+   "id": 2502
+  },
+  {
+   "t": "if",
+   "n": 9
+  },
+  {
+   "t": "spawn",
+   "id": 5483
+  },
+  {
+   "t": "spawn",
+   "id": 1129
+  },
+  {
+   "t": "spawn",
+   "lo": 842,
+   "hi": 845,
+   "randId": true
+  },
+  {
+   "t": "spawn",
+   "id": 1130,
+   "lo": 10,
+   "hi": 31
+  },
+  {
+   "t": "spawn",
+   "id": 2431,
+   "lo": 17,
+   "hi": 31
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3323": [
+  {
+   "t": "spawn",
+   "id": 3245
+  },
+  {
+   "t": "switch",
+   "n": 3
+  },
+  {
+   "t": "spawn",
+   "id": 1281
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1273
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "default:"
+  },
+  {
+   "t": "spawn",
+   "id": 1313
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3324": [
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2105
+  },
+  {
+   "t": "spawn",
+   "id": 367
+  },
+  {
+   "t": "unparsed",
+   "src": "if (!extraAccessory)"
+  },
+  {
+   "t": "spawn",
+   "id": 3335
+  },
+  {
+   "t": "unparsed",
+   "src": "int num6 = Main.rand.Next(4);"
+  },
+  {
+   "t": "unparsed",
+   "src": "num6 = ((num6 != 3) ? (489 + num6) : 2998);"
+  },
+  {
+   "t": "spawn",
+   "useVar": true
+  },
+  {
+   "t": "switch",
+   "n": 4
+  },
+  {
+   "t": "spawn",
+   "id": 514
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 426
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 434
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 4912
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3325": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2113
+  },
+  {
+   "t": "spawn",
+   "id": 548,
+   "lo": 25,
+   "hi": 41
+  },
+  {
+   "t": "spawn",
+   "id": 1225,
+   "lo": 20,
+   "hi": 36
+  },
+  {
+   "t": "spawn",
+   "id": 3355
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3326": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2106
+  },
+  {
+   "t": "spawn",
+   "id": 549,
+   "lo": 25,
+   "hi": 41
+  },
+  {
+   "t": "spawn",
+   "id": 1225,
+   "lo": 20,
+   "hi": 36
+  },
+  {
+   "t": "spawn",
+   "id": 3354
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3327": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2107
+  },
+  {
+   "t": "spawn",
+   "id": 547,
+   "lo": 25,
+   "hi": 41
+  },
+  {
+   "t": "spawn",
+   "id": 1225,
+   "lo": 20,
+   "hi": 36
+  },
+  {
+   "t": "spawn",
+   "id": 3356
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3328": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2109
+  },
+  {
+   "t": "spawn",
+   "id": 1141
+  },
+  {
+   "t": "spawn",
+   "id": 3336
+  },
+  {
+   "t": "if",
+   "n": 15
+  },
+  {
+   "t": "spawn",
+   "id": 1182
+  },
+  {
+   "t": "if",
+   "n": 20
+  },
+  {
+   "t": "spawn",
+   "id": 1305
+  },
+  {
+   "t": "if",
+   "n": 2
+  },
+  {
+   "t": "spawn",
+   "id": 1157
+  },
+  {
+   "t": "if",
+   "n": 10
+  },
+  {
+   "t": "spawn",
+   "id": 3021
+  },
+  {
+   "t": "switch",
+   "n": 8
+  },
+  {
+   "t": "spawn",
+   "id": 758
+  },
+  {
+   "t": "spawn",
+   "id": 771,
+   "lo": 50,
+   "hi": 151
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1255
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 788
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1178
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1259
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1155
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 3018
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 5477
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3329": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "spawn",
+   "id": 3337
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2110
+  },
+  {
+   "t": "if",
+   "n": 3
+  },
+  {
+   "t": "spawn",
+   "id": 1294
+  },
+  {
+   "t": "switch",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 1258
+  },
+  {
+   "t": "spawn",
+   "id": 1261,
+   "lo": 60,
+   "hi": 181
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1122
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 899
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1248
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1295
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 1296
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "default:"
+  },
+  {
+   "t": "spawn",
+   "id": 1297
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 2218,
+   "lo": 18,
+   "hi": 24
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3330": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "spawn",
+   "id": 3367
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 2588
+  },
+  {
+   "t": "if",
+   "n": 10
+  },
+  {
+   "t": "spawn",
+   "id": 2609
+  },
+  {
+   "t": "switch",
+   "n": 6
+  },
+  {
+   "t": "spawn",
+   "id": 5526
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 2624
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 2622
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 2621
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 5478
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (Main.remixWorld)"
+  },
+  {
+   "t": "spawn",
+   "id": 157
+  },
+  {
+   "t": "else"
+  },
+  {
+   "t": "spawn",
+   "id": 2623
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3331": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 3372
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3332": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 3373
+  },
+  {
+   "t": "if",
+   "n": 10
+  },
+  {
+   "t": "spawn",
+   "id": 4469
+  },
+  {
+   "t": "unparsed",
+   "src": "if (!HasItem(3384))"
+  },
+  {
+   "t": "spawn",
+   "id": 3384
+  },
+  {
+   "t": "spawn",
+   "id": 3460,
+   "lo": 90,
+   "hi": 111
+  },
+  {
+   "t": "spawn",
+   "id": 1131
+  },
+  {
+   "t": "spawn",
+   "id": 3577
+  },
+  {
+   "t": "spawn",
+   "id": 4954
+  },
+  {
+   "t": "unparsed",
+   "src": "List<int> list = new List<int> { 3063, 3389, 3065, 1553, 3930, 3541, 3570, 3571, 3569, 5480 };"
+  },
+  {
+   "t": "unparsed",
+   "src": "for (int i = 0; i < 2; i++)"
+  },
+  {
+   "t": "unparsed",
+   "src": "int index = Main.rand.Next(list.Count);"
+  },
+  {
+   "t": "unparsed",
+   "src": "int item2 = list[index];"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(itemSource_OpenItem, item2);"
+  },
+  {
+   "t": "unparsed",
+   "src": "list.RemoveAt(index);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "int num10 = -1;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3318)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 50;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3319)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 4;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3320)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 13;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3321)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 266;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3322)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 222;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3323)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 35;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3324)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 113;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3325)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 134;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3326)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 125;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3327)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 127;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3328)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 262;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3329)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 245;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3330)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 370;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3331)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 439;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3332)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 398;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3860)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 551;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3861)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 576;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 3862)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 564;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 4782)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 636;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 4957)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 657;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (type == 5111)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num10 = 668;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (num10 <= 0)"
+  },
+  {
+   "t": "unparsed",
+   "src": "return;"
+  },
+  {
+   "t": "unparsed",
+   "src": "NPC nPC = new NPC();"
+  },
+  {
+   "t": "unparsed",
+   "src": "nPC.SetDefaults(num10);"
+  },
+  {
+   "t": "unparsed",
+   "src": "float value = nPC.value;"
+  },
+  {
+   "t": "unparsed",
+   "src": "value *= 1f + (float)Main.rand.Next(-20, 21) * 0.01f;"
+  },
+  {
+   "t": "if",
+   "n": 5
+  },
+  {
+   "t": "unparsed",
+   "src": "value *= 1f + (float)Main.rand.Next(5, 11) * 0.01f;"
+  },
+  {
+   "t": "if",
+   "n": 10
+  },
+  {
+   "t": "unparsed",
+   "src": "value *= 1f + (float)Main.rand.Next(10, 21) * 0.01f;"
+  },
+  {
+   "t": "if",
+   "n": 15
+  },
+  {
+   "t": "unparsed",
+   "src": "value *= 1f + (float)Main.rand.Next(15, 31) * 0.01f;"
+  },
+  {
+   "t": "if",
+   "n": 20
+  },
+  {
+   "t": "unparsed",
+   "src": "value *= 1f + (float)Main.rand.Next(20, 41) * 0.01f;"
+  },
+  {
+   "t": "unparsed",
+   "src": "while ((int)value > 0)"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (value > 1000000f)"
+  },
+  {
+   "t": "unparsed",
+   "src": "int num11 = (int)(value / 1000000f);"
+  },
+  {
+   "t": "unparsed",
+   "src": "value -= (float)(1000000 * num11);"
+  },
+  {
+   "t": "spawn",
+   "id": 74,
+   "useVar": true
+  },
+  {
+   "t": "unparsed",
+   "src": "continue;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (value > 10000f)"
+  },
+  {
+   "t": "unparsed",
+   "src": "int num12 = (int)(value / 10000f);"
+  },
+  {
+   "t": "unparsed",
+   "src": "value -= (float)(10000 * num12);"
+  },
+  {
+   "t": "spawn",
+   "id": 73,
+   "useVar": true
+  },
+  {
+   "t": "unparsed",
+   "src": "continue;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (value > 100f)"
+  },
+  {
+   "t": "unparsed",
+   "src": "int num13 = (int)(value / 100f);"
+  },
+  {
+   "t": "unparsed",
+   "src": "value -= (float)(100 * num13);"
+  },
+  {
+   "t": "spawn",
+   "id": 72,
+   "useVar": true
+  },
+  {
+   "t": "unparsed",
+   "src": "continue;"
+  },
+  {
+   "t": "unparsed",
+   "src": "int num14 = (int)value;"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (num14 < 1)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num14 = 1;"
+  },
+  {
+   "t": "unparsed",
+   "src": "value -= (float)num14;"
+  },
+  {
+   "t": "spawn",
+   "id": 71,
+   "useVar": true
+  },
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "unparsed",
+   "src": "if (Main.rand.Next(Main.tenthAnniversaryWorld ? 8 : 16) == 0)"
+  },
+  {
+   "t": "switch",
+   "n": 21
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 666);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 667);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 668);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 665);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3287);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1554);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1555);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1556);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1586);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1554);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1587);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1588);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1586);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1557);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1558);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1559);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1585);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1560);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1561);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1562);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1584);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1563);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1564);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1565);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3582);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1566);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1567);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1568);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1580);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1581);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1582);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 1583);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3226);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3227);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3228);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3288);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3583);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3581);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3578);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3579);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3580);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3585);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3586);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3587);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3588);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3024, 4);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3589);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3590);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3591);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3592);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3599, 4);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3368);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3921);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3922);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3923);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3924);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3925);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3926);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3927);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3928);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 3929);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4732);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4733);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4734);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4730);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4747);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4748);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4749);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4746);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4751);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4752);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4753);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4750);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4755);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4756);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4757);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 4754);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5583);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5584);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5585);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5586);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5587);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5683);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5684);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5685);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 5686);"
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 6137);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 6138);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 6139);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 6140);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(source, 6141);"
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "3860": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 3863
+  },
+  {
+   "t": "switch",
+   "n": 4
+  },
+  {
+   "t": "spawn",
+   "id": 3859
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 3827
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 3870
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "default:"
+  },
+  {
+   "t": "spawn",
+   "id": 3858
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "if",
+   "n": 4
+  },
+  {
+   "t": "spawn",
+   "id": 3883
+  },
+  {
+   "t": "spawn",
+   "id": 3817,
+   "lo": 30,
+   "hi": 51
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "4782": [
+  {
+   "t": "devArmor"
+  },
+  {
+   "t": "spawn",
+   "id": 4989
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 4784
+  },
+  {
+   "t": "if",
+   "n": 10
+  },
+  {
+   "t": "spawn",
+   "id": 4823
+  },
+  {
+   "t": "if",
+   "n": 20
+  },
+  {
+   "t": "spawn",
+   "id": 4715
+  },
+  {
+   "t": "if",
+   "n": 4
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(itemSource_OpenItem, 4778, 3);"
+  },
+  {
+   "t": "if",
+   "n": 20
+  },
+  {
+   "t": "spawn",
+   "id": 5075
+  },
+  {
+   "t": "switch",
+   "n": 4
+  },
+  {
+   "t": "spawn",
+   "id": 4923
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 4952
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 4953
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 4914
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "end"
+  }
+ ],
+ "4957": [
+  {
+   "t": "spawn",
+   "id": 4987
+  },
+  {
+   "t": "spawn",
+   "id": 4986,
+   "lo": 25,
+   "hi": 76
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 4959
+  },
+  {
+   "t": "if",
+   "n": 2
+  },
+  {
+   "t": "spawn",
+   "id": 4981
+  },
+  {
+   "t": "if",
+   "n": 3
+  },
+  {
+   "t": "spawn",
+   "id": 4758
+  },
+  {
+   "t": "if",
+   "n": 2
+  },
+  {
+   "t": "spawn",
+   "id": 4980
+  },
+  {
+   "t": "unparsed",
+   "src": "int num = Main.rand.Next(4982, 4985);"
+  },
+  {
+   "t": "randVar",
+   "a": 4982,
+   "b": 4985
+  },
+  {
+   "t": "unparsed",
+   "src": "while (num2 == num)"
+  },
+  {
+   "t": "unparsed",
+   "src": "num = Main.rand.Next(4982, 4985);"
+  },
+  {
+   "t": "unparsed",
+   "src": "QuickSpawnItem(itemSource_OpenItem, num);"
+  },
+  {
+   "t": "spawn",
+   "useVar": true
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "unparsed",
+   "src": "switch (type)"
+  }
+ ],
+ "5111": [
+  {
+   "t": "spawn",
+   "id": 5100
+  },
+  {
+   "t": "if",
+   "n": 7
+  },
+  {
+   "t": "spawn",
+   "id": 5109
+  },
+  {
+   "t": "if",
+   "n": 14
+  },
+  {
+   "t": "spawn",
+   "id": 5385
+  },
+  {
+   "t": "if",
+   "n": 3
+  },
+  {
+   "t": "spawn",
+   "id": 5098
+  },
+  {
+   "t": "if",
+   "n": 3
+  },
+  {
+   "t": "spawn",
+   "id": 5101
+  },
+  {
+   "t": "if",
+   "n": 3
+  },
+  {
+   "t": "spawn",
+   "id": 5113
+  },
+  {
+   "t": "switch",
+   "n": 4
+  },
+  {
+   "t": "spawn",
+   "id": 5117
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 5118
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 5119
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "spawn",
+   "id": 5095
+  },
+  {
+   "t": "end"
+  },
+  {
+   "t": "end"
+  }
+ ]
+}

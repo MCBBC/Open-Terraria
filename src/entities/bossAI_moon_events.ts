@@ -9,8 +9,9 @@
 //   aiStyle 38  雪人三兄弟 143/144/145        NPC.cs:29115-29256（跳扑/停顿/雪球机枪）
 //   aiStyle  9  弹跳球族 25/30/33/112/516(/665/666)
 //                                             NPC.cs:21349-21548（直飞球/毒唾/日耀耀斑）
-// 经典模式主链 1:1；expert/getGoodWorld 分支（33 骷髅王在场无敌 / 25 血肉墙在场无敌 /
-// 666 地表无敌 / RedHatSkeletronAdjustments 速度档）仅注释保留；netcode 跳过。
+// 经典模式主链 1:1；getGoodWorld 分支已实装（弹跳球族 33 骷髅王在场无敌 / 25 血肉墙
+// 在场无敌 / 666 地表无敌 / RedHatSkeletronAdjustments+FTW 速度档）；expert 分支仅注释
+// 保留；netcode 跳过。
 // 弹幕贴图 Projectile_{109,110,180,325..329,345..352}.png 已入 sprites/vanilla(原 RENDER_PROXY
 // 代渲退役,Arrow 按 projId 懒加载真图)。
 import type { Enemy } from './Enemy';
@@ -52,6 +53,10 @@ function solidTileAt(game: GameHooks, x: number, y: number): boolean {
   const st = game.world.store;
   const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
   return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+}
+/** NPC.AnyNPCs(type)：指定 vanillaId 的存活 NPC 是否在场（弹跳球族 FTW 门用） */
+function anyNpcs(game: GameHooks, id: number): boolean {
+  return (game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === id);
 }
 
 // ---------------------------------------------------------------------------
@@ -952,19 +957,36 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
       return;
     }
   }
-  // 首帧定速直飞(:21380-21406)：num125 = 6（25→5、112/666→7）
+  // 首帧定速直飞(:21380-21406)：num125 = 6（25→5、112/666→7）；
+  // FTW 抬档(:21391-21407)：33 且骷髅王在场 → 10（RedHat 8）/ 25 且血肉墙在场 → 14 /
+  // 666 → 10（flag8 = RedHatSkeletronAdjustmentsEnabled：33 判 ai[3]==1，NPC.cs:67282）
   if (!L[3] && player) {
     L[3] = 1;
     let num125 = 6;
     if (vid === 25) num125 = 5;
     if (vid === 112 || vid === 666) num125 = 7;
+    if (game.world.seedFlags?.getGoodWorld) {
+      if (vid === 33 && anyNpcs(game, 35)) {
+        num125 = 10;
+        if (e.ai3 === 1) num125 = 8;
+      }
+      if (vid === 25 && anyNpcs(game, 113)) num125 = 14;
+      if (vid === 666) num125 = 10;
+    }
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const d = Math.hypot(dx, dy) || 1;
     e.vx = (dx / d) * num125;
     e.vy = (dy / d) * num125;
   }
-  // getGoodWorld 专属无敌分支(:21408-21423，expert 略)：
-  //   33 且骷髅王在场 / 25 且血肉墙在场 / 666 地表 → dontTakeDamage
+  // getGoodWorld 专属无敌分支(:21422-21435，expert 略)：
+  //   33 且骷髅王在场 / 25 且血肉墙在场 / 666 地表（Center.Y/16 < worldSurface）→
+  //   dontTakeDamage。原版门为 !dontTakeDamage（只置不清——条件失效后已置位的球
+  //   仍无敌，原版怪癖 1:1）
+  if (game.world.seedFlags?.getGoodWorld && !e.dontTakeDamage) {
+    if (vid === 33 && anyNpcs(game, 35)) e.dontTakeDamage = true;
+    else if (vid === 25 && anyNpcs(game, 113)) e.dontTakeDamage = true;
+    else if (vid === 666 && e.cy / TILE < game.world.groundLevel) e.dontTakeDamage = true;
+  }
   // 毒唾(:21425-21451)：ai[0] 1→3 渐进；==2 时双倍位移 + 爆裂尘
   if (vid === 112 || vid === 666) {
     e.ai0 += 1;

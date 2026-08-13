@@ -72,7 +72,7 @@ export function setFireFlyChance(world: World): void {
     if (next(5) === 0) world.butterflyChance = 999999;
   }
   // :94607-94610 十周年减半
-  if (world.seedFlags?.tenthAnniversaryWorld) {
+  if (world.seedFlags?.tenthAnniversary) {
     world.fireFlyChance = Math.max(1, Math.floor(world.fireFlyChance * 0.5));
     world.butterflyChance = Math.max(1, Math.floor(world.butterflyChance * 0.5));
   }
@@ -289,7 +289,7 @@ export const mysticLogs = {
     // :96-110 每只独立掷 585/584/583（十周年 3/4 概率强制 583）
     for (let j = 0; j < count; j++) {
       let id = [585, 584, 583][next(3)];
-      if (world.seedFlags?.tenthAnniversaryWorld && next(4) !== 0) id = 583;
+      if (world.seedFlags?.tenthAnniversary && next(4) !== 0) id = 583;
       host.spawnFairy(id, Math.floor(vx), Math.floor(vy));
     }
     // :112 一夜只放一批

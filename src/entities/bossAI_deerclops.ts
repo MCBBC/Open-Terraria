@@ -60,6 +60,7 @@ function game_sceneSnow(e: Enemy, p: Player): boolean {
 
 /** AI_123 主状态机（NPC.cs:44338-44752） */
 export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
+  if (e.ai0 === -1120) e.ai0 = 0;   // 本仓 ai0 缺省 -1120（史莱姆族哨兵）→ 原版 ai[0] 缺省 0
   const DMG_HANDS = 15;   // 主线影手/咆哮段伤害（外层 num）
   const far = p != null && !p.dead && Math.hypot(p.cx - e.cx, p.cy - e.cy) >= 450;
   // :44346-44347 lai3 远距爬升 + 免伤（下界 -10 供入场段清零语义）

@@ -38,12 +38,14 @@ describe('Caster 族传送（AI_008 1:1）', () => {
   it('哥布林术士 29：500 起跳 ~150t 触发 → 双端 Item8+50 尘 + 落点远离玩家', () => {
     const { hooks } = flatWorld({ x: 40, y: 57 });
     const e = Enemy.fromVanilla(29, 30 * 16, 56 * 16)!;
-    expect(e.def.aiStyle).toBe(8);
+    expect(e.vanilla?.aiStyle).toBe(8);
     const x0 = e.x, y0 = e.y;
+    void x0; void y0;
     let teleported = false;
-    for (let t = 0; t < 400; t++) {
+    for (let t = 0; t < 400 && !teleported; t++) {
       e.fixedUpdate(1 / 60, hooks as never);
-      if (Math.abs(e.x - x0) > 8 * 16 || Math.abs(e.y - y0) > 8 * 16) { teleported = true; break; }
+      // 落点可能离原位 <8 格——用传送音判定（与落点无关）
+      teleported = hooks.sfx.some((f) => f[0] === 'Item_8');
     }
     expect(teleported).toBe(true);
     // 传送音：旧+新各一次 Item8
@@ -66,15 +68,12 @@ describe('Caster 族传送（AI_008 1:1）', () => {
     expect(hooks.sfx.filter((f) => f[0] === 'Item_8').length).toBeGreaterThan(0);
   });
 
-  it('族内提前上限：死灵法师 283 计时 450 即拉 700 档（比默认 650 早传）', () => {
+  it('族内提前上限：死灵法师 283 初值 500 ≥450 即触发（前 50t 内必有 Item8 传送音）', () => {
     const { hooks } = flatWorld({ x: 40, y: 57 });
+    // 死灵法师=地牢族：dungeonWallGate（:18899-18904）要求落点上一格地牢砖墙——平面世界无墙会被正确拒绝
+    for (let x = 20; x <= 60; x++) hooks.world.store.wall[hooks.world.store.idx(x, 59)] = 8;
     const e = Enemy.fromVanilla(283, 30 * 16, 56 * 16)!;
-    const x0 = e.x, y0 = e.y;
-    let moved = false;
-    for (let t = 0; t < 300; t++) {
-      e.fixedUpdate(1 / 60, hooks as never);
-      if (Math.abs(e.x - x0) > 8 * 16 || Math.abs(e.y - y0) > 8 * 16) { moved = true; break; }
-    }
-    expect(moved).toBe(true); // 283 在 ~451t 内必传（提前表），普通族要 650t
+    for (let t = 0; t < 50 && hooks.sfx.length === 0; t++) e.fixedUpdate(1 / 60, hooks as never);
+    expect(hooks.sfx.some((f) => f[0] === 'Item_8')).toBe(true); // 提前表：开局即传
   });
 });

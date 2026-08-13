@@ -2164,11 +2164,13 @@ export class VanillaSpawner {
       // L4409 `if (ZoneGraveyard) defaultTarget = target`（:4411→:5161 Target 兜底）——
       //  显式把刷出怪的目标设为玩家；本仓敌怪走最近玩家索敌，单人语义等价，不另设
       // L4410：萤火虫（原版带 !ZoneGraveyard 门 :4413）——草族 tile + 无风 + 无雨 +
-      //  1/fireFlyChance（原版为每世界 roll 的随机值 setFireFlyChance L94555，取代表值 30）
+      //  1/fireFlyChance。概率源 = setFireFlyChance（NPC.cs:94557-94610，每夜 StartNight
+      //  掷：1/9 高发夜 5-9 / 1/3 绝迹夜 999999 / 其余 10-59；世界字段随存档，
+      //  旧档缺省=代表值 30）——旧实现恒 30，台账登记已核销
       const tooWindy = Math.abs(this.world.weather.windSpeedTarget) >= 0.4;
       if (!this.ZoneGraveyard && !tooWindy && !raining
         && (t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS)
-        && N(30) && this.spawnTileY <= this.world.groundLevel) {
+        && N(Math.max(1, this.world.fireFlyChance)) && this.spawnTileY <= this.world.groundLevel) {
         return D(t === T.HALLOW_GRASS ? 358 : 355);
       }
       // L4439：乌鸦 Raven 301——(万圣节 || 墓地) && 1/12（节日未接 → 墓地单门）

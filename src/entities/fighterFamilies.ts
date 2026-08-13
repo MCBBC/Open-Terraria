@@ -268,6 +268,9 @@ function chargerApproach(e: Enemy, dir: number, player: Player | null): void {
 // ---------------------------------------------------------------------------
 /** 上一帧 X（ai[3] 卡死计数的 position.X == oldPosition.X 判据） */
 const prevX = new WeakMap<Enemy, number>();
+/** 两帧前位置（混沌元素传送旧端 FX 用——原版 oldPos[2] :57453） */
+const pos2 = new WeakMap<Enemy, { x: number; y: number }>();
+const pos1 = new WeakMap<Enemy, { x: number; y: number }>();
 
 /** ai[3] 卡死计数（:57504-57545）+ 传送。仅 type 120：num58 = 180（:57430-57433）。
  *  返回新的 ai3 值（调用方写回 this.ai3）。 */
@@ -277,13 +280,19 @@ export function chaosElementalStep(
   const num58 = 180;                                   // :57433
   const oldX = prevX.get(e) ?? e.x;
   prevX.set(e, e.x);
+  const p2Prev = pos2.get(e) ?? { x: e.x, y: e.y };    // oldPos[2]：两帧前位置
+  pos2.set(e, pos1.get(e) ?? { x: e.x, y: e.y });
+  pos1.set(e, { x: e.x, y: e.y });
   let ai3 = e.ai3;
   if (ai3 === -120) {                                  // :57436-57460 传送到达帧
     e.vx = 0; e.vy = 0;
     ai3 = 0;
-    game.playSfx('menuTick', 0.5, e.cx, e.cy);         // SoundID.Item8
-    game.spawnParticles(e.cx, e.cy, '#B06AE8', 12, 2.2, { life: 24 });
-    game.spawnParticles(e.cx, e.cy, '#8A5CD6', 8, 1.6, { life: 24 });
+    game.playSfxFiles(['Item_8'], 1, e.cx, e.cy);      // :57439 Item8 新位置一次
+    // 新旧双端各 20 尘 71（alpha200 scale2 noGravity），速度沿 旧→新 方向相向（:57447-57457）
+    const dir = Math.atan2(e.cy - (p2Prev.y + e.h / 2), e.cx - (p2Prev.x + e.w / 2));
+    game.spawnBurst?.(e.cx, e.cy, '#B06AE8', 20, 2, dir, 0.5, { life: 30 });
+    game.spawnBurst?.(p2Prev.x + e.w / 2, p2Prev.y + e.h / 2, '#B06AE8', 20, 2,
+      dir + Math.PI, 0.5, { life: 30 });
   }
   // :57520-57524 flag7 = 落地且 vx 与 direction 相逆 → 计数上升
   const opposite = e.vy === 0 && ((e.vx > 0 && e.facing < 0) || (e.vx < 0 && e.facing > 0));

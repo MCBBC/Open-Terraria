@@ -2,7 +2,8 @@
 //   aiStyle 50(NPC.cs:31807-31872)= NPC 261 真菌孢子 / 265 孢子(漂移族,261 撞墙即碎)
 //   aiStyle 51(NPC.cs:31873-32237)= NPC 262 世纪之花本体(钩蔓均值牵引 + 二阶段触须)
 //   aiStyle 52(NPC.cs:32238-32405)= NPC 263 世纪之花钩蔓(抓墙锚定,牵引本体)
-// 经典模式参数 1:1;expert/getGoodWorld 分支只注释保留;netcode(netUpdate/Main.netMode)跳过。
+// 经典模式参数 1:1;getGoodWorld 分支已实装(蜂后暴怒 +0.5/世纪之花本体 ×1.15/二阶段
+// 触须 14 只/触手加速度 +4);expert 分支只注释保留;netcode(netUpdate/Main.netMode)跳过。
 // 本体/部件均 noTileCollide(原版 SetDefaults),故位移由各核自行积分(e.x+=vx)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
@@ -44,11 +45,12 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; la(e)[0] = 0; }
   // 玩家失效 = 原版 TargetClosest 落空后的 dead4(:30316-30319)
   const dead4 = !player || player.dead;
-  // 暴怒度 num658(:30321-30327):地表 +1 / 非丛林 +1(getGoodWorld +0.5 省略)。
+  // 暴怒度 num658(:30321-30333):地表 +1 / 非丛林 +1 / getGoodWorld +0.5(:30331-30334)。
   // ZoneJungle = Game.scene 窗口计数(丛林砖 60/61/62/74/226/225 ≥140 且非地狱层)
   let num658 = 0;
   if (e.y / TILE < game.world.groundLevel) num658 += 1;
   if (!game.scene?.zoneJungle) num658 += 1;
+  if (game.world.seedFlags?.getGoodWorld) num658 += 0.5;
   const num659 = player ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : 1e9;
   // timeLeft 维持 ≥60(:30330-30334)由共享 Despawn 系统承担,不在此重复
   if (e.ai0 !== 5 && num659 > 3000) e.ai0 = 4;   // :30336-30341 远距追赶
