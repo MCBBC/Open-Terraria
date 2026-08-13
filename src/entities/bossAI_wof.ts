@@ -15,8 +15,9 @@ import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
-import { spawnPart, shoot, losClear } from './bossAI';
+import { spawnPart, spawnVanillaEnemy, spawnWormChainFor, shoot, losClear } from './bossAI';
 import { mainExpertMode, getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
+import { Lang } from '../i18n/Lang';
 
 // Main.wofDrawAreaTop/Bottom(NPC.cs Main 静态;单只血肉墙语义,墙初始化时复位 -1)
 let wofDrawAreaTop = -1;
@@ -61,6 +62,73 @@ const countType = (game: GameHooks, id: number): number =>
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
+// ================= SpawnWOF（NPC.cs:81112-81191）1:1 =================
+
+/** NPC.SpawnWOF(pos)（NPC.cs:81112-81191）——向导巫毒娃娃入岩浆的召唤链落点算法。
+ *  返回生成的墙实体（未生成返回 null）。逐句对照：
+ *  :81114 pos.Y/16 < maxTilesY-205 → 直接返回（娃娃照烧，不召唤——地表/洞穴
+ *        掉进岩浆不触发）；Main.wofNPCIndex>=0 / AnyNPCs(113) → 已有墙在场返回。
+ *  :81117-81121 num=±1：娃娃 X 在东半图（> w/2）→ -1，墙向西推；否则 +1 向东。
+ *  :81124-81141 num2 落位：从娃娃 X 起逐 16px 向推进方向退让，直到 ±1200px 带
+ *        内无存活玩家；带内始终有玩家也不死循环——num2/16 出 [20, w-20] 即退出。
+ *  :81150-81179 Y：起点格实心/液体 ≥100/出界 → 以 num6 步进双向交替找空气格
+ *        （上限 1000 次迭代），num6 自 0 递增（首查就是起点格本身）。
+ *  :81181-81186 Y 钳 [UnderworldLayer+10, UnderworldLayer+80]。
+ *  :81189-81191 NewNPC(113) + Announcement.HasAwoken 公告（无咆哮音——原版
+ *        SpawnWOF 不播音，WoF 尖啸由 WOFTongue 见到玩家时播，Player.cs:22011）。
+ *  结构性差异：原版 for 255 玩家槽 → 本仓单主角（多人傀儡不参与落位避让）。 */
+export function spawnWOF(game: GameHooks, px: number, py: number): Enemy | null {
+  const st = game.world.store;
+  // :81114 高度门 + 已在场门（Main.wofNPCIndex>=0 ≙ AnyNPCs(113)）
+  if (py / TILE < st.h - 205) return null;
+  if ((game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 113)) return null;
+  // :81117-81121 推进方向：从娃娃所在半区推向另一半区
+  const num = px / TILE > st.w / 2 ? -1 : 1;
+  // :81124-81141 落位扫描
+  let num2 = Math.floor(px);
+  const player = (game as unknown as { player: Player | null }).player ?? null;
+  for (let guard = 0; guard < 20000; guard++) {   // 原版 while(!flag)；边界钳保证可达
+    let flag = true;
+    if (player && !player.dead && player.x > num2 - 1200 && player.x < num2 + 1200) {
+      num2 -= num * TILE;
+      flag = false;
+    }
+    if (num2 / TILE < 20 || num2 / TILE > st.w - 20) flag = true;
+    if (flag) break;
+  }
+  // :81145-81179 Y 双向找空气
+  const num4 = Math.floor(num2 / TILE);
+  let num5 = Math.floor(py / TILE);
+  const tileAir = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && !st.isSolid(x, y) && st.liquid[st.idx(x, y)] < 100;
+  if (!st.inBounds(num4, num5) || st.isSolid(num4, num5)
+    || (st.inBounds(num4, num5 - 0) && st.liquid[st.idx(num4, num5 - 0)] >= 100)) {
+    let num6 = 0;
+    for (let num7 = 1000; num7 > 0; num7--) {
+      if (tileAir(num4, num5 - num6)) { num5 -= num6; break; }
+      if (tileAir(num4, num5 + num6)) { num5 += num6; break; }
+      num6++;
+    }
+  }
+  // :81181-81186 钳 [UnderworldLayer+10, +80]
+  const under = underworldLayer(game);
+  num5 = Math.round(clamp(num5, under + 10, under + 80));
+  const num3 = num5 * TILE;
+  // :81189 NewNPC(num2, num3, 113)——Bottom 锚点（NPC.cs:81547）换算左上角
+  //（fromVanilla 已按 scale 1.2 放大碰撞盒，须用实体实际 w/h 而非数据原值）
+  const wof = spawnVanillaEnemy(game, 113, num2, num3);
+  if (wof) {
+    wof.x = num2 - wof.w / 2;
+    wof.y = num3 - wof.h;
+    wof.ai0 = num;   // 原版未传 ai[0]（定向走 AI 内 vx==0 分支）；登记推进方向备查
+    // :81190-81191 Announcement.HasAwoken，ChatColors.BossOrEvent=(175,75,255)
+    const name = Lang.npcName(113) ?? 'Wall of Flesh';
+    (game as unknown as { announce?: (k: string, w: string, r: number, g: number, b: number) => void })
+      .announce?.('Announcement.HasAwoken', name, 175, 75, 255);
+  }
+  return wof;
+}
+
 /** 原版 UnderworldLayer = maxTilesY-200(World.lavaLine,TerrainPass 设定;0=未知回退) */
 const underworldLayer = (game: GameHooks): number => {
   const lava = game.world.lavaLine;
@@ -90,8 +158,9 @@ function mouthRotation(e: Enemy, player: { cx: number; cy: number }): [number, b
  *  移动自行积分:Y 直接吸附(velocity.Y 分支被 :25977 覆盖),X 沿 vx 推进。 */
 export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) {
   const st = game.world.store;
-  // :25719-25722 推出世界两侧 → 自毁
-  if (e.x < 160 || e.x > (st.w - 10) * TILE) { e.dead = true; return; }
+  // :25719-25722 推出世界两侧 → 自毁（原版 active=false 静默离场,无战利品/标志/
+  // 转化——bossFled 防 Game 击杀流误记,2026-08-13）
+  if (e.x < 160 || e.x > (st.w - 10) * TILE) { e.bossFled = true; e.dead = true; return; }
   const L = wallLocalOf(e);
   // :25726-25731 localAI[0]==0 → 初始化,draw 区域复位 -1
   if (e.ai3 === 0) { e.ai3 = 1; wofDrawAreaBottom = -1; wofDrawAreaTop = -1; }
@@ -121,14 +190,20 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
         leech.x = e.cx - leech.w / 2;
         leech.y = e.y + e.h / 2 + 20 - leech.h;
         leech.vx = e.facing * 8; // :25820 沿推进方向甩出
+        // 体节链（AI_006 :51706-51749）：头生成时 ai[2]=Next(3,6) → 3-5 节身 118
+        // + 尾节 119（身节 ai[2]>0 逐节克隆、归零换尾）——spawnWormChainFor 即
+        // "body×n + 尾"结构，n 取同一掷骰区间（Enemy 为 type-only 导入，经代理出口）
+        spawnWormChainFor(game, leech, 3 + Math.floor(Math.random() * 3));
       }
     }
   }
-  // ---- :25828-25836 localAI[3] 吼叫计时(600-1600t 随机,负值冷却) ----
+  // ---- :25800-25804 localAI[3] 尖啸计时(600-1600t 随机,负值冷却) ----
   L.roarT += 1;
   if (L.roarT >= 600 + Math.random() * 1000) {
     L.roarT = -Math.random() * 200;
-    game.playSfx('roar', 0.8); // 原版 SoundID 4/style 10(WoF 尖啸),音效资源映射由主会话定
+    // :25803 PlaySound(4, x, y, 10) = Sounds/Zombie_10（LegacySoundPlayer.cs:221
+    // "Zombie_"+k）——WoF 专属尖啸，非 Boss Roar
+    game.playSfxFiles(['Zombie_10'], 0.8, e.cx, e.cy);
   }
 
   // ---- 地狱空腔上下沿扫描(:25837-25965) ----
@@ -202,8 +277,10 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (!player || player.dead) {
     L.despawnT += 1 / 180;
     if (L.despawnT >= 1) {
-      game.playSfx('roar', 0.8);
+      // :26027 PlaySound(4, x, y, 10) = Zombie_10 尖啸（同周期吼）
+      game.playSfxFiles(['Zombie_10'], 0.8, e.cx, e.cy);
       e.hp = 0;
+      e.bossFled = true;   // 玩家死 3s 自毁（:26040-26048 life=0 静默,非击杀）
       e.dead = true;
       return;
     }
@@ -214,7 +291,45 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
   // ---- 喷口朝向(:26050-26079) ----
   if (player) e.spin = mouthRotation(e, player)[0];
 
-  // ---- :26081-26125 expert 模式按玩家距离重生 Hungry(115,挑未占用的 ai0 槽位):不实现 ----
+  // ---- :26081-26125 expert 模式 Hungry 重生：每 tick 按墙血量掷骰，重生一只 115
+  //      到未占用的 ai0 槽位（0.05..0.95 十槽）。血越低 num391 越小 → 概率越高 ----
+  if (mainExpertMode(game.world)) {
+    // :26083-26093 num391 = (int)(1 + life/lifeMax*10)²，逐级下限托底后 ×0.7
+    let num391 = Math.trunc(1 + (e.hp / e.maxHp) * 10);
+    num391 *= num391;
+    if (num391 < 400) num391 = Math.trunc((num391 * 19 + 400) / 20);
+    if (num391 < 60) num391 = Math.trunc((num391 * 3 + 60) / 4);
+    if (num391 < 20) num391 = Math.trunc((num391 + 20) / 2);
+    num391 = Math.trunc(num391 * 0.7);
+    // :26095 Main.rand.Next(num391)==0 → 进入槽位挑选
+    if (Math.floor(Math.random() * num391) === 0) {
+      // :26097-26106 收集在场 115 的 ai0（≤10 只）
+      const used: number[] = [];
+      for (const n of game.enemies() as Enemy[]) {
+        if (used.length < 10 && !n.dead && n.vanillaId === 115) used.push(n.ai0);
+      }
+      // :26107-26109 槽越多越难再添（1+2n 分母，≤1 才放行）
+      if (used.length < 10 && Math.floor(Math.random() * (1 + used.length * 2)) <= 1) {
+        // :26110-26120 挑未占用的槽号（1000 次兜底）
+        let num394 = -1;
+        for (let num395 = 0; num395 < 1000; num395++) {
+          const num396 = Math.floor(Math.random() * 10);
+          if (!used.includes(num396 * 0.1 - 0.05)) { num394 = num396; break; }
+        }
+        if (num394 >= 0) {
+          // :26122 NewNPC(position.X, num381, 115, ai0=num394*0.1-0.05)——Bottom 锚点
+          const h = spawnPart(game, e, 115);
+          if (h) {
+            h.x = e.x;
+            h.y = num381 - h.h;
+            h.ai0 = num394 * 0.1 - 0.05;
+            h.ai3 = e.id;      // 头锚定槽（文件头结构性差异 1）
+            h.bInit = true;
+          }
+        }
+      }
+    }
+  }
 
   // ---- 首帧部件生成(:26127-26140 localAI[0]==1 时执行一次):
   //      双眼 114(上眼 ai0=1 贴顶沿半程 / 下眼 ai0=-1 贴底沿半程)+ 11 只 Hungry 115
@@ -269,6 +384,10 @@ export function wofEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (head.hp === L.lastHeadHp && e.hp < head.hp) head.hp = e.hp;
   L.lastHeadHp = head.hp;
   if (head.hp > 0) { e.hp = head.hp; e.maxHp = head.maxHp; }
+  // :26149 realLife = Main.wofNPCIndex 的连带结算语义：打眼 = StrikeNPC 转发到墙
+  //（NPC.StrikeNPC :82224+ realLife 转移走**墙的防御**结算）→ 眼的受击防御取墙
+  // def12（数据 114 自身 defense=0，不镜像会让打眼比打墙每击多算 6 点）
+  e.def.defense = head.def.defense ?? 0;
 
   // :26157-26159 X 钉在墙左沿,朝向随墙
   e.x = head.x;
@@ -312,8 +431,9 @@ export function wofEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
       const vx = (dx / d) * num410, vy = (dy / d) * num410;
-      // 出膛点 = 眼中心 + 单位速度(:26278-26286);83 原版 timeLeft 600/extraUpdates 2
-      // (Projectile.cs:1360-1370),本仓 Arrow 未建模 extraUpdates,按原速直飞
+      // 出膛点 = 眼中心 + 单位速度(:26278-26286);83 SetDefaults：timeLeft 600 /
+      // extraUpdates 2（Projectile.cs:1360-1370）——extraUpdates 由 Arrow 按
+      // projId 缺省注入（PROJ_EXTRA_UPDATES），此处不传
       shoot(game, e.cx + vx, e.cy + vy, vx, vy, num411, 83, 600);
     }
   }

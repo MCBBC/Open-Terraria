@@ -14,14 +14,16 @@ import { projSprite } from './Arrow';
 import { hitCritters, hitTownNpcs, playEnemyHitSound, tryReflectProjectile } from './projTargets';
 import { applyProjStatus, applyMeleeImbue } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
+import { canHit } from '../physics/LineOfSight';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
-function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string): void {
+function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string, alpha = 1): void {
   const ctx = r.canvas.getContext('2d');
   if (!ctx) return;
   const img = projSprite(projId);
   ctx.save();
+  ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
   ctx.translate(e.x + e.w / 2, e.y + e.w / 2);
   ctx.rotate(ang);
   ctx.imageSmoothingEnabled = false;
@@ -73,6 +75,7 @@ function hitEnemies(
   hitCd: HitCooldown,
   cooldown: number,
   dirX: number,
+  pen = 0,
 ): void {
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
@@ -84,7 +87,7 @@ function hitEnemies(
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
   for (const ent of game.enemies()) {
-    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     // 反射源命中（Projectile.cs:12050-12060）：按 projId 查 CanBeReflected 白名单——
@@ -97,7 +100,7 @@ function hitEnemies(
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
     playEnemyHitSound(game, e);
-    e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game);
+    e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game, pen); // ⑥ 减防语义
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     applyProjStatus(me.projId, e as unknown as Record<string, number>);
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
@@ -126,6 +129,11 @@ const BOOMERANG_RETURN: Record<number, [number, number]> = {
   320: [15, 3], 383: [16, 4], 1000: [9.5, 0.4],
 };
 
+/** Phaseblade 族（ProjectileID.Sets.IsAPhaseblade :27——1059-1072/1074-1076/1101/1102）：
+ *  出程 30t 后垂落,回收 40/3 高速穿墙归位（:190-258/:527-531） */
+const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
+  1068, 1069, 1070, 1071, 1072, 1074, 1075, 1076, 1101, 1102]);
+
 export class Boomerang extends Entity {
   w = 22; h = 22; // 原版 SetDefaults（type 6：22×22）
   damage: number;
@@ -133,14 +141,20 @@ export class Boomerang extends Entity {
   projId: number;
   /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
   critChance = 0.04;
+  /** ⑥ 护甲穿透（Game 注入，命中传 hurt 减防） */
+  armorPen = 0;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
+  /** channel 电平（301 Bouncing Shield 按 20t/100t 双门用；其余族不用） */
+  channel: (() => boolean) | null = null;
   /** rotation（出程=飞行向+π/4 定角,返回段自旋 0.4/t——AI_003 尾段 :675-706） */
   private rot = 0;
   /** ai[0]：0 飞出 / 1 返回 */
   private returning = false;
-  /** ai[1]：飞出段计数（≥30t 自动回收,:434-438） */
+  /** ai[1]：飞出段计数（普通族 ≥30t 自动回收,:434-438） */
   private outT = 0;
+  /** localAI[0]（866 飞刀目标搜索计时,:291-300） */
+  private localT = 0;
   private hitCd = new HitCooldown();
   life = 900;
   dead = false;
@@ -158,6 +172,15 @@ export class Boomerang extends Entity {
     drawProj(r, cam, this, this.projId, this.rot, '#C0A060');
   }
 
+  /** 轴向目标速度逼近（AI_003 追踪/返回共用式 :331-360/:586-660）：
+   *  每轴朝目标速度步进 acc,异号再加倍 */
+  private steerTo(tvx: number, tvy: number, acc: number): void {
+    if (this.vx < tvx) { this.vx += acc; if (this.vx < 0 && tvx > 0) this.vx += acc; }
+    else if (this.vx > tvx) { this.vx -= acc; if (this.vx > 0 && tvx < 0) this.vx -= acc; }
+    if (this.vy < tvy) { this.vy += acc; if (this.vy < 0 && tvy > 0) this.vy += acc; }
+    else if (this.vy > tvy) { this.vy -= acc; if (this.vy > 0 && tvy < 0) this.vy -= acc; }
+  }
+
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
@@ -168,38 +191,99 @@ export class Boomerang extends Entity {
       const tx = Math.floor((x + this.w / 2) / TILE), ty = Math.floor((y + this.h / 2) / TILE);
       return game.world.store.inBounds(tx, ty) && game.world.store.isSolid(tx, ty);
     };
+    const outOfWorld = (): boolean => this.x < TILE * 10 || this.y < TILE * 10
+      || this.x > (game.world.store.w - 10) * TILE || this.y > (game.world.store.h - 10) * TILE;
+    const startReturn = (zeroV: boolean): void => {
+      this.returning = true;
+      this.outT = 0;
+      this.hitCd.clear(); // 返程可再次命中（原版去而复返二次伤害语义）
+      if (zeroV) { this.vx = 0; this.vy = 0; } // 301 回收时速度归零（:443-447）
+      else if (solidAt(this.x, this.y)) { this.x -= this.vx; this.y -= this.vy; } // 弹出防嵌墙
+    };
     if (!this.returning) {
-      // 飞出段：直线【无摩擦】（AI_003 无速度衰减——旧实现 0.985 摩擦+低速回收
-      // 完全失真）;30t 定时回收 / 撞墙·出界回收（:434-438/:123-133）
       this.outT++;
-      this.x += this.vx;
-      this.y += this.vy;
-      // 出程旋转 = 飞行向 + π/4（:675-677,不自旋）+ 50% 尾尘（:678-686 近似）
-      this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;
-      if (Math.random() < 0.5) {
-        game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#D0E8FF', 1, 0.4, { life: 18, grav: 0, size: 2 });
+      const isPhase = PHASEBLADE_PROJ.has(this.projId);
+      // ---- 特例族出程行为 ----
+      if (this.projId === 182 || this.projId === 866) {
+        // 圣骑士锤 182 / 飞刀 866：追踪最近敌（:264-330/:291-360）——800px 内最近敌,
+        // 目标速度=(敌-球)norm×12,轴步进 0.25;无目标且 ≥30t(866:30t) → 回收。
+        // 视线门 Collision.CanHit（:285-288/:305-308）——canHit 1:1
+        this.localT++;
+        let tvx = this.vx, tvy = this.vy, found = false;
+        if (this.outT > 10 && this.outT < 360) {
+          const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
+          let best = 800, bx = 0, by = 0;
+          for (const ent of game.enemies()) {
+            const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+            if (e.dead) continue;
+            if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+            const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
+            if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }
+          }
+          if (found) {
+            const dd = Math.hypot(bx - cx0, by - cy0) || 1;
+            tvx = ((bx - cx0) / dd) * 12; tvy = ((by - cy0) / dd) * 12;
+          }
+        }
+        if (!found && this.outT >= 30) { this.x += this.vx; this.y += this.vy; startReturn(false); }
+        else { this.steerTo(tvx, tvy, 0.25); this.x += this.vx; this.y += this.vy; }
+      } else if (this.projId === 301) {
+        // Bouncing Shield 1513：按住 ≥20t / 松手 ≥100t 回收（:437-452）
+        const held = this.channel ? this.channel() : false;
+        if ((held && this.outT >= 20) || (!held && this.outT >= 100)) {
+          this.x += this.vx; this.y += this.vy; startReturn(true);
+        } else { this.x += this.vx; this.y += this.vy; }
+      } else if (this.projId === 383) {
+        // 附魔飞刀 2424：10t 后下垂 vy+=0.5(上升再+0.35)/vx×0.95（:263-277）;>800px 回收
+        if (this.outT >= 10) {
+          this.vy += 0.5;
+          if (this.vy < 0) this.vy += 0.35;
+          this.vx *= 0.95;
+          this.vy = Math.min(this.vy, 16);
+        }
+        this.x += this.vx; this.y += this.vy;
+        if (Math.hypot(this.x + this.w / 2 - p.cx, this.y + this.h / 2 - p.cy) > 800) startReturn(false);
+      } else if (this.projId === 320) {
+        // 冰回旋镖 1825：10t 后下垂 vy+=0.5/vx×0.95（:263-268）
+        if (this.outT >= 10) { this.vy += 0.5; this.vx *= 0.95; this.vy = Math.min(this.vy, 16); }
+        this.x += this.vx; this.y += this.vy;
+      } else if (isPhase) {
+        // 光刃族：前 30t 自旋 0.4×direction,之后垂落 vy+=1/vx×0.96（:190-232）
+        if (this.outT >= 30) {
+          this.vy += 1;
+          this.vx *= 0.96;
+          this.vy = Math.min(this.vy, 16);
+          this.rot += 0.4 * Math.sign(this.vx || 1);
+        } else {
+          this.rot += 0.4 * Math.sign(this.vx || 1);
+        }
+        this.x += this.vx; this.y += this.vy;
+      } else {
+        // 普通族：无摩擦直线;106 光碟 45t 回收（:180-186）,其余 30t（:434-438）
+        this.x += this.vx;
+        this.y += this.vy;
+        // 出程旋转 = 飞行向 + π/4（:675-677,不自旋）;106 光碟 0.3×dir（:670-672）
+        this.rot = this.projId === 106
+          ? this.rot + 0.3 * Math.sign(this.vx || 1)
+          : Math.atan2(this.vy, this.vx) + Math.PI / 4;
+        if (Math.random() < 0.5) {
+          game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#D0E8FF', 1, 0.4, { life: 18, grav: 0, size: 2 });
+        }
+        if (this.outT >= (this.projId === 106 ? 45 : 30)) startReturn(false);
       }
-      if (this.outT >= 30 || solidAt(this.x, this.y)
-        || this.x < TILE * 10 || this.y < TILE * 10
-        || this.x > (game.world.store.w - 10) * TILE || this.y > (game.world.store.h - 10) * TILE) {
-        this.returning = true;
-        this.outT = 0;
-        this.hitCd.clear(); // 返程可再次命中（原版去而复返二次伤害语义）
-        if (solidAt(this.x, this.y)) { this.x -= this.vx; this.y -= this.vy; } // 弹出防嵌墙
-      }
+      // 通用撞墙/出界回收门（:123-133,全部族）
+      if (!this.returning && (solidAt(this.x, this.y) || outOfWorld())) startReturn(false);
     } else {
       // 返回段：tileCollide=false 穿墙（:496）;目标速度制——朝玩家 num28 px/t,
-      // 每轴逼近 num29/t,目标异号再 ×2（:586-660）;>3000px Kill（:606-610）
+      // 每轴逼近 num29/t,目标异号再 ×2（:586-660）;>3000px Kill（:606-610;
+      // 301 是 6000px,:603-605）
       const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
       let dx = p.cx - cx, dy = p.cy - cy;
       const d = Math.hypot(dx, dy) || 1;
-      if (d > 3000) { this.dead = true; return; }
-      const [spd, acc] = BOOMERANG_RETURN[this.projId] ?? [9, 0.4];
+      if (d > (this.projId === 301 ? 6000 : 3000)) { this.dead = true; return; }
+      const [spd, acc] = BOOMERANG_RETURN[this.projId] ?? (PHASEBLADE_PROJ.has(this.projId) ? [40, 3] : [9, 0.4]);
       dx = (dx / d) * spd; dy = (dy / d) * spd;
-      if (this.vx < dx) { this.vx += acc; if (this.vx < 0 && dx > 0) this.vx += acc; }
-      else if (this.vx > dx) { this.vx -= acc; if (this.vx > 0 && dx < 0) this.vx -= acc; }
-      if (this.vy < dy) { this.vy += acc; if (this.vy < 0 && dy > 0) this.vy += acc; }
-      else if (this.vy > dy) { this.vy -= acc; if (this.vy > 0 && dy < 0) this.vy -= acc; }
+      this.steerTo(dx, dy, acc);
       this.x += this.vx;
       this.y += this.vy;
       // 返回段自旋 0.4/t × direction（:704-706）
@@ -209,7 +293,7 @@ export class Boomerang extends Entity {
         this.dead = true; return;
       }
     }
-    hitEnemies(this, game, this.hitCd, 20, Math.sign(this.vx));
+    hitEnemies(this, game, this.hitCd, 20, Math.sign(this.vx), this.armorPen);
   }
 }
 
@@ -227,6 +311,10 @@ const SPEAR_PARAMS: Record<number, [number, number, number]> = {
   130: [3, 1.0, 1.3], 1103: [4, 0.85, 1.1],
 };
 
+/** aiStyle 161 细剑/短剑族(AI_161_RapierStabs :44987):线性外伸 velocity×(t-1),
+ *  16t 消失;与 AI_019 包络完全不同的直刺模型。型号 = 161 全集合 */
+const RAPIER_PROJ = new Set([802, 842, 938, 939, 940, 941, 942, 943, 944, 945]);
+
 export class SpearProj extends Entity {
   w = 20; h = 20;
   damage: number;
@@ -234,6 +322,8 @@ export class SpearProj extends Entity {
   projId: number;
   /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
   critChance = 0.04;
+  /** ⑥ 护甲穿透（Game 注入，命中传 hurt 减防） */
+  armorPen = 0;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
   /** 刺出方向（单位向量，原版出手时定死） */
@@ -262,15 +352,31 @@ export class SpearProj extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // rotation = atan2(vy,vx)+π/2+π/4；spriteDirection==-1 再 -π/2（:43271-43276）
-    const base = Math.atan2(this.dy, this.dx) + Math.PI / 2 + Math.PI / 4;
-    drawProj(r, cam, this, this.projId, this.dx < 0 ? base - Math.PI / 2 : base, '#A0A0B0');
+    // AI_019（:43271-43276）:rotation = atan2+π/2+π/4,spriteDir==-1 再 -π/2;
+    // AI_161 细剑(:44990):rotation = atan2+π/2(无 π/4 修正),Opacity 淡入 0→7/淡出 16→12
+    const isRap = RAPIER_PROJ.has(this.projId);
+    const base = Math.atan2(this.dy, this.dx) + Math.PI / 2
+      + (isRap ? 0 : Math.PI / 4);
+    // Utils.GetLerpValue clamped:淡入 t/7(t≤7),淡出 (16-t)/4(t≥12)
+    const aIn = Math.min(1, this.t / 7);
+    const aOut = this.t <= 12 ? 1 : Math.max(0, (16 - this.t) / 4);
+    drawProj(r, cam, this, this.projId, this.dx < 0 && !isRap ? base - Math.PI / 2 : base,
+      '#A0A0B0', isRap ? aIn * aOut : 1);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
+    const p = game.player;
+    if (RAPIER_PROJ.has(this.projId)) {
+      // AI_161_RapierStabs(:44987-45006):线性外伸,固定 16t 消失(与 AI_019 包络无关)
+      if (this.t >= 16) { this.dead = true; return; }
+      this.x = p.cx - this.w / 2 + this.dx * this.spd * (this.t - 1);
+      this.y = p.cy - this.h / 2 + this.dy * this.spd * (this.t - 1);
+      hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen);
+      return;
+    }
     if (this.t >= this.dur) { this.dead = true; return; }
     // AI_019 伸缩包络 1:1（:43441-43540）：
     //   itemAnimation 从 max 递减；伸出相占前 2/3（num5 增长），缩回相占后 1/3（num10 增长）
@@ -283,10 +389,9 @@ export class SpearProj extends Entity {
     const num10 = num3 - num4;
     const [n6, n7, n8] = this.prm;
     const offset = n6 + n7 * num9 - n8 * num10;
-    const p = game.player;
     this.x = p.cx - this.w / 2 + this.dx * offset * this.spd;
     this.y = p.cy - this.h / 2 + this.dy * offset * this.spd;
-    hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1); // 一次突刺每敌只结算一次
+    hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen); // 一次突刺每敌只结算一次
   }
 }
 
@@ -315,6 +420,8 @@ export class YoyoProj extends Entity {
   projId: number;
   /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
   critChance = 0.04;
+  /** ⑥ 护甲穿透（Game 注入，命中传 hurt 减防） */
+  armorPen = 0;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
   /** 持续按住判定（原版 channel：按住时悠悠球滞留追光标） */
@@ -401,7 +508,7 @@ export class YoyoProj extends Entity {
       this.vy = (this.vy * (inertia - 1) + (dy / d) * top) / inertia;
       this.x += this.vx;
       this.y += this.vy;
-      hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx));
+      hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx), this.armorPen);
       return;
     }
     // ---- 活跃态（:64983-65148）----
@@ -437,7 +544,7 @@ export class YoyoProj extends Entity {
     this.x += this.vx;
     this.y += this.vy;
     // yoyo tileCollide=false 穿墙;命中冷却 10t(SetDefaults localNPCHitCooldown)
-    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx));
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx), this.armorPen);
   }
 }
 
@@ -512,6 +619,8 @@ export class FlailProj extends Entity {
   projId: number;
   /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
   critChance = 0.04;
+  /** ⑥ 护甲穿透（Game 注入，命中传 hurt 减防） */
+  armorPen = 0;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
   /** channel 电平（mouseHeld && 手持原物品 && !uiBlocking）——Game 注入 */
@@ -763,7 +872,7 @@ export class FlailProj extends Entity {
       // :41770-41775 hallow 尘近似
       if (Math.random() < 0.2) game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#B0A0FF', 1, 0.5, { life: 20, grav: 0, size: 2 });
     }
-    hitEnemies(this, game, this.hitCd, cd, Math.sign(this.vx) || 1);
+    hitEnemies(this, game, this.hitCd, cd, Math.sign(this.vx) || 1, this.armorPen);
   }
 
   /** velocity MoveTowards(手方向×targetSpd, accel)（:41281-41285/:41325-41329 同式） */

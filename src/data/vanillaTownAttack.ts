@@ -97,8 +97,8 @@ export const TOWN_BOW: Record<number, TownShotParams> = {
 /** ai[0]==14 魔法态(转录自 :55240-55405) */
 export const TOWN_MAGIC: Record<number, TownShotParams> = {
   54:  { proj: 585, dmg: 16, speed: 10, shootTick: 30, cdBase: 20, cdRand: 15, spread: 1, kb: 2 },
-  108: { proj: 15, dmg: 18, speed: 6, shootTick: 15, cdBase: 15, cdRand: 5, spread: 0, kb: 3, aimLift: 20,
-         note: '连发 1-3 发(权重 4:2:1),每发附加 ±3.4 随机速度' },
+  108: { proj: 15, dmg: 18, speed: 6, shootTick: 15, cdBase: 15, cdRand: 5, spread: 0, kb: 3, aimLiftScaled: 20,
+         note: '连发 1-3 发(权重 4:2:1),每发附加 ±3.4 随机速度(未接,单发近似)' },
   160: { proj: 590, dmg: 40, speed: 0, shootTick: 15, burst: [30, 45], cdBase: 10, cdRand: 1, spread: 0, kb: 3,
          note: '落点弹:在目标区域随机生成(实心重掷≤10),velocity=0' },
   663: { proj: 950, dmg: 15, speed: 0, shootTick: 15, burst: [25, 35, 45], cdBase: 0, cdRand: 1, spread: 0, kb: 3,

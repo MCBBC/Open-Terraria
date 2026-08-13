@@ -418,8 +418,12 @@ export class TownNPC extends Entity {
     let bestL: { cx: number; cy: number; d: number } | null = null;
     let bestR: { cx: number; cy: number; d: number } | null = null;
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+        damage?: number; def?: { damage?: number } };
       if (e.dead) continue;
+      // 原版扫描门(:53887):!friendly && damage>0 才算威胁(0 伤敌/友好不算)
+      const edmg = e.damage ?? e.def?.damage ?? 0;
+      if (edmg <= 0) continue;
       // 中心由 x/y/w/h 推导(敌实体有 cx/cy,但勿依赖——判距门曾因 NaN 恒假失效)
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       const dx = ecx - this.cx;

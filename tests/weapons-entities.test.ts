@@ -57,8 +57,8 @@ function run(e: { fixedUpdate: (dt: number, g: GameHooks) => void; dead?: boolea
 describe('回旋镖（aiStyle 3）', () => {
   it('飞出减速 → 返回主角 → 回手消失，途中可命中', () => {
     const { hooks, player, enemies } = makeHooks();
-    // 敌人摆在回旋镖飞行线上（与出手点同 y）
-    addEnemy(enemies, 1, 80 * 16, player.cy - 12);
+    // 敌人摆在回旋镖飞行线上（AI_003 出程无摩擦直线:30t×10px/t=300px 射程内）
+    addEnemy(enemies, 1, 65 * 16, player.cy - 12);
     const b = new Boomerang(player.cx, player.cy - 4, 10, 0, 15, 4, 6);
     run(b, hooks, 400);
     // 最终必须回手消失（dead）且没有飞出世界
@@ -72,11 +72,75 @@ describe('长矛（aiStyle 19）', () => {
   it('随角色前刺伸缩，一个周期后消失，命中沿途敌人', () => {
     const { hooks, player, enemies } = makeHooks();
     addEnemy(enemies, 2, 55 * 16, 89 * 16);
-    const s = new SpearProj(1, 0, 120, 30, 30, 5, 46);
+    // 新签名(dirX, dirY, shootSpeed, dur, dmg, kb, projId)——spd 用 Dark Lance 真值 6
+    // 位移=offset×spd,刺满 offset=3+1.4×2×22/3≈23.5 → ~141px,敌在 +80px 处沿途命中
+    const s = new SpearProj(1, 0, 6, 22, 30, 5, 46);
     run(s, hooks);
     expect(s.dead).toBe(true); // 一个 useTime 周期结束
     const enemy = enemies[0] as unknown as { hp: number };
     expect(enemy.hp).toBeLessThan(100);
+  });
+});
+
+describe('回旋镖特例族（AI_003 分支）', () => {
+  it('106 光碟:45t 才回收(30t 仍在飞出段)', () => {
+    const { hooks, player } = makeHooks();
+    const b = new Boomerang(player.cx, player.cy - 4, 16, 0, 60, 4, 106);
+    run(b, hooks, 31);
+    expect(b.dead).toBe(false);
+    // (returning 是私有态,用行为验证:31t 时仍在移动且未死)
+    const x31 = b.x;
+    run(b, hooks, 5);
+    expect(b.dead).toBe(false); // 36t 仍飞行(45t 门)
+    void x31;
+  });
+  it('182 圣骑士锤:800px 内最近敌追踪转向', () => {
+    const { hooks, player, enemies } = makeHooks();
+    // 敌摆在飞行线上方——纯直线不会经过,追踪才会命中
+    addEnemy(enemies, 3, 66 * 16, player.cy - 120);
+    const b = new Boomerang(player.cx, player.cy - 4, 12, 0, 80, 4, 182);
+    run(b, hooks, 800); // 追踪期最长 360t,之后 30t 无目标回收+回手
+    const enemy = enemies[0] as unknown as { hp: number };
+    expect(enemy.hp).toBeLessThan(100); // 追踪命中
+    expect(b.dead).toBe(true);
+  });
+  it('383 附魔飞刀:10t 后下垂(vy 增长)', () => {
+    const { hooks, player } = makeHooks();
+    const b = new Boomerang(player.cx, player.cy - 4, 20, 0, 70, 4, 383);
+    run(b, hooks, 9);
+    expect(b.vy).toBe(0); // 前 10t 水平直线
+    run(b, hooks, 3);
+    expect(b.vy).toBeGreaterThan(0.5); // 10t 后垂落
+  });
+  it('301 Bouncing Shield:按住 20t 回收', () => {
+    const { hooks, player } = makeHooks();
+    const b = new Boomerang(player.cx, player.cy - 4, 14, 0, 100, 4, 301);
+    b.channel = () => true; // 按住
+    run(b, hooks, 22);
+    expect(b.dead).toBe(false); // 掷出段(回收态不等于 dead)
+    run(b, hooks, 300);
+    expect(b.dead).toBe(true); // 回收后回手消失
+  });
+  it('光刃族(1059):前 30t 直线,之后垂落', () => {
+    const { hooks, player } = makeHooks();
+    const b = new Boomerang(player.cx, player.cy - 4, 14, 0, 26, 4, 1059);
+    run(b, hooks, 29);
+    expect(b.vy).toBe(0);
+    run(b, hooks, 3);
+    expect(b.vy).toBeGreaterThan(0); // 30t 后 vy+=1 垂落
+  });
+});
+
+describe('细剑族（aiStyle 161）', () => {
+  it('线性外伸,16t 消失', () => {
+    const { hooks, player } = makeHooks();
+    const s = new SpearProj(1, 0, 2.4, 20, 13, 4, 938);
+    run(s, hooks, 15);
+    expect(s.dead).toBe(false);
+    // 位移 = spd×(t-1):t=15 → 33.6px
+    expect(Math.abs(s.cx - player.cx - 2.4 * 14)).toBeLessThan(1.5);
+    run(s, hooks, 2);
+    expect(s.dead).toBe(true); // 16t Kill
   });
 });
 
@@ -99,7 +163,7 @@ describe('悠悠球（aiStyle 99）', () => {
     const { hooks, player } = makeHooks(opts);
     let ch = true;
     const y = new YoyoProj(player.cx, player.cy - 4, 20, 4, 547, 300,
-      () => ch, () => opts.target, false);
+      () => ch, () => opts.target);
     run(y, hooks, 120);
     expect(y.dead).toBe(false); // channel 中不消失
     // 朝光标靠近

@@ -558,13 +558,9 @@ function vanillaCaves({ store, rng }: GenCtx) {
 function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  // 临时子级计时探针(env 门,BIOME_TIMER=1 生效;测量后移除)
-  const _bt = typeof process !== 'undefined' && (process.env as Record<string, string | undefined>).BIOME_TIMER === '1';
-  const _bmark = (n: string) => { if (_bt) { (globalThis as { __btLast?: number }).__btLast = performance.now(); (globalThis as { __btName?: string }).__btName = n; } };
-  const _bend = () => { if (_bt) { const t = performance.now() - ((globalThis as { __btLast?: number }).__btLast ?? 0); console.log(`BT ${((globalThis as { __btName?: string }).__btName ?? '')}=${Math.round(t)}ms`); } };
-  _bmark('ice'); runIceBiomePass(store, rng, gs); _bend();       // 16 Generate Ice Biome
-  _bmark('grass'); runGrassPass(store, rng, gs); _bend();          // 17 Grass
-  _bmark('jungle'); const jx = runJunglePass(store, rng, gs); _bend(); // JunglePass
+  runIceBiomePass(store, rng, gs);       // 16 Generate Ice Biome
+  runGrassPass(store, rng, gs);          // 17 Grass
+  const jx = runJunglePass(store, rng, gs); // JunglePass
   world.jungleX = jx;
   // 丛林表面泥化:泥柱核心区 ±0.12w 内,表层 10 格 dirt→mud(原版巨型 runner
   // 覆盖表面所致;我们补这一步让丛林表面成草皮而非裸土)
@@ -581,20 +577,20 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   }
   // 18 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
   // 曾用近似 spreadGrassAll 中心限距+2 轮快照——caves-oracle 位级对账后替换）
-  _bmark('mudcaves'); runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!); _bend();
-  _bmark('desert'); runDesertPass(store, rng, gs); _bend(); // 19 Full Desert
-  _bmark('mushroom'); runMushroomPass(store, rng, gs); _bend(); // 20 Mushroom Patches
-  _bmark('marble'); runMarbleGranitePass(store, rng, gs); _bend(); // 21/22 Marble/Granite
-  _bmark('islands'); runFloatingIslandsPass(store, rng, gs); _bend(); // 23 Floating Islands（原在蘑菇前——注册序修正）
-  _bmark('silt'); runDirtToMudAndSiltPass(store, rng, gs); _bend(); // 24 Dirt To Mud / 25 Silt
-  _bmark('shinies'); runShiniesPass(store, rng, gs); _bend(); // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
-  _bmark('webs'); runVanillaWebsPass(store, rng, gs); _bend(); // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
-  _bmark('underworld'); runUnderworldPass(store, rng, gs); _bend(); // 28 Underworld（cs:13697——原管线末"地狱"槽；
+  runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
+  runDesertPass(store, rng, gs); // 19 Full Desert
+  runMushroomPass(store, rng, gs); // 20 Mushroom Patches
+  runMarbleGranitePass(store, rng, gs); // 21/22 Marble/Granite
+  runFloatingIslandsPass(store, rng, gs); // 23 Floating Islands（原在蘑菇前——注册序修正）
+  runDirtToMudAndSiltPass(store, rng, gs); // 24 Dirt To Mud / 25 Silt
+  runShiniesPass(store, rng, gs); // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
+  runVanillaWebsPass(store, rng, gs); // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
+  runUnderworldPass(store, rng, gs); // 28 Underworld（cs:13697——原管线末"地狱"槽；
                                         //  地狱屋/地狱箱/熔炉等依赖槽在数组其后 = 地狱 pass 之后 ✓）
-  _bmark('corrupt'); runCorruptionPass(store, rng, gs); _bend(); // 29 Corruption/Crimson
-  _bmark('lakes'); runLakesPass(store, rng, gs); _bend(); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
-  _bmark('slush'); runSlushPass(store, gs); _bend(); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
-  _bmark('dungeon'); runDungeonPass(store, rng, gs, world.chests); _bend(); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
+  runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
+  runLakesPass(store, rng, gs); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
+  runSlushPass(store, gs); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
+  runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
   // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)。
   // 优先取入口门厅可站立点(原版 dungeonX/Y 语义 cs L72510-72527:入口结构上可站处,
@@ -602,15 +598,15 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   // 33 MountainCaveOpenings + 34 Beaches（原紧跟 SurfaceCaves——注册序修正移到 Dungeon 后）
-  _bmark('mcaves'); runMountainCavesPass(store, rng, gs); _bend();
-  _bmark('beaches'); runBeachesPass(store, rng, gs); _bend();
+  runMountainCavesPass(store, rng, gs);
+  runBeachesPass(store, rng, gs);
   // 海盆挖完后刷新 surface[](后续旧 pass 依赖;本函数之后才到那些 pass)
   for (let x = 0; x < store.w; x++) {
     for (let y = 0; y < store.h; y++) {
       if (store.flags[store.idx(x, y)]) { surface[x] = y; break; }
     }
   }
-  _bmark('gems'); runGemsPass(store, rng, gs); _bend(); // 35 Gems（原捆绑在 Lakes 槽——注册序修正移到 Beaches 后）
+  runGemsPass(store, rng, gs); // 35 Gems（原捆绑在 Lakes 槽——注册序修正移到 Beaches 后）
   // 原版 1456 注册序（WorldGen.cs 行号 = 唯一权威，2026-08-11 review 依此重排）：
   //   OceanCaves(15228) < Pyramids(15426) < SurfaceWaterInJungle(15887) <
   //   Temple(15911) < Beehives(16005) < JungleShrines(16059) < Statues(16947) <
@@ -619,7 +615,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   FloatingIslandHouses(17971) < MicroBiomes(21785)
   // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
   // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
-  _bmark('oceancaves'); const oceanTreasures = runOceanCavesPass(store, rng, gs); _bend(); // 海洋洞窟蠕虫+宝藏点记录
+  const oceanTreasures = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
   // 原版注册序 Pyramids(15426) < LivingTrees(15551) < LivingTreeWalls(15792) <
   // SurfaceWaterInJungle(15887)——世界树插在金字塔后、丛林灌水前（方案 A 原版位置）。

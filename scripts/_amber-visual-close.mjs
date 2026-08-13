@@ -49,8 +49,17 @@ async function asciiAt(tx, ty, label) {
     const g = window.__swGame;
     g.player.x = x * 16; g.player.y = (y - 6) * 16;
     g.camera.x = g.player.x; g.camera.y = g.player.y;
+    // 洞穴无光全黑:就地插一圈火把(用内部 torch id,flags=1)
+    const st = g.world.store;
+    const torch = window.__swTiles['torch'];
+    for (const [dx, dy] of [[-5, -4], [5, -4], [-5, 3], [5, 3], [0, -5]]) {
+      const px = x + dx, py = y + dy;
+      if (st.inBounds(px, py) && !st.flags[st.idx(px, py)]) {
+        st.setTileSilent(px, py, torch, 0, 0);
+      }
+    }
   }, [tx, ty]);
-  await new Promise((r) => setTimeout(r, 4000));
+  await new Promise((r) => setTimeout(r, 6000));
   const rows = await page.evaluate(([cx, cy]) => {
     const g = window.__swGame;
     const cv = g.renderer.canvas ?? document.querySelector('canvas');

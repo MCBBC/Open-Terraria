@@ -14,6 +14,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { canHit } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
+import { applyProjStatus } from './projStatus';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  帧 1-6 开火动画、第 12t 出火球 668 */
@@ -93,7 +94,7 @@ const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: number; vo
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean;
 }
 
 /** Utils.Remap（AI_120 :42222 用；value 截断映射 [from1..to1] → [from2..to2]） */
@@ -575,6 +576,7 @@ export class MinionProj extends Entity {
           if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy);
           en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game);
+          applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           this.attackFlash = 24;
         }
       }
@@ -632,7 +634,9 @@ export class MinionProj extends Entity {
       // 大力士甲虫/纸莎草 +2——首版聚合了 equipStats.minionKB 但漏消费，终审补接）
       const owner0 = this.ownerRef();
       const mkb = (owner0 as unknown as { equipStats?: { minionKB?: number } } | null)?.equipStats?.minionKB ?? 0;
-      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5 + mkb, -1, game);
+      const pen0 = (owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0;
+      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5 + mkb, -1, game, pen0); // ⑥
+      applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
       this.attackFlash = 24;
       anyHit = true;
     }
@@ -725,8 +729,7 @@ export class MinionProj extends Entity {
       const owner = this.ownerRef();
       // 随从/哨兵伤害：武器基伤 × summonDamageMult（live 刷新，换装即时生效，
       // Projectile.cs:15368 语义）+ 护甲穿透（对随从弹幕生效 :12068）
-      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.summonDamageMult : 1))
-        + (owner ? owner.equipStats.armorPen : 0));
+      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.summonDamageMult : 1))); // ⑥ pen 移 hit 时
       // 爆炸烈焰塔族（AI_130，Projectile.cs:65194-65450 1:1）：
       // 待机帧 0 → 锁定目标(900px 内)转向 → 开火动画帧 1-6 每 4t（第 12t 从炮口
       // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
@@ -831,6 +834,7 @@ export class MinionProj extends Entity {
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
             en.hurt(res.dmg, 0, 0, game);
+            applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           }
         }
         return;
@@ -852,6 +856,7 @@ export class MinionProj extends Entity {
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
                 en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game);
+                applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
                 boom++;
               }
             }
@@ -930,6 +935,7 @@ export class MinionProj extends Entity {
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
                   en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game);
+                  applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
                 }
               }
               game.spawnParticles(px, py, `hsl(${Math.floor(Math.random() * 360)},90%,65%)`, 8, 2.4, { life: 26 });
@@ -966,7 +972,7 @@ export class MinionProj extends Entity {
     if (!p) { this.dead = true; return; }
     const tgt = this.nearestEnemy(game, MINION_SHOOT[this.projId] ? 1000 : 700);
     // 基础伤害（每 tick 按当前装备 live 重算 = Projectile.cs:15368；+armorPen）
-    const dmg0 = Math.max(1, Math.round(this.damage * p.summonDamageMult) + p.equipStats.armorPen);
+    const dmg0 = Math.max(1, Math.round(this.damage * p.summonDamageMult)); // ⑥ pen 移 hit 时
     // ---- 旗舰家族分发（源码行号见各方法注释；先于通用运动）----
     if (this.projId >= 626 && this.projId <= 628) { this.dragonSegment(game, p, dmg0); return; }
     if (this.projId === 625) { this.dragonHead(game, p, dmg0); return; }

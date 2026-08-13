@@ -220,10 +220,24 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     return Math.floor(t / 8) % Math.min(4, frames);
   }
   // 克苏鲁之眼(FindFrame case 4, cs:77607-77631):0/1/2 三帧眨眼各 7 tick,
-  // ai[0]>1(二阶段)帧偏移 +3(张嘴形态)
+  // ai[0]>1 帧偏移 +3(张嘴形态)——门取真 ai[0](Enemy.ai0):变身段一(ai0==1)仍闭嘴帧,
+  // 段二(ai0==2)起张嘴(此前挂 phase>1,变身一起手就张嘴,早了 100t)
   if (id === 4) {
     const blink = Math.floor(t / 7) % 3;
-    return Math.min(frames - 1, blink + (e.phase > 1 ? 3 : 0));
+    return Math.min(frames - 1, blink + (e.ai0 > 1 ? 3 : 0));
+  }
+  // 克苏鲁之脑（FindFrame case 266，cs:73215-73237）：frameCounter>6 推进
+  // （7t/帧，cs:73216-73221）；一相（ai[0]>=0 且 localAI[2]==0）循环 0..3，
+  // 二相 4..7（低于 4 抬到 4、越 7 回卷 4）——此前走末尾通用档全 8 帧连播
+  if (id === 266) {
+    const idx = Math.floor(t / 7) % 8;
+    const phase2 = e.ai0 < 0 || e.lai2 !== 0;
+    return phase2 ? Math.max(4, idx) : Math.min(3, idx);
+  }
+  // 克眼仆从(FindFrame case 5, cs:77633-77643):frameCounter 每 8t 推进一帧、
+  // 越界回卷帧 0（此前走末尾通用 6t 档,快了 1/3）
+  if (id === 5) {
+    return Math.floor(t / 8) % frames;
   }
   // 训练假人 488（FindFrame case 488，cs:71516-71544）：摇晃动画帧由受击强度驱动——
   // num140 = 方向==-1 ? 4 : 6；帧 = ceil(shake/num140)（dir==1 再 +5）；shake 每帧 -1
@@ -762,6 +776,7 @@ export class Renderer {
   ) {
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
+    this.mainPlayer = player;   // 克脑镜像（Main.cs:24799-24843 以玩家中心镜像）等取用
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
     this._liquidNow = performance.now(); // 帧 first thing 采样：背景水/瀑布/前景水共用同一时刻
@@ -938,7 +953,7 @@ export class Renderer {
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
     for (const e of sorted) {
-      if (e instanceof Enemy) { this.drawEnemy(e, world, entities); this.drawHealthBar(e); }
+      if (e instanceof Enemy) { this.drawEnemy(e, world, entities); this.drawHealthBar(e, world.isExpert); }
       else if (e instanceof ItemDrop) this.drawDrop(e);
       else if (e instanceof TownNPC) { this.drawTownNPC(e); this.drawHealthBar(e); }
       else if (e instanceof Tombstone) this.drawTombstone(e);
@@ -1343,6 +1358,8 @@ export class Renderer {
   }
   /** 远端玩家（Game.render 每帧注入；单机空数组零开销） */
   remotePlayers: Player[] = [];
+  /** 主角引用（Game.render 每帧注入；克脑四镜像 Main.cs:24799-24843 取玩家中心） */
+  mainPlayer: Player | null = null;
   /** 高尔夫蓄力显示（Game 注入：力度条 + 预测线；Main.cs:30690-30721/:42933-42966） */
   golfPower: { x: number; y: number; rel: number; ball: import('../entities/GolfBall').GolfBall } | null = null;
   /** 光照合成 ImageData 复用(尺寸变化才重建) */
@@ -1408,11 +1425,13 @@ export class Renderer {
    *  life != lifeMax 即显示（无时间衰减——原版打到没满血就一直显示）；画在脚底
    *  +10+NPCAddHeight；填充 36px×比例；绿→黄→红渐变（:21766-21778）；光照亮度调
    *  alpha（:45417 Brightness）。蠕虫段不画（头部血条代表全链）；毁灭者原版为
-   *  全链共享一条（destroyerHB 平滑），此处近似画在头下。 */
-  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow'] }) {
+   *  全链共享一条（destroyerHB 平滑），此处近似画在头下。专家档克脑 266 不画
+   *  （Main.cs:45321 `(!expertMode || type != 266)` 门——有四镜像在,血条会穿帮）。 */
+  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow'] }, expert = false) {
     const hp = e.hp, maxHp = e.maxHp;
     if (hp <= 0 || hp >= maxHp) return;
     if (e.wormFollow) return;
+    if (expert && e.vanillaId === 266) return;   // Main.cs:45321
     if (!this.atlas) return;
     const hb1 = this.atlas.ensureVImage('vanilla/HealthBar1.png');
     const hb2 = this.atlas.ensureVImage('vanilla/HealthBar2.png');
@@ -1586,6 +1605,8 @@ export class Renderer {
       // 402 星尘织带蠕虫（Main.cs:23848-23889 case 402 独占）：单 NPC 自绘
       // oldPos 拖尾（403/404 节段 + Glow_133/134 加色）+ 头本体与 Glow_135
       if (e.vanillaId === 402) { this.drawStardustWorm(e); return; }
+      // 266 克苏鲁之脑（Main.cs:24799-24843 专家/FTW 四镜像 + :22949-22951 Y 偏移）
+      if (e.vanillaId === 266) { this.drawBrainOfCthulhu(e, world); return; }
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
       const frameIdx = vanillaFrameIdx(e, frames);
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
@@ -1654,11 +1675,14 @@ export class Renderer {
         const pad = grounded ? this.spriteBottomPad(r, `npc${e.vanillaId}:f${frameIdx}`) : 0;
         const anchorY = grounded ? -r.sh + pad : -r.sh / 2;
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
-        // ---- 冲刺残影（Main.cs:25469 EoC：ai[1]≥4 且 ai[0]==3 冲刺态 → 沿 oldPos 画
-        //      9 层鬼影，每层 RGBA × 0.5×(10−i)/20（越旧越淡），同一帧/旋转/镜像，
-        //      锚点同本体（中心+eocOff）。本体先画在变换内→此处插在本体前 = 鬼影在身后。
-        //      门条件近似为 dashing && phase≥2（原版 ai[1] 计连冲次数 ≥4 档）----
-        if (e.vanillaId === 4 && e.dashing && e.phase >= 2) {
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
+        // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
+        //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA
+        //      × 0.5×(10−i)/20（越旧越淡），同一帧/旋转，锚点同本体（中心+eocOff）。
+        //      原版该分支在 DrawNPC 本体 Draw 之后求值 → 鬼影压在本体之上（越近越深）；
+        //      此前近似门 dashing && phase≥2 把普通 3 连冲也画了鬼影且画在本体之前。
+        //      仓内映射：ai0=ai[0]、state=ai[1]（见 Enemy.eocAI 头注）----
+        if (e.vanillaId === 4 && e.ai0 === 3 && e.state >= 4) {
           for (let i = 1; i < 10; i++) {
             const depth = e.historyDepth();
             if (i >= depth) break;
@@ -1675,7 +1699,6 @@ export class Renderer {
           }
           ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
         }
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
@@ -2048,6 +2071,57 @@ export class Renderer {
    *  头 = NPC_402 + Glow_135×num291。锚点 = 碰撞盒中心（origin halfSize），旋转
    *  随 visAngle/oldRot。【未接登记】DrawPrettyStarSparkle（:23888 头部星尘闪光，
    *  独立 sparkle 绘制原语）未移植。 */
+  /** 266 克苏鲁之脑（Main.cs:24799-24843 专家/FTW 四镜像 + :22949-22951 Y 下垂）：
+   *  life<lifeMax 且（专家 || FTW）→ 以玩家中心镜像画 4 份：alpha 因子 =
+   *  1-life/lifeMax（专家 ×2，FTW 置 1）平方后钳 0..1，乘进整体 alpha；
+   *  镜像位 = 玩家中心 ±(|dx|,|dy|)（num145 0..3：X 取正 0/2、Y 取正 0/1）。
+   *  本体照常最后画。全体绘制 Y 偏移 +50×scale（Main.cs:22950 case 266 num47）——
+   *  贴图下垂出碰撞盒下缘（克脑主体在盒下半） */
+  private drawBrainOfCthulhu(e: Enemy, world: World) {
+    if (!this.atlas) return;
+    const frames = Math.max(1, e.vanilla?.frames ?? 1);
+    const frameIdx = vanillaFrameIdx(e, frames);
+    const r = this.atlas.vnpc(266, frameIdx);
+    if (!r) return;
+    const ctx = this.ctx;
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const yOff = 50 * scale;   // Main.cs:22950 num47 += 50*rCurrentNPC.scale
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255; // NPC.Opacity
+    const mirrored = e.facing > 0;   // 同通用路径朝向镜像（贴图默认朝左）
+    // 四镜像幻影（Main.cs:24802-24841）
+    const pl = this.mainPlayer;
+    const ftw = !!world.seedFlags?.getGoodWorld;
+    if (pl && e.hp < e.maxHp && (world.isExpert || ftw)) {
+      let k = 1 - e.hp / e.maxHp;
+      if (world.isExpert) k *= 2;
+      k *= k;
+      if (ftw) k = 1;
+      k = Math.max(0, Math.min(1, k));
+      const dx = Math.abs(e.cx - pl.cx), dy = Math.abs(e.cy - pl.cy);
+      for (let n = 0; n < 4; n++) {
+        const sx = n === 0 || n === 2 ? 1 : -1;   // :24822-24829
+        const sy = n === 0 || n === 1 ? 1 : -1;   // :24831-24838
+        ctx.save();
+        ctx.translate(pl.cx + sx * dx, pl.cy + sy * dy + yOff);
+        ctx.scale(scale, scale);
+        if (mirrored) ctx.scale(-1, 1);
+        ctx.globalAlpha = Math.max(0, Math.min(1, opacity * k));
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2, r.sw, r.sh);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    }
+    // 本体（同通用路径中心锚 + 朝向镜像 + Y 偏移）
+    ctx.save();
+    ctx.translate(e.cx, e.cy + yOff);
+    ctx.scale(scale, scale);
+    if (mirrored) ctx.scale(-1, 1);
+    ctx.globalAlpha = opacity;
+    ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2, r.sw, r.sh);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   private drawStardustWorm(e: Enemy) {
     const ctx = this.ctx;
     if (!this.atlas) return;
@@ -3159,7 +3233,8 @@ export class Renderer {
     // life != lifeMax 即常驻显示——城镇 NPC 受伤掉血后可见；贴图条加载未就绪也照画）
     this.drawEnemyHpBar(n);
     // ---- 表情气泡（EmoteBubble.Draw :201-224：Extra[48] 8 列网格 34px/格；
-    //      首尾 6t 用边框帧 (1,0) 否则 (0,0)；图标 (emote*2%8+anim, 1+emote/4)。
+    //      边框帧 = (!pop) ? (1,0) : (0,0)——稳定期用满框 (1,0),首尾 6t 弹出/收起
+    //      用尾帧 (0,0)(原版 `(!flag)?1:0`,终审曾反着写);图标 (emote*2%8+anim, 1+emote/4)。
     //      头顶底锚（GetPosition 的头顶锚近似）----
     if (n.emote >= 0 && n.emoteLife > 0 && this.atlas) {
       const sheet = this.atlas.ensureVImage('vanilla/Extra_48.png');
@@ -3169,7 +3244,7 @@ export class Renderer {
         ctx.save();
         ctx.translate(n.cx, n.y - 2);
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(sheet, (pop ? 1 : 0) * F, 0, F, F, -F / 2, -F, F, F);
+        ctx.drawImage(sheet, (pop ? 0 : 1) * F, 0, F, F, -F / 2, -F, F, F);
         if (!pop) {
           const anim = Math.floor((n.emoteTotal - n.emoteLife) / 12) % 2;
           ctx.drawImage(sheet, (n.emote * 2 % 8 + anim) * F, (1 + Math.floor(n.emote / 4)) * F,

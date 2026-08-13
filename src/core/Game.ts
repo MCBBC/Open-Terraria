@@ -57,7 +57,7 @@ import {
   musicBoxRecordItem, musicBoxDropItemOf, fountainDropItemOf, announcementBoxMessage,
   MUSIC_BOX_EMPTY_VID,
 } from '../world/wiring/devices';
-import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, type PartyState } from '../world/wiring/party';
+import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, partyNaturalAttempt, type PartyState } from '../world/wiring/party';
 import { LanternNight } from '../world/LanternNight';
 import type { SaveData } from '../save/serialize';
 import { placePortal as placePortalAt, portalRegistry, clearPortals, type Portal } from '../entities/Portal';
@@ -74,8 +74,10 @@ import {
   furnitureSlotCount, fitsFurniture, type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
+import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath } from '../player/Appearance';
@@ -166,11 +168,15 @@ import { Arrow } from '../entities/Arrow';
 import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
+import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
+import { MeteorChunk } from '../entities/MeteorChunk';
+import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
+import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
 import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHitLine } from '../physics/LineOfSight';
@@ -178,6 +184,7 @@ import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
 import type { DropExtras } from '../drops/NpcDrops';
 import { npcValueOf } from '../drops/NpcDrops';
+import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -273,7 +280,9 @@ const BOSS_GAME_EVENT_BY_NPC: Record<number, number> = {
   4: 13,           // EyeOfCthulhu（downedBoss1）
   13: 14, 266: 14, // EaterOfWorlds / BrainOfCthulhu（downedBoss2）
   35: 15,          // SkeletronHead（downedBoss3）
-  113: 19,         // WallOfFlesh（StartHardmode）
+  // 113 肉山已从本表移除：事件 19 由上方困难模式链按原版语义投递
+  // （SetEventFlagCleared 捕获的是 StartHardmode **之前**的 hardMode——仅首次击杀
+  // 触发灯笼夜；本通用路径无条件触发会每次击杀都预约，2026-08-13 修正）
   262: 12,         // Plantera
   245: 6, 246: 6,  // Golem 头/身
   370: 7,          // DukeFishron
@@ -440,6 +449,9 @@ export function dropInventoryOnDeath(
   });
 }
 
+/** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付） */
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'close';
+
 export interface GameCallbacks {
   onWorldReady: () => void;
   onInventoryChanged: () => void;
@@ -448,7 +460,7 @@ export interface GameCallbacks {
   /** width = NewTextMultiline WidthLimit（-1 不限；广播盒 460） */
   onChat?: (text: string, r: number, g: number, b: number, width?: number) => void;
   /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
-  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close'; label: string }>, portrait?: string | null) => void;
+  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null) => void;
   onNpcDialogClose?: () => void;
   /** 哥布林重铸界面（Main.InReforgeMenu） */
   onReforgeOpen?: () => void;
@@ -514,6 +526,7 @@ export class Game implements GameHooks {
   /** 上一 tick 的夜内时间（0-32400t；鹿角怪 16200t 午夜跨越检测，Main.cs:64602-64603） */
   private _lastNightTicks = 0;
   private _prevRightDown = false;
+  private _prevMouseDown = false;
   /** 入侵周期公告倒计时（原版 Main.invasionWarn，3600 帧一轮；不存档） */
   private invasionWarn = 0;
   /** 月事件 wave≥15 胜利后的当日强制季节（原版 Main.forceHalloweenForToday /
@@ -1355,9 +1368,12 @@ export class Game implements GameHooks {
       // 缩放调节
       if (code === 'Equal' || code === 'NumpadAdd') this.setZoom(this.camera?.zoomTarget + 0.15);
       if (code === 'Minus' || code === 'NumpadSubtract') this.setZoom(this.camera?.zoomTarget - 0.15);
-      // F2:图片 → 像素方块群导入(自研创意工具,原版无;Input 已 preventDefault)。
-      // 原 F11 与系统/浏览器全屏冲突,2026-08-12 改 F2
-      if (code === 'F2') this.openPixelArtImport();
+      // F2:无敌+无限魔力(调试工具,原版无;Input 已 preventDefault)——F2 原像素
+      // 画导入 2026-08-13 让位本键,迁往 F1
+      if (code === 'F2') this.toggleDebugGod();
+      // F1:图片 → 像素方块群导入(自研创意工具,原版无;Input 已 preventDefault)。
+      // 原 F11 与系统全屏冲突 → F2 → 2026-08-13 再迁 F1
+      if (code === 'F1') this.openPixelArtImport();
       // T:旅程模式时间倍率循环（CreativePowers.ModifyTimeRate.TargetTimeRate 1-24×，
       // CreativePowers.cs:866-884；Main.cs:6278 UpdateTimeRate 消费）——仅旅程世界可用，
       // 原版为时间菜单滑杆，此处取最小实现：按键循环常用档 + toast
@@ -1614,6 +1630,8 @@ export class Game implements GameHooks {
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
     this.wiring = new Wiring(w.store);
     this.wiring.worldSurface = w.groundLevel;
+    // NPC.downedPlantBoss（Wiring 蜥蜴砖致动/神庙传送器限制解除门，Wiring.cs:3216/:1554）
+    this.wiring.planteraDowned = !!w.flags['downed_262'];
     attachDevices(this.wiring, this.makeDeviceCtx());
     this.scanTriggerTiles();
     this.lighting = new LightingEngine(w);
@@ -1624,6 +1642,7 @@ export class Game implements GameHooks {
       store: w.store,
       worldSurface: w.groundLevel,
       rockLevel: w.rockLevel,
+      dungeonX: w.dungeonX,
       flags: w.flags,
       crimson: w.crimson,
       get isDay() { return w.clock.isDay; },
@@ -1748,6 +1767,9 @@ export class Game implements GameHooks {
       // 救援 NPC（bound）：世界生成期放置（原版 WorldGen 放置 BoundGoblin/BoundMechanic/
       // WebbedStylist/Golfer，TaxCollector 为地狱酷刑者——此处近似为直接 bound 解救）
       this.placeBoundRescueNpcs();
+      // 渔夫任务链首掷（WorldGen.cs:22655 → Main.AnglerQuestSwap）+ 沙滩睡渔夫放置
+      this.anglerQuestSwap();
+      this.placeSleepingAngler();
     }
     // 昼夜事件基线：季节旗标 + 时钟快照
     this.checkSeasonal();
@@ -1814,6 +1836,38 @@ export class Game implements GameHooks {
     }
   }
 
+  /** 沙滩睡渔夫（NPC 376）放置。原版由 SpawnNPC 海洋段掷出（NPC.cs:1705-1728 海洋
+   *  水域 / :1835-1837 沙滩干沙分支——两分支同门：!savedAngler && !AnyNPCs(376) &&
+   *  横向边缘 380 格内 && 地表以上）。本仓在生成期与入驻轮确定性补放：就近取出生点
+   *  一侧的合格干沙格（空气×2 + 沙格 + 地表以上），差异仅"何时放"不含条件语义。
+   *  解救后写 flags.savedAngler（NPC.savedAngler，WF:1334/2160 随存档）。 */
+  private placeSleepingAngler(): boolean {
+    const w = this.world;
+    const st = w.store;
+    if (w.flags.savedAngler) return false;   // NPC.savedAngler
+    if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'angler')) return false;
+    // Main.tileSand（NPC.cs:7177-7180）：黄沙/黑檀沙/珍珠沙/猩红沙
+    const sands = new Set(['sand', 'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block']
+      .map((k) => TILE_BY_KEY[k]).filter((v): v is number => v !== undefined));
+    const surface = Math.floor(w.groundLevel);                              // y < worldSurface 门（:1835）
+    const sides: Array<[number, number]> = [[8, 1], [st.w - 9, -1]];        // 双侧海洋，向外到内
+    const spawnTx = Math.floor((this.player.cx || w.spawnX * TILE) / TILE);
+    sides.sort((a, b) => Math.abs(a[0] - spawnTx) - Math.abs(b[0] - spawnTx));
+    for (const [x0, dir] of sides) {
+      for (let k = 0; k < 380; k++) {         // WorldGen.beachDistance（WorldGen.cs:4102）
+        const x = x0 + dir * k;
+        if (x < 8 || x > st.w - 9) break;
+        for (let y = Math.max(4, surface - 40); y < surface; y++) {
+          if (!sands.has(st.get(x, y)) || st.liquid[st.idx(x, y)] > 0) continue;   // !waterTile
+          if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;              // 空气×2
+          if (this.placeBoundNpc('angler', 'savedAngler', x, y - 1)) return true;
+          break;
+        }
+      }
+    }
+    return false;
+  }
+
   /** 深度带内找 bound 落脚点（空气×2 + 下方实心），返回 [x, 脚底上一格y] */
   private findBoundSpotByDepth(yTop: number, yBot: number): [number, number] | null {
     const st = this.world.store;
@@ -1847,6 +1901,7 @@ export class Game implements GameHooks {
     const flagByKey: Record<string, string> = {
       goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
       stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
+      angler: 'savedAngler',   // NPC.savedAngler（睡渔夫 376 解救 → 渔夫 369 入镇）
     };
     const flag = flagByKey[npc.npcKey];
     if (flag) this.world.flags[flag] = true;
@@ -2405,6 +2460,7 @@ export class Game implements GameHooks {
         if (!countsAsACritter(e.vanillaId)) continue;
         if (e.x < px + pw && e.x + e.w > px && e.y < py + ph && e.y + e.h > py) {
           w.bestiary.registerSight(e.vanillaNetId !== 0 ? e.vanillaNetId : e.vanillaId);
+          this.achCheckBestiary();
         }
       }
     }
@@ -2426,7 +2482,9 @@ export class Game implements GameHooks {
         this.player.minionTargetId = this.player.minionTargetId === bestId ? -1 : bestId;
       }
     }
-    this._prevRightDown = inp.rightDown;
+    // ★_prevMouseDown/_prevRightDown 须在 updateUse 【之后】记录上一帧值——
+    // 此前记在 updateUse 之前(= 本帧值),⑩ 边沿门 mouseDown&&!prev 恒 false,
+    // 非 autoReuse 武器(链球/回旋镖/悠悠球/长矛)全体掷不出(2026-08-13 实锤)
     this.updateNebulaBoosters();
     if (this.player.sleeping) {
       const bx = Math.floor(this.player.cx / TILE), by = Math.floor((this.player.y + this.player.h + 2) / TILE);
@@ -2644,6 +2702,9 @@ export class Game implements GameHooks {
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
     this.prevSwingMouse = !!this.input?.mouseDown; // 挥剑点击沿（非 autoReuse 武器需重新点击）
+    // ⑩ 边沿门的上一帧快照（须在 updateUse 后记录,见上方注记）
+    this._prevRightDown = !!inp?.rightDown;
+    this._prevMouseDown = !!inp?.mouseDown;
 
     // ---- 实体 ----
     this.entities.update(dt, this);
@@ -2790,11 +2851,28 @@ export class Game implements GameHooks {
     LanternNight.updateTime(this.lanternCtx());
 
     // ---- Boss 逻辑 ----
-    if (this.boss) {
+    bossBlock: if (this.boss) {
       // 原版无通用"日出剔除 Boss"机制：EoC 白天走 AI_004 自漂离、骷髅王族白天狂暴、
       // 其余 Boss（史莱姆王/世吞/克脑/蜂后/机械三王…）白天照常战斗——
       // 此前的通用 dayKill 会把白天召唤的史莱姆王秒删（史莱姆王冠原版任意时间可用）
       if (this.boss.dead) {
+        // EoW 段死亡 ≠ 战斗结束（realLife=-1 各段独立，:51524-51527）：场上仍有
+        // 13/14/15 时换锚到存活段续战（血条/击败记账跟着新锚走）——仅最后一段死
+        // （DropEoWLoot boss 位语义）才走下方击败流程。逃走（腐化外下潜整链清除）
+        // 不换锚，照常走 bossFled 分支
+        const bossVid = this.boss.vanillaId ?? 0;
+        if (!this.boss.bossFled && bossVid >= 13 && bossVid <= 15) {
+          const rest = (this.entities.enemies as Enemy[]).find((e) => !e.dead
+            && (e.vanillaId ?? 0) >= 13 && (e.vanillaId ?? 0) <= 15);
+          if (rest) {
+            this.boss = rest;
+            break bossBlock;
+          }
+          if (bossVid !== 13) {
+            // 记账归一：原版 downedBoss2 单旗覆盖世吞/克脑，本仓键为 downed_13
+            this.boss.vanillaId = 13;
+          }
+        }
         // 注意:?? 与 || 混用必须加括号(esbuild 语法限制)
         const bname = ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss';
         if (this.boss.bossFled) {
@@ -2807,9 +2885,20 @@ export class Game implements GameHooks {
           this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
           w.flags[downedKey] = true;
-          // 成就：肉山击杀 → 困难模式开启（WorldGen.cs:31884 InitializeHardMode 尾
-          // event 9 → ITS_HARD；hardMode 世界变换接通后此事件应随其迁移）
-          if (this.boss.vanillaId === 113) this.achievements.notifyProgressionEvent(9);
+          // NPC.downedPlantBoss → Wiring 死门接活（Wiring.cs:3216 蜥蜴砖致动 / :1554
+          // 神庙传送器捕获：世纪之花前两处 return 拒绝）
+          if (this.boss.vanillaId === 262 && this.wiring) this.wiring.planteraDowned = true;
+          // 肉山：困难模式世界变换全链（NPC.cs:80281-80292 原序：砖盒 → 捕获旧
+          // hardMode → StartHardmode(置位+V 带转化+洞穴墙回填) → 灯笼夜 19(仅首次)
+          // → misc[15] 公告 + 成就 9(随本链迁移,2026-08-13 之前击杀即发的旧点已删))
+          if (this.boss.vanillaId === 113) {
+            const wof = this.boss;
+            createBrickBoxForWallOfFlesh(w.store, Math.trunc(wof.cx / 16), Math.trunc(wof.cy / 16), wof.w, w.crimson);
+            const { wasHard } = startHardmode(w);
+            if (!wasHard) LanternNight.onGameEventCleared(19);
+            this.newText(Lang.misc(15), 50, 255, 130);
+            this.achievements.notifyProgressionEvent(9);
+          }
           // 首胜灯笼夜预约（NPC.cs NPCLoot 各 case SetEventFlagCleared 实参 →
           // OnGameEventClearedForTheFirstTime default/10/16-18 翻转；4/21/22 排除）。
           // id 表：11 史王 8 蜂后 13 EoC 14 世吞|克脑 15 骷髅王 19 肉山 12 世纪之花
@@ -2817,6 +2906,13 @@ export class Game implements GameHooks {
           if (this.boss.vanillaId != null) {
             const ev = BOSS_GAME_EVENT_BY_NPC[this.boss.vanillaId];
             if (ev !== undefined) LanternNight.onGameEventCleared(ev);
+            // 三王全灭 → 保底世花球茎（NPC.cs:79578-79585 case 16/17/18 →
+            // WorldGen.GeneratePlanteraBulbOnAllMechsDefeated：netMode!=1 &&
+            // hardMode && 三旗齐 → 丛林侧搜索框生成恰好一个灯泡）
+            if ((ev === 16 || ev === 17 || ev === 18) && w.flags.hardMode
+              && w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127']) {
+              this.evolution.planteraBulbBurst();
+            }
           }
           // 星璇塔触发（NPC.cs:80194-80197：教徒 439 死 → TriggerLunarApocalypse——
           // downed_439 通用置位处直接追加，四塔就位 + 满盾 + misc[43] 公告）
@@ -2826,6 +2922,13 @@ export class Game implements GameHooks {
         // （原版：老人在诅咒时消失，骷髅王离场/未被击败后重新生成；击败后转为裁缝）
         if (this.boss.vanillaId === 35 && !w.flags.downedSkeletron) {
           this.maybeRespawnOldMan();
+        }
+        // EoW/BoC 击杀 → 陨石坠落置位（NPC.cs:80241-80259：
+        // 首杀（!downedBoss2）必掉，之后 50%）
+        if (this.boss.vanillaId === 13 || this.boss.vanillaId === 266
+          || this.boss.vanillaId === 14 || this.boss.vanillaId === 15) {
+          const boss2 = !!(w.flags['downed_13'] || w.flags['downed_266']);
+          if (!boss2 || Math.random() < 0.5) this.meteorPending = true;
         }
         this.boss = null;
       }
@@ -2847,6 +2950,9 @@ export class Game implements GameHooks {
         // 日晷冷却 -1（:64885-64887，使用时置 8 → 8 个黎明后归零可再用）
         if (w.fastForwardTimeToDawn) w.fastForwardTimeToDawn = false;
         if (w.sundialCooldown > 0) w.sundialCooldown--;
+        // 渔夫任务每日重掷（UpdateTime_StartDay :64852 → Main.AnglerQuestSwap）：清
+        // 今日交付名单/完成旗 + 按世界门（困难/邪恶类型/Boss 进度）重选任务鱼
+        this.anglerQuestSwap();
         // 成就：熬过一夜（Main.cs:64894 event 1）+ 血月夜结束（:64862-64866 event 5，
         // 血月旗在清除前求值——本块首两行即原序）
         this.achievements.notifyProgressionEvent(1);
@@ -2911,6 +3017,23 @@ export class Game implements GameHooks {
             ? 'Misc.StartedVictoryXmas' : 'Misc.EndedVictoryXmas'), 50, 255, 130);
         }
         this.checkSeasonal();
+        // 生日自然派对（BirthdayParty.CheckMorning→NaturalAttempt :62-143）：
+        // 派对女孩在场 + 冷却 + 1/10 → 在场 ≥5 NPC 时开生日派对
+        {
+          const town = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead)
+            .map((n) => (n as TownNPC).npcKey);
+          const ann = this.newText.bind(this);
+          const msg = partyNaturalAttempt(this.partyState, {
+            townNpcKeys: town,
+            girlPresent: town.includes('party_girl'),
+            anniversary: !!w.seedFlags?.tenthAnniversary,
+            rng: Math.random,
+            int: (a, b) => a + Math.floor(Math.random() * (b - a + 1)),
+          });
+          if (msg) ann(msg, 255, 0, 160);
+          // 成就：派对进行中（BirthdayParty.CheckForAchievement → prog 25）
+          if (partyIsUp(this.partyState)) this.achievements.notifyProgressionEvent(25);
+        }
         // 入侵冷却递减（Main.cs:64846-64849；1.4.5.6 无置位点，仅保留语义）
         if (w.invasionDelay > 0) w.invasionDelay--;
         // 日食自然 roll（Main.cs:64898-64920）：hardMode && downedMechBossAny &&
@@ -2965,8 +3088,19 @@ export class Game implements GameHooks {
           this.newText(Lang.misc(99), 255, 0, 160);
         }
       }
+      if (crossed(Clock.DUSK)) {
+        // Star.NightSetup（Star.cs:41-60）：每夜重掷流星强度（10%→3-5x 流星夜）
+        this.starfallBoost = nightStarfallBoost(!!w.seedFlags?.tenthAnniversary);
+        this._skyMeteorShown = false;
+        // 陨石入夜 roll（StartNight :64713-64716：1/50 且 downedBoss2）。
+        // 审计修正 2026-08-13:原版该 roll 在 stopEvents 置位(:64717)之前——
+        // 灯笼夜不压制陨石(曾加 !lanternsUp 门,偏离原版)
+        if (Math.random() < 1 / 50 && (w.flags['downed_13'] || w.flags['downed_266'])) {
+          this.meteorPending = true;
+        }
+      }
       // EoC 自然召唤 roll（StartNight :64732-64764）：!downedBoss1（BossesKeepSpawning
-      // = getGood×dontStarve×非十周年 / 天顶 noAltars 豁免）&& maxHp>=200 && def>10 &&
+      // = getGood×dontStarve×非十周年 / 天顶 noAltars 豁免）&& statLifeMax>=200 && def>10 &&
       // 1/3（天顶 1/10）&& 城镇 NPC>=4 → spawnEye + misc[9]。
       // 入夜 roll 整段门 = !IsFastForwardingTime() && !stopEvents（:64728）——晷快进/
       // 灯笼夜/天界入侵/月总在场或倒计时全部压掉（stopEvents 须在 CheckNight 之后
@@ -2980,7 +3114,9 @@ export class Game implements GameHooks {
         const bossesKeepSpawning = !!(sf.getGoodWorld && sf.theConstant && !sf.tenthAnniversary);
         const eocEligible = !w.flags['downed_4'] || bossesKeepSpawning || !!sf.skyblock;
         const townCount = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).length;
-        if (eocEligible && player.maxHp >= 200 && player.defense > 10
+        // statLifeMax>=200（:64737）= 永久上限（baseMaxHp）；maxHp 是 statLifeMax2
+        // （含生命力药水等临时加成）——挂错会被一瓶药水提前刷出 EoC
+        if (eocEligible && player.baseMaxHp >= 200 && player.defense > 10
           && townCount >= 4 && Math.random() < (sf.skyblock ? 1 / 10 : 1 / 3)) {
           this.spawnEyePending = true;
           this.newText(Lang.misc(9), 50, 255, 130);
@@ -3019,6 +3155,100 @@ export class Game implements GameHooks {
         w.sundialCooldown = 0;
         w.moondialCooldown = 0;
         this.newText(Lang.misc(8), 50, 255, 130);
+      }
+    }
+    // ---- 夜间坠星（SpawnFallingObjects :71861-71898：每 tick 概率
+    //      p = 10×(w/4200)×boost/8000 = w×boost/3,360,000；运气定向 RollLuck(15)==0
+    //      → 玩家±640px——单机用 luck 字段近似）----
+    if (!w.clock.isDay && this.starfallBoost > 0) {
+      const p = (w.store.w * this.starfallBoost) / 3360000;
+      if (Math.random() < p) {
+        const st = w.store;
+        let sx = (Math.floor(Math.random() * (st.w - 50)) + 100) * TILE;
+        const sy = Math.floor(Math.random() * Math.floor(st.h * 0.05)) * TILE;
+        // 运气定向（玩家在地表以上 + 幸运命中）
+        const homing = !player.dead && player.y < w.groundLevel * TILE && Math.random() < Math.max(0, player.luck) * 0.0667;
+        if (homing) sx = player.cx + Math.floor(Math.random() * 1281) - 640;
+        if (FallingStar.canSpawnAt(st, sx, sy)) {
+          let vx = Math.floor(Math.random() * 201) - 100;
+          let vy = Math.floor(Math.random() * 200) + 100;
+          const k = 12 / Math.hypot(vx, vy);
+          vx *= k; vy *= k;
+          this.entities.add(new FallingStar(sx, sy, vx, vy, 180, homing, true), 'projectiles');
+        }
+      }
+      // 流星夜（boost>3）附魔夜行者 484（NPC.cs:2316-2319：云≤55 无云背景 RollLuck(2)==0）
+      if (this.starfallBoost > 3 && Math.random() < 0.5 && !player.dead
+        && player.y < w.groundLevel * TILE) {
+        const e = Enemy.fromVanilla(484, player.cx + (Math.random() - 0.5) * 800, player.y - 200);
+        if (e) this.entities.add(e, 'enemies');
+      }
+    }
+    // ---- 陨石坠落消费（HandleMeteorFall :64948-64981：原始 Main.time>16200 即消费
+    //      ——夜=午夜后 / 昼=上午 9 点后均可落,白天杀 EoW 当天落是原版行为）----
+    if (this.meteorPending) {
+      const tod = w.clock.timeOfDay;
+      const rawTime = w.clock.isDay
+        ? (tod - Clock.DAWN) / (Clock.DUSK - Clock.DAWN) * 54000      // 昼 0-54000
+        : (((tod - Clock.DUSK) % 1 + 1) % 1) / (1 - (Clock.DUSK - Clock.DAWN)) * 32400; // 夜 0-32400
+      // 天幕流星(HandleMeteorFall :64952-64967:夜 time<15000 置 _canShowMeteorFall,
+      // 过 15000 线恰 ForceEntitySpawn 一颗 SkyEntity.Meteor——16200 落地前的窗口前奏;
+      // 仅夜间窗口有效,白天无天幕流星)
+      if (!w.clock.isDay && rawTime > 15000 && !this._skyMeteorShown) {
+        this._skyMeteorShown = true;
+        this.renderer?.sky?.spawnSkyMeteor(player.cx, player.cy, w.groundLevel * 16);
+      }
+      if (rawTime > 16200) {
+        this.meteorPending = false;
+        const st = w.store;
+        const host: MeteorHost = {
+          w: st.w, h: st.h, spawnX: w.spawnX,
+          groundLevel: w.groundLevel, rockLevel: w.rockLevel, store: st,
+          players: player.dead ? [] : [{ x: player.x, y: player.y, w: player.w, h: player.h }],
+          npcs: [
+            ...this.entities.enemies.filter((e) => !e.dead).map((e) => ({ x: e.x, y: e.y, w: e.w, h: e.h })),
+            ...this.entities.npcs.filter((n) => !n.dead).map((n) => ({ x: n.x, y: n.y, w: n.w, h: n.h })),
+          ],  // 原版 Main.npc 全量（敌怪+城镇）
+          rand: Math.random,
+          int: (a, b) => a + Math.floor(Math.random() * (b - a + 1)),
+          announce: () => this.newText(Lang.gen(59), 50, 255, 130),
+        };
+        const landed = dropMeteor(host);
+        if (landed) {
+          // 陨石全走 setTileSilent（不触发 onTileChanged）——手动失效落点 chunk
+          this.chunks.markDirtyArea(landed.i - 40, landed.j - 40, landed.i + 40, landed.j + 40);
+          this.lighting.dirty = true;   // 审计补缺:crater 全走 silent,光照不标脏则夜落陨石黑块
+        } else if (Math.random() < 1 / 3) {
+          // 陨石雨（StartMeteorShower :6189-6194：计数=[650,751)×4 持续整夜,
+          // 由下方每 tick 消费块掷 1078 伤害碎块——审计修正 2026-08-13:曾为
+          // 一次性 8×坠星 burst,且 FallingStar 落地掉 vi_75(流星雨=免费星农场,
+          // 偏离原版灾害语义;原版 1078 撞地无掉落))
+          w.meteorShowerCount = (650 + Math.floor(Math.random() * 101)) * 4;
+          this.newText(Lang.gen(92), 50, 255, 130);
+        }
+      }
+    }
+    // ---- 流星雨消费（WorldGen.UpdateWorld :71771-71810,每 tick）----
+    if (w.meteorShowerCount > 0) {
+      const st = w.store;   // 本块作用域（上方 3179 的 st 在陨石落点块内）
+      // 晷快进清零(:71774-71777)
+      if (w.isFastForwardingTime()) w.meteorShowerCount = 0;
+      else if (Math.random() < 1 / 4) {
+        // 出生:随机 x[100,w-50)×16、y<5%h×16;1/2 概率改玩家 ±2400px(clamp 800..)
+        const cst = w.store;
+        let sx = (100 + Math.floor(Math.random() * (cst.w - 50))) * TILE;
+        const sy = Math.floor(Math.random() * Math.floor(cst.h * 0.05)) * TILE;
+        if (!player.dead && Math.random() < 0.5) {
+          sx = Math.round(player.cx + (Math.floor(Math.random() * 4801) - 2400));
+          sx = Math.max(800, Math.min((cst.w - 50) * TILE, sx));
+        }
+        if (FallingStar.canSpawnAt(cst, sx, sy)) {
+          w.meteorShowerCount--;   // !SolidCollision 才计数(:71803 在 spawn 后递减)
+          const vx0 = Math.floor(Math.random() * 201) - 100;
+          const vy0 = 100 + Math.floor(Math.random() * 200);
+          const k0 = 12 / Math.hypot(vx0, vy0);
+          this.entities.add(new MeteorChunk(sx, sy, vx0 * k0, vy0 * k0), 'projectiles');
+        }
       }
     }
     // ---- 高尔夫计时推进（GolfState.cs:30-36 每帧+1，封顶 3600）----
@@ -3789,9 +4019,11 @@ export class Game implements GameHooks {
         this.input.rightDown = false;
       } else if (heldDef && viIdFromKey(heldDef.key) === 43) {
         if (!this.world.clock.isDay) {
-          this.useSuspiciousEye();
-          this.player.inv.removeAt(this.player.inv.selected, 1);
-          this.cb.onInventoryChanged();
+          // 被召唤门拦下（场上已有 NPC 4）时 SummonItemCheck=false → 不消耗（Player.cs:51441-51447）
+          if (this.useSuspiciousEye()) {
+            this.player.inv.removeAt(this.player.inv.selected, 1);
+            this.cb.onInventoryChanged();
+          }
         } else {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
         }
@@ -3952,9 +4184,11 @@ export class Game implements GameHooks {
       // 召唤道具（原版左键使用）
       if (viIdFromKey(heldDef.key) === 43) {
         if (!this.world.clock.isDay) {
-          this.useSuspiciousEye();
-          this.player.inv.removeAt(this.player.inv.selected, 1);
-          this.cb.onInventoryChanged();
+          // 被召唤门拦下（场上已有 NPC 4）时不消耗（SummonItemCheck，Player.cs:51441-51447）
+          if (this.useSuspiciousEye()) {
+            this.player.inv.removeAt(this.player.inv.selected, 1);
+            this.cb.onInventoryChanged();
+          }
         } else {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
         }
@@ -4125,7 +4359,7 @@ export class Game implements GameHooks {
         // 弹药分道（Player.cs:3820 bowEffectiveDamage 拆分）：箭吃箭袋/射手/蘑菇矿箭头，
       // 弹/火箭吃对应蘑菇矿头；Archery 不再误伤枪械
       const rKind = bowC?.useAmmo === 97 ? 'bullet' : bowC?.useAmmo === 771 ? 'rocket' : bowC?.useAmmo === 283 ? 'other' : 'arrow';
-      let damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind)) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
+      let damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind)) + (ammoC?.damage ?? 0); // ⑥ pen 移 hit 时
         let knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
         if (isArrowKind && this.player.equipStats.quiver) knockback *= 1.1; // 箭袋击退 ×1.1（:52713）
         const projId = ammoC?.shoot ?? bowC?.shoot ?? 1; // PickAmmo：projToShoot = 弹药 shoot
@@ -4140,7 +4374,8 @@ export class Game implements GameHooks {
         // 暴击链（审计 §6）：rangedCrit(装备/套装/词缀67-68配饰/buff) + 武器&弹药 item.crit
         const bowVid2 = bowVid ?? (heldDef?.vid ?? -1);
         bowArrow.critBonus = this.player.critChance('ranged')
-          + (itemCombat(bowVid2)?.crit ?? 0) + (ammoC?.crit ?? 0);
+          + (itemCombat(bowVid2)?.crit ?? 0) + (ammoC?.crit ?? 0) + (ps?.crt ?? 0); // ⑧ 词缀 crt
+        bowArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧ 词缀 arpen
         this.entities.add(bowArrow, 'projectiles');
         // ⑤ 霰弹族多弹丸（Player.cs:47326-47356/47539-47551）：爆管 534 rand(4,6) 发
         // 散布±40×0.05；霰弹枪 964 rand(3,5) ±35×0.04；四管 4703 固定 8 发（同散布，
@@ -4173,11 +4408,13 @@ export class Game implements GameHooks {
           : GUN_HANDGUN_VIDS.has(bowVid) ? 'gunHandgun' : 'gunShot');
         this.cb.onInventoryChanged();
       }
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw && cw.kind !== 'melee') {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw && cw.kind !== 'melee'
+      && ((cw as { autoReuse?: boolean }).autoReuse || (inp.mouseDown && !this._prevMouseDown))) { // ⑩ autoReuse 门
       // vi_* 数据驱动武器（1456 aiStyle 家族）：回旋镖/长矛/悠悠球/连枷/手雷/魔法/直射兜底。
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
       this.useCombatWeapon(cw, heldDef);
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && thrownCombat(heldDef)) {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && thrownCombat(heldDef)
+      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse || (inp.mouseDown && !this._prevMouseDown))) { // ⑩
       // 消耗型投掷武器（手里剑/飞刀/毒刀等，Item.shoot + consumable + noMelee 且无 useAmmo）：
       // 朝鼠标投出 item.shoot 投射物，消耗 1 个，数值全取 vanilla-itemcombat.json；
       // 投射物复用 Arrow（重力 0.3/tick = 原版 aiStyle 2 抛物线同值；命中可回收）
@@ -4197,18 +4434,19 @@ export class Game implements GameHooks {
           Math.cos(ang) * (c?.shootSpeed ?? 4), Math.sin(ang) * (c?.shootSpeed ?? 4), powderProj), 'projectiles');
       } else {
         // 穿透取原版 penetrate（手里剑 4；-1 无限上限 6）。
-        // ★伤害对账：1.4.4+ 投掷系并入 melee（Item 277 手里剑 SetDefaults melee=true）——
-        // 乘区=近战链×词缀+armorPen（此前裸 tc.damage 完全无乘区）
+        // ★伤害对账修正：投掷族是 ranged（手里剑 42/投刀 279/毒刀 287 I:1851-1868
+        // ranged=true；277 是长矛非手里剑——曾误认）乘区=远程链×词缀（审计 §5）；
+        // ⑥ armorPen 移 hit 时（hurt 第 5 参减防语义），磨刀不适用投掷
         const psT = this.heldPrefixStat();
-        const dmgT = Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('melee'))
-          + this.player.equipStats.armorPen + this.player.meleeArmorPen); // 磨刀穿甲含投掷
+        const dmgT = Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('ranged')));
         let pen = projectileData(tc.shoot)?.penetrate ?? 1;
         if (pen < 0) pen = 6;
         pen = Math.max(1, Math.min(pen, 6));
         const thrownArrow = new Arrow(px, py,
           Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
           dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key, { pierce: pen });
-        thrownArrow.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0); // 审计 §6（毒刀 crit=4）
+        thrownArrow.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6 + ⑧ crt；投掷=ranged 族（§5）
+        thrownArrow.armorPen = this.player.equipStats.armorPen + (psT?.arpen ?? 0); // ⑥+⑧
         this.entities.add(thrownArrow, 'projectiles');
       }
       this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -4218,13 +4456,25 @@ export class Game implements GameHooks {
     } else if (heldDef && [70, 1331, 560].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
       // Boss 召唤物(原版 Worm Food 70/Bloody Spine 1331/Slime Crown 560)
+      // 群系门（Player.cs:43107-43121/:43194-43208）：蠕虫食物需 ZoneCorrupt、
+      // 血腥脊椎需 ZoneCrimson——群系外整支不生效（不消耗/不进 useTime/无音效，
+      // 原版 if 内才 ApplyItemTime）；史莱姆王冠无门
       const svid = viIdFromKey(heldDef.key);
-      if (svid === 70) this.summonBoss('eater_of_worlds_head');
-      else if (svid === 1331) this.summonBoss('brain_of_cthulhu');
-      else this.summonBoss('king_slime');
-      this.player.inv.removeAt(this.player.inv.selected, 1);
-      this.player.useTime = 60;
-      this.cb.onInventoryChanged();
+      const scene = this.scene;
+      const zoneOk = svid === 70 ? (scene == null || scene.zoneCorrupt)
+        : svid === 1331 ? (scene == null || scene.zoneCrimson) : true;
+      if (zoneOk) {
+        const summoned = svid === 70 ? this.summonBoss('eater_of_worlds_head')
+          : svid === 1331 ? this.summonBoss('brain_of_cthulhu')
+            : this.summonBoss('king_slime');
+        // 门拦下（同型 Boss 在场/访客）不消耗——原版 SpawnOnPlayer 失败不回滚物品，
+        // 本仓以"召唤成功才扣"为准（审计 2026-08-13）
+        if (summoned) {
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.player.useTime = 60;
+          this.cb.onInventoryChanged();
+        }
+      }
       this.input.mouseDown = false;
     } else if (heldDef && [556, 544, 557].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
@@ -4240,6 +4490,39 @@ export class Game implements GameHooks {
         else this.summonBoss('skeletron_prime');
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 60;
+        this.cb.onInventoryChanged();
+      }
+      this.input.mouseDown = false;
+    } else if (heldDef && viIdFromKey(heldDef.key) === 3328
+      && inp.mouseDown && this.player.useTime === 0) {
+      // 世纪之花宝藏袋开包（Player.OpenBossBag case 3328，Player.cs:7077-7135）：
+      // 面具 1/7 + 神庙钥匙恒 + 孢子囊 3336 恒 + 苗苗 1/15 + 斧头 1/20 +
+      // 俾格米法杖 1/2 + 荆棘钩 1/10 + rand(8) 八选一（0 榴弹发射器+火箭×50-150）。
+      // TryGettingDevArmor（开发者套装小概率）未实装，登记
+      {
+        const px = this.player.cx, py = this.player.cy;
+        const give = (vid: number, n = 1): void => {
+          const k = VANILLA_ITEM_KEY_BY_ID[vid];
+          if (k) this.spawnDrop(px, py, k, n, 0, -2);
+        };
+        if (Math.random() < 1 / 7) give(2109);
+        give(1141);
+        give(3336);
+        if (Math.random() < 1 / 15) give(1182);
+        if (Math.random() < 1 / 20) give(1305);
+        if (Math.random() < 1 / 2) give(1157);
+        if (Math.random() < 1 / 10) give(3021);
+        const w8 = Math.floor(Math.random() * 8);
+        if (w8 === 0) { give(758); give(771, 50 + Math.floor(Math.random() * 101)); }
+        else if (w8 === 1) give(1255);
+        else if (w8 === 2) give(788);
+        else if (w8 === 3) give(1178);
+        else if (w8 === 4) give(1259);
+        else if (w8 === 5) give(1155);
+        else if (w8 === 6) give(3018);
+        else give(5477);
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 30;
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
@@ -4288,7 +4571,7 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
-    } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) {
+    } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) { // 原生 magic 无 autoReuse 字段，维持连发
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
       const mg = heldDef.magic;
       // 魔力花族：耗魔 -8%（manaCost -= 0.08，Player.cs:14040）；不足时自动喝蓝
@@ -4388,13 +4671,13 @@ export class Game implements GameHooks {
           this.reelBobber(bobber);
         } else {
           // 抛竿：需背包有鱼饵（bait>0），取第一个
-          let baitSlot = -1, baitPower = 0;
+          let baitSlot = -1, baitPower = 0, baitVid = 0;
           for (let i = 0; i < this.player.inv.slots.length; i++) {
             const sl = this.player.inv.slots[i];
             if (!sl) continue;
             const dm = /^vi_(\d+)_/.exec(ITEM_DEFS[sl.id].key);
             const df = dm ? itemFuncOfVid(+dm[1]) : null;
-            if (df?.bait) { baitSlot = i; baitPower = df.bait; break; }
+            if (df?.bait && dm) { baitSlot = i; baitPower = df.bait; baitVid = +dm[1]; break; }
           }
           if (baitSlot < 0) {
             this.cb.onToast('需要鱼饵才能钓鱼！');
@@ -4408,6 +4691,7 @@ export class Game implements GameHooks {
               () => (owner.dead ? null : owner),
             );
             bob.poleVid = fm ? +fm[1] : 0; // 血肉抛竿 4325 敌怪概率判定用
+            bob.baitVid = baitVid;          // IsLavaBait 三源判定用（Projectile.cs:19230）
             this.entities.add(bob, 'projectiles');
             this.sfx.play('throw');
             // 成就：抛竿（Player.cs:48652 HandleSpecialEvent(7) → THROWING_LINES）
@@ -4446,14 +4730,29 @@ export class Game implements GameHooks {
     const dmgKind = cwIn.kind === 'magic' ? 'magic' : (cwIn.kind === 'boomerang' || cwIn.kind === 'spear' || cwIn.kind === 'yoyo' || cwIn.kind === 'flail') ? 'melee' as const : 'ranged' as const;
     const cw = {
       ...cwIn,
-      damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1) * this.player.damageMult(dmgKind)) + this.player.equipStats.armorPen),
+      damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1) * this.player.damageMult(dmgKind))), // ⑥ pen 移 hit 时
       knockback: cwIn.knockback * (ps?.kb ?? 1),
+      // ⑧ 词缀乘区出口统一折算（I:558-568）：shtspd→shootSpeed、spd→useTime（I:561）
+      shootSpeed: ((cwIn as { shootSpeed?: number }).shootSpeed ?? 0) * (ps?.shtspd ?? 1),
+      useTime: Math.max(1, Math.round(((cwIn as { useTime?: number }).useTime ?? 0) * (ps?.spd ?? 1))),
     };
     // GetWeaponCrit（Player.cs:42531 族）= 4 基础 + 武器 item.crit + 装备/buff——
     // 投射物近战四族此前写死 4%（Sunfury item.crit=7 原版应 11%）
     const critVid = def.vid ?? viIdFromKey(def.key);
     const critTotal = 0.04 + (itemCombat(critVid)?.crit ?? 0) / 100
-      + this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee') / 100;
+    // 成就：蜜蜂套装持蜂枪使用（Player.cs:16060-16069 → event 3 NOT_THE_BEES：
+    // head 160 + body 168 + legs 103 且 itemAnimation 中挥动 1121 BeeGun）
+    if (critVid === 1121) {
+      const b0 = this.player.inv.armor[0], b1 = this.player.inv.armor[1], b2 = this.player.inv.armor[2];
+      if (b0 && b1 && b2
+        && statOfInternal(b0.id)?.hs === 160 && statOfInternal(b1.id)?.bs === 168
+        && statOfInternal(b2.id)?.ls === 103) {
+        this.achievements.handleSpecialEvent(3,
+          { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+      }
+    }
+      + this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee') / 100
+      + (ps?.crt ?? 0) / 100; // ⑧ 词缀 crt（I:566 crit+=crt）
     // 使用姿势（Player.ItemCheck：itemAnimation>0 期间持物可见）。
     // ★ spear/yoyo/flail/boomerang 族源码 noUseGraphic=true（DefaultToSpear :47637 等
     //   202 处）——投射物即本体，挥动再画持物会重影，这四族不加 swing
@@ -4476,10 +4775,11 @@ export class Game implements GameHooks {
         const hurtBox = cw.shoot === 29 ? 100 : 11;
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox)), 'projectiles');
+          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0))), 'projectiles'); // ⑥+⑧
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
+        this.input.mouseDown = false; // 消费点击(⑩ 边沿门防连发,与 flail/yoyo/magic 一致)
         break;
       }
       case 'glowstick': {
@@ -4491,6 +4791,7 @@ export class Game implements GameHooks {
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
+        this.input.mouseDown = false;
         break;
       }
       case 'boomerang': {
@@ -4499,9 +4800,13 @@ export class Game implements GameHooks {
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot);
         bom.critChance = critTotal;
+        bom.armorPen = this.player.equipStats.armorPen; // ⑥
+        // 301 Bouncing Shield 按 20t/100t 双门需 channel（其余族不用,空挂无害）
+        if (cw.shoot === 301) bom.channel = () => this.input.mouseHeld && !this.input.uiBlocking;
         this.entities.add(bom, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
+        this.input.mouseDown = false;
         break;
       }
       case 'spear': {
@@ -4509,9 +4814,11 @@ export class Game implements GameHooks {
         const spear = new SpearProj(Math.cos(ang), Math.sin(ang), cw.shootSpeed, cw.useTime,
           cw.damage, cw.knockback, cw.shoot);
         spear.critChance = critTotal;
+        spear.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥ 近战含磨刀
         this.entities.add(spear, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
+        this.input.mouseDown = false;
         break;
       }
       case 'whip': {
@@ -4571,6 +4878,13 @@ export class Game implements GameHooks {
           false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
           () => (owner.dead ? null : owner),
         ), 'projectiles');
+        // 成就：9+ 随从（Player.cs:51059 num+num2>=9 → event 6 YOU_AND_WHAT_ARMY；
+        //  本作随从恒 1 槽 = 数量口径，召唤后计数）
+        if (!cw.sentry
+          && this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry).length >= 9) {
+          this.achievements.handleSpecialEvent(6,
+            { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+        }
         this.player.useTime = cw.useTime;
         this.sfx.playWav('summon', 0.9, this.player.cx, this.player.cy); // 召唤杖 UseSound=Item44
         this.input.mouseDown = false;
@@ -4590,6 +4904,7 @@ export class Game implements GameHooks {
           () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
         flailP.critChance = critTotal;
+        flailP.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥
         this.entities.add(flailP, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw'); // UseSound=SoundID.Item1(Item.cs case 220)
@@ -4610,6 +4925,7 @@ export class Game implements GameHooks {
           () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
         yoyo.critChance = critTotal;
+        yoyo.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥
         // 配重球（counterWeight：悠悠球命中时落配重投射物，原版环绕弹的直线坠落近似）
         if (this.player.equipStats.counterWeight) {
           (yoyo as unknown as { spawnWeight?: (x: number, y: number, dmg: number) => void }).spawnWeight =
@@ -4627,7 +4943,7 @@ export class Game implements GameHooks {
       case 'magic': {
         // 魔法：消耗 mana（原版 mana 字段）→ 发射 item.shoot（贴图/穿透/寿命取投射物表）
         // 魔力花族：耗魔 -8%；不足时自动喝蓝重试
-        const cwCost = Math.trunc((cw.mana ?? 0) * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul); // ⑪ 同上
+        const cwCost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1)) * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul); // ⑪+⑧ 词缀 mcst(I:562 round)
         if (this.player.mana < cwCost) {
           if (!(this.player.equipStats.manaFlower && this.tryAutoManaPotion() && this.player.mana >= cwCost)) {
             this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
@@ -4645,8 +4961,9 @@ export class Game implements GameHooks {
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: pen });
         // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
+        mArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
         mArrow.critBonus = this.player.critChance('magic')
-          + (itemCombat(def.vid ?? viIdFromKey(def.key) ?? -1)?.crit ?? 0); // 审计 §6
+          + (itemCombat(def.vid ?? viIdFromKey(def.key) ?? -1)?.crit ?? 0) + (ps?.crt ?? 0); // 审计 §6 + ⑧
         mArrow.nebulaCb = () => {
           if (!this.player.equipStats.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
           this.player.nebulaCD = 30; // :12895
@@ -4662,12 +4979,17 @@ export class Game implements GameHooks {
       case 'shot': {
         // 兜底直射（附魔剑光束等 melee/ranged+shoot 未归族项）：重力按 aiStyle
         const pd = projectileData(cw.shoot);
-        this.entities.add(new Arrow(px, py,
+        const shotArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
-          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: 1 }), 'projectiles');
+          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: 1 });
+        // 暴击链:装备 critChance(dmgKind) + 武器 item.crit(GetWeaponCrit)
+        shotArrow.critBonus = this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee')
+          + (itemCombat(critVid)?.crit ?? 0);
+        this.entities.add(shotArrow, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('bowShoot');
+        this.input.mouseDown = false;
         break;
       }
       default:
@@ -4711,12 +5033,18 @@ export class Game implements GameHooks {
   private smashAltar(tx: number, ty: number): void {
     const st = this.world.store;
     const ALTAR = TILE_BY_KEY['v_26_altars'];
-    for (let dx = -3; dx <= 3; dx++) {
-      for (let dy = -3; dy <= 2; dy++) {
-        if (!st.inBounds(tx + dx, ty + dy)) continue;
-        if (st.type[st.idx(tx + dx, ty + dy)] === ALTAR) st.setTileSilent(tx + dx, ty + dy, 0);
+    // 3×2 对象拆除（TileObjectData 语义）：frameX = style×54 + 列×18 → 列号 %3;
+    // frameY/18∈{0,1} 行。锚点 = 左上格——此前扫 ±3 邻域会误拆 3 格内相邻祭坛
+    const aIdx = st.idx(tx, ty);
+    const ax = tx - (Math.floor(st.frameX[aIdx] / 18) % 3);
+    const ay = ty - Math.floor(st.frameY[aIdx] / 18);
+    for (let dx = 0; dx < 3; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (!st.inBounds(ax + dx, ay + dy)) continue;
+        if (st.type[st.idx(ax + dx, ay + dy)] === ALTAR) st.setTileSilent(ax + dx, ay + dy, 0);
       }
     }
+    this.chunks.markDirtyArea(ax - 1, ay - 1, ax + 3, ay + 2);
     this.spawnParticles(tx * TILE + 24, ty * TILE + 8, '#B080FF', 14, 2.5);
     this.sfx.play('hit', 1);
     const tier = this.world.altarCount % 3;
@@ -4733,6 +5061,9 @@ export class Game implements GameHooks {
     }
     const oreSheet = this.world.savedOreTiers[td.slot];
     const ore = TILE_INTERNAL_BY_SHEET.get(oreSheet) ?? TILE_BY_KEY['ore_cobalt'];
+    // 世界公告（:48991/:49008/:49021——ChatHelper misc[12/13/14 基础,+9=替代矿变体],
+    // 按锁定矿种选文案）
+    this.newText(Lang.misc((tier === 0 ? 12 : tier === 1 ? 13 : 14) + (oreSheet !== td.base ? 9 : 0)), 175, 75, 255);
     let veins = (st.w / 4200) * 310 - 85 * tier;
     veins *= 0.85;
     veins /= wave;
@@ -5038,7 +5369,9 @@ export class Game implements GameHooks {
       }
       if (type === TILE_BY_KEY['v_238_plantera_s_bulb']) {
         if (Math.abs(this.player.cx - (ax * 16 + 16)) + Math.abs(this.player.cy - (ay * 16 + 16)) < 50 * 16) {
-          this.summonBoss('plantera');
+          // SpawnOnPlayer（WorldGen.cs:48030 → NPC.cs:81273）：玩家屏幕外落点，
+          // 非 summonBoss 的地表±55 列顶部扫描（2026-08-13 对齐）
+          this.spawnBossOnPlayer(262);
         }
       } else {
         this.spawnDrop(ax * TILE + 8, ay * TILE, 'vi_1291_life_fruit', 1);
@@ -5342,13 +5675,16 @@ export class Game implements GameHooks {
   /** 砍导入的原版树（tile 5 / 宝石树 / 装饰树 / 灰烬树）：
    *  同列同类型连续段 = 整棵树（含顶部树冠标记格），整棵移除 + 掉木材。
    *  首击即倒（不做倒树动画——动画实体绑定自有树的登记表结构） */
-  /** 暗影之球/恶魔之心整体破碎（原版 WorldGen.CheckOrb 移植，WorldGen.cs:31813-31960）：
+  /** 暗影之球/恶魔之心整体破碎 = 原版 WorldGen.CheckOrb（cs:54259-54358）1:1：
    *  帧锚点定位（frameX∈{0,36} 是左列）→ 2×2 四格一起清除；
-   *  战利品：首破固定（暗影之球:恶魔之心 + 凝胶100；恶魔之心:生命水晶 + 凝胶100），
-   *  之后 5 选 1 随机；无原版物品的部分用现有道具近似 */
+   *  战利品（:54264-54318）：首破（!shadowOrbSmashed）固定 0 档,之后 rand(5) 五选一
+   *  ——腐化{96火枪+凝胶100, 64暗影珠, 162堕落荆棘, 115刺球, 111阳炎之怒} /
+   *  猩红{800下作恶者+凝胶100, 1256猩红之心, 802腐叉, 3062, 1290}；
+   *  计数 shadowOrbCount 满 3 → 最近玩家处召 EoW(13)/BoC(266) 并归零
+   *  （:54320-54352,对侧已存活则跳过）；1/2 颗世界广播 misc[10/11]；
+   *  陨石触发在 1.4 语义里不经砸珠（EoW/BoC 击杀链触发,见 boss 死亡段） */
   private smashOrbHeart(x: number, y: number) {
     const st = this.world.store;
-    const orbId = TILE_BY_KEY['v_31_orb_heart'];
     const i = st.idx(x, y);
     const fx = st.frameX[i];
     const isDemonHeart = fx >= 36; // 原版：frameX ≥ 36 = 恶魔之心（猩红世界）
@@ -5358,20 +5694,39 @@ export class Game implements GameHooks {
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 2; dy++) st.setTile(ax + dx, ay + dy, 0);
     }
-    // 战利品（近似：首破固定 + 之后随机）
-    const drops: Array<[string, number]> = !this.world.flags.shadowOrbSmashed
-      ? (isDemonHeart ? [[VI_KEY.COIN.GOLD, 1], [VI_KEY.GEL, 100]] : [[VI_KEY.SUSPICIOUS_EYE, 1], [VI_KEY.GEL, 100]])
-      : [[VI_KEY.COIN.SILVER, 5], [VI_KEY.GEL, 60]];
-    for (const [key, n] of drops) {
-      this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, n, (Math.random() - 0.5) * 3, -3);
+    // 战利品五档（首破固定 0 档;item id 走 VANILLA_ITEM_KEY_BY_ID 反查）
+    const POOLS: Record<'orb' | 'heart', number[]> = {
+      orb: [96, 64, 162, 115, 111],        // 腐化：火枪/暗影珠/堕落荆棘/刺球/阳炎之怒
+      heart: [800, 1256, 802, 3062, 1290], // 猩红：下作恶者/猩红之心/腐叉/…
+    };
+    const first = !this.world.flags.shadowOrbSmashed;
+    const roll = first ? 0 : Math.floor(Math.random() * 5);   // Main.rand.Next(5)
+    const vid = POOLS[isDemonHeart ? 'heart' : 'orb'][roll];
+    const key = VANILLA_ITEM_KEY_BY_ID[vid];
+    if (key) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, 1, (Math.random() - 0.5) * 3, -3);
+    if (roll === 0) {
+      const gelKey = VANILLA_ITEM_KEY_BY_ID[97];               // 凝胶 ×100（genRand.Next(100,101)）
+      if (gelKey) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, gelKey, 100, (Math.random() - 0.5) * 3, -3);
     }
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
     this.sfx.play('tink');
     this.cb.onToast(isDemonHeart ? Lang.text('Mods.SandboxWorld.Toast.DemonHeartSmashed') : Lang.text('Mods.SandboxWorld.Toast.ShadowOrbSmashed'));
-    // 成就：SMASHING_POPPET（WorldGen.CheckOrb cs:54359 event 7——每次砸珠/心都触发）
+    // 成就：SMASHING_POPPET（:54359 event 7——每次砸珠/心都触发）
     this.achievements.notifyProgressionEvent(7);
-    if (!this.world.flags.shadowOrbSmashed) {
-      this.world.flags.shadowOrbSmashed = true;
+    this.world.flags.shadowOrbSmashed = true;
+    this.world.shadowOrbCount++;
+    if (this.world.shadowOrbCount >= 3) {
+      // :54320-54352:第 3 颗召 EoW/BoC（同型在场则跳过）——计数只在【真召出】时
+      // 归零（:54326 在召唤分支内）；被跳过时保持 ≥3，下一颗再试（此前无条件清零
+      // 会把被吞掉的召唤永久丢失）
+      const anyAlive = (id: number) => (this.entities.enemies as Enemy[]).some(
+        (e) => !e.dead && e.vanillaId === id);
+      if (isDemonHeart ? !anyAlive(266) : !anyAlive(13)) {
+        this.summonBoss(isDemonHeart ? 'brain_of_cthulhu' : 'eater_of_worlds_head');
+        this.world.shadowOrbCount = 0;
+      }
+    } else {
+      this.newText(Lang.misc(this.world.shadowOrbCount === 2 ? 11 : 10), 120, 90, 160);
     }
   }
 
@@ -5494,11 +5849,11 @@ export class Game implements GameHooks {
       const a = this.grandAnchor;
       this.grandAnchor = null;
       const mode = this.wireToolMode;
-      const wires = mode & TOOL_CUTTER ? 9999 : inv.countOf(ITEM_BY_KEY['wire'] ?? -1);
+      const wires = mode & TOOL_CUTTER ? 9999 : inv.countOf(VI_ID(530));
       const actuators = mode & TOOL_CUTTER ? 9999 : inv.countOf(VI_ID(849));
       const res = w.massWireOperation(a, [tx, ty], mode, wires, actuators);
       if (!(mode & TOOL_CUTTER)) {
-        if (res.wire > 0) inv.remove(ITEM_BY_KEY['wire'] ?? -1, res.wire);
+        if (res.wire > 0) inv.remove(VI_ID(530), res.wire);
         if (res.actuator > 0) inv.remove(VI_ID(849), res.actuator);
       }
       this.player.useTime = 10;
@@ -5526,7 +5881,7 @@ export class Game implements GameHooks {
     ];
     for (const [m, bit] of colorBits) if (mode & m && !(st.wire[st.idx(tx, ty)] & bit)) needWire++;
     if (mode & TOOL_ACTUATOR && !(st.wire[st.idx(tx, ty)] & TileStore.WIRE_ACTUATOR)) needActuator++;
-    const wireHave = inv.countOf(ITEM_BY_KEY['wire'] ?? -1);
+    const wireHave = inv.countOf(VI_ID(530));
     const actHave = inv.countOf(VI_ID(849));
     if (needWire > wireHave || needActuator > actHave) {
       this.cb.onToast(needActuator > actHave ? Lang.text('Mods.SandboxWorld.Toast.NoActuator') : Lang.text('Mods.SandboxWorld.Toast.NoWire'));
@@ -5538,7 +5893,7 @@ export class Game implements GameHooks {
     }
     if (mode & TOOL_ACTUATOR && w.placeActuator(tx, ty)) placed = true;
     if (placed) {
-      if (needWire > 0) inv.remove(ITEM_BY_KEY['wire'] ?? -1, needWire);
+      if (needWire > 0) inv.remove(VI_ID(530), needWire);
       if (needActuator > 0) inv.remove(VI_ID(849), needActuator);
       this.player.useTime = 5;
       this.sfx.play('place');
@@ -5645,9 +6000,13 @@ export class Game implements GameHooks {
       if (hasPylonOfType(this.pylons, style)) return;
     }
     // 橡实: 只能种在草块正上方
-    if (viIdFromKey(itemDef.key) === 27 && st.get(tx, ty + 1) !== T.GRASS) {
-      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AcornGrassOnly'));
-      return;
+    if (viIdFromKey(itemDef.key) === 27) {
+      if (st.get(tx, ty + 1) !== T.GRASS) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AcornGrassOnly'));
+        return;
+      }
+      // 成就：种橡实（Player.PlantAcorn → PlantedAcorn，CONSERVATIONIST 计数）
+      this.achievements.plantedAcorn();
     }
     const ow = def.w ?? 1, oh = def.h ?? 1;
     // 绳索(RopeCoil 语义):从放置点向下延伸至实心/最多 10 格
@@ -6093,6 +6452,8 @@ export class Game implements GameHooks {
       // 派对纪念碑右键（Player.cs:31809-31814 → ToggleManualParty）
       this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
       toggleManualParty(this.partyState);
+      // 成就：派对进行中（prog 25，与自然派对同源）
+      if (partyIsUp(this.partyState)) this.achievements.notifyProgressionEvent(25);
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_237_lihzahrd_altar']) {
       // 蜥蜴祭坛 237（Player.cs:32303-32335）：消耗蜥蜴能量电池召石巨人
@@ -6681,6 +7042,14 @@ export class Game implements GameHooks {
   private graveyardIntensity = 0;
   /** 自然 Boss 召唤运行时态（WorldGen.spawnEye/spawnHardBoss :4140/:4142——不入存档，
    *  clearWorld 重置=进世界清零；与血月 roll 互斥门 :64818） */
+  /** 本夜流星强度（Star.starfallBoost——每夜 NightSetup 重掷；坠星频率乘子） */
+  private starfallBoost = 1.0;
+  /** 本夜天幕流星已掷(_canShowMeteorFall 位;入夜重置) */
+  private _skyMeteorShown = false;
+  /** 陨石坠落旗标（WorldGen.spawnMeteor :4156——入夜 roll/EoW 击杀置位，夜半消费；
+   *  WorldFile :1301/:2098 持久化 → 挂 world.flags 随存档走） */
+  private get meteorPending(): boolean { return !!this.world?.flags.spawnMeteor; }
+  private set meteorPending(v: boolean) { if (this.world) this.world.flags.spawnMeteor = v; }
   private spawnEyePending = false;
   /** 高尔夫折扣计时（GolfState.golfScoreTime :30-47：每 tick+1，挥杆清零，
    *  进洞 SetScoreTime=3600；一杆进洞系数 = time/3600） */
@@ -7022,6 +7391,8 @@ export class Game implements GameHooks {
       // 派对纪念碑（Wiring.cs:2037-2039 → BirthdayParty.ToggleManualParty）
       toggleParty: () => {
         toggleManualParty(this.partyState);
+      // 成就：派对进行中（prog 25，与自然派对同源）
+      if (partyIsUp(this.partyState)) this.achievements.notifyProgressionEvent(25);
       },
     };
   }
@@ -7116,7 +7487,7 @@ export class Game implements GameHooks {
   /** hurtBox:实体伤害盒半宽(Projectile.Kill 各族 Resize 盒的半边)。
    *  原版与地形破坏半径【无关】:炸弹/手雷族(:74885)Resize(22,22)=11px;
    *  炸药棍 29(:74951)200×200=100px;缺省按地形半径兜底(放置炸药 108/器件爆) */
-  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number) {
+  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0) {
     const st = this.world.store;
     const R = radius;
     const hardMode = !!this.world.flags.hardMode;
@@ -7168,7 +7539,7 @@ export class Game implements GameHooks {
       const en = e as Enemy;
       if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
         && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
-        en.hurt(damage, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this);
+        en.hurt(damage, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen); // ⑥
       }
     }
     const p = this.player;
@@ -7572,7 +7943,7 @@ export class Game implements GameHooks {
       if (!doll || !hitRect(tn.x, tn.y, tn.w, tn.h)) continue;
       this.swingHitSet.add(tn.id);
       const swBase = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')) + this.player.equipStats.armorPen + this.player.meleeArmorPen;
+        * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
       const swDmg = Math.max(1, Math.round(swBase * (1 + (Math.random() * 30 - 15) / 100)));
       tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this);
     }
@@ -7583,12 +7954,15 @@ export class Game implements GameHooks {
       this.swingHitSet.add(e.id);
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
       if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
-      const crit = Math.random() < 0.04 + this.player.critChance('melee') / 100; // 基础 4% + 装备/词缀暴击
+      const crit = Math.random() < 0.04 + this.player.critChance('melee') / 100
+        // ★武器 item.crit(GetWeaponCrit:4 基础+武器+装备)——vi_ 数据驱动近战武器 crit
+        // 字段此前未入链(挥砍侧全族只有装备 crit)
+        + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1)?.crit ?? 0) / 100;
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
       // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）；
       // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）
       const baseDmg = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')) + this.player.equipStats.armorPen + this.player.meleeArmorPen;
+        * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
       this.player.onMeleeHit(); // 甲虫进攻套蓄能（命中结算前计数无碍）
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round(baseDmg * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
@@ -7596,7 +7970,7 @@ export class Game implements GameHooks {
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1);
-      const killed = e.hurt(dmg, kdir * kb, -2.5, this);
+      const killed = e.hurt(dmg, kdir * kb, -2.5, this, this.player.equipStats.armorPen + this.player.meleeArmorPen); // ⑥ 减防语义
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
       if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
@@ -7919,6 +8293,8 @@ export class Game implements GameHooks {
       const s = this.findBoundSpotByDepth(Math.floor(this.world.rockLevel) + 60, st.h - 350);
       if (s) this.placeBoundNpc('wizard', 'savedWizard', s[0], s[1]);
     }
+    // ①'' 睡渔夫补放（原版 SpawnNPC 海洋/沙滩分支每轮掷——补放近似其"未解救则持续在场"）
+    this.placeSleepingAngler();
 
     // ① QuickFindHome（Main.cs:65072：每轮对未安家 NPC 找房入住）
     // bound（被绑待救）不入住不搬动——原版 AI_007 bound 态原地，否则五个救援 NPC
@@ -8033,13 +8409,21 @@ export class Game implements GameHooks {
     this.dialogNpc = npc;
     // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记）
     this.world.bestiary.registerChat(npc.vanillaId);
+    this.achCheckBestiary();
     npc.talking = true;  // 原版 AI_007:53721 对话中站定面向玩家
     npc.talkCooldown = 30;
     this.sfx.play('menuOpen'); // 对话面板打开音（原版 UI 面板开合语义 id 10/11）
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
-    const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close'; label: string }> = [];
+    this.cb.onNpcDialog?.(name, this.formatDialogTags(this.townNpcChat(npc)),
+      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
+  }
+
+  /** 对话框按钮组（NPCInteractions.cs 各 NPCInteraction 注册序）：商店/治疗/收税/
+   *  重铸/诅咒/渔夫任务（AnglerQuest :134-152，标签 Lang.inter[64]「任务」） */
+  private npcDialogButtons(npc: TownNPC): Array<{ id: NpcButtonId; label: string }> {
+    const buttons: Array<{ id: NpcButtonId; label: string }> = [];
     // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
     if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
     if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
@@ -8050,8 +8434,18 @@ export class Game implements GameHooks {
     if (npc.npcKey === 'old_man' && !this.world.clock.isDay && !this.world.flags.hardMode) {
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
     }
+    // 渔夫：任务交付（NPCInteractions.AnglerQuest.GetText = Lang.inter[64]）
+    if (npc.vanillaId === 369) buttons.push({ id: 'quest', label: Lang.inter(64) });
     buttons.push({ id: 'close', label: Lang.inter(52) });                                   // 关闭
-    this.cb.onNpcDialog?.(name, this.formatDialogTags(this.townNpcChat(npc)), buttons, portraitUrl(npc.vanillaId));
+    return buttons;
+  }
+
+  /** 已开对话框的台词区重绘（交付结算后替换为 AnglerQuestChat 文案，不重开面板） */
+  private refreshNpcDialog(npc: TownNPC, chat: string): void {
+    const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
+    const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
+    this.cb.onNpcDialog?.(name, this.formatDialogTags(chat),
+      this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
   }
 
   /** HasSpecialEventText 类目键（NPC.cs 各分支的字符串字面量：type → "Xxx"）。
@@ -8379,7 +8773,7 @@ export class Game implements GameHooks {
   }
 
   /** 对话框按钮(SetTalkNPC 后 UI 回调) */
-  npcDialogButton(id: 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close'): void {
+  npcDialogButton(id: NpcButtonId): void {
     const npc = this.dialogNpc;
     if (id === 'close' || !npc) { this.closeNpcDialog(); return; }
     if (id === 'shop') { this.openNpcShop(); return; }
@@ -8398,6 +8792,104 @@ export class Game implements GameHooks {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.OldManScream'));
       this.closeNpcDialog();
       this.summonBossAtTx('skeletron_head', Math.floor(npc.cx / TILE));
+      return;
+    }
+    if (id === 'quest' && npc.vanillaId === 369) { this.anglerQuestTurnIn(); return; }
+  }
+
+  // ================= 渔夫任务链（Main.anglerQuest* + Player.GetAnglerReward）=================
+
+  /** 当日任务鱼 id（Main.anglerQuestItemNetIDs[Main.anglerQuest]，Main.cs:20091 同式） */
+  anglerQuestItemId(): number { return ANGLER_QUEST_ITEMS[this.world.anglerQuest] ?? 0; }
+
+  /** Main.AnglerQuestSwap（Main.cs:3799-3947）：清今日交付名单/完成旗 + 按世界门重掷。
+   *  调用点 = 黎明（UpdateTime_StartDay :64852）+ 新世界（WorldGen.cs:22655）。
+   *  掷骰注入按「种子 ^ 天数」播种的独立 UnifiedRandom → 同种子同天数同任务鱼
+   *  （读档/联机一致；原版掷 Main.rand 不可复现，拒绝语义逐条不变） */
+  anglerQuestSwap(): void {
+    const w = this.world;
+    const f = w.flags;
+    w.anglerWhoFinishedToday = [];          // :3805
+    w.anglerQuestFinished = false;          // :3806
+    // :3807 flag = downedBoss1||downedBoss2||downedBoss3||hardMode||downedSlimeKing||downedQueenBee
+    const anyBoss = !!(f['downed_4'] || f.downedEyeOfCthulhu          // downedBoss1（EoC）
+      || f['downed_13'] || f['downed_266']                            // downedBoss2（世吞/克脑）
+      || f.downedSkeletron || f['downed_35']                          // downedBoss3（骷髅王）
+      || f.hardMode
+      || f.downedSlimeKing || f['downed_50']                          // downedSlimeKing
+      || f['downed_222']);                                            // downedQueenBee
+    w.anglerQuest = rollAnglerQuest({
+      hardMode: !!f.hardMode,
+      evil: w.crimson ? 'crimson' : 'corrupt',
+      anyBoss,
+      hasWorldSurface: w.groundLevel > 50,  // Main.isThereAWorldSurface（Main.cs:2861）
+    }, seededRng((w.seed ^ Math.imul(w.clock.dayCount, 0x9E3779B1)) | 0));
+  }
+
+  /** 「任务」按钮（NPCInteractions.AnglerQuest.Interact → Main.NPCChatText_DoAnglerQuest
+   *  Main.cs:39654-39690）1:1：交付门 → 扣鱼 → 计数++ → 四段奖励 → 台词替换 */
+  anglerQuestTurnIn(): void {
+    const w = this.world;
+    const p = this.player;
+    const npc = this.dialogNpc;
+    if (!npc) return;
+    let done = false;
+    // :39659 门：今日任务未交 且 本玩家今日未交（多人各限一次）
+    if (!w.anglerQuestFinished && !w.anglerWhoFinishedToday.includes(this.playerName())) {
+      const questId = this.anglerQuestItemId();
+      const internal = VI_ID(questId);
+      const slot = p.inv.slots.findIndex((s) => s && s.id === internal && s.stack > 0);  // FindItem :39661
+      if (slot >= 0) {
+        p.inv.removeAt(slot, 1);            // :39664-39668（stack 归零即清槽）
+        done = true;
+        p.anglerQuestsFinished++;           // :39671
+        this.grantAnglerRewards(npc, questId);   // GetAnglerReward :39672
+      }
+    }
+    // 台词（Lang.AnglerQuestChat Lang.cs:430-443）：成功 → TurnIn 池；今日已交/未带鱼 →
+    // NoQuest 池；否则 Quest_<物品内名>（item 内名 = vi_<id>_<Name> 键尾段）
+    let chat: string;
+    if (done) {
+      chat = Lang.specialText('AnglerQuestText.TurnIn_') ?? Lang.text('Mods.SandboxWorld.NPC.AnglerTurnIn');
+      w.anglerQuestFinished = true;         // :39678
+      w.anglerWhoFinishedToday.push(this.playerName());   // :39685（单人即本地名）
+    } else if (w.anglerQuestFinished) {
+      chat = Lang.specialText('AnglerQuestText.NoQuest_') ?? Lang.text('Mods.SandboxWorld.NPC.AnglerNoQuest');
+    } else {
+      const key = VANILLA_ITEM_KEY_BY_ID[this.anglerQuestItemId()] ?? '';
+      const internal = key.split('_')[2] ?? '';
+      chat = Lang.text(`AnglerQuestText.Quest_${internal}`)
+        || Lang.text('Mods.SandboxWorld.NPC.AnglerNoQuest');
+    }
+    this.sfx.play('menuTick');
+    this.refreshNpcDialog(npc, chat);
+    this.cb.onInventoryChanged?.();
+  }
+
+  /** Player.GetAnglerReward（Player.cs:55351-55361）四段奖励落物：主奖励/装饰/金币/鱼饵
+   *  全部经 rollAnglerRewards 纯函数结算（数值逐条行号见 data/vanillaFishing.ts），
+   *  在渔夫脚旁生成（QuickSpawnItem → 本仓 spawnDrop） */
+  private grantAnglerRewards(npc: TownNPC, questItemType: number): void {
+    const p = this.player;
+    // DropAnglerAccByMissing 的持有集（Player.cs:55647-55685：inventory+armor+bank×4+loadouts）
+    const owned = new Set<number>();
+    const collect = (it: { id: number; stack: number } | null) => {
+      const key = it ? ITEM_DEFS[it.id]?.key : undefined;
+      const m = key ? /^vi_(\d+)_/.exec(key) : null;
+      if (m) owned.add(+m[1]);
+    };
+    p.inv.slots.forEach(collect);
+    p.inv.armor?.forEach(collect);
+    p.banks?.forEach((b) => b?.forEach(collect));
+    p.inv.loadouts?.forEach((l) => { l?.armor.forEach(collect); });
+    for (const g of rollAnglerRewards({
+      questsDone: p.anglerQuestsFinished,
+      questItemType,
+      hardMode: !!this.world.flags.hardMode,
+      ownedTypes: owned,
+    })) {
+      const key = VI(g.id);
+      if (key) this.spawnDrop(npc.cx, npc.cy - 8, key, g.stack, 0, -2);
     }
   }
 
@@ -8578,6 +9070,10 @@ export class Game implements GameHooks {
       case 'downedBoss3': return !!(f['downed_35'] || f.downedSkeletron);
       case 'downedMechBossAny':
         return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
+      // NPC.downedPlantBoss（世纪之花商店门：爆破专家地雷 937 / 松露自动锤 1551 /
+      // 巫医 Tiki 套·灵液瓶·叶翼 / 画家回声涂层 5344 / 动物学家泥芽 4701）
+      case 'downedPlantBoss': return !!f['downed_262'];
+      case 'downedPirates': return !!f.downedPirates;
       case 'moonPhase':
         // 月相门：extract-shops.mjs 未捕获 case 相位值——恒 false，分档上架由
         // shopStockFor 的相位实表负责（改 true 会全相位重复上架）
@@ -8610,8 +9106,7 @@ export class Game implements GameHooks {
       snowMoon: w.moonEvent.kind === MOON_KIND_FROST,
       invasionType: w.invasionType,
       moonLordCountdown: w.lunarEvent.moonLordCountdown,
-      // WorldGen.spawnMeteor——本仓陨石坠落系统未移植恒 false（登记：spawnMeteor 位）
-      spawnMeteor: false,
+      spawnMeteor: this.meteorPending,
       downedMoonlord: !!w.flags['downed_398'],
       // BossIsActive（:68-79）：boss 或 13-15（世吞体节/克脑爬行者）——本仓 Boss 单槽
       // + 入场怪近似为「Boss 槽在场或世吞体节/爬行者在场」
@@ -8767,16 +9262,17 @@ export class Game implements GameHooks {
     if (rollZero(16)) num++;
     if (rollZero(32)) num++;
     if (this.world.isExpert && rollZero(2)) num++; // Chest.cs:1263 Main.expertMode（世界难度）
-    // 首件（:1276-1299）：仅 hardMode 才有此环；while num2<5000 + 每轮先降档 +
-    // minimumRarity=2；成功入店即 break
+    // 首件（Player.cs:55747-55785）：hardMode 时走**显式清单**单次随机
+    // （非 GetItem 池 RollLuck——此前误用池+重试环）。世纪之花后 +4 妖火染料
+    // （2878/2879/2884/2885）；三机械/火星/月总各加成段同块
     if (this.world.flags.hardMode) {
-      let num2 = 0;
-      while (num2 < 5000) {
-        num2++;
-        adjustSlotRarities(num2);
-        const it = pick(TRAVEL_POOL.items, 2);
-        if (canAdd(it)) { stock.push(it); break; }
-      }
+      const f = this.world.flags;
+      const list = [3039, 3038, 3598, 3597, 3600, 3042, 3533, 3561];
+      if (!!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134'])) list.push(2883, 2869, 2873, 2870);
+      if (f['downed_262']) list.push(2878, 2879, 2884, 2885);
+      if (f['downedMartians']) list.push(2864, 3556);
+      if (f['downed_398']) list.push(3024);
+      stock.push(list[Math.floor(Math.random() * list.length)]);
     }
     // 主件环（:1300-1308）：added<num 且无尝试上限——原版同（概率上必然终止，
     // 此处仅挂防死循环护栏，正常永不可达）
@@ -9225,9 +9721,10 @@ export class Game implements GameHooks {
     // 门（雕像产怪无玩家交互不计）——本仓 hurt 无伤害源参数，近似为全部计入，仅环境击杀的
     // 雕像怪是偏差面）
     if (enemy && enemy.vanillaId != null
-      && isNpcValidForBestiaryKillCredit(enemy.vanillaId, !!enemy.def.boss)) {
+      && isNpcValidForBestiaryKillCredit(enemy.vanillaId, enemy.killBossFlag)) {
       this.world.bestiary.registerKill(enemy.vanillaNetId !== 0 && enemy.vanillaNetId != null
         ? enemy.vanillaNetId : enemy.vanillaId);
+      this.achCheckBestiary();
     }
     // 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount≥150 且场上无王 → 召王）
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
@@ -9347,6 +9844,14 @@ export class Game implements GameHooks {
   /** 跑动里程（AchievementsHelper.HandleRunning——MARATHON_MEDALIST） */
   achNotifyRunning(px: number): void { this.achievements.handleRunning(px); }
 
+  /** 图鉴 100%（TryGrantingBestiary100PercentAchievement → prog 29 BOOK_WORM；
+   *  杀/遇/对话三处登记后调用） */
+  achCheckBestiary(): void {
+    if (this.world.bestiary.completion().percent >= 1) {
+      this.achievements.notifyProgressionEvent(29);
+    }
+  }
+
 
   /** StartVictoryScene（DD2Event.cs:481-507）：水晶 548 ai[1]=2 / 门 549 撤收 */
   private startDD2VictoryScene(): void {
@@ -9405,7 +9910,76 @@ export class Game implements GameHooks {
     };
   }
 
-  // ================= F2 图片 → 像素方块群(自研,原版无;原键 F11 与系统全屏冲突) =================
+  // ================= 调试工具:F6 召唤面板 / F2 无敌+无限魔力(均原版无) =================
+
+  summonPanel: DebugSummonPanel | null = null;
+
+  /** F6:无条件召唤任意 NPC(怪物/Boss/小动物/城镇 NPC)——面板见 DebugSummonPanel */
+  toggleSummonPanel(): void {
+    if (!this.summonPanel) {
+      this.summonPanel = new DebugSummonPanel({
+        spawn: (id, count, atMouse) => this.debugSpawnNpc(id, count, atMouse),
+        clearEnemies: () => this.debugClearEnemies(),
+        nameOf: (id) => Lang.npcName(id) ?? '',
+      });
+    }
+    this.summonPanel.toggle();
+    this.input.uiBlocking = this.summonPanel.open;
+  }
+
+  /** 面板生成动作:Enemy.fromVanilla 全量 + NewNPC 底锚 + Boss 槽接管 + 世吞链 */
+  debugSpawnNpc(id: number, count: number, atMouse: boolean): string | null {
+    if (!this.world) return '世界未就绪';
+    const st = this.world.store;
+    let bx = this.player.cx, by = this.player.cy - 24;
+    if (atMouse) {
+      const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+      bx = wx; by = wy;
+    }
+    const townKey = Object.entries(TOWN_NPC_IDS).find(([, v]) => v.id === id)?.[0];
+    for (let i = 0; i < count; i++) {
+      const ox = (i % 5) * 44 - 88, oy = Math.floor(i / 5) * 44;
+      const x = Math.max(TILE, Math.min((st.w - 2) * TILE, bx + ox));
+      const y = Math.max(TILE, Math.min((st.h - 2) * TILE, by + oy));
+      if (townKey) {
+        this.entities.add(new TownNPC(townKey, x, y), 'npcs');
+        continue;
+      }
+      const e = Enemy.fromVanilla(id, x, y);
+      if (!e) return `${id} 无 vanilla-npcs 数据(如 473-476/686 台账)`;
+      e.y = y - e.h;                       // NewNPC 底锚(NPC.cs:46596-46597,同 spawnNPC)
+      e.id = this.entities.nextId++;
+      this.entities.add(e, 'enemies');
+      if (e.def.boss) this.boss = e;       // 接管 Boss 槽(血条/死亡记账/公告)
+      if (id === 13) {                     // 世吞:体节链随头召唤(同 summonBossAtTx)
+        const segs = Enemy.spawnWormChain(e, 15 + Math.floor(Math.random() * 16));
+        for (const sg of segs) { sg.id = this.entities.nextId++; this.entities.add(sg, 'enemies'); }
+      }
+    }
+    return null;
+  }
+
+  /** 面板清怪:直置 dead 跳过掉落;Boss 槽一并清空防误记账 */
+  debugClearEnemies(): number {
+    let n = 0;
+    for (const ent of this.entities.enemies) {
+      const e = ent as Enemy;
+      if (!e.dead) { e.hp = 0; e.dead = true; n++; }
+    }
+    this.boss = null;
+    return n;
+  }
+
+  /** F2:无敌 + 无限魔力(Player.debugGod:damage() 早退 + 每 tick 血蓝回满) */
+  toggleDebugGod(): void {
+    const p = this.player;
+    if (!p) return;
+    p.debugGod = !p.debugGod;
+    if (p.debugGod) { p.hp = p.maxHp; p.mana = p.maxMana; }
+    this.cb.onToast(p.debugGod ? '调试：无敌 + 无限魔力 已开启' : '调试：无敌 + 无限魔力 已关闭');
+  }
+
+  // ================= F1 图片 → 像素方块群(自研,原版无;原键 F11 与系统全屏冲突) =================
   /** 隐藏 file input(复用单例,每次置空 value 支持重复上传同一文件) */
   private pixelArtInput: HTMLInputElement | null = null;
   openPixelArtImport(): void {
@@ -9858,6 +10432,7 @@ export class Game implements GameHooks {
   eventsForSave(): SaveData['events'] {
     return {
       partyManual: this.partyState.manualParty,
+      partyCooldown: this.partyState.daysOnCooldown,
       lanternManual: LanternNight.manualLanterns,
       lanternGenuine: LanternNight.genuineLanterns,
       lanternNext: LanternNight.nextNightIsLanternNight,
@@ -9869,6 +10444,7 @@ export class Game implements GameHooks {
   eventsApplySave(ev: SaveData['events'] | undefined): void {
     if (!ev) return;
     this.partyState.manualParty = !!ev.partyManual;
+    this.partyState.daysOnCooldown = ev.partyCooldown ?? 0;
     LanternNight.manualLanterns = !!ev.lanternManual;
     LanternNight.genuineLanterns = !!ev.lanternGenuine;
     LanternNight.nextNightIsLanternNight = !!ev.lanternNext;
@@ -10396,20 +10972,91 @@ export class Game implements GameHooks {
     bobber.dead = true;
   }
 
-  summonBoss(key: string): void {
+  /** SpawnOnPlayer 等价（NPC.cs:81273-81506）：灯泡破坏召唤走此链——在玩家
+   *  【屏幕外】找点（500 次尝试，最后一次强制落点），非地表顶部扫描；
+   *  SpawnBoss 段 timeLeft×20=15000、AnyNPCs 独占、HasAwoken 公告。
+   *  与 summonBoss(地表±55 列)的分野：物品召唤维持既有路径（后续统一迁移）。 */
+  spawnBossOnPlayer(vanillaId: number): void {
     if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
-    const side = Math.random() < 0.5 ? -1 : 1;
-    const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
-    this.summonBossAtTx(key, tx);
-  }
-
-  /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王) */
-  private summonBossAtTx(key: string, tx: number): void {
-    if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
-    // 联机访客不召唤（Boss 权威在房主——本地召唤=幽灵 Boss 不同步；召唤物也不消耗）
     if (this.net && !this.net.policy.isHost) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
       return;
+    }
+    const st = this.world.store;
+    const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
+    const halfW = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE) + 5;
+    const halfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE) + 5;
+    let sx = ptx, sy = pty;
+    for (let t = 0; t < 500; t++) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      let tx = ptx + side * (halfW + Math.floor(Math.random() * 45));
+      let ty = pty + Math.floor((Math.random() * 2 - 1) * (halfH + 45));
+      if (t === 499) { tx = ptx + side * (halfW + 20); ty = pty; }   // 末次强制落点
+      tx = Math.max(2, Math.min(st.w - 3, tx));
+      ty = Math.max(4, Math.min(st.h - 10, ty));
+      // 落点区块无实心（非安全点拒绝；强制落点例外）
+      let blocked = t !== 499;
+      if (blocked) {
+        blocked = false;
+        for (let ax = 0; ax <= 5 && !blocked; ax++) {
+          for (let ay = 0; ay <= 5; ay++) {
+            if (st.inBounds(tx + ax, ty + ay) && st.isSolid(tx + ax, ty + ay)) { blocked = true; break; }
+          }
+        }
+      }
+      if (!blocked) { sx = tx; sy = ty; break; }
+    }
+    const head = Enemy.fromVanilla(vanillaId, sx * TILE + 8, sy * TILE + 8);
+    if (!head) return;
+    head.despawnTimer = 15000;   // SpawnBoss timeLeft = activeTime(750)×20（NPC.cs:81484）
+    this.entities.add(head, 'enemies');
+    this.boss = head;
+    this.announceBossSummon(vanillaId);
+  }
+
+  /** Boss 同型家族表（"任意 Boss 活跃"门 → 同型门，审计 2026-08-13）：
+   *  EoW {13,14,15} / BoC {266,267}——同型在场才拦（原版 Worm Food/Bloody Spine
+   *  对已活 Boss 照召 SpawnOnPlayer :43107-43208 无门；本仓单 Boss 槽，
+   *  跨型召唤放行、同型拦下防双刷）；未列出的 boss key 维持原"任意 Boss"门 */
+  private static readonly BOSS_FAMILY: Record<string, number[]> = {
+    eater_of_worlds_head: [13, 14, 15],
+    brain_of_cthulhu: [266, 267],
+  };
+
+  /** 同型家族在场判定（NPC.AnyNPCs 族扫描） */
+  private bossFamilyActive(family: number[]): boolean {
+    return (this.entities.enemies as Enemy[]).some((e) => !e.dead
+      && e.vanillaId != null && family.includes(e.vanillaId));
+  }
+
+  summonBoss(key: string): boolean {
+    const family = Game.BOSS_FAMILY[key];
+    if (family) {
+      if (this.bossFamilyActive(family)) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
+        return false;
+      }
+    } else if (this.boss) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
+      return false;
+    }
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
+    return this.summonBossAtTx(key, tx);
+  }
+
+  /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王)。
+   *  返回是否真的召唤成功（false = 门拦下/访客/落位失败）——召唤物消耗方据此决定扣不扣 */
+  private summonBossAtTx(key: string, tx: number): boolean {
+    const family = Game.BOSS_FAMILY[key];
+    if (family ? this.bossFamilyActive(family) : !!this.boss) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
+      return false;
+    }
+    // 联机访客不召唤（Boss 权威在房主——本地召唤=幽灵 Boss 不同步；召唤物也不消耗）
+    if (this.net && !this.net.policy.isHost) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
+      return false;
     }
     const st = this.world.store;
     tx = Math.max(2, Math.min(st.w - 3, tx));
@@ -10423,6 +11070,16 @@ export class Game implements GameHooks {
       : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113
       : key === 'lunatic_cultist' ? 439 : key === 'empress_of_light' ? 636 : key === 'queen_slime' ? 657
       : key === 'plantera' ? 262 : key === 'duke_fishron' ? 370 : key === 'moon_lord' ? 398 : key === 'golem' ? 245 : -1;
+    // 血肉墙：走 SpawnWOF 1:1（NPC.cs:81112-81191，向导巫毒娃娃入熔岩的召唤链）。
+    // 落位扫描/推进方向/公告全部以"娃娃位置"为种子——调试键以选中列 + 地狱层 Y
+    // 充当娃娃；SpawnWOF 自带 HasAwoken 公告且不播 Roar（原版即无声，尖啸由
+    // WOFTongue 见到玩家时播），故不落进下方 announceBossSummon
+    if (vanillaId === 113) {
+      const dollY = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
+      const wof = spawnWOF(this as unknown as GameHooks, tx * TILE + 8, dollY);
+      if (wof) { this.boss = wof; return true; }
+      return false;
+    }
     if (vanillaId >= 0 && Enemy.fromVanilla) {
       const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
       if (head) {
@@ -10437,8 +11094,11 @@ export class Game implements GameHooks {
         this.entities.add(head, 'enemies');
         this.boss = head;
         if (vanillaId === 13) {
-          // 世吞体节链(原版 15-30 段)
-          const segs = Enemy.spawnWormChain(head, 15 + Math.floor(Math.random() * 16));
+          // 世吞体节数（NPC.cs:51321-51328 GetEaterOfWorldsSegmentsCount + :51712）：
+          // 头 ai[2]=65(普通)/70(专家) → 链 = 65/70 身段 + 1 尾（:51696-51761
+          // ai[2] 逐段 -1，归零段转生尾 15）。spawnWormChain 的 count = 身段+尾
+          const bodies = this.world.isExpert ? 70 : 65;
+          const segs = Enemy.spawnWormChain(head, bodies + 1);
           for (const sg of segs) this.entities.add(sg, 'enemies');
         }
         if (vanillaId === 125) {
@@ -10450,10 +11110,7 @@ export class Game implements GameHooks {
           // 毁灭者:地下落位(原版 SpawnNPC 走地下生成;80 段链由 destroyerAI 首帧补)
           head.y = Math.min(st.h - 10, Math.floor(this.world.rockLevel) + 30) * TILE;
         }
-        if (vanillaId === 113) {
-          // 血肉墙:地狱层落位(原版向导巫毒娃娃入熔岩;2 眼+11 饥饿者由 AI 首帧补)
-          head.y = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
-        }
+        // （血肉墙 113 已在上方 SpawnWOF 分支单独处理，不落通用路径）
         // 成就：MechaMayhem 启动判定（Mech 入场时扫描场上三机械是否齐备；
         // 126 由 125 召唤分支同帧入列，扫描读实体表自然包含）
         if (vanillaId === 125 || vanillaId === 127 || vanillaId === 134) {
@@ -10463,12 +11120,13 @@ export class Game implements GameHooks {
         }
         // 召唤公告+音效（每 Boss 独立，见 bossSummonAnnounce/注释）
         this.announceBossSummon(vanillaId);
-        return;
+        return true;
       }
     }
     this.spawnEnemy(key, tx * TILE + 8, spawnY);
     this.sfx.playWav('roar');
     this.cb.onToast(Lang.misc(9));
+    return true;
   }
 
   /** Boss 召唤公告 + 音效（1.4.5.6 语义）：
@@ -10495,12 +11153,20 @@ export class Game implements GameHooks {
     this.sfx.playWav(vanillaId === 222 ? 'beeSummon' : 'roar');
   }
 
-  useSuspiciousEye() {
+  /** @returns 是否真正消耗（被召唤门拦下/白天时不消耗物品） */
+  useSuspiciousEye(): boolean {
     if (this.world.clock.isDay) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
-      return;
+      return false;
     }
-    if (this.boss) return;
+    // SummonItemCheck（Player.cs:41514-41526）：物品 43 只查场上【是否已有 NPC 4】——
+    // 与其他 Boss 是否在场无关（原版逐物品↔NPC 对照表 43↔4/70↔13/560↔50/…）。
+    // 拦下时 ItemCheck 置 flag=false：物品不使用也不消耗。此前误用 this.boss 全 Boss 门
+    // （其他 Boss 在场会白吞眼球）
+    if (this.entities.enemies.some((en) => {
+      const e2 = en as Enemy;
+      return !e2.dead && e2.vanillaId === 4;
+    })) return false;
     // 从远处地表生成（离玩家 ~55 格），Boss 会自己飞过来
     const side = Math.random() < 0.5 ? -1 : 1;
     const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
@@ -10511,13 +11177,13 @@ export class Game implements GameHooks {
     const spawnY = Math.max(4, ty - 12) * TILE;
     // fromVanilla(4) 取原版 NPC_4 贴图(6 帧)+rotation;数值与 ENEMY_DEFS 一致(2800/15/12/0)
     const e = Enemy.fromVanilla(4, tx * TILE + 8, spawnY);
-    if (e) {
-      e.id = this.entities.nextId++;
-      this.entities.add(e, 'enemies');
-      this.boss = e;
-    }
+    if (!e) return false;
+    e.id = this.entities.nextId++;
+    this.entities.add(e, 'enemies');
+    this.boss = e;
     // 公告+音效与 summonBoss 同语义（EoC → "克苏鲁之眼已苏醒！" + Roar）
     this.announceBossSummon(4);
+    return true;
   }
 
   /** 地图传送：在目标点附近找可容纳主角的空间（2 格高净空 + 站立地面）。

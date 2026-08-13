@@ -1,20 +1,27 @@
-// 钓鱼浮标实体（R7）：抛竿抛物线 → 落水漂浮 → 咬钩窗口 → 收竿掷渔获。
+// 钓鱼浮标实体：抛竿抛物线 → 落水漂浮 → 咬钩窗口 → 收竿掷渔获。
 // 原版 Projectile.AI_061_FishingBobber（Projectile.cs:50762-50937）1:1：
 //   抛出 grav 抛物线；入液（水/蜜/岩浆）转漂浮；等待 = localAI[1] 累积器
-//   （:50897-50914：每 tick += ⌊钓鱼力/30⌋ + rand(1,3) + rand(300)<力 ? rand(1,3) : 0
+//   （:50930-50947：每 tick += ⌊FinalFishingLevel/30⌋ + rand(1,3) + rand(300)<力 ? rand(1,3) : 0
 //   + 1/60 概率 +60；>660 触发 FishingCheck）；
-//   咬钩门（FishingCheck :19179-19184）：rand(100) <= ⌊(力+75)/2⌋ 才真咬；
+//   FishingCheck（:19175-19187）→ TryBuildFishingContext（:19189-19331，本实体
+//   fishingCheck 内 1:1：水量/atmo 缩放/幸运度/heightLevel/junk/五档/任务鱼探测）
+//   → 咬钩门 rand(100) <= ⌊(力+75)/2⌋ → SetFishingCheckResults（:19333-19396：
+//   敌怪先掷、渔获后掷）→ FishDropRuleList 全量表掷渔获（FishDropRule.cs:31-51）；
 //   咬钩窗口 = ai[1] 取 rand(-240,-90) - 力 的负值，每 tick += rand(1,5)，
-//   归零即逃脱（渔获作废，:50918-50934 / :19334/:19344）；
-//   窗口内收竿 → rollCatch 掷渔获 + 消耗鱼饵（消耗率 1/(1+bait/6)，钓具箱 +1 分母）。
+//   归零即逃脱（渔获作废，:50949-50960 / :19348/:19362）；
+//   窗口内收竿 → 消耗鱼饵（消耗率 1/(1+bait/6)，钓具箱 +1 分母）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { pickPool, rollCatch, rollRarities, fishingPowerMultiplier } from '../data/vanillaFishing';
+import {
+  fishingPowerMultiplier, rollDropLevels, rollJunk, heightLevelOf, prepareFishingContext,
+  tryGetItemDrop, CAN_FISH_IN_LAVA_POLES, IS_LAVA_BAIT, ANGLER_QUEST_ITEMS,
+  type ZoneInput,
+} from '../data/vanillaFishing';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { TILE_DEFS } from '../data/tiles';
+import { VI_ID } from '../data/itemKeys';
 import type { World } from '../world/World';
 import { BuffType } from '../stats/Buffs';
 
@@ -65,6 +72,8 @@ export class Bobber extends Entity {
   /** 渔获原版 id → 钓起时落物用 */
   private polePower: number;
   poleVid = 0;
+  /** 鱼饵原版 id（IsLavaBait / CanFishInLava 三源判定用，:19230/:19371-19382） */
+  baitVid = 0;
   private baitSlot: number;
   private baitPower: number;
   private ownerRef: () => Player | null;
@@ -72,7 +81,7 @@ export class Bobber extends Entity {
   private airT = 0;
   /** ai[1]（AI_061）：0 = 等待累积中；<0 = 咬钩窗口（负值幅度 = rand(-240,-90) - 钓鱼力） */
   private ai1 = 0;
-  /** localAI[1]：等待累积器（>660 触发 FishingCheck，:50912-50915） */
+  /** localAI[1]：等待累积器（>660 触发 FishingCheck，:50943-50947） */
   private lAI1 = 0;
 
   constructor(
@@ -88,27 +97,20 @@ export class Bobber extends Entity {
     this.ownerRef = owner;
   }
 
-  /** 钓鱼力（竿+饵+药水 121 +15；声呐 122/宝匣 123 由收竿侧消费）。
-   *  game 传入时追加 Fishing_GetPowerMultiplier 乘区（Player.cs:41560-41605：
-   *  雨/云/晨昏/正午/前半夜/月相/血月） */
+  /** PlayerFishingConditions.FinalFishingLevel（Player.cs:41528-41557）1:1：
+   *  饵力+竿力+钓鱼技能(药水 121 +15，Player.cs:9831) + 三项 +5 加成，再乘
+   *  Fishing_GetPowerMultiplier（:41560-41604）。★幸运度不在此处——原版在
+   *  TryBuildFishingContext 水量缩放**之后**才掷（:19267-19277），见 fishingCheck。
+   *  canFloatInWater&&wet（:41546-41549）与坐姿（:41550-41553）两状态本仓未
+   *  跟踪，对应 +5 未接（登记）；Tipsy +5 已接（:41542-41545）。 */
   private fishingPower(p: Player, game?: GameHooks): number {
-    // buff 121 钓鱼药水 +15（Player.cs:9831 fishingSkill += 15）
-    let lvl = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0);
-    // 幸运度修正（Projectile.cs:19267-19276 FishingAttempt 主干，1:1）：
-    //   luck<0 且 rand<|luck| → ×(0.9 - rand*0.3)（0.6-0.9 倍）
-    //   luck>0 且 rand<luck  → ×(1.1 + rand*0.3)（1.1-1.4 倍）
-    const luck = p.luck;
-    if (luck < 0) {
-      if (Math.random() < -luck) lvl = Math.floor(lvl * (0.9 - Math.random() * 0.3));
-    } else if (Math.random() < luck) {
-      lvl = Math.floor(lvl * (1.1 + Math.random() * 0.3));
-    }
-    // Fishing_GetPowerMultiplier（:41560-41605）：天气/时段/月相/血月乘区
+    let base = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0);
+    if (p.buffs.has(BuffType.Tipsy)) base += 5;                  // buff 25 :41542-41545
     if (game) {
       const w = game.world as World;
       const t = w.clock.timeOfDay;
       const isDay = w.clock.isDay; // 昼夜边界以 Clock 为准（4:30/19:30）
-      lvl = Math.floor(lvl * fishingPowerMultiplier({
+      base = Math.floor(base * fishingPowerMultiplier({          // :41555-41556
         raining: !!w.weather?.raining,
         cloudBGAlpha: w.weather?.cloudAlpha ?? 0,
         dayTime: isDay,
@@ -117,7 +119,7 @@ export class Bobber extends Entity {
         bloodMoon: !!w.clock.bloodMoon,
       }));
     }
-    return lvl;
+    return base;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -180,66 +182,133 @@ export class Bobber extends Entity {
     }
   }
 
-  /** FishingCheck（Projectile.cs:19175-19185）+ TryBuildFishingContext 水体段
-   *  （:19188-19249）：咬钩门 rand(100) <= ⌊(钓鱼力+75)/2⌋；水体 <75 直接不咬。 */
+  /** FishingCheck（Projectile.cs:19175-19187）+ TryBuildFishingContext
+   *  （:19189-19331）+ SetFishingCheckResults（:19333-19396）1:1：
+   *  上下文构建（水体/缩放/幸运/高度/垃圾档/五档/任务鱼探测）→ 咬钩门
+   *  rand(100) <= ⌊(力+75)/2⌋ → 敌怪掷（:19398-19429）→ 全量规则表掷渔获
+   *  （FishDropRuleList，表首 AnyEnemies stopper 保证敌怪与渔获互斥）→
+   *  二者皆空则不开窗（:19337-19367 flag=false），岩浆另加等待加速（:19368-19391）。 */
   private fishingCheck(p: Player, game: GameHooks, idx: number): void {
     const w = game.world as World;
     const st = w.store;
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
     const pond = getFishingPondState(game, tx, ty);   // GetFishingPondState :20170-20201
-    if (pond.waterTilesCount < 75) return;            // :19208-19211 NotEnoughWater
-    let level = this.fishingPower(p, game);           // FinalFishingLevel（Player.cs:41536-41557）
-    // 水量缩放（:19234-19249）：atmo = ⌊(Y/16 - (60 + 10·(W/4200)²)) / (地表/6)⌋ 截 [0.25,1]
+    if (pond.waterTilesCount < 75) return;            // :19206-19210 NotEnoughWater
+    let level = this.fishingPower(p, game);           // :19225 FinalFishingLevel
+    if (level === 0) return;                          // :19226-19229
+    const canFishInLava = CAN_FISH_IN_LAVA_POLES.has(this.poleVid)   // :19230 三源
+      || IS_LAVA_BAIT.has(this.baitVid) || this.ownerLavaOk();
+    // chumsInWater 三档加成（:19231-19242）——鱼饵桶投射物未实装，恒 0（登记）
+    // 水量缩放（:19244-19261）：atmo = (Y/16 - (60 + 10·(W/4200)²)) / (地表/6) 截 [0.25,1]
     const atmoNum = (st.w / 4200) ** 2;
     let atmo = (this.y / TILE - (60 + 10 * atmoNum)) / (w.groundLevel / 6);
     if (atmo < 0.25) atmo = 0.25;
     if (atmo > 1) atmo = 1;
-    const waterNeeded = Math.floor(300 * atmo);       // waterNeededToFish = 300 × atmo
-    if (waterNeeded > 0) {
-      const quality = pond.waterTilesCount / waterNeeded;
-      if (quality < 1) level = Math.floor(level * quality);   // :19244-19246
+    const waterNeeded = Math.floor(300 * atmo);       // :19256 waterNeededToFish = 300 × atmo
+    if (pond.waterTilesCount / waterNeeded < 1) {
+      level = Math.floor(level * (pond.waterTilesCount / waterNeeded));   // :19258-19261
     }
-    // 咬钩门（:19179-19184）：Next(100) <= ⌊(力+75)/2⌋ 才真咬（否则空拍再等下一轮）
-    const num = Math.floor((level + 75) / 2);
-    if (Math.floor(Math.random() * 100) > num) return;
-    // 血月钓鱼敌怪（FishingCheck_RollEnemySpawns :19399-19427，SetFishingCheckResults
-    // 内先敌怪后渔获）：水中、血月夜、1/6（血肉抛竿 4325 → 1/3）→ 咬的是敌怪：
-    // 困难 {620,621,586,587}+1/10 恐惧鹦鹉螺 618；非困难 {586,587}。
+    // 幸运度（:19267-19277）：负运 ×(0.9-rand*0.3) / 正运 ×(1.1+rand*0.3)，掷中才乘
+    const luck = p.luck;
+    if (luck < 0) {
+      if (Math.random() < -luck) level = Math.floor(level * (0.9 - Math.random() * 0.3));
+    } else if (Math.random() < luck) {
+      level = Math.floor(level * (1.1 + Math.random() * 0.3));
+    }
+    // heightLevel（:19306-19325 非 remix 分支）/ junk（:19326）/ 五档（:19327）
+    const heightLevel = heightLevelOf(ty, w.groundLevel, w.rockLevel, st.h);
+    const junk = rollJunk(level, pond.waterTilesCount, waterNeeded);
+    const levels = rollDropLevels(level, p.buffs.has(BuffType.Crate));
+    const questFish = this.probeQuestFish(p, game);   // :19328 → :20089-20104
+    // 咬钩门（:19181-19184）：Next(100) <= ⌊(力+75)/2⌋ 才真咬（否则空拍再等下一轮）
+    if (Math.floor(Math.random() * 100) > Math.floor((level + 75) / 2)) return;
+    // ---- SetFishingCheckResults（:19333-19396）----
+    // 敌怪掷（FishingCheck_RollEnemySpawns :19398-19429）：池含岩浆/蜂蜜即豁免、
+    // 血月夜、1/6（血肉抛竿 4325 → 1/3）→ 困难 {620,621,586,587}+1/10 恐惧鹦鹉螺
+    // 618；非困难 {586,587}；红城镇史莱姆 682 世界级一次性 1/5 优先（:19413-19416）
     this.catchEnemy = 0;
-    const inWater = st.liquidType[idx] !== 2 && st.liquidType[idx] !== 3;
-    if (inWater && w.clock.bloodMoon && !w.clock.isDay) {
-      const chance = this.poleVid === 4325 ? 3 : 6;
-      if (Math.random() < 1 / chance) {
-        // 红色城镇史莱姆首获（:19413-19416：世界级一次性旗标，1/5 优先于敌怪表；
-        //  收竿侧置 unlockedSlimeRedSpawn）
-        if (!w.flags.unlockedSlimeRedSpawn && Math.random() < 0.2) {
-          this.catchEnemy = 682;
-        } else {
-          const hard = w.flags.hardMode;
-          const poolE = hard ? [620, 621, 586, 587] : [586, 587];
-          this.catchEnemy = hard && Math.random() < 0.1 ? 618
+    this.catchId = 0;
+    if (!pond.lava && !pond.honey && w.clock.bloodMoon && !w.clock.isDay) {
+      const chance = this.poleVid === 4325 ? 3 : 6;   // :19404-19408
+      if (Math.floor(Math.random() * chance) === 0) {
+        if (!w.flags.unlockedSlimeRedSpawn && Math.floor(Math.random() * 5) === 0) {
+          this.catchEnemy = 682;                      // :19413-19416
+        } else if (w.flags.hardMode) {
+          const poolE = [620, 621, 586, 587];
+          this.catchEnemy = Math.floor(Math.random() * 10) === 0 ? 618   // :19420-19423
             : poolE[Math.floor(Math.random() * poolE.length)];
+        } else {
+          this.catchEnemy = Math.random() < 0.5 ? 586 : 587;             // :19427
         }
-        this.openBiteWindow(level);
-        game.playSfx('splash', 0.8);
-        game.spawnParticles(this.cx, this.cy, '#C04040', 6, 1.5, { life: 24 });
-        return;
       }
     }
-    const pool = pickPool({
-      liquid: (st.liquidType[idx] === 2 ? 'lava' : st.liquidType[idx] === 3 ? 'honey' : 'water'),
-      zone: this.zoneOf(game),
-      depth: this.depthOf(game),
-      zoneOcean: this.zoneOcean(game, pond.waterTilesCount),
+    // 渔获掷（FishingCheck_RollItemDrop :19431-19449 → FishDropRuleList）：
+    // AnyEnemies stopper 居表首 → 敌怪已掷出时恒 0（互斥由表保证）
+    const zones = this.zonesOf(game);
+    this.catchId = tryGetItemDrop({
+      inLava: pond.lava, inHoney: pond.honey, junk, crate: levels.crate,
+      common: levels.common, uncommon: levels.uncommon, rare: levels.rare,
+      veryrare: levels.veryrare, legendary: levels.legendary,
+      anyEnemies: this.catchEnemy > 0, canFishInLava,
+      x: tx, y: ty, waterTilesCount: pond.waterTilesCount,
+      rockLayer: w.rockLevel, maxTilesX: st.w, heightLevel, questFish,
+      hardMode: !!w.flags.hardMode, bloodMoon: !!w.clock.bloodMoon,
+      combatBookWasUsed: !!w.flags.combatBookWasUsed, remix: false,
+      zones, rolled: prepareFishingContext(zones, heightLevel, ty, w.rockLevel),   // :19451-19502
     });
-    this.catchId = rollCatch(level, pool, p.buffs.has(BuffType.Crate), {
-      rarity: rollRarities(level),
-      bloodMoon: !!w.clock.bloodMoon,
-      combatBook: !!w.flags.combatBookWasUsed,
-    });
-    this.openBiteWindow(level);
-    game.playSfx('splash', 0.8);
-    game.spawnParticles(this.cx, this.cy, '#80B8FF', 6, 1.5, { life: 24 });
+    if (this.catchId > 0 || this.catchEnemy > 0) {
+      this.openBiteWindow(level);                     // :19348/:19362
+      game.playSfx('splash', 0.8);
+      game.spawnParticles(this.cx, this.cy, this.catchEnemy > 0 ? '#C04040' : '#80B8FF',
+        6, 1.5, { life: 24 });
+      return;
+    }
+    // 二者皆空（:19368-19391）：岩浆且三源 ≥2 → 累积器 +240/+480 加速下一咬
+    if (pond.lava) {
+      let n = 0;
+      if (IS_LAVA_BAIT.has(this.baitVid)) n++;        // :19371-19374
+      if (CAN_FISH_IN_LAVA_POLES.has(this.poleVid)) n++;   // :19375-19378
+      if (this.ownerLavaOk()) n++;                    // :19379-19382
+      if (n >= 3) this.lAI1 += 480;                   // :19383-19386
+      else if (n >= 2) this.lAI1 += 240;              // :19387-19390
+    }
+  }
+
+  /** FishingCheck_ProbeForQuestFish（:20089-20104）1:1：当日任务鱼；玩家已持有 /
+   *  场上无渔夫 369 / 今日已完成 → -1（不可再钓） */
+  private probeQuestFish(p: Player, game: GameHooks): number {
+    const w = game.world as World;
+    const quest = ANGLER_QUEST_ITEMS[w.anglerQuest] ?? -1;
+    if (quest === -1) return -1;
+    const id = VI_ID(quest);
+    if (id > 0 && p.inv.slots.some((s) => s && s.id === id && s.stack > 0)) return -1;  // :20092-20095
+    const anglerAlive = (game.npcs?.() ?? []).some(
+      (n) => (n as { vanillaId?: number; dead?: boolean }).vanillaId === 369
+        && !(n as { dead?: boolean }).dead);                                           // :20096-20099
+    if (!anglerAlive) return -1;
+    if (w.anglerQuestFinished) return -1;               // :20100-20103
+    return quest;
+  }
+
+  /** 玩家 zone 快照（PrepareFishingContext :19453-19490 的输入源 = 玩家 zone，
+   *  本仓取 Game.scene——SceneMetrics 以玩家为中心扫描；dungeon 折 downedBoss3
+   *  门 :19458-19461，地牢为真时弃沙漠 :19487-19490） */
+  private zonesOf(game: GameHooks): ZoneInput {
+    const s = game.scene;
+    const w = game.world as World;
+    const dungeon = !!s?.zoneDungeon
+      && !!(w.flags.downedSkeletron || w.flags['downed_35']);   // downedBoss3 双键同 Game.ts:8062
+    return {
+      corrupt: !!s?.zoneCorrupt,
+      crimson: !!s?.zoneCrimson,
+      jungle: !!s?.zoneJungle,
+      snow: !!s?.zoneSnow,
+      dungeon,
+      desert: !!s?.zoneDesert && !dungeon,
+      hallow: !!s?.zoneHallow,
+      beach: !!s?.zoneBeach,
+      glowshroom: !!s?.zoneGlowshroom,
+    };
   }
 
   /** 开咬钩窗口（SetFishingCheckResults :19334 / :19344）：
@@ -280,43 +349,6 @@ export class Bobber extends Entity {
     const p = this.ownerRef();
     if (!p) return false;
     return (p as unknown as { equipStats: { lavaFishing?: boolean } }).equipStats?.lavaFishing ?? false;
-  }
-
-  private zoneOf(game: GameHooks): string {
-    const w = game.world as World;
-    const x = Math.floor(this.cx / TILE);
-    const y = Math.floor(this.cy / TILE);
-    const st = w.store;
-    // 按 tile key 采样（玩家 zone 通道未接此处，浮标位置独立判定）
-    for (let dy = -2; dy <= 0; dy++) {
-      const t = st.get(x, y + dy);
-      const key = t ? TILE_DEFS[t]?.key ?? '' : '';
-      if (!key) continue;
-      if (/corrupt/.test(key)) return 'corrupt';
-      if (/crimson/.test(key)) return 'crimson';
-      if (/hallow/.test(key)) return 'hallow';
-      if (/jungle/.test(key)) return 'jungle';
-      if (/snow/.test(key)) return 'snow';
-    }
-    return 'forest';
-  }
-
-  private depthOf(game: GameHooks): 'sky' | 'surface' | 'cavern' | 'underworld' {
-    const w = game.world as World;
-    const y = Math.floor(this.cy / TILE);
-    if (y < Math.floor(w.groundLevel * 0.35)) return 'sky';
-    if (y <= w.groundLevel + 10) return 'surface';
-    if (y > (w.lavaLine || w.store.h - 200)) return 'underworld';
-    return 'cavern';
-  }
-
-  /** 海洋判定（FishingCheck_RollItemDropOld :19886）：heightLevel <= 1（浮标在地表以上，
-   *  即 Y < worldSurface）&& 横向边缘 380 格内 && 该处水体 >1000 格——三者同时成立。 */
-  private zoneOcean(game: GameHooks, waterTilesCount: number): boolean {
-    const w = game.world as World;
-    const x = Math.floor(this.cx / TILE);
-    const y = Math.floor(this.cy / TILE);
-    return y < w.groundLevel && (x < 380 || x > w.store.w - 380) && waterTilesCount > 1000;
   }
 
   /** 声呐预展示的渔获名（Game 侧在浮标上方画字） */

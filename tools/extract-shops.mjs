@@ -57,6 +57,10 @@ function parseGate(text) {
   const push = (c) => { if (!conds.includes(c)) conds.push(c); };
   if (has('hardMode')) push('hardMode');
   if (has('downedMechBossAny')) push('downedMechBossAny');
+  // NPC.downedPlantBoss（世纪之花商店门：爆破专家地雷 937 / 松露自动锤 1551 /
+  // 巫医 Tiki 套·俾格米项链·叶翼 / 画家回声涂层 5344 等，Chest.cs 多处）
+  if (has('downedPlantBoss')) push('downedPlantBoss');
+  if (has('downedPirates')) push('downedPirates');
   if (has('downedBoss3')) push('downedBoss3');
   if (has('downedBoss2')) push('downedBoss2');
   if (has('downedBoss1')) push('downedBoss1');

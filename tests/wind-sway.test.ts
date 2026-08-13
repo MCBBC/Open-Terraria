@@ -349,25 +349,25 @@ describe('Fishing_GetPowerMultiplier（Player.cs:41560-41605）', () => {
 });
 
 // ============ 依赖子系统接入（七轮） ============
-import { rollRarities } from '../src/data/vanillaFishing';
+import { rollDropLevels } from '../src/data/vanillaFishing';
 import { parseSeed } from '../src/world/gen/SeedEasterEggs';
 
-describe('钓鱼稀有档（FishingCheck_RollDropLevels :20106-20167）', () => {
+describe('钓鱼稀有档（FishingCheck_RollDropLevels :20106-20168）', () => {
   it('下限钳制：L≥750 时 legendary 恒 1/6', () => {
     let hit = 0;
-    for (let i = 0; i < 1200; i++) if (rollRarities(800).legendary) hit++;
+    for (let i = 0; i < 1200; i++) if (rollDropLevels(800, false).legendary) hit++;
     expect(hit / 1200).toBeGreaterThan(1 / 7);
     expect(hit / 1200).toBeLessThan(1 / 5);
   });
   it('低钓鱼力 legendary 稀（L=30 → 1/150 邻域）', () => {
     let hit = 0;
-    for (let i = 0; i < 3000; i++) if (rollRarities(30).legendary) hit++;
+    for (let i = 0; i < 3000; i++) if (rollDropLevels(30, false).legendary) hit++;
     expect(hit).toBeLessThan(60); // 远低于 1/60
   });
   it('各档独立可同时命中（veryrare 不依赖 legendary）', () => {
     let both = 0;
     for (let i = 0; i < 4000; i++) {
-      const r = rollRarities(500);
+      const r = rollDropLevels(500, false);
       if (r.legendary && r.veryrare) both++;
     }
     expect(both).toBeGreaterThan(0); // 独立 roll 允许同时

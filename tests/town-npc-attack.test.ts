@@ -29,7 +29,7 @@ function makeGame(npc: TownNPC, enemy: { x: number; y: number; w: number; h: num
 describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
   it('向导(22):范围内有敌 → 发射木箭 proj 1,方向朝敌', () => {
     const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
-    const enemy = { x: 106 * 16, y: 96 * 16, w: 20, h: 40, dead: false, hurt: () => true };
+    const enemy = { x: 106 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(guide, enemy);
     let fired = false;
     for (let t = 0; t < 900 && !fired; t++) {
@@ -44,7 +44,7 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
 
   it('商人(17):近战弹态 proj 48', () => {
     const merch = new TownNPC('merchant', 100 * 16, 99 * 16, new Inventory());
-    const enemy = { x: 103 * 16, y: 96 * 16, w: 20, h: 40, dead: false, hurt: () => true };
+    const enemy = { x: 103 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(merch, enemy);
     let fired = false;
     for (let t = 0; t < 1500 && !fired; t++) {
@@ -59,7 +59,7 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
     const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
     guide.stationary = true; // 固定站位——防游走自行缩短距离(前两例靠命中够快不受影响)
     // 距离 ~60 格 > 探测 700px(43.75 格)
-    const enemy = { x: 160 * 16, y: 96 * 16, w: 20, h: 40, dead: false, hurt: () => true };
+    const enemy = { x: 160 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(guide, enemy);
     for (let t = 0; t < 900; t++) guide.fixedUpdate(1 / 60, game);
     expect(shots.length).toBe(0);
@@ -67,7 +67,7 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
 
   it('发射后进入冷却(不再连发)', () => {
     const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
-    const enemy = { x: 106 * 16, y: 96 * 16, w: 20, h: 40, dead: false, hurt: () => true };
+    const enemy = { x: 106 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(guide, enemy);
     for (let t = 0; t < 400; t++) guide.fixedUpdate(1 / 60, game);
     const n1 = shots.length;

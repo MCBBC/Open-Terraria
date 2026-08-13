@@ -71,6 +71,10 @@ export class World {
    *  角色难度只管死亡惩罚（软核掉钱/中核掉物品/硬核角色消亡）。创建 UI 写入、
    *  存档 header 持久化、wld 导入按 WldParser.gameMode 回填（旧档/worker 包缺省=0 经典） */
   difficulty = 0;
+  /** 流星雨剩余计数(WorldGen.meteorShowerCount,WorldFile.cs:1069/:177 持久化)。
+   *  消耗:UpdateWorld :71771-71810 每 tick 1/4 掷一颗 1078 伤害碎块,计数-1;
+   *  晷快进直接清零(:71774-71777) */
+  meteorShowerCount = 0;
   /** 旅程模式时间倍率（CreativePowers.ModifyTimeRate.TargetTimeRate，CreativePowers.cs:866-884：
    *  整数 1-24×，IPersistentPerWorldContent 随世界存档；非旅程世界恒 1） */
   journeyTimeRate = 1;
@@ -137,9 +141,25 @@ export class World {
    *  每档矿种全世界二选一固定——钴 107/钯 221、秘银 108/山铜 222、精金 111/钛 223。
    *  -1 = 尚未砸过该档（SmashAltar 首砸 roll 一次并锁定）；存 sheet id */
   savedOreTiers = { cobalt: -1, mythril: -1, adamantite: -1 };
+  /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount，WF:1302/2099 随存档持久化）：
+   *  满 3 召 EoW/BoC 后归零（CheckOrb :54321-54352）；哥布林军队自然 roll 的
+   *  shadowOrbSmashed 门独立于此计数 */
+  shadowOrbCount = 0;
   /** 图鉴统计（BestiaryUnlocksTracker——原版 IPersistentPerWorldContent，随世界存档：
    *  WorldFile.cs:3399 Save/:3405 Load。杀数/遇数/聊天三桶，数据层见 data/Bestiary.ts） */
   bestiary = new BestiaryTracker();
+  // ---- 渔夫任务链（Main.anglerQuest / anglerWhoFinishedToday / anglerQuestFinished）----
+  /** 当日任务鱼索引（Main.anglerQuest，Main.cs:1843；随世界存档 WorldFile.cs:1335/2161。
+   *  每日黎明 AnglerQuestSwap 重掷（Main.cs:64852）；表 = Main.anglerQuestItemNetIDs
+   *  41 条（Main.cs:1845-1852，本仓 data/vanillaFishing.ts ANGLER_QUEST_ITEMS） */
+  anglerQuest = 0;
+  /** 今日已交付玩家名单（Main.anglerWhoFinishedToday，Main.cs:1839；存档 WF:1329-1333/
+   *  2147-2150——同日读档不重置，与原版一致）。多人=每名玩家各限一次 */
+  anglerWhoFinishedToday: string[] = [];
+  /** 今日任务是否已交（Main.anglerQuestFinished，Main.cs:1841）。运行时态**不存档**
+   *  ——原版读档 loadTempInfo 重置 false（WorldFile.cs:628-629）；黎明重掷时清零
+   *  （AnglerQuestSwap :3806） */
+  anglerQuestFinished = false;
   weatherToSave(): import('./weather/Weather').WeatherSave | undefined {
     return weatherToSave(this.weather);
   }
@@ -255,8 +275,14 @@ export class World {
     if (p.invasion) { w.invasionType = p.invasion.type; w.invasionSize = p.invasion.size;
       w.invasionSizeStart = p.invasion.sizeStart; w.invasionX = p.invasion.x; w.invasionDelay = p.invasion.delay; }
     if (p.altarCount !== undefined) w.altarCount = p.altarCount;
+    // 渔夫任务链（WF:2147-2161；旧包缺省=索引 0/空名单）
+    if (p.angler) {
+      w.anglerQuest = p.angler.quest ?? 0;
+      w.anglerWhoFinishedToday = [...(p.angler.whoFinishedToday ?? [])];
+    }
     // 困难矿锁定选种（WorldGen.SavedOreTiers；旧档缺省 -1/-1/-1 = 未砸过，首砸重 roll）
     if (p.savedOreTiers !== undefined) w.savedOreTiers = { ...p.savedOreTiers };
+    if (p.shadowOrbCount !== undefined) w.shadowOrbCount = p.shadowOrbCount;
     // 日晷/月晷四件套（WorldFile.cs:1311/1342/1416-1417；旧包缺省=无快进无冷却）
     if (p.sundial !== undefined) {
       w.sundialCooldown = p.sundial;

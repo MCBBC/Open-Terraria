@@ -83,6 +83,40 @@ export class SkyRenderer {
   snowMoonTex: HTMLImageElement;
   /** 世界月亮样式(原版 header moonType 0-8;默认 0 标准月) */
   moonType = 0;
+  // ---- 天幕流星(AmbientSky.MeteorSkyEntity :1316-1341;spawnMeteor 期间夜 15000-16200
+  //      窗口恰一颗划过,Main.HandleMeteorFall :64952-64967)----
+  private meteorTex: HTMLImageElement | null = null;
+  /** 活动实体:null = 无;spawn() 后按 vanilla 参数运动 */
+  private meteor: {
+    x: number; y: number; vx: number; vy: number; rot: number; t: number; life: number; flip: boolean;
+  } | null = null;
+  /** 贴图 62×384 = 4 帧竖排(FramingSpeed 5 → 每 5 帧进一格) */
+  private static readonly METEOR_FW = 62;
+  private static readonly METEOR_FH = 96;
+
+  /** 触发一颗(Game:夜间过 15000 线时恰调一次;原版 _canShowMeteorFall 门) */
+  spawnSkyMeteor(playerCx: number, playerCy: number, worldSurfacePx: number) {
+    if (this.meteor) return;   // 原版每窗口一颗(ForceEntitySpawn 一次)
+    if (!this.meteorTex) {
+      this.meteorTex = loadTex('Background_Meteor.png');
+    }
+    // :1321-1325:flip 掷;角度 π/4 + rand(π/2) 的单位向量(向下)
+    const ang = Math.PI / 4 + Math.random() * (Math.PI / 2);
+    const vx = Math.cos(ang), vy = Math.sin(ang);
+    // :1326-1333:速度 = 使行进 worldSurface*16 距离恰 1200 帧;出生 = 玩家中心 ±100
+    //  减去 velocity*1200*0.5(前半程从屏外来)
+    const spd = worldSurfacePx / vy / 1200;
+    const speed = 1 / Math.max(1e-6, spd);
+    void speed;
+    this.meteor = {
+      vx: vx * spd, vy: vy * spd,
+      x: playerCx + (Math.floor(Math.random() * 201) - 100) - vx * spd * 600,
+      y: playerCy + (Math.floor(Math.random() * 201) - 100) - vy * spd * 600,
+      rot: ang + Math.PI / 2,   // :1340 rotation = Velocity.ToRotation()+π/2
+      t: 0, life: 1200,         // :1327/1334 LifeTime=1200
+      flip: Math.random() >= 0.5,
+    };
+  }
 
   /** 原版 GetParallax（Cloud.cs:324-343） */
   private cloudParallax(scale: number): number {
@@ -519,6 +553,31 @@ export class SkyRenderer {
   }
 
   draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number, dtMs = 16.7, camY = 0) {
+    // ---- 天幕流星推进+绘制(最远背景层;__swSkyMeteor 由 Game 触发) ----
+    if (this.meteor) {
+      const m = this.meteor;
+      m.t++;
+      m.x += m.vx; m.y += m.vy;
+      const frames = 60 * dtMs / 1000;   // 按帧推进近似的 dt 归一
+      void frames;
+      if (m.t >= m.life) { this.meteor = null; }
+      else if (this.meteorTex && this.meteorTex.width) {
+        // 透明度(:1335-1337):t/life ∈[0,0.05]淡入/[0.95,1]淡出,BrightnessLerper 0.5
+        const k = m.t / m.life;
+        const alpha = k < 0.05 ? k / 0.05 : k > 0.95 ? Math.max(0, (1 - k) / 0.05) : 1;
+        const frame = Math.floor(m.t / 5) % 4;   // FramingSpeed 5
+        ctx.save();
+        ctx.globalAlpha = alpha * 0.75;
+        ctx.translate(m.x - camX * 0.2, m.y);    // 视差 0.2(天幕远层)
+        ctx.rotate(m.rot);
+        if (m.flip) ctx.scale(-1, 1);
+        ctx.drawImage(this.meteorTex, 0, frame * SkyRenderer.METEOR_FH,
+          SkyRenderer.METEOR_FW, SkyRenderer.METEOR_FH,
+          -SkyRenderer.METEOR_FW / 2, -SkyRenderer.METEOR_FH / 2,
+          SkyRenderer.METEOR_FW, SkyRenderer.METEOR_FH);
+        ctx.restore();
+      }
+    }
     const t = clock.timeOfDay;
     const [top, bottom] = this.skyColors(t);
     const grad = ctx.createLinearGradient(0, 0, 0, viewH);

@@ -21,6 +21,8 @@ import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummon
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
+import { mainExpertMode, getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
+import type { Enemy } from './Enemy';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
 // 对齐原版体感：跳跃/小坡绝不受伤（原版约 25 格起伤）；落水另行豁免
@@ -54,6 +56,9 @@ export class Player extends Entity {
   manaRegenDelay = 0;
   /** 用魔物品动画窗剩余 tick（itemAnimation>0 期每帧重置 delay，:42131-42137） */
   manaAnimTicks = 0;
+  /** 调试：无敌 + 无限魔力（F2 切换，原版无）——damage() 早退 + 每 tick 血蓝回满
+   *  （回满兜住 DoT/溺水/摔落等直改 hp 的路径）。仅本地调试语义，不入存档 */
+  debugGod = false;
   hp = 100;
   /** 最近一次伤害死因（PlayerDeathReason 语义子集）——死亡瞬间由 Game 消费生成原版死亡文本 */
   lastDamageCause: import('../i18n/RandomText').DeathCause | null = null;
@@ -74,6 +79,9 @@ export class Player extends Entity {
   headUnderwater = false;
   /** 税务员累积税款（Player.cs:792 taxMoney，铜币；对话「收集」领取） */
   taxMoney = 0;
+  /** 渔夫任务完成数（Player.cs:1790 anglerQuestsFinished；随角色存档 PL:53943/54670。
+   *  交付时先 ++ 再结算奖励（Main.cs:39671-39672）——奖励阶梯/稀有度系数全看此值 */
+  anglerQuestsFinished = 0;
   /** PVE 死亡计数（Player.numberOfDeathsPVE，PL:53840；存档 player 段持久化） */
   deathsPve = 0;
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
@@ -664,6 +672,13 @@ export class Player extends Entity {
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
+
+    // 调试无敌（F2）：每 tick 血蓝回满——兜住 DoT/溺水/摔落等直改 hp 的路径
+    // （战斗伤害已由 damage() 早退拦截）；同时保证不会走到下方 hp<=0 死亡结算
+    if (this.debugGod) {
+      this.hp = this.maxHp;
+      this.mana = this.maxMana;
+    }
 
     // Buff tick：自然回复 / 环境 DoT（负值=持续伤害,原版 lifeRegen 路径:无视防御与无敌帧）
     const buffHeal = this.buffs.tick(dt);
@@ -1607,6 +1622,91 @@ export class Player extends Entity {
     const maxY = world.h * TILE;
     if (this.y > maxY + 100) this.damage(9999, this.cx, this.y);
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
+    // 血肉墙舌头（Player.WOFTongue :21993-22056，Update 内 myPlayer 段调用）
+    this.wofTongue(game, world, dt);
+  }
+
+  /** 狂卷之舌 DoT 分块累加器（专家 50 HP/s，:18905-18910 lifeRegen-100；
+   *  :19136-19148 -600 阈值 → 每 6t 弹 HurtLifeRegen(5)） */
+  private tongueDotAcc = 0;
+
+  /** Player.WOFTongue（Player.cs:21993-22056）1:1：
+   *  gross=惊恐 37（见到墙）、tongued=狂卷之舌 38（高于地狱层/绕到墙后）。
+   *  - 墙嘴前沿 140px 带且 gross → 每帧 Hurt(50×难度缩放)，强制击退（:22003-22007）
+   *  - 未 gross 且身处地狱视野内 → 上 37 + 播 Zombie_10 尖啸（:22009-22012）
+   *  - gross 且（高于地狱层 或 绕到墙背后 40px）→ 上 38（:22014-22027）
+   *  - tongued：封道具/钩爪（:22032-22041）+ 专家 50 HP/s DoT（:18905-18910）+
+   *    舌距中心 >3000px（:22044-22048）或墙抵世界边（:22049-22052）→ KillMe */
+  private wofTongue(game: GameHooks, world: import('../world/World').World, dt: number): void {
+    if (this.dead) return;
+    // :21993-21997 Main.wofNPCIndex<0 / 墙 inactive → 直接返回
+    //（enemies 可选调用：测试假宿主常缺该钩子）
+    const wall = ((game.enemies?.() ?? []) as Enemy[]).find((n) => !n.dead && n.vanillaId === 113) ?? null;
+    if (!wall) return;
+    // UpdateBuffs :10578-10587：buff 37 在且墙在场 → gross + buffTime 钳 10（apply 续期）；
+    // 墙不在场则不续期自然消散（原版 DelBuff）
+    const gross = this.buffs.has(BuffType.Horrified);
+    if (gross) this.buffs.apply(BuffType.Horrified, 10 / 60);
+    const tongued = this.buffs.has(BuffType.TheTongue);
+    // :22000-22002 墙嘴前沿 X（墙朝东再退 96px）
+    let mouth = wall.x + 40;
+    if (wall.facing > 0) mouth -= 96;
+    // :22003-22007 墙前 140px 带且 gross → 每帧 50 伤（难度缩放，走墙的难度档）
+    if (this.x + this.w > mouth && this.x < mouth + 140 && gross) {
+      const dmg = getAttackDamageScaledByDifficulty(50, wall.difficulty);
+      this.lastDamageCause = { kind: 'npc', name: 'Wall of Flesh' };
+      if (this.damage(dmg, wall.cx, wall.cy)) {
+        game.playSfx('hurt');
+        game.addDamageNumber(this.cx, this.y, Math.max(1, Math.round(dmg - this.defense * 0.5)), false, '#FF5050');
+        // :22005 noKnockback=false——舌击无视钴盾族免击退，沿墙推进方向弹开
+        this.vx = (wall.facing >= 0 ? 1 : -1) * 3.4;
+        this.vy = -3;
+      }
+    }
+    // :22009-22012 未 gross 且身处地狱带（>h-250 格）且在墙嘴 ±MaxWorldViewSize.X
+    //  （Main.cs:736-740 = 1920）视野内 → 上 37 + Zombie_10 尖啸
+    if (!gross && this.y > (world.h - 250) * TILE
+      && this.x > mouth - 1920 && this.x < mouth + 1920) {
+      this.buffs.apply(BuffType.Horrified, 10 / 60);
+      game.playSfxFiles(['Zombie_10'], 1, wall.cx, wall.cy);
+    }
+    // :22014-22027 gross 且 高于地狱层 / 绕到墙背后（越过墙中心 40px）→ 上 38
+    if (gross) {
+      if (this.y < (world.lavaLine || world.h - 200) * TILE) {
+        this.buffs.apply(BuffType.TheTongue, 10 / 60);
+      }
+      if (wall.facing < 0) {
+        if (this.cx > wall.cx + 40) this.buffs.apply(BuffType.TheTongue, 10 / 60);
+      } else if (this.cx < wall.cx - 40) {
+        this.buffs.apply(BuffType.TheTongue, 10 / 60);
+      }
+    }
+    // :22032 以下 tongued 效果实装：
+    //  ① controlUseItem/controlHook=false——道具门禁由 Game.updateUse 读本 buff（钩爪
+    //    系统未实装，aiStyle 7 弹 Kill 段 :22036-22041 登记不适用）
+    if (!tongued) return;
+    //  ② 专家 DoT（:18905-18910 lifeRegen-100 = 50 HP/s，正回复清零 + 爬坡计时清零；
+    //     :19136-19148 -600 阈值分块 HurtLifeRegen(5) → 每 0.1s 弹 5，无视无敌帧/防御）
+    if (mainExpertMode(world)) {
+      this.lifeRegenTime = 0;
+      this.tongueDotAcc += 50 * dt;
+      let chunk = 0;
+      while (this.tongueDotAcc >= 5) { this.tongueDotAcc -= 5; chunk += 5; }
+      if (chunk > 0) {
+        this.hp = Math.max(0, this.hp - chunk);
+        game.addDamageNumber(this.cx, this.y, chunk, false, '#FF3C46', true);
+        // :19144-19149 statLife<=0 → KillMe(ByOther(12))——该死因文案包未移植，走默认包
+        if (this.hp <= 0) this.lastDamageCause = { kind: 'default' };
+      }
+    }
+    //  ③ 舌距 >3000px（:22044-22048）/ 墙抵世界两侧（:22049-22052）→ KillMe(1000)
+    if (Math.hypot(wall.cx - this.cx, wall.cy - this.cy) > 3000
+      || wall.x < 608 || wall.x > (world.w - 38) * TILE) {
+      // KillMe 绕无敌帧直死（原版 ByOther(11)/(12) 文案包未移植 → npc 归因）
+      this.lastDamageCause = { kind: 'npc', name: 'Wall of Flesh' };
+      this.iframes = 0;
+      this.hp = 0;
+    }
   }
 
   /** breathCDMax（Player.cs:3693-3710，属性每次读重算）：基础 7 tick；
@@ -1840,6 +1940,8 @@ export class Player extends Entity {
   /** 受击：防御减伤公式 max(1, dmg - defense*0.5)（移植自 Maples Player.OnAttacked）。
    *  knockback=false 用于窒息等环境伤害（只掉血不击退） */
   damage(dmg: number, srcX: number, srcY: number, knockback = true): boolean {
+    // 调试无敌（F2）：完全免伤——不扣血/不进无敌帧/不触发受击饰品（返回 false=未受伤）
+    if (this.debugGod) return false;
     // 微光化免伤（Player.cs:37591-37595 Hurt 前置：shimmering 且可闪避 → 直接返回 0；
     // 本仓 damage 以 false 表示完全免伤——Boss 专属弹幕 371 等不可闪避源未移植）
     if (this.shimmering) return false;

@@ -115,9 +115,13 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
   switch (name) {
     case 'NotExpert': return !ctx.isExpert;
     case 'IsExpert': return ctx.isExpert;
-    case 'LegacyHack_IsBossAndExpert': return ctx.isExpert;
-    case 'LegacyHack_IsBossAndNotExpert': return !ctx.isExpert;
-    case 'LegacyHack_IsABoss': return true; // 挂在 boss 自身注册上，击杀即 boss
+    // Conditions.cs:610-670（LegacyHack_IsBoss* = npc.boss && 档位）：
+    // boss 位由 Enemy 死亡路径按 DropEoWLoot（NPC.cs:79212-79228）注入 ctx——
+    // EoW 13/14/15 仅"场上再无同族"的最后一段为 true（宝袋/纪念章/宠物/魔矿
+    // 20-60/面具/奖旗全挂此位），中间段恒 false 只出非门控小额
+    case 'LegacyHack_IsBossAndExpert': return ctx.boss && ctx.isExpert;
+    case 'LegacyHack_IsBossAndNotExpert': return ctx.boss && !ctx.isExpert;
+    case 'LegacyHack_IsABoss': return ctx.boss;
     case 'Easymode': return !ctx.hardMode;
     case 'IsHardmode': return ctx.hardMode;
     case 'NotRemixSeedHardmode': return ctx.hardMode;

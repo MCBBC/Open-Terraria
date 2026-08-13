@@ -27,6 +27,7 @@ function extractPool(fnName) {
     else if (condText.includes('downedFrost')) cond = 'downedFrost';
     else if (condText.includes('downedPirates')) cond = 'downedPirates';
     else if (condText.includes('downedGoblins')) cond = 'downedGoblins';
+    else if (condText.includes('downedPlantBoss')) cond = 'downedPlantBoss';
     else if (condText.includes('dontStarveWorld')) cond = 'skip'; // 饥荒种子
     else if (condText) cond = 'skip';
     entries.push({ id: Number(m[3]), tier: Number(m[1]), cond });

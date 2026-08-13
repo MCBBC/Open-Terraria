@@ -63,7 +63,10 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
+    meteorShowerCount: world.meteorShowerCount,   // WorldGen.meteorShowerCount（WorldFile.cs:1069/:177）
+    angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
+    shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
     // 挂物族存放物（内部 id；serializeSave 内过稳定 id 表）
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
@@ -85,6 +88,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     taxMoney: player.taxMoney ?? 0,         // PL:53839
     golferScoreAccumulated: player.golferScoreAccumulated ?? 0, // PL:1792
     deathsPve: player.deathsPve ?? 0,       // PL:53840
+    anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);
 }
@@ -117,7 +121,10 @@ export function saveWorldOnly(world: World): string {
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
+    meteorShowerCount: world.meteorShowerCount,
+    angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
+    shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
     sundialCooldown: world.sundialCooldown, moondialCooldown: world.moondialCooldown,
     fastForwardTimeToDawn: world.fastForwardTimeToDawn,
     fastForwardTimeToDusk: world.fastForwardTimeToDusk,
@@ -222,7 +229,15 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
     world.invasionDelay = data.invasion.delay;
   }
   if (data.altarCount != null) world.altarCount = data.altarCount; // 旧档缺省 0
+  if (data.meteorShowerCount != null) world.meteorShowerCount = data.meteorShowerCount; // 旧档缺省 0
+  // 渔夫任务链（WorldFile.cs:2147-2161）：当日任务鱼索引 + 今日已交付名单；
+  // anglerQuestFinished 不回填——原版读档 loadTempInfo 重置 false（WF:628-629）
+  if (data.angler) {
+    world.anglerQuest = data.angler.quest ?? 0;
+    world.anglerWhoFinishedToday = [...(data.angler.whoFinishedToday ?? [])];
+  }
   if (data.savedOreTiers != null) world.savedOreTiers = { ...data.savedOreTiers }; // 旧档缺省 -1 未砸过
+  if (data.shadowOrbCount != null) world.shadowOrbCount = data.shadowOrbCount;      // 旧档缺省 0
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
   world.chests = v3Chests;      // v3 id 翻译+locked 透传
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）

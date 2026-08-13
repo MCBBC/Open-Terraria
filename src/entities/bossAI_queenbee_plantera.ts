@@ -10,6 +10,7 @@ import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
+import { mainExpertMode } from '../stats/ScaleStats';
 
 /** 原版 localAI[0..3](Enemy 的 ai0-ai3 对应 ai[],localAI 是独立数组 → WeakMap 落盘) */
 const localAI = new WeakMap<Enemy, number[]>();
@@ -273,18 +274,20 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
 // 弱重力 0.02 下沉 + X 朝玩家 0.1 步进;261 撞墙即碎(life=0),265 穿墙。
 // ============================================================================
 export function planteraHookAI(e: Enemy, game: GameHooks, player: Player | null) {
-  // EncourageDespawn(5):共享 Despawn 系统兜底
+  // EncourageDespawn(5,:31808):共享 Despawn 系统兜底（离屏 5t 即消）
+  e.encourageDespawn(5);
   e.vy += 0.02;                                    // :31819
   if (player) {
     if (e.vy < 0 && player.y > e.y + 100) e.vy *= 0.95;   // :31821-31824
     if (e.vy > 1) e.vy = 1;
-    // X 朝玩家 0.1 步进,逆向先 0.98 阻尼(:31829-31860;expert 双档省略)
+    // X 朝玩家 0.1 步进(expert ×2),逆向先 0.98 阻尼(:31829-31860)
+    const homeStep = mainExpertMode(game.world) ? 0.2 : 0.1;
     if (e.x + e.w < player.x) {
       if (e.vx < 0) e.vx *= 0.98;
-      e.vx += 0.1;
+      e.vx += homeStep;
     } else if (e.x > player.x + player.w) {
       if (e.vx > 0) e.vx *= 0.98;
-      e.vx -= 0.1;
+      e.vx -= homeStep;
     }
   }
   if (e.vx > 5 || e.vx < -5) e.vx *= 0.97;         // :31861-31864
@@ -327,8 +330,8 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
   }
   // 暴怒 flag50(:31923-31928):!ZoneJungle || 玩家顶边 Y < worldSurface*16
   // || > UnderworldLayer*16 → num793+8 / num794=0.15(ZoneJungle = Game.scene 窗口计数;
-  // UnderworldLayer 同 SceneMetrics 取法:lavaLine || maxTilesY-200)
-  const underLayer = (game.world.lavaLine || game.world.store.h - 200) * TILE;
+  // UnderworldLayer = maxTilesY-200,Main.cs:2863——勿用 lavaLine,两者差近 200 格)
+  const underLayer = (game.world.store.h - 200) * TILE;
   const flag50 = !game.scene?.zoneJungle
     || p.y < game.world.groundLevel * TILE
     || p.y > underLayer;
@@ -337,6 +340,18 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.bInit = true;
     l[0] = 1;
     for (let k = 0; k < 3; k++) spawnPart(game, e, 263);
+  }
+  // despawn 防逃(:31885-31892):SpawnBoss 时 timeLeft×20=15000;目标存活且
+  // 4800px 内每 tick 刷新回 750,否则倒数归零消散（玩家死 flag51 不刷新→离场消散）
+  {
+    const dist = Math.hypot(p.cx - e.cx, p.cy - e.cy);
+    if (!flag51 && dist < 4800) {
+      e.despawnTimer = 750;
+      e.despawnEncouraged = false;
+    } else {
+      e.despawnEncouraged = true;
+      if (e.despawnTimer > 15000) e.despawnTimer = 15000;
+    }
   }
   // 钩蔓中心(:31893-31913):场上前 3 只 aiStyle 52 的位置均值
   let sumX = 0, sumY = 0, cnt = 0;
@@ -352,11 +367,18 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
   let num789 = cnt > 0 ? sumX / cnt : e.cx;
   let num790 = cnt > 0 ? sumY / cnt : e.cy;
   // 速度/加速度档(:31914-31928):2.5/0.025 → 半血 5/0.05 → 1/4 血 7
+  const expert = mainExpertMode(game.world);
+  const ftw = !!game.world.seedFlags?.getGoodWorld;
   let num793 = 2.5;
   let num794 = 0.025;
   if (e.hp < e.maxHp / 2) { num793 = 5; num794 = 0.05; }
   if (e.hp < e.maxHp / 4) num793 = 7;
-  if (flag50) { num793 += 8; num794 = 0.15; }   // :31923-31941 暴怒档(expert ×1.1 档省略)
+  if (flag50) { num793 += 8; num794 = 0.15; }   // :31923-31941 暴怒档
+  if (expert) {                                 // :31936-31942 expert 档
+    num793 = (num793 + 1) * 1.1;
+    num794 = (num794 + 0.01) * 1.1;
+  }
+  if (ftw) { num793 *= 1.15; num794 *= 1.15; }  // :31943-31946
   // 目标点 = 钩蔓中心 + 朝玩家偏移,钳 500px(:31942-31968)
   let num795 = p.cx - num789;
   let num796 = p.cy - num790;
@@ -366,7 +388,7 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     num793 += 8;
   }
   let num797 = Math.hypot(num795, num796);
-  const num798 = 500 + (flag50 ? 350 : 0);   // expert +150 省略
+  const num798 = 500 + (flag50 ? 350 : 0) + (expert ? 150 : 0);
   if (num797 >= num798) {
     const s = num798 / num797;
     num795 *= s;
@@ -402,14 +424,16 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     l[1] += 1;                                // :32034
     for (const th of [0.9, 0.8, 0.7, 0.6]) if (e.hp < e.maxHp * th) l[1] += 1;
     if (flag50) l[1] += 3;                     // :32059-32062 暴怒蓄力 +3
-    // expert:+1 / expert justHit 概率蓄力 / getGoodWorld:+1 省略(:32051-32066)
+    if (expert) l[1] += 1;                     // :32058-32060 expert 蓄力 +1
+    if (ftw) l[1] += 1;                        // :32066-32068
+    // expert justHit 1/2 蓄力越过视线(:32061-32064/:32077-32081)——justHit 未建模,登记
     if (l[1] > 80) {
       l[1] = 0;
       // 视线检查(:32069-32078):Collision.CanHit(position,w,h,player,...) 近似
       const flag52 = losClear(game, e.x, e.y, p.x, p.y);
       if (flag52) {
         // 种子 275 / 毒种 276 / 刺球 277(:32080-32133)
-        const num802 = 15;                    // expert 17 省略
+        const num802 = expert ? 17 : 15;      // :32088-32097
         let num803 = p.cx - e.cx;
         let num804 = p.cy - e.cy;
         const t = num802 / (Math.hypot(num803, num804) || 1);
@@ -418,18 +442,25 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
         let num806 = 22;
         let num807 = 275;
         let life = 300;
-        if (e.hp < e.maxHp * 0.8 && rnd(4) === 0) {
-          num806 = 27;                        // 毒种 276
+        // 弹幕物理:275/276 = aiStyle 1(35t 后 g=0.025 下坠,Projectile.cs:54318-54329;
+        // expert 追踪 18/70/floor14,:54330-54345);277 = aiStyle 14(撞块 ×-0.9 反弹,
+        // :18306-18314 + expert 追踪 12/200/cap16,:23307-23316)
+        let arrowOpts: Partial<import('./Arrow').ArrowOpts> = { grav: 0.025, gravDelay: 35 };
+        if (expert) arrowOpts = { ...arrowOpts, homing: { speed: 18, weight: 70, floor: 14 } };
+        if (e.hp < e.maxHp * 0.8 && rnd(expert ? 2 : 4) === 0) {
+          num806 = 27;                        // 毒种 276(命中上毒在 statusPlayer case 276)
           num807 = 276;
           l[1] = -30;                         // 下发弹延迟 30t
-        } else if (e.hp < e.maxHp * 0.8 && rnd(8) === 0) {
+        } else if (e.hp < e.maxHp * 0.8 && rnd(expert ? 6 : 8) === 0) {
           num806 = 31;                        // 刺球 277
           num807 = 277;
           l[1] = -120;                        // 下发弹延迟 120t
-          life = 1200;                        // 原版不设 timeLeft(保持默认),此处取本框架默认
+          life = 1200;                        // 原版不设 timeLeft(保持默认 1200)
+          arrowOpts = { grav: 0.3, thornBounce: true };
+          if (expert) arrowOpts = { ...arrowOpts, homing: { speed: 12, weight: 200, cap: 16 } };
         }
         if (flag50) num806 *= 2;              // :32120-32122 暴怒弹伤 ×2
-        shoot(game, e.cx + num803 * 3, e.cy + num804 * 3, num803, num804, num806, num807, life);
+        shoot(game, e.cx + num803 * 3, e.cy + num804 * 3, num803, num804, num806, num807, life, arrowOpts);
       }
     }
   } else {
@@ -437,10 +468,26 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.def.defense = 10;                       // :32134
     e.def.damage = 70;                        // GetAttackDamage_ScaledByDifficulty(70) 经典 = 70
     if (flag50) { e.def.defense *= 4; e.def.damage *= 2; }   // :32136-32140 暴怒防 ×4/接触伤 ×2
-    // 首次进二阶段:触须 264×8(:32144-32170;expert 追加分配/getGoodWorld +6 省略)
+    // 首次进二阶段:触须 264×8(:32144-32154;getGoodWorld +6=14)
     if (l[0] === 1) {
       l[0] = 2;
-      for (let k = 0; k < 8; k++) spawnPart(game, e, 264);
+      const nT = ftw ? 14 : 8;
+      for (let k = 0; k < nT; k++) spawnPart(game, e, 264);
+      // expert:每个存活钩蔓(263)再派 3 只 ai[3]=hookIndex+1 锚定触须(:32155-32167)
+      if (expert) {
+        const hooks = (game.enemies() as Enemy[]).filter((n) => !n.dead && n.vanillaId === 263);
+        hooks.forEach((hk, hi) => {
+          for (let k = 0; k < Math.floor(nT / 2) - 1; k++) {
+            const t = spawnPart(game, e, 264);
+            if (t) t.ai3 = hk.id + 1;   // ai[3] = hook whoAmI+1（触手2 按 id 反查锚）
+          }
+        });
+      }
+    }
+    // expert 每 60t 补触须(:32171-32185):自由触须(ai3==0)<8 且 1/((count+1)*10) → +1
+    if (expert && rnd(60) === 0) {
+      const free = (game.enemies() as Enemy[]).filter((n) => !n.dead && n.vanillaId === 264 && n.ai3 === 0);
+      if (free.length < 8 && rnd((free.length + 1) * 10) <= 1) spawnPart(game, e, 264);
     }
     // 二阶段入场花瓣 Gore 378/379/380(:32194-32200)→ 粒子近似
     if (l[2] === 0) {
@@ -489,8 +536,8 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
   const target: { cx: number; cy: number; x: number; y: number; dead: boolean } = player ?? boss;
   const flag54 = !player || player.dead;    // 玩家死(:32248-32250)
   // 暴怒 flag53(:32252-32257):目标玩家非丛林 / 顶边 Y < worldSurface*16 /
-  // > UnderworldLayer*16 / 玩家死(flag54)→ 入口 localAI[0] -4
-  const underLayerT = (game.world.lavaLine || game.world.store.h - 200) * TILE;
+  // > UnderworldLayer*16(maxTilesY-200,Main.cs:2863) / 玩家死(flag54)→ 入口 localAI[0] -4
+  const underLayerT = (game.world.store.h - 200) * TILE;
   const flag53 = !game.scene?.zoneJungle
     || (!!player && player.y < game.world.groundLevel * TILE)
     || (!!player && player.y > underLayerT)
@@ -551,10 +598,14 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
     }
   }
   if (!(e.ai0 > 0) || !(e.ai1 > 0)) return;   // :32352-32355 无锚不动
-  // 收线速度(:32356-32375):6 → 本体半血 8 → 1/4 血 10(expert +1/+1、暴怒/玩家死 ×2)
+  // 收线速度(:32356-32375):6 → 本体半血 8 → 1/4 血 10;expert +1、半血后再 +1;
+  // 暴怒/玩家死 ×2
   let num834 = 6;
   if (boss.hp < boss.maxHp / 2) num834 = 8;
   if (boss.hp < boss.maxHp / 4) num834 = 10;
+  const expertHook = mainExpertMode(game.world);
+  if (expertHook) num834 += 1;
+  if (expertHook && boss.hp < boss.maxHp / 2) num834 += 1;
   if (flag53) num834 *= 2;                   // :32368-32371 暴怒收线 ×2
   if (flag54) num834 *= 2;
   // 朝锚点(锚点 tile 中心 - 8px)收线(:32383-32395):近于 12+速 → 速度=残差(钉住)
@@ -598,20 +649,25 @@ export function planteraTentacle2AI(e: Enemy, game: GameHooks, player: Player | 
     e.ai0 = rndRange(-100, 101);
     e.ai1 = rndRange(-100, 101);
   }
-  // 环绕半径随本体血量(:32442-32451;expert 动态半径省略)
+  // 环绕半径随本体血量(:32442-32451);expert 动态半径 +300×(1-血比) + 加速度 0.5
+  // (:32454-32459);getGoodWorld 加速度 +4(:32460-32463)
+  const expertTen = mainExpertMode(game.world);
+  const ftwTen = !!game.world.seedFlags?.getGoodWorld;
   let orbit = 200;
   if (boss.hp < boss.maxHp * 0.25) orbit += 100;
   if (boss.hp < boss.maxHp * 0.1) orbit += 100;
-  // 目标点 = 锚点 + 归一化偏移×半径;±0.2 步进,符号翻转 0.9 阻尼(:32467-32509)
+  if (expertTen) orbit += 300 * (1 - boss.hp / boss.maxHp);
+  const accTen = 0.2 + (expertTen ? 0.3 : 0) + (ftwTen ? 4 : 0);
+  // 目标点 = 锚点 + 归一化偏移×半径;步进 accTen,符号翻转 0.9 阻尼(:32467-32509)
   let dx = anchor.cx + e.ai0 - anchor.cx;
   let dy = anchor.cy + e.ai1 - anchor.cy;
   const d = Math.hypot(dx, dy) || 1;
   dx = (dx / d) * orbit;
   dy = (dy / d) * orbit;
-  if (e.cx < anchor.cx + dx) { e.vx += 0.2; if (e.vx < 0 && dx > 0) e.vx *= 0.9; }
-  else if (e.cx > anchor.cx + dx) { e.vx -= 0.2; if (e.vx > 0 && dx < 0) e.vx *= 0.9; }
-  if (e.cy < anchor.cy + dy) { e.vy += 0.2; if (e.vy < 0 && dy > 0) e.vy *= 0.9; }
-  else if (e.cy > anchor.cy + dy) { e.vy -= 0.2; if (e.vy > 0 && dy < 0) e.vy *= 0.9; }
+  if (e.cx < anchor.cx + dx) { e.vx += accTen; if (e.vx < 0 && dx > 0) e.vx *= 0.9; }
+  else if (e.cx > anchor.cx + dx) { e.vx -= accTen; if (e.vx > 0 && dx < 0) e.vx *= 0.9; }
+  if (e.cy < anchor.cy + dy) { e.vy += accTen; if (e.vy < 0 && dy > 0) e.vy *= 0.9; }
+  else if (e.cy > anchor.cy + dy) { e.vy -= accTen; if (e.vy > 0 && dy < 0) e.vy *= 0.9; }
   e.vx = Math.max(-8, Math.min(8, e.vx));
   e.vy = Math.max(-8, Math.min(8, e.vy));
   // 朝向旋转(:32526-32535)

@@ -78,11 +78,22 @@ const WALL_SPREADS_HALLOW = new Set([70, 219, 222, 28]);
 const SNOW_FAMILY = new Set([147, 161, 163, 164, 200]);
 // 上面所有 sheet 集合 → 内部 id 集合（运行时比较用）
 const sheetOf = (id: number): number => TILE_DEFS[id]?.vanilla?.sheet ?? -1;
+// 保底球茎 forceBulb 计分黑名单（WorldGen.cs:74266-74281，sheet=原版 id）：
+// IsAContainer（BasicChest{21,88,467} 近似）+ 蜥蜴砖/祭坛/门/各结构块/轨道/巨石。
+// Paintings 近似取 242-244，Boulders 取 379（TileID.Sets 两集合的已知成员）
+const BURST_BLACKLIST = new Set<number>([
+  21, 88, 467,            // IsAContainer
+  226, 237, 10, 11, 26, 16, 15, 14, 104, 158, 105, 531, 349, 137, 443, 12, 314,
+  242, 243, 244,          // TileID.Sets.Paintings 近似
+  379,                    // TileID.Sets.Boulders
+]);
 
 export interface EvolutionHost {
   store: TileStore;
   worldSurface: number;
   rockLevel: number;
+  /** Main.dungeonX（保底灯泡搜索框用，GeneratePlanteraBulbOnAllMechsDefeated cs:74182） */
+  dungeonX: number;
   flags: Record<string, boolean>;
   crimson: boolean;
   isDay: boolean;
@@ -199,6 +210,91 @@ export class WorldEvolution {
       st.setTile(x + dx, y + dy, t, styleX + dx * 18, dy * 18);
     }
     return true;
+  }
+
+  // ================= 保底世花球茎（GeneratePlanteraBulbOnAllMechsDefeated） =================
+
+  /** WorldGen.GeneratePlanteraBulbOnAllMechsDefeated（cs:74180-74248）+ AttemptTo
+   *  GeneratePlanteraBulbAt（cs:74250-74329）：三王全灭时在丛林侧搜索框
+   *  [worldSurface, UnderworldLayer) 内掷 2500 点，逐点向上走找丛林草 60
+   *  （<500 次后 forceBulb 允许泥 59，<200 次后允许非活动格）；找到即试
+   *  (X,Y-1)/(X-1,Y-1)/(X+1,Y-1) 三锚，**恰好生成一个**灯泡即返回。 */
+  planteraBulbBurst(): boolean {
+    const st = this.host.store;
+    const { w } = st;
+    const jungleLeft = this.host.dungeonX > w * 0.5;   // 丛林在地牢对侧（cs:74182）
+    const x0 = Math.floor(jungleLeft ? w * 0.15 : w * 0.65);
+    const x1 = Math.floor(jungleLeft ? w * 0.35 : w * 0.85);
+    const yTop = Math.floor(this.host.worldSurface);
+    const yBot = st.h - 200;                            // Main.UnderworldLayer（Main.cs:2863）
+    let tries = 2500;
+    while (tries > 0) {
+      const forceBulb = tries < 500;                     // cs:74197 允许泥 59+计分档
+      const allowInactive = tries < 200;                 // cs:74198
+      tries--;
+      let px = x0 + Math.floor(Math.random() * (x1 - x0));
+      let py = yTop + Math.floor(Math.random() * (yBot - yTop));
+      // 逐点向上走（≤500 步,cs:74206-74230）：flag2 时非活动格也算；命中 60/59 停
+      let foundSheet = -1;
+      let steps = 500;
+      while (steps-- > 0) {
+        py--;
+        if (py < yTop) break;
+        const sheet = sheetOf(this.typeAt(px, py));
+        const act = this.active(px, py);
+        if (allowInactive || act) {
+          if (sheet === 60 || (forceBulb && sheet === 59)) { foundSheet = sheet; break; }
+        }
+      }
+      if (foundSheet < 0) continue;
+      // 三锚尝试（cs:74232-74246）：PlaceJunglePlant 锚=2×2 右下角 → placeBlock 左上角
+      for (const ox of [0, -1, 1]) {
+        if (this.attemptBulbAt(px + ox, py - 1, forceBulb)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** AttemptToGeneratePlanteraBulbAt（cs:74250-74329）。锚 (i,j)=灯泡 2×2 右下角
+   *  （底行 j 之下两列须为实心丛林草,cs:47820-47827）；2×2 须空或仅藤蔓/蘑菇/
+   *  丛林植物 233（cs:47795-47812，可覆写）。forceBulb 档：4×4 邻域计分
+   *  （泥/草 +1,其余活动格 -1,黑名单格直接 -1）≥12 才放,且清 4×4 + 外环转草 60。 */
+  private attemptBulbAt(i: number, j: number, forceBulb: boolean): boolean {
+    const st = this.host.store;
+    // 底承:两列 j+1 行须实心丛林草
+    if (!(st.inBounds(i - 1, j + 1) && st.inBounds(i, j + 1))) return false;
+    if (!(this.solidTile(i - 1, j + 1) && sheetOf(this.typeAt(i - 1, j + 1)) === 60)) return false;
+    if (!(this.solidTile(i, j + 1) && sheetOf(this.typeAt(i, j + 1)) === 60)) return false;
+    // 2×2 清场校验（藤 62 / 蘑菇植物 63-71 / 丛林植物 233 可覆写）
+    for (let dx = -1; dx <= 0; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        const sh = sheetOf(this.typeAt(i + dx, j + dy));
+        if (this.active(i + dx, j + dy)
+          && sh !== 62 && sh !== 233 && !(sh >= 63 && sh <= 71)) return false;
+      }
+    }
+    if (forceBulb) {
+      // 计分（cs:74255-74296）：4×4 邻域泥/草 +1、其余活动 -1；黑名单即 -1
+      let score = 0;
+      outer:
+      for (let k = -2; k < 2; k++) {
+        for (let l = -2; l < 2; l++) {
+          const sh = sheetOf(this.typeAt(i + k, j + l));
+          if (sh === 59 || sh === 60) score++;
+          else if (this.active(i + k, j + l)) score--;
+          if (BURST_BLACKLIST.has(sh)) { score = -1; break outer; }
+        }
+      }
+      if (score < 12) return false;
+      // 清 4×4 + 外环转丛林草（cs:74298-74309）
+      for (let m = -2; m < 2; m++) {
+        for (let n = -2; n < 2; n++) {
+          this.kill(i + m, j + n);
+          if (m === -2 || m === 1 || n === -2 || n === 1) this.setType(i + m, j + n, S(60)!);
+        }
+      }
+    }
+    return this.placeBlock(i - 1, j - 1, 238, 2, 2);
   }
 
   // ================= 采样子分发（OvergroundTile cs:72066） =================

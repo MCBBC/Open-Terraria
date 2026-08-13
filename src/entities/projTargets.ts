@@ -4,7 +4,7 @@
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { projectileData } from '../data/vanillaProjectiles';
-import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { hostileProjectileDamage, mainDifficulty, mainExpertMode } from '../stats/ScaleStats';
 
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
@@ -93,6 +93,7 @@ export function hitPlayer(
   self: { x: number; y: number; w: number; h: number },
   game: GameHooks,
   dmg: number,
+  trap = false,
 ): boolean {
   if (dmg <= 0) return false;
   const p = game.player;
@@ -108,6 +109,12 @@ export function hitPlayer(
   //   （Enemy.def.damage 已是缩放值），在此再乘会双重缩放。
   //   （本函数调用方均为 hostile 弹幕，无 reflected 路径——反射弹转 friendly 打怪）
   game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)), self.x + self.w / 2, self.y + self.h / 2);
+  // 成就：陷阱弹致死（Projectile.cs:13804-13808 trap→trapDebuffSource，死则
+  // HandleSpecialEvent(4) WATCH_YOUR_STEP；仅 trap 类、非反射弹）
+  if (trap && (p.dead || p.hp <= 0)) {
+    game.achievements?.handleSpecialEvent(4,
+      { statLifeMax: p.maxHp, statManaMax: p.maxMana });
+  }
   return p.iframes > ifr; // damage 落地才置无敌帧（闪避不置，对应 Hurt 返回 0）
 }
 
@@ -201,6 +208,15 @@ export function tryReflectProjectile(
 export function statusPlayer(game: GameHooks, projId: number): void {
   const p = game.player;
   switch (projId) {
+    case 276: {
+      // 毒种子命中（Projectile.cs:11527-11535）：专家必中 Next(120,540)t；
+      // 经典 50% Next(180,420)t → buff 20 Poison
+      const t = mainExpertMode(game.world)
+        ? 120 + Math.floor(Math.random() * 421)
+        : (Math.random() < 0.5 ? 180 + Math.floor(Math.random() * 241) : 0);
+      if (t > 0) p.buffs.apply(BuffType.Poisoned, t / 60);
+      break;
+    }
     case 348:
       p.buffs.apply(BuffType.Chilled, (Math.random() < 0.5 ? 300 : 600) / 60);
       if (Math.random() < 2 / 3) {

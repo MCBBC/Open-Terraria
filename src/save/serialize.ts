@@ -85,8 +85,15 @@ export interface SaveData {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100；旧档缺省 0） */
   altarCount?: number;
+  /** 流星雨剩余计数（WorldGen.meteorShowerCount，WorldFile.cs:1069/:177；旧档缺省 0） */
+  meteorShowerCount?: number;
+  /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WorldFile.cs:1329-1335/
+   *  2147-2161；anglerQuestFinished 运行时态不存——读档 loadTempInfo 重置 WF:628-629） */
+  angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */
   savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
+  /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount，WF:1302/2099；旧档缺省 0） */
+  shadowOrbCount?: number;
   tiles: string;   // base64 RLE
   walls: string;
   liquid: string;
@@ -119,6 +126,8 @@ export interface SaveData {
     taxMoney?: number;
     /** 高尔夫累计分（Player.golferScoreAccumulated :1792;旧档缺省 0） */
     golferScoreAccumulated?: number;
+    /** 渔夫任务完成数（Player.anglerQuestsFinished :1790;旧档缺省 0——奖励阶梯据此） */
+    anglerQuestsFinished?: number;
     /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
     deathsPve?: number;
   };
@@ -127,6 +136,7 @@ export interface SaveData {
   /** 世界事件态（原版 header 内 party/灯笼夜段,WF:1361-1368/1381-1384;旧档缺省=无派对无预约） */
   events?: {
     partyManual: boolean;            // BirthdayParty.ManualParty
+    partyCooldown?: number;         // BirthdayParty.PartyDaysOnCooldown（旧档缺省 0）
     lanternManual: boolean;          // 服务端手动灯笼（本仓无入口,位保留）
     lanternGenuine: boolean;         // 真灯笼夜兑现中
     lanternNext: boolean;            // 次夜灯笼夜预约
@@ -178,8 +188,14 @@ export interface SaveMeta {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100；旧档缺省 0） */
   altarCount?: number;
+  /** 流星雨剩余计数（WorldGen.meteorShowerCount，WorldFile.cs:1069/:177；旧档缺省 0） */
+  meteorShowerCount?: number;
+  /** 渔夫任务链世界段（SaveData.angler 同形；旧档缺省=索引 0/空名单） */
+  angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */
   savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
+  /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount，WF:1302/2099；旧档缺省 0） */
+  shadowOrbCount?: number;
   /** 图鉴三桶（杀数/遇数/聊天）——data/Bestiary.ts BestiarySave */
   bestiary?: import('../data/Bestiary').BestiarySave;
 }
@@ -275,7 +291,10 @@ export function serializeSave(
     },
     invasion: meta.invasion ?? { type: 0, size: 0, sizeStart: 0, x: 0, delay: 0 },
     altarCount: meta.altarCount ?? 0,
+    meteorShowerCount: meta.meteorShowerCount ?? 0,
+    angler: meta.angler ?? { quest: 0, whoFinishedToday: [] },   // WF:1329-1335（旧档缺省）
     savedOreTiers: meta.savedOreTiers ?? { cobalt: -1, mythril: -1, adamantite: -1 },
+    shadowOrbCount: meta.shadowOrbCount ?? 0,
     tiles: bytesToB64(rleTiles(st, TILE_STABLE_OF_INTERNAL)),
     walls: bytesToB64(rlePairs(st.wall)),
     liquid: bytesToB64(rlePairs(st.liquid)),

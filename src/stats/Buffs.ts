@@ -121,6 +121,15 @@ export enum BuffType {
                    //   计时（:18998 同流血 30）；headcovered → ScreenObstruction 遮屏
                    //   （目标 0.95/步进 0.3，ScreenObstruction.cs:27-31）。
                    //   由星云头蟹 421 头顶吸附每 tick AddBuff(163,59)（NPC.cs:39199）
+  Poisoned = 78, // 中毒(20)：lifeRegen-4 → 2 HP/s DoT（Player.cs:18795 poisoned 分支）
+                 //   授予链：世纪之花毒种子 276 命中（Projectile.cs:11527-11535
+                 //   专家必中 120-540t / 经典 50% 180-420t）
+  // ---- 血肉墙舌头两态（Player.WOFTongue :21993-22056 授予链）----
+  Horrified = 79,   // 惊恐(37)：见到墙 → gross（Player.cs:10578-10587 buffType==37 且
+                    //   wofNPCIndex 在场 → gross=true + buffTime 钳 10；墙不在 → DelBuff）
+  TheTongue = 80,   // 狂卷之舌(38)：tongued=true（:10589-10593 buffTime 钳 10）——
+                    //   禁用道具/钩爪 + 专家 50 HP/s DoT（:18905-18910）+ 舌距 3000px/
+                    //   墙抵边即死（:22036-22052）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -208,6 +217,11 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // ★120 在 BUFF_NO_SAVE 名单内（环境类，不落盘）
   [BuffType.KiteBuff]: { vanillaBuff: 383, descKey: 'BuffDescription.Kite', fallbackName: '腾灵' },
   [BuffType.Stinky]: { vanillaBuff: 120, descKey: 'BuffDescription.Stinky', fallbackName: '恶臭' },
+  // 世纪之花批：毒种子 276 命中授予（Projectile.cs:11527-11535），描述用原版键
+  [BuffType.Poisoned]: { vanillaBuff: 20, descKey: 'BuffDescription.Poisoned', fallbackName: '中毒' },
+  // 血肉墙舌头两态（描述走原版 BuffDescription 现成键，同 Honey/MoonLeech 先例）
+  [BuffType.Horrified]: { vanillaBuff: 37, descKey: 'BuffDescription.Horrified', fallbackName: '惊恐' },
+  [BuffType.TheTongue]: { vanillaBuff: 38, descKey: 'BuffDescription.TheTongue', fallbackName: '狂卷之舌' },
 };
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
@@ -260,6 +274,7 @@ const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
   [BuffType.OnFire, -4],      // lifeRegen-8（:18793，vampireSeed 分支未移植）
   [BuffType.Burning, -30],    // lifeRegen-60（:18862，另 moveSpeed×0.5 在 moveSpeedMult）
   [BuffType.Suffocation, -20], // lifeRegen-40（:18889）
+  [BuffType.Poisoned, -2],    // lifeRegen-4 → 2 HP/s（Player.cs:18795 poisoned 分支）
 ];
 
 export class BuffState {

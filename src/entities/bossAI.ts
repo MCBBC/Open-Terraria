@@ -130,6 +130,25 @@ export function spawnPart(game: GameHooks, src: Enemy, id: number): Enemy | null
   return addEnemy(game, p);
 }
 
+/** 指定坐标生成原版怪（NPC.NewNPC 语义，Bottom 锚点由调用方换算）：
+ *  spawnWOF（bossAI_wof）等无"母体"来源的生成点用 */
+export function spawnVanillaEnemy(game: GameHooks, id: number, x: number, y: number): Enemy | null {
+  if (!enemyCtor) return null;
+  const p = enemyCtor.fromVanilla(id, x, y);
+  if (!p) return null;
+  return addEnemy(game, p);
+}
+
+/** Enemy.spawnWormChain 的代理出口（外部 AI 文件以 type-only 导入 Enemy，
+ *  运行时引用会成环——绑定源同 spawnPart 的 enemyCtor）：建链并入 enemies 桶 */
+export function spawnWormChainFor(game: GameHooks, head: Enemy, segCount: number): Enemy[] {
+  if (!enemyCtor) return [];
+  const segs = enemyCtor.spawnWormChain(head, segCount);
+  const em = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
+  for (const s of segs) em?.add?.(s, 'enemies');
+  return segs;
+}
+
 /** AI_012 骷髅王手(NPC.cs:22289-22400):锚定头(ai1=头 id),头离场 → 自毁;
  *  头非悬浮态 → 漂在头两侧(±120×ai0, 头上方 100);悬浮态 → 缓慢环绕(±200, +230)。
  *  每 300t(ai3 计)朝玩家挥击冲刺。 */
@@ -241,8 +260,9 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
  *  二阶段 ai[0]<0：-1 追踪 8 速 ((v*50+dir)/51 :32591-32600)，计时 localAI[1]
  *  达 60+Next(120)（justHit 时 -Next(5) :32605-32609）→ -2（v×0.9、ai[3]+=25/t
  *  到 255 后瞬移 :32660-32681）→ -3（ai[3]-=25/t 回 -1 :32682-32699），alpha 跟 ai[3]。
- *  注：原版**无幻影分身机制**——所谓"幻影"即这套 alpha 渐隐/渐显瞬移循环
- *  （旧"冲刺时半透明"近似已退役）。
+ *  专家/FTW 四镜像幻影（Main.cs:24799-24843）：life<lifeMax 时以玩家中心镜像画
+ *  4 份（Renderer.drawEnemy BoC 分支），alpha=(1-life/lifeMax)²×2 钳 0..1——
+ *  与本 AI 的 alpha 渐隐/渐显瞬移循环是两套独立机制。
  *  距离消散 :32555-32567（曼哈顿 >6000px）；玩家死/离猩红 :32810-32826
  *  （localAI[3] 钳 120，>60 后 vy+=(n-60)*0.25、ai[0]=2、alpha=10；
  *  ZoneCrimson 读 world.scene.zoneCrimson）。 */
@@ -398,7 +418,8 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
  *  以玩家所在格为原点，min..max 格随机偏移（各 50% 取负）；偏移向量与玩家速度
  *  同向（点积>0）时沿自身方向外推 16×speed px；一阶段收点条件 =
  *  101 次后无条件 或（非实心 且（76 次后 或 对玩家 CanHit）），二阶段 =
- *  101 次后无条件 或 非实心。返回 tile 坐标。 */
+ *  101 次后无条件 或 非实心；越界点 = 非实心直接收（SolidTile 越界取空 tile，
+ *  :32646/:32775 无 InWorld 门）。返回 tile 坐标。 */
 function pickTeleportSpot(
   st: GameHooks['world']['store'], _e: Enemy, p: Player,
   min: number, max: number, losGate: boolean,
@@ -421,11 +442,13 @@ function pickTeleportSpot(
     }
     tx = Math.floor(p.cx / TILE) + Math.trunc(vx / TILE);
     ty = Math.floor(p.cy / TILE) + Math.trunc(vy / TILE);
-    if (st.inBounds(tx, ty)) {
-      const solid = st.isSolid(tx, ty); // WorldGen.SolidTile
-      const canSee = losGate && canHit(st, tx * TILE, ty * TILE, 1, 1, p.x, p.y, p.w, p.h);
-      if (tries > 100 || (!solid && (!losGate || tries > 75 || canSee))) break;
-    } else if (tries > 100) break;
+    // WorldGen.SolidTile 越界取默认空 tile → 非实心：越界点直接视"非实心+视线通"
+    // 收下（NPC.cs:32646/:32775 收点条件无 InWorld 门，此前越界一律重掷是偏差）
+    const inB = st.inBounds(tx, ty);
+    const solid = inB && st.isSolid(tx, ty); // WorldGen.SolidTile
+    const canSee = !losGate || !inB
+      || canHit(st, tx * TILE, ty * TILE, 1, 1, p.x, p.y, p.w, p.h);
+    if (tries > 100 || (!solid && (!losGate || tries > 75 || canSee))) break;
   }
   return { x: tx, y: ty };
 }
@@ -539,9 +562,9 @@ export function losClear(game: GameHooks, x0: number, y0: number, x1: number, y1
 /** Boss 弹幕:直飞(grav 0)+ 原版 Projectile_N 贴图。
  *  hostile=true(原版 Projectile.hostile):命中玩家结算——所有走本出口的弹都是
  *  Boss/敌怪发射的敌弹(双子激光/死光/蜂后毒刺/哥布林弹等) */
-export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId: number, life = 300): void {
+export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId: number, life = 300, arrowOpts?: Partial<import('./Arrow').ArrowOpts>): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true }), 'projectiles');
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }), 'projectiles');
 }
 
 /** AI_030/031 双子(NPC.cs:26497-27735):雷神之眼 125 / 魔神之眼 126。

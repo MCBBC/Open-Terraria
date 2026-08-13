@@ -106,9 +106,22 @@ window.addEventListener('keydown', (e) => {
   const typing = !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable);
   if (typing && e.code !== 'Escape') return;
   switch (e.code) {
+    case 'KeyS':
+      // Ctrl+S 快速存档（原 F6 让位召唤面板后迁入）
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        flow.doSave();
+      }
+      break;
     case 'KeyE':
     case 'Escape':
       e.preventDefault();
+      if (game.summonPanel?.open) {
+        // F6 召唤面板打开时,Esc 先收面板不进暂停链
+        game.summonPanel.close();
+        game.input.uiBlocking = false;
+        break;
+      }
       if (game.renderer.fullMap.open) {
         game.renderer.fullMap.open = false;
         break;
@@ -166,7 +179,8 @@ window.addEventListener('keydown', (e) => {
     }
     case 'F6':
       e.preventDefault();
-      flow.doSave();
+      // 召唤面板(调试,原版无;原 F6 快速存档挪 Ctrl+S)
+      game.toggleSummonPanel();
       break;
     case 'F7':
       e.preventDefault();

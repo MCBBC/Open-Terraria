@@ -181,14 +181,16 @@ Retarget = (targetX, targetHeight) => {
     }
 };
 Func<int, double> GenOffset = f => {
+    // ★1456 概率表（GenerateWorldSurfaceOffset 普通分支，2026-08-13 对 wld 审计修正——
+    // 曾照 1405 抄错：分母 7/4/2 且 Mountain/Valley 续走方向反）
     double n = 0.0;
     switch (f)
     {
-        case 0: while ((int)r.Next(0, 7) == 0) n += (int)r.Next(-1, 2); break;
-        case 1: while ((int)r.Next(0, 4) == 0) n -= 1.0; while ((int)r.Next(0, 10) == 0) n += 1.0; break;
-        case 2: while ((int)r.Next(0, 4) == 0) n += 1.0; while ((int)r.Next(0, 10) == 0) n -= 1.0; break;
-        case 3: while ((int)r.Next(0, 2) == 0) n -= 1.0; while ((int)r.Next(0, 6) == 0) n += 1.0; break;
-        case 4: while ((int)r.Next(0, 2) == 0) n += 1.0; while ((int)r.Next(0, 5) == 0) n -= 1.0; break;
+        case 0: while ((int)r.Next(0, 6) == 0) n += (int)r.Next(-1, 2); break;
+        case 1: while ((int)r.Next(0, 3) == 0) n -= 1.0; while ((int)r.Next(0, 10) == 0) n += 1.0; break;
+        case 2: while ((int)r.Next(0, 3) == 0) n += 1.0; while ((int)r.Next(0, 10) == 0) n -= 1.0; break;
+        case 3: while ((int)r.Next(0, 3) != 0) n -= 1.0; while ((int)r.Next(0, 6) == 0) n += 1.0; break;
+        case 4: while ((int)r.Next(0, 3) != 0) n += 1.0; while ((int)r.Next(0, 5) == 0) n -= 1.0; break;
     }
     return n;
 };
@@ -3858,6 +3860,7 @@ Checkpoint("lakes");
     }
 }
 Checkpoint("slush");
+Checkpoint("dungeon");   // #32 占位：DungeonCrawler 转录落地前=slush 同态快照（零掷骰占位，勿删）
 // ★#29 Corruption（cs:13919）与 #32 Dungeon（cs:14816）尚未转录——转录后须插在
 
 // ================= Pass 33：MountainCaveOpenings（cs:14932-14947）+ Pass 34：Beaches（cs:14947-15087）=================

@@ -1,7 +1,7 @@
-// R7 钓鱼回归：钓竿/鱼饵数据、渔获池、浮标状态机（mock 驱动）
+// R7 钓鱼回归：钓竿/鱼饵数据、渔获规则表结算、浮标状态机（mock 驱动）
 import { describe, it, expect } from 'vitest';
 import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
-import { pickPool, rollCatch } from '../src/data/vanillaFishing';
+import { FISH_DROP_RULES, tryGetItemDrop, ANGLER_QUEST_ITEMS, type FishingRollCtx } from '../src/data/vanillaFishing';
 import { Bobber } from '../src/entities/Bobber';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -59,18 +59,38 @@ describe('钓具数据', () => {
   });
 });
 
-describe('渔获池', () => {
-  it('液体优先：岩浆→闪鳍锦鲤池；蜂蜜→蜂蜜鱼；地表普通→基础鱼池', () => {
-    expect(pickPool({ liquid: 'lava', zone: 'forest', depth: 'cavern', zoneOcean: false }).fish).toContain(2312);
-    expect(pickPool({ liquid: 'honey', zone: 'jungle', depth: 'surface', zoneOcean: false }).fish).toEqual([2314]);
-    const surf = pickPool({ liquid: 'water', zone: 'forest', depth: 'surface', zoneOcean: false });
-    expect(surf.fish).toContain(2290);
-    expect(surf.crates).toContain(2334);
+describe('渔获规则表', () => {
+  const baseCtx = (over: Partial<FishingRollCtx> = {}): FishingRollCtx => ({
+    inLava: false, inHoney: false, junk: false, crate: false,
+    common: true, uncommon: true, rare: true, veryrare: true, legendary: true,
+    anyEnemies: false, canFishInLava: false,
+    x: 1000, y: 100, waterTilesCount: 2000,
+    rockLayer: 400, maxTilesX: 4200, heightLevel: 1, questFish: -1,
+    hardMode: false, bloodMoon: false, combatBookWasUsed: false, remix: false,
+    zones: {
+      corrupt: false, crimson: false, jungle: false, snow: false,
+      dungeon: false, desert: false, hallow: false,
+    },
+    rolled: {
+      corruption: false, crimson: false, jungle: false, snow: false, desert: false,
+      infectedDesert: false, remixOcean: false,
+    },
+    ...over,
   });
-  it('rollCatch：只掷出池内 id', () => {
-    const pool = pickPool({ liquid: 'water', zone: 'forest', depth: 'surface', zoneOcean: false });
-    const all = [...pool.fish, ...(pool.crates ?? []), ...(pool.junk ?? [])];
-    for (let k = 0; k < 200; k++) expect(all).toContain(rollCatch(30, pool, false));
+  it('岩浆池：CanFishInLava + veryrare → 2312（表内 LavaDrops :245）', () => {
+    const ctx = baseCtx({ inLava: true, canFishInLava: true, common: false, uncommon: false, rare: false });
+    expect(FISH_DROP_RULES.some((r) => r.group === 'LavaDrops' && r.items.includes(2312))).toBe(true);
+    expect(tryGetItemDrop(ctx)).toBe(2312);
+  });
+  it('蜂蜜池：rare → 2314（HoneyDrops :233）', () => {
+    expect(tryGetItemDrop(baseCtx({ inHoney: true, common: false, uncommon: false }))).toBe(2314);
+  });
+  it('地表普通：兜底 Any 池 → 2290（SurfaceDrops :70）', () => {
+    expect(tryGetItemDrop(baseCtx({ common: false, uncommon: false, rare: false, veryrare: false, legendary: false }))).toBe(2290);
+  });
+  it('任务鱼：questFish 命中且 uncommon → 对应任务鱼（SurfaceDrops QuestFish 规则）', () => {
+    const quest = ANGLER_QUEST_ITEMS[0]; // 2450 Batfish（HeightAbove1 + uncommon）
+    expect(tryGetItemDrop(baseCtx({ heightLevel: 2, common: false, rare: false, veryrare: false, legendary: false, questFish: quest }))).toBe(quest);
   });
 });
 

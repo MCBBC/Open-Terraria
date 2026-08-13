@@ -18,7 +18,7 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${n}${x
 // 塞材料：木 30 + 坠星 5（原版段魔力水晶可合成才会列出）
 await page.evaluate(() => {
   const g = window.__swGame;
-  const wood = window.__swItems['wood'];
+  const wood = Object.keys(window.__swItems).find((k) => /^vi_9_/.test(k));
   const star = window.__swItems['vi_75_fallen_star'];
   g.player.inv.add(wood, 30);
   g.player.inv.add(star, 5);

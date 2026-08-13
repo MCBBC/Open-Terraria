@@ -111,8 +111,7 @@ export class WhipProj extends Entity {
     const whipAtk = Math.min(3, 1 + swb * (o?.equipStats.whipSpd ?? 1));
     this.anim = Math.max(1, Math.round(anim / whipAtk));
     this.damage = damage;
-    this.dmgNow = Math.max(1, Math.round(damage * (o ? o.summonDamageMult : 1))
-      + (o ? o.equipStats.armorPen : 0));
+    this.dmgNow = Math.max(1, Math.round(damage * (o ? o.summonDamageMult : 1))); // ⑥ pen 移 hurt 参
   }
 
   /** GetWhipSettings（:45683-45761） */
@@ -235,13 +234,14 @@ export class WhipProj extends Entity {
         Math.sign(p.x - this.x) * 2, 'playerProj');
       for (const ent of game.enemies()) {
         const e = ent as unknown as { id: number; dead: boolean; x: number; y: number; w: number; h: number;
-          hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean } & import('./WhipTag').WhipTagged;
+          hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean } & import('./WhipTag').WhipTagged;
         if (e.dead || this.hitSet.has(e.id)) continue; // localNPCHitCooldown=-1 每敌一次
         // myRect 置于控制点中心后与敌 AABB 求交（:14487-14493；18×18 → 半宽 9）
         if (p.x - 9 >= e.x + e.w || p.x + 9 <= e.x || p.y - 9 >= e.y + e.h || p.y + 9 <= e.y) continue;
         this.hitSet.add(e.id);
         const dmg = this.dmgNow; // 当前鞭伤（已含召唤乘区+护穿；衰减链前）
-        e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, -1, game);
+        const wpOwner = this.ownerRef();
+        e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, -1, game, wpOwner ? wpOwner.equipStats.armorPen : 0); // ⑥ :12068 玩家穿透
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
         // 武器浸剂(StatusNPC:10559 门含 whip:IsAWhip)——鞭命中同享药剂 debuff

@@ -346,7 +346,7 @@ function scaleStatsByDifficultyTweaks(s: ScalingStats, ctx: ScaleStatsWorld): vo
     num2 = 0.6;                       // 原文 0.6000000000000001 (double) → (float) 后为 0.6
     num = 0.6;
     s.defense = Math.trunc(remap(s.difficulty, GDL.CLASSIC, GDL.EXPERT, 1, 0.8) * s.defense);
-  } else if (type === 5) {            // 5 史莱姆王
+  } else if (type === 5) {            // 5 克眼仆从（ServantOfCthulhu，:18159-18163 num2=0.75）
     num2 = 0.75;
     num3 *= COMMON_MASTER_BOSS_LIFE_REDUCTION;
   } else if (type === 4) {            // 4 克苏鲁之眼

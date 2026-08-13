@@ -31,8 +31,13 @@ export interface WorldPacket {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（读档路径回传;旧包缺省 0） */
   altarCount?: number;
+  /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WF:1329-1335/2147-2161；
+   *  旧包缺省=索引 0/空名单。anglerQuestFinished 运行时态不回传——读档重置 WF:628-629） */
+  angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers；旧包缺省 -1 = 未砸过,首砸重 roll） */
   savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
+  /** 已砸暗影珠/猩红之心计数（WorldGen.shadowOrbCount；旧包缺省 0） */
+  shadowOrbCount?: number;
   /** 日晷/月晷快进四件套（WorldFile.cs:1311/1342/1416-1417；旧包缺省=无快进无冷却） */
   sundial?: number; moondial?: number;
   fastForwardTimeToDawn?: boolean; fastForwardTimeToDusk?: boolean;

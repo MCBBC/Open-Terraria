@@ -69,7 +69,28 @@ export interface ArrowOpts {
   /** aiStyle 14 弹跳弹（希腊火/装饰球等月事件弹幕，Projectile.cs 碰撞反弹
    *  cs:18314-18327 档）：撞实心块法向反弹 ×0.5 衰减而非消亡。 */
   bounce?: boolean;
+  /** aiStyle 14 荆棘球档（世纪之花 277，Projectile.cs:18306-18314）：
+   *  vx 恒反 ×0.9；仅入撞 |vy|>3 才竖弹 ×0.9（地面滚动语义）。 */
+  thornBounce?: boolean;
+  /** 延迟重力（世纪之花种子 275/276，Projectile.cs:54318-54329）：飞行满
+   *  gravDelay tick 后才开始下坠（重力 0.025，非 aiStyle1 默认 0.3）。 */
+  gravDelay?: number;
+  /** 专家追踪（275/276/277 共用模式，Projectile.cs:54330-54345/:23307-23316）：
+   *  每 tick v=(v*(weight-1)+dirToPlayer*speed)/weight，速度 <floor 归一到 floor
+   *  （277 用 cap：>cap 归一到 cap）。spawn 侧仅在专家模式注入。 */
+  homing?: { speed: number; weight: number; floor?: number; cap?: number };
+  /** 原版 Projectile.extraUpdates（Projectile.cs:15331-15336 numUpdates 循环）：
+   *  每逻辑帧把整段 AI/位移/碰撞/命中多跑 N 次——弹速视觉上 ×(N+1)，timeLeft
+   *  同步按子步消耗（:15861 在循环内）。83 眼激光 SetDefaults=2（:1369）。 */
+  extraUpdates?: number;
 }
+
+/** SetDefaults 提取的 extraUpdates 表（Projectile.cs 各 type 段，0=缺省）：
+ *  与生命/穿透同属【按弹型】属性，故在 Arrow 内按 projId 缺省注入而非每个
+ *  spawn 点手写——83 眼激光（WoF 之眼 + 双子雷神之眼）共用同一 SetDefaults */
+const PROJ_EXTRA_UPDATES: Record<number, number> = {
+  83: 2, // Projectile.cs:1369（width 4/aiStyle 1/penetrate 3/extraUpdates 2/scale 1.7）
+};
 
 export class Arrow extends Entity {
   w = 10; h = 10; // 原版 SetDefaults type 1：width/height = 10
@@ -95,10 +116,22 @@ export class Arrow extends Entity {
   critBonus = 0;
   /** 暴击总概率阈值（0-1，spawn 侧一次性算好；未设=按 critBonus+4%） */
   critChance = 0;
+  /** 护甲穿透（N:81913 减防语义——spawn 注入，命中时传 hurt 第 5 参） */
+  armorPen = 0;
   /** 星云套 booster 回调（StrikeNPC :12892-12905：魔法弹命中 → Game 判定掉落） */
   nebulaCb: (() => void) | null = null;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
   bounce: boolean;
+  /** aiStyle 14 荆棘球档（277）：撞块按 Projectile.cs:18306-18314 反弹 */
+  thornBounce: boolean;
+  /** 延迟重力（275/276）：age 超过此值才施加 grav；-1=不延迟 */
+  gravDelay: number;
+  /** 专家追踪参数（null=无） */
+  homing: { speed: number; weight: number; floor?: number; cap?: number } | null;
+  /** 原版 Projectile.extraUpdates：每帧额外子步数（0=普通 1 步） */
+  extraUpdates: number;
+  /** 已存活 tick（延迟重力/追踪门用） */
+  age = 0;
   /** 已反射（原版 Projectile.reflected：反射源命中后置位，防重复反射；
    *  反射后弹体转 hostile——不再入下方敌怪判定，改走 hitPlayer 伤玩家） */
   reflected = false;
@@ -120,6 +153,10 @@ export class Arrow extends Entity {
     this.pierce = opts?.pierce ?? 1;
     this.hostile = opts?.hostile ?? false;
     this.bounce = opts?.bounce ?? false;
+    this.thornBounce = opts?.thornBounce ?? false;
+    this.gravDelay = opts?.gravDelay ?? -1;
+    this.homing = opts?.homing ?? null;
+    this.extraUpdates = opts?.extraUpdates ?? PROJ_EXTRA_UPDATES[projId] ?? 0;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -157,10 +194,47 @@ export class Arrow extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // extraUpdates 子步循环（Projectile.cs:15331-15336）：numUpdates = extraUpdates，
+    // while(numUpdates>=0) 跑完整 AI/位移/命中体——timeLeft 也在循环内逐子步消耗
+    //（:15861），故弹体寿命同步缩短为 1/(N+1)。
+    for (let u = 0; u <= this.extraUpdates; u++) {
+      this.subStep(game);
+      if (this.dead) return;
+    }
+  }
+
+  /** 单次子步（无 extraUpdates 时即整帧本体） */
+  private subStep(game: GameHooks): void {
     if (--this.life <= 0) { this.killNow(game); return; }
     const world = game.world;
-    // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）
-    if (this.grav !== 0) this.vy = Math.min(this.vy + this.grav, 16);
+    this.age++;
+    // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）；
+    // 275/276 延迟重力（Projectile.cs:54318-54329：35t 后 g=0.025）
+    if (this.grav !== 0 && (this.gravDelay < 0 || this.age > this.gravDelay)) {
+      this.vy = Math.min(this.vy + this.grav, 16);
+    }
+    // 专家追踪（Projectile.cs:54330-54345 275/276 / :23307-23316 277：
+    // v=(v*(weight-1)+dirToPlayer*speed)/weight；<floor 或 >cap 归一）
+    if (this.homing) {
+      const p = game.player;
+      if (p && !p.dead) {
+        let dx = p.cx - (this.x + this.w / 2), dy = p.cy - (this.y + this.h / 2);
+        const d = Math.hypot(dx, dy) || 1;
+        dx = dx / d * this.homing.speed;
+        dy = dy / d * this.homing.speed;
+        this.vx = (this.vx * (this.homing.weight - 1) + dx) / this.homing.weight;
+        this.vy = (this.vy * (this.homing.weight - 1) + dy) / this.homing.weight;
+        const sp = Math.hypot(this.vx, this.vy);
+        if (this.homing.floor !== undefined && sp < this.homing.floor && sp > 0) {
+          this.vx = this.vx / sp * this.homing.floor;
+          this.vy = this.vy / sp * this.homing.floor;
+        }
+        if (this.homing.cap !== undefined && sp > this.homing.cap) {
+          this.vx = this.vx / sp * this.homing.cap;
+          this.vy = this.vy / sp * this.homing.cap;
+        }
+      }
+    }
     this.x += this.vx;
     this.y += this.vy;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
@@ -175,6 +249,9 @@ export class Arrow extends Entity {
       if (!world.store.isSolid(tx, ty)) return;
       // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
       if (this.bounce && this.bounceOff(game)) return;
+      // 荆棘球 277 专属档（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
+      // 仅入撞 |vy|>3 竖弹 ×0.9（贴地滚动）
+      if (this.thornBounce && this.thornBounceOff(game)) return;
       // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
       if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
       this.killNow(game);
@@ -182,7 +259,8 @@ export class Arrow extends Entity {
     }
     // 敌对弹命中玩家（原版 Projectile.Damage_EVP :13706-13830）：不消耗弹体，
     // Player.damage 自带 iframes 去重（= 原版 player.immune 门禁）；
-    // 实际造成伤害才走 StatusPlayer 的 debuff 授予（:13798-13800）
+    // 实际造成伤害才走 StatusPlayer 的 debuff 授予（:13798-13800；
+    // 276 毒种子的中毒授予在 statusPlayer case 276）
     if (this.hostile && hitPlayer(this, game, this.damage)) statusPlayer(game, this.projId);
     // 敌对弹命中城镇 NPC(原版 flag2 分支:hostile && victim.friendly,Projectile.cs:11975-11976);
     // 不消耗弹体(原版该分支不动 keepIterating)
@@ -194,7 +272,7 @@ export class Arrow extends Entity {
     if (hitCritters(this, game)) { this.killNow(game); return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         // 反射源（419 旋刃冲刺等 reflectsProjectiles 置标）：命中前先走反射
@@ -234,7 +312,7 @@ export class Arrow extends Entity {
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
         playEnemyHitSound(game, e);
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game);
+        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
         // ---- 吸血链（Projectile.cs:12877-12892 on-hit 段）----
@@ -254,6 +332,28 @@ export class Arrow extends Entity {
     // 召骷髅王即此链);穿透/销毁语义与敌怪一致
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)
       && --this.pierce <= 0) { this.killNow(game); return; }
+  }
+
+  /** 荆棘球 277 撞块反弹（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
+   *  竖向仅入撞 |vy|>3 才 ×-0.9（否则贴地滚动）。逐轴回退探测，脱困失败 false。 */
+  private thornBounceOff(game: GameHooks): boolean {
+    const st = game.world.store;
+    const solidAt = (px: number, py: number) => {
+      const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+      return st.inBounds(t0, t1) && st.isSolid(t0, t1);
+    };
+    let bounced = false;
+    if (!solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+      this.x -= this.vx;
+      this.vx *= -0.9;
+      bounced = true;
+    }
+    if (this.vy > 3 && !solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+      this.y -= this.vy;
+      this.vy *= -0.9;
+      bounced = true;
+    }
+    return bounced;
   }
 
   /** aiStyle 14 撞块反弹（Projectile.cs:18314-18327 默认档：法向 ×-0.5，低速归零）。

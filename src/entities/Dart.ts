@@ -328,7 +328,7 @@ export class TrapShot extends Entity {
     // 读实例 hostile 而非 style.friendly——反射后弹体转 hostile 需改为伤玩家
     if (this.hostile) {
       if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
-        hitPlayer(this, game, this.damage);
+        hitPlayer(this, game, this.damage, !this.reflected); // trap 标（反射弹非陷阱）
         if (this.kind !== 'boulder') this.dead = true;
         if (this.dead) return;
       }

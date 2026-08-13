@@ -13,6 +13,19 @@ import {
   makeNpcOfItem, npcShimmerTransformTo,
 } from '../stats/Shimmer';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { liquidCollision } from '../stats/TouchDamage';
+import itemRareJson from '../data/vanilla-itemrare.json';
+import { spawnWOF } from './bossAI_wof';
+import type { TownNPC } from './TownNPC';
+
+/** Item.rare（tools 提取，缺省 0 = 白色——Item.cs 类默认）
+ *  CheckLavaDeath else 分支的 (rare==0 || rare==-1) 烧毁门用（WorldItem.cs:803） */
+const ITEM_RARE = itemRareJson as Record<string, number>;
+/** ItemID.Sets.IsLavaImmuneRegardlessOfRarity（ItemID.cs:62）：黑曜石肤族/
+ *  熔岩护身符族等 18 件——rare 高于 0 也照烧豁免名单外，此名单内恒免疫 */
+const LAVA_IMMUNE_ITEMS = new Set([
+  318, 312, 173, 174, 175, 4422, 2701, 205, 206, 207, 1128, 2340, 2739, 2492, 1127, 85, 581, 582,
+]);
 
 export class ItemDrop extends Entity {
   w = 12; h = 12;
@@ -155,6 +168,12 @@ export class ItemDrop extends Entity {
         this.vx *= 0.96;
       }
       moveAndCollide(this, game.world, this.vx, this.vy);
+      // 岩浆死亡（WorldItem.Update :576-580：MoveInWorld 后 lavaWet → CheckLavaDeath）。
+      // 仅非抓取帧（else 分支）——被抓取帧走 ApplyMovement 不检岩浆
+      if (liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 2)) {
+        this.checkLavaDeath(game);
+        if (this.dead) return;
+      }
     }
     // 入水小水花声（掉落物轻，音量小）。wet 判定排除岩浆/微光（Collision.cs:1418
     // WetCollision 只认 !lava && !shimmer）；微光入池走专属 Shimmer 音（:19 style 4）
@@ -338,6 +357,44 @@ export class ItemDrop extends Entity {
   }
 
   inWater = false;
+
+  /** WorldItem.CheckLavaDeath（:731-804）1:1：
+   *  - vid 267 向导巫毒娃娃：TurnToAir → 场上每只向导（type 22）
+   *    StrikeNPCNoInteraction(9999, 10, -direction) 致死 + **每杀一只调一次**
+   *    NPC.SpawnWOF(物品位置)（:736-752；首次生成后 AnyNPCs(113) 门挡掉后续调用，
+   *    净效果 = 杀完全部向导再召）→ stack 余量随机处决城镇 NPC 直到扣完（:754-779）。
+   *  - 其余物品（:800-804）：rare 0/-1 且不在 IsLavaImmuneRegardlessOfRarity → 烧毁。
+   *  单人语义缺省：playerIndexTheItemIsReservedFor==myPlayer 恒真、netMode 门不适用。
+   *  差异：原版 StrikeNPC 后 NPC 当 tick 仍 active（死亡在下一 Update 收口），余量
+   *  随机池可能命中垂死向导；本仓 TownNPC.hurt 即时置 dead，池自然排除，净效果一致 */
+  private checkLavaDeath(game: GameHooks): void {
+    const vid = vanillaIdOfItem(this.itemId);
+    if (vid === 267) {
+      let num = this.stack;
+      this.dead = true;                       // TurnToAir
+      const npcs = ((game.npcs?.() ?? []) as TownNPC[]).filter((n) => !n.dead);
+      let flag = false;
+      for (const n of npcs) {
+        if (n.vanillaId !== 22) continue;
+        n.hurt(9999, 10 * (n.facing || 1), 0, game);   // StrikeNPCNoInteraction(9999, 10f, -dir)
+        num--;
+        flag = true;
+        spawnWOF(game, this.x, this.y);       // :748 娃娃掉落位置（娃娃已烧，位置留用）
+      }
+      if (flag) {
+        const pool = npcs.filter((n) => !n.dead);      // isLikeATownNPC ≙ 城镇 NPC 桶
+        while (num > 0 && pool.length > 0) {
+          const n = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+          n.hurt(9999, 10 * (n.facing || 1), 0, game);
+          num--;
+        }
+      }
+      return;
+    }
+    if (LAVA_IMMUNE_ITEMS.has(vid)) return;
+    const rare = ITEM_RARE[String(vid)] ?? 0;
+    if (rare === 0 || rare === -1) this.dead = true;
+  }
 
   draw() { /* Renderer 统一绘制 */ }
 }

@@ -38,7 +38,8 @@ export class Input {
       this.keys.add(e.code);
       this.keydownHandlers.forEach((fn) => fn(e.code));
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
-      if (e.code === 'F2') e.preventDefault(); // 像素画导入(Game)——原 F11 与系统全屏冲突,改 F2（防浏览器快捷）
+      // F2 无敌+无限魔力(调试,Game) / F1 像素画导入(Game,自 F2 迁入)——防浏览器快捷
+      if (e.code === 'F2' || e.code === 'F1') e.preventDefault();
     }) as EventListener);
     onWin('keyup', ((e: KeyboardEvent) => { this.keys.delete(e.code); }) as EventListener);
     onWin('blur', (() => { this.keys.clear(); this.mouseHeld = false; }) as EventListener);

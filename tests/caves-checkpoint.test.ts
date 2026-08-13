@@ -119,6 +119,7 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   snap('corruption');
   runLakesPass(st, rng, gs); snap('lakes');
   runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）
+  snap('dungeon');                        // #32 占位（oracle 同步占位，转录后替换为 runDungeonPass）
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
   runBeachesPass(st, rng, gs); snap('beaches');
   return { grids: out, walls: outWall };
@@ -148,7 +149,7 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound',
         'desertentrance', 'deserthive', 'desertdone',
         'mushroom', 'marble', 'granite', 'islands', 'dirttomud', 'silt', 'ores',
-        'webs', 'underworld', 'corruption', 'lakes', 'slush', 'mcopenings', 'beaches'];
+        'webs', 'underworld', 'corruption', 'lakes', 'slush', 'dungeon', 'mcopenings', 'beaches'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;
