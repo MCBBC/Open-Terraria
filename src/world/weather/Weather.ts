@@ -68,6 +68,8 @@ export interface WeatherCtx {
   behindBackwall?: boolean;
   /** 天气环境音循环音量下发（每帧；Sfx 常驻轨 setVolume 跟随） */
   onAmbience?: (v: WeatherLoopVolumes) => void;
+  /** 金币雨玩家锚定（WorldGen.cs:71825 FindClosest 的单机等价；active/dead 门在 Weather 内判） */
+  playerForCoinRain?: { x: number; active: boolean; dead: boolean };
 }
 
 /** 原版风/暴雨判定阈值（Main.cs:66137-66140 MainCSS 构造区） */
@@ -336,9 +338,15 @@ export class WeatherState {
     if (this.coinRain <= 0) return;
     if (!this.raining || this.shouldUseStormMusic) { this.coinRain = 0; return; }
     if (this.rng.int(0, 29) !== 0) return;
-    // 全图随机 x、顶部 5% 高度带；玩家附近 ±2400px 以 1/2 概率锚定
+    // 全图随机 x、顶部 5% 高度带（:71818-71823）
     let x = this.rng.int(50, ctx.maxTilesX - 51) * 16;
     const y = this.rng.int(0, Math.floor(this.maxTilesYRef * 0.05) - 1) * 16;
+    // 玩家锚定（:71825-71832）：最近玩家活跃且未死 且 1/2 → x = player.X ± 2400，
+    // 钳 [800, (maxTilesX-50)*16]。★此前整段缺失（金币总在全图随机处掉落）
+    const p = ctx.playerForCoinRain;
+    if (p && p.active && !p.dead && this.rng.int(0, 1) === 0) {
+      x = p.x + this.rng.int(-2400, 2400);
+    }
     x = Math.max(800, Math.min((ctx.maxTilesX - 50) * 16, x));
     // 非实心 32×32 门由 Game 落点回调侧判定（此处只出提案）
     let type: 71 | 72 | 73 = 71;
@@ -393,14 +401,17 @@ export class WeatherState {
     ctx?.onSlimeRainToggle?.(false);
   }
 
-  /** 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount++，≥150 出王） */
-  advanceSlimeRainKill(vanillaNpcId: number): boolean {
-    if (!this.slimeRain || vanillaNpcId !== 1) return false; // slimeRainNPC 表仅 [1]=true（Main.cs:8800）
-    let threshold = 150;
+  /** 史莱姆雨击杀推进（NPC.cs:79880-79897 DoDeathEvents_AdvanceSlimeRain：
+   *  slimeRainNPC 表仅 [1]；阈值 150，杀过王减半 75；≥阈值 → 出王并置 -阈值/2）。
+   *  场上无王门（AnyNPCs(50)）由调用方（Game）判 boss 槽近似 */
+  advanceSlimeRainKill(vanillaNpcId: number, downedSlimeKing = false): boolean {
+    if (!this.slimeRain || vanillaNpcId !== 1) return false;
+    let num = 150;
+    if (downedSlimeKing) num = Math.floor(num / 2);        // :79886 downed → 75
     this.slimeRainKillCount++;
-    if (this.slimeRainKillCount >= threshold) {
-      this.slimeRainKillCount = -Math.floor(threshold / 2);
-      return true; // 召唤史莱姆王（场上无 50 时）
+    if (this.slimeRainKillCount >= num) {
+      this.slimeRainKillCount = -Math.floor(num / 2);      // :79894 置 -75/-37 冷却段
+      return true;
     }
     return false;
   }
@@ -666,7 +677,8 @@ export class WeatherState {
     }
   }
 
-  /** UI 天气词（Main.cs:46236 八档链） */
+  /** UI 天气词（Main.cs:46236 八档链；风句/沙暴闪句由消费端 Renderer 拼接——
+   *  原版 :46240-46254 GlobalTimeWrappedHourly%10≥5 才显词、恒加 " +"） */
   statusText(): string {
     if (this.slimeRain) return 'SlimeRain';
     if (this.shouldUseStormMusic) return 'Storm';

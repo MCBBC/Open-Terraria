@@ -16,7 +16,7 @@ import { Enemy } from '../../entities/Enemy';
 import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
 import { TileStore } from '../TileStore';
-import { mainExpertMode } from '../../stats/ScaleStats';
+import { mainExpertMode, netIdSpawnScale, scaleStatsWorld } from '../../stats/ScaleStats';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollBadLuck, rollLuck } from '../../stats/Luck';
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
@@ -450,22 +450,35 @@ export class VanillaSpawner {
     const baseId = map?.base ?? netId;
     const e = Enemy.fromVanilla(baseId, x, y);
     if (!e) return null;
-    // 原版 NewNPC 锚点(NPC.cs:46596-46597):X-width/2, Y-height(底部贴格顶)。
-    // 此前 fromVanilla 中心锚(y-h/2)把怪埋进落脚实心格半格高——飞行怪沿地面内沿
-    // 漂移穿过侧壁,看起来像穿墙(噬魂怪等 ai5 族)
-    e.y = y - e.h;
     const ov = NET_ID_OVERRIDE[String(netId)];
     e.vanillaNetId = netId;
+    // ---- sizeScaleOverride 消费链（批次B 落地，ScaleStats.netIdSpawnScale 1:1）----
+    // SetDefaultsFromNetId case → SetDefaults_ForNetId(num, spawnparams, scale)
+    // → SetDefaults(base, WithScale(o))（NPC.cs:8328-8330）：
+    //  ① FTW 入口膨胀 o'=(o+o²)/2（:8362-8366，图鉴假人豁免）
+    //  ② 首盒【替换】类型 scale：w1=(int)(rawW×o')、h1==16||32→+1（:17733-17739）
+    //  ③ 种子档调整在 o' 上再乘 + 命中分支二次盒（:18025-18026/:17861-17862）——
+    //    十周年无 else-return 恒二盒：netID 基类型与两列表零交集 ⇒ 未列族
+    //    盒 = rawW×o'×o' 二次乘（原版怪癖，照抄）。旧实现只改渲染乘区不改盒，
+    //    判定区恒基底尺寸（批次B 修复）。
+    const oScale = ov?.scale ?? map?.scale;
+    if (oScale != null) {
+      const v = e.vanilla!;
+      const box = netIdSpawnScale(baseId, oScale, v.width, v.height, scaleStatsWorld());
+      e.w = e.def.width = box.width;
+      e.h = e.def.height = box.height;
+      e.vanillaScale = box.scale / (v.scale ?? 1);   // 渲染（v.scale × vanillaScale）= npc.scale
+      if (box.canDisplayBuffs === false) e.canDisplayBuffs = false;
+    }
+    // 原版 NewNPC 锚点(NPC.cs:46596-46597):X-width/2, Y-height(底部贴格顶)——
+    // 盒定后再锚（此前 fromVanilla 中心锚 y-h/2 埋进落脚实心格半格高）
+    e.y = y - e.h;
     if (map) {
-      e.vanillaScale = ov?.scale ?? map.scale;   // scale 优先源数据（SetDefaults_ForNetId 第 3 参）
+      // flag=true 族硬置属性（SetDefaultsFromNetId case 块 :7643+，跑在完整
+      // SetDefaults（含 ScaleStats）之后——fromVanilla 数值链后再覆写即同序）
       if (map.hp != null) e.hp = e.maxHp = map.hp;
       if (map.dmg != null) e.def.damage = map.dmg;
       if (map.def != null) e.def.defense = map.def;
-    } else if (ov?.scale != null) {
-      // 原版链 SetDefaultsFromNetId → SetDefaults(WithScale(o))（:8327-8330）：
-      // sizeScale 赋值后 getGood 仍再乘（:17874 在 :17727-17742 之后）——
-      // 与 fromVanilla 注入的种子档比值相乘（未命中族 vanillaScale=1 恒等不变）
-      e.vanillaScale = ov.scale * e.vanillaScale;
     }
     // SetDefaultsFromNetId 覆盖 color/alpha（L7633+：color = new Color(...) / alpha = N）
     if (ov?.color) e.colorRGBA = [ov.color[0], ov.color[1], ov.color[2], ov.color[3] ?? 255];

@@ -2183,7 +2183,10 @@ export class Game implements GameHooks {
       const vid = def.vid ?? viIdFromKey(def.key);
       if (!Number.isFinite(vid)) return;
       const shoot = itemCombat(vid)?.shoot;
-      if (shoot && shoot > 0) ids.add(shoot);
+      if (shoot && shoot > 0) {
+        ids.add(shoot);
+        if (shoot === 707) ids.add(708, 709, 1110);   // 天龙之怒右键 alt 链族（708 弧/709 弹/1110 圈）
+      }
     };
     for (const s of this.player.inv.slots) scan(s);
     for (const a of this.player.inv.armor) scan(a);
@@ -10219,6 +10222,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return st.inBounds(ptx, pty) && st.wall[st.idx(ptx, pty)] !== 0;
       })(),
       onAmbience: (v) => this.applyWeatherLoops(v),
+      // 金币雨玩家锚定（WorldGen.cs:71825 FindClosest 单机等价）
+      playerForCoinRain: { x: this.player.cx, active: true, dead: this.player.dead },
       onCoinRain: (x, y, type, stack) => {
         // 非实心 32×32 门（WorldGen.cs:71847）
         const st = w.store;
@@ -14171,9 +14176,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.entities.add(nerdy, 'npcs');
       this.cb.onToast?.(Lang.npcName(670) ?? '书呆子史莱姆加入了小镇！');
     }
-    // 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount≥150 且场上无王 → 召王）
+    // 史莱姆雨击杀推进（NPC.cs:79880-79897：阈值 150、杀过王减半 75；场上无王 → 召王）
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
-      if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId) && !this.boss) {
+      const downedSK = !!(this.world.flags as Record<string, boolean>).downedSlimeKing;
+      if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId, downedSK) && !this.boss) {
         this.summonBoss('king_slime');
       }
     }

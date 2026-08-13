@@ -21,10 +21,10 @@ describe('vanity 数据（van 标记）', () => {
     expect(st54.acc).toBe(1);
     expect(st54.van).toBeUndefined();
   });
-  it('提取覆盖面：stats 表 van=1 共 390 条（3 缺=非装备 856/2054/3373）', () => {
+  it('提取覆盖面：stats 表 van=1 共 400 条（含 Boss 面具范围块;3 缺=非装备）', () => {
     const t = JSON.parse(readFileSync('src/data/vanilla-itemstats.json', 'utf8')) as Record<string, { van?: number }>;
     const vanCount = Object.values(t).filter((e) => e.van === 1).length;
-    expect(vanCount).toBe(390);
+    expect(vanCount).toBe(400);   // 390 case 块 + 10 Boss 面具范围块(2104-2113)
   });
 });
 
@@ -50,5 +50,13 @@ describe('armorAccepts 槽位门（社交/功能）', () => {
     const boots = internalOf('vi_54_hermes_boots');
     inv.armor[3] = { id: boots, stack: 1 };
     expect(inv.armorAccepts(13, boots)).toBe(false);    // 对段同 type 拒
+  });
+});
+
+describe('Boss 面具范围块（2104-2113,2026-08-14 补提）', () => {
+  it('2112 EyeMask = vanity 头盔 hs=154;整族 s=h+van 入表', () => {
+    expect(vanillaStatOfVid(2112)).toMatchObject({ s: 'h', hs: 154, van: 1 });
+    expect(vanillaStatOfVid(2104)).toMatchObject({ s: 'h', hs: 146, van: 1 });
+    expect(vanillaStatOfVid(2113)).toMatchObject({ s: 'h', hs: 155, van: 1 });
   });
 });

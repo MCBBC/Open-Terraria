@@ -15,8 +15,8 @@
 //     寿命 → Kill 链 :70218-70290——尘爆 + 消费 80×80 内旧 1110（ai1=1 渐隐）+
 //     新 1110（timeLeft=30×Next(2,6)、DD2_SkyDragonsFuryCircle）。
 //   1110（aiStyle 77 :29583-29700，SetDefaults :10058-10070：80×80 脉动
-//     num641=max(0.75−cosθ·0.25, 0.8+cosθ·0.2)、4 帧 3t、8t 免疫 penetrate −1）：
-//     滞留 AoE 圈，尘 226 环抛。
+//     num641=max(0.75+0.25v, 0.8−0.2v)（v=−cosθ）∈[0.778,1] → 尺寸 [62,80]、
+//     4 帧 3t、8t 免疫 penetrate −1）：滞留 AoE 圈，尘 226 环抛。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -222,12 +222,15 @@ export class SkyDragonSpin extends Entity {
       const kdir = Math.sign((e.x + e.w / 2) - this.cx) || this.dir;
       hurtEnemy(game, e, dmg, crit, this.knockback, kdir, this.armorPen);
       game.addDamageNumber(this.cx, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
-      const pl = game.player as unknown as { buffs: { has: (b: never) => boolean }; equipStats: { frostBurn: boolean; magmaStone: boolean } };
-      applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
+      // 浸剂三链（netMode/测试态 player 可为 null——null 门跳过，原版单机恒有主）
+      const pl = game.player as unknown as { buffs?: { has: (b: never) => boolean }; equipStats?: { frostBurn: boolean; magmaStone: boolean } } | null;
+      if (pl?.buffs) applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
         () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
           ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
-      applyFrostBurn(pl.equipStats.frostBurn, e as unknown as Record<string, number>);
-      applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
+      if (pl?.equipStats) {
+        applyFrostBurn(pl.equipStats.frostBurn, e as unknown as Record<string, number>);
+        applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
+      }
     }
   }
 
@@ -485,7 +488,7 @@ export class SkyDragonShot extends Entity {
 
 export class SkyDragonCircle extends Entity {
   readonly projId = 1110;
-  w = 80; h = 80;                                    // :10059-10060（脉动 64-80）
+  w = 80; h = 80;                                    // :10059-10060（脉动 [62,80]，floor）
   damage: number;
   knockback = 0;
   critChance = 0.04;

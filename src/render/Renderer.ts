@@ -7720,7 +7720,8 @@ export class Renderer {
       let wt = ZH[w.statusText()] ?? '';
       const wind = Math.round(w.windSpeedCurrent * 50);
       if (wind !== 0) wt += ` ${wind > 0 ? '\u897f\u98ce' : '\u4e1c\u98ce'}${Math.abs(wind)}`;
-      const sand = w.sandstorm.happening ? (Math.floor(performance.now() / 500) % 2 === 0 ? ' +\u6c99\u5c18\u66b4' : ' +') : '';
+      // \u6c99\u66b4\u95ea\u53e5\uff08Main.cs:46252 GlobalTimeWrappedHourly%10\u22655 \u2192 5 \u79d2\u5236,\u66fe\u8bef 500ms \u95ea\uff09
+      const sand = w.sandstorm.happening ? (Math.floor(performance.now() / 1000) % 10 >= 5 ? ' +\u6c99\u5c18\u66b4' : ' +') : '';
       ctx.font = 'bold 12px sans-serif';
       const wtText = wt + sand;
       ctx.strokeText(wtText, ox + size / 2, oy + 253 + 32);

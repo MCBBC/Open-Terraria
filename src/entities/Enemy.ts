@@ -596,6 +596,7 @@ export class Enemy extends Entity {
     // 扩盒（★与专家档 Tweaks"只缩贴图不扩盒"语义相反），详 ScaleStats.applySeedAdjustments 头注。
     const seedS: SeedAdjustStats = {
       type: id, scale: v.scale ?? 1, lifeMax: v.lifeMax, defense: v.defense, damage: v.damage,
+      canDisplayBuffs: true,   // NPC.canDisplayBuffs 默认 true（NPC.cs:6124）
     };
     const seedBox = applySeedAdjustments(seedS, scaleStatsWorld());
     // 碰撞盒：:17745 基扩盒 (int)(w×scale) 之后，种子档命中分支再 (int)(w×scaleNew)
@@ -652,6 +653,10 @@ export class Enemy extends Entity {
     // 注入"种子档总 scale / 基 scale"比值，使贴图与扩盒后的碰撞盒一致
     // （113=0.65、134-136=1.3、39-41=1.1[remix 1.32]）
     if (seedBox) e.vanillaScale = seedS.scale / vScale;
+    // NPC.canDisplayBuffs（批次B 落地）：FTW getGood 245-248 石巨人族置 false
+    // （ScaleStats.getGoodAdjustments :17945/:17950/:17955）。原版两处消费
+    // （染色门 :92026 / 鞭标 VFX 门 :92135）本仓均未移植——字段先行保数据链一致
+    e.canDisplayBuffs = seedS.canDisplayBuffs !== false;
     e.spawnAlpha = v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255）
     // alpha=255 = 出生全透明渐显标记（13-15 世吞 / 134-136 毁灭者；其余 alpha 为
     // 静态不透明度,勿动）：置 alphaFade 交渐显路径逐 tick 减回 0。EoW 族保持原版
@@ -866,6 +871,12 @@ export class Enemy extends Entity {
   get justHit(): boolean { return this.justHitT > 0; }
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
   vanillaScale = 1;
+  /** NPC.canDisplayBuffs（NPC.cs:6124 默认 true / :8423 SetDefaults 复位）。
+   *  FTW 世界 245-248 石巨人族置 false（getGoodAdjustments :17945/:17950/:17955，
+   *  249 不置）。原版门控消费两处：GetNPCColorTintedByBuffs 染色（:92026，经
+   *  Main.cs:22797）与 UpdateNPC_BuffApplyVFX 鞭标闪电粒子（:92135）——两消费者
+   *  本仓未移植（debuff 自发光 :92181+ 段不受此门），字段落地保数据链一致（批次B） */
+  canDisplayBuffs = true;
   /** 实际生效的负 netID（SetDefaultsFromNetId；凝胶染色过滤用） */
   vanillaNetId = 0;
   /** 原版 NPC.color 当前值（SetDefaults/SetDefaultsFromNetId 初值，AI_001 逐 tick 渐变）。

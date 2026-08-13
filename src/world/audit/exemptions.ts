@@ -29,9 +29,9 @@ export const MULTITILE_EXEMPT: ReadonlySet<string> = new Set([
   //   repo def fh:2 与单格存储形态差一格 → R1 报"缺下格"为形态差异非缺角。
   //   移除条件:def fh 改 1 且渲染链适配。
   'v_529_sea_oats',
-  // 掘地龟/啮龙蛋 751/752:【单格存储】(frameX 状态机:非锚点帧整格跳过绘制,
-  // VanillaTiler:817 特判 :1034-1048)。移除条件:多格化改造。
-  'v_751_sleeping_digtoise', 'v_752_chillet_egg',
+  // ★751/752 曾以"单格存储"豁免——实为渲染端跳画(VanillaTiler:860 跳非锚点
+  //   帧),生成端放的是完整 2×2 四格帧分片(place2x2/4 格循环)。R1 正常通过,
+  //   2026-08-14 审计移除。若后续出现真残片,R1 会抓到。
 ]);
 // ★存【残片/形态差】不进本表(规则层),由 tests/world-invariants.test.ts 集成组的
 //  FRAGMENTS 白名单+计数基线管理(新类型/同类暴增必红):

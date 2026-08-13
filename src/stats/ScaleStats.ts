@@ -330,10 +330,20 @@ export function scaleStatsWorldOf(
 //   （本层【前】）——调用侧 baseDamage 用未调基值即对齐。
 //   ★命中分支尾部回写 width/height ×scaleNew（:18025-18026/:17861-17862）=【扩盒】，
 //   与专家档 Tweaks"只缩贴图不扩盒"（ScaleStats 之后 :18187 等）语义相反。
-//   备案（本仓无对应路径）：SetDefaults 入口 FTW sizeScaleOverride 膨胀
-//   (o+o²)/2（:8362-8366，fromVanilla 无 scale 参数）；图鉴假人还原 scale 不扩盒
-//   （:18020-18023/:17856-17859）；canDisplayBuffs=false（245-248 :17945/:17950/:17955，
-//   无 NPC buff 图标渲染）。
+//   批次B（2026-08-14）三项落地：
+//   ①图鉴假人还原——IsABestiaryIconDummy（NPC.cs:5940）：两调整函数尾部
+//     scale=还原入口值 + 不扩盒提前 return（getGood :18020-18023 / 十周年 :17856-17859；
+//     图鉴图标实例以原版体型呈现）。488 训练假人本身不入图鉴
+//     （NPCBestiaryDrawOffset[488].Hide=true，NPCID.cs:10429-10435 → 本仓
+//     BESTIARY_HIDE_IDS）。
+//   ②canDisplayBuffs——NPC 字段（:6124 默认 true / :8423 SetDefaults 复位）；
+//     FTW 245/246/247/248 石巨人族置 false（:17945/:17950/:17955；249 无此项）。
+//     原版仅两处消费：GetNPCColorTintedByBuffs 染色门（:92026，Main.cs:22797）、
+//     UpdateNPC_BuffApplyVFX 鞭标闪电粒子门（:92135）——两消费者本仓均未移植
+//     （debuff 自发光段 :92181+ 原版不受此门）；BuffID.Sets 无图标显隐集
+//     （玩家侧 buff 图标恒画，仅时长文字被 TryGetBuffTime 门控 Main.cs:42688-42703），
+//     字段先行落地保数据链一致（Enemy.canDisplayBuffs）。
+//   ③sizeScaleOverride 膨胀+二次盒——见 netIdSpawnScale 头注。
 // ---------------------------------------------------------------------------
 
 /** 种子调整原值 bundle（= SetDefaults 主体已写好的 npc 原始字段，逐字段原地改） */
@@ -343,6 +353,12 @@ export interface SeedAdjustStats {
   lifeMax: number;
   defense: number;
   damage: number;
+  /** NPC.canDisplayBuffs（NPC.cs:6124 默认 true；缺省 undefined = 调用方不跟踪）——
+   *  FTW 245-248 石巨人族置 false（:17945/:17950/:17955；249 不置） */
+  canDisplayBuffs?: boolean;
+  /** NPC.IsABestiaryIconDummy（NPC.cs:5940；UnlockableNPCEntryIcon.cs:27 等置位）——
+   *  图鉴图标实例：种子档还原 scale、不扩盒（:18020-18023/:17856-17859） */
+  isBestiaryIconDummy?: boolean;
 }
 
 /** getZenithSeedAdjustmentsBeforeEverything（:17865-17872）：
@@ -355,9 +371,12 @@ function zenithSeedAdjustments(s: SeedAdjustStats): void {
 
 /** getGoodAdjustments（:17874-18027，FTW）。返回是否命中分支（=扩盒门；
  *  else :18014-18016 提前 return 不扩盒）。scale 乘按 (float) 逐处对齐；
- *  lifeMax/defense/damage 走 (double)×(int) 截断 */
+ *  lifeMax/defense/damage 走 (double)×(int) 截断。
+ *  尾部图鉴假人还原（:18020-18023）：scale 还原入口值、不扩盒（返回 false）——
+ *  canDisplayBuffs=false 已写入不回滚（原版同样在还原前赋值） */
 function getGoodAdjustments(s: SeedAdjustStats, remixWorld: boolean): boolean {
   const t = s.type;
+  const scale0 = s.scale;                              // :17875 float num = scale
   if (t === 13) { s.scale = f32(s.scale * f32(1.35)); s.defense += 2; }
   else if (t === 14 || t === 15) { s.scale = f32(s.scale * f32(1.4)); s.defense += 2; }
   else if (t === 39 || t === 40 || t === 41) {
@@ -375,8 +394,9 @@ function getGoodAdjustments(s: SeedAdjustStats, remixWorld: boolean): boolean {
   else if (t === 115 || t === 116) { s.scale = f32(s.scale * f32(1.4)); }
   else if (t === 118) { s.damage += 10; s.defense += 14; s.lifeMax *= 3; }   // :17933-17938
   else if (t === 222) { s.scale = f32(s.scale * f32(1.2)); }
-  else if (t === 245 || t === 246 || t === 247 || t === 248) { s.scale = f32(s.scale * f32(0.5)); }
-  else if (t === 249) { s.scale = f32(s.scale * f32(0.5)); }                 // 无 canDisplayBuffs
+  else if (t === 245 || t === 246) { s.canDisplayBuffs = false; s.scale = f32(s.scale * f32(0.5)); }  // :17942-17948
+  else if (t === 247 || t === 248) { s.canDisplayBuffs = false; s.scale = f32(s.scale * f32(0.5)); }  // :17949-17958
+  else if (t === 249) { s.scale = f32(s.scale * f32(0.5)); }                 // :17959-17962 无 canDisplayBuffs
   else if (t === 262) { s.scale = f32(s.scale * f32(1.3)); }
   else if (t === 266) {
     s.defense = Math.trunc(s.defense * 1.5);          // (double)
@@ -388,26 +408,31 @@ function getGoodAdjustments(s: SeedAdjustStats, remixWorld: boolean): boolean {
   else if (t >= 134 && t <= 136) { s.scale = f32(s.scale * f32(1.3)); }
   else if (t === 139) { s.scale = f32(s.scale * f32(1.6)); }
   else return false;
+  if (s.isBestiaryIconDummy) { s.scale = scale0; return false; }   // :18020-18023
   return true;
 }
 
 /** getTenthAnniversaryAdjustments（:17795-17863，celebrationmk10）：列族 scale×0.5。
  *  尾部扩盒【无条件】执行（无 else-return）——未列族二次乘盒是原版真实行为：
- *  scale=1 族恒等无感，scale≠1 未列族（史莱姆王 50 等 38 条）真放大（122→152） */
+ *  scale=1 族恒等无感，scale≠1 未列族（史莱姆王 50 等 38 条）真放大（122→152）。
+ *  图鉴假人还原（:17856-17859）：scale 还原入口值、不扩盒（返回 false） */
 function tenthAnniversaryAdjustments(s: SeedAdjustStats): boolean {
   const t = s.type;
+  const scale0 = s.scale;                              // :17796 float num = scale
   if (t === 4 || (t >= 13 && t <= 15) || t === 266 || t === 267 || t === 35 || t === 36
     || t === 222 || (t >= 113 && t <= 116) || (t >= 134 && t <= 136) || t === 139
     || t === 125 || t === 126 || (t >= 127 && t <= 131) || t === 370 || t === 636
     || t === 422 || t === 493 || t === 507 || t === 517) {
     s.scale = f32(s.scale * f32(0.5));
   }
+  if (s.isBestiaryIconDummy) { s.scale = scale0; return false; }   // :17856-17859
   return true;
 }
 
 /** SetDefaults 尾段种子档调整入口（:17774-17785）。原值逐字段原地改；
  *  返回是否【扩盒】——调用侧用调整后 scale 对已基扩盒的 width/height 二次
- *  (int) 乘（:18025-18026/:17861-17862） */
+ *  (int) 乘（:18025-18026/:17861-17862）。isBestiaryIconDummy（s 上）时
+ *  getGood/十周年还原 scale 且不扩盒（返回 false） */
 export function applySeedAdjustments(
   s: SeedAdjustStats,
   ctx: Pick<ScaleStatsWorld, 'zenithWorld' | 'getGoodWorld' | 'tenthAnniversaryWorld' | 'remixWorld'>,
@@ -416,6 +441,61 @@ export function applySeedAdjustments(
   if (ctx.getGoodWorld) return getGoodAdjustments(s, ctx.remixWorld);         // :17778-17781
   if (ctx.tenthAnniversaryWorld) return tenthAnniversaryAdjustments(s);       // :17782-17885
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// NPCSpawnParams.sizeScaleOverride 消费链（批次B 落地）——netID 变体刷出的体型语义：
+//   来源 = SetDefaultsFromNetId（NPC.cs:7633+ 各 case 的 0.6/0.9/1.05/1.2… 经
+//   SetDefaults_ForNetId :8328-8330 → spawnparams.WithScale(o)）与进度条参考假人
+//   （GetMatchingSpawnParams :18071-18078——本仓无进度条假人路径，不可达已登记）。
+//   ① SetDefaults 入口 FTW 膨胀（:8362-8366）：getGood && !IsABestiaryIconDummy
+//      && 有值 → o' = (o + o*o) / 2f（小者更小、大者更大）
+//   ② 首盒（:17727-17742）：有 override 时【替换】类型默认 scale ——
+//      w1=(int)(rawW×o')（:17734）、h1=(int)(rawH×o')（:17735），
+//      h1==16||32 → +1（:17736-17739，贴格防卡）；
+//      无 override 才走 w=(int)(rawW×s_type)（:17745-17746）
+//   ③ 种子档调整（:17774-17785）在首盒【之后】：getGood/十周年在 o' 上再乘，
+//      命中分支二盒 w2=(int)(w1×scaleNew)（:18025-18026/:17861-17862）——
+//      十周年无 else-return 恒二盒；netID 基类型与两列表零交集 ⇒ 未列族
+//      scaleNew=o' → 盒 = rawW×o'×o' 二次乘（原版怪癖，照抄）
+//   ④ ScaleStats（:17791）只缩数值不动盒——调用侧（Enemy.fromVanilla）已覆盖
+// ---------------------------------------------------------------------------
+export interface NetIdSpawnScaleResult {
+  /** 最终 npc.scale（渲染与后续消费；= 调整后的 override） */
+  scale: number;
+  width: number;
+  height: number;
+  /** NPC.canDisplayBuffs（FTW 245-248 → false；缺省 true，NPC.cs:6124） */
+  canDisplayBuffs: boolean;
+}
+
+export function netIdSpawnScale(
+  type: number,          // 基底 NPC id（SetDefaults(num) 语义，非负）
+  override: number,      // SetDefaults_ForNetId 第 3 参（0.6/0.9/1.2…）
+  rawWidth: number,      // 基底类型原始 width（未乘任何 scale）
+  rawHeight: number,
+  ctx: Pick<ScaleStatsWorld, 'zenithWorld' | 'getGoodWorld' | 'tenthAnniversaryWorld' | 'remixWorld'>,
+  isBestiaryIconDummy = false,
+): NetIdSpawnScaleResult {
+  // ① FTW 入口膨胀（:8362-8366）——(o + o*o)/2f 全 float32 逐步对齐
+  let o = override;
+  if (ctx.getGoodWorld && !isBestiaryIconDummy) {
+    o = f32(f32(o + f32(o * o)) / 2);
+  }
+  // ② 首盒（:17733-17735）：override 替换类型 scale + h==16/32 +1（:17736-17739）
+  let w = Math.trunc(f32(rawWidth * o));
+  let h = Math.trunc(f32(rawHeight * o));
+  if (h === 16 || h === 32) h++;
+  // ③ 种子档调整 + 命中分支二盒（十周年恒命中：:17861-17862 无条件乘）
+  const s: SeedAdjustStats = {
+    type, scale: o, lifeMax: 0, defense: 0, damage: 0,
+    canDisplayBuffs: true, isBestiaryIconDummy,
+  };
+  if (applySeedAdjustments(s, ctx)) {
+    w = Math.trunc(f32(w * s.scale));
+    h = Math.trunc(f32(h * s.scale));
+  }
+  return { scale: s.scale, width: w, height: h, canDisplayBuffs: s.canDisplayBuffs !== false };
 }
 
 // ---------------------------------------------------------------------------

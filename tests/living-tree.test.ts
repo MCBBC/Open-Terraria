@@ -267,8 +267,9 @@ describe('Living Trees 世界生成', () => {
     expect(world.breakTileAt(10, 10)).toBeNull();   // 活木无掉落
     expect(world.breakTileAt(12, 10)).toBeNull();   // 树叶无掉落
     expect(st.get(10, 10)).toBe(0);
-    // def 对齐：191/192 均实心（Main.cs:10159/:10167 tileSolid=true——树冠可站；
-    // 通行性全量对账 vanilla-tilecollision.json 修正，旧注引用的 cs:15789 非实心判定为过时）
+    // def 对齐：191/192 均实心（Main.cs:10159/:10167 初始 tileSolid=true；生成期
+    // :15789/:16694 曾置 false 但被 generateWorld finally 的 tileSolidBackup 整表
+    // 还原（:11128 克隆 / :22678 RestoreTemporaryStateChanges）——初始=运行时终态）
     expect(TILE_DEFS[LIVING_WOOD].solid).toBe(true);
     expect(TILE_DEFS[LEAF].solid).toBe(true);
   });

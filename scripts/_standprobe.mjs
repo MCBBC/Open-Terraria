@@ -68,23 +68,40 @@ const out = await page.evaluate(async () => {
   const TILE = 16;
   const col0 = Math.floor(p.cx / TILE) + 6;   // 玩家右侧一段
   const row0 = Math.floor((p.y + p.h) / TILE) + 2;
+  // 先清空一片建造区（出生点附近自然地形会干扰锚行）
+  for (let x = col0 - 2; x <= col0 + 24; x++) {
+    for (let y = row0; y <= row0 + 8; y++) st.setTile(x, y, 0);
+  }
   // 地板列（col0..col0+20）
   for (let x = col0 - 1; x <= col0 + 22; x++) st.setTile(x, row0 + 6, 1);
 
-  // ② 工作台顶可站（sheet 18 → key 'v_18'）
-  const WB = idOf('v_18_');
+  // ② 工作台顶可站（sheet 18 → 本地 def key 'workbench'）
+  const WB = idOf('workbench');
   ok('② 工作台条目', WB > 0, WB);
   if (WB > 0) {
     for (let x = col0; x <= col0 + 2; x++) st.setTile(x, row0 + 5, WB, 0, 0);
     p.x = col0 * TILE + 8; p.y = (row0 + 5) * TILE - 42 - 4; p.vx = 0; p.vy = 0; p.fallStartY = null;
     p.inputX = 0; p.inputUp = false; p.inputDown = false;
+    const trace = [];
+    for (let f = 0; f < 60; f++) {
+      await new Promise(r => setTimeout(r, 16));
+      trace.push(`${(p.y + p.h).toFixed(1)}/vy${p.vy.toFixed(2)}/${p.onGround ? 'G' : '-'}`);
+      if (p.onGround && Math.abs(p.y + p.h - (row0 + 5) * TILE) < 0.01) break;
+    }
     await waitUntil(() => p.onGround, 3000);
+    const dbg = { trace: trace.join(' '),
+      h: p.h, bottom: p.y + p.h, row0, col0,
+      cx: Math.floor(p.cx / TILE), rowBelow: Math.floor((p.y + p.h) / TILE),
+      tBelow: st.get(Math.floor(p.cx / TILE), Math.floor((p.y + p.h) / TILE)),
+      tAt5: st.get(Math.floor(p.cx / TILE), row0 + 5),
+      stepRenderY: p.stepRenderY,
+    };
     ok('② 落到工作台顶站稳（底=顶行格顶）', p.onGround && Math.abs(p.y + p.h - (row0 + 5) * TILE) < 0.01,
-      `onGround=${p.onGround} bottom=${p.y + p.h} want=${(row0 + 5) * TILE}`);
+      `onGround=${p.onGround} bottom=${p.y + p.h} want=${(row0 + 5) * TILE} dbg=${JSON.stringify(dbg)}`);
   }
 
-  // ③ 按住↑行走踏上前方铁砧（sheet 16）
-  const ANVIL = idOf('v_16_');
+  // ③ 按住↑行走踏上前方铁砧（sheet 16 → 本地 def key 'anvil'）
+  const ANVIL = idOf('anvil');
   ok('③ 铁砧条目', ANVIL > 0, ANVIL);
   if (ANVIL > 0) {
     for (let x = col0; x <= col0 + 22; x++) st.setTile(x, row0 + 6, 1);  // 补地板
@@ -119,8 +136,8 @@ const out = await page.evaluate(async () => {
     ok('④ 笼身可穿（落到地板）', p.y + p.h >= (row0 + 6) * TILE - 0.01, `bottom=${p.y + p.h}`);
   }
 
-  // ⑤ 致动平台下穿（nactive 门）
-  const PLAT = idOf('v_19_');
+  // ⑤ 致动平台下穿（nactive 门；sheet 19 → 本地 def key 'platform'）
+  const PLAT = idOf('platform');
   ok('⑤ 平台条目', PLAT > 0, PLAT);
   if (PLAT > 0) {
     const px = col0 + 14;
@@ -136,7 +153,7 @@ const out = await page.evaluate(async () => {
   }
 
   // ⑥ 开门可穿、关门阻挡（10/11）
-  const D_OPEN = idOf('v_11_'); const D_CLOSED = idOf('v_10_');
+  const D_OPEN = idOf('door_open'); const D_CLOSED = idOf('door_closed');
   ok('⑥ 门条目', D_OPEN > 0 && D_CLOSED > 0, `${D_OPEN}/${D_CLOSED}`);
   if (D_OPEN > 0) {
     const wx = col0 + 18;
