@@ -447,6 +447,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   const wireArr = new Uint8Array(n);
   const halfArr = new Uint8Array(n);
   const slopeArr = new Uint8Array(n);
+  const paintArr = new Uint8Array(n);
+  const paintWallArr = new Uint8Array(n);
 
   const chestAt = new Map<string, { x: number; y: number }>();
   for (const c of wld.chests) chestAt.set(`${c.x},${c.y}`, c);
@@ -503,6 +505,9 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         slopeArr[i] = wld.tiles.slope[i];
       }
     }
+    // 油漆双通道直拷（WorldFile.cs:2571-2586 parser 已按 5bit 域解码；0=无漆）
+    paintArr[i] = wld.tiles.paint[i];
+    paintWallArr[i] = wld.tiles.paintWall[i];
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
@@ -590,6 +595,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     liquidType: bytesToB64(rlePairs(liquidTypeArr)),
     wire: bytesToB64(rlePairs(wireArr)),
     blocks: bytesToB64(rlePairs(combineHalfSlope(halfArr, slopeArr))),
+    paint: bytesToB64(rlePairs(paintArr)),         // 油漆（WF:2571-2574）
+    paintWall: bytesToB64(rlePairs(paintWallArr)), // 墙漆（WF:2583-2586）
     chests,
     player: {
       hp: 100,

@@ -92,7 +92,7 @@ function parseStatementTree(text) {
       continue;
     }
     const head = s.endsWith('{') ? s.slice(0, -1).trim() : s;
-    const hm = head.match(/^(else if|if|switch)\s*\((.*)\)$/) ?? (head === 'else' ? ['else'] : null);
+    const hm = head.match(/^(else if|if|switch)\s*\((.*)\)$/) ?? (head === 'else' ? ['else', 'else', null] : null);
     if (hm) {
       const [, kw, condRaw] = hm;
       const node = { kind: 'if', cond: condRaw ?? null, children: [], opened: s.endsWith('{') };
