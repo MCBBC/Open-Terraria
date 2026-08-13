@@ -64,6 +64,11 @@ const SHOP_SLOT = {
 };
 function parseGate(text) {
   if (!text) return null;
+  // 顶层 OR 切段递归（源码门无嵌套括号组合,split 安全）
+  if (text.includes('||')) {
+    return orOf(text.split('||').map((seg) => parseGate(seg.trim())));
+  }
+  let orSeg = false;
   const has = (s) => text.includes(s);
   // 未实现的门直接整体跳过（如 dayTime && IsItAHappyWindyDay = 起风日限定商品）
   if (has('IsItAHappyWindyDay') || has('IsItAHappyRainyDay')) return 'skip';
@@ -82,8 +87,12 @@ function parseGate(text) {
   // 嵌套 if 语义 = 外层门 && 内层门同时成立才上架，如 hardMode && ZoneGraveyard）
   const conds = [];
   const push = (c) => { if (!conds.includes(c)) conds.push(c); };
-  if (has('hardMode')) push('hardMode');
+  if (/!\s*Main\.hardMode|!hardMode/.test(t) && !/[^!]\bhardMode/.test(t.replace(/!Main\.hardMode/g,''))) push('!hardMode');
+  else if (has('hardMode')) push('hardMode');
   if (has('downedMechBossAny')) push('downedMechBossAny');
+  if (has('downedMechBoss1')) push('downedMechBoss1');
+  if (has('downedMechBoss2')) push('downedMechBoss2');
+  if (has('downedMechBoss3')) push('downedMechBoss3');
   // NPC.downedPlantBoss（世纪之花商店门：爆破专家地雷 937 / 松露自动锤 1551 /
   // 巫医 Tiki 套·俾格米项链·叶翼 / 画家回声涂层 5344 等，Chest.cs 多处）
   if (has('downedPlantBoss')) push('downedPlantBoss');
@@ -105,7 +114,23 @@ function parseGate(text) {
   if (has('eclipse')) push('eclipse');
   if (has('PartyIsUp') || has('birthdayParty')) push('party');
   if (has('LanternNight.LanternsUp')) push('lanternNight');
-  return conds.length ? conds.join('&&') : 'skip';
+  if (!conds.length) return 'skip';
+  const joined = conds.join('&&');
+  // 顶层 OR（Chest.cs 如军火商银子弹 `(downedBoss2 && 夜) || hardMode`）：text 含
+  // 顶层 || 时各 OR 段独立收集,本段结果作为一支——由下方 orOf 汇总（2026-08-13:
+  // 旧实现一律 join('&&') 把 OR 收紧成与门,六家店条件语义失真）
+  return orSeg ? { seg: joined } : joined;
+}
+// 顶层 OR 汇总:各段 mini-parse({seg} 形态),skip 段丢弃/null 段恒真
+function orOf(segs) {
+  const parts = [];
+  for (const g of segs) {
+    if (g === null) return null;
+    if (g === 'skip') continue;
+    parts.push(typeof g === 'string' ? g : g.seg);
+  }
+  if (!parts.length) return 'skip';
+  return parts.join('||');
 }
 
 const shops = {};

@@ -2602,6 +2602,18 @@ export class VanillaSpawner {
     // PostCheckChosenSpawnTile（L922-927）：地牢内刷怪点必须踩地牢砖且上方格有墙。
     // 原版失败 = TrySpawnAnNPC return false（L227-230）——整帧放弃，不回选点循环换点重试
     if (this.ZoneDungeon && (!this.isDungeonTile(groundType) || spawnWallType === 0)) return null;
+    // :931-940 落脚上方两格均有液体且非岩浆 → 微光/蜂蜜面拒绝（水走 waterTile 水生成链）
+    if (this.spawnTileY > 1) {
+      const iUp1 = st.idx(this.spawnTileX, this.spawnTileY - 1), iUp2 = st.idx(this.spawnTileX, this.spawnTileY - 2);
+      if (st.liquid[iUp1] > 0 && st.liquid[iUp2] > 0 && st.liquidType[iUp1] !== 2
+        && (st.liquidType[iUp1] === 3 || st.liquidType[iUp1] === 4)) return null;
+    }
+    // :943-947 高尔夫草地（477 修剪/492 神圣修剪）：非事件态 1/10 整帧拒绝
+    // （invasionType<=0 用 invaders 近前线代理——高尔夫球场+入侵的交集极罕见）
+    if ((groundType === T.MOWED_GRASS || groundType === T.HALLOW_MOWED_GRASS)
+      && !this.world.clock.bloodMoon && !this.world.clock.eclipse && !this.invaders
+      && this.moonEvent.kind === 0 && !this.world.weather.slimeRain
+      && Math.random() * 100 < 10) return null;
     this.setFlagsForChosenTile(this.spawnTileX, this.spawnTileY, groundType, rng);
     this.currentSpawnX = this.spawnTileX;
     this.currentSpawnY = this.spawnTileY;

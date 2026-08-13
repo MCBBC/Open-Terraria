@@ -722,20 +722,39 @@ export class Player extends Entity {
         this.hp = Math.min(this.maxHp, this.hp + n);
       }
     }
-    // 自然回血：脱离战斗 5 秒后每秒缓回 1 点（流血 Bleeding 清 lifeRegenTime → 阻断,:18998；
-    // 遮挡 Obstructed 163 的 bleed 同门——:11424 bleed=true 同消费点）。
-    // 爬坡计时 lifeRegenTime：基础 +1/tick（:18930）、蜂蜜 +2（:18954）→ 蜂蜜态 3 倍速
-    // 触达首档阈值；DoT/流血同样清零（:18781+/:19000）——DoT 期间自然回血重启爬坡
+    // 自然再生 9 档公式（Player.cs:18925-19089 NaturalLifeRegen eRT 段;2026-08-13
+    // 重写——旧"恒 1HP/s"简化致满配回血仅原版 1/3~1/5,续航手感差异根因）。
+    // 流血 Bleeding/遮挡 Obstructed 清 lifeRegenTime → 阻断(:18998/:11424);
+    // DoT 同清（:18781+）——DoT 期间自然回血重启爬坡
     this.sinceHurt++;
     this.lifeRegenTime += (1 + (this.buffs.has(BuffType.Honey) ? 2 : 0))
-      * (this.usedAegisCrystal ? 1.2 : 1);   // usedAegisCrystal 爬坡 +0.2/tick(:18931)近似
+      * (this.usedAegisCrystal ? 1.2 : 1);   // 蜂蜜×3 速(:18954)/神盾水晶 +0.2(:18931)
     if (buffHeal < 0 || this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed) this.lifeRegenTime = 0;
-    if (this.lifeRegenTime >= 300 && this.hp > 0 && this.hp < this.maxHp
+    if (this.hp > 0 && this.hp < this.maxHp
       && !this.buffs.has(BuffType.Bleeding) && !this.buffs.obstructed) {
-      this.regenAccum += dt;
+      // eRT 八档阶梯（:19003-19039）+ 3600 封顶档（:19041-19045;闪亮石静止档
+      // (RT-3000)/300 连续加成 [:19022-19033] 未实装,登记）
+      const rt = this.lifeRegenTime;
+      let ert = 0;
+      for (const th of [300, 600, 900, 1200, 1500, 1800, 2400, 3000]) if (rt >= th) ert++;
+      if (rt >= 3600) ert++;
+      if (this.lifeRegenTime > 3600) this.lifeRegenTime = 3600;
+      let num5 = ert;
+      // 移动系数（:19054:vx≠0 且未抓钩 ×0.5;静止/抓钩 ×1.25）
+      num5 *= (Math.abs(this.vx) > 0.01 && !this.onRope) ? 0.5 : 1.25;
+      // 篝火乘区（:19057——本仓篝火为 buff,lifeRegen+1 半边在 Buffs 系,此处为乘区）
+      if (this.buffs.has(BuffType.Campfire)) num5 *= 1.1;
+      // 专家且未进食 /2（:19060;闪亮石 0.75 档 skip;坐/睡 ×1.3 未实装）
+      const diff = scaleStatsWorld().difficulty;
+      const fed = this.buffs.has(BuffType.WellFed) || this.buffs.has(BuffType.WellFed2) || this.buffs.has(BuffType.WellFed3);
+      if (diff >= GDL.EXPERT && !fed) num5 /= 2;
+      // mHP 系数（:19069:statLifeMax2/400×0.85+0.15）→ lifeRegen 单位=半HP/s
+      num5 *= this.maxHp / 400 * 0.85 + 0.15;
+      this.regenAccum += (num5 / 2) * dt;
       if (this.regenAccum >= 1) {
-        this.regenAccum -= 1;
-        this.hp = Math.min(this.maxHp, this.hp + 1);
+        const n = Math.floor(this.regenAccum);
+        this.regenAccum -= n;
+        this.hp = Math.min(this.maxHp, this.hp + n);
       }
     }
     // 上限收缩时钳制

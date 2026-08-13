@@ -28,6 +28,12 @@ export class TileStore {
   readonly half: Uint8Array;      // halfBrick 位（原版 Tile.cs bTileHeader bit1）：下半 8px 实心
   readonly slope: Uint8Array;     // 坡面 0-4（原版编码；渲染暂未支持，生成期少用）
   readonly wire: Uint8Array;      // 电路位（原版 Tile.cs sTileHeader）：bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动(inActive)
+  /** 方块油漆 id（0-31，原版 Tile.cs:609-617 `color()` = sTileHeader & 0x1F）。
+   *  PaintID 全表见 world/Paint.ts；深层漆 13-24 与浅层 1-12 同 RGB，
+   *  区别只在渲染覆盖强度（TilePaintSystemV2）。 */
+  readonly paint: Uint8Array;
+  /** 背景墙油漆 id（0-31，原版 Tile.cs:365-373 `wallColor()` = bTileHeader & 0x1F） */
+  readonly paintWall: Uint8Array;
   // wire 位掩码常量（对应原版 Tile.cs:396-459 的 wire/wire2/wire3/wire4/actuator/inActive）
   static readonly WIRE_RED = 1;
   static readonly WIRE_BLUE = 2;
@@ -61,6 +67,11 @@ export class TileStore {
       this.half = new Uint8Array(bufs.half);
       this.slope = new Uint8Array(bufs.slope);
       this.wire = new Uint8Array(bufs.wire);
+      // 油漆双通道（旧包可缺省——worker 包版本 <5 无此二数组，全 0 = 无油漆；
+      // fromPacket 路径已按 explored 同款兜底补零，此处理论上不会缺，防御性兜底）
+      const nBuf = bufs.type.byteLength / 2;
+      this.paint = bufs.paint ? new Uint8Array(bufs.paint) : new Uint8Array(nBuf);
+      this.paintWall = bufs.paintWall ? new Uint8Array(bufs.paintWall) : new Uint8Array(nBuf);
       return;
     }
     const n = w * h;
@@ -74,6 +85,8 @@ export class TileStore {
     this.half = new Uint8Array(n);
     this.slope = new Uint8Array(n);
     this.wire = new Uint8Array(n);
+    this.paint = new Uint8Array(n);
+    this.paintWall = new Uint8Array(n);
   }
 
   idx(x: number, y: number): number { return y * this.w + x; }
@@ -123,11 +136,17 @@ export class TileStore {
   setTile(x: number, y: number, type: number, frameX = 0, frameY = 0) {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
+    const wasActive = this.flags[i] !== 0;
     this.type[i] = type;
     this.flags[i] = type !== 0 ? 1 : 0;
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
     if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除清半砖/坡面
+    // 油漆随方块清除/铺块重置：
+    //   KillTile（WorldGen.cs:63933-63939）active(false)+halfBrick(false)+ClearBlockPaintAndCoating；
+    //   PlaceTile（WorldGen.cs:59499-59501）!active() 时 Clear(Tile|TilePaint|Slope)。
+    //   即油漆只在 active→active 的替换（草化/转化）中存活
+    if (type === 0 || !wasActive) this.paint[i] = 0;
     if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: type, fx: frameX, fy: frameY });
     this.listeners.forEach((fn) => fn(x, y));
   }
@@ -153,18 +172,25 @@ export class TileStore {
   setTileSilent(x: number, y: number, type: number, frameX = 0, frameY = 0) {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
+    const wasActive = this.flags[i] !== 0;
     this.type[i] = type;
     this.flags[i] = type !== 0 ? 1 : 0;
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
     if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除同步清位（防生成期脏残留）
+    if (type === 0 || !wasActive) this.paint[i] = 0;          // KillTile/PlaceTile 油漆清位（同 setTile）
   }
 
   setWall(x: number, y: number, wall: number) {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
+    const hadWall = this.wall[i] !== 0;
     if (this.wall[i] !== wall) {
       this.wall[i] = wall;
+      // 墙漆清位：KillWall（WorldGen.cs:60425-60426）wall=0 后 ClearWallPaintAndCoating；
+      // PlaceWall（:75199-75201）本身不清 wallColor——但 KillWall 已保证 wall==0 ⇒ 无漆，
+      // 故 0→非0 铺墙时同样归零（保持原版不可达态不变量，见 world/Paint.ts）
+      if (wall === 0 || !hadWall) this.paintWall[i] = 0;
       if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetWall, x, y, v: wall, fx: 0, fy: 0 });
       this.listeners.forEach((fn) => fn(x, y));
     }
@@ -172,7 +198,40 @@ export class TileStore {
 
   setWallSilent(x: number, y: number, wall: number) {
     if (!this.inBounds(x, y)) return;
-    this.wall[this.idx(x, y)] = wall;
+    const i = this.idx(x, y);
+    const hadWall = this.wall[i] !== 0;
+    this.wall[i] = wall;
+    if (wall === 0 || !hadWall) this.paintWall[i] = 0; // 同 setWall 的墙漆清位
+  }
+
+  /** 油漆写入（WorldGen.paintTile/paintWall 等价原语）。发 listeners：油漆改变 tile/wall
+   *  视觉色 → chunk 画布与小地图都须重建（导线不进烘焙画布故 setWire 不发，此处不同）。
+   *  值域 0-31（PaintID），>31 由调用方保证不出现（Item.paint 为 byte） */
+  setPaint(x: number, y: number, v: number) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    if (this.paint[i] === v) return;
+    this.paint[i] = v & 31;
+    this.listeners.forEach((fn) => fn(x, y));
+  }
+
+  setPaintSilent(x: number, y: number, v: number) {
+    if (!this.inBounds(x, y)) return;
+    this.paint[this.idx(x, y)] = v & 31;
+  }
+
+  /** 墙漆写入（WorldGen.paintWall） */
+  setPaintWall(x: number, y: number, v: number) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    if (this.paintWall[i] === v) return;
+    this.paintWall[i] = v & 31;
+    this.listeners.forEach((fn) => fn(x, y));
+  }
+
+  setPaintWallSilent(x: number, y: number, v: number) {
+    if (!this.inBounds(x, y)) return;
+    this.paintWall[this.idx(x, y)] = v & 31;
   }
 
   /** 导线/致动位写入（Wiring 系统）。不发 listeners：导线不进 chunk 烘焙画布，

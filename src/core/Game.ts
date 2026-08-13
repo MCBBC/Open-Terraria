@@ -9626,6 +9626,9 @@ export class Game implements GameHooks {
   /** 商店上架门（Chest.SetupShop if 门 → 本作状态映射；未实现事件门不上架） */
   private shopCondOk(cond: string | null): boolean {
     if (!cond) return true;
+    // 顶层 OR（extract-shops.mjs 2026-08-13 OR 感知产出,如军火商银子弹
+    // `downedBoss2&&night||hardMode`）:任一支成立即上架（|| 优先级低于 &&）
+    if (cond.includes('||')) return cond.split('||').some((c) => this.shopCondOk(c));
     // 复合门（extract-shops.mjs parseGate：嵌套 if 的全部开门按 '&&' 连接，
     // 如 `hardMode && ZoneGraveyard`——外层与内层同时成立才上架）
     if (cond.includes('&&')) return cond.split('&&').every((c) => this.shopCondOk(c));
@@ -9641,6 +9644,10 @@ export class Game implements GameHooks {
       case 'downedBoss3': return !!(f['downed_35'] || f.downedSkeletron);
       case 'downedMechBossAny':
         return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
+      // 单机械王（造型师 1985 染发剂 = hardMode && 三机械全灭 等,Chest.cs:2737）
+      case 'downedMechBoss1': return !!f['downed_125'];
+      case 'downedMechBoss2': return !!f['downed_126'];
+      case 'downedMechBoss3': return !!f['downed_127'];
       // NPC.downedPlantBoss（世纪之花商店门：爆破专家地雷 937 / 松露自动锤 1551 /
       // 巫医 Tiki 套·灵液瓶·叶翼 / 画家回声涂层 5344 / 动物学家泥芽 4701）
       case 'downedPlantBoss': return !!f['downed_262'];
@@ -10966,10 +10973,10 @@ export class Game implements GameHooks {
   private spawnMoonLordOnPlayer(): void {
     if (this.boss) return;   // 已有 Boss 在场（原版 SpawnOnPlayer 同样照召；此处避免双 Boss 槽冲突）
     const p = this.player;
-    const e = Enemy.fromVanilla(398, p.cx, p.cy - 160);
+    const e = Enemy.fromVanilla(398, p.cx, p.cy - 150);  // SpawnOnPlayer case 398：玩家上方 150px
     if (!e) return;
     e.x = p.cx - e.w / 2;
-    e.y = p.cy - 160 - e.h / 2;
+    e.y = p.cy - 150 - e.h / 2;
     e.id = this.entities.nextId++;
     this.entities.add(e, 'enemies');
     this.boss = e;
