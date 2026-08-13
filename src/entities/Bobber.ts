@@ -236,11 +236,21 @@ export class Bobber extends Entity {
       }
       return;   // :19223 松露虫钓鱼恒不出鱼
     }
+    // Chum Bucket(:19231-19242):池内每只 4608 掉落物 +11/+6/+3——
+    // 简化:抛竿时扫浮标 15 格内的 4608 掉落物计数,2026-08-13
+    let chums = 0;
+    for (const d of (game as unknown as { entities?: { drops?: Array<{ itemId?: number; x: number; y: number; dead: boolean }> } })
+      .entities?.drops ?? []) {
+      if (d.dead || d.itemId === undefined) continue;
+      const key = VANILLA_ITEM_KEY_BY_ID[this.getItemId(d)] ?? '';
+      if (key !== 'vi_4608_chum_bucket') continue;
+      if (Math.abs(d.x - this.cx) < 15 * 16 && Math.abs(d.y - this.cy) < 15 * 16) chums++;
+    }
     let level = this.fishingPower(p, game);           // :19225 FinalFishingLevel
     if (level === 0) return;                          // :19226-19229
+    if (chums > 0) level += chums > 2 ? 11 : chums > 1 ? 6 : 3;   // :19231-19242
     const canFishInLava = CAN_FISH_IN_LAVA_POLES.has(this.poleVid)   // :19230 三源
       || IS_LAVA_BAIT.has(this.baitVid) || this.ownerLavaOk();
-    // chumsInWater 三档加成（:19231-19242）——鱼饵桶投射物未实装，恒 0（登记）
     // 水量缩放（:19244-19261）：atmo = (Y/16 - (60 + 10·(W/4200)²)) / (地表/6) 截 [0.25,1]
     const atmoNum = (st.w / 4200) ** 2;
     let atmo = (this.y / TILE - (60 + 10 * atmoNum)) / (w.groundLevel / 6);

@@ -9856,10 +9856,6 @@ export class Game implements GameHooks {
   }
 
   private updateSwingHits() {
-    if (typeof window !== 'undefined') {
-      const w = window as unknown as { __pvpSw?: number[] };
-      (w.__pvpSw ??= [0, 0, 0, 0])[0]++;
-    }
     if (!this.swing) return;
     this.swing.t--;
     if (this.swing.t <= 0) { this.swing = null; return; }
@@ -9876,10 +9872,6 @@ export class Game implements GameHooks {
     const meleeDmg = this.swing.dmg ?? tool?.damage ?? swingCombat?.damage ?? 0;
     const noMelee = heldDef.magic || swingCombat?.noMelee;
     const isNet = swingVid === 1991 || swingVid === 3183 || swingVid === 4821;  // :42962 网特判
-    if (typeof window !== 'undefined') {
-      const w = window as unknown as { __pvpSw?: number[] };
-      (w.__pvpSw ??= [0, 0, 0, 0])[1]++;
-    }
     if (!isNet && (noMelee || meleeDmg <= 0)) return;
     // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
     // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）+ **恒 32×32**
@@ -10050,16 +10042,7 @@ export class Game implements GameHooks {
     // 不对 proxy 扣血（proxy.hp 由被击端 msg16 回报刷新）。门禁：pvpAllowed 房 +
     // 自己 hostile + 对方 hostile/异队（InOpposingTeam）——与 Damage_PVP :13506-13510
     // 同构（原版 :43409 同队门 team!=0&&equal）
-    if (typeof window !== 'undefined') {
-      const w = window as unknown as { __pvpCond?: number[][] };
-      (w.__pvpCond ??= []).push([this.net?.active ? 1 : 0, this.net?.policy?.pvpAllowed ? 1 : 0,
-        this.player.hostile ? 1 : 0, isNet ? 1 : 0]);
-    }
     if (this.net?.active && this.net.policy.pvpAllowed && this.player.hostile && !isNet) {
-      if (typeof window !== 'undefined') {
-        const w = window as unknown as { __pvpSw?: number[] };
-        (w.__pvpSw ??= [0, 0, 0, 0])[2]++;
-      }
       for (const rpEnt of this.remotePlayerProxies) {
         const rp = rpEnt as Player;
         const slot = (rp as unknown as { __netSlot?: number }).__netSlot;

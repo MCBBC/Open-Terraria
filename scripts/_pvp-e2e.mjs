@@ -165,7 +165,7 @@ console.log('diag:', JSON.stringify({ teleA, diagB }));
 
 // ① 近战全链：A 挥击 → B 掉血
 const bHp0 = await pageB.evaluate(() => window.__swGame.player.hp);
-const swing = await pageA.evaluate(async () => {
+const swing = await pageA.evaluate(() => {
   const g = window.__swGame;
   const held = g.player.inv.heldItem();
   if (!held) return { err: 'no held' };
@@ -178,51 +178,12 @@ const swing = await pageA.evaluate(async () => {
     for (let i = 0; i < 14; i++) g.updateSwingHits(); // 相位扫描（真实挥击扫过全程）
   } finally { g.net.sendStrikePlayer = origSend; }
   const rp0 = g.remotePlayerProxies[0];
-  // 复刻 updateSwingHits 盒公式验算（真实图集尺寸）
-  let boxDebug = null;
-  try {
-    const { atlasIconForKey } = await import('/src/assets/SpriteAtlas.ts');
-    const { ITEM_DEFS } = await import('/src/data/items.ts');
-    const ar = g.renderer?.atlas ? atlasIconForKey(g.renderer.atlas, ITEM_DEFS[held.id].key) : null;
-    const sprW = ar?.sw ?? 16, sprH = ar?.sh ?? 16;
-    const xT = (w, ph) => ph === 0 ? (w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10)
-      : ph === 1 ? (w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10)
-        : (w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6);
-    const yT = (h, ph) => ph === 0 ? 24 : h > 64 ? 14 : h > 52 ? 12 : ph === 1 && h > 32 ? 8 : 10;
-    const boxes = [];
-    for (const pAnim of [0.94, 0.75, 0.5, 0.25]) {
-      const tier = pAnim <= 1 / 3 ? 0 : pAnim < 2 / 3 ? 1 : 2;
-      const offX = tier === 0 ? sprW * 0.5 - xT(sprW, 0) : tier === 1 ? sprW * 0.5 - xT(sprW, 1) : -(sprW * 0.5 - xT(sprW, 2));
-      const offY = yT(sprH, tier);
-      let bx = g.player.cx + g.player.facing * offX, by = g.player.y + offY, bw = 32, bh = 32;
-      if (g.player.facing === -1) bx -= bw;
-      by -= bh;
-      const phase = pAnim > 2 / 3 ? 0 : pAnim > 1 / 3 ? 1 : 2;
-      if (phase === 0) { if (g.player.facing === 1) bx -= Math.floor(bw * 1.2); bw *= 2; by -= Math.floor(bh * 1.4 - bh); bh = Math.floor(bh * 1.4); }
-      else if (phase === 2) { if (g.player.facing === -1) bx -= Math.floor(bw * 1.4 - bw); bw = Math.floor(bw * 1.4); by += Math.floor(bh * 0.5); bh = Math.floor(bh * 1.1); }
-      boxes.push({ pAnim, box: [Math.round(bx), Math.round(by), bw, bh] });
-    }
-    boxDebug = { sprW, sprH, boxes, rpBox: rp0 ? [rp0.x, rp0.y, rp0.w, rp0.h] : null, facing: g.player.facing,
-      heldDef: ITEM_DEFS[held.id] ? { key: ITEM_DEFS[held.id].key, vid: ITEM_DEFS[held.id].vid } : null,
-      heldId: held.id };
-  } catch (e) { boxDebug = { err: String(e) }; }
   return {
     sent44: sent44.length, first: sent44[0] ?? null,
-    gates: {
-      net: g.net?.active, pvpRoom: g.net?.policy?.pvpAllowed, hostile: g.player.hostile,
-      proxies: g.remotePlayerProxies.length, rpBox: rp0 ? [rp0.x, rp0.y, rp0.w, rp0.h] : null,
-      rpHostile: rp0?.hostile, rpTeam: rp0?.team, myTeam: g.player.team,
-      swingSet: g.swingHitSet.size,
-    },
-    boxDebug,
-    bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,
-    stageSw: window.__pvpSw ?? null, cond: window.__pvpCond?.slice(-6) ?? null,
+    proxies: g.remotePlayerProxies.length, swingSet: g.swingHitSet.size,
   };
   const sent = g.swing ? 'swing-alive' : 'swing-consumed';
-  return {
-    sent, bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,
-    swingHits: g.swingHitSet.size, hostile: g.player.hostile, pvpRoom: g.net.policy.pvpAllowed,
-  };
+  return { sent };
 }).catch((e) => ({ err: String(e) }));
 check('① A 挥击执行', !swing.err, JSON.stringify(swing));
 await pump2(6);

@@ -210,6 +210,11 @@ export class Enemy extends Entity {
    *  原版 maxLife = (GetEaterOfWorldsSegmentsCount()+2)×150,玩家杀段不缩分母;
    *  spawnWormChain 写入全链各段,断链拆分时各自继承原值） */
   eowChainMax = 0;
+  /** 共享生命主段（NPC.realLife :6086;=null 即 -1 各自独立）。毁灭者族 134-136
+   *  首帧建链时全链指向头（:50208-50222）——受击伤害传导扣主头、本段 hp 镜像
+   *  （StrikeNPC :82132-82137）,段不可单独打死;EoW 族恒 null（:51524 realLife=-1
+   *  各段独立 150HP）。WoF 113-115 用 wofNPCIndex（:26148）同语义由其 AI 自管 */
+  realLifeHost: Enemy | null = null;
   /** 本段跟随的前一段（非空 = 本段是身体段，跳过 AI 只做跟随） */
   wormFollow: Enemy | null = null;
   /** 上一 tick 位置（段跟随用：段复制前一段的旧位置 = 经典贪吃蛇链） */
@@ -6340,7 +6345,15 @@ export class Enemy extends Entity {
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
-    this.hp -= dmg;
+    // realLife 共享生命（StrikeNPC :82132-82137）：伤害扣主段,本段 hp/maxHp 镜像
+    // ——毁灭者族打任意节都扣头 80000 总血,节不可单独打死
+    if (this.realLifeHost && !this.realLifeHost.dead) {
+      this.realLifeHost.hp -= dmg;
+      this.hp = this.realLifeHost.hp;
+      this.maxHp = this.realLifeHost.maxHp;
+    } else {
+      this.hp -= dmg;
+    }
     // DPS 计累计(Projectile.cs:12817-12818/Player.cs:20165-20168 两调用点均
     // accDreamCatcher 门禁+fromPlayer 标记;全仓伤害漏斗单点收口)
     if (fromPlayer) {

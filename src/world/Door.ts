@@ -146,7 +146,10 @@ export function shiftTallGate(
  *  神庙锁门段）且 frameX<54（关闭态）——开锁消耗神庙钥匙 1141（Player.cs:32332-32357） */
 export function isLockedDoor(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
-  return st.type[i] === 10 && st.frameY[i] >= 594 && st.frameY[i] <= 646 && st.frameX[i] < 54;
+  // WorldGen.cs:69248：type==10(关门表)——原版 tile id 10,此处须比内部 id
+  //（door_closed=17）。★曾写 st.type[i]===10：10 是 sheet id,内部 id 空间恒 false
+  // → 神庙锁门(PlaceDoor style11, fy=594)开锁链全灭,无钥匙也能开(2026-08-13)。
+  return st.type[i] === T.DOOR_CLOSED && st.frameY[i] >= 594 && st.frameY[i] <= 646 && st.frameX[i] < 54;
 }
 
 /** WorldGen.UnlockDoor（cs:37613-37640）：向上扫锁段顶格（frameY==594），三格
