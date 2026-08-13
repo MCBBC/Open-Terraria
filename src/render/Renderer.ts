@@ -57,6 +57,7 @@ import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
+import { TOWN_HOLDOUT } from '../data/vanillaTownAttack';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -5706,6 +5707,10 @@ export class Renderer {
         if (this.scene?.partyUp && world) this.drawPartyHat(ctx, n, world);
         ctx.filter = 'none';
         ctx.restore();
+        // ---- AttackType1 持械（DrawNPCExtras Main.cs:27121-27195）：弓/枪族攻击态
+        //      ai[0]==12 全程手持武器图标——旋转 = ai[2]×90°×朝向；228/229/209 原版
+        //      提前 return 无持械（:27124-27126,表里不列即同效）
+        if (!n.bound && n.attackState === 12) this.drawTownHoldout(ctx, n);
         return;
       }
       // 贴图条懒加载首帧未就绪：落入下方程序化兜底，本帧后懒加载完成
@@ -5716,6 +5721,43 @@ export class Renderer {
     ctx.translate(n.cx, n.cy);
     ctx.scale(n.facing >= 0 ? 1 : -1, 1);
     ctx.drawImage(spr.canvas, -spr.fw / 2, -spr.fh / 2, spr.fw, spr.fh);
+    ctx.restore();
+  }
+
+  /** AttackType1（弓/枪族）攻击态持械（DrawNPCExtras Main.cs:27121-27195 1:1）。
+   *  触发 = AttackType==1 && ai[0]==12（攻击态全程）；228/229/209 原版提前 return
+   *  （:27124-27126）——TOWN_HOLDOUT 不列即同效。
+   *  锚 = Bottom − OffsetsNPCOffhand[2](14,26)，spriteDirection==1 时偏移 X 取负(:27102)；
+   *  旋转 = ai[2]×90°×spriteDirection(:27109)；握位 num12=floor(W/2)−grip（DrawPlayerItemPos
+   *  .X 恒 =W/2，:27164-27168）——右向 dx=num12、左向经 scale(-1,1) 镜像（=原版
+   *  origin=(W+num12,H/2)+Flip 的等价几何；旋转先绕锚后镜像的次序差 ≤2px 不再追）。
+   *  微光 alpha 与本体同档（GetShimmerColor 经 npcColor 通道）。 */
+  private drawTownHoldout(ctx: CanvasRenderingContext2D, n: TownNPC): void {
+    const ho = TOWN_HOLDOUT[n.vanillaId];
+    if (!ho) return;
+    const hm = n.hardMode && ho.hm !== undefined;
+    const icon = this.atlas.vicon(hm ? ho.hm! : ho.pre);
+    if (!icon || !icon.img.complete || !icon.img.naturalWidth) return;
+    const aim = n.holdoutAim;
+    const sd = n.facing;                                    // spriteDirection（+1 右 / −1 左）
+    let ax = n.cx - (sd === 1 ? -14 : 14);                  // Bottom − OffsetsNPCOffhand[2]
+    let ay = n.y + n.h - 26;
+    if (n.vanillaId === 22 && aim > -0.1) ay += 4;          // :27107 向导扶弓
+    if (n.vanillaId === 19 && hm) { ax -= 10 * sd; ay += 4; } // :27127-27131 爆破专家霰弹枪
+    let grip = ho.grip ?? 4;
+    let sc = ho.scale ?? 1;
+    if (n.vanillaId === 368) {                              // :27148-27162 高尔夫球手
+      if (hm) grip = 18;
+      else { if (aim < -0.1) grip = ho.preGripAimDown ?? 4; sc = ho.preScale ?? 1; }
+    }
+    const num12 = Math.floor(icon.sw / 2) - grip;           // DrawPlayerItemPos.X − num11
+    ctx.save();
+    ctx.globalAlpha = shimmerBodyAlpha(n.shimmerTransparency);
+    ctx.translate(Math.round(ax), Math.round(ay));
+    ctx.rotate(aim * (Math.PI / 2) * sd);
+    if (sd === -1) ctx.scale(-1, 1);
+    ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
+      num12, -icon.sh / 2, icon.sw * sc, icon.sh * sc);
     ctx.restore();
   }
 

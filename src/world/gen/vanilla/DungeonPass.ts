@@ -529,15 +529,22 @@ export function runDungeonPass(
     const sdX = -z2x, sdY = -z2y;
     lastHallX = sdX; lastHallY = sdY;
     if (Math.abs(vx) > Math.abs(vy) && hrn(3) !== 0) {
-      // ★原版是 **float32** 算术(LegacyDungeonHall.cs:680 `(float)num4 * ((float)Next(110,150)*0.01f)`)
-      //  ——float 截断偶发翻 trunc 边界;Math.fround 逐因子复刻(oracle :4549 同款)
-      nnum = Math.trunc(Math.fround(num4) * Math.fround(hri(110, 149) * 0.01));
+      // ★原版是**逐运算 float32** 算术(LegacyDungeonHall.cs:680 `(float)num4 *
+      //  (((float)Next(110,150))*0.01f)`)——C# 每个 float*float 各自舍入到 float,
+      //  非"double 乘完再舍一次"。曾单层 fround 致 trunc 边界偶发翻 1(轨迹对账
+      //  H#30 num 6↔7 实锤);现逐二元运算 fround 复刻(oracle :4551 同款)
+      nnum = Math.trunc(Math.fround(Math.fround(num4) * Math.fround(Math.fround(hri(110, 149)) * Math.fround(0.01))));
     }
     const hb = new DBnd(w, h);
     hb.set(Math.trunc(px), Math.trunc(py), Math.trunc(px), Math.trunc(py));
     const hall: DHall = { seed: s.seed, generated: true, forceX: s.forceX, isEntrance: false, bounds: hb, sx: sx, sy: sy, ex: 0, ey: 0, sdx: sdX, sdy: sdY, edx: sdX, edy: sdY };
     halls.push(hall);
     const roomsArea = roomsInSpots(px, py, px + vx * num3, py + vy * num3, Math.trunc(num3 / 2 + nnum));
+    // 对账插桩(dormant):globalThis.__dgHallTrace 存在时逐步记录,与 caves-oracle.cs 的
+    // DG_TRACE 输出逐行 diff(dungeonL 微差定位用,零开销常驻)
+    const TRACE = (globalThis as { __dgHallTrace?: Array<Record<string, number>> }).__dgHallTrace;
+    const hIdx = TRACE ? TRACE.length : -1;
+    if (TRACE) TRACE.push({ h: 1, idx: hIdx, seed: s.seed, sx, sy, num2, vx, vy, num: nnum, steps: num3, zig: flag2 ? 1 : 0, sdX, sdY });
     let cnt = 0;
     while (num3 > 0) {
       cnt++;
@@ -578,6 +585,7 @@ export function runDungeonPass(
       if (vy === 0 && hrn(nnum + 1) === 0) n21 = hri(1, 2);
       else if (vx === 0 && hrn(nnum - 1) === 0) n21 = hri(1, 2);
       else if (hrn(nnum * 3) === 0) n21 = hri(1, 2);
+      if (TRACE) TRACE.push({ s: 1, idx: hIdx, cnt, px: +px.toFixed(3), py: +py.toFixed(3), num: nnum, n21, x0, x1, y0, y1, left: num3 });
       const kx0 = Math.max(0, Math.min(w - 1, Math.trunc(px - nnum * num5 - n21)));
       const kx1 = Math.max(0, Math.min(w - 1, Math.trunc(px + nnum * num5 + n21)));
       const ky0 = Math.max(0, Math.min(h - 1, Math.trunc(py - nnum * num5 - n21)));

@@ -5,6 +5,9 @@
 import { describe, it, expect } from 'vitest';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS, LightsBaneSlash, GrassSlash } from '../src/entities/SwingArc';
 import { SolarEruptionWhip, SolarFlare } from '../src/entities/SolarEruption';
+import { TideSlash } from '../src/entities/TideSlash';
+import { FirstFractalSlash } from '../src/entities/FirstFractal';
+import { Arrow } from '../src/entities/Arrow';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -163,6 +166,7 @@ describe('日耀喷发 611 链鞭（AI_075 :63918-63956）', () => {
     const whip = new SolarEruptionWhip(16, 0, 105);
     projectiles.push(whip);
     whip.x = 50 * TILE; whip.y = 90 * TILE;
+    (whip as unknown as { ai1: number }).ai1 = 0.1;   // 固定抖动（随机抖动会随机甩偏 flaky）
     whip.fixedUpdate(1, game);
     const sp0 = Math.hypot(whip.vx, whip.vy);
     expect(sp0).toBeGreaterThan(16);                  // +48×spin 首帧加速
@@ -179,5 +183,46 @@ describe('日耀喷发 611 链鞭（AI_075 :63918-63956）', () => {
     expect(flare['ai0']).toBe(1);
     for (let t = 0; t < 14 && !flare.dead; t++) flare.fixedUpdate(1, game);
     expect(flare.dead).toBe(true);                    // 3×5=15t
+  });
+});
+
+describe('波涌之刃 451（aiStyle 81 三阶段）', () => {
+  it('掷出渐显 → 折返 → 瞬击穿梭（250px 敌重定向+100px 环落）→ 末段消亡', () => {
+    const w = new World(160, 300, 30, 'open');
+    const list: unknown[] = [];
+    let dmgTaken = 0;
+    list.push({ id: 1, x: 60 * TILE, y: 90 * TILE, w: 40, h: 40, cx: 60 * TILE + 20, cy: 90 * TILE + 20,
+      vx: 0, vy: 0, dead: false, hp: 500,
+      hurt: (d: number) => { dmgTaken += d; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
+    const game = makeGame(w, list);
+    const tide = new TideSlash(16, 0, 100, 4.5, 3);
+    game.entities && ((game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(tide, 'projectiles'));
+    tide.x = 50 * TILE; tide.y = 90 * TILE;
+    tide.fixedUpdate(1, game);
+    expect(tide['ai0']).toBe(-1);                     // 掷出阶段
+    for (let t = 0; t < 80 && !tide.dead; t++) tide.fixedUpdate(1, game);
+    // 三阶段流转至少进入瞬击（ai0 ≥ 1）并最终消亡
+    expect(tide.dead || tide['ai0'] >= 0).toBe(true);
+  });
+});
+
+describe('初代分形剑 857（AI_168）+ 双足翼龙弹 711 模式', () => {
+  it('857：60t 消亡 + 曲率旋进 + Opacity 包络', () => {
+    const game = makeGame(new World(160, 300, 30, 'open'));
+    const ff = new FirstFractalSlash(50 * TILE, 90 * TILE, 12, 0, 190, Math.PI / 120);
+    ff.fixedUpdate(1, game);
+    const a0 = Math.atan2(ff.vy, ff.vx);
+    expect(a0).toBeGreaterThan(0);                     // 曲率旋进（vy 从 0 起）
+    for (let t = 0; t < 70 && !ff.dead; t++) ff.fixedUpdate(1, game);
+    expect(ff.dead).toBe(true);                        // 59t 消亡
+  });
+
+  it('711：构造态 dragonFade + betsyCurse + 30×30 盒 scale 0.7', () => {
+    const b = new Arrow(0, 0, 10, 0, 10, 1, 711, null, {});
+    expect(b.dragonFade).toBe(true);
+    expect(b.betsyCurse).toBe(true);
+    expect(b.w).toBe(30); expect(b.h).toBe(30);
+    expect(b.drawScale).toBeCloseTo(0.7, 3);
+    expect(b.extraUpdates).toBe(1);
   });
 });

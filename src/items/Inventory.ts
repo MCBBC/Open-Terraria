@@ -61,10 +61,11 @@ export function isAmmoSlot(i: number): boolean {
   return i >= AMMO_START && i < AMMO_START + AMMO_SLOTS;
 }
 
-/** 金钱格只收对应币种（ItemSlot context1：type 0/71-74，ItemSlot.cs:1338-1343） */
+/** 金钱格收任意币种（ItemSlot context1：type 0/71-74 全通过,ItemSlot.cs:1338-1343——
+ *  原版钱币槽【不锁面额】,任意币可放任意格。曾按槽位锁面额=误读该行） */
 export function coinSlotAccepts(i: number, id: number): boolean {
   if (!isCoinSlot(i)) return false;
-  return id === ITEM_BY_KEY[COIN_KEYS[i - COIN_START]];
+  return coinIndexOf(id) >= 0;
 }
 
 /** 弹药格校验（Item.FitsAmmoSlot 1:1，Item.cs:1351-1367）：
@@ -296,11 +297,27 @@ export class Inventory {
    *  ⑤ 钱币满 100 自动合大（DoCoins :38573-38589） */
   add(id: number, count: number, prefix?: number, placeStyle?: number): number { // prefix/placeStyle 随新放置槽写入（合并已有堆保留现有）
     const max = ITEM_DEFS[id].maxStack;
-    // ① 钱币（合并→空格→DoCoins）
+    // ① 钱币：钱币格循环（填→转）到无进展（GetItem 每次合并后即 DoCoins :38840）,
+    //    溢出再走背包合并/空格（:38701+ 通用路径——原版溢出币进 0-49,非丢弃）
     const ci = coinIndexOf(id);
     if (ci >= 0) {
-      count = this.fillRange(COIN_START, COIN_SLOTS, id, count, max);
-      if (count > 0) count = this.doCoinsFromSlot(COIN_START, COIN_SLOTS, ci, id, count, max);
+      let guard = 0;
+      while (count > 0 && guard++ < 100000) {   // 上限仅防呆;无进展 break 已保证收敛
+        const before = count;
+        count = this.fillRange(COIN_START, COIN_SLOTS, id, count, max);
+        this.doCoins();
+        if (count === before) break;   // 无进展（格满且不再转换）→ 溢出走背包
+      }
+      if (count > 0) {
+        count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle);
+        for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
+          if (!this.slots[i]) {
+            const put = Math.min(max, count);
+            this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}) };
+            count -= put;
+          }
+        }
+      }
       return count;
     }
     // ② 弹药（FillAmmo :38591-38655：先合并 54-57 已有再空格）
@@ -343,20 +360,40 @@ export class Inventory {
     return count;
   }
 
-  /** DoCoins（Player.cs:38573-38589）：同币 stack==100 → 升一级面额并在 0-53 找同类未满堆 +1，递归 */
-  private doCoinsFromSlot(start: number, len: number, ci: number, id: number, count: number, max: number): number {
-    void start; void len; void ci; void max;
-    // 100 铜→银（coin_copper→coin_silver）等：仅当该面额格已达 100
-    for (let tier = 0; tier < 3; tier++) {
-      const s = this.slots[COIN_START + tier];
-      if (s && s.id === ITEM_BY_KEY[COIN_KEYS[tier]] && s.stack >= 100) {
-        this.slots[COIN_START + tier] = null;
-        // 升级币放入钱币格（递归走 add 保持链）
-        const left = this.add(ITEM_BY_KEY[COIN_KEYS[tier + 1]], 1);
-        if (left > 0) return count; // 放不下（理论不发生）
+  /** DoCoins（Player.cs:38573-38589）1:1：扫 0-53（背包+钱币格,不含弹药）,
+   *  任意币堆 stack==100 且面额 71-73 → 本槽升一级面额置 1（:38578 SetDefaults(type+1)）,
+   *  再找别处同型未满堆 +1 并清本槽（:38580-38588,递归 DoCoins(j)）——外层
+   *  while(changed) 等价覆盖递归。铂不升（:38574 只认 71-73）。
+   *  ★旧实现按"槽位=面额"锁死：第二堆铜币落 51 槽被当银币位永远不转;
+   *  且合并恰好满 100 时被调用点 count>0 门跳过 = "满 100 铜不转银"双根因
+   *  （2026-08-13 用户实抓,重写） */
+  private doCoins(): void {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < COIN_START + COIN_SLOTS; i++) {
+        const s = this.slots[i];
+        if (!s) continue;
+        const tier = coinIndexOf(s.id);
+        if (tier < 0 || tier > 2) continue;          // 非币/铂币不升
+        if (s.stack < 100) continue;                 // :38575 stack != 100 return
+        // 本槽变 1 枚上级（原位,不挪槽）
+        const nextId = ITEM_BY_KEY[COIN_KEYS[tier + 1]];
+        s.id = nextId;
+        s.stack = 1;
+        changed = true;
+        // 找同型未满堆 +1 → 清本槽（原版随后递归 DoCoins(j)）
+        for (let j = 0; j < COIN_START + COIN_SLOTS; j++) {
+          if (j === i) continue;
+          const t = this.slots[j];
+          if (t && t.id === nextId && t.stack < (ITEM_DEFS[nextId]?.maxStack ?? 100)) {
+            t.stack++;
+            this.slots[i] = null;
+            break;
+          }
+        }
       }
     }
-    return count;
   }
 
   removeAt(i: number, count = 1): boolean {

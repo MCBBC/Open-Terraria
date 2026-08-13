@@ -4094,6 +4094,7 @@ var dgEntBounds = new DBnd();       // dungeonEntrance.Bounds
 bool dgEntExists = false;
 bool dgEntOnSurface = false;        // createdDungeonEntranceOnSurface
 double dgLastHallX = 0.0, dgLastHallY = 0.0;   // lastDungeonHall（Vector2D）
+int dgTraceCount = 0;                          // DG_TRACE 幂等计数(dormant)
 bool dgPitFlood = true;             // makeNextPitTrapFlooded（cs:345 初值 true）
 int dgLootStyle = 0;                // genVars.dungeonLootStyle
 int dgPosX, dgPosY, dgTopX;         // generatingDungeonPositionX/Y + generatingDungeonTopX
@@ -4548,6 +4549,12 @@ void DgHall(DHall s)
     dgLastHallX = -z2x; dgLastHallY = -z2y;                    // dungeonData.lastDungeonHall = zero
     if (Math.Abs(vx) > Math.Abs(vy) && (int)rr.Next(3) != 0)
         num = (int)((float)num4 * ((float)(int)rr.Next(110, 150) * 0.01f));
+    int traceIdx = -1;                                          // DG_TRACE:dungeonL 微差对账(dormant)
+    if (Environment.GetEnvironmentVariable("DG_TRACE") != null)
+    {
+        traceIdx = dgTraceCount++;
+        Console.Error.WriteLine($"H {traceIdx} seed={s.Seed} sx={sx:F3} sy={sy:F3} num2={num2} vx={vx:F6} vy={vy:F6} num={num} steps={num3} zig={(flag2 ? 1 : 0)} sdX={sdX} sdY={sdY}");
+    }
     var hb = new DBnd();
     hb.Set((int)px, (int)py, (int)px, (int)py);
     var hall = new DHall { Seed = s.Seed, Generated = true, Bounds = hb };
@@ -4594,6 +4601,8 @@ void DgHall(DHall s)
         if (vy == 0.0 && (int)rr.Next(num + 1) == 0) n21 = (int)rr.Next(1, 3);
         else if (vx == 0.0 && (int)rr.Next(num - 1) == 0) n21 = (int)rr.Next(1, 3);
         else if ((int)rr.Next(num * 3) == 0) n21 = (int)rr.Next(1, 3);
+        if (traceIdx >= 0)
+            Console.Error.WriteLine($"S {traceIdx} cnt={cnt} px={px:F3} py={py:F3} num={num} n21={n21} x0={x0} x1={x1} y0={y0} y1={y1} left={num3}");
         int kx0 = Math.Max(0, Math.Min(W - 1, (int)(px - num * num5 - n21)));
         int kx1 = Math.Max(0, Math.Min(W - 1, (int)(px + num * num5 + n21)));
         int ky0 = Math.Max(0, Math.Min(H - 1, (int)(py - num * num5 - n21)));
@@ -6950,6 +6959,7 @@ int GrowGemTreeFn(int tx, int ty, int treeTile)
     if (!GEM_GROUND.Contains(typ[gi])) return 4;
     bool sideFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && GEM_GROUND.Contains(typ[num * W + tx + dx]);
     if (!sideFit(-1) && !sideFit(1)) return 5;
+    if (Environment.GetEnvironmentVariable("SW_DEBUG_TREES") == "1") Console.WriteLine($"  oragrow x={tx} num={num} pre={StreamHash():x8}");
     int height = (int)r.Next(7, 13);
     int num4 = height + 4;                                      // TreeTopPaddingNeeded = 4
     if (tx - 2 < 0 || tx + 2 >= W || num - num4 < 0) return 6;
@@ -6962,22 +6972,24 @@ int GrowGemTreeFn(int tx, int ty, int treeTile)
         }
     void Put(int ax, int ay) { if (ax >= 0 && ax < W && ay >= 0 && ay < H) { typ[ay * W + ax] = (ushort)treeTile; act[ay * W + ax] = 1; } }
     bool flagL = false, flagR = false;
+    int dbgBrL = 0, dbgBrR = 0, dbgReroll = 0;
     for (int i = num - height; i < num; i++)
     {
         int num6 = (int)r.Next(10);
         int num5 = (int)r.Next(3);                              // 干身帧骰（帧值不入哈希）
         if (i == num - 1 || i == num - height) num6 = 0;
-        while (((num6 == 5 || num6 == 7) && flagL) || ((num6 == 6 || num6 == 7) && flagR)) num6 = (int)r.Next(10);
+        while (((num6 == 5 || num6 == 7) && flagL) || ((num6 == 6 || num6 == 7) && flagR)) { num6 = (int)r.Next(10); dbgReroll++; }
         flagL = false; flagR = false;
         if (num6 == 5 || num6 == 7) flagL = true;
         if (num6 == 6 || num6 == 7) flagR = true;
         Put(tx, i);
-        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); }   // 左枝 2 骰
-        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); }   // 右枝 2 骰
+        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); dbgBrL++; }   // 左枝 2 骰
+        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); dbgBrR++; }   // 右枝 2 骰
     }
     // 基座 tuft（cs:30846-30861）：两侧草族才置位 + 各 1/3 概率抹除（2 骰无条件）
     bool tuftFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && TREE_FIT.Contains(typ[num * W + tx + dx]);
     bool tL = tuftFit(-1), tR = tuftFit(1);
+    if (Environment.GetEnvironmentVariable("SW_DEBUG_TREES") == "1") Console.WriteLine($"  grow x={tx} num={num} h={height} tL={tL} tR={tR} brL={dbgBrL} brR={dbgBrR} reroll={dbgReroll}");  // pre-hash 在函数入口打印
     if ((int)r.Next(3) == 0) tL = false;
     if ((int)r.Next(3) == 0) tR = false;
     if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1); }

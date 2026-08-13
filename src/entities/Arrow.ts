@@ -229,6 +229,8 @@ export class Arrow extends Entity {
   /** SetDefaults alpha=255（:7021）→ AI 每帧 −40 渐显 */
   dragonFade = false;
   dragonAlpha = 255;
+  /** 711 双足翼龙弹：命中 Betsy's Curse(203) 600t（:10719-10721） */
+  betsyCurse = false;
   // ---- 泰拉刃光束 985（aiStyle 191）专属态 ----
   terra = false;
   // ---- 星怒剑 503 专属态 ----
@@ -326,6 +328,7 @@ export class Arrow extends Entity {
     this.tumblePoseLock = opts?.tumblePoseLock ?? false;
     this.terra = !!opts?.terra;
     if (projId === 684) { this.dragonFade = true; this.dragonAlpha = 255; }
+    if (projId === 711) { this.dragonFade = true; this.dragonAlpha = 255; this.betsyCurse = true; }
     if (projId === 261) this.boulder = true;
     if (opts?.terra) {
       this.terraAi0 = opts.terra.ai0;
@@ -734,6 +737,12 @@ export class Arrow extends Entity {
         }
         // 命中 debuff（StatusNPC:10555 表驱动——火枪弹 2 33% OnFire 180t 等,按型号掷骰）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
+        if (this.betsyCurse) {
+          // Betsy's Curse 203（:10719-10721）——计时直写；防御穿透层机制暂以
+          // armorPen 语义近似（独立 -10 防/层 待后续接）
+          const rec = e as unknown as Record<string, number>;
+          rec.betsysCurseT = Math.max(rec.betsysCurseT ?? 0, 600);
+        }
         // 冰霜盔甲引擎(ranged 门,:93712;魔法/召唤弹 frostEligible=false)
         if (this.frostEligible) {
           applyFrostBurn((game.player as unknown as { equipStats: { frostBurn: boolean } }).equipStats.frostBurn,

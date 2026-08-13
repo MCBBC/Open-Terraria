@@ -617,6 +617,8 @@ export class BestiaryPanel {
   private searchEl!: HTMLInputElement;
   private chipsEl!: HTMLElement;
   private ro: ResizeObserver | null = null;
+  /** RO 稳定居抖定时器(close 时清,防面板关后补刷) */
+  private roTimer: ReturnType<typeof setTimeout> | 0 = 0;
   private escHandler = (e: KeyboardEvent) => {
     if (e.code === 'Escape' || e.code === 'KeyE') {
       e.stopImmediatePropagation();
@@ -700,7 +702,22 @@ export class BestiaryPanel {
     // capture 阶段拦截：防 main.ts 全局 Esc/E 处理器同时关暂停菜单/背包
     window.addEventListener('keydown', this.escHandler, true);
     if (typeof ResizeObserver !== 'undefined') {
-      this.ro = new ResizeObserver(() => this.refresh());
+      // ★resize 稳定居抖(2026-08-14,用户报"resize 后头像全消失"):拖拽窗口
+      // = 每帧 RO→refresh→replaceChildren+~81 张新 canvas=画布创建风暴→GPU
+      // 压力致 context 丢失(canvas 2D 内容不自动恢复)→全透明。150ms 稳定后
+      // 只刷一次;rAF 合并保留给滚轮/点击等高频源
+      let lastW = -1, lastH = -1;
+      this.ro = new ResizeObserver(() => {
+        const w = this.gridWrap.clientWidth, h = this.gridWrap.clientHeight;
+        if (w === lastW && h === lastH) return;
+        if (this.roTimer) clearTimeout(this.roTimer);
+        this.roTimer = setTimeout(() => {
+          this.roTimer = 0;
+          if (w === lastW && h === lastH) return;
+          lastW = w; lastH = h;
+          this.refresh();
+        }, 150) as unknown as ReturnType<typeof setTimeout>;
+      });
       this.ro.observe(this.gridWrap);
     }
     parent.appendChild(this.panel);
@@ -808,6 +825,13 @@ export class BestiaryPanel {
       cell.dataset.credit = r.entry.creditId;
       const canvas = document.createElement('canvas');
       canvas.width = 64; canvas.height = 64;
+      // contextlost 韧性(2026-08-14,用户报"resize 后头像全消失"):canvas 2D
+      // 内容在 context 丢失后不自动恢复,而本面板只在创建时画一次——preventDefault
+      // 允许恢复,restored 时按原参数重画
+      canvas.addEventListener('contextlost', (e) => e.preventDefault());
+      canvas.addEventListener('contextrestored', () => {
+        this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
+      });
       cell.appendChild(canvas);
       const name = document.createElement('div');
       name.className = 'sw-bst-name';
@@ -964,11 +988,15 @@ export class BestiaryPanel {
         this.infoEl.appendChild(wrap);
       }
     }
-    // 大头像
+    // 大头像(NotKnown = 原版黑影语义:brightness 0 opacity 0.55)
     const canvas = document.createElement('canvas');
     canvas.width = 96; canvas.height = 96;
     canvas.style.cssText = 'width:96px;height:96px;image-rendering:pixelated;display:block;margin:0 auto 6px;';
     if (st === UnlockState.NotKnown) canvas.style.filter = 'brightness(0) opacity(0.55)';
+    canvas.addEventListener('contextlost', (e) => e.preventDefault());
+    canvas.addEventListener('contextrestored', () => {
+      this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
+    });
     this.infoEl.appendChild(canvas);
     this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
     // 击杀数（NPCKillCounterInfoElement）
@@ -1083,6 +1111,7 @@ export class BestiaryPanel {
   close() {
     window.removeEventListener('keydown', this.escHandler, true);
     this.gridWrap?.removeEventListener('wheel', this.wheelHandler);
+    if (this.roTimer) { clearTimeout(this.roTimer); this.roTimer = 0; }
     this.ro?.disconnect();
     this.ro = null;
     this.selected = null;

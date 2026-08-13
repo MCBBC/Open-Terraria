@@ -20,8 +20,16 @@ const CASES = [
   { file: 'caves-chain-9293480.json', seedText: '9293480', evil: 0 as const },
   { file: 'caves-chain-SandboxWorld.json', seedText: 'SandboxWorld', evil: 1 as const },
 ];
-/** oracle 转录段：恒以 golden 为准（刷新禁入） */
-const ORACLE_AUTHORITY = new Set(['corruption']);
+/** oracle 转录段(terrain→slush 全段 + corruption):恒以 golden 为准(刷新禁入)——
+ *  这些行承载 C# 镜像交叉验证。JS 若在此段分岐=并行会话在途改动(如 TreePass
+ *  growAshTree),待其定稿后走 oracle 同步循环恢复,勿冻结覆盖 */
+const ORACLE_AUTHORITY = new Set([
+  'terrain', 'dunes', 'oceansand', 'sandpatches', 'tunnels', 'mountaincaves', 'dirtwallbg',
+  'rocksclay', 'smallholes', 'dirtlayer', 'rocklayer', 'surfacecaves', 'icebiome', 'grass',
+  'jungle', 'mudcaves', 'desertmound', 'desertentrance', 'deserthive', 'desertdone', 'mushroom',
+  'marble', 'granite', 'islands', 'dirttomud', 'silt', 'ores', 'webs', 'underworld',
+  'corruption', 'lakes', 'slush',
+]);
 
 describe('caves-checkpoint 冻结基线再生', () => {
   for (const c of CASES) {

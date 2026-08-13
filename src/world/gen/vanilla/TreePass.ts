@@ -263,6 +263,17 @@ const ASH_PROFILE: TreeProfile = {
   heightMin: 7, heightMax: 12, topPadding: 4,   // Tree_Ash 高度 7-12 / Padding 4（cs:3898-3901）
 };
 
+/** 诊断专用（临时）：RNG 内部态指纹（SeedArray[56]+inext，与 oracle StreamHash 同算法） */
+function streamTag(rng: RNG): string {
+  const ur = (rng as unknown as { ur: { seedArray: Int32Array; inext: number } }).ur;
+  let h = 0x811c9dc5;
+  const step = (b: number) => { h = Math.imul(h ^ (b & 0xff), 16777619) >>> 0; };
+  for (let i = 0; i < 56; i++) { const v = ur.seedArray[i] | 0; for (let b = 0; b < 4; b++) step(v >>> (8 * b)); }
+  const ix = ur.inext >>> 0;
+  for (let b = 0; b < 4; b++) step(ix >>> (8 * b));
+  return h.toString(16).padStart(8, '0');
+}
+
 /** GrowTreeWithSettings（cs:30546-30967）1:1：宝石树/观赏树共用骨架。
  *  干身帧表与 GrowTree 同构（同一 switch，cs:30604-30700），复用 TRUNK。 */
 export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: number, p: TreeProfile): boolean {
@@ -282,6 +293,9 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   const fitSide = (dx: number) => st.inBounds(x + dx, num)
     && st.flags[st.idx(x + dx, num)] && p.ground.has(st.type[st.idx(x + dx, num)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
+  if (typeof process !== 'undefined' && process.env.SW_DEBUG_TREES === '1') {
+    console.log(`JSGROW x=${x} num=${num} pre=${streamTag(rng)}`);
+  }
   const height = rng.int(p.heightMin, p.heightMax);    // Next(TreeHeightMin, TreeHeightMax+1)
   const num4 = height + p.topPadding;                  // + TreeTopPaddingNeeded
   // EmptyTileCheck(x-2, x+2, num-num4, num-1, 20)（cs:30580-30582）
@@ -295,22 +309,23 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   }
   // 干身帧循环（cs:30590-30816）：与 GrowTree 同表，tile 换成宝石树干
   let flagL = false, flagR = false;
+  let dbgBrL = 0, dbgBrR = 0, dbgReroll = 0;
   for (let i = num - height; i < num; i++) {
     let num6 = rng.int(0, 9);
     if (i === num - 1 || i === num - height) num6 = 0; // 顶/底强制直干
-    while (((num6 === 5 || num6 === 7) && flagL) || ((num6 === 6 || num6 === 7) && flagR)) num6 = rng.int(0, 9);
+    while (((num6 === 5 || num6 === 7) && flagL) || ((num6 === 6 || num6 === 7) && flagR)) { num6 = rng.int(0, 9); dbgReroll++; }
     flagL = false; flagR = false;
     if (num6 === 5 || num6 === 7) flagL = true;
     if (num6 === 6 || num6 === 7) flagR = true;
     const num5 = rng.int(0, 2);
     const [fx, fy] = TRUNK[num6][num5];
     st.setTileSilent(x, i, p.treeTile, fx, fy);
-    if (num6 === 5 || num6 === 7) {                    // 左枝（cs:30741-30764）
+    if (num6 === 5 || num6 === 7) { dbgBrL++;          // 左枝（cs:30741-30764）
       const k = rng.int(0, 2);
       const [bfx, bfy] = rng.int(0, 2) < 2 ? [44, 198 + k * 22] : [66, k * 22];
       st.setTileSilent(x - 1, i, p.treeTile, bfx, bfy);
     }
-    if (num6 === 6 || num6 === 7) {                    // 右枝（cs:30766-30789）
+    if (num6 === 6 || num6 === 7) { dbgBrR++;          // 右枝（cs:30766-30789）
       const k = rng.int(0, 2);
       const [bfx, bfy] = rng.int(0, 2) < 2 ? [66, 198 + k * 22] : [88, 66 + k * 22];
       st.setTileSilent(x + 1, i, p.treeTile, bfx, bfy);
@@ -336,6 +351,9 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   if (tL && tR) st.setTileSilent(x, num - 1, p.treeTile, 88, 132 + baseK * 22);  // cs:30907-30923
   else if (tL) st.setTileSilent(x, num - 1, p.treeTile, 0, 132 + baseK * 22);    // cs:30925-30941
   else if (tR) st.setTileSilent(x, num - 1, p.treeTile, 66, 132 + baseK * 22);   // cs:30943-30959
+  if (typeof process !== 'undefined' && process.env.SW_DEBUG_TREES === '1') {
+    console.log(`  jsgrow2 x=${x} num=${num} h=${height} tL=${tL} tR=${tR} brL=${dbgBrL} brR=${dbgBrR} reroll=${dbgReroll}`);
+  }
   // 树冠标记帧（cs:30932-30967）：12/13 fx=22 否则 fx=0；fy=198+22*k
   const crownFx = rng.int(0, 12) !== 0 ? 22 : 0;
   st.setTileSilent(x, num - height, p.treeTile, crownFx, 198 + rng.int(0, 2) * 22);

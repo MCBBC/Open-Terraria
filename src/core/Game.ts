@@ -221,6 +221,8 @@ import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../entities/MissileProj';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
 import { SolarEruptionWhip } from '../entities/SolarEruption';
+import { TideSlash } from '../entities/TideSlash';
+import { FirstFractalSlash } from '../entities/FirstFractal';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
@@ -5434,6 +5436,70 @@ export class Game implements GameHooks {
             mxAdj = (ux * Math.cos(px) - uy * Math.sin(px)) * 24;
             myAdj = (ux * Math.sin(px) + uy * Math.cos(px)) * 24;
           }
+          // 初代分形剑 4722 → 857（Player.cs:47400-47447）：目标=随机可追敌
+          // （+速度×20 预测）或鼠标位钳 700；方向混入玩家速度；速度 12+rand×2；
+          // 曲率 ±π/120；出生点=目标−30 步旋转弧（弧尾入场）
+          if (cwMelee.shoot === 857) {
+            const [ffx, ffy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+            const ffTargets: Array<{ cx: number; cy: number; vx: number; vy: number }> = [];
+            for (const ent of this.entities.enemies) {
+              const e = ent as unknown as { cx: number; cy: number; vx: number; vy: number; dead: boolean; maxHp: number };
+              if (e.dead || e.maxHp <= 5) continue;
+              ffTargets.push(e);
+            }
+            let tx857 = ffx, ty857 = ffy;
+            let hasTarget = false;
+            if (ffTargets.length > 0) {
+              const pick = ffTargets[Math.floor(Math.random() * ffTargets.length)];
+              tx857 = pick.cx + pick.vx * 20; ty857 = pick.cy + pick.vy * 20;
+              hasTarget = true;
+            } else {
+              tx857 += (Math.random() * 2 - 1) * 24; ty857 += (Math.random() * 2 - 1) * 24;
+              const dx857 = tx857 - this.player.cx, dy857 = ty857 - this.player.cy;
+              const dl857 = Math.hypot(dx857, dy857);
+              if (dl857 > 700) { tx857 = this.player.cx + dx857 / dl857 * 700; ty857 = this.player.cy + dy857 / dl857 * 700; }
+            }
+            // 方向：随机单位圆 ×(1−速度混合) + 玩家速度 ×0.8 混合后归一
+            let dxa = Math.cos(Math.random() * Math.PI * 2), dya = Math.sin(Math.random() * Math.PI * 2);
+            if (!hasTarget) {
+              const pspd = Math.hypot(this.player.vx, this.player.vy);
+              const mix = Math.min(1, pspd / 6) * 0.8;
+              dxa = dxa * (1 - mix) + this.player.vx * mix;
+              dya = dya * (1 - mix) + this.player.vy * mix;
+              const dl = Math.hypot(dxa, dya) || 1; dxa /= dl; dya /= dl;
+            } else { dxa = 0; dya = 0; }   // 有敌：方向由出生弧几何决定（vector35 未用）
+            const spd857 = 12 + Math.random() * 2;
+            const curv = (Math.random() < 0.5 ? -1 : 1) * Math.PI / 120;
+            // 出生点 = 目标 − ∫30 步旋转弧（:47433-47438）
+            let ax857 = 0, ay857 = 0;
+            let vx857 = dxa * spd857, vy857 = dya * spd857;
+            if (hasTarget) {
+              vx857 = (tx857 - this.player.cx); vy857 = (ty857 - this.player.cy);
+              const vl = Math.hypot(vx857, vy857) || 1;
+              vx857 = vx857 / vl * spd857; vy857 = vy857 / vl * spd857;
+            }
+            for (let k = 0; k < 30; k++) {
+              ax857 += vx857; ay857 += vy857;
+              const rc = Math.cos(curv), rs = Math.sin(curv);
+              const nvx = vx857 * rc - vy857 * rs, nvy = vx857 * rs + vy857 * rc;
+              vx857 = nvx; vy857 = nvy;
+            }
+            const ff = new FirstFractalSlash(tx857 - ax857, ty857 - ay857, vx857, vy857,
+              this.swing.dmg ?? cwMelee.damage, curv);
+            ff.critChance = arcCrit;
+            ff.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            this.entities.add(ff, 'projectiles');
+          }
+          // 波涌之刃 2880 → 451（Player.cs:48616-48618：ai[0]=-1 初值；穿透取表）
+          if (cwMelee.shoot === 451) {
+            const tide = new TideSlash(
+              Math.cos(ang2) * cwMelee.shootSpeed, Math.sin(ang2) * cwMelee.shootSpeed,
+              this.swing.dmg ?? cwMelee.damage, cwMelee.knockback,
+              Math.max(1, pd?.penetrate ?? 3));
+            tide.critChance = arcCrit;
+            tide.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            this.entities.add(tide, 'projectiles');
+          }
           // 日耀喷发 3473 → 611 链鞭（Player.cs:48059-48063）：初速=瞄准向（链
           // 鞭自甩）；ai[1] 抖动在构造内；同 swing 伤害
           if (cwMelee.shoot === 611) {
@@ -6925,6 +6991,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
           bolt.critChance = critTotal;
           this.entities.add(bolt, 'projectiles');
+          this.player.useTime = cw.useTime;
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');
+          this.input.mouseDown = false;
+          break;
+        }
+        // 双足翼龙之怒 3870 → 711×3（Player.cs:48156-48170）：出膛 40px（LOS 门）
+        // + 三连扇形（0.8×速 + 垂直分量 0/±1，各旋 -π/60×direction）
+        if (cw.shoot === 711) {
+          const muzzleX = px + Math.cos(ang) * 40;
+          const muzzleY = py + Math.sin(ang) * 40;
+          const baseVx = Math.cos(ang) * cw.shootSpeed * 0.8;
+          const baseVy = Math.sin(ang) * cw.shootSpeed * 0.8;
+          const perpX = -Math.sin(ang), perpY = Math.cos(ang);
+          const rotStep = Math.PI / 180 * -this.player.facing;
+          for (let k = 0; k <= 2; k++) {
+            let bvx = baseVx + perpX * k, bvy = baseVy + perpY * k;
+            const rot = k * rotStep;
+            const rc = Math.cos(rot), rs = Math.sin(rot);
+            const nvx = bvx * rc - bvy * rs, nvy = bvx * rs + bvy * rc;
+            bvx = nvx; bvy = nvy;
+            const bolt = new Arrow(muzzleX, muzzleY, bvx, bvy,
+              cw.damage, cw.knockback, 711, null, { grav: 0, life: 600, pierce: 3 });
+            bolt.critBonus = this.player.critChance('magic')
+              + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+            bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            bolt.nebulaCb = () => {
+              if (!this.player.equipStats.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
+              this.player.nebulaCD = 30;
+              this.spawnNebulaBooster(bolt.cx, bolt.cy);
+            };
+            this.entities.add(bolt, 'projectiles');
+          }
           this.player.useTime = cw.useTime;
           this.player.onManaItemUsed();
           this.playUseSound(critVid, 'tink');

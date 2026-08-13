@@ -77,4 +77,25 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
     for (let t = 0; t < 40; t++) guide.fixedUpdate(1 / 60, game);
     expect(shots.length - before).toBeLessThanOrEqual(1);
   });
+
+  it('持械瞄准值 ai[2](DrawNPCExtras :27121 消费):发射档写入钳 ±0.5,态尽归零', () => {
+    const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
+    // 敌在右上方:目标中心方向 Y 分量为负(钳下界 -0.5)
+    const enemy = { x: 106 * 16, y: 92 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+    const { game, shots } = makeGame(guide, enemy);
+    let aimAtFire = 0;
+    for (let t = 0; t < 900; t++) {
+      guide.fixedUpdate(1 / 60, game);
+      if (shots.length) { aimAtFire = guide.holdoutAim; break; }
+    }
+    expect(shots.length).toBeGreaterThan(0);
+    expect(aimAtFire).toBeLessThan(0);            // 上方目标 → 负俯仰
+    expect(aimAtFire).toBeGreaterThanOrEqual(-0.5); // :55196 钳 ±0.5
+    // 攻击态中 → attackState===12(DrawNPCExtras 触发门)
+    expect(guide.attackState).toBe(12);
+    // 态尽(ai[1]<=0)退出 → ai[2] 归零(:55203)
+    for (let t = 0; t < 200 && guide.attackState !== 0; t++) guide.fixedUpdate(1 / 60, game);
+    expect(guide.attackState).toBe(0);
+    expect(guide.holdoutAim).toBe(0);
+  });
 });

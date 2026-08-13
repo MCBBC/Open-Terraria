@@ -5837,11 +5837,13 @@ export class Enemy extends Entity {
     this.reflectsProjectiles = false;
 
     // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(10)（:20020-20025） ----
-    // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续
+    // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续。
+    // ★位移交给通用物理段 noTileCollide 分支——此处再积分即双倍速（曾致白天
+    // 漂离双速,更早连 P2 冲刺也是双倍:6.8→13.6/连冲 20→40 像瞬移,2026-08-13
+    // 用户报"二阶段冲刺速度差距大"实锤后一并归一）
     if (game.world.clock.isDay || player.dead) {
       this.vy -= 0.04;
       this.encourageDespawn(10);
-      this.x += this.vx; this.y += this.vy;
       if (dist > T * 120) this.dead = true;   // 漂远后兜底消失
       return;
     }
@@ -6203,9 +6205,9 @@ export class Enemy extends Entity {
       if (flag3 && this.state === 5) this.state = 3;
     }
 
-    // 移动：EoC 全程无视地形——悬浮飞行体贴图块边缘会卡顿、冲撞后残留在
-    // 图块内也会受碰撞影响，统一直接积分 + 世界边界钳制（撞墙/嵌入问题全部消除）
-    this.x += this.vx; this.y += this.vy;
+    // 移动交给通用物理段 noTileCollide 分支（x+=vx 每 tick 一次）——此处曾再积分
+    // 一次 = 全程双倍速（P2 连冲 20→40px/t 像瞬移,2026-08-13 实锤）。世界边界
+    // 钳制保留（原版 noTileCollide 也有 InWorld 钳;通用段无此钳）
     this.onGround = false; this.hitWall = false; this.hitHead = false;
     const maxX = game.world.w * T - this.w, maxY = game.world.h * T - this.h;
     this.x = Math.max(0, Math.min(maxX, this.x));
@@ -6454,6 +6456,11 @@ export class Enemy extends Entity {
       dmg = 5; kbx = 0; kby = 0;
     }
     const rawDmg = dmg; // 傀儡上报用原始值（下方 def 凘认算只做一次，双端一致）
+    // 死亡单次门(用户报"多弹头武器打出双份僵尸碎块"):pierce=1 豁免免疫帧后,
+    // 同 tick 多弹头(霰弹/食人鱼咬+随从)会全部进 hurt——首发致死后,后续弹头
+    // 对"已死未出列"的敌怪二次触发死亡管线(碎块/掉落/音效翻倍)。原版由
+    // Damage_PVE 的 npc.active 前置门(Projectile.cs:11869)天然防重;此处等价。
+    if (this.dead) return false;
     if (pierce !== 1 && this.iframes > 0) return false; // 单发弹豁免免疫检查（flag3）
     // 旗 buff 加伤（Main.GetBannerBuffEffect → StrikeNPC 乘区,ItemID.cs:11-44 普通族:
     // 经典 ×1.5/专家 ×2;DD2 0.2 族不区分,登记）——统一入口=StrikeNPC 全通道语义
