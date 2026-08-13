@@ -14,7 +14,7 @@ import {
   bestiaryRepNpcId, isBossCredit, flattenDropsForNpc, dropRateText,
   bestiarySpawnConditions, bestiaryFlavorText, SPAWN_BY_NPC,
   bestiaryPortraitBackground, bestiaryGridBackground, bestiaryBgPreferencePaths,
-  DEFAULT_BESTIARY_FILTER, type BestiarySortKey,
+  DEFAULT_BESTIARY_FILTER, applyBestiaryChip, type BestiarySortKey,
 } from '../src/ui/BestiaryPanel';
 import { BestiaryTracker, UnlockState, bestiaryCreditId, bestiaryEntries, bestiaryGating } from '../src/data/Bestiary';
 import { VANILLA_NPCS } from '../src/data/vanillaNpcs';
@@ -146,6 +146,28 @@ describe('筛选（Filters.BySearch/ByUnlockState/ByBoss + kind 维度）', () =
     const named = filterBestiaryRows(bestiaryRows(t), { ...DEFAULT_BESTIARY_FILTER, search: '僵尸' });
     expect(named).toHaveLength(1);
     expect(named[0].entry.creditId).toBe('Zombie');
+  });
+
+  it('chip 组合：boss 隶属敌怪——矛盾组合（小动物/城镇 × boss）不可达', () => {
+    const D = DEFAULT_BESTIARY_FILTER;
+    // 小动物态下点 敌方Boss → kind 自动归一 enemy,boss 开
+    const fromCritter = applyBestiaryChip({ ...D, kind: 'critter' }, 'boss');
+    expect(fromCritter).toMatchObject({ kind: 'enemy', boss: true });
+    // boss 态下点 小动物 → boss 自动清
+    const toCritter = applyBestiaryChip({ ...D, kind: 'enemy', boss: true }, 'kind', 'critter');
+    expect(toCritter).toMatchObject({ kind: 'critter', boss: false });
+    const toTown = applyBestiaryChip({ ...D, boss: true }, 'kind', 'town');
+    expect(toTown).toMatchObject({ kind: 'town', boss: false });
+    // 合法组合保持：全部/敌怪 × boss 自由
+    expect(applyBestiaryChip({ ...D }, 'boss')).toMatchObject({ boss: true, kind: 'all' });
+    expect(applyBestiaryChip({ ...D, kind: 'enemy' }, 'boss')).toMatchObject({ boss: true, kind: 'enemy' });
+    // 经 chip 序列产生的任何组合,筛选结果集非空
+    const seq = [
+      applyBestiaryChip(applyBestiaryChip({ ...D }, 'kind', 'critter'), 'boss'),
+      applyBestiaryChip(applyBestiaryChip({ ...D }, 'boss'), 'kind', 'town'),
+      applyBestiaryChip(applyBestiaryChip({ ...D }, 'boss'), 'kind', 'enemy'),
+    ];
+    for (const nf of seq) expect(f(nf).length).toBeGreaterThan(0);
   });
 });
 

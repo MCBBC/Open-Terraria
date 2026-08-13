@@ -4156,7 +4156,8 @@ export class Enemy extends Entity {
       let fading = !player
         || Math.hypot(player.cx - this.cx, player.cy - this.cy) >= 300;
       // cs:45248-45252：非 remix 世界（本仓无 remix）且目标玩家不在神圣 → 上限抬 60 且渐隐
-      if (player && !game.scene?.zoneHallow) { cap = 60; fading = true; }
+      //（scene 缺席按"在神圣"处理——不因快照缺失误触发渐隐）
+      if (player && game.scene && !game.scene.zoneHallow) { cap = 60; fading = true; }
       const f = lacewingFadeStep(this.ai2, fading, cap);
       this.ai2 = f.ai2;
       if (f.despawn) { this.dead = true; return; }             // cs:45254-45262

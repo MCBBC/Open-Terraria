@@ -853,6 +853,7 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
       m += 0.15 * this.nebula[0];        // 星云伤害 179-181 每级四系 +15%（:10118-10124）
+      if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;   // 枯萎武器（:25715）
       // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4991：minionDamage += 0.15）
       if (this.ridingMount && this.mount.type === 12 && this.mount.fishronBoost) m += 0.15;
       return m;
@@ -877,6 +878,8 @@ export class Player extends Entity {
     // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4988-4992：melee/ranged/magic/minion
     // 四系各 += 0.15——湿身/半血以下/雨中露天的 MountFishronSpecial 态）
     if (this.ridingMount && this.mount.type === 12 && this.mount.fishronBoost) m += 0.15;
+    // 枯萎武器(196)：四系伤害 ×0.5（Player.cs:25712-25719）
+    if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;
     return m;
   }
   /** 远程分道乘区（Player.cs:3820-3824 bowEffectiveDamage 拆分）：
@@ -1444,7 +1447,7 @@ export class Player extends Entity {
     // 能量/疲劳恢复 + 地面飞行时量回充（:26538 ResetFlightTime）+ hover 起始
     //（:26416）+ 帧态机分派（:35745-35790）。冻结/石化/蛛网控场强制下坐（:26556）
     if (this.ridingMount) {
-      if (this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned)) {
+      if (this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned) || this.buffs.has(BuffType.Webbed)) {
         this.mount.dismount(this, game);
       } else {
         this.mount.upkeep(this);
@@ -1591,6 +1594,18 @@ export class Player extends Entity {
       // 物理 :24117-24119 gravity/maxFall ×0.9——速度只用于积分，位移走下方
       // :27868 的 velocity×0.375 穿墙下坠（绕过 tile collision）
       this.vy = Math.min(this.vy + GRAVITY * 0.9, MAX_FALL_SPEED * 0.9);
+      this.fallStartY = null;
+    } else if (this.buffs.has(BuffType.Webbed)) {
+      // 结网(149)（Player.cs:11459-11476）：本帧 velocity 清零（下落中留 1e-6 缓降）、
+      // gravity=0、jumpHeight=0、moveSpeed=0（已走 moveSpeedMult）、dash 归零、
+      // 免击退；摘钩链 RemoveAllGrapplingHooks 由 Game 钩爪清理段按帧处理
+      this.vx = 0;
+      this.vy = this.vy !== 0 ? 0.000001 : 0;
+      this.fallStartY = null;
+    } else if (this.buffs.has(BuffType.VortexDebuff)) {
+      // 星旋减益(164)：gravity=0（:24162-24164）+ vy 摆动（:27854-27857：
+      // vy×0.8 + cos(cx%120/120×2π)×5×0.2——按世界 X 相位正弦悬浮）
+      this.vy = this.vy * 0.8 + Math.cos((this.cx % 120) / 120 * Math.PI * 2) * 5 * 0.2;
       this.fallStartY = null;
     } else
     // 跳跃 / 游泳

@@ -218,6 +218,31 @@ export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): Best
   });
 }
 
+/** chip 组合语义（2026-08-13 用户报：小动物 × 敌方Boss 可同时选中 → 矛盾组合恒空）。
+ *  boss 隶属敌怪维度——与 critter/town 互斥：
+ *  - 选 boss 时 kind 归一到 enemy（从 小动物/城镇 切入即自动跳敌怪）
+ *  - 选 小动物/城镇 时清 boss（不存在 boss 城镇/boss 小动物）
+ *  kind all/enemy 与 boss 自由组合（结果集非空：全部→boss 25 条 / 敌怪→boss 25 条） */
+export function applyBestiaryChip(
+  f: BestiaryFilter,
+  chip: 'kind' | 'boss' | 'unlocked' | 'unlockedNo',
+  kind?: BestiaryFilter['kind'],
+): BestiaryFilter {
+  const nf: BestiaryFilter = { ...f };
+  if (chip === 'kind' && kind) {
+    nf.kind = kind;
+    if (kind !== 'all' && kind !== 'enemy') nf.boss = false;
+  } else if (chip === 'boss') {
+    nf.boss = !nf.boss;
+    if (nf.boss && nf.kind !== 'all' && nf.kind !== 'enemy') nf.kind = 'enemy';
+  } else if (chip === 'unlocked') {
+    nf.unlocked = nf.unlocked === 'yes' ? 'all' : 'yes';
+  } else {
+    nf.unlocked = nf.unlocked === 'no' ? 'all' : 'no';
+  }
+  return nf;
+}
+
 // ============ 掉落表展平（ItemDropBestiaryInfoElement 近似） ============
 
 export interface DropLine {
@@ -658,15 +683,27 @@ export class BestiaryPanel {
     const kindLabel: Record<string, string> = { all: '全部', enemy: '敌怪', town: '城镇', critter: '小动物' };
     this.chipsEl.replaceChildren();
     for (const k of kinds) {
-      this.chipsEl.appendChild(this.chip(kindLabel[k], f.kind === k, () => { f.kind = k; this.buildChips(); }));
+      this.chipsEl.appendChild(this.chip(kindLabel[k], f.kind === k, () => {
+        this.filter = applyBestiaryChip(f, 'kind', k);
+        this.buildChips();
+      }));
     }
     this.chipsEl.appendChild(this.chip(
-      Lang.text('BestiaryInfo.IsBoss'), f.boss, () => { f.boss = !f.boss; this.buildChips(); }));
+      Lang.text('BestiaryInfo.IsBoss'), f.boss, () => {
+        this.filter = applyBestiaryChip(f, 'boss');
+        this.buildChips();
+      }));
     const ul = f.unlocked;
     this.chipsEl.appendChild(this.chip(
-      Lang.text('BestiaryInfo.IfUnlocked'), ul === 'yes', () => { f.unlocked = ul === 'yes' ? 'all' : 'yes'; this.buildChips(); }));
+      Lang.text('BestiaryInfo.IfUnlocked'), ul === 'yes', () => {
+        this.filter = applyBestiaryChip(f, 'unlocked');
+        this.buildChips();
+      }));
     this.chipsEl.appendChild(this.chip(
-      '未解锁', ul === 'no', () => { f.unlocked = ul === 'no' ? 'all' : 'no'; this.buildChips(); }));
+      '未解锁', ul === 'no', () => {
+        this.filter = applyBestiaryChip(f, 'unlockedNo');
+        this.buildChips();
+      }));
   }
 
   /** OnOpenPage → UpdateBestiaryContents（FilterEntries → SortEntries → Fill + 进度） */

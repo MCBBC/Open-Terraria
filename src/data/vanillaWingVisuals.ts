@@ -22,15 +22,18 @@
 //   controlJump && vy>0 && !downDash 时按款覆盖帧（默认 2；30/34/39 恒循环；
 //   48→3、40→0、44→2、26→2、37→2、43→1、12→3；22/28/45/51/47/49/50/24 除外不覆盖）。
 //
-// ===== 偏差登记 =====
-// ① 47/49 锚点的 OffsetsPlayerHeadgear[bodyFrameRow] 按站立行 0 取值（(0,2)→
-//   局部 −20），逐行 ±2px 偏差未建模（Main.cs:504 表仅 0/2 两值）；
-// ② 发光叠画未移植：22 火焰(ItemFlame[1866]×7)/23 Flames[8]/27 GlowMask[92]/
-//   43 GlowMask[272]×2/44 彩虹 RenderTarget/47 GlowMask[366]/50 免疫帧双画/
-//   28 Extra[38] 叠画/40 的 14 帧程序化摆动（Betsy 翼特殊绘制，按 generic 单帧近似）；
-// ③ 逐款翅膀尘（WingAirVisuals/33/38/26/37 尘）未接（无视觉实体外的粒子语义差异）；
-// ④ tryKeepingHoveringUp/Down 锁存未建模（TryingToHover 用 controlUp/Down 近似，
-//   与既有 wingMovement 的 hoverDown 近似一致）。
+// ===== 偏差登记（2026-08-13 二轮 /goal 清零批后残留——全部为源头不可得/引擎级）=====
+// ① 44 HallowBoss 像素着色器 HLSL 不在反编译源（编译期 effect 二进制）→ Extra_171
+//   静态直画（与女皇 Extra_157 先例同法）；44/45 残影 (70,70,70,0)·f 与 38 影子环
+//   的 A=0 是原版死画（XNA A=0 不出像素）→ 跳过即 1:1；
+// ② extra38 暗环境 tint 取满档、49 光照门 z 恒 1——两处需读侧光照采样 API
+//   （本仓 LightingEngine 只写不读），亮环境 1:1、暗环境略偏亮；
+// ③ stealth（潜行）与 cWings 染色（dye）系统全局未建模（引擎级，非翅膀层）；
+// ④ tryKeepingHoveringUp/Down 锁存 = HoverControl Click 模式专属（Player.cs:361
+//   默认 Hold → :24985 恒清零）——默认设置下 controlUp/Down 即原版语义；
+//   Click 设置项本身未移植（设置系统级）；
+// ⑤ isPerformingJump_DownDash（5465 手持下冲跳 :13978）跳跃变体未移植（跳跃系统级）
+//   → downDash 恒 false 与现状一致。
 export interface WingDraw {
   /** 绘制切帧数（num14 / Frame(1,N) 的 N；28 用 miscCounter 动画帧率恒 4） */
   frames: number;

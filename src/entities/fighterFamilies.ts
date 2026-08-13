@@ -656,85 +656,85 @@ function getChaseResults(
   return { x: (ix - chaserX) / t, y: (iy - chaserY) / t };            // ChaserVelocity
 }
 
-/** 425 专属段（NPC.cs:58865-59013）。调用点 = Enemy.fighterAI 内 fighterMoveStep 之后：
- *  - localAI[3]==0 出生门 → ai3=−120（2s 起手延迟，:58868-58872）；
- *  - 落地清 ai2（喷包态复位，:58873-58876）；空中 ai2==1 → 喷包伺服（保持玩家横向
- *    300px、纵向 20px 死区，0.3 步进钳横 7 纵 8，:58877-58928）+ 1/3 喷口尘
- *    （:58929-58942）+ 同族挤开（:58944-58963）；
- *  - 起飞门：玩家顶高于自身 ≥100px 且视线通 → vy=−5、ai2=1（:58949-58963）；
+/** 425 专属段（NPC.cs:58865-59015）。调用点 = Enemy.fighterAI 内 fighterMoveStep 之后
+ *  （原版横向移动链 :57799-58598 与本段是两段独立 if/else-if 阶梯——425 两段都命中：
+ *  链上 num84=6 行走档 + 本段喷包/蓄力）：
+ *  - localAI[3]==0 出生门 → ai3=−120（2s 起手延迟，:58867-58871）；
+ *  - 落地清 ai2（喷包态复位，:58872-58875）；空中 ai2==1 → 喷包伺服（保持玩家横向
+ *    300px、纵向 20px 死区，0.3 步进钳横 7，:58876-58916）+ 1/3 喷口尘（:58931-58939）
+ *    + 同族挤开（:58940-58961）；
+ *  - 起飞门：玩家中心高于自身顶 ≥100px 且视线通 → vy=−5、ai2=1（:58963-58966）；
  *  - ai3 蓄力（stormDiverAimStep）：aim = |dy|≤|dx| && 距离<800 && CanHitLine
- *    （:58970-58975）；满蓄自枪口 Center+(direction*30, 2) 发 4× 弹 577——直瞄 20 速，
- *    拦截成功（玩家速度×0.5/2 领先量）改半速 10，首发精确其余 ±0.8 抖动
- *    （:58983-59013）。 */
+ *    （:58978-58980）；满蓄自枪口 Center+(direction*30, 2) 发 4× 弹 577——直瞄 20 速，
+ *    拦截成功（玩家速度×0.5/2 领先量）改半速 10，首发精确其余 ±0.8 抖动（:58988-59015）。 */
 export function stormDiverStep(e: Enemy, game: GameHooks, player: Player | null): void {
   if (e.vanillaId !== 425) return;
-  if (e.lai3 === 0) { e.lai3 = 1; e.ai3 = -120; }                     // :58868-58872 出生门
-  if (e.vy === 0) e.ai2 = 0;                                          // :58873-58876 落地复位喷包态
+  if (e.lai3 === 0) { e.lai3 = 1; e.ai3 = -120; }                     // :58867-58871 出生门
+  if (e.vy === 0) e.ai2 = 0;                                          // :58872-58875 落地复位喷包态
   const st = game.world.store;
   if (player && !player.dead) {
     if (e.vy !== 0 && e.ai2 === 1) {
-      // ---- 喷包空中伺服（:58877-58928）----
-      // 注：本分支原版另置 spriteDirection=-direction（:58879）；FindFrame case 425
+      // ---- 喷包空中伺服（:58876-58916）----
+      // 注：本分支原版另置 spriteDirection=-direction（:58878）；FindFrame case 425
       //（:71003-71005）对全部帧恒置同式 → 等价"贴图恒反向"，属绘制层登记项（S 侧），
       // 此处不翻 facing 以免起降瞬间往返镜像。
       if (canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
-        const num115 = player.cx - e.facing * 300 - e.cx;             // :58887 横向期望（保持 300px）
-        const num116 = player.y + player.h - (e.y + e.h);             // :58888 Bottom 差
-        if (num115 < 0 && e.vx > 0) e.vx *= 0.9;                      // :58889-58893 逆期望阻尼
+        const num115 = player.cx - e.facing * 300 - e.cx;             // :58886 横向期望（保持 300px）
+        const num116 = player.y + player.h - (e.y + e.h);             // :58887 Bottom 差
+        if (num115 < 0 && e.vx > 0) e.vx *= 0.9;                      // :58888-58892 逆期望阻尼
         else if (num115 > 0 && e.vx < 0) e.vx *= 0.9;
-        if (num115 < 0 && e.vx > -7) e.vx -= 0.3;                     // :58894-58897
+        if (num115 < 0 && e.vx > -7) e.vx -= 0.3;                     // :58893-58896
         else if (num115 > 0 && e.vx < 7) e.vx += 0.3;
-        if (e.vx > 7) e.vx = 7;                                       // :58898-58903 钳横 7
+        if (e.vx > 7) e.vx = 7;                                       // :58897-58902 钳横 7
         if (e.vx < -7) e.vx = -7;
         if (num116 < -20 && e.vy > 0) e.vy *= 0.8;                    // :58904-58908 纵向死区 20px
         else if (num116 > 20 && e.vy < 0) e.vy *= 0.8;
         if (num116 < -20 && e.vy > -8) e.vy -= 0.3;                   // :58909-58912
         else if (num116 > 20 && e.vy < 8) e.vy += 0.3;
       }
-      if (Math.floor(Math.random() * 3) === 0) {                      // :58929-58942 喷口尘（1/3）
+      if (Math.floor(Math.random() * 3) === 0) {                      // :58931-58939 喷口尘（1/3）
         game.spawnParticles(
           e.cx - e.facing * 14 - 4, e.cy - 8 - 4, '#FFB060', 1, 0.6,
           { life: 26, damp: 0.94 });
       }
-      // ---- 同族挤开（:58944-58963，Manhattan < width → ±0.15 推离）----
+      // ---- 同族挤开（:58940-58961，Manhattan < width → ±0.15 推离）----
       for (const o of game.enemies() as Enemy[]) {
         if (o === e || o.dead || o.vanillaId !== 425) continue;
         if (Math.abs(e.x - o.x) + Math.abs(e.y - o.y) < e.w) {
-          e.vx += e.x < o.x ? -0.15 : 0.15;                           // :58952-58958
-          e.vy += e.y < o.y ? -0.15 : 0.15;                           // :58959-58962
+          e.vx += e.x < o.x ? -0.15 : 0.15;                           // :58951-58956
+          e.vy += e.y < o.y ? -0.15 : 0.15;                           // :58957-58960
         }
       }
-    } else if (player.cy + 100 < e.y                                  // :58950 Center.Y+100 < position.Y
+    } else if (player.cy + 100 < e.y                                   // :58963 Center.Y+100 < position.Y
       && canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
-      e.vy = -5;                                                      // :58961-58962 起飞
-      e.ai2 = 1;
+      e.vy = -5;                                                      // :58964-58965 起飞
+      e.ai2 = 1;                                                      // :58966
     }
-    // ---- ai3 瞄准蓄力（:58968-59006）----
+    // ---- ai3 瞄准蓄力（:58969-58985，状态机见 stormDiverAimStep）----
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
-    const dist = Math.hypot(dx, dy);
-    const aim = Math.abs(dy) <= Math.abs(dx)                          // :58971-58972 目标大致水平
-      && dist < 800                                                   // :58973 距离门
-      && canHitLine(st, e.cx, e.cy, 0, 0, player.cx, player.cy, 0, 0); // :58974 CanHitLine(center,0,0→center,0,0)
+    const aim = Math.abs(dy) <= Math.abs(dx)                          // :58978-58979 |dir.Y|≤|dir.X|
+      && Math.hypot(dx, dy) < 800                                     // :58980 距离门
+      && canHitLine(st, e.cx, e.cy, 0, 0, player.cx, player.cy, 0, 0); // :58980 CanHitLine(center,0,0→center,0,0)
     const step = stormDiverAimStep(e.ai3, aim);
     e.ai3 = step.ai3;
-    if (step.fired) {
-      // :58983-58985 枪口 = Center + (direction*30, 2)
-      const mx = e.cx + e.facing * 30, my = e.cy + 2;
-      const num121 = 20;                                              // :58986 弹速
-      const num122 = 2;                                               // :58994 拦截档除数
-      let vx = 0, vy = 0;                                             // vector28 直瞄（:58987-58990）
+    if (step.fired) {                                                 // :58988-59015 满蓄发射
+      const mx = e.cx + e.facing * 30, my = e.cy + 2;                 // :58993 chaserPosition = Center+(dir*30,2)
+      const num121 = 20;                                              // :58992 弹速
+      const num122 = 2;                                               // :58999 拦截档除数
       const dd = Math.hypot(player.cx - mx, player.cy - my) || 1;
-      vx = ((player.cx - mx) / dd) * num121;
-      vy = ((player.cy - my) / dd) * num121;
-      const chase = getChaseResults(                                  // :58991-58997 领先半速拦截
+      let vx = ((player.cx - mx) / dd) * num121;                      // :58994 vector28 = DirectionTo×20
+      let vy = ((player.cy - my) / dd) * num121;
+      if (dd <= 0.01) { vx = e.facing * num121; vy = 0; }             // :58995-58997 HasNaNs 退化档 (dir*20, 0)
+      const chase = getChaseResults(                                  // :59000-59002 领先半速拦截
         mx, my, num121, player.cx, player.cy, player.vx * 0.5 / num122, player.vy * 0.5 / num122);
       if (chase) { vx = chase.x / num122; vy = chase.y / num122; }
-      const dmg = getAttackDamageForProjectiles(75, 50, e.difficulty); // :58998 GetAttackDamage_ForProjectiles(75,50)
-      for (let i = 0; i < 4; i++) {                                   // :58999-59012 四连发
-        const jx = i !== 0 ? (Math.random() * 1.6 - 0.8) : 0;         // 首发精确，其余 ±0.8
+      const dmg = getAttackDamageForProjectiles(75, 50, e.difficulty); // :59007 GetAttackDamage_ForProjectiles(75,50)
+      for (let i = 0; i < 4; i++) {                                   // :59008-59014 四连发
+        const jx = i !== 0 ? (Math.random() * 1.6 - 0.8) : 0;         // 首发精确，其余 ±0.8（:59009-59010）
         const jy = i !== 0 ? (Math.random() * 1.6 - 0.8) : 0;
-        e.spawnHostileProj(game, mx, my, vx + jx, vy + jy, dmg, 577); // :59012 proj 577（kb 1）
+        e.spawnHostileProj(game, mx, my, vx + jx, vy + jy, dmg, 577); // :59011 proj 577（kb 1）
       }
     }
   }
 }
+

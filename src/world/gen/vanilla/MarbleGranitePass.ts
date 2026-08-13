@@ -12,6 +12,7 @@ import { FastRandom } from '../../../core/rng';
 const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
 const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
 import { placeTight, placeUncheckedStalactite as placeStalactiteWithRolls } from './ShimmerPass';
+import { genSolidType } from './GenSolid';
 const STALACTITE = TILE_BY_KEY['v_165_cave_decos']!; // 仅哈希/置型用；帧走 ShimmerPass
 const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!, THIN_ICE = TILE_BY_KEY['thin_ice']!;
 const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
@@ -47,8 +48,12 @@ export function biomeTileCheck(st: TileStore, x: number, y: number): boolean {
 }
 
 function solidTileAt(st: TileStore, x: number, y: number): boolean {
+  // ★生成期实心走 genSolidType（cs:12537 起生成期 tileSolid[484]=false）：本 pass
+  // 在 Desert 之后，CA 初值/放置门/清理门的 SolidTile 查询若用裸 TILE_DEFS.solid
+  // （484=true），与 oracle 的 SOLID.Remove(484) 分叉——地下沙漠边缘的 484 会被
+  // JS 当实心花岗岩腔壁（granite checkpoint 三哈希全差）。
   return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0
-    && !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;
+    && genSolidType(st.type[st.idx(x, y)]);
 }
 
 /** TileID.Sets.Ore（TileID.cs:399，19 个）——大理石/花岗岩 ResetToType 的矿石保留判定。

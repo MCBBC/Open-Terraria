@@ -1,4 +1,7 @@
-// 一次性:图鉴面板视觉探针（boss 过滤/锁定态/分页）
+// 一次性:图鉴面板回归探针（原版门控回归后）
+//   ① 未解锁条目 = 暗影剪影（.sw-bst-lock）+ 详情 "???"
+//   ② 滚轮换页（下滚 offset 前进）
+//   ③ 敌方Boss 过滤 25 格
 // SW_ORIGIN=http://localhost:5203 node tools/run-diag.mjs scripts/_bst-probe.mjs
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -23,31 +26,37 @@ const out = await page.evaluate(async () => {
     onBack: () => {},
   });
   await new Promise((r) => setTimeout(r, 600));
-  const chips = [...document.querySelectorAll('.sw-bst-chip')].map((c) => c.textContent);
-  const cells = () => document.querySelectorAll('.sw-bst-cell').length;
-  const names = () => [...document.querySelectorAll('.sw-bst-name')].slice(0, 8).map((n) => n.textContent);
-  const base = { chips, cells: cells(), names: names() };
-  // 点"敌方Boss"chip
+  const cells = document.querySelectorAll('.sw-bst-cell').length;
+  const locked = document.querySelectorAll('.sw-bst-cell.sw-bst-lock').length;
+  const pct = document.querySelector('.sw-bst-pct')?.textContent;
+  // 点第一个锁定格 → 详情标题应为 ???
+  const firstLock = document.querySelector('.sw-bst-cell.sw-bst-lock');
+  let lockedInfo = null;
+  if (firstLock) {
+    firstLock.click();
+    await new Promise((r) => setTimeout(r, 200));
+    lockedInfo = document.querySelector('.sw-bst-info h3')?.textContent;
+  }
+  // 滚轮：网格区下发 wheel → range 应前进
+  const rangeBefore = document.querySelector('.sw-bst-range')?.textContent;
+  const wrap = document.querySelector('.sw-bst-gridwrap');
+  wrap.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+  await new Promise((r) => setTimeout(r, 250));
+  const rangeAfter = document.querySelector('.sw-bst-range')?.textContent;
+  // boss 过滤
   const bossChip = [...document.querySelectorAll('.sw-bst-chip')].find((c) => c.textContent.includes('Boss'));
   let boss = { found: !!bossChip };
   if (bossChip) {
+    // 先滚回第一页（滚轮向上直到 range 起点为 1）
+    for (let i = 0; i < 8; i++) wrap.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 250));
     bossChip.click();
     await new Promise((r) => setTimeout(r, 300));
-    boss = { found: true, cells: cells(), names: names(), range: document.querySelector('.sw-bst-range')?.textContent };
+    boss = { found: true, cells: document.querySelectorAll('.sw-bst-cell').length, range: document.querySelector('.sw-bst-range')?.textContent };
+    bossChip.click();
   }
-  // 恢复 + 看首格 canvas 是否画了内容
-  const canvases = () => [...document.querySelectorAll('.sw-bst-cell canvas')].slice(0, 3).map((cv) => {
-    const cx = cv.getContext('2d');
-    const d = cx.getImageData(0, 0, cv.width, cv.height).data;
-    let nonZero = 0;
-    for (let i = 3; i < d.length; i += 40) if (d[i] > 0) nonZero++;
-    return nonZero;
-  });
-  if (bossChip) { bossChip.click(); await new Promise((r) => setTimeout(r, 200)); }
-  const painted = canvases();
-  const navs = [...document.querySelectorAll('[data-nav]')].map((b) => b.textContent);
   panel.close();
-  return { base, boss, painted, navs, pct: document.querySelector('.sw-bst-pct')?.textContent };
+  return { cells, locked, pct, lockedInfo, rangeBefore, rangeAfter, wheelPaged: rangeBefore !== rangeAfter, boss };
 });
 console.log(JSON.stringify(out, null, 1));
 await browser.close();

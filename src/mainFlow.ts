@@ -15,6 +15,8 @@ import { VI_KEY } from './data/itemKeys';
 import { parseWldToSave } from './wld/WldImport';
 import { Inventory } from './items/Inventory';
 import { VUI } from './vui/VUI';
+import { warmAllAssets } from './net/AssetCache';
+import { gateAssetsOrRun, mountAssetBadge } from './ui/AssetDownloadUI';
 import { TitleMenu } from './ui/TitleMenu';
 import { MultiplayerSelect } from './ui/MultiplayerSelect';
 import { SettingsPanel } from './ui/Settings';
@@ -669,13 +671,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function showTitle() {
     audio.play('title');
     ui.closeAll();
+    // SW 资产预载(仅生产构建):进菜单即按优先级全量后台下载 + 挂右下角进度徽标
+    // (warmAll 幂等,SW 侧 keys() 过滤已下载;被系统清理只补缺=自愈)
+    warmAllAssets();
+    mountAssetBadge();
     if (!menuBg) {
       menuBg = new MenuBackground(root);
       (window as unknown as { __swMenuBg?: MenuBackground }).__swMenuBg = menuBg; // 调试句柄
     }
     titleMenu?.destroy();
     titleMenu = new TitleMenu(root, {
-      onSinglePlayer: () => showCharacterSelect(),
+      onSinglePlayer: () => gateAssetsOrRun(() => showCharacterSelect()),
       onSettings: () => openSettings(false),
       onQuit: () => ui.toast(Lang.text('Mods.SandboxWorld.Toast.QuitUnsupported')),
       onCredits: () => ui.toast(Lang.text('Mods.SandboxWorld.CreditsLine')),

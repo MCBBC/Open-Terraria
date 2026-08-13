@@ -36,6 +36,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -53,7 +54,7 @@ const SLOWLY_DIES_IN_WATER = idsByVanillaSheet(3, 20, 24, 27, 73, 201, 80, 110, 
 const CONV_SANDSTONE = idsByVanillaSheet(396, 400, 403, 401);
 const CONV_HARDENED_SAND = idsByVanillaSheet(397, 398, 402, 399);
 
-const BUBBLE = sheetId(379);            // ①/⑫ tileSolid[379] 覆写对象(气泡块)
+const BUBBLE = sheetId(379);            // ①/⑫ tileSolid[379] 翻转对象(气泡块,已并入 GenSolid)
 const DRIP_WATER = sheetId(373);
 const DRIP_LAVA = sheetId(374);
 const DRIP_HONEY = sheetId(375);
@@ -64,21 +65,23 @@ const WOODEN_SPIKE = sheetId(232);
 const LIHZARD_BRICK = sheetId(226);
 const BEE_WALL = 86;                    // 蜂巢墙 → 强制蜂蜜滴头(cs:21404)
 
-/** SaveSlopes[t] = tileSolid[t](含 ① 的 379=false 覆写)∪ NonSolidSaveSlopes */
+/** SaveSlopes[t] = tileSolid[t](含 ① 的 379=false 覆写)∪ NonSolidSaveSlopes。
+ *  tileSolid 走 GenSolid：pass 头翻转（cs:21331）已把 379 置非实心,原 BUBBLE
+ *  特判并入 genSolidType（pass 尾 cs:21750 还原后自动恢复实心） */
 function isSaveSlope(t: number): boolean {
-  return (t !== BUBBLE && !!TILE_DEFS[t]?.solid) || NON_SOLID_SAVE_SLOPES.has(t);
+  return (genSolidType(t) && !!TILE_DEFS[t]?.solid) || NON_SOLID_SAVE_SLOPES.has(t);
 }
 
 /** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0。
- *  tileSolid 经 ① 覆写(379 非实心);tileSolidTop 近似为 platform(与 HalfBrickPass 同口径) */
+ *  tileSolid 走 GenSolid（① 的 379 覆写 = pass 头 cs:21331 翻转）;tileSolidTop
+ *  近似为 platform(与 HalfBrickPass 同口径) */
 function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   const t = st.type[i];
-  if (t === BUBBLE) return false; // ① 覆写
   const d = TILE_DEFS[t];
-  return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+  return genSolidType(t) && !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
 }
 
 /** 生成期 KillTile(cs:63559,isGeneratingOrLoadingWorld → noItem=true):
@@ -100,6 +103,10 @@ function dripFor(liquidType: number): number {
 }
 
 export function runTileCleanupPass(st: TileStore, rng: RNG, _gs: GenState): void {
+  // ★① pass 头 tileSolid 翻转（cs:21331 `Main.tileSolid[379] = false`）：泡泡块非实心
+  //   ——原 solidTile/isSaveSlope 内的 BUBBLE 特判已并入 GenSolid（genSolidType）。
+  //   pass 尾 ⑫ 还原 true（cs:21750,见函数尾）。
+  flipGenSolid([379], false);
   const { w, h } = st;
 
   // ② 全图清坡(cs:21333-21343,全图含边缘,先于内层 40 收缩圈)
@@ -194,6 +201,6 @@ export function runTileCleanupPass(st: TileStore, rng: RNG, _gs: GenState): void
     }
   }
 
-  // ⑫ tileSolid[379] 还原 true(cs:21750)——TileStore 无全局 tileSolid 表,
-  //    覆写经 solidTile/isSaveSlope 内的 BUBBLE 判定实现,pass 结束自动失效
+  // ⑫ tileSolid[379] 还原 true(cs:21750)——GenSolid 统一还原（① 的 pass 头翻转配对）
+  flipGenSolid([379], true);
 }

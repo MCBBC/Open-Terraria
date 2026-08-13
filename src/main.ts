@@ -14,6 +14,7 @@ import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 import { setDebugPool } from './data/vanillaNpcs';
 import { VUI } from './vui/VUI';
+import { initAssetCache } from './net/AssetCache';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
 import { Lang } from './i18n/Lang';
@@ -372,6 +373,8 @@ kvHas('sandboxworld.quicksave').then(async () => {
   await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
+  // SW 资产持久缓存(仅生产构建;dev 需 ?sw=1):注册后由 mainFlow.showTitle 驱动全量预载
+  void initAssetCache();
   flow = createFlow(root, atlas, ui, audio);
 
   // M0 验收入口：?vuidemo=1 只跑 VUI 框架演示

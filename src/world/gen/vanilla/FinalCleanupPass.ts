@@ -34,6 +34,7 @@ import { LIQUID_TYPE } from '../../TileStore';
 import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
+import { flipGenSolid } from './GenSolid';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -118,6 +119,11 @@ function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean
 }
 
 export function runFinalCleanupPass(st: TileStore, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:22306 `Main.tileSolid[484] = false`）：滚动仙人掌
+  //   非实心——DesertBiome 头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档
+  //   （484 生成期恒非实心,生成结束亦不还原）。写在 denySomeGeneration 门之外,
+  //   原版无条件执行。
+  flipGenSolid([484], false);
   const { w, h } = st;
 
   for (let i = 0; i < w; i++) {

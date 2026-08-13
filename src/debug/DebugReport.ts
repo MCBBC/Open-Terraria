@@ -12,6 +12,7 @@ import { liquidDebugState } from '../render/VanillaLiquidRenderer';
 import { autoFrameAt } from '../render/VanillaTiler';
 import { TILE_ANIM_RATE, animFrameIdx, animYOffset, tileAnim } from '../render/TileAnim';
 import { vanillaFrameIdx } from '../render/Renderer';
+import { assetCacheState } from '../net/AssetCache';
 import type { Game } from '../core/Game';
 import type { Enemy } from '../entities/Enemy';
 
@@ -781,6 +782,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       tickCount: snap.tickCount ?? 0,
       enemySpawnEnabled: g.enemySpawnEnabled ? 1 : 0,
       forceShowWires: g.forceShowWires ? 1 : 0,
+      assetCache: assetCacheState(),  // SW 资产预载(生产构建;enabled/version/done/total/phase)
     },
     perf: {
       fps: g.fps ?? null,

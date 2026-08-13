@@ -35,6 +35,7 @@
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
+import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
@@ -121,15 +122,16 @@ function solidTileStrict(st: TileStore, x: number, y: number): boolean {
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
 
-function overlaps(a: Rect, b: Rect): boolean {
-  return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
-}
-
 export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void {
   // Skyblock.denyAllGeneration 包裹整个 pass(cs:21787)——1.4.5.6 skyblock 种子全段跳过
   if (gs.seedFlags.skyblock) return;
   const { w, h } = st;
-  const protectedRects: Rect[] = [];
+  // ★结构互斥走全局 StructureMap（GenState.protectedRects）：原本 pass 局部
+  //   protectedRects 近似（文件头备案的"无全局 StructureMap"已由 GenState 落地）,
+  //   提升后与蜂巢主巢/蜂蜜斑/神龛/微光/地下小屋等全部已保护结构跨结构互斥。
+  //   各微群系的 pad 对齐原版：剑冢 10（EnchantedSwordBiome.cs:110）/ 野营地 4
+  //   （CampsiteBiome.cs:114）/ 矿爆点 5（MiningExplosivesBiome.cs:74）/ 薄冰 0
+  //   （ThinIceBiome.cs:32,原版为 AddStructure 非保护,见 placeThinIcePatch 注）。
   // WorldGenRange ScalingMode(WorldGenRange.cs:43-58):
   //   WorldArea = w*h/5040000;WorldWidth = w/4200;ScaleValue=(int)截断
   const areaScale = (w * h) / 5040000;
@@ -163,7 +165,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
       // RandomWorldPoint(worldSurface+20, 50, 200, 50)(cs:21836)
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 20, h - 201);
-      if (placeThinIcePatch(st, rng, protectedRects, ox, oy)) {
+      if (placeThinIcePatch(st, rng, gs, ox, oy)) {
         iceDone++;
         iceFail = 0;
       } else {
@@ -190,7 +192,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
           const ox = rng.int(0, 1) === 0                               // Next(2) == 0 → 左 30%
             ? rng.int(50, Math.floor(w * 0.3) - 1)                     // Next(50, w*0.3)
             : rng.int(Math.floor(w * 0.7), w - 51);                    // Next(w*0.7, w-50)
-          if (placeEnchantedSwordShrine(st, rng, protectedRects, ox, oy)) break;
+          if (placeEnchantedSwordShrine(st, rng, gs, ox, oy)) break;
         }
       }
     }
@@ -206,7 +208,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (++tries > 1000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1); // RandomWorldPoint(top,right,bottom,left)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
-    if (placeCampsite(st, rng, protectedRects, ox, oy)) placed++;
+    if (placeCampsite(st, rng, gs, ox, oy)) placed++;
   }
 
   // ---- 4. Mining Explosives(cs:21951-21975,最多 3000 次尝试;cs:21956 notTheBees 门)----
@@ -222,7 +224,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (++tries > 3000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
     const oy = rng.int(Math.floor(gs.rockLevel), h - 201);
-    if (placeMiningExplosives(st, rng, gs, protectedRects, ox, oy)) placed++;
+    if (placeMiningExplosives(st, rng, gs, ox, oy)) placed++;
   }
 
   // ---- 5. TrackGenerator(cs:22014-22091)----
@@ -269,7 +271,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
 }
 
 /** CampsiteBiome.Place(CampsiteBiome.cs:9-116) */
-function placeCampsite(st: TileStore, rng: RNG, protectedRects: Rect[], ox: number, oy: number): boolean {
+function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number): boolean {
   // Circle(10):实心占比门禁(solid ≥ total-5,cs:12-17)
   {
     let total = 0, solid = 0;
@@ -286,7 +288,8 @@ function placeCampsite(st: TileStore, rng: RNG, protectedRects: Rect[], ox: numb
   const num = rng.int(6, 9);  // Next(6,10)
   const num2 = rng.int(1, 4); // Next(1,5)
   const rect: Rect = { x0: ox - num, y0: oy - num, x1: ox + num + 1, y1: oy + num + 1 };
-  if (protectedRects.some((p) => overlaps(rect, p))) return false;
+  // structures.CanPlace(rect, pad 0)（CampsiteBiome.cs:20）——全局保护图互斥
+  if (!canPlaceStructure(gs, rect, 0)) return false;
   // (num+3)² 内禁地牢砖/容器/神庙砖/祭坛(cs:24-35)
   {
     const n3 = num + 3;
@@ -416,7 +419,8 @@ function placeCampsite(st: TileStore, rng: RNG, protectedRects: Rect[], ox: numb
       }
     }
   }
-  protectedRects.push(rect);
+  // structures.AddProtectedStructure(rect, 4)（CampsiteBiome.cs:114）——pad 4
+  addProtectedStructure(gs, rect, 4);
   return true;
 }
 
@@ -441,7 +445,7 @@ function placeLargePile(st: TileStore, x: number, y: number): void {
 }
 
 /** MiningExplosivesBiome.Place(MiningExplosivesBiome.cs:10-76) */
-function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, protectedRects: Rect[], ox: number, oy: number): boolean {
+function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number): boolean {
   if (solidAt(st, ox, oy)) return false;
   {
     const wl = st.inBounds(ox, oy) ? st.wall[st.idx(ox, oy)] : -1;
@@ -514,7 +518,8 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, protectedR
   }
   if (solid < Math.trunc(total / 2)) return false; // cs:35-38
   const area: Rect = { x0: x - 15, y0: y - 10, x1: x + 15, y1: y + 10 };
-  if (protectedRects.some((p) => overlaps(area, p))) return false;
+  // structures.CanPlace(area, pad 0)（MiningExplosivesBiome.cs:40）——全局保护图互斥
+  if (!canPlaceStructure(gs, area, 0)) return false;
   // 矿石地板(cs:44)
   for (const key of data) {
     const qx = key % st.w, qy = Math.trunc(key / st.w);
@@ -591,7 +596,8 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, protectedR
       if (st.inBounds(detX, j)) st.wire[st.idx(detX, j)] |= WIRE_RED;
     }
   }
-  protectedRects.push(area);
+  // structures.AddProtectedStructure(area, 5)（MiningExplosivesBiome.cs:74）——pad 5
+  addProtectedStructure(gs, area, 5);
   return true;
 }
 
@@ -1005,7 +1011,7 @@ export class DeadMansChestBiome {
 
 /** ThinIceBiome.Place(cs:9-34):雪原水面上 BreakableIce 162 斑 */
 export function placeThinIcePatch(
-  st: TileStore, rng: RNG, protectedRects: Rect[], ox: number, oy: number,
+  st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number,
 ): boolean {
   // TileScanner 50×50(cs:11-12,origin-25 起):0/1/59/147/225 计数
   let dirtStone = 0, mud = 0, snow = 0, hive = 0;
@@ -1047,8 +1053,11 @@ export function placeThinIcePatch(
     });
     num4 += num5 - 2;
   }
-  // structures.AddStructure((ox-25, oy-25, 50, 50), 8)(cs:32)
-  protectedRects.push({ x0: ox - 25, y0: oy - 25, x1: ox + 25, y1: oy + 25 });
+  // structures.AddStructure((ox-25, oy-25, 50, 50), 8)(cs:32)——★原版是
+  // AddStructure（StructureMap.cs:72-79,只入 _structures 不入 _protectedStructures,
+  // **不参与 CanPlace 互斥**,仅 GetBoundingBox 消费）。为保持本 pass 原局部互斥
+  // 行为（薄冰斑挡后续野营地/矿爆点/剑冢）不回归,仍登记进全局保护图,备案。
+  addProtectedStructure(gs, { x0: ox - 25, y0: oy - 25, x1: ox + 25, y1: oy + 25 }, 0);
   return true;
 }
 
@@ -1148,13 +1157,12 @@ function shrineBlotches(
 
 /** StructureMap.CanPlace(StructureMap.cs:22-53):区域在界内(留 1 格边距) +
  *  padding 扩张后不撞已保护结构 + 扩张区内活性 tile 全在白名单。
- *  无全局 StructureMap——已保护结构以本 pass 的 protectedRects 近似(文件头已备案) */
-function shrineCanPlace(st: TileStore, protectedRects: Rect[], area: Rect, padding: number): boolean {
-  if (area.x0 < 0 || area.y0 < 0 || area.x1 > st.w - 1 || area.y1 > st.h - 1) return false;
+ *  结构互斥半边走全局 StructureMap（GenState.protectedRects / canPlaceStructure,
+ *  含 cs:28 越界判定）；内容扫描半边为本地 PLACEMENT_FORBID 近似（白名单本体=
+ *  GeneralPlacementTiles 排除 21/467,EnchantedSwordBiome.cs:68-74,未提取,备案） */
+function shrineCanPlace(st: TileStore, gs: GenState, area: Rect, padding: number): boolean {
+  if (!canPlaceStructure(gs, area, padding)) return false;
   const r: Rect = { x0: area.x0 - padding, y0: area.y0 - padding, x1: area.x1 + padding, y1: area.y1 + padding };
-  for (const p of protectedRects) {
-    if (overlaps(r, p)) return false;
-  }
   for (let x = r.x0; x < r.x1; x++) {
     for (let y = r.y0; y < r.y1; y++) {
       if (!st.inBounds(x, y)) continue;
@@ -1169,7 +1177,7 @@ function shrineCanPlace(st: TileStore, protectedRects: Rect[], area: Rect, paddi
  *  1/3 竖井 + 土丘剑。洞穴中心 = 种子点**下方** 20 格(cs:58)——旧实现放上方 10-20,
  *  整体形状上下颠倒(根因) */
 function placeEnchantedSwordShrine(
-  st: TileStore, rng: RNG, protectedRects: Rect[], ox: number, oy: number,
+  st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number,
 ): boolean {
   // ① 50×50 泥+石计数门(cs:24-30):TileScanner(0,1) 之和 < 1250 → 拒(errorWorld 625 不建模)
   let dirtStone = 0;
@@ -1217,9 +1225,9 @@ function placeEnchantedSwordShrine(
     x0: pointX - Math.trunc(20 * num5), y0: pointY - 20,
     x1: pointX - Math.trunc(20 * num5) + Math.trunc(40 * num5), y1: pointY + 20,
   };
-  if (!shrineCanPlace(st, protectedRects, rect1, 0)) return false;
+  if (!shrineCanPlace(st, gs, rect1, 0)) return false;
   const rect2: Rect = { x0: ox, y0: resultY + 10, x1: ox + 1, y1: resultY + 10 + (oy - resultY - 9) };
-  if (!shrineCanPlace(st, protectedRects, rect2, 2)) return false;
+  if (!shrineCanPlace(st, gs, rect2, 2)) return false;
 
   const blot: Array<[number, number]> = [];
   // ⑧ 洞穴(cs:75):Slime(20, num5, 1.0) + Blotches(2, 0.4) + ClearTile → shapeData
@@ -1367,10 +1375,9 @@ function placeEnchantedSwordShrine(
     if (st.flags[st.idx(px, py)] || st.flags[st.idx(px, py - 1)]) return;
     st.setTileSilent(px, py, rng.int(0, 1) === 0 ? SHORT_PLANTS : TALL_PLANTS, 0, 0);
   });
-  // ⑰ structures.AddProtectedStructure(rectangle, 10)(cs:98)——pad 10 入保护图
-  protectedRects.push({
-    x0: rect1.x0 - 10, y0: rect1.y0 - 10, x1: rect1.x1 + 10, y1: rect1.y1 + 10,
-  });
+  // ⑰ structures.AddProtectedStructure(rectangle, 10)(cs:98/EnchantedSwordBiome.cs:110)
+  //   ——pad 10 入全局保护图（GenState.protectedRects,addProtectedStructure 内部 Inflate）
+  addProtectedStructure(gs, rect1, 10);
   return true;
 }
 

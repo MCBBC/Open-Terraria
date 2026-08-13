@@ -152,7 +152,9 @@ function hitEnemies(
 //   :36985/:36999;extraUpdates 型号（182/866/301,SetDefaults）按 AI 次计数,
 //   折合实际 tick = 计数 ÷ (1+extraUpdates)）：
 //   6/19/52/113/272/333/867/902/1000/1052 → ai[1]≥30 回收（:37082-37086）
-//   106 光碟     → ai[1]≥45 回收（:36794-36799）;撞墙反弹不回收（:18142-18151）
+//   106 光碟     → 同 30 回收——独立 45 门（:36794-36799）在其后的类型链尾
+//                  else if(ai[1]≥30)（:37082-37087,未豁免 106）之前永不可达
+//                  =1456 影子死代码,实测回收点就是 30;撞墙反弹不回收（:18142-18151）
 //   320 冰回旋镖 → ai[1]≥10 起下垂 vy+0.5/vx×0.95（:36868-36886）
 //   383 附魔飞刀 → 同 320（上升再+0.35）;距玩家>800 回收（:36868-36888）
 //   182 圣骑士锤 → 追踪窗 ai[1]∈(10,360) 取 800px 最近敌（CanHit 视线门）,
@@ -192,11 +194,16 @@ const BOOMERANG_DUST: Record<number, [string, number]> = {
   867: ['#FF6060', 0.4], 1000: ['#FFD080', 0.3], 182: ['#FFD080', 0.5],
 };
 
-/** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 36 型提取：type→size） */
+/** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 36 型提取：type→size;
+ *  光刃族 1065-1070/1072/1074/1076/1102=46,其余 38） */
 const BOOMERANG_SIZE: Record<number, number> = {
   6: 22, 19: 22, 33: 38, 52: 22, 106: 32, 113: 22, 182: 30, 272: 32,
   301: 38, 320: 34, 333: 38, 383: 34, 866: 30, 867: 22, 902: 20, 1000: 22,
-  1052: 22, 1101: 38, 1102: 46, 1074: 46,
+  1052: 22, 1074: 46,
+  1059: 38, 1060: 38, 1061: 38, 1062: 38, 1063: 38, 1064: 38, 1071: 38,
+  1075: 38, 1101: 38,
+  1065: 46, 1066: 46, 1067: 46, 1068: 46, 1069: 46, 1070: 46, 1072: 46,
+  1076: 46, 1102: 46,
 };
 
 export class Boomerang extends Entity {
@@ -323,7 +330,10 @@ export class Boomerang extends Entity {
   private aiOut(game: GameHooks, isPhase: boolean): void {
     const p = game.player;
     if (this.projId !== 866) this.outT++; // :36786-36793（866 不计 ai[1],计数在 localT）
-    if (this.projId === 106 && this.outT >= 45) { this.ai0 = 1; this.outT = 0; return; } // :36794-36799
+    // :36794-36799 独立 106/45 门——按源码原样保留,但 ai[1] 先被类型链尾的
+    // else if(ai[1]≥30)（:37082-37087,106 未豁免）截住 → 1456 中此门不可达
+    // （影子死代码）。实测 106 回收点=30,勿按 45 调参
+    if (this.projId === 106 && this.outT >= 45) { this.ai0 = 1; this.outT = 0; return; }
     if (isPhase) {
       // 光刃族（:36800-36866）：前 30 AI 次自旋,之后 vy+1/vx×0.96 垂落（vy 钳 16）
       if (this.outT >= 30) {
@@ -369,11 +379,12 @@ export class Boomerang extends Entity {
     if (this.projId === 182 || this.projId === 866) {
       // 182 圣骑士锤（:36889-36973）/ 866 飞刀（:36980-37057）:800px 内最近敌追踪
       // （CanHit 视线门）,目标速度=(目标-球心)norm×12,轴步进 0.25;无目标 ≥30 回收。
-      // 计数源不同（182=ai[1] / 866=localAI[0]）但数值门一致,统一用 outT
-      if (this.projId === 866) this.localT++; // :36999
+      // ★计数源不同:182=ai[1]（:36790-36793,顶部已自增）/ 866=localAI[0]（:36999,
+      //   ai[1] 被 866 占用为目标索引）——数值门一致,这里统一取 cnt
+      const cnt = this.projId === 866 ? ++this.localT : this.outT;
       let tx = this.cx + this.vx * 100, ty = this.cy + this.vy * 100; // :36944-36946 无目标前瞻点
       let found = false;
-      if (this.outT > 10 && this.outT < 360) { // :36909-36938 / :36985-36997
+      if (cnt > 10 && cnt < 360) { // :36909-36938 / :36985-36997
         let best = 800; // :36907 / FindTargetWithLineOfSight 缺省 800 :42972
         for (const ent of game.enemies()) {
           const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
@@ -383,7 +394,7 @@ export class Boomerang extends Entity {
           if (d < best) { best = d; tx = e.x + e.w / 2; ty = e.y + e.h / 2; found = true; }
         }
       }
-      if (!found && this.outT >= 30) { this.ai0 = 1; this.outT = 0; return; } // :36932-36938 / :37009-37017
+      if (!found && cnt >= 30) { this.ai0 = 1; this.outT = 0; return; } // :36932-36938 / :37009-37017
       const dd = Math.hypot(tx - this.cx, ty - this.cy) || 1;
       this.steerTo(((tx - this.cx) / dd) * 12, ((ty - this.cy) / dd) * 12, 0.25); // :36937-36973
       return;
@@ -469,16 +480,21 @@ export class Boomerang extends Entity {
     const ny = this.y + this.vy;
     if (solidBox(this.x, ny)) hitY = true; else this.y = ny;
     if (!hitX && !hitY) return;
-    // 撞墙尘 + 挖掘音（默认族 Collision.HitTiles :18139-18140 + SoundID 0 :18161）
-    game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
-    game.playSfx('dig', 1, this.cx, this.cy);
     if (WALL_BOUNCE_PROJ.has(this.projId)) {
+      // 撞墙尘 + 挖掘音（默认族 Collision.HitTiles :18139-18140 + SoundID 0 :18161）
+      game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+      game.playSfx('dig', 1, this.cx, this.cy);
       // :18142-18151 33/106/866 命中轴反弹,不回收（106 LightDisc_Bounce 溅射视觉略）
       if (hitX) this.vx = -lvx;
       if (hitY) this.vy = -lvy;
     } else if (isPhase) {
-      this.ai0 = 2; this.outT = 0; // :17975-17990 光刃撞墙 → 悬停态
+      // :17975-17990 光刃撞墙 → 悬停态（独立 else 链:无 HitTiles 尘/挖掘音,
+      // 入态音尘由 aiHover 的 localAI[1] 门承担）
+      this.ai0 = 2; this.outT = 0;
     } else {
+      // 撞墙尘 + 挖掘音（同上 :18139-18140/:18161）
+      game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+      game.playSfx('dig', 1, this.cx, this.cy);
       // :18152-18160 其余:ai[0]=1 回收 + 速度=-lastVelocity（383 豁免取反 :18156）。
       // 383 ≥10 的 HitTilesInACircle(300)+Item14 / 301 冲击波粒（:18115-18138）未建模
       this.ai0 = 1; this.outT = 0;

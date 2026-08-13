@@ -7,6 +7,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { flipGenSolid } from './GenSolid';
 
 const TRAP = TILE_BY_KEY['v_137_traps']!;
 const PLATE = TILE_BY_KEY['v_135_pressure_plates']!;
@@ -304,6 +305,10 @@ function isOre(t: number): boolean {
 /** pass 76 Traps 主体（cs:18796-18896）：w*0.05 次 placeTrap + w*0.003 次 PlaceSandTrap。
  *  两段计数均为裸 double 比较（cs:18789/18866 `for i < num`，不取整） */
 export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:18773 `Main.tileSolid[379] = false`）：泡泡块非实心
+  //   ——placeTrap 下扫实心地面（solidAt）不被 379 阻断。本仓生成期不放置 379,
+  //   行为无差,存档时间线。pass 尾 cs:18897 还原 true（见函数尾）。
+  flipGenSolid([379], false);
   bouldersPlaced.length = 0; // 模块级状态须按次生成重置，否则同种子双生成发散
   const trapTries = st.w * 0.05;
   for (let n = 0; n < trapTries; n++) {
@@ -328,4 +333,6 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (st.wall[st.idx(x, y)] === 187 && placeSandTrap(st, rng, x, y)) break;
     }
   }
+  // ★pass 尾还原（cs:18897 `Main.tileSolid[379] = true`）
+  flipGenSolid([379], true);
 }

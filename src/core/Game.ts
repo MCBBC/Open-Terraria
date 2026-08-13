@@ -218,6 +218,7 @@ import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
+import { firePortalGun } from '../entities/PortalGunBolt';
 import type { DropExtras } from '../drops/NpcDrops';
 import { npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
@@ -1075,7 +1076,9 @@ export class Game implements GameHooks {
       // 计时）挂在 damagePlayer 尾部——直调会绕过,_pvp-e2e 实抓"炸死无计数"）
       if (this.damagePlayer(rolled, rp.x, rp.y, undefined, false, pvpHit)) {
         this.playSfx('hit', 1, p.cx, p.cy);
-        if (!p.dead && p.hp > 0) statusPlayer(this, projType);
+        // ★hostile=false（爆炸无敌我门 :13979-13980——!hostile 分支（285 二块/253/
+        // 399-402）唯一可触发路径）
+        if (!p.dead && p.hp > 0) statusPlayer(this, projType, false);
       }
       return;
     }
@@ -1979,6 +1982,10 @@ export class Game implements GameHooks {
    *  全扫(≤78 格);afterWorldLoad 与 onInventoryChanged(mainFlow)各调一次,
    *  拾取新弹药/换装自动覆盖 */
   prefetchInvProjectiles(): void {
+    // ★player 是 player!: Player(确定赋值断言)——loadWorld :2232 才实例化;
+    // onInventoryChanged 在存档异步加载链中可能先于赋值触发(读档时物品入包
+    // → 回调 → this.player.inv 崩,2026-08-13 生产构建实锤)。守护退出
+    if (!this.player?.inv) return;
     const ids = new Set<number>();
     const scan = (it: { id: number } | null | undefined) => {
       if (!it) return;
@@ -4807,6 +4814,8 @@ export class Game implements GameHooks {
     // 石化/冰冻禁道具（:24942-24950 controlUseItem/UseTile 清零段——stoned 与
     // frozen||webbed 同段;此前 Frozen 只封移动不封使用,本次按原版一并补上）
     if (this.player.buffs.has(BuffType.Stoned) || this.player.buffs.has(BuffType.Frozen)) return;
+    // 诅咒(23)：noItems（:11326-11330）→ TryUsingItem 整链禁用（:5757/:5964/:52017）
+    if (this.player.buffs.has(BuffType.Cursed)) return;
     // ---- 传送族引导 tick(先于 uiBlocking 早退:引导中开背包不中断,原版同语义) ----
     if (this.recallChannel && this.player.useTime <= this.recallChannel.triggerAt) {
       const c = this.recallChannel;
@@ -4946,6 +4955,18 @@ export class Game implements GameHooks {
         return;
       } else {
         this.interactAt(tx, ty);
+      }
+      // 传送门枪右键（form 1 蓝门；Player.cs:48053-48057 altFunctionUse==2 → ai1=1）。
+      // 挂在 tile 交互分派之后 = 原版 :31070 !tileInteractionHappened 语义——
+      // 右键悬门/箱/祭坛时优先交互不射门（前面分支消费过 rightDown 则跳过）
+      if (inp.rightDown && heldDef && viIdFromKey(heldDef.key) === 3384 && this.player.useTime === 0) {
+        const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
+          inp.mouseX - this.renderer.canvas.width / 2);
+        this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
+        this.entities.add(firePortalGun(this.player, ang, 1), 'projectiles');
+        this.useSwing(heldDef, ang);
+        this.player.useTime = 20;
+        this.input.rightDown = false;
       }
     }
 
@@ -5854,6 +5875,18 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
+    } else if (heldDef && viIdFromKey(heldDef.key) === 3384
+      && inp.mouseDown && this.player.useTime === 0) {
+      // 传送门枪（Item.cs:30926-30942：useTime 20 / autoReuse / channel / UseSound=null /
+      // 不消耗；左键 form 0 橙门）。弹体 PortalGunBolt（601，extraUpdates=30 近瞬达）
+      const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
+        inp.mouseX - this.renderer.canvas.width / 2);
+      this.player.facing = Math.cos(ang) > 0 ? 1 : -1;      // :46578 发射型面向鼠标
+      this.entities.add(firePortalGun(this.player, ang, 0), 'projectiles');
+      this.useSwing(heldDef, ang);                          // useStyle5 静持（原版由 600 holdout 画枪，持物近似）
+      this.player.useTime = 20;
+      this.input.mouseDown = false;
+      this.cb.onInventoryChanged();
     } else if (heldDef && heldDef.key === 'vi_2767_solar_tablet'
       && inp.mouseDown && this.player.useTime === 0) {
       // 日耀碑牌（Player.cs:43308-43328/51431：dayTime && !eclipse && hardMode 才可用，

@@ -465,3 +465,32 @@ if (uiMissing.length) console.warn('UI 缺失:', uiMissing.join(', '));
 writeFileSync(OUT_JSON, JSON.stringify(out));
 console.log(`vanilla-atlas: tiles=${Object.keys(out.tiles).length} items=${Object.keys(out.items).length} walls=${Object.keys(out.walls).length} copied=${copied}`);
 if (missing.length) console.warn('缺失（白名单有但文件/数据不存在）:', missing.join(', '));
+
+// ---------- SW 资产预载索引(2026-08-13)----------
+// 产出 public/assets-index.json:页面侧 AssetCache 的 P2(其余贴图)/P3(音效)枚举源。
+// 音乐不走这里(页面从 data/Music.ts MUSIC 表枚举)。fonts/l10n 也列入 misc。
+// 本脚本在 vanillaAtlasAuto 的 stale 源清单里 → dev 启动与 vite build 自动重跑;
+// ★若只改了 sounds/fonts/l10n 内容,需手动 `node scripts/vanilla-atlas.mjs` 或
+//   bump AssetCache.CACHE_BUSTER 使 SW 版本缓存失效。
+{
+  const pub = join(ROOT, 'public');
+  const listDir = (dir, ext) => {
+    const d = join(pub, dir);
+    if (!existsSync(d)) return [];
+    return readdirSync(d).filter((f) => f.endsWith(ext)).map((f) => `${dir}/${f}`).sort();
+  };
+  const index = {
+    generatedAt: new Date().toISOString(),
+    sounds: listDir('sounds', '.wav'),
+    fonts: listDir('fonts', '.woff2'),
+    l10n: ['l10n/index.json', ...readdirSync(join(pub, 'l10n')).filter((f) => f.endsWith('.json') && f !== 'index.json').map((f) => `l10n/${f}`)],
+    miscVanilla: readdirSync(join(pub, 'sprites', 'vanilla'))
+      .filter((f) => f.endsWith('.png') && !/^Item_Atlas_/.test(f) && !/^Tiles_\d+\.png$/.test(f) && !/^Wall_\d+\.png$/.test(f) && !/^NPC_\d+\.png$/.test(f))
+      .map((f) => `sprites/vanilla/${f}`).sort(),
+    miscUi: readdirSync(join(pub, 'sprites', 'vanilla-ui'))
+      .filter((f) => f.endsWith('.png'))
+      .map((f) => `sprites/vanilla-ui/${f}`).sort(),
+  };
+  writeFileSync(join(pub, 'assets-index.json'), JSON.stringify(index));
+  console.log(`assets-index: sounds=${index.sounds.length} fonts=${index.fonts.length} l10n=${index.l10n.length} miscVanilla=${index.miscVanilla.length} miscUi=${index.miscUi.length}`);
+}

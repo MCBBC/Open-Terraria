@@ -16,6 +16,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { spreadWall2 } from './GrassWallPass';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 const STONE = TILE_BY_KEY['stone']!;
 /** SolidTile 类型计数表（countTiles cs:9557-9576） */
@@ -25,22 +26,19 @@ const ICE = idsByVanillaSheet(147, 161);
 const SANDY = idsByVanillaSheet(53, 396, 397);
 /** CaveWallVariety 的 IsTouching 无效集（cs:16826-16835：冰/沙/蘑菇草/191） */
 const INVALID_TOUCH = idsByVanillaSheet(147, 161, 396, 397, 70, 191);
-/** pass 头 tileSolid 覆写（cs:17821-17823：162 薄冰非实、226 蜥蜴砖实、232 非实） */
-const SOLID_OVERRIDES: Record<number, boolean> = { 162: false, 226: true, 232: false };
 /** 微光安全距离（WorldGen.cs:4104 shimmerSafetyDistance） */
 const SHIMMER_SAFETY = 150;
 
 /** WorldGen.SolidTile（cs:70155）：active && tileSolid && !tileSolidTop && !halfBrick
- *  && slope==0 && !inActive。tileSolid 按 pass 头覆写表取值 */
+ *  && slope==0 && !inActive。tileSolid 走 GenSolid（pass 头 cs:17821-17823 翻转表,
+ *  原 SOLID_OVERRIDES 局部表已迁移 GenSolid 统一） */
 function solidAt(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true;
   const ii = st.idx(x, y);
   if (!st.flags[ii]) return false;
   const def = TILE_DEFS[st.type[ii]];
   if (!def) return false;
-  const sh = def.vanilla?.sheet ?? -1;
-  const solid = sh in SOLID_OVERRIDES ? SOLID_OVERRIDES[sh] : !!def.solid;
-  return solid && !def.platform && !st.half[ii] && st.slope[ii] === 0 && (st.wire[ii] & 32) === 0;
+  return genSolidType(st.type[ii]) && !def.platform && !st.half[ii] && st.slope[ii] === 0 && (st.wire[ii] & 32) === 0;
 }
 
 interface CountResult { count: number; shroom: number; rock: number; ice: number; sand: number; lava: number }
@@ -115,6 +113,13 @@ function spreadWall(st: TileStore, sx: number, sy: number, wallType: number): vo
  *  RNG 消费顺序严格 1:1（主段：每迭代 2 掷 + 重掷 2 掷/次 + 恒 Next(2) +
  *  else 分支补 Next(4)；次段：每迭代 2 掷 + 重掷按墙值条件掷） */
 export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:17821-17823,原版写在 denyAll 门之外无条件执行）：
+  //   162 薄冰非实心 / 226 蜥蜴砖实心 / 232 木刺非实心——countTiles 的 SolidTile
+  //   洪泛与主段选点随之判定。原为本文件局部 SOLID_OVERRIDES 表,已迁移 GenSolid
+  //   统一（下游消费端经 genSolidType 可见）。
+  flipGenSolid([162], false);
+  flipGenSolid([226], true);
+  flipGenSolid([232], false);
   // ---- 主段（cs:17827-17871）：w*0.04 次，封闭腔(10≤air<1500)刷洞穴背景墙 ----
   const maxY = st.h - 220;
   const minY = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
@@ -208,9 +213,11 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
         const qi = st.idx(qx, qy);
         if (cells.has(qi)) continue;
         // IsNotSolid：active 且 SolidOrSlopedTile → Fail（不入形、不计数）
+        // ★solid 走 GenSolid：本 pass 时点 226/162 已被 FragileIce（cs:16782-83）翻
+        //   非实心,原版 SolidOrSlopedTile 读可变 tileSolid 同样视其为非实心
         const qd = TILE_DEFS[st.type[qi]];
         const solidOrSloped = !!st.flags[qi] && qd
-          && (!!qd.solid || !!st.half[qi] || st.slope[qi] !== 0);
+          && (genSolidType(st.type[qi]) || !!st.half[qi] || st.slope[qi] !== 0);
         if (st.flags[qi] && solidOrSloped) continue;
         cells.add(qi);
         quota--;

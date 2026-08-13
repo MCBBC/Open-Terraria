@@ -83,16 +83,18 @@ describe('长矛（aiStyle 19）', () => {
 });
 
 describe('回旋镖特例族（AI_003 分支）', () => {
-  it('106 光碟:45t 才回收(30t 仍在飞出段)', () => {
+  it('106 光碟:回收点=30（独立 45 门是影子死代码,:36794-36799 被 :37082-37087 截住）', () => {
+    // ★源码修正:1456 中 106 的独立 ai[1]≥45 门位于类型链【之前】,而链尾
+    //   else if(ai[1]≥30)（:37082-37087）未豁免 106 → ai[1] 到 30 即回收,
+    //   45 门永不可达。旧断言名"45t 才回收"是把死代码当活门
     const { hooks, player } = makeHooks();
     const b = new Boomerang(player.cx, player.cy - 4, 16, 0, 60, 4, 106);
-    run(b, hooks, 31);
-    expect(b.dead).toBe(false);
-    // (returning 是私有态,用行为验证:31t 时仍在移动且未死)
-    const x31 = b.x;
-    run(b, hooks, 5);
-    expect(b.dead).toBe(false); // 36t 仍飞行(45t 门)
-    void x31;
+    run(b, hooks, 29);
+    expect(b.returning).toBe(false); // 29 < 30 仍在飞出段
+    run(b, hooks, 2);
+    expect(b.returning).toBe(true);  // 31t = ai[1]≥30 → 回收
+    run(b, hooks, 300);
+    expect(b.dead).toBe(true);       // 返回段回手消失
   });
   it('182 圣骑士锤:800px 内最近敌追踪转向', () => {
     const { hooks, player, enemies } = makeHooks();
@@ -205,6 +207,26 @@ describe('AI_003 回收门三处独立（2026-08-13 1:1 补齐）', () => {
     const b = new Boomerang(player.cx, player.cy - 4, 14, 0, 26, 4, 1059);
     const t = runUntil(b, hooks, () => b.vx === 0 && !b.returning && b.vy > 0, 30);
     expect(t).toBeGreaterThanOrEqual(0); // 悬停:vx=0、vy+=1,且未进返回段
+  });
+
+  it('866 无目标 ≥30 AI 次回收（:37009-37017）——计数在 localAI[0] 非 ai[1]（extra=1→15t）', () => {
+    const { hooks, player } = makeHooks();
+    const b = new Boomerang(player.cx, player.cy - 4, 10, 0, 80, 4, 866);
+    run(b, hooks, 14);
+    expect(b.returning).toBe(false); // 14t = 28 AI 次 < 30
+    run(b, hooks, 2);
+    expect(b.returning).toBe(true); // 16t = 32 AI 次 ≥ 30
+    run(b, hooks, 300);
+    expect(b.dead).toBe(true);
+  });
+
+  it('866 命中敌不触发回收（Damage :12278 豁免列）——追踪续飞', () => {
+    const { hooks, player, enemies } = makeHooks();
+    addEnemy(enemies, 300, 56 * 16, player.cy - 12);
+    const b = new Boomerang(player.cx, player.cy - 4, 10, 0, 80, 4, 866);
+    run(b, hooks, 12); // ~80px 外,第 6-8t 命中
+    expect((enemies[0] as unknown as { hp: number }).hp).toBeLessThan(100); // 已命中
+    expect(b.returning).toBe(false); // 但不因命中回收（目标仍在追踪窗内续飞）
   });
 
   it('penetrate 链（:13175-13182/:15866-15868）:182 第 10 次命中消亡;866 五击后伤害归零不消失', () => {

@@ -9,6 +9,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeDoorClosed } from '../../Door';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { placeFurn } from './DungeonPass';
+import { flipGenSolid } from './GenSolid';
 
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
 const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
@@ -583,7 +584,17 @@ export function runTemplePass(
   }
   // ---- templePart2（1456 cs:34497-34685）1:1 五段：陷阱 → 宝箱 → 雕像 → 家具 → 挂饰 ----
   // 顺序对齐原版：宝箱在尖刺陷阱段**之后**（旧版反序且公式为房数×1.1×(1±25%)）
+  // ★LihzahrdTemplePart2 pass 头翻转（cs:17813-17814 `tileSolid[162]=false;
+  //   tileSolid[226]=true`）：本仓神庙与 Part2 合并在 runTemplePass 内,此处在
+  //   templePart2 调用前对齐原版 Part2 pass 头（162 薄冰非实/226 蜥蜴砖实）。
+  flipGenSolid([162], false);
+  flipGenSolid([226], true);
   templePart2(st, rng, gs, chests, rooms);
+  // ★Part2 pass 尾翻转（cs:17816 `Main.tileSolid[232] = false`）：木刺非实心——
+  //   CaveWalls 头（cs:17823）重放,BeeLarva 尾（cs:21048）还原 true。
+  //   ★本仓神庙槽远早于原版 Part2 注册位（17809）,该 false 态在本仓会覆盖神庙与
+  //   BeeLarva 之间的大量 pass（原版此间 232 恒实心）,与 pass 序偏差联动,备案。
+  flipGenSolid([232], false);
   // 注：LihzahrdAltar 终保 pass（cs:21753-21791）原版是 TileCleanup(21327) 之后、
   // MicroBiomes(21785) 之前的独立 pass（Pots/Traps/TileCleanup 可能扰动祭坛后再
   // 重放）。2026-08-13 前并入本函数末尾（执行位≈15911），已外提为
@@ -645,6 +656,10 @@ function templePart2(
       if (fails > 100) { fails = 0; budget -= 1; }   // cs:34517-34518
     }
   }
+  // ★cs:34530 `Main.tileSolid[232] = false`（尖刺陷阱段后、宝箱段前）：木刺非实心,
+  //   后续箱/雕像/家具/挂饰段的 SolidTile 锚定不再踩在 232 上。函数尾 cs:34701
+  //   还原 true（见函数尾）——净效果为零,纯段内作用域。
+  flipGenSolid([232], false);
 
   // ---- 2. 神庙宝箱（cs:34521-34545）：预算 = 房数×0.35×(1±15%) ----
   //  AddBuriedChest(mainItem=1293 蜥蜴能量电池, notNearOtherChests:true, style 16)
@@ -753,6 +768,8 @@ function templePart2(
       if (fails > 10000) break;
     }
   }
+  // ★cs:34701 `Main.tileSolid[232] = true`：函数尾还原（对应段内 cs:34530 翻转）
+  flipGenSolid([232], true);
 }
 
 /** PlaceTile(105, style)（神庙雕像）：2×3，锚点=底行左列的下一格语义（与 StatuesPass 一致） */
