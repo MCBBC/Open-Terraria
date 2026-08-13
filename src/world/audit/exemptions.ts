@@ -42,4 +42,7 @@ export const MULTITILE_EXEMPT: ReadonlySet<string> = new Set([
   // 分带重算);组内格帧语义与 R2"互异"模型不符(R2 warn 32 处在案)。
   // 移除条件:187 族帧分片语义核对完成。
   'v_186_decos_3x2', 'v_187_decos_3x2_group_2',
+  // 掘地龟/啮龙蛋 751/752:【单格存储】(frameX 状态机:非锚点帧整格跳过绘制,
+  // VanillaTiler:817 特判 :1034-1048)。移除条件:多格化改造。
+  'v_751_sleeping_digging_turtle', 'v_752_chillet_egg',
 ]);

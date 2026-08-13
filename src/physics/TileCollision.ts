@@ -323,6 +323,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   // 只缩位移）。由 npcLiquid.updateNpcLiquid 每 tick 写入（dry=1 跳过）；实体基类缺省 1。
   const lf = b.liqFactor;
   if (lf !== undefined && lf !== 1) { dx *= lf; dy *= lf; }
+  const wasGround = b.onGround;   // 上一 tick 落地态（StepDown 贴地门用——重置前捕获）
   b.onGround = false;
   b.hitWall = false;
   b.hitHead = false;
@@ -333,7 +334,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   // 瞬移按压到地面（萤火虫/蝴蝶"怪力按地+闪现"根因）
   if (b.stepUp) {
     const gate = b.stepDownGate ?? 'grounded';
-    if (gate === 'gravity' ? b.vy === GRAVITY : b.onGround) applyStepDown(b, world);
+    if (gate === 'gravity' ? b.vy === GRAVITY : wasGround) applyStepDown(b, world);
     applyStepUp(b, world);
   }
   // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)
