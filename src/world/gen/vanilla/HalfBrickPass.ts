@@ -279,23 +279,39 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
 }
 
 /** 原版 pass "Waterfalls"（WorldGen.cs:7697-7743）：水边唇缘砸半砖（瀑布触发的来源） */
-export function runWaterfallLipPass(st: TileStore, _rng: RNG, _gs: GenState): void {
+export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): void {
   const { w, h } = st;
+  // ★cs:16702 `Main.tileSolid[191] = false`：本 pass 期间活木(191)视为非实心——
+  //   本仓该 pass 走静态 TILE_DEFS，做 pass 内局部覆写（191 仍 solid:true），
+  //   不动全局表（BuriedChests 等导入的 solidTile 语义不受影响）
+  const NON_SOLID = idsByVanillaSheet(191);
+  const solidWF = (x: number, y: number): boolean => {
+    if (!solidTile(st, x, y)) return false;
+    return !NON_SOLID.has(st.type[st.idx(x, y)]);
+  };
+  // cs:16723-16726 特判素材：75=黑曜石砖 / 76=狱石砖——旁水唇缘砸半砖前 1/10 才放行
+  const OBSIDIAN_HELL = idsByVanillaSheet(75, 76);
   // —— 第一遍（L7701-7723）：实心顶格、左右空、侧旁有水 → 砸半砖 ——
   for (let i = 20; i < w - 20; i++) {
     for (let j = 20; j < h - 20; j++) {
-      if (!solidTile(st, i, j)) continue;
+      const ti = st.idx(i, j);
+      if (!solidWF(i, j)) continue;
       const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
       // cs:16709:左右邻须 !active(曾误用 type!==0 → 幽灵格侧邻漏砸半砖)
       if (st.flags[li] !== 0 || st.flags[ri] !== 0) continue;
-      if (!solidTile(st, i, j + 1)) continue;
+      if (!solidWF(i, j + 1)) continue;
       if (st.liquid[li] === 0 && st.liquid[ri] === 0) continue;
-      // 上方 8-20 格内已有半砖则跳过（原版防连续砸穿）
+      // 上方 8-20 格内已有半砖则跳过（原版防连续砸穿）；
+      // 掷骰 = genRand.Next(8,20) ×2（8+trunc(Sample*12) 与 Next(8,20) 同分布同流位）
       let flag = true;
-      const num3 = 8 + Math.floor(_rng.next() * 12), num4 = 8 + Math.floor(_rng.next() * 12);
+      const num3 = 8 + Math.floor(rng.next() * 12), num4 = 8 + Math.floor(rng.next() * 12);
       for (let k = j - num3; k <= j + num4; k++) {
         if (k >= 0 && k < h && st.half[st.idx(i, k)]) flag = false;
       }
+      // ★cs:16723-16726 `(type==75||type==76) && Next(10)!=0` → flag=false：
+      //   黑曜石/狱石砖旁的唇缘只有 1/10 概率被砸半砖。&& 左短路——仅 75/76 格
+      //   才掷 Next(10)；原版此处不查 flag 状态，即使 flag 已 false 也掷（保流位）
+      if (OBSIDIAN_HELL.has(st.type[ti]) && rng.nextInt(10) !== 0) flag = false;
       if (flag) poundTile(st, i, j);
     }
   }
@@ -303,11 +319,11 @@ export function runWaterfallLipPass(st: TileStore, _rng: RNG, _gs: GenState): vo
   for (let i = 20; i < w - 20; i++) {
     for (let j = 20; j < h - 20; j++) {
       const ti = st.idx(i, j);
-      if (!solidTile(st, i, j) || !solidTile(st, i, j + 1)) continue;
-      if (!solidTile(st, i + 1, j) && st.half[st.idx(i - 1, j)] && st.liquid[st.idx(i - 2, j)] > 0) {
+      if (!solidWF(i, j) || !solidWF(i, j + 1)) continue;
+      if (!solidWF(i + 1, j) && st.half[st.idx(i - 1, j)] && st.liquid[st.idx(i - 2, j)] > 0) {
         poundTile(st, i, j);
       }
-      if (!solidTile(st, i - 1, j) && st.half[st.idx(i + 1, j)] && st.liquid[st.idx(i + 2, j)] > 0) {
+      if (!solidWF(i - 1, j) && st.half[st.idx(i + 1, j)] && st.liquid[st.idx(i + 2, j)] > 0) {
         poundTile(st, i, j);
       }
     }
