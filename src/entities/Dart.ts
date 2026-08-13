@@ -766,9 +766,10 @@ export class Dart extends Entity {
       game.spawnParticles(this.cx, this.cy, st.trail.color, st.trail.count, 0.4,
         { life: st.trail.life ?? 24, damp: 0.93, grav: st.trail.grav ?? 0 });
     }
-    // ---- 光照（SetDefaults light × Projectile.cs:15170 起分型系数）----
-    if (st.light && this.alpha < 128) this.lightRGB = st.light;
-    else this.lightRGB = null;
+    // ---- 光照：无实体自报光。发光弹型（44/84/96/115/180/257/302 等）全部由 Game 侧
+    //      ProjLight() 1:1 标量循环结算（SetDefaults light × 乘区/绝对通道表）——
+    //      曾在此处自报 st.light 造成双重注入，且多条数值与原版不符（96 灰 vs 原版绿、
+    //      257 手调蓝、596/814 原版根本无光）已全数摘除
     // ---- 撞实心块 ----
     const tx = Math.floor(this.cx / TILE);
     const ty = Math.floor(this.cy / TILE);
@@ -825,8 +826,6 @@ export class Dart extends Entity {
   private frame = 0;        // 多帧行帧号(909/836)
   private dir = 1;          // projectile.direction(旋转符号)
   private pulseDir = 0;     // 115 呼吸相位
-  /** 点光（Game 实体光循环读取;SetDefaults light 族） */
-  lightRGB: [number, number, number] | null = null;
 }
 
 /** 敌怪弹幕样式表——每条对应原版 Projectile 的 SetDefaults(Projectile.cs) + AI 行为。
@@ -847,7 +846,6 @@ interface DartStyle {
   spinRate?: number;
   alpha0?: number;                       // 出生 alpha(255=渐入)
   fade?: 'speed' | number;               // 渐入速率
-  light?: [number, number, number];      // 点光(SetDefaults light × :15170 分型系数)
   grav?: number; gravDelay?: number; xDamp?: number;   // 重力档(ai0 门)
   accel?: { from: number; to: number; mul: number };   // 加速段(ai0 区间内每更新 ×mul)
   updates?: number;                      // extraUpdates(每 tick 完整更新次数)
@@ -876,23 +874,24 @@ const DART_STYLE: Record<number, DartStyle> = {
   // 596 沙漠幽焰（533 沙漠精灵 :21104-21135）：8×8 aiStyle 107 慢速追踪、timeLeft 180、
   //  ignoreWater；出生零速由 homing 拉向玩家（AI_107 收敛近似）
   596: { w: 8, h: 8, rot: 'align90', life: 180, home: { range: 2400, spd: 5, lerp: 40 },
-    trail: { color: '#8A5AE8', count: 2 }, light: [0.6, 0.3, 0.9], fallback: '#9A6AF0' },
+    trail: { color: '#8A5AE8', count: 2 }, fallback: '#9A6AF0' },
   // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾(:52612)
   55: { w: 10, h: 10, rot: 'align90', life: 300, trail: { color: '#B8A070', count: 1 }, fallback: '#D8C890' },
   // 81/82 木箭/燃烧箭(战士族 num172 :59797/:59821):10×10,重力 0.07@20(:54009);发射音 Item5
   81: { w: 10, h: 10, rot: 'align90', grav: 0.07, gravDelay: 20, sfx: ['Item_5'], fallback: '#D8C8A0' },
   82: { w: 10, h: 10, rot: 'align90', grav: 0.07, gravDelay: 20, sfx: ['Item_5'], fallback: '#FFB060' },
   // 84 粉激光(NPC 122 :24887):4×4,scale1.2,alpha255 渐入(|v|*0.9),extraUpdates2,life600,
-  //    light 0.75×(0.8,0,0.5)(:15181);发射音 Item12
+  //    光=ProjLight 0.75×(0.8,0,0.5)(:15181,Game 侧标量循环);发射音 Item12
   84: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 'speed', updates: 2, life: 600,
-    light: [0.45, 0, 0.28], sfx: ['Item_12'], fallback: '#FF70E0' },
-  // 96 诅咒焰(爬行者 101 :22846):16×16,alpha100(恒),spin 0.3,light 0.8;尘 75 拖尾;Item20
+    sfx: ['Item_12'], fallback: '#FF70E0' },
+  // 96 诅咒焰(爬行者 101 :22846):16×16,alpha100(恒),spin 0.3,光=0.8×(0.35,1,0) 绿(ProjLight);
+  //    尘 75 拖尾;Item20
   96: { w: 16, h: 16, rot: 'spin', spinRate: 0.3, alpha0: 100,
-    light: [0.64, 0.64, 0.64], trail: { color: '#9A6AFF', count: 1 }, sfx: ['Item_20'], fallback: '#8A5AE8' },
+    trail: { color: '#9A6AFF', count: 1 }, sfx: ['Item_20'], fallback: '#8A5AE8' },
   // 115 邪恶三叉戟(红恶魔 156 :23533):16×16,a45,alpha255 呼吸脉冲,加速 ×1.125@ai0<30(:24753),
-  //    light 0.5×(0.5,0.05,1)(:15205);Item8
+  //    光=ProjLight 0.5×(0.5,0.05,1)(:15205);Item8
   115: { w: 16, h: 16, rot: 'a45', alpha0: 255, fade: 50, pulse: true, life: 300,
-    accel: { from: 0, to: 30, mul: 1.125 }, light: [0.25, 0.025, 0.5], sfx: ['Item_8'], fallback: '#B060FF' },
+    accel: { from: 0, to: 30, mul: 1.125 }, sfx: ['Item_8'], fallback: '#B060FF' },
   // 128 霜爆(冰元素 169 :24933):14×14 旋转恒 0,alpha255 渐入;尘 92 ×3;Item28
   128: { w: 14, h: 14, rot: 'none', alpha0: 255, fade: 50,
     trail: { color: '#A8D8F0', count: 2 }, sfx: ['Item_28'], fallback: '#C8ECFF' },
@@ -908,13 +907,13 @@ const DART_STYLE: Record<number, DartStyle> = {
   177: { w: 10, h: 10, rot: 'none', alpha0: 255, fade: 50,
     trail: { color: '#BFE8F0', count: 2 }, fallback: '#A8D8E8' },
   // 180 死眼弹(海盗 214/216/292 :59895):4×4,scale1.2,alpha255 渐入(|v|*0.9),extraUpdates1,life600,
-  //    light 0.5×(1,0.7,0.1)(:14990);Item11
+  //    光=ProjLight 0.5×(1,0.7,0.1)(:14990);Item11
   180: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 'speed', updates: 1, life: 600,
-    light: [0.5, 0.35, 0.05], sfx: ['Item_11'], fallback: '#FFE8A0' },
+    sfx: ['Item_11'], fallback: '#FFE8A0' },
   // 257 霜束(冰雪巨人 243 :59339):4×4,scale1.2,alpha255 渐入 -10(:53036),extraUpdates1,life600;
-  //    light 0.75;Item12
+  //    光=ProjLight 0.75×(0.1,0.9,1);Item12
   257: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 10, updates: 1, life: 600,
-    light: [0.18, 0.45, 0.6], sfx: ['Item_12'], fallback: '#A8E8FF' },
+    sfx: ['Item_12'], fallback: '#A8E8FF' },
   // 288 金雨(脓水粘怪 268 :25032):32×32,重力 0.075(:22835),scale -0.002/更新(:22824),
   //    extraUpdates2,旋转恒 0;尘 170 ×3;Item17
   288: { w: 32, h: 32, rot: 'none', alpha0: 255, fade: 50, grav: 0.075, updates: 2, shrink: 0.002,
@@ -926,9 +925,9 @@ const DART_STYLE: Record<number, DartStyle> = {
   // 300 圣锤(圣骑士 290 :59887):38×38 roll,重力 0.2@60(:21893),tileCollide=false 穿墙;Item1
   300: { w: 38, h: 38, rot: 'roll', grav: 0.2, gravDelay: 60, noTile: true, sfx: ['Item_1'], fallback: '#C8B860' },
   // 302 狙击弹(骷髅神射 291 :59883):4×4,scale1.18,alpha255 渐入(|v|*0.9),extraUpdates7(!) →
-  //    弹速 4×8=32px/t,life300;light 0.3×(1,0.7,0.1);Item11
+  //    弹速 4×8=32px/t,life300;光=ProjLight 0.3×(1,0.7,0.1);Item11
   302: { w: 4, h: 4, rot: 'align90', scale: 1.18, alpha0: 255, fade: 'speed', updates: 7, life: 300,
-    light: [0.3, 0.21, 0.03], sfx: ['Item_11'], fallback: '#FFF0B0' },
+    sfx: ['Item_11'], fallback: '#FFF0B0' },
   // 303 火箭(骷髅爆破 293 :59893):14×20 aiStyle16 手雷族:重力 0.3 滚转,life180,Kill 128 盒爆炸
   303: { w: 14, h: 20, rot: 'roll', grav: 0.3, life: 180, rocket: 64, fallback: '#B8B8C0' },
   // 31 沙球(蚁狮 69 :24520):10×10,重力 0.41(AI_010 :55083),spin 0.1(:55158);尘 32
@@ -942,9 +941,9 @@ const DART_STYLE: Record<number, DartStyle> = {
   572: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 50,
     trail: { color: '#8AD8A0', count: 2 }, sfx: ['Item_17'], fallback: '#8AD8A0' },
   // 44 魔鬼飞镰(恶魔 62/66 :23504):48×48,scale0.9,alpha100,spin 0.8(:23814),
-  //    加速 ×1.06@ai0[30,100)(:23816),light (0.3,0.25,0.1)(:23748);尘 27;Item8(:23723)
+  //    加速 ×1.06@ai0[30,100)(:23816),光=ProjLight 0.2×(0.6,0.1,B=1 绝对)(:15054);尘 27;Item8(:23723)
   44: { w: 48, h: 48, rot: 'spin', spinRate: 0.8, scale: 0.9, alpha0: 100, life: 300,
-    accel: { from: 30, to: 100, mul: 1.06 }, light: [0.3, 0.25, 0.1],
+    accel: { from: 30, to: 100, mul: 1.06 },
     trail: { color: '#B08050', count: 1 }, sfx: ['Item_8'], fallback: '#B08050' },
   // 909 岩石巨人岩(631 :56722):12×12,roll,重力 0.4@38+xDamp0.97(:21527),随机帧 1-6(:21534)
   909: { w: 12, h: 12, rot: 'roll', grav: 0.4, gravDelay: 38, xDamp: 0.97, frameRand: 6, fallback: '#9A8C72' },
@@ -963,10 +962,10 @@ const DART_STYLE: Record<number, DartStyle> = {
   // 836 蒲公英籽(628):4×4,tilt 旋转,4 帧行 6 更新步进(帧动画由 frame 自增,此处用出生随机帧近似起步)
   836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, hFrames: 4, windSeed: true, fallback: '#E8E8D0' },
   // 814 血弹(恐惧鹦鹉螺 AI_117 :47751):10×10 aiStyle1,alpha255 渐入 -20/t(:53573),
-  //    tileCollide=false 穿墙,penetrate=-1;红光 (0.3,0.05,0.05)(:53558);尘 5 尾;
-  //    出生音 Item171(:53562)
+  //    tileCollide=false 穿墙,penetrate=-1;★原版 814 无光(:53561 起块内无 AddLight——
+  //    曾误挂 819 的红光 :53558);尘 5 尾;出生音 Item171(:53562)
   814: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, noTile: true, life: 180,
-    light: [0.3, 0.05, 0.05], trail: { color: '#C83848', count: 1 },
+    trail: { color: '#C83848', count: 1 },
     sfx: ['Item_171'], fallback: '#B03040' },
 };
 

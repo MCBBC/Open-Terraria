@@ -122,7 +122,7 @@ const MINION_SHOT_SFX: Record<number, { track: string; vol: number }> = {
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, penPercent?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 }
 
 /** Utils.Remap（AI_120 :42222 用；value 截断映射 [from1..to1] → [from2..to2]） */
@@ -897,7 +897,7 @@ export class MinionProj extends Entity {
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
-            en.hurt(res.dmg, 0, 0, game, 0, false, 1, 0, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443)
+            en.hurt(res.dmg, 0, 0, game, 0, false, 1, false, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443)
             applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           }
           // 原版是 tracked 循环声（每 tick 场内有敌即续播）——单次 wav 按命中节拍近似，

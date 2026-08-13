@@ -4,6 +4,7 @@ import { RNG, translateSeed } from '../../core/rng';
 import type { TileStore } from '../TileStore';
 import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { World } from '../World';
+import { randomEpitaph } from '../../i18n/RandomText';   // 墓园 pass 碑文（WorldGen.cs:25161）
 
 export interface GenConfig {
   width: number;
@@ -984,8 +985,140 @@ function tileRunnerHell(st: World['store'], rng: RNG, gs: GenState, i: number, j
 }
 
 
+// ---------- 墓园群系（原版 SpawnGraveyardBiomesEverywhere cs:25074-25096） ----------
+// 调用位 = PotsGraveyardsAndBoulderPiles pass 首段（cs:18108-18120）——**秘密种子专属**：
+//   (dontStarve && (drunk || getGood) && !tenthAnniversary) || graveyardBloodmoonStart
+// 普通世界不调用（墓园的常态来源 = 玩家自放墓碑 tile 85 计数，SceneMetrics 侧已就位）。
+// 每处 SpawnGraveyardBiome（cs:25098-25165）：锚点上下归位 → 81×81 排斥扫描 →
+// 5000 次尝试放 2×2 墓碑 + 写 Epitaph 碑文（cs:25161——RandomText.ts 数据的唯一消费端）。
+const GY_EXCLUDE_SHEETS = new Set([
+  25, 203, 53, 191, 383, 226, 225, 367, 368, 57, 70, 189,   // cs:25124 字面 id
+  41, 43, 44, 481, 482, 483,                                 // tileDungeon[] 全表
+]);
+
+/** IsTileNearby（cs:8828-8850）：type!=235 时步长 1 的方形邻域扫描 */
+function isTileNearby(store: TileStore, x: number, y: number, sheet: number, distance: number): boolean {
+  for (let i = x - distance; i <= x + distance; i++) {
+    for (let j = y - distance; j <= y + distance; j++) {
+      if (!store.inBounds(i, j)) continue;
+      if (store.flags[store.idx(i, j)] && TILE_DEFS[store.type[store.idx(i, j)]]?.vanilla?.sheet === sheet) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function spawnGraveyardBiome(
+  store: TileStore, rng: RNG, world: World, X: number, Y: number,
+): void {
+  const TOMB = TILE_BY_KEY['tombstone_v'];
+  if (TOMB === undefined) return;
+  const num = 40;                 // cs:25100 半径
+  const distance = 3;             // cs:25101 墓碑排斥距离
+  const num2 = 5000;              // cs:25102 尝试次数
+  const underworldLayer = store.h - 200;   // Main.UnderworldLayer = maxTilesY-200（Main.cs:2863）
+  // 锚点归位（cs:25103-25119）：先向上跳出实心，再下落到首个实心
+  while (store.inBounds(X, Y) && store.flags[store.idx(X, Y)]) {
+    Y--;
+    if (Y < 100) return;          // cs:25106-25109
+  }
+  Y++;
+  while (store.inBounds(X, Y) && !store.flags[store.idx(X, Y)]) {
+    Y++;
+    if (Y > underworldLayer - 100) return;   // cs:25115-25118
+  }
+  if (!store.inBounds(X, Y)) return;
+  // 81×81 排斥扫描（cs:25120-25129）：命中任一排斥族 tile 整处放弃
+  // （anyShimmer 涂层门：生成期无任何 tile 带微光涂层，恒 false，省略即等价）
+  for (let i = X - num; i <= X + num; i++) {
+    for (let j = Y - num; j <= Y + num; j++) {
+      if (!store.inBounds(i, j) || !store.flags[store.idx(i, j)]) continue;
+      if (GY_EXCLUDE_SHEETS.has(TILE_DEFS[store.type[store.idx(i, j)]]?.vanilla?.sheet ?? -1)) return;
+    }
+  }
+  for (let k = 0; k < num2; k++) {
+    // cs:25132-25133：Next(-40, 41)（含 +40）
+    let num3 = X + rng.int(-num, num);
+    let num4 = Y + rng.int(-num, num);
+    // cs:25134-25136：InWorld(num3,num4,50) 且目标格须空气
+    if (num3 < 50 || num4 < 50 || num3 >= store.w - 50 || num4 >= store.h - 50) continue;
+    if (store.flags[store.idx(num3, num4)]) continue;
+    // cs:25138-25146：向下落到首个实心（越界 55 边距 → 钉在 maxTilesY-50）
+    while (store.inBounds(num3, num4) && !store.flags[store.idx(num3, num4)]) {
+      num4++;
+      if (num3 < 55 || num4 < 55 || num3 >= store.w - 55 || num4 >= store.h - 55) {
+        num4 = store.h - 50;
+        break;
+      }
+    }
+    num4--;                        // cs:25147：墓碑底行上移一格（2×2 顶行）
+    // cs:25148-25151 放置门禁：右邻非空 / 3 格内有墓碑 / 落点有液体 /
+    // 下方双列非实心支撑 → 全部 continue
+    if (!store.inBounds(num3, num4) || !store.inBounds(num3 + 1, num4 + 1)) continue;
+    if (store.flags[store.idx(num3 + 1, num4)]) continue;
+    if (isTileNearby(store, num3, num4, 85, distance)) continue;
+    if (store.liquid[store.idx(num3, num4)] !== 0) continue;
+    let supported = true;
+    for (const dx of [0, 1]) {
+      const gi = store.idx(num3 + dx, num4 + 1);
+      if (!store.flags[gi] || !TILE_DEFS[store.type[gi]]?.solid) { supported = false; break; }
+    }
+    if (!supported) continue;
+    // cs:25152-25155：支撑格清坡面/半砖
+    for (const dx of [0, 1]) {
+      const gi = store.idx(num3 + dx, num4 + 1);
+      store.slope[gi] = 0;
+      store.half[gi] = 0;
+    }
+    // PlaceTile(num3, num4, 85, style=Next(6))（cs:25156）：2×2，帧语义同 Tombstone.ts
+    const style = rng.int(0, 5);
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        store.setTileSilent(num3 + dx, num4 + dy, TOMB, style * 36 + dx * 18, dy * 18);
+      }
+    }
+    // Sign.ReadSign/TextSign（cs:25158-25162）：墓碑锚格立碑并写随机墓志铭
+    if (!world.signs.some((s) => s.x === num3 && s.y === num4)) {
+      world.signs.push({ x: num3, y: num4, text: randomEpitaph() });
+    }
+  }
+}
+
+function spawnGraveyardBiomesEverywhere(
+  store: TileStore, rng: RNG, world: World, gs: GenState,
+): void {
+  const num = Math.floor(store.w / 4200);    // cs:25076 C# int/int 截断（小/中 1，大 2）
+  const bd = gs.beachDistance;               // 380（WorldGen.cs:4102 常量）
+  const underworldLayer = store.h - 200;
+  // 地表批（cs:25077-25089）：worldSurface>150 时 10×num 处，锚 y ∈ [150, worldSurface)
+  if (gs.worldSurface > 150) {
+    const hi = store.w - bd - 100;
+    if (bd + 100 < hi) {
+      for (let i = 0; i < 10 * num; i++) {
+        let num2 = rng.int(bd + 100, hi - 1);            // cs:25081 Next(bd+100, w-bd-100)
+        while (num2 > store.w * 0.48 && num2 < store.w * 0.52) {  // cs:25082-25085 避开出生带
+          num2 = rng.int(bd + 100, hi - 1);
+        }
+        const y = rng.int(150, Math.max(150, gs.worldSurface - 1)); // cs:25086 Next(150, worldSurface)
+        spawnGraveyardBiome(store, rng, world, num2, y);
+      }
+    }
+  }
+  // 地下批（cs:25090-25095）：30×num 处，锚 y ∈ [worldSurface+50, underworldLayer-100)
+  const lo = gs.worldSurface + 50;
+  const hi2 = underworldLayer - 100;
+  if (bd + 100 < store.w - bd - 100 && lo < hi2) {
+    for (let j = 0; j < 30 * num; j++) {
+      const x = rng.int(bd + 100, store.w - bd - 100 - 1); // cs:25092
+      const y2 = rng.int(lo, hi2 - 1);                     // cs:25093
+      spawnGraveyardBiome(store, rng, world, x, y2);
+    }
+  }
+}
+
 // ---------- 瓦罐散布 ----------
-function potPass({ store, rng }: GenCtx) {
+function potPass({ store, rng, world }: GenCtx) {
   // 原版 Pots pass(1.4.5.6 WorldGen.cs:18186-18286)1:1:
   // count = 面积×0.0008(小 4200×1200 = 4032 个),每个成功点放 1 罐;
   // 进度 >75% 强制从地表浅层起扫、>93% 强制地狱行;2 宽×2 高 PlacePot
@@ -995,6 +1128,15 @@ function potPass({ store, rng }: GenCtx) {
   // 旧实现 w/6 次尝试+12 格排斥 → 只有原版 ~5%
   const gs = ctxGs[0];
   if (!gs) return;
+  // ---- 墓园群系（cs:18110-18120：本 pass 首段，先于瓦罐消耗 RNG 流）----
+  // 门 = !Skyblock.denySomeGeneration（skyblock 种子跳过）&&
+  //      (dontStarve && (drunk || getGood) && !tenthAnniversary) || graveyardBloodmoonStart
+  const sf = gs.seedFlags;
+  if (!sf.skyblock) {
+    const gySeed = (sf.theConstant && (sf.drunkWorld || sf.getGoodWorld) && !sf.tenthAnniversary)
+      || !!sf.graveyardBloodmoonStart;
+    if (gySeed) spawnGraveyardBiomesEverywhere(store, rng, world, gs);
+  }
   const { w, h } = store;
   const POT = TILE_BY_KEY['pot']!;
   const count = Math.floor(w * h * 0.0008);

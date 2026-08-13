@@ -137,7 +137,9 @@ export function createDeathText(playerName: string, cause: DeathCause, worldName
 
 // ===================== 墓志铭（WorldGen.cs:25161） =====================
 
-/** 随机墓志铭（原版墓地装饰用；墓地 pass 未移植——数据就绪供后续/调试使用） */
+/** 随机墓志铭（唯一消费端 = 墓园生成 pass：SpawnGraveyardBiome 每放一座墓碑写一条，
+ *  仅秘密种子触发——(The Constant && (drunk||FTW) && !十周年) || graveyardBloodmoonStart，
+ *  WorldGen.cs:18117-18120；普通世界墓碑碑文走死亡文本（Player.DropTombstone→aiStyle17）） */
 export function randomEpitaph(): string {
   return Lang.randomFrom('Epitaph');
 }

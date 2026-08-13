@@ -4222,7 +4222,7 @@ void DgHall(DHall s)
     dynamic rr = Activator.CreateInstance(dgUR, s.Seed)!;
     double vx = 0, vy = 0;
     int num = (int)(4.0 * 1.0) + (int)rr.Next(2);             // hallStrengthScalar=1
-    double px = s.X < 0 ? dgPosX : s.X, py = s.Y < 0 ? dgPosY : s.Y;
+    double px = dgPosX, py = dgPosY;
     double sx = px, sy = py;
     int num2 = 1;
     double hallStepScalar = 1.0;
@@ -4762,9 +4762,9 @@ void DgEntrance(int seed, int preSeed)
     int m8 = m7;
     if (num2 < 0) m8 = Math.Max(0, Math.Min(W - 1, m8 + 1));
     int e1 = Math.Max(0, Math.Min(W - 1, m8 + 5 + (int)rr.Next(4)));
-    int f1 = Math.Max(0, Math.Min(H - 1, n5 - 3 - (int)rr.Next(3)));
-    eb.Upd(m8, f1, e1, n5);
-    fillIfNotDW(m8, f1, e1, n5);
+    int f1v = Math.Max(0, Math.Min(H - 1, n5 - 3 - (int)rr.Next(3)));
+    eb.Upd(m8, f1v, e1, n5);
+    fillIfNotDW(m8, f1v, e1, n5);
     int g0 = Math.Max(0, Math.Min(W - 1, Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.5))) - 5 - (int)rr.Next(4)));
     int g1 = Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.5)));
     int h0 = Math.Max(0, Math.Min(H - 1, n5 - 3 - (int)rr.Next(3)));
@@ -5440,13 +5440,13 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
             if ((int)r.Next(6) == 0) { int n = 1; if (r.Next(5) == 0) n += r.Next(2); if (r.Next(10) == 0) n += r.Next(3); }
             if ((int)r.Next(6) == 0) { int n = 1; if (r.Next(5) == 0) n += r.Next(2); if (r.Next(10) == 0) n += r.Next(3); }
             if (r.Next(3) == 0) r.Next(3, 6);                   // 手雷 168
-            if (r.Next(2) == 0) { r.Next(2); r.Next(8) + 3; }
+            if (r.Next(2) == 0) { r.Next(2); var _dg = r.Next(8) + 3; }
             if (r.Next(2) == 0) r.Next(50, 101);                // 绳 965
-            if (r.Next(3) != 0) { r.Next(2); r.Next(26) + 25; }
-            if (r.Next(2) == 0) r.Next(3) + 3;                  // 药水 28
+            if (r.Next(3) != 0) { r.Next(2); var _dg2 = r.Next(26) + 25; }
+            if (r.Next(2) == 0) var _dg7 = r.Next(3) + 3;                  // 药水 28
             if (r.Next(3) != 0) r.Next(3, 6);                   // 回城 2350
             if (r.Next(3) > 0) { r.Next(6); r.Next(1, 3); }
-            if (r.Next(2) == 0) { r.Next(2); r.Next(11) + 10; }
+            if (r.Next(2) == 0) { r.Next(2); var _dg5 = r.Next(11) + 10; }
             if (r.Next(2) == 0) r.Next(10, 30);
             if (r.Next(2) == 0) r.Next(50, 100);
         }
@@ -5465,18 +5465,18 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
             {
                 r.Next(6);
                 if (r.Next(20) == 0) { }
-                else if (r.Next(20) == 0) { r.Next(26) + 25; }
+                else if (r.Next(20) == 0) { var _dg2 = r.Next(26) + 25; }
             }
             if (flag3) { if (r.Next(3) == 0) r.Next(10, 20); }
             else if (r.Next(3) == 0) r.Next(10, 20);
             if (r.Next(5) == 0) { }                             // 天使雕像 52
             if (r.Next(3) == 0) r.Next(50, 101);
-            if (r.Next(2) == 0) { r.Next(2); r.Next(10) + 5; }
-            if (r.Next(2) == 0) { r.Next(2); r.Next(25) + 25; }
-            if (r.Next(2) == 0) r.Next(3) + 3;
+            if (r.Next(2) == 0) { r.Next(2); var _dg3 = r.Next(10) + 5; }
+            if (r.Next(2) == 0) { r.Next(2); var _dg4 = r.Next(25) + 25; }
+            if (r.Next(2) == 0) var _dg7 = r.Next(3) + 3;
             if (r.Next(3) > 0) { r.Next(9); r.Next(1, 3); }
             if (r.Next(3) != 0) r.Next(2, 5);
-            if (r.Next(2) == 0) r.Next(11) + 10;
+            if (r.Next(2) == 0) { var _dg5b = r.Next(11) + 10; }
             if (r.Next(2) == 0) r.Next(50, 90);
         }
         else if (num7 < H - 250)
@@ -5497,7 +5497,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
                 int num25 = (int)r.Next(7);
                 if ((int)r.Next(20) == 0 && num7 > lavaLine) { }
                 else if ((int)r.Next(15) == 0) { }
-                else if (num25 == 6) { r.Next(26) + 25; }
+                else if (num25 == 6) { var _dg2 = r.Next(26) + 25; }
             }
             if (r.Next(5) == 0) { }                             // 可疑眼球 43
             if (r.Next(3) == 0) { }                             // 炸药 167
@@ -5518,7 +5518,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
             if (r.Next(3) == 0) { }                             // 炸药 167
             if (r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }
             if (r.Next(2) == 0) { r.Next(2); r.Next(50, 75); }
-            if (r.Next(2) == 0) r.Next(6) + 15;                 // 再生药水 227
+            if (r.Next(2) == 0) var _dg6 = r.Next(6) + 15;                 // 再生药水 227
             if (r.Next(3) > 0) { r.Next(8); r.Next(1, 3); }
             if (r.Next(3) > 1) { r.Next(8); r.Next(1, 3); }
             { r.Next(1, 3); r.Next(2); }
@@ -5571,8 +5571,8 @@ void DgBasicChests()
         int half = (int)(rm.Strength * 0.4f);
         for (int j = 0; j < 1000; j++)
         {
-            int num = (int)System.Math.Lerp((double)(rm.Ex - half), rm.Ex + half, (double)r.NextDouble());
-            int num2 = (int)System.Math.Lerp((double)(rm.Ey - half), rm.Ey + half, (double)r.NextDouble());
+            int num = (int)((double)(rm.EX - half) + ((double)(rm.EX + half) - (double)(rm.EX - half)) * (double)r.NextDouble());
+            int num2 = (int)((double)(rm.EY - half) + ((double)(rm.EY + half) - (double)(rm.EY - half)) * (double)r.NextDouble());
             if (!DgFeatAreaOK(num, num2, 1)) continue;          // CanGenerateFeatureInArea(feature, num, num2, 1)
             int itemType, chestStyle = 2;
             DgLootStyle(num2, out itemType, ref chestStyle);

@@ -145,8 +145,9 @@ export function martianProbeAI(e: Enemy, game: GameHooks, player: Player | null)
       return;
     }
   }
-  // 点光（:38210-38217）：天蓝 0.65 / 逃逸态红 0.65
-  e.lightRGB = e.ai0 === 2 ? [0.42, 0.09, 0.09] : [0.14, 0.36, 0.49];
+  // 点光（:38210-38217）：rgb = ai0==2 ? Color.Red : Color.SkyBlue，×0.65
+  // ——SkyBlue(135,206,235)/255×0.65=(0.344,0.525,0.599)；Red×0.65=(0.65,0,0)
+  e.lightRGB = e.ai0 === 2 ? [0.65, 0, 0] : [0.344, 0.525, 0.599];
   // 位移：0/1 态贴地碰撞（SetDefaults 无 noTileCollide）,2 态原版置 noTileCollide=true
   if (e.ai0 === 2) fly(e);
   else moveAndCollide(e, game.world, e.vx, e.vy);
@@ -634,7 +635,7 @@ export function martianDroneAI(e: Enemy, game: GameHooks, player: Player | null)
     }
     return;
   }
-  e.lightRGB = [0.1, 0.4, 0.6];
+  // aiStyle 74 常态无 AddLight（:35452-35580 全块无点光——曾挂 [0.1,0.4,0.6] 造假常光）
   fly(e);
 }
 

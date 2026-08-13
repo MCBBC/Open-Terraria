@@ -45,7 +45,11 @@ import {
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
 import { openDoor } from '../world/Door';
-import { fighterMoveStep, chaosElementalStep, swampThingAmbushStep, attemptToFindTeleportSpot } from './fighterFamilies';
+import {
+  fighterMoveStep, chaosElementalStep, swampThingAmbushStep, attemptToFindTeleportSpot,
+  psychoStealthStep, nailheadHitScatter, butcherKbStep, possessedStep, fritzPounceStep,
+  FIGHTER_NO_DOOR,
+} from './fighterFamilies';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
 import {
@@ -59,6 +63,7 @@ import {
   getKnockbackMultiplierScaledByDifficulty,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
+import { spawnNpcDeathGore } from './GorePiece';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
@@ -1121,6 +1126,16 @@ export class Enemy extends Entity {
       .add(dart, 'projectiles');
   }
 
+  /** 敌怪弹幕发射辅助（原始速度向量版）：Nailhead 463 散射（NPC.cs:57611）等
+   *  "速度向量已定"的发射点——shootDart 会把 (tx,ty) 归一到 speed，不适用此处。
+   *  projId = 原版弹型（Dart.ts DART_STYLE 表） */
+  spawnHostileProj(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId = 0): void {
+    const dart = new Dart(x, y, vx, vy, dmg, projId);
+    dart.hostile = true;
+    (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
+      .add(dart, 'projectiles');
+  }
+
   private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1) {
     // 注：水中行为不在本方法——wet 减速由 npcLiquid→liqFactor 统一承担（原版
     // Collision_MoveWhileWet），浮力族（史莱姆）的弹跳漂浮在各自 AI 的 wet 段（cs:61877）
@@ -1583,13 +1598,20 @@ export class Enemy extends Entity {
     if (this.vanillaId === 480 && player) {
       if (this.medusaChargeStep(game, player)) return;
     }
+    // ---- Psycho 466 潜伏突袭（NPC.cs:56290-56326，AI_003 最前段——先于白天驱散）：
+    // 潜伏/显形两分支 return 跳过本 tick 余段（helper 自补重力+碰撞）
+    if (psychoStealthStep(this, game, player)) return;
     // ---- 白天地表驱散（cs:57732-57775 + NotDiscouraged :60694）：
     // 白天 && y<worldSurface && 类型不在昼行豁免表 → 停止索敌 + EncourageDespawn(10)，
     // 沿原方向游荡（站定 2t 转向），离屏后由 CheckActive ~10t 清除。
+    // ★日食豁免（:60694 首条件 !Main.eclipse）：日食期间全体战士族不被驱散——
+    // 日食怪（Eyezor/Psycho/Nailhead/Butcher/Possessed/Fritz/Dr Man Fly）都是白天
+    // 刷的，缺此门会一出生就停止索敌游荡离场。
     // 墓地豁免（:60698 `!Main.player[npcInstance.target].ZoneGraveyard`）：目标玩家在
     // 墓地时白天不驱散——墓地白天刷出的僵尸/蛆僵尸白天照常索敌（scene 为本地玩家
     // 快照，单人下与"目标玩家所在区"等价）
-    const daySurface = game.world.clock.isDay && this.cy < game.world.groundLevel * TILE
+    const daySurface = game.world.clock.isDay && !game.world.clock.eclipse
+      && this.cy < game.world.groundLevel * TILE
       && !game.world.scene?.zoneGraveyard;
     const dayActive = this.vanillaId != null
       && (FIGHTER_DAY_ACTIVE.has(this.vanillaId)
@@ -1624,6 +1646,14 @@ export class Enemy extends Entity {
     if (swampThingAmbushStep(this, !!player && this.canSeePlayer(st, player))) return;
     // 混沌元素 120（NPC.cs:57431-57460/:60679-60696）：ai[3] 卡死计数 + 传送
     if (this.vanillaId === 120 && player) this.ai3 = chaosElementalStep(this, game, player);
+    // ---- 日食怪战士族专属段（NPC.cs:57547-57710，位于卡死计数与横向移动链之间）----
+    // Nailhead 463 受击散射（:57547-57613）；Butcher 460 空中免击退（:57615-57624）；
+    // Possessed 469 爬墙冲刺（:57626-57677，冲刺分支 return 跳过余段）；
+    // Fritz 462 跳扑（:57678-57710，改 vx/vy 后继续走本 tick 行走）
+    nailheadHitScatter(this, game, player);
+    butcherKbStep(this);
+    if (possessedStep(this, game, player)) return;
+    fritzPounceStep(this, player);
     // 横向移动逐族表（NPC.cs:57799-58800 else-if 链 1:1，fighterFamilies.ts）——
     // 取代一期固定档（加速 0.1 / 限速 ±1）；射击族（:58719 排除表）链上无分支
     fighterMoveStep(this, dir, player);
@@ -1668,8 +1698,12 @@ export class Enemy extends Entity {
     // tick +5（tall gate 388 +2）累计至 10 → 尝试开门（失败 30t 脱离 ai[3]=num21）；
     // 血月/墓园不脱离（AI_007 flag27 反义：(!bloodMoon||getGoodWorld)&&!graveyard），
     // 持续攻门直到开出；GoblinPeon 26 直接拆门（KillTile → 掉门物品）。
+    // ★:60383 flag8 门（NPC.cs:57462-57471 表）：Psycho 466/Possessed 469/Eyezor 251/
+    // Dr Man Fly 468/沼泽怪 166/美杜莎 480 等表内型原版**不攻门**。
     if (this.doorCd > 0) {
       this.doorCd--;
+    } else if (this.vanillaId == null || FIGHTER_NO_DOOR.has(this.vanillaId)) {
+      // flag8=false 族：原版整个攻门段被 `&& flag8` 短路（doorWarm/doorHit 也不累计）
     } else if (this.vy === 0 && dir !== 0 && vxSign === dir) {
       const dtx = fx, dty = fy - 1;
       if (st.inBounds(dtx, dty) && st.flags[st.idx(dtx, dty)]) {
@@ -1799,6 +1833,41 @@ export class Enemy extends Entity {
         }
         if (this.ai2 >= 100) this.ai2 = 0;
       } else this.ai2 = 0;
+    }
+    // ---- Eyezor 251 死光（NPC.cs:59335-59378：独立 type 段，**不在**通用射击族
+    // （:59464 表无 251）；ai[2] 每 tick +1（:59349），justHit 倒扣 rand(30)（:59337），
+    // confused 清零（:59345），负值钳 0（:59341）。阈值 = rand(60..1799)×(HP比)+15
+    // （:59350-59352 每次判定重掷）。命中门：计时达标 + 落地 + 玩家存活且未冰冻
+    // （:59353 !Main.player[target].frozen = buff 47）+ 朝向玩家 + CanHit；再过
+    // <700px 距离门（:59363-59364）→ EyeLaser 83（速 15 伤 30；枪口
+    // (Center.X + 6×direction, position.Y + 12)，瞄准 + 散布 ±40 / Y −30..−1，
+    // 出生点沿弹向 +vel×3）；发射后 ai[2]=0（:59374）
+    if (this.vanillaId === 251 && player) {
+      if (this.justHit) this.ai2 -= Math.floor(Math.random() * 30);      // :59337-59340
+      if (this.ai2 < 0) this.ai2 = 0;                                    // :59341-59344
+      if (this.confused) this.ai2 = 0;                                   // :59345-59348
+      this.ai2 += 1;                                                     // :59349
+      // num142（:59350-59352）：rand(60,1800) × (life/lifeMax) + 15
+      const num142 = (60 + Math.floor(Math.random() * 1740)) * (this.hp / this.maxHp) + 15;
+      const facingPlayer = (this.facing > 0 && this.cx < player.cx)
+        || (this.facing < 0 && this.cx > player.cx);                     // :59353 direction 锥
+      if (this.ai2 >= num142 && this.vy === 0 && !player.dead
+        && !player.buffs?.has(BuffType.Frozen)                           // :59353 !frozen
+        && facingPlayer && this.canSeePlayer(st, player)) {
+        // 枪口（:59356-59357）：(Center.X + 6×direction, position.Y + 12)
+        const mx = this.cx + 6 * this.facing, my = this.y + 12;
+        let num144 = player.cx - mx + (Math.random() * 82 - 41);         // :59358/:59360 ±41
+        let num145 = player.cy - my + (Math.floor(Math.random() * 30) - 30); // :59359/:59361 −30..−1
+        const num146 = Math.hypot(num144, num145);                       // :59362
+        if (num146 < 700) {                                              // :59363-59364 距离门
+          const num143 = 15;                                             // :59355 弹速
+          // 出生点沿弹向 +vel×3（:59371-59372）
+          const u = num146 || 1;
+          this.shootDart(game, mx + (num144 / u) * num143 * 3, my + (num145 / u) * num143 * 3,
+            num144, num145, num143, 30, 83);                             // :59373 proj 83 伤 30
+          this.ai2 = 0;                                                  // :59374
+        }
+      }
     }
   }
 
@@ -6052,7 +6121,13 @@ export class Enemy extends Entity {
       if (this.killBossFlag) game.playSfx('roar', 1, this.cx, this.cy);
       else if (this.def.killedSound.length) game.playSfxFiles(this.def.killedSound, 1, this.cx, this.cy);
       else game.playSfx('killed', 1, this.cx, this.cy);
+      // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →
+      // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece
+      // （位置/速度/ai 门 1:1，Gore.NewGore 随机扰动在 GorePiece.newGore 内）。
+      // 无表项 = 原版只出尘不出块（史莱姆族等）→ 只走下方彩色粒子近似
+      spawnNpcDeathGore(this, game, Math.sign(kbx) || 1);
       // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
+      // （兼作原版 HitEffect 的血尘近似，与 gore 碎块叠加）
       const [c1, c2, c3] = this.def.gore;
       const big = this.killBossFlag || this.w > 40;
       game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });

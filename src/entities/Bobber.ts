@@ -33,6 +33,20 @@ function nextInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min));
 }
 
+/** 鱼竿物品 id → 浮标弹型（原版两处合成：
+ *  Item.cs SetDefaults :23001 `shoot = 361 + type - 2291`（竿 2291-2296 → 361-366）、
+ *  2289 显式 360 / 4325 血肉竿 760 / 4442 热钓竿 775；
+ *  Player.UpdateFishingBobber :36244-36272 竿 5139-5146 覆写 986-993
+ *  ——987-993 即七色发光浮漂，light=1+glowMask 318+） */
+export function bobberProjIdFor(poleVid: number): number {
+  if (poleVid >= 5139 && poleVid <= 5146) return 986 + (poleVid - 5139);
+  if (poleVid >= 2291 && poleVid <= 2296) return 361 + (poleVid - 2291);
+  if (poleVid === 2289) return 360;
+  if (poleVid === 4325) return 760;
+  if (poleVid === 4442) return 775;
+  return 360;
+}
+
 interface PondState { lava: boolean; honey: boolean; waterTilesCount: number }
 
 /** GetFishingPondState（Projectile.cs:20170-20201）1:1：
@@ -75,6 +89,9 @@ export class Bobber extends Entity {
   /** 渔获原版 id → 钓起时落物用 */
   private polePower: number;
   poleVid = 0;
+  /** 原版弹型（鱼竿→浮标映射，bobberProjIdFor；ProjLight 光由 Game 标量循环结算：
+   *  987-993 七色浮漂 light=1×各乘区——曾在无 projId 下整族无光） */
+  projId = 360;
   /** 鱼饵原版 id（IsLavaBait / CanFishInLava 三源判定用，:19230/:19371-19382） */
   baitVid = 0;
   private baitSlot: number;

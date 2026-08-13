@@ -264,12 +264,16 @@ export const mysticLogs: MysticLogState = {
 
   startWorld(host: FairyHost): void {
     this.scanWholeOverworldForLogs(host.world.store, host.world.groundLevel);
+    // Spawner.fairyLog（MysticLogFairiesEvent.cs:181-183）：扫到任一倒木即置位，
+    // 地下仙女链（NPC.cs:5730 CheckToSpawnUndergroundFairy）的消费门——运行时位不落盘
+    host.world.fairyLog = this._stumpCoords.length > 0;
   },
 
   startNight(host: FairyHost): void {
     this._canSpawnFairies = true;
     this._delayUntilNextAttempt = 0;
     this.scanWholeOverworldForLogs(host.world.store, host.world.groundLevel);
+    host.world.fairyLog = this._stumpCoords.length > 0;
   },
 
   fallenLogDestroyed(host: FairyHost): void {

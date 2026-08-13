@@ -87,13 +87,15 @@ export class PrismProng extends Entity {
     const aim = Math.atan2(p.dirY, p.dirX);
     const off = this.idx - 2.5;
     const orbit = (charge + off * num723) / (num723 * 6) * Math.PI * 2;
-    const spreadRot = Math.sin(orbit) * (Math.PI / 6) * num724;   // UnitY.RotatedBy(num727).Y
-    const orbitOff = Math.sin(orbit + Math.PI / 2) * 4;           // (cos,sin)×(4,num725) 近似
-    const orbitOffY = Math.cos(orbit + Math.PI / 2) * num725;
-    // 轨道偏移旋转到 aim 系
+    // UnitY.RotatedBy(θ) = (−sinθ, cosθ)（XNA 旋转阵）；num722 取其 .Y=cosθ
+    const spreadRot = Math.cos(orbit) * (Math.PI / 6) * num724;   // :30376
+    // 预旋转分量（:30374：(−sinθ,cosθ)×(4,num725)——曾写 sin(θ+π/2) 相位错，修正）
+    const pxPre = -4 * Math.sin(orbit);
+    const pyPre = num725 * Math.cos(orbit);
+    // 轨道偏移旋转到 aim 系（.RotatedBy(aim)）
     const ca = Math.cos(aim), sa = Math.sin(aim);
-    this.x = p.cx - this.w / 2 + (ca * 16) + ca * num726 + (ca * orbitOff - sa * orbitOffY);
-    this.y = p.cy - this.h / 2 + (sa * 16) + sa * num726 + (sa * orbitOff + ca * orbitOffY);
+    this.x = p.cx - this.w / 2 + ca * 16 + ca * num726 + (ca * pxPre - sa * pyPre);
+    this.y = p.cy - this.h / 2 + sa * 16 + sa * num726 + (sa * pxPre + ca * pyPre);
     // 光束方向 = aim 旋转 spreadRot
     const rot = aim + spreadRot;
     this.vx = Math.cos(rot);
@@ -204,11 +206,16 @@ export class PrismProj extends Entity {
     this.charge++;
     const cadence = this.charge > 120 ? 5 : this.charge > 90 ? 15 : 30;
     if (this.charge % cadence === 0 && !this.payMana()) { this.dead = true; this.killProngs(); return; }
-    // aim 平滑（:63662-63676）：Lerp(aimDir, prevDir, 0.92) 归一 ×30
+    // aim 平滑（:63662-63676）：value7=Normalize(瞄准向) 先归一，再
+    // Lerp(value7, Normalize(velocity), 0.92)（曾漏归一直接 0.08×原始差——鼠标
+    // 距离越远偏差越大，2026-08-13 复查修正）
     const aim = this.aimCb();
     const pd = Math.hypot(this.dirX, this.dirY) || 1;
-    let mx = (aim.x - this.cx) * 0.08 + (this.dirX / pd) * 0.92;
-    let my = (aim.y - this.cy) * 0.08 + (this.dirY / pd) * 0.92;
+    let ax = aim.x - this.cx, ay = aim.y - this.cy;
+    const al = Math.hypot(ax, ay) || 1;
+    ax /= al; ay /= al;
+    let mx = ax * 0.08 + (this.dirX / pd) * 0.92;
+    let my = ay * 0.08 + (this.dirY / pd) * 0.92;
     const ml = Math.hypot(mx, my) || 1;
     this.dirX = mx / ml * 30; this.dirY = my / ml * 30;
     // channel 门（:63700-63717）：断 channel/noItems/CCed → Kill

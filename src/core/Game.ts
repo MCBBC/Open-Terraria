@@ -104,7 +104,6 @@ import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spaw
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
-import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerDamageMult, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
@@ -118,6 +117,7 @@ import { scanLuckScene, rollLuck } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
 import { pickMusic, newMusicState, bossMusicFor, BOSS_MUSIC, MUSIC, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
+import { resetGorePool } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
@@ -194,10 +194,9 @@ import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj } from '../entities/PrismProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
-import { Bobber } from '../entities/Bobber';
+import { Bobber, bobberProjIdFor } from '../entities/Bobber';
 import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
 import { npcRarityOf } from '../data/vanillaNpcs';
-import { bannerOfNpc } from '../world/Banners';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
 import { GolfState } from '../world/golf/GolfState';
 import { golfVanillaTileId } from '../world/golf/golfPhysics';
@@ -1931,6 +1930,7 @@ export class Game implements GameHooks {
       }
     });
     this.entities.clear();
+    resetGorePool();                // Gore 池计数同步归零（clear 丢弃引用不置 dead，防 600 槽假满）
     clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
     partyWorldClear(this.partyState);
     LanternNight.worldClear();      // LanternNight.WorldClear（Main.cs:51656）：运行时态不进存档
@@ -3810,56 +3810,119 @@ export class Game implements GameHooks {
         || prevLight.r !== heldRGB![0] || prevLight.g !== heldRGB![1] || prevLight.b !== heldRGB![2]))) {
       this.lighting.dirty = true;
     }
-    // 弹幕动态点光(原版 Projectile.ProjLight() cs:14809：light 标量 × 逐类型
-    // RGB 乘区表；荧光棒/燃烧箭/火花/火焰镖等飞行中发光——均暴露 projId)。
-    // 荧光棒族颜色表（cs:15060-15091，与手持光同色）：
-    //   50=(0.7,1,0.8) 53=(0.7,0.8,1) 473=(1.05,0.95,0.55) 515=(1,0.6,0.85)
-    //   870=(0.9,0.35,1) 1089=Disco 轮转
-    // ProjLight() 乘区全表（Projectile.cs:14808-15309 全量提取；第二路审计
-    // 曾仅 5 条致 91 型发光弹白光——燃烧箭暖橙/诅咒焰绿/七色浮漂全失色）
-    const PROJ_LIGHT_RGB: Record<number, [number, number, number]> = {
-      2: [1, 0.75, 0.55], 4: [0.5, 0.1, 1], 5: [1, 1, 1], 6: [1, 1, 1],
-      12: [0.9, 0.8, 0.1], 14: [1, 0.7, 0.1], 15: [1, 0.4, 0.1], 16: [0.1, 0.4, 1],
-      18: [0.6, 0.1, 1], 19: [1, 0.5, 0.1], 20: [0.1, 1, 0.3], 34: [1, 0.1, 0.1],
-      36: [0.8, 0.2, 0.6], 41: [1, 0.8, 0.6], 44: [0.6, 0.1, 1], 45: [0.6, 0.1, 1],
-      50: [0.7, 1, 0.8], 53: [0.7, 0.8, 1], 72: [0.45, 0.75, 1], 73: [0.4, 0.6, 1],
-      74: [1, 0.4, 0.6], 76: [1, 0.3, 0.6], 77: [1, 0.3, 0.6], 78: [1, 0.3, 0.6],
-      80: [0, 0.8, 1], 83: [0.7, 0, 1], 84: [0.8, 0, 0.5], 86: [1, 0.45, 0.75],
-      87: [0.45, 1, 0.75], 88: [0.7, 0, 1], 89: [0.05, 0.2, 1], 90: [0.05, 0.2, 1],
-      93: [1, 1, 0.01], 94: [0.5, 0, 1], 95: [0.35, 1, 0], 96: [0.35, 1, 0],
-      100: [1, 0.5, 0], 103: [0.35, 1, 0], 104: [0.35, 1, 0], 106: [0, 0.5, 1],
-      110: [1, 0.7, 0.1], 113: [0.25, 0.75, 1], 114: [0.5, 0.05, 1], 115: [0.5, 0.05, 1],
-      116: [1, 1, 0.25], 131: [0.1, 0.4, 1], 132: [0.2, 1, 0.6], 156: [1, 0, 0.6],
-      157: [0.2, 1, 0.6], 172: [0.35, 0.55, 1], 173: [0.3, 0.4, 1], 180: [1, 0.7, 0.1],
-      182: [1, 1, 1], 207: [0.4, 1, 0.4], 209: [0.25, 1, 0.5], 211: [0.5, 0.9, 1],
-      226: [0.25, 1, 0.5], 229: [0.25, 1, 0.5], 242: [1, 0.7, 0.1], 253: [0, 0.4, 1],
-      254: [0.1, 1, 1], 257: [0.1, 0.9, 1], 263: [0.1, 0.7, 1], 274: [0.7, 0.1, 1],
+    // 弹幕动态点光 = Projectile.ProjLight() 1:1 全函数逐 case 转写（cs:14809-15309）。
+    // 语义：final = light(SetDefaults) × 乘区表（缺省 [1,1,1]）；个别通道被原版
+    // 【绝对赋值】（num=0.3f / num3=1f 等）——PROJ_LIGHT_ABS_CHAN 非 null 通道直接
+    // 取常量（忽略 light）。动态档专属分支先于表查询：
+    //   79/1089  Disco 绝对（num=Disco/255 覆写，:278-283/:349-354）
+    //   251      light × (Disco+1)/2（:469-480 先白化再乘回 light）
+    //   993      light × Disco（switch 段 :42-46，乘区非绝对）
+    //   867/1000 闪烁公式绝对（num4=Next(28,42)×0.005+(270-mouseTextColor)/500，:63-78）
+    //   209      ×(0.3,0.4,1.75) 再乘 fade=(255-alpha)/255（:453-462）
+    //   211      ×(0.5,0.9,1)；light 帧后自改写（首帧 1.0→次帧 1.5→其后 1.0，:439-452）
+    //   259      B×0.1；getGoodWorld 全零（:84-93）
+    //   870      ×(0.9, G=0.35 绝对, 1) + FloodFillTile 4.5 穿墙扩散（:487-495）
+    // （第二路审计曾仅 5 条乘区致 91 型发光弹白光；后续全表批又漏了绝对通道/动态档
+    //  ——44 族 B=1 绝对、251 白化公式、209 alpha 渐变均被当纯乘区）
+    const PROJ_LIGHT_MUL: Record<number, [number, number, number]> = {
+      // switch 段（:12-46，仅 987-993；993 动态不在此表）
+      987: [0.6, 0.5, 0.1], 988: [0.8, 0.35, 0], 989: [0, 0.65, 0],
+      990: [0, 0.35, 0.7], 991: [0.9, 0, 0.5], 992: [0.75, 0, 0.75],
+      // if-else 链（:48-486；含绝对通道的类型乘区照抄、绝对值见 ABS_CHAN）
+      446: [0, 1, 0.8], 493: [1, 0.3, 1], 494: [1, 0.3, 1], 876: [0.1, 0.7, 1],
+      // 867/1000 动态绝对；332/259：
+      332: [1, 0.6, 0.1], // 259 动态（getGoodWorld 零化）不在此表
+      329: [1, 0.9, 0.1], 2: [1, 0.75, 0.55], 82: [1, 0.75, 0.55],
+      172: [0.35, 0.55, 1], 308: [0.1, 0.7, 1], 304: [1, 0.2, 0.1], 263: [0.1, 0.7, 1],
+      274: [0.7, 0.1, 1], 254: [0.1, 1, 1], 94: [0.5, 0, 1],
+      95: [0.35, 1, 0], 96: [0.35, 1, 0], 103: [0.35, 1, 0], 104: [0.35, 1, 0],
+      4: [0.5, 0.1, 1], 257: [0.1, 0.9, 1], 9: [1, 0.1, 0.6],
+      // 488 全绝对（ABS_CHAN）；92/93：
+      92: [0.8, 0.6, 1], 93: [1, 1, 0.01],
+      12: [0.9, 0.8, 0.1], 955: [0.9, 0.8, 0.1],
+      14: [1, 0.7, 0.1], 110: [1, 0.7, 0.1], 180: [1, 0.7, 0.1], 242: [1, 0.7, 0.1],
+      302: [1, 0.7, 0.1], 981: [1, 0.7, 0.7],
+      15: [1, 0.4, 0.1], 16: [0.1, 0.4, 1], 27: [0, 0.3, 1], 36: [1, 0.2, 0.6],
+      18: [0.6, 0.1, 1], 19: [1, 0.5, 0.1], 20: [0.1, 1, 0.3], 22: [0, 0, 1],
+      34: [1, 0.1, 0.1], 41: [1, 0.8, 0.6], 44: [0.6, 0.1, 1], 45: [0.6, 0.1, 1],
+      50: [0.7, 1, 0.8], 515: [1, 0.6, 0.85], 53: [0.7, 0.8, 1], 473: [1.05, 0.95, 0.55],
+      72: [0.45, 0.75, 1], 73: [0.4, 0.6, 1], 74: [1, 0.4, 0.6],
+      76: [1, 0.3, 0.6], 77: [1, 0.3, 0.6], 78: [1, 0.3, 0.6], 80: [0, 0.8, 1],
+      83: [0.7, 0, 1], 88: [0.7, 0, 1], 84: [0.8, 0, 0.5], 389: [0.8, 0, 0.5],
+      89: [0.05, 0.2, 1], 90: [0.05, 0.2, 1], 86: [1, 0.45, 1], 87: [0.45, 1, 0.75],
+      100: [1, 0.5, 0], 106: [0, 0.5, 1], 113: [0.25, 0.75, 1], 114: [0.5, 0.05, 1],
+      115: [0.5, 0.05, 1], 116: [1, 1, 0.25], 131: [0.1, 0.4, 1], 132: [0.2, 1, 0.6],
+      157: [0.2, 1, 0.6], 156: [1, 0, 0.6], 173: [0.3, 1, 1], 207: [0.4, 1, 0.4],
+      253: [0, 0.4, 1], 226: [0.25, 1, 0.5], 221: [0.25, 1, 0.5], 229: [0.25, 1, 0.5],
       278: [1, 1, 0], 279: [1, 1, 0], 283: [0.8, 0.1, 1], 284: [1, 0.1, 0.8],
-      285: [0.1, 0.5, 1], 286: [1, 0.5, 0.1], 287: [0.9, 1, 0.4], 302: [1, 0.7, 0.1],
-      304: [1, 0.2, 0.1], 308: [0.1, 0.7, 1], 329: [1, 0.9, 0.1], 332: [1, 0.6, 0.1],
-      389: [0.8, 0, 0.5], 446: [0, 1, 0.8], 451: [1, 1, 1], 473: [1.05, 0.95, 0.55],
-      488: [0.3, 0, 0.25], 493: [1, 0.3, 1], 494: [1, 0.3, 1], 515: [1, 0.6, 0.85],
-      866: [1, 1, 1], 870: [0.9, 0.35, 1], 876: [0.1, 0.7, 1], 955: [0.9, 0.8, 0.1],
-      981: [1, 0.7, 0.7], 987: [0.6, 0.5, 0.1], 988: [0.8, 0.35, 0], 989: [0, 0.65, 0],
-      990: [0, 0.35, 0.7], 991: [0.9, 0, 0.5], 992: [0.75, 0, 0.75], 1099: [1, 1, 1],
-      // Disco 型（79/251/993/1089）运行期动态色，见下方 rgb 分支
+      285: [0.1, 0.5, 1], 286: [1, 0.5, 0.1], 287: [0.9, 1, 0.4],
+      // 211/209/870 动态分支见下（870 乘区 [0.9,1,1]+G 绝对 0.35）
+    };
+    // 绝对通道表（原版对该通道【赋常量】而非乘 light——num=0.8f / num3=1f 等）：
+    // 非 null 通道 final = 常量；其余通道仍走乘区表
+    const PROJ_LIGHT_ABS_CHAN: Record<number, [number | null, number | null, number | null]> = {
+      15: [1, null, null],              // R 绝对 1（:192-197）
+      16: [null, null, 1],              // B 绝对 1（:198-203）
+      27: [null, null, 1],              // B 绝对 1（:224-229）
+      36: [0.8, null, null],            // R 绝对 0.8（:235-240）
+      44: [null, null, 1], 45: [null, null, 1],  // B 绝对 1（:246-251）
+      488: [0.3, 0, 0.25],              // 全绝对（:159-164）
+      72: [null, null, 1],              // B 绝对 1（:284-289）
+      86: [null, null, 0.75],           // B 绝对 0.75（:290-295）
+      87: [null, 1, null],              // G 绝对 1（:296-301）
+      173: [null, 0.4, null],           // G 绝对 0.4（:423-428）
+      // 156 G=0 / 253 R=0 / 22 R=G=0 与乘 0 等价，不列入
     };
     for (const p of this.entities.projectiles) {
-      const pid = (p as { projId?: number }).projId;
+      const pe = p as unknown as {
+        projId?: number; x: number; y: number; w: number; h: number;
+        alpha?: number; age?: number; lightRGB?: unknown;
+      };
+      const pid = pe.projId;
       if (pid == null) continue;
+      // 实体自报点光（AI 侧 AddLight——985 泰拉刃 :39382 / 502 喵刀 :22611-22621）：
+      // 由实体光通道结算，此处跳过防双重注入
+      if (pe.lightRGB) continue;
       const l = projectileData(pid)?.light;
       if (!l || l <= 0) continue;
-      const pe = p as unknown as { x: number; y: number; w: number; h: number };
-      // Disco 型（79/251/993/1089）用真 FlickerClock.discoColor（原版 Disco/255 连续轮转；
-      // 曾 1089 六色跳变近似、其余 Disco 型完全缺）
-      const isDisco = pid === 79 || pid === 251 || pid === 993 || pid === 1089;
-      const rgb = isDisco
-        ? this.lighting.clock.discoColor()
-        : PROJ_LIGHT_RGB[pid] ?? [1, 1, 1];
-      this.lighting.addLight(
-        Math.floor((pe.x + pe.w / 2) / TILE), Math.floor((pe.y + pe.h / 2) / TILE),
-        l * rgb[0], l * rgb[1], l * rgb[2],
-      );
+      const tx = Math.floor((pe.x + pe.w / 2) / TILE), ty = Math.floor((pe.y + pe.h / 2) / TILE);
+      let lr: number, lg: number, lb: number;
+      const clock = this.lighting.clock;
+      if (pid === 79 || pid === 1089) {
+        // Disco 绝对（覆写 num=Disco/255，light 不参与）
+        [lr, lg, lb] = clock.discoColor();
+      } else if (pid === 251) {
+        const d = clock.discoColor();
+        lr = (l * (d[0] + 1)) / 2; lg = (l * (d[1] + 1)) / 2; lb = (l * (d[2] + 1)) / 2;
+      } else if (pid === 993) {
+        const d = clock.discoColor();
+        lr = l * d[0]; lg = l * d[1]; lb = l * d[2];
+      } else if (pid === 867 || pid === 1000) {
+        const n4 = (Math.random() * 14 + 28) * 0.005 + (270 - clock.mouseTextColor) / 500;
+        if (pid === 867) { lr = 0.1; lg = 0.3 + n4 / 2; lb = 0.6 + n4; }
+        else { lr = 0.3 + n4 * 0.25; lg = 0.35 + n4 * 0.75; lb = 0.5 + n4; }
+      } else if (pid === 209) {
+        const fade = (255 - (pe.alpha ?? 255)) / 255;
+        lr = l * 0.3 * fade; lg = l * 0.4 * fade; lb = l * 1.75 * fade;
+      } else if (pid === 211) {
+        // light 帧序（:439-452）：帧1 用 SetDefaults 1.0，帧2 用改写后的 1.5，帧3+ 用 1.0
+        const l211 = pe.age === 2 ? 1.5 : 1;
+        lr = l211 * 0.5; lg = l211 * 0.9; lb = l211;
+      } else if (pid === 259) {
+        if (this.world.seedFlags?.getGoodWorld) continue;   // FTW 世界不发光（:87-92）
+        lr = l; lg = l; lb = l * 0.1;
+      } else if (pid === 870) {
+        lr = l * 0.9; lg = 0.35; lb = l;   // G 绝对 0.35（:262-266）
+        this.addProjFloodLight(tx, ty, lr, lg, lb);
+        continue;
+      } else {
+        const m = PROJ_LIGHT_MUL[pid] ?? [1, 1, 1];
+        const a = PROJ_LIGHT_ABS_CHAN[pid];
+        lr = a?.[0] != null ? a[0] : l * m[0];
+        lg = a?.[1] != null ? a[1] : l * m[1];
+        lb = a?.[2] != null ? a[2] : l * m[2];
+      }
+      this.lighting.addLight(tx, ty, lr, lg, lb);
     }
     // 掉落物点光（WorldItem.UpdateItem_VisualEffects :1467-1471 + :1455-1461 + :1684-1703）：
     // createTile==4 火把族 → TorchColor；蜡烛(105) → [1,0.95,0.8]；均 !wet。
@@ -5423,6 +5486,7 @@ export class Game implements GameHooks {
             );
             bob.poleVid = fm ? +fm[1] : 0; // 血肉抛竿 4325 敌怪概率判定用
             bob.baitVid = baitVid;          // IsLavaBait 三源判定用（Projectile.cs:19230）
+            bob.projId = bobberProjIdFor(bob.poleVid);  // 浮标弹型（ProjLight 光结算用）
             this.entities.add(bob, 'projectiles');
             this.sfx.play('throw');
             // 成就：抛竿（Player.cs:48652 HandleSpecialEvent(7) → THROWING_LINES）
@@ -5443,6 +5507,40 @@ export class Game implements GameHooks {
   private heldPrefixStat() {
     const pfx = this.player.inv.heldItem()?.prefix;
     return pfx ? prefixStat(pfx) : null;
+  }
+
+  /** 870 族 ProjLight 穿墙播光（Projectile.cs:487-495 + Utils.FloodFillTile :2516
+   *  + DelegateMethods.SpreadLightOpen_StopForSolids :805）：从弹心 BFS 半径 4.5，
+   *  delegate 语义 = 内容格(type!=0，含致动块)/平台/非实心 → 播光并扩展邻居；
+   *  空气格不播不扩展（光沿实心侧渗入墙内）；尾段对弹心格恒播一次（:494） */
+  private addProjFloodLight(tx: number, ty: number, r: number, g: number, b: number): void {
+    const st = this.world.store;
+    this.lighting.addLight(tx, ty, r, g, b);
+    if (!st.inBounds(tx, ty)) return;
+    const MAXD = 4.5, RING = Math.ceil(MAXD) + 1;
+    const seen = new Set<number>([st.idx(tx, ty)]);
+    let cur = [st.idx(tx, ty)];
+    while (cur.length) {
+      const nxt: number[] = [];
+      for (const i of cur) {
+        const x = i % st.w, y = (i / st.w) | 0;
+        const d = TILE_DEFS[st.type[i]];
+        const expand = st.type[i] !== 0 || !!d?.platform || !(d?.solid ?? false);
+        if (!expand) continue;   // 空气格：不播光不扩展
+        this.lighting.addLight(x, y, r, g, b);
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < tx - RING || nx > tx + RING || ny < ty - RING || ny > ty + RING) continue;
+          if (Math.hypot(nx - tx, ny - ty) > MAXD) continue;   // delegate 距离门（:807-810）
+          if (!st.inBounds(nx, ny)) continue;
+          const ni = st.idx(nx, ny);
+          if (seen.has(ni)) continue;
+          seen.add(ni);
+          nxt.push(ni);
+        }
+      }
+      cur = nxt;
+    }
   }
 
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
@@ -10475,14 +10573,13 @@ export class Game implements GameHooks {
     const scene = r.scene;
     let oreText: string | null = null;
     if (scene && scene.bestOreSheet >= 0) {
-      const key = TILE_KEY_NAME_BY_SHEET.get(scene.bestOreSheet);
-      if (key) oreText = Lang.tileName(scene.bestOreSheet);
+      oreText = Lang.tileName(scene.bestOreSheet);
     }
     // 击杀数(BannerSystem.BannerToNPC + GetKillCount :46421-46430)
     let killText: string | null = null;
     if (p.lastCreatureHit > 0) {
       const banner = bannerOfNpc(p.lastCreatureHit);
-      const kills = banner != null ? (w.bannerKills.get(banner) ?? 0) : 0;
+      const kills = banner != null ? (w.bannerKills[banner] ?? 0) : 0;
       killText = `${Lang.npcName(p.lastCreatureHit)}: ${kills}`;
     }
     // ctx
@@ -11606,6 +11703,12 @@ export class Game implements GameHooks {
       this.world.bestiary.registerKill(enemy.vanillaNetId !== 0 && enemy.vanillaNetId != null
         ? enemy.vanillaNetId : enemy.vanillaId);
       this.achCheckBestiary();
+      // TryGrantingBestiary100Percent（AchievementsHelper.cs:80-87）：完成度达 100%
+      // → HandleSpecialEvent(29 BOOK_WORM;此前 100% 不触发,2026-08-13 接）
+      if (this.world.bestiary.completion().percent >= 1) {
+        this.achievements?.handleSpecialEvent(29,
+          { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+      }
     }
     // 旗帜击杀记账（BannerSystem.AddNPCKillBy :193-216——达标公告+掉一面旗;原版
     // claimable+对话领取,本仓自动授予近似,登记）

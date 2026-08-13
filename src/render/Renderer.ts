@@ -125,6 +125,7 @@ import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/Lu
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
+import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim } from '../entities/bossAI_dd2';
@@ -1178,6 +1179,12 @@ export class Renderer {
     //     水 0.6 半透明盖在实体上——水中角色带水色
     this.drawLiquids(world, cam, viewW, viewH, z, false);
 
+    // 4.6 Gore 死亡碎块（原版 DrawGore Main.cs:21712-21742：DrawItems/Rain 之后、
+    //     DrawDust 之前——实体与液体前景之后、尘粒之前；Main.DrawGore 帧路径 :21728-
+    //     21737 多帧源矩形，非帧路径 :21741-21742 整张贴图，均中心锚 + rotation +
+    //     scale，透明度 = (255-alpha)/255（Gore.GetAlpha :1486））
+    this.drawGorePieces(ctx, cam, viewW, viewH);
+
     // 5. 粒子
     for (const p of particles) {
       ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
@@ -1636,6 +1643,51 @@ export class Renderer {
       ctx.drawImage(pc, -8, -11, 16, 22);
     }
     ctx.restore();
+  }
+
+  /** Gore 死亡碎块（Main.DrawGore Main.cs:21712-21742）。世界变换内世界坐标绘制，
+   *  光照合成在后自动受光（同 wind-sway/natureParticles 层）。贴图多帧行取
+   *  GorePiece.frameRows（1217/1218 等竖条）；落地不归零 rotation（Gore.cs 无此步，
+   *  翻滚随 vx 摩擦冻结）。 */
+  private drawGorePieces(ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number) {
+    if (!this.atlas) return;
+    const pieces = liveGorePieces();
+    if (!pieces.length) return;
+    const z = cam.zoom;
+    // 视区外剔除（扩半贴图防边缘闪断）
+    const x0 = cam.x - viewW / 2 - 64, x1 = cam.x + viewW / 2 + 64;
+    const y0 = cam.y - viewH / 2 - 64, y1 = cam.y + viewH / 2 + 64;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const p of pieces) {
+      if (p.x < x0 || p.x > x1 || p.y < y0 || p.y > y1) continue;
+      this.drawGorePiece(ctx, p, z);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  private drawGorePiece(ctx: CanvasRenderingContext2D, p: GorePiece, z: number) {
+    const img = this.atlas!.ensureVImage(`vanilla/Gore_${p.goreId}.png`);
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const rows = p.frameRows;
+    const fh = img.naturalHeight / rows;
+    const sh = Math.floor(fh);
+    const sw = img.naturalWidth;
+    // Gore.GetAlpha（:1486）：opacity = (255 - alpha)/255
+    ctx.globalAlpha = Math.max(0, (255 - p.alpha) / 255);
+    if (p.rotation === 0 && p.scale === 1) {
+      // 直绘路径（Main.cs:21706-21742 原点即贴图中心：落点 + 尺寸/2）
+      ctx.drawImage(img, 0, p.row * sh, sw, sh, p.x, p.y, sw, sh);
+      return;
+    }
+    ctx.save();
+    ctx.translate(p.x + (sw * p.scale) / 2, p.y + (sh * p.scale) / 2);
+    if (p.rotation) ctx.rotate(p.rotation);
+    if (p.scale !== 1) ctx.scale(p.scale, p.scale);
+    ctx.drawImage(img, 0, p.row * sh, sw, sh, -sw / 2, -sh / 2, sw, sh);
+    ctx.restore();
+    void z;
   }
 
   /** 小动物：原版 NPC 纵向帧条动画（移动时循环全帧，静止首帧；贴图默认朝左镜像） */

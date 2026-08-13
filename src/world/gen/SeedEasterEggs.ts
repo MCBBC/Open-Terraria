@@ -15,6 +15,9 @@ export interface SeedFlags {
   infectedSeed?: boolean;    // 1.4.5 worldIsInfected 秘密种子（Main.infectedSeed）——
   //  尚无文本种子映射到该位（注册为哈希种子，WorldGen.cs:374），仅作 SceneMetrics
   //  向日葵压制 ×3 等读取位的预留（恒 false 时行为与原版普通世界一致）
+  graveyardBloodmoonStart?: boolean; // SecretSeed.graveyardBloodmoonStart（WorldGen.cs:356，
+  //  哈希注册无文本种子）——墓园 pass 的第二触发源（:18117-18120），预留位恒 false
+  //  时行为与原版普通世界一致
 }
 
 const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [

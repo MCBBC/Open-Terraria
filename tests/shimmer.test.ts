@@ -177,9 +177,9 @@ describe('掉落物入微光（WorldItem.Shimmering + GetShimmered）', () => {
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
     const drops: ItemDrop[] = [];
     const h = hooks(w, p);
-    (h as unknown as { spawnDrop: (...a: unknown[]) => ItemDrop | null }).spawnDrop =
-      (_x, _y, key, stack, vx, vy) => {
-        const d = new ItemDrop(_x, _y, ITEM_BY_KEY[key], stack);
+    (h as unknown as { spawnDrop: (x: number, y: number, key: string, stack: number, vx: number, vy: number) => ItemDrop | null }).spawnDrop =
+      (x: number, y: number, key: string, stack: number, vx: number, vy: number) => {
+        const d = new ItemDrop(x, y, ITEM_BY_KEY[key], stack);
         d.vx = vx; d.vy = vy;
         drops.push(d);
         return d;

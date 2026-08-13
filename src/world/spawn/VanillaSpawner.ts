@@ -396,6 +396,29 @@ export class VanillaSpawner {
 
   /** 造怪入口：netId 可为负（SetDefaultsFromNetId 映射）；
    *  ai0/ai1 = 原版 SpawnNPC 第 6/7 参（如攀爬者 101 的锚点格，NPC.cs:4040） */
+  /** 萤火虫四向附加（dx,dy ∈ {(-16,0),(16,0),(0,-16),(0,16)}，各独立掷
+   *  1/fireFlyMultiple；fireFlyMultiple 999999 绝迹哨兵经 1/999999 天然关闭） */
+  private queueFireflyExtras(rng: RNG, npc: number): void {
+    const m = Math.max(1, this.world.fireFlyMultiple);
+    for (const [dx, dy] of [[-16, 0], [16, 0], [0, -16], [0, 16]] as const) {
+      if (rng.next() < 1 / m) this.pendingCritterExtras.push({ npc, dx, dy });
+    }
+  }
+
+  /** CheckToSpawnUndergroundFairy（NPC.cs:5730-5757 1:1）：fairyLog 门 +
+   *  RollLuck(500[十周年 250]·hardMode ×1.66) + 深度窗 [(ws+rl)/2, h-300) +
+   *  AnyHelpfulFairies 拒 */
+  private checkToSpawnUndergroundFairy(rng: RNG): boolean {
+    if (!this.world.fairyLog) return false;
+    let num = 500;
+    if (this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.getGoodWorld) num = 250;
+    if (this.hardMode) num = Math.floor(num * 1.66);
+    if (rollLuck(this.playerLuck, num, () => rng.next()) !== 0) return false;
+    if (this.spawnTileY < (this.world.groundLevel + this.world.rockLevel) / 2
+      || this.spawnTileY >= this.world.store.h - 300) return false;
+    return !this.fairyHelpfulActive;
+  }
+
   private spawnNPC(x: number, y: number, netId: number, rng: RNG, ai0?: number, ai1?: number): Enemy | null {
     const map = NET_ID_MAP[netId];
     const baseId = map?.base ?? netId;
@@ -1674,15 +1697,17 @@ export class VanillaSpawner {
     //    （解救记账见 Game.freeBoundNpc；685 解救置 flags.unlockedSlimeOldSpawn）
     {
       const f = this.world.flags;
-      if (f['downedGoblins'] && N(20) && !this.waterTile && this.deeperThanRockLayer
+      // ★原版三支均为 RollLuck(20)（运气缩放，:1996-2008）——曾平掷 N(20)，已 1:1
+      const luck20 = () => rollLuck(this.playerLuck, 20, () => rng.next()) === 0;
+      if (f['downedGoblins'] && luck20() && !this.waterTile && this.deeperThanRockLayer
         && this.spawnTileY < st.h - 210 && !f['savedGoblin'] && !any(105)) {
         return this.spawnBound(105);
       }
-      if (hardMode && N(20) && !this.waterTile && this.deeperThanRockLayer
+      if (hardMode && luck20() && !this.waterTile && this.deeperThanRockLayer
         && this.spawnTileY < st.h - 210 && !f['savedWizard'] && !any(106)) {
         return this.spawnBound(106);
       }
-      if (this.downedBoss3 && N(20) && !this.waterTile && this.deeperThanRockLayer
+      if (this.downedBoss3 && luck20() && !this.waterTile && this.deeperThanRockLayer
         && this.spawnTileY < st.h - 210 && !f['unlockedSlimeOldSpawn'] && !any(685)) {
         return this.spawnBound(685);
       }
@@ -1866,6 +1891,18 @@ export class VanillaSpawner {
       if (N(3)) return D(461);                                 // 深海怪形 Creature from the Deep
       if (N(2)) return D(462);                                 // 弗里茨 Fritz
       return D(166);                                           // 沼泽怪 Swamp Thing（兜底）
+    }
+    // ---- 地下仙女（NPC.cs:3524-3532 else-if，日食支之后的下一支）：fairyLog 门 +
+    //      RollLuck(500[十周年 250]·hardMode×1.66) + 深度窗 + 无跟随仙女 →
+    //      Next(583,586) 随机三色（十周年 3/4 固定 583），ai2=2（跟玩家初始态）
+    //      ——2026-08-13 前整支缺失 = 倒木只影响地表夜仙女，地下随机仙女永不触发 ----
+    if (this.checkToSpawnUndergroundFairy(rng)) {
+      const t10 = this.world.seedFlags?.tenthAnniversary && !this.world.seedFlags?.getGoodWorld;
+      let fType = 583 + Math.floor(rng.next() * 3);          // Next(583, 586)
+      if (t10 && Math.floor(rng.next() * 4) !== 0) fType = 583;
+      const fe = this.spawnNPC(this.spawnTileX * TILE + 8, this.spawnTileY * TILE, fType, rng);
+      if (fe) fe.ai2 = 2;   // SpawnNPC(..., 2f) 第 9 参 = ai[2]（跟随态基线）
+      return fe;
     }
     // ---- 蘑菇地（L3540-3610，tile 70；三支 else-if 1:1）----
     if (t === T.MUSHROOM_GRASS) {
@@ -2224,7 +2261,10 @@ export class VanillaSpawner {
       if (!this.ZoneGraveyard && !tooWindy && !raining
         && (t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS)
         && N(Math.max(1, this.world.fireFlyChance)) && this.spawnTileY <= this.world.groundLevel) {
-        return D(t === T.HALLOW_GRASS ? 358 : 355);
+        // :4419-4433 主只后四向各 1/fireFlyMultiple 附加（此前恒单只，备案已核销）
+        const ffId = t === T.HALLOW_GRASS ? 358 : 355;
+        this.queueFireflyExtras(rng, ffId);
+        return D(ffId);
       }
       // L4439：乌鸦 Raven 301——(万圣节 || 墓地) && 1/12（节日未接 → 墓地单门）
       if (this.ZoneGraveyard && N(12)) return D(301);
@@ -2330,7 +2370,12 @@ export class VanillaSpawner {
       //  SpawnLavaBaitCritters（L5760）：2/3 → 白天 Hell Butterfly 653 / 夜 Lavafly 654
       //  （原版夜间成群 1-5 只，单返回值只交付 1 只）；else Magma Snail 655
       if (N(8)) {
-        if (!N(3)) return D(this.dayTime ? 653 : 654);
+        if (!N(3)) {
+          if (this.dayTime) return D(653);   // Hell Butterfly（昼，单只）
+          // :5767-5782 夜间 Lavafly 654 主只 + 四向 1/fireFlyMultiple 附加
+          this.queueFireflyExtras(rng, 654);
+          return D(654);
+        }
         return D(655);
       }
       // L4787：Bone Serpent 1/40（场上唯一）
@@ -2521,6 +2566,13 @@ export class VanillaSpawner {
    *  场上无 687 → 神秘青蛙 687（交付 pendingCritterKey 由 Game 转 Critter——687 无
    *  Enemy 数据条目）；RollLuck(400) → 金蛙 445；else 蛙 361。 */
   pendingCritterKey: string | null = null;
+  /** 萤火虫成群附加队列（原版 :2327-2344/:4419-4433/:5767-5782 主只后四向各
+   *  1/fireFlyMultiple 独立掷 SpawnNPC）——spawn() 单返回值只交付主只，附加以
+   *  像素偏移入队，Game.trySpawnEnemy 落位段消费（消费后清空） */
+  pendingCritterExtras: Array<{ npc: number; dx: number; dy: number }> = [];
+  /** NPC.AnyHelpfulFairies（:90885）：场上存在 ai[2]>1 的跟随态仙女 583/584/585
+   *  ——Game 每周期喂入（spawner 无实体桶访问） */
+  fairyHelpfulActive = false;
   private spawnFrog(rng: RNG): Enemy | null {
     const x = this.spawnTileX * TILE + 8;
     const y = this.spawnTileY * TILE;

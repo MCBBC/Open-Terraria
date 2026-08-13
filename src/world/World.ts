@@ -141,6 +141,9 @@ export class World {
   groundLevel = 0; rockLevel = 0;   // tile 坐标
   /** 地狱顶（原版 UnderworldLayer = maxTilesY-200；TerrainPass 设定，SceneMetrics/BGM/背景共用） */
   lavaLine = 0;
+  /** NPC.Spawner.fairyLog（MysticLogFairiesEvent.cs:181-183 扫倒木置位）——运行时位
+   *  不落盘（StartWorld/StartNight 每次重扫回填）；地下仙女链（NPC.cs:5730）消费门 */
+  fairyLog = false;
   clock: Clock;
   /** 天气系统（WeatherState 状态机；存档/wld 导入经 applyWeatherSave 回填） */
   weather = new WeatherState();

@@ -197,6 +197,8 @@ export class Arrow extends Entity {
   private discoStyle = 0;
   /** 弹体点光（Game 实体光扫读 lightRGB——同 Enemy 约定） */
   lightRGB: [number, number, number] | null = null;
+  /** 点光源像素覆盖（缺省=实体中心；985 泰拉刃 :39382 光心=弹心+朝向 85×scale） */
+  lightRGBAt: { x: number; y: number } | null = null;
   dead = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
@@ -378,6 +380,11 @@ export class Arrow extends Entity {
       if (this.terraT >= 25) { this.killNow(game); return; }
       const stT = world.store;
       this.lightRGB = [0.25, 0.86, 0.38];    // Color(64,220,96)（:39382）
+      // 光心 = 弹心 + 朝向 ×85×scale（:39382 Center+rotation.ToRotationVector2()*85*scale）
+      {
+        const sp = Math.hypot(this.vx, this.vy) || 1;
+        this.lightRGBAt = { x: this.cx + (this.vx / sp) * 85, y: this.cy + (this.vy / sp) * 85 };
+      }
       if (Math.hypot(this.vx, this.vy) > 0.5 && Math.random() < 0.6) {
         game.spawnParticles(this.cx, this.cy, '#7CE81E', 1, 1.2, { life: 18 });
       }

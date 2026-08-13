@@ -436,6 +436,159 @@ function idFields(e) {
   return {};
 }
 
+// ---- 位置/速度表达式 → 结构化数值（运行时只做一次线性组合）----
+/** 单轴项求值 → { off, frac, rand } | null；axisDim = 'width' | 'height' */
+function axisTerm(term, axisDim) {
+  const t = term.trim();
+  let m;
+  if ((m = t.match(/^(-?[\d.]+)[fF]?$/))) return { off: +m[1] };
+  if ((m = t.match(/^\(float\)\((width|height)\s*\/\s*(\d+)\)$/)) || (m = t.match(/^(width|height)\s*\/\s*(\d+)$/))) {
+    return m[1] === axisDim ? { frac: 1 / +m[2] } : null;
+  }
+  if ((m = t.match(/^\(float\)(width|height)$/)) || (m = t.match(/^(width|height)$/))) {
+    return m[1] === axisDim ? { frac: 1 } : null;
+  }
+  if ((m = t.match(/^\(?float\)?\s*Main\.rand\.Next\(\s*(width|height)\s*\)$/)) || (m = t.match(/^Main\.rand\.Next\(\s*(width|height)\s*\)$/))) {
+    return m[1] === axisDim ? { rand: 1 } : null;
+  }
+  if ((m = t.match(/^(width|height)\s*\*\s*([\d.]+)[fF]?$/))) {
+    return m[1] === axisDim ? { frac: +m[2] } : null;
+  }
+  return null;
+}
+
+/** 轴表达式（已剥 anchor）→ { off, frac, rand } | null */
+function axisExpr(expr, axisDim) {
+  let off = 0, frac = 0, rand = 0;
+  // 顶层 ± 切分（无括号嵌套数字场景）
+  const parts = expr.replace(/^\s*\+/, '').split(/\s*\+\s*/);
+  const terms = [];
+  for (const p of parts) {
+    const neg = p.split(/\s*-\s*/);
+    for (let k = 0; k < neg.length; k++) {
+      if (neg[k] === '') continue;
+      terms.push({ t: neg[k], sign: k === 0 ? 1 : -1 });
+    }
+  }
+  for (const { t, sign } of terms) {
+    const r = axisTerm(t, axisDim);
+    if (!r) return null;
+    if (r.off != null) off += sign * r.off;
+    if (r.frac != null) frac += sign * r.frac;
+    if (r.rand != null) rand += sign * r.rand;
+  }
+  const out = {};
+  if (off) out.off = +off.toFixed(4);
+  if (frac) out.frac = +frac.toFixed(4);
+  if (rand) out.rand = 1;
+  return out;
+}
+
+/** Position 实参 → { ox,oy,fx,fy,rx,ry } | null（基准=position 左上角） */
+function compilePos(expr) {
+  let s = String(expr).trim();
+  let m;
+  // anchor 前缀（base.Center/Top/Bottom/position + …）
+  let base = {};
+  if ((m = s.match(/^(base\.Center|base\.Top|base\.Bottom|position)\s*\+\s*(.+)$/s))) {
+    if (m[1] === 'base.Center') base = { fx: 0.5, fy: 0.5 };
+    else if (m[1] === 'base.Top') base = { fx: 0.5 };
+    else if (m[1] === 'base.Bottom') base = { fx: 0.5, fy: 1 };
+    s = m[2].trim();
+  }
+  // 实体参照归一到 position.X/Y + 尺寸项
+  s = s.replace(/base\.Center\.X/g, 'position.X + (float)(width / 2)')
+    .replace(/base\.Center\.Y/g, 'position.Y + (float)(height / 2)')
+    .replace(/base\.Top\.X/g, 'position.X + (float)(width / 2)')
+    .replace(/base\.Top\.Y/g, 'position.Y')
+    .replace(/base\.Bottom\.X/g, 'position.X + (float)(width / 2)')
+    .replace(/base\.Bottom\.Y/g, 'position.Y + (float)height')
+    .replace(/base\.Right\.X/g, 'position.X + (float)width')
+    .replace(/base\.Left\.X/g, 'position.X')
+    .replace(/base\.Size\s*\*\s*0\.5f?/g, 'new Vector2((float)(width / 2), (float)(height / 2))');
+  if (s === 'position' || s === '') return { ...base };
+  if (s === 'base.Center') return { fx: 0.5, fy: 0.5 };
+  if (s === 'base.Top') return { fx: 0.5 };
+  if (s === 'base.Bottom') return { fx: 0.5, fy: 1 };
+  let sx = null, sy = null;
+  if (s.startsWith('new Vector2(')) {
+    const comps = splitArgs(parenBody(s, s.indexOf('(')));
+    if (comps.length !== 2) return null;
+    sx = comps[0]; sy = comps[1];
+  } else if ((m = s.match(/^(.*?)[+-]\s*new Vector2\(/s))) {
+    return null; // 复合表达式（vector19 链等）→ 留原文
+  } else {
+    return null;
+  }
+  const out = { ...base };
+  for (const [axisName, dim, comp] of [['x', 'width', sx], ['y', 'height', sy]]) {
+    let body = comp.trim();
+    const anchorRe = new RegExp(`position\\.${axisName.toUpperCase()}\\b`);
+    if (!anchorRe.test(body)) {
+      // 无 position 锚点：整体当作偏移项（含 width/height 项）
+      const r = axisExpr(body, dim);
+      if (!r) return null;
+      if (r.off != null) out[`o${axisName}`] = r.off;
+      if (r.frac != null) out[`f${axisName}`] = r.frac;
+      if (r.rand) out[`r${axisName}`] = 1;
+      continue;
+    }
+    body = body.replace(anchorRe, '');
+    const r = axisExpr(body, dim);
+    if (!r) return null;
+    if (r.off != null) out[`o${axisName}`] = r.off;
+    if (r.frac != null) out[`f${axisName}`] = r.frac;
+    if (r.rand) out[`r${axisName}`] = 1;
+  }
+  return out;
+}
+
+/** 速度实参 → { vx,vy,kx,ky,ax,ay,mx,my,hd } | null（k=NPC 速度系数；
+ *  v=常量；m+a=均匀随机区间 [m-a, m+a]；hd=1 表示 vx 取击退方向） */
+function compileVel(expr) {
+  const s = String(expr).trim();
+  let m;
+  if (s === 'velocity') return {};
+  if (s === 'Vector2.Zero' || s === 'default(Vector2)') return { vx: 0, vy: 0 };
+  if ((m = s.match(/^velocity\s*\*\s*([\d.]+)[fF]?$/))) return +m[1] === 0 ? { vx: 0, vy: 0 } : { kx: +m[1], ky: +m[1] };
+  if (!s.startsWith('new Vector2(')) return null;
+  const comps = splitArgs(parenBody(s, s.indexOf('(')));
+  if (comps.length !== 2) return null;
+  const out = {};
+  const comp = (c, axis) => {
+    const t = c.trim();
+    let mm;
+    if ((mm = t.match(/^(-?[\d.]+)[fF]?$/))) { out[`v${axis}`] = +mm[1]; return true; }
+    if (t === 'hitDirection') { out.hd = 1; return true; }
+    if ((mm = t.match(/^\(float\)\s*Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)\s*\*\s*([\d.]+)[fF]?$/))
+      || (mm = t.match(/^Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)\s*\*\s*([\d.]+)[fF]?$/))) {
+      const lo = +mm[1] * +mm[3], hi = (+mm[2] - 1) * +mm[3];
+      out[`m${axis}`] = +((lo + hi) / 2).toFixed(4);
+      out[`a${axis}`] = +((hi - lo) / 2).toFixed(4);
+      return true;
+    }
+    if ((mm = t.match(/^Main\.rand\.Next\((-?\d+),\s*(-?\d+)\)$/))) {
+      const lo = +mm[1], hi = +mm[2] - 1;
+      out[`m${axis}`] = +((lo + hi) / 2).toFixed(4);
+      out[`a${axis}`] = +((hi - lo) / 2).toFixed(4);
+      return true;
+    }
+    if ((mm = t.match(/^Main\.rand\.Next\((-?\d+)\)$/))) {
+      out[`m${axis}`] = +((+mm[1] - 1) / 2).toFixed(4);
+      out[`a${axis}`] = +((+mm[1] - 1) / 2).toFixed(4);
+      return true;
+    }
+    if ((mm = t.match(/^Main\.rand\.NextFloat\(\)\s*\*\s*([\d.]+)[fF]?$/))) {
+      out[`m${axis}`] = +((+mm[1]) / 2).toFixed(4);
+      out[`a${axis}`] = +((+mm[1]) / 2).toFixed(4);
+      return true;
+    }
+    return false;
+  };
+  if (!comp(comps[0], 'x') || !comp(comps[1], 'y')) return null;
+  return out;
+}
+
 function emitEntry(npcId, fields, line, gates, ai) {
   if (!entries.has(npcId)) entries.set(npcId, []);
   const f = { ...fields, line };
@@ -566,20 +719,23 @@ function handleGoreCall(callee, args, lineNo) {
 
   const velFields = (() => {
     const v = String(a.Velocity ?? 'velocity');
-    if (v === 'velocity') return {};
-    if (v === 'Vector2.Zero') return { vx: 0, vy: 0 };
-    let m;
-    if ((m = v.match(/^new Vector2\(\s*(-?[\d.]+)[fF]?\s*,\s*(-?[\d.]+)[fF]?\s*\)$/))) return { vx: +m[1], vy: +m[2] };
-    return { velExpr: v };
+    const c = compileVel(v);
+    if (c) return c;
+    return { velExpr: v }; // 不可编译 → 运行时按继承 NPC 速度
   })();
   const scaleFields = (() => {
     const v = a.Scale;
     if (v === undefined || v === '1f' || v === '1') return {};
     let m;
     if ((m = String(v).match(/^([\d.]+)[fF]?$/))) return { scale: +m[1] };
-    return { scaleExpr: String(v) };
+    return { scaleExpr: String(v) }; // 'scale' = NPC.scale；其余登记原文
   })();
-  const posFields = a.Position === 'position' ? {} : { posExpr: String(a.Position) };
+  const posFields = (() => {
+    if (a.Position === 'position') return {};
+    const c = compilePos(a.Position);
+    if (c) return c;
+    return { posExpr: String(a.Position) }; // 不可编译 → 运行时按左上角
+  })();
   const perfect = callee === 'Gore.NewGorePerfect' ? { perfect: true } : {};
   const base = { ...velFields, ...scaleFields, ...posFields, ...perfect };
 
