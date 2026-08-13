@@ -5,7 +5,10 @@ export class Camera {
   x = 0; y = 0;         // 视野中心（世界 px）
   zoom = 1.25;          // 当前缩放（向 targetZoom 缓动）
   zoomTarget = 1.25;    // 目标缩放
-  static ZOOM_MIN = 0.75;
+  // 下限 0.5:canvas 背板是 CSS px(无 DPR 适配),retina(DPR2)上 zoom 0.5 才等效
+  // 原版 100% 的视野/屏上速度(0.5×2=1.0)——2026-08-13 用户报"EoC 二阶段冲刺体感
+  // 差距大",数值链已证 1:1,差在有效缩放(1.25×2=250% 原版)
+  static ZOOM_MIN = 0.5;
   static ZOOM_MAX = 2.5;
   /** 每帧把 zoom 向 target 缓动（指数趋近，永不到达导致卡死） */
   easeZoom() {

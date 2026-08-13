@@ -267,8 +267,9 @@ describe('Living Trees 世界生成', () => {
     expect(world.breakTileAt(10, 10)).toBeNull();   // 活木无掉落
     expect(world.breakTileAt(12, 10)).toBeNull();   // 树叶无掉落
     expect(st.get(10, 10)).toBe(0);
-    // def 对齐：191 实心、192 非实心（LivingTrees pass 收尾 tileSolid[192]=false,cs:15789）
+    // def 对齐：191/192 均实心（Main.cs:10159/:10167 tileSolid=true——树冠可站；
+    // 通行性全量对账 vanilla-tilecollision.json 修正，旧注引用的 cs:15789 非实心判定为过时）
     expect(TILE_DEFS[LIVING_WOOD].solid).toBe(true);
-    expect(TILE_DEFS[LEAF].solid).toBe(false);
+    expect(TILE_DEFS[LEAF].solid).toBe(true);
   });
 });

@@ -100,7 +100,7 @@ import {
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
-import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemUseSoundWav } from '../data/itemUseSound';
@@ -219,6 +219,7 @@ import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, G
 import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../entities/MissileProj';
+import { SkyDragonSpin, SkyDragonSwing, SkyDragonShot, SkyDragonCircle } from '../entities/SkyDragonFury';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
 import { SolarEruptionWhip } from '../entities/SolarEruption';
 import { TideSlash } from '../entities/TideSlash';
@@ -4864,6 +4865,26 @@ export class Game implements GameHooks {
     this.swingTileCutSet.clear();
   }
 
+  /** 709 天龙弹的 1110 星圈挂接（Kill 链 :70218-70290）：亡爆消费 80×80 内
+   *  同主旧圈（ai1=1 渐隐）+ 新圈 timeLeft=30×Next(2,6) + 圈音 */
+  private hookSkyDragonCircle(shot: SkyDragonShot): void {
+    shot.consumeCircles = (x, y) => {
+      for (const e of this.entities.projectiles) {
+        const c = e as unknown as { dead?: boolean; consume?: () => void; x: number; y: number; w: number; h: number };
+        if (c === shot || c.dead || typeof c.consume !== 'function') continue;
+        if (!(Math.abs((c.x + c.w / 2) - x) <= 40 + c.w / 2 && Math.abs((c.y + c.h / 2) - y) <= 40 + c.h / 2)) continue;
+        c.consume();                                 // ai[1]=1（:70256-70264）
+      }
+    };
+    shot.spawnCircle = (x, y, dmg) => {
+      const circle = new SkyDragonCircle(x, y, dmg, 30 * (2 + Math.floor(Math.random() * 4))); // Next(2,6)
+      circle.critChance = shot.critChance;
+      circle.armorPen = shot.armorPen;
+      this.entities.add(circle, 'projectiles');
+      this.playSfxFiles(soundTrackFiles('dd2_sky_dragons_fury_circle'), 1, x, y); // :70287-70290
+    };
+  }
+
   /** 双工具分流（Player.cs:45040-45045：tileHammer→锤力 / tileAxe→斧力 / 其余→镐力）。
    *  Hamaxe 族（pick+axe）对树族用斧力、对矿石用镐力；The Axe 族（axe+hammer）
    *  对树族用斧力、其余（锤墙/坡面）走锤。单工具原样返回 */
@@ -5200,6 +5221,41 @@ export class Game implements GameHooks {
         this.entities.add(firePortalGun(this.player, ang, 1), 'projectiles');
         this.useSwing(heldDef, ang);
         this.player.useTime = 20;
+        this.input.rightDown = false;
+      }
+      // 天龙之怒 3858 右键 alt（Player.cs:31170 altFunctionUse 门 + :48127-48141
+      // 出生：Damage×0.5 / kb+4 / 速 ×1.5 / ai0=(0.3+0.7r)×24×1.75×dir → 弹 708
+      // AI_142 椭圆弧挥舞，anim 2/6/10 各出一发 709；709 亡爆生 1110 滞留圈
+      // （同位消费旧圈）。useTime 门 = 原版 alt 复用冷却（useAnimation 30）
+      if (inp.rightDown && heldDef && viIdFromKey(heldDef.key) === 3858 && this.player.useTime === 0) {
+        const [swx, swy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        const ang = Math.atan2(swy - this.player.cy, swx - this.player.cx);
+        this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
+        const swVid = 3858;
+        const swPs = this.heldPrefixStat();
+        // Damage 参数 = item.damage ×词缀 ×meleeDamage 再 ×0.5；kb+4（:48135）
+        const swDmg = Math.max(1, Math.round((itemCombat(swVid)?.damage ?? 140)
+          * (swPs?.dmg ?? 1) * this.player.damageMult('melee') * 0.5));
+        const swKb = (itemCombat(swVid)?.knockBack ?? 5) * (swPs?.kb ?? 1) + 4;
+        const swCrit = 0.04 + (itemCombat(swVid)?.crit ?? 0) / 100;
+        const swingP = new SkyDragonSwing(this.player,
+          Math.cos(ang) * 24 * 1.5, Math.sin(ang) * 24 * 1.5,  // vector46 ×1.5（:48131/:48134）
+          swDmg, swKb,
+          () => this.swing?.t ?? 0,
+          (sx, sy, svx, svy) => {
+            const shot = new SkyDragonShot(sx, sy, svx, svy, swDmg);
+            shot.critChance = swCrit;
+            shot.armorPen = this.player.equipStats.armorPen;
+            this.hookSkyDragonCircle(shot);
+            this.entities.add(shot, 'projectiles');
+          });
+        swingP.critChance = swCrit;
+        swingP.armorPen = this.player.equipStats.armorPen;
+        this.entities.add(swingP, 'projectiles');
+        this.useSwing(heldDef, ang);
+        if (this.swing) this.swing.noGraphic = true;    // noUseGraphic（:34091）
+        this.player.useTime = 30;
+        this.playUseSound(swVid, 'bowShoot');            // UseSound=DD2_SkyDragonsFurySwing
         this.input.rightDown = false;
       }
     }
@@ -6719,9 +6775,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     };
     // 词缀乘区（Item.Prefix :551-557）：damage=round(×dmg)、knockBack×kb——
     // 手雷兜底下限在乘区后取 max，与原版（damage 先乘再判 0）一致；
-    // 装备全系伤害乘区（徽章/险恶词缀等）：近战族=melee、魔法=magic、其余=ranged
+    // 装备全系伤害乘区（徽章/险恶词缀等）：近战族=melee、魔法=magic、其余=ranged。
+    // ★'shot' 兜底里的 melee+noMelee 件（636 破晓/707 天龙之怒——SetDefaults
+    //  melee=true）原版走 meleeDamage 乘区，勿笼统归 ranged
     const ps = this.heldPrefixStat();
-    const dmgKind = cwIn.kind === 'magic' ? 'magic' : (cwIn.kind === 'boomerang' || cwIn.kind === 'spear' || cwIn.kind === 'yoyo' || cwIn.kind === 'flail') ? 'melee' as const : 'ranged' as const;
+    const dmgKind = cwIn.kind === 'magic' ? 'magic'
+      : (cwIn.kind === 'boomerang' || cwIn.kind === 'spear' || cwIn.kind === 'yoyo' || cwIn.kind === 'flail'
+        || (cwIn.kind === 'shot' && !!itemCombat(def.vid ?? viIdFromKey(def.key))?.melee))
+        ? 'melee' as const : 'ranged' as const;
     const cw = {
       ...cwIn,
       damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1) * this.player.damageMult(dmgKind))), // ⑥ pen 移 hit 时
@@ -7278,6 +7339,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.entities.add(flare, 'projectiles');
           this.player.useTime = cw.useTime;
           this.playUseSound(critVid, 'bowShoot');   // 3543 UseSound=Item1（itemUseSound 表）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 天龙之怒 3858 左键 → 707（AI_140_MonkStaffT1 :66249-66337）：channel
+        // 持械旋剑 50t 两整圈。原版 SetDummyItemTime(2) 冻结物品时间（:66344）→
+        // 下一挥须等旋完 + reuseDelay2 = useTime 52 近似；t=25 松手提前收剑时
+        // onEnd 把 useTime 钳回 2。右键 alt（708 椭圆弧+709 弹+1110 圈）在
+        // 右键分派（viIdFromKey 3858 分支，同传送门枪位）
+        if (cw.shoot === 707) {
+          const sdAlive = this.entities.projectiles.some(
+            (e) => e instanceof SkyDragonSpin && !e.dead);
+          if (sdAlive) { this.input.mouseDown = false; break; }
+          const sdItemId = ITEM_BY_KEY[def.key];
+          const sdOwner = this.player;
+          // owner 传玩家本体（cx/cy/facing 实时引用；半程重瞄要写 facing）
+          const spin = new SkyDragonSpin(
+            sdOwner,
+            Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+            cw.damage, cw.knockback,
+            () => this.input.mouseHeld && !this.input.uiBlocking
+              && sdOwner.inv.heldItem()?.id === sdItemId && !sdOwner.dead,
+            () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+            () => { if (this.player.useTime > 2) this.player.useTime = 2; });
+          spin.critChance = critTotal;
+          spin.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(spin, 'projectiles');
+          this.useSwing(def, ang);
+          if (this.swing) { this.swing.noGraphic = true; this.swing.t = 52; this.swing.dur = 52; } // noUseGraphic(:34091)+持械姿势延展到旋完
+          this.player.useTime = 52;
+          this.playUseSound(critVid, 'bowShoot');   // UseSound=DD2_SkyDragonsFurySwing（itemUseSound 表）
           this.input.mouseDown = false;
           break;
         }

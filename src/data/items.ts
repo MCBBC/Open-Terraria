@@ -246,8 +246,8 @@ function item(d: Partial<ItemDef> & { key: string; name: string }) {
 
 
 // 上限扩容三件套（Player.cs:44655-44700 ItemCheck_Use*；vi_ 前缀自动映射原版图标）
-item({ key: 'vi_109_mana_crystal', name: '魔力水晶', desc: '使用：魔力上限 +20（上限 200）' });
-item({ key: 'vi_1291_life_fruit', name: '生命果', desc: '生命上限 ≥400 时使用：+5（上限 500）' });
+item({ key: 'vi_109_mana_crystal', name: '魔力水晶', desc: '使用：魔力上限 +20（上限 200）', value: 1 }); // ←vi_109_ManaCrystal 独有字段搬移(批次A)
+item({ key: 'vi_1291_life_fruit', name: '生命果', desc: '生命上限 ≥400 时使用：+5（上限 500）', value: 1 }); // ←vi_1291_LifeFruit 独有字段搬移(批次A)
 
 
 
@@ -732,7 +732,7 @@ item({ key: 'vi_5302_bottomless_honey_bucket', name: '', value: 1 });
 item({ key: 'vi_5303_honey_absorbant_sponge', name: '', value: 1 });
 item({ key: 'vi_5304_ultra_absorbant_sponge', name: '', value: 1 });
 item({ key: 'vi_5364_bottomless_shimmer_bucket', name: '', value: 1 });
-item({ key: 'vi_509_red_wrench', name: '', value: 1 });
+item({ key: 'vi_509_red_wrench', name: '', value: 1, wireTool: { place: 1 } }); // ←vi_509_Wrench 独有字段搬移(批次A)
 item({ key: 'vi_4741_butcher_s_bloodstained_apron', name: '', value: 1 });
 item({ key: 'vi_3065_star_wrath', name: '', value: 1 });
 item({ key: 'vi_3063_meowmere', name: '', value: 1 });
@@ -744,11 +744,11 @@ item({ key: 'vi_4415_stone_door', name: '', value: 1 });
 item({ key: 'vi_1681_skeleton_banner', name: '', value: 1 });
 item({ key: 'vi_283_seed', name: '', value: 1 });
 item({ key: 'vi_1173_grave_marker', name: '', value: 1 });
-item({ key: 'vi_4379_wyvern_kite', name: '', value: 1 });
+item({ key: 'vi_4379_wyvern_kite', name: '', value: 1, tile: 'v_723_kite_anchor' }); // ←vi_4379_KiteWyvern 独有字段搬移(批次A)
 item({ key: 'vi_4378_xenon_moss', name: '', value: 1 });
 item({ key: 'vi_4377_krypton_moss', name: '', value: 1 });
 item({ key: 'vi_4376_rat_cage', name: '', value: 1, tile: 'v_533_rat_cage' });  // createTile=533 placeStyle=0（Item.cs:37240-37244）——笼族放置链样板：物种=tile id、无捕获机制，详见 render/CritterCage.ts GAP ①
-item({ key: 'vi_4375_rat', name: '', value: 1 });
+item({ key: 'vi_4375_rat', name: '', value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // ←vi_4375_Rat 独有字段搬移(批次A)
 item({ key: 'vi_4484_1_2_second_timer', name: '', value: 1 });
 item({ key: 'vi_4824_wet_bomb', name: '', value: 1 });
 item({ key: 'vi_4485_1_4_second_timer', name: '', value: 1 });
@@ -774,15 +774,15 @@ item({ key: 'vi_5275_joja_cola', name: '', value: 1 });
 item({ key: 'vi_5278_pomegranate', name: '', value: 1 });
 item({ key: 'vi_5277_spicy_pepper', name: '', value: 1 });
 item({ key: 'vi_5437_shellphone', name: '', value: 1 });
-item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1 });
+item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 90 }, axePower: 30 }); // ←vi_1507_SpectreHamaxe 独有字段搬移(批次A)
 item({ key: 'vi_2250_steampunk_chest', name: '', value: 1 });
 item({ key: 'vi_392_glass_wall', name: '', value: 1 });
 item({ key: 'vi_2699_weapon_rack', name: '', value: 1 });
 item({ key: 'vi_3552_blue_flame_and_silver_dye', name: '', value: 1 });
 item({ key: 'vi_5005_terraprisma', name: '', value: 1 });
 item({ key: 'vi_4604_exotic_chew_toy', name: '', value: 1 });
-item({ key: 'vi_4611_world_feeder_kite', name: '', value: 1 });
-item({ key: 'vi_4649_blue_jellyfish_kite', name: '', value: 1 });
+item({ key: 'vi_4611_world_feeder_kite', name: '', value: 1, tile: 'v_723_kite_anchor' }); // ←vi_4611_KiteWorldFeeder 独有字段搬移(批次A)
+item({ key: 'vi_4649_blue_jellyfish_kite', name: '', value: 1, tile: 'v_723_kite_anchor' }); // ←vi_4649_KiteJellyfishBlue 独有字段搬移(批次A)
 item({ key: 'vi_4796_dark_mage_s_tome', name: '', value: 1 });
 item({ key: 'vi_4553_plasma_lamp', name: '', value: 1 });
 item({ key: 'vi_4365_celestial_wand', name: '', value: 1 });
@@ -792,7 +792,7 @@ item({ key: 'vi_4956_zenith', name: '', value: 1 });
 item({ key: 'vi_2798_laser_drill', name: '', value: 1 });
 item({ key: 'vi_2814_martian_chest', name: '', value: 1 });
 item({ key: 'vi_210_vine', name: '', value: 1 });
-item({ key: 'vi_4371_yellow_kite', name: '', value: 1 });
+item({ key: 'vi_4371_yellow_kite', name: '', value: 1, tile: 'v_723_kite_anchor' }); // ←vi_4371_KiteYellow 独有字段搬移(批次A)
 item({ key: 'vi_4291_lemon', name: '', value: 1 });
 item({ key: 'vi_2493_king_slime_mask', name: '', value: 1 });
 item({ key: 'vi_1919_sugar_cookie', name: '', value: 1 });
@@ -806,8 +806,8 @@ item({ key: 'vi_593_snow_block', name: '', value: 1 });
 item({ key: 'vi_3081_marble_block', name: '', value: 1 });
 item({ key: 'vi_1111_blue_berries', name: '', value: 1 });
 item({ key: 'vi_1115_red_husk', name: '', value: 1 });
-item({ key: 'vi_217_molten_hamaxe', name: '', value: 1 });
-item({ key: 'vi_122_molten_pickaxe', name: '', value: 1 });
+item({ key: 'vi_217_molten_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 70 }, axePower: 30 }); // ←vi_217_MoltenHamaxe 独有字段搬移(批次A)
+item({ key: 'vi_122_molten_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 100 } }); // ←vi_122_MoltenPickaxe 独有字段搬移(批次A)
 item({ key: 'vi_1827_bladed_glove', name: '', value: 1 });
 item({ key: 'vi_2263_white_dynasty_wall', name: '', value: 1 });
 item({ key: 'vi_330_obsidian_brick_wall', name: '', value: 1 });
@@ -914,41 +914,41 @@ import vanillaItemMeta from '../../public/sprites/vanilla.json';
 import { MUSIC_BOX_ITEM_BY_STYLE } from '../world/wiring/devices';
 /** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
 // ===================== 原版工具力道具补齐（锤/镐梯度,Item.cs 提取） =====================
-item({ key: 'vi_103_nightmare_pickaxe', name: '', value: 1 });
-item({ key: 'vi_104_the_breaker', name: '', value: 1 });
-item({ key: 'vi_122_molten_pickaxe', name: '', value: 1 });
-item({ key: 'vi_204_meteor_hamaxe', name: '', value: 1 });
-item({ key: 'vi_217_molten_hamaxe', name: '', value: 1 });
-item({ key: 'vi_367_pwnhammer', name: '', value: 1 });
-item({ key: 'vi_579_drax', name: '', value: 1 });
-item({ key: 'vi_654_ebonwood_hammer', name: '', value: 1 });
-item({ key: 'vi_657_rich_mahogany_hammer', name: '', value: 1 });
-item({ key: 'vi_660_pearlwood_hammer', name: '', value: 1 });
-item({ key: 'vi_776_cobalt_pickaxe', name: '', value: 1 });
-item({ key: 'vi_777_mythril_pickaxe', name: '', value: 1 });
-item({ key: 'vi_778_adamantite_pickaxe', name: '', value: 1 });
-item({ key: 'vi_787_hammush', name: '', value: 1 });
-item({ key: 'vi_797_flesh_grinder', name: '', value: 1 });
-item({ key: 'vi_798_deathbringer_pickaxe', name: '', value: 1 });
-item({ key: 'vi_922_shadewood_hammer', name: '', value: 1 });
-item({ key: 'vi_990_pickaxe_axe', name: '', value: 1 });
-item({ key: 'vi_1188_palladium_pickaxe', name: '', value: 1 });
-item({ key: 'vi_1195_orichalcum_pickaxe', name: '', value: 1 });
-item({ key: 'vi_1202_titanium_pickaxe', name: '', value: 1 });
-item({ key: 'vi_1234_chlorophyte_warhammer', name: '', value: 1 });
-item({ key: 'vi_1262_chlorophyte_jackhammer', name: '', value: 1 });
-item({ key: 'vi_1305_the_axe', name: '', value: 1 });
-item({ key: 'vi_1506_spectre_pickaxe', name: '', value: 1 });
-item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1 });
-item({ key: 'vi_3481_platinum_hammer', name: '', value: 1 });
-item({ key: 'vi_3487_tungsten_hammer', name: '', value: 1 });
-item({ key: 'vi_3493_lead_hammer', name: '', value: 1 });
-item({ key: 'vi_3499_tin_hammer', name: '', value: 1 });
-item({ key: 'vi_3505_copper_hammer', name: '', value: 1 });
-item({ key: 'vi_3511_silver_hammer', name: '', value: 1 });
-item({ key: 'vi_3517_gold_hammer', name: '', value: 1 });
-item({ key: 'vi_3525_stardust_hamaxe', name: '', value: 1 });
-item({ key: 'vi_4317_haemorrhaxe', name: '', value: 1 });
+item({ key: 'vi_103_nightmare_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 65 } }); // ←vi_103_NightmarePickaxe 独有字段搬移(批次A)
+item({ key: 'vi_104_the_breaker', name: '', value: 1, tool: { type: 'hammer', power: 55 } }); // ←vi_104_TheBreaker 独有字段搬移(批次A)
+item({ key: 'vi_122_molten_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 100 } }); // ←vi_122_MoltenPickaxe 独有字段搬移(批次A)
+item({ key: 'vi_204_meteor_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 60 }, axePower: 20 }); // ←vi_204_MeteorHamaxe 独有字段搬移(批次A)
+item({ key: 'vi_217_molten_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 70 }, axePower: 30 }); // ←vi_217_MoltenHamaxe 独有字段搬移(批次A)
+item({ key: 'vi_367_pwnhammer', name: '', value: 1, tool: { type: 'hammer', power: 80 } }); // ←vi_367_Pwnhammer 独有字段搬移(批次A)
+item({ key: 'vi_579_drax', name: '', value: 1, tool: { type: 'pick', power: 200 }, axePower: 22 }); // ←vi_579_Drax 独有字段搬移(批次A)
+item({ key: 'vi_654_ebonwood_hammer', name: '', value: 1, tool: { type: 'hammer', power: 40 } }); // ←vi_654_EbonwoodHammer 独有字段搬移(批次A)
+item({ key: 'vi_657_rich_mahogany_hammer', name: '', value: 1, tool: { type: 'hammer', power: 35 } }); // ←vi_657_RichMahoganyHammer 独有字段搬移(批次A)
+item({ key: 'vi_660_pearlwood_hammer', name: '', value: 1, tool: { type: 'hammer', power: 55 } }); // ←vi_660_PearlwoodHammer 独有字段搬移(批次A)
+item({ key: 'vi_776_cobalt_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 110 } }); // ←vi_776_CobaltPickaxe 独有字段搬移(批次A)
+item({ key: 'vi_777_mythril_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 150 } }); // ←vi_777_MythrilPickaxe 独有字段搬移(批次A)
+item({ key: 'vi_778_adamantite_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 180 } }); // ←vi_778_AdamantitePickaxe 独有字段搬移(批次A)
+item({ key: 'vi_787_hammush', name: '', value: 1, tool: { type: 'hammer', power: 85 } }); // ←vi_787_Hammush 独有字段搬移(批次A)
+item({ key: 'vi_797_flesh_grinder', name: '', value: 1, tool: { type: 'hammer', power: 55 } }); // ←vi_797_FleshGrinder 独有字段搬移(批次A)
+item({ key: 'vi_798_deathbringer_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 70 } }); // ←vi_798_DeathbringerPickaxe 独有字段搬移(批次A)
+item({ key: 'vi_922_shadewood_hammer', name: '', value: 1, tool: { type: 'hammer', power: 40 } }); // ←vi_922_ShadewoodHammer 独有字段搬移(批次A)
+item({ key: 'vi_990_pickaxe_axe', name: '', value: 1, tool: { type: 'pick', power: 200 }, axePower: 22 }); // ←vi_990_PickaxeAxe 独有字段搬移(批次A)
+item({ key: 'vi_1188_palladium_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 130 } }); // ←vi_1188_PalladiumPickaxe 独有字段搬移(批次A)
+item({ key: 'vi_1195_orichalcum_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 165 } }); // ←vi_1195_OrichalcumPickaxe 独有字段搬移(批次A)
+item({ key: 'vi_1202_titanium_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 190 } }); // ←vi_1202_TitaniumPickaxe 独有字段搬移(批次A)
+item({ key: 'vi_1234_chlorophyte_warhammer', name: '', value: 1, tool: { type: 'hammer', power: 90 } }); // ←vi_1234_ChlorophyteWarhammer 独有字段搬移(批次A)
+item({ key: 'vi_1262_chlorophyte_jackhammer', name: '', value: 1, tool: { type: 'hammer', power: 90 } }); // ←vi_1262_ChlorophyteJackhammer 独有字段搬移(批次A)
+item({ key: 'vi_1305_the_axe', name: '', value: 1, tool: { type: 'hammer', power: 100 }, axePower: 35 }); // ←vi_1305_TheAxe 独有字段搬移(批次A)
+item({ key: 'vi_1506_spectre_pickaxe', name: '', value: 1, tool: { type: 'pick', power: 200 } }); // ←vi_1506_SpectrePickaxe 独有字段搬移(批次A)
+item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 90 }, axePower: 30 }); // ←vi_1507_SpectreHamaxe 独有字段搬移(批次A)
+item({ key: 'vi_3481_platinum_hammer', name: '', value: 1, tool: { type: 'hammer', power: 59 } }); // ←vi_3481_PlatinumHammer 独有字段搬移(批次A)
+item({ key: 'vi_3487_tungsten_hammer', name: '', value: 1, tool: { type: 'hammer', power: 50 } }); // ←vi_3487_TungstenHammer 独有字段搬移(批次A)
+item({ key: 'vi_3493_lead_hammer', name: '', value: 1, tool: { type: 'hammer', power: 43 } }); // ←vi_3493_LeadHammer 独有字段搬移(批次A)
+item({ key: 'vi_3499_tin_hammer', name: '', value: 1, tool: { type: 'hammer', power: 38 } }); // ←vi_3499_TinHammer 独有字段搬移(批次A)
+item({ key: 'vi_3505_copper_hammer', name: '', value: 1, tool: { type: 'hammer', power: 35 } }); // ←vi_3505_CopperHammer 独有字段搬移(批次A)
+item({ key: 'vi_3511_silver_hammer', name: '', value: 1, tool: { type: 'hammer', power: 45 } }); // ←vi_3511_SilverHammer 独有字段搬移(批次A)
+item({ key: 'vi_3517_gold_hammer', name: '', value: 1, tool: { type: 'hammer', power: 55 } }); // ←vi_3517_GoldHammer 独有字段搬移(批次A)
+item({ key: 'vi_3525_stardust_hamaxe', name: '', value: 1, tool: { type: 'hammer', power: 100 }, axePower: 30 }); // ←vi_3525_LunarHamaxeStardust 独有字段搬移(批次A)
+item({ key: 'vi_4317_haemorrhaxe', name: '', value: 1, tool: { type: 'hammer', power: 80 } }); // ←vi_4317_BloodHamaxe 独有字段搬移(批次A)
 
 // 月事件触发物品（Player.cs:43294/43361：夜晚 && 无进行中月事件；Main.startPumpkinMoon/
 // startSnowMoon :10903-10940）。键用 vanilla.json 权威驼峰键（下方自动注册循环按此键
@@ -1797,14 +1797,14 @@ item({ key: 'vi_4760_sergeants_united_shield', name: '', maxStack: 1, value: 1 }
 // ---- 钓鱼链物品补齐
 item({ key: 'vi_4608_chum_bucket', name: '', maxStack: 99, value: 1 }); // 鱼饵桶(Chum Bucket——抛入水增渔力 +11/+6/+3,:19231-19242)(2026-08-13:饵/竿/药水/渔获——此前正常玩法无法抛竿,B26 断链) ----
 item({ key: 'vi_2422_hotline_fishing_hook', name: '', maxStack: 1, value: 1 }); // 熔线钓钩(Hotline Fishing Hook——岩浆钓三源之一,:19230/:19375-19378)
-item({ key: 'vi_1992_f1992', name: '', maxStack: 999, value: 1 }); // 饵(黑蜻蜓)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2001_f2001', name: '', maxStack: 999, value: 1 }); // 饵(紫蜻蜓)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2002_f2002', name: '', maxStack: 999, value: 1 }); // 饵(红蜻蜓?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2004_f2004', name: '', maxStack: 999, value: 1 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2006_f2006', name: '', maxStack: 999, value: 1 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2007_f2007', name: '', maxStack: 999, value: 1 }); // 饵(瓢虫?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2156_f2156', name: '', maxStack: 999, value: 1 }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2157_f2157', name: '', maxStack: 999, value: 1 }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_1992_f1992', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(黑蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_1992_Firefly 独有字段搬移(批次A)
+item({ key: 'vi_2001_f2001', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 8 }); // 饵(紫蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_2001_JuliaButterfly 独有字段搬移(批次A)
+item({ key: 'vi_2002_f2002', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(红蜻蜓?)——数值/名走 itemfunc+l10n 链 // ←vi_2002_Worm 独有字段搬移(批次A)
+item({ key: 'vi_2004_f2004', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_2004_LightningBug 独有字段搬移(批次A)
+item({ key: 'vi_2006_f2006', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链 // ←vi_2006_Snail 独有字段搬移(批次A)
+item({ key: 'vi_2007_f2007', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(瓢虫?)——数值/名走 itemfunc+l10n 链 // ←vi_2007_GlowingSnail 独有字段搬移(批次A)
+item({ key: 'vi_2156_f2156', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链 // ←vi_2156_BlackScorpion 独有字段搬移(批次A)
+item({ key: 'vi_2157_f2157', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链 // ←vi_2157_Scorpion 独有字段搬移(批次A)
 item({ key: 'vi_2289_f2289', name: '', maxStack: 999, value: 1 }); // 竿(木质钓竿)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2291_f2291', name: '', maxStack: 999, value: 1 }); // 竿(强化钓竿?)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2293_f2293', name: '', maxStack: 999, value: 1 }); // 竿(渔夫钓竿?)——数值/名走 itemfunc+l10n 链
@@ -1816,19 +1816,19 @@ item({ key: 'vi_2355_f2355', name: '', maxStack: 999, value: 1 }); // 药水(声
 item({ key: 'vi_2356_f2356', name: '', maxStack: 999, value: 1 }); // 药水(宝匣药水)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2438_f2438', name: '', maxStack: 999, value: 1 }); // 饵(蜗牛?)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2613_f2613', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2673_f2673', name: '', maxStack: 999, value: 1 }); // 饵(松露虫)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2673_f2673', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(松露虫)——数值/名走 itemfunc+l10n 链 // ←vi_2673_TruffleWorm 独有字段搬移(批次A)
 item({ key: 'vi_2674_f2674', name: '', maxStack: 999, value: 1 }); // 饵(学徒饵)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2675_f2675', name: '', maxStack: 999, value: 1 }); // 饵(行家饵)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_2676_f2676', name: '', maxStack: 999, value: 1 }); // 饵(大师饵)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2740_f2740', name: '', maxStack: 999, value: 1 }); // 饵(幼虫?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_2895_f2895', name: '', maxStack: 999, value: 1 }); // 饵(蠕虫?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_3191_f3191', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_3192_f3192', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_3193_f3193', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_3194_f3194', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2740_f2740', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor' }); // 饵(幼虫?)——数值/名走 itemfunc+l10n 链 // ←vi_2740_Grasshopper 独有字段搬移(批次A)
+item({ key: 'vi_2895_f2895', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 饵(蠕虫?)——数值/名走 itemfunc+l10n 链 // ←vi_2895_GoldWorm 独有字段搬移(批次A)
+item({ key: 'vi_3191_f3191', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3191_EnchantedNightcrawler 独有字段搬移(批次A)
+item({ key: 'vi_3192_f3192', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3192_Grubby 独有字段搬移(批次A)
+item({ key: 'vi_3193_f3193', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3193_Sluggy 独有字段搬移(批次A)
+item({ key: 'vi_3194_f3194', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链 // ←vi_3194_Buggy 独有字段搬移(批次A)
 item({ key: 'vi_3392_f3392', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_3393_f3393', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
 item({ key: 'vi_4325_f4325', name: '', maxStack: 999, value: 1 }); // 竿(血肉捕手)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_4339_f4339', name: '', maxStack: 999, value: 1 }); // 饵(熔岩萤火虫?)——数值/名走 itemfunc+l10n 链
-item({ key: 'vi_4340_f4340', name: '', maxStack: 999, value: 1 }); // 饵(地狱蝴蝶?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_4339_f4339', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(熔岩萤火虫?)——数值/名走 itemfunc+l10n 链 // ←vi_4339_YellowDragonfly 独有字段搬移(批次A)
+item({ key: 'vi_4340_f4340', name: '', maxStack: 999, value: 1, tile: 'v_724_critter_anchor', placeStyle: 4 }); // 饵(地狱蝴蝶?)——数值/名走 itemfunc+l10n 链 // ←vi_4340_GoldDragonfly 独有字段搬移(批次A)
 item({ key: 'vi_4442_f4442', name: '', maxStack: 999, value: 1 }); // 竿(深渊钓竿?)——数值/名走 itemfunc+l10n 链

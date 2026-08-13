@@ -140,9 +140,10 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
       //  (pot/statue/bowls/detonator/heart)从白名单移除并转为【缺席断言】——
       //  清扫 pass 回归(被移除/改名)时这些类型重新出现即红,白名单不再养残片。
       const FRAGMENTS: Record<string, number> = {
-        'v_26_altars': 20,  // 原版不保护祭坛残片(altar-fragment-fix);基线 5→20=并行会话祭坛/挖空逻辑改动后重校(实测 9)
-        'v_186_decos_3x2': 50, 'v_187_decos_3x2_group_2': 60, // 多带表帧语义
+        'v_26_altars': 20,  // 原版不保护祭坛残片(altar-fragment-fix);并行会话改动后重校
         'v_529_sea_oats': 60, // 原版单格写入(cs:58333)
+        // ★186/187 从白名单移除(2026-08-14):曾以"多带帧语义"豁免是 R2 理由
+        //   误用于 R1——放置恒 3×2,缺角=真残片,清扫后应归零
       };
       // ★清扫已通用式(2026-08-13):全部多格残片自动清,豁免=FRAGMENTS 白名单
       // 同源 KEEP_KEYS——不再枚举 SWEPT 缺位集,unknown 断言即清扫回归检测

@@ -473,9 +473,11 @@ export class WeatherState {
     this.windCounter--;
     if (this.windCounter <= 0) {
       const prevSign = this.windSpeedTarget < 0 ? -1 : 1;
-      const r = this.rng.int(0, 3);
-      if (r === 0) this.windSpeedTarget += this.rng.int(-25, 25) * 0.001;
-      else if (r === 1 || r === 2) this.windSpeedTarget += this.rng.int(-50, 50) * 0.001;
+      // 增量三级（L58278-58290）：if Next(4)==0 ±25；【else-if 再掷】Next(2)==0 ±50；
+      // 否则 ±100——两掷分布 = ±25 1/4 / ±50 3/8 / ±100 3/8。
+      // ★曾单掷三段映射（1/4, 1/2, 1/4）= 分布偏差（±50 过多/±100 过少）
+      if (this.rng.int(0, 3) === 0) this.windSpeedTarget += this.rng.int(-25, 25) * 0.001;
+      else if (this.rng.int(0, 1) === 0) this.windSpeedTarget += this.rng.int(-50, 50) * 0.001;
       else this.windSpeedTarget += this.rng.int(-100, 100) * 0.001;
       if (!ctx.playerStrongEnough && Math.abs(this.windSpeedTarget) > 0.35) {
         this.windSpeedTarget = 0.35 * Math.sign(this.windSpeedTarget);

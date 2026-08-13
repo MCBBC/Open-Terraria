@@ -1,6 +1,10 @@
 // 原版 pass "Shimmer"(WorldGen.cs:15256-15308)+ ShimmerMakeBiome(cs:34889-35083)
 // 1:1 移植:以太生物群系——圆形石壳(型 1)+ 腔体挖空 + 底部微光液 +
 // 两侧隧道开口 + (num==0 时)地表石笋柱 + aether 宝石树。
+// ★checkpoint 金标对账:tools/golden/caves-oracle.cs Shimmer 段(1456 注册序
+//   Gems(15109)<GravitatingSand(15198)<OceanCaves(15228)<Shimmer(15256))+
+//   tests/shimmer-checkpoint.test.ts——全链与"状态恢复"双通道,四段落检查点
+//   (shimmershell/shimmerpillars/shimmeropen/shimmer)+RNG 流指纹+落点坐标逐项全等。
 // 位置(cs:15274-15275):地牢异侧 dungeonSide<Right → Next(0.89w, w-200),
 // 否则 Next(200, 0.11w);y∈[(ws+rl)/2+50, ((h-250)*2+rl)/3](失败重掷见下)。
 // 失败重试(cs:15283-15300):前 1e4 次不变 x 带;>20000 次放宽到 0.8/0.2 带,

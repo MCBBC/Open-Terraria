@@ -58,12 +58,13 @@ describe('物块通行性对账（Main.cs tileSolid/tileSolidTop 全表）', () 
 
   it('未注册但原版有标记的 tile 全清单（数量闸门：注册面只增不减）', () => {
     const unreg = VAN.filter((v) => !BY_SHEET.has(v.id) && !RUNTIME_SPECIAL.has(v.id));
-    // 现状基线：未注册 tile 数。WldImport 对未注册 id 的处理决定其通行性——
-    // 映射到已注册 def（TILE_MAP）或落空为空气。此闸门防"新增实心 tile 无人注册
-    // → 导入世界可穿墙"的静默漂移；注册面扩大时更新基线数。
-    console.log(`[tile-collision] 未注册 flagged tiles: ${unreg.length}`);
-    for (const u of unreg.slice(0, 20)) console.log('  ', u.id, u.name, `s=${+u.solid} top=${+u.solidTop}`);
-    expect(unreg.length).toBeLessThanOrEqual(230);
+    // 现状 = 全量注册（2026-08-14 审计基线 0）：原版 399 个有标记 tile 每个都有
+    // 对应 def。闸门恒 0——新增原版标记 tile（版本升级）必须同步注册，否则
+    // 导入世界可穿墙/挡死的静默漂移会被此测试拦下。
+    if (unreg.length) {
+      for (const u of unreg) console.error('  未注册:', u.id, u.name, `s=${+u.solid} top=${+u.solidTop}`);
+    }
+    expect(unreg.length).toBe(0);
   });
 
   it('关键通行语义 spot-check（对齐提取源逐项）', () => {

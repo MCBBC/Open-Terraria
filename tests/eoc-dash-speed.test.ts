@@ -1,7 +1,8 @@
-// EoC 冲刺单积分回归(用户报"二阶段冲刺速度差距大"):
-//   根因 = eocAI 尾部自己 x+=vx + 通用物理段 noTileCollide 分支再积分 = 双倍速
-//   (P2 单冲 6.8→13.6、连冲 20→40px/t 像瞬移)。断言:P2 冲刺期每 tick 位移
-//   ≈6.8px(经典档,state1 赋速后前 40t 无摩擦),而非 13.6(双积分)。
+// EoC 冲刺单积分回归(用户报"二阶段冲刺速度差距大",实测数值全对齐——体感差来自
+//   默认 zoom 1.25 vs 原版 100%):
+//   ★eocAI 尾部 x+=vx 是【唯一】积分点(:5717 的 noTileCollide 分支属 flyAI 内部
+//   非通用物理)——曾误判双积分删除致 EoC 定格。断言:P2 冲刺期每 tick 位移
+//   ≈6.8px(经典档,state1 赋速后前 40t 无摩擦),删积分→0,双积分→13.6。
 import { describe, it, expect } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';

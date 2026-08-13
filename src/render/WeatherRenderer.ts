@@ -162,11 +162,9 @@ export class WeatherRenderer {
       if (solid || wet || d.y > camBottom) {
         d.active = false;
         // 落水花（Rain.cs:120-133）：dust 生在 position−velocity（退回表面一步），
-        // 再 X−2/Y+2；速度 = −v×0.025 且 Y−2。概率 = gfxQuality（0.5）。
-        // ★曾生在当前位置（水/地面格内 14px 深）= 涟漪沉在水下（用户报告位置不对）
-        if (Math.random() < 0.5) {
-          hooks.emitSand(d.x - d.vx - 2, d.y - d.vy + 2, -d.vx * 0.025, -d.vy * 0.025 - 2, '#B8D0E8', 3);
-        }
+        // 再 X−2/Y+2；速度 = −v×0.025 且 Y−2。概率门 rand(100)<gfxQuality×100
+        // ——gfxQuality 默认 1（Main.cs:1012）= 恒溅。★曾误 0.5（少一半水花）
+        hooks.emitSand(d.x - d.vx - 2, d.y - d.vy + 2, -d.vx * 0.025, -d.vy * 0.025 - 2, '#B8D0E8', 3);
       }
     }
     // ---- 雪粒更新（Dust.cs:1810-1828 dust 76 分支）----
@@ -185,7 +183,7 @@ export class WeatherRenderer {
       if (--f.life <= 0 || f.scale < 0.3 || f.y > camBottom) f.active = false;
       if (f.active) snowLive.push(f);
     }
-    this.emitSandstorm(world, viewW, camX, camY);
+    this.emitSandstorm(world, viewW, viewH, camX, camY);
   }
 
   /** Main.snowing()（Main.cs:12964-13045）1:1：雪原常开雪粒；雨时（cloudAlpha↑）密度
@@ -204,7 +202,9 @@ export class WeatherRenderer {
     for (const f of this.snow) if (f.active) live++;
     const st = world.store;
     for (let i = 0; i < attempts; i++) {
-      if (!(live < target * 0.5 + target * 0.1)) break;         // gfxQuality=0.5（:12997）
+      // 活片门（:12997）：num4×(gfxQuality/2+0.5)+num4×0.1——gfxQuality 默认 1（:1012）= 1.1×target。
+      // ★曾误 0.5 档（0.6×target）= 雪密度只有原版 55%
+      if (!(live < target * 1.1)) break;
       if (Math.random() >= num) continue;
       let sx = Math.floor(Math.random() * (viewW + 1500)) - 750;
       let sy = camY - Math.floor(Math.random() * 50);
@@ -242,8 +242,12 @@ export class WeatherRenderer {
     }
   }
 
-  /** Sandstorm.EmitDust（Sandstorm.cs:141-248）近似：风向速度 + 四色加权 + Severity 密度 */
-  private emitSandstorm(world: World, viewW: number, camX: number, camY: number) {
+  /** Sandstorm.EmitDust（Sandstorm.cs:141-248）1:1：密度门 Next(num5/4)、每帧尝试
+   *  20×Severity、屏上方 -50 生成带、边缘 1/3 概率、速度链（主项 = dir×lerp(0.5,0.7,α)×20
+   *  + 基速 dir×lerp(0.9,1,wind)×5，vy=(2+rand0.2)×0.35，末端 ×(1+num12×0.5)×(1+num12)×value）。
+   *  渲染仍走 Game.particles 色方块（原版 dust 268 streak/fadeIn 增长为已备案视觉近似）。
+   *  ★曾速度慢 3-4 倍（主项 20× 缺失）+屏内 600 带生成（粒子凭空出现）+边缘 1/5 概率 */
+  private emitSandstorm(world: World, viewW: number, viewH: number, camX: number, camY: number) {
     const w = this.weather!;
     const hooks = this.hooks!;
     const sand = w.sandstorm;
@@ -251,25 +255,37 @@ export class WeatherRenderer {
     const dir = Math.sign(w.windSpeedCurrent);
     const windAbs = Math.abs(w.windSpeedCurrent);
     if (windAbs < 0.01) return;
-    const vxBase = dir * (0.9 + windAbs * 0.1);
-    // 密度：20×Severity×(屏宽比例) 上限（num8 L171：1000×屏宽比×质量系数）
-    const n = Math.round(20 * sand.severity * (viewW / 1920 + 0.5));
+    const num3 = dir * (0.9 + 0.1 * windAbs);               // Lerp(0.9,1,num2)
+    const num4 = 2000 / hooks.desertSandTiles;
+    const value = Math.max(0.77, Math.min(1, 3 / num4));
+    const num5 = Math.max(1, Math.floor(num4));             // 密度门分母 /4
+    const num8 = 20 * sand.severity;                        // 每帧尝试数
+    const num12 = 0.2 + 0.15 * sand.severity;               // Lerp(0.2,0.35,Severity)
+    const num13 = 0.5 + 0.2 * sand.severity;                // Lerp(0.5,0.7,Severity)
     const colors = hooks.sandColors().filter((c) => c.weight > 0);
     const totalW = colors.reduce((s, c) => s + c.weight, 0);
     if (!colors.length || totalW <= 0) return;
-    for (let i = 0; i < n; i++) {
-      let x = camX - 500 + Math.random() * (viewW + 1000);
-      let y = camY - 50 + Math.random() * (600 + Math.random() * 400);
-      if (x < camX || x > camX + viewW) y += Math.random() * 400;
+    const st = world.store;
+    for (let i = 0; i < num8; i++) {
+      if (Math.floor(Math.random() * Math.max(1, Math.floor(num5 / 4))) !== 0) continue;  // Next(num5/4)==0
+      let x = Math.random() * (viewW + 1000) - 500;
+      let y = -Math.random() * 50;                          // 屏幕上缘之上（原版屏坐标 +screenPosition）
+      if (Math.random() * 3 < 1 && dir === 1) x = Math.random() * 500 - 500;
+      else if (Math.random() * 3 < 1 && dir === -1) x = Math.random() * 500 + viewW;
+      if (x < 0 || x > viewW) y += Math.random() * viewH * 0.9;
+      x += camX; y += camY;
       const tx = Math.floor(x / TILE);
       const ty = Math.floor(y / TILE);
-      if (!stIn(world, tx, ty) || world.store.wall[world.store.idx(tx, ty)] !== 0) continue;
+      if (!stIn(world, tx, ty) || st.wall[st.idx(tx, ty)] !== 0) continue;
       let pick = Math.random() * totalW;
       let color = colors[0].color;
       for (const c of colors) { pick -= c.weight; if (pick <= 0) { color = c.color; break; } }
-      hooks.emitSand(x, y,
-        vxBase * 5 * (0.5 + sand.severity * 0.3) + dir * (Math.random() * 2),
-        2 + Math.random() * 0.2, color);
+      // 速度链（:169-180；NewDust 默认 scale=1，末行 scale=0.9 不影响速度）
+      let vx = num3 * 5 + Math.random();
+      vx += num3 * num13 * 20;
+      let vy = (2 + Math.random() * 0.2) * 0.35;
+      const k = (1 + num12 * 0.5) * (1 + num12) * value;
+      hooks.emitSand(x, y, vx * k, vy * k, color, 3);
     }
   }
 
@@ -291,7 +307,9 @@ export class WeatherRenderer {
         const ty = Math.floor((d.y + 4) / TILE);
         const [lr, lg, lb] = hooks.lightAt(tx, ty);
         ctx.save();
-        ctx.translate(d.x + 1, d.y);
+        // DrawRain（:38246-38256）1:1：position=左上角、origin=(0,0)（绕【顶点】旋转，
+        // 雨条自 position 向速度方向垂落）——★曾中心锚（整体低 20px+旋转心错）
+        ctx.translate(d.x, d.y);
         ctx.rotate(d.rotation);
         if (texOk) {
           // 光照着色（原版 GetColor×0.85）：量化 8 级 × 3 型预烘焙乘色条（multiply+destination-in），
@@ -300,7 +318,7 @@ export class WeatherRenderer {
           const v = Math.round((lvl / 7) * 0.85 * 255);
           const tinted = tintedRainStrip(tex!, d.type, v);
           if (tinted) {
-            ctx.drawImage(tinted, 0, 0, 2, 40, 0, -20 * d.scale, 2 * d.scale, 40 * d.scale);
+            ctx.drawImage(tinted, 0, 0, 2, 40, 0, 0, 2 * d.scale, 40 * d.scale);
           }
         }
         ctx.restore();

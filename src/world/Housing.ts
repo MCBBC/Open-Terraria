@@ -47,11 +47,22 @@ function countsAsChair(key: string, sheet: number | undefined): boolean {
 
 const isDoorType = (t: number) => t === T.DOOR_CLOSED || t === T.DOOR_OPEN;
 
-/** Main.tileSolid 代理：平台族在原版 tileSolid=true（仅 tileSolidTop 另计），
- *  本仓库 defs 把平台记为 platform 而非 solid——ScoreRoom 杂物扫描按原版语义并入 */
+/** Main.tileSolid 代理（CheckRoom 填充门 :6121 = 纯 tileSolid，无 !tileSolidTop 豁免）：
+ *  平台/金属条/种植箱在原版 tileSolid=true → 封房（平台地板可做房间边界）；
+ *  桌/砧/笼等家具 tileSolid=false（仅 solidTop）→ 不封（房内家具合法）。
+ *  本仓库 platform 旗两族混装 → 以 vanilla-tilecollision.json 的 solid&&solidTop
+ *  集（提取自 Main.cs）区分 */
+import tileCollisionJson from '../data/vanilla-tilecollision.json';
+const ROOM_BLOCK_SOLIDTOP = new Set<number>(
+  ((tileCollisionJson as unknown as { tiles: Array<{ id: number; solid: boolean; solidTop: boolean }> }).tiles)
+    .filter((t) => t.solid && t.solidTop).map((t) => t.id));
 const tileSolidLike = (t: number): boolean => {
   const d = t ? TILE_DEFS[t] : undefined;
-  return !!d && (d.solid || d.platform);
+  if (!d) return false;
+  if (d.solid) return true;
+  if (!d.platform) return false;
+  const sheet = (d as unknown as { vanilla?: { sheet?: number } }).vanilla?.sheet ?? -1;
+  return ROOM_BLOCK_SOLIDTOP.has(sheet);
 };
 
 export interface Room {
@@ -321,10 +332,12 @@ function floodRoom(st: TileStore, sx: number, sy: number): Room | null {
       if (tiles.has(ni)) continue;
       const nt = st.type[ni];
       const ndef = nt ? TILE_DEFS[nt] : undefined;
-      // 边界：实心 / 平台 / 门（门计入需求但不穿透到室外）。
-      // 原版 CheckRoom 先 roomTiles.Add 再拒绝（6076-6080）——边界格也入集合，
+      // 边界：纯 tileSolid（tileSolidLike = 实心 + 平台/金属条/种植箱）+ 门。
+      // 原版 CheckRoom 填充门 :6121 = nactive && tileSolid（无 !tileSolidTop 豁免）
+      // → 平台地板封房、桌/砧/笼等家具（tileSolid=false）为房内格可穿透。
+      // 原版先 roomTiles.Add 再拒绝（6076-6080）——边界格也入集合，
       // ScoreRoom 的 Housing_CheckIfInRoom(地板格) 依赖这一点
-      if (st.isSolid(nx, ny) || ndef?.platform || isDoorType(nt)) {
+      if (tileSolidLike(nt) || isDoorType(nt)) {
         if (isDoorType(nt)) hasDoor = true;
         tiles.add(ni);
         if (nx < minX) minX = nx;

@@ -45,7 +45,7 @@ const snowInfo = await page.evaluate(async () => {
   for (let cx = 0; cx < colSnow.length; cx++) {
     const x0 = cx * 16;
     for (let x = x0; x < x0 + 16; x += 2) {
-      for (let y = 60; y < 60 + 48; y += 2) {
+      for (let y = 180; y < 180 + 220; y += 2) {
         if (st.type[st.idx(x, y)] === snowId) colSnow[cx]++;
       }
     }
@@ -113,51 +113,65 @@ const rippleGone = await page.evaluate(() => {
 });
 check('③ 自创环涟漪系统已退役', !rippleGone.has && rippleGone.budget === 'undefined', JSON.stringify(rippleGone));
 
-// ④ splash 位置:造一小片水+观察粒子——轻量近似:验证 WeatherRenderer splash 公式
-//    位置=d.x-vx-2(检查源码级不可行,改行为:放水 2 格在雪原表面,强制雨滴落上,
-//    采样 particles 中 '#B8D0E8' 粒子位置 vs 水面顶)
-const splash = await page.evaluate(() => {
+// ④ splash 位置:搬到【非雪区】(雪原雨滴已被正确削减到 0,无滴可测)——
+//    挖坑填水,采样 particles 中 '#B8D0E8' 粒子位置 vs 水面顶
+const splash = await page.evaluate((snowCol) => {
   const g = window.__swGame;
   const st = g.world.store;
+  // 远离雪原(世界另一侧中心)
+  const far = Math.abs(snowCol - Math.floor(st.w / 2)) > 800 ? Math.floor(st.w / 2) : Math.floor(st.w * 0.15);
+  // 找该列地表
+  let surf = 0;
+  for (let y = 10; y < st.h; y++) if (st.flags[st.idx(far, y)]) { surf = y; break; }
+  g.player.x = far * 16 - 8;
+  g.player.y = (surf - 3) * 16;
+  g.camera.x = g.player.cx; g.camera.y = g.player.cy;
   const p = g.player;
   const ptx = Math.floor(p.cx / 16), pty = Math.floor(p.cy / 16);
-  // 玩家右侧 4 格挖 6 宽坑填水(顶 2 行留空)
-  for (let x = ptx + 4; x < ptx + 10; x++) {
-    for (let y = pty; y < pty + 3; y++) {
+  // 整平 ptx+2..ptx+12 地面到 pty+3 行(消除斜坡噪声),再挖定形水槽:
+  // 地面行(pty+3)上单行水(pty+2),两侧实心墙防液体摊平 → 液面唯一
+  for (let x = ptx + 2; x <= ptx + 12; x++) {
+    for (let y = pty - 4; y <= pty + 2; y++) {
       const i = st.idx(x, y);
-      st.flags[i] = 0; st.type[i] = 0;
+      st.flags[i] = 0; st.type[i] = 0; st.liquid[i] = 0;   // 上方清空
     }
-    for (let y = pty; y < pty + 3; y++) {
+    for (let y = pty + 3; y <= pty + 6; y++) {
       const i = st.idx(x, y);
-      st.liquid[i] = 255; st.liquidType[i] = 1;
+      st.flags[i] = 1; st.type[i] = 2; st.liquid[i] = 0;   // 平地基岩
     }
+  }
+  for (let x = ptx + 4; x <= ptx + 10; x++) {
+    const i = st.idx(x, pty + 2);
+    st.liquid[i] = 255; st.liquidType[i] = 1;
   }
   g.chunks.invalidateAll();
   return { ptx, pty };
-});
-await new Promise((r) => setTimeout(r, 2000));
-const splashPos = await page.evaluate((s) => {
+}, snowInfo.bestCol);
+await new Promise((r) => setTimeout(r, 1200));
+// 用 emitSand 入口记录【起飞前】位置(粒子 vy≈-2.4/t 上飘,事后采样全是飞行位移)
+const splashPos = await page.evaluate((s) => new Promise((resolve) => {
   const g = window.__swGame;
-  const surfaceY = s.pty * 16;
-  // 采 3 秒内的蓝色 splash 粒子位置
+  const fx = g.renderer.weatherFx;
+  const orig = fx.hooks.emitSand;
   const seen = [];
+  fx.hooks.emitSand = (x, y, vx, vy, c, sz) => {
+    if (seen.length < 12 && x > (s.ptx + 3) * 16 && x < (s.ptx + 11) * 16) {
+      seen.push(Math.round(y - (s.pty + 2) * 16));
+    }
+    orig(x, y, vx, vy, c, sz);
+  };
   const t0 = performance.now();
-  return new Promise((resolve) => {
-    const iv = setInterval(() => {
-      for (const p of g.particles) {
-        if (p.color === '#B8D0E8' && p.x > (s.ptx + 3) * 16 && p.x < (s.ptx + 11) * 16
-          && Math.abs(p.y - surfaceY) < 40) seen.push(Math.round(p.y - surfaceY));
-      }
-      if (performance.now() - t0 > 3000 || seen.length >= 8) {
-        clearInterval(iv);
-        resolve({ n: seen.length, offs: seen.slice(0, 8) });
-      }
-    }, 100);
-  });
-}, splash);
+  const iv = setInterval(() => {
+    if (seen.length >= 8 || performance.now() - t0 > 4000) {
+      clearInterval(iv);
+      fx.hooks.emitSand = orig;
+      resolve({ n: seen.length, offs: seen.slice(0, 8) });
+    }
+  }, 150);
+}), splash);
 // 原版 splash = 落点回退一步(-v≈-14)+2 → 应在水面附近 ±(2..18)px(不再深 14px+)
-check('④ splash 位置=水面附近(偏移带 -12..+18)', splashPos.n === 0
-  || splashPos.offs.every((o) => o >= -12 && o <= 18), JSON.stringify(splashPos));
+check('④ splash 生成位=水面回退带[-16,+2](0=帧中穿越入水档)', splashPos.n === 0
+  || splashPos.offs.every((o) => o >= -16 && o <= 2), JSON.stringify(splashPos));
 check('④b 实际有 splash 粒子产生', splashPos.n > 0, `n=${splashPos.n}`);
 
 check('无页面错误', errors.length === 0, errors.join(' | ').slice(0, 200));

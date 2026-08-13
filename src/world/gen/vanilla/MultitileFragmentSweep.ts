@@ -16,8 +16,10 @@ import { findFragments } from '../../audit/rules';
 /** 原版保留形态(不参与清扫;与集成测试 FRAGMENTS 白名单同源) */
 const KEEP_KEYS: ReadonlySet<string> = new Set([
   'v_26_altars',             // 原版不保护祭坛残片(altar-fragment-fix,属原版风格)
-  'v_186_decos_3x2', 'v_187_decos_3x2_group_2', // 多带表帧语义
   'v_529_sea_oats',          // 原版单格写入(cs:58333)
+  // ★186/187 曾以"多带表帧语义"豁免——那是 R2 帧重复检测的理由(贴图带宽),
+  //   不是 R1 几何缺角的理由;放置恒 3×2,缺角=真残片。2026-08-14 用户
+  //   debug-report 实锤:17 格中 11 格残片(两组仅顶行/一组底行缺 1 格)
 ]);
 
 export function runMultitileFragmentSweepPass(st: TileStore): { swept: number } {
