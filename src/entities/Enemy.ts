@@ -935,9 +935,11 @@ export class Enemy extends Entity {
       }
     }
     // onFire DoT（NPC.cs:92619:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
+    // Oiled(:93728)使 onFire/onFire2/onFire3/frostburn/frostburn2/shadowFlame 六系翻倍
+    const oiledMul = this.oiledT > 0 ? 2 : 1;
     if (this.onFireT > 0) {
       this.onFireT -= dt;
-      this.onFireDoT += 4 * dt;
+      this.onFireDoT += 4 * dt * oiledMul;
       if (this.onFireDoT >= 1) {
         const n = Math.floor(this.onFireDoT);
         this.onFireDoT -= n;
@@ -956,8 +958,16 @@ export class Enemy extends Entity {
     // ---- 武器浸剂 debuff 滴血（R2，NPC.cs:92585/92697/92708 DoT 同 onFire 模式） ----
     if (this.poisonT > 0) { this.poisonT -= dt; this.poisonDoT += 6 * dt; }
     if (this.venomT > 0) { this.venomT -= dt; this.venomDoT += 30 * dt; }
-    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += 24 * dt; }
-    for (const [tKey, dKey] of [['poisonT', 'poisonDoT'], ['venomT', 'venomDoT'], ['cursedT', 'cursedDoT']] as const) {
+    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += 24 * dt * oiledMul; } // onFire2 亦吃 Oiled(:93728)
+    // 四新系(NPC.cs:44→8HP/s / 324→25HP/s / 323→15HP/s / 153→15HP/s,均吃 Oiled 翻倍)
+    if (this.frostburnT > 0) { this.frostburnT -= dt; this.frostburnDoT += 8 * dt * oiledMul; }
+    if (this.frostburn2T > 0) { this.frostburn2T -= dt; this.frostburn2DoT += 25 * dt * oiledMul; }
+    if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += 15 * dt * oiledMul; }
+    if (this.shadowFlameT > 0) { this.shadowFlameT -= dt; this.shadowFlameDoT += 15 * dt * oiledMul; }
+    if (this.oiledT > 0) this.oiledT -= dt;
+    for (const [tKey, dKey] of [['poisonT', 'poisonDoT'], ['venomT', 'venomDoT'], ['cursedT', 'cursedDoT'],
+      ['frostburnT', 'frostburnDoT'], ['frostburn2T', 'frostburn2DoT'],
+      ['onFire3T', 'onFire3DoT'], ['shadowFlameT', 'shadowFlameDoT']] as const) {
       const acc = this[dKey];
       if (acc >= 1) {
         const n = Math.floor(acc);

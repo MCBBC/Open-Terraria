@@ -9,11 +9,10 @@ import { BuffType } from '../stats/Buffs';
 interface StatusEntry { buff: number; chance: number; durMin: number; durMax: number }
 const TABLE = tableJson as unknown as Record<string, StatusEntry[]>;
 
-/** Enemy 侧已实装的 buff 字段(秒)。GAP:30 Bleeding/36 BrokenArmor/44 Frostburn/
- *  137 Slimed/151 SoulDrain/153 ShadowFlame/169 BoneJavelin/183 StardustBleed/
- *  189 Daybreak/203 BetsysCurse/204 Oiled/323 OnFire3/324 Frostburn2/337 TentacleSpike/
- *  344 BloodButcherer/375 Hemorrhage——Enemy 无对应 DoT/减益字段,命中静默跳过
- *  (表数据完整,字段补齐后自动生效) */
+/** Enemy 侧已实装的 buff 字段(秒)。GAP:30 Bleeding/36 BrokenArmor/137 Slimed/
+ *  151 SoulDrain/169 BoneJavelin/183 StardustBleed/189 Daybreak(层数模型)/203 BetsysCurse/
+ *  337 TentacleSpike/344 BloodButcherer/375 Hemorrhage——Enemy 无对应 DoT/减益字段,
+ *  命中静默跳过(表数据完整,字段补齐后自动生效) */
 const SUPPORTED: Record<number, string> = {
   24: 'onFireT',     // On Fire!(NPC.cs:92619 lifeRegen-8 = 4 HP/s)
   20: 'poisonT',     // Poisoned(-12 → 6 HP/s,:92590)
@@ -22,6 +21,11 @@ const SUPPORTED: Record<number, string> = {
   31: 'confusedT',   // Confused(TargetClosest direction 反转,:78569)
   69: 'ichorT',      // Ichor(防御 -15;repo 近似=armorPen 7,Enemy.ts:4132)
   72: 'midasT',      // Midas(掉钱 ×1.10-1.51,Enemy.ts:4286 rollCoins)
+  44: 'frostburnT',    // Frostburn(-16 → 8 HP/s)
+  324: 'frostburn2T',  // Frostburn2(-50 → 25 HP/s)
+  323: 'onFire3T',     // OnFire3(-30 → 15 HP/s)
+  153: 'shadowFlameT', // ShadowFlame(-30 → 15 HP/s)
+  204: 'oiledT',       // Oiled:六火系 DoT 翻倍(NPC.cs:93728)
 };
 
 type StatusEnemy = { [field: string]: number | undefined };
