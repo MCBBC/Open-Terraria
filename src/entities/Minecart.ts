@@ -401,19 +401,15 @@ export class Minecart extends Entity {
         if (this.vy > 1) rh += 10;
         const dir = this.vx < 0 ? -1 : 1;
         let kb = 10 + 40 * ratio;
-        // :27272-27276 击退预除 knockBackResist（矿车击退不随抗性衰减——Enemy.hurt
-        // 管线会再除一次，此处先乘回抵消）近似登记：hurt 侧无 resist 暴露，直接传原值
-        void kb; kb = 10 + 40 * ratio;
         let base: number;
         if (this.superCart) base = 50 + 100 * ratio;         // :28814-28817
         else if (this.mountId === WOOD_CART_MOUNT) base = 15 + 30 * ratio;  // :28809-28811 case 13
         else base = 25 + 55 * ratio;                          // :28786-28807
         // Main.DamageVar :65597-65620（±15% + luck 重掷）
         let dmg = Math.max(1, damageVar(base, p.luck));
-        // :28808-28810 hardMode 与 expertMode 两个独立 ×1.5（曾漏 expert 档）
+        // :28818-28822 hardMode 与 expertMode 两个独立 ×1.5（C# (int) 截断）
         if (game.world.flags?.hardMode) dmg = Math.trunc(dmg * 1.5);
-        if (game.world.isExpert) dmg = Math.trunc(dmg * 1.5);   // :28818-28820
-        if (game.world.isExpert) dmg = Math.round(dmg * 1.5);          // :28821-28822
+        if (game.world.isExpert) dmg = Math.trunc(dmg * 1.5);
         const crit = Math.random() * 100 + 1
           <= Math.max(p.critChance('melee'), p.critChance('ranged'), p.critChance('magic'));
         if (crit) dmg = Math.round(dmg * 2);
@@ -425,8 +421,12 @@ export class Minecart extends Entity {
           };
           if (e.dead || e.dontTakeDamage || e.friendly) continue;
           if (!(rx < e.x + e.w && rx + rw > e.x && ry < e.y + e.h && ry + rh > e.y)) continue;
+          // :27277-27281：0<knockBackResist<1 时预除抗性（StrikeNPC 内部再乘回 →
+          //  矿车击退净效果不随抗性衰减）。hurt() 管线按 kbx×resist 结算，故先除抵消
+          const resist = (ent as { def?: { knockBackResist?: number } }).def?.knockBackResist ?? 1;
+          const kbx = resist > 0 && resist < 1 ? kb / resist : kb;
           // 命中：pierce=0 走 hurt 自带免疫门；命中后覆写 30t（原版 immune[i]=30）
-          if (e.hurt(dmg, dir * kb, 0, game, 0, crit, 0)) {
+          if (e.hurt(dmg, dir * kbx, 0, game, 0, crit, 0)) {
             e.iframes = 30;
             if (e.dead) {
               game.achievements?.handleSpecialEvent(9,

@@ -133,9 +133,10 @@ describe('逐族状态机（Main.cs:13452-16536 直译）', () => {
       expect(i2).toBeGreaterThan(-1);
       expect(a.slice(i2, i2 + 10).every((v) => v === 2)).toBe(true);
       expect(a[i2 + 10]).toBe(3);
-      // 帧 11 的前驱只可能是 10（耳动段尾）或 12（回望段回卷）
+      // 帧 11 是第二空闲帧（持留 rand(30,900)t）——只查【转移点】：进入 11 的前驱
+      // 只可能是 10（耳动段尾 ++）或 12（回望段回卷 :13498-13501）
       for (let i = 1; i < a.length; i++) {
-        if (a[i] === 11) expect([10, 12]).toContain(a[i - 1]);
+        if (a[i] === 11 && a[i - 1] !== 11) expect([10, 12]).toContain(a[i - 1]);
       }
       // 跳跃段 13-21 每 5t 一帧后回 0（:13500-13506）
       const i13 = a.indexOf(13);
@@ -170,7 +171,7 @@ describe('逐族状态机（Main.cs:13452-16536 直译）', () => {
     within(a, 0, 23);
   });
 
-  it('蹲鸊鷉 grebe（:14082-15151→14082-14151）：帧域 0-27，空闲 rand(300,400) 下界', () => {
+  it('蹲鸊鷉 grebe（:14082-14151）：帧域 0-27，空闲 rand(300,400) 下界', () => {
     const a = trace(553, 20000);
     within(a, 0, 27);
     expect(a[299]).toBe(0);
@@ -380,12 +381,14 @@ describe('逐族状态机（Main.cs:13452-16536 直译）', () => {
     expect(Math.max(...a)).toBeGreaterThanOrEqual(8);
   });
 
-  it('蜻蜓 dragonfly（:16612-16666）：停驻 ≥300t，起飞 ∈{1,5,9}，帧域 0-12', () => {
+  it('蜻蜓 dragonfly（:16612-16666）：停驻 ≥300t + rand(60) 门起飞 ∈{1,5,9}，帧域 0-12', () => {
     const a = trace(521, 30000);
     within(a, 0, 12);
     for (let t = 0; t < 300; t++) expect(a[t], `停驻 t=${t}`).toBe(0);
-    const takeoff = a[300];
-    expect([1, 5, 9]).toContain(takeoff);
+    const takeoffAt = a.findIndex((v) => v !== 0);
+    expect(takeoffAt).toBeGreaterThanOrEqual(300);         // c>=300 且 rand(60)==0
+    expect(takeoffAt).toBeLessThan(300 + 2000);            // 期望 ~360t 内起飞
+    expect([1, 5, 9]).toContain(a[takeoffAt]);
     expect(a).toContain(12);   // 摆动段上界
   });
 

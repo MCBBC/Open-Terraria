@@ -26,7 +26,11 @@ import { mainExpertMode, mainDifficulty, getAttackDamageScaledByDifficulty, scal
 import type { Enemy } from './Enemy';
 import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
 import { TRACK_SHEET } from '../data/grappleHooks';
-import { MountInstance } from './Mounts';
+import { canHitLine } from '../physics/LineOfSight';
+import { TownShot } from './TownShot';
+import {
+  MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind,
+} from './Mounts';
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -720,6 +724,8 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
       m += 0.15 * this.nebula[0];        // 星云伤害 179-181 每级四系 +15%（:10118-10124）
+      // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4991：minionDamage += 0.15）
+      if (this.ridingMount && this.mount.type === 12 && this.mount.fishronBoost) m += 0.15;
       return m;
     }
     let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
@@ -739,6 +745,9 @@ export class Player extends Entity {
     }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
     m += 0.15 * this.nebula[0];      // 星云四系 +15%/层
+    // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4988-4992：melee/ranged/magic/minion
+    // 四系各 += 0.15——湿身/半血以下/雨中露天的 MountFishronSpecial 态）
+    if (this.ridingMount && this.mount.type === 12 && this.mount.fishronBoost) m += 0.15;
     return m;
   }
   /** 远程分道乘区（Player.cs:3820-3824 bowEffectiveDamage 拆分）：
@@ -814,6 +823,40 @@ export class Player extends Entity {
       return 1 + Math.floor(this.animTime / 8) % 3;
     }
     return 0;
+  }
+
+  /** 坐骑能力维护上下文（Mount.updateMountEffects 用）：Scutlix 索敌候选（CanBeChasedBy
+   *  口径过滤）+ 视线门 + 眼激光发射桶 + 猪鲨崽天气视图（Player.cs:25373 UpdateEffects
+   *  :4884-4930/:4996-5003 对应数据源） */
+  private mountEffectsCtx(game: GameHooks): import('./Mounts').MountEffectsCtx {
+    const st = this.lastStore;
+    const targets: import('./Mounts').ScutlixTarget[] = [];
+    for (const e of game.enemies()) {
+      const n = e as { x: number; y: number; w: number; h: number; dead: boolean;
+        maxHp: number; def?: { friendly?: boolean; critter?: boolean } };
+      // NPC.CanBeChasedBy（NPC.cs:28334：active && chaseable && lifeMax>5 && !friendly && !immortal）
+      if (n.dead || n.maxHp <= 5 || n.def?.friendly || n.def?.critter) continue;
+      if (n.x === undefined || n.w === undefined) continue;
+      targets.push({ x: n.x, y: n.y, w: n.w, h: n.h });
+    }
+    const raining = !!game.world.weather?.raining;
+    return {
+      scutlixTargets: targets,
+      los: (cx, cy, t) => !!st && canHitLine(st, cx, cy, 0, 0, t.x, t.y, t.w, t.h),
+      fireScutlixShot: game.spawnTownShot
+        ? (x, y, vx, vy) => {
+          game.spawnTownShot?.(new TownShot(x, y, vx, vy, SCUTLIX_SHOT_DAMAGE, 0,
+            SCUTLIX_PROJ_ID, { noGravity: true }));
+        }
+        : undefined,
+      fishron: {
+        hp: this.hp, maxHp: this.maxHp,
+        inWater: this.inWater, inLava: this.inLava, inHoney: this.inHoney,
+        raining,
+        windExposed: raining && !!st
+          && inAPlaceWithWind(st, this.x, this.y, this.w, this.h, game.world.groundLevel),
+      },
+    };
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -1252,6 +1295,9 @@ export class Player extends Entity {
         this.mount.dismount(this, game);
       } else {
         this.mount.upkeep(this);
+        // 能力维护（Player.cs:25373 UpdateEffects 能力子集）：猪鲨崽计数器/增益 +
+        // Scutlix 索敌-充能-开火。须在 upkeep 后、hover 消费前（fishronBoost 本 tick 新鲜）
+        this.mount.updateMountEffects(this, this.mountEffectsCtx(game));
       }
     }
     const ix = this.inputX;
@@ -1291,13 +1337,21 @@ export class Player extends Entity {
       let runSlow = RUN_SLOWDOWN * this.equipStats.runSlowMul;   // 暗影套 ×1.75(:26195-26201)
       // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）
       if (duneBoost && !mnt) { maxRun *= 1.75; accRun *= 1.75; }
-      const runAcc = mnt ? mnt.acceleration
+      let runAcc = mnt ? mnt.acceleration
         : RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
+      // 猪鲨崽非增益态减半（Player.cs:26333-26337：mount.Type==12 && !MountFishronSpecial
+      //  → runAcceleration/=2、maxRunSpeed/=2——干爽满血且无雨才减，湿身/雨中/半血以下全额）
+      if (mnt && mnt.type === 12 && !mnt.fishronBoost) { runAcc /= 2; maxRun /= 2; }
+      // 坐骑特殊跳进行中加成（Player.cs:26272-26290 isPerformingJump_*：独角兽/圣诞坦克/
+      // 山羊/蜥蜴 → runAcceleration×3、maxRunSpeed×1.5——蜥蜴/山羊两版源码均无复位，骑乘期内常驻）
+      if (mnt && mnt.mountJumpPerforming) { runAcc *= 3; maxRun *= 1.5; }
       const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0 && !mnt;
+      // Scutlix/Santank 瞄准中锁朝向（Player.cs:19549 flag3 的 AllowDirectionChange 门）
+      const mountAllowDir = !mnt || mnt.allowDirectionChange;
       if (ix !== 0) {
         // :19546-19556：itemAnimation 窗内仅锁【朝向】不锁移动（挥砍中可跑）——
         // useTurn 物品（工具族）豁免
-        if (!animBusy || this.itemUseTurn) this.facing = ix;
+        if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix;
         const canRamp = this.vy === 0 || wingAir;          // 爬坡门（地面或翼飞行）
         const toward = ix * Math.max(maxRun, wingAir ? accRun : 0);
         // 全速段（|vx| 未到 maxRun → 加速;反向先 runSlowdown 制动 :19563-19568）
@@ -1320,7 +1374,7 @@ export class Player extends Entity {
         else this.vx = 0;
       }
     } else if (ix !== 0) {
-      if (!animBusy || this.itemUseTurn) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）
+      if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）
     }
 
     // 绳索攀爬(原版:身体中心格为绳(213/353/950-9)时无重力,上/下键攀爬,左右离绳)
@@ -1432,6 +1486,22 @@ export class Player extends Entity {
         this.jumpHold--;
       } else {
         this.jumpHold = 0;
+      }
+      // ---- 坐骑特殊跳（hasJumpOption_*：UpdateEffects :4933/:4877/:4956/:4963 授予；
+      //      JumpMovement :20435-20688 链——优先于装备多段跳） ----
+      // 独角兽 10 / 圣诞坦克 46 / 山羊 47：vy = -mountJumpSpeed、保持 jumpHeight×2；
+      // 蜥蜴 14：保持 trunc(jumpHeight×0.75)（:20659）。落地恢复（:22612-22628
+      // canJumpAgain_* 段）。isPerformingJump_* 蜥蜴/山羊两版源码均无复位——一旦使出，
+      // 骑乘期内 runAcceleration×3/maxRunSpeed×1.5 常驻（Run 段消费）
+      if (mnt2?.jumpOption) {
+        if (this.onGround) this.mount.mountJumpReady = true;
+        else if (this.mount.mountJumpReady && this.inputJump && this.jumpHold <= 0) {
+          this.mount.mountJumpReady = false;
+          this.mount.mountJumpPerforming = true;
+          this.vy = -mJumpSpd * gd;
+          this.jumpHold = this.mount.mountJumpTicks();
+          this.extraJumpCd = 8;   // 与装备多段跳互斥（防同帧连段）
+        }
       }
       // ---- 多段跳（RefreshDoubleJumps + JumpMovement 近似）：云朵/沙暴/暴雪/屁瓶族 ----
       // 空中再按跳（持续按住 + 段数剩余 + 未在急升中）→ 消费一段；各段速度原版梯度近似
@@ -1975,7 +2045,12 @@ export class Player extends Entity {
         // 坐骑摔伤系数（Player.cs:25081 num17 *= mount.FallDamage）：兔兔 0.8/史莱姆 0.5/
         // 独角兽 0.2/蜥蜴 0.2/飞行族 0；extraFall 起步豁免（:25011 mount.ExtraFall）
         let dmg = Math.max(1, Math.round((fallTiles - safeT) * 10));
-        if (this.ridingMount) dmg = Math.max(1, Math.round(dmg * this.mount.fallDamageFactor));
+        if (this.ridingMount) {
+          // Player.cs:25022-25025：Mount.Type==1（兔兔）落距直接清零——永不摔伤
+          // （曾按 fallDamage 0.8 结算错值）；其余乘 mounts[n].fallDamage 系数
+          if (this.mount.type === 1) { this.fallStartY = null; return; }
+          dmg = Math.max(1, Math.round(dmg * this.mount.fallDamageFactor));
+        }
         this.lastDamageCause = { kind: 'fell' };
         this.damage(dmg, this.cx, this.y - 10);
         game.playSfx('hurt');
@@ -2487,6 +2562,16 @@ export class Player extends Entity {
   get store() { return this.lastStore; }
   /** 上一 tick 的跳跃输入（Mount.tryStartHover 的 releaseUp 边沿门 :26416） */
   prevInputJump = false;
+  /** 鼠标世界坐标（Game 每帧注入；钻头坐骑瞄准 AimAbility / Scutlix 索敌回退用） */
+  aimWX = 0;
+  aimWY = 0;
+  /** 左键（controlUseItem）/ 右键（controlUseTile）按住电平——钻头坐骑挖掘驱动 */
+  inputUseItem = false;
+  inputUseTile = false;
+  /** 上一 tick 的两键电平（ItemCheck_HandleMount :52074 的 releaseUseItem&&releaseUseTile
+   *  按压边沿 = 上 tick 双松 + 本 tick 任一按下） */
+  prevUseItem = false;
+  prevUseTile = false;
   /** 重力方向（R7：1 普通 / -1 倒置——重力药水 buff 18 激活时按 Up 切换，Player.gravDir）
    *  倒置 = 重力/跳跃/落点起点全部取反；onGround 由 hitHead 近似（天花板当地板） */
   gravDir: 1 | -1 = 1;
@@ -2658,8 +2743,10 @@ export class Player extends Entity {
     if (eq.panic) this.panicTime = 300;
     // 魔力手铐（magicCuffs :37678）：受伤回蓝 = 原始伤害 1:1（防前数值）
     if (eq.magicCuffs) this.mana = Math.min(this.maxMana, this.mana + dmg);
-    // 击退（钴护盾族 noKnockback 免疫）
-    if (knockback && !eq.noKnockback) {
+    // 击退（钴护盾族 noKnockback 免疫；坐骑冲刺态免击退——UpdateEffects
+    // :4962/:4968 |vx| > DashSpeed-RunSpeed/2 时 mountedPlayer.noKnockback=true）
+    if (knockback && !eq.noKnockback
+      && !(this.ridingMount && this.mount.dashNoKnockback(this.vx))) {
       const dir = this.cx < srcX ? -1 : 1;
       this.vx = dir * 3.4;
       this.vy = -3;

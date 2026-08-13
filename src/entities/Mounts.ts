@@ -96,7 +96,7 @@ export const mountFallbackColor = (id: number): string => MOUNT_FALLBACK_COLOR[i
 
 /** 坐骑 buff 授予的水下自由语义（Player.cs UpdateBuffs :9592-9608：
  *  131 海龟 / 168 猪鲨崽 → ignoreWater+accFlipper；265 熔岩鲨 → canFloatInWater+accFlipper） */
-const BUFF_SWIM_FREE = new Set([131, 168, 265, 279]);
+const BUFF_SWIM_FREE = new Set([131, 168, 265, 279, 305]); // +305 熔岩鲨（Player.cs:9602-9608：ignoreWater+accFlipper+lavaImmune+lavaVision+fireWalk）
 
 /** MountInstance 消费的玩家视图（结构性接口，避免与 Player 循环依赖） */
 export interface MountedPlayerView {
@@ -175,6 +175,17 @@ export const SCUTLIX_EYE_FRAME_MAX = 10;
 export const FISHRON_COUNTER_LOW_HP = 60;
 export const FISHRON_COUNTER_WET = 420;
 
+/** updateMountEffects 的每 tick 上下文（Player 侧组装：敌怪盒/视线/天气/发射桶） */
+export interface MountEffectsCtx {
+  /** Scutlix 索敌候选（已按 NPC.CanBeChasedBy 口径过滤的敌怪命中盒） */
+  scutlixTargets: ScutlixTarget[];
+  /** Collision.CanHitLine（Mount.cs :4922 视线门） */
+  los(cx: number, cy: number, t: ScutlixTarget): boolean;
+  /** 眼激光发射（UseAbility case 9：弹型 606/伤 150/速 14） */
+  fireScutlixShot?(x: number, y: number, vx: number, vy: number): void;
+  fishron: FishronView;
+}
+
 /** fishronSpecial/updateFishron 的玩家视图 */
 export interface FishronView {
   hp: number; maxHp: number;
@@ -248,7 +259,7 @@ function plotTileLineBand(startX: number, startY: number, endX: number, endY: nu
   const offMinX = toTile(startX - nx) - baseX, offMinY = toTile(startY - ny) - baseY;
   const offMaxX = toTile(startX + nx) - baseX, offMaxY = toTile(startY + ny) - baseY;
   return plotLine(baseX, baseY, toTile(endX), toTile(endY), (x, y) =>
-    plotLine(x + offMinX, y + offMinY, x + offMaxX, y + offMaxY, plot, false));
+    plotLine(x + offMinX, y + offMinY, x + offMaxX, y + offMaxY, plot, false), true);
 }
 
 /** 钻头光束判定的世界视图（TileStore 结构子集） */
@@ -598,9 +609,12 @@ export class MountInstance {
     return true;
   }
 
-  /** hover 是否豁免疲劳池（DoesHoverIgnoresFatigue :3534：无 fatigueMax 的 hover 坐骑） */
+  /** hover 是否豁免疲劳池——DoesHoverIgnoresFatigue（Mount.cs:3534-3542）是【固定
+   *  类型表】{7,8,12,23,44,49,56,61}：这些坐骑永不耗能；只有蜜蜂 5 与暗黑魔法书
+   *  48 真正吃能量池（曾误判为 fatigueMax<=0，致 UFO/钻头/猪鲨崽等全部误耗能坠落） */
+  private static readonly HOVER_IGNORES_FATIGUE = new Set([7, 8, 12, 23, 44, 49, 56, 61]);
   private hoverIgnoresFatigue(): boolean {
-    return (this.data?.fatigueMax ?? 0) <= 0;
+    return MountInstance.HOVER_IGNORES_FATIGUE.has(this.type);
   }
 
   // ---- 能量/疲劳恢复（Mount.cs :2897-2945） ----
@@ -799,6 +813,24 @@ export class MountInstance {
       this.abilityCharging = false;
       this.abilityCooldown = this.data?.abilityCooldown ?? 0;
       this.abilityDuration = this.data?.abilityDuration ?? 0;
+    }
+  }
+
+  /** 每 tick 能力维护（Player.fixedUpdate 挂点，对应 Player.cs:25373 UpdateEffects
+   *  的能力相关子集）：猪鲨崽计数器/增益旗 + Scutlix 索敌-充能-开火。
+   *  在 mount.upkeep 之后调用——hover() 消费的 fishronBoost 在本 tick 内即新鲜 */
+  updateMountEffects(p: MountedPlayerView, ctx: MountEffectsCtx): void {
+    if (!this.active || this.isCart) return;
+    // 计数器先衰减（Player.cs:25340 UpdateBuffs 段）再由 updateFishron 重置
+    if (this.fishronCounter > 0) this.fishronCounter -= 1;
+    if (this.type === 12) {
+      this.updateFishron(ctx.fishron);
+    } else {
+      this.fishronBoost = false;
+    }
+    if (this.type === 9) {
+      const target = scutlixFindTarget(p, ctx.scutlixTargets, ctx.los);
+      this.updateScutlix(p, target, ctx.fireScutlixShot ?? (() => { /* 无投射物桶：静默 */ }));
     }
   }
 
@@ -1189,6 +1221,9 @@ export class MountInstance {
     this.type = m;
     const d = this.data;
     this.fatigueMax = d?.fatigueMax ?? 0;
+    // 眼炮族冷却下限（SetMount :6224-6231：Scutlix 上坐即预热 20 / 圣诞坦克 40）
+    if (m === 9 && this.abilityCooldown < 20) this.abilityCooldown = 20;
+    if (m === 46 && this.abilityCooldown < 40) this.abilityCooldown = 40;
     // 出生尘（DoSpawnDust :6363：spawnDust 族；本仓粒子为程序化圆，数量 10）
     if (game?.spawnParticles && d?.spawnDust) {
       game.spawnParticles(p.x + p.w / 2, p.y + p.h / 2, '#C8C8C8', 10, 1.5);
@@ -1242,6 +1277,20 @@ export class MountInstance {
     this.abilityCharge = 0;
     this.abilityCooldown = 0;
     this.abilityDuration = 0;
+    this.abilityActive = false;
+    this.aiming = false;
+    this.flipDraw = false;
+    this.fishronCounter = 0;
+    this.fishronBoost = false;
+    this.mountJumpReady = false;
+    this.mountJumpPerforming = false;
+    this.drillBeams = [drillBeamIdle(), drillBeamIdle()];
+    this.drillBeamCooldown = 0;
+    this.diodeRotation = 0;
+    this.diodeRotationTarget = 0;
+    this.outerRingRotation = 0;
+    this.crosshairX = 0;
+    this.crosshairY = 0;
     this.walkingGraceTime = 0;
   }
 

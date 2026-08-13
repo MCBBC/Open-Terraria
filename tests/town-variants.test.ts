@@ -157,10 +157,10 @@ describe('③ 小动物笼族 tile 识别（TileID.cs:199 + TileDrawing.cs:5730-
     }
     // 65 张笼键（cage）表 = 64 顶盖笼 + 360 金蝴蝶笼（无顶盖）
     expect(cageSheets).toHaveLength(65);
-    // CAGE_FAMILY 全量 93 张 = 65 笼 + 28 罐/缸族（288-295/580/620 蝴蝶罐 11、
+    // CAGE_FAMILY 全量 92 张 = 65 笼 + 27 罐/缸族（288-295/580/620 蝴蝶罐 10、
     // 282/505/543 鱼缸 3、598 熔岩鱼缸 1、568-570 妖精罐 3、521-527 蜻蜓罐 7、
     // 316-318 水母罐 3，TileDrawing.cs:5925-6001）
-    expect(Object.keys(CAGE_FAMILY)).toHaveLength(93);
+    expect(Object.keys(CAGE_FAMILY)).toHaveLength(92);
   });
 
   it('顶盖样式表 1:1（TileID.cs:199）', () => {

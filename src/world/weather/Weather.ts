@@ -88,6 +88,22 @@ export interface WeatherLoopVolumes {
   sandstorm: number;
 }
 
+// ================= 雨点落水涟漪（Misc/Ripples 的纯逻辑侧） =================
+// 原版 Ripples.png 是水体扭曲 shader 的形状掩码（WaterShaderData._rippleShapeTexture
+// :108 / QueueRipple :446-468），无独立实体；canvas 2D 无扭曲通道——本仓以"水面扩散
+// 椭圆环"近似（采样/绘制在 SkyRenderer，状态池在此便于单测）。
+
+/** 单枚涟漪（世界 px + 归一进度 t 0..life） */
+export interface WaterRipple {
+  x: number; y: number;
+  t: number;
+  life: number;
+}
+
+/** 涟漪寿命/并发上限（60Hz tick 计；45t ≈ 0.75s） */
+export const RIPPLE_LIFE = 45;
+export const RIPPLE_CAP = 150;
+
 // ================= 存档持久化（纯数据，旧档缺省=晴） =================
 
 /** wld 头与本存档共用的天气快照 */
@@ -187,6 +203,29 @@ export class WeatherState {
   /** 室外天气效果强度（SceneState.cs:190-191：BehindBackwall ? -0.1 : 1.1，
    *  0.005/帧 逼近后钳 0-1 → outsideWeatherEffectIntensity） */
   outsideWeatherEffect = 1;
+  /** 雨点落水涟漪池（渲染侧采样入池；update 推进 t） */
+  ripples: WaterRipple[] = [];
+
+  /** 每帧涟漪采样预算（cloudAlpha × 屏宽比例；纯读状态可单测）：
+   *  雨越强/视口越宽越多，上限 24。cloudAlpha≤0（无雨）恒 0。 */
+  rippleBudget(viewW: number): number {
+    if (this.cloudAlpha <= 0) return 0;
+    return Math.min(24, Math.round(this.cloudAlpha * (viewW / 1920) * 6));
+  }
+
+  /** 入池一枚（容量封顶 RIPPLE_CAP，溢出丢弃） */
+  pushRipple(x: number, y: number): boolean {
+    if (this.ripples.length >= RIPPLE_CAP) return false;
+    this.ripples.push({ x, y, t: 0, life: RIPPLE_LIFE });
+    return true;
+  }
+
+  /** 涟漪推进（update 尾段；dayRate 缩放） */
+  private updateRipples(dayRate: number): void {
+    if (!this.ripples.length) return;
+    for (const rp of this.ripples) rp.t += dayRate;
+    this.ripples = this.ripples.filter((rp) => rp.t < rp.life);
+  }
   /** RNG（可注入固定种子做单测） */
   private rng: RNG;
 

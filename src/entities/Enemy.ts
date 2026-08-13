@@ -34,7 +34,7 @@ import {
 import {
   flyingDutchmanAI, sandElementalAI, sandSharkAI, dd2AttackerTestAI,
   eterniaCrystalAI, lanePortalAI, divingFlyerAI, darkMageAI, betsyAI,
-  dd2LightningBugAI,
+  dd2LightningBugAI, ai107ImprovedWalkers,
 } from './bossAI_dd2';
 import {
   moonLordFreeEyeAI, moonLeechAI, cultistTabletAI, lunaticDevoteeAI,
@@ -910,7 +910,10 @@ export class Enemy extends Entity {
         case 44: this.flyingSwarmerAI(game, p); break;                    // AI_044 飞鱼/蚁狮蜂（cs:30999 分轴限速追+失视逃逸）
         case 56: this.dungeonSpiritAI(game, p); break;                    // AI_056 地牢之魂（cs:32915 穿墙0.99惯性追踪）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
-        case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
+        case 107:                                                          // AI_107 ImprovedWalkers（NPC.cs:63372-64919）
+          if (this.vanillaId !== 620) ai107ImprovedWalkers(this, game, p); // DD2 walker 族 1:1（bossAI_dd2.ts：近战前摇/投弹/掷矛/喷吐/自爆/灵气）
+          else this.chargerAI(game, p, 1);                                 // 620 地精鲨（wet 游泳档,cs:64118-64230 专属分支）
+          break;
         case 94: this.towerAI(game, p); break;                          // AI_094 星璇四塔（NPC.cs:41029-41443，核心 1:1）
         // ---- 星璇塔四组专属怪 1:1（bossAI_lunar_misc.ts；docs/event-lunar-pillars.md §4）----
         // 74 穿心者 418 / 75 日耀骑手 416 已由火星批 bossAI_martian.ts 落位（见下方
@@ -974,6 +977,11 @@ export class Enemy extends Entity {
       case 'servant_of_cthulhu': this.flyAI(game, hasPlayer ? player : null, 0.22); break;
       case 'eye_of_cthulhu': this.eocAI(game, player ?? null); break;
     }
+
+    // ---- AI 家族外的三段恒走点光（与 AI 分发无关，原版各自独立方法）----
+    this.updateNpcCastLights();
+    this.updateNpcTrailLights();
+    this.updateNpcDebuffLights();
 
     // ---- EoW 出生渐显（AI_006 尾段 1:1，NPC.cs:52650-52670；须在 AI 分发后跑——
     //      原版位移门 `(position - oldPosition).Length() > 2` 量的是本 tick 位移，
@@ -1190,6 +1198,22 @@ export class Enemy extends Entity {
   private slimeAI(game: GameHooks, player: Player | null) {
     // ai[0]==-999：风气球挂载冻结（NPC.cs:61441 帧0不行动，位置由气球驱动）
     if (this.ai0 === -999) return;
+    // ---- 史莱姆族点光（cs:61445-61456 / :61508-61515 / :61527-61531 / :61866-61870）----
+    // （:60737/:61152/:61289 三处 ai[1] 物品变体光依赖 SlimeCanContainItems 未移植，登记跳过）
+    if (this.vanillaId === 244) {
+      // :61444-61456 彩虹史莱姆 = Main.Disco 三色（6 相状态机 ≈ hsl 时间色，s=1 l=0.5）
+      const [dr, dg, db] = hslToRgb((visEffectFrames() / 222) % 1, 1, 0.5);
+      this.lightRGB = [dr, dg, db];
+    } else if (this.vanillaId === 667) {
+      // :61508-61513 金史莱姆 Color(204,181,72)/255×1.1
+      this.lightRGB = [(204 / 255) * 1.1, (181 / 255) * 1.1, (72 / 255) * 1.1];
+    } else if (this.vanillaId === 676) {
+      // :61527-61530 微光史莱姆 = TorchColor(23)（TorchID.cs:48-62 公式）
+      const num = Math.min(1, Math.max(0, 0.9 + (270 - mouseTextColorApprox()) / 900));
+      this.lightRGB = [num * 0.9, 0.55, num * 1.2];
+    } else if (this.vanillaId === 59) {
+      this.lightRGB = [1, 0.3, 0.1];                                    // :61866-61870 岩浆史莱姆
+    }
     const st = game.world.store;
     const underground = this.cy / TILE > game.world.groundLevel;
     const grasshopper = this.vanillaId === 377 || this.vanillaId === 446;
@@ -1428,6 +1452,67 @@ export class Enemy extends Entity {
     this.hp = this.maxHp; // immortal：血量恒满（cs:14535 lifeMax=1000 + immortal）
   }
 
+  /** UpdateNPC_CastLights（NPC.cs:93520-93603）敌怪侧两段：发光蘑菇族闪烁蓝光 +
+   *  44 不死矿工头盔灯。城镇 NPC 段（160 松露 / 209 电子人）归 TownNPC 实体不在此。
+   *  蘑菇族（:93576-93588）：num9 = Next(28,42)×0.005 + (270−mouseTextColor)/500，
+   *  基色 (0.1, 0.3+num9/2, 0.6+num9) × num13（634 孢子蝙蝠 0.65，其余 0.35）。 */
+  private updateNpcCastLights() {
+    const vid = this.vanillaId;
+    if (vid === null) return;
+    if ((vid >= 254 && vid <= 261) || vid === 634 || vid === 635) {
+      const num9 = (28 + Math.random() * 14) * 0.005 + (270 - mouseTextColorApprox()) / 500;
+      const num13 = vid === 634 ? 0.65 : 0.35;
+      this.mergeLightRGB([0.1 * num13, (0.3 + num9 / 2) * num13, (0.6 + num9) * num13]);
+      // 256 菌鱼与 AI_018 水母光（cs:24276）原版同帧叠加——单槽逐通道 max
+    } else if (vid === 44) {
+      // :93599-93602 不死矿工：(0.9, 0.75, 0.5) @ (position.x+w/2, position.y+4)
+      this.lightRGB = [0.9, 0.75, 0.5];
+      this.lightRGBAt = { x: this.cx, y: this.y + 4 };
+    }
+  }
+
+  /** UpdateNPC_UpdateTrails TrailingMode==4（NPC.cs:91825-91841）：120 混沌元素 /
+   *  137 荧光蝠 / 138 荧光史莱姆——循环体内在 position（顶左格）加 (0.3,0,0.2)。 */
+  private updateNpcTrailLights() {
+    const vid = this.vanillaId;
+    if (vid !== 120 && vid !== 137 && vid !== 138) return;
+    this.lightRGB = [0.3, 0, 0.2];
+    this.lightRGBAt = { x: this.x, y: this.y };
+  }
+
+  /** debuff 自发光（NPC.cs:92181-92467，DrawNPC 前的 buff 视效段）：onFire/onFire3/
+   *  daybreak/onFire2(诅咒焰) (1,0.3,0.1)、betsysCurse (0.6,0.1,0.9)、onFrostBurn/
+   *  onFrostBurn2 (0.1,0.6,1)。位置 = (position.x, position.y+16)。原版同帧可与
+   *  type 光叠加；本仓单槽 → 逐通道 max 合并（AI 已写 lightRGBAt 时不挪光源位） */
+  /** 单槽点光的通道 max 合并：AI 已写 lightRGB 时逐通道取大（原版 AddLight 可同帧
+   *  叠加，单槽下 max 最接近视觉并集）且不挪既有 lightRGBAt；空槽则直接写入 */
+  private mergeLightRGB(rgb: [number, number, number], at?: { x: number; y: number }) {
+    if (this.lightRGB) {
+      this.lightRGB = [
+        Math.max(this.lightRGB[0], rgb[0]),
+        Math.max(this.lightRGB[1], rgb[1]),
+        Math.max(this.lightRGB[2], rgb[2]),
+      ];
+    } else {
+      this.lightRGB = rgb;
+      if (at) this.lightRGBAt = at;
+    }
+  }
+
+  private updateNpcDebuffLights() {
+    let bl: [number, number, number] | null = null;
+    if (this.onFireT > 0 || this.onFire3T > 0 || this.daybreakT > 0 || this.cursedT > 0) {
+      bl = [1, 0.3, 0.1];
+    }
+    if (this.frostburnT > 0 || this.frostburn2T > 0) {
+      bl = bl ? [Math.max(bl[0], 0.1), Math.max(bl[1], 0.6), Math.max(bl[2], 1)] : [0.1, 0.6, 1];
+    }
+    if (this.betsysCurseT > 0) {
+      bl = bl ? [Math.max(bl[0], 0.6), Math.max(bl[1], 0.1), Math.max(bl[2], 0.9)] : [0.6, 0.1, 0.9];
+    }
+    if (bl) this.mergeLightRGB(bl, { x: this.x, y: this.y + 16 });
+  }
+
   /** 火把僵尸 590/591 手持火把点光（NPC.cs:57309-57366，AI_003 内 type 段 1:1）。
    *  590：光源格 = floor((Center.x + dir 偏移)/16)，y 取 floor((y+6)/16)；火把格与
    *  相邻格（dir 侧）液体均须为 0。591（持械专家变体）：!wet 即亮，偏移 ±36/±28、
@@ -1619,6 +1704,23 @@ export class Enemy extends Entity {
   }
 
   private fighterAI(game: GameHooks, player: Player | null) {    const st = game.world.store;
+    // ---- AI_003 尾段点光（cs:58802-58823，恒亮；放函数头防各 type 分支提前 return 漏写）----
+    const vidF = this.vanillaId ?? -1;
+    if (vidF >= 277 && vidF <= 280) {
+      this.lightRGB = [0.2, 0.1, 0];                                   // :58802-58804 地牢骷髅四族
+    } else if (vidF === 520) {
+      this.lightRGB = [0.3, 0.3, 0.7];                                 // :58806-58808 火星行者 Top+20
+      this.lightRGBAt = { x: this.cx, y: this.y + 20 };
+    } else if (vidF === 525) {
+      this.lightRGB = [0.35, 0.5, 0.1];                                // :58810-58813 腐化沙鬼 Top+15
+      this.lightRGBAt = { x: this.cx, y: this.y + 15 };
+    } else if (vidF === 526) {
+      this.lightRGB = [0.4, 0.4, 0.2];                                 // :58815-58818 猩红沙鬼 Top+15
+      this.lightRGBAt = { x: this.cx, y: this.y + 15 };
+    } else if (vidF === 527) {
+      this.lightRGB = [0.24, 0.12, 0.4];                               // :58820-58823 圣域沙鬼 Top+15
+      this.lightRGBAt = { x: this.cx, y: this.y + 15 };
+    }
     // 游泳化双族 461/586（AI_003_Fighters cs:56361/:56486）：块在通用行走与白天驱散
     // （cs:57732，位于其后）之前，wet 时整段接管本 tick——故 hook 在函数最前
     if (this.vanillaId === 461 || this.vanillaId === 586) {
@@ -2804,6 +2906,8 @@ export class Enemy extends Entity {
       if (this.vy < -4) this.vy = -4;
       if (player) this.facing = this.seekDirX(player);   // TargetClosest
     }
+    // ---- 点光（cs:52826-52828）：116 饿魂 II（脱落追击态）Center (0.3,0.2,0.1) 恒亮
+    if (this.vanillaId === 116) this.lightRGB = [0.3, 0.2, 0.1];
   }
 
   /** AI_005 噬魂怪族（NPC.cs:17567-17790）"蜂群"AI：
@@ -3053,6 +3157,12 @@ export class Enemy extends Entity {
     if (!isHornet && vid !== 205 && Math.random() < 1 / 20) {
       game.spawnParticles(this.cx, this.y + this.h * 0.5,
         vid === 173 ? '#8A3030' : '#7A4FA8', 1, 0.3, { life: 30, damp: 0.9, grav: 0 });
+    }
+    // ---- 点光（cs:51006-51017）：中心格在世界内且非实心 → Center (0.3,0.1,0.05)
+    //  （噬魂怪族 AI_005 全体——飞行体不嵌墙时的环境微光）
+    const ltx = Math.floor(this.cx / TILE), lty = Math.floor(this.cy / TILE);
+    if (st.inBounds(ltx, lty) && !st.isSolid(ltx, lty)) {
+      this.lightRGB = [0.3, 0.1, 0.05];
     }
   }
 
@@ -3696,6 +3806,15 @@ export class Enemy extends Entity {
   private butterflyAI(game: GameHooks, _player: Player | null) {
     const st = game.world.store;
     if (!this.aiInit) { this.aiInit = true; this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; }
+    // ---- 点光（AI_065_Butterflies，cs:45233-45241 / :45448-45453）----
+    if (this.vanillaId === 661) {
+      // :45233-45237 光皇蝴蝶：hslToRgb(GlobalTimeWrappedHourly×0.33 % 1, 1, 0.5)×0.3
+      //  + 白 0.1。GlobalTimeWrappedHourly 1 游戏小时 = 54000 帧 → 色相周期 ≈163636 帧
+      const [hr, hg, hb] = hslToRgb((visEffectFrames() / 54000) * 0.33, 1, 0.5);
+      this.lightRGB = [hr * 0.3 + 0.1, hg * 0.3 + 0.1, hb * 0.3 + 0.1];
+    } else if (this.vanillaId === 653) {
+      this.lightRGB = [0.6, 0.3, 0.1];      // :45448-45453 地狱蝴蝶恒亮 + 尘 6 号 1/60
+    }
     // 漂移目标重选
     if (this.ai2 <= 0) {
       this.ai0 = (Math.random() * 2 - 1) * (0.26 + Math.random() * 2.74);
@@ -3962,10 +4081,12 @@ export class Enemy extends Entity {
    *  钻地逃走（cs:34560-34584），静止期不被随机蠕动惊扰 */
   private wormCritterAI(game: GameHooks) {
     const st = game.world.store;
-    // 484 魔化夜爬虫点光（cs:34492-34497）：每帧 90-111% 抖动 ×(essScale+0.5)/2
-    // （essScale 赋能默认 0.5 → 系数 0.5），紫光
+    // 484 魔化夜爬虫点光（cs:34492-34497）：num1047 = Next(90,111)×0.01 × (essScale+0.5)/2，
+    // 紫光。essScale = Main.cs:61703-61713 三角波 0.7↔1.0（每帧 ±0.01，周期 60 帧）
     if (this.vanillaId === 484) {
-      const f = (0.9 + Math.random() * 0.2) * 0.5;
+      const t = visEffectFrames() % 60;
+      const ess = t < 30 ? 1 - t / 100 : 0.7 + (t - 30) / 100;
+      const f = (0.9 + Math.random() * 0.2) * ((ess + 0.5) / 2);
       this.lightRGB = [0.3 * f, 0.1 * f, 0.25 * f];
     }
     if (this.ai0 < 0) this.ai0 = 0;
@@ -4132,6 +4253,12 @@ export class Enemy extends Entity {
   private fairyAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     if (!this.aiInit) { this.aiInit = true; this.ai0 = this.cx; this.ai1 = this.cy; this.ai2 = 0; this.ai3 = 0; }
+    // ---- 点光（cs:48991-49010）：value3 主色 ×0.7（value4 仅尘色不进光）
+    //  583 粉仙灵 HotPink(255,105,180) / 584 绿仙灵 LimeGreen(50,205,50) /
+    //  585 蓝仙灵 RoyalBlue(65,105,225)
+    if (this.vanillaId === 583) this.lightRGB = [(255 / 255) * 0.7, (105 / 255) * 0.7, (180 / 255) * 0.7];
+    else if (this.vanillaId === 584) this.lightRGB = [(50 / 255) * 0.7, (205 / 255) * 0.7, (50 / 255) * 0.7];
+    else if (this.vanillaId === 585) this.lightRGB = [(65 / 255) * 0.7, (105 / 255) * 0.7, (225 / 255) * 0.7];
     this.ai3 += 1;
     if (this.ai3 >= 18000) { this.dead = true; return; } // 存在期满离场
     if (this.ai2 === 0) {

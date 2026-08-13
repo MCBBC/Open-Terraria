@@ -350,6 +350,431 @@ interface AmbientEnt {
   dead: boolean;
 }
 
+/** Utils.Remap（Utils.cs）= Lerp(toMin, toMax, GetLerpValue(fromMin, fromMax, value, clamped)) */
+function remap(value: number, fromMin: number, fromMax: number, toMin: number, toMax: number): number {
+  return toMin + (toMax - toMin) * lerpValueClamped(fromMin, fromMax, value);
+}
+
+// ================= 月塔天空族（Nebula/Solar/Stardust/Vortex Sky 1:1） =================
+
+type TowerFamily = 'vortex' | 'nebula' | 'stardust' | 'solar';
+
+/** 各族贴图文件（展平键）：Background/Planet 公共 + 族专属件 */
+const TOWER_SKY_TEX: Record<TowerFamily, Record<string, string>> = {
+  vortex: {
+    Background: 'Misc_VortexSky_Background.png', Planet: 'Misc_VortexSky_Planet.png',
+    Bolt: 'Misc_VortexSky_Bolt.png', Flash: 'Misc_VortexSky_Flash.png',
+  },
+  nebula: {
+    Background: 'Misc_NebulaSky_Background.png', Planet: 'Misc_NebulaSky_Planet.png',
+    Beam: 'Misc_NebulaSky_Beam.png', Rock0: 'Misc_NebulaSky_Rock_0.png',
+    Rock1: 'Misc_NebulaSky_Rock_1.png', Rock2: 'Misc_NebulaSky_Rock_2.png',
+  },
+  solar: {
+    Background: 'Misc_SolarSky_Background.png', Planet: 'Misc_SolarSky_Planet.png',
+    Meteor: 'Misc_SolarSky_Meteor.png',
+  },
+  stardust: {
+    Background: 'Misc_StarDustSky_Background.png', Planet: 'Misc_StarDustSky_Planet.png',
+    Star0: 'Misc_StarDustSky_Star 0.png', Star1: 'Misc_StarDustSky_Star 1.png',
+  },
+};
+
+/** 单族天空状态（对应一个 CustomSky 实例：SceneState 同族也供 Monolith* 复用） */
+class TowerSkyState {
+  /** _isActive */
+  active = false;
+  /** _fadeOpacity（Activate 置 0.002，±0.01/帧 1:1 Update :47-67） */
+  fade = 0;
+  /** Main.GlobalTimeWrappedHourly 近似（秒，驱动星尘闪烁/星云落石） */
+  time = 0;
+  private texs = new Map<string, HTMLImageElement>();
+  // NebulaSky._pillars（Activate :121-133：40 根光柱，X 均布世界宽±20000、Y -2000..-1800、Depth 7-15）
+  private pillars: Array<{ x: number; y: number; depth: number }> = [];
+  // SolarSky._meteors（Activate :124-147：150 颗，2/3 近层 Depth 1.8-4.8、1/3 远层 4.8-9.8）
+  private meteors: Array<{ x: number; y: number; depth: number; frame: number; scale: number; startX: number }> = [];
+  // StardustSky._stars（Activate :121-146：200×10 颗，Depth 1.5-9.5）
+  private stars: Array<{ x: number; y: number; depth: number; tex: number; off: number; amp: number; freq: number }> = [];
+  // VortexSky._bolts（Activate :131-140：500 槽；Update :59-83 每 1-4t 一道，寿命 30）
+  private bolts: Array<{ x: number; y: number; depth: number; life: number; alive: boolean }> = [];
+  private boltTimer = 0;
+
+  private tex(fam: TowerFamily, key: string): HTMLImageElement | null {
+    const k = `${fam}|${key}`;
+    let t = this.texs.get(k);
+    if (!t) {
+      t = loadTex(TOWER_SKY_TEX[fam][key]);
+      this.texs.set(k, t);
+    }
+    return t;
+  }
+
+  /** ManageSpecialBiomeVisuals 翻转（Activate :121-147 / Deactivate :140-143） */
+  setActive(on: boolean, fam: TowerFamily, maxTilesX: number, surfacePx: number): void {
+    if (on && !this.active) this.generate(fam, maxTilesX, surfacePx);
+    else if (!on) this.active = false;
+  }
+
+  reset(): void {
+    this.active = false;
+    this.fade = 0;
+    this.pillars = [];
+    this.meteors = [];
+    this.stars = [];
+    this.bolts = [];
+  }
+
+  /** Activate 实体生成（按族分发；调用方持有族名） */
+  generate(fam: TowerFamily, maxTilesX: number, surfacePx: number): void {
+    const r = Math.random;
+    this.fade = 0.002;
+    this.active = true;
+    this.maxTilesX = maxTilesX;
+    this.surfacePx = surfacePx;
+    if (fam === 'nebula') {
+      // NebulaSky.Activate :125-132
+      const maxTilesX = this.maxTilesX, N = 40;
+      this.pillars = new Array(N);
+      for (let i = 0; i < N; i++) {
+        this.pillars[i] = {
+          x: (i / N) * (maxTilesX * 16 + 20000) + r() * 40 - 20 - 20000,
+          y: r() * 200 - 2000,
+          depth: r() * 8 + 7,
+        };
+      }
+      this.pillars.sort((a, b) => b.depth - a.depth);   // Array.Sort(降 Depth)
+    } else if (fam === 'solar') {
+      // SolarSky.Activate :128-146
+      const maxTilesX = this.maxTilesX, surfacePx = this.surfacePx, N = 150;
+      this.meteors = new Array(N);
+      for (let i = 0; i < N; i++) {
+        const depth = Math.floor(r() * 3) !== 0 ? r() * 3 + 1.8 : r() * 5 + 4.8;  // :134-141
+        const x = (i / N) * maxTilesX * 16 + r() * 40 - 20;
+        this.meteors[i] = {
+          x, y: -(r() * (surfacePx + 10000)) - 10000,
+          depth, frame: Math.floor(r() * 12), scale: r() * 0.5 + 1, startX: x,
+        };
+      }
+      this.meteors.sort((a, b) => b.depth - a.depth);
+    } else if (fam === 'stardust') {
+      // StardustSky.Activate :124-145
+      const maxTilesX = this.maxTilesX, surfacePx = this.surfacePx;
+      const N1 = 200, N2 = 10;
+      this.stars = new Array(N1 * N2);
+      for (let i = 0; i < N1; i++) {
+        for (let j = 0; j < N2; j++) {
+          this.stars[i * N2 + j] = {
+            x: (i / N1) * maxTilesX * 16,
+            y: (j / N2) * (surfacePx + 2000) - 1000,
+            depth: r() * 8 + 1.5,
+            tex: Math.floor(r() * 2),
+            off: r() * 6.28, amp: r() * 5, freq: r() + 1,
+          };
+        }
+      }
+      this.stars.sort((a, b) => b.depth - a.depth);
+    } else {
+      // VortexSky.Activate :131-139
+      this.bolts = new Array(500);
+      for (let i = 0; i < 500; i++) this.bolts[i] = { x: 0, y: 0, depth: 0, life: 0, alive: false };
+      this.boltTimer = 0;
+    }
+  }
+
+  /** Activate 所需世界尺寸（generate 前由调用方注入） */
+  maxTilesX = 4200;
+  surfacePx = 4800;
+
+  /** Update（各 Sky.Update :47-67 通用淡入淡出 + Solar 流星下坠/Vortex 落雷计时） */
+  update(fam: TowerFamily, dtMs: number): void {
+    const frames = dtMs / (1000 / 60);
+    this.time += dtMs / 1000;
+    this.fade = this.active
+      ? Math.min(1, 0.01 * frames + this.fade)
+      : Math.max(0, this.fade - 0.01 * frames);
+    if (fam === 'solar' && this.fade > 0.001) {
+      // SolarSky.Update :56-66：1200px/s 斜向下坠，落过地表线回顶
+      const dtSec = dtMs / 1000;
+      for (const m of this.meteors) {
+        m.x -= 1200 * dtSec;
+        m.y += 1200 * dtSec;
+        if (m.y > this.surfacePx) { m.x = m.startX; m.y = -10000; }
+      }
+    } else if (fam === 'vortex' && this.fade > 0.001) {
+      // VortexSky.Update :59-83
+      this.boltTimer -= frames;
+      if (this.boltTimer <= 0) {
+        this.boltTimer = 1 + Math.floor(Math.random() * 4);        // Next(1,5)
+        let slot = this.bolts.findIndex((b) => !b.alive);
+        if (slot < 0) slot = this.bolts.length - 1;
+        this.bolts[slot] = {
+          x: Math.random() * (this.maxTilesX * 16 + 4000) - 2000,
+          y: Math.random() * 500,
+          depth: Math.random() * 8 + 2,
+          life: 30, alive: true,
+        };
+      }
+      for (const b of this.bolts) {
+        if (!b.alive) continue;
+        if (--b.life <= 0) b.alive = false;
+      }
+    }
+  }
+
+  /** Draw（各 Sky.Draw 1:1）：黑幕 + 背景带 + 行星（远景段）→ 族专属实体（视差段） */
+  draw(ctx: CanvasRenderingContext2D, fam: TowerFamily, viewW: number, viewH: number,
+    screenX: number, screenY: number, maxTilesX: number, surfacePx: number): void {
+    if (this.fade <= 0.001) return;                                  // IsActive 语义
+    this.maxTilesX = maxTilesX;
+    this.surfacePx = surfacePx;
+    // ---- 远景段（maxDepth==MaxValue 分支，各族同构 :66-73/:76-83/:71-78/:93-100）----
+    ctx.save();
+    ctx.fillStyle = `rgba(0,0,0,${this.fade.toFixed(4)})`;           // BlackTile × fade
+    ctx.fillRect(0, 0, viewW, viewH);
+    const bg = this.tex(fam, 'Background');
+    if (bg && bg.complete && bg.naturalWidth) {
+      // :69 背景带竖向偏移 + :69 alpha = min(1,(screenY-800)/1000)×fade
+      const y = Math.max(0, (surfacePx - screenY - 2400) * 0.1);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (screenY - 800) / 1000)) * this.fade;
+      ctx.drawImage(bg, 0, y, viewW, viewH);
+    }
+    const planet = this.tex(fam, 'Planet');
+    if (planet && planet.complete && planet.naturalWidth) {
+      // :70-72 屏中心 + (-200,-200) + 0.01×(maxTilesX*8 − screenX, worldSurface/2 − screenY)
+      const px = viewW / 2 - 200 + 0.01 * (maxTilesX * 8 - screenX);
+      const py = viewH / 2 - 200 + 0.01 * (surfacePx / 16 / 2 - screenY);
+      ctx.globalAlpha = 0.9 * this.fade;
+      ctx.drawImage(planet, px - planet.naturalWidth / 2, py - planet.naturalHeight / 2);
+    }
+    // ---- 族专属实体段（:74-113/:84-117/:79-114/:101-123）----
+    const num3 = Math.max(0, Math.min(1, (screenY - 1000) / 1000)); // 高度门 alpha
+    const camCX = screenX + viewW / 2, camCY = screenY + viewH / 2; // vector3
+    const inRect = (x: number, y: number) =>
+      x > -1000 && x < viewW + 1000 && y > -1000 && y < viewH + 1000;
+    const project = (x: number, y: number, depth: number, sy: number): [number, number] => {
+      const px = (x - camCX) / depth + camCX - screenX;
+      const py = (y - camCY) * sy / depth + camCY - screenY;
+      return [px, py];
+    };
+    ctx.imageSmoothingEnabled = true;
+    if (fam === 'nebula') {
+      for (let j = 0; j < this.pillars.length; j++) {
+        const p = this.pillars[j];
+        const [px, py] = project(p.x, p.y, p.depth, 0.9);
+        if (!inRect(px, py)) continue;
+        const num4 = (1 / p.depth) * 450;                            // :103
+        const beam = this.tex(fam, 'Beam');
+        if (beam && beam.complete && beam.naturalWidth) {
+          // :104 原点 (0,0)，scale=(num4/70, num4/45)，alpha 0.2×num3×fade
+          ctx.globalAlpha = 0.2 * num3 * this.fade;
+          ctx.drawImage(beam, px, py, num4, beam.naturalHeight * (num4 / 45));
+        }
+        // :105-111 每 0.03 一颗落石（34 颗/柱），num7=1−(phase%1) 驱动纵落/旋转/亮度
+        for (let k = 0, rockIdx = 0; k <= 1.0001; k += 0.03, rockIdx++) {
+          const num6 = k;
+          const num7 = 1 - ((num6 + this.time * 0.02 + Math.sin(j)) % 1);
+          const rock = this.tex(fam, `Rock${rockIdx % 3}`);
+          if (!rock || !rock.complete || !rock.naturalWidth) continue;
+          const rx = px + Math.sin(num6 * 1582) * (num4 * 0.5) + num4 * 0.5;
+          const ry = py + num7 * 2000;
+          ctx.save();
+          ctx.globalAlpha = num7 * num3 * this.fade;
+          ctx.translate(rx, ry);
+          ctx.rotate(num7 * 20);
+          ctx.drawImage(rock, -rock.naturalWidth * 0.9 / 2, -rock.naturalHeight * 0.9 / 2,
+            rock.naturalWidth * 0.9, rock.naturalHeight * 0.9);
+          ctx.restore();
+        }
+      }
+    } else if (fam === 'solar') {
+      for (const m of this.meteors) {
+        const [px, py] = project(m.x, m.y, m.depth, 0.9);
+        if (!inRect(px, py)) continue;
+        const tex = this.tex(fam, 'Meteor');
+        if (!tex || !tex.complete || !tex.naturalWidth) continue;
+        const frame = Math.floor(m.frame / 3);                        // :110
+        m.frame = (m.frame + 1) % 12;                                 // :111（Draw 内推进）
+        const fh = tex.naturalHeight / 4;
+        const s = (1 / m.depth) * 5 * m.scale;                        // :114
+        ctx.globalAlpha = num3 * this.fade;
+        ctx.drawImage(tex, 0, frame * fh, tex.naturalWidth, fh, px, py,
+          tex.naturalWidth * s, fh * s);
+      }
+    } else if (fam === 'stardust') {
+      for (const s of this.stars) {
+        const [px, py] = project(s.x, s.y, s.depth, 1.1);             // :103 星尘垂直视差 1.1
+        if (!inRect(px, py)) continue;
+        const tex = this.tex(fam, s.tex === 0 ? 'Star0' : 'Star1');
+        if (!tex || !tex.complete || !tex.naturalWidth) continue;
+        // :107-109 双正弦亮度
+        let value = Math.sin(s.freq * this.time + s.off) * s.amp + s.amp;
+        const num4 = Math.sin(s.freq * this.time * 5 + s.off) * 0.1 - 0.1;
+        value = Math.max(0, Math.min(1, value));
+        const a = num3 * value * 0.8 * (1 - num4) * this.fade;        // :111
+        if (a <= 0.01) continue;
+        const scale = ((1 / s.depth) * 0.5 + 0.5) * (value * 0.3 + 0.7);
+        ctx.globalAlpha = a;
+        ctx.drawImage(tex, px - tex.naturalWidth * scale / 2, py - tex.naturalHeight * scale / 2,
+          tex.naturalWidth * scale, tex.naturalHeight * scale);
+      }
+    } else {
+      for (const b of this.bolts) {
+        if (!b.alive) continue;
+        const [px, py] = project(b.x, b.y, b.depth, 0.9);
+        if (!inRect(px, py)) continue;
+        const flash = b.life > 26 && b.life % 2 === 0;                // :115-119
+        const tex = this.tex(fam, flash ? 'Flash' : 'Bolt');
+        if (!tex || !tex.complete || !tex.naturalWidth) continue;
+        const a = num3 * (b.life / 30) * this.fade;                   // :121
+        const s = (1 / b.depth) * 5;                                  // :121
+        ctx.globalAlpha = a;
+        ctx.drawImage(tex, px, py, tex.naturalWidth * s, tex.naturalHeight * s);
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ================= 月总死亡戏剧件（MoonlordDeathDrama.cs :12-146） =================
+
+type DramaPieceKind = 'spine' | 'shoulder' | 'torso' | 'head' | 'explosion';
+
+const DRAMA_TEX_FILE: Record<DramaPieceKind, string> = {
+  spine: 'Misc_MoonExplosion_Spine.png',
+  shoulder: 'Misc_MoonExplosion_Shoulder.png',
+  torso: 'Misc_MoonExplosion_Torso.png',
+  head: 'Misc_MoonExplosion_Head.png',
+  explosion: 'Misc_MoonExplosion_Explosion.png',
+};
+
+const dramaTexCache = new Map<DramaPieceKind, HTMLImageElement>();
+function dramaTex(kind: DramaPieceKind): HTMLImageElement | null {
+  if (typeof Image === 'undefined') return null;
+  let t = dramaTexCache.get(kind);
+  if (!t) {
+    t = new Image();
+    t.src = `sprites/vanilla/${DRAMA_TEX_FILE[kind]}`;
+    dramaTexCache.set(kind, t);
+  }
+  return t;
+}
+
+/** MoonlordPiece（:12-87）：重力 0.3 + 角速度衰减 0.99 + 出界判死 */
+class DramaPiece {
+  rot = 0;
+  dead = false;
+  constructor(
+    readonly kind: DramaPieceKind,
+    public x: number, public y: number,
+    public vx: number, public vy: number,
+    readonly ox: number, readonly oy: number,   // 贴图 origin（:235-241 显式值）
+    readonly rotV: number,
+  ) {}
+  update(maxTilesX: number, maxTilesY: number): void {
+    this.vy += 0.3;                              // :50
+    this.rot += this.rotV;                       // :51
+    this.rotV *= 0.99;                           // :52
+    this.x += this.vx; this.y += this.vy;        // :53
+    if (this.y > maxTilesY * 16 - 480 || this.x < 480 || this.x >= maxTilesX * 16 - 480) {
+      this.dead = true;                          // :26-36
+    }
+  }
+}
+
+/** MoonlordExplosion（:89-146）：7 帧竖条，帧速 2-4，恒 (255,255,255,127) */
+class DramaExplosion {
+  counter = 0;
+  dead = false;
+  constructor(public x: number, public y: number, readonly speed: number) {}
+  update(): void {
+    this.counter++;                              // :127
+    if (this.counter >= this.speed * 7) this.dead = true;   // :103-113
+  }
+}
+
+/** UnifiedRandom(seed) 的确定性替身（ThrowPieces 四件散射角序列按种子定）。
+ *  非 .NET 位级同源（MS RNG 内部状态不公开），只保证同种子同序列（登记）。 */
+function seededRandom(seed: number): () => number {
+  let s = (seed <= 0 ? 1 : seed) >>> 0;
+  return () => {
+    s = (Math.imul(s ^ 0x9e3779b9, 25214903917) + 11) >>> 0;
+    return s / 0x100000000;
+  };
+}
+
+// ================= 晨昏耀斑贴图（Misc/Sunflare/*） =================
+
+type SunflareTex = 'flare1' | 'flare2' | 'bokeh' | 'spectra' | 'pointblurry' | 'pointsharp' | 'colorgradient';
+
+const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
+  flare1: 'Misc_Sunflare_flare1.png',
+  flare2: 'Misc_Sunflare_flare2.png',
+  bokeh: 'Misc_Sunflare_Lens_Flare1.png',
+  spectra: 'Misc_Sunflare_Lens_Flare2.png',
+  pointblurry: 'Misc_Sunflare_Lens_PointBlurry.png',
+  pointsharp: 'Misc_Sunflare_Lens_PointSharp.png',
+  colorgradient: 'Misc_Sunflare_colorgradient.png',
+};
+
+/** 镜头元素乘色缓存（lighter 叠加前先 multiply 着色——LensFlareElement.Color :422 等） */
+const flareTintCache = new Map<string, HTMLCanvasElement>();
+function tintedFlareSprite(tex: HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  const key = `${tex.src}|${r},${g},${b}`;
+  const hit = flareTintCache.get(key);
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = tex.naturalWidth; c.height = tex.naturalHeight;
+  const cx = c.getContext('2d')!;
+  cx.imageSmoothingEnabled = true;
+  cx.drawImage(tex, 0, 0);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${r},${g},${b})`;
+  cx.fillRect(0, 0, c.width, c.height);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(tex, 0, 0);
+  flareTintCache.set(key, c);
+  if (flareTintCache.size > 24) {
+    const first = flareTintCache.keys().next().value;
+    if (first !== undefined) flareTintCache.delete(first);
+  }
+  return c;
+}
+
+/** 帧数据挂点（Renderer.render 每帧一行注入 sky.frameCtx；结构化类型避免反向依赖）。
+ *  消费：月塔天空近距门 / 月总死亡戏剧 / 稀有云世界旗标 / AmbientSky zone 门 /
+ *  涟漪水面采样。null = 未注入（菜单等），各子系统自静默。 */
+export interface SkyFrameCtx {
+  /** 场上实体（月塔 493/422/507/517 与月总 398 扫描用） */
+  entities: ReadonlyArray<{
+    vanillaId: number | null; cx: number; cy: number;
+    ai0: number; ai1: number; dead: boolean;
+  }>;
+  world: {
+    w: number; h: number;
+    /** groundLevel（tile）——与 fx.surfaceY 同源（px = ×16） */
+    groundLevel: number;
+    /** 地狱顶（tile；= UnderworldLayer，0 缺省时以 h-200 回退） */
+    lavaLine: number;
+    crimson: boolean;
+    flags: Record<string, boolean>;
+    store: {
+      inBounds(x: number, y: number): boolean;
+      isSolid(x: number, y: number): boolean;
+      idx(x: number, y: number): number;
+      liquid: ArrayLike<number>;
+    };
+  } | null;
+  scene: {
+    zoneDesert: boolean; zoneBeach: boolean; zoneJungle: boolean;
+    zoneCorrupt: boolean; zoneCrimson: boolean; zoneHallow: boolean;
+  } | null;
+  player: { cx: number; cy: number } | null;
+  clock: { dayCount: number; timeOfDay: number; isDay: boolean } | null;
+  camX: number; camY: number; z: number; viewW: number; viewH: number;
+}
+
 export class SkyRenderer {
   private stars: Array<{ x: number; y: number; s: number }> = [];
   /** 原版云贴图（Cloud.cs:114-146）：0-3 常态/4-8 高层薄云/9-13 远空灰云/
@@ -617,6 +1042,9 @@ export class SkyRenderer {
     this.weatherRef = w;
   }
 
+  /** 塔天空激活时的云量乘子（GetCloudAlpha()；sky.draw 每帧写，drawVanillaClouds 读） */
+  private towerCloudMul = 1;
+
   // ---- 器件驱动的天空效果（SceneMetrics 器件态；Renderer 每帧写入）----
   fx: {
     monolith: number; party: boolean; surfaceY: number; worldW: number; worldH: number;
@@ -878,7 +1306,7 @@ export class SkyRenderer {
         }
       }
       ctx.save();
-      ctx.globalAlpha = c.alpha;
+      ctx.globalAlpha = Math.min(1, c.alpha * this.towerCloudMul);
       ctx.translate(c.x + w / 2, c.y + h / 2);
       ctx.rotate(c.rot);
       if (c.flip) ctx.scale(-1, 1);
@@ -1246,6 +1674,9 @@ export class SkyRenderer {
       }
       this.ambEntities = this.ambEntities.filter((e) => !e.dead);
     }
+    // 月总死亡戏剧（DrawPieces/DrawExplosions Main.cs:62711-62712：WoF/背景碎块之后、
+    // NPC 缓存之前 = tile 之前——本仓 pre-world 变换段等价；白闪在 drawWorldFx）
+    this.drawMoonlordDrama(ctx, camX, camY, viewW, viewH, this.frameCtx?.z ?? 1);
     if (!this.ambEntities.length) return;
     // atmo（Game.updateWeather 同公式，Main.cs:62622）——CommonDraw :76 color × atmo
     const atmo = Math.max(0, Math.min(1,
@@ -1296,6 +1727,529 @@ export class SkyRenderer {
     ctx.globalAlpha = 1;
   }
 
+  // ================= 帧数据挂点 + 各子系统共用的小读数 =================
+
+  /** Renderer.render 每帧一行注入；null = 未进世界（各子系统自静默） */
+  frameCtx: SkyFrameCtx | null = null;
+
+  /** 族贴图首用懒加载（texKey → Image；未就绪调用方跳帧自愈） */
+  private ambTex(key: string): HTMLImageElement | null {
+    let t = this.ambTexCache.get(key);
+    if (!t) {
+      t = loadTex(`${key}.png`);
+      this.ambTexCache.set(key, t);
+    }
+    return t;
+  }
+
+  /** Main.IsItStorming（Main.cs:2978 = _shouldUseStormMusic） */
+  private storming(): boolean { return !!this.weatherRef?.shouldUseStormMusic; }
+  /** Main.IsItAHappyWindyDay（Main.cs:2976 = _shouldUseWindyDayMusic） */
+  private windyDay(): boolean { return !!this.weatherRef?.shouldUseWindyDayMusic; }
+  private hardMode(): boolean { return !!this.frameCtx?.world?.flags?.hardMode; }
+
+  /** 地狱顶 px（Main.UnderworldLayer = maxTilesY-200；lavaLine 缺省回退） */
+  underworldLayerPx(): number {
+    const fc = this.frameCtx;
+    if (!fc?.world) return 0;
+    return (fc.world.lavaLine || (fc.world.h - 200)) * 16;
+  }
+
+  /** IsSunset（AmbienceServer.cs:39-46：白天且 Main.time>40500 → timeOfDay>0.625） */
+  private isSunset(): boolean {
+    const c = this.frameCtx?.clock;
+    return !!c && c.isDay && c.timeOfDay > 0.625;
+  }
+
+  /** NPC.butterflyChance<6（AmbienceServer.cs:65）。NPC.cs:94583-94599 每日黎明掷：
+   *  1/3 无蝶；否则 Next(1,21) 且 1/5 无蝶 → <6 仅约 13% 的日子有天空蝶群 */
+  private butterflyChanceLow(): boolean {
+    const day = this.frameCtx?.clock?.dayCount ?? -1;
+    if (day !== this.butterflyDay) {
+      this.butterflyDay = day;
+      if (Math.random() < 1 / 3) this.butterflyChance = 999999;
+      else {
+        this.butterflyChance = 1 + Math.floor(Math.random() * 20);
+        if (Math.random() < 1 / 5) this.butterflyChance = 999999;
+      }
+    }
+    return this.butterflyChance < 6;
+  }
+
+  /** 月总在场（SceneState.cs:109 ClosestNPCPosition[398] != Zero → MoonLord 天空激活，
+   *  同时 :1362-1369 与 Ambience 冲突） */
+  private moonLordPresent(): boolean { return this.dramaCore !== null; }
+
+  // ================= 月塔天空装饰层（Nebula/Solar/Stardust/Vortex Sky 1:1） =================
+
+  /** 四塔族索引（SceneState.cs:111-115 MonolithType 映射：0 星璇/1 星云/2 星尘/3 耀斑） */
+  private static readonly TOWER_FAMILY = ['vortex', 'nebula', 'stardust', 'solar'] as const;
+  /** 塔族 → 塔 NPC id（NPCID：422 星璇 / 507 星云 / 493 星尘 / 517 耀斑） */
+  private static readonly TOWER_NPC: Record<TowerFamily, number> =
+    { vortex: 422, nebula: 507, stardust: 493, solar: 517 };
+
+  private towerSky: Record<TowerFamily, TowerSkyState> = {
+    vortex: new TowerSkyState('vortex'), nebula: new TowerSkyState('nebula'),
+    stardust: new TowerSkyState('stardust'), solar: new TowerSkyState('solar'),
+  };
+
+  clearTowerSky(): void {
+    for (const k of SkyRenderer.TOWER_FAMILY) this.towerSky[k].reset();
+  }
+
+  /** SceneState.ApplyVisuals :105-115 每帧扫描：近距门（SceneMetrics.cs:276-282/921-928
+   *  距离²≤4000²）+ 器件门（!flag4 && ActiveMonolithType==N）→ Activate/Deactivate */
+  private updateTowerSky(): void {
+    const fc = this.frameCtx;
+    const player = fc?.player;
+    const monolith = this.fx.monolith;
+    const maxTilesX = fc?.world?.w ?? Math.max(1, Math.round(this.fx.worldW));
+    const surfacePx = this.fx.surfaceY;
+    const near: Partial<Record<TowerFamily, boolean>> = {};
+    let anyTowerNear = false;
+    if (fc && player) {
+      for (const fam of SkyRenderer.TOWER_FAMILY) {
+        const npcId = SkyRenderer.TOWER_NPC[fam];
+        let found = false;
+        for (const e of fc.entities) {
+          if (e.vanillaId !== npcId || e.dead) continue;
+          const d2 = (e.cx - player.cx) ** 2 + (e.cy - player.cy) ** 2;
+          if (d2 <= 4000 * 4000) { found = true; break; }   // NPCEventZoneRadius（SceneMetrics.cs:130）
+        }
+        near[fam] = found;
+        if (found) anyTowerNear = true;
+      }
+    }
+    for (let idx = 0; idx < SkyRenderer.TOWER_FAMILY.length; idx++) {
+      const fam = SkyRenderer.TOWER_FAMILY[idx];
+      const active = towerSkyActive(!!near[fam], monolith, idx, anyTowerNear);
+      this.towerSky[fam].setActive(active, fam, maxTilesX, surfacePx);
+    }
+  }
+
+  /** 绘制四塔天空层（sky.draw 星星之后、日月之前——原版 SkyManager 远景层在星星后） */
+  private drawTowerSky(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    camX: number, camY: number, dtMs: number): void {
+    this.updateTowerSky();
+    const fc = this.frameCtx;
+    const maxTilesX = fc?.world?.w ?? Math.max(1, Math.round(this.fx.worldW));
+    const surfacePx = this.fx.surfaceY;
+    const screenX = camX - viewW / 2, screenY = camY - viewH / 2;
+    for (const fam of SkyRenderer.TOWER_FAMILY) {
+      this.towerSky[fam].update(fam, dtMs);
+      this.towerSky[fam].draw(ctx, fam, viewW, viewH, screenX, screenY, maxTilesX, surfacePx);
+    }
+  }
+
+  /** 当前塔天空云量乘子（GetCloudAlpha 四族同式；任一激活即取最小） */
+  towerCloudAlphaMul(): number {
+    let mul = 1;
+    for (const fam of SkyRenderer.TOWER_FAMILY) {
+      if (this.towerSky[fam].fade > 0.001) {
+        mul = Math.min(mul, (1 - this.towerSky[fam].fade) * 0.3 + 0.7);
+      }
+    }
+    return mul;
+  }
+
+  // ================= 月总死亡戏剧（MoonlordDeathDrama.cs 1:1） =================
+  // 消费锚点：ThrowPieces = NPC.cs:83496（398 终死 HitEffect(0,1337)）；
+  // AddExplosion = NPC.cs:36982（死亡态 ai0==2，ai1%3==0 且 60<ai1<580）；
+  // RequestLight = :36796/:36820（出生态 -1/-2 闪白 ai1/30）与 :37055（死亡态 ≥480 段）。
+  // 任务描述"登场爆炸"系推测有误：Misc/MoonExplosion 五件贴图全部挂在**死亡**戏剧。
+
+  private dramaCore: { cx: number; cy: number; ai0: number; ai1: number } | null = null;
+  private dramaPieces: DramaPiece[] = [];
+  private dramaExplosions: DramaExplosion[] = [];
+  /** whitening/requestedLight（:154-156）——MoveTowards 0.02/帧 */
+  private dramaWhitening = 0;
+  private dramaRequestedLight = 0;
+  private dramaLightRequestedThisFrame = false;
+
+  clearMoonlordDrama(): void {
+    this.dramaCore = null;
+    this.dramaPieces = [];
+    this.dramaExplosions = [];
+    this.dramaWhitening = 0;
+    this.dramaRequestedLight = 0;
+  }
+
+  /** 每帧扫描 398（Renderer frameCtx.entities）→ 死亡戏剧触发/爆炸/白光请求 */
+  private updateMoonlordDrama(dtFrames: number): void {
+    const fc = this.frameCtx;
+    const world = fc?.world ?? null;
+    let core: { cx: number; cy: number; ai0: number; ai1: number } | null = null;
+    if (fc) {
+      for (const e of fc.entities) {
+        if (e.vanillaId !== 398 || e.dead) continue;
+        core = { cx: e.cx, cy: e.cy, ai0: e.ai0, ai1: e.ai1 };
+        break;
+      }
+    }
+    const prev = this.dramaCore;
+    this.dramaCore = core;
+    this.dramaLightRequestedThisFrame = false;
+
+    if (core) {
+      // 死亡演出段（ai0==2）：每 3t 一簇爆炎（:36981-36998，落点须界内非实心）
+      if (core.ai0 === 2 && core.ai1 % 3 === 0 && core.ai1 > 60 && core.ai1 < 580) {
+        const ang = Math.random() * Math.PI * 2;
+        const rad = 20 + Math.random() * 400;
+        const ex = core.cx + Math.cos(ang) * rad, ey = core.cy + Math.sin(ang) * rad;
+        const tx = Math.floor(ex / 16), ty = Math.floor(ey / 16);
+        const ok = world ? (world.store.inBounds(tx, ty) && !world.store.isSolid(tx, ty)) : true;
+        if (ok) this.addMoonlordExplosion(ex, ey);
+      }
+      // 白光请求：出生态 -1/-2（ai1<60 → ai1/30）与死亡态尾段（≥480 → (ai1-480)/120）
+      if ((core.ai0 === -1 || core.ai0 === -2) && core.ai1 < 60) {
+        this.requestDramaLight(core.ai1 / 30, core.cx, core.cy);   // :36796/:36820
+      } else if (core.ai0 === 2 && core.ai1 >= 480) {
+        this.requestDramaLight((core.ai1 - 480) / 120, core.cx, core.cy);  // :37055
+      }
+      // 终死（ai1≥600 → life=0 + HitEffect(0,1337) → ThrowPieces）：掷点跨线或实体消失兜底
+      const diedNow = prev !== null && prev.ai1 < 600 && core.ai1 >= 600 && core.ai0 === 2;
+      const vanished = prev !== null && prev.ai0 === 2 && prev.ai1 >= 590;
+      if (diedNow || vanished) {
+        this.throwMoonlordPieces(vanished && !diedNow ? prev.cx : core.cx,
+          vanished && !diedNow ? prev.cy : core.cy, Math.floor(Math.random() * 100));
+      }
+    }
+    // Update :158-196：碎片/爆炸推进 + 白光 0.02/帧 逼近（无光源请求 → 目标 0）
+    for (const p of this.dramaPieces) p.update(world?.w ?? 0, world?.h ?? 0);
+    this.dramaPieces = this.dramaPieces.filter((p) => !p.dead);
+    for (const ex of this.dramaExplosions) ex.update();
+    this.dramaExplosions = this.dramaExplosions.filter((ex) => !ex.dead);
+    if (!this.dramaLightRequestedThisFrame) this.dramaRequestedLight = 0;   // :190-193
+    const target = this.dramaRequestedLight;
+    this.dramaWhitening += Math.max(-0.02, Math.min(0.02, target - this.dramaWhitening)) * dtFrames;
+    this.dramaWhitening = Math.max(0, Math.min(1, this.dramaWhitening));
+  }
+
+  /** ThrowPieces（:231-242）：四件骨骼碎块自核心飞散（UnitY 旋 NextFloat()×π/2−π/4+π
+   *  的 6/10/8/12 速；角速度 ±0.05）。种子 = Main.rand.Next(100)（NPC.cs:83496 调用点） */
+  private throwMoonlordPieces(cx: number, cy: number, seed: number): void {
+    if (this.dramaPieces.length > 0) return;   // 一次死亡一组
+    const r = seededRandom(seed);
+    const defs: Array<[DramaPieceKind, number, number, number, number, number]> = [
+      // [件, originX, originY, 距核心偏移x, 偏移y, 速度]
+      ['spine', 64, 150, 0, 50, 6],        // :235
+      ['shoulder', 40, 120, 50, -120, 10], // :237
+      ['torso', 192, 252, 0, 0, 8],        // :239
+      ['head', 138, 185, 0, -200, 12],     // :241
+    ];
+    for (const [kind, ox, oy, dx, dy, spd] of defs) {
+      const ang = r() * (Math.PI / 2) - Math.PI / 4 + Math.PI;
+      this.dramaPieces.push(new DramaPiece(kind, cx + dx, cy + dy,
+        Math.cos(ang) * spd, Math.sin(ang) * spd, ox, oy,
+        r() * 0.1 - 0.05));
+    }
+  }
+
+  /** AddExplosion（:244-247）：7 帧爆炎，帧速 Next(2,4) */
+  addMoonlordExplosion(x: number, y: number): void {
+    this.dramaExplosions.push(new DramaExplosion(x, y, 2 + Math.floor(Math.random() * 2)));
+  }
+
+  /** RequestLight（:249-260）：本帧光源 + 目标取 max（钳 1） */
+  private requestDramaLight(light: number, x: number, y: number): void {
+    const player = this.frameCtx?.player;
+    // :181-188 光源须距 metrics.Center <2000 才生效
+    if (player && Math.hypot(player.cx - x, player.cy - y) >= 2000) return;
+    this.dramaLightRequestedThisFrame = true;
+    const v = Math.max(0, Math.min(1, light));
+    if (v > this.dramaRequestedLight) this.dramaRequestedLight = v;
+  }
+
+  /** DrawPieces/DrawExplosions（:198-220）：世界位 - screenPosition；原版画在 tile 层
+   *  之前（Main.cs:62711-62712，WoF/背景碎块之后）——本仓在 pre-world 变换段调用 */
+  private drawMoonlordDrama(ctx: CanvasRenderingContext2D, camX: number, camY: number,
+    viewW: number, viewH: number, z: number): void {
+    this.updateMoonlordDrama(1);
+    if (!this.dramaPieces.length && !this.dramaExplosions.length) return;
+    const screenX = camX - viewW / 2, screenY = camY - viewH / 2;
+    const sx = (wx: number) => (wx - screenX) * z;
+    const sy = (wy: number) => (wy - screenY) * z;
+    // 屏中心 ±(视口+1000) 剔除（:200/:212）
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const p of this.dramaPieces) {
+      const px = sx(p.x), py = sy(p.y);
+      if (px < -1000 || px > viewW + 1000 || py < -1000 || py > viewH + 1000) continue;
+      const tex = dramaTex(p.kind);
+      if (!tex || !tex.complete || !tex.naturalWidth) continue;
+      ctx.save();
+      ctx.globalAlpha = 1;
+      ctx.translate(px, py);
+      ctx.rotate(p.rot);
+      ctx.drawImage(tex, -p.ox, -p.oy);
+      ctx.restore();
+    }
+    for (const ex of this.dramaExplosions) {
+      const px = sx(ex.x), py = sy(ex.y);
+      if (px < -1000 || px > viewW + 1000 || py < -1000 || py > viewH + 1000) continue;
+      const tex = dramaTex('explosion');
+      if (!tex || !tex.complete || !tex.naturalWidth) continue;
+      const fw = tex.naturalWidth, fh = tex.naturalHeight / 7;   // Frame(1,7)（:121）
+      ctx.save();
+      ctx.globalAlpha = 127 / 255;                                // GetLight :142-145 恒 (255,255,255,127)
+      ctx.drawImage(tex, 0, Math.min(6, Math.floor(ex.counter / ex.speed)) * fh, fw, fh,
+        px - fw / 2, py - fh / 2, fw, fh);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /** DrawWhite（:222-229）：全屏白 × whitening。原版画在 ScreenDarkness.DrawFront 之后
+   *  （Main.cs:61763，几乎最末）；本仓在世界变换段以恒等变换近似（登记：位置偏早） */
+  private drawMoonlordWhitening(ctx: CanvasRenderingContext2D, viewW: number, viewH: number): void {
+    if (this.dramaWhitening <= 0.001) return;
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = Math.min(1, this.dramaWhitening);
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, viewW, viewH);
+    ctx.restore();
+  }
+
+  // ================= 晨昏耀斑（NextHorizonRenderer Sunflare 族 1:1） =================
+  // 消费锚点勘误：Sunflare 与日耀塔**无关**——全部挂在晨昏地平线系统
+  // （DrawSun :171-184 / DrawLensFlare :368-541 / DrawSurfaceLayer(3) :141-147）。
+
+  /** 本帧太阳屏幕位（sky.draw 写入；镜头光斑轴用） */
+  private sunScreen: { x: number; y: number } | null = null;
+  private sunflareTex: Partial<Record<SunflareTex, HTMLImageElement>> = {};
+
+  /** GetVisibilities（NextHorizonRenderer.cs:199-239 一比一）：
+   *  atmo ×(1-cloudAlpha)² ×(1-蘑菇光影响[无→1])；日出窗 = time∈(0,2700)↑·(3600,10800)↓；
+   *  日落窗 = 54000−10800..−3600 ↑ 与 −3600..54000 ↓²；夜/日食清零 */
+  private sunVisibilities(dayTimeTicks: number, isDay: boolean, eclipse: boolean, atmo: number,
+    cloudAlpha: number): { sunset: number; sunrise: number; celestial: number } {
+    const celestial = this.celestialEffectPower(dayTimeTicks, isDay);   // :315-325
+    let vis = atmo * (1 - cloudAlpha) * (1 - cloudAlpha);               // :205-209
+    let sunrise = vis, sunset = vis;
+    if (isDay) {
+      // :215-223（Remap 单调钳位插值）
+      sunrise *= remap(dayTimeTicks, 0, 2700, 0, 1) * remap(dayTimeTicks, 3600, 10800, 1, 0);
+      sunset *= remap(dayTimeTicks, 54000 - 10800, 54000 - 3600, 0, 1)
+        * remap(dayTimeTicks, 54000 - 3600, 54000, 1, 0) ** 2;
+      if (eclipse) { sunrise = 0; sunset = 0; }                          // :224-228
+    } else {
+      sunrise = 0; sunset = 0;                                           // :230-234
+    }
+    void celestial;
+    return { sunset, sunrise, celestial };
+  }
+
+  /** GetCelestialEffectPower（:315-325）：天体高度驱动的整体强度 */
+  private celestialEffectPower(dayTimeTicks: number, isDay: boolean): number {
+    if (isDay) {
+      return remap(dayTimeTicks, 0, 3600, 0, 1) * remap(dayTimeTicks, 54000 - 1800, 54000, 1, 0);
+    }
+    return remap(dayTimeTicks, 0, 3600, 0, 1) * remap(dayTimeTicks, 32400 - 1800, 32400, 1, 0);
+  }
+
+  private sunflareTexLoad(key: SunflareTex): HTMLImageElement | null {
+    let t = this.sunflareTex[key];
+    if (!t) {
+      t = loadTex(SUNFLARE_TEX_FILE[key]);
+      this.sunflareTex[key] = t;
+    }
+    return t;
+  }
+
+  /** 【未接·原版死代码】DrawSun（:171-184）的 flare1/flare2 两张贴图在原版以
+   *  Color(255,255,255,0)×vis 绘制（A 恒 0，Main.cs:62379 普通 AlphaBlend 批次）→
+   *  1.4.5.6 实测不可见；可见的晨昏耀斑全部走 DrawLensFlare（shader 路径）。 */
+
+  /** DrawSurfaceLayer(3)（:141-147）：colorgradient 晨昏渐变带（日出水平翻转） */
+  private drawSunflareGradientBand(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    screenY: number, sunset: number, sunrise: number): void {
+    if (sunset <= 0.01 && sunrise <= 0.01) return;
+    const tex = this.sunflareTexLoad('colorgradient');
+    if (!tex || !tex.complete || !tex.naturalWidth) return;
+    // GetGradientRect（:66-72）：val=(1-Lerp(40,worldSurface,screenY/16))×400，y=max(0,val)−400
+    const surfaceTiles = this.fx.surfaceY / 16;
+    const val = (1 - lerpValueClamped(40, surfaceTiles, screenY / 16)) * 400;
+    const y = Math.max(0, val) - 400;
+    ctx.save();
+    ctx.globalCompositeOperation = 'overlay';
+    ctx.imageSmoothingEnabled = true;
+    if (sunrise > 0.01) {
+      ctx.globalAlpha = Math.min(1, sunrise * 0.6);                  // ×num2=0.6（:145）
+      ctx.save();
+      ctx.translate(viewW, 0);
+      ctx.scale(-1, 1);                                             // FlipHorizontally
+      ctx.drawImage(tex, 0, y, viewW, viewH + 400);
+      ctx.restore();
+    }
+    if (sunset > 0.01) {
+      ctx.globalAlpha = Math.min(1, sunset * 0.6);                  // :146
+      ctx.drawImage(tex, 0, y, viewW, viewH + 400);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /** DrawLensFlare（:368-541）：太阳↔屏心轴上的镜头光斑串。
+   *  原版为 Immediate 模式 shader（Main.cs:61760 末段后处理）；本仓在世界变换段
+   *  恒等变换绘制（登记：层级偏早、无 SunVisibilityPixel 遮挡采样） */
+  private drawLensFlare(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    sunset: number, sunrise: number, celestial: number): void {
+    const sun = this.sunScreen;
+    if (!sun) return;
+    // AdjustIntensity（:393-408）：intensity = temporal³ × celestial（无 sunScorch）
+    const num = (sunrise * celestial) ** 3 * celestial;
+    const num2 = (sunset * celestial) ** 3 * celestial;
+    if (num <= 0.01 && num2 <= 0.01) return;
+    const cx = viewW / 2, cy = viewH / 2;
+    const baseRot = Math.atan2(cy - sun.y, cx - sun.x) + sun.y * 0.001;   // :46-49
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.imageSmoothingEnabled = true;
+    if (num2 > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num2, 'sunset');
+    if (num > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num, 'sunrise');
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /** DrawSunsetFlare / DrawSunriseFlare 元素表（:410-541 逐元素 1:1）。
+   *  元素定位（LensFlareElement.Draw :28-52）：i ∈ [0,RepeatTimes)——
+   *  scale = ScaleStart+ScaleOverIndex·i；alpha = Color×(1+IntensityOverIndex·i)×intensity；
+   *  d = (DistanceStart+DistanceAlongIndex·i)%1；pos = Lerp(sun,center,d*2)；rot = 轴角+Rotation */
+  private drawLensFlareSet(ctx: CanvasRenderingContext2D, sunX: number, sunY: number,
+    cx: number, cy: number, baseRot: number, intensity: number, which: 'sunset' | 'sunrise'): void {
+    type Row = [SunflareTex, number, number, number, number, number, [number, number, number], number, number, number];
+    // [贴图, Repeat, ScaleStart, ScaleOver, DistStart, DistStep, RGB, 强度乘, IntensityOverIndex, Rotation]
+    const sets: Row[] = which === 'sunset' ? [
+      ['pointblurry', 3, 0.3, -0.04, 0.33, 0.05, [43, 32, 0], 0.47058824, -0.125, 0],    // :415-424
+      ['pointsharp', 3, 0.3, 0.04, 0.03, 0.05, [43, 32, 0], 0.47058824, -0.125, 0],      // :425-434
+      ['pointblurry', 1, 0.3, 0, 0.41, 0, [255, 0, 65], 0.11764706, 0, 0],               // :435-441
+      ['bokeh', 1, 0.3, 0, 0.475, 0, [255, 255, 255], 8 / 51, 0, 0],                     // :442-448
+      ['bokeh', 6, 0.24, -0.04, 0.225, 0.04, [255, 255, 255], 4 / 51, 0, 0],             // :449-457
+      ['pointblurry', 1, 1, 0, 0.6, 0, [255, 157, 0], 8 / 51, 0, 0],                     // :458-464
+      ['spectra', 1, 0.4, 0, 0.65, 0, [255, 255, 255], 2 / 51, 0, Math.PI],              // :465-472
+    ] : [
+      ['pointsharp', 3, 0.3, -0.04, 0.33, 0.05, [0, 32, 43], 0.47058824, -0.125, 0],     // :480-490
+      ['pointsharp', 3, 0.3, 0.04, 0.03, 0.05, [0, 32, 43], 0.47058824, -0.125, 0],      // :491-500
+      ['pointblurry', 1, 0.3, 0, 0.41, 0, [65, 0, 255], 0.11764706, 0, 0],               // :501-507
+      ['bokeh', 1, 0.3, 0, 0.525, 0, [255, 255, 255], 8 / 51, 0, 0],                     // :508-515
+      ['bokeh', 6, 0.24, -0.04, 0.225, 0.04, [255, 255, 255], 4 / 51, 0, 0],             // :516-524
+      ['pointblurry', 1, 1, 0, 0.6, 0, [0, 157, 255], 8 / 51, 0, 0],                     // :525-531
+      ['spectra', 1, 0.38, 0, 0.65, 0, [255, 255, 255], 2 / 51, 0, Math.PI],             // :532-539
+    ];
+    for (const [key, repeat, scaleStart, scaleOver, distStart, distStep, rgb, mul, ioi, rot] of sets) {
+      const tex = this.sunflareTexLoad(key);
+      if (!tex || !tex.complete || !tex.naturalWidth) continue;
+      const sprite = tintedFlareSprite(tex, rgb[0], rgb[1], rgb[2]);   // Color 乘子（lighter 下呈色相）
+      if (!sprite) continue;
+      for (let i = 0; i < repeat; i++) {
+        const scale = scaleStart + scaleOver * i;                       // :40
+        const a = mul * (1 + ioi * i) * intensity;                      // :41
+        if (a <= 0.01) continue;
+        let d = distStart + distStep * i;                               // :42-43
+        d = ((d % 1) + 1) % 1;
+        const px = sunX + (cx - sunX) * (d * 2);                        // :45
+        const py = sunY + (cy - sunY) * (d * 2);
+        ctx.save();
+        ctx.globalAlpha = Math.min(1, a);
+        ctx.translate(px, py);
+        ctx.rotate(baseRot + rot);                                       // :46-50
+        const w = tex.naturalWidth * scale, h = tex.naturalHeight * scale;
+        ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
+        ctx.restore();
+      }
+    }
+  }
+
+  // ================= 雨点落水涟漪（Misc/Ripples 近似） =================
+  // 原版 Ripples.png 是水体扭曲 shader 的形状掩码（WaterShaderData._rippleShapeTexture
+  // :108，上 64×64 方形/下 64×64 圆形，已像素解析确认），canvas 2D 无扭曲通道——
+  // 以水面扩散椭圆环近似（任务语义：雨天玩家附近水面出涟漪）。
+  // 涟漪池在 Weather.ts（纯逻辑侧）；此处只做水面采样 + 绘制。
+
+  /** 每帧采样可见水面并按雨强入池（Weather.pushRipple） */
+  private updateRipples(): void {
+    const w = this.weatherRef;
+    const fc = this.frameCtx;
+    if (!w || !fc?.world || w.cloudAlpha <= 0) return;
+    const player = fc.player;
+    if (!player) return;
+    const viewW = fc.viewW;
+    const budget = w.rippleBudget(viewW);          // cloudAlpha × 屏宽比例
+    if (budget <= 0) return;
+    const store = fc.world.store;
+    const camL = fc.camX - viewW / 2;
+    const pty = Math.floor(player.cy / 16);
+    for (let i = 0; i < budget; i++) {
+      const x = camL + Math.random() * viewW;
+      const tx = Math.floor(x / 16);
+      // 自玩家上方 30 格向下扫 54 格，取首个液面（顶层水面）
+      const y0 = Math.max(2, pty - 30);
+      const y1 = Math.min(fc.world.h - 2, pty + 24);
+      let found = -1;
+      for (let ty = y0; ty <= y1; ty++) {
+        if (store.liquid[store.idx(tx, ty)] > 0) { found = ty; break; }
+      }
+      if (found < 0) continue;
+      w.pushRipple(tx * 16 + 8, found * 16);
+    }
+  }
+
+  /** 涟漪绘制（世界坐标，画在 tile/液体层之上——Renderer 世界变换段调用） */
+  private drawRipples(ctx: CanvasRenderingContext2D): void {
+    const w = this.weatherRef;
+    if (!w || w.cloudAlpha <= 0 || !w.ripples.length) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const rp of w.ripples) {
+      const k = Math.max(0, Math.min(1, rp.t / rp.life));
+      const r = 4 + 20 * k;                                   // 扩散半径 4→24px
+      const a = (1 - k) * 0.32 * Math.max(0.2, Math.min(1, w.cloudAlpha));
+      if (a <= 0.01) continue;
+      ctx.strokeStyle = `rgba(225,238,255,${a.toFixed(3)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(rp.x, rp.y, r, r * 0.42, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (k < 0.6) {                                          // 内环只在前段
+        ctx.strokeStyle = `rgba(225,238,255,${(a * 0.6).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.ellipse(rp.x, rp.y, r * 0.5, r * 0.21, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
+
+  /** 世界变换段绘制（Renderer.render 2d' 区一行调用）：涟漪（世界坐标）+
+   *  月总死亡白闪 / 晨昏镜头光斑（恒等变换全屏） */
+  drawWorldFx(ctx: CanvasRenderingContext2D, camX: number, camY: number,
+    z: number, viewW: number, viewH: number): void {
+    if (!this.frameCtx) return;
+    this.updateRipples();
+    this.drawRipples(ctx);
+    this.drawMoonlordWhitening(ctx, viewW, viewH);
+    if (this.sunScreen) {
+      const dayTimeTicks = this.lastDayTimeTicks;
+      const v = this.sunVisibilities(dayTimeTicks, dayTimeTicks > 0, this.lastEclipse,
+        this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0);
+      this.drawLensFlare(ctx, viewW, viewH, v.sunset, v.sunrise, v.celestial);
+    }
+    void camX; void camY; void z;
+  }
+
+  /** atmo（Game.updateWeather 同公式，Main.cs:62622） */
+  private atmoValue(camY: number): number {
+    return Math.max(0, Math.min(1,
+      (camY / 16 - (65 + 10 * (this.fx.worldW / 4200) ** 2)) / Math.max(1, this.fx.surfaceY / 16 / 5)));
+  }
+
+  /** 最近一帧白天 tick / 日食（sky.draw 写入；镜头光斑复用可见性） */
+  private lastDayTimeTicks = 0;
+  private lastEclipse = false;
+
   skyColors(t: number): [string, string] {
     for (let i = 0; i < SKY_KEYS.length - 1; i++) {
       const [t0, a0, b0] = SKY_KEYS[i];
@@ -1309,6 +2263,28 @@ export class SkyRenderer {
   }
 
   draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number, dtMs = 16.7, camY = 0) {
+    // ---- 帧数据消化：稀有云世界旗标（Cloud.cs RollRareCloud 门）----
+    {
+      const wf = this.frameCtx?.world?.flags;
+      if (wf) {
+        this.rareCloudFlags = {
+          // 击杀链通用键 downed_<vanillaId>（4 克眼 / 13 世吞 / 266 克脑 / 35 骷髅王）+ 具名键兜底
+          downedBoss1: !!(wf['downed_4'] || wf['downedEyeOfCthulhu']),
+          downedBoss2: !!(wf['downed_13'] || wf['downed_266']),
+          downedBoss3: !!(wf['downed_35'] || wf['downedSkeletron']),
+          hardMode: !!wf['hardMode'],
+          crimson: !!this.frameCtx?.world?.crimson,
+          // 饥荒/十周年世界类型本仓无对应（drunk 系世界生成未移植）——恒 false（登记）
+          dontStarveWorld: false, tenthAnniversaryWorld: false,
+        };
+      }
+    }
+    const t = clock.timeOfDay;
+    const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
+    const dayTimeTicks = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
+    // 镜头光斑可见性复用（drawWorldFx）
+    this.lastDayTimeTicks = isDay ? dayTimeTicks : 0;
+    this.lastEclipse = !!clock.eclipse;
     // ---- 天幕流星推进(绘制在天空底色之后,见 drawSkyMeteor;原版 SkyManager 天空层序) ----
     if (this.meteor) {
       const m = this.meteor;
@@ -1317,7 +2293,6 @@ export class SkyRenderer {
       if (m.t >= m.life) this.meteor = null;
       void dtMs;
     }
-    const t = clock.timeOfDay;
     const [top, bottom] = this.skyColors(t);
     // 天空实体 GetColor 的 bgColor（Main.ColorOfTheSkies）近似源——本帧色缓存
     this.lastSkyTop = top;
@@ -1356,6 +2331,14 @@ export class SkyRenderer {
       ctx.fillStyle = `rgb(${dv},${dv},${dv})`;
       ctx.fillRect(0, 0, viewW, viewH);
       ctx.restore();
+    }
+
+    // ---- 晨昏耀斑渐变带（NextHorizonRenderer.DrawSurfaceLayer(3) :141-147；
+    //      DrawHorizon 在 DrawBG 头段 = 星星/日月之前）----
+    {
+      const v = this.sunVisibilities(dayTimeTicks, isDay, clock.eclipse, this.atmoValue(camY),
+        this.weatherRef?.cloudAlpha ?? 0);
+      this.drawSunflareGradientBand(ctx, viewW, viewH, camY - viewH / 2, v.sunset, v.sunrise);
     }
 
     // ---- 天幕流星绘制（AmbientSky 天空实体层：画在天空底色之后=原版 SkyManager 层序；
@@ -1401,10 +2384,12 @@ export class SkyRenderer {
       ctx.globalAlpha = 1;
     }
 
+    // ---- 月塔天空装饰层（Nebula/Solar/Stardust/Vortex Sky：远景段黑幕盖星，
+    //      日月/云画其上；云量 ×GetCloudAlpha()=0.7 起）----
+    this.drawTowerSky(ctx, viewW, viewH, camX, camY, dtMs);
+
     // ---- 原版太阳/月亮(Main.cs:62279 DrawSunAndMoon 一比一)----
     // 昼夜时间(我们 0.25/0.75 边界 → 原版 day 0-54000 / night 0-32400)
-    const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
-    const dayTime = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
     const nightTime = !isDay ? ((((t - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -1413,11 +2398,12 @@ export class SkyRenderer {
       if (tex.complete && tex.naturalWidth > 0) {
         // 原版:x = time/54000*(屏宽+图宽*2)-图宽(横穿);y = bgTopY + |t*2-1|²*250+180(正午最高);
         // scale = (1.2-|t*2-1|²*0.4)*1.1;rotation = t*2-7.3(t=time/54000)
-        const ft = dayTime / 54000;
+        const ft = dayTimeTicks / 54000;
         const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
         const x = ft * (viewW + tex.width * 2) - tex.width;
         const y = dip * 250 + 180;
         const scale = (1.2 - dip * 0.4) * 1.1;
+        this.sunScreen = { x, y };    // 镜头光斑轴锚（NextHorizonRenderer.GetCelestialBodyPosition）
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(ft * 2 - 7.3);
@@ -1425,6 +2411,7 @@ export class SkyRenderer {
         ctx.restore();
       }
     } else {
+      this.sunScreen = null;
       const tex = this.fx.moonEventKind === 2 ? this.ensureEventMoonTex(2)
         : this.fx.moonEventKind === 1 ? this.ensureEventMoonTex(1)
           : this.moonTexs[Math.max(0, Math.min(8, this.moonType))];
@@ -1447,7 +2434,9 @@ export class SkyRenderer {
     }
     ctx.restore();
 
-    // 云：原版素材与规则（Cloud.cs / NextHorizonRenderer.DrawCloud）
+    // 云：原版素材与规则（Cloud.cs / NextHorizonRenderer.DrawCloud）；
+    // 塔天空激活时云量乘 GetCloudAlpha() = (1-fade)*0.3+0.7（各 Sky 同式 :116-119）
+    this.towerCloudMul = this.towerCloudAlphaMul();
     this.drawVanillaClouds(ctx, viewW, viewH, isNight, dtMs);
 
     // 派对气球（PartySky：BirthdayParty.PartyIsUp 时 SkyManager 激活）

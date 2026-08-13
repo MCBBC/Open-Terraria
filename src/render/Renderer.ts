@@ -2507,18 +2507,38 @@ export class Renderer {
   //   mode 'frame4'  中心整图 + 四向偏移 4 份（月族 415/417/418/518/315/346 与 416）
   //   a 字段         中心层 alpha 表达式：'255a'=(255-α)/255、'128a2'=(128-α/2)/255、
   //                  'opacity'=NPC.Opacity、数字=常数（缺省走上方旧 id 链）
+  // ---- 第四批（2026-08-13）：轨道族 + 运行时态特殊分支 ----
+  //   mode 'orbit'   环绕轨道族 541/568/569/661（Main.cs:26086-26128）：碰撞盒中心 1 份
+  //                  + 极角 i/count×2π 环绕的 Glow 拷贝（参数在 NPC_GLOW_ORBIT）
+  //   dy             世界 px Y 锚微调（653 地狱蝴蝶 +3 vs 族内 +4 → -1，:25198/:25194）
+  //   fadeA          Color.A 背景衰减（XNA AlphaBlend=src One：out = texel·RGB +
+  //                  D·(1-texelA·A/255)）——非零时 lighter 前先 destination-out 削底
+  //   full           437 教徒石板第二层整图罩（Glow_108 null 源矩形=全图，:25488）
+  //   sparkle        425 星璇枪手枪口星芒（DrawPrettyStarSparkle :25631-25633/:34734-34750）
+  //   spinner        520 火星行者旋转指示灯（Extra_56+Glow_165，:25425-25443）
   private static readonly NPC_GLOW: Record<number, {
-    tex: string; mode: 'frame' | 'frame4' | 'vel4' | 'trail';
+    tex: string; mode: 'frame' | 'frame4' | 'vel4' | 'trail' | 'orbit';
     /** vel4 速度偏移倍率（四塔 4；416 骑手 :24538 为 0.5 + 光照项） */
     velMult?: number;
     /** frame4 固定四向偏移（UnitX.RotatedBy(k*π/2)×n，:25736/:25746）替代速度偏移 */
     fixed4?: number;
     /** frame4 绘制原点 X 平移（518 halfSize+(-10,0) :25722 → 图像右移 10px） */
     dx?: number;
+    /** 世界 px Y 锚微调（orbit 族 568/569 的 num47=-3 在 NPC_GLOW_ORBIT.dy） */
+    dy?: number;
     /** 中心层 alpha 表达式（见上；缺省 = 旧 id 链） */
     a?: number | '255a' | '128a2' | 'opacity';
+    /** Color.A 背景衰减常数（运行时态 387/414 在 drawNpcGlow 内计算覆盖） */
+    fadeA?: number;
     /** 399 探测器状态灯（:24571-24575）：Extra_20(ai0+1 行) 本体 + glow 罩，dy=+24px */
     lamp?: { tex: string; glow: string; dy: number };
+    /** 437 第二层整图罩（:25488 null 源矩形） */
+    full?: string;
+    /** 425 枪口星芒（Extra_98；位置 = 帧中心 +dx 本地 X，:25632 的 27×-spriteDirection
+     *  折进已镜像本地系恒为 +27） */
+    sparkle?: { tex: string; dx: number };
+    /** 520 旋转指示灯（Extra_56 source-over 本体 + Glow_165 lighter 光环） */
+    spinner?: { tex: string; glow: string; dy: number };
   }> = {
     392: { tex: 'vanilla/Glow_48.png', mode: 'frame' },   // 火星飞碟主体（:24218 Color(200,200,200,0)）
     395: { tex: 'vanilla/Glow_49.png', mode: 'frame' },   // 飞碟核心（:24222）
@@ -2542,16 +2562,18 @@ export class Renderer {
     24: { tex: 'vanilla/Glow_360.png', mode: 'frame', a: 'opacity' },    // 火焰小鬼（:25044-25047 GetAlpha(White)）
     383: { tex: 'vanilla/Glow_11.png', mode: 'frame', a: 1 },            // 火星军官（:25258-25260）
     386: { tex: 'vanilla/Glow_31.png', mode: 'frame', a: 1 },            // 火星工程师（:25445-25448）
-    387: { tex: 'vanilla/Glow_32.png', mode: 'frame', a: 0.75 },         // 特斯拉炮塔（:25451-25459 White×0.75 再 ×(255-α)/255——α 恒 0 故 0.75 即终值；ai0>0 白化渐隐未接）
+    387: { tex: 'vanilla/Glow_32.png', mode: 'frame' },                  // 特斯拉炮塔（:25451-25459；亮度/A 随 ai0 充能链见 npcGlowTeslaFade）
     388: { tex: 'vanilla/Glow_33.png', mode: 'frame', a: 1 },            // 火星无人机（:25460-25463）
     389: { tex: 'vanilla/Glow_34.png', mode: 'frame', a: 1 },            // 电圈僵尸（:25464-25467）
-    437: { tex: 'vanilla/Glow_109.png', mode: 'frame', a: 200 / 255 },   // 幽火（:25484-25488 white.A=200；Glow_108 整图罩未接）
+    437: { tex: 'vanilla/Glow_109.png', mode: 'frame', a: 1, fadeA: 200 / 255,
+      full: 'vanilla/Glow_108.png' },                                    // 教徒石板（:25484-25488；A=200 显著→fadeA+整图罩）
     472: { tex: 'vanilla/Glow_110.png', mode: 'frame', a: '255a' },      // 暗焰幻灵（:25542-25545）
-    520: { tex: 'vanilla/Glow_164.png', mode: 'frame', a: 1 },           // 火星行者（:25422-25424；Glow_165 旋转环未接）
-    653: { tex: 'vanilla/Glow_288.png', mode: 'frame', a: 1 },           // 地狱蝴蝶（:25195-25198，Y 基准 +3 未接）
+    520: { tex: 'vanilla/Glow_164.png', mode: 'frame', a: 1,
+      spinner: { tex: 'vanilla/Extra_56.png', glow: 'vanilla/Glow_165.png', dy: 20 } }, // 火星行者（:25422-25443 旋转指示灯）
+    653: { tex: 'vanilla/Glow_288.png', mode: 'frame', a: 1, dy: -1 },   // 地狱蝴蝶（:25195-25198 锚 +3 vs 族内 +4 → dy=-1）
     654: { tex: 'vanilla/Glow_290.png', mode: 'frame', a: 1 },           // 熔岩萤火虫（:25191-25194）
-    160: { tex: 'vanilla/Glow_166.png', mode: 'frame', a: '128a2' },     // 松露人（:25766-25782；变体 Glow_352 未接）
-    209: { tex: 'vanilla/Glow_167.png', mode: 'frame', a: '128a2' },     // 电子人（:25780-25787；变体 Glow_350/351 未接）
+    160: { tex: 'vanilla/Glow_166.png', mode: 'frame', a: '128a2' },     // 松露人（:25766-25778；微光变体 Glow_352 链见 npcGlowVariantTex）
+    209: { tex: 'vanilla/Glow_167.png', mode: 'frame', a: '128a2' },     // 电子人（:25780-25784；变体 Glow_350/351 链见 npcGlowVariantTex）
     // 城镇宝石小动物 639-645 → Glow_286、646-652 → Glow_287（:25048-25055 GetAlpha(White)）
     639: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
     640: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
@@ -2577,11 +2599,12 @@ export class Renderer {
     424: { tex: 'vanilla/Glow_144.png', mode: 'frame', a: '128a2' },     // 预言者（:25615-25616）
     423: { tex: 'vanilla/Glow_145.png', mode: 'frame', a: '128a2' },     // 进化兽（:25618-25619）
     420: { tex: 'vanilla/Glow_147.png', mode: 'frame', a: '128a2' },     // 星云浮怪（:25624-25625）
-    425: { tex: 'vanilla/Glow_150.png', mode: 'frame', a: '128a2' },     // 风暴潜行者（:25627-25630；DrawPrettyStarSparkle 未接）
+    425: { tex: 'vanilla/Glow_150.png', mode: 'frame', a: '128a2',
+      sparkle: { tex: 'vanilla/Extra_98.png', dx: 27 } },                // 星璇枪手（:25627-25633；枪口星芒）
     429: { tex: 'vanilla/Glow_151.png', mode: 'frame', a: '128a2' },     // 旋涡怪（:25636-25637）
-    412: { tex: 'vanilla/Glow_157.png', mode: 'frame', a: '255a' },      // 爬足虫头（:25645-25652；localAI[2] 红闪未接）
+    412: { tex: 'vanilla/Glow_157.png', mode: 'frame', a: '255a' },      // 爬足虫头（:25645-25664）
     413: { tex: 'vanilla/Glow_158.png', mode: 'frame', a: '255a' },      // 爬足虫身
-    414: { tex: 'vanilla/Glow_159.png', mode: 'frame', a: '255a' },      // 爬足虫尾
+    414: { tex: 'vanilla/Glow_159.png', mode: 'frame', a: '255a' },      // 爬足虫尾（:25656-25663 localAI[2] 受击红闪见 npcGlowCrawltipedeFlash）
     525: { tex: 'vanilla/Glow_169.png', mode: 'frame', a: 200 / 255 },   // 邪恶食尸鬼（:25754-25755）
     526: { tex: 'vanilla/Glow_170.png', mode: 'frame', a: 200 / 255 },   // 污染食尸鬼（:25757-25758）
     527: { tex: 'vanilla/Glow_171.png', mode: 'frame', a: 200 / 255 },   // 梦游食尸鬼（:25760-25761）
@@ -2596,15 +2619,181 @@ export class Renderer {
     344: { tex: 'vanilla/Glow_253.png', mode: 'frame', a: 0.39 },       // 常绿尖叫树（:25731-25733 Color(200,200,200,100)*0.5）
     346: { tex: 'vanilla/Glow_254.png', mode: 'frame4', fixed4: 4, a: 200 / 255 },  // 坐骑雪橇-NK1（:25734-25743）
     315: { tex: 'vanilla/Glow_255.png', mode: 'frame4', fixed4: 2, a: 1 },          // 无头骑士（:25744-25753）
-    // 【未接登记】541 沙元素/568/569 枯萎兽的 Glow_216/224 环绕轨道副本（:26083-26131，
-    // Center + angle.ToRotationVector2()×(4*num300+2)）与 661 的自贴图轨道（:26103-26123）
-    // 未移植——中心罩先落表外（只画一半反而误导），待轨道原语一起接。
+    // ---- 第四批：环绕轨道族（Main.cs:26086-26128，参数表 NPC_GLOW_ORBIT）----
+    541: { tex: 'vanilla/Glow_216.png', mode: 'orbit' },   // 沙元素（:26086-26096 Glow_216 ×4 Gold 轨道）
+    568: { tex: 'vanilla/Glow_224.png', mode: 'orbit' },   // 枯萎兽 T2（:26116-26128 Glow_224 ×4 HotPink，出生门）
+    569: { tex: 'vanilla/Glow_224.png', mode: 'orbit' },   // 枯萎兽 T3
+    661: { tex: 'vanilla/NPC_661.png', mode: 'orbit' },    // 帝皇蝶（:26099-26113 自贴图 ×6 HSL 彩虹轨道——
+    //                                                     原版画 value80=TextureAssets.Npc[661] 即本表 tex 同文件）
   };
 
   /** NPC_GLOW 表全量条目（[npcId, 贴图路径]）——供 tests/visual-extras.test.ts
    *  抽查素材存在性（表内每个 tex 都必须真实落在 public/sprites/vanilla/）。 */
   static npcGlowEntries(): Array<[number, string]> {
     return Object.entries(Renderer.NPC_GLOW).map(([id, g]) => [Number(id), g.tex]);
+  }
+
+  /** 表配置直读（tests 断言 full/sparkle/spinner/dy/fadeA 等特殊分支触发位） */
+  static npcGlowConfig(id: number) {
+    return Renderer.NPC_GLOW[id] ?? null;
+  }
+
+  // ===================== 轨道族参数 + 特殊分支纯函数（第四批） =====================
+  // 全部无 DOM/无 this 依赖，tests/visual-extras.test.ts 直接断言。
+  // 标杆：Main.cs:25805-26204（ghost 族绘制块）+ :26086-26128（轨道 Glow 段）。
+  private static readonly NPC_GLOW_ORBIT: Record<number, {
+    /** num299 环绕份数（:25892/:25902/:25911/:25918） */
+    count: number;
+    /** num300 呼吸周期 s（GlobalTimeWrappedHourly % period） */
+    period: number;
+    /** num300 包络：'half'=cos/2+0.5（0..1）；'sixth'=cos/6+0.75（0.583..0.917） */
+    env: 'half' | 'sixth';
+    /** 半径 num300 系数（541/568=4；661=2+ai[2]） */
+    rBase: number;
+    /** 半径常数项（恒 2，:26091/:26108/:26123 的 +2f） */
+    rAdd: number;
+    /** 661：rBase 项 = 2+ai[2]（:26106 num320 = 2f + ai[2]） */
+    ai2Radius?: boolean;
+    /** 661：num300 下限 = GetLerpValue(0,60,ai[2])（:25921） */
+    ai2Gate?: boolean;
+    /** 661：相位 num302 = Lerp(0,3,GetLerpValue(0,60,ai[2]))（:26100） */
+    phaseAi2?: boolean;
+    /** color43 染色（:25895 HotPink / :25914 Gold / :26105 HSL 彩虹） */
+    tint: 'gold' | 'hotpink' | 'hsl';
+    /** 拷贝亮度 ×(1-num300×k)（541/568=1；661=0.5 :26106） */
+    copyFade: number;
+    /** 中心层亮度系数（541/568=1 原色；661=0.1 :26113 White×0.1） */
+    center: number;
+    /** 568/569：localAI[3]≥60 出生门（:26116） */
+    spawnGate?: boolean;
+    /** num47 世界 px Y 偏移（568/569=-3 :25898） */
+    dy?: number;
+  }> = {
+    // 541 沙元素（:25910-25914 num299=4/period 2.4/Gold；半径 4·num300+2 :26091）
+    541: { count: 4, period: 2.4, env: 'half', rBase: 4, rAdd: 2, tint: 'gold', copyFade: 1, center: 1 },
+    // 568/569 枯萎兽（:25892-25898 num299=4/period 1.5/HotPink(A=127)/num47=-3；出生门 :26116）
+    568: { count: 4, period: 1.5, env: 'sixth', rBase: 4, rAdd: 2, tint: 'hotpink', copyFade: 1, center: 1, spawnGate: true, dy: -3 },
+    569: { count: 4, period: 1.5, env: 'sixth', rBase: 4, rAdd: 2, tint: 'hotpink', copyFade: 1, center: 1, spawnGate: true, dy: -3 },
+    // 661 帝皇蝶（:25917-25922 num299=6/period 2.4/ai2 门；相位/半径随 ai2 :26100/:26106）
+    661: { count: 6, period: 2.4, env: 'half', rBase: 2, rAdd: 2, ai2Radius: true, ai2Gate: true, phaseAi2: true, tint: 'hsl', copyFade: 0.5, center: 0.1 },
+  };
+
+  /** Utils.GetLerpValue 1:1（Utils.cs:283-308，含 from>to 反向钳位） */
+  private static glowLerpValue(from: number, to: number, t: number): number {
+    if (from < to) { if (t < from) return 0; if (t > to) return 1; }
+    else { if (t < to) return 1; if (t > from) return 0; }
+    return (t - from) / (to - from);
+  }
+
+  /** 飞行型判定（与 drawEnemy 调用方同式：vanilla.noGravity）——轨道族/指示灯
+   *  需要在 drawNpcGlow 内把"碰撞盒中心"换算进本地系（飞行型原点即中心、
+   *  地面型原点在盒底需 -e.h/2） */
+  private static glowFlying(e: Enemy): boolean {
+    return !!e.vanilla?.noGravity;
+  }
+
+  /** 轨道族逐帧参数（Main.cs:25826-25829 num299/num300/num302 初值 + 各 case 覆写 +
+   *  :26091/:26108/:26123 半径公式）。tSec=GlobalTimeWrappedHourly；lai3 供 568/569
+   *  出生门（:26116 localAI[3]>=60，未过返回 null）。ai2 仅 661 消费，按原版
+   *  Clamp(0,50)（NPC.cs:45253）钳界。
+   *  【登记】本仓 AI_107(ImprovedWalkers) 未承载 localAI[3] 出生计时（lai3 恒 0），
+   *  drawNpcGlow 对 568/569 按出生完成态 60 代入；出生 3 份紫雾收敛（:25899-25907）
+   *  属本体绘制层，未接。 */
+  static npcGlowOrbitParams(
+    id: number, tSec: number, ai2: number, lai3 = 60,
+  ): { count: number; num300: number; radius: number; phase: number } | null {
+    const c = Renderer.NPC_GLOW_ORBIT[id];
+    if (!c) return null;
+    if (c.spawnGate && lai3 < 60) return null;
+    const x = tSec % c.period / c.period * Math.PI * 2;
+    let num300 = c.env === 'half' ? Math.cos(x) / 2 + 0.5 : Math.cos(x) / 6 + 0.75;
+    const a2 = Math.max(0, Math.min(50, ai2));
+    let phase = 0;
+    if (c.ai2Gate) num300 = Math.max(num300, Renderer.glowLerpValue(0, 60, a2));
+    if (c.phaseAi2) phase = 3 * Renderer.glowLerpValue(0, 60, a2);
+    const base = c.ai2Radius ? c.rBase + a2 : c.rBase;
+    return { count: c.count, num300, radius: base * num300 + c.rAdd, phase };
+  }
+
+  /** 轨道拷贝染色（color43 MultiplyRGBA，RGB 0..255）：
+   *  - gold：Gold(255,215,0)（:26087/:25914）
+   *  - hotpink：HotPink(255,105,180)，源色 A 通道为 0 → 乘后 A 恒 0（:25895-25896）
+   *  - hsl：661 逐份 hslToRgb((GT+i/count)%1, 1, 0.5)（:26105，Main.cs:47266-47290），
+   *    hue 量化 1/32 防逐帧打爆 tintCache */
+  static npcGlowOrbitTint(id: number, i: number, tSec: number): [number, number, number] {
+    const c = Renderer.NPC_GLOW_ORBIT[id];
+    if (c?.tint === 'gold') return [255, 215, 0];
+    if (c?.tint === 'hotpink') return [255, 105, 180];
+    if (c?.tint === 'hsl' && c) {
+      const hq = Math.round(((tSec + i / c.count) % 1) * 32) / 32;
+      const [r, g, b] = Renderer.glowHslToRgb(hq % 1, 1, 0.5);
+      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+    }
+    return [255, 255, 255];
+  }
+
+  /** Main.hslToRgb 1:1（Main.cs:47266-47290）→ RGB 0..1（s=0 灰阶捷径同源码） */
+  private static glowHslToRgb(hue: number, sat: number, lum: number): [number, number, number] {
+    if (sat === 0) return [lum, lum, lum];
+    const v2 = lum < 0.5 ? lum * (1 + sat) : lum + sat - lum * sat;
+    const v1 = 2 * lum - v2;
+    const h2r = (h: number): number => {
+      if (h < 0) h += 1;
+      if (h > 1) h -= 1;
+      if (6 * h < 1) return v1 + (v2 - v1) * 6 * h;
+      if (2 * h < 1) return v2;
+      if (3 * h < 1) return v1 + (v2 - v1) * (2 / 3 - h) * 6;
+      return v1;
+    };
+    return [h2r(hue + 1 / 3), h2r(hue), h2r(hue - 1 / 3)];
+  }
+
+  /** 414 爬足虫尾受击红闪（Main.cs:25656-25663）：localAI[2]≠0 时 color38 覆写为
+   *  (255-num219, num219, num219, 255-num219)；num219 = trunc(lai2)，负段 = 128+trunc。
+   *  返回 null = 无闪（走基础 255a 白罩）。A = 255-num219 ∈ 127..255 → 显著，调用方
+   *  需做 fadeA 背景衰减。localAI[2] 的递减驱动在 AI_006（NPC.cs:52026-52047：
+   *  受击置 128，每 tick −16，过零翻 −128 后 +16 回升）——本仓 412-414 无 AI 承载。 */
+  static npcGlowCrawltipedeFlash(lai2: number): { rgb: [number, number, number]; a: number } | null {
+    if (lai2 === 0) return null;
+    let n = Math.trunc(lai2);
+    if (lai2 < 0) n = 128 + Math.trunc(lai2);
+    const inv = 255 - n;
+    return { rgb: [inv, n, n], a: inv };
+  }
+
+  /** 387 特斯拉炮塔充能白化（Main.cs:25451-25458）：color32 = White×0.75（RGB=A=191）；
+   *  ai0>0 时 amount7=(ai0+1)/60 → RGB Lerp(0.75,1)、A Lerp(191,0)，再整体 ×Opacity。
+   *  bright=加色亮度（RGB/255），fadeA=背景衰减（A/255，静止 191/255 显著）。
+   *  本仓 teslaTurretAI 的 ai0 即充能计数（0→60，受击 -30）→ 分支实时触发。 */
+  static npcGlowTeslaFade(ai0: number, alphaRaw: number): { bright: number; fadeA: number } {
+    const opacity = (255 - Math.min(255, Math.max(alphaRaw, 0))) / 255;
+    const amount7 = ai0 > 0 ? (ai0 + 1) / 60 : 0;
+    const rgb = (191 + (255 - 191) * amount7) / 255;
+    const a = 191 * (1 - amount7) / 255 * opacity;
+    return { bright: rgb * opacity, fadeA: Math.max(0, Math.min(1, a)) };
+  }
+
+  /** 425 枪口星芒包络（Main.cs:25631-25633 + DrawPrettyStarSparkle :34741-34745）：
+   *  opacity = Remap(ai3, 0, 15, 0, 1)（瞄准蓄力渐亮）；
+   *  num = GetLerpValue(0,30,ai3) × GetLerpValue(36,30,ai3)（ai3≤0 冷却期恒 0，
+   *  30 满蓄、30→40 放射后渐灭——与 NPC.cs:58986-59006 的 ai3 状态机同环）。 */
+  static npcGlowSparkleEnvelope(ai3: number): { opacity: number; num: number } {
+    const o = Math.max(0, Math.min(1, ai3 / 15));
+    const num = Renderer.glowLerpValue(0, 30, ai3) * Renderer.glowLerpValue(36, 30, ai3);
+    return { opacity: o, num: Math.max(0, Math.min(1, num)) };
+  }
+
+  /** 160/209 城镇 NPC 微光/派对变体贴图档（Main.cs:25769/:25783）：
+   *  - 160 松露人：townNpcVariationIndex==1（微光态）→ Glow_352，否则 Glow_166
+   *  - 209 电子人：常态 Glow_167；微光态按 altTexture 选 Glow_350（≠1）/Glow_351（==1）
+   *  返回 null = 该 id 无变体链。【登记】城镇 NPC 走 drawTownNPC（TownNPC 类），
+   *  不经过 drawNpcGlow → 本链当前仅作 1:1 备案，接通需 drawTownNPC 侧挂 glow 层
+   *  （该函数非本批所有权范围）；160 的 shimmerTransparency RGB 衰减（:25771-25776）
+   *  TownNPC 未承载该字段，亦登记。 */
+  static npcGlowVariantTex(id: number, shimmered: boolean, altTexture: number): string | null {
+    if (id === 160) return shimmered ? 'vanilla/Glow_352.png' : 'vanilla/Glow_166.png';
+    if (id === 209) return shimmered ? (altTexture !== 1 ? 'vanilla/Glow_350.png' : 'vanilla/Glow_351.png') : 'vanilla/Glow_167.png';
+    return null;
   }
 
   /** GlowMask 叠画：与基础精灵同一变换（调用点在 drawEnemy 的 save 块内）。
@@ -2667,6 +2856,47 @@ export class Renderer {
           : (svx * Math.sin(ang) + svy * Math.cos(ang)) * mult) / scale;
         ctx.drawImage(img, 0, sy, img.width, gh, bx + offX + dx, by + dy, r.sw, r.sh);
       }
+    } else if (g.mode === 'orbit') {
+      // 环绕轨道族（Main.cs:26086-26128）：碰撞盒中心 1 份 + 极角 i/count×2π+phase
+      // 环绕 count 份拷贝。锚点 = Center（:26091/:26107/:26123）——与 frame 族
+      // Bottom+4 不同源，故不沿用 bx/by，按 noGravity 自行换算盒心。
+      const prm = Renderer.npcGlowOrbitParams(
+        e.vanillaId ?? -1, performance.now() / 1000, e.ai2,
+        (e.vanillaId === 568 || e.vanillaId === 569) ? 60 : e.lai3,
+      );
+      if (prm) {
+        const cfg = Renderer.NPC_GLOW_ORBIT[e.vanillaId ?? -1]!;
+        const dyo = (cfg.dy ?? 0) / scale;                     // num47（568/569=-3 :25898）
+        const ocy = ((Renderer.glowFlying(e) ? 0 : -e.h / 2)) / scale + dyo;
+        const ox = -r.sw / 2, oy = ocy - r.sh / 2;             // 帧左上（盒心 − 半帧）
+        const base = (127 - alphaRaw) / 255;                   // Color(127-α,…,0) 基底
+        const t = performance.now() / 1000;
+        // 中心层：541/568 原色（无 GetAlpha/无 num300 衰减）；661 White×0.1（:26113）
+        if (e.vanillaId === 661) {
+          ctx.globalAlpha = Math.max(0, Math.min(1, 0.1));
+          ctx.drawImage(img, 0, sy, img.width, gh, ox, oy, r.sw, r.sh);
+        } else {
+          const ct = Renderer.npcGlowOrbitTint(e.vanillaId ?? -1, 0, t);
+          const cc = this.tintedSprite(`glow|${g.tex}|r${row}`,
+            { img, sx: 0, sy, sw: img.width, sh: gh }, [ct[0], ct[1], ct[2]]);
+          ctx.globalAlpha = Math.max(0, Math.min(1, base));
+          ctx.drawImage(cc, 0, 0, cc.width, cc.height, ox, oy, r.sw, r.sh);
+        }
+        for (let i = 0; i < prm.count; i++) {
+          const ang = i / prm.count * Math.PI * 2 + prm.phase;
+          const dx = Math.cos(ang) * prm.radius / scale;
+          const dy = Math.sin(ang) * prm.radius / scale;
+          const fade = 1 - prm.num300 * cfg.copyFade;          // ×(1-num300·k)
+          // 拷贝亮度 = GetAlpha(×Opacity) × fade（:26092-26093/:26105-26106）；
+          // 中心层系数 cfg.center 只作用于 661 的 0.1 白罩（上方分支），不进拷贝
+          const bright = base * opacity * fade;
+          const tt = Renderer.npcGlowOrbitTint(e.vanillaId ?? -1, i, t);
+          const tc = this.tintedSprite(`glow|${g.tex}|r${row}`,
+            { img, sx: 0, sy, sw: img.width, sh: gh }, [tt[0], tt[1], tt[2]]);
+          ctx.globalAlpha = Math.max(0, Math.min(1, bright));
+          ctx.drawImage(tc, 0, 0, tc.width, tc.height, ox + dx, oy + dy, r.sw, r.sh);
+        }
+      }
     } else if (g.mode === 'frame') {
       let alpha = 0.8;
       let flashPulse = 1;
@@ -2682,8 +2912,108 @@ export class Renderer {
       else alpha = 0.78;                                                  // Color(200,200,200,0)/白色系通用
       const ga = resolveAlpha();
       if (ga >= 0) alpha = ga;                                            // 第三批表项覆盖旧链
-      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      ctx.drawImage(img, 0, sy, img.width, gh, bx, by, r.sw, r.sh);
+      // 653 地狱蝴蝶 Y 锚 +3（族内其余 +4，:25198/:25194）→ 本仓底锚惯例相对 -1
+      const dyo = (g.dy ?? 0) / scale;
+      // ---- 第四批运行时态/Color.A 分支 ----
+      // Color.A 背景衰减（XNA AlphaBlend=src One：先 destination-out 削底再 lighter
+      // 加色，与本体染色 pass :2307-2310 同式）。addA=加色亮度、fadeA=削底强度。
+      let addA = alpha;
+      let fadeA = g.fadeA ?? 0;
+      let tint: [number, number, number] | null = null;
+      if (e.vanillaId === 387) {
+        // 特斯拉炮塔（:25451-25459）：White×0.75 起，ai0 充能 → RGB→255/A→0
+        const f = Renderer.npcGlowTeslaFade(e.ai0, alphaRaw);
+        addA = f.bright; fadeA = f.fadeA;
+      } else if (e.vanillaId === 414) {
+        // 爬足虫尾受击红闪（:25656-25663）：RGB=(255-n,n,n) 且 A=255-n（显著）
+        const fl = Renderer.npcGlowCrawltipedeFlash(e.lai2);
+        if (fl) { addA = 1; fadeA = fl.a / 255; tint = fl.rgb; }
+      }
+      // 染色源（tintedSprite 缓存画布，整幅即帧）——无 tint 时直取 glow 帧行
+      let src: CanvasImageSource = img;
+      let ssx = 0, ssy = sy, ssw = img.width, ssh = gh;
+      if (tint) {
+        const tc = this.tintedSprite(`glow|${g.tex}|r${row}`,
+          { img, sx: 0, sy, sw: img.width, sh: gh }, [tint[0], tint[1], tint[2]]);
+        src = tc; ssx = 0; ssy = 0; ssw = tc.width; ssh = tc.height;
+      }
+      if (fadeA > 0) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = Math.max(0, Math.min(1, fadeA));
+        ctx.drawImage(src, ssx, ssy, ssw, ssh, bx, by + dyo, r.sw, r.sh);
+        ctx.globalCompositeOperation = 'lighter';
+      }
+      ctx.globalAlpha = Math.max(0, Math.min(1, addA));
+      ctx.drawImage(src, ssx, ssy, ssw, ssh, bx, by + dyo, r.sw, r.sh);
+      // 437 教徒石板第二层整图罩（:25488 null 源矩形 = 全图，同 white5 A=200）
+      if (g.full) {
+        const fimg = this.atlas.ensureVImage(g.full);
+        if (fimg) {
+          if (fadeA > 0) {
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.globalAlpha = Math.max(0, Math.min(1, fadeA));
+            ctx.drawImage(fimg, 0, 0, fimg.width, fimg.height, bx, by + dyo, r.sw, r.sh);
+            ctx.globalCompositeOperation = 'lighter';
+          }
+          ctx.globalAlpha = Math.max(0, Math.min(1, addA));
+          ctx.drawImage(fimg, 0, 0, fimg.width, fimg.height, bx, by + dyo, r.sw, r.sh);
+        }
+      }
+      // 425 星璇枪手枪口星芒（:25631-25633 → DrawPrettyStarSparkle :34734-34750）：
+      // Extra_98 四笔十字（绿 shine 对 ×1.0 / 白 draw 对 ×0.6，旋转 0/π/2）。
+      // 位置 = 帧中心 +27px 本地 X（:25632 的 27×-spriteDirection 世界向折进镜像系）。
+      // 【登记】本仓 AI_003 无 425 ai3 瞄准蓄力（NPC.cs:58986-59006），ai3 撞的是
+      // 通用卡墙计数——星芒可能误闪，AI 侧修复后自然归位。
+      if (g.sparkle) {
+        const env = Renderer.npcGlowSparkleEnvelope(e.ai3);
+        const ex = this.atlas.ensureVImage(g.sparkle.tex);
+        if (env.num > 0 && env.opacity > 0 && ex) {
+          const n = env.num;
+          const cx0 = bx + r.sw / 2 + g.sparkle.dx / scale;
+          const cy0 = by + dyo + r.sh / 2;
+          // 绿对：shineColor=Green×opacity×0.5（tint 乘法）；白对：White×0.5
+          const green = this.tintedSprite('sparkle|green',
+            { img: ex, sx: 0, sy: 0, sw: ex.width, sh: ex.height }, [0, 128, 0]);
+          const pair = (image: CanvasImageSource, rot: number, sx: number, sy2: number, a: number) => {
+            ctx.save();
+            ctx.translate(cx0, cy0);
+            ctx.rotate(rot);
+            ctx.globalAlpha = Math.max(0, Math.min(1, a));
+            ctx.drawImage(image, -ex.width / 2 * sx, -ex.height / 2 * sy2,
+              ex.width * sx, ex.height * sy2);
+            ctx.restore();
+          };
+          // vector =(fatness.X/2, scale.X)×num=(1,3)×n 旋 π/2；vector2=(fatness.Y/2, scale.Y)×n=(1,1.5)×n 旋 0
+          pair(green, Math.PI / 2, 1 * n, 3 * n, 0.5 * env.opacity * n);
+          pair(green, 0, 1 * n, 1.5 * n, 0.5 * env.opacity * n);
+          pair(ex, Math.PI / 2, 0.6 * n, 1.8 * n, 0.5 * n);
+          pair(ex, 0, 0.6 * n, 0.9 * n, 0.5 * n);
+        }
+      }
+      // 520 火星行者旋转指示灯（:25425-25443）：Extra_56 画在 Top+(0,20)，
+      // rotation=localAI[3]（镜像系折算 -num194-π、origin (4,4)），再叠 Glow_165 白罩。
+      // Extra_56 是深色本体件 → source-over（lighter 会不可见）；Glow_165 走 lighter。
+      // 【登记】AI_003 未写 lai3 → 旋转恒 0（原版为指示灯自旋角）。
+      if (g.spinner) {
+        const sp = this.atlas.ensureVImage(g.spinner.tex);
+        const spGlow = this.atlas.ensureVImage(g.spinner.glow);
+        if (sp && spGlow) {
+          // zero6 = Top + (0,20)（:25434，Top=盒左上角而非中心；zero6.X*=−1 对零向量空操作）
+          const sx0 = -e.w / 2 / scale;
+          const sy0 = ((Renderer.glowFlying(e) ? 0 : -e.h) + g.spinner.dy) / scale;
+          const rot = -(e.lai3) - Math.PI;               // 镜像系：mirror∘rot(θ+π) = rot(-θ-π)
+          ctx.save();
+          ctx.translate(sx0, sy0);
+          ctx.rotate(rot);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = opacity;
+          ctx.drawImage(sp, -4, -4, sp.width, sp.height);      // origin (4,4)（:25426/:25432）
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 1;
+          ctx.drawImage(spGlow, -4, -4, spGlow.width, spGlow.height);
+          ctx.restore();
+        }
+      }
       // 399 探测器状态灯（:24571-24575）：Extra_20 按 ai0+1 取行，画在本体下方 +24px，
       // 再叠 Glow_101 同源矩形罩（A=127-α/2）
       if (g.lamp) {

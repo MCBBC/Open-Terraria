@@ -562,7 +562,7 @@ item({ key: 'vi_1173_grave_marker', name: '', value: 1 });
 item({ key: 'vi_4379_wyvern_kite', name: '', value: 1 });
 item({ key: 'vi_4378_xenon_moss', name: '', value: 1 });
 item({ key: 'vi_4377_krypton_moss', name: '', value: 1 });
-item({ key: 'vi_4376_rat_cage', name: '', value: 1 });
+item({ key: 'vi_4376_rat_cage', name: '', value: 1, tile: 'v_533_rat_cage' });  // createTile=533 placeStyle=0（Item.cs:37240-37244）——笼族放置链样板：物种=tile id、无捕获机制，详见 render/CritterCage.ts GAP ①
 item({ key: 'vi_4375_rat', name: '', value: 1 });
 item({ key: 'vi_4484_1_2_second_timer', name: '', value: 1 });
 item({ key: 'vi_4824_wet_bomb', name: '', value: 1 });

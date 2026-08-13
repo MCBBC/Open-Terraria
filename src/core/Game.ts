@@ -195,7 +195,7 @@ import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
 import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj } from '../entities/PrismProj';
-import { TerraArc } from '../entities/TerraArc';
+import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly } from '../entities/SwingArc';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
@@ -1139,7 +1139,7 @@ export class Game implements GameHooks {
     for (const ent of this.entities.projectiles) {
       const pr = ent as Entity & { projId?: number; damage?: number; hostile?: boolean; netPuppet?: boolean; dead?: boolean; x: number; y: number; w: number; h: number };
       if (!(pr instanceof Arrow) && !(pr instanceof MagicProj)) continue;
-      if (pr.netPuppet || pr.dead || pr.hostile) continue;
+      if (pr.netPuppet || pr.dead || (pr as { hostile?: boolean }).hostile) continue;
       alive.add(pr.id);
       const dmg0 = pr.damage ?? 0;
       if (dmg0 <= 0) continue;
@@ -1287,7 +1287,7 @@ export class Game implements GameHooks {
         // CanHitWithMeleeWeapon（:13513-13515 ownerHitCheck 族 + Projectile.cs:11734-11744）：
         // 近战弹（回旋镖/剑气等 kind1）不许隔墙命中——线段被实心格挡即跳过。
         // 箭/弹（kind0）无 ownerHitCheck,原版不检查——此处同构只拦 kind1
-        if (pup.kind7 === 1 && !canHitLine(pr.cx, pr.cy, this.player.cx, this.player.cy)) continue;
+        if (pup.kind7 === 1 && !canHitLine(this.world.store, pr.x, pr.y, pr.w, pr.h, this.player.x, this.player.y, this.player.w, this.player.h)) continue;
         // Main.DamageVar（:13563±15% 幅度,打在被击端）+ 死因 player（凶器=弹型名）
         const rolled = Math.max(1, Math.round(dmg0 * (1 + (Math.random() * 30 - 15) / 100)));
         this.player.lastDamageCause = {
@@ -2809,6 +2809,16 @@ export class Game implements GameHooks {
     player.inputJump = inp.down('Space') || inp.down('KeyW') || inp.down('ArrowUp');
     player.inputDown = inp.down('KeyS') || inp.down('ArrowDown');
     player.inputUp = inp.down('KeyW') || inp.down('ArrowUp');
+    // 坐骑能力输入（钻头坐骑 8 专用：ItemCheck_HandleMount :52066-52081）：
+    // 鼠标世界坐标（AimAbility 的 crosshair）+ 左/右键电平 + 按压边沿
+    //（releaseUseItem&&releaseUseTile = 上 tick 双松 + 本 tick 任一按下）
+    {
+      const [awx, awy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+      player.aimWX = awx;
+      player.aimWY = awy;
+      player.inputUseItem = !!inp.mouseDown;
+      player.inputUseTile = !!inp.rightDown;
+    }
     // 重力药水（buff 18，:9720）：Up 边沿切换 gravDir（按住不连切）
     if (player.buffs.has(BuffType.Gravitation) && player.inputUp && !this.gravLatch) {
       player.gravDir = player.gravDir === 1 ? -1 : 1;
@@ -2878,6 +2888,9 @@ export class Game implements GameHooks {
     // 宠物/光宠存续（Player.UpdatePet/UpdatePetLight :17147-17187 每帧语义）：
     // 装备槽 [0]/[1] 有宠物物品且未隐藏 → 确保跟随体；卸装/隐藏/死亡 → 消散
     this.updatePets();
+    // Journey 研究：逐帧版本门复查（Player.cs:25418 CheckResearchAchievement——
+    // 中途跨半数线当帧触发 event 45，曾只在进世界查）
+    this.research.checkResearchAchievement();
     // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
     // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
     // Player.HitboxForBestiaryNearbyCheck（Player.cs:3165：玩家盒外扩 300×200）
@@ -4307,8 +4320,9 @@ export class Game implements GameHooks {
     compactByLife(this.particles);
     // 飘字更新 1:1（CombatText.Update:131-206）。label 类（物品名）走旧轨迹;
     // 数字类:alpha 0.6~1 闪烁 → 速度演化（dot 加重力,暴击双重衰减）→ 寿命内
-    // scale 生长（dot 封顶 0.8）→ 寿命归零后 scale 收缩至 0.1 才消亡（暴击每 t
-    // 先 +0.07 补偿=净 -0.03,收尾更久,且 alphaDir=-1 淡出）
+    // scale 生长（原版 Update :163-165 dot 与普通同链 +0.1×TargetScale 无封顶——
+    //  旧 0.5/t+0.8 封顶是 monospace 时代自造近似,位图字体对齐时一并归位）→
+    //  寿命归零后 scale 收缩至 0.1 才消亡（暴击每 t 先 +0.07 补偿=净 -0.03,收尾更久,且 alphaDir=-1 淡出）
     let wn = 0;
     for (const d of this.dmgNumbers) {
       if (d.label) {
@@ -4330,7 +4344,7 @@ export class Game implements GameHooks {
       d.life--;
       if (d.life > 0) {
         if (d.crit) d.rotation = (d.rotation ?? 0) + (d.vx < 0 ? 0.001 : -0.001);
-        if (d.dot) d.scale = Math.min(0.8, (d.scale ?? 0) + 0.5);
+        if (d.dot) d.scale = Math.min(1, (d.scale ?? 0) + 0.1);
         else d.scale = Math.min(1, (d.scale ?? 0) + 0.1);
         this.dmgNumbers[wn++] = d;
       } else {
@@ -4705,6 +4719,13 @@ export class Game implements GameHooks {
       this.mining = null;
       return;
     }
+    // ---- 钻头坐骑（mount 8）：接管整条使用路径（ItemCheck_HandleMount :52066-52081
+    //      noItems=true——骑乘钻头时手持物品全部禁用；左键按住挖块/右键按住拆墙，
+    //      按压边沿开激光、双松关激光） ----
+    if (this.player.ridingMount && this.player.mount.type === 8) {
+      this.updateDrillMountUse();
+      return;
+    }
     const held = this.player.inv.heldItem();
     const heldDef = held ? ITEM_DEFS[held.id] : null;
     const [rawTx, rawTy] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
@@ -4829,10 +4850,49 @@ export class Game implements GameHooks {
         this.player.useTime = reuseSpd;
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
-        // ★ melee+shoot 剑族（附魔剑 989/波刃 190 等，Player.cs:42880 flag4 语义）：
-        // 挥砍为主 + 挥击启动帧朝鼠标射出 item.shoot（useTime 节奏=每次挥击一弹）；
-        // 弹体走通用 Arrow（贴图/穿透/寿命取投射物表），伤害与本体挥击同源
-        if (cwMelee?.shoot && cwMelee.shootSpeed != null) {
+        // ★ 真刃系旋斩弧五剑（Player.cs:48265-48317 各专属出生链——先于下方通用
+        // shoot 门：368/1826 无 shootSpeed 会被饿死；弧弹自带命中，不再走 Arrow）
+        if (cwMelee && [972, 973, 982, 983, 997].includes(cwMelee.shoot)) {
+          const angT = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+          this.player.facing = Math.cos(angT) > 0 ? 1 : -1;   // 发射型面向鼠标（:46578）
+          const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 20;
+          const scaleT = ps?.size ?? 1;
+          const mkArc = (projId: number, dmg: number) => {
+            const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), this.player.facing, scaleT);
+            arc.critChance = critTotal;
+            arc.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            this.entities.add(arc, 'projectiles');
+          };
+          switch (cwMelee.shoot) {
+            case 972: {   // 永夜刃 273（:48265-48274）：972 锚弧 + 972 飞斩（aim 向、ai1=30）
+              mkArc(972, this.swing.dmg ?? cwMelee.damage);
+              const fly = new NightsEdgeFly(this.player.cx, this.player.cy - 4,
+                Math.cos(angT) * cwMelee.shootSpeed, Math.sin(angT) * cwMelee.shootSpeed,
+                this.swing.dmg ?? cwMelee.damage, this.player.facing, 30, scaleT);
+              fly.critChance = critTotal;
+              fly.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+              this.entities.add(fly, 'projectiles');
+              break;
+            }
+            case 973: {   // 真永夜刃 675（:48294-48301）：972 锚弧 + 973 伸长斩（aim 向、半伤、ai1=32）
+              mkArc(972, this.swing.dmg ?? cwMelee.damage);
+              const slash = new TrueNightsEdgeSlash(this.player,
+                Math.cos(angT) * cwMelee.shootSpeed, Math.sin(angT) * cwMelee.shootSpeed,
+                (this.swing.dmg ?? cwMelee.damage) / 2, this.player.facing, 32, scaleT);
+              slash.critChance = critTotal;
+              slash.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+              this.entities.add(slash, 'projectiles');
+              break;
+            }
+            case 982: mkArc(982, this.swing.dmg ?? cwMelee.damage); break;          // 圣剑 368（:48280）
+            case 997: mkArc(997, this.swing.dmg ?? cwMelee.damage); break;          // 无头骑士剑 1826（:48287）
+            case 983: {   // 真断钢剑 674（:48302-48309）：983 弧 + 982【伤害 0】视觉弧
+              mkArc(983, this.swing.dmg ?? cwMelee.damage);
+              mkArc(982, 0);
+              break;
+            }
+          }
+        } else if (cwMelee?.shoot && cwMelee.shootSpeed != null) {
           const ang2 = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           // 发射型武器面向鼠标（同 useCombatWeapon——ItemCheck_Shoot :46578 语义）
           this.player.facing = Math.cos(ang2) > 0 ? 1 : -1;
@@ -4862,8 +4922,10 @@ export class Game implements GameHooks {
               'projectiles');
             // 984 旋斩弧（同链首行 NewProjectile 984：方向×重力、itemAnimationMax、
             // 调整 scale——Player 相对锚定的挥砍视觉，TerraArcProj 随 985 同生同灭）
-            const arc = new TerraArc(this.player, cwMelee.useTime,
+            const arc = new SwingArc(this.player, 984, cwMelee.useTime,
               Math.round((this.swing.dmg ?? 1)), this.player.facing, (ps?.size ?? 1));
+            arc.critChance = critTotal;
+            arc.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
             this.entities.add(arc, 'projectiles');
             this.mining = null;
             return;
@@ -6280,11 +6342,13 @@ export class Game implements GameHooks {
     this.achievements.notifyProgressionEvent(6);
   }
 
-  private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number, useTime?: number) {
+  private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number, useTime?: number,
+    opts?: { drill?: boolean }) {
     // 联机破坏保护（v3 房间制）：非房主禁挖/禁锤墙
     if (!this.netCanEditTile()) { this.mining = null; this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
-    // 范围检查
-    if (!this.inTileRange(tx, ty)) { this.mining = null; return; }
+    // 范围检查（钻头坐骑豁免：Mount.UseDrill → Player.PickTile 无 IsInTileInteractionRange
+    // 门，射程由光束自身 256px 钳制——Mount.cs :3155-3162）
+    if (!opts?.drill && !this.inTileRange(tx, ty)) { this.mining = null; return; }
     const type = this.world.store.get(tx, ty);
     // 恶魔祭坛（tile 26，原版 Player.cs:45058）：镐不可破坏（def pick:-1 拦）；
     // 锤 ≥80 锤力且困难模式 → SmashAltar（砸碎=困难矿三档轮换+幽灵）；
@@ -6406,7 +6470,11 @@ export class Game implements GameHooks {
     // 食物 pickSpeed -= 5/10/15%（Player.cs:11534+）× 风筝 −15%（:9616）→
     // 冷却按原版 useTime/pickSpeed 缩短
     const pickMult = this.player.buffs.pickSpeedMult;
-    const cooldown = Math.max(8, Math.round(useTime ?? speed) * mineMult / pickMult);
+    // 钻头坐骑（drillPickTime=1）豁免手持工具的 8t 冷却下限——原版 PickTile 每束每
+    // tick 可命中（Mount.cs :3092/:3139），节流由光束自身 cooldown 承担
+    const cooldown = opts?.drill
+      ? Math.max(1, Math.round(useTime ?? speed) * mineMult / pickMult)
+      : Math.max(8, Math.round(useTime ?? speed) * mineMult / pickMult);
     if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
       this.hardnessCache = 100;
@@ -11502,9 +11570,11 @@ export class Game implements GameHooks {
     }
     const sc = this.scene;
     const zones: BiomeZones = {
+      // ShoppingZone_Forest（Player.cs:3660-3683）= !AnyBiome && !BelowSurface——
+      // ★泥土层也算 BelowSurface（曾漏 zoneDirtLayerHeight：地下泥土层被误判森林）
       forest: !!(sc && !sc.zoneCorrupt && !sc.zoneCrimson && !sc.zoneHallow && !sc.zoneSnow
         && !sc.zoneJungle && !sc.zoneDesert && !sc.zoneGlowshroom && !sc.zoneBeach
-        && !sc.zoneDungeon && !sc.zoneRockLayerHeight),
+        && !sc.zoneDungeon && !sc.zoneDirtLayerHeight && !sc.zoneRockLayerHeight),
       ocean: !!sc?.zoneBeach, snow: !!sc?.zoneSnow, desert: !!sc?.zoneDesert,
       jungle: !!sc?.zoneJungle, underground: !!sc?.zoneDirtLayerHeight || !!sc?.zoneRockLayerHeight,
       hallow: !!sc?.zoneHallow, mushroom: !!sc?.zoneGlowshroom,
@@ -12087,7 +12157,8 @@ export class Game implements GameHooks {
         if (p.thornsActive) {
           const num2 = (p.buffs.hasThorns ? 1 : 0) + (p.turtleSet ? 1 : 0);   // :30911-30916
           // Main.DamageVar :65597-65620（±15% + luck 重掷——曾裸随机丢重掷段）
-          const reflect = Math.min(1000, damageVar(dmg * num2, p.luck));
+          // Player.cs:30929 DamageVar(dmg×mult, -luck)——负幸运劣化重掷（曾传 +luck 方向反）
+          const reflect = Math.min(1000, damageVar(dmg * num2, -p.luck));
           attacker.hurt(reflect, -num3 * 10 * 0.65, 0, this);
           this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#80FF80');
         }

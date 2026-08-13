@@ -93,6 +93,10 @@ const MISC = [
   // 682 电弧 / 686 Betsy 火球 / 687 Betsy 喷焰——此前以 21/173/15 代渲(RENDER_PROXY 已退役)
   'Projectile_240.png', 'Projectile_675.png', 'Projectile_682.png',
   'Projectile_686.png', 'Projectile_687.png',
+  // DD2 walker 族弹幕（AI_107 ImprovedWalkers,NPC.cs:63372）：662/685 标枪 T1/T3 /
+  // 671 德拉肯弹 / 676 食人魔涎 / 681 哥布林炸弹 / 683 食人魔跺地波
+  'Projectile_662.png', 'Projectile_685.png', 'Projectile_671.png',
+  'Projectile_676.png', 'Projectile_681.png', 'Projectile_683.png',
   // 日月(Main.cs:62279 DrawSunAndMoon):太阳整图 + 月亮 8 相位竖条(Moon_N 50×400)
   'Sun.png',
   ...Array.from({ length: 9 }, (_, i) => `Moon_${i}.png`),

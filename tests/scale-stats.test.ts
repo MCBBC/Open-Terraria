@@ -142,13 +142,13 @@ describe('僵尸 type 3 四档强度（NPC.cs:18106-18447）', () => {
     expect(e.hp).toBe(45); expect(e.maxHp).toBe(45);
     expect(e.def.damage).toBe(14); expect(e.def.defense).toBe(6);
   });
-  it('fromVanilla 端到端：专家世界僵尸 hp 90 / damage 28 / 抗性 0.55（1−0.45）', () => {
+  it('fromVanilla 端到端：专家世界僵尸 hp 90 / damage 28 / 承受击退比例 0.45', () => {
     worldOf(1);
     const e = Enemy.fromVanilla(3, 0, 0)!;
     expect(e.hp).toBe(90); expect(e.maxHp).toBe(90);
     expect(e.def.damage).toBe(28);
     expect(e.def.value).toBe(150);           // 击杀掉钱消费 def.value
-    expect(e.def.knockbackResist).toBeCloseTo(0.55, 6);   // 本仓"抗性"=1−承受比例
+    expect(e.def.knockbackResist).toBeCloseTo(0.45, 6);   // def 存原版承受比例(1−0.55=0.45;旧 0.55 是 1:1 换算前的错误期望,2026-08-13 修正)
     expect(e.difficulty).toBeCloseTo(GDL.EXPERT, 6);
     expect(e.baseDamage).toBe(14);           // 未缩放基线保留（弹幕出膛防双乘）
   });

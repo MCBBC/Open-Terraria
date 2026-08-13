@@ -142,9 +142,9 @@ export class AutoTiler {
         const r = this.atlas.rect('地形/Tiles_3.png', 'Tiles_3_' + k);
         if (r) list.push(r);
       }
+      if (!list.length) return null; // 素材未就绪:空表不缓存(中毒防御),下帧重查
       this.weedCache = list;
     }
-    if (!this.weedCache.length) return null;
     return this.weedCache[Math.floor(hash2(x, y, 401) * this.weedCache.length) % this.weedCache.length];
   }
 

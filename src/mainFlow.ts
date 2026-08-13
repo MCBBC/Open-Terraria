@@ -56,6 +56,19 @@ export interface FlowHandle {
 export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI, audio: AudioSystem): FlowHandle {
   let game: Game | null = null;
   let mobile: MobileControls | null = null;
+  // GOING_OLDSCHOOL B1 收口：菜单级成就句柄（标题屏日月拖拽首访即达——
+  // 曾只挂 Game.achOnWorldEnter，直载标题屏拿不到句柄）
+  {
+    const w = window as unknown as { __swAchievements?: unknown };
+    if (!w.__swAchievements) {
+      import('./core/Achievements').then(({ Achievements }) => {
+        (window as unknown as { __swAchievements?: unknown }).__swAchievements
+          = new Achievements(typeof localStorage !== 'undefined'
+            ? { load: () => localStorage.getItem('sbw.achievements.v1'), save: (x: string) => localStorage.setItem('sbw.achievements.v1', x) }
+            : null);
+      });
+    }
+  }
   (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
   let playStart = 0;
   let menuBg: MenuBackground | null = null;

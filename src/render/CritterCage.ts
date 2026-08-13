@@ -1198,8 +1198,8 @@ function entryOf(fam: CageFamily, slot: number): SlotEntry {
   return e;
 }
 
-/** 派生槽位（妖精罐 Main.cs:16152-16167：槽 k 帧 = (槽0帧 + k%12 + k%2==0 +
- *  k%5==0 + k%8==0) mod 12） */
+/** 派生槽位（妖精罐 Main.cs:16152-16167：槽 1..24 帧 = (槽0帧 + k%12 + k%2==0 +
+ *  k%5==0 + k%8==0) mod 12；槽 0 是主槽本身不派生） */
 function deriveFairyJar(master: number, slot: number): number {
   let v = master + (slot % 12);
   if (slot % 2 === 0) v++;
@@ -1221,7 +1221,7 @@ export function resetCageAnim(): void {
 export function cageFrameOf(fam: CageFamily, slot: number, tick: number, frames?: number): number {
   const machine = CAGE_ANIM[fam.family];
   if (!machine) return 0;
-  // 派生族：只推进槽 0，其余槽由主槽帧级联导出
+  // 派生族：只推进槽 0（entryOf 内已归一），其余槽由主槽帧级联导出
   const e = entryOf(fam, fam.derive ? 0 : slot);
   if (tick < e.tick) {
     e.s = { f: 0, c: 0, m: 0 };
@@ -1233,13 +1233,22 @@ export function cageFrameOf(fam: CageFamily, slot: number, tick: number, frames?
     e.tick++;
     machine(e.s, e.rng, fam.style);
   }
-  const f = fam.derive ? deriveFairyJar(e.s.f, slot) : e.s.f;
+  const f = fam.derive && slot > 0 ? deriveFairyJar(e.s.f, slot) : e.s.f;
   return frames === undefined ? f : Math.min(f, Math.max(0, frames - 1));
 }
 
-/** 兼容旧签名（style=0）的帧行查询 */
+/** idx → 族档案反查表（cageFrameRow 兼容签名用；懒建） */
+let familyByIdx: Map<number, CageFamily> | null = null;
+
+/** 兼容旧签名（按族 idx + style 0）的帧行查询 */
 export function cageFrameRow(family: number, slot: number, tick: number, frames: number): number {
-  const fam = Object.values(CAGE_FAMILY).find((x) => x.idx === family && x.style === 0);
+  if (!familyByIdx) {
+    familyByIdx = new Map();
+    for (const fam of Object.values(CAGE_FAMILY)) {
+      if (!familyByIdx.has(fam.idx)) familyByIdx.set(fam.idx, fam);
+    }
+  }
+  const fam = familyByIdx.get(family);
   if (!fam) return 0;
   return cageFrameOf(fam, slot, tick, frames);
 }

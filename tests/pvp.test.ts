@@ -32,17 +32,17 @@ describe('Player.damage pvp 语义（Hurt :37769/:38208）', () => {
   const mk = () => new Player(0, 0, new Inventory());
   it('pvp 无敌帧 = 8t（非 pvp 40t 基准的 1/5）', () => {
     const a = mk();
-    expect(a.damage(10, -10, 0, true, true)).toBe(true);
+    expect(a.damage(10, -10, 0, true, true)).toBeGreaterThan(0);
     expect(a.iframes).toBe(8);
     const b = mk();
     b.damage(10, -10, 0);
     expect(b.iframes).toBe(40); // PLAYER_IFRAME_TICKS
   });
-  it('减伤链与 PvE 相同（经典 def×0.5,下限 1）', () => {
+  it('减伤链与 PvE 相同（经典 def×0.5,下限 1）+ 返回实扣值', () => {
     const p = mk();
     p.baseMaxHp = 100; p.hp = 100;
     // 无装备无 buff：def=0 → reduction = dmg 原值
-    expect(p.damage(30, -10, 0, true, true)).toBe(true);
+    expect(p.damage(30, -10, 0, true, true)).toBe(30);
     expect(p.hp).toBe(70);
   });
   it('pvp 击杀置 lastPvpDeath（KillMe :38208-38210）', () => {
