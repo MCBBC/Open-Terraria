@@ -1,0 +1,566 @@
+// 矿车系统完整链测试（Minecart.ts 实体 / MinecartTrack.ts 帧族 / Game.ts 接线数据面）。
+// 对照原版（Terraria 1.4.5.6 反编译）：
+//   轨道帧连接     Minecart.FrameTrack/GetNearbyTilesSetLookupIndex（Minecart.cs:947-1202）
+//   上下车/脱轨    Player.cs:22401（默认木质车 13）/26344-26360（onWrongGround）
+//   物理           Player.cs:19530-19791（Carts 段）/27031-27037（斜坡重力停摆）
+//   撞敌伤害       Player.cs:27225-27296 + GetMinecartDamage :28776-28822
+//   存档           SaveFile.ts flags/frameX/frameY 往返
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { TileStore } from '../src/world/TileStore';
+import { World } from '../src/world/World';
+import { TILE_BY_KEY } from '../src/data/tiles';
+import { TILE } from '../src/core/constants';
+import { Inventory } from '../src/items/Inventory';
+import { Player } from '../src/entities/Player';
+import type { GameHooks } from '../src/entities/types';
+import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../src/entities/Minecart';
+import { mountOfItem, isCartMount, MOUNT_DATA, MOUNT_NAMES } from '../src/entities/Mounts';
+import {
+  frameTrack, frameTrackArea, flipSwitchTrack, placeTrack, getOnTrack,
+  trackTypeOf, trackItemId, PLAYER_DEFAULT_GRAVITY,
+} from '../src/world/MinecartTrack';
+import { saveGame, loadSave } from '../src/save/SaveFile';
+
+const TRACK = TILE_BY_KEY['v_314_minecart_track'] ?? -1;
+const STONE = TILE_BY_KEY['stone'] ?? -1;
+expect(TRACK).toBeGreaterThanOrEqual(0);
+const FLAT_H = 6;   // 平轨面高度（子段高度 5 → (8-5)*2）
+
+// ---------------------------------------------------------------------------
+// 桩与助手
+// ---------------------------------------------------------------------------
+interface HitCall { dmg: number; kx: number; crit: boolean }
+
+function mkPlayer(): Player {
+  return new Player(0, 0, new Inventory());
+}
+
+/** 完整 GameHooks 桩（可注入敌怪表/世界旗标） */
+function mkHooks(st: TileStore, p: Player, world?: World, enemies: unknown[] = []): GameHooks {
+  const w = world ?? {
+    store: st,
+    flags: {} as Record<string, boolean>,
+    isExpert: false,
+  } as unknown as World;
+  return {
+    world: w,
+    player: p,
+    enemies: () => enemies,
+    critters: () => [],
+    spawnDrop: () => null,
+    damagePlayer: () => {},
+    addDamageNumber: () => {},
+    cutTile: () => {},
+    onEnemyKilled: () => {},
+    spawnEnemy: () => {},
+    spawnParticles: () => {},
+    notifyInventoryChanged: () => {},
+    playSfx: () => {},
+    playSfxFiles: () => {},
+    showPickupLabel: () => {},
+    hitTrackSwitch: () => {},
+  } as unknown as GameHooks;
+}
+
+/** 手写一帧轨道 */
+function seg(st: TileStore, x: number, y: number, frame: number, back = -1): void {
+  st.setTile(x, y, TRACK, frame, back < 0 ? 0xFFFF : back);
+}
+
+/** 放置链（placeTrack + 邻接重定型） */
+function line(st: TileStore, x0: number, y: number, n: number, style = 0): void {
+  for (let k = 0; k < n; k++) {
+    placeTrack(st, x0 + k, y, style);
+    frameTrackArea(st, x0 + k, y);
+  }
+}
+
+/** 上轨就位的骑乘矿车（GetOnTrack 吸附语义，Player.cs:22407） */
+function mountedCart(st: TileStore, tx: number, ty: number, mountId = 6): {
+  cart: Minecart; p: Player; game: GameHooks;
+} {
+  const p = mkPlayer();
+  const cart = new Minecart();
+  cart.mountId = mountId;
+  cart.applyMountStats();
+  cart.texture = CART_MOUNT_TEXTURES[mountId] ?? DEFAULT_CART_TEXTURE;
+  const snap = getOnTrack(st, tx, ty, tx * TILE, ty * TILE - 40, cart.w, cart.h);
+  cart.x = snap ? snap.x : tx * TILE;
+  cart.y = snap ? snap.y : ty * TILE + FLAT_H - cart.h;
+  cart.mounted = true;
+  p.ridingCart = true;
+  p.cart = cart;
+  return { cart, p, game: mkHooks(st, p) };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+// ---------------------------------------------------------------------------
+// A. 轨道帧连接规则（Minecart.cs:947-1202）
+// ---------------------------------------------------------------------------
+describe('轨道帧连接与邻接防护', () => {
+  it('frameTrackArea 不触碰非轨道邻格（原版 FrameTrack 仅 case 314 调用）', () => {
+    const st = new TileStore(30, 20);
+    // 带帧的多格物件占位：石砖块 + 手写非零帧（模拟家具/门的 frameX/frameY）
+    st.setTile(9, 12, STONE, 36, 72);
+    st.setTile(9, 11, STONE, 18, 36);
+    const b0 = { fx: st.frameX[st.idx(9, 12)], fy: st.frameY[st.idx(9, 12)] };
+    const b1 = { fx: st.frameX[st.idx(9, 11)], fy: st.frameY[st.idx(9, 11)] };
+    // 紧贴放置轨道（左邻即带帧石块）
+    line(st, 10, 12, 3);
+    expect(st.frameX[st.idx(9, 12)]).toBe(b0.fx);
+    expect(st.frameY[st.idx(9, 12)]).toBe(b0.fy);
+    expect(st.frameX[st.idx(9, 11)]).toBe(b1.fx);
+    expect(st.frameY[st.idx(9, 11)]).toBe(b1.fy);
+    // 拆除中段再次触发六邻重定型——邻块帧仍不被写
+    st.setTile(11, 12, 0);
+    frameTrackArea(st, 11, 12);
+    expect(st.frameX[st.idx(9, 12)]).toBe(b0.fx);
+    expect(st.frameY[st.idx(9, 12)]).toBe(b0.fy);
+  });
+
+  it('三连轨端盖改道：补第三格后旧墙挡端自动变平接（GetNearbyTilesSetLookupIndex）', () => {
+    const st = new TileStore(30, 20);
+    line(st, 10, 10, 2);
+    expect(st.frameX[st.idx(11, 10)]).toBe(3);   // 右端墙挡（frame 3）
+    line(st, 12, 10, 1);
+    expect(st.frameX[st.idx(11, 10)]).toBe(1);   // 变中段平接
+    expect(st.frameX[st.idx(12, 10)]).toBe(3);   // 新右端
+  });
+
+  it('锤击（pound）斜坡中段：双侧全连接同型项间循环（Minecart.cs:1079-1112）', () => {
+    const st = new TileStore(30, 20);
+    // 左邻高一格 + 右邻低一格 → 中格可取 8（左 TOP 右 BOTTOM）或 9（镜像）
+    line(st, 10, 9, 1);
+    line(st, 11, 10, 1);
+    line(st, 12, 11, 1);
+    // 邻接为斜向（左上/右下）：mask = 1|32 = 33 → 候选 8/9
+    const before = st.frameX[st.idx(11, 10)];
+    expect(before === 8 || before === 9).toBe(true);
+    expect(frameTrack(st, 11, 10, true)).toBe(true);
+    const after = st.frameX[st.idx(11, 10)];
+    expect(after === 8 || after === 9).toBe(true);
+    expect(after).not.toBe(before);   // 循环切换到另一同型全连接项
+  });
+
+  it('FlipSwitchTrack 加速轨：左右向循环（Minecart.cs:1320-1324 pound 路径）', () => {
+    const st = new TileStore(30, 20);
+    // 三连加速轨：mask = 2|16 = 18 → 候选含 30(boostRight)/31(boostLeft)
+    line(st, 10, 10, 1, 3);   // style 3 = 右加速首帧
+    line(st, 11, 10, 1, 3);
+    line(st, 12, 10, 1, 3);
+    const mid = st.idx(11, 10);
+    expect(trackTypeOf(st.frameX[mid])).toBe(2);
+    const before = st.frameX[mid];
+    expect(flipSwitchTrack(st, 11, 10)).toBe(true);
+    expect(st.frameX[mid]).not.toBe(before);          // 换向
+    expect(trackTypeOf(st.frameX[mid])).toBe(2);      // 保持加速型
+    expect(flipSwitchTrack(st, 11, 10)).toBe(true);
+    expect(st.frameX[mid]).toBe(before);              // 再翻回
+  });
+});
+
+// ---------------------------------------------------------------------------
+// B. 矿车坐骑族数据（Mount.cs mounts[n] / MountID.Sets.Cart）
+// ---------------------------------------------------------------------------
+describe('矿车坐骑族数据面', () => {
+  it('27 种矿车坐骑全部有贴图登记（CART_MOUNT_TEXTURES = Mount.frontTexture）', () => {
+    const carts = Object.keys(MOUNT_DATA)
+      .map(Number)
+      .filter((id) => MOUNT_DATA[String(id)]?.Minecart);
+    expect(carts.length).toBe(27);
+    for (const id of carts) expect(CART_MOUNT_TEXTURES[id]).toBeTruthy();
+  });
+
+  it('26 种召唤物品 → 坐骑 id 且均属 Cart 族（Item.cs DefaultToMinecart）', () => {
+    const items = [2343, 3353, 4066, 4067, 4426, 4427, 4428, 4429, 4443, 4450,
+      4451, 4452, 4453, 4454, 4455, 4456, 4467, 4468, 4469, 4470, 4471, 4472,
+      4745, 4763, 5125, 5288];
+    for (const it of items) {
+      const m = mountOfItem(it);
+      expect(m, `item ${it}`).toBeGreaterThanOrEqual(0);
+      expect(isCartMount(m), `item ${it} -> mount ${m}`).toBe(true);
+    }
+  });
+
+  it('默认矿车 = 木质车 13（Player.cs:22401 `int num4 = 13`）：参数/贴图/伤害档', () => {
+    expect(WOOD_CART_MOUNT).toBe(13);
+    expect(MOUNT_NAMES[String(13)]).toBe('MinecartWood');
+    expect(MOUNT_DATA['13'].runSpeed).toBe(10);
+    expect(MOUNT_DATA['13'].acceleration).toBe(0.03);
+    expect(MOUNT_DATA['13'].jumpHeight).toBe(12);
+    expect(DEFAULT_CART_TEXTURE).toBe('vanilla/Mount_MinecartWood.png');
+  });
+
+  it('逐型 hitbox：h = 42 + heightBoost（机械矿车 11 → 54，其余矿车 52）', () => {
+    const c6 = new Minecart();
+    c6.mountId = 6; c6.applyMountStats();
+    expect(c6.h).toBe(52);
+    const c11 = new Minecart();
+    c11.mountId = 11; c11.applyMountStats();
+    expect(c11.h).toBe(54);          // Mount.cs:1459-1465 heightBoost 12
+    expect(c11.w).toBe(20);
+    const c39 = new Minecart();
+    c39.mountId = 39; c39.applyMountStats();   // Digging Molecart：run 6/acc 0.02
+    expect(c39.runSpeed).toBe(6);
+    expect(c39.acceleration).toBeCloseTo(0.02, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// C. 物理算例（Player.cs:19530-19791 / 27031-27043）
+// ---------------------------------------------------------------------------
+describe('矿车物理算例', () => {
+  it('贴轨加速 0.04/tick，上限 maxRunSpeed 13（mounts[6]）', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    p.inputX = 1;
+    for (let t = 0; t < 400; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBe(13);
+    expect(cart.onTrackNow).toBe(true);
+  });
+
+  it('SuperCart 档：上限 20 / 加速 0.1（Mount.cs:371-379 + _shouldSuperCart）', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    cart.superCart = true;
+    p.inputX = 1;
+    for (let t = 0; t < 400; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.runSpeed).toBe(20);
+    expect(cart.vx).toBe(20);
+  });
+
+  it('木质车 13：加速 0.03/tick、上限 10', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p, game } = mountedCart(st, 9, 12, 13);
+    p.inputX = 1;
+    for (let t = 0; t < 2; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBeCloseTo(0.03, 5);
+    for (let t = 0; t < 400; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBe(10);
+  });
+
+  it('贴轨反推 = runSlowdown(runAcceleration) + runAcceleration = 0.08/tick（:26357）', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    p.inputX = -1;
+    cart.fixedUpdate(1 / 60, game);   // 首帧：vx 0 → -0.04（未超 runSlowdown 不吃反推）
+    expect(cart.vx).toBeCloseTo(-0.04, 5);
+    cart.vx = 5;
+    cart.fixedUpdate(1 / 60, game);   // 反推一帧：-(0.04 + 0.04)
+    expect(cart.vx).toBeCloseTo(5 - 0.08, 5);
+  });
+
+  it('无输入 |vx|≥1 贴轨不减速；|vx|<1 落地摩擦刹停（:19731/:19764）', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    cart.vx = 6;
+    for (let t = 0; t < 30; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBeCloseTo(6, 5);          // 保持
+    cart.vx = 0.5;
+    cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBeCloseTo(0.5 - 0.04, 5); // 贴轨摩擦 = runAcceleration
+    for (let t = 0; t < 30; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBe(0);                    // 刹停
+  });
+
+  it('加速轨道：trackBoost +4 并入后钳 ±maxRunSpeed（:27849 + :19530-19544）', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 2);
+    seg(st, 10, 12, 30);      // boostRight
+    seg(st, 11, 12, 1);
+    frameTrack(st, 9, 12, false);
+    const { cart, game } = mountedCart(st, 8, 12);
+    cart.vx = 12;
+    let boosted = false;
+    for (let t = 0; t < 100 && !boosted; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      boosted = cart.trackBoost !== 0;
+    }
+    expect(boosted).toBe(true);
+    expect(cart.vx).toBe(12);          // 本帧只记 trackBoost，速度未变
+    cart.fixedUpdate(1 / 60, game);    // 下帧并入 12+4 → 钳 13
+    expect(cart.vx).toBe(13);
+  });
+
+  it('斜坡起飞：cartRampTime 窗口内重力停摆（:27031-27037）', () => {
+    const st = new TileStore(60, 30);
+    seg(st, 10, 10, 16);   // L=BOTTOM、子段 2-7 RAMP_END → 向右上抛
+    const { cart, game } = mountedCart(st, 10, 10);
+    cart.vx = 8;
+    let launched = false;
+    for (let t = 0; t < 40 && !launched; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      launched = cart.cartRampTime > 0;
+    }
+    expect(launched).toBe(true);
+    expect(cart.cartRampTime).toBe(Math.trunc(Math.min(1, 8 / 13) * 20));  // :27841
+    const vyAtLaunch = cart.vy;
+    const rampAtLaunch = cart.cartRampTime;
+    cart.fixedUpdate(1 / 60, game);
+    // 起飞窗口：重力不加（vy 保持），只递减窗口计数
+    expect(cart.vy).toBeCloseTo(vyAtLaunch, 6);
+    expect(cart.cartRampTime).toBe(rampAtLaunch - 1);
+  });
+
+  it('水中减速：湿态 TrackCollision 速度 ×0.5（:27802-27806 num108）', () => {
+    const run = (wet: boolean): number => {
+      const st = new TileStore(80, 30);
+      line(st, 8, 12, 40);
+      const { cart, p, game } = mountedCart(st, 9, 12);
+      cart.vx = 6;
+      p.inWater = wet;
+      const x0 = cart.x;
+      for (let t = 0; t < 20; t++) cart.fixedUpdate(1 / 60, game);
+      return cart.x - x0;
+    };
+    const dry = run(false), wet = run(true);
+    expect(dry).toBeGreaterThan(0);
+    expect(wet).toBeGreaterThan(0);
+    expect(wet).toBeLessThan(dry * 0.75);   // 轨上位移约减半
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D. 脱轨链（Player.cs:26344-26360 onWrongGround + DryCollision + 摔伤）
+// ---------------------------------------------------------------------------
+describe('脱轨：落地面 / 刹车 / 下车 / 摔伤', () => {
+  /** 开放端轨道（8,12)-(10,12) + y=20 石板地面 */
+  function derailWorld(floorY = 20): { st: TileStore; world: World } {
+    const world = new World(40, floorY + 8, 42, 'cart-derail');
+    const st = world.store;
+    line(st, 8, 12, 2);
+    seg(st, 10, 12, 14);   // 右开放端（L=-1,R=1）
+    frameTrack(st, 9, 12, false);
+    for (let x = 4; x < 24; x++) st.setTile(x, floorY, STONE);
+    return { st, world };
+  }
+
+  it('开放端脱轨：抛出后落石板地面停住（不穿地、vy 归零）', () => {
+    const { st } = derailWorld(20);
+    const { cart, game } = mountedCart(st, 8, 12);
+    cart.vx = 8;
+    let landed = false;
+    for (let t = 0; t < 400 && !landed; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      landed = !cart.onTrackNow && cart.vy === 0 && cart.onWrongGround;
+    }
+    expect(landed).toBe(true);
+    expect(cart.mounted).toBe(true);
+    expect(cart.y).toBeGreaterThan(15 * TILE);          // 已落到 y=20 附近
+    expect(cart.y).toBeLessThan(20 * TILE);             // 未穿入石板
+    expect(cart.vy).toBe(0);
+  });
+
+  it('脱轨落地按方向键 → 下车（:26353-26355 TryDismount）', () => {
+    const { st } = derailWorld(20);
+    const { cart, p, game } = mountedCart(st, 8, 12);
+    cart.vx = 8;
+    let grounded = false;
+    for (let t = 0; t < 400 && !grounded; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      grounded = cart.onWrongGround;
+    }
+    expect(grounded).toBe(true);
+    const cartX = cart.x;
+    p.inputX = 1;                       // 方向键按下边沿
+    cart.fixedUpdate(1 / 60, game);
+    expect(cart.mounted).toBe(false);
+    expect(cart.dead).toBe(true);
+    expect(p.ridingCart).toBe(false);
+    expect(p.cart).toBeNull();
+    expect(p.x).toBe(cartX);            // 玩家留在车位
+  });
+
+  it('脱轨落地无输入：按 runSlowdown 0.2 刹车至停（:19731-19750）', () => {
+    const { st } = derailWorld(20);
+    const { cart, game } = mountedCart(st, 8, 12);
+    cart.vx = 8;
+    let grounded = false;
+    for (let t = 0; t < 400 && !grounded; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      grounded = cart.onWrongGround;
+    }
+    expect(grounded).toBe(true);
+    const v0 = cart.vx;
+    expect(v0).toBeGreaterThanOrEqual(1);
+    cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBeCloseTo(v0 - 0.2, 5);   // WRONG_GROUND_SLOWDOWN
+    for (let t = 0; t < 200; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBe(0);
+  });
+
+  it('脱轨高空落地摔伤：num10>25 → (num10-25)×10（:25005-25091）；矮落无伤', () => {
+    // 高落：轨道 y=12，石板 y=40 → 落点 tileY≈36，fallStart≈9 → num10≈27
+    const { st, world } = derailWorld(40);
+    expect(world.store.h).toBeGreaterThanOrEqual(44);
+    const { cart, p, game } = mountedCart(st, 8, 12);
+    cart.vx = 8;
+    let grounded = false;
+    for (let t = 0; t < 600 && !grounded; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      grounded = cart.onWrongGround;
+    }
+    expect(grounded).toBe(true);
+    const num10 = Math.trunc(cart.y / 16) - 12;
+    expect(num10).toBeGreaterThan(25);
+    expect(p.lastDamageCause?.kind).toBe('fell');
+    const dmg = (num10 - 25) * 10;
+    expect(p.hp).toBeLessThan(p.maxHp);
+    expect(p.maxHp - p.hp).toBe(dmg);
+
+    // 矮落对照（y=20 石板 → num10≈7 < 25）：无摔伤
+    const low = derailWorld(20);
+    const { cart: c2, p: p2, game: g2 } = mountedCart(low.st, 8, 12);
+    c2.vx = 8;
+    const hp0 = p2.hp;
+    for (let t = 0; t < 400; t++) c2.fixedUpdate(1 / 60, g2);
+    expect(p2.hp).toBe(hp0);
+    expect(p2.lastDamageCause?.kind).not.toBe('fell');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// E. 撞敌伤害（Player.cs:27225-27296 + GetMinecartDamage :28776-28822）
+// ---------------------------------------------------------------------------
+describe('矿车撞敌伤害', () => {
+  /** 固定随机（damageVar ±15% 取 +15% 档；暴击掷骰不中） */
+  function fixedRand(): void {
+    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+  }
+
+  function fakeEnemy(x: number, y: number, calls: HitCall[]): unknown {
+    return {
+      x, y, w: 20, h: 20, dead: false, iframes: 0, friendly: false,
+      hurt: (dmg: number, kx: number, _ky: number, _g: GameHooks, _ap: number, crit: boolean) => {
+        calls.push({ dmg, kx, crit });
+        return true;
+      },
+    };
+  }
+
+  function cartWithEnemy(mountId: number, vx: number, opts: {
+    hardMode?: boolean; expert?: boolean; superCart?: boolean; ex: number; ey: number;
+  }): { calls: HitCall[]; run: () => void } {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p } = mountedCart(st, 9, 12, mountId);
+    if (opts.superCart) cart.superCart = true;
+    const flags = {} as Record<string, boolean>;
+    if (opts.hardMode) flags.hardMode = true;
+    const world = {
+      store: st, flags,
+      isExpert: !!opts.expert,
+    } as unknown as World;
+    const calls: HitCall[] = [];
+    const game = mkHooks(st, p, world, [fakeEnemy(opts.ex, opts.ey, calls)]);
+    cart.vx = vx;
+    return { calls, run: () => cart.fixedUpdate(1 / 60, game) };
+  }
+
+  it('速度>4 命中：25+55×速比（DamageVar +15% 档）、击退 10+40×速比、免疫 30t', () => {
+    fixedRand();
+    const { calls, run } = cartWithEnemy(6, 13, { ex: 9 * 16, ey: 12 * 16 });
+    run();
+    expect(calls.length).toBe(1);
+    // base = 25+55×(13/13) = 80 → DamageVar +15% = 92；kb = 10+40×1 = 50
+    expect(calls[0].dmg).toBe(92);
+    expect(calls[0].kx).toBe(50);
+    expect(calls[0].crit).toBe(false);
+  });
+
+  it('速度≤4 不命中（:27224 velocity.Length() > 4 门）', () => {
+    const { calls, run } = cartWithEnemy(6, 4, { ex: 9 * 16, ey: 12 * 16 });
+    run();
+    expect(calls.length).toBe(0);
+  });
+
+  it('木质车 13 低伤害档 15+30×速比（:28809-28811 case 13）', () => {
+    fixedRand();
+    const { calls, run } = cartWithEnemy(13, 10, { ex: 9 * 16, ey: 12 * 16 });
+    run();
+    // base = 15+30×(10/10) = 45 → +15% = trunc(51.75) = 51
+    expect(calls[0].dmg).toBe(51);
+  });
+
+  it('SuperCart 伤害档 50+100×速比（:28814-28817）', () => {
+    fixedRand();
+    const { calls, run } = cartWithEnemy(6, 13, { superCart: true, ex: 9 * 16, ey: 12 * 16 });
+    run();
+    // base = 50+100×1 = 150 → +15% = trunc(172.5) = 172
+    expect(calls[0].dmg).toBe(172);
+  });
+
+  it('hardMode ×1.5 且 expertMode ×1.5（:28818-28822）', () => {
+    fixedRand();
+    const both = cartWithEnemy(6, 13, { hardMode: true, expert: true, ex: 9 * 16, ey: 12 * 16 });
+    both.run();
+    // 92 → ×1.5 = 138 → ×1.5 = 207
+    expect(both.calls[0].dmg).toBe(207);
+  });
+
+  it('命中盒按速度扩张：vx>1 右扩 15px、|vx|>10 再扩 10px（:27229-27244）', () => {
+    fixedRand();
+    // 敌怪在车左侧 18px（车盒外、扩张盒内）：vx=13 时命中
+    const fast = cartWithEnemy(6, 13, { ex: 9 * 16 + 2 - 25, ey: 12 * 16 });
+    const cartX = 9 * 16 + 2 - 10;   // 车左缘
+    void cartX;
+    fast.run();
+    expect(fast.calls.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F. 物品链（WorldGen.PlaceTile case 314 + Minecart.GetTrackItem）
+// ---------------------------------------------------------------------------
+describe('轨道物品链', () => {
+  it('placeStyle：2340→普通(-1) / 2492→压板 / 2739→加速（Item.cs + Minecart.cs:1492-1512）', () => {
+    const st = new TileStore(30, 20);
+    line(st, 8, 10, 1, 0);
+    expect(trackTypeOf(st.frameX[st.idx(8, 10)])).toBe(0);
+    line(st, 12, 10, 1, 1);
+    expect(trackTypeOf(st.frameX[st.idx(12, 10)])).toBe(1);
+    expect(st.frameX[st.idx(12, 10)]).toBe(20);   // _firstPressureFrame
+    line(st, 16, 10, 1, 2);
+    expect(trackTypeOf(st.frameX[st.idx(16, 10)])).toBe(2);
+    expect(st.frameX[st.idx(16, 10)]).toBe(31);   // _firstLeftBoostFrame
+    line(st, 20, 10, 1, 3);
+    expect(st.frameX[st.idx(20, 10)]).toBe(30);   // _firstRightBoostFrame
+  });
+
+  it('GetTrackItem 反查：普通 2340 / 压板 2492 / 加速 2739（Minecart.cs:1514-1523）', () => {
+    expect(trackItemId(1)).toBe(2340);
+    expect(trackItemId(20)).toBe(2492);
+    expect(trackItemId(21)).toBe(2492);
+    expect(trackItemId(30)).toBe(2739);
+    expect(trackItemId(31)).toBe(2739);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// G. 存档（SaveFile.ts frameX/frameY/flags 往返）
+// ---------------------------------------------------------------------------
+describe('矿车存档往返', () => {
+  it('轨道帧（含 0xFFFF 空后轨）与 superCart 旗标存读一致', () => {
+    const w = new World(32, 24, 42, 'cart-save');
+    line(w.store, 8, 10, 3);
+    // 手写一个分叉态：前平接后下行（frameY=4）
+    w.store.setTile(9, 10, TRACK, 1, 4);
+    (w.flags as Record<string, boolean>).superCart = true;
+    const p = new Player(100, 100, new Inventory());
+    const back = loadSave(saveGame(w, p, 0));
+    const st = back.world.store;
+    expect(st.frameX[st.idx(8, 10)]).toBe(w.store.frameX[w.store.idx(8, 10)]);
+    expect(st.frameX[st.idx(9, 10)]).toBe(1);
+    expect(st.frameY[st.idx(9, 10)]).toBe(4);
+    expect(st.frameY[st.idx(8, 10)]).toBe(0xFFFF);    // 空后轨 -1 往返
+    expect((back.world.flags as Record<string, boolean>).superCart).toBe(true);
+  });
+});

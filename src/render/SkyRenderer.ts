@@ -1200,40 +1200,53 @@ export class SkyRenderer {
    * 天空实体推进 + 绘制。由 Renderer 在群系背景（biomeBg）之后、世界实体变换之前调用
    * （原版 SkyManager「Ambience」天空层叠在 DrawBG 之上、tile 之前）。
    * 调度 1:1 AmbienceServer.Update :96-129：到期一次尝试（间隔 Next(600,7200)=10-120s），
-   * 选族走 pickAmbientFamily；Main.rand.Next(5)<3（60%）放宽次级条件。
+   * 选族走 pickAmbientFamily（全 17 族）；Main.rand.Next(5)<3（60%）放宽次级条件。
    */
   drawAmbience(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
     camX: number, camY: number, dtMs = 16.7): void {
     if (this.fx.surfaceY <= 0) return;   // 未进世界（fx 未注入）
     this.ambViewW = viewW;
+    this.ambViewH = viewH;
     const ticks = Math.max(1, Math.round(dtMs / (1000 / 60)));
     const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
+    const moonlord = this.moonLordPresent();   // :1362-1369 月总天空冲突 → Ambience 禁出
     for (let f = 0; f < ticks; f++) {
       this.ambFrame++;
       if (this.ambNextAttempt > 0) {
         this.ambNextAttempt -= 1;                                   // :100-104
-      } else {
+      } else if (!moonlord) {
         this.ambNextAttempt = 600 + Math.floor(Math.random() * 6600);  // :133 Next(600,7200)
         const a = this.amb;
         const fam = pickAmbientFamily({
           dayTime: a.dayTime, raining: a.raining, eclipse: a.eclipse, bloodMoon: a.bloodMoon,
           pumpkinMoon: a.moonEventKind === 2, snowMoon: a.moonEventKind === 1,
           zoneHallow: a.zoneHallow,
-          playerAtSkyHeight: a.playerY <= this.fx.surfaceY + 1600,   // :190-193
+          zoneDesert: !!this.frameCtx?.scene?.zoneDesert,           // :77
+          zoneBeach: !!this.frameCtx?.scene?.zoneBeach,             // :79
+          zoneJungle: !!this.frameCtx?.scene?.zoneJungle,           // :84
+          zoneCorrupt: !!this.frameCtx?.scene?.zoneCorrupt,         // :82
+          zoneCrimson: !!this.frameCtx?.scene?.zoneCrimson,         // :83
+          hardMode: this.hardMode(),                                // :61
+          windyDay: this.windyDay(),                                // Main.cs:2976
+          sunset: this.isSunset(),                                  // :39-46
+          tooWindyForButterflies: Math.abs(this.weatherRef?.windSpeedTarget ?? 0) >= 0.4,  // NPC.cs:6801
+          butterflyChanceLow: this.butterflyChanceLow(),            // :65
+          playerAtSkyHeight: a.playerY <= this.fx.surfaceY + 1600,  // :190-193
+          playerAtHellHeight: a.playerY >= (this.underworldLayerPx() - 100) * 16,  // :195-198
+          moonLordActive: moonlord,                                 // :1362-1369
           roll5: Math.floor(Math.random() * 5),
           pick: Math.random(),
         });
         if (fam) this.spawnAmbientFamily(fam, camX, camY);
       }
       for (const e of this.ambEntities) {
+        if (moonlord) this.ambientStartFadingOut(e, this.ambFrame); // :1383-1385 冲突即整体淡出
         this.stepAmbientEntity(e, this.ambFrame, wind);
         this.ambientEnvGate(e, this.ambFrame);
       }
       this.ambEntities = this.ambEntities.filter((e) => !e.dead);
     }
     if (!this.ambEntities.length) return;
-    if (!this.birdsTex) this.birdsTex = loadTex('Ambience_BirdsVShape.png');
-    if (!this.gastropodTex) this.gastropodTex = loadTex('Ambience_Gastropod.png');
     // atmo（Game.updateWeather 同公式，Main.cs:62622）——CommonDraw :76 color × atmo
     const atmo = Math.max(0, Math.min(1,
       (camY / 16 - (65 + 10 * (this.fx.worldW / 4200) ** 2)) / Math.max(1, this.fx.surfaceY / 16 / 5)));
@@ -1244,7 +1257,7 @@ export class SkyRenderer {
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (const e of this.ambEntities) {
-      const tex = e.kind === 'birds' ? this.birdsTex : this.gastropodTex;
+      const tex = this.ambTex(e.texKey);
       if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
       // GetDrawPositionByDepth :85-88：(Position-相机中心)×(1/depth, 0.9/depth)+相机中心
       const wx = (e.x - camX) / e.depth + camX;
@@ -1253,16 +1266,23 @@ export class SkyRenderer {
       const sy = wy - camY + viewH / 2;
       if (sx < -400 || sx > viewW + 400 || sy < -400 || sy > viewH + 400) continue;
       const fw = tex.naturalWidth, fh = tex.naturalHeight / e.rows;
-      const scale = 2.9 / e.depth;   // CommonDraw :79 scale = depthScale/Depth，各族 Draw 传 3-0.1
-      // GetColor：birds Lerp(bg,白,0.2)（:169-171 + BrightnessLerper 0.2）；
-      // gastropod Lerp(bg,(102,0,63),0.75)（:658 + Colors.cs:39）
+      const scale = (3 + e.depthScaleAdj) / e.depth;   // CommonDraw :79 + 各族 Draw depthScale 偏移
+      // GetColor（各族覆盖）：
+      //  常规 = Lerp(bg, 白, BrightnessLerper)（:165-168）；
+      //  gastropod = Lerp(bg, (102,0,63), 0.75)（:658 + Colors.cs:39）；
+      //  hellbats = Lerp(白, 灰, Depth/15)（:871，无 atmo 乘）
+      //  群系背景层 alpha 乘子（Vulture/Seagulls/Bats/EOC 族 ×bgAlphaFrontLayer）无对应态，按 1 近似（登记）
       let cr: number, cg: number, cb: number;
-      if (e.kind === 'birds') {
-        cr = sr + (255 - sr) * 0.2; cg = sg + (255 - sg) * 0.2; cb = sb + (255 - sb) * 0.2;
+      if (e.kind === 'gastropod') {
+        cr = sr + (102 - sr) * 0.75; cg = sg * 0.25; cb = sb + (63 - sb) * 0.75;
+      } else if (e.grayDepthFade) {
+        const k = Math.min(1, e.depth / 15);
+        cr = 255 + (128 - 255) * k; cg = cr; cb = cr;
       } else {
-        cr = sr + (102 - sr) * 0.75; cg = sg - sg * 0.75; cb = sb + (63 - sb) * 0.75;
+        const b = e.brightness;
+        cr = sr + (255 - sr) * b; cg = sg + (255 - sg) * b; cb = sb + (255 - sb) * b;
       }
-      const alpha = Math.min(1, e.opacity * atmo);
+      const alpha = Math.min(1, e.opacity * (e.grayDepthFade ? 1 : atmo));
       if (alpha <= 0.01) continue;
       ctx.save();
       ctx.globalAlpha = alpha;

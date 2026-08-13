@@ -78,6 +78,7 @@
 // 弹幕贴图：Projectile_{240,662,671,675,676,681,682,683,685,686,687}.png 已入
 //   sprites/vanilla 管线（见 shootD 上方注记）；658/673/674 三枚 0 伤效果弹无弹体
 //   （粒子降级）,速度/伤害/节拍 1:1。
+import { Entity } from './Entity';
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -2204,10 +2205,12 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       }
     }
   }
+  const preX = e.x;
   oldVel.set(e, { x: e.vx, y: e.vy });
   moveAndCollide(e, game.world, e.vx, e.vy);
   if (e.hitWall) e.vx = 0;
   if (e.onGround || e.hitHead) e.vy = 0;
+  if (Math.abs(e.x - preX) < 0.01) w107NoMove.add(e); else w107NoMove.delete(e);
 }
 
 // ---------------------------------------------------------------------------

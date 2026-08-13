@@ -67,7 +67,7 @@ const BIOME_PREFS: Record<number, Array<{ level: 'Love' | 'Like' | 'Dislike' | '
   54: [{ level: 'Like', biome: 'underground' }, { level: 'Dislike', biome: 'hallow' }],  // Clothier
   108: [{ level: 'Like', biome: 'hallow' }, { level: 'Dislike', biome: 'ocean' }],       // Wizard
   18: [{ level: 'Like', biome: 'hallow' }, { level: 'Dislike', biome: 'snow' }],         // Nurse
-  208: [{ level: 'Like', biome: 'hallow' }, { level: 'Dislike', biome: 'snow' }],        // Party Girl
+  208: [{ level: 'Like', biome: 'hallow' }, { level: 'Dislike', biome: 'underground' }], // Party Girl（PersonalityDatabasePopulator.cs:137-141 biome7=underground——曾误抄 snow）
   550: [{ level: 'Like', biome: 'hallow' }, { level: 'Dislike', biome: 'snow' }],        // Tavernkeep
   160: [{ level: 'Like', biome: 'mushroom' }],                                           // Truffle（仅 Like 一档）
 };

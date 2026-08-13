@@ -1040,19 +1040,33 @@ export class MountInstance {
         break;
       }
       case FRAME_RUNNING: {
-        // 跑动帧速率 = 水平速度（:4228-4262）；海盗船/暗黑魔法书族取速度比例
+        // 跑动帧速率 = 水平速度（:4228-4292）；海盗船/暗黑魔法书族取速度比例；
+        // Scutlix/圣诞坦克背向移动（flipDraw）时速率取负——帧倒放（:4245-4291）
         let rate = Math.abs(vx);
         if (this.type === 44) rate = Math.max(1, Math.abs(vx) * 0.25);
         if (this.type === 48) rate = Math.max(0.5, Math.hypot(vx, vy) * 0.125);
         if (this.type === 50) rate = Math.abs(vx) * 0.5;
+        if ((this.type === 9 || this.type === 46) && this.flipDraw) rate = -Math.abs(vx);
         this.frameCounter += rate;
-        if (this.frameCounter > (d.runningFrameDelay ?? 12)) {
-          this.frameCounter -= d.runningFrameDelay ?? 12;
-          this.frame++;
-        }
-        if (this.frame < (d.runningFrameStart ?? 0)
-          || this.frame >= (d.runningFrameStart ?? 0) + Math.max(1, d.runningFrameCount ?? 1)) {
-          this.frame = d.runningFrameStart ?? 0;
+        if (rate >= 0) {
+          if (this.frameCounter > (d.runningFrameDelay ?? 12)) {
+            this.frameCounter -= d.runningFrameDelay ?? 12;
+            this.frame++;
+          }
+          if (this.frame < (d.runningFrameStart ?? 0)
+            || this.frame >= (d.runningFrameStart ?? 0) + Math.max(1, d.runningFrameCount ?? 1)) {
+            this.frame = d.runningFrameStart ?? 0;
+          }
+        } else {
+          // 倒放（:4281-4291）：计数为负才回退帧，出界钳到组尾
+          if (this.frameCounter < 0) {
+            this.frameCounter += d.runningFrameDelay ?? 12;
+            this.frame--;
+          }
+          if (this.frame < (d.runningFrameStart ?? 0)
+            || this.frame >= (d.runningFrameStart ?? 0) + Math.max(1, d.runningFrameCount ?? 1)) {
+            this.frame = (d.runningFrameStart ?? 0) + Math.max(1, d.runningFrameCount ?? 1) - 1;
+          }
         }
         break;
       }
@@ -1108,14 +1122,27 @@ export class MountInstance {
         break;
       }
       case FRAME_DASHING: {
-        this.frameCounter += Math.abs(vx);
-        if (this.frameCounter > (d.dashingFrameDelay ?? 40)) {
-          this.frameCounter -= d.dashingFrameDelay ?? 40;
-          this.frame++;
-        }
-        if (this.frame < (d.dashingFrameStart ?? 0)
-          || this.frame >= (d.dashingFrameStart ?? 0) + Math.max(1, d.dashingFrameCount ?? 1)) {
-          this.frame = d.dashingFrameStart ?? 0;
+        // 冲刺帧速率（:4452-4480）：Scutlix 背向移动倒放，其余按 |vx|
+        const rate = this.type === 9 && this.flipDraw ? -Math.abs(vx) : Math.abs(vx);
+        this.frameCounter += rate;
+        if (rate >= 0) {
+          if (this.frameCounter > (d.dashingFrameDelay ?? 40)) {
+            this.frameCounter -= d.dashingFrameDelay ?? 40;
+            this.frame++;
+          }
+          if (this.frame < (d.dashingFrameStart ?? 0)
+            || this.frame >= (d.dashingFrameStart ?? 0) + Math.max(1, d.dashingFrameCount ?? 1)) {
+            this.frame = d.dashingFrameStart ?? 0;
+          }
+        } else {
+          if (this.frameCounter < 0) {
+            this.frameCounter += d.dashingFrameDelay ?? 40;
+            this.frame--;
+          }
+          if (this.frame < (d.dashingFrameStart ?? 0)
+            || this.frame >= (d.dashingFrameStart ?? 0) + Math.max(1, d.dashingFrameCount ?? 1)) {
+            this.frame = (d.dashingFrameStart ?? 0) + Math.max(1, d.dashingFrameCount ?? 1) - 1;
+          }
         }
         break;
       }
