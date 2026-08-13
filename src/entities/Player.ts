@@ -1925,6 +1925,21 @@ export class Player extends Entity {
       const feetLiq = world.store.liquid[world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 1) / TILE))];
       const landedInWater = feetLiq > 60 || this.inWater;
       if (landedInWater) { /* 落水缓冲：不计摔伤 */ }
+      else if (this.buffs.has(BuffType.Stoned)) {
+        // :25066-25075 石化摔伤：(格数-2)×20——无 25 格安全阈值、不吃翼/马掌/
+        // noFallDmg 豁免（分支独立于常规链）；幸存 ≤10% → event 8（:25071-25076）
+        if (fallTiles > 2) {
+          const dmg = Math.max(1, Math.round((fallTiles - 2) * 20));
+          this.lastDamageCause = { kind: 'fell' };
+          this.damage(dmg, this.cx, this.y - 10);
+          game.playSfx('hurt');
+          game.addDamageNumber(this.cx, this.y, dmg, false, '#FF5050');
+          if (!this.dead && this.hp > 0 && this.hp <= this.maxHp / 10) {
+            game.achievements?.handleSpecialEvent(8,
+              { statLifeMax: this.maxHp, statManaMax: this.maxMana });
+          }
+        }
+      }
       else if (fallTiles > 25 + this.equipStats.extraFall + (this.ridingMount ? this.mount.extraFall : 0)
         && !(this.equipStats.wing || this.hasHorseshoe || this.equipStats.noFallDmg)) {
         const safeT = 25 + this.equipStats.extraFall + (this.ridingMount ? this.mount.extraFall : 0);

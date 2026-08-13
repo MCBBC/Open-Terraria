@@ -13,6 +13,7 @@ import {
   drawBumper, drawBouncyBumper,
   DECOR_LEFT_DOWN, DECOR_RIGHT_DOWN, DECOR_BOUNCY_BUMPER, DECOR_REGULAR_BUMPER,
 } from '../world/MinecartTrack';
+import { cageFamilyOf, drawCageCell } from './CritterCage';
 
 type Frame = [number, number];
 
@@ -1044,6 +1045,16 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     dyOff -= num28;
   }
 
+  // ---- 小动物笼族（TileID.Sets.CritterCageLidStyle ≥ 0 的 64 张 + 360 金蝴蝶笼）：
+  //      动画帧行 + 首行格 CageTop 顶盖/本体下移 8px，详见 render/CritterCage.ts
+  //      （TileDrawing.cs:5730-5974 帧带 / :1670-1716 顶盖段 1:1）。
+  //      笼族非实心恒无坡面/半砖，先于坡面分支接管 ----
+  const cageFam = cageFamilyOf(sheet);
+  if (cageFam) {
+    drawCageCell(ctx, atlas, cageFam, r, x, y, fx, fy, px, py, dyOff, r.img.height);
+    return;
+  }
+
   // ---- 坡面/半砖分支(原版 TileDrawing.cs:1314-1361) ----
   const si = st.idx(x, y);
   const slope = st.slope[si];
@@ -1188,6 +1199,15 @@ const DRAW_Y_OFFSET: Record<number, number> = {
   528: -2, 529: -14, 530: 2, 543: 2, 547: 2, 548: 2, 552: 2, 560: 2, 564: 2, 565: 2, 568: 2,
   569: 2, 570: 2, 571: 2, 579: -2, 593: 2, 594: 2, 597: 2, 598: 2, 613: 2, 614: 2, 617: 2,
   621: 2, 622: 2, 624: 2, 636: -2, 638: -2, 646: -4, 654: 2, 656: -16, 700: 2, 701: -16, 705: 2,
+  // ---- 小动物笼族 65 张（GetTileDrawData 三段全设 tileTop=2：大笼组 :5746、小笼组
+  //      :5873、蝴蝶笼组 :5965）。旧表只收 275/285 两张，其余 63 张缺顶 2px——
+  //      配套 CritterCage.ts 的顶盖/帧行动画 ----
+  276: 2, 277: 2, 278: 2, 279: 2, 280: 2, 281: 2, 286: 2, 296: 2, 297: 2, 298: 2, 299: 2,
+  309: 2, 310: 2, 339: 2, 358: 2, 359: 2, 360: 2, 361: 2, 362: 2, 363: 2, 364: 2, 391: 2,
+  392: 2, 393: 2, 394: 2, 413: 2, 414: 2, 532: 2, 533: 2, 538: 2, 542: 2, 544: 2, 550: 2,
+  551: 2, 553: 2, 554: 2, 555: 2, 556: 2, 558: 2, 559: 2, 582: 2, 599: 2, 600: 2, 601: 2,
+  602: 2, 603: 2, 604: 2, 605: 2, 606: 2, 607: 2, 608: 2, 609: 2, 610: 2, 611: 2, 612: 2,
+  619: 2, 629: 2, 632: 2, 640: 2, 643: 2, 644: 2, 645: 2, 710: 2,
 };
 
 /** 条件型 tileTop（按帧变化,GetTileDrawData 原文条件;返回 null = 走静态表） */

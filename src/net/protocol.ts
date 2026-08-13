@@ -67,6 +67,11 @@ export const enum Msg {
   StrikeNPC = 42,      // 访客→房主（服务器定向转发）{u32 netId, i16 dmg, f32 kbx, f32 kby}
                        //   （原版 42=Unknown42：旧 StrikeNPC 槽位；注释曾误写 crit/kbDir/srcX/srcY——
                        //    实际线格式自 v3 起即为 dmg+击退两分量，2026-08 校正）
+  StrikePlayer = 44,   // C→S→定向转发（v7 PvP）：{u8 targetSlot, i16 rawDmg, i16 kbx, i16 kby,
+                       //   u16 weaponId, u8 flags(bit0=crit)}——近战 PvP 命中意向广播。
+                       //   权威模型=被打方本地结算（与 msg16 客户端权威 HP 同构）：
+                       //   攻击端只报意向，被打端过 InOpposingTeam 门禁后自行结算扣血，
+                       //   伪造包最多影响显示、无法强制扣血。武器 id 供死因文案（DeathSource.Player）
   NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----

@@ -11563,12 +11563,18 @@ export class Game implements GameHooks {
   petHidden = false;
   lightPetHidden = false;
 
-  /** 每帧宠物存续维护（UpdatePet :17147-17162 / UpdatePetLight :17164-17187） */
+  /** 每帧宠物存续维护（UpdatePet :17147-17162 / UpdatePetLight :17164-17187）。
+   *  光宠点光（Projectile light 族：Fairy 等 7 款照明宠物恒发光——近似暖光 1.1/1.0/0.85；
+   *  逐款色差登记二期） */
   private updatePets(): void {
-    const p = this.player;
     this.petFollower = this.updatePetSlot(0, !this.petHidden, this.petFollower);
     this.lightPetFollower = this.updatePetSlot(1, !this.lightPetHidden, this.lightPetFollower);
-    void p;
+    if (this.lightPetFollower && !this.lightPetFollower.dead) {
+      this.lighting.addLight(
+        Math.floor(this.lightPetFollower.cx / TILE), Math.floor(this.lightPetFollower.cy / TILE),
+        1.1, 1.0, 0.85,
+      );
+    }
   }
 
   private updatePetSlot(slot: 0 | 1, visible: boolean, cur: PetFollower | null): PetFollower | null {

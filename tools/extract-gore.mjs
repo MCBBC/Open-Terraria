@@ -323,26 +323,19 @@ function emitEntry(npcId, fields, line, gates, ai) {
   entries.get(npcId).push(f);
 }
 
-// ---------- 逻辑行扫描 ----------
-for (const { text: raw0, line: lineNo } of logical) {
-  let s = raw0;
-  // 1) 前导闭括号（跳过缩进）：弹栈 + 清 case 标签
-  const mClose = s.match(/^\s*\}+/);
-  const closes = mClose ? mClose[0].trim().length : 0;
-  if (closes) {
-    for (let k = 0; k < closes && stack.length; k++) stack.pop();
-    depth -= closes;
-    for (const k of [...caseAt.keys()]) if (k > depth) caseAt.delete(k);
-    s = s.slice(mClose[0].length);
-  }
-  const trimmed = s.trim();
-  if (!trimmed) continue;
+// ---------- 逻辑行扫描（词法括号走查：对象初始化器 `{`/尾随 `}` 也计 depth） ----------
+const LOOP_GUARD = { kind: 'loop', cond: null, types: null, exclude: null, bounds: null, life: null, gate: null, ai: null };
+for (const { text, line: lineNo } of logical) {
+  let i = 0;
+  let guard = pendingGuard;   // 跨行：守卫头与 `{` 分行的挂起上下文
+  pendingGuard = null;
 
-  // 2) 局部变量赋值流（声明与重赋值；供 `num + K` id 还原）
+  const plain = text.trim();
+  // 局部变量赋值流（声明与重赋值；供 `num + K` id 还原）
   {
     let m;
-    if ((m = trimmed.match(/^(?:int|float|double|byte|short|long|uint|var|bool|Vector2)\s+([A-Za-z_]\w*)\s*=\s*(.+?);$/))
-      || (m = trimmed.match(/^([A-Za-z_]\w*)\s*=(?![=>])\s*(.+?);$/))) {
+    if ((m = plain.match(/^(?:int|float|double|byte|short|long|uint|var|bool|Vector2)\s+([A-Za-z_]\w*)\s*=\s*(.+?);$/))
+      || (m = plain.match(/^([A-Za-z_]\w*)\s*=(?![=>])\s*(.+?);$/))) {
       if (!/^(if|for|while|switch|return|else)$/.test(m[1])) {
         const r = resolveChain(null);
         recordLocalAssign(m[1], m[2], lineNo, r.typeCtxId);
@@ -350,110 +343,154 @@ for (const { text: raw0, line: lineNo } of logical) {
     }
   }
 
-  // 3) 守卫头解析
-  let guard = null, caseLabel = undefined;
-  {
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '{') {
+      pushCtx(guard ?? null);
+      guard = null;
+      depth++;
+      i++;
+      continue;
+    }
+    if (c === '}') {
+      if (stack.length) stack.pop();
+      depth--;
+      for (const k of [...caseAt.keys()]) if (k > depth) caseAt.delete(k);
+      guard = null;
+      i++;
+      continue;
+    }
+    if (c === ' ' || c === '\t' || c === ';') { i++; continue; }
+
+    // 语句起点：守卫头 / case 标签 / 普通语句段
+    const rest = text.slice(i);
     let m;
-    if ((m = trimmed.match(/^(else\s+if|if)\s*\(/))) guard = makeGuard(m[1].replace(/\s+/g, ''), parenBody(trimmed, m[0].length - 1));
-    else if (/^else(\s|$)/.test(trimmed)) guard = makeGuard('else', 'else');
-    else if ((m = trimmed.match(/^switch\s*\(/))) guard = makeGuard('switch', parenBody(trimmed, m[0].length - 1));
-    else if ((m = trimmed.match(/^case\s+(.+?):/))) caseLabel = m[1].trim();
-    else if (/^default\s*:/.test(trimmed)) caseAt.set(depth, null);
-    else if (/^(for|foreach|while|do|try)\b/.test(trimmed)) guard = { kind: 'loop', cond: null, types: null, exclude: null, bounds: null, life: null, gate: null, ai: null };
+    let handled = true;
+    if ((m = rest.match(/^(else\s+if|if)\s*\(/))) {
+      const cond = parenBody(rest, m[0].length - 1);
+      guard = makeGuard(m[1].replace(/\s+/g, ''), cond);
+      i += m[0].length + cond.length + 1;
+    } else if ((m = rest.match(/^else\b/))) {
+      guard = makeGuard('else', 'else');
+      i += m[0].length;
+    } else if ((m = rest.match(/^switch\s*\(/))) {
+      const cond = parenBody(rest, m[0].length - 1);
+      guard = makeGuard('switch', cond);
+      i += m[0].length + cond.length + 1;
+    } else if ((m = rest.match(/^case\s+([^:]+):/))) {
+      const lbl = m[1].trim();
+      const e = evalIdExpr(lbl);
+      caseAt.set(depth, { label: lbl, types: e && e.kind === 'id' ? new Set([e.id]) : null });
+      i += m[0].length;
+    } else if ((m = rest.match(/^default\s*:/))) {
+      caseAt.set(depth, null);
+      i += m[0].length;
+    } else if ((m = rest.match(/^(for|foreach|while|do|try)\b/))) {
+      guard = LOOP_GUARD;
+      i += m[0].length;
+    } else {
+      handled = false;
+    }
+    if (handled) { if (!/[{]$/.test(rest) && guard && !text.slice(i).startsWith('{')) pendingGuard = null; continue; }
+
+    // 普通语句段：吃到顶层 ; { } 为止；段内提取 Gore.NewGore* 调用（此时 depth 即调用点深度）
+    let j = i, pd = 0;
+    const segStart = i;
+    while (j < text.length) {
+      const ch = text[j];
+      if (ch === '(') pd++;
+      else if (ch === ')') pd--;
+      else if (pd === 0 && (ch === ';' || ch === '{' || ch === '}')) break;
+      j++;
+    }
+    const seg = text.slice(segStart, j);
+    let from = 0;
+    for (;;) {
+      const at = seg.indexOf('Gore.NewGore', from);
+      if (at < 0) break;
+      from = at + 1;
+      const p = seg.indexOf('(', at);
+      if (p < 0) continue;
+      const callee = seg.slice(at, p);
+      if (!/^Gore\.NewGore(Perfect|Direct)?$/.test(callee)) continue;
+      handleGoreCall(callee, splitArgs(parenBody(seg, p)), lineNo);
+    }
+    guard = null;
+    i = j;
   }
-  if (caseLabel !== undefined) {
-    const e = evalIdExpr(caseLabel);
-    caseAt.set(depth, { label: caseLabel, types: e && e.kind === 'id' ? new Set([e.id]) : null });
+}
+// 行尾仍未消费的守卫（守卫头与 `{` 分行）挂到下一行
+if (pendingGuard === null) { /* 已在行首消费 */ }
+
+/** 单个 Gore.NewGore* 调用 → 表项 */
+function handleGoreCall(callee, args, lineNo) {
+  callsTotal++;
+  const a = namedArgs(args);
+  if (a.Position === undefined || a.Type === undefined) return;
+  const cc = caseAt.get(depth) ?? caseAt.get(depth - 1) ?? null;
+  if (process.env.GORE_DBG_LINE && lineNo === +process.env.GORE_DBG_LINE) {
+    console.error('[dbg] line', lineNo, 'depth', depth, 'stack', JSON.stringify(stack.map((c2) => c2?.cond)), 'case', cc?.label ?? null);
+  }
+  const r = resolveChain(cc ? { id: 0, kind: 'case', cond: `case ${cc.label}`, types: cc.types, exclude: null, bounds: null, life: null, gate: null, ai: null } : null);
+
+  if (r.gates.some((g) => g.includes('UsesPartyHat'))) { callsPartySkipped++; return; } // 派对帽专属
+  if (r.life === 'alive') { callsHitSkipped++; return; }                               // hit 段
+
+  const velFields = (() => {
+    const v = String(a.Velocity ?? 'velocity');
+    if (v === 'velocity') return {};
+    if (v === 'Vector2.Zero') return { vx: 0, vy: 0 };
+    let m;
+    if ((m = v.match(/^new Vector2\(\s*(-?[\d.]+)[fF]?\s*,\s*(-?[\d.]+)[fF]?\s*\)$/))) return { vx: +m[1], vy: +m[2] };
+    return { velExpr: v };
+  })();
+  const scaleFields = (() => {
+    const v = a.Scale;
+    if (v === undefined || v === '1f' || v === '1') return {};
+    let m;
+    if ((m = String(v).match(/^([\d.]+)[fF]?$/))) return { scale: +m[1] };
+    return { scaleExpr: String(v) };
+  })();
+  const posFields = a.Position === 'position' ? {} : { posExpr: String(a.Position) };
+  const perfect = callee === 'Gore.NewGorePerfect' ? { perfect: true } : {};
+  const base = { ...velFields, ...scaleFields, ...posFields, ...perfect };
+
+  let e = evalIdExpr(a.Type);
+  let perType = null;
+  if (e && e.kind === 'local') {
+    const res = resolveLocal(e, lineNo, r.typeCtxId, r.types);
+    if (res?.kind === 'perType') perType = res.per;
+    else if (res) e = res;
+    else e = null;
+  } else if (e && e.kind !== 'id' && e.kind !== 'range' && e.kind !== 'ids') {
+    e = null;
   }
 
-  // 4) 压栈（本行 '{'；守卫行无 '{' 时挂 pending 等下一行）
-  const opens = (trimmed.match(/\{/g) || []).length;
-  if (opens) {
-    for (let k = 0; k < opens; k++) pushCtx(k === 0 ? (guard ?? pendingGuard) : null);
-    depth += opens;
-    pendingGuard = null;
-  } else if (guard) {
-    pendingGuard = guard;
+  if (!r.types) {
+    defaultEntries.push({ line: lineNo, idExpr: String(a.Type), gates: r.gates });
+    return;
   }
+  const target = [...r.types].filter((t) => !r.exclude.has(t));
 
-  // 5) Gore.NewGore / NewGorePerfect / NewGoreDirect 调用
-  let searchFrom = 0;
-  for (;;) {
-    const at = trimmed.indexOf('Gore.NewGore', searchFrom);
-    if (at < 0) break;
-    searchFrom = at + 1;
-    callsTotal++;
-    const p = trimmed.indexOf('(', at);
-    if (p < 0) continue;
-    const callee = trimmed.slice(at, p);
-    if (!/^Gore\.NewGore(Perfect|Direct)?$/.test(callee)) continue;
-    const a = namedArgs(splitArgs(parenBody(trimmed, p)));
-    if (a.Position === undefined || a.Type === undefined) continue;
-    const cc = caseAt.get(depth) ?? caseAt.get(depth - 1) ?? null;
-    if (process.env.GORE_DBG_LINE && lineNo === +process.env.GORE_DBG_LINE) {
-      console.error('[dbg] line', lineNo, 'depth', depth, 'stack', JSON.stringify(stack.map((c) => c?.cond)), 'case', cc?.label ?? null);
+  if (perType) {
+    for (const t of target) {
+      const v = perType.get(t);
+      const f = Array.isArray(v) ? { ids: v, n: v.length }
+        : typeof v === 'object' ? { idMin: v.min, idMax: v.max, n: v.max - v.min + 1 }
+          : { id: v };
+      emitEntry(t, { ...base, ...f }, lineNo, r.gates, r.ai);
     }
-    const r = resolveChain(cc ? { id: 0, kind: 'case', cond: `case ${cc.label}`, types: cc.types, exclude: null, bounds: null, life: null, gate: null, ai: null } : null);
-
-    if (r.gates.some((g) => g.includes('UsesPartyHat'))) { callsPartySkipped++; continue; } // 派对帽专属
-    if (r.life === 'alive') { callsHitSkipped++; continue; }                               // hit 段
-
-    const velFields = (() => {
-      const v = String(a.Velocity ?? 'velocity');
-      if (v === 'velocity') return {};
-      if (v === 'Vector2.Zero') return { vx: 0, vy: 0 };
-      let m;
-      if ((m = v.match(/^new Vector2\(\s*(-?[\d.]+)[fF]?\s*,\s*(-?[\d.]+)[fF]?\s*\)$/))) return { vx: +m[1], vy: +m[2] };
-      return { velExpr: v };
-    })();
-    const scaleFields = (() => {
-      const v = a.Scale;
-      if (v === undefined || v === '1f' || v === '1') return {};
-      let m;
-      if ((m = String(v).match(/^([\d.]+)[fF]?$/))) return { scale: +m[1] };
-      return { scaleExpr: String(v) };
-    })();
-    const posFields = a.Position === 'position' ? {} : { posExpr: String(a.Position) };
-    const perfect = callee === 'Gore.NewGorePerfect' ? { perfect: true } : {};
-    const base = { ...velFields, ...scaleFields, ...posFields, ...perfect };
-
-    let e = evalIdExpr(a.Type);
-    let perType = null;
-    if (e && e.kind === 'local') {
-      const res = resolveLocal(e, lineNo, r.typeCtxId, r.types);
-      if (res?.kind === 'perType') perType = res.per;
-      else if (res) e = res;
-      else e = null;
-    } else if (e && e.kind !== 'id' && e.kind !== 'range' && e.kind !== 'ids') {
-      e = null;
-    }
-
-    if (!r.types) {
-      defaultEntries.push({ line: lineNo, idExpr: String(a.Type), gates: r.gates });
-      continue;
-    }
-    const target = [...r.types].filter((t) => !r.exclude.has(t));
-
-    if (perType) {
-      for (const t of target) {
-        const v = perType.get(t);
-        const f = Array.isArray(v) ? { ids: v, n: v.length }
-          : typeof v === 'object' ? { idMin: v.min, idMax: v.max, n: v.max - v.min + 1 }
-            : { id: v };
-        emitEntry(t, { ...base, ...f }, lineNo, r.gates, r.ai);
-      }
-      continue;
-    }
-    if (e && (e.kind === 'id' || e.kind === 'range' || e.kind === 'ids')) {
-      for (const t of target) emitEntry(t, { ...base, ...idFields(e) }, lineNo, r.gates, r.ai);
-      continue;
-    }
-    for (const t of target) emitEntry(t, { ...base, expr: String(a.Type) }, lineNo, r.gates, r.ai);
-    unresolved.push({
-      line: lineNo, expr: String(a.Type),
-      types: target.length > 6 ? `${target[0]}..${target[target.length - 1]}(${target.length})` : target.join('|'),
-    });
+    return;
   }
+  if (e && (e.kind === 'id' || e.kind === 'range' || e.kind === 'ids')) {
+    for (const t of target) emitEntry(t, { ...base, ...idFields(e) }, lineNo, r.gates, r.ai);
+    return;
+  }
+  for (const t of target) emitEntry(t, { ...base, expr: String(a.Type) }, lineNo, r.gates, r.ai);
+  unresolved.push({
+    line: lineNo, expr: String(a.Type),
+    types: target.length > 6 ? `${target[0]}..${target[target.length - 1]}(${target.length})` : target.join('|'),
+  });
 }
 
 // ============ 贴图尺寸表（出现过的 gore id） ============
