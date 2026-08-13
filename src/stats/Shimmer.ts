@@ -27,7 +27,7 @@
 //       Item.cs DefaultToCapturedCritter 提取 → src/data/vanilla-shimmer.json
 //       （312 物品对 + 114 NPC 对 + 15 NPC→物品 + 29 城镇变体 + 93 瓶中小动物 +
 //       CommonCoin/PostMoonlord）
-//   GAP 登记（未移植）：
+//   GAP 登记（已移植——原缺口逐项落地，保留条目作溯源）：
 //     - decraft 反 craft：已移植（vanillaRecipes 索引 + 本文件 decraft 段 + ItemDrop 分支；
 //       RecipeGroup 组代表并列错位已修：tools/extract-itemrare.mjs 工厂盲区
 //       （buyPrice/SetShopValues/标签列/扫描越界）修复后重提，value 2344→4256 条）
@@ -197,6 +197,9 @@ export interface DecraftPile { vid: number; stack: number }
 export interface DecraftOutcome {
   /** 返还垛（配方材料序；单垛 ≤9999，超额拆垛 = 原版逐垛独立 Item.NewItem :1913-1921） */
   piles: DecraftPile[];
+  /** 与 piles 等长的材料序号（1 基 = 原版 num7，:1900/1929-1936 逐材料递增）：
+   *  拆垛共享同一序号、炼金全蒸发的材料序号不空缺——散射速度按【材料】而非按垛 */
+  slots: number[];
   /** 原物品消耗量（次数 × createStack，:1927） */
   consumed: number;
   /** ≥2 材料 → 掉落物按序号抛撒（requiredItem[1].stack > 0，:1882） */
@@ -221,8 +224,11 @@ export function decraftOutcome(
     ? r.shimmer.map(([id, st]) => ({ id, stack: st }))
     : r.items;
   const piles: DecraftPile[] = [];
+  const slots: number[] = [];
+  let num7 = 0;                                 // :1900 材料序号，逐材料 +1（1 基）
   for (const e of entries) {
     if (e.id <= 0 || e.stack <= 0) break;      // :1898-1901 requiredItem 空位终止
+    num7++;
     let qty = times * e.stack;
     if (r.alchemy) {
       for (let u = qty; u > 0; u--) if (rand3() === 0) qty--;
@@ -231,10 +237,11 @@ export function decraftOutcome(
     while (qty > 0) {
       const chunk = Math.min(qty, 9999);       // :1913-1916
       piles.push({ vid: target, stack: chunk });
+      slots.push(num7);                        // 拆垛同序号（:1929-1936 同一 num7）
       qty -= chunk;
     }
   }
-  return { piles, consumed: times * r.createStack, spread: (r.items[1]?.stack ?? 0) > 0 };
+  return { piles, slots, consumed: times * r.createStack, spread: (r.items[1]?.stack ?? 0) > 0 };
 }
 
 /** Item.CanShimmer（Item.cs:49045-49061）全分支 1:1：

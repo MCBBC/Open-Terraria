@@ -31,6 +31,9 @@ const SAND_TILES = ids([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 40
 const DESERT_BIOME_SAND = ids([53, 397, 396, 400, 403, 401]);
 const SUNFLOWER = SHEET_MAP.get(27) ?? -1;
 const GRAVEYARD_TILES = ids([85]);
+/** HoneyBlockCount / PartyMonolithCount 计数源 tile（AggregateTileCounts cs:601/621） */
+const HONEY_BLOCK = SHEET_MAP.get(229) ?? -1;
+const PARTY_MONOLITH = SHEET_MAP.get(455) ?? -1;
 
 /** 器件帧态 tile（内部 id → sheet）：139 八音盒 / 207 喷泉 / 410·509 天塔柱 / 480 血月柱 */
 const FX_SHEET_IDS = new Map<number, number>();
@@ -111,6 +114,27 @@ export interface SceneFlags {
   /** HasSunflower（SceneMetrics.cs:594/626-630）：窗口内有向日葵 且 墓碑计数 ≤ GraveyardTileMin(16)。
    *  墓地压制向日葵的"快乐！"buff（Player.cs:25262-25265 授予链 → buff 146） */
   hasSunflower: boolean;
+  /** ---- CalculateZones cs:675-692 补齐（2026-08-13 复审）----
+   *  四墙 Zone 全部取中心格 wall（与 ZoneLihzhardTemple 同源）：
+   *  花岗岩 184/180、大理石 183/178、蜂巢 108/86、宝石洞 48-53——
+   *  原版消费 = Player.ZoneGranite 等（Player.cs:16552-16555，图鉴/出生表上下文），
+   *  本仓尚无消费端（登记：bestiary/刷怪上下文未接） */
+  zoneGranite: boolean;
+  zoneMarble: boolean;
+  zoneHive: boolean;
+  zoneGemCave: boolean;
+  /** BehindBackwall（cs:675）：中心格 wall>0——原版唯一消费 SceneState.cs:175
+   *  室外天气效应强度 ±0.005/t 逼近（BehindBackwall → -0.1），本仓天气渲染未接（登记） */
+  behindBackwall: boolean;
+  /** ShimmerTileCount（cs:601 = _liquidCounts[Shimmer]）：窗口内非实心格的微光
+   *  液格数（ScanTiles cs:361-366 只在 !active() 格计液）→ EnoughTilesForShimmer
+   *  ≥300 → ZoneShimmer（cs:708，另需 worldSurface+84<Y<maxTilesY-396 且非地牢）。
+   *  消费：TeleportPylons 微光传送塔、BGM。ZoneShimmer 位本仓未派生（登记） */
+  shimmerTileCount: number;
+  /** HoneyBlockCount（cs:601 = _tileCounts[229]）：消费 SceneState 蜂蜜块环境光效（登记） */
+  honeyBlockCount: number;
+  /** PartyMonolithCount（cs:621 = _tileCounts[455]）：消费生日派对视觉（登记） */
+  partyMonolithCount: number;
 }
 
 export const EMPTY_SCENE: SceneFlags = {
@@ -124,6 +148,8 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneUndergroundDesert: false, townNPCCount: 0,
   musicBoxStyle: -1, fountainColor: -1, monolithType: -1, bloodMoonMonolith: false, partyUp: false,
   hasSunflower: false,
+  zoneGranite: false, zoneMarble: false, zoneHive: false, zoneGemCave: false,
+  behindBackwall: false, shimmerTileCount: 0, honeyBlockCount: 0, partyMonolithCount: 0,
 };
 
 const countSet = (counts: Map<number, number>, set: Set<number>): number => {
@@ -149,13 +175,17 @@ export function scanScene(
   const tileX = Math.floor(centerX / 16);
   const tileY = Math.floor(centerY / 16);
 
-  // 169×124 采样窗口（SceneMetrics.ZoneScanSize；CenteredRectangle 半高 62 →
-  // Top=Y-62, Bottom=Y+62 排他 = -62..+61——曾 -61..+62 整体偏 +1,2026-08-13 对齐）
+  // 169×124 采样窗口（SceneMetrics.ZoneScanSize = (1920/16+49)×(1200/16+49)；
+  // CenteredRectangle(Utils.cs:936) Top=Y-124/2=Y-62、Bottom 排他 = Y+62 →
+  // Y-62..Y+61 整体向上偏 1 格（偶数尺寸窗口天然不对称，X 侧 169 奇数对称 ±84）
   const sx0 = Math.max(0, tileX - 84), sx1 = Math.min(w - 1, tileX + 84);
   const sy0 = Math.max(0, tileY - 62), sy1 = Math.min(h - 1, tileY + 61);
   const counts = new Map<number, number>();
   let sunflower = 0;
   let oceanSand = 0;
+  // 液量计数（ScanTiles cs:361-366）：只计 !active()（无实心 tile）格的液体，
+  // 实心格内液体不进 _liquidCounts——shimmerTileCount 的口径来源
+  let shimmerLiquid = 0;
   // 器件态累加器（SceneMetrics.cs:471-585 ScanEnums；后扫到者覆盖 = 原版逐格覆写语义）
   let mbStyle = -1, fountain = -1, monolith = -1, bloodMoonMono = false;
   const oceanTopY = (worldSurface + rockLevel) / 2 + 40; // oceanLevel（WorldGen.cs:4393）
@@ -163,7 +193,10 @@ export function scanScene(
   for (let y = sy0; y <= sy1; y++) {
     for (let x = sx0; x <= sx1; x++) {
       const i = st.idx(x, y);
-      if (!st.flags[i]) continue;
+      if (!st.flags[i]) {
+        if (st.liquid[i] > 0 && st.liquidType[i] === 4) shimmerLiquid++;
+        continue;
+      }
       const t = st.type[i];
       counts.set(t, (counts.get(t) ?? 0) + 1);
       if (t === SUNFLOWER) sunflower++;
@@ -187,11 +220,15 @@ export function scanScene(
     }
   }
 
-  // 聚合（AggregateTileCounts cs:636-664：互减前后各钳位一次——向日葵过剩使
+  // 聚合（AggregateTileCounts cs:588-664：互减前后各钳位一次——向日葵过剩使
   // evil/blood 为负时,漏前置钳位会把 holy 虚增(2026-08-13 审计修正)）
+  // 向日葵压制系数 num（cs:588-592）：-10；Main.infectedSeed（1.4.5 worldIsInfected
+  // 秘密种子）时 ×3 = 每株 -30。本仓 SeedFlags 预留位尚无种子映射 → 恒 ×1
+  const infectedSeed = !!world.seedFlags?.infectedSeed;
+  const sunflowerMul = infectedSeed ? -30 : -10;
   let holy = Math.max(0, countSet(counts, HOLY_TILES));
-  let evil = Math.max(0, countSet(counts, EVIL_TILES) + sunflower * -10);
-  let blood = Math.max(0, countSet(counts, BLOOD_TILES) + sunflower * -10);
+  let evil = Math.max(0, countSet(counts, EVIL_TILES) + sunflower * sunflowerMul);
+  let blood = Math.max(0, countSet(counts, BLOOD_TILES) + sunflower * sunflowerMul);
   const holyRaw = holy;
   holy -= evil; holy -= blood;
   evil -= holyRaw; blood -= holyRaw;
@@ -202,6 +239,10 @@ export function scanScene(
   const mushroom = countSet(counts, MUSHROOM_TILES);
   const meteor = countSet(counts, METEOR_TILES);
   const dungeonTiles = countSet(counts, DUNGEON_TILES);
+  // ShimmerTileCount/HoneyBlockCount/PartyMonolithCount（cs:601/621）
+  const shimmerTileCount = shimmerLiquid;
+  const honeyBlockCount = HONEY_BLOCK >= 0 ? (counts.get(HONEY_BLOCK) ?? 0) : 0;
+  const partyMonolithCount = PARTY_MONOLITH >= 0 ? (counts.get(PARTY_MONOLITH) ?? 0) : 0;
   // DesertSandTileCount（SceneMetrics L665：sand - oceanSand；oceanSand 在扫描循环内按 oceanDepths 逐格计）
   const desert = Math.max(0, countSet(counts, SAND_TILES) - oceanSand);
   // 墓碑族（L622-623）：GraveyardTileCount = _tileCounts[85] − _tileCounts[27]/2（下取整、负值钳 0）。
@@ -217,6 +258,12 @@ export function scanScene(
   const centerWall = st.inBounds(tileX, tileY) ? st.wall[st.idx(tileX, tileY)] : 0;
   const zoneDungeon = dungeonTiles >= DUNGEON_THRESHOLD && belowSurface && DUNGEON_WALLS.has(centerWall);
   const zoneDesert = desert >= DESERT_THRESHOLD;
+  // 四墙 Zone + BehindBackwall（cs:675/687-690）：全部取中心格 wall（与神庙 87 同源）
+  const zoneGranite = centerWall === 184 || centerWall === 180;
+  const zoneMarble = centerWall === 183 || centerWall === 178;
+  const zoneHive = centerWall === 108 || centerWall === 86;
+  const zoneGemCave = centerWall >= 48 && centerWall <= 53;
+  const behindBackwall = centerWall > 0;
 
   // oceanDepths（WorldGen.cs:10978-10988：y > oceanLevel 恒假；否则 x 距边 < beachDistance(380)）
   const oceanTop = (worldSurface + rockLevel) / 2 + 40;
@@ -256,5 +303,13 @@ export function scanScene(
     monolithType: monolith,
     bloodMoonMonolith: bloodMoonMono,
     partyUp,
+    zoneGranite,
+    zoneMarble,
+    zoneHive,
+    zoneGemCave,
+    behindBackwall,
+    shimmerTileCount,
+    honeyBlockCount,
+    partyMonolithCount,
   };
 }

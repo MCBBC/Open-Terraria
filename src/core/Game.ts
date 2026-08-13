@@ -2867,7 +2867,18 @@ export class Game implements GameHooks {
 
     // ---- 灯笼夜 UpdateTime（Main.cs:64429 = LanternNight.UpdateTime 每帧位）：
     //      真灯笼不再满足 LanternsCanPersist（血月/入侵/月总倒计时/刷出 Boss）即提前收场。
-    //      入夜 CheckNight / 黎明 CheckMorning 在下方昼夜事件 crossing 段触发 ----
+    //      入夜 CheckNight / 黎明 CheckMorning 在下方昼夜事件 crossing 段触发。
+    //      UpdateTime 尾段其余子系统处置（Main.cs:64427-64434，逐一核实）：
+    //      · CultistRitual.UpdateTime（:64427 / CultistRitual.cs:20-47）——真缺口：
+    //        地牢拜月教徒 437 自然重生计时（hardMode && downedGolemBoss && downedBoss3，
+    //        delay/recheck 每帧按 dayRate 递减，recheck 到 0 掷 TrySpawning(dungeonX/Y)）；
+    //        本仓 437 无自然出生入口，教徒链 437→438→439 仅 AI 移植（entities/Enemy.ts:788），
+    //        补齐需 delay/recheck 存档位 + 地牢锚 → 台账登记待移植
+    //      · CreditsRollEvent.UpdateTime（:64432）——月总死亡制作名单倒计时递减，
+    //        纯客户端演出数值（消费端 = 滤镜/联机包）→ 不适用
+    //      · PylonSystem.Update（:64434 / TeleportPylonsSystem.cs:29-42）——列表更新冷却
+    //        = int.MaxValue，实际语义 = 首帧建表 + TE 放置/拆除时 RequestImmediateUpdate
+    //        （:45-52）即时重建；本仓 TeleportPylons.ts:64 按需等价 → 不适用 ----
     LanternNight.updateTime(this.lanternCtx());
 
     // ---- Boss 逻辑 ----
@@ -2960,7 +2971,11 @@ export class Game implements GameHooks {
     // ---- 树苗生长（每 5 秒扫一次） ----
     if (this.tickCount % 300 === 0) this.growSaplings();
     // ---- 城镇 NPC 入驻评估（原版 Main.cs:65021 每 7200 tick 一轮；载入后 10s 首轮
-    //      ≈ UpdateTime_SpawnTownNPCs(forceUpdate)） ----
+    //      ≈ UpdateTime_SpawnTownNPCs(forceUpdate)）。
+    //      固定周期 = 原版语义，非偏差（:65032-65036 checkForSpawns++ 攒到
+    //      7200/worldUpdateRate 才评估，无随机化）；差异仅在相位锚——原版
+    //      StartNight/StartDay 双双清 checkForSpawns（:64711-64712/:64857-64858），
+    //      计数锚在昼夜切换点，本仓锚全局 tick，不影响入驻节奏 ----
     if (this.tickCount % 7200 === 600) this.updateTownNpcArrival();
     // ---- 昼夜事件（UpdateTime_StartNight :64817 / StartDay :64876 语义） ----
     {
@@ -3041,7 +3056,11 @@ export class Game implements GameHooks {
         }
         this.checkSeasonal();
         // 生日自然派对（BirthdayParty.CheckMorning→NaturalAttempt :62-143）：
-        // 派对女孩在场 + 冷却 + 1/10 → 在场 ≥5 NPC 时开生日派对
+        // 派对女孩在场 + 冷却 + 1/10 → 在场 ≥5 NPC 时开生日派对。
+        // RNG 消费点已接：原版 StartDay 序 = BirthdayParty.CheckMorning(:64853) 先于
+        // LanternNight.CheckMorning(:64854)（本仓两调用均在 DAWN 块内，掷骰走
+        // Math.random，无顺序敏感）；NaturalAttempt 另置 NPC.freeCake=true(:106) 未随置位
+        // ——消费端（ConditionalDialogue.cs:45-51 蛋糕对话/联机位）未移植，死位登记
         {
           const town = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead)
             .map((n) => (n as TownNPC).npcKey);
@@ -3098,6 +3117,22 @@ export class Game implements GameHooks {
         // 月晷冷却 -1（:64695-64697，使用时置 8 → 8 个夜晚后归零可再用）
         if (w.fastForwardTimeToDusk) w.fastForwardTimeToDusk = false;
         if (w.moondialCooldown > 0) w.moondialCooldown--;
+        // StartNight 头部其余杂项处置（:64699-64712，逐一核实）：
+        // · :64699-64702 !isThereAWorldSurface → spawnMeteor=false——isThereAWorldSurface
+        //   = worldSurface>50（Main.cs:2861），本仓生成器恒有地表（lanternCtx 旁
+        //   hasWorldSurface 同式判 groundLevel>50），守卫永不触发 → 跳过
+        // · :64703 ResetBadgerHatTime（NPC.cs:79740-79744）= EoCKilledToday/WoFKilledToday
+        //   清零（同日双杀 EoC+WoF 掉 Badger's Hat，NPC.cs:79800-79814）——掉落链未移植
+        //   → 台账登记
+        // · :64704 NPC.freeCake=false（生日派对开时置位，BirthdayParty.cs:106）——消费端
+        //   未移植，死位登记（见上方 DAWN 块 partyNaturalAttempt 注）
+        // · :64706 setFireFlyChance（NPC.cs:94557-94610：每夜掷萤火虫/蝴蝶/椿象生成概率，
+        //   1/3 的夜萤火虫直接归零）——消费端 VanillaSpawner 用固定代表值 30
+        //   （spawn/VanillaSpawner.ts:1968）→ 台账登记
+        // · :64710 mysticLogsEvent.StartNight（MysticLogFairiesEvent.cs:34-41：夜放仙女 +
+        //   全图扫原木桩）——仙女事件系统未移植 → 台账登记
+        // · :64711-64712 prioritizedTownNPCType=0/checkForSpawns=0——本仓入驻走
+        //   tickCount %7200 模型（上方注），无计数器可清 → 不适用
         // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
         // UpdateTime_StartNight 内位于血月 roll 之前）；
         // 成就：挺过日食（event 3，旗在清除前求值）
@@ -3117,7 +3152,10 @@ export class Game implements GameHooks {
         this._skyMeteorShown = false;
         // 陨石入夜 roll（StartNight :64713-64716：1/50 且 downedBoss2）。
         // 审计修正 2026-08-13:原版该 roll 在 stopEvents 置位(:64717)之前——
-        // 灯笼夜不压制陨石(曾加 !lanternsUp 门,偏离原版)
+        // 灯笼夜不压制陨石(曾加 !lanternsUp 门,偏离原版)。
+        // 台账「陨石落地系统未实装」已过期:落地 1:1 已接(本文件下方
+        // HandleMeteorFall 消费块 dropMeteor+陨石雨),另有 EoW/BoC 击杀置位
+        // (NPC.cs:80241-80259,Boss 逻辑块)双链路
         if (Math.random() < 1 / 50 && (w.flags['downed_13'] || w.flags['downed_266'])) {
           this.meteorPending = true;
         }
@@ -3758,7 +3796,15 @@ export class Game implements GameHooks {
   private heldUseStyle(def: (typeof ITEM_DEFS)[number] | null): number {
     if (!def) return 1;
     const vid = def.vid ?? viIdFromKey(def.key);
-    if (vid >= 0) return itemFuncOfVid(vid)?.useStyle ?? 1;
+    if (vid >= 0) {
+      const us = itemFuncOfVid(vid)?.useStyle;
+      if (us) return us;
+      // itemfunc 提取缺口推断:细剑/短剑族(shoot→aiStyle 161)useStyle=13
+      // (SetDefaults1(6) 模板,Item.cs:1379)——缺失时回退 1 会画成普通挥砍姿势
+      const sh = itemCombat(vid)?.shoot ?? 0;
+      if (sh && projectileData(sh)?.aiStyle === 161) return 13;
+      return 1;
+    }
     if (def.potion || def.heal) return 9; // 治疗类（仅标 heal 的残余占位）
     return 1;
   }
@@ -4218,13 +4264,18 @@ export class Game implements GameHooks {
     //  路由——4 举过头（镜子/机械三王召唤）/5 朝鼠标静持（火把族非放置路径）/
     //  9 举杯（增益药水 DefaultToHealingPotion）/2 咀嚼（食物 DefaultToFood）/
     //  6 饮用旋转（回归药水）；此前的统一 30t 挥砍对 395 件 4/5/9 族全错族）
-    // （召唤武器例外——交给下方 cw 分发 kind='summon'；spear/yoyo/flail/boomerang 四族
-    //  原版 noUseGraphic=true（Item.cs case 220 等,DefaultToSpear :47637 全 202 处）——
-    //  投射物即本体,此处再画持物 = 角色旁多出一个静态武器图标,一并排除）
+    // （召唤武器例外——交给下方 cw 分发 kind='summon'；yoyo/flail/boomerang 与
+    //  长矛(aiStyle 19)族原版 noUseGraphic=true（Item.cs case 220 等,DefaultToSpear
+    //  :47637 全 202 处）——投射物即本体,此处再画持物 = 角色旁多出一个静态武器图标。
+    //  ★短剑族(aiStyle 161)noUseGraphic 未设=false——使用期间【必须画手持剑】
+    //  (SetDefaults1(6) 模板无 noUseGraphic),此前随 spear 整族误排除 = 玩家空手+
+    //  剑贴图独立飞出 = "抛出"观感,2026-08-13 铜短剑报告根因）
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
-      && cw?.kind !== 'summon' && cw?.kind !== 'spear' && cw?.kind !== 'yoyo'
-      && cw?.kind !== 'flail' && cw?.kind !== 'boomerang') {
-      this.useSwing(heldDef);
+      && cw?.kind !== 'summon' && cw?.kind !== 'yoyo'
+      && cw?.kind !== 'flail' && cw?.kind !== 'boomerang'
+      && !(cw?.kind === 'spear' && projectileData(cw.shoot)?.aiStyle === 19)) {
+      // aim 朝鼠标角——useStyle 13(短剑突刺持位)/5 静持需方向化(Renderer case 13)
+      this.useSwing(heldDef, Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2));
       // 召唤道具（原版左键使用）
       if (viIdFromKey(heldDef.key) === 43) {
         if (!this.world.clock.isDay) {
@@ -4578,9 +4629,15 @@ export class Game implements GameHooks {
         let pen = projectileData(tc.shoot)?.penetrate ?? 1;
         if (pen < 0) pen = 6;
         pen = Math.max(1, Math.min(pen, 6));
+        // 物理档 = aiStyle 2 投掷族默认档（Projectile.cs:21955-21977）：前 20t
+        // 平飞 → vy+0.4/vx×0.97/tick，终端 32；全体翻滚（:21508），刀族
+        // （48/54/93/520/599）平飞期姿态锁定 atan2（:21971-21972）。此前误用
+        // 箭矢档（出生即 0.3 重力/无阻力/终端 16）→ 投掷距离偏短
+        const THROWN_POSE_LOCK = new Set([48, 54, 93, 520, 599]);
         const thrownArrow = new Arrow(px, py,
           Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
-          dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key, { pierce: pen });
+          dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key,
+          { pierce: pen, grav: 0.4, gravDelay: 20, drag: 0.97, maxFall: 32, tumble: true, tumblePoseLock: THROWN_POSE_LOCK.has(tc.shoot) });
         thrownArrow.frostEligible = true; // 投掷并入 melee(:93712 门含 melee)
         thrownArrow.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6 + ⑧ crt；投掷=ranged 族（§5）
         thrownArrow.armorPen = this.player.equipStats.armorPen + (psT?.arpen ?? 0); // ⑥+⑧
@@ -8251,7 +8308,7 @@ export class Game implements GameHooks {
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
       const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1);
-      const killed = e.hurt(dmg, kdir * kb, -2.5, this, this.player.equipStats.armorPen + this.player.meleeArmorPen); // ⑥ 减防语义
+      const killed = e.hurt(dmg, kdir * kb, -2.5, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit); // ⑥+击退管线 crit×1.4
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
       if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
@@ -8262,7 +8319,7 @@ export class Game implements GameHooks {
       if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
       if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
       // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
-      applyFrostBurn(this.player.equipStats.frostBurn, e);
+      applyFrostBurn(this.player.equipStats.frostBurn, e as unknown as Record<string, number>);
       if (this.player.buffs.has(BuffType.ImbueParty)) {
         this.spawnParticles(e.cx, e.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 });
       }
@@ -8332,7 +8389,7 @@ export class Game implements GameHooks {
         lunar = { zone, counts: moonCounts };
       }
     }
-    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx, lunar, this.player.maxHp);
+    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck);
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
     this.vanillaSpawner.setWeather(
       w.weather.cloudAlpha,
@@ -9345,6 +9402,10 @@ export class Game implements GameHooks {
     // 复合门（extract-shops.mjs parseGate：嵌套 if 的全部开门按 '&&' 连接，
     // 如 `hardMode && ZoneGraveyard`——外层与内层同时成立才上架）
     if (cond.includes('&&')) return cond.split('&&').every((c) => this.shopCondOk(c));
+    // 取反 token（extract-shops.mjs else-if 互斥链生成，如 '!zoneGraveyard&&day'
+    // = 非墓地白天）：Chest.SetupShop 的 else-if 分支只在全部前支不成立时执行。
+    // 未知 token 取反同样 false（无法证明成立 → 保守不上架，与正向 default 同策略）
+    if (cond.startsWith('!')) return !this.shopCondOk(cond.slice(1));
     const f = this.world.flags;
     switch (cond) {
       case 'hardMode': return !!f.hardMode;
@@ -9384,6 +9445,7 @@ export class Game implements GameHooks {
   private lanternCtx() {
     const w = this.world;
     return {
+      dayTime: !!w.clock.isDay,   // Main.dayTime（LanternsCanPersist :52 白天恒 false）
       bloodMoon: !!w.clock.bloodMoon,
       pumpkinMoon: w.moonEvent.kind === MOON_KIND_PUMPKIN,
       snowMoon: w.moonEvent.kind === MOON_KIND_FROST,
@@ -11349,12 +11411,15 @@ export class Game implements GameHooks {
       const room = 1_000_000_000 - this.player.golferScoreAccumulated;
       this.player.golferScoreAccumulated += Math.min(score, Math.max(0, room));
     }
-    // PutBallInCup_TextAndEffects（:117-135）：>0 杆才有公告；单/复数键切换
+    // PutBallInCup_TextAndEffects（:117-135）：>0 杆才有公告；单/复数键切换。
+    // 参数序 = (玩家名, 球名, 杆数)（:127/:131 NetworkText.FromKey）
     if (swings !== 0) {
       this.sfx.play('tink', 0.9, ball.cx, ball.cy);                // Item129 进洞音（:168）
-      this.newText(Lang.text(
-        swings === 1 ? 'Game.BallBounceResultGolf_Single' : 'Game.BallBounceResultGolf_Plural',
-        ball.swings, score), 255, 240, 20);
+      const ballName = Lang.projectileName(ball.projId) ?? '';
+      this.newText(swings === 1
+        ? Lang.text('Game.BallBounceResultGolf_Single', this.playerName(), ballName)
+        : Lang.text('Game.BallBounceResultGolf_Plural', this.playerName(), ballName, swings),
+      255, 240, 20);
     }
     this.golfState.resetScoreTime();                               // :106
     this.wiring?.hitSwitch(tileX, tileY);                          // :107（msg59 单机无对端）

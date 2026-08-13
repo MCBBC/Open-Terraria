@@ -38,6 +38,9 @@ export class ItemDrop extends Entity {
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
   pickup?: 'heart' | 'star';
+  /** 原版 Item.noGrabDelay：玩家主动抛出的物品 =100t（Player.cs:4990/:4996
+   *  DropSelectedItem），期间抛出者拾不回；普通战利品 0（走全局 PICKUP_DELAY） */
+  noGrabDelay = 0;
   // ---- 微光（WorldItem.cs:25-27/434/486-558/806-840/1781-1931）----
   /** 浸在微光中（Collision.shimmer 盒命中，:434/:944） */
   shimmerWet = false;
@@ -63,7 +66,7 @@ export class ItemDrop extends Entity {
 
     const player = (game as unknown as { player: Player }).player;
     let beingGrabbed = false;
-    if (player && !player.dead && this.age > PICKUP_DELAY) {
+    if (player && !player.dead && this.age > PICKUP_DELAY && this.age > this.noGrabDelay) {
       // 原版 GrabItems(Player.cs:34461-34524):hitbox 相交=直接拾取;
       // 否则玩家盒 ±42px(defaultItemGrabRange :2406)扩展盒相交=拉取；
       // 宝藏磁石(+94)/金戒指族(+12)扩展范围（Player.grabRangeBonus 聚合）
@@ -341,7 +344,10 @@ export class ItemDrop extends Entity {
     outcome.piles.forEach((p, k) => {
       const key = VANILLA_ITEM_KEY_BY_ID[p.vid];
       if (!key) return;
-      const n = k + 1;   // 原版 num7 自 1 起（:1881/1929-1936）
+      // 散射序号按【材料】递增（原版 num7，:1900/1929-1936）而非按垛：超额拆垛
+      // 共享同一序号、炼金全蒸发的材料序号不空缺——曾 k+1 按垛计数，拆垛后
+      // 续材料的散射速度整体错档
+      const n = outcome.slots[k];
       let vx = this.vx * 0.1;
       if (outcome.spread) vx = n * (1 + n * 0.05) * (n % 2 === 0 ? -1 : 1);
       const d = game.spawnDrop(this.cx, this.cy, key, p.stack, vx, this.vy * 0.1);

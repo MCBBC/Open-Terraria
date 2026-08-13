@@ -578,6 +578,13 @@ export class Enemy extends Entity {
   onFire3T = 0;      onFire3DoT = 0;
   shadowFlameT = 0;  shadowFlameDoT = 0;
   oiledT = 0;
+  /** BrokenArmor(36)=受击无视 20 防 / BetsysCurse(203)=无视 40 防
+   *  (NPC.cs:81919-81924 armorPenetration += 20/40);Daybreak(189) 单层近似
+   *  (原版层数模型:场上 636 太阳耀斑数 num8,DoT=num8×200 lifeRegen=100HP/s/层,
+   *  repo 无 636 实体,取单层 num8=1——层数叠加登记 GAP) */
+  brokenArmorT = 0;
+  betsysCurseT = 0;
+  daybreakT = 0;  daybreakDoT = 0;
   poisonDoT = 0;
   venomDoT = 0;
   cursedDoT = 0;
@@ -920,8 +927,9 @@ export class Enemy extends Entity {
     if (this.inWater && !this.lavaWet) this.onFireT = 0;
     // 微光接触（NPC.cs:94268-94274）：WetCollision 盒命中微光 → shimmerWet +
     // TryAddingRepeatedBuff(353,100)；buff 353 → shimmering（:93313-93321）→
-    // shimmerTransparency +0.01/t（:92468-92483）>0.9 → GetShimmered。离池衰减
-    // （:92484-92500）视觉侧未接（GAP），此处只保留转化触发计时。
+    // shimmerTransparency +0.01/t（:92468-92483）>0.9 → GetShimmered；离池衰减
+    // :92484-92500 一并 1:1（见下），视觉渐隐侧未接（GAP：shimmerTransparency
+    // 渲染消费）。
     // 入口门（NPC.cs:17773）：buffImmune[353] = ShimmerImmunity[type]——免表 NPC
     // （史莱姆王/石巨人/史莱姆皇后/城镇宠物/事件军…，isNpcShimmerImmune）不进
     // shimmering；非免表 Boss（克苏鲁之眼 4 等）原版照进，GetShimmered 无表项
@@ -931,7 +939,10 @@ export class Enemy extends Entity {
         this.shimmerT += 1;
         if (this.shimmerT > 90) this.npcGetShimmered(game);
       } else if (this.shimmerT > 0) {
-        this.shimmerT -= 1;
+        // 离池衰减（:92484-92500）：shimmerTransparency -0.001/t（本仓 shimmerT
+        // 为其 ×100 计数 → -0.1/t，90 → 0 需 900t；justHit -0.1、buffImmune[353]
+        // -0.015 两加速项本仓无对应态不进）。曾 -1/t（快 10 倍，离池即近乎清零）
+        this.shimmerT = Math.max(0, this.shimmerT - 0.1);
       }
     }
     // onFire DoT（NPC.cs:92619:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
@@ -965,9 +976,13 @@ export class Enemy extends Entity {
     if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += 15 * dt * oiledMul; }
     if (this.shadowFlameT > 0) { this.shadowFlameT -= dt; this.shadowFlameDoT += 15 * dt * oiledMul; }
     if (this.oiledT > 0) this.oiledT -= dt;
+    if (this.brokenArmorT > 0) this.brokenArmorT -= dt;
+    if (this.betsysCurseT > 0) this.betsysCurseT -= dt;
+    if (this.daybreakT > 0) { this.daybreakT -= dt; this.daybreakDoT += 100 * dt; } // 单层 100HP/s
     for (const [tKey, dKey] of [['poisonT', 'poisonDoT'], ['venomT', 'venomDoT'], ['cursedT', 'cursedDoT'],
       ['frostburnT', 'frostburnDoT'], ['frostburn2T', 'frostburn2DoT'],
-      ['onFire3T', 'onFire3DoT'], ['shadowFlameT', 'shadowFlameDoT']] as const) {
+      ['onFire3T', 'onFire3DoT'], ['shadowFlameT', 'shadowFlameDoT'],
+      ['daybreakT', 'daybreakDoT']] as const) {
       const acc = this[dKey];
       if (acc >= 1) {
         const n = Math.floor(acc);
@@ -4654,7 +4669,7 @@ export class Enemy extends Entity {
   }
 
   /** 受击。返回是否死亡 */
-  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0): boolean {
+  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false): boolean {
     // Critter 兼容：critters 桶的调用方按 Critter.hurt(game) 单参调用；
     // 原版小动物是 Enemy 进该桶，这里把 Game 对象重映射回 game 参、伤害取固定 5
     if (typeof dmg === 'object' && dmg !== null) {
@@ -4694,7 +4709,9 @@ export class Enemy extends Entity {
     // 负防御(EoC P2 专家 -15/-30、诸 Boss 狂暴态)按原版直算式应为【增伤】;
     // 此前 Math.max(0,…) 把负值钳成 0 吞掉加伤(2026-08-13 对齐)。armorPen 只削
     // 非负防御(min 内侧钳 0),不与负防御交互
-    const effDef = effDef0 - Math.min(armorPen, Math.max(0, effDef0));
+    // buff 侧无视防(NPC.cs:81919-81924):BrokenArmor +20 / BetsysCurse +40 armorPenetration
+    const buffPen = (this.brokenArmorT > 0 ? 20 : 0) + (this.betsysCurseT > 0 ? 40 : 0);
+    const effDef = effDef0 - Math.min(armorPen + buffPen, Math.max(0, effDef0));
     dmg = Math.max(1, Math.round(dmg - effDef * 0.5 + pen));
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
@@ -4702,8 +4719,23 @@ export class Enemy extends Entity {
     this.hp -= dmg;
     this.iframes = 8;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
-    // 击退抗性方向修正（N:82144-82239 vx=num3×dir×resist——resist 是"接受的击退
-    // 比例"而非"抵抗比例"：0=免疫（Boss）1=全额。曾 (1-resist) 反向——Boss 被推飞）
+    // 击退管线（N:82144-82236 1:1）：五段软封顶 8/10/12/14/16（超出段 ×0.9/0.8/
+    // 0.7/0.6/钳 16）+ 地狱火(onFire2,onFireT 代)×1.1 + 暴击×1.4 + 小丑 185×1.5。
+    // ★调用侧遗留的 0.65 系数待全量清扫后此管线即完整 num3 语义（登记）
+    let imp = Math.hypot(kbx, kby);
+    if (imp > 0) {
+      if (this.onFireT > 0) imp *= 1.1;
+      if (imp > 8) imp = 8 + (imp - 8) * 0.9;
+      if (imp > 10) imp = 10 + (imp - 10) * 0.8;
+      if (imp > 12) imp = 12 + (imp - 12) * 0.7;
+      if (imp > 14) imp = 14 + (imp - 14) * 0.6;
+      if (imp > 16) imp = 16;
+      if (crit) imp *= 1.4;
+      if (this.vanillaId === 185) imp *= 1.5;
+      const f = imp / Math.hypot(kbx, kby);
+      kbx *= f; kby *= f;
+    }
+    // 击退抗性方向（N:82144 resist=接受比例：0=免疫 Boss 1=全额——曾反向）
     const resist = this.def.knockbackResist;
     if (resist < 0.9) {
       this.vx += kbx * resist;

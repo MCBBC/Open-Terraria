@@ -11,10 +11,10 @@ import { BuffType } from '../stats/Buffs';
 interface StatusEntry { buff: number; chance: number; durMin: number; durMax: number; mut?: number }
 const TABLE = tableJson as unknown as Record<string, StatusEntry[]>;
 
-/** Enemy 侧已实装的 buff 字段(秒)。GAP:30 Bleeding/36 BrokenArmor/137 Slimed/
- *  151 SoulDrain/169 BoneJavelin/183 StardustBleed/189 Daybreak(层数模型)/203 BetsysCurse/
- *  337 TentacleSpike/344 BloodButcherer/375 Hemorrhage——Enemy 无对应 DoT/减益字段,
- *  命中静默跳过(表数据完整,字段补齐后自动生效) */
+/** Enemy 侧已实装的 buff 字段(秒)。GAP:30 Bleeding(禁回血——repo 敌不回血,
+ *  天然等效)/137 Slimed(摩擦减速)/151 SoulDrain(陷阱吸血)/169 BoneJavelin/
+ *  183 StardustBleed/337 TentacleSpike/344 BloodButcherer/375 Hemorrhage——
+ *  低频或需专属机制,命中静默跳过(表数据完整) */
 const SUPPORTED: Record<number, string> = {
   24: 'onFireT',     // On Fire!(NPC.cs:92619 lifeRegen-8 = 4 HP/s)
   20: 'poisonT',     // Poisoned(-12 → 6 HP/s,:92590)
@@ -28,6 +28,9 @@ const SUPPORTED: Record<number, string> = {
   323: 'onFire3T',     // OnFire3(-30 → 15 HP/s)
   153: 'shadowFlameT', // ShadowFlame(-30 → 15 HP/s)
   204: 'oiledT',       // Oiled:六火系 DoT 翻倍(NPC.cs:93728)
+  36: 'brokenArmorT',  // BrokenArmor:受击无视 20 防(:81919)
+  203: 'betsysCurseT', // BetsysCurse:受击无视 40 防(:81922)
+  189: 'daybreakT',    // Daybreak:单层 100 HP/s(层数模型登记 GAP)
 };
 
 type StatusEnemy = { [field: string]: number | undefined };

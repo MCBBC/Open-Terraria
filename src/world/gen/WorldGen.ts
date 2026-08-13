@@ -621,7 +621,8 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   const oceanTreasures = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
   // 原版注册序 Pyramids(15426) < LivingTrees(15551) < LivingTreeWalls(15792) <
-  // SurfaceWaterInJungle(15887)——世界树插在金字塔后、丛林灌水前（方案 A 原版位置）。
+  // DemonAndCrimsonAltars(15825) < SurfaceWaterInJungle(15887)——世界树插在金字塔后、
+  // 丛林灌水前（方案 A 原版位置）；全图祭坛独立 pass 卡在活木墙与灌水之间。
   // LivingTrees：GrowLivingTree 树干壳+枝叶+根系+贯通竖井+密室宝箱；LivingTreeWalls：
   // 全图 type==191 连通核补墙 244（零掷骰）。
   runLivingTreesPass(store, rng, gs, world.chests);  // Living Trees(世界树)

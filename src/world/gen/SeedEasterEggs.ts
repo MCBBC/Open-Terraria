@@ -12,6 +12,9 @@ export interface SeedFlags {
   everything?: boolean;      // getfixedboi（组合种子）
   skyblock?: boolean;        // 1.4.5.6 新增 skyblock
   notTheBees?: boolean;
+  infectedSeed?: boolean;    // 1.4.5 worldIsInfected 秘密种子（Main.infectedSeed）——
+  //  尚无文本种子映射到该位（注册为哈希种子，WorldGen.cs:374），仅作 SceneMetrics
+  //  向日葵压制 ×3 等读取位的预留（恒 false 时行为与原版普通世界一致）
 }
 
 const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [

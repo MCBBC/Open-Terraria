@@ -83,6 +83,15 @@ export interface ArrowOpts {
    *  每逻辑帧把整段 AI/位移/碰撞/命中多跑 N 次——弹速视觉上 ×(N+1)，timeLeft
    *  同步按子步消耗（:15861 在循环内）。83 眼激光 SetDefaults=2（:1369）。 */
   extraUpdates?: number;
+  /** X 轴空气阻力/tick（aiStyle 2 投掷族默认档 ×0.97，Projectile.cs:21969） */
+  drag?: number;
+  /** 终端下落速度（框架默认 16；aiStyle 2 投掷档 32，Projectile.cs:21973-21977） */
+  maxFall?: number;
+  /** 翻滚旋转（aiStyle 2 刀族：重力期内 rotation += (|vx|+|vy|)*0.03*dir，
+   *  Projectile.cs:21508；前 gravDelay tick 保持 atan2 姿态 :21971-21972） */
+  tumble?: boolean;
+  /** 平飞期姿态锁定（48/54/93/520/599 前 20t atan2 姿态） */
+  tumblePoseLock?: boolean;
 }
 
 /** SetDefaults 提取的 extraUpdates 表（Projectile.cs 各 type 段，0=缺省）：
@@ -132,6 +141,16 @@ export class Arrow extends Entity {
   homing: { speed: number; weight: number; floor?: number; cap?: number } | null;
   /** 原版 Projectile.extraUpdates：每帧额外子步数（0=普通 1 步） */
   extraUpdates: number;
+  /** X 轴空气阻力/tick（1=无；投掷族 0.97） */
+  drag: number;
+  /** 终端下落速度（缺省 16） */
+  maxFall: number;
+  /** 翻滚旋转（aiStyle 2 刀族重力期） */
+  tumble: boolean;
+  /** 平飞期姿态锁定（48/54/93/520/599 前 20t atan2 姿态，Projectile.cs:21971-21972） */
+  tumblePoseLock: boolean;
+  /** 翻滚累积角（tumble 专用，勿与 Enemy.spin 混） */
+  tumbleRot = 0;
   /** 已存活 tick（延迟重力/追踪门用） */
   age = 0;
   /** 已反射（原版 Projectile.reflected：反射源命中后置位，防重复反射；
@@ -159,6 +178,10 @@ export class Arrow extends Entity {
     this.gravDelay = opts?.gravDelay ?? -1;
     this.homing = opts?.homing ?? null;
     this.extraUpdates = opts?.extraUpdates ?? PROJ_EXTRA_UPDATES[projId] ?? 0;
+    this.drag = opts?.drag ?? 1;
+    this.maxFall = opts?.maxFall ?? 16;
+    this.tumble = opts?.tumble ?? false;
+    this.tumblePoseLock = opts?.tumblePoseLock ?? false;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -166,7 +189,9 @@ export class Arrow extends Entity {
     // 曾双变换把箭甩出屏幕,表现为"箭隐形但能命中")
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const ang = Math.atan2(this.vy, this.vx);
+    // 翻滚态用累积角（aiStyle 2）；48/54/93/520/599 平飞期姿态锁定 atan2
+    const tumbling = this.tumble && !(this.tumblePoseLock && this.age <= this.gravDelay);
+    const ang = tumbling ? this.tumbleRot : Math.atan2(this.vy, this.vx);
     const img = projSprite(this.projId);
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
@@ -211,9 +236,17 @@ export class Arrow extends Entity {
     const world = game.world;
     this.age++;
     // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）；
-    // 275/276 延迟重力（Projectile.cs:54318-54329：35t 后 g=0.025）
+    // 275/276 延迟重力（Projectile.cs:54318-54329：35t 后 g=0.025）；
+    // aiStyle 2 投掷族（Projectile.cs:21955-21977 默认档）：20t 平飞后
+    // vy+=0.4、vx×=0.97，终端 32
     if (this.grav !== 0 && (this.gravDelay < 0 || this.age > this.gravDelay)) {
-      this.vy = Math.min(this.vy + this.grav, 16);
+      this.vy = Math.min(this.vy + this.grav, this.maxFall);
+      if (this.drag !== 1) this.vx *= this.drag;
+    }
+    // 翻滚（aiStyle 2 刀族 :21508，自出生每 tick 累加）；48/54/93/520/599 在
+    // 平飞期由 draw 侧姿态锁定覆盖（:21971-21972）
+    if (this.tumble) {
+      this.tumbleRot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx >= 0 ? 1 : -1);
     }
     // 专家追踪（Projectile.cs:54330-54345 275/276 / :23307-23316 277：
     // v=(v*(weight-1)+dirToPlayer*speed)/weight；<floor 或 >cap 归一）
@@ -319,7 +352,7 @@ export class Arrow extends Entity {
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
         playEnemyHitSound(game, e);
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen);
+        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
         // ---- 吸血链（Projectile.cs:12877-12892 on-hit 段）----

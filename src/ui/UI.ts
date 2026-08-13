@@ -6,7 +6,7 @@ import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaT
 import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
-import { atlasIconForKey } from '../assets/SpriteAtlas';
+import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
@@ -46,7 +46,13 @@ function iconUrl(game: Game, id: number): string {
     // 优先原版素材图标（合成 32×32 dataURL）
     const def = ITEM_DEFS[id];
     if (game.atlas && def) {
-      const ar = atlasIconForKey(game.atlas, def.key);
+      let ar = atlasIconForKey(game.atlas, def.key);
+      if (ar && def.key.startsWith('vi_')) {
+        // 物品贴图动画(坠星 75 等竖条):图标取帧 0 单帧(背包内原版也在转,
+        // 此处静态帧 0——此前整条入画被压成 32×32 细条)
+        const vm = /^vi_(\d+)_/.exec(def.key);
+        if (vm) ar = sliceItemAnimFrame(Number(vm[1]), ar, 0);
+      }
       if (ar) {
         const c = document.createElement('canvas');
         c.width = 32; c.height = 32;
@@ -966,12 +972,17 @@ export class UI {
     this.placeTrash();
   }
 
-  /** 拖出面板：以掉落物形式丢在角色面前 */
+  /** 拖出面板：以掉落物形式丢在角色面前。速度 = 原版 DropSelectedItem
+   *  （Player.cs:4993-4997）：vy=-2、vx=4×朝向+玩家自身水平速度（跑步/坠落
+   *  叠加——此前 facing×1.5 不叠速度,抛出距离约为原版 1/3）；noGrabDelay=100
+   *  （:4990/:4996 抛出者 100t 内拾不回） */
   private throwHeldToWorld() {
     if (!this.heldStack || !this.game) return;
     const p = this.game.player;
     const key = ITEM_DEFS[this.heldStack.id].key;
-    this.game.spawnDrop(p.cx + p.facing * 18, p.y + 6, key, this.heldStack.stack, p.facing * 1.5, -2);
+    const drop = this.game.spawnDrop(p.cx + p.facing * 18, p.y + 6, key, this.heldStack.stack,
+      p.facing * 4 + p.vx, -2);
+    if (drop) drop.noGrabDelay = 100;
     this.heldStack = null;
   }
 

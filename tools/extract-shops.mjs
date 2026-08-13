@@ -104,16 +104,58 @@ const shops = {};
     if (inMethod && depth <= 1 && marks.length) break; // switch 结束
   }
   // 逐 case 段解析(行号切片)
+  // ★else-if 互斥链（2026-08-13 复审修复）：原解析把 `if (A) {x} else if (B) {y}`
+  //   拍平成 x@A / y@B 两条独立门——原版 else 支只在全部前支不成立时执行（互斥，
+  //   如 Chest.cs:1784-1793 裁缝 5577=墓地 else-if 242=白天，墓地白天不能双上架）。
+  //   chainByDepth[d] 记录该深度当前链的前支门，else/else-if 支据此生成取反门。
+  //   取反规则（不可取反的前支不生成取反，else 支维持外层门近似——登记失真）：
+  //     - 单 token 且非 moonPhase/非 skip → '!token'
+  //     - null（parseGate 判普通世界恒真）→ else 支不可达 → 'skip' 整支丢弃
+  //     - 'skip'/复合门('&&')/moonPhase（token 丢相位值，!moonPhase 不可表达）→ 跳过
+  //   同深度出现新的裸 if 即开新链（覆盖旧链）。
+  const NO_NEGATE = new Set(['moonPhase']);
+  const elseNegations = (preds) => {
+    const negs = [];
+    for (const g of preds) {
+      if (g === null) return { dead: true, negs };
+      if (g === 'skip' || g.includes('&&') || NO_NEGATE.has(g)) continue;
+      negs.push('!' + g);
+    }
+    return { dead: false, negs };
+  };
   for (let i = 0; i < marks.length; i++) {
     const li0 = marks[i].at + 1;
     const li1 = i + 1 < marks.length ? marks[i + 1].at : lines.length;
     const stock = [];
     let gateStack = [];
+    const chainByDepth = new Map(); // depth → 前支门列表（else-if 链累积）
     let d = 2; // case 体起始深度
     for (let li = li0; li < li1; li++) {
       const line = lines[li];
+      const isElse = /^\s*else\b/.test(line);
       const ifM = line.match(/if \((.+)\)/);
-      if (ifM) gateStack.push({ cond: parseGate(ifM[1]), depth: d });
+      if (ifM) {
+        const own = parseGate(ifM[1]);
+        let gate = own;
+        if (isElse) {
+          const preds = chainByDepth.get(d) ?? [];
+          const r = elseNegations(preds);
+          preds.push(own);
+          chainByDepth.set(d, preds);
+          if (r.dead || own === 'skip') gate = 'skip';
+          else if (r.negs.length) gate = [...r.negs, ...(own ? [own] : [])].join('&&');
+        } else {
+          chainByDepth.set(d, [own]); // 裸 if = 新链起点
+        }
+        gateStack.push({ cond: gate, depth: d });
+      } else if (isElse) {
+        // 裸 else：无自身门，有效门 = 前支取反（无可取反项则无门，= 旧近似）
+        const preds = chainByDepth.get(d) ?? [];
+        const r = elseNegations(preds);
+        preds.push(null);
+        chainByDepth.set(d, preds);
+        gateStack.push({ cond: r.dead ? 'skip' : (r.negs.length ? r.negs.join('&&') : null), depth: d });
+      }
       const defM = line.match(/array\[num\+?\+?\]\.SetDefaults\((\d+)\)/);
       if (defM) {
         // 全部未闭合门的条件 AND（原版嵌套 if 语义）：任一门 'skip' → 整条丢弃
@@ -122,7 +164,12 @@ const shops = {};
       }
       for (const ch of line) {
         if (ch === '{') d++;
-        else if (ch === '}') { d--; while (gateStack.length && gateStack[gateStack.length - 1].depth >= d) gateStack.pop(); }
+        else if (ch === '}') {
+          d--;
+          while (gateStack.length && gateStack[gateStack.length - 1].depth >= d) gateStack.pop();
+          // 链生命周期 = 其所在块：块闭合（深度跌破链深度）才作废，分支自身闭合不清
+          for (const k of [...chainByDepth.keys()]) if (k > d) chainByDepth.delete(k);
+        }
       }
     }
     shops[marks[i].slot] = stock;

@@ -144,7 +144,6 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const iceBackStyle = r.i32();
   const jungleBackStyle = r.i32();
   const hellBackStyle = r.i32();
-  r.i32(); r.i32(); r.i32(); // ice/jungle/hell back style
   const spawnX = r.i32();
   const spawnY = r.i32();
   const groundLevel = r.f64();

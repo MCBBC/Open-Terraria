@@ -20,6 +20,8 @@
 //   - SkyManager "Lantern" → LanternSky（夜空灯笼，Extra_134 三变体，SkyRenderer 落位）
 // 状态为运行时态不进存档（原版 WorldClear 于读图 Main.cs:51656/WorldGen.cs:6957）。
 export interface LanternCtx {
+  /** Main.dayTime（白天 LanternsCanPersist 恒 false → Genuine 提前收场，:52） */
+  dayTime: boolean;
   bloodMoon: boolean;
   pumpkinMoon: boolean;
   snowMoon: boolean;
@@ -77,9 +79,10 @@ class LanternNightState {
     }
   }
 
-  /** LanternsCanPersist（:50-57）：夜间且可开 */
+  /** LanternsCanPersist（:50-57）：!dayTime && LanternsCanStart()——白天恒 false
+   *  （真灯笼天亮即散，等价 CheckMorning 的清零路径；bloodMoon 已在 CanStart 内） */
   lanternsCanPersist(ctx: LanternCtx): boolean {
-    return !ctx.bloodMoon && this.lanternsCanStart(ctx);
+    return !ctx.dayTime && this.lanternsCanStart(ctx);
   }
   /** LanternsCanStart（:59-66）：无陨石/血月/南瓜月/霜月/入侵/月总倒计时，且场上无 Boss */
   lanternsCanStart(ctx: LanternCtx): boolean {
@@ -97,11 +100,12 @@ class LanternNightState {
     this.wasLanternNight = this.lanternsUp;
   }
 
-  /** WorldClear（:120-126）：读图重置（运行时态不进存档） */
+  /** WorldClear（:120-126）：读图重置（运行时态不进存档）。★不清
+   *  NextNightIsLanternNight——原版 WorldClear 只清 Manual/Genuine/Cooldown/
+   *  _wasLanternNight 四项，首胜预约跨读图保留（旧实现误清，读图后预约丢失） */
   worldClear(): void {
     this.manualLanterns = false;
     this.genuineLanterns = false;
-    this.nextNightIsLanternNight = false;
     this.lanternNightsOnCooldown = 0;
     this.wasLanternNight = false;
   }

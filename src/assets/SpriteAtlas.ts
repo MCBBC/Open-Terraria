@@ -483,6 +483,43 @@ export class SpriteAtlas {
 // ---- 物品图标：一律原版 Item_N（旧 Maples UI/ 图标层已整体移除） ----
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 
+/**
+ * 物品贴图动画注册表(Main.InitializeItemAnimations :3685-3722 1:1)。
+ * 物品源图是竖排多帧条(如坠星 Item_75=22×208),不切片会整条入画。
+ * dur=tick/帧;pingPong=往返;static=true=恒帧 0(IsFood 的 int.MaxValue
+ * 静态三帧与 NotActuallyAnimating 族)。
+ */
+export const ITEM_ANIMATION: Record<number, { dur: number; n: number; pingPong?: boolean; static?: boolean }> = {
+  3581: { dur: 4, n: 4 },
+  3580: { dur: 6, n: 4 },
+  75: { dur: 5, n: 8, pingPong: true },    // 坠星 8 帧 PingPong 旋转
+  575: { dur: 6, n: 4 }, 547: { dur: 6, n: 4 }, 520: { dur: 6, n: 4 },
+  548: { dur: 6, n: 4 }, 521: { dur: 6, n: 4 }, 549: { dur: 6, n: 4 },
+  3453: { dur: 6, n: 4 }, 3454: { dur: 6, n: 4 }, 3455: { dur: 6, n: 4 },
+  4068: { dur: 6, n: 4, static: true },   // NotActuallyAnimating(:3701-3709)
+  4069: { dur: 6, n: 4, static: true },
+  4070: { dur: 6, n: 4, static: true },
+  5644: { dur: 7, n: 9 },                 // ScryingOrb(专属着色器,垂直循环近似)
+};
+
+/** 物品动画当前帧(DrawAnimationVertical.GetFrame 语义;tick=游戏 tick 或等价毫秒换算) */
+export function itemAnimFrame(vid: number, tick: number): number {
+  const a = ITEM_ANIMATION[vid];
+  if (!a || a.static) return 0;
+  const span = a.pingPong ? a.n * 2 - 2 : a.n;
+  const idx = Math.floor(tick / a.dur) % span;
+  return a.pingPong && idx >= a.n ? span - idx : idx;
+}
+
+/** 把整条 DrawRect 按帧切片(vid 无动画原样返回) */
+export function sliceItemAnimFrame(vid: number, ar: DrawRect, tick: number): DrawRect {
+  const a = ITEM_ANIMATION[vid];
+  if (!a || a.n <= 1) return ar;
+  const fh = ar.sh / a.n;
+  const f = Math.min(a.n - 1, itemAnimFrame(vid, tick));
+  return { img: ar.img, sx: ar.sx, sy: ar.sy + Math.round(fh * f), sw: ar.sw, sh: Math.round(fh) };
+}
+
 export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | null {
   const vid = VANILLA_ITEM_ICON_MAP[key];
   if (vid !== undefined) return atlas.vicon(vid);

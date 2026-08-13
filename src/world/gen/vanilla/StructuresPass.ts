@@ -1121,6 +1121,173 @@ function placeSeaShell(st: TileStore, rng: RNG, x: number, y: number, style: num
   return true;
 }
 
+// ============ 绿洲消费段（cs:21129-21163）+ 尾部燕麦段（cs:21302-21320）共用辅助 ============
+const PALM = TILE_BY_KEY['v_323_palm_trees']!;
+const SEAOAT = TILE_BY_KEY['v_529_sea_oats']!;
+const OASIS_PLANT = TILE_BY_KEY['v_530_oasis_plants']!;
+/** GenVars.oasisHeight（GenVars.cs:268）= 20——与 OasisPass.OASIS_HEIGHT 同源常量
+ *  （本文件不得改 OasisPass，无法 import 其私有常量，原样复制） */
+const OASIS_HEIGHT = 20;
+/** TileID.Sets.Conversion.Sand（TileID.cs:30）：53/112/116/234——燕麦/绿洲植物基座沙族门 */
+const SAND_FAMILY = idsByVanillaSheet(53, 112, 116, 234);
+/** 苗 tile 20：棕榈越过找基座（cs:27268 while type==20）——同 TreePass.PLANTS */
+const PALM_SAPLING = idsByVanillaSheet(20);
+/** 棕榈基座沙族（cs:27292：53/234/116/112）——同 TreePass.PALM_GROUND */
+const PALM_GROUND = idsByVanillaSheet(53, 234, 116, 112);
+
+/** EmptyTileCheck（L15685 简化：出界 false，任何活性格 false）——同 TreePass */
+function palmEmptyCheck(st: TileStore, x0: number, x1: number, y0: number, y1: number): boolean {
+  if (x0 < 0 || x1 >= st.w || y0 < 0 || y1 >= st.h) return false;
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      if (st.flags[st.idx(x, y)]) return false;
+    }
+  }
+  return true;
+}
+
+/** GrowPalmTree（cs:27260-27352）= TryGrowingTreeByType(323)（cs:30508）。
+ *  TreePass.growPalmTree 为私有函数且本任务只许改本文件，故同源复制（若后续
+ *  TreePass 导出 growPalmTree 应改回复用防漂移）。
+ *  侧净空注意：1456:27302 用 num-num2（num2=20+treeHeightAddon=20 → num-20）；
+ *  1405:11800 是 index1-30——TreePass 移植仍携 1405 值 -30，此处按项目铁律取
+ *  1456 终态 -20。 */
+function growPalmTreeAt(st: TileStore, rng: RNG, i: number, y: number): boolean {
+  if (!st.inBounds(i, y)) return false;
+  let index1 = y;
+  while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PALM_SAPLING.has(st.type[st.idx(i, index1)])) index1++;
+  if (!st.inBounds(i, index1) || index1 < 1) return false;
+  const gi = st.idx(i, index1);
+  // 基座整砖检查（cs:27280-27285 active && !halfBrick && slope==0）
+  if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !PALM_GROUND.has(st.type[gi])) return false;
+  if (st.wall[st.idx(i, index1 - 1)] !== 0 || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
+  if (!palmEmptyCheck(st, i, i, index1 - 2, index1 - 1)) return false;
+  if (!palmEmptyCheck(st, i - 1, i + 1, index1 - 20, index1 - 3)) return false;   // cs:27302（1456 终态）
+  const height = rng.int(10, 20);                 // Next(10,21)
+  const target = rng.int(-8, 8) * 2;              // Next(-8,9)*2
+  let tilt = 0;
+  for (let k = 0; k < height; k++) {
+    if (k === 0) {
+      st.setTileSilent(i, index1 - 1, PALM, 66, 0);
+      continue;
+    }
+    if (k === height - 1) {
+      st.setTileSilent(i, index1 - 1 - k, PALM, 22 * rng.int(4, 6), tilt); // 顶段 fx=22*Next(4,7)
+      continue;
+    }
+    if (tilt !== target) {
+      const prog = k / height;                    // 倾斜步进阈值（cs:27323-27335）
+      // 原版 || true 恒真但前段掷骰照走（Next(13)/Next(9)/Next(5)），短路次序已对齐
+      if (prog >= 0.25 && ((prog < 0.5 && rng.int(0, 12) === 0)
+        || (prog < 0.7 && rng.int(0, 8) === 0)
+        || (prog < 0.95 && rng.int(0, 4) === 0) || true)) {
+        tilt += Math.sign(target) * 2;
+      }
+    }
+    st.setTileSilent(i, index1 - 1 - k, PALM, 22 * rng.int(0, 2), tilt); // fx=22*Next(0,3)
+  }
+  return true;
+}
+
+/** SolidTileAllowBottomSlope（cs:70211）：active && (tileSolid||tileSolidTop) &&
+ *  非 topSlope(1/2) && !halfBrick。tileSolidTop≈platform（HalfBrickPass 同款近似）；
+ *  cs:70214 出界返回 true（原版怪癖，照抄）。 */
+function solidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (!st.flags[i] || t === 0) return false;
+  const d = TILE_DEFS[t];
+  return !!d && (d.solid || !!d.platform)
+    && st.slope[i] !== 1 && st.slope[i] !== 2 && !st.half[i];
+}
+
+/** SeaOatWaterCheck（cs:58269-58313）：邻域非实心格液量和 /255 ≥ 20 时——非海滩带放行、
+ *  海滩带（x ≤ beachDistance 或 x ≥ w-beachDistance）反转拒绝（盒同时扩大到 131×50）。
+ *  num4/num5（最近水距）算后不用，返回只依赖液量和 flag，已省。 */
+function seaOatWaterCheck(st: TileStore, gs: GenState, x: number, y: number): boolean {
+  let num = 45, num2 = 20;
+  let flag = false;
+  if (x <= gs.beachDistance || x >= st.w - gs.beachDistance) { flag = true; num = 65; num2 += 5; }
+  let sum = 0;
+  for (let i = x - num; i <= x + num; i++) {
+    for (let j = y - num2; j <= y + num2; j++) {
+      if (st.inBounds(i, j) && !_solidTileHB(st, i, j) && st.liquid[st.idx(i, j)] > 0) {
+        sum += st.liquid[st.idx(i, j)];
+      }
+    }
+  }
+  if (Math.trunc(sum / 255) >= 20) return !flag;
+  return flag;
+}
+
+/** PlantSeaOat（cs:58315-58350）：本格空气/无墙/无液 + 下格整砖沙族 + 水检过 →
+ *  种燕麦 529（frameX=18*Next(5)、frameY=0）。Next(5) 只在成功路径消耗。
+ *  BlockColorAndCoating/UseBlockColors 拷贝下格涂装——生成期无涂装，等价无操作。 */
+function plantSeaOat(st: TileStore, rng: RNG, gs: GenState, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return false;
+  const i = st.idx(x, y);
+  if (st.wall[i] > 0 || st.flags[i] || st.liquid[i] > 0) return false;   // cs:58318-58320
+  if (!solidAllowBottomSlope(st, x, y + 1)) return false;
+  if (!SAND_FAMILY.has(st.type[st.idx(x, y + 1)])) return false;         // cs:58321 Conversion.Sand
+  if (!seaOatWaterCheck(st, gs, x, y)) return false;                     // cs:58323
+  st.setTileSilent(x, y, SEAOAT, 18 * rng.nextInt(5), 0);                // cs:58333-58336
+  return true;
+}
+
+/** GrowSeaOat（cs:58359-58367）：frameX < 180 时 +90（两段生长）。零掷骰 */
+function growSeaOat(st: TileStore, x: number, y: number): void {
+  const i = st.idx(x, y);
+  if (st.frameX[i] < 180) st.frameX[i] += 90;
+}
+
+/** OasisPlantWaterCheck（cs:47511-47536）：45×41 盒非实心格液量和 /255 ≥ 20。
+ *  cs:47522 原版在内层判的是参数 x 而非循环变量 i（海滩带整列放空）——照抄。 */
+function oasisPlantWaterCheck(st: TileStore, gs: GenState, x: number, y: number): boolean {
+  if (x <= gs.beachDistance || x >= st.w - gs.beachDistance) return false;
+  let sum = 0;
+  for (let i = x - 45; i <= x + 45; i++) {
+    for (let j = y - 20; j <= y + 20; j++) {
+      if (st.inBounds(i, j) && !_solidTileHB(st, i, j)) sum += st.liquid[st.idx(i, j)];
+    }
+  }
+  return Math.trunc(sum / 255) >= 20;
+}
+
+/** PlaceOasisPlant（cs:47543-47615）：Next(9) style 掷在海滩/边界早退门之前——
+ *  每次调用必掷（RNG 流关键）。门：3×2 盒内活性物须全为燕麦 529 且无液、
+ *  盒下 3 格整砖沙族（Conversion.Sand）、OasisPlantWaterCheck 过 → 清盒后铺
+ *  6 格 530（frameX=54*style+{0,18,36}，frameY={0,18}，style num2 恒 0 → num4=0）。 */
+function placeOasisPlant(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number): void {
+  const style = rng.nextInt(9);                              // cs:47546——早退门之前
+  if (X < gs.beachDistance || X > st.w - gs.beachDistance || Y < 5 || Y > st.h - 5) return;
+  let flag = true;
+  for (let i = X - 1; i <= X + 1; i++) {
+    for (let j = Y - 1; j <= Y; j++) {                       // cs:47555：j < Y+1（两行）
+      if (!st.inBounds(i, j)) continue;
+      const k = st.idx(i, j);
+      if (st.flags[k] && st.type[k] !== SEAOAT) flag = false;   // 活性且非 529 → 拒
+      if (st.liquid[k] > 0) flag = false;                       // cs:47562
+    }
+    if (!st.inBounds(i, Y + 1) || !_solidTileHB(st, i, Y + 1)
+      || !SAND_FAMILY.has(st.type[st.idx(i, Y + 1)])) flag = false;   // cs:47567-47570
+  }
+  if (!flag || !oasisPlantWaterCheck(st, gs, X, Y)) return;
+  // cs:47582-47590：清 3×2 盒活性物（KillTile noItem——生成期 isGeneratingOrLoadingWorld
+  // 强制 noItem，529 不进任何 genRand 分支 → 零掷骰；随后 6 格全被覆写，帧残留无影响）
+  for (let i = X - 1; i <= X + 1; i++) {
+    for (let j = Y - 1; j <= Y; j++) {
+      if (st.inBounds(i, j)) st.flags[st.idx(i, j)] = 0;
+    }
+  }
+  const fx = 54 * style;                                     // cs:47593 num3 = 54*num
+  for (let i = X - 1; i <= X + 1; i++) {
+    for (let j = Y - 1; j <= Y; j++) {
+      st.setTileSilent(i, j, OASIS_PLANT, fx + 18 * (i - (X - 1)), 18 * (j - (Y - 1)));
+    }
+  }
+}
+
 /** pass 96 本体。Skyblock.denyAllGeneration（cs:21117）→ 整段跳过（零掷骰）。 */
 export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenState): void {
   if (gs.seedFlags.skyblock) return;
@@ -1130,7 +1297,29 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
   const maxL = rng.int(3, 12);               // cs:21123 Next(3,13)——左段列距骰
   const maxR = rng.int(3, 12);               // cs:21124 Next(3,13)——右段列距骰
   rng.int(2, 5); rng.int(2, 5);              // cs:21125-21126 Next(2,6)×2——死骰（声明后未用）
-  // cs:21129-21153：绿洲棕榈/海滨燕麦/绿洲植物 530 消费段未实现（备案）
+  // ---- 头部绿洲消费段（cs:21129-21163）：每片绿洲 ±(width*1.5)×±oasisHeight(20) 逐格 ----
+  for (let i = 0; i < gs.numOasis; i++) {
+    const num8 = Math.trunc(gs.oasisW[i]! * 1.5);      // cs:21131 (int)(oasisWidth*1.5)
+    const ox = gs.oasisX[i]!, oy = gs.oasisY[i]!;
+    for (let j = ox - num8; j <= ox + num8; j++) {
+      for (let k = oy - OASIS_HEIGHT; k <= oy + OASIS_HEIGHT; k++) {
+        // cs:21138-21149：17×17 邻域已有棕榈 323 → 概率 1.0 降为 0.13（全扫不 break，
+        // num9 赋值幂等）
+        let num9 = 1.0;
+        for (let l = j - 8; l <= j + 8; l++) {
+          for (let m = k - 8; m <= k + 8; m++) {
+            if (st.inBounds(l, m) && st.flags[st.idx(l, m)] && st.type[st.idx(l, m)] === PALM) num9 = 0.13;
+          }
+        }
+        if (rng.next() < num9) growPalmTreeAt(st, rng, j, k);   // cs:21151-21152 NextDouble < num9
+        if (plantSeaOat(st, rng, gs, j, k)) {                   // cs:21154
+          if (rng.nextInt(2) === 0) growSeaOat(st, j, k);       // cs:21156
+          if (rng.nextInt(2) === 0) growSeaOat(st, j, k);       // cs:21160
+        }
+        placeOasisPlant(st, rng, gs, j, k);                     // cs:21163（530，Next(9) 必掷）
+      }
+    }
+  }
   const yTop = gs.worldSurface - 1;          // cs:21198：num13 = worldSurface - 1
   for (let n = 0; n < 3; n++) {
     let x0: number, x1: number, flag: boolean, maxValue: number;
@@ -1138,7 +1327,17 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
     else if (n === 1) { x0 = 400; x1 = w - 400; flag = true; maxValue = num; }
     else { x0 = w - num7; x1 = w - 5; flag = false; maxValue = maxR; }
     for (let x = x0; x < x1; x++) {
-      if (rng.nextInt(maxValue) !== 0) continue;   // else 分支（燕麦段 cs:21302-21320）备案
+      if (rng.nextInt(maxValue) !== 0) {
+        // ---- 尾部燕麦段（cs:21302-21320）：列距骰未命中的列，y 自 0 起整列铺燕麦/530 ----
+        for (let y = 0; y < yTop && y < st.h; y++) {
+          if (plantSeaOat(st, rng, gs, x, y)) {                // cs:21309
+            if (rng.nextInt(2) === 0) growSeaOat(st, x, y);    // cs:21312
+            if (rng.nextInt(2) === 0) growSeaOat(st, x, y);    // cs:21315
+          }
+          placeOasisPlant(st, rng, gs, x, y);                  // cs:21318（Next(9) 必掷）
+        }
+        continue;
+      }
       // y=0 起扫（cs:21205）；y<1 时上格越界（C# OOB 读 = 空格 → 门必过但
       // 放置目标 y-1<0 不可写）——等价跳过
       for (let y = 1; y < yTop && y < st.h; y++) {

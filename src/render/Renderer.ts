@@ -7,7 +7,7 @@ import type { World, Clock } from '../world/World';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
-import { atlasIconForKey, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
+import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
 import type { Inventory } from '../items/Inventory';
@@ -133,9 +133,16 @@ const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
 const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
 // 旋转族 NPC（原版 npc.rotation 驱动绘制朝向；FindFrame 不做朝向翻转）：
-// 35/68=骷髅王头/守卫、113-115=血肉墙/之眼/饥饿者、125/126=双子、127-131=Prime 头+四部件、
+// 35/68=骷髅王头/守卫、113-115=血肉墙/之眼/饥饿者、116=饥饿者 II(FindFrame case 116
+//   rotation=atan2(vy,vx)，vx>0 再 FlipHorizontally——drawEnemy 独占分支自带翻转，
+//   登记进 rotationDriven 以禁用通用 facing 镜像)、125/126=双子、127-131=Prime 头+四部件、
 // 134-136=毁灭者链、261-265=世花族(孢子/本体/钩蔓/触须)、370=猪鲨、396/397=月总头/手、657=史莱姆皇后(飞行倾斜)
-const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136, 246, 247, 248, 249, 261, 262, 263, 264, 265, 370, 396, 397, 657]);
+const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 116, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136, 246, 247, 248, 249, 261, 262, 263, 264, 265, 370, 396, 397, 657]);
+
+// Main.wofDrawFrameIndex（Main.cs:820 静态；同屏只有一只血肉墙，模块级等价）。
+// 原版在 DrawWOFBody 内自增（:37861-37863），bossAI_wof 未维护 → 渲染侧持有。
+// 18 步循环、/6 换帧 = 3 帧各 6 步；gamePaused 冻结语义本仓无暂停态，恒推进（差异登记）
+let wofDrawFrameIndex = 0;
 
 /** 按原版 FindFrame 分族规则算当前帧 index（导出供 DebugReport tiles.focus.frameEngine 复算） */
 export function vanillaFrameIdx(e: Enemy, frames: number): number {
@@ -247,6 +254,32 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     let idx = Math.ceil(e.dummyShake / step);
     if (idx > 0 && dir === 1) idx += 5;
     return Math.min(frames - 1, idx);
+  }
+  // 血肉墙 113/之眼 114（FindFrame case 113/114，cs:74214-74233）：ai[2]==0 时
+  // frameCounter 每 12t 推进一帧、越 npcFrameCount(均 2) 回卷；ai[2]!=0 → 锁帧 0
+  // 且 frameCounter=-60（回合结束后需再攒 72t 才回动画——无状态引擎近似为立即恢复，
+  // 差异登记：113 的 ai[2] 是 Leech 放虫轮(bossAI_wof)，放虫期间嘴部定帧=原版吐虫姿势）
+  if (id === 113 || id === 114) {
+    if (e.ai2 !== 0) return 0;
+    return Math.floor(t / 12) % Math.max(1, Math.min(2, frames));
+  }
+  // 饥饿者 115（FindFrame case 115，cs:75695-75712）：counter 先 +1 再比阈值
+  // （1..15）：1-2→0 / 3-5→1 / 6-11→2 / 12-14→1，15 回卷——0→1→2→1 乒乓嚼动
+  if (id === 115) {
+    const p = (Math.floor(t) % 15) + 1;
+    return p < 3 ? 0 : p < 6 ? 1 : p < 12 ? 2 : 1;
+  }
+  // 饥饿者 II 116（FindFrame case 116，cs:74789-74808）：counter 每 5t 推进、
+  // 越 npcFrameCount(6) 回卷全帧；rotation=atan2(vy,vx)（vx<0 再 +π，drawEnemy
+  // 独占分支）——此前落通用 6t 档（节奏差 20%）
+  if (id === 116) {
+    return Math.floor(t / 5) % Math.max(1, frames);
+  }
+  // 腐化者 133（FindFrame case 133，cs:74761-74788）：counter 1-7→0 / 8-15→1 /
+  // 16→0 并回卷；血 <50% 帧 +2（狂暴形态——floatEyeAI rage 档的视觉面）
+  if (id === 133) {
+    const p = (Math.floor(t) % 16) + 1;
+    return Math.min(frames - 1, (p >= 8 && p < 16 ? 1 : 0) + (e.hp < e.maxHp * 0.5 ? 2 : 0));
   }
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
@@ -737,13 +770,21 @@ export class Renderer {
     return this.assets.itemIcons.get(id) ?? null;
   }
 
-  /** Maples 图标绘制矩形（找不到返回 null） */
+  /** Maples 图标绘制矩形（找不到返回 null）。
+   *  物品贴图动画(Main.InitializeItemAnimations :3685-3722):竖排多帧条
+   *  按渲染时钟切片——坠星 75 等此前整条入画(22×208 九帧全画)即此修 */
   atlasIcon(id: number) {
     if (!this.atlas) return null;
     const def = ITEM_DEFS[id];
     if (!def) return null;
-    return atlasIconForKey(this.atlas, def.key);
+    const ar = atlasIconForKey(this.atlas, def.key);
+    if (!ar) return null;
+    const vid = /^vi_(\d+)_/.exec(def.key);
+    if (vid) return sliceItemAnimFrame(Number(vid[1]), ar, this.animTick);
+    return ar;
   }
+  /** 渲染时钟(60t/s 等效,供物品动画取帧;Vanilla Star.NightSetup 无关) */
+  animTick = 0;
 
   resize() {
     this.canvas.width = window.innerWidth;
@@ -774,6 +815,7 @@ export class Renderer {
     remotePlayers: Player[] = [],
     invasion: { name: string; pct: number; label?: string } | null = null,
   ) {
+    this.animTick++;
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
     this.mainPlayer = player;   // 克脑镜像（Main.cs:24799-24843 以玩家中心镜像）等取用
@@ -950,6 +992,11 @@ export class Renderer {
     // 挂 House_Banner 旗布 + 叠画 NPC 头像；实体层之前画，让 NPC 从旗前走过）
     this.drawHouseBanners(entities, world, cam);
 
+    // 3.7 血肉墙墙身/肌腱链/舌头（Main.cs DrawWoF :37811-37966，DoDraw_WallsTilesNPCs
+    //     :62709 在墙/方块之后、NPC 缓存之前调用 → 墙身垫在嘴(113)/眼(114)/饥饿者(115)
+    //     精灵之下，本仓在实体层之前画等价；墙死透时的全屏血尘崩落近似也在此触发）
+    this.drawWoF(player, entities, world, camRY, viewW, viewH, z);
+
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
     for (const e of sorted) {
@@ -984,6 +1031,9 @@ export class Renderer {
       ctx.fillStyle = p.color;
       ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
     }
+    // 5b. 渲染层自持瞬态粒子（血肉墙崩落血尘——Game 侧粒子池 600 上限内放不下
+    //     原版 ~550 尘+110 gore，且死亡触发点只在渲染侧可得）
+    this.stepWoFDeathFx();
     ctx.globalAlpha = 1;
 
     // 6. 挖掘/放置光标：挖掘中黄色填充随进度加深（半透明黄 → 破坏完成时最深）
@@ -1094,10 +1144,10 @@ export class Renderer {
 
     this._lastPlayer = player;
     // 9. 小地图
-    this.drawMinimap(ctx, cam, world, player, clock);
+    this.drawMinimap(ctx, cam, world, player, clock, entities);
     // 9.5 全屏地图
     if (this.fullMap.open && this.minimap) {
-      this.drawFullMap(ctx, world, this._mouseX, this._mouseY, this._mouseDown);
+      this.drawFullMap(ctx, world, this._mouseX, this._mouseY, this._mouseDown, entities);
       return; // 全屏地图时跳过其余 HUD
     }
 
@@ -1552,6 +1602,257 @@ export class Renderer {
     return f;
   }
 
+  // ===================== 血肉墙墙身三件套（Main.cs DrawWoF :37811-37966 1:1） =====================
+  // 原版 DrawWoF 顺序：舌头(:37818-37823) → 肌腱链(:37825-37829) → 墙身(:37831)，
+  // 整体在 DoDraw_WallsTilesNPCs(:62709) 里墙/方块之后、NPC 缓存绘制之前调用——
+  // 墙身垫底、嘴(113)/眼(114)/饥饿者(115) 精灵压在上面（behindTiles 族仍在墙身前）。
+  // 本仓在实体层之前整段画，层序等价。
+  //
+  // 光照：原版逐 16px 横条 Lighting.GetColor / 逐链段 GetColor；本仓 compositeLight
+  // 全屏 multiply 用同一光照缓冲做 2× 超采样双线性合成（比原版逐格采样更细）——
+  // 此处不再逐条取 lightAt，否则与全屏 pass 双重相乘会过暗。
+
+  /** 上帧血肉墙本体引用（死亡检测：实体被 compact 移除后对象仍可读 dead/bossFled） */
+  private wofHeadSeen: Enemy | null = null;
+  /** 墙身崩落血尘（渲染层自持瞬态，形状同 Particle） */
+  private wofDeathFx: Particle[] = [];
+  /** 墙身贴图（WallOfFlesh.png 190×420 = 3 帧×140px；懒加载经 ensureVImage） */
+  private wofTex(): HTMLImageElement | null {
+    return this.atlas ? this.atlas.ensureVImage('vanilla/WallOfFlesh.png') : null;
+  }
+
+  /** DrawWoF 总入口（:37811-37816 门：wofNPCIndex<0 / inactive / life<=0 不画） */
+  private drawWoF(
+    player: Player, entities: Entity[], world: World,
+    camRY: number, viewW: number, viewH: number, z: number,
+  ) {
+    if (!this.atlas) return;
+    const head = (entities as Enemy[]).find((e) => !e.dead && e.vanillaId === 113 && e.hp > 0) ?? null;
+    if (head) {
+      this.wofHeadSeen = head;
+      const { top, bottom } = this.wofDrawAreaOf(head, entities as Enemy[]);
+      // :37818-37823 狂卷之舌（tongued 玩家）
+      if (!player.dead && player.buffs.has(BuffType.TheTongue)) this.drawWoFTongue(head, player);
+      // :37825-37829 肌腱链（所有 aiStyle 29 饥饿者）
+      for (const e of entities as Enemy[]) {
+        if (!e.dead && e.vanilla?.aiStyle === 29) this.drawWoFRope(head, e, top, bottom);
+      }
+      // :37831 墙身
+      this.drawWoFBody(head, top, camRY, viewH, z);
+      return;
+    }
+    // 墙不在场：上帧还在 → 判死透（bossFled=逃逸/玩家死自毁，不播崩落）
+    const gone = this.wofHeadSeen;
+    this.wofHeadSeen = null;
+    if (gone && gone.dead && !gone.bossFled && gone.hp <= 0) {
+      this.spawnWoFDeathFx(gone, player, world, camRY, viewW, viewH, z);
+    }
+  }
+
+  /** Main.wofDrawAreaTop/Bottom 近似：bossAI_wof 模块内私有未导出（结构性差异），
+   *  由之眼反解——wofEyeAI 锚定式(:26161-26167/生成位 :26132-26136)
+   *  上眼 cy=(mid+top)/2、下眼 cy=(mid+bottom)/2，且 mid=head.cy(:25955-25956
+   *  y=(top+bottom)/2-h/2)→ top=2×上眼cy-head.cy。眼以 ±1 步进追锚点，误差 ≤ 数 px；
+   *  眼缺失时回退最小跨度 160(:25940-25946) 对称展开 */
+  private wofDrawAreaOf(head: Enemy, entities: Enemy[]): { top: number; bottom: number } {
+    let eyeTop: Enemy | null = null;
+    let eyeBot: Enemy | null = null;
+    for (const e of entities) {
+      if (e.dead || e.vanillaId !== 114) continue;
+      if (e.ai0 > 0) eyeTop = e; else eyeBot = e;
+    }
+    if (eyeTop && eyeBot) {
+      return { top: 2 * eyeTop.cy - head.cy, bottom: 2 * eyeBot.cy - head.cy };
+    }
+    return { top: head.cy - 80, bottom: head.cy + 80 };
+  }
+
+  /** DrawWOFBody（Main.cs:37827-37875）：WallOfFlesh.png 以 16px 横条沿屏幕纵向平铺。
+   *  平铺算法要点：
+   *  - 帧高 num = 贴图高/3 = 140（:37829）；
+   *  - num3 先取 wofDrawAreaBottom 随即被 screenPosition.Y+screenHeight 覆写（:37832-37833）
+   *    → 纵向只画到【屏幕底】，与空腔下沿无关；
+   *  - 行对齐：num4 = floor((top-screenY)/140)+1，top -= num4*140（:37836-37844）
+   *    → 首行起点 ≡ top (mod 140)，后续行 +140 步进 = 世界坐标锚定的无缝平铺
+   *    （相机平移时贴图不随屏游动）；num4>12（顶沿离屏顶 >12 行）整体跳过（:37838）；
+   *  - 每行内 16px 一条横切（:37871-37873），末行按剩余高度截断；
+   *  - X = 墙 hitbox 左沿，direction>0 时 -80（:37850-37852）；spriteDirection==1
+   *    （AI :26041 spriteDirection=direction）水平翻转（:37856-37858）；
+   *  - 动画帧行 = wofDrawFrameIndex/6*140，先取帧后自增、18 回卷（:37860-37863） */
+  private drawWoFBody(
+    head: Enemy, areaTop: number,
+    camRY: number, viewH: number, z: number,
+  ) {
+    const img = this.wofTex();
+    if (!img || !img.height) return;
+    const num = Math.floor(img.height / 3);            // :37829 帧高 140
+    const screenTop = camRY - viewH / (2 * z);         // Main.screenPosition.Y
+    const screenBottom = camRY + viewH / (2 * z);      // :37833 screenPosition.Y+screenHeight
+    let top = areaTop;                                 // wofDrawAreaTop(:37830)
+    const rows = Math.floor((top - screenTop) / num) + 1;   // :37836
+    if (rows > 12) return;                             // :37838
+    const rewind = rows * num;
+    if (rewind > 0) top -= rewind;                     // :37841-37844
+    let x = head.x;                                    // :37850 npc.position.X
+    if (head.facing > 0) x -= 80;                      // :37851-37852 direction>0
+    const flip = head.facing === 1;                    // :37856-37858 spriteDirection==1
+    const frameRow = Math.floor(wofDrawFrameIndex / 6) * num;  // :37860
+    if (++wofDrawFrameIndex >= 18) wofDrawFrameIndex = 0;      // :37861-37863
+    const ctx = this.ctx;
+    const w = img.width;
+    ctx.save();
+    if (flip) { ctx.translate(2 * x + w, 0); ctx.scale(-1, 1); } // 竖直中线 x+w/2 镜像
+    for (let i = Math.floor(top); i < screenBottom; i += num) { // :37868
+      let rowH = screenBottom - i;
+      if (rowH > num) rowH = num;                      // :37869-37871
+      for (let j = 0; j < rowH; j += 16) {             // :37873 16px 横条
+        ctx.drawImage(img, 0, frameRow + j, w, 16, x, i + j, w, 16);
+      }
+    }
+    ctx.restore();
+  }
+
+  /** DrawWOFRopeToTheHungry（Main.cs:37879-37928）：墙列上 Hungry 挂点
+   *  （top + 跨度×ai[0]）→ 饥饿者位（Center.X, Bottom-h/2×scale）Chain12 肌腱链。
+   *  段距 28×scale、终止距 40×scale（尾段高 = dist-40×scale+28）；rotation =
+   *  atan2(dy,dx)-π/2 恒定；链段交替 FlipHorizontally（起始 = frameCounter>7，
+   *  即 15t 嚼动周期后半）。原版源矩形/origin 用 Chain4 尺寸（16×28，与 Chain12
+   *  同尺寸，数值无差）；netOffset 本地恒 0 不加 */
+  private drawWoFRope(head: Enemy, h: Enemy, top: number, bottom: number) {
+    const chain = this.atlas ? this.atlas.vmisc('vanilla/Chain12.png') : null;
+    if (!chain) return;
+    const ctx = this.ctx;
+    const scale = (h.vanilla?.scale ?? 1) * h.vanillaScale;
+    const mx = head.x + head.w / 2;                    // :37884 嘴中心 X
+    const anchorY = top + (bottom - top) * h.ai0;      // :37890-37891 挂点
+    // :37887 frameCounter>7（case 115 嚼动 counter 1..15 → 后半为真）
+    let flip = ((Math.floor(h.animT) % 15) + 15) % 15 + 1 > 7;
+    let px = h.cx;                                     // :37893 Center.X
+    let py = h.y + h.h - h.h * 0.5 * scale;            // :37894 Bottom.Y - height*0.5*scale
+    let dx = mx - px, dy = anchorY - py;
+    if (dx === 0 && dy === 0) return;                  // dist=0 除零保护（原版无此态）
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;      // :37899
+    const stop = Math.floor(40 * scale);               // :37906 num5
+    let running = true;
+    let guard = 0;
+    while (running && guard++ < 200) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      let seg = 28;                                    // :37905 段高（源矩形高）
+      if (dist < stop) { seg = Math.floor(dist) - stop + 28; running = false; } // :37908-37910
+      const k = (28 * scale) / dist;                   // :37912 段距 28×scale
+      dx *= k; dy *= k;
+      px += dx; py += dy;
+      dx = mx - px; dy = anchorY - py;                 // :37914-37915
+      if (seg > 0 && seg <= chain.sh) {                // 尾段 seg≤0 不画（canvas 0 高会抛）
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(rot);
+        if (flip) ctx.scale(-1, 1);                    // SpriteEffects.FlipHorizontally 交替
+        ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, seg,
+          -chain.sw / 2, -chain.sh / 2, chain.sw, seg);
+        ctx.restore();
+      }
+      flip = !flip;
+    }
+  }
+
+  /** DrawWOFTongueToPlayer（Main.cs:37929-37966）：嘴中心 → 舌上玩家中心 Chain12
+   *  全段链，步进 = 贴图全高 28、距嘴 <40px 段不画直接收尾；恒不翻转、scale 1 */
+  private drawWoFTongue(head: Enemy, p: Player) {
+    const chain = this.atlas ? this.atlas.vmisc('vanilla/Chain12.png') : null;
+    if (!chain) return;
+    const ctx = this.ctx;
+    const mx = head.x + head.w / 2;                    // :37936
+    const my = head.y + head.h / 2;                    // :37937
+    let px = p.x + p.w * 0.5, py = p.y + p.h * 0.5;    // :37938 玩家中心
+    let dx = mx - px, dy = my - py;
+    if (dx === 0 && dy === 0) return;
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;      // :37942
+    let running = true;
+    let guard = 0;
+    while (running && guard++ < 200) {
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 40) { running = false; continue; }    // :37947-37951
+      const k = chain.sh / dist;                       // :37952 步进 28px
+      dx *= k; dy *= k;
+      px += dx; py += dy;
+      dx = mx - px; dy = my - py;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+      ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, chain.sh,
+        -chain.sw / 2, -chain.sh / 2, chain.sw, chain.sh);
+      ctx.restore();
+    }
+  }
+
+  /** 死亡崩落近似（NPC.cs:88277-88325）：无 gore 贴图机制——嘴部 gore 137-139 由
+   *  Enemy.hurt 既有三色粒子爆发代位；此处补 :88296-88324 的墙列全屏血尘扫掠
+   *  （门 = 玩家深于 maxTilesY-250；X = 墙左沿 direction>0 时 -80、宽 140；
+   *  纵向从屏顶起 screenWidth px 高——原版用 screenWidth 当纵向跨度的怪癖照搬；
+   *  46×50 网格每格 5 尘+1 gore → 尘降为 2、gore 0.5 概率，控制总量 ~250） */
+  private spawnWoFDeathFx(
+    head: Enemy, player: Player, world: World,
+    camRY: number, viewW: number, viewH: number, z: number,
+  ) {
+    if (this.wofDeathFx.length) return;
+    // :88296-88299 玩家深度门
+    if (!(player.cy / TILE > world.store.h - 250)) return;
+    let x0 = Math.floor(head.x);                       // :88300
+    if (head.facing > 0) x0 -= 80;                     // :88301-88302
+    const x1 = x0 + 140;                               // :88303
+    const y0 = Math.floor(camRY - viewH / (2 * z));    // :88305 (int)screenPosition.Y
+    const y1 = y0 + Math.floor(viewW / z);             // :88306 +screenWidth（原版怪癖）
+    const list = this.wofDeathFx;
+    for (let y = y0; y < y1; y += 50) {                // :88308
+      for (let x = x0; x < x1; x += 46) {              // :88310
+        for (let k = 0; k < 2; k++) {                  // 原 5 尘（Dust 5 血）
+          const life = Math.round(60 + Math.random() * 40);
+          list.push({
+            x: x + Math.random() * 32, y: y + Math.random() * 32,
+            vx: (Math.floor(Math.random() * 121) - 60) * 0.1,
+            vy: (Math.floor(Math.random() * 121) - 60) * 0.1,
+            life, maxLife: life, color: '#8A1A1A', size: 2 + Math.random() * 2,
+            damp: 0.985, grav: 0.09,
+          });
+        }
+        if (Math.random() < 0.5) {                     // gore 140-142 → 半数碎肉粒
+          const life = Math.round(90 + Math.random() * 60);
+          list.push({
+            x: x + Math.random() * 32, y: y + Math.random() * 32,
+            vx: (Math.floor(Math.random() * 161) - 80) * 0.1,
+            vy: (Math.floor(Math.random() * 81) - 60) * 0.1,
+            life, maxLife: life, color: '#5E0F0F', size: 3 + Math.random() * 3,
+            damp: 0.988, grav: 0.12,
+          });
+        }
+      }
+    }
+  }
+
+  /** 崩落血尘推进+绘制（每 render 调用一步，物理与 Game.spawnParticles 同形简化） */
+  private stepWoFDeathFx() {
+    const list = this.wofDeathFx;
+    if (!list.length) return;
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (p.life <= 0) continue;
+      p.life--;
+      p.vy += p.grav ?? 0.12;
+      if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; }
+      p.x += p.vx; p.y += p.vy;
+      list[n++] = p;
+    }
+    list.length = n;
+    const ctx = this.ctx;
+    for (const p of list) {
+      ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+  }
+
   private drawEnemy(e: Enemy, world: World, entities: unknown[] = []) {
     const ctx = this.ctx;
     const spr = this.assets.enemySprites.get(e.key);
@@ -1642,6 +1943,12 @@ export class Renderer {
         const rotationDriven = !tiltOnly5
           && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 23 || stR === 40 || stR === 56);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
+        else if (e.vanillaId === 116) {
+          // 饥饿者 II（FindFrame case 116，cs:74789-74808）：rotation=atan2(vy,vx)，
+          // vx<0 再 +π；spriteDirection=sign(vx)（vx>0 镜像——在下方通用镜像位补，
+          // 本分支自带旋转故进 rotationDriven 禁用 facing 镜像，否则双翻）
+          if (e.vx !== 0) ctx.rotate(Math.atan2(e.vy, e.vx) + (e.vx < 0 ? Math.PI : 0));
+        }
         else if (e.vanilla?.aiStyle === 5) {
           // AI_005 旋转按族分流（cs:51045-51054 + FindFrame 蜜蜂覆盖 L75553）：
           // 黄蜂 42/231-235、孢子蝠 176、205 仅倾斜 vx*0.1（不随飞行方向转头）；
@@ -1664,6 +1971,7 @@ export class Renderer {
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
+        if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
@@ -3411,9 +3719,12 @@ export class Renderer {
     if (p.headUnderwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
     let bodyAlpha = 1;
     if (p.iframes > 0 && p.iframes % 6 < 2) bodyAlpha = 0.45;
-    // 微光化半透明（Player.cs:18147-18162 shimmerTransparency → GetAlpha :53253
-    // 颜色三通道乘 (1-t) ≈ globalAlpha 1-t；t>0.8 起还有淡紫色调，此处只做透明）
-    if (p.shimmerTransparency > 0) bodyAlpha *= 1 - p.shimmerTransparency;
+    // 微光化半透明（Player.cs:18147-18162 shimmerTransparency → GetImmuneAlpha
+    // :53253-53256：(1-t) 连乘三次 = (1-t)³ 曲线（前段几乎不透明、后段急坠），
+    // t≥0.8 直接 Color.Transparent 全隐——曾线性 1-t，深浸段偏亮）
+    if (p.shimmerTransparency > 0) {
+      bodyAlpha *= p.shimmerTransparency >= 0.8 ? 0 : (1 - p.shimmerTransparency) ** 3;
+    }
     if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;
     // 矿车骑乘：整体绕脚底中心旋转（Player.fullRotation/fullRotationOrigin=(w/2,h)，
     // Player.cs:27805-27806 TrackRotation 产出）+ gfxOffY 纵向贴轨补偿
@@ -4194,7 +4505,7 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock) {
+  private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock, entities: Entity[] = []) {
     if (!this.minimap) return;
     this.minimap.flushDirty();
     const size = 240;                 // 放大
@@ -4219,9 +4530,13 @@ export class Renderer {
       ox - sx * size / viewTiles, oy - sy * size / viewTiles,
       size / viewTiles, 2 * size / viewTiles,
       { x: ox, y: oy, w: size, h: size });
-    // 玩家图标
-    this.drawPlayerMarker(ctx,
-      ox + (px - sx) / viewTiles * size, oy + (py - sy) / viewTiles * size, 10);
+    // 头像层(原版 DrawNPCMapIcons3 :55546 + MapPlayerRenderer):玩家头/城镇 NPC 头/
+    // Boss 头;headScale=min(1,(1×0.4+1)/3)≈0.47(Main.cs:55059,小地图 scale=1)
+    this.drawMapHeads(ctx, player, Math.min(1, (1 * 0.2 * 2 + 1) / 3),
+      (wx) => ox + (wx / TILE - sx) / viewTiles * size,
+      (wy) => oy + (wy / TILE - sy) / viewTiles * size,
+      entities.filter((e) => e instanceof TownNPC) as TownNPC[],
+      entities.filter((e) => e instanceof Enemy) as Enemy[]);
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
     const { skin, tex } = this.minimapSkinAssets();
     const fx = ox + 4 + skin.fo[0], fy = oy + 4 + skin.fo[1];
@@ -4471,19 +4786,7 @@ export class Renderer {
   }
 
   /** 地图玩家标记：优先 Maples 主角帧（与游戏内形象一致），程序化仅兜底 */
-  private drawPlayerMarker(ctx: CanvasRenderingContext2D, x: number, y: number, size: number) {
-    let fw: number, fh: number, img: CanvasImageSource;
-    const atlasFrame = this.atlas ? this.atlas.rect('角色/Player.png', 'Player_0') : null;
-    if (atlasFrame) {
-      img = atlasFrame.img; fw = atlasFrame.sw; fh = atlasFrame.sh;
-    } else {
-      const sheet = this.assets.playerSheet;
-      img = sheet; fw = this.assets.playerFrameW; fh = this.assets.playerFrameH;
-    }
-    const aspect = fw / fh;
-    const h = size, w = size * aspect;
-    ctx.drawImage(img, 0, 0, fw, fh, x - w / 2, y - h / 2, w, h);
-  }
+
 
   /** 地图头像层(原版 Main.DrawMap 的 DrawNPCMapIcons3/2 :55546+/:55602+ +
    *  MapPlayerRenderer.DrawPlayerHead :55158+):小地图与全屏地图共用。
@@ -4545,13 +4848,13 @@ export class Renderer {
       if (vid == null) continue;
       const idx = BOSS_HEAD_INDEX[vid];
       if (idx === undefined) continue;
-      const rot = bossHeadRotation(vid, (e as unknown as { rotation?: number }).rotation ?? 0);
+      const rot = bossHeadRotation(vid, (e as unknown as { visAngle?: number }).visAngle ?? 0);
       drawHead(this.atlas.ensureVImage(`vanilla/NPC_Head_Boss_${idx}.png`), e.cx, e.cy, false, rot);
     }
   }
 
   /** 全屏地图：半透明背景 + 完整世界图 + 边框 + 操作提示；支持拖动/缩放 */
-  drawFullMap(ctx: CanvasRenderingContext2D, world: World, mouseX: number, mouseY: number, mouseDown: boolean) {
+  drawFullMap(ctx: CanvasRenderingContext2D, world: World, mouseX: number, mouseY: number, mouseDown: boolean, entities: Entity[] = []) {
     const fm = this.fullMap;
     const viewW = ctx.canvas.width, viewH = ctx.canvas.height;
     this._fmWorldW = world.w;
@@ -4610,10 +4913,15 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
     // 迷雾
     this.drawFog(ctx, world, cx0, cy0, fm.zoom, 2 * fm.zoom);
-    // 玩家位置标记（醒目：脉冲圆环 + 白箭头 + 文字）
+    // 头像层(原版 DrawNPCMapIcons2 :55602 + MapPlayerRenderer:玩家头/城镇 NPC 头/
+    // Boss 头;headScale=min(1,(zoom×0.5+1)/3)——Main.cs:55140)
     const p = this._lastPlayer;
     if (p) {
-      this.drawFullMapPlayerMarker(ctx, cx0 + p.cx / TILE * fm.zoom, cy0 + p.cy / TILE * fm.zoom);
+      this.drawMapHeads(ctx, p, Math.min(1, (fm.zoom * 0.25 * 2 + 1) / 3),
+        (wx) => cx0 + wx / TILE * fm.zoom,
+        (wy) => cy0 + wy / TILE * fm.zoom,
+        entities.filter((e) => e instanceof TownNPC) as TownNPC[],
+        entities.filter((e) => e instanceof Enemy) as Enemy[]);
     }
     // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）
     const tp = this.tpMark;
@@ -4757,50 +5065,6 @@ export class Renderer {
   }
 
   /** 全屏地图主角标记：脉冲圆环 + 原版风格白箭头（黑描边）+ 坐标文字 */
-  private drawFullMapPlayerMarker(ctx: CanvasRenderingContext2D, x: number, y: number) {
-    const t = performance.now() * 0.004;
-    const pulse = 0.5 + 0.5 * Math.sin(t);
-    // 外圈脉冲环（由内向外扩散渐隐）
-    ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - pulse)})`;
-    ctx.lineWidth = 2.5;
-    ctx.beginPath();
-    ctx.arc(x, y, 16 + 14 * pulse, 0, Math.PI * 2);
-    ctx.stroke();
-    // 常驻细环
-    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.arc(x, y, 13, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, 13, 0, Math.PI * 2);
-    ctx.stroke();
-    // 原版风格向下箭头（黑描边白填充，指示"我在这里"）
-    const s = 9;
-    ctx.beginPath();
-    ctx.moveTo(x, y + s * 1.6);
-    ctx.lineTo(x - s * 0.85, y - s * 0.5);
-    ctx.lineTo(x + s * 0.85, y - s * 0.5);
-    ctx.closePath();
-    ctx.fillStyle = '#000';
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 3;
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-    ctx.fillStyle = '#FFF';
-    ctx.fill();
-    // 文字标注（黑描边保证任何底色上可读）
-    const label = Lang.text('Mods.SandboxWorld.Map.PlayerLabel');
-    ctx.font = 'bold 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-    ctx.strokeText(label, x, y - 22);
-    ctx.fillStyle = '#FFF';
-    ctx.fillText(label, x, y - 22);
-  }
   /** 打开地图的那次点击不参与拖拽（Game 打开时置位，松开后清除） */
   _mapOpenClick = false;
   private _lastPlayer: Player | null = null;

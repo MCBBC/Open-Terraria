@@ -45,7 +45,7 @@ describe('选取规则：IsCrafted last-wins + 邪恶覆盖分支', () => {
 describe('数量与拆垛（Item.FindDecraftAmount :49062-49070 / :1913-1916）', () => {
   it('骨头平台 634 createStack=2：5 个 → 2 次 → 2 骨头，消耗 4；不足一组 → null', () => {
     expect(decraftOutcome(634, 5, false, () => 2)).toEqual({
-      piles: [{ vid: 154, stack: 2 }], consumed: 4, spread: false,
+      piles: [{ vid: 154, stack: 2 }], slots: [1], consumed: 4, spread: false,
     });
     expect(decraftOutcome(634, 1, false, () => 2)).toBeNull();
   });
@@ -53,6 +53,7 @@ describe('数量与拆垛（Item.FindDecraftAmount :49062-49070 / :1913-1916）'
   it('单垛上限 9999：30000 骨头平台 → 15000 骨头拆 9999+5001 两垛', () => {
     const out = decraftOutcome(634, 30000, false, () => 2)!;
     expect(out.piles).toEqual([{ vid: 154, stack: 9999 }, { vid: 154, stack: 5001 }]);
+    expect(out.slots).toEqual([1, 1]);   // 拆垛共享材料序号（num7 按材料递增，非按垛）
     expect(out.consumed).toBe(30000);
   });
 });

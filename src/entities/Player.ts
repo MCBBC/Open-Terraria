@@ -808,8 +808,19 @@ export class Player extends Entity {
     // 微光浸入（Player.cs:27420-27434）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
     // shimmerImmune（:14981 原版旗标来源未移植）恒 false；地狱层内不授予
     // （:27430 采样处即有 position.Y/16 < UnderworldLayer 门）
+    // Main.UnderworldLayer = maxTilesY-200（Main.cs:2863 恒 h-200，SceneMetrics.ts 同源）——
+    // 非 world.lavaLine（本仓岩浆线 ≈(rockLayer+h)/2 生成参数，比 h-200 浅 ~170 格，
+    // 误用会提前关闭地狱层门）
+    const underworldLayer = world.h - 200;
     this.inShimmer = world.store.liquidType[centerIdx] === 4 && liq > 30;
-    if (this.inShimmer && this.y / TILE < world.lavaLine) this.buffs.apply(BuffType.Shimmered, 1);
+    // 授予采样（:27426-27433）与 shimmerWet 盒判定不同位：外门 = Collision.shimmer
+    // 盒命中（inShimmer 近似），内采样另取【顶格】(Center.X/16, (position.Y+1)/16) 的
+    // shimmer() 旗标——该旗标只看液体类型不看液量（同句 liquid>=0 恒真），浅浸即授予；
+    // 曾沿用脚格 + liq>30 → 顶格 1 单位微光时不授予（修正：浅浸过量授予的反向漏授）。
+    // 顶格越界（y<0）读 undefined !== 4 = 原版 Main.tile[负] null 短路，同语义
+    const topIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + 1) / TILE));
+    if (this.inShimmer && world.store.liquidType[topIdx] === 4
+      && this.y / TILE < underworldLayer) this.buffs.apply(BuffType.Shimmered, 1);
     // buff 353 处理段（Player.cs:11381-11419）：buff 在 → shimmering=true + frozen
     // 封输入（下方移动积分前的 Frozen∪Shimmering 清零段消费）+ fallStart 重置（免摔伤）。
     // 注意：本 tick 内 DelBuff 后 shimmering 保留到下 tick 才复位（原版 :18168 帧首
@@ -817,7 +828,7 @@ export class Player extends Entity {
     if (this.buffs.has(BuffType.Shimmered)) {
       this.shimmering = true;
       this.fallStartY = null;
-      if (this.y / TILE > world.lavaLine) {
+      if (this.y / TILE > underworldLayer) {
         // 地狱层门（:11391-11397）position.Y/16 > UnderworldLayer → DelBuff
         this.buffs.remove(BuffType.Shimmered);
       } else if (this.inShimmer) {
@@ -1930,8 +1941,10 @@ export class Player extends Entity {
    *  不 clamp——luckMinimumCap=-0.7/luckMaximumCap=1（Player.cs:2952/2954）只喂 UI 计量
    *  （:3950-3957），聚合本体可超界（原版如此）。
    *  来源接线：药水 buff 257 三档 / 灯笼夜 / 地精+火炬（Game 15t 扫描）/ 装备（幸运币 855
-   *  +0.05、马掌族 +0.05，Player.cs:12629-12647）已接；瓢虫 359/360、buff 383 风筝、
-   *  buff 120 臭屁、银河珍珠 5340、碎镜 810、微光化币——登记（物品/子系统未移植） */
+   *  +0.05、马掌族 +0.05，Player.cs:12629-12647）已接；瓢虫 604/605（击杀=坏运
+   *  Enemy.hurt cs:82338、触碰=好运 ladybugAI cs:78730——旧注 359/360 为误记，实为蜗牛）、
+   *  buff 383 风筝三档、buff 120 臭屁、银河珍珠 5340、碎镜 1085、微光化币——均已接
+   *  （来源状态权威见 src/stats/Luck.ts 头注） */
   get luck(): number {
     const l = this.luckState;
     let v = l.ladyBugLuck * 0.2 + l.torchLuck * 0.2;        // :28673

@@ -167,7 +167,9 @@ export class Critter extends Entity {  stepUp = true; // 原版 NPC 全体走 Co
     const inShimmer = st.inBounds(tx, ty) && st.liquidType[st.idx(tx, ty)] === 4
       && st.liquid[st.idx(tx, ty)] > 30;
     if (!inShimmer) {
-      if (this.shimmerT > 0) this.shimmerT--;   // 离池衰减（:92484-92500）
+      // 离池衰减（:92484-92500）：shimmerTransparency -0.001/t——shimmerT 是其
+      // ×100 计数 → -0.1/t（90 → 0 需 900t）；曾 -1/t 快 10 倍
+      if (this.shimmerT > 0) this.shimmerT = Math.max(0, this.shimmerT - 0.1);
       return false;
     }
     if (!CRITTER_AISTYLE_67.has(this.def.npc)) {

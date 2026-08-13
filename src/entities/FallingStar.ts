@@ -93,7 +93,14 @@ export class FallingStar extends Entity {
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(Math.atan2(this.vy, this.vx) - Math.PI / 2);
-    // 星形：四角星简形（原版贴图 22×24 竖四角星；程序绘制近似）
+    // 原版贴图 Projectile_9.png(22×24,单帧;旋转对齐速度向)
+    const img = r.atlas?.ensureVImage?.('vanilla/Projectile_9.png') ?? null;
+    if (img) {
+      ctx.drawImage(img, -11, -12, 22, 24);
+      ctx.restore();
+      return;
+    }
+    // 星形：四角星简形（贴图缺失时程序兜底）
     ctx.fillStyle = this.natural ? '#FFF7D8' : '#D8E8FF';
     ctx.beginPath();
     ctx.moveTo(0, -9);

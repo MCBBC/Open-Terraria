@@ -23,10 +23,19 @@ function zeroRate(fn: () => number): number {
   return hit / TRIALS;
 }
 
+/** 蒙特卡洛命中率断言：|p̂−p| < k×SE（二项 SE = √(p(1−p)/n)）。
+ *  原 toBeCloseTo 定容差与样本量脱钩，统计上必挂：p=0.1/n=1e4 的 ±0.005 仅 1.7σ
+ *  （≈10% flaky）、p=0.02/n=2e5 的 ±5e-4 仅 1.6σ（≈11%）；按 SE 定容差（默认 5σ，
+ *  两侧 ≈6e-7）既稳定又不放松断言意图。 */
+function expectRateClose(rate: number, p: number, n = TRIALS, k = 5): void {
+  const se = Math.sqrt((p * (1 - p)) / n);
+  expect(Math.abs(rate - p)).toBeLessThan(k * se);
+}
+
 describe('Luck.cs 掷骰三态（Luck.cs:5-60）', () => {
   it('RollLuck：luck=0 基线 1/N；luck=1 正运命中率约 +37%；luck=-1 负运约减半', () => {
     const base = zeroRate(() => rollLuck(0, 100));
-    expect(base).toBeCloseTo(0.01, 3);
+    expectRateClose(base, 0.01);
     const good = zeroRate(() => rollLuck(1, 100));
     // 正运必触发：Next(Next(50,100))，期望命中率 = ∫₅₀¹⁰⁰ (1/x dx)/50 ≈ ln2/50 ≈ 0.0139
     expect(good).toBeGreaterThan(base * 1.2);
@@ -40,7 +49,7 @@ describe('Luck.cs 掷骰三态（Luck.cs:5-60）', () => {
   it('RollOnlyBadLuck：正运不受益（同基线）；负运收窄为 [N/2, N)', () => {
     const base = zeroRate(() => rollOnlyBadLuck(0, 100));
     const good = zeroRate(() => rollOnlyBadLuck(1, 100));
-    expect(base).toBeCloseTo(0.01, 3);
+    expectRateClose(base, 0.01);
     expect(Math.abs(good - base)).toBeLessThan(0.003);   // 正运与 0 等价
     const bad = zeroRate(() => rollOnlyBadLuck(-1, 100));
     expect(bad).toBeGreaterThan(base * 1.2);             // 负运下血月墓园怪更易刷
@@ -48,14 +57,14 @@ describe('Luck.cs 掷骰三态（Luck.cs:5-60）', () => {
 
   it('Extreme 两函数：正运 ×10 窗口（P0≈1/1000）/ 负运 ÷10 窗口（P0≈0.1）；OnlyBadLuckExtreme 非负运恒 -1', () => {
     // RollBadLuckExtreme 语义是"掷中小值=坏"：luck>0 → Next(N*10)（P0 变小）、luck<0 → Next(N/10)
-    expect(zeroRate(() => rollBadLuckExtreme(1, 100))).toBeCloseTo(0.001, 3);
+    expectRateClose(zeroRate(() => rollBadLuckExtreme(1, 100)), 0.001);
     expect(zeroRate(() => rollBadLuckExtreme(-1, 100))).toBeGreaterThan(0.05);
     let negOne = 0;
     for (let i = 0; i < 1000; i++) if (rollOnlyBadLuckExtreme(0.5, 100) === -1) negOne++;
     expect(negOne).toBe(1000);
     let hit = 0;
     for (let i = 0; i < 10_000; i++) if (rollOnlyBadLuckExtreme(-1, 100) === 0) hit++;
-    expect(hit / 10_000).toBeCloseTo(0.1, 2);   // [0, N/10) 上命中 0 ≈ 10%
+    expectRateClose(hit / 10_000, 0.1, 10_000);   // [0, N/10) 上命中 0 ≈ 10%
   });
 });
 
@@ -194,7 +203,7 @@ describe('掉落概率随 luck 变化趋势（NpcDrops rollLuck 同构链：Roll
   it('1/50 掷骰：luck 0 → 0.02 基线；0.5 / 1.0 逐级上升', () => {
     const rate = (luck: number) => zeroRate(() => rollLuck(luck, 50));
     const r0 = rate(0), r1 = rate(0.5), r2 = rate(1);
-    expect(r0).toBeCloseTo(0.02, 3);
+    expectRateClose(r0, 0.02);
     expect(r1).toBeGreaterThan(r0 * 1.1);
     expect(r2).toBeGreaterThan(r1);
   });

@@ -16,7 +16,7 @@ import { TILE } from '../src/core/constants';
 // ---------------------------------------------------------------------------
 function cleanCtx(over: Partial<LanternCtx> = {}): LanternCtx {
   return {
-    bloodMoon: false, pumpkinMoon: false, snowMoon: false,
+    dayTime: false, bloodMoon: false, pumpkinMoon: false, snowMoon: false,
     invasionType: 0, moonLordCountdown: 0, spawnMeteor: false,
     downedMoonlord: false, bossActive: () => false, ...over,
   };
@@ -31,7 +31,11 @@ describe('LanternNight 灯笼夜', () => {
     LanternNight.onGameEventCleared(16);           // 毁灭者
     expect(LanternNight.nextNightIsLanternNight).toBe(true);
     expect(LanternNight.lanternsUp).toBe(false);   // 预约不等于当夜
+    // WorldClear（:120-126）只清 Manual/Genuine/Cooldown/_was 四项——首胜预约跨读图保留
     LanternNight.worldClear();
+    expect(LanternNight.nextNightIsLanternNight).toBe(true);
+    LanternNight.checkNight(cleanCtx());           // 入夜兑现并消费预约
+    expect(LanternNight.nextNightIsLanternNight).toBe(false);
     LanternNight.onGameEventCleared(4);            // 哀木
     LanternNight.onGameEventCleared(21);           // 圣诞树
     LanternNight.onGameEventCleared(22);           // 圣诞坦克

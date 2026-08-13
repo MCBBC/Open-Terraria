@@ -100,7 +100,7 @@ function hitEnemies(
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
     playEnemyHitSound(game, e);
-    e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game, pen); // ⑥ 减防语义
+    e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game, pen, crit); // ⑥+击退管线 crit×1.4
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     applyProjStatus(me.projId, e as unknown as Record<string, number>);
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
@@ -737,6 +737,14 @@ export class FlailProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.dead = true; return; }
+    // 火焰重锤 948 入水(非岩浆)→ 变型 948→947(:41069-41072 type==948 && wet && !lavaWet)
+    if (this.projId === 948) {
+      const st948 = game.world.store;
+      const li = st948.liquid[st948.idx(Math.floor((this.x + this.w / 2) / TILE), Math.floor((this.y + this.h / 2) / TILE))];
+      if (li > 64 && st948.liquidType[st948.idx(Math.floor((this.x + this.w / 2) / TILE), Math.floor((this.y + this.h / 2) / TILE))] !== 2) {
+        this.projId = 947;
+      }
+    }
     const p = game.player;
     this.handX = p.cx;
     this.handY = p.cy;
@@ -897,9 +905,10 @@ export class FlailProj extends Entity {
     else { this.vx += (ddx / dd) * accel; this.vy += (ddy / dd) * accel; }
   }
 
-  /** 撞墙反馈（Collision.HitTiles + SoundID 0 音尘近似——挖掘音未接,登记 GAP） */
+  /** 撞墙反馈（Collision.HitTiles 尘 + SoundID 0 挖掘音——:41045 num2>0 门） */
   private hitTileFx(game: GameHooks, hx: number, hy: number): void {
     game.spawnParticles(hx + this.w / 2, hy + this.h / 2, '#A09080', 3, 1.5, { life: 14, size: 2 });
+    game.playSfx('dig', 0.5, hx + this.w / 2, hy + this.h / 2);
   }
 }
 

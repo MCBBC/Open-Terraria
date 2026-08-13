@@ -32,8 +32,10 @@
 //           （BuffType.Stinky，Player.luck 直读）、银河珍珠 5340（vi_5340_galaxy_pearl
 //           使用置 usedGalaxyPearl）、碎镜（vi_5577_pretty_mirror 投掷弹 1085 消亡近身
 //           150px → brokenMirrorBadLuckTime；原版此处弹体 id=1085，旧注释"810"系 1.4.0.5 编号）。
-//     仍登记：微光化币（微光未移植）；风筝/恶臭 buff 的授予物品（风筝族 4371 等/恶臭
-//           药水 1332/弹幕 1080）未移植。
+//     登记→已接：微光化币（WorldItem.cs:1791-1810 钱币入微光消散 → coinLuckAmount
+//           面额放大 → LuckState.addCoinLuck 距离门+衰减；ItemDrop 钱币分支已接，
+//           回归见 tests/shimmer.test.ts「金币 73 入池」探针）。
+//     仍登记：风筝/恶臭 buff 的授予物品（风筝族 4371 等/恶臭药水 1332/弹幕 1080）未移植。
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 
