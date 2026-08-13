@@ -182,12 +182,17 @@ const res = await page.evaluate(async () => {
   ok('⑪ unlockedMerchantSpawn → 商人直通（死亡后花光钱也回归）', g.townNpcSpawnAllowed('merchant') === true);
   delete g.world.flags.unlockedMerchantSpawn;
 
-  // ---- ⑫ 许可证商店门（图鉴 25%/45%）----
-  ok('⑫ 新世界图鉴 <25% → 狗证不上架', g.shopCondOk('bestiary25') === false);
-  ok('⑫ 新世界图鉴 <45% → 兔证不上架', g.shopCondOk('bestiary45') === false);
+  // ---- ⑫ 许可证商店门（图鉴 25%/45%）——本世界图鉴进度可能非零（复用存档），
+  //      断言恒等式 cond === (percent ≥ 阈值) ----
+  const pct = g.world.bestiary.completion().percent;
+  ok('⑫ bestiary25 门 = (percent≥0.25)', g.shopCondOk('bestiary25') === (pct >= 0.25));
+  ok('⑫ bestiary45 门 = (percent≥0.45)', g.shopCondOk('bestiary45') === (pct >= 0.45));
 
   // ---- ⑬ 宠物入驻链（boughtCat → 免房流浪生成）----
-  delete g.world.flags.unlockedMerchantSpawn;
+  // 预置 painter 占位：优先链 painter 条目（在场≥8 无 allow 门）会抢先吃掉本轮
+  if (!g.entities.npcs.some(n2 => n2.npcKey === 'painter')) {
+    g.entities.add(new TownNPC('painter', g.player.cx, g.player.cy), 'npcs');
+  }
   const catsBefore = g.entities.npcs.filter(n2 => n2.npcKey === 'town_cat').length;
   g.world.flags.boughtCat = true;
   g.updateTownNpcArrival();

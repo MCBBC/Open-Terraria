@@ -211,6 +211,8 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
     bee.fatigueRecovery();
     expect(bee.fatigue).toBe(3);
     bee.fatigueRecovery();
+    expect(bee.fatigue).toBe(1);                  // ≤2 档下一次归 0
+    bee.fatigueRecovery();
     expect(bee.fatigue).toBe(0);
   });
 
@@ -224,7 +226,8 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
     expect(ufo.flyTime).toBe(1);
     ufo.hover(view({ inputUp: true }));
     expect(ufo.flyTime).toBe(0);
-    expect(ufo.fatigue).toBe(1);                  // 转入疲劳累积
+    ufo.hover(view({ inputUp: true }));
+    expect(ufo.fatigue).toBe(1);                  // flyTime 尽后转入疲劳累积
     // 爬升速度：vy 向 -(2 + 6×(1-疲劳比)) 带 deadzone 钳
     ufo.fatigue = 0;
     const v2 = view({ inputUp: true, vy: 0 });
@@ -250,7 +253,8 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
     const ufo = new MountInstance();
     ufo.setMount(7, view());
     ufo.updateFrame(view(), FRAME_STANDING, 0, 0);
-    expect(ufo.frameState).toBe(FRAME_FLYING);   // UFO 无条件空中帧（:3688）
+    expect(ufo.frameState).toBe(FRAME_STANDING);  // frameState 不被改写（:3688 只改帧组）
+    expect(ufo.frame).toBe(0);                    // 空中组起点 0（inAirFrameStart 0）
   });
 
   it('abilityRecovery（:2897）：充能单向爬升、冷却/持续时间递减', () => {
@@ -286,32 +290,18 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
     tick(p, w, 8);
     p.mount.setMount(1, p);
     expect(p.ridingMount).toBe(true);
-    p.buffs.apply(4 /* Frozen 占位 = BuffType.OnFire 枚举序无关，直接用已注册冻结位 */, 0);
-    p.buffs.remove(4);
-    // 用真实冻结 buff 键（BuffType.Frozen）验证
-    p.buffs.apply(60, 0);                          // 任意已注册键不强转——见下方真实用例
-    p.buffs.remove(60);
-    const { BuffType } = await_import_BuffType();
     p.buffs.apply(BuffType.Frozen, 1);
     tick(p, w, 1);
     expect(p.ridingMount).toBe(false);
   });
 });
 
-// 动态引入避免循环依赖问题（测试环境直接 import 亦可）
-function await_import_BuffType() {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  return { BuffType: require('../src/stats/Buffs').BuffType };
-}
-
 describe('三模物理接管（Player.fixedUpdate 挂钩）', () => {
   it('陆行族：Run 段参数覆写（Player.cs:26329-26331）', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     tick(p, w, 8);
-    const baseVx = p.maxRunProbe();
-    void baseVx;
-    p.mount.setMount(14, p);                      // 蜥蜴 runSpeed 8 / dash 9.01?
+    p.mount.setMount(14, p);                      // 蜥蜴 runSpeed 8
     p.inputX = 1;
     const x0 = p.x;
     tick(p, w, 30);
@@ -327,10 +317,12 @@ describe('三模物理接管（Player.fixedUpdate 挂钩）', () => {
     tick(p, w, 8);
     p.mount.setMount(3, p);                       // constantJump = true
     expect(p.mount.autoJump).toBe(true);
+    const restY = p.y;
     p.inputX = 1;
-    tick(p, w, 30);
-    // 自动连跳期间应出现过负 vy（无需按跳）
-    expect(p.y).toBeLessThanOrEqual(77 * 16);
+    let minY = p.y;
+    for (let i = 0; i < 60; i++) { p.fixedUpdate(1 / 60, fakeHooks(w, p) as never); minY = Math.min(minY, p.y); }
+    // 自动连跳（无需按跳）应离地腾空：最低 y 显著高于站定高度
+    expect(minY).toBeLessThan(restY - 16);
   });
 
   it('飞行族 hover 接管：按上升键消耗 flyTime 且免摔', () => {

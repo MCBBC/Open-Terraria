@@ -113,7 +113,7 @@ describe('不变量扫描器·合成用例', () => {
 
 
 // ---- 集成组:真实世界生成后全图扫描(默认单种子,SW_AUDIT_SEEDS 扩展) ----
-const SEEDS = (process.env.SW_AUDIT_SEEDS ?? '9293480').split(',');
+const SEEDS = (process.env.SW_AUDIT_SEEDS ?? '9293480,12345').split(','); // 双种子默认(单种子盲区实证:9293480 陷阱巨石路径不可达)
 
 describe('不变量扫描器·集成(真实生成世界)', () => {
   for (const seed of SEEDS) {
@@ -124,11 +124,17 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
       // 残片登记表:R1 规则层豁免只收"存储形态差异"(单格/多带);存量【残片】
       // (后续 pass 半拆多格物体,原版 KillTile 整块清语义未接通)在此白名单+计数
       // 基线——新类型出现或同类暴增必红(扫描器核心价值保留)。
+      // 残片登记表:R1 规则层豁免只收"存储形态差异";存量【残片】在此白名单+计数
+      // 基线——新类型出现或同类暴增必红(扫描器核心价值保留)。
+      // ★2026-08-13 残片清扫 pass(MultitileFragmentSweep)落地后,可放置物体类
+      //  (pot/statue/bowls/detonator/heart)从白名单移除并转为【缺席断言】——
+      //  清扫 pass 回归(被移除/改名)时这些类型重新出现即红,白名单不再养残片。
       const FRAGMENTS: Record<string, number> = {
-        'pot': 10, 'v_26_altars': 5, 'v_186_decos_3x2': 50, 'v_187_decos_3x2_group_2': 60,
-        'v_529_sea_oats': 60, 'v_105_statue': 25, 'v_411_detonator': 10,
-        'v_103_bowls': 6, 'crystal_heart': 4,
+        'v_26_altars': 5,   // 原版不保护祭坛残片(altar-fragment-fix memory)
+        'v_186_decos_3x2': 50, 'v_187_decos_3x2_group_2': 60, // 多带表帧语义
+        'v_529_sea_oats': 60, // 原版单格写入(cs:58333)
       };
+      const SWEPT = new Set(['pot', 'v_105_statue', 'v_103_bowls', 'v_411_detonator', 'crystal_heart']);
       const byType = new Map<string, number>();
       for (const v of errs) byType.set(v.typeKey, (byType.get(v.typeKey) ?? 0) + 1);
       const unknown = [...byType.keys()].filter((k) => !(k in FRAGMENTS));
@@ -136,6 +142,8 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
       for (const [k, n] of byType) {
         expect(n, `${k} 超基线(同类暴增?)`).toBeLessThanOrEqual(FRAGMENTS[k]);
       }
+      const reswept = [...byType.keys()].filter((k) => SWEPT.has(k));
+      expect(reswept, '清扫类型重新出现=清扫 pass 回归').toEqual([]);
       const warnsAll = rep.violations.filter((v) => v.severity === 'warn');
       if (warnsAll.length) {
         const byType2 = new Map<string, number>();

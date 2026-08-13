@@ -237,6 +237,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 沙岩硬沙墙灌满岩浆/巨石重帧补支撑/液体中棕榈杀/地牢墙液体转水/矿轨清液/
     // 金币堆补底/地表散水清除/画作继承邻墙；FillWallHoles 与彩蛋备案）。零掷骰
     { name: '终清理', run: finalCleanupPass },
+    // 多格残片清扫(本仓补,原版由 KillTile 整块语义天然保证):破损的可放置
+    // 多格物体(陶罐/雕像/碗/起爆器/生命水晶)整体移除;祭坛/装饰组/海燕麦
+    // 为原版保留形态,不在清扫列(集成 FRAGMENTS 白名单在案)。零掷骰
+    { name: '多格残片清扫', run: multitileSweepPass },
   ];
 
   for (let i = 0; i < passes.length; i++) {
@@ -282,6 +286,7 @@ import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
 import { runTileCleanupPass } from './vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from './vanilla/BrokenTrapCleanupPass';
 import { runFinalCleanupPass } from './vanilla/FinalCleanupPass';
+import { runMultitileFragmentSweepPass } from './vanilla/MultitileFragmentSweep';
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
@@ -881,6 +886,10 @@ function brokenTrapCleanupPass({ store, world }: GenCtx) {
 
 function finalCleanupPass({ store }: GenCtx) {
   runFinalCleanupPass(store, ctxGs[0]!);
+}
+
+function multitileSweepPass({ store }: GenCtx) {
+  runMultitileFragmentSweepPass(store);
 }
 
 // ---- Batch D 顺序归位包装(2026-08-13)----

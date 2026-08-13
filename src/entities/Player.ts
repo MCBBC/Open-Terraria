@@ -144,6 +144,8 @@ export class Player extends Entity {
   private stickyBreak = 0;
   private surfaceJumpCd = 0;  // 水面起跳冷却
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
+  /** 移动段当前速度上限探针（mounts.test 等消费;非原版字段） */
+  _maxRunProbe = 0;
   /** 自然回血爬坡计时（Player.lifeRegenTime：受击 :37784 / DoT :18781+ / 流血 :19000 清零，
    *  每 tick 基础 +1（:18930）、蜂蜜 +2（:18954）；本仓自然回血为恒 1HP/s 简化，爬坡只
    *  决定"出伤后多久开始回"（首档阈值 300t :19003）——蜂蜜 3 倍速抵达 */
@@ -343,6 +345,7 @@ export class Player extends Entity {
     sentrySlots: number;   // maxTurrets += N
     fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
     runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
+    enduranceEq: number; solarSet: boolean;   // 日曜套(:16224-16295)
     whipRange: number;     // whipRangeMultiplier += X
     whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
     summonSet: SummonSetFx | null;
@@ -367,6 +370,7 @@ export class Player extends Entity {
     let move = 0, meleeSpeed = 0, runSpeed = 0;
     let fish = 0;             // fishingSkill（钓具配饰+渔夫甲）
     let setRunAccMul = 1, setMaxRunMul = 1, setRunSlowMul = 1;   // 暗影套移动四参数(:26195)
+    let setEndurance = 0, solarSet = false;   // 日曜套(:16224-16295)
     // 魔力回复直值（ApplyEquipFunctional if-chain :14379-14383——魔力斗篷 982 专属）
     let manaRegenBonus = 0, manaRegenDelayBonus = 0;
     let extraFall = 0, lavaMax = 0, armorPen = 0, rocketBoots = 0;
@@ -564,6 +568,8 @@ export class Player extends Entity {
       if (sb.runAccMul) setRunAccMul = sb.runAccMul;      // 暗影套 :26195-26201
       if (sb.maxRunMul) setMaxRunMul = sb.maxRunMul;
       if (sb.runSlowMul) setRunSlowMul = sb.runSlowMul;
+      if (sb.endurance) setEndurance += sb.endurance;   // 日曜套 :16224
+      if (sb.solar) solarSet = true;
       if (sb.fireWalk) fireWalk = true;
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.ammoCost80) ammoSave = true;
@@ -616,6 +622,7 @@ export class Player extends Entity {
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
       runAccMul: setRunAccMul, maxRunMul: setMaxRunMul, runSlowMul: setRunSlowMul,
+      enduranceEq: setEndurance, solarSet,
       setBonus: sb, manaCostMul,
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
       whipSpd: summonSet?.whipSpd ?? 1,
@@ -1255,7 +1262,8 @@ export class Player extends Entity {
           this.vx += ix * runAcc * 0.2;
           if (wingAir) this.vx += ix * runAcc * 0.2;
         }
-        this.vx = ix > 0 ? Math.min(this.vx, Math.max(accRun, toward)) : Math.max(this.vx, -Math.max(accRun, toward));
+        this._maxRunProbe = Math.max(accRun, toward);
+        this.vx = ix > 0 ? Math.min(this.vx, this._maxRunProbe) : Math.max(this.vx, -this._maxRunProbe);
       } else {
         // 无输入减速（:19771-19800:地面 0.2 / 空中 0.1 加法钳 0）
         const fr = this.onGround ? runSlow : runSlow * 0.5;

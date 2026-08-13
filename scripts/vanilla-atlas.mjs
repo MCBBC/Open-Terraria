@@ -2,7 +2,7 @@
 // 原版 Tiles 表无 .meta（不同于 Maples Unity 项目），按 textureGrid+frameGap 网格寻址：
 //   帧 (col,row) 位于 (col*(gridX+gapX), row*(gridY+gapY))，帧尺寸 = textureGrid
 // 用法：node scripts/vanilla-atlas.mjs
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -414,6 +414,47 @@ if (existsSync(armorDir)) {
     uiOut.files[key] = `vanilla-ui/${key}`;
     uiCopied++;
   }
+}
+// ---- 全量族拷贝（2026-08-13 素材差异扫描批）----
+// 根级：除 Item_\d+（Item_Atlas 打包通道）外全拷（Gore/Glow/Extra/Cloud/ItemFlame/
+// LiquidSlope/Chain/Mount/Rune/散件……）。子目录：UI/** → vanilla-ui 展平键；
+// 其余（Backgrounds/Misc/TownNPCs/Accessories/Armor/SplashScreens）→ vanilla/<展平名>
+// （父目录_文件名；重名时父目录前缀消歧）。本段幂等：重跑重复拷贝无副作用。
+{
+  const imgDir = join(ASSETS);
+  const skipRoot = (f) => /^Item_\d+\.png$/.test(f);
+  let bulk = 0;
+  for (const f of readdirSync(imgDir)) {
+    const full = join(imgDir, f);
+    if (!statSync(full).isFile() || !f.endsWith('.png') || skipRoot(f)) continue;
+    copyFileSync(full, join(OUT_DIR, f)); bulk++;
+  }
+  const SUBDIRS_UI = ['UI'];
+  const SUBDIRS_MISC = ['Backgrounds', 'Misc', 'TownNPCs', 'Accessories', 'Armor', 'SplashScreens'];
+  const flatName = (rel) => rel.replace(/\//g, '_');
+  const usedNames = new Set(readdirSync(OUT_DIR));
+  const copySub = (sub, toUi) => {
+    const base = join(imgDir, sub);
+    const outDir = toUi ? UI_OUT_DIR : OUT_DIR;
+    const seen = new Set(readdirSync(outDir));
+    const walkD = (dir, rel) => {
+      for (const f of readdirSync(dir)) {
+        const p = join(dir, f);
+        if (statSync(p).isDirectory()) { walkD(p, `${rel}${f}/`); continue; }
+        if (!f.endsWith('.png')) continue;
+        let key = flatName(rel + f);
+        if (seen.has(key) && !existsSync(join(base, rel) ? join(ASSETS, sub, rel, f) : p)) { /* noop */ }
+        if (seen.has(key)) continue;   // 已有同名（含白名单产物）不覆盖
+        copyFileSync(p, join(outDir, key));
+        seen.add(key); bulk++;
+        if (toUi) uiOut.files[key] = `vanilla-ui/${key}`;
+      }
+    };
+    walkD(base, '');
+  };
+  for (const sub of SUBDIRS_UI) copySub(sub, true);
+  for (const sub of SUBDIRS_MISC) copySub(sub, false);
+  console.log(`bulk-family copied: ${bulk}`);
 }
 writeFileSync(UI_OUT_JSON, JSON.stringify(uiOut));
 console.log(`vanilla-ui: copied=${uiCopied}`);

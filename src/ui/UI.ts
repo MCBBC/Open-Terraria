@@ -68,6 +68,7 @@ import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
+import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
@@ -1152,6 +1153,17 @@ export class UI {
     const vsDef = def.armor?.defense ?? statOfInternal(s.id)?.def;
     if (vsDef) html += `<br>防御 +${vsDef}`;
     if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
+    // 物品自带说明行（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*，
+    // 2664 键 zh 包内嵌；此前未消费——悬停只见数值不见"做什么用"）。vi_ 物品按原版名查键
+    if (def.key.startsWith('vi_')) {
+      const vid = parseInt(def.key.slice(3), 10);
+      const nameKey = ITEM_NAME_BY_ID[vid];
+      if (nameKey) {
+        const path = `ItemTooltip.${nameKey}`;
+        const tip = Lang.text(path);
+        if (tip !== path && tip) html += tip.split('\n').map((ln) => `<br>${ln}`).join('');
+      }
+    }
     if (def.desc) html += `<br><span style="color:#9a8ab8">${def.desc}</span>`;
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';

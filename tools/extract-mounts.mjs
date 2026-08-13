@@ -34,13 +34,19 @@ for (const m of mountIdSrc.matchAll(/^\tpublic const int (\w+) = (\d+);$/gm)) na
 const mountCount = +(mountIdSrc.match(/public static int Count = (\d+);/)?.[1] ?? 0);
 
 // ---- MountID.cs Sets：CreateBoolSet(...) / CreateIntSet(...) 展开 ----
+//  bool 集：args 全部为置位索引；int 集：首参为缺省值、其后 (键, 值) 成对
 const sets = {};
 for (const m of mountIdSrc.matchAll(/^\tpublic static (bool|int)\[\] (\w+) = Factory\.Create(?:Bool|Int)Set\(([^;]*)\);$/gm)) {
   const [, kind, setName, argsRaw] = m;
   const args = [...argsRaw.matchAll(/-?\d+/g)].map((a) => +a[0]);
-  const def = kind === 'bool' ? false : args.shift();
-  const arr = Array.from({ length: mountCount }, () => def);
-  for (let i = 0; i + 1 < args.length; i += 2) arr[args[i]] = !!args[i + 1];
+  const arr = Array.from({ length: mountCount }, () => kind === 'bool' ? false : -1);
+  if (kind === 'bool') {
+    for (const i of args) arr[i] = true;
+  } else {
+    const def = args.shift();
+    arr.fill(def);
+    for (let i = 0; i + 1 < args.length; i += 2) arr[args[i]] = args[i + 1];
+  }
   sets[setName] = arr;
 }
 

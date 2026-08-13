@@ -16,6 +16,8 @@ export interface ArmorSetBonus {
   critMagic?: number;
   noKnockback?: boolean;
   runAccMul?: number;      // runAcceleration *=（暗影套 1.75,:26195-26201）
+  endurance?: number;      // 受伤 ×(1-N)（日曜套 0.12,:16224）
+  solar?: boolean;         // 日曜护盾 3 层引擎（每层该次受伤 ×0.2,:37699;每 3s 回 1,:16227）
   maxRunMul?: number;      // maxRunSpeed *=（暗影套 1.15）
   runSlowMul?: number;     // runSlowdown *=（暗影套 1.75）
   fireWalk?: boolean;
@@ -56,6 +58,9 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   // 2026-08-13 接入移动模型:runAcc×1.75/maxRun×1.15/accRun×1.15/runSlow×1.75）
   '5|5|5': { runAccMul: 1.75, maxRunMul: 1.15, runSlowMul: 1.75 },      // 暗影（102/101/100）
   '74|48|44': { runAccMul: 1.75, maxRunMul: 1.15, runSlowMul: 1.75 },   // 远古暗影（956/957/958,同 :15842 旗标）
+  // 日曜耀斑（2763/2764/2765=171|177|112,Player.cs:16224-16295 setSolar):
+  // 受伤 ×0.88 + 护盾 3 层（每层该次受伤 ×0.2 + 反击 608 弹;每 3s 回 1 层;dashType=3 冲撞登记）
+  '171|177|112': { endurance: 0.12, solar: true },
   // 丛林 (76|8)(49|45) 2×2×2=8 种组合全配（:15873-15877 manaCost-=0.16f）
   '8|8|8': { manaCostMul: 0.84, name: 'Jungle' },
   '76|8|8': { manaCostMul: 0.84, name: 'Jungle' },

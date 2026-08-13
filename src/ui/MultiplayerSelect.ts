@@ -49,6 +49,7 @@ export class MultiplayerSelect {
   private createPublic: HTMLInputElement;
   private createTiles: HTMLInputElement;
   private createItems: HTMLInputElement;
+  private createPvp: HTMLInputElement;
   private saveSel: HTMLSelectElement;
   private createdInfo = el('div');
   private hostCode = '';
@@ -167,6 +168,7 @@ export class MultiplayerSelect {
     this.createPublic = mkCheck('公开房间（出现在房间列表；不勾则只能凭房间码进入）', true);
     this.createTiles = mkCheck('破坏保护（其他玩家不能挖掘/建造，仅房主可以）', false);
     this.createItems = mkCheck('物品保护（其他玩家不能取放宝箱物品）', false);
+    this.createPvp = mkCheck('允许玩家对决（PvP——双方都开启 hostile 才会互伤）', false);
 
     const createBtn = el('button', 'sw-btn', '创建房间') as HTMLButtonElement;
     createBtn.style.margin = '8px 0 4px';
@@ -263,6 +265,7 @@ export class MultiplayerSelect {
           public: this.createPublic.checked,
           protectTiles: this.createTiles.checked,
           protectItems: this.createItems.checked,
+          pvpAllowed: this.createPvp.checked,
           save: sv.json,
         }),
       });

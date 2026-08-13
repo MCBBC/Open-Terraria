@@ -5802,6 +5802,7 @@ export class Enemy extends Entity {
     if (fromPlayer) {
       const pl = game.player as Player | null;
       pl?.addDPS(dmg);
+      this.playerInteracted = true;  // AnyInteractions（playerInteraction 位）——雕像门 :79651
     }
     this.iframes = pierce === 1 ? 0 : 10; // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
@@ -5935,7 +5936,9 @@ export class Enemy extends Entity {
         const statueSkip = this.spawnedFromStatue && (() => {
           if (STATUE_NO_EARLYMODE_LOOT.has(this.vanillaId!) && !game.world.flags.hardMode) return true;
           const rarity = STATUE_DROP_RARITY[this.vanillaId!] ?? -1;
-          return rarity >= 0 && rng.next() >= rarity;
+          // :79651 `rand >= rarity || !AnyInteractions()`——掷中还需玩家曾交互
+          // （岩浆/陷阱杀的雕像怪即便掷中也不出；近似：hurt fromPlayer 生效置位）
+          return rarity >= 0 && (rng.next() >= rarity || !this.playerInteracted);
         })();
         if (!statueSkip) {
         const w = game.world;

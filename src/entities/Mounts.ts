@@ -376,10 +376,10 @@ export class MountInstance {
     if (!d) return;
     if (this.frameState !== state) {
       this.frameState = state;
-      // UFO（7）恒空中帧；熔岩鲨浸水恒游泳帧（:3688/:3697-3710）
-      if (!(this.type === 7)) this.frameCounter = 0;
+      this.frameCounter = 0;
     }
-    if (this.type === 7) state = FRAME_FLYING;
+    // UFO（7）帧组恒取空中组（:3688 case 7: state = 2）——frameState 本身不变
+    if (this.type === 7) state = FRAME_IN_AIR;
     if (state !== FRAME_STANDING) this.idleTime = 0;
     // 离地行走宽限（:3599-3607）
     if (vy === 0) this.walkingGraceTime = d.walkingGraceTimeMax ?? 0;
