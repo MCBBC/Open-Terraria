@@ -1748,7 +1748,24 @@ export class UI {
       const pair = el('div');
       pair.style.cssText = 'display:flex; flex-direction:column;';
       pair.appendChild(el('div', 'sw-lbl', lbl));
-      pair.appendChild(this.makeSlotEl(k, 'misc'));
+      const slotEl = this.makeSlotEl(k, 'misc');
+      // 宠物/光源槽眼睛开关（原版 InventoryTick 图标 Main.cs:40666-40691：光标为空
+      // 时点击小眼睛 → TogglePet/ToggleLight 显隐翻转——槽 0/1 专属）
+      if (k === 0 || k === 1) {
+        const eye = el('button', 'sw-btn sw-peteye');
+        eye.textContent = '👁';
+        eye.title = Lang.text('LegacyInterface.41');   // 可见性
+        eye.style.cssText = 'position:absolute; right:-12px; top:-10px; width:24px; height:20px;'
+          + 'margin:0; padding:0; font-size:11px; line-height:1; z-index:5;';
+        eye.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          if (this.heldStack) return;   // 原版 mouseItem.IsAir 门（:40670）
+          this.game.togglePetSlot(k as 0 | 1);
+        });
+        slotEl.style.position = 'relative';
+        slotEl.appendChild(eye);
+      }
+      pair.appendChild(slotEl);
       miscCol.appendChild(pair);
     });
     this.miscPageEl.appendChild(miscCol);

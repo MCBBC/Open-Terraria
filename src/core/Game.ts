@@ -4334,6 +4334,21 @@ export class Game implements GameHooks {
       }
     }
     if (inp.rightDown) {
+      // 抚摸宠物（Main.cs:37404：右键悬停宠物投射物 → PetAnimal → HandleSpecialEvent
+      // 21 PET_THE_PET）。命中宠物/光宠（光标世界点 32px 内）即消费右键——优先级高于
+      // 地块交互（原版 petting 判定在 TileInteraction 之前）
+      {
+        const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        const pet = [this.petFollower, this.lightPetFollower].find(
+          (f) => f && !f.dead && Math.hypot(f.cx - wx, f.cy - wy) < 32);
+        if (pet) {
+          this.achievements.handleSpecialEvent(21,
+            { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+          this.spawnParticles(pet.cx, pet.y, '#FF90B0', 4, 1.2, { life: 40 }); // 爱心尘近似
+          this.sfx.play('menuTick', 0.5);
+          this.input.rightDown = false;
+        }
+      }
       // 光标格本身是蜥蜴祭坛时跳过 ±1 格宝箱搜索——神庙宝箱全庙随机散布可能
       // 贴着祭坛，原版无 ±1 搜索（点到箱本体才开箱）；不跳过则右键祭坛变成开箱
       const cursorIsAltar = type === TILE_BY_KEY['v_237_lihzahrd_altar'];
@@ -11598,13 +11613,17 @@ export class Game implements GameHooks {
    *  的 hideMisc 翻转语义；移动端坐骑/宠物键入口。坐骑引擎未实装——槽 3 装备
    *  时仅提示） */
   togglePets(): void {
-    if (this.player.inv.miscEquips[0]) {
-      this.petHidden = !this.petHidden;
-      this.sfx.play('menuTick', 0.6);   // UI 点击 Sound 12（Main.cs:40688）
-    } else if (this.player.inv.miscEquips[1]) {
-      this.lightPetHidden = !this.lightPetHidden;
-      this.sfx.play('menuTick', 0.6);
-    }
+    if (this.player.inv.miscEquips[0]) this.togglePetSlot(0);
+    else if (this.player.inv.miscEquips[1]) this.togglePetSlot(1);
+  }
+
+  /** 槽位化切换（原版 TogglePet/ToggleLight 各管各槽——Main.cs:40682-40691 装备
+   *  界面眼睛图标点击；桌面端入口，移动端聚合键走 togglePets） */
+  togglePetSlot(slot: 0 | 1): void {
+    if (!this.player.inv.miscEquips[slot]) return;
+    if (slot === 0) this.petHidden = !this.petHidden;
+    else this.lightPetHidden = !this.lightPetHidden;
+    this.sfx.play('menuTick', 0.6);   // UI 点击 Sound 12（Main.cs:40688）
   }
 
   /** 装备钩爪发射（miscEquips[4]，移动端虚拟键）。方向 = 摇杆轴或角色朝向。
@@ -13621,6 +13640,8 @@ export class Game implements GameHooks {
         onProjDespawn: (ids) => this.netRemoveProjPuppets(ids),
         // onSSC 不再即用——msg201 改暂存（net.pendingSSC），loadWorld 完成后应用（终审 H1 竞态）
         onStrike: (netId, dmg, kbx, kby) => this.netApplyStrike(netId, dmg, kbx, kby),
+        onStrikePlayer: (fromSlot, _targetSlot, dmg, _kbx, _kby, weaponId, _crit) =>
+          this.netApplyStrikePlayer(fromSlot, dmg, weaponId),
         onHp: (slot, hp, maxHp) => {
           // ClientNet.msg16 已缓存进 RemotePlayerState；此处仅兜底（正常恒同步命中）
           const rp = net.players.get(slot);

@@ -5,6 +5,7 @@ import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
 import { TILE_ANIM_RATE, tileAnim, animYOffset, campfireYOffset } from './TileAnim';
+import { cageAnimRate, cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
 import { paintColor } from '../world/Paint';
@@ -188,7 +189,7 @@ export class ChunkCache {
     tileAnim.tick++;
     if (this.animChunksBySheet.size) {
       for (const [sheet, set] of this.animChunksBySheet) {
-        const rate = TILE_ANIM_RATE[sheet];
+        const rate = TILE_ANIM_RATE[sheet] ?? (cageFamilyOf(sheet) ? cageAnimRate() : 0);
         if (!rate || tileAnim.tick % rate !== 0) continue;
         for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
       }
@@ -328,6 +329,12 @@ export class ChunkCache {
             let set314 = this.animChunksBySheet.get(314);
             if (!set314) { set314 = new Set(); this.animChunksBySheet.set(314, set314); }
             set314.add(ChunkCache.key(cx, cy));
+          } else if (cageFamilyOf(def.vanilla.sheet)) {
+            // 小动物笼族（CritterCage.ts）：帧行偏移由 drawVanillaCell→drawCageCell
+            // 内部按 (族,槽位,tick) 计算，此处只注册重烘焙
+            let setC = this.animChunksBySheet.get(def.vanilla.sheet);
+            if (!setC) { setC = new Set(); this.animChunksBySheet.set(def.vanilla.sheet, setC); }
+            setC.add(ChunkCache.key(cx, cy));
           } else if (TILE_ANIM_RATE[def.vanilla.sheet]) {
             const rows = this.autotiler.atlas.vmeta(def.vanilla.sheet)?.rows ?? 0;
             fy += animYOffset(def.vanilla.sheet, rows * 18);

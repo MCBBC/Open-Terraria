@@ -109,7 +109,7 @@ export class Bobber extends Entity {
   private fishingPower(p: Player, game?: GameHooks): number {
     let base = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0)
       + p.equipStats.fishingSkill;
-    if (p.equipStats.lavaWaders || (p as unknown as { canFloatInWater?: boolean }).canFloatInWater) base += 5;  // :41546-41549   // 装备侧渔力（钓具族+渔夫甲+软糖虫,:12549-12556/:13022-13027/:12451）
+    if (p.equipStats.waterWalk) base += 5;  // canFloatInWater 漂浮态（:41546-41549;waterWalk 族=漂浮资格）   // 装备侧渔力（钓具族+渔夫甲+软糖虫,:12549-12556/:13022-13027/:12451）
     if (p.buffs.has(BuffType.Tipsy)) base += 5;                  // buff 25 :41542-41545
     if (game) {
       const w = game.world as World;

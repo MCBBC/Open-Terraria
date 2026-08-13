@@ -391,7 +391,7 @@ for (const { text, line: lineNo } of logical) {
     } else {
       handled = false;
     }
-    if (handled) { if (!/[{]$/.test(rest) && guard && !text.slice(i).startsWith('{')) pendingGuard = null; continue; }
+    if (handled) continue;
 
     // 普通语句段：吃到顶层 ; { } 为止；段内提取 Gore.NewGore* 调用（此时 depth 即调用点深度）
     let j = i, pd = 0;
@@ -418,9 +418,9 @@ for (const { text, line: lineNo } of logical) {
     guard = null;
     i = j;
   }
+  // 行尾仍未消费的守卫头（与 `{` 分行）挂到下一逻辑行
+  if (guard) pendingGuard = guard;
 }
-// 行尾仍未消费的守卫（守卫头与 `{` 分行）挂到下一行
-if (pendingGuard === null) { /* 已在行首消费 */ }
 
 /** 单个 Gore.NewGore* 调用 → 表项 */
 function handleGoreCall(callee, args, lineNo) {

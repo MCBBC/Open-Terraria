@@ -194,7 +194,7 @@ export function cageAnimRate(): number {
   return ACTION_TICKS;
 }
 
-export interface DrawSource { img: HTMLImageElement; sx: number; sy: number; sw: number; sh: number }
+export interface DrawSource { img: HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number }
 
 /**
  * 笼族一格绘制（TileDrawing.cs:1670-1716 顶盖段 1:1）。

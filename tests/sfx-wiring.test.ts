@@ -77,12 +77,18 @@ function spawnBetsy(h: ReturnType<typeof makeHooks>, tx = 100, ty = 96): Enemy {
   return e;
 }
 
+/** 手动拨状态前先跑一帧：AI 家族首帧 bInit 门会清 ai[0..3]（与生产语义一致） */
+function prime(e: Enemy, h: ReturnType<typeof makeHooks>): void {
+  e.fixedUpdate(1 / 60, h.hooks);
+  h.sfx.length = 0;
+}
+
 function tickEnemy(e: Enemy, h: ReturnType<typeof makeHooks>, n: number): void {
   for (let i = 0; i < n; i++) if (!e.dead) e.fixedUpdate(1 / 60, h.hooks);
 }
 
-const played = (sfx: SfxCall[], prefix: string): string[] =>
-  sfx.flatMap((c) => c.files).filter((f) => f.startsWith(prefix));
+const played = (sfx: SfxCall[], prefix: string): SfxCall[] =>
+  sfx.filter((c) => c.files.some((f) => f.startsWith(prefix)));
 
 describe('A. 数据层：命名轨 → wav 变体组', () => {
   it('DD2_*/Deerclops* HitSound/DeathSound 全部解析为多变体 wav', () => {
@@ -107,7 +113,7 @@ describe('A. 数据层：命名轨 → wav 变体组', () => {
     expect(betsy.def.killedSound).toEqual(['dd2_betsy_death_0', 'dd2_betsy_death_1', 'dd2_betsy_death_2']);
     const skel = Enemy.fromVanilla(566, 0, 0)!;
     expect(skel.def.hitSound[0]).toBe('dd2_skeleton_hurt_0');
-    expect(Enemy.fromVanilla(667, 0, 0)!.def.killedSound).toEqual(['deerclops_death']);
+    expect(Enemy.fromVanilla(668, 0, 0)!.def.killedSound).toEqual(['deerclops_death']);
   });
 });
 
@@ -123,6 +129,7 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
   it('Betsy：火焰吐息 40t 接位帧 → dd2_betsy_flame_breath + 687 喷焰', () => {
     const h = makeHooks(makeWorld(), { x: 130, y: 100 });
     const e = spawnBetsy(h);
+    prime(e, h);
     e.ai0 = 3; e.ai1 = 0; e.ai2 = 0;
     tickEnemy(e, h, 41);
     expect(played(h.sfx, 'dd2_betsy_flame_breath')).toHaveLength(1);
@@ -131,6 +138,7 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
   it('Betsy：空袭掠射投 686 火球 → 出膛音 dd2_betsy_fireball_shot', () => {
     const h = makeHooks(makeWorld(), { x: 130, y: 100 });
     const e = spawnBetsy(h);
+    prime(e, h);
     e.ai0 = 4; e.ai1 = 60; e.ai2 = 0;    // BOMB_APR_T=60：直接进掠射段
     tickEnemy(e, h, 12);
     expect(h.projectiles.some((p) => p.damage === 35)).toBe(true);
@@ -139,6 +147,7 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
   it('Betsy：翻转俯冲首帧 → dd2_betsy_flying_circle_attack', () => {
     const h = makeHooks(makeWorld(), { x: 130, y: 100 });
     const e = spawnBetsy(h);
+    prime(e, h);
     e.ai0 = 5; e.ai1 = 0;
     tickEnemy(e, h, 2);
     expect(played(h.sfx, 'dd2_betsy_flying_circle_attack')).toHaveLength(1);
@@ -146,6 +155,7 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
   it('Betsy：召唤态 → scream 一声 + summon 三拍（20/45/70）', () => {
     const h = makeHooks(makeWorld(), { x: 130, y: 100 });
     const e = spawnBetsy(h);
+    prime(e, h);
     e.ai0 = 6; e.ai1 = 1;                // 越过贴位段直接进召唤演出
     tickEnemy(e, h, 2);
     expect(played(h.sfx, 'dd2_betsy_scream')).toHaveLength(1);
@@ -156,12 +166,13 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
     const h = makeHooks(makeWorld(), { x: 130, y: 104 });
     const e = Enemy.fromVanilla(564, 100 * TILE, 108 * TILE)!;
     e.id = 1001; h.enemies.push(e);
+    prime(e, h);
     e.ai0 = 127; e.ai1 = 1;              // 治疗招起手
     tickEnemy(e, h, 1);
     expect(played(h.sfx, 'dd2_dark_mage_cast_heal')).toHaveLength(1);   // ai[0]==126（:66461）
     tickEnemy(e, h, 90);
     expect(played(h.sfx, 'dd2_dark_mage_heal_impact').length).toBeGreaterThanOrEqual(2);
-    e.ai0 = 81; e.ai1 = 2;               // 召骷髅招
+    e.ai0 = 81; e.ai1 = 2;               // 召骷髅招（ai[0] 递减过 80）
     tickEnemy(e, h, 1);
     expect(played(h.sfx, 'dd2_dark_mage_summon_skeleton')).toHaveLength(1);  // ai[0]==80（:66445）
     tickEnemy(e, h, 16);
@@ -175,6 +186,7 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
     expect(played(h.sfx, 'dd2_lightning_bug_zap').length).toBeGreaterThanOrEqual(1);
     const mage = Enemy.fromVanilla(565, 60 * TILE, 108 * TILE)!;
     mage.id = 1003; h.enemies.push(mage);
+    prime(mage, h);
     mage.ai0 = 33; mage.ai1 = 0;         // 暗影矢招 ai[0]==32 发弹
     tickEnemy(mage, h, 1);
     expect(played(h.sfx, 'dd2_dark_mage_attack').length).toBeGreaterThanOrEqual(1);
@@ -214,18 +226,21 @@ function makeMinionHooks(enemyAt?: { x: number; y: number }) {
     },
     showPickupLabel: () => {},
   };
-  (hooks as unknown as { entities: { add: (e: unknown) => void } }).entities =
-    { add: () => {} };
-  return { hooks, player, sfx };
+  const projectiles: unknown[] = [];
+  (hooks as unknown as { entities: { add: (e: unknown) => void; projectiles: unknown[] } }).entities =
+    { add: (e: unknown) => { projectiles.push(e); }, projectiles };
+  return { hooks, player, sfx, projectiles };
 }
 
 describe('C. MinionProj.ts 族专属音', () => {
   it('阿比盖尔 970：首帧召唤音 + 同类>1 升级音', () => {
-    const { hooks, sfx } = makeMinionHooks();
+    const { hooks, sfx, projectiles } = makeMinionHooks();
     const a = new MinionProj(60 * TILE, 90 * TILE, 970, 6, 2, false, 0, false, () => hooks.player as never as Player);
+    projectiles.push(a);                  // 生产侧经 entities.add 入桶（peerCount 计数源）
     a.fixedUpdate(1, hooks);
     expect(played(sfx, 'abigail_summon')).toHaveLength(1);
     const b = new MinionProj(61 * TILE, 90 * TILE, 970, 6, 2, false, 1, false, () => hooks.player as never as Player);
+    projectiles.push(b);
     b.fixedUpdate(1, hooks);
     expect(played(sfx, 'abigail_upgrade').length).toBeGreaterThanOrEqual(1);
   });

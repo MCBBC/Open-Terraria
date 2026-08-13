@@ -94,6 +94,9 @@ export interface ClientNetHooks {
   onSSC?: (recordJson: string) => void;
   /** 打击到达（msg42；房主权威结算） */
   onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number) => void;
+  /** PvP 近战命中意向到达（v7 msg44；被打方本地结算——Game 过 InOpposingTeam 门禁后走
+   *  damagePlayer(pvp)）。fromSlot=攻击者槽位（服务器回填） */
+  onStrikePlayer?: (fromSlot: number, targetSlot: number, dmg: number, kbx: number, kby: number, weaponId: number, crit: boolean) => void;
   /** 远端玩家 HP（msg16 中继） */
   onHp?: (slot: number, hp: number, maxHp: number) => void;
   /** 房间策略到达（进场时；门禁/提示用） */
@@ -489,6 +492,17 @@ export class ClientNet {
         this.hooks.onStrike?.(netId, dmg, kbx, kby);
         return;
       }
+      case Msg.StrikePlayer: {
+        // v7 PvP 近战命中意向（被击端接收）：尾部 u8 fromSlot = 服务器回填的攻击者槽位
+        const targetSlot = r.u8();
+        const dmg = r.i16();
+        const kbx = r.i16(), kby = r.i16();
+        const weaponId = r.u16();
+        const flags = r.u8();
+        const fromSlot = r.remaining > 0 ? r.u8() : 0;
+        this.hooks.onStrikePlayer?.(fromSlot, targetSlot, dmg, kbx, kby, weaponId, !!(flags & 1));
+        return;
+      }
       case Msg.ProjDespawn: {
         // v6 msg28：消亡批量——未知 netId 为无主傀儡，直接忽略
         const n = Math.min(r.u16(), 64);
@@ -783,6 +797,13 @@ export class ClientNet {
   /** 傀儡受击上报（msg42，访客→房主；Enemy.hurt 内经 entityNet 注入调用） */
   sendStrike(netId: number, rawDmg: number, kbx: number, kby: number) {
     this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).finish());
+  }
+
+  /** PvP 近战命中意向上报（v7 msg44，C→S→定向转发被击者；权威=被打方本地结算）。
+   *  weaponId 为凶器内部物品 id（死因文案 DeathSource.Player {2} 用）；flags bit0=crit */
+  sendStrikePlayer(targetSlot: number, rawDmg: number, kbx: number, kby: number, weaponId: number, crit: boolean) {
+    this.send(new NetWriter(Msg.StrikePlayer).u8(targetSlot).i16(rawDmg)
+      .i16(kbx).i16(kby).u16(weaponId).u8(crit ? 1 : 0).finish());
   }
 
   /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威） */

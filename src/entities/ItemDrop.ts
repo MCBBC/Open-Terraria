@@ -181,11 +181,14 @@ export class ItemDrop extends Entity {
       this.x += this.vx;
       this.y += this.vy;
     } else {
-      // 液体采样（身体中心格；本仓液体编码 1水 2岩浆 3蜂蜜 4微光）
+      // 液体采样（身体中心格；本仓液体编码 1水 2岩浆 3蜂蜜 4微光）——仅作重力档选择
       const st0 = game.world.store;
       const ci = st0.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
       const wetType = st0.liquid[ci] > 30 ? st0.liquidType[ci] : 0;
-      this.shimmerWet = wetType === 4;
+      // shimmerWet = Collision.shimmer（WorldItem :949-951 ← LiquidCollision :1600-1655）：
+      // 整盒擦到任一 liquid>0 微光格即 true（坡面格另判上格液体）。★旧实现中心单格
+      // >30——浅液面/盒缘擦液时 Shimmering 不跑 → 同一物品"有时能分解有时不能"根因
+      this.shimmerWet = liquidCollision(st0, this.x, this.y, this.w, this.h, 4);
       if (this.shimmered) {
         // 已微光化：无重力（:487 gravity=0）。上浮/悬停三分支（:515-536）：
         //  ① shimmerWet（身在微光中）→ vy-0.05/t 钳 -4 继续上浮；
@@ -224,11 +227,13 @@ export class ItemDrop extends Entity {
         const g = wetType === 1 ? 0.08 : wetType === 3 ? 0.05 : wetType === 4 ? 0.065 : ITEM_GRAVITY;
         const mf = wetType === 1 ? 5 : wetType === 3 ? 3 : wetType === 4 ? 4 : ITEM_MAX_FALL;
         this.vy = Math.min(this.vy + g, mf);
-        // 水平摩擦（:928-932 vx*=0.95，|vx|<0.1 归零）
-        this.vx *= 0.95;
-        if (Math.abs(this.vx) < 0.1) this.vx = 0;
         if (wetType === 1 || wetType === 3) { this.vx *= 0.95; } // 浸液额外阻尼（:440 wetVelocity 近似）
       }
+      // 水平摩擦（:927-932 通用段：vx*=0.95，|vx|<0.1 归零）——★shimmered 物品
+      // 同样执行。曾误放非 shimmered 分支内：decraft 散射初速永不衰减 → 产物无限
+      // 横漂 + 速度恒 >0.2 永不可拾取
+      this.vx *= 0.95;
+      if (Math.abs(this.vx) < 0.1) this.vx = 0;
       moveAndCollide(this, game.world, this.vx, this.vy);
       // 岩浆死亡（WorldItem.Update :576-580：MoveInWorld 后 lavaWet → CheckLavaDeath）。
       // 仅非抓取帧（else 分支）——被抓取帧走 ApplyMovement 不检岩浆
