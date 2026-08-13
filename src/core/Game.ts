@@ -98,6 +98,7 @@ import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
+import { cultistRitualUpdate, cultistTabletDestroyed as ritualTabletDestroyed } from '../world/CultistRitual';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
@@ -2189,6 +2190,8 @@ export class Game implements GameHooks {
     // FullyFallenAsleep（PlayerSleepingHelper.cs:33-37：isSleeping && timeSleeping>=120）
     w.allSleeping = this.player.sleeping && this.player.timeSleeping >= 120;
     w.clock.tick(dt * 1000 * w.dayRate());
+    // Main.cs:64427 CultistRitual.UpdateTime()——石巨人后地牢口仪式驱动(2026-08-13 接通)
+    cultistRitualUpdate(this, w.dayRate());
     // ---- 天气系统推进（原版 UpdateWeather/UpdateTime 每帧；60Hz tick 语义） ----
     this.updateWeather();
     // 昼夜切换：公告走原版消息列（Main.NewText→LegacyChatMonitor；ChatColors.World 50,255,130）
@@ -12320,6 +12323,9 @@ export class Game implements GameHooks {
   playerName(): string {
     return this.player.appearance?.name?.trim() || Lang.text('Mods.SandboxWorld.DefaultPlayerName');
   }
+
+  /** 石碑召出 439 后的仪式重置(NPC.cs:38881 TabletDestroyed)——bossAI_lunar_misc 反向调用 */
+  cultistTabletDestroyed(): void { ritualTabletDestroyed(this); }
 
   respawnPlayer() {
     const p = this.player;

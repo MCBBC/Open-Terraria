@@ -445,6 +445,7 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
       // NPC.cs:38881 石碑召出 439 → CultistRitual.TabletDestroyed()(delay=43200 重置,
       // 打完一轮 24 游戏时后才再出现)
       if (cultist) (game as unknown as { cultistTabletDestroyed?: () => void }).cultistTabletDestroyed?.();
+      if (cultist) {
         cultist.x = tx * TILE + 10 - cultist.w / 2;
         cultist.y = ty * TILE - cultist.h;              // 原版顶锚 y=tileY*16-2,本仓落底对齐
         cultist.facing = Math.sign(e.cx - (tx * TILE + 10)) || 1;
