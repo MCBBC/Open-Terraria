@@ -188,7 +188,7 @@ import type { GameHooks } from '../entities/types';
 import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
-import { Arrow, prefetchProjectiles } from '../entities/Arrow';
+import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE } from '../entities/Arrow';
 import { prefetchTrapProjectiles } from '../entities/Dart';
 import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
@@ -197,6 +197,7 @@ import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
 import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj } from '../entities/PrismProj';
+import { MagicMissileProj, StarfuryStar } from '../entities/MissileProj';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile } from '../entities/SwingArc';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
@@ -5114,6 +5115,42 @@ export class Game implements GameHooks {
             this.mining = null;
             return;
           }
+          // 老星怒 65 → 9 天降落星（Player.cs:46613-46625 出生链 + :48479-48491
+          // type65 块）：出生 = 光标 X + 远离玩家侧 rand(0..200)、玩家上方 600px；
+          // 伤害 ×1.5、击退清零；目标线从光标向出生点逐 16px 回退到首个非实心格
+          // （aiStyle 5 :22159-22162 越线前穿墙用 Bottom.Y ≥ ai[1]——与 503 的
+          // Center.Y > ai[1] 不同）。65 在"仅 ItemAnimationJustStarted 射弹"名单
+          // （Player.cs:42783）= 每挥一星
+          if (cwMelee.shoot === 9) {
+            const [mwx9, mwy9] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+            const num3 = mwx9 < this.player.x ? 1
+              : (mwx9 <= this.player.x + this.player.w && Math.random() < 0.5) ? 1 : -1;
+            const sx9 = this.player.x + this.player.w / 2 + Math.floor(Math.random() * 201) * num3
+              + (mwx9 - this.player.x);
+            const sy9 = this.player.cy - 600;
+            // 目标线回退（:48483-48488）：vec 从光标沿 normalize(出生点−光标) 步进
+            let vx9 = mwx9, vy9 = mwy9;
+            let ux9 = sx9 - mwx9, uy9 = sy9 - mwy9;
+            const dl9 = Math.hypot(ux9, uy9);
+            if (dl9 > 0) { ux9 /= dl9; uy9 /= dl9; } else { ux9 = 0; uy9 = -1; }
+            for (let g9 = 0; g9 < 64 && vy9 > sy9; g9++) {
+              const tx9 = Math.floor(vx9 / TILE), ty9 = Math.floor(vy9 / TILE);
+              if (!this.world.store.inBounds(tx9, ty9) || !this.world.store.isSolid(tx9, ty9)) break;
+              vx9 += ux9 * 16; vy9 += uy9 * 16;
+            }
+            const spd9 = cwMelee.shootSpeed / this.player.attackSpeedMult;
+            const dvx9 = mwx9 - sx9, dvy9 = mwy9 - sy9;
+            const dvl9 = Math.hypot(dvx9, dvy9) || 1;
+            const star9 = new StarfuryStar(sx9, sy9,
+              dvx9 / dvl9 * spd9, dvy9 / dvl9 * spd9,
+              Math.trunc((this.swing.dmg ?? 1) * 1.5),   // :46624 Damage ×1.5
+              Math.max(1, pd?.penetrate ?? 2), vy9);
+            star9.critChance = arcCrit;
+            star9.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            this.entities.add(star9, 'projectiles');
+            this.mining = null;   // 与 503 分支同语义（提前 return 防下方通用单发补射）
+            return;  // 本击只出天降落星，不再走下方通用单发
+          }
           // 3065 星怒 → 503 天降三剑（Player.cs:47107-47136）：出生=玩家上方 600px
           // 随机偏后 0-400px、每剑再高 100px；速度朝鼠标且强制向下 |dy|≥20、
           // vy 抖动 ±0.4；目标线 = min(鼠标Y, 玩家cy−200)（线上穿墙越线撞块）
@@ -6408,6 +6445,59 @@ export class Game implements GameHooks {
           this.input.mouseDown = false;
           break;
         }
+        // 可控导弹族 aiStyle 9（AI_009_MagicMissiles :40518-40751）：113→16 魔法飞弹、
+        // 218→34 Flamelash、495→79 彩虹魔杖——channel 光标操控 + 松手索敌/直飞，
+        // 兜底直飞 mArrow 表达不了。持按连发每 useTime 一发新弹（循环重用语义）
+        if (pd?.aiStyle === 9) {
+          // Flamelash 水中禁射（Player.cs:51274 wet && !lavaWet && shoot∈{85,15,34}——
+          // 原版门在扣魔之前，此处已在上方扣过 → 退还）
+          if (cw.shoot === 34 && this.player.inWater && !this.player.inLava) {
+            this.player.mana += cwCost;
+            this.input.mouseDown = false;
+            return;
+          }
+          const missileOwner = this.player;
+          const missileItemId = def.key;
+          const spawnMissile = (mx: number, my: number, mvx: number, mvy: number) => {
+            const m = new MagicMissileProj(mx, my, mvx, mvy, {
+              projId: cw.shoot, damage: cw.damage, knockback: cw.knockback, useTime: cw.useTime,
+              channelCb: () => this.input.mouseHeld && !this.input.uiBlocking
+                && missileOwner.inv.heldItem()?.id === ITEM_BY_KEY[missileItemId]
+                && !missileOwner.dead,
+              aimCb: () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+              payMana: () => {
+                const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
+                  * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul);
+                if (this.player.mana < cost) return false;
+                this.player.mana -= cost;
+                return true;
+              },
+              fireExtra: () => {
+                // 兄弟弹：枪口 → 当前光标 × shootSpeed（Player.cs:46642-46673 num4/num5 同构）
+                const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+                const a2 = Math.atan2(mwy - this.player.cy, mwx - this.player.cx);
+                const sx = this.player.cx + Math.cos(a2) * 14;
+                const sy = this.player.cy - 4 + Math.sin(a2) * 14;
+                const dl = Math.hypot(mwx - sx, mwy - sy) || 1;
+                spawnMissile(sx, sy, (mwx - sx) / dl * cw.shootSpeed, (mwy - sy) / dl * cw.shootSpeed);
+              },
+            });
+            m.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
+            m.critChance = critTotal;
+            m.nebulaCb = () => {
+              if (!this.player.equipStats.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1/3) return;
+              this.player.nebulaCD = 30; // :12895
+              this.spawnNebulaBooster(m.cx, m.cy);
+            };
+            this.entities.add(m, 'projectiles');
+          };
+          spawnMissile(px, py, Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed);
+          this.player.useTime = cw.useTime;
+          this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
+          this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（113=Item9/218=Item20/495 各杖专属）
+          this.input.mouseDown = false; // 本击只负责首发；持按连发由实体内 useTime 拍驱动
+          break;
+        }
         let pen = pd?.penetrate ?? 1;
         if (pen < 0) pen = 3;
         pen = Math.max(1, Math.min(pen, 3));
@@ -6434,6 +6524,42 @@ export class Game implements GameHooks {
       case 'shot': {
         // 兜底直射（附魔剑光束等 melee/ranged+shoot 未归族项）：重力按 aiStyle
         const pd = projectileData(cw.shoot);
+        // ★食人鱼枪 1156 → 弹 190（aiStyle 39，GAP G3 行为层）：直飞 Arrow 表达不了
+        //  咬住/返回状态机，独占分流。出生数 = 3 − 同主在场数（ItemCheck_Shoot 专支
+        //  Player.cs:47768-47786 每次补满 3 条，速度分量各 +Next(−40,41)×0.05 扰动）；
+        //  channel=按住电平（mouseHeld，同 PrismProj/FlailProj 先例）——松手由实体
+        //  AI 转 ai[0]=1 返回（Projectile.cs:26093-26096）；回收后在场数 <3 的补弹在
+        //  实体侧 pTopUp 通道再生（P:42856-42868），本分支只管首发
+        if (cw.shoot === PIRANHA_PROJ) {
+          const pgItemId = ITEM_BY_KEY[def.key];
+          const pgOwner = this.player;
+          const pgAlive = this.entities.projectiles.filter(
+            (e) => (e as { projId?: number }).projId === PIRANHA_PROJ && !(e as { dead?: boolean }).dead).length;
+          const pgCtl = {
+            channel: () => this.input.mouseHeld && !this.input.uiBlocking
+              && pgOwner.inv.heldItem()?.id === pgItemId && !pgOwner.dead,
+            aim: () => {
+              const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+              return { x: wx, y: wy };
+            },
+          };
+          for (let i = 0; i < 3 - pgAlive; i++) {
+            const pg = new Arrow(px, py,
+              Math.cos(ang) * cw.shootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
+              Math.sin(ang) * cw.shootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
+              cw.damage, cw.knockback, PIRANHA_PROJ, null,
+              { grav: 0, life: PIRANHA_LIFE, piranha: pgCtl });   // timeLeft 通用默认 3600（:526）
+            pg.pShootSpeed = cw.shootSpeed;                        // 精确 shootSpeed（14）供补弹
+            pg.critChance = critTotal;
+            pg.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            pg.frostEligible = dmgKind !== 'magic';                // ranged 弹吃冰霜引擎
+            this.entities.add(pg, 'projectiles');
+          }
+          this.player.useTime = cw.useTime;
+          this.playUseSound(critVid, 'bowShoot');   // UseSound=Item_10（itemUseSound 表数据驱动）
+          this.input.mouseDown = false;
+          break;
+        }
         const shotArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
@@ -8994,6 +9120,7 @@ export class Game implements GameHooks {
       playerStrongEnough: this.player.maxHp >= 120,
       playerReadyForKingSlime: this.player.maxHp > 140 && this.player.defense > 8, // Main.cs:64645
       expertMode: w.isExpert,   // Main.expertMode（Main.cs:2775）：史莱姆雨自然触发门（:64373-64409 就绪||专家）
+      zoneRain: !!this.scene?.zoneRain,        // ZoneRain 派生位（SceneMetrics.cs:700——暴风雪门 SceneState.cs:102）
       atmo,
       aboveRockLayer: pty < rl,
       graveyardIntensity: this.graveyardIntensity,
@@ -10324,11 +10451,13 @@ export class Game implements GameHooks {
       invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck,
       !!w.seedFlags?.everything && this.player.insideUnbreakableWalls && ddCan < ddNeeds,
       partyIsUp(this.partyState));
-    // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
+    // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）。第三参 = NPC.cs:302 读
+    // player.ZoneSandstorm（SceneMetrics zoneSandstorm 派生位——已含地表大气门，
+    // 旧 zoneDesert&&<groundLevel+30 近似退役）
     this.vanillaSpawner.setWeather(
       w.weather.cloudAlpha,
       w.weather.sandstorm.happening,
-      !!this.scene?.zoneDesert && p.cy / 16 < w.groundLevel + 30,
+      !!this.scene?.zoneSandstorm,
     );
     // 狙击镜扩圈（GetSpawnArea :846-862）：手持 1254/1299 或装备 1299 → num3 档
     {
@@ -14218,7 +14347,7 @@ export class Game implements GameHooks {
     const open = this.openChestRef?.() ?? null;
     return craftSourcesFor(this.world.chests, p.x, p.y, {
       openChest: open,
-      banks: p.banks,
+      banks: p.banks.map((b) => ({ items: b })),   // bank 裸数组 → CraftItemSource 包装
       voidBagHeld: heldVids.has(4131),
       voidVaultHeld: heldVids.has(5325),
       openIsBank4: false,   // 本仓开 bank 走 openChest({x:-2-bi}) 而非 chest 槽——虚空袋重复计入门不适用

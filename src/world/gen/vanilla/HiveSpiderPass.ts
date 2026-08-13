@@ -10,6 +10,8 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { tileRunner } from './TileRunner';
 import { solidTile as solidTileHB, poundTile as poundTileHB } from './HalfBrickPass';
+import { addProtectedStructure, canPlaceStructure } from './GenState';
+import { flipGenSolid } from './GenSolid';
 
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
 const LARVA = TILE_BY_KEY['v_231_larva']!;
@@ -111,7 +113,6 @@ function dentForHoneyFall(st: TileStore, x: number, y: number, dirIn: number): v
  *  2 掷(+命中补 4 掷)——与原版逐点对齐。 */
 function placeHoneyPatch(
   st: TileStore, rng: RNG, gs: GenState,
-  protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number }>,
   ox: number, oy: number,
 ): boolean {
   // HoneyPatchBiome.cs:10-13
@@ -150,9 +151,10 @@ function placeHoneyPatch(
     if (solidTileHB(st, rx + dx, ry + dy)) solid8++;
   });
   if (solid8 < 20) return false;
-  // cs:33-36:保护图 CanPlace(16×16)
+  // cs:33-36:保护图 CanPlace(16×16)——全局 StructureMap（GenState.protectedRects）,
+  // 与蜂巢主巢/神龛/微光/地下小屋等全部已保护结构互斥
   const rect = { x0: rx - 8, y0: ry - 8, x1: rx + 8, y1: ry + 8 };
-  if (protectedRects.some((p) => p.x0 < rect.x1 && rect.x0 < p.x1 && p.y0 < rect.y1 && rect.y0 < p.y1)) return false;
+  if (!canPlaceStructure(gs, rect, 0)) return false;
   // cs:37-40 + TooCloseToImportantLocations(cs:50-81)
   if (ry >= gs.lavaLine - 30) return false;
   for (let i = rx - 150; i < rx + 150; i += 10) {
@@ -228,7 +230,7 @@ function placeHoneyPatch(
       }
     }
   }
-  protectedRects.push(rect);   // cs:46
+  addProtectedStructure(gs, rect, 0);   // cs:46（pad 默认 0）
   return true;
 }
 
@@ -237,8 +239,10 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
   const s = st.w / 4200;
   const count = 1 + rng.int(Math.floor(5 * s), Math.max(Math.floor(5 * s) + 1, Math.floor(8 * s)) - 1);
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
-  // 结构保护图近似(无全局 StructureMap):主巢 ±50(padding 5)与蜂蜜斑 16×16 互斥
-  const protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
+  // 结构互斥走全局 StructureMap（GenState.protectedRects,canPlaceStructure/
+  //   addProtectedStructure）——主巢 ±50（CanPlace 无 pad / AddProtectedStructure pad5,
+  //   HiveBiome.cs:37/124）与蜂蜜斑 16×16（pad0,HoneyPatchBiome.cs:33/46）原为
+  //   本 pass 局部 protectedRects 近似,提升后跨结构互斥（神龛/微光/地下小屋等）生效。
   let placed = 0;
   // 原版驱动(WorldGen.cs:16011-16015):外层预算 num3=10000 **固定**(与巢数无关;
   // 曾 count*100 = 巢少时预算骤减)
@@ -254,8 +258,8 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) continue;
     // ★HiveBiome.Place 前置门(HiveBiome.cs:37-45,此前缺失——主巢可叠既有蜂巢/
     // 蜂蜜斑、可贴丛林神庙生成):
-    // (a) structures.CanPlace(±50 矩形)——对既有保护区(前巢/斑)的交叠自查
-    if (protectedRects.some((p) => p.x0 < x + 50 && x - 50 < p.x1 && p.y0 < y + 50 && y - 50 < p.y1)) continue;
+    // (a) structures.CanPlace(±50 矩形,pad 0)——对既有保护区(前巢/斑/神龛/微光等)的交叠自查
+    if (!canPlaceStructure(gs, { x0: x - 50, y0: y - 50, x1: x + 50, y1: y + 50 }, 0)) continue;
     // (b) TooCloseToImportantLocations(:295-321:±150 步进 10,活性蜥蜴砖 226
     //     或墙 83/3/87 → 弃;神庙 pass 先于蜂巢,此门在原版是活的)
     let tooClose = false;
@@ -333,8 +337,10 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
     }
     // ★AddProtectedStructure(±50, padding 5)(HiveBiome.cs:124,Place 返回**前**):
     //   原版主巢先注册保护区,驱动(WorldGen.cs:16036-16053)才掷蜂蜜斑——斑与本巢
-    //   互斥。曾把注册放在斑循环之后 → 斑可落主巢正中
-    protectedRects.push({ x0: x - 45, y0: y - 45, x1: x + 55, y1: y + 55 });
+    //   互斥。曾把注册放在斑循环之后 → 斑可落主巢正中。
+    //   矩形语义:Rectangle(x-50, y-50, 100, 100) 半开区间 + Inflate(5) → 存 x±55/y±55
+    //   （旧局部近似 {x-45..x+55} 左上偏 10 格,已按原版校正）
+    addProtectedStructure(gs, { x0: x - 50, y0: y - 50, x1: x + 50, y1: y + 50 }, 5);
     // ★cs:16036-16053:主巢落成后是"蜂蜜斑"(HoneyPatchBiome)而非卫星巢——
     //   目标数 Next(5)、预算 10000、每次先掷半径 NextDouble*60+30 再掷角度
     //   NextDouble*2π,y 无压缩;落点横向 50 边距内或放置失败则不计
@@ -346,7 +352,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       const hx = Math.trunc(Math.cos(ang) * rad) + x;
       const hy = Math.trunc(Math.sin(ang) * rad) + y;
       budget--;
-      if (hx > 50 && hx < st.w - 50 && placeHoneyPatch(st, rng, gs, protectedRects, hx, hy)) done++;
+      if (hx > 50 && hx < st.w - 50 && placeHoneyPatch(st, rng, gs, hx, hy)) done++;
     }
     placed++;
   }
@@ -517,6 +523,10 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
 /** SpiderCaves pass（L17455）1:1：w*0.005 个巢；采样 x∈[200,w-200) y∈[(ws+rock)/2,h-230)；
  *  countTiles 门 500≤空腔<3500（重试上限 w/2，超限放弃该巢；重掷 y 域换 rockLevel+30） */
 export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
+  // ★pass 头 tileSolid 翻转（cs:17459 `Main.tileSolid[379] = false`）：泡泡块非实心
+  //   （countTiles 的 SolidTile 洪泛不再被 379 阻断）。本仓生成期不放置 379,行为无差,
+  //   存档时间线——原版由 UndergroundJungleTrees 头（cs:17956,本仓缺该 pass,备案）还原。
+  flipGenSolid([379], false);
   const count = Math.floor(st.w * 0.005);
   const retryCap = Math.floor(st.w / 2);
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
@@ -535,6 +545,11 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
     }
     if (tries < retryCap) spreadSpider(st, rng, gs, chests, x, y);
   }
+  // ★pass 尾 tileSolid 翻转（cs:17521 `Main.tileSolid[162] = true`）：薄冰回实心
+  //   （FragileIce cs:16783 曾翻非实心）——此后 UndergroundHouses 头（cs:17077）与
+  //   LihzahrdTemplePart2 头（cs:17813）会再各自翻转。本仓 SpiderNest 槽在薄冰之后,
+  //   时序与原版一致（FragileIce 16756 < SpiderCaves 17455）。
+  flipGenSolid([162], true);
 }
 
 /** WebsInSpiderCavesAndHoney pass（L20140）1:1：
@@ -606,6 +621,11 @@ export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {  cons
  *  （原版注册序 21018：LongMoss(20915) 之后、SettleLiquidsPart2(21051) 之前）。
  *  零掷骰——不影响 RNG 流。 */
 export function runBeeLarvaPass(st: TileStore, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:21022 `Main.tileSolid[229] = true`）：蜂蜜块回实心——
+  //   Piles 头（cs:18907）曾翻非实心且尾不还原,原版在此（BeeLarva 注册序 21018
+  //   在 Piles 18900 之后）补回。★本仓蜂巢幼虫槽在矿骨堆**之前**执行,故本句先于
+  //   Piles 头翻转 → 229 终态与本仓序偏差联动（生成末态 false,原版 true）,备案。
+  flipGenSolid([229], true);
   for (let n = 0; n < gs.larvaX.length; n++) {
     const x = gs.larvaX[n], y = gs.larvaY[n];
     for (let j = x - 1; j <= x + 1; j++) {
@@ -631,4 +651,8 @@ export function runBeeLarvaPass(st: TileStore, gs: GenState): void {
       }
     }
   }
+  // ★pass 尾 tileSolid 翻转（cs:21047-21048 `Main.tileSolid[232/162] = true`）：
+  //   木刺/薄冰回实心（LihzahrdTemplePart2 尾 cs:17816 翻非实心的 232、FragileIce
+  //   cs:16783 翻非实心的 162）。生成期此后再无两者的翻转写点。
+  flipGenSolid([232, 162], true);
 }

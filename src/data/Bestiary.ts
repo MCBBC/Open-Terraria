@@ -92,8 +92,10 @@ export const enum UnlockState {
   DropsWithRates = 4,
 }
 
-/** 图鉴免门总开关（holder 便于单测注入；详见 BestiaryTracker.unlockState 注） */
-export const bestiaryGating = { unlockAll: true };
+/** 图鉴免门总开关（holder 便于单测注入；详见 BestiaryTracker.unlockState 注）。
+ *  默认 false = 原版门控语义（未解锁条目暗影剪影 + "???"，2026-08-13 用户要求回归）。
+ *  true = 参考书模式（全部内容直读，攻略查询批引入）——仅调试/单测注入用 */
+export const bestiaryGating = { unlockAll: false };
 
 type Source =
   | { t: 'kill'; credit: string; quick: boolean; full: number }
@@ -232,11 +234,10 @@ export class BestiaryTracker {
   }
 
   /** 条目解锁档（各 UIInfoProvider.GetEntryUICollectionInfo 的数据层等价）。
-   *  ★免门（2026-08-13 用户拍板）——图鉴作纯参考书,恒最高档,完全免门。
-   *  偏离原版：原版 5 档击杀门（CommonEnemyUICollectionInfoProvider
+   *  原版 5 档击杀门（CommonEnemyUICollectionInfoProvider
    *  .GetUnlockStateByKillCount,BestiaryEntryUnlockState）+金宠/目击/对话门。
-   *  仅【显示内容】免门;isUnlocked/completion 仍走真实门控（否则完成度开局恒
-   *  100%——2026-08-13 用户抓到的免门副作用,已拆分）。 */
+   *  bestiaryGating.unlockAll=true 时免门直读最高档（参考书模式,仅调试注入）;
+   *  isUnlocked/completion 恒走真实门控（realUnlockState）。 */
   unlockState(entry: BestiaryEntryDef): UnlockState {
     if (bestiaryGating.unlockAll) return UnlockState.DropsWithRates;
     return this.realUnlockState(entry);

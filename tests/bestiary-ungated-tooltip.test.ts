@@ -3,7 +3,7 @@
 //   ② tooltip ItemTooltip.* 说明行链路（vi_ 物品 → ITEM_NAME_BY_ID → l10n 嵌套键）
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { bestiaryEntries, BestiaryTracker, UnlockState } from '../src/data/Bestiary';
+import { bestiaryEntries, BestiaryTracker, UnlockState, bestiaryGating } from '../src/data/Bestiary';
 import { ITEM_NAME_BY_ID } from '../src/i18n/idNames.generated';
 import { Lang } from '../src/i18n/Lang';
 import { languageManager } from '../src/i18n/LanguageManager';
@@ -13,8 +13,9 @@ beforeAll(() => {
   languageManager.loadPackJson(JSON.parse(readFileSync('public/l10n/zh-Hans.json', 'utf8')));
 });
 
-describe('图鉴免门（参考书模式）', () => {
+describe('图鉴免门（参考书模式,bestiaryGating 显式开——默认已回归原版门控）', () => {
   it('零击杀/零目击/零对话条目：unlockState 恒最高档（掉落+掉落率全可见）;完成度走真实门控', () => {
+    bestiaryGating.unlockAll = true;
     const t = new BestiaryTracker();
     const enemy = bestiaryEntries().find((e) => e.kind === 'enemy')!;
     const critter = bestiaryEntries().find((e) => e.kind === 'critter')!;

@@ -563,6 +563,13 @@ export class BestiaryPanel {
   private working: BestiaryRow[] = [];
   private selected: BestiaryRow | null = null;
   private sortSel: HTMLSelectElement | null = null;
+  /** 滚轮换页（UIBestiaryEntryGrid 同款交互）：下滚下一页/上滚上一页。
+   *  passive:false + preventDefault——面板打开时吞掉滚轮防页面背后滚动 */
+  private wheelHandler = (e: WheelEvent) => {
+    if (e.deltaY === 0) return;
+    e.preventDefault();
+    this.page(e.deltaY > 0 ? 1 : -1);
+  };
 
   constructor(private parent: HTMLElement, private flow: BestiaryPanelFlow) {
     if (!document.getElementById('sw-bst-style')) {
@@ -608,6 +615,7 @@ export class BestiaryPanel {
     this.panel.querySelectorAll('[data-nav]').forEach((b) => {
       (b as HTMLElement).addEventListener('click', () => this.page(Number((b as HTMLElement).dataset.nav)));
     });
+    this.gridWrap.addEventListener('wheel', this.wheelHandler, { passive: false });
     this.searchEl.addEventListener('input', () => { this.filter.search = this.searchEl.value; this.offset = 0; this.refresh(); });
     this.sortSel.addEventListener('change', () => {
       this.sortKey = (this.sortSel!.value || 'unlocks') as BestiarySortKey;
@@ -979,6 +987,7 @@ export class BestiaryPanel {
 
   close() {
     window.removeEventListener('keydown', this.escHandler, true);
+    this.gridWrap?.removeEventListener('wheel', this.wheelHandler);
     this.ro?.disconnect();
     this.ro = null;
     this.selected = null;

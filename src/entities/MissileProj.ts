@@ -110,7 +110,7 @@ interface MissileEnemyView {
   cx?: number; cy?: number; maxHp?: number; dead: boolean;
   def?: { friendly?: boolean; critter?: boolean; hitSound?: string[] };
   hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
-    pierce?: number, fromPlayer?: number, penPercent?: number) => boolean;
+    pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
 }
 
 /** 同族存活链：尾部 = 最新弹，独占"持按连发"循环（原版每 useAnimation 一发新弹） */

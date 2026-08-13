@@ -16,7 +16,7 @@ import { placeDoorClosed } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
-import { flipGenSolid } from './GenSolid';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -81,7 +81,7 @@ const SC368 = TILE_BY_KEY['v_368_granite_block']!;
 const SC367 = TILE_BY_KEY['v_367_marble_block']!;
 
 const solidAt = (st: TileStore, x: number, y: number) =>
-  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && !!(TILE_DEFS[st.type[st.idx(x, y)]]?.solid);
+  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && genSolidType(st.type[st.idx(x, y)]);
 const activeAt = (st: TileStore, x: number, y: number) => st.inBounds(x, y) && !!st.flags[st.idx(x, y)];
 
 // ---------- 房间生成(HouseUtils) ----------
@@ -936,4 +936,12 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       }
     }
   }
+  // ★pass 尾 tileSolid 翻转（cs:17220-17223）：226 蜥蜴砖/162 薄冰/225 蜂巢块/
+  //   190 荧光菇块翻回非实心（pass 头 cs:17076-79 曾强制实心）。
+  //   ★注意：原版此四格在 pass 前本就非实心（FragileIce cs:16782-83 / LifeCrystals
+  //   尾 cs:16944 / SmoothWorld 尾 cs:16693 翻的）,此处是"还原"；本仓 pass 序偏差
+  //   （小屋先于平滑/薄冰/生命水晶执行）,故本句实际把四格从数据初值 true 翻为 false,
+  //   与原版在本 pass 之后的态一致（226 由 CaveWalls 头 cs:17822 回 true,162 由
+  //   BeeLarva 尾 cs:21048 回 true,225/190 由 Piles 尾 cs:19599/19591 回 true）。
+  flipGenSolid([226, 162, 225, 190], false);
 }

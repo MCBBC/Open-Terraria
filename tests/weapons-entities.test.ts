@@ -55,7 +55,7 @@ function run(e: { fixedUpdate: (dt: number, g: GameHooks) => void; dead?: boolea
 }
 
 describe('回旋镖（aiStyle 3）', () => {
-  it('飞出减速 → 返回主角 → 回手消失，途中可命中', () => {
+  it('飞出无摩擦直线 → 30t 计数门回收 → 回手消失，途中可命中', () => {
     const { hooks, player, enemies } = makeHooks();
     // 敌人摆在回旋镖飞行线上（AI_003 出程无摩擦直线:30t×10px/t=300px 射程内）
     addEnemy(enemies, 1, 65 * 16, player.cy - 12);
@@ -144,6 +144,87 @@ describe('回旋镖特例族（AI_003 分支）', () => {
     expect(b.vy).toBe(0);
     run(b, hooks, 3);
     expect(b.vy).toBeGreaterThan(0); // 30t 后 vy+=1 垂落
+  });
+});
+
+describe('AI_003 回收门三处独立（2026-08-13 1:1 补齐）', () => {
+  /** 竖墙:tile 列 x=wallTx,y∈[80,100) 实心(命中盒带 tile 扫描,与 FlailProj 同式) */
+  function addWall(hooks: GameHooks, wallTx: number): void {
+    const store = (hooks.world as { store: TileStore }).store;
+    for (let y = 80; y < 100; y++) store.setTile(wallTx, y, 1);
+  }
+  /** 逐 tick 跑到谓词首次为真,返回 tick 数(上限内未命中返回 -1) */
+  function runUntil(e: { fixedUpdate: (dt: number, g: GameHooks) => void; dead?: boolean },
+    g: GameHooks, pred: () => boolean, max = 60): number {
+    for (let i = 0; i < max && !e.dead; i++) { e.fixedUpdate(1 / 60, g); if (pred()) return i; }
+    return -1;
+  }
+
+  it('命中敌回收门（Projectile.Damage :12278-12291）:出程命中即速度反转+进返回段', () => {
+    const { hooks, player, enemies } = makeHooks();
+    addEnemy(enemies, 10, 57 * 16, player.cy - 12); // ~102px,30t 计数门前命中
+    const b = new Boomerang(player.cx, player.cy - 4, 10, 0, 15, 4, 6);
+    const t = runUntil(b, hooks, () => b.returning, 20);
+    expect(t).toBeGreaterThanOrEqual(0); // 命中触发(非等 30t 计数门)
+    expect(b.vx).toBeLessThan(0);        // 速度反转(:12286-12287)
+    const enemy = enemies[0] as unknown as { hp: number };
+    expect(enemy.hp).toBeLessThan(100);
+    run(b, hooks, 300);
+    expect(b.dead).toBe(true);
+  });
+
+  it('撞墙反弹族 33/106/866（:18142-18151）:分轴反弹不回收', () => {
+    const { hooks, player } = makeHooks();
+    addWall(hooks, 56);
+    const b = new Boomerang(player.cx, player.cy - 4, 14, 0, 25, 4, 33);
+    run(b, hooks, 12); // 第 4t 撞墙(右缘过 x=896)
+    expect(b.returning).toBe(false); // 荆棘轮撞墙不回收
+    expect(b.vx).toBeLessThan(0);    // 命中轴速度取反续飞
+    run(b, hooks, 300);              // 之后由 30t 计数门回收
+    expect(b.dead).toBe(true);
+  });
+
+  it('缺省族撞墙（:18152-18160）:回收 + 速度=-lastVelocity;383 豁免取反', () => {
+    const { hooks, player } = makeHooks();
+    addWall(hooks, 56);
+    const b = new Boomerang(player.cx, player.cy - 4, 10, 0, 15, 4, 6);
+    expect(runUntil(b, hooks, () => b.returning, 20)).toBeGreaterThanOrEqual(0);
+    expect(b.vx).toBeLessThan(0); // 反弹向回飞
+    run(b, hooks, 300);
+    expect(b.dead).toBe(true);
+    // 383:同样进返回段但速度不取反(:18156 type != 383 门)
+    const b2 = new Boomerang(player.cx, player.cy - 4, 20, 0, 70, 4, 383);
+    const t2 = runUntil(b2, hooks, () => b2.returning, 20);
+    expect(t2).toBeGreaterThanOrEqual(0);
+    expect(b2.vx).toBeGreaterThan(0); // 仍朝墙方向(未被反转)
+  });
+
+  it('光刃撞墙 → 悬停态 ai[0]=2（:17975-17990/:37089-37109）:vx 清零、不回收', () => {
+    const { hooks, player } = makeHooks();
+    addWall(hooks, 56);
+    const b = new Boomerang(player.cx, player.cy - 4, 14, 0, 26, 4, 1059);
+    const t = runUntil(b, hooks, () => b.vx === 0 && !b.returning && b.vy > 0, 30);
+    expect(t).toBeGreaterThanOrEqual(0); // 悬停:vx=0、vy+=1,且未进返回段
+  });
+
+  it('penetrate 链（:13175-13182/:15866-15868）:182 第 10 次命中消亡;866 五击后伤害归零不消失', () => {
+    // 同点叠 10 敌:一次重叠内逐敌结算 → penetrate 递减到 0
+    const { hooks, player, enemies } = makeHooks();
+    for (let i = 0; i < 10; i++) addEnemy(enemies, 100 + i, 56 * 16, player.cy - 12);
+    const b = new Boomerang(player.cx, player.cy - 4, 12, 0, 80, 4, 182);
+    run(b, hooks, 60);
+    expect(b.dead).toBe(true); // penetrate=10 耗尽 → Kill
+    const hurtCount = enemies.filter((e) => (e as unknown as { hp: number }).hp < 100).length;
+    expect(hurtCount).toBe(10); // 第 10 次命中仍然结算(Damage 先 hurt 后 Kill)
+    // 866（:13124-13137):penetrate=5,耗尽时复位 1 + damage=0,不消失
+    const enemies2: Array<Record<string, unknown>> = [];
+    const hooks2 = { ...hooks, enemies: () => enemies2 } as GameHooks;
+    for (let i = 0; i < 6; i++) addEnemy(enemies2, 200 + i, 56 * 16, player.cy - 12);
+    const b2 = new Boomerang(player.cx, player.cy - 4, 10, 0, 80, 4, 866);
+    run(b2, hooks2, 60);
+    expect(b2.dead).toBe(false);            // 866 不因穿透耗尽消失
+    expect(b2.damage).toBe(0);              // 五击后伤害归零
+    expect(events_track.filter((id) => id >= 200).length).toBeGreaterThanOrEqual(6);
   });
 });
 

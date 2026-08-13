@@ -5,7 +5,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../src/data/items';
 import { T, W } from '../src/data/tiles';
-import { BUFF_DEFS, BuffType } from '../src/stats/Buffs';
+import { BUFF_DEFS, BuffType, buffTypeByVanilla } from '../src/stats/Buffs';
 import { packWorld } from '../src/workers/worldPacket';
 import { World as WorldClass } from '../src/world/World';
 
@@ -139,9 +139,11 @@ describe('自有存档格式', () => {
   it('BuffState.toSave/applySaved:buffNoSave 过滤(Main.cs:8896-8990)+未知 id 容忍', () => {
     const player = new Player(100, 100, new Inventory());
     player.buffs.applySaved([[26, 600], [999, 60], [87, 30]]); // 饱腹(26 可存)/未知/光环 87
-    // vanilla 26 → 本仓 WellFed(经 BUFF_DEFS 反查,不硬编码枚举值)
-    const wellFed = (Object.keys(BUFF_DEFS) as unknown as BuffType[])
-      .find((t) => BUFF_DEFS[t].vanillaBuff === 26)!;
+    // vanilla 26 → 本仓 WellFed(经 BUFF_DEFS 反查,不硬编码枚举值)。
+    // ★须用 buffTypeByVanilla 取【数值】枚举键——Object.keys 返回字符串,
+    // BuffState.active 以数值 BuffType 为键,字符串键 has() 恒 false
+    // (2026-08-13 修复 Buffs.ts 反查表同陷阱后,此断言随之校正)
+    const wellFed = buffTypeByVanilla(26)!;
     expect(player.buffs.has(wellFed)).toBe(true);
     const saved = player.buffs.toSave();
     expect(saved.some(([v]) => v === 87)).toBe(false);   // 87 在 NO_SAVE 名单

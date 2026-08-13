@@ -1615,12 +1615,12 @@ function setLai0(e: Enemy, v: number): void { lunarLocalAI(e)[0] = v; }
 //   头 412 首帧自建 30 段链（29×413 身 + 1×414 尾，:51764-51785 num35=30），
 //   全链 realLife=头（:51770/:51782——受击传导扣头 10000 总血，段不可单杀）；
 //   空泳追击环（flag3 恒 true :51955-51957）：玩家下方 15 格内有地面 → 目标改为
-//   地面上方 800px 悬停线，|dx|<500 时再沿速度向外推 ±600px 环绕（:52187-52196）；
-//   玩家悬空（下方无地）→ 直追且提速 10/0.3 → 14/0.5（:52197-52199）；
-//   速度带钳 [0.7n,1.3n]（:52209-52220）；同族头分离（:52225-52244，60/200 或
-//   400/1000）；段链收缩 linkDist = width+6（:52304-52306）；头火尘双粒（:52050-52067）。
+//   地面上方 800px 悬停线，|dx|<500 时再沿速度向外推 ±600px 环绕（:52198-52208）；
+//   玩家悬空（下方无地）→ 直追且提速 10/0.3 → 14/0.5（:52211-52214）；
+//   速度带钳 [0.7n,1.3n]（:52216-52230）；同族头分离（:52232-52254，60/200 或
+//   400/1000）；段链收缩 linkDist = width+6（:52292-52294）；头火尘双粒（:52050-52067）。
 //   段完整性 + 414 红闪原版由各段独立跑 AI_006 承担；本仓段（wormBody）跳过 AI
-//   分发 → 头循环代行（:51807-51818 身/尾查前段 / :51850-51861 头/身查下段）。
+//   分发 → 头循环代行（:51807-51819 身/尾查前段 / :51850-51862 头/身查下段）。
 // ---------------------------------------------------------------------------
 
 /** 414 尾受击红闪一步（NPC.cs:52026-52047 纯函数化，仅 type 414）：
@@ -1632,14 +1632,14 @@ function setLai0(e: Enemy, v: number): void { lunarLocalAI(e)[0] = v; }
 export function crawltipedeFlashStep(
   lai2: number, lai3: number, justHit: boolean,
 ): { lai2: number; lai3: number } {
-  if (justHit) lai3 = 3;                                              // :52028-52030 受击装填 3 发
+  if (justHit) lai3 = 3;                                              // :52027-52029 受击装填 3 发
   if (lai2 > 0) {
-    lai2 -= 16;                                                       // :52031-52033 正段衰减
-    if (lai2 === 0) lai2 = -128;                                      // :52034-52036 过零翻转
+    lai2 -= 16;                                                       // :52030-52033 正段衰减
+    if (lai2 === 0) lai2 = -128;                                      // :52033-52035 过零翻转
   } else if (lai2 < 0) {
-    lai2 += 16;                                                       // :52039-52041 负段回升
+    lai2 += 16;                                                       // :52038-52040 负段回升
   } else if (lai3 > 0) {
-    lai2 = 128;                                                       // :52042-52046 归零且有存货 → 重发
+    lai2 = 128;                                                       // :52041-52045 归零且有存货 → 重发
     lai3 -= 1;
   }
   return { lai2, lai3 };
@@ -1655,11 +1655,11 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
   }
   const st = game.world.store;
   // ---- 段完整性与 414 红闪（原版各段独立自查，头循环代行）----
-  if (!e.wormNext || e.wormNext.dead) { e.die(game); return; }        // :51850-51861 头下段失效自灭
+  if (!e.wormNext || e.wormNext.dead) { e.die(game); return; }        // :51850-51862 头下段失效自灭
   for (let s = e.wormNext; s; s = s.wormNext!) {
     if (s.dead) continue;
-    const prevDead = !s.wormFollow || s.wormFollow.dead;              // :51807-51818（413/414）
-    const nextDead = s.vanillaId === 413 && (!s.wormNext || s.wormNext.dead); // :51850-51861（413）
+    const prevDead = !s.wormFollow || s.wormFollow.dead;              // :51807-51819（413/414 查前段）
+    const nextDead = s.vanillaId === 413 && (!s.wormNext || s.wormNext.dead); // :51850-51862（413 查下段）
     if (prevDead || nextDead) { s.die(game); continue; }              // 同 tick 逐段级联
     if (s.vanillaId === 414) {                                        // :52026-52047 尾段红闪
       const f = crawltipedeFlashStep(s.lai2, s.lai3, s.justHit);
@@ -1687,41 +1687,41 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
       e.cy + Math.sin(fw) * 8 - Math.sin(mv) * 16,
       '#FF9A3C', 1, 0.4, { life: 26, damp: 0.94 });
   }
-  // ---- 412 目标覆写（:52176-52285）----
-  let num46 = 10, num47 = 0.3;                                        // :52177-52178 基础速/加速
-  let tx = player.cx, ty = player.cy;                                 // num49/num50 初值（:52173-52175）
+  // ---- 412 目标覆写（:52176-52254）----
+  let num46 = 10, num47 = 0.3;                                        // :52178-52179 基础速/加速
+  let tx = player.cx, ty = player.cy;                                 // num49/num50 初值 = 玩家中心（:52173-52175）
   const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
-  let groundRow = -1;                                                 // num51：玩家下方首个实心行
-  let found = false;                                                  // WorldGen.SolidTile2（null→true）
-  for (let dx = -2; dx <= 2 && !found; dx++) {                        // :52182-52185 列 ±2 × 下 15 格
+  let groundRow = -1;                                                 // num51：玩家下方首个实心行（:52180）
+  for (let dx = -2; dx <= 2; dx++) {                                  // :52183-52191 列 ±2 × 下 15 格
     for (let dy = 0; dy <= 15; dy++) {
+      // WorldGen.SolidTile2（WorldGen.cs:70178——null tile 视为实心）→ 世界外按实心
       if (!st.inBounds(ptx + dx, pty + dy) || st.isSolid(ptx + dx, pty + dy)) {
         groundRow = pty + dy;
-        found = true;
         break;
       }
     }
+    if (groundRow > 0) break;                                         // :52193-52196 仅正行号中断外层
   }
-  let sepDist = 60, sepPush = 200;                                    // num60/num61（:52222-52223）
+  let sepDist = 60, sepPush = 200;                                    // num60/num61（:52232-52233）
   if (groundRow > 0) {
-    const hoverY = groundRow * TILE - 800;                            // :52189 num56 = num51×16 − 800
-    if (player.y > hoverY) {                                          // :52190 玩家顶低于悬停线
-      ty = hoverY;                                                    // :52192 目标改悬停线
-      if (Math.abs(e.cx - player.cx) < 500) {                         // :52193
-        tx = e.vx > 0 ? player.cx + 600 : player.cx - 600;            // :52194 沿速度向外推 600px 环绕
+    const hoverY = groundRow * TILE - 800;                            // :52200-52201 num56 = num51×16 − 800
+    if (player.y > hoverY) {                                          // :52202 玩家顶低于悬停线
+      ty = hoverY;                                                    // :52204 目标改悬停线
+      if (Math.abs(e.cx - player.cx) < 500) {                         // :52205
+        tx = e.vx > 0 ? player.cx + 600 : player.cx - 600;            // :52207 沿速度向外推 600px 环绕
       }
     }
-    sepDist = 400; sepPush = 1000;                                    // :52224-52226 有地 → 分离加强
+    sepDist = 400; sepPush = 1000;                                    // :52234-52237 有地 → 分离加强
   } else {
-    num46 = 14; num47 = 0.5;                                          // :52197-52199 玩家悬空 → 直追提速
+    num46 = 14; num47 = 0.5;                                          // :52211-52214 玩家悬空 → 直追提速
   }
-  // ---- 速度带钳 [0.7n, 1.3n]（:52209-52220，舵机前的存量速度）----
+  // ---- 速度带钳 [0.7n, 1.3n]（:52216-52230，舵机前的存量速度）----
   const spd = Math.hypot(e.vx, e.vy);
   if (spd > 0) {
     if (spd > num46 * 1.3) { e.vx = (e.vx / spd) * num46 * 1.3; e.vy = (e.vy / spd) * num46 * 1.3; }
     else if (spd < num46 * 0.7) { e.vx = (e.vx / spd) * num46 * 0.7; e.vy = (e.vy / spd) * num46 * 0.7; }
   }
-  // ---- 同族头分离（:52229-52244）：目标点沿远离方向推 sepPush ----
+  // ---- 同族头分离（:52239-52254）：目标点沿远离方向推 sepPush ----
   for (const o of enemies(game)) {
     if (o === e || o.dead || o.vanillaId !== 412) continue;
     const d = Math.hypot(o.cx - e.cx, o.cy - e.cy);
@@ -1730,15 +1730,15 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
       ty -= ((o.cy - e.cy) / d) * sepPush;
     }
   }
-  // ---- 16px 量化（:52288-52294）----
+  // ---- 16px 量化（:52254-52259）----
   const dxq = Math.floor(tx / TILE) * TILE - Math.floor(e.cx / TILE) * TILE;
   const dyq = Math.floor(ty / TILE) * TILE - Math.floor(e.cy / TILE) * TILE;
-  // ---- 期望速度向量（:52390-52393 num68 = num46/num63）----
+  // ---- 期望速度向量（:52396-52401 num68 = num46/num63）----
   const dist = Math.hypot(dxq, dyq) || 1;
-  const ax = Math.abs(dxq), ay = Math.abs(dyq);                       // num66/num67
+  const ax = Math.abs(dxq), ay = Math.abs(dyq);                       // num66/num67（:52397-52398，均匀缩放下比较不变）
   const wantX = (dxq / dist) * num46, wantY = (dyq / dist) * num46;
   const step = num47;
-  // ---- 舵机（:52505-52577 的 !flag8 分支；flag8 仅 87/454/621 置位，412 恒 false）----
+  // ---- 舵机（:52511-52583 的 !flag8 分支；flag8 仅 87/454/621 置位，412 恒 false）----
   if ((e.vx > 0 && wantX > 0) || (e.vx < 0 && wantX < 0)
     || (e.vy > 0 && wantY > 0) || (e.vy < 0 && wantY < 0)) {
     if (e.vx < wantX) e.vx += step; else if (e.vx > wantX) e.vx -= step;
@@ -1761,22 +1761,22 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
     }
   }
   e.facing = e.vx > 0 ? 1 : -1;
-  e.visAngle = Math.atan2(e.vy, e.vx) + Math.PI * 0.5;                // :52593-52595
+  e.visAngle = Math.atan2(e.vy, e.vx) + Math.PI * 0.5;                // :52600 头 rotation
   // ---- 位移（noTileCollide 直积分）----
   e.x += e.vx; e.y += e.vy;
-  // ---- 段链收缩跟随（:52266-52330，num64 = width+6）----
+  // ---- 段链收缩跟随（:52266-52323：rotation :52277 / num64=width+6 :52292-52294 /
   for (let s = e.wormNext; s && !s.dead; s = s.wormNext!) {
     const fx = s.wormFollow!;
     const dxC = fx.cx - s.cx, dyC = fx.cy - s.cy;
     const d = Math.hypot(dxC, dyC);
     if (d > 0.01) {
-      const shrink = (d - (s.w + 6)) / d;                             // :52304-52306
+      const shrink = (d - (s.w + 6)) / d;                             // :52304 收缩比 = (dist−num64)/dist
       s.x += dxC * shrink;
       s.y += dyC * shrink;
-      s.visAngle = Math.atan2(dyC, dxC) + Math.PI * 0.5;              // :52303
+      s.visAngle = Math.atan2(dyC, dxC) + Math.PI * 0.5;              // :52277
     }
     s.facing = dxC < 0 ? 1 : -1;
-    s.vx = 0; s.vy = 0;                                               // :52312 velocity = Zero
+    s.vx = 0; s.vy = 0;                                               // :52307 velocity = Vector2.Zero
   }
 }
 
