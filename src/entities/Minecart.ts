@@ -244,7 +244,8 @@ export class Minecart extends Entity {
         const kb = 10 + 40 * ratio;
         let base = 25 + 55 * ratio;
         if (this.superCart) base = 50 + 100 * ratio;
-        let dmg = Math.max(1, Math.round(base * (1 + (Math.random() * 30 - 15) / 100))); // DamageVar ±15%
+        // Main.DamageVar :65597-65620（±15% + luck 重掷——曾裸随机丢重掷段）
+        let dmg = Math.max(1, damageVar(base, p.luck));
         if (game.world.flags?.hardMode) dmg = Math.round(dmg * 1.5);
         const crit = Math.random() * 100
           < Math.max(p.critChance('melee'), p.critChance('ranged'), p.critChance('magic'));

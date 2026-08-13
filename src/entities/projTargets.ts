@@ -94,6 +94,7 @@ export function hitPlayer(
   game: GameHooks,
   dmg: number,
   trap = false,
+  pvp = false,
 ): boolean {
   if (dmg <= 0) return false;
   const p = game.player;
@@ -111,7 +112,12 @@ export function hitPlayer(
   //   但接触伤害同样吃这 ×2？否——×2 只在 Projectile.Damage_EVP（弹幕侧），
   //   接触侧是 Player.Hurt 直入（Enemy.def.damage 已是 ScaleStats 终值）。
   //   （本函数调用方均为 hostile 弹幕，无 reflected 路径——反射弹转 friendly 打怪）
-  game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2, self.x + self.w / 2, self.y + self.h / 2);
+  game.damagePlayer(
+    // pvp=true 不乘敌弹难度缩放与 ×2——那是 Damage_EVP（NPC 敌弹）专属（:13770-13778）；
+    // 玩家 PvP 弹走 Damage_PVP 的 Main.DamageVar（0.85-1.15 幅度,数值侧已含）直传
+    pvp ? dmg : hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2,
+    self.x + self.w / 2, self.y + self.h / 2,
+    undefined, false, pvp);
   // 成就：陷阱弹致死（Projectile.cs:13804-13808 trap→trapDebuffSource，死则
   // HandleSpecialEvent(4) WATCH_YOUR_STEP；仅 trap 类、非反射弹）
   if (trap && (p.dead || p.hp <= 0)) {

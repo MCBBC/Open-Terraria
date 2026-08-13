@@ -115,7 +115,7 @@ import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
 import { scanLuckScene, rollLuck } from '../stats/Luck';
-import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode } from '../stats/ScaleStats';
+import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
 import { pickMusic, newMusicState, bossMusicFor, BOSS_MUSIC, MUSIC, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
@@ -11130,7 +11130,7 @@ export class Game implements GameHooks {
     // 日曜护盾反击（:37706-37716 ConsumeSolarFlare 后 NewProjectile 608：
     // 150×meleeDamage + kb15 朝攻击者——608 追踪弹未实装,直伤近似,登记）
     const shieldsBefore = p.solarShields;
-    const ok = p.damage(dmg, srcX, srcY);
+    const ok = p.damage(dmg, srcX, srcY, true, pvp);
     if (ok && p.solarShields < shieldsBefore && attacker && !attacker.dead) {
       const retaliation = Math.max(1, Math.round(150 * p.damageMult('melee')));
       attacker.hurt(retaliation, Math.sign(attacker.cx - p.cx) * 10, -3, this);
@@ -11219,7 +11219,8 @@ export class Game implements GameHooks {
         const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-30932
         if (p.thornsActive) {
           const num2 = (p.buffs.hasThorns ? 1 : 0) + (p.turtleSet ? 1 : 0);   // :30911-30916
-          const reflect = Math.min(1000, Math.round(dmg * (1 + (Math.random() * 30 - 15) / 100) * num2));
+          // Main.DamageVar :65597-65620（±15% + luck 重掷——曾裸随机丢重掷段）
+          const reflect = Math.min(1000, damageVar(dmg * num2, p.luck));
           attacker.hurt(reflect, -num3 * 10 * 0.65, 0, this);
           this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#80FF80');
         }

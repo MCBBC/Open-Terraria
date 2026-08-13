@@ -637,6 +637,16 @@ function drawLiquidBehindTiles(
     }
     return t;
   };
+  // LiquidSlope 表缓存（同款"只缓存命中"策略；坡面格才触碰）
+  const slopeTexCache = new Map<number, HTMLImageElement | null>();
+  const slopeTexFor = (vt: number) => {
+    let t = slopeTexCache.get(vt);
+    if (t === undefined) {
+      t = atlas.ensureVImage(liquidSlopeSheet(vt, waterStyle)) ?? null;
+      if (t) slopeTexCache.set(vt, t);
+    }
+    return t;
+  };
 
   for (let x = Math.max(1, tx0); x <= Math.min(st.w - 2, tx1); x++) {
     for (let y = Math.max(1, ty0); y <= Math.min(st.h - 2, ty1); y++) {
@@ -653,8 +663,18 @@ function drawLiquidBehindTiles(
         return { lq: st.liquid[ni], lt: st.liquidType[ni] || 1 };
       };
       const L = lq(-1, 0), R = lq(1, 0), U = lq(0, -1), D = lq(0, 1);
+      // 坡面格的"实心侧"邻格不计入（:3967/:3989/:4011/:4028 的 slope 门）：
+      // slope 1/3 忽略左、2/4 忽略右、3/4 忽略上、1/2 忽略下——液体只从坡面开放侧来
+      const slope = st.slope[i];
+      const slopeBlocksLeft = slope === 1 || slope === 3;
+      const slopeBlocksRight = slope === 2 || slope === 4;
+      const slopeBlocksUp = slope === 3 || slope === 4;
+      const slopeBlocksDown = slope === 1 || slope === 2;
       // flag 语义(:3967-4053):flag=左 / flag2=右 / flag3=上 / flag4=下(>240)
-      let fL = L.lq > 0; let fR = R.lq > 0; const fU = U.lq > 0, fD = D.lq > 240;
+      let fL = L.lq > 0 && !slopeBlocksLeft;
+      let fR = R.lq > 0 && !slopeBlocksRight;
+      const fU = U.lq > 0 && !slopeBlocksUp;
+      const fD = D.lq > 240 && !slopeBlocksDown;
       if (!fL && !fR && !fU && !fD) continue; // :4055-4057 四邻无液体跳过
 
       // 液体类型与最大液位(:3940-3965 取最高液位邻居)
@@ -677,7 +697,7 @@ function drawLiquidBehindTiles(
           // 仅上方有水:格顶 16×4 条(:4081-4087;坡面/半砖加深到 12)
           rh = 4;
           const isHalf = st.half[i];
-          if (isHalf) rh = 12;
+          if (isHalf || slope !== 0) rh = 12;
         } else if (fD && !fL && !fR) {
           // 仅下方:格底 16×4(:4089-4093)
           py = y * 16 + 12; rh = 4;
@@ -688,7 +708,10 @@ function drawLiquidBehindTiles(
           if (st.liquid[upNi] === 0 && !st.isSolid(x, y - 1)) y0 = 0; // 上方无液无实心→从格顶画(:4098-4101)
           const num6 = Math.floor((256 - maxLq) / 32) * 2; // 深度=液位不足时从底收(:4096,4102)
           const isHalf = st.half[i];
-          if (fL && fR || isHalf) {
+          if (slope !== 0) {
+            // 坡面格:整格宽、自 num6 起(:4102-4106)——窄条分支对坡面不适用
+            py = y * 16 + num6; ry = num6; rh = 16 - num6;
+          } else if (fL && fR || isHalf) {
             // 左右都有 或 半砖:整格宽(:4108-4111)
             py = y * 16 + num6; ry = y0; rh = 16 - num6;
           } else if (fL) {
@@ -702,11 +725,22 @@ function drawLiquidBehindTiles(
       }
       if (rw <= 0 || rh <= 0) continue;
 
+      // ---- 斜面格换 LiquidSlope 表（TileDrawing.cs:4539-4552）----
+      // 源 X += 18*(slope-1)；平面表语义(ry/rh 不变)。半砖恒 slope=0 → 天然走平面。
+      const slopeSrc = liquidSlopeSource(slope, rx, ry, rw, rh);
+      let drawTex: HTMLImageElement | null = tex;
+      let srx = rx;
+      if (slopeSrc) {
+        drawTex = slopeTexFor(lt);
+        srx = slopeSrc.sx;
+        if (!drawTex) drawTex = tex; // 斜面表未就绪 → 退回平面带(下帧懒加载生效)
+      }
+
       // ---- 源矩形钳制到贴图边界(原版 XNA PointClamp 自动钳;Canvas 2D 需显式) ----
       // Liquid_N 是 16×16 纯块;ry=4 起 + rh=16 会到 y=20 越界——XNA 读边缘像素,
       // 我们钳 rh = tex.height - ry 保持等比(不画满时目标也同步缩)
-      const srcH = Math.min(rh, tex.height - ry);
-      const srcW = Math.min(rw, tex.width - rx);
+      const srcH = Math.min(rh, drawTex.height - ry);
+      const srcW = Math.min(rw, drawTex.width - srx);
       if (srcW <= 0 || srcH <= 0) continue;
       const dstH = srcH; // 源=目标尺寸(原版 DrawPartialLiquid 同源同目标)
       const dstW = srcW;
@@ -720,7 +754,7 @@ function drawLiquidBehindTiles(
       // 按源码对齐为"不透明直画 + 2×2 子块波色 multiply"（与前景 DrawShimmer 同式）。
       if (lt === 3) {
         ctx.globalAlpha = 1;
-        ctx.drawImage(tex, rx, ry, srcW, srcH, px, py, dstW, dstH);
+        ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py, dstW, dstH);
         if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py, dstW, dstH,
           (performance.now() / 1000) * 60);
         continue;
@@ -736,7 +770,7 @@ function drawLiquidBehindTiles(
         else if (wi > 0) alpha = 0.6;
       }
       ctx.globalAlpha = alpha;
-      ctx.drawImage(tex, rx, ry, srcW, srcH, px, py, dstW, dstH);
+      ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py, dstW, dstH);
     }
   }
   ctx.globalAlpha = 1;

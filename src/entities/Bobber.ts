@@ -108,7 +108,8 @@ export class Bobber extends Entity {
    *  跟踪，对应 +5 未接（登记）；Tipsy +5 已接（:41542-41545）。 */
   private fishingPower(p: Player, game?: GameHooks): number {
     let base = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0)
-      + p.equipStats.fishingSkill;   // 装备侧渔力（钓具族+渔夫甲+软糖虫,:12549-12556/:13022-13027/:12451）
+      + p.equipStats.fishingSkill;
+    if (p.equipStats.lavaWaders || (p as unknown as { canFloatInWater?: boolean }).canFloatInWater) base += 5;  // :41546-41549   // 装备侧渔力（钓具族+渔夫甲+软糖虫,:12549-12556/:13022-13027/:12451）
     if (p.buffs.has(BuffType.Tipsy)) base += 5;                  // buff 25 :41542-41545
     if (game) {
       const w = game.world as World;
