@@ -63,6 +63,7 @@ ok('spawn-3', spawnRes === 3, { spawnRes });
 const fontLoaded = requests.some((u) => u.includes('Combat_Text_p22.png'));
 ok('font-texture-loaded', fontLoaded, { fontLoaded, reqs: requests.length });
 ok('glyph-pixels', pixels.lit > 50, pixels);
+ok('glyph-bitmap-shape', pixels.solid > 0.9, { solid: Math.round(pixels.solid * 100) / 100 });
 ok('glyph-colors', pixels.colors >= 3, pixels);   // 普通红/暴击橙/DoT 深红至少三色调
 const failed = A.filter((a) => !a.pass);
 console.log(JSON.stringify({ asserts: A, failed: failed.length, errors: errors.slice(0, 3) }, null, 1));

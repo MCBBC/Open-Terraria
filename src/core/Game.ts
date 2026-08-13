@@ -89,7 +89,7 @@ import {
   furnitureSlotCount, fitsFurniture, type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng } from '../data/vanillaFishing';
+import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
@@ -209,7 +209,7 @@ import { MeteorChunk } from '../entities/MeteorChunk';
 import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
 import { computeHappiness, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
-import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
+import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../entities/Minecart';
 import { mountOfItem, isCartMount } from '../entities/Mounts';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine } from '../physics/LineOfSight';
@@ -1048,11 +1048,28 @@ export class Game implements GameHooks {
    *  伪造意向包最多触发一次受击表现，扣血与否完全由本地决定（victim-settles）。
    *  伤害走 damagePlayer(pvp)（8t 无敌帧 + pvpDeath 标记），死因 = DeathSource.Player */
   private netApplyStrikePlayer(fromSlot: number, dmg: number, weaponId: number, flags: number) {
-    if (!this.net || !this.net.policy.pvpAllowed) return;
+    if (!this.net) return;
     const p = this.player;
     if (p.dead) return;
     const rp = this.net.players.get(fromSlot);
     if (!rp || !rp.active) return;
+    // ---- bit7 爆炸意向（BombsHurtPlayers :13944-13981 的被炸端结算）----
+    // ★原版爆炸无 hostile/InOpposingTeam 门（炸谁都成立）;pvp 参仅投射物 108/1002
+    // 为 false(:13964-13967)其余恒 true。伤害=±15% DamageVar 本地掷(:13953 用
+    // -luck);命中且未死 → StatusPlayer debuff(:13979-13980);死因 ByProjectile
+    // （:13974,weaponId 携投射物型）
+    if (flags & 0x80) {
+      const projType = weaponId;
+      const rolled = Math.max(1, Math.round(dmg * (1 + (Math.random() * 30 - 15) / 100)));
+      p.lastDamageCause = { kind: 'projectile', name: Lang.projectileName(projType) ?? 'Explosives' };
+      const pvpHit = projType !== 108 && projType !== 1002;
+      if (p.damage(rolled, rp.x, rp.y, true, pvpHit)) {
+        this.playSfx('hit', 1, p.cx, p.cy);
+        if (!p.dead && p.hp > 0) statusPlayer(this, projType);
+      }
+      return;
+    }
+    if (!this.net.policy.pvpAllowed) return;
     // ---- bit5 圣骑士盾转移（Player.cs:37727-37763 受击侧镜像：同队盾持有者承担 25%）----
     // 转移 hurt 为 pvp:false 的独立冷却槽（ImmunityCooldownID.PaladinsShield）——
     // 不吃常规无敌帧；死因 ByOther(20) teamTank。冷却/减伤以独立字段近似（计划备案）
@@ -1109,6 +1126,45 @@ export class Game implements GameHooks {
 
   /** 狱火光环 PvP 意向的 per-owner 冷却（tick） */
   private pvpAuraCd = new Map<number, number>();
+
+  /** v7 PvP 弹幕攻击端反馈（Damage_PVP :13497 的本端半边——只做吸血反馈,
+   *  扣血权在被击端）：原版 ghostHeal/vampireHeal 消费 Hurt 返回值 =
+   *  CalculateDamagePlayersTakeInPVP（DamageVar 掷后取 dmg−def×0.5 下限 1,
+   *  :13563/:37954）。吸血鬼刀 304 → vampire；法弹+幽灵套 → ghost（钩子自检
+   *  setBonus.ghostHeal 与月噬禁用/预算池）。每弹×每目标一次（键 `${projId}:${slot}`） */
+  private pvpProjHitSet = new Set<string>();
+  private netPvpProjFeedback() {
+    if (!this.net?.active || !this.net.policy.pvpAllowed || !this.player.hostile) return;
+    const alive = new Set<number>();
+    for (const ent of this.entities.projectiles) {
+      const pr = ent as Entity & { projId?: number; damage?: number; hostile?: boolean; netPuppet?: boolean; dead?: boolean; x: number; y: number; w: number; h: number };
+      if (!(pr instanceof Arrow) && !(pr instanceof MagicProj)) continue;
+      if (pr.netPuppet || pr.dead || pr.hostile) continue;
+      alive.add(pr.id);
+      const dmg0 = pr.damage ?? 0;
+      if (dmg0 <= 0) continue;
+      for (const rpEnt of this.remotePlayerProxies) {
+        const rp = rpEnt as Player;
+        const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
+        if (slot === undefined || rp.dead) continue;
+        if (!inOpposingTeam(this.player, rp)) continue;
+        const key = `${pr.id}:${slot}`;
+        if (this.pvpProjHitSet.has(key)) continue;
+        if (!(pr.x < rp.x + rp.w && pr.x + pr.w > rp.x && pr.y < rp.y + rp.h && pr.y + pr.h > rp.y)) continue;
+        this.pvpProjHitSet.add(key);
+        // :13563 Main.DamageVar ±15% → :37954 InPVP 口径
+        const num2 = Math.max(1, Math.round(dmg0 * (1 + (Math.random() * 30 - 15) / 100) - rp.defense * 0.5));
+        if (pr instanceof MagicProj) this.applyLifeSteal('ghost', num2, 1, rp.cx, rp.cy, true);
+        else if (pr.projId === 304) this.applyLifeSteal('vampire', num2, 1, rp.cx, rp.cy, false);
+      }
+    }
+    // 清理已消亡弹的命中键（防 Set 无界）
+    if (this.tickCount % 60 === 0) {
+      for (const k of this.pvpProjHitSet) {
+        if (!alive.has(Number(k.split(':')[0]))) this.pvpProjHitSet.delete(k);
+      }
+    }
+  }
 
   /** PvP 攻击者侧装备态还原（frostBurn 套装引擎/熔岩石 903——msg5 已同步 armor,
    *  代理 equipStats 现成；熔岩石 accfx 未登记,直接扫配饰槽 vid） */
@@ -1228,6 +1284,10 @@ export class Game implements GameHooks {
         if (dmg0 <= 0) continue;
         const owner = net.players.get(pup.ownerSlot ?? -1);
         if (!owner || !owner.active || !inOpposingTeam(this.player, owner)) continue;
+        // CanHitWithMeleeWeapon（:13513-13515 ownerHitCheck 族 + Projectile.cs:11734-11744）：
+        // 近战弹（回旋镖/剑气等 kind1）不许隔墙命中——线段被实心格挡即跳过。
+        // 箭/弹（kind0）无 ownerHitCheck,原版不检查——此处同构只拦 kind1
+        if (pup.kind7 === 1 && !canHitLine(pr.cx, pr.cy, this.player.cx, this.player.cy)) continue;
         // Main.DamageVar（:13563±15% 幅度,打在被击端）+ 死因 player（凶器=弹型名）
         const rolled = Math.max(1, Math.round(dmg0 * (1 + (Math.random() * 30 - 15) / 100)));
         this.player.lastDamageCause = {
@@ -1382,21 +1442,26 @@ export class Game implements GameHooks {
   /** 坐骑键（R）边沿锁（上/下车都只吃一次按下） */
   private cartKeyLatch = false;
 
-  /** 物品 → 矿车贴图（矿车族召唤物；含内部占位 minecart_item = vanilla 2343） */
-  private cartTextureOfItem(internalId: number): string | null {
-    const key = ITEM_DEFS[internalId]?.key ?? '';
-    if (viIdFromKey(key) === 2343) return DEFAULT_CART_TEXTURE;
-    const vid = viIdFromKey(key);
-    return vid >= 0 ? CART_TEXTURES[vid] ?? null : null;
+  /** 物品 → 矿车坐骑型（MountID.Sets.Cart 族召唤物 DefaultToMinecart(n)；
+   *  非矿车族物品返回 -1） */
+  private cartMountOfItem(internalId: number): number {
+    const vid = viIdFromKey(ITEM_DEFS[internalId]?.key ?? '');
+    if (vid < 0) return -1;
+    const m = mountOfItem(vid);
+    return m >= 0 && isCartMount(m) ? m : -1;
   }
 
   /** 上车（TrackHook proj 403 语义：GetOnTrack 吸附 + 落点实心门 :22407）。
+   *  mountId 传 -1 = 默认木质矿车 13（Player.cs:22401 `int num4 = 13`——
+   *  未装备矿车族物品时也上车，无需任何物品）。
    *  返回 false = 落点被实心卡住，上车失败 */
-  private mountMinecartAt(tx: number, ty: number, texture: string): boolean {
+  private mountMinecartAt(tx: number, ty: number, mountId: number): boolean {
     if (this.minecart) return false;
     const st = this.world.store;
     const cart = new Minecart();
-    cart.texture = texture;
+    cart.mountId = mountId >= 0 ? mountId : WOOD_CART_MOUNT;
+    cart.applyMountStats();
+    cart.texture = CART_MOUNT_TEXTURES[cart.mountId] ?? DEFAULT_CART_TEXTURE;
     cart.superCart = this.superCartUnlocked();
     const snap = getOnTrack(st, tx, ty, this.player.x, this.player.y, cart.w, cart.h);
     if (snap) { cart.x = snap.x; cart.y = snap.y; }
@@ -1495,30 +1560,31 @@ export class Game implements GameHooks {
       }
     }
     if (best) {
-      // 贴图优先级：矿车装备槽（miscEquips[2]）> 手持 > 背包首件（TrackHook 近似）
-      const tex = this.bestCartTexture();
-      if (tex) this.mountMinecartAt(best.x, best.y, tex);
+      // 坐骑型优先级：矿车装备槽（miscEquips[2]）> 手持 > 背包首件（Player.cs:22401-22409
+      //  原版只认装备槽；后备两档为本仓无装备槽 UI 时的近似）；全无 → 木质车 13
+      this.mountMinecartAt(best.x, best.y, this.bestCartMount());
     }
   }
 
-  /** 玩家可用的矿车贴图（miscEquips[2] 装备矿车 > 手持 > 背包扫描；无矿车返回 null） */
-  private bestCartTexture(): string | null {
+  /** 玩家可用的矿车坐骑型（miscEquips[2] 装备矿车 > 手持 > 背包扫描；
+   *  无矿车族物品 → -1 = 默认木质矿车 13，仍可上车） */
+  private bestCartMount(): number {
     const misc = this.player.inv.miscEquips?.[2];
     if (misc) {
-      const t = this.cartTextureOfItem(misc.id);
-      if (t) return t;
+      const m = this.cartMountOfItem(misc.id);
+      if (m >= 0) return m;
     }
     const held = this.player.inv.heldItem();
     if (held) {
-      const t = this.cartTextureOfItem(held.id);
-      if (t) return t;
+      const m = this.cartMountOfItem(held.id);
+      if (m >= 0) return m;
     }
     for (const s of this.player.inv.slots) {
       if (!s) continue;
-      const t = this.cartTextureOfItem(s.id);
-      if (t) return t;
+      const m = this.cartMountOfItem(s.id);
+      if (m >= 0) return m;
     }
-    return null;
+    return -1;
   }
 
   /** 矿车升级套件解锁态（Player.unlockedSuperCart；持久化于世界 flags） */
@@ -1934,7 +2000,19 @@ export class Game implements GameHooks {
         }, 500);
       };
       this.atlas.onVImageLoaded = (file: string) => {
-        if (file.startsWith('vanilla/Tiles_') || file.startsWith('vanilla/Wall_')) {
+        // 【烘焙路径懒取全集】:凡 chunk 烘焙(VanillaTiler/WallTiler/CritterCage)可能
+        // ensureVImage 懒取的文件,晚到都必须 scheduleChunkInvalidate 重烘焙——否则
+        // 回退会永久烤进已缓存 chunk(用户问的"物块变化后新贴图没加载"场景)。
+        // ① Tiles_/Wall_ 出生点扫描精确预载(主通道);② CageTop_ 笼顶盖/③ Glow_316·317
+        // 灰烬树 glowmask:烘焙懒取且【无预载】= 此前的真洞(晚到不重烘=永久缺失);
+        // ④ Tree_*/Shroom/Cactus 由 VANILLA_MISC 预载兜底,覆盖仅为预载失败重试成功的边缘。
+        // ★勿 blanket 加 'vanilla/Glow_'——NPC glow 叠画是每帧活画,重烘纯属浪费
+        if (file.startsWith('vanilla/Tiles_') || file.startsWith('vanilla/Wall_')
+          || file.startsWith('vanilla/CageTop_')
+          || file === 'vanilla/Glow_316.png' || file === 'vanilla/Glow_317.png'
+          || file.startsWith('vanilla/Tree_Tops_') || file.startsWith('vanilla/Tree_Branches_')
+          || file === 'vanilla/Shroom_Tops.png'
+          || file === 'vanilla/Evil_Cactus.png' || file === 'vanilla/Good_Cactus.png' || file === 'vanilla/Crimson_Cactus.png') {
           scheduleChunkInvalidate();
         }
         // 物品图标图集晚到 → 标记 UI 待刷（fixedUpdate 节流后刷背包/快捷栏/宝箱，
@@ -4050,9 +4128,10 @@ export class Game implements GameHooks {
       }
       this.lighting.addLight(tx, ty, lr, lg, lb);
     }
-    // 掉落物点光（WorldItem.UpdateItem_VisualEffects :1467-1471 + :1455-1461 + :1684-1703）：
-    // createTile==4 火把族 → TorchColor；蜡烛(105) → [1,0.95,0.8]；均 !wet。
-    // 荧光棒族（282/286/3002）：水中也发光（原版分支无 !wet 门控）
+    // 掉落物点光（WorldItem.UpdateItem_VisualEffects :1286-1505 全分支 1:1）：
+    // 亮晶簇/矿族 ×jitter、四柱魂 ×essScale（本仓未跟踪 essScale，取 1 近似——登记）、
+    // 彩凝胶 1970-1976 / 凝胶块 2677-2689、蜡烛 105 !wet、火把族 TorchColor(placeStyle)
+    // （!wet||水火把门）、荧光棒族无 wet 门控
     for (const dent of this.entities.drops) {
       const d = dent as ItemDrop;
       const def = ITEM_DEFS[d.itemId];
@@ -4060,20 +4139,73 @@ export class Game implements GameHooks {
       const tx = Math.floor((d.x + d.w / 2) / TILE), ty = Math.floor((d.y + d.h / 2) / TILE);
       const dst = this.world.store;
       if (!dst.inBounds(tx, ty)) continue;
-      const isTorch = def.tile === 'torch';
-      const isCandle = def.tile === 'candle';
-      if (isTorch || isCandle) {
-        if (dst.liquid[dst.idx(tx, ty)] > 100) continue; // !wet
-        this.lighting.addLight(tx, ty, 1, 0.95, 0.8);
+      const wet = dst.liquid[dst.idx(tx, ty)] > 100;
+      const vid = viIdFromKey(def.key);
+      // jitter = Main.rand.Next(a,b) × 0.01（:1288 Next(90,111) 系 / :1294 Next(95,106) 陨石）
+      const jit = (a: number, b: number) => (Math.floor(Math.random() * (b - a)) + a) * 0.01;
+      const lit = (r: number, g: number, b: number) => this.lighting.addLight(tx, ty, r, g, b);
+      if (vid === 5043) { const n = jit(90, 111); lit(0.25 * n, 0.25 * n, 0.25 * n); continue; }
+      if (vid === 116) { const n = jit(95, 106); lit(0.56 * n, 0.43 * n, 0.15 * n); continue; }
+      if (vid === 3191) { const n = jit(90, 111); lit(0.3 * n, 0.1 * n, 0.25 * n); continue; }
+      if (vid === 520 || vid === 3454) { const n = jit(90, 111); lit(0.5 * n, 0.1 * n, 0.25 * n); continue; }
+      if (vid === 521 || vid === 3455) { const n = jit(90, 111); lit(0.25 * n, 0.1 * n, 0.5 * n); continue; }
+      if (vid === 547 || vid === 3453) { const n = jit(90, 111); lit(0.5 * n, 0.3 * n, 0.05 * n); continue; }
+      if (vid === 548) { const n = jit(90, 111); lit(0.1 * n, 0.1 * n, 0.6 * n); continue; }
+      if (vid === 575) { const n = jit(90, 111); lit(0.1 * n, 0.3 * n, 0.5 * n); continue; }
+      if (vid === 549) { const n = jit(90, 111); lit(0.1 * n, 0.5 * n, 0.2 * n); continue; }
+      if (vid === 58 || vid === 1734 || vid === 1867) { const n = jit(90, 111); lit(0.5 * n, 0.1 * n, 0.1 * n); continue; }
+      if (vid === 184 || vid === 1735 || vid === 1868 || vid === 4143) { const n = jit(90, 111); lit(0.1 * n, 0.1 * n, 0.5 * n); continue; }
+      if (vid === 522) { const n = jit(90, 111); lit(0.5 * n, 1 * n, 0.1 * n); continue; }
+      if (vid === 1332) { const n = jit(90, 111); lit(1 * n, 1 * n, 0.1 * n); continue; }
+      // 四柱魂（:1372-1386 ×Main.essScale——本仓未跟踪，×1 近似）
+      if (vid === 3456) { lit(0.2, 0.4, 0.5); continue; }
+      if (vid === 3457) { lit(0.4, 0.2, 0.5); continue; }
+      if (vid === 3458) { lit(0.5, 0.4, 0.2); continue; }
+      if (vid === 3459) { lit(0.2, 0.2, 0.5); continue; }
+      if (vid === 3822) { lit(0.1, 0.3, 0.1); continue; }
+      // 彩凝胶（:1970-1976 段）与凝胶块（:2679-2677 段）
+      if (vid === 1970) { lit(0.75, 0, 0.75); continue; }
+      if (vid === 1971) { lit(0.75, 0.75, 0); continue; }
+      if (vid === 1972) { lit(0, 0, 0.75); continue; }
+      if (vid === 1973) { lit(0, 0.75, 0); continue; }
+      if (vid === 1974) { lit(0.75, 0, 0); continue; }
+      if (vid === 1975) { lit(0.75, 0.75, 0.75); continue; }
+      if (vid === 1976) { lit(0.75, 0.375, 0); continue; }
+      if (vid === 2677) { lit(0.6, 0.375, 0); continue; }
+      if (vid === 2679) { lit(0.6, 0, 0.6); continue; }
+      if (vid === 2681) { lit(0.6, 0.6, 0.6); continue; }
+      if (vid === 2683) { lit(0, 0.6, 0); continue; }
+      if (vid === 2685) { lit(0.6, 0, 0); continue; }
+      if (vid === 2687) { lit(0, 0, 0.6); continue; }
+      if (vid === 2689) { lit(0.6, 0.6, 0); continue; }
+      if (vid === 2701) { lit(0.7, 0.65, 0.55); continue; }
+      if (def.tile === 'candle') {
+        if (!wet) lit(1, 0.95, 0.8);   // 105 !wet（:1455-1461）
         continue;
       }
-      // 荧光棒族（vi id → 原版色；无 wet 门控）
-      const vid = viIdFromKey(def.key);
-      if (vid === 282) this.lighting.addLight(tx, ty, 0.7, 1, 0.8);
-      else if (vid === 286) this.lighting.addLight(tx, ty, 0.7, 0.8, 1);
-      else if (vid === 3002) this.lighting.addLight(tx, ty, 1.05, 0.95, 0.55);
-      else if (vid === 75) this.lighting.addLight(tx, ty, 0.8, 0.7, 0.1);      // 坠落之星 :1719
-      else if (vid === 183) this.lighting.addLight(tx, ty, 0.15, 0.45, 0.9);   // 陨石锭 :1715
+      if (def.tile === 'torch') {
+        // createTile==4 → TorchColor(placeStyle)（:1467-1472）；门 = (!wet&&Torches)||WaterTorches
+        const WATER_TORCH = new Set([523, 1333, 4384]);
+        if (wet && !WATER_TORCH.has(vid)) continue;
+        const BIOME_TORCH_ITEM: Record<number, number> = {
+          523: 8, 974: 9, 1245: 10, 1333: 11, 2274: 12, 3004: 13, 3045: 14, 3114: 15,
+          4383: 16, 4384: 17, 4385: 18, 4386: 19, 4387: 20, 4388: 21, 5293: 22, 5353: 23,
+        };
+        const torchId = vid >= 427 && vid <= 433 ? vid - 426 : BIOME_TORCH_ITEM[vid] ?? 0;
+        let c: [number, number, number] | undefined;
+        if (torchId === 7) c = this.lighting.clock.demonTorchColor();
+        else if (torchId === 14) c = this.lighting.clock.discoColor();
+        else if (torchId === 23) c = this.lighting.clock.shimmerTorchColor();
+        else c = TORCH_LIGHT[torchId];
+        if (c) lit(c[0], c[1], c[2]);
+        continue;
+      }
+      // 荧光棒族（无 wet 门控）与坠落之星/陨石锭（:1715-1719）
+      if (vid === 282) { lit(0.7, 1, 0.8); continue; }
+      if (vid === 286) { lit(0.7, 0.8, 1); continue; }
+      if (vid === 3002) { lit(1.05, 0.95, 0.55); continue; }
+      if (vid === 75) { lit(0.8, 0.7, 0.1); continue; }
+      if (vid === 183) { lit(0.15, 0.45, 0.9); continue; }
     }
     // 实体点光（原版 Lighting.AddLight 的 NPC 侧调用）：AI 每 tick 写 lightRGB——
     // 萤火虫族闪烁（NPC.cs:34395-34407，昼地表不亮）、发光蜗牛/熔岩蜗牛恒定（:34623-34630）、
@@ -4586,11 +4718,9 @@ export class Game implements GameHooks {
     //  用"最佳矿车"（装备槽 > 手持 > 背包）；矿车是坐骑召唤物，不消耗）
     const type = this.world.store.get(tx, ty);
     if (inp.rightDown && !this.minecart && type === this.trackTile && this.trackTile !== 0) {
-      const tex = this.bestCartTexture();
-      if (tex) {
-        if (this.mountMinecartAt(tx, ty, tex)) this.input.rightDown = false;
-        return;
-      }
+      // 无矿车族物品也上车（默认木质车 13，Player.cs:22401）
+      if (this.mountMinecartAt(tx, ty, this.bestCartMount())) this.input.rightDown = false;
+      return;
     }
     if (inp.rightDown) {
       // 抚摸宠物（Main.cs:37404：右键悬停宠物投射物 → PetAnimal → HandleSpecialEvent
@@ -6175,12 +6305,18 @@ export class Game implements GameHooks {
     }
     // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
     if (toolType === 'hammer') {
-      // 矿车轨道锤击（Player.cs:45442-45447）：FrameTrack(pound) 循环切换连接/加速向
+      // 矿车轨道锤击（Player.cs:45442-45447）：FrameTrack(pound) 循环切换连接/加速向。
+      // 帧有变（FrameTrack 内 flag4）→ KillTile(fail:true)（Minecart.cs:1167-1170）——
+      // 走 KillTile_PlaySounds case 314 = SoundID.Item52（WorldGen.cs:66587-66590）
       if (type === this.trackTile && this.trackTile !== 0) {
         if (this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
           this.lastMineHitTick = this.tickCount;
+          const ti = this.world.store.idx(tx, ty);
+          const beforeX = this.world.store.frameX[ti], beforeY = this.world.store.frameY[ti];
           frameTrack(this.world.store, tx, ty, true);
-          this.sfx.play('tink');
+          if (this.world.store.frameX[ti] !== beforeX || this.world.store.frameY[ti] !== beforeY) {
+            this.playSfxFile('Item_52', 0.8, tx * TILE, ty * TILE);
+          }
         }
         this.mining = null;
         return;
@@ -8977,6 +9113,22 @@ export class Game implements GameHooks {
       };
       p.damage(damage, cx, cy);
     }
+    // BombsHurtPlayers 跨端半边（Projectile.cs:13944-13981）：原版各端只结算【本地
+    // 玩家】被炸（Main.LocalPlayer）——爆炸天然 victim-settles。远端代理在本端无爆炸
+    // 模拟,由爆炸端按同盒广播 msg44 bit7 意向、被炸端本地结算。★原版爆炸无
+    // hostile/InOpposingTeam 门（:13948 无 hostile 检查）——pvp 参仅 108/1002 为
+    // false（:13964-13967）其余恒 true;故 bit7 走非 PvP 门,服务器亦放行非 pvp 房
+    if (this.net?.active) {
+      for (const rpEnt of this.remotePlayerProxies) {
+        const rp = rpEnt as Player;
+        const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
+        if (slot === undefined || rp.dead) continue;
+        if (Math.abs(rp.cx - cx) < hb + rp.w / 2 && Math.abs(rp.cy - cy) < hb + rp.h / 2) {
+          // direction(:13951)=玩家在弹右→1 否则 -1（击退朝远离爆炸侧）
+          this.net.sendStrikePlayer(slot, damage, rp.cx < cx ? -1 : 1, 0, projId || 108, 0x80);
+        }
+      }
+    }
     // 视觉 1:1（Projectile.Kill 按类型分档）:
     //   炸弹 28/手雷 30(:74881-74916):烟 31×20(scale1.5 vel×1.4) + 火 6×10 对
     //     (scale2.5 noGrav vel×5 + scale1.5 vel×3) + gore 61-64×4(vel×0.4 对角±1)
@@ -9616,8 +9768,24 @@ export class Game implements GameHooks {
           * this.player.damageMult('melee') * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
         const kdir = Math.sign(rp.cx - p.cx) || this.player.facing;
         // flags: bit0=crit / bits1-4=武器浸剂 meleeEnchant（被击端 StatusPvP 消费）
+        const enchant = meleeEnchantOf(this.player.buffs);
         this.net.sendStrikePlayer(slot, rawDmg, kdir, 0, this.swing?.item ?? -1,
-          (meleeEnchantOf(this.player.buffs) << 1) | (crit ? 1 : 0));
+          (enchant << 1) | (crit ? 1 : 0));
+        // 攻击端命中后效（ItemCheck_MeleeHitPvP :43420-43457,与原版同在 Hurt 后）：
+        // ①甲虫进攻套窗口刷新（beetleCounter+=num2 :43434——本仓时间蓄能模型近似）
+        this.player.onMeleeHit();
+        // ②派对浸剂（enchant 7）彩纸（原版 spawn 弹 289——纯视觉,粒子近似,同敌怪侧）
+        if (enchant === 7) {
+          this.spawnParticles(rp.cx, rp.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)],
+            6, 2.4, { life: 40, damp: 0.96 });
+        }
+        // ③蝙蝠棒 5097（BatBat_TryLifeLeeching :43518-43525：命中且 hp<max → Heal(1)）
+        // ④变态刀 3106（:43455-43460）：命中玩家 → stealth=1 满潜行
+        const pvpHeldVid = ITEM_DEFS[this.swing?.item ?? -1]?.vid ?? -1;
+        if (pvpHeldVid === 5097 && this.player.hp < this.player.maxHp) {
+          this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
+        }
+        if (pvpHeldVid === 3106) this.player.stealth = 1;
         // 本端反馈：受击音 + InPVP 公式预览飘字（Main.cs:65636：dmg−def×0.5 下限 1，
         // 与 Hurt 返回值同源——实扣以被击端为准）
         this.sfx.play('hit', 1, rp.cx, rp.cy);
@@ -10805,26 +10973,95 @@ export class Game implements GameHooks {
   /** 城镇 NPC 社交表情（原版 ai[0]=7/19 相邻互发 EmoteBubble 的简化切片，NPC.cs:69936）：
    *  白天、空闲、地面上的 NPC 与 6 格内另一 NPC 配对，低频随机互发表情 */
   private emoteCooldown = 0;
+
+  /** NPC.dontCountMe 全表(雷达行不计入):1456 SetDefaults 仅 10 处赋 true——
+   *  type 8/9/11/12/14/15/40/41/88/89(NPC.cs:8740/8769/8815/8833/8872/8892/9191/9209/9905/9923) */
+  private static readonly NPC_DONT_COUNT_ME = new Set([8, 9, 11, 12, 14, 15, 40, 41, 88, 89]);
+
+  /** PlayerFishingConditions(Player.cs:41528-41556)1:1 切片——渔情行无浮标时的
+   *  FinalFishingLevel 现算:GetBestFishingPole(手持竿优先,否则全包最高)/GetBait
+   *  (弹药位 54-57 先于主包 0-49,取先见者);松露虫饵提前返回 level=0;
+   *  level = ⌊(饵+竿+skill+Tipsy5+漂浮5) × 乘区⌋(坐姿 +5 未跟踪) */
+  playerFishingConditions(): { polePower: number; poleType: number; baitPower: number; baitType: number; level: number } {
+    const p = this.player;
+    const slots = p.inv.slots;
+    const fn = (id: number) => {
+      const m = /^vi_(\d+)_/.exec(ITEM_DEFS[id].key);
+      return m ? itemFuncOfVid(+m[1]) : null;
+    };
+    // Fishing_GetBestFishingPole(:41634-41651):手持非 0 即用,否则扫全包取最高
+    const sel = slots[p.inv.selected];
+    let polePower = 0, poleType = 0;
+    if (sel) { polePower = fn(sel.id)?.fishingPole ?? 0; poleType = polePower > 0 ? +(/^vi_(\d+)_/.exec(ITEM_DEFS[sel.id].key)?.[1] ?? 0) : 0; }
+    if (polePower === 0) {
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        if (!s) continue;
+        const pp = fn(s.id)?.fishingPole ?? 0;
+        if (pp > polePower) {
+          polePower = pp;
+          poleType = +(/^vi_(\d+)_/.exec(ITEM_DEFS[s.id].key)?.[1] ?? 0);
+        }
+      }
+    }
+    // Fishing_GetBait(:41606-41632):弹药 54-57 先扫,再主包 0-49,均取先见者
+    let baitPower = 0, baitType = 0;
+    const scanBait = (from: number, to: number) => {
+      for (let i = from; i < to && i < slots.length; i++) {
+        const s = slots[i];
+        if (!s || s.stack <= 0) continue;
+        const b = fn(s.id)?.bait ?? 0;
+        if (b > 0) { baitPower = b; baitType = +(/^vi_(\d+)_/.exec(ITEM_DEFS[s.id].key)?.[1] ?? 0); break; }
+      }
+    };
+    scanBait(54, 58);
+    if (baitPower === 0 && baitType === 0) scanBait(0, 50);
+    if (baitType === 2673) return { polePower, poleType, baitPower, baitType, level: 0 };
+    if (baitPower === 0 || polePower === 0) return { polePower, poleType, baitPower, baitType, level: 0 };
+    const w = this.world;
+    const t = w.clock.timeOfDay;
+    const isDay = w.clock.isDay;
+    let bonus = 0;
+    if (p.buffs.has(BuffType.Tipsy)) bonus += 5;     // :41542-41545
+    if (p.equipStats.waterWalk) bonus += 5;          // canFloatInWater&&wet(:41546;近似取 waterWalk 资格)
+    const base = baitPower + polePower + p.equipStats.fishingSkill
+      + (p.buffs.has(BuffType.Fishing) ? 15 : 0) + bonus;
+    const level = Math.floor(base * fishingPowerMultiplier({
+      raining: !!w.weather?.raining,
+      cloudBGAlpha: w.weather?.cloudBGAlpha ?? 0,
+      dayTime: isDay,
+      time: isDay ? ((t - 0.25) / 0.5) * 54000 : ((((t - 0.75) + 1) % 1) / 0.5) * 32400,
+      moonPhase: w.clock.moonPhase,
+      bloodMoon: !!w.clock.bloodMoon,
+    }));
+    return { polePower, poleType, baitPower, baitType, level };
+  }
+
   /** 信息显示列数据组装(DrawInfoAccs 的运行时侧):节流计数 + InfoAccCtx 注入。
-   *  渔情(:46300-46316):浮漂在液 → currentFishingPower 现算;否则用
-   *  displayedFishingInfo 粘性缓存(TruffleWorm 咬钩 → 警告文本)。 */
+   *  渔情(:46296-46316):浮标在场 → displayedFishingInfo 粘性缓存只读;
+   *  无浮标 → playerFishingConditions 现算刷缓存(松露虫 → 警告文本不刷)。 */
   private tickInfoAccs(): void {
     const p = this.player;
     const gates = p.equipStats.infoAccs;
     const w = this.world;
     const r = this.renderer;
     const clock = w.clock;
-    // 渔情(松露虫特判 + 粘性)
+    // 渔情(Main.cs:46296-46316):浮标在场(含飞行中)→ 只显示粘性缓存不更新;
+    // 无浮标 → 现算 FinalFishingLevel 并刷缓存;松露虫饵 → FishingWarning 不刷缓存
     let fishingText: string | null = null;
     if (gates.accFishFinder) {
       const bobber = this.entities.projectiles.find((e) => e instanceof Bobber && !e.dead) as Bobber | undefined;
-      if (bobber && bobber.floating) {
-        const power = bobber.currentFishingPower(this as never);
-        p.displayedFishingInfo = bobber.baitVid === 2673 || bobber.truffleBite
-          ? Lang.text('GameUI.FishingWarning')
-          : Lang.text('GameUI.FishingPower', power);
+      if (bobber) {
+        fishingText = p.displayedFishingInfo || null;
+      } else {
+        const cond = this.playerFishingConditions();
+        if (cond.baitType === 2673) {
+          fishingText = Lang.text('GameUI.FishingWarning');
+        } else {
+          p.displayedFishingInfo = Lang.text('GameUI.FishingPower', cond.level);
+          fishingText = p.displayedFishingInfo || null;
+        }
       }
-      fishingText = p.displayedFishingInfo || null;
     } else {
       p.displayedFishingInfo = '';
     }
@@ -10847,7 +11084,7 @@ export class Game implements GameHooks {
       mainTime: clock.timeOfDay * 86400,
       dayTime: clock.isDay,
       weather: {
-        storming: !!w.weather?.shouldUseStormMusic || (w.weather?.raining && (w.weather?.maxRaining ?? 0) > 0.6 && false),
+        storming: !!w.weather?.shouldUseStormMusic,   // IsItStorming => _shouldUseStormMusic(Main.cs:2978)
         maxRaining: w.weather?.maxRaining ?? 0,
         cloudBGActive: w.weather?.cloudBGActive ?? 0,
         numClouds: w.weather?.numClouds ?? 200,
@@ -10857,7 +11094,7 @@ export class Game implements GameHooks {
       moonPhase: clock.moonPhase, bloodMoon: !!clock.bloodMoon, eclipse: !!clock.eclipse,
       fishingText, oreText,
       rareText: p.accCritterGuideText,
-      enemyCount: p.accThirdEyeCount,
+      enemyCount: p.accThirdEyeNumber,
       killText,
       dps: p.getDPS(),
       mph: gates.accStopwatch ? mphOf(r.infoAccs ? r.infoAccs.speedAvg : 0, {
@@ -10867,17 +11104,24 @@ export class Game implements GameHooks {
       worldSurface: w.groundLevel, rockLevel: w.rockLevel,
       maxTilesX: w.store.w, maxTilesY: w.store.h,
     };
-    // 层 tick(节流计数 + speedSlice 推进)
+    // 层 tick(节流计数 + speedSlice 推进);雷达谓词=原版四门
+    // (active/!friendly/damage>0/lifeMax>5/!dontCountMe :46401;dontCountMe 全表
+    // 仅 10 id:NPC.cs SetDefaults type 8/9/11/12/14/15/40/41/88/89)
     r.infoAccs.tick(p, this.entities.enemies as never, this.entities.critters as never,
       p.cx, p.cy,
       (e) => {
         const en = e as unknown as { vanillaId: number | null; def?: { damage?: number; lifeMax?: number } };
-        return (en.def?.damage ?? 0) > 0 && (en.def?.lifeMax ?? 0) > 5;
+        return (en.def?.damage ?? 0) > 0 && (en.def?.lifeMax ?? 0) > 5
+          && !Game.NPC_DONT_COUNT_ME.has(en.vanillaId ?? -1);
       },
       (vid) => npcRarityOf(vid as number | null),
       (vid) => vid != null ? Lang.npcName(vid as number) : null,
       (vx, vy) => Math.hypot(vx, vy),
+      { accThirdEye: gates.accThirdEye, accCritterGuide: gates.accCritterGuide, accStopwatch: gates.accStopwatch },
     );
+    // ResetEffects(Player.cs:12623-12626):卸下雷达 → accThirdEyeCounter 归零,
+    // 重装备时立即重扫(CritterGuide 无此重置——保持原版不对称)
+    if (!gates.accThirdEye) p.accThirdEyeCounter = 0;
     // 悬停行;背包内点图标切换 hideInfo(Main.cs:46547-46573:Sound 12 + 翻转;
     // num==8 已在 buildInfoAccRows 归并 7)
     r.infoAccHover = r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY);
@@ -11735,24 +11979,22 @@ export class Game implements GameHooks {
     // 圣骑士盾 25% 转移（Player.cs:37727-37763）：本人装 938 + 有队友（同队 team≠0）
     // 800px 内也装 938 → 该次伤 25% 改由队友承担（死因 teamTank 20）。
     // 本地先全额结算再退还 25%（等价于原版 num2×0.75 前置）；转移额经 msg44 bit5
-    // 发给队友、由其本地结算（victim-settles）。门：实际伤害 ≥4 且非 9999 级直死
-    if (ok && dmg < 9999 && p.team !== 0 && this.hasPaladinShield(p) && this.net?.active) {
-      const dealt = p.damagePreview(dmg);
-      if (dealt >= 4) {
-        const holder = this.remotePlayerProxies.find((pr) => {
-          const s = (pr as unknown as { __netSlot?: number }).__netSlot;
-          return s !== undefined && pr.team === p.team && !pr.dead
-            && Math.hypot(pr.cx - p.cx, pr.cy - p.cy) <= 800
-            && this.hasPaladinShield(pr);
-        });
-        if (holder) {
-          const transfer = Math.floor(dealt * 0.25);
-          if (transfer > 0) {
-            p.hp = Math.min(p.maxHp, p.hp + transfer);   // 退还 25%（原版前置 ×0.75 等价）
-            this.net.sendStrikePlayer(
-              (holder as unknown as { __netSlot: number }).__netSlot,
-              transfer, 0, 0, -1, 0x20);
-          }
+    // 发给队友、由其本地结算（victim-settles）。门：实扣 ≥4 且非 9999 级直死
+    // （ok 现为 damage() 返回的实扣值——含 endurance/日曜/甲虫后,与原版 num2 同口径）
+    if (ok >= 4 && dmg < 9999 && p.team !== 0 && this.hasPaladinShield(p) && this.net?.active) {
+      const holder = this.remotePlayerProxies.find((pr) => {
+        const s = (pr as unknown as { __netSlot?: number }).__netSlot;
+        return s !== undefined && pr.team === p.team && !pr.dead
+          && Math.hypot(pr.cx - p.cx, pr.cy - p.cy) <= 800
+          && this.hasPaladinShield(pr);
+      });
+      if (holder) {
+        const transfer = Math.floor(ok * 0.25);
+        if (transfer > 0) {
+          p.hp = Math.min(p.maxHp, p.hp + transfer);   // 退还 25%（原版前置 ×0.75 等价）
+          this.net.sendStrikePlayer(
+            (holder as unknown as { __netSlot: number }).__netSlot,
+            transfer, 0, 0, -1, 0x20);
         }
       }
     }
@@ -14314,6 +14556,7 @@ export class Game implements GameHooks {
       }
       if (this.tickCount % 30 === 0) this.netSweepPuppets();
       if (!this.net.policy.isHost) { this.netPuppetContact(); this.netPuppetProjContact(); }
+      this.netPvpProjFeedback();
       // PvP 冷却递减（圣骑士盾独立槽近似 + 狱火光环 per-owner）
       if (this.player.paladinShieldCd > 0) this.player.paladinShieldCd--;
       for (const [k, v] of this.pvpAuraCd) {

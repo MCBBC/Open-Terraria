@@ -425,8 +425,9 @@ describe('Minecart 坐骑实体（Mount 6 + 每帧 TrackCollision）', () => {
     const vx = cart.vx;
     p.inputX = -1;
     cart.fixedUpdate(1 / 60, game);
-    // 反推一帧 = -(runSlowdown 0.2 + accel 0.04)
-    expect(cart.vx).toBeCloseTo(vx - 0.24, 5);
+    // 反推一帧 = -(runSlowdown + runAcceleration)：贴轨时 runSlowdown = runAcceleration
+    // （Player.cs:26357）→ 0.04 + 0.04 = 0.08（旧实现误用地面默认 0.2 → 0.24，已修）
+    expect(cart.vx).toBeCloseTo(vx - 0.08, 5);
   });
   it('加速轨道过车：trackBoost ∓/±4 并入（下帧生效、钳 ±13）', () => {
     const st = mkStore(60, 40);

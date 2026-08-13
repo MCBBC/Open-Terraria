@@ -22,23 +22,13 @@ export const DECOR_RIGHT_DOWN = 37;      // RightDownDecoration
 export const DECOR_BOUNCY_BUMPER = 38;   // BouncyBumperDecoration
 export const DECOR_REGULAR_BUMPER = 39;  // RegularBumperDecoration
 
-// ---- Mount.cs mounts[6]（Minecart 坐骑）参数 + SuperCart（升级套件）----
-export const CART_RUN_SPEED = 13;        // runSpeed
-export const CART_DASH_SPEED = 13;       // dashSpeed
-export const CART_ACCELERATION = 0.04;   // acceleration
-export const CART_JUMP_HEIGHT = 15;      // jumpHeight
-export const CART_JUMP_SPEED = 5.15;     // jumpSpeed
-export const SUPER_CART_RUN_SPEED = 20;
-export const SUPER_CART_DASH_SPEED = 20;
-export const SUPER_CART_ACCELERATION = 0.1;
-export const SUPER_CART_JUMP_HEIGHT = 15;
-export const SUPER_CART_JUMP_SPEED = 5.15;
-/** Player.cs:27845-27849：boostLeft/Right → trackBoost ∓/± 4（下帧入 vx，钳 ±maxRunSpeed） */
+// ---- Mount.cs mounts[6]（Minecart 坐骑）参数：坐骑族逐型参数已由 entities/Mounts.ts
+//      的 vanilla-mounts.json（Mount.cs 提取）承载，SuperCart 覆写在 entities/Minecart.ts ----
+/** Player.cs:27845-27849：boostLeft/Right → trackBoost ∓/± 4（下帧入 vx，钳 ±maxRunSpeed；
+ *  Minecart.cs:75 BoosterSpeed） */
 export const TRACK_BOOST_DELTA = 4;
 /** Player.defaultGravity（1.4.5 = 0.4f）：开放端脱轨的初始下落速度（Minecart.cs:911） */
 export const PLAYER_DEFAULT_GRAVITY = 0.4;
-/** Player.runSlowdown 默认 0.2f（Player.cs:2390/24098）：车上反推减速量 */
-export const RUN_SLOWDOWN = 0.2;
 
 // ---- Minecart.Customization.Default ----
 export const CART_TEXTURE_WIDTH = 50;                       // MinecartTextureWidth

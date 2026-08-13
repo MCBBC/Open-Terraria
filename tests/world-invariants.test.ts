@@ -144,7 +144,7 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
         'v_186_decos_3x2': 50, 'v_187_decos_3x2_group_2': 60, // 多带表帧语义
         'v_529_sea_oats': 60, // 原版单格写入(cs:58333)
       };
-      const SWEPT = new Set(['pot', 'v_105_statue', 'v_103_bowls', 'v_411_detonator', 'crystal_heart']);
+      const SWEPT = new Set(['pot', 'v_105_statue', 'v_103_bowls', 'v_411_detonator', 'crystal_heart', 'v_91_banners', 'door_closed', 'door_open']);
       const byType = new Map<string, number>();
       for (const v of errs) byType.set(v.typeKey, (byType.get(v.typeKey) ?? 0) + 1);
       const unknown = [...byType.keys()].filter((k) => !(k in FRAGMENTS));

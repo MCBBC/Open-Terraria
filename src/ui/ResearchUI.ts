@@ -65,6 +65,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 export function openResearchPanel(game: Game): void {
   ensureCss();
   if (panel) { closeResearchPanel(); return; }
+  game.input.uiBlocking = true;   // 面板打开封游戏输入（摇杆/世界触摸）
   const r = game.research;
   const inv = game.player.inv;
 
@@ -140,8 +141,11 @@ export function openResearchPanel(game: Game): void {
         const bAll = el('button', '', Lang.text('Mods.SandboxWorld.Research.SacrificeAll'));
         bAll.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          // CreativeUI.SacrificeItem :297-314：消耗量 = min(need-have, stack)——
+          // 永不超扣（曾整堆扣光：计数满了物品还在被吃）
+          const remaining = info.need - info.have;
           let n = 0;
-          while (n < stack && consumeOne()) { r.sacrifice(vid, 1); n++; }
+          while (n < stack && n < remaining && consumeOne()) { r.sacrifice(vid, 1); n++; }
           if (n > 0) game.cb.onInventoryChanged?.();
           render();
         });
@@ -161,6 +165,7 @@ export function openResearchPanel(game: Game): void {
 }
 
 export function closeResearchPanel(): void {
+  if (window.__swGame) window.__swGame.input.uiBlocking = false;
   panel?.remove();
   panel = null;
   if (escHandler) { window.removeEventListener('keydown', escHandler); escHandler = null; }

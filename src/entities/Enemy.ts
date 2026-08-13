@@ -64,9 +64,26 @@ import {
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { spawnNpcDeathGore } from './GorePiece';
+import { hslToRgb } from '../player/Appearance';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
+
+// ================= NPC 侧点光的共享近似源（GameHooks 取不到 FlickerClock/Main 计数器） =========
+/** 近似 Main.timeForVisualEffects（Main.cs:17110-17113：每帧 +1、216000 回卷）。
+ *  以 performance.now() 折帧数（16.6667ms/帧）——光色波（hsl 时间色/WrappedLerp）
+ *  只需视觉节拍，帧漂移无感 */
+export function visEffectFrames(): number {
+  return (performance.now() / 16.6667) % 216000;
+}
+/** 近似 Main.mouseTextColor（Main.cs:18066-18073：190↔255 每帧 ±1 三角波，周期 130 帧）。
+ *  消费点：cs:24722（火轮 num306=(270−mouseTextColor)/400）、cs:93547 等
+ *  UpdateNPC_CastLights 的 (270−mouseTextColor)/500 抖动项 */
+export function mouseTextColorApprox(): number {
+  const t = visEffectFrames();
+  const p = t % 130;
+  return p < 65 ? 190 + p : 255 - (p - 65);
+}
 // 原生 def 覆盖表(钱币/凝胶/火把/晶状体→本地键)已随本地物品退役移除:
 // 全量 vi_ 注册(VANILLA_ITEM_KEY_BY_ID)直接覆盖;236 曾误当 Lens(实为 Black Lens)
 /** 雕像产怪战利品门（NPCID.Sets，NPC.cs :79648-79654 NPCLoot 早退用） */
@@ -2390,6 +2407,11 @@ export class Enemy extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
+    // ---- 点光（cs:25321-25331 aiStyle23 全族 Center 恒亮）----
+    // 83 诅咒锤 (0.2,0.05,0.3) / 179 猩红斧 (0.3,0.15,0.05) / else 84 魔化剑 (0.05,0.2,0.3)
+    if (this.vanillaId === 83) this.lightRGB = [0.2, 0.05, 0.3];
+    else if (this.vanillaId === 179) this.lightRGB = [0.3, 0.15, 0.05];
+    else this.lightRGB = [0.05, 0.2, 0.3];
   }
 
   /** AI_025 宝箱怪 85/341/629（NPC.cs:25621-25713）：ai[0]=0 伪装（重力站立），玩家进
@@ -3177,6 +3199,12 @@ export class Enemy extends Entity {
     this.vx = 6 * this.facing;
     this.vy = 6 * this.dirY;
     moveAndCollide(this, game.world, this.vx, this.vy);
+    // ---- 点光（cs:24722-24724）：aiStyle21 全族（=72 火轮）火焰光
+    //  (0.9, 0.3+num306, 0.2)，num306=(270−mouseTextColor)/400（190-255 三角波 → 0.0375-0.1375）
+    if (this.vanillaId === 72) {
+      const num306 = (270 - mouseTextColorApprox()) / 400;
+      this.lightRGB = [0.9, 0.3 + num306, 0.2];
+    }
   }
 
   /** AI_026 独角兽/冲锋族（NPC.cs:25863-26292）：
@@ -3401,6 +3429,12 @@ export class Enemy extends Entity {
       this.vy = Math.min(this.vy + 0.3, 10);
       moveAndCollide(this, game.world, this.vx, this.vy);
     }
+    // ---- 102 灯笼鱼额前小灯（cs:23820-23822）：面朝方向前 (width+8)px、y+2 处
+    //  0.07/0.04/0.025 微光（钓竿诱饵）——位置偏移走 lightRGBAt ----
+    if (this.vanillaId === 102) {
+      this.lightRGB = [0.07, 0.04, 0.025];
+      this.lightRGBAt = { x: this.x + this.w / 2 + this.facing * (this.w + 8), y: this.y + 2 };
+    }
   }
 
   /** AI_018 水母族 1:1（cs:24212-24474）：潜伏（专家）+ 水中追击脉冲 + 上下漂移。
@@ -3521,6 +3555,9 @@ export class Enemy extends Entity {
   /** AI_022 幽灵族（NPC.145.cs:24726+）：穿墙缓速追击
    *  目标速度 = 归一化方向×7（num312），Lerp 系数 0.0125（num317）——飘忽逼近的手感 */
   private ghostAI(game: GameHooks, player: Player | null) {
+    // ---- 点光（cs:24858-24860 蜗牛怪 / cs:24934-24936 冰雪元素，Center，恒亮）----
+    if (this.vanillaId === 122) this.lightRGB = [0.4, 0, 0.25];
+    else if (this.vanillaId === 169) this.lightRGB = [0, 0.6, 0.75];
     if (!player) { this.vx *= 0.95; this.vy *= 0.95; return; }
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
     const d = Math.hypot(dx, dy) || 1;
@@ -4931,6 +4968,24 @@ export class Enemy extends Entity {
     this.ai0 += 1;                                 // :20971 每帧计时
     this.vx *= 0.9; this.vy *= 0.9;
     this.x += this.vx; this.y += this.vy;          // noGravity 悬浮直移
+    // ---- 点光（cs:21274-21341 粉尘链后的 AddLight 分支，在移动后每帧执行）----
+    if (vid === 693) {
+      // :21272-21276 图书管理员骷髅：num116=Remap(ai[0],0,60,0,1)²>0 时 Top 位
+      // （0.91/0.82/0.57)×num116——传送后 ai[0] 归 1 再涨 60 帧到 1，常态恒满
+      const ramp = Math.min(Math.max(this.ai0 / 60, 0), 1);
+      const n116 = ramp * ramp;
+      if (n116 > 0) {
+        this.lightRGB = [0.91 * n116, 0.82 * n116, 0.57 * n116];
+        this.lightRGBAt = { x: this.cx, y: this.y };          // base.Top
+      }
+    } else if (vid === 533) {
+      this.lightRGB = [0.6, 0.6, 0.3];                        // :21331-21333 沙漠幽魂 Top
+      this.lightRGBAt = { x: this.cx, y: this.y };
+    } else if (vid !== 172) {
+      // :21336-21338 兜底（24 火妖/29 哥布林术士/32 黑暗施法者/45 Tim/281-286 地牢
+      // 法师）Center 0.6/0.39/0.24；172 符文法师走粉尘分支不发光
+      this.lightRGB = [0.6, 0.39, 0.24];
+    }
     if (!player) return;
     this.facing = this.seekDirX(player);
     // ---- ② 攻击蓄力点（:20984-21054）→ ai1=30（下帧起倒数，==25 发射）----

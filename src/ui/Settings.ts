@@ -280,8 +280,12 @@ export class SettingsPanel {
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartBlocks'), () => d.smartBlocksEnabled, (v) => void options.set('smartBlocksEnabled', v)),
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartHoldRelease'), () => d.smartHoldCanReleaseMidUse, (v) => void options.set('smartHoldCanReleaseMidUse', v)),
         // 玩家对决（Player.hostile;原版仅联机显示该 UI——Main.cs:2982 ShouldPVPDraw,
-        // 单机常驻为调试便利,联机语义由协议同步压制）
-        this.toggle(Lang.text('Mods.SandboxWorld.Settings.Pvp'), () => d.pvpEnabled, (v) => {
+        // 单机常驻为调试便利,联机语义由协议同步压制）。显示态读【实时 player.hostile】
+        // （原版会话语义:进服恒 false,与 options 上次设置无关——勿用 options 回显）
+        this.toggle(Lang.text('Mods.SandboxWorld.Settings.Pvp'), () => {
+          const p = (window as unknown as { __swGame?: { player: { hostile: boolean } } }).__swGame?.player;
+          return p ? p.hostile : d.pvpEnabled;
+        }, (v) => {
           void options.set('pvpEnabled', v);
           const p = (window as unknown as { __swGame?: { player: import('../entities/Player').Player } }).__swGame?.player;
           if (p) p.hostile = v;

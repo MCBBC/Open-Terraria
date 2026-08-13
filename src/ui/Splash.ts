@@ -6,6 +6,22 @@
 //  LoadingSunflower（52×1007 竖条，19 帧环形取 (t/3+10)%19，底中锚缩放）。
 export interface SplashHandle { done(): void }
 
+/** 每次启动随机一组（Main.cs：UnifiedRandom.Next(1,11)） */
+export function pickSplashSet(rand: () => number): number {
+  return 1 + Math.floor(rand() * 10);
+}
+
+/** 淡入淡出 alpha 曲线（:51963-51985，帧→ms；wide169=Splash_1 特例档） */
+export function splashAlphaAt(tMs: number, wide169: boolean): number {
+  const [n3, n4, n5, n6] = wide169 ? [0, 75, 200, 75] : [90, 410, 620, 60];
+  const t = tMs / 16.67;
+  if (t < n3) return 0;
+  if (t <= n4) return ((t - n3) / (n4 - n3)) * 255;
+  if (t <= n5 - n6) return 255;
+  if (t <= n5) return ((n6 - (t - (n5 - n6))) / n6) * 255;
+  return -1;   // 时序走完（加载完成则收场，未完归零）
+}
+
 export function showSplash(opts: {
   /** 异步加载完成信号（Promise resolve 后进入淡出） */
   loading: Promise<unknown> | null;
@@ -39,7 +55,7 @@ export function showSplash(opts: {
   const front = root.querySelector('.front') as HTMLDivElement;
   const flower = root.querySelector('.flower') as HTMLCanvasElement;
 
-  const set = 1 + Math.floor(rand() * 10);          // Next(1,11)
+  const set = pickSplashSet(rand);
   const wide169 = set === 1;
   const base = `sprites/vanilla/SplashScreens_Splash_${set}_`;
   back.style.backgroundImage = `url(${base}0.png)`;
@@ -49,7 +65,7 @@ export function showSplash(opts: {
   // 时序（帧→ms；:51947-51965：默认 90/410/620/60/120，16:9 路径 0/75/200/75/75）
   const [n3, n4, n5, n6] = wide169 ? [0, 75, 200, 75].map((v) => v * 16.67) : [90, 410, 620, 60].map((v) => v * 16.67);
   const flowerImg = new Image();
-  flowerImg.src = 'sprites/vanilla/UI_Sunflower_Loading.png';
+  flowerImg.src = 'sprites/vanilla-ui/UI_Sunflower_Loading.png';   // UI/ 子目录展平在 vanilla-ui/
   const fctx = flower.getContext('2d')!;
 
   let loadingDone = false;
@@ -66,13 +82,9 @@ export function showSplash(opts: {
   const step = () => {
     if (removed) return;
     const t = performance.now() - t0;
-    // :51963-51985 淡入→持满→淡出（淡出段起点 = num5-num6）
-    if (t < n3) b = 0;
-    else if (t <= n4) b = Math.round(((t - n3) / (n4 - n3)) * 255);
-    else if (t <= n5 - n6) b = 255;
-    else if (t <= n5) b = Math.round(((n6 - (t - (n5 - n6))) / n6) * 255);
-    else if (!loadingDone) b = 0;
-    else { remove(); return; }
+    const a = splashAlphaAt(t, wide169);
+    if (a < 0) { if (!loadingDone) b = 0; else { remove(); return; } }
+    else b = Math.round(a);
     apply();
     // LoadingSunflower（:52041-52060：Frame(1,19,0,(帧/3+10)%19)，53px/帧=1007/19）
     if (flowerImg.complete && flowerImg.naturalWidth) {

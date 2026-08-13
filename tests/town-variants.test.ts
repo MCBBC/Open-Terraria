@@ -155,9 +155,12 @@ describe('③ 小动物笼族 tile 识别（TileID.cs:199 + TileDrawing.cs:5730-
     for (const s of cageSheets) {
       expect(CAGE_FAMILY[s], `sheet ${s} 缺笼族档案`).toBeDefined();
     }
-    // 65 张笼表 = 64 顶盖笼 + 360 金蝴蝶笼（无顶盖）
+    // 65 张笼键（cage）表 = 64 顶盖笼 + 360 金蝴蝶笼（无顶盖）
     expect(cageSheets).toHaveLength(65);
-    expect(Object.keys(CAGE_FAMILY)).toHaveLength(65);
+    // CAGE_FAMILY 全量 93 张 = 65 笼 + 28 罐/缸族（288-295/580/620 蝴蝶罐 11、
+    // 282/505/543 鱼缸 3、598 熔岩鱼缸 1、568-570 妖精罐 3、521-527 蜻蜓罐 7、
+    // 316-318 水母罐 3，TileDrawing.cs:5925-6001）
+    expect(Object.keys(CAGE_FAMILY)).toHaveLength(93);
   });
 
   it('顶盖样式表 1:1（TileID.cs:199）', () => {
@@ -208,19 +211,19 @@ describe('③ 小动物笼族 tile 识别（TileID.cs:199 + TileDrawing.cs:5730-
     }
   });
 
-  it('笼内动画帧行：空闲帧 0 → 动作帧 1..N-1（5t/帧）→ 回空闲，恒在值域内', () => {
+  it('笼内动画帧行：空闲帧 0 → 动作段 → 回空闲，恒在值域内（逐族状态机见 critter-cages.test.ts）', () => {
     const frames = 22;   // Tiles_275：1188/54
-    // 找到该 (族,槽) 的空闲窗起点：帧 0 持续 ≥30t（rand(30,900) 下界）
+    // 兔笼空闲窗：逐 tick 竞速首达（counter>rand(30,900)，首帧最早 t=31 触发）
     let zeroRun = 0;
     for (let t = 0; t < 3000; t++) {
       if (cageFrameRow(0, 3, t, frames) === 0) zeroRun++;
       else break;
     }
     expect(zeroRun).toBeGreaterThanOrEqual(30);
-    expect(zeroRun).toBeLessThan(900 + 1);
-    // 动作段逐帧推进且不越界（一个完整空闲+动作循环足够覆盖：≤900+21×5=1005t）
+    expect(zeroRun).toBeLessThanOrEqual(901);   // counter=901 必 > rand 上界 900
+    // 动作段逐帧推进且不越界（一个完整空闲+动作循环足够覆盖）
     let prev = -1, sawAction = false, returned = false;
-    for (let t = 0; t < 1200; t++) {
+    for (let t = 0; t < 4000; t++) {
       const f = cageFrameRow(0, 3, t, frames);
       expect(f).toBeGreaterThanOrEqual(0);
       expect(f).toBeLessThan(frames);

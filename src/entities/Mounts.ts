@@ -16,6 +16,7 @@
 //             （Player.cs:9592-9608）→ 水下不降速不溺水物理，frameState==4 时
 //             RunSpeed→swimSpeed、跳跃 +5 高 /+2.5 速（Mount.JumpHeight/JumpSpeed）。
 import mountJson from '../data/vanilla-mounts.json';
+import { TILE_DEFS } from '../data/tiles';
 
 // ---- 数据表类型（vanilla-mounts.json 提取产物） ----
 export interface MountData {
@@ -127,6 +128,272 @@ export const FRAME_DASHING = 5;
 
 const DEFAULT_GRAVITY = 0.4;
 
+// ============================================================================
+// 钻头坐骑（mount 8 Drill Mounted Containment）常量（Mount.cs :303-319）
+// ============================================================================
+
+/** :313 drillPickPower——PickTile/PickWall 的镐力 */
+export const DRILL_PICK_POWER = 210;
+/** :315 drillPickTime——每束命中后再装填 tick（beam.cooldown 初值，1 = 每帧可再射） */
+export const DRILL_PICK_TIME = 1;
+/** :317 amountOfBeamsAtOnce——同 tick 最多齐射的光束数 */
+export const DRILL_BEAMS = 2;
+/** :319 maxDrillLength——光束延伸 = min(鼠标距,224)+32（块）/ 再 +16（墙） */
+export const DRILL_MAX_LENGTH = 224;
+/** DrillSmartCursor_Blocks 的 PlotTileLine 带宽（:3164 65.6 ≈ 4 格扫掠带） */
+export const DRILL_BLOCK_BAND = 65.6;
+/** DrillSmartCursor_Walls 的带宽（:3197 97.6）与额外 16px 延伸（:3192） */
+export const DRILL_WALL_BAND = 97.6;
+export const DRILL_WALL_EXTRA = 16;
+/** :303/:305 二极管发射点（相对坐骑贴图原点，随 diodeRotation 旋转；Draw :6032） */
+export const DRILL_DIODE_1 = { x: 36, y: -6 };
+export const DRILL_DIODE_2 = { x: 36, y: 8 };
+/** :1308 drillTextureSize（80×80，ClampToDeadZone 死区半径） */
+export const DRILL_TEXTURE_SIZE = { x: 80, y: 80 };
+
+// ============================================================================
+// Scutlix Gunner（mount 9）常量（Mount.cs :297-303/:1374-1397）
+// ============================================================================
+
+/** :301 scutlixBaseDamage——两束眼激光的单发伤害（UseAbility :3247 damage3 = 150） */
+export const SCUTLIX_SHOT_DAMAGE = 150;
+/** :1374-1383 scutlixEyePositions 原表（:1395 已统一减贴图中心 45,54 → 原点=坐骑锚点） */
+export const SCUTLIX_EYE_OFFSETS: ReadonlyArray<readonly [number, number]> = [
+  [60 - 45, 2 - 54], [70 - 45, 6 - 54], [68 - 45, 6 - 54], [76 - 45, 12 - 54], [80 - 45, 10 - 54],
+  [84 - 45, 18 - 54], [74 - 45, 20 - 54], [76 - 45, 24 - 54], [70 - 45, 34 - 54], [76 - 45, 34 - 54],
+];
+/** :1397 scutlixTextureSize（45,54）——ClampToDeadZone 死区半径 */
+export const SCUTLIX_TEXTURE_SIZE = { x: 45, y: 54 };
+/** UpdateEffects :4885/:4886——索敌半径 num3=850 / 上限 num2=1500 */
+export const SCUTLIX_SEEK_RANGE = 850;
+export const SCUTLIX_SEEK_MAX = 1500;
+/** 眼部瞄准帧区间（AimAbility :5384-5399：frameExtra 6..10 对应 ±112.5° 分档） */
+export const SCUTLIX_EYE_FRAME_MIN = 6;
+export const SCUTLIX_EYE_FRAME_MAX = 10;
+
+/** 猪鲨崽（mount 12）MountFishronSpecial 计数器档位（Mount.cs UpdateEffects :4998/:5003） */
+export const FISHRON_COUNTER_LOW_HP = 60;
+export const FISHRON_COUNTER_WET = 420;
+
+/** fishronSpecial/updateFishron 的玩家视图 */
+export interface FishronView {
+  hp: number; maxHp: number;
+  /** Player.wet（水）——岩浆/蜂蜜湿另有标记，湿水才触发 */
+  inWater: boolean; inLava: boolean; inHoney: boolean;
+  /** Main.raining */
+  raining: boolean;
+  /** WorldGen.InAPlaceWithWind（露天迎风：地表以上、无液体、无挡风墙） */
+  windExposed: boolean;
+}
+
+/** WorldGen.InAPlaceWithWind（WorldGen.cs:66135-66161）1:1 子集：
+ *  地表高度以上 + 命中盒每格无液体且无墙（AllowsWind 墙表白名单未实装，有墙即挡风） */
+export function inAPlaceWithWind(
+  st: Pick<DrillStore, 'inBounds' | 'idx' | 'wall'> & { liquid?: ArrayLike<number> },
+  x: number, y: number, w: number, h: number, worldSurface: number,
+): boolean {
+  // DoesWindBlowAtThisHeight：tileY < worldSurface（remix 世界反转未实装）
+  if (Math.floor(y / 16) >= worldSurface) return false;
+  const x0 = Math.floor(x / 16), y0 = Math.floor(y / 16);
+  const x1 = Math.floor((x + w) / 16), y1 = Math.floor((y + h) / 16);
+  for (let i = x0; i <= x1; i++) {
+    for (let j = y0; j <= y1; j++) {
+      if (!st.inBounds(i, j)) continue;   // 越界格原版 InWorld 门外跳过
+      const k = st.idx(i, j);
+      if ((st.liquid?.[k] ?? 0) > 0 || st.wall[k] > 0) return false;
+    }
+  }
+  return true;
+}
+
+/** 激光弹型（ProjectileID.ScutlixEye = 606；UseAbility :3227 type2） */
+export const SCUTLIX_PROJ_ID = 606;
+
+/** Utils.PlotLine（Utils.cs:2327）1:1：谓词返回 false 即中断并返回 false。
+ *  主循环 `for (i = x0; i != x1; i += step)` 不含终点格——原版同款语义，勿改。 */
+function plotLine(x0: number, y0: number, x1: number, y1: number,
+  plot: (x: number, y: number) => boolean, jump: boolean): boolean {
+  if (x0 === x1 && y0 === y1) return plot(x0, y0);
+  const flag = Math.abs(y1 - y0) > Math.abs(x1 - x0);
+  if (flag) { const t = x0; x0 = y0; y0 = t; const t2 = x1; x1 = y1; y1 = t2; }
+  const num = Math.abs(x1 - x0);
+  const num2 = Math.abs(y1 - y0);
+  let num3 = Math.trunc(num / 2);
+  let num4 = y0;
+  const num5 = x0 < x1 ? 1 : -1;
+  const num6 = y0 < y1 ? 1 : -1;
+  for (let i = x0; i !== x1; i += num5) {
+    if (!plot(flag ? num4 : i, flag ? i : num4)) return false;
+    num3 -= num2;
+    if (num3 >= 0) continue;
+    num4 += num6;
+    if (!jump && !plot(flag ? num4 : i, flag ? i : num4)) return false;
+    num3 += num;
+  }
+  return true;
+}
+
+/** Utils.PlotTileLine（Utils.cs:2428）1:1：主轴逐格步进，每步扫一条垂直带（jump=false）。
+ *  start/end 为世界像素坐标；带宽 width 换算成法向半宽后取整格偏移。 */
+function plotTileLineBand(startX: number, startY: number, endX: number, endY: number,
+  width: number, plot: (x: number, y: number) => boolean): boolean {
+  const half = width / 2;
+  let dx = endX - startX, dy = endY - startY;
+  const len = Math.hypot(dx, dy);
+  if (len > 0) { dx /= len; dy /= len; }
+  // 法向 × 半宽（Vector2D(-dir.Y, dir.X) * num）
+  const nx = -dy * half, ny = dx * half;
+  const toTile = (v: number) => Math.trunc(v / 16);
+  const baseX = toTile(startX), baseY = toTile(startY);
+  const offMinX = toTile(startX - nx) - baseX, offMinY = toTile(startY - ny) - baseY;
+  const offMaxX = toTile(startX + nx) - baseX, offMaxY = toTile(startY + ny) - baseY;
+  return plotLine(baseX, baseY, toTile(endX), toTile(endY), (x, y) =>
+    plotLine(x + offMinX, y + offMinY, x + offMaxX, y + offMaxY, plot, false));
+}
+
+/** 钻头光束判定的世界视图（TileStore 结构子集） */
+export interface DrillStore {
+  w: number; h: number;
+  type: ArrayLike<number>;
+  wall: ArrayLike<number>;
+  inBounds(x: number, y: number): boolean;
+  idx(x: number, y: number): number;
+  isActive(x: number, y: number): boolean;
+}
+
+/** 单束激光状态（Mount.cs DrillBeam :20-27） */
+export interface DrillBeam {
+  /** curTileTarget（-1,-1 = 空闲） */
+  tx: number; ty: number;
+  cooldown: number;
+  /** lastPurpose：0 = 挖块 / 1 = 拆墙 */
+  purpose: number;
+}
+
+/** useDrill 的实效回调（Game 侧接线：HitTile 挖掘管线 / 粒子 / 坡面平滑） */
+export interface DrillHooks {
+  /** controlUseItem（左键按住） */
+  useItem: boolean;
+  /** controlUseTile（右键按住） */
+  useTile: boolean;
+  /** Player.PickTile（:52839：镐力 210 走 HitTile 积累） */
+  pickTile?(tx: number, ty: number): void;
+  /** Player.PickWall（:45328：墙 HitTile type-2 积累 ≥100 即毁） */
+  pickWall?(tx: number, ty: number): void;
+  /** 命中尘（:3084-3092：dust 230 两粒垂直向） */
+  dust?(x: number, y: number, n: number): void;
+  /** Tile.SmoothSlope（:3094：命中后平滑邻接坡面） */
+  smoothSlope?(tx: number, ty: number): void;
+}
+
+export const drillBeamIdle = (): DrillBeam => ({ tx: -1, ty: -1, cooldown: 0, purpose: 0 });
+
+/** WorldGen.CanKillTile 子集（同 SmartCursor 口径：只看"镐可破坏"，不查承载结构；
+ *  越界/未激活按 CanKillTile 的 null/inactive → false 处理） */
+function drillCanKillTile(st: DrillStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  return (TILE_DEFS[st.type[st.idx(x, y)]]?.pick ?? -1) >= 0;
+}
+
+/** DrillSmartCursor_Blocks（Mount.cs :3145-3179）1:1：
+ *  从玩家中心朝鼠标方向扫带（65.6px 宽），途中第一块"可破坏实体格"即目标；
+ *  已被其他束以挖块目的锁定的格跳过（两束分工）。无目标返回 null。 */
+export function drillBlockTarget(
+  st: DrillStore, centerX: number, centerY: number,
+  aimX: number, aimY: number, beams: readonly DrillBeam[],
+): { x: number; y: number } | null {
+  const rawX = aimX - centerX, rawY = aimY - centerY;
+  const dist = Math.hypot(rawX, rawY);
+  let len = dist > DRILL_MAX_LENGTH ? DRILL_MAX_LENGTH : dist;
+  len += 32;
+  const inv = dist > 0 ? len / dist : 0;
+  const endX = centerX + rawX * inv, endY = centerY + rawY * inv;
+  let target: { x: number; y: number } | null = null;
+  const hit = !plotTileLineBand(centerX, centerY, endX, endY, DRILL_BLOCK_BAND, (x, y) => {
+    target = { x, y };
+    for (const b of beams) {
+      if (b.tx === x && b.ty === y && b.purpose === 0) return true;   // 已锁定 → 跳过
+    }
+    if (!drillCanKillTile(st, x, y)) return true;                     // 不可破坏 → 跳过
+    return false;                                                     // 命中目标
+  });
+  return hit ? target : null;
+}
+
+/** DrillSmartCursor_Walls（Mount.cs :3181-3218）1:1：
+ *  同向扫带（97.6px 宽 + 16px 延伸），第一格"有可拆背景墙"即目标。
+ *  CanPlayerSmashWall（Player.cs:45303）取子集：wall 350 不可拆；wallHouse 3×3 曝露
+ *  规则未实装（本仓锤墙路径同样不查——登记偏差）。 */
+export function drillWallTarget(
+  st: DrillStore, centerX: number, centerY: number,
+  aimX: number, aimY: number, beams: readonly DrillBeam[],
+): { x: number; y: number } | null {
+  const rawX = aimX - centerX, rawY = aimY - centerY;
+  const dist = Math.hypot(rawX, rawY);
+  let len = dist > DRILL_MAX_LENGTH ? DRILL_MAX_LENGTH : dist;
+  len += 32 + DRILL_WALL_EXTRA;
+  const inv = dist > 0 ? len / dist : 0;
+  const endX = centerX + rawX * inv, endY = centerY + rawY * inv;
+  let target: { x: number; y: number } | null = null;
+  const hit = !plotTileLineBand(centerX, centerY, endX, endY, DRILL_WALL_BAND, (x, y) => {
+    target = { x, y };
+    for (const b of beams) {
+      if (b.tx === x && b.ty === y && b.purpose === 1) return true;
+    }
+    if (!st.inBounds(x, y)) return false;            // 原版 tile==null → return false（即目标）
+    const wall = st.wall[st.idx(x, y)];
+    return !(wall > 0 && wall !== 350);              // 有可拆墙 → false（目标）
+  });
+  return hit ? target : null;
+}
+
+/** ClampToDeadZone（Mount.cs :5294-5332）——瞄准点贴着玩家时外推到死区边缘，
+ *  避免零向量方向抖动。deadX/deadY = 各坐骑贴图半尺寸（9: 45×54 / 8: 80×80） */
+export function clampToDeadZone(
+  centerX: number, centerY: number, x: number, y: number, deadX: number, deadY: number,
+): { x: number; y: number } {
+  let dx = x - centerX, dy = y - centerY;
+  if (dx > -deadX && dx < deadX && dy > -deadY && dy < deadY) {
+    const sx = deadX / Math.abs(dx);
+    const sy = deadY / Math.abs(dy);
+    const s = sx > sy ? sy : sx;
+    if (Number.isFinite(s)) { dx *= s; dy *= s; }
+  }
+  return { x: dx + centerX, y: dy + centerY };
+}
+
+/** Scutlix 索敌目标的实体视图（NPC.CanBeChasedBy 过滤后的候选，Player 侧组装） */
+export interface ScutlixTarget { x: number; y: number; w: number; h: number }
+
+/** UpdateEffects case 9/46 索敌段（Mount.cs :4884-4930）1:1：
+ *  850px 内、朝向锥 ±60° 内、视线可达的最近敌怪（1500px 上限内取更近者） */
+export function scutlixFindTarget(
+  p: { x: number; y: number; w: number; h: number; facing: number },
+  npcs: readonly ScutlixTarget[],
+  los: (cx: number, cy: number, t: ScutlixTarget) => boolean,
+): ScutlixTarget | null {
+  const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+  let best: ScutlixTarget | null = null;
+  let found = false;
+  let bestD = SCUTLIX_SEEK_MAX;
+  for (const n of npcs) {
+    const vx = n.x + n.w / 2 - cx, vy = n.y + n.h / 2 - cy;
+    const d = Math.hypot(vx, vy);
+    if (d >= SCUTLIX_SEEK_RANGE) continue;
+    const bestDist = best ? Math.hypot(best.x + best.w / 2 - cx, best.y + best.h / 2 - cy) : 0;
+    if (!((bestDist > d && d < SCUTLIX_SEEK_MAX) || !found)) continue;
+    // 朝向锥（:4909-4918）：面右限 |角| ≤ π/3；面左限 |角| ≥ 2π/3
+    const ang = Math.abs(Math.atan2(vy, vx));
+    let cone = true;
+    if (p.facing === 1 && ang > 1.047197594907988) cone = false;
+    else if (p.facing === -1 && ang < 2.0943951461045853) cone = false;
+    if (cone && los(cx, cy, n)) {
+      bestD = d; best = n; found = true;
+    }
+  }
+  return found ? best : null;
+}
+
 /**
  * 单坐骑实例状态机（Mount.cs 实例字段 + 行为 1:1）。
  * 玩家持有恒一个实例（player.mount），active 即骑乘中。
@@ -151,6 +418,31 @@ export class MountInstance {
   abilityCharge = 0;
   abilityCooldown = 0;
   abilityDuration = 0;
+  /** 钻头激光激活态（Mount.cs _abilityActive :357；UseAbility case 8 开合） */
+  abilityActive = false;
+  /** Scutlix/Santank 瞄准中（_aiming :359——眼部帧与朝向锁定门 AllowDirectionChange） */
+  aiming = false;
+  /** Scutlix 背向移动时动画倒放（_flipDraw :327；UpdateFrame :4247/:4455 消费） */
+  flipDraw = false;
+  /** 猪鲨崽 MountFishronSpecial 计数器（Player.MountFishronSpecialCounter :2868） */
+  fishronCounter = 0;
+  /** 猪鲨崽增益本 tick 生效缓存（UpdateEffects case 12 先算后消费） */
+  fishronBoost = false;
+  /** 坐骑特殊跳（hasJumpOption_*）空中段是否已消费（Player.canJumpAgain_* 语义） */
+  mountJumpReady = false;
+  /** 坐骑特殊跳进行中（isPerformingJump_*——蜥蜴/山羊两版源码均无复位，骑乘期内常驻） */
+  mountJumpPerforming = false;
+  // ---- 钻头坐骑（mount 8）专属态（DrillMountData :36-50） ----
+  private drillBeams: DrillBeam[] = [drillBeamIdle(), drillBeamIdle()];
+  private drillBeamCooldown = 0;
+  /** 二极管当前角（AimAbility 目标角的 0.85/0.15 lerp，UpdateDrill :3011） */
+  diodeRotation = 0;
+  private diodeRotationTarget = 0;
+  /** 外环旋转（Hover case 8 :3474-3488：随 vx/80 累积，供背层贴图旋转） */
+  outerRingRotation = 0;
+  /** 光标世界位（crosshairPosition :48——本地玩家=鼠标世界坐标） */
+  crosshairX = 0;
+  crosshairY = 0;
   /** 离地行走宽限（UpdateFrame :3599：vy!=0 起每帧 -1，归零才切空中帧） */
   walkingGraceTime = 0;
   private idleTime = 0;
@@ -198,6 +490,73 @@ export class MountInstance {
 
   get dashSpeed(): number { return this.data?.dashSpeed ?? this.data?.runSpeed ?? 0; }
   get acceleration(): number { return this.data?.acceleration ?? 0.1; }
+  /** MountData.dashSpeed 裸值（C# 字段默认 0——14/17/37/43/52 五坐骑未设）。
+   *  上方 dashSpeed 的 runSpeed 回退是旧接入的近似（accRunSpeed 用途下与 0 等价），
+   *  冲刺门（免击退/冲刺帧）按原版取裸值 */
+  get dashSpeedRaw(): number { return this.data?.dashSpeed ?? 0; }
+
+  /** UpdateEffects :4933/:4877/:4956/:4963 授予的空中再跳（hasJumpOption_*）。
+   *  独角兽 10 / 圣诞坦克 46 / 山羊 47 / 蜥蜴 14——JumpMovement :20435-20688 链消费 */
+  get jumpOption(): 'Unicorn' | 'Santank' | 'WallOfFleshGoat' | 'Basilisk' | null {
+    if (!this.active) return null;
+    switch (this.type) {
+      case 10: return 'Unicorn';
+      case 46: return 'Santank';
+      case 47: return 'WallOfFleshGoat';
+      case 14: return 'Basilisk';
+      default: return null;
+    }
+  }
+
+  /** 特殊跳跳跃保持时长（JumpMovement :20603/:20631/:20659：
+   *  独角兽/山羊 = jumpHeight×2；蜥蜴 = trunc(jumpHeight×0.75)） */
+  mountJumpTicks(): number {
+    const jh = this.data?.jumpHeight ?? 0;
+    return this.type === 14 ? Math.trunc(jh * 0.75) : jh * 2;
+  }
+
+  /** 冲刺态免击退门（UpdateEffects :4962/:4968：|vx| > DashSpeed - RunSpeed/2）。
+   *  蜥蜴未设 dashSpeed（裸值 0）→ 门恒过——原版同款数值怪癖，照抄 */
+  dashNoKnockback(vx: number): boolean {
+    if (!this.active) return false;
+    return Math.abs(vx) > this.dashSpeedRaw - this.runSpeed() / 2;
+  }
+
+  /** 冲刺帧触发门（UpdateFrame case 10/40/41/42/47 :3827）——与免击退同式 */
+  isDashingSpeed(vx: number): boolean {
+    return Math.abs(vx) > this.dashSpeedRaw - this.runSpeed() / 2;
+  }
+
+  /** Mount.AllowDirectionChange（:604-615）：Scutlix/Santank 瞄准中锁朝向
+   *  （Player.cs:19549 HorizontalMovement 改向门） */
+  get allowDirectionChange(): boolean {
+    if (this.type !== 9 && this.type !== 46) return true;
+    return !this.aiming;
+  }
+
+  /** 猪鲨崽增益判定（Player.cs:3882-3896 MountFishronSpecial 1:1）：
+   *  半血以下 / 水湿（岩浆蜂蜜不算）/ 滴水 buff 103 / 计数器 > 0 / 雨中露天
+   *  任一成立即全额（hover ×1、移速不减半、四系伤害 +15%）。
+   *  dripping（buff 103）本仓未实装，按 false 计——计数器已覆盖出水后的 420t 余效 */
+  fishronSpecial(p: FishronView): boolean {
+    const half = Math.floor(p.maxHp / 2);   // C# int 除法
+    if (p.hp >= half && (!p.inWater || p.inLava || p.inHoney)
+      && !(this.fishronCounter > 0)) {
+      if (p.raining) return p.windExposed;
+      return false;
+    }
+    return true;
+  }
+
+  /** 猪鲨崽计数器维护（UpdateEffects case 12 :4996-5003）：
+   *  半血以下 → 60；湿身或雨中露天 → 420（离开后逐 tick 衰减，Player.cs:25340） */
+  updateFishron(p: FishronView): boolean {
+    this.fishronBoost = this.fishronSpecial(p);
+    const half = Math.floor(p.maxHp / 2);
+    if (p.hp <= half) this.fishronCounter = FISHRON_COUNTER_LOW_HP;
+    if (p.inWater || (p.raining && p.windExposed)) this.fishronCounter = FISHRON_COUNTER_WET;
+    return this.fishronBoost;
+  }
 
   // ---- Mount.cs JumpHeight/JumpSpeed :2767-2816 ----
   jumpHeight(xVelocity: number): number {
@@ -258,6 +617,191 @@ export class MountInstance {
     else this.fatigue = 0;
   }
 
+  // ---- 钻头坐骑（mount 8）能力链（Mount.cs UpdateDrill/UseDrill/UseAbility/AimAbility） ----
+
+  get isDrill(): boolean { return this.active && this.type === 8; }
+
+  /** UpdateDrill（:3000-3021）每 tick 维护：光束冷却衰减（==1 档清目标）、
+   *  二极管角向目标角 lerp、全局 beamCooldown 递减 */
+  updateDrill(): void {
+    for (const b of this.drillBeams) {
+      if (b.cooldown > 1) b.cooldown--;
+      else if (b.cooldown === 1) { b.cooldown = 0; b.tx = -1; b.ty = -1; }
+    }
+    this.diodeRotation = this.diodeRotation * 0.85 + 0.15 * this.diodeRotationTarget;
+    if (this.drillBeamCooldown > 0) this.drillBeamCooldown--;
+  }
+
+  /** AimAbility case 8（:5465-5498）：光标死区外推 → 二极管目标角（取最短旋转路径）。
+   *  aimX/aimY = 鼠标世界坐标（本地玩家） */
+  aimDrill(centerX: number, centerY: number, aimX: number, aimY: number): boolean {
+    const c = clampToDeadZone(centerX, centerY, aimX, aimY,
+      DRILL_TEXTURE_SIZE.x, DRILL_TEXTURE_SIZE.y);
+    let target = Math.atan2(c.y - centerY, c.x - centerX);
+    if (target < 0) target += Math.PI * 2;
+    this.diodeRotationTarget = target;
+    let cur = this.diodeRotation % (Math.PI * 2);
+    if (cur < 0) cur += Math.PI * 2;
+    if (cur < target) {
+      if (target - cur > Math.PI) cur += Math.PI * 2;
+    } else if (cur - target > Math.PI) {
+      cur -= Math.PI * 2;
+    }
+    this.diodeRotation = cur;
+    this.crosshairX = aimX;
+    this.crosshairY = aimY;
+    return true;
+  }
+
+  /** UseAbility case 8（:3282-3303）：toggleOn 边沿开激光（原版伴生光标投射物 453，
+   *  本仓以 abilityActive 单一真源表达——释放按键即关，见 driveDrill） */
+  setDrillActive(on: boolean): void {
+    if (!on) {
+      this.abilityActive = false;
+    } else if (!this.abilityActive) {
+      this.abilityActive = true;
+    }
+  }
+
+  /** UseDrill（:3023-3143）1:1：激光激活 + 按住左键挖块 / 按住右键拆墙。
+   *  每 tick 最多 DRILL_BEAMS 束齐射（各自找首个未被锁定的目标格）；
+   *  挖掘实效经 hooks 回调（Game 侧接 HitTile 管线） */
+  useDrill(p: MountedPlayerView, h: DrillHooks): void {
+    if (this.type !== 8 || !this.abilityActive) return;
+    const st = p.store as DrillStore | null;
+    const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+    if (h.useItem && st) {
+      for (let i = 0; i < DRILL_BEAMS; i++) {
+        if (this.drillBeamCooldown !== 0) break;
+        for (const beam of this.drillBeams) {
+          if (beam.cooldown !== 0) continue;
+          const t = drillBlockTarget(st, cx, cy, this.crosshairX, this.crosshairY, this.drillBeams);
+          if (!t) continue;
+          beam.tx = t.x; beam.ty = t.y;
+          h.pickTile?.(t.x, t.y);
+          h.dust?.(t.x * 16 + 8, t.y * 16 + 8, 2);
+          h.smoothSlope?.(t.x, t.y);
+          beam.cooldown = DRILL_PICK_TIME;
+          beam.purpose = 0;
+          break;
+        }
+      }
+    }
+    if (!h.useTile || !st) return;
+    for (let i = 0; i < DRILL_BEAMS; i++) {
+      if (this.drillBeamCooldown !== 0) break;
+      for (const beam of this.drillBeams) {
+        if (beam.cooldown !== 0) continue;
+        const t = drillWallTarget(st, cx, cy, this.crosshairX, this.crosshairY, this.drillBeams);
+        if (!t) continue;
+        beam.tx = t.x; beam.ty = t.y;
+        h.pickWall?.(t.x, t.y);
+        h.dust?.(t.x * 16 + 8, t.y * 16 + 8, 2);
+        beam.cooldown = DRILL_PICK_TIME;
+        beam.purpose = 1;
+        break;
+      }
+    }
+  }
+
+  /** 当前光束目标（渲染层消费：两束激光的终点格） */
+  get beams(): readonly DrillBeam[] { return this.drillBeams; }
+
+  // ---- Scutlix Gunner（mount 9）能力链（AimAbility/UseAbility/UpdateEffects case 9） ----
+
+  /** ResetHeadPosition（:5281-5292）：失瞄后眼部帧复位、朝向解锁 */
+  resetHeadPosition(): void {
+    if (this.aiming) {
+      this.aiming = false;
+      this.frameExtra = 0;
+      this.flipDraw = false;
+    }
+  }
+
+  /** AimAbility case 9（:5338-5418）1:1：目标点死区外推 → 朝向翻转（±90° 外换向）+
+   *  眼部瞄准帧分档（6..10 对应 ±112.5°/±67.5°/±22.5° 带）+ 背向移动倒放标记。
+   *  返回 frameExtra 或朝向是否变化（原版返回值仅用于联网同步） */
+  aimScutlix(p: MountedPlayerView, aimX: number, aimY: number): boolean {
+    this.aiming = true;
+    const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+    const c = clampToDeadZone(cx, cy, aimX, aimY, SCUTLIX_TEXTURE_SIZE.x, SCUTLIX_TEXTURE_SIZE.y);
+    const beforeFrame = this.frameExtra;
+    const beforeDir = p.facing;
+    let deg = Math.atan2(c.y - cy, c.x - cx) * 180 / Math.PI;
+    if (deg > 90) { p.facing = -1; deg = 180 - deg; }
+    else if (deg < -90) { p.facing = -1; deg = -180 - deg; }
+    else { p.facing = 1; }
+    this.flipDraw = (p.facing > 0 && p.vx < 0) || (p.facing < 0 && p.vx > 0);
+    if (deg >= 0) {
+      if (deg < 22.5) this.frameExtra = 8;
+      else if (deg < 67.5) this.frameExtra = 9;
+      else if (deg < 112.5) this.frameExtra = 10;
+    } else if (deg > -22.5) {
+      this.frameExtra = 8;
+    } else if (deg > -67.5) {
+      this.frameExtra = 7;
+    } else if (deg > -112.5) {
+      this.frameExtra = 6;
+    }
+    return this.frameExtra !== beforeFrame || p.facing !== beforeDir;
+  }
+
+  /** UseAbility case 9（:3223-3254）1:1：眼部双激光。
+   *  出生点 = 玩家底心 + 眼偏移（frameExtra 档对应 2 连号）+ 朝向翻转 + 一帧初速前移；
+   *  弹速 = 朝目标单位向量 ×14，伤害 150。fire 回调由 Player 侧接投射物桶 */
+  fireScutlix(p: MountedPlayerView, aimX: number, aimY: number,
+    fire: (x: number, y: number, vx: number, vy: number) => void): void {
+    const c = clampToDeadZone(p.x + p.w / 2, p.y + p.h / 2, aimX, aimY,
+      SCUTLIX_TEXTURE_SIZE.x, SCUTLIX_TEXTURE_SIZE.y);
+    const bottomX = p.x + p.w / 2;
+    const bottomY = p.y + p.h;
+    const base = (this.frameExtra - SCUTLIX_EYE_FRAME_MIN) * 2;
+    const xOff = this.data?.xOffset ?? 0;
+    const yOff = this.data?.yOffset ?? 0;
+    for (let i = 0; i < 2; i++) {
+      const eye = SCUTLIX_EYE_OFFSETS[base + i];
+      if (!eye) continue;
+      const ex = p.facing === -1 ? bottomX - eye[0] - xOff : bottomX + eye[0] + xOff;
+      const ey = bottomY + eye[1] + yOff;
+      let dx = c.x - ex, dy = c.y - ey;
+      const len = Math.hypot(dx, dy);
+      if (len > 0) { dx = dx / len * 14; dy = dy / len * 14; }
+      fire(ex + dx, ey + dy, dx, dy);
+    }
+  }
+
+  /** UpdateEffects case 9/46 索敌-充能-开火主循环（:4875-4954，type 9 分支）：
+   *  有目标且冷却归零 → 瞄准+停充+开火（冷却重置 20）；有目标冷却中 → 瞄准+持续充能；
+   *  无目标 → 停充+头部复位。返回本 tick 是否开火 */
+  updateScutlix(p: MountedPlayerView, target: ScutlixTarget | null,
+    fire: (x: number, y: number, vx: number, vy: number) => void): boolean {
+    if (this.type !== 9) return false;
+    if (target) {
+      const tx = target.x + target.w / 2, ty = target.y + target.h / 2;
+      if (this.abilityCooldown === 0) {
+        this.aimScutlix(p, tx, ty);
+        this.stopAbilityCharge();
+        this.fireScutlix(p, tx, ty, fire);
+        return true;
+      }
+      this.aimScutlix(p, tx, ty);
+      this.abilityCharging = true;
+      return false;
+    }
+    this.abilityCharging = false;
+    this.resetHeadPosition();
+    return false;
+  }
+
+  /** StopAbilityCharge（:2886-2895）：9/46 停充并重置冷却/持续时长 */
+  stopAbilityCharge(): void {
+    if (this.type === 9 || this.type === 46) {
+      this.abilityCharging = false;
+      this.abilityCooldown = this.data?.abilityCooldown ?? 0;
+      this.abilityDuration = this.data?.abilityDuration ?? 0;
+    }
+  }
+
   /** 非悬停飞行坐骑的能量消费（Flight :2937：flyTime 递减，耗尽返回 false） */
   flight(): boolean {
     if (this.flyTime <= 0) return false;
@@ -286,8 +830,9 @@ export class MountInstance {
     if (flyingState) {
       let canLift = true;
       let mult = 1;
-      // 猪鲨崽未湿身减半（:3344-3348 MountFishronSpecial 未实装走减半支线）
-      if (this.type === 12 && p.inWater === false) mult = 0.5;
+      // 猪鲨崽非增益态减半（:3354 `if (_type == 12 && !mountedPlayer.MountFishronSpecial) num = 0.5f`）——
+      // 增益态 = 湿身/半血以下/雨中露天（见 fishronSpecial），湿身是【全额】而非减半
+      if (this.type === 12 && !this.fishronBoost) mult = 0.5;
       const fatigueRatio = noFatigue ? 0 : this.fatigueMax > 0 ? this.fatigue / this.fatigueMax : 0;
       // 能量池：先吃 flyTime，尽后累积疲劳，疲劳满则失去升力（:3322-3342）
       if (!noFatigue) {
@@ -379,13 +924,89 @@ export class MountInstance {
       this.frameState = state;
       this.frameCounter = 0;
     }
-    // UFO（7）帧组恒取空中组（:3688 case 7: state = 2）——frameState 本身不变
-    if (this.type === 7) state = FRAME_IN_AIR;
     if (state !== FRAME_STANDING) this.idleTime = 0;
     // 离地行走宽限（:3599-3607）
     if (vy === 0) this.walkingGraceTime = d.walkingGraceTimeMax ?? 0;
     else if (this.walkingGraceTime > 0) this.walkingGraceTime--;
     if (p.inputDown && p.vy > 0) this.walkingGraceTime = 0;
+
+    // ---- 每坐骑特例段（Mount.cs UpdateFrame 首个 switch(_type) :3619-4130） ----
+    switch (this.type) {
+      case 7:
+        // UFO 帧组恒取空中组（:3688 case 7: state = 2）——frameState 本身不变
+        state = FRAME_IN_AIR;
+        break;
+      case 9:
+        // Scutlix 眼部待机动画（:3715-3730）：非瞄准时 0-5 帧 @12 循环；瞄准中由
+        // aimScutlix 直接驱动 frameExtra（6-10 档），此处跳过
+        if (this.aiming) break;
+        this.frameExtraCounter += 1;
+        if (this.frameExtraCounter >= 12) {
+          this.frameExtraCounter = 0;
+          this.frameExtra++;
+          if (this.frameExtra >= SCUTLIX_EYE_FRAME_MIN) this.frameExtra = 0;
+        }
+        break;
+      case 46:
+        // 圣诞坦克腿部副帧（:3731-3774）：非站立态一律按跑动；待机 12 / 行走 12-23
+        // 随 |vx| @8 / 瞄准中 24-26 @3
+        if (state !== FRAME_STANDING) state = FRAME_RUNNING;
+        if (!this.aiming) {
+          if (state === FRAME_STANDING) { this.frameExtra = 12; this.frameExtraCounter = 0; break; }
+          if (this.frameExtra < 12) this.frameExtra = 12;
+          this.frameExtraCounter += Math.abs(vx);
+          if (this.frameExtraCounter >= 8) {
+            this.frameExtraCounter = 0;
+            this.frameExtra++;
+            if (this.frameExtra >= 24) this.frameExtra = 12;
+          }
+          break;
+        }
+        if (this.frameExtra < 24) this.frameExtra = 24;
+        this.frameExtraCounter += 1;
+        if (this.frameExtraCounter >= 3) {
+          this.frameExtraCounter = 0;
+          this.frameExtra++;
+          if (this.frameExtra >= 27) this.frameExtra = 24;
+        }
+        break;
+      case 50:
+        // 史后坐骑（皇后史莱姆）挤压副帧（:4041-4061）：落地恒 3；空中 0-3 @7 循环
+        //（flyTime 有余时双倍速）。该副帧驱动 Extra_206/207 眼翼层（见 Renderer）
+        if (vy === 0) {
+          this.frameExtraCounter = 0;
+          this.frameExtra = 3;
+          break;
+        }
+        this.frameExtraCounter += 1;
+        if (this.flyTime > 0) this.frameExtraCounter += 1;
+        if (this.frameExtraCounter > 7) {
+          this.frameExtraCounter = 0;
+          this.frameExtra++;
+          if (this.frameExtra > 3) this.frameExtra = 0;
+        }
+        break;
+      case 10:
+      case 40:
+      case 41:
+      case 42:
+      case 47: {
+        // 冲刺帧门（:3827-3838）：跑动中 |vx| > DashSpeed-RunSpeed/2 → 切冲刺帧组；
+        // frameExtra 为冲刺尘节奏计数（每 6 拍一簇——尘效未接，登记）
+        const flag6 = this.isDashingSpeed(vx);
+        if (state === FRAME_RUNNING) {
+          if (flag6) {
+            state = FRAME_DASHING;
+            this.frameExtra++;      // 原版无上限自增（:3836），离开冲刺态即归零
+          } else {
+            this.frameExtra = 0;
+          }
+        }
+        break;
+      }
+      default:
+        break;
+    }
 
     switch (state) {
       case FRAME_STANDING: {

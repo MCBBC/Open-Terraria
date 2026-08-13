@@ -632,23 +632,30 @@ export class TileLightScanner {
         if (wall !== 0 && st.type[i] === 0) {
           const we = WALL_EMISSIVE[wall];
           if (we) { lr = Math.max(lr, we[0]); lg = Math.max(lg, we[1]); lb = Math.max(lb, we[2]); }
-          // 彩色玻璃墙彩光（ApplySurfaceLight :3190-3242）：墙 88-93（紫/黄/蓝/绿/
-          // 红/彩虹玻璃）/241 橙——格式满光后按墙种 RGB 乘区染色（switch wall-88 档）
-          if ((wall >= 88 && wall <= 93) || wall === 241) {
+        }
+        // 彩色玻璃墙（ApplySurfaceLight :3190-3242）——★乘区语义 1:1：原版先
+        // `num=num4`（回到天空分量）再逐通道乘染色系数；门 = (!active||半砖||!挡阳)
+        // && liquid<255——半砖/平台后的玻璃墙同样染色（故独立于上方 type==0 门）。
+        // 彩虹档（wall-88==5）= (0.7-0.2) + Disco/255×0.2 动态乘区。
+        // 非暴露格天空分量恒 0 → 乘后仍 0（与原版一致），后续发光 max-raise 照常叠加
+        if (((wall >= 88 && wall <= 93) || wall === 241) && st.liquid[i] < 255) {
+          const t = st.type[i];
+          const td = TILE_DEFS[t];
+          const tileOk = t === 0 || st.half[i] !== 0 || !(td && td.solid && !td.platform && td.opacity >= 0.9);
+          if (tileOk) {
             const k = wall === 241 ? 6 : wall - 88;
             const TINT: Array<[number, number, number]> = [
               [0.9, 0.15, 0.9], [0.9, 0.9, 0.15], [0.15, 0.15, 0.9], [0.15, 0.9, 0.15],
-              [0.9, 0.15, 0.15], [0.7 + 0.2, 0.7, 0.7], [0.9, 0.5, 0],
+              [0.9, 0.15, 0.15], [0, 0, 0], [0.9, 0.5, 0],
             ];
             // 原版 switch：0 紫(0.9,0.15,0.9) 1 黄(0.9,0.9,0.15) 2 蓝(0.15,0.15,0.9)
-            // 3 绿(0.15,0.9,0.15) 4 红(0.9,0.15,0.15) 5 彩虹(0.7+Disco×0.2) 6 橙(0.9,0.5,0)
-            const dc = this.flicker.discoColor();  // Main.Disco 轮转（:3229-3233 彩虹档）
-            const t = k === 5
-              ? [0.7 + (dc[0] / 255) * 0.2, 0.7 + (dc[1] / 255) * 0.2, 0.7 + (dc[2] / 255) * 0.2]
-              : TINT[k];
-            // 此分支原版作用在天空光之上（num=num4 系）且要求 tile 不挡阳/液<255：
-            // 此处以 max 合成等效（墙格无挡阳块时天空已满 → 乘区改写）
-            lr = Math.max(lr, t[0]); lg = Math.max(lg, t[1]); lb = Math.max(lb, t[2]);
+            // 3 绿(0.15,0.9,0.15) 4 红(0.9,0.15,0.15) 5 彩虹(动态) 6 橙(0.9,0.5,0)
+            let tint: [number, number, number];
+            if (k === 5) {
+              const dc = this.flicker.discoColor();  // Main.Disco 轮转（:3229-3233）
+              tint = [0.5 + dc[0] * 0.2, 0.5 + dc[1] * 0.2, 0.5 + dc[2] * 0.2];
+            } else tint = TINT[k];
+            lr *= tint[0]; lg *= tint[1]; lb *= tint[2];
           }
         }
         // ③ 发光 tile(:103-106)

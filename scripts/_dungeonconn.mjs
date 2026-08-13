@@ -24,9 +24,9 @@ for (const seed of SEEDS) {
     const g = window.__swGame;
     const st = g.world.store;
     const dx = g.world.dungeonX, dy = g.world.dungeonY;
-    // BFS 灌水:门 tile(10 关/388/389 开)视为可通行(原版门可开,不是墙);
+    // BFS 灌水:门 tile(内部 id 17 关/18 开,tiles.ts:34)视为可通行(原版门可开,不是墙);
     // 断言 = 最深"地牢墙开放格"(竖井/房厅挖空格自带地牢墙,天然洞穴没有)
-    const DOOR = new Set([10, 388, 389]);
+    const DOOR = new Set([17, 18]);
     const passable = (i) => !st.flags[i] || DOOR.has(st.type[i]);
     const startY = dy - 1;
     const startI = st.idx(dx, startY);

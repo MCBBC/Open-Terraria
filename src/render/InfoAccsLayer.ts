@@ -25,63 +25,73 @@ export class InfoAccsLayer {
     return !talking && !chestOpen && !signOpen;
   }
 
-  /** 本帧推进:节流计数器(雷达/稀有生物 15 帧一扫)+ speedSlice 秒表窗口 */
+  /** 本帧推进:节流计数器(雷达/稀有生物 16 帧一扫)+ speedSlice 秒表窗口 */
   tick(player: {
-    accThirdEyeCounter: number; accThirdEyeNumber: number;
-    accCritterGuideCounter: number; accCritterGuideNumber: number;
-    accThirdEyeCount: number; accCritterGuideText: string | null;
+    accThirdEyeCounter: number;
+    accCritterGuideCounter: number;
+    accThirdEyeNumber: number; accCritterGuideText: string | null;
     speedSlice: Float32Array; vx: number; vy: number;
   }, enemies: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vanillaId: number | null }>,
-    critters: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean }>,
+    critters: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; def?: { npc?: number } }>,
     pcx: number, pcy: number,
     countEnemy: (e: { vanillaId: number | null; cx: number; cy: number }) => boolean,
     rarityOf: (vanillaId: number | null) => number,
     nameOf: (vanillaId: number | null) => string | null,
     speedOf: (vx: number, vy: number) => number,
+    gates: { accThirdEye: boolean; accCritterGuide: boolean; accStopwatch: boolean },
   ): void {
-    // 雷达(Main.cs:46389-46414):2000px 半径,15 帧节流
-    if (++player.accThirdEyeCounter >= 15) {
-      player.accThirdEyeCounter = 0;
-      let n = 0;
-      for (const e of enemies) {
-        if (e.dead || !countEnemy(e)) continue;
-        if (Math.hypot(e.cx - pcx, e.cy - pcy) < 2000) n++;
+    // 雷达(Main.cs:46389-46414):2000px 半径;counter==0 扫一轮并置 15,否则递减
+    // (周期 16 帧;计数只在配饰装备时推进——原版在行分支内)
+    if (gates.accThirdEye) {
+      if (player.accThirdEyeCounter <= 0) {
+        player.accThirdEyeCounter = 15;
+        player.accThirdEyeNumber = 0;
+        for (const e of enemies) {
+          if (e.dead || !countEnemy(e)) continue;
+          if (Math.hypot(e.cx - pcx, e.cy - pcy) < 2000) player.accThirdEyeNumber++;
+        }
+      } else {
+        player.accThirdEyeCounter--;
       }
-      player.accThirdEyeNumber = 15;
-      player.accThirdEyeCount = n;
     }
-    // 稀有生物(Main.cs:46352-46382):1300px,15 帧节流,取 rarity 最大者
-    if (++player.accCritterGuideCounter >= 15) {
-      player.accCritterGuideCounter = 0;
-      player.accCritterGuideNumber = 15;
-      let best: { name: string; d: number; rarity: number } | null = null;
-      const pool: Array<{ dead: boolean; cx: number; cy: number; vanillaId: number | null }> = [
-        ...enemies.map((e) => ({ dead: e.dead, cx: e.cx, cy: e.cy, vanillaId: e.vanillaId })),
-        ...critters.map((c) => ({ dead: c.dead, cx: c.cx, cy: c.cy, vanillaId: null })),
-      ];
-      for (const c of pool) {
-        if (c.dead) continue;
-        const r = rarityOf(c.vanillaId);
-        if (r <= 0) continue;
-        const d = Math.hypot(c.cx - pcx, c.cy - pcy);
-        if (d >= 1300) continue;
-        const nm = nameOf(c.vanillaId);
-        if (!nm) continue;
-        if (!best || r > best.rarity || (r === best.rarity && d < best.d)) best = { name: nm, d, rarity: r };
+    // 稀有生物(Main.cs:46352-46382):1300px;counter<=0 扫一轮并置 15,否则递减;
+    // 取 rarity 最大者(严格 >,平局先扫到者胜——原版无距离平局解析)
+    if (gates.accCritterGuide) {
+      if (player.accCritterGuideCounter <= 0) {
+        player.accCritterGuideCounter = 15;
+        let best: { name: string; rarity: number } | null = null;
+        const pool: Array<{ dead: boolean; cx: number; cy: number; vanillaId: number | null }> = [
+          ...enemies.map((e) => ({ dead: e.dead, cx: e.cx, cy: e.cy, vanillaId: e.vanillaId })),
+          ...critters.map((c) => ({ dead: c.dead, cx: c.cx, cy: c.cy, vanillaId: c.def?.npc ?? null })),
+        ];
+        for (const c of pool) {
+          if (c.dead) continue;
+          const r = rarityOf(c.vanillaId);
+          if (r <= 0) continue;
+          if (Math.hypot(c.cx - pcx, c.cy - pcy) >= 1300) continue;
+          const nm = nameOf(c.vanillaId);
+          if (!nm) continue;
+          if (!best || r > best.rarity) best = { name: nm, rarity: r };
+        }
+        player.accCritterGuideText = best ? best.name : null;
+      } else {
+        player.accCritterGuideCounter--;
       }
-      player.accCritterGuideText = best ? best.name : null;
     }
-    // 秒表 speedSlice(Main.cs:46414-46440):窗口长 = 1+|v|*6,右移回填均值
-    const v = speedOf(player.vx, player.vy);
-    const n = Math.min(60, Math.floor(1 + Math.abs(v) * 6));
-    const sl = player.speedSlice;
-    let sum = 0;
-    for (let i = 0; i < n; i++) sum += sl[i];
-    const avg = n > 0 ? sum / n : 0;
-    sl.copyWithin(1, 0, 59);
-    sl[0] = v;
-    for (let i = n; i < 60; i++) sl[i] = avg; // 尾部均值回填(:46436-46440)
-    this._speedAvg = avg;
+    // 秒表 speedSlice(Main.cs:46466-46491):窗口长 = min(60, 1+|v|*6);窗口内右移
+    // → 本帧速度入 [0] → 再对窗口求和(含本帧)→ 尾部 [n,60) 回填均值
+    if (gates.accStopwatch) {
+      const v = speedOf(player.vx, player.vy);
+      const n = Math.min(60, Math.floor(1 + Math.abs(v) * 6));
+      const sl = player.speedSlice;
+      for (let i = n - 1; i > 0; i--) sl[i] = sl[i - 1];
+      sl[0] = v;
+      let sum = 0;
+      for (let i = 0; i < n; i++) sum += sl[i];
+      const avg = sum / n;
+      for (let i = n; i < 60; i++) sl[i] = avg;
+      this._speedAvg = avg;
+    }
   }
   private _speedAvg = 0;
   get speedAvg(): number { return this._speedAvg; }
@@ -131,8 +141,9 @@ export class InfoAccsLayer {
         this.state.iconRects.push({ x: X, y: iy, w: 20, h: 20, row: r });
         if (!inventoryOpen) {
           // 文本(:46594-46639):宽 >215 缩 X;scaleX<0.58 缩 Y;4 遍黑描边+正文;
-          // 悬停行与下一行文本压暗 1/3(:46629-46632)
-          const dim = (i >= hoveredRow && i < hoveredRow + 2) ? 0.34 : 1;
+          // "附近无 X"行文字降灰(:46328/:46388/:46414 等 infoTextColor=Color(100,100,100));
+          // 悬停行的**下一行**压暗 1/3(:46629-46632:i>num2 && i<num2+2,无悬停恒不暗)
+          const dim = hoveredRow >= 0 && i === hoveredRow + 1 ? 0.34 : 1;
           const fontPx = 14;
           ctx.font = `${fontPx}px monospace`;
           const w = ctx.measureText(r.text).width;
@@ -148,7 +159,7 @@ export class InfoAccsLayer {
             ctx.fillStyle = '#000';
             ctx.fillText(r.text, ox, oy);
           }
-          ctx.fillStyle = '#e8e4f0';
+          ctx.fillStyle = r.grayed ? '#646464' : '#e8e4f0';
           ctx.fillText(r.text, 0, 0);
           ctx.restore();
         }

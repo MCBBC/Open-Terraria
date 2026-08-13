@@ -119,6 +119,8 @@ export interface InfoAccRow {
   text: string;
   /** 原版行标签 tooltip(Lang.inter 95-106 → LegacyInterface) */
   label: string;
+  /** "附近无 X"行:原版整行文字降灰 Color(100,100,100)(:46328/:46388/:46414/:46426/:46451) */
+  grayed?: boolean;
 }
 
 const inter = (n: number) => Lang.inter(n);
@@ -210,10 +212,10 @@ export function mphOf(avgPxPerTick: number, wet: { honey: boolean; shimmer: bool
 export function buildInfoAccRows(ctx: InfoAccCtx, hidden: boolean[], inventoryOpen: boolean): InfoAccRow[] {
   const g = ctx.gates;
   const rows: InfoAccRow[] = [];
-  const push = (icon: number, text: string, labelN: number) => {
+  const push = (icon: number, text: string, labelN: number, grayed?: boolean) => {
     const hideIndex = icon === 8 ? 7 : icon;
     if (!inventoryOpen && hidden[hideIndex]) return;
-    rows.push({ row: rows.length, icon, hideIndex, text, label: inter(labelN) });
+    rows.push({ row: rows.length, icon, hideIndex, text, label: inter(labelN), grayed });
   };
   if (g.accWatch > 0) push(0, formatWatchText(ctx.mainTime, ctx.dayTime, g.accWatch), 95);
   if (g.accWeatherRadio) push(1, formatWeatherText(ctx.weather), 96);
@@ -225,23 +227,23 @@ export function buildInfoAccRows(ctx: InfoAccCtx, hidden: boolean[], inventoryOp
   if (g.accOreFinder) {
     push(10, ctx.oreText !== null
       ? Lang.text('GameUI.OreDetected', ctx.oreText)
-      : Lang.text('GameUI.NoTreasureNearby'), 104);
+      : Lang.text('GameUI.NoTreasureNearby'), 104, ctx.oreText === null);
   }
   if (g.accCritterGuide) {
-    push(11, ctx.rareText !== null ? ctx.rareText : Lang.text('GameUI.NoRareCreatures'), 105);
+    push(11, ctx.rareText !== null ? ctx.rareText : Lang.text('GameUI.NoRareCreatures'), 105, ctx.rareText === null);
   }
   if (g.accThirdEye) {
     push(5, ctx.enemyCount > 1
       ? Lang.text('GameUI.EnemiesNearby', ctx.enemyCount)
       : ctx.enemyCount === 1
         ? Lang.text('GameUI.OneEnemyNearby')
-        : Lang.text('GameUI.NoEnemiesNearby'), 100);
+        : Lang.text('GameUI.NoEnemiesNearby'), 100, ctx.enemyCount <= 0);
   }
   if (g.accJarOfSouls) {
-    push(6, ctx.killText !== null ? ctx.killText : Lang.text('GameUI.NoKillCount'), 101);
+    push(6, ctx.killText !== null ? ctx.killText : Lang.text('GameUI.NoKillCount'), 101, ctx.killText === null);
   }
   if (g.accDreamCatcher) {
-    push(12, ctx.dps > 0 ? Lang.text('GameUI.DPS', ctx.dps) : Lang.text('GameUI.NoDPS'), 106);
+    push(12, ctx.dps > 0 ? Lang.text('GameUI.DPS', ctx.dps) : Lang.text('GameUI.NoDPS'), 106, ctx.dps <= 0);
   }
   if (g.accStopwatch && Number.isFinite(ctx.mph)) push(9, Lang.text('GameUI.Speed', Math.round(ctx.mph)), 103);
   if (g.accCompass > 0) push(3, formatCompassText(ctx.centerX, ctx.maxTilesX), 98);

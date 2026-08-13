@@ -13,6 +13,8 @@ import { findFragments } from '../../audit/rules';
 /** 参与清扫的类型(可放置物体;原版保留形态不列入) */
 const SWEEP_KEYS: ReadonlySet<string> = new Set([
   'pot', 'v_105_statue', 'v_103_bowls', 'v_411_detonator', 'crystal_heart',
+  'v_91_banners', // 城镇旗帜 1×3(与 pot 同族的 finalize 幽灵净化受害,2026-08-13 双种子实锤)
+  'door_closed', 'door_open', // 门 1×3/2×3(生成端门放置缺格/幽灵净化受害,同族)
 ]);
 
 export function runMultitileFragmentSweepPass(st: TileStore): { swept: number } {

@@ -37,15 +37,16 @@ export function combatFontReady(crit: boolean): boolean {
   return READY[crit ? 1 : 0];
 }
 
-/** MeasureString（单行数字）:Σ kerning + spacing×(n−1);高 = lineSpacing */
+/** MeasureString（单行数字,XNA 语义:每字符 advance 后 +spacing,含尾字符）;
+ *  高 = lineSpacing */
 export function combatMeasure(text: string, crit: boolean): { w: number; h: number } {
   const f = FONTS[crit ? 'Combat_Crit' : 'Combat_Text'];
   let w = 0;
   for (let i = 0; i < text.length; i++) {
     const k = CHAR_INDEX[crit ? 1 : 0].get(text.charCodeAt(i));
-    if (k === undefined) { w += 8; continue; }
+    if (k === undefined) { w += 8 + f.spacing; continue; }
     const [l, wd, r] = f.kerning[k];
-    w += l + wd + r + (i > 0 ? f.spacing : 0);
+    w += l + wd + r + f.spacing;
   }
   return { w, h: f.lineSpacing };
 }
@@ -70,14 +71,17 @@ export function drawCombatText(
   if (rotation) ctx.rotate(rotation);
   ctx.scale(scale, scale);
   ctx.imageSmoothingEnabled = false;
-  const ratio = scale / targetScale;      // 影层色暗化系数随缩放比例（:61800 num15）
+  // num15 = scale/targetScale（:61795）:生长段(scale<1)整体亮度随比例衰减
+  const num15 = scale / targetScale;
   for (let layer = 0; layer < 5; layer++) {
     const isShadow = layer < 4;
     const dx = layer === 0 ? -targetScale : layer === 1 ? targetScale : 0;
     const dy = layer === 2 ? -targetScale : layer === 3 ? targetScale : 0;
-    const k = isShadow ? 0.3 : 1;         // 影层本色调暗 ×0.3（:61800-61803）
-    ctx.fillStyle = `rgba(${Math.round(rgb[0] * k)},${Math.round(rgb[1] * k)},${Math.round(rgb[2] * k)},${alpha * (isShadow ? k : 1)})`;
-    ctx.globalAlpha = alpha * (isShadow ? 0.3 : 1);
+    // 颜色（:61800-61828):影层 RGB×num15×alpha×0.3(本色调暗);本体 RGB×num15×alpha。
+    // ★alpha 两层都不再乘额外系数(影层 A=num15×alpha,曾误乘 0.3)
+    const k = isShadow ? 0.3 : 1;
+    ctx.globalAlpha = alpha * num15;
+    ctx.fillStyle = `rgba(${Math.round(rgb[0] * k)},${Math.round(rgb[1] * k)},${Math.round(rgb[2] * k)},1)`;
     let x = -m.w / 2 + dx;
     const y0 = -m.h / 2 + dy;
     for (let i = 0; i < text.length; i++) {
@@ -90,7 +94,6 @@ export function drawCombatText(
       x += wd + r + f.spacing;
     }
   }
-  void ratio;
   ctx.restore();
   ctx.globalAlpha = 1;
 }

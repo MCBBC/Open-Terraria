@@ -189,7 +189,7 @@ export class ChunkCache {
     tileAnim.tick++;
     if (this.animChunksBySheet.size) {
       for (const [sheet, set] of this.animChunksBySheet) {
-        const rate = TILE_ANIM_RATE[sheet] ?? (cageFamilyOf(sheet) ? cageAnimRate() : 0);
+        const rate = TILE_ANIM_RATE[sheet] ?? (cageFamilyOf(sheet) ? cageAnimRate(sheet) : 0);
         if (!rate || tileAnim.tick % rate !== 0) continue;
         for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
       }

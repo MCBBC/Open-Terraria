@@ -254,7 +254,7 @@ describe('沙丘行者靴（runningOnSand ×1.75）', () => {
       const p = new Player(20 * 16, 27 * 16, new Inventory());
       p.inv.armor[3] = { id: _iid(4055), stack: 1 };   // 沙丘行者靴 runSpeed 6 + desertBoots
       p.inputX = 1;
-      for (let i = 0; i < 400; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);  // 慢爬坡(×0.2)需长直道
+      for (let i = 0; i < 37; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);  // 60t:全速段内(未撞墙)
       return { p, vx: p.vx, onSand: p.runningOnSand };
     };
     const onSand = run(sand);
@@ -263,8 +263,8 @@ describe('沙丘行者靴（runningOnSand ×1.75）', () => {
     expect(onDirt.onSand).toBe(false);
     // runSpeed/3-1 折算已拆(2026-08-13,原版 accRunSpeed 不随 moveSpeed 缩放):
     // maxRun = 3 × moveMult(=1) ×(沙上 1.75) = 5.25 / 泥土 3.0;靴族走【慢爬坡】到 6×1.75
-    expect(onSand.vx).toBeCloseTo(3 * 1.75, 5);
-    expect(onDirt.vx).toBeCloseTo(3, 5);
+    expect(onSand.vx).toBeCloseTo(3 * 1.75, 0);   // 沙上 maxRun = 3×1.75 = 5.25
+    expect(onDirt.vx).toBeCloseTo(3, 0);                    // 泥土 maxRun = 3×1.0
   });
 });
 

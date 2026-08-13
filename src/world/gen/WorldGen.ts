@@ -253,6 +253,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   }
 
   finalize(ctx);
+  // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
+  // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
+  // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
+  runMultitileFragmentSweepPass(ctx.store);
   onProgress?.('完成', 1);
   return world;
 }

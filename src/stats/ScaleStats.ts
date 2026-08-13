@@ -223,7 +223,7 @@ export function damageVar(base: number, luck: number, rnd: () => number = Math.r
       if (second < num) num = second;
     }
   }
-  return Math.trunc(num);
+  return Math.round(num);   // (int)Math.Round（Main.cs:65620——曾误 trunc 系统性偏低 0.5）
 }
 
 /** GetAttackDamage_CappedAtMaster（:7020）：大师以上钳在 Master 档 */

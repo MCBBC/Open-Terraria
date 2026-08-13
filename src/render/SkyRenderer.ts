@@ -69,7 +69,7 @@ function lerpValueClamped(from: number, to: number, t: number): number {
  *  ⑤ 缺省 0-3 常态云。
  *  注意 9-13 在下雨/阴天转为 kill（Cloud.cs Update :449-452）——它们是"晴天远空灰云"，
  *  雨天出场的深色云是 18-21（任务描述里"Cloud_9-13 深雨云"系误记，以源码为准）。
- *  稀有云 22-40（:139-146 RollRareCloud，1/150 掷 + 世界旗标门）未实装，登记不做。
+ *  稀有云 22-40（:139-146 → RollRareCloud）见 rollRareCloud，已实装。
  */
 export function pickCloudType(i: {
   scale: number; y: number; viewH: number;
@@ -96,15 +96,57 @@ export function pickCloudType(i: {
   return { type, stormShift };
 }
 
-// ================= AmbientSky 天空实体（AmbientSky.cs FadingSkyEntity 家族精选） =================
+/** 稀有云世界旗标门输入（Cloud.cs RollRareCloud :183-227）。 */
+export interface RareCloudFlags {
+  /** NPC.downedBoss1（克眼）→ 稀有云 25/26（克眼云） */
+  downedBoss1: boolean;
+  /** NPC.downedBoss2（世吞/克脑）且 WorldGen.crimson → 稀有云 36（克脑云） */
+  downedBoss2: boolean;
+  /** NPC.downedBoss3（骷髅王）→ 稀有云 31（骷髅云） */
+  downedBoss3: boolean;
+  /** Main.hardMode → 稀有云 30（南瓜王云）/35（飞龙云） */
+  hardMode: boolean;
+  /** WorldGen.crimson */
+  crimson: boolean;
+  /** Main.dontStarveWorld → 37-40 直通（+触发概率 1/25） */
+  dontStarveWorld: boolean;
+  /** Main.tenthAnniversaryWorld → 37-40 不掷（范围收窄 22-36）+触发概率 1/25 与 1/3 */
+  tenthAnniversaryWorld: boolean;
+}
 
-/** 已实装的天空装饰族（AmbienceServer.cs:60-84 十九族中选 2）：
- *  birds = BirdsPackSkyEntity（AmbientSky.cs:444-487，V 形鸟群横穿）；
- *  gastropod = GastropodGroupSkyEntity（:601-708，夜空腹足怪——水母状浮空怪，
- *  自发光 Colors.AmbientNPCGastropodLight=(102,0,63)，Colors.cs:39）。 */
-export type AmbientFamily = 'birds' | 'gastropod';
+/** RollRareCloud（Cloud.cs:183-227 一比一，纯函数供测试）：22-40 掷点（十周年世界
+ *  22-36），旗标门未过的类型重掷。稀有云贴图语义见 CloudID.cs:49-85（鸟/兔/世吞/
+ *  克眼×2/金鱼/Redigit/心/南瓜王/骷髅/星/剑/树/飞龙/克脑/饥荒四角色）。 */
+export function rollRareCloud(f: RareCloudFlags, rnd: () => number): number {
+  let num = -1;
+  let ok = false;
+  let guard = 0;
+  while (!ok && guard++ < 512) {
+    num = 22 + Math.floor(rnd() * (f.tenthAnniversaryWorld ? 15 : 19));   // :189 Next(22,41)/Next(22,37)
+    switch (num) {
+      case 31: ok = f.downedBoss3; break;                                  // :195-197
+      case 36: ok = f.downedBoss2 && f.crimson; break;                     // :198-200
+      case 25: case 26: ok = f.downedBoss1; break;                         // :201-204
+      case 30: case 35: ok = f.hardMode; break;                            // :205-208
+      case 28: ok = Math.floor(rnd() * 10) === 0; break;                   // :209-214 1/10
+      case 37: case 38: case 39: case 40:
+        ok = f.dontStarveWorld || Math.floor(rnd() * 10) === 0; break;     // :215-223
+      default: ok = true; break;
+    }
+  }
+  return num;
+}
 
-/** 选族判定输入（AmbienceServer 各判定 + 玩家高度带） */
+// ================= AmbientSky 天空实体（AmbientSky.cs FadingSkyEntity 全族 17/19） =================
+
+/** 天空装饰族（AmbienceServer.cs:60-84 十七族 + Meteor :1316 已由 spawnSkyMeteor 单接）。
+ *  BoneSerpent（:1078）为空类且 Spawn 分发 :1446-1531 无 case——原版死代码，不实装。 */
+export type AmbientFamily =
+  | 'birds' | 'wyvern' | 'airship' | 'airballoon' | 'eyeball' | 'butterflies'
+  | 'lostkite' | 'vulture' | 'bats' | 'pixieposse' | 'seagulls' | 'slimeBalloons'
+  | 'gastropod' | 'pegasus' | 'eos' | 'crimera' | 'hellbats';
+
+/** 选族判定输入（AmbienceServer 各判定 + 玩家高度带；新增字段均可选，向后兼容） */
 export interface AmbientSpawnInput {
   dayTime: boolean;
   /** Main.IsItRaining = cloudAlpha>0（Main.cs:2659） */
@@ -113,7 +155,7 @@ export interface AmbientSpawnInput {
   bloodMoon: boolean;
   pumpkinMoon: boolean;
   snowMoon: boolean;
-  /** 次级条件：腹足怪需 ZoneHallow（AmbienceServer.cs:80） */
+  /** 次级条件（AmbienceServer.cs:77-84）：各族 Zone 门 */
   zoneHallow: boolean;
   /** 玩家在可见天空高度带（AmbienceServer.cs:190-193：position.Y ≤ worldSurface*16+1600） */
   playerAtSkyHeight: boolean;
@@ -121,66 +163,198 @@ export interface AmbientSpawnInput {
   roll5: number;
   /** source2.ElementAt(Next(num)) 的均匀选点 0-1 */
   pick: number;
+  // ---- 全族扩展（天空视觉深化批；均缺省 false → 只影响对应族） ----
+  zoneDesert?: boolean;       // Vulture（:77）
+  zoneBeach?: boolean;        // Seagulls（:79）
+  zoneJungle?: boolean;       // Bats（:84）
+  zoneCorrupt?: boolean;      // EaterOfSouls（:82）
+  zoneCrimson?: boolean;      // Crimera（:83）
+  /** Main.hardMode（Wyvern 门 :61） */
+  hardMode?: boolean;
+  /** Main.IsItAHappyWindyDay = _shouldUseWindyDayMusic（Main.cs:2976） */
+  windyDay?: boolean;
+  /** IsSunset（:39-46：白天 time>40500 → timeOfDay>0.625）——Bats 黄昏支 :68 */
+  sunset?: boolean;
+  /** NPC.TooWindyForButterflies（NPC.cs:6801：|windSpeedTarget|≥0.4） */
+  tooWindyForButterflies?: boolean;
+  /** NPC.butterflyChance<6（:65；每日黎明掷，<6 仅约 13% 的日子） */
+  butterflyChanceLow?: boolean;
+  /** 玩家地狱高度带（:195-198：position.Y ≥ (UnderworldLayer-100)×16）——Hellbats 专属高度门 */
+  playerAtHellHeight?: boolean;
+  /** 月总在场（AnActiveSkyConflictsWithAmbience :1362-1369 → Ambience 整体禁出） */
+  moonLordActive?: boolean;
 }
-
-/** 未实装族登记（AmbienceServer.cs:60-84 + AmbientSky.cs 各类，素材已全量入库）：
- *  Wyvern(:1026 困难模式晴天)、Airship(:1082 风日)、AirBalloon(:1126 非风日晴天)、
- *  Eyeball/EOC(:1226 夜)、Butterflies(:186 无风晴天)、LostKite(:231 风日)、
- *  Vulture(:338 沙漠晴天)、PixiePosse(:389 神圣)、Seagulls(:488 海滩)、
- *  SlimeBalloons(:708 风日)、Pegasus(:289 神圣晴天)、EaterOfSouls(:1202 腐化)、
- *  Crimera(:1178 猩红)、Bats(:919 丛林黄昏/夜)、Hellbats(:807 地狱带)、
- *  BoneSerpent(:1078 地狱层)、Meteor(:1316 已接 spawnSkyMeteor)。 */
 
 /**
- * 天空装饰选族纯函数（AmbienceServer.Update :96-129 截取已实装两族）：
- *  BirdsV 条件 = IsSunnyDay（:30-37：!雨 && 白天 && !日食，:60）；
- *  Gastropods 条件 = IsCalmNight（:48-55：!雨 && 夜 && !血月/南瓜月/霜月，:72）；
- *  次级条件列表（:117）非空且 roll5≥3（40%）→ 只在带次级条件的族里选，
- *  否则放宽到全候选（:119-123）。注意任务里"地狱上空水母"系误记：腹足怪是
- *  夜空/太空高度带实体（y∈[3200, surface*16-1600]，:692/:618），地狱带的族是
- *  Hellbats/BoneSerpent（未实装）。
+ * 天空装饰选族纯函数（AmbienceServer.Update :96-129 一比一，全 17 族）：
+ *  ① source = 主条件（:60-76）成立的族（注册序 = Dictionary 插入序）；
+ *  ② source2 严格列表 = 高度门（:87-94：Hellbats 走地狱带门、其余走天空带门）
+ *     + 有次级条件且满足（:117）；
+ *  ③ 严格列表空或 roll5<3（60%）→ 放宽到「高度门 + 无次级条件或满足」（:119-123）；
+ *  ④ 均匀选点（:126）。
+ *  月总天空冲突（:1362-1369）在 :1383 直接 Deactivate——此处以 null 表达。
  */
 export function pickAmbientFamily(i: AmbientSpawnInput): AmbientFamily | null {
-  if (!i.playerAtSkyHeight) return null;                            // :117/:190-193 高度门
-  const sunnyDay = !i.raining && i.dayTime && !i.eclipse;           // :30-37
+  if (i.moonLordActive) return null;                                // :1362-1369/:1383
+  const sunny = !i.raining && i.dayTime && !i.eclipse;              // :30-37 IsSunnyDay
   const calmNight = !i.raining && !i.dayTime && !i.bloodMoon && !i.pumpkinMoon && !i.snowMoon; // :48-55
-  const eligible: AmbientFamily[] = [];
-  if (sunnyDay) eligible.push('birds');                             // :60
-  if (calmNight) eligible.push('gastropod');                        // :72
-  if (!eligible.length) return null;                                // :108-111
-  // :115-118 严格列表 = 有次级条件且满足的族（birds 无次级条件不参与严格列表）
-  const strict = eligible.filter((f) => (f === 'gastropod' ? i.zoneHallow : false));
-  const pool = strict.length > 0 && i.roll5 >= 3 ? strict : eligible;  // :119-123
-  return pool[Math.min(pool.length - 1, Math.floor(i.pick * pool.length))];
+  const windy = i.windyDay ?? false;
+  const sunset = i.sunset ?? false;
+  const butterfliesOK = sunny && !windy && !(i.tooWindyForButterflies ?? false)
+    && (i.butterflyChanceLow ?? false);                            // :65
+  /** [族, 主条件, 次级条件(undefined=无), 是否地狱高度门]——顺序 = _spawnConditions 注册序 :60-76 */
+  const table: Array<[AmbientFamily, boolean, boolean | undefined, boolean]> = [
+    ['birds', sunny, undefined, false],                             // :60
+    ['wyvern', sunny && (i.hardMode ?? false), undefined, false],   // :61
+    ['airship', sunny && windy, undefined, false],                  // :62
+    ['airballoon', sunny && !windy, undefined, false],              // :63
+    ['eyeball', !i.dayTime, undefined, false],                      // :64
+    ['butterflies', butterfliesOK, undefined, false],               // :65
+    ['lostkite', i.dayTime && !i.eclipse && windy, undefined, false], // :66
+    ['vulture', sunny, i.zoneDesert ?? false, false],               // :67 + :77
+    ['bats', (sunset && sunny) || calmNight, i.zoneJungle ?? false, false], // :68 + :84
+    ['pixieposse', sunny || calmNight, i.zoneHallow, false],        // :69 + :78
+    ['seagulls', sunny, i.zoneBeach ?? false, false],               // :70 + :79
+    ['slimeBalloons', sunny && windy, undefined, false],            // :71
+    ['gastropod', calmNight, i.zoneHallow, false],                  // :72 + :80
+    ['pegasus', sunny, i.zoneHallow, false],                        // :73 + :81
+    ['eos', sunny || calmNight, i.zoneCorrupt ?? false, false],     // :74 + :82
+    ['crimera', sunny || calmNight, i.zoneCrimson ?? false, false], // :75 + :83
+    ['hellbats', true, undefined, true],                            // :76（:89-91 地狱高度门）
+  ];
+  const source = table.filter((row) => row[1]);
+  if (!source.length) return null;                                  // :108-111
+  const heightOk = (row: typeof source[number]) =>
+    row[3] ? (i.playerAtHellHeight ?? false) : i.playerAtSkyHeight; // :87-94
+  let pool = source.filter((row) => heightOk(row) && row[2] === true);   // :117 严格列表
+  if (pool.length === 0 || i.roll5 < 3) {                           // :119
+    pool = source.filter((row) => heightOk(row) && row[2] !== false);    // :121 放宽列表
+  }
+  if (!pool.length) return null;
+  return pool[Math.min(pool.length - 1, Math.floor(i.pick * pool.length))][0];  // :126
 }
 
-/** FadingSkyEntity（AmbientSky.cs:88-184）本仓表示 */
-class AmbientEnt {
-  opacity = 0;
-  vx = 0; vy = 0;
-  rotation = 0;
-  /** 腹足怪磁吸弹簧（GastropodGroupSkyEntity :631-636 的四元组偏移域） */
-  magAccX = 0; magAccY = 0; magTX = 0; magTY = 0;
-  magPX = 0; magPY = 0; magVX = 0; magVY = 0;
-  dead = false;
-  constructor(
-    readonly kind: AmbientFamily,
-    public x: number, public y: number,       // SkyEntity.Position（世界 px）
-    public depth: number,
-    public dir: 1 | -1,
-    public life: number,                      // LifeTime（tick）
-    public bornAt: number,                    // TimeEntitySpawnedIn
-    public fadeIn: number, public fadeOut: number,  // OpacityNormalizedTimeTo*
-    public frame: number, public rows: number,
-    public framingSpeed: number,
-  ) {}
+/** 单体族参数表（AmbientSky.cs 各类构造器 1:1；纯数据供测试对账） */
+export interface AmbientFamilyParams {
+  /** SpriteFrame(1, rows)——帧行数（变体族由生成侧覆盖：butterflies 17/19、eos/crimera 3-4 档） */
+  rows: number;
+  /** FramingSpeed（0 = int.MaxValue 不推进） */
+  framingSpeed: number;
+  fadeIn: number; fadeOut: number;    // OpacityNormalizedTimeTo*
+  /** BrightnessLerper（GetColor :165-168 向白 lerp 系数；gastropod 走专属色） */
+  brightness: number;
+  /** LifeTime = Next(a,b)*60 */
+  life: [number, number];
+  /** Depth = depthMin + rand*depthSpan */
+  depthMin: number; depthSpan: number;
+  /** 高度带 y = yOff + rand*(surfacePx - ySub - yOff)（airballoon/eoc 族为定位特例，生成侧自算） */
+  yOff: number; ySub: number;
+  /** 横速 |v| = speedA + |WindForVisuals|*speedB（Main.cs:2896 = windSpeedCurrent） */
+  speedA: number; speedB: number;
+  /** Draw 传 depthScale-adj（PixiePosse -0.1 :440 / Seagulls -1.5 :561） */
+  depthScaleAdj?: number;
+  /** spriteDir 与风无关（Airship :1087 / AirBalloon :1134 = random.Next(2)） */
+  randomDir?: boolean;
+  /** 固定纵向速度（SlimeBalloons -0.01 :751） */
+  vy?: number;
+  /** EOCSkyEntity 状态机（eyeball/eos/crimera：3/4 折线 1/4 追玩家 :1244-1251） */
+  eoc?: boolean;
+  /** 出生帧随机推进 Next(RowCount)（LostKite :257 / Seagulls :523 / Bats :954 / HellBats :842 / SlimeBalloons :736） */
+  frameRandom?: boolean;
+  /** FrameOffset 随机相位（Seagulls :522 / Bats :953 / HellBats :841） */
+  frameOffset?: boolean;
+  /** GetColor = Lerp(白, 灰, Depth/15)（HellBats :871——越远越灰） */
+  grayDepthFade?: boolean;
+  /** 地狱带族：y = UnderworldLayer*16 + rand*800（HellBats CreateGroup :890） */
+  hellBand?: boolean;
+}
+
+export const AMBIENT_FAMILY_PARAMS: Record<AmbientFamily, AmbientFamilyParams> = {
+  birds:         { rows: 4, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [60, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 3, speedB: 0.8 },                       // BirdsPack :444-487
+  wyvern:        { rows: 5, framingSpeed: 4, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [40, 71], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 3, speedB: 0.8 },                        // Wyvern :1026-1059
+  airship:       { rows: 4, framingSpeed: 4, fadeIn: 0.05, fadeOut: 0.95, brightness: 0.2, life: [40, 71], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 6, speedB: 1.6, randomDir: true },        // Airship :1082-1124
+  airballoon:    { rows: 5, framingSpeed: 0, fadeIn: 0.05, fadeOut: 0.95, brightness: 0.2, life: [20, 51], depthMin: 3, depthSpan: 3, yOff: 0, ySub: 0, speedA: 0, speedB: 4, randomDir: true },               // AirBalloon :1126-1176（vx=wind*4、vy 自算）
+  eyeball:       { rows: 3, framingSpeed: 5, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [18, 31], depthMin: 4.5, depthSpan: 3, yOff: 0, ySub: 0, speedA: 3, speedB: 0, eoc: true },                     // EOC :1226-1314
+  butterflies:   { rows: 17, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [60, 121], depthMin: 3, depthSpan: 3, yOff: 4000, ySub: 0, speedA: 0.1, speedB: 0.05 },                      // Butterflies :186-229（rows 变体 17/19）
+  lostkite:      { rows: 42, framingSpeed: 6, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [60, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 1.2, speedB: 3, frameRandom: true },    // LostKite :231-287（风暴 FramingSpeed 4 / 速度×1.5）
+  vulture:       { rows: 10, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [60, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 3, speedB: 0.8 },                      // Vulture :338-387
+  bats:          { rows: 10, framingSpeed: 4, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [30, 61], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 3, speedB: 0.8, frameOffset: true, frameRandom: true }, // Bats :919-1024
+  pixieposse:    { rows: 25, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.6, life: [60, 121], depthMin: 2, depthSpan: 3, yOff: 4000, ySub: 4000, speedA: 0.12, speedB: 0.08, depthScaleAdj: -0.1 }, // PixiePosse :389-442
+  seagulls:      { rows: 9, framingSpeed: 4, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [30, 61], depthMin: 1, depthSpan: 2, yOff: 2400, ySub: 1600, speedA: 4, speedB: 0, depthScaleAdj: -1.5, frameOffset: true, frameRandom: true }, // Seagulls :488-599
+  slimeBalloons: { rows: 7, framingSpeed: 0, fadeIn: 0.025, fadeOut: 0.975, brightness: 0.2, life: [80, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 1, speedB: 1, vy: -0.01, frameRandom: true }, // SlimeBalloons :708-805
+  gastropod:     { rows: 1, framingSpeed: 0, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.75, life: [60, 121], depthMin: 2, depthSpan: 3, yOff: 3200, ySub: 1600, speedA: 1.5, speedB: 0.2, depthScaleAdj: -0.1 },  // Gastropod :601-708（BrightnessLerper .75 → 色 (102,0,63)）
+  pegasus:       { rows: 11, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [60, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 1.5, speedB: 0.6 },                    // Pegasus :289-336
+  eos:           { rows: 4, framingSpeed: 5, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [18, 31], depthMin: 4.5, depthSpan: 3, yOff: 0, ySub: 0, speedA: 3, speedB: 0, eoc: true },                     // EOS :1202-1224（继承 EOC）
+  crimera:       { rows: 3, framingSpeed: 5, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [18, 31], depthMin: 4.5, depthSpan: 3, yOff: 0, ySub: 0, speedA: 3, speedB: 0, eoc: true },                     // Crimera :1178-1200
+  hellbats:      { rows: 10, framingSpeed: 4, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [30, 61], depthMin: 3, depthSpan: 5, yOff: 0, ySub: 0, speedA: 3, speedB: 0.8, frameOffset: true, frameRandom: true, grayDepthFade: true, hellBand: true }, // HellBats :807-917
+};
+
+/** 群体族参数（各族 CreateGroup 1:1；单体族不在此表） */
+export interface AmbientGroupSpec {
+  /** 群内数量 = Next(a,b) */
+  count: [number, number];
+  /** 磁吸加速度基 = a + rand*b（Gastropod :691 异于其余族的 0.5+rand*0.5） */
+  accX: [number, number]; accY: [number, number];
+  /** 加速度因子 = (rand*factorA + factorB) * 0.05（Gastropod :701 / 其余 :594/:903/:1019） */
+  factorA: number; factorB: number;
+  /** 磁吸目标偏移 ±target（Gastropod 120 / Slime 150 / 其余 100） */
+  target: number;
+  /** 群内散布乘子（(rand*20-10, rand*3) * spread :590/:697/:796/:899/:1015） */
+  spread: number;
+  /** 逐体 Depth 抖动（+ rand*depthJitter） */
+  depthJitter: number;
+  /** 逐体 LifeTime 抖动（+ Next(301)） */
+  lifeJitter: number;
+  /** 基础寿命 = Next(a,b)*60（群族统一在 spec.life 上，此字段保留对账） */
+  baseLife: [number, number];
+}
+
+export const AMBIENT_GROUP_SPEC: Partial<Record<AmbientFamily, AmbientGroupSpec>> = {
+  seagulls:      { count: [5, 9], accX: [0.5, 0.5], accY: [0.5, 0.5], factorA: 0.3, factorB: 0.85, target: 100, spread: 50, depthJitter: 0.5, lifeJitter: 301, baseLife: [30, 61] },      // :564-598
+  gastropod:     { count: [3, 8], accX: [0.1, 0.1], accY: [0.3, 0.3], factorA: 0.5, factorB: 0, target: 120, spread: 60, depthJitter: 0.5, lifeJitter: 301, baseLife: [30, 61] },        // :672-705
+  slimeBalloons: { count: [5, 10], accX: [0.1, 0.1], accY: [0.1, 0.1], factorA: 0.2, factorB: 0, target: 150, spread: 80, depthJitter: 0.5, lifeJitter: 301, baseLife: [80, 121] },       // :771-804
+  bats:          { count: [20, 40], accX: [0.5, 0.5], accY: [0.5, 0.5], factorA: 0.3, factorB: 0.85, target: 100, spread: 50, depthJitter: 0.5, lifeJitter: 301, baseLife: [30, 61] },    // :990-1023
+  hellbats:      { count: [20, 40], accX: [0.5, 0.5], accY: [0.5, 0.5], factorA: 0.3, factorB: 0.85, target: 100, spread: 50, depthJitter: 0.5, lifeJitter: 301, baseLife: [30, 61] },    // :874-907
+};
+
+/** 月塔天空激活门（SceneState.cs:105-115 + SceneMetrics.cs:276-282/921-928 一比一）：
+ *  塔近距门 = 玩家中心与塔 NPC 距离² ≤ NPCEventZoneRadius²(4000²)；
+ *  器件门 = 无任何塔近距 且 ActiveMonolithType 对应（:111-115 !flag4 && type==N）。 */
+export function towerSkyActive(nearTower: boolean, monolithType: number, familyIndex: number,
+  anyTowerNear: boolean): boolean {
+  if (nearTower) return true;
+  return !anyTowerNear && monolithType === familyIndex;             // :111-115
+}
+
+/** FadingSkyEntity（AmbientSky.cs:88-184）本仓表示（全族） */
+interface AmbientEnt {
+  kind: AmbientFamily;
+  x: number; y: number;             // SkyEntity.Position（世界 px）
+  depth: number;
+  dir: 1 | -1;
+  life: number; bornAt: number;     // LifeTime / TimeEntitySpawnedIn（tick）
+  fadeIn: number; fadeOut: number;
+  frame: number; rows: number; framingSpeed: number; frameOffset: number;
+  opacity: number; vx: number; vy: number; rotation: number;
+  brightness: number;               // BrightnessLerper
+  depthScaleAdj: number;
+  grayDepthFade: boolean;
+  texKey: string;
+  /** PixiePosse 昼夜变体（1 日 / 2 夜 :409-413）——env 门按变体判 */
+  variant: number;
+  /** 磁吸弹簧四元组（群体族 :530-537/:639-644/:747-752） */
+  magAccX: number; magAccY: number; magTX: number; magTY: number;
+  magPX: number; magPY: number; magVX: number; magVY: number;
+  /** EOCSkyEntity 状态机（:1232-1237：1 折线 / 2 追玩家） */
+  state: number; waviness: number;
+  dead: boolean;
 }
 
 export class SkyRenderer {
   private stars: Array<{ x: number; y: number; s: number }> = [];
-  /** 原版云贴图五族（Cloud.cs:114-138）：0-3 常态/4-8 高层薄云/9-13 远空灰云/
-   *  14-17 低空白云/18-21 雨云·风暴云；22-40 稀有云未接（登记不做） */
-  private cloudTexs: Array<HTMLImageElement | null> = new Array(22).fill(null);
+  /** 原版云贴图（Cloud.cs:114-146）：0-3 常态/4-8 高层薄云/9-13 远空灰云/
+   *  14-17 低空白云/18-21 雨云·风暴云/22-40 稀有云（RollRareCloud 世界旗标门） */
+  private cloudTexs: Array<HTMLImageElement | null> = new Array(41).fill(null);
   private vclouds: VanillaCloud[] = [];
   /** 风——原版风场模型(Main.cs:10800/58222-58310):
    *  windSpeedTarget 随机游走 ±0.001 步、钳 ±0.35;windSpeedCurrent 以
@@ -189,6 +363,11 @@ export class SkyRenderer {
   private windTarget = 0;      // windSpeedTarget
   private windCounter = 0;     // 重掷计数(帧)
   private windRng: () => number = Math.random;
+  /** 稀有云世界旗标（frameCtx 每帧刷新；缺省全 false = 只出无门稀有云） */
+  private rareCloudFlags: RareCloudFlags = {
+    downedBoss1: false, downedBoss2: false, downedBoss3: false,
+    hardMode: false, crimson: false, dontStarveWorld: false, tenthAnniversaryWorld: false,
+  };
 
   constructor() {
     for (let i = 0; i < 120; i++) {
@@ -307,6 +486,14 @@ export class SkyRenderer {
     });
     c.type = pick.type;
     c.y -= pick.stormShift;          // :118-125 风暴云大块腾位
+    // 稀有云（Cloud.cs:139-146）：1/150（饥荒/十周年世界 1/25）掷中 → RollRareCloud；
+    //  十周年世界另 1/3 直通。掷点替换在五族选型之后（覆盖任意常规族）
+    const rareDenom = this.rareCloudFlags.dontStarveWorld || this.rareCloudFlags.tenthAnniversaryWorld ? 25 : 150;
+    if (Math.floor(r() * rareDenom) === 0) {
+      c.type = rollRareCloud(this.rareCloudFlags, r);
+    } else if (this.rareCloudFlags.tenthAnniversaryWorld && Math.floor(r() * 3) === 0) {
+      c.type = rollRareCloud(this.rareCloudFlags, r);
+    }
     // scale>1.2 下移 100（:147-149）；scale 钳 0.7/1.3（:151-158）
     if (c.scale > 1.2) c.y += 100;
     if (c.scale > 1.3) c.scale = 1.3;
@@ -745,8 +932,12 @@ export class SkyRenderer {
   private ambNextAttempt = 0;
   /** 绘制帧缓存（spawn 用相机/视口） */
   private ambViewW = 1920;
-  private birdsTex: HTMLImageElement | null = null;
-  private gastropodTex: HTMLImageElement | null = null;
+  private ambViewH = 1080;
+  /** 族贴图缓存（texKey → Image，首用懒加载） */
+  private ambTexCache = new Map<string, HTMLImageElement>();
+  /** NPC.butterflyChance（NPC.cs:94583-94599 每日黎明掷）——按 dayCount 重掷 */
+  private butterflyDay = -1;
+  private butterflyChance = 999999;
   /** 最近天空色（GetColor 的 bgColor = Main.ColorOfTheSkies；sky.draw 每帧写入） */
   private lastSkyTop = '#4A90E0';
   private lastSkyBottom = '#B8DCF5';
@@ -756,6 +947,9 @@ export class SkyRenderer {
     this.ambEntities = [];
     this.ambFrame = 0;
     this.ambNextAttempt = 0;
+    this.butterflyDay = -1;
+    this.clearTowerSky();
+    this.clearMoonlordDrama();
   }
 
   /** SetPositionInWorldBasedOnScreenSpace（AmbientSky.cs:47-51）：
@@ -764,50 +958,136 @@ export class SkyRenderer {
     return [camX + (sx - camX) * (depth / 3), camY + (sy - camY) * (depth / 3)];
   }
 
-  private mkAmbient(kind: AmbientFamily, sx: number, sy: number, depth: number, dir: 1 | -1,
-    life: number, camX: number, camY: number): AmbientEnt {
-    const [x, y] = this.ambientWorldPos(sx, sy, depth, camX, camY);
-    // 族参数：fadeIn/fadeOut（BirdsPack :461-462 / Gastropod :627-628）、
-    // 帧 4 行 vs 1 行（:458 / :622）、FramingSpeed 5 vs int.MaxValue（:463 / :629）
-    const birds = kind === 'birds';
-    return new AmbientEnt(kind, x, y, depth, dir, life, this.ambFrame,
-      birds ? 0.15 : 0.1, birds ? 0.85 : 0.9, 0, birds ? 4 : 1, birds ? 5 : 0x7fffffff);
+  /** 族贴图键（各族 Texture 请求 1:1；变体族按掷点/深度/昼夜选表） */
+  private ambientTexKey(kind: AmbientFamily, r: () => number, depth: number): { key: string; rows: number; variant: number } {
+    switch (kind) {
+      case 'birds': return { key: 'Ambience_BirdsVShape', rows: 4, variant: 0 };                    // :462
+      case 'wyvern': return { key: 'Ambience_Wyvern', rows: 5, variant: 0 };                        // :1044
+      case 'airship': return { key: 'Ambience_FlyingShip', rows: 4, variant: 0 };                   // :1100
+      case 'airballoon':                                                                            // :1138
+        return { key: Math.floor(r() * 2) === 0 ? 'Ambience_AirBalloons_Large' : 'Ambience_AirBalloons_Small', rows: 5, variant: 0 };
+      case 'eyeball': return { key: 'Ambience_EOC', rows: 3, variant: 0 };                          // :1241
+      case 'butterflies': {                                                                         // :204-206
+        const n = Math.floor(r() * 2) + 1;
+        return { key: `Ambience_ButterflySwarm${n}`, rows: n === 2 ? 19 : 17, variant: n };
+      }
+      case 'lostkite': return { key: 'Ambience_LostKite', rows: 42, variant: 0 };                   // :249-250
+      case 'vulture': return { key: 'Ambience_Vulture', rows: 10, variant: 0 };                     // :356
+      case 'bats': { const n = 1 + Math.floor(r() * 3); return { key: `Ambience_Bat${n}`, rows: 10, variant: n }; }   // :945
+      case 'pixieposse': {                                                                          // :409-413
+        const n = this.amb.dayTime ? 1 : 2;
+        return { key: `Ambience_PixiePosse${n}`, rows: 25, variant: n };
+      }
+      case 'seagulls': return { key: 'Ambience_Seagull', rows: 9, variant: 0 };                     // :514
+      case 'slimeBalloons': return { key: 'Ambience_SlimeBalloons', rows: 7, variant: 0 };          // :734
+      case 'gastropod': return { key: 'Ambience_Gastropod', rows: 1, variant: 0 };                  // :627
+      case 'pegasus': return { key: 'Ambience_Pegasus', rows: 11, variant: 0 };                     // :307
+      case 'eos': case 'crimera': {                                                                 // :1183-1193/:1207-1217
+        let n = 3;
+        if (depth <= 6) n = 2;
+        if (depth <= 5) n = 1;
+        return { key: `${kind === 'eos' ? 'Ambience_EOS' : 'Ambience_Crimera'}${n}`, rows: kind === 'eos' ? 4 : 3, variant: n };
+      }
+      case 'hellbats': { const n = 1 + Math.floor(r() * 2); return { key: `Ambience_HellBat${n}`, rows: 10, variant: n }; }  // :833
+    }
   }
 
-  /** 生成一族（AmbientSky.Spawn :1409-1533 分发；此处仅 birds 单体 / gastropod 群体） */
+  private mkAmbient(kind: AmbientFamily, sx: number, sy: number, depth: number, dir: 1 | -1,
+    life: number, camX: number, camY: number, texKey: string, rows: number, variant: number): AmbientEnt {
+    const spec = AMBIENT_FAMILY_PARAMS[kind];
+    const [x, y] = this.ambientWorldPos(sx, sy, depth, camX, camY);
+    return {
+      kind, x, y, depth, dir, life, bornAt: this.ambFrame,
+      fadeIn: spec.fadeIn, fadeOut: spec.fadeOut,
+      frame: spec.frameRandom ? Math.floor(Math.random() * rows) : 0,
+      rows, framingSpeed: spec.framingSpeed || 0x7fffffff,
+      frameOffset: spec.frameOffset ? Math.floor(Math.random() * rows) : 0,
+      opacity: 0, vx: 0, vy: 0, rotation: 0,
+      brightness: spec.brightness, depthScaleAdj: spec.depthScaleAdj ?? 0,
+      grayDepthFade: !!spec.grayDepthFade, texKey, variant,
+      magAccX: 0, magAccY: 0, magTX: 0, magTY: 0, magPX: 0, magPY: 0, magVX: 0, magVY: 0,
+      state: 0, waviness: 0, dead: false,
+    };
+  }
+
+  /** 生成一族（AmbientSky.Spawn :1425-1537 分发 → 各类构造器/CreateGroup 1:1） */
   private spawnAmbientFamily(kind: AmbientFamily, camX: number, camY: number): void {
     const r = Math.random;
+    const spec = AMBIENT_FAMILY_PARAMS[kind];
+    const group = AMBIENT_GROUP_SPEC[kind];
     const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
-    const dir: 1 | -1 = wind > 0 ? 1 : -1;   // Effects（:449-450：WindForVisuals>0 → None 顺风飞）
+    // spriteDir（各族 :191 等：WindForVisuals≤0 → Flip；Airship :1087/AirBalloon :1134 = random.Next(2)）
+    const dir: 1 | -1 = spec.randomDir
+      ? (Math.floor(r() * 2) !== 0 ? -1 : 1)
+      : (wind > 0 ? 1 : -1);
     // VirtualCamera（VirtualCamera.cs:9-13）= 玩家中心 ± Size/2；原版 Size=Main.maxScreen
     // 4096（Main.cs:3754）——本仓以实际视口近似（登记：远端生成距离略近）
-    const px = this.amb.playerX, halfW = this.ambViewW / 2;
+    const px = this.amb.playerX, halfW = this.ambViewW / 2, halfH = this.ambViewH / 2;
     const edgeX = dir > 0 ? px - halfW - 100 : px + halfW + 100;   // :452-459
-    if (kind === 'birds') {
-      // BirdsPackSkyEntity :444-467
-      const depth = r() * 3 + 3;                                   // :456
-      const y = r() * (this.fx.surfaceY - 1600 - 2400) + 2400;     // :455 高度带 2400..surface-1600
-      const life = (60 + Math.floor(r() * 61)) * 60;               // :459 Next(60,121)*60
-      this.ambEntities.push(this.mkAmbient('birds', edgeX, y, depth, dir, life, camX, camY));
+    const mk = (sx: number, sy: number, d: number, l: number, key: string, rows: number, variant: number) =>
+      this.mkAmbient(kind, sx, sy, d, dir, l, camX, camY, key, rows, variant);
+    const randLife = () => (spec.life[0] + Math.floor(r() * (spec.life[1] - spec.life[0]))) * 60;
+
+    // EOCSkyEntity 族（eyeball/eos/crimera :1238-1258）：3/4 折线 / 1/4 追玩家；不走常规 y 带
+    if (spec.eoc) {
+      const depth = spec.depthMin + r() * spec.depthSpan;           // :1243
+      const t = this.ambientTexKey(kind, r, depth);
+      const life = randLife();                                      // :1263/:1281 Next(18,31)*60
+      let e: AmbientEnt;
+      if (Math.floor(r() * 4) !== 0) {
+        // BeginZigZag :1260-1276：方向掷（1 = 左侧入屏右飞）；y=相机顶、x 对侧屏外
+        const d: 1 | -1 = Math.floor(r() * 2) === 1 ? 1 : -1;
+        e = mk(d === 1 ? camX - halfW - 100 : camX + halfW + 100, camY - halfH, depth, life, t.key, t.rows, t.variant);
+        e.state = 1; e.dir = d; e.waviness = 1 + r();               // :1265
+      } else {
+        // BeginChasingPlayer :1278-1283：相机矩形内均匀随机点
+        e = mk(camX - halfW + r() * halfW * 2, camY - halfH + r() * halfH * 2, depth, life, t.key, t.rows, t.variant);
+        e.state = 2;
+      }
+      this.ambEntities.push(e);
       return;
     }
-    // GastropodGroupSkyEntity.CreateGroup :677-707
-    const count = 3 + Math.floor(r() * 5);                         // :680 Next(3,8) → 3-7 只
-    const baseY = r() * (this.fx.surfaceY - 1600 - 3200) + 3200;   // :695 高度带 3200..surface-1600
-    const baseDepth = r() * 3 + 2;                                 // :693
-    const baseLife = (30 + Math.floor(r() * 31)) * 60;             // :694 Next(30,61)*60
-    const accX = r() * 0.1 + 0.1, accY = r() * 0.3 + 0.3;          // :696 磁吸加速度
-    const tX = (r() * 2 - 1) * 120, tY = (r() * 2 - 1) * 120;      // :697 磁吸目标 ±120
-    for (let i = 0; i < count; i++) {
-      const depth = baseDepth + r() * 0.5;                         // :700
-      const ox = (r() * 20 - 10) * 60, oy = r() * 3 * 60;          // :701 群内散布 ±600/180
-      const life = baseLife + Math.floor(r() * 301);               // :703
-      const e = this.mkAmbient('gastropod', edgeX + ox, baseY + oy, depth, dir, life, camX, camY);
-      const k = r() * 0.5;                                         // :704 加速度 ×rand*0.5×0.05
-      e.magAccX = accX * k * 0.05; e.magAccY = accY * k * 0.05;
-      e.magTX = tX; e.magTY = tY;
-      this.ambEntities.push(e);
+    // AirBalloon（:1130-1147）：锚玩家列 ±100 格、地表上 50-80 格（不走常规 y 带）
+    if (kind === 'airballoon') {
+      const depth = spec.depthMin + r() * spec.depthSpan;
+      const t = this.ambientTexKey(kind, r, depth);
+      const sx = (Math.floor(px / 16) + 100 * (r() * 2 - 1)) * 16;  // :1133-1135
+      const sy = this.fx.surfaceY - (50 + Math.floor(r() * 31)) * 16;  // :1136 Next(50,81)
+      this.ambEntities.push(mk(sx, sy, depth, randLife(), t.key, t.rows, t.variant));
+      return;
     }
+    // 常规高度带 y = yOff + rand*(surfacePx - ySub - yOff)（各族 :201/:246/:304/:353/:411/
+    // :459/:511/:624/:731/:942/:1041/:1097）；HellBats = 地狱层 + rand*800（:890）
+    const bandY = () => spec.hellBand
+      ? this.underworldLayerPx() + r() * 800
+      : r() * Math.max(0, this.fx.surfaceY - spec.ySub - spec.yOff) + spec.yOff;
+    const depth = () => spec.depthMin + r() * spec.depthSpan;
+    if (group) {
+      // CreateGroup（:564-598/:672-705/:771-804/:874-907/:990-1023）
+      const count = group.count[0] + Math.floor(r() * (group.count[1] - group.count[0]));
+      const baseY = bandY();
+      const baseDepth = depth();
+      // 群族基础寿命 = Next(a,b)*60（与单体 spec.life 不同：Gastropod/Seagulls/Bats/HellBats 30-60s）
+      const baseLife = (group.baseLife[0] + Math.floor(r() * (group.baseLife[1] - group.baseLife[0]))) * 60;
+      const accX = group.accX[0] + r() * group.accX[1];             // :584/:691/:790/:893/:1009
+      const accY = group.accY[0] + r() * group.accY[1];
+      const tX = (r() * 2 - 1) * group.target, tY = (r() * 2 - 1) * group.target;  // :585/:692/:791/:894/:1010
+      for (let i = 0; i < count; i++) {
+        const d = baseDepth + r() * group.depthJitter;              // :589/:696/:795/:898/:1014
+        const tex = this.ambientTexKey(kind, r, d);
+        const ox = (r() * 20 - 10) * group.spread, oy = r() * 3 * group.spread;    // :590/:697/:796/:899/:1015
+        const e = mk(edgeX + ox, baseY + oy, d, baseLife + Math.floor(r() * group.lifeJitter), tex.key, tex.rows, tex.variant);
+        const k = (r() * group.factorA + group.factorB) * 0.05;     // :594/:701/:800/:903/:1019
+        e.magAccX = accX * k; e.magAccY = accY * k;
+        e.magTX = tX; e.magTY = tY;
+        this.ambEntities.push(e);
+      }
+      return;
+    }
+    // 单体族
+    const d = depth();
+    const tex = this.ambientTexKey(kind, r, d);
+    this.ambEntities.push(mk(edgeX, bandY(), d, randLife(), tex.key, tex.rows, tex.variant));
   }
 
   /** StartFadingOut（AmbientSky.cs:170-176）：把出生点前推到"淡出已开始"的时刻 */
@@ -819,38 +1099,100 @@ export class SkyRenderer {
 
   /** FadingSkyEntity.Update（AmbientSky.cs:103-121）+ 各族 UpdateVelocity/Update */
   private stepAmbientEntity(e: AmbientEnt, frame: number, wind: number): void {
+    const spec = AMBIENT_FAMILY_PARAMS[e.kind];
     const age = frame - e.bornAt;
     if (age >= e.life) { e.dead = true; return; }                  // IsMovementDone :128-140
     // UpdateOpacity :151-165：淡出段（age≥life×fadeOut）反向 1→0
     e.opacity = age >= e.life * e.fadeOut
       ? lerpValueClamped(e.life, e.life * e.fadeOut, age)
       : lerpValueClamped(0, e.life * e.fadeIn, age);
-    // 帧推进 :110-113（(frame+FrameOffset)%FramingSpeed==0 → 下一行）
-    if (e.framingSpeed < 0x7fffffff && (frame % e.framingSpeed) === 0) {
+    // 帧推进 :110-113（(frame+FrameOffset)%FramingSpeed==0 → 下一行）；
+    // LostKite 风暴时 FramingSpeed=4（:276-279）
+    const fs = e.kind === 'lostkite' && this.storming() ? 4 : e.framingSpeed;
+    if (fs < 0x7fffffff && ((frame + e.frameOffset) % fs) === 0) {
       e.frame = (e.frame + 1) % e.rows;
     }
-    if (e.kind === 'birds') {
-      // BirdsPack.UpdateVelocity :470-474：3+|wind|×0.8 px/tick 顺风
-      e.vx = (3 + Math.abs(wind) * 0.8) * e.dir;
-      e.vy = 0;
-    } else {
-      // Gastropod.UpdateVelocity :631-638：磁吸弹簧 + 基速 1.5+|wind|×0.2
+    // SlimeBalloons :758 / LostKite :280：每帧按风重估朝向
+    if (e.kind === 'slimeBalloons' || e.kind === 'lostkite') e.dir = wind > 0 ? 1 : -1;
+    const group = AMBIENT_GROUP_SPEC[e.kind];
+    if (spec.eoc) {
+      // EOCSkyEntity.UpdateVelocity :1285-1297
+      if (e.state === 1) {
+        // ZigzagMove :1299-1302：dir*3 横速 + cos(frame/1200×2π)×waviness 纵摆
+        e.vx = e.dir * 3;
+        e.vy = Math.cos((frame / 1200) * Math.PI * 2) * e.waviness;
+      } else {
+        // ChasePlayerTop :1304-1313：朝玩家上方 500px 以 0.1/tick 加速，钳 ±18
+        const p = this.frameCtx?.player;
+        if (p) {
+          const dx = p.cx - e.x, dy = (p.cy - 500) - e.y;
+          if (Math.hypot(dx, dy) >= 100) {
+            e.vx = Math.max(-18, Math.min(18, e.vx + 0.1 * Math.sign(dx)));
+            e.vy = Math.max(-18, Math.min(18, e.vy + 0.1 * Math.sign(dy)));
+          }
+        }
+      }
+      e.rotation = Math.atan2(e.vy, e.vx);                         // :1296
+    } else if (group) {
+      // 磁吸弹簧（Seagulls :530-537 / Gastropod :637-644 / Slime :745-752 /
+      // Bats :961-967 / HellBats :849-855 同构）
       e.magVX += e.magAccX * Math.sign(e.magTX - e.magPX);
       e.magVY += e.magAccY * Math.sign(e.magTY - e.magPY);
       e.magPX += e.magVX; e.magPY += e.magVY;
-      e.vx = (1.5 + Math.abs(wind) * 0.2) * e.dir + e.magVX;
-      e.vy = e.magVY;
-      e.rotation = e.vx * 0.1;
+      e.vx = (spec.speedA + Math.abs(wind) * spec.speedB) * e.dir + e.magVX;
+      e.vy = (spec.vy ?? 0) + e.magVY;
+      if (e.kind === 'gastropod' || e.kind === 'slimeBalloons') e.rotation = e.vx * 0.1;  // :644/:752
+    } else if (e.kind === 'airballoon') {
+      // :1149-1165：vx = wind*4；vy = -(3+|wind|)，y<worldSurface×12/8/4 三档各减半
+      e.vx = wind * 4;
+      let rise = 3 + Math.abs(wind);
+      const surfTiles = this.fx.surfaceY / 16;
+      if (e.y < surfTiles * 12) rise *= 0.5;
+      if (e.y < surfTiles * 8) rise *= 0.5;
+      if (e.y < surfTiles * 4) rise *= 0.5;
+      e.vy = -rise;
+    } else if (e.kind === 'lostkite') {
+      // :264-272：1.2+|wind|×3，风暴 ×1.5
+      let v = spec.speedA + Math.abs(wind) * spec.speedB;
+      if (this.storming()) v *= 1.5;
+      e.vx = v * e.dir; e.vy = 0;
+    } else {
+      // 常规单体族（Birds :472-474 / Wyvern :1054-1057 / Airship :1110-1113 / Butterflies
+      // :215-218 / Vulture :366-369 / PixiePosse :423-426 / Pegasus :317-320）
+      e.vx = (spec.speedA + Math.abs(wind) * spec.speedB) * e.dir;
+      e.vy = 0;
     }
     e.x += e.vx; e.y += e.vy;                                      // :115 Position += Velocity
   }
 
-  /** 各族 Update 尾部的环境门（BirdsPack :479-483 / Gastropod :644-647） */
+  /** 各族 Update 尾部的环境门（StartFadingOut 触发条件 1:1） */
   private ambientEnvGate(e: AmbientEnt, frame: number): void {
     const a = this.amb;
-    const out = e.kind === 'birds'
-      ? (a.raining || !a.dayTime || a.eclipse)                       // :481
-      : (a.raining || a.dayTime || a.bloodMoon || a.moonEventKind === 2 || a.moonEventKind === 1); // :646
+    const rainDayEclipse = a.raining || !a.dayTime || a.eclipse;   // Birds :481 等 8 族同构
+    let out = false;
+    switch (e.kind) {
+      case 'gastropod':   // :650
+        out = a.raining || a.dayTime || a.bloodMoon || a.moonEventKind === 2 || a.moonEventKind === 1;
+        break;
+      case 'pixieposse':  // :432：昼夜变体错位即淡出 + 雨/日食/血月/南瓜霜月
+        out = (e.variant === 1 && !a.dayTime) || (e.variant === 2 && a.dayTime) || a.raining
+          || a.eclipse || a.bloodMoon || a.moonEventKind === 2 || a.moonEventKind === 1;
+        break;
+      case 'slimeBalloons':  // :759
+        out = !this.windyDay() || a.raining || !a.dayTime || a.eclipse;
+        break;
+      case 'lostkite':    // :282（无雨门）
+        out = !a.dayTime || a.eclipse;
+        break;
+      case 'birds': case 'vulture': case 'pegasus': case 'seagulls':
+      case 'airship': case 'airballoon': case 'butterflies': case 'bats':
+        out = rainDayEclipse;
+        break;
+      default:
+        // Wyvern/Eyeball/EOS/Crimera/HellBats 无 Update 覆盖 = 无环境门
+        out = false;
+        break;
+    }
     if (out) this.ambientStartFadingOut(e, frame);
   }
 

@@ -187,11 +187,18 @@ export class Player extends Entity {
   displayedFishingInfo = '';
   /** 秒表速度滑动窗口(Player.speedSlice :1292,长 60;窗口长随速度变化) */
   speedSlice = new Float32Array(60);
-  /** 雷达/稀有生物节流(Player.accThirdEyeCounter/Number、accCritterGuideCounter/Number :2462-2474) */
-  accThirdEyeCounter = 0; accThirdEyeNumber = 0;
-  accCritterGuideCounter = 0; accCritterGuideNumber = -1;
-  /** 缓存的雷达敌数/稀有生物名(节流刷新间用旧值) */
-  accThirdEyeCount = 0; accCritterGuideText: string | null = null;
+  /** 雷达/稀有生物节流(Player.accThirdEyeCounter/accCritterGuideCounter :2462/:2472,
+   *  byte;ResetEffects :12625 卸下雷达时 accThirdEyeCounter 归零 → 重装备立即重扫) */
+  accThirdEyeCounter = 0;
+  accCritterGuideCounter = 0;
+  /** 雷达扫描间缓存的敌数(Player.accThirdEyeNumber :2464,byte;唯一消费点
+   *  DrawInfoAccs :46406-46408 行文本;byte++ 255 回绕此处不模拟——2000px 内
+   *  敌数 >255 不现实) */
+  accThirdEyeNumber = 0;
+  /** 稀有生物行缓存。原版 accCritterGuideNumber(:2474)缓存的是 npc[] 槽位索引,
+   *  消费点 npc[num13].GivenOrTypeName(:46366/:46371)——本仓实体无 npc 槽位数组,
+   *  索引不可移植,直接缓存消费产出(生物名)等效 */
+  accCritterGuideText: string | null = null;
   // ---- DPS 计(Player.cs:2488-2496 字段 + :53290-53353 addDPS/checkDPSTime/getDPS) ----
   /** dpsDamage/dpsStart/dpsEnd/dpsLastHit/dpsStarted;墙钟 3 秒窗口,停手自动归 N/A */
   private dpsDamage = 0;
@@ -2604,16 +2611,20 @@ export class Player extends Entity {
    *  （:37769 num9 = pvp ? 8 : 40/80）——远短于 PvE，不同弹幕可高频命中（每弹另有
    *  playerImmune 40t 独立冷却，Projectile.cs:214/:13618，弹侧维护）②击杀置
    *  pvpDeath（KillMe :38208-38210）→ 不掉钱/300t 无敌满血复活/跳过 Boss 重生延迟 */
-  damage(dmg: number, srcX: number, srcY: number, knockback = true, pvp = false): boolean {
-    // 调试无敌（F2）：完全免伤——不扣血/不进无敌帧/不触发受击饰品（返回 false=未受伤）
-    if (this.debugGod) return false;
+  /** 返回实际扣除的 HP（0=完全未受伤/被无敌帧吞掉——原版 Hurt 返回 0 语义;
+   *  圣骑士盾转移/日曜反击消费此值。★pvp 时原版 Hurt 的【返回值】另有口径 =
+   *  CalculateDamagePlayersTakeInPVP（dmg−def×0.5 下限 1,吸血/甲虫蓄能消费,
+   *  :37953）——需要该口径的消费方自行计算,勿改本返回 */
+  damage(dmg: number, srcX: number, srcY: number, knockback = true, pvp = false): number {
+    // 调试无敌（F2）：完全免伤——不扣血/不进无敌帧/不触发受击饰品（返回 0=未受伤）
+    if (this.debugGod) return 0;
     // 微光化免伤（Player.cs:37591-37595 Hurt 前置：shimmering 且可闪避 → 直接返回 0；
     // 本仓 damage 以 false 表示完全免伤——Boss 专属弹幕 371 等不可闪避源未移植）
-    if (this.shimmering) return false;
-    if (this.iframes > 0 || this.dead) return false;
+    if (this.shimmering) return 0;
+    if (this.iframes > 0 || this.dead) return 0;
     const eq = this.equipStats;
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :9772 blackBelt 分支）
-    if (eq.blackBelt && Math.random() < 0.1) return false;
+    if (eq.blackBelt && Math.random() < 0.1) return 0;
     // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
       + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0)   // 甲虫壳每球 15%（buffs 95-97）
@@ -2653,7 +2664,7 @@ export class Player extends Entity {
       this.vx = dir * 3.4;
       this.vy = -3;
     }
-    return true;
+    return reduction;
   }
 
   /** ShimmerUnstuck（Player.cs:28394-28428）：timeShimmering 清零，找最近无微光

@@ -75,7 +75,7 @@ export class Input {
     // 长按 ≥400ms 且位移 <12px = 右键交互脉冲：开箱/对话/开门）。
     // ★ 不改桌面路径：桌面无 touch 事件，本段零影响
     const isUiTarget = (t: EventTarget | null): boolean =>
-      !!t && (t as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-mobile, .sw-hotbar, .sw-tooltip, .sw-ach-panel, .sw-drag-ghost') != null;
+      !!t && (t as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-mobile, .sw-hotbar, .sw-tooltip, .sw-ach-panel, .sw-res-panel, .sw-drag-ghost') != null;
     let worldTouchId: number | null = null;
     let touchStartX = 0, touchStartY = 0, touchStartT = 0;
     let longPressTimer: ReturnType<typeof setTimeout> | null = null;
