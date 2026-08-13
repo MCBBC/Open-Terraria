@@ -156,6 +156,47 @@ describe('掉落物入微光（WorldItem.Shimmering + GetShimmered）', () => {
     expect(d.shimmered).toBe(false);
     expect(d.shimmerTime).toBe(0);
   });
+
+  it('shimmerWet = Collision.shimmer 盒判定（浅液面盒缘擦液即湿,非中心格 >30 门）', () => {
+    // 浅微光格 liquid=40 → 液面段仅上部 ~3px（drop=(256-40)/32=6.75 → y+13.5 起 3px 高）。
+    // 物品盒顶压入液面段 → 原版盒判定 true。旧实现中心单格 >30 在液面边界处时真时假
+    // = "有时能分解有时不能"根因（Shimmering 顶格采样是另一层门,满液没顶必触发）
+    const w = new World(W, H, 11, 'shimmer-shallow');
+    const st = w.store;
+    for (let x = 10; x < 30; x++) st.setTile(x, 40, 1);
+    for (let x = 10; x < 30; x++) st.setLiquid(x, 39, 40, 4);   // 浅液(40/255)
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const d = new ItemDrop(20 * TILE, 39 * TILE + 2, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3509]], 1);
+    d.vx = 0; d.vy = 0;
+    d.fixedUpdate(1, hooks(w, p));
+    expect(d.shimmerWet).toBe(true);          // 盒擦浅液即湿（液面段 627.5-630.5 与盒顶相交）
+  });
+
+  it('decraft 产物 shimmered 上浮 + vx 通用摩擦衰减（:927-932,勿放非 shimmered 分支）', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const drops: ItemDrop[] = [];
+    const h = hooks(w, p);
+    (h as unknown as { spawnDrop: (...a: unknown[]) => ItemDrop | null }).spawnDrop =
+      (_x, _y, key, stack, vx, vy) => {
+        const d = new ItemDrop(_x, _y, ITEM_BY_KEY[key], stack);
+        d.vx = vx; d.vy = vy;
+        drops.push(d);
+        return d;
+      };
+    const d = new ItemDrop(20 * TILE, 36 * TILE, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3509]], 1);
+    d.vx = 0; d.vy = 0;
+    for (let i = 0; i < 300 && !d.dead; i++) d.fixedUpdate(1, h);
+    expect(d.dead).toBe(true);
+    expect(drops.length).toBe(2);             // 木材 12 + 铜矿 9
+    const mats = drops.map((x) => vanillaIdOfItem(x.itemId)).sort((a, b) => a - b);
+    expect(mats).toEqual([9, 12]);
+    expect(drops.every((x) => x.shimmered)).toBe(true);   // 上浮漂浮
+    // 散射初速 |vx|≤2.2;通用摩擦每 tick ×0.95——驱动 200t 后 |vx| 必归零(<0.1)
+    // (旧实现 shimmered 分支无摩擦 → 无限横漂 + 恒 >0.2 永不可拾)
+    for (let i = 0; i < 200; i++) drops.forEach((x) => x.fixedUpdate(1, h));
+    expect(drops.every((x) => Math.abs(x.vx) < 0.1)).toBe(true);
+  });
 });
 
 describe('玩家脱困落点（ShimmerHelper.FindSpotWithoutShimmer 近似）', () => {

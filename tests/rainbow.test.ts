@@ -5,6 +5,7 @@
 //     命中 = 穿透 -1 + 【全段共享】静态 10t 冷却（usesIDStaticNPCImmunity）
 import { describe, it, expect } from 'vitest';
 import { RainbowBolt, RainbowSegment, _setRainbowClock } from '../src/entities/RainbowProj';
+import { PrismProj, PrismProng } from '../src/entities/PrismProj';
 import { Arrow } from '../src/entities/Arrow';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -156,5 +157,76 @@ describe('星怒 3065 → 弹 503（Arrow star 模式）', () => {
       { grav: 0, life: 900, pierce: 2, star: { targetY: 120 * TILE } });
     for (let t = 0; t < 30; t++) sword.fixedUpdate(1, game);
     expect(sword.starAlpha).toBe(150);                    // 线上方钳 150（:22197-22202）
+  });
+});
+
+describe('最后的棱镜 3541 → 633/632（PrismProj 充能聚束）', () => {
+  it('首帧生成 6 光棱；断 channel 全链消亡；魔耗 30 拍首扣', () => {
+    const projectiles: unknown[] = [];
+    const game = makeGame(new World(200, 200, 30, 'open'), [], projectiles);
+    let ch = true;
+    let pays = 0;
+    const prism = new PrismProj(1, 0, 100, 0.25,
+      () => ch, () => ({ x: 150 * TILE, y: 90 * TILE }), () => { pays++; return true; });
+    projectiles.push(prism);
+    (game as unknown as { player: unknown }).player = { cx: 90 * TILE, cy: 90 * TILE };
+    prism.fixedUpdate(1, game);
+    expect(projectiles.filter((q) => q instanceof PrismProng).length).toBe(6);
+    for (let t = 0; t < 28; t++) prism.fixedUpdate(1, game);
+    expect(pays).toBe(0);
+    prism.fixedUpdate(1, game);
+    expect(pays).toBe(1);                     // charge=30 首拍（:63628）
+    ch = false;
+    prism.fixedUpdate(1, game);
+    expect(prism.dead).toBe(true);
+    for (const q of prism.prongs) expect(q.dead).toBe(true);
+  });
+
+  it('魔耗失败即断束（mana 不足 Kill）', () => {
+    const projectiles: unknown[] = [];
+    const game = makeGame(new World(200, 200, 30, 'open'), [], projectiles);
+    let ok = true;
+    const prism = new PrismProj(1, 0, 100, 0.25, () => true, () => ({ x: 1, y: 0 }), () => ok);
+    projectiles.push(prism);
+    (game as unknown as { player: unknown }).player = { cx: 90 * TILE, cy: 90 * TILE };
+    prism.fixedUpdate(1, game);
+    ok = false;
+    for (let t = 0; t < 30 && !prism.dead; t++) prism.fixedUpdate(1, game);
+    expect(prism.dead).toBe(true);
+  });
+
+  it('充能三段：散开→收敛；满充 180t 伤害×3 + 光束被墙截断', () => {
+    const w = new World(200, 200, 30, 'open');
+    for (let y = 0; y < 200; y++) w.store.setTileSilent(90, y, 1, 0, 0);   // x=90 墙列
+    const list: unknown[] = [];
+    let dmgTaken = 0;
+    list.push({ id: 1, x: 60 * TILE, y: 90 * TILE, w: 24, h: 18, dead: false,
+      hurt: (d: number) => { dmgTaken += d; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
+    const projectiles: unknown[] = [];
+    const game = makeGame(w, list, projectiles);
+    const prism = new PrismProj(1, 0, 100, 0.25,
+      () => true, () => ({ x: 150 * TILE, y: 90 * TILE }), () => true);
+    projectiles.push(prism);
+    (game as unknown as { player: unknown }).player = { cx: 40 * TILE, cy: 90 * TILE };
+    prism.fixedUpdate(1, game);
+    const prongs = prism.prongs;
+    expect(dmgTaken).toBe(0);                 // charge<30 光束不伤敌（friendly 门）
+    for (let t = 0; t < 180; t++) {
+      prism.fixedUpdate(1, game);
+      for (const q of prongs) if (!q.dead) q.fixedUpdate(1, game);
+    }
+    expect(prism.charge).toBeGreaterThanOrEqual(181);
+    dmgTaken = 0;
+    for (let t = 0; t < 10; t++) {
+      for (const q of prongs) if (!q.dead) q.fixedUpdate(1, game);
+    }
+    expect(dmgTaken).toBeGreaterThanOrEqual(300);   // 满充 ×3（基 100）至少一跳
+    for (const q of prongs) {
+      // 墙在 x=90（1440px），棱镜 cx=640 → 截断 ≈800px（远小于 2400 上限）
+      if (!q.dead) { expect(q.beamLen).toBeLessThan(820); expect(q.beamLen).toBeGreaterThan(700); break; }
+    }
+    const spread = Math.max(...prongs.filter((q) => !q.dead)
+      .map((q) => Math.abs(Math.atan2(q.vy, q.vx))));
+    expect(spread).toBeLessThan(0.5);               // 满充收敛（spread=1.75）
   });
 });

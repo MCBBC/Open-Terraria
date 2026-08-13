@@ -126,6 +126,7 @@ import { growGemTree } from '../world/gen/vanilla/TreePass';
 import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
+import { inOpposingTeam } from '../stats/Pvp';
 import { Critter } from '../entities/Critter';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
@@ -190,9 +191,13 @@ import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
 import { RainbowBolt } from '../entities/RainbowProj';
+import { PrismProj } from '../entities/PrismProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
+import { type InfoAccCtx, mphOf } from '../stats/InfoAccs';
+import { npcRarityOf } from '../data/vanillaNpcs';
+import { bannerOfNpc } from '../world/Banners';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
 import { GolfState } from '../world/golf/GolfState';
 import { golfVanillaTileId } from '../world/golf/golfPhysics';
@@ -731,7 +736,7 @@ export class Game implements GameHooks {
 
   private netNpcPuppets = new Map<number, { e: Enemy; seen: number }>();
   private netDropPuppets = new Map<number, { d: ItemDrop; seen: number }>();
-  private netProjPuppets = new Map<number, { p: Entity; seen: number }>();
+  private netProjPuppets = new Map<number, { p: Entity; seen: number; pvp?: boolean; ownerSlot?: number; pvpImmuneT?: number }>();
   private netNpcLast = new Map<number, { x: number; y: number; hp: number; t: number }>();
   private netProjLast = new Map<number, { x: number; y: number; t: number }>();
   private netDropSeen = new Map<number, ItemDrop>();
@@ -784,6 +789,9 @@ export class Game implements GameHooks {
     const snaps: ProjSnap[] = [];
     const list = this.entities.projectiles;
     const n = list.length;
+    // v7 PvP：pvpAllowed 房且自己 hostile 时，玩家弹幕（kind0 友方/1 武器族/4 法弹）
+    // 携带 kind bit6——被击端傀儡过 InOpposingTeam 门禁后本地结算（victim-settles）
+    const pvpOn = net.policy.pvpAllowed && this.player.hostile;
     let examined = 0;
     for (; examined < n && snaps.length < 24; examined++) {
       const p = list[(this.netProjCursor + examined) % n] as Entity & { projId?: number; damage?: number; kind?: string; color?: string; life?: number };
@@ -801,17 +809,24 @@ export class Game implements GameHooks {
         kind = 0; tag = String(p.projId ?? 1);
         // v5：敌对弹带 bit7（原版 Projectile.hostile）——访客端据此本地结算 Damage_EVP
         if (p.hostile) kind |= 0x80;
+        else if (pvpOn) kind |= 0x40;   // v7：玩家 PvP 弹（友方 Arrow = 玩家射出）
       }
       else if (p instanceof Dart) {
         kind = 2; tag = String(p.projId ?? 0);
         if (p.hostile) kind |= 0x80; // 射击怪弹（!style.friendly）——review F1：此前整族漏覆盖
       }
-      else if (p.projId !== undefined) { kind = 1; tag = String(p.projId); }
+      else if (p.projId !== undefined) {
+        kind = 1; tag = String(p.projId);
+        if (pvpOn) kind |= 0x40;   // v7：武器族弹幕（回旋镖/剑气等，恒玩家来源）
+      }
       else if (p instanceof TrapShot) {
         kind = 3; tag = p.kind ?? 'dart';
         if (p.hostile) kind |= 0x80; // 机关/陷阱弹（环境危害，原版伤所有玩家）
       }
-      else if (p.color !== undefined) { kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600)); }
+      else if (p.color !== undefined) {
+        kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600));
+        if (pvpOn) kind |= 0x40;   // v7：法弹（恒玩家来源）
+      }
       else if (typeof (p as { netProjMeta?: unknown }).netProjMeta === 'function') {
         // v6：Boss 锚定弹体族（DukeSharknadoBolt/龙卷/MLDeathray/LunarOrb）——
         // 访客重建真类、本地跑确定性 AI（锚=msg23 傀儡，见 netMakeProj case 5-8）
@@ -930,8 +945,16 @@ export class Game implements GameHooks {
         p.netPuppet = true;
         p.netId = s.netId;
         this.entities.add(p, 'projectiles');
-        pup = { p, seen: this.tickCount };
+        // v7：PvP 弹 meta（kind bit6 + netId 高 8 位归属）——netPuppetProjContact 消费
+        pup = {
+          p, seen: this.tickCount,
+          pvp: (s.kind & 0x40) !== 0,
+          ownerSlot: s.netId >>> 24,
+        };
         this.netProjPuppets.set(s.netId, pup);
+      } else {
+        // 已在场的傀儡也跟随发送方 PvP 姿态刷新（hostile 开关后无需弹幕重生）
+        pup.pvp = (s.kind & 0x40) !== 0;
       }
       pup.p.netSnapTo(s.x, s.y); // P3.2：插值追踪（弹幕周期短，intervalTicks 默认 4）
       pup.p.vx = s.vx; pup.p.vy = s.vy;
@@ -1000,6 +1023,26 @@ export class Game implements GameHooks {
       this.addDamageNumber(e.cx, e.y, dealt, false, '#FF7060');
       return;
     }
+  }
+
+  /** v7 msg44：PvP 近战命中意向到达（被打端=本地权威结算）。
+   *  门禁链 = 原版 MessageBuffer.cs:3864 服务器"双方 hostile"校验的客户端等价 +
+   *  InOpposingTeam（Player.cs:4287 全服唯一 PvP 关系判定）：任一门不过即丢弃——
+   *  伪造意向包最多触发一次受击表现，扣血与否完全由本地决定（victim-settles）。
+   *  伤害走 damagePlayer(pvp)（8t 无敌帧 + pvpDeath 标记），死因 = DeathSource.Player */
+  private netApplyStrikePlayer(fromSlot: number, dmg: number, weaponId: number) {
+    if (!this.net || !this.net.policy.pvpAllowed) return;
+    const p = this.player;
+    if (p.dead) return;
+    const rp = this.net.players.get(fromSlot);
+    if (!rp || !rp.active) return;
+    // InOpposingTeam（Player.cs:4287）：双方 hostile 且（对方无队或异队）——单调用
+    // 完成原版 MessageBuffer.cs:3864 双向 hostile 校验的等价判定
+    if (!inOpposingTeam(p, rp)) return;
+    // 死因：凶手名 + 凶器名（DeathSource.Player "{0}，凶手是{1}的{2}。"）
+    p.lastDamageCause = { kind: 'player', name: rp.name, weapon: Lang.itemName(weaponId) ?? '?' };
+    this.damagePlayer(dmg, rp.x, rp.y, undefined, false, true);
+    this.playSfx('hit', 1, rp.x, rp.y);
   }
 
   /** msg28 回包：弹幕消亡即时移除傀儡（v6——替代纯超时清扫的补刀路径） */
@@ -1088,9 +1131,35 @@ export class Game implements GameHooks {
    *  hostile + dmg>0 / player.immune(iframes) / AABB 相交；命中【不消耗穿透】
    *  （:13811-13829 特判除外），弹体照常飞行；debuff 授予以实际伤害为准（statusPlayer）。 */
   private netPuppetProjContact() {
+    const net = this.net;
     for (const [, pup] of this.netProjPuppets) {
       const pr = pup.p as Entity & { hostile?: boolean; damage?: number; projId?: number };
-      if (!pr.hostile || pr.dead) continue;
+      if (pr.dead) continue;
+      // ---- v7 PvP 弹（kind bit6）：玩家命中链（原版 Projectile.Damage_PVP
+      //      :13497-13620 的被打方本地结算等价）。门禁与原版 :13506-13510 同构：
+      //      dmg>0 / 跳过自己（netId 高位=own slot 不会出现在傀儡表，天然满足）/
+      //      对方 hostile（InOpposingTeam 含双方）/ playerImmune 40t 每弹独立冷却
+      //      （:13618——本地单玩家模型下退化为傀儡单计数器）
+      if (pup.pvp) {
+        if (!net || !net.policy.pvpAllowed) continue;
+        if ((pup.pvpImmuneT ?? 0) > 0) { pup.pvpImmuneT = pup.pvpImmuneT! - 1; continue; }
+        const dmg0 = pr.damage ?? 0;
+        if (dmg0 <= 0) continue;
+        const owner = net.players.get(pup.ownerSlot ?? -1);
+        if (!owner || !owner.active || !inOpposingTeam(this.player, owner)) continue;
+        // Main.DamageVar（:13563±15% 幅度,打在被击端）+ 死因 player（凶器=弹型名）
+        const rolled = Math.max(1, Math.round(dmg0 * (1 + (Math.random() * 30 - 15) / 100)));
+        this.player.lastDamageCause = {
+          kind: 'player', name: owner.name,
+          weapon: Lang.projectileName(pr.projId ?? 0) ?? '?',
+        };
+        if (hitPlayer(pr, this, rolled, false, true)) {
+          pup.pvpImmuneT = 40;   // :13618 每弹×每玩家独立冷却
+          this.playSfx('hit', 1, pr.cx, pr.cy);
+        }
+        continue;
+      }
+      if (!pr.hostile) continue;
       // 判定用渲染位（插值+速度外推）而非权威位：原版各端本地模拟，"所见即所中"
       // 才是客户端权威语义；权威位在差分快照间隔内（慢速弹最长 60t）会冻结在过期
       // 位置——review F3 改权威位实测造成慢速敌弹系统性漏判（ax 漂出玩家盒仍判不中）
@@ -3637,6 +3706,7 @@ export class Game implements GameHooks {
     this.chunks.advanceAnim(); // 动画陈设（制冰机/固化机/篝火/熔炉等）：换帧 tick 重建含动画 chunk
     tickEmotes();
     this.tickNpcEmotes();
+    this.tickInfoAccs();
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;
     const viewTH = Math.ceil(this.camera.viewH / this.camera.zoom / TILE) + 2;
     // 风摆动相位钟 + 玩家扰动网格（TileDrawing.Update 1:1）。网格按视区尺寸建格
@@ -5642,6 +5712,33 @@ export class Game implements GameHooks {
           this.input.mouseDown = false;
           break;
         }
+        // 最后的棱镜 3541 → 633（channel 充能聚束，AI_075 :63626）：
+        // 633 晶体挂手 + 6×632 光棱（PrismProj 独占链）。channel=按住（电平语义同
+        // 链球 mouseHeld）；魔耗节奏 30→15→5 由 payMana 回调按拍扣
+        if (cw.shoot === 633) {
+          const prismOwner = this.player;
+          const prismItemId = def.key;
+          const prism = new PrismProj(Math.cos(ang), Math.sin(ang),
+            cw.damage, cw.knockback,
+            () => this.input.mouseHeld && !this.input.uiBlocking
+              && prismOwner.inv.heldItem()?.id === ITEM_BY_KEY[prismItemId]
+              && !prismOwner.dead,
+            () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+            () => {
+              const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
+                * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul);
+              if (this.player.mana < cost) return false;
+              this.player.mana -= cost;
+              return true;
+            });
+          prism.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          prism.critChance = critTotal;
+          this.entities.add(prism, 'projectiles');
+          this.player.useTime = cw.useTime;
+          this.player.onManaItemUsed();
+          this.input.mouseDown = false;
+          break;
+        }
         let pen = pd?.penetrate ?? 1;
         if (pen < 0) pen = 3;
         pen = Math.max(1, Math.min(pen, 3));
@@ -5807,6 +5904,7 @@ export class Game implements GameHooks {
       } else if (toolType === 'hammer') {
         const p = this.player;
         const dmg = Math.max(1, Math.floor(p.maxHp / 2));
+        p.lastDamageCause = { kind: 'defaultWrap' };  // 祭坛锤反噬:ByOther(3) 同族(applyTouchDamage)
         p.damage(dmg, p.cx - p.facing * 8, p.cy, false);
         this.addDamageNumber(p.cx, p.y, dmg, false, '#B080FF');
         this.sfx.play('hit', 0.8);
@@ -8389,8 +8487,8 @@ export class Game implements GameHooks {
         }
         return false;
       },
-      explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean) =>
-        this.explodeAt(tx, ty, damage, radius, destroyTiles),
+      explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, projId?: number) =>
+        this.explodeAt(tx, ty, damage, radius, destroyTiles, undefined, 0, projId ?? 108),
       extractinatorPull: (ax: number, ay: number, blockType: number) =>
         this.extractinatorPullImpl(ax, ay, blockType),
       dropItemStack: (vid: number, stack: number, px: number, py: number) =>
@@ -8563,7 +8661,17 @@ export class Game implements GameHooks {
     }
     const p = this.player;
     const hb = hurtBox ?? R * TILE;
-    if (Math.abs(p.cx - cx) < hb + p.w / 2 && Math.abs(p.cy - cy) < hb + p.h / 2) p.damage(damage, cx, cy);
+    // 爆炸炸死玩家的死亡归因 = ByProjectile（BombsHurtPlayers :13974）：投射物名
+    // 取 Lang.GetProjectileName(projType)——掷出的炸弹/雷管/手雷按型号、电路炸药=108
+    // Explosives、地雷=164 Landmine、链爆=108。此前漏设 → 死因残留上一次受击来源
+    // （如已反杀的洞穴蝙蝠,"凶手是洞穴蝙蝠"串归因 bug 即此）。
+    if (Math.abs(p.cx - cx) < hb + p.w / 2 && Math.abs(p.cy - cy) < hb + p.h / 2) {
+      p.lastDamageCause = {
+        kind: 'projectile',
+        name: Lang.projectileName(projId || 108) ?? 'Explosives',
+      };
+      p.damage(damage, cx, cy);
+    }
     // 视觉 1:1（Projectile.Kill 按类型分档）:
     //   炸弹 28/手雷 30(:74881-74916):烟 31×20(scale1.5 vel×1.4) + 火 6×10 对
     //     (scale2.5 noGrav vel×5 + scale1.5 vel×3) + gore 61-64×4(vel×0.4 对角±1)
@@ -8598,7 +8706,7 @@ export class Game implements GameHooks {
       if (st.get(ex, ey) !== TILE_BY_KEY['v_141_explosives']) continue;
       st.setTile(ex, ey, 0);
       chained++;
-      this.explodeAt(ex, ey, 500, 10);
+      this.explodeAt(ex, ey, 500, 10, true, undefined, 0, 108);  // 语义=Projectile 108 Explosives
     }
   }
 
@@ -9181,6 +9289,33 @@ export class Game implements GameHooks {
         this.spawnDrop(e.cx, e.y, coin.key, coin.stack, coin.vx, coin.vy);
       }
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
+    }
+    // ---- 近战 PvP：远端玩家命中（原版 ItemCheck_MeleeHitPVP Player.cs:49994-43000 段）----
+    // 权威=被打方本地结算（victim-settles）：本端只检测相交并广播 msg44 意向，
+    // 不对 proxy 扣血（proxy.hp 由被击端 msg16 回报刷新）。门禁：pvpAllowed 房 +
+    // 自己 hostile + 对方 hostile/异队（InOpposingTeam）——与 Damage_PVP :13506-13510
+    // 同构（原版 :13510 同队门 team!=0&&equal）
+    if (this.net?.active && this.net.policy.pvpAllowed && this.player.hostile && !isNet) {
+      for (const rpEnt of this.remotePlayerProxies) {
+        const rp = rpEnt as Player & { __netSlot?: number };
+        const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
+        if (slot === undefined || rp.dead) continue;
+        if (this.swingHitSet.has(rp.id)) continue;             // 同一挥击只中一次
+        if (!inOpposingTeam(this.player, rp)) continue;         // :4287（含双方 hostile 门）
+        if (!hitRect(rp.x, rp.y, rp.w, rp.h)) continue;
+        this.swingHitSet.add(rp.id);
+        // 命中意向：裸伤（对方端自行结算防御/endurance/无敌帧）+ 击退方向 + 凶器 id
+        const crit = Math.random() < this.player.critChance('melee') / 100
+          + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1)?.crit ?? 0) / 100;
+        const rawDmg = Math.max(1, Math.round((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
+          * this.player.damageMult('melee') * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
+        const kdir = Math.sign(rp.cx - p.cx) || this.player.facing;
+        this.net.sendStrikePlayer(slot, rawDmg, kdir, 0, this.swing?.item ?? -1, crit);
+        // 本端反馈：受击音 + InPVP 公式预览飘字（Main.cs:65636：dmg−def×0.5 下限 1，
+        // 与 Hurt 返回值同源——实扣以被击端为准）
+        this.sfx.play('hit', 1, rp.cx, rp.cy);
+        this.addDamageNumber(rp.cx, rp.y, Math.max(1, Math.round(rawDmg - rp.defense * 0.5)), crit, crit ? '#FFD040' : '#FF7060');
+      }
     }
     void prog;
   }
@@ -10313,6 +10448,84 @@ export class Game implements GameHooks {
   /** 城镇 NPC 社交表情（原版 ai[0]=7/19 相邻互发 EmoteBubble 的简化切片，NPC.cs:69936）：
    *  白天、空闲、地面上的 NPC 与 6 格内另一 NPC 配对，低频随机互发表情 */
   private emoteCooldown = 0;
+  /** 信息显示列数据组装(DrawInfoAccs 的运行时侧):节流计数 + InfoAccCtx 注入。
+   *  渔情(:46300-46316):浮漂在液 → currentFishingPower 现算;否则用
+   *  displayedFishingInfo 粘性缓存(TruffleWorm 咬钩 → 警告文本)。 */
+  private tickInfoAccs(): void {
+    const p = this.player;
+    const gates = p.equipStats.infoAccs;
+    const w = this.world;
+    const r = this.renderer;
+    const clock = w.clock;
+    // 渔情(松露虫特判 + 粘性)
+    let fishingText: string | null = null;
+    if (gates.accFishFinder) {
+      const bobber = this.entities.projectiles.find((e) => e instanceof Bobber && !e.dead) as Bobber | undefined;
+      if (bobber && bobber.floating) {
+        const power = bobber.currentFishingPower(this as never);
+        p.displayedFishingInfo = bobber.baitVid === 2673 || bobber.truffleBite
+          ? Lang.text('GameUI.FishingWarning')
+          : Lang.text('GameUI.FishingPower', power);
+      }
+      fishingText = p.displayedFishingInfo || null;
+    } else {
+      p.displayedFishingInfo = '';
+    }
+    // 金属探测器(SceneMetrics.bestOre;渲染器持有 scene)
+    const scene = r.scene;
+    let oreText: string | null = null;
+    if (scene && scene.bestOreSheet >= 0) {
+      const key = TILE_KEY_NAME_BY_SHEET.get(scene.bestOreSheet);
+      if (key) oreText = Lang.tileName(scene.bestOreSheet);
+    }
+    // 击杀数(BannerSystem.BannerToNPC + GetKillCount :46421-46430)
+    let killText: string | null = null;
+    if (p.lastCreatureHit > 0) {
+      const banner = bannerOfNpc(p.lastCreatureHit);
+      const kills = banner != null ? (w.bannerKills.get(banner) ?? 0) : 0;
+      killText = `${Lang.npcName(p.lastCreatureHit)}: ${kills}`;
+    }
+    // ctx
+    r.infoAccCtx = {
+      gates,
+      mainTime: clock.timeOfDay * 86400,
+      dayTime: clock.isDay,
+      weather: {
+        storming: !!w.weather?.shouldUseStormMusic || (w.weather?.raining && (w.weather?.maxRaining ?? 0) > 0.6 && false),
+        maxRaining: w.weather?.maxRaining ?? 0,
+        cloudBGActive: w.weather?.cloudBGActive ?? 0,
+        numClouds: w.weather?.numClouds ?? 200,
+        windSpeedCurrent: w.weather?.windSpeedCurrent ?? 0,
+        sandstorm: !!w.weather?.sandstorm.happening,
+      },
+      moonPhase: clock.moonPhase, bloodMoon: !!clock.bloodMoon, eclipse: !!clock.eclipse,
+      fishingText, oreText,
+      rareText: p.accCritterGuideText,
+      enemyCount: p.accThirdEyeCount,
+      killText,
+      dps: p.getDPS(),
+      mph: gates.accStopwatch ? mphOf(r.infoAccs ? r.infoAccs.speedAvg : 0, {
+        honey: p.inHoney, shimmer: p.inShimmer, water: p.inWater, merman: p.merman,
+      }) : NaN,
+      centerX: p.cx, bottomY: p.y + p.h,
+      worldSurface: w.groundLevel, rockLevel: w.rockLevel,
+      maxTilesX: w.store.w, maxTilesY: w.store.h,
+    };
+    // 层 tick(节流计数 + speedSlice 推进)
+    r.infoAccs.tick(p, this.entities.enemies as never, this.entities.critters as never,
+      p.cx, p.cy,
+      (e) => {
+        const en = e as unknown as { vanillaId: number | null; def?: { damage?: number; lifeMax?: number } };
+        return (en.def?.damage ?? 0) > 0 && (en.def?.lifeMax ?? 0) > 5;
+      },
+      (vid) => npcRarityOf(vid as number | null),
+      (vid) => vid != null ? Lang.npcName(vid as number) : null,
+      (vx, vy) => Math.hypot(vx, vy),
+    );
+    // 悬停行(背包内点图标切换 P2 接)
+    r.infoAccHover = r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY);
+  }
+
   private tickNpcEmotes(): void {
     if (this.world.clock.isDay && --this.emoteCooldown <= 0) {
       this.emoteCooldown = 600; // 每 10s 窗口一次
@@ -12451,6 +12664,11 @@ export class Game implements GameHooks {
 
   playSfx(name: string, vol?: number, x?: number, y?: number) {
     this.sfx.play(name as SfxName, vol ?? 1, x, y);
+  }
+
+  /** Lang.GetProjectileName（cs:444）——GameHooks.projectileName 实现（死亡归因用） */
+  projectileName(id: number) {
+    return Lang.projectileName(id);
   }
 
   /** PlayTrackedLoopedSound 实现（GameHooks.startTrackedLoop——AI_016 引信嘶声） */

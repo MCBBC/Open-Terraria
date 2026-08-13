@@ -28,51 +28,56 @@ export interface TownNpcProfile {
   party: boolean;
   /** 同上第 5 参 uniquePartyTextureShimmered（微光档的 _Party） */
   shimmerParty: boolean;
+  /** 是否有微光档（StackedNPCProfile 只为 ShimmerTownTransform 29 只叠加；
+   *  slime 八只是裸 LegacyNPCProfile，townNpcVariationIndex 不参与选档） */
+  shimmer: boolean;
   /** TransformableNPCProfile（仅 633）：altTexture=2 → _Default_Transformed */
   transform?: boolean;
 }
 
 /** TownNPCProfiles._townNPCProfiles 1:1（含 slime 八只的 LegacyNPCProfile :151-180） */
 export const TOWN_NPC_PROFILE: Record<number, TownNpcProfile> = {
-  22:  { name: 'Guide', party: false, shimmerParty: false },             // :23
-  20:  { name: 'Dryad', party: false, shimmerParty: false },             // :27
-  19:  { name: 'ArmsDealer', party: false, shimmerParty: false },        // :31
-  107: { name: 'GoblinTinkerer', party: false, shimmerParty: false },    // :35
-  160: { name: 'Truffle', party: false, shimmerParty: false },           // :39
-  208: { name: 'PartyGirl', party: false, shimmerParty: false },         // :43
-  228: { name: 'WitchDoctor', party: false, shimmerParty: false },       // :47
-  550: { name: 'Tavernkeep', party: false, shimmerParty: false },        // :51
-  369: { name: 'Angler', party: true, shimmerParty: false },             // :55
-  54:  { name: 'Clothier', party: true, shimmerParty: false },           // :59
-  209: { name: 'Cyborg', party: true, shimmerParty: true },              // :63
-  38:  { name: 'Demolitionist', party: true, shimmerParty: true },       // :67
-  207: { name: 'DyeTrader', party: true, shimmerParty: true },           // :71
-  588: { name: 'Golfer', party: true, shimmerParty: false },             // :75
-  124: { name: 'Mechanic', party: true, shimmerParty: true },            // :79
-  17:  { name: 'Merchant', party: true, shimmerParty: true },            // :83
-  18:  { name: 'Nurse', party: true, shimmerParty: true },               // :87
-  227: { name: 'Painter', party: true, shimmerParty: false },            // :91
-  229: { name: 'Pirate', party: true, shimmerParty: true },              // :95
-  142: { name: 'Santa', party: true, shimmerParty: true },               // :99
-  178: { name: 'Steampunker', party: true, shimmerParty: false },        // :103
-  353: { name: 'Stylist', party: true, shimmerParty: true },             // :107
-  441: { name: 'TaxCollector', party: true, shimmerParty: true },        // :111
-  108: { name: 'Wizard', party: true, shimmerParty: true },              // :115
-  663: { name: 'Princess', party: true, shimmerParty: true },            // :119
-  633: { name: 'BestiaryGirl', party: true, shimmerParty: true, transform: true }, // :123
-  37:  { name: 'OldMan', party: false, shimmerParty: false },            // :127
-  453: { name: 'SkeletonMerchant', party: true, shimmerParty: true },    // :131
-  368: { name: 'TravelingMerchant', party: true, shimmerParty: true },   // :135
+  22: { name: 'Guide', party: false, shimmerParty: false, shimmer: true },
+  20: { name: 'Dryad', party: false, shimmerParty: false, shimmer: true },
+  19: { name: 'ArmsDealer', party: false, shimmerParty: false, shimmer: true },
+  107: { name: 'GoblinTinkerer', party: false, shimmerParty: false, shimmer: true },
+  160: { name: 'Truffle', party: false, shimmerParty: false, shimmer: true },
+  208: { name: 'PartyGirl', party: false, shimmerParty: false, shimmer: true },
+  228: { name: 'WitchDoctor', party: false, shimmerParty: false, shimmer: true },
+  550: { name: 'Tavernkeep', party: false, shimmerParty: false, shimmer: true },
+  369: { name: 'Angler', party: true, shimmerParty: false, shimmer: true },
+  54: { name: 'Clothier', party: true, shimmerParty: false, shimmer: true },
+  209: { name: 'Cyborg', party: true, shimmerParty: true, shimmer: true },
+  38: { name: 'Demolitionist', party: true, shimmerParty: true, shimmer: true },
+  207: { name: 'DyeTrader', party: true, shimmerParty: true, shimmer: true },
+  588: { name: 'Golfer', party: true, shimmerParty: false, shimmer: true },
+  124: { name: 'Mechanic', party: true, shimmerParty: true, shimmer: true },
+  17: { name: 'Merchant', party: true, shimmerParty: true, shimmer: true },
+  18: { name: 'Nurse', party: true, shimmerParty: true, shimmer: true },
+  227: { name: 'Painter', party: true, shimmerParty: false, shimmer: true },
+  229: { name: 'Pirate', party: true, shimmerParty: true, shimmer: true },
+  142: { name: 'Santa', party: true, shimmerParty: true, shimmer: true },
+  178: { name: 'Steampunker', party: true, shimmerParty: false, shimmer: true },
+  353: { name: 'Stylist', party: true, shimmerParty: true, shimmer: true },
+  441: { name: 'TaxCollector', party: true, shimmerParty: true, shimmer: true },
+  108: { name: 'Wizard', party: true, shimmerParty: true, shimmer: true },
+  663: { name: 'Princess', party: true, shimmerParty: true, shimmer: true },
+  633: { name: 'BestiaryGirl', party: false, shimmerParty: false, shimmer: true, transform: true },
+  // ↑ TransformableNPCProfile（Profiles.cs:112-159）无 alt==1 派对分支、也不加载
+  //   _Party 贴图——且 UpdateAltTexture :91261 对 633 强制关派对，双保险恒 false
+  37: { name: 'OldMan', party: false, shimmerParty: false, shimmer: true },
+  453: { name: 'SkeletonMerchant', party: true, shimmerParty: true, shimmer: true },
+  368: { name: 'TravelingMerchant', party: true, shimmerParty: true, shimmer: true },
   // 城镇史莱姆八只：无微光档（ShimmerImmunity，Shimmer.ts NPC_SHIMMER_IMMUNITY），
   // shimmerParty 恒不消费，取 false 防误指不存在的 Shimmered_ 文件
-  670: { name: 'SlimeBlue', party: false, shimmerParty: false },   // :151 uniquePartyTexture:false
-  678: { name: 'SlimeGreen', party: true, shimmerParty: false },   // :155
-  679: { name: 'SlimeOld', party: true, shimmerParty: false },     // :159
-  680: { name: 'SlimePurple', party: true, shimmerParty: false },  // :163
-  681: { name: 'SlimeRainbow', party: true, shimmerParty: false }, // :167
-  682: { name: 'SlimeRed', party: true, shimmerParty: false },     // :171
-  683: { name: 'SlimeYellow', party: true, shimmerParty: false },  // :175
-  684: { name: 'SlimeCopper', party: true, shimmerParty: false },  // :179
+  670: { name: 'SlimeBlue', party: false, shimmerParty: false, shimmer: false },
+  678: { name: 'SlimeGreen', party: true, shimmerParty: false, shimmer: false },
+  679: { name: 'SlimeOld', party: true, shimmerParty: false, shimmer: false },
+  680: { name: 'SlimePurple', party: true, shimmerParty: false, shimmer: false },
+  681: { name: 'SlimeRainbow', party: true, shimmerParty: false, shimmer: false },
+  682: { name: 'SlimeRed', party: true, shimmerParty: false, shimmer: false },
+  683: { name: 'SlimeYellow', party: true, shimmerParty: false, shimmer: false },
+  684: { name: 'SlimeCopper', party: true, shimmerParty: false, shimmer: false },
 };
 
 /**
@@ -87,8 +92,11 @@ export const TOWN_NPC_PROFILE: Record<number, TownNpcProfile> = {
 export function townNpcProfileSheet(id: number, variant: number, alt: number): string | null {
   const p = TOWN_NPC_PROFILE[id];
   if (!p) return null;
-  const root = variant === 1 ? `vanilla/Shimmered_${p.name}` : `vanilla/${p.name}`;
-  const uniqueParty = variant === 1 ? p.shimmerParty : p.party;
+  // 微光档仅对有 StackedNPCProfile 的 29 只生效；裸 LegacyNPCProfile（slime 族）
+  // 不看 townNpcVariationIndex，恒走常态档
+  const useShimmer = variant === 1 && p.shimmer;
+  const root = useShimmer ? `vanilla/Shimmered_${p.name}` : `vanilla/${p.name}`;
+  const uniqueParty = useShimmer ? p.shimmerParty : p.party;
   if (alt === 1) return `${root}_Default${uniqueParty ? '_Party' : ''}.png`;
   if (alt === 2 && p.transform) return `${root}_Default_Transformed.png`;
   return `${root}_Default.png`;

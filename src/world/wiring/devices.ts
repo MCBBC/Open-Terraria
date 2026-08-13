@@ -35,8 +35,9 @@ export interface DeviceCtx {
   teleportPair(a: [number, number], b: [number, number]): void;
   /** 城镇 NPC 搬迁雕像(style 40/41):group 0/1 白名单,搬到 (px,py) */
   relocateTownNpc(group: 0 | 1, px: number, py: number): boolean;
-  /** 爆炸(炸药/地雷/炮弹):范围伤害+清格+粒子 */
-  explode(tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean): void;
+  /** 爆炸(炸药 108/地雷 164/炮弹):范围伤害+清格+粒子;projId=死亡归因的投射物
+   *  (Wiring.cs case141→NewProjectile 108 Explosives / ExplodeMine→164 Landmine) */
+  explode(tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean, projId?: number): void;
   toast(msg: string): void;
   sfx(name: string, x?: number, y?: number): void; // 带坐标时按距离衰减/超距静音
   /** 广播盒（425）：锚点 (x,y) 起的 2×2 内告示牌文本广播；无牌由引擎侧静默 */
@@ -601,7 +602,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 141: // 炸药(:1781-1785)：清格 + Projectile 108(500伤/半径10)
       w.skipCell(x, y);
       st.setTile(x, y, 0);
-      ctx.explode(x, y, 500, 10);
+      ctx.explode(x, y, 500, 10, undefined, 108);  // 归因=Projectile 108 Explosives
       return true;
     case 149: // 节日彩灯 frameX ±54(:1244-1250)
       flipCell(w, x, y, 54);
@@ -705,7 +706,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 210: // 地雷 ExplodeMine(:3093)：清格 + Projectile 164(250伤)——
       // 164 不在 ExplodeTiles 判定表内 = **不破坏地形**（纯伤害爆炸）
       st.setTile(x, y, 0);
-      ctx.explode(x, y, 250, 0, false);
+      ctx.explode(x, y, 250, 0, false, 164);  // 归因=Projectile 164 Landmine
       return true;
     case 212: { // 雪球发射器（Wiring.cs:1345-1418 1:1）：旋转+开火复合状态机。
       // num51=块内列(0/2=旋转态,1=待发) num52=行内偏移 num55=朝向带(frameX/54,0左 1右)

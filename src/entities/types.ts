@@ -68,6 +68,8 @@ export interface GameHooks {
   applyPowder?(projId: number, x: number, y: number, w: number, h: number): void;
   /** 吸血链（Projectile.vampireHeal/ghostHeal）：返回实际回复 HP（0 = 未生效） */
   applyLifeSteal?(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic?: boolean): number;
+  /** 投射物显示名（Lang.GetProjectileName cs:444——死亡归因 DeathSource.Projectile 用） */
+  projectileName?(id: number): string | null;
   /** 播放音效 */
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;

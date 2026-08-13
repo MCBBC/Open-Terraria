@@ -94,7 +94,7 @@ function hitEnemies(
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
   for (const ent of game.enemies()) {
-    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     // 反射源命中（Projectile.cs:12050-12060）：按 projId 查 CanBeReflected 白名单——
@@ -1451,9 +1451,14 @@ export class TorchGodProj extends Entity {
       const tx = Math.floor((nx + this.w / 2) / TILE), ty = Math.floor((ny + this.h / 2) / TILE);
       if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.dead = true; return; }
     }
-    // 命中玩家（无敌帧由 Player.damage 侧处理）
+    // 命中玩家（无敌帧由 Player.damage 侧处理）。死亡归因 = ByProjectile
+    // （Projectile.Damage→Hurt 同源弹型名;此前漏设→死因残留旧值）
     const p = game.player;
     if (nx < p.x + p.w && nx + this.w > p.x && ny < p.y + p.h && ny + this.h > p.y) {
+      p.lastDamageCause = {
+        kind: 'projectile',
+        name: game.projectileName?.(this.projId) ?? '弹幕',
+      };
       p.damage(this.damage, Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
       this.dead = true;
       return;

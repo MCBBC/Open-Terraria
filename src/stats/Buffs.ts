@@ -294,7 +294,10 @@ export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
   campfireAccum = 0;
   /** 本仓已实装的 debuff 集（Main.debuff 表 ∩ BuffType：环境伤害/控速/DoT 族——
-   *  魔力眩晕 94 亦在原版 debuff 表，护士可清） */
+   *  魔力眩晕 94 亦在原版 debuff 表，护士可清）。
+   *  ★ NurseCannotRemoveDebuff 排除表（BuffID.cs:32 = {28,34,87,89,21,86,199,332,
+   *  333,334,165,146,48,158,157,350,215,147,321,43}）与本集【零交集】——本集成员
+   *  全部可被护士计价清除；实装排除表内 buff 时须在此过滤（登记） */
   static readonly DEBUFFS = new Set<BuffType>([
     BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
     BuffType.Chilled, BuffType.Weak, BuffType.Slow, BuffType.ManaSickness, BuffType.Poisoned,

@@ -127,6 +127,14 @@ export class Bobber extends Entity {
     return base;
   }
 
+  /** InfoAccs 渔情行消费(Main.cs:46300-46316 语义):浮漂在液 → 现算渔力;
+   *  调用方自管 displayedFishingInfo 粘性缓存 */
+  public currentFishingPower(game?: GameHooks): number {
+    const p = this.ownerRef();
+    if (!p) return 0;
+    return this.fishingPower(p, game);
+  }
+
   fixedUpdate(dt: number, game: GameHooks) {
     void dt;
     const p = this.ownerRef();

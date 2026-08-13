@@ -232,12 +232,18 @@ export class BestiaryTracker {
   }
 
   /** 条目解锁档（各 UIInfoProvider.GetEntryUICollectionInfo 的数据层等价）。
-   *  ★UNLOCK_ALL（2026-08-13 用户拍板）——图鉴作纯参考书,恒最高档,完全免门。
+   *  ★免门（2026-08-13 用户拍板）——图鉴作纯参考书,恒最高档,完全免门。
    *  偏离原版：原版 5 档击杀门（CommonEnemyUICollectionInfoProvider
-   *  .GetUnlockStateByKillCount,BestiaryEntryUnlockState）+金宠/目击/对话门;
-   *  击杀计数与完成度条仍按真实 kills/sights 统计显示,仅不再遮挡内容。 */
+   *  .GetUnlockStateByKillCount,BestiaryEntryUnlockState）+金宠/目击/对话门。
+   *  仅【显示内容】免门;isUnlocked/completion 仍走真实门控（否则完成度开局恒
+   *  100%——2026-08-13 用户抓到的免门副作用,已拆分）。 */
   unlockState(entry: BestiaryEntryDef): UnlockState {
     if (bestiaryGating.unlockAll) return UnlockState.DropsWithRates;
+    return this.realUnlockState(entry);
+  }
+
+  /** 原版门控计算本体（免门开关不经过——完成度/"已解锁"筛选/存档口径专用） */
+  realUnlockState(entry: BestiaryEntryDef): UnlockState {
     let state = UnlockState.NotKnown;
     for (const s of entry.sources) {
       const st = s.t === 'kill'
@@ -254,9 +260,9 @@ export class BestiaryTracker {
     return state;
   }
 
-  /** 条目是否已解锁（完成度分母口径：UnlockState > NotKnown） */
+  /** 条目是否已解锁（完成度分母口径：UnlockState > NotKnown;真实门控） */
   isUnlocked(entry: BestiaryEntryDef): boolean {
-    return this.unlockState(entry) > UnlockState.NotKnown;
+    return this.realUnlockState(entry) > UnlockState.NotKnown;
   }
 
   /** Main.GetBestiaryProgressReport（:65003-65020）——percent=已解锁/总数，总数 0 → 1 */

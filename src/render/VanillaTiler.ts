@@ -1183,7 +1183,7 @@ function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: HTMLImageEleme
  *  放置预览虚影(TileObject.cs:911),世界渲染唯一权威是 GetTileDrawData 的 tileTop;
  *  两表大量重合但不等同(旧表 16 项多余、3 项值错、条件项全部缺失),已全量换血。
  *  227 仙人掌走 drawCactusCell 专属路径不在此表;518 按水位动态偏移未移植(备案)。 */
-const DRAW_Y_OFFSET: Record<number, number> = {
+export const DRAW_Y_OFFSET: Record<number, number> = {
   // ★12(生命水晶)/31(暗影球) 曾误标 +4：原版 36px 动画组（TileDrawing.cs :5524-5529
   //   case 12/31/96/639/665/696）只设 addFrY、tileTop 恒 0（DrawBasicTile 锚 y*16+0）——
   //   +4 遇 ChunkCache 256 无外扩裁剪 → 球骑 chunk 边界时中线裂 4px 缝（2026-08-13 实测）

@@ -57,7 +57,10 @@ export const enum Msg {
                        //    5=DukeSharknadoBolt 6=DukeSharknadoTornado 7=MLDeathray 8=LunarOrb（v6：
                        //    Boss 锚定弹体，tag 打包锚参数——见 Game.netProjBroadcast 各分支注释）；
                        //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起 kind0/2/3 携带
-                       //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP）
+                       //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP；
+                       //    bit6(0x40)=pvp——v7 玩家 PvP 弹：pvpAllowed 房内 hostile 玩家的
+                       //    kind0(友方)/1/4 弹幕携带，与 bit7 独立（NPC 敌弹≠玩家 PvP 弹，
+                       //    前者无条件命中、后者须过 InOpposingTeam 门禁）
   ProjDespawn = 28,  // C→S→广播（v6）：{u16 count, [u32 netId]}——弹幕消亡上报，
                     //   各端对自己拥有的弹幕在消亡时批量上报，接收端即时移除傀儡
                     //   （替代纯 180t 超时清扫：消除幽灵弹窗口 + 消亡闪烁）

@@ -122,7 +122,7 @@ const MINION_SHOT_SFX: Record<number, { track: string; vol: number }> = {
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, penPercent?: number) => boolean;
 }
 
 /** Utils.Remap（AI_120 :42222 用；value 截断映射 [from1..to1] → [from2..to2]） */
@@ -892,12 +892,12 @@ export class MinionProj extends Entity {
             if (!canHit(game.world.store, this.cx, this.auraCy - 20, 0, 0, en.cx, en.cy, 0, 0)) continue;
             if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
             zapped = true;
-            // 命中 armorPenetrationPercent=1（100% 护穿，:12443——Enemy.hurt 无护穿参，
-            // 登记未实装）；tag 伤 ×SummonTagDamageMultiplier 0.5（ProjectileID.cs:31）
+            // 命中 armorPenetrationPercent=1（100% 护穿，:12443——penPercent 通道
+            // 2026-08-13 接通）;tag 伤 ×SummonTagDamageMultiplier 0.5（ProjectileID.cs:31）
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
-            en.hurt(res.dmg, 0, 0, game, 0, false, 1); // 哨兵射击=单发弹语义
+            en.hurt(res.dmg, 0, 0, game, 0, false, 1, 0, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443)
             applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           }
           // 原版是 tracked 循环声（每 tick 场内有敌即续播）——单次 wav 按命中节拍近似，

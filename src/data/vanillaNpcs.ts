@@ -188,7 +188,7 @@ export const NPC_RARITY: Record<number, number> = {"100": 1, "101": 1, "102": 1,
 /** rarity 查询(未登记=0;供 InfoAccsLayer 稀有生物行) */
 export function npcRarityOf(vanillaId: number | null): number {
   if (vanillaId == null) return 0;
-  return NPC_RARITY[String(vanillaId)] ?? 0;
+  return NPC_RARITY[vanillaId] ?? 0;
 }
 
 /** Boss 头像旋转(NPC.GetBossHeadRotation :7586-7608):68/262 → npc.rotation;

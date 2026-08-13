@@ -165,7 +165,7 @@ export function drawTileFlames(
   if (_drawCycle === 0) _frameSeed = randomNextSeed(_frameSeed);   // Main.cs:61156-61159
   _drawCycle = (_drawCycle + 1) % 5;
 
-  const flameImg = new Map<number, HTMLCanvasElement | null>();
+  const flameImg = new Map<number, HTMLImageElement | null>();
   const imgFor = (idx: number) => {
     let im = flameImg.get(idx);
     if (im === undefined) {

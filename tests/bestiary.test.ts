@@ -24,12 +24,13 @@ describe('图鉴数据层（Bestiary）', () => {
   beforeEach(() => { bestiaryGating.unlockAll = false; });
   afterEach(() => { bestiaryGating.unlockAll = true; });
 
-  it('免门默认开：零击杀条目 unlockState 恒最高档（参考书模式）', () => {
+  it('免门默认开：零击杀条目 unlockState 恒最高档;完成度口径走真实门控（免门副作用回归）', () => {
     bestiaryGating.unlockAll = true;
     const t = new BestiaryTracker();
     const e = bestiaryEntries().find((x) => x.kind === 'enemy')!;
-    expect(t.unlockState(e)).toBe(UnlockState.DropsWithRates);
-    expect(t.isUnlocked(e)).toBe(true);
+    expect(t.unlockState(e)).toBe(UnlockState.DropsWithRates);   // 显示内容免门
+    expect(t.isUnlocked(e)).toBe(false);                          // 完成度口径=真实门控
+    expect(t.completion().percent).toBeLessThan(0.01);            // 开局不再恒 100%
   });
 
   it('杀数四档：1 杀头像 / full/5 属性 / full/2 掉落表 / full 掉落率（默认 50）', () => {

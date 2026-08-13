@@ -3,21 +3,29 @@
 // 断言只读素材与导出的纯函数/静态表，不依赖 DOM（vitest node 环境，同
 // tests/liquid-shimmer-render.test.ts 的既有用法）。
 import { describe, it, expect } from 'vitest';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+// pngjs 无类型声明（同 tests/liquid-shimmer-render.test.ts 的既有用法）
+// @ts-ignore
+import { PNG } from 'pngjs';
 import { TORCH_FLAME_TILE, flameWobble, randomNextSeed } from '../src/render/TileFlames';
 import { liquidSlopeSource, liquidSlopeSheet } from '../src/render/VanillaLiquidRenderer';
+import { Renderer } from '../src/render/Renderer';
 
 const VANILLA = join(__dirname, '..', 'public', 'sprites', 'vanilla');
 const vanillaFile = (f: string) => join(VANILLA, f);
+/** PNG IHDR 宽高（偏移 16/20） */
+const pngSize = (f: string): [number, number] => {
+  const b = readFileSync(vanillaFile(f));
+  return [b.readUInt32BE(16), b.readUInt32BE(20)];
+};
 /** GLOW_{id}.png 全量清单（379 张，GlowMaskID 空间） */
 const glowIds = readdirSync(VANILLA)
   .filter((f) => /^Glow_\d+\.png$/.test(f))
   .map((f) => Number(f.slice(5, -4)));
 
-// Renderer.ts 是大模块，测试只取静态表 → 用 require 形式避免拉起整个渲染器？
-// 不：npcGlowEntries 是纯静态遍历，import 副作用仅模块级常量，node 环境安全。
-import { Renderer } from '../src/render/Renderer';
+// Renderer.ts 是大模块，但 npcGlowEntries 是纯静态遍历，import 副作用仅模块级
+// 常量，node 环境安全（不触碰 canvas/DOM）。
 
 describe('① Glow 发光覆层表（Main.cs DrawNPC 尾段硬编码 GlowMask 绘制）', () => {
   it('表内每个贴图都真实存在于 public/sprites/vanilla（懒加载 ensureVImage 的前提）', () => {
@@ -91,25 +99,10 @@ describe('② 火苗族 tile 表（Main.tileFlame Main.cs:9210-9222 + TileDrawin
   });
 
   it('Flame_0 与 Torch_0 同布局（132×528 平行表）——源矩形直取本体帧的前提', () => {
-    const size = (f: string) => {
-      const b = (readdirSync(VANILLA), f);
-      void b;
-      return f;
-    };
-    void size;
-    // 直接读 PNG 头（IHDR 宽高，偏移 16/20）
-    const { readFileSync } = require('node:fs');
-    const wh = (f: string): [number, number] => {
-      const b = readFileSync(vanillaFile(f));
-      return [b.readUInt32BE(16), b.readUInt32BE(20)];
-    };
-    expect(wh('Flame_0.png')).toEqual(wh('Tiles_4.png'));
+    expect(pngSize('Flame_0.png')).toEqual(pngSize('Tiles_4.png'));
   });
 
   it('未点燃火把列（frameX 66/88/110）在火苗表里是全透明——无需额外门（原版同机制）', () => {
-    // @ts-ignore pngjs 无类型声明（同 liquid-shimmer-render.test.ts 用法）
-    const { PNG } = require('pngjs');
-    const { readFileSync } = require('node:fs');
     const tex = PNG.sync.read(readFileSync(vanillaFile('Flame_0.png')));
     for (const fx of [66, 88, 110]) {
       let opaque = 0;
@@ -154,12 +147,10 @@ describe('③ LiquidSlope 斜面贴合（TileDrawing.cs:4526-4553 DrawPartialLiq
   });
 
   it('斜面表 15 张全在盘且为 72×16（4 列×18px 间距的斜面片段网格）', () => {
-    const { readFileSync } = require('node:fs');
     for (let n = 0; n < 15; n++) {
       const f = `LiquidSlope_${n}.png`;
       expect(existsSync(vanillaFile(f)), `${f} 缺素材`).toBe(true);
-      const b = readFileSync(vanillaFile(f));
-      expect([b.readUInt32BE(16), b.readUInt32BE(20)], f).toEqual([72, 16]);
+      expect(pngSize(f), f).toEqual([72, 16]);
     }
   });
 

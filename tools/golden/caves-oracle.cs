@@ -5375,19 +5375,11 @@ void DgPlatforms()
     }
 }
 // —— Prefix(-1) 掷骰（Item.cs:486-560 + GetRollablePrefixes:1083 + PrefixLegacy.Prefixes）——
-static readonly int[] DgPreSwords = { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,36,37,38,53,54,55,39,40,56,41,57,42,43,44,45,46,47,48,49,50,51,59,60,61,81 };
-static readonly int[] DgPreSpears = { 36,37,38,53,54,55,39,40,56,41,57,59,60,61 };
-static readonly int[] DgPreGuns = { 16,17,18,19,20,21,22,23,24,25,58,36,37,38,53,54,55,39,40,56,41,57,42,44,45,46,47,48,49,50,51,59,60,61,82 };
-static readonly int[] DgPreMagic = { 26,27,28,29,30,31,32,33,34,35,52,36,37,38,53,54,55,39,40,56,41,57,42,43,44,45,46,47,48,49,50,51,59,60,61,83 };
-static readonly int[] DgPreSummon = { 85,86,87,88,89,90,91,92,93,94,95,96,97,55,38,54,53,57,40,56,41,39 };
-static readonly int[] DgPreBoom = { 36,37,38,53,54,55,39,40,56,41,57,59,60,61 };
-static readonly int[] DgPreAcc = { 62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80 };
-static readonly HashSet<int> DgPreReduced = new HashSet<int> { 7,8,9,10,11,22,23,24,29,30,31,39,40,56,41,47,48,49 };
 int[] DgPrefixClass(int item) => item switch
 {
-    155 => DgPreSwords, 156 => DgPreAcc, 157 => DgPreMagic, 163 => DgPreSpears, 113 => DgPreMagic,
-    3317 => DgPreBoom, 164 => DgPreGuns, 1156 => DgPreGuns, 1571 => DgPreBoom, 1569 => DgPreBoom,
-    1260 => DgPreMagic, 1572 => DgPreSummon, 4607 => DgPreSummon, 5465 => DgPreAcc, _ => null
+    155 => DgPre.Swords, 156 => DgPre.Acc, 157 => DgPre.Magic, 163 => DgPre.Spears, 113 => DgPre.Magic,
+    3317 => DgPre.Boom, 164 => DgPre.Guns, 1156 => DgPre.Guns, 1571 => DgPre.Boom, 1569 => DgPre.Boom,
+    1260 => DgPre.Magic, 1572 => DgPre.Summon, 4607 => DgPre.Summon, 5465 => DgPre.Acc, _ => null
 };
 void DgPrefixRolls(int item)
 {
@@ -5396,7 +5388,7 @@ void DgPrefixRolls(int item)
     if ((int)r.Next(4) != 0)
     {
         int rolled = arr[(int)r.Next(arr.Length)];
-        if (DgPreReduced.Contains(rolled)) r.Next(3);
+        if (DgPre.Reduced.Contains(rolled)) r.Next(3);
     }
 }
 bool dgShadowKey = false, dgRamRune = false;                   // GenVars.generatedShadowKey/RamRune
@@ -6864,4 +6856,17 @@ sealed class DPlat
 {
     public int X, Y;
     public bool Hall;
+}
+
+// PrefixLegacy.Prefixes 前缀池（PrefixLegacy.cs:9-64）+ PrefixID.Sets.ReducedNaturalChance（:9）
+static class DgPre
+{
+    public static readonly int[] Swords = { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,36,37,38,53,54,55,39,40,56,41,57,42,43,44,45,46,47,48,49,50,51,59,60,61,81 };
+    public static readonly int[] Spears = { 36,37,38,53,54,55,39,40,56,41,57,59,60,61 };
+    public static readonly int[] Guns = { 16,17,18,19,20,21,22,23,24,25,58,36,37,38,53,54,55,39,40,56,41,57,42,44,45,46,47,48,49,50,51,59,60,61,82 };
+    public static readonly int[] Magic = { 26,27,28,29,30,31,32,33,34,35,52,36,37,38,53,54,55,39,40,56,41,57,42,43,44,45,46,47,48,49,50,51,59,60,61,83 };
+    public static readonly int[] Summon = { 85,86,87,88,89,90,91,92,93,94,95,96,97,55,38,54,53,57,40,56,41,39 };
+    public static readonly int[] Boom = { 36,37,38,53,54,55,39,40,56,41,57,59,60,61 };
+    public static readonly int[] Acc = { 62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80 };
+    public static readonly HashSet<int> Reduced = new HashSet<int> { 7,8,9,10,11,22,23,24,29,30,31,39,40,56,41,47,48,49 };
 }

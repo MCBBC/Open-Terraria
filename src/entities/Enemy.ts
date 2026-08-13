@@ -5737,7 +5737,7 @@ export class Enemy extends Entity {
   }
 
   /** 受击。返回是否死亡 */
-  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0, fromPlayer = false): boolean {
+  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0, fromPlayer = false, penPercent = 0): boolean {
     // pierce 语义（Projectile.cs:11903-11907/13152-13155 Damage_PVE）：
     //   0   = 近战/荆棘等非弹幕 → 命中设免疫 10t（原版 immune[owner] 默认档）；
     //   1   = 单发弹（maxPenetrate==1，flag3）→ **无视免疫且命中后不设帧**
@@ -5792,7 +5792,9 @@ export class Enemy extends Entity {
     // 非负防御(min 内侧钳 0),不与负防御交互
     // buff 侧无视防(NPC.cs:81919-81924):BrokenArmor +20 / BetsysCurse +40 armorPenetration
     const buffPen = (this.brokenArmorT > 0 ? 20 : 0) + (this.betsysCurseT > 0 ? 40 : 0);
-    const effDef = effDef0 - Math.min(armorPen + buffPen, Math.max(0, effDef0));
+    // armorPenetrationPercent（:12443 闪电光环 688/690=1:按比例无视防御——在定点穿甲前扣）
+    const pctDef = Math.max(0, effDef0) * Math.min(1, Math.max(0, penPercent));
+    const effDef = effDef0 - pctDef - Math.min(armorPen + buffPen, Math.max(0, effDef0) - pctDef);
     dmg = Math.max(1, Math.round(dmg - effDef * 0.5 + pen));
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）

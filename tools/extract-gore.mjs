@@ -269,43 +269,164 @@ function resolveChain(extraCase) {
   return { types: include, exclude, life, gates, ai, typeCtxId };
 }
 
-function recordLocalAssign(name, valExpr, line, typeCtxId) {
+function recordLocalAssign(name, valExpr, line, typeCtxId, loopRange) {
   if (!locals.has(name)) locals.set(name, []);
-  locals.get(name).push({ line, valExpr, typeCtxId });
+  locals.get(name).push({ line, valExpr, typeCtxId, loopRange });
 }
 
-/** 局部变量按 type 还原 → {kind:id|range|ids|perType} | null */
-function resolveLocal(e, callLine, typeCtxId, include) {
-  const hist = (locals.get(e.name) ?? []).filter((h) => h.line < callLine && h.typeCtxId === typeCtxId);
-  if (!hist.length) return null;
-  const shift = (v) => {
-    if (v == null) return null;
-    if (v.kind === 'id') return { kind: 'id', id: v.id + e.off };
-    if (v.kind === 'range') return { kind: 'range', min: v.min + e.off, max: v.max + e.off };
-    if (v.kind === 'ids') return { kind: 'ids', ids: v.ids.map((i) => i + e.off) };
-    return null;
-  };
-  if (include) {
-    const perType = new Map();
-    for (const t of include) {
-      let v = null;
-      for (const h of hist) {
-        const hv = evalIdExpr(h.valExpr);
-        if (!hv || hv.kind === 'local' || hv.kind === undefined) { v = null; break; }
-        v = shift(hv);
-      }
-      if (!v) return null;
-      perType.set(t, JSON.stringify(v));
+// ---- 简易算术求值（局部变量/`type` 代数 id 还原用）----
+/** 递归下降：数 / 一元± / * / + -；括号。`type==N` 归一后为 0/1。返回 number | null */
+function evalArith(expr) {
+  const toks = [];
+  let s = String(expr).trim();
+  let m;
+  while (s.length) {
+    if (/^\s/.test(s)) { s = s.slice(1); continue; }
+    if ((m = s.match(/^(-?\d+\.?\d*)/))) { toks.push({ t: 'n', v: +m[1] }); s = s.slice(m[1].length); continue; }
+    if ((m = s.match(/^([-+*()/<>?:])/))) {
+      const op = m[1];
+      // 双字符 <= >= == != 跳过（归一阶段已替换成数字）
+      if ((op === '<' || op === '>') && '=<>=!'.includes(s[1] ?? '')) return null;
+      if ((op === ':' || op === '?') && toks.length) { /* 三元（cond 已归一为数）：手工处理 */ }
+      toks.push({ t: op }); s = s.slice(1); continue;
     }
-    const uniq = [...new Set(perType.values())];
-    if (uniq.length === 1) return JSON.parse(uniq[0]);
-    const per = new Map();
-    for (const [t, raw] of perType) per.set(t, JSON.parse(raw));
-    return { kind: 'perType', per };
+    if ((m = s.match(/^==/))) return null;
+    return null;
   }
-  const hv = evalIdExpr(hist[hist.length - 1].valExpr);
-  if (!hv || hv.kind === 'local') return null;
-  return shift(hv);
+  let pos = 0;
+  const peek = () => toks[pos];
+  const eat = (t) => { if (toks[pos] && toks[pos].t === t) { pos++; return true; } return false; };
+  function ternary() {
+    const c = additive();
+    if (c == null) return null;
+    if (eat('?')) {
+      const a = ternary();
+      if (a == null || !eat(':')) return null;
+      const b = ternary();
+      if (b == null) return null;
+      return c !== 0 ? a : b;
+    }
+    return c;
+  }
+  function additive() {
+    let v = multiplicative();
+    while (v != null && (peek() && (peek().t === '+' || peek().t === '-'))) {
+      const op = peek().t; pos++;
+      const r = multiplicative();
+      if (r == null) return null;
+      v = op === '+' ? v + r : v - r;
+    }
+    return v;
+  }
+  function multiplicative() {
+    let v = unary();
+    while (v != null && peek() && peek().t === '*') {
+      pos++;
+      const r = unary();
+      if (r == null) return null;
+      v = v * r;
+    }
+    return v;
+  }
+  function unary() {
+    if (eat('-')) { const v = unary(); return v == null ? null : -v; }
+    if (eat('+')) return unary();
+    if (eat('(')) { const v = ternary(); return eat(')') ? v : null; }
+    const t = peek();
+    if (t && t.t === 'n') { pos++; return t.v; }
+    return null;
+  }
+  const out = ternary();
+  return pos === toks.length ? out : null;
+}
+
+/** `type` → 具体值代入 + `X == Y` 归一为 0/1（仅支持全数字比较） */
+function normalizeForArith(expr, t) {
+  let s = String(expr).replace(/\btype\b/g, String(t));
+  s = s.replace(/\(\s*(\d+)\s*==\s*(\d+)\s*\)/g, (_, a, b2) => (a === b2 ? '(1)' : '(0)'));
+  s = s.replace(/(\d+)\s*==\s*(\d+)/g, (_, a, b2) => (a === b2 ? '1' : '0'));
+  s = s.replace(/\(\s*\)/g, '');
+  return s;
+}
+
+/** 单 type 值下的 id 求值 → {kind:id|range|ids} | null */
+function evalIdForType(expr, t, callLine, typeCtxId) {
+  const e = evalIdExpr(expr);
+  if (e) {
+    if (e.kind === 'id' || e.kind === 'range' || e.kind === 'ids') return e;
+    if (e.kind === 'local') {
+      const base = localValueForType(e.name, t, callLine, typeCtxId);
+      if (base == null) return null;
+      return applyOff(base, e.off);
+    }
+    return null;
+  }
+  // `X + local` / `local + rand(N)` / `local ± K` 反向形态
+  let m;
+  if ((m = expr.match(/^(-?\d+)\s*\+\s*([A-Za-z_]\w*)$/))) {
+    const base = localValueForType(m[2], t, callLine, typeCtxId);
+    return base == null ? null : applyOff(base, +m[1]);
+  }
+  if ((m = expr.match(/^([A-Za-z_]\w*)\s*\+\s*Main\.rand\.Next\(\s*(\d+)\s*\)$/))) {
+    const base = localValueForType(m[1], t, callLine, typeCtxId);
+    if (base == null || base.kind !== 'id') return null;
+    return { kind: 'range', min: base.id, max: base.id + +m[2] - 1 };
+  }
+  if ((m = expr.match(/^(-?\d+)\s*\+\s*\(\(Main\.rand\.Next\(\d+\)\s*==\s*0\)\s*\?\s*(-?\d+)\s*:\s*(-?\d+)\)$/))) {
+    return { kind: 'ids', ids: [+m[1] + +m[2], +m[1] + +m[3]] };
+  }
+  // 含 type 的代数式：代入后算术求值
+  if (/\btype\b/.test(expr)) {
+    const v = evalArith(normalizeForArith(expr, t));
+    if (v != null) return { kind: 'id', id: v };
+  }
+  return null;
+}
+
+/** 局部变量在 type=t 下的值（赋值流末值；声明含 type/循环变量则代数求值） */
+function localValueForType(name, t, callLine, typeCtxId) {
+  const hist = (locals.get(name) ?? []).filter((h) => h.line < callLine && (h.typeCtxId === typeCtxId || h.typeCtxId == null));
+  if (!hist.length) return null;
+  const last = hist[hist.length - 1];
+  if (last.loopRange) return { kind: 'range', min: last.loopRange[0], max: last.loopRange[1] };
+  const e = evalIdExpr(last.valExpr);
+  if (e && e.kind !== 'local') return e;
+  if (/\btype\b/.test(last.valExpr)) {
+    const v = evalArith(normalizeForArith(last.valExpr, t));
+    if (v != null) return { kind: 'id', id: v };
+  }
+  if (/^([A-Za-z_]\w*)$/.test(last.valExpr.trim())) {
+    return localValueForType(last.valExpr.trim(), t, callLine, typeCtxId);
+  }
+  // 算术组合（如 `11 + num744`，num744 为循环变量）
+  let m;
+  if ((m = last.valExpr.match(/^(-?\d+)\s*\+\s*([A-Za-z_]\w*)$/))) {
+    const base = localValueForType(m[2], t, callLine, typeCtxId);
+    return base == null ? null : applyOff(base, +m[1]);
+  }
+  return null;
+}
+
+function applyOff(v, off) {
+  if (v.kind === 'id') return { kind: 'id', id: v.id + off };
+  if (v.kind === 'range') return { kind: 'range', min: v.min + off, max: v.max + off };
+  if (v.kind === 'ids') return { kind: 'ids', ids: v.ids.map((x) => x + off) };
+  return null;
+}
+
+/** 逐 type 求值 → {fields} 统一 / {perType:Map} 分歧 / null 不可求值 */
+function resolveIdPerType(expr, target, callLine, typeCtxId) {
+  const per = new Map();
+  for (const t of target) {
+    const v = evalIdForType(expr, t, callLine, typeCtxId);
+    if (!v) return null;
+    per.set(t, v);
+  }
+  const uniq = [...new Set([...per.values()].map((v) => JSON.stringify(v)))];
+  if (uniq.length === 1) return { fields: idFields(JSON.parse(uniq[0])) };
+  const perMap = new Map();
+  for (const [t, v] of per) perMap.set(t, idFields(v));
+  return { perType: perMap };
 }
 
 function idFields(e) {
@@ -387,6 +508,13 @@ for (const { text, line: lineNo } of logical) {
       i += m[0].length;
     } else if ((m = rest.match(/^(for|foreach|while|do|try)\b/))) {
       guard = LOOP_GUARD;
+      // for 头部整数循环变量 → 记区间（id 表达式引用循环变量时还原成区间）
+      const fh = rest.match(/^for\s*\(\s*(?:int|float|double|var)\s+([A-Za-z_]\w*)\s*=\s*(-?\d+)\s*;\s*\1\s*(<=|<)\s*(\d+)\s*;/);
+      if (fh) {
+        const lo = +fh[2], hi = +fh[4];
+        const rg = [lo, fh[3] === '<=' ? hi : hi - 1];
+        recordLocalAssign(fh[1], `${rg[0]}`, lineNo, resolveChain(null).typeCtxId, rg);
+      }
       i += m[0].length;
     } else {
       handled = false;
@@ -455,15 +583,15 @@ function handleGoreCall(callee, args, lineNo) {
   const perfect = callee === 'Gore.NewGorePerfect' ? { perfect: true } : {};
   const base = { ...velFields, ...scaleFields, ...posFields, ...perfect };
 
-  let e = evalIdExpr(a.Type);
+  let e = null;
   let perType = null;
-  if (e && e.kind === 'local') {
-    const res = resolveLocal(e, lineNo, r.typeCtxId, r.types);
-    if (res?.kind === 'perType') perType = res.per;
-    else if (res) e = res;
-    else e = null;
-  } else if (e && e.kind !== 'id' && e.kind !== 'range' && e.kind !== 'ids') {
-    e = null;
+  let fields = null;
+
+  if (r.types) {
+    const target = [...r.types].filter((t) => !r.exclude.has(t));
+    const res = resolveIdPerType(String(a.Type), target, lineNo, r.typeCtxId);
+    if (res?.fields) fields = res.fields;
+    else if (res?.perType) perType = res.perType;
   }
 
   if (!r.types) {
@@ -474,16 +602,12 @@ function handleGoreCall(callee, args, lineNo) {
 
   if (perType) {
     for (const t of target) {
-      const v = perType.get(t);
-      const f = Array.isArray(v) ? { ids: v, n: v.length }
-        : typeof v === 'object' ? { idMin: v.min, idMax: v.max, n: v.max - v.min + 1 }
-          : { id: v };
-      emitEntry(t, { ...base, ...f }, lineNo, r.gates, r.ai);
+      emitEntry(t, { ...base, ...perType.get(t) }, lineNo, r.gates, r.ai);
     }
     return;
   }
-  if (e && (e.kind === 'id' || e.kind === 'range' || e.kind === 'ids')) {
-    for (const t of target) emitEntry(t, { ...base, ...idFields(e) }, lineNo, r.gates, r.ai);
+  if (fields) {
+    for (const t of target) emitEntry(t, { ...base, ...fields }, lineNo, r.gates, r.ai);
     return;
   }
   for (const t of target) emitEntry(t, { ...base, expr: String(a.Type) }, lineNo, r.gates, r.ai);
@@ -491,6 +615,21 @@ function handleGoreCall(callee, args, lineNo) {
     line: lineNo, expr: String(a.Type),
     types: target.length > 6 ? `${target[0]}..${target[target.length - 1]}(${target.length})` : target.join('|'),
   });
+}
+
+// ============ 手工补丁：守卫链为排除式(`type != N` + return)的收尾支 ============
+// catch-all else 尾支（NPC.cs:90859-90867）：`if (type != 156) return;` → 仅 Red Devil
+// 走到 184/185/185。排除式守卫无法从链上还原出正集（需要整链 else 语义），按源行手工钉死。
+const MANUAL_PATCHES = {
+  156: [
+    { id: 184, line: 90865 },
+    { id: 185, line: 90866 },
+    { id: 185, line: 90867 },
+  ],
+};
+for (const [npcId, list] of Object.entries(MANUAL_PATCHES)) {
+  if (!entries.has(+npcId)) entries.set(+npcId, []);
+  entries.get(+npcId).push(...list);
 }
 
 // ============ 贴图尺寸表（出现过的 gore id） ============

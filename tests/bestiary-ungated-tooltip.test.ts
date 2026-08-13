@@ -14,15 +14,16 @@ beforeAll(() => {
 });
 
 describe('图鉴免门（参考书模式）', () => {
-  it('零击杀/零目击/零对话条目：unlockState 恒最高档（掉落+掉落率全可见）', () => {
+  it('零击杀/零目击/零对话条目：unlockState 恒最高档（掉落+掉落率全可见）;完成度走真实门控', () => {
     const t = new BestiaryTracker();
     const enemy = bestiaryEntries().find((e) => e.kind === 'enemy')!;
     const critter = bestiaryEntries().find((e) => e.kind === 'critter')!;
     const town = bestiaryEntries().find((e) => e.kind === 'town')!;
     for (const e of [enemy, critter, town]) {
-      expect(t.unlockState(e)).toBe(UnlockState.DropsWithRates);
-      expect(t.isUnlocked(e)).toBe(true);
+      expect(t.unlockState(e)).toBe(UnlockState.DropsWithRates);  // 显示免门
+      expect(t.isUnlocked(e)).toBe(false);                        // 完成度=真实
     }
+    expect(t.completion().percent).toBeLessThan(0.01);
   });
 });
 

@@ -1753,8 +1753,7 @@ export class UI {
       // 时点击小眼睛 → TogglePet/ToggleLight 显隐翻转——槽 0/1 专属）
       if (k === 0 || k === 1) {
         const eye = el('button', 'sw-btn sw-peteye');
-        eye.textContent = '👁';
-        eye.title = Lang.text('LegacyInterface.41');   // 可见性
+        eye.textContent = '👁';   // 原版 InventoryTick 眼睛图标（无文字标签）
         eye.style.cssText = 'position:absolute; right:-12px; top:-10px; width:24px; height:20px;'
           + 'margin:0; padding:0; font-size:11px; line-height:1; z-index:5;';
         eye.addEventListener('mousedown', (e) => {

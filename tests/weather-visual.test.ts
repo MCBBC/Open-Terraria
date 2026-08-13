@@ -206,6 +206,8 @@ class FakeSrc {
   stop = vi.fn();
 }
 class FakeCtx {
+  /** 记录每次 new（Sfx.ensure 内部 new AC()）——测试从末位取实例 */
+  static instances: FakeCtx[] = [];
   currentTime = 0;
   state = 'running';
   destination = {};
@@ -213,14 +215,14 @@ class FakeCtx {
   createGain = vi.fn(() => new FakeGain());
   createBufferSource = vi.fn(() => new FakeSrc());
   decodeAudioData = vi.fn(async () => ({ fake: 'buffer' }) as unknown as AudioBuffer);
+  constructor() { FakeCtx.instances.push(this); }
 }
 
 describe('Sfx.playLoop 循环轨 API', () => {
-  let fake: FakeCtx;
   const windowBackup = (globalThis as { window?: unknown }).window;
   const fetchBackup = (globalThis as { fetch?: unknown }).fetch;
   beforeEach(() => {
-    fake = new FakeCtx();
+    FakeCtx.instances = [];
     (globalThis as { window?: unknown }).window = { AudioContext: FakeCtx as unknown as typeof AudioContext };
     (globalThis as { fetch?: unknown }).fetch = vi.fn(async () =>
       ({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) }) as unknown as Response);
@@ -244,6 +246,7 @@ describe('Sfx.playLoop 循环轨 API', () => {
     // 等 fetch → arrayBuffer → decodeAudioData 微任务链
     await new Promise((r) => setTimeout(r, 20));
     expect(h!.playing).toBe(true);
+    const fake = FakeCtx.instances[FakeCtx.instances.length - 1];
     const gain = fake.createGain.mock.results[0].value as FakeGain;
     const src = fake.createBufferSource.mock.results[0].value as FakeSrc;
     expect(src.loop).toBe(true);
