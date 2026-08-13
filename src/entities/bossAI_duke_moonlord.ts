@@ -24,7 +24,7 @@ import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
-import { projSprite } from './Arrow';
+import { projSprite, projFrameCount } from './Arrow';
 import { BuffType } from '../stats/Buffs';
 
 // ---------------------------------------------------------------------------
@@ -956,7 +956,12 @@ export class MoonLeechProj extends Entity {
     ctx.translate(this.cx, this.cy);
     ctx.rotate(ang);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.h);
+    // 多帧行切片（Main.projFrames[456]=4，Main.cs:8490；aiStyle 85 不推帧 → 恒帧 0，
+    // 帧格 22×24）。曾整条 22×96 压进 16×16 判定盒 = 胶片条（G11）
+    const frames = projFrameCount(456);
+    const fh = img.naturalHeight / frames;
+    ctx.drawImage(img, 0, 0, img.naturalWidth, fh, -img.naturalWidth / 2, -fh / 2,
+      img.naturalWidth, fh);
     ctx.restore();
   }
 }

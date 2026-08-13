@@ -9,7 +9,8 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
-import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, dollHairLayer, hairFrameTinted, headArmorImage, FRAME_W, FRAME_H } from '../player/PaperDoll';
+import { hairDyeColor } from '../player/HairDyeColor';
 import type { Inventory } from '../items/Inventory';
 import { options } from '../core/Options';
 import { VanillaResourceBars } from './ResourceBars';
@@ -49,7 +50,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { renderEnv } from './VanillaTiler';
-import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS } from './TileFlames';
+import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -116,7 +117,7 @@ import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
-import { mountFallbackColor, mountLights } from '../entities/Mounts';
+import { mountFallbackColor, mountLights, fishronWashFactor } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
@@ -134,12 +135,122 @@ import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
 import { wingDrawOf, wingDrawFrame, wingAnchorForRow, stealthFactors } from '../data/vanillaWingVisuals';
-import { dyeEmulationOf, applyDyeEmulation } from '../data/vanillaDyes';
-import type { DyeEmulation } from '../data/vanillaDyes';
+import { dyeApplyOf, applyDyePass, type DyeApply } from '../data/vanillaDyes';
+import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Uniforms } from '../fx/SM2Effect';
 import { VanillaDust } from '../fx/VanillaDust';
+import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
+import { leashedBubbleVisible } from '../entities/LeashedCritter';
+import { applyHeldProjPointing, heldProjFrameBegin, noteHeldProjEntity } from './heldProj';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
+
+// ---- 拴绳风筝绘制（Main.DrawKite :36614-37069）工具 ----
+
+/** Utils.Remap（Utils.cs:815-821，钳位段） */
+function remapClamped(x: number, iMin: number, iMax: number, oMin: number, oMax: number): number {
+  const t = Math.max(0, Math.min(1, (x - iMin) / (iMax - iMin)));
+  return oMin + (oMax - oMin) * t;
+}
+
+/** Main.hslToRgb（Main.cs:4540 起）→ [r,g,b] 0-1 */
+function hslRgb(hIn: number, s: number, l: number): [number, number, number] {
+  const h = ((hIn % 1) + 1) % 1;
+  if (s === 0) return [l, l, l];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const f = (t: number) => {
+    let tt = t;
+    if (tt < 0) tt += 1;
+    if (tt > 1) tt -= 1;
+    if (tt < 1 / 6) return p + (q - p) * 6 * tt;
+    if (tt < 1 / 2) return q;
+    if (tt < 2 / 3) return p + (q - p) * (2 / 3 - tt) * 6;
+    return p;
+  };
+  return [f(h + 1 / 3), f(h), f(h - 1 / 3)];
+}
+
+function mixRgb(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+/** DrawKite 逐型绳索参数（Main.cs:36614-36821 逐 case；缺省档 = 766-770 五色风筝） */
+interface KiteRopeParams {
+  rope: number;        // TextureAssets.Extra[id]（绳尾贴图）
+  segCols: number;     // num  绳尾贴图列数
+  startCol: number;    // num12 起始列（回卷锚点）
+  rotOffset: number;   // num2 = ±π/2（spriteDirection 定号）
+  tailSegs: number;    // num3 oldPos 采样档数
+  oldStep: number;     // num4 oldPos 采样步长
+  segLen: number;      // num5 段长上限
+  rotSway: number;     // num6 本体摆角偏置
+  tailDx: number;      // num7 尾根 X 偏移
+  tailDy: number;      // num8 尾根 Y 偏移
+  swapAt: number;      // num9 换段长档位（-1 不换）
+  swapLen: number;     // num10 换后段长
+  swayLen: number;     // num11 摆幅
+  ropeLines: number;   // num13 尾条数
+  dx2: number;         // num14
+  dy2: number;         // num15
+  lineToo: boolean;    // flag  尾下垫 FishingLine
+  rewind: boolean;     // flag2 回卷列 -1
+  droopRot: number;    // num16 下垂角
+}
+
+function KITE_ROPE_PARAMS(type: number, spriteDirection: number): KiteRopeParams {
+  const p: KiteRopeParams = {
+    rope: 103, segCols: 15, startCol: 0, rotOffset: 0, tailSegs: 10, oldStep: 5,
+    segLen: 10, rotSway: 0, tailDx: -14, tailDy: -2, swapAt: -1, swapLen: -1,
+    swayLen: 8, ropeLines: 1, dx2: 0, dy2: 0, lineToo: true, rewind: false, droopRot: 0,
+  };
+  const flip = (v: number) => (spriteDirection === 1 ? v : -v);   // ±π/2 与 ±π/n 定号
+  switch (type) {
+    case 771:   // :36643
+      Object.assign(p, { rope: 104, segCols: 12, startCol: 12, rotOffset: flip(Math.PI / 2), tailSegs: 12, segLen: 22, rotSway: flip(Math.PI / 8), tailDx: -8, tailDy: -6, swapAt: 10, swapLen: 8, swayLen: 12, droopRot: Math.PI / 16 });
+      break;
+    case 822:   // :36658
+      Object.assign(p, { rope: 132, segCols: 7, startCol: 7, rotOffset: flip(Math.PI / 2), tailSegs: 7, segLen: 22, rotSway: flip(Math.PI / 12), tailDx: -20, tailDy: -6, swayLen: 12, droopRot: Math.PI / 16 });
+      break;
+    case 850:   // :36671
+      Object.assign(p, { rope: 147, segCols: 8, startCol: 8, rotOffset: flip(Math.PI / 2), tailSegs: 8, segLen: 22, rotSway: flip(Math.PI / 12), tailDx: -20, tailDy: -38, swayLen: 12, dx2: 6, dy2: 2, lineToo: false, droopRot: Math.PI * 5 / 32 });
+      break;
+    case 823:   // :36687（846 同参数换 146）
+    case 846:
+      Object.assign(p, { rope: type === 846 ? 146 : 133, segCols: 6, startCol: 6, rotOffset: flip(Math.PI / 2), tailSegs: 6, segLen: 40, rotSway: flip(Math.PI / 12), tailDx: -16, tailDy: -10, swapLen: -1, swayLen: 30, droopRot: Math.PI * 3 / 16 });
+      break;
+    case 827:   // :36705（844 → 144）
+    case 844:
+      Object.assign(p, { rope: type === 844 ? 144 : 135, segCols: 4, startCol: 3, rotOffset: flip(Math.PI / 2), tailSegs: 16, oldStep: 4, segLen: 10, rotSway: flip(Math.PI / 12), tailDy: -4, swapLen: -1, rewind: true, droopRot: Math.PI / 32 });
+      break;
+    case 828:   // :36723（829 → 137）
+    case 829:
+      Object.assign(p, { rope: type === 829 ? 137 : 136, segCols: 2, startCol: 1, rotOffset: flip(Math.PI / 2), tailSegs: 6, segLen: 10, rotSway: flip(Math.PI / 12), swayLen: 10, tailDy: -4, ropeLines: 3, lineToo: false, rewind: true, droopRot: Math.PI * 3 / 16 });
+      break;
+    case 852:   // :36743
+      Object.assign(p, { rope: 148, segCols: 2, startCol: 1, rotOffset: flip(Math.PI / 2), tailSegs: 6, segLen: 10, rotSway: flip(Math.PI / 12), swayLen: 10, tailDy: -4, ropeLines: 4, lineToo: false, rewind: true, droopRot: Math.PI * 5 / 16 });
+      break;
+    case 830:   // :36758（838 → 139）
+    case 838:
+      Object.assign(p, { rope: type === 838 ? 139 : 138, segCols: 3, startCol: 3, rotOffset: flip(Math.PI / 2), tailSegs: 3, segLen: 60, rotSway: flip(Math.PI / 12), swapLen: 40, swapAt: 3, swayLen: 50, tailDy: -20, dx2: -10, droopRot: Math.PI / 4 });
+      break;
+    case 843:   // :36778
+      Object.assign(p, { rope: 140, segCols: 2, startCol: 2, rotOffset: flip(Math.PI / 2), tailSegs: 2, segLen: 30, rotSway: flip(Math.PI / 12), swayLen: 20, tailDy: -16, dx2: -10, droopRot: Math.PI / 4 });
+      break;
+    case 845:   // :36791
+      Object.assign(p, { rope: 145, segCols: 3, startCol: 3, rotOffset: flip(Math.PI / 2), tailSegs: 3, segLen: 42, rotSway: flip(Math.PI / 12), swapLen: 50, swapAt: 2, swayLen: 30, tailDy: -8, dx2: -10 });
+      break;
+    case 824: case 826: case 839: case 840: case 853:   // :36805（num13=0，无尾条）
+      p.ropeLines = 0;
+      break;
+    case 766: case 767: case 768: case 769: case 770:   // :36814
+      p.startCol = (type - 766) * 3 + 3;
+      break;
+    default:
+      break;
+  }
+  return p;
+}
 
 const PIXEL_ART_TILE = TILE_BY_KEY['pixel_block'] ?? -1; // 自研像素方块（F2 图片导入，RGB 在 frameX/Y）
 
@@ -1198,11 +1309,19 @@ export class Renderer {
 
     // 3.8 拴绳实体（LeashedEntity.DrawEntities，Main.cs:22163——DrawNPCs 起手调用；
     //     各实体以 behindTiles:true 入 NPC 层 = 方块后实体前，与 2b'/实体段之间同档）。
-    //     锚桩本体（tile 723/724 的木桩贴图）由 VanillaTiler 画，此处只画游走本体
-    if (leashed) this.drawLeashedEntities(leashed, world);
+    //     锚桩本体（tile 723/724 的木桩贴图）由 VanillaTiler 画，此处只画游走本体。
+    //     门 = 激活 section（manager.isSectionActive）+ 屏幕矩形外扩 512（:477-478）
+    if (leashed) {
+      this.drawLeashedEntities(leashed, world,
+        cam.x - viewW / 2 / z - 512, cam.y - viewH / 2 / z - 512,
+        cam.x + viewW / 2 / z + 512, cam.y + viewH / 2 / z + 512);
+    }
 
     // 4. 实体（按 y 排序；behindTiles 族已在 2b' 画过，此处只补血条——
     //    原版 DrawNPCHealthBars 独立 pass 恒在最上层，钻地中血条仍可见）
+    // heldProj 账本:帧首清账,实体自带 draw 分支登记活体投射物中心;
+    // 同帧 drawPlayer 消费(实体先画玩家后画 → 无跨帧陈旧)。见 heldProj.ts 头注
+    heldProjFrameBegin();
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
@@ -1214,6 +1333,7 @@ export class Renderer {
       else if (e instanceof Critter) this.drawCritter(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
         // 投射物等自带 draw 的实体(飞镖/陷阱弹/箭/法弹):世界变换内绘制
+        noteHeldProjEntity(e);   // heldProj 账本登记(非目标弹型静默跳过)
         (e as unknown as { draw(r: Renderer, cam: Camera): void }).draw(this, cam);
       }
     }
@@ -1222,6 +1342,10 @@ export class Renderer {
       const eb = this.emoteSheet();
       if (eb) drawEmotes(this.ctx, eb);
     }
+    // 3.85 FlameParticle 层（Main.ParticleSystem_World_BehindPlayers，Main.cs:61692-61693：
+    //     投射物之后、玩家之前——山羊坐骑 47 地面冲刺火焰本体；dust 6 段在
+    //     Player.goatFlames 回调，编排器 Spawn_WallOfFleshGoatMountFlames :3259-3306）
+    this.drawFlameParticles();
     this.drawPlayer(player, world, swing, flicker);
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
@@ -1708,6 +1832,11 @@ export class Renderer {
   }
   /** 远端玩家（Game.render 每帧注入；单机空数组零开销） */
   remotePlayers: Player[] = [];
+  /** Main.netMode != 0（Game 每帧注入 net?.active）——队伍发色剂单机恒取 teamColor[0]
+   *  （DyeInitializer.cs:334 `Main.netMode != 0 ? player.team : 0`） */
+  netActive = false;
+  /** 地图头像发色剂头带 scratch（40×32，每帧重画） */
+  private headStripScratch: HTMLCanvasElement | null = null;
   /** 主角引用（Game.render 每帧注入；克脑四镜像 Main.cs:24799-24843 取玩家中心） */
   mainPlayer: Player | null = null;
   /** 高尔夫蓄力显示（Game 注入：力度条 + 预测线；Main.cs:30690-30721/:42933-42966） */
@@ -1875,6 +2004,81 @@ export class Renderer {
     ctx.restore();
   }
 
+  // ===================== FlameParticle（山羊坐骑 47 火焰本体层）=====================
+  /** Projectile_326/327/328 ×(60/255) 预染缓存（DrawData 色 rgb 分量差的加性 pass 用） */
+  private flameTintCache = new Map<number, HTMLCanvasElement>();
+
+  /** FlameParticle.Draw（FlameParticle.cs:53-68）1:1——世界变换内直画（世界坐标，
+   *  原版 ParticleSystem 的 AnchorPosition=−screenPosition 平移即此意）。
+   *  逐份：offset = (RandomInt(−2,3), RandomInt(−2,3)) × Scale（:61，种子 =
+   *  TileFrameSeed ^ (x<<32|y) :57），origin = (w/2, h−2)（SetBasicInfo :33），
+   *  rotation 恒 0（FetchFromPool 复位、编排器不写）。
+   *  色 (120,120,120,60)（:55）在 XNA 预乘混合下 rgb:alpha = 2:1（源比覆盖亮一倍）
+   *  → canvas 两 pass 精确等价：① source-over 原贴图 α=(60/255)×lerp；
+   *  ② 'lighter' ×(60/255) 预染 α=lerp——两 pass rgb 合计 = 贴图×(120/255)×lerp，
+   *  覆盖衰减只走 ①（TileFlames 的 A=0 纯加色推导同族）。
+   *  坐骑染料 shader（player.cMount，PlayerDrawHelper.SetShaderForData :64）未建模
+   *  ——登记（本仓无坐骑染料系统，画本色）。 */
+  private drawFlameParticles(): void {
+    const atlas = this.atlas;
+    if (!atlas) return;
+    let any = false;
+    for (const f of flameParticles.each()) { any = true; break; }
+    if (!any) return;
+    const ctx = this.ctx;
+    const seedBase = currentTileFrameSeed();
+    const tinted = (tex: number, img: HTMLImageElement): HTMLCanvasElement | null => {
+      const hit = this.flameTintCache.get(tex);
+      if (hit) return hit;
+      if (typeof document === 'undefined') return null;
+      const c = document.createElement('canvas');
+      c.width = img.naturalWidth; c.height = img.naturalHeight;
+      const cc = c.getContext('2d');
+      if (!cc) return null;
+      cc.imageSmoothingEnabled = false;
+      cc.drawImage(img, 0, 0);
+      cc.globalCompositeOperation = 'multiply';
+      cc.fillStyle = `rgb(60,60,60)`;
+      cc.fillRect(0, 0, c.width, c.height);
+      cc.globalCompositeOperation = 'destination-in';
+      cc.drawImage(img, 0, 0);
+      this.flameTintCache.set(tex, c);
+      return c;
+    };
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const f of flameParticles.each()) {
+      const img = atlas.ensureVImage(`vanilla/Projectile_${f.tex}.png`);
+      if (!img || !img.complete || img.naturalWidth === 0) continue;
+      const lerp = flameFadeOutFactor(f.timeSinceSpawn / f.timeToLive, f.fadeOut);
+      if (lerp <= 0) continue;
+      const glow = tinted(f.tex, img);
+      // :57 种子 = TileFrameSeed ^ ((ulong)X << 32 | (uint)Y)——与 tile 火苗同源同节拍
+      const seed = seedBase
+        ^ ((BigInt.asUintN(64, BigInt(Math.trunc(f.x))) << 32n)
+          | BigInt.asUintN(32, BigInt(Math.trunc(f.y))));
+      const box = { s: seed };
+      const ox = img.naturalWidth / 2, oy = img.naturalHeight - 2;   // SetBasicInfo :33
+      const alphaBase = (60 / 255) * lerp;
+      for (let k = 0; k < 4; k++) {                                  // :59 四份抖动副本
+        const dx = randomInt(box, -2, 3) * f.scale;
+        const dy = randomInt(box, -2, 3) * f.scale;
+        ctx.save();
+        ctx.translate(f.x + dx, f.y + dy);
+        if (f.scale !== 1) ctx.scale(f.scale, f.scale);
+        ctx.globalAlpha = alphaBase;                                  // ① 覆盖 pass
+        ctx.drawImage(img, -ox, -oy);
+        if (glow) {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = lerp;                                     // ② 加性 pass
+          ctx.drawImage(glow, -ox, -oy);
+        }
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+
   /** 小动物：原版 NPC 纵向帧条动画（移动时循环全帧，静止首帧；贴图默认朝左镜像） */
   /** 大血条比例 1.5 的类型（Main.cs:45228-45298：Boss 与大型怪） */
   private static readonly HB_BIG_SCALE = new Set([
@@ -1954,15 +2158,21 @@ export class Renderer {
    * LeashedCritter.Draw :190-206 的 DrawNPCDirect 近似）：
    *  - 小动物：NPC 表逐帧切片，sprite 中心 = Center + (0, 8 - h/2)（CopyToDummy
    *    :171 的 position 换算），叠加 GetDrawOffset（halfBrick 贴地/悬停 bobbing/
-   *    水黾贴液面）、Recall/帝皇蝶渐隐 Opacity、飞行族 rotation、Fly 族随机 scale
-   *  - 风筝：Projectile 表 + 锚桩→风筝绳（原版 DrawKite Main.cs:36614 的逐型
-   *    Extra_103+ 绳索贴图为备案近似——见 LeashedCritter.ts GAP ①）
+   *    水黾贴液面）、Recall/帝皇蝶渐隐 Opacity、飞行族 rotation、Fly 族随机 scale；
+   *    入水/出水提示气泡 Gore_413（LeashedCritter.DrawBubble :213-223）
+   *  - 微光之灵 677：DrawNPCDirect_Faeling（Main.cs:26306-26362）四列表 + oldPositions 拖尾
+   *  - 风筝：Main.DrawKite :36614-37069 全量（锚绳 FishingLine 分段 + 逐型 Extra 绳尾）
    */
   private drawLeashedEntities(
     leashed: import('../entities/LeashedCritter').LeashedEntityManager,
     world: World,
+    clipL: number, clipT: number, clipR: number, clipB: number,
   ) {
     const ctx = this.ctx;
+    // DrawEntities :474-491：只画激活 section 内且落在（屏幕矩形外扩 512）中的实体
+    const visible = (ax: number, ay: number, cx: number, cy: number): boolean =>
+      leashed.isSectionActive(ax, ay)
+      && cx >= clipL && cx <= clipR && cy >= clipT && cy <= clipB;
     const env = {
       timeForVisualEffects: visEffectFrames(),
       dayTime: world.clock.isDay,
@@ -1973,8 +2183,18 @@ export class Renderer {
       playerCy: this.mainPlayer?.cy ?? 0,
       addLight: () => { /* 绘制期不点光（update 期已推 LightingEngine） */ },
     };
-    for (const e of leashed.kites) this.drawLeashedKite(ctx, e);
+    for (const e of leashed.kites) {
+      if (visible(e.ax, e.ay, e.cx, e.cy)) this.drawLeashedKite(ctx, e, world);
+    }
     for (const e of leashed.critters) {
+      if (!visible(e.ax, e.ay, e.cx, e.cy)) continue;
+      if (e.npcType === 677) {
+        // 微光之灵走 DrawNPCDirect_Faeling（GetDrawOffset 对该族恒 0：hover 参数为 0，
+        // halfBrick 贴地从略——备案）；DrawBubble 判定与其余族共用
+        this.drawLeashedFaeling(ctx, e, world);
+        this.drawLeashedBubble(ctx, e, world, 0, 0);
+        continue;
+      }
       const fr = this.atlas?.vnpc(e.drawNpcType, e.frame);
       if (!fr) continue;
       const off = e.getDrawOffset(env);
@@ -1990,31 +2210,343 @@ export class Renderer {
       ctx.scale(e.spriteDirection === 1 ? -1 : 1, 1); // NPC 贴图默认朝左（spriteDirection==1 翻转）
       ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h / 2, w, h);
       ctx.restore();
+      this.drawLeashedBubble(ctx, e, world, off.dx, off.dy);
     }
   }
 
-  /** LeashedKite.Draw（LeashedKite.cs:82-87 → Main.DrawKite :36614）近似 */
-  private drawLeashedKite(ctx: CanvasRenderingContext2D, k: import('../entities/LeashedCritter').LeashedKiteEntity) {
-    const frames = projFrameCount(k.projType);
-    const frame = k.frameCount(frames);
-    const img = projFrameImg(k.projType, frame);
-    // 绳：锚桩中心 → 风筝（原版逐型绳索贴图 Extra_103/104/132/147…，GAP ① 近似直线）
+  /**
+   * DrawBubble（LeashedCritter.cs:213-223）：tile 取 _dummy.Center（= Center+(0,8)），
+   *  判定 `(isAquatic && liquid<255) || (!isAquatic && liquid>0)`；Gore_413 整帧
+   *  贴 Center+GetDrawOffset，颜色 = Lighting.GetColor(tileCoords)
+   */
+  private drawLeashedBubble(
+    ctx: CanvasRenderingContext2D,
+    e: import('../entities/LeashedCritter').LeashedCritterEntity,
+    world: World, dx: number, dy: number,
+  ) {
+    const st = world.store;
+    const gore = this.atlas?.vmisc('vanilla/Gore_413.png');
+    if (!st || !gore) return;
+    const tx = Math.floor(e.cx / 16), ty = Math.floor((e.cy + 8) / 16);
+    if (!leashedBubbleVisible(st, e.cx, e.cy, !!e.proto.isAquatic)) return;
+    const light = this.lighting ? this.lighting.lightAt(tx, ty) : [255, 255, 255];
+    // GetColor 乘法着色（tint 量化缓存，同 NPC color pass 的 tintedSprite 管线）
+    const q = [Math.round(light[0] / 8) * 8, Math.round(light[1] / 8) * 8, Math.round(light[2] / 8) * 8];
+    const tinted = this.tintedSprite('gore413', gore, q);
+    const w = gore.sw, h = gore.sh;
     ctx.save();
-    ctx.strokeStyle = 'rgba(60,52,40,0.55)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(k.ax * 16 + 8, k.ay * 16 + 8);
-    const midX = (k.ax * 16 + 8 + k.cx) / 2;
-    const midY = (k.ay * 16 + 8 + k.cy) / 2 + 6; // 中点微垂（绳的悬垂感）
-    ctx.quadraticCurveTo(midX, midY, k.cx, k.cy);
-    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.translate(e.cx + dx, e.cy + dy);
+    ctx.drawImage(tinted, -w / 2, -h / 2, w, h);
     ctx.restore();
+  }
+
+  /**
+   * DrawNPCDirect_Faeling（Main.cs:26306-26362）——NPC 677 四列×五行表：
+   *  列 0 = 主动画（行 = FindFrame 帧）、列 1 = 中层亮体、列 2 = 拖尾段、列 3 = 呼吸光晕
+   *  （行 whoAmI%5 与行 1 两张）。拖尾取 ShimmerFlyLeashedCritter.oldPositions
+   *  （:56-62 临时换入 _dummy.oldPos），54→5 步进 3 共 17 段正弦环绕渐隐。
+   */
+  private drawLeashedFaeling(
+    ctx: CanvasRenderingContext2D,
+    e: import('../entities/LeashedCritter').LeashedCritterEntity,
+    world: World,
+  ) {
+    const img = this.atlas ? this.atlas.ensureVImage('vanilla/NPC_677.png') : null;
     if (!img) return;
+    void world;
+    const COLS = 4, ROWS = 5;                       // horizontalFrames=4, num=5（:26310-26311）
+    const cw = img.width / COLS, ch = img.height / ROWS;
+    const t = visEffectFrames();
+    const cx = e.cx, cy = e.cy + 8;                 // dummy.Center = Center + (0,8)（CopyToDummy :171）
+    const num2 = (e.whoAmI * 0.11 + t / 360) % 1;   // :26312
+    const hue = (h: number) => hslRgb(h, 1, 0.5);
+    const core = hslRgb(num2, 1, 0.65);
+    const frame = Math.max(0, Math.min(ROWS - 1, e.frame));
+    const src = (col: number, row: number) => [col * cw, row * ch, cw, ch] as const;
+    const light = this.lighting ? this.lighting.lightAt(Math.floor(cx / 16), Math.floor(cy / 16)) : [255, 255, 255];
+    const lm = Math.max(0.15, Math.max(light[0], light[1], light[2]) / 255);
+    const draw = (col: number, row: number, x: number, y: number, scale: number,
+      rgba: [number, number, number, number], flip: boolean) => {
+      const [sx, sy, sw, sh] = src(col, row);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, rgba[3]));
+      ctx.translate(x, y);
+      ctx.scale((flip ? -1 : 1) * scale, scale);
+      ctx.drawImage(img, sx, sy, sw, sh, -cw / 2, -ch / 2, cw, ch);
+      ctx.restore();
+    };
+    // ---- 拖尾（:26321-26347）----
+    const old = e.oldPositions;
+    if (old && old.length > 0) {
+      const num3 = old.length;                       // TrailCacheLength[677] = 60
+      const num4 = num3 - 1 - 5;                     // 54
+      let num7 = 32, num8 = 16;
+      const fromMax = Math.hypot(num7, num8);
+      let num9 = Math.hypot(old[num4].x - e.cx, old[num4].y - e.cy);
+      num9 = remapClamped(num9, 0, fromMax, 0, 100);
+      num9 = Math.floor(num9 / 5) * 5 / 100;         // (int)num9/5 → *5 → /100
+      num8 *= num9; num7 *= num9;
+      for (let i = num4; i >= 5; i -= 3) {
+        const ox = old[i].x - e.cx, oy = old[i].y - e.cy;
+        const num14 = remapClamped(i, 0, num3, 1, 0);
+        const num15 = 1 - num14;
+        // spinningpoint = (sin(whoAmI/17 + t/9 + num14·4π)·num8, -num7)·num15，再 RotatedBy(π)
+        const spX = Math.sin(e.whoAmI / 17 + t / 9 + num14 * 2 * Math.PI * 2) * num8 * num15;
+        const spY = -num7 * num15;
+        const vx = ox + -spX, vy = oy + -spY;        // RotatedBy(π) = 取反
+        const c3 = hue((num2 + num15 * 0.5) % 1);
+        const a = num14 * 0.16 * lm;
+        const sc = e.scale * remapClamped(num14 * num14, 0, 1, 0, 2.5);
+        draw(2, 0, cx + vx, cy + vy, sc, [c3[0] * 255 * lm, c3[1] * 255 * lm, c3[2] * 255 * lm, a],
+          e.spriteDirection !== 1);
+      }
+    }
+    // ---- 三层本体 + 双光晕（:26348-26361）----
+    const whiteA = 0.5 * lm;                          // Color(255,255,255,0) 预乘 A=0 → 加性观感；乘光照
+    draw(2, 0, cx, cy, e.scale, [255 * lm, 255 * lm, 255 * lm, whiteA], e.spriteDirection !== 1);
+    draw(1, frame, cx, cy, e.scale, [255 * lm, 255 * lm, 255 * lm, whiteA], e.spriteDirection !== 1);
+    draw(0, frame, cx, cy, e.scale,
+      [core[0] * 255 * lm, core[1] * 255 * lm, core[2] * 255 * lm, 0.5 * lm], e.spriteDirection !== 1);
+    const num16 = Math.max(0, Math.min(1, Math.sin(t / 60) * 0.3 + 0.3));   // :26354
+    const num17 = 0.8 + Math.sin(t / 15 * Math.PI * 2) * 0.3;               // :26355
+    const glowRowA = ((e.whoAmI % ROWS) + ROWS) % ROWS;
+    for (const row of [glowRowA, 1]) {
+      const c = mixRgb(core, [1, 1, 1], 0.5);
+      draw(3, row, cx, cy, e.scale * num17,
+        [c[0] * 255 * lm, c[1] * 255 * lm, c[2] * 255 * lm, num16 * lm], false);   // SpriteEffects.None
+    }
+  }
+
+  /**
+   * Main.DrawKite（Main.cs:36614-37069）全量 1:1：
+   *  ① 锚绳：FishingLine 自锚桩向风筝 12px 步进分段（垂度随速度/距离调制），色 = 光照×0.427×Remap
+   *  ② 绳尾：逐型 Extra 贴图（103 默认 + 104/132-140/144-148），oldPos 每 num4 步采样
+   *     链式跟随（段长 num5、兜底 swapAt 换 num10），flag 族再垫一层 FishingLine
+   *  ③ 本体：proj 帧 + rotation + num6 摆角
+   *  num18 = Remap(localAI0, 0,300,0,1)（无风下垂）、num19 = localAI1（下垂插值）
+   */
+  private drawLeashedKite(
+    ctx: CanvasRenderingContext2D,
+    k: import('../entities/LeashedCritter').LeashedKiteEntity,
+    world: World,
+  ) {
+    const atlas = this.atlas;
+    if (!atlas) return;
+    const rope = KITE_ROPE_PARAMS(k.projType, k.spriteDirection);
+    const img = projFrameImg(k.projType, k.frame);     // value.Frame(projFrames, 1, proj.frame)
+    const ropeTex = atlas.vmisc(`vanilla/Extra_${rope.rope}.png`);
+    const lineTex = atlas.vmisc('vanilla/FishingLine.png');
+    if (!img || !ropeTex || !lineTex) return;
+    const t = visEffectFrames();
+    const windAbs = Math.abs(world.weather?.windSpeedCurrent ?? 0);   // num17 = |WindForVisuals|
+    const num18 = remapClamped(k.projectileLocalAI0, 0, 300, 0, 1);
+    const num19 = k.projectileLocalAI1;
+    const light = this.lighting
+      ? this.lighting.lightAt(Math.floor(k.cx / 16), Math.floor(k.cy / 16))
+      : [255, 255, 255];
+    const lm = Math.max(0.2, Math.max(light[0], light[1], light[2]) / 255);
+    const flip = k.spriteDirection !== 1;              // SpriteEffects.FlipHorizontally
+    // ---- 主绳（:36828-36946）----
+    const center = { x: k.cx, y: k.cy };
+    const anchor = { x: k.anchorX, y: k.anchorY };
+    const lineWidth = lineTex.sw, lineHeight = lineTex.sh;
+    let vx = center.x - anchor.x, vy = center.y - anchor.y;
+    let velX = k.vx, velY = k.vy;
+    if (Math.abs(velX) > Math.abs(velY)) { const tmp = velX; velX = velY; velY = tmp; }
+    const num21 = Math.hypot(vx, vy);
+    let num22 = Math.hypot(center.x - anchor.x, center.y - anchor.y);
+    if (num22 === 0) num22 = 1;
+    let drawing = true;
+    if (num21 !== 0) {
+      vx *= 12 / num21; vy *= 12 / num21;
+      anchor.x -= vx; anchor.y -= vy;
+      vx = center.x - anchor.x; vy = center.y - anchor.y;
+    } else {
+      drawing = false;
+    }
+    let node = { x: anchor.x, y: anchor.y };
+    let seg = { x: vx, y: vy };
+    let guard = 0;
+    while (drawing && guard++ < 400) {
+      let num25 = 12;
+      const num26raw = Math.hypot(seg.x, seg.y);
+      const num27 = num26raw;
+      if (!Number.isFinite(num26raw) || num26raw === 0) { drawing = false; break; }
+      if (num26raw < 20) {
+        drawing = false;
+        node.x += (seg.x / num26raw) * num25;
+        node.y += (seg.y / num26raw) * num25;
+        seg.x = center.x - node.x; seg.y = center.y - node.y;
+        num25 = Math.hypot(seg.x, seg.y) + 4;
+      } else {
+        const k2 = 12 / num26raw;
+        seg.x *= k2; seg.y *= k2;
+        node.x += seg.x; node.y += seg.y;
+        seg.x = center.x - node.x; seg.y = center.y - node.y;
+        if (num27 > 12) {
+          let num28 = 0.3;
+          let num29 = Math.abs(velX) + Math.abs(velY);
+          if (num29 > 16) num29 = 16;
+          num29 = 1 - num29 / 16;
+          num28 *= num29;
+          num29 = num27 / 80;
+          if (num29 > 1) num29 = 1;
+          num28 *= num29;
+          if (num28 < 0) num28 = 0;
+          if (seg.y > 0) {
+            seg.y *= 1 + num28;
+            seg.x *= 1 - num28;
+          } else {
+            num29 = Math.abs(velX) / 3;
+            if (num29 > 1) num29 = 1;
+            num29 -= 0.5;
+            num28 *= num29;
+            if (num28 > 0) num28 *= 2;
+            seg.y *= 1 + num28;
+            seg.x *= 1 - num28;
+          }
+        }
+      }
+      const rot = Math.atan2(seg.y, seg.x) - Math.PI / 2;
+      const segH = drawing ? lineHeight : num25;      // 末段取残余长度（:36937-36939）
+      // 基色取【风筝中心】格光照（:36940），逐段只乘距离 Remap（:36942-36944）
+      const fromValue = 1 - Math.hypot(center.x - node.x, center.y - node.y) / num22;
+      const shade = 0.42745098 * remapClamped(fromValue, 0, 1, 0.5, 1) * lm;
+      ctx.save();
+      ctx.translate(node.x, node.y);
+      ctx.rotate(rot);
+      ctx.scale(0.8, 1);
+      ctx.globalAlpha = Math.max(0, Math.min(1, shade));
+      ctx.drawImage(lineTex.img, lineTex.sx, lineTex.sy, lineWidth, lineHeight,
+        -lineWidth / 2, -2, lineWidth, segH);
+      ctx.restore();
+    }
+    // ---- 绳尾（:36947-37067）----
+    const frameW = img.width, frameH = img.height;
+    const ropeW = ropeTex.sw, ropeH = ropeTex.sh;
+    const colW = ropeW / rope.segCols;
+    let rectX = colW * (rope.segCols - 1);
+    const rectW = colW - 2;                            // rectangle2.Width -= 2
+    let num2 = rope.rotOffset;
+    let num5 = rope.segLen;
+    let num6 = rope.rotSway;
+    let num8 = rope.tailDy;
+    let num10 = rope.swapLen;
+    let num14 = rope.dx2;
+    let num15 = rope.dy2;
+    let num16 = rope.droopRot;
+    const num32raw = windAbs;
+    const num32 = (seg.y >= -0.02 && seg.y < 1)
+      ? Math.max(0, Math.min(1, (num32raw - 0.2) / 0.3)) : num32raw;   // GetLerpValue(0.2,0.5)
+    for (let i = 0; i < rope.ropeLines; i++) {
+      rectX = colW * (rope.segCols - 1);
+      const list: Array<{ x: number; y: number }> = [];
+      let num31 = 0.5 + 0.5 * windAbs;                 // Lerp(0.5, 1, num17)
+      let vec4x = num31 * rope.swayLen * k.spriteDirection;
+      let vec4y = Math.sin(t / 300 * Math.PI * 2) * num32;
+      if (i === 1) { vec4y += 0.5 * (1 - num18); }
+      else if (i === 2) { vec4y += 1 * (1 - num18); }
+      else if (i === 3) { vec4y += 1.5 * (1 - num18); }
+      vec4x *= 2; vec4y *= 2;
+      let num35 = rope.tailDx + num14;
+      let num36 = num8 + num15;
+      if (i === 1) { num35 -= 8; num36 -= 8; }
+      else if (i === 2) { num35 -= 4; num36 -= 4; }
+      else if (i === 3) { num35 -= 12; num36 -= 12; }
+      if (num18 > 0) {
+        const ca = Math.cos(num18 * Math.PI / 2 * k.spriteDirection);
+        const sa = Math.sin(num18 * Math.PI / 2 * k.spriteDirection);
+        const rx = vec4x * ca - vec4y * sa, ry = vec4x * sa + vec4y * ca;
+        vec4x = rx; vec4y = ry;
+        num8 *= 1 - num18; num14 *= 1 - num18; num15 *= 1 - num18;
+        const num38 = (1 - num19) * num18;
+        num6 *= 1 - num38;
+        num6 -= Math.PI / 4 * num38 * k.spriteDirection;
+        num6 += num38 * num16 * k.spriteDirection;
+        if (num5 !== -1) num5 *= 1 + (0.7 - 1) * num18;
+        num10 *= 1 + (0.7 - 1) * num18;
+      }
+      const num37 = 0.5;
+      const baseRot = k.rotation + num6;
+      const pivotX = (frameW * num37 + num35) * k.spriteDirection;
+      const pivotY = num36;
+      const cr = Math.cos(baseRot), sr = Math.sin(baseRot);
+      let tipX = center.x + pivotX * cr - pivotY * sr;
+      let tipY = center.y + pivotX * sr + pivotY * cr;
+      list.push({ x: tipX, y: tipY });
+      let num39 = rope.oldStep;
+      let num40 = 1;
+      while (num39 < (rope.tailSegs + 1) * rope.oldStep) {
+        // :37005-37008 换段长是【持久赋值】（num5 = num10，跨段跨条延续）
+        if (rope.swapAt !== -1 && rope.swapAt === num40) num5 = num10;
+        const p = k.oldPos[num39];
+        if (!p || (p.x === 0 && p.y === 0)) {
+          list.push({ x: tipX, y: tipY });
+        } else {
+          const osd = k.oldSpriteDirection[num39] ?? k.spriteDirection;
+          const orot = (k.oldRot[num39] ?? k.rotation) + num6;
+          const spx = (frameW * num37 + num35) * osd;
+          const spy = num36;
+          const ocr = Math.cos(orot), osr = Math.sin(orot);
+          let px = p.x + spx * ocr - spy * osr;
+          let py = p.y + spx * osr + spy * ocr;
+          px += vec4x * (num40 + 1);
+          py += vec4y * (num40 + 1);
+          let ddx = tipX - px, ddy = tipY - py;
+          const dl = Math.hypot(ddx, ddy);
+          if (dl > num5) { ddx *= num5 / dl; ddy *= num5 / dl; }
+          px = tipX - ddx; py = tipY - ddy;
+          list.push({ x: px, y: py });
+          tipX = px; tipY = py;
+        }
+        num39 += rope.oldStep;
+        num40++;
+      }
+      if (rope.lineToo) {                              // :37033-37047 FishingLine 垫层
+        for (let n = list.length - 2; n >= 0; n--) {
+          const a = list[n], b = list[n + 1];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 2) continue;
+          const rot2 = Math.atan2(dy, dx) - Math.PI / 2;
+          ctx.save();
+          ctx.translate(a.x, a.y);
+          ctx.rotate(rot2);
+          ctx.globalAlpha = Math.max(0, Math.min(1, lm * 0.42745098));
+          ctx.drawImage(lineTex.img, lineTex.sx, lineTex.sy, lineWidth, lineHeight,
+            -lineWidth / 2, -2, lineWidth, len);          // 纵向 scale = len/帧高 → 画高 = len
+          ctx.restore();
+        }
+      }
+      for (let n = list.length - 2; n >= 0; n--) {      // :37048-37066 尾段贴图（倒序）
+        const a = list[n], b = list[n + 1];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const rot3 = Math.atan2(dy, dx) - Math.PI / 2 + num2;
+        ctx.save();
+        ctx.translate(b.x, b.y);
+        ctx.rotate(rot3);
+        ctx.scale(flip ? -1 : 1, 1);
+        ctx.globalAlpha = Math.max(0, Math.min(1, lm));
+        ctx.drawImage(ropeTex.img, ropeTex.sx + rectX, ropeTex.sy, rectW, ropeH,
+          -rectW / 2, -ropeH / 2, rectW, ropeH);
+        ctx.restore();
+        rectX -= colW;
+        if (rectX < 0) {
+          let wrap = rope.startCol;
+          if (rope.rewind) wrap--;
+          rectX = wrap * colW;
+        }
+      }
+    }
+    // ---- 本体（:37068）----
     ctx.save();
-    ctx.translate(k.cx, k.cy);
-    if (k.rotation !== 0) ctx.rotate(k.rotation);
-    ctx.scale(k.spriteDirection === 1 ? -1 : 1, 1);
-    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    // :36836 origin.X += -2·spriteDirection → XNA 精灵中心 = Center + 2·sd（翻转无关的屏幕空间偏移）
+    ctx.translate(k.cx + 2 * k.spriteDirection, k.cy);
+    ctx.rotate(k.rotation + num6);
+    ctx.scale(flip ? -1 : 1, 1);
+    ctx.globalAlpha = Math.max(0, Math.min(1, lm));
+    ctx.drawImage(img, -frameW / 2, -frameH / 2, frameW, frameH);
     ctx.restore();
   }
 
@@ -5164,8 +5696,8 @@ export class Renderer {
     /** drawinfo.stealth（叠画消费值）与 s' 档（lit 主纹理用，flush 内 34/51 等取 settled） */
     settled: number; clamp: number;
     vortexTint: [number, number, number] | null;
-    /** cWings 染料仿真（null = 无染料/effect 缺口） */
-    dye: DyeEmulation | null;
+    /** cWings 染料（SM2 字节码执行描述；null = 无染料） */
+    dye: DyeApply | null;
   }> = [];
   /** 均一色调 scratch（叠画 tint 精确化：RGB×tint/255 + A×alpha/255） */
   private wingTintScratch: HTMLCanvasElement | null = null;
@@ -5189,10 +5721,16 @@ export class Renderer {
       ctx.scale(e.p.facing * z, z);
       ctx.translate(e.anchor[0], e.anchor[1]);
       // ---- 全亮主纹理 ----
-      const mainTex = d.rainbowLayer ? atlas.ensureVImage('vanilla/Extra_171.png')
+      // 44 彩虹翼：vanilla 主纹理 = Extra_171 灰度翼经 Misc "HallowBoss" pass 的
+      // 烘焙图（PlayerRainbowWingsTextureContent.cs 1:1，烘焙一次缓存）——不是
+      // Wings_44 原图；cWings 染料在其上再套（:1033 item.shader）
+      const baked = d.rainbowLayer ? this.hallowBossWingsSheet() : null;
+      const mainTex: HTMLImageElement | HTMLCanvasElement | null = baked
+        ? baked.canvas
         : atlas.ensureVImage(`vanilla/Wings_${e.slot}.png`);
-      if (d.mainGlow && mainTex && mainTex.naturalWidth > 0) {
-        const fh = Math.floor(mainTex.naturalHeight / d.frames);
+      const tw = mainTex ? (mainTex instanceof HTMLImageElement ? mainTex.naturalWidth : mainTex.width) : 0;
+      if (d.mainGlow && mainTex && tw > 0) {
+        const fh = Math.floor((mainTex instanceof HTMLImageElement ? mainTex.naturalHeight : mainTex.height) / d.frames);
         let a = 1, tint = 1;
         if (d.mainGlow === 'c250a100') { tint = 250 / 255; a = (100 / 255) * e.settled; }  // :858 ×stealth
         else if (d.mainGlow === 'luna') {
@@ -5205,35 +5743,25 @@ export class Renderer {
         } else if (d.rainbowLayer) {
           a = e.settled;                                            // :1032 White×stealth
         }
-        // 44 彩虹重上色（HallowBoss 着色器仿真：Extra_171=灰度掩膜实证全灰、
-        // Extra_156=横向彩虹渐变调色板；uTime=GlobalTimeWrappedHourly MiscShaderData:91。
-        // 采样映射与滚动率是 effect 二进制内语义 → 取"横向铺满+0.25 周/秒"近似并登记；
-        // cWings 染料在 RT 输出后再套（:1033 item.shader 同款链））
-        if (d.rainbowLayer) {
-          const sc = this.rainbowSlice(mainTex, e.fr * fh, mainTex.naturalWidth, fh, e.dye);
-          if (sc) {
-            ctx.globalAlpha = a;
-            ctx.drawImage(sc, -mainTex.naturalWidth / 2, -fh / 2);
-            ctx.globalAlpha = 1;
-          }
-        } else if (!e.dye && tint >= 0.999) {
+        // 44 彩虹翼主纹理 = 已烘焙的彩虹图；其余 = Wings 表
+        if (!e.dye && tint >= 0.999) {
           ctx.globalAlpha = a;
-          ctx.drawImage(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
-            -mainTex.naturalWidth / 2, -fh / 2, mainTex.naturalWidth, fh);
+          ctx.drawImage(mainTex as CanvasImageSource, 0, e.fr * fh, tw, fh,
+            -tw / 2, -fh / 2, tw, fh);
           ctx.globalAlpha = 1;
         } else {
           const tintArr: [number, number, number] | null = tint < 0.999
             ? [tint, tint, tint] : null;
-          const sc = this.wingTexSource(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
-            e.dye, tintArr);
+          const sc = this.wingTexSource(mainTex as HTMLImageElement | HTMLCanvasElement,
+            0, e.fr * fh, tw, fh, e.dye, tintArr);
           if (sc) {
             ctx.globalAlpha = a;
-            ctx.drawImage(sc, -mainTex.naturalWidth / 2, -fh / 2);
+            ctx.drawImage(sc, -tw / 2, -fh / 2);
             ctx.globalAlpha = 1;
           } else {
             ctx.globalAlpha = a;
-            ctx.drawImage(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
-              -mainTex.naturalWidth / 2, -fh / 2, mainTex.naturalWidth, fh);
+            ctx.drawImage(mainTex as CanvasImageSource, 0, e.fr * fh, tw, fh,
+              -tw / 2, -fh / 2, tw, fh);
             ctx.globalAlpha = 1;
           }
         }
@@ -5245,47 +5773,86 @@ export class Renderer {
     this.wingGlowQueue.length = 0;
   }
 
-  /** 44 彩虹重上色 scratch：掩膜灰度 × Extra_156 彩虹行（时间滚动）；dye 再套 */
-  private rainbowSlice(img: HTMLImageElement, sy: number, sw: number, sh: number,
-    dye: DyeEmulation | null): HTMLCanvasElement | null {
-    const ramp = this.rainbowRamp(img);   // 调色板行（惰性缓存，复用 Extra_156）
-    if (!ramp) return null;
-    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
-    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
-    const sctx = sc.getContext('2d', { willReadFrequently: true })!;
-    sctx.clearRect(0, 0, sw, sh);
-    sctx.drawImage(img, 0, sy, sw, sh, 0, 0, sw, sh);
-    const id = sctx.getImageData(0, 0, sw, sh);
-    const t = performance.now() / 1000;    // GlobalTimeWrappedHourly 近似（Game.ts:11858 同源）
-    for (let y = 0; y < sh; y++) {
-      for (let x = 0; x < sw; x++) {
-        const i = (y * sw + x) * 4;
-        if (!id.data[i + 3]) continue;
-        const rx = (((x / sw) + t * 0.25) % 1 + 1) % 1;
-        const ri = Math.min(ramp.length - 4, (rx * ramp.length) & ~3);
-        id.data[i] = ramp[ri] * id.data[i] / 255;
-        id.data[i + 1] = ramp[ri + 1] * id.data[i + 1] / 255;
-        id.data[i + 2] = ramp[ri + 2] * id.data[i + 2] / 255;
-      }
-    }
-    if (dye) this.applyDyeToImageData(id.data, dye);
-    sctx.putImageData(id, 0, 0);
-    return sc;
+  /** ReflectiveArmorShaderData.Apply 1:1（uLightSource：4 点 GetSubLight 梯度 →
+   *  归一化伪法线；bodyRotation 本仓未建模取 0，登记）。lightAt 语域 0-255 → /255 */
+  private reflectiveLightSource(p: Player): [number, number, number, number] {
+    const L = this.lighting;
+    if (!L?.lightAt) return [0, 0, 0, 0];
+    const vx = p.x + p.w * 0.1, vy = p.y + p.h * 0.1;
+    const w = p.w * 0.8, h = p.h * 0.8;
+    const sub = (x: number, y: number): number => {
+      const c = L.lightAt(Math.floor(x / 16), Math.floor(y / 16));
+      return (c[0] + c[1] + c[2]) / 255;      // subLight.X+Y+Z（0-1 语域）
+    };
+    const n4 = sub(vx + w * 0.5, vy);           // 右中
+    const n5 = sub(vx, vy + h * 0.5);           // 上中
+    const n6 = sub(vx + w, vy + h * 0.5);       // 左中
+    const n7 = sub(vx + w * 0.5, vy + h);       // 下中
+    let spx = n6 - n5, spy = n7 - n4;
+    const len = Math.hypot(spx, spy);
+    if (len > 1) { spx /= len; spy /= len; }
+    if (p.facing === -1) spx *= -1;
+    // spinningpoint.RotatedBy(-rotation)：bodyRotation 未建模恒 0
+    let x3 = spx * 2;
+    let y3 = (spy - 0.15) * 2;
+    let z3 = 1 - (spx * spx + spy * spy);
+    const l3 = Math.hypot(x3, y3, z3) || 1;
+    x3 /= l3; y3 /= l3; z3 = (z3 / l3) * 0.6;
+    return [x3, y3, z3, 0];
   }
 
-  private rainbowRampData: Uint8ClampedArray | null = null;
-  private rainbowRamp(mask: HTMLImageElement): Uint8ClampedArray | null {
-    if (this.rainbowRampData) return this.rainbowRampData;
+  /** 退出世界/contextlost 清烘焙缓存（canvas 内容归零不重画） */
+  resetFxCache(): void {
+    this.hallowBake = null;
+    this.hallowRampData = null;
+  }
+
+  /** Extra_156 wrap 采样器缓存（HallowBoss 链共用：44 翼烘焙 + 4778 染料） */
+  private hallowRampData: { data: Uint8ClampedArray; w: number; h: number } | null = null;
+  private hallowRampSampler(): ((u: number, v: number) => [number, number, number, number]) | null {
+    if (!this.hallowRampData) {
+      const atlas = this.atlas;
+      if (!atlas) return null;
+      const ramp = atlas.ensureVImage('vanilla/Extra_156.png');
+      if (!ramp || ramp.naturalWidth === 0) return null;
+      const c = document.createElement('canvas');
+      c.width = ramp.naturalWidth; c.height = ramp.naturalHeight;
+      const cc = c.getContext('2d', { willReadFrequently: true })!;
+      cc.drawImage(ramp, 0, 0);
+      this.hallowRampData = {
+        data: cc.getImageData(0, 0, c.width, c.height).data, w: c.width, h: c.height,
+      };
+    }
+    const r = this.hallowRampData;
+    return (u, v) => sampleImageData(r!.data, r!.w, r!.h, u, v, true);   // LinearWrap（MiscShaderData.Apply 默认）
+  }
+
+  /** 44 彩虹翼烘焙缓存（PlayerRainbowWingsTextureContent.cs 1:1）：Extra_171 全图
+   *  经 Misc "HallowBoss" pass（s0=Extra_171 灰度翼、s1=Extra_156 wrap、
+   *  uTime=GlobalTimeWrappedHourly）烘焙——ARenderTargetContentByRequest 一次成图
+   *  不重绘，uTime 取首次烘焙时刻（原版同语义） */
+  private hallowBake: { canvas: HTMLCanvasElement; w: number; h: number } | null = null;
+  private hallowBossWingsSheet(): { canvas: HTMLCanvasElement; w: number; h: number } | null {
+    if (this.hallowBake) return this.hallowBake;
     const atlas = this.atlas;
     if (!atlas) return null;
-    const ramp = atlas.ensureVImage('vanilla/Extra_156.png');
-    if (!ramp || ramp.naturalWidth === 0) return null;
-    const c = document.createElement('canvas');
-    c.width = ramp.naturalWidth; c.height = 1;
-    const cc = c.getContext('2d', { willReadFrequently: true })!;
-    cc.drawImage(ramp, 0, (ramp.naturalHeight / 2) | 0, ramp.naturalWidth, 1, 0, 0, ramp.naturalWidth, 1);
-    this.rainbowRampData = cc.getImageData(0, 0, ramp.naturalWidth, 1).data;
-    return this.rainbowRampData;
+    const mask = atlas.ensureVImage('vanilla/Extra_171.png');
+    if (!mask || mask.naturalWidth === 0) return null;
+    const s1 = this.hallowRampSampler();
+    const pass = getPass('HallowBoss');
+    if (!s1 || !pass) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = mask.naturalWidth; canvas.height = mask.naturalHeight;
+    const cc = canvas.getContext('2d', { willReadFrequently: true })!;
+    cc.clearRect(0, 0, canvas.width, canvas.height);
+    cc.drawImage(mask, 0, 0);
+    const id = cc.getImageData(0, 0, canvas.width, canvas.height);
+    const u = defaultUniforms();
+    u.uTime = (performance.now() / 1000) % 3600;   // Main.GlobalTimeWrappedHourly
+    runPassOnImageData(pass, id.data, canvas.width, canvas.height, u, [s1]);
+    cc.putImageData(id, 0, 0);
+    this.hallowBake = { canvas, w: canvas.width, h: canvas.height };
+    return this.hallowBake;
   }
 
   /** 均一色调 scratch：绘制 (img, sx, sy, sw, sh) → tint×RGB / 返回临时画布 */
@@ -5326,15 +5893,22 @@ export class Renderer {
     return sc;
   }
 
-  /** cWings 染料仿真应用（公式在 vanillaDyes.ts 纯函数，单测覆盖） */
-  private applyDyeToImageData(data: Uint8ClampedArray, emu: DyeEmulation): void {
-    applyDyeEmulation(data, emu);
+  /** cWings 染料应用（SM2Effect 字节码执行；uniforms 补齐烘焙上下文）。
+   *  rect = 切片在大图内的位置（uSourceRect/uImageSize0，vanilla DrawData 同源） */
+  private applyDyeToImageData(data: Uint8ClampedArray, w: number, h: number,
+    dye: DyeApply, rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): void {
+    const u = dye.uniforms;
+    u.uTime = (performance.now() / 1000) % 3600;   // Main.GlobalTimeWrappedHourly
+    u.uSourceRect = rect ? [rect.sx, rect.sy, w, h] : [0, 0, w, h];
+    u.uImageSize0 = rect ? [rect.sheetW, rect.sheetH] : [w, h];
+    const extra = dye.needsImage1 ? [this.hallowRampSampler() ?? undefined] : [];
+    applyDyePass(data, w, h, dye, extra);
   }
 
   /** 翅膀纹理可绘源：染料仿真 → tint 链（无处理时返回原图）。返回 canvas 时
    *  调用方按整幅居中绘制（sw/sh 尺寸） */
-  private wingTexSource(img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
-    dye: DyeEmulation | null, tint: [number, number, number] | null): HTMLCanvasElement | null {
+  private wingTexSource(img: HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
+    dye: DyeApply | null, tint: [number, number, number] | null): HTMLCanvasElement | null {
     if (!dye && !tint) return null;
     const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
@@ -5343,7 +5917,9 @@ export class Renderer {
     sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
     if (dye || tint) {
       const id = sctx.getImageData(0, 0, sw, sh);
-      if (dye) this.applyDyeToImageData(id.data, dye);
+      if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
+        { sx, sy, sheetW: img instanceof HTMLImageElement ? img.naturalWidth : img.width,
+          sheetH: img instanceof HTMLImageElement ? img.naturalHeight : img.height });
       if (tint) {
         for (let i = 0; i < id.data.length; i += 4) {
           id.data[i] *= tint[0]; id.data[i + 1] *= tint[1]; id.data[i + 2] *= tint[2];
@@ -5411,7 +5987,7 @@ export class Renderer {
   /** Wings 40 Betsy 程序化摆动（:854-896）：空气帧 k=0..7（cycle 4）/地面帧 k=8..13
    *  （cycle 3），每片偏移 = 轨道摆动(miscCounterNormalized)+速度反拖(×−1.5)+
    *  朝向外推(×3)，帧格 W−2/H−2 中心锚，色 (250³,100)×stealth。flush 内 */
-  private drawBetsyWings(p: Player, slot: number, _fr: number, settled: number, dye: DyeEmulation | null = null): void {
+  private drawBetsyWings(p: Player, slot: number, _fr: number, settled: number, dye: DyeApply | null = null): void {
     const atlas = this.atlas;
     if (!atlas) return;
     const img = atlas.ensureVImage(`vanilla/Wings_${slot}.png`);
@@ -5447,7 +6023,7 @@ export class Renderer {
    *  各 case 行号注；染料对全部叠画 DrawData 生效（原版 item.shader 同绑） */
   private drawWingOverlay(p: Player, slot: number, d: import('../data/vanillaWingVisuals').WingDraw,
     fr: number, cam: Camera, settled: number, clamp: number,
-    vortexTint: [number, number, number] | null, dye: DyeEmulation | null): void {
+    vortexTint: [number, number, number] | null, dye: DyeApply | null): void {
     const atlas = this.atlas;
     if (!atlas || !d.overlay) return;
     const ctx = this.ctx;
@@ -5466,7 +6042,8 @@ export class Renderer {
       if (sc && dye) {
         const c = sc.getContext('2d', { willReadFrequently: true })!;
         const id = c.getImageData(0, 0, sw, sh);
-        this.applyDyeToImageData(id.data, dye);
+        this.applyDyeToImageData(id.data, sw, sh, dye,
+          { sx, sy, sheetW: img.naturalWidth, sheetH: img.naturalHeight });
         c.putImageData(id, 0, 0);
       }
       return sc;
@@ -5530,7 +6107,8 @@ export class Renderer {
           if (dye) {
             const c38 = sc.getContext('2d', { willReadFrequently: true })!;
             const id38 = c38.getImageData(0, 0, s.sw - 2, s.sh - 2);
-            this.applyDyeToImageData(id38.data, dye);
+            this.applyDyeToImageData(id38.data, s.sw - 2, s.sh - 2, dye,
+              { sx: 0, sy: mcFr * s.sh, sheetW: s.img.naturalWidth, sheetH: s.img.naturalHeight });
             c38.putImageData(id38, 0, 0);
           }
           ctx.save();
@@ -5595,7 +6173,8 @@ export class Renderer {
           id.data[i + 2] = id.data[i + 2] * c.b / 255;
           id.data[i + 3] *= settled;
         }
-        if (dye) this.applyDyeToImageData(id.data, dye);
+        if (dye) this.applyDyeToImageData(id.data, s.sw, s.sh, dye,
+          { sx: 0, sy: s.sy, sheetW: img.naturalWidth, sheetH: img.naturalHeight });
         sctx.putImageData(id, 0, 0);
         ctx.save();
         ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
@@ -5605,6 +6184,83 @@ export class Renderer {
       default:
         break;
     }
+  }
+
+  /** 发色剂渲染色（Player.GetHairColor :54933-54937 → HairShaderDataSet.GetColor:39-46）。
+   *  无染料（hairDye 0）/表外 shaderId → null（调用方回落常规烘焙发色） */
+  private hairDyeRenderColor(p: Player, world: World, flicker: FlickerClock | null): { r: number; g: number; b: number } | null {
+    const shaderId = Math.trunc(p.hairDye || 0);
+    if (shaderId <= 0) return null;            // HairShaderDataSet.cs:41 shaderId!=0 才走染料
+    const flick = flicker ?? this.lighting?.clock ?? null;
+    const clock = world.clock;
+    // Main.time（昼夜染料 :293-329）：昼 0-54000（4:30AM 起）/ 夜 0-32400（7:30PM 起）。
+    // 窗口常量 = Clock.DAWN/DUSK（4:30/24=0.1875、19:30/24=0.8125）——type-only import
+    // 取常量会被剥，此处按值内联
+    const DAWN = 0.1875, DUSK = 0.8125;
+    const tod = clock ? clock.timeOfDay : 0.5;
+    const isDay = clock ? clock.isDay : true;
+    const time = isDay
+      ? (tod - DAWN) / (DUSK - DAWN) * 54000
+      : (((tod - DUSK) % 1) + 1) % 1 / (1 - (DUSK - DAWN)) * 32400;
+    // 金钱染料（:220-247）：0-53 槽钱币铜值（71铜/72银/73金/74铂，Item.cs:42-48）
+    let coins = 0;
+    for (let i = 0; i < 54 && i < p.inv.slots.length; i++) {
+      const s = p.inv.slots[i];
+      if (!s) continue;
+      const vid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const v = vid === 71 ? 1 : vid === 72 ? 100 : vid === 73 ? 10000 : vid === 74 ? 1000000 : 0;
+      if (v) {
+        coins += s.stack * v;
+        if (coins > 9999999999) { coins = 9999999999; break; }
+      }
+    }
+    // 火星染料头部格光照（:413-415：position+width*0.5 / position+height*0.25）
+    const lightRgb = this.lighting
+      ? this.lighting.lightAt(Math.trunc((p.x + p.w * 0.5) / TILE), Math.trunc((p.y + p.h * 0.25) / TILE))
+      : null;
+    return hairDyeColor(shaderId, {
+      hp: p.hp, maxHp: Math.max(1, p.maxHp),
+      mana: p.mana, maxMana: Math.max(1, p.maxMana),
+      centerX: p.cx, centerY: p.cy,
+      vx: p.vx, vy: p.vy,
+      team: p.team, netActive: this.netActive,
+      hairColor: p.appearance?.hairColor ?? { r: 215, g: 90, b: 55 },
+      coins,
+      worldSurface: world.groundLevel, rockLayer: world.rockLevel, maxTilesY: world.h,
+      isDay, time,
+      waterStyle: this.waterStyle,
+      zoneShimmer: !!this.scene?.zoneShimmer,
+      shimmerTorch: flick ? flick.shimmerTorchColor() : [0.9, 0.55, 1.2],
+      disco: flick ? [flick.discoR, flick.discoG, flick.discoB] : [255, 255, 255],
+      lightRgb,
+      nowSec: this._liquidNow / 1000,
+    });
+  }
+
+  /** 发色剂头发叠层。back=true 画后发层（本体之前）；false 画前发层+头甲（本体之后，
+   *  层序对齐 compositePaperDoll 内 后发→身体→前发→头甲） */
+  private drawDollHairOverlays(
+    p: Player,
+    equip: { head?: number | null; body?: number | null; legs?: number | null },
+    row: number, pad: number,
+    color: { r: number; g: number; b: number },
+    back: boolean,
+  ): void {
+    const layer = p.appearance ? dollHairLayer(p.appearance, equip?.head ?? 0) : null;
+    if (!layer) return;
+    const tinted = hairFrameTinted(layer, row, color);
+    if (!tinted) return;
+    const ctx = this.ctx;
+    if (back) {
+      if (!layer.back) return;   // 无后发层发型：后段不画（前段画全帧高）
+      ctx.drawImage(tinted, 0, 0, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
+      return;
+    }
+    // 前发层（backHairDraw 时只画顶部 26px——PlayerDrawSet:1751-1753）
+    const frontH = layer.back ? 26 : FRAME_H;
+    ctx.drawImage(tinted, 0, 0, FRAME_W, frontH, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, frontH);
+    const head = headArmorImage(equip?.head ?? 0);
+    if (head) ctx.drawImage(head, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
   }
 
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null, flicker: FlickerClock | null = null) {
@@ -5625,6 +6281,12 @@ export class Renderer {
         { x: p.x, y: p.y, w: p.w, h: p.h }, p.mount.heightBoost)
       : null;
     if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
+    // ---- heldProj 指向（渲染层单点；模型与门见 src/render/heldProj.ts 头注）----
+    // 玩家持有"挂着活体投射物"的武器（食人鱼枪 1156→190）时持物瞄准角改指向
+    // 投射物；挥砍/饮用等非 useStyle 5 动画与 noGraphic 族原样让位（挥舞优先）。
+    // swing 过期时合成一条 useStyle 5（= aiStyle 39 SetDummyItemTime(5) 的渲染侧
+    // 等价，Projectile.cs:26086），持物按住期间持续可见。
+    swing = applyHeldProjPointing(p, swing);
     // ---- 手持物（PlayerDrawLayers.cs:3857 门槛）：itemAnimation>0 || (holdStyle!=0) ----
     // 武器/工具 holdStyle=0 → 仅使用中渲染（下方挥舞动画）；火把/荧光棒族 holdStyle=1、
     // 雨伞族 holdStyle=2 等静持时也渲染（ItemCheck_ApplyHoldStyle :49496 逐值持位）；
@@ -5757,7 +6419,13 @@ export class Renderer {
       const wingSlot = p.equipStats.wing && !mnt ? p.equipStats.wing.logic : 0;
       if (wingSlot > 0 && this.atlas) {
         const d = wingDrawOf(wingSlot);
-        const dyeEmu = dyeEmulationOf(p.wingDyeVid());
+        const dyeEmu = dyeApplyOf(p.wingDyeVid());
+        if (dyeEmu) {
+          dyeEmu.uniforms.uDirection = p.facing;              // ArmorShaderData.Apply 尾段 entity.direction
+          if (dyeEmu.tech === 'ArmorReflective' || dyeEmu.tech === 'ArmorReflectiveColor') {
+            dyeEmu.uniforms.uLightSource = this.reflectiveLightSource(p);
+          }
+        }
         // ShouldDrawWingsThatAreAlwaysAnimated 门（:30271）：vy≠0 && 未锚定钩爪 &&
         // 非水中漂浮（mount.CanUseWings 已由上方坐骑清零门覆盖）
         const alwaysOk = !d.alwaysAir
@@ -5769,14 +6437,13 @@ export class Renderer {
           const anchor = d.headgearRow
             ? wingAnchorForRow(d, this.playerBodyRow(p, swing, staticHoldStyle, mnt))
             : d.anchor;
-          // lit 主纹理（合成前）：generic/22/23/27/30/38/39/43/47/48/49/50 + rainbowLayer
+          // lit 主纹理（合成前）：generic/22/23/27/30/38/39/43/47/48/49/50
+          //（44 彩虹翼是 mainGlow 族，只走烘焙图链，不入此分支）
           // stealth：armor 主纹理 RGBA×s'（3106/蘑菇矿 :1539-1541/星璇 secondColor
           // A=s'）→ alpha ×s'；星璇另带 RGB 暗青 tint（secondColor）；
-          // cWings 染料（Player.cs:9417 → dyeEmulationOf 仿真族，effect 族缺口跳过）
+          // cWings 染料（Player.cs:9417 → SM2 字节码执行，全技术可用）
           if (!d.mainGlow && d.overlay?.kind !== 'betsy') {
-            const tex = d.rainbowLayer
-              ? this.atlas.ensureVImage('vanilla/Extra_171.png')
-              : this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
+            const tex = this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
             if (tex && tex.naturalWidth > 0) {
               const fh = Math.floor(tex.naturalHeight / d.frames);
               const sc = this.wingTexSource(tex, 0, fr * fh, tex.naturalWidth, fh, dyeEmu, vortexTint);
@@ -5810,7 +6477,10 @@ export class Renderer {
       let dollEquip = dollEquipFromInv(p.inv, this.atlas);
       // ⑮ 狼人形态（PlayerFrame :35457-35484：wereWolf 时盔甲槽强制 38/21/20）
       if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
-      const doll = compositePaperDoll(p.appearance, dollEquip);
+      // 发色剂（Player.hairDye 1..12）：动态染料逐帧变色——头发/头甲拆出烘焙，
+      // 此处按 后发→本体→前发→头甲 叠画（PlayerDrawSet 发层序同构）
+      const dyeColor = this.hairDyeRenderColor(p, world, flicker);
+      const doll = compositePaperDoll(p.appearance, dollEquip, dyeColor ? { skipHair: true } : undefined);
       if (doll) {
         let row = 0; // 0 站立
         if (useRow >= 0) row = useRow;
@@ -5835,7 +6505,9 @@ export class Renderer {
         // 贴底:纸娃娃帧底有 ~2px 透明边距(Player_0_10 全帧实测),底锚会悬空——
         // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿
         const pad = this.spriteBottomPad(f, `doll:${row}`);
+        if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, true);
         ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
+        if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
         drawn = true;
       }
     }
@@ -5975,10 +6647,16 @@ export class Renderer {
     //      次帧生效）。仅背层走一遍，避免双层重复累加 ----
     if (layer === 'back' && this.lighting) {
       // Colors.CurrentLiquidColor 近似（Colors.cs _liquidColors 表）：按玩家浸入液体
-      // 取色，未浸入取当前群系水色档 0；liquidAlpha 渐变未建模（登记）
+      // 取色，未浸入取当前群系水色档 0；背层液色渐变由下方 case-12 背层段以
+      // mnt.fishronCounter 直读实现（Mount.Draw :5780-5787）
       const lc: [number, number, number] = p.inLava ? [253, 32, 3]
         : p.inHoney ? [59, 29, 131] : [9, 61, 191];
-      for (const l of mountLights(mnt, p, { liquidColor: lc, worldSurface, miscCounter: p.miscCounter })) {
+      // WindForVisuals = Main.windSpeedCurrent（Main.cs:2896）——扫帚挂件风摆项
+      // （Mount.cs :3553 num2）取真实风值，缺省 0（无风）
+      const wind = renderEnv.wind ?? 0;
+      for (const l of mountLights(mnt, p, {
+        liquidColor: lc, worldSurface, miscCounter: p.miscCounter, wind,
+      })) {
         this.lighting.addLight(l.tx, l.ty, l.r, l.g, l.b);
       }
     }
@@ -6007,18 +6685,19 @@ export class Renderer {
           : p.facing < 0;
         if (flip) ctx.scale(-1, 1);
         // ---- 机身倾斜（Mount.cs Hover 尾段 :3468-3521 写 player.fullRotation）：
-        //      UFO 7 / 钻头 8 绕锚点（原版 origin = Size/2）；巫婆扫帚 23 绕底心
-        //      （:3520 origin = (w/2, height)）。仅机身层随转——原版会带动玩家本体
-        //      一起旋转（Player 绘制整组），本仓玩家层不转（drawMountLayer 所有权
-        //      之外的近似，登记） ----
+        //      原版 mount 贴图与玩家本体同在 PlayerDrawSet 绘制缓存里，TransformDrawData
+        //      （PlayerDrawLayers.cs:4199-4230）绕 drawinfo.Position+fullRotationOrigin
+        //      把【全部层】作刚体旋转——两侧 pivot 必然同源：
+        //        UFO 7 / 钻头 8 = mounted 盒心（Mount.cs:6268-6271 (width/2, height/2)）
+        //        巫婆扫帚 23 = mounted 盒底心（Mount.cs:3520 (width/2, height)）
+        //      故此处与 drawPlayer 的 playerMountRotation 取同一锚（mounted 盒系，
+        //      不含 xOffset/yOffset/playerOffset 贴图定位项——曾挂贴图锚点上与本体
+        //      差 ≈4px（yOffset 4 + playerOffset），备案已核销）。旋转零角时
+        //      playerMountRotation 返 null，rotate(0) 本就恒等，跳过等价 ----
         if (mnt.type === 7 || mnt.type === 8 || mnt.type === 23) {
-          if (mnt.type === 23) {
-            ctx.translate(0, fh / 2);
-            ctx.rotate(mnt.fullRotation);
-            ctx.translate(0, -fh / 2);
-          } else {
-            ctx.rotate(mnt.fullRotation);
-          }
+          const mrot = playerMountRotation(mnt.type, mnt.fullRotation,
+            { x: p.x, y: p.y, w: p.w, h: p.h }, mnt.heightBoost);
+          if (mrot) applyPlayerMountRotation(ctx, mrot);
         }
         // 层旋转（Mount.Draw :5793-5796）：钻头背层 = 外环角 / 钻头眼前层 = 二极管角
         if (mnt.type === 8) {
@@ -6043,13 +6722,14 @@ export class Renderer {
           ctx.restore();
           return;
         }
-        // ---- 猪鲨崽背层液色渐染（Mount.Draw case 12 :5780-5787）：背层以环境液色
-        //      整层替换绘制，alpha = 127/255 × clamp(计数器/60)（出水后 60t 渐隐）。
-        //      Canvas 等价 = 贴图行 × 液色 multiply 后 destination-in 裁回 alpha 蒙版
-        //      （ChunkCache 油漆同款两步法） ----
+        // ---- 猪鲨崽背层液色渐染（Mount.Draw case 12 :5780-5787）：
+        //      `color = CurrentLiquidColor; color.A = 127; color *= num8`，
+        //      num8 = clamp(计数器/60, 0, 1)（出水后 60t 渐隐）——RGB 与 alpha
+        //      同乘 num8（整色缩放）。Canvas 等价 = 贴图行 × 液色×num8 multiply 后
+        //      destination-in 裁回 alpha 蒙版（ChunkCache 油漆同款两步法） ----
         if (mnt.type === 12 && layer === 'back') {
           const scratch = this.mountTintScratch();
-          const wash = Math.min(1, Math.max(0, mnt.fishronCounter / 60));
+          const wash = fishronWashFactor(mnt.fishronCounter);
           if (wash > 0 && scratch) {
             const { c, x: tc } = scratch;
             const lc = p.inLava ? [253, 32, 3] : p.inHoney ? [59, 29, 131] : [9, 61, 191];
@@ -6061,7 +6741,7 @@ export class Renderer {
             tc.clearRect(0, 0, img.width, fh);
             tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
             tc.globalCompositeOperation = 'multiply';
-            tc.fillStyle = `rgb(${lc[0]},${lc[1]},${lc[2]})`;
+            tc.fillStyle = `rgb(${Math.round(lc[0] * wash)},${Math.round(lc[1] * wash)},${Math.round(lc[2] * wash)})`;
             tc.fillRect(0, 0, img.width, fh);
             tc.globalCompositeOperation = 'destination-in';
             tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
@@ -6097,9 +6777,15 @@ export class Renderer {
               // 二极管层（frontExtra）：不随 facing 翻（上面 flip 只对 front 主层）——
               // 此处在已翻转的坐标系里先翻回来，再按 diodeRotation 旋转；同层先抵消
               // 机身倾斜（fullRotation）——激光段原版 ignorePlayerRotation=true（:6061），
-              // 二极管贴图随机身倾斜的原版差异一并近似掉（登记）
+              // 二极管贴图随机身倾斜的原版差异一并近似掉（登记）。
+              // 抵消须绕同一 mounted 盒 pivot 取逆（上方机身旋转已改挂该锚）——
+              // 简单 rotate(−θ) 绕贴图锚点会残留 pivot 杠杆位移（≈|Δ|·θ，~1.5px）
               ctx.save();
-              if (mnt.fullRotation !== 0) ctx.rotate(-mnt.fullRotation);
+              if (mnt.fullRotation !== 0) {
+                const inv = playerMountRotation(mnt.type, -mnt.fullRotation,
+                  { x: p.x, y: p.y, w: p.w, h: p.h }, mnt.heightBoost);
+                if (inv) applyPlayerMountRotation(ctx, inv);
+              }
               if (flip) ctx.scale(-1, 1);
               ctx.rotate(mnt.diodeRotation);
               ctx.drawImage(ex, 0, 0, ex.width, ex.height, -ex.width / 2, -ex.height / 2, ex.width, ex.height);
@@ -6851,7 +7537,7 @@ export class Renderer {
       (wx) => ox + (wx / TILE - sx) / viewTiles * size,
       (wy) => oy + (wy / TILE - sy) / viewTiles * size,
       entities.filter((e) => e instanceof TownNPC) as TownNPC[],
-      entities.filter((e) => e instanceof Enemy) as Enemy[]);
+      entities.filter((e) => e instanceof Enemy) as Enemy[], world);
     ctx.restore();
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
     const { skin, tex } = this.minimapSkinAssets();
@@ -7126,6 +7812,7 @@ export class Renderer {
     headScale: number,
     mapX: (wx: number) => number, mapY: (wy: number) => number,
     npcs: TownNPC[], enemies: Enemy[],
+    world: World | null = null,
   ) {
     if (!this.atlas) return;
     const drawHead = (img: CanvasImageSource | null, wx: number, wy: number,
@@ -7153,9 +7840,29 @@ export class Renderer {
     // 纸娃娃帧 0 顶部 40×32 裁头带(整宽+发冠带,24×22 会削发型——用户报"绘制不完整");
     // 无外观回退头贴图 0
     if (player.appearance) {
-      const doll = compositePaperDoll(player.appearance, dollEquipFromInv(player.inv, this.atlas) as never);
-      if (doll) drawHead(doll as unknown as HTMLCanvasElement, player.cx, player.cy, player.facing < 0, 0, 1, 40, 32);
-      else return; // 纸娃娃未就绪:头像层整体等下一帧(原版头层贴图驱动同理)
+      const equip = dollEquipFromInv(player.inv, this.atlas) as { head?: number | null };
+      // 发色剂激活：地图头带同样拆发层（40×32 裁头带按 后发→本体→前发→头甲 合成）
+      const dyeColor = world ? this.hairDyeRenderColor(player, world, null) : null;
+      const doll = compositePaperDoll(player.appearance, equip, dyeColor ? { skipHair: true } : undefined);
+      if (doll) {
+        let img: CanvasImageSource = doll;
+        if (dyeColor) {
+          const strip = this.headStripScratch ??= document.createElement('canvas');
+          if (strip.width !== 40 || strip.height !== 32) { strip.width = 40; strip.height = 32; }
+          const sctx = strip.getContext('2d')!;
+          sctx.imageSmoothingEnabled = false;
+          sctx.clearRect(0, 0, 40, 32);
+          const layer = dollHairLayer(player.appearance, equip?.head ?? 0);
+          const tinted = layer ? hairFrameTinted(layer, 0, dyeColor) : null;
+          if (tinted && layer?.back) sctx.drawImage(tinted, 0, 0, 40, 32, 0, 0, 40, 32);
+          sctx.drawImage(doll, 0, 0, 40, 32, 0, 0, 40, 32);
+          if (tinted) sctx.drawImage(tinted, 0, 0, 40, 26, 0, 0, 40, 26);
+          const head = headArmorImage(equip?.head ?? 0);
+          if (head) sctx.drawImage(head, 0, 0, 40, 32, 0, 0, 40, 32);
+          img = strip;
+        }
+        drawHead(img, player.cx, player.cy, player.facing < 0, 0, 1, 40, 32);
+      } else return; // 纸娃娃未就绪:头像层整体等下一帧(原版头层贴图驱动同理)
     } else {
       drawHead(this.atlas.ensureVImage('vanilla/NPC_Head_0.png'), player.cx, player.cy, false, 0, 1);
     }
@@ -7295,7 +8002,7 @@ export class Renderer {
         (wx) => cx0 + wx / TILE * fm.zoom,
         (wy) => cy0 + wy / TILE * fm.zoom,
         entities.filter((e) => e instanceof TownNPC) as TownNPC[],
-        entities.filter((e) => e instanceof Enemy) as Enemy[]);
+        entities.filter((e) => e instanceof Enemy) as Enemy[], world);
     }
     // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）
     const tp = this.tpMark;

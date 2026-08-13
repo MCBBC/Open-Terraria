@@ -473,6 +473,162 @@ describe('链球特例子子弹(AI_015 尾段)', () => {
   });
 });
 
+describe('链球 GAP#8 细节补齐（AI_015 回源终审,2026-08-13）', () => {
+  /** 录音版 hooks:粒子/定向爆发/音效计数(撞墙冲击波断言用) */
+  function makeRecorded() {
+    const base = makeHooks();
+    const rec = { particles: 0, bursts: 0, sfx: [] as string[] };
+    base.hooks.spawnParticles = () => { rec.particles++; };
+    base.hooks.spawnBurst = () => { rec.bursts++; };
+    base.hooks.playSfx = (name: string) => { rec.sfx.push(name); };
+    return { ...base, rec };
+  }
+
+  it('① ChangeDir:旋转态朝鼠标侧转面(:41203-41210,channel 判定之前)', () => {
+    const { hooks, player } = makeHooks();
+    let target = { x: player.cx + 300, y: player.cy };
+    const f = new FlailProj(player.cx, player.cy - 4, 65, 4, 25, () => true, () => target);
+    run(f, hooks, 3);
+    expect(player.facing).toBe(1);   // 鼠标在右 → ChangeDir(1)
+    expect(f.aiState).toBe(0);       // 仍在旋转态
+    target = { x: player.cx - 300, y: player.cy };
+    run(f, hooks, 3);
+    expect(player.facing).toBe(-1);  // 鼠标在左 → ChangeDir(-1)
+  });
+
+  it('① ChangeDir:掷出态每 tick 面朝球(:41261)', () => {
+    const { hooks, player } = makeHooks();
+    let ch = true;
+    const f = new FlailProj(player.cx, player.cy - 4, 65, 4, 25, () => ch,
+      () => ({ x: player.cx + 300, y: player.cy }));
+    run(f, hooks, 3);
+    ch = false;                       // 松手朝右掷出
+    run(f, hooks, 3);
+    expect(f.cx).toBeGreaterThan(player.cx + 30); // 球已飞到右侧
+    player.facing = -1;               // 人为掰向左——验证状态机每 tick 拉回
+    run(f, hooks, 1);
+    expect(player.facing).toBe(1);    // player.Center.X < proj.Center.X → 1
+  });
+
+  it('② 757 超时过渡【当场】掷气泡 928(速度=throw×0.3×1.3,伤害/击退满额 :41251-41259)', () => {
+    const { hooks, player } = makeHooks();
+    let ch = true;
+    const spawned: Array<{ id: number; v: number; dmg: number; kb: number }> = [];
+    const f = new FlailProj(player.cx, player.cy - 4, 60, 5, 757, () => ch,
+      () => ({ x: player.cx + 300, y: player.cy }));
+    f.spawnProj = (_x, _y, vx, vy, projId, dmg, kb) => spawned.push({ id: projId, v: Math.hypot(vx, vy), dmg, kb });
+    run(f, hooks, 2);
+    ch = false;                       // 掷出(throwSpeed 22,flightTicks 13)
+    run(f, hooks, 13);                // 掷出 tick + 12 计数 = stT 12 < 13
+    expect(spawned.length).toBe(0);
+    run(f, hooks, 1);                 // 第 13 计数 → 回拉 + 气泡
+    expect(spawned.length).toBe(1);
+    expect(spawned[0].id).toBe(928);
+    expect(spawned[0].v).toBeCloseTo(22 * 0.3 * 1.3, 1); // 8.58
+    expect(spawned[0].dmg).toBe(60);  // damage 满额
+    expect(spawned[0].kb).toBe(5);    // knockBack 满额
+  });
+
+  it('② 757 再按过渡掷气泡(×0.2×1.3)且目标态=6 非 3(:41236-41247;case 3 无入口)', () => {
+    const { hooks, player } = makeHooks();
+    let ch = true;
+    const spawned: Array<{ id: number; vx: number }> = [];
+    const f = new FlailProj(player.cx, player.cy - 4, 60, 5, 757, () => ch,
+      () => ({ x: player.cx + 300, y: player.cy }));
+    f.spawnProj = (_x, _y, vx, _vy, projId) => spawned.push({ id: projId, vx });
+    run(f, hooks, 2);
+    ch = false;
+    run(f, hooks, 3);                 // 飞行 3t(未超时)
+    ch = true;                        // 再按
+    run(f, hooks, 1);
+    expect(spawned.length).toBe(1);
+    expect(spawned[0].id).toBe(928);
+    expect(spawned[0].vx).toBeCloseTo(22 * 0.2 * 1.3, 1); // 5.72
+    expect(f.aiState).toBe(6);        // 垂地悬荡——1456 的 case 3 是死状态
+  });
+
+  it('② 247 首枚花瓣恰在第 20t(localAI[0]≥20 :41451-41455);命中归零后仍 20t', () => {
+    const { hooks, player, enemies } = makeHooks();
+    addEnemy(enemies, 60, player.cx + 300, player.cy); // 600 搜索半径内、轨道(40)外
+    const spawned: number[] = [];
+    const f = new FlailProj(player.cx, player.cy - 4, 65, 4, 247, () => true,
+      () => ({ x: player.cx + 300, y: player.cy }));
+    f.spawnProj = (_x, _y, _vx, _vy, projId) => spawned.push(projId);
+    run(f, hooks, 19);
+    expect(spawned.length).toBe(0);   // 前 19t 计数未满
+    run(f, hooks, 1);
+    expect(spawned.length).toBe(1);   // 第 20t 首掷
+    run(f, hooks, 19);
+    expect(spawned.length).toBe(1);   // 命中后 localAI[0]=0 重新累计
+    run(f, hooks, 1);
+    expect(spawned.length).toBe(2);
+  });
+
+  it('② 1058 旋转态 3-5t 首掷 405:方向朝玩家反向±π/4,速 4.5-6.5,伤满额/kb×0.5(:41417-41463)', () => {
+    const { hooks, player } = makeHooks();
+    const spawned: Array<{ x: number; y: number; vx: number; vy: number; id: number; dmg: number; kb: number }> = [];
+    const f = new FlailProj(player.cx, player.cy - 4, 66, 4, 1058, () => true,
+      () => ({ x: player.cx + 300, y: player.cy }));
+    f.spawnProj = (x, y, vx, vy, projId, dmg, kb) => spawned.push({ x, y, vx, vy, id: projId, dmg, kb });
+    let first = -1;
+    for (let i = 0; i < 8 && first < 0; i++) {
+      f.fixedUpdate(1 / 60, hooks);
+      if (spawned.length) first = i + 1;
+    }
+    expect(first).toBeGreaterThanOrEqual(3); // Next(3,6)
+    expect(first).toBeLessThanOrEqual(5);
+    const s = spawned[0];
+    expect(s.id).toBe(405);
+    expect(s.dmg).toBe(66);                  // damage 满额(:41431)
+    expect(s.kb).toBeCloseTo(4 * 0.5, 6);    // 旋转态 num26=kb×0.5(:41420-41422)
+    // v = normalize(ball-player)×Next(45,65)/10 再 ±π/4(:41457-41460)
+    let dev = Math.abs(Math.atan2(s.vy, s.vx) - Math.atan2(s.y - player.cy, s.x - player.cx));
+    if (dev > Math.PI) dev = 2 * Math.PI - dev;
+    expect(dev).toBeLessThanOrEqual(Math.PI / 4 + 1e-6);
+    expect(Math.hypot(s.vx, s.vy)).toBeGreaterThanOrEqual(4.5);
+    expect(Math.hypot(s.vx, s.vy)).toBeLessThanOrEqual(6.5);
+  });
+
+  it('③ 948 火焰重锤入水变 947(:41069-41071);岩浆豁免(lavaWet,:15456-15459)', () => {
+    const { hooks, player } = makeHooks();
+    const store = (hooks.world as { store: TileStore }).store;
+    const mk = () => new FlailProj(player.cx, player.cy - 4, 30, 4, 948, () => true,
+      () => ({ x: player.cx + 10, y: player.cy }));
+    const f = mk();
+    f.fixedUpdate(1 / 60, hooks);
+    expect(f.projId).toBe(948);       // 干燥不变
+    store.setLiquid(Math.floor(f.cx / 16), Math.floor(f.cy / 16), 255, 1); // 水
+    f.fixedUpdate(1 / 60, hooks);
+    expect(f.projId).toBe(947);       // wet && !lavaWet → 变型
+    const f2 = mk();
+    f2.fixedUpdate(1 / 60, hooks);
+    store.setLiquid(Math.floor(f2.cx / 16), Math.floor(f2.cy / 16), 255, 2); // 岩浆
+    f2.fixedUpdate(1 / 60, hooks);
+    expect(f2.projId).toBe(948);      // lavaWet 豁免
+  });
+
+  it('④ 掷出撞墙:坠落态+挖掘音一响+冲击波+位移回卷(:41027-41045)', () => {
+    const { hooks, player, rec } = makeRecorded();
+    const store = (hooks.world as { store: TileStore }).store;
+    for (let y = 80; y < 100; y++) store.setTile(56, y, 1); // 竖墙(左缘 x=896)
+    let ch = true;
+    const f = new FlailProj(player.cx, player.cy - 4, 60, 4, 25, () => ch,
+      () => ({ x: player.cx + 300, y: player.cy }));
+    run(f, hooks, 2);
+    ch = false;                       // 朝右掷出(throwSpeed 14)
+    let hitTick = -1, xBefore = 0;
+    for (let i = 0; i < 12 && hitTick < 0; i++) {
+      xBefore = f.x;
+      f.fixedUpdate(1 / 60, hooks);
+      if (f.aiState === 5) hitTick = i;
+    }
+    expect(hitTick).toBeGreaterThanOrEqual(0);          // 撞墙 → 坠落态(:41028)
+    expect(f.x).toBeCloseTo(xBefore - 14, 5);           // position -= vector(:41035)
+    expect(rec.sfx.filter((s) => s === 'dig').length).toBe(1); // SoundID 0 一响(num2 档收拢)
+    expect(rec.bursts).toBeGreaterThanOrEqual(1);       // CreateImpactExplosion2 冲击波环
+  });
+});
+
 
 describe('弗莱龙刺 405(aiStyle 70 全语义)', () => {
   it('ai0=-10 漂入段:10t 内减速+α衰减,不追踪', () => {

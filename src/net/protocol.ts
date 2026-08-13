@@ -91,12 +91,18 @@ export const enum Msg {
 }
 
 /** NetModule 表（0-2 对齐原版 NetworkInitializer.cs 注册序：Liquid/Text/Ping；
- *  JoinLeave=3 与原版 NetAmbienceModule 撞号——本协议双端自洽，无互操作需求） */
+ *  JoinLeave=3 与原版 NetAmbienceModule 撞号——本协议双端自洽，无互操作需求）
+ *  LeashedEntity=13 对齐原版注册序（NetworkInitializer.cs:25 第 14 个 Register）：
+ *  旧双端 default 忽略未知 moduleId，新增通道不破坏在跑实例——故不升 PROTO_VER
+ *  （升版会踢掉正在运行的旧 server 进程，共享开发环境不宜） */
 export const enum NetModule {
   Liquid = 0,   // 预留（v1 液体客户端本地）
   Text = 1,     // 聊天 {authorSlot, text, r, g, b}（author=255 无前缀，对齐原版 255=服务器）
   PingModule = 2, // 预留
   JoinLeave = 3,  // S→C 系统 {slot, joined}——加入/离开公告（原版 Lang.mp[19]/[20]，服务器广播）
+  LeashedEntity = 13, // 拴绳实体（原版 LeashedEntity.NetModule，msg82 承载）：
+                      //   sub1=FullSync（新增/section 激活全量）/ sub2=PartialSync（周期位置）/
+                      //   sub0=Remove——仅房主上行，服务器登记后按条带定向补发（见 net/leashedSync.ts）
 }
 
 // ================= Writer（小端，定宽；字符串 = u16 长度 + UTF-8） =================
@@ -123,6 +129,8 @@ export class NetWriter {
   }
 
   u8(v: number): this { this.grow(1); this.buf[this.len++] = v & 255; return this; }
+  /** sbyte（原版 writer.Write(sbyte)——C# 有符号字节；v 超界按位回绕） */
+  i8(v: number): this { return this.u8(v); }
   u16(v: number): this { this.grow(2); this.dv.setUint16(this.len, v, true); this.len += 2; return this; }
   i16(v: number): this { this.grow(2); this.dv.setInt16(this.len, v, true); this.len += 2; return this; }
   u32(v: number): this { this.grow(4); this.dv.setUint32(this.len, v >>> 0, true); this.len += 4; return this; }
@@ -131,6 +139,9 @@ export class NetWriter {
   f64(v: number): this { this.grow(8); this.dv.setFloat64(this.len, v, true); this.len += 8; return this; }
   bool(v: boolean): this { return this.u8(v ? 1 : 0); }
   bytes(b: Uint8Array): this { this.grow(b.length); this.buf.set(b, this.len); this.len += b.length; return this; }
+  /** 半精度 f16（IEEE 754 binary16，舍入 = 就近偶数；XNA HalfVector2.PackedValue 1:1——
+   *  原版 Utils.WritePackedVector2（Utils.cs:1395-1398）即写此 16 位打包值） */
+  f16(v: number): this { return this.u16(f32ToHalf(v)); }
   str(s: string): this {
     const b = new TextEncoder().encode(s);
     this.u16(b.length);
@@ -156,6 +167,8 @@ export class NetReader {
     this.dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   }
   u8(): number { return this.buf[this.p++]; }
+  /** sbyte（原版 reader.ReadSByte()——无符号字节按符号位扩展） */
+  i8(): number { const v = this.buf[this.p++]; return v & 0x80 ? v - 256 : v; }
   get remaining(): number { return this.buf.length - this.p; }
   u16(): number { const v = this.dv.getUint16(this.p, true); this.p += 2; return v; }
   i16(): number { const v = this.dv.getInt16(this.p, true); this.p += 2; return v; }
@@ -165,10 +178,61 @@ export class NetReader {
   f64(): number { const v = this.dv.getFloat64(this.p, true); this.p += 8; return v; }
   bool(): boolean { return this.u8() !== 0; }
   bytes(n: number): Uint8Array { const b = this.buf.subarray(this.p, this.p + n); this.p += n; return b; }
+  /** 半精度 f16（配对 NetWriter.f16；NaN→NaN、Inf→Inf、下溢→±0） */
+  f16(): number { return halfToF32(this.u16()); }
   str(): string {
     const n = this.u16();
     return new TextDecoder().decode(this.bytes(n));
   }
+}
+
+// ================= f16（half float）编解码：XNA HalfVector2 1:1 =================
+
+const F32_BUF = new Float32Array(1);
+const U32_BUF = new Uint32Array(F32_BUF.buffer);
+
+/** 24 位尾数右移 + 就近偶数舍入（s ≥ 1） */
+function rshiftRNE(m: number, s: number): number {
+  const out = m >>> s;
+  const rem = m & ((1 << s) - 1);
+  const half = 1 << (s - 1);
+  if (rem > half || (rem === half && (out & 1) === 1)) return out + 1;
+  return out;
+}
+
+/** f32 → f16 位型（IEEE 754 binary16）。XNA HalfVector2 构造同源
+ *  （Microsoft.Xna.Framework.Graphics.PackedVector 半精度规范）：
+ *  上溢 → ±Inf、下溢（< 2^-24 量级）→ ±0、NaN 保号保尾数高位 */
+export function f32ToHalf(v: number): number {
+  F32_BUF[0] = v;                       // 先单精度化（对齐 C# float 运算精度）
+  const x = U32_BUF[0];
+  const sign = (x >>> 16) & 0x8000;
+  const exp = (x >>> 23) & 0xff;
+  const man = x & 0x7fffff;
+  if (exp === 0xff) return sign | 0x7c00 | (man ? 0x200 : 0); // Inf / NaN
+  let e = exp - 127 + 15;               // f32 偏移 127 → f16 偏移 15
+  if (e >= 31) return sign | 0x7c00;    // 上溢 → ±Inf
+  if (e <= 0) {
+    if (e < -10 || exp === 0) return sign;   // 下溢 / f32 亚正规 → ±0
+    let sub = rshiftRNE(man | 0x800000, 14 - e);  // f16 亚正规尾数
+    if (sub >= 0x400) return sign | 0x0400;       // 舍入进位到最小正规数
+    return sign | sub;
+  }
+  let m = rshiftRNE(man, 13);
+  if (m === 0x400) { m = 0; e++; if (e >= 31) return sign | 0x7c00; }
+  return sign | (e << 10) | m;
+}
+
+/** f16 位型 → f32（精确：f16 全部可由 f32 无损表示） */
+export function halfToF32(h: number): number {
+  const sign = (h & 0x8000) >>> 15;
+  const e = (h >>> 10) & 0x1f;
+  const m = h & 0x3ff;
+  let out: number;
+  if (e === 0) out = m * 5.960464477539063e-8;   // 亚正规：m * 2^-24
+  else if (e === 31) out = m ? NaN : Infinity;
+  else out = (1 + m / 1024) * 2 ** (e - 15);
+  return sign ? -out : out;
 }
 
 // ================= 帧流解析（粘包；对齐原版 CheckBytes 语义） =================

@@ -73,6 +73,10 @@ export interface SummonSetFx extends SummonFx {
   whipSpd?: number;
   /** 行为型：星尘守护者（套装在身 → buff 187 + 常驻 proj 623） */
   guardian?: boolean;
+  /** 女猎手 T2/T3 套装旗标（Player.cs:16119-16122 / :16145-16149 setHuntressT2）：
+   *  爆炸机关弹 694-696 命中上 Oiled 门（StatusNPC :10786）+ 机关冷却 90→60/30
+   *  （GetExplosiveTrapCooldown :66109-66119,冷却档未接登记） */
+  huntressT2?: boolean;
 }
 
 export const SUMMON_SET: Record<string, SummonSetFx> = {
@@ -92,11 +96,13 @@ export const SUMMON_SET: Record<string, SummonSetFx> = {
   // 套装专精旗标（setSquireT3 等→Etherian mana 消耗/哨兵行为）与 bonus 文本登记未接
   '204|201|145': { sentry: 1 },      // Squire T2（:16107）
   '203|200|144': { sentry: 1 },      // Apprentice T2（:16113）
-  '205|202|146': { sentry: 1 },      // Huntress T2（:16119;腿 146/147 双变体,146 实装）
+  '205|202|146': { sentry: 1, huntressT2: true },  // Huntress T2（:16119;腿 146/147 双变体,146 实装）
+  '205|202|147': { sentry: 1, huntressT2: true },  // Huntress T2 腿变体 147（:16121 (legs == 147 || legs == 146)）
   '206|203|148': { sentry: 1 },      // Monk T2（:16125）
   '210|204|152': { sentry: 1 },      // Squire T3（:16131）
   '211|205|153': { sentry: 1 },      // Apprentice T3（:16138）
-  '212|206|154': { sentry: 1 },      // Huntress T3（:16145;腿 154/155,154 实装）
+  '212|206|154': { sentry: 1, huntressT2: true },  // Huntress T3（:16145;T3 也置 setHuntressT2 :16149）
+  '212|206|155': { sentry: 1, huntressT2: true },  // Huntress T3 腿变体 155（:16147）
   '213|207|156': { sentry: 1 },      // Monk T3（:16152）
   '189|190|130': { guardian: true },                     // 星尘（不加槽，守护者行为型）
 };

@@ -2306,8 +2306,13 @@ export class DD2GoblinBomb extends Entity {
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    if (img) ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.h);
-    else { ctx.fillStyle = '#3A3A3A'; ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h); }
+    if (img) {
+      // 原生 14×20（SetDefaults 681 仅 14×14 判定盒，scale=1；曾压成 14×14 竖向掐短）。
+      // Main.cs:29811 type 681 velocity.X>0 时 ^= FlipHorizontally（贴图默认朝左）;
+      // origin (7,13) = (texW/2, h/2+num143=6)（Main.cs:29805 num143=6 + :29856 num145）
+      if (this.vx > 0) ctx.scale(-1, 1);
+      ctx.drawImage(img, -7, -13, img.naturalWidth, img.naturalHeight);
+    } else { ctx.fillStyle = '#3A3A3A'; ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h); }
     ctx.restore();
     void cam;
   }
@@ -2359,17 +2364,11 @@ export class DD2OgreSmash extends Entity {
     }
   }
   draw(r: import('../render/Renderer').Renderer, cam: import('../render/Camera').Camera): void {
-    const ctx = r.canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.save();
-    ctx.globalAlpha = 0.8;
-    ctx.translate(this.cx, this.cy);
-    ctx.imageSmoothingEnabled = false;
-    const img = r.atlas?.ensureVImage('vanilla/Projectile_683.png');
-    const s = this.w / 30;                 // 贴图原尺寸 30²,按盒缩放
-    if (img) ctx.drawImage(img, -this.w / 2, -this.h / 2, 30 * s, 30 * s);
-    else { ctx.fillStyle = '#8A6A4A'; ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h); }
-    ctx.restore();
+    // 原版 683 不绘制本体:SetDefaults alpha=255（Projectile.cs:7003-7012）且 AI_135
+    // （:65725-65830）全程不调 alpha → Opacity 恒 0,贴图从不显示;视觉效果只靠
+    // 每 3t 的 KillTile 尘爆 + 溅射 gore（:65787-65820）。曾画成随盒扩张的贴图
+    // （盒扩到 640² → 巨型方块,双重失真）——移除本体绘制（G11 对账）
+    void r;
     void cam;
   }
 }

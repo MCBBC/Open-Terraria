@@ -1,12 +1,26 @@
-// 原版 Dust 引擎（Dust.cs NewDust :75-285 / UpdateDust :423-2450 / Main.DrawDust
-// :38266-38436 / GetAlpha :2469-2772 / GetColor :2773-2817）——翅膀视觉批引入。
+// 原版 Dust 引擎（Dust.cs NewDust :75-285 / CloneDust :260-288 / UpdateDust
+// :423-2450 / Main.DrawDust :38266-38436 / GetAlpha :2469-2772 / GetColor
+// :2773-2817）——翅膀视觉批引入，拴绳小动物批扩表。
 //
 // 范围说明：本引擎按"消费方已用到的 type"精植（翅膀尘埃 13 型：6/31/43/55/58/76/
-// 86/182/217/229/240/261/264），逐型带源码行号；NewDust 初始化链与通用老化链
-// （fadeIn=生长目标语义 :2148-2171：0<fadeIn<100 时 scale += 0.03/t 至超 fadeIn
-// 转衰落；否则 scale -= 0.01/t）全量 1:1。后续其它系统接入新 type 时按同法扩表。
+// 86/182/217/229/240/261/264；拴绳批 5 型：43/15/267/278/6——见各 case 行号），
+// 逐型带源码行号；NewDust 初始化链与通用老化链（fadeIn=生长目标语义 :2148-2171：
+// 0<fadeIn<100 时 scale += 0.03/t 至超 fadeIn 转衰落；否则 scale -= 0.01/t）
+// 全量 1:1。后续其它系统接入新 type 时按同法扩表。
 //
-// 光照：261/264/182 逐尘 AddLight（update 期收集 → Game 推 LightingEngine）。
+// UpdateDust 结构（照源码三分段，勿合并）：
+//  ① 链 A 独占 else-if 链（:423-2139）：一尘至多命中一链接，命中者跳过 :1884
+//     通用重力与 :2136 兜底 vx×0.99（267/278 例外见 case 注）；
+//  ② 公共段：:2144 旋转 + :2148 fadeIn 老化（全体）；
+//  ③ 链 B 独占链（:2197-2386）：130-134/278/219-223/226/272 + :2379 兜底
+//     （type!=304 && noGravity → velocity×0.92、fadeIn==0 时 scale−0.04）。
+//  本引擎 switch(链A)+老化后 switch(链B) 两段对应；261/264/182 维持翅膀批
+//  既有链 A 单段近似（其后通用重力照旧——扩表时勿动）。
+//
+// 光照：261/264/182/43/15 族/267/278/6 逐尘 AddLight（update 期收集 → Game 推
+// LightingEngine）；43 型需读光（Lighting.GetColor :1475 照度门）——update 由
+// Game 注入 lightAt 采样器；278 型入实心格收缩（:2264 WorldGen.SolidTile）需
+// solidTileAt 探针；两者缺省 = 全亮/不实心（无注入时门不误杀）。
 // 绘制：亮色族 {6,15,59-64}（DrawDust 强制 White :38406）画在光照合成之后
 // （= 原版 GetColor(White) 等价），其余画在合成前（逐像素乘光 ≈ 原版逐尘取光）。
 // 双 pass：本体（GetAlpha）+ 自定义色 pass（GetColor 加性钳位 :2773）。
@@ -39,6 +53,10 @@ export interface VDust {
 const POOL = 512;
 
 const clamp255 = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : v | 0);
+
+/** C# default(Color)（NewDust :170 dust.color = newColor 的缺省实参）= (0,0,0,0)。
+ *  逐型分支读 color.R/G/B 时按此兜底——无色尘的发光贡献恒 0（与原版一致）。 */
+const BLACK: DustColor = { r: 0, g: 0, b: 0, a: 0 };
 
 /** NewDust 帧映射（:176-191）：X = 10·type，type≥100 每 100 减 1000 加 Y+30 */
 function frameOf(type: number): { fx: number; fy: number } {
@@ -106,10 +124,39 @@ export class VanillaDust {
     return d;
   }
 
+  /** CloneDust（:260-288）：NewDust 复入池后逐字段覆写复原（spawn 的抖动/烟雾
+   *  特例全部被覆盖）。dustIndex==maxDustToDraw 自身返回（:267-270）在池模型下
+   *  等价于"源尘失活/池满返回 null"。注意 noLightEmittance 不复制（原版字段表
+   *  :273-286 无此项——NewDust 重置为 false） */
+  clone(rf: VDust): VDust | null {
+    if (!rf.active) return rf;
+    const c = this.spawn(rf.x, rf.y, 5, 5, rf.type, rf.vx, rf.vy, rf.alpha, rf.color, 1);
+    if (!c) return null;
+    c.x = rf.x; c.y = rf.y;                    // :273 position
+    c.vx = rf.vx; c.vy = rf.vy;                // :274 velocity
+    c.fadeIn = rf.fadeIn;                      // :275
+    c.noGravity = rf.noGravity;                // :276
+    c.scale = rf.scale;                        // :277
+    c.rotation = rf.rotation;                  // :278
+    c.noLight = rf.noLight;                    // :279
+    c.active = rf.active;                      // :280
+    c.type = rf.type;                          // :281
+    c.color = rf.color;                        // :282
+    c.alpha = rf.alpha;                        // :283
+    c.fx = rf.fx; c.fy = rf.fy;                // :284 frame（原样复制，非重掷）
+    c.followPlayer = rf.followPlayer;          // :286 customData=Player
+    c.followOnce = rf.followOnce;
+    return c;
+  }
+
   /** UpdateDust（:423-2450，消费型精植）。playerDelta = 主角本 tick 位移
-   *  （oldPosition 差——customData=Player 跟随用） */
+   *  （oldPosition 差——customData=Player 跟随用）。
+   *  lightAt = Lighting.GetColor(tx,ty) 采样器（43 型照度门 :1475-1484；缺省全亮）；
+   *  solidTileAt = WorldGen.SolidTile 探针（278 型入实心格收缩 :2264-2268；缺省恒假） */
   update(screenX: number, screenY: number, screenW: number, screenH: number,
-    playerDx = 0, playerDy = 0): void {
+    playerDx = 0, playerDy = 0,
+    lightAt: ((tx: number, ty: number) => [number, number, number]) | null = null,
+    solidTileAt: ((tx: number, ty: number) => boolean) | null = null): void {
     this.lights.length = 0;
     for (const d of this.pool) {
       if (!d.active) continue;
@@ -117,7 +164,8 @@ export class VanillaDust {
       if (d.scale > 10) { d.active = false; continue; }
       // :469 position += velocity
       d.x += d.vx; d.y += d.vy;
-      // ---- 逐型段 ----
+      // ---- 链 A 独占段（:423-2139：命中即跳过 :1884 重力与 :2136 兜底阻尼）----
+      let chainLink = false;
       switch (d.type) {
         case 264:   // :625-641：光 + 一次性主角跟随
           if (!d.noLight) {
@@ -153,11 +201,79 @@ export class VanillaDust {
           d.scale -= 0.0025;
           if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }
           break;
+        case 6: {   // :890-1092 烟雾族链接（拴绳批地狱蝶）：轻重力 + 灰橙光
+          if (!d.noGravity) d.vy += 0.05;                 // :892-895（非通用 0.1）
+          if (!d.noLight && !d.noLightEmittance) {        // :918 尾档 else :1083-1090
+            const k = Math.min(d.scale * 1.4, 0.6);
+            this.lights.push({ x: d.x, y: d.y, r: k, g: k * 0.65, b: k * 0.4 });
+          }
+          chainLink = true;
+          break;
+        }
+        case 43: {  // :1472-1518 金尘：旋转 + 照度门 + 两段缩放 + 持续玩家跟随
+          d.rotation += 0.1 * d.scale;                    // :1474
+          const lc = lightAt
+            ? lightAt(Math.floor(d.x / 16), Math.floor(d.y / 16)) : [255, 255, 255];
+          const c = d.color ?? BLACK;                     // :1479-1481（default(Color)=黑）
+          const lr = (lc[0] / 270) * d.scale * 1.07 * (c.r / 255);
+          const lg = (lc[1] / 270) * d.scale * 1.07 * (c.g / 255);
+          const lb = (lc[2] / 270) * d.scale * 1.07 * (c.b / 255);
+          if (d.alpha < 255) {                            // :1485-1493 生长档
+            d.scale += 0.09;
+            if (d.scale >= 1) { d.scale = 1; d.alpha = 255; }
+          } else {                                        // :1494-1504 双段收缩
+            if (d.scale < 0.8) d.scale -= 0.01;
+            if (d.scale < 0.5) d.scale -= 0.01;
+          }
+          if (lr < 0.05 && lg < 0.05 && lb < 0.05) {      // :1505-1508 照度门
+            d.active = false;
+          } else if (!d.noLightEmittance) {               // :1509-1512
+            this.lights.push({ x: d.x, y: d.y, r: lr, g: lg, b: lb });
+          }
+          if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }   // :1513-1517
+          chainLink = true;
+          break;
+        }
+        case 15: case 57: case 58: case 274: case 292: {  // :1519-1551 Recall/魔光族
+          d.vy *= 0.98; d.vx *= 0.98;                     // :1521-1522
+          if (!d.noLightEmittance) {                      // :1523-1550
+            let k = d.type === 15 ? d.scale : d.scale * 0.8;   // :1525-1529
+            if (d.noLight) { d.vx *= 0.95; d.vy *= 0.95; }     // :1530-1533
+            if (k > 1) k = 1;                             // :1534-1537
+            if (d.type === 15) {                          // :1538-1541
+              this.lights.push({ x: d.x, y: d.y, r: k * 0.45, g: k * 0.55, b: k });
+            } else if (d.type === 57) {                   // :1542-1545
+              this.lights.push({ x: d.x, y: d.y, r: k * 0.95, g: k * 0.95, b: k * 0.45 });
+            } else if (d.type === 58) {                   // :1546-1549
+              this.lights.push({ x: d.x, y: d.y, r: k, g: k * 0.55, b: k * 0.75 });
+            }
+            // 274/292：仅阻尼无光（原版同链无 AddLight 分支）
+          }
+          chainLink = true;
+          break;
+        }
+        case 267: {  // :1660-1686 帝皇蝶尘：方向旋转 + 阻尼 + 生长 + 自色光
+          d.rotation += d.vx < 0 ? -1 : 1;                // :1662-1669
+          d.vy *= 0.98; d.vx *= 0.98;                     // :1670-1671
+          d.scale += 0.02;                                // :1672
+          const k = Math.min(d.scale * 0.8, 1);           // :1673-1677
+          if (d.noLight) d.noLight = false;               // :1678-1681 自愈
+          if (!d.noLight && !d.noLightEmittance) {        // :1682-1685
+            const c = d.color ?? BLACK;
+            this.lights.push({ x: d.x, y: d.y, r: k * c.r / 255, g: k * c.g / 255, b: k * c.b / 255 });
+          }
+          chainLink = true;
+          break;
+        }
+        case 278:   // :2240-2269 妖精尘：链 A 无专档，仅命中 :2136-2139 兜底
+          d.vx *= 0.99;
+          chainLink = true;
+          break;
         default:
           break;
       }
-      // :1889-1897 重力（链头特型不在消费集）
-      if (!d.noGravity && d.type !== 41 && d.type !== 44 && d.type !== 309) {
+      // :1884-1894 重力（链 A 命中者由其链接自管速度，跳过；链头特型不在消费集）
+      if (!chainLink && !d.noGravity && d.type !== 41 && d.type !== 44 && d.type !== 309) {
         d.vy += 0.1;
       }
       // :2144-2146 通用旋转
@@ -173,6 +289,40 @@ export class VanillaDust {
       } else if (d.type !== 304) {
         if (d.type === 213 || d.type === 260) d.scale -= 0.2;
         else d.scale -= 0.01;
+      }
+      // ---- 链 B 独占段（:2197-2386，公共老化之后）----
+      switch (d.type) {
+        case 278: {  // :2240-2269：自色光 + 双档阻尼 + 入实心格收缩
+          const k = Math.min(d.scale, 1);                 // :2242-2246
+          if (!d.noLight && !d.noLightEmittance) {        // :2247-2250
+            const c = d.color ?? BLACK;
+            this.lights.push({ x: d.x, y: d.y, r: c.r / 255 * k, g: c.g / 255 * k, b: c.b / 255 * k });
+          }
+          if (d.noGravity) {                              // :2251-2258
+            d.vx *= 0.93; d.vy *= 0.93;
+            if (d.fadeIn === 0) d.scale += 0.0025;
+          } else {                                        // :2259-2263
+            d.vx *= 0.95; d.vy *= 0.95;
+            d.scale -= 0.0025;
+          }
+          if (solidTileAt && d.fadeIn === 0 && !d.noGravity   // :2264-2268
+            && solidTileAt(Math.floor(d.x / 16), Math.floor(d.y / 16))) {
+            d.scale *= 0.9;
+            d.vx *= 0.25; d.vy *= 0.25;
+          }
+          break;
+        }
+        case 6: case 15: case 43: case 57:
+        case 58: case 267: case 274: case 292:
+          // :2379-2386 链 B 兜底（type!=304 && noGravity 才有效应——拴绳批诸型
+          // 多为 noGravity=false 不命中；267 恒命中：无此档则生长段后只增不减）
+          if (d.noGravity) {
+            d.vx *= 0.92; d.vy *= 0.92;
+            if (d.fadeIn === 0) d.scale -= 0.04;
+          }
+          break;
+        default:
+          break;
       }
       // :2387 屏底清除
       if (d.y > screenY + screenH) { d.active = false; continue; }
@@ -196,6 +346,11 @@ export class VanillaDust {
       case 261: return { rgb: 230 / 255, a: 115 / 255 };                       // :2521
       case 6: return { rgb: 1, a: 25 / 255 };                                   // :2583
       case 182: return { rgb: 1, a: 0 };                                        // :2517
+      case 267: return { rgb: 1, a: 0 };                                        // :2743-2746 Color(color.RGB,0)——色走 color pass
+      case 278: return { rgb: 1, a: 25 / 255 };                                 // :2632-2637 newColor×color, A=25
+      case 58: return { rgb: 1, a: 0 };                                         // :2721-2724 Color(255,255,255,0)
+      // 15/57/274 亮色族走默认档：本体 A=255−alpha（:2756-2759），(num+3)/4 的
+      // 光乘区折减由"画在合成后强制 White"（DrawDust :38406）等价表达
       case 264: {                                                               // :2508
         const c = d.color ?? { r: 0, g: 0, b: 0, a: 0 };
         return { rgb: 0.5, a: (clamp255(c.a / 8) / 255) * 0.5 };

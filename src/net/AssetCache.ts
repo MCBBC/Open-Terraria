@@ -181,7 +181,9 @@ export async function initAssetCache(): Promise<void> {
   if (typeof isSecureContext !== 'undefined' && !isSecureContext) return; // 纯 http 非 localhost 降级
   try {
     state.version = assetVersion();
-    const reg = await navigator.serviceWorker.register('sw.js');
+    // updateViaCache:'none':SW 脚本本身绕过 HTTP 缓存——否则部署新版 sw.js 后
+    // 浏览器最长 24h 仍跑旧 SW(标准坑,2026-08-13)
+    const reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
     await navigator.serviceWorker.ready;
     const sw = navigator.serviceWorker.controller ?? reg.active ?? null;
     if (!sw) return;
@@ -207,6 +209,12 @@ function onSwMessage(e: MessageEvent): void {
     // 初始判定:以 SW 实测缓存数对齐进度(被系统清理→cached 变小→重新补下)
     if (typeof d.cached === 'number' && d.version === state.version) {
       state.done = Math.min(d.cached, state.total);
+      // 满缓存直接判定完成——免得每次进菜单空跑 23 个块(SW keys() 扫一遍×23)
+      if (state.done >= state.total && chunkCursor === 0) {
+        chunkCursor = plan.urls.length;
+        state.warming = false;
+        state.phase = 'done';
+      }
       lastProgressAt = Date.now();
       emit();
     }
@@ -235,10 +243,21 @@ let watchdogTimer: ReturnType<typeof setInterval> | 0 = 0;
 const CHUNK = 500;
 let chunkCursor = 0;      // 下一块在 plan.urls 的起始下标
 let chunkFailedAcc = 0;   // 跨块累计失败
+let autoRetries = 0;      // 全量跑完仍有失败时的自动补拉轮数(限速期偶发失败自愈)
 
 function sendChunk(): void {
   const slice = plan.urls.slice(chunkCursor, chunkCursor + CHUNK);
   if (!slice.length) {
+    // 全量跑完仍有失败 → 自动重拉一轮(keys() 过滤=只补失败项,极快);
+    // 3 轮后放弃,交人工(门槛弹窗的"重新下载"按钮)
+    if (chunkFailedAcc > 0 && autoRetries < 3) {
+      autoRetries++;
+      chunkFailedAcc = 0;
+      state.failed = 0;
+      chunkCursor = 0;
+      sendChunk();
+      return;
+    }
     state.warming = false;
     state.phase = 'done';
     state.done = plan.urls.length;
@@ -260,12 +279,16 @@ function startWatchdog(): void {
   }, 5_000) as unknown as ReturnType<typeof setInterval>;
 }
 
-/** 全量后台下载(进菜单即调;分块接力+断点续传,已下载跳过/被清理只补缺) */
-export function warmAllAssets(): void {
+/** 全量后台下载(进菜单即调;分块接力+断点续传,已下载跳过/被清理只补缺)。
+ *  force=true:门槛弹窗"重新下载"按钮用——**绕过已完成早退守卫**(3 轮自动
+ *  重试耗尽后 done>=total 恒真,不绕过则按钮点了没反应=用户永久卡死,2026-08-13) */
+export function warmAllAssets(force = false): void {
   if (!state.enabled) return;
   if (state.warming) return;
-  if (state.done >= state.total && chunkCursor >= plan.urls.length) return; // 已完成(幂等)
+  if (!force && state.done >= state.total && chunkCursor >= plan.urls.length) return; // 已完成(幂等)
+  if (force) { chunkCursor = 0; state.done = 0; state.phase = phaseAt(0); }
   chunkFailedAcc = 0;
+  autoRetries = 0;
   sendChunk();
 }
 

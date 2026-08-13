@@ -16,7 +16,7 @@ import {
   type MountedPlayerView,
   DRILL_PICK_POWER, DRILL_PICK_TIME, DRILL_MAX_LENGTH,
   drillBlockTarget, drillWallTarget, clampToDeadZone, scutlixFindTarget,
-  inAPlaceWithWind,
+  inAPlaceWithWind, fishronWashFactor,
   canKillTileAt, canPlayerSmashWallAt, smoothSlopeAt, bodyRotationFor, mountLights,
   MountShot,
   type DrillStore, type DrillBeam, type SlopeStore,
@@ -740,10 +740,91 @@ describe('蜥蜴 14 / 山羊 47：特殊跳与冲刺态（UpdateEffects + JumpMo
   });
 });
 
+describe('山羊 47 火焰编排器门（Mount.cs :3885-3896 SolidTileAllowBottomSlope）', () => {
+  /** 落脚格视图桩：flags/type/half/slope/frameX 按需覆写（落脚格 = (tx,ty) 由调用方定） */
+  const footStore = (tx: number, ty: number, over: {
+    type?: number; half?: number; slope?: number; frameX?: number; liquid?: number; flagsOn?: boolean;
+  } = {}) => {
+    const w = 40, h = 40;
+    const idx = (x: number, y: number) => y * w + x;
+    const inBounds = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h;
+    const flags = new Uint8Array(w * h); flags[idx(tx, ty)] = over.flagsOn === false ? 0 : 1;
+    const type = new Uint16Array(w * h); type[idx(tx, ty)] = over.type ?? 1;
+    const half = new Uint8Array(w * h); half[idx(tx, ty)] = over.half ?? 0;
+    const slope = new Uint8Array(w * h); slope[idx(tx, ty)] = over.slope ?? 0;
+    const frameX = new Uint16Array(w * h); frameX[idx(tx, ty)] = over.frameX ?? 0;
+    const liquid = new Uint8Array(w * h); liquid[idx(tx, ty)] = over.liquid ?? 0;
+    return { w, h, inBounds, idx, flags, type, half, slope, frameX, liquid,
+      isSolid: (x: number, y: number) => inBounds(x, y) && flags[idx(x, y)] !== 0,
+    } as never;
+  };
+  const runGoat = (st: never) => {
+    const m = new MountInstance();
+    m.setMount(47, view());
+    m.dashing = true;
+    // 玩家底边落在 ty-1 → 落脚格 = ty（Mount.cs num25+1）
+    const p = view({ y: 100, h: 42, vy: 0, store: st });
+    const fires: Array<[number, number]> = [];
+    m.updateMountEffects(p, {
+      scutlixTargets: [], los: () => true, fishron: {
+        hp: 100, maxHp: 100, inWater: false, inLava: false, inHoney: false,
+        dripping: false, raining: false, windExposed: false,
+      },
+      goatFlames: (x, y) => fires.push([x, y]),
+    });
+    return fires;
+  };
+  const FOOT_Y = Math.trunc((100 + 42 - 1) / 16) + 1;   // (141)/16=8 → 落脚格 y=9
+
+  it('整砖实心无液 → 触发，出生点 = (tx×16+8, ty×16+16)', () => {
+    const tx = Math.trunc((100 + 20 / 2) / 16);          // Center.X/16 = 6
+    const fires = runGoat(footStore(tx, FOOT_Y));
+    expect(fires).toHaveLength(1);
+    expect(fires[0]).toEqual([tx * 16 + 8, FOOT_Y * 16 + 16]);   // ★纵向 +16 偏移（:3895）
+  });
+
+  it('SolidTileAllowBottomSlope（cs:70172-70194）：平台放行 / 半砖拦 / 顶坡按帧 / 有液拦', () => {
+    const tx = Math.trunc((100 + 20 / 2) / 16);
+    // 平台（tileSolidTop）→ 放行
+    const platId = TILE_DEFS.findIndex((d) => d.platform);
+    expect(runGoat(footStore(tx, FOOT_Y, { type: platId }))).toHaveLength(1);
+    // 半砖 → 拦
+    expect(runGoat(footStore(tx, FOOT_Y, { half: 1 }))).toHaveLength(0);
+    // 顶坡 slope 1 + 非平台 → 拦（topSlope=1|2，Tile.cs:320）
+    expect(runGoat(footStore(tx, FOOT_Y, { slope: 1 }))).toHaveLength(0);
+    expect(runGoat(footStore(tx, FOOT_Y, { slope: 2 }))).toHaveLength(0);
+    // 顶坡 + 平台 + 合法顶帧（frameX 0 → 列 0 ∈[0,7]）→ 放行（cs:70223 豁免）
+    expect(runGoat(footStore(tx, FOOT_Y, { type: platId, slope: 1, frameX: 0 }))).toHaveLength(1);
+    // 顶坡 + 平台 + 非法帧（frameX 198 → 列 11 ∉ 合法段）→ 拦
+    expect(runGoat(footStore(tx, FOOT_Y, { type: platId, slope: 1, frameX: 198 }))).toHaveLength(0);
+    // 有液体 → 拦（:3891 tile.liquid == 0 门）
+    expect(runGoat(footStore(tx, FOOT_Y, { liquid: 255 }))).toHaveLength(0);
+    // 底坡（slope 3/4 非 topSlope）→ 放行
+    expect(runGoat(footStore(tx, FOOT_Y, { slope: 3 }))).toHaveLength(1);
+  });
+
+  it('非冲刺态/空中不触发（:3887 flag6 && velocity.Y==0）', () => {
+    const tx = Math.trunc((100 + 20 / 2) / 16);
+    const m = new MountInstance();
+    m.setMount(47, view());
+    m.dashing = false;
+    const p = view({ y: 100, h: 42, vy: 0, store: footStore(tx, FOOT_Y) });
+    let n = 0;
+    m.updateMountEffects(p, {
+      scutlixTargets: [], los: () => true, fishron: {
+        hp: 100, maxHp: 100, inWater: false, inLava: false, inHoney: false,
+        dripping: false, raining: false, windExposed: false,
+      },
+      goatFlames: () => { n++; },
+    });
+    expect(n).toBe(0);
+  });
+});
+
 describe('猪鲨崽 12：MountFishronSpecial 湿身语义（Player.cs:3882 + Mount.cs:3354/:4996）', () => {
   const fv = (over: Partial<Parameters<MountInstance['fishronSpecial']>[0]> = {}) => ({
     hp: 100, maxHp: 100, inWater: false, inLava: false, inHoney: false,
-    raining: false, windExposed: false, ...over,
+    dripping: false, raining: false, windExposed: false, ...over,
   });
 
   it('增益真值表：湿身/半血以下/雨中露天 = 全额；干爽满血无雨 = 减半', () => {
@@ -772,6 +853,31 @@ describe('猪鲨崽 12：MountFishronSpecial 湿身语义（Player.cs:3882 + Mou
     expect(m.fishronCounter).toBe(59);                        // 先衰减再判（:25340）
     m.fishronCounter = 0;
     expect(m.fishronSpecial(fv())).toBe(false);
+  });
+
+  it('dripping 消费（Player.cs:3886 `!dripping`）：buff 103 Wet 激活 → 全额增益', () => {
+    const m = new MountInstance();
+    m.setMount(12, view());
+    // 干爽满血无雨无 Wet → 减半
+    expect(m.fishronSpecial(fv({ dripping: true }))).toBe(true);
+    // dripping 只进增益判定——updateFishron 不因 Wet 写计数器（Mount.cs :4996-5003
+    // 计数器仅由 wet | 雨中露天驱动）
+    m.updateFishron(fv({ dripping: true, inWater: false, raining: false }));
+    expect(m.fishronCounter).toBe(0);
+    expect(m.fishronBoost).toBe(true);
+    // Wet 到期（dripping 回落）且无其他增益源 → 减半恢复
+    expect(m.fishronSpecial(fv({ dripping: false }))).toBe(false);
+  });
+
+  it('liquidAlpha 渐变因子（Mount.Draw case 12 :5780-5787）：clamp(计数器/60, 0, 1)', () => {
+    // num8 = clamp(MountFishronSpecialCounter/60f, 0f, 1f)；color.A=127 后整色 × num8
+    expect(fishronWashFactor(0)).toBe(0);
+    expect(fishronWashFactor(30)).toBeCloseTo(0.5);
+    expect(fishronWashFactor(60)).toBe(1);
+    expect(fishronWashFactor(420)).toBe(1);          // 钳上界
+    expect(fishronWashFactor(-5)).toBe(0);           // 钳下界
+    // 渲染层 alpha = 127/255 × num8（Renderer.drawMountLayer 消费同一因子）
+    expect((127 / 255) * fishronWashFactor(15)).toBeCloseTo((127 / 255) * 0.25);
   });
 
   it('hover 增益态全额 / 非增益态加速度减半（:3354 num=0.5）', () => {
@@ -803,6 +909,24 @@ describe('猪鲨崽 12：MountFishronSpecial 湿身语义（Player.cs:3882 + Mou
     expect(p.mount.fishronBoost).toBe(true);
     expect(p.damageMult('melee')).toBeCloseTo(1.15);
     expect(p.damageMult('summon')).toBeCloseTo(1.15);
+  });
+
+  it('Player 挂钩：Wet buff 103 → dripping 全额增益（:3886 `!dripping`）', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    tick(p, w, 8);
+    p.mount.setMount(12, p);
+    expect(p.mount.fishronBoost).toBe(false);                 // 干爽满血无雨
+    p.buffs.apply(BuffType.Wet, 4);                           // 371 接触授予
+    tick(p, w, 1);
+    expect(p.mount.fishronBoost).toBe(true);                  // dripping → 全额
+    expect(p.damageMult('melee')).toBeCloseTo(1.15);
+    // ★Wet 不写 420 计数器（Mount.cs :4996-5003 计数器仅 wet|雨天驱动）——
+    // Wet 到期后增益即消失（区别于出水后的 420t 余效）
+    p.buffs.remove(BuffType.Wet);
+    tick(p, w, 1);
+    expect(p.mount.fishronBoost).toBe(false);
+    expect(p.mount.fishronCounter).toBe(0);
   });
 
   it('inAPlaceWithWind：地表以上无液无墙（WorldGen.cs:66135）', () => {
@@ -905,7 +1029,7 @@ describe('钻头边缘①：CanKillTile/CanPlayerSmashWall 子集（WorldGen.cs:
 
   it('drillWallTarget：3×3 规则下天然墙仅曝露缘可锁（钻头侧已接 CanPlayerSmashWall）', () => {
     // 3×3 天然墙 7 块：外缘格（外侧邻墙 0）可拆、内芯未曝露不可拆 → 光束锁定
-    // 扫带内的首个曝露缘格（12,19）
+    // 扫带内的首个曝露缘格（12,19)
     const sealed: Record<string, number> = {};
     for (let i = 12; i <= 14; i++) for (let j = 19; j <= 21; j++) sealed[`${i},${j}`] = 7;
     const st = fakeDrillStore([], sealed);
@@ -913,6 +1037,90 @@ describe('钻头边缘①：CanKillTile/CanPlayerSmashWall 子集（WorldGen.cs:
       .toEqual({ x: 12, y: 19 });
     // 内芯 (13,20) 直接判定：3×3 全同墙 → 不可拆
     expect(canPlayerSmashWallAt(st, 13, 20)).toBe(false);
+  });
+});
+
+// ============================================================================
+// CanKillTile 追加四子项（WorldGen.cs:62316-62356）：锁门/巨石承载/传送器 235/
+// 容器内容（CanDestroyChest）
+// ============================================================================
+
+const sheetId = (sheet: number): number => TILE_DEFS.findIndex((d) => d.vanilla?.sheet === sheet);
+const DOOR_ID = sheetId(10);      // 关门表（内部 17）
+const CHEST_ID = sheetId(21);     // 基础宝箱（内部 16）
+const DRESSER_ID = sheetId(88);   // 梳妆台
+const TELEPORTER_ID = sheetId(235);
+const BOULDER_ID = sheetId(138);
+const ALTAR_ID = sheetId(77);
+/** KillTileCtx 桩：occupied = 内容非空的宝箱锚格集合 */
+const mkCtx = (occupied: Array<[number, number]> = [], hardMode = false) => ({
+  hardMode,
+  chestDestroyable: (x: number, y: number) => !occupied.some(([ox, oy]) => ox === x && oy === y),
+});
+
+describe('钻头边缘①b：CanKillTile 追加四子项（WorldGen.cs:62316-62356）', () => {
+  it('上锁门（case 10 :62323-62330）：关门表 + frameY 594-646 + frameX<54 → 不可杀', () => {
+    // 神庙锁门帧段 → 不可锁定
+    const locked = fakeDrillStore([], {}, 40, 40, { '13,20': [0, 594] }, { '13,20': DOOR_ID });
+    expect(canKillTileAt(locked, 13, 20)).toBe(false);
+    // 锁段右列（frameX≥54）→ 可杀（IsLockedDoor 仅认关闭态左列）
+    const lockedRight = fakeDrillStore([], {}, 40, 40, { '13,20': [54, 594] }, { '13,20': DOOR_ID });
+    expect(canKillTileAt(lockedRight, 13, 20)).toBe(true);
+    // 锁段之外（frameY 648，已 +54 解锁）→ 可杀
+    const unlocked = fakeDrillStore([], {}, 40, 40, { '13,20': [0, 648] }, { '13,20': DOOR_ID });
+    expect(canKillTileAt(unlocked, 13, 20)).toBe(true);
+    // 开门表（sheet 11）不参与锁判定
+    const openDoor = sheetId(11);
+    const opened = fakeDrillStore([], {}, 40, 40, { '13,20': [0, 594] }, { '13,20': openDoor });
+    expect(canKillTileAt(opened, 13, 20)).toBe(true);
+  });
+
+  it('巨石-承载保护（:62316-62321 + CheckBoulderChest :48810）：锚点上方两格有容器 → 不可杀', () => {
+    // (13,20) 巨石 frameX 18（中列）→ 锚点归一到左列 (12,20)；其上方 (12,19) 放宝箱
+    const st = fakeDrillStore([], {}, 40, 40, { '13,20': [18, 0] }, { '13,20': BOULDER_ID, '12,19': CHEST_ID });
+    expect(canKillTileAt(st, 13, 20)).toBe(false);
+    // 上方两格皆空 → 可杀
+    const clear = fakeDrillStore([], {}, 40, 40, { '13,20': [18, 0] }, { '13,20': BOULDER_ID });
+    expect(canKillTileAt(clear, 13, 20)).toBe(true);
+    // 祭坛 77 非困难模式也拦（CheckTileBreakability :62494）
+    const altar = fakeDrillStore([], {}, 40, 40, { '13,20': [18, 0] }, { '13,20': BOULDER_ID, '12,19': ALTAR_ID });
+    expect(canKillTileAt(altar, 13, 20, mkCtx([], false))).toBe(false);
+    expect(canKillTileAt(altar, 13, 20, mkCtx([], true))).toBe(true);   // hardMode 放行
+  });
+
+  it('传送器 235（case 235 :62331-62344）：锚点列起上方 3 格扫描', () => {
+    // (13,20) 传送器 frameX 54（右列，%54=0 → baseX=13）；上方 (14,19) 放模特 470 → 拦
+    const mannequin = sheetId(470);
+    const st = fakeDrillStore([], {}, 40, 40, { '13,20': [54, 0] },
+      { '13,20': TELEPORTER_ID, '14,19': mannequin });
+    expect(canKillTileAt(st, 13, 20)).toBe(false);
+    // 上方 3 格外（(17,19)，超出 baseX+2）→ 不拦
+    const far = fakeDrillStore([], {}, 40, 40, { '13,20': [54, 0] },
+      { '13,20': TELEPORTER_ID, '17,19': mannequin });
+    expect(canKillTileAt(far, 13, 20)).toBe(true);
+    // 同型自身顶行不拦（ignoreType 门 :62493）
+    const self = fakeDrillStore([], {}, 40, 40, { '13,20': [54, 0] },
+      { '13,20': TELEPORTER_ID, '13,19': TELEPORTER_ID });
+    expect(canKillTileAt(self, 13, 20)).toBe(true);
+  });
+
+  it('容器内容门（case 21/467/88 :62345-62356）：CanDestroyChest——有物不可杀', () => {
+    // 宝箱 frameX 18（右列，/18=1，%2=1 → 锚 x=12）；frameY 18（底行 → 锚 y=19）
+    const frames: Record<string, [number, number]> = { '13,20': [18, 18] };
+    const types: Record<string, number> = { '13,20': CHEST_ID };
+    const st = fakeDrillStore([], {}, 40, 40, frames, types);
+    // 无 ctx（坡面平滑链）→ 最宽近似可杀
+    expect(canKillTileAt(st, 13, 20)).toBe(true);
+    // 锚格 (12,19) 有内容 → 不可杀
+    expect(canKillTileAt(st, 13, 20, mkCtx([[12, 19]]))).toBe(false);
+    // 内容在别的锚 → 可杀
+    expect(canKillTileAt(st, 13, 20, mkCtx([[13, 19]]))).toBe(true);
+    // 梳妆台 88：%3 归一（frameX 36 → /18=2，%3=2 → 锚 x=11）
+    const df: Record<string, [number, number]> = { '13,20': [36, 18] };
+    const dt: Record<string, number> = { '13,20': DRESSER_ID };
+    const dst = fakeDrillStore([], {}, 40, 40, df, dt);
+    expect(canKillTileAt(dst, 13, 20, mkCtx([[11, 19]]))).toBe(false);
+    expect(canKillTileAt(dst, 13, 20, mkCtx([[12, 19]]))).toBe(true);
   });
 });
 
@@ -1088,7 +1296,7 @@ describe('渲染装饰：坐骑点光（Mount.cs AddLight 汇总）——mock �
     const flags = new Uint8Array(40 * 40);
     flags[base.idx(18, 7)] = 1;
     const solidView = {
-      inBounds: base.inBounds, idx: base.idx, flags,
+      inBounds: base.inBounds, idx: base.idx, flags, type: base.type,
       isSolid: (x: number, y: number) => base.isActive(x, y),
     } as never;
     const withStore = view({ x: 100, y: 100, vx: 16, vy: 0, store: solidView });
@@ -1096,6 +1304,38 @@ describe('渲染装饰：坐骑点光（Mount.cs AddLight 汇总）——mock �
     // 非增益态无光
     m.fishronBoost = false;
     expect(collect(m, view({ x: 100, y: 100 }))).toHaveLength(0);
+  });
+
+  it('猪鲨崽落点门 = WorldGen.SolidTile（:4984→cs:70155）：半砖/坡面/平台不算实心', () => {
+    // WorldGen.SolidTile = active && tileSolid && !tileSolidTop && !half && slope==0
+    // && !inActive——落点是半砖/坡面/平台时【不退回身侧】（光落在原格）
+    const base = fakeDrillStore([[18, 7]]);
+    const flags = new Uint8Array(40 * 40);
+    flags[base.idx(18, 7)] = 1;
+    const mkStore = (over: { half?: number; slope?: number; type?: number }) => ({
+      inBounds: base.inBounds, idx: base.idx, flags,
+      type: (() => { const t = new Uint16Array(40 * 40); t[base.idx(18, 7)] = over.type ?? 1; return t; })(),
+      half: (() => { const h = new Uint8Array(40 * 40); h[base.idx(18, 7)] = over.half ?? 0; return h; })(),
+      slope: (() => { const s = new Uint8Array(40 * 40); s[base.idx(18, 7)] = over.slope ?? 0; return s; })(),
+      isSolid: (x: number, y: number) => base.isActive(x, y),
+    } as never);
+    const m = new MountInstance();
+    m.setMount(12, view({ x: 100, y: 100 }));
+    m.fishronBoost = true;
+    const lightAt = (st: unknown) => {
+      const ls = collect(m, view({ x: 100, y: 100, vx: 16, vy: 0, store: st as never }));
+      return [ls[0][0], ls[0][1]];
+    };
+    // 整砖实心 → 退回身侧 (8,7)
+    expect(lightAt(mkStore({}))).toEqual([8, 7]);
+    // 半砖 → SolidTile false → 光落身前点 (18,7)
+    expect(lightAt(mkStore({ half: 1 }))).toEqual([18, 7]);
+    // 坡面 1-4 → 全部不算实心
+    for (const s of [1, 2, 3, 4]) expect(lightAt(mkStore({ slope: s }))).toEqual([18, 7]);
+    // 平台（内部 id 查 TILE_DEFS：platform tile）→ tileSolidTop 排除
+    const platId = TILE_DEFS.findIndex((d) => d.platform);
+    expect(platId).toBeGreaterThan(0);
+    expect(lightAt(mkStore({ type: platId }))).toEqual([18, 7]);
   });
 
   it('蜥蜴 14：worldSurface 以下红光 (0.5,0.1,0.1)（:4079）', () => {

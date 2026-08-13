@@ -320,8 +320,10 @@ function shootRubbleUp(
     if (!solidAt(game, x, y)) continue;
     const ang = -Math.PI / 2 + whichOne * e.facing * 0.7 * (Math.PI / 4 / howMany);
     const spd = 8 + Math.random() * 8;
+    // ai[1] = rand(projFrames[962] × 4) = rand(12)——3×4 网格全 12 格随机(NPC.cs:44768-44770;
+    // 此前误写 6..11 只取下两行)
     addProj(game, new DeerclopsRubbleProj(x * TILE + 8, y * TILE - 8,
-      Math.cos(ang) * spd, Math.sin(ang) * spd, DMG, 6 + Math.floor(Math.random() * 6)));
+      Math.cos(ang) * spd, Math.sin(ang) * spd, DMG, Math.floor(Math.random() * 12)));
     break;
   }
 }
@@ -389,12 +391,15 @@ export class DeerclopsSpikeProj extends Entity {
   private readonly ai1: number;
   private opacity = 0;      // Opacity（0-1 语义）
   private readonly rot: number;
+  /** 变体帧:AI_157 flag=true → frame=rand(5)（Projectile.cs:48487-48490,maxValue=5） */
+  private readonly frame: number;
   life = 20;                // num9=20 出世
   constructor(x: number, y: number, angle: number, private dmg: number, ai1: number) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
     this.rot = angle;
     this.ai1 = ai1;
+    this.frame = Math.floor(Math.random() * 5);
   }
   fixedUpdate(_dt: number, game: GameHooks): void {
     const was = this.ai0;
@@ -427,25 +432,38 @@ export class DeerclopsSpikeProj extends Entity {
     ctx.save();
     ctx.globalAlpha = this.opacity;
     ctx.translate(this.cx, this.cy);
-    ctx.rotate(this.rot + Math.PI / 2);
+    // 朝右贴图:原版 rotation = velocity.ToRotation()（:48485）,无 +π/2 偏置——
+    // 曾 +π/2 把横置冰泪竖过来（G11 旋转模式）。AI 的 scaleY 生长斜坡
+    // GetLerpValue(30,25,ai0)（Main.cs:31009-31011）在 ai0<=20 即 Kill 的寿命内恒 1,死码
+    ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    if (img) ctx.drawImage(img, -16 * s, -16 * s, 32 * s, 32 * s);
-    else { ctx.fillStyle = '#9FD8F0'; ctx.fillRect(-16 * s, -16 * s, 32 * s, 32 * s); }
+    if (img) {
+      // Frame(1,5)（Main.cs:31004）:贴图 200×240 → 帧格 200×48,× scale=Opacity*ai[1]（:48536）。
+      // 曾压成 32×32 判定盒（横向 6.25× / 纵向 5× 失真）。origin (16, 24) = (16, 帧高/2)
+      // （Main.cs:31005）——泪体自锚点向 velocity 方向前伸
+      const fh = img.naturalHeight / 5;
+      ctx.drawImage(img, 0, Math.round(this.frame * fh), img.naturalWidth, Math.round(fh),
+        -16 * s, -(fh / 2) * s, img.naturalWidth * s, fh * s);
+    } else { ctx.fillStyle = '#9FD8F0'; ctx.fillRect(-16 * s, -16 * s, 32 * s, 32 * s); }
     ctx.restore();
   }
 }
 
 // ---------------------------------------------------------------------------
-// 弹幕 962 碎石（aiStyle 1 抛物线 + ai1 帧变体 6-11;timeLeft 220）
+// 弹幕 962 碎石（aiStyle 1 抛物线 + ai1 = rand(12) 3×4 网格变体;timeLeft 220）
 // ---------------------------------------------------------------------------
 export class DeerclopsRubbleProj extends Entity {
   w = 32; h = 32;
   dead = false;
   life = 220;
+  /** 出世姿态角（:54039 localAI[0]==0 时 rotation = velocity.ToRotation() 一次定型,
+   *  此后不随当前速度更新——曾每帧重算 atan2(vy,vx)） */
+  private readonly spawnRot: number;
   constructor(x: number, y: number, public vx: number, public vy: number,
     private dmg: number, private frame: number) {
     super();
     this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.spawnRot = Math.atan2(vy, vx);
   }
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.dead = true; game.onProjectileDeath?.(962, this.x, this.y); return; }
@@ -463,13 +481,16 @@ export class DeerclopsRubbleProj extends Entity {
     const img = r.atlas?.ensureVImage('vanilla/Projectile_962.png');
     ctx.save();
     ctx.translate(this.cx, this.cy);
-    ctx.rotate(Math.atan2(this.vy, this.vx));
+    ctx.rotate(this.spawnRot);
     ctx.imageSmoothingEnabled = false;
     if (img) {
-      // 12 变体 = 4 列×3 行（Main.projFrames[962]=3）;ai1 ∈ 6..11 → 行 floor(/4)
-      const fw = img.naturalWidth / 4, fh = img.naturalHeight / 3;
+      // 网格 = Frame(3,4)（Main.cs:32828-32834:projFrames[962]=3 横 × 4 纵,帧格 34×34）;
+      // frameX = frame%3 / frameY = frame/3。曾按 4 列×3 行（25.5×45.33 非整数格）切片
+      // 并归一到 32×32 判定盒（纵横比翻转,G11）
+      const fw = img.naturalWidth / 3, fh = img.naturalHeight / 4;
       const f = Math.max(0, Math.min(11, this.frame));
-      ctx.drawImage(img, (f % 4) * fw, Math.floor(f / 4) * fh, fw, fh, -16, -16, 32, 32);
+      ctx.drawImage(img, Math.round((f % 3) * fw), Math.round(Math.floor(f / 3) * fh),
+        Math.round(fw), Math.round(fh), -fw / 2, -fh / 2, fw, fh);
     } else { ctx.fillStyle = '#887860'; ctx.fillRect(-16, -16, 32, 32); }
     ctx.restore();
   }
@@ -558,10 +579,20 @@ export class InsanityShadowProj extends Entity {
     ctx.save();
     ctx.globalAlpha = 1 - this.alpha / 255;
     ctx.translate(this.cx, this.cy);
+    // 原版:rotation = ToRotation(+π 向左) 且 dir=FlipHorizontally（AI_187 :39850-39857
+    // 等:velocity.X<0 → spriteDirection=-1 + rotation += π）——两变换叠加,曾漏镜像。
+    // 未单独登记的 vanilla 视觉层（登记偏差）:4 尾影幽灵拷贝 + Black×Opacity 剪影着色
+    // （Main.cs:30747-30757/:30793-30796）
     ctx.rotate(this.rotation);
+    if (this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
-    if (img) ctx.drawImage(img, -20, -20, 40, 40);
-    else { ctx.fillStyle = '#6020B0'; ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.fill(); }
+    if (img) {
+      // 原生 80×84 × scale=1（SetDefaults 965 无 scale;曾归一 40×40 判定盒 → 整体减半）。
+      // origin（Main.cs:29934-29937）:X = spriteDirection==1 ? W-20 : 20,Y = H/2——腕部锚点
+      const ox = this.vx >= 0 ? img.naturalWidth - 20 : 20;
+      const oy = img.naturalHeight / 2;
+      ctx.drawImage(img, -ox, -oy, img.naturalWidth, img.naturalHeight);
+    } else { ctx.fillStyle = '#6020B0'; ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.fill(); }
     ctx.restore();
   }
 }

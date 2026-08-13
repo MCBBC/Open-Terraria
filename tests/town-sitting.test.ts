@@ -1,4 +1,4 @@
-// 城镇 NPC 坐姿 + 微光透明度衰减回归（AI_007 ai[0]==5 族 + shimmerTransparency）。
+// 城镇 NPC 坐姿 + 微光转化链 + 风暴门回归（AI_007 ai[0]==5 族 + ai[0]==25 上升态）。
 // 标杆（Terarria1456/Terraria）：
 //  - 入座 AI_007_TryForcingSitting NPC.cs:53264-53287（椅格=落座地面格上一行、
 //    style 27 排除 frameY∈[1080,1098]、占位互斥、ai[1]=900+rand(10800)、
@@ -10,6 +10,14 @@
 //  - shimmerTransparency：+0.01/t（:92469）、>0.9 转化（:92471）、转化置 0.89
 //    （:92568）、上升态 −1/60（:53625）、justHit −0.1（:92484）、常规 −0.001
 //    （:92492）；消费 = GetAlpha :94874（本体）+ Main.cs:25771-25776（160 Glow）
+//  - 坐姿落盘：WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883-2930 **无 ai[]**
+//    ——ai[0]==5/ai[1] 坐姿态不随存档持久，读档站立、夜间 AI 自然重坐
+//  - ai[0]==25 上升态 :53594-53682：落点传送 :53609/:55982-56059、ai[1]≥30 起
+//    −1/60 + velocity.Y=−4×st :53621-53631、收尾变体翻转 :53664（双向）、
+//    ShimmerTownNPC 粒子 + 成就 43（:53666-53669）
+//  - 风暴门 :53399-53402：Main.IsItStorming（= _shouldUseStormMusic，迟滞机
+//    Main.cs:12927-12960，阈值 0.34/0.4/0.4/0.5 见 :66137-66140）且
+//    position.Y/16 < worldSurface
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TownNPC } from '../src/entities/TownNPC';
@@ -21,8 +29,12 @@ import {
   shimmerTransparencyNext, shimmerBodyAlpha, shimmerGlowAlpha,
   SHIMMER_ST_RAMP, SHIMMER_ST_TRANSFORM, SHIMMER_ST_RISE,
   SHIMMER_ST_DECAY_RISE, SHIMMER_ST_DECAY_HIT, SHIMMER_ST_DECAY_IDLE,
+  SHIMMER_RISE_VELOCITY_TICK, SHIMMER_RISE_END_TICK,
+  SHIMMER_RISE_PAUSE, SHIMMER_RISE_TELEPORT_DIST,
+  remapClamped, isItStormingNext,
 } from '../src/entities/TownNPC';
 import { TILE_BY_KEY } from '../src/data/tiles';
+import { saveGame, loadSave } from '../src/save/SaveFile';
 
 const CHAIR = TILE_BY_KEY['chair']!;            // sheet 15
 const TOILET = TILE_BY_KEY['v_497_toilets']!;   // sheet 497
@@ -36,8 +48,14 @@ function makeGame(world: World, extra: Partial<{
   enemies: unknown[]; npcs: unknown[];
 }> = {}) {
   const shots: TownShot[] = [];
+  /** 演出调用计数（ai[0]==25 上升态断言用） */
+  const fx = {
+    bursts: 0, particles: 0, sfx: [] as string[],
+    achievements: [] as number[],
+  };
   return {
     shots,
+    fx,
     game: {
       world,
       player: { x: -9999, y: -9999, w: 0, h: 0, dead: true },
@@ -45,8 +63,12 @@ function makeGame(world: World, extra: Partial<{
       npcs: () => extra.npcs ?? [],
       critters: () => [],
       spawnTownShot: (s: TownShot) => shots.push(s),
-      spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
+      spawnParticles: (_x: number, _y: number, _c: string, count?: number) => { fx.particles += count ?? 1; },
+      spawnBurst: (_x: number, _y: number, _c: string, count?: number) => { fx.bursts += count ?? 1; },
+      playSfx: (name: string) => { fx.sfx.push(name); },
+      playSfxFiles: () => {},
       addDamageNumber: () => {},
+      achievements: { notifyProgressionEvent: (id: number) => { fx.achievements.push(id); } },
     } as never,
   };
 }
@@ -258,7 +280,7 @@ describe('shimmerTransparency（NPC.cs:92468-92497/:92568/:53625）', () => {
     expect(shimmerGlowAlpha(0.5, 1)).toBeCloseTo(0, 10);   // 全透明
   });
 
-  it('端到端：浸微光 ~91t 渐隐后转化（置 0.89），离池后上升态衰减归零', () => {
+  it('端到端：浸微光 ~91t 渐隐 → 转化（置 0.89 进上升态，非即刻标记变体）', () => {
     const world = new World(200, 200, 100, 'shimmer-test');
     for (let x = 20; x <= 180; x++) world.store.setTileSilent(x, FLOOR, DIRT);
     const npc = new TownNPC('guide', spotCenter(100) - 10, FLOOR * 16);
@@ -269,22 +291,238 @@ describe('shimmerTransparency（NPC.cs:92468-92497/:92568/:53625）', () => {
     // 渐变期（~91t 才到 >0.9，非即刻转化——原版 :92471）
     for (let t = 0; t < 60; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.shimmered).toBe(false);
+    expect(npc.shimmerRising).toBe(false);
     expect(npc.shimmerTransparency).toBeCloseTo(0.6, 5);
-    // 转化：shimmered 翻转当帧 st 恰为 0.89（:92568）
+    // 转化帧：只进 ai[0]=25 上升态 + st=0.89（:92562-92568），变体未翻转
     let tick = -1;
     for (let t = 60; t < 300 && tick < 0; t++) {
       npc.fixedUpdate(1 / 60, game);
-      if (npc.shimmered) tick = t;
+      if (npc.shimmerRising) tick = t;
     }
     // 0.9/0.01 = 90 次 +0.01（浮点累积 0.9000000000000001 > 0.9，恰第 90 次过线）
     expect(tick).toBeGreaterThanOrEqual(85);
     expect(tick).toBeLessThanOrEqual(95);
     expect(npc.shimmerTransparency).toBe(0.89);
-    expect(shimmerBodyAlpha(npc.shimmerTransparency)).toBeCloseTo(0.11, 10);
-    // 离池 → 上升态 −1/60/t 衰减（0.89 → 0 需 54t）
-    world.store.setLiquid(100, 98, 0, 0);
-    for (let t = 0; t < 60; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmered).toBe(false);
+    // 落点传送（:53609）：位置移出微光列（FindSpotWithoutShimmer 近似）
+    expect(Math.abs(npc.x - (spotCenter(100) - 10))).toBeGreaterThan(0);
+    // ai[1]<30 期间 st 原样保持（衰减门 :53621）——转化帧已 ai[1]=0→1，再推 28t 到 29
+    for (let t = 0; t < SHIMMER_RISE_VELOCITY_TICK - 2; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmerTransparency).toBe(0.89);
+    expect(npc.shimmerRising).toBe(true);
+    // ai[1]≥30 起 −1/60/t 衰减 + velocity.Y=−4×st 上浮（:53625-53631）——
+    // 落点传送后先落回地面（1..29 无速度设定只受重力），30 起自站位上浮
+    const standY = FLOOR * 16 - npc.h;
+    let minY = npc.y;
+    for (let t = 0; t < 200 && npc.shimmerRising; t++) {
+      npc.fixedUpdate(1 / 60, game);
+      minY = Math.min(minY, npc.y);
+    }
+    expect(npc.shimmerRising).toBe(false);
+    expect(npc.shimmered).toBe(true);            // 收尾变体翻转（:53664）
     expect(npc.shimmerTransparency).toBeLessThanOrEqual(1e-9);
+    expect(minY).toBeLessThan(standY - 30);      // 上升演出：自地面站位上浮 ≥30px
     expect(shimmerBodyAlpha(npc.shimmerTransparency)).toBe(1);
+  });
+});
+
+describe('ai[0]=25 微光上升态演出（NPC.cs:53594-53682）', () => {
+  /** 备好"地面 + 中心微光池 + 无 home 站定向导"场景，返回 {npc, game, world} */
+  function shimmerScene() {
+    const world = new World(200, 200, 100, 'shimmer-rise');
+    for (let x = 20; x <= 180; x++) world.store.setTileSilent(x, FLOOR, DIRT);
+    const npc = new TownNPC('guide', spotCenter(100) - 10, FLOOR * 16);
+    npc.stationary = true;
+    const { game, fx } = makeGame(world, { npcs: [npc] });
+    world.store.setLiquid(100, 98, 255, 4);
+    return { world, npc, game, fx };
+  }
+
+  /** 推进直到 ai[0]=25 上升态启动（渐隐期 ~91t） */
+  function runUntilRising(npc: TownNPC, game: unknown, cap = 400): boolean {
+    for (let t = 0; t < cap && !npc.shimmerRising; t++) npc.fixedUpdate(1 / 60, game as never);
+    return npc.shimmerRising;
+  }
+
+  /** 自上升态启动推进到收尾（cap 防死循环），返回 tick 数 */
+  function runUntilSettled(npc: TownNPC, game: unknown, cap = 300): number {
+    let t = 0;
+    for (; t < cap && npc.shimmerRising; t++) npc.fixedUpdate(1 / 60, game as never);
+    return t;
+  }
+
+  it('转化帧无即刻粒子/音效（GetShimmered :92561-92573 纯态切换）', () => {
+    const { npc, game, fx } = shimmerScene();
+    for (let t = 0; t < 90 && !npc.shimmerRising; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmerRising).toBe(true);
+    expect(fx.bursts).toBe(0);        // dust 309 门在 ai[1]<30 时钳恒假（:53644 Remap）
+    expect(fx.particles).toBe(0);
+    expect(fx.sfx).toHaveLength(0);
+  });
+
+  it('上升演出：dust 309 + ShimmerBlock 粒子 + 收尾到场粒子/音效/成就 43', () => {
+    const { npc, game, fx } = shimmerScene();
+    expect(runUntilRising(npc, game)).toBe(true);
+    runUntilSettled(npc, game);
+    expect(npc.shimmered).toBe(true);
+    expect(npc.shimmerRising).toBe(false);
+    // 上升段 dust 309（spawnBurst，:53640-53646）与 ShimmerBlock（:53642-53649）
+    expect(fx.bursts).toBeGreaterThan(0);
+    // 收尾 ShimmerTownNPC 到场粒子（:53666 → Spawn_ :1696-1752）+ 音效
+    expect(fx.particles).toBeGreaterThanOrEqual(20);
+    // SoundID.Item29（Spawn_ShimmerTownNPC :1756）——Sfx 键 manaCrystal → Item_29.wav；
+    // 曾因登记"素材缺"以 shimmerSplash 近似（素材实测在库，已换真声）
+    expect(fx.sfx).toContain('manaCrystal');
+    // 成就 43 = ShimmerVillager（AchievementHelperID.Events:43 → NEW_DIGS）
+    expect(fx.achievements).toEqual([43]);
+  });
+
+  it('收尾时间线：ai[1]≥30 起衰减 54t，ai[1]≥75 且 st≤0 收尾（:53621/:53653）', () => {
+    const { npc, game } = shimmerScene();
+    expect(runUntilRising(npc, game)).toBe(true);
+    const ticks = runUntilSettled(npc, game, 300);
+    // 转化帧 ai[1]=0→1，+54 衰减 tick 到 st=0（riseT 84 ≥ 75 收尾门）→ 83t
+    expect(ticks).toBeGreaterThanOrEqual(80);
+    expect(ticks).toBeLessThanOrEqual(110);
+  });
+
+  it('上升态免伤（ai[0]==25 dontTakeDamage :53596）', () => {
+    const { world, npc, game } = shimmerScene();
+    for (let t = 0; t < 120 && !npc.shimmerRising; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.shimmerRising).toBe(true);
+    const hp = npc.hp;
+    expect(npc.hurt(100, 0, 0, game)).toBe(false);
+    expect(npc.hp).toBe(hp);
+    void world;
+  });
+
+  it('变体回切（:53664 双向翻转）：再浸微光 → 上升收尾翻回原形态，成就 43 只发一次', () => {
+    const { npc, game, fx } = shimmerScene();
+    expect(runUntilRising(npc, game)).toBe(true);
+    runUntilSettled(npc, game);
+    expect(npc.shimmered).toBe(true);
+    expect(fx.achievements).toEqual([43]);
+    // 二次浸微光：放回池内重新累积触发
+    npc.x = spotCenter(100) - 10;
+    npc.y = FLOOR * 16 - npc.h;
+    npc.vx = 0; npc.vy = 0;
+    expect(runUntilRising(npc, game, 600)).toBe(true);
+    runUntilSettled(npc, game, 300);
+    expect(npc.shimmerRising).toBe(false);
+    expect(npc.shimmerTransparency).toBeLessThanOrEqual(1e-9);
+    expect(npc.shimmered).toBe(false);          // 翻转回原形态（townNpcVariationIndex 0）
+    expect(fx.achievements).toEqual([43]);      // 43 仅在变体→1 时通知（:53667-9）
+  });
+});
+
+describe('风暴门（NPC.cs:53399-53402 + Main.IsItStorming）', () => {
+  it('IsItStorming 迟滞机 1:1（Main.cs:12927-12960，阈值 0.34/0.4/0.4/0.5）', () => {
+    // 无云恒 false
+    expect(isItStormingNext(0, 0.8, true)).toBe(false);
+    // 高雨+强风 → true
+    expect(isItStormingNext(0.5, 0.4, false)).toBe(true);
+    expect(isItStormingNext(0.8, -0.6, false)).toBe(true);
+    // 低雨或低风 → false
+    expect(isItStormingNext(0.39, 0.8, true)).toBe(false);
+    expect(isItStormingNext(0.8, 0.33, true)).toBe(false);
+    // 中间带保持前值（迟滞）
+    expect(isItStormingNext(0.45, 0.36, true)).toBe(true);
+    expect(isItStormingNext(0.45, 0.36, false)).toBe(false);
+  });
+
+  it('Remap 钳位（Utils.cs:313）', () => {
+    expect(remapClamped(30, 30, 90, 0, 0.7)).toBeCloseTo(0, 10);
+    expect(remapClamped(60, 30, 90, 0, 0.7)).toBeCloseTo(0.35, 10);
+    expect(remapClamped(90, 30, 90, 0, 0.7)).toBeCloseTo(0.7, 10);
+    expect(remapClamped(10, 30, 90, 0, 0.7)).toBeCloseTo(0, 10);     // 区间外钳端值
+    expect(remapClamped(29, 30, 60, 1, 0.5)).toBeCloseTo(1, 10);
+    expect(remapClamped(60, 30, 60, 1, 0.5)).toBeCloseTo(0.5, 10);
+  });
+
+  it('白天风暴 + 地表以上 → 回家 flag（远离 home 静默传送，:53399-53402/:56063）', () => {
+    const world = makeWorld();
+    world.clock.timeOfDay = 0.5;   // 白天（无雨/夜/日食/史莱姆雨）
+    world.groundLevel = FLOOR + 20;   // worldSurface 在 NPC 头顶行之下 → "地表以上"
+    world.weather.cloudAlpha = 0.6;
+    world.weather.windSpeedTarget = 0.5;
+    const npc = new TownNPC('guide', spotCenter(60) - 10, FLOOR * 16);  // 远离 home
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    npc.stationary = true;          // 隔离白天随机游走，只看回家传送
+    const { game } = makeGame(world, { npcs: [npc] });
+    for (let t = 0; t < 120; t++) npc.fixedUpdate(1 / 60, game);
+    // flag=true 且不在好休息位 → TeleportToHome 落位 home 三列之一
+    expect(Math.abs(npc.cx - (SPOT_X * 16 + 8))).toBeLessThanOrEqual(2 * 16);
+  });
+
+  it('非风暴白天不触发回家（flag 四源全假）', () => {
+    const world = makeWorld();
+    world.clock.timeOfDay = 0.5;
+    world.groundLevel = FLOOR + 20;
+    world.weather.cloudAlpha = 0;   // 无云 → IsItStorming 恒 false
+    world.weather.windSpeedTarget = 0;
+    const npc = new TownNPC('guide', spotCenter(60) - 10, FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    npc.stationary = true;
+    const { game } = makeGame(world, { npcs: [npc] });
+    for (let t = 0; t < 120; t++) npc.fixedUpdate(1 / 60, game);
+    // 无 flag → 不触发回家传送（stationary+home 仍会缓慢步行向 home，但 120t
+    // 远到不了：无传送的判据 = 距 home 仍 >10 格）
+    expect(Math.abs(npc.cx - (SPOT_X * 16 + 8))).toBeGreaterThan(10 * 16);
+  });
+});
+
+describe('坐姿落存档语义（WorldFile.SaveNPCs :1703-1750 / LoadNPCs :2883-2930）', () => {
+  it('原版不落盘 ai[]：存档快照无 sitting/sitTimer，读档站立 + 夜间 AI 自然重坐', () => {
+    const world = makeWorld();
+    const npc = new TownNPC('guide', spotCenter(SPOT_X) - 10, FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    const { game } = makeGame(world, { npcs: [npc] });
+    for (let t = 0; t < 120 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.sitting).toBe(true);
+    // Game.townNpcsForSave 同构快照（原版 WF:1712-1726 只写 active/netID/GivenName/
+    // position/homeless/homeTileX/Y/townNpcVariationIndex/homelessDespawn——无 ai[]）
+    const snap = [{
+      key: npc.npcKey,
+      x: Math.round(npc.x), y: Math.round(npc.y),
+      home: npc.home ? [npc.home.x, npc.home.y] as [number, number] : null,
+      givenName: npc.givenName,
+    }];
+    expect(Object.keys(snap[0]).sort()).toEqual(['givenName', 'home', 'key', 'x', 'y']);
+    // 存 → 读往返（共享 save 管线；sitting 不在序列化面 = 蒸发）
+    const json = saveGame(world, { hp: 100, x: 0, y: 0, inv: { slots: [], selected: 0 } } as never, 0, snap);
+    const { world: w2 } = loadSave(json);
+    expect(w2.pendingTownNpcs).toHaveLength(1);
+    const rec = w2.pendingTownNpcs![0];
+    expect('sitting' in rec).toBe(false);
+    // 读档恢复（Game.ts 城镇 NPC 段同构）：站立起手，夜间 + 椅在 → AI 自然重坐
+    const restored = new TownNPC(rec.key, rec.x, rec.y);
+    if (rec.home) { restored.home = { x: rec.home[0], y: rec.home[1] }; restored.leashHome = true; }
+    expect(restored.sitting).toBe(false);
+    const { game: g2 } = makeGame(w2, { npcs: [restored] });
+    for (let t = 0; t < 300 && !restored.sitting; t++) restored.fixedUpdate(1 / 60, g2);
+    expect(restored.sitting).toBe(true);
+  });
+
+  it('读档后椅格已失效 → 不重坐（FindGoodRestingSpot 无椅返回 null :53255）', () => {
+    const world = makeWorld();
+    const npc = new TownNPC('guide', spotCenter(SPOT_X) - 10, FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    const { game } = makeGame(world, { npcs: [npc] });
+    for (let t = 0; t < 120 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.sitting).toBe(true);
+    // 存档前拆椅
+    world.store.setTileSilent(SPOT_X, FLOOR - 2, 0);
+    world.store.setTileSilent(SPOT_X, FLOOR - 1, 0);
+    const json = saveGame(world, { hp: 100, x: 0, y: 0, inv: { slots: [], selected: 0 } } as never, 0, [{
+      key: npc.npcKey, x: Math.round(npc.x), y: Math.round(npc.y),
+      home: [npc.home.x, npc.home.y] as [number, number], givenName: npc.givenName,
+    }]);
+    const { world: w2 } = loadSave(json);
+    const rec = w2.pendingTownNpcs![0];
+    const restored = new TownNPC(rec.key, rec.x, rec.y);
+    restored.home = { x: rec.home![0], y: rec.home![1] };
+    const { game: g2 } = makeGame(w2, { npcs: [restored] });
+    for (let t = 0; t < 300; t++) restored.fixedUpdate(1 / 60, g2);
+    expect(restored.sitting).toBe(false);
   });
 });

@@ -998,8 +998,8 @@ export class YoyoProj extends Entity {
 
 // ================= 连枷/链球（aiStyle 15，AI_015_Flails，Projectile.cs:41051-41506） =================
 
-/** 每型号参数（Projectile.cs:41070-41115 switch 各 case + 默认值；单位 px/tick/tick）。
- *  meleeSpeed 缩放链（:41116-41124）：throwSpd/farPull/pullAccel/retractKill/returnAccel/
+/** 每型号参数（Projectile.cs:41073-41087 默认值 + :41088-41148 switch 各 case；单位 px/tick/tick）。
+ *  meleeSpeed 缩放链（:41151-41159）：throwSpd/farPull/pullAccel/retractKill/returnAccel/
  *  returnKill ×(1/meleeSpeed)——orbitRadius(num15)不缩放 */
 interface FlailParams {
   flightTicks: number;  // num:掷出态飞行上限 tick（超时 → 回拉）
@@ -1080,10 +1080,11 @@ export class FlailProj extends Entity {
    *  AI_015 特例:247 Flairon 飞行中自机弹 248 / 757 Drippler 掷出回收气泡 928 /
    *  1058 轨道刺 405 */
   spawnProj: ((x: number, y: number, vx: number, vy: number, projId: number, dmg: number, kb: number) => void) | null = null;
-  /** 247/1058 周期计数(localAI[2]/localAI[0]) */
+  /** 247/1058 周期计数(247=localAI[0] :41451 / 1058=localAI[2] :41424) */
   private subT = 0;
-  /** 757 过渡点缓存:[vx,vy] 待下帧掷气泡(掷出态 ×0.3 / 按住转垂地 ×0.2) */
-  private trans757: [number, number] | null = null;
+  /** 1058 出场淡入:原版 alpha 语义(255=隐形,SetDefaults :9719;每 tick -50 至 0,
+   *  :41386-41394)——其余型号恒 0(不透明) */
+  private alpha = 0;
   /** ai[0] 状态：0 旋转 / 1 掷出 / 2 回拉 / 5 坠落 / 6 垂地悬荡 / 4 回收 */
   private st = 0;
   /** ai[1] 状态内计数 */
@@ -1114,12 +1115,17 @@ export class FlailProj extends Entity {
     const pd = projectileData(projId);
     this.w = pd?.width ?? 22;
     this.h = pd?.height ?? 22;
+    if (projId === 1058) this.alpha = 255; // SetDefaults :9719(出场淡入起点)
   }
+
+  /** ai[0] 状态只读视图(0 旋转/1 掷出/2 回拉/3 垂链/4 回收/5 坠落/6 垂地悬荡)——测试对账用 */
+  get aiState(): number { return this.st; }
 
   draw(r: Renderer, cam: Camera): void {
     const ctx = r.canvas.getContext('2d');
     if (ctx) this.drawChain(ctx, r);
-    drawProj(r, cam, this, this.projId, this.rotation, '#E04040');
+    // alpha 原版语义(Main.cs:28965 color *= (255-alpha)/255——越大越透明)
+    drawProj(r, cam, this, this.projId, this.rotation, '#E04040', Math.max(0, (255 - this.alpha) / 255));
   }
 
   /** 链条（DrawProj_FlailChains Main.cs:34752-34842 1:1）：球心 → 手臂方向逐节
@@ -1182,19 +1188,16 @@ export class FlailProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (--this.life <= 0) { this.dead = true; return; }
-    // 火焰重锤 948 入水(非岩浆)→ 变型 948→947(:41069-41072 type==948 && wet && !lavaWet)
-    if (this.projId === 948) {
-      const st948 = game.world.store;
-      const li = st948.liquid[st948.idx(Math.floor((this.x + this.w / 2) / TILE), Math.floor((this.y + this.h / 2) / TILE))];
-      if (li > 64 && st948.liquidType[st948.idx(Math.floor((this.x + this.w / 2) / TILE), Math.floor((this.y + this.h / 2) / TILE))] !== 2) {
-        this.projId = 947;
-      }
-    }
+    // 火焰重锤 948 入水(非岩浆)→ 变型 948→947(:41064-41067 type==948 && wet && !lavaWet)
+    // wet 语义 = 任一液体(Collision.WetCollision :1608 liquid>0,含蜂蜜/微光)中心
+    // 探盒交叠;lavaWet 单独判(:15456-15459)——"湿且非岩浆"即水/蜂蜜/微光都触发。
+    // 变型在 switch(type) 参数提取之前 → 同 tick 起按 947 参数走(两型参数一致,无感)
+    if (this.projId === 948 && this.inLiquid(game) && !this.inLiquid(game, 2)) this.projId = 947;
     const p = game.player;
     this.handX = p.cx;
     this.handY = p.cy;
     this.hitCd.tick();
-    // meleeSpeed 缩放链（:41116-41124,1/meleeSpeed）——repo attackSpeedMult 语义同向(>1 更快)
+    // meleeSpeed 缩放链（:41151-41159,1/meleeSpeed）——repo attackSpeedMult 语义同向(>1 更快)
     const inv = 1 / (p.attackSpeedMult || 1);
     const throwSpd = this.prm.throwSpeed * inv;
     const pullAccel = this.prm.pullAccel * inv;
@@ -1203,20 +1206,26 @@ export class FlailProj extends Entity {
     const returnKill = this.prm.returnKill * inv;
     const farPull = this.prm.farPullSpeed * inv;
     const maxRange = 800;
-    // 击杀门（:41053-41060）：主角死亡/离手 900×(1/meleeSpeed)
+    // 击杀门（:41053-41059）：主角死亡/离手 900×(1/meleeSpeed)
     const distHand = () => Math.hypot(this.x + this.w / 2 - p.cx, this.y + this.h / 2 - p.cy);
     if (p.dead || distHand() > 900 * inv) { this.dead = true; return; }
     const held = this.channel();
-    // num17/num18(:41129-41130):链长上限=掷速×飞行tick;垂地悬荡放行 +160
+    // num17/num18(:41164-41165):链长上限=掷速×飞行tick;垂地悬荡放行 +160
     const num17 = throwSpd * this.prm.flightTicks;
     const num18 = num17 + 160;
     let cd = 10; // num11 默认每敌冷却
     switch (this.st) {
-      case 0: { // 旋转态（:41163-41212）：绕体公转,松手朝鼠标掷出
+      case 0: { // 旋转态（:41168-41228）：绕体公转,松手朝鼠标掷出
+        // ChangeDir（:41195-41201,channel 判定【之前】）:vector5 = mountedCenter→鼠标
+        // 方向,X>0 → 1 / 否则 -1——角色朝鼠标侧转面(GAP#8 ①)。
+        // ★26/35 双球在场时原版取反(:41174-41191 flag5,且掷出速度 X 翻转 :41207-41209)——
+        // 本仓 channel 绑定手持物品 id(换手即掷出),双球并存结构性不可达,登记偏差
+        const t0 = this.target();
+        const spinDir = t0.x > p.cx ? 1 : -1;
+        this.changeDir(p, spinDir);
         if (!held) {
           this.st = 1; this.stT = 0;
-          const t = this.target();
-          const dx = t.x - p.cx, dy = t.y - p.cy;
+          const dx = t0.x - p.cx, dy = t0.y - p.cy;
           const dd = Math.hypot(dx, dy) || 1;
           this.vx = (dx / dd) * throwSpd + p.vx;
           this.vy = (dy / dd) * throwSpd + p.vy;
@@ -1227,14 +1236,11 @@ export class FlailProj extends Entity {
           break;
         }
         this.spinT++;
-        // :41189-41197 vector6 = (direction,0).RotatedBy(π×10×(t/60)×direction);
+        // :41218-41227 vector6 = (direction,0).RotatedBy(π×10×(t/60)×direction);
         // Y×0.8;向下(gravDir>0)再减半——扁椭圆轨迹,上快下慢。
-        // direction 取朝鼠标侧（原版 ChangeDir(vector5.X>0?1:-1) :41203;不直接改
-        // player.facing,登记 GAP）
-        const t0 = this.target();
-        const dir = (t0.x >= p.cx ? 1 : -1);
-        const a = Math.PI * 10 * (this.spinT / 60) * dir;
-        let ox = Math.cos(a) * dir, oy = Math.sin(a) * dir;
+        // direction = 上面 ChangeDir 的结果(原版同 tick 先转面后取 player.direction)
+        const a = Math.PI * 10 * (this.spinT / 60) * spinDir;
+        let ox = Math.cos(a) * spinDir, oy = Math.sin(a) * spinDir;
         oy *= 0.8;
         if (oy > 0) oy *= 0.5;
         this.x = p.cx + ox * this.prm.orbitRadius - this.w / 2;
@@ -1243,32 +1249,40 @@ export class FlailProj extends Entity {
         cd = this.prm.spinHitCd;
         break;
       }
-      case 1: { // 掷出态（:41243-41273）：直线无重力;超时/超程 → 回拉;再按 → 垂地
+      case 1: { // 掷出态（:41230-41263）：直线无重力;再按 → 垂地悬荡(6)
         this.stT++;
-        // ★757 气泡只在两过渡点掷(:41251-41258)——此前每帧缓存=掷出态每帧一泡
-        // (review 实锤,2026-08-13);按住转垂地 ×0.2 / 超时超程回收 ×0.3
+        // ★再按目标态 = 6(:41238),非 3——1456 的 case 3 在 AI_015 内无任何入口
+        //   (ai[0] 全部赋值点 :41204/:41238/:41251/:41275/:41292/:41355/:41370 无 3),
+        //   是死状态;此前误接 3(垂链) = 飞行中再按球悬链不落地,行为偏差
         if (held) {
-          if (this.projId === 757) this.trans757 = [this.vx * 0.2, this.vy * 0.2];
-          this.st = 3; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; // 再按→垂链(:41288)
+          this.vx *= 0.2; this.vy *= 0.2; // :41241
+          // 757 气泡:速度×0.2 后×1.3,当场生成(:41242-41246)——
+          // 此前缓存到帧尾=迟 1t 且位置已积分,1:1 改当场
+          this.bubble757(this.vx * 1.3, this.vy * 1.3);
+          this.st = 6; this.stT = 0;
+          break; // break 在 ChangeDir 之前(:41247)——本 tick 不转面
         }
         if (this.stT >= this.prm.flightTicks || distHand() >= maxRange) {
-          if (this.projId === 757) this.trans757 = [this.vx * 0.3, this.vy * 0.3];
-          this.st = 2; this.stT = 0; this.vx *= 0.3; this.vy *= 0.3;
+          this.vx *= 0.3; this.vy *= 0.3; // :41254
+          this.bubble757(this.vx * 1.3, this.vy * 1.3); // :41255-41259
+          this.st = 2; this.stT = 0;
         }
+        this.changeDir(p, p.cx < this.cx ? 1 : -1); // :41261 面朝球
         cd = this.prm.thrownHitCd;
         break;
       }
-      case 2: { // 回拉态（:41275-41290）：向手回拉,近手消失;再按 → 垂地
+      case 2: { // 回拉态（:41265-41286）：向手回拉,近手消失;再按 → 垂地
         if (distHand() <= retractKill) { this.dead = true; return; }
         if (held) { this.st = 6; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; }
         this.vx *= 0.98; this.vy *= 0.98;
         this.moveTowardsHand(p, retractKill, pullAccel);
+        this.changeDir(p, p.cx < this.cx ? 1 : -1); // :41284 面朝球(仅未再按支)
         cd = this.prm.thrownHitCd;
         break;
       }
       case 3: { // 垂链态（:41288-41330 1:1）：持按悬垂摆动;松手 → 回收;
         //  超链长段 ×0.98 朝手 MoveTowards(num9=14, num8=1)；链内近停段 X×0.96/Y+0.2
-        //  （玩家静止再 X×0.96）；tileCollide 按是否超 num17 切换；玩家朝向背对球
+        //  （玩家静止再 X×0.96）；tileCollide 按是否超 num17 切换；玩家面朝球(:41328)
         if (!held) { this.st = 4; this.stT = 0; break; }
         {
           const dHand3 = Math.hypot(p.cx - this.cx, this.cy - p.cy);
@@ -1282,26 +1296,28 @@ export class FlailProj extends Entity {
             }
             if (p.vx === 0) this.vx *= 0.96;
           }
-          // ChangeDir 背对球（:41327）：玩家中心在球左侧 → 朝右（本仓玩家朝向由输入驱动,此处仅注释语义）
+          this.changeDir(p, p.cx < this.cx ? 1 : -1); // :41328 面朝球
           cd = this.prm.thrownHitCd;
         }
         break;
       }
-      case 5: { // 坠落态（:41346-41362,撞墙入口见下方 tile 碰撞）：重力坠地
+      case 5: { // 坠落态（:41352-41367,撞墙入口见下方 tile 碰撞）：重力坠地
         this.stT++;
         if (this.stT >= this.prm.flightTicks + 5) { this.st = 6; this.stT = 0; break; }
         cd = this.prm.thrownHitCd;
         this.vy += 0.6;
         this.vx *= 0.95;
+        this.changeDir(p, p.cx < this.cx ? 1 : -1); // :41364 面朝球(else 支)
         break;
       }
-      case 6: { // 垂地悬荡态（:41364-41376）：持按垂链;松手/超程 → 回收
+      case 6: { // 垂地悬荡态（:41367-41382）：持按垂链;松手/超程 → 回收
         if (!held || distHand() > num18) { this.st = 4; this.stT = 0; break; }
-        this.vy += 0.8;
+        if (!this.inLiquid(game, 4)) this.vy += 0.8; // :41374-41376 微光中不受重力(!shimmerWet)
         this.vx *= 0.95;
+        this.changeDir(p, p.cx < this.cx ? 1 : -1); // :41380 面朝球
         break;
       }
-      case 4: { // 回收态（:41292-41234 区段 case 4:41321-41344）：无视碰撞回手
+      case 4: { // 回收态（:41331-41351）：无视碰撞回手
         if (distHand() <= returnKill) { this.dead = true; return; }
         this.vx *= 0.98; this.vy *= 0.98;
         this.moveTowardsHand(p, returnKill, returnAccel);
@@ -1312,6 +1328,7 @@ export class FlailProj extends Entity {
         const sx = (p.cx - (this.x + this.w / 2)) / (distHand() || 1);
         const sy = (p.cy - (this.y + this.h / 2)) / (distHand() || 1);
         if (sx * (hx / hd) + sy * (hy / hd) < 0) { this.dead = true; return; }
+        this.changeDir(p, p.cx < this.cx ? 1 : -1); // :41349 面朝球
         break;
       }
       default: break;
@@ -1330,38 +1347,59 @@ export class FlailProj extends Entity {
         return false;
       };
       const lvx = this.vx, lvy = this.vy;
+      // num2(int,:40985):0=无音尘 / |lastV|>4 按轴置 1(:41001-41003/:41008-41010)/ 掷出态强制 2
+      // (:41021)。结算(:41026-41033) = num2 次 Collision.HitTiles 尘 + 一次 SoundID 0
+      // (挖掘音只一响,尘份量随档)——此前按轴各播一次会双响,1:1 收拢
+      let dustN = 0;
       const nx = this.x + this.vx;
       if (solid(nx, this.y)) {
         this.vx = -lvx * rest;
-        this.bounces++; // localAI[0]:每次接触都计(:41001/:41010)——只计 >4 会让缓磨墙永不触发逃生
-        if (Math.abs(lvx) > 4) this.hitTileFx(game, nx, this.y); // num2>0 门=音尘(:40999)
+        this.bounces++; // localAI[0]:每次接触都计(:41005/:41012)——只计 >4 会让缓磨墙永不触发逃生
+        if (Math.abs(lvx) > 4) dustN = 1; // num2>0 门(:41001-41003)
       } else this.x = nx;
       const ny = this.y + this.vy;
       if (solid(this.x, ny)) {
         this.vy = -lvy * rest;
         this.bounces++;
-        if (Math.abs(lvy) > 4) this.hitTileFx(game, this.x, ny);
+        if (Math.abs(lvy) > 4) dustN = 1; // (:41008-41010)
       } else this.y = ny;
-      // 掷出态撞墙 → 坠落态（:41027-41037 + CreateImpactExplosion 音尘近似）
+      // 掷出态撞墙 → 坠落态(:41014-41024):位移回卷 + num2 强制 2 + 冲击波(GAP#8 ④)
       if (this.st === 1 && (this.vx !== lvx || this.vy !== lvy)) {
         this.st = 5; this.stT = 0;
+        this.x -= lvx; this.y -= lvy; // position -= vector(:41024)——撞墙 tick 不陷墙
+        dustN = 2;                    // :41021 无视 |lastV|>4 门,音尘双份
+        this.impactExplosion(game, lvx, lvy);
       }
-      // 卡死逃生（:41040-41045）：弹墙≥10 次且非 3/0/5/6 态 → 强制回收
+      if (dustN > 0) this.hitTileFx(game, this.x, this.y, dustN);
+      // 卡死逃生（:41035-41039）：弹墙≥10 次且非 3/0/5/6 态 → 强制回收
       if (this.st !== 3 && this.st !== 0 && this.st !== 5 && this.st !== 6 && this.bounces >= 10) {
         this.st = 4; this.stT = 0;
       }
     }
-    // 旋转（:41476-41484 flag 通用段）：速度>1 对齐速度向,否则按 vx 缓转
-    const spd = Math.hypot(this.vx, this.vy);
-    if (spd > 1) this.rotation = Math.atan2(this.vy, this.vx) + this.vx * 0.1;
-    else this.rotation += this.vx * 0.1;
-    // ---- AI_015 特例子弹(:41352-41475 switch(type) 尾段) ----
-    // ★原版该 switch(type) 特例段在【全部状态】运行(:41434-41480,无 ai[0] 门)——
+    // 旋转:247/1058 的 switch(type) 段内置 flag=false(:41437/:41395)——通用段
+    // (:41485-41493 速度>1 对齐速度向,否则按 vx 缓转)被跳过,走各自专属式
+    if (this.projId === 247) {
+      // :41438-41442:rotation ±=(|vx|+|vy|)×0.01(按 vx 符号);旋转态再 +2π/15×direction
+      const n22 = (Math.abs(this.vx) + Math.abs(this.vy)) * 0.01;
+      this.rotation += this.vx > 0 ? n22 : -n22;
+      if (this.st === 0) this.rotation += (Math.PI * 2 / 15) * p.facing;
+    } else if (this.projId === 1058) {
+      // :41396-41398:rotation 恒指玩家(-π/2 补偿),不随飞行向
+      this.rotation = Math.atan2(p.cy - this.cy, p.cx - this.cx) - Math.PI / 2;
+    } else {
+      const spd = Math.hypot(this.vx, this.vy);
+      if (spd > 1) this.rotation = Math.atan2(this.vy, this.vx) + this.vx * 0.1;
+      else this.rotation += this.vx * 0.1;
+    }
+    // 1058 出场淡入(:41386-41394,SetDefaults alpha=255 :9719;全状态无门)
+    if (this.alpha > 0) this.alpha = Math.max(0, this.alpha - 50);
+    // ---- AI_015 特例子弹(:41383-41478 switch(type) 尾段) ----
+    // ★原版该 switch(type) 特例段在【全部状态】运行(:41383-41478,无 ai[0] 门)——
     // 此前 st!==4 把回收态排除,1:1 对齐移除(2026-08-13)
     if (this.spawnProj) {
       if (this.projId === 247) {
         // Flairon:每 20t(脱靶续 17)600px 内最近敌(距离+CanHit)→ 自机弹 248
-        // (:41369-41400)damage/1.5、kb/2、速 14
+        // (:41435-41478)damage/1.5、kb/2、速 14
         this.subT++;
         if (this.subT >= 20) {
           this.subT = 17;
@@ -1382,10 +1420,10 @@ export class FlailProj extends Entity {
           }
         }
       } else if (this.projId === 1058) {
-        // 轨道刺(:41406-41475):旋转态每 3-6t/其余态每 6t,朝【玩家反向】掷 405
-        // (:41449-41463 v=(ball-player)norm×(4.5-6.5)±π/4);damage 满额/旋转态 kb×0.5
+        // 轨道刺(:41409-41430):旋转态每 3-6t/其余态每 6t,朝【玩家反向】掷 405
+        // (:41425-41429 v=(ball-player)norm×(4.5-6.5)±π/4);damage 满额/旋转态 kb×0.5
         this.subT++;
-        // :41417-41423 num28:默认 4;垂链/悬荡态(vanilla 6/3)→ 6;旋转态 Next(3,6)=3-5
+        // :41412-41421 num28:默认 4;垂链/悬荡态(vanilla 6/3)→ 6;旋转态 Next(3,6)=3-5
         const need = this.st === 0 ? 3 + Math.floor(Math.random() * 3)
           : this.st === 3 || this.st === 6 ? 6 : 4;
         if (this.subT >= need) {
@@ -1401,14 +1439,6 @@ export class FlailProj extends Entity {
         }
       }
     }
-    // 757 Drippler:掷出态回收(→2)与按住转垂地(→6)两过渡点各掷气泡 928
-    // (:41243-41273)velocity×0.3/0.2 后 ×1.3;damage/knockBack 满额
-    if (this.projId === 757 && this.spawnProj && this.trans757) {
-      const [vx0, vy0] = this.trans757;
-      this.trans757 = null;
-      this.spawnProj(this.x + this.w / 2, this.y + this.h / 2, vx0 * 1.3, vy0 * 1.3,
-        928, this.damage, this.knockback);
-    }
     // 火尘（AI_015_Flails_Dust :41778-41785:type 35 每帧 1 颗火尘 noGravity）
     if (this.projId === 35 || this.projId === 948) {
       game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#FF8830', 1, 0.5,
@@ -1417,10 +1447,14 @@ export class FlailProj extends Entity {
       // :41770-41775 hallow 尘近似
       if (Math.random() < 0.2) game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#B0A0FF', 1, 0.5, { life: 20, grav: 0, size: 2 });
     }
-    hitEnemies(this, game, this.hitCd, cd, Math.sign(this.vx) || 1, this.armorPen);
+    // 击退方向 = projectile.direction(:41479-41482 velocity.X>0?1:-1,vx==0 → -1;
+    // 1058 走专属式 :41398-41405 = 反(player→球)方向)——此前 Math.sign(vx)||1
+    // 把 vx==0 档写成 1,1:1 修正
+    const kdir = this.projId === 1058 ? (p.cx < this.cx ? 1 : -1) : (this.vx > 0 ? 1 : -1);
+    hitEnemies(this, game, this.hitCd, cd, kdir, this.armorPen);
   }
 
-  /** velocity MoveTowards(手方向×targetSpd, accel)（:41281-41285/:41325-41329 同式） */
+  /** velocity MoveTowards(手方向×targetSpd, accel)（case2 :41283 / case3 :41311-41315 同式） */
   private moveTowardsHand(p: { cx: number; cy: number }, targetSpd: number, accel: number): void {
     const d = Math.hypot(p.cx - (this.x + this.w / 2), p.cy - (this.y + this.h / 2)) || 1;
     const tx = ((p.cx - (this.x + this.w / 2)) / d) * targetSpd;
@@ -1431,16 +1465,56 @@ export class FlailProj extends Entity {
     else { this.vx += (ddx / dd) * accel; this.vy += (ddy / dd) * accel; }
   }
 
-  /** 撞墙反馈（Collision.HitTiles 尘 + SoundID 0 挖掘音——:41045 num2>0 门） */
-  private hitTileFx(game: GameHooks, hx: number, hy: number): void {
-    game.spawnParticles(hx + this.w / 2, hy + this.h / 2, '#A09080', 3, 1.5, { life: 14, size: 2 });
+  /** Player.ChangeDir（Player.cs:41440-41460）:同向早退只写 direction;原版还镜像
+   *  手臂合成旋转/itemRotation/itemLocation——本仓无手臂/持物朝向系统,仅落 facing */
+  private changeDir(p: { facing: number }, dir: number): void {
+    if (p.facing !== dir) p.facing = dir;
+  }
+
+  /** 中心格液体探测:type 省略=任一液体;1水/2岩浆/3蜂蜜/4微光(LIQUID_TYPE)。
+   *  近似 Collision.WetCollision/LavaCollision(:1575-1651)中心探盒:阈值 64(≈1/4 格)
+   *  近似原版表面偏移 (256-liquid)/16 的交叠判定(:1613-1616) */
+  private inLiquid(game: GameHooks, type?: number): boolean {
+    const st = game.world.store;
+    const i = st.idx(Math.floor((this.x + this.w / 2) / TILE), Math.floor((this.y + this.h / 2) / TILE));
+    return st.liquid[i] > 64 && (type === undefined || st.liquidType[i] === type);
+  }
+
+  /** 757 Drippler 气泡 928(:41243-41246/:41256-41259):两过渡点当场掷出,
+   *  速度 = (衰减后 velocity)×1.3,damage/knockBack 满额——实际生成走 spawnProj 回调 */
+  private bubble757(vx: number, vy: number): void {
+    if (this.projId === 757 && this.spawnProj) {
+      this.spawnProj(this.cx, this.cy, vx, vy, 928, this.damage, this.knockback);
+    }
+  }
+
+  /** 撞墙反馈(num2 次 Collision.HitTiles 尘 + 一次 SoundID 0 挖掘音,:41026-41033) */
+  private hitTileFx(game: GameHooks, hx: number, hy: number, n = 1): void {
+    game.spawnParticles(hx + this.w / 2, hy + this.h / 2, '#A09080', 3 * n, 1.5, { life: 14, size: 2 });
     game.playSfx('dig', 1, hx + this.w / 2, hy + this.h / 2);
+  }
+
+  /** 掷出态撞墙冲击波(GAP#8 ④)。原版两连(:41031-41034):
+   *  ①CreateImpactExplosion(2, center, 命中盒, width, :66367-66412)——命中盒内逐格,
+   *    实心·非 solidTop·非 frameImportant 且上方空气的块,按 KillTile_GetTileDustAmount
+   *    ×2 出【块色】尘(velocity.Y -= (3+num×1.5)×rand、scale += num×0.03,num 恒 4;
+   *    num≥2 再补 num2-1 颗上抛),出过尘 → causedShockwaves=true;
+   *  ②CreateImpactExplosion2_FlailTileCollision(:66452-66500)——8 颗椭圆(7×0.7)白尘
+   *    (color=White×0.5,α=causedShockwaves?0:50,scale 0.4,velocity.Y-=0.8/X×0.8 后
+   *    += 撞前速度向×2;无块尘再补 8 颗 α100 ×1.5)。
+   *  近似:粒子系统无逐格块色尘/定点椭圆环 → 上抛尘团(①)+ 定向半环(②,沿撞前方向
+   *  偏置 yMul 0.7 压轴;原版入墙半环本就被块遮住) */
+  private impactExplosion(game: GameHooks, lvx: number, lvy: number): void {
+    const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
+    game.spawnParticles(cx0, cy0, '#A09080', 8, 2.5, { life: 22, grav: 0.1, size: 2 });
+    game.spawnBurst?.(cx0, cy0, '#E8E4DC', 8, 2, Math.atan2(-lvy, -lvx), Math.PI / 2,
+      { life: 24, grav: -0.02, yMul: 0.7 });
   }
 }
 
 // ================= 弗莱龙刺（proj 405，aiStyle 70 全语义 1:1，:29188-29239） =================
 
-/** 1058 掷出的轨道刺 405（AI_015 :41427-41433 传 ai0=-10）：
+/** 1058 掷出的轨道刺 405（AI_015 :41425-41430 传 ai0=-10）：
  *  -10→0 漂入段(:29224-29231)：每 tick ai0++、α-25(下限 50)、vel×0.95;
  *  ai0==0 首寻(:29191-29215)：650px 内最近敌(CanHit 视线门)→ ai0=idx+1 并
  *  初次转向 (v×20+dir×Next(35,75)/30)/21；无目标 → ai0=-15(再漂 15t);
@@ -1473,9 +1547,13 @@ export class FlaironSpike extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // α:255→50 漂入段递减,globalAlpha 近似;scale=ai1
-    drawProj(r, cam, { ...this, w: Math.round(14 * this.ai1) }, this.projId,
-      Math.atan2(this.vy, this.vx) + Math.PI / 2, '#FFB060', Math.max(0.2, this.alpha / 255));
+    // α 原版语义(Main.cs:28965 color *= (255-alpha)/255,越大越透明):SetDefaults 255
+    // (:4590)出生隐形,漂入段每 tick -25 至 50(:29225-29229)→ 淡入。
+    // 此前直接 alpha/255 当不透明度 = 方向写反(出生全显、越漂越透明)。
+    // scale=ai1(:29237)是贴图缩放非命中盒——此前改 w 会让绘制中心随缩放偏移
+    drawProj(r, cam, this, this.projId,
+      Math.atan2(this.vy, this.vx) + Math.PI / 2, '#FFB060',
+      Math.max(0, (255 - this.alpha) / 255), Math.round(14 * this.ai1));
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {

@@ -48,7 +48,10 @@ describe('WorldStore', () => {
     await s.delete(a.id);
     const c = await s.register({ name: 'c', seed: '3', w: 4200, h: 1200, difficulty: 0, evil: -1 });
     expect(c.id).toBeGreaterThan(b.id);
-    expect(s.list().map((x) => x.name)).toEqual(['b', 'c']);
+    // list() 排序键 = 收藏→lastPlayed→name→id（1.4.5.6 UIWorldSelect）——同毫秒并列
+    // 才落 name 档；高并发下注册跨毫秒即翻转顺序（曾 ['c','b'] flake）。此处本意
+    // 只验"删除后成员集合正确"，顺序无关化
+    expect(s.list().map((x) => x.name).sort()).toEqual(['b', 'c']);
   });
 
   it('复制带副本后缀并带数据', async () => {

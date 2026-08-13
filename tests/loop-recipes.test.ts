@@ -70,9 +70,9 @@ const FAKE_CHEST_PAIRS: Array<[number, number]> = [
   [5995, 5982], [6018, 6005], [6041, 6028], [6064, 6051], [6087, 6074], [6131, 6118],
 ];
 
-/** 伪装宝箱族成品（TextureCopyLoad 批 3665-3704 + int[,] 批）：public/sprites/vanilla.json
- *  无条目 → ITEM_DEFS 未注册、vanillaItemKey 反查不到。属素材表缺口（这族 item 的贴图
- *  本就是复用源箱子贴图，TextureCopyLoad 即为此设），与配方数据无关，此处登记不阻断。 */
+/** 伪装宝箱族成品（TextureCopyLoad 批 3665-3704 + int[,] 批）：vanilla.json 已补录
+ *  全 76 条（贴图复用映射源箱条目，ItemID.cs:1090 TextureCopyLoad 语义），自动注册
+ *  循环（items.ts 阶段 5）产出 vi_<id>_Fake_Xxx → vanillaItemKey 全量可反查。 */
 const FAKE_CHEST_PRODUCTS: Set<number> = new Set<number>([
   ...TEXTURE_COPY_LOAD.map(([c]) => c),
   ...FAKE_CHEST_PAIRS.map(([c]) => c),
@@ -166,18 +166,20 @@ describe('循环生成配方普查（Recipe.cs 7 处 for 段共 137 条）', () 
     expect(VANILLA_RECIPES.some((r) => r.create === 4880)).toBe(false);
   });
 
-  it('登记：伪装宝箱族成品仅 16/76 进素材表（vanilla.json 缺 60）——配方侧无碍，素材侧遗留', () => {
-    // 配方可合成校验/扣料全链已通（下方 craftOne），仅缺条目成品的 key 反查（vanillaItemKey）。
-    // 已注册 16 项（int[,] 批前段 3886..5708），缺 60 项（TextureCopyLoad 全批 3665-3704 +
-    // int[,] 批后段 5567..6131）——这族贴图本就复用源箱（TextureCopyLoad 即为此设），
-    // 素材侧补录属独立工作项，不阻断配方数据。
+  it('素材表补录核销：伪装宝箱族成品 76/76 全量注册（vanilla.json items 条目→vi_ 自动注册）', () => {
+    // 原 16/76（int[,] 批前段 3886..5708），缺 60（TextureCopyLoad 全批 3665-3704 +
+    // int[,] 批后段 5567..6131）——贴图复用映射源箱（ItemID.cs:1090 TextureCopyLoad
+    // 即为此设），vanilla.json 补录同款矩形条目后经 items.ts 阶段 5 自动注册循环生效。
     let registered = 0;
     for (const c of FAKE_CHEST_PRODUCTS) if (vanillaItemKey(c) !== undefined) registered++;
-    expect(registered).toBe(16);
+    expect(registered).toBe(76);
     expect(FAKE_CHEST_PRODUCTS.size).toBe(76);
-    // 材料侧齐全（金箱 48 / 5962 均可反查内部 id）——缺口仅在成品登记
+    // 材料侧齐全（金箱 48 / 5962 均可反查内部 id）
     expect(invIndexOfVanilla(48)).toBeGreaterThanOrEqual(0);
     expect(invIndexOfVanilla(5962)).toBeGreaterThanOrEqual(0);
+    // 新补录样本：键名走 ItemID.cs Fake_* 常量（自动注册循环剔非字母数字位）
+    expect(vanillaItemKey(3665)).toBe('vi_3665_FakeChest');
+    expect(vanillaItemKey(5567)).toBe('vi_5567_FakeAetheriumChest');
   });
 });
 
@@ -198,8 +200,8 @@ describe('循环配方 craftOne 端到端', () => {
     // 材料按配方需求量精确投放 → 合成后全部扣净
     for (const [vid] of mats) expect(inv.countOf(invIndexOfVanilla(vid))).toBe(0);
     // 产物可反查到仓库 item key（合成 UI 放置进背包的入口）——伪装宝箱族
-    // 尚未进素材表（见下方登记项），此处不设产物反查断言
-    if (!FAKE_CHEST_PRODUCTS.has(r.create)) expect(vanillaItemKey(r.create)).toBeDefined();
+    // 已随 vanilla.json 补录全量注册（见上方补录核销用例），不再设例外
+    expect(vanillaItemKey(r.create)).toBeDefined();
   }
 
   it('蝴蝶罐：君主蝴蝶 1994 + 瓶子(31) → 2178，徒手可合成', () => {

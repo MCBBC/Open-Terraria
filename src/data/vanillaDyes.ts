@@ -1,20 +1,13 @@
 // 染料运行时（tools/extract-dyes.mjs ← DyeInitializer.cs → vanilla-dyes.json）。
 // 数据 1:1：116 条 id → {tech, color?, secondary?, saturation?}。
 //
-// ===== 像素语义可得性（重要） =====
-// 全部染料技术（含"基础" ArmorColored 族）都是编译期 effect 技术——HLSL 不在
-// 反编译 C# 源内。本仓只对"单色重着色"可静态推演的族做仿真，公式为近似并逐项
-// 登记；其余技术（彩虹/活火/反射/凝胶等 ~35 条）登记为 effect 二进制缺口，
-// 消费端跳过（= 未染原色，与无染料等价）。
-//
-// 仿真族（EMULABLE）：
-//   ArmorColored / AndBlack / AndSilverTrim：lum = 0.299r+0.587g+0.114b（XNA 权重
-//     未得，取 BT.601）；colored = lum×color；final = colored + (orig−colored)×sat
-//     （sat=1.2 基础族 → 超取样回原色 20%）
-//   ArmorBrightnessColored：final = orig × color（颜色可为 >1 提亮）
-//   ArmorColoredGradient / AndBlackGradient / AndSilverTrimGradient / BrightnessGradient：
-//     c = lerp(color, secondary, lum)；final = c + (orig−c)×sat（Brightness 无 sat）
+// 像素执行走 SM2Effect 解释器：直接跑 PixelShader.cso 导出的原始字节码
+// （src/data/fxPixelShader.json，63 pass 全量）——含基础 ArmorColored 族与全部
+// 特效染料（彩虹/活火/反射/凝胶/HallowBoss 等），逐指令 1:1，无近似公式。
+// uniform 注入对齐 ArmorShaderData.Apply（C# 可读侧）；uLightSource 的 4 点光照
+// 梯度对齐 ReflectiveArmorShaderData.Apply。
 import dyeJson from './vanilla-dyes.json';
+import { defaultUniforms, getPass, runPassOnImageData, type SM2Sampler, type SM2Uniforms } from '../fx/SM2Effect';
 
 export interface DyeEntry {
   tech: string;
@@ -25,69 +18,47 @@ export interface DyeEntry {
 
 const TABLE = (dyeJson as unknown as { dyes: Record<string, DyeEntry> }).dyes;
 
-/** 仿真族技术集（其余 = effect 登记缺口） */
-const EMULABLE = new Set([
-  'ArmorColored', 'ArmorColoredAndBlack', 'ArmorColoredAndSilverTrim',
-  'ArmorColoredGradient', 'ArmorColoredAndBlackGradient', 'ArmorColoredAndSilverTrimGradient',
-  'ArmorBrightnessColored', 'ArmorBrightnessGradient',
-]);
-
-export interface DyeEmulation {
-  /** 'solid' = lum×color 族；'bright' = ×color；'gradient' = lerp(color,secondary,lum) */
-  kind: 'solid' | 'bright' | 'gradient';
-  color: [number, number, number];
-  secondary?: [number, number, number];
-  saturation: number;
+/** 染料 vid → 可执行描述（tech + 已装配 uniforms 基底）；无表项/无字节码 pass 返回 null */
+export interface DyeApply {
+  vid: number;
+  tech: string;
+  uniforms: SM2Uniforms;
+  /** 需要调用方提供 s1 采样器（HallowBoss 染料 4778 → Extra_156 彩虹渐变） */
+  needsImage1: boolean;
 }
 
-/** dye 物品 vid → 仿真参数；不可仿真（effect 缺口）或未知 id 返回 null */
-export function dyeEmulationOf(vid: number): DyeEmulation | null {
-  const e = TABLE[String(vid)];
-  if (!e || !EMULABLE.has(e.tech)) return null;
-  const color = e.color ?? [1, 1, 1];
-  if (e.tech === 'ArmorBrightnessColored') {
-    return { kind: 'bright', color, saturation: 1 };
-  }
-  if (e.tech.endsWith('Gradient')) {
-    return { kind: 'gradient', color, secondary: e.secondary ?? color, saturation: e.saturation ?? 1 };
-  }
-  return { kind: 'solid', color, saturation: e.saturation ?? 1 };
-}
-
-/** 表查询（测试/登记用） */
-export function dyeEntryOf(vid: number): DyeEmulation & { tech: string } | null {
+export function dyeApplyOf(vid: number): DyeApply | null {
   const e = TABLE[String(vid)];
   if (!e) return null;
-  const emu = dyeEmulationOf(vid);
-  return { tech: e.tech, ...(emu ?? { kind: 'solid', color: [1, 1, 1], saturation: 1 }) };
+  const pass = getPass(e.tech);
+  if (!pass) return null;
+  const u = defaultUniforms();
+  if (e.color) u.uColor = e.color;
+  if (e.secondary) u.uSecondaryColor = e.secondary;
+  if (e.saturation !== undefined) u.uSaturation = e.saturation;
+  return {
+    vid, tech: e.tech, uniforms: u,
+    needsImage1: pass.name === 'ArmorHallowBoss',
+  };
 }
 
-/** effect 二进制缺口染料 id 全集（登记清单） */
-export function effectDyeIds(): number[] {
-  return Object.entries(TABLE)
-    .filter(([, e]) => !EMULABLE.has(e.tech))
-    .map(([k]) => +k)
-    .sort((a, b) => a - b);
+/** 表查询（测试用） */
+export function dyeEntryOf(vid: number): DyeEntry | null {
+  return TABLE[String(vid)] ?? null;
 }
 
-/** 染料仿真像素公式（近似，见头注；RGBA ImageData 原地改写） */
-export function applyDyeEmulation(data: Uint8ClampedArray, emu: DyeEmulation): void {
-  const sat = emu.saturation;
-  for (let i = 0; i < data.length; i += 4) {
-    if (!data[i + 3]) continue;
-    const r = data[i], g = data[i + 1], b = data[i + 2];
-    if (emu.kind === 'bright') {
-      data[i] = r * emu.color[0]; data[i + 1] = g * emu.color[1]; data[i + 2] = b * emu.color[2];
-      continue;
-    }
-    const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    const base = emu.kind === 'gradient'
-      ? [emu.color[0] + (emu.secondary![0] - emu.color[0]) * lum,
-         emu.color[1] + (emu.secondary![1] - emu.color[1]) * lum,
-         emu.color[2] + (emu.secondary![2] - emu.color[2]) * lum]
-      : [lum * emu.color[0], lum * emu.color[1], lum * emu.color[2]];
-    data[i] = base[0] * 255 + (r - base[0] * 255) * sat;
-    data[i + 1] = base[1] * 255 + (g - base[1] * 255) * sat;
-    data[i + 2] = base[2] * 255 + (b - base[2] * 255) * sat;
-  }
+export function dyeCount(): number {
+  return Object.keys(TABLE).length;
+}
+
+/**
+ * 对 ImageData 执行染料 pass（原地）。extraSamplers 供 s1/s2（见 needsImage1）。
+ * 返回是否实际染色（false = pass 缺失/数据异常 → 原样）。
+ */
+export function applyDyePass(data: Uint8ClampedArray, w: number, h: number,
+  apply: DyeApply, extraSamplers: Array<SM2Sampler | undefined> = []): boolean {
+  const pass = getPass(apply.tech);
+  if (!pass) return false;
+  runPassOnImageData(pass, data, w, h, apply.uniforms, extraSamplers);
+  return true;
 }

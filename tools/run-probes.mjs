@@ -129,7 +129,7 @@ void origin0;
 // ---- 汇总 ----
 console.log('\n===== 探针汇总 =====');
 for (const r of [...results].sort((a, b) => b.fail - a.fail || b.timedOut - a.timedOut)) {
-  console.log(`${(r.timedOut ? '⏱' : r.fail > 0 ? '✗' : '✓').padEnd(2)} ${r.name.padEnd(16)} ${r.tail ?? `exit=${r.status}`}`);
+  console.log(`${(r.timedOut ? '⏱' : r.fail > 0 || r.status !== 0 ? '✗' : '✓').padEnd(2)} ${r.name.padEnd(16)} ${r.tail ?? `exit=${r.status}`}`);
 }
 const bad = results.filter((r) => r.fail > 0 || r.timedOut || r.status !== 0).length;
 console.log(bad ? `\n${bad} 个探针未过` : '\n全部通过 ✓');

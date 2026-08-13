@@ -11,8 +11,9 @@ import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Do
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
-import { isNpcTownShimmerable } from '../stats/Shimmer';
+import { isNpcTownShimmerable, findShimmerFreeSpot } from '../stats/Shimmer';
 import { townNpcAltTexture, townNpcProfileSheet } from '../data/townNpcProfiles';
+import { hslToRgb } from '../player/Appearance';
 import { newNpcName } from '../i18n/RandomText';
 import { canHit } from '../physics/LineOfSight';
 import {
@@ -151,6 +152,33 @@ export function shimmerGlowAlpha(baseAlpha: number, shimmerTransparency: number)
   return shimmerTransparency > 0 ? baseAlpha * (1 - shimmerTransparency) : baseAlpha;
 }
 
+// ===================== ai[0]=25 微光上升态（NPC.cs:53594-53682）=====================
+export const SHIMMER_RISE_VELOCITY_TICK = 30;   // ai[1]≥30 起 st 衰减 + 上浮速度（:53621）
+export const SHIMMER_RISE_END_TICK = 75;        // ai[1]≥75 且 st≤0 → 转化收尾（:53653）
+export const SHIMMER_RISE_PAUSE = 30;           // 远距落点后 ai[2]=30 暂停（:53604）
+export const SHIMMER_RISE_TELEPORT_DIST = 560;  // 落点位移 ≥560px 才暂停+发送粒子（:56001）
+
+/** Utils.Remap（Utils.cs:313，clamped 默认 true）：fromMin..fromMax 归一后
+ *  线性映到 toMin..toMax（区间外钳端值） */
+export function remapClamped(
+  v: number, fromMin: number, fromMax: number, toMin: number, toMax: number,
+): number {
+  const t = fromMax === fromMin ? 0 : (v - fromMin) / (fromMax - fromMin);
+  return toMin + (Math.max(0, Math.min(1, t))) * (toMax - toMin);
+}
+
+/** Main.IsItStorming（Main.cs:2978 = _shouldUseStormMusic；UpdateWindyDayState
+ *  :12927-12960 迟滞机，阈值 _minWind 0.34/_maxWind 0.4/_minRain 0.4/_maxRain
+ *  0.5 见 Main.cs:66137-66140）逐步推进的纯函数：无云恒 false；低雨/低风翻
+ *  false；高雨(≥0.5)+强风(|w|≥0.4) 翻 true；中间带保持前值（迟滞）。带 prev
+ *  逐步喂入 ≡ 原版每帧重算的全局字段。remixWorld 强制 false 分支本仓无 remix 世界 */
+export function isItStormingNext(cloudAlpha: number, windSpeedTarget: number, prev: boolean): boolean {
+  if (cloudAlpha === 0) return false;
+  if (cloudAlpha < 0.4 || Math.abs(windSpeedTarget) < 0.34) return false;
+  if (cloudAlpha >= 0.5 && Math.abs(windSpeedTarget) >= 0.4) return true;
+  return prev;
+}
+
 
 export class TownNPC extends Entity {
   w = 20; h = 42;
@@ -181,9 +209,10 @@ export class TownNPC extends Entity {
   /** 正在与玩家对话（原版 AI_007 :53721：talkNPC==本体 → ai[0]=0 站定、面向玩家） */
   talking = false;
   talkCooldown = 0;
-  /** 微光化变体（NPCID.Sets.ShimmerTownTransform 入微光 → NPC.cs:92560-92573
-   *  ai[0]=25 传送离场回归；本仓 = 标记 + 回家。变体贴图经 townSheet getter 切
-   *  TownNPCs/Shimmered 档（Profiles.StackedNPCProfile 档位 1），对话差分登记 GAP） */
+  /** 微光化变体 = townNpcVariationIndex==1（NPCID.Sets.ShimmerTownTransform 入
+   *  微光 → GetShimmered :92561-92573 → ai[0]=25 上升态；上升收尾 :53664 翻转——
+   *  **双向**：已微光化再浸微光翻转回原形态）。变体贴图经 townSheet getter 切
+   *  TownNPCs/Shimmered 档（Profiles.StackedNPCProfile 档位 1），对话差分登记 GAP */
   shimmered = false;
   /** 当前 altTexture（UpdateAltTexture NPC.cs:91254-91273：1=派对 2=狼人；
    *  fixedUpdate 每 tick 由 townNpcAltTexture 刷新——月相/血月/派对随时翻态） */
@@ -204,9 +233,18 @@ export class TownNPC extends Entity {
    *  消费：Renderer 本体 alpha=1−st（GetAlpha :94874）+ 160 Glow ×(1−st)
    *  （Main.cs:25771-25776）——微光转化渐显/渐隐的唯一驱动字段 */
   shimmerTransparency = 0;
-  /** 微光上升态旗标（原版 ai[0]==25，:53616-53666：转化后 −1/60/t 衰减段；
-   *  本仓无上升演出，仅承接衰减速率档） */
+  /** 微光上升态旗标（原版 ai[0]==25，NPC.cs:53594-53682：落点传送 → ai[1]≥30
+   *  起 −1/60/t 衰减 + velocity.Y=−4×st 上浮 → st 归零后翻转变体 + 到场粒子 +
+   *  成就 43；态内 dontTakeDamage——推进见 shimmerRiseUpdate） */
   private shimmerRise = false;
+  /** ai[1]：上升态计时（0 起，暂停期外每 tick +1；浸液钳 30） */
+  private shimmerRiseT = 0;
+  /** ai[2]：远距落点传送后的暂停倒计时（:53604） */
+  private shimmerRisePause = 0;
+  /** Main.IsItStorming 缓存（isItStormingNext 逐步推进；坐姿/回家 flag 消费） */
+  private storming = false;
+  /** ai[0]==25 上升态只读（渲染/测试消费） */
+  get shimmerRising(): boolean { return this.shimmerRise; }
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
   hp: number;
@@ -259,6 +297,7 @@ export class TownNPC extends Entity {
    *  条件满足 → 重新入驻，≈次日回归），无需独立重生系统 */
   hurt(dmg: number, kbx: number, _kby: number, game: GameHooks): boolean {
     if (this.iframes > 0 || this.dead) return false;
+    if (this.shimmerRise) return false;   // ai[0]==25 dontTakeDamage（NPC.cs:53596）
     const books = (game.world.flags.combatBookWasUsed ? 1 : 0) + (game.world.flags.combatBookVolumeTwoWasUsed ? 1 : 0);
     const def = (VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15) + books * 8; // NPC.cs:53419
     dmg = Math.max(1, Math.round(dmg - def * 0.5));
@@ -316,9 +355,9 @@ export class TownNPC extends Entity {
    *  - 681 彩虹城镇史莱姆（AI_007 尾段 :55963-55974）= TorchColor(23)×0.35
    *  - 683 黄城镇史莱姆（:55974-55979）= (0.25,0.25,0.1)×WrappedLerp(0.75,1,t%120/120)
    *  条件态：魔法光环 ai[0]==14（:55394，num69=1 恒满档，atkState===14 承接）
-   *  ×GetMagicAuraColor；跳过两处——:53637 微光上升光（ai[1] 30→90 上升态计时
-   *  机未移植，本仓入微光即刻标记+传送回家，无上升过程）；:55546 ai[0]==24
-   *  （树妖 Stardew 演出 HaveDryadDoStardewAnimation :19123，公主礼物彩蛋无载体） */
+   *  ×GetMagicAuraColor；微光上升光 :53637（ai[1] 30→90，shimmerRise 态内已接）；
+   *  跳过一处——:55546 ai[0]==24（树妖 Stardew 演出 HaveDryadDoStardewAnimation
+   *  :19123，公主礼物彩蛋无载体） */
   get lightRGB(): [number, number, number] | null {
     let rgb: [number, number, number] | null = null;
     // 逐通道 max 合并（原版同帧多 AddLight，单槽近似视觉并集；不挪光源位）
@@ -352,6 +391,13 @@ export class TownNPC extends Entity {
         || this.vanillaId === 20 || this.vanillaId === 663)) {
       merge(this.magicAuraColor());
     }
+    // 微光上升光（:53637-53639）：Center 处 hslToRgb(t/360%1, 0.6, 0.65) ×
+    // Remap(ai[1],30,90,0,0.7)——Remap 钳位使 ai[1]<30 时恒 0（无光）
+    if (this.shimmerRise) {
+      const k = remapClamped(this.shimmerRiseT, SHIMMER_RISE_VELOCITY_TICK, 90, 0, 0.7);
+      const c = hslToRgb((visEffectFrames() / 360) % 1, 0.6, 0.65);
+      merge([c[0] * k, c[1] * k, c[2] * k]);
+    }
     return rgb;
   }
   lightRGBAt: { x: number; y: number } | null = null;
@@ -371,36 +417,41 @@ export class TownNPC extends Entity {
       for (let k = 0; k < books0; k++) this.applyCombatBook();
     }
 
-    // ---- 微光化城镇变体 + shimmerTransparency（赋值时序 NPC.cs:92468-92497 +
-    //      :92560-92573 + :53625）。原版链：浸微光 st +0.01/t（:92469），>0.9 触发
-    //      GetShimmered（:92471——约 91t 渐隐，非即刻）；城镇 GetShimmered 置
-    //      st=0.89 并进 ai[0]=25 上升态（:92568），态内 −1/60/t 衰减（:53625），
-    //      st 归零后切换微光变体（townNpcVariationIndex 翻转 :53656-53669）。
-    //      本仓近似：转化即刻标记微光化 + 传送回家（"离场→稍后回归"由入驻轮承担），
-    //      shimmerRise 承接上升态衰减档；上升演出（velocity=-4×st/:53631）未接。
-    //      变体贴图走 townSheet getter（已接），对话差分未接（GAP）----
+    // ---- 城镇微光转化链 1:1（GetShimmered NPC.cs:92561-92573 + AI_007 ai[0]==25
+    //      :53594-53682）。触发：浸微光 st +0.01/t（:92469），>0.9 → GetShimmered
+    //      （:92471，约 91t 渐隐非即刻）；城镇分支置 st=0.89 并进 ai[0]=25 上升态
+    //      （:92562-92568，摘 buff 353 :92570-92573——城镇 buff 系统未建，无载体）。
+    //      上升态 = 落点传送 → ai[1]≥30 起 −1/60/t 衰减 + velocity.Y=−4×st 上浮 →
+    //      st 归零后翻转微光变体 + 到场粒子 + 成就 43（推进见 shimmerRiseUpdate）。
+    //      变体贴图走 townSheet getter（已接），对话差分未接（GAP）。
+    //      注：原版 UpdateNPC_BuffApplyVFX（:92492）上升态外仍每 tick −0.001 共衰减，
+    //      本仓并入 −1/60 单档（既有 shimmerTransparencyNext 模型，纯函数测试锁定）----
     const st0 = world.store;
     const si = st0.idx(
       Math.max(0, Math.min(st0.w - 1, Math.floor(this.cx / TILE))),
       Math.max(0, Math.min(st0.h - 1, Math.floor(this.cy / TILE))),
     );
     const inShimmer = st0.liquid[si] > 30 && st0.liquidType[si] === 4;
-    this.shimmerTransparency = shimmerTransparencyNext(
-      this.shimmerTransparency, inShimmer, justHit, this.shimmerRise,
-    );
-    if (this.shimmerRise && this.shimmerTransparency <= 0) this.shimmerRise = false;
-    if (!this.shimmered && isNpcTownShimmerable(this.vanillaId)
-      && inShimmer && this.shimmerTransparency > SHIMMER_ST_TRANSFORM) {
-      this.shimmered = true;
-      this.shimmerTransparency = SHIMMER_ST_RISE;   // :92568
-      this.shimmerRise = true;                      // ai[0]=25 上升态
-      game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
-      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
-      if (this.home) {
-        this.x = this.home.x * TILE + 8 - this.w / 2;
-        this.y = this.home.y * TILE - this.h;
-        this.vx = 0; this.vy = 0;
+    // 上升态内 st 由 shimmerRiseUpdate 独占推进（ai[1]<30 期间原样保持 0.89）
+    if (!this.shimmerRise) {
+      this.shimmerTransparency = shimmerTransparencyNext(
+        this.shimmerTransparency, inShimmer, justHit, false,
+      );
+      if (isNpcTownShimmerable(this.vanillaId) && inShimmer
+        && this.shimmerTransparency > SHIMMER_ST_TRANSFORM) {
+        this.shimmerRise = true;                    // ai[0]=25（:92562）
+        this.shimmerRiseT = 0;                      // ai[1]=0（:92563）
+        this.shimmerRisePause = 0;                  // ai[2]=0（:92564）
+        this.shimmerTransparency = SHIMMER_ST_RISE; // :92568
       }
+    }
+    if (this.shimmerRise && this.shimmerRiseUpdate(world, game, st0.liquid[si] > 0)) {
+      // ai[0]==25 块整段 return（:53682）：AI_007 游走/坐姿/攻击/开门全跳过；
+      // 只补 UpdateNPC 尾段的重力 + 碰撞 + 找帧（:91521-91565，AI() 之后照常执行）
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, world, this.vx, this.vy);
+      this.updateWalkFrame();
+      return;
     }
 
     // ---- altTexture 刷新（UpdateAltTexture NPC.cs:91254-91273，原版 UpdateNPC 每
@@ -429,8 +480,13 @@ export class TownNPC extends Entity {
     //      回家传送同式）+ **夜间**才扫椅（:53209 dayTime 早退——白天雨天也只回
     //      home 地面不坐）；以 home 为锚扫 ±7 列可坐格；城镇宠物/史莱姆不坐
     //      （:53214 type 638/656 + IsTownSlime 族 NPCID.cs:4446）→ 本仓 null ----
+    // 风暴门（:53399-53402）：Main.IsItStorming 且 NPC 头顶行 < worldSurface
+    // （= world.groundLevel，SceneMetrics 同源；缺省 0=未知世界恒 false）。迟滞机
+    // 每 tick 逐步推进（原版 Main 全局字段 _shouldUseStormMusic 逐帧重算）
+    this.storming = isItStormingNext(world.weather.cloudAlpha, world.weather.windSpeedTarget, this.storming);
     const sitFlag = world.weather.raining || !world.clock.isDay
-      || !!world.clock.eclipse || !!world.weather.slimeRain;
+      || !!world.clock.eclipse || !!world.weather.slimeRain
+      || (this.storming && this.y / TILE < world.groundLevel);
     this.restSpot = (sitFlag && !world.clock.isDay && this.home
       && !NO_SIT_NPC_IDS.has(this.vanillaId))
       ? findChairSpot(world.store, this.home.x, this.home.y) : null;
@@ -547,9 +603,15 @@ export class TownNPC extends Entity {
     // 54243-54252：走过门 >2 格关门，>4 格放弃）
     this.npcDoorUpdate(world, game);
 
-    // ---- 原版 FindFrame 城镇分支（NPC.cs:70172-70262）----
-    // 腾空=帧1；地面站定=帧0、计数清零；行走 frameCounter += |vx|*2+1，>6 推进，
-    // 帧区间 2..frames-extra-1（越界回卷帧2）
+    // ---- 原版 FindFrame 城镇分支（NPC.cs:70172-70262，UpdateNPC :91565 调）----
+    this.updateWalkFrame();
+
+  }
+
+  /** FindFrame 城镇分支（NPC.cs:70172-70262）：腾空=帧1；地面站定=帧0、计数清零；
+   *  行走 frameCounter += |vx|*2+1，>6 推进，帧区间 2..frames-extra-1（越界回卷
+   *  帧2）。微光上升态同样调（原版 FindFrame 在 AI 早退之后仍执行 :91565） */
+  private updateWalkFrame(): void {
     if (!this.onGround) {
       this.frame = 1;
       this.frameT = 0;
@@ -567,7 +629,107 @@ export class TownNPC extends Entity {
       }
       if (this.frame >= total - extra) this.frame = 2;
     }
+  }
 
+  /** AI_007 ai[0]==25 微光上升态（NPC.cs:53594-53682）1:1，返回 true = 态中。
+   *  时间线：ai[1]==0 落点传送（:53609，位移 ≥560px 则 ai[2]=30 暂停 + 发送
+   *  粒子）→ ai[2] 倒计时毕置 ai[1]=1（:53612-53618）→ 此后每 tick ai[1]+1
+   *  （:53620）→ ≥30 起非浸液 st−1/60、浸液钳 30 等待（:53621-53629）+
+   *  velocity=(0,−4×st)（:53631）→ ai[1]≥75 且 st≤0 收尾（:53653-53669）：
+   *  变体翻转（双向）+ 原地 Teleport(12)（TeleportEffect 无 style 12 分支 =
+   *  纯重锚无视觉，Main.cs:13169-13414）+ ShimmerTownNPC 到场粒子 + 成就 43 */
+  private shimmerRiseUpdate(
+    world: import('../world/World').World, game: GameHooks, wet: boolean,
+  ): boolean {
+    if (this.shimmerRiseT === 0) this.vx = 0;                     // :53597-53599
+    if (this.shimmerRiseT === 0 && this.shimmerRisePause < 1) {
+      this.shimmerLandAt(world.store, game);                      // :53609
+    }
+    if (this.shimmerRisePause > 0) {                              // :53612-53618
+      this.shimmerRisePause--;
+      if (this.shimmerRisePause <= 0) this.shimmerRiseT = 1;
+      return true;
+    }
+    this.shimmerRiseT++;                                          // :53620
+    if (this.shimmerRiseT >= SHIMMER_RISE_VELOCITY_TICK) {        // :53621
+      if (!wet) {
+        // WetCollision 近似 = 中心格任意液体（:53622-53626）
+        this.shimmerTransparency = shimmerTransparencyNext(this.shimmerTransparency, false, false, true);
+      } else {
+        this.shimmerRiseT = SHIMMER_RISE_VELOCITY_TICK;           // :53627 浸液等待
+      }
+      this.vx = 0;
+      this.vy = -4 * this.shimmerTransparency;                    // :53631
+    }
+    // 上升演出（:53634-53649）——dust 309 / ShimmerBlock 的 Remap 门在 ai[1]<30
+    // 时钳到恒假，与原版同 tick 生效（光走 lightRGB 的 shimmerRise 分支）
+    const num5 = Math.random() * 2 - 1;                           // NextFloatDirection
+    if (Math.random() > remapClamped(this.shimmerRiseT, 30, 60, 1, 0.5)) {
+      // dust 309（:53640-53646）：下半身盒（Y+20/H−20）内随机点 + 圆偏(8,0)+(0,4)，
+      // velocity=(0,−2).RotatedBy(num5×2π×0.11)、scale 1.7−|num5|×1.3（size 档
+      // spawnBurst 无参不建模）
+      game.spawnBurst?.(
+        this.x + Math.random() * this.w + (Math.random() * 2 - 1) * 8,
+        this.y + 20 + Math.random() * (this.h - 20) + 4,
+        '#BFE8FF', 1, 2, -Math.PI / 2 + num5 * Math.PI * 2 * 0.11, 0,
+        { life: 30, grav: -0.04 },
+      );
+    }
+    if (this.shimmerRiseT > 60 && Math.floor(Math.random() * 15) === 0) {
+      // ShimmerBlock ×3（:53642-53649 → Spawn_ShimmerBlock :1791-1811）：星尘带
+      // MovementVector = DirectionTo(v).RotatedBy(9π/20×±1)×rand 减速漂散——
+      // 无粒子编排器，随机向小速度近似
+      for (let i = 0; i < 3; i++) {
+        game.spawnBurst?.(
+          this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+          '#C9C2FF', 1, 0.8, Math.random() * Math.PI * 2, Math.PI, { life: 45, damp: 0.98 },
+        );
+      }
+    }
+    // TargetClosest（:53651）：面向最近玩家
+    const tp = (game as unknown as { player?: { x: number; y: number; w: number; h: number; dead: boolean } }).player;
+    if (tp && !tp.dead) this.facing = tp.x + tp.w / 2 < this.cx ? -1 : 1;
+    if (this.shimmerRiseT >= SHIMMER_RISE_END_TICK && this.shimmerTransparency <= 0) {
+      this.shimmerRise = false;                                   // ai[0]=0（:53654）
+      this.shimmerRiseT = 0;
+      this.shimmerRisePause = 0;
+      this.vx = 0; this.vy = -4;                                  // :53660
+      this.shimmered = !this.shimmered;                           // :53664 变体翻转（双向）
+      // ShimmerTownNPC 到场粒子（:53666 → Spawn_ShimmerTownNPC :1696-1752）：
+      // 40 PrettySparkle（hsl(rand,1,0.5)+白，30×60 盒上升）+ 20 dust 308 四色
+      // （#FFFFD2/#BEF5FF/#FF96FF/#BEAFFF = 1:1:1:3，vy−8）+ SoundID.Item29
+      //（= Item bank cue 29，Sfx 键 manaCrystal → sounds/Item_29.wav；曾因登记
+      //  "素材缺"走 shimmerSplash 近似——素材实测在库，已换真声）
+      game.spawnParticles(this.cx, this.cy, '#BEAFFF', 12, 3.2, { life: 34, grav: -0.12 });
+      game.spawnParticles(this.cx, this.cy, '#BEF5FF', 4, 3.2, { life: 34, grav: -0.12 });
+      game.spawnParticles(this.cx, this.cy, '#FF96FF', 4, 3.2, { life: 34, grav: -0.12 });
+      game.playSfx('manaCrystal', 1, this.cx, this.cy);
+      if (this.shimmered) game.achievements?.notifyProgressionEvent(43);   // :53667-53669
+    }
+    return true;
+  }
+
+  /** AI_007_TownEntities_Shimmer_TeleportToLandingSpot（:53609 → :55982-56010 +
+   *  ScanForBestSpotToLandOn :55996-56059）：以自身顶格扫无微光落点（home 锚
+   *  兜底），传送过去；位移 ≥560px → ai[2]=30 暂停 + ShimmerTownNPCSend 粒子
+   *  （Spawn_ :1657-1694）。复用 stats/Shimmer.findShimmerFreeSpot（玩家脱困
+   *  版同谓词）：环扫为原版 8 点环超集、r 并到 59、平台落点恒允许（原版仅
+   *  homeless 无 home 时 allowSolidTop）——行为相容近似 */
+  private shimmerLandAt(st: TileStore, game: GameHooks): void {
+    const spot = findShimmerFreeSpot(
+      st, Math.floor(this.x / TILE), Math.floor(this.y / TILE),   // Top.ToTileCoordinates
+      this.home?.x, this.home?.y,
+    );
+    if (!spot) return;
+    const nx = spot.x * TILE - this.w / 2, ny = spot.y * TILE - this.h;   // ShimmerHelper.cs:9
+    const dist = Math.hypot(nx - this.x, ny - this.y);
+    this.x = nx;
+    this.y = ny;
+    if (dist >= SHIMMER_RISE_TELEPORT_DIST) {
+      this.shimmerRisePause = SHIMMER_RISE_PAUSE;                 // :56004
+      game.spawnParticles(this.cx, this.cy, '#BEAFFF', 14, 1.2, { life: 30, grav: -0.05 });
+      game.spawnParticles(this.cx, this.cy, '#BEF5FF', 10, 1.2, { life: 30, grav: -0.05 });
+    }
   }
 
   /** 环境与互殴受击(NPC.cs:91534-91544 的 townNPC 分支三件套):

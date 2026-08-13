@@ -168,7 +168,8 @@ describe('六件物品登记（docs/implementation-gap-list-2026-08-13.md §1）
     for (const [key, vid] of Object.entries(ids)) {
       const m = /^vi_(\d+)_/.exec(key);
       expect(m ? Number(m[1]) : -1).toBe(vid);
-      expect(Game.bucketUse(vid, 0, vid === 5364 ? S : vid === 4820 ? L : vid === 5302 ? H : W).kind)
+      // 空格(liquid=0)+ 非实心:无底桶族应倾倒,海绵族不进倾倒支
+      expect(Game.bucketUse(vid, 0, vid === 5364 ? S : vid === 4820 ? L : vid === 5302 ? H : W, 0, false).kind)
         .toBe(vid === 4872 || vid === 5303 || vid === 5304 ? 'none' : 'pour');
     }
   });

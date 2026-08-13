@@ -148,6 +148,9 @@ export interface SaveData {
     hideInfo?: boolean[];
     /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
     deathsPve?: number;
+    /** 发色剂染料 shaderId 1..12（Player.hairDye byte,PL:53805-53808 写/:54214-54216
+     *  读；0=无。旧档缺省 0=无染料） */
+    hairDye?: number;
     /** 永久升级族(Player.cs:44575-44802;旧档缺省全 false) */
     permanentUpgrades?: {
       extraAccessory?: boolean;
@@ -158,7 +161,7 @@ export interface SaveData {
       usedAmbrosia?: boolean;
     };
   };
-  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
+  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
   /** 世界事件态（原版 header 内 party/灯笼夜段,WF:1361-1368/1381-1384;旧档缺省=无派对无预约） */
   events?: {

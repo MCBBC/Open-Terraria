@@ -235,9 +235,13 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
   //  BuildMagmaMap 时全新(全 0),循环只写被激活/过压力门的格,轮末交换数组引用——
   //  本轮未写格保留 **i-2 轮**值。曾每轮 tPres.set(pres) 全量刷新 → 未写格保留
   //  i-1 轮值,CA 边界低压力格行为分叉
-  const tPres0 = new Float64Array(200 * 200);
-  const tRes0 = new Float64Array(200 * 200);
-  const tAct0 = new Uint8Array(200 * 200);
+  // ★BuildMagmaMap(GraniteBiome.cs:96-107):target 缓冲初始为 source 的**别名拷贝**
+  //  (未写格 Resistance 恒保持地形初值 1/4,非全 0)——曾 new 全 0 数组,CA 边界
+  //  电阻场差一个量级(oracle 对账揪出;此前为对齐 JS 曾在 oracle 镜像 0 初值,现
+  //  双侧回正原版语义)
+  const tPres0 = Float64Array.from(pres);
+  const tRes0 = Float64Array.from(res);
+  const tAct0 = Uint8Array.from(mact);
   let tPres = tPres0, tRes = tRes0, tAct = tAct0;
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   for (let it = 0; it < 300; it++) {

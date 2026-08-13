@@ -17,7 +17,7 @@
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
-import { projSprite } from './Arrow';
+import { projSprite, Arrow } from './Arrow';
 import { playEnemyHitSound } from './projTargets';
 
 /** hslToRgb（原版 Main.hslToRgb 近似——S=1 L=0.5 时的纯色环） */
@@ -258,6 +258,188 @@ export class PrismProj extends Entity {
     ctx.rotate(rot);
     ctx.drawImage(img, 0, Math.round(f * fh), img.naturalWidth, Math.round(fh),
       -img.naturalWidth / 2, -fh / 2, img.naturalWidth, fh);
+    ctx.restore();
+  }
+}
+
+/** 充能爆破炮 2882 → 460/461/459（AI_075 :63442-63620 的 460 分支 + AI_84 461 锚定）：
+ *  460 晶体：channel 主控；ai[0] 计数（80=二档尘/180=满蓄 flag4）；每 5t 重瞄
+ *  （vel=归一瞄准向）；音 Item15 按 (5−档)×2 间隔；459 小弹发射点 = ai0==1、
+ *  ≤50 每 10t、80-180 每 30t（速度 10）；ai0==180 发 461 光束（伤害×1.5）后
+ *  光束灭即亡。命中 461 = 线碰撞 22×scale（:14612-14620）+ LaserScan 2400。 */
+export class BlasterBeam extends Entity {
+  w = 18; h = 18;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  parent: ChargedBlaster | null = null;
+  vx = 0; vy = -1;
+  beamLen = 0;
+  private hitCd = new Map<number, number>();
+  dead = false;
+  lightRGB: [number, number, number] | null = [0.5, 0.2, 0.5];
+
+  constructor(damage: number, knockback: number) {
+    super();
+    this.damage = damage;
+    this.knockback = knockback;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    const p = this.parent;
+    if (!p || p.dead) { this.dead = true; return; }
+    // 锚定（AI_84 :30313-30319：Center = 父.Center + 归一vel×16）
+    this.x = p.cx + p.dirX * 16 - this.w / 2;
+    this.y = p.cy + p.dirY * 16 - this.h / 2;
+    this.vx = p.dirX; this.vy = p.dirY;
+    // 激光长度（LaserScan 2400 截实心）
+    const st = game.world.store;
+    let scanLen = 2400;
+    for (let d = 0; d <= 2400; d += 8) {
+      const tx = Math.floor((this.cx + this.vx * d) / TILE);
+      const ty = Math.floor((this.cy + this.vy * d) / TILE);
+      if (!st.inBounds(tx, ty)) { scanLen = d; break; }
+      if (st.isSolid(tx, ty)) { scanLen = d; break; }
+    }
+    this.beamLen = this.beamLen + (scanLen - this.beamLen) * 0.75;
+    // 线碰撞命中（厚 22）
+    for (const [k, v] of this.hitCd) {
+      if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
+    }
+    const thick = 22;
+    const steps = Math.max(1, Math.floor(this.beamLen / 12));
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+      if (e.dead || this.hitCd.has(e.id)) continue;
+      for (let s2 = 1; s2 <= steps; s2++) {
+        const d = s2 * 12;
+        if (d > this.beamLen) break;
+        const bx = this.cx + this.vx * d - thick / 2, by = this.cy + this.vy * d - thick / 2;
+        if (!(bx < e.x + e.w && bx + thick > e.x && by < e.y + e.h && by + thick > e.y)) continue;
+        const crit = Math.random() < this.critChance;
+        const dmg = crit ? this.damage * 2 : this.damage;
+        playEnemyHitSound(game, e);
+        e.hurt(dmg, this.vx * this.knockback, this.vy * this.knockback, game, this.armorPen, crit);
+        game.addDamageNumber(this.cx, this.cy - 8, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+        this.hitCd.set(e.id, 5);
+        break;
+      }
+    }
+  }
+
+  draw(r: { canvas: HTMLCanvasElement }): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx || this.beamLen < 8) return;
+    const x2 = this.cx + this.vx * this.beamLen, y2 = this.cy + this.vy * this.beamLen;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(230,140,255,0.85)';
+    ctx.lineWidth = 18;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(this.cx, this.cy); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(this.cx, this.cy); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+export class ChargedBlaster extends Entity {
+  w = 14; h = 18;
+  damage: number;
+  knockback: number;
+  critChance = 0.04;
+  armorPen = 0;
+  dirX: number; dirY: number;
+  channelCb: () => boolean;
+  aimCb: () => { x: number; y: number };
+  payMana: () => boolean;
+  beam: BlasterBeam | null = null;
+  dead = false;
+  private charge = 0;
+  private aimCd = 0;
+  private sndT = 0;
+
+  constructor(dirX: number, dirY: number, damage: number, knockback: number,
+    channelCb: () => boolean, aimCb: () => { x: number; y: number }, payMana: () => boolean) {
+    super();
+    const n = Math.hypot(dirX, dirY) || 1;
+    this.dirX = dirX / n; this.dirY = dirY / n;
+    this.damage = damage;
+    this.knockback = knockback;
+    this.channelCb = channelCb;
+    this.aimCb = aimCb;
+    this.payMana = payMana;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.charge++;
+    const full = this.charge >= 180;
+    const stage = (this.charge >= 180 ? 2 : this.charge >= 80 ? 1 : 0);
+    // 重瞄（:63476-63496：满蓄前 ai1≥5 门、满蓄 ai0%5）
+    if (!full) this.aimCd++;
+    if ((!full && this.aimCd >= 5) || (full && this.charge % 5 === 0)) {
+      if (!full) this.aimCd = 0;
+      const aim = this.aimCb();
+      let ax = aim.x - this.cx, ay = aim.y - this.cy;
+      const al = Math.hypot(ax, ay) || 1;
+      this.dirX = ax / al; this.dirY = ay / al;
+    }
+    // 音（Item15 按 (5−档)×2 间隔，非首帧）
+    if (this.sndT <= 0 && !full) {
+      this.sndT = (5 - stage) * 2;
+      if (this.charge !== 1) game.playSfxFiles(['Item_15'], 1, this.cx, this.cy);
+    }
+    this.sndT--;
+    // channel 门（:63562-63565）——断链即亡
+    if (!this.channelCb()) { this.dead = true; if (this.beam) this.beam.dead = true; return; }
+    // 挂手
+    const pl = game.player as unknown as { cx: number; cy: number } | null;
+    if (!pl) { this.dead = true; return; }
+    this.x = pl.cx - this.w / 2;
+    this.y = pl.cy - this.h / 2;
+    if (!full) {
+      // 459 小弹（:63592-63620：ai0==1 / ≤50 每 10t / 80-180 每 30t；速度 10）
+      const fire = this.charge === 1
+        || (this.charge <= 50 && this.charge % 10 === 0)
+        || (this.charge >= 80 && this.charge % 30 === 0);
+      if (fire && this.payMana()) {
+        const bolt = new Arrow(this.cx, this.cy, this.dirX * 10, this.dirY * 10,
+          this.damage, this.knockback, 459, null,
+          { grav: 0, life: 600, pierce: 1 });
+        bolt.critChance = this.critChance;
+        bolt.armorPen = this.armorPen;
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(bolt, 'projectiles');
+      }
+    } else if (this.charge === 180) {
+      // 满蓄发 461 光束（伤害 ×1.5，:63569-63578）
+      if (this.payMana()) {
+        const beam = new BlasterBeam(Math.round(this.damage * 1.5), this.knockback);
+        beam.parent = this;
+        beam.critChance = this.critChance;
+        beam.armorPen = this.armorPen;
+        this.beam = beam;
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(beam, 'projectiles');
+      } else {
+        this.dead = true; return;
+      }
+    } else if (this.beam?.dead) {
+      this.dead = true; return;      // 光束灭即亡（:63580-63587）
+    }
+  }
+
+  draw(r: { canvas: HTMLCanvasElement }): void {
+    const img = projSprite(460);
+    const ctx = r.canvas.getContext('2d');
+    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(Math.atan2(this.dirY, this.dirX));
+    if (this.dirX < 0) ctx.scale(1, -1);
+    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
     ctx.restore();
   }
 }

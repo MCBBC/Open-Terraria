@@ -3,14 +3,26 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
+   "src": 10896,
    "durMin": 180,
    "durMax": 180
+  }
+ ],
+ "15": [
+  {
+   "buff": 24,
+   "chance": 0.5,
+   "src": 10907,
+   "gate": "remixWorld→323",
+   "durMin": 300,
+   "durMax": 300
   }
  ],
  "19": [
   {
    "buff": 24,
    "chance": 0.5,
+   "src": 10923,
    "durMin": 360,
    "durMax": 360
   }
@@ -19,6 +31,7 @@
   {
    "buff": 30,
    "chance": 1,
+   "src": 10638,
    "durMin": 480,
    "durMax": 720
   }
@@ -27,6 +40,7 @@
   {
    "buff": 20,
    "chance": 0.5,
+   "src": 10937,
    "durMin": 420,
    "durMax": 420
   }
@@ -35,6 +49,7 @@
   {
    "buff": 24,
    "chance": 0.5,
+   "src": 10951,
    "durMin": 240,
    "durMax": 479
   }
@@ -43,6 +58,7 @@
   {
    "buff": 24,
    "chance": 0.5,
+   "src": 10965,
    "durMin": 300,
    "durMax": 300
   }
@@ -51,6 +67,7 @@
   {
    "buff": 153,
    "chance": 1,
+   "src": 10814,
    "durMin": 240,
    "durMax": 299
   }
@@ -59,6 +76,7 @@
   {
    "buff": 20,
    "chance": 0.5,
+   "src": 10972,
    "durMin": 600,
    "durMax": 600
   }
@@ -67,14 +85,26 @@
   {
    "buff": 31,
    "chance": 0.8,
+   "src": 10990,
    "durMin": 120,
    "durMax": 240
+  }
+ ],
+ "85": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "src": 10997,
+   "gate": "ai0==1→324",
+   "durMin": 1200,
+   "durMax": 1200
   }
  ],
  "95": [
   {
    "buff": 39,
    "chance": 1,
+   "src": 11010,
    "durMin": 420,
    "durMax": 420
   }
@@ -83,6 +113,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 11041,
    "durMin": 600,
    "durMax": 600
   }
@@ -91,6 +122,7 @@
   {
    "buff": 39,
    "chance": 1,
+   "src": 11010,
    "durMin": 420,
    "durMax": 420
   }
@@ -99,6 +131,7 @@
   {
    "buff": 39,
    "chance": 1,
+   "src": 11010,
    "durMin": 420,
    "durMax": 420
   }
@@ -107,6 +140,7 @@
   {
    "buff": 44,
    "chance": 0.5,
+   "src": 10930,
    "durMin": 180,
    "durMax": 180
   }
@@ -115,6 +149,7 @@
   {
    "buff": 324,
    "chance": 1,
+   "src": 10650,
    "durMin": 240,
    "durMax": 240
   }
@@ -123,14 +158,16 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 600,
    "durMax": 600
   },
   {
    "buff": 24,
    "chance": 0.6666666666666666,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 300,
    "durMax": 300
   }
@@ -139,6 +176,7 @@
   {
    "buff": 44,
    "chance": 0.3333333333333333,
+   "src": 10900,
    "durMin": 180,
    "durMax": 180
   }
@@ -147,6 +185,7 @@
   {
    "buff": 375,
    "chance": 1,
+   "src": 10618,
    "durMin": 480,
    "durMax": 720
   }
@@ -155,6 +194,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 11045,
    "durMin": 900,
    "durMax": 900
   }
@@ -163,6 +203,7 @@
   {
    "buff": 323,
    "chance": 1,
+   "src": 11006,
    "durMin": 1200,
    "durMax": 1200
   }
@@ -171,6 +212,7 @@
   {
    "buff": 375,
    "chance": 1,
+   "src": 10622,
    "durMin": 240,
    "durMax": 360
   }
@@ -179,6 +221,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 10646,
    "durMin": 300,
    "durMax": 600
   }
@@ -187,6 +230,7 @@
   {
    "buff": 324,
    "chance": 1,
+   "src": 10919,
    "durMin": 480,
    "durMax": 480
   }
@@ -195,6 +239,7 @@
   {
    "buff": 31,
    "chance": 0.3333333333333333,
+   "src": 10634,
    "durMin": 60,
    "durMax": 120
   }
@@ -203,6 +248,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 11053,
    "durMin": 1800,
    "durMax": 1800
   }
@@ -211,14 +257,16 @@
   {
    "buff": 20,
    "chance": 0.3333333333333333,
-   "mut": 3,
+   "mut": 5,
+   "src": 10979,
    "durMin": 3600,
    "durMax": 3600
   },
   {
    "buff": 20,
    "chance": 0.6666666666666666,
-   "mut": 3,
+   "mut": 5,
+   "src": 10979,
    "durMin": 1800,
    "durMax": 1800
   }
@@ -227,6 +275,7 @@
   {
    "buff": 69,
    "chance": 1,
+   "src": 11014,
    "durMin": 600,
    "durMax": 600
   }
@@ -235,6 +284,7 @@
   {
    "buff": 69,
    "chance": 1,
+   "src": 11014,
    "durMin": 600,
    "durMax": 600
   }
@@ -243,6 +293,7 @@
   {
    "buff": 69,
    "chance": 1,
+   "src": 11014,
    "durMin": 600,
    "durMax": 600
   }
@@ -251,6 +302,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 11018,
    "durMin": 600,
    "durMax": 600
   }
@@ -259,6 +311,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 11018,
    "durMin": 600,
    "durMax": 600
   }
@@ -267,14 +320,16 @@
   {
    "buff": 31,
    "chance": 0.3333333333333333,
-   "mut": 2,
+   "mut": 4,
+   "src": 10885,
    "durMin": 180,
    "durMax": 180
   },
   {
    "buff": 31,
    "chance": 0.6666666666666666,
-   "mut": 2,
+   "mut": 4,
+   "src": 10885,
    "durMin": 60,
    "durMax": 60
   }
@@ -283,6 +338,7 @@
   {
    "buff": 72,
    "chance": 1,
+   "src": 10881,
    "durMin": 120,
    "durMax": 120
   }
@@ -291,6 +347,7 @@
   {
    "buff": 323,
    "chance": 1,
+   "src": 10858,
    "durMin": 480,
    "durMax": 900
   }
@@ -299,6 +356,7 @@
   {
    "buff": 323,
    "chance": 1,
+   "src": 10858,
    "durMin": 480,
    "durMax": 900
   }
@@ -307,6 +365,7 @@
   {
    "buff": 36,
    "chance": 1,
+   "src": 10626,
    "durMin": 600,
    "durMax": 1200
   }
@@ -315,6 +374,7 @@
   {
    "buff": 324,
    "chance": 1,
+   "src": 10654,
    "durMin": 300,
    "durMax": 300
   }
@@ -323,14 +383,16 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 600,
    "durMax": 600
   },
   {
    "buff": 24,
    "chance": 0.6666666666666666,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 300,
    "durMax": 300
   }
@@ -339,6 +401,7 @@
   {
    "buff": 30,
    "chance": 1,
+   "src": 10642,
    "durMin": 180,
    "durMax": 300
   }
@@ -347,6 +410,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 11057,
    "durMin": 1800,
    "durMax": 1800
   }
@@ -355,6 +419,7 @@
   {
    "buff": 324,
    "chance": 1,
+   "src": 10658,
    "durMin": 420,
    "durMax": 420
   }
@@ -363,6 +428,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 10842,
    "durMin": 240,
    "durMax": 360
   }
@@ -371,6 +437,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10846,
    "durMin": 180,
    "durMax": 360
   }
@@ -379,6 +446,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 10834,
    "durMin": 120,
    "durMax": 240
   }
@@ -387,6 +455,7 @@
   {
    "buff": 31,
    "chance": 0.3333333333333333,
+   "src": 10630,
    "durMin": 60,
    "durMax": 120
   }
@@ -395,6 +464,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 10838,
    "durMin": 120,
    "durMax": 240
   }
@@ -403,6 +473,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 10838,
    "durMin": 120,
    "durMax": 240
   }
@@ -411,6 +482,7 @@
   {
    "buff": 70,
    "chance": 1,
+   "src": 10838,
    "durMin": 120,
    "durMax": 240
   }
@@ -419,6 +491,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10850,
    "durMin": 180,
    "durMax": 360
   }
@@ -427,6 +500,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10850,
    "durMin": 180,
    "durMax": 360
   }
@@ -435,6 +509,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10850,
    "durMin": 180,
    "durMax": 360
   }
@@ -443,6 +518,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10850,
    "durMin": 180,
    "durMax": 360
   }
@@ -451,6 +527,7 @@
   {
    "buff": 151,
    "chance": 1,
+   "src": 10818,
    "durMin": 30,
    "durMax": 30
   }
@@ -459,6 +536,7 @@
   {
    "buff": 39,
    "chance": 1,
+   "src": 10826,
    "durMin": 180,
    "durMax": 360
   }
@@ -467,6 +545,7 @@
   {
    "buff": 69,
    "chance": 1,
+   "src": 10830,
    "durMin": 420,
    "durMax": 840
   }
@@ -475,6 +554,7 @@
   {
    "buff": 39,
    "chance": 1,
+   "src": 10826,
    "durMin": 180,
    "durMax": 360
   }
@@ -483,6 +563,7 @@
   {
    "buff": 39,
    "chance": 1,
+   "src": 11010,
    "durMin": 420,
    "durMax": 420
   }
@@ -491,6 +572,7 @@
   {
    "buff": 153,
    "chance": 1,
+   "src": 10802,
    "durMin": 120,
    "durMax": 299
   }
@@ -499,6 +581,7 @@
   {
    "buff": 153,
    "chance": 1,
+   "src": 10810,
    "durMin": 240,
    "durMax": 479
   }
@@ -507,6 +590,7 @@
   {
    "buff": 153,
    "chance": 1,
+   "src": 10806,
    "durMin": 60,
    "durMax": 179
   }
@@ -515,14 +599,16 @@
   {
    "buff": 323,
    "chance": 0.16666666666666666,
-   "mut": 1,
+   "mut": 2,
+   "src": 10759,
    "durMin": 60,
    "durMax": 239
   },
   {
    "buff": 323,
    "chance": 0.3333333333333333,
-   "mut": 1,
+   "mut": 2,
+   "src": 10759,
    "durMin": 60,
    "durMax": 119
   }
@@ -531,6 +617,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 10822,
    "durMin": 600,
    "durMax": 1740
   }
@@ -539,6 +626,7 @@
   {
    "buff": 69,
    "chance": 1,
+   "src": 10739,
    "durMin": 180,
    "durMax": 420
   }
@@ -547,6 +635,7 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
+   "src": 10790,
    "durMin": 60,
    "durMax": 239
   }
@@ -555,6 +644,7 @@
   {
    "buff": 324,
    "chance": 0.6666666666666667,
+   "src": 10798,
    "durMin": 120,
    "durMax": 319
   }
@@ -563,6 +653,7 @@
   {
    "buff": 323,
    "chance": 1,
+   "src": 10794,
    "durMin": 180,
    "durMax": 479
   }
@@ -571,6 +662,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 10683,
    "durMin": 300,
    "durMax": 600
   }
@@ -579,6 +671,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 10683,
    "durMin": 300,
    "durMax": 600
   }
@@ -587,6 +680,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 10735,
    "durMin": 180,
    "durMax": 300
   }
@@ -595,14 +689,26 @@
   {
    "buff": 153,
    "chance": 1,
+   "src": 10731,
    "durMin": 300,
    "durMax": 600
+  }
+ ],
+ "598": [
+  {
+   "buff": 169,
+   "chance": 1,
+   "src": 10687,
+   "gate": "ai1==i",
+   "durMin": 900,
+   "durMax": 900
   }
  ],
  "611": [
   {
    "buff": 189,
    "chance": 1,
+   "src": 10703,
    "durMin": 300,
    "durMax": 300
   }
@@ -611,6 +717,27 @@
   {
    "buff": 189,
    "chance": 1,
+   "src": 10707,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "614": [
+  {
+   "buff": 183,
+   "chance": 1,
+   "src": 10727,
+   "gate": "ai1==i",
+   "durMin": 900,
+   "durMax": 900
+  }
+ ],
+ "636": [
+  {
+   "buff": 189,
+   "chance": 1,
+   "src": 10691,
+   "gate": "ai1==i",
    "durMin": 300,
    "durMax": 300
   }
@@ -619,6 +746,7 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
+   "src": 10671,
    "durMin": 180,
    "durMax": 300
   }
@@ -627,6 +755,7 @@
   {
    "buff": 323,
    "chance": 0.5,
+   "src": 10675,
    "durMin": 180,
    "durMax": 480
   }
@@ -635,6 +764,7 @@
   {
    "buff": 323,
    "chance": 0.6666666666666667,
+   "src": 10679,
    "durMin": 360,
    "durMax": 480
   }
@@ -643,14 +773,46 @@
   {
    "buff": 31,
    "chance": 0.05,
+   "src": 10666,
    "durMin": 120,
    "durMax": 300
+  }
+ ],
+ "694": [
+  {
+   "buff": 204,
+   "chance": 1,
+   "src": 10786,
+   "gate": "setHuntressT2",
+   "durMin": 240,
+   "durMax": 510
+  }
+ ],
+ "695": [
+  {
+   "buff": 204,
+   "chance": 1,
+   "src": 10786,
+   "gate": "setHuntressT2",
+   "durMin": 240,
+   "durMax": 510
+  }
+ ],
+ "696": [
+  {
+   "buff": 204,
+   "chance": 1,
+   "src": 10786,
+   "gate": "setHuntressT2",
+   "durMin": 240,
+   "durMax": 510
   }
  ],
  "706": [
   {
    "buff": 323,
    "chance": 1,
+   "src": 10723,
    "durMin": 480,
    "durMax": 480
   }
@@ -659,6 +821,7 @@
   {
    "buff": 203,
    "chance": 1,
+   "src": 10719,
    "durMin": 600,
    "durMax": 600
   }
@@ -667,6 +830,7 @@
   {
    "buff": 24,
    "chance": 0.16666666666666666,
+   "src": 10958,
    "durMin": 120,
    "durMax": 180
   }
@@ -675,14 +839,56 @@
   {
    "buff": 189,
    "chance": 1,
+   "src": 10715,
    "durMin": 300,
    "durMax": 300
+  }
+ ],
+ "954": [
+  {
+   "buff": 24,
+   "chance": 0.16666666666666666,
+   "mut": 1,
+   "src": 10743,
+   "gate": "remixWorld→323",
+   "durMin": 60,
+   "durMax": 239
+  },
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "mut": 1,
+   "src": 10743,
+   "gate": "remixWorld→323",
+   "durMin": 60,
+   "durMax": 119
+  }
+ ],
+ "971": [
+  {
+   "buff": 337,
+   "chance": 1,
+   "src": 10695,
+   "gate": "ai1==i",
+   "durMin": 540,
+   "durMax": 540
+  }
+ ],
+ "975": [
+  {
+   "buff": 344,
+   "chance": 1,
+   "src": 10699,
+   "gate": "ai1==i",
+   "durMin": 540,
+   "durMax": 540
   }
  ],
  "976": [
   {
    "buff": 20,
    "chance": 0.25,
+   "src": 10944,
    "durMin": 420,
    "durMax": 420
   }
@@ -691,14 +897,36 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10711,
    "durMin": 180,
    "durMax": 180
+  }
+ ],
+ "979": [
+  {
+   "buff": 44,
+   "chance": 0.16666666666666666,
+   "mut": 3,
+   "src": 10770,
+   "gate": "remixWorld→324",
+   "durMin": 60,
+   "durMax": 239
+  },
+  {
+   "buff": 44,
+   "chance": 0.3333333333333333,
+   "mut": 3,
+   "src": 10770,
+   "gate": "remixWorld→324",
+   "durMin": 60,
+   "durMax": 119
   }
  ],
  "980": [
   {
    "buff": 70,
    "chance": 1,
+   "src": 11049,
    "durMin": 300,
    "durMax": 300
   }
@@ -707,14 +935,16 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 600,
    "durMax": 600
   },
   {
    "buff": 24,
    "chance": 0.6666666666666666,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 300,
    "durMax": 300
   }
@@ -723,6 +953,7 @@
   {
    "buff": 39,
    "chance": 1,
+   "src": 11037,
    "durMin": 600,
    "durMax": 600
   }
@@ -731,14 +962,16 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 600,
    "durMax": 600
   },
   {
    "buff": 24,
    "chance": 0.6666666666666666,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 300,
    "durMax": 300
   }
@@ -747,14 +980,16 @@
   {
    "buff": 24,
    "chance": 0.3333333333333333,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 600,
    "durMax": 600
   },
   {
    "buff": 24,
    "chance": 0.6666666666666666,
-   "mut": 4,
+   "mut": 6,
+   "src": 11022,
    "durMin": 300,
    "durMax": 300
   }
@@ -763,6 +998,7 @@
   {
    "buff": 20,
    "chance": 1,
+   "src": 10598,
    "durMin": 300,
    "durMax": 599
   }
@@ -771,6 +1007,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 11033,
    "durMin": 300,
    "durMax": 300
   }
@@ -779,6 +1016,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10594,
    "durMin": 300,
    "durMax": 599
   }
@@ -787,6 +1025,7 @@
   {
    "buff": 30,
    "chance": 1,
+   "src": 10590,
    "durMin": 240,
    "durMax": 360
   }
@@ -795,6 +1034,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 10662,
    "durMin": 300,
    "durMax": 599
   }
@@ -803,6 +1043,7 @@
   {
    "buff": 137,
    "chance": 1,
+   "src": 11061,
    "durMin": 180,
    "durMax": 180
   }
@@ -811,12 +1052,14 @@
   {
    "buff": 137,
    "chance": 1,
+   "src": 10602,
    "durMin": 180,
    "durMax": 180
   },
   {
    "buff": 24,
    "chance": 1,
+   "src": 10602,
    "durMin": 180,
    "durMax": 300
   }
@@ -825,6 +1068,7 @@
   {
    "buff": 24,
    "chance": 1,
+   "src": 11002,
    "durMin": 300,
    "durMax": 300
   }
@@ -833,6 +1077,7 @@
   {
    "buff": 323,
    "chance": 1,
+   "src": 10854,
    "durMin": 180,
    "durMax": 360
   }
@@ -841,6 +1086,7 @@
   {
    "buff": 323,
    "chance": 1,
+   "src": 10854,
    "durMin": 180,
    "durMax": 360
   }
@@ -849,6 +1095,7 @@
   {
    "buff": 323,
    "chance": 1,
+   "src": 10854,
    "durMin": 180,
    "durMax": 360
   }

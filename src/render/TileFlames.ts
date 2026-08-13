@@ -354,6 +354,12 @@ export function furnitureFlameTint(
 let _frameSeed = 0x2545f4914f6cdd1dn & MASK48; // 初值任意（原版 = Guid 哈希，仅要"每局不同"）
 let _drawCycle = 0;
 
+/** Main.TileFrameSeed 只读访问：全局唯一种子（tile 火苗与 FlameParticle.Draw :57
+ *  的抖动种子同源——`TileFrameSeed ^ (x<<32|y)`，两族共用同一推进节拍） */
+export function currentTileFrameSeed(): bigint {
+  return _frameSeed;
+}
+
 // ---- 颜色乘子预染缓存（multiply×fill 逐像素染 Flame 单元；静态色缓存命中、
 //      Disco 按 32 档量化限幅，超 512 条整体清空防无界增长）----
 const _tintCache = new Map<string, HTMLCanvasElement>();

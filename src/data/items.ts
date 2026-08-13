@@ -34,7 +34,7 @@ export interface ItemDef {
   vid?: number;
   wall?: string;          // 放置的 wall key
   /** 原版 createWall（Item.cs SetDefaults）：放置的背景墙 vanilla id。
-   *  vanilla-wallitems.json 全量 124 项（tools/extract-wallitems.mjs 提取） */
+   *  vanilla-wallitems.json 全量 292 项（tools/extract-wallitems.mjs 提取） */
   wallId?: number;
   tool?: {
     type: ToolType;
@@ -590,6 +590,7 @@ item({ key: 'vi_5627_花栗鼠斗篷', name: '', value: 1 });
 item({ key: 'vi_5659_英雄翅膀', name: '', value: 1 });
 item({ key: 'vi_5686_卡兹默德斯之翼', name: '', value: 1 });
 item({ key: 'vi_6140_露娜的符文妖精翅膀', name: '', value: 1 });
+item({ key: 'vi_5669_true_copper_shortsword', name: '', value: 1 });
 // ---- 原版远程武器+弹药全量注册（useAmmo 族对账 2026-08-13：枪 24/弓弩 39/
 // 发射器 7/吹箭 4——此前仅 6 把，弹链数据驱动已备）----
 item({ key: 'vi_95_地牢砖墙', name: '', value: 1 });
@@ -1097,7 +1098,28 @@ item({ key: 'vi_4857_GemTreeAmberSeed', name: '琥珀宝石橡实', value: 100, 
 
 
 // ---- 电路工具(原版 530 电线/509,850,851,3612 扳手/510 剪线钳/849 致动器/3620 致动魔杖/3625 五彩扳手/3611 宏伟蓝图) ----
-// 位掩码见 world/Wiring.ts TOOL_*。扳手消耗背包中的 wire(原版语义:找第一组 530 扣 1)
+// 位掩码见 world/Wiring.ts TOOL_*。扳手消耗背包中的 wire(原版语义:找第一组 530 扣 1)。
+// ★2026-08-13 补登记:此前本段是空壳注释——运行时链(Game.ts:5313 使用派发/:15326
+//  显示导线/:1842 R 键切模式/UseWiringTools 全分支)只等这张表,整族曾为死路径
+// (手持扳手无任何效果)。语义对照 Player.cs:30289-30444 ItemCheck_UseWiringTools。
+import { TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR } from '../world/Wiring';
+const WIRE_TOOL_TABLE: ReadonlyArray<readonly [number, NonNullable<ItemDef['wireTool']>]> = [
+  [509, { place: TOOL_RED }],
+  [850, { place: TOOL_BLUE }],
+  [851, { place: TOOL_GREEN }],
+  [3612, { place: TOOL_YELLOW }],
+  [510, { cutter: true }],
+  [849, { place: TOOL_ACTUATOR }],   // 手持致动器单放一枚;放置分支按 countOf(849) 扣 1(与原版耗持有物等价)
+  [3620, { rod: true }],
+  // 3625 五彩扳手:place 为载体值(运行时 :7727 按 wireToolMode 特例覆写);3611 蓝图 grand
+  [3625, { place: TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW }],
+  [3611, { grand: true }],
+];
+for (const [vid, wt] of WIRE_TOOL_TABLE) {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
+  if (d) d.wireTool = wt;
+}
 
 
 
@@ -1247,7 +1269,7 @@ export const PRIV_ITEM_STABLE: Record<string, number> = {
   'night_owl_potion': 10501,
 };
 
-// ---- 墙面物品全量（vanilla-wallitems.json = Item.cs createWall 提取，124 项）：
+// ---- 墙面物品全量（vanilla-wallitems.json = Item.cs createWall 提取,292 项）：
 // 已注册的 vi_ 墙物品补 wallId；缺的按 vi_ 命名注册（稳定 id = 物品 id 自动派生）
 import wallItemsJson from './vanilla-wallitems.json';
 for (const wi of Object.values(wallItemsJson as Record<string, { wall: number; key: string }>)) {
@@ -1760,6 +1782,7 @@ export const PLACE_TILE_ON_ALT_USE: ReadonlySet<number> = new Set<number>([
   5300, 5311, 5312, 5313, 5350, 5511,
 ]);
 
+item({ key: 'vi_5573_torch_gods_potion', name: '', maxStack: 30, value: 1 }); // 火把神药水(Torch God's Potion——:10594-10596 授 TorchGodsFavor)
 // 格挡盾族（Player.cs:31254-31280 shield 旗标 + :30979 CanParryAgainst——2026-08-13）
 item({ key: 'vi_3823_brand_of_the_inferno', name: '', maxStack: 1, value: 1 });
 item({ key: 'vi_4760_sergeants_united_shield', name: '', maxStack: 1, value: 1 });

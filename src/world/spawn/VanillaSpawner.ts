@@ -247,7 +247,9 @@ export class VanillaSpawner {
   private hardMode = false;
   private expert = false;
   private waterTile = false;
-  private noWorms = false;         // 原版 wallHouse（房屋内不出蠕虫）
+  private noWorms = false;
+  /** ZoneShadowCandle（NPC.cs:328-333 tile 646 扫描 → noWorms/noGroundWorms=false + townNPCs=0） */
+  private shadowCandle = false;         // 原版 wallHouse（房屋内不出蠕虫）
   /** GetSpawnRate 城镇段置位（NPC.cs:717/:734/:750/:767/:792/:814）：城镇 NPC ≥1 时
    *  蠕虫抑制。原版与 wallHouse 同字段（GetSpawnRate 在 SetSpawnFlags 之后调用,
    *  直接覆写 noWorms）;本仓 getSpawnRate/spawn 拆两次调用 → 先闩锁,spawn() 合成 */
@@ -693,10 +695,12 @@ export class VanillaSpawner {
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
     townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false,
+    shadowCandle = false,
     invis = false, anglerSet = false): { spawnRate: number; maxSpawns: number } {
     // ZoneWaterCandle 先落字段（SetSpawnFlags L308 语义）：同一值既改刷怪率（:637/:650）
     // 也供 SpawnAnNPC 的 399/87/86 水蜡烛加重支——Game 每帧先 getSpawnRate 后 spawn
     this.zoneWaterCandle = waterCandle;
+    this.shadowCandle = shadowCandle;
     // 月事件覆盖（L681-685）：南瓜月/霜月且玩家在地表（remix 省略）→
     // rate=20、max=⌊5×(2+0.3n)⌋（单人 11）；先于 invaders 覆盖（原版即此顺序）
     if (this.moonEvent && playerYpx < this.world.groundLevel * 16) {
@@ -778,7 +782,8 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.2);
       maxSpawns = Math.floor(maxSpawns * 3);
     } else if (zoneJungle) {
-      if (townNPCs === 0) {
+      if (shadowCandle) { townNPCs = 0; this.noWorms = false;  }
+    else if (townNPCs === 0) {
         spawnRate = Math.floor(spawnRate * 0.4);
         maxSpawns = Math.floor(maxSpawns * 1.5);
       } else if (townNPCs === 1) {

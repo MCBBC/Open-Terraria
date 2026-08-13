@@ -10,7 +10,7 @@ import {
   type WingFrameState, type WingFrameInput,
 } from '../src/data/vanillaWingVisuals';
 import { VanillaDust } from '../src/fx/VanillaDust';
-import { dyeEmulationOf, effectDyeIds, applyDyeEmulation } from '../src/data/vanillaDyes';
+import { dyeApplyOf, dyeEntryOf, dyeCount } from '../src/data/vanillaDyes';
 
 function st(frame = 0, counter = 0): WingFrameState { return { frame, counter }; }
 
@@ -425,6 +425,230 @@ describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
   });
 });
 
+// ===================== 拴绳批逐型 Update 分支（Dust.cs 链 A/链 B） =====================
+describe('VanillaDust：拴绳批逐型分支（43/15/267/278/6）', () => {
+  /** 金系闪光 spawn 形态（LeashedCritter.ts goldCritterSparkle：43, alpha 254,
+   *  黄色, scale 0.5, velocity 清零） */
+  const gold = (vd: VanillaDust) => {
+    const d = vd.spawn(0, 0, 5, 5, 43, 0, 0, 254, { r: 255, g: 255, b: 0, a: 255 }, 0.5)!;
+    d.vx = 0; d.vy = 0; d.scale = 0.5;   // spawn ±20% 抖动归零，公式断言才确定
+    return d;
+  };
+
+  it('43 型（:1472-1518）：旋转 +0.1·scale、照度门取光发光、alpha<255 生长档 +0.09', () => {
+    const vd = new VanillaDust();
+    const d = gold(vd);
+    const bright = () => [255, 255, 255] as [number, number, number];
+    vd.update(0, 0, 1920, 1080, 0, 0, bright);
+    expect(d.rotation).toBeCloseTo(0.1 * 0.5, 5);          // :1474（演化前 scale）
+    expect(d.scale).toBeCloseTo(0.5 + 0.09 - 0.01, 5);     // :1487 分支 + :2194 老化
+    expect(d.alpha).toBe(254);                             // 未触顶
+    // :1475-1484 光 = GetColor/270 × scale·1.07 × color/255（黄尘蓝通道恒 0）
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo((255 / 270) * 0.5 * 1.07, 5);
+    expect(vd.lights[0].g).toBeCloseTo((255 / 270) * 0.5 * 1.07, 5);
+    expect(vd.lights[0].b).toBe(0);
+  });
+  it('43 型生长触顶（:1485-1493）：scale≥1 → 钳 1 + alpha=255，随后走收缩档', () => {
+    const vd = new VanillaDust();
+    const d = gold(vd);
+    const bright = () => [255, 255, 255] as [number, number, number];
+    for (let i = 0; i < 7; i++) vd.update(0, 0, 1920, 1080, 0, 0, bright);   // 0.5→…→0.98→触顶
+    expect(d.alpha).toBe(255);
+    expect(d.scale).toBeCloseTo(0.99, 5);                  // 钳 1 后老化 −0.01
+    vd.update(0, 0, 1920, 1080, 0, 0, bright);
+    expect(d.scale).toBeCloseTo(0.98, 5);                  // :2194 收缩（0.99 未过 0.8 档）
+    expect(d.active).toBe(true);
+  });
+  it('43 型照度门（:1505-1508）：三通道全 <0.05 直接失活且不发光', () => {
+    const vd = new VanillaDust();
+    const d = gold(vd);
+    vd.update(0, 0, 1920, 1080, 0, 0, () => [0, 0, 0]);
+    expect(d.active).toBe(false);
+    expect(vd.lights.length).toBe(0);
+    // noLightEmittance（:1509）：门过了也不发光
+    const vd2 = new VanillaDust();
+    const d2 = gold(vd2);
+    d2.noLightEmittance = true;
+    vd2.update(0, 0, 1920, 1080, 0, 0, () => [255, 255, 255]);
+    expect(d2.active).toBe(true);
+    expect(vd2.lights.length).toBe(0);
+  });
+  it('43 型持续玩家跟随（:1513-1517）：customData=Player 逐 tick 加位移差', () => {
+    const vd = new VanillaDust();
+    const d = gold(vd);
+    d.followPlayer = true;
+    const x0 = d.x, y0 = d.y;
+    vd.update(0, 0, 1920, 1080, 5, -3, () => [255, 255, 255]);
+    expect(d.x).toBeCloseTo(x0 + 5, 5);
+    expect(d.y).toBeCloseTo(y0 - 3, 5);
+    expect(d.followPlayer).toBe(true);                     // 持续档（非一次性）
+  });
+
+  it('15 型（:1519-1551）：双轴 0.98 阻尼、scale 直取光 (0.45,0.55,1)、无重力', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 15, 0, 0, 150, null, 1.1)!;
+    d.vx = 1; d.vy = 2; d.scale = 1.1;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vx).toBeCloseTo(0.98, 5);
+    expect(d.vy).toBeCloseTo(1.96, 5);                     // 无通用重力 +0.1（链 A 独占）
+    expect(d.scale).toBeCloseTo(1.1 - 0.01, 5);            // 仅老化收缩
+    expect(d.rotation).toBeCloseTo(0.98 * 0.5, 5);         // :2146 通用旋转照常
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo(0.45, 5);           // :1540（1.1 钳 1 后 k=1）
+    expect(vd.lights[0].g).toBeCloseTo(0.55, 5);
+    expect(vd.lights[0].b).toBeCloseTo(1, 5);
+  });
+  it('15 族变体（:1525-1549）：58 光 ×0.8 档、274 仅阻尼无光、noLight 加重阻尼', () => {
+    const vd = new VanillaDust();
+    const d58 = vd.spawn(0, 0, 5, 5, 58, 0, 0, 255, null, 1.2)!;
+    d58.vx = 1; d58.vy = 0; d58.scale = 1.2;
+    vd.update(0, 0, 1920, 1080);
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo(1.2 * 0.8, 5);      // :1528 num85=scale×0.8 未触顶
+    expect(vd.lights[0].g).toBeCloseTo(1.2 * 0.8 * 0.55, 5);
+    const vd2 = new VanillaDust();
+    const d274 = vd2.spawn(0, 0, 5, 5, 274)!;
+    d274.vx = 1;
+    vd2.update(0, 0, 1920, 1080);
+    expect(d274.vx).toBeCloseTo(0.98, 5);                  // 阻尼照常
+    expect(vd2.lights.length).toBe(0);                     // 274/292 无 AddLight 分支
+    const vd3 = new VanillaDust();
+    const d15 = vd3.spawn(0, 0, 5, 5, 15)!;
+    d15.vx = 1; d15.noLight = true;
+    vd3.update(0, 0, 1920, 1080);
+    expect(d15.vx).toBeCloseTo(0.98 * 0.95, 5);            // :1530-1533 noLight ×0.95
+  });
+
+  it('267 型（:1660-1686）：方向旋转 ±1、双轴 0.98、scale+0.02、自色光 ×min(scale·0.8,1)', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 267, 0, 0, 0, { r: 255, g: 128, b: 0, a: 255 })!;
+    d.vx = 1.5; d.vy = 0.5; d.scale = 0.35; d.noGravity = true; d.fadeIn = 0.9;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.rotation).toBeCloseTo(1 + 1.5 * 0.98 * 0.5, 5);   // :1668 分支 + :2146 通用
+    expect(d.vx).toBeCloseTo(1.5 * 0.98 * 0.92, 5);            // 链 A 0.98 + 链 B 兜底 0.92
+    expect(d.scale).toBeCloseTo(0.35 + 0.02 + 0.03, 5);        // :1672 生长 + :2179 fadeIn 档
+    const k = Math.min((0.35 + 0.02) * 0.8, 1);
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo(k, 5);                  // color.R=255
+    expect(vd.lights[0].g).toBeCloseTo(k * 128 / 255, 5);
+    expect(d.fadeIn).toBe(0.9);                                // 未超生长目标
+  });
+  it('267 型生长转衰（:2181-2184 + :2379-2386）：超 fadeIn 后净 −0.03/t 收缩', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 267)!;
+    d.vx = 0; d.scale = 0.35; d.noGravity = true; d.fadeIn = 0.9;
+    let guard = 0;
+    while (d.fadeIn !== 0 && guard++ < 200) vd.update(0, 0, 1920, 1080);
+    expect(d.fadeIn).toBe(0);
+    const s = d.scale;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.scale).toBeCloseTo(s - 0.03, 5);              // +0.02 −0.01 −0.04 三段合计
+  });
+  it('267 型 noLight 自愈（:1678-1681）：清旗后照常发光', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 267, 0, 0, 0, { r: 255, g: 255, b: 255, a: 255 })!;
+    d.noLight = true;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.noLight).toBe(false);
+    expect(vd.lights.length).toBe(1);
+  });
+
+  it('278 型妖精路径（:2240-2269）：链 A 0.99 + 链 B 0.93 阻尼、noLight 不发光', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 4, 4, 278, 0, 0, 200, { r: 50, g: 205, b: 50, a: 255 }, 0.65)!;
+    d.vx = 1; d.vy = 0; d.scale = 0.65; d.noGravity = true; d.noLight = true;   // updateFairy 形态
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vx).toBeCloseTo(1 * 0.99 * 0.93, 5);          // :2136 兜底 + :2253
+    expect(d.scale).toBeCloseTo(0.65 - 0.01 + 0.0025, 5);  // :2256 fadeIn==0 补 + :2194
+    expect(d.rotation).toBeCloseTo(1 * 0.99 * 0.5, 5);
+    expect(vd.lights.length).toBe(0);                      // noLight 门（:2247）
+  });
+  it('278 型发光 + 入实心格收缩（:2247-2268）：scale×0.9、velocity×0.25', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 4, 4, 278, 0, 0, 0, { r: 255, g: 255, b: 255, a: 255 }, 1)!;
+    d.vx = 1; d.vy = 0; d.scale = 1; d.fadeIn = 0;         // noGravity=false 走 0.95 档
+    vd.update(0, 0, 1920, 1080, 0, 0, null, () => true);
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo((1 - 0.01), 5);     // 老化后 scale 的 min(scale,1)
+    expect(d.scale).toBeCloseTo((1 - 0.01 - 0.0025) * 0.9, 5);   // :2266
+    expect(d.vx).toBeCloseTo(1 * 0.99 * 0.95 * 0.25, 5);   // :2267
+    // 不实心 → 无收缩档
+    const vd2 = new VanillaDust();
+    const d2 = vd2.spawn(0, 0, 4, 4, 278, 0, 0, 0, { r: 255, g: 255, b: 255, a: 255 }, 1)!;
+    d2.vx = 1; d2.scale = 1; d2.fadeIn = 0;
+    vd2.update(0, 0, 1920, 1080, 0, 0, null, () => false);
+    expect(d2.vx).toBeCloseTo(1 * 0.99 * 0.95, 5);
+    expect(d2.scale).toBeCloseTo(1 - 0.01 - 0.0025, 5);
+  });
+
+  it('6 型（:890-1092）：轻重力 +0.05（非通用 0.1）+ 灰橙光 ×min(scale·1.4,0.6)', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 6, 0, 0, 254)!;
+    d.vx = 0; d.vy = 0; d.scale = 1;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vy).toBeCloseTo(0.05, 5);                     // :892-895（跳过 :1884 的 0.1）
+    expect(d.scale).toBeCloseTo(0.99, 5);
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo(0.6, 5);            // :1083-1090 尾档（钳 0.6）
+    expect(vd.lights[0].g).toBeCloseTo(0.6 * 0.65, 5);
+    expect(vd.lights[0].b).toBeCloseTo(0.6 * 0.4, 5);
+  });
+  it('6 型 noGravity（翅膀批形态）：链 B 兜底 ×0.92 + fadeIn==0 时 scale−0.04', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 6)!;
+    d.vx = 1; d.vy = 0; d.scale = 1; d.noGravity = true; d.fadeIn = 0;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vy).toBe(0);                                  // 无重力档
+    expect(d.vx).toBeCloseTo(0.92, 5);                     // :2381
+    expect(d.scale).toBeCloseTo(1 - 0.01 - 0.04, 5);       // :2194 + :2384
+  });
+
+  it('CloneDust（:260-288）：字段级复制回池（rotation/frame 原样，noLightEmittance 不复制）', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(100, 100, 10, 10, 267, 1, 2, 50, { r: 10, g: 20, b: 30, a: 40 }, 1.5)!;
+    d.vx = 1; d.vy = 2; d.scale = 1.5;                     // spawn 抖动归零（公式断言）
+    d.rotation = 0.7; d.fadeIn = 0.8; d.noGravity = true; d.noLight = true;
+    d.noLightEmittance = true; d.followPlayer = true;
+    const c = vd.clone(d)!;
+    expect(c).not.toBe(d);
+    expect(c.type).toBe(267);
+    expect(c.x).toBe(d.x); expect(c.y).toBe(d.y);
+    expect(c.vx).toBe(1); expect(c.vy).toBe(2);            // 覆盖 spawn 抖动
+    expect(c.scale).toBe(1.5);                             // 覆盖 spawn 缩放抖动
+    expect(c.rotation).toBe(0.7);                          // :278（旧适配器漏项）
+    expect(c.fadeIn).toBe(0.8);
+    expect(c.alpha).toBe(50);
+    expect(c.noGravity).toBe(true); expect(c.noLight).toBe(true);
+    expect(c.noLightEmittance).toBe(false);                // :273-286 字段表无此项
+    expect(c.color).toBe(d.color);
+    expect(c.fx).toBe(d.fx); expect(c.fy).toBe(d.fy);      // :284 frame 原样（非重掷）
+    expect(c.followPlayer).toBe(true);
+    // 源尘失活 → 自身返回（:267-270 dustIndex==maxDustToDraw 等价）
+    d.active = false;
+    expect(vd.clone(d)).toBe(d);
+    // 池满 → null
+    const full = new VanillaDust();
+    for (let i = 0; i < 512; i++) full.spawn(0, 0, 5, 5, 267);
+    const src = full.spawn(0, 0, 5, 5, 267);
+    expect(src).toBeNull();
+    const any = [...full.each(false)][0];
+    expect(full.clone(any)).toBeNull();
+  });
+
+  it('拴绳批消费集回归：GetAlpha 逐型表（:2628/:2721/:2743）', () => {
+    const vd = new VanillaDust();
+    const d267 = vd.spawn(0, 0, 5, 5, 267)!;
+    expect(VanillaDust.alphaOf(d267)).toEqual({ rgb: 1, a: 0 });
+    const d278 = vd.spawn(0, 0, 5, 5, 278)!;
+    expect(VanillaDust.alphaOf(d278)).toEqual({ rgb: 1, a: 25 / 255 });
+    const d58 = vd.spawn(0, 0, 5, 5, 58)!;
+    expect(VanillaDust.alphaOf(d58)).toEqual({ rgb: 1, a: 0 });
+    const d15 = vd.spawn(0, 0, 5, 5, 15, 0, 0, 150)!;      // 亮色族默认档（画在合成后）
+    expect(VanillaDust.alphaOf(d15)).toEqual({ rgb: 105 / 255, a: 105 / 255 });
+  });
+});
+
 // ===================== stealth 视觉因子（PlayerDrawSet :1523-1660） =====================
 describe('stealthFactors 三分支', () => {
   it('无潜行态全 1（settled/clamp/skinMul=1，无 vortexTint）', () => {
@@ -451,41 +675,28 @@ describe('stealthFactors 三分支', () => {
 });
 
 // ===================== cWings 染料（DyeInitializer.cs 116 条） =====================
-describe('vanillaDyes 表与仿真', () => {
+describe('vanillaDyes 表（SM2 执行，无仿真近似）', () => {
   it('基础族展开（:26-29）：1007 红 → base/黑+12/亮+31(色×0.5+0.5)/银+44', () => {
-    const base = dyeEmulationOf(1007)!;
-    expect(base.kind).toBe('solid');
-    expect(base.color).toEqual([1, 0, 0]);
-    expect(base.saturation).toBe(1.2);
-    const black = dyeEmulationOf(1019)!;    // 1007+12
-    expect(black.color).toEqual([1, 0, 0]);
-    const bright = dyeEmulationOf(1038)!;   // 1007+31
-    expect(bright.color).toEqual([1, 0.5, 0.5]);
-    const silver = dyeEmulationOf(1051)!;   // 1007+44
-    expect(silver.color).toEqual([1, 0, 0]);
+    const base = dyeApplyOf(1007)!;
+    expect(base.tech).toBe('ArmorColored');
+    expect(base.uniforms.uColor).toEqual([1, 0, 0]);
+    expect(base.uniforms.uSaturation).toBe(1.2);
+    const black = dyeApplyOf(1019)!;    // 1007+12 → ArmorColoredAndBlack
+    expect(black.tech).toBe('ArmorColoredAndBlack');
+    expect(black.uniforms.uColor).toEqual([1, 0, 0]);
+    const bright = dyeApplyOf(1038)!;   // 1007+31 → ArmorColored 色×0.5+0.5
+    expect(bright.uniforms.uColor).toEqual([1, 0.5, 0.5]);
+    const silver = dyeApplyOf(1051)!;   // 1007+44 → ArmorColoredAndSilverTrim
+    expect(silver.tech).toBe('ArmorColoredAndSilverTrim');
+    expect(silver.uniforms.uColor).toEqual([1, 0, 0]);
   });
-  it('渐变族/亮度族分类 + effect 缺口跳过', () => {
-    expect(dyeEmulationOf(1031)!.kind).toBe('gradient');          // 红黄渐变
-    expect(dyeEmulationOf(1031)!.secondary).toEqual([1, 1, 0]);
-    expect(dyeEmulationOf(3558)!.kind).toBe('bright');            // 1.5 提亮
-    expect(dyeEmulationOf(1066)).toBeNull();                      // 彩虹 = effect
-    expect(dyeEmulationOf(4778)).toBeNull();                      // HallowBoss
-    expect(dyeEmulationOf(3026)).toBeNull();                      // 反射
-    expect(effectDyeIds().length).toBeGreaterThan(30);
-  });
-  it('仿真公式：solid=灰度×色+sat 回混；bright=×色；透明像素不动', () => {
-    // 中灰 (128,128,128) 红染 solid：lum=0.502 → baseR=128/baseG=0；sat=1.2 回混
-    const d = new Uint8ClampedArray([128, 128, 128, 255, 0, 0, 0, 0]);
-    applyDyeEmulation(d, { kind: 'solid', color: [1, 0, 0], saturation: 1.2 });
-    expect(d[0]).toBeCloseTo(128, 1);              // R 不变（lum×1=same）
-    expect(d[1]).toBeCloseTo(128 * 1.2, 0);        // 0 + 128×1.2
-    expect(d[2]).toBe(d[1]);
-    // 第二像素透明不动
-    expect(d[4]).toBe(0);
-    // bright 0.6
-    const b = new Uint8ClampedArray([100, 100, 100, 255]);
-    applyDyeEmulation(b, { kind: 'bright', color: [0.6, 0.6, 0.6], saturation: 1 });
-    expect(b[0]).toBeCloseTo(60, 0);
+  it('渐变族/特效族全部有可执行 pass（旧 effect 缺口清零）', () => {
+    expect(dyeEntryOf(1031)!.tech).toBe('ArmorColoredGradient');   // 红黄渐变
+    expect(dyeEntryOf(1031)!.secondary).toEqual([1, 1, 0]);
+    expect(dyeApplyOf(1066)!.tech).toBe('ArmorColoredRainbow');    // 彩虹（曾是缺口）
+    expect(dyeApplyOf(4778)!.tech).toBe('ArmorHallowBoss');        // HallowBoss
+    expect(dyeApplyOf(3026)!.tech).toBe('ArmorReflectiveColor');   // 反射
+    expect(dyeCount()).toBe(116);
   });
 });
 

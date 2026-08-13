@@ -17,7 +17,8 @@ import {
   LeashedEntityManager, LCG32Random,
   PROTOTYPES, NPC_FAMILY, prototypeOfNpc, ITEM_MAKE_NPC, KITE_ITEM_PROJ,
   IS_GOLD_CRITTER, solidTile2, anchorStyleOfItem,
-  type LeashedEnv, type LeashedFamily,
+  inAPlaceWithWind, leashedBubbleVisible, KITE_TRAIL_LENGTH,
+  type LeashedEnv, type LeashedFamily, type LeashedDust,
 } from '../src/entities/LeashedCritter';
 
 // 内部 item id → 原版 vid 反查（记录重生链用）
@@ -506,29 +507,147 @@ describe('拴绳小动物：生命周期（TELeashedEntityAnchor）', () => {
 // ⑤ 风筝链（LeashedKite + TEKiteAnchor）
 // ----------------------------------------------------------------------------
 
-describe('拴绳风筝（LeashedKite.cs）', () => {
-  it('放置 → 风筝实体带正确 projType 并升空离桩', () => {
+describe('拴绳风筝（LeashedKite.cs + Projectile.KiteLogic :45809-46036）', () => {
+  it('放置 → 风筝实体带正确 projType（4×4 判定盒，Projectile.DefaultToKite :10133-10140）', () => {
     const st = groundWorld(120, 80, 40);
     const m = mkManager(st);
     const k = m.spawnKite(60, 39, KITE_ITEM_PROJ[4367], mkEnv({ windForVisuals: 0.5 }));
     expect(k.projType).toBe(766);
+    expect(k.w).toBe(4);
+    expect(k.h).toBe(4);
+    // Spawn 后第一帧未跑快进（newlyAdded=true）→ 线长仍初值 250
     expect(k.kiteDistance).toBe(250);
-    const startY = k.cy;
-    runTicks(m, st, 600, 60 * 16 + 8, 39 * 16 + 8, mkEnv({ windForVisuals: 0.5 }));
-    expect(k.cy).toBeLessThan(startY);          // 升空
-    expect(Math.hypot(k.cx - (60 * 16 + 8), k.cy - (39 * 16 + 8))).toBeGreaterThan(50);
+    expect(k.windCurrent).toBe(0.5);           // Spawn 尾段覆写（LeashedKite.cs:237）
   });
 
-  it('无风时绳长衰减 250→48（Utils.Remap(120,420)，LeashedKite.cs:112-115）', () => {
+  it('收放线输入模型：owner=255 恒定——channel −5 / controlUseItem +5 块（:45816-45837）不走', () => {
     const st = groundWorld(120, 80, 40);
     const m = mkManager(st);
-    const k = m.spawnKite(60, 39, 766, mkEnv({ windForVisuals: 0 }));
-    runTicks(m, st, 500, 60 * 16 + 8, 39 * 16 + 8, mkEnv({ windForVisuals: 0 }));
+    // |windForVisuals|=5 → windCurrent=0.25 ≥ 0.2 门 → 有风档（线长恒 250，无收放）
+    const k = m.spawnKite(60, 20, 766, mkEnv({ windForVisuals: 5 }));
+    runTicks(m, st, 900, 60 * 16 + 8, 20 * 16 + 8, mkEnv({ windForVisuals: 5 }));
+    expect(k.timeWithoutWind).toBe(0);
+    expect(k.kiteDistance).toBe(250);          // 既不被收到 4 也不放到 500
+  });
+
+  it('常风（0.5）：windCurrent=0.05×wind < 0.2 门 → 下垂档，线长衰减收敛 48（:149-160）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const k = m.spawnKite(60, 20, 766, mkEnv({ windForVisuals: 0.5 }));
+    runTicks(m, st, 500, 60 * 16 + 8, 20 * 16 + 8, mkEnv({ windForVisuals: 0.5 }));
+    expect(k.windCurrent).toBeCloseTo(0.025, 6);   // Lerp(0, 0.5, 0.05)
     expect(k.timeWithoutWind).toBeGreaterThan(0);
     expect(k.kiteDistance).toBeLessThan(250);
-    // 跑满 420t 无风 → 48 下限
-    runTicks(m, st, 3000, 60 * 16 + 8, 39 * 16 + 8, mkEnv({ windForVisuals: 0 }));
+    // 无风档跑满 420t → 48 下限（Utils.Remap(120,420,250,48)）
+    runTicks(m, st, 3000, 60 * 16 + 8, 20 * 16 + 8, mkEnv({ windForVisuals: 0 }));
     expect(k.kiteDistance).toBeCloseTo(48, 5);
+    // 下垂累积 localAI[0]（无升力档每 tick +1 钳 300，:45871）
+    expect(k.projectileLocalAI0).toBe(300);
+    // localAI[1]（:45968）随绷紧态 flag5 摆动（下垂 +0.005 / 绷紧 −0.005）——无单调靶值，
+    // 只验界内（原版 Clamp(0,1)）
+    expect(k.projectileLocalAI1).toBeGreaterThanOrEqual(0);
+    expect(k.projectileLocalAI1).toBeLessThanOrEqual(1);
+  });
+
+  it('快进路径（section 激活 → Spawn(false)）：windTarget 直取 → 有风档直达 + 拖尾吸附', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const k = m.spawnKite(60, 20, 766, mkEnv({ windForVisuals: 0.5 }));
+    k.cx += 40; k.cy += 40;                     // 模拟残位
+    k.update(st, mkEnv({ windForVisuals: 0.5 }), true);   // fastForward
+    // :152 快进档 windCurrent = windTarget（不走 5% 衰减）→ 0.5 ≥ 0.2 门 → 有风
+    expect(k.windCurrent).toBe(0.5);
+    expect(k.timeWithoutWind).toBe(0);
+    expect(k.kiteDistance).toBe(250);
+    expect(k.timeCounter).toBe(6);              // :189 快进后跳 6（拖尾相位直达成体态）
+    for (let i = 0; i < k.oldPos.length; i++) {
+      expect(k.oldPos[i].x).toBeCloseTo(k.cx, 5);         // :206-211 整条吸附
+      expect(k.oldPos[i].y).toBeCloseTo(k.cy, 5);
+    }
+  });
+
+  it('快进路径无风档：timeWithoutWind=3600 → 线长直达 48 + 锁下垂（:200-205）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const k = m.spawnKite(60, 20, 766, mkEnv({ windForVisuals: 0 }));
+    k.update(st, mkEnv({ windForVisuals: 0 }), true);
+    expect(k.timeWithoutWind).toBe(3600);
+    expect(k.kiteDistance).toBeCloseTo(48, 5);
+    expect(k.rotation).toBe(0);                 // info.WindInWorld==0 → rotation=0
+    expect(k.projectileLocalAI0).toBe(300);     // localAI[0]=300（FixFirstTimeAppearance 同语义）
+    expect(k.projectileLocalAI1).toBe(1);       // localAI[1]=1
+  });
+
+  it('强风升空：线张力把风筝约束在 kiteDistance 内（:45910-45945 flag2 回拽）', () => {
+    const st = groundWorld(200, 120, 100);
+    const m = mkManager(st);
+    const k = m.spawnKite(100, 60, 766, mkEnv({ windForVisuals: 5 }));
+    runTicks(m, st, 1200, 100 * 16 + 8, 60 * 16 + 8, mkEnv({ windForVisuals: 5 }));
+    const d = Math.hypot(k.cx - (100 * 16 + 8), k.cy - (60 * 16 + 8));
+    // 线长 250 + 回拽加速度的小越冲余量
+    expect(d).toBeLessThan(250 + 40);
+    expect(d).toBeGreaterThan(50);              // 真飞起来了（非锚桩贴脸下垂）
+    expect(k.spriteDirection).toBe(1);          // 风向右侧（MoveKite :173-176）
+  });
+
+  it('帧表（:45969-46034）：771 恒帧 0 / 828 慢速帧 1 / 766-770 速度四档', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const k771 = m.spawnKite(60, 20, 771, mkEnv({ windForVisuals: 0 }));
+    k771.vx = 3; k771.vy = 0;
+    k771['selectFrame'](0.3);
+    expect(k771.frame).toBe(0);                 // case 771：恒 0
+    const k828 = m.spawnKite(70, 20, 828, mkEnv({ windForVisuals: 0 }));
+    k828.vx = 0.5; k828.vy = 0;
+    k828['selectFrame'](0.3);
+    expect(k828.frame).toBe(1);                 // speed<6 → 帧 1
+    k828.vx = 8;
+    k828['selectFrame'](0.3);
+    expect(k828.frame).toBe(0);                 // speed≥6 → 帧 0
+    const k766 = m.spawnKite(80, 20, 766, mkEnv({ windForVisuals: 0 }));
+    for (const [sp, want] of [[0, 0], [3.5, 1], [5.5, 2], [8, 3]] as const) {
+      k766.vx = sp; k766.vy = 0;
+      k766['selectFrame'](0.3);
+      expect(k766.frame, `speed ${sp}`).toBe(want);
+    }
+  });
+
+  it('拖尾：TrailCacheLength 逐型（ProjectileID.cs:293）+ 位移超 16px 整条吸附（:135-143）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const k = m.spawnKite(60, 20, 827, mkEnv({ windForVisuals: 0 }));
+    expect(k.oldPos).toHaveLength(KITE_TRAIL_LENGTH[827]);   // 65
+    expect(KITE_TRAIL_LENGTH[766]).toBe(60);
+    expect(KITE_TRAIL_LENGTH[771]).toBe(80);
+    k.cx += 20;                                  // 单帧 >16px → 吸附
+    k.update(st, mkEnv({ windForVisuals: 0 }), false);
+    for (let i = 0; i < k.oldPos.length; i++) {
+      expect(k.oldPos[i].x).toBeCloseTo(k.cx, 5);           // 全条吸附（非逐帧位移）
+    }
+    // 平稳帧：Utils.Shift 右移一格，[0] = 帧首当前位（:215-220——记录在 KiteLogic 之前）
+    const p0x = k.cx, p0y = k.cy;
+    k.update(st, mkEnv({ windForVisuals: 0 }), false);
+    expect(k.oldPos[0].x).toBeCloseTo(p0x, 5);
+    expect(k.oldPos[0].y).toBeCloseTo(p0y, 5);
+    const p1x = k.cx, p1y = k.cy;
+    k.update(st, mkEnv({ windForVisuals: 0 }), false);
+    expect(k.oldPos[0].x).toBeCloseTo(p1x, 5);              // 本帧帧首
+    expect(k.oldPos[0].y).toBeCloseTo(p1y, 5);
+    expect(k.oldPos[1].x).toBeCloseTo(p0x, 5);              // 上上帧 [0] 右移两格而来
+    expect(k.oldPos[1].y).toBeCloseTo(p0y, 5);
+  });
+
+  it('拉绳碰撞回拉：嵌实心 → Bottom 朝锚点 2px/t 回移（LeashedKite.cs:223-227）', () => {
+    const st = new TileStore(120, 120);         // 全空世界
+    for (let x = 60; x < 66; x++) for (let y = 30; y < 36; y++) st.setTile(x, y, T.DIRT);
+    const m = mkManager(st);
+    const k = m.spawnKite(60, 30, 766, mkEnv({ windForVisuals: 0 }));
+    k.cx = 62 * 16 + 8; k.cy = 33 * 16 + 8;     // 塞进实心块
+    const startY = k.cy;
+    k.update(st, mkEnv({ windForVisuals: 0 }), false);
+    // 每帧最多朝锚点 2px（MoveTowards 语义），不会瞬移
+    expect(k.cy).toBeLessThan(startY);
+    expect(startY - k.cy).toBeLessThanOrEqual(2.0001);
   });
 
   it('removeAt 消散风筝（OnRemoved）', () => {
@@ -556,9 +675,432 @@ describe('solidTile2（WorldGen.cs:70500-70509）', () => {
     expect(solidTile2(st, 2, 2)).toBe(false); // halfBrick 不算
     st.half[st.idx(2, 2)] = 0;
     st.slope[st.idx(2, 2)] = 1;
-    expect(solidTile2(st, 2, 2)).toBe(false); // 坡面不算
+    expect(solidTile2(st, 2, 2)).toBe(false); // 非平台：坡面一律不算
     st.slope[st.idx(2, 2)] = 0;
     st.wire[st.idx(2, 2)] |= 32; // inActive
     expect(solidTile2(st, 2, 2)).toBe(false);
+  });
+
+  it('平台特例（:70503）：平台平放=实心 / 上半坡(1,2)=实心 / 下半坡(3,4)=非 / halfBrick=非', () => {
+    const st = new TileStore(8, 8);
+    st.setTile(2, 2, T.PLATFORM);
+    expect(solidTile2(st, 2, 2)).toBe(true);          // Main.tileSolid[19]=true → 平放实心
+    st.slope[st.idx(2, 2)] = 1;
+    expect(solidTile2(st, 2, 2)).toBe(true);          // 平台+上半坡 → 实心
+    st.slope[st.idx(2, 2)] = 2;
+    expect(solidTile2(st, 2, 2)).toBe(true);
+    st.slope[st.idx(2, 2)] = 3;
+    expect(solidTile2(st, 2, 2)).toBe(false);         // 下半坡不算
+    st.slope[st.idx(2, 2)] = 4;
+    expect(solidTile2(st, 2, 2)).toBe(false);
+    st.slope[st.idx(2, 2)] = 1;
+    st.half[st.idx(2, 2)] = 1;
+    expect(solidTile2(st, 2, 2)).toBe(false);         // !halfBrick 否决（含平台变体）
+  });
+});
+
+// ----------------------------------------------------------------------------
+// ⑦ 风筝风场判定（WorldGen.InAPlaceWithWind :87586-87627）
+// ----------------------------------------------------------------------------
+
+describe('inAPlaceWithWind（WorldGen.cs:87586-87627）', () => {
+  it('高度门 worldSurface + 液体/挡风墙豁免', () => {
+    const st = new TileStore(40, 200);
+    expect(inAPlaceWithWind(st, 100, 10 * 16, 4, 4, 100)).toBe(true);   // 10 < surface
+    expect(inAPlaceWithWind(st, 100, 150 * 16, 4, 4, 100)).toBe(false); // 地下无风
+    st.setTile(5, 10, T.DIRT);
+    st.liquid[st.idx(5, 10)] = 100;
+    expect(inAPlaceWithWind(st, 5 * 16, 10 * 16, 4, 4, 100)).toBe(false); // 有液
+    st.liquid[st.idx(5, 10)] = 0;
+    st.wall[st.idx(5, 10)] = 1;                        // 土墙不在 AllowsWind 表
+    expect(inAPlaceWithWind(st, 5 * 16, 10 * 16, 4, 4, 100)).toBe(false);
+    st.wall[st.idx(5, 10)] = 150;                      // AllowsWind（WallID.cs:54）
+    expect(inAPlaceWithWind(st, 5 * 16, 10 * 16, 4, 4, 100)).toBe(true);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// ⑧ DrawBubble 判定（LeashedCritter.Draw :200-205）
+// ----------------------------------------------------------------------------
+
+describe('DrawBubble 判定（leashedBubbleVisible，LeashedCritter.cs:200-205）', () => {
+  it('水生（isAquatic）：非满水格画气泡；陆生：有液格画气泡', () => {
+    const st = new TileStore(8, 8);
+    st.liquid[st.idx(4, 4)] = 255;
+    st.liquid[st.idx(5, 4)] = 0;
+    st.liquid[st.idx(6, 4)] = 80;
+    // tile 取 _dummy.Center = (cx, cy+8)
+    const cx = 4 * 16 + 8 - 8;                        // 使 tile 落在 (4,4)
+    const at = (tx: number) => leashedBubbleVisible(st, tx * 16, 4 * 16 - 8, true);
+    expect(at(4)).toBe(false);                        // 满液格不画（鱼在水里）
+    expect(at(5)).toBe(true);                         // 空气格画（鱼离水）
+    expect(leashedBubbleVisible(st, 6 * 16, 4 * 16 - 8, false)).toBe(true);  // 陆生入液
+    expect(leashedBubbleVisible(st, 5 * 16, 4 * 16 - 8, false)).toBe(false); // 陆生在空气
+  });
+});
+
+// ----------------------------------------------------------------------------
+// ⑨ 逐型 FindFrame（NPC.cs:67295-78074）
+// ----------------------------------------------------------------------------
+
+describe('FindFrame 逐型（NPC.cs 大 switch 各 case）', () => {
+  /** 取一个实体并钉住运动态（直接驱动帧引擎，绕开移动 AI） */
+  function frameEntity(itemVid: number) {
+    const st = groundWorld(200, 100, 60);
+    const m = mkManager(st);
+    const e = m.spawnCritter(100, 50, itemVid, { seed: 3 })!;
+    e.vx = 0; e.vy = 0; e.frame = 0; e.frameCounter = 0;
+    return e;
+  }
+
+  it('兔族（:77553）：行走 6 阈值循环 / 上升=帧4 / 下降=帧6 / 静止锁 0', () => {
+    const e = frameEntity(2019);   // npc 46
+    e.vx = 0.8; e.vy = 0;
+    for (let i = 0; i < 7; i++) e.findFrame();        // fc=1.8/t → 7 帧 ≈ 12.6 > 6 推进
+    expect(e.frame).toBe(1);
+    for (let i = 0; i < 40; i++) e.findFrame();
+    expect(e.frame).toBeLessThan(7);                  // npcFrameCount[46]=7 回卷
+    e.vx = 0; e.vy = -1; e.findFrame();
+    expect(e.frame).toBe(4);
+    e.vy = 1; e.findFrame();
+    expect(e.frame).toBe(6);
+    e.vy = 0; e.findFrame();
+    expect(e.frame).toBe(0);
+    expect(e.spriteDirection).toBe(1);                // :77566-77571 direction 同步
+  });
+
+  it('鸟族（:74326）：静止=帧4（栖息）；飞行 4t/帧循环 0..count-2', () => {
+    const e = frameEntity(2015);   // npc 74（count=5）
+    e.findFrame();
+    expect(e.frame).toBe(4);
+    e.vx = 1; e.vy = 0;
+    for (let i = 0; i < 4; i++) e.findFrame();
+    expect(e.frame).toBe(1);
+    for (let i = 0; i < 60; i++) e.findFrame();
+    expect(e.frame).toBeLessThan(4);                  // 循环上界 = count-1 = 4
+    expect(e.spriteDirection).toBe(e.direction);
+  });
+
+  it('蝶族（:73420-73453）：7t 四相 0/1/2/1 + 物种窗口（356）与 444/653/661 无窗口', () => {
+    const e = frameEntity(1995);   // npc 356, placeStyle=2（1+1995-1994）
+    expect(e.variant).toBe(2);
+    e.vx = 0; e.vy = 0;
+    let fc = 0;
+    for (let t = 0; t < 28; t++) {
+      e.findFrame();
+      fc += 1;                                        // |vx|+|vy| = 0 → 每 tick +1
+      let want: number;
+      if (fc < 7) want = 0;
+      else if (fc < 14) want = 1;
+      else if (fc < 21) want = 2;
+      else { want = 1; if (fc >= 27) fc = 0; }        // 命中 27 先落帧 1 再清零
+      expect(e.frame, `t=${t}`).toBe(want + 3);       // 窗口 = 3×(variant-1)
+    }
+    // 金蝶 444（flyer 族，无 variant 窗口）
+    const g = frameEntity(2891);   // npc 444
+    g.vx = 1; g.vy = 0;
+    for (let i = 0; i < 30; i++) g.findFrame();
+    expect(g.frame).toBeLessThan(3);                  // npcFrameCount[444]=3，无 +3 窗口
+  });
+
+  it('萤火虫（:73369）：灯灭帧 +2（localAI2<=0 档）', () => {
+    const e = frameEntity(1992);   // npc 355
+    e.lightOn = false;
+    e.findFrame();
+    expect(e.frame).toBe(2);                          // 亮相 0 → 灭档 0+2
+    e.frameCounter = 5; e.findFrame();                // fc≥4 → 亮相 1
+    expect(e.frame).toBe(3);                          // 1+2
+    e.lightOn = true;
+    e.frameCounter = 5; e.findFrame();
+    expect(e.frame).toBe(1);                          // 不再加 2
+  });
+
+  it('蜗牛（:72919）：静止保持 / 移动六相 0/1/2/3/2/1 各 10t / 下坠 4·5', () => {
+    const e = frameEntity(2006);   // npc 359
+    const hold = e.frame;
+    e.findFrame();                                    // velocity==Zero → 保持
+    expect(e.frame).toBe(hold);
+    e.vx = 0.4; e.vy = 0;
+    let fc = 0;
+    for (let t = 0; t < 59; t++) {
+      e.findFrame();
+      fc += 1;
+      let want: number;
+      if (fc < 10) want = 0;
+      else if (fc < 20) want = 1;
+      else if (fc < 30) want = 2;
+      else if (fc < 40) want = 3;
+      else if (fc < 50) want = 2;
+      else { want = 1; if (fc >= 59) fc = 0; }        // 末相先落帧 1 再清零
+      expect(e.frame, `t=${t}`).toBe(want);
+    }
+    e.vx = 0; e.vy = 2;                               // vy>1 → 下坠档
+    e.frameCounter = 0;
+    e.findFrame();
+    expect(e.frame).toBe(4);
+    e.frameCounter = 7; e.findFrame();
+    expect(e.frame).toBe(5);
+  });
+
+  it('金鱼族（:74879）：wet（isAquatic）四相 6t 循环 0..3（24t 清零但帧保持 3）', () => {
+    const e = frameEntity(261);     // npc 55（fish → wet=true）
+    let fc = 0;
+    for (let t = 0; t < 24; t++) {
+      e.findFrame();
+      fc += 1;
+      const want = fc < 6 ? 0 : fc < 12 ? 1 : fc < 18 ? 2 : 3;   // :74906 先落帧
+      if (fc >= 24) fc = 0;                           // :74907-74909 仅清零
+      expect(e.frame, `t=${t}`).toBe(want);
+    }
+    expect(e.frame).toBe(3);
+  });
+
+  it('鸭族（:74445）：静止=0 / 行走 4t/帧 钳 [3,9]；泳姿表 363（:74470）钳 [11,count)', () => {
+    const e = frameEntity(2122);    // npc 362（waterfowl）
+    e.vx = 1; e.vy = 0;
+    e.findFrame();
+    expect(e.frame).toBe(3);                          // 立即抬到下限 3
+    for (let i = 0; i < 30; i++) e.findFrame();
+    expect(e.frame).toBeLessThanOrEqual(9);
+    e.vx = 0; e.vy = 0.0001;                          // 泳姿表（type+1 → 363）
+    expect(e.drawNpcType).toBe(363);
+    e.frame = 0; e.frameCounter = 0;
+    e.findFrame();
+    expect(e.frame).toBe(11);                         // 抬到泳姿下限
+  });
+
+  it('鼠族（:77215）：站姿 0↔1（9t）；行走 |vx|×0.5 累加，溢出回卷帧 2', () => {
+    const e = frameEntity(2003);    // npc 300（count=6）
+    e.vx = 0; e.vy = 0;
+    for (let i = 0; i < 9; i++) e.findFrame();
+    expect(e.frame).toBe(1);
+    e.vx = 1.5; e.vy = 0;
+    e.frame = 5; e.frameCounter = 6;
+    e.findFrame();                                    // fc=6+1.75>6 → 推进后 ≥count → 回卷 2
+    expect(e.frame).toBe(2);
+  });
+
+  it('龟族（:77388）：静止锁 0 / 腾空锁 8 / 行走 8t/帧 0..7', () => {
+    const e = frameEntity(4464);    // npc 616
+    e.vx = 0.5; e.vy = 0;
+    e.findFrame();
+    expect(e.frame).toBe(0);                          // 首帧未达 8t
+    for (let i = 0; i < 9; i++) e.findFrame();
+    expect(e.frame).toBe(1);
+    e.vx = 0; e.findFrame();
+    expect(e.frame).toBe(0);
+    e.vy = 1; e.findFrame();
+    expect(e.frame).toBe(8);
+  });
+
+  it('蚱蜢（:71627）两态 + 蠕虫（:73455）静止=1 / 走 0↔1 12t', () => {
+    const hop = frameEntity(2740);   // npc 377
+    hop.vy = 1; hop.findFrame();
+    expect(hop.frame).toBe(1);
+    hop.vy = 0; hop.findFrame();
+    expect(hop.frame).toBe(0);
+    const worm = frameEntity(2002);  // npc 357
+    worm.vx = 0; worm.vy = 0;
+    worm.findFrame();
+    expect(worm.frame).toBe(1);                       // 静止帧 = 1
+    worm.vx = 0.4;
+    for (let i = 0; i < 13; i++) worm.findFrame();
+    expect(worm.frame).toBe(0);                       // 12t 后翻到 0
+  });
+
+  it('蜻蜓（:73403）每 3t 一帧全循环 / 微光之灵（:73391）双累加 3t/帧 0..4', () => {
+    const d = frameEntity(4334);    // npc 595（count=4）
+    for (let t = 0; t < 12; t++) {
+      d.findFrame();
+      expect(e_frame(d), `t=${t}`).toBe(Math.floor((t + 1) / 3) % 4);
+    }
+    const f = frameEntity(5350);    // npc 677
+    for (let t = 0; t < 15; t++) {
+      f.findFrame();
+      expect(e_frame(f), `t=${t}`).toBe(Math.floor(((t + 1) * 2) / 6) % 5);
+    }
+  });
+
+  it('海马（:77482）速度分档 / 河豚（:74942）wet 8t 循环 / 瓢虫（:67616）2t 相位', () => {
+    const horse = frameEntity(4480);  // npc 626（fish）
+    horse.vx = 0.2; horse.vy = 0;
+    horse.findFrame();
+    expect(horse.frame).toBe(3);                        // speed>0.15
+    horse.vx = 0.06;
+    horse.findFrame();
+    expect(horse.frame).toBe(2);
+    const puff = frameEntity(5511);   // npc 688（fish）
+    for (let i = 0; i < 8; i++) puff.findFrame();
+    expect(puff.frame).toBe(1);
+    const bug = frameEntity(4361);    // npc 604
+    bug.vx = 1; bug.vy = 0;
+    bug.findFrame();
+    expect(bug.frame).toBe(0);                          // floor(1/2)
+    bug.frameCounter = 3;
+    bug.findFrame();
+    expect(bug.frame).toBe(2);                          // 先 +1 → fc=4 → floor(4/2)
+  });
+
+  it('鸮（:74379）：飞行段钳 [8,count) / spriteDirection = -direction', () => {
+    const e = frameEntity(4395);    // npc 611
+    e.direction = 1;
+    e.vx = 1; e.vy = 0;
+    e.findFrame();
+    expect(e.frame).toBe(8);
+    expect(e.spriteDirection).toBe(-1);
+  });
+
+  it('鹦鹉族（:74352）循环回卷到帧 1；水黾（:70442）疾行锁帧 4', () => {
+    const p = frameEntity(5212);    // npc 671
+    p.vx = 1; p.vy = 0;
+    p.frame = 5; p.frameCounter = 4;   // count=6 → 溢出
+    p.findFrame();
+    expect(p.frame).toBe(1);
+    const ws = frameEntity(4418);   // npc 612
+    ws.vx = 2; ws.vy = 0;              // |vx|>1 → 疾行
+    ws.findFrame();
+    expect(ws.frame).toBe(4);
+    expect(ws.spriteDirection).toBe(1);
+  });
+});
+
+/** FindFrame 断言辅助：读回推进后的帧（各 case 的 frame 即行 index） */
+function e_frame(e: { frame: number }): number { return e.frame; }
+
+// ----------------------------------------------------------------------------
+// ⑩ section 流式（ActiveSections.CheckSection 3×3）
+// ----------------------------------------------------------------------------
+
+describe('section 流式（LeashedEntity.BySection + ActiveSections.cs:14-33）', () => {
+  it('玩家 section 3×3 外的实体不更新（200×150 格栅格）', () => {
+    const st = groundWorld(1400, 500, 400);
+    const m = mkManager(st);
+    const near = m.spawnCritter(100, 300, 2019, { seed: 1 })!;
+    const far = m.spawnCritter(900, 300, 2019, { seed: 2 })!;   // section (4,2)
+    runTicks(m, st, 60, 100 * 16 + 8, 300 * 16 + 8);            // 玩家 section (0,2)
+    expect(far.animT).toBe(0);                                  // 从未被更新
+    expect(far.cx).toBe(900 * 16 + 8);                          // Spawn 初值原封
+    expect(near.animT).toBeGreaterThan(0);                      // 近端每帧更新
+  });
+
+  it('再激活走 Spawn(false)（SectionEntityList.Activate :213-225）：位置重置回锚桩', () => {
+    const st = groundWorld(1400, 500, 400);
+    const m = mkManager(st);
+    const e = m.spawnCritter(900, 300, 2019, { seed: 5 })!;
+    e.cx = 905 * 16 + 8;                                        // 模拟游走残位
+    runTicks(m, st, 5, 900 * 16 + 8, 300 * 16 + 8);             // 首帧激活 → Spawn(false)
+    expect(e.cx).toBe(900 * 16 + 8);                            // 拉回锚桩
+  });
+});
+
+// ----------------------------------------------------------------------------
+// ⑪ ShimmerFly 拖尾 + 尘通道（VisualEffects 各族）
+// ----------------------------------------------------------------------------
+
+describe('ShimmerFly 拖尾（ShimmerFlyLeashedCritter.cs:43-54）', () => {
+  it('oldPositions = TrailCacheLength[677] = 60，每帧右移 [0]=Center', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 30, 5350, { seed: 1 })!;       // npc 677
+    expect(e.npcType).toBe(677);
+    runTicks(m, st, 1, 60 * 16 + 8, 30 * 16 + 8);
+    expect(e.oldPositions).toHaveLength(60);
+    const p0 = { ...e.oldPositions![0] };
+    e.cx += 3;
+    runTicks(m, st, 1, 60 * 16 + 8, 30 * 16 + 8);
+    expect(e.oldPositions![1].x).toBeCloseTo(p0.x, 5);          // 右移一格
+    expect(e.oldPositions![0].x).toBeCloseTo(e.cx, 5);
+  });
+});
+
+/** 测试用 Dust 池（VanillaDust.spawn 的记录替身） */
+function fakeDustPool() {
+  const spawned: Array<{ type: number; x: number; y: number; w: number; h: number; alpha: number; scale: number }> = [];
+  const pool = {
+    spawn: (x: number, y: number, w: number, h: number, type: number,
+      _sx = 0, _sy = 0, alpha = 0,
+      _color: { r: number; g: number; b: number; a: number } | null = null, scale = 1): LeashedDust => {
+      spawned.push({ type, x, y, w, h, alpha, scale });
+      return {
+        type, x, y, vx: 0, vy: 0, scale, fadeIn: 0, alpha,
+        noGravity: false, noLight: false, noLightEmittance: false, color: _color,
+      };
+    },
+    spawned,
+  };
+  return pool;
+}
+
+describe('VisualEffects 尘通道（各族源码行号）', () => {
+  it('金系 43：照度门（任一通道>20）+ peak/30/300 掷骰（LeashedCritter.cs:143-161）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 30, 2889, { seed: 1 })!;       // npc 442 金鸟
+    // 全黑 → 不生成
+    let pool = fakeDustPool();
+    m.update({ store: st }, mkEnv({ dust: pool, lightAt: () => [0, 0, 0] }), e.cx, e.cy);
+    expect(pool.spawned).toHaveLength(0);
+    // 亮处 → 1/300·(peak/30) 概率——跑 2000 帧（Math.random 掷骰）必有命中且型号恒 43
+    pool = fakeDustPool();
+    for (let i = 0; i < 2000; i++) {
+      m.update({ store: st }, mkEnv({ dust: pool, lightAt: () => [255, 255, 255] }), e.cx, e.cy);
+    }
+    expect(pool.spawned.length).toBeGreaterThan(0);
+    for (const d of pool.spawned) expect(d.type).toBe(43);
+    expect(pool.spawned[0].alpha).toBe(254);
+  });
+
+  it('Recall 尘 15 × 前后各 10（LeashedCritter.cs:119-133）', () => {
+    const st = new TileStore(120, 80);                          // 全空 → 必触发 Recall
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 30, 2019, { seed: 9 })!;
+    const pool = fakeDustPool();
+    // 跑到 walker 越界（State_Recalling 到期执行 Recall）
+    for (let i = 0; i < 400; i++) {
+      m.update({ store: st }, mkEnv({ dust: pool }), 60 * 16 + 8, 30 * 16 + 8);
+    }
+    expect(pool.spawned.some((d) => d.type === 15)).toBe(true);
+  });
+
+  it('妖精 278：t%4==0 且 1/4 掷骰，noGravity+noLight（FairyLeashedCritter.cs:35-44）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 30, 4068, { seed: 2 })!;       // npc 583
+    const pool = fakeDustPool();
+    for (let i = 0; i < 400; i++) {
+      m.update({ store: st }, mkEnv({ dust: pool, timeForVisualEffects: i }), e.cx, e.cy);
+    }
+    expect(pool.spawned.some((d) => d.type === 278)).toBe(true);
+    expect(pool.spawned.filter((d) => d.type === 278)[0].alpha).toBe(200);
+  });
+
+  it('帝皇蝶 267：fadeAmount>0 才出尘 + CloneDust 二段（EmpressButterfly.cs:30-57）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 30, 4961, { seed: 4 })!;       // npc 661
+    const pool = fakeDustPool();
+    const clones: LeashedDust[] = [];
+    const env = mkEnv({
+      dust: {
+        spawn: pool.spawn,
+        clone: (d) => { const c = { ...d }; clones.push(c); return c; },
+      },
+      playerCx: e.cx + 500, playerCy: e.cy,                     // >300px 渐隐
+    });
+    for (let i = 0; i < 300; i++) m.update({ store: st }, env, e.cx, e.cy);
+    expect(e.fadeAmount).toBe(50);
+    const empress = pool.spawned.filter((d) => d.type === 267);
+    if (empress.length > 0) {
+      expect(clones.length).toBe(empress.length);               // 每尘必带二段
+    }
+  });
+
+  it('地狱蝶 6：1/60 掷骰（HellButterflyLeashedCritter.cs:12-16）', () => {
+    const st = groundWorld(120, 80, 40);
+    const m = mkManager(st);
+    const e = m.spawnCritter(60, 30, 4845, { seed: 6 })!;       // npc 653
+    const pool = fakeDustPool();
+    for (let i = 0; i < 600; i++) m.update({ store: st }, mkEnv({ dust: pool }), e.cx, e.cy);
+    expect(pool.spawned.some((d) => d.type === 6)).toBe(true);
   });
 });

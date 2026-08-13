@@ -33,6 +33,36 @@ import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc } from '../data/vanillaNpcs';
+import type { NetWriter, NetReader } from '../net/protocol';
+
+// ============================================================================
+// msg82 module13 拴绳实体信封（原版 LeashedEntity.NetModule，LeashedEntity.cs:13-107）
+//   帧体由 net/leashedSync.ts 编解码；实体段（NetSend/NetReceive 字段序）在下方
+//   两个实体类上。sub 编号 = 原版 MessageType 枚举序（Remove/FullSync/PartialSync），
+//   PlaceRequest 为本仓新增的访客→房主请求（见 net/leashedSync.ts 信任边界注）
+// ============================================================================
+
+export const LEASHED_SUB_REMOVE = 0;
+export const LEASHED_SUB_FULL = 1;
+export const LEASHED_SUB_PARTIAL = 2;
+/** 本仓新增：访客放置锚桩的请求（guest→host 定向转发；原版无——访客放置走
+ *  SendTileObject 内联在 msg17 内由服务器重放，本仓 tile 层是客户端权威直通，
+ *  实体层须显式请求。见 net/leashedSync.ts） */
+export const LEASHED_SUB_PLACE_REQUEST = 3;
+export const LEASHED_KIND_CRITTER = 0;
+export const LEASHED_KIND_KITE = 1;
+
+/** msg82 module13 解析后的信封（LeashedEntityManager 消费；PlaceRequest 只有 vid） */
+export interface LeashedNetMsg {
+  sub: number;
+  netId: number;
+  ax: number;
+  ay: number;
+  kind: number;
+  vid: number;
+  /** 实体段游标（sub 1/2；指向身份头之后或恒有段起点，见 netApplyFull/netApplyPartial） */
+  r: NetReader;
+}
 
 /** 世界常量（LeashedCritter.cs:41-43） */
 const GRAVITY = 0.3;
@@ -75,21 +105,53 @@ export class LCG32Random {
 // ============================================================================
 
 /**
- * WorldGen.SolidTile2(i, j)（WorldGen.cs:70500-70509）：
- *  active && tileSolid && slope==0 && !halfBrick && !inActive。
- *  （平台 topSlope 特例 :70503 的 `Sets.Platforms && (halfBrick||topSlope)` 与后半
- *  !halfBrick 互斥后仅剩"平台+上半坡"一档，本仓平台坡面罕见且渲染未支持坡面，
- *  从略——备案偏差，见文末 GAP）
+ * WorldGen.SolidTile2(i, j)（WorldGen.cs:70500-70509）逐条件 1:1：
+ *  active && tileSolid
+ *  && ((Sets.Platforms[type] && (halfBrick || topSlope)) || slope == 0)
+ *  && !halfBrick && !inActive
+ *  ——平台特例（:70503）与后半 !halfBrick 互斥后仅剩"平台+上半坡（slope 1/2）"一档：
+ *  平台平放（slope 0）走 `slope==0` 同样算实心（原版 Main.tileSolid[19]=true，拴绳
+ *  小动物可站平台）；下半坡（3/4）一律不算。本仓 TILE_DEFS 平台族 solid=false
+ *  （碰撞审计以独立 platform 旗承载），此处并入 tileSolid。
  */
 export function solidTile2(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false; // 原版越界 Main.tile[i,j]==null → true；本仓越界恒空（防边缘卡死）
   const i = st.idx(x, y);
   if (st.type[i] === 0) return false;                       // !active
   if (st.wire[i] & 32) return false;                        // inActive（致动缩入）
-  if (st.half[i]) return false;                             // halfBrick
-  if (st.slope[i] !== 0) return false;                      // slope
+  if (st.half[i]) return false;                             // halfBrick（含平台 halfBrick 变体——同被 !halfBrick 否决）
   const d = TILE_DEFS[st.type[i]];
-  return d ? !!d.solid : false;
+  if (!d) return false;
+  if (!d.solid && !d.platform) return false;                // !Main.tileSolid（平台族例外并入）
+  const slope = st.slope[i];
+  const topSlope = slope === 1 || slope === 2;              // Tile.tileData.topSlope()
+  return (!!d.platform && topSlope) || slope === 0;
+}
+
+/**
+ * WorldGen.InAPlaceWithWind(position, width, height)（WorldGen.cs:87586-87627）：
+ *  ① DoesWindBlowAtThisHeight(tileY) = tileY < worldSurface（remixWorld 取反，本仓恒正世界）；
+ *  ② 覆盖盒内任一格 liquid>0 或（wall>0 && !WallID.Sets.AllowsWind[wall]）→ false。
+ *  AllowsWind 全表（WallID.cs:54）：{0,150,138,145,107,152,140,139,141,106,245,315,317}。
+ *  风筝升力/风向的门槛判定（LeashedKite.Update :150 / KiteLogic :45865）
+ */
+const WALL_ALLOWS_WIND: ReadonlySet<number> = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317]);
+
+export function inAPlaceWithWind(
+  st: TileStore, px: number, py: number, w: number, h: number, worldSurface: number,
+): boolean {
+  if (!(py / T < worldSurface)) return false;               // ①高度门（DoesWindBlowAtThisHeight）
+  const x0 = Math.floor(px / T), y0 = Math.floor(py / T);
+  const x1 = Math.floor((px + w) / T), y1 = Math.floor((py + h) / T);   // ToTileCoordinates（截断）
+  for (let i = x0; i <= x1; i++) {
+    for (let j = y0; j <= y1; j++) {                        // ② width = 1+x1-x0（含端点）
+      if (!st.inBounds(i, j)) continue;                     // 原版 !InWorld 格直接跳过
+      const k = st.idx(i, j);
+      if (st.liquid[k] !== 0) return false;
+      if (st.wall[k] !== 0 && !WALL_ALLOWS_WIND.has(st.wall[k])) return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -102,6 +164,19 @@ export function anyLiquidAt(st: TileStore, x: number, y: number, waterOnly = fal
   const i = st.idx(x, y);
   if (st.liquid[i] === 0) return false;
   return waterOnly ? st.liquidType[i] === 1 : true;
+}
+
+/**
+ * DrawBubble 可见判定（LeashedCritter.Draw :200-205）：tile 取 _dummy.Center
+ *  （= Center + (0,8)，CopyToDummy :171）；`(isAquatic && liquid<255) ||
+ *  (!isAquatic && liquid>0)`——水生（FishLeashedCritter）在非满水格 / 陆生在
+ *  有液格 时画 Gore_413 气泡
+ */
+export function leashedBubbleVisible(st: TileStore, cx: number, cy: number, isAquatic: boolean): boolean {
+  const tx = Math.floor(cx / T), ty = Math.floor((cy + 8) / T);
+  if (!st.inBounds(tx, ty)) return false;
+  const liquid = st.liquid[st.idx(tx, ty)];
+  return (isAquatic && liquid < 255) || (!isAquatic && liquid > 0);
 }
 
 // ============================================================================
@@ -438,12 +513,32 @@ export const KITE_ITEM_PROJ: Readonly<Record<number, number>> = {
 // 运行时环境（Game 每帧注入；netMode!=2 的视觉分支全部走这里）
 // ============================================================================
 
+/** Dust.NewDust 返回句柄的可变子集（src/fx/VanillaDust.ts VDust 结构等价） */
+export interface LeashedDust {
+  type: number;
+  x: number; y: number;
+  vx: number; vy: number;
+  scale: number; fadeIn: number; alpha: number;
+  noGravity: boolean; noLight: boolean; noLightEmittance: boolean;
+  color: { r: number; g: number; b: number; a: number } | null;
+}
+
+/** Dust 池通道（Game 注入 vanillaDust；缺省 = 不生成尘——netMode==2 语义） */
+export interface LeashedDustPool {
+  /** Dust.NewDust(position, w, h, type, speedX, speedY, alpha, color, scale)（Dust.cs:75-285） */
+  spawn(x: number, y: number, w: number, h: number, type: number,
+    speedX?: number, speedY?: number, alpha?: number,
+    color?: { r: number; g: number; b: number; a: number } | null, scale?: number): LeashedDust | null;
+  /** Dust.CloneDust（Dust.cs：字段级复制回池；帝皇蝶二段尘用，缺省跳过） */
+  clone?(d: LeashedDust): LeashedDust | null;
+}
+
 export interface LeashedEnv {
   /** Main.timeForVisualEffects（悬停相位/妖精尘节奏） */
   timeForVisualEffects: number;
   /** Main.dayTime（萤火虫昼地表门，FireflyLeashedCritter.cs:51-54） */
   dayTime: boolean;
-  /** Main.worldSurface（萤火虫地表门：position.Y/16 < worldSurface+10） */
+  /** Main.worldSurface（萤火虫地表门 / 风筝 DoesWindBlowAtThisHeight） */
   worldSurface: number;
   /** Main.WindForVisuals（风筝 windTarget，LeashedKite.cs:100-102） */
   windForVisuals: number;
@@ -454,8 +549,10 @@ export interface LeashedEnv {
   playerCy: number;
   /** Lighting.AddLight(i, j, r, g, b)（tile 坐标） */
   addLight(i: number, j: number, r: number, g: number, b: number): void;
-  /** Dust 近似（金系闪光；缺省不生成） */
-  spawnDust?(x: number, y: number, w: number, h: number, color: string): void;
+  /** 原版 Dust 池（金系 43 / 妖精 278 / 帝皇蝶 267 / 地狱蝶 6 / Recall 15） */
+  dust?: LeashedDustPool;
+  /** Lighting.GetColor(i, j) → [r,g,b] 0-255（金系闪光的照度门，LeashedCritter.cs:143-156） */
+  lightAt?(i: number, j: number): [number, number, number];
 }
 
 /** 实体点光（update 期收集，Game 侧统一推 LightingEngine） */
@@ -513,6 +610,17 @@ export class LeashedCritterEntity {
   /** 本实体在 manager 列表的下标（GetBobbingOffset 的 whoAmI*npcType 相位项） */
   whoAmI = 0;
 
+  /** 联机 netId（房主分配，单调；本地实体也持有——房主广播需要，0 = 尚未分配） */
+  netId = 0;
+  /** 访客端傀儡标记（netApplyFull 重建才置位）：section 再激活不做 Spawn 归位
+   *  （原版 client 端 Activate 不调 Spawn，LeashedEntity.cs:216 `if (Main.netMode != 1)`
+   *  门——状态以 PartialSync 为准）。房主/单机的本地实体恒 false（仍归位） */
+  netPuppet = false;
+  /** NetReceive 半包平滑位移（LeashedCritter.cs:33 netOffset；每帧向 0 收敛 2px
+   *  （:110-112），绘制经 getDrawOffset 叠加 = Draw :198 `netOffset + GetDrawOffset()`） */
+  netOffsetX = 0;
+  netOffsetY = 0;
+
   active = true;
 
   constructor(ax: number, ay: number, npcType: number, proto: LeashedPrototype, seed: number) {
@@ -541,10 +649,22 @@ export class LeashedCritterEntity {
 
   /** 地形查询用 store（manager 注入；spawn 期即需——Flyer 悬空门 / Jumper 首选点） */
   store: TileStore | null = null;
+  /** 本帧环境（update 注入；Recall 尘在引擎深处生成要用） */
+  private env: LeashedEnv | null = null;
 
-  /** Spawn(bool newlyAdded)（Walker 无覆写；Flyer :41-51；Jumper :38-42） */
+  /**
+   * Spawn(bool newlyAdded)（基类 LeashedCritter.Spawn :103-108 + Flyer :41-51 /
+   *  Jumper :38-42 覆写）：Center/Target 归位锚桩——section 再激活
+   *  （SectionEntityList.Activate :213-225 → Spawn(false)）同样走此，即游走残位
+   *  在玩家临近时拉回锚桩。rand 重播种（:107 Main.rand.Next）从略——本仓种子由
+   *  manager 注入以保测试确定性（备案偏差）
+   */
   spawn(): void {
     const st = this.store;
+    this.cx = this.ax * T + 8;
+    this.cy = this.ay * T + 8;
+    this.tx = this.ax;
+    this.ty = this.ay;
     if (this.proto.move === 'flyer') {
       // FlyerLeashedCritter.Spawn :43-50：锚桩下非实心 → vy=0.0001（走悬停分支）
       if (st && !solidTile2(st, this.ax, this.ay + 1)) this.vy = HOVER_Y_VELOCITY;
@@ -552,6 +672,69 @@ export class LeashedCritterEntity {
     } else if (this.proto.move === 'jumper') {
       this.pickJumpTarget(); // JumperLeashedCritter.Spawn :40-42 → PickNewTarget
     }
+  }
+
+  // ------------------------------------------------------------------
+  // 联机序列化（LeashedCritter.cs:59-101 NetSend/NetReceive 字段序 1:1）
+  // ------------------------------------------------------------------
+
+  /**
+   * NetSend（LeashedCritter.cs:59-73，NormalButterfly.cs:23-30 / ShimmerFly.cs:24-31
+   * 族尾部随后）。字段序：full 身份头（npcType/Size，由 manager 在构造前读——
+   * HandleFullSync :79-96 先读 type/anchor 再 NewInstance 的拆分）→ 恒有段 → full 尾部。
+   *  与原版编码差异（备案）：7bit→u16、Size f32×2→u16×2（尺寸恒整像素）、
+   *  位移对走 NetWriter.f16（= 原 WritePackedVector2 的 HalfVector2，Utils.cs:1395）。
+   *  ★尾部新增 scale100：原版不传 scale → 访客端重建不跑 SetDefaults、scale 恒 1
+   *  （Fly 族 0.75-1.11 随机档全失效）——原版联机渲染失配事实，本仓补传修正
+   */
+  toNet(w: NetWriter, full: boolean): void {
+    if (full) {
+      w.u16(this.npcType & 0xffff);
+      w.u16(clampU16(this.w));
+      w.u16(clampU16(this.h));
+    }
+    // position - AnchorPosition.ToWorldCoordinates()（:66；本仓 position = Center - Size/2）
+    w.f16(this.cx - this.w / 2 - this.ax * T);
+    w.f16(this.cy - this.h / 2 - this.ay * T);
+    w.bool(this.direction > 0);
+    w.u32(this.rand.state >>> 0);
+    w.i16(this.waitTime);
+    w.u8(this.state & 0xff);
+    w.i8(clampSByte(this.tx - this.ax));
+    w.i8(clampSByte(this.ty - this.ay));
+    if (full) {
+      w.u8(this.variant & 0xff);                          // NormalButterfly.cs:26-29
+      w.u8(clampU16(Math.round(this.scale * 100)));       // 本仓扩展（见方法注）
+      w.u8(clampU16(this.oldPositions?.length ?? 60));    // ShimmerFly.cs:27-30
+    }
+  }
+
+  /**
+   * NetReceive（LeashedCritter.cs:75-101）：恒有段 + full 族尾部（身份头已由
+   *  manager 消费）。netOffset 语义 1:1：full 清零 / 半包累积旧位与新位之差
+   *  （:90-96），每帧向 0 收敛（:110-112），绘制叠加（:198）
+   */
+  fromNet(r: NetReader, full: boolean): void {
+    const oldCx = this.cx, oldCy = this.cy;
+    this.cx = r.f16() + this.ax * T + this.w / 2;
+    this.cy = r.f16() + this.ay * T + this.h / 2;
+    this.direction = r.bool() ? 1 : -1;
+    this.rand.state = r.u32() >>> 0;
+    this.waitTime = r.i16();
+    this.state = r.u8();
+    this.tx = this.ax + clampSByte(r.i8());
+    this.ty = this.ay + clampSByte(r.i8());
+    if (full) {
+      this.variant = r.u8();
+      this.scale = r.u8() / 100;
+      const trailLen = r.u8();                            // ShimmerFly.cs:35-41
+      if (this.npcType === 677 && trailLen > 0
+        && (!this.oldPositions || this.oldPositions.length !== trailLen)) {
+        this.oldPositions = Array.from({ length: trailLen }, () => ({ x: this.cx, y: this.cy }));
+      }
+    }
+    if (full) { this.netOffsetX = 0; this.netOffsetY = 0; }
+    else { this.netOffsetX += oldCx - this.cx; this.netOffsetY += oldCy - this.cy; }
   }
 
   // ------------------------------------------------------------------
@@ -890,12 +1073,14 @@ export class LeashedCritterEntity {
   // 公共：Recall / VisualEffects / FindFrame
   // ------------------------------------------------------------------
 
-  /** Recall（LeashedCritter.cs:115-134）：拉回锚桩上方一格（尘近似走 env.spawnDust） */
+  /** Recall（LeashedCritter.cs:115-134）：前后各 10 颗 Dust 15 + 拉回锚桩上方一格 */
   private recall(): void {
+    if (this.env) this.recallDust(this.env);                // :120-124 前 10 颗
     this.cx = this.ax * T + 8;
     this.cy = this.ay * T + 8 - T;
     this.vx = 0;
     this.vy = 0;
+    if (this.env) this.recallDust(this.env);                // :128-132 后 10 颗
   }
 
   /** Update 尾段（CopyToDummy + FindFrame + CopyFromDummy）。
@@ -908,26 +1093,57 @@ export class LeashedCritterEntity {
 
   /**
    * VisualEffects 各族覆写（金系闪光 LeashedCritter.cs:136-163 / Snail :18-28 /
-   * HellButterfly :14-25 / Firefly :24-58 / EmpressButterfly :25-59 / Fairy :25-47）
+   * HellButterfly :7-18 / Firefly :17-57 / EmpressButterfly :22-58 / Fairy :19-46 /
+   * ShimmerFly :43-53）——尘走原版 Dust 池（env.dust = VanillaDust）。
    * @param outLight 本帧点光（Game 侧推 LightingEngine）
    */
   visualEffects(env: LeashedEnv, outLight?: LeashedLight[]): void {
     const p = this.proto;
     const ti = Math.floor(this.cx / T), tj = Math.floor(this.cy / T);
-    // 金系闪光（NPCID.Sets.IsGoldCritter NPCID.cs:4456）
-    if (IS_GOLD_CRITTER.has(this.npcType) && env.spawnDust) {
-      if (Math.random() < 0.03) env.spawnDust(this.cx, this.cy, this.w, this.h, '#FFFF00');
-    }
+    this.goldCritterSparkle(env);          // LeashedCritter.VisualEffects :136-163
     if (p.snailFx) {
       if (this.npcType === 360) outLight?.push({ tx: ti, ty: tj, r: 0.1, g: 0.2, b: 0.7 });
       else if (this.npcType === 655) outLight?.push({ tx: ti, ty: tj, r: 0.6, g: 0.3, b: 0.1 });
     }
-    if (p.hellGlow) {
-      outLight?.push({ tx: ti, ty: tj, r: 0.6, g: 0.3, b: 0.1 });
-    }
+    if (p.hellGlow) this.updateHellButterfly(env, outLight);
     if (p.fireflyGlow) this.updateFirefly(env, outLight);
     if (p.empressFade) this.updateEmpress(env, outLight);
     if (p.fairyGlow) this.updateFairy(env, outLight);
+    if (this.npcType === 677) this.shiftShimmerTrail();   // ShimmerFlyLeashedCritter :43-53
+  }
+
+  /** 金系闪光（LeashedCritter.cs:143-161：照度门 + max(R,G,B)/30/300 掷骰，Dust 43） */
+  private goldCritterSparkle(env: LeashedEnv): void {
+    const dust = env.dust;
+    if (!dust || !IS_GOLD_CRITTER.has(this.npcType)) return;
+    const ti = Math.floor(this.cx / T), tj = Math.floor(this.cy / T);
+    const light = env.lightAt?.(ti, tj) ?? [255, 255, 255];
+    if (!(light[0] > 20 || light[1] > 20 || light[2] > 20)) return;
+    const peak = Math.max(light[0], light[1], light[2]);
+    const roll = Math.floor(peak / 30);                    // C# num /= 30（整除）
+    if (Math.floor(Math.random() * 300) >= roll) return;   // Main.rand.Next(300) < num
+    const d = dust.spawn(this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h,
+      43, 0, 0, 254, { r: 255, g: 255, b: 0, a: 255 }, 0.5);
+    if (d) { d.vx *= 0; d.vy *= 0; }                        // :158-159 velocity *= 0
+  }
+
+  /** Recall 尘（LeashedCritter.cs:119-133）：前后各 10 颗 Dust 15（alpha 150 / scale 1.1） */
+  recallDust(env: LeashedEnv): void {
+    const dust = env.dust;
+    if (!dust) return;                                      // netMode==2 语义：无尘
+    for (let i = 0; i < 10; i++) {
+      dust.spawn(this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h, 15, 0, 0, 150, null, 1.1);
+    }
+  }
+
+  /** HellButterfly（:7-18：点光 + 1/60 掷骰 Dust 6 alpha 254） */
+  private updateHellButterfly(env: LeashedEnv, outLight?: LeashedLight[]): void {
+    outLight?.push({
+      tx: Math.floor(this.cx / T), ty: Math.floor(this.cy / T), r: 0.6, g: 0.3, b: 0.1,
+    });
+    if (Math.floor(Math.random() * 60) !== 0) return;       // Main.rand.Next(60) == 0
+    const d = env.dust?.spawn(this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h, 6, 0, 0, 254);
+    if (d) { d.vx *= 0; d.vy *= 0; }
   }
 
   /** Firefly 明灭（FireflyLeashedCritter.cs:38-58） */
@@ -951,7 +1167,12 @@ export class LeashedCritterEntity {
     }
   }
 
-  /** EmpressButterfly 渐隐 + HSL 环绕光（EmpressButterflyLeashedCritter.cs:25-59） */
+  /**
+   * EmpressButterfly 渐隐 + HSL 环绕光 + 尘 267（EmpressButterflyLeashedCritter.cs:22-58）
+   *  尘：1/5 掷骰 → Dust 267（hslToRgb(t*0.3,1,0.5)×0.5），位置覆写为 Center+
+   *  NextVector2Circular(w,h)，velocity×rand*0.8 + velocity*0.6，fadeIn 0.6+rand*0.7*num2，
+   *  scale 0.35，CloneDust 二段（scale/2、fadeIn×0.85、白×0.5）
+   */
   private updateEmpress(env: LeashedEnv, outLight?: LeashedLight[]): void {
     const far = Math.hypot(env.playerCx - this.cx, env.playerCy - this.cy) > 300;
     this.fadeAmount = Math.max(0, Math.min(50, this.fadeAmount + (far ? 1 : -1)));
@@ -961,37 +1182,477 @@ export class LeashedCritterEntity {
       tx: Math.floor(this.cx / T), ty: Math.floor(this.cy / T),
       r: c[0] * 0.3 + 0.1, g: c[1] * 0.3 + 0.1, b: c[2] * 0.3 + 0.1,
     });
+    if (this.fadeAmount <= 0 || !env.dust) return;           // :30-33 fadeAmount==0 直接返回
+    const opacity = this.opacity;
+    if (Math.floor(Math.random() * 5) !== 0) return;         // Main.rand.Next(5) == 0
+    const num2 = 0.9 + (0.6 - 0.9) * opacity;               // MathHelper.Lerp(0.9, 0.6, opacity)
+    const c2 = hslToRgb((env.timeForVisualEffects * 0.3) % 1, 1, 0.5);
+    const col = { r: c2[0] * 127.5, g: c2[1] * 127.5, b: c2[2] * 127.5, a: 255 };   // ×0.5
+    const d = env.dust.spawn(this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h,
+      267, 0, 0, 0, col);
+    if (!d) return;
+    // Main.rand.NextVector2Circular(width, height)（半径 w/2, h/2 均匀圆盘）
+    const ang = Math.random() * Math.PI * 2;
+    const rad = Math.sqrt(Math.random());
+    d.x = this.cx + Math.cos(ang) * rad * this.w * 0.5;
+    d.y = this.cy + Math.sin(ang) * rad * this.h * 0.5;
+    d.vx *= Math.random() * 0.8;
+    d.vy *= Math.random() * 0.8;
+    d.vx += this.vx * 0.6;
+    d.vy += this.vy * 0.6;
+    d.noGravity = true;
+    d.fadeIn = 0.6 + Math.random() * 0.7 * num2;
+    d.scale = 0.35;
+    const clone = env.dust.clone?.(d);                       // Dust.CloneDust（num3 != 6000 恒真）
+    if (clone) {
+      clone.scale /= 2;
+      clone.fadeIn *= 0.85;
+      clone.color = { r: 127.5, g: 127.5, b: 127.5, a: 127.5 };   // White × 0.5
+    }
   }
 
-  /** Fairy 点光（FairyLeashedCritter.cs:25-47：583 粉 / 584 绿 / 585 蓝 ×0.7） */
+  /**
+   * Fairy 点光 + 环绕尘（FairyLeashedCritter.cs:19-46）：timeForVisualEffects%4==0 且
+   *  Main.rand.Next(4)!=0 → Dust 278（Lerp(主色,辅色,NextFloat)，alpha 200，scale 0.65），
+   *  位置 Center-(4,4)+NextVector2Circular(2,2)，velocity 清零后 += velocity*0.3
+   */
   private updateFairy(env: LeashedEnv, outLight?: LeashedLight[]): void {
-    void env;
-    const c = this.npcType === 584 ? [0.196, 0.804, 0.478]   // LimeGreen
-      : this.npcType === 585 ? [0.255, 0.412, 0.882]          // RoyalBlue
-        : [1.0, 0.412, 0.706];                                // HotPink
+    const a = this.npcType === 584 ? [50, 205, 50] : this.npcType === 585 ? [65, 105, 225] : [255, 105, 180];
+    const b = this.npcType === 584 ? [32, 178, 170] : this.npcType === 585 ? [173, 216, 230] : [255, 182, 193];
     outLight?.push({
       tx: Math.floor(this.cx / T), ty: Math.floor(this.cy / T),
-      r: c[0] * 0.7, g: c[1] * 0.7, b: c[2] * 0.7,
+      r: a[0] / 255 * 0.7, g: a[1] / 255 * 0.7, b: a[2] / 255 * 0.7,
     });
+    if (!env.dust) return;
+    if (Math.floor(env.timeForVisualEffects) % 4 !== 0) return;   // (int)t % 4 == 0
+    if (Math.floor(Math.random() * 4) === 0) return;              // Main.rand.Next(4) != 0
+    const t = Math.random();                                      // Color.Lerp(a, b, NextFloat)
+    const col = {
+      r: a[0] + (b[0] - a[0]) * t,
+      g: a[1] + (b[1] - a[1]) * t,
+      b: a[2] + (b[2] - a[2]) * t,
+      a: 255,
+    };
+    const ang = Math.random() * Math.PI * 2;
+    const rad = Math.sqrt(Math.random());
+    const ox = this.cx - 4 + Math.cos(ang) * rad * 2;
+    const oy = this.cy - 4 + Math.sin(ang) * rad * 2;
+    const d = env.dust.spawn(ox, oy, 4, 4, 278, 0, 0, 200, col, 0.65);
+    if (d) {
+      d.vx = 0; d.vy = 0;
+      d.vx += this.vx * 0.3;
+      d.vy += this.vy * 0.3;
+      d.noGravity = true;
+      d.noLight = true;
+    }
   }
 
-  /** _dummy.FindFrame 最小等价（移动循环 / 静止首帧；蝴蝶 4 相 + 物种窗口） */
-  private findFrame(): void {
+  /**
+   * ShimmerFly 拖尾历史（ShimmerFlyLeashedCritter.VisualEffects :43-54）：
+   *  oldPositions = _dummy.oldPos（NPCID.Sets.TrailCacheLength[677] = 60，NPCID.cs:4805），
+   *  每帧右移一格、[0] = position + netOffset（单机 netOffset 恒 0——仅在 NetReceive
+   *  半包路径注入（LeashedCritter.cs:90-96），本仓无联机消费端，等价恒 0）。
+   *  绘制端消费见 Renderer.drawLeashedFaeling（DrawNPCDirect_Faeling Main.cs:26306-26362）
+   */
+  oldPositions: Array<{ x: number; y: number }> | null = null;
+
+  private shiftShimmerTrail(): void {
+    const n = 60;                                           // TrailCacheLength[677]
+    if (!this.oldPositions) this.oldPositions = Array.from({ length: n }, () => ({ x: this.cx, y: this.cy }));
+    for (let i = this.oldPositions.length - 1; i > 0; i--) {
+      this.oldPositions[i].x = this.oldPositions[i - 1].x;
+      this.oldPositions[i].y = this.oldPositions[i - 1].y;
+    }
+    this.oldPositions[0].x = this.cx;
+    this.oldPositions[0].y = this.cy;
+  }
+
+  /**
+   * _dummy.FindFrame 逐型 1:1（NPC.cs:67295-78074 switch，拴绳可放置 NPC 全集）。
+   *  状态帧推进语义：frameCounter（double，负方向累加）+ frame（帧行 index）；
+   *  FindFrame 对 spriteDirection 的覆写经 CopyFromDummy（:183-188）持久化——本方法
+   *  直接写回 this.spriteDirection；rotation 覆写在 Draw 期 CopyToDummy 重置（:176）
+   *  不持久——绘制 rotation 只取各族 rotationScalar 档（见 get rotation）。
+   *  视觉掷骰（猫头鹰眨眼/水黾 180 门/风筝 824 族 Next(4)）原版走 Main.rand 全局
+   *  视觉流，非实体 LCG——此处 Math.random 等价（不污染 gameplay rand 序列）。
+   *  （public = 测试/渲染直调入口；update 经 afterMove 每帧调一次）
+   */
+  findFrame(): void {
     const meta = vanillaNpc(this.npcType);
     const count = meta?.frames ?? 1;
-    const moving = Math.abs(this.vx) + Math.abs(this.vy) > 0.1;
-    if (this.proto.butterflyVariant && this.npcType === 356) {
-      // NPC.cs:73420-73456：frameCounter += 1+(|vx|+|vy|)/2；0/1/2/1 四相，7t/相
-      this.frameCounter += 1 + (Math.abs(this.vx) + Math.abs(this.vy)) / 2;
-      const fc = Math.floor(this.frameCounter);
-      const phase = fc < 7 ? 0 : fc < 14 ? 1 : fc < 21 ? 2 : 1;
-      if (fc >= 27) this.frameCounter = 0;
-      const window = Math.max(0, (this.variant - 1) * 3); // ai[2]-1 → 物种窗口（每物种 3 帧）
-      this.frame = Math.min(count - 1, window + phase);
-      return;
+    // Waterfowl vy!=0 → CopyToDummy type+1（泳姿表），FindFrame 以递增后 type 分派
+    const type = this.drawFrameNpcType;
+    const vx = this.vx, vy = this.vy;
+    const moving = vx !== 0 || vy !== 0;
+    switch (type) {
+      // ---- 兔族（:77553）----
+      case 46: case 47: case 303: case 337: case 443: case 464: case 540: case 614:
+      case 646: case 647: case 648: case 649: case 650: case 651: case 652:
+        if (vy === 0) {
+          if (this.direction === 1) this.spriteDirection = 1;
+          if (this.direction === -1) this.spriteDirection = -1;
+          if (vx === 0) { this.frame = 0; this.frameCounter = 0; break; }
+          this.frameCounter += Math.abs(vx) + 1;
+          if (this.frameCounter > 6) { this.frame++; this.frameCounter = 0; }
+          if (this.frame >= count) this.frame = 0;
+        } else if (vy < 0) { this.frameCounter = 0; this.frame = 4; }
+        else { this.frameCounter = 0; this.frame = 6; }
+        break;
+      // ---- 金鱼族（:74879；拴绳恒 wet=isAquatic）----
+      case 55: case 57: case 58: case 102: case 241: case 465: case 592: case 607:
+        this.spriteDirection = this.direction;
+        this.frameCounter += 1;
+        if (this.proto.isAquatic) {
+          if (this.frameCounter < 6) this.frame = 0;
+          else if (this.frameCounter < 12) this.frame = 1;
+          else if (this.frameCounter < 18) this.frame = 2;
+          else if (this.frameCounter < 24) this.frame = 3;
+          else this.frameCounter = 0;                       // :74907 帧 3 保持
+        } else {
+          if (this.frameCounter < 6) this.frame = 4;
+          else if (this.frameCounter < 12) this.frame = 5;
+          else this.frameCounter = 0;                       // :74917 帧 5 保持
+        }
+        break;
+      // ---- 鸟族（:74326：静止=帧4；飞行 4t/帧 循环 0..count-2）----
+      case 74: case 297: case 298: case 442: {
+        this.spriteDirection = this.direction;
+        if (vx === 0 && vy === 0) { this.frame = 4; this.frameCounter = 0; break; }
+        this.frameCounter += 1;
+        if (this.frameCounter >= 4) { this.frame++; this.frameCounter = 0; }
+        if (this.frame >= count - 1) this.frame = 0;
+        break;
+      }
+      // ---- 鹦鹉族（:74352：静止=帧0；飞行循环回卷到帧 1）----
+      case 671: case 672: case 673: case 674: case 675:
+        this.spriteDirection = this.direction;
+        if (vx === 0 && vy === 0) { this.frame = 0; this.frameCounter = 0; break; }
+        this.frameCounter += 1;
+        if (this.frameCounter >= 4) { this.frameCounter = 0; this.frame++; }
+        if (this.frame >= count) this.frame = 1;
+        break;
+      // ---- 鸮（:74379：spriteDirection=-direction；站姿 40t 眨眼序列 / 飞行 8..count）----
+      case 611: case 689: {
+        this.spriteDirection = -this.direction;
+        if (vx === 0 && vy === 0) {
+          if (this.frame < 0 || this.frame >= 8) this.frame = 0;
+          const fcInt = Math.floor(this.frameCounter);
+          if (fcInt % 40 !== 0 || Math.floor(Math.random() * 80) === 0) this.frameCounter += 1;
+          if ((this.frameCounter + 1) % 40 === 39) this.frameCounter = 40 * Math.floor(Math.random() * 3);
+          const seg = Math.floor(Math.floor(this.frameCounter) % 40 / 10);   // C# (int)fc%40/10
+          const band = Math.floor(this.frameCounter / 40);                    // C# (int)fc/40
+          let f: number;
+          if (band === 0) f = seg === 3 ? 1 : seg;
+          else if (band === 1) f = seg === 0 ? 0 : 2 + seg;
+          else f = seg === 0 ? 0 : 4 + seg;
+          this.frame = f;
+        } else {
+          this.frameCounter += 1;
+          if (this.frameCounter >= 5) { this.frame++; this.frameCounter = 0; }
+          if (this.frame >= count || this.frame < 8) this.frame = 8;
+        }
+        break;
+      }
+      // ---- 鸭族/海鸥（:74445 / :74517：静止=0；行走循环 3..9）----
+      case 362: case 364: case 608: case 602:
+        this.spriteDirection = this.direction;
+        if (vx === 0) { this.frameCounter = 0; this.frame = 0; break; }
+        this.frameCounter += 1;
+        if (this.frameCounter >= 4) { this.frame++; this.frameCounter = 0; }
+        if (this.frame >= 10) this.frame = 3;
+        if (this.frame < 3) this.frame = 3;
+        break;
+      // ---- 鸭族泳姿表 363/365/609（:74470；wet 恒 false → 陆行段：11..count-1）----
+      case 363: case 365: case 609:
+        this.spriteDirection = this.direction;
+        if (this.proto.isAquatic) {
+          this.frameCounter += 1;
+          if (this.frameCounter >= 8) { this.frame++; this.frameCounter = 0; }
+          if (this.frame > 2) this.frame = 1;
+          if (this.frame < 1) this.frame = 1;
+          break;
+        }
+        if (vx === 0 && vy === 0) { this.frame = 1; this.frameCounter = 0; break; }
+        this.frameCounter += 1;
+        if (this.frameCounter >= 4) { this.frame++; this.frameCounter = 0; }
+        if (this.frame >= count) this.frame = 11;
+        if (this.frame < 11) this.frame = 11;
+        break;
+      // ---- 鼠族（:77215 / :77268 同体：站姿 0↔1 / 行走循环回卷帧 2）----
+      case 300: case 447: case 610:
+        if (vy === 0) {
+          if (this.direction === 1) this.spriteDirection = 1;
+          if (this.direction === -1) this.spriteDirection = -1;
+          if (vx === 0) {
+            this.frameCounter += 1;
+            if (this.frameCounter > 8) { this.frame++; this.frameCounter = 0; }
+            if (this.frame > 1) this.frame = 0;
+            break;
+          }
+        }
+        this.frameCounter += Math.abs(vx) * 0.5 + 1;
+        if (this.frameCounter > 6) { this.frame++; this.frameCounter = 0; }
+        if (this.frame >= count) this.frame = 2;
+        break;
+      // ---- 蛙族（:77320：站姿 0..5 循环；跳相 0/6/8/9 六拍）----
+      case 361: case 445: case 687:
+        this.spriteDirection = this.direction;
+        if (this.proto.isAquatic) {
+          this.frameCounter = 0;
+          this.frame = vx > 0.25 || vx < -0.25 ? 10 : vx > 0.15 || vx < -0.15 ? 11 : 12;
+          break;
+        }
+        if (vy === 0) {
+          if (vx === 0) {
+            this.frameCounter += 1;
+            if (this.frameCounter > 6) { this.frameCounter = 0; this.frame++; }
+            if (this.frame > 5) this.frame = 0;
+            break;
+          }
+          this.frameCounter += 1;
+          if (this.frameCounter < 6) this.frame = 0;
+          else if (this.frameCounter < 12) this.frame = 6;
+          else if (this.frameCounter < 18) this.frame = 8;
+          else { this.frame = 9; if (this.frameCounter >= 23) this.frameCounter = 0; }
+        } else if (vy > 0) this.frame = 9;
+        else this.frame = 8;
+        break;
+      // ---- 龟族（:77388：8t/帧 0..7；静止锁 0；腾空锁 8）----
+      case 616: case 617: {
+        const walkStep = 8;
+        this.spriteDirection = this.direction;
+        this.frameCounter += 1;
+        if (this.frameCounter > walkStep) {
+          this.frameCounter = 0;
+          this.frame++;
+          if (this.frame > 7) this.frame = 0;
+        }
+        if (vx === 0) { this.frameCounter = 0; this.frame = 0; }
+        if (vy !== 0) { this.frameCounter = 0; this.frame = 8; }
+        break;
+      }
+      // ---- 海马（:77482：wet 速度分档 0..3；vx 定朝向）----
+      case 626: case 627:
+        if (vx !== 0) this.spriteDirection = vx < 0 ? -1 : 1;
+        if (!this.proto.isAquatic) { this.frame = 0; break; }
+        {
+          const sp = Math.hypot(vx, vy);
+          this.frame = sp > 0.15 ? 3 : sp > 0.05 ? 2 : sp > 0.025 ? 1 : 0;
+        }
+        break;
+      // ---- 蝎族（:77522：静止锁 0；|vx| 累加 6 阈值全循环）----
+      case 366: case 367:
+        if (vy === 0) {
+          if (this.direction === 1) this.spriteDirection = 1;
+          if (this.direction === -1) this.spriteDirection = -1;
+        }
+        if (vx === 0) { this.frame = 0; this.frameCounter = 0; break; }
+        this.frameCounter += Math.abs(vx) + 1;
+        if (this.frameCounter > 6) { this.frame++; this.frameCounter = 0; }
+        if (this.frame >= count) this.frame = 0;
+        break;
+      // ---- 松鼠族（:77160：aiStyle==3 转身锁 0；上升=2 下降=4；行走循环回卷 1）----
+      case 299: case 538: case 539: case 639: case 640: case 641: case 642: case 643: case 644: case 645:
+        if (vy === 0) {
+          if (this.direction === 1) this.spriteDirection = 1;
+          if (this.direction === -1) this.spriteDirection = -1;
+          const aiStyle = vanillaNpc(this.npcType)?.aiStyle ?? 0;
+          if (aiStyle === 3 && ((this.direction < 0 && vx > 0) || (this.direction > 0 && vx < 0))) {
+            this.frame = 0; this.frameCounter = 0; break;
+          }
+          if (vx === 0) { this.frame = 0; this.frameCounter = 0; break; }
+          this.frameCounter += Math.abs(vx) * 0.5 + 1;
+          if (this.frameCounter > 6) { this.frame++; this.frameCounter = 0; }
+          if (this.frame >= count - 1) this.frame = 1;
+        } else if (vy < 0) { this.frameCounter = 0; this.frame = 2; }
+        else { this.frameCounter = 0; this.frame = 4; }
+        break;
+      // ---- 企鹅（:77094：localAI0 恒 0 → 段偏移 0；静止锁 0；|vx| 三段 0/1/2）----
+      case 148: case 149: case 168: case 470:
+        if (vy === 0) {
+          if (this.direction === 1) this.spriteDirection = 1;
+          if (this.direction === -1) this.spriteDirection = -1;
+          if (vx === 0) { this.frame = 0; this.frameCounter = 0; break; }
+          this.frameCounter += Math.abs(vx);
+          if (this.frameCounter < 6) this.frame = 0;
+          else if (this.frameCounter < 12) this.frame = 1;
+          else if (this.frameCounter < 15) this.frame = 2;
+          else { this.frameCounter = 0; this.frame = 2; }
+        } else { this.frameCounter = 0; this.frame = 2; }
+        break;
+      // ---- 蚱蜢（:71627：腾空=1 落地=0 两态）----
+      case 377: case 446:
+        this.frame = vy !== 0 ? 1 : 0;
+        this.spriteDirection = this.direction;
+        break;
+      // ---- 松露虫（:71793：地面 6t 空中 3t 循环 1..3）----
+      case 374:
+        if (vy === 0) {
+          if (vx === 0) { this.frame = 0; this.frameCounter = 0; break; }
+          this.frameCounter += 1;
+          if (this.frameCounter > 6) {
+            this.frameCounter = 0; this.frame++;
+            if (this.frame >= 4) this.frame = 1;
+          }
+        } else {
+          this.frameCounter += 1;
+          if (this.frameCounter > 3) {
+            this.frameCounter = 0; this.frame++;
+            if (this.frame >= 4) this.frame = 1;
+          }
+        }
+        break;
+      // ---- 萤火虫（:73369：4t 亮/3t 暗；localAI2<=0（灯灭）→ 帧 +2）----
+      case 355: case 358: case 654:
+        this.spriteDirection = this.direction;
+        this.frameCounter += 1;
+        if (this.frameCounter < 4) this.frame = 0;
+        else { this.frame = 1; if (this.frameCounter >= 7) this.frameCounter = 0; }
+        if (!this.lightOn) this.frame += 2;
+        break;
+      // ---- 微光之灵（:73391：counter 双 +1，≥6 推进，0..4 循环）----
+      case 677:
+        this.spriteDirection = this.direction;
+        this.frameCounter += 1;
+        this.frameCounter += 1;
+        if (this.frameCounter >= 6) {
+          this.frameCounter = 0;
+          this.frame++;
+          if (this.frame >= 5) this.frame = 0;
+        }
+        break;
+      // ---- 蜻蜓（:73403：count*3 一循环，每 3t 一帧全循环）----
+      case 595: case 596: case 597: case 598: case 599: case 600: case 601: {
+        this.spriteDirection = this.direction;
+        this.frameCounter += 1;
+        if (this.frameCounter >= count * 3) this.frameCounter = 0;
+        this.frame = Math.floor(this.frameCounter / 3);
+        break;
+      }
+      // ---- 蝶族（:73420-73453：0/1/2/1 四相 7t；356 叠物种窗口）----
+      case 356: case 444: case 653: case 661: {
+        this.spriteDirection = this.direction;
+        this.frameCounter += 1 + (Math.abs(vx) + Math.abs(vy)) / 2;
+        if (this.frameCounter < 7) this.frame = 0;
+        else if (this.frameCounter < 14) this.frame = 1;
+        else if (this.frameCounter < 21) this.frame = 2;
+        else {
+          this.frame = 1;
+          if (this.frameCounter >= 27) this.frameCounter = 0;
+        }
+        if (type !== 444 && type !== 653 && type !== 661) this.frame += 3 * (this.variant - 1);
+        break;
+      }
+      // ---- 蠕虫族（:73455：静止=1；行走 0↔1 12t；腾空=1）----
+      case 357: case 448: case 484: case 606:
+        if (vy === 0) {
+          if (vx === 0) { this.frame = 1; this.frameCounter = 0; }
+          else {
+            this.frameCounter += 1;
+            if (this.frameCounter > 12) {
+              this.frameCounter = 0; this.frame++;
+              if (this.frame > 1) this.frame = 0;
+            }
+          }
+        } else this.frame = 1;
+        break;
+      // ---- 附魔夜爬虫（:73511：|vx|×5 累加 10 阈值 0..3 循环；静止/腾空=1）----
+      case 485: case 486: case 487:
+        this.spriteDirection = this.direction;
+        if (vy === 0) {
+          if (vx === 0) { this.frame = 1; this.frameCounter = 0; }
+          else {
+            this.frameCounter += Math.abs(vx * 5);
+            if (this.frameCounter > 10) {
+              this.frameCounter = 0; this.frame++;
+              if (this.frame > 3) this.frame = 0;
+            }
+          }
+        } else this.frame = 1;
+        break;
+      // ---- 蜗牛（:72919：下坠 4/5 两相 6t；移动 0/1/2/3/2/1 六拍 10t；静止保持）----
+      case 359: case 360: case 655:
+        if (vy > 1) {
+          this.frameCounter += 1;
+          if (this.frameCounter < 6) this.frame = 4;
+          else {
+            this.frame = 5;
+            if (this.frameCounter >= 11) this.frameCounter = 0;
+          }
+        } else {
+          if (!moving) break;                                // :72947 velocity==Zero → 保持当前帧
+          this.frameCounter += 1;
+          if (this.frameCounter < 10) this.frame = 0;
+          else if (this.frameCounter < 20) this.frame = 1;
+          else if (this.frameCounter < 30) this.frame = 2;
+          else if (this.frameCounter < 40) this.frame = 3;
+          else if (this.frameCounter < 50) this.frame = 2;
+          else {
+            this.frame = 1;
+            if (this.frameCounter >= 59) this.frameCounter = 0;
+          }
+        }
+        break;
+      // ---- 妖精（:70504：4t/帧 0..3 全循环）----
+      case 583: case 584: case 585:
+        this.frameCounter += 1;
+        if (this.frameCounter >= 4) {
+          this.frame++; this.frameCounter = 0;
+          if (this.frame >= 4) this.frame = 0;
+        }
+        break;
+      // ---- 水黾（:70442：驻留/滑行/疾行三档节拍 2/60，5 帧循环）----
+      case 612: case 613: {
+        let gate = true;
+        if (this.frame === 0 && Math.floor(Math.random() * 180) !== 0) gate = false;
+        if (gate) this.frameCounter += 1;
+        if (vx !== 0) this.spriteDirection = Math.sign(vx);
+        let step = 10;
+        const fast = Math.abs(vx) > 1;
+        if (Math.abs(vy) > 0.1 || fast) { this.frameCounter = 0; this.frame = 4; }
+        else if (this.frame === 0) step = 2;
+        if (this.frame === 4) step = fast ? 60 : 2;
+        if (this.frameCounter >= step) {
+          this.frameCounter = 0; this.frame++;
+          if (this.frame >= 5) this.frame = 0;
+        }
+        break;
+      }
+      // ---- 瓢虫（:67616：2t/帧；腾空段 +4）/ 椿象（:67636 同体）----
+      case 604: case 605: case 669: {
+        this.spriteDirection = this.direction;
+        const sub = 2;
+        if (moving) {
+          this.frameCounter += 1;
+          if (this.frameCounter >= 4 * sub) this.frameCounter = 0;
+        }
+        const seg = Math.floor(this.frameCounter / sub);
+        this.frame = vy === 0 ? seg : 4 + seg;
+        break;
+      }
+      // ---- 河豚（:74942：wet 8t/帧 0..3 循环；ai[2]==1 充气段 n/a）----
+      case 688:
+        this.spriteDirection = this.direction;
+        if (!this.proto.isAquatic) {
+          this.frameCounter += 1;
+          if (this.frameCounter >= 12) { this.frameCounter = 0; this.frame++; }
+          if (this.frame < 4 || this.frame > 5) this.frame = 4;
+        } else {
+          this.frameCounter += 1;
+          if (this.frameCounter >= 8) { this.frameCounter = 0; this.frame++; }
+          if (this.frame > 3) this.frame = 0;
+        }
+        break;
+      default:
+        // 拴绳全集均有专属 case（见 NPC_FAMILY 注）；兜底 6t 全循环（FindFrame 通用档）
+        this.frame = Math.floor(this.animT / 6) % count;
+        break;
     }
-    this.frame = moving ? Math.floor(this.animT / 8) % count : 0;
-    if (this.proto.isAquatic) this.frame = Math.floor(this.animT / 8) % count; // 鱼恒游
+  }
+
+  /** FindFrame 分派用的 type（Waterfowl vy!=0 → type+1，WaterfowlLeashedCritter.cs:16-19） */
+  private get drawFrameNpcType(): number {
+    return this.proto.waterfowlSwimSheet && this.vy !== 0 ? this.npcType + 1 : this.npcType;
   }
 
   /** 帧选择期渲染覆写：Opacity（Recall 渐隐 + Empress 渐隐） */
@@ -1010,14 +1671,16 @@ export class LeashedCritterEntity {
     return 1;
   }
 
-  /** 旋转（FlyerLeashedCritter.CopyToDummy :69-74：vy!=0 → rotation = vx*scalar） */
+  /**
+   * 绘制旋转（Draw 期 CopyToDummy 重算）：LeashedCritter.CopyToDummy :176 先置 0，
+   *  FlyerLeashedCritter.CopyToDummy :69-74 仅 vy!=0 时 rotation = vx*rotationScalar。
+   *  ★FindFrame 各族的 rotation 覆写（蝶族 :73426 vx*0.3 / 鸟族 :74331 vx*0.1 等）
+   *  只落在 _dummy 上且 CopyFromDummy（:183-188）不回拷——Draw 再次 CopyToDummy 即被
+   *  重置丢弃，故拴绳蝶族绘制 rotation 恒 0（勿把 FindFrame 的 rotation 移植进来）
+   */
   get rotation(): number {
     if (this.proto.move === 'flyer' && this.vy !== 0) {
       return this.vx * (this.proto.rotationScalar ?? 0);
-    }
-    if (this.proto.butterflyVariant || this.npcType === 444
-      || this.npcType === 653 || this.npcType === 661) {
-      return this.vx * 0.3; // NPC.cs:73423（蝶族 FindFrame rotation）
     }
     return 0;
   }
@@ -1029,9 +1692,16 @@ export class LeashedCritterEntity {
 
   /**
    * GetDrawOffset（Walker :182-189 / Flyer :153-170 / Jumper :251-258 /
-   * WaterStrider :27-38）——halfBrick 贴地 / 悬停 bobbing / 水面贴合
+   * WaterStrider :27-38）——halfBrick 贴地 / 悬停 bobbing / 水面贴合。
+   *  出口统一叠加 netOffset（Draw :198 `_dummy.position += netOffset + GetDrawOffset()`；
+   *  联机半包平滑位移的消费点——Renderer 无需感知）
    */
   getDrawOffset(env: LeashedEnv): { dx: number; dy: number } {
+    const o = this.getDrawOffsetRaw(env);
+    return { dx: o.dx + this.netOffsetX, dy: o.dy + this.netOffsetY };
+  }
+
+  private getDrawOffsetRaw(env: LeashedEnv): { dx: number; dy: number } {
     const st = this.store;
     const p = this.proto;
     const px = Math.floor(this.cx) >> 4;
@@ -1078,6 +1748,11 @@ export class LeashedCritterEntity {
   /** 单帧推进（= LeashedEntity.Update；引擎分流） */
   update(st: TileStore, env: LeashedEnv): void {
     this.store = st;
+    this.env = env;
+    // 基类段（LeashedCritter.Update :110-112，Walker/Flyer/Jumper.Update 首行
+    // base.Update()）：netOffset 每帧向 0 收敛 2px（联机半包平滑，单机恒 0 no-op）
+    this.netOffsetX = moveTowardsF(this.netOffsetX, 0, 2);
+    this.netOffsetY = moveTowardsF(this.netOffsetY, 0, 2);
     if (this.proto.move === 'walker') this.updateWalker(st, env);
     else if (this.proto.move === 'flyer') this.updateFlyer(st, env);
     else this.updateJumper(st, env);
@@ -1090,33 +1765,71 @@ export const IS_GOLD_CRITTER: ReadonlySet<number> = new Set([
 ]);
 
 // ============================================================================
-// LeashedKiteEntity —— 风筝本体（LeashedKite.cs；KiteLogic/DrawKite 为备案近似，
-//   见文末 GAP ①）
+// LeashedKiteEntity —— 风筝本体（LeashedKite.cs 全文 1:1 + Projectile.KiteLogic
+//   :45809-46036 1:1；绘制走 Renderer.drawLeashedKite = Main.DrawKite :36614-37069）
 // ============================================================================
+
+/** ProjectileID.Sets.TrailCacheLength（ProjectileID.cs:293）——风筝族全表（缺省 10） */
+export const KITE_TRAIL_LENGTH: Readonly<Record<number, number>> = {
+  766: 60, 767: 60, 768: 60, 769: 60, 770: 60, 771: 80,
+  822: 80, 823: 80, 824: 60, 826: 60, 827: 65, 828: 60, 829: 60,
+  830: 80, 838: 80, 839: 60, 840: 60, 843: 60, 844: 65, 845: 80,
+  846: 80, 850: 80, 852: 60, 853: 60,
+};
+
+/** KiteLogic 收放线界 num=4 / num2=500（Projectile.cs:45813-45815；owner=255 收放块
+ *  不走——锚桩风筝无 channel/controlUseItem 输入，登记于类注释） */
 
 export class LeashedKiteEntity {
   readonly ax: number;
   readonly ay: number;
   readonly projType: number;
 
+  /** Size = _dummy.Size（Projectile.DefaultToKite → 4×4，Projectile.cs:10133-10140） */
   w: number;
   h: number;
+  /** Center（LeashedEntity.Center = position + Size/2） */
   cx: number;
   cy: number;
   vx = 0;
   vy = 0;
   rotation = 0;
   spriteDirection = 1;
-  /** kiteDistance（LeashedKite.cs:20——随风衰减 250→48） */
+  /** ai[0]——线长（LeashedKite.cs:20 随无风衰减 250→48；CopyToDummy :255） */
   kiteDistance = 250;
   windTarget = 0;
   windCurrent = 0;
   timeCounter = 0;
+  /** Main.cloudAlpha 快照（Update :104——KiteLogic 读 info 不读 Main） */
+  cloudAlpha = 0;
   timeWithoutWind = 0;
-  /** 拖尾（oldPos/oldRot/oldSpriteDirection，LeashedKite.cs:26-28） */
+  /** localAI[0]——无风下垂累积 0..300（KiteLogic :45871，DrawKite num18 源） */
+  projectileLocalAI0 = 0;
+  /** localAI[1]——下垂/飘飞插值 0..1（KiteLogic :45968，DrawKite num19 源） */
+  projectileLocalAI1 = 0;
+  frame = 0;
+  frameCounter = 0;
+  /** localAI[2]——线长变化音效簿记（KiteLogic :45838-45854；owner!=myPlayer 不播） */
+  private localAI2 = 0;
+  private soundDelay = 0;
+  /** Main.player[255].direction（MoveKite 借空 Player 持朝向，KiteLogic 尾行消费） */
+  dummyDirection = 1;
+  /** 拖尾（oldPos/oldRot/oldSpriteDirection，LeashedKite.cs:26-28；长度 = TrailCacheLength） */
   oldPos: Array<{ x: number; y: number }> = [];
+  oldRot: number[] = [];
+  oldSpriteDirection: number[] = [];
   active = true;
-  animT = 0;
+  /** 联机 netId（同 LeashedCritterEntity——房主广播需要，本地实体也持有） */
+  netId = 0;
+  /** 访客端傀儡标记（同 LeashedCritterEntity）：Update 不覆写风态
+   *  （LeashedKite.cs:144-148 `if (Main.netMode != 1)` 门）、section 再激活不快进 */
+  netPuppet = false;
+  /** NetReceive 半包平滑位移（LeashedKite.cs:47/87-92/162）——绘制消费需 Renderer
+   *  侧 drawLeashedKite 叠加（本仓渲染层暂未接，登记为遗留项，见 GAP 台账⑤） */
+  netOffsetX = 0;
+  netOffsetY = 0;
+  /** 地形查询用 store（manager 注入；InAPlaceWithWind / HandleMovement 需要） */
+  store: TileStore | null = null;
 
   constructor(ax: number, ay: number, projType: number, w: number, h: number) {
     this.ax = ax; this.ay = ay;
@@ -1126,58 +1839,385 @@ export class LeashedKiteEntity {
     this.cy = ay * T + 8;
   }
 
-  /** Spawn（LeashedKite.cs:225-232）：锚点出发上抛 + 快进收敛 */
-  spawn(env: LeashedEnv): void {
+  /** AnchorWorldPosition（LeashedKite.cs:49——AnchorPosition.ToWorldCoordinates()） */
+  get anchorX(): number { return this.ax * T + 8; }
+  get anchorY(): number { return this.ay * T + 8; }
+
+  // ------------------------------------------------------------------
+  // 联机序列化（LeashedKite.cs:58-98 NetSend/NetReceive 字段序 1:1）
+  // ------------------------------------------------------------------
+
+  /**
+   * NetSend（LeashedKite.cs:58-70）。字段序：full 身份头（projType + 本仓扩展的
+   *  w/h——原版 Size 由 SetDefaults(projType) 派生，访客端无 _dummy 重建链须随包带）
+   *  → 恒有段。编码对齐：position = WriteVector2（f32×2，position 为左上 = Center-Size/2）、
+   *  velocity = WritePackedVector2（f16×2）、rotation = u8（256 份之一圈，:66/:81）
+   */
+  toNet(w: NetWriter, full: boolean): void {
+    if (full) {
+      w.u16(this.projType & 0xffff);
+      w.u16(clampU16(this.w));
+      w.u16(clampU16(this.h));
+    }
+    w.f32(this.cx - this.w / 2);
+    w.f32(this.cy - this.h / 2);
+    w.f16(this.vx);
+    w.f16(this.vy);
+    w.u8(Math.trunc((this.rotation * 256) / (Math.PI * 2)) & 0xff);
+    w.f32(this.windTarget);
+    w.f32(this.cloudAlpha);
+    w.f32(this.timeCounter);
+  }
+
+  /** NetReceive（LeashedKite.cs:72-98）：恒有段 + netOffset 簿记（full 清零 / 半包累积） */
+  fromNet(r: NetReader, full: boolean): void {
+    const oldCx = this.cx, oldCy = this.cy;
+    this.cx = r.f32() + this.w / 2;
+    this.cy = r.f32() + this.h / 2;
+    this.vx = r.f16();
+    this.vy = r.f16();
+    this.rotation = (r.u8() * Math.PI * 2) / 256;
+    this.windTarget = r.f32();
+    this.cloudAlpha = r.f32();
+    this.timeCounter = r.f32();
+    if (full) { this.netOffsetX = 0; this.netOffsetY = 0; }
+    else { this.netOffsetX += oldCx - this.cx; this.netOffsetY += oldCy - this.cy; }
+  }
+
+  /** FixFirstTimeAppearance（LeashedKite.cs:100-107）：NetReceive(full) 尾段——
+   *  无风处直接置下垂态（localAI0=300/localAI1=1），防新端风筝凭空悬停 */
+  fixFirstTimeAppearance(env: LeashedEnv): void {
+    if (!this.inWind(env)) {
+      this.projectileLocalAI0 = 300;
+      this.projectileLocalAI1 = 1;
+    }
+  }
+
+  /** Spawn(bool newlyAdded)（LeashedKite.cs:232-239） */
+  spawn(st: TileStore, env: LeashedEnv, newlyAdded = true): void {
+    this.store = st;
+    this.cx = this.anchorX;
+    this.cy = this.anchorY;
     this.vx = 0;
     this.vy = -5;
+    this.update(st, env, !newlyAdded);
     this.windCurrent = this.windTarget = env.windForVisuals;
-    // Update(fastForward) 的目标位直达（:182-187）
-    const t = this.targetPoint(env);
-    this.cx = t.x;
-    this.cy = t.y;
-    this.timeCounter = 6;
+    this.cloudAlpha = env.cloudAlpha;
   }
 
-  /** 风向目标位：anchor + normalize(wind, ±2)*kiteDistance（LeashedKite.cs:182-184） */
-  private targetPoint(env: LeashedEnv): { x: number; y: number } {
-    const wind = this.windCurrent;
-    const len = Math.hypot(wind, 2);
-    const nx = len > 0 ? wind / len : 0;
-    const ny = len > 0 ? (wind > 0 ? -2 : 2) / len : -1;
-    return { x: this.ax * T + 8 + nx * this.kiteDistance, y: this.ay * T + 8 + ny * this.kiteDistance };
-  }
-
-  /** Update（LeashedKite.cs:97-127 + MoveKite 近似） */
-  update(env: LeashedEnv): void {
-    this.animT++;
-    this.windTarget = env.windForVisuals;
-    // windCurrent = Lerp(windCurrent, windTarget, 0.05)（:105）
-    this.windCurrent += (this.windTarget - this.windCurrent) * 0.05;
-    // :112-115：无风计时 → kiteDistance 250→48（Utils.Remap(120,420)）
-    const hasWind = Math.abs(this.windCurrent) >= 0.2;
-    this.timeWithoutWind = hasWind ? 0 : this.timeWithoutWind + 1;
+  /** Update()（LeashedKite.cs:117-120 → :122-163） */
+  update(st: TileStore, env: LeashedEnv, fastForward = false): void {
+    this.store = st;
+    if (this.oldPos.length === 0) this.initTrail();
+    // NearbySectionsMissing（LeashedEntity.cs:526-538）：netMode!=1 恒 false
+    // :135-143：快进或单帧位移 >16px → 整条拖尾吸附当前态（防拉丝）
+    const dx = this.cx - this.oldPos[0].x, dy = this.cy - this.oldPos[0].y;
+    if (fastForward || dx * dx + dy * dy > 256) this.snapTrail();
+    // :144-148 `if (Main.netMode != 1)`——访客端傀儡不覆写：windTarget/cloudAlpha 以
+    // PartialSync 为准（FullSync 恒有段），本地环境风仅权威端采样
+    if (!this.netPuppet) {
+      this.windTarget = env.windForVisuals;
+      this.cloudAlpha = env.cloudAlpha;
+    }
+    // :149-157：windCurrent 先清零；有风处 = Lerp(0, windTarget, 0.05)（快进 = 直取）
+    this.windCurrent = 0;
+    if (this.inWind(env)) {
+      this.windCurrent = fastForward ? this.windTarget : this.windTarget * 0.05;
+    } else {
+      this.windTarget = 0;
+    }
+    // :158-160
+    const windy = Math.abs(this.windCurrent) >= KITE_WIND_GATE;
+    this.timeWithoutWind = !windy ? (fastForward ? 3600 : this.timeWithoutWind + 1) : 0;
     this.kiteDistance = remap(this.timeWithoutWind, 120, 420, 250, 48);
-    this.timeCounter += 1 / 60;
-    // 目标位 + 摆动（KiteFlyingInfo.BobOffset = (anchorX+anchorY*0.92)*0.0025，:171-178）
-    const bob = Math.sin(this.timeCounter + (this.ax + this.ay * 0.92) * 0.0025)
-      + env.cloudAlpha * 5;
-    const t = this.targetPoint(env);
-    const targetY = t.y + bob * 4;
-    // 收敛（KiteLogic 的 velocity lerp + rise 段近似为定点收敛）
-    this.cx += (t.x - this.cx) * 0.03 + this.windCurrent * 0.25;
-    this.cy += (targetY - this.cy) * 0.03;
-    this.vx = this.windCurrent * 0.25;
-    this.vy = (targetY - this.cy) * 0.03;
-    if (Math.abs(this.windCurrent) > 0.05) this.spriteDirection = this.windCurrent > 0 ? 1 : -1;
-    this.rotation = this.windCurrent * 0.5;
-    // 拖尾（LeashedKite.cs:157-163：位移超 16px 才推进整条）
-    this.oldPos.unshift({ x: this.cx, y: this.cy });
-    if (this.oldPos.length > 5) this.oldPos.pop();
+    this.moveKite(st, env, fastForward);
+    // netOffset.MoveTowards(0, 2)（:162）——联机半包平滑位移收敛（单机恒 0 no-op）
+    this.netOffsetX = moveTowardsF(this.netOffsetX, 0, 2);
+    this.netOffsetY = moveTowardsF(this.netOffsetY, 0, 2);
   }
 
-  frameCount(total: number): number {
-    return total > 1 ? Math.floor(this.animT / 6) % total : 0;
+  /** WorldGen.InAPlaceWithWind(position, width, height)（LeashedKite.cs:150） */
+  private inWind(env: LeashedEnv): boolean {
+    const st = this.store;
+    if (!st) return false;
+    return inAPlaceWithWind(st, this.cx - this.w / 2, this.cy - this.h / 2, this.w, this.h, env.worldSurface);
   }
+
+  private initTrail(): void {
+    const n = KITE_TRAIL_LENGTH[this.projType] ?? 10;
+    this.oldPos = Array.from({ length: n }, () => ({ x: this.cx, y: this.cy }));
+    this.oldRot = new Array<number>(n).fill(this.rotation);
+    this.oldSpriteDirection = new Array<number>(n).fill(this.spriteDirection);
+  }
+
+  private snapTrail(): void {
+    for (let i = 0; i < this.oldPos.length; i++) {
+      this.oldPos[i].x = this.cx; this.oldPos[i].y = this.cy;
+      this.oldRot[i] = this.rotation;
+      this.oldSpriteDirection[i] = this.spriteDirection;
+    }
+  }
+
+  /** Utils.Shift(arr, 1) + 记录当前态（LeashedKite.cs:215-220） */
+  private shiftTrail(): void {
+    for (let i = this.oldPos.length - 1; i > 0; i--) {
+      this.oldPos[i].x = this.oldPos[i - 1].x; this.oldPos[i].y = this.oldPos[i - 1].y;
+      this.oldRot[i] = this.oldRot[i - 1];
+      this.oldSpriteDirection[i] = this.oldSpriteDirection[i - 1];
+    }
+    this.oldPos[0].x = this.cx; this.oldPos[0].y = this.cy;
+    this.oldRot[0] = this.rotation;
+    this.oldSpriteDirection[0] = this.spriteDirection;
+  }
+
+  /** MoveKite(fastForward)（LeashedKite.cs:165-230） */
+  private moveKite(st: TileStore, env: LeashedEnv, fastForward: boolean): void {
+    // _dummy.owner = 255；player[255].Center = AnchorWorldPosition（:167-170）
+    if (this.timeWithoutWind === 0) {
+      const dir = this.cx - this.anchorX < 0 ? -1 : 1;      // :173（!(<0) ? 1 : -1）
+      this.spriteDirection = dir;
+      this.dummyDirection = dir;
+    }
+    this.timeCounter += 1 / 60;
+    const bobOffset = (this.anchorX + this.anchorY * 0.92) * 0.0025;   // KiteFlyingInfo :180
+    if (fastForward) {
+      // :187-212：KiteLogic → 顺风力位矢量积分 → 限速 4 → 再 KiteLogic → 无风锁下垂
+      this.kiteLogic(st, env, bobOffset);
+      this.timeCounter = 6;
+      const wY = this.windCurrent > 0 ? -2 : 2;
+      const len = Math.hypot(this.windCurrent, wY);
+      const nx = len > 0 ? this.windCurrent / len : 0;
+      const ny = len > 0 ? wY / len : 0;
+      this.vx = nx * this.kiteDistance;
+      this.vy = ny * this.kiteDistance;
+      this.handleMovement(st);
+      // _dummy.position.MoveTowards(自身, 1)（:194）——恒等 no-op（反编译产物），从略
+      const sp = Math.hypot(this.vx, this.vy);
+      if (sp > 4) { this.vx *= 4 / sp; this.vy *= 4 / sp; }
+      this.kiteLogic(st, env, bobOffset);
+      if (this.windCurrent === 0) {
+        this.rotation = 0;
+        this.projectileLocalAI0 = 300;
+        this.projectileLocalAI1 = 1;
+      }
+      for (let i = this.oldPos.length - 1; i >= 0; i--) {   // :206-211
+        this.oldPos[i].x = this.cx; this.oldPos[i].y = this.cy;
+        this.oldRot[i] = this.rotation;
+        this.oldSpriteDirection[i] = this.spriteDirection;
+      }
+      return;
+    }
+    this.shiftTrail();                                      // :215-220
+    this.kiteLogic(st, env, bobOffset);                     // :221
+    this.handleMovement(st);                                // :222
+    // :223-227：嵌实心 → Bottom.MoveTowards(anchor, 2)（拉绳碰撞回拉）
+    if (solidFullTiles(st, this.cx - this.w * 0.5, this.cy - this.h * 0.5, this.w, this.h)) {
+      const bx = this.cx;
+      const by = this.cy + this.h / 2;                     // _dummy.Bottom
+      const ddx = this.anchorX - bx, ddy = this.anchorY - by;
+      const sq = ddx * ddx + ddy * ddy;
+      if (sq > 0 && 4 < sq) {
+        const d = Math.sqrt(sq);
+        this.cx += (ddx / d) * 2;
+        this.cy += (ddy / d) * 2;
+      } else {
+        this.cx = this.anchorX;
+        this.cy = this.anchorY - this.h / 2;
+      }
+    }
+  }
+
+  /**
+   * Projectile.KiteLogic（Projectile.cs:45809-46036，owner=255 恒定档）：
+   *  - 收放线块（:45816-45837）owner==Main.myPlayer 才走——锚桩风筝无收放输入
+   *    （玩家手持风筝的 channel 收/-5、controlUseItem 放/+5 不适用）
+   *  - 线长 ai[0] = kiteDistance（CopyToDummy :255），张力段 :45910-45945
+   */
+  private kiteLogic(st: TileStore, env: LeashedEnv, bobOffset: number): void {
+    void st;
+    const ai0 = this.kiteDistance;
+    // :45838-45854 localAI[2] 线长簿记 + soundDelay（owner!=myPlayer → 不播音效）
+    if (this.localAI2 === 0) this.localAI2 = ai0;
+    else if (this.localAI2 !== ai0) {
+      this.localAI2 = ai0;
+      if (this.soundDelay === 0) this.soundDelay = 30;
+    }
+    if (this.soundDelay > 0) this.soundDelay--;
+    // :45863-45871
+    const num6 = this.inWind(env) ? this.windCurrent : 0;
+    const windy = Math.abs(num6) >= KITE_WIND_GATE;
+    this.projectileLocalAI0 = clampF(this.projectileLocalAI0 - (windy ? 1 : -1), 0, 300);
+    const num7 = getLerpValue(0.2, 0.5, Math.abs(num6), true) * 0.5;   // 升力
+    // :45873-45885：拍动目标中心（风推 + 正弦摆 + 云湍流）
+    let vecX = num6 * 25;
+    let vecY = (Math.sin(this.timeCounter + bobOffset) + this.cloudAlpha * 5) * 25;
+    if (this.cloudAlpha > 0 && Math.abs(num6) >= this.cloudAlpha / 2 && vecY > 0) {
+      vecY *= 1 - Math.abs(num6) * 2;
+    }
+    const centerX = this.cx + vecX;
+    const centerY = this.cy + vecY;
+    let vxT = centerX - this.cx, vyT = centerY - this.cy;
+    const vl = Math.hypot(vxT, vyT);
+    const push = 3 + this.cloudAlpha * 7;
+    if (vl > 0) { vxT = vxT / vl * push; vyT = vyT / vl * push; }
+    else { vxT = 0; vyT = 0; }
+    if (num7 === 0) { vxT = 0; vyT = 0; }
+    // extraUpdates=0（CopyToDummy :258）→ :45886-45890 不走
+    // :45891-45909：速度趋近拍动矢量 + 升力/微重力
+    const num8 = Math.hypot(centerX - this.cx, centerY - this.cy);
+    const lerpValue = getLerpValue(5, 10, num8, true);
+    const yKeep = this.vy;
+    if (num8 > 10) {
+      const t = 0.075 * lerpValue;
+      this.vx += (vxT - this.vx) * t;
+      this.vy += (vyT - this.vy) * t;
+    }
+    this.vy = yKeep;
+    this.vy -= num7;
+    this.vy += 0.02 + num7 * 0.25;
+    this.vy = clampF(this.vy, -2, 2);
+    if (this.cy + this.vy < centerY) {                     // :45902-45905
+      this.vy += (this.vy + num7 + 0.01 - this.vy) * 0.75;
+    }
+    if (Math.abs(this.vx) > 0.02) this.vx *= 0.98;
+    // :45910-45945：线张力（超出线长 → 朝锚点回拽 + 俯仰修正）
+    const num9 = Math.hypot(this.anchorX - this.cx, this.anchorY - this.cy);
+    const num10 = ai0;
+    const flag2 = num9 > num10;
+    const flag3 = num9 > num10 - 2;
+    if (flag2) {
+      let ddx = this.anchorX - this.cx, ddy = this.anchorY - this.cy;
+      const dl = Math.hypot(ddx, ddy) || 1;
+      ddx /= dl; ddy /= dl;
+      const num11 = num9 - num10;
+      this.vx += ddx * num11;                               // CanReelThroughBlocks=false → 加速度档
+      this.vy += ddy * num11;
+      let flag4 = ddy < 0.8 || num7 > 0;                    // Dot(dir, UnitY) = dir.Y
+      if (num7 === 0 && Math.abs(this.vx) < 0.05) flag4 = false;
+      this.vy += ddy * 0.05;
+      if (flag4) this.vy -= 0.15;
+      this.vx += ddx * 0.2;
+      // :45938-45944 收到最短(4)即 Kill——仅 owner==myPlayer，锚桩风筝不触发
+    }
+    // timeLeft = 2（:45946）——无消亡语义，从略
+    // :45947-45952：横向占比过半 → 借位 Player 转向
+    const v4x = this.cx - this.anchorX, v4y = this.cy - this.anchorY;
+    const dir = v4x > 0 ? 1 : -1;
+    if (Math.abs(v4x) > Math.abs(v4y) / 2) this.dummyDirection = dir;
+    // :45953-45967：朝向（下垂衰减 vs 锚点反方向 + π/4 偏置）
+    let d5x = this.anchorX - this.cx, d5y = this.anchorY - this.cy;
+    const d5l = Math.hypot(d5x, d5y);
+    if (d5l > 0) { d5x /= d5l; d5y /= d5l; } else { d5x = 0; d5y = 0; }
+    const flag5 = num7 === 0 && this.vy >= 0.02 && !flag3; // 下垂态
+    if (flag5) {
+      this.rotation *= 0.95;
+    } else {
+      let num12 = Math.atan2(-d5y, -d5x) + Math.PI / 4;    // (-vector5).ToRotation()
+      if (this.spriteDirection === -1) num12 -= Math.PI / 2 * this.dummyDirection;
+      this.rotation = num12 + this.vx * 0.05;
+    }
+    this.projectileLocalAI1 = clampF(this.projectileLocalAI1 + (flag5 ? 1 : -1) * 0.005, 0, 1);
+    // :45969-46034 帧表 + :46035 spriteDirection = player.direction
+    this.selectFrame(num7);
+    this.spriteDirection = this.dummyDirection;
+  }
+
+  /** KiteLogic 帧选择（Projectile.cs:45969-46034） */
+  private selectFrame(num7: number): void {
+    const speed = Math.hypot(this.vx, this.vy);
+    switch (this.projType) {
+      case 771: case 822: case 823: case 827: case 830: case 838:
+      case 843: case 844: case 845: case 846: case 850: case 852:
+        this.frame = 0;
+        break;
+      case 828: case 829:
+        this.frame = speed < 6 ? 1 : 0;
+        break;
+      case 826:
+        this.frame = 0;      // frame = (int)ai[1]——CopyToDummy 不写 ai[1] 恒 0
+        break;
+      case 824: case 839: case 840: case 853:
+        if (num7 < 0.15) { this.frame = 0; break; }
+        this.frameCounter++;
+        if (this.frameCounter > (1 - num7) * 10) {
+          this.frameCounter = 0;
+          this.frame = Math.floor(Math.random() * 4);      // Main.rand.Next(4)
+        }
+        break;
+      default:               // 766-770 五色风筝：速度四档
+        this.frame = speed < 3 ? 0 : speed < 5 ? 1 : speed < 7 ? 2 : 3;
+        break;
+    }
+  }
+
+  /**
+   * Projectile.HandleMovement 子集（:16132-16520，aiStyle 160 / wet=false / 4×4 盒）：
+   *  GetCollisionParams（:18459-18480）resizeAnchor=(0.5,0.5) colW/H=width/height →
+   *  盒心=Center；|velocity| ≤ min(w,h)（=4）走 :16488-16513 直移档：
+   *  TileCollision（分量阻挡清零，fallThrough=true 平台不阻）+ SlopeCollision（位移积分）。
+   *  坡面贴合段从略（本仓生成期坡面罕见，登记备案）
+   */
+  private handleMovement(st: TileStore): void {
+    let nvx = this.vx;
+    let nvy = this.vy;
+    const px = this.cx - this.w / 2, py = this.cy - this.h / 2;
+    if (nvx !== 0 && boxHitsSolid(st, px + nvx, py, this.w, this.h)) nvx = 0;
+    if (nvy !== 0 && boxHitsSolid(st, px + nvx, py + nvy, this.w, this.h)) nvy = 0;
+    this.vx = nvx;
+    this.vy = nvy;
+    this.cx += this.vx;
+    this.cy += this.vy;
+  }
+}
+
+/** MinimumWindStrengthToFlyKite（Projectile.cs:302） */
+const KITE_WIND_GATE = 0.2;
+
+/** Collision.TileCollision 阻挡格（nactive && tileSolid && !tileSolidTop；平台不阻） */
+function boxHitsSolid(st: TileStore, px: number, py: number, w: number, h: number): boolean {
+  const x0 = Math.floor(px / T), y0 = Math.floor(py / T);
+  const x1 = Math.floor((px + w - 0.0001) / T), y1 = Math.floor((py + h - 0.0001) / T);
+  for (let i = x0; i <= x1; i++) {
+    for (let j = y0; j <= y1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const k = st.idx(i, j);
+      if (st.type[k] === 0) continue;
+      if (st.wire[k] & 32) continue;                       // !nactive
+      const d = TILE_DEFS[st.type[k]];
+      if (d && d.solid && !d.platform) return true;
+    }
+  }
+  return false;
+}
+
+/** Collision.SolidFullTiles（Collision.cs:3553-3574）：整实心格（无坡/半砖/平台） */
+function solidFullTiles(st: TileStore, px: number, py: number, w: number, h: number): boolean {
+  const x0 = Math.max(0, Math.floor(px / T));
+  const y0 = Math.max(0, Math.floor(py / T));
+  const x1 = Math.min(st.w - 1, Math.ceil((px + w) / T) - 1);
+  const y1 = Math.min(st.h - 1, Math.ceil((py + h) / T) - 1);
+  for (let i = x0; i <= x1; i++) {
+    for (let j = y0; j <= y1; j++) {
+      const k = st.idx(i, j);
+      if (st.type[k] === 0) continue;
+      if (st.wire[k] & 32) continue;                       // !nactive
+      if (st.half[k]) continue;                            // blockType != 0
+      if (st.slope[k] !== 0) continue;                     // blockType != 0
+      const d = TILE_DEFS[st.type[k]];
+      if (d && d.solid && !d.platform) return true;
+    }
+  }
+  return false;
+}
+
+/** Utils.GetLerpValue(a, b, v, clamped)（Utils.cs:283-310；本仓两处调用均为 a<b） */
+function getLerpValue(a: number, b: number, v: number, clamped: boolean): number {
+  if (clamped && b > a) return clampF((v - a) / (b - a), 0, 1);
+  return (v - a) / (b - a);
+}
+
+function clampF(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 
 // ============================================================================
@@ -1200,12 +2240,22 @@ export class LeashedEntityManager {
   store: TileStore | null = null;
   /** 主随机（Spawn 的 rand = new LCG32Random(Main.rand.Next())，LeashedCritter.cs:107） */
   private mainRand = new LCG32Random((Math.random() * 0xffffffff) >>> 0);
-  /** 距离门：玩家 3000px（≈ vanilla section 200×150 格流式外的近似）外的实体不更新 */
-  streamRadius = 3000;
+  /** 联机 netId 序（房主权威分配；原版 whoAmI = ByWhoAmI 空槽复用（:343-355），本仓
+   *  取单调递增——Remove 后 id 不复用，访客端迟到 PartialSync 不会误中重生实体） */
+  private netSeq = 0;
+  /** section 尺寸（LeashedEntity.cs:310：maxTilesX/200 × maxTilesY/150 栅格） */
+  static readonly SECTION_W = 200;
+  static readonly SECTION_H = 150;
+  /** CheckSection 的 fluff（Player.cs:27996 恒 1 → 玩家 section 周围 3×3 激活） */
+  private static readonly SECTION_FLUFF = 1;
+  /** 实体所在 section 是否在上一帧激活集内（再激活时触发 Spawn(false) 快进，见 update） */
+  private activeSections = new Set<number>();
+  private activeKey(sx: number, sy: number): number { return sx * 4096 + sy; }
 
   /** 换图/读档时注入 world store（spawn 期的 Flyer 悬空门 / Jumper 首选点要用） */
   attach(world: { store: TileStore }): void {
     this.store = world.store;
+    this.activeSections.clear();
   }
 
   /** TECritterAnchor.CreateLeashedEntity（:53-62）：itemType → makeNPC → 原型实例 */
@@ -1215,6 +2265,7 @@ export class LeashedEntityManager {
     const proto = prototypeOfNpc(npcType);
     const e = new LeashedCritterEntity(ax, ay, npcType, proto,
       opts?.seed ?? this.mainRand.next(0xffffffff));
+    e.netId = ++this.netSeq;
     e.whoAmI = this.critters.length;
     e.store = this.store;
     e.setDefaults(opts?.placeStyle ?? placeStyleOfVid(itemVid));
@@ -1225,9 +2276,11 @@ export class LeashedEntityManager {
   }
 
   /** TEKiteAnchor.CreateLeashedEntity（:54-62）：itemType → shoot → LeashedKite */
-  spawnKite(ax: number, ay: number, projType: number, env: LeashedEnv, projSize = 14): LeashedKiteEntity {
+  spawnKite(ax: number, ay: number, projType: number, env: LeashedEnv, projSize = 4): LeashedKiteEntity {
+    const st = this.store;
     const e = new LeashedKiteEntity(ax, ay, projType, projSize, projSize);
-    e.spawn(env);
+    e.netId = ++this.netSeq;
+    if (st) e.spawn(st, env, true);                         // AddNewEntity → Spawn(true)
     this.kites.push(e);
     return e;
   }
@@ -1266,32 +2319,71 @@ export class LeashedEntityManager {
   }
 
   /**
-   * LeashedEntity.UpdateEntities（Main.cs:17895）：逐实体 Update + 点光收集。
-   * 距离门 ≈ section 流式（vanilla 按玩家 section 激活；本仓以玩家中心半径近似）。
+   * LeashedEntity.UpdateEntities（Main.cs:17895 = RecheckActiveSections :417-434 +
+   * _UpdateEntities :436-459）——section 流式 1:1：
+   *  - 玩家每 tick ActiveSections.CheckSection(position, fluff=1)（Player.cs:27996）→
+   *    恒定激活玩家 section 周围 3×3；60t 不刷新的 section 失活（ActiveSections.cs:8-33）。
+   *    稳态下即「实体 section 落在玩家 3×3 内 ⇔ 更新」（半径下限 200 格 = 3200px，
+   *    中心对齐时 400 格；此前 3000px 距离门偏紧，已换真判定）。
+   *  - section 由失活转激活 → SectionEntityList.Activate → Spawn(newlyAdded: false)
+   *    （:213-225，风筝走 fastForward 快进升空）；持续激活则正常 Update。
+   *  - SectionCoordinates 以 **AnchorPosition** 取（LeashedEntity.cs:281），非实时位置。
+   *  - 入参 playerCx/Cy 为玩家中心（Game 注入）；原版取 position 左上——同一 200 格
+   *    section 栅格内偏差 <1 格，等价。
    */
   update(world: { store: TileStore }, env: LeashedEnv, playerCx: number, playerCy: number): void {
     this.lights.length = 0;
     const st = world.store;
+    // ---- CheckSection：3×3 激活集（Netplay.GetSectionX/Y = tile/200、tile/150）----
+    const psx = Math.floor(playerCx / T / LeashedEntityManager.SECTION_W);
+    const psy = Math.floor(playerCy / T / LeashedEntityManager.SECTION_H);
+    const next = new Set<number>();
+    const f = LeashedEntityManager.SECTION_FLUFF;
+    for (let i = psx - f; i <= psx + f; i++) {
+      for (let j = psy - f; j <= psy + f; j++) next.add(this.activeKey(i, j));
+    }
+    // ---- RecheckActiveSections + _UpdateEntities ----
     for (const e of this.critters) {
-      if (Math.abs(e.cx - playerCx) > this.streamRadius || Math.abs(e.cy - playerCy) > this.streamRadius) {
-        continue;
-      }
+      const key = this.activeKey(
+        Math.floor(e.ax / LeashedEntityManager.SECTION_W),
+        Math.floor(e.ay / LeashedEntityManager.SECTION_H));
+      if (!next.has(key)) continue;                         // section 未激活：不更新不绘制
+      // Activate → Spawn(false)（:213-225）——原版仅 server/单机调（:216 netMode!=1 门）；
+      // 访客端傀儡跳过：状态以 PartialSync 为准，归位锚桩会丢权威位置
+      if (!this.activeSections.has(key) && !e.netPuppet) e.spawn();
       e.update(st, env);
       e.visualEffects(env, this.lights);
     }
     for (const e of this.kites) {
-      if (Math.abs(e.cx - playerCx) > this.streamRadius || Math.abs(e.cy - playerCy) > this.streamRadius) {
-        continue;
+      const key = this.activeKey(
+        Math.floor(e.ax / LeashedEntityManager.SECTION_W),
+        Math.floor(e.ay / LeashedEntityManager.SECTION_H));
+      if (!next.has(key)) continue;
+      if (!this.activeSections.has(key) && !e.netPuppet) {
+        // SectionEntityList.Activate → Spawn(false) → Update(fastForward)（风筝回锚快进）
+        e.spawn(st, env, false);
       }
-      e.update(env);
+      e.update(st, env, false);
     }
+    this.activeSections = next;
     for (const l of this.lights) env.addLight(l.tx, l.ty, l.r, l.g, l.b);
+  }
+
+  /**
+   * DrawEntities 的激活集查询（LeashedEntity.cs:479 只遍历 ActiveSectionList）：
+   *  renderer 消费——锚桩 section 非激活的实体不绘制（冻结在 section 外）
+   */
+  isSectionActive(ax: number, ay: number): boolean {
+    return this.activeSections.has(this.activeKey(
+      Math.floor(ax / LeashedEntityManager.SECTION_W),
+      Math.floor(ay / LeashedEntityManager.SECTION_H)));
   }
 
   clear(): void {
     this.critters.length = 0;
     this.kites.length = 0;
     this.lights.length = 0;
+    this.activeSections.clear();
   }
 
   private compact(): void {
@@ -1305,6 +2397,95 @@ export class LeashedEntityManager {
       critter: this.critters.find((e) => e.ax === x && e.ay === y) ?? null,
       kite: this.kites.find((e) => e.ax === x && e.ay === y) ?? null,
     };
+  }
+
+  // ==================================================================
+  // 联机（msg82 module13；原版 LeashedEntity.NetModule 三消息的 manager 落点）
+  // ==================================================================
+
+  /** 锚点 (x,y) 上的实体 netId 集（破坏路径在 removeAt 前捕获，供 Remove 广播） */
+  netIdsAt(x: number, y: number): number[] {
+    const ids: number[] = [];
+    for (const e of this.critters) if (e.ax === x && e.ay === y && e.active) ids.push(e.netId);
+    for (const e of this.kites) if (e.ax === x && e.ay === y && e.active) ids.push(e.netId);
+    return ids;
+  }
+
+  /**
+   * HandleFullSync（LeashedEntity.cs:79-96）：
+   *  - 身份头（critter: npcType/w/h；kite: projType/w/h）→ 未知 netId 建实体
+   *    （= Registry.Get(type).NewInstance + AddNewEntity :86-90）
+   *  - 已知 netId → NetReceive(full) 状态刷新；npcType/锚点不符 → 整体替换
+   *    （原版 :91-94 throw——本仓自愈替换，重连/服务器补发窗口内陈旧条目不炸连接）
+   *  - 同锚点异源实体先清场（防双实体——访客乐观放置与权威包竞争的兜底）
+   *  - 尾段 1:1：critter 跑一帧 Update()（:99）；kite 跑 Update() + FixFirstTimeAppearance（:95-96）
+   */
+  netApplyFull(msg: LeashedNetMsg, env: LeashedEnv): void {
+    const r = msg.r;
+    if (msg.kind === LEASHED_KIND_CRITTER) {
+      const npcType = r.u16();
+      const w = r.u16(), h = r.u16();
+      let e = this.critters.find((c) => c.netId === msg.netId);
+      if (e && (e.npcType !== npcType || e.ax !== msg.ax || e.ay !== msg.ay)) {
+        this.critters = this.critters.filter((c) => c !== e);
+        e = undefined;
+      }
+      if (!e) {
+        // 同锚点异源实体清场（FullSync 是唯一权威源）
+        this.critters = this.critters.filter((c) => !(c.ax === msg.ax && c.ay === msg.ay));
+        const proto = prototypeOfNpc(npcType);
+        e = new LeashedCritterEntity(msg.ax, msg.ay, npcType, proto, 0);
+        if (w > 0) e.w = w;
+        if (h > 0) e.h = h;
+        e.netId = msg.netId;
+        e.netPuppet = true;
+        e.whoAmI = this.critters.length;
+        e.store = this.store;
+        this.critters.push(e);
+      }
+      e.fromNet(r, true);
+      if (this.store) e.update(this.store, env);            // NetReceive(full) 尾段 Update()
+      return;
+    }
+    if (msg.kind === LEASHED_KIND_KITE) {
+      const projType = r.u16();
+      const w = r.u16(), h = r.u16();
+      let e = this.kites.find((k) => k.netId === msg.netId);
+      if (e && (e.projType !== projType || e.ax !== msg.ax || e.ay !== msg.ay)) {
+        this.kites = this.kites.filter((k) => k !== e);
+        e = undefined;
+      }
+      if (!e) {
+        this.kites = this.kites.filter((k) => !(k.ax === msg.ax && k.ay === msg.ay));
+        e = new LeashedKiteEntity(msg.ax, msg.ay, projType, w || 4, h || w || 4);
+        e.netId = msg.netId;
+        e.netPuppet = true;
+        e.store = this.store;
+        this.kites.push(e);
+      }
+      e.fromNet(r, true);
+      if (this.store) {
+        e.update(this.store, env);                          // :95 Update()
+        e.fixFirstTimeAppearance(env);                      // :96
+      }
+      return;
+    }
+  }
+
+  /** HandlePartialSync（:98-106）：未知 netId 丢弃（等服务器按条带补发的 FullSync 兜底） */
+  netApplyPartial(msg: LeashedNetMsg): void {
+    const list = msg.kind === LEASHED_KIND_KITE ? this.kites : this.critters;
+    const e = list.find((c) => c.netId === msg.netId);
+    if (!e) return;
+    e.fromNet(msg.r, false);
+  }
+
+  /** HandleRemove（:71-77）+ LeashedEntity.Remove（:385-398 列表收缩） */
+  netRemove(netId: number): void {
+    if (netId <= 0) return;
+    this.critters = this.critters.filter((e) => (e.netId === netId ? (e.active = false, false) : true));
+    this.kites = this.kites.filter((e) => (e.netId === netId ? (e.active = false, false) : true));
+    this.critters.forEach((e, i) => { e.whoAmI = i; });
   }
 }
 
@@ -1325,6 +2506,17 @@ function moveTowards(e: LeashedCritterEntity, tx: number, ty: number, maxDelta: 
   e.cx += (dx / dist) * maxDelta;
   e.cy += (dy / dist) * maxDelta;
 }
+
+/** 标量 MoveTowards（netOffset 每帧收敛用，Utils.cs:1830-1849 的单轴等价） */
+function moveTowardsF(v: number, target: number, maxDelta: number): number {
+  const d = target - v;
+  if (Math.abs(d) <= maxDelta) return target;
+  return v + Math.sign(d) * maxDelta;
+}
+
+/** 联机序列化钳位（net 写出防脏值） */
+function clampU16(v: number): number { return Math.max(0, Math.min(65535, Math.round(v))); }
+function clampSByte(v: number): number { return Math.max(-127, Math.min(127, Math.round(v))); }
 
 /** Utils.Remap（Utils.cs:815-821）：[iMin,iMax] → [oMin,oMax] 线性 */
 function remap(x: number, iMin: number, iMax: number, oMin: number, oMax: number): number {
@@ -1351,20 +2543,48 @@ function hue2rgb(p: number, q: number, tIn: number): number {
 }
 
 // ============================================================================
-// GAP 登记（未 1:1 项，后续立项）
-//   ① LeashedKite 的 KiteLogic（Projectile.cs:45809-45960）与 DrawKite
-//     （Main.cs:36614-36830，逐风筝型 Extra_103/104/132/147… 绳索参数表 24 组）
-//     为近似：定点收敛 + 简单摆动 + 直线绳；未移植 Player 收放线（channel ±5/t）、
-//     拉绳碰撞回拉（SolidFullTiles → Bottom.MoveTowards）、逐型绳索贴图、
-//     oldPos/oldRot 拖尾绘制（TrailCacheLength）。
-//   ② LeashedCritter.Draw 的 DrawBubble（LeashedCritter.cs:213-223，Gore 413
-//     气泡）未实装（水生出水面/陆生入水提示）。
-//   ③ NPC.FindFrame 逐型状态机未全量（本仓通用 8t 循环 + 蝶族 4 相；原版 50+ 型
-//     各自的 frameCounter 推进表）。
-//   ④ VisualEffects 的 Dust（妖精 278 / 帝皇蝶 267 / 地狱蝶 6 / 金系 43）以
-//     spawnDust 近似或从略；ShimmerFlyLeashedCritter 的 oldPos 拖尾（:44-63）
-//     未实装；netOffset（联机插值平滑）无对等物（单机恒 0）。
-//   ⑤ section 流式（LeashedEntity.BySection 200×150 格激活/休眠）以玩家中心
-//     3000px 距离门近似；联机 NetModule（FullSync/PartialSync/Remove）未接。
-//   ⑥ solidTile2 的平台 topSlope 特例（WorldGen.cs:70503）从略（见函数注）。
+// GAP 处置台账（2026-08-13 尾项清零批）
+//   ① KiteLogic/DrawKite —— 已对齐：KiteLogic（Projectile.cs:45809-46036）全量
+//     入 LeashedKiteEntity.kiteLogic；DrawKite（Main.cs:36614-37069）全量入
+//     Renderer.drawLeashedKite（24 型绳索参数表 KITE_ROPE_PARAMS + FishingLine
+//     锚绳分段 + Extra 尾条 + oldPos 拖尾）。收放线（:45816-45837 channel −5 /
+//     controlUseItem +5）经源码证实 owner==Main.myPlayer 才走——LeashedKite 恒
+//     owner=255（MoveKite :168）→ 锚桩风筝原版即无收放输入，等价（不移植）。
+//     残留：HandleMovement 的 SlopeCollision 坡面贴合段从略（生成期坡面罕见）；
+//     风筝无碰撞音效（kiteSoundPitch 计算无消费端，:45845-45854 owner!=myPlayer
+//     不播）。
+//   ② DrawBubble —— 已对齐：Renderer.drawLeashedBubble（Gore_413 +
+//     (isAquatic&&liquid<255)||(!isAquatic&&liquid>0) 判定，LeashedCritter.cs:200-205）。
+//   ③ FindFrame —— 已对齐：拴绳全集 31 组 case（兔/金鱼/鸟/鹦鹉/鸮/鸭+泳姿/
+//     海鸥/鼠/蛙/龟/海马/蝎/松鼠/企鹅/蚱蜢/松露虫/萤火虫/微光之灵/蜻蜓/蝶/蠕虫/
+//     夜爬虫/蜗牛/妖精/水黾/瓢虫+椿象/河豚）逐条件入 findFrame；spriteDirection
+//     覆写持久、rotation 覆写证实被 Draw 期 CopyToDummy 重置（:176）→ 绘制只取
+//     rotationScalar 档（蝶族 vx*0.3 已据此移除）。
+//   ④ ShimmerFly 拖尾 + Dust —— 已对齐：oldPositions（TrailCacheLength[677]=60）
+//     每帧右移入 shiftShimmerTrail，绘制走 DrawNPCDirect_Faeling（Main.cs:26306-
+//     26362）四列表 17 段环绕渐隐；尘改走原版 Dust 池（金系 43 带照度门 / Recall
+//     15×10 / 地狱蝶 6 / 帝皇蝶 267+CloneDust / 妖精 278）。netOffset 经源码证实
+//     仅 NetReceive 半包路径注入（LeashedCritter.cs:90-96 / LeashedKite.cs:90-92）
+//     且每帧 MoveTowards(0,2) 收敛——单机恒 0，等价（ShimmerFly 拖尾处已注）。
+//     残留：VanillaDust 引擎对 43/15/267/278 的逐型 Update 分支（Dust.cs:1472/
+//     :1519/:1660/:2240）未精植，走通用老化档（引擎按消费方扩表的既定模式，
+//     见 fx/VanillaDust.ts 头注）。
+//   ⑤ section 流式 + NetModule —— 已对齐：流式（ActiveSections.CheckSection(fluff=1)
+//     3×3 激活，Player.cs:27996 + ActiveSections.cs:14-33）入 manager.update；失活→
+//     再激活走 Spawn(false)（风筝 fastForward 快进；**访客端傀儡跳过**——原版
+//     client 端 Activate 不调 Spawn（LeashedEntity.cs:216 netMode!=1 门），状态以
+//     PartialSync 为准）。联机同步已落地（msg82 module13 = 原版注册序
+//     NetworkInitializer.cs:25）：FullSync（放置/重生广播 + 服务器按条带补发 =
+//     SyncEntitiesInSection :469-472 等价）/ PartialSync（每 1024t 逐实体，相位 =
+//     出生时刻，原版 whoAmI 错相同效）/ Remove（破坏广播）+ 本仓新增 sub3
+//     PlaceRequest（访客放置请求→房主三重校验落账）。先前的两大阻塞均已绕开：
+//     ①「furnitureItems 不上网→访客拿不到 makeNPC/shoot」→ FullSync 实体段自带
+//     npcType/projType+变体+种子（访客重建不依赖 TE 记录同步）；②「无 section
+//     激活协议→定向广播无数据源」→ 服务器登记 FullSync 帧、sendStrips 尾段按条带
+//     补发（见 server/src/room.ts handleLeashedModule）。遗留：风筝 netOffset 的
+//     渲染消费（drawLeashedKite 需叠画，Renderer 侧一行改动，未在本批所有权内）；
+//     Fairy/HellButterfly 尘位置的 netOffset 包裹（LeashedCritter.cs:142/:162，
+//     纯粒子位置差异）。
+//   ⑥ solidTile2 平台特例 —— 已对齐：WorldGen.cs:70503 全条件入（平台+上半坡
+//     算实心；平台平放走 slope==0 也算；下半坡 3/4 不算）。
 // ============================================================================

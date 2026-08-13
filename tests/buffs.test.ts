@@ -5,7 +5,11 @@
 // 4) Ironskin(5)：防御 +8（1456 数值）
 // 5) 到期自动移除
 import { describe, it, expect } from 'vitest';
-import { BuffState, BuffType } from '../src/stats/Buffs';
+import { BuffState, BuffType, BUFF_DEFS, buffTypeByVanilla, wetFromBubbleContact } from '../src/stats/Buffs';
+import { World } from '../src/world/World';
+import { Player } from '../src/entities/Player';
+import { Enemy } from '../src/entities/Enemy';
+import { Inventory } from '../src/items/Inventory';
 
 describe('Buff 框架（AddBuff 语义）', () => {
   it('apply 取 max：续期不缩短、短时长不覆盖长时长', () => {
@@ -112,5 +116,96 @@ describe('环境 DoT 分块（HurtLifeRegen Player.cs:19136-19212）', () => {
     for (let k = 0; k < 14; k++) { b.tick(1 / 60); expect(b.consumeDotChunk()).toBe(0); }
     b.tick(1 / 60);
     expect(b.consumeDotChunk()).toBe(1);
+  });
+});
+
+// ============================================================================
+// Wet 潮湿 buff 103（BuffID.cs:343；UpdateBuffs Player.cs:11335-11346；
+// 授予链 = 爆裂泡泡 371 接触 StatusFromNPC :22239-22242）
+// ============================================================================
+
+describe('Wet 潮湿（103）', () => {
+  it('注册：vanillaBuff 103 / 原版描述键 / Main.debuff 表（护士可清）', () => {
+    expect(BUFF_DEFS[BuffType.Wet]).toEqual({
+      vanillaBuff: 103, descKey: 'BuffDescription.Wet', fallbackName: '潮湿',
+    });
+    expect(BuffType.Wet).toBe(102);
+    // Main.debuff[103]=true（Main.cs:8833）——护士计价清除名单内
+    expect(BuffState.DEBUFFS.has(BuffType.Wet)).toBe(true);
+    // buffTypeByVanilla 反查（StatusFromNPC 链接的授予入口）
+    expect(buffTypeByVanilla(103)).toBe(BuffType.Wet);
+  });
+
+  it('纯视觉登记：无 DoT/无属性聚合，到期自然移除', () => {
+    const b = new BuffState();
+    b.apply(BuffType.Wet, 5);
+    let delta = 0;
+    for (let k = 0; k < 330; k++) delta += b.tick(1 / 60);   // 5.5 秒（浮点边界放宽）
+    expect(delta).toBe(0);                                    // 无生命变化
+    expect(b.moveSpeedMult).toBe(1);                          // 无移速影响
+    expect(b.defenseBonus).toBe(0);                           // 无防御影响
+    expect(b.has(BuffType.Wet)).toBe(false);                  // 到期移除
+  });
+
+  it('火系免疫（Player.cs:11344-11346 buffImmune[24]/[323]/[67]）：Wet 激活期间授予', () => {
+    const w = new World(80, 120, 72, 'wet-buff');
+    for (let x = 20; x <= 60; x++) w.store.setTileSilent(x, 80, 1);
+    const p = new Player(30 * 16, 77 * 16, new Inventory());
+    expect(p.buffs.immuneVanilla.has(24)).toBe(false);
+    p.buffs.apply(BuffType.Wet, 5);
+    void p.equipStats;   // buffImmune 刷新（Player.cs:14911+ 装备段）
+    expect(p.buffs.immuneVanilla.has(24)).toBe(true);    // OnFire 24
+    expect(p.buffs.immuneVanilla.has(323)).toBe(true);   // OnFire3 323
+    expect(p.buffs.immuneVanilla.has(67)).toBe(true);    // Burning 67
+    // 到期回落
+    p.buffs.remove(BuffType.Wet);
+    void p.equipStats;
+    expect(p.buffs.immuneVanilla.has(67)).toBe(false);
+  });
+
+  it('不入存档（Main.cs buffNoSave[103]）', () => {
+    const b = new BuffState();
+    b.apply(BuffType.Wet, 10);
+    expect(b.toSave()).toEqual([]);
+  });
+
+  it('接触授予链（StatusFromNPC :22239-22242）：371 有接触伤害值 + 时长 = 60×Next(3,8)', () => {
+    // ① 371 走通用接触伤害链的前提：def.damage > 0（vanilla-npcs.json 371 = 100）
+    const bub = Enemy.fromVanilla(371, 100 * 16, 100 * 16);
+    expect(bub).not.toBeNull();
+    expect(bub!.def.damage).toBeGreaterThan(0);
+    expect(bub!.vanillaId).toBe(371);
+    // ② 时长公式：60×Next(3,8) = 180-420t → 3-7 秒（Next 上界不含；★非 3-8s）
+    const seen = new Set<number>();
+    for (let k = 0; k < 500; k++) {
+      const sec = wetFromBubbleContact(() => k / 500);
+      expect(sec).toBeGreaterThanOrEqual(3);
+      expect(sec).toBeLessThanOrEqual(7);
+      seen.add(sec);
+    }
+    expect([...seen].sort()).toEqual([3, 4, 5, 6, 7]);
+  });
+
+  it('浸岩浆即刻移除（UpdateBuffs :11335-11338 lavaWet → DelBuff）', () => {
+    const w = new World(80, 120, 72, 'wet-lava');
+    for (let x = 20; x <= 60; x++) w.store.setTileSilent(x, 80, 1);
+    const p = new Player(30 * 16, 77 * 16, new Inventory());
+    const fakeHooks = {
+      world: w, player: p, enemies: () => [], critters: () => [],
+      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+      cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
+      spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {},
+      playSfxFiles: () => {}, showPickupLabel: () => {},
+    } as never;
+    p.buffs.apply(BuffType.Wet, 5);
+    expect(p.buffs.has(BuffType.Wet)).toBe(true);
+    // 玩家全身没入岩浆（LIQUID_TYPE.LAVA = 2）→ 下一 tick Wet 被蒸干
+    const tx = Math.floor(p.x / 16);
+    for (let j = 70; j < 80; j++) {
+      for (let i = tx - 1; i <= tx + 2; i++) w.store.setLiquid(i, j, 255, 2);
+    }
+    p.fixedUpdate(1 / 60, fakeHooks);
+    expect(p.inLava).toBe(true);
+    expect(p.buffs.has(BuffType.Wet)).toBe(false);
   });
 });

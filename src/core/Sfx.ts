@@ -40,6 +40,8 @@ export type SfxName =
   | 'mirror'      // SoundID.Item6（魔镜族 UseSound：Magic/Ice Mirror/Cell Phone/Shellphone :42297 族）
   | 'bombFuse'    // SoundID.BombFuse = CreateTrackable("fuse")（SoundID.cs:1153，引信嘶声循环 0.2 音量）
   | 'conch'       // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
+  | 'manaCrystal' // SoundID.Item29（LegacySoundStyle(2,29)：Item.cs:2657 物品 109 魔力水晶 UseSound
+                  //   + ParticleOrchestrator.Spawn_ShimmerTownNPC :1756 城镇 NPC 微光到位音）
   // ---- 天气环境音循环轨（SceneState.cs:235-297 暴风雪双轨；SoundType.Ambient）----
   | 'blizzardStrong'    // blizzard_strong_loop（SoundID.cs:821 BlizzardStrongLoop，WithVolume(0.5)）
   | 'blizzardInside'    // blizzard_inside_building_loop（:819 BlizzardInsideBuildingLoop）
@@ -130,6 +132,9 @@ const WAV_MAP: Record<SfxName, string[]> = {
   mirror: ['Item_6'],
   bombFuse: ['Fuse'],   // Content/Sounds/Custom/fuse.xnb → Fuse.wav（自提取，1.42s 循环）
   conch: ['Item_64'],
+  // Item bank cue 29（case 2 无专属音量/音高修正——LegacySoundPlayer.cs:519-643，
+  // 仅默认 ±0.06 音高抖动，playWavFile 的 0.92+rand×0.16 已覆盖）
+  manaCrystal: ['Item_29'],
   // ---- 天气环境音循环（Sounds/Custom/ 提取拍平；SceneState.cs:235-297 双轨管理）----
   blizzardStrong: ['blizzard_strong_loop'],
   blizzardInside: ['blizzard_inside_building_loop'],

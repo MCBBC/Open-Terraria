@@ -298,6 +298,10 @@ export function runDungeonPass(
   // ================= LegacyDungeonLayoutProvider.LegacyDungeonLayout（:25-98）=================
   function dgLayout(steps: number): void {
     bounds.set(posX, posY, posX, posY);
+    // ★LegacyDungeonLayoutProvider.cs:37/:42——起始房之前先耗两颗 settings.RandomSeed
+    //  (hall-settings 与 room-settings 对象的种子;本仓 settings 复用单流,掷而不用。
+    //  曾缺失→起始房种子前移 2 颗,全地牢分叉;oracle 对账时揪出)
+    raw(); raw();
     dgRoom({ seed: raw(), x: posX, y: posY, start: true, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
     let roomDelay = 5;
     let s = steps;

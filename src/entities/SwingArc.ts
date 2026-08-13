@@ -564,3 +564,184 @@ export class ZenithSword extends Entity {
     ctx.globalAlpha = 1;
   }
 }
+
+/** 魔光剑斩痕 974（AI_188_LightsBane :39558-39591 + DrawProj_LightsBane :27356）：
+ *  出生（Player.cs:48242-48264）：生成在【瞄准搜索点】（MountedCenter+(70,−40)×Directions
+ *  ±20px 散布，或 ZenithTarget 50px 内敌人身上）；vel=方向载波×0.001（不位移）；
+ *  ai[0]=1（暴击掷中 Next(100)<meleeCrit → 2 且 Damage×2——暴击折进斩痕）；
+ *  Damage×0.5。AI：首帧 Item60×0.15×ai0；scale=ai0；3t/帧 ×12 帧=36t 消亡；
+ *  rotation=vel 角；尘 278 沿 ±46×scale 扫线（num2=Remap(t/36×4,0,1) 包络）。
+ *  绘制：Frame(1,13)（171×702=13 帧 54px）本体帧 ×0.7×scale + 帧 12 辉光两遍
+ *  （(1,6)/(2,2)×vector2、white×0.3×num、multiply blend→lighter 近似）。 */
+export class LightsBaneSlash extends Entity {
+  w = 20; h = 20;
+  damage: number;
+  ai0: number;
+  private t = 0;
+  private frame = 0;
+  private frameCtr = 0;
+  private rot = 0;
+  private dirX: number; private dirY: number;
+  private hitCd = new Map<number, number>();
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  lightRGB: [number, number, number] | null = [0.2, 0, 0.5];
+
+  constructor(x: number, y: number, dirX: number, dirY: number, damage: number, ai0: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.dirX = dirX; this.dirY = dirY;
+    this.damage = damage;
+    this.ai0 = ai0;
+    this.rot = Math.atan2(dirY, dirX);
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    this.t++;
+    if (this.t === 1) game.playSfxFiles(['Item_60'], 0.15 * this.ai0, this.cx, this.cy);
+    if (++this.frameCtr >= 3) {
+      this.frameCtr = 0;
+      if (++this.frame >= 12) { this.dead = true; return; }
+    }
+    // 尘 278 扫线（:39580-39590：t/36×4 包络 ×0.7）
+    const num2 = this.t / 36 * 4;
+    if (num2 >= 0 && num2 <= 1 && Math.random() < 0.5) {
+      const k = Math.random();
+      game.spawnParticles(
+        (this.cx - this.dirX * 46 * this.ai0) * (1 - k) + (this.cx + this.dirX * 46 * this.ai0) * k,
+        (this.cy - this.dirY * 46 * this.ai0) * (1 - k) + (this.cy + this.dirY * 46 * this.ai0) * k,
+        '#8C3CE8', 1, 1.2, { life: 20 });
+    }
+    // 命中（穿透 2 + 10t 免疫）
+    for (const [k, v] of this.hitCd) {
+      if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
+    }
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+      if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      playEnemyHitSound(game, e);
+      e.hurt(dmg, Math.sign(this.dirX) * 6.5, 0, game, this.armorPen, crit);
+      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+      this.hitCd.set(e.id, 10);
+    }
+  }
+
+  draw(r: { canvas: HTMLCanvasElement }): void {
+    const img = projSprite(974);
+    const ctx = r.canvas.getContext('2d');
+    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    const fw = img.naturalWidth, fh = img.naturalHeight / 13;
+    const sc = 0.7 * this.ai0;
+    // num = Remap(frame,0,3,0,1)×Remap(frame,4,12,1,0)（辉光包络）
+    const n = Math.min(1, Math.max(0, this.frame / 3)) * (this.frame <= 4 ? 1 : Math.max(0, (12 - this.frame) / 8));
+    const pass = (frame: number, sx: number, sy: number, alpha: number, additive: boolean) => {
+      if (alpha <= 0.02) return;
+      ctx.save();
+      if (additive) ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(this.rot);
+      ctx.drawImage(img, 0, frame * fh, fw, fh, -fw * sx * sc / 2, -fh * sy * sc / 2, fw * sx * sc, fh * sy * sc);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    };
+    ctx.imageSmoothingEnabled = false;
+    pass(12, 1, 6, 0.3 * n, true);   // 辉光 (1,6)×vector2（multiply→lighter 近似）
+    pass(12, 2, 2, 0.3 * n, true);   // 辉光 (2,2)×vector2
+    pass(this.frame, 1, 1, 1, false); // 本体帧（原版 ×4 遍合并为一遍）
+  }
+}
+
+/** 草剑飞叶 976（AI_152_SuperStarSlash :20872-20995 的 976 分支 + 绘制 :30059）：
+ *  出生（Player.cs:48318-48361）：弧线搜索（ZenithTarget 150px→敌人盒内随机点，否则
+ *  ±20px 散布）；起=玩家中心随机半宽；ai[0]=每 tick 旋转量（num178/60）、
+ *  ai[1]=弧步数；Damage×0.25。AI：vel=vel.RotatedBy(ai0) 弧线飞行；
+ *  速度 = 4+12×(1−num6)（num6 = Remap(60−timeLeft,…)—**timeLeft 默认 3600 恒负 →
+ *  num6=0 恒 16px/t**——原版 1.4.5.6 实际行为，忠实移植勿"修"）；2t/帧 ×7 帧循环；
+ *  rotation=vel 角；tileCollide=false 穿墙；岩浆即亡；timeLeft 3600（远射程飞叶）。 */
+export class GrassSlash extends Entity {
+  w = 20; h = 20;
+  damage: number;
+  private ai0: number;
+  private frame = 0;
+  private frameCtr = 0;
+  private life = 3600;
+  private rot = 0;
+  private first = true;
+  private hitCd = new Map<number, number>();
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, ai0: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.vx = vx; this.vy = vy;
+    this.damage = damage;
+    this.ai0 = ai0;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    if (--this.life <= 0) { this.dead = true; return; }
+    // 弧线（:20927-20930：vel.RotatedBy(ai0)）
+    const c = Math.cos(this.ai0), s = Math.sin(this.ai0);
+    const nvx = this.vx * c - this.vy * s, nvy = this.vx * s + this.vy * c;
+    this.vx = nvx; this.vy = nvy;
+    // 帧循环（2t/帧 ×7）
+    if (++this.frameCtr >= 2) { this.frameCtr = 0; if (++this.frame >= 7) this.frame = 0; }
+    // 恒速 16（num6=0：60−timeLeft 在 timeLeft=3600 下恒负 → Remap 钳 0——原版最终态）
+    const sp = Math.hypot(this.vx, this.vy) || 1;
+    this.vx = this.vx / sp * 16; this.vy = this.vy / sp * 16;
+    this.rot = Math.atan2(this.vy, this.vx);
+    this.x += this.vx; this.y += this.vy;
+    // 岩浆即亡（:20953-20956）+ 出界
+    const st = game.world.store;
+    const cxT = Math.floor(this.cx / 16), cyT = Math.floor(this.cy / 16);
+    if (!st.inBounds(cxT, cyT)) { this.dead = true; return; }
+    if (st.liquidType[st.idx(cxT, cyT)] === 2) { this.dead = true; return; }
+    // 尘 40 拖尾（1/3）+ 首帧 10 粒爆发
+    if (this.first) {
+      this.first = false;
+      for (let i = 0; i < 10; i++) game.spawnParticles(this.cx, this.cy, '#7CE84A', 1, 1.5, { life: 22 });
+    } else if (Math.random() < 1 / 3) {
+      game.spawnParticles(this.cx, this.cy, '#7CE84A', 1, 1, { life: 18 });
+    }
+    // 命中（穿透 2 + 10t 免疫）
+    for (const [k, v] of this.hitCd) {
+      if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
+    }
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+      if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      playEnemyHitSound(game, e);
+      e.hurt(dmg, Math.sign(this.vx) * 6.5, 0, game, this.armorPen, crit);
+      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+      this.hitCd.set(e.id, 10);
+    }
+  }
+
+  draw(r: { canvas: HTMLCanvasElement }): void {
+    const img = projSprite(976);
+    const ctx = r.canvas.getContext('2d');
+    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);
+    ctx.imageSmoothingEnabled = false;
+    // 帧 = (0, frame*20, 32, 18)（:30063-30067）×1.3
+    const fw = 32, fh = 18;
+    const dw = fw * 1.3, dh = fh * 1.3;
+    ctx.drawImage(img, 0, this.frame * 20, fw, fh, -dw / 2, -dh / 2, dw, dh);
+    ctx.restore();
+  }
+}

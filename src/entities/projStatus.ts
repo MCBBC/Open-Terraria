@@ -1,67 +1,73 @@
 // 投射物命中 → 敌怪 debuff(Projectile.StatusNPC 1:1,Projectile.cs:10555-11065;
 // 由 StrikeNPC:12757 每次命中敌怪后调用)。表由 tools/extract-projstatus.mjs 从
-// Terarria1456 源码提取:{"<projType>": [{buff, chance, durMin, durMax}]}(tick)。
-// 复杂块(ai[1] 定向/套装门 setHuntressT2/配件门 frostBurn·magmaStone/区间门)未入表,
-// 见提取脚本 SKIP 清单——后续按需人工补。
+// Terarria1456 源码提取:{"<projType>": [{buff, chance, durMin, durMax, src, gate?}]}(tick)。
+// 复杂形状已入表并带 gate 标记(2026-08-13 G7):
+//   · 'ai1==i' 定向 tag(598/636/971/975/614)——StrikeNPC :12421 先写 ai[1]=victimIndex
+//     再调 StatusNPC → 首击恒真;repo 附着弹无追踪态,单次命中等价恒真,直接施加
+//   · 'setHuntressT2' 套装门(694-696)——运行时校验 ctx.setHuntressT2(Player.equipStats)
+//   · 'remixWorld→N'(15/954/979)/'ai0==1→N'(85)——秘密种子/附着态未跟踪,
+//     取基档(else 档)生效,另一档登记偏差
+// 提取器仍 SKIP 的三块为"无 type==N"运行时配件门:meleeEnchant(:10558)→applyMeleeImbue、
+// frostBurn(:10862)→applyFrostBurn、magmaStone(:10866)→applyMagmaStoneProj。
 import { npcImmuneTo } from '../data/vanillaNpcImmunity';
 import tableJson from '../data/vanilla-projstatus.json';
 import { BuffType } from '../stats/Buffs';
 
 /** mut=互斥组 id(StatusNPC if/else 双分支:单掷骰二选一必中其一,
- *  组内按累积 chance 扫描——两条独立掷骰会让双落空/双中,2026-08-13 修正) */
-interface StatusEntry { buff: number; chance: number; durMin: number; durMax: number; mut?: number }
+ *  组内按累积 chance 扫描——两条独立掷骰会让双落空/双中,2026-08-13 修正)
+ *  src=StatusNPC 源码行号(提取器锚);gate=原版条件门档记(见文件头) */
+interface StatusEntry { buff: number; chance: number; durMin: number; durMax: number; mut?: number; src?: number; gate?: string }
 const TABLE = tableJson as unknown as Record<string, StatusEntry[]>;
 
-/** Enemy 侧已实装的 buff 字段(秒)。GAP:30 Bleeding(禁回血——repo 敌不回血,
- *  天然等效)/137 Slimed(摩擦减速)/151 SoulDrain(陷阱吸血)/169 BoneJavelin/
- *  183 StardustBleed/337 TentacleSpike/344 BloodButcherer/375 Hemorrhage——
- *  低频或需专属机制,命中静默跳过(表数据完整) */
+/** Enemy 侧已实装的 buff 字段(秒)。效果对照(全部回源 NPC.cs UpdateNPC_BuffApplyDOTs
+ *  :92577 起,lifeRegen 单位=2×HP/s;受击穿甲在 checkArmorPenetration :81912) */
 const SUPPORTED: Record<number, string> = {
-  24: 'onFireT',     // On Fire!(NPC.cs:92619 lifeRegen-8 = 4 HP/s)
-  20: 'poisonT',     // Poisoned(-12 → 6 HP/s,:92590)
-  70: 'venomT',      // Venom(-60 → 30 HP/s,:92706)
-  39: 'cursedT',     // Cursed Inferno(onFire2,-48 → 24 HP/s,:92690)
+  24: 'onFireT',     // On Fire!(onFire,:92616-92630;-8 = 4 HP/s)
+  20: 'poisonT',     // Poisoned(:92584-92591;-12 → 6 HP/s)
+  70: 'venomT',      // Venom(:92703-92710;-60 → 30 HP/s)
+  39: 'cursedT',     // Cursed Inferno(onFire2,:92684-92695;-48 → 24 HP/s)
   31: 'confusedT',   // Confused(TargetClosest direction 反转,:78569)
-  69: 'ichorT',      // Ichor(防御 -15;repo 近似=armorPen 7,Enemy.ts:4132)
-  72: 'midasT',      // Midas(掉钱 ×1.10-1.51,Enemy.ts:4286 rollCoins)
-  44: 'frostburnT',    // Frostburn(-16 → 8 HP/s)
-  324: 'frostburn2T',  // Frostburn2(-50 → 25 HP/s)
-  323: 'onFire3T',     // OnFire3(-30 → 15 HP/s)
-  153: 'shadowFlameT', // ShadowFlame(-30 → 15 HP/s)
-  204: 'oiledT',       // Oiled:六火系 DoT 翻倍(NPC.cs:93728)
-  36: 'brokenArmorT',  // BrokenArmor:受击无视 20 防(:81919)
-  203: 'betsysCurseT', // BetsysCurse:受击无视 40 防(:81922)
-  189: 'daybreakT',    // Daybreak:单层 100 HP/s(层数模型登记 GAP)
-  30: 'bleedT',        // Bleeding:-24 = 12 HP/s(:92598)
-  137: 'slimedT',      // Slimed:着火段叠 +4 HP/s（:92623-92624 drippingSlime）
-  375: 'hemorrhageT',  // Hemorrhage:-200 = 100 HP/s(:92610)
-  169: 'javelinT',     // BoneJavelin:单层 3 HP/s(层数模型 GAP)
-  337: 'spikeT',       // TentacleSpike:单层 3 HP/s(层数模型 GAP)
-  344: 'butcherT',     // BloodButcherer:单层 4 HP/s(层数模型 GAP)
+  69: 'ichorT',      // Ichor(checkArmorPenetration :81916 armorPen+15;repo 近似=armorPen 7)
+  72: 'midasT',      // Midas(掉钱 ×1.10-1.51,Enemy.ts rollCoins)
+  44: 'frostburnT',    // Frostburn(onFrostBurn,:92648-92661;-16 → 8 HP/s)
+  324: 'frostburn2T',  // Frostburn2(:92668-92680;-50 → 25 HP/s)
+  323: 'onFire3T',     // OnFire3(:92632-92644;-30 → 15 HP/s)
+  153: 'shadowFlameT', // ShadowFlame(:92712-92724;-30 → 15 HP/s)
+  204: 'oiledT',       // Oiled:六火系在身时再叠 -50 = +25 HP/s(:92728-92737)
+  36: 'brokenArmorT',  // BrokenArmor:受击无视 20 防(:81919-81921)
+  203: 'betsysCurseT', // BetsysCurse:受击无视 40 防(:81922-81924)
+  189: 'daybreakT',    // Daybreak:单层 100 HP/s(层数=场上 636 计数,:92807-92841;GAP)
+  30: 'bleedT',        // Bleeding(:92592-92601;-24 = 12 HP/s)
+  137: 'slimedT',      // Slimed(drippingSlime):六火系 DoT 翻倍(:92623 等 6 处)
+  375: 'hemorrhageT',  // Hemorrhage(:92604-92611;-200 = 100 HP/s)
+  169: 'javelinT',     // BoneJavelin:单层 3 HP/s(层数=附着 598 计数,:92740-92758;GAP)
+  337: 'spikeT',       // TentacleSpike:单层 3 HP/s(层数=附着 971 计数,:92761-92779;GAP)
+  344: 'butcherT',     // BloodButcherer:单层 4 HP/s(层数=附着 975 计数,:92786-92804;GAP)
+  151: 'soulDrainT',   // SoulDrain:25 HP/s(:92927-92935,-50;魂镰 3006 联动登记 GAP)
+  183: 'stardustT',    // StardustBleed:单层 20 HP/s(层数=附着 614 计数,:92846-92863;GAP)
 };
 
 type StatusEnemy = { [field: string]: number | undefined };
 
+/** 运行时门上下文(对应表内 gate 标记;缺省 = 门条件按"可施加"处理) */
+export interface ProjStatusCtx {
+  /** setHuntressT2(女猎手 T2/T3 套装,Player.cs:16119/16149)——爆炸机关弹 694-696
+   *  的 Oiled 门(StatusNPC :10786)。由调用方从 Player.equipStats.huntressT2 传入 */
+  setHuntressT2?: boolean;
+}
+
 /** 命中结算侧调用:按投射物型号掷骰并施加 debuff(AddBuff max 合并语义)。
  *  duration 掷骰 Next(durMin, durMax+1) tick → 秒(/60)。
  *  同 mut 组 = 互斥分支(单掷骰按累积概率选一,必中其一或全落空) */
-export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy): void {
+export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, ctx?: ProjStatusCtx): void {
   if (projId === undefined || projId < 0) return;
-  // ---- 提取器无法入表的两块手工特例（StatusNPC :10905-10915 / :10995-11002）----
-  // type 15（魔球族,cs:10908-10914）：remixWorld → 323 否则 24；1/2 掷，300t=5s。
-  //  remix 秘密种子未跟踪恒 false → 基档 24（OnFire 5s）
-  if (projId === 15 && Math.random() < 0.5) {
-    if (5 > (enemy.onFireT ?? 0)) enemy.onFireT = 5;
-  }
-  // type 85（彩虹魔棒弹,cs:10998-11001）：ai0==1 → 324(Frostburn2) 否则 323(OnFire3)，
-  // 1200t=20s。实体 ai0 门未接——默认 323 档（彩虹魔棒常态档）；ai0==1 分支登记
-  if (projId === 85) {
-    if (20 > (enemy.onFire3T ?? 0)) enemy.onFire3T = 20;
-  }
   const entries = TABLE[String(projId)];
   if (!entries) return;
   let pendingMut: { id: number; roll: number } | null = null;
   for (const en of entries) {
+    // 运行时门:setHuntressT2 未穿套装 → 该条不施加(其余 gate 档已按基档并入,
+    //  见文件头注释,不拦)
+    if (en.gate === 'setHuntressT2' && !ctx?.setHuntressT2) continue;
     let hit: boolean;
     if (en.mut !== undefined) {
       // 互斥组:同组共用一次掷骰,按累积 chance 区间判定本条是否被选中

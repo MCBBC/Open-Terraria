@@ -71,7 +71,9 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
       for (let y = y0; y < y1; y++) {
         if (!st.inBounds(x, y)) continue;
         const ti = st.idx(x, y);
-        const t = Math.min(1, Math.max(0, steps / stepsTotal)); // num2/num4（lerp 系数）
+        // ★Utils.Lerp(Utils.cs:107)**无钳制**——steps×1.3 为小数时末步 steps 为负,
+        //  t<0 会外扩腔体;曾 clamp [0,1](oracle 对账揪出)
+        const t = steps / stepsTotal;                   // num2/num4（lerp 系数）
         const xc = (Math.abs(x - px) * 0.6) * (1 - t) + (Math.abs(x - px) * 0.3) * t;
         const yc = (Math.abs(y - py) * 1.4) * (1 - t) + (Math.abs(y - py) * 5) * t;
         const dist = Math.hypot(xc, yc);               // num16

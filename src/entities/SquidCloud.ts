@@ -3,16 +3,35 @@
 // ai[0]==90t 生成 NPC 619 血鱿鱼（:32711-32716）；>120t 未在可见段后自然消散
 // （timeLeft 600 由本类 life 收紧到 150 等效其视觉寿命）。
 // 由 AI_117 CallForHelp（恐惧鹦鹉螺召唤）投掷（NPC.cs:47874）。
+//
+// 绘制尺寸 = 贴图原生 72×72 × AI scale（G11 对账,SetDefaults 32×32 仅判定盒;
+// 曾画成 32×32 → 整体缩小 2.25×）。显形段 scale/opacity/rotation 三段语义:
+// 51-90t 生长（scale=(t-50)/40,alpha 反向;rotation -= π/20/t,:32619-32622）/
+// 91-120t 定格（scale=1;rotation -= π/60/t,:32674-32676）/
+// >120t 收缩（scale=1-(t-120)/60;rotation -= π/30/t,:32764-32767）。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { Enemy } from './Enemy';
+
+/** 纯函数:813 显形视觉态（AI_108 三段,scale/opacity 0-1/rotation 弧度）。
+ *  t<=50 仍按 0 返回（draw 侧另有隐形门）,便于单测锚定。 */
+export function squidCloudVisual(t: number): { scale: number; opacity: number; rotation: number } {
+  if (t <= 50) return { scale: 0, opacity: 0, rotation: 0 };
+  if (t <= 90) {
+    const s = (t - 50) / 40;                                   // :32619
+    return { scale: s, opacity: s, rotation: -(t - 50) * (Math.PI / 20) };   // :32622
+  }
+  if (t <= 120) {
+    return { scale: 1, opacity: 1, rotation: -40 * (Math.PI / 20) - (t - 90) * (Math.PI / 60) }; // :32674-32676
+  }
+  const s = Math.max(0, 1 - (t - 120) / 60);                   // :32764
+  return { scale: s, opacity: s, rotation: -40 * (Math.PI / 20) - 30 * (Math.PI / 60) - (t - 120) * (Math.PI / 30) };
+}
 
 export class SquidCloud extends Entity {
   w = 32; h = 32;
   private t = 0;
   private spawned = false;
-  /** 消散透明度（0=实） */
-  private fade = 0;
 
   constructor(x: number, y: number) {
     super();
@@ -46,11 +65,8 @@ export class SquidCloud extends Entity {
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(squid, 'enemies');
       }
     }
-    // 120t 后消散
-    if (this.t > 120) {
-      this.fade = Math.min(1, (this.t - 120) / 30);
-      if (this.t > 150) this.dead = true;
-    }
+    // 120t 后消散（原版 :32764 scale 1-(t-120)/60 到 180 才 Kill;本类 150 提前清场,登记偏差）
+    if (this.t > 150) this.dead = true;
   }
 
   draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, HTMLImageElement>; ensureVImage?: (f: string) => HTMLImageElement | null } | null }): void {
@@ -60,12 +76,16 @@ export class SquidCloud extends Entity {
     // ensureVImage 触发懒加载(此前直取且无人预载该表 = 永久隐形,2026-08-13 排雷)
     const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_813.png') : r.atlas.vimages.get('vanilla/Projectile_813.png');
     if (!img || !img.width) return;
-    // 旋转 -= π/60（:32725）；scale/alpha 在 51-120 显形段固定 1/0
+    const v = squidCloudVisual(this.t);
+    if (v.opacity <= 0) return;
     ctx.save();
     ctx.translate(this.cx, this.cy);
-    ctx.rotate(-this.t * (Math.PI / 60));
-    ctx.globalAlpha = Math.max(0, 1 - this.fade);
-    ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.h);
+    ctx.rotate(v.rotation);
+    ctx.globalAlpha = v.opacity;
+    ctx.imageSmoothingEnabled = false;
+    // 原生 72×72 × AI scale（不再归一到判定盒 32×32）
+    ctx.drawImage(img, (-img.width * v.scale) / 2, (-img.height * v.scale) / 2,
+      img.width * v.scale, img.height * v.scale);
     ctx.restore();
     ctx.globalAlpha = 1;
   }

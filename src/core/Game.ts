@@ -93,7 +93,7 @@ import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
   furnitureTryBreak, furnitureTakeFirst, dollPlace, hatRackPlace, removeFurnitureAt,
   furnitureSlotCount, fitsFurniture, critterAnchorPlace, critterAnchorBreakDrop,
-  kiteAnchorPlace, kiteAnchorBreakDrop,
+  kiteAnchorPlace, kiteAnchorBreakDrop, critterAnchorAt, kiteAnchorAt,
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE } from '../data/items';
@@ -103,6 +103,7 @@ import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } f
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemUseSoundWav } from '../data/itemUseSound';
+import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing } from '../entities/projStatus';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
@@ -141,7 +142,12 @@ import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } f
 import { Critter } from '../entities/Critter';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
-import { LeashedEntityManager, KITE_ITEM_PROJ, anchorStyleOfItem } from '../entities/LeashedCritter';
+import {
+  LeashedEntityManager, KITE_ITEM_PROJ, anchorStyleOfItem, placeStyleOfVid, ITEM_MAKE_NPC,
+  LEASHED_SUB_FULL, LEASHED_SUB_PARTIAL, LEASHED_SUB_REMOVE, LEASHED_SUB_PLACE_REQUEST,
+  type LeashedNetMsg, type LeashedCritterEntity, type LeashedKiteEntity,
+} from '../entities/LeashedCritter';
+import { internalIdOfVid } from '../net/leashedSync';
 /** 血月腐化变换表（AttemptToConvertNPCToEvil :93122-93149：[腐化, 猩红]）——
  *  兔 46/企鹅 303/海鸥 337/蚱蜢? 443/鼠 540 → 47/464；金鱼族 55/230/592/593 → 57/465；
  *  松鼠 148/149 → 168/470 */
@@ -179,7 +185,7 @@ import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
-import { BuffType, BUFF_DEFS } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
 import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
@@ -204,9 +210,9 @@ import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
 import { RainbowBolt } from '../entities/RainbowProj';
-import { PrismProj } from '../entities/PrismProj';
+import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar } from '../entities/MissileProj';
-import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile } from '../entities/SwingArc';
+import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
@@ -230,6 +236,7 @@ import { firePortalGun } from '../entities/PortalGunBolt';
 import type { DropExtras } from '../drops/NpcDrops';
 import { npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
+import { flameParticles } from '../fx/FlameParticles';
 import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
 
 const FIXED_DT = 1 / 60;
@@ -916,6 +923,125 @@ export class Game implements GameHooks {
       if (!cur.has(netId)) net.sendItemOp(1, netId); // 上轮在、本轮没 = 拾取/过期 → take
     }
     this.netDropSeen = cur;
+  }
+
+  // ================= 拴绳实体（msg82 module13；原版 LeashedEntity.NetModule） =================
+
+  /** PartialSync 差分基准（netId → 上次同步 tick；错相 = 各实体出生时刻，与原版
+   *  whoAmI 错相（LeashedEntity.cs:463 `(GameUpdateCount + whoAmI) & 0x3FF`）同效——
+   *  每实体固定 1024t 周期、出生时间天然错开） */
+  private netLeashedLast = new Map<number, number>();
+
+  /**
+   * 房主侧每 64t 巡检（= 原版 _UpdateEntities :436-459 的 Update + StreamNetUpdates 段）：
+   *  ① PartialSync：距上次同步 ≥1024t 的实体发位置校正（原版每实体 1024t 错相）；
+   *  ② 锚格巡检：锚桩 tile 已不存在（访客破坏的 tile 落格不触发本端破坏链——
+   *     applyRemote 只写数组）→ 消散实体 + 掉存物（房主权威，走既有 msg21 掉落同步；
+   *     = 原版 dedicated server TE DropItemForTileBreak 服务端掉落语义）+ 清 furniture
+   *     记录（防存档重读复活已破锚桩 = 存物复制）+ 广播 Remove。
+   *  与原版的差异（备案）：a. 原版 TE OnRemoved 由服务器 tile 落格即时触发，本仓
+   *  tile 层是客户端权威直通（无服务端 tile 事件回调），故巡检周期 64t（≤1.07s 收敛）；
+   *  b. PartialSync 不按房主 section 活性过滤（原版 StreamNetUpdates 只遍历激活 section）
+   *  ——本仓房主=玩家（无 dedicated 形态），按房主 section 过滤会让"离房主近访客远"
+   *  的实体饿死；实体全为玩家手放量级极小，服务器侧 AOI 过滤已挡掉无关收件人
+   */
+  private netLeashedHostSweep() {
+    const net = this.net;
+    if (!net?.active || !net.policy.isHost) return;
+    const st = this.world.store;
+    const anchorTiles = new Set([TILE_BY_KEY['v_724_critter_anchor'], TILE_BY_KEY['v_723_kite_anchor']]);
+    const sweep = (list: Array<LeashedCritterEntity | LeashedKiteEntity>): Array<LeashedCritterEntity | LeashedKiteEntity> => {
+      const keep: Array<LeashedCritterEntity | LeashedKiteEntity> = [];
+      for (const e of list) {
+        // ---- ② 锚格巡检 ----
+        if (!st.inBounds(e.ax, e.ay) || !anchorTiles.has(st.type[st.idx(e.ax, e.ay)])) {
+          // 存物掉落（房间主权威；访客破坏时破坏端本地无记录不掉，无双份）
+          const rec = this.world.furnitureItems.find(
+            (r) => r.x === e.ax && r.y === e.ay && (r.kind === 'critter_anchor' || r.kind === 'kite_anchor'));
+          const stored = rec?.slots[0] ?? null;
+          if (stored) this.spawnDrop(e.ax * TILE + 8, e.ay * TILE, ITEM_DEFS[stored.id].key, stored.stack, 0, -2);
+          if (rec) removeFurnitureAt(this.world.furnitureItems, e.ax, e.ay);
+          net.sendLeashedRemove(e.netId);
+          continue;
+        }
+        keep.push(e);
+        // ---- ① PartialSync（1024t/实体）----
+        const last = this.netLeashedLast.get(e.netId) ?? -1024;
+        if (this.tickCount - last >= 1024) {
+          this.netLeashedLast.set(e.netId, this.tickCount);
+          net.sendLeashedPartial(e);
+        }
+      }
+      return keep;
+    };
+    const keptCritters = sweep(this.leashed.critters);
+    const keptKites = sweep(this.leashed.kites);
+    if (keptCritters.length !== this.leashed.critters.length
+      || keptKites.length !== this.leashed.kites.length) {
+      this.leashed.critters = keptCritters as LeashedCritterEntity[];
+      this.leashed.kites = keptKites as LeashedKiteEntity[];
+    }
+    // 差分基准收缩（消亡实体防 Map 无界增长）
+    const alive = new Set<number>();
+    for (const e of this.leashed.critters) alive.add(e.netId);
+    for (const e of this.leashed.kites) alive.add(e.netId);
+    for (const id of this.netLeashedLast.keys()) if (!alive.has(id)) this.netLeashedLast.delete(id);
+  }
+
+  /** msg82 module13 回包分发（= NetModule.Deserialize :22-41；访客端为主，
+   *  sub3 PlaceRequest 仅房主会收到——服务器定向转发） */
+  private netApplyLeashed(msg: LeashedNetMsg) {
+    if (msg.sub === LEASHED_SUB_FULL) {
+      this.leashed.netApplyFull(msg, this.leashedEnv());
+    } else if (msg.sub === LEASHED_SUB_PARTIAL) {
+      this.leashed.netApplyPartial(msg);
+    } else if (msg.sub === LEASHED_SUB_REMOVE) {
+      this.leashed.netRemove(msg.netId);
+    } else if (msg.sub === LEASHED_SUB_PLACE_REQUEST) {
+      if (this.net?.active && this.net.policy.isHost) this.netApplyLeashedPlace(msg.ax, msg.ay, msg.vid);
+    }
+  }
+
+  /**
+   * 访客放置请求落账（sub3；房主侧）。校验链（不裸信访客上报）：
+   *  ① 锚格 tile 类型与物品族匹配（724↔捕获小动物 makeNPC / 723↔风筝 shoot）；
+   *  ② 该锚点无既有实体（防重复放置刷实体）；
+   *  ③ furniture 记录缺位或空槽（防覆写他人存物）。
+   *  通过 → 房主写记录 + 生成实体 + 广播 FullSync（= 自身放置链同款，netTryPlace 内联）。
+   *  物品消耗由请求端本地完成（其 inv 经 msg5 差分同步），房主不代扣
+   */
+  private netApplyLeashedPlace(ax: number, ay: number, vid: number) {
+    const net = this.net;
+    if (!net?.active || !net.policy.isHost) return;
+    const st = this.world.store;
+    if (!st.inBounds(ax, ay)) return;
+    const tileHere = st.type[st.idx(ax, ay)];
+    const npcType = ITEM_MAKE_NPC[vid];
+    const projType = KITE_ITEM_PROJ[vid];
+    if (npcType !== undefined) {
+      if (tileHere !== TILE_BY_KEY['v_724_critter_anchor']) return;   // ①
+      if (this.leashed.netIdsAt(ax, ay).length) return;               // ②
+      const rec = critterAnchorAt(this.world.furnitureItems, ax, ay);
+      if (rec?.slots[0]) return;                                      // ③
+      const internalId = internalIdOfVid(vid);
+      if (internalId <= 0) return;
+      if (!rec) critterAnchorPlace(this.world.furnitureItems, ax, ay, { id: internalId, stack: 1 });
+      const e = this.leashed.spawnCritter(ax, ay, vid, { placeStyle: placeStyleOfVid(vid) });
+      if (e) net.sendLeashedFull(e);
+      return;
+    }
+    if (projType !== undefined) {
+      if (tileHere !== TILE_BY_KEY['v_723_kite_anchor']) return;
+      if (this.leashed.netIdsAt(ax, ay).length) return;
+      const rec = kiteAnchorAt(this.world.furnitureItems, ax, ay);
+      if (rec?.slots[0]) return;
+      const internalId = internalIdOfVid(vid);
+      if (internalId <= 0) return;
+      if (!rec) kiteAnchorPlace(this.world.furnitureItems, ax, ay, { id: internalId, stack: 1 });
+      const pd = projectileData(projType);
+      const e = this.leashed.spawnKite(ax, ay, projType, this.leashedEnv(), pd?.width ?? 4);
+      if (e) net.sendLeashedFull(e);
+    }
   }
 
   /** msg23 回包：NPC 傀儡 upsert（首次创建入桶；boss 置 this.boss 供血条） */
@@ -2300,6 +2426,7 @@ export class Game implements GameHooks {
         const t = new TownNPC(n.key, n.x, n.y);
         t.bound = !!n.bound;
         if (n.givenName) t.givenName = n.givenName;
+        if (n.shimmered) t.shimmered = true;   // 微光变体恢复（townNpcVariationIndex,WF:2927）
         if (n.home) { t.home = { x: n.home[0], y: n.home[1] }; t.leashHome = true; }
         this.entities.add(t, 'npcs');
       }
@@ -2595,6 +2722,7 @@ export class Game implements GameHooks {
     this.renderer.sky.clearAmbience();
     natureParticles.clear(); // 落叶/滴水粒子不跨世界残留
     natureParticles.onDripSplash = null;
+    flameParticles.clear(); // 山羊火焰 FlameParticle 同理不跨世界残留
     // 月总震屏滤镜解除（倒计时中退世界 → 菜单不留红色脉冲）
     this.renderer.moonLordShake = null;
     // 资源释放链(缺一不可,见各 dispose 注释):连续多次读档曾因不释放
@@ -2606,6 +2734,7 @@ export class Game implements GameHooks {
     // 纸娃娃合成缓存:contextlost 后缓存内容归零且不重画——不清则
     // "角色/装备/时装全部隐形"(选人界面与游戏内 alike)
     clearPaperDollCache();
+    this.renderer.resetFxCache();   // 44 彩虹翼烘焙/Extra_156 采样缓存（同 contextlost 归零语义）
     // 智能光标状态复位（防指针帧/黄框残留到主菜单）
     this.smartCursor.wanted = false;
     this.smartCursor.showing = false;
@@ -3003,13 +3132,21 @@ export class Game implements GameHooks {
     player.itemUseTurn = !!itemCombat(player.inv.heldItem()?.id ?? -1)?.useTurn;
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
+    // FlameParticle 步进（Main.UpdateParticles Main.cs:3951-3952 的
+    // ParticleSystem_World_BehindPlayers——山羊坐骑 47 火焰本体；
+    // spawn 在 Player.goatFlames 回调，绘制在 Renderer.drawFlameParticles）
+    flameParticles.update();
     // 原版 Dust 步进（UpdateDust :423——customData 跟随差值 = 主角本 tick 位移；
     // 视口世界矩形用于屏底清除）+ 逐尘光照推 LightingEngine
     {
       const vz = this.camera.zoom;
       const vw = this.renderer.canvas.width / vz, vh = this.renderer.canvas.height / vz;
       this.vanillaDust.update(this.camera.x - vw / 2, this.camera.y - vh / 2, vw, vh,
-        player.x - player.oldX, player.y - player.oldY);
+        player.x - player.oldX, player.y - player.oldY,
+        // 43 型照度门 Lighting.GetColor（Dust.cs:1475-1484）读光采样器
+        (tx, ty) => this.lighting.lightAt(tx, ty),
+        // 278 型入实心格收缩（Dust.cs:2264-2268）WorldGen.SolidTile 探针
+        (tx, ty) => { const s = this.world.store; return s.inBounds(tx, ty) && s.isSolid(tx, ty); });
       for (const l of this.vanillaDust.lights) {
         const tx = Math.floor(l.x / TILE), ty = Math.floor(l.y / TILE);
         if (this.world.store.inBounds(tx, ty)) this.lighting.addLight(tx, ty, l.r, l.g, l.b);
@@ -5075,7 +5212,7 @@ export class Game implements GameHooks {
         const arcVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');
         const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
           + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
-        if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 933].includes(cwMelee.shoot)) {
+        if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 933, 974, 976, 1100].includes(cwMelee.shoot)) {
           const angT = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           this.player.facing = Math.cos(angT) > 0 ? 1 : -1;   // 发射型面向鼠标（:46578）
           const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 20;
@@ -5107,10 +5244,10 @@ export class Game implements GameHooks {
               this.entities.add(slash, 'projectiles');
               break;
             }
-            case 933: {   // Zenith 4956（Player.cs:48078-48121）：useAnimation 30/useTime 10
-              // → 每挥 3 剑（cycle=floor(swing.t/useTime)）；首剑档案 4956 后续表随机；
-              // 目标=鼠标世界位（limit-to-reach 省略备案），cycle 1-2 在鼠标 400px 内
-              // 重定向最近敌 + 无目标(cycle1)/cycle2 加 ±150px 圆散布
+            case 933:
+            case 1100: {  // Zenith 4956 / 真铜短剑 5669（Player.cs:48078-48121 同链：
+              // 5669 档案恒 3507、Zenith 首 4956 后续表随机）
+              const isZenith = cwMelee.shoot === 933;
               const [zwx, zwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
               const cycle = Math.floor((this.swing?.t ?? 0) / (cwMelee.useTime ?? 10));
               let tzx = zwx, tzy = zwy;
@@ -5129,10 +5266,93 @@ export class Game implements GameHooks {
                 }
               }
               const zsword = new ZenithSword(this.player, tzx, tzy,
-                this.swing.dmg ?? cwMelee.damage, cycle === 0 ? 4956 : randomFractalProfile());
+                this.swing.dmg ?? cwMelee.damage,
+                !isZenith ? 3507 : (cycle === 0 ? 4956 : randomFractalProfile()));
               zsword.critChance = arcCrit;
               zsword.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
               this.entities.add(zsword, 'projectiles');
+              break;
+            }
+            case 974: {   // 魔光剑 46（Player.cs:48242-48264）：生成在瞄准搜索点
+              // （MountedCenter+(70,−40)×Directions ±20 散布或 50px 内敌人身上）；
+              // ai0=1（暴击掷中→2 且伤害×2 折进斩痕）；伤害×0.5；方向载波不位移
+              const [lbwx, lbwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+              const fd = this.player.facing;
+              let dvx = fd, dvy = 4;
+              const dvl = Math.hypot(dvx, dvy) || 1; dvx /= dvl; dvy /= dvl;
+              const jit = (Math.random() * 2 - 1) * 0.05 * Math.PI * 2;
+              const jd = Math.cos(jit), js = Math.sin(jit);
+              const rdx = dvx * jd - dvy * js, rdy = dvx * js + dvy * jd;
+              let sx974 = this.player.cx + fd * 70 - rdx * 10;
+              let sy974 = this.player.cy - 40 - rdy * 10;
+              let best = null as { cx: number; cy: number } | null, bd = 50;
+              for (const ent of this.entities.enemies) {
+                const e = ent as unknown as { cx: number; cy: number; dead: boolean };
+                if (e.dead) continue;
+                const dd = Math.hypot(e.cx - sx974, e.cy - sy974);
+                if (dd < bd) { bd = dd; best = e; }
+              }
+              if (best) { sx974 = best.cx + (Math.random() - 0.5) * 20; sy974 = best.cy + (Math.random() - 0.5) * 20; }
+              else { sx974 += (Math.random() * 2 - 1) * 20; sy974 += (Math.random() * 2 - 1) * 20; }
+              let ai0974 = 1;
+              let dmg974 = (this.swing.dmg ?? cwMelee.damage) * 0.5;
+              if (Math.floor(Math.random() * 100) < this.player.critChance('melee') * 100 + 4) { ai0974 = 2; dmg974 *= 2; }
+              const lb = new LightsBaneSlash(sx974, sy974, rdx, rdy, Math.round(dmg974), ai0974);
+              lb.critChance = arcCrit;
+              lb.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+              this.entities.add(lb, 'projectiles');
+              break;
+            }
+            case 976: {   // 草剑 190（Player.cs:48318-48361）：弧线搜索飞叶
+              // 目标 = MountedCenter+(70,−40)±20 散布或 150px 内敌人盒内随机点；
+              // 起点沿方向弧线步行（步长 16、旋转 num178/60、上限 60 步）；
+              // ai0=每 tick 旋转、伤害×0.25
+              const [gx, gy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+              let tx976 = this.player.cx + this.player.facing * 70, ty976 = this.player.cy - 40;
+              let best976 = null as { cx: number; cy: number; x: number; y: number; w: number; h: number } | null, bd976 = 150;
+              for (const ent of this.entities.enemies) {
+                const e = ent as unknown as { cx: number; cy: number; x: number; y: number; w: number; h: number; dead: boolean };
+                if (e.dead) continue;
+                const dd = Math.hypot(e.cx - tx976, e.cy - ty976);
+                if (dd < bd976) { bd976 = dd; best976 = e; }
+              }
+              if (best976) {
+                tx976 = best976.x + Math.random() * best976.w;
+                ty976 = best976.y + Math.random() * best976.h;
+              } else { tx976 += (Math.random() * 2 - 1) * 20; ty976 += (Math.random() * 2 - 1) * 20; }
+              const dir976 = this.player.facing;
+              let sx976 = this.player.cx + (Math.random() * 2 - 1) * this.player.w / 2;
+              let sy976 = this.player.cy + this.player.h / 2 - 24;   // !zenithTarget 的 Y−=24 分支
+              const v6x = tx976 - sx976, v6y = ty976 - sy976;
+              let num178 = (Math.PI + Math.PI * 2 * Math.random() * 1.5) * (-dir976);
+              const num180 = num178 / 60;
+              // 弧线步进：UnitX*16 每步旋转 num180，直到覆盖 |v6| 或 60 步
+              let px = 16, py = 0, accX = 0, accY = 0, steps = 0;
+              while (Math.hypot(accX, accY) < Math.hypot(v6x, v6y) && steps < 60) {
+                steps++;
+                accX += px; accY += py;
+                const rc = Math.cos(num180), rs = Math.sin(num180);
+                const npx = px * rc - py * rs, npy = px * rs + py * rc;
+                px = npx; py = npy;
+              }
+              const num184 = Math.atan2(py, px) - num180;
+              let svx = v6x, svy = v6y;
+              const svl = Math.hypot(svx, svy) || 1; svx /= svl; svy /= svl;
+              const rc2 = Math.cos(-num184), rs2 = Math.sin(-num184);
+              let fvx = svx * rc2 - svy * rs2, fvy = svx * rs2 + svy * rc2;
+              if (steps === 60) { fvx = dir976; fvy = 0; }
+              fvx *= 16; fvy *= 16;
+              if (!best976) {
+                const rotJit = dir976 * Math.PI * 2 * 0.14;
+                const jc = Math.cos(rotJit), js2 = Math.sin(rotJit);
+                const jvx = fvx * jc - fvy * js2, jvy = fvx * js2 + fvy * jc;
+                fvx = jvx; fvy = jvy;
+              }
+              const gs = new GrassSlash(sx976, sy976, fvx, fvy,
+                Math.round((this.swing.dmg ?? cwMelee.damage) * 0.25), num180);
+              gs.critChance = arcCrit;
+              gs.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+              this.entities.add(gs, 'projectiles');
               break;
             }
             case 982: mkArc(982, this.swing.dmg ?? cwMelee.damage); break;          // 圣剑 368（:48280）
@@ -5407,6 +5627,18 @@ export class Game implements GameHooks {
         this.player.useTime = 30;
       }
     }
+    // 发色剂族（Player.cs:42179-42186 `item.hairDye >= 0`：使用即 player.hairDye =
+    //  item.hairDye；1990 去除剂 hairDye=0 = 清除。原版无装备槽位，颜色随 .plr 存档）
+    if (heldDef && inp.mouseDown && this.player.useTime === 0
+      && hairDyeShaderOfItem(viIdFromKey(heldDef.key)) >= 0) {
+      const dyeVid = viIdFromKey(heldDef.key);
+      const p = this.player;
+      p.hairDye = hairDyeShaderOfItem(dyeVid);
+      p.inv.removeAt(p.inv.selected, 1);
+      p.useTime = 17;   // Item.cs:21223 useTime 17（1990 同 :21276）
+      this.playSfxFile(itemUseSoundWav(dyeVid) ?? 'Item_3', 1, p.cx, p.cy);  // UseSound=Item3（:21219/:21272）
+      this.cb.onInventoryChanged();
+    }
     // 药水饮用（移植自 Maples：点击饮用，治疗类受耐药性封锁）
     if (heldDef?.potion && inp.mouseDown && this.player.useTime === 0) {
       const p = heldDef.potion;
@@ -5516,7 +5748,12 @@ export class Game implements GameHooks {
           flagOnce(() => { this.world.flags.unlockedBiomeTorches = true; });
           p.useTime = 30; this.sfx.play('pickup');
           break;
-        case 2756: { // 性别转换药水(:42516-42542):Male 翻转
+        case 5573: { // Torch God's Potion（:10594-10596 → unlockedBiomeTorches 置位,2026-08-13）
+          this.world.flags.unlockedBiomeTorches = true;
+          p.useTime = 30;
+          break;
+        }
+case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           // 未设置变体(缺省)视作 0(男);特殊套装 2-9 不动只消耗
           if (p.appearance) {
             const v = p.appearance.skinVariant ?? 0;
@@ -6499,6 +6736,32 @@ export class Game implements GameHooks {
           this.input.mouseDown = false;
           break;
         }
+        // 充能爆破炮 2882 → 460（AI_075 :63442 460 分支）：channel 蓄力 180t
+        // 发 461 光束（×1.5 伤）+ 459 小弹节奏（同 payMana 回调）
+        if (cw.shoot === 460) {
+          const blOwner = this.player;
+          const blItemId = def.key;
+          const bl = new ChargedBlaster(Math.cos(ang), Math.sin(ang),
+            cw.damage, cw.knockback,
+            () => this.input.mouseHeld && !this.input.uiBlocking
+              && blOwner.inv.heldItem()?.id === ITEM_BY_KEY[blItemId]
+              && !blOwner.dead,
+            () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+            () => {
+              const cost = Math.trunc(Math.round((cw.mana ?? 0) * (ps?.mcst ?? 1))
+                * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul);
+              if (this.player.mana < cost) return false;
+              this.player.mana -= cost;
+              return true;
+            });
+          bl.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          bl.critChance = critTotal;
+          this.entities.add(bl, 'projectiles');
+          this.player.useTime = cw.useTime;
+          this.player.onManaItemUsed();
+          this.input.mouseDown = false;
+          break;
+        }
         // 最后的棱镜 3541 → 633（channel 充能聚束，AI_075 :63626）：
         // 633 晶体挂手 + 6×632 光棱（PrismProj 独占链）。channel=按住（电平语义同
         // 链球 mouseHeld）；魔耗节奏 30→15→5 由 payMana 回调按拍扣
@@ -6809,6 +7072,17 @@ export class Game implements GameHooks {
         const st = this.world.store;
         smoothSlopeAt(st, tx, ty);
         this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+      },
+      // CanKillTile 追加子项上下文（WorldGen.cs:62316-62358）：hardMode 门 +
+      // Chest.CanDestroyChest（Chest.cs:590-606——锚格有非空内容不可锁）。
+      // 宝箱记录在 world.chests（锚点=左上格），梳妆台共用同表
+      killTileCtx: {
+        hardMode: !!this.world.flags.hardMode,
+        chestDestroyable: (cx, cy) => {
+          const c = this.world.chests.find((cc) => cc.x === cx && cc.y === cy);
+          if (!c) return true;   // 无登记 = 可毁（Chest.cs:594-597）
+          return !c.items.some((it) => it != null && it.id > 0 && it.stack > 0);
+        },
       },
     });
     this.mining = null;
@@ -7278,7 +7552,14 @@ export class Game implements GameHooks {
       if (stored) {
         this.spawnDrop(x * TILE + 8, y * TILE, ITEM_DEFS[stored.id].key, stored.stack, 0, -2);
       }
+      // 联机：锚桩消散广播 Remove（= 原版 LeashedEntity.Remove :385-398 → NetModule.Remove）。
+      // 房主权威链路才上行（访客破坏走 tile 层 msg17，房主锚格巡检兜底下发 Remove）；
+      // 掉落归房主侧生成 → 既有 msg21 掉落同步（原版 dedicated server 同语义）
+      const leashedNetIds = this.leashed.netIdsAt(x, y);
       this.leashed.removeAt(x, y);
+      if (leashedNetIds.length && this.net?.active && this.net.policy.isHost) {
+        for (const id of leashedNetIds) this.net.sendLeashedRemove(id);
+      }
       removeFurnitureAt(this.world.furnitureItems, x, y);
       st.setTile(x, y, 0);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
@@ -7336,8 +7617,10 @@ export class Game implements GameHooks {
       if (framedSheet === 55 || framedSheet === 85 || framedSheet === 425 || framedSheet === 573) {
         this.world.signs = this.world.signs.filter((s) => !(s.x === ax && s.y === ay));
       }
-      // 宝箱内容物掉出
-      if (type === T.CHEST) this.dumpChest(ax, ay);
+      // 宝箱内容物掉出（BasicChest {21,467}——TileID.cs:315：两表都有战利品登记，
+      //  曾只查 T.CHEST → 挖 467 族箱静默吞掉全部内容；陷阱箱 441/468 无内容
+      //  记录（放置只登 T.CHEST），无物可掉，等价）
+      if (type === T.CHEST || type === TILE_BY_KEY['v_467_chests_group_2']) this.dumpChest(ax, ay);
       // 挂物族：空物破坏 → 移除存放记录（TileEntityType.Kill，TileEntity.cs:110-116；
       //  挂物族锚点公式与通用锚点算法在这些 tile 上一致，直接用 ax/ay）
       if (FURNITURE_TILE_KIND.has(type)) removeFurnitureAt(this.world.furnitureItems, ax, ay);
@@ -8204,28 +8487,43 @@ export class Game implements GameHooks {
     if (tileId === TILE_BY_KEY['v_724_critter_anchor']) {
       const held = this.player.inv.heldItem();
       if (held) {
-        critterAnchorPlace(this.world.furnitureItems, tx, ty, held);
         const vid = viIdFromKey(ITEM_DEFS[held.id]?.key ?? '');
         if (vid > 0) {
           st.setTile(tx, ty, tileId, anchorStyleOfItem(vid) * 18, 0);
-          this.leashed.spawnCritter(tx, ty, vid, { placeStyle: itemDef.placeStyle ?? 0 });
+          // 联机：实体层房主权威（= 原版 AddNewEntity :357-373 netMode==2 → FullSync）。
+          // 访客不写本地 furniture 记录也不生成实体——记录/实体唯一权威 = 房主
+          //（防访客破坏时本地掉物与房主巡检掉物双份），仅发 PlaceRequest（sub3），
+          // 房主校验后落记录+实体并广播 FullSync 回来重建（信任边界见 net/leashedSync.ts）
+          if (this.net?.active && !this.net.policy.isHost) {
+            this.net.sendLeashedPlaceRequest(tx, ty, vid);
+          } else {
+            critterAnchorPlace(this.world.furnitureItems, tx, ty, held);
+            const e = this.leashed.spawnCritter(tx, ty, vid, { placeStyle: itemDef.placeStyle ?? 0 });
+            if (e && this.net?.active) this.net.sendLeashedFull(e);
+          }
         }
       }
     }
     // 风筝桩 723（TEKiteAnchor 同基类链 :43-65）：写入手持风筝 + 生成拴绳风筝
     // （projType = item.shoot，CreateLeashedEntity :54-62）。风筝 consumable=false，
     // 但钩子内 --stack（TELeashedEntityAnchorWithItem.cs:46-48）= 放置消耗 1——
-    // 与下方通用 removeAt(selected,1) 等量，无需另扣
+    // 与下方通用 removeAt(selected,1) 等量，无需另扣。联机分支同 724（访客仅请求）
     if (tileId === TILE_BY_KEY['v_723_kite_anchor']) {
       const held = this.player.inv.heldItem();
       if (held) {
-        kiteAnchorPlace(this.world.furnitureItems, tx, ty, held);
         const vid = viIdFromKey(ITEM_DEFS[held.id]?.key ?? '');
         const proj = vid > 0 ? KITE_ITEM_PROJ[vid] : undefined;
         if (proj !== undefined) {
-          // Size = _dummy.Size（LeashedKite.SetDefaults :32-35 → Projectile.SetDefaults）
+          // Size = _dummy.Size（LeashedKite.SetDefaults :32-35 → Projectile.SetDefaults →
+          // Projectile.DefaultToKite :10133-10140 width=height=4；提取表缺条目时兜底 4）
           const pd = projectileData(proj);
-          this.leashed.spawnKite(tx, ty, proj, this.leashedEnv(), pd?.width ?? 14);
+          if (this.net?.active && !this.net.policy.isHost) {
+            this.net.sendLeashedPlaceRequest(tx, ty, vid);
+          } else {
+            kiteAnchorPlace(this.world.furnitureItems, tx, ty, held);
+            const e = this.leashed.spawnKite(tx, ty, proj, this.leashedEnv(), pd?.width ?? 4);
+            if (e && this.net?.active) this.net.sendLeashedFull(e);
+          }
         }
       }
     }
@@ -8297,10 +8595,20 @@ export class Game implements GameHooks {
       addLight: (i, j, r, g, b) => {
         if (this.world.store.inBounds(i, j)) this.lighting.addLight(i, j, r, g, b);
       },
-      spawnDust: (x, y, bw, bh, color) => {
-        this.spawnParticles(x, y, color, 1, 0.2, { life: 30, size: 2, grav: 0, damp: 0.9 });
-        void bw; void bh;
+      // 原版 Dust 池（金系 43 / Recall 15 / 地狱蝶 6 / 帝皇蝶 267 / 妖精 278——
+      // LeashedCritter.ts 各族 VisualEffects 源码行号）+ 金系照度门取光
+      dust: {
+        spawn: (x, y, bw, bh, type, sx = 0, sy = 0, alpha = 0,
+          color: { r: number; g: number; b: number; a: number } | null = null, scale = 1) =>
+          this.vanillaDust.spawn(x, y, bw, bh, type, sx, sy, alpha,
+            color as import('../fx/VanillaDust').DustColor | null, scale),
+        clone: (d) =>
+          // Dust.CloneDust（Dust.cs:260-288）：字段级复制回池（EmpressButterfly
+          // 二段尘 :50-55）——实现归引擎（含 rotation/frame 复制与 noLightEmittance
+          // 不复制的原版语义），见 VanillaDust.clone
+          this.vanillaDust.clone(d as import('../fx/VanillaDust').VDust),
       },
+      lightAt: (i, j) => this.lighting.lightAt(i, j),
     };
   }
 
@@ -10728,7 +11036,8 @@ export class Game implements GameHooks {
       !!this.scene?.zoneCorrupt || !!this.scene?.zoneCrimson,
       !!w.clock.bloodMoon,
       p.buffs.has(BuffType.Invisibility),          // 隐身（:611-615）
-      p.equipStats.anglerSetSpawnReduction);       // 渔夫套（:627-630）
+      p.equipStats.anglerSetSpawnReduction,       // 渔夫套（:627-630）
+      this.scene?.zoneShadowCandle ?? false);     // ShadowCandle(:328-333)
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
@@ -12916,6 +13225,13 @@ export class Game implements GameHooks {
     if (ok) {
       // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）
       if (attacker?.vanillaId === 155) p.buffs.apply(BuffType.Weak, 30);
+      // 爆裂泡泡 371 接触施加潮湿 103（StatusFromNPC Player.cs:22239-22242：
+      // AddBuff(103, 60×Next(3,8)) = 180-420t 即 3-7s——猪鲨仔 MountFishronSpecial
+      // 的 dripping 增益 + 火系免疫 24/323/67 两处消费）。★371 走通用接触伤害链
+      //（Enemy.fixedUpdate → damagePlayer），此处统一汇入即可覆盖本地/傀儡两路
+      if (attacker?.vanillaId === 371) {
+        p.buffs.apply(BuffType.Wet, wetFromBubbleContact());
+      }
       // 星星斗篷族受击反击（Player.cs:37826-37870）：3 颗星，出点 x=position.X+Next(-400,400)、
       // y=position.Y-Next(500,800)，速度 = 朝(玩家中心 X 再 ±100 抖动)归一化到 23 速；
       // 弹型按装备 override 件取（manaCloak 723 > beeCloak 724 > starVeil 725 > starCloak 726），
@@ -14191,7 +14507,7 @@ export class Game implements GameHooks {
   }
 
   /** 城镇 NPC 存档快照（原版 WorldFile town NPC 段：位置+home+bound+自定义名） */
-  townNpcsForSave(): Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }> {
+  townNpcsForSave(): Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }> {
     return this.entities.npcs
       .filter((n): n is TownNPC => n instanceof TownNPC && !n.dead)
       .map((n) => ({
@@ -14200,6 +14516,8 @@ export class Game implements GameHooks {
         home: n.home ? [n.home.x, n.home.y] : null,
         bound: n.bound || undefined,
         givenName: n.givenName,
+        // 微光变体（原版 townNpcVariationIndex,WF:1732 写/:2927 读——本仓 shimmered 布尔承接）
+        shimmered: n.shimmered || undefined,
       }));
   }
 
@@ -14623,6 +14941,7 @@ export class Game implements GameHooks {
     // Player.cs:35218 AdjTiles() 每帧先清 alchemyTable=false 再扫描——否则靠近过
     // 一次后永久享受 1/3 材料折扣（旧"只置位不清零"粘滞 bug,2026-08-13 修）
     this._alchemyTable = false;
+    this.player.buffs.deadCells = false;   // DeadCellsPotionStation(:5206)
     const st = this.world.store;
     const out = new Set<number>();
     const px = Math.floor(this.player.cx / TILE), py = Math.floor(this.player.cy / TILE);
@@ -14647,6 +14966,7 @@ export class Game implements GameHooks {
           // 与 207 两档；本仓 vanilla.sheet 即原版 tile id，sheet∈{172,207} 与该 Set 等值，
           // 非近似。消费点 Player.cs AdjTiles :35230-35232 → adjWaterSource）
           const sheet = TILE_DEFS[t]?.vanilla?.sheet;
+          if (sheet === 699) this.player.buffs.deadCells = true;   // DeadCellsPotionStation(:5206 buff ×1.2)
           if (sheet === 172 || sheet === 207) this._nearLiquid.water = true;
         }
         if (st.liquid[ii] > 200) {
@@ -15342,6 +15662,8 @@ export class Game implements GameHooks {
     this.renderer.grandPreview = this.grandAnchor && hover
       ? { from: this.grandAnchor, to: [hover.x, hover.y], mode: this.wireToolMode }
       : null;
+    // Main.netMode != 0 近似（DyeInitializer.cs:334 队伍发色剂单机恒白）
+    this.renderer.netActive = !!this.net?.active;
     this.renderer.render(
       cam, this.world, this.world.clock, this.chunks,
       L.r, L.g, L.b, L.rx, L.ry, L.rw, L.rh,
@@ -15466,6 +15788,11 @@ export class Game implements GameHooks {
               net.pendingSSC = null;
               this.netApplySSC(json);
             }
+            // msg82 module13 暂存冲放（同 H1 竞态：组装期 FullSync 若即用会被
+            // afterWorldLoad → respawnAll 的 clear() 抹掉——实体永久丢失）。
+            // 冲放后才开直通（leashedReady）——后续 PartialSync/Remove 不再进暂存
+            net.drainPendingLeashed((msg) => this.netApplyLeashed(msg));
+            net.leashedReady = true;
             if (settled) return;
             settled = true;
             resolve();
@@ -15497,6 +15824,8 @@ export class Game implements GameHooks {
         },
         onChestSync: (chestIdx, x, y, items) => this.netApplyChest(chestIdx, x, y, items),
         onNpcSnapshot: (snaps) => this.netApplyNpcSnaps(snaps),
+        // 拴绳实体（msg82 module13；世界就绪后直通——组装期帧在 pendingLeashed）
+        onLeashedSync: (msg) => this.netApplyLeashed(msg),
         onItemOp: (op) => this.netApplyItemOp(op),
         onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
         onProjDespawn: (ids) => this.netRemoveProjPuppets(ids),
@@ -15543,6 +15872,10 @@ export class Game implements GameHooks {
     if (this.net?.active && this.tickCount % 15 === 0) this.netChestPoll();
     // v3 实体同步：房主 NPC 快照 + 双向弹幕/掉落 + 傀儡清扫/接触伤害
     if (this.net?.active) {
+      // 拴绳实体（msg82 module13）：房主周期 PartialSync（= 原版 StreamNetUpdates
+      // :461-467，每 1024t 逐实体）+ 锚格巡检（访客破坏的 tile 落格不触发房主破坏链，
+      // 实体/记录须巡检兜底——见 netLeashedHostSweep）
+      if (this.net.policy.isHost && this.tickCount % 64 === 0) this.netLeashedHostSweep();
       if (this.tickCount % 4 === 0) {
         if (this.net.policy.isHost) this.netNpcBroadcast();
         this.netProjBroadcast();

@@ -44,6 +44,59 @@ const ARM_FRAME: ReadonlyArray<readonly [number, number]> = [
 const FULL_HAIR_HEADS = new Set([10, 12, 28, 42, 62, 97, 106, 113, 116, 119, 133, 138, 139, 163, 178, 181, 191, 198, 217, 218, 220, 222, 224, 225, 228, 229, 230, 232, 235, 238, 242, 243, 244, 245, 272, 273, 274, 277, 284, 290]);
 const HAT_HAIR_HEADS = new Set([13, 14, 15, 16, 18, 21, 24, 25, 26, 29, 40, 44, 51, 56, 59, 60, 63, 64, 65, 67, 68, 69, 81, 92, 94, 95, 100, 114, 121, 126, 130, 136, 140, 143, 145, 158, 159, 161, 182, 184, 190, 195, 215, 216, 219, 223, 226, 227, 231, 233, 234, 262, 263, 264, 265, 267, 275, 279, 280, 281, 286, 289, 292]);
 
+/** 发型层信息（发色剂渲染拆层用）：mode=隐藏时 null */
+export interface DollHairLayer {
+  mode: 'full' | 'alt';
+  /** 贴图名（Player_Hair_N / Player_HairAlt_N） */
+  src: string;
+  /** 后发层（backHairDraw :16771）——true 时全帧高先画、前发层只画顶部 26px */
+  back: boolean;
+}
+
+/** 头盔下的发型档（GetHairSettings；compositePaperDoll 与发色剂叠层共用同一判定） */
+export function dollHairLayer(a: Appearance, headIdx: number): DollHairLayer | null {
+  const mode = headIdx === 0 || FULL_HAIR_HEADS.has(headIdx) ? 'full' as const
+    : HAT_HAIR_HEADS.has(headIdx) ? 'alt' as const : null;
+  if (!mode) return null;
+  return {
+    mode,
+    src: mode === 'alt' ? `Player_HairAlt_${a.hair + 1}.png` : `Player_Hair_${a.hair + 1}.png`,
+    back: backHairDraw(a.hair),
+  };
+}
+
+/** 发色剂逐帧着色头发帧（40×56，动态染料每帧变色——不进 tintCache 防爆缓存）。
+ *  复用 tint() 的 multiply+destination-in 模式，输出为共享 scratch（当帧即用勿存） */
+export function hairFrameTinted(layer: DollHairLayer, row: number, color: { r: number; g: number; b: number }): HTMLCanvasElement | null {
+  const rect = UITextures.get(layer.src);
+  if (!rect) return null;
+  const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
+  const img = rect.img as HTMLImageElement;
+  const sc = hairScratch ??= document.createElement('canvas');
+  if (sc.width !== FRAME_W || sc.height !== FRAME_H) { sc.width = FRAME_W; sc.height = FRAME_H; }
+  const sctx = sc.getContext('2d')!;
+  sctx.imageSmoothingEnabled = false;
+  sctx.clearRect(0, 0, FRAME_W, FRAME_H);
+  sctx.drawImage(img, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
+  sctx.globalCompositeOperation = 'multiply';
+  sctx.fillStyle = `rgb(${color.r},${color.g},${color.b})`;
+  sctx.fillRect(0, 0, FRAME_W, FRAME_H);
+  sctx.globalCompositeOperation = 'destination-in';
+  sctx.drawImage(img, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);
+  sctx.globalCompositeOperation = 'source-over';
+  return sc;
+}
+
+/** 发色剂 scratch（每帧重画，contextlost 后内容自动补齐——勿缓存其结果） */
+let hairScratch: HTMLCanvasElement | null = null;
+
+/** 头甲贴图（Armor_Head_N.png；发色剂叠层时画在发层之后，与 composite 内层序一致） */
+export function headArmorImage(headIdx: number): HTMLImageElement | null {
+  if (!headIdx) return null;
+  const r = UITextures.get(`Armor_Head_${headIdx}.png`);
+  return r ? (r.img as HTMLImageElement) : null;
+}
+
 const cache = new Map<string, HTMLCanvasElement>();
 const tintCache = new Map<string, HTMLCanvasElement>();
 
@@ -94,17 +147,24 @@ function sheetRect(variant: number, sheet: number): HTMLImageElement | null {
   return r ? (r.img as HTMLImageElement) : null;
 }
 
-/** 合成完整帧表（含发型+装备）。equip 为原版物品 id（Armor_Head_/Armor_Legs_/Armor_Armor_ 贴图索引） */
-export function compositePaperDoll(a: Appearance, equip?: { head?: number | null; body?: number | null; legs?: number | null }): HTMLCanvasElement | null {
-  const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '');
+/** 合成完整帧表（含发型+装备）。equip 为原版物品 id（Armor_Head_/Armor_Legs_/Armor_Armor_ 贴图索引）。
+ *  opts.skipHair = 发色剂激活时拆层：头发与头甲都不进烘焙（调用方 hairFrameTinted/
+ *  headArmorImage 按 后发→本体→前发→头甲 层序叠画——动态染料逐帧变色，烘焙缓存无法承载） */
+export function compositePaperDoll(
+  a: Appearance,
+  equip?: { head?: number | null; body?: number | null; legs?: number | null },
+  opts?: { skipHair?: boolean },
+): HTMLCanvasElement | null {
+  const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
+    + (opts?.skipHair ? '|nohair' : '');
   const hit = cache.get(key);
   if (hit) return hit;
 
   // 发型模式（GetHairSettings）：无头盔=完整；fullHair 头盔=完整；hatHair=帽子发型；其余=隐藏
   const headIdx = equip?.head ?? 0;
-  const hairMode: 'full' | 'alt' | 'none' = headIdx === 0 || FULL_HAIR_HEADS.has(headIdx) ? 'full'
-    : HAT_HAIR_HEADS.has(headIdx) ? 'alt' : 'none';
-  const hairSrc = hairMode === 'alt' ? `Player_HairAlt_${a.hair + 1}.png` : `Player_Hair_${a.hair + 1}.png`;
+  const hairLayer = opts?.skipHair ? null : dollHairLayer(a, headIdx);
+  const hairMode: 'full' | 'alt' | 'none' = !hairLayer ? 'none' : hairLayer.mode;
+  const hairSrc = hairLayer ? hairLayer.src : '';
 
   // ---- 懒加载就绪预检(vanilla-ui 按需加载后必需):任一必需贴图未就绪 → 返回 null
   // 且【不缓存】(查询本身触发后台加载,消费方下帧重试)。否则首帧的空纸娃娃会被
@@ -223,8 +283,9 @@ export function compositePaperDoll(a: Appearance, equip?: { head?: number | null
     }
   }
 
-  // 头甲（Armor_Head_{id} 竖条 20 帧，画在头发之后——头盔覆盖发型）
-  if (equip?.head) {
+  // 头甲（Armor_Head_{id} 竖条 20 帧，画在头发之后——头盔覆盖发型）。
+  // skipHair 时一并让出（发色剂叠层路径由调用方在发层之后补画，保层序）
+  if (equip?.head && !opts?.skipHair) {
     const headArmor = UITextures.get(`Armor_Head_${equip.head}.png`);
     if (headArmor) {
       for (let row = 0; row < BODY_FRAMES; row++) {

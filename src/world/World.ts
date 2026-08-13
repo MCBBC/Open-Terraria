@@ -155,7 +155,7 @@ export class World {
    *  原版 TileEntity 体系的最小等价，锚点 = 物件左上格。见 world/FurnitureItems.ts */
   furnitureItems: FurnitureItemRecord[] = [];
   /** 读档/wld 导入携带的城镇 NPC（afterWorldLoad 原位生成后清空；原版 WorldFile town NPC 段） */
-  pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
+  pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
   // Boss 进度旗标
   flags: Record<string, boolean> = { downedEyeOfCthulhu: false, downedSkeletron: false, shadowOrbSmashed: false, hardMode: false };
   /** 已砸碎恶魔祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100 随存档持久化）：

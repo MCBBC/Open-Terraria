@@ -198,7 +198,16 @@ export enum BuffType {
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
+const BUFF_TIME_EXTENDED_BY_DEAD_CELLS = new Set([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,104,105,106,107,108,109,110,111,112,113,114,115,116,117,121,122,123,124,257,343]);
+
 const BUFF_TIME_EXTENDED_BY_DIFFICULTY = new Set([20, 22, 23, 24, 323, 30, 31, 32, 33, 35, 36, 39, 44, 324, 46, 47, 69, 70, 80]);
+
+/** 爆裂泡泡 371 接触授予的 Wet 时长（秒）（Player.cs:22239-22242 StatusFromNPC：
+ *  `AddBuff(103, 60 * Main.rand.Next(3, 8))`——Next 上界不含 → 60×{3..7}t
+ *  = 3-7 秒。★非"180+rand(300)"——以源码为准） */
+export function wetFromBubbleContact(rand: () => number = Math.random): number {
+  return 3 + Math.floor(rand() * 5);
+}
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
   [BuffType.Campfire]: { vanillaBuff: 87, descKey: 'Mods.SandboxWorld.Buff.Campfire.Desc', fallbackName: '篝火' },
@@ -446,10 +455,16 @@ export class BuffState {
    *  装备扫描（十字章族 885-904/1612/1613/1921/3781/5354）与 buff 驱动
    *  （黑曜石皮 1 → 免 24）每帧刷新；apply 门 = AddBuff :5052/:5068 */
   immuneVanilla = new Set<number>();
+  /** DeadCellsPotionStation 在场(:5206 buff 时长×1.2) */
+  deadCells = false;
   apply(type: BuffType, durationSec: number) {
     // buffImmune 门（AddBuff :5052——免疫则直接 return，不掉已有同类 buff）
     const vb = BUFF_DEFS[type]?.vanillaBuff;
     if (vb !== undefined && this.immuneVanilla.has(vb)) return;
+    // DeadCellsPotionStation(:5206-5209——buff 1-18,104-117,121-124,257,343 时长 ×1.2)
+    if (vb !== undefined && BUFF_TIME_EXTENDED_BY_DEAD_CELLS.has(vb) && durationSec > 0 && this.deadCells) {
+      durationSec *= 1.2;
+    }
     // D2 专家/大师 debuff 时长缩放（Player.cs:5211-5215+GameDifficultyData.cs:71:
     // BuffTimeIsExtendedWithGameDifficulty {20,22,23,24,323,30,31,32,33,35,36,39,44,324,46,47,69,70,80}
     // → Expert ×2 / Master ×2.5——仅时长,DoT 伤害不缩。2026-08-13）

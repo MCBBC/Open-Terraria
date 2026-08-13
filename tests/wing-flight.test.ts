@@ -70,16 +70,3 @@ describe('翅膀爬升', () => {
 
 
 
-describe('诊断8', () => {
-  it('flap trace', () => {
-    const { p, hooks } = makePlayer();
-    for (let i = 0; i < 60; i++) p.fixedUpdate(1 / 60, hooks);
-    p.inputJump = true;
-    for (let t = 0; t < 30; t++) {
-      p.fixedUpdate(1 / 60, hooks);
-      if (t >= 5 && t <= 20) {
-        console.log(`t${t}: y=${p.y.toFixed(0)} vy=${p.vy.toFixed(2)} jumpHold=${p.jumpHold} wingTime=${p.wingTime} ground=${p.onGround} inJ=${p.inputJump}`);
-      }
-    }
-  });
-});

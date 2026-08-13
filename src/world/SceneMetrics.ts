@@ -101,6 +101,7 @@ export interface SceneFlags {
   zoneGlowshroom: boolean;
   zoneMeteor: boolean;
   zoneGraveyard: boolean;
+  zoneShadowCandle: boolean;   // tile 646 暗影蜡烛（NPC.cs:328-333）
   zoneDungeon: boolean;
   zoneTemple: boolean;
   zoneBeach: boolean;
@@ -176,7 +177,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneCorrupt: false, zoneCrimson: false, zoneHallow: false, zoneJungle: false,
   zoneSnow: false, zoneDesert: false, snowTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
   zoneGlowshroom: false, zoneMeteor: false,
-  zoneGraveyard: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
+  zoneGraveyard: false, zoneShadowCandle: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
   zoneUndergroundDesert: false, townNPCCount: 0,
   musicBoxStyle: -1, fountainColor: -1, monolithType: -1, bloodMoonMonolith: false, partyUp: false,
   hasSunflower: false,
@@ -302,6 +303,7 @@ export function scanScene(
   const jungle = countSet(counts, JUNGLE_TILES);
   const snow = countSet(counts, SNOW_TILES);
   const mushroom = countSet(counts, MUSHROOM_TILES);
+  const shadowCandleCount = counts.get(646) ?? 0;   // ShadowCandle tile 646
   const meteor = countSet(counts, METEOR_TILES);
   const dungeonTiles = countSet(counts, DUNGEON_TILES);
   // ShimmerTileCount/HoneyBlockCount/PartyMonolithCount（cs:601/621）
@@ -375,6 +377,7 @@ export function scanScene(
     zoneGlowshroom: mushroom >= MUSHROOM_THRESHOLD,
     zoneMeteor: meteor >= METEOR_THRESHOLD,
     zoneGraveyard: graveyard >= GRAVEYARD_THRESHOLD,
+    zoneShadowCandle: shadowCandleCount > 0,   // tile 646
     zoneDungeon,
     zoneTemple: centerWall === 87,
     zoneBeach,

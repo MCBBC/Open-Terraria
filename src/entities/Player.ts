@@ -35,6 +35,7 @@ import { hslToRgb } from '../player/Appearance';
 import {
   MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind, MountShot,
 } from './Mounts';
+import { flameParticles } from '../fx/FlameParticles';
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -126,6 +127,10 @@ export class Player extends Entity {
   hostile = false;
   /** 队伍 0-5（Player.cs:1312 team，PlayerTeamID：0 无/1 红/2 绿/3 蓝/4 黄/5 粉紫；存档持久） */
   team = 0;
+  /** 发色剂槽（Player.cs:2412 hairDye byte——染料 shaderId 1..12，0=无/去除剂清除；
+   *  使用发色剂物品赋值 Player.cs:42179-42186，随存档持久化 :53805-53808）。
+   *  原版无装备槽位——使用即换色，清除走 1990 去除剂 */
+  hairDye = 0;
   /** 上一 tick PvP 死亡标记（Player.cs:1250 pvpDeath：KillMe 时若 pvp 置位——
    *  死亡不掉钱 + 复活满血/300t 无敌/跳过 Boss 延迟，:38208/:38321/:37223/:38388） */
   lastPvpDeath = false;
@@ -432,6 +437,7 @@ export class Player extends Entity {
     rocketBoots: number; autoJump: boolean; fireWalk: boolean;
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
     frostBurn: boolean;   // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
+    huntressT2: boolean;  // 女猎手 T2/T3（setHuntressT2 :16119/:16149）：爆炸机关弹 Oiled 门
     anglerSetSpawnReduction: boolean;   // 渔夫套：生成环 ×1.3/×0.7（NPC.cs:627-630）
     iceSkate: boolean;   // 冰刀族 950/1861/1862/5000：冰面不滑+加速（:26237-26255）
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
@@ -737,6 +743,9 @@ export class Player extends Entity {
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     manaCostMul *= setManaCostMul;   // DD2 散件魔耗乘区并入(2026-08-13)
     }
+    // 女猎手 T2/T3 套装旗标（setHuntressT2,Player.cs:16119/:16149——爆炸机关弹
+    // 694-696 的 Oiled 门,StatusNPC :10786;由 MinionProj 经 ctx 传入 applyProjStatus）
+    let huntressT2 = false;
     // 召唤系套装（SUMMON_SET 槽序键；散件效果已在上扫，此处只叠套装层）
     const summonSet = (() => {
       const st0 = statOfInternal(this.inv.armor[0]?.id ?? -1);
@@ -749,6 +758,7 @@ export class Player extends Entity {
       if (s.sentry) sentrySlots += s.sentry;
       if (s.dmg) minionDmg += s.dmg;
       if (s.whipRange) whipRange += s.whipRange;
+      if (s.huntressT2) huntressT2 = true;
       return s;
     })();
     // 天界石族复合（Player.cs:12558-12570：life+2/def+4/近战速+10%/全系伤+10%/全系暴+2%）
@@ -756,6 +766,25 @@ export class Player extends Entity {
       life += 2; def += 4; meleeSpeed += 0.1;
       dmgMelee += 0.1; dmgRanged += 0.1; dmgMagic += 0.1;
       critMelee += 2; critRanged += 2; critMagic += 2;
+    }
+    // buffImmune 刷新（Player.cs:14911-15003 装备段 + :9576-9578 黑曜石皮 buff 段；
+    // buff 103 Wet 的 buffImmune[24]/[323]/[67] 见 UpdateBuffs :11342-11346——水行族
+    // 授予三段火免疫）。★必须在下方 return 之前执行（曾位于 return 之后成死代码，
+    // 黑曜石皮/Wet 免疫全灭）。空集路径 O(1) 清零
+    const immuneDirty = immuneBuffs.size > 0
+      || this.buffs.immuneVanilla.size > 0
+      || this.buffs.has(BuffType.ObsidianSkin)
+      || this.buffs.has(BuffType.Wet);
+    if (immuneDirty) {
+      this.buffs.immuneVanilla = new Set(immuneBuffs);
+      if (this.buffs.has(BuffType.ObsidianSkin)) this.buffs.immuneVanilla.add(24);   // :9577
+      // Wet 103：着火 24 / 地狱火 323 / 燃烧 67 免疫（Player.cs:11344-11346——
+      // UpdateBuffs 内 buffType==103 分支逐帧置位，DrippingSlime 同族语义）
+      if (this.buffs.has(BuffType.Wet)) {
+        this.buffs.immuneVanilla.add(24);
+        this.buffs.immuneVanilla.add(323);
+        this.buffs.immuneVanilla.add(67);
+      }
     }
     return {
       def, mana, hpPerSec: life / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）
@@ -766,6 +795,7 @@ export class Player extends Entity {
       extraFall, lavaMax, armorPen, rocketBoots,
       autoJump, fireWalk, noKnockback, noFallDmg, desertBoots,
       frostBurn,
+      huntressT2,                // 女猎手 T2/T3（setHuntressT2 :16119/:16149）
       anglerSetSpawnReduction,   // 渔夫套生成环（NPC.cs:627-630）
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
@@ -795,15 +825,6 @@ export class Player extends Entity {
       summonSet,
       divingHelm, merman, arcticDivingGear, jellyfishGlow,
     };
-    // buffImmune 刷新（Player.cs:14911-15003 装备段 + :9576-9578 黑曜石皮 buff 段；
-    // buff 103 水行族授予的 24/323/67 依赖 103 buff 跟踪，登记）。空集路径 O(1) 清零
-    const immuneDirty = immuneBuffs.size > 0
-      || this.buffs.immuneVanilla.size > 0
-      || this.buffs.has(BuffType.ObsidianSkin);
-    if (immuneDirty) {
-      this.buffs.immuneVanilla = new Set(immuneBuffs);
-      if (this.buffs.has(BuffType.ObsidianSkin)) this.buffs.immuneVanilla.add(24);   // :9577
-    }
   }
   get maxHp(): number {
     // 生命力药水（Lifeforce :9883）：statLifeMax2 += statLifeMax/5/20*20 → +20%（按 20 取整）
@@ -1034,14 +1055,39 @@ export class Player extends Entity {
         game.spawnBurst?.(x, y, type === 6 ? '#8C6A4A' : '#D8D0E0', n, 3, 0, Math.PI * 2,
           { life: 30, grav: 0 });
       },
-      // 山羊火焰（ParticleOrchestrator WallOfFleshGoatMountFlames :3892-3895——
-      // 编排器未实装，火焰色粒子近似，登记）
+      // 山羊火焰（ParticleOrchestrator.WallOfFleshGoatMountFlames :3892-3895 引用，
+      //  Spawn_WallOfFleshGoatMountFlames 编排器定义 ParticleOrchestrator.cs:3259-3306）：
+      //  3 束 FlameParticle（x = 入参 ±5.3333335px，零速，scale 0.1-1.0，TTL 50，
+      //  贴图 326/327/328——本体层已 1:1 落地 src/fx/FlameParticles.ts，绘制走
+      //  Renderer.drawFlameParticles = Main.ParticleSystem_World_BehindPlayers）+
+      //  每束 1/8 概率 dust 6（NewDustDirect(vector,4,4,6,0,0,α100) 后 velocity×0.6、
+      //  vy-1.2、y-4、noLight；50% noGravity+fadeIn1.15 / 50% scale0.6）——尘段 1:1。
       goatFlames: (x, y) => {
-        game.spawnBurst?.(x, y, '#FF7020', 6, 2.2, -Math.PI / 2, Math.PI / 3, { life: 24, grav: -0.02 });
+        // FlameParticle 本体层（编排器 :3262-3290 的三束段）
+        flameParticles.spawnGoatFlames(x, y);
+        const pool = game.vanillaDust;
+        if (!pool) return;   // 无尘池（测试桩）：尘段静默跳过（火焰本体层不受影响）
+        for (let i = -1; i <= 1; i++) {
+          const vx0 = x + i * 5.3333335;                     // :3269 三束同偏移
+          if (Math.floor(Math.random() * 8) !== 0) continue;   // :3292 Next(8)==0
+          const d = pool.spawn(vx0, y, 4, 4, 6, 0, 0, 100);
+          if (!d) continue;
+          if (Math.floor(Math.random() * 2) === 0) {           // :3293 Next(2)==0
+            d.noGravity = true;
+            d.fadeIn = 1.15;
+          } else {
+            d.scale = 0.6;
+          }
+          d.vx *= 0.6;                                          // :3299 velocity *= 0.6
+          d.vy = d.vy * 0.6 - 1.2;                              // :3300 velocity.Y -= 1.2
+          d.noLight = true;                                     // :3301
+          d.y -= 4;                                             // :3302 position.Y -= 4
+        }
       },
       fishron: {
         hp: this.hp, maxHp: this.maxHp,
         inWater: this.inWater, inLava: this.inLava, inHoney: this.inHoney,
+        dripping: this.buffs.has(BuffType.Wet),  // Player.dripping（buff 103 Wet 激活 :11342）
         raining,
         windExposed: raining && !!st
           && inAPlaceWithWind(st, this.x, this.y, this.w, this.h, game.world.groundLevel),
@@ -1217,6 +1263,10 @@ export class Player extends Entity {
     const canWaterWalk = this.equipStats.waterWalk || this.buffs.canWaterWalk;
     const lavaProbeH = canWaterWalk ? this.h - 6 : this.h;
     this.inLava = liquidCollision(world.store, this.x, this.y, this.w, lavaProbeH, 2); // LavaCollision 盒判定
+    // Wet 103：浸岩浆即刻移除（UpdateBuffs :11335-11338 `if (lavaWet) DelBuff(j)`——
+    // 岩浆蒸干一身水。★须在 inLava 判定同帧执行（原版 Collision 先于 UpdateBuffs），
+    // 放 buffs.tick 前会因 inLava 滞后一帧）
+    if (this.inLava && this.buffs.has(BuffType.Wet)) this.buffs.remove(BuffType.Wet);
     // 蜂蜜浸入（Player.cs:27436：Collision.honey 命中 → AddBuff(48, 1800t=30s) + honeyWet）。
     // 判定 = Collision.WetCollision（Collision.cs:1573-1625）：**全身盒**扫蜂蜜格且
     // liquid>0（任一残量即算）——曾只查脚底单格且 liq>30，脚不沾蜜但身体没入时漏判。

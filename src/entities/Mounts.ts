@@ -220,6 +220,16 @@ export const SCUTLIX_EYE_FRAME_MAX = 10;
 /** 猪鲨崽（mount 12）MountFishronSpecial 计数器档位（Mount.cs UpdateEffects :4998/:5003） */
 export const FISHRON_COUNTER_LOW_HP = 60;
 export const FISHRON_COUNTER_WET = 420;
+/** Mount.Draw case 12 drawType 0（:5780-5787）背层液色渐变的计数器满格值：
+ *  num8 = clamp(MountFishronSpecialCounter/60, 0, 1)——离水/离雨后 60t 内渐隐 */
+export const FISHRON_WASH_TICKS = 60;
+
+/** 背层液色渐变因子（Mount.Draw case 12 :5780-5787）：
+ *  `color = CurrentLiquidColor(透明则 White); color.A = 127; color *= num8`——
+ *  渲染层以本因子同时乘 RGB 与 alpha（等价 `color *= num8` 的整色缩放） */
+export function fishronWashFactor(counter: number): number {
+  return Math.max(0, Math.min(1, counter / FISHRON_WASH_TICKS));
+}
 
 /** updateMountEffects 的每 tick 上下文（Player 侧组装：敌怪盒/视线/天气/发射桶） */
 export interface MountEffectsCtx {
@@ -234,8 +244,13 @@ export interface MountEffectsCtx {
   /** 冲刺尘（UpdateFrame case 10/47 :3855-3873：14 粒环向尘——原版为 176/177/179（独角兽）
    *  或 6（山羊）dust + shader 着色；本仓以原版 dust 池/程序粒子近似） */
   dashDust?(x: number, y: number, n: number, spreadPx: number, type: 6 | 176 | 177 | 179): void;
-  /** 山羊火焰粒子（:3888-3896 ParticleOrchestrator WallOfFleshGoatMountFlames——
-   *  地面冲刺且落脚格实心无液时；本仓以火焰色粒子近似） */
+  /** 山羊火焰粒子（:3888-3896 ParticleOrchestrator.WallOfFleshGoatMountFlames，
+   *  Spawn_WallOfFleshGoatMountFlames ParticleOrchestrator.cs:3259-3306——地面冲刺
+   *  且落脚格 SolidTileAllowBottomSlope+无液时）。入参 = PositionInWorld
+   *  (tx×16+8, ty×16+16)；编排器模式 = 3 束 FlameParticle（x 偏移 ±5.33px）+
+   *  每束 1/8 概率 dust 6（alpha100、velocity×0.6 后 vy-1.2、y-4、noLight）
+   *  ——FlameParticle 贴图层（弹 326/327/328）为本仓未建模的独立粒子系统，
+   *  由消费方以 vanillaDust 近似承载视觉，登记 */
   goatFlames?(x: number, y: number): void;
   fishron: FishronView;
 }
@@ -424,6 +439,63 @@ function smoothSlopeOne(st: SlopeStore, x: number, y: number): void {
 }
 
 export const drillBeamIdle = (): DrillBeam => ({ tx: -1, ty: -1, cooldown: 0, purpose: 0 });
+
+/** WorldGen.SolidTile 系列的最小世界视图（MountedPlayerView.store 结构化超集——
+ *  声明类型只有 inBounds/idx/flags/isSolid，type/half/slope/frameX 经结构化 cast
+ *  读取，缺省字段按 0 处理） */
+export interface SolidTileView {
+  inBounds(x: number, y: number): boolean;
+  idx(x: number, y: number): number;
+  flags: ArrayLike<number>;
+  type: ArrayLike<number>;
+  isSolid(x: number, y: number): boolean;
+  half?: ArrayLike<number>;
+  slope?: ArrayLike<number>;
+  frameX?: ArrayLike<number>;
+}
+
+/** WorldGen.SolidTile(int,int)（WorldGen.cs:70155-70176）1:1：
+ *  active && tileSolid && !tileSolidTop(平台) && !halfBrick && slope==0 && !inActive
+ *  ——半砖/坡面/平台都【不算】实心（猪鲨崽点光落点门 Mount.cs:4984 消费）。
+ *  store.isSolid 已含 solid+致动双查，此处复用作 active/solid/inActive 门，
+ *  再补 platform/half/slope 三项排除 */
+export function solidTileAt(st: SolidTileView, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) return false;   // 越界 / !active
+  if (!st.isSolid(x, y)) return false;                               // !inActive（含 solid 复查）
+  const i = st.idx(x, y);
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || d.platform) return false;                                // !tileSolidTop
+  if ((st.half?.[i] ?? 0) !== 0) return false;                       // !halfBrick
+  if ((st.slope?.[i] ?? 0) !== 0) return false;                      // slope() == 0
+  return true;
+}
+
+/** WorldGen.SolidTileAllowBottomSlope(int,int)（WorldGen.cs:70172-70194）1:1：
+ *  active && (tileSolid || tileSolidTop) && (!topSlope || 平台且帧合法)
+ *  && !halfBrick && !inActive——平台/顶坡放行（山羊火焰落脚门 Mount.cs:3893 消费）。
+ *  ★InWorld 门外返回 true（原版怪癖，照抄） */
+export function solidTileAllowBottomSlopeAt(st: SolidTileView, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;                               // :70177-70180 InWorld 门外 true
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;                                    // !active
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !(d.solid || d.platform)) return false;                  // tileSolid || tileSolidTop
+  if (!st.isSolid(x, y)) return false;                               // !inActive
+  if ((st.half?.[i] ?? 0) !== 0) return false;                       // !halfBrick
+  const slope = st.slope?.[i] ?? 0;
+  const topSlope = slope === 1 || slope === 2;                       // Tile.topSlope()（Tile.cs:320-328）
+  if (topSlope && !(d.platform && platformProperTopFrame(st.frameX?.[i] ?? 0))) return false;
+  return true;
+}
+
+/** WorldGen.PlatformProperTopFrame（WorldGen.cs:70197-70209）：列号 =
+ *  frameX/PlatformFrameWidth()，合法 = 0-7 / 12-16 / 25-26。★除数是 18 非 16
+ *  （PlatformFrameWidth = _data[19].CoordinateFullWidth = (16+2)×1，Tiles_19.png
+ *  486px=27 帧×18px 实证——同 world/gen/vanilla/GemPasses.ts 同名实现） */
+function platformProperTopFrame(frameX: number): boolean {
+  const n = Math.trunc(frameX / 18);
+  return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
+}
 
 /** CanKillTile 追加子项（WorldGen.cs:62316-62358）的运行期上下文。
  *  由钻头智能光标链（Game.updateDrillMountUse → useDrill → drillBlockTarget）注入；
@@ -1174,12 +1246,16 @@ export class MountInstance {
       }
     }
     if (this.type === 47 && this.dashing && p.vy === 0 && ctx.goatFlames && p.store) {
-      // :3885-3896：落脚格实心且无液才发（WorldGen.SolidTileAllowBottomSlope 近似 = solid）
-      const tx = Math.floor((p.x + p.w / 2) / TILE), ty = Math.floor((p.y + p.h - 1) / TILE) + 1;
+      // :3885-3896：落脚格 = (Center.X/16, (Y+H-1)/16)+1 须 active 且无液体且
+      // SolidTileAllowBottomSlope（平台/顶坡放行，半砖/致动不放行）才发火焰编排器。
+      // 火焰出生点 = (tx×16+8, ty×16+16)——旧实现漏 +16 纵向偏移（已对齐）
+      const tx = Math.trunc((p.x + p.w / 2) / TILE);
+      const ty = Math.trunc((p.y + p.h - 1) / TILE) + 1;
       const st = p.store;
-      if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)
-        && !(st as unknown as { liquid?: ArrayLike<number> }).liquid?.[st.idx(tx, ty)]) {
-        ctx.goatFlames(tx * TILE + 8, ty * TILE);
+      if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)]
+        && !(st as unknown as { liquid?: ArrayLike<number> }).liquid?.[st.idx(tx, ty)]
+        && solidTileAllowBottomSlopeAt(st as unknown as SolidTileView, tx, ty)) {
+        ctx.goatFlames(tx * TILE + 8, ty * TILE + TILE);
       }
     }
   }
@@ -1705,13 +1781,16 @@ export interface MountLight {
 
 export interface MountLightCtx {
   /** Colors.CurrentLiquidColor 近似（0-255 RGB；猪鲨崽光/背层渐染用）。玩家当前
-   *  浸入液体取其色，未浸入取当前群系水色——原版 liquidAlpha 渐变未建模（登记） */
+   *  浸入液体取其色，未浸入取当前群系水色。背层液色渐变（Mount.Draw case 12
+   *  drawType 0 :5780-5787，alpha = 127/255×clamp(计数器/60,0,1)）由渲染层
+   *  drawMountLayer 以 mnt.fishronCounter 直读实现 */
   liquidColor: [number, number, number];
   /** worldSurface 格线（蜥蜴地下红光门 :4077 position.Y > worldSurface*16+160） */
   worldSurface: number;
   /** miscCounter（扫帚挂件摆动相位 :3553；缺省 0） */
   miscCounter?: number;
-  /** WindForVisuals（扫帚挂件风摆项 :3553；缺省 0 = 无风近似，登记） */
+  /** WindForVisuals（Main.cs:2896 = windSpeedCurrent，±0.8——扫帚挂件风摆项
+   *  :3553；由渲染层传 weather.windSpeedCurrent，缺省 0 = 无风近似） */
   wind?: number;
 }
 
@@ -1788,13 +1867,14 @@ export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLi
       break;
     }
     case 12: {
-      // 增益态液色光（:4981-4991）：身前点（速度外推 10 帧），实心则退回身侧
+      // 增益态液色光（:4981-4991）：身前点（速度外推 10 帧），实心则退回身侧。
+      // 落点门 = WorldGen.SolidTile（:4984）——半砖/坡面/平台（solidTop）与致动
+      // 缩入态均不算实心（旧实现只查 flags+isSolid，半砖/坡面误判实心）
       if (m.fishronBoost) {
         const [lr, lg, lb] = [lc[0] / 255 * 0.4, lc[1] / 255 * 0.4, lc[2] / 255 * 0.4];
         const fx = cx + p.facing * 20 + p.vx * 10, fy = cy + p.vy * 10;
         const tx = Math.trunc(fx / 16), ty = Math.trunc(fy / 16);
-        const st = p.store;
-        const solid = !!st && st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty);
+        const solid = !!p.store && solidTileAt(p.store as unknown as SolidTileView, tx, ty);
         if (!solid) out.push({ tx, ty, r: lr, g: lg, b: lb });
         else out.push({ tx: Math.trunc((cx + p.facing * 20) / 16), ty: Math.trunc(cy / 16),
           r: lr, g: lg, b: lb });

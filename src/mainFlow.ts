@@ -285,6 +285,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.deathsPve !== undefined) g.player.deathsPve = player.deathsPve; // PL:53840
     if (player.anglerQuestsFinished !== undefined) g.player.anglerQuestsFinished = player.anglerQuestsFinished; // PL:1790
     if (Array.isArray(player.hideInfo)) g.player.hideInfo = player.hideInfo; // PL:776 hideInfo[13]
+    if (player.hairDye !== undefined) g.player.hairDye = player.hairDye;   // PL:53805-53808 发色剂 byte（旧档缺省 0）
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示
     g.cb.onInventoryChanged();

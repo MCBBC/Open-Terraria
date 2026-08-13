@@ -1897,10 +1897,16 @@ export class LunarOrb extends Entity {
     const img = projFrameImg(this.kind, this.kind === 574 ? 1 : this.frame);
     ctx.save();
     ctx.translate(this.cx, this.cy);
+    // 539 旋转分两段（AI_102）：盘旋期 vx*0.1（:32135）/冲刺期向 ToRotation+π/2 收敛
+    // （:32230 AngleLerp 0.4）;574 向瞄准向 ToRotation+π/2 收敛（:32167）。此处 539 恒用
+    // 盘旋档（冲刺段姿态差登记偏差）
     ctx.rotate(this.kind === 539 ? this.vx * 0.1 : Math.atan2(this.vy, this.vx) + Math.PI / 2);
     ctx.imageSmoothingEnabled = false;
-    if (img) ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.h);
-    else {
+    if (img) {
+      // 原生帧 × scale=1（SetDefaults 539/574 无 scale;origin = 帧格 Size/2,Main.cs:32812
+      // 列表族 :32889）。曾归一到判定盒 18×30/18×18 → 539 纵横比失真（G11）
+      ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
+    } else {
       ctx.fillStyle = this.kind === 539 ? '#8FE8FF' : '#C060FF';
       ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
     }

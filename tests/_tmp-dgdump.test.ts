@@ -3,9 +3,9 @@ import { describe, it } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { runResetAndTerrain } from '../src/world/gen/WorldGen';
 import { runDunesPass } from '../src/world/gen/vanilla/DunesPass';
-import { runOceanSandPass, runBeachesPass } from '../src/world/gen/vanilla/BeachPass';
+import { runOceanSandPass } from '../src/world/gen/vanilla/BeachPass';
 import { runSandPatchesPass, runTunnelsPass, runDirtWallBgPass, runSmallHolesPass } from '../src/world/gen/vanilla/MissingCavesPass';
-import { runMountCavesPass, runMountainCavesPass } from '../src/world/gen/vanilla/MountCavesPass';
+import { runMountCavesPass } from '../src/world/gen/vanilla/MountCavesPass';
 import { runRocksAndClayPass, runCavesPass } from '../src/world/gen/vanilla/CavesPass';
 import { runIceBiomePass, runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
 import { runGrassPass } from '../src/world/gen/vanilla/GrassPass';
@@ -22,9 +22,12 @@ import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
 import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
-import { TILE_BY_KEY } from '../src/data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 
 const TARGET = process.env.DG_TARGET ?? 'dungeonL';
+const VID = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let i = 0; i < TILE_DEFS.length; i++) { const sh = TILE_DEFS[i]?.vanilla?.sheet; if (typeof sh === 'number') VID[i] = sh; }
+
 describe('tmp dungeon dump', () => {
   it('dumps grids at ' + TARGET, () => {
     const { world, rng, gs } = runResetAndTerrain({ width: 4200, height: 1200, seedText: '9293480', evil: 0 });
@@ -58,7 +61,9 @@ describe('tmp dungeon dump', () => {
     runSlushPass(st, gs);
     runDungeonPass(st, rng, gs, world.chests, (name) => {
       if (name !== TARGET) return;
-      writeFileSync('/tmp/js-dg.typ', Buffer.from(new Uint8Array(st.type.buffer, st.type.byteOffset, st.type.byteLength)));
+      const mapped = new Uint16Array(st.type.length);
+      for (let i = 0; i < st.type.length; i++) { const v = VID[st.type[i]]; mapped[i] = v < 0 ? 0x7fff : v; }
+      writeFileSync('/tmp/js-dg.typ', Buffer.from(mapped.buffer, mapped.byteOffset, mapped.byteLength));
       writeFileSync('/tmp/js-dg.act', Array.from(st.flags, f => (f ? '1' : '0')).join(''));
       writeFileSync('/tmp/js-dg.wall', Array.from(st.wall).join(','));
       console.log('DUMPED at', name);

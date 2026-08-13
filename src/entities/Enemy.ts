@@ -731,13 +731,15 @@ export class Enemy extends Entity {
   venomT = 0;
   cursedT = 0;
   /** Frostburn(44)/Frostburn2(324)/OnFire3(323)/ShadowFlame(153)/Oiled(204)
-   *  （NPC.cs UpdateNPC_BuffDOT：44→lifeRegen-16=8HP/s / 324→-50=25HP/s /
-   *   323→-30=15HP/s / 153→-30=15HP/s；Oiled 使六火系 DoT 翻倍 :93728-93731） */
+   *  （NPC.cs UpdateNPC_BuffApplyDOTs：44→lifeRegen-16=8HP/s(:92648) / 324→-50=25HP/s
+   *  (:92668) / 323→-30=15HP/s(:92632) / 153→-30=15HP/s(:92712)。
+   *  Oiled(:92728-92737) = 六火系任意在身时【再叠 -50 = +25 HP/s】,flat 加算
+   *  非"翻倍"(旧实现按倍率,2026-08-13 G7 回源修正) */
   frostburnT = 0;    frostburnDoT = 0;
   frostburn2T = 0;   frostburn2DoT = 0;
   onFire3T = 0;      onFire3DoT = 0;
   shadowFlameT = 0;  shadowFlameDoT = 0;
-  oiledT = 0;
+  oiledT = 0;        oiledDoT = 0;
   /** BrokenArmor(36)=受击无视 20 防 / BetsysCurse(203)=无视 40 防
    *  (NPC.cs:81919-81924 armorPenetration += 20/40);Daybreak(189) 单层近似
    *  (原版层数模型:场上 636 太阳耀斑数 num8,DoT=num8×200 lifeRegen=100HP/s/层,
@@ -745,18 +747,24 @@ export class Enemy extends Entity {
   brokenArmorT = 0;
   betsysCurseT = 0;
   daybreakT = 0;  daybreakDoT = 0;
-  /** R2 余量批(NPC.cs UpdateNPC_BuffDOT 逐条):Bleeding(30)=-24=12HP/s(:92598)/
+  /** R2 余量批(NPC.cs UpdateNPC_BuffApplyDOTs 逐条):Bleeding(30)=-24=12HP/s(:92598)/
    *  Hemorrhage(375)=-200=100HP/s(:92610)。骨标(169)/触手刺(337)/血腥屠夫(344)
-   *  =层数模型(附着弹 598/971/975 每 6/6/8 lifeRegen,:92740/:92761/:92788)——
+   *  =层数模型(附着弹 598/971/975 每 6/6/8 lifeRegen,:92740/:92761/:92786)——
    *  repo 无附着弹计数,取单层 3/3/4 HP/s 近似,层数叠加登记 GAP(同 Daybreak)。
-   *  137 Slimed = 着火段叠加 DoT（见 onFireT 块）;151 SoulDrain 依赖魂镰 3006、
-   *  183 StardustBleed 依赖星尘细胞实体——双依赖登记 GAP */
+   *  137 Slimed = 六火系 DoT 翻倍(drippingSlime 六处等量叠伤,见 onFireT 块)。
+   *  151 SoulDrain = -50 lifeRegen = 25 HP/s(:92927-92935,realLife==-1 即非蠕虫
+   *  分体)——玩家侧魂镰联动(3006 持械挥击时 player.soulDrain++ 计数,
+   *  UpdateNPC_SoulDrainDebuff :91952-91979)依赖魂镰实装,登记 GAP。
+   *  183 StardustBleed = 层数模型(附着 614 每 40 lifeRegen=20HP/s/层,
+   *  :92846-92863)——repo 614 为无附着态 Arrow,取单层 20 HP/s,层数 GAP(同上) */
   slimedT = 0;
   bleedT = 0;      bleedDoT = 0;
   hemorrhageT = 0; hemorrhageDoT = 0;
   javelinT = 0;    javelinDoT = 0;
   spikeT = 0;      spikeDoT = 0;
   butcherT = 0;    butcherDoT = 0;
+  soulDrainT = 0;  soulDrainDoT = 0;
+  stardustT = 0;   stardustDoT = 0;
   poisonDoT = 0;
   venomDoT = 0;
   cursedDoT = 0;
@@ -1213,15 +1221,22 @@ export class Enemy extends Entity {
         this.shimmerT = Math.max(0, this.shimmerT - 0.1);
       }
     }
-    // onFire DoT（NPC.cs:92619:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
-    // Oiled(:93728)使 onFire/onFire2/onFire3/frostburn/frostburn2/shadowFlame 六系翻倍
-    // Slimed(137,：92623)在 onFire 段再叠 -8 → +4 HP/s（凝胶易燃）；slimedT 独立递减
-    const oiledMul = this.oiledT > 0 ? 2 : 1;
+    // onFire DoT（NPC.cs:92616-92630:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
+    // Slimed(137 = drippingSlime,凝胶易燃):六火系每系再叠等量 lifeRegen → 各系 DoT 翻倍
+    //  （:92623-92624 onFire / :92633-92635 onFire3 / :92643-92645 frostburn /
+    //    :92655-92657 frostburn2 / :92667-92669 onFire2 / :92684-92686 shadowFlame）
+    // Oiled(204):六火系任意在身时【flat 再叠 -50 = +25 HP/s】(:92728-92737)——
+    //  非"按系翻倍"(旧 oiledMul=2 系误读,2026-08-13 G7 回源修正);slimedT 独立递减
+    const slimedMul = this.slimedT > 0 ? 2 : 1;
+    // Oiled 的 -50 是【单块一次性】(:92728-92737),多火系并存时不得按系重复叠——
+    // 独立 oiledDoT 累加器结算,不并入各系
+    const fireOn = this.onFireT > 0 || this.cursedT > 0 || this.onFire3T > 0
+      || this.frostburnT > 0 || this.frostburn2T > 0 || this.shadowFlameT > 0;
+    if (this.oiledT > 0 && fireOn) this.oiledDoT += 25 * dt;
     if (this.slimedT > 0) this.slimedT -= dt;
     if (this.onFireT > 0) {
       this.onFireT -= dt;
-      this.onFireDoT += 4 * dt * oiledMul;
-      if (this.slimedT > 0) this.onFireDoT += 4 * dt;   // drippingSlime 叠伤（:92623-92624）
+      this.onFireDoT += 4 * slimedMul * dt;
       if (this.onFireDoT >= 1) {
         const n = Math.floor(this.onFireDoT);
         this.onFireDoT -= n;
@@ -1237,15 +1252,17 @@ export class Enemy extends Entity {
       }
     }
 
-    // ---- 武器浸剂 debuff 滴血（R2，NPC.cs:92585/92697/92708 DoT 同 onFire 模式） ----
+    // ---- 武器浸剂 debuff 滴血（R2，NPC.cs:92585/92703/92684 DoT 同 onFire 模式） ----
     if (this.poisonT > 0) { this.poisonT -= dt; this.poisonDoT += 6 * dt; }
     if (this.venomT > 0) { this.venomT -= dt; this.venomDoT += 30 * dt; }
-    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += 24 * dt * oiledMul; } // onFire2 亦吃 Oiled(:93728)
-    // 四新系(NPC.cs:44→8HP/s / 324→25HP/s / 323→15HP/s / 153→15HP/s,均吃 Oiled 翻倍)
-    if (this.frostburnT > 0) { this.frostburnT -= dt; this.frostburnDoT += 8 * dt * oiledMul; }
-    if (this.frostburn2T > 0) { this.frostburn2T -= dt; this.frostburn2DoT += 25 * dt * oiledMul; }
-    if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += 15 * dt * oiledMul; }
-    if (this.shadowFlameT > 0) { this.shadowFlameT -= dt; this.shadowFlameDoT += 15 * dt * oiledMul; }
+    // 六火系:各自基档 × slimedMul(cursed=onFire2 亦吃 Slimed 翻倍)
+    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += 24 * slimedMul * dt; }
+    // 四新系(NPC.cs:44→8HP/s(:92648) / 324→25HP/s(:92668) / 323→15HP/s(:92632) /
+    //  153→15HP/s(:92712),各吃 Slimed 翻倍)
+    if (this.frostburnT > 0) { this.frostburnT -= dt; this.frostburnDoT += 8 * slimedMul * dt; }
+    if (this.frostburn2T > 0) { this.frostburn2T -= dt; this.frostburn2DoT += 25 * slimedMul * dt; }
+    if (this.onFire3T > 0) { this.onFire3T -= dt; this.onFire3DoT += 15 * slimedMul * dt; }
+    if (this.shadowFlameT > 0) { this.shadowFlameT -= dt; this.shadowFlameDoT += 15 * slimedMul * dt; }
     if (this.oiledT > 0) this.oiledT -= dt;
     if (this.brokenArmorT > 0) this.brokenArmorT -= dt;
     if (this.betsysCurseT > 0) this.betsysCurseT -= dt;
@@ -1255,11 +1272,22 @@ export class Enemy extends Entity {
     if (this.javelinT > 0) { this.javelinT -= dt; this.javelinDoT += 3 * dt; }
     if (this.spikeT > 0) { this.spikeT -= dt; this.spikeDoT += 3 * dt; }
     if (this.butcherT > 0) { this.butcherT -= dt; this.butcherDoT += 4 * dt; }
+    if (this.soulDrainT > 0) { this.soulDrainT -= dt; this.soulDrainDoT += 25 * dt; } // :92927-92935
+    if (this.stardustT > 0) { this.stardustT -= dt; this.stardustDoT += 20 * dt; }    // 单层 :92846-92863
+    // Oiled 独立结算(:92728-92737 单块 -50 = 25 HP/s,不随各系翻倍/重复)
+    if (this.oiledDoT >= 1) {
+      const n = Math.floor(this.oiledDoT);
+      this.oiledDoT -= n;
+      this.hp -= n;
+      this.hpBarT = 240;
+      if (this.hp <= 0) this.hurt(9999, 0, 0, game);
+    }
     for (const [tKey, dKey] of [['poisonT', 'poisonDoT'], ['venomT', 'venomDoT'], ['cursedT', 'cursedDoT'],
       ['frostburnT', 'frostburnDoT'], ['frostburn2T', 'frostburn2DoT'],
       ['onFire3T', 'onFire3DoT'], ['shadowFlameT', 'shadowFlameDoT'],
       ['daybreakT', 'daybreakDoT'], ['bleedT', 'bleedDoT'], ['hemorrhageT', 'hemorrhageDoT'],
-      ['javelinT', 'javelinDoT'], ['spikeT', 'spikeDoT'], ['butcherT', 'butcherDoT']] as const) {
+      ['javelinT', 'javelinDoT'], ['spikeT', 'spikeDoT'], ['butcherT', 'butcherDoT'],
+      ['soulDrainT', 'soulDrainDoT'], ['stardustT', 'stardustDoT']] as const) {
       const acc = this[dKey];
       if (acc >= 1) {
         const n = Math.floor(acc);

@@ -917,6 +917,11 @@ export class MinionProj extends Entity {
           if (hit) {
             this.sCool = 90;
             game.playSfxFiles(soundTrackFiles('dd2_explosive_trap_explode'), 0.9); // AI_138 :66104（无位置参数）
+            // 原版塔体 691/692/693 生成【爆炸弹】694/695/696（AI_138 :66063-66073）,
+            // StatusNPC 走爆炸弹型号——Oiled 门在 694 族(:10786,setHuntressT2 套装门)
+            const boomProj = 694 + (this.projId - 691);
+            const ownerH = (this.ownerRef() as unknown as { equipStats?: { huntressT2?: boolean } } | null)
+              ?.equipStats?.huntressT2 ?? false;
             let boom = 0;
             for (const ent of game.enemies()) {
               const en = ent as EnemyLike & { dead: boolean };
@@ -924,6 +929,7 @@ export class MinionProj extends Entity {
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
                 en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
                 applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
+                applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH });
                 boom++;
               }
             }

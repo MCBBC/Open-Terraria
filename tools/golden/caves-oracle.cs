@@ -2232,22 +2232,18 @@ void GranitePlace(int gox0, int goy0)
     double[] nvx = { -0.7071067811865476, -1, -0.7071067811865476, 0, 0, 0, 0.7071067811865476, 1, 0.7071067811865476 };
     double[] nvy = { -0.7071067811865476, 0, 0.7071067811865476, -1, 0, 1, -0.7071067811865476, 0, 0.7071067811865476 };
     int gx3 = 100, gx4 = 100, gy3 = 100, gy4 = 100;
-    // ★双缓冲稀疏写+轮末 Swap（GraniteBiome.cs:186-187 Utils.Swap）：target 不做全量
-    // 拷贝，循环只写被激活/过压力门的格，轮末交换数组引用——未写格保留 i-2 轮值。
-    // 曾每轮全量拷贝 → 未写格保留 i-1 轮值，CA 行为分叉。
-    // ★★备案（JS 侧偏差镜像）：GraniteBiome.cs:96-107 BuildMagmaMap 原版为
-    //   `_targetMagmaMap[i,j] = _sourceMagmaMap[i,j]`（引用别名，未写格 Resistance 恒
-    //   1/4）；JS MarbleGranitePass.granitePlace 的 tRes0 为全 0 值数组（未写格 res=0）。
-    //   此处以 JS 现状为准置 0——两侧 granite/islands/dirttomud/silt/ores/webs/
-    //   underworld/corruption 八检查点随之全对齐。**JS 修齐 BuildMagmaMap 别名语义后
-    //   把下一行改回 `tRes[a, b] = gRes[a, b]` 即可恢复原版权威**（差异影响：res=0 使
-    //   岩浆以更低压渗入实心岩，花岗岩体偏大）。
+    // ★BuildMagmaMap（GraniteBiome.cs:96-107）原版语义：target = source 的同值别名
+    //（`_targetMagmaMap[i,j] = _sourceMagmaMap[i,j]`，Magma 引用型不可变 → 未写格
+    //   恒读初值 Pressure=0/Resistance=1or4/inactive）。此后 300 轮不再全量拷贝，循环只写
+    //   被激活/过压力门的格，轮末 Swap（:186-187）：未写格保留 i-2 轮值。
+    //   JS 侧已修齐（tPres0/tRes0/tAct0 = Float64Array.from(pres/res/mact) 快照）。
+    //   曾镜像 JS 旧偏差置 tRes=0（岩浆以更低压渗入实心岩，花岗岩体偏大）——已翻回。
     var tPres = new double[200, 200];
     var tRes = new double[200, 200];
     var tAct = new bool[200, 200];
     for (int a = 0; a < 200; a++)
         for (int b = 0; b < 200; b++)
-        { tPres[a, b] = 0.0; tRes[a, b] = 0.0; tAct[a, b] = false; }
+        { tPres[a, b] = 0.0; tRes[a, b] = gRes[a, b]; tAct[a, b] = false; }
     for (int it = 0; it < 300; it++)
     {
         for (int j = gx3; j <= gx4; j++)
@@ -2383,13 +2379,6 @@ void GranitePlace(int gox0, int goy0)
     for (int gi = 0; gi < gnCount && gi < gnPts.Count; gi++) GranitePlace(gnPts[gi].x, gnPts[gi].y);
 }
 Checkpoint("granite");
-if (Environment.GetEnvironmentVariable("GRANITE_DUMP") != null) {
-    var gb = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, gb, 0, gb.Length);
-    File.WriteAllBytes(Environment.GetEnvironmentVariable("GRANITE_DUMP"), gb);
-    File.WriteAllText(Environment.GetEnvironmentVariable("GRANITE_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
-    File.WriteAllText(Environment.GetEnvironmentVariable("GRANITE_DUMP") + ".liq", string.Join("", liq.Select(a => a.ToString("D3"))));
-    return;
-}
 
 // ================= Pass 23 FloatingIslands（cs:12976 + CloudIsland cs:78618 + CloudLake cs:79068）=================
 bool WaterStaysPut(int wx, int wy)   // WillWaterPlacedHereStayPut（cs:79050）
@@ -3837,12 +3826,11 @@ void SonOfLakinater(int li, int lj)
                 double lvB = Math.Abs((double)ll - lvy) * 1.4;
                 double lvC = Math.Abs((double)lk - lvx) * 0.3;
                 double lvD = Math.Abs((double)ll - lvy) * 5.0;
-                // ★★备案（JS 侧偏差镜像）：原版 Utils.Lerp（Utils.cs:107）= value1+(value2-value1)*amount，
-                // **无 [0,1] 钳制**；num5 可为小数（steps*1.3，如 49.4），末步 num2 减到负值
-                // （-0.6）→ t=-0.012 外扩使个别边界格过 dist<r 门被腔壁壳激活。JS LakesPass
-                // 以 Math.min(1,Math.max(0,steps/stepsTotal)) 钳 t——此处按 JS 现状镜像钳制。
-                // **JS 摘除钳制后删掉下一行 clamp 即可恢复原版权威**
-                double lt = Math.Clamp(lnum2 / lnum5, 0.0, 1.0);
+                // ★原版 Utils.Lerp（Utils.cs:107）= value1+(value2-value1)*amount，**无 [0,1]
+                //   钳制**。num5 可为小数（steps*1.3，如 49.4），末步 num2 减到负值（-0.6）→
+                //   t=-0.012 外扩使个别边界格过 dist<r 门被腔壁壳激活——原版行为，保留裸除。
+                //   曾镜像 JS 旧偏差钳 t 到 [0,1]（湖缘丢 6 格腔壁壳激活）——已翻回。
+                double lt = lnum2 / lnum5;
                 lvA = lvA + (lvC - lvA) * lt;
                 lvB = lvB + (lvD - lvB) * lt;
                 double ldist = Math.Sqrt(lvA * lvA + lvB * lvB);
@@ -4134,6 +4122,13 @@ if (Environment.GetEnvironmentVariable("DGL_DUMP") != null) {
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGL_DUMP"), dgbuf);
     File.WriteAllText(Environment.GetEnvironmentVariable("DGL_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
     File.WriteAllText(Environment.GetEnvironmentVariable("DGL_DUMP") + ".wall", string.Join(",", wal.Select(a => a.ToString())));
+    var inv = new System.Text.StringBuilder();
+    inv.AppendLine($"anchor dgX0={dgX0} dgY0={dgY0} dgNum={dgNum} rooms={dgRooms.Count} halls={dgHalls.Count}");
+    for (int qi = 0; qi < dgRooms.Count; qi++)
+    { var q = dgRooms[qi]; inv.AppendLine($"R{qi} seed={q.Seed} start={q.Start} outer=({q.Outer.L},{q.Outer.T},{q.Outer.R},{q.Outer.B}) inner=({q.Inner.L},{q.Inner.T},{q.Inner.R},{q.Inner.B}) ex={q.EX:F1} ey={q.EY:F1}"); }
+    for (int qi = 0; qi < dgHalls.Count; qi++)
+    { var q = dgHalls[qi]; inv.AppendLine($"H{qi} seed={q.Seed} forceX={q.ForceX} bounds=({q.Bounds.L},{q.Bounds.T},{q.Bounds.R},{q.Bounds.B}) sx={q.SX:F1} sy={q.SY:F1} ex={q.EX:F1} ey={q.EY:F1} sd=({q.SDX},{q.SDY})"); }
+    File.WriteAllText("/tmp/oracle-dg-inventory.txt", inv.ToString());
     return;
 }
 // —— 爬升入口大厅（cs:398-449）：上限 100 轮；roomDelay 归零后 1/5 且 y>ws+100 时
@@ -4164,7 +4159,22 @@ Checkpoint("dungeonE");
 for (int i = 0; i < dgRooms.Count; i++) if (dgRooms[i].Generated) DgRoomPlatformsDoors(dgRooms[i]);
 for (int i = 0; i < dgHalls.Count; i++) if (dgHalls[i].Generated) DgHallPlatformsDoors(dgHalls[i]);
 Checkpoint("dungeonPD");
+if (Environment.GetEnvironmentVariable("DPD_DUMP") != null) {
+    var pdbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(wal, 0, pdbuf, 0, pdbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DPD_DUMP"), pdbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("DPD_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    var pdt = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, pdt, 0, pdt.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DPD_DUMP") + ".typ", pdt);
+    return;
+}
 DgEarly(); Checkpoint("dungeonPi");     // DungeonGlobalEarlyDualDungeonFeatures（Default → 仅 pit 陷阱循环）
+if (Environment.GetEnvironmentVariable("DGP_DUMP") != null) {
+    var dpbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dpbuf, 0, dpbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DGP_DUMP"), dpbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGP_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGP_DUMP") + ".wall", string.Join(",", wal.Select(a => a.ToString())));
+    return;
+}
 DgSpikes(); Checkpoint("dungeonS");     // DungeonGlobalSpikes
 DgDoorsF(); Checkpoint("dungeonD");     // DungeonGlobalDoors
 DgWallVariants(); Checkpoint("dungeonW"); // DungeonGlobalWallVariants
@@ -4254,6 +4264,10 @@ void DgLayout(int steps)
     int maxSteps = steps;
     dgBounds = new DBnd();
     dgBounds.Set(dgPosX, dgPosY, dgPosX, dgPosY);
+    // ★原版 LegacyDungeonLayoutProvider.cs:36-43：起始房前先
+    //   `hallSettings.RandomSeed = Next()` + `roomSettings.RandomSeed = Next()` 各掷一颗
+    //   （两 settings 仅作模板、每次生成前都会重设种子，故这两掷是纯流消耗）。
+    //   曾镜像 JS 旧偏差删掉这两掷（起始房种子前移 2 → 全地牢分叉）——JS 已补回，翻回原版。
     int hallSeed = (int)r.Next();      // legacyDungeonHallSettings.RandomSeed（:37）
     int roomSeed = (int)r.Next();      // legacyDungeonRoomSettings.RandomSeed（:42）
     DgRoom(new DRoom { Seed = (int)r.Next(), X = dgPosX, Y = dgPosY, Start = true });   // 起始房（:44-50）

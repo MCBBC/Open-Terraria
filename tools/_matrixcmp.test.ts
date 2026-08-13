@@ -12,7 +12,8 @@ it('convergence matrix compare', () => {
   if (!seeds.length) { console.log('无采集数据：先跑 tools/convergence-matrix.sh gen <seeds>'); return; }
   let allOk = true;
   for (const s of seeds) {
-    const oTxt = readFileSync(`/tmp/vserver/oracle_${s}.txt`, 'utf8');
+    let oTxt = '';
+    try { oTxt = readFileSync(`/tmp/vserver/oracle_${s}.txt`, 'utf8'); } catch { /* 未采集 */ }
     const m = oTxt.match(/terrain ok: worldSurface=(\d+) rockLayer=(\d+)/);
     if (!m) { console.log(`seed=${s}: oracle 输出缺失/超时`); allOk = false; continue; }
     const [ows, orl] = [Number(m[1]), Number(m[2])].map(Number);

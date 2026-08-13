@@ -104,6 +104,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     },
     anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
     hideInfo: player.hideInfo ?? undefined,     // PL:776 hideInfo[13](DrawInfoAccs 行开关)
+    hairDye: player.hairDye ?? 0,               // PL:53805-53808 hairDye byte（发色剂槽）
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);
 }

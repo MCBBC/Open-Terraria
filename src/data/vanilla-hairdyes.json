@@ -1,0 +1,77 @@
+{
+ "meta": {
+  "source": "Terarria1456/Terraria.Initializers/DyeInitializer.cs",
+  "itemSource": "Terarria1456/Terraria/Item.cs",
+  "bindCount": 12,
+  "legacyCount": 11,
+  "removerItem": 1990,
+  "entries": 12,
+  "anchors": {
+   "loadHairDyes": 143,
+   "loadLegacyHairdyes": 150,
+   "twilightBind": 147
+  }
+ },
+ "hairDyes": {
+  "1977": {
+   "shaderId": 1,
+   "kind": "legacy",
+   "bindLine": 153
+  },
+  "1978": {
+   "shaderId": 2,
+   "kind": "legacy",
+   "bindLine": 160
+  },
+  "1979": {
+   "shaderId": 3,
+   "kind": "legacy",
+   "bindLine": 167
+  },
+  "1980": {
+   "shaderId": 4,
+   "kind": "legacy",
+   "bindLine": 217
+  },
+  "1981": {
+   "shaderId": 5,
+   "kind": "legacy",
+   "bindLine": 287
+  },
+  "1982": {
+   "shaderId": 6,
+   "kind": "legacy",
+   "bindLine": 332
+  },
+  "1983": {
+   "shaderId": 7,
+   "kind": "legacy",
+   "bindLine": 341
+  },
+  "1984": {
+   "shaderId": 8,
+   "kind": "legacy",
+   "bindLine": 385
+  },
+  "1985": {
+   "shaderId": 9,
+   "kind": "legacy",
+   "bindLine": 390
+  },
+  "1986": {
+   "shaderId": 10,
+   "kind": "legacy",
+   "bindLine": 395
+  },
+  "2863": {
+   "shaderId": 11,
+   "kind": "legacy",
+   "bindLine": 410
+  },
+  "3259": {
+   "shaderId": 12,
+   "kind": "twilight",
+   "bindLine": 147
+  }
+ }
+}

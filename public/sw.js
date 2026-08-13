@@ -35,8 +35,13 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
+  // ★scheme 门(2026-08-13 用户实报):浏览器扩展注入的 chrome-extension:// 等
+  // 请求也会进页面 SW——Cache API 只收 http(s),put 即抛
+  // "Request scheme 'chrome-extension' is unsupported"。非 http(s) 一律放行。
+  const url = new URL(req.url);
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
   if (req.method !== 'GET' || !currentVersion) return;
-  const path = new URL(req.url).pathname;
+  const path = url.pathname;
   // ② 应用壳(vite 内容寻址 JS/CSS + 文档):网络优先+离线回退——真断网也能进游戏
   //    (JS 带 hash,旧缓存仅在离线时兜底,在线永远走网络=更新不卡壳)
   const isShellJs = /^\/assets\/.+\.(js|css|woff2?)$/.test(path);
@@ -98,12 +103,19 @@ async function warm(tag, urls, base) {
       const i = cursor++;
       if (i >= missing.length) return;
       const u = missing[i];
-      try {
-        const res = await fetch(u);
-        if (res && res.ok) await cache.put(u, res);
-        else failed++;
-      } catch (err) {
-        failed++;
+      // 单文件即时重试 ×3(间隔 300/600ms):弱网瞬断就地恢复,不必等全量
+      // 跑完后的整轮补拉(2026-08-13 可靠性 review)
+      let ok = false;
+      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+        if (warmAbort) return;
+        try {
+          const res = await fetch(u);
+          if (res && res.ok) { await cache.put(u, res); ok = true; }
+          else if (attempt === 2) failed++;
+        } catch (err) {
+          if (attempt === 2) failed++;
+        }
+        if (!ok && attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
       }
       done++;
       sinceBreath++;

@@ -3,7 +3,7 @@
 //   · TrueNightsEdgeSlash 973：锚定伸长 76px / 旋进 / 寿命 ai1+65=97 / t≥80 清伤
 //   · NightsEdgeFly（273 飞斩）：10t 起前漂 + ai1=30 消亡 + 旋进
 import { describe, it, expect } from 'vitest';
-import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS } from '../src/entities/SwingArc';
+import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS, LightsBaneSlash, GrassSlash } from '../src/entities/SwingArc';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -112,3 +112,38 @@ describe('Zenith 933（AI_182 FinalFractal）', () => {
   });
 });
 
+
+describe('魔光剑斩痕 974（AI_188）', () => {
+  it('36t 消亡（3t/帧×12）+ 暴击档 scale=ai0=2', () => {
+    const game = makeGame(new World(120, 120, 30, 'open'));
+    const lb = new LightsBaneSlash(60 * TILE, 60 * TILE, 1, 0, 8, 2);
+    lb.fixedUpdate(1, game);
+    expect(lb['frame']).toBe(0);                        // 3t/帧
+    for (let t = 0; t < 38 && !lb.dead; t++) lb.fixedUpdate(1, game);
+    expect(lb.dead).toBe(true);                         // frame>=12 = 36t
+  });
+});
+
+describe('草剑飞叶 976（AI_152 976 分支）', () => {
+  it('弧线飞行（vel 旋转）+ 恒速 16 + 岩浆即亡', () => {
+    const w = new World(160, 300, 30, 'open');
+    for (let x = 40; x < 120; x++) w.store.setTile(x, 60, 1, 0, 0);
+    // 岩浆池（liquidType 2；铺 4 行防弧线旋转后 y 漂移出池；放左侧 x 10-16
+    // ——勿放飞行路径上（曾放 60-66 被自己的飞叶撞进池里提前亡）
+    for (let y = 53; y < 57; y++) for (let x = 10; x < 16; x++) {
+      const i = w.store.idx(x, y); w.store.liquid[i] = 200; w.store.liquidType[i] = 2;
+    }
+    const game = makeGame(w);
+    const gs = new GrassSlash(50 * TILE, 50 * TILE, 16, 0, 5, 0.05);
+    gs.fixedUpdate(1, game);
+    expect(Math.hypot(gs.vx, gs.vy)).toBeCloseTo(16, 1);   // 恒速（num6=0 原版最终态）
+    const vy0 = gs.vy;
+    for (let t = 0; t < 10 && !gs.dead; t++) gs.fixedUpdate(1, game);
+    expect(Math.abs(gs.vy - vy0)).toBeGreaterThan(0.01);   // ai0 旋转 → 弧线
+    expect(gs.dead).toBe(false);
+    // 岩浆即亡
+    gs.x = 12 * TILE; gs.y = 55 * TILE;
+    gs.fixedUpdate(1, game);
+    expect(gs.dead).toBe(true);
+  });
+});

@@ -7,6 +7,11 @@ import {
   NetWriter, NetReader, FrameParser, TileOp, TileOpAction, readTileBatch, decodeStrip,
   ItemContainer, ItemSyncEntry, INV_SYNC_SIZES, writePlayerItems, readPlayerItems,
 } from './protocol';
+import {
+  writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
+  readLeashedMessage, type LeashedEntityLike,
+} from './leashedSync';
+import type { LeashedNetMsg } from '../entities/LeashedCritter';
 import type { World } from '../world/World';
 import { World as WorldCtor } from '../world/World';
 import { Lang } from '../i18n/Lang';
@@ -100,6 +105,9 @@ export interface ClientNetHooks {
   onStrikePlayer?: (fromSlot: number, targetSlot: number, dmg: number, kbx: number, kby: number, weaponId: number, flags: number) => void;
   /** 远端玩家 HP（msg16 中继） */
   onHp?: (slot: number, hp: number, maxHp: number) => void;
+  /** 拴绳实体到达（msg82 module13；Game 经 LeashedEntityManager 重建/刷新/移除）。
+   *  仅世界就绪后回调（组装期帧进 pendingLeashed，由 Game 在 loadWorld 完成后消费） */
+  onLeashedSync?: (msg: LeashedNetMsg) => void;
   /** 房间策略到达（进场时；门禁/提示用） */
   onPolicy?: (policy: RoomPolicyState) => void;
 }
@@ -128,6 +136,13 @@ export class ClientNet {
   private npcCodes = new Map<number, { netId: number; key: string }>();
   /** v6 msg201 暂存（世界就绪后由 Game 消费，见 SscSync case 注释——竞态防护） */
   pendingSSC: string | null = null;
+  /** msg82 module13 暂存（同 pendingSSC 竞态防护：进场组装期到达的 FullSync 若即用，
+   *  会被 loadWorld → afterWorldLoad → respawnAll 的 clear() 整体抹掉——实体永久丢失。
+   *  Game 在 loadWorld 完成后 drainPendingLeashed 消费并置 leashedReady） */
+  pendingLeashed: LeashedNetMsg[] = [];
+  /** 拴绳实体直通开关（Game 在 loadWorld 完成后开启；worldDelivered 早于 loadWorld
+   *  完成——用它做门会漏进 clear() 竞态窗口，故独立成旗） */
+  leashedReady = false;
   /** msg21 上行合帧暂存（P1.3：netDropSweep 每 4 tick 逐条发 → 攒到 tick 冲洗拼一条 WS 消息） */
   private pendingFrames: Uint8Array[] = [];
   private lastStateSent = 0;
@@ -245,6 +260,8 @@ export class ClientNet {
             this.worldDelivered = false;
             this.pendingWorld = null;
             this.pendingStrips = 0;
+            this.pendingLeashed.length = 0;   // 旧会话实体帧作废（服务器按条带重发）
+            this.leashedReady = false;        // 重组装期间重新走暂存
           }
           this.session = sess;
           this.reconnects = 0;
@@ -413,6 +430,14 @@ export class ClientNet {
             Lang.text(joined ? 'LegacyMultiplayer.19' : 'LegacyMultiplayer.20', name),
             255, 240, 20,
           );
+        } else if (moduleId === NetModule.LeashedEntity) {
+          // msg82 module13 拴绳实体（= 原版 LeashedEntity.NetModule）。loadWorld 完成
+          // 前（leashedReady）暂存——respawnAll 的 clear() 竞态见 pendingLeashed 注
+          const msg = readLeashedMessage(r);
+          if (msg) {
+            if (this.leashedReady) this.hooks.onLeashedSync?.(msg);
+            else if (this.pendingLeashed.length < 256) this.pendingLeashed.push(msg);
+          }
         }
         return;
       }
@@ -700,6 +725,11 @@ export class ClientNet {
     }
   }
 
+  /** 进场组装期暂存的拴绳实体帧冲放（Game 在 loadWorld 完成后调用，同 pendingSSC 时机） */
+  drainPendingLeashed(cb: (msg: LeashedNetMsg) => void) {
+    while (this.pendingLeashed.length) cb(this.pendingLeashed.shift()!);
+  }
+
   // ================= 远端 tile 应用（回环抑制 + 事件链触发） =================
 
   private applyRemote(ops: TileOp[]) {
@@ -806,6 +836,28 @@ export class ClientNet {
   sendStrikePlayer(targetSlot: number, rawDmg: number, kbx: number, kby: number, weaponId: number, flags: number) {
     this.send(new NetWriter(Msg.StrikePlayer).u8(targetSlot).i16(rawDmg)
       .i16(kbx).i16(kby).u16(weaponId).u8(flags & 0xff).finish());
+  }
+
+  // ================= 拴绳实体（msg82 module13，房主上行；见 net/leashedSync.ts） =================
+
+  /** FullSync 广播（放置/重生时；= 原版 AddNewEntity → NetModule.Sync(full:true)） */
+  sendLeashedFull(e: LeashedEntityLike) {
+    if (e.netId > 0) this.send(writeLeashedFullSync(e));
+  }
+
+  /** PartialSync 广播（周期位置校正；= 原版 StreamNetUpdates :461-467） */
+  sendLeashedPartial(e: LeashedEntityLike) {
+    if (e.netId > 0) this.send(writeLeashedPartialSync(e));
+  }
+
+  /** Remove 广播（锚桩破坏；= 原版 NetModule.Remove :43-49） */
+  sendLeashedRemove(netId: number) {
+    if (netId > 0) this.send(writeLeashedRemove(netId));
+  }
+
+  /** 访客放置锚桩请求（sub3，服务器定向转发房主校验——唯一允许访客上行的 sub） */
+  sendLeashedPlaceRequest(ax: number, ay: number, itemVid: number) {
+    this.send(writeLeashedPlaceRequest(ax, ay, itemVid));
   }
 
   /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威） */
