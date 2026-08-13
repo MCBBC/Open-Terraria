@@ -19,7 +19,7 @@ page.on('pageerror', (e) => console.log('PAGE ERROR:', e.message));
 await page.goto(origin, { waitUntil: 'networkidle0', timeout: 120000 });
 
 // ---- 先装探针（世界创建前）----
-await page.evaluate(() => {
+await page.evaluate(async () => {
   const { Sfx } = await import('/src/core/Sfx.ts');
   const { Game } = await import('/src/core/Game.ts');
   window.__tileLog = [];

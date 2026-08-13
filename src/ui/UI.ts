@@ -69,7 +69,7 @@ import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
-import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
+import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
@@ -1262,17 +1262,24 @@ export class UI {
     this.itemSearchEl = overlay;
 
     // 全量条目缓存（一次性构建：id/显示名/小写匹配串）
+    // 匹配串含【英文原名】——zh 名只对部分家族含族词（翅膀族 zh 多为"XX之翼"，
+    // 搜"翅膀"只见开发者翅膀；搜 wing/翼 才全）——2026-08-13 报障
     const entries = ITEM_DEFS.map((d, id) => {
       const vid = d.key.startsWith('vi_') ? d.key.slice(3, d.key.indexOf('_', 3)) : '';
       const name = Lang.itemNameByKey(d.key) || d.key;
-      return { id, d, name, lc: (name + ' ' + d.key + ' ' + vid).toLowerCase() };
+      const en = vid ? (ITEM_NAME_EN_BY_ID[+vid] ?? '') : '';
+      return { id, d, name, lc: (name + ' ' + d.key + ' ' + vid + ' ' + en).toLowerCase() };
     });
+    // 族词别名（zh 族词分裂：翅膀↔翼——搜"翅膀"也能命中"天使之翼"族；本地
+    // 表软链不动 i18n；2026-08-13 报障）。匹配串已含英文原名（搜 wing 全族可见）
+    const ALIAS: Record<string, string[]> = { 翅膀: ['翼'], 翼: ['翅膀'] };
     const render = () => {
-      const q = input.value.trim().toLowerCase();
+      const qRaw = input.value.trim().toLowerCase();
+      const qs = [qRaw, ...(ALIAS[qRaw] ?? []).map((x) => x.toLowerCase())].filter(Boolean);
       list.textContent = '';
       let shown = 0;
       for (const e of entries) {
-        if (q && !e.lc.includes(q)) continue;
+        if (qs.length && !qs.some((q) => e.lc.includes(q))) continue;
         if (++shown > 80) {
           list.appendChild(el('div', 'sw-lbl', `…更多结果请细化搜索`));
           break;

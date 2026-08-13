@@ -7611,8 +7611,31 @@ export class Game implements GameHooks {
         // tileCut 族(草类)由 decor 近似覆盖;framed 家具不换;solid!==false 排除非实心
         // (|| 平台 19 族可换——优先级括号已显式)
         const solidish = tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false;
-        const swapOk = !NO_SWAP_PLACE.has(placeVid) && !NO_SWAP_TARGET.has(tsheet)
+        let swapOk = !NO_SWAP_PLACE.has(placeVid) && !NO_SWAP_TARGET.has(tsheet)
           && !(tdef?.decor ?? false) && !tdef?.framed && solidish;
+        // style 族交换分支(:39299-39349——平台/火把/篝火/箱/柜的逐 style 换,
+        // 同型不同 style 可换;frameX/frameY 偏差超出该 style 的宽 → swap。2026-08-13)
+        let styleSwap = false;
+        if (!swapOk) {
+          const ts = tdef?.vanilla?.sheet ?? -1;
+          if (ts === 19 && placeVid >= 0) {
+            // 平台(:39299-39301):frameY/18 != placeStyle → 换
+            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 18) !== (itemDef.placeStyle ?? 0);
+          } else if (ts === 4 && placeVid >= 0) {
+            // 火把(:39308-39321):frameY/22 != placeStyle → 换
+            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 22) !== (itemDef.placeStyle ?? 0);
+          } else if (ts === 215 && placeVid >= 0) {
+            // 篝火(:39324-39335):frameX/54 != placeStyle → 换
+            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
+          } else if (tdef?.vanilla?.sheet === 21 && placeVid >= 0) {
+            // 箱(:39337-39344):frameX/36 != placeStyle → 换
+            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 36) !== (itemDef.placeStyle ?? 0);
+          } else if (tdef?.vanilla?.sheet === 88 && placeVid >= 0) {
+            // 柜(:39346-39349):frameX/54 != placeStyle → 换
+            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
+          }
+        }
+        if (styleSwap) { swapOk = true; }
         if (swapOk) {
           const tileIdHere = TILE_BY_KEY[itemDef.tile!];
           if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
@@ -12280,9 +12303,11 @@ export class Game implements GameHooks {
 
   /** contactOnly：伤害源是 NPC **接触**（Player.cs:30880-30970 的 Main.npc[i] 循环）——
    *  荆棘反伤/狼人虚弱只在该分支结算；弹幕命中只带 attacker 做死亡归因，不触发反伤 */
-  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy, contactOnly = false, pvp = false) {
+  /** 返回实际扣除 HP（0=未受伤——damage() 返回值直通;爆炸/近战 PvP 接收端按此
+   *  决定 StatusPlayer debuff 与受击音,对齐原版 Hurt>0 语义 :13979） */
+  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy, contactOnly = false, pvp = false): number {
     const p = this.player;
-    if (p.dead) return;
+    if (p.dead) return 0;
     if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
     // 旗 buff 接触减伤（Player.cs:30930-30933 GetBannerBuffEffect:经典 ×0.75/专家 ×0.5）
     if (attacker && attacker.vanillaId != null && contactOnly && this.bannerNpcActive(attacker.vanillaId)) {
@@ -12408,10 +12433,10 @@ export class Game implements GameHooks {
         const reflect = Math.max(1, Math.round(dmg * 2));
         attacker.hurt(reflect, -facing * 5, -2, this);
         this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#FFD080');
-        return;   // 完全免伤
+        return 0;   // 完全免伤
       }
     }
-const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-30932
+    const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-30932
         if (p.thornsActive) {
           const num2 = (p.buffs.hasThorns ? 1 : 0) + (p.turtleSet ? 1 : 0);   // :30911-30916
           // Main.DamageVar :65597-65620（±15% + luck 重掷——曾裸随机丢重掷段）
@@ -12485,6 +12510,7 @@ const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-3
         p.inv.trash = null;
       }
     }
+    return ok;
   }
 
   /** CombatText.NewText 1:1（CombatText.cs:59-118）：普通 vy=-7/life=60、暴击

@@ -448,7 +448,7 @@ export class MountInstance {
   private drillBeamCooldown = 0;
   /** 二极管当前角（AimAbility 目标角的 0.85/0.15 lerp，UpdateDrill :3011） */
   diodeRotation = 0;
-  private diodeRotationTarget = 0;
+  diodeRotationTarget = 0;
   /** 外环旋转（Hover case 8 :3474-3488：随 vx/80 累积，供背层贴图旋转） */
   outerRingRotation = 0;
   /** 光标世界位（crosshairPosition :48——本地玩家=鼠标世界坐标） */

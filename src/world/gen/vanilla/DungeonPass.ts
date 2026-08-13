@@ -937,7 +937,7 @@ export function runDungeonPass(
         }
       }
       if (num2 < 0) cx -= 1.0;
-      dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, 13);
+      dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, rn(3) === 0 ? doorStyle : 13); // DungeonGlobalDoors:47-54(1/3 themed)
     }
   }
 

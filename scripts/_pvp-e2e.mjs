@@ -96,9 +96,19 @@ const platform = async (page, who) => page.evaluate((w) => {
   g.player.fallStartY = null;
   return { x: g.player.x, y: g.player.y, dead: g.player.dead };
 }, who);
-// B 预埋弹幕同步钩子计数（区分"没收到"vs"收到没建傀儡"）
+// B 预埋弹幕同步钩子计数（区分"没收到"vs"收到没建傀儡"）+ damage 包装
+// （命中瞬间捕获 8t 无敌帧——伤害可能在任何 evaluate 间隙落地,须先装）
 await pageB.evaluate(() => {
   const g = window.__swGame;
+  if (!window.__pvpIfrHooked) {
+    window.__pvpIfrHooked = true;
+    const od = g.player.damage.bind(g.player);
+    g.player.damage = (...a) => {
+      const r = od(...a);
+      if (r) window.__pvpIfr = g.player.iframes;
+      return r;
+    };
+  }
   const orig = g.net.hooks.onProjectileSync;
   g.net.hooks.onProjectileSync = (snaps) => {
     window.__pvpSawProj = (window.__pvpSawProj ?? 0) + (snaps ? snaps.length : 0);
@@ -215,22 +225,19 @@ const swing = await pageA.evaluate(async () => {
   };
 }).catch((e) => ({ err: String(e) }));
 check('① A 挥击执行', !swing.err, JSON.stringify(swing));
-const aliveB = await pageB.evaluate(() => ({
-  net: window.__swGame?.net?.active ?? false,
-  slot: window.__swGame?.net?.mySlot ?? -1,
-  players: window.__swGame?.net?.players?.size ?? -1,
-})).catch((e) => ({ err: String(e) }));
-console.log('B-alive@①:', JSON.stringify(aliveB), 'serverTail:', serverLog.slice(-3).join('|').slice(-260));
-await pump2(10);
-await sleep(400); // WS 往返
+await pump2(6);
+await sleep(400); // WS 往返（msg44 同步达）
 const bHit = await pageB.evaluate(() => {
   const g = window.__swGame;
-  return { hp: g.player.hp, ifr: g.player.iframes, cause: JSON.stringify(g.player.lastDamageCause) };
+  return {
+    hp: g.player.hp, ifr: g.player.iframes, peakIfr: window.__pvpIfr ?? -1,
+    cause: JSON.stringify(g.player.lastDamageCause),
+  };
 });
 const dmgTaken = bHp0 - bHit.hp;
 check('① B 掉血（本地结算）', dmgTaken > 0, `hp ${bHp0}→${bHit.hp}`);
 check('① B 死因=player', bHit.cause.includes('"kind":"player"'), bHit.cause);
-check('① B 无敌帧=8t', bHit.ifr > 0 && bHit.ifr <= 8, `ifr=${bHit.ifr}`);
+check('① B 无敌帧=8t（命中瞬间捕获）', bHit.peakIfr === 8, `peakIfr=${bHit.peakIfr}`);
 // msg16 回报：A 代理 hp 同步
 await pump2(10);
 await sleep(400);
@@ -336,7 +343,7 @@ const bPos5 = await pageB.evaluate(() => ({
   hp: window.__swGame.player.hp,
 }));
 await pageA.evaluate((pos) => {
-  window.__swGame.explodeAt(pos.tx, pos.ty, 60, 3, false, undefined, 0, 28);
+  window.__swGame.explodeAt(pos.tx, pos.ty, 20, 3, false, undefined, 0, 28);
 }, bPos5);
 await pump2(10); await sleep(400);
 const bBoom = await pageB.evaluate(() => ({
@@ -346,9 +353,15 @@ const bBoom = await pageB.evaluate(() => ({
 check('⑤ 爆炸意向 → B 掉血', bBoom.hp < bPos5.hp, `${bPos5.hp}→${bBoom.hp}`);
 check('⑤ 死因=projectile', bBoom.cause.includes('"kind":"projectile"'), bBoom.cause);
 
-// ⑥ PvP 死亡：B 残血 → A 补刀
+// ⑥ PvP 死亡：B 残血 → A 补刀（若 ⑤ 余波致死先复活归位,保证结算走 msg44 链）
 await pageB.evaluate(() => {
   const g = window.__swGame;
+  if (g.player.dead) {
+    g.respawnPlayer();
+    const ty = g.world.h - 60, tx = Math.floor(g.world.w / 2);
+    g.player.x = (tx + 2) * 16; g.player.y = (ty - 3) * 16;
+    g.player.vx = 0; g.player.vy = 0;
+  }
   g.player.hp = 5; g.player.iframes = 0;
   g.net.syncHp();
 });

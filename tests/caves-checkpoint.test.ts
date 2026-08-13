@@ -70,7 +70,8 @@ function hashGhost(st: { type: Uint16Array; flags: Uint8Array; w: number; h: num
   return fnv1a(ghost);   // fnv1a 返回 hex string（注解曾是 number——陈旧签名残留）
 }
 
-function chainCheckpoints(seedText: string, evil: 0 | 1) {
+/** 导出给 tests/_freeze-caves.test.ts（SW_FREEZE_CAVES=1 冻结基线再生用） */
+export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   const { world, rng, gs } = runResetAndTerrain({ width: 4200, height: 1200, seedText, evil });
   const st = world.store;
   const out = new Map<string, string>();
@@ -127,6 +128,9 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   return { grids: out, walls: outWall };
 }
 
+// SW_FREEZE_CAVES=1 时本对账 describe 让位给 _freeze-caves.test.ts（避免导入副作用
+// 把冻结跑挂——corruption 在冻结后持续 ✗ 是预期备案态）
+if (!process.env.SW_FREEZE_CAVES)
 describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
   const cases = [
     { file: 'caves-chain-9293480.json', seedText: '9293480', evil: 0 as const },

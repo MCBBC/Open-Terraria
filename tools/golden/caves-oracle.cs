@@ -1801,6 +1801,12 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
     }
 }
 Checkpoint("deserthive");
+if (Environment.GetEnvironmentVariable("HIVE_DUMP") != null) {
+    var hb = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, hb, 0, hb.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("HIVE_DUMP"), hb);
+    File.WriteAllText(Environment.GetEnvironmentVariable("HIVE_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    return;
+}
 Checkpoint("desertdone");   // CleanupArea 仅 SquareWallFrame/TileFrame——无哈希效应
 
 // ================= Pass 20 GlowingMushroomPatches（cs:12581-12709 + ShroomPatch cs:80540 + SpreadGrass cs:75210）=================

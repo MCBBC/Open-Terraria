@@ -17,6 +17,7 @@ const out = await p.evaluate(async () => {
   const g = window.__swGame;
   const { TILE_BY_KEY, T } = await import('/src/data/tiles.ts');
   const { ITEM_BY_KEY } = await import('/src/data/items.ts');
+  const { VI_KEY } = await import('/src/data/itemKeys.ts');
   const res = {};
   const list = () => g.entities.npcs.map((n) => ({ key: n.npcKey, home: n.home ? [n.home.x, n.home.y] : null }));
 
@@ -24,7 +25,7 @@ const out = await p.evaluate(async () => {
   res.initial = list();
 
   // ② 50 银入包 + 直接入驻轮：无房 → 商人不来
-  g.player.inv.add(ITEM_BY_KEY['coin_silver'], 50);
+  g.player.inv.add(ITEM_BY_KEY[VI_KEY.COIN.SILVER], 50);
   g.updateTownNpcArrival();
   res.afterCoinsNoHouse = list();
 
@@ -52,17 +53,22 @@ const out = await p.evaluate(async () => {
     st.setTileSilent(x0 + 6, yTop + 5, CHAIR);
     return { doorX: x0 + 12, doorY: yTop + 2 };
   };
-  const { checkRoom } = await import('/src/world/Housing.ts');
+  const { checkRoom, findFreeHouse } = await import('/src/world/Housing.ts');
   // 第一间：门锚落在出生点 ±10 窗内（冷启锚点 = 出生点）→ 向导可发现
   const sy = g.world.spawnY;
   const r1 = buildHouse(g.world.spawnX - 6, sy - 10);
   res.room1 = !!checkRoom(st, r1.doorX, r1.doorY);
+  // DEBUG
+  const _d = findFreeHouse(st, [], g.world.spawnX, g.world.spawnY, 22);
+  res.debug = { spawn: [g.world.spawnX, g.world.spawnY], door1: [r1.doorX, r1.doorY],
+    room1raw: checkRoom(st, r1.doorX, r1.doorY), ffh: _d && { x: _d.standX, y: _d.standY } };
 
   // 入驻轮①：向导入住第一间房
   g.updateTownNpcArrival();
   res.afterGuideHomed = list();
   // 第二间：门锚挂在向导 home ±10 窗内（下一轮锚点 = 已安家 home 随机取一）
   const gh = res.afterGuideHomed.find((n) => n.key === 'guide');
+  if (!gh || !gh.home) return res;   // 向导未入住：输出 debug/room1/afterGuideHomed 排查
   const r2 = buildHouse(gh.home[0] - 22, gh.home[1] - 12);
   res.room2 = !!checkRoom(st, r2.doorX, r2.doorY);
   res.guideHome = gh.home;

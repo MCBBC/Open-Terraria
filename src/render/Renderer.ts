@@ -119,6 +119,7 @@ import type { Player } from '../entities/Player';
 import { mountFallbackColor } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
+import { localAIOf } from '../entities/bossAI_moon_events';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
 import { mapPaintColor, PAINT_RGB } from '../world/Paint';
 import { Enemy } from '../entities/Enemy';
@@ -1257,6 +1258,10 @@ export class Renderer {
     // 7. 光照合成
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
+    // 7c. 食人怪 259/260 茎蔓强制亮彩（Main.cs:22467-22477）：光照合成后绘制——
+    //     主 pass 跳过该族，下限色 (max(R,100),max(G,150),255) 不被全屏乘光压掉
+    this.drawBrightVines(entities, cam, z, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+
     // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画，
     //     颜色手动乘该格光照（Lighting.GetColor 语义）
     if (hover?.smart) {
@@ -2144,13 +2149,20 @@ export class Renderer {
     const headI = world.store.idx(Math.floor(e.cx / TILE), Math.floor((e.y + 2) / TILE));
     const underwater = world.store.liquid[headI] > 100;
     // 骷髅王手（36）的两节臂骨 IK（Main.cs:22543-22596 1:1）：从手部锚点向头
-    // 中心做两段收缩（92/60 缩比），段间旋转 atan2-π/2——贴图 Arm_Bone.png
+    // 中心做两段收缩（92/60 缩比），段间旋转 atan2-π/2——贴图 Arm_Bone.png；
+    // Red Hat 族（头 ai3==1→手 localAI[3] 镜像 :22304）换 Arm_Bone_3（:22571-22578）
     if (e.vanillaId === 36 && e.master) this.drawSkeletronArm(e, e.master);
+    // 南瓜王披风（Main.cs:22499-22506）：锚=本体中心+80Y、PumpkingCloak 五帧行
+    // =localAI[1]（与表情帧同节拍 0-4）、origin=(W/2, 帧高/2)
+    if (e.vanillaId === 327) this.drawPumpkingCloak(e);
+    // 南瓜王之刃 328 双臂（Main.cs:22508-22542）：与骷髅王手同构两段 IK，目标带
+    // -30 偏移、贴图 PumpkingArm 整幅
+    if (e.vanillaId === 328 && e.master) this.drawPumpkingArm(e, e.master);
     // AI_013 食人怪族茎蔓（Main.cs:22433-22514 1:1）：头中心 → 锚点格(ai0/ai1)
     // 每 28px 一段 Chain 贴图步进，剩余 <40px 画一段收缩尾段对齐锚点
     if (e.vanilla?.aiStyle === 13) this.drawPlantVine(e);
     // 石巨人拳链（Main.cs:22593-22632）：拳 → 本体（AI 侧 master；本体死透锚自由头）
-    if (e.vanilla?.aiStyle === 47 && e.master) this.drawGolemFistChain(e);
+    if (e.vanilla?.aiStyle === 47 && e.master) this.drawGolemFistChain(e, !!world.seedFlags?.getGoodWorld);
     // Prime 部件臂骨（Main.cs:22633-22675）：锯/激光/钳/炮 → 头 两段 IK
     if ((e.vanilla?.aiStyle ?? 0) >= 33 && (e.vanilla?.aiStyle ?? 0) <= 36 && e.master) this.drawPrimeArm(e);
     // 世纪之花钩蔓/触须链（Main.cs:22225-22285）：263/264 → 本体
@@ -2494,6 +2506,11 @@ export class Renderer {
 
   /** Arm_Bone.png 懒加载（骷髅王臂骨；vanilla 独立贴图，非 NPC 表） */
   private armBoneImg: HTMLImageElement | null | undefined;
+  private boneArm3Img: HTMLImageElement | null | undefined;   // 二阶段臂骨（Red Hat 族）
+  private pumpkingCloakImg: HTMLImageElement | null | undefined;
+  private pumpkingArmImg: HTMLImageElement | null | undefined;
+  /** 259/260 茎蔓强制亮彩的共享染色 scratch（source-atop 下限色） */
+  private brightVineScratch: HTMLCanvasElement | null = null;
 
   // ===================== NPC GlowMask 体系（Main.cs DrawNPC 硬编码发光层） =====================
   // 原版 NPC 无通用 glowMask 字段（与 Projectile/Item 不同）：发光层是 DrawNPC 里
@@ -4089,6 +4106,10 @@ export class Renderer {
       return;
     }
     const id = e.vanillaId;
+    // 259/260 强制亮彩族（:22467-22477 下限色）不走主 pass——compositeLight 全屏
+    // 乘光会把 (max(R,100),max(G,150),255) 下限压回黑暗；延后到光照合成后的
+    // drawBrightVines（render 7c 钩子）绘制
+    if (id === 259 || id === 260) return;
     // num7/num8：段长/终止距离（Main.cs:22442-22447）
     let step = 28, stop = 40;
     if (id === 259 || id === 260) { step = 12; stop = 20; }
@@ -4122,11 +4143,80 @@ export class Renderer {
     }
   }
 
+  /** 食人怪 259/260 茎蔓强制亮彩（Main.cs:22462-22477）：原版整链单次采样锚点
+   *  光照后取下限色 (max(R,100), max(G,150), B=255)——洞穴内藤蔓保底可见。
+   *  主 pass 已跳过该族（drawPlantVine 头部 return）——compositeLight 全屏乘光会
+   *  压掉下限色，本方法在光照合成【后】绘制（render 7c 钩子）。逐敌用共享
+   *  scratch source-atop 染色后按段旋转贴回；段循环与主 pass 同式（step 12/stop 20） */
+  private drawBrightVines(
+    entities: Entity[], cam: Camera, z: number,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    lrx: number, lry: number, lrw: number, lrh: number,
+  ): void {
+    const vines = (entities as Enemy[]).filter(
+      (n) => n instanceof Enemy && !n.dead
+        && (n.vanillaId === 259 || n.vanillaId === 260) && n.ai0 >= 0 && n.ai1 >= 0);
+    if (!vines.length || !this.atlas) return;
+    const ctx = this.ctx;
+    const scratch = this.brightVineScratch ??= document.createElement('canvas');
+    const sctx = scratch.getContext('2d');
+    if (!sctx) return;
+    for (const e of vines) {
+      const chain = this.atlas.vmisc(e.vanillaId === 259 ? 'vanilla/Chain24.png' : 'vanilla/Chain25.png');
+      if (!chain) continue;
+      // 锚点光照单采样（:22462）+ 下限（:22467-22477）；光图外按全亮（区域边界防断藤）
+      let lr = 255, lg = 255, lb = 255;
+      const tx = Math.floor(e.ai0), ty = Math.floor(e.ai1);
+      if (tx >= lrx && ty >= lry && tx < lrx + lrw && ty < lry + lrh) {
+        const li = (ty - lry) * lrw + (tx - lrx);
+        lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+      }
+      const cr = Math.max(lr, 100), cg = Math.max(lg, 150);   // B 恒 255
+      const ax = e.ai0 * 16 + 8, ay = e.ai1 * 16 + 8;
+      let px = e.cx, py = e.cy;
+      let dx = ax - px, dy = ay - py;
+      const rot = Math.atan2(dy, dx) - Math.PI / 2;
+      const step = 12, stop = 20;                   // :22442-22447（259/260 档）
+      if (scratch.width !== chain.sw || scratch.height !== chain.sh) {
+        scratch.width = chain.sw; scratch.height = chain.sh;
+      }
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.clearRect(0, 0, scratch.width, scratch.height);
+      let running = true, guard = 0;
+      while (running && guard++ < 200) {
+        const dist = Math.hypot(dx, dy);
+        let seg = step;
+        if (dist < stop) { seg = dist - stop + step; running = false; }
+        if (dist > 0 && seg > 0) {
+          const k = seg / dist;
+          px += dx * k; py += dy * k;
+          dx = ax - px; dy = ay - py;
+          const sh = Math.min(seg, chain.sh);
+          sctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, sh, 0, 0, chain.sw, sh);
+          sctx.globalCompositeOperation = 'source-atop';
+          sctx.fillStyle = `rgb(${cr},${cg},255)`;
+          sctx.fillRect(0, 0, scratch.width, scratch.height);
+          sctx.globalCompositeOperation = 'source-over';
+          const [sxp, syp] = cam.worldToScreen(px, py);
+          ctx.save();
+          ctx.translate(sxp, syp);
+          ctx.rotate(rot);
+          ctx.drawImage(scratch, 0, 0, chain.sw, sh,
+            (-chain.sw / 2) * z, (-chain.sh / 2) * z, chain.sw * z, chain.sh * z);
+          ctx.restore();
+        } else {
+          running = false;
+        }
+      }
+    }
+  }
+
   /** 石巨人拳链（Main.cs:22593-22632 1:1）：拳 → golemBoss 本体中心（AI 侧
    *  master=本体，本体死透时锚自由头——与原版 golemBoss=-1 回退自身中心的
    *  差异已注释）；目标带肩偏移（247 左 -70×scale / 248 右 +66×scale，Y -7×scale），
-   *  Chain21 全段 16×16、步长 16×scale、距锚 <16 无尾段直接停 */
-  private drawGolemFistChain(e: Enemy) {
+   *  Chain21 全段 16×16、步长 16×scale、距锚 <16 无尾段直接停。
+   *  FTW 每段再 -8Y（:22625-22628）——拳链整体下探 */
+  private drawGolemFistChain(e: Enemy, getGoodWorld: boolean) {
     if (!this.atlas) return;
     const chain = this.atlas.vmisc('vanilla/Chain21.png');
     if (!chain || !e.master) return;
@@ -4146,6 +4236,7 @@ export class Renderer {
       px += dx * k; py += dy * k;
       dx = ax - px + offX * scale;
       dy = ay - py - 7 * scale;
+      if (getGoodWorld) dy += 8;                    // :22625-22628 FTW 段目标下探 +8
       ctx.save();
       ctx.translate(px, py);
       ctx.rotate(rot);
@@ -4258,13 +4349,23 @@ export class Renderer {
       this.armBoneImg = new Image();
       this.armBoneImg.src = 'sprites/vanilla/Arm_Bone.png';
     }
-    const img = this.armBoneImg;
+    // Red Hat 族（生成时 head.ai[3]=1 :81269-81271，手 localAI[3] 每 tick 镜像 :22304）
+    // → 换 Arm_Bone_3（:22571-22578；rect/origin 两分支同用 BoneArm 尺寸，原版 quirk）
+    const redHat = head.ai3 === 1;
+    if (redHat && this.boneArm3Img === undefined) {
+      this.boneArm3Img = new Image();
+      this.boneArm3Img.src = 'sprites/vanilla/Arm_Bone_3.png';
+    }
+    const img = redHat ? this.boneArm3Img : this.armBoneImg;
     if (!img || !img.complete || img.naturalWidth === 0) return;
     const ctx = this.ctx;
     const ai0 = hand.ai0 >= 0 ? 1 : -1; // ai[0]：-1 左手 / 1 右手
     // vector5 = 手部锚点（Main.cs:22545：position + width/2 - 5*ai[0], +20）
     let vx = hand.x + hand.w / 2 - 5 * ai0;
     let vy = hand.y + 20;
+    // BoneArm 基准尺寸（26×98）——Arm_Bone_3（28×98）按此 rect/origin 绘制（:22575）
+    const bw = this.armBoneImg?.naturalWidth ?? img.naturalWidth;
+    const bh = this.armBoneImg?.naturalHeight ?? img.naturalHeight;
     for (let j = 0; j < 2; j++) {
       // num14/num15 = 头中心（position + w/2, +h/2）相对锚点的向量（Main.cs:22547-22548）
       let dx = head.x + head.w / 2 - vx;
@@ -4277,9 +4378,59 @@ export class Renderer {
       ctx.save();
       ctx.translate(vx, vy);
       ctx.rotate(rot);
-      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      ctx.drawImage(img, -bw / 2, -bh / 2, bw, bh);
       ctx.restore();
       if (j === 0) { vx += dx * k / 2; vy += dy * k / 2; } // Main.cs:22587 段间推进
+    }
+  }
+
+  /** 南瓜王 327 披风（Main.cs:22499-22506）：锚=本体中心+(0,80)，PumpkingCloak
+   *  166×630 五帧行（帧高 126），行号 = localAI[1]（表情帧同节拍），origin=
+   *  (W/2, 帧高/2)，rotation 0——本体贴图之下仍画在实体层（原版同段叠画） */
+  private drawPumpkingCloak(e: Enemy) {
+    if (this.pumpkingCloakImg === undefined) {
+      this.pumpkingCloakImg = new Image();
+      this.pumpkingCloakImg.src = 'sprites/vanilla/PumpkingCloak.png';
+    }
+    const img = this.pumpkingCloakImg;
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const fw = img.naturalWidth, fh = img.naturalHeight / 5;
+    const row = Math.max(0, Math.min(4, Math.trunc(localAIOf(e)[1] ?? 0)));   // :22501 num10
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(e.cx, e.cy + 80);
+    ctx.drawImage(img, 0, row * fh, fw, fh, -fw / 2, -fh / 2, fw, fh);
+    ctx.restore();
+  }
+
+  /** 南瓜王之刃 328 双臂（Main.cs:22508-22542，与骷髅王手同构）：锚=position+
+   *  w/2-5*ai[0], +20；朝主中心（h/2-30）两段 92/60 收缩，段偏移
+   *  (-200*ai[0],+130)/(-50*ai[0],+80)，贴图 PumpkingArm（26×96）整幅 */
+  private drawPumpkingArm(blade: Enemy, master: Enemy) {
+    if (this.pumpkingArmImg === undefined) {
+      this.pumpkingArmImg = new Image();
+      this.pumpkingArmImg.src = 'sprites/vanilla/PumpkingArm.png';
+    }
+    const img = this.pumpkingArmImg;
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const ctx = this.ctx;
+    const ai0 = blade.ai0 >= 0 ? 1 : -1;
+    let vx = blade.x + blade.w * 0.5 - 5 * ai0;   // :22509 vector4
+    let vy = blade.y + 20;
+    for (let i = 0; i < 2; i++) {
+      let dx = master.x + master.w / 2 - vx;
+      let dy = master.y + master.h / 2 - 30 - vy; // :22513（-30 偏移，骷髅王手无）
+      let k: number;
+      if (i === 0) { dx -= 200 * ai0; dy += 130; const len = Math.hypot(dx, dy) || 1; k = 92 / len; }
+      else { dx -= 50 * ai0; dy += 80; const len = Math.hypot(dx, dy) || 1; k = 60 / len; }
+      vx += dx * k; vy += dy * k;
+      const rot = Math.atan2(dy, dx) - Math.PI / 2;
+      ctx.save();
+      ctx.translate(vx, vy);
+      ctx.rotate(rot);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      ctx.restore();
+      if (i === 0) { vx += dx * k / 2; vy += dy * k / 2; }   // :22541 段间推进
     }
   }
 

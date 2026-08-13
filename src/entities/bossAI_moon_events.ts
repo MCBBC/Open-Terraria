@@ -30,6 +30,8 @@ const la = (e: Enemy): number[] => {
   if (!a) { a = [0, 0, 0, 0]; localAI.set(e, a); }
   return a;
 };
+/** 渲染侧只读出口（南瓜王 327 披风帧 = localAI[1]，Main.cs:22501） */
+export const localAIOf = la;
 /** Main.rand.Next(n) → [0,n) */
 const rnd = (n: number): number => Math.floor(Math.random() * n);
 /** Main.rand.Next(a, b) → [a,b) */
