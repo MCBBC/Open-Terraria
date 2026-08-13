@@ -24,10 +24,7 @@ import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
 import { mainExpertMode, getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
 import type { Enemy } from './Enemy';
 
-// 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
-// 对齐原版体感：跳跃/小坡绝不受伤（原版约 25 格起伤）；落水另行豁免
-const FALL_SAFE_TILES = 22;
-const FALL_FATAL_TILES = 45;
+// 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
 // 沙族地格集合（TileID.Sets.Conversion：Sand{53,112,116,234} / HardenedSand{397,398,399,402}
 // / Sandstone{396,400,401,403}——TileID.cs:30-34）。53/396/397 是本地基础方块键。
@@ -788,9 +785,12 @@ export class Player extends Entity {
       Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE),
     )];
     const wasInWater = this.inWater;
-    // wet 判定排除微光（Collision.cs:1418 WetCollision 只认 !lava && !shimmer）
-    this.inWater = liq > 100 && world.store.liquidType[
-      world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] !== 4;
+    // wet 判定排除岩浆与微光（Collision.cs:1418 WetCollision 只认 !lava && !shimmer；
+    // 本仓编码 1水/2岩浆/3蜜/4微光——岩浆里不能"游泳"）
+    this.inWater = liq > 100 && (world.store.liquidType[
+      world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] === 1
+      || world.store.liquidType[
+        world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] === 3);
     // 入水瞬间：水花声（出水不响）
     if (this.inWater && !wasInWater) game.playSfx('splash');
     const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE));
@@ -1635,19 +1635,18 @@ export class Player extends Entity {
       if (--this.whipBuffs[Number(k)] <= 0) delete this.whipBuffs[Number(k)];
     }
 
-    // 落地摔伤结算（幸运马掌免疫；落在水里豁免——水有缓冲）
+    // 落地摔伤结算（Player.cs:25005-25091：25 格 + extraFall 起伤，超格数 ×10 线性；
+    // 翼豁免 flag9=任一盔甲槽 wingSlot>-1；幸运马掌 noFallDmg；落在水里豁免）
     if (this.onGround && this.fallStartY !== null) {
       const fallTiles = (this.y - this.fallStartY) / TILE;
       this.fallStartY = null;
       const feetLiq = world.store.liquid[world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 1) / TILE))];
       const landedInWater = feetLiq > 60 || this.inWater;
       if (landedInWater) { /* 落水缓冲：不计摔伤 */ }
-      else if (fallTiles > FALL_SAFE_TILES + this.equipStats.extraFall
-        && !(this.hasHorseshoe || this.equipStats.noFallDmg)) {
-        const safeT = FALL_SAFE_TILES + this.equipStats.extraFall;
-        const t = Math.min(1, (fallTiles - safeT) / (FALL_FATAL_TILES - FALL_SAFE_TILES));
-        const dmgPercent = 10 + 90 * t * t * t; // 10%~100% 三次方曲线（Maples 公式）
-        const dmg = Math.max(1, Math.round((dmgPercent / 100) * this.hp));
+      else if (fallTiles > 25 + this.equipStats.extraFall
+        && !(this.equipStats.wing || this.hasHorseshoe || this.equipStats.noFallDmg)) {
+        const safeT = 25 + this.equipStats.extraFall;
+        const dmg = Math.max(1, Math.round((fallTiles - safeT) * 10));
         this.lastDamageCause = { kind: 'fell' };
         this.damage(dmg, this.cx, this.y - 10);
         game.playSfx('hurt');

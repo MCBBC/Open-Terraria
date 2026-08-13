@@ -6,6 +6,7 @@ import type { UIState } from './core/UIState';
 import { UIScale } from './draw/UIScale';
 import { UISpriteBatch, rgb } from './draw/UISpriteBatch';
 import { UITextures } from './assets/UITextures';
+import { isTouchDevice } from '../ui/MobileControls';
 
 export class VUI {
   static ui = new UserInterface();
@@ -176,9 +177,11 @@ export class VUI {
   /** 智能光标激活中（Game 每帧写入）：指针切换到 Cursors[12] 帧（Main.cs:47442-47513 num=11+smart） */
   static smartCursorOn = false;
 
-  /** Canvas 原版光标：菜单与游戏内统一绘制（系统光标已被 #sw-cursor-style 全树隐藏） */
+  /** Canvas 原版光标：菜单与游戏内统一绘制（系统光标已被 #sw-cursor-style 全树隐藏）。
+   *  触屏设备不画指针（原版移动端同语义——触摸定位无需指针精灵） */
   private static drawCursor() {
     if (!VUI.batch || !VUI.enabled) return;
+    if (isTouchDevice()) return;
     const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
     if (!tex) return;
     const x = Math.round(UIScale.mouseX);

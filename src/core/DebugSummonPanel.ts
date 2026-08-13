@@ -55,6 +55,11 @@ export interface DebugSummonPanelHooks {
   clearEnemies: () => number;
   /** 显示名本地化（Lang.npcName） */
   nameOf: (id: number) => string;
+  /** 事件触发面板（F6 扩展）：按 key 触发特定世界事件。
+   *  返回错误文案（红字）或 null=成功——实现须走自然事件入口
+   *  （与自然 roll 命中同路径/同公告/同清旗点），不得绕过昼夜消费时序 */
+  events?: Array<{ key: string; label: string }>;
+  triggerEvent?: (key: string) => string | null;
 }
 
 const STYLE = `
@@ -103,6 +108,7 @@ export class DebugSummonPanel {
         <button data-act="clear" style="flex:1;background:#301818;color:#F99;border:1px solid #644;border-radius:4px;cursor:pointer;padding:2px 0;">清除敌怪</button>
         <span data-role="msg" style="flex:2;color:#8C8;"></span>
       </div>
+      <div data-role="events" style="display:none;flex-wrap:wrap;gap:4px;padding:6px 8px;border-bottom:1px solid #334;"></div>
       <div data-role="list" style="overflow:auto;padding:4px;"></div>`;
     document.body.appendChild(el);
     this.el = el;
@@ -119,8 +125,29 @@ export class DebugSummonPanel {
     cnt.addEventListener('change', () => { this.count = Number(cnt.value) || 1; });
     const am = el.querySelector<HTMLInputElement>('[data-role=atMouse]')!;
     am.addEventListener('change', () => { this.atMouse = am.checked; });
+    this.renderEvents();
     this.render();
     q.focus();
+  }
+
+  /** 事件触发行（hooks.events 有条目才显示） */
+  private renderEvents(): void {
+    const box = this.el?.querySelector<HTMLElement>('[data-role=events]');
+    if (!box) return;
+    const events = this.hooks.events ?? [];
+    if (!events.length || !this.hooks.triggerEvent) return;
+    box.style.display = 'flex';
+    for (const ev of events) {
+      const btn = document.createElement('button');
+      btn.textContent = ev.label;
+      btn.style.cssText = 'background:#182838;color:#9CD;border:1px solid #356;border-radius:4px;cursor:pointer;padding:2px 8px;font:inherit;';
+      btn.addEventListener('click', () => {
+        const err = this.hooks.triggerEvent!(ev.key);
+        if (err) this.msg(err, '#F88');
+        else this.msg(`已触发:${ev.label}`);
+      });
+      box.appendChild(btn);
+    }
   }
 
   close(): void {

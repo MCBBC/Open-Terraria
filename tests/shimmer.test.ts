@@ -93,7 +93,10 @@ describe('钱币 → 微光化币 → coinLuck（WorldItem.cs:1791-1810 + Player
 
 // ============ 掉落物端到端（TileStore 造微光池） ============
 
-const W = 60, H = 60;
+// 高度取 256：UnderworldLayer = h-200 = 56（Main.cs:2863）须落在池（行 33-40）
+// 之下，玩家（行 36）才在地狱层之上可获 buff 353——60 高的小世界 h-200=-140
+// 会让全域被判入地狱层、微光永不生效（2026-08-13 地狱层门 lavaLine→h-200 对齐）
+const W = 60, H = 256;
 
 function shimmerWorld(): World {
   const w = new World(W, H, 11, 'shimmer-test');
@@ -103,7 +106,6 @@ function shimmerWorld(): World {
     for (let y = 33; y < 40; y++) st.setLiquid(x, y, 255, 4); // 微光满格
   }
   for (let x = 30; x < 46; x++) st.setTile(x, 40, 1); // 池外实地（脱困传送落点候选）
-  w.lavaLine = 50;
   return w;
 }
 
@@ -160,12 +162,13 @@ describe('玩家脱困落点（ShimmerHelper.FindSpotWithoutShimmer 近似）', 
   it('微光柱内不放人；池外最近的空气+实地落点被选中', () => {
     const w = shimmerWorld();
     const st = w.store;
-    // 池心上方全是微光 → 不该选池内任何格
+    // 池心上方全是微光 → 不该选池内任何格（必然断言：落点必存在且必在池外）
     const inPool = findShimmerFreeSpot(st, 20, 36);
-    if (inPool) {
-      const i = st.idx(inPool.x, inPool.y);
-      expect(st.liquid[i] === 0 || st.liquidType[i] !== 4).toBe(true);
-    }
+    expect(inPool).not.toBeNull();
+    const i = st.idx(inPool!.x, inPool!.y);
+    expect(st.liquid[i] === 0 || st.liquidType[i] !== 4).toBe(true);
+    // 池列 x∈[10,30) 全液——落点必须溢出到池外实地列
+    expect(inPool!.x).toBeGreaterThanOrEqual(30);
     // 池外（x=35 无液体，y=39 上方三格空 + 下方实地 40 行石）→ 选脚下实地上一格
     for (let x = 31; x < 40; x++) st.setTile(x, 40, 1);
     const spot = findShimmerFreeSpot(st, 35, 39);
@@ -268,7 +271,7 @@ describe('玩家浸微光（buff 353 + 穿墙下坠 + 脱困传送，Player.cs:2
     const h = hooks(w, p);
     p.fixedUpdate(1 / 60, h);
     expect(p.inShimmer).toBe(true);
-    expect(p.shimmering).toBe(true);          // y=36 < lavaLine 50 → buff 353 生效
+    expect(p.shimmering).toBe(true);          // y=36 < UnderworldLayer(=h-200=56) → buff 353 生效
     expect(p.timeShimmering).toBe(1);
     expect(p.damage(9999, p.cx, p.cy)).toBe(false); // Hurt :37591-37595 直接 0
     // 强制走脱困（≥1200 且有输入）：传送到池外无微光落点
@@ -282,13 +285,19 @@ describe('玩家浸微光（buff 353 + 穿墙下坠 + 脱困传送，Player.cs:2
     expect(p.timeShimmering).toBe(0);
   });
 
-  it('地狱层内微光不生效（:11391-11397 position.Y/16 > UnderworldLayer → DelBuff）', () => {
+  it('地狱层内微光不生效（:27430/:11391-11397 position.Y/16 > UnderworldLayer(=h-200) → 不授予/即撤）', () => {
     const w = shimmerWorld();
-    w.lavaLine = 30;                          // 玩家 y=36 已入地狱层
-    const p = new Player(20 * TILE, 36 * TILE, new Inventory());
+    const st = w.store;
+    // 世界底部另造深池（行 60-63 液 + 行 64 实地）——UnderworldLayer = 256-200 = 56，
+    // 池体整体在地狱层内（旧实现用 lavaLine=30 模拟，门源已对齐 Main.cs:2863）
+    for (let x = 10; x < 30; x++) {
+      st.setTile(x, 64, 1);
+      for (let y = 60; y < 64; y++) st.setLiquid(x, y, 255, 4);
+    }
+    const p = new Player(20 * TILE, 61 * TILE, new Inventory());
     p.fixedUpdate(1 / 60, hooks(w, p));
-    expect(p.inShimmer).toBe(true);
-    expect(p.shimmering).toBe(false);
+    expect(p.inShimmer).toBe(true);    // 浸液判定照常（盒/脚格采样不受层门影响）
+    expect(p.shimmering).toBe(false);  // y/16=61 > 56 → 地狱层门拦授予
   });
 });
 

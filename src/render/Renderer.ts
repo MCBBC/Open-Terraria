@@ -18,6 +18,7 @@ import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS } from '../player/SmartCursor';
+import { mobileUiScale } from '../ui/MobileControls';
 
 /** 鼠标目标格（智能光标激活时 smart=true 并附方向锁 arrow） */
 export interface HoverTarget {
@@ -1183,8 +1184,19 @@ export class Renderer {
 
     // 11. 生命/魔力资源条（原版默认 "New"=FancyClassic 金框分格样式；Classic 为
     //     朴素心/星——PlayerResourceSetsManager2.cs:26-31 五样式，此处两主样式可切）
-    if (options.data.resourceBarStyle === 'classic') this.resourceBars.draw(ctx, player, viewW, flicker);
-    else this.fancyBars.draw(ctx, player, viewW, flicker);
+    //     移动端整体缩小（右锚缩放——两样式均以 viewW 右缘锚定；桌面恒等）
+    {
+      const barsUiS = mobileUiScale();
+      if (barsUiS !== 1) {
+        ctx.save();
+        ctx.translate(viewW, 0);
+        ctx.scale(barsUiS, barsUiS);
+        ctx.translate(-viewW, 0);
+      }
+      if (options.data.resourceBarStyle === 'classic') this.resourceBars.draw(ctx, player, viewW, flicker);
+      else this.fancyBars.draw(ctx, player, viewW, flicker);
+      if (barsUiS !== 1) ctx.restore();
+    }
     // 11b. 呼吸计（原版 DrawInterface_Resources_Breath Main.cs:42824：玩家头顶
     //      100px 屏幕 10 气泡；岩浆宽限耗损时换火焰条）
     this.breathMeter.draw(ctx, player, cam, viewH, this.atlas, this.playerInventory);
@@ -1649,11 +1661,14 @@ export class Renderer {
     }
   }
 
-  /** Main.wofDrawAreaTop/Bottom 近似：bossAI_wof 模块内私有未导出（结构性差异），
-   *  由之眼反解——wofEyeAI 锚定式(:26161-26167/生成位 :26132-26136)
-   *  上眼 cy=(mid+top)/2、下眼 cy=(mid+bottom)/2，且 mid=head.cy(:25955-25956
-   *  y=(top+bottom)/2-h/2)→ top=2×上眼cy-head.cy。眼以 ±1 步进追锚点，误差 ≤ 数 px；
-   *  眼缺失时回退最小跨度 160(:25940-25946) 对称展开 */
+  /** Main.wofDrawAreaTop/Bottom 近似：bossAI_wof 模块内私有未导出（结构性差异，
+   *  精确化需在该文件加 getter——受会话改域限制，此处渲染侧反解）。
+   *  空腔中点可精确取得：wallOfFleshAI :25955-25956 y=(top+bottom)/2-h/2 →
+   *  mid = head.cy 分毫不差。未知量只剩跨度：wofEyeAI 锚定式(:26161-26167)
+   *  上眼 cy=(mid+top)/2、下眼 cy=(mid+bottom)/2 → span = 2×(下眼−上眼)。
+   *  用【双眼间距】而非单眼位置反解 top/bottom：双眼共享同一滞后（生成锚点差
+   *  h/2 + ±1 步进追靶），差分相消，只剩微分滞后——空腔稳定时双眼收敛即精确；
+   *  眼缺失/间距异常时回退最小跨度 160(:25940-25946) 对称展开 */
   private wofDrawAreaOf(head: Enemy, entities: Enemy[]): { top: number; bottom: number } {
     let eyeTop: Enemy | null = null;
     let eyeBot: Enemy | null = null;
@@ -1662,7 +1677,9 @@ export class Renderer {
       if (e.ai0 > 0) eyeTop = e; else eyeBot = e;
     }
     if (eyeTop && eyeBot) {
-      return { top: 2 * eyeTop.cy - head.cy, bottom: 2 * eyeBot.cy - head.cy };
+      let span = 2 * (eyeBot.cy - eyeTop.cy);
+      if (!(span >= 160)) span = 160;                    // :25940-25946 跨度保底
+      return { top: head.cy - span / 2, bottom: head.cy + span / 2 };
     }
     return { top: head.cy - 80, bottom: head.cy + 80 };
   }
@@ -1790,7 +1807,8 @@ export class Renderer {
    *  Enemy.hurt 既有三色粒子爆发代位；此处补 :88296-88324 的墙列全屏血尘扫掠
    *  （门 = 玩家深于 maxTilesY-250；X = 墙左沿 direction>0 时 -80、宽 140；
    *  纵向从屏顶起 screenWidth px 高——原版用 screenWidth 当纵向跨度的怪癖照搬；
-   *  46×50 网格每格 5 尘+1 gore → 尘降为 2、gore 0.5 概率，控制总量 ~250） */
+   *  46×50 网格每格原版 5 尘+1 gore → 尘降为 2、gore 0.5 概率，总量 ~150 粒
+   *  （Game 粒子池 600 上限内放不下原版 ~660，故渲染层自持） */
   private spawnWoFDeathFx(
     head: Enemy, player: Player, world: World,
     camRY: number, viewW: number, viewH: number, z: number,
@@ -3653,7 +3671,7 @@ export class Renderer {
 
   /** swing 形状（Game.swing / 远端 swingNet 同构）。
    *  useStyle 分族 + aim（useStyle 5/13 的瞄准角）由 Game.useSwing 写入 */
-  private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number } | null) {
+  private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null) {
     const ctx = this.ctx;
     if (p.dead) return;
     // ---- 手持物（PlayerDrawLayers.cs:3857 门槛）：itemAnimation>0 || (holdStyle!=0) ----
@@ -3886,8 +3904,9 @@ export class Renderer {
         ctx.restore();
       }
     }
-    // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住
-    if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool) {
+    // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住。
+    // noGraphic 族(短剑 noUseGraphic=true)不画物品贴图——投射物即本体,双画=两个贴图
+    if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool && !swing.noGraphic) {
       this.drawUseItem(ctx, p, swing);
     }
 
@@ -3945,7 +3964,7 @@ export class Renderer {
    *  坐标约定：全部按 direction=+1 推导（offX 正=身前），朝左靠镜像空间翻转；
    *  offY 从 p.y（碰撞盒顶）起算；旋转 origin = 底角（PlayerDrawLayers.cs:3260）。
    *  图层：工具/武器挥砍在身体之前调用（身后），使用类托举在身体之后调用（身前） */
-  private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number }) {
+  private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean }) {
     const ar = this.atlasIcon(swing.item);
     const icon = ar ? null : this.itemIcon(swing.item);
     const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
@@ -4508,6 +4527,18 @@ export class Renderer {
   private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock, entities: Entity[] = []) {
     if (!this.minimap) return;
     this.minimap.flushDirty();
+    // 移动端整体缩小（右锚缩放变换：小地图+框+按钮+时间文字同尺度；
+    // 桌面 uiS=1 → 与原实现逐像素一致）
+    const uiS = mobileUiScale();
+    ctx.save();
+    if (uiS !== 1) {
+      ctx.translate(ctx.canvas.width, 0);
+      ctx.scale(uiS, uiS);
+      ctx.translate(-ctx.canvas.width, 0);
+    }
+    // 屏幕鼠标 → 本变换局部坐标（右锚缩放逆变换；uiS=1 恒等——桌面零影响）
+    const lmX = (sx: number) => (uiS === 1 ? sx : ctx.canvas.width - (ctx.canvas.width - sx) / uiS);
+    const lmY = (sy: number) => (uiS === 1 ? sy : sy / uiS);
     const size = 240;                 // 放大
     // 原版锚点（Main.cs:54696-54706 UpdateMinimapAnchors + 54944-54949，MapScale=1）：
     // miniMapX = screenWidth - (52+240) = 屏宽-292，miniMapY = 90
@@ -4530,13 +4561,19 @@ export class Renderer {
       ox - sx * size / viewTiles, oy - sy * size / viewTiles,
       size / viewTiles, 2 * size / viewTiles,
       { x: ox, y: oy, w: size, h: size });
-    // 头像层(原版 DrawNPCMapIcons3 :55546 + MapPlayerRenderer):玩家头/城镇 NPC 头/
-    // Boss 头;headScale=min(1,(1×0.4+1)/3)≈0.47(Main.cs:55059,小地图 scale=1)
-    this.drawMapHeads(ctx, player, Math.min(1, (1 * 0.2 * 2 + 1) / 3),
+    // 头像层(原版 mapStyle1 支 :55140 + DrawNPCMapIcons2 :55602):玩家头/城镇 NPC 头/
+    // Boss 头;headScale=min(1,(minimapZoom×0.5+1)/3)×UIScale(mapMinimapScale=1.05 :890;
+    // 原写死 0.47 不随缩放且漏 UIScale≈1.1)。裁剪到小地图框内——窗口外实体头像不外溢
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(ox, oy, size, size);
+    ctx.clip();
+    this.drawMapHeads(ctx, player, Math.min(1, (this.minimapZoom * 0.25 * 2 + 1) / 3) * 1.1,
       (wx) => ox + (wx / TILE - sx) / viewTiles * size,
       (wy) => oy + (wy / TILE - sy) / viewTiles * size,
       entities.filter((e) => e instanceof TownNPC) as TownNPC[],
       entities.filter((e) => e instanceof Enemy) as Enemy[]);
+    ctx.restore();
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
     const { skin, tex } = this.minimapSkinAssets();
     const fx = ox + 4 + skin.fo[0], fy = oy + 4 + skin.fo[1];
@@ -4550,7 +4587,7 @@ export class Renderer {
     ];
     for (const [tex, [bx, by], kind] of btns) {
       const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
-      const hovering = Math.abs(this._mouseX - cx) < 11 && Math.abs(this._mouseY - cy) < 11;
+      const hovering = Math.abs(lmX(this._mouseX) - cx) < 11 && Math.abs(lmY(this._mouseY) - cy) < 11;
       if (!hovering || !tex.complete) continue;
       this.minimapUiHover = true;
       ctx.drawImage(tex, fx + bx, fy + by);
@@ -4561,7 +4598,11 @@ export class Renderer {
       }
     }
     // 记录小地图区域供点击检测（黑垫外沿）
-    this.minimapRect = { x: ox - 2, y: oy - 2, w: size + 4, h: size + 4 };
+    this.minimapRect = {
+      x: uiS === 1 ? ox - 2 : ctx.canvas.width - (ctx.canvas.width - (ox - 2)) * uiS,
+      y: uiS === 1 ? oy - 2 : (oy - 2) * uiS,
+      w: (size + 4) * uiS, h: (size + 4) * uiS,
+    };
     // 时间显示
     const hFloat = clock.hourFloat;
     const hh = String(Math.floor(hFloat)).padStart(2, '0');
@@ -4594,7 +4635,7 @@ export class Renderer {
     }
 
     // ---- \u65f6\u95f4\u8c03\u6574\u6309\u94ae + \u9762\u677f\uff08\u00b1 \u5207\u6362\uff1b\u547d\u4e2d\u533a\u6574\u4f53\u4e0a\u62a5 timeUiHover \u4f9b Game \u541e\u70b9\u51fb\uff09 ----
-    const mx = this._mouseX, my = this._mouseY;
+    const mx = lmX(this._mouseX), my = lmY(this._mouseY);
     const clicked = this._mouseDown && !this._uiPrevMouseDown; // \u6309\u4e0b\u8fb9\u6cbf\uff08\u4e0e\u7f29\u653e\u6309\u94ae\u7684\u6301\u7eed\u6309\u4f4f\u533a\u5206\uff09
     const hit = (x: number, y: number, w: number, h: number) =>
       mx >= x && mx <= x + w && my >= y && my <= y + h;
@@ -4689,6 +4730,7 @@ export class Renderer {
     }
     this._uiPrevMouseDown = this._mouseDown;
     ctx.restore();
+    ctx.restore(); // 移动端缩放变换（uiS=1 时为空 save/restore，恒等）
   }
 
   /** 迷雾遮罩：未探索区域黑色覆盖（世界坐标 → 目标矩形） */
@@ -4806,7 +4848,7 @@ export class Renderer {
   ) {
     if (!this.atlas) return;
     const drawHead = (img: CanvasImageSource | null, wx: number, wy: number,
-      flip: boolean, rotation = 0, extra = 0) => {
+      flip: boolean, rotation = 0, extra = 0, sw = 24, sh = 22) => {
       if (!img) return;
       const x = mapX(wx), y = mapY(wy);
       ctx.save();
@@ -4819,17 +4861,19 @@ export class Renderer {
       if (extra) {
         ctx.globalAlpha = 0.35;
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          ctx.drawImage(img as CanvasImageSource, 0, 0, 24, 22, -12 + dx, -11 + dy, 24, 22);
+          ctx.drawImage(img as CanvasImageSource, 0, 0, sw, sh, -sw / 2 + dx, -sh / 2 + dy, sw, sh);
         }
         ctx.globalAlpha = 1;
       }
-      ctx.drawImage(img as CanvasImageSource, 0, 0, 24, 22, -12, -11, 24, 22);
+      ctx.drawImage(img as CanvasImageSource, 0, 0, sw, sh, -sw / 2, -sh / 2, sw, sh);
       ctx.restore();
     };
-    // 玩家头(纸娃娃帧 0 顶部 24px 裁头;无外观回退头贴图 0)
+    // 玩家头(原版 PlayerHeadDrawRenderTargetContent:发型/头盔全层的组合头,中心锚)。
+    // 纸娃娃帧 0 顶部 40×32 裁头带(整宽+发冠带,24×22 会削发型——用户报"绘制不完整");
+    // 无外观回退头贴图 0
     if (player.appearance) {
       const doll = compositePaperDoll(player.appearance, dollEquipFromInv(player.inv, this.atlas) as never);
-      if (doll) drawHead(doll as unknown as HTMLCanvasElement, player.cx, player.cy, player.facing < 0, 0, 1);
+      if (doll) drawHead(doll as unknown as HTMLCanvasElement, player.cx, player.cy, player.facing < 0, 0, 1, 40, 32);
       else return; // 纸娃娃未就绪:头像层整体等下一帧(原版头层贴图驱动同理)
     } else {
       drawHead(this.atlas.ensureVImage('vanilla/NPC_Head_0.png'), player.cx, player.cy, false, 0, 1);
@@ -4917,7 +4961,7 @@ export class Renderer {
     // Boss 头;headScale=min(1,(zoom×0.5+1)/3)——Main.cs:55140)
     const p = this._lastPlayer;
     if (p) {
-      this.drawMapHeads(ctx, p, Math.min(1, (fm.zoom * 0.25 * 2 + 1) / 3),
+      this.drawMapHeads(ctx, p, Math.min(1, (fm.zoom * 0.2 * 2 + 1) / 3) * 1.1,
         (wx) => cx0 + wx / TILE * fm.zoom,
         (wy) => cy0 + wy / TILE * fm.zoom,
         entities.filter((e) => e instanceof TownNPC) as TownNPC[],

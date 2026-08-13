@@ -13,6 +13,10 @@ export abstract class Entity {
   hitWall = false;
   hitHead = false;
   dropThrough = false;
+  /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946 默认 水/岩浆 .5、
+   *  蜂蜜 .25、微光 .375）。1=dry 不减速；Enemy 侧 npcLiquid.updateNpcLiquid 每 tick 写，
+   *  moveAndCollide 入口缩 dx/dy（velocity 不变——同 Collision_MoveWhileWet :93986） */
+  liqFactor = 1;
   // ---- 联机傀儡标记（v3 实体同步）：快照驱动实体，本地不跑 AI/命中判定 ----
   netPuppet = false;
   /** 联机实体号（拥有者 slot 高 8 位 + 本地 id 低 24 位；见 net/entitySyncHooks） */

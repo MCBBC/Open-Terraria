@@ -18,10 +18,12 @@ await new Promise((r) => setTimeout(r, 2000));
 
 const trace = await page.evaluate(async () => {
   const g = window.__swGame;
-  const before = g.entities.list('enemies').length;
+  // 强制入夜(避开白天漂离分支,直测 P1 状态机)
+  g.world.clock.timeOfDay = 0.9; g.world.clock.isDay = false;
+  const before = g.entities.all().length;
   const err = g.debugSpawnNpc(4, 1, false);
   await new Promise((r) => setTimeout(r, 400));
-  const eyes = g.entities.list('enemies').filter((e) => e.vanillaId === 4);
+  const eyes = g.entities.all().filter((e) => e.vanillaId === 4);
   const eye = eyes[eyes.length - 1];
   if (!eye) return { err, before, eyeFound: false };
   const samples = [];

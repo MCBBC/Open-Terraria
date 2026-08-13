@@ -811,9 +811,10 @@ export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 真身是 StrikeNPC cs:82102-82107（371 伤害清零、ai0=1/ai1=4/dontTakeDamage），
   // 已由 Enemy.hurt() 同构处理，此处 justHit 为 AI 侧兜底
   if (e.ai0 !== 1 && e.justHit) { e.ai0 = 1; e.ai1 = 4; }
-  if (!e.bInit && player) { // :35124-35131 初速 = 朝玩家 ±100px 随机偏移 × 11~17.7 速
-    e.bInit = true;
-    e.ai0 = 0; e.ai1 = 0;
+  // ai0/ai1 复位先于任何读点(原在 player 门内——无玩家时 ai0 留 -1120 会让
+  // :844 `ai0===0` 落空直入爆炸分支 1 tick 即死;2026-08-13 ai0 清查)
+  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; }
+  if (e.bInit && player && e.ai3 <= 0) { // :35124-35131 初速 = 朝玩家 ±100px 随机偏移 × 11~17.7 速
     e.ai3 = (80 + Math.random() * 41) / 100;
     const jx = e.cx - player.cx + (Math.random() - 0.5) * 200;
     const jy = e.cy - player.cy + (Math.random() - 0.5) * 200;
@@ -1486,6 +1487,9 @@ const ML_HEAD_ATTACKS: ReadonlyArray<readonly [number, number]> = [
 ];
 
 export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
+  // 类默认 ai0=-1120 会令 `ai0>=0` 攻击表门恒假 = 头部冻结(2026-08-13 ai0 清查;
+  // 现网靠父核 :1184 预置 0 挡住,此为入口防御)。放行运行态 -2/-3(闭眼残肢)
+  if (e.ai0 < -3) e.ai0 = 0;
   const core = (game.enemies() as Enemy[]).find((n) => n.id === e.ai3 && n.vanillaId === 398);
   if (!core || core.dead) { e.dead = true; return; } // :37714-37719
   // checkDead(:78845-78857)同手:血尽 → ai0=-2 闭眼残肢 + 召真眼 400

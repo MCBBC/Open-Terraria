@@ -1176,7 +1176,9 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
 // >120 阻尼 0.98;触地(ai0>=0 时)→ 停驻 5t 自灭。(尘 261 系为纯视觉,略)
 // ============================================================================
 export function ancientLightAI(e: Enemy, game: GameHooks, player: Player | null) {
-  if (!e.bInit) { e.bInit = true; e.vx = e.ai2; e.vy = e.ai3; }
+  // bInit 原只复位 vx/vy——ai0 泄漏 -1120 时 `ai0>=0` 三门全假 = 计时不启动、
+  // 落地不停 → 永不弯转/自灭的直飞弹(F6 可直接造出,2026-08-13 ai0 清查)
+  if (!e.bInit) { e.bInit = true; if (e.ai0 < 0) e.ai0 = 0; e.vx = e.ai2; e.vy = e.ai3; }
   if (e.vy === 0 && e.ai0 >= 0) { e.ai0 = -1; e.ai1 = 0; return; }
   if (e.ai0 === -1) {
     e.vx = 0; e.vy = 0;

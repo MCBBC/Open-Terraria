@@ -14,6 +14,9 @@ export interface Body {
   /** 启用原版自动上台阶（Collision.StepUp）：行走实体（玩家/敌人/小动物/城镇NPC）置 true；
    *  掉落物/弹幕/墓碑等不参与（原版它们不调 StepUp） */
   stepUp?: boolean;
+  /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946：水/岩浆 .5、蜂蜜 .25、
+   *  微光 .375；dry=1）。Entity 基类缺省 1，Enemy 侧由 npcLiquid.updateNpcLiquid 写入 */
+  liqFactor?: number;
 }
 
 /** Collision.StepUp（Collision.cs:3641-3770，gravDir=1、holdsMatching=false）：
@@ -309,6 +312,10 @@ function slopeCollide(b: Body, world: World): void {
 
 /** 移动并碰撞。高速时分子步防穿透。 */
 export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
+  // NPC Collision_MoveWhileWet（NPC.cs:93986）：wet 时位移 ×liquidMoveFactor（velocity 不变，
+  // 只缩位移）。由 npcLiquid.updateNpcLiquid 每 tick 写入（dry=1 跳过）；实体基类缺省 1。
+  const lf = b.liqFactor;
+  if (lf !== undefined && lf !== 1) { dx *= lf; dy *= lf; }
   b.onGround = false;
   b.hitWall = false;
   b.hitHead = false;

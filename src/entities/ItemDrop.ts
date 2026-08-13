@@ -1,7 +1,7 @@
 // 掉落物实体：重力、落地、磁吸拾取
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
-import { GRAVITY, MAX_FALL_SPEED, MAGNET_RADIUS, PICKUP_DELAY, TILE } from '../core/constants';
+import { ITEM_GRAVITY, ITEM_MAX_FALL, MAGNET_RADIUS, PICKUP_DELAY, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { ITEM_DEFS } from '../data/items';
 import { coinIndexOf } from '../items/Inventory';
@@ -147,7 +147,8 @@ export class ItemDrop extends Entity {
       // 液体采样（身体中心格；本仓液体编码 1水 2岩浆 3蜂蜜 4微光）
       const st0 = game.world.store;
       const ci = st0.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
-      this.shimmerWet = st0.liquidType[ci] === 4 && st0.liquid[ci] > 30;
+      const wetType = st0.liquid[ci] > 30 ? st0.liquidType[ci] : 0;
+      this.shimmerWet = wetType === 4;
       if (this.shimmered) {
         // 已微光化：无重力上浮（:486-511 gravity=0，vy -0.05/t 钳 -4）
         this.vy = Math.max(this.vy - 0.05, -4);
@@ -164,11 +165,15 @@ export class ItemDrop extends Entity {
             color, 1, 0.3, { life: 40 + Math.random() * 12, grav: -0.01, size: 1.1 });
         }
       } else {
-        // 微光浸入重力（:434-441：0.065 / maxFall 4，比水 0.08/5 更缓）
-        const g = this.shimmerWet ? GRAVITY * 0.7 * (0.065 / 0.3) : GRAVITY * 0.7;
-        const mf = this.shimmerWet ? 4 : MAX_FALL_SPEED;
+        // 掉落物液体物理（WorldItem.cs:418-450：空气 0.1/7、水 0.08/5、蜂蜜 0.05/3、
+        // 微光 0.065/4；浸液加 wetVelocity 阻尼）——独立于玩家 GRAVITY
+        const g = wetType === 1 ? 0.08 : wetType === 3 ? 0.05 : wetType === 4 ? 0.065 : ITEM_GRAVITY;
+        const mf = wetType === 1 ? 5 : wetType === 3 ? 3 : wetType === 4 ? 4 : ITEM_MAX_FALL;
         this.vy = Math.min(this.vy + g, mf);
-        this.vx *= 0.96;
+        // 水平摩擦（:928-932 vx*=0.95，|vx|<0.1 归零）
+        this.vx *= 0.95;
+        if (Math.abs(this.vx) < 0.1) this.vx = 0;
+        if (wetType === 1 || wetType === 3) { this.vx *= 0.95; } // 浸液额外阻尼（:440 wetVelocity 近似）
       }
       moveAndCollide(this, game.world, this.vx, this.vy);
       // 岩浆死亡（WorldItem.Update :576-580：MoveInWorld 后 lavaWet → CheckLavaDeath）。

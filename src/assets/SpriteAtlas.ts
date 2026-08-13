@@ -483,8 +483,24 @@ export class SpriteAtlas {
 // ---- 物品图标：一律原版 Item_N（旧 Maples UI/ 图标层已整体移除） ----
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 
+/** DrawAnimationVertical(int.MaxValue, 3) 的静态等价(IsFood 全表) */
+const FOOD = { dur: Number.MAX_SAFE_INTEGER, n: 3, static: true };
+const FOOD_IDS: number[] = [
+  353, 357, 967, 969, 1787, 1911, 1912, 1919, 1920, 2266, 2267, 2268, 
+  2425, 2426, 2427, 3195, 3532, 4009, 4010, 4011, 4012, 4013, 4014, 4015, 
+  4016, 4017, 4018, 4019, 4020, 4021, 4022, 4023, 4024, 4025, 4026, 4027, 
+  4028, 4029, 4030, 4031, 4032, 4033, 4034, 4035, 4036, 4037, 4282, 4283, 
+  4284, 4285, 4286, 4287, 4288, 4289, 4290, 4291, 4292, 4293, 4294, 4295, 
+  4296, 4297, 4403, 4411, 4614, 4615, 4616, 4617, 4618, 4619, 4620, 4621, 
+  4622, 4623, 4624, 4625, 5009, 5041, 5042, 5092, 5093, 5275, 5277, 5278, 
+  5537, 5645, 
+];
+
 /**
  * 物品贴图动画注册表(Main.InitializeItemAnimations :3685-3722 1:1)。
+ * 食物族:ItemID.Sets.IsFood(:258,86 项)全部为竖 3 帧条,原版注册
+ * DrawAnimationVertical(int.MaxValue,3) = 恒帧 0(顶部一帧);本表以 FOOD
+ * 静态条目等价表达(切片帧高 = 总高/3)。
  * 物品源图是竖排多帧条(如坠星 Item_75=22×208),不切片会整条入画。
  * dur=tick/帧;pingPong=往返;static=true=恒帧 0(IsFood 的 int.MaxValue
  * 静态三帧与 NotActuallyAnimating 族)。
@@ -500,7 +516,10 @@ export const ITEM_ANIMATION: Record<number, { dur: number; n: number; pingPong?:
   4069: { dur: 6, n: 4, static: true },
   4070: { dur: 6, n: 4, static: true },
   5644: { dur: 7, n: 9 },                 // ScryingOrb(专属着色器,垂直循环近似)
+  // ---- 食物族(IsFood :258):竖 3 帧条,原版 int.MaxValue 恒帧 0 ----
+  ...Object.fromEntries(FOOD_IDS.map((v) => [v, FOOD])),
 };
+
 
 /** 物品动画当前帧(DrawAnimationVertical.GetFrame 语义;tick=游戏 tick 或等价毫秒换算) */
 export function itemAnimFrame(vid: number, tick: number): number {

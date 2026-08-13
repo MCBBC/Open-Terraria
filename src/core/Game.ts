@@ -566,6 +566,9 @@ export class Game implements GameHooks {
     useStyle?: number;
     /** useStyle 5/13 的瞄准角（世界系 atan2；Renderer 姿势与 bodyFrame 行档用它） */
     aim?: number;
+    /** noUseGraphic=true 族(短剑 aiStyle 161,SetDefaults1(6) 模板倒数第二行)——
+     *  身体姿势(useStyle 13)保留但【物品贴图不画】:投射物即唯一的剑,再画持物=双贴图 */
+    noGraphic?: boolean;
   } | null = null;
   /** 上一帧鼠标左键状态（非 autoReuse 近战武器需点击沿触发新挥，原版 autoReuse 语义） */
   prevSwingMouse = false;
@@ -3840,6 +3843,7 @@ export class Game implements GameHooks {
       t: dur, dur, item: ITEM_BY_KEY[def.key] ?? 0,
       useStyle: us,
       aim: us === 5 || us === 13 ? aim : undefined,
+      noGraphic: us === 13, // 短剑族 noUseGraphic=true(Item.cs SetDefaults1 case 6)——投射物即本体
     };
     this.swingHitSet.clear();
     this.swingTileCutSet.clear();
@@ -4136,10 +4140,14 @@ export class Game implements GameHooks {
     }
 
     // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速倍率 =
-    // Player.attackSpeedMult = CapAttackSpeeds 倒数档，Player.cs:28555-28574）
+    // Player.attackSpeedMult = CapAttackSpeeds 倒数档，Player.cs:28555-28574）。
+    // ★工具豁免：镐/斧/锤同时是 melee(Item.cs melee=true)——cwMelee 会命中,若不豁免
+    //  本分支 return 会把挖掘链(tryMine)整个截胡 = 镐斧无法挖掘/砍树(2026-08-13 实锤:
+    //  铜镐 tryMine 调用数 0)。工具优先落工具分支(自带低伤挥击打怪),仅无工具的
+    //  纯近战(剑/vi_ melee)与本仓库 legacy sword 走本分支
     const cw = heldDef ? combatWeapon(heldDef) : null;
     const cwMelee = cw?.kind === 'melee' ? cw : null;
-    if (tool?.type === 'sword' || cwMelee) {
+    if (tool?.type === 'sword' || (cwMelee && !tool)) {
       // ★挥击时长 = useAnimation、复用冷却 = useTime（Player.ItemCheck：itemAnimationMax 与
       // itemTime 分立；1790 件 vi 武器两者不同——此前把 useTime 当动画时长，挥速虚快 35%+）
       // autoReuse 持按链式：useTime<useAnimation 时原版会在动画未走完时重置弧线（下挥被截）
@@ -8307,8 +8315,8 @@ export class Game implements GameHooks {
       const kdir = Math.sign(e.cx - p.cx) || this.player.facing;
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
-      const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1);
-      const killed = e.hurt(dmg, kdir * kb, -2.5, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit); // ⑥+击退管线 crit×1.4
+      const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1); // 0.65 自造已摘（glove×2/Titan×1.5=P:52477-52498）
+      const killed = e.hurt(dmg, kdir * kb, 0, this, this.player.equipStats.armorPen + this.player.meleeArmorPen, crit); // kby=0 走原版 X/Y 语义
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
       if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
@@ -9709,6 +9717,13 @@ export class Game implements GameHooks {
     return true;
   }
 
+  /** 实体侧入侵通道（GameHooks.startInvasionWithAnnounce）:火星探测器逃逸触发——
+   *  与物品/自然 roll 同入口(逼近公告+invasionWarn);调用方已过 canStartInvasion
+   *  门,失败静默 false(回退方自行 startInvasion) */
+  startInvasionWithAnnounce(type: number, ignoreDelay = false): boolean {
+    return this.startInvasionAndAnnounce(type, ignoreDelay);
+  }
+
   /** 季节旗标（checkXMas Main.cs:13054-13073 / checkHalloween :13093-13110：
    *  现实日期 ∪ 月事件胜利当日位 ∪ 永久季种子位 三路或——Forever 随存档 flags 持久化） */
   private checkSeasonal() {
@@ -10382,10 +10397,64 @@ export class Game implements GameHooks {
         spawn: (id, count, atMouse) => this.debugSpawnNpc(id, count, atMouse),
         clearEnemies: () => this.debugClearEnemies(),
         nameOf: (id) => Lang.npcName(id) ?? '',
+        events: [
+          { key: 'bloodMoon', label: '血月' },
+          { key: 'eclipse', label: '日食' },
+          { key: 'meteor', label: '陨石坠落' },
+          { key: 'meteorShower', label: '流星雨' },
+          { key: 'goblin', label: '哥布林入侵' },
+          { key: 'pirate', label: '海盗入侵' },
+        ],
+        triggerEvent: (key) => this.debugTriggerEvent(key),
       });
     }
     this.summonPanel.toggle();
     this.input.uiBlocking = this.summonPanel.open;
+  }
+
+  /** F6 事件触发(调试):全部走**自然事件入口**——与自然 roll 命中同路径/同公告/
+   *  同清旗点,不绕过保护门与昼夜消费时序,自然流程零破坏:
+   *  - 血月 = 黄昏 roll 命中体(bloodMoon+清晷冷却+misc[8],Main.cs:64813-64831);
+   *    夜间生效、黎明自然清除——白天按下 = 当晚升起
+   *  - 日食 = 黎明 roll 命中体(eclipse+misc[20],Main.cs:64898-64920);黄昏自然清除,
+   *    夜间按下会被即刻清除故拦下
+   *  - 陨石 = 仅置 meteorPending(同 EoW 击杀/入夜 1/50 的旗位),消费仍走
+   *    HandleMeteorFall 原始 time>16200 门(夜=午夜后/昼=9AM 后)+落点保护
+   *  - 流星雨 = StartMeteorShower(:6189-6194) 计数 [650,751)×4
+   *  - 入侵 = announceNaturalInvasion(StartInvasion 门:生命上限/Boss 在场/进行中) */
+  debugTriggerEvent(key: string): string | null {
+    const w = this.world;
+    if (!w) return '世界未就绪';
+    // 联机访客拦下(事件权威在房主,同 summonBossAtTx 的 Boss 门)
+    if (this.net && !this.net.policy.isHost) return '仅房主可触发事件';
+    switch (key) {
+      case 'bloodMoon':
+        w.clock.bloodMoon = true;
+        w.sundialCooldown = 0; w.moondialCooldown = 0;   // 血月清晷冷却（:64892-64893）
+        this.newText(Lang.misc(8), 50, 255, 130);
+        return null;
+      case 'eclipse':
+        if (!w.clock.isDay) return '现在是夜晚——日食黄昏即被自然清除,请白天触发';
+        w.clock.eclipse = true;
+        this.newText(Lang.misc(20), 50, 255, 130);
+        return null;
+      case 'meteor':
+        this.meteorPending = true;   // 消费门:夜午夜后/昼 9AM 后,落点走保护/上限
+        return null;
+      case 'meteorShower':
+        w.meteorShowerCount = (650 + Math.floor(Math.random() * 101)) * 4;
+        this.newText(Lang.gen(92), 50, 255, 130);
+        return null;
+      case 'goblin':
+      case 'pirate': {
+        // 带门公共入口(哥布林战旗/海盗地图同款):hp≥200/Boss 不在场/无进行中入侵
+        // ——自然 roll 的 hp 门在调用点而非 startInvasion 内,直通会漏门
+        const ok = this.startInvasionAndAnnounce(key === 'goblin' ? INVASION_GOBLIN : INVASION_PIRATE);
+        return ok ? null : '无法开启(见提示:生命上限<200/Boss 在场/已有入侵)';
+      }
+      default:
+        return `未知事件 ${key}`;
+    }
   }
 
   /** 面板生成动作:Enemy.fromVanilla 全量 + NewNPC 底锚 + Boss 槽接管 + 世吞链 */
@@ -10411,7 +10480,17 @@ export class Game implements GameHooks {
       e.y = y - e.h;                       // NewNPC 底锚(NPC.cs:46596-46597,同 spawnNPC)
       e.id = this.entities.nextId++;
       this.entities.add(e, 'enemies');
-      if (e.def.boss) this.boss = e;       // 接管 Boss 槽(血条/死亡记账/公告)
+      if (e.def.boss) {
+        this.boss = e;                     // 接管 Boss 槽(血条/死亡记账)
+        // 世界消息广播(左下角 ChatMonitor,同召唤链 announceBossSummon):
+        // SpawnOnPlayer 末尾 HasAwoken 开关(NPC.cs:81495-81511)。WoF 113 走
+        // SpawnWOF 专属链(公告无咆哮)——此处仅补文本
+        if (id === 113) {
+          this.newText(Lang.text('Announcement.HasAwoken', Lang.npcName(113) ?? '???'), 175, 75, 255);
+        } else {
+          this.announceBossSummon(id);
+        }
+      }
       if (id === 13) {                     // 世吞:体节链随头召唤(同 summonBossAtTx)
         const segs = Enemy.spawnWormChain(e, 15 + Math.floor(Math.random() * 16));
         for (const sg of segs) { sg.id = this.entities.nextId++; this.entities.add(sg, 'enemies'); }
@@ -10542,6 +10621,7 @@ export class Game implements GameHooks {
     e.id = this.entities.nextId++;
     this.entities.add(e, 'enemies');
     this.boss = e;
+    this.announceBossSummon(398);   // SpawnOnPlayer(398) → Enemies.MoonLord HasAwoken 公告
   }
 
   /** 鹿角怪(668)雨天自然生成（NPC.SpawnOnPlayer 语义：直接落在玩家身上，
@@ -10556,6 +10636,7 @@ export class Game implements GameHooks {
     e.id = this.entities.nextId++;
     this.entities.add(e, 'enemies');
     this.boss = e;
+    this.announceBossSummon(668);   // SpawnOnPlayer 末尾 HasAwoken 公告(:81495-81511)
   }
 
   /** 小动物生成：视野外地表，按昼夜 + 栖息生态筛选，权重抽取。

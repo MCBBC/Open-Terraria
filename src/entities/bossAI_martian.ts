@@ -133,9 +133,13 @@ export function martianProbeAI(e: Enemy, game: GameHooks, player: Player | null)
     e.vx = Math.min(e.vx + e.ai3 * 0.05, 4);
     if (e.y < -e.h || e.ai1 >= 180) {
       // Main.StartInvasion(4)（:38202）：原版只查"≥200HP 玩家数>0"且无视 delay;
-      // canStartInvasion(ignoreDelay=true) 同语义,invasionType!=0 时静默 no-op
+      // canStartInvasion(ignoreDelay=true) 同语义,invasionType!=0 时静默 no-op。
+      // 走 startInvasionWithAnnounce 带逼近公告(Game.startInvasionAndAnnounce
+      // 实体侧通道)——直通 startInvasion 会漏 misc 广播+invasionWarn
       if (player && canStartInvasion(game.world, player.maxHp, true)) {
-        startInvasion(game.world, INVASION_MARTIAN);
+        if (!game.startInvasionWithAnnounce?.(INVASION_MARTIAN, true)) {
+          startInvasion(game.world, INVASION_MARTIAN);
+        }
       }
       e.dead = true;   // 原版 active=false（不走掉落/击杀记账）
       return;

@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { Arrow } from '../src/entities/Arrow';
 import { ItemDrop } from '../src/entities/ItemDrop';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
@@ -74,6 +75,8 @@ describe('投掷武器物理（aiStyle 2 默认档）', () => {
 });
 
 describe('丢弃抛出（DropSelectedItem，Player.cs:4990-4997）', () => {
+  /** 注册在案的真实物品 id（vi_ 迁移后勿用裸 vanilla id/旧锚表） */
+  const DIRT_ID = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[2] ?? ''] ?? 0;
   function dropHooks(world: World) {
     const player = new Player(100 * TILE, 90 * TILE, new Inventory());
     return {
@@ -90,25 +93,25 @@ describe('丢弃抛出（DropSelectedItem，Player.cs:4990-4997）', () => {
   it('noGrabDelay=100：30t（>全局 25 门）拾不回，101t 后才拾取', () => {
     const hooks = dropHooks(makeWorld());
     const p = (hooks as unknown as { player: Player }).player;
-    const d = new ItemDrop(p.cx, p.y, 2, 1, p.facing * 4 + p.vx, -2);  // 丢弃速度公式
+    const d = new ItemDrop(p.cx, p.y, DIRT_ID, 1, p.facing * 4 + p.vx, -2);  // 丢弃速度公式
     expect(d.vx).toBe(4);            // facing=1、玩家静止：4×1+0
     expect(d.vy).toBe(-2);
-    d.vx = 0;                        // 时序段钉在玩家身上（否则 4px/t 飞出拾取范围）
+    d.vx = 0; d.vy = 0;              // 时序段钉在玩家身上（否则飞出/落出拾取范围）
     d.noGrabDelay = 100;
-    for (let i = 0; i < 30; i++) d.fixedUpdate(1, hooks);
+    for (let i = 0; i < 30; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }
     expect(d.dead).toBe(false);      // 全局 25 门已过但仍被 noGrab 挡住
     expect(p.inv.slots.every((s) => s === null)).toBe(true);
-    for (let i = 0; i < 90; i++) d.fixedUpdate(1, hooks);   // age>100
+    for (let i = 0; i < 90; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }   // age>100
     expect(d.dead).toBe(true);       // 已被拾取
   });
 
   it('普通掉落（noGrab=0）走全局 PICKUP_DELAY=25 门', () => {
     const hooks = dropHooks(makeWorld());
     const p = (hooks as unknown as { player: Player }).player;
-    const d = new ItemDrop(p.cx, p.y, 2, 1, 0, -2);
-    for (let i = 0; i < 20; i++) d.fixedUpdate(1, hooks);
+    const d = new ItemDrop(p.cx, p.y, DIRT_ID, 1, 0, -2);
+    for (let i = 0; i < 20; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }
     expect(d.dead).toBe(false);
-    for (let i = 0; i < 10; i++) d.fixedUpdate(1, hooks);   // age>25
+    for (let i = 0; i < 10; i++) { d.x = p.cx; d.y = p.y; d.fixedUpdate(1, hooks); }   // age>25
     expect(d.dead).toBe(true);
   });
 });

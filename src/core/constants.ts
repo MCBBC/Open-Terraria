@@ -2,12 +2,16 @@
 export const TILE = 16; // tile 尺寸（px）
 
 // ---- 物理 ----
-export const GRAVITY = 0.36; // px/tick^2
-export const MAX_FALL_SPEED = 9.5;
+// 玩家重力/移速/下落上限对齐 Player.cs:2376-2386（defaultGravity 0.4 / maxFallSpeed 10(+0.01) / accWalk 3）
+export const GRAVITY = 0.4; // px/tick^2
+export const MAX_FALL_SPEED = 10;
 export const PLAYER_WALK_ACCEL = 0.32;
-export const PLAYER_WALK_MAX = 2.6; // px/tick
+export const PLAYER_WALK_MAX = 3; // px/tick（15 mph）
 export const PLAYER_FRICTION = 0.72; // 地面摩擦系数（乘法）
 export const PLAYER_AIR_FRICTION = 0.94;
+// 掉落物独立物理（WorldItem.cs:418-450：空气 0.1/7、水 0.08/5、蜂蜜 0.05/3）——勿与玩家 GRAVITY 耦合
+export const ITEM_GRAVITY = 0.1;
+export const ITEM_MAX_FALL = 7;
 export const PLAYER_JUMP_SPEED = 6.6;
 export const PLAYER_JUMP_TICKS = 9; // 长按跳跃的持续加速度 tick 数
 export const ENEMY_GRAVITY = 0.32;

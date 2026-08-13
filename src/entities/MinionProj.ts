@@ -635,7 +635,7 @@ export class MinionProj extends Entity {
       const owner0 = this.ownerRef();
       const mkb = (owner0 as unknown as { equipStats?: { minionKB?: number } } | null)?.equipStats?.minionKB ?? 0;
       const pen0 = (owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0;
-      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5 + mkb, -1, game, pen0); // ⑥
+      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
       applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
       this.attackFlash = 24;
       anyHit = true;

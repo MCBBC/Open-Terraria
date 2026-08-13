@@ -147,10 +147,20 @@ describe('Chest.SetupShop 墓地限定商品（复合门）', () => {
     expect(hit).toHaveLength(1);
     expect(hit[0].cond).toBe('downedBoss3&&zoneGraveyard');
   });
-  it('树妖 2171（非猩红世界）= hardMode && zoneGraveyard（Chest.cs:1575）', () => {
+  it('树妖 2171（非猩红世界）= hardMode && zoneGraveyard && !crimson（Chest.cs:1575 else 支）', () => {
     const stock = (shopstock as { shops: Record<string, Array<{ id: number; cond: string | null }>> }).shops['20'];
-    expect(stock.some((e) => e.id === 2171 && e.cond === 'hardMode&&zoneGraveyard')).toBe(true);
+    expect(stock.some((e) => e.id === 2171 && e.cond === 'hardMode&&zoneGraveyard&&!crimson')).toBe(true);
     // 猩红世界支 59 = hardMode && zoneGraveyard && crimson
     expect(stock.some((e) => e.id === 59 && e.cond === 'hardMode&&zoneGraveyard&&crimson')).toBe(true);
+  });
+  it('else-if 互斥链（Chest.cs:1784-1793）：裁缝 5577=墓地 else-if 242=白天——互斥不能双上架', () => {
+    const stock = (shopstock as { shops: Record<string, Array<{ id: number; cond: string | null }>> }).shops['54'];
+    expect(stock.some((e) => e.id === 5577 && e.cond === 'zoneGraveyard')).toBe(true);
+    // 242 的有效门 = !zoneGraveyard && day（else 支取反前支）：墓地白天不得同时上架
+    expect(stock.some((e) => e.id === 242 && e.cond === '!zoneGraveyard&&day')).toBe(true);
+    // 同款互斥：树妖 3218=crimson else 3217=!crimson（Chest.cs:1825-1833）
+    const dryad = (shopstock as { shops: Record<string, Array<{ id: number; cond: string | null }>> }).shops['20'];
+    expect(dryad.some((e) => e.id === 3218 && e.cond === 'crimson')).toBe(true);
+    expect(dryad.some((e) => e.id === 3217 && e.cond === '!crimson')).toBe(true);
   });
 });

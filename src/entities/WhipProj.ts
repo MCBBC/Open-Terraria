@@ -243,7 +243,7 @@ export class WhipProj extends Entity {
         this.hitSet.add(e.id);
         const dmg = this.dmgNow; // 当前鞭伤（已含召唤乘区+护穿；衰减链前）
         const wpOwner = this.ownerRef();
-        e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, -1, game, wpOwner ? wpOwner.equipStats.armorPen : 0); // ⑥ :12068 玩家穿透
+        e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, 0, game, wpOwner ? wpOwner.equipStats.armorPen : 0); // kby=0 原版管线; ⑥ :12068
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
         // 武器浸剂(StatusNPC:10559 门含 whip:IsAWhip)——鞭命中同享药剂 debuff

@@ -18,7 +18,10 @@ import { canHit } from '../physics/LineOfSight';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
-function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string, alpha = 1): void {
+function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0): void {
+  // drawSize=绘制尺寸(缺省取碰撞盒 w)——细剑族贴图 32×32 原尺寸,碰撞盒 18 独立
+  // (原版投射物绘制=贴图原生尺寸,与 width/height 碰撞盒解耦)
+  const dw = drawSize > 0 ? drawSize : e.w;
   const ctx = r.canvas.getContext('2d');
   if (!ctx) return;
   const img = projSprite(projId);
@@ -28,10 +31,10 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   ctx.rotate(ang);
   ctx.imageSmoothingEnabled = false;
   if (img && img.complete && img.naturalWidth > 0) {
-    ctx.drawImage(img, -e.w / 2, -e.w / 2, e.w, e.w * (img.naturalHeight / img.naturalWidth));
+    ctx.drawImage(img, -dw / 2, -dw / 2, dw, dw * (img.naturalHeight / img.naturalWidth));
   } else {
     ctx.fillStyle = fallbackColor;
-    ctx.fillRect(-e.w / 2, -e.w / 2, e.w, e.w);
+    ctx.fillRect(-dw / 2, -dw / 2, dw, dw);
   }
   ctx.restore();
 }
@@ -87,7 +90,7 @@ function hitEnemies(
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
   for (const ent of game.enemies()) {
-    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     // 反射源命中（Projectile.cs:12050-12060）：按 projId 查 CanBeReflected 白名单——
@@ -100,7 +103,7 @@ function hitEnemies(
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
     playEnemyHitSound(game, e);
-    e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game, pen, crit); // ⑥+击退管线 crit×1.4
+    e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit); // 裸 kb（0.65 自造已摘）——hurt 内原版管线
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     applyProjStatus(me.projId, e as unknown as Record<string, number>);
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
@@ -372,7 +375,7 @@ export class SpearProj extends Entity {
     const aIn = Math.min(1, this.t / 7);
     const aOut = this.t <= 12 ? 1 : Math.max(0, (16 - this.t) / 4);
     drawProj(r, cam, this, this.projId, this.dx < 0 && !isRap ? base - Math.PI / 2 : base,
-      '#A0A0B0', isRap ? aIn * aOut : 1);
+      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? 32 : 0); // 细剑贴图 32×32 原尺寸(碰撞盒 18 解耦)
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {

@@ -4,7 +4,7 @@ import { Entity } from './Entity';
 import { entityNet } from '../net/entitySyncHooks';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { liquidCollision } from '../stats/TouchDamage';
-import { NPC_LAVA_IMMUNE } from '../data/npcLavaImmune';
+import { updateNpcLiquid } from './npcLiquid';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
@@ -88,7 +88,9 @@ const STATUE_DROP_RARITY: Record<number, number> = {
 export const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657,
   // 月事件 Boss（原版 NPCID.boss 族,SetDefaults boss=true）：哀木 325 / 南瓜王 327 /
   // 常绿尖叫怪 344 之外的三王——冰女王 345 / 圣诞坦克 346（血条/咆哮/击败记账）
-  325, 327, 345, 346]);
+  325, 327, 345, 346,
+  // 鹿角怪 668（SetDefaults boss=true——曾漏登记：F6 召唤不进 Boss 槽/无公告/击杀无 defeated 记账）
+  668]);
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
@@ -561,6 +563,13 @@ export class Enemy extends Entity {
   lavaWet = false;
   onFireT = 0;
   onFireDoT = 0;
+  /** 原版液体态（NPC.cs UpdateCollision :93712-93805，npcLiquid.updateNpcLiquid 每 tick 写）：
+   *  wet=中心小盒 WetCollision 命中（含岩浆格）；honeyWet/shimmerWet 选减速档与熄火门；
+   *  wetCount=出入水 10t 去抖（溅落声/尘）。inWater 为旧字段别名（=wet） */
+  wet = false;
+  wetCount = 0;
+  honeyWet = false;
+  shimmerWet = false;
   /** 微光浸入进度（≈shimmerTransparency ×100，NPC.cs:92468-92483：+0.01/t，
    *  90t 到 0.9 阈值触发 NPC.GetShimmered；离池 -0.01/t） */
   shimmerT = 0;
@@ -880,6 +889,8 @@ export class Enemy extends Entity {
         case 109: darkMageAI(this, game, p); break;                       // AI_109 黑暗魔法师 564/565（cs:66392 walker+三连招 675/674/673）
         case 110: betsyAI(this, game, p); break;                          // AI_110 双足翼龙 551（cs:62266 八槽攻表+rotation 收敛）
         case 111: dd2LightningBugAI(this, game, p); break;                // AI_111 埃特尼亚荧光虫 578（cs:66799 悬停蓄电 682 电弧）
+        case 113: this.windyBalloonAI(game, p); break;                    // AI_113 风气球 594（cs:48253 挂史莱姆 ai[0]=-999）
+        case 119: this.dandelionAI(game, p); break;                      // AI_119 蒲公英 628（cs:43254 下风喷籽；非critter勿只登 critterWanderAI）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
     } else switch (this.key) {
@@ -892,39 +903,11 @@ export class Enemy extends Entity {
       case 'eye_of_cthulhu': this.eocAI(game, player ?? null); break;
     }
 
-    // 入水溅落声（与主角一致）：音量随与主角距离衰减，Boss 更响
-    const eli = game.world.store.liquid[game.world.store.idx(
-      Math.floor(this.cx / TILE), Math.floor(this.cy / TILE),
-    )];
-    const wasWater = this.inWater;
-    this.inWater = eli > 80;
-    if (this.inWater && !wasWater && hasPlayer) {
-      const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
-      const vol = Math.max(0.12, Math.min(1, 1 - d / (TILE * 45))) * (this.def.boss ? 1.2 : 0.9);
-      game.playSfx('splash', vol);
-    }
-
-    // 岩浆接触（NPC.cs:94520-94545）：30t 独立冷却（immune[255],不受普通受击 iframes 影响）,
-    // onFire 7s + 50 直伤;lavaImmune 族（NPC_LAVA_IMMUNE,SetDefaults 提取）完全豁免
-    if (this.vanillaId === null || !NPC_LAVA_IMMUNE.has(this.vanillaId)) {
-      if (this.lavaCd > 0) this.lavaCd--;
-      const inLava = liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 2);
-      if (inLava) {
-        this.lavaWet = true;
-        if (this.lavaCd <= 0) {
-          this.lavaCd = 30;
-          this.onFireT = Math.max(this.onFireT, 7); // AddBuff(24,420)
-          this.hurt(50, 0, 0, game);                // StrikeNPCNoInteraction(50)
-          game.spawnParticles(this.cx, this.cy, '#FF9A3C', 10, 1.6, { life: 30, grav: -0.05 });
-        }
-      } else {
-        this.lavaWet = false;
-      }
-    } else {
-      this.lavaWet = false;
-    }
-    // 入水熄灭 onFire（NPC.cs:94284 TryRemovingWaterPerishableEffects:水湿(非岩浆)→DelBuff 24）
-    if (this.inWater && !this.lavaWet) this.onFireT = 0;
+    // ---- 液体态 1:1（NPC.cs UpdateCollision :93712-93805，全量细节在 npcLiquid.ts）----
+    // 岩浆判定(受伤/onFire)→wet 判定(WetCollision 中心小盒/蜂蜜/微光)→出入水去抖溅落声
+    // →!wet 清液体态→熄火(24+323)→liqFactor 供 moveAndCollide 缩位移（水 .5/岩浆 .5/
+    // 蜂蜜 .25/微光 .375；DD2 族与 612/613 = 1）。此前中心格 liquid>80 近似 + 无减速已退役。
+    updateNpcLiquid(this, game, game.world.store);
     // 微光接触（NPC.cs:94268-94274）：WetCollision 盒命中微光 → shimmerWet +
     // TryAddingRepeatedBuff(353,100)；buff 353 → shimmering（:93313-93321）→
     // shimmerTransparency +0.01/t（:92468-92483）>0.9 → GetShimmered；离池衰减
@@ -935,7 +918,8 @@ export class Enemy extends Entity {
     // shimmering；非免表 Boss（克苏鲁之眼 4 等）原版照进，GetShimmered 无表项
     // 时为空操作（npcGetShimmered 同语义提前返回）
     if (this.vanillaId !== null && !isNpcShimmerImmune(this.vanillaId)) {
-      if (liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 4)) {
+      // shimmerWet 由 updateNpcLiquid 的 WetCollision（中心小盒）写出——原版同一判定
+      if (this.shimmerWet) {
         this.shimmerT += 1;
         if (this.shimmerT > 90) this.npcGetShimmered(game);
       } else if (this.shimmerT > 0) {
@@ -1781,6 +1765,7 @@ export class Enemy extends Entity {
     const los = alive ? this.canSeePlayer(st, player!) : false;
     if (!los) {
       // 无视线：振荡漂移（:29833-29878）——ai[0] 驱动的 X/Y 交替扰动 + 微弱趋目标分量
+      if (this.ai0 < -200) this.ai0 = 0; // 类默认 -1120 钳回原版下界（同 swarmerAI 清查）
       this.ai0 += 1;
       this.vy += this.ai0 > 0 ? 0.023 : -0.023;
       this.vx += (this.ai0 < -100 || this.ai0 > 100) ? 0.023 : -0.023;
@@ -2401,6 +2386,13 @@ export class Enemy extends Entity {
    *  攀爬者 101: range 175、accel 0.035、noTileCollide 幽灵位移(穿墙摆动)。 */
   private plantAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
+    // 未初始化(-1120)自愈：绕过 VanillaSpawner 锚点传参的生成路径(fromVanilla/
+    // spawnNpcByVanilla/微光 Transform 等)从这里进——用当前格补锚点,否则下方
+    // ai0<0 判定会即刻误杀(2026-08-13 ai0 陷阱清查)
+    if (this.ai0 === -1120) {
+      this.ai0 = Math.floor(this.cx / TILE);
+      this.ai1 = Math.floor(this.cy / TILE);
+    }
     // 锚点格失活 → 死亡(原版 :22608-22620)
     if (this.ai0 < 0 || this.ai1 < 0 || !st.inBounds(this.ai0, this.ai1)
       || st.type[st.idx(this.ai0, this.ai1)] === 0) {
@@ -2517,6 +2509,7 @@ export class Enemy extends Entity {
     const swarmAlways = vid === 42 || vid === 94 || vid === 619
       || vid === 176 || isBee || (vid >= 231 && vid <= 235);
     if ((swarmGated && dist > 100) || swarmAlways) {
+      if (this.ai0 < -200) this.ai0 = 0; // 类默认 -1120 钳回原版下界（振荡相位漂移 ~22s,2026-08-13 清查）
       this.ai0 += 1;
       if (this.ai0 > 200) this.ai0 = -200;
       this.vy += this.ai0 > 0 ? 0.023 : -0.023;
@@ -2647,6 +2640,7 @@ export class Enemy extends Entity {
     } else if (player && dist < 100 && this.ai1 >= 0) {
       this.ai1 = -60; // 贴脸冷却重置
     } else if (dist < 250) {
+      if (this.ai0 < -200) this.ai0 = 0; // 类默认 -1120 钳回原版下界（同 swarmerAI 清查）
       this.ai0 += 0.9;
       this.vy += this.ai0 > 0 ? 0.019 : -0.019;
       this.vx += Math.abs(this.ai0) > 100 ? 0.019 : -0.019;
@@ -3067,6 +3061,8 @@ export class Enemy extends Entity {
    *  全空 vy+=0.05 缓沉，受阻 vy-=0.1，近障 5 格内再 -0.2（L25568-25605）；
    *  撞墙 direction 反转 + 旧速×-0.5（最小 ±3/±1，L25500+）；落水上浮 */
   private birdAI(game: GameHooks, player: Player | null) {
+    // ai0===0/2 等值门：类默认 -1120 全空转 = 鸟永久滞空（地面/降落态成死代码）
+    if (this.ai0 < 0) this.ai0 = 0;
     const st = game.world.store;
     const oldVx = this.vx, oldVy = this.vy;
     if (this.ai0 === 0) {
@@ -3549,18 +3545,29 @@ export class Enemy extends Entity {
       this.ai2 = 1 + Math.floor(Math.random() * 7); // ai[2] 装饰随机
       const slave = Enemy.fromVanilla(1, this.cx, this.cy);
       if (slave) {
-        // 变体近似（SetDefaultsFromNetId -4/-7/-3：scale + 属性/颜色覆盖）
+        // 变体覆盖（SetDefaults case -3/:7658、-4/:7668、-7/:7699：
+        // SetDefaults_ForNetId(scale) + 属性/颜色/kbResist 覆写）。
+        // kbResist 乘子（:7665/:7675/:7705）作用在原版"承受比例"上——本仓 def 存
+        // 抗性=1-比例，先反解再乘回来：kbr = clamp(1-(1-def.kb)*m, 0, 0.89)
+        const kbMul = (m: number) => {
+          slave.def.knockbackResist = Math.max(0, Math.min(0.89, 1 - (1 - slave.def.knockbackResist) * m));
+        };
         const r = Math.random();
-        if (r < 1 / 180) { // 金史莱姆 -4
-          slave.vanillaScale = 0.6; slave.w = Math.round(slave.w * 0.6 / (slave.vanillaScale || 1));
+        if (r < 1 / 180) { // 金史莱姆 -4：scale 0.6/dmg 5/def 5/hp 150/kb×1.4
+          //（曾除以已更新的 vanillaScale → 缩放自抵消不缩身，已改同 -7/-3 直乘）
+          slave.w = Math.round(slave.w * 0.6); slave.h = Math.round(slave.h * 0.6);
+          slave.vanillaScale = 0.6;
           slave.hp = slave.maxHp = 150; slave.def.damage = 5; slave.def.defense = 5;
-          slave.colorRGBA = [250, 30, 90, 90];
-        } else if (r < 1 / 10) { // 母史莱姆 -7（纯 scale 1.05）
-          slave.vanillaScale = 1.05; slave.w = Math.round(slave.w * 1.05); slave.h = Math.round(slave.h * 1.05);
+          slave.colorRGBA = [250, 30, 90, 90]; kbMul(1.4);
+        } else if (r < 1 / 10) { // 母史莱姆 -7（SetDefaults case -7 :7699：scale 1.2/
+          // damage 12/defense 6/life 40/kbResist×0.9/color 200,0,255,150——曾近似成纯 scale 1.05）
+          slave.vanillaScale = 1.2; slave.w = Math.round(slave.w * 1.2); slave.h = Math.round(slave.h * 1.2);
+          slave.hp = slave.maxHp = 40; slave.def.damage = 12; slave.def.defense = 6;
+          slave.colorRGBA = [200, 0, 255, 150]; kbMul(0.9);
         } else if (r < 1 / 3) { // 绿史莱姆 -3
           slave.vanillaScale = 0.9; slave.w = Math.round(slave.w * 0.9); slave.h = Math.round(slave.h * 0.9);
           slave.hp = slave.maxHp = 14; slave.def.damage = 6; slave.def.defense = 0;
-          slave.colorRGBA = [0, 220, 40, 100];
+          slave.colorRGBA = [0, 220, 40, 100]; kbMul(1.2);
         }
         slave.ai0 = -999; // 挂载冻结标记（slimeAI 首行放行）
         slave.id = (game as unknown as { entities: { nextId: number; add(e: unknown, b: string): void } }).entities.nextId++;
@@ -3650,6 +3657,8 @@ export class Enemy extends Entity {
    *  玩家在下风 600px 内且 |dy|<100 → 喷籽态 ai[0]=1：计数 40 发 1-3 枚种子
    *  （proj 836 伤 7——Dart 近似），>80 回待机。本体无位移（原版仅状态机+弹幕） */
   private dandelionAI(game: GameHooks, player: Player | null) {
+    // ai0===0/1 等值门：类默认 -1120 会全空转 = 蒲公英永不喷籽（2026-08-13 ai0陷阱清查）
+    if (this.ai0 < 0) this.ai0 = 0;
     const wt = game.world.weather;
     if (!wt.shouldUseWindyDayMusic) this.encourageDespawn(10); // :43257
     if (!player || player.dead) return;
@@ -3830,6 +3839,9 @@ export class Enemy extends Entity {
    *  接近水面时新角朝下则折回；离水 vy==0 时 vx×0.95 瘫软；碰撞反射对应轴（cs:47470） */
   private seahorseAI(game: GameHooks) {
     const st = game.world.store;
+    // 类默认 -1120 当角度用 = 出生朝向固化 ~92°(2026-08-13 清查)——归 0 交由下方
+    // 原版自愈(==0 → 随机角)接管,与 NewNPC ai[0]=0 起步语义一致
+    if (this.ai0 < 0) this.ai0 = 0;
     if (this.ai0 === 0 || Math.abs(this.ai0) < 0.01) this.ai0 = Math.random() * Math.PI * 2;
     if (this.ai1 <= 0) this.ai1 = 450 + Math.floor(Math.random() * 150);
     const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
@@ -4071,6 +4083,11 @@ export class Enemy extends Entity {
   private eocAI(game: GameHooks, player: Player | null) {
     const T = TILE;
     if (!player) return;
+    // 类字段默认 ai0=-1120 是史莱姆族约定初值;原版 ai[0] 从 0 起步(NewNPC 清零)。
+    // 缺此归一时 ai0∉{0,1,2,3} 状态机无分支匹配 → 夜晚整段 P1/P2 全空转 =
+    // 眼悬停不动(F6 面板/自然刷怪两路都会触发)。同 bInit 复位族(kingSlime/queenBee)
+    // 的入口级归一——2026-08-13 用户报"克眼呆在空中"
+    if (this.ai0 < 0) this.ai0 = 0;
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
     const dist = Math.hypot(dx, dy) || 1;
     // Main.Difficulty / Main.expertMode（:19903 起；getGoodWorld 抬档同义）
@@ -4735,11 +4752,24 @@ export class Enemy extends Entity {
       const f = imp / Math.hypot(kbx, kby);
       kbx *= f; kby *= f;
     }
-    // 击退抗性方向（N:82144 resist=接受比例：0=免疫 Boss 1=全额——曾反向）
+    // 应用（N:82204-82236）：kby===0 = 武器路径 → 原版 X 朝 ±num3 收敛设置
+    // （:82204-82216 同向不足才推、反向 ×2 步、钳目标值）+ Y=-num3×0.75×resist
+    // （:82231 抗性二次乘原版怪癖）；kby!==0 = 爆炸/光环等非武器冲量 → 加法（登记）
     const resist = this.def.knockbackResist;
     if (resist < 0.9) {
-      this.vx += kbx * resist;
-      this.vy += kby * resist;
+      if (kby === 0) {
+        const dir0 = Math.sign(kbx) || 1;
+        const t0 = kbx; // 已含五段封顶/crit 缩放
+        if (dir0 > 0 ? this.vx < t0 : this.vx > t0) {
+          this.vx += t0 * (dir0 > 0 ? (this.vx < 0 ? 2 : 1) : (this.vx > 0 ? 2 : 1));
+          if (dir0 > 0 ? this.vx > t0 : this.vx < t0) this.vx = t0;
+        }
+        const vyT = -Math.abs(t0) * 0.75 * resist;
+        if (this.vy > vyT) this.vy = vyT;
+      } else {
+        this.vx += kbx * resist;
+        this.vy += kby * resist;
+      }
     }
     // 联机傀儡受击：上报房主权威结算（本地视觉反馈已生效：扣血/飘字/击退）
     if (this.netPuppet) entityNet.reportStrike?.(this.netId, rawDmg, kbx, kby);

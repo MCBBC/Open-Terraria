@@ -224,9 +224,15 @@ for (int i = 0; i < W; i++)
         num3w = Math.Clamp(num3w, H * num10, num9t);
     else if (num3w < H * num10) { num3w = H * num10; counter = 0; }
     else if (num3w > H * num11) { num3w = H * num11; counter = 0; }
-    // ★诊断 NUM4FLIP=1 → 续走条件取反（!=0），鉴别真 IL 语义
-    if (Environment.GetEnvironmentVariable("NUM4FLIP") == "1") { while ((int)r.Next(0, 3) != 0) num4w += (int)r.Next(-2, 3); }
-    else while ((int)r.Next(0, 3) == 0) num4w += (int)r.Next(-2, 3);
+    // ★诊断 NUM4FLIP/NUM4STEP/NUM4COND 变体扫描（鉴别真 IL 语义）
+    {
+        int stepHi = 3; var sh = Environment.GetEnvironmentVariable("NUM4STEP"); if (sh != null) int.TryParse(sh, out stepHi);
+        int condHi = 3; var ch2 = Environment.GetEnvironmentVariable("NUM4COND"); if (ch2 != null) int.TryParse(ch2, out condHi);
+        bool flip = Environment.GetEnvironmentVariable("NUM4FLIP") == "1";
+        bool cont = (int)r.Next(0, condHi) == 0;
+        if (flip) cont = !cont;
+        while (cont) { num4w += (int)r.Next(-2, stepHi); cont = (int)r.Next(0, condHi) == 0; if (flip) cont = !cont; }
+    }
     if (num4w < num3w + H * 0.06) num4w += 1.0;
     if (num4w > num3w + H * 0.35) num4w -= 1.0;
     history.Add(num3w);

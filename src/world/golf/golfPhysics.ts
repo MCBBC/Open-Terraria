@@ -221,8 +221,7 @@ export function stepGolfBall(body: GolfBallBody, map: GolfTileMap, hooks?: GolfB
     }
     px += vx; py += vy;                                   // position += velocity（:62）
     if (!isBallInWorld(px, py, sizeX, sizeY, map)) {      // :63-66
-      body.x = px; body.y = py; body.vx = vx * substeps; body.vy = vy * substeps;
-      body.angular = ang * substeps;
+      // 原版直接 return，不回写 entity.position/velocity（:65）
       return BallState.OutOfBounds;
     }
     // ---- GetClosestEdgeToCircle（:67-76 / :152-180） ----

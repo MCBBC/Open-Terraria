@@ -20,7 +20,9 @@ import { Inventory } from '../src/items/Inventory';
 // 假地图（只铺需要的格；材质按 vanilla tile id 取表）
 // ---------------------------------------------------------------------------
 class FakeMap implements GolfTileMap {
-  widthTiles = 60; heightTiles = 60;
+  // 300×300：高速球（上限 1000px/tick）弹飞后仍留在世界内（边界收缩 32px，
+  // BallCollision.IsBallInWorld :143-150）
+  widthTiles = 300; heightTiles = 300;
   private tiles = new Map<string, { type: number; slope: number; half: boolean }>();
   private liquids = new Map<string, { amount: number; type: number }>();
   set(x: number, y: number, type: number, slope = 0, half = false) {
@@ -181,9 +183,9 @@ describe('高尔夫球物理（BallCollision.cs）', () => {
 
   it('球洞 476：>100px/tick 高速弹开不进洞（:62 num > 100 → 跳过）', () => {
     const map = new FakeMap();
-    map.set(10, 14, 476);
+    map.set(10, 40, 476);                          // 放低：弹飞 ~186px 不出世界
     const b = ball7();
-    b.x = 10 * 16; b.y = 14 * 16 - 3.0 - 3.5;      // 直接触边 + 高速
+    b.x = 10 * 16; b.y = 40 * 16 - 3.0 - 3.5;      // 直接触边 + 高速
     b.vy = 200; b.vx = 0;                          // 触速 ≈198 > 100
     let cup: [number, number] | null = null;
     stepGolfBall(b, map, { onCupCapture: (tx, ty) => { cup = [tx, ty]; } });

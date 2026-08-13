@@ -76,7 +76,12 @@ const out = await page.evaluate(async () => {
   g.meteorPending = true;
   await new Promise((r2) => setTimeout(r2, 800));
   res.skyMeteor = !!g.renderer.sky.meteor;
-  res.meteorDepth = g.renderer.sky.meteor ? g.renderer.sky.meteor.depth : null;
+  const m = g.renderer.sky.meteor;
+  res.meteorDepth = m ? m.depth : null;
+  res.meteorTexW = g.renderer.sky.meteorTex ? g.renderer.sky.meteorTex.width : 0;
+  res.meteorTexComplete = g.renderer.sky.meteorTex ? g.renderer.sky.meteorTex.complete : false;
+  res.meteorPos = m ? { x: m.x, y: m.y, t: m.t } : null;
+  res.playerPos = { x: g.player.cx, y: g.player.cy };
   return res;
 });
 

@@ -44,7 +44,10 @@ const out = await page.evaluate(() => {
   for (let i = 0; i < 10 && !rap; i++) {
     g.fixedUpdate(1 / 60);
     rap = g.entities.projectiles.find((p) => p.projId === 938);
-    if (rap) res.swingUseStyle = g.swing ? g.swing.useStyle : null; // 掷出当帧读(13t 动画窗内)
+    if (rap) {
+      res.swingUseStyle = g.swing ? g.swing.useStyle : null; // 掷出当帧读(13t 动画窗内)
+      res.swingNoGraphic = g.swing ? !!g.swing.noGraphic : false; // noUseGraphic=true 族物品贴图不画
+    }
   }
   if (rap) {
     res.spawned = true;
@@ -75,7 +78,8 @@ check('掷出直刺投射物 938', out.spawned === true);
 check('shootSpeed=2.1(SetDefaults1 模板补丁)', out.spd !== undefined && Math.abs(out.spd - 2.1) < 0.01, `spd=${out.spd}`);
 check('位移 ≤ 2.1×15≈32px(非丢剑 120px)', out.maxDist !== undefined && out.maxDist < 40, `max=${out.maxDist}px`);
 check('16t 消失(AI_161)', out.diedAt16 === true);
-check('使用期间画持械姿势(useStyle 13,非空手)', out.swingUseStyle === 13, `useStyle=${out.swingUseStyle}`);
+check('身体姿势 useStyle 13(手臂突刺)', out.swingUseStyle === 13, `useStyle=${out.swingUseStyle}`);
+check('noGraphic 物品贴图不画(防双贴图)', out.swingNoGraphic === true, `noGraphic=${out.swingNoGraphic}`);
 check('单次点击掷出一次(⑩ 门放行新点击)', out.secondThrow === true, `count=${out.secondThrow}`);
 check('无 page error', errors.length === 0, errors.join('; '));
 

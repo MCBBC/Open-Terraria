@@ -145,8 +145,7 @@ export function isInLihzahrdTempleEarly(world: World, x: number, y: number): boo
 
 /** DoesPylonAcceptTeleportation（:254-312）：按塔型的生物群系/深度要求。
  *  scene = 塔位 scanScene 结果（Zone 判定即原版 EnoughTilesFor* 阈值判定）；
- *  remixWorld 分支不适用（本作无颠倒世界）。Shimmer 型用微光腔距离近似
- *  （原版 EnoughTilesForShimmer 为 tile 计数阈值，SceneFlags 无该计数——等价边界）。 */
+ *  remixWorld 分支不适用（本作无颠倒世界）。 */
 export function pylonAcceptsTeleportation(
   type: number, world: World, scene: SceneFlags, x: number, y: number,
 ): boolean {
@@ -182,8 +181,9 @@ export function pylonAcceptsTeleportation(
     case PYLON.Underworld:
       return y >= (world.lavaLine || world.store.h - 200);   // :302 Main.UnderworldLayer
     case PYLON.Shimmer:
-      // :304-306：微光群系。SceneFlags 无 shimmer 计数 → 以微光腔中心距近似
-      return Math.hypot(x - world.shimmerX, y - world.shimmerY) < 125;
+      // :304-306 EnoughTilesForShimmer：窗口微光液格计数 ≥300
+      // （SceneMetrics.cs:37 ShimmerTileThreshold；曾以微光腔中心距 125 近似）
+      return scene.shimmerTileCount >= 300;
     default:
       return true;                                    // :308
   }

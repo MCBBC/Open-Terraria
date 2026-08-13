@@ -265,9 +265,11 @@ describe('A4-4 毁灭者激光概率公式（NPC.cs:50206-50241）', () => {
     const head = Enemy.fromVanilla(134, 100 * TILE, 100 * TILE)!;
     list.push(head);
     const p = fakePlayer(105 * TILE, 100 * TILE);
-    destroyerAI(head, game, p);                       // 首帧建 80 段链
+    destroyerAI(head, game, p);                       // 首帧建链
     const segs = (list as Enemy[]).filter((n) => n.vanillaId === 135);
-    expect(segs.length).toBe(79);                     // 135×79 + 尾 136
+    // 原版 :51339 GetDestroyerSegmentsCount=80（FTW 100），建链循环 j<=80（:50212-
+    // 50225）→ 80×135 + 尾 136；2026-08-13 bossAI.ts 由 79 修正为 80，同步此断言
+    expect(segs.length).toBe(80);
     for (let t = 0; t < 600; t++) destroyerAI(head, game, p);
     expect(projectiles.length).toBe(0);               // lai0 < 1400 → 阈值永不可达
     expect(segs.every((s) => s.lai0 > 0)).toBe(true); // localAI[0] += Next(4) 累积
@@ -398,6 +400,32 @@ describe('A4-7 风气球 AI_113（NPC.cs:48253-48430）', () => {
     expect(balloon.facing).toBe(1);
     for (let t = 0; t < 40; t++) callBalloon(balloon, game, p);
     expect(balloon.vy).toBeLessThan(0);               // flag2 近距 → 上浮（:48396-48399）
+  });
+
+  it('路由回归：Enemy.fixedUpdate 必须把 aiStyle 113 分发到 windyBalloonAI（NPC.AI 按 aiStyle 分发无 critter 门）', () => {
+    // 2026-08-13 线上报障：594 只画"灰色吊起史莱姆"无气球——case 113 只登记在
+    // critterWanderAI（vanilla.critter 门后），而 594 json 无 critter 字段 → 落入
+    // default zombieAI 在地上走，aiInit 恒 false → ai2=0（帧 0=灰壳）且无 slave。
+    const w = emptyWorld();
+    const list: unknown[] = [];
+    const game = makeGame(w, list);
+    (game.world as unknown as { weather: { windSpeedTarget: number } }).weather.windSpeedTarget = 0;
+    const balloon = Enemy.fromVanilla(594, 100 * TILE, 60 * TILE)!;
+    expect(balloon.vanilla?.critter).toBeFalsy();     // 594 不走 critter 门（原版事实）
+    list.push(balloon);
+    balloon.fixedUpdate(1, game);                     // 端到端：路由 → 初始化 → 挂载
+    expect(balloon.aiInit).toBe(true);                // AI_113 init 已跑（localAI[0]==0 分支）
+    expect(balloon.ai2).toBeGreaterThanOrEqual(1);    // ai[2] = Next(7)+1 ∈ 1..7
+    expect(balloon.ai2).toBeLessThanOrEqual(7);
+    const slave = (list as Enemy[]).find((n) => n !== balloon && n.vanillaId === 1);
+    expect(slave).toBeTruthy();                       // 挂载史莱姆已入表
+    expect(slave!.ai0).toBe(-999);                    // 冻结标记（:48274）
+    expect(balloon.ai3).toBe(slave!.id);              // ai[3] = slave whoAmI（:48276）
+    expect(balloon.vanillaScale).toBeCloseTo(slave!.vanillaScale, 5); // ai[1] = slave scale
+    // 下一帧 slave 被装进吊篮：Center = 本体底边 + (0,-8+56*scale)（:48414）
+    balloon.fixedUpdate(1, game);
+    const cy = balloon.y + balloon.h - 8 + 56 * (balloon.vanillaScale ?? 1);
+    expect(slave!.y + slave!.h / 2).toBeCloseTo(cy, 1);
   });
 });
 

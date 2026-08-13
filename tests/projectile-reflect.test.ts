@@ -145,13 +145,14 @@ describe('TrapShot 友方弹反射（炮弹 162 / 雪球 166，aiStyle2）', () 
     const { game, player } = makeCtx([e], 8 * 16);
     const shot = new TrapShot(20 * 16 - 12, 10 * 16, 6, 0, 80, 'cannonball');
     expect(shot.hostile).toBe(false); // 友方炮弹
+    const hp0 = player.hp;
     for (let i = 0; i < 4 && !shot.reflected; i++) shot.fixedUpdate(1 / 60, game);
     expect(shot.reflected).toBe(true);
     expect(shot.hostile).toBe(true);        // 转敌对后可伤玩家
     expect(shot.damage).toBe(20);           // 80 ÷2÷2
     expect(shot.vx).toBeLessThan(0);
     expect(hurtLog.length).toBe(0);
-    expect(player.hp).toBe(player.hp);
+    expect(player.hp).toBe(hp0);            // 尚未飞回，不伤玩家
   });
 
   it('敌对陷阱弹（spiky 尖刺球，hostile）不反射', () => {

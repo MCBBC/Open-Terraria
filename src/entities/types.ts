@@ -20,6 +20,9 @@ export interface GameHooks {
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown, contactOnly?: boolean): void;
   /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
+  /** 入侵开启 + 逼近公告（Game.startInvasionAndAnnounce 实体侧通道——火星探测器
+   *  逃逸触发用;缺省回退方自行静默 startInvasion） */
+  startInvasionWithAnnounce?(type: number, ignoreDelay?: boolean): boolean;
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
   cutTile(x: number, y: number): void;
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */
