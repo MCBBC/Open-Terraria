@@ -6,6 +6,7 @@
 //     树层0 y=320（-50 若 50 / -100 若 53…:60815）、树层1 y=400、树层2 y=480
 //     树层 scale=1.25 parallax=0.4（:60710）；基准 UI 高 982（1920×1080 UIScale1.1）
 //   昼夜循环（UpdateTime:64426 菜单也走 time）→ 天空/日月/星 + 夜间 multiply 压暗。
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { SkyRenderer } from './SkyRenderer';
 import { Clock } from '../world/World';
 
@@ -40,7 +41,7 @@ export class MenuBackground {
     this.clock.timeOfDay = ((time01 % 1) + 1) % 1;
   }
   private camX = 0;
-  private imgs = new Map<number, HTMLImageElement>();
+  private imgs = new Map<number, ImageBitmap | HTMLImageElement>();
   private variantIdx = Math.floor(Math.random() * FOREST_VARIANTS.length);
   private variantT = 0;
 
@@ -58,10 +59,11 @@ export class MenuBackground {
     this.canvas.height = window.innerHeight;
   };
 
-  private img(n: number): HTMLImageElement | null {
+  private img(n: number): ImageBitmap | HTMLImageElement | null {
     if (n < 0) return null;
     if (this.imgs.has(n)) return this.imgs.get(n) ?? null;
     const im = new Image();
+    im.onload = () => upgradeToBitmap(im, (b) => this.imgs.set(n, b));
     im.src = `sprites/vanilla/Background_${n}.png`;
     this.imgs.set(n, im);
     return im;

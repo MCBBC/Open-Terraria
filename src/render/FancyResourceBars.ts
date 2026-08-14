@@ -12,15 +12,19 @@
 //   锚点 +(15,16)、每星推进 -2+24px。
 // "New"（默认）无文字；"NewWithText" 才画生命文本（DrawLifeBarText :161-169）。
 import type { Player } from '../entities/Player';
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { PixelText } from '../vui/draw/PixelText';
 import { Lang } from '../i18n/Lang';
 
 function loadTex(name: string): HTMLImageElement {
   const img = new Image();
+  img.onload = () => upgradeToBitmap(img, (b) => { TEX_UPGRADES[name]?.forEach((s) => s(b)); });
   img.src = `sprites/vanilla-ui/${name}.png`;
   return img;
 }
+/** name → 持有者替换回调(t 对象字段升级为 bitmap) */
+const TEX_UPGRADES: Record<string, Array<(b: ImageBitmap) => void>> = {};
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 /** Utils.GetLerpValue(a, b, x, clamped)（分段线性 + 截断） */
@@ -28,19 +32,19 @@ const lerpValue = (a: number, b: number, x: number) =>
   b === a ? 0 : clamp((x - a) / (b - a), 0, 1);
 
 export class FancyResourceBars {
-  private t = {
-    heartLeft: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Left'),          // 28×30
-    heartMiddle: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Middle'),      // 24×30
-    heartRight: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Right'),        // 26×30
-    heartRightFancy: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Right_Fancy'), // 36×38（末格华丽帽）
-    heartFill: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Fill'),          // 22×22
-    heartFillHoney: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Fill_B'),   // 22×22（生命果金填充）
-    heartSingle: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Single_Fancy'), // 36×38（单心）
-    starTop: loadTex('UI_PlayerResourceSets_FancyClassic_Star_A'),                // 30×26
-    starMiddle: loadTex('UI_PlayerResourceSets_FancyClassic_Star_B'),             // 30×22
-    starBottom: loadTex('UI_PlayerResourceSets_FancyClassic_Star_C'),             // 30×28
-    starSingle: loadTex('UI_PlayerResourceSets_FancyClassic_Star_Single'),        // 30×32
-    starFill: loadTex('UI_PlayerResourceSets_FancyClassic_Star_Fill'),            // 22×24
+  private t: Record<string, ImageBitmap | HTMLImageElement> = {
+    heartLeft: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Left'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Heart_Left'] = [(b) => { this.t['heartLeft'] = b; }]; return el; })(),          // 28×30
+    heartMiddle: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Middle'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Heart_Middle'] = [(b) => { this.t['heartMiddle'] = b; }]; return el; })(),      // 24×30
+    heartRight: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Right'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Heart_Right'] = [(b) => { this.t['heartRight'] = b; }]; return el; })(),        // 26×30
+    heartRightFancy: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Right_Fancy'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Heart_Right_Fancy'] = [(b) => { this.t['heartRightFancy'] = b; }]; return el; })(), // 36×38（末格华丽帽）
+    heartFill: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Fill'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Heart_Fill'] = [(b) => { this.t['heartFill'] = b; }]; return el; })(),          // 22×22
+    heartFillHoney: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Fill_B'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Heart_Fill_B'] = [(b) => { this.t['heartFillHoney'] = b; }]; return el; })(),   // 22×22（生命果金填充）
+    heartSingle: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Single_Fancy'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Heart_Single_Fancy'] = [(b) => { this.t['heartSingle'] = b; }]; return el; })(), // 36×38（单心）
+    starTop: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Star_A'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Star_A'] = [(b) => { this.t['starTop'] = b; }]; return el; })(),                // 30×26
+    starMiddle: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Star_B'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Star_B'] = [(b) => { this.t['starMiddle'] = b; }]; return el; })(),             // 30×22
+    starBottom: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Star_C'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Star_C'] = [(b) => { this.t['starBottom'] = b; }]; return el; })(),             // 30×28
+    starSingle: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Star_Single'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Star_Single'] = [(b) => { this.t['starSingle'] = b; }]; return el; })(),        // 30×32
+    starFill: (() => { const el = loadTex('UI_PlayerResourceSets_FancyClassic_Star_Fill'); TEX_UPGRADES['UI_PlayerResourceSets_FancyClassic_Star_Fill'] = [(b) => { this.t['starFill'] = b; }]; return el; })(),            // 22×24
   };
 
   /** 每帧绘制（游戏画布屏幕坐标） */

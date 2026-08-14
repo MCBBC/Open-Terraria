@@ -145,8 +145,8 @@ export class PortalGunBolt extends Entity {
   }
 
   /** 帧染门色缓存（20×19 帧 × 2 帧 × 2 色；手法同 Portal.tintedFrame） */
-  private static tintedFrame(tex: HTMLImageElement, frame: number, r: number, g: number, b: number): HTMLCanvasElement {
-    const key = `${tex.src}|${frame}|${r},${g},${b}`;
+  private static tintedFrame(tex: ImageBitmap | HTMLImageElement, frame: number, r: number, g: number, b: number): HTMLCanvasElement {
+    const key = `${(tex as HTMLImageElement).src}|${frame}|${r},${g},${b}`;
     const hit = PortalGunBolt.frameCache.get(key);
     if (hit) return hit;
     const c = document.createElement('canvas');

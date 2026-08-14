@@ -23,6 +23,7 @@ import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
 import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
+import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
 import { mainExpertMode, mainDifficulty, getAttackDamageScaledByDifficulty, scaleStatsWorld, GDL } from '../stats/ScaleStats';
@@ -2406,6 +2407,65 @@ export class Player extends Entity {
     // 每帧自登记（挂墙 :49797-49801 / 锚定段 :49954-49957），下 tick 消费前重建
     this.grappling[0] = null;
     this.grapCount = 0;
+    // 跑动/下落撞碎裂砖（Player.Update 每帧调 CheckCrackedBrickBreak :23040）
+    this.checkCrackedBrickBreak(game);
+  }
+
+  /** CheckCrackedBrickBreak（Player.cs:23040-23110 全 1:1）：跑动/下落撞上地牢
+   *  裂砖族（481-483）徒手撞碎一片。速度门：|vx|>rand(2,12) 或 vy>rand(2,12)；
+   *  vy<1 时脚底三点（Bottom/BottomLeft/BottomRight+1px）任一为"实心非裂砖"
+   *  则不触发（站在普通地面跑不算）；扫掠命中格压 vy→1；破坏区=预测位外扩
+   *  （横 ±(16+8)px、脚行至 +2 行）内全部"上方无实心"的裂砖 KillTile（掉落）。 */
+  private checkCrackedBrickBreak(game: GameHooks): void {
+    if (this.shimmering || this.dead) return;               // :23043 shimmering 豁免
+    const st = game.world.store;
+    const cxT = Math.floor(this.cx / 16), cyT = Math.floor(this.cy / 16);
+    if (cxT < 10 || cyT < 10 || cxT >= st.w - 10 || cyT >= st.h - 10) return;  // InWorld 10
+    let flag = (2 + Math.random() * 10) < Math.abs(this.vx)
+      || (2 + Math.random() * 10) < this.vy;                // rand.Next(2, 12)
+    if (flag && this.vy < 1) {
+      const feetY = Math.floor((this.y + this.h + 1) / 16); // Bottom + UnitY
+      for (const px of [this.x + this.w / 2, this.x, this.x + this.w]) {
+        const tx = Math.floor(px / 16);
+        if (!st.inBounds(tx, feetY)) continue;
+        const t = st.get(tx, feetY);
+        if (t === 0) continue;
+        const d = TILE_DEFS[t];
+        // SolidTileAllowBottomSlope && !CrackedBricks（:23060）→ 站普通地面不触发
+        if (d?.solid && !d.platform && !isCrackedSheet(d.vanilla?.sheet)) { flag = false; break; }
+      }
+    }
+    if (!flag) return;
+    const pvx = this.x + this.vx;                            // position + velocity（:23072）
+    const num = Math.floor(pvx / 16), num2 = Math.floor((pvx + this.w) / 16);
+    const num3 = Math.floor((this.y + this.h + 1) / 16);
+    const solidTopAt = (x: number, y: number): boolean => {  // WorldGen.SolidTile
+      if (!st.inBounds(x, y)) return false;
+      const t = st.get(x, y);
+      if (t === 0) return false;
+      const d = TILE_DEFS[t];
+      return !!d?.solid && !d.platform;
+    };
+    const rx = this.x - 1, ry = this.y - 1, rw = this.w + 2, rh = this.h + 2;  // getRect Inflate(1,1)
+    let hit = false;
+    for (let i = num; i <= num2; i++) {
+      for (let j = num3; j <= num3 + 1 && i >= 0 && i < st.w && j >= 0 && j < st.h; j++) {
+        if (isCrackedAt(st, i, j) && !solidTopAt(i, j - 1)
+          && i * 16 < rx + rw && i * 16 + 16 > rx
+          && j * 16 < ry + rh && j * 16 + 16 > ry) {
+          hit = true;
+          if (this.vy > 1) this.vy = 1;                      // :23091 速度钳
+        }
+      }
+    }
+    if (!hit) return;
+    // 破坏区（:23099-23106：(x−16−8)/16 .. (x+w+16+8)/16，脚行 num3..num3+2）
+    const k0 = Math.floor((pvx - 16 - 8) / 16), k1 = Math.floor((pvx + this.w + 16 + 8) / 16);
+    for (let k = k0; k <= k1; k++) {
+      for (let l = num3; l <= num3 + 2; l++) {
+        if (isCrackedAt(st, k, l) && !solidTopAt(k, l - 1)) game.breakTile?.(k, l);
+      }
+    }
   }
 
   // ==================== 钩爪（Grappling Hooks 1:1）====================

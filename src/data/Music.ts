@@ -22,7 +22,8 @@ export const MUSIC = {
   EmpressOfLight: 57, DukeFishron: 58, MorningRain: 59, TitleAlt: 60,
   UndergroundDesert: 61, JourneysEnd: 89, Deerclops: 90, Aether: 91,
   Destroyer: 92, KingSlime: 93, LunaticCultist: 94, QueenBee: 96, Twins: 97,
-  SkeletronPrime: 98, EaterOfWorlds: 99, Skeletron: 104,
+  SkeletronPrime: 98, EaterOfWorlds: 99, TorchGodVocals: 100,
+  TorchGodInstrumental: 101, Skeletron: 104,
 } as const;
 
 /** 粘性随机槽（原版 Main.ugMusic/dayMusic 字段语义：只在目标曲不在播时重掷） */
@@ -67,6 +68,11 @@ export interface MusicInput {
    *  之后——与月总同屏时月总曲胜出，故本字段在 pickMusic 内排在 bossMusic 之后判定
    *  （文档 §5 写"与 moonMusic 同层其后"，与源码冲突处以源码为准） */
   lunarMusic?: number;
+  /** 火把神小游戏进行中（SceneMetrics.InTorchGodMinigame，Player.cs happyFunTorchTime）。
+   *  原版 Main.cs:12477-12480：链首（CreditsRoll 89 之后）先于全部 Boss flag → 101
+   *  TorchGodInstrumental。注意月事件覆写在链尾（:12914-12921）——南瓜/霜月仍压过
+   *  火把神曲，故本分支排在 moonMusic 之后（两者实际互斥：小游戏只在地下） */
+  torchGod?: boolean;
   /** 八音盒曲目 style（SceneMetrics.musicBoxStyle；-1/缺省 = 无）。
    *  原版 Main.cs:11002-11405：ActiveMusicBox ≥ 0 时在 DecideOnNewMusic 之后覆盖 newMusic
    *  ——优先级高于一切（含月事件/Boss 曲）；style 100 = 静音（MusicBoxSilence → newMusic=0） */
@@ -88,7 +94,12 @@ export interface MusicInput {
  *  EoW 13-15→99、骷髅王 35/36→104、血肉墙 113/114→12、双子 125/126→97、
  *  Prime 127-131→98、毁灭者 134-136→92、蜂后 222→96、石巨人 245→17、世花 262-264→24、
  *  克脑 266→13(Boss3)、猪鲨 370→58、月总 398→38、异教徒 439→94、光皇 636→57、
- *  史莱姆皇后 657→56、鹿角怪 668→90、史莱姆王 50→93 */
+ *  史莱姆皇后 657→56、鹿角怪 668→90、史莱姆王 50→93。
+ *  表外 boss=true → Boss1(5)（:12283-12287）：EoC 4、月总头/手 396/397、火把神 664。
+ *  ★地牢守卫 68（:9584 无 boss 位）与 Betsy 551（:16448 同无）不触发 Boss 曲——
+ *  Betsy 走 DD2 军团曲 41（BelongsToInvasionOldOnesArmy :4771 含 551）。
+ *  ★Mechdusa（remix+getGood 秘密种子，Main.cs:12288-12291）：125/126/127/134 覆写
+ *  为 25 Boss5——优先级在 398(38) 之后（flag17 < flag8），由 Game 选曲侧重写。 */
 export const BOSS_MUSIC: Record<number, number> = {
   13: 99, 14: 99, 15: 99,
   35: 104, 36: 104,
@@ -149,6 +160,9 @@ export function pickMusic(inp: MusicInput): number {
   // 月事件（原版 L12914-12921 位于 DecideOnNewMusic 链尾=最高优先级，覆盖 Boss 曲；
   // 门「相机在地表 worldSurface+10 带内」由 Game 侧判定后传入）
   if (inp.moonMusic && inp.moonMusic > 0) return inp.moonMusic;
+  // 火把神小游戏（原版 L12477-12480 InTorchGodMinigame → 101，先于全部 Boss flag；
+  // 月事件链尾覆写在其后 → 本分支排 moonMusic 之后）
+  if (inp.torchGod) return MUSIC.TorchGodInstrumental;
   // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
   if (inp.bossMusic > 0) return inp.bossMusic;
   // 星璇塔曲（Main.cs:12479-12493：flag8 月总 38 → flag17 25 → flag10 37 → flag11 塔曲 34，

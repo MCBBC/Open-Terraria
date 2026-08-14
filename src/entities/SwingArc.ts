@@ -292,7 +292,7 @@ export class TrueNightsEdgeSlash extends Entity {
       [155, 255, 100], this.opacity * 0.7);
   }
 
-  private tneLayer(ctx: CanvasRenderingContext2D, img: HTMLImageElement, fw: number, fh: number,
+  private tneLayer(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement, fw: number, fh: number,
     px: number, py: number, ang: number, sc: number, rgb: [number, number, number], alpha: number): void {
     if (alpha <= 0.02) return;
     ctx.save();
@@ -549,7 +549,7 @@ export class ZenithSword extends Entity {
       ctx.restore();
     }
     // 本体 = ai[1] 物品贴图（:30181-30186：LoadItem(ai[1])，基角 −π/4×spriteDir）
-    const icon = (r.atlas as unknown as { vicon?: (id: number) => { img: HTMLImageElement; sx: number; sy: number; sw: number; sh: number } | null } | undefined)?.vicon?.(this.ai1);
+    const icon = (r.atlas as unknown as { vicon?: (id: number) => { img: ImageBitmap | HTMLImageElement; sx: number; sy: number; sw: number; sh: number } | null } | undefined)?.vicon?.(this.ai1);
     ctx.save();
     ctx.globalAlpha = this.opacity;
     ctx.translate(this.cx, this.cy);

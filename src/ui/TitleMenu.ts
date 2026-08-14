@@ -111,8 +111,8 @@ const CSS = `
 
 export class TitleMenu {
   private root: HTMLElement;
-  private logoDay!: HTMLImageElement;
-  private logoNight!: HTMLImageElement;
+  private logoDay!: ImageBitmap | HTMLImageElement;
+  private logoNight!: ImageBitmap | HTMLImageElement;
   private celestial!: HTMLDivElement;
   private celestialBody!: HTMLDivElement;
   /** 昼/夜贴图态（避免每帧重设 background-image） */
@@ -152,8 +152,8 @@ export class TitleMenu {
       </div>
       <div class="sw-title-version">SandboxWorld v0.1.0</div>
     `;
-    this.logoDay = this.root.querySelector('.logo-day')!;
-    this.logoNight = this.root.querySelector('.logo-night')!;
+    this.logoDay = this.root.querySelector('.logo-day') as unknown as HTMLImageElement;
+    this.logoNight = this.root.querySelector('.logo-night') as unknown as HTMLImageElement;
     // 日/月命中层 + 可见体（GOING_OLDSCHOOL）——置于按钮之下、天空画布之上
     this.celestial = document.createElement('div');
     this.celestial.className = 'sw-title-celestial';
@@ -301,8 +301,8 @@ export class TitleMenu {
       const frames = dt / (1000 / 60);
       const isDay = menuTimeInfo.timeOfDay > 0.1875 && menuTimeInfo.timeOfDay < 0.8125;
       logoA = Math.max(0, Math.min(255, logoA + (isDay ? 2 : -2) * frames));
-      this.logoDay.style.opacity = String(logoA / 255);
-      this.logoNight.style.opacity = String((255 - logoA) / 255);
+      (this.logoDay as HTMLImageElement).style.opacity = String(logoA / 255);
+      (this.logoNight as HTMLImageElement).style.opacity = String((255 - logoA) / 255);
       // 日/月命中层每帧对齐天空画布（时钟在走，日/月横穿屏幕）
       // modY 松手衰减 ×0.999/帧（Main.cs:62415-62416——short 截断在视觉上不可辨，省略）
       if (!this.grabbing && this.modY !== 0) {

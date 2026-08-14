@@ -74,7 +74,7 @@ export class MeteorChunk extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, HTMLImageElement>; ensureVImage?: (f: string) => HTMLImageElement | null } | null }): void {
+  draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, ImageBitmap | HTMLImageElement>; ensureVImage?: (f: string) => ImageBitmap | HTMLImageElement | null } | null }): void {
     // Projectile_1078.png 16×54 = 3 帧 16×18
     const ctx = r.canvas.getContext('2d');
     if (!ctx || !r.atlas) return;

@@ -36,6 +36,9 @@ export interface ShopEntry {
   name: string;
   /** 铜币计价(item.value) */
   price: number;
+  /** 卖回货架条目下标（Chest.AddItemToShop buyOnce 克隆；购买时回传 npcShopBuy
+   *  区分常规货——同 vid 双行时 data-id 撞号，以此区分） */
+  buyback?: number;
   iconUrl: string | null;
 }
 
@@ -184,14 +187,18 @@ export class NpcShop {
   private panel: HTMLElement | null = null;
   private escHandler: ((e: KeyboardEvent) => void) | null = null;
 
-  constructor(private parent: HTMLElement, private onBuy: (vanillaId: number) => void, private onClose: () => void) {}
+  /** onBuy(vanillaId, buybackIndex?)：buybackIndex = 卖回货架条目（buyOnce）
+   *  下标（ItemSlot.HandleShopSlot :1925-1928 减库存），缺省 = 常规货 */
+  constructor(private parent: HTMLElement,
+    private onBuy: (vanillaId: number, buybackIndex?: number) => void,
+    private onClose: () => void) {}
 
   open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null) {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-shop';
     const rows = items.map((it) => `
-      <div class="sw-shop-item${copper < it.price ? ' poor' : ''}" data-id="${it.vanillaId}" data-ok="${copper >= it.price ? 1 : 0}">
+      <div class="sw-shop-item${copper < it.price ? ' poor' : ''}" data-id="${it.vanillaId}"${it.buyback !== undefined ? ` data-bb="${it.buyback}"` : ''} data-ok="${copper >= it.price ? 1 : 0}">
         ${it.iconUrl ? `<img src="${it.iconUrl}">` : '<span style="width:26px;height:26px;display:inline-block"></span>'}
         <span class="nm">${it.name}</span><span class="pr">${formatCopper(it.price)}</span>
       </div>`).join('');
@@ -208,7 +215,8 @@ export class NpcShop {
     panel.querySelectorAll('.sw-shop-item').forEach((el) => {
       el.addEventListener('click', () => {
         if ((el as HTMLElement).dataset.ok !== '1') return;
-        this.onBuy(Number((el as HTMLElement).dataset.id));
+        const bb = (el as HTMLElement).dataset.bb;
+        this.onBuy(Number((el as HTMLElement).dataset.id), bb !== undefined ? Number(bb) : undefined);
       });
     });
     (panel.querySelector('.sw-set-back') as HTMLElement).addEventListener('click', () => this.onClose());

@@ -78,7 +78,11 @@ describe('渔获规则表', () => {
     ...over,
   });
   it('岩浆池：CanFishInLava + veryrare → 2312（表内 LavaDrops :245）', () => {
-    const ctx = baseCtx({ inLava: true, canFishInLava: true, common: false, uncommon: false, rare: false });
+    // legendary 必须关：GameContentFishDropPopulator.cs:243/:244 的 Legendary 1/3 池
+    // （hardMode 4819/4820/4872/2331、EarlyMode 4819/4820/4872）注册在 :245
+    // VeryRare→2312 之前，且 Attempt 顺序=条件→chance→稀有档（FishDropRule.cs:38-45）。
+    // 留 true 时 1/3 概率先命中 Legendary 池 → 断言掷骰相关（实测 9/12 过 3/12 挂）。
+    const ctx = baseCtx({ inLava: true, canFishInLava: true, common: false, uncommon: false, rare: false, legendary: false });
     expect(FISH_DROP_RULES.some((r) => r.group === 'LavaDrops' && r.items.includes(2312))).toBe(true);
     expect(tryGetItemDrop(ctx)).toBe(2312);
   });
@@ -90,7 +94,12 @@ describe('渔获规则表', () => {
   });
   it('任务鱼：questFish 命中且 uncommon → 对应任务鱼（SurfaceDrops QuestFish 规则）', () => {
     const quest = ANGLER_QUEST_ITEMS[0]; // 2450 Batfish（HeightAbove1 + uncommon）
-    expect(tryGetItemDrop(baseCtx({ heightLevel: 2, common: false, rare: false, veryrare: false, legendary: false, questFish: quest }))).toBe(quest);
+    // 注入定序 rng 闪避两个 Next(5) 掷（同 fishing-full.test.ts 任务鱼例）：
+    // RareDrops :198（2423，didNotUseCombatBook 条件过）与 :201（炸弹鱼 3196，
+    // BombRarity=!legendary&&!veryrare&&uncommon 恰好过）都注册在 QuestFish 规则
+    // 之前——next(5)=1 ≥ num(1) 即跳过；不注入则 1/5 概率被抢先 → 断言 flaky
+    const rng = { next: (n: number) => (n === 5 ? 1 : 0), range: (min: number) => min, double: () => 0 };
+    expect(tryGetItemDrop(baseCtx({ heightLevel: 2, common: false, rare: false, veryrare: false, legendary: false, questFish: quest, rng }))).toBe(quest);
   });
 });
 

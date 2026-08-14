@@ -5,6 +5,7 @@
 // 地下：PickUndergroundBackgroundStyle :53454 → style→7 槽贴图表（UpdateBackgroundStyles :53221）
 // → 表面过渡/泥土/岩石/岩浆分层（ugBackTransition 0.25/帧 新旧双绘）。
 // 贴图懒加载（vanilla/Background_N.png，不进 SpriteAtlas 常驻表）。
+import { upgradeToBitmap, SpriteAtlas } from '../assets/SpriteAtlas';
 import type { World } from '../world/World';
 import type { SceneFlags } from '../world/SceneMetrics';
 
@@ -111,7 +112,7 @@ interface Cam { x: number; y: number }
 
 export class BiomeBackground {
   /** 贴图懒加载缓存（n → img；-1 = 加载失败） */
-  private imgs = new Map<number, HTMLImageElement | null>();
+  private imgs = new Map<number, ImageBitmap | HTMLImageElement | null>();
   /** 地表风格状态（≈Main.bgStyle/bgDelay/bgAlphaFrontLayer/bgAlphaFarBackLayer） */
   bgStyle = 0;
   private bgDelay = 0;
@@ -162,22 +163,24 @@ export class BiomeBackground {
   private underworldStyle = 0;
   private seededFor = -1;
   /** 地狱多层背景贴图缓存(Underworld_0-13,与 Background_N 分池) */
-  private hellImgs = new Map<number, HTMLImageElement | null>();
+  private hellImgs = new Map<number, ImageBitmap | HTMLImageElement | null>();
   private hellFrameT = 0;
-  private hellImg(n: number): HTMLImageElement | null {
+  private hellImg(n: number): ImageBitmap | HTMLImageElement | null {
     if (n < 0) return null;
     if (this.hellImgs.has(n)) return this.hellImgs.get(n) ?? null;
     if (typeof Image === 'undefined') return null;   // node 测试环境(浏览器外无 Image)
     const im = new Image();
+    im.onload = () => upgradeToBitmap(im, (b) => this.hellImgs.set(n, b));
     im.src = `sprites/vanilla/Underworld_${n}.png`;
     this.hellImgs.set(n, im);
     return im;
   }
 
-  private img(n: number): HTMLImageElement | null {
+  private img(n: number): ImageBitmap | HTMLImageElement | null {
     if (n < 0) return null;
     if (this.imgs.has(n)) return this.imgs.get(n) ?? null;
     const im = new Image();
+    im.onload = () => upgradeToBitmap(im, (b) => this.imgs.set(n, b));
     im.src = `sprites/vanilla/Background_${n}.png`;
     this.imgs.set(n, im);
     return im;
@@ -215,8 +218,9 @@ export class BiomeBackground {
       const im = new Image();
       im.onload = () => {
         this.imgs.set(n, im);
-        // decode():背景图 2048px 级,首帧 draw 才解码会卡一拍——预载阶段完成解码
-        im.decode().then(() => resolve(), () => resolve());
+        // 背景图 2048px 级:预载阶段即完成解码(createImageBitmap 自带 decode)
+        upgradeToBitmap(im, (b) => { this.imgs.set(n, b); resolve(); });
+        if (!SpriteAtlas.USE_BITMAP) resolve();
       };
       im.onerror = () => { this.imgs.set(n, im); resolve(); };
       im.src = `sprites/vanilla/Background_${n}.png`;
@@ -441,10 +445,10 @@ export class BiomeBackground {
   /** 带色调平铺绘制（tint 缓存按 (tex,tint) 键，避免每帧逐像素） */
   private tintCache = new Map<string, HTMLCanvasElement>();
   private drawTiledTinted(
-    ctx: CanvasRenderingContext2D, im: HTMLImageElement,
+    ctx: CanvasRenderingContext2D, im: ImageBitmap | HTMLImageElement,
     tr: number, tg: number, tb: number, dx: number, dy: number, dw: number, dh: number,
   ) {
-    const key = `${im.src}|${tr.toFixed(2)},${tg.toFixed(2)},${tb.toFixed(2)}`;
+    const key = `${(im as HTMLImageElement).src}|${tr.toFixed(2)},${tg.toFixed(2)},${tb.toFixed(2)}`;
     let c = this.tintCache.get(key);
     if (!c) {
       c = document.createElement('canvas');

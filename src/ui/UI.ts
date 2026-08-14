@@ -15,11 +15,12 @@ const ITEM_RARE = vanillaRareJson as Record<string, number>;
  *  返回 dataURL;素材未载(首次打开竞态)返回 null,调用方保留兜底底色 */
 let invBgTinted: HTMLCanvasElement | null = null;
 /** 模块级预载(首次打开面板时大概率已就绪;未就绪由 invBgEnsure 的 onload 回补) */
-let invBgImg: HTMLImageElement | null = null;
-function invBgEnsure(): HTMLImageElement | null {
+let invBgImg: ImageBitmap | HTMLImageElement | null = null;
+function invBgEnsure(): ImageBitmap | HTMLImageElement | null {
   if (typeof Image === 'undefined') return null;
   if (!invBgImg) {
     invBgImg = new Image();
+    invBgImg.onload = () => upgradeToBitmap(invBgImg as unknown as HTMLImageElement, (b) => { invBgImg = b as unknown as HTMLImageElement; });
     invBgImg.src = 'sprites/vanilla/Inventory_Back13.png';
   }
   return invBgImg;
@@ -63,7 +64,7 @@ function invBgDataUrl(w: number, h: number): string | null {
   x.drawImage(t, 10, 10, 10, 10, 10, 10, c.width - 20, c.height - 20);
   return c.toDataURL();
 }
-import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
+import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
@@ -573,7 +574,7 @@ export class UI {
     const meta = atlas ? atlas.vmeta(sheetId) : null;
     if (!atlas || !meta) { this.toast('贴图表加载失败'); return; }
     // 实际渲染用的贴图：仙人掌按生物群系换变体（腐化/猩红/神圣）
-    let img: HTMLImageElement | null = atlas.vimages.get(meta.sheet) ?? null;
+    let img: ImageBitmap | HTMLImageElement | null = atlas.vimages.get(meta.sheet) ?? null;
     if (sheetId === 80) img = cactusTextureFor(atlas, st, tx, ty) ?? img;
     if (!img) { this.toast('贴图表加载失败'); return; }
     // 当前实际渲染帧：
@@ -954,6 +955,20 @@ export class UI {
       if (!this.heldStack) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest?.('.sw-slot') || t?.closest?.('.sw-panel') || t?.closest?.('.sw-btn')) return;
+      // NPC 商店面板（ItemSlot.Handle context 15 Main.cs:41279-41282 商店格区）：
+      //  · 行/按钮 → 各自 click 链（行 = 有货商店格；光标持有时 Game.npcShopBuy 内
+      //    的 CanStack/满叠门裁决，异型整链无动作 PickItemMovementAction :1427-1438）
+      //  · 空白区 = 空商店格 → 光标持有物整叠卖出（PickItemMovementAction case 15
+      //    :1435-1438 → LeftClick case 4 :1110-1129 SellItem(mouseItem)），
+      //    不丢世界、不放置
+      //  · NPC 对话/心情浮层也是 UI（mouseInterface），点它不丢世界
+      if (t?.closest?.('.sw-npc-shop')) {
+        if (t.closest('.sw-shop-item') || t.closest('button')) return;
+        if (this.game?.npcShopSellHeld(this.heldStack)) this.heldStack = null;  // :1116 SetDefaults(0)
+        this.refreshAll();
+        return;
+      }
+      if (t?.closest?.('.sw-npc-dialog') || t?.closest?.('.sw-happy-panel')) return;
       this.throwHeldToWorld();
       this.refreshAll();
     });
@@ -1714,8 +1729,6 @@ export class UI {
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
   /** 装备/杂项页签与 Loadout 按钮（背包面板顶部） */
   private eqPageEl: HTMLElement | null = null;
-  /** 装备页竖排容器（三列 + 底部防御计数器）——切页整体显隐 */
-  private eqColEl: HTMLElement | null = null;
   private miscPageEl: HTMLElement | null = null;
   private loadoutBtns: HTMLButtonElement[] = [];
   private eqPageBtns: HTMLButtonElement[] = [];
@@ -1724,7 +1737,7 @@ export class UI {
   /** 页签切换（原版 EquipPage 0=装备 2=杂项；DrawInventory :40614） */
   setEquipPage(page: number): void {
     this.equipPage = page;
-    if (this.eqColEl) this.eqColEl.style.display = page === 0 ? 'flex' : 'none';
+    if (this.eqPageEl) this.eqPageEl.style.display = page === 0 ? 'flex' : 'none';
     if (this.miscPageEl) this.miscPageEl.style.display = page === 1 ? 'flex' : 'none';
     this.eqPageBtns.forEach((b, k) => {
       b.style.borderColor = k === page ? '#ffd75a' : '#6a5a8a';
@@ -1849,15 +1862,12 @@ export class UI {
       return col;
     };
     this.eqPageEl = el('div');
-    this.eqPageEl.style.cssText = 'display:flex; gap:2px;'; // 原版 47px 列距≈贴列
+    this.eqPageEl.style.cssText = 'display:flex; gap:16px;'; // 列距拉开：自制列标签与邻列槽贴叠会被读成"词左边的杂字"（原版无文字标签不显此问题）
     this.eqPageEl.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 7, 'dye'));            // 染料 dye[0-2]+[3-9]
     this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
-    this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor')); // 装备 armor[0-2]+[3-7]
-    // 装备页竖排容器：三列在上、防御计数器贴列底（用户指定；切 Misc 页整体隐藏）
-    this.eqColEl = el('div');
-    this.eqColEl.style.cssText = 'display:flex; flex-direction:column;';
-    this.eqColEl.appendChild(this.eqPageEl);
-    left.appendChild(this.eqColEl);
+    const equipCol = vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor');          // 装备 armor[0-2]+[3-7]（防御计数器挂此列底）
+    this.eqPageEl.appendChild(equipCol);
+    left.appendChild(this.eqPageEl);
     // 杂项页：miscEquips[5]（宠物/光源/矿车/坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）
     this.miscPageEl = el('div');
     this.miscPageEl.style.cssText = 'display:none; gap:10px;';
@@ -1935,8 +1945,8 @@ export class UI {
     rightRail.appendChild(coinAmmo);
     left.appendChild(rightRail);
     // 成就提示牌（AchievementAdvisor：未完成成就小卡，点击开成就菜单）
+    // ——挂载点在物品格之后（见 body.appendChild(right) 处），此处仅创建
     this.achAdvisorEl = createAchievementAdvisor(this.game);
-    left.appendChild(this.achAdvisorEl);
     body.appendChild(left);
 
     // 背包 10×4（10-39）
@@ -1952,12 +1962,8 @@ export class UI {
       searchBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
       searchBtn.addEventListener('click', () => this.openItemSearch());
       lblRow.appendChild(searchBtn);
-      // 向导配方反查（guideItem 槽 → CollectGuideRecipes；LegacyInterface.21 标题）
-      const guideBtn = el('button', 'sw-btn');
-      guideBtn.textContent = Lang.text('LegacyInterface.21').replace('：', '');
-      guideBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
-      guideBtn.addEventListener('click', () => this.openGuideSearch());
-      lblRow.appendChild(guideBtn);
+      // 向导配方反查按钮已摘（2026-08-14 用户要求；openGuideSearch 逻辑保留，
+      // 通道如需再开走 Guide 对话入口）
       right.appendChild(lblRow);
     }
     const grid = el('div');
@@ -1967,6 +1973,9 @@ export class UI {
     }
     right.appendChild(grid);
     body.appendChild(right);
+    // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
+    this.achAdvisorEl.style.alignSelf = 'flex-start';
+    body.appendChild(this.achAdvisorEl);
     this.invPanel.appendChild(body);
 
     // 防御计数器（原版 DrawDefenseCounter Main.cs:41555-41623：Extra_58 盾 3×2 帧
@@ -1999,14 +2008,15 @@ export class UI {
       this.tooltip.style.display = 'block';
     });
     defRow.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
-    this.eqColEl!.appendChild(defRow);   // 装备三列正下方贴列底（原版画在装备区左侧垂直居中,用户指定列底）
+    equipCol.appendChild(defRow);   // 装备列（第三列）正下方（原版画在装备区左侧垂直居中,用户指定装备列底）
 
-    // 合成区
-    this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
+    // 合成区 —— 挂 right（物品格容器）内部底部=物品格正下方（用户指定，
+    // 此前挂 invPanel 横跨整个面板宽度）
+    right.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
     const stations = el('div', '', '');
     stations.style.cssText = 'font-size:12px; color:#8ad0a0; margin-bottom:6px;';
     stations.dataset.role = 'stations';
-    this.invPanel.appendChild(stations);
+    right.appendChild(stations);
     // ---- Modern 合成网格控件（1.4.5 CraftingGrid：搜索栏 + 焦点配方材料格） ----
     const modernRow = el('div');
     modernRow.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
@@ -2018,10 +2028,10 @@ export class UI {
     this.craftGridEl = el('div');
     this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
     modernRow.appendChild(this.craftGridEl);
-    this.invPanel.appendChild(modernRow);
+    right.appendChild(modernRow);
     this.craftListEl = el('div');
     this.craftListEl.style.cssText = 'max-height:240px; overflow-y:auto; width:520px;';
-    this.invPanel.appendChild(this.craftListEl);
+    right.appendChild(this.craftListEl);
     this.root.appendChild(this.invPanel);
   }
 
@@ -2048,7 +2058,7 @@ export class UI {
    *  t=null 时为宠物 buff 通道块（BuffType 无宠物成员，不进 BuffState.active）：
    *  无倒计时（buffNoTimeDisplay）+ 右键 = 收宠（原版 TryRemovingBuff
    *  Main.cs:42788 → CheckBuffHideMisc :42808：右键宠物 buff 图标即 hideMisc 翻转） */
-  private makeBuffBlock(t: BuffType | null, petSlot: 0 | 1 = 0): { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement } {
+  private makeBuffBlock(t: BuffType | null, petSlot: 0 | 1 = 0): { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement } {
     const block = el('div', 'sw-buff');
     block.style.display = 'none';
     block.style.cssText += 'position:relative; width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer; flex:0 0 auto;';
@@ -2080,12 +2090,12 @@ export class UI {
   }
 
   buffBar: HTMLElement | null = null;
-  buffBlocks = new Map<BuffType, { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement }>();
+  buffBlocks = new Map<BuffType, { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement }>();
   /** 宠物 buff 显示通道（key = 装备槽 0=宠物 / 1=光宠）。不进 buffBlocks：
    *  BuffType 未扩 62 个宠物成员，宠物 buff 也不在 BuffState.active 里——
    *  原版 UpdatePet/UpdatePetLight（Player.cs:17147-17187）装备槽 buffType 经
    *  AddBuff(buff,3600) 恒刷新入 buff 槽即"宠物存在标志"，UI 直接由装备槽派生 */
-  petBuffBlocks = new Map<0 | 1, { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement }>();
+  petBuffBlocks = new Map<0 | 1, { block: HTMLElement; icon: ImageBitmap | HTMLImageElement; time: HTMLElement }>();
 
   /** 槽位当前应显示的宠物 buff：装备在槽 + 跟随体存活（hideMisc/玩家死亡时
    *  Game.updatePetSlot 即灭跟随体，等价原版 TogglePet 的 ClearBuff） */
@@ -2124,14 +2134,14 @@ export class UI {
       // 原版 DrawBuffIcon（Main.cs:42736）：TextureAssets.Buff[type] 原大绘制——
       // 用原版 Buff_{vanillaBuff} 贴图（2026-08-13 前：误用对应药水物品图标）
       const want = `/sprites/vanilla/Buff_${BUFF_DEFS[t].vanillaBuff}.png`;
-      if (!ui.icon.src.endsWith(want)) {
-        ui.icon.onerror = () => {
+      if (!(ui.icon as HTMLImageElement).src.endsWith(want)) {
+        (ui.icon as HTMLImageElement).onerror = () => {
           // 素材缺失兜底：退回药水物品图标（缺表时仍可见）
           const iconId = this.buffIconItem.get(t);
-          if (iconId && this.game) ui.icon.src = iconUrl(this.game, iconId);
-          ui.icon.onerror = null;
+          if (iconId && this.game) (ui.icon as HTMLImageElement).src = iconUrl(this.game, iconId);
+          (ui.icon as HTMLImageElement).onerror = null;
         };
-        ui.icon.src = want;
+        (ui.icon as HTMLImageElement).src = want;
       }
       const s = Math.ceil(left);
       ui.time.textContent = s >= 60
@@ -2168,13 +2178,13 @@ export class UI {
       // buffNoTimeDisplay：宠物 buff 不显示剩余时长（原版 TryGetBuffTime 不出文字）
       u.time.textContent = '';
       const want = `/sprites/vanilla/Buff_${pb.buff}.png`;
-      if (!u.icon.src.endsWith(want)) {
-        u.icon.onerror = () => {
+      if (!(u.icon as HTMLImageElement).src.endsWith(want)) {
+        (u.icon as HTMLImageElement).onerror = () => {
           // 素材缺失兜底：退回宠物投射物贴图 Projectile_<proj>.png
-          u.icon.onerror = null;
-          u.icon.src = `/sprites/vanilla/Projectile_${pb.proj}.png`;
+          (u.icon as HTMLImageElement).onerror = null;
+          (u.icon as HTMLImageElement).src = `/sprites/vanilla/Projectile_${pb.proj}.png`;
         };
-        u.icon.src = want;
+        (u.icon as HTMLImageElement).src = want;
       }
     }
     // 恒置普通 buff 之后（原版 AddBuff 找空槽追加）：末位不符才整序（免每秒 DOM 抖动）
@@ -2448,21 +2458,27 @@ export class UI {
   }
 
   private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null) {
-    const oldImg = slotEl.querySelector('img');
+    // ★元素复用(2026-08-14 trace④:80 万次 LazyPixelRef 恒定流根因):此前每次
+    // 刷新删旧 <img> 建新——新元素即使 src 相同也要重新解码,50-80 槽 × iconUiDirty
+    // 风暴期的每 30t 刷新 = 每帧 50+ 次解码任务。复用元素且 src 不变不动 = 零解码
+    let img = slotEl.querySelector('img') as HTMLImageElement | null;
     const oldCnt = slotEl.querySelector('.cnt');
-    if (oldImg) oldImg.remove();
-    if (oldCnt) oldCnt.remove();
+    if (!content) { if (img) img.remove(); if (oldCnt) oldCnt.remove(); }
     // 类型幽灵图只在空槽显示（:2312 `item.type <= 0 || stack <= 0` 门）
     const ghost = slotEl.querySelector('.sw-slot-ghost');
     if (ghost) (ghost as HTMLElement).style.display = content ? 'none' : 'block';
     if (content) {
-      const img = el('img') as HTMLImageElement;
-      img.src = iconUrl(this.game, content.id);
-      img.draggable = false;
-      slotEl.appendChild(img);
-      if (content.stack > 1) {
-        slotEl.appendChild(el('span', 'cnt', String(content.stack)));
+      const url = iconUrl(this.game, content.id);
+      if (!img) {
+        img = el('img') as HTMLImageElement;
+        img.draggable = false;
+        slotEl.appendChild(img);
       }
+      if (img.getAttribute('src') !== url) img.src = url;  // 不变不动:免重解码/重光栅
+      if (content.stack > 1) {
+        if (oldCnt) oldCnt.textContent = String(content.stack);
+        else slotEl.appendChild(el('span', 'cnt', String(content.stack)));
+      } else if (oldCnt) oldCnt.remove();
     }
     // 收藏星标（原版 Inventory_Back10 金边贴图——ItemSlot :1966-1985 favorited 分支）
     const inHotbar = !!slotEl.closest('.sw-hotbar');
@@ -2878,7 +2894,7 @@ export class UI {
     };
     requestAnimationFrame(applyBg);
     const img = invBgEnsure();
-    if (img && !(img.width > 0)) img.addEventListener('load', applyBg, { once: true });
+    if (img && !(img as HTMLImageElement).complete) (img as HTMLImageElement).addEventListener('load', applyBg, { once: true });
     return panel;
   }
 
@@ -2991,10 +3007,21 @@ export class UI {
     this.npcHappiness?.close();   // 心情浮层随对话框一并关闭
   }
 
-  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number, happinessPct?: number): void {
+  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; buyback?: number }>, copper: number, happinessPct?: number): void {
     if (!this.npcShop) {
       this.npcShop = new NpcShop(this.root,
-        (vid) => this.game?.npcShopBuy(vid),
+        // 行点击 = 有货商店格（PickItemMovementAction case 15 ItemSlot.cs:1426-1439）：
+        // 光标持有物时 Game.npcShopBuy 内裁决——同型 CanStack（:1431）→ 买入叠光标
+        // （HandleShopSlot :1910-1923，held.stack++）；异型 → result -1 整链无动作
+        (vid, bb) => {
+          const held = this.heldStack;
+          if (held) {
+            this.game?.npcShopBuy(vid, bb, held);   // 成交时 Game 侧 held.stack++
+            this.refreshAll();                       // ghost 计数随叠购刷新
+            return;
+          }
+          this.game?.npcShopBuy(vid, bb);
+        },
         () => {
           this.npcShop?.close();
           this.npcShop = null;

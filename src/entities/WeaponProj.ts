@@ -6,6 +6,7 @@
 //   GrenadeProj aiStyle 16 —— 弹跳 + 引信爆炸（手雷 180/炸弹 150/炸药 135 tick）
 // 贴图统一 Projectile_N.png 懒加载（Arrow.projSprite 共享缓存）。
 import { Entity } from './Entity';
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -1046,12 +1047,13 @@ function flailChainTex(projId: number): string {
     default: return 'Chain3';
   }
 }
-const chainImgCache = new Map<string, HTMLImageElement>();
-function chainImg(name: string): HTMLImageElement | null {
+const chainImgCache = new Map<string, ImageBitmap | HTMLImageElement>();
+function chainImg(name: string): ImageBitmap | HTMLImageElement | null {
   let img = chainImgCache.get(name);
   if (img !== undefined) return img ?? null;
   if (typeof Image === 'undefined') return null;
   img = new Image();
+  img.onload = () => upgradeToBitmap(img, (b) => chainImgCache.set(name, b));
   img.src = `sprites/vanilla/${name}.png`;
   chainImgCache.set(name, img);
   return img;

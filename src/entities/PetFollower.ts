@@ -578,7 +578,7 @@ export class PetFollower extends Entity {
     }
   }
 
-  private legacyDraw(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
+  private legacyDraw(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement): void {
     // 横排帧假设（旧版）：帧宽 = 贴图高（方形帧）；不足一帧的整图直接画
     const fw = img.height;
     const frames = fw > 0 ? Math.max(1, Math.floor(img.width / fw)) : 1;

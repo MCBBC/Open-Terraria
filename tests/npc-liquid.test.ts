@@ -197,7 +197,12 @@ describe('水栖离水分支（aiStyle 16 :24019-24034）与史莱姆 wet 段（
   it('食人鱼 58 搁浅：拍打挣扎（vy 出现负脉冲）且不飞天', () => {
     const w = liquidWorld();
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
-    const e = Enemy.fromVanilla(58, 38 * TILE, 38 * TILE)!;    // 岸上实地
+    // 确定性布场：拍打 vx∈(-2,2) px/t（cs:24031 rand(-20,20)×0.1）×120t 的左漂上限
+    // 240px——把岸加宽到 x∈[46,60) 并出生在 52 列后，距池右缘 x=480 有 352px > 240px，
+    // 随机左漂恒不可能入池（旧 38 列仅 128px 缓冲，实测 2.6%（13/500）概率整程左漂
+    // 进池 → wet 假阳性 flaky；产品侧拍打随机是原版 Main.rand 语义，不改）
+    for (let x = 46; x < 60; x++) w.store.setTile(x, 40, 1);
+    const e = Enemy.fromVanilla(58, 52 * TILE, 38 * TILE)!;    // 岸上实地（右段加宽）
     let minVy = 0;
     for (let i = 0; i < 120; i++) {
       e.fixedUpdate(1 / 60, hooks(w, p) as never);

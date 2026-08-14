@@ -4,6 +4,7 @@
 //   - 闪电：由 SkyRenderer 读 weather.lightning 把天空色向白 lerp（不画贴图，原版同语义）
 // 绘制在世界坐标变换内调用（与实体一致），雨层画在瀑布后实体前（原版 DrawRain 在
 // tile 层后）。光照着色由调用方注入 lightAt 回调（LightingEngine.lightAt 同源）。
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { TILE } from '../core/constants';
 import type { World } from '../world/World';
 import type { Camera } from './Camera';
@@ -59,17 +60,18 @@ export interface WeatherFxHooks {
   sandColors(): Array<{ color: string; weight: number }>;
 }
 
-let rainTex: HTMLImageElement | null = null;
-function getRainTex(): HTMLImageElement | null {
+let rainTex: ImageBitmap | HTMLImageElement | null = null;
+function getRainTex(): ImageBitmap | HTMLImageElement | null {
   if (rainTex !== null) return rainTex;
   if (typeof Image === 'undefined') return null;
   rainTex = new Image();
+  rainTex.onload = () => upgradeToBitmap(rainTex as unknown as HTMLImageElement, (b) => { rainTex = b; });
   rainTex.src = 'sprites/vanilla/Rain.png';
   return rainTex;
 }
 
-let dustTex: HTMLImageElement | null = null;
-function getDustTex(): HTMLImageElement | null {
+let dustTex: ImageBitmap | HTMLImageElement | null = null;
+function getDustTex(): ImageBitmap | HTMLImageElement | null {
   if (dustTex !== null) return dustTex;
   if (typeof Image === 'undefined') return null;
   dustTex = new Image();
@@ -426,7 +428,7 @@ export class WeatherRenderer {
 
 /** 乘色雨滴条缓存（type×8 级亮度）：multiply 灰阶 ×0.85 上限 + destination-in 保形 */
 const rainTintCache = new Map<string, HTMLCanvasElement>();
-function tintedRainStrip(tex: HTMLImageElement, type: number, v: number): HTMLCanvasElement | null {
+function tintedRainStrip(tex: ImageBitmap | HTMLImageElement, type: number, v: number): HTMLCanvasElement | null {
   const key = `${type}|${v}`;
   const hit = rainTintCache.get(key);
   if (hit) return hit;
@@ -450,7 +452,7 @@ function stIn(world: World, tx: number, ty: number): boolean {
 
 /** 雪花乘色缓存（8 级亮度）：Dust.png 源矩形 (760,0,10,10) = dust 76 */
 const flakeTintCache = new Map<number, HTMLCanvasElement>();
-function tintedFlake(tex: HTMLImageElement, v: number): HTMLCanvasElement | null {
+function tintedFlake(tex: ImageBitmap | HTMLImageElement, v: number): HTMLCanvasElement | null {
   const hit = flakeTintCache.get(v);
   if (hit) return hit;
   if (typeof document === 'undefined') return null;
@@ -470,7 +472,7 @@ function tintedFlake(tex: HTMLImageElement, v: number): HTMLCanvasElement | null
 /** 沙尘 grain 乘色缓存：Dust.png 源矩形 (680,20,10,10) = dust 268，
  *  按 EmitDust 四色（GetColor = dust.color × light，DrawDust :38423-38429 叠画） */
 const sandTintCache = new Map<string, HTMLCanvasElement>();
-function tintedSand(tex: HTMLImageElement, cr: number, cg: number, cb: number, v: number): HTMLCanvasElement | null {
+function tintedSand(tex: ImageBitmap | HTMLImageElement, cr: number, cg: number, cb: number, v: number): HTMLCanvasElement | null {
   const key = `${cr},${cg},${cb},${v}`;
   const hit = sandTintCache.get(key);
   if (hit) return hit;

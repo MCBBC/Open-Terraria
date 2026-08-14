@@ -84,7 +84,7 @@ function ensureStyle(): void {
 // ---- 原版像素面板底(Inventory_Back13 九宫格 × (33,15,91)×0.685;UI.ts 同源算法) ----
 
 let panelBg: string | null = null;
-let panelBgImg: HTMLImageElement | null = null;
+let panelBgImg: ImageBitmap | HTMLImageElement | null = null;
 function ensurePanelBg(panel: HTMLElement): void {
   if (panelBg) { panel.style.backgroundImage = `url(${panelBg})`; return; }
   if (!panelBgImg && typeof Image !== 'undefined') {

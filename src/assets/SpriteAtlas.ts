@@ -40,7 +40,7 @@ export interface ResourcesData {
   rules: Record<string, RuleTileDef>;
 }
 
-export interface DrawRect { img: HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number; }
+export interface DrawRect { img: ImageBitmap | ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number; }
 
 // ---- 原版素材命名空间（vanilla.json，TEdit 数据驱动） ----
 
@@ -115,7 +115,7 @@ function vuiKeyMiss(name: string): void {
 }
 
 /** 整图硬 alpha：alpha ≥128 → 255，<128 → 0（并清零 RGB），消除提取 PNG 的半透明镶边 */
-function hardAlpha(img: HTMLImageElement): HTMLCanvasElement {
+function hardAlpha(img: ImageBitmap | HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
   c.width = img.width; c.height = img.height;
   const ctx = c.getContext('2d')!;
@@ -136,7 +136,7 @@ export class SpriteAtlas {
   data = atlasJson as unknown as AtlasData;
   resources = resourcesJson as unknown as ResourcesData;
   vanilla = vanillaJson as unknown as VanillaData;
-  images = new Map<string, ImageBitmap | HTMLImageElement | HTMLCanvasElement>();
+  images = new Map<string, ImageBitmap | ImageBitmap | HTMLImageElement | HTMLCanvasElement>();
   /** ★ImageBitmap 化(2026-08-14 根治):drawImage(HTMLImageElement) 走浏览器
    *  懒解码缓存,GPU 压力下被驱逐→静默重解码(三份 trace 14-21 万次解码风暴)。
    *  createImageBitmap = 自持已解码像素(原版 Texture2D 语义):绘制永不重解码,
@@ -295,7 +295,7 @@ export class SpriteAtlas {
   /** UI 贴图失败负缓存(与 ensureVImage._vImageFailed 对称,2026-08-13 补):
    *  清单内但 404 的键若不加终态标记,每帧重查的消费方会每帧重发请求 */
   private _uiFailed = new Set<string>();
-  private ensureUiImage(file: string): ImageBitmap | HTMLImageElement | null {
+  private ensureUiImage(file: string): ImageBitmap | ImageBitmap | HTMLImageElement | null {
     const hit = this.uiimages.get(file);
     if (hit) return hit;
     if (this._uiPending.has(file) || this._uiFailed.has(file)) return null;
@@ -403,7 +403,7 @@ export class SpriteAtlas {
    *  miss 发起加载时 note、onload 到达时 onLoaded——烘焙消费的任何懒取贴图
    *  晚到自动触发重烘焙,不再依赖 Game.ts 的前缀白名单(白名单保留作纵深) */
   bakeTracker: { _baking?: boolean; note(file: string): void; onLoaded(file: string): void } | null = null;
-  ensureVImage(file: string): ImageBitmap | HTMLImageElement | null {
+  ensureVImage(file: string): ImageBitmap | ImageBitmap | HTMLImageElement | null {
     const hit = this.vimages.get(file);
     if (hit) return hit;
     if (this._iconPending.has(file) || this._vImageFailed.has(file)) return null;
@@ -970,3 +970,11 @@ vi_678_red_potion: 678,
   // ---- 旧 UI 移除迁移补全（2026-08-09，全部 id 经 TEdit items.json 核实；
   //      木镐/木斧原版不存在，用铜镐 3509/铜斧 3506 代位） ----
 };
+
+/** 独立加载器共用 ImageBitmap 桥(二期,2026-08-14):
+ *  用法:im.onload 里先照旧 set(Image),再调 upgradeToBitmap(im, b => map.set(k, b))
+ *  ——消费方每帧重查,下一帧起拿到的就是自持解码像素;契约零变化 */
+export function upgradeToBitmap(img: HTMLImageElement, onReady: (b: ImageBitmap) => void): void {
+  if (!SpriteAtlas.USE_BITMAP) return;
+  createImageBitmap(img).then(onReady, () => { /* 解码失败保留 Image */ });
+}

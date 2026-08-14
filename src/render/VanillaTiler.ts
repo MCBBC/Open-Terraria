@@ -399,7 +399,7 @@ const TREE_SHEET_STYLES: Record<number, number> = { 5: 0, 596: 29, 616: 30, 634:
 for (let i = 583; i <= 589; i++) TREE_SHEET_STYLES[i] = 22 + (i - 583);
 /** 树冠帧尺寸按 PNG 实际宽度推导（3 变体等分 + 2px 间隔；高度 -2）：
  *  自动覆盖全部样式（森林 80×80 / 丛林·宝石 114-116×96 / 装饰 118×96 / 神圣 80-114×140） */
-function treeTopSize(img: HTMLImageElement): [number, number] {
+function treeTopSize(img: ImageBitmap | HTMLImageElement): [number, number] {
   return [Math.floor(img.width / 3) - 2, img.height - 2];
 }
 // 树下草地 → 生物群系树干变体（TEdit treeType；-1 = 基础 Tiles_5）
@@ -586,7 +586,7 @@ export function drawTreeCell(
     const crown = sheet === 5 && trees
       ? crownStyleFor(scanX, scan.type, scan.floorY, trees)
       : style;
-    let img: HTMLImageElement | null;
+    let img: ImageBitmap | HTMLImageElement | null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
     if (fx === 22 || fx === 0) {   // fx=0：1/13 概率的顶冠变体（TreePass 与原版一致）
       img = atlas.ensureVImage(`vanilla/Tree_Tops_${crown}.png`)
@@ -668,7 +668,7 @@ export function drawTreeCell(
 /** 仙人掌生物群系贴图（向下扫沙类：腐化/猩红/神圣 → 独立变体贴图）。
  *  扫描带 baseX 偏移（TEdit 同款）：手臂格朝主干列方向扫——手臂列自身下方
  *  可能没有沙（如浮空装饰/黑檀石地基），直下扫会漏判 */
-export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y: number): HTMLImageElement | null {
+export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y: number): ImageBitmap | HTMLImageElement | null {
   let img = atlas.ensureVImage('vanilla/Tiles_80.png');
   // 角色判定：与 cactusFrameAt 同一列高比较 → 决定扫描列偏移
   const isC = (ax: number, ay: number) => st.inBounds(ax, ay) && st.type[st.idx(ax, ay)] === TILE_BY_KEY['v_80_cactus'];
@@ -1204,7 +1204,7 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
  * slope3(左低右高)/4(右低左高):8 条 2px 竖条,源行偏移 2i(取帧中段),
  * 目标 y=0;补顶部 16×2 整条。
  */
-function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number }, slope: number, px: number, py: number): void {
+function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number }, slope: number, px: number, py: number): void {
   const fx = r.sx, fy = r.sy;
   for (let i = 0; i < 8; i++) {
     let num19: number; // 源X/目标X
@@ -1554,7 +1554,7 @@ function drawAdjust(
  *  返回 true = 已绘制(调用方 return) */
 function drawHalfBrickSeam(
   ctx: CanvasRenderingContext2D,
-  r: { img: HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+  r: { img: ImageBitmap | HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
   st: TileStore, x: number, y: number, sheet: number, px: number, py: number,
 ): boolean {
   if (DONT_DRAW_SLOPES.has(sheet) || IGNORES_NEARBY_HALFBRICK.has(sheet) || NOT_REALLY_SOLID.has(sheet)) return false;

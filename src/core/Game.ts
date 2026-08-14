@@ -9,7 +9,8 @@ import { alignmentPcts, dryadWorldStatus } from '../world/WorldAlignment';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
-import { computeSellValue, canSellFromShopUi } from '../stats/SellChain';
+import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
+import { PREFIX_NAMES } from '../data/vanillaPrefixes';
 import { TILE, CHUNK, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -28,7 +29,7 @@ import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, WALL_HOUSE } from '../world/Housing';
 import {
   INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION, INVASION_MARTIAN,
-  INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
+  INVASION_GROUP, KILL_WEIGHT, INVASION_MUSIC, invasionActive, canStartInvasion, startInvasion,
   tickInvasion, invasionWarningMisc, shouldSpawnInvasionEnemies,
 } from '../world/Invasion';
 import {
@@ -144,6 +145,8 @@ import { Critter } from '../entities/Critter';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
 import { CoinPortalProj } from '../entities/CoinPortalProj';
+import { DebrisProj } from '../entities/DebrisProj';
+import { crackedChainKill, isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 import {
   LeashedEntityManager, KITE_ITEM_PROJ, anchorStyleOfItem, placeStyleOfVid, ITEM_MAKE_NPC,
   LEASHED_SUB_FULL, LEASHED_SUB_PARTIAL, LEASHED_SUB_REMOVE, LEASHED_SUB_PLACE_REQUEST,
@@ -222,6 +225,7 @@ import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../entities/MissileProj';
 import { SkyDragonSpin, SkyDragonSwing, SkyDragonShot, SkyDragonCircle } from '../entities/SkyDragonFury';
 import { NebulaBlazeBolt, LunarFlareStar } from '../entities/LunarNebula';
+import { Celeb2Muzzle, Celeb2Rocket } from '../entities/Celeb2';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
 import { SolarEruptionWhip } from '../entities/SolarEruption';
 import { TideSlash } from '../entities/TideSlash';
@@ -572,8 +576,10 @@ export interface GameCallbacks {
   /** 哥布林重铸界面（Main.InReforgeMenu） */
   onReforgeOpen?: () => void;
   /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币；
-   *  happinessMul = 快乐度价格乘子（Main.cs:41231-41243 标题旁表情/百分比显示用） */
-  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number, happinessMul?: number) => void;
+   *  happinessMul = 快乐度价格乘子（Main.cs:41231-41243 标题旁表情/百分比显示用）；
+   *  buyback = 卖回货架条目下标（Chest.AddItemToShop 的 buyOnce 克隆，购买时
+   *  回传给 npcShopBuy 以区分常规货） */
+  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; buyback?: number }>, copper: number, happinessMul?: number) => void;
   /** NPC 快乐度详情浮层（ReportHappiness.Interact）：报告逐条文案 + 价格乘子 */
   onNpcHappiness?: (info: { name: string; lines: string[]; priceMul: number }) => void;
   onBuffsChanged?: () => void;
@@ -2211,6 +2217,8 @@ export class Game implements GameHooks {
       if (shoot && shoot > 0) {
         ids.add(shoot);
         if (shoot === 707) { ids.add(708); ids.add(709); ids.add(1110); }   // 天龙之怒右键 alt 链族（708 弧/709 弹/1110 圈）
+        if (shoot === 714) { ids.add(715); ids.add(716); ids.add(717); ids.add(718); }   // MK2 烟花弹族
+        if (shoot === 615) ids.add(616);                                    // 派对机枪彩带弹
       }
     };
     for (const s of this.player.inv.slots) scan(s);
@@ -2351,7 +2359,15 @@ export class Game implements GameHooks {
         // 用户点击才自愈）。Tiles_ 表同样要刷：place_v_* 家具类物品的图标取自
         // 图块表首帧（atlasIconForKey → vframeAt），此前只认 Item_Atlas → 开宝箱
         // 时这类物品永久回退
-        if (file.includes('Item_Atlas') || file.startsWith('vanilla/Tiles_')) this.iconUiDirty = true;
+        // ★限频(2026-08-14 trace④):探索期 Tiles_ 表持续晚到,每张都置位→
+        // 每 30t 一次全 UI 刷新;元素复用后刷新本身已廉价,这里再限频——一个
+        // 500ms 窗口内的多张表只触发一次图标刷新(图标只关心"有没有就位",不关心哪张)
+        if (file.includes('Item_Atlas') || file.startsWith('vanilla/Tiles_')) {
+          if (!this._iconUiDirtyAt || Date.now() - this._iconUiDirtyAt > 500) {
+            this._iconUiDirtyAt = Date.now();
+            this.iconUiDirty = true;
+          }
+        }
       };
     }
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
@@ -2963,6 +2979,12 @@ export class Game implements GameHooks {
       // CultistDevote 438 ai[1]==1（:12212-12217）与 CultistArcher 379 ai[3]>=0
       // （:12220-12225）→ num3=20 → 音乐 94（与 439 本体同曲）。
       // 仪式态由异教徒仪式 AI 置位（未移植——当前不可达，公式先 1:1 在位）
+      // ★578 DD2 闪电甲虫：VANILLA_BOSS_IDS 含它是本仓消散语义，原版 SetDefaults
+      // （NPC.cs:16470）无 boss 位 → 不触发 Boss1 兜底（T3 曲由 DD2 军团曲 41 接管）。
+      // ★Mechdusa 覆写（Main.cs:12288-12291 remix+getGood && 125/126/127/134 → 25）：
+      // flag17 排在 398(flag8→38) 之后——本仓单值模型下直接覆写即可（同场无 398）
+      const sfMusic = w.seedFlags ?? {};
+      const mechdusaMusicWorld = (!!sfMusic.remix && !!sfMusic.getGoodWorld) || !!sfMusic.everything;
       let bossMusic = 0;
       for (const e of this.entities.enemies) {
         const en = e as unknown as { x: number; y: number; cx: number; cy: number; def?: { boss?: boolean }; vanillaId?: number | null; ai1?: number; ai3?: number };
@@ -2971,28 +2993,32 @@ export class Game implements GameHooks {
         // type 表命中（表内 id 即原版 switch 命中者；438/379 表内但需仪式态门）
         const typeHit = en.vanillaId != null && en.vanillaId !== 438 && en.vanillaId !== 379
           && BOSS_MUSIC[en.vanillaId] !== undefined;
-        if (!en.def?.boss && !ceremony && !typeHit) continue;
+        const musicBossFlag = !!en.def?.boss && en.vanillaId !== 578;
+        if (!musicBossFlag && !ceremony && !typeHit) continue;
         // 盒半径（Main.cs:12155 默认 5000；仪式态 :12215/:12222 收窄 1600）；
         // 原版以 NPC 中心对屏盒求交（:12297-12302）——用 cx/cy 对玩家中心近似
         const box = ceremony ? 1600 : 5000;
         if (Math.abs(en.cx - this.player.cx) < box && Math.abs(en.cy - this.player.cy) < box) {
-          bossMusic = bossMusicFor(en.vanillaId ?? 0);
+          bossMusic = mechdusaMusicWorld && en.vanillaId != null
+            && (en.vanillaId === 125 || en.vanillaId === 126 || en.vanillaId === 127 || en.vanillaId === 134)
+            ? MUSIC.Boss5
+            : bossMusicFor(en.vanillaId ?? 0);
           break;
         }
       }
-      // 入侵 BGM（Main.cs:12186-12192+12478-12566：屏内 ±5000px 入侵组 NPC 驱动；
-      // 海盗 35 > 哥布林 39，雪人走 Boss3 13）
+      // 入侵 BGM（Main.cs:12196-12280 switch(type)→num3 + :12474-12535 槽位→MusicID；
+      // 哥布林族→39 / 海盗族→35（492 飞船炮不在音乐表）/ 火星族→37（含 384/392，
+      // 394 飞碟尾锥不在）/ 雪人三兄弟 143-145→13(Boss3 槽)。纯 ±5000px 邻近触发
+      // ——原版无 invasionType 门（雕像产怪同切曲），1:1）
       let invasionMusic = 0;
-      if (w.invasionType > 0) {
-        for (const e of this.entities.enemies) {
-          const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
-          if (en.vanillaId == null) continue;
-          const g = INVASION_GROUP[en.vanillaId];
-          if (g !== w.invasionType) continue;
-          if (Math.abs(en.x - this.player.cx) >= 5000 || Math.abs(en.y - this.player.cy) >= 5000) continue;
-          invasionMusic = g === INVASION_PIRATE ? 35 : g === INVASION_SNOW_LEGION ? 13 : 39;
-          break;
-        }
+      for (const e of this.entities.enemies) {
+        const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
+        if (en.vanillaId == null) continue;
+        const m = INVASION_MUSIC[en.vanillaId];
+        if (m === undefined) continue;
+        if (Math.abs(en.x - this.player.cx) >= 5000 || Math.abs(en.y - this.player.cy) >= 5000) continue;
+        invasionMusic = m;
+        break;
       }
       // 旧日军团 BGM（Main.cs 音乐链入侵组 -3 分支：GetNPCInvasionGroup -3 =
       // BelongsToInvasionOldOnesArmy + DD2Event.Ongoing → MusicID.OldOnesArmy 41；
@@ -3031,6 +3057,7 @@ export class Game implements GameHooks {
       const music = pickMusic({
         scene: this.scene, isDay, bossMusic, invasionMusic, moonMusic: moonMusicGated,
         lunarMusic, musicBox: this.scene.musicBoxStyle,
+        torchGod: this.torchGod?.active ?? false,   // InTorchGodMinigame（Main.cs:12477-12480 → 101）
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
@@ -3519,6 +3546,11 @@ export class Game implements GameHooks {
 
     // ---- 实体 ----
     this.entities.update(dt, this);
+    // 弹幕扫掠碎裂砖（Projectile.HandleMovement :16630-16655 等价）：移动扫掠盒内
+    // 裂砖 KillTile（CanCutTile AttackProjectile 上下文对普通格恒 true——:87573，
+    // 墙 350/下方 78·380·579 豁免面窄不构成主门）。DebrisProj 自身豁免（弹片不碎砖，
+    // 原版 :16634 tileCutIgnorance 含自身弹型；其连锁走 Kill 段）
+    this.crushCrackedBricksSweptByProjectiles();
 
     // ---- gore 池推进（Gore.Update 每 tick，Gore.cs:313——Main.Update 全量 gore 遍历
     //      的本仓等价）。此前缺失 = 死亡碎块冻结 + timeLeft 永不衰减（600 槽只进不出，
@@ -3743,6 +3775,17 @@ export class Game implements GameHooks {
             this.boss.vanillaId = 13;
           }
         }
+        // 双子换锚（DoDeathEvents_BeforeLoot NPC.cs:79716-79724：一只眼死时另一只
+        // 还活着 → boss=false——击败公告/掉落门只随最后死的一只）：先死的一只不进
+        // 击败流程，血条/槽位跟到幸存眼上
+        if (!this.boss.bossFled && (bossVid === 125 || bossVid === 126)) {
+          const other = (this.entities.enemies as Enemy[]).find((e) => !e.dead
+            && e.vanillaId === (bossVid === 125 ? 126 : 125));
+          if (other) {
+            this.boss = other;
+            break bossBlock;
+          }
+        }
         // 注意:?? 与 || 混用必须加括号(esbuild 语法限制)
         const bname = ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss';
         if (this.boss.bossFled) {
@@ -3750,9 +3793,19 @@ export class Game implements GameHooks {
           // 非击杀——不播击败公告、不写 downed 标志(原版 EncourageDespawn 语义)
           this.newText(`${bname}逃走了…`, 150, 150, 150);
         } else {
-          // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
-          // NPC.cs:79833 BroadcastChatMessage("Announcement.HasBeenDefeated_Single", ChatColors.BossOrEvent)
-          this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
+          // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)。
+          // 击败公告（DoDeathEvents_CelebrateBossDeath NPC.cs:79822-79836）：
+          // 双子 → Plural + Enemies.TheTwins"双子魔眼已被打败！"；
+          // 月总核心 → Single + Enemies.MoonLord"月亮领主已被打败！"（不取
+          // MoonLordCore 名）；其余 → Single + 本体名
+          const defeatVid = this.boss.vanillaId ?? 0;
+          if (defeatVid === 125 || defeatVid === 126) {
+            this.newText(Lang.text('Announcement.HasBeenDefeated_Plural', Lang.text('Enemies.TheTwins')), 175, 75, 255);
+          } else if (defeatVid === 398) {
+            this.newText(Lang.text('Announcement.HasBeenDefeated_Single', Lang.text('Enemies.MoonLord')), 175, 75, 255);
+          } else {
+            this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
+          }
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
           // SetEventFlagCleared(NPC.cs:79557) 首次语义:downed 旗标翻转(false→true)
           // 才触发灯笼夜——此前每次击杀都预约(2026-08-13 对齐;肉山 19 在下方链内单独投递)
@@ -4210,12 +4263,14 @@ export class Game implements GameHooks {
         const offTx = Math.floor(player.cx / TILE) + (Math.random() < 0.5 ? -1 : 1) * offCols;
         if (this.spawnEyePending) {
           this.spawnEyePending = false; // 清旗无条件（:64553-64555）
-          this.summonBossAtTx('eye_of_cthulhu', offTx);
+          // 自然生成无声（Main.cs:64550 SpawnOnPlayer 直调，无 PlaySound）——只公告
+          this.summonBossAtTx('eye_of_cthulhu', offTx, false);
         } else if (this.spawnHardBossPending > 0) {
           const n = this.spawnHardBossPending;
           this.spawnHardBossPending = 0; // 一次性机会：无论成败清零（:64596）
           if (!this.boss) {
-            this.summonBossAtTx(n === 1 ? 'destroyer' : n === 2 ? 'twins' : 'skeletron_prime', offTx);
+            // 机械自然生成同无声（Main.cs:64580-64594；Roar 只在物品 :43146 等）
+            this.summonBossAtTx(n === 1 ? 'destroyer' : n === 2 ? 'twins' : 'skeletron_prime', offTx, false);
           }
         }
       }
@@ -6168,7 +6223,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const s = this.world.lunarEvent;
           s.moonLordCountdownMax = 720;
           s.moonLordCountdown = 720;
-          this.newText('月亮末日即将来临……', 50, 255, 130);   // Lang.misc[52] BroadcastText
+          this.sfx.playWav('roar');                    // SoundID 15（:43350，先于 StartImpendingDoom）
+          this.newText(Lang.misc(52), 50, 255, 130);   // BroadcastText ChatColors.World
           consume(); p.useTime = 30;
           break;
         }
@@ -6249,6 +6305,96 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）；
         // 装备远程伤害乘区（侦察镜/复仇者徽章等）
         const ps = this.heldPrefixStat();
+        // ---- Celebration 双持械枪（3930 MK2 → 714 / 3475 派对机枪 → 615，AI_075
+        //      :63959/:64072）：channel 持械 muzzle——每 volley（8t/5t）自行开火，
+        //      弹道变体 = ⌊ai0/volley⌋%7 确定循环（出生相位 5×Next(0,20) 错开），
+        //      弹药逐发解析与消耗（PickAmmo 每 volley 等价）。此前按逐点击 Arrow 打
+        //      = 无变体循环/无持械节奏（2026-08-14 补）----
+        const bowVid2 = bowVid >= 0 ? bowVid : (heldDef?.vid ?? -1);
+        if (bowVid2 === 3930 || bowVid2 === 3475) {
+          const mzId: 714 | 615 = bowVid2 === 3930 ? 714 : 615;
+          const mzAlive = this.entities.projectiles.some(
+            (e) => e instanceof Celeb2Muzzle && (e as Celeb2Muzzle).projId === mzId && !e.dead);
+          if (!mzAlive) {
+            const mzOwner = this.player;
+            const mzItemId = ITEM_BY_KEY[heldDef.key];
+            const mzBase = bowC?.damage ?? 50;
+            const mzKb = bowC?.knockBack ?? 2;
+            const muzzle = new Celeb2Muzzle(mzOwner, mzId,
+              () => this.input.mouseHeld && !this.input.uiBlocking
+                && mzOwner.inv.heldItem()?.id === mzItemId && !mzOwner.dead,
+              () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+              (variant, fx, fy, fvx, fvy, fo) => {
+                // 每 volley 再解析弹药（弹药栏 54-57 优先 → 背包 0-53）
+                let mSlot = -1; let mDef: (typeof ITEM_DEFS)[number] | null = null;
+                for (const [from, to] of [[54, 58], [0, 54]] as const) {
+                  for (let i = from; i < to; i++) {
+                    const sl = this.player.inv.slots[i];
+                    if (!sl || sl.stack <= 0) continue;
+                    const d2 = ITEM_DEFS[sl.id];
+                    const am = d2 ? (d2.ammoId ?? (viIdFromKey(d2.key) >= 0 ? itemCombat(viIdFromKey(d2.key))?.ammo ?? 0 : 0)) : 0;
+                    if (d2 && am === useAmmo) { mSlot = i; mDef = d2; break; }
+                  }
+                  if (mSlot >= 0) break;
+                }
+                if (!mDef) return false;                       // 无弹药 → muzzle Kill
+                const mVid = viIdFromKey(mDef.key);
+                const mC = itemCombat(mVid);
+                const rKind2 = useAmmo === 97 ? 'bullet' as const : 'rocket' as const;
+                const dmg2 = Math.round(mzBase * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind2))
+                  + (mC?.damage ?? 0);
+                const kb2 = mzKb * (ps?.kb ?? 1) + (mC?.knockBack ?? 0);
+                if (mzId === 714) {
+                  // MK2：烟花弹 715-718（Specific 表解析），变体驱动弹道
+                  const pid2 = resolveAmmoProjId(3930, mVid, useAmmo, bowC?.shoot, mC?.shoot);
+                  const er2 = Game.EXPLODE_RADIUS[pid2] ?? 0;
+                  const shots: Array<{ x: number; y: number; vx: number; vy: number }> =
+                    [{ x: fx, y: fy, vx: fvx, vy: fvy }];
+                  if (variant === 5) {                          // 三连 ±2π/80（:64163-64174）
+                    for (const sgn of [-1, 1]) {
+                      const r5 = fo.spreadRot(Math.PI * 2 * sgn / 80);
+                      shots.push({ x: fx, y: fy, vx: r5.x, vy: r5.y });
+                    }
+                  }
+                  for (const s of shots) {
+                    const rk = new Celeb2Rocket(pid2, variant, s.x, s.y, s.vx, s.vy,
+                      dmg2, kb2, fo.bonusAi1,
+                      (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE),
+                        edmg, er2, er2 > 0, 11, this.player.equipStats.armorPen + (ps?.arpen ?? 0), pid2));
+                    rk.critChance = this.player.critChance('ranged') + (bowC?.crit ?? 0) + (mC?.crit ?? 0);
+                    rk.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+                    this.entities.add(rk, 'projectiles');
+                  }
+                } else {
+                  // 派对机枪：弹药自定型（默认 14）+ 每 7 轮附赠 616 彩带（+20 伤/×1.25 kb/速 8）
+                  const pid2 = mC?.shoot && mC.shoot > 0 ? mC.shoot : 14;
+                  const b1 = new Arrow(fx, fy, fvx, fvy, dmg2, kb2, pid2, null, {});
+                  b1.critBonus = this.player.critChance('ranged') + (mC?.crit ?? 0);
+                  b1.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+                  b1.frostEligible = true;
+                  this.entities.add(b1, 'projectiles');
+                  if (variant === 0) {                          // ⌊ai0/5⌋%7==0（:63989-63993）
+                    const sp3 = 0.3926991 * Math.random() - 0.19634955;
+                    const c3 = Math.cos(sp3), s3 = Math.sin(sp3);
+                    const b2 = new Arrow(fx, fy, fvx * c3 - fvy * s3, fvx * s3 + fvy * c3,
+                      dmg2 + 20, kb2 * 1.25, 616, null, {});
+                    b2.critBonus = b1.critBonus;
+                    b2.armorPen = b1.armorPen;
+                    this.entities.add(b2, 'projectiles');
+                  }
+                }
+                this.player.inv.removeAt(mSlot, 1);
+                this.cb.onInventoryChanged();
+                return true;
+              });
+            this.entities.add(muzzle, 'projectiles');
+          }
+          this.player.useTime = bowC?.useTime ?? rg?.speed ?? 6;
+          this.useSwing(heldDef, Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
+            inp.mouseX - this.renderer.canvas.width / 2));
+          this.input.mouseDown = false;
+          return;
+        }
         // 弹药分道（Player.cs:3820 bowEffectiveDamage 拆分）：箭吃箭袋/射手/蘑菇矿箭头，
       // 弹/火箭吃对应蘑菇矿头；Archery 不再误伤枪械
       const rKind = bowC?.useAmmo === 97 ? 'bullet' : bowC?.useAmmo === 771 ? 'rocket' : bowC?.useAmmo === 283 ? 'other' : 'arrow';
@@ -6256,7 +6402,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
         if (isArrowKind && this.player.equipStats.quiver) knockback *= 1.1; // 箭袋击退 ×1.1（:52713）
         // ---- PickAmmo 弹型解析 1:1（Player.cs:52635-52668，resolveAmmoProjId）----
-        const bowVid2 = bowVid >= 0 ? bowVid : (heldDef?.vid ?? -1);
         let projId = resolveAmmoProjId(bowVid2, viIdFromKey(ammoDef.key), useAmmo, bowC?.shoot, ammoC?.shoot);
         if (bowVid2 === 3019 && projId === 1) projId = 485;   // 炼狱天弓：木箭→狱翼箭（:52660-52663）
         if (bowVid2 === 3052) projId = 495;                    // 暗影焰弓恒 495（:52664-52667）
@@ -6475,6 +6620,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
+    } else if (heldDef && viIdFromKey(heldDef.key) === 5120
+      && inp.mouseDown && this.player.useTime === 0) {
+      // 鹿角怪召唤物 Deer Thing（Player.cs:43225-43237：门仅 ZoneSnow——无昼夜门；
+      //  成功 → ApplyItemTime(45) + Roar(:43229) + SpawnOnPlayer(668) → 公告走表）。
+      //  非雪原【静默】不可用（原版 ZoneSnow 合取外整支不生效，不消耗无提示）
+      if (this.scene?.zoneSnow) {
+        this.summonBoss('deerclops');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 45;
+        this.cb.onInventoryChanged();
+      }
+      this.input.mouseDown = false;
     } else if (heldDef && BOSS_BAG_IDS.has(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
       // 宝藏袋开包（Player.OpenBossBag :6828-7520 全 19 袋,数据驱动引擎
@@ -6515,6 +6672,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 成功 → Main.eclipse=true + Lang.misc[20] 公告；非白天/已日食/肉前静默不可用——
       // 门判定与公告在 world/Eclipse.ts useSolarTablet）
       if (useSolarTablet(this.world, this.eclipseHost())) {
+        this.sfx.playWav('roar');   // SoundID 15（Player.cs:43310，成功即 Roar）
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 60;
         this.cb.onInventoryChanged();
@@ -6608,6 +6766,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else if (this.world.moonEvent.kind === 0 && this.world.invasionType === 0) {
         const ann = startMoonEvent(this.world, kind);
+        this.sfx.playWav('roar');   // SoundID 15（:43297 南瓜 / :43364 霜月，成功即 Roar）
         if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 45;
@@ -6738,7 +6897,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (/^vi_4271_/.test(heldDef.key)) {
         const wk = this.world;
         if (!wk.clock.isDay && !wk.clock.bloodMoon) {
-          this.sfx.play('throw'); // SoundID 15 ≈ Item_1（throw 通道）
+          this.sfx.playWav('roar');   // SoundID 15 Roar（:43331——旧 throw=Item_1 误映射已正）
           wk.clock.bloodMoon = true;
           if (wk.clock.moonPhase === 4) wk.clock.moonPhase = 5;
           this.newText(Lang.misc(8), 50, 255, 130);
@@ -8048,6 +8207,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.smashPot(x, y);
       return;
     }
+    // 地牢裂砖族（481-483）：连锁崩塌 + Debris 弹片 + 掉同色地牢砖 + 专属音
+    // （KillTile :63837-63895 段，见 breakCrackedBrick）。须在 object 锚点/
+    // 通用 1×1 路径前拦（drop:null 会吞掉同色砖掉落）
+    if (isCrackedSheet(def.vanilla?.sheet)) {
+      this.breakCrackedBrick(x, y, true);   // 主动破坏（挖/炸/撞/扫掠/钩爪）默认 noItem=false
+      return;
+    }
     if (IMPORTED_TREE_TYPES.has(type)) {
       this.fellImportedTree(x, y, type);
       return;
@@ -8375,9 +8541,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     this.spawnParticles(x * TILE + 8, y * TILE + 8, '#E0C265', 10, 2);
-    // 距离判定 + 蜂后召唤（原版 SpawnOnPlayer(222)；boss 流程复用 summonBoss）
+    // 距离判定 + 蜂后召唤（原版 SpawnOnPlayer(222)；boss 流程复用 summonBoss）。
+    // 幼虫破碎无声（WorldGen.cs:53248-53274 只 gore 300-302+尘；Item173 只随
+    // 蜜蜂分泌物物品 :43184）——公告 HasAwoken 走表，roar=false
     if (larvaSummonInRange(this.player.x, this.player.y, x, y)) {
-      this.summonBoss('queen_bee');
+      this.summonBoss('queen_bee', { roar: false });
     }
   }
 
@@ -8515,7 +8683,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const anyAlive = (id: number) => (this.entities.enemies as Enemy[]).some(
         (e) => !e.dead && e.vanillaId === id);
       if (isDemonHeart ? !anyAlive(266) : !anyAlive(13)) {
-        this.summonBoss(isDemonHeart ? 'brain_of_cthulhu' : 'eater_of_worlds_head');
+        // 第 3 颗暗影珠/猩红之心破坏召唤：生成瞬间无声（WorldGen CheckOrb 链
+        // 无 PlaySound；Roar 只在蠕虫食物/血腥脊椎物品 :43112/:43199）
+        this.summonBoss(isDemonHeart ? 'brain_of_cthulhu' : 'eater_of_worlds_head', { roar: false });
         this.world.shadowOrbCount = 0;
       }
     } else {
@@ -9868,7 +10038,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     head.id = this.entities.nextId++;
     this.entities.add(head, 'enemies');
     if (!this.boss) this.boss = head;   // 等价边界：单 Boss 槽（见报告）
-    this.newText(Lang.text('Announcement.HasAwoken', Lang.npcName(245) ?? 'Golem'), 175, 75, 255);
+    // 公告 SpawnOnPlayer case 245（NPC.cs:81328）——咆哮已在祭坛使用点播（:32322）
+    this.announceBossSummon(245);
   }
 
   /** 永恒水晶座右键（Player.cs:31930-31977 1:1）：
@@ -11250,6 +11421,68 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   // ================= 战斗 =================
+
+  /** 地牢裂砖族破坏链（KillTile :63837-63895 段 1:1）：
+   *  ① 掉落：同色普通地牢砖（:67003：481→275 / 482→276 / 483→277）——仅主动破坏
+   *    （挖/炸/撞碎/弹幕扫掠/钩爪，原版 KillTile 默认 noItem=false）；连锁格 noItem 不掉。
+   *  ② 连锁崩塌（:63838-63866）：8 邻域掷签——正上 1/3、其余 1/6，命中 KillTile(noItem)
+   *    递归链式（crackedChainKill）。
+   *  ③ 每块喷 Debris 弹片（:63887-63895：proj 736-738，伤 20，v=(0,0.41)）。
+   *  ④ 专属音 Item_127（:66551 sound switch）。原序=连锁先、弹片后。 */
+  private breakCrackedBrick(x: number, y: number, dropLoot: boolean): void {
+    const st = this.world.store;
+    const t = st.get(x, y);
+    const sheet = TILE_DEFS[t]?.vanilla?.sheet;
+    if (!isCrackedSheet(sheet)) return;
+    const mapColor = TILE_DEFS[t]?.mapColor ?? '#888';
+    st.setTile(x, y, 0);
+    if (dropLoot) {
+      const key = VANILLA_ITEM_KEY_BY_ID[sheet! - 481 + 275];   // 同色地牢砖物品
+      if (key) this.spawnDrop(x * TILE + 8, y * TILE + 8, key, 1);
+    }
+    const fx = (fx: number, fy: number, sh: number) => {
+      this.playSfxFiles(['Item_127'], 1, fx * TILE + 8, fy * TILE + 8);
+      this.entities.add(new DebrisProj(sh, fx * TILE + 8, fy * TILE + 8), 'projectiles');
+      this.spawnParticles(fx * TILE + 8, fy * TILE + 8, mapColor, 3, 1.4);
+    };
+    const killed = crackedChainKill(st, x, y);   // 连锁（noItem——掉落门在此）
+    fx(x, y, sheet!);                             // 首格弹片（:63887 在连锁段后）
+    for (const [kx, ky, ksh] of killed) fx(kx, ky, ksh);
+  }
+
+  /** 弹幕移动扫掠盒内裂砖切碎（Projectile.HandleMovement :16630-16655 等价：
+   *  移动前后包围盒内 CrackedBricks 逐格 KillTile——CanCutTile AttackProjectile
+   *  上下文（:87573）：墙 350 / 正下 78·380·579 豁免，其余可切）。DebrisProj 豁免
+   *  （自身弹片不碎砖，其连锁走 Kill 段 :75347）。快照长度迭代——链上追加的
+   *  弹片不参与本轮扫掠。 */
+  private crushCrackedBricksSweptByProjectiles(): void {
+    const st = this.world.store;
+    const projs = this.entities.projectiles;
+    const n = projs.length;
+    for (let pi = 0; pi < n; pi++) {
+      const p = projs[pi] as { x: number; y: number; w: number; h: number; vx: number; vy: number; dead: boolean };
+      if (p.dead || p instanceof DebrisProj) continue;
+      if (p.vx === 0 && p.vy === 0) continue;
+      const x0 = Math.floor(Math.min(p.x, p.x + p.vx) / TILE);
+      const x1 = Math.floor((Math.max(p.x, p.x + p.vx) + p.w) / TILE);
+      const y0 = Math.floor(Math.min(p.y, p.y + p.vy) / TILE);
+      const y1 = Math.floor((Math.max(p.y, p.y + p.vy) + p.h) / TILE);
+      for (let x = x0; x <= x1; x++) {
+        for (let y = y0; y <= y1; y++) {
+          if (!isCrackedAt(st, x, y)) continue;
+          if (st.wall[st.idx(x, y)] === 350) continue;          // CanCutTile 墙 350 门
+          if (st.inBounds(x, y + 1)) {
+            const below = st.get(x, y + 1);
+            if (below !== 0) {
+              const bs = TILE_DEFS[below]?.vanilla?.sheet;
+              if (bs === 78 || bs === 380 || bs === 579) continue;  // 下方种植族不切
+            }
+          }
+          this.breakTile(x, y);   // KillTile（默认 noItem=false——掉同色地牢砖）
+        }
+      }
+    }
+  }
 
   /** 瓦罐碎裂（WorldGen.CheckPot L56807 + SpawnThingsFromPot L57100，肉前普通世界主干）：
    *  任意一格被打破 → 整罐碎裂 + 掉落表（稀有药水 / 蘑菇 / 火把 / 箭 / 凝胶 / 绳 / 钱币），只掉一次。
@@ -12758,11 +12991,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     if (id === 'curse' && npc.npcKey === 'old_man') {
       if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
-      // 原版:释放诅咒时老人消失,击败骷髅王后转为裁缝
+      // 原版:释放诅咒时老人消失,击败骷髅王后转为裁缝。诅咒召唤无声——
+      // NPCInteractions.OldManCurse :191 直调 SpawnSkeletron（无 PlaySound；
+      // 骷髅王咆哮只在黎明逃跑/转头阶段，NPC.cs:21946/:22157）
       npc.dead = true;
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.OldManScream'));
       this.closeNpcDialog();
-      this.summonBossAtTx('skeletron_head', Math.floor(npc.cx / TILE));
+      this.summonBossAtTx('skeletron_head', Math.floor(npc.cx / TILE), false);
       return;
     }
     if (id === 'quest' && npc.vanillaId === 369) { this.anglerQuestTurnIn(); return; }
@@ -13424,12 +13659,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     this.shopHappinessMul = mul;
     this.npcShopOpen = true;    // Main.npcShop = npc 槽位（开店门，ItemSlot.cs:187）
-    const entries = this.shopStockFor(npc).map(([vid, price]) => ({
+    // 显示价 = GetItemExpectedPrice 的 calcForBuying（商店条目悬停 tooltip 同链：
+    // Main.cs:20307-20309 context 15 → HoverItem.buy → num=calcForBuying）——
+    // Player.cs:34916-34935 逐行：折扣 (int)(×0.8f) 截断（:34921）→ ×PriceAdjustment
+    // Math.Round 银行家舍入（:34935）；显示侧再 min-1（Main.cs:20341-20343 num6<1→1）
+    const entries: Array<{ key: string; vanillaId: number; name: string; price: number; buyback?: number }> =
+      this.shopStockFor(npc).map(([vid, price]) => ({
       key: VANILLA_ITEM_KEY_BY_ID[vid] ?? '',
       vanillaId: vid,
       name: Lang.itemName(vid) ?? VANILLA_ITEM_KEY_BY_ID[vid] ?? String(vid),
-      price: Math.max(1, Math.round(price * mul)),
+      price: Math.max(1, expectedPrices(price, {
+        priceAdjustment: mul,
+        discountAvailable: this.player.equipStats.discount,
+      }).buying),
     }));
+    // 卖回货架条目（Chest.AddItemToShop Chest.cs:658-663 克隆 buyOnce）追加在常规
+    // 货之后（原版落 item[0-39] 首空位）。买回价 = buyOnce 分支（Player.cs:34930
+    // round(value/pa) → :34940 ÷5 → :34941-34944 min1；折扣不参与——:34920 的
+    // discount 门要求 !buyOnce）。value 含词缀缩放（Item.cs:596-597）
+    for (let i = 0; i < this.shopBuybackStock.length; i++) {
+      const bb = this.shopBuybackStock[i];
+      const nm = (bb.prefix ? Game.prefixNameOf(bb.prefix) : '')
+        + (Lang.itemName(bb.vid) ?? String(bb.vid));
+      entries.push({
+        key: VANILLA_ITEM_KEY_BY_ID[bb.vid] ?? '',
+        vanillaId: bb.vid,
+        name: bb.stack > 1 ? `${nm} ×${bb.stack}` : nm,
+        price: Math.max(1, expectedPrices(itemValueWithPrefix(bb.vid, bb.prefix),
+          { buyOnce: true, priceAdjustment: mul }).buying),
+        buyback: i,
+      });
+    }
     // 第 4 参 = 快乐度价格百分比（Main.cs:41231-41243 商店标题旁表情/价格显示）
     this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned(), mul);
   }
@@ -13489,6 +13749,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （Player.cs:34739-34743）→ 换店/关店清（Main.cs:18056-18064 UpdateOldNPCShop） */
   private shopSellbackMemo = new Map<string, number>();
 
+  /** 卖回 buyOnce 货架（Chest.AddItemToShop Chest.cs:651-670 的会话投影）：卖出/
+   *  白送物品克隆进商店 item[0-39] 首空位（buyOnce=true、stack-=回购记覆盖量；记全
+   *  覆盖则不上架 :653-656）。开店会话态——买/卖刷新不重跑（原版仅 Main.OpenShop
+   *  Main.cs:39895-39903 点击商店按钮才 SetupShop 重建货架），关店清（npcShopClose）。
+   *  上限 39 条（:654 首空位扫 0-38，末格不收） */
+  private shopBuybackStock: Array<{ vid: number; prefix: number; stack: number }> = [];
+
   /** 对话 NPC 的快乐度快照（Player.currentShoppingSettings，SetTalkNPC 时计算；
    *  价格乘子 + 心情报告行，商店/购买/心情浮层共用） */
   private dialogHappiness: { priceMul: number; report: HappinessReportLine[] } | null = null;
@@ -13520,34 +13787,79 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     });
   }
 
-  /** 商店购买:扣币 + 入包 + 刷新商店面板(可购态/余额) */
-  npcShopBuy(vanillaId: number): void {
-    const list = this.dialogNpc ? this.shopStockFor(this.dialogNpc) : [];
-    const entry = list.find(([id]) => id === vanillaId);
-    if (!entry) return;
-    // 折扣卡（discountAvailable：PriceAdjustment 0.8，Main.cs:41028 同源）× 快乐度乘子
-    const price = Math.max(1, Math.round(entry[1] * (this.player.equipStats.discount ? 0.8 : 1) * this.shopHappinessMul));
+  /** 商店购买（ItemSlot.HandleShopSlot ItemSlot.cs:1870-1931）：左键买入 =
+   *  :1894 GetItemExpectedPrice（买价 calcForBuying）→ :1895 BuyItem（扣币）→
+   *  :1910-1923 入光标/背包 + 记回购 → :1925-1928 buyOnce 减库存归零下架。
+   *  buybackIndex = 卖回货架条目下标（缺省 = 常规货）；held = 光标持有物
+   *  （PickItemMovementAction case 15 ItemSlot.cs:1426-1439：空手→3 买入；同型
+   *  CanStack（Item.cs:49446-4954 type+prefix 全等）且未满叠（:1890-1893）→ 3 买入
+   *  叠到光标；异型 → result -1 整链无动作）。返回是否成交 */
+  npcShopBuy(vanillaId: number, buybackIndex?: number,
+    held?: { id: number; stack: number; prefix?: number }): boolean {
+    const bb = buybackIndex === undefined ? undefined : this.shopBuybackStock[buybackIndex];
+    if (buybackIndex !== undefined && (!bb || bb.vid !== vanillaId)) return false;
+    const prefix = bb ? bb.prefix : 0;
+    // 光标持有门（:1878 !CanStack 早退 + :1890-1893 满叠停买）
+    if (held) {
+      const hd = ITEM_DEFS[held.id];
+      if (!hd || vanillaIdOfItem(held.id) !== vanillaId) return false;
+      if ((held.prefix ?? 0) !== prefix) return false;
+      if (held.stack >= (hd.maxStack ?? 1)) return false;
+    }
+    let price: number;
+    if (bb) {
+      // buyOnce 买回价（Player.cs:34930 round(value/pa) → :34940 ÷5 → :34941-34944
+      // min1；折扣卡不参与——:34919-34921 的 discount 门要求 !buyOnce）；
+      // value 含词缀缩放（卖出克隆带的 scaled value，Item.cs:596-597）
+      price = expectedPrices(itemValueWithPrefix(bb.vid, bb.prefix),
+        { buyOnce: true, priceAdjustment: this.shopHappinessMul }).buying;
+    } else {
+      const list = this.dialogNpc ? this.shopStockFor(this.dialogNpc) : [];
+      const entry = list.find(([id]) => id === vanillaId);
+      if (!entry) return false;
+      // 常规买价 1:1（Player.GetItemExpectedPrice Player.cs:34916-34935）：
+      //   :34921 折扣 (int)(calcForBuying × 0.8f) ——(int) 向零截断，先截后乘
+      //   :34935 calcForBuying = (int)Math.Round(× PriceAdjustment) ——银行家舍入
+      //   ★无 min-1 钳制：calcForBuying 原值直接进 BuyItem（:34948 CoinsCount <
+      //     price 才拒付）；仅显示侧有 min1（Main.cs:20341-20343）
+      price = expectedPrices(entry[1], {
+        priceAdjustment: this.shopHappinessMul,
+        discountAvailable: this.player.equipStats.discount,
+      }).buying;
+    }
     if (this.coinsOwned() < price || !this.spendCopper(price)) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
       this.openNpcShop();
-      return;
+      return false;
     }
     const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
-    if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 1);
-    // 店内回购记（ItemSlot.cs:1919-1922：!buyOnce && shopSpecialCurrency==-1 → Add；
-    // 本仓商店条目两者恒假/无自定义币种 → 无条件记。prefix 恒 0：购买链不带词缀）
-    const memoKey = `${vanillaId}:0`;
-    this.shopSellbackMemo.set(memoKey, (this.shopSellbackMemo.get(memoKey) ?? 0) + 1);
-    this.sfx.play('coin');
+    if (held) held.stack++;   // :1910-1923 买叠到光标（CanStack 门已保证 prefix 全等）
+    else if (key && ITEM_BY_KEY[key] !== undefined) {
+      this.player.inv.add(ITEM_BY_KEY[key], 1, prefix || undefined);  // :1912-1916 货架词缀随行
+    }
+    if (bb) {
+      // buyOnce 不进回购记（:1919-1922 !buyOnce 门）；减库存归零下架（:1925-1928）
+      if (--bb.stack <= 0) this.shopBuybackStock.splice(buybackIndex!, 1);
+    } else {
+      // 店内回购记（ItemSlot.cs:1919-1922：!buyOnce && shopSpecialCurrency==-1 → Add；
+      // 本仓常规商店条目两者恒假/无自定义币种 → 无条件记。prefix 恒 0：货架购买不带词缀）
+      const memoKey = `${vanillaId}:0`;
+      this.shopSellbackMemo.set(memoKey, (this.shopSellbackMemo.get(memoKey) ?? 0) + 1);
+    }
+    this.sfx.play('coin');    // :1899-1908 value>0 → 18 Coins（本仓表无 value-0 货）
     this.cb.onInventoryChanged();
     this.openNpcShop();
+    return true;
   }
 
   /** 关闭商店面板（UI 回调；原版 Main.npcShop=-1）。换店/关店清回购记
-   *  （Main.UpdateOldNPCShop Main.cs:18056-18064：npcShop != oldNPCShop → Clear） */
+   *  （Main.UpdateOldNPCShop Main.cs:18056-18064：npcShop != oldNPCShop → Clear）
+   *  与 buyOnce 货架（原版重开走 Main.OpenShop → SetupShop 重建货架
+   *  Main.cs:39895-39903，卖回条目不跨会话存活） */
   npcShopClose(): void {
     this.npcShopOpen = false;
     this.shopSellbackMemo.clear();
+    this.shopBuybackStock = [];
   }
 
   /** 商店出售（Player.SellItem Player.cs:34716-34878 + ItemSlot.OverrideLeftClick
@@ -13565,13 +13877,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!canSellFromShopUi(vid)) return true;      // 钱币 71-74 → null 不动作（:191-194）
     const memoKey = `${vid}:${it.prefix ?? 0}`;
     const quote = computeSellValue(vid, it.stack, {
+      prefix: it.prefix ?? 0,                       // 词缀 value 缩放（Item.cs:596-597）
       priceAdjustment: this.shopHappinessMul,       // currentShoppingSettings.PriceAdjustment
       discountAvailable: this.player.equipStats.discount, // :34917 discountAvailable
       sellbackAmount: this.shopSellbackMemo.get(memoKey) ?? 0, // :34739 GetAmount
     });
     if (!quote.sellable) {
       // SellItem false 且 value==0 → 白送入店（ItemSlot.cs:790-795 AddItemToShop + 音效 7）
-      this.consumeSellbackMemo(memoKey, it.stack);  // Chest.AddItemToShop :653 Remove
+      this.addItemToShopShelf(memoKey, vid, it.prefix ?? 0, it.stack);
       inv.slots[slot] = null;                       // item.TurnToAir()（:794）
       this.sfx.play('pickup');                      // SoundID 7 = Grab（:795）
       this.cb.onInventoryChanged();
@@ -13583,17 +13896,81 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.gainCopper(quote.copper);                  // :34745-34868 铂/金/银/铜换装
     if (this.coinsOwned() - before !== quote.copper) {
       // 装不下所有币 → 整体回滚（Player.cs:34727-34731 全仓克隆 + :34869-34876 还原；
-      // 本仓等价实现 = 撤回已入币 + 复原物品格），物品不动、回购记不动
+      // 本仓等价实现 = 撤回已入币 + 复原物品格），物品不动、回购记不动、货架不动
+      // （SellItem false 在先 → chest.AddItemToShop 根本不执行，ItemSlot.cs:783 门）
       const gained = this.coinsOwned() - before;
       if (gained > 0) this.spendCopper(gained);
       inv.slots[slot] = it;
       return true;
     }
-    this.consumeSellbackMemo(memoKey, it.stack);    // chest.AddItemToShop → Remove（Chest.cs:653）
+    this.addItemToShopShelf(memoKey, vid, it.prefix ?? 0, it.stack);  // chest.AddItemToShop（:785）
     this.sfx.play('coin');                          // SoundID 18 = Coins（:788）
     this.cb.onInventoryChanged();
     if (this.dialogNpc) this.openNpcShop();         // 刷新面板余额（同 npcShopBuy）
     return true;
+  }
+
+  /** 光标持有物整叠卖出（ItemSlot.LeftClick case 4，ItemSlot.cs:1110-1129）：
+   *  触发门 = PickItemMovementAction case 15（:1435-1438）——mouseItem 非空、点中
+   *  的商店格为空、type 非钱币 71-74 → result 4。结算：
+   *  :1113 SellItem(mouseItem) 成功 → :1115 AddItemToShop + :1116 mouseItem 清空 +
+   *  :1117 音效 18；value==0 → :1120-1126 白送入店 + 音效 7。
+   *  返回 true = 已售出/白送（调用方清光标）；false = 无动作/币装不下（光标原样） */
+  npcShopSellHeld(held: { id: number; stack: number; prefix?: number }): boolean {
+    if (!this.npcShopOpen) return false;
+    const vid = vanillaIdOfItem(held.id);
+    if (vid < 0) return false;
+    if (!canSellFromShopUi(vid)) return false;      // 钱币 71-74 → result -1（:1435）
+    const prefix = held.prefix ?? 0;
+    const memoKey = `${vid}:${prefix}`;
+    const quote = computeSellValue(vid, held.stack, {
+      prefix,
+      priceAdjustment: this.shopHappinessMul,
+      discountAvailable: this.player.equipStats.discount,
+      sellbackAmount: this.shopSellbackMemo.get(memoKey) ?? 0, // :34739 GetAmount
+    });
+    if (!quote.sellable) {
+      this.addItemToShopShelf(memoKey, vid, prefix, held.stack);  // :1122 白送入店
+      this.sfx.play('pickup');                                    // :1124 音效 7
+      this.cb.onInventoryChanged();
+      if (this.dialogNpc) this.openNpcShop();
+      return true;                                                // :1123 mouseItem 清空
+    }
+    const before = this.coinsOwned();
+    this.gainCopper(quote.copper);                  // :34745-34868 铂/金/银/铜换装
+    if (this.coinsOwned() - before !== quote.copper) {
+      // 装不下 → SellItem false → mouseItem 原样保留（:1113 门，货也不回架）
+      const gained = this.coinsOwned() - before;
+      if (gained > 0) this.spendCopper(gained);
+      return false;
+    }
+    this.addItemToShopShelf(memoKey, vid, prefix, held.stack);     // :1115 AddItemToShop
+    this.sfx.play('coin');                                          // :1117 音效 18
+    this.cb.onInventoryChanged();
+    if (this.dialogNpc) this.openNpcShop();
+    return true;                                                    // :1116 SetDefaults(0)
+  }
+
+  /** Chest.AddItemToShop（Chest.cs:651-670）1:1 会话投影：先扣回购记（:652 Remove，
+   *  ItemShopSellbackHelper.cs:52-63 实扣 = min(记账, stack)）→ 记账全覆盖不上架
+   *  （:653-656）→ 残量克隆进 buyOnce 货架（:658-663 buyOnce=true、favorited=false、
+   *  stack-=num；:654 首空位扫 0-38 → 上限 39 条） */
+  private addItemToShopShelf(memoKey: string, vid: number, prefix: number, stack: number): void {
+    const memoBefore = this.shopSellbackMemo.get(memoKey) ?? 0;
+    this.consumeSellbackMemo(memoKey, stack);
+    const shelf = buybackShelfStack(stack, memoBefore);
+    if (shelf > 0 && this.shopBuybackStock.length < 39) {
+      this.shopBuybackStock.push({ vid, prefix, stack: shelf });
+    }
+  }
+
+  /** 词缀显示名（Lang.GetPrefixedItemName 渲染侧："Prefix.{ConstName} + 物品名"，
+   *  与 UI.prefixDisplayName 同式）——卖回货架条目名带词缀 */
+  private static prefixNameOf(prefix: number): string {
+    const key = PREFIX_NAMES[String(prefix)];
+    if (!key) return '';
+    const t = Lang.text(`Prefix.${key}`);
+    return t && t !== `Prefix.${key}` ? `${t} ` : `${key} `;
   }
 
   /** ItemShopSellbackHelper.Remove（ItemShopSellbackHelper.cs:45-63）：扣减记账，
@@ -14329,11 +14706,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.entities.add(nerdy, 'npcs');
       this.cb.onToast?.(Lang.npcName(670) ?? '书呆子史莱姆加入了小镇！');
     }
-    // 史莱姆雨击杀推进（NPC.cs:79880-79897：阈值 150、杀过王减半 75；场上无王 → 召王）
+    // 史莱姆雨击杀推进（NPC.cs:79880-79897：阈值 150、杀过王减半 75；场上无王 → 召王）。
+    // 自然召王无公告无咆哮（SpawnOnPlayer(50) → SpawnBoss case 50 静默 :81504；
+    // Roar 只随史莱姆王冠物品 :43080）
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
       const downedSK = !!(this.world.flags as Record<string, boolean>).downedSlimeKing;
       if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId, downedSK) && !this.boss) {
-        this.summonBoss('king_slime');
+        this.summonBoss('king_slime', { roar: false });
       }
     }
     // 月事件计分（NPC.cs CheckProgressFrostMoon/PumpkinMoon :79245/:79487）：
@@ -14696,14 +15075,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (res.waveAnnounce) {
       this.newText(invasionWaveText(res.waveAnnounce), 175, 55, 255);
       if (res.summonBetsy) {
-        // SummonBetsy（:929-943）→ SpawnOnPlayer(551)：SpawnBoss default 分支广播
-        // Announcement.HasAwoken（NPC.cs:81466-81472）
+        // SummonBetsy（DD2Event.cs:929-943）→ SpawnOnPlayer(551) → SpawnBoss
+        // case 551 静默（NPC.cs:81504-81506 case-break 组）——无 "已苏醒" 公告
+        // 无咆哮（Betsy 551 无 boss 位 :16448，BGM 走 DD2 军团曲 41）
         const crystal = (this.entities.enemies as Enemy[]).find((e) => !e.dead && e.vanillaId === 548);
         const cx = crystal ? crystal.cx : this.player.cx;
         const cy = crystal ? crystal.cy : this.player.cy;
-        if (dd2SummonBetsy(oa, this.dd2Host(), cx, cy)) {
-          this.newText(Lang.text('Announcement.HasAwoken', Lang.npcName(551) ?? 'Betsy'), 175, 75, 255);
-        }
+        dd2SummonBetsy(oa, this.dd2Host(), cx, cy);
       }
     }
     if (res.lose) {
@@ -15468,6 +15846,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private invNotifyPending = false;
   /** 图标图集晚到标记（onVImageLoaded 置位，flushInvNotify 节流刷 UI） */
   private iconUiDirty = false;
+  /** iconUiDirty 限频时戳(500ms 窗口合一,2026-08-14 trace④) */
+  private _iconUiDirtyAt = 0;
   /** iconUiDirty 上次刷 UI 的 tick（冷却节流用） */
   private iconUiAt = -100;
   /** 新物品入手飘名（主角旁浅白文本） */
@@ -16210,7 +16590,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       && e.vanillaId != null && family.includes(e.vanillaId));
   }
 
-  summonBoss(key: string): boolean {
+  /** 召唤入口（物品使用默认带 Roar——ItemCheck_UseBossSpawners 语义；
+   *  自然/剧情路径传 { roar: false }：原版生成瞬间无声，见 announceBossSummon 注） */
+  summonBoss(key: string, opts: { roar?: boolean } = {}): boolean {
     const family = Game.BOSS_FAMILY[key];
     if (family) {
       if (this.bossFamilyActive(family)) {
@@ -16223,12 +16605,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const side = Math.random() < 0.5 ? -1 : 1;
     const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
-    return this.summonBossAtTx(key, tx);
+    return this.summonBossAtTx(key, tx, opts.roar ?? true);
   }
 
   /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王)。
+   *  roar = 是否播召唤咆哮（物品召唤 true；自然/灯泡/诅咒等生成路径 false）。
    *  返回是否真的召唤成功（false = 门拦下/访客/落位失败）——召唤物消耗方据此决定扣不扣 */
-  private summonBossAtTx(key: string, tx: number): boolean {
+  private summonBossAtTx(key: string, tx: number, roar = true): boolean {
     const family = Game.BOSS_FAMILY[key];
     if (family ? this.bossFamilyActive(family) : !!this.boss) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
@@ -16250,7 +16633,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       : key === 'skeletron_head' ? 35 : key === 'queen_bee' ? 222 : key === 'skeletron_prime' ? 127
       : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113
       : key === 'lunatic_cultist' ? 439 : key === 'empress_of_light' ? 636 : key === 'queen_slime' ? 657
-      : key === 'plantera' ? 262 : key === 'duke_fishron' ? 370 : key === 'moon_lord' ? 398 : key === 'golem' ? 245 : -1;
+      : key === 'plantera' ? 262 : key === 'duke_fishron' ? 370 : key === 'moon_lord' ? 398 : key === 'golem' ? 245
+      : key === 'deerclops' ? 668 : -1;
     // 血肉墙：走 SpawnWOF 1:1（NPC.cs:81112-81191，向导巫毒娃娃入熔岩的召唤链）。
     // 落位扫描/推进方向/公告全部以"娃娃位置"为种子——调试键以选中列 + 地狱层 Y
     // 充当娃娃；SpawnWOF 自带 HasAwoken 公告且不播 Roar（原版即无声，尖啸由
@@ -16299,8 +16683,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             (this.entities.enemies as Enemy[]).filter((e) => !e.dead && e.vanillaId != null)
               .map((e) => e.vanillaId!));
         }
-        // 召唤公告+音效（每 Boss 独立，见 bossSummonAnnounce/注释）
-        this.announceBossSummon(vanillaId);
+        // 召唤公告+（物品路径）咆哮（见 announceBossSummon 注释：roar 只在物品使用时播）
+        this.announceBossSummon(vanillaId, roar);
         return true;
       }
     }
@@ -16310,28 +16694,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return true;
   }
 
-  /** Boss 召唤公告 + 音效（1.4.5.6 语义）：
-   *  文本：SpawnOnPlayer 末尾 switch（NPC.cs:81495-81511）——default 走
-   *  Announcement.HasAwoken（"{名}已苏醒！"）；双子 125 专项 Lang.misc[48]；
-   *  126/398（部件/第二只）不播；月总 398 用 Enemies.MoonLord（"月亮领主"）。
-   *  颜色 ChatColors.BossOrEvent = (175,75,255)（onChat 未接线时回退 toast）。
-   *  音效：ItemCheck_UseBossSpawners（Player.cs:43083+）统一 SoundID 15 Roar；
-   *  唯一例外 Abeemination(蜂后) → SoundID.Item173。 */
-  private announceBossSummon(vanillaId: number): void {
+  /** SpawnBoss 公告静默集（NPC.cs:81498-81506 switch 的 case-break 组）：
+   *  50 史王 / 82 幽灵 / 126 帕拉丁之眼(双子由 125 一次性公告) / 316 幽灵 /
+   *  551 Betsy / 662 海盗幽灵 —— 无 "已苏醒" 公告。398 经 SpawnBoss 同静默，
+   *  但唯一生成路径 SpawnOnPlayer(:81358-81360) 专项播 Enemies.MoonLord，单列。 */
+  private static readonly BOSS_SPAWN_SILENT = new Set([50, 82, 126, 316, 551, 662]);
+
+  /** Boss 召唤公告（+可选咆哮）。文本 = SpawnBoss 末尾 switch（NPC.cs:81492-81511）：
+   *  default → Announcement.HasAwoken（"{名}已苏醒！"）；125 双子专项 Lang.misc[48]；
+   *  398 月总用 Enemies.MoonLord（SpawnOnPlayer :81358-81360，"月亮领主已苏醒！"）；
+   *  静默集（50/82/126/316/551/662）无公告。颜色 ChatColors.BossOrEvent=(175,75,255)。
+   *  ★音效与公告解耦（2026-08-14 对账）：原版 Roar 只在【物品使用】瞬间播
+   *  （ItemCheck_UseBossSpawners Player.cs:43080-43232 + 石巨人祭坛 :32322 +
+   *  事件物 :43246-43364）——生成路径（自然/灯泡/幼虫/老人诅咒/娃娃/浮标/月总
+   *  倒计时/光女踩虫）全部无声，唯一例外 Item173=蜂后蜜蜂分泌物(:43184)。
+   *  故 roar=true 仅由物品召唤点传入。 */
+  private announceBossSummon(vanillaId: number, roar = false): void {
     const announce = (text: string) => {
       if (this.cb.onChat) this.cb.onChat(text, 175, 75, 255);
       else this.cb.onToast(text);
     };
     if (vanillaId === 125) {
-      announce(Lang.misc(48));                              // 双子魔眼已苏醒！
-    } else if (vanillaId !== 126) {
-      // 398 月总：原版播 Enemies.MoonLord（NPC.cs:81358-81360），不取 MoonLordCore 名
-      const name = vanillaId === 398
-        ? Lang.text('Enemies.MoonLord')
-        : (Lang.npcName(vanillaId) ?? vanillaNpc(vanillaId)?.name ?? '???');
+      announce(Lang.misc(48));                              // 双子魔眼已苏醒！（misc[48]）
+    } else if (vanillaId === 398) {
+      announce(Lang.text('Announcement.HasAwoken', Lang.text('Enemies.MoonLord')));
+    } else if (!Game.BOSS_SPAWN_SILENT.has(vanillaId)) {
+      const name = Lang.npcName(vanillaId) ?? vanillaNpc(vanillaId)?.name ?? '???';
       announce(Lang.text('Announcement.HasAwoken', name));
     }
-    this.sfx.playWav(vanillaId === 222 ? 'beeSummon' : 'roar');
+    if (roar) this.sfx.playWav(vanillaId === 222 ? 'beeSummon' : 'roar');
   }
 
   /** @returns 是否真正消耗（被召唤门拦下/白天时不消耗物品） */
@@ -16362,8 +16753,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     e.id = this.entities.nextId++;
     this.entities.add(e, 'enemies');
     this.boss = e;
-    // 公告+音效与 summonBoss 同语义（EoC → "克苏鲁之眼已苏醒！" + Roar）
-    this.announceBossSummon(4);
+    // 物品召唤（可疑眼球 43）：公告 + Roar（Player.cs:43095 PlaySound(15)）
+    this.announceBossSummon(4, true);
     return true;
   }
 

@@ -96,11 +96,11 @@ export function wallAnimBandRows(wallId: number, x: number, y: number): number {
 }
 
 export class VanillaWallTiler {
-  private imgCache = new Map<number, HTMLImageElement | null>();
+  private imgCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
 
   constructor(private atlas: SpriteAtlas | null) {}
 
-  private wallImg(wallId: number): HTMLImageElement | null {
+  private wallImg(wallId: number): ImageBitmap | HTMLImageElement | null {
     // ★ 只缓存命中：懒加载未就绪时 ensureVImage 返回 null，若把 null 也缓存，
     //   图片晚到后 onVImageLoaded→invalidateAll 重烘焙也永远查到 null → 永久色块回退
     //   （与 VanillaLiquidRenderer null-texCache / PaperDoll 同款缓存投毒）

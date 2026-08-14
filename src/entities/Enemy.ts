@@ -3621,9 +3621,13 @@ export class Enemy extends Entity {
 
   /** AI_011 地牢守卫(68)（NPC.145.cs:21937-21941, 22277-22288）：
    *  恒 ai[1]=2：伤害 9999、恒速 8 直线追击；玩家死/超 2000px → ai[1]=3 下坠脱场。
-   *  noTileCollide 直移 */
+   *  noTileCollide 直移。生成瞬间一声 Roar（:21929-21933 localAI[0]==0 单次——
+   *  地牢守卫是全游戏唯一"非物品召唤也咆哮"的生成点） */
   private dungeonGuardianAI(game: GameHooks, player: Player | null) {
-    if (!this.aiInit) { this.aiInit = true; this.ai0 = 1; } // 初始化（L21910；68 无手 NPC）
+    if (!this.aiInit) {
+      this.aiInit = true; this.ai0 = 1;   // 初始化（L21910；68 无手 NPC）
+      game.playSfx('roar', 1, this.cx, this.cy);
+    }
     if (!player || Math.abs(this.cx - player.cx) > 2000 || Math.abs(this.cy - player.cy) > 2000) {
       this.ai1 = 3;
     } else if (this.ai1 !== 3) {
@@ -6775,12 +6779,20 @@ export class Enemy extends Entity {
         }
       }
       game.onEnemyKilled(this.key, this);
-      // 死亡专属声：Boss 咆哮；普通怪优先专属 killedSound，无则通用。
-      // EoW 挂 killBossFlag（最后一段）——中段死只播本体 DeathSound（原版 13/14/15
-      // 均为 NPCDeath1，无 Boss 咆哮）
-      if (this.killBossFlag) game.playSfx('roar', 1, this.cx, this.cy);
-      else if (this.def.killedSound.length) game.playSfxFiles(this.def.killedSound, 1, this.cx, this.cy);
-      else game.playSfx('killed', 1, this.cx, this.cy);
+      // 死亡声 = 本体 DeathSound（NPC.Strike :48316 全 NPC 同链，Boss 亦然——
+      // 血肉墙 NPCDeath10 / 机械族 NPCDeath14 / 克脑 NPCDeath11 / 猪鲨 NPCDeath20 /
+      // 光皇 65 / 史后 64 / 异教徒 59 / 月总头手 62 / Betsy DD2 / 鹿角怪专属）。
+      // HitEffect 里唯一额外 Boss 咆哮 = EoC（NPC.cs:88205-88210：gore 循环体内
+      // PlaySound(15)，×2 次迭代 → 连播两声）；月总核心 398 DeathSound=null 无声。
+      // （旧"Boss 一律咆哮吞掉 DeathSound"2026-08-14 对账修正）
+      if (this.vanillaId === 4) {
+        game.playSfx('roar', 1, this.cx, this.cy);
+        game.playSfx('roar', 1, this.cx, this.cy);
+      }
+      if (this.vanillaId !== 398) {
+        if (this.def.killedSound.length) game.playSfxFiles(this.def.killedSound, 1, this.cx, this.cy);
+        else game.playSfx('killed', 1, this.cx, this.cy);
+      }
       // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →
       // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece
       // （位置/速度/ai 门/gates 守卫/post 后处理 1:1，Gore.NewGore 随机扰动在

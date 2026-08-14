@@ -1,4 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
 import type { Camera } from './Camera';
 import { SkyRenderer } from './SkyRenderer';
@@ -61,7 +62,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
   return { head: idx(disp[0], 0), body: idx(disp[1], 1), legs: idx(disp[2], 2) };
 }
 import { WeatherRenderer } from './WeatherRenderer';
-import { drawVanillaLiquids } from './VanillaLiquidRenderer';
+import { drawVanillaLiquids, drawLiquidBehindTilesOnly } from './VanillaLiquidRenderer';
 import { renderEnv } from './VanillaTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
@@ -1253,6 +1254,16 @@ export class Renderer {
       if (e instanceof Enemy && this.isBehindTilesEnemy(e)) this.drawEnemy(e, world, entities);
     }
 
+    // 2b''. 浸润带·实心层 pass（TileDrawing.Draw :528-529 solidLayer=true——
+    //       原版在逐 tile 绘制时,每个实心格先画浸润带(Layer_LiquidBehindTiles=0)
+    //       再画贴图(Layer_Tiles=1),带在【墙之后、贴图之前】。
+    //       本仓原来只在背景液体 pass(isBackground=true,墙之前)画浸润带
+    //       → 地下(有墙)区域的带全部被墙盖住 = "方块旁水不浸润"真根因
+    //       （2026-08-14 用户实抓 (3504,325)/(3486,325)）。
+    //       这里在墙层之后、tile 层之前补画一遍;背景 pass 的带保留(原版也有
+    //       DrawLiquidBehindTiles :449-466 背景层调用,两 pass 并存）
+    this.drawLiquidBehindSolidTiles(world, cam, viewW, viewH, z);
+
     // 2c. 前景 tile/物体层(同款保险重叠)
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
@@ -1723,6 +1734,21 @@ export class Renderer {
       world.weather?.windSpeedCurrent ?? 0, this.waterStyle);
   }
 
+  /** 浸润带·实心层 pass（TileDrawing.Draw :528-529 solidLayer=true 语义）——
+   *  在墙之后、tile 贴图之前画,方块贴图透明像素透出水色。
+   *  与背景液体 pass(isBackground=true)的区别:那个画在墙之前(墙盖住带);
+   *  这个画在墙之后(贴图盖住带,但透明处透出)——原版两层并存。
+   *  只画浸润带(drawLiquidBehindTiles),不画水体本体(避免水在墙上方重复叠加) */
+  private drawLiquidBehindSolidTiles(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    if (!this.atlas) return;
+    const ts = TILE;
+    const tx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
+    const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
+    const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
+    const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
+    drawLiquidBehindTilesOnly(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this.waterStyle);
+  }
+
   /** 导线覆盖层(Main.cs:43543-43954 DrawWires 移植:四色行/连接掩码/多色淡化/致动器覆盖) */
   showWires = false;
   /** 宏伟蓝图拖拽预览(Game.render 注入;世界坐标 tile) */
@@ -2054,7 +2080,7 @@ export class Renderer {
   // ===================== FlameParticle（山羊坐骑 47 火焰本体层）=====================
   /** Projectile_326/327/328 染料基底 + ×(60/255) 预染双缓存。
    *  key = `${tex}:${vid}`（vid = 坐骑染料 vid，−1 = 无染料档——染料更换/卸下各一档） */
-  private flameDyeCache = new Map<string, { base: HTMLImageElement | HTMLCanvasElement; glow: HTMLCanvasElement | null }>();
+  private flameDyeCache = new Map<string, { base: ImageBitmap | HTMLImageElement | HTMLCanvasElement; glow: HTMLCanvasElement | null }>();
 
   /** FlameParticle.Draw（FlameParticle.cs:53-68）1:1——世界变换内直画（世界坐标，
    *  原版 ParticleSystem 的 AnchorPosition=−screenPosition 平移即此意）。
@@ -2082,11 +2108,11 @@ export class Renderer {
     const seedBase = currentTileFrameSeed();
     const vidKey = dye ? dye.vid : -1;
     /** 染料基底（无染料 = 原图）+ ×(60,60,60) 预染 glow，按 (tex, vid) 缓存 */
-    const source = (tex: number, img: HTMLImageElement) => {
+    const source = (tex: number, img: ImageBitmap | HTMLImageElement) => {
       const key = `${tex}:${vidKey}`;
       const hit = this.flameDyeCache.get(key);
       if (hit) return hit;
-      let base: HTMLImageElement | HTMLCanvasElement = img;
+      let base: ImageBitmap | HTMLImageElement | HTMLCanvasElement = img;
       let glow: HTMLCanvasElement | null = null;
       if (typeof document !== 'undefined') {
         if (dye) {   // 染料烘焙（DrawData.shader → ArmorShaderData.Apply 等价）
@@ -2725,7 +2751,7 @@ export class Renderer {
   /** 墙身崩落血尘（渲染层自持瞬态，形状同 Particle） */
   private wofDeathFx: Particle[] = [];
   /** 墙身贴图（WallOfFlesh.png 190×420 = 3 帧×140px；懒加载经 ensureVImage） */
-  private wofTex(): HTMLImageElement | null {
+  private wofTex(): ImageBitmap | HTMLImageElement | null {
     return this.atlas ? this.atlas.ensureVImage('vanilla/WallOfFlesh.png') : null;
   }
 
@@ -3328,10 +3354,10 @@ export class Renderer {
   }
 
   /** Arm_Bone.png 懒加载（骷髅王臂骨；vanilla 独立贴图，非 NPC 表） */
-  private armBoneImg: HTMLImageElement | null | undefined;
-  private boneArm3Img: HTMLImageElement | null | undefined;   // 二阶段臂骨（Red Hat 族）
-  private pumpkingCloakImg: HTMLImageElement | null | undefined;
-  private pumpkingArmImg: HTMLImageElement | null | undefined;
+  private armBoneImg: ImageBitmap | HTMLImageElement | null | undefined;
+  private boneArm3Img: ImageBitmap | HTMLImageElement | null | undefined;   // 二阶段臂骨（Red Hat 族）
+  private pumpkingCloakImg: ImageBitmap | HTMLImageElement | null | undefined;
+  private pumpkingArmImg: ImageBitmap | HTMLImageElement | null | undefined;
   /** 259/260 茎蔓强制亮彩的共享染色 scratch（source-atop 下限色） */
   private brightVineScratch: HTMLCanvasElement | null = null;
 
@@ -4075,7 +4101,7 @@ export class Renderer {
     const fade = Math.max(0, Math.min(1, n291));          // ai2 恒 0（计时未接）时 = 1
     const num287 = (2 / 10) * 0.7;                        // 2/oldPos.Length×0.7（:23857）
     const drawSeg = (
-      img: HTMLImageElement, glow: HTMLImageElement | null,
+      img: ImageBitmap | HTMLImageElement, glow: ImageBitmap | HTMLImageElement | null,
       px: number, py: number, rot: number, aBody: number, aGlow: number,
     ) => {
       ctx.save();
@@ -4190,7 +4216,7 @@ export class Renderer {
    *  等价（翻转均绕 origin 点），anchorPx 非对称锚按 spriteDirection 切换取值
    *  （Main.cs 各 case 的 `origin.X = anchor / width-anchor` 同款） */
   private drawNpcGrid(
-    e: Enemy, img: HTMLImageElement, cols: number, rows: number, idx: number,
+    e: Enemy, img: ImageBitmap | HTMLImageElement, cols: number, rows: number, idx: number,
     cellW: number, cellH: number,
     opts: {
       perRow?: number;            // idx→(col,row) 除数；696 为 9（其 rows=27 但索引每 9 折行）
@@ -4634,7 +4660,7 @@ export class Renderer {
       }
     }
     // 帆1/2（:24284-24297）×2；帆3（:24298-24301）；帆4（:24302-24305，相位差帧）
-    const sail = (img: HTMLImageElement | null, fw: number, fh: number, dx: number, dy: number, frame: number) => {
+    const sail = (img: ImageBitmap | HTMLImageElement | null, fw: number, fh: number, dx: number, dy: number, frame: number) => {
       if (!img?.width) return;
       ctx.drawImage(img, (frame % 4) * fw, 0, fw, fh, dx, dy, fw, fh);
     };
@@ -5270,6 +5296,7 @@ export class Renderer {
   private drawSkeletronArm(hand: Enemy, head: Enemy) {
     if (this.armBoneImg === undefined) {
       this.armBoneImg = new Image();
+      (this.armBoneImg as HTMLImageElement).onload = () => upgradeToBitmap(this.armBoneImg as unknown as HTMLImageElement, (b) => { this.armBoneImg = b as unknown as typeof this.armBoneImg; });
       this.armBoneImg.src = 'sprites/vanilla/Arm_Bone.png';
     }
     // Red Hat 族（生成时 head.ai[3]=1 :81269-81271，手 localAI[3] 每 tick 镜像 :22304）
@@ -5277,6 +5304,7 @@ export class Renderer {
     const redHat = head.ai3 === 1;
     if (redHat && this.boneArm3Img === undefined) {
       this.boneArm3Img = new Image();
+      (this.boneArm3Img as HTMLImageElement).onload = () => upgradeToBitmap(this.boneArm3Img as unknown as HTMLImageElement, (b) => { this.boneArm3Img = b as unknown as typeof this.boneArm3Img; });
       this.boneArm3Img.src = 'sprites/vanilla/Arm_Bone_3.png';
     }
     const img = redHat ? this.boneArm3Img : this.armBoneImg;
@@ -5313,6 +5341,7 @@ export class Renderer {
   private drawPumpkingCloak(e: Enemy) {
     if (this.pumpkingCloakImg === undefined) {
       this.pumpkingCloakImg = new Image();
+      (this.pumpkingCloakImg as HTMLImageElement).onload = () => upgradeToBitmap(this.pumpkingCloakImg as unknown as HTMLImageElement, (b) => { this.pumpkingCloakImg = b as unknown as typeof this.pumpkingCloakImg; });
       this.pumpkingCloakImg.src = 'sprites/vanilla/PumpkingCloak.png';
     }
     const img = this.pumpkingCloakImg;
@@ -5332,6 +5361,7 @@ export class Renderer {
   private drawPumpkingArm(blade: Enemy, master: Enemy) {
     if (this.pumpkingArmImg === undefined) {
       this.pumpkingArmImg = new Image();
+      (this.pumpkingArmImg as HTMLImageElement).onload = () => upgradeToBitmap(this.pumpkingArmImg as unknown as HTMLImageElement, (b) => { this.pumpkingArmImg = b as unknown as typeof this.pumpkingArmImg; });
       this.pumpkingArmImg.src = 'sprites/vanilla/PumpkingArm.png';
     }
     const img = this.pumpkingArmImg;
@@ -5847,7 +5877,7 @@ export class Renderer {
       // 烘焙图（PlayerRainbowWingsTextureContent.cs 1:1，烘焙一次缓存）——不是
       // Wings_44 原图；cWings 染料在其上再套（:1033 item.shader）
       const baked = d.rainbowLayer ? this.hallowBossWingsSheet() : null;
-      const mainTex: HTMLImageElement | HTMLCanvasElement | null = baked
+      const mainTex: ImageBitmap | HTMLImageElement | HTMLCanvasElement | null = baked
         ? baked.canvas
         : atlas.ensureVImage(`vanilla/Wings_${e.slot}.png`);
       const tw = mainTex ? (mainTex instanceof HTMLImageElement ? mainTex.width : mainTex.width) : 0;
@@ -5874,7 +5904,7 @@ export class Renderer {
         } else {
           const tintArr: [number, number, number] | null = tint < 0.999
             ? [tint, tint, tint] : null;
-          const sc = this.wingTexSource(mainTex as HTMLImageElement | HTMLCanvasElement,
+          const sc = this.wingTexSource(mainTex as ImageBitmap | HTMLImageElement | HTMLCanvasElement,
             0, e.fr * fh, tw, fh, e.dye, tintArr);
           if (sc) {
             ctx.globalAlpha = a;
@@ -5978,7 +6008,7 @@ export class Renderer {
   }
 
   /** 均一色调 scratch：绘制 (img, sx, sy, sw, sh) → tint×RGB / 返回临时画布 */
-  private tintSlice(img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+  private tintSlice(img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
     tint: number, alphaMul: number): HTMLCanvasElement | null {
     const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
@@ -5997,7 +6027,7 @@ export class Renderer {
   }
 
   /** 逐通道 RGB scratch（星璇 secondColor tint / extra38 光采样 tint 用） */
-  private tintSliceRGB(img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+  private tintSliceRGB(img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
     rgb: [number, number, number], alphaMul: number): HTMLCanvasElement | null {
     const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
@@ -6029,7 +6059,7 @@ export class Renderer {
 
   /** 翅膀纹理可绘源：染料仿真 → tint 链（无处理时返回原图）。返回 canvas 时
    *  调用方按整幅居中绘制（sw/sh 尺寸） */
-  private wingTexSource(img: HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
+  private wingTexSource(img: ImageBitmap | HTMLImageElement | HTMLCanvasElement, sx: number, sy: number, sw: number, sh: number,
     dye: DyeApply | null, tint: [number, number, number] | null): HTMLCanvasElement | null {
     if (!dye && !tint) return null;
     const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
@@ -6158,7 +6188,7 @@ export class Renderer {
       return { img, fh, sy: fr * fh, sw: img.width, sh: fh };
     };
     /** tintSlice + 染料折叠（cWings 对全部叠画 DrawData 生效，:699/:722 等同绑） */
-    const dyeScratch = (img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    const dyeScratch = (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
       tint: number): HTMLCanvasElement | null => {
       const sc = this.tintSlice(img, sx, sy, sw, sh, tint, 1);
       if (sc && dye) {
@@ -7247,9 +7277,9 @@ export class Renderer {
   private actionFramesCache: Record<string, ReturnType<SpriteAtlas['rect']>> | null = null;
 
   /** Extra_48 表情总表（272×1092）懒加载——原版 TextureAssets.Extra[48] */
-  private emoteSheetImg: HTMLImageElement | null = null;
+  private emoteSheetImg: ImageBitmap | HTMLImageElement | null = null;
   private emoteSheetFailed = false;
-  private emoteSheet(): HTMLImageElement | null {
+  private emoteSheet(): ImageBitmap | HTMLImageElement | null {
     if (this.emoteSheetFailed) return null; // 404 终态:不重发(2026-08-13 前无 onerror=坏图滞留永久)
     if (!this.emoteSheetImg) {
       const im = new Image();
@@ -7345,7 +7375,7 @@ export class Renderer {
   /** screenObstruction 当前黑幕强度（Update 的静态位；调试/探针可读） */
   screenObstruction = 0;
   private obstructionLastSpeed = 0.1;   // lastSpeed（:9）
-  private obstructionTex: HTMLImageElement | null = null;
+  private obstructionTex: ImageBitmap | HTMLImageElement | null = null;
 
   /** Update（:12-41）+ Draw（:43-63）合并：headcovered（buff 163）→ 目标 0.95/步进
    *  0.3；解除后以 lastSpeed 回落。绘制 = 黑幕四象限围出玩家矩形孔（MagicPixel 四
@@ -7385,6 +7415,7 @@ export class Renderer {
     ctx.fillRect(0, 0, Math.max(0, rect.left), viewH);                                  // 左
     if (!this.obstructionTex) {
       const im = new Image();
+      im.onload = () => upgradeToBitmap(im, (b) => { this.obstructionTex = b; });
       im.src = 'sprites/vanilla/Extra_49.png';
       this.obstructionTex = im;
     }
@@ -7543,8 +7574,8 @@ export class Renderer {
     Valkyrie: { fo: [-10, -10], reset: [154, 242], zoomIn: [206, 240], zoomOut: [180, 244] },
   };
   /** 选中皮肤的 4 张贴图（懒加载缓存，切皮肤自动换批） */
-  private minimapSkinTex = new Map<string, { frame: HTMLImageElement; reset: HTMLImageElement; zoomIn: HTMLImageElement; zoomOut: HTMLImageElement }>();
-  private minimapSkinAssets(): { skin: typeof Renderer.MINIMAP_SKINS[string]; tex: { frame: HTMLImageElement; reset: HTMLImageElement; zoomIn: HTMLImageElement; zoomOut: HTMLImageElement } } {
+  private minimapSkinTex = new Map<string, { frame: ImageBitmap | HTMLImageElement; reset: ImageBitmap | HTMLImageElement; zoomIn: ImageBitmap | HTMLImageElement; zoomOut: HTMLImageElement }>();
+  private minimapSkinAssets(): { skin: typeof Renderer.MINIMAP_SKINS[string]; tex: { frame: ImageBitmap | HTMLImageElement; reset: ImageBitmap | HTMLImageElement; zoomIn: ImageBitmap | HTMLImageElement; zoomOut: HTMLImageElement } } {
     const name = Renderer.MINIMAP_SKINS[options.data.minimapFrame] ? options.data.minimapFrame : 'Default';
     let tex = this.minimapSkinTex.get(name);
     if (!tex) {
@@ -7574,8 +7605,10 @@ export class Renderer {
   /** UI 点击边沿检测（render 存 _mouseDown，drawMinimap 末尾更新） */
   private _uiPrevMouseDown = false;
 
-  private loadUiTex(name: string): HTMLImageElement {
+  private loadUiTex(name: string, onUp?: (b: ImageBitmap) => void): HTMLImageElement {
     const img = new Image();
+    // 小地图皮肤 4 张:升级后替换持有者(minimapSkinTex 查表处宽类型)
+    img.onload = () => upgradeToBitmap(img, (b) => { onUp?.(b); });
     img.src = `sprites/vanilla-ui/${name}.png`;
     return img;
   }
@@ -7702,9 +7735,9 @@ export class Renderer {
     // 按钮：悬停高亮 + 按住生效（MinimapFrame.Update/Click：mouseLeft 持续，×1.025/0.975 步进）
     this.minimapUiHover = false;
     const btns: Array<[HTMLImageElement, readonly [number, number], 'in' | 'out' | 'reset']> = [
-      [tex.zoomIn, skin.zoomIn, 'in'],
-      [tex.zoomOut, skin.zoomOut, 'out'],
-      [tex.reset, skin.reset, 'reset'],
+      [tex.zoomIn as HTMLImageElement, skin.zoomIn, 'in'],
+      [tex.zoomOut as HTMLImageElement, skin.zoomOut, 'out'],
+      [tex.reset as HTMLImageElement, skin.reset, 'reset'],
     ];
     for (const [tex, [bx, by], kind] of btns) {
       const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
@@ -7865,13 +7898,15 @@ export class Renderer {
   // 672ms 长任务），首次导入大世界时每秒 4 次 × 20MB 垃圾 → GC 风暴 → 白屏闪烁 + OOM
   private fogCanvas: HTMLCanvasElement | null = null;
   private fogVersion = -1;
+  /** 整幅重建的分帧行游标(0=未在重建) */
+  private fogRebuildRow = 0;
   private fogWorld: World | null = null;
 
   private getFogCanvas(world: World): HTMLCanvasElement | null {
     const ex = world.explored;
     if (!ex) return null;
     // 世界实例切换（读档/导入另一世界）：版本号数值可能巧合相等，必须按实例强制重建
-    if (this.fogWorld !== world) { this.fogWorld = world; this.fogVersion = -1; }
+    if (this.fogWorld !== world) { this.fogWorld = world; this.fogVersion = -1; this.fogRebuildRow = 0; }
     if (this.fogCanvas && this.fogVersion === world.exploredVersion) return this.fogCanvas;
     const st = world.store;
     const w = Math.ceil(st.w / 2), h = Math.ceil(st.h / 2);
@@ -7909,16 +7944,24 @@ export class Renderer {
         return this.fogCanvas;
       }
     }
-    // 整幅重建（首帧 / 全图点亮 / 版本跳跃无脏信息）
+    // 整幅重建（首帧 / 全图点亮 / 版本跳跃无脏信息）。
+    // ★分帧行带(2026-08-14 trace⑥:同步 O(世界) 循环 2100×600×4 探测+5MB
+    // ImageData = 单帧 640ms 巨帧,GPU 压力临界时直接崩)——摊到 ROWS_PER_FRAME
+    // 行/帧(~10 帧完),画布立即可用(迷雾迟 ~150ms 无感)
     if (this.fogCanvas.width !== w || this.fogCanvas.height !== h) {
       this.fogCanvas.width = w; this.fogCanvas.height = h;
+      this.fogRebuildRow = 0;
     }
-    fc.clearRect(0, 0, w, h);
+    if (this.fogRebuildRow === 0) { fc.clearRect(0, 0, w, h); }
     fc.fillStyle = '#050508';
-    const img = fc.createImageData(w, h);
-    for (let by = 0; by < h; by++) {
+    const ROWS = 120;  // 每帧行数(600 行 ≈ 5 帧完;单帧 <20ms)
+    const yEnd = Math.min(h, this.fogRebuildRow + ROWS);
+    const bh = yEnd - this.fogRebuildRow;
+    const img = fc.createImageData(w, bh);
+    for (let by = 0; by < bh; by++) {
+      const wy = this.fogRebuildRow + by;
       for (let bx = 0; bx < w; bx++) {
-        const x0 = bx * 2, y0 = by * 2;
+        const x0 = bx * 2, y0 = wy * 2;
         let seen = false;
         for (let dy = 0; dy < 2 && !seen; dy++) for (let dx = 0; dx < 2; dx++) {
           const xx = x0 + dx, yy = y0 + dy;
@@ -7930,7 +7973,13 @@ export class Renderer {
         }
       }
     }
-    fc.putImageData(img, 0, 0);
+    fc.putImageData(img, 0, this.fogRebuildRow);
+    this.fogRebuildRow = yEnd;
+    if (yEnd < h) {
+      // 未完成:版本号不落定(下帧续),画布半新半旧可先用
+      return this.fogCanvas;
+    }
+    this.fogRebuildRow = 0;
     this.fogVersion = world.exploredVersion;
     return this.fogCanvas;
   }

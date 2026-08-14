@@ -156,7 +156,7 @@ export function tintSparkleBand(data: Uint8ClampedArray, r: number, g: number, b
   }
 }
 
-function shimmerSparkleTint(tex: HTMLImageElement, hueIdx: number): HTMLCanvasElement | null {
+function shimmerSparkleTint(tex: ImageBitmap | HTMLImageElement, hueIdx: number): HTMLCanvasElement | null {
   let c = _sparkleTintCache.get(hueIdx);
   if (c) return c;
   const bandX = 48;                     // :721 sparkle 带 X 偏移（water_14 第 4-6 列 16px 带）
@@ -450,7 +450,7 @@ export function drawVanillaLiquids(
   }
 
   // ---- 绘制 ----
-  const texCache = new Map<number, HTMLImageElement | null>();
+  const texCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const texFor = (vt: number) => {
     let t = texCache.get(vt);
     if (t === undefined) {
@@ -566,7 +566,7 @@ export function drawVanillaLiquids(
   //   仅下方有水 → 格底 16×4 横条(:4089-4093)
   //   仅左侧有水 → 格左 4px 竖条(:4113-4116);仅右侧 → 格右 4px(:4118-4121)
   //   左右都有   → 整格 16 宽(:4108-4111);深度按液体量 num6=(256-max)/32*2 从底收
-  if (isBackground) drawLiquidBehindTiles(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle);
+  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;
@@ -619,13 +619,13 @@ export function liquidSlopeSheet(vt: number, waterStyle = 0): string {
  * (TileDrawing.cs:3859-4193)。对视区内每个实心方块格检查四邻液体,在方块格内画液体带。
  * 背景 pass 调用(画在方块贴图之下)——透明圆角像素透出液体色。
  */
-function drawLiquidBehindTiles(
+export function drawLiquidBehindTilesOnly(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number, waterStyle = 0,
 ): void {
   // Liquid_N 贴图(16×16 纯液体块;水 Liquid_0 多 style 但取首 16px)
-  const texCache = new Map<number, HTMLImageElement | null>();
+  const texCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const texFor = (vt: number) => {
     let t = texCache.get(vt);
     if (t === undefined) {
@@ -638,7 +638,7 @@ function drawLiquidBehindTiles(
     return t;
   };
   // LiquidSlope 表缓存（同款"只缓存命中"策略；坡面格才触碰）
-  const slopeTexCache = new Map<number, HTMLImageElement | null>();
+  const slopeTexCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const slopeTexFor = (vt: number) => {
     let t = slopeTexCache.get(vt);
     if (t === undefined) {
@@ -728,7 +728,7 @@ function drawLiquidBehindTiles(
       // ---- 斜面格换 LiquidSlope 表（TileDrawing.cs:4539-4552）----
       // 源 X += 18*(slope-1)；平面表语义(ry/rh 不变)。半砖恒 slope=0 → 天然走平面。
       const slopeSrc = liquidSlopeSource(slope, rx, ry, rw, rh);
-      let drawTex: HTMLImageElement | null = tex;
+      let drawTex: ImageBitmap | HTMLImageElement | null = tex;
       let srx = rx;
       if (slopeSrc) {
         drawTex = slopeTexFor(lt);
@@ -739,6 +739,7 @@ function drawLiquidBehindTiles(
       // ---- 源矩形钳制到贴图边界(原版 XNA PointClamp 自动钳;Canvas 2D 需显式) ----
       // Liquid_N 是 16×16 纯块;ry=4 起 + rh=16 会到 y=20 越界——XNA 读边缘像素,
       // 我们钳 rh = tex.height - ry 保持等比(不画满时目标也同步缩)
+      // 【2026-08-14 回退:dstH=rh 拉伸方案实测令更多泥土格浸润恶化——用户报加重,先归零再排查】
       const srcH = Math.min(rh, drawTex.height - ry);
       const srcW = Math.min(rw, drawTex.width - srx);
       if (srcW <= 0 || srcH <= 0) continue;

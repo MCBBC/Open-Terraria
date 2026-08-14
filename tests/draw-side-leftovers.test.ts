@@ -141,11 +141,14 @@ describe('③ 229 海盗 / 550 酒保帽位 X 修正（Main.cs:27001-27008）', 
     expect(Renderer.hatStateOffsetX(550, 10)).toBe(0);
     expect(Renderer.hatStateOffsetX(208, 12)).toBe(0);
   });
-  it('仓内消费链：229 弓态经 TownNPC.attackState 喂入（TOWN_ATTACK_TYPE[229]=1 → 12）', () => {
+  it('仓内消费链：229 弓态经 TownNPC.attackState 喂入；坐姿 ai0=5 还原（Main.cs:27001-27008 读 n.ai[0]）', () => {
     const src = srcOf('entities/TownNPC.ts');
     expect(src).toContain('get attackState(): number');
     const r = srcOf('render/Renderer.ts');
-    expect(r).toContain("Renderer.hatStateOffsetX(n.vanillaId, n.attackState)");
+    // 54da8bb4 起消费链还原原版 ai[0]：550 坐姿 ai[0]==5f（Main.cs:27005-27008）——
+    // TownNPC 把坐姿单列为 sitting，故 ai0 = sitting ? 5 : attackState 后喂入
+    expect(r).toContain('const ai0 = n.sitting ? 5 : n.attackState;');
+    expect(r).toContain('Renderer.hatStateOffsetX(n.vanillaId, ai0)');
   });
 });
 
@@ -172,10 +175,12 @@ describe('④ 160/209 微光态 Glow 变体档（Main.cs:25769/:25783）', () =>
     expect(townSheetFrameCount(160)).toBe(23);   // Glow_166/352 = 1380 = 23×60
     expect(townSheetFrameCount(209)).toBe(26);   // Glow_167/350/351 = 1456 = 26×56
   });
-  it("drawTownNPC 已挂叠画（'lighter' + (128−α/2)/255，α=城镇 NPC 静态 0）", () => {
+  it("drawTownNPC 已挂叠画（'lighter' + (128−α/2)/255 ×(1−st)，α=城镇 NPC 静态 0）", () => {
     const src = srcOf('render/Renderer.ts');
     expect(src).toContain('Renderer.npcGlowVariantTex(n.vanillaId, n.shimmered, n.altTexture)');
-    expect(src).toContain("ctx.globalAlpha = 128 / 255;");
+    // 54da8bb4 起 160 档补 shimmerTransparency RGB 衰减（Main.cs:25771-25776 ×(1f−st)，
+    // 'lighter' 加性下经 alpha 等价实现）；209 无此档（:25783 直接 Draw）
+    expect(src).toContain('ctx.globalAlpha = shimmerGlowAlpha(128 / 255, n.vanillaId === 160 ? n.shimmerTransparency : 0);');
     expect(src).toContain("ctx.globalCompositeOperation = 'lighter';");
   });
 });

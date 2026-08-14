@@ -91,7 +91,7 @@ export function hairFrameTinted(layer: DollHairLayer, row: number, color: { r: n
 let hairScratch: HTMLCanvasElement | null = null;
 
 /** 头甲贴图（Armor_Head_N.png；发色剂叠层时画在发层之后，与 composite 内层序一致） */
-export function headArmorImage(headIdx: number): HTMLImageElement | null {
+export function headArmorImage(headIdx: number): ImageBitmap | HTMLImageElement | null {
   if (!headIdx) return null;
   const r = UITextures.get(`Armor_Head_${headIdx}.png`);
   return r ? (r.img as HTMLImageElement) : null;
@@ -157,7 +157,7 @@ function appearanceKey(a: Appearance): string {
   ].join('|');
 }
 
-function sheetRect(variant: number, sheet: number): HTMLImageElement | null {
+function sheetRect(variant: number, sheet: number): ImageBitmap | HTMLImageElement | null {
   // 女性变体缺的通道回退男体（文件分布：Player_1_ 仅有 4,6,8,11,12,13）
   const r = UITextures.get(`Player_${variant}_${sheet}.png`) ?? UITextures.get(`Player_0_${sheet}.png`);
   return r ? (r.img as HTMLImageElement) : null;
@@ -252,12 +252,12 @@ export function compositePaperDoll(
     if (noArmor && bodyArmorImg) continue;       // skin 层身甲槽留空（甲覆盖语义）
     const torsoX = row === 5 ? 1 : 0;
     const arm = ARM_FRAME[row];
-    const drawTinted = (img: HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }) => {
+    const drawTinted = (img: ImageBitmap | HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }) => {
       // 全部部件左上角对齐帧锚点(原版 position-origin 相消;臂偏移仅是旋转 pivot,见文件头)
       ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
         0, row * FRAME_H, FRAME_W, FRAME_H);
     };
-    const drawArmorCell = (img: HTMLImageElement, x: number, y: number) => {
+    const drawArmorCell = (img: ImageBitmap | HTMLImageElement, x: number, y: number) => {
       ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
         0, row * FRAME_H, FRAME_W, FRAME_H);
     };

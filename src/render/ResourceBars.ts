@@ -8,6 +8,7 @@
 // Main.cs:51896-51905 CursorColor 状态机）。
 // 字段映射：statLifeMax→baseMaxHp，statLifeMax2→maxHp（含 buffs.healthBonus），
 // statLife→hp，statManaMax2→maxMana，statMana→mana，ghost→dead。
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import type { Player } from '../entities/Player';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { PixelText } from '../vui/draw/PixelText';
@@ -35,14 +36,22 @@ export function classicLifeLayout(statLifeMax: number, statLifeMax2: number): {
 /** 懒加载 PNG（sprites/vanilla-ui/ 心/星贴图，22×22/22×24） */
 function loadTex(name: string): HTMLImageElement {
   const img = new Image();
+  img.onload = () => upgradeToBitmap(img, (b) => { UPG[name]?.forEach((cb) => cb(b)); });
   img.src = `sprites/vanilla-ui/${name}.png`;
   return img;
 }
+const UPG: Record<string, Array<(b: ImageBitmap) => void>> = {};
 
 export class VanillaResourceBars {
-  private heart = loadTex('Heart');
-  private heart2 = loadTex('Heart2');
-  private mana = loadTex('Mana');
+  private heart: ImageBitmap | HTMLImageElement = (() => {
+    const el = loadTex('Heart'); UPG['Heart'] = [(b) => { this.heart = b; }]; return el;
+  })();
+  private heart2: ImageBitmap | HTMLImageElement = (() => {
+    const el = loadTex('Heart2'); UPG['Heart2'] = [(b) => { this.heart2 = b; }]; return el;
+  })();
+  private mana: ImageBitmap | HTMLImageElement = (() => {
+    const el = loadTex('Mana'); UPG['Mana'] = [(b) => { this.mana = b; }]; return el;
+  })();
 
   /** 每帧绘制（游戏画布屏幕坐标，CSS px） */
   draw(ctx: CanvasRenderingContext2D, p: Player, viewW: number, flicker: FlickerClock | null) {
@@ -152,7 +161,7 @@ export class VanillaResourceBars {
 
   /** 中心原点 + 缩放 + 亮度/透明度绘制一颗资源图标（等价 spriteBatch.Draw origin=中心） */
   private drawRes(
-    ctx: CanvasRenderingContext2D, img: HTMLImageElement,
+    ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement,
     cx: number, cy: number, scale: number, bright: number, alpha: number,
   ) {
     ctx.save();

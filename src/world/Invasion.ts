@@ -28,6 +28,23 @@ export const KILL_WEIGHT: Record<number, number> = {
   216: 5, 471: 10, 491: 10, 472: 0, 395: 10, 387: 0,
 };
 
+/** 入侵/事件曲 type→MusicID 表（Main.cs UpdateAudio_DecideOnNewMusic switch(type)
+ *  :12196-12260 的非 Boss 族 + :12474-12535 槽位→MusicID）。
+ *  与 INVASION_GROUP（计分表）分离：音乐触发是纯 type 邻近（±5000px），无
+ *  invasionType 门，且成员表不同——492 飞船炮/394 飞碟尾锥只计分不切曲，
+ *  384 火星军官护盾/392 飞碟炮座只切曲不计分；雪人三兄弟 143-145 与克脑 266
+ *  共用 num3=3 槽 → Boss3(13)。 */
+export const INVASION_MUSIC: Record<number, number> = (() => {
+  const m: Record<number, number> = {};
+  for (const id of [26, 27, 28, 29, 111, 471, 472]) m[id] = 39;            // 哥布林 GoblinArmy
+  for (const id of [212, 213, 214, 215, 216, 252, 491, 662]) m[id] = 35;   // 海盗 PirateInvasion
+  for (const id of [381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 395, 520]) {
+    m[id] = 37;                                                            // 火星 MartianMadness
+  }
+  for (const id of [143, 144, 145]) m[id] = 13;                            // 雪人 Boss3
+  return m;
+})();
+
 /** 入侵进行中（SpawnHomelessNPC/SpawnTravelNPC 压制门，WorldGen.cs:4987） */
 export function invasionActive(w: World): boolean {
   return w.invasionType > 0 && w.invasionDelay === 0 && w.invasionSize > 0;

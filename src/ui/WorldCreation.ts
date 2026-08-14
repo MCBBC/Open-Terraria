@@ -85,7 +85,7 @@ export class WorldCreationPanel {
   private desc: HTMLElement;
   private preview: HTMLCanvasElement;
   private previewCtx: CanvasRenderingContext2D;
-  private seedIcon: HTMLImageElement;
+  private seedIcon: ImageBitmap | HTMLImageElement;
   // 模块级:语言切换重建面板时恢复用户选择
   private static lastSel = { size: 1, diff: 0, evil: 0 };
   private sel = { ...WorldCreationPanel.lastSel };
@@ -119,7 +119,7 @@ export class WorldCreationPanel {
     this.preview = this.panel.querySelector('.sw-wc-preview')!;
     this.previewCtx = this.preview.getContext('2d')!;
     this.previewCtx.imageSmoothingEnabled = false;
-    this.seedIcon = this.panel.querySelector('.sw-wc-seedicon')!;
+    this.seedIcon = this.panel.querySelector('.sw-wc-seedicon') as unknown as HTMLImageElement;
 
     // 选项组
     this.buildGroup('size', SIZES);
@@ -191,7 +191,7 @@ export class WorldCreationPanel {
   /** 多层预览图（UIWorldCreationPreview.cs 1:1：元素 84×84，
    *  边框 (0,0)、内容层 (4,4)——76×76 恰好嵌在 84 边框的 4px 边内。
    *  曾把 120×120 画布按原尺寸画 → 内容层只有 76²、边框 84²，图小框大） */
-  private previewImgs = new Map<string, HTMLImageElement>();
+  private previewImgs = new Map<string, ImageBitmap | HTMLImageElement>();
   private drawPreview() {
     const ctx = this.previewCtx;
     ctx.clearRect(0, 0, 84, 84);
@@ -208,10 +208,12 @@ export class WorldCreationPanel {
       ctx.clearRect(0, 0, 84, 84);
       for (const key of content) {
         const im = this.previewImgs.get(key);
-        if (im?.complete && im.width) ctx.drawImage(im, 4, 4);
+        const ime = im as unknown as HTMLImageElement | undefined;
+        if (ime?.complete && ime.width) ctx.drawImage(ime, 4, 4);
       }
       const b = this.previewImgs.get(border);
-      if (b?.complete && b.width) ctx.drawImage(b, 0, 0);
+      const be = b as unknown as HTMLImageElement | undefined;
+      if (be?.complete && be.width) ctx.drawImage(be, 0, 0);
     };
     for (const key of [...content, border]) {
       if (this.previewImgs.has(key)) continue;
@@ -236,7 +238,7 @@ export class WorldCreationPanel {
       : flags.noTraps ? 'Seed_NoTraps'
       : flags.remix ? 'Seed_Remix'
       : 'Seed_Normal';
-    this.seedIcon.src = `sprites/vanilla-ui/UI_WorldCreation_${key}.png`;
+    (this.seedIcon as HTMLImageElement).src = `sprites/vanilla-ui/UI_WorldCreation_${key}.png`;
   }
 
   private submit() {

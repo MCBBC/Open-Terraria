@@ -1,6 +1,7 @@
 // 天空渲染：昼夜渐变、太阳/月亮、星星、云
 // 注意:Clock 必须值导入——DAWN/DUSK 是运行时常量,import type 会被擦除
 // (:528/:561 运行时取值 → "Clock is not defined" 每帧崩渲染循环)
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { Clock } from '../world/World';
 import { Clock as ClockVal } from '../world/World';
 
@@ -32,8 +33,14 @@ function lerpColor(a: string, b: string, t: number): string {
  *  Moon_N.png 50×400 竖条 = 8 个相位帧(moonType 0-8 选表,moonPhase 选帧) */
 function loadTex(name: string): HTMLImageElement {
   const im = new Image();
+  im.onload = () => upgradeToBitmap(im, (b) => { UPG.get(im)?.forEach((cb) => cb(b)); UPG.delete(im); });
   im.src = `sprites/vanilla/${name}`;
   return im;
+}
+/** loadTex 返回的 Image → bitmap 就绪回调登记(持有方替换自身引用) */
+const UPG = new WeakMap<HTMLImageElement, Array<(b: ImageBitmap) => void>>();
+function onBitmap(im: HTMLImageElement, cb: (b: ImageBitmap) => void): HTMLImageElement {
+  const q = UPG.get(im) ?? []; q.push(cb); UPG.set(im, q); return im;
 }
 
 /** 原版云（Cloud.cs 语义）：贴图五族 Cloud_0-3 常态/4-8 高层薄云/9-13 远空灰云/
@@ -413,7 +420,7 @@ class TowerSkyState {
   fade = 0;
   /** Main.GlobalTimeWrappedHourly 近似（秒，驱动星尘闪烁/星云落石） */
   time = 0;
-  private texs = new Map<string, HTMLImageElement>();
+  private texs = new Map<string, ImageBitmap | HTMLImageElement>();
   // NebulaSky._pillars（Activate :121-133：40 根光柱，X 均布世界宽±20000、Y -2000..-1800、Depth 7-15）
   private pillars: Array<{ x: number; y: number; depth: number }> = [];
   // SolarSky._meteors（Activate :124-147：150 颗，2/3 近层 Depth 1.8-4.8、1/3 远层 4.8-9.8）
@@ -424,7 +431,7 @@ class TowerSkyState {
   private bolts: Array<{ x: number; y: number; depth: number; life: number; alive: boolean }> = [];
   private boltTimer = 0;
 
-  private tex(fam: TowerFamily, key: string): HTMLImageElement | null {
+  private tex(fam: TowerFamily, key: string): ImageBitmap | HTMLImageElement | null {
     const k = `${fam}|${key}`;
     let t = this.texs.get(k);
     if (!t) {
@@ -674,7 +681,7 @@ const DRAMA_TEX_FILE: Record<DramaPieceKind, string> = {
 };
 
 const dramaTexCache = new Map<DramaPieceKind, HTMLImageElement>();
-function dramaTex(kind: DramaPieceKind): HTMLImageElement | null {
+function dramaTex(kind: DramaPieceKind): ImageBitmap | HTMLImageElement | null {
   if (typeof Image === 'undefined') return null;
   let t = dramaTexCache.get(kind);
   if (!t) {
@@ -755,9 +762,9 @@ const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
 
 /** 镜头元素乘色缓存（lighter 叠加前先 multiply 着色——LensFlareElement.Color :422 等） */
 const flareTintCache = new Map<string, HTMLCanvasElement>();
-function tintedFlareSprite(tex: HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement | null {
+function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
-  const key = `${tex.src}|${r},${g},${b}`;
+  const key = `${(tex as HTMLImageElement).src}|${r},${g},${b}`;
   const hit = flareTintCache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
@@ -818,7 +825,7 @@ export class SkyRenderer {
   private stars: Array<{ x: number; y: number; s: number }> = [];
   /** 原版云贴图（Cloud.cs:114-146）：0-3 常态/4-8 高层薄云/9-13 远空灰云/
    *  14-17 低空白云/18-21 雨云·风暴云/22-40 稀有云（RollRareCloud 世界旗标门） */
-  private cloudTexs: Array<HTMLImageElement | null> = new Array(41).fill(null);
+  private cloudTexs: Array<ImageBitmap | HTMLImageElement | null> = new Array(41).fill(null);
   private vclouds: VanillaCloud[] = [];
   /** 风——原版风场模型(Main.cs:10800/58222-58310):
    *  windSpeedTarget 随机游走 ±0.001 步、钳 ±0.35;windSpeedCurrent 以
@@ -841,8 +848,8 @@ export class SkyRenderer {
     // 跳帧自愈(云淡入本身 >1s,无可见差异)。此前构造器全量装载 22 张——雨云/
     // 风暴云(18-21)无雨天气永不出现,白载;且 SkyRenderer 在菜单+进图各构造一次,
     // 急载翻倍
-    this.sunTex = loadTex('Sun.png');
-    for (let i = 0; i <= 8; i++) this.moonTexs[i] = loadTex(`Moon_${i}.png`);
+    this.sunTex = onBitmap(loadTex('Sun.png'), (b) => { this.sunTex = b; });
+    for (let i = 0; i <= 8; i++) this.moonTexs[i] = onBitmap(loadTex(`Moon_${i}.png`), (b) => { this.moonTexs[i] = b; });
     // 事件月亮(Main.cs:62400-62408):南瓜月 kind=2 / 霜月 kind=1,50×400 相位竖条
     // ——只在对应月亮事件进行时才画,改首用懒加载(月亮绘制分支内 ensure)
     // 风场初值(Main.cs:10800):current = ±0.8 随机,计数 7200-28800 帧
@@ -851,7 +858,7 @@ export class SkyRenderer {
   }
 
   /** 云贴图首用懒加载(in-flight 去重:占位即标记;未就绪时调用方以 complete 守卫跳帧) */
-  private cloudTex(i: number): HTMLImageElement | null {
+  private cloudTex(i: number): ImageBitmap | HTMLImageElement | null {
     let t = this.cloudTexs[i];
     if (!t) {
       t = new Image();
@@ -861,13 +868,13 @@ export class SkyRenderer {
     return t;
   }
 
-  sunTex: HTMLImageElement;
-  moonTexs: Array<HTMLImageElement | null> = [null, null, null, null, null, null, null, null, null];
+  sunTex: ImageBitmap | HTMLImageElement;
+  moonTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null, null, null, null, null, null, null, null];
   /** 事件月亮（kind 1=霜月 Snow / 2=南瓜月 Pumpkin,Main.cs:62400-62408）——
    *  事件进行时才需要,首用懒加载(绘制分支 ensureEventMoonTex) */
-  private eventMoonTexs: Array<HTMLImageElement | null> = [null, null]; // [1]=Snow [2]=Pumpkin
+  private eventMoonTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null]; // [1]=Snow [2]=Pumpkin
   /** 事件月亮贴图(首用懒加载,未就绪调用方跳帧) */
-  private ensureEventMoonTex(kind: 1 | 2): HTMLImageElement | null {
+  private ensureEventMoonTex(kind: 1 | 2): ImageBitmap | HTMLImageElement | null {
     let t = this.eventMoonTexs[kind];
     if (!t) {
       t = new Image();
@@ -880,7 +887,7 @@ export class SkyRenderer {
   moonType = 0;
   // ---- 天幕流星(AmbientSky.MeteorSkyEntity :1316-1341;spawnMeteor 期间夜 15000-16200
   //      窗口恰一颗划过,Main.HandleMeteorFall :64952-64967)----
-  private meteorTex: HTMLImageElement | null = null;
+  private meteorTex: ImageBitmap | HTMLImageElement | null = null;
   /** 活动实体:null = 无;spawn() 后按 vanilla 参数运动 */
   private meteor: {
     x: number; y: number; vx: number; vy: number; rot: number; t: number; life: number; flip: boolean;
@@ -894,7 +901,7 @@ export class SkyRenderer {
   spawnSkyMeteor(playerCx: number, playerCy: number, worldSurfacePx: number) {
     if (this.meteor) return;   // 原版每窗口一颗(ForceEntitySpawn 一次)
     if (!this.meteorTex) {
-      this.meteorTex = loadTex('Background_Meteor.png');
+      this.meteorTex = onBitmap(loadTex('Background_Meteor.png'), (b) => { this.meteorTex = b; });
     }
     // :1321-1325:flip 掷;角度 π/4 + rand(π/2) 的单位向量(向下)
     const ang = Math.PI / 4 + Math.random() * (Math.PI / 2);
@@ -1129,7 +1136,7 @@ export class SkyRenderer {
 
   // ---- 派对气球天空（PartySky.cs 精简核：BirthdayParty.PartyIsUp 时激活）----
   private partyBalloons: Array<{ tex: number; variant: number; x: number; y: number; depth: number; speed: number }> = [];
-  private partyTexs: Array<HTMLImageElement | null> = [null, null, null];
+  private partyTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null, null];
 
   /** 生成气球（PartySky.ResetBalloon :109-122 + GenerateBalloons :88-107：
    *  贴图 Extra_69/70 二选一（1/30 换 Extra_71）、variant 0-2、speed -1.5..-4、
@@ -1146,7 +1153,7 @@ export class SkyRenderer {
   }
 
   // ---- 灯笼夜天空（LanternSky.cs 1:1，贴图 Extra_134 三变体 20×20）----
-  private lanternTex: HTMLImageElement | null = null;
+  private lanternTex: ImageBitmap | HTMLImageElement | null = null;
   private lanternOpacity = 0;   // _opacity：±0.01/帧向 LanternsUp 逼近（Update :119）
   private lanterns: Array<{
     x: number; y: number; depth: number; speed: number; variant: number;
@@ -1404,8 +1411,8 @@ export class SkyRenderer {
 
   private cloudTintCache = new Map<string, HTMLCanvasElement>();
   /** 云朵着色缓存（multiply + destination-in 保形） */
-  private cloudTint(tex: HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement {
-    const key = `${tex.src}|${r},${g},${b}`;
+  private cloudTint(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement {
+    const key = `${(tex as HTMLImageElement).src}|${r},${g},${b}`;
     const hit = this.cloudTintCache.get(key);
     if (hit) return hit;
     const c = document.createElement('canvas');
@@ -1442,7 +1449,7 @@ export class SkyRenderer {
   /** AmbienceServer._updatesUntilNextAttempt */
   private ambNextAttempt = 0;
   /** 族贴图缓存（texKey → Image，首用懒加载） */
-  private ambTexCache = new Map<string, HTMLImageElement>();
+  private ambTexCache = new Map<string, ImageBitmap | HTMLImageElement>();
   /** NPC.butterflyChance（NPC.cs:94583-94599 每日黎明掷）——按 dayCount 重掷 */
   private butterflyDay = -1;
   private butterflyChance = 999999;
@@ -1862,7 +1869,7 @@ export class SkyRenderer {
   }
 
   /** 族贴图首用懒加载（texKey → Image；未就绪调用方跳帧自愈） */
-  private ambTex(key: string): HTMLImageElement | null {
+  private ambTex(key: string): ImageBitmap | HTMLImageElement | null {
     let t = this.ambTexCache.get(key);
     if (!t) {
       t = loadTex(`${key}.png`);
@@ -2182,7 +2189,7 @@ export class SkyRenderer {
     return remap(dayTimeTicks, 0, 3600, 0, 1) * remap(dayTimeTicks, 32400 - 1800, 32400, 1, 0);
   }
 
-  private sunflareTexLoad(key: SunflareTex): HTMLImageElement | null {
+  private sunflareTexLoad(key: SunflareTex): ImageBitmap | HTMLImageElement | null {
     let t = this.sunflareTex[key];
     if (!t) {
       t = loadTex(SUNFLARE_TEX_FILE[key]);

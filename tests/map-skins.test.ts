@@ -6,7 +6,7 @@
 //   - 原版唯一的地图皮肤 = 小地图边框 MinimapFrameManager 9 款（MinimapFrameManager.cs:32-42），
 //     仓库已全链实装（Options.minimapFrame / Settings ui 栏 / Renderer.MINIMAP_SKINS）。
 // 本测试锁定这条真实链路：贴图文件存在 + Options 持久化 + 切换纯函数（CycleSelection 方向）。
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 
 // localStorage stub（Options 经 KvStore 走 localStorage 快路径；node 无实现，同 character-store.test.ts）
@@ -57,15 +57,25 @@ describe('小地图边框皮肤（MinimapFrameManager）', () => {
     expect(cur).toBe('Default');
   });
 
-  it('Options 持久化：默认 Default；set 落 kv；新实例回读生效', async () => {
-    const a = new OptionsStore();
-    await a.load();
-    expect(a.data.minimapFrame).toBe('Default');
-    await a.set('minimapFrame', 'Golden');
-    expect(JSON.parse(mem.get(OPTIONS_KEY)!).minimapFrame).toBe('Golden');
-    const b = new OptionsStore();
-    await b.load();
-    expect(b.data.minimapFrame).toBe('Golden');
+  it('Options 持久化：默认 Default；set 落 kv（400ms 防抖窗后）；新实例回读生效', async () => {
+    // 产品语义（Options.ts set，2026-08-13 泄露 review IO 防抖）：内存值即时、
+    // 落盘合并到停手后 400ms——本测试按防抖语义等待窗口，不即时断言 kv
+    vi.useFakeTimers();
+    try {
+      const a = new OptionsStore();
+      await a.load();
+      expect(a.data.minimapFrame).toBe('Default');
+      await a.set('minimapFrame', 'Golden');
+      expect(a.data.minimapFrame).toBe('Golden');          // 内存值即时（所见即所得）
+      expect(mem.get(OPTIONS_KEY)).toBeUndefined();        // 防抖窗内未落盘（设计语义）
+      await vi.advanceTimersByTimeAsync(400);              // 走完 400ms 防抖窗
+      expect(JSON.parse(mem.get(OPTIONS_KEY)!).minimapFrame).toBe('Golden');
+      const b = new OptionsStore();
+      await b.load();
+      expect(b.data.minimapFrame).toBe('Golden');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('存档里的未知皮肤键归一化 → Default（SetActiveFrame 兜底 First()）', async () => {

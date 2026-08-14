@@ -3,6 +3,7 @@
 // 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
@@ -14,11 +15,12 @@ import type { Camera } from '../render/Camera';
 
 /** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
 const spriteCache = new Map<number, HTMLImageElement>();
-export function projSprite(projId: number): HTMLImageElement | null {
+export function projSprite(projId: number): ImageBitmap | HTMLImageElement | null {
   let img = spriteCache.get(projId);
   if (img !== undefined) return img ?? null;
   if (typeof Image === 'undefined') return null;
   img = new Image();
+  img.onload = () => upgradeToBitmap(img, (b) => spriteCache.set(projId, b));
   img.src = `sprites/vanilla/Projectile_${projId}.png`;
   spriteCache.set(projId, img);
   return img;

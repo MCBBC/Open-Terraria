@@ -8,6 +8,12 @@
 //   Main.UpdateOldNPCShop         Main.cs:18056-18064     （换店清回购记）
 //   ItemSlot.GetSellOrTrash       ItemSlot.cs:185-196     （Shift+左键 Sell/垃圾桶/钱币豁免）
 //   ItemSlot.OverrideLeftClick cursorOverride==10         ItemSlot.cs:780-798（出售结算）
+//   ItemSlot.LeftClick case 4 / PickItemMovementAction 15 ItemSlot.cs:1110-1129/:1426-1439
+//                                （光标持有物点空商店格 = 整叠卖出）
+//   ItemSlot.HandleShopSlot       ItemSlot.cs:1870-1931   （买入：GetItemExpectedPrice
+//                                →BuyItem；buyOnce 减库存；!buyOnce 才记回购）
+//   Item.Prefix value 缩放        Item.cs:596-597         （num2*=num2 平方乘区）
+//   Chest.AddItemToShop           Chest.cs:651-670        （卖出克隆回 buyOnce 货架）
 //   Main.MouseText_DrawItemTooltip_AddShopLines Main.cs:20305-20345（tooltip 同公式）
 //
 // 本模块纯函数化：全部状态走入参（settings），不触 Game/World/存档。
@@ -17,6 +23,7 @@
 // ============================================================================
 import shopstockJson from '../data/vanilla-shopstock.json';
 import { f32, roundCS } from './ScaleStats';
+import { prefixValueMul } from '../data/vanillaPrefixes';
 
 /** 物品 value 表（vanilla-shopstock.json 附带；Game.ts:268 ITEM_VALUES 同源，此处
  *  独立导入以保持纯函数无 Game 依赖） */
@@ -37,8 +44,28 @@ export function itemStoreValue(vid: number): number {
   return ITEM_VALUES[String(vid)] ?? 0;
 }
 
+// ---------------------------------------------------------------------------
+// Item.Prefix 的 value 缩放（Item.cs:596-597）——带词缀物品的 GetStoreValue：
+//   :596  num2 *= num2;                          ← 词缀价值乘区【平方后再乘】
+//   :597  value = (int)((float)value * num2);    ← (int) 向零截断
+// num2 = TryGetPrefixStatMultipliersForItem 的 out value（Item.cs:1041 乘区公式，
+// 本仓 prefixValueMul 同式、含配饰档位 :1043-1058）。卖价（GetStoreValue→
+// calcForSelling）与买回价（buyOnce 分支）都以缩放后 value 计——白板物品恒走
+// itemStoreValue 原值。
+// ---------------------------------------------------------------------------
+export function itemValueWithPrefix(vid: number, prefix = 0): number {
+  const base = itemStoreValue(vid);
+  if (!prefix) return base;
+  const m = prefixValueMul(prefix);              // out value（未平方）
+  const sq = f32(f32(m) * f32(m));               // :596 num2 *= num2（f32 逐位）
+  return Math.trunc(f32(f32(base) * sq));        // :597 (int) 截断
+}
+
 /** 出售输入（对应 SellItem 处引用的原版字段） */
 export interface SellSettings {
+  /** Item.prefix——value 缩放（Item.cs:596-597 num2 平方乘区）；
+   *  缺省 0 = 白板，走 itemStoreValue 原值 */
+  prefix?: number;
   /** Player.currentShoppingSettings.PriceAdjustment（Player.cs:2780；NotInShop=1f，
    *  ShoppingSettings.cs:11-14）。Game 侧传 shopHappinessMul（开对话时快照） */
   priceAdjustment?: number;
@@ -128,7 +155,7 @@ export interface SellQuote {
 //   :34869-34876 装不下 → 全量回滚 → Game.npcShopSell 消费
 // ---------------------------------------------------------------------------
 export function computeSellValue(vid: number, stack: number, settings: SellSettings = {}): SellQuote {
-  const prices = expectedPrices(itemStoreValue(vid), settings);
+  const prices = expectedPrices(itemValueWithPrefix(vid, settings.prefix ?? 0), settings);
   if (prices.selling <= 0) {                       // :34719-34722
     return { sellable: false, copper: 0, perUnit: 0, prices };
   }
@@ -151,4 +178,20 @@ export function computeSellValue(vid: number, stack: number, settings: SellSetti
 // ---------------------------------------------------------------------------
 export function canSellFromShopUi(vid: number): boolean {
   return !(vid >= 71 && vid <= 74);
+}
+
+// ---------------------------------------------------------------------------
+// Chest.AddItemToShop（Chest.cs:651-670）残量纯函数——卖出物品回 buyOnce 货架：
+//   :652  num = shopSellbackHelper.Remove(newItem)
+//         ← 实扣量 = min(记账量, newItem.stack)（ItemShopSellbackHelper.cs:52-63：
+//           记少扣到 0 删键返回记账量 / 记多扣 item.stack）
+//   :653-656  if (num >= newItem.stack) return;   ← 记账全覆盖 → 不上架
+//   :658-663  item[i] = newItem.Clone()（buyOnce=true、favorited=false、
+//             stack -= num）落 item[0-39] 首空位
+// 返回应上架残量（0 = 不上架）。
+// ---------------------------------------------------------------------------
+export function buybackShelfStack(stack: number, memoBefore: number): number {
+  const covered = Math.min(memoBefore, stack);   // Remove 实扣量（:652）
+  if (covered >= stack) return 0;                // :653-656 全覆盖不上架
+  return stack - covered;                        // :663 stack -= num
 }

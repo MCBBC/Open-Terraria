@@ -20,6 +20,7 @@
 //   - Visuals.* 装饰叠层（MapBGOverlay1-9：Rain/Blizzard/Sun/Moon/Meteor 等）——
 //     提取数据已含 derivations 推导规则，DOM 头像暂只铺底图不叠装饰层
 //   - 筛选：稀有生物（RareSpawnBestiaryInfoElement）/ 群系 / 事件标签
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
@@ -501,14 +502,14 @@ export function bestiaryGridBackground(npcId: number, crimson = false): string |
  *  ①命中直回 ②atlas.vimages 已有的直接借 ③在途去重(并发 refresh 共享一次
  *  fetch+decode) ④onerror 负终结(404 也回调,防等待队列无限堆积) ⑤容量上限
  *  LRU 淘汰(引用即成本)。 */
-const bstSheetCache = new Map<string, HTMLImageElement>();
-const bstSheetPending = new Map<string, Array<(img: HTMLImageElement | null) => void>>();
+const bstSheetCache = new Map<string, ImageBitmap | HTMLImageElement>();
+const bstSheetPending = new Map<string, Array<(img: ImageBitmap | HTMLImageElement | null) => void>>();
 /** 404 负缓存(2026-08-13 泄露 review):缺表时此前每次 refresh 都重新 fetch+
  * 解码(pending 去重只挡并发不挡串行)——登记终态,不再重发 */
 const bstSheetFailed = new Set<string>();
 const BST_SHEET_CACHE_MAX = 160;
 
-function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: HTMLImageElement | null) => void): void {
+function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBitmap | HTMLImageElement | null) => void): void {
   const hit = bstSheetCache.get(file);
   if (hit) { cb(hit); return; }
   const atlasHit = atlas?.vimages.get(file) ?? null;
@@ -529,6 +530,8 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: HTMLIma
     if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
     bstSheetCache.set(file, im);
     for (const c of q!) c(im);
+    // ImageBitmap 升级(下帧起缓存命中即自持解码像素;画布 isConnected 守卫管旧引用)
+    upgradeToBitmap(im, (b) => { if (!bstSheetFailed.has(file)) bstSheetCache.set(file, b); });
   };
   im.onerror = () => {
     bstSheetPending.delete(file);
@@ -897,7 +900,7 @@ export class BestiaryPanel {
         : bestiaryPortraitBackground(npcId, crimson))
       : { image: null as string | null, color: [255, 255, 255, 255] };
     const size = canvas.width;
-    const paint = (img: HTMLImageElement) => {
+    const paint = (img: ImageBitmap | HTMLImageElement) => {
       if (!canvas.isConnected) return;  // 上代 refresh 已销毁的画布不画(解码风暴浪费源)
       const frames = VANILLA_NPCS[String(npcId)]?.frames ?? 1;
       const fh = Math.max(1, Math.floor(img.height / frames));
@@ -912,7 +915,7 @@ export class BestiaryPanel {
     const atlas = this.flow.atlas ?? null;
     // 统一走 bstLoadSheet 缓存(同表并发只取一次/结果回写/失败负终结;
     // 此前 loadBg 每格每次 refresh new Image 且不回写=滚轮风暴解码源)
-    const paintWithBg = (bgImg: HTMLImageElement | null) => {
+    const paintWithBg = (bgImg: ImageBitmap | HTMLImageElement | null) => {
       const cx = canvas.getContext('2d');
       if (!cx) return;
       cx.imageSmoothingEnabled = false;

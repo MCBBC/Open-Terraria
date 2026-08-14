@@ -25,9 +25,9 @@ function stubImgs(bg: BiomeBackground) {
     125: [160, 288], 126: [160, 288], 127: [160, 288],
     185: [160, 48], 186: [160, 48], 187: [160, 48],
   };
-  const map = (bg as unknown as { imgs: Map<number, HTMLImageElement | null> }).imgs;
-  const orig = (bg as unknown as { img(n: number): HTMLImageElement | null }).img;
-  (bg as unknown as { img(n: number): HTMLImageElement | null }).img = (n: number) => {
+  const map = (bg as unknown as { imgs: Map<number, ImageBitmap | HTMLImageElement | null> }).imgs;
+  const orig = (bg as unknown as { img(n: number): ImageBitmap | HTMLImageElement | null }).img;
+  (bg as unknown as { img(n: number): ImageBitmap | HTMLImageElement | null }).img = (n: number) => {
     const s = SIZES[n];
     if (s) {
       const fake = { tex: n, complete: true, naturalWidth: s[0], naturalHeight: s[1] } as unknown as HTMLImageElement;
@@ -121,7 +121,7 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     (bg as unknown as { ugAlpha: number; ugOld: number }).ugAlpha = 1;
     (bg as unknown as { ugAlpha: number; ugOld: number }).ugOld = bg.ugStyle;
     // 地狱层贴图 stub(风格 0 集 = Underworld 0-4;1/6 带动画)
-    const hellMap = (bg as unknown as { hellImgs: Map<number, HTMLImageElement | null> }).hellImgs;
+    const hellMap = (bg as unknown as { hellImgs: Map<number, ImageBitmap | HTMLImageElement | null> }).hellImgs;
     const HELL: Record<number, [number, number]> = {
       0: [1024, 858], 1: [2048, 1900], 2: [1024, 630], 3: [1024, 630], 4: [48, 1300],
     };

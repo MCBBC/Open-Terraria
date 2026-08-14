@@ -37,7 +37,13 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     }
   }
   // 白天 → ai1=2(守卫/离场语义);玩家死/超 2000px → 3
-  if (game.world.clock.isDay && !isGuardian && e.ai1 !== 3) e.ai1 = 2;
+  // ★进入狂暴时冻结旋转方向(ai3):原版 rotation += direction*0.3 的 direction 是
+  //  TargetClosest 的**持久**朝向字段(目标侧),非每帧 sign(vx)——曾用 facing
+  //  (每帧 vx 符号)致旋冲过头贴脸时 spin 反复换号 = "只会两边摇动不旋转"
+  if (game.world.clock.isDay && !isGuardian && e.ai1 !== 3) {
+    if (e.ai1 !== 2) e.ai3 = player && player.cx > e.cx ? 1 : -1;
+    e.ai1 = 2;
+  }
   if (!player || Math.abs(e.cx - player.cx) > 2000 || Math.abs(e.cy - player.cy) > 2000) {
     if (!player || Math.abs(e.cx - player.cx) > 2000 || Math.abs(e.cy - player.cy) > 2000) e.ai1 = 3;
   }
@@ -46,7 +52,7 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     // 8 速恒直追——此前只改了伤害没改防御，且玩家死后 null 解引用
     e.def.damage = 9999;
     e.def.defense = 9999;
-    e.spin += (e.facing || 1) * 0.3;
+    e.spin += (e.ai3 || 1) * 0.3;
     if (player) {
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
@@ -69,8 +75,14 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
 
   e.ai2 += 1;
   if (e.ai1 === 0) {
-    // 悬浮段(:22046-22091)
-    if (e.ai2 >= 800) { e.ai2 = 0; e.ai1 = 1; }
+    // 悬浮段(:22046-22091):rotation = velocity.X/15(倾转)
+    e.spin = e.vx / 15;
+    if (e.ai2 >= 800) {
+      e.ai2 = 0;
+      e.ai1 = 1;
+      // 旋冲方向冻结 = 目标侧(TargetClosest direction 语义,见上 ai1=2 注)
+      e.ai3 = player.cx > e.cx ? 1 : -1;
+    }
     // 回悬浮:恢复冲撞前的伤害/防御基值
     const base = baseStats.get(e);
     if (base) { e.def.damage = base.dmg; e.def.defense = base.def; }
@@ -100,7 +112,7 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     if (!base) { base = baseOf(e); }
     e.def.defense = Math.max(0, base.def - 10);
     e.def.damage = Math.round(base.dmg * 1.3);
-    e.spin += (e.facing || 1) * 0.3;
+    e.spin += (e.ai3 || 1) * 0.3;
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const d = Math.hypot(dx, dy) || 1;
     const spd = 12; // (1.5x 追击速)
@@ -860,15 +872,25 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
   if (!player || Math.abs(e.cx - player.cx) > 6000 || Math.abs(e.cy - player.cy) > 6000) e.ai1 = 3;
   if (!player) { e.x += e.vx; e.y += e.vy; return; }
   // 白天 → 狂暴(原版不逃走,持续 9999 追杀;Game.ts 日出剔除对 127 豁免)
+  // ★旋转方向冻结(ai3)同骷髅王 35:原版 rotation += direction*0.3 用 TargetClosest
+  //  持久 direction,非每帧 sign(vx)(曾 facing 致贴脸旋冲 spin 反复换号成摆动)
   if (game.world.clock.isDay && e.ai1 !== 3 && e.ai1 !== 2) {
+    e.ai3 = player && player.cx > e.cx ? 1 : -1;
     e.ai1 = 2;
     game.playSfx('roar', 0.8);
   }
   if (e.ai1 === 0) {
     // 悬浮段(:27787-27874):Y 带 [玩家-200, 玩家-500] 0.1/±2;X 窗 ±100 0.1/±8
     e.ai2 += 1;
-    if (e.ai2 >= 600) { e.ai2 = 0; e.ai1 = 1; }
-    e.spin = e.vx / 15;
+    if (e.ai2 >= 600) {
+      e.ai2 = 0;
+      e.ai1 = 1;
+      e.ai3 = player.cx > e.cx ? 1 : -1;
+    }
+    // 原版 hover 倾转是阻尼收敛(:27874 rotation.AngleLerp(vx/15*0.5, 0.75)),
+    //  非裸 vx/15(曾直写=无阻尼)
+    const tilt = (e.vx / 15) * 0.5;
+    e.spin += (tilt - e.spin) * 0.75;
     if (e.y > player.y - 200) {
       if (e.vy > 0) e.vy *= 0.98;
       e.vy -= 0.1;
@@ -895,7 +917,7 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
     e.ai2 += 1;
     if (e.ai2 === 2) game.playSfx('roar', 0.6);
     if (e.ai2 >= 400) { e.ai2 = 0; e.ai1 = 0; }
-    e.spin += (e.facing || 1) * 0.3;
+    e.spin += (e.ai3 || 1) * 0.3;
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const d = Math.hypot(dx, dy) || 1;
     e.vx = dx / d * 2; e.vy = dy / d * 2;
@@ -903,7 +925,7 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
     // 白天狂暴(:27971-28004):伤/防 9999,速 10+dist/100 钳 [8,32]
     e.def.damage = 9999;
     e.def.defense = 9999;
-    e.spin += (e.facing || 1) * 0.3;
+    e.spin += (e.ai3 || 1) * 0.3;
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const d = Math.hypot(dx, dy) || 1;
     let spd = 10 + d / 100;

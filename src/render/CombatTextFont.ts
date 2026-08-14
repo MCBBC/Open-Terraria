@@ -18,7 +18,7 @@ interface FontPage {
 }
 
 const FONTS = combatFontJson as unknown as { Combat_Text: FontPage; Combat_Crit: FontPage };
-const TEX: Array<HTMLImageElement | null> = [null, null];
+const TEX: Array<ImageBitmap | HTMLImageElement | null> = [null, null];
 const CHAR_INDEX: Array<Map<number, number>> = [new Map(), new Map()];
 const READY: [boolean, boolean] = [false, false];
 
@@ -28,7 +28,7 @@ const READY: [boolean, boolean] = [false, false];
   pages.forEach((p, i) => {
     p.characters.forEach((c, k) => CHAR_INDEX[i].set(c, k));
     const img = new Image();
-    img.onload = () => { TEX[i] = img; READY[i] = true; };
+    img.onload = () => { TEX[i] = img; READY[i] = true; upgradeToBitmap(img, (b) => { TEX[i] = b; }); };
     img.src = `sprites/${p.texture}`;
   });
 })();
