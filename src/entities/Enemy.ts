@@ -26,6 +26,7 @@ import { Dart } from './Dart';
 import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
 import { daybreakStacks } from './WeaponProj';
+import { npcCheckArmorPenetration } from './projStatus';
 import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear, mechProbeLock } from './bossAI';
 import { mechQueenUp } from './mechQueen';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
@@ -756,15 +757,19 @@ export class Enemy extends Entity {
   betsysCurseT = 0;
   daybreakT = 0;  daybreakDoT = 0;
   /** R2 余量批(NPC.cs UpdateNPC_BuffApplyDOTs 逐条):Bleeding(30)=-24=12HP/s(:92598)/
-   *  Hemorrhage(375)=-200=100HP/s(:92610)。骨标(169)/触手刺(337)/血腥屠夫(344)
-   *  =层数模型(附着弹 598/971/975 每 6/6/8 lifeRegen,:92740/:92761/:92786)——
-   *  repo 无附着弹计数,取单层 3/3/4 HP/s 近似,层数叠加登记 GAP(同 Daybreak)。
+   *  Hemorrhage(375)=-200=100HP/s(:92610)。
+   *  贴附族层数模型已接(2026-08-15,NPC.cs:92740-92863 逐条):层数=场上附着弹计数
+   *  (169←598 骨标 3HP/s/层 :92740-92759 / 337←971 触手刺 3HP/s/层 :92761-92779 /
+   *  344←975 血腥屠夫 4HP/s/层 :92786-92804 / 183←614 星尘弹 20HP/s/层 :92846-92863
+   *  ——均无零层兜底,唯 Daybreak 189 有 :92822-92825)。
+   *  仓内 598/614/971/975 无附着实体,以"层=独立倒计时条目"等价建模:
+   *  每层寿命=对应 buff 时长(贴附弹寿命 60×num11 AI 次,AI_113 :38252-38272
+   *  默认 num11=15→900t/971·975=9×MaxUpdates→540t,恰与 AddBuff 时长
+   *  169/183=900t、337/344=540t 等长)——层自然消亡与 buff 到期同步,无独立衰减。
    *  137 Slimed = 六火系 DoT 翻倍(drippingSlime 六处等量叠伤,见 onFireT 块)。
    *  151 SoulDrain = -50 lifeRegen = 25 HP/s(:92927-92935,realLife==-1 即非蠕虫
    *  分体)——玩家侧魂镰联动(3006 持械挥击时 player.soulDrain++ 计数,
-   *  UpdateNPC_SoulDrainDebuff :91952-91979)依赖魂镰实装,登记 GAP。
-   *  183 StardustBleed = 层数模型(附着 614 每 40 lifeRegen=20HP/s/层,
-   *  :92846-92863)——repo 614 为无附着态 Arrow,取单层 20 HP/s,层数 GAP(同上) */
+   *  UpdateNPC_SoulDrainDebuff :91952-91979)依赖魂镰实装,登记 GAP */
   slimedT = 0;
   bleedT = 0;      bleedDoT = 0;
   hemorrhageT = 0; hemorrhageDoT = 0;
@@ -773,6 +778,14 @@ export class Enemy extends Entity {
   butcherT = 0;    butcherDoT = 0;
   soulDrainT = 0;  soulDrainDoT = 0;
   stardustT = 0;   stardustDoT = 0;
+  /** 贴附族层数池（每元素=一层的剩余秒数；addStickerStack 入池、buff tick 衰减，
+   *  ≤0 剪除）。上限=KillOldestJavelin（Projectile.cs:13019-13030/:13995-14020
+   *  杀 timeLeft 最低=最老）：598=6 / 614=10；971/975 不在白名单无上限。
+   *  189 Daybreak 有 DaybreakFlare 实体走 daybreakStacks 活计数，不入本表 */
+  javelinStacks: number[] = [];    // 598 骨标枪（cap 6）
+  stardustStacks: number[] = [];   // 614 星尘细胞弹（cap 10）
+  spikeStacks: number[] = [];      // 971 触手刺（无上限）
+  butcherStacks: number[] = [];    // 975 血腥屠夫（无上限）
   poisonDoT = 0;
   venomDoT = 0;
   cursedDoT = 0;
@@ -930,6 +943,19 @@ export class Enemy extends Entity {
     this.h = this.def.height;
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
+  }
+
+  /** 贴附族层数登记（projStatus.applyProjStatus 施加 169/183/337/344 时调用，
+   *  等价原版一枚贴附弹入场的 KillOldestJavelin 检查 :13019-13030）：
+   *  push 一层（寿命=dur 秒），超上限杀最老（最早入池者剩余时间最低，对应
+   *  原版扫 timeLeft 最低者 Kill，:13995-14020）。598=6 / 614=10；
+   *  971/975 不在 :13021 白名单 → 无上限 */
+  addStickerStack(buff: 169 | 183 | 337 | 344, dur: number): void {
+    const arr = buff === 169 ? this.javelinStacks : buff === 183 ? this.stardustStacks
+      : buff === 337 ? this.spikeStacks : this.butcherStacks;
+    const cap = buff === 169 ? 6 : buff === 183 ? 10 : Infinity;
+    arr.push(dur);
+    while (arr.length > cap) arr.shift(); // 最老离池
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -1288,11 +1314,26 @@ export class Enemy extends Entity {
     }
     if (this.bleedT > 0) { this.bleedT -= dt; this.bleedDoT += 12 * dt; }
     if (this.hemorrhageT > 0) { this.hemorrhageT -= dt; this.hemorrhageDoT += 100 * dt; }
-    if (this.javelinT > 0) { this.javelinT -= dt; this.javelinDoT += 3 * dt; }
-    if (this.spikeT > 0) { this.spikeT -= dt; this.spikeDoT += 3 * dt; }
-    if (this.butcherT > 0) { this.butcherT -= dt; this.butcherDoT += 4 * dt; }
+    // 贴附族层数结算（NPC.cs:92740-92863）：层数先随 dt 衰减（每层独立倒计时，
+    // 寿命=对应 buff 时长——与场上附着弹到寿消亡等价），再按层 ×单层 HP/s。
+    // 无零层兜底（:92740/:92761/:92786/:92846 四处均无 num==0→1；唯 Daybreak 有）
+    const decay = (arr: number[]): number => {
+      let n = 0;
+      for (let i = arr.length - 1; i >= 0; i--) {
+        arr[i] -= dt;
+        if (arr[i] <= 0) arr.splice(i, 1); else n++;
+      }
+      return n;
+    };
+    if (this.javelinT > 0) { this.javelinT -= dt; this.javelinDoT += 3 * decay(this.javelinStacks) * dt; }   // :92740-92759
+    else this.javelinStacks.length = 0;   // buff 尽层同步清（防御性；正常两钟同步到期）
+    if (this.spikeT > 0) { this.spikeT -= dt; this.spikeDoT += 3 * decay(this.spikeStacks) * dt; }           // :92761-92779
+    else this.spikeStacks.length = 0;
+    if (this.butcherT > 0) { this.butcherT -= dt; this.butcherDoT += 4 * decay(this.butcherStacks) * dt; }   // :92786-92804
+    else this.butcherStacks.length = 0;
     if (this.soulDrainT > 0) { this.soulDrainT -= dt; this.soulDrainDoT += 25 * dt; } // :92927-92935
-    if (this.stardustT > 0) { this.stardustT -= dt; this.stardustDoT += 20 * dt; }    // 单层 :92846-92863
+    if (this.stardustT > 0) { this.stardustT -= dt; this.stardustDoT += 20 * decay(this.stardustStacks) * dt; } // :92846-92863 num10×20
+    else this.stardustStacks.length = 0;
     // Oiled 独立结算(:92728-92737 单块 -50 = 25 HP/s,不随各系翻倍/重复)
     if (this.oiledDoT >= 1) {
       const n = Math.floor(this.oiledDoT);
@@ -2286,9 +2327,13 @@ export class Enemy extends Entity {
     if (this.vanillaId === 198 && this.hp <= this.maxHp * 0.55) {
       this.tryTransformTo(199, st);
     }
-    // 地面摩擦（依赖 slope 坡面碰撞系统未实装——TileStore.slope 已存数据但
-    // Collision.SlopeCollision 逐面摩擦未接，此处 0.85 衰减为性能近似，登记待接）
-    if (this.onGround) this.vx *= 0.85;
+    // 地面摩擦：原版 walker 摩擦链已在 fighterMoveStep（fighterFamilies.ts）1:1
+    // （AI_003_Fighters :60115-60175——num3 档 velocity×damp【双轴】、vy==0 落地门、
+    // 仅 |vx|>max 超速段衰减,逐族 damp 0.7/0.8/0.95…;未超速段是 +=accel 钳 ±max）;
+    // 坡面逐面链（Collision.SlopeCollision :1796-2036 贴合/受阻清零）在
+    // TileCollision.slopeCollide。此处的 onGround ×0.85 是 slope 系统落地前的
+    // 陈旧近似,与 damp 叠乘成双阻尼（超速段 0.8×0.85,匀速段把平衡点压到
+    // accel/(1-0.85)≈0.47px/t,远低于原版 max 1-1.5）——2026-08-15 摘除回归单链
     // ---- 战士族远程攻击（NPC.cs:59464-60085：落地 + 视线 + 距离<射程 → 举枪蓄力，
     // 半程发射；justHit 打断蓄力 cs:59489。覆盖入侵弓手 + 地牢/沙漠常驻射击怪）----
     // ai[1]=蓄力倒数(ai0)、ai[2]=瞄准姿态(ai3)
@@ -6546,25 +6591,21 @@ export class Enemy extends Entity {
       this.iframes = 8; // dontTakeDamage（爆炸 4t 内不可再受击）
       return true;
     }
-    // 原版 Main.CalculateDamageNPCsTake：dmg - defense*0.5，下限 1
+    // 原版结算序（Projectile.cs:12796-12808 + Main.cs:65626-65635）：
+    //   弹幕侧最终伤 num12 先 += checkArmorPenetration（穿甲加成【加进伤害】，
+    //   单池：弹幕/玩家 armorPen（Arrow.settlePen 即此参）+ ichor15 + brokenArmor20
+    //   + betsysCurse40 + (int)(def×pct)——NPC.cs:81913-81938，池>def 钳 def/2、
+    //   池≤0 或 def≤0 早退 0）→ 再入 StrikeNPC 的 CalculateDamageNPCsTake：
+    //   max(1, dmg + pen − def×0.5)。pen/2 上限=def/2 ⇒ 穿甲永不把伤害推过全额
+    //   （旧自造"def 钳 2×dmg"删除，下限 1 由本式承担）；负防御 def≤0 不吃穿甲
+    //   但 −def×0.5 为增伤（原版直算式,2026-08-13 对齐保留）。
+    //   已知偏差登记：crit ×2 原版在防后（StrikeNPC :81990），仓内调用侧预倍——
+    //   crit 会连带翻倍 pen/防（Game.ts 挥击侧,并行会话领走未动）
     const def = this.def.defense ?? 0;
-    // ichor（灵液药剂）：NPC.checkArmorPenetration（NPC.cs:81913-81938）——
-    // armorPenetration += 15，结算 (armorPenetration/2) 整除 = +7 直伤；
-    // 超防钳制（def>2×dmg 时按 dmg 上限，防穿透把伤害推到全额以上）
-    // ⑥ armorPen 改减防语义（NPC.cs:81913-81938 checkArmorPenetration=min(pen,def)：
-    // 有效防 = def - min(armorPen,def)，伤 = dmg - 有效防/2——此前调用方把 pen 加在
-    // 伤害上约 2 倍过强；ichor 灵液仍走 +7 直伤通道（:81920 既有特例）
-    const pen = this.ichorT > 0 ? 7 : 0;
-    const effDef0 = def > dmg * 2 ? dmg * 2 : def;
-    // 负防御(EoC P2 专家 -15/-30、诸 Boss 狂暴态)按原版直算式应为【增伤】;
-    // 此前 Math.max(0,…) 把负值钳成 0 吞掉加伤(2026-08-13 对齐)。armorPen 只削
-    // 非负防御(min 内侧钳 0),不与负防御交互
-    // buff 侧无视防(NPC.cs:81919-81924):BrokenArmor +20 / BetsysCurse +40 armorPenetration
-    const buffPen = (this.brokenArmorT > 0 ? 20 : 0) + (this.betsysCurseT > 0 ? 40 : 0);
-    // armorPenetrationPercent（:12443 闪电光环 688/690=1:按比例无视防御——在定点穿甲前扣）
-    const pctDef = Math.max(0, effDef0) * Math.min(1, Math.max(0, penPercent));
-    const effDef = effDef0 - pctDef - Math.min(armorPen + buffPen, Math.max(0, effDef0) - pctDef);
-    dmg = Math.max(1, Math.round(dmg - effDef * 0.5 + pen));
+    const penAdd = npcCheckArmorPenetration(def, armorPen, penPercent, {
+      ichor: this.ichorT > 0, brokenArmor: this.brokenArmorT > 0, betsysCurse: this.betsysCurseT > 0,
+    });
+    dmg = Math.max(1, Math.round(dmg + penAdd - def * 0.5));
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
@@ -6597,42 +6638,53 @@ export class Enemy extends Entity {
     }
     this.iframes = pierce === 1 ? 0 : 10; // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
-    // 击退管线（N:82144-82236 1:1）：五段软封顶 8/10/12/14/16（超出段 ×0.9/0.8/
-    // 0.7/0.6/钳 16）+ 地狱火(onFire2,onFireT 代)×1.1 + 暴击×1.4 + 小丑 185×1.5。
-    // ★调用侧遗留的 0.65 系数待全量清扫后此管线即完整 num3 语义（登记）
-    let imp = Math.hypot(kbx, kby);
-    if (imp > 0) {
-      if (this.onFireT > 0) imp *= 1.1;
-      if (imp > 8) imp = 8 + (imp - 8) * 0.9;
-      if (imp > 10) imp = 10 + (imp - 10) * 0.8;
-      if (imp > 12) imp = 12 + (imp - 12) * 0.7;
-      if (imp > 14) imp = 14 + (imp - 14) * 0.6;
-      if (imp > 16) imp = 16;
-      if (crit) imp *= 1.4;
-      if (this.vanillaId === 185) imp *= 1.5;
-      const f = imp / Math.hypot(kbx, kby);
-      kbx *= f; kby *= f;
-    }
-    // 应用（N:82142-82239）：门 knockBackResist>0（0=免疫 Boss 整块跳过）；
-    // num3=kb×resist 一次乘 + 五段封顶 + crit×1.4。kby===0 = 武器路径 →
-    // 重路（num8=(int)伤×10(专家15)≤lifeMax 时）：X 收敛到 ±num3（:82204-82216
-    // 同向不足才推、反向 ×2 步、钳目标值）+ Y=-num3×0.75×resist（:82231 二次乘）；
-    // TODO 轻路（num8>lifeMax 大伤害打小怪）：减法收敛 + 185 特例 + Y 加法钳。
-    // kby!==0 = 爆炸/光环等非武器冲量 → 加法（登记）
+    // 击退管线（NPC.cs:82144-82239 1:1）。武器路径（kby===0，kbx=方向×力度）：
+    //   num3 = kb×resist（:82145 ★resist 先乘、五段软封顶作用在乘后值——旧实现
+    //   封顶算在裸 kb 上再乘 resist，顺序反）→ onFire2（诅咒焰 buff39，cursedT 代）
+    //   ×1.1（:82148）→ 五段封顶 8/10/12/14/16（:82152-82175）→ crit×1.4（:82181）
+    //   → num8 = (int)防后最终伤 ×10（专家 ×15，:82183-82187）
+    //   num8>lifeMax = 轻路（大伤害打小怪，:82188-82226）：X 减法收敛（同向不足
+    //   才推、同号余速 ×2 步、钳 ±num3，:82189-82206）→ 小丑 185 num3×1.5
+    //   （:82209-82212，★仅轻路——旧实现放在共享段）→ num3 翻负（noGravity
+    //   ×-0.5 / 有重力 ×-0.75，:82217）→ Y 加法钳（vy>num3 才 += 并钳下限，
+    //   :82220-82225——下落/静止中挨打才起跳，上升中不追加）
+    //   否则重路（:82227-82237）：直接赋值 vy=-num3×(0.75|0.5)×resist、
+    //   vx=num3×dir×resist（★resist 二次乘=原版如此,num3 已含一次）
+    // kby!==0 = 爆炸/光环等非武器冲量 → 加法冲量（原版同走 StrikeNPC 管线，
+    //   仓内双参冲量约定，登记）
     const resist = this.kbResistOverride ?? this.def.knockbackResist;
-    if (resist > 0) {
-      if (kby === 0) {
-        const dir0 = Math.sign(kbx) || 1;
-        const t0 = kbx * resist; // num3：imp 已含五段封顶/crit 缩放，此处乘 resist
-        if (dir0 > 0 ? this.vx < t0 : this.vx > t0) {
-          this.vx += t0 * (dir0 > 0 ? (this.vx < 0 ? 2 : 1) : (this.vx > 0 ? 2 : 1));
-          if (dir0 > 0 ? this.vx > t0 : this.vx < t0) this.vx = t0;
+    if (kby !== 0) {
+      if (resist > 0) { this.vx += kbx * resist; this.vy += kby * resist; }
+    } else if (Math.abs(kbx) > 0 && resist > 0) {   // :82144 knockBack>0 && resist>0 双门
+      const hitDir = Math.sign(kbx) || 1;
+      let num3 = Math.abs(kbx) * resist;            // :82145 kb×resist
+      if (this.cursedT > 0) num3 *= 1.1;            // :82148 onFire2=诅咒焰（buff 39）
+      if (num3 > 8) num3 = 8 + (num3 - 8) * 0.9;    // :82152-82156 五段软封顶
+      if (num3 > 10) num3 = 10 + (num3 - 10) * 0.8; // :82157-82161
+      if (num3 > 12) num3 = 12 + (num3 - 12) * 0.7; // :82162-82166
+      if (num3 > 14) num3 = 14 + (num3 - 14) * 0.6; // :82167-82171
+      if (num3 > 16) num3 = 16;                     // :82172-82175
+      if (crit) num3 *= 1.4;                        // :82179-82182
+      const num8 = Math.trunc(dmg) * (mainExpertMode(game.world) ? 15 : 10); // :82183-82187
+      if (num8 > this.maxHp) {                      // 轻路 :82188
+        if (hitDir < 0 && this.vx > -num3) {        // :82189-82197 X 减法收敛
+          if (this.vx > 0) this.vx -= num3;
+          this.vx -= num3;
+          if (this.vx < -num3) this.vx = -num3;
+        } else if (hitDir > 0 && this.vx < num3) {  // :82198-82206
+          if (this.vx < 0) this.vx += num3;
+          this.vx += num3;
+          if (this.vx > num3) this.vx = num3;
         }
-        const vyT = -Math.abs(t0) * 0.75 * resist;
-        if (this.vy > vyT) this.vy = vyT;
-      } else {
-        this.vx += kbx * resist;
-        this.vy += kby * resist;
+        if (this.vanillaId === 185) num3 *= 1.5;    // :82209-82212 小丑特例
+        num3 = this.def.flying ? num3 * -0.5 : num3 * -0.75; // :82217 noGravity 档
+        if (this.vy > num3) {                       // :82220-82225 Y 加法钳
+          this.vy += num3;
+          if (this.vy < num3) this.vy = num3;
+        }
+      } else {                                      // 重路 :82227-82237
+        this.vy = -num3 * (this.def.flying ? 0.5 : 0.75) * resist; // :82228-82233
+        this.vx = num3 * hitDir * resist;           // :82235 resist 二次乘
       }
     }
     // 联机傀儡受击：上报房主权威结算（本地视觉反馈已生效：扣血/飘字/击退）

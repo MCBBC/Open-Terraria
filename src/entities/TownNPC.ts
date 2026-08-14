@@ -289,11 +289,14 @@ export function townNpcProgressionBoost(p: TownNpcProgression): { damageMul: num
  *  `downed_<vanillaId>`（Game.ts 击败链，双子归一 125；世吞归一 13/克脑 266），
  *  与 Game.shopCondOk 同源键序；旧档/导入别名（downedEyeOfCthulhu/downedSkeletron/
  *  downedSlimeKing）双读。恒 false 两项 = 精确登记非近似：
- *  - skyblockLowTiles：WorldGen.cs:3210-3216 需 ScanTiles 全图活跃块率 <0.1 的
- *    扫描链，本仓无该计数系统（seedFlags.skyblock 只证世界类型，后期铺满 >10%
- *    即失格——不可拿它近似）；
- *  - tipsy：NPC buff 25 需城镇 NPC buff 载体（UpdateNPC_BuffSetFlags :93179），
- *    本仓城镇 NPC 无 buff 栏 */
+ *  - skyblockLowTiles：WorldGen.Skyblock.ScanTiles 只在世界装载时跑一次
+ *    （WorldFile.cs:771），活跃块率 <0.1 且 skyblockWorld 才置（WorldGen.cs
+ *    :3210-3216）。本仓无 skyblock 世界生成链（sf.skyblock 仅拒绝墓园 pass,
+ *    生成的是常规满图世界 >10%），WldParser 导入亦不保留该位 → 本仓可产的
+ *    任何世界恒 false,不可拿 seedFlags.skyblock 近似；
+ *  - tipsy：NPC 实例位非世界旗标（buff 25,:93179）——本函数恒 false,由消费点
+ *    （attackUpdate 触发门 / swingUpdate / shootAt）按 this.tipsy 覆盖；施加链
+ *    = 麦酒弹 669 Kill 爆炸（TownShot.kill669,Projectile.cs:68725-68734） */
 export function townNpcProgressionFromWorld(world: {
   flags: Record<string, boolean>;
 }): TownNpcProgression {
@@ -481,6 +484,25 @@ export class TownNPC extends Entity {
 
   private cbApplied = false;
 
+  /** buff 25 Tipsy 剩余 tick（NPC.buffType/buffTime 单槽近似——本仓城镇 NPC 无
+   *  buff 栏,只为 num2 链建此单槽）。唯一施加点 = 麦酒弹 669 Kill 爆炸
+   *  （Projectile.cs:68725-68734 AddBuff(25, 3659),酒馆老板 550 自卫投掷,
+   *  TownShot.kill669 落点）;每 tick 递减（NPC.cs:93174 lowerBuffTime）,归零
+   *  即失效（:93333 整段重置）。消费:进度链 tipsy 位（num2×1.1/num3×0.9 链尾
+   *  :53552-53557）+ 醉酒气泡金尘（:92349 rand(4)==0 且 rand(2)==0 → 净 1/8） */
+  tipsyT = 0;
+
+  /** NPC.AddBuff(25, ticks)（同 buff 合并取更长剩余——标准 buffTime 合并语义） */
+  applyTipsy(ticks: number): void {
+    if (ticks > this.tipsyT) this.tipsyT = ticks;
+  }
+
+  /** 本 tick 的 NPC.tipsy 位（:93179 buff25 在列 → true）。快照语义：原版
+   *  递减（:93174）后置位——剩余 1t 的最后一 tick 仍 true,次 tick 才 false */
+  private tipsyNow = false;
+
+  get tipsy(): boolean { return this.tipsyNow; }
+
   /** GetMagicAuraColor（NPC.cs:53317-53332）1:1：NPCID.Sets.MagicAuraColor
    *  （NPCID.cs:4853）五人恰好 = AttackType-2 魔法攻击族（54 裁缝/108 巫师/
    *  160 松露/20 树妖/663 公主；五人 TownNPCProfiles 全走 LegacyWithSimpleShimmer
@@ -562,6 +584,20 @@ export class TownNPC extends Entity {
     // → 递减前 ==8 恰好标记"自上 tick 起受过击"（微光衰减 −0.1 档 NPC.cs:92484）
     const justHit = this.iframes === 8;
     if (this.iframes > 0) this.iframes--;
+    // buff 25 Tipsy 递减（NPC.cs:93174 lowerBuffTime,UpdateNPC 每 tick 头部）+
+    // 醉酒气泡金尘（:92349-92370：rand(4)==0 且 rand(2)==0 → 净 1/8,尘 4
+    // 金 (245,200,30,155) alpha 75(+25×2 随机档) scale 0.9,vel×0.2 后 +0.2 下沉）
+    if (this.tipsyT > 0) {
+      // :93170 顶部守卫 time>0 → :93174 递减 → :93179 置位（递减后仍按本 tick 生效）
+      this.tipsyNow = true;
+      this.tipsyT--;
+      if (Math.random() < 1 / 8) {
+        game.spawnParticles(this.x - 2, this.y - 2, 'rgba(245,200,30,0.61)', 1, 0.3,
+          { life: 40, grav: 0.005, size: 2 });
+      }
+    } else {
+      this.tipsyNow = false;   // :93333 整段重置
+    }
     this.teleportedHome = false;
     const world = game.world;
     // 战斗书增益一次性套用（后入驻的 NPC 在首 tick 补；使用书时对在场者即时叠）
@@ -960,7 +996,9 @@ export class TownNPC extends Entity {
    *  num2 进度强化链(2026-08-14 接):AI_007 头部 :53400-53557 = 战斗书两本
    *  +0.25/17 Boss 旗标+硬模式(+0.05~+0.4)/Skyblock+0.5/醉酒尾乘×1.1——
    *  townNpcProgressionBoost(FromWorld) 1:1,num3(频率门除数)同链同步接;
-   *  恒 false 登记:skyblockLowTiles(无 ScanTiles 计数链)/tipsy(无 buff 载体)。
+   *  恒 false 登记:skyblockLowTiles(无 ScanTiles 计数链,见 fromWorld 注);
+   *  tipsy=实例位(669 麦酒爆炸施加,TownShot.kill669→applyTipsy,本类
+   *  tipsyT/tipsyNow 承接——消费点按 this.tipsy 覆盖 fromWorld 的 false)。
    *  已销项:633 狼人变体 proj929+×1.5/108 连发 1-3(权重 4:2:1)±3.4/160·663
    *  落点弹原版几何+重掷次数(10/5)。
    *  登记未接:挥击态逐 tick 弧形判定(GetSwingStats/TweakSwingStats,近似中段
@@ -982,7 +1020,10 @@ export class TownNPC extends Entity {
       if (!target) return false;
       let chance = TOWN_ATTACK_CHANCE[this.vanillaId] ?? 1;
       // num3 = 进度强化链频率除数(:53413 起 19 项累计;2026-08-14 前恒 2 近似已废)
-      let num3 = townNpcProgressionBoost(townNpcProgressionFromWorld(world)).chanceMul;
+      // tipsy = 实例位（NPC.tipsy :93179,669 麦酒爆炸施加——非世界旗标）
+      const progGate = townNpcProgressionFromWorld(world);
+      progGate.tipsy = this.tipsy;
+      let num3 = townNpcProgressionBoost(progGate).chanceMul;
       if (this.vanillaId === 209) num3 /= 3;    // :53548 蒸汽朋克人三倍勤
       const gate = Math.max(1, Math.floor(chance * num3));
       if (Math.random() >= 1 / gate) return false;  // rand(gate)==0
@@ -1053,7 +1094,10 @@ export class TownNPC extends Entity {
     let kb = sw.kb;
     if (this.vanillaId === 441 && this.givenName === 'Andrew') { dmg *= 2; kb *= 2; } // 猫单特典 :55431
     // num2 进度强化链(:53400-53557)先于难度曲线(:55466 同式)
-    const num2 = townNpcProgressionBoost(townNpcProgressionFromWorld(world)).damageMul;
+    // tipsy = 实例位（NPC.tipsy :93179,669 麦酒爆炸施加——非世界旗标）
+    const progSwing = townNpcProgressionFromWorld(world);
+    progSwing.tipsy = this.tipsy;
+    const num2 = townNpcProgressionBoost(progSwing).damageMul;
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
         hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
@@ -1152,7 +1196,10 @@ export class TownNPC extends Entity {
     // 伤害结算(近战 :54897/弓 :55169/魔法 :55319 同式):
     // GetAttackDamage_ForTownNPC(dmg*num2)——(int) 截断;num2 进度强化链
     // (:53400-53557,2026-08-14 接,2026-08-14 前恒 1 近似已废)
-    const num2 = townNpcProgressionBoost(townNpcProgressionFromWorld(world)).damageMul;
+    // tipsy = 实例位（NPC.tipsy :93179,669 麦酒爆炸施加——非世界旗标）
+    const progShot = townNpcProgressionFromWorld(world);
+    progShot.tipsy = this.tipsy;
+    const num2 = townNpcProgressionBoost(progShot).damageMul;
     const dmgFinal = getAttackDamageForTownNPC(dmg * num2, mainDifficulty(world));
     const sx = this.cx + this.facing * 16 - 5;
     const sy = this.cy - 2 - 5;

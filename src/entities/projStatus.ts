@@ -29,8 +29,8 @@ const SUPPORTED: Record<number, string> = {
   31: 'confusedT',   // Confused(TargetClosest direction 反转,:78569)
   69: 'ichorT',      // Ichor(NPC 侧=checkArmorPenetration :81916 armorPenetration+15 进
   //   共享池,非独立直伤也非防直减;玩家侧 Ichor 才是 statDefense-15,Player.cs:9756-9758)
-  //   ★Enemy.hurt 结算现状=近似平推 +7 直伤(池外),待接线 npcCheckArmorPenetration
-  //   (Enemy.ts 热文件禁改,2026-08-14 登记偏差:防≤0/池饱和两态多算)
+  //   Enemy.hurt 已接 npcCheckArmorPenetration 原版序(2026-08-15):池/2 加伤→
+  //   再减 def/2,Projectile.cs:12796-12808 + Main.cs:65626
   72: 'midasT',      // Midas(掉钱 ×1.10-1.51,Enemy.ts rollCoins)
   44: 'frostburnT',    // Frostburn(onFrostBurn,:92648-92661;-16 → 8 HP/s)
   324: 'frostburn2T',  // Frostburn2(:92668-92680;-50 → 25 HP/s)
@@ -44,11 +44,13 @@ const SUPPORTED: Record<number, string> = {
   30: 'bleedT',        // Bleeding(:92592-92601;-24 = 12 HP/s)
   137: 'slimedT',      // Slimed(drippingSlime):六火系 DoT 翻倍(:92623 等 6 处)
   375: 'hemorrhageT',  // Hemorrhage(:92604-92611;-200 = 100 HP/s)
-  169: 'javelinT',     // BoneJavelin:单层 3 HP/s(层数=附着 598 计数,:92740-92758;GAP)
-  337: 'spikeT',       // TentacleSpike:单层 3 HP/s(层数=附着 971 计数,:92761-92779;GAP)
-  344: 'butcherT',     // BloodButcherer:单层 4 HP/s(层数=附着 975 计数,:92786-92804;GAP)
+  169: 'javelinT',     // BoneJavelin:层数模型已接(3 HP/s/层×附着 598 计数,
+  //   :92740-92758;层池=Enemy.addStickerStack,cap 6)
+  337: 'spikeT',       // TentacleSpike:层数模型已接(3 HP/s/层,:92761-92779;无上限)
+  344: 'butcherT',     // BloodButcherer:层数模型已接(4 HP/s/层,:92786-92804;无上限)
   151: 'soulDrainT',   // SoulDrain:25 HP/s(:92927-92935,-50;魂镰 3006 联动登记 GAP)
-  183: 'stardustT',    // StardustBleed:单层 20 HP/s(层数=附着 614 计数,:92846-92863;GAP)
+  183: 'stardustT',    // StardustBleed:层数模型已接(20 HP/s/层,:92846-92863;
+  //   层池 cap 10;MinionProj 613 星尘细胞→614 已在仓,弹命中即经本表入层)
 };
 
 type StatusEnemy = { [field: string]: number | undefined };
@@ -98,6 +100,15 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, 
     const sec = ticks / 60;
     const cur = enemy[field] ?? 0;
     if (sec > cur) enemy[field] = sec;
+    // 贴附族层数登记（NPC.cs:92740-92863 层数=场上附着弹计数）：169/183/337/344
+    // 每次施加=一枚贴附弹入池——层寿命=本处 buff 时长（与贴附弹 60×num11 AI 次
+    // 寿命等长），Enemy.fixedUpdate 按层×单层 HP/s 结算；上限（KillOldestJavelin
+    // :13019-13030：598=6/614=10）在 Enemy.addStickerStack 内执行。
+    // 189 Daybreak 走 WeaponProj.daybreakStacks 活计数（有实体），不入此链
+    if (en.buff === 169 || en.buff === 183 || en.buff === 337 || en.buff === 344) {
+      (enemy as { addStickerStack?: (b: 169 | 183 | 337 | 344, d: number) => void })
+        .addStickerStack?.(en.buff, sec);
+    }
   }
 }
 
@@ -159,9 +170,8 @@ export function applyMeleeImbue(
  *    + (int)(defense × armorPenetrationPercent)（:81927，闪电光环 688/690 传 1）。
  *  早退：pool ≤ 0 或 defense ≤ 0 → 0（负防/零防不吃穿甲加成）；
  *  超防钳制：pool > defense → defense/2（加成永不把伤害推过全额）。
- *  ★待接线：Enemy.hurt 现为"armorPen 减防 + ichor 平推 +7 直伤"近似（池外混算），
- *  2026-08-14 Enemy.ts 热文件禁改——冷却后替换 hurt 内 :6551-6557 段为
- *  dmg + npcCheckArmorPenetration(def, armorPen, penPercent, flags) 结算链 */
+ *  已接线（2026-08-15）：Enemy.hurt = max(1, round(dmg + 本值 − def×0.5))
+ *  原版序（Projectile.cs:12796-12808 → Main.cs:65626 CalculateDamageNPCsTake） */
 export function npcCheckArmorPenetration(
   defense: number,
   armorPenetration: number,

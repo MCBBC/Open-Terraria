@@ -14,6 +14,7 @@ import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
 import { projOverlap, playEnemyHitSound } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
+import { BuffType } from '../stats/Buffs';
 
 const GRAV = 0.3; // 箭族重力(aiStyle 1/2 同值)
 
@@ -156,6 +157,51 @@ export class TownShot extends Entity {
 
   private noGrav = false;
 
+  /** Projectile.Kill() case 669（Projectile.cs:68701-68737,酒馆老板 550 麦酒
+   *  投掷弹的死亡爆炸）1:1：
+   *  - 爆音 PlaySound(13)=Item_13（:68702）
+   *  - 尘近似两档：白 12（α110 vel×1.5,:68706-68712）+ 金 noGravity 160
+   *    （80 次循环每次两粒:scale1.2 vel×1.0-7.0 + scale0.8 vel×1.0-4.0,
+   *    :68713-68723）
+   *  - Resize(144,144) 中心不变（:68724）→ 判定框交叠玩家/城镇 NPC →
+   *    AddBuff(25, 3659) Tipsy（:68726-68734;玩家走 BuffState.apply 秒制
+   *    max 合并,城镇 NPC 走 applyTipsy 单槽——num2 进度链 ×1.1 的唯一入口）
+   *  - Damage()（:68736）:144×144 内敌怪吃弹伤（伤害已在发射端过 num2×难度
+   *    曲线;pierce 0 免疫帧拦同敌双吃 ≈ 原版 localNPCImmunity） */
+  private kill669(game: GameHooks): void {
+    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    game.playSfxFiles(['Item_13'], 1, cx, cy);
+    game.spawnParticles(cx, cy, 'rgba(255,255,255,0.43)', 12, 1.5, { grav: 0.003 });
+    game.spawnParticles(cx, cy, 'rgba(245,200,30,0.61)', 80, 4, { grav: 0.0005 });
+    game.spawnParticles(cx, cy, 'rgba(245,200,30,0.61)', 80, 2, { grav: 0.0005 });
+    const ex = cx - 72, ey = cy - 72, ER = 144;                  // Resize(144,144)
+    const p = game.player as unknown as {
+      x: number; y: number; w: number; h: number; dead: boolean;
+      buffs?: { apply(t: BuffType, sec: number): void };
+    } | null;
+    if (p && !p.dead && projOverlap(ex, ey, ER, ER, p)) {
+      p.buffs?.apply(BuffType.Tipsy, 3659 / 60);                 // :68727-68730
+    }
+    // duck-type applyTipsy（不 import TownNPC——环导 + HMR fork instanceof 坑）
+    for (const n of game.npcs?.() ?? []) {
+      const tn = n as unknown as {
+        x: number; y: number; w: number; h: number; dead: boolean;
+        applyTipsy?: (t: number) => void;
+      } | null;
+      if (!tn || tn.dead || typeof tn.applyTipsy !== 'function') continue;
+      if (projOverlap(ex, ey, ER, ER, tn)) tn.applyTipsy(3659);  // :68731-68734
+    }
+    for (const ent of game.enemies()) {                          // Damage() :68736
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
+      if (e.dead || !projOverlap(ex, ey, ER, ER, e)) continue;
+      if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false)) {
+        playEnemyHitSound(game, e);
+        game.addDamageNumber(e.x, e.y, this.damage, false, '#FFD060');
+      }
+    }
+  }
+
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
@@ -194,7 +240,7 @@ export class TownShot extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) { if (this.projId === 669) this.kill669(game); this.dead = true; return; }
     if (!this.noGrav) this.vy += GRAV;
     // 翻滚/自旋累积(aiStyle 2 :21517 / 自旋款)——up20 前 20t 由姿态锁覆盖
     const spec = townDrawSpec(this.projId);
@@ -208,7 +254,10 @@ export class TownShot extends Entity {
     this.y += this.vy;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
-    if (game.world.store.isSolid(tx, ty)) { this.dead = true; return; }
+    if (game.world.store.isSolid(tx, ty)) {
+      if (this.projId === 669) this.kill669(game);
+      this.dead = true; return;
+    }
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
         hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
@@ -218,6 +267,7 @@ export class TownShot extends Entity {
         game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
       }
       this.dead = true; // 穿透 1(城镇自卫弹均为 penetrate 1 或 -1 特化弹,近似单发)
+      if (this.projId === 669) this.kill669(game);  // Kill() 爆炸(同敌免疫帧拦双吃)
       return;
     }
   }

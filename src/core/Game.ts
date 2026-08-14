@@ -12579,13 +12579,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 原版房表口径 townNPC && type!=37 && !homeless（:5019）：宠物算锚（宠物
     // townNPC=true，NPC.cs:17145）；old_man(type 37) 虽有地牢驻点 home 也不可作锚
     // （否则全图锚点被地牢劫持，出生点旁的房永不可见）。
-    // 冷启（无任何可作锚的已安家 NPC）回退出生点（原版静态 LastFoundHouse(0,0) 必
-    // 失败后走 randomNext homes，无家可取时 :5041 直接 return——本仓出生点兜底保证
-    // 第一间出生点旁的房可被发现，见 findFreeHouse ±10 窗注释）
+    // 冷启（无任何可作锚的已安家 NPC）回退锚池 = 出生点 + 玩家当前位置（原版静态
+    // LastFoundHouse(0,0) 必失败后走 randomNext homes，无家可取时 :5041 直接
+    // return——原版远程基地靠住房查询 UI moveRoom 手动塞人，本仓无该 UI，玩家位
+    // 入锚池补偿：玩家基地旁的房可被发现。首 NPC 安家后回到原版锚池语义。
+    // ★曾只回退出生点：房离出生点 >10 格（如 66 格的玩家基地）每轮都扫不到——
+    // 3 个 homeless NPC 永不入驻（用户报"NPC 没入驻我的房子",2026-08-15）
     const anchorPool = homes.filter((h) => h.npcId !== 37);   // 37 = Old Man（:5019 排除）
+    const coldStart = !anchorPool.length;
     const pickAnchor = (): { x: number; y: number } =>
       anchorPool.length > 0 ? anchorPool[Math.floor(Math.random() * anchorPool.length)]
-        : { x: this.world.spawnX, y: this.world.spawnY };
+        : (coldStart && !this.player.dead
+          ? { x: Math.floor(this.player.cx / TILE), y: Math.floor(this.player.cy / TILE) }
+          : { x: this.world.spawnX, y: this.world.spawnY });
 
     // ①' 被绑巫师【不补放】（2026-08-13 对齐原版）：106 BoundWizard 唯一来源 =
     // SpawnAnNPC 三人组链（NPC.cs:1999-2002，hardMode && 1/20 && 洞穴层深处门），
