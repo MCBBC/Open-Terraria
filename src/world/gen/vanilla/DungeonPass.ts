@@ -1736,8 +1736,10 @@ export function runDungeonPass(
               if (!flag3 && rn(2) === 0) {
                 x = num8; y--;
                 const n12v = rn(4) === 0 ? 49 : 13;
-                placeSimple(x, y, n12v === 49 ? WATER_CANDLE : TILE_BY_KEY['v_13_bottles']);
-                if (inW(x, y, 0) && typAt(x, y) === TILE_BY_KEY['v_13_bottles']) rn(2);
+                // v_13_placed_bottles（sheet 13）——曾误写 'v_13_bottles'（不存在的键）：
+                // undefined 被 Uint16Array 吞成 type 0，且下行 frameX 掷骰恒不触发（流欠耗）。
+                placeSimple(x, y, n12v === 49 ? WATER_CANDLE : TILE_BY_KEY['v_13_placed_bottles']!);
+                if (inW(x, y, 0) && typAt(x, y) === TILE_BY_KEY['v_13_placed_bottles']) rn(2);
               }
             }
           }
@@ -2162,6 +2164,9 @@ export function runDungeonPass(
 
   // ============ DungeonGlobalPaintings（:28-321）============
   function dgPaintings(): void {
+    // lihzahrdPaintingsMax（DungeonGlobalPaintings.cs:36-42）：Large(4200) → case 2 →
+    // 2 + Next(2)。默认地牢无风格表/wall87 → 计数器永不消费，但此掷骰必须耗流。
+    rn(2);
     const num2v = wallVariants[0];
     const num4 = Math.trunc(100 * (w / 4200) * Math.max(1, 0.75));
     let num5 = num4 * 3;
@@ -2212,11 +2217,16 @@ export function runDungeonPass(
       if (wallAt(x, y) === num2v) n15 = 0;
       while (!arr[n15]) n15 = rn(3);
       if (nearPicture2(st, x, y, wall)) n15 = -1;
+      // ★D10（2026-08-14）：Paintings 段对齐原版调用序——GetPaintingEntry 的选型掷骰在
+      // 门槛判定**之前**消耗（cs:167-168/:183-184/:281-283/:296-298），即使最终不放画也耗；
+      // CanGenerateFeatureInArea 的 fluff=3（cs:169/186/281/297 等，7×7 区）非 2。
       if (n15 === 0) {
-        if (featArea3(x, y, 2) && !nearPicture(st, x, y)) paintingAt(x, y);
+        const e = paintingEntry(x, y);
+        if (featArea3(x, y, 3) && !nearPicture(st, x, y)) placeSimple(x, y, e);
       } else if (n15 === 1) {
-        if (!featArea3(x, y, 2)) continue;
-        if (actAt(x, y) === 0) paintingAt(x, y);
+        let e = paintingEntry(x, y);
+        if (!featArea3(x, y, 3)) continue;
+        if (actAt(x, y) === 0) placeSimple(x, y, e);
         if (actAt(x, y) !== 0) continue;
         const baseY = y;
         for (let m = 0; m < 2; m++) {
@@ -2227,9 +2237,10 @@ export function runDungeonPass(
           while (a2 < h - 1 && actAt(x, a2) === 0 && actAt(x - 1, a2) === 0 && actAt(x + 1, a2) === 0) a2++;
           a2--;
           const ny = Math.trunc((a1 + a2) / 2);
-          if (featArea3(x, ny, 2)) {
+          if (featArea3(x, ny, 3)) {
+            e = paintingEntry(x, ny);
             if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
-            paintingAt(x, ny);
+            placeSimple(x, ny, e);
           }
         }
         for (let m = 0; m < 2; m++) {
@@ -2240,14 +2251,16 @@ export function runDungeonPass(
           while (a2 < h - 1 && actAt(x, a2) === 0 && actAt(x - 1, a2) === 0 && actAt(x + 1, a2) === 0) a2++;
           a2--;
           const ny = Math.trunc((a1 + a2) / 2);
-          if (featArea3(x, ny, 2)) {
+          if (featArea3(x, ny, 3)) {
+            e = paintingEntry(x, ny);
             if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
-            paintingAt(x, ny);
+            placeSimple(x, ny, e);
           }
         }
       } else if (n15 === 2) {
-        if (!featArea3(x, y, 2)) continue;
-        if (actAt(x, y) === 0) paintingAt(x, y);
+        let e = paintingEntry(x, y);
+        if (!featArea3(x, y, 3)) continue;
+        if (actAt(x, y) === 0) placeSimple(x, y, e);
         if (actAt(x, y) !== 0) continue;
         const baseX = x;
         for (let m = 0; m < 3; m++) {
@@ -2258,9 +2271,10 @@ export function runDungeonPass(
           while (a2 < w - 1 && actAt(y, a2) === 0 && actAt(y - 1, a2) === 0 && actAt(y + 1, a2) === 0) a2++;
           a2--;
           const nx = Math.trunc((a1 + a2) / 2);
-          if (featArea3(nx, y, 2)) {
+          if (featArea3(nx, y, 3)) {
+            e = paintingEntry(nx, y);
             if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
-            paintingAt(nx, y);
+            placeSimple(nx, y, e);
           }
         }
         for (let m = 0; m < 3; m++) {
@@ -2271,9 +2285,10 @@ export function runDungeonPass(
           while (a2 < w - 1 && actAt(y, a2) === 0 && actAt(y - 1, a2) === 0 && actAt(y + 1, a2) === 0) a2++;
           a2--;
           const nx = Math.trunc((a1 + a2) / 2);
-          if (featArea3(nx, y, 2)) {
+          if (featArea3(nx, y, 3)) {
+            e = paintingEntry(nx, y);
             if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
-            paintingAt(nx, y);
+            placeSimple(nx, y, e);
           }
         }
       }
@@ -2287,25 +2302,28 @@ export function runDungeonPass(
     }
     return true;
   };
-  function paintingAt(x: number, y: number): void {
-    let tile = HANGING, style = 0;
+  /** Paintings_GetPaintingEntry（DungeonGlobalPaintings.cs:327-360）：只取 tile 型
+   * （style 走帧不入哈希，placeSimple 不落帧）——但选型掷骰必须照原版序全部消耗。 */
+  function paintingEntry(x: number, y: number): number {
+    let tile = HANGING;
     if (wallAt(x, y) === wall) {
+      // RandomDungeonPainting（:364-385）：Next(3)≤1→240 Next(7)(==6 重掷)style{12,13,14,15,18,19,23}；
+      // 否则 242 Next(17) style(14→15/15→16/16→30)
       const n = rn(3);
       if (n <= 1) {
         let n2 = rn(7);
         if (n2 === 6) n2 = rn(7);
-        style = [12, 13, 14, 15, 18, 19, 23][n2] ?? 12;
       } else {
         tile = PAINTING;
-        const n2 = rn(17);
-        style = n2 === 14 ? 15 : n2 === 15 ? 16 : n2 === 16 ? 30 : n2;
+        rn(17);
       }
     } else {
+      // RandomBonePainting（:387-410）：Next(2)→0:240 style Next(2)(16/17)；1:241 style Next(9)
       const n = rn(2);
-      if (n === 0) { tile = HANGING; style = rn(2) === 0 ? 16 : 17; }
-      else { tile = CATACOMB; style = rn(9); }
+      if (n === 0) { tile = HANGING; rn(2); }
+      else { tile = CATACOMB; rn(9); }
     }
-    placeSimple(x, y, tile);
+    return tile;
   }
   // ============ DungeonGlobalBanners（:24-104）============
   function dgBanners(): void {

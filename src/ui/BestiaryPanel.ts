@@ -25,6 +25,56 @@ import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
 import { VANILLA_NPCS } from '../data/vanillaNpcs';
+// 负 netID 变体的 color/scale/alpha（SetDefaultsFromNetId L7633-7820；
+// public/sprites/vanilla-npcnetid.json，与 VanillaSpawner 同源数据）
+import vanillaNetIdJson from '../data/vanilla-npcnetid.json';
+const NETID_OV: Record<string, { scale?: number; color?: number[]; alpha?: number }> = vanillaNetIdJson;
+
+/** 图鉴 NPC 染色帧缓存（key = sheet|npcId|帧高——负 id 变体各自成键） */
+const bstTintCache = new Map<string, HTMLCanvasElement>();
+/** base 帧 + color 二次绘制（Main.cs:24527 + NPC.GetColor 逐像素乘；XNA AlphaBlend
+ *  预乘语义 = destination-out 按 colorA 削弱 base + lighter 全量加染色帧——
+ *  在离屏合成完再贴回，destination-out 不挖主画布的 MapBG 底图） */
+function bstTintedFrame(
+  img: ImageBitmap | HTMLImageElement, sheetId: number, npcId: number, fh: number, colorRGBA: number[],
+): HTMLCanvasElement | null {
+  const key = `${sheetId}|${npcId}|${fh}|${colorRGBA.join(',')}`;
+  const hit = bstTintCache.get(key);
+  if (hit) return hit;
+  const w = (img as HTMLImageElement).width ?? (img as ImageBitmap).width;
+  if (!w) return null;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = fh;
+  const cx = c.getContext('2d');
+  if (!cx) return null;
+  cx.imageSmoothingEnabled = false;
+  // ① base 帧（白剪影原样）
+  cx.drawImage(img, 0, 0, w, fh, 0, 0, w, fh);
+  // ② 染色帧：逐像素乘 colorRGB（alpha 保留）——同 Renderer.tintedSprite
+  const t = document.createElement('canvas');
+  t.width = w; t.height = fh;
+  const tx = t.getContext('2d')!;
+  tx.drawImage(img, 0, 0, w, fh, 0, 0, w, fh);
+  const d = tx.getImageData(0, 0, w, fh);
+  const [r, g, b] = colorRGBA;
+  for (let i = 0; i < d.data.length; i += 4) {
+    d.data[i] = (d.data[i] * r / 255) | 0;
+    d.data[i + 1] = (d.data[i + 1] * g / 255) | 0;
+    d.data[i + 2] = (d.data[i + 2] * b / 255) | 0;
+  }
+  tx.putImageData(d, 0, 0);
+  // ③ 两步混合：destination-out 削 base × colorA + lighter 加染色帧
+  cx.globalCompositeOperation = 'destination-out';
+  cx.globalAlpha = (colorRGBA[3] ?? 255) / 255;
+  cx.drawImage(img, 0, 0, w, fh, 0, 0, w, fh);
+  cx.globalCompositeOperation = 'lighter';
+  cx.globalAlpha = 1;
+  cx.drawImage(t, 0, 0);
+  cx.globalCompositeOperation = 'source-over';
+  if (bstTintCache.size > 800) bstTintCache.clear();   // 有界（负 id 变体×色键）
+  bstTintCache.set(key, c);
+  return c;
+}
 import { npcValueOf } from '../drops/NpcDrops';
 import dropData from '../data/vanilla-npcdrops.json';
 import spawnData from '../data/vanilla-bestiary-spawn.json';
@@ -902,15 +952,32 @@ export class BestiaryPanel {
     const size = canvas.width;
     const paint = (img: ImageBitmap | HTMLImageElement) => {
       if (!canvas.isConnected) return;  // 上代 refresh 已销毁的画布不画(解码风暴浪费源)
-      const frames = VANILLA_NPCS[String(npcId)]?.frames ?? 1;
-      const fh = Math.max(1, Math.floor(img.height / frames));
+      // ★ frames 查【母体 sheetId】——负 netID 变体（-1..-10 史莱姆配色等）在
+      //   vanilla-npcs.json 无独立条目，查 npcId 会缺帧数→整条多帧行当一帧画
+      const frames = VANILLA_NPCS[String(sheetId)]?.frames ?? 1;
+      const iw = (img as HTMLImageElement).naturalWidth || (img as ImageBitmap).width;
+      const ih = (img as HTMLImageElement).naturalHeight || (img as ImageBitmap).height;
+      const fh = Math.max(1, Math.floor(ih / frames));
+      // 负 id 变体：netid 表 color/scale/alpha（绿史莱姆 -3=(0,220,40,100) 等）；
+      // 正 id：NPC 表自身 color（16 僵尸色等个别非 default）
+      const netOv = npcId < 0 ? NETID_OV[String(npcId)] : undefined;
+      const colorRGBA = netOv?.color ?? (npcId > 0 ? VANILLA_NPCS[String(npcId)]?.color : undefined);
+      const scale = netOv?.scale ?? 1;
+      const alphaBase = netOv?.alpha ?? 255;
       const cx = canvas.getContext('2d');
-      if (!cx) return;
+      if (!cx || !iw) return;
       cx.imageSmoothingEnabled = false;
       cx.clearRect(0, 0, canvas.width, canvas.height);
-      const s = Math.min(size / img.width, size / fh);
-      const w = img.width * s, h = fh * s;
-      cx.drawImage(img, 0, 0, img.width, fh, (size - w) / 2, (size - h) / 2, w, h);
+      const s = Math.min(size / (iw * scale), size / (fh * scale));
+      const w = iw * s * scale, h = fh * s * scale;
+      const dx = (size - w) / 2, dy = (size - h) / 2;
+      cx.globalAlpha = alphaBase / 255;                // 负 id alpha 变体（-5 黑史莱姆 120）
+      const composed = colorRGBA && (colorRGBA[3] ?? 255) > 0
+        ? bstTintedFrame(img, sheetId, npcId, fh, colorRGBA)
+        : null;
+      if (composed) cx.drawImage(composed, dx, dy, w, h);   // base+染色离屏合成
+      else cx.drawImage(img, 0, 0, iw, fh, dx, dy, w, h);
+      cx.globalAlpha = 1;
     };
     const atlas = this.flow.atlas ?? null;
     // 统一走 bstLoadSheet 缓存(同表并发只取一次/结果回写/失败负终结;

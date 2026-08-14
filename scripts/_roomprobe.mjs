@@ -184,6 +184,43 @@ try {
     const seeA = await pageB.evaluate(() => [...window.__swGame.net.players.values()].filter((p) => p.active).length);
     check('双端互见', seeB >= 1 && seeA >= 1, `A侧=${seeB} B侧=${seeA}`);
 
+    // ---- msg4 hairDye 同步（2026-08-14）：B 染发 → resendAppearance → 服务器中继 →
+    //      A 侧 RemotePlayerState.appearance 携带 + 代理 hairDye 注入（渲染/彩纸消费位）----
+    const bDbg = await pageB.evaluate(() => {
+      const g = window.__swGame;
+      const sent = [];
+      const orig = g.net.send.bind(g.net);
+      g.net.send = (frame) => { sent.push(frame[2]); return orig(frame); };
+      g.player.hairDye = 9;                 // 模拟染料使用（Game 发色剂分支同款字段+resend）
+      g.net.resendAppearance();
+      g.net.send = orig;
+      return { active: g.net.active, mySlot: g.net.mySlot, dye: g.player.hairDye,
+        sentMsg4: sent.filter((id) => id === 4).length };
+    });
+    await sleep(700);                        // 中继 + A 侧外观串变化解析（按串变化才 parse）
+    if (!bDbg.sentMsg4) console.log('[dbg] B resend 未发送:', JSON.stringify(bDbg));
+    // 探针页游戏循环不自动跑——代理外观解析在 simulateRemotePlayers（fixedUpdate 内），
+    // 读代理前手动驱动若干 tick（真实对局 RAF 常跑无此需要）
+    await pageA.evaluate(() => {
+      const g = window.__swGame;
+      for (let i = 0; i < 12; i++) g.fixedUpdate(1 / 60);
+    });
+    const dyeReads = await pageA.evaluate(() => {
+      const g = window.__swGame;
+      const other = [...g.net.players.values()].find((p) => p.active && p.slot !== g.net.mySlot);
+      let wire = -1, proxy = -1;
+      if (other) { try { wire = JSON.parse(other.appearance).hairDye ?? -1; } catch { /* 保持 -1 */ } }
+      const pr = g.remotePlayerProxies ?? [];   // private 仅编译期——运行时直取
+      for (const p of pr) { if (p.hairDye > proxy) proxy = p.hairDye; }
+      return { wire, proxy,
+        netApp: other?.appearance ?? null,
+        cached: pr.map((p) => p.__netAppearance ?? null),
+        nProxies: pr.length };
+    });
+    if (dyeReads.proxy !== 9) console.log('[dbg] A 代理未注入:', JSON.stringify(dyeReads));
+    check('msg4 hairDye 随外观 JSON 中继（B 染发 → A 侧收到）', dyeReads.wire === 9, `A wire=${dyeReads.wire}`);
+    check('A 侧代理 hairDye 注入（Renderer.hairDyeRenderColor/派对彩纸消费位）', dyeReads.proxy === 9, `A proxy=${dyeReads.proxy}`);
+
     // ---- P1.1 AOI（玩家态）：B 传送 6000px 外（>1920×1.6 滞回外径）→ A 侧代理冻结 ----
     const bHome = await pageB.evaluate(() => ({ x: window.__swGame.player.x, y: window.__swGame.player.y }));
     await pageB.evaluate(async (home) => {

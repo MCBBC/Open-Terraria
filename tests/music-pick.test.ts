@@ -13,7 +13,7 @@ const S = (over: Partial<SceneFlags> = {}): SceneFlags =>
 
 function inp(over: Partial<Parameters<typeof pickMusic>[0]> = {}) {
   return {
-    scene: S(), isDay: true, bossMusic: 0, invasionMusic: 0,
+    scene: S(), isDay: true, eventMusic: 0,
     worldSurface: 200, rockLevel: 400, lavaLine: 900, maxTilesX: 4200,
     centerX: 2100 * 16, centerY: 3000, state: newMusicState(), // 地表：spaceFactor=(187-75)/40≈2.8≥1 且 y<surf*16+400
     weather: { storm: false, rain: false, windy: false, timeOfDay01: 0.5 },
@@ -23,8 +23,8 @@ function inp(over: Partial<Parameters<typeof pickMusic>[0]> = {}) {
 
 describe('BGM 选曲链（Main.cs 主链顺序）', () => {
   it('Boss/入侵曲先于一切群系与天气', () => {
-    expect(pickMusic(inp({ bossMusic: 99, weather: { storm: true, rain: false, windy: false, timeOfDay01: 0.5 } }))).toBe(99);
-    expect(pickMusic(inp({ bossMusic: 0, invasionMusic: 39 }))).toBe(39);
+    expect(pickMusic(inp({ eventMusic: 99, weather: { storm: true, rain: false, windy: false, timeOfDay01: 0.5 } }))).toBe(99);
+    expect(pickMusic(inp({ eventMusic: 39 }))).toBe(39);
   });
 
   it('地下优先于天气：大风+地下 → 地下曲（4/31），非 44/52', () => {

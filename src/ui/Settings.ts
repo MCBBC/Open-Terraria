@@ -235,7 +235,9 @@ export class SettingsPanel {
         this.slider(Lang.text('LegacyMenu.98'), 0, 1, 0.05, () => d.sfxVol, (v) => { d.sfxVol = v; this.applySound(); void options.set('sfxVol', v); }),
         // Ambient 环境音轨（Main.ambientVolume，config 键 VolumeAmbient；雷声/滴水/
         // 瀑布岩浆流/小动物鸣叫/暴风雪循环等 13+ 环境音独立音量，LegacySoundPlayer.cs:1443）
-        this.slider(Lang.text('Mods.SandboxWorld.Settings.AmbientVol'), 0, 1, 0.05, () => d.ambientVol, (v) => { d.ambientVol = v; this.applySound(); void options.set('ambientVol', v); }),
+        // 标签 = LegacyMenu.119（Main.cs:50914 音量三杆同族 98/99/119,原版 12 语言官译;
+        // 旧自造 Mods.SandboxWorld.Settings.AmbientVol 仅 zh/en 两译,他语言落英文兜底）
+        this.slider(Lang.text('LegacyMenu.119'), 0, 1, 0.05, () => d.ambientVol, (v) => { d.ambientVol = v; this.applySound(); void options.set('ambientVol', v); }),
       );
     } else if (this.cat === 'ui') {
       this.content.append(

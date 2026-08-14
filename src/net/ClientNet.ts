@@ -268,8 +268,10 @@ export class ClientNet {
           this.reconnects = 0;
         }
         // 全量上传自身（对齐原版 msg3 后立刻 SyncPlayer + RequestWorldData）
-        const p2 = this.game.player as { appearance?: unknown } | undefined | null;
-        const app = JSON.stringify(p2?.appearance ?? {});
+        // hairDye 并入外观 JSON（原版 msg4 PlayerInfo 携带 hairDye byte 的等价；
+        // 服务器盲转字符串 → 零协议改动，2026-08-14）
+        const p2 = this.game.player as { appearance?: unknown; hairDye?: number } | undefined | null;
+        const app = JSON.stringify({ ...(p2?.appearance as Record<string, unknown> ?? {}), hairDye: p2?.hairDye ?? 0 });
         this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot).str(app).finish());
         this.send(new NetWriter(Msg.RequestWorldData).finish());
         return;
@@ -717,13 +719,15 @@ export class ClientNet {
     this.hooks.onChestSync?.(chestIdx, x, y, items);
   }
 
-  /** 外观变更后重发 SyncPlayer（进游戏后 applyCharacter 调用——初始两发都在外观应用前） */
+  /** 外观变更后重发 SyncPlayer（进游戏后 applyCharacter 调用——初始两发都在外观应用前）；
+   *  hairDye 一并携带（染料使用后 Game 侧调用，远端发色/派对彩纸实时生效）。
+   *  守卫只看连接态——appearance 缺失（裸加入流程无角色档）也发 {hairDye}，
+   *  原版 msg4 PlayerInfo 本就无条件发（探针实测旧守卫会静默吞掉染料重发） */
   resendAppearance() {
     if (!this.active || this.mySlot < 0) return;
-    const p = this.game.player as { appearance?: unknown } | undefined;
-    if (p?.appearance) {
-      this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot).str(JSON.stringify(p.appearance)).finish());
-    }
+    const p = this.game.player as { appearance?: unknown; hairDye?: number } | undefined;
+    this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot)
+      .str(JSON.stringify({ ...((p?.appearance as Record<string, unknown>) ?? {}), hairDye: p?.hairDye ?? 0 })).finish());
   }
 
   /** 进场组装期暂存的拴绳实体帧冲放（Game 在 loadWorld 完成后调用，同 pendingSSC 时机） */

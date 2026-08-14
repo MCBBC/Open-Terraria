@@ -29,7 +29,7 @@ import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, WALL_HOUSE } from '../world/Housing';
 import {
   INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION, INVASION_MARTIAN,
-  INVASION_GROUP, KILL_WEIGHT, INVASION_MUSIC, invasionActive, canStartInvasion, startInvasion,
+  INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
   tickInvasion, invasionWarningMisc, shouldSpawnInvasionEnemies,
 } from '../world/Invasion';
 import {
@@ -129,7 +129,7 @@ import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
 import { scanLuckScene, rollLuck } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
-import { pickMusic, newMusicState, bossMusicFor, BOSS_MUSIC, MUSIC, type MusicState } from '../data/Music';
+import { pickMusic, newMusicState, MUSIC_SLOT, resolveEventMusic, isOldOnesArmy, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { resetGorePool, liveGorePieces, setGoreScreen, GorePiece } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
@@ -741,6 +741,8 @@ export class Game implements GameHooks {
   /** 进图预载用的角色外观(纸娃娃贴图按当前外观收窄用;mainFlow.makeGame 注入,
    *  外观应用 onWorldReady 才发生——预载时取 player.appearance 拿到的是默认值) */
   preloadAppearance: import('../player/Appearance').Appearance | null = null;
+  /** 渲染动态加载日志开关(控制台/探针可改;?rlog=0 也可关) */
+  renderLoadLog = true;
   /** 原版 Spawner 移植实例（VanillaSpawner.ts） */
   vanillaSpawner: VanillaSpawner | null = null;
   /** 世界生成 worker 客户端（懒建；不可用时 newWorld 走主线程 fallback） */
@@ -2253,6 +2255,61 @@ export class Game implements GameHooks {
     this.cb.onWorldReady();
   }
 
+  /** 内存趋势哨兵(2026-08-14,用户定位"感觉仍有泄漏"):
+   *  每 5s 采样 usedJSHeapSize;环比上一采样上涨 >8MB 时打印增量行,
+   *  并附当 5s 窗口内 [rload] 加载的贴图数 + chunk 数变化(嫌疑面归因)。
+   *  JS 堆只是三维之一(另两维:GPU 显存≈live canvas 数×尺寸、解码位图≈
+   *  vimages 数)——snap() 一起看。window.__swMemLog 常开,?mlog=0 关 */
+  private memSamplePrev = 0;
+  private memRloadPrev = 0;
+  attachMemSentinel(): void {
+    if (new URLSearchParams(location.search).has('mlog')) return;
+    const perf = performance as unknown as { memory?: { usedJSHeapSize: number } };
+    setInterval(() => {
+      if (!perf.memory) return;
+      const now = perf.memory.usedJSHeapSize / 1048576;
+      const rloads = this.atlas ? this.atlas.vimages.size : 0;
+      const chunks = this.chunks.chunks.size;
+      if (this.memSamplePrev > 0) {
+        const dHeap = now - this.memSamplePrev;
+        const dR = rloads - this.memRloadPrev;
+        if (dHeap > 8) {
+          console.warn(`[mem] JS堆 ${this.memSamplePrev.toFixed(0)}→${now.toFixed(0)}MB (+${dHeap.toFixed(0)}) | 贴图${dR >= 0 ? '+' : ''}${dR}→${rloads} chunk=${chunks} 实体=${this.entities.all().length} 粒子=${this.particles.length}`);
+        }
+      }
+      this.memSamplePrev = now;
+      this.memRloadPrev = rloads;
+    }, 5000);
+  }
+
+  /** 渲染调试句柄(控制台/探针):window.__swRenderLog
+   *  .toggle() 开关日志 | .snap() 一次性状态快照 | .on/.off */
+  attachRenderLogHandle(): void {
+    const h = {
+      on: () => { this.renderLoadLog = true; return '渲染加载日志 ON'; },
+      off: () => { this.renderLoadLog = false; return '渲染加载日志 OFF'; },
+      toggle: () => { this.renderLoadLog = !this.renderLoadLog; return `渲染加载日志 ${this.renderLoadLog ? 'ON' : 'OFF'}`; },
+      snap: () => ({
+        tick: this.tickCount,
+        jsHeapMB: ((performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? 0) / 1048576,
+        heapDelta5s: this.memSamplePrev ? undefined : undefined,
+        chunkCapNow: (this.chunks.constructor as { MAX_CHUNKS?: number }).MAX_CHUNKS,
+        vimages: this.atlas?.vimages.size ?? -1,
+        uiimages: this.atlas?.uiimages.size ?? -1,
+        chunkCached: this.chunks.chunks.size,
+        chunkMax: (this.chunks.constructor as { MAX_CHUNKS?: number }).MAX_CHUNKS,
+        dirty: this.chunks.dirtyQueue.length,
+        lastFlushMs: +this.chunks.lastFlushMs.toFixed(2),
+        lastFlushCount: this.chunks.lastFlushCount,
+        arriveInvalidateChunks: this.chunks.arriveInvalidateChunks,
+        failedVImages: this.atlas?.failedVImages().length ?? 0,
+        entities: this.entities.all().length,
+        particles: this.particles.length,
+      }),
+    };
+    (globalThis as unknown as { __swRenderLog?: typeof h }).__swRenderLog = h;
+  }
+
   private afterWorldLoad() {
     const w = this.world;
     // 摇树状态复位（WorldGen.clearWorld :6896 ResetTreeShakes）+ 绑当前 store
@@ -2340,6 +2397,12 @@ export class Game implements GameHooks {
     // 21 万次图像重解码 → 渲染进程崩溃,2026-08-14 trace 实锤)
     if (this.atlas) {
       this.atlas.onVImageLoaded = (file: string) => {
+        // ★渲染动态加载日志(2026-08-14,用户调试用):每次懒加载晚到打印一行,
+        //   含引发的重烘 chunk 数与总缓存规模。URL 加 ?rlog=0 静默
+        if (this.renderLoadLog && !new URLSearchParams(location.search).has('rlog') ) {
+          const cached = this.atlas ? this.atlas.vimages.size : 0;
+          console.log(`[rload] ${file} | vimages=${cached}`);
+        }
         // 【烘焙路径懒取全集】:凡 chunk 烘焙(VanillaTiler/WallTiler/CritterCage)可能
         // ensureVImage 懒取的文件,晚到都必须进精确重烘链——否则
         // 回退会永久烤进已缓存 chunk(用户问的"物块变化后新贴图没加载"场景)。
@@ -2489,6 +2552,8 @@ export class Game implements GameHooks {
     this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
     this.prefetchInvProjectiles();
     prefetchTrapProjectiles();
+    this.attachRenderLogHandle();
+    this.attachMemSentinel();
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.sfx.suppress = false;                            // 解除载入静音门
@@ -2986,92 +3051,45 @@ export class Game implements GameHooks {
       // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
       this.renderer.biomeBg.warm(this.scene);
-      // Boss 专属 BGM（Main.cs:12155-12312：屏盒内 Boss 的专属曲，盒半径默认 5000；
-      // 触发面是【type 表】不是 boss 标记——switch(type) 命中即得专属曲（:12162-12280），
-      // 世吞 13/14/15 任一段、骷髅王手 36、血肉墙之眼 114、毁灭者 135/136、世花钩蔓
-      // 263/264 等非 boss 段同样触发（= BOSS_MUSIC 表内 id 全量）；表外无 boss 标记
-      // 的 NPC num3=0 → continue（:12283-12287）。异教徒仪式态两族例外用 1600——
-      // CultistDevote 438 ai[1]==1（:12212-12217）与 CultistArcher 379 ai[3]>=0
-      // （:12220-12225）→ num3=20 → 音乐 94（与 439 本体同曲）。
-      // 仪式态由异教徒仪式 AI 置位（未移植——当前不可达，公式先 1:1 在位）
-      // ★578 DD2 闪电甲虫：VANILLA_BOSS_IDS 含它是本仓消散语义，原版 SetDefaults
-      // （NPC.cs:16470）无 boss 位 → 不触发 Boss1 兜底（T3 曲由 DD2 军团曲 41 接管）。
-      // ★Mechdusa 覆写（Main.cs:12288-12291 remix+getGood && 125/126/127/134 → 25）：
-      // flag17 排在 398(flag8→38) 之后——本仓单值模型下直接覆写即可（同场无 398）
+      // ★事件曲 flag 链（Main.cs:12150-12566 全 1:1）：屏盒内 NPC 逐个经 type→num3
+      //  槽位置位**独立 flag**（多 Boss 并存各置各 flag,非首/末取一——曾 break 首个
+      //  =近似,已废）,再由 SLOT_MUSIC_CHAIN 固定 else-if 序裁决。
+      //  规则（:12162-12291）：
+      //  ① type 表 MUSIC_SLOT 命中即得槽（世吞段/骷髅王手/WoF 眼/毁灭者链/世花钩蔓
+      //    等非 boss 段同触发）；438/379 需仪式态（ai[1]==1 / ai[3]>=0）且盒半径
+      //    收窄 1600（:12212-12225）;
+      //  ② OOA 成员覆写 num3=12（:12281-12283,压过原槽——Betsy 551 等 DD2 族曲 41）;
+      //  ③ num3==0 && boss → 槽 1 Boss1 兜底（:12283-12287;578 本仓 VANILLA_BOSS_IDS
+      //    消散语义位,原版无 boss → 排除）;
+      //  ④ Mechdusa 覆写（:12288-12291 remix+getGood && 125/126/127/134 → 槽 17）;
+      //  ⑤ num3==0 skip;盒 = NPC 中心对屏盒求交（:12297-12302,cx/cy 对玩家中心近似）。
       const sfMusic = w.seedFlags ?? {};
       const mechdusaMusicWorld = (!!sfMusic.remix && !!sfMusic.getGoodWorld) || !!sfMusic.everything;
-      let bossMusic = 0;
+      const eventSlots = new Set<number>();
       for (const e of this.entities.enemies) {
-        const en = e as unknown as { x: number; y: number; cx: number; cy: number; def?: { boss?: boolean }; vanillaId?: number | null; ai1?: number; ai3?: number };
-        // 仪式态判定（438 ai[1]==1 / 379 ai[3]>=0）——两族无 boss 标记，显式并入
-        const ceremony = (en.vanillaId === 438 && en.ai1 === 1) || (en.vanillaId === 379 && (en.ai3 ?? 0) >= 0);
-        // type 表命中（表内 id 即原版 switch 命中者；438/379 表内但需仪式态门）
-        const typeHit = en.vanillaId != null && en.vanillaId !== 438 && en.vanillaId !== 379
-          && BOSS_MUSIC[en.vanillaId] !== undefined;
-        const musicBossFlag = !!en.def?.boss && en.vanillaId !== 578;
-        if (!musicBossFlag && !ceremony && !typeHit) continue;
-        // 盒半径（Main.cs:12155 默认 5000；仪式态 :12215/:12222 收窄 1600）；
-        // 原版以 NPC 中心对屏盒求交（:12297-12302）——用 cx/cy 对玩家中心近似
+        const en = e as unknown as { cx: number; cy: number; def?: { boss?: boolean }; vanillaId?: number | null; ai1?: number; ai3?: number; dead?: boolean };
+        if (en.dead || en.vanillaId == null) continue;
+        const id = en.vanillaId;
+        const ceremony = (id === 438 && en.ai1 === 1) || (id === 379 && (en.ai3 ?? 0) >= 0);
+        let slot = id === 438 || id === 379 ? (ceremony ? 20 : 0) : MUSIC_SLOT[id] ?? 0;
+        if (isOldOnesArmy(id)) slot = 12;   // ② OOA 覆写（事件未开时雕像产怪同切曲,原版无 ongoing 门）
+        if (slot === 0 && !!en.def?.boss && id !== 578) slot = 1;   // ③ Boss1 兜底
+        if (mechdusaMusicWorld && (id === 125 || id === 126 || id === 127 || id === 134)) slot = 17;  // ④
+        if (slot === 0) continue;           // ⑤
         const box = ceremony ? 1600 : 5000;
         if (Math.abs(en.cx - this.player.cx) < box && Math.abs(en.cy - this.player.cy) < box) {
-          bossMusic = mechdusaMusicWorld && en.vanillaId != null
-            && (en.vanillaId === 125 || en.vanillaId === 126 || en.vanillaId === 127 || en.vanillaId === 134)
-            ? MUSIC.Boss5
-            : bossMusicFor(en.vanillaId ?? 0);
-          break;
+          eventSlots.add(slot);
         }
       }
-      // 入侵 BGM（Main.cs:12196-12280 switch(type)→num3 + :12474-12535 槽位→MusicID；
-      // 哥布林族→39 / 海盗族→35（492 飞船炮不在音乐表）/ 火星族→37（含 384/392，
-      // 394 飞碟尾锥不在）/ 雪人三兄弟 143-145→13(Boss3 槽)。纯 ±5000px 邻近触发
-      // ——原版无 invasionType 门（雕像产怪同切曲），1:1）
-      let invasionMusic = 0;
-      for (const e of this.entities.enemies) {
-        const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
-        if (en.vanillaId == null) continue;
-        const m = INVASION_MUSIC[en.vanillaId];
-        if (m === undefined) continue;
-        if (Math.abs(en.x - this.player.cx) >= 5000 || Math.abs(en.y - this.player.cy) >= 5000) continue;
-        invasionMusic = m;
-        break;
-      }
-      // 旧日军团 BGM（Main.cs 音乐链入侵组 -3 分支：GetNPCInvasionGroup -3 =
-      // BelongsToInvasionOldOnesArmy + DD2Event.Ongoing → MusicID.OldOnesArmy 41；
-      // 屏内 ±5000px 有军团 NPC 即切曲，与入侵 BGM同层）
-      if (w.oldOnesArmy.ongoing) {
-        for (const e of this.entities.enemies) {
-          const en = e as Enemy;
-          if (en.dead || en.vanillaId == null) continue;
-          const id = en.vanillaId;
-          // BelongsToInvasionOldOnesArmy：551-578（550 酒馆老板除外）+ 548 水晶/549 门
-          const isDD2 = (id >= 551 && id <= 578) || id === 548 || id === 549;
-          if (!isDD2) continue;
-          if (Math.abs(en.cx - this.player.cx) >= 5000 || Math.abs(en.cy - this.player.cy) >= 5000) continue;
-          invasionMusic = MUSIC.OldOnesArmy;
-          break;
-        }
-      }
+      const eventMusic = resolveEventMusic(eventSlots);
       // 月事件 BGM（Main.cs:12914-12921，链尾最高优先级）：相机在地表
       // worldSurface+10 格带内时覆盖一切（含 Boss 曲）；南瓜月 30 / 霜月 32
       const moonMusic = w.moonEvent.kind === MOON_KIND_PUMPKIN ? 30
         : w.moonEvent.kind === MOON_KIND_FROST ? 32 : 0;
       const moonMusicGated = moonMusic && this.player.cy / TILE < w.groundLevel + 10 ? moonMusic : 0;
-      // 星璇塔 BGM（Main.cs:12243-12247 num3=10 → :12479-12493 flag11 → 34 LunarPillars）：
-      // 屏内 ±5000px 有塔即切曲。优先级：398 月总（flag8→38）在源码链里先于塔曲，
-      // 故 pickMusic 内 lunarMusic 排在 bossMusic 之后（文档 §5"与 moonMusic 同层"以源码为准）
-      let lunarMusic = 0;
-      if (w.lunarEvent.active) {
-        for (const e of this.entities.enemies) {
-          const en = e as Enemy;
-          if (en.dead || !isTowerId(en.vanillaId)) continue;
-          if (Math.abs(en.cx - this.player.cx) >= 5000 || Math.abs(en.cy - this.player.cy) >= 5000) continue;
-          lunarMusic = 34;
-          break;
-        }
-      }
       const music = pickMusic({
-        scene: this.scene, isDay, bossMusic, invasionMusic, moonMusic: moonMusicGated,
-        lunarMusic, musicBox: this.scene.musicBoxStyle,
+        scene: this.scene, isDay, eventMusic, moonMusic: moonMusicGated,
+        musicBox: this.scene.musicBoxStyle,
         torchGod: this.torchGod?.active ?? false,   // InTorchGodMinigame（Main.cs:12477-12480 → 101）
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
@@ -3821,7 +3839,11 @@ export class Game implements GameHooks {
           } else {
             this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           }
-          const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
+          // 双子 125/126 共写同一家族键（NPC.cs:80223-80229 case 125: case 126: 同写
+          // downedMechBoss2）——曾按 vanillaId 裸写,后死之眼写 downed_126 会漏掉
+          // downed_125,机械自然 roll 全灭门(:4119)与三王全灭判定永假
+          const twinsPart = this.boss.vanillaId === 125 || this.boss.vanillaId === 126;
+          const downedKey = `downed_${twinsPart ? 125 : this.boss.vanillaId ?? 0}`;
           // SetEventFlagCleared(NPC.cs:79557) 首次语义:downed 旗标翻转(false→true)
           // 才触发灯笼夜——此前每次击杀都预约(2026-08-13 对齐;肉山 19 在下方链内单独投递)
           const wasDowned = !!w.flags[downedKey];
@@ -4116,13 +4138,15 @@ export class Game implements GameHooks {
           this.newText(Lang.misc(9), 50, 255, 130);
         } else if (!this.spawnEyePending && w.flags.hardMode && w.altarCount > 0
           && w.moonEvent.kind === 0 && !this.boss
-          && !(w.flags['downed_125'] && w.flags['downed_126'] && w.flags['downed_127'])
+          && !(w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127'])
           && Math.random() < 1 / 10) {
           // 机械 Boss 自然召唤 roll（:64765-64811）：1/10、无月事件、场上无 Boss、
           // 三机械未全灭 → 三选一（只选未击败；1000 次重抽语义）+ misc[28/29/30]
+          // 家族键（vanilla downedMechBoss1/2/3）：n=1 毁灭者 134 / n=2 双子 125 / n=3
+          // Prime 127——消费端 :4288 同映射（曾 n=1 键 125=双子 id 错位、门漏 134）
           for (let k = 0; k < 1000; k++) {
             const n = 1 + Math.floor(Math.random() * 3);
-            const flag = n === 1 ? 'downed_125' : n === 2 ? 'downed_126' : 'downed_127';
+            const flag = n === 1 ? 'downed_134' : n === 2 ? 'downed_125' : 'downed_127';
             if (!w.flags[flag] || bossesKeepSpawning) {
               this.spawnHardBossPending = n;
               this.newText(Lang.misc(27 + n), 50, 255, 130);
@@ -4383,6 +4407,13 @@ export class Game implements GameHooks {
       const hw = cam.viewW / 2 / cam.zoom + 2 * CHUNK * TILE, hh = cam.viewH / 2 / cam.zoom + 2 * CHUNK * TILE;
       this.chunks.animView = { x0: cam.x - hw, y0: cam.y - hh, x1: cam.x + hw, y1: cam.y + hh };
       this.chunks.advanceAnim();
+      // 烘焙吞吐日志(每 60 帧汇总):dirty 队列/最近烘焙耗时/画布规模
+      if (this.renderLoadLog && this.tickCount % 60 === 0) {
+        const cc = this.chunks;
+        if (cc.dirtyQueue.length || cc.lastFlushMs > 2) {
+          console.log(`[rbake] t=${this.tickCount} dirty=${cc.dirtyQueue.length}/${cc.chunks.size} lastFlush=${cc.lastFlushMs.toFixed(1)}ms×${cc.lastFlushCount} arrive=${cc.arriveInvalidateChunks}`);
+        }
+      }
     }
     tickEmotes();
     this.tickNpcEmotes();
@@ -5948,6 +5979,7 @@ export class Game implements GameHooks {
       const dyeVid = viIdFromKey(heldDef.key);
       const p = this.player;
       p.hairDye = hairDyeShaderOfItem(dyeVid);
+      this.net?.resendAppearance();   // msg4 外观重发——远端发色/派对彩纸实时生效（2026-08-14）
       p.inv.removeAt(p.inv.selected, 1);
       p.useTime = 17;   // Item.cs:21223 useTime 17（1990 同 :21276）
       this.playSfxFile(itemUseSoundWav(dyeVid) ?? 'Item_3', 1, p.cx, p.cy);  // UseSound=Item3（:21219/:21272）
@@ -13512,9 +13544,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'downedBoss3': return !!(f['downed_35'] || f.downedSkeletron);
       case 'downedMechBossAny':
         return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
-      // 单机械王（造型师 1985 染发剂 = hardMode && 三机械全灭 等,Chest.cs:2737）
-      case 'downedMechBoss1': return !!f['downed_125'];
-      case 'downedMechBoss2': return !!f['downed_126'];
+      // 单机械王（造型师 1985 染发剂 = hardMode && 三机械全灭 等,Chest.cs:2737）。
+      // vanilla 语义(NPC.cs:80256-80277)：mech1=毁灭者 134 / mech2=双子 125(126 旧档
+      // 兼容读) / mech3=Prime 127——曾 125/126/127 顺位错指三家
+      case 'downedMechBoss1': return !!f['downed_134'];
+      case 'downedMechBoss2': return !!(f['downed_125'] || f['downed_126']);
       case 'downedMechBoss3': return !!f['downed_127'];
       // NPC.downedPlantBoss（世纪之花商店门：爆破专家地雷 937 / 松露自动锤 1551 /
       // 巫医 Tiki 套·灵液瓶·叶翼 / 画家回声涂层 5344 / 动物学家泥芽 4701）
@@ -14697,11 +14731,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
       }
     }
-    // 踩死帝皇蝶 661 → 光女苏醒（checkDead case 661，NPC.cs:80294-80303：
-    // GetWereThereAnyInteractions 门 ≈ 玩家击杀链（本钩子即玩家侧击杀近似）；
-    // !AnyNPCs(636) 独占 + 出生点 = 蝶 Center+(0,-200)+randCircular(50,50)。
-    // SpawnBoss default → "光之女皇已苏醒！" 公告，无咆哮（原版生成路径无声））
-    if (enemy && enemy.vanillaId === 661 && !this.hasNpcId(636)) {
+    // 踩死帝皇蝶 661 → 光女苏醒（checkDead case 661，NPC.cs:80294-80303）：
+    // 门 = GetWereThereAnyInteractions（:80616-80625 → 本体 playerInteraction 位，
+    // 由玩家伤害置位 Enemy.hurt fromPlayer → playerInteracted——玩家曾碰过即算,
+    // 死因不限玩家直接击杀,环境/岩浆死同触发）；!AnyNPCs(636) 独占 +
+    // 出生点 = 蝶 Center+(0,-200)+randCircular(50,50)。
+    // SpawnBoss default → "光之女皇已苏醒！" 公告，无咆哮（原版生成路径无声）
+    if (enemy && enemy.vanillaId === 661 && enemy.playerInteracted && !this.hasNpcId(636)) {
       const px = enemy.cx + (Math.random() * 100 - 50);
       const py = enemy.cy - 200 + (Math.random() * 100 - 50);
       const eol = Enemy.fromVanilla(636, px, py);
@@ -17310,6 +17346,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           try {
             const parsed = JSON.parse(rp.appearance) as Record<string, unknown>;
             if (parsed && typeof parsed.hair === 'number') proxy.appearance = parsed as never;
+            // hairDye（msg4 外观 JSON 携带，2026-08-14）：Renderer.hairDyeRenderColor
+            // 读 Player.hairDye → 远端发色实时生效；派对染发剂彩纸走代理
+            // fixedUpdate（本地模拟同款 1/45 尘）自然同步
+            if (parsed && typeof parsed.hairDye === 'number') proxy.hairDye = parsed.hairDye;
           } catch { /* 保持默认外观 */ }
         }
       }

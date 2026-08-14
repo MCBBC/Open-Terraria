@@ -642,8 +642,26 @@ export class Wiring {
       if (st.flags[up]) {
         const ush = TILE_DEFS[st.type[up]]?.vanilla?.sheet ?? -1;
         if (BOULDER_SHEETS.has(ush)) {
-          st.type[up] = 0; st.flags[up] = 0;   // KillTile 清格 → 转 Projectile 99
-          this.boulderFall?.(i, j - 1, ush);
+          // 巨石是 2×2 多格对象(帧 (0,0)/(18,0)/(0,18)/(18,18),锚=帧(0,0) 左上)。
+          // 原版 KillTile 任一格 → **整对象清除** + 生成一颗 Projectile 99。
+          // 曾只清单格:残余 3/4 贴图留原地(用户报"左下角透明缺块"),且弹 99 在
+          // 残余实心格内生成即判撞碎裂("没有巨石落下",2026-08-14 修)
+          let ax = i, ay = j - 1;
+          if (st.frameX[up] > 0) ax -= 1;
+          if (st.frameY[up] > 0) ay -= 1;
+          for (let oy = 0; oy <= 1; oy++) {
+            for (let ox = 0; ox <= 1; ox++) {
+              const bi = st.idx(ax + ox, ay + oy);
+              const bsh = TILE_DEFS[st.type[bi]]?.vanilla?.sheet ?? -1;
+              if (st.flags[bi] && BOULDER_SHEETS.has(bsh)) {
+                // ★必须走 setTile 唯一写入入口:裸写数组绕过 listeners → 渲染
+                // chunk 不失效 → 贴图残留(与下落弹体成双)
+                st.setTile(ax + ox, ay + oy, 0);
+              }
+            }
+          }
+          // 弹生成点 = 锚格 + (15.5, 16)(cs:48766 语义,≈2×2 中心)
+          this.boulderFall?.(ax, ay, ush);
         }
       }
     }

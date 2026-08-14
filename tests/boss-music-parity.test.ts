@@ -99,7 +99,7 @@ describe('Boss 唤起三件套冻结对账（NPC.cs/Player.cs/Main.cs 1456）', 
   it('火把神小游戏曲 101 优先级：月事件 > 火把神 > Boss 曲（Main.cs:12477-12480/12914-12921）', () => {
     const base = {
       scene: { townNPCCount: 0 } as never, isDay: false,
-      bossMusic: 96, worldSurface: 300, rockLevel: 500, lavaLine: 1000,
+      eventMusic: 96, worldSurface: 300, rockLevel: 500, lavaLine: 1000,
       maxTilesX: 4200, centerX: 2100 * 16, centerY: 400 * 16, state: newMusicState(),
     };
     expect(MUSIC.TorchGodInstrumental).toBe(101);

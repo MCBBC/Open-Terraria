@@ -39,12 +39,15 @@ export function newMusicState(): MusicState {
 export interface MusicInput {
   scene: SceneFlags;
   isDay: boolean;
-  /** Boss 专属 BGM（MusicID；0=无 Boss）。原版屏幕±5000px 盒内 Boss 链（Main.cs:12155-12312）
-   *  先于全部群系分支；每 Boss 一曲，未列入表的 Boss 一律 Boss1(5) */
-  bossMusic: number;
-  /** 入侵 BGM（MusicID；0=无）。原版屏内 ±5000px 入侵 NPC 驱动（Main.cs:12186-12192,
-   *  12478-12566 链：海盗 35 > 哥布林 39 > 日食），优先级仅次于 Boss 曲 */
-  invasionMusic?: number;
+  /** Boss/入侵事件 BGM（MusicID；0=无）。原版 Main.cs:12150-12312：屏盒内 NPC 逐个
+   *  经 type→num3 槽位 switch 置位**独立 flag**（多 Boss 并存各置各 flag，非首/末
+   *  取一），再由 :12474-12566 的固定 else-if 链按 flag 优先级裁决——本字段 =
+   *  resolveEventMusic(slots) 的链上取值（Game 侧扫描置 flag 后解析传入）。
+   *  链序（节选）：月总38 > Mechdusa25 > 火星37 > 星璇塔34 > 世花24 > 光女57 >
+   *  猪鲨58 > 毁灭者92 > 双子97 > Prime98 > 史王93 > 邪教徒94 > 血肉墙12 >
+   *  Boss1兜底5 > 克脑/雪人13 > 石巨人17 > 骷髅王104 > 蜂后96 > 史后56 >
+   *  EoW99 > 鹿角怪90 > 海盗35 > 哥布林39 > 旧日军团41 */
+  eventMusic?: number;
   /** 天气。注意原版天气曲不是全局优先——只嵌在特定槽位（见 pickMusic）：
    *  storm52/rain19/windy44 各自在森林白天、神圣地表、丛林表层等分支内；
    *  wind=cloudAlpha==0 且白天中段 && |windTarget|≥0.4（updateMusicGates 维护） */
@@ -63,10 +66,8 @@ export interface MusicInput {
    *  链尾（Main.cs:12914-12921）——覆盖一切（含 Boss 曲）；门=相机在地表
    *  worldSurface+10 格带内。Game 侧算好传入 */
   moonMusic?: number;
-  /** 星璇塔 BGM（MusicID 34=LunarPillars；0=无）。原版 Main.cs:12243-12247（塔入屏
-   *  ±5000px → num3=10）→ :12479-12493 flag11 → 34。优先级在 398 月总曲（flag8→38）
-   *  之后——与月总同屏时月总曲胜出，故本字段在 pickMusic 内排在 bossMusic 之后判定
-   *  （文档 §5 写"与 moonMusic 同层其后"，与源码冲突处以源码为准） */
+  /** 星璇塔 BGM——已并入 eventMusic（塔 422/493/507/517 → num3=10 → flag11 → 34，
+   *  Main.cs:12243-12247/:12493-12497）。字段保留仅为兼容旧调用，缺省 0 */
   lunarMusic?: number;
   /** 火把神小游戏进行中（SceneMetrics.InTorchGodMinigame，Player.cs happyFunTorchTime）。
    *  原版 Main.cs:12477-12480：链首（CreditsRoll 89 之后）先于全部 Boss flag → 101
@@ -129,6 +130,79 @@ export function bossMusicFor(npcId: number): number {
   return BOSS_MUSIC[npcId] ?? MUSIC.Boss1;
 }
 
+// ============ 事件曲 flag 链（Main.cs:12150-12566 全 1:1）===================
+// 原版语义：屏盒内每个 NPC 经 type→num3 槽位 switch 置位**独立 flag**（互不覆盖，
+// 多 Boss 并存各置各的），再由固定 else-if 链按 flag 裁决——不是"取首个/末个"。
+/** type → num3 槽位（:12162-12280 switch 全表；含入侵/塔/仪式族） */
+export const MUSIC_SLOT: Record<number, number> = {
+  13: 23, 14: 23, 15: 23,                                   // EoW 族 → 99
+  35: 24, 36: 24,                                           // 骷髅王+手 → 104
+  26: 11, 27: 11, 28: 11, 29: 11, 111: 11, 471: 11, 472: 11, // 哥布林 → 39
+  113: 2, 114: 2,                                           // 血肉墙+眼 → 12
+  125: 21, 126: 21,                                         // 双子 → 97
+  134: 18, 135: 18, 136: 18,                                // 毁灭者链 → 92
+  127: 22, 128: 22, 129: 22, 130: 22, 131: 22,              // Prime+四臂 → 98
+  143: 3, 144: 3, 145: 3, 266: 3,                           // 雪人三兄弟+克脑 → 13
+  212: 8, 213: 8, 214: 8, 215: 8, 216: 8, 252: 8, 491: 8, 662: 8, // 海盗 → 35
+  245: 4,                                                   // 石巨人 → 17
+  222: 5,                                                   // 蜂后 → 96
+  262: 6, 263: 6, 264: 6,                                   // 世花+钩蔓 → 24
+  381: 9, 382: 9, 383: 9, 384: 9, 385: 9, 386: 9, 387: 9, 388: 9, 389: 9,
+  390: 9, 391: 9, 392: 9, 395: 9, 520: 9,                   // 火星 Madness → 37
+  398: 7,                                                   // 月总核心 → 38
+  422: 10, 493: 10, 507: 10, 517: 10,                       // 星璇四塔 → 34
+  438: 20, 379: 20, 439: 20,                                // 邪教徒+仪式态 → 94
+  657: 13,                                                   // 史后 → 56
+  636: 14,                                                   // 光女 → 57
+  370: 15,                                                   // 猪鲨 → 58
+  668: 16,                                                   // 鹿角怪 → 90
+  50: 19,                                                    // 史王 → 93
+};
+/** num3 → flag → MusicID 的固定裁决链（:12474-12566 else-if 全序。
+ *  Boss flag 段在前、RainbowBoulder(102/103,秘种子)之后接入侵段；本仓无
+ *  rainbow boulder 曲,两段连续排即原版语义） */
+const SLOT_MUSIC_CHAIN: Array<[number, number]> = [
+  [8, 38],    // 月总（flag8,链首第二位仅次火把神小游戏）
+  [17, 25],   // Mechdusa（remix+getGood 机械族覆写）
+  [10, 37],   // 火星入侵
+  [11, 34],   // 星璇塔（LunarPillars）
+  [7, 24],    // 世纪之花
+  [15, 57],   // 光女
+  [16, 58],   // 猪鲨
+  [18, 92],   // 毁灭者
+  [21, 97],   // 双子
+  [22, 98],   // Prime
+  [19, 93],   // 史王
+  [20, 94],   // 邪教徒/仪式
+  [3, 12],    // 血肉墙
+  [1, 5],     // Boss1 兜底（表外 boss=true）
+  [4, 13],    // 克脑/雪人（Boss3）
+  [5, 17],    // 石巨人
+  [26, 104],  // 骷髅王
+  [6, 96],    // 蜂后
+  [14, 56],   // 史后
+  [25, 99],   // EoW
+  [2, 90],    // 鹿角怪
+  [9, 35],    // 海盗
+  [12, 39],   // 哥布林
+  [13, 41],   // 旧日军团（OOA 成员覆写位）
+];
+
+/** flag 集合 → 链上 MusicID（0=无事件曲）。slot 1=Boss1 兜底、12=OOA 覆写、
+ *  17=Mechdusa 覆写——由 Game 侧扫描按原版规则置入集合 */
+export function resolveEventMusic(slots: Set<number>): number {
+  for (const [slot, music] of SLOT_MUSIC_CHAIN) {
+    if (slots.has(slot)) return music;
+  }
+  return 0;
+}
+
+/** 旧日军团成员（NPCID.Sets.BelongsToInvasionOldOnesArmy：551-578 除 550 酒馆老板
+ *  + 548 水晶 + 549 门——:12281-12283 成员覆写 num3=12,压过 type 表原槽） */
+export function isOldOnesArmy(id: number): boolean {
+  return (id >= 551 && id <= 578 && id !== 550) || id === 548 || id === 549;
+}
+
 /** 太空系数（Main.cs:12466-12469）：(centerY/16 - (65+10*(w/4200)^2)) / (worldSurface/5)；<1 = 太空层 */
 export function spaceFactor(centerY: number, maxTilesX: number, worldSurface: number): number {
   return (centerY / 16 - (65 + 10 * (maxTilesX / 4200) ** 2)) / (worldSurface / 5);
@@ -163,12 +237,10 @@ export function pickMusic(inp: MusicInput): number {
   // 火把神小游戏（原版 L12477-12480 InTorchGodMinigame → 101，先于全部 Boss flag；
   // 月事件链尾覆写在其后 → 本分支排 moonMusic 之后）
   if (inp.torchGod) return MUSIC.TorchGodInstrumental;
-  // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
-  if (inp.bossMusic > 0) return inp.bossMusic;
-  // 星璇塔曲（Main.cs:12479-12493：flag8 月总 38 → flag17 25 → flag10 37 → flag11 塔曲 34，
-  // 排在 Boss 曲之后＝398 月总优先；其余 Boss 曲与塔曲同屏时取 Boss——单值 bossMusic 近似）
-  if (inp.lunarMusic && inp.lunarMusic > 0) return inp.lunarMusic;
-  if (inp.invasionMusic && inp.invasionMusic > 0) return inp.invasionMusic;
+  // Boss/入侵事件曲（原版 :12474-12566 flag 链——resolveEventMusic 已按全序裁决,
+  //  含月总38>Mechdusa25>火星37>塔34>…>海盗35>哥布林39>OOA41;先于日食/群系分支）
+  if (inp.eventMusic && inp.eventMusic > 0) return inp.eventMusic;
+  if (inp.lunarMusic && inp.lunarMusic > 0) return inp.lunarMusic;   // 兼容旧字段（塔曲已并入 eventMusic）
   // 日食（L12578-12585：eclipse 且相机在地表半屏带内 → 27；remix 分支省略）
   if (inp.eclipse && !belowHalf) return MUSIC.Eclipse;
 

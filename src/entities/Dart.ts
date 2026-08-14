@@ -2,6 +2,7 @@
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
 import { hitPlayer, playEnemyHitSound, projOverlap, tryReflectProjectile } from './projTargets';
+import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';
 import { prefetchProjectiles } from './Arrow';
@@ -54,7 +55,9 @@ const TRAP_SHOT_STYLE: Record<string, {
   spear: { w: 6, h: 14, color: '#B8B8C0', grav: 0, proj: 'vanilla/Projectile_186.png', fw: 10, fh: 16, rotOff: Math.PI / 2 },
   // 185 尖刺球(SetDefaults 1405:2255/1456:2449):14×14 aiStyle14 penetrate-1 timeLeft 900
   spiky: { w: 14, h: 14, color: '#8A8F96', grav: 0.3, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, spin: true, spinK: 0.14 },
-  boulder: { w: 14, h: 14, color: '#9A8C72', grav: 0.22, proj: 'vanilla/Projectile_99.png', fw: 32, fh: 32, spin: true },
+  // 99 巨石(SetDefaults :1561-1568):31×31 aiStyle25 penetrate-1 trap;物理全在
+  // boulderStep(AI_025 :24662-24723 + 撞块 :17530-17551)——grav/vCap 值仅表占位
+  boulder: { w: 31, h: 31, color: '#9A8C72', grav: 0, proj: 'vanilla/Projectile_99.png', fw: 32, fh: 32, spin: true, spinK: 0.06 },
   geyser: { w: 10, h: 14, color: '#B8E8F0', grav: 0.02, proj: 'vanilla/Projectile_654.png', fw: 16, fh: 16,
     trail: { colors: ['#E8F4F8', '#C8E4EE'], count: 1, life: 26, grav: -0.015 } },
   // ---- 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon / 直接 NewProjectile）----
@@ -159,12 +162,33 @@ function shotCenterSolid(game: GameHooks, e: { x: number; y: number; w: number; 
   return game.world.store.isSolid(tx, ty);
 }
 
+/** AABB 前沿三点采样(巨石 31×31 盒用;中心点判定会让半盒嵌入墙后才发现) */
+function boxEdgeSolid(game: GameHooks, e: { x: number; y: number; w: number; h: number }, axis: 'x' | 'y', dir: number): boolean {
+  const st = game.world.store;
+  if (axis === 'y') {
+    const ey = dir > 0 ? e.y + e.h - 1 : e.y;
+    const ty = Math.floor(ey / TILE);
+    for (const fx of [0.25, 0.5, 0.75]) {
+      if (st.isSolid(Math.floor((e.x + e.w * fx) / TILE), ty)) return true;
+    }
+    return false;
+  }
+  const ex = dir > 0 ? e.x + e.w - 1 : e.x;
+  const tx = Math.floor(ex / TILE);
+  for (const fy of [0.25, 0.5, 0.75]) {
+    if (st.isSolid(tx, Math.floor((e.y + e.h * fy) / TILE))) return true;
+  }
+  return false;
+}
+
 export class TrapShot extends Entity {
   w = 8; h = 8;
   vx: number;
   vy: number;
   damage: number;
   kind: TrapShotKind;
+  /** 巨石 ai[0] 落地旗(:24666 置 1 后恒 1;转角踢门 :24578 的 ai[0]≠0 条件) */
+  boulderLanded = false;
   /** 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：0 橙门 / 1 蓝门）；
    *  烟花族 = 色变体（167-170 / 415-418 / 419-422 减基址） */
   form = 0;
@@ -276,6 +300,50 @@ export class TrapShot extends Entity {
       // aiStyle49（Projectile.cs:26841）：rotation += vx*0.05 + direction*0.05
       this.rot += this.vx * 0.05 + (this.vx < 0 ? -1 : 1) * 0.05;
     }
+    if (this.kind === 'boulder') {
+      // ---- 巨石 aiStyle 25(AI_025 :24578-24723 + 撞块族 :17530-17551)----
+      // 滞滞启动踢(:24578-24661):落地态(ai[0]≠0,本仓 landed)且 vy≤0 且 vx==0 →
+      // 探 ±40px(8+32)侧壁:左实 → 向右踢 0.5 / 右实 → 向左 / 两侧空 → 按
+      // Center.X 奇偶定向。没有这一踢,vx=0 命不中滚地加速两分支 → 落地即死停。
+      if (this.boulderLanded && this.vy <= 0 && this.vx === 0) {
+        const st8 = game.world.store;
+        const solid2 = (px: number, py: number) => st8.isSolid(Math.floor(px / TILE), Math.floor(py / TILE));
+        const rowA = this.y, rowB = this.y + TILE;
+        const leftBlocked = solid2(this.x - 8 - 32, rowA) || solid2(this.x - 8 - 32, rowB);
+        const rightBlocked = solid2(this.x + this.w + 8 + 32, rowA) || solid2(this.x + this.w + 8 + 32, rowB);
+        // 原版(:24578-24661):flag11(左实)→vx=+0.5 / flag12(右实)→vx=−0.5 /
+        // 两侧空 → Center.X 格奇偶定向(偶=flag11=向右)
+        this.vx = leftBlocked && !rightBlocked ? 0.5 : rightBlocked && !leftBlocked ? -0.5
+          : (Math.floor(this.cx / TILE) % 2 === 0 ? 0.5 : -0.5);
+      }
+      // 重力 0.3/终端 16(:24723/:24667);滚地加速:vy≤6 且 |vx|<7 → ±0.05(:24699-24708)
+      // ——落地后不会停,持续加速滚动直到撞墙;旋转 = vx×0.06(:24664)。
+      // 撞块(AABB 分轴 + lastVelocity):Y 阻挡且 lastVy>5 → 反弹 −lastVy×0.2(:17551,
+      // 软落直接落定不微弹);X 阻挡 → HitTiles(敲石音+尘)+ 碎裂消亡(:17561-17574)。
+      this.boulderLanded = true;               // ai[0]=1(:24666,次 tick 起转角门生效)
+      this.rot += this.vx * 0.06;
+      this.vy += 0.3;
+      if (this.vy > 16) this.vy = 16;
+      if (this.vy <= 6) {
+        if (this.vx > 0 && this.vx < 7) this.vx += 0.05;
+        else if (this.vx < 0 && this.vx > -7) this.vx -= 0.05;
+      }
+      const lvx = this.vx, lvy = this.vy;
+      // ★碰撞 = 引擎通用 moveAndCollide(玩家/敌怪同款,带贴边钳制/推出)。
+      // 陷阱几何:巨石右列常坐在未致动石上,出生即嵌地形 ~15px——自建边缘
+      // 采样两轮翻车(出生叠壁误碎→预叠容忍→贴地恒沉→严格阻挡又嵌住),
+      // 全部退役。响应旗标:hitWall=撞墙碎裂;onGround=落地(硬落反弹 ×0.2)。
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.hitWall) {
+        game.playSfx('tink', 1, this.cx, this.cy);      // HitTiles 敲击音
+        game.spawnParticles(this.cx + this.w / 2 * Math.sign(lvx || 1), this.cy, '#9A8C72', 8, 2.4, { life: 40 });
+        this.shatter(game);                              // 撞墙碎裂(:17574 Kill)
+        this.dead = true;
+        return;
+      }
+      if (this.onGround) this.vy = lvy > 5 ? -lvy * 0.2 : 0;
+      // 落下不 return:继续走下方对玩家/敌怪命中段(穿透语义在 hostile/pierce 链)
+    }
     if (this.kind === 'spiky') {
       // aiStyle 14 默认尾部(1405 :21600-21608 / 1456 同):vy==0 贴地时额外 vx*=0.95;
       // 每帧 vx*=0.98、重力 0.3、终端速度 15.9
@@ -302,7 +370,7 @@ export class TrapShot extends Entity {
     } else {
       this.vy += st.grav;
     }
-    if (this.kind !== 'spiky') {
+    if (this.kind !== 'spiky' && this.kind !== 'boulder') {
       this.x += this.vx;
       this.y += this.vy;
     }
@@ -331,11 +399,8 @@ export class TrapShot extends Entity {
         this.dead = true;
         return;
       }
-      // 巨石:撞块反弹衰减(尖刺球已走上方 aiStyle14 分轴反弹链,不在此列)
-      if (this.kind === 'boulder') {
-        if (Math.abs(this.vy) > 1) { this.vy *= -0.4; this.vx *= 0.7; this.y -= this.vy; }
-        else { this.vy = 0; this.vx *= 0.94; }
-      } else if (st.blast) {
+      // 巨石撞块已在上方针石专属分支(AI 25 AABB 分轴)处理;此处仅余非巨石族
+      if (st.blast) {
         // 炮弹/兔兔炮撞块 → Kill 落点爆炸（Projectile.cs:72768-72831 / 72704-72758）
         this.blastKill(game);
         return;

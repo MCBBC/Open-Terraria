@@ -4182,13 +4182,31 @@ DgDoorsF(); Checkpoint("dungeonD");     // DungeonGlobalDoors
 DgWallVariants(); Checkpoint("dungeonW"); // DungeonGlobalWallVariants
 DgPlatforms(); Checkpoint("dungeonP");    // DungeonGlobalPlatforms
 DgBiomeChests(); Checkpoint("dungeonC");  // DungeonGlobalBiomeChests（5 个上锁生物群系箱）
+if (Environment.GetEnvironmentVariable("DGC_DUMP") != null) {
+    var dcbbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dcbbuf, 0, dcbbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DGC_DUMP"), dcbbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGC_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    return;
+}
 DgBookshelves(); Checkpoint("dungeonB");  // DungeonGlobalBookshelves
+if (Environment.GetEnvironmentVariable("DGB_DUMP") != null) {
+    var dbbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dbbuf, 0, dbbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DGB_DUMP"), dbbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGB_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    return;
+}
 DgBasicChests(); Checkpoint("dungeonG");  // DungeonGlobalBasicChests（房间金箱）
 dgBounds.Inflate(25);                     // cs:489-490
 DgLights(); Checkpoint("dungeonI");       // DungeonGlobalLights
 DgTraps(); Checkpoint("dungeonT");        // DungeonGlobalTraps
 DgFurniture(); Checkpoint("dungeonF");    // DungeonGlobalGroundFurniture
 DgPaintings(); Checkpoint("dungeonPa");   // DungeonGlobalPaintings
+if (Environment.GetEnvironmentVariable("DGPB_DUMP") != null) {
+    var dppbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dppbuf, 0, dppbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DGPB_DUMP"), dppbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGPB_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    return;
+}
 DgBanners(); Checkpoint("dungeonBa");     // DungeonGlobalBanners
 // Late 双地牢特征（Default 无 BiomeDungeonRoom/BrickGrass → 纯空转）
 Checkpoint("dungeon");   // #32 转录落地（原 slush 同态占位已替换）
@@ -5189,15 +5207,19 @@ void DgSpikes()
                     // ★D8：两段起点对齐原版（DungeonGlobalSpikes.cs:66-72/:163-170）——命中判定后
                     // 不预偏移，首刺落在命中格本身，while 条件查"步进方向下一格"支撑、放置当前格
                     //（:73-96/:170-193）。曾先 -1 使整段尖刺列整体错位一格、丢命中格尖刺。
+                    // ★D9（2026-08-14）：round1 与 round0 同构走步——vanilla round1 第一段 while 条件
+                    // 查 (j, num12-1) 支撑（cs:170）、放置 (j, num12)、步进 num12--（cs:191）；第二段
+                    // 查 (j, num12+1)（cs:196）、步进 num12++（cs:217）。曾误传 step=0：支撑查当前格、
+                    // 永不走步，每段只落 1 根尖刺（与 JS 侧 DungeonPass.ts dgSpikes 对不上）。
                     // 第一段：沿主轴负向刻尖刺（起点=命中格）
                     int n11 = (int)r.Next(5, 13);
                     int cx = wx, cy = wy;
-                    DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: round == 0 ? -1 : 0, decY: round != 0);
+                    DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: -1);
                     // 第二段：沿主轴正向刻尖刺（round0 起点=原始采样 x+1 即 cs:105 num9+1；
                     // round1 起点=原始采样 y+1 即 cs:190 num13+1，非命中格 wy+1）
                     n11 = (int)r.Next(5, 13);
                     cx = round == 0 ? x + 1 : wx; cy = round == 0 ? wy : y + 1;
-                    DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: round == 0 ? 1 : 0, decY: round != 0);
+                    DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: 1);
                 }
             }
             if (n3 > n4) { n3 = 0; n5++; }
@@ -5205,7 +5227,7 @@ void DgSpikes()
     }
 }
 // 单段尖刺刻划（DungeonGlobalSpikes.cs:950-999 round0 / :1047-1096 round1）
-void DgSpikeRun(int round, ref int cx, ref int cy, int wx, int wy, int d, ref int n11, int step, bool decY)
+void DgSpikeRun(int round, ref int cx, ref int cy, int wx, int wy, int d, ref int n11, int step)
 {
     while (n11 > 0)
     {
@@ -6293,14 +6315,19 @@ void DgPaintings()
         if (wal[y * W + x] == num2v) n15 = 0;
         while (!arr[n15]) n15 = (int)r.Next(3);
         if (DgNearPicture2(x, y)) n15 = -1;
+        // ★D10（2026-08-14）：对齐原版调用序——GetPaintingEntry 选型掷骰在门槛判定**之前**
+        // 消耗（DungeonGlobalPaintings.cs:167-168/:183-184/:281-283/:296-298，不放画也耗）；
+        // CanGenerateFeatureInArea fluff=3（7×7 区）非 2。
         if (n15 == 0)
         {
-            if (DgFeatArea3(x, y, 2) && !DgNearPicture(x, y)) DgPaintingAt(x, y);
+            int e = DgPaintingEntry(x, y);
+            if (DgFeatArea3(x, y, 3) && !DgNearPicture(x, y)) DgPlacePainting(x, y, e);
         }
         else if (n15 == 1)
         {
-            if (!DgFeatArea3(x, y, 2)) continue;
-            if (act[y * W + x] == 0) DgPaintingAt(x, y);
+            int e = DgPaintingEntry(x, y);
+            if (!DgFeatArea3(x, y, 3)) continue;
+            if (act[y * W + x] == 0) DgPlacePainting(x, y, e);
             if (act[y * W + x] != 0) continue;
             int baseY = y;
             for (int m = 0; m < 2; m++)
@@ -6312,10 +6339,11 @@ void DgPaintings()
                 while (a2 < H - 1 && act[a2 * W + x] == 0 && act[a2 * W + x - 1] == 0 && act[a2 * W + x + 1] == 0) a2++;
                 a2--;
                 int ny = (a1 + a2) / 2;
-                if (DgFeatArea3(x, ny, 2))
+                if (DgFeatArea3(x, ny, 3))
                 {
+                    e = DgPaintingEntry(x, ny);
                     if (Math.Abs(baseY - ny) >= 4 || DgNearPicture(x, ny)) break;
-                    DgPaintingAt(x, ny);
+                    DgPlacePainting(x, ny, e);
                 }
             }
             for (int m = 0; m < 2; m++)
@@ -6327,17 +6355,19 @@ void DgPaintings()
                 while (a2 < H - 1 && act[a2 * W + x] == 0 && act[a2 * W + x - 1] == 0 && act[a2 * W + x + 1] == 0) a2++;
                 a2--;
                 int ny = (a1 + a2) / 2;
-                if (DgFeatArea3(x, ny, 2))
+                if (DgFeatArea3(x, ny, 3))
                 {
+                    e = DgPaintingEntry(x, ny);
                     if (Math.Abs(baseY - ny) >= 4 || DgNearPicture(x, ny)) break;
-                    DgPaintingAt(x, ny);
+                    DgPlacePainting(x, ny, e);
                 }
             }
         }
         else if (n15 == 2)
         {
-            if (!DgFeatArea3(x, y, 2)) continue;
-            if (act[y * W + x] == 0) DgPaintingAt(x, y);
+            int e = DgPaintingEntry(x, y);
+            if (!DgFeatArea3(x, y, 3)) continue;
+            if (act[y * W + x] == 0) DgPlacePainting(x, y, e);
             if (act[y * W + x] != 0) continue;
             int baseX = x;
             for (int m = 0; m < 3; m++)
@@ -6349,10 +6379,11 @@ void DgPaintings()
                 while (a2 < W - 1 && act[y * W + a2] == 0 && act[(y - 1) * W + a2] == 0 && act[(y + 1) * W + a2] == 0) a2++;
                 a2--;
                 int nx = (a1 + a2) / 2;
-                if (DgFeatArea3(nx, y, 2))
+                if (DgFeatArea3(nx, y, 3))
                 {
+                    e = DgPaintingEntry(nx, y);
                     if (Math.Abs(baseX - nx) >= 4 || DgNearPicture(nx, y)) break;
-                    DgPaintingAt(nx, y);
+                    DgPlacePainting(nx, y, e);
                 }
             }
             for (int m = 0; m < 3; m++)
@@ -6364,10 +6395,11 @@ void DgPaintings()
                 while (a2 < W - 1 && act[y * W + a2] == 0 && act[(y - 1) * W + a2] == 0 && act[(y + 1) * W + a2] == 0) a2++;
                 a2--;
                 int nx = (a1 + a2) / 2;
-                if (DgFeatArea3(nx, y, 2))
+                if (DgFeatArea3(nx, y, 3))
                 {
+                    e = DgPaintingEntry(nx, y);
                     if (Math.Abs(baseX - nx) >= 4 || DgNearPicture(nx, y)) break;
-                    DgPaintingAt(nx, y);
+                    DgPlacePainting(nx, y, e);
                 }
             }
         }
@@ -6398,32 +6430,35 @@ bool DgNearPicture2(int x, int y)
     return false;
 }
 // Paintings_PlacePainting + Paintings_GetPaintingEntry（style0：主墙→RandomDungeonPainting，变体墙→RandomBonePainting）
-void DgPaintingAt(int x, int y)
+// Paintings_GetPaintingEntry（DungeonGlobalPaintings.cs:327-360）：选型掷骰照原版序消耗
+//（style 不入哈希——DgPlaceSimple 不落帧；tile 型 240/241/242 入哈希）。
+int DgPaintingEntry(int x, int y)
 {
-    int tile = 240, style = 0;
+    int tile = 240;
     if (wal[y * W + x] == dgWall)
     {
         int n = (int)r.Next(3);
         if (n <= 1)
         {
-            tile = 240;
             int n2 = (int)r.Next(7);
             if (n2 == 6) n2 = (int)r.Next(7);
-            style = n2 switch { 0 => 12, 1 => 13, 2 => 14, 3 => 15, 4 => 18, 5 => 19, _ => 23 };
         }
         else
         {
             tile = 242;
             int n2 = (int)r.Next(17);
-            style = n2 switch { 14 => 15, 15 => 16, 16 => 30, _ => n2 };
         }
     }
     else
     {
         int n = (int)r.Next(2);
-        if (n == 0) { tile = 240; style = (int)r.Next(2) == 0 ? 16 : 17; }
-        else { tile = 241; style = (int)r.Next(9); }
+        if (n == 0) { int n3 = (int)r.Next(2); }
+        else { tile = 241; int n4 = (int)r.Next(9); }
     }
+    return tile;
+}
+void DgPlacePainting(int x, int y, int tile)
+{
     DgPlaceSimple(x, y, tile);
     if (wal[y * W + x] == 87) dgLihzPlaced++;
 }

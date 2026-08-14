@@ -9,6 +9,7 @@ import { mainExpertMode, getAttackDamageForProjectiles } from '../stats/ScaleSta
 import { canHit } from '../physics/LineOfSight';
 import { MagicProj } from './MagicProj';
 import { Arrow } from './Arrow';
+import { markMechQueen, mechQueenUp, getMechQueen, getMechQueenCenter } from './mechQueen';
 
 const addProj = (game: GameHooks, p: MagicProj) => {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(p, 'projectiles');
@@ -640,16 +641,60 @@ export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: num
     new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }), 'projectiles');
 }
 
+/** NPC.SpawnMechQueen 合体召唤链(NPC.cs:19739-19748,Game.summonMechdusa 调用)：
+ *  queen(127) 落位 → markMechQueen(=SpawnBoss :81472 写 ai[3]=mechQueen 非零标记)
+ *  → 以 queen Center 为共同出生点同点 NewNPC 125/126/134 + 2×139 探针
+ *  (ai2=毁灭者头引用,ai3=∓1 侧位——原版第 7/8 参 ai2/ai3,曾误记 ai0)。
+ *  调用方须已过 anyMechBossUp 门与 Mechdusa 种子门(remix+getGood)。 */
+export function spawnMechQueenEnsemble(game: GameHooks, cx: number, cy: number): Enemy | null {
+  const queen = spawnVanillaEnemy(game, 127, cx, cy);
+  if (!queen) return null;
+  // SpawnBoss :81469-81473：Type==127 且 mechQueen!=-1 → ai[3]=whoAmI(非零标记)；
+  // 本仓 ai3 是旋冲方向缓存(±1)不冲突——mech 态旋转走 AngleLerp 不读 ai3,标记走 WeakSet
+  markMechQueen(queen);
+  queen.ai3 = queen.id;
+  // :19743-19747 同点伴随(取 mechQueen 的 Center)
+  for (const id of [125, 126, 134]) spawnVanillaEnemy(game, id, queen.cx, queen.cy);
+  const head = (game.enemies() as Enemy[]).find((n) => (n as Enemy).vanillaId === 134 && !(n as Enemy).dead)
+    ?? null;
+  for (const side of [-1, 1]) {
+    const probe = spawnVanillaEnemy(game, 139, queen.cx, queen.cy);
+    if (probe) { probe.ai2 = head ? head.id : -1; probe.ai3 = side; }
+  }
+  return queen;
+}
+
+/** Mechdusa queen 锚点(NPC.cs:26571-26579 雷眼 / :27194-27202 魔眼)：
+ *  GetMechQueenCenter + (±150,-250)×0.75 再 RotatedBy(queen.velocity.X×0.05×0.5, 中心)
+ *  ——双子挂 queen 头上,随 queen 水平速度整体旋转。返回绝对坐标。 */
+export function mechQueenAnchor(queen: Enemy, spaz: boolean): { x: number; y: number } {
+  const qc = getMechQueenCenter(queen);
+  // vector38/44 = new Vector2(±150, -250) × 0.75
+  const ox = (spaz ? 150 : -150) * 0.75, oy = -250 * 0.75;
+  const ang = queen.vx * 0.025;            // num431/num475
+  const cos = Math.cos(ang), sin = Math.sin(ang);
+  // RotatedBy(ang, qc)：绕 qc 旋转 (qc+off) 点
+  return { x: qc.x + ox * cos - oy * sin, y: qc.y + ox * sin + oy * cos };
+}
+
 /** AI_030/031 双子(NPC.cs:26497-27735):雷神之眼 125 / 魔神之眼 126。
  *  旋转持续瞄准玩家(0.1/0.15 步进+绕圈处理);白天/玩家死 → 上飞离场;
  *  一阶段(血>40%):侧向悬浮(300/400)→4-10 连冲(12/13 速);二阶段变身自旋;
  *  三阶段:雷眼 激光 83→100(伤害×1.5 防+10),魔眼 火焰喷射 101(伤害×1.5 防+18)。
  *  getGoodWorld(FTW)分支全量实装:悬浮/冲刺/弹幕计数抬档(:26599/26709/26745/
- *  26883/27020 雷眼,:27218/27313/27373/27539 魔眼)。 */
+ *  26883/27020 雷眼,:27218/27313/27373/27539 魔眼)。
+ *  Mechdusa 联动(IsMechQueenUp,2026-08-14 全分支实装):锚位悬浮(:26571-26579/
+ *  :27194-27202)、悬浮计时 600→1200(:26685/:27291)、雷眼激光门 60→90/120
+ *  (:26675-26680,有 135 段在场=120)、变身段反弹弹幕(:26812/:27435)、
+ *  三阶段锚位悬浮+计时 300/400→1200(:26891-26906/:27510-27587/:27651-27671)、
+ *  魔眼三阶段旋转步进 ×0.25(:27135-27139)、火焰沿自身朝向喷(:27640-27647)。 */
 export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: boolean) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
   // Main.getGoodWorld(for the worthy)
   const ftw = !!game.world.seedFlags?.getGoodWorld;
+  // Mechdusa 合体态(NPC.IsMechQueenUp)——queen 失效(死亡/消散)自动回落 false
+  const mq = mechQueenUp();
+  const queen = mq ? getMechQueen() : null;
   // 白天/玩家死:上飞离场(原版 :26585/:27208 vy-=0.04 + EncourageDespawn(10))——
   // 玩家死亡派发为 null,一并进离场（此前 null 仅漂移不消散）
   if (game.world.clock.isDay || !player || player.dead) {
@@ -658,10 +703,15 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
     e.x += e.vx; e.y += e.vy;
     return;
   }
+  // reflectsProjectiles 每帧复位(:26582/:27204)——mech 变身段(:26812/:27435)置真
+  e.reflectsProjectiles = false;
   // ---- 旋转瞄准(num427/num471:atan2(dy-59, 自-玩)+π/2,步进 0.1/0.15) ----
   let target = Math.atan2(e.y + e.h - 59 - (player.y + player.h / 2), e.cx - player.cx) + Math.PI / 2;
   if (target < 0) target += 6.283; else if (target > 6.283) target -= 6.283;
-  const step = spaz ? 0.15 : 0.1;
+  // :27135-27139 魔眼 mech 态悬浮(三阶段 ai0==3 && ai1==0)旋转步进 ×0.25
+  //  (锚位悬浮时头缓慢转向玩家)
+  let step = spaz ? 0.15 : 0.1;
+  if (spaz && mq && e.ai0 === 3 && e.ai1 === 0) step *= 0.25;
   let rot = e.spin;
   if (rot < target) { rot += (target - rot > Math.PI ? -step : step); }
   else if (rot > target) { rot += (rot - target > Math.PI ? step : -step); }
@@ -679,10 +729,24 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       const side = e.cx < player.x + player.w ? -1 : 1;
       const offX = spaz ? 400 : 300, offY = spaz ? 0 : 300;
       const tx = player.cx + side * offX, ty = player.cy - offY;
-      const hoverDist = Math.hypot(tx - e.cx, ty - e.cy);
-      seek(e, tx, ty, spd, acc);
+      const hoverDist = Math.hypot(tx - e.cx, ty - e.cy);   // num438:玩家侧悬浮点距(mech 激光门消费)
+      if (mq && queen) {
+        // mech 锚位悬浮(:26622-26678 雷眼 / :27231-27260 魔眼):速 14、目标 =
+        // queen 锚点;距离 >14 时目标速度钳 14,速度指数逼近(雷眼 1/60 :26674-26679,
+        // 魔眼 1/5 :27241-27248)——双子挂 queen 头上随头旋转
+        const a = mechQueenAnchor(queen, spaz);
+        let dx = a.x - e.cx, dy = a.y - e.cy;
+        const d = Math.hypot(dx, dy);
+        if (d > 14) { dx = dx / d * 14; dy = dy / d * 14; }
+        const k = spaz ? 5 : 60;   // 魔眼 (v*4+t)/5 / 雷眼 (v*59+t)/60
+        e.vx = (e.vx * (k - 1) + dx) / k;
+        e.vy = (e.vy * (k - 1) + dy) / k;
+      } else {
+        seek(e, tx, ty, spd, acc);
+      }
       e.ai2 += 1;
-      if (e.ai2 >= 600) { e.ai1 = 1; e.ai2 = 0; e.ai3 = 0; }
+      // mech 悬浮计时 600→1200(:26685-26690 雷眼 num440 / :27291-27296 魔眼 num483)
+      if (e.ai2 >= (mq ? 1200 : 600)) { e.ai1 = 1; e.ai2 = 0; e.ai3 = 0; }
       // 悬浮期弹幕:魔眼 每 60t 诅咒焰 96(25 伤 12 速);雷眼 位于玩家上方且距悬浮点<400 时绿激光 83(20 伤 9 速)
       if (spaz) {
         e.ai3 += 1 + (ftw ? 0.4 : 0);   // :27313-27316 FTW 诅咒焰计数 +0.4/t
@@ -695,7 +759,12 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
         }
       } else if (e.y + e.h < player.y && hoverDist < 400) {
         e.ai3 += 1 + (ftw ? 0.5 : 0);   // :26709-26711 FTW 激光计数 +0.5/t
-        if (e.ai3 >= 60) {
+        // mech 激光门 60→90/120(:26673-26679 num441 = !npcsFoundForCheckActive[135]
+        //   ? 90 : 120——毁灭者身段在场=更慢)
+        const laserGate = mq
+          ? ((game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 135) ? 120 : 90)
+          : 60;
+        if (e.ai3 >= laserGate) {
           e.ai3 = 0;
           const dx = player.cx - e.cx, dy = player.cy - e.cy;
           const d = Math.hypot(dx, dy) || 1;
@@ -736,6 +805,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
 
   // ---- 变身(ai0=1 自旋加速 / ai0=2 减速,各 100t;ai2=角速度 0↔0.5) ----
   if (e.ai0 === 1 || e.ai0 === 2) {
+    // mech 变身段反弹玩家弹幕(:26812-26815 雷眼 / :27435-27438 魔眼)——
+    // Projectile.cs:12050 flag6 命中即 ReflectProjectile 回射玩家(伤 1/4)
+    if (mq) e.reflectsProjectiles = true;
     if (e.ai0 === 1) { e.ai2 += 0.005; if (e.ai2 > 0.5) e.ai2 = 0.5; }
     else { e.ai2 -= 0.005; if (e.ai2 < 0) e.ai2 = 0; }
     e.spin += e.ai2;

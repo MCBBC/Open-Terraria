@@ -518,7 +518,7 @@ const S = (over: Partial<SceneFlags> = {}): SceneFlags =>
 
 function musicInp(over: Partial<Parameters<typeof pickMusic>[0]> = {}) {
   return {
-    scene: S(), isDay: true, bossMusic: 0, invasionMusic: 0,
+    scene: S(), isDay: true,
     worldSurface: 200, rockLevel: 400, lavaLine: 900, maxTilesX: 4200,
     centerX: 2100 * 16, centerY: 3000, state: newMusicState(),
     weather: { storm: false, rain: false, windy: false, timeOfDay01: 0.5 },
@@ -538,9 +538,9 @@ describe('BGM 选曲（Main.cs:12578-12585 日食 / 12243-12247 塔曲）', () =
   });
 
   it('四塔事件进行中 → LunarPillars 34；月总（398）在场 → MoonLord 38 胜出', () => {
-    expect(pickMusic(musicInp({ lunarMusic: 34 }))).toBe(MUSIC.LunarPillars);
+    expect(pickMusic(musicInp({ eventMusic: 34 }))).toBe(MUSIC.LunarPillars);
     expect(MUSIC.LunarPillars).toBe(34);
-    expect(pickMusic(musicInp({ lunarMusic: 34, bossMusic: 38 }))).toBe(MUSIC.MoonLord);
+    expect(pickMusic(musicInp({ eventMusic: 38 }))).toBe(MUSIC.MoonLord);
     expect(MUSIC.MoonLord).toBe(38);
   });
 });

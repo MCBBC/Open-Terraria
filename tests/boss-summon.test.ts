@@ -38,9 +38,9 @@ describe('Boss 专属 BGM（Main.cs:12162-12280 + 12474-12535）', () => {
       maxTilesX: 4200, centerX: 200 * 16, centerY: 1100 * 16, // 地狱深度
       state: newMusicState(),
     };
-    const withBoss = pickMusic({ ...base, bossMusic: 96 } as never);
+    const withBoss = pickMusic({ ...base, eventMusic: 96 } as never);
     expect(withBoss).toBe(96);                              // 蜂后曲压过地狱
-    const without = pickMusic({ ...base, bossMusic: 0 } as never);
+    const without = pickMusic({ ...base } as never);
     expect(without).toBe(MUSIC.Underworld);                 // 无 boss 落地狱曲
   });
 });

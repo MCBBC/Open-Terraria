@@ -6,6 +6,7 @@
 //   偏移的暗化层（本色调暗至 ×0.3,非纯黑）,4 = 本体;锚点 = 文字盒中心
 //   （origin = Measure/2）;crit 带 rotation（NewText :107 初始 ±0.12、Update
 //   :178-187 漂移 ±0.001/t）。
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import combatFontJson from '../data/combat-font.json';
 
 interface GlyphRect { x: number; y: number; width: number; height: number }

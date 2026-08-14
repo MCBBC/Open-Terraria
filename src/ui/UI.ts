@@ -2011,12 +2011,15 @@ export class UI {
     equipCol.appendChild(defRow);   // 装备列（第三列）正下方（原版画在装备区左侧垂直居中,用户指定装备列底）
 
     // 合成区 —— 挂 right（物品格容器）内部底部=物品格正下方（用户指定，
-    // 此前挂 invPanel 横跨整个面板宽度）
-    right.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
+    // 此前挂 invPanel 横跨整个面板宽度）。标题+可用合成站同行（减少高度占用）
+    const craftTitleRow = el('div');
+    craftTitleRow.style.cssText = 'display:flex; align-items:baseline; gap:8px; margin-bottom:6px;';
+    craftTitleRow.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
     const stations = el('div', '', '');
-    stations.style.cssText = 'font-size:12px; color:#8ad0a0; margin-bottom:6px;';
+    stations.style.cssText = 'font-size:11px; color:#8ad0a0; flex:1; min-width:0; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
     stations.dataset.role = 'stations';
-    right.appendChild(stations);
+    craftTitleRow.appendChild(stations);
+    right.appendChild(craftTitleRow);
     // ---- Modern 合成网格控件（1.4.5 CraftingGrid：搜索栏 + 焦点配方材料格） ----
     const modernRow = el('div');
     modernRow.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
@@ -2030,7 +2033,9 @@ export class UI {
     modernRow.appendChild(this.craftGridEl);
     right.appendChild(modernRow);
     this.craftListEl = el('div');
-    this.craftListEl.style.cssText = 'max-height:240px; overflow-y:auto; width:520px;';
+    // 原版无滚动条——滚轮驱动焦点评动(CraftingUI 滚动列表),不走原生滚动;
+    // 曾 overflow-y:auto + refreshAll 重建行后 scrollTop 归零 = 滚动位置每帧重置
+    this.craftListEl.style.cssText = 'height:240px; overflow:hidden; width:520px;';
     right.appendChild(this.craftListEl);
     this.root.appendChild(this.invPanel);
   }
@@ -2617,8 +2622,7 @@ export class UI {
       });
       if (filtered.length) avail = filtered;
     }
-    const head = el('div', 'sw-lbl', '── 原版配方 ──');
-    this.craftListEl.appendChild(head);
+    // 小标题已摘——面板只留原版配方段,无需分区标识
     const MAX_ROWS = 60; // 焦点 ±30（超出原版 middleY 视口即 alpha→0 :177）
     const start = Math.max(0, Math.min(this.craftFocus - 30, avail.length - MAX_ROWS));
     if (this.craftFocus >= avail.length) this.craftFocus = 0;
@@ -2896,7 +2900,10 @@ export class UI {
     };
     requestAnimationFrame(applyBg);
     const img = invBgEnsure();
-    if (img && !(img as HTMLImageElement).complete) (img as HTMLImageElement).addEventListener('load', applyBg, { once: true });
+    // ★bitmap 就绪语义(2026-08-14 修复):invBgImg 升级为 ImageBitmap 后无
+    // .complete/.addEventListener——守卫只对 HTMLImageElement 阶段生效;
+    // bitmap 存在即已解码,invBgDataUrl 内部自会走 width 判定
+    if (img && img instanceof HTMLImageElement && !img.complete) img.addEventListener('load', applyBg, { once: true });
     return panel;
   }
 
