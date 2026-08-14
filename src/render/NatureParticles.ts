@@ -418,25 +418,25 @@ export class NatureParticles {
     // 落叶：32 列(油漆) × 8 行(旋转)，帧 12×14（SpriteFrame(32,8)）
     for (const l of this.leaves) {
       const img = atlas.ensureVImage(`vanilla/Gore_${l.gore}.png`);
-      if (!img || !img.complete || img.naturalWidth === 0) continue;
-      const fw = img.naturalWidth / 32, fh = img.naturalHeight / 8;
+      if (!img || !(img.width > 0) || img.width === 0) continue;
+      const fw = img.width / 32, fh = img.height / 8;
       ctx.globalAlpha = 1 - l.alpha / 255;
       ctx.drawImage(img, 0, l.row * fh, fw, fh, l.x, l.y, fw * l.scale, fh * l.scale);
     }
     // 滴水：18×300 竖条 15 帧（帧高 20）
     for (const d of this.drips) {
       const img = atlas.ensureVImage(`vanilla/Gore_${d.type}.png`);
-      if (!img || !img.complete || img.naturalWidth === 0) continue;
-      const fh = img.naturalHeight / 15;
+      if (!img || !(img.width > 0) || img.width === 0) continue;
+      const fh = img.height / 15;
       ctx.globalAlpha = 1 - d.alpha / 255;
-      ctx.drawImage(img, 0, d.frame * fh, img.naturalWidth, fh, d.x, d.y, img.naturalWidth, fh);
+      ctx.drawImage(img, 0, d.frame * fh, img.width, fh, d.x, d.y, img.width, fh);
     }
     // 云雾：Main.DrawGore（Main.cs:21749-21756）——中心锚 + scale + rotation，
     // 不透明度 = (255-alpha)/255（Gore.GetAlpha :1486）
     for (const c of this.clouds) {
       const img = atlas.ensureVImage(`vanilla/Gore_${c.type}.png`);
-      if (!img || !img.complete || img.naturalWidth === 0) continue;
-      const w = img.naturalWidth, h = img.naturalHeight;
+      if (!img || !(img.width > 0) || img.width === 0) continue;
+      const w = img.width, h = img.height;
       ctx.save();
       ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255);
       ctx.translate(c.x + w / 2, c.y + h / 2);

@@ -13,8 +13,8 @@ export interface ArtGrid { w: number; h: number; rgba: Uint8ClampedArray }
 /** 图片 → 像素格:盒式平均降采样(最长边 ≤ maxSide),通道轻度量化(32 级/通道,
  *  压缩色数更接近像素画);alpha < alphaThresh 的格子标记透明(放置时跳过)。 */
 export function imageToGrid(img: HTMLImageElement | HTMLCanvasElement, maxSide = 48, alphaThresh = 40): ArtGrid {
-  const iw = 'naturalWidth' in img ? img.naturalWidth : img.width;
-  const ih = 'naturalHeight' in img ? img.naturalHeight : img.height;
+  const iw = 'naturalWidth' in img ? img.width : img.width;
+  const ih = 'naturalHeight' in img ? img.height : img.height;
   const scale = Math.min(1, maxSide / Math.max(iw, ih));
   const w = Math.max(1, Math.round(iw * scale));
   const h = Math.max(1, Math.round(ih * scale));

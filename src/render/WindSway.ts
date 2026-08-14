@@ -331,12 +331,12 @@ function basicGrassGlow(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, rec: 
     if (rec.sheet === 637) {
       // 自身贴图重绘（Lerp(White,color,0.75)，color=油漆色——无油漆恒白）
       const img = atlas.ensureVImage(`vanilla/Tiles_${rec.sheet}.png`);
-      if (!img || !img.complete) return;
+      if (!img || !(img.width > 0)) return;
       ctx.drawImage(img, fx, fy, TILE, TILE, dpx, dpy, TILE, TILE);
       return;
     }
     const img = atlas.ensureVImage('vanilla/Glow_329.png');
-    if (!img || !img.complete) return;
+    if (!img || !(img.width > 0)) return;
     // glowColor = White × (mouseTextColor/255)——鼠标文本脉冲近似
     ctx.globalAlpha = 0.88 + 0.12 * Math.sin(performance.now() / 180);
     ctx.drawImage(img, fx, fy, TILE, TILE, dpx, dpy, TILE, TILE);
@@ -493,7 +493,7 @@ function drawMultiGrass(
   // 27 香蒲 glowmask（:9096/9174 flag2 族：同贴图 fy+74 白色重绘）
   const cattailGlow = rec.sheet === 27 ? (dpx: number, dpy: number, idx2: number) => {
     const img = atlas.ensureVImage('vanilla/Tiles_27.png');
-    if (!img || !img.complete) return;
+    if (!img || !(img.width > 0)) return;
     ctx.drawImage(img, st.frameX[idx2], st.frameY[idx2] + 74, TILE, TILE, dpx, dpy, TILE, TILE);
   } : undefined;
   for (let j = 0; j < sy; j++) {

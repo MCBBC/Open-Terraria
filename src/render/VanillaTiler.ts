@@ -370,7 +370,7 @@ export function frameFor(atlas: SpriteAtlas, sheet: number, st: TileStore, x: nu
  *  窄表）上是空像素，直画会整格空白 → 检出后回退默认帧 */
 const frameContentCache = new Map<string, boolean>();
 function frameHasContent(r: DrawRect): boolean {
-  const key = `${(r.img as HTMLImageElement).naturalWidth || r.img.width}x${r.img.height}:${r.sx},${r.sy}`;
+  const key = `${(r.img as HTMLImageElement).width || r.img.width}x${r.img.height}:${r.sx},${r.sy}`;
   const hit = frameContentCache.get(key);
   if (hit !== undefined) return hit;
   let ok = false;
@@ -486,8 +486,8 @@ function drawTreeGlow(
 ): void {
   if (sheet !== 634) return;
   const glow = atlas.ensureVImage(anchor === 0 ? 'vanilla/Glow_316.png' : 'vanilla/Glow_317.png');
-  if (!glow || !glow.complete || glow.naturalWidth === 0) return;
-  if (sx + sw > glow.naturalWidth || sy + sh > glow.naturalHeight) return;
+  if (!glow || !(glow.width > 0) || glow.width === 0) return;
+  if (sx + sw > glow.width || sy + sh > glow.height) return;
   ctx.drawImage(glow, sx, sy, sw, sh, dx, dy, sw, sh);
 }
 
@@ -786,8 +786,8 @@ function drawXmasTreeCell(
   if (!cell) return;
   const { ax, ay, col, row } = cell;
   const body = atlas.ensureVImage('vanilla/Tiles_171.png');
-  if (body && body.complete && body.naturalWidth > 0
-    && col * 16 + 16 <= body.naturalWidth && row * 16 + 16 <= body.naturalHeight) {
+  if (body && (body.width > 0) && body.width > 0
+    && col * 16 + 16 <= body.width && row * 16 + 16 <= body.height) {
     ctx.drawImage(body, col * 16, row * 16, 16, 16, px, py, TILE, TILE);
   }
   // 装饰层（:3774-3797：topper=slot0 Xmas_3 / garland=slot1 Xmas_1 /
@@ -802,11 +802,11 @@ function drawXmasTreeCell(
     const style = xmasDecorStyle(st, ax, ay, obj);
     if (style <= 0) continue;
     const img = atlas.ensureVImage(tex);
-    if (!img || !img.complete || img.naturalWidth === 0) continue;
+    if (!img || !(img.width > 0) || img.width === 0) continue;
     const vx = (style - 1) * 66 + col * 16;
     let vy = row * 16;
     if (obj === 3) vy += animFrameIdx(171, XMAS_LIGHT_FRAMES * 130) * 130;   // 串灯帧行
-    if (vx + 16 <= img.naturalWidth && vy + 16 <= img.naturalHeight) {
+    if (vx + 16 <= img.width && vy + 16 <= img.height) {
       ctx.drawImage(img, vx, vy, 16, 16, px, py, TILE, TILE);
     }
   }

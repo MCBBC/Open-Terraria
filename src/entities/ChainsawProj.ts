@@ -83,9 +83,9 @@ export class ChainsawProj extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(509);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const frames = Math.max(1, Math.round(img.naturalHeight / img.naturalWidth));
-    const fh = img.naturalHeight / frames;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const frames = Math.max(1, Math.round(img.height / img.width));
+    const fh = img.height / frames;
     const idx = Math.min(frames - 1, this.frame % frames);
     const rot = Math.atan2(this.vy, this.vx) + Math.PI / 2 + 1.57;   // :23917（+π/2 贴图纵向 +1.57 链锯修正）
     ctx.save();
@@ -93,8 +93,8 @@ export class ChainsawProj extends Entity {
     ctx.rotate(rot);
     if (this.vx < 0) ctx.scale(1, -1);
     ctx.imageSmoothingEnabled = false;
-    const dw = img.naturalWidth * this.drawScale, dh = fh * this.drawScale;
-    ctx.drawImage(img, 0, idx * fh, img.naturalWidth, fh, -dw / 2, -dh / 2, dw, dh);
+    const dw = img.width * this.drawScale, dh = fh * this.drawScale;
+    ctx.drawImage(img, 0, idx * fh, img.width, fh, -dw / 2, -dh / 2, dw, dh);
     ctx.restore();
   }
 }

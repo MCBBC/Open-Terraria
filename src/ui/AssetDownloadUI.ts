@@ -93,7 +93,7 @@ function ensurePanelBg(panel: HTMLElement): void {
       try {
         const img = panelBgImg!;
         const t = document.createElement('canvas');
-        t.width = img.naturalWidth; t.height = img.naturalHeight;
+        t.width = img.width; t.height = img.height;
         const tc = t.getContext('2d')!;
         tc.imageSmoothingEnabled = false;
         tc.drawImage(img, 0, 0);

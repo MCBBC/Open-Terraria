@@ -249,15 +249,15 @@ export class PrismProj extends Entity {
     // 晶体本体（Projectile_633.png 26×120 = 5 帧；帧按充能推进≈3t/帧）
     const img = projSprite(633);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const fh = img.naturalHeight / 5;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const fh = img.height / 5;
     const f = Math.floor(this.frame / 3) % 5;
     const rot = Math.atan2(this.dirY, this.dirX);
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(rot);
-    ctx.drawImage(img, 0, Math.round(f * fh), img.naturalWidth, Math.round(fh),
-      -img.naturalWidth / 2, -fh / 2, img.naturalWidth, fh);
+    ctx.drawImage(img, 0, Math.round(f * fh), img.width, Math.round(fh),
+      -img.width / 2, -fh / 2, img.width, fh);
     ctx.restore();
   }
 }
@@ -434,12 +434,12 @@ export class ChargedBlaster extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(460);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(Math.atan2(this.dirY, this.dirX));
     if (this.dirX < 0) ctx.scale(1, -1);
-    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    ctx.drawImage(img, -img.width / 2, -img.height / 2);
     ctx.restore();
   }
 }

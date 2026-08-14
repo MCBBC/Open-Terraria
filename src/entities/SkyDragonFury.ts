@@ -243,7 +243,7 @@ export class SkyDragonSpin extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(707);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;             // GetAlpha 707：white×(255−alpha)（:76224-76228）
     if (a <= 0.02) return;
     ctx.save();
@@ -251,7 +251,7 @@ export class SkyDragonSpin extends Entity {
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);                            // 贴图 0 态朝右（AI_140 旋转原样）
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    ctx.drawImage(img, -img.width / 2, -img.height / 2);
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -364,7 +364,7 @@ export class SkyDragonSwing extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(708);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;
     ctx.save();
@@ -372,7 +372,7 @@ export class SkyDragonSwing extends Entity {
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+    ctx.drawImage(img, -img.width / 2, -img.height / 2);
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -467,18 +467,18 @@ export class SkyDragonShot extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(709);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;
-    const fh = img.naturalHeight / 3;                // 36×102 = 3 帧
+    const fh = img.height / 3;                // 36×102 = 3 帧
     const rot = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);   // :54760-54766
     ctx.save();
     ctx.globalAlpha = a;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(rot);
     ctx.imageSmoothingEnabled = false;
-    const dw = img.naturalWidth * this.drawScale, dh = fh * this.drawScale;
-    ctx.drawImage(img, 0, this.frame * fh, img.naturalWidth, fh, -dw / 2, -dh / 2, dw, dh);
+    const dw = img.width * this.drawScale, dh = fh * this.drawScale;
+    ctx.drawImage(img, 0, this.frame * fh, img.width, fh, -dw / 2, -dh / 2, dw, dh);
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -578,16 +578,16 @@ export class SkyDragonCircle extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(1110);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;
-    const fh = img.naturalHeight / 4;                // 102×408 = 4 帧
+    const fh = img.height / 4;                // 102×408 = 4 帧
     ctx.save();
     ctx.globalAlpha = a;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, this.frame * fh, img.naturalWidth, fh,
-      this.cx0 - img.naturalWidth / 2, this.cy0 - img.naturalHeight / 2,
-      img.naturalWidth, fh);
+    ctx.drawImage(img, 0, this.frame * fh, img.width, fh,
+      this.cx0 - img.width / 2, this.cy0 - img.height / 2,
+      img.width, fh);
     ctx.restore();
     ctx.globalAlpha = 1;
   }

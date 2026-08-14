@@ -366,7 +366,7 @@ export class WeatherRenderer {
     ctx.imageSmoothingEnabled = false;
     if (w.cloudAlpha > 0) {
       const tex = getRainTex();
-      const texOk = tex && tex.complete && tex.naturalWidth > 0;
+      const texOk = tex && (tex.width > 0) && tex.width > 0;
       for (const d of this.pool) {
         if (!d.active) continue;
         const tx = Math.floor((d.x + 4) / TILE);
@@ -392,7 +392,7 @@ export class WeatherRenderer {
     }
     // ---- 雪粒（晴天雪原也有：w.cloudAlpha 无关，只看池）----
     const dTex = getDustTex();
-    if (dTex && dTex.complete && dTex.naturalWidth > 0) {
+    if (dTex && (dTex.width > 0) && dTex.width > 0) {
       for (const f of this.snow) {
         if (!f.active) continue;
         const tx = Math.floor((f.x + 5) / TILE);

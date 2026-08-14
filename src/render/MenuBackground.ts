@@ -73,8 +73,8 @@ export class MenuBackground {
   /** 单层横滚平铺（原版 DrawSurfaceBG 主循环） */
   private drawLayer(n: number, parallax: number, y: number, scale: number, alpha = 1) {
     const im = this.img(n);
-    if (!im || !im.complete || im.naturalWidth === 0 || alpha <= 0.01) return;
-    const w = im.naturalWidth * scale, h = im.naturalHeight * scale;
+    if (!im || !(im.width > 0) || im.width === 0 || alpha <= 0.01) return;
+    const w = im.width * scale, h = im.height * scale;
     const startX = -(((this.camX * parallax) % w) + w) % w - w / 2;
     const loops = Math.ceil(this.canvas.width / w) + 2;
     const ctx = this.ctx;

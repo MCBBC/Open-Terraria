@@ -25,6 +25,9 @@ export function cycleMinimapFrame(current: string): MinimapFrameSkin {
 export interface OptionsData {
   musicVol: number;   // 0..1
   sfxVol: number;     // 0..1
+  /** Ambient 环境音轨音量 0..1（Main.ambientVolume，Main.cs:1413 默认 1f；
+   *  config.json 键 "VolumeAmbient"，Main.cs:4159/4383）——13+ 环境音独立轨 */
+  ambientVol: number; // 0..1
   uiScale: number;    // 0.75..1.5（作用于 UIScale.userScale）
   devMode: boolean;
   lang: string;       // culture 名(如 zh-Hans);兼容旧数字 legacyId(对齐原版 config.json)
@@ -51,6 +54,7 @@ export class OptionsStore {
   data: OptionsData = {
     musicVol: 0.35,
     sfxVol: 1,
+    ambientVol: 1,    // Main.cs:1413 ambientVolume = 1f（旧存档无此键走默认）
     uiScale: 1,
     devMode: false,
     pvpEnabled: false,

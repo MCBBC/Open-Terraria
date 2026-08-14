@@ -122,8 +122,13 @@ function colorKey(color: { r: number; g: number; b: number }): string {
 }
 
 /** 灰度图调色：multiply 铺色 + destination-in 用原 alpha 裁回 */
-function tint(img: HTMLImageElement, color: { r: number; g: number; b: number }): HTMLCanvasElement {
-  const key = (img.src as string) + '|' + colorKey(color);
+/** 贴图实例稳定 id(ImageBitmap 化后无 .src 可拼键——用 WeakMap 自增 id 防跨表碰撞) */
+const tintImgId = new WeakMap<object, number>();
+let tintImgSeq = 0;
+function tint(img: CanvasImageSource & { width: number; height: number }, color: { r: number; g: number; b: number }): HTMLCanvasElement {
+  let id = tintImgId.get(img as object);
+  if (id === undefined) { id = ++tintImgSeq; tintImgId.set(img as object, id); }
+  const key = `t${id}|` + colorKey(color);
   let c = tintCache.get(key);
   if (c) return c;
   if (tintCache.size >= TINT_CACHE_MAX) {  // 满即清(防无界)

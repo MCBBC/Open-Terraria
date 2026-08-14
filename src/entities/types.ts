@@ -102,11 +102,18 @@ export interface GameHooks {
    *  脱庙加成读 zoneJungle/zoneTemple——原版 Main.player[target].ZoneJungle/ZoneLihzhardTemple） */
   scene?: import('../world/SceneMetrics').SceneFlags;
   /** 原版 Dust 池直入（fx/VanillaDust.spawn——Dust.NewDust 签名对齐）。
-   *  Gore 411-430 气泡族爆裂尘（Gore.cs:905-928，type 176-179）用；缺省静默丢弃 */
+   *  Gore 411-430 气泡族爆裂尘（Gore.cs:905-928，type 176-179）用；缺省静默丢弃。
+   *  返回入池尘（调用侧可做原版 DelegateMethods 式的 NewDust 后置字段覆写——
+   *  矿车轮火花 DelegateMethods.Minecart.Sparks 族即此模式）；池满/缺省 = null */
   spawnDust?(
     x: number, y: number, w: number, h: number, type: number,
     speedX?: number, speedY?: number, alpha?: number,
     color?: { r: number; g: number; b: number; a: number } | null, scale?: number,
     noGravity?: boolean,
-  ): void;
+  ): import('../fx/VanillaDust').VDust | null;
+  /** 鼠马车挖掘链的镐力门（MinecartDiggerHelper.HasPickPower :163-170 ←
+   *  Player.HasEnoughPickPowerToHurtTile Player.cs:52964-52979）：背包最佳镐
+   *  （GetBestPickaxe :39439-39450 前五十格最高 pick）对该格可伤。
+   *  Game 实现 = bestPickaxePower + tileNoFail/门槛表；缺省 = true（放行近似） */
+  pickPowerEnough?(x: number, y: number): boolean;
 }

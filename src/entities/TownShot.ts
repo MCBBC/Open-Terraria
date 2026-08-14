@@ -171,13 +171,13 @@ export class TownShot extends Entity {
     // 水平镜像族:mirror-right(585 :54715)/up-mirror(930 :44844)/upright-mirror(880 AI_183)
     if ((spec.rot === 'mirror-right' || spec.rot === 'up-mirror' || spec.rot === 'upright-mirror')
       && this.vx < 0) ctx.scale(-1, 1);
-    if (img && img.complete && img.naturalWidth > 0) {
+    if (img && (img.width > 0) && img.width > 0) {
       // 源切片直取(9 参 drawImage,不走 projFrameImg 的 document 依赖):
       // 横向条(589/590)切列 / 竖排行(585/880)切行 / 单帧整图(cols=0 勿除零)
       const cols = spec.cols;
       const rows = cols > 0 ? 1 : projFrameCount(this.projId);
-      const cw = cols > 0 ? img.naturalWidth / cols : img.naturalWidth;
-      const ch = cols > 0 ? img.naturalHeight : img.naturalHeight / rows;
+      const cw = cols > 0 ? img.width / cols : img.width;
+      const ch = cols > 0 ? img.height : img.height / rows;
       const sx = cols > 0 ? fIdx * cw : 0;
       const sy = cols > 0 ? 0 : fIdx * ch;
       // 原生帧尺寸 × SetDefaults scale(589 曾整条 100×28 压进 10×10、590 压成 14×2.9)

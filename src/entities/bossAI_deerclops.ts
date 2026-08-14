@@ -441,9 +441,9 @@ export class DeerclopsSpikeProj extends Entity {
       // Frame(1,5)（Main.cs:31004）:贴图 200×240 → 帧格 200×48,× scale=Opacity*ai[1]（:48536）。
       // 曾压成 32×32 判定盒（横向 6.25× / 纵向 5× 失真）。origin (16, 24) = (16, 帧高/2)
       // （Main.cs:31005）——泪体自锚点向 velocity 方向前伸
-      const fh = img.naturalHeight / 5;
-      ctx.drawImage(img, 0, Math.round(this.frame * fh), img.naturalWidth, Math.round(fh),
-        -16 * s, -(fh / 2) * s, img.naturalWidth * s, fh * s);
+      const fh = img.height / 5;
+      ctx.drawImage(img, 0, Math.round(this.frame * fh), img.width, Math.round(fh),
+        -16 * s, -(fh / 2) * s, img.width * s, fh * s);
     } else { ctx.fillStyle = '#9FD8F0'; ctx.fillRect(-16 * s, -16 * s, 32 * s, 32 * s); }
     ctx.restore();
   }
@@ -487,7 +487,7 @@ export class DeerclopsRubbleProj extends Entity {
       // 网格 = Frame(3,4)（Main.cs:32828-32834:projFrames[962]=3 横 × 4 纵,帧格 34×34）;
       // frameX = frame%3 / frameY = frame/3。曾按 4 列×3 行（25.5×45.33 非整数格）切片
       // 并归一到 32×32 判定盒（纵横比翻转,G11）
-      const fw = img.naturalWidth / 3, fh = img.naturalHeight / 4;
+      const fw = img.width / 3, fh = img.height / 4;
       const f = Math.max(0, Math.min(11, this.frame));
       ctx.drawImage(img, Math.round((f % 3) * fw), Math.round(Math.floor(f / 3) * fh),
         Math.round(fw), Math.round(fh), -fw / 2, -fh / 2, fw, fh);
@@ -589,9 +589,9 @@ export class InsanityShadowProj extends Entity {
     if (img) {
       // 原生 80×84 × scale=1（SetDefaults 965 无 scale;曾归一 40×40 判定盒 → 整体减半）。
       // origin（Main.cs:29934-29937）:X = spriteDirection==1 ? W-20 : 20,Y = H/2——腕部锚点
-      const ox = this.vx >= 0 ? img.naturalWidth - 20 : 20;
-      const oy = img.naturalHeight / 2;
-      ctx.drawImage(img, -ox, -oy, img.naturalWidth, img.naturalHeight);
+      const ox = this.vx >= 0 ? img.width - 20 : 20;
+      const oy = img.height / 2;
+      ctx.drawImage(img, -ox, -oy, img.width, img.height);
     } else { ctx.fillStyle = '#6020B0'; ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.fill(); }
     ctx.restore();
   }

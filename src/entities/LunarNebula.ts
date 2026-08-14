@@ -274,17 +274,17 @@ export class NebulaBlazeBolt extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(this.projId);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;            // GetAlpha :76359（白 × Opacity）
     if (a <= 0.02) return;
-    const fh = img.naturalHeight / Math.max(1, projFrameCount(this.projId));
+    const fh = img.height / Math.max(1, projFrameCount(this.projId));
     ctx.save();
     ctx.globalAlpha = a;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, this.frame * fh, img.naturalWidth, fh,
-      -img.naturalWidth / 2, -fh / 2, img.naturalWidth, fh);
+    ctx.drawImage(img, 0, this.frame * fh, img.width, fh,
+      -img.width / 2, -fh / 2, img.width, fh);
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -434,16 +434,16 @@ export class LunarFlareStar extends Entity {
     if (!this.exploded) return;                      // 飞行相 alpha=255 → GetAlpha≈0 不画
     const img = projSprite(645);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;
-    const fh = img.naturalHeight / 7;                // 7 帧（98×686）
+    const fh = img.height / 7;                // 7 帧（98×686）
     const fr = Math.min(6, this.frame);
     ctx.save();
     ctx.globalAlpha = a * 0.5;                       // GetAlpha :76171 A=127−alpha/2 ≈ 半透
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(img, 0, fr * fh, img.naturalWidth, fh,
-      this.ecx - img.naturalWidth / 2, this.ecy - fh / 2, img.naturalWidth, fh);
+    ctx.drawImage(img, 0, fr * fh, img.width, fh,
+      this.ecx - img.width / 2, this.ecy - fh / 2, img.width, fh);
     ctx.restore();
     ctx.globalAlpha = 1;
   }

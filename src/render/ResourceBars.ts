@@ -78,7 +78,7 @@ export class VanillaResourceBars {
 
     let golden = golden0; // 原版在绘制循环内递减：先画的用金心（Heart2）
     const tex = this.heart, tex2 = this.heart2;
-    if (!tex.complete || !tex2.complete) return;
+    if (!(tex.width > 0) || !(tex2.width > 0)) return;
     const W = tex.width, H = tex.height;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -125,7 +125,7 @@ export class VanillaResourceBars {
     ctx.textAlign = prevAlign;
 
     const tex = this.mana;
-    if (!tex.complete) return;
+    if (!(tex.width > 0)) return;
     const W = tex.width, H = tex.height;
     ctx.save();
     ctx.imageSmoothingEnabled = false;

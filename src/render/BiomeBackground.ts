@@ -366,8 +366,8 @@ export class BiomeBackground {
     const drawLayer = (l: LayerDef, alpha: number) => {
       if (alpha <= 0.01 || l.tex < 0) return;
       const im = this.img(l.tex);
-      if (!im || !im.complete || im.naturalWidth === 0) return;
-      const wScaled = im.naturalWidth * l.scale;
+      if (!im || !(im.width > 0) || im.width === 0) return;
+      const wScaled = im.width * l.scale;
       const startX = -(((cam.x * l.parallax) % wScaled) + wScaled) % wScaled - wScaled / 2;
       const loops = Math.ceil(viewW / wScaled) + 2;
       const topY = num3 * l.topA + l.topB; // 屏幕空间 y（vanilla bgTopY 语义）
@@ -380,10 +380,10 @@ export class BiomeBackground {
       const dw = wScaled + 1;
       for (let i = 0; i < loops; i++) {
         if (tr >= 0.999 && tg >= 0.999 && tb >= 0.999) {
-          ctx.drawImage(im, startX + i * wScaled, topY, dw, im.naturalHeight * l.scale);
+          ctx.drawImage(im, startX + i * wScaled, topY, dw, im.height * l.scale);
         } else {
           // 先画原图再叠 tint（保持边缘 alpha）：用 offscreen 缓存避免每帧 getImageData
-          this.drawTiledTinted(ctx, im, tr, tg, tb, startX + i * wScaled, topY, dw, im.naturalHeight * l.scale);
+          this.drawTiledTinted(ctx, im, tr, tg, tb, startX + i * wScaled, topY, dw, im.height * l.scale);
         }
       }
       ctx.restore();
@@ -448,7 +448,7 @@ export class BiomeBackground {
     let c = this.tintCache.get(key);
     if (!c) {
       c = document.createElement('canvas');
-      c.width = im.naturalWidth; c.height = im.naturalHeight;
+      c.width = im.width; c.height = im.height;
       const cx = c.getContext('2d')!;
       cx.drawImage(im, 0, 0);
       cx.globalCompositeOperation = 'multiply';
@@ -504,8 +504,8 @@ export class BiomeBackground {
       ctx.globalAlpha = a;
       const tile = (n: number, y: number, hHint?: number) => {
         const im = n > 0 ? this.img(n) : null;
-        if (!im || !im.complete || im.naturalWidth === 0) return;
-        const wS = im.naturalWidth;
+        if (!im || !(im.width > 0) || im.width === 0) return;
+        const wS = im.width;
         // 横向平铺（地下层无水平视差：caveParallax=0）
         const loops = Math.ceil(viewW / wS) + 1;
         for (let i = 0; i < loops; i++) {
@@ -513,8 +513,8 @@ export class BiomeBackground {
           let yy = y;
           const bottom = viewH;
           while (yy < bottom) {
-            ctx.drawImage(im, i * wS, yy, wS, im.naturalHeight);
-            yy += im.naturalHeight;
+            ctx.drawImage(im, i * wS, yy, wS, im.height);
+            yy += im.height;
             if (hHint && yy > y + hHint) break;
           }
         }
@@ -527,45 +527,45 @@ export class BiomeBackground {
       // slot3 = 岩石带主体，按自身纹理高平铺至 magmaTop。
       const rockTop2 = (() => {
         const im3 = slots[3] ? this.img(slots[3]) : null;
-        const h3 = im3 && im3.complete && im3.naturalHeight ? im3.naturalHeight : 96;
+        const h3 = im3 && (im3.width > 0) && im3.height ? im3.height : 96;
         const span = (world.rockLevel - world.groundLevel) * 16;
         const steps = Math.ceil(span / h3);
         return world.groundLevel * 16 + steps * h3 + 32 - camTopY;
       })();
       // 泥土带（slot1）：dirtTop → 岩石带顶
       const dirtIm = slots[1] ? this.img(slots[1]) : null;
-      if (dirtIm && dirtIm.complete && dirtIm.naturalWidth) {
-        const wS = dirtIm.naturalWidth;
+      if (dirtIm && (dirtIm.width > 0) && dirtIm.width) {
+        const wS = dirtIm.width;
         const loops = Math.ceil(viewW / wS) + 1;
         for (let i = 0; i < loops; i++) {
           let yy = dirtTop;
           while (yy < Math.min(rockTop2, viewH)) {
-            ctx.drawImage(dirtIm, i * wS, yy, wS, dirtIm.naturalHeight);
-            yy += dirtIm.naturalHeight;
+            ctx.drawImage(dirtIm, i * wS, yy, wS, dirtIm.height);
+            yy += dirtIm.height;
           }
         }
       }
       {
         // slot3 主体
         const im3 = slots[3] ? this.img(slots[3]) : null;
-        if (im3 && im3.complete && im3.naturalWidth) {
-          const wS = im3.naturalWidth;
+        if (im3 && (im3.width > 0) && im3.width) {
+          const wS = im3.width;
           const loops = Math.ceil(viewW / wS) + 1;
           for (let i = 0; i < loops; i++) {
-            let yy = Math.max(rockTop2, -im3.naturalHeight);
+            let yy = Math.max(rockTop2, -im3.height);
             while (yy < Math.min(magmaTop, viewH)) {
-              ctx.drawImage(im3, i * wS, yy, wS, im3.naturalHeight);
-              yy += im3.naturalHeight;
+              ctx.drawImage(im3, i * wS, yy, wS, im3.height);
+              yy += im3.height;
             }
           }
         }
         // slot2 单条过渡条（带顶 -16px，仅纹理第 0 行 16px 高）
         const im2 = slots[2] ? this.img(slots[2]) : null;
-        if (im2 && im2.complete && im2.naturalWidth && rockTop2 - 16 > -32 && rockTop2 - 16 < viewH) {
-          const wS = im2.naturalWidth;
+        if (im2 && (im2.width > 0) && im2.width && rockTop2 - 16 > -32 && rockTop2 - 16 < viewH) {
+          const wS = im2.width;
           const loops = Math.ceil(viewW / wS) + 1;
           for (let i = 0; i < loops; i++) {
-            ctx.drawImage(im2, 0, 0, wS, Math.min(16, im2.naturalHeight), i * wS, rockTop2 - 16, wS, Math.min(16, im2.naturalHeight));
+            ctx.drawImage(im2, 0, 0, wS, Math.min(16, im2.height), i * wS, rockTop2 - 16, wS, Math.min(16, im2.height));
           }
         }
       }
@@ -573,10 +573,10 @@ export class BiomeBackground {
       // sourceY=frame*96;带区 magmaTop→UnderworldLayer）
       {
         const im6 = slots[5] ? this.img(slots[5]) : null;
-        if (im6 && im6.complete && im6.naturalWidth) {
-          const frameH = im6.naturalHeight / 3;   // 160×288 = 3 帧 × 96px
+        if (im6 && (im6.width > 0) && im6.width) {
+          const frameH = im6.height / 3;   // 160×288 = 3 帧 × 96px
           const sy = Math.min(2, magmaFrame) * frameH;
-          const wS = im6.naturalWidth;
+          const wS = im6.width;
           const loops = Math.ceil(viewW / wS) + 1;
           for (let i = 0; i < loops; i++) {
             let yy = magmaTop;
@@ -591,9 +591,9 @@ export class BiomeBackground {
         // 岩浆海表面波纹条（slot6=185+hell = 原版 backTexture[6](:52495),160×48 取
         // 16px 行 sourceY=frame*16,画在 UnderworldLayer 高度——★曾从未绘制)
         const im5 = slots[6] ? this.img(slots[6]) : null;
-        if (im5 && im5.complete && im5.naturalWidth) {
+        if (im5 && (im5.width > 0) && im5.width) {
           const sy = Math.min(2, magmaFrame) * 16;
-          const wS = im5.naturalWidth;
+          const wS = im5.width;
           const loops = Math.ceil(viewW / wS) + 1;
           const stripY = Math.max(magmaTop, uwScreenY);
           if (stripY > -32 && stripY < viewH) {
@@ -632,12 +632,12 @@ export class BiomeBackground {
     for (let idx = 4; idx >= 0; idx--) {             // :52092 远→近(4→0)
       const texId = set[idx];
       const im = this.hellImg(texId);
-      if (!im || !im.complete || im.naturalWidth === 0) continue;
+      if (!im || !(im.width > 0) || im.width === 0) continue;
       const num2 = idx * 2 + 3;                      // :52109 深度
       const inv = 1 / num2;                          // vector = 1/num2(纵横同)
       const scale = texId === 4 ? 0.5 : 1.3;         // num3(:52113;贴图4细柱条 0.5)
       // 2×2 四帧行动画 + 各贴图 Y/X 偏移(:52117-52206)
-      let sx = 0, sy = 0, sw = im.naturalWidth, sh = im.naturalHeight;
+      let sx = 0, sy = 0, sw = im.width, sh = im.height;
       let zeroX = 0, zeroY = 0;
       const anim = texId === 1 || texId === 6 || texId === 7 || texId === 8 || texId === 13;
       if (anim) {

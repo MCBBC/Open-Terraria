@@ -593,7 +593,7 @@ export function drawHeldItemFlame(
 ): void {
   if (!FLAME_ITEMS.has(itemId)) return;
   const img = atlas.ensureVImage(`vanilla/ItemFlame_${itemId}.png`);
-  if (!img || typeof img.naturalWidth !== 'number' || img.naturalWidth === 0) return;
+  if (!img || typeof img.width !== 'number' || img.width === 0) return;
   const spec = heldFlameSpec(itemId);
   refreshItemFlamePos();
   // 颜色乘子：disco 走 FlickerClock（16 档量化进染色缓存，同放置态 disco 惯例）
@@ -607,7 +607,7 @@ export function drawHeldItemFlame(
       tint = [128, 128, 128];
     }
   }
-  const cell = tint ? tintedFlameCell(img, 0, 0, img.naturalWidth, img.naturalHeight, tint[0], tint[1], tint[2]) : null;
+  const cell = tint ? tintedFlameCell(img, 0, 0, img.width, img.height, tint[0], tint[1], tint[2]) : null;
   ctx.save();
   ctx.imageSmoothingEnabled = false;
   ctx.globalCompositeOperation = 'lighter';   // A=0 预乘加色语义（同放置态火苗）
@@ -617,7 +617,7 @@ export function drawHeldItemFlame(
   for (let i = 0; i < spec.count; i++) {
     const worldX = _itemFlamePos[i][0] * spec.scale + spec.dxDir * direction;
     const worldY = _itemFlamePos[i][1] * spec.scale;
-    ctx.drawImage(cell ?? img, 0, 0, img.naturalWidth, img.naturalHeight,
+    ctx.drawImage(cell ?? img, 0, 0, img.width, img.height,
       dest.x + Math.trunc(worldX) * direction, dest.y + Math.trunc(worldY), dest.w, dest.h);
   }
   ctx.restore();

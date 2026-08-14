@@ -136,10 +136,16 @@ export class SpriteAtlas {
   data = atlasJson as unknown as AtlasData;
   resources = resourcesJson as unknown as ResourcesData;
   vanilla = vanillaJson as unknown as VanillaData;
-  images = new Map<string, HTMLImageElement | HTMLCanvasElement>();
-  vimages = new Map<string, HTMLImageElement>(); // 原版 PNG（干净像素，不做 hardAlpha）
+  images = new Map<string, ImageBitmap | HTMLImageElement | HTMLCanvasElement>();
+  /** ★ImageBitmap 化(2026-08-14 根治):drawImage(HTMLImageElement) 走浏览器
+   *  懒解码缓存,GPU 压力下被驱逐→静默重解码(三份 trace 14-21 万次解码风暴)。
+   *  createImageBitmap = 自持已解码像素(原版 Texture2D 语义):绘制永不重解码,
+   *  close() = Dispose。?bitmap=0 走旧 Image 路径(逃生门) */
+  static readonly USE_BITMAP = typeof createImageBitmap === 'function'
+    && !(typeof location !== 'undefined' && new URLSearchParams(location.search).has('bitmap') && location.search.includes('bitmap=0'));
+  vimages = new Map<string, ImageBitmap | HTMLImageElement>(); // 原版 PNG（干净像素，不做 hardAlpha）
   /** UI 贴图（vanilla-ui/，干净像素不 hardAlpha——UI 有抗锯齿边缘） */
-  uiimages = new Map<string, HTMLImageElement>();
+  uiimages = new Map<string, ImageBitmap | HTMLImageElement>();
   private uiFiles = (vanillaUiJson as { files: Record<string, string> }).files;
   /** 人工标注（annotator.html 导出）：sheet → spriteName → 方位标签 */
   annotations: Record<string, Record<string, string>> = {};
@@ -289,13 +295,22 @@ export class SpriteAtlas {
   /** UI 贴图失败负缓存(与 ensureVImage._vImageFailed 对称,2026-08-13 补):
    *  清单内但 404 的键若不加终态标记,每帧重查的消费方会每帧重发请求 */
   private _uiFailed = new Set<string>();
-  private ensureUiImage(file: string): HTMLImageElement | null {
+  private ensureUiImage(file: string): ImageBitmap | HTMLImageElement | null {
     const hit = this.uiimages.get(file);
     if (hit) return hit;
     if (this._uiPending.has(file) || this._uiFailed.has(file)) return null;
     this._uiPending.add(file);
     const im = new Image();
-    im.onload = () => { this.uiimages.set(file, im); this._uiPending.delete(file); this._uiFailed.delete(file); };
+    im.onload = () => {
+      // ImageBitmap 桥:入表即自持已解码像素(懒解码缓存驱逐免疫)
+      const land = (store: ImageBitmap | HTMLImageElement) => {
+        this.uiimages.set(file, store);
+        this._uiPending.delete(file);
+        this._uiFailed.delete(file);
+      };
+      if (SpriteAtlas.USE_BITMAP) createImageBitmap(im).then(land, () => land(im));
+      else land(im);
+    };
     im.onerror = () => { this._uiPending.delete(file); this._uiFailed.add(file); };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
@@ -329,11 +344,15 @@ export class SpriteAtlas {
       if (this.vimages.has(f)) { done++; onProgress?.(done / list.length); return resolve(); }
       const img = new Image();
       img.onload = () => {
-        this.vimages.set(f, img);
-        // decode():预载阶段完成解码,否则 Chrome 延迟到首次 draw 才解码,
-        // 大表(2000px 级)首帧仍会卡一拍——"预载"语义要求字节+解码双就绪
-        img.decode().then(() => { done++; onProgress?.(done / list.length); resolve(); }, () => resolve());
-        this.onVImageLoaded?.(f);
+        // ImageBitmap 桥(字节+解码双就绪的原生语义,替代 img.decode());
+        // 晚到钩子须在 bitmap 落地后触发(消费方读的是表内对象)
+        const land = (store: ImageBitmap | HTMLImageElement) => {
+          this.vimages.set(f, store);
+          done++; onProgress?.(done / list.length); resolve();
+          this.onVImageLoaded?.(f);
+        };
+        if (SpriteAtlas.USE_BITMAP) createImageBitmap(img).then(land, () => land(img));
+        else land(img);
       };
       img.onerror = () => resolve();
       img.src = `sprites/${encodeURI(f)}`;
@@ -384,7 +403,7 @@ export class SpriteAtlas {
    *  miss 发起加载时 note、onload 到达时 onLoaded——烘焙消费的任何懒取贴图
    *  晚到自动触发重烘焙,不再依赖 Game.ts 的前缀白名单(白名单保留作纵深) */
   bakeTracker: { _baking?: boolean; note(file: string): void; onLoaded(file: string): void } | null = null;
-  ensureVImage(file: string): HTMLImageElement | null {
+  ensureVImage(file: string): ImageBitmap | HTMLImageElement | null {
     const hit = this.vimages.get(file);
     if (hit) return hit;
     if (this._iconPending.has(file) || this._vImageFailed.has(file)) return null;
@@ -392,11 +411,17 @@ export class SpriteAtlas {
     this._iconPending.add(file);
     const im = new Image();
     im.onload = () => {
-      this.vimages.set(file, im);
-      this._iconPending.delete(file);
-      this._vImageFailed.delete(file);
-      if (this.bakeTracker) this.bakeTracker.onLoaded(file);
-      this.onVImageLoaded?.(file);  // 晚到的表 → ChunkCache 重烘焙
+      // ImageBitmap 桥(2026-08-14 根治):入表即自持已解码像素;晚到/烘焙
+      // 钩子在 bitmap 落地后触发(消费方读表内对象)
+      const land = (store: ImageBitmap | HTMLImageElement) => {
+        this.vimages.set(file, store);
+        this._iconPending.delete(file);
+        this._vImageFailed.delete(file);
+        if (this.bakeTracker) this.bakeTracker.onLoaded(file);
+        this.onVImageLoaded?.(file);  // 晚到的表 → ChunkCache 重烘焙
+      };
+      if (SpriteAtlas.USE_BITMAP) createImageBitmap(im).then(land, () => land(im));
+      else land(im);
     };
     im.onerror = () => {
       this._iconPending.delete(file);

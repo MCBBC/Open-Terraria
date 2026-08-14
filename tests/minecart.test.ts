@@ -10,10 +10,16 @@ import { TileStore } from '../src/world/TileStore';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
+import { ITEM_DEFS } from '../src/data/items';
+import { viIdFromKey } from '../src/data/vanillaItemCombat';
 import { Inventory } from '../src/items/Inventory';
 import { Player } from '../src/entities/Player';
 import type { GameHooks } from '../src/entities/types';
-import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../src/entities/Minecart';
+import {
+  Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT,
+  MOLE_CART_MOUNT, TRACK_ITEM_VID, SUPER_CART_LASER_DMG,
+  superCartDefenseBonus, wheelSparkTier, cartDustKindOf, type CartLaserBeam,
+} from '../src/entities/Minecart';
 import { mountOfItem, isCartMount, MOUNT_DATA, MOUNT_NAMES } from '../src/entities/Mounts';
 import {
   frameTrack, frameTrackArea, flipSwitchTrack, placeTrack, getOnTrack,
@@ -57,8 +63,11 @@ function mkHooks(st: TileStore, p: Player, world?: World, enemies: unknown[] = [
     notifyInventoryChanged: () => {},
     playSfx: () => {},
     playSfxFiles: () => {},
+    playSfxFile: () => {},
     showPickupLabel: () => {},
     hitTrackSwitch: () => {},
+    breakTile: (x: number, y: number) => { st.setTile(x, y, 0); },
+    pickPowerEnough: () => true,
   } as unknown as GameHooks;
 }
 
@@ -572,5 +581,298 @@ describe('矿车存档往返', () => {
     expect(st.frameY[st.idx(9, 10)]).toBe(4);
     expect(st.frameY[st.idx(8, 10)]).toBe(0xFFFF);    // 空后轨 -1 往返
     expect((back.world.flags as Record<string, boolean>).superCart).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// H. SuperCart 防御 + 机械激光（Mount.cs:4790-4799 / 5200-5258）
+// ---------------------------------------------------------------------------
+describe('SuperCart 防御 + 机械激光', () => {
+  it('防御加成公式：(int)(2×(1+|vx|/RunSpeed×2.5))（Mount.cs:4797-4798）', () => {
+    // RunSpeed 取 SuperCart 档 20（_shouldSuperCart 整体覆写，Mount.cs:480-486）
+    expect(superCartDefenseBonus(0, 20)).toBe(2);     // 2×1.0 = 2
+    expect(superCartDefenseBonus(13, 20)).toBe(5);    // 2×2.625 = 5.25 → (int) 5
+    expect(superCartDefenseBonus(20, 20)).toBe(7);    // 2×3.5 = 7
+  });
+
+  it('fixedUpdate 每帧回写 p.cartDefenseBonus 并计入 defense；非 SuperCart 恒 0', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    cart.superCart = true;
+    cart.vx = 13;
+    cart.fixedUpdate(1 / 60, game);
+    expect(p.cartDefenseBonus).toBe(5);              // 2×(1+13/20×2.5)
+    expect(p.defense).toBeGreaterThanOrEqual(5);     // defense getter 计入坐骑加成
+    cart.superCart = false;
+    cart.fixedUpdate(1 / 60, game);
+    expect(p.cartDefenseBonus).toBe(0);
+  });
+
+  it('激光：前向 ±π/4 锥内敌人即时 60 伤（Mount.cs:5215-5230；591 无暴击旗）', () => {
+    // ★TileStore 高度取 60：LineOfSight.centerTiles 的 y 钳是 st.h-40（世界底
+    //   保护），30 格的矮桩会把扫描行钳到负值 → 视线恒断（测试环境伪影）
+    const st = new TileStore(80, 60);
+    line(st, 8, 12, 40);
+    const calls: Array<{ dmg: number; kx: number; crit: boolean }> = [];
+    const { cart, p } = mountedCart(st, 9, 12);
+    cart.superCart = true;
+    cart.vx = 6;                                     // 静止不发（:5207 vx==0 门）
+    const enemy = {
+      x: cart.x + 120, y: cart.y + 10, w: 20, h: 20, dead: false, iframes: 0,
+      friendly: false,
+      hurt: (dmg: number, kx: number, _ky: number, _g: GameHooks, _ap: number, crit: boolean) => {
+        calls.push({ dmg, kx, crit });
+        return true;
+      },
+    };
+    const game = mkHooks(st, p, undefined, [enemy]);
+    cart.fixedUpdate(1 / 60, game);
+    expect(calls.length).toBe(1);
+    expect(calls[0].dmg).toBe(SUPER_CART_LASER_DMG); // 60
+    expect(calls[0].kx).toBe(0);                     // NewProjectile kb 0
+    expect(calls[0].crit).toBe(false);               // 591 无 melee/ranged/magic → 不暴击
+    expect(cart.laserBeams.length).toBe(1);          // 余辉束登记
+    expect(cart.laserBeams[0].dirX).toBe(1);
+  });
+
+  it('激光门：身后/超距/免免疫帧的敌人不命中', () => {
+    const st = new TileStore(80, 60);   // 同上：高度 ≥ 41 防 LOS 钳位伪影
+    line(st, 8, 12, 40);
+    const { cart, p } = mountedCart(st, 9, 12);
+    cart.superCart = true;
+    cart.vx = 6;
+    const mk = (x: number, iframes = 0) => ({
+      x, y: cart.y + 10, w: 20, h: 20, dead: false, iframes, friendly: false,
+      hurt: () => true,
+    });
+    const behind = mk(cart.x - 60);                  // 身后：angleFrom≈π 不在锥内
+    const far = mk(cart.x + 500);                    // Distance ≥ 300
+    const immune = mk(cart.x + 80, 10);              // immune[player] > 0（:5218）
+    const game = mkHooks(st, p, undefined, [behind, far, immune]);
+    cart.fixedUpdate(1 / 60, game);
+    expect(cart.laserBeams.length).toBe(0);
+  });
+
+  it('激光余辉 20t 寿 + 玩家反向即灭（Projectile.cs:31993/32020-32024）', () => {
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    cart.superCart = true;
+    cart.vx = 6;
+    // 手动注入一束（绕开敌怪布置，单测寿命语义）
+    (cart.laserBeams as CartLaserBeam[]).push({
+      dx: -20, dy: -39, vx: 60, vy: 0, dirX: 1, age: 0,
+    });
+    for (let t = 0; t < 19; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.laserBeams.length).toBe(1);          // age 1..19 存活
+    cart.fixedUpdate(1 / 60, game);
+    expect(cart.laserBeams.length).toBe(0);          // age 到 20 即灭
+    // 反向即灭：dirX=1 而 vx 反向
+    (cart.laserBeams as CartLaserBeam[]).push({
+      dx: -20, dy: -39, vx: 60, vy: 0, dirX: 1, age: 0,
+    });
+    cart.vx = -6;
+    cart.fixedUpdate(1 / 60, game);
+    expect(cart.laserBeams.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// I. 鼠马车挖掘（Player.cs:19912-19933 + MinecartDiggerHelper.cs）
+// ---------------------------------------------------------------------------
+describe('鼠马车挖掘（Digging Molecart）', () => {
+  /** 探针点 = 车中心 + (12,20) + (0,10)（RotatedRelativePoint 平地态）：
+   *  车吸附在 tile 9 → 探针 ≈ (166,202) → tile(10,12) = 轨道末格；目标 (11,12) 石柱。
+   *  trackLen ≥ 6 时轨道贯穿 (11,12)（不摆石柱——"已连通不重挖"对照用） */
+  function moleWorld(trackLen = 3, withStone = true): { st: TileStore; p: Player; cart: Minecart; game: GameHooks } {
+    const st = new TileStore(40, 30);
+    line(st, 8, 12, trackLen);                       // 轨道 8..(8+len-1)
+    if (withStone) for (let y = 8; y <= 12; y++) st.setTile(11, y, STONE);   // 前方 5 格石柱
+    const { cart, p } = mountedCart(st, 9, 12, MOLE_CART_MOUNT);
+    p.facing = 1;
+    p.inputX = 1;
+    const world = {
+      store: st, flags: {} as Record<string, boolean>, isExpert: false, groundLevel: 5,
+    } as unknown as World;
+    const game = mkHooks(st, p, world);
+    return { st, p, cart, game };
+  }
+
+  /** 轨道物品 2340 的仓库 id（vi_2340_* 反查） */
+  const TRACK_ITEM_REPO_ID = ITEM_DEFS.findIndex((d) => viIdFromKey(d.key) === TRACK_ITEM_VID);
+
+  it('在轨按方向键：挖穿前方 5 格 + 消耗 1 轨道 + 延轨 + 限速 ±1（Helper.cs:41-54）', () => {
+    expect(TRACK_ITEM_REPO_ID).toBeGreaterThanOrEqual(0);   // 2340 已在 vi_ 空间
+    const { st, p, cart, game } = moleWorld();
+    p.inv.slots[5] = { id: TRACK_ITEM_REPO_ID, stack: 10 };
+    cart.vx = 5;
+    cart.fixedUpdate(1 / 60, game);
+    // 前方 5 格被 KillTile（y=8..11 清空）
+    for (let y = 8; y <= 11; y++) {
+      expect(st.type[st.idx(11, y)]).toBe(0);
+    }
+    // (11,12) 放置新轨（PlaceATrack style 0）
+    expect(st.type[st.idx(11, 12)]).toBe(TRACK);
+    // 消耗 1 个轨道物品
+    expect(p.inv.slots[5]!.stack).toBe(9);
+    // 挖穿瞬间速度钳 ±1（:50）
+    expect(cart.vx).toBe(1);
+  });
+
+  it('无轨道物品（CanConsumeATrackItem :58-61）→ 不挖不消耗', () => {
+    const { st, cart, game } = moleWorld();
+    cart.vx = 5;
+    cart.fixedUpdate(1 / 60, game);
+    expect(st.type[st.idx(11, 8)]).toBe(STONE);      // 石柱原封
+    expect(st.type[st.idx(11, 12)]).toBe(STONE);
+    expect(cart.vx).toBeGreaterThan(1);              // 无限速（未挖）
+  });
+
+  it('站位不在轨道/地表以上（:14 worldSurface 门）→ 不挖', () => {
+    const { st, p, cart, game } = moleWorld();
+    // 地表线抬到轨道之下（py=12 < groundLevel=20 → 不挖）
+    (game.world as unknown as { groundLevel: number }).groundLevel = 20;
+    p.inv.slots[5] = { id: TRACK_ITEM_REPO_ID, stack: 10 };
+    cart.vx = 5;
+    cart.fixedUpdate(1 / 60, game);
+    expect(st.type[st.idx(11, 8)]).toBe(STONE);
+  });
+
+  it('镐力门（pickPowerEnough :36 → Player.cs:52964）false → 不挖', () => {
+    const { st, p, cart, game } = moleWorld();
+    p.inv.slots[5] = { id: TRACK_ITEM_REPO_ID, stack: 10 };
+    (game as { pickPowerEnough: (x: number, y: number) => boolean })
+      .pickPowerEnough = () => false;
+    cart.fixedUpdate(1 / 60, game);
+    expect(st.type[st.idx(11, 8)]).toBe(STONE);
+  });
+
+  it('已连通轨道（AlreadyLeadsIntoWantedTrack :21）→ 不重挖', () => {
+    const { st, p, cart, game } = moleWorld(6, false);   // 轨道 8..13 贯穿（无石柱）
+    p.inv.slots[5] = { id: TRACK_ITEM_REPO_ID, stack: 10 };
+    cart.fixedUpdate(1 / 60, game);
+    expect(p.inv.slots[5]!.stack).toBe(10);          // 未消耗
+    expect(st.type[st.idx(11, 12)]).toBe(TRACK);     // 原轨道未被重写
+  });
+});
+
+// ---------------------------------------------------------------------------
+// J. 车轮火花（Player.cs:19573-19673 + Minecart.cs:1629 + DelegateMethods.cs:224-413）
+// ---------------------------------------------------------------------------
+describe('车轮火花 + 滚动声', () => {
+  it('速度档（Player.cs:19585-19596）：0.66/0.33×maxRunSpeed 三档', () => {
+    expect(wheelSparkTier(13, 13)).toBe(2);
+    expect(wheelSparkTier(8.6, 13)).toBe(2);         // > 8.58
+    expect(wheelSparkTier(8.58, 13)).toBe(1);
+    expect(wheelSparkTier(4.3, 13)).toBe(1);
+    expect(wheelSparkTier(4.29, 13)).toBe(0);
+    expect(wheelSparkTier(0, 13)).toBe(0);
+  });
+
+  it('尘型分派（Mount.cs 各 mounts[n].delegations.MinecartDust）', () => {
+    expect(cartDustKindOf(33)).toBe('sparksMeow');   // MeowmereMinecart（:988）
+    expect(cartDustKindOf(51)).toBe('sparksFart');   // FartMinecart（:1074）
+    expect(cartDustKindOf(53)).toBe('sparksTerraFart'); // TerraFart（:1082）
+    expect(cartDustKindOf(11)).toBe('sparksMech');   // MinecartMech（:1462）
+    expect(cartDustKindOf(6)).toBe('sparks');        // 默认 Sparks（:891）
+    expect(cartDustKindOf(39)).toBe('sparks');       // SetAsMinecart 默认（:2708）
+  });
+
+  it('贴轨反向推动触发：Item_55 滚动声 + 档位掷发火花（磁石位 WheelSparks）', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);     // 全部掷位命中
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p } = mountedCart(st, 9, 12);
+    const sfxFiles: string[] = [];
+    const dusts: number[] = [];
+    const game = {
+      ...mkHooks(st, p),
+      playSfxFile: (f: string) => { sfxFiles.push(f); },
+      spawnDust: () => {
+        dusts.push(1);
+        return {
+          x: 0, y: 0, vx: 1, vy: 1, scale: 1, alpha: 0, fadeIn: 0,
+          noGravity: false, noLight: false, noLightEmittance: false, color: null,
+        };
+      },
+    } as unknown as GameHooks;
+    cart.vx = 6;                                     // > 0.33×13 = 4.29 → 档 1
+    p.inputX = -1;                                   // 左推（门 vx>=0 ✓）
+    cart.fixedUpdate(1 / 60, game);                  // 首 tick：onTrackNow 尚未置位
+    expect(dusts.length).toBe(0);
+    cart.fixedUpdate(1 / 60, game);                  // 次 tick：上 tick 碰撞后态
+    expect(sfxFiles).toContain('Item_55');
+    expect(dusts.length).toBe(2);                    // 档 1 = 0.5/0 两位各 2/3（random=0 全中）
+  });
+
+  it('门：itemAnimation>0（:19573 itemAnimation==0）与正向推动不触发', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const mkGame = (): { game: GameHooks; dusts: number[]; sfx: string[] } => {
+      const dusts: number[] = [];
+      const sfx: string[] = [];
+      const game = {
+        ...mkHooks(st, mkPlayer()),
+        playSfxFile: (f: string) => { sfx.push(f); },
+        spawnDust: () => {
+          dusts.push(1);
+          return {
+            x: 0, y: 0, vx: 1, vy: 1, scale: 1, alpha: 0, fadeIn: 0,
+            noGravity: false, noLight: false, noLightEmittance: false, color: null,
+          };
+        },
+      } as unknown as GameHooks;
+      return { game, dusts, sfx };
+    };
+    // 挥舞中（itemAnimation > 0）→ 不触发
+    {
+      const { cart, p } = mountedCart(st, 9, 12);
+      const { game, dusts } = mkGame();
+      cart.vx = 6; p.inputX = -1; p.itemAnimTicks = 5;
+      cart.fixedUpdate(1 / 60, game);
+      cart.fixedUpdate(1 / 60, game);
+      expect(dusts.length).toBe(0);
+    }
+    // 右推 + vx>0（门 vx<=0 不满足）→ 不触发
+    {
+      const { cart, p } = mountedCart(st, 9, 12);
+      const { game, dusts } = mkGame();
+      cart.vx = 6; p.inputX = 1;
+      cart.fixedUpdate(1 / 60, game);
+      cart.fixedUpdate(1 / 60, game);
+      expect(dusts.length).toBe(0);
+    }
+  });
+
+  it('火花尘后置（DelegateMethods.cs:229-241）：213 型 noGravity/fadeIn/速度缩放', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.999);  // rand 恒取上界-1 档
+    const st = new TileStore(80, 30);
+    line(st, 8, 12, 40);
+    const { cart, p } = mountedCart(st, 9, 12);
+    const game = mkHooks(st, p);
+    interface SparkDust {
+      type: number; x: number; y: number; vx: number; vy: number;
+      noGravity: boolean; fadeIn: number; scale: number;
+    }
+    let spawned: SparkDust | undefined;
+    (game as { spawnDust?: unknown }).spawnDust = (
+      x: number, y: number, _w: number, _h: number, type: number, sx: number, sy: number,
+    ): SparkDust => {
+      spawned = { type, x, y, vx: sx, vy: sy, noGravity: false, fadeIn: 0, scale: 1 };
+      return spawned;
+    };
+    // 直调尘型委派（绕开掷位随机门，单测 NewDust 后置字段算术）
+    (cart as unknown as { wheelSparkDust(g: GameHooks, x: number, y: number): void })
+      .wheelSparkDust(game, 100, 200);
+    expect(spawned).not.toBeNull();
+    const d = spawned as SparkDust;
+    expect(d.type).toBe(213);                         // 默认 Sparks 尘型（mount 6）
+    // random=0.999：rand(-2,3)=2、Next(0,3)=2≠0 → noGravity 复位 false
+    expect(d.noGravity).toBe(false);
+    // v × rand(15,51)·0.01(=0.50) × rand(25,101)·0.01(=1.00)；y -= 4
+    expect(d.vx).toBeCloseTo(2 * 0.5, 5);
+    expect(d.y).toBe(196);                            // 200 - 4（:236 position.Y -= 4）
   });
 });

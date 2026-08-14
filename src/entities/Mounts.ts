@@ -612,6 +612,91 @@ export function canKillTileAt(st: DrillStore, x: number, y: number, ctx?: KillTi
   return true;
 }
 
+/** WorldGen.CheckTileBreakability（WorldGen.cs:62403-62489）1:1——
+ *  鼠马车挖掘链（MinecartDiggerHelper.CanGetPastTile :172-188）的破坏性分级：
+ *  返回 0=可破坏 / 1=条件保护（巨石压箱等，挖者语义上"别动"） / 2=结构保护
+ *  （下方锁门 / 上方承载 / 树干 / 梳妆台宽段 / 传送器顶物件）。
+ *  ★非实心且非 SolidTop 的格恒 0（:62426-62429）——轨道 314 等穿行件天然放行。
+ *  ctx 缺省 = 非困难模式 + 无宝箱表（与 canKillTileAt 同口径） */
+export function checkTileBreakabilityAt(st: DrillStore, x: number, y: number, ctx?: KillTileCtx): 0 | 1 | 2 {
+  if (!st.inBounds(x, y)) return 0;
+  const i = st.idx(x, y);
+  const mine = st.type[i];
+  if (y >= 1 && y <= st.h - 1) {                                    // :62410 边界带
+    if (st.inBounds(x, y + 1) && st.isActive(x, y + 1)
+      && isLockedDoorAt(st, x, y + 1)) return 2;                    // :62422-62425 下方锁门
+    const d = TILE_DEFS[mine];
+    if (!d || !(d.solid || d.platform)) return 0;                   // :62426-62429 !tileSolid&&!tileSolidTop
+    if (st.isActive(x, y - 1)) {
+      const a = st.idx(x, y - 1);
+      const above = st.type[a];
+      const flag = CONTAINER_IDS.has(mine);                         // IsAContainer(tile)
+      if (hasReasonToReturnEarly(st, mine, x, y - 1, !flag, ctx)) { // :62433
+        if (TREE_TRUNK_IDS.has(above)) {                            // :62435-62442 分支/树顶帧豁免
+          const fx = st.frameX?.[a] ?? 0, fy = st.frameY?.[a] ?? 0;
+          const exempt = (fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110) || fy >= 198;
+          return exempt ? 0 : 2;
+        }
+        if (PALM_ABOVE_IDS.has(above)) {                            // :62443-62450 棕榈枝帧
+          const fx = st.frameX?.[a] ?? 0;
+          return (fx === 66 || fx === 220) ? 2 : 0;
+        }
+        return 2;
+      }
+      if (above !== mine && DRESSER_ABOVE_IDS.has(above)) {         // :62453-62460 梳妆台宽段
+        const col = Math.trunc((st.frameX?.[a] ?? 0) / 18);
+        if (col <= 1 || (col >= 4 && col <= 5)) return 2;
+      }
+      if (DOOR_CLOSED_IDS.has(mine) && isLockedDoorAt(st, x, y)) return 1;  // :62461-62464
+      if (BOULDER_IDS.has(mine)) {                                  // :62465-62472 CheckBoulderChest
+        let left = -Math.trunc((st.frameX?.[i] ?? 0) / 18);
+        if (left < -1) left += 2;
+        left += x;
+        let fy2 = st.frameY?.[i] ?? 0;
+        while (fy2 >= 36) fy2 -= 36;
+        const top = y - Math.trunc(fy2 / 18);
+        const hit = hasReasonToReturnEarly(st, mine, left, top - 1, true, ctx)
+          || hasReasonToReturnEarly(st, mine, left + 1, top - 1, true, ctx);
+        return hit ? 1 : 0;
+      }
+    }
+    if (TELEPORTER_IDS.has(mine)) {                                 // :62474-62486 传送器顶 3 格
+      const baseX = x - Math.trunc(((st.frameX?.[i] ?? 0) % 54) / 18);
+      for (let k = 0; k < 3; k++) {
+        const bx = baseX + k;
+        if (st.inBounds(bx, y - 1) && st.isActive(bx, y - 1)
+          && hasReasonToReturnEarly(st, mine, bx, y - 1, true, ctx)) return 2;
+      }
+    }
+  }
+  return 0;
+}
+
+/** WorldGen.CheckTileBreakability2_ShouldTileSurvive（WorldGen.cs:62515-62559）1:1：
+ *  非空容器（BasicChest 21/467 %2、梳妆台 88 %3、模特 470、帽架 475）应存活。
+ *  470/475 的 TEDisplayDoll/TEHatRack.IsBreakable ≈ 空内容可拆——复用
+ *  ctx.chestDestroyable 语义（缺省按可拆） */
+export function shouldTileSurviveAt(st: DrillStore, x: number, y: number, ctx?: KillTileCtx): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  const mine = st.type[i];
+  if (BASIC_CHEST_IDS.has(mine) || DRESSER_CHEST_IDS.has(mine)) {   // :62526-62550
+    const mod = DRESSER_CHEST_IDS.has(mine) ? 3 : 2;
+    let num = Math.trunc((st.frameX?.[i] ?? 0) / 18) % mod;
+    const ax = x - num, ay = y - Math.trunc((st.frameY?.[i] ?? 0) / 18);
+    if (ctx && !ctx.chestDestroyable(ax, ay)) return true;          // !DestroyChest → survive
+  }
+  if (CONTAINER_IDS.has(mine)) {                                    // :62551-62558 470/475
+    // 模特/帽架锚点 %2 归一后按空内容近似（无 TE 表时）
+    if (ctx) {
+      const ax = x - (Math.trunc((st.frameX?.[i] ?? 0) / 18) % 2);
+      const ay = y - Math.trunc((st.frameY?.[i] ?? 0) / 18);
+      if (!ctx.chestDestroyable(ax, ay)) return true;
+    }
+  }
+  return false;
+}
+
 /** Player.CanPlayerSmashWall（Player.cs:45303-45326）1:1：wall 350 不可拆；
  *  房墙（Main.wallHouse 表）直接可拆，天然墙需 3×3 内曝露一格（空/房墙）才可拆 */
 export function canPlayerSmashWallAt(st: DrillStore, x: number, y: number): boolean {

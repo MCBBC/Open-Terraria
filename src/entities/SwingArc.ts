@@ -116,8 +116,8 @@ export class SwingArc extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(this.projId);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const fw = img.naturalWidth, fh = img.naturalHeight / 4;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const fw = img.width, fh = img.height / 4;
     const num = this.num;
     const sc = this.scaleCur * 1.1;                       // num = proj.scale×1.1
     const st = this.style;
@@ -262,8 +262,8 @@ export class TrueNightsEdgeSlash extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(973);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const fw = img.naturalWidth, fh = img.naturalHeight / 4;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const fw = img.width, fh = img.height / 4;
     const sc = this.scaleCur * 1.1 * 0.975;
     // oldPos 3 档残影（:27597-27611）
     for (let i = this.hist.length - 2; i >= 0; i--) {
@@ -375,8 +375,8 @@ export class NightsEdgeFly extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(972);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const fw = img.naturalWidth, fh = img.naturalHeight / 4;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const fw = img.width, fh = img.height / 4;
     const sc = this.scaleCur * 1.1;
     const op = Math.min(1, Math.max(0, this.num / 0.6)) * (this.num <= 0.6 ? 1 : Math.max(0, (1 - this.num) / 0.4));
     const layer = (px: number, py: number, ang: number, rgb: [number, number, number], a: number, sy = 1) => {
@@ -634,8 +634,8 @@ export class LightsBaneSlash extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(974);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const fw = img.naturalWidth, fh = img.naturalHeight / 13;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const fw = img.width, fh = img.height / 13;
     const sc = 0.7 * this.ai0;
     // num = Remap(frame,0,3,0,1)×Remap(frame,4,12,1,0)（辉光包络）
     const n = Math.min(1, Math.max(0, this.frame / 3)) * (this.frame <= 4 ? 1 : Math.max(0, (12 - this.frame) / 8));
@@ -733,7 +733,7 @@ export class GrassSlash extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(976);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);

@@ -89,9 +89,9 @@ export class MagicProj extends Entity {
     if (!img) return false;
     // 就绪判定同 Arrow.draw：HTMLImageElement 未 complete / 零宽 = 未就绪
     const asImg = img as HTMLImageElement;
-    if (asImg.complete === false) return false;
-    const iw = (img as HTMLCanvasElement).width || asImg.naturalWidth;
-    const ih = (img as HTMLCanvasElement).height || asImg.naturalHeight;
+    if ((asImg.width > 0) === false) return false;
+    const iw = (img as HTMLCanvasElement).width || asImg.width;
+    const ih = (img as HTMLCanvasElement).height || asImg.height;
     if (!iw || !ih) return false;
     const ang = Math.atan2(this.vy, this.vx);
     const rightArt = PROJ_ROT_RIGHT.has(this.projId);

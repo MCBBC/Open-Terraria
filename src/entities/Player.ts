@@ -191,6 +191,9 @@ export class Player extends Entity {
    *  用。Game.fixedUpdate 每帧注入（swing 在 postUpdate 递减，读到的是上一帧尾值，
    *  ≤1 tick 偏差，注释存档） */
   itemAnimTicks = 0;
+  /** SuperCart 矿车坐骑防御加成（Mount.cs:4797-4798 UpdateEffects 每帧写入：
+   *  statDefense += (int)(2×(1+|vx|/RunSpeed×2.5))；下车清零）——Minecart 持有 */
+  cartDefenseBonus = 0;
   /** accMerman 人鱼化态（:22965 merman=true，水中呼吸；本作仅标志，变身渲染后续） */
   merman = false;
   inLava = false;
@@ -398,7 +401,7 @@ export class Player extends Entity {
   }
   /** 防御 = 基础(0) + 盔甲/配饰（含 vi_ 表防御+accfx def+词缀 62-65）+ 铁皮 Buff(+6)（时装不计） */
   get defense(): number {
-    let d = this.buffs.defenseBonus + this.equipStats.def;
+    let d = this.buffs.defenseBonus + this.equipStats.def + this.cartDefenseBonus;
     if (this.usedAegisFruit) d += 4;   // UpdatePermanentBoosters :12447-12449
     for (const id of this.inv.equippedArmor()) {
       if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? statOfInternal(id)?.def ?? 0;

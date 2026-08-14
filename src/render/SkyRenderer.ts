@@ -557,19 +557,19 @@ class TowerSkyState {
     ctx.fillStyle = `rgba(0,0,0,${this.fade.toFixed(4)})`;           // BlackTile × fade
     ctx.fillRect(0, 0, viewW, viewH);
     const bg = this.tex(fam, 'Background');
-    if (bg && bg.complete && bg.naturalWidth) {
+    if (bg && (bg.width > 0) && bg.width) {
       // :69 背景带竖向偏移 + :69 alpha = min(1,(screenY-800)/1000)×fade
       const y = Math.max(0, (surfacePx - screenY - 2400) * 0.1);
       ctx.globalAlpha = Math.max(0, Math.min(1, (screenY - 800) / 1000)) * this.fade;
       ctx.drawImage(bg, 0, y, viewW, viewH);
     }
     const planet = this.tex(fam, 'Planet');
-    if (planet && planet.complete && planet.naturalWidth) {
+    if (planet && (planet.width > 0) && planet.width) {
       // :70-72 屏中心 + (-200,-200) + 0.01×(maxTilesX*8 − screenX, worldSurface/2 − screenY)
       const px = viewW / 2 - 200 + 0.01 * (maxTilesX * 8 - screenX);
       const py = viewH / 2 - 200 + 0.01 * (surfacePx / 16 / 2 - screenY);
       ctx.globalAlpha = 0.9 * this.fade;
-      ctx.drawImage(planet, px - planet.naturalWidth / 2, py - planet.naturalHeight / 2);
+      ctx.drawImage(planet, px - planet.width / 2, py - planet.height / 2);
     }
     // ---- 族专属实体段（:74-113/:84-117/:79-114/:101-123）----
     const num3 = Math.max(0, Math.min(1, (screenY - 1000) / 1000)); // 高度门 alpha
@@ -589,25 +589,25 @@ class TowerSkyState {
         if (!inRect(px, py)) continue;
         const num4 = (1 / p.depth) * 450;                            // :103
         const beam = this.tex(fam, 'Beam');
-        if (beam && beam.complete && beam.naturalWidth) {
+        if (beam && (beam.width > 0) && beam.width) {
           // :104 原点 (0,0)，scale=(num4/70, num4/45)，alpha 0.2×num3×fade
           ctx.globalAlpha = 0.2 * num3 * this.fade;
-          ctx.drawImage(beam, px, py, num4, beam.naturalHeight * (num4 / 45));
+          ctx.drawImage(beam, px, py, num4, beam.height * (num4 / 45));
         }
         // :105-111 每 0.03 一颗落石（34 颗/柱），num7=1−(phase%1) 驱动纵落/旋转/亮度
         for (let k = 0, rockIdx = 0; k <= 1.0001; k += 0.03, rockIdx++) {
           const num6 = k;
           const num7 = 1 - ((num6 + this.time * 0.02 + Math.sin(j)) % 1);
           const rock = this.tex(fam, `Rock${rockIdx % 3}`);
-          if (!rock || !rock.complete || !rock.naturalWidth) continue;
+          if (!rock || !(rock.width > 0) || !rock.width) continue;
           const rx = px + Math.sin(num6 * 1582) * (num4 * 0.5) + num4 * 0.5;
           const ry = py + num7 * 2000;
           ctx.save();
           ctx.globalAlpha = num7 * num3 * this.fade;
           ctx.translate(rx, ry);
           ctx.rotate(num7 * 20);
-          ctx.drawImage(rock, -rock.naturalWidth * 0.9 / 2, -rock.naturalHeight * 0.9 / 2,
-            rock.naturalWidth * 0.9, rock.naturalHeight * 0.9);
+          ctx.drawImage(rock, -rock.width * 0.9 / 2, -rock.height * 0.9 / 2,
+            rock.width * 0.9, rock.height * 0.9);
           ctx.restore();
         }
       }
@@ -616,21 +616,21 @@ class TowerSkyState {
         const [px, py] = project(m.x, m.y, m.depth, 0.9);
         if (!inRect(px, py)) continue;
         const tex = this.tex(fam, 'Meteor');
-        if (!tex || !tex.complete || !tex.naturalWidth) continue;
+        if (!tex || !(tex.width > 0) || !tex.width) continue;
         const frame = Math.floor(m.frame / 3);                        // :110
         m.frame = (m.frame + 1) % 12;                                 // :111（Draw 内推进）
-        const fh = tex.naturalHeight / 4;
+        const fh = tex.height / 4;
         const s = (1 / m.depth) * 5 * m.scale;                        // :114
         ctx.globalAlpha = num3 * this.fade;
-        ctx.drawImage(tex, 0, frame * fh, tex.naturalWidth, fh, px, py,
-          tex.naturalWidth * s, fh * s);
+        ctx.drawImage(tex, 0, frame * fh, tex.width, fh, px, py,
+          tex.width * s, fh * s);
       }
     } else if (fam === 'stardust') {
       for (const s of this.stars) {
         const [px, py] = project(s.x, s.y, s.depth, 1.1);             // :103 星尘垂直视差 1.1
         if (!inRect(px, py)) continue;
         const tex = this.tex(fam, s.tex === 0 ? 'Star0' : 'Star1');
-        if (!tex || !tex.complete || !tex.naturalWidth) continue;
+        if (!tex || !(tex.width > 0) || !tex.width) continue;
         // :107-109 双正弦亮度
         let value = Math.sin(s.freq * this.time + s.off) * s.amp + s.amp;
         const num4 = Math.sin(s.freq * this.time * 5 + s.off) * 0.1 - 0.1;
@@ -639,8 +639,8 @@ class TowerSkyState {
         if (a <= 0.01) continue;
         const scale = ((1 / s.depth) * 0.5 + 0.5) * (value * 0.3 + 0.7);
         ctx.globalAlpha = a;
-        ctx.drawImage(tex, px - tex.naturalWidth * scale / 2, py - tex.naturalHeight * scale / 2,
-          tex.naturalWidth * scale, tex.naturalHeight * scale);
+        ctx.drawImage(tex, px - tex.width * scale / 2, py - tex.height * scale / 2,
+          tex.width * scale, tex.height * scale);
       }
     } else {
       for (const b of this.bolts) {
@@ -649,11 +649,11 @@ class TowerSkyState {
         if (!inRect(px, py)) continue;
         const flash = b.life > 26 && b.life % 2 === 0;                // :115-119
         const tex = this.tex(fam, flash ? 'Flash' : 'Bolt');
-        if (!tex || !tex.complete || !tex.naturalWidth) continue;
+        if (!tex || !(tex.width > 0) || !tex.width) continue;
         const a = num3 * (b.life / 30) * this.fade;                   // :121
         const s = (1 / b.depth) * 5;                                  // :121
         ctx.globalAlpha = a;
-        ctx.drawImage(tex, px, py, tex.naturalWidth * s, tex.naturalHeight * s);
+        ctx.drawImage(tex, px, py, tex.width * s, tex.height * s);
       }
     }
     ctx.restore();
@@ -761,7 +761,7 @@ function tintedFlareSprite(tex: HTMLImageElement, r: number, g: number, b: numbe
   const hit = flareTintCache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
-  c.width = tex.naturalWidth; c.height = tex.naturalHeight;
+  c.width = tex.width; c.height = tex.height;
   const cx = c.getContext('2d')!;
   cx.imageSmoothingEnabled = true;
   cx.drawImage(tex, 0, 0);
@@ -968,14 +968,14 @@ export class SkyRenderer {
     const lo = num3 - 300, hi = viewW + num4 + 300;
     c.x = lo + r() * (hi - lo);      // :107 Next(num3-300, screenWidth+num4+300)
     // 远端屏外直接全显（:161-168：x>屏+400 或 x+宽<-400 → Alpha=1）
-    const tw = (this.cloudTex(c.type)?.naturalWidth ?? 200) * c.scale;
+    const tw = (this.cloudTex(c.type)?.width ?? 200) * c.scale;
     if (c.x > viewW + 400 || c.x + tw < -400) c.alpha = 1;
     // AABB 重叠拒绝（:169-180）
     const tex = this.cloudTex(c.type);
-    const w = (tex?.naturalWidth ?? 200) * c.scale, h = (tex?.naturalHeight ?? 80) * c.scale;
+    const w = (tex?.width ?? 200) * c.scale, h = (tex?.height ?? 80) * c.scale;
     for (const o of this.vclouds) {
       const ot = this.cloudTex(o.type);
-      const ow = (ot?.naturalWidth ?? 200) * o.scale, oh = (ot?.naturalHeight ?? 80) * o.scale;
+      const ow = (ot?.width ?? 200) * o.scale, oh = (ot?.height ?? 80) * o.scale;
       if (c.x < o.x + ow && c.x + w > o.x && c.y < o.y + oh && c.y + h > o.y) return null;
     }
     return c;
@@ -1047,7 +1047,7 @@ export class SkyRenderer {
     const off = 600;
     this.vclouds = this.vclouds.filter((c) => {
       const tex = this.cloudTex(c.type);
-      const w = (tex?.naturalWidth ?? 200) * c.scale;
+      const w = (tex?.width ?? 200) * c.scale;
       return c.alpha > 0 && c.x + w > -off && c.x < viewW + off;
     });
   }
@@ -1235,8 +1235,8 @@ export class SkyRenderer {
       }
       drawing++;
     }
-    if (drawing === 0 || !tex || !tex.complete || tex.naturalWidth === 0) return;
-    const fw = tex.naturalWidth / 3, fh = tex.naturalHeight;
+    if (drawing === 0 || !tex || !(tex.width > 0) || tex.width === 0) return;
+    const fw = tex.width / 3, fh = tex.height;
     const cx = camX + viewW / 2, cy = camY + viewH / 2; // 屏中心（世界 px）
     const hourY = Math.sin(((performance.now() / 1000) % 6) / 6 * Math.PI * 2); // GlobalTime 6s 环绕的 Y 分量
     const flicker = hourY * 0.2 + 0.8;                  // DrawLantern :245-246
@@ -1310,12 +1310,12 @@ export class SkyRenderer {
         b.depth = 1.6 + Math.random() * 1.75;
       }
       const tex = this.partyTexs[b.tex];
-      if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
+      if (!tex || !(tex.width > 0) || tex.width === 0) continue;
       // 视差（:320-322：(pos - 屏中心) × (1/depth, 0.9/depth) + 屏中心）+ X 4000 包裹（:325-330）
       const par = 1 / b.depth;
       const sx = (((b.x - camX) * par + camX + 500) % 4000 + 4000) % 4000 - 500;
       const sy = (b.y - viewH / 2) * (0.9 * par) + viewH / 2;
-      const fw = tex.naturalWidth / 3, fh = tex.naturalHeight / 3;
+      const fw = tex.width / 3, fh = tex.height / 3;
       const scale = par * 2 * 0.9;  // :337 vector2.X * 2 × 天色亮度 0.9 近似
       ctx.globalAlpha = 0.8;
       ctx.drawImage(tex, fw * b.variant, 0, fw, fh, sx, sy, fw * scale, fh * scale);
@@ -1380,8 +1380,8 @@ export class SkyRenderer {
     ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放
     for (const c of sorted) {
       const tex = this.cloudTex(c.type);
-      if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
-      const w = tex.naturalWidth * c.scale, h = tex.naturalHeight * c.scale;
+      if (!tex || !(tex.width > 0) || tex.width === 0) continue;
+      const w = tex.width * c.scale, h = tex.height * c.scale;
       const k = Math.min(1, c.scale * c.alpha);              // cloudColor num（:203-215）
       let r = sky[0] * k, g = sky[1] * k, b = sky[2] * k;
       if (pass === 1) {                                      // OriginalColorsForCloud（:259-268）
@@ -1409,7 +1409,7 @@ export class SkyRenderer {
     const hit = this.cloudTintCache.get(key);
     if (hit) return hit;
     const c = document.createElement('canvas');
-    c.width = tex.naturalWidth; c.height = tex.naturalHeight;
+    c.width = tex.width; c.height = tex.height;
     const cx = c.getContext('2d')!;
     cx.imageSmoothingEnabled = true;
     cx.drawImage(tex, 0, 0);
@@ -1771,14 +1771,14 @@ export class SkyRenderer {
     ctx.imageSmoothingEnabled = false;
     for (const e of this.ambEntities) {
       const tex = this.ambTex(e.texKey);
-      if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
+      if (!tex || !(tex.width > 0) || tex.width === 0) continue;
       // GetDrawPositionByDepth :85-88：(Position-相机中心)×(1/depth, 0.9/depth)+相机中心
       const wx = (e.x - camX) / e.depth + camX;
       const wy = (e.y - camY) * 0.9 / e.depth + camY;
       const sx = wx - camX + viewW / 2;
       const sy = wy - camY + viewH / 2;
       if (sx < -400 || sx > viewW + 400 || sy < -400 || sy > viewH + 400) continue;
-      const fw = tex.naturalWidth, fh = tex.naturalHeight / e.rows;
+      const fw = tex.width, fh = tex.height / e.rows;
       const scale = (3 + e.depthScaleAdj) / e.depth;   // CommonDraw :79 + 各族 Draw depthScale 偏移
       // GetColor（各族覆盖）：
       //  常规 = Lerp(bg, 白, BrightnessLerper)（:165-168）；
@@ -2109,7 +2109,7 @@ export class SkyRenderer {
       const px = sx(p.x), py = sy(p.y);
       if (px < -1000 || px > viewW + 1000 || py < -1000 || py > viewH + 1000) continue;
       const tex = dramaTex(p.kind);
-      if (!tex || !tex.complete || !tex.naturalWidth) continue;
+      if (!tex || !(tex.width > 0) || !tex.width) continue;
       ctx.save();
       ctx.globalAlpha = 1;
       ctx.translate(px, py);
@@ -2121,8 +2121,8 @@ export class SkyRenderer {
       const px = sx(ex.x), py = sy(ex.y);
       if (px < -1000 || px > viewW + 1000 || py < -1000 || py > viewH + 1000) continue;
       const tex = dramaTex('explosion');
-      if (!tex || !tex.complete || !tex.naturalWidth) continue;
-      const fw = tex.naturalWidth, fh = tex.naturalHeight / 7;   // Frame(1,7)（:121）
+      if (!tex || !(tex.width > 0) || !tex.width) continue;
+      const fw = tex.width, fh = tex.height / 7;   // Frame(1,7)（:121）
       ctx.save();
       ctx.globalAlpha = 127 / 255;                                // GetLight :142-145 恒 (255,255,255,127)
       ctx.drawImage(tex, 0, Math.min(6, Math.floor(ex.counter / ex.speed)) * fh, fw, fh,
@@ -2200,7 +2200,7 @@ export class SkyRenderer {
     screenY: number, sunset: number, sunrise: number): void {
     if (sunset <= 0.01 && sunrise <= 0.01) return;
     const tex = this.sunflareTexLoad('colorgradient');
-    if (!tex || !tex.complete || !tex.naturalWidth) return;
+    if (!tex || !(tex.width > 0) || !tex.width) return;
     // GetGradientRect（:66-72）：val=(1-Lerp(40,worldSurface,screenY/16))×400，y=max(0,val)−400
     const surfaceTiles = this.fx.surfaceY / 16;
     const val = (1 - lerpValueClamped(40, surfaceTiles, screenY / 16)) * 400;
@@ -2281,7 +2281,7 @@ export class SkyRenderer {
     ];
     for (const [key, repeat, scaleStart, scaleOver, distStart, distStep, rgb, mul, ioi, rot] of sets) {
       const tex = this.sunflareTexLoad(key);
-      if (!tex || !tex.complete || !tex.naturalWidth) continue;
+      if (!tex || !(tex.width > 0) || !tex.width) continue;
       const sprite = tintedFlareSprite(tex, rgb[0], rgb[1], rgb[2]);   // Color 乘子（lighter 下呈色相）
       if (!sprite) continue;
       for (let i = 0; i < repeat; i++) {
@@ -2296,7 +2296,7 @@ export class SkyRenderer {
         ctx.globalAlpha = Math.min(1, a);
         ctx.translate(px, py);
         ctx.rotate(baseRot + rot);                                       // :46-50
-        const w = tex.naturalWidth * scale, h = tex.naturalHeight * scale;
+        const w = tex.width * scale, h = tex.height * scale;
         ctx.drawImage(sprite, -w / 2, -h / 2, w, h);
         ctx.restore();
       }
@@ -2548,7 +2548,7 @@ export class SkyRenderer {
     ctx.imageSmoothingEnabled = false;
     if (isDay) {
       const tex = this.sunTex;
-      if (tex.complete && tex.naturalWidth > 0) {
+      if ((tex.width > 0) && tex.width > 0) {
         // 原版:x = time/54000*(屏宽+图宽*2)-图宽(横穿);y = bgTopY + |t*2-1|²*250+180(正午最高);
         // scale = (1.2-|t*2-1|²*0.4)*1.1;rotation = t*2-7.3(t=time/54000)
         const ft = dayTimeTicks / 54000;
@@ -2568,7 +2568,7 @@ export class SkyRenderer {
       const tex = this.fx.moonEventKind === 2 ? this.ensureEventMoonTex(2)
         : this.fx.moonEventKind === 1 ? this.ensureEventMoonTex(1)
           : this.moonTexs[Math.max(0, Math.min(8, this.moonType))];
-      if (tex && tex.complete && tex.naturalWidth > 0) {
+      if (tex && (tex.width > 0) && tex.width > 0) {
         const mw = tex.width; // 相位帧宽(50)
         const ft = nightTime / 32400;
         const dip = Math.pow(Math.abs(ft * 2 - 1), 2);

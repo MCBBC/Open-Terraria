@@ -296,6 +296,32 @@ export function projGravity(shoot: number): number {
   return projGravSpec(shoot).grav;
 }
 
+/** AmmoID.Sets.SpecificLauncherAmmoProjectileMatches 全表（AmmoID.cs，1.4.5.6）：
+ *  发射器 id → { 弹药 id → 弹体 id }，5 发射器 × 12 弹药，优先级最高 */
+export const SPECIFIC_LAUNCHER_AMMO: Record<number, Record<number, number>> = {
+  759: { 771: 134, 772: 137, 773: 140, 774: 143, 4445: 776, 4446: 780, 4457: 793, 4458: 796, 4459: 799, 4447: 784, 4448: 787, 4449: 790 },
+  758: { 771: 133, 772: 136, 773: 139, 774: 142, 4445: 777, 4446: 781, 4457: 794, 4458: 797, 4459: 800, 4447: 785, 4448: 788, 4449: 791 },
+  760: { 771: 135, 772: 138, 773: 141, 774: 144, 4445: 778, 4446: 782, 4457: 795, 4458: 798, 4459: 801, 4447: 786, 4448: 789, 4449: 792 },
+  1946: { 771: 338, 772: 339, 773: 340, 774: 341, 4445: 803, 4446: 804, 4457: 808, 4458: 809, 4459: 810, 4447: 805, 4448: 806, 4449: 807 },
+  3930: { 771: 715, 772: 716, 773: 717, 774: 718, 4445: 717, 4446: 718, 4457: 717, 4458: 718, 4459: 717, 4447: 717, 4448: 717, 4449: 717 },
+};
+
+/** PickAmmo 弹型解析 1:1（Player.cs:52635-52668）：优先级 = Specific 匹配表 >
+ *  雪人炮算式（338+ammo−771）/ MK2 算式（715+ammo−771）> 火箭族【加法】
+ *  （发射器 shoot + 弹药 shoot，:52648-52651 —— 非替换！火箭一型 shoot=0 → 基弹，
+ *  二/三/四型 +3/+6/+9 偏移）> 弹药 shoot 替换；弓族特例尾改写（3019/3052）。
+ *  此前误用"弹药 shoot 替换"链：火箭一型打出 projId 0 隐形弹、二型打出手里剑
+ *  贴图（772.shoot=3=Shuriken），2026-08-14 对账修复 */
+export function resolveAmmoProjId(launcherVid: number, ammoVid: number, useAmmo: number,
+  launcherShoot: number | undefined, ammoShoot: number | undefined): number {
+  const specMatch = SPECIFIC_LAUNCHER_AMMO[launcherVid]?.[ammoVid];
+  if (specMatch !== undefined) return specMatch;
+  if (launcherVid === 1946) return 338 + ammoVid - 771;
+  if (launcherVid === 3930) return 715 + ammoVid - 771;
+  if (useAmmo === 771) return (launcherShoot ?? 0) + (ammoShoot ?? 0);   // 火箭加法
+  return ammoShoot ?? launcherShoot ?? 1;
+}
+
 /** vi_ useAmmo 远程武器（弓/枪/发射器，DefaultToRangedWeapon 族 useStyle=5）：
  *  返回 useAmmo id（AmmoID.Arrow=40 / Bullet=97 …）；非 useAmmo 物品返回 0。
  *  combatWeapon 对 useAmmo 物品返回 null（弓弩/弹药体系另走 PickAmmo），Game 远程

@@ -127,7 +127,7 @@ export class PortalGunBolt extends Entity {
     // 与 TrapShot 'portalbolt' 同款朝向约定（速度角，rotOff 0）
     ctx.rotate(Math.atan2(this.vy, this.vx));
     ctx.globalAlpha = 1 - this.alpha / 255;                        // alpha 255→0 = 透明→全显
-    if (img && img.complete && img.naturalWidth > 0) {
+    if (img && (img.width > 0) && img.width > 0) {
       // GetAlpha（:76199-76202）：601 整体贴图染门色——multiply + destination-in 保形
       const f = PortalGunBolt.tintedFrame(img, this.frame, pr, pg, pb);
       ctx.drawImage(f, -10, -10);

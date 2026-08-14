@@ -72,8 +72,8 @@ export interface SfxLoop {
   readonly dead: boolean;
 }
 
-// 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
-const WAV_MAP: Record<SfxName, string[]> = {
+// 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动；导出供测试/预热侧消费）
+export const WAV_MAP: Record<SfxName, string[]> = {
   hit: ['NPC_Hit_1', 'NPC_Hit_2', 'NPC_Hit_3', 'NPC_Hit_4', 'NPC_Hit_5'],
   hurt: ['Player_Hit_0', 'Player_Hit_1', 'Player_Hit_2'],
   killed: ['NPC_Killed_1', 'NPC_Killed_2', 'NPC_Killed_3'],
@@ -184,6 +184,55 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   return m;
 })();
 
+// ---------------------------------------------------------------------------
+// Ambient 环境音轨（独立音量轨）
+// ---------------------------------------------------------------------------
+// 原版双通道（互斥替换，非叠加）：
+//  ① Legacy 路径：DoesSoundScaleWithAmbientVolume（LegacySoundPlayer.cs:1443-1461）
+//     的 14 个 SoundID 走 Main.ambientVolume（:420-423 num2 *= ambientVolume），
+//     其余走 Main.soundVolume（:427）；
+//  ② 现代路径：CreateTrackable(..., SoundType.Ambient)（SoundID.cs:819-827）经
+//     ActiveSound.DetermineIntendedVolume（ActiveSound.cs:150-153）按
+//     SoundType.Ambient → ambientVolume。
+// 成员 → wav 文件全集（LegacySoundPlayer 各 case 的 bank 索引）：
+//   30 Duck→Zombie_10-12（:1101-1122）/ 31 Frog→Zombie_13（:1124-1134）/
+//   32 Bird→Zombie_14（:1136-1148）/ 33 Critter→Zombie_15（:1199-1211）/
+//   34 Waterfall→Liquid_0（:1248-1278 SoundLiquid[0] 跟踪循环）/
+//   35 Lavafall→Liquid_1（:1280-1310）/ 39 Drip→Drip_0-2（:1354-1360）/
+//   43 Thunder→Thunder_0-5（:457-477）/ 44 Seagull→Zombie_106-108（:1050-1057）/
+//   45 Dolphin→Zombie_109（:1058-1068）/ 46 Owl→Zombie_110-114（:1070-1090）/
+//   67 Cockatiel→Zombie_118-120（:1143-1154）/ 68 Macaw→Zombie_126-128（:1155-1166）/
+//   69 Toucan→Zombie_129-130（:1167-1177）
+//   + SoundType.Ambient trackable：blizzard 双轨 + liquids_* 六配对（SoundID.cs:819-827）
+export const AMBIENT_FILES: ReadonlySet<string> = new Set([
+  // SoundID 30/31/32/33（Duck/Frog/Bird/Critter，Zombie 音库）
+  'Zombie_10', 'Zombie_11', 'Zombie_12', 'Zombie_13', 'Zombie_14', 'Zombie_15',
+  // SoundID 34/35（Waterfall/Lavafall 跟踪循环）
+  'Liquid_0', 'Liquid_1',
+  // SoundID 39（Drip）
+  'Drip_0', 'Drip_1', 'Drip_2',
+  // SoundID 43（Thunder）
+  'Thunder_0', 'Thunder_1', 'Thunder_2', 'Thunder_3', 'Thunder_4', 'Thunder_5',
+  // SoundID 44/45/46（Seagull/Dolphin/Owl）
+  'Zombie_106', 'Zombie_107', 'Zombie_108', 'Zombie_109',
+  'Zombie_110', 'Zombie_111', 'Zombie_112', 'Zombie_113', 'Zombie_114',
+  // SoundID 67/68/69（Cockatiel/Macaw/Toucan）
+  'Zombie_118', 'Zombie_119', 'Zombie_120', 'Zombie_126', 'Zombie_127', 'Zombie_128',
+  'Zombie_129', 'Zombie_130',
+  // SoundType.Ambient trackable（SoundID.cs:819-827）
+  'blizzard_strong_loop', 'blizzard_inside_building_loop',
+  'liquids_water_lava_0', 'liquids_water_lava_1', 'liquids_water_lava_2',
+  'liquids_honey_water_0', 'liquids_honey_water_1', 'liquids_honey_water_2',
+  'liquids_honey_lava_0', 'liquids_honey_lava_1', 'liquids_honey_lava_2',
+]);
+
+/** 音轨分派（LegacySoundPlayer.cs:420-429 的 if/else 同构）：
+ *  ambient 成员 → ambientVol（替换 master）；其余 → masterVol。
+ *  播放链单点消费（playWavFile / startLoopFile / setRain），测试可直断言 */
+export function trackVolumeFor(file: string, ambientVol: number, masterVol: number): number {
+  return AMBIENT_FILES.has(file) ? ambientVol : masterVol;
+}
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
@@ -196,6 +245,10 @@ export class Sfx {
   muted = false;
   /** 主音量 0..1（M6 设置页） */
   master = 1;
+  /** Ambient 环境音量 0..1（Main.ambientVolume，Main.cs:1413 默认 1f；config 键
+   *  "VolumeAmbient" Main.cs:4159/4383）。环境音族按此轨替换 master（见
+   *  AMBIENT_FILES 注释） */
+  ambient = 1;
   /** 载入期静音门（Game 侧置位/解除）：afterWorldLoad 的 waterCheck 全图收敛期间，
    *  killTile/breakTile/合并音会以 listener=(0,0) 满响（"进世界音效爆发"根因）。
    *  只盖一次性播放入口（play/playWavFile/startTrackedLoop——playWav/playFiles
@@ -261,7 +314,9 @@ export class Sfx {
         })
         .catch(() => {});
     }
-    const v = Math.max(0, Math.min(1, vol)) * this.master * 0.6;
+    // RainAmbience 是 XACT Ambient cue（Main.cs:11484-11516 ambientVolume × 天气强度）
+    // ——走 ambient 轨不走 master（原版声轨模型同款替换）
+    const v = Math.max(0, Math.min(1, vol)) * this.ambient * 0.6;
     this.rainGain.gain.setTargetAtTime(v, ctx.currentTime, 0.4);
   }
 
@@ -370,7 +425,8 @@ export class Sfx {
       failed: false,
     };
     const apply = () => {
-      const target = Math.min(1, st.vol * st.base * this.master);
+      // 循环轨同款音轨分派（ActiveSound.cs:150-153 SoundType.Ambient → ambientVolume）
+      const target = Math.min(1, st.vol * st.base * trackVolumeFor(file, this.ambient, this.master));
       gain.gain.setTargetAtTime(target, ctx.currentTime, 0.2);
     };
     const handle: SfxLoop = {
@@ -438,7 +494,9 @@ export class Sfx {
     src.buffer = buf;
     src.playbackRate.value = pitch != null ? 2 ** pitch : 0.92 + Math.random() * 0.16;
     const g = ctx.createGain();
-    g.gain.value = Math.min(1, vol * this.master);
+    // 音轨分派（LegacySoundPlayer.cs:420-429）：ambient 成员 ×ambientVolume，
+    // 其余 ×soundVolume（master）——替换而非叠加，原版同构
+    g.gain.value = Math.min(1, vol * trackVolumeFor(file, this.ambient, this.master));
     src.connect(g).connect(ctx.destination);
     src.start();
     return true;

@@ -44,7 +44,7 @@ export function tickEmotes(): void {
 /** 绘制（Draw :203-231 1:1）。img = Extra_48 表。
  *  ※在渲染器的世界变换内调用（ctx 已 scale(z)/translate(-cam)）——直接用世界坐标锚定 */
 export function drawEmotes(ctx: CanvasRenderingContext2D, img: HTMLImageElement): void {
-  if (!img || !img.complete || img.naturalWidth === 0) return;
+  if (!img || !(img.width > 0) || img.width === 0) return;
   const CW = 34, CH = 28; // 272/8=34, 1092/39=28
   for (const b of bubbles) {
     const opening = b.lifeTime < 6 || b.lifeStart - b.lifeTime < 6; // flag：开合动画 → 行0 列0

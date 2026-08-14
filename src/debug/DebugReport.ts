@@ -404,8 +404,8 @@ function focusChain(
     try { m = atlas.vmeta(sheetId); } catch { m = null; }
     if (m) {
       const img = atlas.vimages?.get(m.sheet) ?? null;
-      const iw = img ? (img.naturalWidth || img.width || 0) : 0;
-      const ih = img ? (img.naturalHeight || img.height || 0) : 0;
+      const iw = img ? (img.width || img.width || 0) : 0;
+      const ih = img ? (img.height || img.height || 0) : 0;
       const sx = autoFrame ? autoFrame.col * m.stride[0] : cell.fx;
       const sy = autoFrame ? autoFrame.row * m.stride[1] : cell.fy;
       const sw = m.grid[0], sh = m.grid[1];

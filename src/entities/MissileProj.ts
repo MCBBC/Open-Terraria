@@ -518,11 +518,11 @@ export class MagicMissileProj extends Entity {
     const asImg = img as HTMLImageElement;
     const ready = (img as HTMLCanvasElement).width !== undefined
       ? (img as HTMLCanvasElement).width > 0
-      : asImg.complete && asImg.naturalWidth > 0;
+      : (asImg.width > 0) && asImg.width > 0;
     if (!ready) return;
     const lerpS = lerpValue(0, 8, speed);   // GetLerpValue(0,8,|vel|)（:32421/:32430）
-    const iw = (img as HTMLCanvasElement).width || asImg.naturalWidth;
-    const ih = (img as HTMLCanvasElement).height || asImg.naturalHeight;
+    const iw = (img as HTMLCanvasElement).width || asImg.width;
+    const ih = (img as HTMLCanvasElement).height || asImg.height;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     if (this.projId === 16) {
@@ -733,12 +733,12 @@ export class FlyingKnifeProj extends Entity {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
     const img = projSprite(this.projId);
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);                  // GetAlpha 恒白（:76286-76291），无淡入
-    ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.w * img.naturalHeight / img.naturalWidth);
+    ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.w * img.height / img.width);
     ctx.restore();
   }
 }
@@ -840,7 +840,7 @@ export class StarfuryStar extends Entity {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
     const img = projSprite(9);
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     const sp = Math.hypot(this.vx, this.vy) || 1;
     // Main.cs:31101-31127 type 9 覆写：绘制位 = Center + normalize(vel)×8（vector46）、
     // scale ×0.75（num207）；色 = Gold(A=180) ↔ (194,22,134,127) 按 rotation 脉动
@@ -866,8 +866,8 @@ export class StarfuryStar extends Entity {
     ctx.translate(px, py);
     ctx.rotate(this.rot);
     const s = 0.75 * 0.8;   // num207×0.75 × SetDefaults scale 0.8
-    ctx.drawImage(img, -img.naturalWidth * s / 2, -img.naturalHeight * s / 2,
-      img.naturalWidth * s, img.naturalHeight * s);
+    ctx.drawImage(img, -img.width * s / 2, -img.height * s / 2,
+      img.width * s, img.height * s);
     ctx.restore();
     ctx.globalAlpha = 1;
   }

@@ -10,7 +10,7 @@ import { petInfoOfVid } from '../data/vanillaPets';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { computeSellValue, canSellFromShopUi } from '../stats/SellChain';
-import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
+import { TILE, CHUNK, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
 import { imageToGrid, findArtPlacement, placeArt } from '../dev/PixelArtImport';
@@ -102,7 +102,7 @@ import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fish
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
-import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
+import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemUseSoundWav } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing } from '../entities/projStatus';
@@ -143,6 +143,7 @@ import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } f
 import { Critter } from '../entities/Critter';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
+import { CoinPortalProj } from '../entities/CoinPortalProj';
 import {
   LeashedEntityManager, KITE_ITEM_PROJ, anchorStyleOfItem, placeStyleOfVid, ITEM_MAKE_NPC,
   LEASHED_SUB_FULL, LEASHED_SUB_PARTIAL, LEASHED_SUB_REMOVE, LEASHED_SUB_PLACE_REQUEST,
@@ -270,6 +271,9 @@ const SHOTGUN_PELLETS: Record<number, [number, number, number, number]> = {
   964: [3, 4, 0.04, 35],
   4703: [8, 8, 0.05, 40],
 };
+
+/** AmmoID.Sets 匹配表与解析已抽至 data/vanillaItemCombat.resolveAmmoProjId
+ *  （2026-08-14 火箭族对账）——表与优先级链见彼处注释 */
 
 /** 粉末族物品 → 弹体（ItemID.cs: PurificationPowder 66 → ProjectileID 10 / VilePowder 67
  *  → 11 / ViciousPowder 2886 → 463；Item.cs SetDefaults shoot）。注：其余 shoot=10 的
@@ -475,6 +479,25 @@ export function luckyCoinRoll(rnd: () => number, direction: number): { key: stri
     vx: (10 + Math.floor(rnd() * 21)) * 0.2 * direction,
     vy: (Math.floor(rnd() * 21) - 20) * 0.2,
   };
+}
+
+/** 瓦罐 style→钱币乘子原始值（SpawnThingsFromPot switch 1:1，WorldGen.cs:57110-57162）。
+ *  消费侧一律先过 `(n*2+1)/3` 变换（:57163）：钱币量 num16 *= num（:57714）、
+ *  传送门 range = 500/((num+1)/2)（:57185）。金字塔罐 25-27 n=10→×7 与 1/125
+ *  双料全游戏最高；28-30 地狱罐 hardMode 才 4（:57152-57156 Main.hardMode）。 */
+export function potCoinMul(style: number, hardMode: boolean): number {
+  if (style >= 4 && style <= 6) return 1.25;
+  if (style >= 7 && style <= 9) return 1.75;
+  if (style >= 10 && style <= 12) return 1.9;
+  if (style >= 13 && style <= 15) return 2.1;
+  if (style >= 16 && style <= 18) return 1.6;
+  if (style >= 19 && style <= 21) return 3.5;
+  if (style >= 22 && style <= 24) return 1.6;
+  if (style >= 25 && style <= 27) return 10;
+  if (style >= 28 && style <= 30) return hardMode ? 4 : 1;
+  if (style >= 31 && style <= 33) return 2;
+  if (style >= 34 && style <= 36) return 1.25;
+  return 1;   // style 0-3 及其余
 }
 
 /** 玩家储物族 tile key → bank 索引（原版 Player.cs:32598+：29→bank / 97→bank2 /
@@ -1697,6 +1720,7 @@ export class Game implements GameHooks {
     p.vy = 0;
     p.ridingCart = false;
     p.cart = null;
+    p.cartDefenseBonus = 0;   // Mount.UpdateEffects 停跑（Mount.cs:4797-4798 加成解除）
     cart.mounted = false;
     cart.dead = true;
     this.minecart = null;
@@ -2297,25 +2321,16 @@ export class Game implements GameHooks {
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     // atlas 传入 = 烘焙懒取自注册(晚到自动重烘,见 ChunkCache 构造器注释)
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler, this.atlas);
-    // 懒加载晚到的【图块/墙表】→ 全量标脏重烘焙:出生点子集预载后,远行遇到
-    // 新类型时 vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正。
-    // 必须按文件名过滤——图标/NPC/弹幕贴图不进 chunk，此前任何 vimage 晚到都
-    // invalidateAll（后台补齐 6059 张图标 = 6059 次全图重烘焙标记，进图后持续帧尖峰）。
-    // 再加 500ms 合批去抖:进新生态的表到达风暴(765 Tiles_*+368 Wall_*)期间
-    // N 张表晚到只触发一次 invalidateAll——dirtyQueue 有 Set 去重,不去抖则是
-    // 同一批 chunk 被 N 次扫全图+释放循环(O(n²) ×N 次空转)
+    // 懒加载晚到的【图块/墙表】→ 精确重烘:出生点子集预载后,远行遇到新类型时
+    // vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正。
+    // 必须按文件名过滤——图标/NPC/弹幕贴图不进 chunk。修正走 ChunkCache 的
+    // 烘焙期缺表登记(file→chunks 反查,ChunkCache.onBakeAssetArrived):只重烘
+    // 真正烤了 fallback 的 chunk(★全量 invalidateAll = 384 chunk 重烘风暴 =
+    // 21 万次图像重解码 → 渲染进程崩溃,2026-08-14 trace 实锤)
     if (this.atlas) {
-      let chunkInvalidateTimer: ReturnType<typeof setTimeout> | 0 = 0;
-      const scheduleChunkInvalidate = () => {
-        if (chunkInvalidateTimer) return;
-        chunkInvalidateTimer = setTimeout(() => {
-          chunkInvalidateTimer = 0;
-          this.chunks.invalidateAll();
-        }, 500);
-      };
       this.atlas.onVImageLoaded = (file: string) => {
         // 【烘焙路径懒取全集】:凡 chunk 烘焙(VanillaTiler/WallTiler/CritterCage)可能
-        // ensureVImage 懒取的文件,晚到都必须 scheduleChunkInvalidate 重烘焙——否则
+        // ensureVImage 懒取的文件,晚到都必须进精确重烘链——否则
         // 回退会永久烤进已缓存 chunk(用户问的"物块变化后新贴图没加载"场景)。
         // ① Tiles_/Wall_ 出生点扫描精确预载(主通道);② CageTop_ 笼顶盖/③ Glow_316·317
         // 灰烬树 glowmask:烘焙懒取且【无预载】= 此前的真洞(晚到不重烘=永久缺失);
@@ -2327,7 +2342,9 @@ export class Game implements GameHooks {
           || file.startsWith('vanilla/Tree_Tops_') || file.startsWith('vanilla/Tree_Branches_')
           || file === 'vanilla/Shroom_Tops.png'
           || file === 'vanilla/Evil_Cactus.png' || file === 'vanilla/Good_Cactus.png' || file === 'vanilla/Crimson_Cactus.png') {
-          scheduleChunkInvalidate();
+          // ★路由到按 chunk 精确打击(2026-08-14 trace 实锤:进地牢表批晚到 →
+          // 全量 invalidateAll = 384 chunk 重烘风暴 = 21 万次图像重解码 → 崩溃)
+          this.chunks.onBakeAssetArrived(file);
         }
         // 物品图标图集晚到 → 标记 UI 待刷（fixedUpdate 节流后刷背包/快捷栏/宝箱，
         // 把空图标升格为原版图标——否则图标未就绪时 paintSlot 写空 src，直到下次
@@ -4287,7 +4304,16 @@ export class Game implements GameHooks {
       this.camera.y - this.camera.viewH / (2 * this.camera.zoom),
       this.camera.viewW, this.camera.viewH);
     this.chunks.flushDirty();
-    this.chunks.advanceAnim(); // 动画陈设（制冰机/固化机/篝火/熔炉等）：换帧 tick 重建含动画 chunk
+    // 动画陈设换帧重烘(制冰机/固化机/篝火/熔炉/火把等)。★双门(2026-08-14
+    // trace②:站定+暂停仍解码风暴):①暂停冻结(原版单机暂停世界全冻结);
+    // ②只重烘视野内 chunk(屏外动画白烘=持续 drawImage 大表慢性驱逐解码缓存)。
+    // 屏外 chunk 回到视野时由渲染 get 惰性重烘,动画自然追上
+    if (!this.paused) {
+      const cam = this.camera;
+      const hw = cam.viewW / 2 / cam.zoom + 2 * CHUNK * TILE, hh = cam.viewH / 2 / cam.zoom + 2 * CHUNK * TILE;
+      this.chunks.animView = { x0: cam.x - hw, y0: cam.y - hh, x1: cam.x + hw, y1: cam.y + hh };
+      this.chunks.advanceAnim();
+    }
     tickEmotes();
     this.tickNpcEmotes();
     this.tickInfoAccs();
@@ -6229,7 +6255,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       let damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind)) + (ammoC?.damage ?? 0); // ⑥ pen 移 hit 时
         let knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
         if (isArrowKind && this.player.equipStats.quiver) knockback *= 1.1; // 箭袋击退 ×1.1（:52713）
-        const projId = ammoC?.shoot ?? bowC?.shoot ?? 1; // PickAmmo：projToShoot = 弹药 shoot
+        // ---- PickAmmo 弹型解析 1:1（Player.cs:52635-52668，resolveAmmoProjId）----
+        const bowVid2 = bowVid >= 0 ? bowVid : (heldDef?.vid ?? -1);
+        let projId = resolveAmmoProjId(bowVid2, viIdFromKey(ammoDef.key), useAmmo, bowC?.shoot, ammoC?.shoot);
+        if (bowVid2 === 3019 && projId === 1) projId = 485;   // 炼狱天弓：木箭→狱翼箭（:52660-52663）
+        if (bowVid2 === 3052) projId = 495;                    // 暗影焰弓恒 495（:52664-52667）
         if (isArrowKind && this.player.equipStats.moltenQuiver && projId === 1) damage += 2; // 熔箭袋木箭→火矢+2（:52700，火矢 proj 换体从略）
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
         // 弓/枪面向鼠标（shoot>0 发射型同款 :46578）
@@ -6243,12 +6273,49 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 逐型档（172=0.085@17、267/478/479=0.075@20、5/639=0 等）。此前 projGravity
         // 对 aiStyle1 一律 0 = 箭完全不下坠（与原版抛物线轨迹不符）
         const gs = projGravSpec(projId);
+        // ---- 发射器弹药族（aiStyle 16，AI_016 发射支 :44542-44911）：GrenadeProj
+        //      fired 模式（无重力直线/火箭加速/雪人追踪/感应雷布防/撞块语义表），
+        //      爆炸半径走 Kill :75260-75300 闸门表（I 型不毁地形，II/III/IV 毁）——
+        //      此前误当 Arrow 打（无引信无爆炸直线飞）2026-08-14 修复 ----
+        if (projectileData(projId)?.aiStyle === 16) {
+          const er16 = Game.EXPLODE_RADIUS[projId] ?? 0;
+          // 实体伤害盒 = Kill 尘爆盒半宽（tier1/2 22×22 / tier3-4 80×80，:74484/:74545）
+          const hurtBox16 = (projId >= 139 && projId <= 144) || projId === 340 || projId === 341 ? 40 : 11;
+          const rocket = new GrenadeProj(ax, ay,
+            Math.cos(ang) * speed, Math.sin(ang) * speed,
+            damage, 3600, projId,
+            (ex, ey, edmg) => {
+              this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er16, er16 > 0,
+                hurtBox16, this.player.equipStats.armorPen + (ps?.arpen ?? 0), projId);
+              // 液体火箭载荷（Kill :74051-74244 同 903-906 四分发）
+              const payload16 = Game.BOMB_PAYLOAD[projId];
+              if (payload16) {
+                const painted = Game.spreadBombPayload(this.world.store, payload16,
+                  Math.floor(ex / TILE), Math.floor(ey / TILE));
+                if (painted > 0) this.sfxAt('splash', ex, ey);
+              }
+            });
+          rocket.fired = true;
+          this.entities.add(rocket, 'projectiles');
+          // 段尾与 Arrow 路径共用（消耗→useTime→swing→音效→UI 刷新）
+          const ammoVid16 = viIdFromKey(ammoDef.key);
+          if (ammoVid16 !== 3103 && ammoVid16 !== 3104
+            && !(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
+            this.player.inv.removeAt(ammoSlot, 1);
+          }
+          this.player.useTime = bowC?.useTime ?? rg?.speed ?? 30;
+          this.useSwing(heldDef, ang);
+          const usBow16 = itemUseSoundWav(bowVid2);
+          if (usBow16) this.playSfxFile(usBow16);
+          else this.sfx.play('gunShot');
+          this.cb.onInventoryChanged();
+          return;
+        }
         const bowArrow = new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
           damage, knockback, projId, dropKey,
           { grav: gs.grav, gravDelay: gs.delay, grav2: gs.grav2, grav2At: gs.grav2At });
         bowArrow.frostEligible = true; // 冰霜盔甲引擎(ranged 门)
         // 暴击链（审计 §6）：rangedCrit(装备/套装/词缀67-68配饰/buff) + 武器&弹药 item.crit
-        const bowVid2 = bowVid ?? (heldDef?.vid ?? -1);
         bowArrow.critBonus = this.player.critChance('ranged')
           + (itemCombat(bowVid2)?.crit ?? 0) + (ammoC?.crit ?? 0) + (ps?.crt ?? 0); // ⑧ 词缀 crt
         bowArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧ 词缀 arpen
@@ -10654,6 +10721,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  表外（手雷 30 等）= 不破坏地形（Kill 判定表 :75260 之外） */
   static readonly EXPLODE_RADIUS: Record<number, number> = {
     28: 4, 37: 4, 516: 4, 519: 4, 29: 7, 470: 7, 637: 7, 108: 10,
+    // 发射器弹药族（Kill :75260-75300 闸门表，2026-08-14 补）：I 型（133/134/135/
+    // 139/140/141/338/340/442）不在闸门内 = 不毁地形；II 型 r3；III/IV 型 r5；
+    // 集束/干族 796-798/809 r7；MK2 系 716/780-783/804/863 r3、718 r5
+    136: 3, 137: 3, 138: 3,
+    142: 5, 143: 5, 144: 5, 341: 5, 718: 5,
+    716: 3, 780: 3, 781: 3, 782: 3, 804: 3, 783: 3, 863: 3,
+    796: 7, 797: 7, 798: 7, 809: 7,
   };
   /** 液体/土制炸弹爆炸载荷（Projectile.Kill :74007-74244 → Kill_DirtAndFluid-
    *  Projectiles_RunDelegateMethodPushUpForHalfBricks :67221-67239 的 size+delegate 对）：
@@ -10670,6 +10744,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     906: { kind: 'dry', radius: 3.5 },
     910: { kind: 'dirt', radius: 4.2 },
     911: { kind: 'dirt', radius: 4.2 },
+    // 液体火箭族（Kill :74051-74244 同四分发：水/岩浆/蜂蜜 r3、干 r3.5——
+    // 湿·熔岩·蜂蜜·干火箭 × 759/758/760/1946 四发射器的弹体，2026-08-14 补）
+    784: { kind: 'water', radius: 3 }, 785: { kind: 'water', radius: 3 },
+    786: { kind: 'water', radius: 3 }, 805: { kind: 'water', radius: 3 },
+    787: { kind: 'lava', radius: 3 }, 788: { kind: 'lava', radius: 3 },
+    789: { kind: 'lava', radius: 3 }, 806: { kind: 'lava', radius: 3 },
+    790: { kind: 'honey', radius: 3 }, 791: { kind: 'honey', radius: 3 },
+    792: { kind: 'honey', radius: 3 }, 807: { kind: 'honey', radius: 3 },
+    799: { kind: 'dry', radius: 3.5 }, 800: { kind: 'dry', radius: 3.5 },
+    801: { kind: 'dry', radius: 3.5 }, 810: { kind: 'dry', radius: 3.5 },
   };
   /** CanExploteTile 纯函数版（测试用）：规则见 explodeAt 注释 */
   static canExplodeTile(
@@ -11208,6 +11292,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const w = this.world;
     const underworldY = w.store.h - 200; // UnderworldLayer ≈ maxTilesY-200
     const flag = y < w.rockLevel;         // 原版 flag：j < rockLayer（地表+泥土层）
+    // ★钱币传送门大奖（WorldGen.cs:57186-57194，先于 1/45 药水掷）：
+    // range = 500/((num+1)/2)，num 为过 (n*2+1)/3 变换值（:57163）——
+    // 金字塔罐 25-27→125（wiki 1/125 即此）、普通罐→500；
+    // 最近玩家 RollLuck(range)==0 → 弹 518 CoinPortal（i*16+16 中心、v=(0,-12)）并短路。
+    // isGeneratingOrLoadingWorld 门（:57187）：载入期 player 未建→跳过（原版直接 return）。
+    {
+      const plr = this.player;
+      const numT = (potCoinMul(style, w.flags.hardMode) * 2 + 1) / 3;
+      if (plr && rollLuck(plr.luck, Math.floor(500 / ((numT + 1) / 2))) === 0) {
+        this.entities.add(new CoinPortalProj(x * TILE + 16, y * TILE + 16), 'projectiles');
+        return;
+      }
+    }
     // item id → 我们 key：VANILLA_ITEM_KEY_BY_ID 全量映射（vi_ 表覆盖 6146 件）。
     // 原生 def 覆盖段已退役（曾把火把/金币折到本地键,后者还把 73 金折成铜币——既有 bug）
     const drop = (itemId: number, n = 1): ItemDrop | null => {
@@ -11292,20 +11389,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (const [den, lo, hi] of [[4, 5, 11], [8, 10, 21], [12, 20, 41], [16, 40, 81], [20, 50, 101]] as const) {
       if (R(den) === 0) coins *= 1 + (lo + R(hi - lo)) / 100;
     }
-    // style 系数 num（L57113-57160）→ coins *= (num*2+1)/3
-    let num = 1;
-    if (style >= 4 && style <= 6) num = 1.25;
-    else if (style >= 7 && style <= 9) num = 1.75;
-    else if (style >= 10 && style <= 12) num = 1.9;
-    else if (style >= 13 && style <= 15) num = 2.1;
-    else if (style >= 16 && style <= 18) num = 1.6;
-    else if (style >= 19 && style <= 21) num = 3.5;
-    else if (style >= 22 && style <= 24) num = 1.6;
-    else if (style >= 25 && style <= 27) num = 10;
-    else if (style >= 28 && style <= 30) num = 4; // hardMode 才 ×4，肉前应为 1——此处取肉前
-    else if (style >= 31 && style <= 33) num = 2;
-    else if (style >= 34 && style <= 36) num = 1.25;
-    coins *= (num * 2 + 1) / 3;
+    // style 系数 num（L57113-57160）→ coins *= (num*2+1)/3（num16 *= num :57714）
+    // 28-30 地狱罐 hardMode 才 4（曾无条件 ×4，随 potCoinMul 抽出顺带修正）
+    coins *= (potCoinMul(style, w.flags.hardMode) * 2 + 1) / 3;
     if (coins > 1000) coins = 1000; // 防御性上限（原版由 Item.NewItem 内部面值转换）
     drop(73, Math.max(1, Math.round(coins)));
   }
@@ -15314,16 +15400,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** GameHooks.spawnDust：原版 Dust 池直入（Dust.NewDust 签名对齐 + 调用侧
    *  后置字段覆写——Gore.cs:922-927 气泡爆裂尘的 noGravity/alpha/scale 三件套
-   *  在 NewDust 之后逐尘赋值，NewDust 本身不带这些参）。DrawDust 双 pass 消费 */
+   *  在 NewDust 之后逐尘赋值，NewDust 本身不带这些参）。DrawDust 双 pass 消费。
+   *  返回入池尘供调用侧做 DelegateMethods 式后置（矿车轮火花）；池满 null */
   spawnDust(
     x: number, y: number, w: number, h: number, type: number,
     speedX = 0, speedY = 0, alpha = 0,
     color: { r: number; g: number; b: number; a: number } | null = null,
     scale = 1, noGravity = false,
-  ): void {
+  ): import('../fx/VanillaDust').VDust | null {
     const d = this.vanillaDust.spawn(x, y, w, h, type, speedX, speedY, alpha,
       color as import('../fx/VanillaDust').DustColor | null, scale);
     if (d && noGravity) d.noGravity = true;
+    return d ?? null;
+  }
+
+  /** GameHooks.pickPowerEnough（Player.cs:52964-52979 HasEnoughPickPowerToHurtTile）：
+   *  GetBestPickaxe（:39439-39450：前五十格 stack>0 且 pick 最高的镐）非空且
+   *  GetPickaxeDamage>0 ——后者以 tileNoFail 表（恒 100 伤）或 TILE_DEFS.pick
+   *  门槛近似（挖掘模型 1:1 的 d.pick 即原版逐型门槛） */
+  pickPowerEnough(x: number, y: number): boolean {
+    const power = this.bestPickaxePower();
+    if (power <= 0) return false;                    // GetBestPickaxe == null
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return false;
+    const k = st.idx(x, y);
+    if (!(st.flags[k] & 1)) return true;             // 空气格：pickPower>0 即可伤
+    const d = TILE_DEFS[st.type[k]];
+    if (!d) return false;
+    if (d.vanilla && TILE_NO_FAIL_SHEETS.has(d.vanilla.sheet)) return true;   // num=100
+    return d.pick >= 0 && power >= d.pick;           // GetPickaxeDamage 主门槛
+  }
+
+  /** Player.GetBestPickaxe（Player.cs:39439-39450）：0-49 格内最高 pick（vi_ 表
+   *  itemFunc.pick；0 = 无镐） */
+  private bestPickaxePower(): number {
+    let best = 0;
+    for (let i = 0; i < 50; i++) {
+      const s = this.player.inv.slots[i];
+      if (!s || s.stack <= 0) continue;
+      const def = ITEM_DEFS[s.id];
+      if (!def) continue;
+      const vid = def.vid ?? viIdFromKey(def.key);
+      if (vid < 0) continue;
+      const pick = itemFuncOfVid(vid)?.pick ?? 0;
+      if (pick > best) best = pick;
+    }
+    return best;
   }
 
   /** 武器使用音（2026-08-13 特效音效审计）：Item.cs SetDefaults 显式 UseSound

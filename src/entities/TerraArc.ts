@@ -81,8 +81,8 @@ export class TerraArc extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(984);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const fw = img.naturalWidth, fh = img.naturalHeight / 4;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const fw = img.width, fh = img.height / 4;
     const num = this.num;
     const sc = this.scaleCur * 1.1;                       // :27636 num=proj.scale×1.1
     const layer = (frame: number, angOff: number, sy: number, alpha: number, flipV: boolean) => {

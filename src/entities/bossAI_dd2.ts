@@ -2311,7 +2311,7 @@ export class DD2GoblinBomb extends Entity {
       // Main.cs:29811 type 681 velocity.X>0 时 ^= FlipHorizontally（贴图默认朝左）;
       // origin (7,13) = (texW/2, h/2+num143=6)（Main.cs:29805 num143=6 + :29856 num145）
       if (this.vx > 0) ctx.scale(-1, 1);
-      ctx.drawImage(img, -7, -13, img.naturalWidth, img.naturalHeight);
+      ctx.drawImage(img, -7, -13, img.width, img.height);
     } else { ctx.fillStyle = '#3A3A3A'; ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h); }
     ctx.restore();
     void cam;

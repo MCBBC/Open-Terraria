@@ -50,20 +50,20 @@ export function projFrameCount(projId: number): number {
 const frameCache = new Map<string, HTMLCanvasElement>();
 export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElement | null {
   const img = projSprite(projId);
-  if (!img || !img.complete || img.naturalWidth === 0) return null;
+  if (!img || !(img.width > 0) || img.width === 0) return null;
   const frames = projFrameCount(projId);
   const idx = Math.max(0, Math.min(frames - 1, frameIdx));
-  const fh = img.naturalHeight / frames;
+  const fh = img.height / frames;
   if (!Number.isFinite(fh) || fh < 1) return null;
   const key = `${projId}|${idx}`;
   let c = frameCache.get(key);
   if (c) return c;
   c = document.createElement('canvas');
-  c.width = img.naturalWidth;
+  c.width = img.width;
   c.height = Math.round(fh);
   const cx = c.getContext('2d')!;
   cx.imageSmoothingEnabled = false;
-  cx.drawImage(img, 0, Math.round(idx * fh), img.naturalWidth, Math.round(fh), 0, 0, c.width, c.height);
+  cx.drawImage(img, 0, Math.round(idx * fh), img.width, Math.round(fh), 0, 0, c.width, c.height);
   if (frameCache.size > 2048) frameCache.clear();
   frameCache.set(key, c);
   return c;
@@ -376,8 +376,8 @@ export class Arrow extends Entity {
     // 淡出 = Remap(localAI[0],0,25,1,0)
     if (this.terra) {
       const img = projSprite(985);
-      if (!img || !img.complete || img.naturalWidth === 0) return;
-      const fw = img.naturalWidth, fh = img.naturalHeight / 4;
+      if (!img || !(img.width > 0) || img.width === 0) return;
+      const fw = img.width, fh = img.height / 4;
       // 淡入淡出（:39344 985 专属）：Remap(t,0,ai1/2,0,1)×Remap(t,ai1+13,ai1+25,1,0)
       const aIn = Math.min(1, this.terraT / (this.terraAi1 * 0.5));
       const aOut = this.terraT <= this.terraAi1 + 13 ? 1
@@ -418,13 +418,13 @@ export class Arrow extends Entity {
     // Opacity = 1−alpha/255 渐显
     if (this.starY !== null) {
       const img = projSprite(503);
-      if (!img || !img.complete || img.naturalWidth === 0) return;
+      if (!img || !(img.width > 0) || img.width === 0) return;
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.starAlpha / 255));
       ctx.translate(this.cx, this.cy);
       ctx.rotate(Math.atan2(this.vy, this.vx) - Math.PI / 2);
       ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(img, -img.naturalWidth / 2, -70, img.naturalWidth, img.naturalHeight);
+      ctx.drawImage(img, -img.width / 2, -70, img.width, img.height);
       ctx.restore();
       ctx.globalAlpha = 1;
       return;
@@ -441,7 +441,7 @@ export class Arrow extends Entity {
     // 画在【本体之前】（原版在本体绘制后叠画，此处先画拖尾再本体等效）
     if (this.projId === 502 && this.meowTrail.length >= 4) {
       const streak = projSprite(250);
-      if (streak && streak.complete && streak.naturalWidth > 0) {
+      if (streak && (streak.width > 0) && streak.width > 0) {
         const N = this.meowTrail.length / 2;
         for (let i = N - 1; i > 0; i--) {
           const x1 = this.meowTrail[i * 2], y1 = this.meowTrail[i * 2 + 1];
@@ -455,8 +455,8 @@ export class Arrow extends Entity {
           ctx.imageSmoothingEnabled = false;
           ctx.globalAlpha = (127 / 255) * (1 - i / N);
           // origin (w/2, 0)：段起点为锚、沿段向拉伸到段长（scaleY=段长/贴图高）
-          ctx.drawImage(streak, -streak.naturalWidth / 2, 0,
-            streak.naturalWidth, Math.max(1, segLen));
+          ctx.drawImage(streak, -streak.width / 2, 0,
+            streak.width, Math.max(1, segLen));
           ctx.restore();
           ctx.globalAlpha = 1;
         }
@@ -487,12 +487,12 @@ export class Arrow extends Entity {
     const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     const drawImg = frameImg ?? img;
     if (drawImg && (drawImg as HTMLImageElement).complete !== false
-      && (drawImg.width > 0 || (drawImg as HTMLImageElement).naturalWidth > 0)) {
+      && (drawImg.width > 0 || (drawImg as HTMLImageElement).width > 0)) {
       // 原生尺寸 × SetDefaults scale（与判定盒 w/h 解耦）：子弹 14 = 2×20×1.2
       // 曳光条；箭 1 = 14×32 贴图 × 1。曾统一拉成 w×w 宽 → 100px 巨型子弹/箭偏小
       const s = this.drawScale;
-      const iw = drawImg.width || (drawImg as HTMLImageElement).naturalWidth;
-      const ih = drawImg.height || (drawImg as HTMLImageElement).naturalHeight;
+      const iw = drawImg.width || (drawImg as HTMLImageElement).width;
+      const ih = drawImg.height || (drawImg as HTMLImageElement).height;
       ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
     } else {
       // 贴图未就绪：短线兜底

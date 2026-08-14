@@ -233,6 +233,9 @@ export class SettingsPanel {
       this.content.append(
         this.slider(Lang.text('LegacyMenu.99'), 0, 1, 0.05, () => d.musicVol, (v) => { d.musicVol = v; this.applySound(); void options.set('musicVol', v); }),
         this.slider(Lang.text('LegacyMenu.98'), 0, 1, 0.05, () => d.sfxVol, (v) => { d.sfxVol = v; this.applySound(); void options.set('sfxVol', v); }),
+        // Ambient 环境音轨（Main.ambientVolume，config 键 VolumeAmbient；雷声/滴水/
+        // 瀑布岩浆流/小动物鸣叫/暴风雪循环等 13+ 环境音独立音量，LegacySoundPlayer.cs:1443）
+        this.slider(Lang.text('Mods.SandboxWorld.Settings.AmbientVol'), 0, 1, 0.05, () => d.ambientVol, (v) => { d.ambientVol = v; this.applySound(); void options.set('ambientVol', v); }),
       );
     } else if (this.cat === 'ui') {
       this.content.append(
@@ -348,8 +351,9 @@ export class SettingsPanel {
 
   /** 音量下发（Audio 实例由 main.ts 注入过 options.onChange，这里同步 UISfx） */
   private applySound() {
-    // UISfx 共享实例的 master
-    (UISfx as unknown as { sfx: { master: number } }).sfx.master = options.data.sfxVol;
+    // UISfx 共享实例的 master + ambient 双轨
+    (UISfx as unknown as { sfx: { master: number; ambient: number } }).sfx.master = options.data.sfxVol;
+    (UISfx as unknown as { sfx: { master: number; ambient: number } }).sfx.ambient = options.data.ambientVol;
   }
 
   private applyUi() {

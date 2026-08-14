@@ -73,18 +73,18 @@ export class FirstFractalSlash extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(857);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     if (this.opacity <= 0.02) return;
-    const frames = Math.max(1, Math.round(img.naturalHeight / img.naturalWidth));
-    const fh = img.naturalHeight / frames;
+    const frames = Math.max(1, Math.round(img.height / img.width));
+    const fh = img.height / frames;
     const idx = Math.min(frames - 1, this.frame % frames);
     ctx.save();
     ctx.globalAlpha = this.opacity;
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);
     if (this.vx < 0) ctx.scale(1, -1);
-    ctx.drawImage(img, 0, idx * fh, img.naturalWidth, fh,
-      -img.naturalWidth / 2, -fh / 2, img.naturalWidth, fh);
+    ctx.drawImage(img, 0, idx * fh, img.width, fh,
+      -img.width / 2, -fh / 2, img.width, fh);
     ctx.restore();
     ctx.globalAlpha = 1;
   }

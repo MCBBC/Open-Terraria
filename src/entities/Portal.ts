@@ -170,7 +170,7 @@ export class Portal extends Entity {
     ctx.save();
     ctx.translate(this.centerX, this.centerY);
     ctx.rotate(this.angle);
-    if (img && img.complete && img.naturalWidth > 0) {
+    if (img && (img.width > 0) && img.width > 0) {
       const frame = Portal.tintedFrame(img, this.anim, cr, cg, cb);
       ctx.globalAlpha = 0.95;
       ctx.drawImage(frame, -9, -25);

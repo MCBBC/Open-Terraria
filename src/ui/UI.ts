@@ -26,10 +26,10 @@ function invBgEnsure(): HTMLImageElement | null {
 }
 function invBgDataUrl(w: number, h: number): string | null {
   const img = invBgEnsure();
-  if (!img || !img.complete || img.naturalWidth === 0) return null;
+  if (!img || !(img.width > 0) || img.width === 0) return null;
   if (!invBgTinted) {
     const t = document.createElement('canvas');
-    t.width = img.naturalWidth; t.height = img.naturalHeight;
+    t.width = img.width; t.height = img.height;
     const tc = t.getContext('2d')!;
     tc.imageSmoothingEnabled = false;
     tc.drawImage(img, 0, 0);
@@ -124,7 +124,7 @@ function iconUrl(game: Game, id: number): string {
       }
       if (ar) {
         const imgOk = !(ar.img instanceof HTMLImageElement)
-          || (ar.img.complete && ar.img.naturalWidth > 0);
+          || ((ar.img.width > 0) && ar.img.width > 0);
         if (!imgOk) ar = null;   // 破图（素材热切换瞬态）走兜底路径
       }
       if (ar) {
@@ -1714,6 +1714,8 @@ export class UI {
   achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
   /** 装备/杂项页签与 Loadout 按钮（背包面板顶部） */
   private eqPageEl: HTMLElement | null = null;
+  /** 装备页竖排容器（三列 + 底部防御计数器）——切页整体显隐 */
+  private eqColEl: HTMLElement | null = null;
   private miscPageEl: HTMLElement | null = null;
   private loadoutBtns: HTMLButtonElement[] = [];
   private eqPageBtns: HTMLButtonElement[] = [];
@@ -1722,7 +1724,7 @@ export class UI {
   /** 页签切换（原版 EquipPage 0=装备 2=杂项；DrawInventory :40614） */
   setEquipPage(page: number): void {
     this.equipPage = page;
-    if (this.eqPageEl) this.eqPageEl.style.display = page === 0 ? 'flex' : 'none';
+    if (this.eqColEl) this.eqColEl.style.display = page === 0 ? 'flex' : 'none';
     if (this.miscPageEl) this.miscPageEl.style.display = page === 1 ? 'flex' : 'none';
     this.eqPageBtns.forEach((b, k) => {
       b.style.borderColor = k === page ? '#ffd75a' : '#6a5a8a';
@@ -1851,7 +1853,11 @@ export class UI {
     this.eqPageEl.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 7, 'dye'));            // 染料 dye[0-2]+[3-9]
     this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
     this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor')); // 装备 armor[0-2]+[3-7]
-    left.appendChild(this.eqPageEl);
+    // 装备页竖排容器：三列在上、防御计数器贴列底（用户指定；切 Misc 页整体隐藏）
+    this.eqColEl = el('div');
+    this.eqColEl.style.cssText = 'display:flex; flex-direction:column;';
+    this.eqColEl.appendChild(this.eqPageEl);
+    left.appendChild(this.eqColEl);
     // 杂项页：miscEquips[5]（宠物/光源/矿车/坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）
     this.miscPageEl = el('div');
     this.miscPageEl.style.cssText = 'display:none; gap:10px;';
@@ -1993,7 +1999,7 @@ export class UI {
       this.tooltip.style.display = 'block';
     });
     defRow.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
-    left.appendChild(defRow);   // 装备列下方（原版画在装备区左侧垂直居中,用户指定下方）
+    this.eqColEl!.appendChild(defRow);   // 装备三列正下方贴列底（原版画在装备区左侧垂直居中,用户指定列底）
 
     // 合成区
     this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
@@ -2872,7 +2878,7 @@ export class UI {
     };
     requestAnimationFrame(applyBg);
     const img = invBgEnsure();
-    if (img && !img.complete) img.addEventListener('load', applyBg, { once: true });
+    if (img && !(img.width > 0)) img.addEventListener('load', applyBg, { once: true });
     return panel;
   }
 

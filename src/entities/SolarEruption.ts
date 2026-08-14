@@ -68,8 +68,8 @@ export class SolarFlare extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(612);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
-    const fw = 52, fh = img.naturalHeight / 5;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
+    const fw = 52, fh = img.height / 5;
     const dw = fw * this.sc, dh = fh * this.sc;
     ctx.save();
     ctx.globalAlpha = 0.85;
@@ -156,7 +156,7 @@ export class SolarEruptionWhip extends Entity {
   draw(r: { canvas: HTMLCanvasElement }): void {
     const img = projSprite(611);
     const ctx = r.canvas.getContext('2d');
-    if (!img || !img.complete || img.naturalWidth === 0 || !ctx) return;
+    if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     if (this.vx === 0 && this.vy === 0) return;
     const op = Math.max(0, 1 - this.alpha / 255);
     if (op <= 0.02) return;

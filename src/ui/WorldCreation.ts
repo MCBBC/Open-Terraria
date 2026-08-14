@@ -208,10 +208,10 @@ export class WorldCreationPanel {
       ctx.clearRect(0, 0, 84, 84);
       for (const key of content) {
         const im = this.previewImgs.get(key);
-        if (im?.complete && im.naturalWidth) ctx.drawImage(im, 4, 4);
+        if (im?.complete && im.width) ctx.drawImage(im, 4, 4);
       }
       const b = this.previewImgs.get(border);
-      if (b?.complete && b.naturalWidth) ctx.drawImage(b, 0, 0);
+      if (b?.complete && b.width) ctx.drawImage(b, 0, 0);
     };
     for (const key of [...content, border]) {
       if (this.previewImgs.has(key)) continue;

@@ -77,7 +77,7 @@ export class ChunkCache {
   private animChunksByWall = new Map<number, Set<number>>();
   /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
    *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
-  static readonly MAX_CHUNKS = 384;
+  static readonly MAX_CHUNKS = 224;  // 384→224(2026-08-14 trace③:死亡重生远跳批烘焙在积累 GPU 压力下全量重解码;112MB 画布常驻给解码缓存留空间,缩放 0.5 可视~100 chunk 仍冗余)
   /** 最近一次 flushDirty 实测耗时 ms（F5 调试报告：烘焙尖峰证据面） */
   lastFlushMs = 0;
   lastFlushCount = 0;
@@ -102,6 +102,8 @@ export class ChunkCache {
     this.animChunksBySheet.clear();
     this.animChunksByWall.clear();
     if (this.bakeArriveTimer) { clearTimeout(this.bakeArriveTimer); this.bakeArriveTimer = 0; }
+    this.chunkSheets.clear();
+    this.arriveFiles.clear();
     if (this.atlasRef?.bakeTracker) this.atlasRef.bakeTracker = null; // 解绑,防跨世界回调
   }
 
@@ -116,30 +118,57 @@ export class ChunkCache {
       .filter((id) => id >= 0);
     world.store.onTileChanged((x, y) => this.markDirtyAround(x, y));
     // 烘焙懒取自注册(2026-08-13 结构自愈):renderChunk 置 _baking 期间 ensureVImage
-    // 的 miss 触发加载、晚到回调 onLoaded → 500ms 去抖 invalidateAll 自动重烘。
-    // 此后烘焙路径新接任何懒取贴图(CageTop/Glow_316·317 类)无需登记 Game.ts
-    // 白名单(白名单保留作纵深防御)
+    // 的 miss 被 note 记录到【当前 chunk 的缺表集】,晚到 onLoaded → 去抖后只重烘
+    // 含该表的 chunk(★2026-08-14 trace 实锤:进地牢 = 地牢墙/砖/背景批晚到 →
+    // 旧版全量 invalidateAll = 384 chunk × 数百 drawImage 大表 = 15s 内 21 万次
+    // 图像重解码风暴(GPU 内存压力致解码缓存反复驱逐)→ 渲染进程崩溃)
     if (atlas) {
       this.atlasRef = atlas;
       atlas.bakeTracker = {
         _baking: false,
-        note: () => { /* miss 本身已触发加载,晚到必然回调 onLoaded,记录非必需 */ },
-        onLoaded: () => this.scheduleBakeArriveInvalidate(),
+        note: (file: string) => {
+          if (this._bakingKey === null) return;
+          let s = this.chunkSheets.get(this._bakingKey);
+          if (!s) { s = new Set(); this.chunkSheets.set(this._bakingKey, s); }
+          s.add(file);
+        },
+        onLoaded: (file: string) => this.onBakeAssetArrived(file),
       };
     }
   }
 
   private atlasRef: import('../assets/SpriteAtlas').SpriteAtlas | null = null;
+  /** 每 chunk 烘焙时缺失的贴图文件(晚到精确重烘依据;markDirty/淘汰时删) */
+  private chunkSheets = new Map<number, Set<string>>();
+  /** 当前正在烘焙的 chunk key(note 写入用) */
+  private _bakingKey: number | null = null;
 
-  /** 烘焙期懒取贴图晚到 → 去抖合批全量标脏(与 Game.ts 侧 invalidateAll 双路径
-   *  无害重叠,dirtySet 去重) */
+  /** 晚到贴图 → 去抖合批 → 只重烘登记过该文件的 chunk。
+   *  全程无登记(所有烘焙时已就位)= 无 fallback 可修 → no-op(绝不能 invalidateAll
+   *  兜底——那正是解码风暴根因) */
   private bakeArriveTimer: ReturnType<typeof setTimeout> | 0 = 0;
-  private scheduleBakeArriveInvalidate(): void {
+  private arriveFiles = new Set<string>();
+  /** 调试/F5:最近一轮晚到重烘的 chunk 数(0=无需修) */
+  arriveInvalidateChunks = 0;
+  onBakeAssetArrived(file: string): void {
+    this.arriveFiles.add(file);
     if (this.bakeArriveTimer) return;
     this.bakeArriveTimer = setTimeout(() => {
       this.bakeArriveTimer = 0;
-      this.invalidateAll();
-    }, 500);
+      const files = this.arriveFiles;
+      this.arriveFiles = new Set();
+      let hit = 0;
+      for (const [k, sheets] of this.chunkSheets) {
+        for (const f of files) {
+          if (sheets.has(f)) {
+            this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+            hit++;
+            break;
+          }
+        }
+      }
+      this.arriveInvalidateChunks = hit;
+    }, 500) as unknown as ReturnType<typeof setTimeout>;
   }
 
   static key(cx: number, cy: number): number {
@@ -151,6 +180,7 @@ export class ChunkCache {
     if (!this.chunks.has(k)) return; // 未生成的 chunk 惰性创建
     this.releasePair(this.chunks.get(k)); // 旧画布丢弃前先释放,防 detached canvas 积压
     this.chunks.set(k, undefined as unknown as ChunkPair); // 标记删除，重绘时重建
+    this.chunkSheets.delete(k);  // 重建时会重新登记缺表
     this.enqueueDirty(k);
   }
 
@@ -212,20 +242,31 @@ export class ChunkCache {
   /** 动画时钟推进（Game 每帧调用）：sheet/wallId 到达换帧行 tick → 只重建对应 chunk。
    *  原版语义 = AnimateTiles / DoUpdate_AnimateWalls 每 rate tick 推进一帧；
    *  帧内 chunk 复用零开销 */
+  /** 视野范围(像素世界坐标);advanceAnim 只重烘视野内 chunk(2026-08-14
+   *  trace②实锤:站定+暂停仍崩溃——屏外/暂停下的动画重烘=持续 drawImage 大表
+   *  =慢性解码风暴。原版单机暂停世界全冻结,屏外动画不推进无视觉差异) */
+  animView: { x0: number; y0: number; x1: number; y1: number } | null = null;
   advanceAnim(): void {
+    const inView = (k: number) => {
+      const v = this.animView;
+      if (!v) return true;
+      const cx = (k & 0xffff) * CHUNK * TILE, cy = ((k >> 16) & 0xffff) * CHUNK * TILE;
+      const s = CHUNK * TILE;
+      return cx + s > v.x0 && cx < v.x1 && cy + s > v.y0 && cy < v.y1;
+    };
     tileAnim.tick++;
     if (this.animChunksBySheet.size) {
       for (const [sheet, set] of this.animChunksBySheet) {
         const rate = TILE_ANIM_RATE[sheet] ?? (cageFamilyOf(sheet) ? cageAnimRate(sheet) : 0);
         if (!rate || tileAnim.tick % rate !== 0) continue;
-        for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+        for (const k of set) if (inView(k)) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
       }
     }
     if (this.animChunksByWall.size) {
       for (const [wallId, set] of this.animChunksByWall) {
         const rate = wallAnimRate(wallId);
         if (!rate || tileAnim.tick % rate !== 0) continue;
-        for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+        for (const k of set) if (inView(k)) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
       }
     }
   }
@@ -247,6 +288,7 @@ export class ChunkCache {
       const oldest = this.chunks.keys().next().value as number | undefined;
       if (oldest === undefined) break;
       this.releasePair(this.chunks.get(oldest)); // 淘汰画布同样释放,防 detached 积压
+      this.chunkSheets.delete(oldest);
       this.chunks.delete(oldest);
     }
     return c;
@@ -274,10 +316,13 @@ export class ChunkCache {
     // 烘焙期标志:此块内 ensureVImage 的 miss/晚到走 bakeTracker 自注册重烘链
     const tracker = this.atlasRef?.bakeTracker;
     if (tracker) tracker._baking = true;
+    this._bakingKey = ChunkCache.key(cx, cy);
+    this.chunkSheets.delete(this._bakingKey); // 重烘焙 = 重新登记
     try {
       return this.renderChunkInner(cx, cy);
     } finally {
       if (tracker) tracker._baking = false;
+      this._bakingKey = null;
     }
   }
 

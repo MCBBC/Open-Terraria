@@ -87,7 +87,7 @@ export function showSplash(opts: {
     else b = Math.round(a);
     apply();
     // LoadingSunflower（:52041-52060：Frame(1,19,0,(帧/3+10)%19)，53px/帧=1007/19）
-    if (flowerImg.complete && flowerImg.naturalWidth) {
+    if ((flowerImg.width > 0) && flowerImg.width) {
       const row = (Math.floor(t / 16.67 / 3) + 10) % 19;
       fctx.clearRect(0, 0, 52, 53);
       fctx.drawImage(flowerImg, 0, row * 53, 52, 53, 0, 0, 52, 53);

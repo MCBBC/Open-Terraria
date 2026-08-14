@@ -195,10 +195,10 @@ export class CultistRitualCircle extends Entity {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
     const img = projSprite(490);
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     const s = this.scale;
     if (s <= 0.01) return;
-    const iw = img.naturalWidth, ih = img.naturalHeight;
+    const iw = img.width, ih = img.height;
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.rotate(this.rot);

@@ -45,7 +45,7 @@ export class FancyResourceBars {
 
   /** 每帧绘制（游戏画布屏幕坐标） */
   draw(ctx: CanvasRenderingContext2D, p: Player, viewW: number, flicker: FlickerClock | null, drawText = false) {
-    const ready = Object.values(this.t).every((i) => i.complete && i.naturalWidth > 0);
+    const ready = Object.values(this.t).every((i) => (i.width > 0) && i.width > 0);
     if (!ready) return;
     const cursorScale = flicker?.cursorScale ?? 1;
     // PrepareFields（PlayerStatsSnapshot.cs:21-47）
@@ -84,7 +84,7 @@ export class FancyResourceBars {
         else if (idx === last) { img = this.t.heartRight; }
         else if (idx !== first) { img = this.t.heartMiddle; }
         ctx.drawImage(img, Math.round(ax + ox), Math.round(ayy + oy));
-        ax += img.naturalWidth; // OffsetPerDrawByTexturePercentile = UnitX
+        ax += img.width; // OffsetPerDrawByTexturePercentile = UnitX
       }
       // 填充层（HeartFillingDrawer :255-270）：锚点 +(15,15)、推进 2+22、缩放从中心。
       // ★ResourceDrawSettings.Draw（:26-55）：OffsetSpriteAnchorByTexturePercentile=(0.5,0.5)
@@ -95,7 +95,7 @@ export class FancyResourceBars {
         const img = idx < fruit ? this.t.heartFillHoney : this.t.heartFill;
         let scale = lerpValue(lifePerSegment * idx, lifePerSegment * (idx + 1), p.hp);
         if (idx === lastHeartFilling && scale > 0) scale += cursorScale - 1;
-        const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+        const w = img.width * scale, h = img.height * scale;
         ctx.drawImage(img, fx - w / 2, fy - h / 2, w, h);
         fx += 2 + 22;
       }
@@ -114,7 +114,7 @@ export class FancyResourceBars {
         else if (i === last) img = this.t.starBottom;
         else if (i !== first) img = this.t.starMiddle;
         ctx.drawImage(img, Math.round(px), Math.round(py));
-        py += img.naturalHeight;
+        py += img.height;
       }
       // 填充层（StarFillingDrawer :282-290）：锚点 +(15,16)、推进 -2+24、中心缩放。
       // 同心条：精灵中心=锚点（origin 0.5,0.5），不再 +11/+12（2026-08-13 错位修复）
@@ -123,7 +123,7 @@ export class FancyResourceBars {
         const img = this.t.starFill;
         let scale = lerpValue(manaPerStar * i, manaPerStar * (i + 1), p.mana);
         if (i === lastStarFilling && scale > 0) scale += cursorScale - 1;
-        const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+        const w = img.width * scale, h = img.height * scale;
         ctx.drawImage(img, fx - w / 2, fy - h / 2, w, h);
         fy += -2 + 24;
       }

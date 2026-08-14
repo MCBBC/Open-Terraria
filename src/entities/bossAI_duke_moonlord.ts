@@ -949,7 +949,7 @@ export class MoonLeechProj extends Entity {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
     const img = projSprite(456);
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     // 自旋（:30717）：(源心 - 玩家心 + (0,216)) 角 + π/2——回程矢量已同向，直接用速度角近似
     const ang = Math.atan2(this.vy, this.vx) + Math.PI / 2;
     ctx.save();
@@ -959,9 +959,9 @@ export class MoonLeechProj extends Entity {
     // 多帧行切片（Main.projFrames[456]=4，Main.cs:8490；aiStyle 85 不推帧 → 恒帧 0，
     // 帧格 22×24）。曾整条 22×96 压进 16×16 判定盒 = 胶片条（G11）
     const frames = projFrameCount(456);
-    const fh = img.naturalHeight / frames;
-    ctx.drawImage(img, 0, 0, img.naturalWidth, fh, -img.naturalWidth / 2, -fh / 2,
-      img.naturalWidth, fh);
+    const fh = img.height / frames;
+    ctx.drawImage(img, 0, 0, img.width, fh, -img.width / 2, -fh / 2,
+      img.width, fh);
     ctx.restore();
   }
 }

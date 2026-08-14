@@ -652,11 +652,11 @@ export class Dart extends Entity {
     if (st.hFrames) {
       // 836 蒲公英籽:横向 4 列胶片(Frame(4,1,frame),Main.cs:33247)——projFrameImg 竖切不适用
       const full = projSprite(this.projId);
-      if (full && full.complete && full.naturalWidth > 0) {
-        const fw = full.naturalWidth / st.hFrames;
+      if (full && (full.width > 0) && full.width > 0) {
+        const fw = full.width / st.hFrames;
         const idx = Math.min(st.hFrames - 1, this.frame);
-        ctx.drawImage(full, Math.round(idx * fw), 0, Math.round(fw), full.naturalHeight,
-          -fw * this.scale / 2, -full.naturalHeight * this.scale / 2, fw * this.scale, full.naturalHeight * this.scale);
+        ctx.drawImage(full, Math.round(idx * fw), 0, Math.round(fw), full.height,
+          -fw * this.scale / 2, -full.height * this.scale / 2, fw * this.scale, full.height * this.scale);
         drawn = true;
       }
     } else {

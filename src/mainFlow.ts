@@ -82,6 +82,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   options.onChange((d) => {
     audio.setVolume(d.musicVol);
     UISfx.sfx.master = d.sfxVol;
+    UISfx.sfx.ambient = d.ambientVol;   // Ambient 环境音轨（Main.ambientVolume）
     UIScale.userScale = d.uiScale;
     devMode = d.devMode;
   });

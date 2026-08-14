@@ -23,8 +23,8 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
   // mirror=旋转坐标系内水平镜像（XNA dir=FlipHorizontally 等价，绕 origin 翻转）
   const img0 = projSprite(projId);
-  const natural = drawSize < 0 && img0 && img0.complete && img0.naturalWidth > 0;
-  const dw = natural ? img0!.naturalWidth : drawSize > 0 ? drawSize : e.w;
+  const natural = drawSize < 0 && img0 && (img0.width > 0) && img0.width > 0;
+  const dw = natural ? img0!.width : drawSize > 0 ? drawSize : e.w;
   const ctx = r.canvas.getContext('2d');
   if (!ctx) return;
   const img = img0;
@@ -35,8 +35,8 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   ctx.rotate(ang);
   if (mirror) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = false;
-  if (img && img.complete && img.naturalWidth > 0) {
-    ctx.drawImage(img, -dw / 2, -dw / 2, dw, dw * (img.naturalHeight / img.naturalWidth));
+  if (img && (img.width > 0) && img.width > 0) {
+    ctx.drawImage(img, -dw / 2, -dw / 2, dw, dw * (img.height / img.width));
   } else {
     ctx.fillStyle = fallbackColor;
     ctx.fillRect(-dw / 2, -dw / 2, dw, dw);
@@ -1132,7 +1132,7 @@ export class FlailProj extends Entity {
    *  步长=链节高，每节按所在格光照着色；948 三段混排 / 757 六帧动画链 */
   private drawChain(ctx: CanvasRenderingContext2D, r: Renderer): void {
     const img = chainImg(flailChainTex(this.projId));
-    if (!img || !img.complete || img.naturalWidth === 0) {
+    if (!img || !(img.width > 0) || img.width === 0) {
       // 贴图未就绪兜底：细线（旧实现形态）
       ctx.strokeStyle = '#605848';
       ctx.lineWidth = 1.5;
@@ -1157,20 +1157,20 @@ export class FlailProj extends Entity {
     if (d < 1) return;
     dx /= d; dy /= d;
     const frames = this.projId === 757 ? 6 : 1;
-    const linkH = img.naturalHeight / frames + (this.projId === 757 ? -2 : 0);
+    const linkH = img.height / frames + (this.projId === 757 ? -2 : 0);
     const rotation = Math.atan2(dy, dx) + Math.PI / 2;
     let px = cx0, py = cy0;
     let i = 0;
     for (let remain = d + linkH / 2; remain > 0; remain -= linkH, i++) {
       let tex = img;
-      let sy = 0, sh = img.naturalHeight;
-      if (this.projId === 757) { sy = (i % 6) * (img.naturalHeight / 6); sh = img.naturalHeight / 6; }
+      let sy = 0, sh = img.height;
+      if (this.projId === 757) { sy = (i % 6) * (img.height / 6); sh = img.height / 6; }
       else if (this.projId === 948) {
         // 三段：前 4 节 Chain43（全亮）→ 2 节 Chain42（最低亮度 140）→ 其余 Chain41
         if (i < 4) { tex = chainImg('Chain43') ?? img; }
         else if (i < 6) { tex = chainImg('Chain42') ?? img; }
       }
-      if (!tex.complete || tex.naturalWidth === 0) tex = img;
+      if (!(tex.width > 0) || tex.width === 0) tex = img;
       const alpha = this.projId === 948 && i < 4 ? 1
         : this.projId === 948 && i < 6 ? Math.max(lightAt(px, py), 140 / 255)
           : lightAt(px, py);
@@ -1179,7 +1179,7 @@ export class FlailProj extends Entity {
       ctx.rotate(rotation);
       ctx.imageSmoothingEnabled = false;
       ctx.globalAlpha = Math.max(0.15, alpha);
-      ctx.drawImage(tex, 0, sy, tex.naturalWidth, sh, -tex.naturalWidth / 2, -sh / 2, tex.naturalWidth, sh);
+      ctx.drawImage(tex, 0, sy, tex.width, sh, -tex.width / 2, -sh / 2, tex.width, sh);
       ctx.restore();
       px += dx * linkH;
       py += dy * linkH;
@@ -1628,6 +1628,10 @@ const STICKY_PROJ = new Set([37, 397, 470, 911]);
 /** 液体炸弹族（903 水/904 岩浆/905 蜂蜜/906 干燥）：入液即爆
  *  （AI_016 :44267 wet && 族列表 → timeLeft=1 次帧爆） */
 const LIQUID_BOMB_PROJ = new Set([903, 904, 905, 906]);
+/** 液体火箭族（AI_016 :44267 wet → timeLeft=1 入液即爆，与 903-906 同门——
+ *  湿 784-786/805、熔岩 787-789/806、蜂蜜 790-792/807、干 799-801/810） */
+const LIQUID_ROCKET_PROJ = new Set([784, 785, 786, 805, 787, 788, 789, 806,
+  790, 791, 792, 807, 799, 800, 801, 810]);
 /** 炸药棍族（Kill :74943 视觉/PrepareBombToBlow 250×250/半径 7/反弹 ×0.8/摩擦追加 ×0.99） */
 const DYN_PROJ = new Set([29, 470, 637]);
 /** 炸弹族（Kill :74881 视觉/PrepareBombToBlow 128×128 dmg100/半径 4） */
@@ -1660,6 +1664,32 @@ export class GrenadeProj extends Entity {
   /** 911 首贴标记（原版 localAI[0]，:44364/:44372） */
   private stuckOnce = false;
 
+  // ---- 发射器弹药族（AI_016 else 发射支 :44542-44911，2026-08-14 对账新增）----
+  /** fired = 发射族（无 PrepareBombToBlow 投掷臂路径；无重力直线/加速/追踪） */
+  fired = false;
+  /** 撞块语义表（:18365-18370）：火箭族撞块 vel=0 + 隐形 + timeLeft=3（贴墙 3t 后爆） */
+  private static readonly FIRED_STICK = new Set([134, 137, 140, 143, 303,
+    338, 339, 340, 341, 776, 780, 784, 787, 790, 793, 796, 799,
+    803, 804, 805, 806, 807, 808, 809, 810, 930]);
+  /** 火箭族（:44685-44742）：|vx|<15&&|vy|<15 → v×1.1 飞行加速；|v|≥8 烟尾 */
+  private static readonly FIRED_ROCKET = new Set([134, 137, 140, 143, 303,
+    776, 780, 784, 787, 790, 793, 796, 799]);
+  /** 雪人/集束追踪（:44570-44684）：ai0>30 搜敌 600(930:650)+视线 → lerp 1/12 → dir×16(930:12) */
+  private static readonly FIRED_HOME = new Set([338, 339, 340, 341,
+    803, 804, 805, 806, 807, 808, 809, 810, 930]);
+  /** 发射榴弹尾尘（:44743-44749） */
+  private static readonly FIRED_GRENADE = new Set([133, 136, 139, 142,
+    777, 781, 785, 788, 791, 794, 797, 800]);
+  /** 感应雷（:44750-44768）：|v|<0.2 → alpha+2 钳 200 布防半隐 */
+  private static readonly FIRED_MINE = new Set([135, 138, 141, 144,
+    778, 782, 786, 789, 792, 795, 798, 801]);
+  /** 发射支 ai[0]（追踪 ramp 用） */
+  private firedAi0 = 0;
+  /** 火箭贴墙待爆标记（vel=0 后停物理） */
+  private stickPending = false;
+  /** 感应雷布防 alpha（0 常态 → 200 布防） */
+  private armedAlpha = 0;
+
   constructor(x: number, y: number, vx: number, vy: number, damage: number, fuse: number,
     projId: number, onExplode: (x: number, y: number, damage: number) => void) {
     super();
@@ -1675,10 +1705,131 @@ export class GrenadeProj extends Entity {
     this.w = hb; this.h = hb;
   }
 
+  /** 发射支（AI_016 else :44542-44911）：无重力直线 + 家族行为 + 撞块语义表 */
+  private firedStep(game: GameHooks): void {
+    const st = game.world.store;
+    // 液体火箭入液即爆（AI_016 头 :44267 wet → timeLeft=1，与 903-906 同门）
+    if (LIQUID_ROCKET_PROJ.has(this.projId)) {
+      const tx0 = Math.floor(this.x / TILE), tx1 = Math.floor((this.x + this.w - 1) / TILE);
+      const ty0 = Math.floor(this.y / TILE), ty1 = Math.floor((this.y + this.h - 1) / TILE);
+      wetScan: for (let wx = tx0; wx <= tx1; wx++) {
+        for (let wy = ty0; wy <= ty1; wy++) {
+          if (st.inBounds(wx, wy) && st.liquid[st.idx(wx, wy)] > 0) { this.fuse = 1; break wetScan; }
+        }
+      }
+    }
+    // 接触引爆（Damage :12330-12340 碰 NPC → timeLeft 钳 3；发射族 friendly 不炸玩家）
+    if (this.fuse > 3) {
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
+        if (e.dead) continue;
+        if (this.x < e.x + e.w && this.x + this.w > e.x
+          && this.y < e.y + e.h && this.y + this.h > e.y) { this.fuse = 3; break; }
+      }
+    }
+    if (--this.fuse <= 0) {
+      this.dead = true;
+      this.destroy();
+      this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage);
+      return;
+    }
+    // ---- 家族行为（发射支通用 ai[0] += 1 :44836——榴弹 15u 重力门/追踪 ramp 都吃它）----
+    this.firedAi0 += 1;
+    if (GrenadeProj.FIRED_HOME.has(this.projId) && this.firedAi0 > 30) {
+      let tx = this.cx + this.vx * 100, ty = this.cy + this.vy * 100;   // 无目标 → 前方 100px
+      let bd = this.projId === 930 ? 650 : 600;
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; dead?: boolean };
+        if (e.dead) continue;
+        const d = Math.abs(e.cx - this.cx) + Math.abs(e.cy - this.cy);
+        if (d < bd && canHit(st, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0)) {
+          bd = d; tx = e.x + e.w / 2; ty = e.y + e.h / 2;
+        }
+      }
+      const spd = this.projId === 930 ? 12 : 16;
+      const dl = Math.hypot(tx - this.cx, ty - this.cy) || 1;
+      const gx = (tx - this.cx) / dl * spd, gy = (ty - this.cy) / dl * spd;
+      this.vx += (gx - this.vx) / 12;                                   // Lerp 1/12（:44683）
+      this.vy += (gy - this.vy) / 12;
+    }
+    if (GrenadeProj.FIRED_ROCKET.has(this.projId)) {
+      if (Math.abs(this.vx) < 15 && Math.abs(this.vy) < 15) {             // 飞行加速 ×1.1（:44738-44741）
+        this.vx *= 1.1; this.vy *= 1.1;
+      }
+      if (Math.hypot(this.vx, this.vy) >= 8 && Math.random() < 0.6) {     // 烟尾（|v|≥8，:44689-44736）
+        game.spawnParticles(this.cx - this.vx * 0.5, this.cy - this.vy * 0.5,
+          Math.random() < 0.5 ? '#C8C8C8' : '#8890A0', 1, 1.6, { life: 24 });
+      }
+    }
+    if (GrenadeProj.FIRED_GRENADE.has(this.projId)) {
+      if (Math.random() < 0.5) game.spawnParticles(this.cx, this.cy, '#B8B8A8', 1, 1.2, { life: 18 });  // 尾尘 31（:44745-44748）
+      if (this.firedAi0 > 15) {                                           // 15u 后重力 + 落地摩擦（:44870-44879）
+        if (this.vy === 0 && this.vx !== 0) this.vx *= 0.95;
+        this.vy = Math.min(this.vy + 0.2, 16);
+      }
+    }
+    if (GrenadeProj.FIRED_MINE.has(this.projId)) {
+      // 恒重力 + 减速布防（:44857-44868）：vy+=0.2、v×0.97、|v|<0.1 归零
+      this.vy = Math.min(this.vy + 0.2, 16);
+      this.vx *= 0.97; this.vy *= 0.97;
+      if (Math.abs(this.vx) < 0.1) this.vx = 0;
+      if (Math.abs(this.vy) < 0.1) this.vy = 0;
+      if (Math.abs(this.vx) < 0.2 && Math.abs(this.vy) < 0.2) {
+        this.armedAlpha = Math.min(200, this.armedAlpha + 2);             // 布防半隐（:44752-44758）
+      } else {
+        this.armedAlpha = 0;
+        if (Math.random() < 0.5) game.spawnParticles(this.cx, this.cy, '#C0C0B0', 1, 1.4, { life: 16 });
+      }
+    }
+    if (this.stickPending) return;                                        // 贴墙待爆：vel=0 静止
+    // ---- 位移（无重力）+ 撞块（:18339-18371 响应表）----
+    const lastVx = this.vx, lastVy = this.vy;
+    let nx = this.x + this.vx;
+    let ny = this.y + this.vy;
+    const solidAt = (px: number, py: number) => {
+      const tx = Math.floor(px / TILE);
+      const ty = Math.floor(py / TILE);
+      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+    };
+    if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, ny + this.h - 1)) {
+      if (GrenadeProj.FIRED_STICK.has(this.projId)) {
+        this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
+      } else {
+        this.vx = lastVx * -0.4;                                          // 榴弹/雷反弹 ×−0.4（:18349-18356）
+      }
+      nx = this.x;
+    }
+    if (solidAt(nx + this.w / 2, ny + this.h - 1) || solidAt(this.x + this.w - 1, ny + this.h - 1)) {
+      if (GrenadeProj.FIRED_STICK.has(this.projId)) {
+        this.vx = 0; this.vy = 0; this.stickPending = true; this.fuse = Math.min(this.fuse, 3);
+      } else if (lastVy > 0.7) {
+        this.vy = lastVy * -0.4;
+      } else {
+        this.vy = 0;
+      }
+      ny = this.y;
+    }
+    this.x = nx;
+    this.y = ny;
+    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+      this.dead = true;
+      this.destroy();
+      return;
+    }
+    // 滚转：火箭族不滚（:44908 排除）→ 朝向速度；榴弹/雷滚转
+    if (GrenadeProj.FIRED_STICK.has(this.projId)) {
+      this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;   // 贴图纵向（同箭族）
+    } else {
+      this.rot += this.vx * 0.1;
+    }
+  }
+
   draw(r: Renderer, cam: Camera): void {
     // 原版投射物绘制 = 贴图原生尺寸 × scale 1（与碰撞盒解耦）——雷管 29 贴图 10×32
     // 此前按碰撞盒宽 14 拉方成 14×44.8（"雷管贴图这么大个"根因）
-    drawProj(r, cam, this, this.projId, this.rot, '#408040', 1, -1);
+    // 发射族：贴墙待爆 alpha=255 隐形 / 感应雷布防 alpha=200 半隐（:18368/:44754）
+    const firedA = this.fired ? 1 - Math.max(this.stickPending ? 255 : this.armedAlpha, 0) / 255 : 1;
+    drawProj(r, cam, this, this.projId, this.rot, '#408040', firedA, -1);
   }
 
   /** 死亡清理：停引信嘶声（Kill :67373-67377 GetActiveSound?.Stop()） */
@@ -1688,6 +1839,7 @@ export class GrenadeProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    if (this.fired) { this.firedStep(game); return; }
     const st = game.world.store;
     // ---- 液体炸弹入液即爆（AI_016 :44267：wet && {903..906} 族 → timeLeft=1 次帧爆；
     //      wet = Collision.WetCollision 投射物盒与任一液体格重叠 :10248）----
@@ -1872,12 +2024,12 @@ export class GlowstickProj extends Entity {
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
-    if (img && img.complete && img.naturalWidth > 0) {
+    if (img && (img.width > 0) && img.width > 0) {
       if (this.projId === 870) {
         const fr = Math.floor(this.fairyT / 5) % 6;
         ctx.drawImage(img, 0, fr * 16, 18, 16, -9, -8, 18, 16);
       } else {
-        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
       }
     } else {
       ctx.fillStyle = '#7FE8A8';

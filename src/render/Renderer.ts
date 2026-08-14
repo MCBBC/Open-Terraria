@@ -1951,11 +1951,11 @@ export class Renderer {
 
   private drawGorePiece(ctx: CanvasRenderingContext2D, p: GorePiece, z: number) {
     const img = this.atlas!.ensureVImage(`vanilla/Gore_${p.goreId}.png`);
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     const rows = p.frameRows;
-    const fh = img.naturalHeight / rows;
+    const fh = img.height / rows;
     const sh = Math.floor(fh);
-    const sw = img.naturalWidth;
+    const sw = img.width;
     // Gore.GetAlpha（:1486）：opacity = (255 - alpha)/255；
     // 16/17 火苗（:1487-1490 返回 Color(255,255,255,0)）——XNA 预乘混合 A=0 即加性
     // 全亮（1405 同处取场景光照 RGB，Gore.cs:1164-1174；此处从 1456）→ canvas 'lighter'
@@ -1991,7 +1991,7 @@ export class Renderer {
     const vd = this.vanillaDust;
     if (!vd) return;
     const img = this.atlas?.ensureVImage('vanilla/Dust.png');
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     const ctx = this.ctx;
     // 剔除矩形（:38268-38269：视口外扩 ±1000/±1050，世界坐标）
     const worldW = cam.viewW / cam.zoom, worldH = cam.viewH / cam.zoom;
@@ -2091,7 +2091,7 @@ export class Renderer {
       if (typeof document !== 'undefined') {
         if (dye) {   // 染料烘焙（DrawData.shader → ArmorShaderData.Apply 等价）
           const c = document.createElement('canvas');
-          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          c.width = img.width; c.height = img.height;
           const cc = c.getContext('2d', { willReadFrequently: true });
           if (cc) {
             cc.imageSmoothingEnabled = false;
@@ -2103,7 +2103,7 @@ export class Renderer {
           }
         }
         const g = document.createElement('canvas');
-        g.width = img.naturalWidth; g.height = img.naturalHeight;
+        g.width = img.width; g.height = img.height;
         const gc = g.getContext('2d');
         if (gc) {
           gc.imageSmoothingEnabled = false;
@@ -2125,7 +2125,7 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
     for (const f of flameParticles.each()) {
       const img = atlas.ensureVImage(`vanilla/Projectile_${f.tex}.png`);
-      if (!img || !img.complete || img.naturalWidth === 0) continue;
+      if (!img || !(img.width > 0) || img.width === 0) continue;
       const lerp = flameFadeOutFactor(f.timeSinceSpawn / f.timeToLive, f.fadeOut);
       if (lerp <= 0) continue;
       const { base, glow } = source(f.tex, img);
@@ -2134,7 +2134,7 @@ export class Renderer {
         ^ ((BigInt.asUintN(64, BigInt(Math.trunc(f.x))) << 32n)
           | BigInt.asUintN(32, BigInt(Math.trunc(f.y))));
       const box = { s: seed };
-      const ox = img.naturalWidth / 2, oy = img.naturalHeight - 2;   // SetBasicInfo :33
+      const ox = img.width / 2, oy = img.height - 2;   // SetBasicInfo :33
       const alphaBase = (60 / 255) * lerp;
       for (let k = 0; k < 4; k++) {                                  // :59 四份抖动副本
         const dx = randomInt(box, -2, 3) * f.scale;
@@ -4957,12 +4957,12 @@ export class Renderer {
     const prm = Renderer.npcSoulRingParams(witherBeastLocal(e)[0]);
     if (!prm) return;
     const img = this.atlas.ensureVImage('vanilla/Extra_89.png');
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     const ctx = this.ctx;
     // fade 量化 1/32 进染色键（连续值会打爆 tintCache；33 档上界有界）
     const q = Math.round(prm.fade * 32) / 32;
     const soul = this.tintedSprite(`extra89soul|q${q}`, {
-      img, sx: 0, sy: 0, sw: img.naturalWidth, sh: img.naturalHeight,
+      img, sx: 0, sy: 0, sw: img.width, sh: img.height,
     }, [135 * q, 67 * q, 191 * q]);   // (180,90,255)×0.75 截整，再 ×fade（XNA src 项）
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -5280,15 +5280,15 @@ export class Renderer {
       this.boneArm3Img.src = 'sprites/vanilla/Arm_Bone_3.png';
     }
     const img = redHat ? this.boneArm3Img : this.armBoneImg;
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     const ctx = this.ctx;
     const ai0 = hand.ai0 >= 0 ? 1 : -1; // ai[0]：-1 左手 / 1 右手
     // vector5 = 手部锚点（Main.cs:22545：position + width/2 - 5*ai[0], +20）
     let vx = hand.x + hand.w / 2 - 5 * ai0;
     let vy = hand.y + 20;
     // BoneArm 基准尺寸（26×98）——Arm_Bone_3（28×98）按此 rect/origin 绘制（:22575）
-    const bw = this.armBoneImg?.naturalWidth ?? img.naturalWidth;
-    const bh = this.armBoneImg?.naturalHeight ?? img.naturalHeight;
+    const bw = this.armBoneImg?.width ?? img.width;
+    const bh = this.armBoneImg?.height ?? img.height;
     for (let j = 0; j < 2; j++) {
       // num14/num15 = 头中心（position + w/2, +h/2）相对锚点的向量（Main.cs:22547-22548）
       let dx = head.x + head.w / 2 - vx;
@@ -5316,8 +5316,8 @@ export class Renderer {
       this.pumpkingCloakImg.src = 'sprites/vanilla/PumpkingCloak.png';
     }
     const img = this.pumpkingCloakImg;
-    if (!img || !img.complete || img.naturalWidth === 0) return;
-    const fw = img.naturalWidth, fh = img.naturalHeight / 5;
+    if (!img || !(img.width > 0) || img.width === 0) return;
+    const fw = img.width, fh = img.height / 5;
     const row = Math.max(0, Math.min(4, Math.trunc(localAIOf(e)[1] ?? 0)));   // :22501 num10
     const ctx = this.ctx;
     ctx.save();
@@ -5335,7 +5335,7 @@ export class Renderer {
       this.pumpkingArmImg.src = 'sprites/vanilla/PumpkingArm.png';
     }
     const img = this.pumpkingArmImg;
-    if (!img || !img.complete || img.naturalWidth === 0) return;
+    if (!img || !(img.width > 0) || img.width === 0) return;
     const ctx = this.ctx;
     const ai0 = blade.ai0 >= 0 ? 1 : -1;
     let vx = blade.x + blade.w * 0.5 - 5 * ai0;   // :22509 vector4
@@ -5351,7 +5351,7 @@ export class Renderer {
       ctx.save();
       ctx.translate(vx, vy);
       ctx.rotate(rot);
-      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
       ctx.restore();
       if (i === 0) { vx += dx * k / 2; vy += dy * k / 2; }   // :22541 段间推进
     }
@@ -5720,7 +5720,7 @@ export class Renderer {
         const glowTex = n.bound ? null : Renderer.npcGlowVariantTex(n.vanillaId, n.shimmered, n.altTexture);
         if (glowTex) {
           const gi = this.atlas.ensureVImage(glowTex);
-          if (gi && gi.complete && gi.naturalWidth) {
+          if (gi && (gi.width > 0) && gi.width) {
             const gCount = townSheetFrameCount(n.vanillaId);
             const gfh = Math.max(1, Math.floor(gi.height / gCount));
             const gIdx = Math.min(gCount - 1, Math.max(0, n.frame));
@@ -5769,7 +5769,7 @@ export class Renderer {
     const icon = this.atlas.vicon(hm ? ho.hm! : ho.pre);
     if (!icon) return;
     const iconImg = icon.img as HTMLImageElement;   // vicon 恒 Image 背书（atlas 懒加载）
-    if (!iconImg.complete || !iconImg.naturalWidth) return;
+    if (!(iconImg.width > 0) || !iconImg.width) return;
     const aim = n.holdoutAim;
     const sd = n.facing;                                    // spriteDirection（+1 右 / −1 左）
     let ax = n.cx - (sd === 1 ? -14 : 14);                  // Bottom − OffsetsNPCOffhand[2]
@@ -5850,9 +5850,9 @@ export class Renderer {
       const mainTex: HTMLImageElement | HTMLCanvasElement | null = baked
         ? baked.canvas
         : atlas.ensureVImage(`vanilla/Wings_${e.slot}.png`);
-      const tw = mainTex ? (mainTex instanceof HTMLImageElement ? mainTex.naturalWidth : mainTex.width) : 0;
+      const tw = mainTex ? (mainTex instanceof HTMLImageElement ? mainTex.width : mainTex.width) : 0;
       if (d.mainGlow && mainTex && tw > 0) {
-        const fh = Math.floor((mainTex instanceof HTMLImageElement ? mainTex.naturalHeight : mainTex.height) / d.frames);
+        const fh = Math.floor((mainTex instanceof HTMLImageElement ? mainTex.height : mainTex.height) / d.frames);
         let a = 1, tint = 1;
         if (d.mainGlow === 'c250a100') { tint = 250 / 255; a = (100 / 255) * e.settled; }  // :858 ×stealth
         else if (d.mainGlow === 'luna') {
@@ -5936,9 +5936,9 @@ export class Renderer {
       const atlas = this.atlas;
       if (!atlas) return null;
       const ramp = atlas.ensureVImage('vanilla/Extra_156.png');
-      if (!ramp || ramp.naturalWidth === 0) return null;
+      if (!ramp || ramp.width === 0) return null;
       const c = document.createElement('canvas');
-      c.width = ramp.naturalWidth; c.height = ramp.naturalHeight;
+      c.width = ramp.width; c.height = ramp.height;
       const cc = c.getContext('2d', { willReadFrequently: true })!;
       cc.drawImage(ramp, 0, 0);
       this.hallowRampData = {
@@ -5959,12 +5959,12 @@ export class Renderer {
     const atlas = this.atlas;
     if (!atlas) return null;
     const mask = atlas.ensureVImage('vanilla/Extra_171.png');
-    if (!mask || mask.naturalWidth === 0) return null;
+    if (!mask || mask.width === 0) return null;
     const s1 = this.hallowRampSampler();
     const pass = getPass('HallowBoss');
     if (!s1 || !pass) return null;
     const canvas = document.createElement('canvas');
-    canvas.width = mask.naturalWidth; canvas.height = mask.naturalHeight;
+    canvas.width = mask.width; canvas.height = mask.height;
     const cc = canvas.getContext('2d', { willReadFrequently: true })!;
     cc.clearRect(0, 0, canvas.width, canvas.height);
     cc.drawImage(mask, 0, 0);
@@ -6040,8 +6040,8 @@ export class Renderer {
     if (dye || tint) {
       const id = sctx.getImageData(0, 0, sw, sh);
       if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
-        { sx, sy, sheetW: img instanceof HTMLImageElement ? img.naturalWidth : img.width,
-          sheetH: img instanceof HTMLImageElement ? img.naturalHeight : img.height });
+        { sx, sy, sheetW: img instanceof HTMLImageElement ? img.width : img.width,
+          sheetH: img instanceof HTMLImageElement ? img.height : img.height });
       if (tint) {
         for (let i = 0; i < id.data.length; i += 4) {
           id.data[i] *= tint[0]; id.data[i + 1] *= tint[1]; id.data[i + 2] *= tint[2];
@@ -6062,7 +6062,7 @@ export class Renderer {
     const img = atlas.ensureVImage('vanilla/Projectile_250.png');
     const hist = p.advancedShadows;
     const n = Math.min(hist.length - 1, 30);
-    if (!img || img.naturalWidth === 0 || n < 1) return;
+    if (!img || img.width === 0 || n < 1) return;
     const ctx = this.ctx;
     // 路径系数 num4 = clamp(总程/160, 0, 1)（:2909-2913）
     let total = 0;
@@ -6072,7 +6072,7 @@ export class Renderer {
     const num4 = Math.min(1, total / 160);
     if (num4 <= 0) return;
     const off = { x: 10, y: p.h - 4 };   // DefaultSize×(0.5,1)+(0,−4)（:2924-2928）
-    const texH = img.naturalHeight;
+    const texH = img.height;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (let i = n; i > 0; i--) {
@@ -6095,7 +6095,7 @@ export class Renderer {
         ctx.translate(x, y);
         ctx.rotate(rot);
         ctx.scale(scale.x * z, scale.y * z);
-        ctx.drawImage(img, -img.naturalWidth / 2, -texH / 2);
+        ctx.drawImage(img, -img.width / 2, -texH / 2);
         ctx.restore();
       };
       drawSeg(pos[0], pos[1]);
@@ -6113,12 +6113,12 @@ export class Renderer {
     const atlas = this.atlas;
     if (!atlas) return;
     const img = atlas.ensureVImage(`vanilla/Wings_${slot}.png`);
-    if (!img || img.naturalWidth === 0) return;
+    if (!img || img.width === 0) return;
     const ctx = this.ctx;
     const k0 = p.vy === 0 ? 8 : 0, k1 = p.vy === 0 ? 14 : 8;
     const cyc = p.vy === 0 ? 3 : 4;
     const mcn = p.miscCounter / 300;   // miscCounterNormalized :3241
-    const fw = img.naturalWidth, fh14 = Math.floor(img.naturalHeight / 14);
+    const fw = img.width, fh14 = Math.floor(img.height / 14);
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (let k = k0; k < k1; k++) {
@@ -6153,9 +6153,9 @@ export class Renderer {
     const ov = d.overlay;
     const slice = (file: string) => {
       const img = atlas.ensureVImage(`vanilla/${file}`);
-      if (!img || img.naturalWidth === 0) return null;
-      const fh = Math.floor(img.naturalHeight / d.frames);
-      return { img, fh, sy: fr * fh, sw: img.naturalWidth, sh: fh };
+      if (!img || img.width === 0) return null;
+      const fh = Math.floor(img.height / d.frames);
+      return { img, fh, sy: fr * fh, sw: img.width, sh: fh };
     };
     /** tintSlice + 染料折叠（cWings 对全部叠画 DrawData 生效，:699/:722 等同绑） */
     const dyeScratch = (img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
@@ -6165,7 +6165,7 @@ export class Renderer {
         const c = sc.getContext('2d', { willReadFrequently: true })!;
         const id = c.getImageData(0, 0, sw, sh);
         this.applyDyeToImageData(id.data, sw, sh, dye,
-          { sx, sy, sheetW: img.naturalWidth, sheetH: img.naturalHeight });
+          { sx, sy, sheetW: img.width, sheetH: img.height });
         c.putImageData(id, 0, 0);
       }
       return sc;
@@ -6230,7 +6230,7 @@ export class Renderer {
             const c38 = sc.getContext('2d', { willReadFrequently: true })!;
             const id38 = c38.getImageData(0, 0, s.sw - 2, s.sh - 2);
             this.applyDyeToImageData(id38.data, s.sw - 2, s.sh - 2, dye,
-              { sx: 0, sy: mcFr * s.sh, sheetW: s.img.naturalWidth, sheetH: s.img.naturalHeight });
+              { sx: 0, sy: mcFr * s.sh, sheetW: s.img.width, sheetH: s.img.height });
             c38.putImageData(id38, 0, 0);
           }
           ctx.save();
@@ -6296,7 +6296,7 @@ export class Renderer {
           id.data[i + 3] *= settled;
         }
         if (dye) this.applyDyeToImageData(id.data, s.sw, s.sh, dye,
-          { sx: 0, sy: s.sy, sheetW: img.naturalWidth, sheetH: img.naturalHeight });
+          { sx: 0, sy: s.sy, sheetW: img.width, sheetH: img.height });
         sctx.putImageData(id, 0, 0);
         ctx.save();
         ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
@@ -6566,15 +6566,15 @@ export class Renderer {
           // cWings 染料（Player.cs:9417 → SM2 字节码执行，全技术可用）
           if (!d.mainGlow && d.overlay?.kind !== 'betsy') {
             const tex = this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
-            if (tex && tex.naturalWidth > 0) {
-              const fh = Math.floor(tex.naturalHeight / d.frames);
-              const sc = this.wingTexSource(tex, 0, fr * fh, tex.naturalWidth, fh, dyeEmu, vortexTint);
+            if (tex && tex.width > 0) {
+              const fh = Math.floor(tex.height / d.frames);
+              const sc = this.wingTexSource(tex, 0, fr * fh, tex.width, fh, dyeEmu, vortexTint);
               ctx.save();
               ctx.translate(anchor[0], anchor[1]);
               if (stealthClamp < 1) ctx.globalAlpha = stealthClamp;
-              if (sc) ctx.drawImage(sc, -tex.naturalWidth / 2, -fh / 2);
-              else ctx.drawImage(tex, 0, fr * fh, tex.naturalWidth, fh,
-                -tex.naturalWidth / 2, -fh / 2, tex.naturalWidth, fh);
+              if (sc) ctx.drawImage(sc, -tex.width / 2, -fh / 2);
+              else ctx.drawImage(tex, 0, fr * fh, tex.width, fh,
+                -tex.width / 2, -fh / 2, tex.width, fh);
               ctx.restore();
             }
           }
@@ -7389,7 +7389,7 @@ export class Renderer {
       this.obstructionTex = im;
     }
     const tex = this.obstructionTex;
-    if (tex && tex.complete && tex.naturalWidth > 0) {
+    if (tex && (tex.width > 0) && tex.width > 0) {
       ctx.globalAlpha = a;
       ctx.drawImage(tex, rect.left, rect.top, rw, rh);
       ctx.globalAlpha = 1;
@@ -7698,7 +7698,7 @@ export class Renderer {
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
     const { skin, tex } = this.minimapSkinAssets();
     const fx = ox + 4 + skin.fo[0], fy = oy + 4 + skin.fo[1];
-    if (tex.frame.complete) ctx.drawImage(tex.frame, fx, fy);
+    if ((tex.frame.width > 0)) ctx.drawImage(tex.frame, fx, fy);
     // 按钮：悬停高亮 + 按住生效（MinimapFrame.Update/Click：mouseLeft 持续，×1.025/0.975 步进）
     this.minimapUiHover = false;
     const btns: Array<[HTMLImageElement, readonly [number, number], 'in' | 'out' | 'reset']> = [
@@ -7709,7 +7709,7 @@ export class Renderer {
     for (const [tex, [bx, by], kind] of btns) {
       const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
       const hovering = Math.abs(lmX(this._mouseX) - cx) < 11 && Math.abs(lmY(this._mouseY) - cy) < 11;
-      if (!hovering || !tex.complete) continue;
+      if (!hovering || !(tex.width > 0)) continue;
       this.minimapUiHover = true;
       ctx.drawImage(tex, fx + bx, fy + by);
       if (this._mouseDown) {
@@ -8141,7 +8141,7 @@ export class Renderer {
     // 8400/6400/6300/4200 手调的外扩魔数），羊皮纸边缘饰纹在地图缩放留边处露出；
     // 地图探索未达区域在卷轴上呈现纸张色而非纯蓝）
     const scroll = this.atlas ? this.atlas.vui('Map.png') : null;
-    if (scroll && scroll.img instanceof HTMLImageElement && scroll.img.complete && scroll.img.naturalWidth > 0) {
+    if (scroll && (scroll.img.width > 0) && scroll.img.width > 0) {
       const sr = Renderer.fullMapScrollRect(world.w, fm.zoom, cx0, cy0, scroll.sw, scroll.sh);
       ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
       ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, sr.x, sr.y, sr.w, sr.h);
