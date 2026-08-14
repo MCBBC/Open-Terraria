@@ -30,22 +30,35 @@ export interface HoverTarget {
 }
 
 /** 装备 → 纸娃娃渲染参数。贴图索引 = item.head/body/legs 槽位序号（原版语义，
- *  非物品 id——铁甲三件的槽位序号都是 2）；原版物品 id 经 vanilla.json armorIndex 查表 */
+ *  非物品 id——铁甲三件的槽位序号都是 2）；原版物品 id 经 vanilla.json armorIndex 查表。
+ *  ★vi_ 物品无 legacy def.armor——部位/贴图序号改走 vanilla-itemstats（s + hs/bs/ls，
+ *  与 armorIndex 同源;2026-08-14 前只认 def.armor → vi_ 盔甲/面具全不渲染,
+ *  "时装头不显示"根因）。armorIndex 兜底保留（legacy/place_ 物品）。 */
 function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas').SpriteAtlas | null): { head: number | null; body: number | null; legs: number | null } {
-  const idx = (itemId: number | null | undefined): number | null => {
+  const idx = (itemId: number | null | undefined, slot: 0 | 1 | 2): number | null => {
     if (itemId == null) return null;
     const def = ITEM_DEFS[itemId];
-    if (!def?.armor) return null;
+    if (!def) return null;
+    // vi_ 装备：stats 表部位 + 贴图序号（hs/bs/ls = 原版 headSlot/bodySlot/legSlot）
+    const st = statOfInternal(itemId);
+    if (st?.s) {
+      const part = st.s === 'h' ? 0 : st.s === 'b' ? 1 : 2;
+      if (part !== slot) return null;
+      const tex = part === 0 ? st.hs : part === 1 ? st.bs : st.ls;
+      return tex ?? null;
+    }
+    // legacy/place_ 物品：def.armor + vanilla.json armorIndex 查表
+    if (!def.armor) return null;
     const key = def.key;
     const vid = VANILLA_ITEM_ICON_MAP[key] ?? (key.startsWith('vi_') ? parseInt(key.slice(3), 10) : NaN);
     if (!Number.isFinite(vid)) return null;
     const entry = atlas?.vanilla.armorIndex?.[String(vid)];
     if (!entry) return null;
-    const slot = def.armor.slot; // 0头 1胸 2腿
+    if (def.armor.slot !== slot) return null;
     return slot === 0 ? (entry.head || null) : slot === 1 ? (entry.body || null) : (entry.legs || null);
   };
   const disp = inv.displayArmor();
-  return { head: idx(disp[0]), body: idx(disp[1]), legs: idx(disp[2]) };
+  return { head: idx(disp[0], 0), body: idx(disp[1], 1), legs: idx(disp[2], 2) };
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
@@ -116,6 +129,7 @@ const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2,
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
+import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { mountFallbackColor, mountLights, fishronWashFactor } from '../entities/Mounts';
@@ -456,6 +470,20 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     const p = (Math.floor(t) % 16) + 1;
     return Math.min(frames - 1, (p >= 8 && p < 16 ? 1 : 0) + (e.hp < e.maxHp * 0.5 ? 2 : 0));
   }
+  // 机械骷髅王头 127（FindFrame case 127，cs:75196-75231）：ai[1]==0（悬浮段）=
+  // 帧 {0,1} 每 12t 循环（眨眼）；ai[1]!=0（旋冲/白天狂暴/离场）= **恒定帧 2**
+  // （旋冲脸，counter 清零不推进）；3-5 帧为 MechQueen 合体专属（IsMechQueenUp，
+  // 未支持）。曾落通用 6t 档 → 6 帧连播=一/二阶段动画混播（2026-08-14 用户报告）。
+  // 状态近似：无引擎态计数器，12t 相位取全局 t（重进悬浮段时相位任意，差 <12t）
+  if (id === 127) {
+    if (e.ai1 === 0) return Math.floor(t / 12) % 2;
+    return 2;
+  }
+  // Prime 锯臂 129 / 激光臂 130（cs:75235-75264）：每 2t / 每 8t 推进、越帧数回卷
+  // （曾落通用 6t 档：锯慢 3 倍、激光快 33%）；钳 128/炮 131 无 case=恒帧 0
+  //（frames=1，通用档亦恒 0，无需特判）
+  if (id === 129) return Math.floor(t / 2) % Math.max(1, frames);
+  if (id === 130) return Math.floor(t / 8) % Math.max(1, frames);
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -1164,6 +1192,8 @@ export class Renderer {
         tb = 1 - 0.50 * night - 0.40 * dusk;
       }
       this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
+      // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后、实体前）
+      this.sky.drawCloudsNear(ctx, viewW, viewH, cam.y);
     }
 
     // 1.55 AmbientSky 天空实体（SkyManager「Ambience」层：群系背景之上、世界实体之下；

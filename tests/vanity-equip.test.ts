@@ -24,7 +24,7 @@ describe('vanity 数据（van 标记）', () => {
   it('提取覆盖面：stats 表 van=1 共 400 条（含 Boss 面具范围块;3 缺=非装备）', () => {
     const t = JSON.parse(readFileSync('src/data/vanilla-itemstats.json', 'utf8')) as Record<string, { van?: number }>;
     const vanCount = Object.values(t).filter((e) => e.van === 1).length;
-    expect(vanCount).toBe(400);   // 390 case 块 + 10 Boss 面具范围块(2104-2113)
+    expect(vanCount).toBe(402);   // 390 case + 10 Boss 面具范围块 + 2 DD2 面具嵌套 switch(3863/3864)
   });
 });
 

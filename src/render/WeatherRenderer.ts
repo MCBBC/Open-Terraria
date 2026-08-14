@@ -27,6 +27,17 @@ interface SnowFlake {
   active: boolean;
 }
 
+/** 沙尘暴尘（dust 268）：位置/速度/scale/fadeIn（簇生链重掷门）/生物群系加权色 */
+interface SandGrain {
+  x: number; y: number;
+  vx: number; vy: number;
+  scale: number;
+  fadeIn: number;
+  /** EmitDust 四色（(200,160,20)/(103,98,122)/(135,43,34)/(213,196,197)，alpha 180） */
+  cr: number; cg: number; cb: number;
+  active: boolean;
+}
+
 export interface WeatherFxHooks {
   /** 光照采样（0-255 RGB；雨滴着色 ×0.85） */
   lightAt(tx: number, ty: number): [number, number, number];
@@ -71,6 +82,8 @@ export class WeatherRenderer {
   private poolCap = 0;
   /** 雪粒池（Main.snowing() → dust 76；与雨滴独立——雪原永远飘雪，雨时成暴风雪） */
   private snow: SnowFlake[] = [];
+  /** 沙尘暴尘池（dust 268；SandStormCount 等价 = active 计数） */
+  private sand: SandGrain[] = [];
   private weather: WeatherState | null = null;
   hooks: WeatherFxHooks | null = null;
 
@@ -79,7 +92,7 @@ export class WeatherRenderer {
     this.weather = weather;
     this.hooks = hooks;
   }
-  detach() { this.weather = null; this.hooks = null; this.pool.length = 0; this.snow.length = 0; }
+  detach() { this.weather = null; this.hooks = null; this.pool.length = 0; this.snow.length = 0; this.sand.length = 0; }
 
   /** 池容量 = 屏宽比例（原版 Main.maxRain 语义近似：屏宽/视口宽×25） */
   private ensurePool(cap: number) {
@@ -183,6 +196,24 @@ export class WeatherRenderer {
       if (--f.life <= 0 || f.scale < 0.3 || f.y > camBottom) f.active = false;
       if (f.active) snowLive.push(f);
     }
+    // ---- 沙尘 grain 更新（Dust.cs 主线 + 268 分支 :1854-1875 + 通用死亡 :446/:2387/:2434）----
+    const sandBottom = camY + viewH;
+    for (const g of this.sand) {
+      if (!g.active) continue;
+      g.vy += 0.05;                                        // 默认尘重力（:721-724）
+      g.vx *= 1.0050251; g.vy *= 1.0050251;                // :1857
+      g.scale += 0.01;                                     // :1858
+      if (!hooks.sandstormVisuals) g.scale -= 0.05;        // !flag 档（:1859-1861）
+      if (g.fadeIn > 0 && g.scale > g.fadeIn) g.fadeIn = 0;   // :2148-2168（268 恒瞬时清）
+      if (playerVy > 0 && g.fadeIn === 0 && g.vy < playerVy) g.vy += (playerVy - g.vy) * 0.04;  // :1811-1816
+      if (playerVy > 0 && g.fadeIn === 0) g.y += playerVy * 0.2;                               // :1817-1819
+      const gx = Math.floor((g.x + 5) / TILE), gy = Math.floor((g.y + 5) / TILE);
+      if (g.fadeIn === 0 && st.inBounds(gx, gy) && st.isSolid(gx, gy)) {   // :1821-1825 落地
+        g.scale *= 0.9; g.vx *= 0.25; g.vy *= 0.25;
+      }
+      g.x += g.vx; g.y += g.vy;
+      if (g.scale > 10 || g.y > sandBottom || g.scale < 0.1) g.active = false;
+    }
     this.emitSandstorm(world, viewW, viewH, camX, camY);
   }
 
@@ -242,11 +273,12 @@ export class WeatherRenderer {
     }
   }
 
-  /** Sandstorm.EmitDust（Sandstorm.cs:141-248）1:1：密度门 Next(num5/4)、每帧尝试
-   *  20×Severity、屏上方 -50 生成带、边缘 1/3 概率、速度链（主项 = dir×lerp(0.5,0.7,α)×20
-   *  + 基速 dir×lerp(0.9,1,wind)×5，vy=(2+rand0.2)×0.35，末端 ×(1+num12×0.5)×(1+num12)×value）。
-   *  渲染仍走 Game.particles 色方块（原版 dust 268 streak/fadeIn 增长为已备案视觉近似）。
-   *  ★曾速度慢 3-4 倍（主项 20× 缺失）+屏内 600 带生成（粒子凭空出现）+边缘 1/5 概率 */
+  /** Sandstorm.EmitDust（Sandstorm.cs:141-248）1:1 → dust 268 grain 池。
+   *  密度门 Next(num5/4)、每帧尝试 20×Severity、屏上方 -50 生成带、边缘 1/3、
+   *  num9 预算（num7×1.1−活尘，num7=1000×屏比,gfxQuality=1）、速度链（主项 dir×lerp(.5,.7,α)×20
+   *  + 基速 5、vy=(2+rand.2)×0.35、×(1+num12×.5)(1+num12)value）、fadeIn += num13×0.2、
+   *  簇生链（:187-207 j-- 重掷 1/maxValue2：pos += rand±10 + v×−1.1，链上生尘不做墙门）。
+   *  ★曾走 Game.particles 色方块近似（用户令禁近似,2026-08-14 全量 1:1） */
   private emitSandstorm(world: World, viewW: number, viewH: number, camX: number, camY: number) {
     const w = this.weather!;
     const hooks = this.hooks!;
@@ -262,14 +294,40 @@ export class WeatherRenderer {
     const num8 = 20 * sand.severity;                        // 每帧尝试数
     const num12 = 0.2 + 0.15 * sand.severity;               // Lerp(0.2,0.35,Severity)
     const num13 = 0.5 + 0.2 * sand.severity;                // Lerp(0.5,0.7,Severity)
+    const amount = (value - 0.77) / 0.23000002;
+    const maxValue2 = Math.max(1, Math.floor(1 + 9 * amount));   // Lerp(1,10,amount)
+    const num7 = Math.floor(1000 * (viewW / 1920));         // maxScreenW≈1920
+    let num9 = num7 * 1.1 - this.countSand();               // gfxQuality=1（Main.cs:1012）
+    if (num9 <= 0) return;
     const colors = hooks.sandColors().filter((c) => c.weight > 0);
     const totalW = colors.reduce((s, c) => s + c.weight, 0);
     if (!colors.length || totalW <= 0) return;
     const st = world.store;
-    for (let i = 0; i < num8; i++) {
+    const pickColor = (): [number, number, number] => {
+      let pick = Math.random() * totalW;
+      let c = colors[0].color;
+      for (const cc of colors) { pick -= cc.weight; if (pick <= 0) { c = cc.color; break; } }
+      const v = parseInt(c.slice(1), 16);
+      return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
+    };
+    const spawnGrain = (x: number, y: number) => {
+      let vx = num3 * 5 + Math.random();                    // :169-176 速度链
+      vx += num3 * num13 * 20;
+      let vy = (2 + Math.random() * 0.2) * 0.35;            // ×scale(默认1)×0.35
+      const k = (1 + num12 * 0.5) * (1 + num12) * value;    // :177-180 末端三连乘
+      vx *= k; vy *= k;
+      const [cr, cg, cb] = pickColor();
+      this.sand.push({
+        x, y, vx, vy, scale: 0.9,                           // :181 scale=0.9（速度链后置）
+        fadeIn: num13 * 0.2,                                // :178
+        cr, cg, cb, active: true,
+      });
+      num9--;
+    };
+    for (let i = 0; i < num8 && num9 > 0; i++) {
       if (Math.floor(Math.random() * Math.max(1, Math.floor(num5 / 4))) !== 0) continue;  // Next(num5/4)==0
       let x = Math.random() * (viewW + 1000) - 500;
-      let y = -Math.random() * 50;                          // 屏幕上缘之上（原版屏坐标 +screenPosition）
+      let y = -Math.random() * 50;                          // 屏幕上缘之上
       if (Math.random() * 3 < 1 && dir === 1) x = Math.random() * 500 - 500;
       else if (Math.random() * 3 < 1 && dir === -1) x = Math.random() * 500 + viewW;
       if (x < 0 || x > viewW) y += Math.random() * viewH * 0.9;
@@ -277,16 +335,24 @@ export class WeatherRenderer {
       const tx = Math.floor(x / TILE);
       const ty = Math.floor(y / TILE);
       if (!stIn(world, tx, ty) || st.wall[st.idx(tx, ty)] !== 0) continue;
-      let pick = Math.random() * totalW;
-      let color = colors[0].color;
-      for (const c of colors) { pick -= c.weight; if (pick <= 0) { color = c.color; break; } }
-      // 速度链（:169-180；NewDust 默认 scale=1，末行 scale=0.9 不影响速度）
-      let vx = num3 * 5 + Math.random();
-      vx += num3 * num13 * 20;
-      let vy = (2 + Math.random() * 0.2) * 0.35;
-      const k = (1 + num12 * 0.5) * (1 + num12) * value;
-      hooks.emitSand(x, y, vx * k, vy * k, color, 3);
+      // 内联簇生链（:181-207）：1/maxValue2 概率原地续生（j--），位置步进 rand±10+v×−1.1
+      for (let j = 0; j < 1 && num9 > 0; j++) {
+        spawnGrain(x, y);
+        if (num9 <= 0) break;
+        if (Math.floor(Math.random() * maxValue2) !== 0) {
+          j--;
+          x += (Math.random() * 20 - 10) - this.sand[this.sand.length - 1].vx * 1.1;
+          y += (Math.random() * 20 - 10) - this.sand[this.sand.length - 1].vy * 1.1;
+        }
+      }
     }
+    if (this.sand.length > 2200) this.sand = this.sand.filter((g) => g.active);
+  }
+
+  private countSand(): number {
+    let n = 0;
+    for (const g of this.sand) if (g.active) n++;
+    return n;
   }
 
   /** Rain.Draw（Main.cs:38238-38266）：2×40 条 × type 偏移，光照着色 ×0.85；
@@ -336,6 +402,22 @@ export class WeatherRenderer {
         const tinted = tintedFlake(dTex, Math.round((lvl / 7) * 255));
         if (tinted) ctx.drawImage(tinted, f.x - 5 * f.scale, f.y - 5 * f.scale, 10 * f.scale, 10 * f.scale);
       }
+      // ---- 沙尘 grain（dust 268；DrawDust :38403-38429 双画：环境光底 + GetColor
+      //      （dust.color×light）叠加；帧 = Dust.png 源矩形 (680,20)，origin (4,4)，rot 0 ----
+      for (const g of this.sand) {
+        if (!g.active) continue;
+        const tx = Math.floor((g.x + 4) / TILE);
+        const ty = Math.floor((g.y + 4) / TILE);
+        const [lr, lg, lb] = hooks.lightAt(tx, ty);
+        const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
+        const v = Math.round((lvl / 7) * 255);
+        const base = tintedFlake(dTex, v);                 // 基画（dust 268 帧同 10px 格）
+        const over = tintedSand(dTex, g.cr, g.cg, g.cb, v); // GetColor 叠画（color×light）
+        const dx = g.x - 4 * g.scale, dy = g.y - 4 * g.scale;
+        const sz = 10 * g.scale;
+        if (base) ctx.drawImage(base, dx, dy, sz, sz);
+        if (over) ctx.drawImage(over, dx, dy, sz, sz);
+      }
     }
     ctx.restore();
     void world;
@@ -382,5 +464,27 @@ function tintedFlake(tex: HTMLImageElement, v: number): HTMLCanvasElement | null
   cx.globalCompositeOperation = 'destination-in';
   cx.drawImage(tex, 760, 0, 10, 10, 0, 0, 10, 10);
   flakeTintCache.set(v, c);
+  return c;
+}
+
+/** 沙尘 grain 乘色缓存：Dust.png 源矩形 (680,20,10,10) = dust 268，
+ *  按 EmitDust 四色（GetColor = dust.color × light，DrawDust :38423-38429 叠画） */
+const sandTintCache = new Map<string, HTMLCanvasElement>();
+function tintedSand(tex: HTMLImageElement, cr: number, cg: number, cb: number, v: number): HTMLCanvasElement | null {
+  const key = `${cr},${cg},${cb},${v}`;
+  const hit = sandTintCache.get(key);
+  if (hit) return hit;
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = 10; c.height = 10;
+  const cx = c.getContext('2d')!;
+  cx.drawImage(tex, 680, 20, 10, 10, 0, 0, 10, 10);
+  cx.globalCompositeOperation = 'multiply';
+  const m = (c1: number) => Math.round((c1 * v) / 255);   // color×light（Dust.GetColor 同义）
+  cx.fillStyle = `rgb(${m(cr)},${m(cg)},${m(cb)})`;
+  cx.fillRect(0, 0, 10, 10);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(tex, 680, 20, 10, 10, 0, 0, 10, 10);
+  sandTintCache.set(key, c);
   return c;
 }

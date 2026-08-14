@@ -2,8 +2,8 @@
 // 双键注册 = 蛇形显式键（vi_832_living_wood_wand）+ 驼峰自动键（vi_832_LivingWoodWand，
 // items.ts 自动注册循环）。删除驼峰条目前必须先搬移其独有字段——本套件锁死搬移成果：
 // **任一双键对中，驼峰 def 的全部有效字段必须已被蛇形 def 覆盖（驼峰独有字段数 = 0）**。
-// 搬移史：60 蛇形键 / 63 行补丁（tool×35 + axePower×5 + value×2 + wireTool×1 +
-// tile×20 + placeStyle×18，注释标来源驼峰键）。
+// 搬移史：60 蛇形键 / 63 行补丁（tool×35 + axePower×7 + value×2 + wireTool×1 +
+// tile×22 + placeStyle×14 = 81 字段，注释标来源驼峰键）。
 // 已知不在本锁范围：10 处值冲突（蛇形为手工修正值：草药籽 tile/placeStyle、人偶 tile）、
 // 14 个重复键异常（清理方案第 3 步，另行处理）。
 import { describe, it, expect } from 'vitest';

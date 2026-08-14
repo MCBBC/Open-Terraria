@@ -839,7 +839,8 @@ export class MinionProj extends Entity {
               vx = ((tgt.cx - this.cx) / d) * 16; vy = ((tgt.cy - (this.y + 20)) / d) * 16;
             }
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              Object.assign(new Arrow(this.cx, this.y + 20, vx, vy, dmgOf(), this.knockback, 680, null, { grav: 0 }), { whipTagShot: true }),
+              // 680 弩箭：AI_001 默认档（0.1@15 缓坠）——重力缺省走规格链（2026-08-14 对账）
+              Object.assign(new Arrow(this.cx, this.y + 20, vx, vy, dmgOf(), this.knockback, 680, null), { whipTagShot: true }),
               'projectiles');
           }
           if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = 160; }

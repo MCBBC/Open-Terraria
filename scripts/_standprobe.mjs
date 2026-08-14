@@ -53,6 +53,13 @@ const out = await page.evaluate(async () => {
   };
   const p = g.player;
   const st = g.world.store;
+  // 入场沉降门：出生点传送/spawn 收敛完成后再摆场景（否则位置被入场流程覆写）
+  await waitUntil(() => p.onGround, 8000);
+  const settleX = p.x, settleY = p.y;
+  await new Promise(r => setTimeout(r, 600));
+  while (Math.abs(p.x - settleX) + Math.abs(p.y - settleY) > 0.5) {
+    await new Promise(r => setTimeout(r, 300));   // 等 spawn 微调结束
+  }
   // 从 TILE_DEFS 反查：sheet → 内部 id
   const defs = window.__swGame.renderer ? null : null;
   // 通过模块不可达——用 store 现存 tile 扫描不行；改用放置链？直接借 atlas 不行。
@@ -80,7 +87,7 @@ const out = await page.evaluate(async () => {
   ok('② 工作台条目', WB > 0, WB);
   if (WB > 0) {
     for (let x = col0; x <= col0 + 2; x++) st.setTile(x, row0 + 5, WB, 0, 0);
-    p.x = col0 * TILE + 8; p.y = (row0 + 5) * TILE - 42 - 4; p.vx = 0; p.vy = 0; p.fallStartY = null;
+    p.x = col0 * TILE + 8; p.y = (row0 + 5) * TILE - 42 - 4; p.vx = 0; p.vy = 0; p.fallStartY = null; p.onGround = false;
     p.inputX = 0; p.inputUp = false; p.inputDown = false;
     const trace = [];
     for (let f = 0; f < 60; f++) {
@@ -107,15 +114,23 @@ const out = await page.evaluate(async () => {
     for (let x = col0; x <= col0 + 22; x++) st.setTile(x, row0 + 6, 1);  // 补地板
     const ax = col0 + 6;
     st.setTile(ax, row0 + 5, ANVIL, 0, 0);
-    p.x = (col0 + 2) * TILE; p.y = (row0 + 6) * TILE - 42; p.vx = 0; p.vy = 0; p.fallStartY = null;
-    p.inputX = 1; p.inputUp = true; p.inputDown = false;
+    // 起点=干净地板（② 的工作台占 col0..col0+2，③ 从 col0+4 起走——身体不嵌入）
+    p.x = (col0 + 4) * TILE + 8; p.y = (row0 + 6) * TILE - 42; p.vx = 0; p.vy = 0; p.fallStartY = null;
+    p.hp = p.maxHp; p.dead = false;   // 窒息/意外伤害护栏（死亡会冻结 fixedUpdate）
+    g.input.touchKeys.add('KeyD'); g.input.touchKeys.add('KeyW');   // 走输入通道（直赋被每帧注入覆写）
     let stepped = false;
+    const tr3 = [];
     const t0 = performance.now();
-    while (performance.now() - t0 < 4000) {
+    while (performance.now() - t0 < 2000) {
       await new Promise(r => setTimeout(r, 16));
+      tr3.push(`${Math.floor(p.x / TILE)}:${(p.y + p.h - (row0 + 6) * TILE).toFixed(0)}${p.onGround ? 'G' : ''}`);
       if (p.onGround && Math.abs(p.y + p.h - (row0 + 5) * TILE) < 0.01) { stepped = true; break; }
+      if (p.dead || p.hp <= 0) break;
     }
-    ok('③ 按住↑行走踏上铁砧（holdsMatching）', stepped, `bottom=${p.y + p.h}`);
+    void tr3;
+    g.input.touchKeys.delete('KeyD'); g.input.touchKeys.delete('KeyW');
+    ok('③ 按住↑行走踏上铁砧（holdsMatching）', stepped,
+      `bottom=${p.y + p.h} want=${(row0 + 5) * TILE} dead=${p.dead} hp=${p.hp} col=${Math.floor(p.x / TILE)} tr=${tr3.slice(-14).join(' ')}`);
     p.inputX = 0; p.inputUp = false;
   }
 
@@ -123,15 +138,21 @@ const out = await page.evaluate(async () => {
   const CAGE = idOf('v_285_');
   ok('④ 蜗牛笼条目', CAGE > 0, CAGE);
   if (CAGE > 0) {
-    const cx = col0 + 10;
+    const cx = col0 + 12;
     for (let dy = 0; dy < 3; dy++) st.setTile(cx, row0 + 3 + dy, CAGE, 0, dy * 18);
-    p.x = cx * TILE + 8; p.y = (row0 + 3) * TILE - 42 - 4; p.vx = 0; p.vy = 0; p.fallStartY = null;
+    p.hp = p.maxHp; p.dead = false;
+    p.x = cx * TILE + 8; p.y = (row0 + 3) * TILE - 42 - 4; p.vx = 0; p.vy = 0; p.fallStartY = null; p.onGround = false;
     p.inputX = 0;
-    await waitUntil(() => p.onGround, 3000);
+    const tr4 = [];
+    for (let f = 0; f < 30 && !p.onGround; f++) {
+      await new Promise(r => setTimeout(r, 16));
+      tr4.push(`${(p.y + p.h).toFixed(1)}/vy${p.vy.toFixed(2)}${p.onGround ? 'G' : ''}`);
+    }
+    ok('④ 逐帧', tr4.length > 0, tr4.slice(0, 12).join(' '));
     ok('④ 落到笼顶站稳（顶行 frameY=0）', p.onGround && Math.abs(p.y + p.h - (row0 + 3) * TILE) < 0.01,
-      `bottom=${p.y + p.h} want=${(row0 + 3) * TILE}`);
+      `bottom=${p.y + p.h} want=${(row0 + 3) * TILE} dead=${p.dead} hp=${p.hp}`);
     // 下穿：从笼顶下缘起步直接下落（腿行 frameY≠0 不挡）
-    p.y = (row0 + 4) * TILE + 2; p.vy = 0; p.fallStartY = null;
+    p.y = (row0 + 4) * TILE + 2; p.vy = 0; p.fallStartY = null; p.onGround = false;
     await new Promise(r => setTimeout(r, 400));
     ok('④ 笼身可穿（落到地板）', p.y + p.h >= (row0 + 6) * TILE - 0.01, `bottom=${p.y + p.h}`);
   }
@@ -140,13 +161,19 @@ const out = await page.evaluate(async () => {
   const PLAT = idOf('platform');
   ok('⑤ 平台条目', PLAT > 0, PLAT);
   if (PLAT > 0) {
-    const px = col0 + 14;
+    const px = col0 + 16;
     for (let x = px; x <= px + 2; x++) st.setTile(x, row0 + 4, PLAT, 0, 0);
-    p.x = px * TILE + 8; p.y = (row0 + 4) * TILE - 42 - 4; p.vx = 0; p.vy = 0; p.fallStartY = null;
-    await waitUntil(() => p.onGround, 3000);
-    ok('⑤ 平台正常站立', p.onGround && Math.abs(p.y + p.h - (row0 + 4) * TILE) < 0.01, `bottom=${p.y + p.h}`);
+    p.hp = p.maxHp; p.dead = false;
+    p.x = px * TILE + 8; p.y = (row0 + 4) * TILE - 42 - 4; p.vx = 0; p.vy = 0; p.fallStartY = null; p.onGround = false;
+    const tr5 = [];
+    for (let f = 0; f < 40 && !p.onGround; f++) {
+      await new Promise(r => setTimeout(r, 16));
+      tr5.push(`${(p.y + p.h).toFixed(1)}/vy${p.vy.toFixed(2)}${p.onGround ? 'G' : ''}`);
+    }
+    ok('⑤ 平台正常站立', p.onGround && Math.abs(p.y + p.h - (row0 + 4) * TILE) < 0.01,
+      `bottom=${p.y + p.h} want=${(row0 + 4) * TILE} tr=${tr5.slice(0, 10).join(' ')} plat=${st.isPlatform(px, row0 + 4)} drop=${p.dropThrough ?? 'n/a'} down=${p.inputDown}`);
     for (let x = px; x <= px + 2; x++) st.setActuated(x, row0 + 4, true);
-    p.y = (row0 + 4) * TILE - 42 - 4; p.vy = 0; p.fallStartY = null;
+    p.y = (row0 + 4) * TILE - 42 - 4; p.vy = 0; p.fallStartY = null; p.onGround = false;
     await new Promise(r => setTimeout(r, 500));
     ok('⑤ 致动后下穿（落到地板）', p.y + p.h >= (row0 + 6) * TILE - 0.01, `bottom=${p.y + p.h}`);
     for (let x = px; x <= px + 2; x++) st.setActuated(x, row0 + 4, false);
@@ -156,11 +183,13 @@ const out = await page.evaluate(async () => {
   const D_OPEN = idOf('door_open'); const D_CLOSED = idOf('door_closed');
   ok('⑥ 门条目', D_OPEN > 0 && D_CLOSED > 0, `${D_OPEN}/${D_CLOSED}`);
   if (D_OPEN > 0) {
-    const wx = col0 + 18;
+    const wx = col0 + 20;
     for (let dy = 0; dy < 3; dy++) st.setTile(wx, row0 + 3 + dy, D_OPEN, 0, dy * 18);
+    p.hp = p.maxHp; p.dead = false;
     p.x = (wx - 1) * TILE - 4; p.y = (row0 + 6) * TILE - 42; p.vx = 0; p.vy = 0; p.fallStartY = null;
-    p.inputX = 1;
+    g.input.touchKeys.add('KeyD');
     await new Promise(r => setTimeout(r, 700));
+    g.input.touchKeys.delete('KeyD');
     ok('⑥ 开门可穿行', p.x > wx * TILE + TILE, `x=${p.x} threshold=${wx * TILE + TILE}`);
     for (let dy = 0; dy < 3; dy++) st.setTile(wx, row0 + 3 + dy, D_CLOSED, 0, dy * 18);
     const xBefore = p.x;

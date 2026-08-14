@@ -458,6 +458,59 @@ export function trackItemId(frame: number): number {
 }
 
 // ============================================================================
+// 鼠马车挖掘链（MinecartDiggerHelper.cs 的连接校验/修正段）
+// ============================================================================
+
+/** ConvertOffsetYToTrackConnectionValue（Minecart.cs:1609-1617）：Y 偏移 → 连接值。
+ *  -1(上方)→TOP 0 / 1(下方)→BOTTOM 2 / 0(平)→MIDDLE 1 */
+export function offsetToConn(offsetY: number): number {
+  return offsetY === -1 ? TOP : offsetY === 1 ? BOTTOM : MIDDLE;
+}
+
+/** GetAreExpectationsForSidesMet（Minecart.cs:1540-1562）：该格当前前轨帧的
+ *  左/右连接是否与期望一致。期望值 = Y 偏移（-1/0/1；null = 不校验该侧），
+ *  内部经 offsetToConn 换连接值 */
+export function areSidesMetForTrack(
+  st: TileStore, i: number, j: number,
+  expectedLeft: number | null, expectedRight: number | null,
+): boolean {
+  if (!st.inBounds(i, j)) return false;
+  const frame = frontTrack(st, st.idx(i, j));
+  if (frame < 0 || frame >= TRACK_FRAMES) return false;
+  if (expectedLeft !== null && LEFT_CONN[frame] !== offsetToConn(expectedLeft)) return false;
+  if (expectedRight !== null && RIGHT_CONN[frame] !== offsetToConn(expectedRight)) return false;
+  return true;
+}
+
+/** TryFittingTileOrientation（Minecart.cs:1564-1607）：在邻接掩码可选帧里找
+ *  「同轨道型 + 左右连接满足期望」的帧写入前轨；找不到保持原帧。
+ *  期望值 = Y 偏移（-1/0/1；null = 不校验该侧）。返回是否改帧 */
+export function tryFittingTileOrientation(
+  st: TileStore, i: number, j: number,
+  expectedLeft: number | null, expectedRight: number | null,
+): boolean {
+  if (!st.inBounds(i, j)) return false;
+  const idx = st.idx(i, j);
+  const cur = frontTrack(st, idx);
+  if (cur < 0 || cur >= TRACK_FRAMES) return false;
+  const options = TRACK_SWITCH_OPTIONS[nearbyMask(st, i, j)];
+  if (!options) return false;
+  const curType = TRACK_TYPE[cur];
+  const wantLeft = expectedLeft !== null ? offsetToConn(expectedLeft) : null;
+  const wantRight = expectedRight !== null ? offsetToConn(expectedRight) : null;
+  for (let k = 0; k < options.length; k++) {
+    const f = options[k];
+    if (wantLeft !== null && LEFT_CONN[f] !== wantLeft) continue;   // :1580-1587
+    if (wantRight !== null && RIGHT_CONN[f] !== wantRight) continue; // :1588-1595
+    if (TRACK_TYPE[f] !== curType) continue;                        // :1596-1600
+    if (f === cur) return false;
+    writeFrames(st, i, j, f, backTrack(st, idx));
+    return true;
+  }
+  return false;
+}
+
+// ============================================================================
 // 磁石位（Minecart.cs:1296-1300）：车身贴图参考点 = 位置 + 偏移 + MagnetOffset
 // ============================================================================
 export function magnetPosition(x: number, y: number, width: number, height: number): { x: number; y: number } {

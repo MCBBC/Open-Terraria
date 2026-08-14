@@ -104,7 +104,13 @@ export const Lang = {
       // id-maps 兜底（l10n 缺译的少数 id；zh 系取 zh 其余取 en）
       const isZh = (languageManager.activeCulture?.name ?? '').startsWith('zh');
       const fb = isZh ? ITEM_NAME_ZH_BY_ID[id] : ITEM_NAME_EN_BY_ID[id];
-      if (fb) return fb;
+      // 提取器对官方未翻译物品写 'none' 占位（zh 表 15 件：FirstFractal 4722/
+      // 3847-3862 未实装族等）——按缺失处理，回退英文名而非显示 'none'
+      if (fb && fb !== 'none') return fb;
+      if (isZh) {
+        const en = ITEM_NAME_EN_BY_ID[id];
+        if (en && en !== 'none') return en;
+      }
     }
     if (key.startsWith('place_v_')) {
       const tileKey = ITEM_DEFS[ITEM_BY_KEY[key]]?.tile;

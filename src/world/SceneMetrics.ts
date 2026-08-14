@@ -25,6 +25,15 @@ const MUSHROOM_TILES = ids([70, 71, 72, 528]);
 const METEOR_TILES = ids([37]);
 const DUNGEON_TILES = ids([41, 43, 44, 481, 482, 483]);
 const SAND_TILES = ids([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
+/** 沙尘暴四色权重（Sandstorm.EmitDust :171-178 GetTileCount 逐格计数）：
+ *  普通沙 (200,160,20)=[53,396,397] / 黑檀沙 (103,98,122)=[112,400,398] /
+ *  猩红沙 (135,43,34)=[234,401,399] / 珍珠沙 (213,196,197)=[116,403,402] */
+const SAND_COLORS: Array<[string, number[]]> = [
+  ['#C8A014', [53, 396, 397]],
+  ['#67627A', [112, 400, 398]],
+  ['#872B22', [234, 401, 399]],
+  ['#D5C4C5', [116, 403, 402]],
+];
 /** TileID.Sets.isDesertBiomeSand（TileID.cs:189）——只有普通沙三色变体计入海洋沙。
  *  此前误用整张 SAND_TILES（含珍珠沙 112/116/234 与沙岩砖族）→ 海岸沙漠沙多扣、
  *  desertSandTileCount 系统性偏低 */
@@ -97,6 +106,8 @@ export interface SceneFlags {
   /** 精确计数（SceneMetrics L604-665：视区扫描聚合计数，天气渲染/沙尘门用） */
   snowTileCount: number;
   desertSandTileCount: number;
+  /** 沙尘暴四色权重（EmitDust :171-178）：[普通沙,黑檀沙,猩红沙,珍珠沙] 扫描窗格数 */
+  sandColorWeights: [number, number, number, number];
   graveyardTileCount: number;
   zoneGlowshroom: boolean;
   zoneMeteor: boolean;
@@ -176,6 +187,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneRockLayerHeight: false, zoneUnderworldHeight: false,
   zoneCorrupt: false, zoneCrimson: false, zoneHallow: false, zoneJungle: false,
   zoneSnow: false, zoneDesert: false, snowTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
+  sandColorWeights: [0, 0, 0, 0],
   zoneGlowshroom: false, zoneMeteor: false,
   zoneGraveyard: false, zoneShadowCandle: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
   zoneUndergroundDesert: false, townNPCCount: 0,
@@ -371,6 +383,8 @@ export function scanScene(
     zoneDesert,
     snowTileCount: snow,
     desertSandTileCount: desert, // DesertSandTileCount = max(0, SandTileCount - OceanSandTileCount)（L665，
+    // EmitDust 四色权重（:171-178 按【格数】非区旗——曾用 zone 旗近似）
+    sandColorWeights: SAND_COLORS.map(([ , sheets]) => countSet(counts, ids(sheets))) as [number, number, number, number],
     // 海洋沙 = isDesertBiomeSand ∩ oceanDepths 逐格计，扫描窗内与原版一致）
     graveyardTileCount: graveyard,
     hasSunflower,

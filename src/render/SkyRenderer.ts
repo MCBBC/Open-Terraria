@@ -57,6 +57,12 @@ export interface CloudTypePick {
   stormShift: number;
 }
 
+/** #rrggbb → [r,g,b]（atmo 相乘）——云色链的 ColorOfTheSkies 换算 */
+function hexRGB(hex: string, atmo = 1): [number, number, number] {
+  const v = parseInt(hex.slice(1), 16);
+  return [((v >> 16) & 255) * atmo, ((v >> 8) & 255) * atmo, (v & 255) * atmo];
+}
+
 /** Utils.GetLerpValue（Utils.cs）钳位版本：from>to 时单调递减（淡出段用） */
 function lerpValueClamped(from: number, to: number, t: number): number {
   if (from === to) return t < from ? 0 : 1;
@@ -1012,9 +1018,15 @@ export class SkyRenderer {
   /** 原版 Update（Cloud.cs:348-443）：风驱动位移 + 淡入淡出 + 旋转微摆 + 越界回收。
    *  速度随雨增强由 Weather.updateWind 承担（Main.cs:58221-58237：
    *  current 向 target×(1+5/9×maxRaining) 逼近——暴雨云速最高 +~56%） */
-  private updateClouds(dtMs: number, viewW: number) {
+  private updateClouds(dtMs: number, viewW: number, camX = 0) {
     const frames = dtMs / (1000 / 60);
     this.updateWind(frames);
+    // 相机视差（Cloud.cs UpdateCloudParallax :313-330）：云.x −= 相机位移 × GetParallax
+    if (this.lastCloudCamX !== null) {
+      const d = camX - this.lastCloudCamX;
+      if (d !== 0) for (const c of this.vclouds) c.x -= d * this.cloudParallax(c.scale);
+    }
+    this.lastCloudCamX = camX;
     const wr = this.weatherRef;
     for (const c of this.vclouds) {
       c.x += this.wind * 9 * this.cloudParallax(c.scale) * frames;
@@ -1040,31 +1052,34 @@ export class SkyRenderer {
     });
   }
 
-  /** 维持云量（原版每帧尝试 SpawnCloud；初始铺满，之后顺风补充）。
-   *  天气联动：attachWeather 后目标云数由 numClouds 驱动（0-200 → 2-14 朵）。
-   *  下雨加密在 Weather.updateCloudCounts（Main.cs:58381-58392：cloudAlpha>0 时
-   *  numClouds 强制爬升到 200×cloudAlpha）——此处只读 numClouds 即自动随雨加密 */
-  private targetCloudCount(viewW: number): number {
-    const base = Math.max(8, Math.round(viewW / 90));
-    if (!this.weatherRef) return base;
-    const density = Math.max(0, Math.min(1, this.weatherRef.numClouds / 200));
-    return Math.max(1, Math.round(base * (0.15 + 0.95 * density)));
+  /** 维持云量（Cloud.cs UpdateClouds :230-296 1:1）：目标 = Main.numClouds【直连】
+   *  （0-200 朵——★曾视口公式映射 8-21 朵=云量严重偏少）。缺 → 每帧 addCloud 一朵；
+   *  超 → 每帧随机 kill 一朵。首次进场按 resetClouds(:39-59) 铺满且 Alpha=1。
+   *  下雨加密由 Weather.updateCloudCounts（numClouds 强制爬升 200×cloudAlpha）自动传导 */
+  private targetCloudCount(): number {
+    return this.weatherRef ? Math.max(0, Math.round(this.weatherRef.numClouds)) : 200;
   }
+  private cloudsInitialized = false;
   private maintainClouds(viewW: number, viewH: number) {
-    const target = this.targetCloudCount(viewW);
-    let guard = 0;
-    while (this.vclouds.length < target && guard++ < 30) {
-      const c = this.spawnCloud(viewW, viewH, this.vclouds.length < target * 0.6);
-      if (c) this.vclouds.push(c);
-    }
-    // 超出目标：标记回收（淡出后移除）
-    if (this.vclouds.length > target + 2) {
-      const excess = this.vclouds.length - target;
-      let killed = 0;
-      for (const c of this.vclouds) {
-        if (killed >= excess) break;
-        if (!c.kill) { c.kill = true; killed++; }
+    const target = this.targetCloudCount();
+    if (!this.cloudsInitialized) {
+      this.cloudsInitialized = true;                       // resetClouds 铺满段
+      let guard = 0;
+      while (this.vclouds.length < target && guard++ < 400) {
+        const c = this.spawnCloud(viewW, viewH, true);
+        if (c) this.vclouds.push(c);
       }
+      return;
+    }
+    let alive = 0;
+    for (const c of this.vclouds) if (!c.kill) alive++;
+    if (alive < target) {                                  // :291 每帧补一朵
+      const c = this.spawnCloud(viewW, viewH, false);
+      if (c) this.vclouds.push(c);
+    } else if (alive > target) {                           // :292-300 随机 kill 一朵
+      const idx: number[] = [];
+      for (let i = 0; i < this.vclouds.length; i++) if (!this.vclouds[i].kill) idx.push(i);
+      if (idx.length) this.vclouds[idx[Math.floor(Math.random() * idx.length)]].kill = true;
     }
   }
 
@@ -1311,40 +1326,75 @@ export class SkyRenderer {
 
   /** 原版三层绘制（DrawClouds_Distant/Closer/Closest + NextHorizonRenderer.DrawCloud）：
    *  按视口宽缩放（cloud.position.Y*(H/600) 语义近似为 y 带），远景(scale<1)压暗 R/G 通道。 */
-  private drawVanillaClouds(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, isNight: boolean, dtMs: number) {
-    this.updateClouds(dtMs, viewW);
+  private lastCloudCamX: number | null = null;
+  /** 垂直视差因子与 bgTopY（DrawSurfaceBG :58743-58744）：num3 = (300−camTop)/(worldSurface×16)、
+   *  bgTopY = num3×1200+1190（scAdj=0）——云三通道 Y 变换的锚（fx.surfaceY=groundLevel×16） */
+  private cloudBgTop(camY: number, viewH: number): { num3: number; bgTopY: number } {
+    const camTop = camY - viewH / 2;
+    const num3 = (300 - camTop) / Math.max(1, this.fx.surfaceY);
+    return { num3, bgTopY: num3 * 1200 + 1190 };
+  }
+  /** 云三通道（Main.cs DrawClouds_Distant :59112 / _Closer :59093 / _Closest :59073）：
+   *  distant（scale<1）画在群系背景【后】= sky 层内（DrawSurfaceBG 层间 :58755-58758）；
+   *  closer/closest 画在背景【前】（drawCloudsNear，Renderer 于 biomeBg.draw 后调）。
+   *  地表上门 = camTop < worldSurface×16+16（:59119） */
+  private drawVanillaClouds(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, isNight: boolean, dtMs: number, camX = 0, camY = 0) {
+    this.updateClouds(dtMs, viewW, camX);
     this.maintainClouds(viewW, viewH);
-    // 近→远排序绘制（近的在上）
-    const sorted = [...this.vclouds].sort((a, b) => b.scale - a.scale);
+    const camTop = camY - viewH / 2;
+    if (camTop >= this.fx.surfaceY + 16) return;
+    const { num3 } = this.cloudBgTop(camY, viewH);
+    const distY = num3 * 750 + 830;                          // :59115（scAdj/pushBGTopHack=0）
+    this.drawCloudPass(ctx, this.vclouds.filter((c) => c.scale < 1), 1, camY,
+      (c) => c.y + distY);
+    void isNight;
+  }
+  /** DrawClouds_Closer + _Closest（:58871/:58942——群系背景层之后）：
+   *  pass2 scale∈[1,1.15)：cY = y×(H/600)+bgTopY+150；pass3 ≥1.15：cY = y×(H/600)−100+bgTopY×1.01−150 */
+  drawCloudsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camY: number) {
+    const camTop = camY - viewH / 2;
+    if (camTop >= this.fx.surfaceY + 16) return;
+    const { bgTopY } = this.cloudBgTop(camY, viewH);
+    const sH = viewH / 600;
+    this.drawCloudPass(ctx, this.vclouds.filter((c) => c.scale >= 1 && c.scale < 1.15), 2, camY,
+      (c) => c.y * sH + bgTopY + 150);
+    this.drawCloudPass(ctx, this.vclouds.filter((c) => c.scale >= 1.15), 3, camY,
+      (c) => c.y * sH - 100 + bgTopY * 1.01 - 150);
+    void viewW;
+  }
+  /** 单通道绘制（云色链 NextHorizonRenderer.DrawCloud :246-268 1:1）：
+   *  cloudColor = ColorOfTheSkies×(scale×Alpha) → pass1 压暗 → ×atmo（二次）→ α×globalCloudAlpha
+   *  （:58752 = max(cloudAlpha,墓园×.92)×atmo；ColorOfTheSkies 源 = 本帧天空色,存储侧已×atmo） */
+  private drawCloudPass(
+    ctx: CanvasRenderingContext2D, clouds: VanillaCloud[], pass: 1 | 2 | 3,
+    camY: number, yOf: (c: VanillaCloud) => number,
+  ) {
+    if (!clouds.length) return;
+    const atmo = this.atmoValue(camY);
+    const wr = this.weatherRef;
+    const basis = wr ? Math.max(wr.cloudAlpha, (wr.graveyardVisual ?? 0) * 0.92) : 0;
+    const globalCloudAlpha = basis * atmo;
+    const sky = hexRGB(this.lastSkyTop, atmo);
+    const sorted = [...clouds].sort((a, b) => b.scale - a.scale);   // scale 交换序等价
     ctx.save();
     ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放
     for (const c of sorted) {
       const tex = this.cloudTex(c.type);
       if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
       const w = tex.naturalWidth * c.scale, h = tex.naturalHeight * c.scale;
-      const dim = c.scale < 1 ? c.scale * 0.8 : 1; // 原版远景压暗（OriginalColorsForCloud pass1）
-      const nightDim = isNight ? 0.25 : 1;
-      let r = Math.round(255 * dim * nightDim);
-      let g = Math.round(255 * (c.scale < 1 ? ((c.scale + 1) / 2) * 0.9 : 1) * nightDim);
-      let b = Math.round(255 * nightDim);
-      // 天气联动：云染灰基准 = ProcessCloudAlpha（Main.cs:59154：max(cloudAlpha, 墓园强度×0.92)）×atmo
-      const wr = this.weatherRef;
-      if (wr) {
-        const basis = Math.max(wr.cloudAlpha, (wr.graveyardVisual ?? 0) * 0.92);
-        if (basis > 0) {
-          const rainK = basis * 0.55;
-          r = Math.round(r * (1 - rainK) + 158 * rainK);
-          g = Math.round(g * (1 - rainK) + 162 * rainK);
-          b = Math.round(b * (1 - rainK) + 168 * rainK);
-        }
+      const k = Math.min(1, c.scale * c.alpha);              // cloudColor num（:203-215）
+      let r = sky[0] * k, g = sky[1] * k, b = sky[2] * k;
+      if (pass === 1) {                                      // OriginalColorsForCloud（:259-268）
+        r *= c.scale * 0.8;
+        g *= ((c.scale + 1) / 2) * 0.9;
       }
+      r *= atmo; g *= atmo; b *= atmo;                       // DrawCloud :252-255
       ctx.save();
-      ctx.globalAlpha = Math.min(1, c.alpha * this.towerCloudMul);
-      ctx.translate(c.x + w / 2, c.y + h / 2);
+      ctx.globalAlpha = Math.min(1, Math.min(1, c.alpha * this.towerCloudMul) * globalCloudAlpha);
+      ctx.translate(c.x + w / 2, yOf(c) + h / 2);
       ctx.rotate(c.rot);
       if (c.flip) ctx.scale(-1, 1);
-      // tint：先画原图再叠色保留形状（云端白色为主，直接 source-atop 着色近似原版 cloudColor）
-      const tinted = this.cloudTint(tex, r, g, b);
+      const tinted = this.cloudTint(tex, Math.round(r), Math.round(g), Math.round(b));
       ctx.drawImage(tinted, -w / 2, -h / 2, w, h);
       ctx.restore();
     }
@@ -2540,7 +2590,7 @@ export class SkyRenderer {
     // 云：原版素材与规则（Cloud.cs / NextHorizonRenderer.DrawCloud）；
     // 塔天空激活时云量乘 GetCloudAlpha() = (1-fade)*0.3+0.7（各 Sky 同式 :116-119）
     this.towerCloudMul = this.towerCloudAlphaMul();
-    this.drawVanillaClouds(ctx, viewW, viewH, isNight, dtMs);
+    this.drawVanillaClouds(ctx, viewW, viewH, isNight, dtMs, camX, camY);
 
     // 派对气球（PartySky：BirthdayParty.PartyIsUp 时 SkyManager 激活）
     this.drawPartyBalloons(ctx, viewW, viewH, camX, dtMs);

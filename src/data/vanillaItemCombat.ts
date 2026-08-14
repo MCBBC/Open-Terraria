@@ -228,10 +228,72 @@ export function thrownCombat(def: CombatWeaponItemLike): { shoot: number; damage
   return { shoot: c.shoot, damage: c.damage ?? 0 };
 }
 
-/** aiStyle → 投射物重力/tick（ai2/16 抛物线 0.3；其余直飞 0）——AI_002/AI_016 实测值 */
-export function projGravity(shoot: number): number {
+/** AI_001（aiStyle 1）重力全链规格（1.4.5.6 反编译 :53083-53173 / :53881-54698 /
+ *  :54871-54887，2026-08-14 对账）：
+ *  · 默认（:54686-54696）：ai[0] ≥15（每 AI update 计一次）后 vy += 0.1/update，
+ *    终端 vy 16（flag7，577 除外）——箭族 E=0 即"15t 平飞后 0.1/t² 缓坠"
+ *  · 三类豁免默认：①flag3 表（:53085-53168，ai[0] 冻结 → 默认门永不开——
+ *    子弹/光束族 83 型）②顶层行为链命中（:53881-54295 自管速度——357 叶绿弹/
+ *    207/837 吸血飞刀等）③链尾排除（:54308/:54638：239/264/675 + 437/477）
+ *  · 逐型自带重力（替代默认）：见 AI1_GRAV 表
+ *  · 686/711 两段式（:54640-54659）：+0.1@ai0≥10 再 +0.1@≥20、vx×0.99 */
+const AI1_NO_DROP = new Set<number>([
+  // flag3（ai[0] 不自增；498 例外——分支内手动计数，在 AI1_GRAV 表）
+  5, 14, 20, 36, 38, 55, 83, 84, 88, 89, 98, 100, 104, 110, 158, 159, 160, 161, 180, 184,
+  242, 248, 257, 259, 265, 270, 279, 283, 284, 285, 286, 287, 299, 302, 323, 325, 348, 349,
+  350, 355, 374, 376, 389, 435, 436, 438, 440, 442, 449, 459, 462, 467, 468, 469, 472, 483,
+  484, 485, 498, 576, 577, 585, 592, 593, 601, 606, 616, 634, 635, 638, 639, 660, 661, 682,
+  684, 706, 709, 710, 712, 876, 980, 981, 1073,
+  // 顶层行为链命中（分支自管速度，重力链不达）
+  357, 207, 837, 962, 337, 645, 424, 425, 426, 344, 336, 345, 246, 311, 1023, 312,
+  // 链尾排除 + 无重力分支（437 仅淡出 / 477 分支内豁免）
+  239, 264, 675, 437, 477,
+]);
+
+/** 逐型重力 [rate/update, ai0 门槛]（顶层链 :54009-54032 + 嵌套链 :54310-54626） */
+const AI1_GRAV: Record<number, [number, number]> = {
+  81: [0.07, 20], 91: [0.07, 20],                                        // :54009-54016
+  174: [0.15, 5], 605: [0.15, 5], 920: [0.15, 5], 921: [0.15, 5], 926: [0.15, 5],  // :54017-54024
+  937: [0.07, 5],                                                        // :54025-54032
+  176: [0.05, 15], 275: [0.025, 35], 276: [0.025, 35],                   // :54310/:54318
+  172: [0.085, 17], 117: [0.06, 35], 120: [0.05, 30],                    // :54354-54380
+  195: [0.15, 40], 1097: [0.15, 40],                                     // :54381-54408
+  267: [0.075, 20], 478: [0.075, 20], 479: [0.075, 20],                  // :54409-54423
+  408: [0.05, 45], 495: [0.04, 30], 498: [0.15, 50],                     // :54482/:54597/:54608
+  507: [0.3, 60], 508: [0.3, 60], 662: [0.3, 60], 680: [0.3, 60], 685: [0.3, 60],  // :54589-54596
+};
+
+/** 686/711 两段式（grav2 通道） */
+const AI1_TWO_STEP = new Set<number>([686, 711]);
+
+export interface ProjGravSpec {
+  /** 每 update 重力（Arrow subStep 即 per-update 语义） */
+  grav: number;
+  /** ai[0] 门槛（update 计）；-1 = 无延迟 */
+  delay: number;
+  /** 二段重力（686/711 @20 再 +0.1） */
+  grav2?: number;
+  grav2At?: number;
+  /** 恒定 vx 衰减（686/711 ×0.99/update） */
+  drag?: number;
+}
+
+export function projGravSpec(shoot: number): ProjGravSpec {
   const ai = projectileData(shoot)?.aiStyle ?? -1;
-  return ai === AI_THROWN || ai === AI_GRENADE ? 0.3 : 0;
+  if (ai !== 1) {
+    // aiStyle 2/16 旧口径保留（GrenadeProj/投掷路径自带物理，此处仅兜底）
+    return { grav: ai === AI_THROWN || ai === AI_GRENADE ? 0.3 : 0, delay: -1 };
+  }
+  const t = AI1_GRAV[shoot];
+  if (t) return { grav: t[0], delay: t[1] };
+  if (AI1_TWO_STEP.has(shoot)) return { grav: 0.1, delay: 10, grav2: 0.1, grav2At: 20, drag: 0.99 };
+  if (AI1_NO_DROP.has(shoot)) return { grav: 0, delay: -1 };
+  return { grav: 0.1, delay: 15 };   // 默认（:54686-54696）
+}
+
+/** aiStyle → 投射物重力（兼容旧调用面；规格细节走 projGravSpec） */
+export function projGravity(shoot: number): number {
+  return projGravSpec(shoot).grav;
 }
 
 /** vi_ useAmmo 远程武器（弓/枪/发射器，DefaultToRangedWeapon 族 useStyle=5）：

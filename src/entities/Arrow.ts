@@ -40,6 +40,7 @@ export function prefetchProjectiles(ids: Iterable<number>): void {
  *  整图绘制会把多帧压成胶片条（史莱姆随从 266 曾 12 帧压成一坨） */
 import projFramesJson from '../data/vanilla-projframes.json';
 import { projectileData } from '../data/vanillaProjectiles';
+import { projGravSpec } from '../data/vanillaItemCombat';
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 export function projFrameCount(projId: number): number {
   return PROJ_FRAMES[String(projId)] ?? 1;
@@ -84,9 +85,16 @@ export interface ArrowOpts {
   /** aiStyle 14 荆棘球档（世纪之花 277，Projectile.cs:18306-18314）：
    *  vx 恒反 ×0.9；仅入撞 |vy|>3 才竖弹 ×0.9（地面滚动语义）。 */
   thornBounce?: boolean;
-  /** 延迟重力（世纪之花种子 275/276，Projectile.cs:54318-54329）：飞行满
-   *  gravDelay tick 后才开始下坠（重力 0.025，非 aiStyle1 默认 0.3）。 */
+  /** 延迟重力（AI_001 重力链语义，2026-08-14 对账）：飞行满 gravDelay 个
+   *  update 后才开始下坠。默认档 = 15（箭缓坠 +0.1，:54686-54696）；275/276
+   *  世纪之花种子 35（g 0.025，:54318-54329）。计数与施加都在 subStep 内 =
+   *  per-update（extraUpdates 弹同原版） */
   gravDelay?: number;
+  /** 二段重力（686/711 :54640-54659：ai0≥10 后 +0.1，≥20 再 +0.1） */
+  grav2?: number;
+  grav2At?: number;
+  /** 恒定 vx 衰减/update（686/711 ×0.99——与 drag 不同：不挂重力门） */
+  dragAlways?: number;
   /** 专家追踪（275/276/277 共用模式，Projectile.cs:54330-54345/:23307-23316）：
    *  每 tick v=(v*(weight-1)+dirToPlayer*speed)/weight，速度 <floor 归一到 floor
    *  （277 用 cap：>cap 归一到 cap）。spawn 侧仅在专家模式注入。 */
@@ -204,8 +212,13 @@ export class Arrow extends Entity {
   frostEligible = false;
   /** aiStyle 14 荆棘球档（277）：撞块按 Projectile.cs:18306-18314 反弹 */
   thornBounce: boolean;
-  /** 延迟重力（275/276）：age 超过此值才施加 grav；-1=不延迟 */
+  /** 延迟重力（AI_001 链）：age（update 计）超过此值才施加 grav；-1=不延迟 */
   gravDelay: number;
+  /** 二段重力（686/711）：age 超过 grav2At 再加 grav2；0=无 */
+  grav2: number;
+  grav2At: number;
+  /** 恒定 vx 衰减/update（0=无；686/711 0.99——不挂重力门） */
+  dragAlways: number;
   /** 专家追踪参数（null=无） */
   homing: { speed: number; weight: number; floor?: number; cap?: number } | null;
   /** 原版 Projectile.extraUpdates：每帧额外子步数（0=普通 1 步） */
@@ -312,14 +325,22 @@ export class Arrow extends Entity {
     if (pd0?.width) this.w = pd0.width;
     if (pd0?.height) this.h = pd0.height;
     this.drawScale = pd0?.scale ?? 1;
-    this.grav = opts?.grav ?? 0.3;
+    // 重力缺省 = AI_001 规格链（projGravSpec：箭 0.1@15 缓坠 / 子弹 flag3 直线 /
+    // 686/711 两段式…）——未显式传 grav 的调用面（敌方箭/塔弹/同步复体）自动对齐；
+    // 显式传 grav 的走调用方档（gravDelay 缺省回到 -1 无延迟，旧语义不回退）
+    const spec0 = projGravSpec(projId);
+    const gravExplicit = opts?.grav !== undefined;
+    this.grav = gravExplicit ? opts!.grav! : spec0.grav;
+    this.gravDelay = opts?.gravDelay ?? (gravExplicit ? -1 : spec0.delay);
+    this.grav2 = opts?.grav2 ?? (gravExplicit ? 0 : spec0.grav2 ?? 0);
+    this.grav2At = opts?.grav2At ?? (gravExplicit ? 0 : spec0.grav2At ?? 0);
+    this.dragAlways = opts?.dragAlways ?? (gravExplicit ? 0 : spec0.drag ?? 0);
     this.life = opts?.life ?? 1200;
     this.pierce = opts?.pierce ?? 1;
     this.pierceInit = this.pierce;
     this.hostile = opts?.hostile ?? false;
     this.bounce = opts?.bounce ?? false;
     this.thornBounce = opts?.thornBounce ?? false;
-    this.gravDelay = opts?.gravDelay ?? -1;
     this.homing = opts?.homing ?? null;
     this.extraUpdates = opts?.extraUpdates ?? pd0?.extraUpdates ?? 0;   // 子弹 14=1(2 步/tick)、高速弹 207=2
     this.drag = opts?.drag ?? 1;
@@ -511,14 +532,20 @@ export class Arrow extends Entity {
     if (--this.life <= 0) { this.killNow(game); return; }
     const world = game.world;
     this.age++;
-    // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）；
-    // 275/276 延迟重力（Projectile.cs:54318-54329：35t 后 g=0.025）；
-    // aiStyle 2 投掷族（Projectile.cs:21955-21977 默认档）：20t 平飞后
-    // vy+=0.4、vx×=0.97，终端 32
+    // AI_001 重力链（2026-08-14 对账，:53083-54698 全链规格走 projGravSpec）：
+    //   默认 = ai0≥15 update 后 +0.1/update、终端 16（:54686-54696/:54871-54887）
+    //   ——箭族 15t 平飞缓坠；子弹/光束 flag3 表豁免（grav=0）；
+    //   275/276 延迟档（35t 后 g=0.025，:54318-54329）；
+    //   686/711 两段式（≥10 +0.1、≥20 再 +0.1、vx×0.99 恒定，:54640-54659）；
+    //   aiStyle 2 投掷族（:21955-21977 默认档）：20t 平飞后 vy+=0.4、vx×=0.97、终端 32
     if (this.grav !== 0 && (this.gravDelay < 0 || this.age > this.gravDelay)) {
       this.vy = Math.min(this.vy + this.grav, this.maxFall);
       if (this.drag !== 1) this.vx *= this.drag;
     }
+    if (this.grav2 !== 0 && this.age > this.grav2At) {
+      this.vy = Math.min(this.vy + this.grav2, this.maxFall);
+    }
+    if (this.dragAlways !== 0) this.vx *= this.dragAlways;
     // 翻滚（aiStyle 2 刀族 :21508，自出生每 tick 累加）；48/54/93/520/599 在
     // 平飞期由 draw 侧姿态锁定覆盖（:21971-21972）
     if (this.tumble) {

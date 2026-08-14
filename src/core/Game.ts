@@ -102,7 +102,7 @@ import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fish
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
-import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
+import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemUseSoundWav } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing } from '../entities/projStatus';
@@ -220,6 +220,7 @@ import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../entities/MissileProj';
 import { SkyDragonSpin, SkyDragonSwing, SkyDragonShot, SkyDragonCircle } from '../entities/SkyDragonFury';
+import { NebulaBlazeBolt, LunarFlareStar } from '../entities/LunarNebula';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, LightsBaneSlash, GrassSlash } from '../entities/SwingArc';
 import { SolarEruptionWhip } from '../entities/SolarEruption';
 import { TideSlash } from '../entities/TideSlash';
@@ -2185,7 +2186,7 @@ export class Game implements GameHooks {
       const shoot = itemCombat(vid)?.shoot;
       if (shoot && shoot > 0) {
         ids.add(shoot);
-        if (shoot === 707) ids.add(708, 709, 1110);   // 天龙之怒右键 alt 链族（708 弧/709 弹/1110 圈）
+        if (shoot === 707) { ids.add(708); ids.add(709); ids.add(1110); }   // 天龙之怒右键 alt 链族（708 弧/709 弹/1110 圈）
       }
     };
     for (const s of this.player.inv.slots) scan(s);
@@ -2277,12 +2278,14 @@ export class Game implements GameHooks {
         });
       },
       sandColors: () => {
-        const s = this.scene;
+        // EmitDust :171-178 四色按【格数】加权（曾用区旗近似）——沙漠沙景
+        // 普通沙占绝对多数;珍珠/黑檀/猩红沙只在对应转化地有计数
+        const w = this.scene?.sandColorWeights ?? [1, 0, 0, 0];
         return [
-          { color: '#C8A014', weight: 1 },
-          { color: '#67627A', weight: s.zoneHallow ? 1 : 0.02 },
-          { color: '#872B22', weight: s.zoneCrimson ? 1 : 0.02 },
-          { color: '#D5C4C5', weight: s.zoneCorrupt ? 1 : 0.02 },
+          { color: '#C8A014', weight: w[0] },
+          { color: '#67627A', weight: w[1] },
+          { color: '#872B22', weight: w[2] },
+          { color: '#D5C4C5', weight: w[3] },
         ];
       },
     };
@@ -5679,8 +5682,11 @@ export class Game implements GameHooks {
             Math.cos(ang2) * cwMelee.shootSpeed / this.player.attackSpeedMult,
             Math.sin(ang2) * cwMelee.shootSpeed / this.player.attackSpeedMult,
             this.swing.dmg ?? 1, this.swing.kb ?? 3, cwMelee.shoot, null,
-            { grav: meow ? 0.2 : projGravity(cwMelee.shoot), gravDelay: meow ? 19 : -1,
-              life: meow ? 180 : (pd?.timeLeft ?? 600), pierce: pen }), 'projectiles');
+            // meow 502 = aiStyle8 自档（平飞 20t 后 0.2）；其余走 AI_001 规格链
+            (() => { const g = projGravSpec(cwMelee.shoot); return meow
+              ? { grav: 0.2, gravDelay: 19, life: 180, pierce: pen }
+              : { grav: g.grav, gravDelay: g.delay, grav2: g.grav2, grav2At: g.grav2At,
+                  dragAlways: g.drag, life: pd?.timeLeft ?? 600, pierce: pen }; })()), 'projectiles');
         }
       }
       this.mining = null;
@@ -6232,10 +6238,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const ay = this.player.cy - 4 + Math.sin(ang) * 14;
         // 回收掉落：仅木箭（原版燃烧箭 Kill 不掉；子弹/飞镖不可回收）
         const dropKey = projId === 1 ? ammoDef.key : null;
-        // grav 按弹型：子弹(aiStyle 1)直线 0 / 投掷·手雷族 0.3（AI_001 无通用重力，
-        // 此前缺省 0.3 → 子弹全程抛物线下坠未对齐）；箭默认 0.3 由 projGravity 给出
+        // grav 按 AI_001 重力链规格（projGravSpec，2026-08-14 对账）：箭族默认
+        // 15update 平飞后 +0.1/update 缓坠（终端 16）；子弹/光束 flag3 表直线 0；
+        // 逐型档（172=0.085@17、267/478/479=0.075@20、5/639=0 等）。此前 projGravity
+        // 对 aiStyle1 一律 0 = 箭完全不下坠（与原版抛物线轨迹不符）
+        const gs = projGravSpec(projId);
         const bowArrow = new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
-          damage, knockback, projId, dropKey, { grav: projGravity(projId) });
+          damage, knockback, projId, dropKey,
+          { grav: gs.grav, gravDelay: gs.delay, grav2: gs.grav2, grav2At: gs.grav2At });
         bowArrow.frostEligible = true; // 冰霜盔甲引擎(ranged 门)
         // 暴击链（审计 §6）：rangedCrit(装备/套装/词缀67-68配饰/buff) + 武器&弹药 item.crit
         const bowVid2 = bowVid ?? (heldDef?.vid ?? -1);
@@ -6253,7 +6263,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             for (let i2 = 1; i2 < n; i2++) {
               const pvx = Math.cos(ang) * speed + (Math.random() * 2 * sg[3] - sg[3]) * sg[2] * 20;
               const pvy = Math.sin(ang) * speed + (Math.random() * 2 * sg[3] - sg[3]) * sg[2] * 20;
-              const pa = new Arrow(ax, ay, pvx, pvy, damage, knockback, projId, null, { grav: projGravity(projId) });
+              const pa = new Arrow(ax, ay, pvx, pvy, damage, knockback, projId, null,
+                { grav: gs.grav, gravDelay: gs.delay, grav2: gs.grav2, grav2At: gs.grav2At });
               pa.critBonus = bowArrow.critBonus;
               this.entities.add(pa, 'projectiles');
             }
@@ -7007,8 +7018,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             this.entities.add(bub, 'projectiles');
             return;
           }
+          // 248 在 flag3 豁免表（:53106）→ 原版无重力直线（此前 0.3 抛物线未对齐）
           this.entities.add(new Arrow(sx, sy, svx, svy, dmg, sKb, sProj, null,
-            { grav: 0.3, life: 1200 }), 'projectiles'); // 248:aiStyle1 箭物理
+            { grav: projGravity(sProj), life: 1200 }), 'projectiles');
         };
         flailP.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥
         this.entities.add(flailP, 'projectiles');
@@ -7080,6 +7092,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
+        // 星云烈焰 3542 → 634（普）/635（强）（AI_001 :51577-51762 追踪弹 +
+        // Kill :68745 50×50 AoE 爆；20% 强发 Damage×3 否则速 −1，Player.cs:46489-46498）
+        if (cw.shoot === 634) {
+          const mega = Math.random() * 100 < 20;
+          const speed634 = mega ? cw.shootSpeed : cw.shootSpeed - 1;
+          const bolt = new NebulaBlazeBolt(px, py,
+            Math.cos(ang) * speed634, Math.sin(ang) * speed634,
+            mega ? Math.round(cw.damage * 3) : cw.damage, cw.knockback,
+            mega ? 635 : 634);
+          bolt.critChance = critTotal;
+          bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(bolt, 'projectiles');
+          this.player.useTime = cw.useTime;
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');   // UseSound=Item_20（itemUseSound 表）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 月耀 3570 → 645×3 天降（Player.cs:47072-47097）：天顶 Y−600−100i、X 双重
+        // 散布、|dy| 钳 ≥20 恒向下、速 ×0.5、ai[1]=鼠标 Y 线（过线开 tileCollide）
+        if (cw.shoot === 645) {
+          const [mwx645, mwy645] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const p645 = this.player;
+          for (let i = 0; i < 3; i++) {
+            let sx = p645.x + p645.w * 0.5 + Math.floor(Math.random() * 201) * -p645.facing
+              + (mwx645 - p645.x);
+            sx = (sx + p645.cx) / 2 + Math.floor(Math.random() * 401) - 200;
+            const sy = p645.cy - 600 - 100 * i;
+            const dx = mwx645 - sx;
+            let dy = mwy645 - sy;
+            const lineY = dy + sy;                    // ai[1] = 鼠标世界 Y（原符号）
+            const ady = Math.max(20, Math.abs(dy));
+            const len = Math.hypot(dx, ady) || 1;
+            const spd = cw.shootSpeed / len / 2;      // 单位化 ×speed ÷2
+            const star = new LunarFlareStar(sx, sy, dx * spd, ady * spd,
+              cw.damage, cw.knockback, lineY);
+            star.critChance = critTotal;
+            star.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            this.entities.add(star, 'projectiles');
+          }
+          this.player.useTime = cw.useTime;
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');   // UseSound=Item_88（itemUseSound 表）
+          this.input.mouseDown = false;
+          break;
+        }
         // 双足翼龙之怒 3870 → 711×3（Player.cs:48156-48170）：出膛 40px（LOS 门）
         // + 三连扇形（0.8×速 + 垂直分量 0/±1，各旋 -π/60×direction）
         if (cw.shoot === 711) {
@@ -7095,8 +7153,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const rc = Math.cos(rot), rs = Math.sin(rot);
             const nvx = bvx * rc - bvy * rs, nvy = bvx * rs + bvy * rc;
             bvx = nvx; bvy = nvy;
+            // 711 重力 = 686/711 两段式（:54640-54659：ai0≥10 +0.1、≥20 再 +0.1、
+            // vx×0.99/update）——此前 grav 0 直线未对齐
+            const gs711 = projGravSpec(711);
             const bolt = new Arrow(muzzleX, muzzleY, bvx, bvy,
-              cw.damage, cw.knockback, 711, null, { grav: 0, life: 600, pierce: 3 });
+              cw.damage, cw.knockback, 711, null,
+              { grav: gs711.grav, gravDelay: gs711.delay, grav2: gs711.grav2, grav2At: gs711.grav2At,
+                dragAlways: gs711.drag, life: 600, pierce: 3 });
             bolt.critBonus = this.player.critChance('magic')
               + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
             bolt.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
@@ -7245,10 +7308,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         let pen = pd?.penetrate ?? 1;
         if (pen < 0) pen = 3;
         pen = Math.max(1, Math.min(pen, 3));
+        const gsM = projGravSpec(cw.shoot);
         const mArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
-          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: pen });
+          { grav: gsM.grav, gravDelay: gsM.delay, grav2: gsM.grav2, grav2At: gsM.grav2At,
+            dragAlways: gsM.drag, life: pd?.timeLeft ?? 600, pierce: pen });
         // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
         mArrow.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0); // ⑥+⑧
         mArrow.critBonus = this.player.critChance('magic')
@@ -7375,10 +7440,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
+        const gsS = projGravSpec(cw.shoot);
         const shotArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
-          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: 1 });
+          { grav: gsS.grav, gravDelay: gsS.delay, grav2: gsS.grav2, grav2At: gsS.grav2At,
+            dragAlways: gsS.drag, life: pd?.timeLeft ?? 600, pierce: 1 });
         shotArrow.frostEligible = dmgKind !== 'magic'; // melee/ranged 兜底弹吃冰霜引擎
         // 暴击链:装备 critChance(dmgKind) + 武器 item.crit(GetWeaponCrit)
         shotArrow.critBonus = this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee')
