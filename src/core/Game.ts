@@ -2001,6 +2001,9 @@ export class Game implements GameHooks {
       this.autotiler = new AutoTiler(atlas);
     }
     this.renderer = new Renderer(this.assets, atlas);
+    // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限
+    this.renderer.installGpuPressureGuard();
+    this.renderer.cbOnGpuPressure = () => this.shrinkChunks();
     this.renderer.vanillaDust = this.vanillaDust;   // DrawDust 双 pass 消费（lit/全亮）
     this.renderer.attach(root);
     // 音效按需加载（2026-08-10）：不在此预读——播放未命中时后台 fetch+decode、
@@ -2787,6 +2790,18 @@ export class Game implements GameHooks {
   }
 
   /** 销毁：停止循环并移除画布（退出到主菜单时调用） */
+  /** GPU 压力收缩:释放最旧 chunk 至当前上限(画布 width=0 即归还) */
+  shrinkChunks(): void {
+    const cc = this.chunks; if (!cc) return;
+    while (cc.chunks.size > ChunkCache.MAX_CHUNKS) {
+      const oldest = cc.chunks.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      const pair = cc.chunks.get(oldest);
+      if (pair) { pair.wall.width = 0; pair.wall.height = 0; pair.tile.width = 0; pair.tile.height = 0; }
+      cc.chunks.delete(oldest);
+    }
+  }
+
   destroy() {
     // R7：联机断开（否则幽灵玩家 + gameWorld 数百 MB 无法回收）
     this.net?.disconnect();
@@ -14682,6 +14697,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
       }
     }
+    // 踩死帝皇蝶 661 → 光女苏醒（checkDead case 661，NPC.cs:80294-80303：
+    // GetWereThereAnyInteractions 门 ≈ 玩家击杀链（本钩子即玩家侧击杀近似）；
+    // !AnyNPCs(636) 独占 + 出生点 = 蝶 Center+(0,-200)+randCircular(50,50)。
+    // SpawnBoss default → "光之女皇已苏醒！" 公告，无咆哮（原版生成路径无声））
+    if (enemy && enemy.vanillaId === 661 && !this.hasNpcId(636)) {
+      const px = enemy.cx + (Math.random() * 100 - 50);
+      const py = enemy.cy - 200 + (Math.random() * 100 - 50);
+      const eol = Enemy.fromVanilla(636, px, py);
+      if (eol) {
+        eol.id = this.entities.nextId++;
+        eol.despawnTimer = 15000;   // SpawnBoss timeLeft = activeTime×20（NPC.cs:81485）
+        this.entities.add(eol, 'enemies');
+        if (!this.boss) this.boss = eol;
+        this.announceBossSummon(636);
+      }
+    }
     // 旗帜击杀记账（BannerSystem.AddNPCKillBy :193-216——达标公告+掉一面旗;原版
     // claimable+对话领取,本仓自动授予近似,登记）
     if (enemy && enemy.vanillaId != null) {
@@ -16534,7 +16565,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const head = Enemy.fromVanilla(vanillaId, sx * TILE + 8, sy * TILE + 8);
     if (!head) return;
-    head.despawnTimer = 15000;   // SpawnBoss timeLeft = activeTime(750)×20（NPC.cs:81484）
+    head.despawnTimer = 15000;   // SpawnBoss timeLeft = activeTime(750)×20（NPC.cs:81485）
     this.entities.add(head, 'enemies');
     this.boss = head;
     this.announceBossSummon(vanillaId);
@@ -16694,13 +16725,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return true;
   }
 
-  /** SpawnBoss 公告静默集（NPC.cs:81498-81506 switch 的 case-break 组）：
-   *  50 史王 / 82 幽灵 / 126 帕拉丁之眼(双子由 125 一次性公告) / 316 幽灵 /
-   *  551 Betsy / 662 海盗幽灵 —— 无 "已苏醒" 公告。398 经 SpawnBoss 同静默，
-   *  但唯一生成路径 SpawnOnPlayer(:81358-81360) 专项播 Enemies.MoonLord，单列。 */
-  private static readonly BOSS_SPAWN_SILENT = new Set([50, 82, 126, 316, 551, 662]);
+  /** 生成公告静默集（两组合并）：
+   *  ① SpawnBoss switch case-break 组（NPC.cs:81505-81512）：50 史王 / 82 幽灵 /
+   *    126 帕拉丁之眼(双子由 125 一次性公告) / 316 幽灵 / 551 Betsy / 662 海盗幽灵；
+   *  ② 从不经 SpawnBoss 的生成路径（实际游戏永不公告）：68 地牢守卫（地牢入口
+   *    刷怪链直接 NewNPC）/ 395 火星飞碟（事件刷怪链）/ 439 拜月教邪教徒（石碑
+   *    仪式 NewNPC :38877）/ 396/397 月总头与手（核心 398 的 AI 生成）/
+   *    664 火把神（小游戏结束演出 NewNPC）。
+   *    398 经 SpawnBoss 同静默，但唯一生成路径 SpawnOnPlayer(:81358-81360)
+   *    专项播 Enemies.MoonLord，单列。 */
+  private static readonly BOSS_SPAWN_SILENT = new Set([50, 82, 126, 316, 551, 662, 68, 395, 439, 396, 397, 664]);
 
-  /** Boss 召唤公告（+可选咆哮）。文本 = SpawnBoss 末尾 switch（NPC.cs:81492-81511）：
+  /** 物品召唤咆哮集（ItemCheck_UseBossSpawners Player.cs:43080-43232 +
+   *  石巨人能量电池祭坛 :32322——全表 SoundID 15 Roar，唯一例外 222 蜂后
+   *  Item173 :43184。双子一次使用召 125+126 两体、咆哮一声）。生成路径
+   *  （自然 roll/暗影珠/幼虫/老人诅咒/巫毒娃娃/松露虫/月总倒计时/踩死虹萤）
+   *  原版全部无声——本集只作冻结对账锚（tests/boss-music-parity.test.ts）。 */
+  static readonly BOSS_ITEM_SUMMON_ROAR = new Set([4, 13, 50, 125, 126, 127, 134, 222, 245, 266, 657, 668]);
+
+  /** Boss 召唤公告（+可选咆哮）。文本 = SpawnBoss 末尾 switch（NPC.cs:81497-81513）：
    *  default → Announcement.HasAwoken（"{名}已苏醒！"）；125 双子专项 Lang.misc[48]；
    *  398 月总用 Enemies.MoonLord（SpawnOnPlayer :81358-81360，"月亮领主已苏醒！"）；
    *  静默集（50/82/126/316/551/662）无公告。颜色 ChatColors.BossOrEvent=(175,75,255)。
@@ -16714,15 +16757,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.cb.onChat) this.cb.onChat(text, 175, 75, 255);
       else this.cb.onToast(text);
     };
-    if (vanillaId === 125) {
+    const kind = Game.bossSummonAnnounceKind(vanillaId);
+    if (kind === 'misc48') {
       announce(Lang.misc(48));                              // 双子魔眼已苏醒！（misc[48]）
-    } else if (vanillaId === 398) {
+    } else if (kind === 'moonlord') {
       announce(Lang.text('Announcement.HasAwoken', Lang.text('Enemies.MoonLord')));
-    } else if (!Game.BOSS_SPAWN_SILENT.has(vanillaId)) {
+    } else if (kind === 'awoken') {
       const name = Lang.npcName(vanillaId) ?? vanillaNpc(vanillaId)?.name ?? '???';
       announce(Lang.text('Announcement.HasAwoken', name));
     }
     if (roar) this.sfx.playWav(vanillaId === 222 ? 'beeSummon' : 'roar');
+  }
+
+  /** Boss 生成公告类型（SpawnBoss switch NPC.cs:81492-81511 的纯函数化，
+   *  供 tests/boss-music-parity.test.ts 冻结对账）：
+   *  'misc48'  = 双子 125 专项（126 静默）
+   *  'moonlord'= 398 月总（SpawnOnPlayer :81358-81360 → Enemies.MoonLord）
+   *  'awoken'  = default → Announcement.HasAwoken（"{名}已苏醒！"）
+   *  null      = 静默集（50/82/126/316/551/662 case-break） */
+  static bossSummonAnnounceKind(vanillaId: number): 'misc48' | 'moonlord' | 'awoken' | null {
+    if (vanillaId === 125) return 'misc48';
+    if (vanillaId === 398) return 'moonlord';
+    return Game.BOSS_SPAWN_SILENT.has(vanillaId) ? null : 'awoken';
   }
 
   /** @returns 是否真正消耗（被召唤门拦下/白天时不消耗物品） */
@@ -16762,7 +16818,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  优先目标点自身，然后螺旋外扩到 24 格内就近安置 */
   /** 传送前贴图就位门:目标区域 ±160 类型扫描 → 预载 → 再落位。
    *  多数表已加载时扫描+命中检查 <10ms(无感);跨群系首传才真正等待加载 */
+  /** 传送串行门(2026-08-14:调试快速连点地图=多个 teleportWhenReady 并发,
+   *  反复相机跳转→chunk 集高频换血→画布分配/释放churn;在飞中忽略新目标) */
+  private _tpInFlight = false;
   private async teleportWhenReady(tx: number, ty: number): Promise<void> {
+    if (this._tpInFlight) return;
+    this._tpInFlight = true;
+    try {
+      await this.teleportWhenReadyInner(tx, ty);
+    } finally {
+      this._tpInFlight = false;
+    }
+  }
+
+  private async teleportWhenReadyInner(tx: number, ty: number): Promise<void> {
     const a = this.atlas;
     if (a) {
       const { tileSheets, wallIds } = this.collectSheetsAround(tx, ty, 160);

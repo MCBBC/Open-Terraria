@@ -30,14 +30,16 @@ const owner = () => ({ cx: 80 * TILE, cy: 100 * TILE, facing: 1, dead: false });
 const noRot = (ang: number) => ({ x: Math.cos(ang), y: Math.sin(ang) });
 
 describe('Celeb2Muzzle 持械枪口（AI_075 714/615）', () => {
-  it('714 每 8t 一发，变体 ⌊ai0/8⌋%7 循环（相邻 +1 mod 7）', () => {
+  it('714 首 tick 即发第一发（出生 ai[1]=0），此后每 8t 一发', () => {
     const game = makeGame(emptyWorld());
     const fired: number[] = [];
     const m = new Celeb2Muzzle(owner(), 714, () => true,
       () => ({ x: 80 * TILE + 100, y: 100 * TILE }),
       (variant) => { fired.push(variant); return true; });
-    for (let t = 0; t < 8 * 8 && !m.dead; t++) m.fixedUpdate(1, game);
-    expect(fired.length).toBeGreaterThanOrEqual(7);       // 64t ≥ 7 发
+    m.fixedUpdate(1, game);                               // 第 1 tick 必须已开火
+    expect(fired.length).toBe(1);
+    for (let t = 0; t < 8 * 7 && !m.dead; t++) m.fixedUpdate(1, game);
+    expect(fired.length).toBeGreaterThanOrEqual(7);       // 8t 节奏
     // 变体序列：相邻差 = +1 mod 7（相位随机只偏移起点）
     for (let i = 1; i < fired.length; i++) {
       expect((fired[i] - fired[i - 1] + 7) % 7).toBe(1);

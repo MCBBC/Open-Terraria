@@ -180,8 +180,9 @@ export function hairDyeColor(shaderId: number, ctx: HairDyeCtx): RGBColor | null
  * 3. 群系 1983 平滑是原版死代码：player.hairDyeColor 全源码无赋值点
  *    （1405/1456 双版核对），A==0 → 每次从目标色起步 ±1 即回原值——等价于
  *    直接取目标色，本仓照此实现（不做平滑状态）。
- * 4. 派对 1984 彩纸尘/内脏（UpdateHairDyeDust Player.cs:23996-24001：尘 139-143
- *    1/45、内脏 276-283 1/225）未接——需扩 VanillaDust 表 5 型+内脏实体，登记。
+ * 4. 派对 1984 彩纸尘/内脏 —— ✅ 已接（2026-08-14）：Player.fixedUpdate 头部
+ *    UpdateHairDyeDust 1:1（尘 139-142 1/45、gore 276-282 1/225；VanillaDust/
+ *    GorePiece 均通用无需扩表——旧注"需扩 5 型"系误判）。
  * 5. 多人 netMode 判定：原版 `Main.netMode != 0`（:334），本仓以 renderEnv.netActive
  *    （Game 每帧注入 net?.active）近似；单机恒 0 = 白发，与原版一致。
  */

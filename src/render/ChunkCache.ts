@@ -77,7 +77,7 @@ export class ChunkCache {
   private animChunksByWall = new Map<number, Set<number>>();
   /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
    *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
-  static readonly MAX_CHUNKS = 224;  // 384→224(2026-08-14 trace③:死亡重生远跳批烘焙在积累 GPU 压力下全量重解码;112MB 画布常驻给解码缓存留空间,缩放 0.5 可视~100 chunk 仍冗余)
+  static MAX_CHUNKS = 224;  // GPU 压力自适应可覆写(contextlost 减半,2026-08-14)  // 384→224(2026-08-14 trace③:死亡重生远跳批烘焙在积累 GPU 压力下全量重解码;112MB 画布常驻给解码缓存留空间,缩放 0.5 可视~100 chunk 仍冗余)
   /** 最近一次 flushDirty 实测耗时 ms（F5 调试报告：烘焙尖峰证据面） */
   lastFlushMs = 0;
   lastFlushCount = 0;

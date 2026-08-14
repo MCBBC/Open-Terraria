@@ -955,6 +955,22 @@ export class Renderer {
   infoAccHover = -1;
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
+  /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
+   *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
+   *  释放最旧一半,恢复后续跑;连续丢失连续收缩(下限 64) */
+  installGpuPressureGuard(): void {
+    this.canvas.addEventListener('contextlost', (e) => {
+      e.preventDefault();
+      const cur = ChunkCache.MAX_CHUNKS;
+      const next = Math.max(64, Math.floor(cur / 2));
+      ChunkCache.MAX_CHUNKS = next;
+      console.warn(`[Renderer] contextlost:GPU 压力自适应 chunk 上限 ${cur}→${next}`);
+      this.cbOnGpuPressure?.();
+    });
+  }
+  /** GPU 压力回调(释放远 chunk;Game 接线) */
+  cbOnGpuPressure: (() => void) | null = null;
+
   /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植）——按当前样式
    *  懒构造二选一(此前两个实例同时构造 = 15 张 UI 贴图急载,另一套样式永远不用) */
   private _resourceBars: VanillaResourceBars | null = null;

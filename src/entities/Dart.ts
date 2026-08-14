@@ -59,9 +59,10 @@ const TRAP_SHOT_STYLE: Record<string, {
     trail: { colors: ['#E8F4F8', '#C8E4EE'], count: 1, life: 26, grav: -0.015 } },
   // ---- 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon / 直接 NewProjectile）----
   // 162 炮弹（SetDefaults Projectile.cs:2239-2246）：16×16 aiStyle2 friendly penetrate4；
-  // AI（:21540-21592）：18 tick 直线后 vy+=0.28/vx*=0.99；Kill（:72768-72831）：64×64→144×144
+  // AI（:21540-21592）：18 tick 直线后 vy+=0.28/vx*=0.99；终端 vy 32（aiStyle2 通用钳
+  // :21978-21981，2026-08-14 补）；Kill（:72768-72831）：64×64→144×144
   // 两段 Damage() 纯伤害（不在 ExplodeTiles 表 = 不破坏地形）
-  cannonball: { w: 16, h: 16, color: '#33333C', grav: 0.28, gravDelay: 18, xDamp: 0.99,
+  cannonball: { w: 16, h: 16, color: '#33333C', grav: 0.28, gravDelay: 18, xDamp: 0.99, vCap: 32,
     proj: 'vanilla/Projectile_162.png', fw: 18, fh: 18, spin: 'roll', friendly: true, blast: 72,
     launchSfx: 'explosion', life: 3600 },
   // 281 爆炸兔兔（SetDefaults Projectile.cs:3408-3418）：28×28 aiStyle49 friendly timeLeft600；
@@ -71,8 +72,10 @@ const TRAP_SHOT_STYLE: Record<string, {
     proj: 'vanilla/Projectile_281.png', fw: 28, fh: 28, spin: 'bunny', friendly: true, blast: 64,
     launchSfx: 'explosion', life: 600 },
   // 166 雪球（SetDefaults Projectile.cs:2282-2289）：14×14 aiStyle2 friendly ranged coldDamage；
-  // AI（:21862-21897）：20 tick 直线后 vy+=0.3/vx*=0.98；Kill（:71758-71767）：碎裂尘无 AoE
-  snowball: { w: 14, h: 14, color: '#F2F8FF', grav: 0.3, gravDelay: 20, xDamp: 0.98,
+  // AI（:21862-21892）：玩家射出（ai1==1）时命中城镇 NPC 即消散清伤；20 tick 直线后
+  // vy+=0.3/vx*=0.98（专属分支，勿改默认档 0.4/0.97——166 不落 else）；终端 32
+  // （:21978 通用钳，2026-08-14 补）；Kill（:71758-71767）：碎裂尘无 AoE
+  snowball: { w: 14, h: 14, color: '#F2F8FF', grav: 0.3, gravDelay: 20, xDamp: 0.98, vCap: 32,
     proj: 'vanilla/Projectile_166.png', fw: 14, fh: 14, spin: 'roll', friendly: true,
     shatterDust: true, life: 3600 },
   // 601 传送门弹（SetDefaults Projectile.cs:3408 族：10×10 friendly，无重力直线；

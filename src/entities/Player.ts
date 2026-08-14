@@ -31,6 +31,8 @@ import type { Enemy } from './Enemy';
 import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
 import { TRACK_SHEET } from '../data/grappleHooks';
 import { canHitLine } from '../physics/LineOfSight';
+import { PARTY_HAIR_DYE_SHADER_ID } from '../data/vanillaHairDyes';
+import { GorePiece } from './GorePiece';
 import { TownShot } from './TownShot';
 import { hslToRgb } from '../player/Appearance';
 import {
@@ -1106,6 +1108,34 @@ export class Player extends Entity {
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
     this.oldX = this.x; this.oldY = this.y;   // oldPosition（尘埃 customData 跟随差值）
+    // ---- 派对染发剂彩纸（UpdateHairDyeDust Player.cs:23994-24023；2026-08-14 接通，
+    //      原 HairDyeColor.ts §4 登记偏差销核）门=hairDye==派对 shaderId 且非死亡/
+    //      石化/冰冻（本仓 shimmering≈frozen 语义）；fixedUpdate 本身只在非暂停时跑 ----
+    if (this.hairDye === PARTY_HAIR_DYE_SHADER_ID && !this.dead && !this.shimmering) {
+      const jit = () => 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;   // 1±0.5
+      if (Math.random() < 1 / 45) {
+        // 尘 139-142（Next(139,143) 上界排除）：盒 width×8、scale 1.2×(0.7±0.3)、
+        // 速度 ×(1±0.5)+±0.5、vy−1、+自身速度×0.2
+        const d = game.vanillaDust?.spawn(this.x, this.y, this.w, 8,
+          139 + Math.floor(Math.random() * 4), 0, 0, 0, null, 1.2);
+        if (d) {
+          d.vx = d.vx * jit() + jit() - 0.5 + this.vx * 0.2;
+          d.vy = d.vy * jit() + jit() - 0.5 - 1 + this.vy * 0.2;
+          d.scale *= 0.7 + (Math.floor(Math.random() * 61) - 30) * 0.01;
+        }
+      }
+      if (Math.random() < 1 / 225) {
+        // 内脏 gore 276-282（Next(276,283) 上界排除）：NewGore 自带抖动后再
+        // ×(1±0.5)+±0.5、vy−1、scale×(1±0.2)、+自身速度×0.2
+        const g = GorePiece.newGore(276 + Math.floor(Math.random() * 7),
+          this.x + Math.random() * this.w, this.y + Math.random() * 8, 0, 0, 1, false);
+        if (g) {
+          g.vx = g.vx * jit() + jit() - 0.5 + this.vx * 0.2;
+          g.vy = g.vy * jit() + jit() - 0.5 - 1 + this.vy * 0.2;
+          g.scale *= 1 + (Math.floor(Math.random() * 41) - 20) * 0.01;
+        }
+      }
+    }
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
     this.miscCounter++;

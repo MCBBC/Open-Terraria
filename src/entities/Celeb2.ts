@@ -64,7 +64,8 @@ export class Celeb2Muzzle extends Entity {
     this.projId = projId;
     this.volley = projId === 714 ? 8 : 5;
     this.ai0 = 5 * Math.floor(Math.random() * 20);
-    this.ai1 = this.volley;
+    this.ai1 = 0;   // 出生 ai[1]=0（:48376 只传 ai0）→ 首 tick 即发第一发——
+                    // 勿初始化成 volley 间隔（曾致 MK2 首发迟 8t，2026-08-14 review 修）
     this.channelCb = channelCb;
     this.aimCb = aimCb;
     this.fireCb = fireCb;
@@ -108,7 +109,8 @@ export class Celeb2Muzzle extends Entity {
     }
     if (variant < 0) return;
     // ---- volley：开火（弹速 714: 8(+1 变体3) / 615: 14；散布 ±0.098）----
-    if (this.ai0 !== 1) {
+    // 首发跳音门仅 714（:64114 `if (ai[0] != 1f)`）；615 的 Item36 无此门（:64004-64008）
+    if (this.projId === 714 ? this.ai0 !== 1 : true) {
       game.playSfxFiles([this.projId === 714 ? 'Item_156' : 'Item_36'], 1, this.cx, this.cy);
     }
     const spd = (this.projId === 714 ? 8 + (variant === 3 ? 1 : 0) : 14);
