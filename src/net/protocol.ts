@@ -80,6 +80,10 @@ export const enum Msg {
                        //   权威模型=被打方本地结算（与 msg16 客户端权威 HP 同构）：
                        //   攻击端只报意向，被打端过 InOpposingTeam 门禁后自行结算扣血，
                        //   伪造包最多影响显示、无法强制扣血。武器 id 供死因文案（DeathSource.Player）
+  SpectateFocus = 150, // C→S {i16 targetSlot}（v8 观战，对齐原版 msg150 SetOrRequestSpectating
+                       //   语义子集）：服务器把该端 AOI 过滤中心从自身 avatar 切到观战目标
+                       //   （-1 = 恢复）。旧 server 不识别此号 → default 忽略，AOI 退回
+                       //   avatar 中心 = 优雅降级，故不升 PROTO_VER（同 NetModules 通道纪律）
   NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----

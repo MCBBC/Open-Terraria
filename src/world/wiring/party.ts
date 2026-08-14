@@ -7,6 +7,7 @@
 // 广播 Game.BirthdayParty_1/2/3，冷却置 rand(5,11)。
 // PartyIsUp = ManualParty || GenuineParty（:26-34）。
 import { Lang } from '../../i18n/Lang';
+import { TOWN_NPC_IDS } from '../../data/vanillaNpcs';
 
 export interface PartyState {
   /** BirthdayParty.ManualParty */
@@ -89,7 +90,7 @@ export function partyNaturalAttempt(s: PartyState, opts: {
   if (Lang.has(key)) {
     return Lang.text(key, ...names);
   }
-  return `${names.join('、')}的生日派对！`;
+  return Lang.text('Mods.SandboxWorld.Party.Birthday', names.join('、'));
 }
 
 /** WorldClear（:182-190）：切世界/清档复位 */
@@ -99,16 +100,9 @@ export function partyWorldClear(s: PartyState): void {
   s.celebratingNpcs.length = 0;
 }
 
-/** NPC key → 中文名（公告用；映射不全时返回空串由调用方过滤） */
+/** NPC key → 当前语言名（公告用；Lang.npcName 走原版 12 语言译名表,
+ *  映射缺失返回空串由调用方过滤——旧硬编码中文名表已退役） */
 function townNpcName(key: string): string {
-  const NAMES: Record<string, string> = {
-    guide: '向导', merchant: '商人', nurse: '护士', arms_dealer: '军火商', dryad: '树妖',
-    demolitionist: '爆破专家', clothier: '裁缝', goblin_tinkerer: '哥布林工匠', wizard: '法师',
-    mechanic: '机械师', santa_claus: '圣诞老人', truffle: '松露人', steampunker: '蒸汽朋克人',
-    dyer: '染料商', party_girl: '派对女孩', cyborg: '生化人', painter: '油漆工',
-    witch_doctor: '巫医', pirate: '海盗', stylist: '造型师', golfer: '高尔夫球手',
-    angler: '渔夫', tavernkeep: '酒保', zoologist: '动物学家', princess: '公主',
-    travelling_merchant: '旅行商人',
-  };
-  return NAMES[key] ?? '';
+  const id = TOWN_NPC_IDS[key]?.id;
+  return (id !== undefined ? Lang.npcName(id) : null) ?? '';
 }

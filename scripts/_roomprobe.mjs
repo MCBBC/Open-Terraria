@@ -224,6 +224,55 @@ try {
     check('msg4 hairDye 随外观 JSON 中继（B 染发 → A 侧收到）', dyeReads.wire === 9, `A wire=${dyeReads.wire}`);
     check('A 侧代理 hairDye 注入（Renderer.hairDyeRenderColor/派对彩纸消费位）', dyeReads.proxy === 9, `A proxy=${dyeReads.proxy}`);
 
+    // ---- 观战系统（2026-08-14）：A 占卜球语义 → spectateNextPlayer 切 B + msg150
+    //      通报 + 相机跟随目标 + 观战期输入冻结 + Space 退出回自身 ----
+    const specStart = await pageA.evaluate(() => {
+      const g = window.__swGame;
+      const sent = [];
+      const orig = g.net.send.bind(g.net);
+      g.net.send = (f) => { sent.push(f[2]); return orig(f); };
+      const anyone = g.anyoneToSpectate();
+      const ok = g.spectateNextPlayer(1, false);
+      g.net.send = orig;
+      return { anyone, ok, slot: g.spectatingSlot, mySlot: g.net.mySlot, sent150: sent.filter((id) => id === 150).length };
+    });
+    check('观战：AnyoneToSpectate 有目标（B 在场）', specStart.anyone === true);
+    check('观战：SpectateNextPlayer(1,false) 锁定 B', specStart.ok === true && specStart.slot >= 0 && specStart.slot !== specStart.mySlot,
+      JSON.stringify(specStart));
+    check('观战：msg150 已发服务器（AOI 焦点切换）', specStart.sent150 === 1, `sent150=${specStart.sent150}`);
+
+    // 相机收敛到 B（0.15 指数缓动，90t 足够）+ 观战期 A 自身冻结
+    const camRead = await pageA.evaluate(async () => {
+      const g = window.__swGame;
+      const ax0 = g.player.x, ay0 = g.player.y;
+      for (let i = 0; i < 90; i++) g.fixedUpdate(1 / 60);
+      const pr = (g.remotePlayerProxies ?? []).find((p) => p.__netSlot === g.spectatingSlot);
+      return {
+        camX: g.camera.x, camY: g.camera.y,
+        tX: pr ? pr.cx : 0, tY: pr ? pr.y + pr.h + pr.netOffY - 21 : 0,
+        moved: Math.hypot(g.player.x - ax0, g.player.y - ay0),
+        slot: g.spectatingSlot,
+      };
+    });
+    const camErr = Math.hypot(camRead.camX - camRead.tX, camRead.camY - camRead.tY);
+    check('观战：相机收敛到目标（±32px）', camRead.slot >= 0 && camErr < 32,
+      `err=${camErr.toFixed(1)}px cam=(${camRead.camX.toFixed(0)},${camRead.camY.toFixed(0)}) tgt=(${camRead.tX.toFixed(0)},${camRead.tY.toFixed(0)})`);
+    check('观战：输入冻结（A 自身 90t 位移≈0）', camRead.moved < 2, `moved=${camRead.moved.toFixed(2)}px`);
+
+    // Space 退出（真实 keydown 事件路径 → keydownHandlers）+ 相机回落自身
+    const slotBefore = await pageA.evaluate(() => window.__swGame.spectatingSlot);
+    await pageA.keyboard.press('Space');
+    const exitRead = await pageA.evaluate(async () => {
+      const g = window.__swGame;
+      for (let i = 0; i < 150; i++) g.fixedUpdate(1 / 60);
+      return { slot1: g.spectatingSlot, camX: g.camera.x, camY: g.camera.y,
+        pX: g.player.cx, pY: g.player.cy };
+    });
+    const backErr = Math.hypot(exitRead.camX - exitRead.pX, exitRead.camY - exitRead.pY);
+    check('观战：Space 退出（spectating → -1）', slotBefore >= 0 && exitRead.slot1 === -1,
+      `${slotBefore} → ${exitRead.slot1}`);
+    check('观战：退出后相机回落自身（±32px）', backErr < 32, `err=${backErr.toFixed(1)}px`);
+
     // ---- P1.1 AOI（玩家态）：B 传送 6000px 外（>1920×1.6 滞回外径）→ A 侧代理冻结 ----
     const bHome = await pageB.evaluate(() => ({ x: window.__swGame.player.x, y: window.__swGame.player.y }));
     await pageB.evaluate(async (home) => {
@@ -649,7 +698,7 @@ try {
     }
 
     // 断线重连：B 模拟网络断开（非用户主动）→ 自动携 session 重连 → 同 slot 复位
-    const slotBefore = await pageB.evaluate(() => window.__swGame.net.mySlot);
+    const slotBeforeB = await pageB.evaluate(() => window.__swGame.net.mySlot);
     await pageB.evaluate(() => window.__swGame.net.ws.close()); // 绕过 userClosed = 模拟掉线
     await sleep(6000); // 2s 重试间隔 + 世界重组装
     const rc = await pageB.evaluate(() => ({
@@ -657,7 +706,7 @@ try {
       slot: window.__swGame?.net?.mySlot,
       world: !!window.__swGame?.world,
     })).catch((e) => ({ err: String(e) }));
-    check('断线自动重连（session 同 slot 复位）', rc.active === true && rc.slot === slotBefore, JSON.stringify(rc));
+    check('断线自动重连（session 同 slot 复位）', rc.active === true && rc.slot === slotBeforeB, JSON.stringify(rc));
     // 尽早断言（vite 偶发全量 reload 会清 window 状态——缩短暴露窗口）
     await pageB.evaluate(() => window.__swGame.net.disconnect());
     await sleep(1000);

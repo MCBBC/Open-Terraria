@@ -95,13 +95,14 @@ describe('难度曲线采样（GameDifficultyData.cs:16-70）', () => {
 // 2. Main.Difficulty 档位映射（Main.cs:2764-2786）
 // ===========================================================================
 describe('Main.Difficulty 档位映射（Main.cs:2764-2786）', () => {
-  it('我方 difficulty 0/1/2/3 → 原版 Classic/Expert/Master/Classic（旅程不抬档）', () => {
+  it('我方 difficulty 0/1/2/3 → 原版 Classic/Expert/Master/Journey（滑杆缺省 0.5×）', () => {
     expect(mainDifficulty(worldOf(0))).toBeCloseTo(GDL.CLASSIC, 6);
     expect(mainDifficulty(worldOf(1))).toBeCloseTo(GDL.EXPERT, 6);
     expect(mainDifficulty(worldOf(2))).toBeCloseTo(GDL.MASTER, 6);
-    // ★GameMode==3（旅程）不进 Expert/Master 分支 → Difficulty=Classic（:2766-2779）；
-    //   旅程 0.5× 由 _gameModeDifficultyOverride（Main.cs:17245 旅程强度滑杆）注入，未建模
-    expect(mainDifficulty(worldOf(3))).toBeCloseTo(GDL.CLASSIC, 6);
+    // ★GameMode==3（旅程）不走 Expert/Master 分支；Difficulty 由
+    //   _gameModeDifficultyOverride（Main.cs:17238-17248 旅程强度滑杆，缺省 0 → 0.5）
+    //   注入——旅程世界 NPC 半强度是原版真实缺省（2026-08-14 建模，此前误按经典档）
+    expect(mainDifficulty(worldOf(3))).toBeCloseTo(GDL.JOURNEY, 6);
   });
   it('getGoodWorld（for the worthy）整体 +1 档（:2783-2785）：经典 FTW = 专家手感', () => {
     const w = worldOf(0, { getGoodWorld: true });
@@ -142,12 +143,13 @@ describe('僵尸 type 3 四档强度（NPC.cs:18106-18447）', () => {
     expect(s.value).toBe(150);
     expect(s.knockBackResist).toBeCloseTo(0.4, 6);
   });
-  it('旅程世界（difficulty=3 → Main.Difficulty=Classic）：与经典档完全一致', () => {
+  it('旅程世界（difficulty=3 → Difficulty=Journey 0.5）：hp 45×0.5=22 / damage 14×0.5=7', () => {
     const w = worldOf(3);
     const e = Enemy.fromVanilla(3, 0, 0)!;
     void w;
-    expect(e.hp).toBe(45); expect(e.maxHp).toBe(45);
-    expect(e.def.damage).toBe(14); expect(e.def.defense).toBe(6);
+    // 旅程强度滑杆缺省 0 → 0.5×（ENEMY_MAX_LIFE/DAMAGE_MULTIPLIER 在 Journey 档输出 0.5）
+    expect(e.hp).toBe(22); expect(e.maxHp).toBe(22);
+    expect(e.def.damage).toBe(7); expect(e.def.defense).toBe(6);   // defense 无难度乘区
   });
   it('fromVanilla 端到端：专家世界僵尸 hp 90 / damage 28 / 承受击退比例 0.45', () => {
     worldOf(1);
@@ -280,11 +282,12 @@ describe('ScaleStats 入口门（NPC.cs:18083）', () => {
 // 7. 玩家受伤倍率：敌对弹幕命中乘区（Projectile.cs:13770）+ 弹体出膛 lerp
 // ===========================================================================
 describe('玩家受伤倍率（Projectile.cs:264/544 + :13770）', () => {
-  it('hostileProjectileDamage：经典 ×1 / 专家 ×2 / 大师 ×3 / 旅程世界（=Classic 档）×1', () => {
+  it('hostileProjectileDamage：经典 ×1 / 专家 ×2 / 大师 ×3 / 旅程世界（滑杆缺省 0.5 档）×0.5', () => {
     expect(hostileProjectileDamage(22, GDL.CLASSIC)).toBe(22);
     expect(hostileProjectileDamage(22, GDL.EXPERT)).toBe(44);
     expect(hostileProjectileDamage(22, GDL.MASTER)).toBe(66);
-    expect(hostileProjectileDamage(22, mainDifficulty(worldOf(3)))).toBe(22);
+    // 旅程滑杆缺省 0 → Difficulty 0.5 → 22×0.5=11（2026-08-14 建模旅程强度滑杆）
+    expect(hostileProjectileDamage(22, mainDifficulty(worldOf(3)))).toBe(11);
   });
   it('毁灭者激光 GetAttackDamage_ForProjectiles(22,18)（NPC.cs:7031/50223）：经典 22 / 专家 18 / 大师钳 18', () => {
     expect(getAttackDamageForProjectiles(22, 18, GDL.CLASSIC)).toBe(22);

@@ -28,7 +28,7 @@ describe('l10n 构建产物', () => {
       expect(d.LegacyMenu?.['12']).toBeTruthy();
       expect(d.Language?.Chinese).toBeTruthy();
       expect(d.UI?.WorldSizeSmall).toBeTruthy();
-      expect(d.Mods?.['SandboxWorld.UI.Inventory']).toBeTruthy();
+      expect(d.Mods?.['SandboxWorld.UI.InvLabel']).toBeTruthy();
       // {$} 可解析引用已构建期展开(未命中引用按原版行为保留,如 NPCName.None)
       expect(raw.includes('{$CommonItemTooltip.')).toBe(false);
       // {? 条件标记已剥离(残留 {0} 位置参数合法)
@@ -40,7 +40,7 @@ describe('l10n 构建产物', () => {
     const zh = JSON.parse(readFileSync(join(L10N_DIR, 'zh-Hans.json'), 'utf8'));
     const en = JSON.parse(readFileSync(join(L10N_DIR, 'en-US.json'), 'utf8'));
     expect(zh.LegacyMenu['12']).toBe('单人模式');
-    expect(zh.Mods['SandboxWorld.UI.Dropped']).toContain('{0}');
+    expect(zh.Mods['SandboxWorld.Toast.NpcArrived']).toContain('{0}');
     expect(en.LegacyMenu['12']).toBe('Single Player');
   });
 });

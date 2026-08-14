@@ -576,6 +576,8 @@ export interface GameCallbacks {
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
   /** width = NewTextMultiline WidthLimit（-1 不限；广播盒 460） */
   onChat?: (text: string, r: number, g: number, b: number, width?: number) => void;
+  /** 观战启动时关闭全 UI（原版 IngameUIWindows.CloseAll :43017——5644 使用成功支） */
+  onCloseAllUI?: () => void;
   /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
   onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null) => void;
   onNpcDialogClose?: () => void;
@@ -642,6 +644,11 @@ export class Game implements GameHooks {
    *  锚桩 724 拴绳小动物 + 风筝桩 723 风筝——生命周期随 furnitureItems 记录
    *  （放置 spawn / 破坏 removeAt / 读档 respawnAll），实体本身不落盘 */
   leashed = new LeashedEntityManager();
+  /** 观战目标 slot（Player.spectating :1520 同义，-1=off；仅联机，单机恒 -1）。
+   *  占卜球 5644 / 左右键切换；相机与 AOI 焦点随切（2026-08-14 观战系统移植） */
+  spectatingSlot = -1;
+  /** 观战目标死亡时刻（slot→tick）：CanSpectate 死亡滞留窗 180t（:1528/:16993） */
+  private spectateDeathAt = new Map<number, number>();
   input: Input;
   cb: GameCallbacks;
   sfx = new Sfx();
@@ -1426,6 +1433,94 @@ export class Game implements GameHooks {
   }
 
   /** msg28 回包：弹幕消亡即时移除傀儡（v6——替代纯超时清扫的补刀路径） */
+  // ================= 观战系统（Player.cs :16931-17122 + :3920-3930，2026-08-14） =================
+
+  /** CanSpectate（:16980-17000）：-1/自身 true；在场且存活 true；死亡 → 仅当前
+   *  观战目标在 180t 滞留窗（SpectatingLingerAfterDeath :1528）内 true */
+  private canSpectateNet(slot: number): boolean {
+    if (slot < 0 || slot === this.net?.mySlot) return true;
+    const rp = this.net?.players.get(slot);
+    if (!rp || !rp.active) return false;
+    if (!rp.dead) { this.spectateDeathAt.delete(slot); return true; }
+    if (!this.spectateDeathAt.has(slot)) this.spectateDeathAt.set(slot, this.tickCount);
+    return slot === this.spectatingSlot && this.tickCount - (this.spectateDeathAt.get(slot) ?? 0) < 180;
+  }
+
+  /** AnyoneToSpectate（:17011-17021）：存在任一可观战的他端玩家 */
+  private anyoneToSpectate(): boolean {
+    if (!this.net?.active) return false;
+    for (const [slot, rp] of this.net.players) {
+      if (slot !== this.net.mySlot && rp.active && this.canSpectateNet(slot)) return true;
+    }
+    return false;
+  }
+
+  /** SpectateNextPlayer（:17042-17072）：从当前（或自身）起 ±step 环形找下一可
+   *  观战 slot；单机恒 false（:17044）。includeSelf 仅死亡观战自机用（本仓未接） */
+  private spectateNextPlayer(step: number, includeSelf: boolean): boolean {
+    if (!this.net?.active) return false;
+    const cur = this.spectatingSlot < 0 ? this.net.mySlot : this.spectatingSlot;
+    let n = cur;
+    for (let guard = 0; guard < 255; guard++) {
+      n += step;
+      if (n >= 255) n -= 255;
+      if (n < 0) n += 255;
+      if (n === cur) break;
+      if ((n !== this.net.mySlot || includeSelf) && this.canSpectateNet(n)) {
+        this.setSpectating(n);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** SetOrRequestSpectating（:17079-17122 客户端半边）：本仓观战态纯本地 +
+   *  msg150 通报服务器切 AOI 焦点（原版还有 RemoteClient.CheckSection——由
+   *  本地 strip 请求轮（下方 %30 段）随相机位发出，等价覆盖） */
+  private setSpectating(target: number) {
+    if (target === this.net?.mySlot) target = -1;
+    if (target === this.spectatingSlot) return;
+    this.spectatingSlot = target;
+    this.net?.sendSpectateFocus(target);
+    this.lastStripReq = '';    // 触发下一 %30 轮立即按新相机位请求条带
+  }
+
+  /** 观战相机位（SpectatingCameraPosition :3920-3930）：
+   *  目标代理 Bottom + (0, gfxOffY−21) + netOffset（gfxOffY 未建模，取 0） */
+  private spectateCamPos(): { x: number; y: number } | null {
+    if (this.spectatingSlot < 0 || !this.net?.active) return null;
+    const proxy = this.remotePlayerProxies.find(
+      (p) => (p as unknown as { __netSlot?: number }).__netSlot === this.spectatingSlot);
+    if (!proxy) return null;
+    return { x: proxy.cx + proxy.netOffX, y: proxy.y + proxy.h + proxy.netOffY - 21 };
+  }
+
+  /** HandleSpectatingControls（:16931-16978）tick 半边：死亡退出 + 鼠标左右切换
+   *  （原版 JustPressed.MouseLeft/MouseRight :16948-16955）+ 目标失效回退。
+   *  键位半边（Space/Escape 退出、←/→ 切换）走 keydownHandlers（事件天然边沿，
+   *  Input 无 keyEdge API）。手持 5644 切换播 Item197/198（:16961-16971）；
+   *  失败的 NoMoreTargets 相机推挤未实装（屏震近似暂略）。观战期间本方法吞掉
+   *  mouseDown/rightDown = 冻结使用/交互输入（原版观战中 control* 不入玩家模拟） */
+  private handleSpectatingControls() {
+    const inp = this.input;
+    if (this.player.dead) { this.setSpectating(-1); return; }             // Ghost() 清观战（:6349）
+    let step = 0;
+    if (inp.mouseDown) { step++; inp.mouseDown = false; }
+    if (inp.rightDown) { step--; inp.rightDown = false; }
+    if (step !== 0) {
+      const ok = this.spectateNextPlayer(step, false);
+      const held = this.player.inv.heldItem();
+      if (held && viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 5644) {
+        this.playSfxFile(ok ? 'Item_197' : 'Item_198');
+      }
+    }
+    // 目标彻底失效（死亡滞留超窗/离场）→ 换下一个；全空 → 退出（SpectateNextClosestPlayer 等价）
+    if (this.spectatingSlot >= 0 && this.spectatingSlot !== this.net?.mySlot
+      && !this.canSpectateNet(this.spectatingSlot) && !this.spectateNextPlayer(1, false)) {
+      this.setSpectating(-1);
+    }
+  }
+
   private netRemoveProjPuppets(ids: number[]) {
     for (const id of ids) {
       const pup = this.netProjPuppets.get(id);
@@ -1978,7 +2073,7 @@ export class Game implements GameHooks {
       }
     }
     if (!land) {
-      this.cb.onToast?.('瞬移失败:附近没有可落脚点');
+      this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Map.TeleportFail'));
       return;
     }
     const p = this.player;
@@ -1992,7 +2087,7 @@ export class Game implements GameHooks {
     this.lighting.liquidDirty = true;
     const liq = st.liquid[st.idx(land[0], land[1] - 1)];
     this.cb.onToast?.(liq > 0 && st.liquidType[st.idx(land[0], land[1] - 1)] === 2
-      ? `已瞬移至 (${land[0]}, ${land[1]})——脚下是岩浆!` : `已瞬移至 (${land[0]}, ${land[1]})`);
+      ? Lang.text('Mods.SandboxWorld.Map.TeleportedLava', `(${land[0]}, ${land[1]})`) : Lang.text('Mods.SandboxWorld.Map.Teleported', `(${land[0]}, ${land[1]})`));
   }
   marks: Array<{ x: number; y: number }> = [];
   private _annoLatch = false;
@@ -2027,6 +2122,13 @@ export class Game implements GameHooks {
       if (this.player && /^Digit[0-9]$/.test(code) && !this.input.uiBlocking) {
         this.player.inv.selected = code === 'Digit0' ? 9 : Number(code.slice(5)) - 1;
         this.cb.onInventoryChanged();
+      }
+      // 观战键位半边（HandleSpectatingControls :16933-16955——keydown 天然边沿；
+      // 退出=Jump/Inv 族 → Space/Escape；切换=Left/Right）
+      if (this.spectatingSlot >= 0 && this.player) {
+        if (code === 'Space' || code === 'Escape') this.setSpectating(-1);
+        else if (code === 'ArrowRight') this.spectateNextPlayer(1, false);
+        else if (code === 'ArrowLeft') this.spectateNextPlayer(-1, false);
       }
       // 缩放调节
       if (code === 'Equal' || code === 'NumpadAdd') this.setZoom(this.camera?.zoomTarget + 0.15);
@@ -2707,7 +2809,7 @@ export class Game implements GameHooks {
     // 685 抖箱保真门（Main.cs:42454 + TryFreeingElderSlime :42536-42553）：须消耗金钥匙 327
     if (npc.npcKey === 'town_slime_old') {
       if (!this.consumeVanillaItem(327)) {
-        this.cb.onToast?.(Lang.itemName(327) ? `需要${Lang.itemName(327)}！` : '需要金钥匙！');
+        this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NeedItem', Lang.itemName(327) ?? 'Golden Key'));
         return;
       }
     }
@@ -2766,7 +2868,7 @@ export class Game implements GameHooks {
         this.world.flags.unlockedSlimeYellowSpawn = true;
         const ms = new TownNPC('town_slime_yellow', c.x, c.y);
         this.entities.add(ms, 'npcs');
-        this.cb.onToast?.(Lang.npcName(683) ?? '神秘史莱姆加入了小镇！');
+        this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.npcName(683) ?? ''));
         break;
       }
     }
@@ -3208,7 +3310,7 @@ export class Game implements GameHooks {
             } else {
               this._tpTarget = { x: tx, y: ty };
               this.renderer.tpMark = { x: tx, y: ty };
-              this.cb.onToast(`已选传送点 (${tx}, ${ty})，再次点击确认`);
+              this.cb.onToast(Lang.text('Mods.SandboxWorld.Map.Preselect', `(${tx}, ${ty})`));
             }
           }
         }
@@ -3229,15 +3331,25 @@ export class Game implements GameHooks {
         const existed = this.marks.some((m) => m.x === tx && m.y === ty);
         this.marks = this.marks.filter((m) => m.x !== tx || m.y !== ty); // 同格重复点 = 取消
         if (!existed) this.marks.push({ x: tx, y: ty });
-        this.cb.onToast(existed ? `已取消标记 (${tx}, ${ty})` : `已标记 (${tx}, ${ty})，再次点击取消`);
+        this.cb.onToast(existed ? Lang.text('Mods.SandboxWorld.Map.Unmark', `(${tx}, ${ty})`) : Lang.text('Mods.SandboxWorld.Map.Mark', `(${tx}, ${ty})`));
         (window as unknown as { __swUI?: { updateAnnotateCount: (n: number) => void } }).__swUI?.updateAnnotateCount(this.marks.length);
       }
     }
     if (!inp.mouseDown) this._annoLatch = false;
-    player.inputX = (inp.down('KeyA') || inp.down('ArrowLeft') ? -1 : 0) + (inp.down('KeyD') || inp.down('ArrowRight') ? 1 : 0);
-    player.inputJump = inp.down('Space') || inp.down('KeyW') || inp.down('ArrowUp');
-    player.inputDown = inp.down('KeyS') || inp.down('ArrowDown');
-    player.inputUp = inp.down('KeyW') || inp.down('ArrowUp');
+    // ---- 观战控制（tick 半边）：吞鼠标输入 + 目标失效回退（键位半边在 keydownHandlers）；
+    //      观战期间移动输入冻结（原版 spectating>=0 时 control* 不入玩家模拟）----
+    if (this.spectatingSlot >= 0) this.handleSpectatingControls();
+    if (this.spectatingSlot >= 0) {
+      player.inputX = 0;
+      player.inputJump = false;
+      player.inputDown = false;
+      player.inputUp = false;
+    } else {
+      player.inputX = (inp.down('KeyA') || inp.down('ArrowLeft') ? -1 : 0) + (inp.down('KeyD') || inp.down('ArrowRight') ? 1 : 0);
+      player.inputJump = inp.down('Space') || inp.down('KeyW') || inp.down('ArrowUp');
+      player.inputDown = inp.down('KeyS') || inp.down('ArrowDown');
+      player.inputUp = inp.down('KeyW') || inp.down('ArrowUp');
+    }
     // 坐骑能力输入（钻头坐骑 8 专用：ItemCheck_HandleMount :52066-52081）：
     // 鼠标世界坐标（AimAbility 的 crosshair）+ 左/右键电平 + 按压边沿
     //（releaseUseItem&&releaseUseTile = 上 tick 双松 + 本 tick 任一按下）
@@ -3845,7 +3957,7 @@ export class Game implements GameHooks {
         if (this.boss.bossFled) {
           // 离场逃走(天亮撤离/玩家死后 EncourageDespawn 消散/毁灭者黎明钻地):
           // 非击杀——不播击败公告、不写 downed 标志(原版 EncourageDespawn 语义)
-          this.newText(`${bname}逃走了…`, 150, 150, 150);
+          this.newText(Lang.text('Mods.SandboxWorld.Toast.BossFled', bname), 150, 150, 150);
         } else {
           // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)。
           // 击败公告（DoDeathEvents_CelebrateBossDeath NPC.cs:79822-79836）：
@@ -4423,7 +4535,10 @@ export class Game implements GameHooks {
     if (this.tickCount % 60 === 0) this.cb.onBuffsChanged?.();
 
     // ---- 相机 / 光照 ----
-    this.camera.follow(player.cx, player.cy);
+    // 观战中相机跟随目标（SpectatingCameraPosition :3920-3930；follow 内建缓动=
+    // 原版相机切换平滑；目标代理未建（刚切换）退回自身不跳变）
+    const specCam = this.spectateCamPos();
+    this.camera.follow(specCam ? specCam.x : player.cx, specCam ? specCam.y : player.cy);
     this.camera.easeZoom();
     this.camera.clamp();
     // Main.screenPosition/screenWidth/Height 快照（视区左上角世界坐标 + 画布尺寸）——
@@ -6046,7 +6161,7 @@ export class Game implements GameHooks {
         this.player.useTime = 60;
         this.sfx.play('drink');
         this.cb.onInventoryChanged();
-        this.cb.onToast(`${heldDef.name}：${p.duration} 秒`);
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BuffSeconds', heldDef.name, p.duration));
       }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && viIdFromKey(heldDef.key) === 29) {
       // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
@@ -6262,7 +6377,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         case 4988: // 史莱姆皇后水晶(:43210-43224):神圣区+夜晚
           if (!this.world.flags.hardMode || this.world.clock.isDay
             || !(this.scene?.zoneHallow)) {
-            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightHallowOnly') || '需困难模式神圣区夜晚');
+            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightHallowOnly'));
           } else {
             this.summonBoss('queen_slime');
             consume();
@@ -6805,11 +6920,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       && inp.mouseDown && this.player.useTime === 0) {
       // 5644 占卜球（Item.cs:44324-44333：useStyle 15 HoldOrb/holdStyle 8/useTime 100,
       //  不消耗）。Player.ItemCheck :43011-43030：动画首帧 AnyoneToSpectate() 有目标 →
-      //  关 UI + Item197 + 观战下一玩家；无目标 → Item198 + Game.SpectateSinglePlayer。
-      //  ★观战镜头系统未实装（引擎级缺口,见 docs 登记）——本仓恒走"无目标"支：
-      //  音效+聊天文案 1:1,不消耗不入 CD 之外的行为
-      this.playSfxFile('Item_198');
-      this.newText(Lang.text('Game.SpectateSinglePlayer'), 255, 240, 20);  // ChatColors.ServerMessage
+      //  关 UI + Item197 + SpectateNextPlayer(1, includeSelf:false)；无目标 → Item198 +
+      //  单机 Game.SpectateSinglePlayer / 联机 Game.SpectateNoTargets（观战系统
+      //  2026-08-14 实装——此前恒走"无目标"支）
+      if (this.anyoneToSpectate()) {
+        this.cb.onCloseAllUI?.();                        // IngameUIWindows.CloseAll（:43017）
+        this.playSfxFile('Item_197');
+        this.spectateNextPlayer(1, false);
+        this.newText(Lang.text('Game.SpectateHintChangeTarget'), 255, 240, 20);
+      } else {
+        this.playSfxFile('Item_198');
+        this.newText(Lang.text(this.net?.active ? 'Game.SpectateNoTargets' : 'Game.SpectateSinglePlayer'),
+          255, 240, 20);                                 // ChatColors.ServerMessage
+      }
       this.player.useTime = itemCombat(5644)?.useTime ?? 100;              // ApplyItemTime
       this.input.mouseDown = false;
     } else if (heldDef && viIdFromKey(heldDef.key) === 5334
@@ -7008,7 +7131,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (df?.bait && dm) { baitSlot = i; baitPower = df.bait; baitVid = +dm[1]; break; }
           }
           if (baitSlot < 0) {
-            this.cb.onToast('需要鱼饵才能钓鱼！');
+            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedBait'));
           } else {
             const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
             const owner = this.player;
@@ -12698,7 +12821,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
     if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
     // 树妖：世界状态（NPCInteractions.cs:124-129 Register Status——注册序在商店后）
-    if (npc.npcKey === 'dryad') buttons.push({ id: 'status', label: '世界状态' });
+    if (npc.npcKey === 'dryad') buttons.push({ id: 'status', label: Lang.text('Mods.SandboxWorld.NPC.WorldStatus') });
     if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) }); // 收集税款
     // 哥布林工匠：重铸（NPCChatText_TinkererReforge Main.cs:39431）
     if (npc.npcKey === 'goblin_tinkerer') buttons.push({ id: 'reforge', label: Lang.inter(19) });
@@ -13074,17 +13197,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return inst?.givenName ? Lang.text('Game.NPCTitle', inst.givenName, base) : base;
     };
     return s
-      .replace(/\{PlayerName\}/g, this.player.appearance?.name || '泰拉瑞亚')
+      .replace(/\{PlayerName\}/g, this.player.appearance?.name || Lang.text('Mods.SandboxWorld.DefaultPlayerName'))
       .replace(/\{Guide\}/g, townName('guide'))
       .replace(/\{Nurse\}/g, townName('nurse'))
       .replace(/\{Dryad\}/g, townName('dryad'))
       .replace(/\{Demolitionist\}/g, townName('demolitionist'))
       .replace(/\{ArmsDealer\}/g, townName('arms_dealer'))
       .replace(/\{Merchant\}/g, townName('merchant'))
-      .replace(/\{Bartender\}/g, Lang.npcName(550) ?? '酒馆老板') // 酒馆老板未实装,恒用类型名
+      .replace(/\{Bartender\}/g, Lang.npcName(550) ?? 'Bartender') // 酒馆老板未实装,恒用类型名
       .replace(/\{WorldEvilStone\}/g,
         Lang.itemName(this.world.crimson ? 836 : 61)   // ItemID.cs:3211/1661：Crimstone/Ebonstone Block
-        ?? (this.world.crimson ? '猩红石' : '黑檀石'));
+        ?? (this.world.crimson ? 'Crimstone' : 'Ebonstone'));
   }
 
   /** 对话框按钮(SetTalkNPC 后 UI 回调) */
@@ -14824,7 +14947,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (grant) {
         const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
         const name = Lang.npcName(bannerItemId(banner) ? (enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId) : enemy.vanillaId);
-        this.newText(`${name} 旗帜已就绪!`, 250, 250, 0);
+        this.newText(Lang.text('Mods.SandboxWorld.Toast.BannerReady', name ?? ''), 250, 250, 0);
         const _bannerItemVid = bannerItemId(banner);
         const _bannerKey = VANILLA_ITEM_KEY_BY_ID[_bannerItemVid] ?? 'place_v_91_banners';
         this.spawnDrop(this.player.cx, this.player.cy, _bannerKey, 1, 0, -3, banner);
@@ -14837,7 +14960,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const nerdy = new TownNPC('town_slime_blue', enemy.cx, enemy.cy - 20);
       nerdy.vy = -3 - Math.random() * 3;
       this.entities.add(nerdy, 'npcs');
-      this.cb.onToast?.(Lang.npcName(670) ?? '书呆子史莱姆加入了小镇！');
+      this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.npcName(670) ?? ''));
     }
     // 史莱姆雨击杀推进（NPC.cs:79880-79897：阈值 150、杀过王减半 75；场上无王 → 召王）。
     // 自然召王无公告无咆哮（SpawnOnPlayer(50) → SpawnBoss case 50 静默 :81504；
@@ -16621,7 +16744,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.world.flags.unlockedSlimeRedSpawn = true; // 世界级一次性（WorldFile :1413/:2433 持久化）
         const slime = new TownNPC('town_slime_red', bobber.cx, bobber.cy);
         this.entities.add(slime, 'npcs');
-        this.cb.onToast(Lang.itemName(682) ?? '红色城镇史莱姆加入了小镇！');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.itemName(682) ?? ''));
       } else {
         const en = Enemy.fromVanilla(id, bobber.cx - 8, bobber.cy - 8 + (id === 618 ? 64 : 0));
         if (en) this.entities.add(en, 'enemies');
@@ -17256,7 +17379,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (settled) return;
             settled = true;
             resolve();
-          }, (e) => fail(`世界加载失败：${(e as Error).message}`));
+          }, (e) => fail(Lang.text('Mods.SandboxWorld.Toast.WorldLoadFail', (e as Error).message)));
         },
         onSectionArrived: (rect) => {
           // R3：晚到 strip 标脏（chunk 重烘焙 + 光照；200×20 逐格 mark 低频可接受）
@@ -17302,7 +17425,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       net.connect(url, hostToken);
       // R10：30s 握手超时（fail 内统一 clearTimeout,终审 B4 修正：原 void timer 空转）
       timer = setTimeout(() => {
-        if (!settled && !net.gameWorld) fail('连接超时');
+        if (!settled && !net.gameWorld) fail(Lang.text('Mods.SandboxWorld.Toast.ConnectTimeout'));
       }, 30000);
     });
   }
@@ -17314,14 +17437,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 联机 pump：tile 上报冲洗 + 玩家状态节流发送（docs §4.2）
     if (this.net?.active) {
       this.net.tick();
-      // R3 移动续传：跨条带（200×20）边界时向服务器请求周围 strip
+      // R3 移动续传：跨条带（200×20）边界时向服务器请求周围 strip。
+      // 观战期取相机位（= RemoteClient.CheckSection 的观战段等价 :17118——
+      // 条带跟随观战目标而非自身 avatar）
+      const specCam0 = this.spectateCamPos();
+      const camX = specCam0 ? specCam0.x : this.player.cx;
+      const camY = specCam0 ? specCam0.y : this.player.cy;
       if (this.tickCount % 30 === 0 && this.net.gameWorld) {
-        const sx = Math.floor(this.player.cx / 16 / 200);
-        const sy = Math.floor(this.player.cy / 16 / 20);
+        const sx = Math.floor(camX / 16 / 200);
+        const sy = Math.floor(camY / 16 / 20);
         const key = sx + ',' + sy;
         if (key !== this.lastStripReq) {
           this.lastStripReq = key;
-          this.net.requestSection(this.player.cx, this.player.cy);
+          this.net.requestSection(camX, camY);
         }
       }
     }

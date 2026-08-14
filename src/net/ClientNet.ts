@@ -233,6 +233,12 @@ export class ClientNet {
     this.send(new NetWriter(Msg.SpawnTileData).i32(Math.floor(cx)).i32(Math.floor(cy)).finish());
   }
 
+  /** msg150 观战焦点（原版 SetOrRequestSpectating 客户端半边 :17089-17102）：
+   *  服务器把本端 AOI 过滤中心切到目标 slot（-1 恢复自身 avatar） */
+  sendSpectateFocus(targetSlot: number) {
+    this.send(new NetWriter(Msg.SpectateFocus).i16(targetSlot).finish());
+  }
+
   disconnect() {
     this.userClosed = true;
     this.active = false;

@@ -173,6 +173,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)；
       // width = NewTextMultiline WidthLimit（广播盒 460px 折行，-1 不限）
       onChat: (t, r, g, b, width) => ui.chatMessage(t, r, g, b, width),
+      // 观战启动关全 UI（IngameUIWindows.CloseAll :43017）
+      onCloseAllUI: () => ui.closeAll(),
       // NPC 对话系统(SetTalkNPC + GetChat)
       onNpcDialog: (name, chat, buttons, portrait) => ui.showNpcDialog(name, chat, buttons, portrait),
       onNpcDialogClose: () => ui.closeNpcDialog(),

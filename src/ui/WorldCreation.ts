@@ -245,7 +245,7 @@ export class WorldCreationPanel {
     const size = SIZES[this.sel.size];
     const seed = (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value.trim();
     const name = (this.panel.querySelector('[data-f=name]') as HTMLInputElement).value.trim()
-      || parseSeed(seed).specialName || '新世界';
+      || parseSeed(seed).specialName || Lang.text('Mods.SandboxWorld.WorldCreation.DefaultName');
     this.close(() => this.flow.onCreate({ name, seed, w: size.w, h: size.h, difficulty: this.sel.diff, evil: EVILS[this.sel.evil].value }));
   }
 

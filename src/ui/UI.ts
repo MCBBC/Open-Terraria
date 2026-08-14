@@ -74,7 +74,7 @@ import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
-import { NpcDialog, NpcShop, NpcHappinessPanel, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
+import { NpcDialog, NpcShop, NpcHappinessPanel, formatCopper, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
@@ -1269,7 +1269,7 @@ export class UI {
     if (def.tool?.power && def.tool.type !== 'sword') html += `<br>${Lang.text(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power)}`;
     // 盔甲防御行（vi_ 物品查 vanilla-itemstats.json；原版经 item.defense 的 tooltip 行）
     const vsDef = def.armor?.defense ?? statOfInternal(s.id)?.def;
-    if (vsDef) html += `<br>防御 +${vsDef}`;
+    if (vsDef) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Defense', vsDef)}`;
     if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
     // 物品自带说明行（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*，
     // 2664 键 zh 包内嵌；此前未消费——悬停只见数值不见"做什么用"）。vi_ 物品按原版名查键。
@@ -1455,7 +1455,7 @@ export class UI {
       if (this.heldStack) {
         // 放入 1 件（ItemSlot :757-764：reforgeItem = item.Clone() stack=1）
         if (this.reforgeItem) return;
-        if (!this.game.canReforge(this.heldStack)) { this.toast('该物品无法重铸'); return; }
+        if (!this.game.canReforge(this.heldStack)) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.CannotReforge')); return; }
         this.reforgeItem = { id: this.heldStack.id, stack: 1, prefix: this.heldStack.prefix }; // 保留词缀
         this.heldStack.stack -= 1;
         if (this.heldStack.stack <= 0) this.heldStack = null;
@@ -1484,11 +1484,11 @@ export class UI {
       if (!this.reforgeItem) return;
       const cost = this.game.reforgeCost(this.reforgeItem);
       if (this.game.coinsOwned() < cost) {
-        this.toast(Lang.inter(46) + ' 不足');
+        this.toast(Lang.text('Mods.SandboxWorld.Reforge.TooExpensive', Lang.inter(46)));
         return;
       }
       const np = this.game.doReforge(this.reforgeItem);
-      if (np < 0) { this.toast('重铸失败'); return; }
+      if (np < 0) { this.toast(Lang.text('Mods.SandboxWorld.Reforge.Fail')); return; }
       this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
       this.refreshReforge();
     });
@@ -1525,7 +1525,7 @@ export class UI {
       if (this.reforgeItem) {
         const cost = this.game.reforgeCost(this.reforgeItem);
         const owned = this.game.coinsOwned();
-        this.reforgeCostEl.textContent = `${Lang.inter(46)}: ${cost} 铜` + (owned < cost ? '（不足）' : '');
+        this.reforgeCostEl.textContent = `${Lang.inter(46)}: ${formatCopper(cost)}` + (owned < cost ? Lang.text('Mods.SandboxWorld.Reforge.CostShortParen') : '');
         this.reforgeCostEl.style.color = owned < cost ? '#e08a8a' : '#ffe8a0';
       } else {
         this.reforgeCostEl.textContent = '';
@@ -1755,7 +1755,7 @@ export class UI {
     {
       const row = el('div');
       row.style.cssText = 'display:flex; gap:4px; align-items:center; margin-bottom:6px;';
-      row.appendChild(el('div', 'sw-lbl', '预设'));
+      row.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.Tabs.Loadout')));
       this.loadoutBtns = [];
       for (let k = 0; k < 3; k++) {
         // 原版 DrawLoadoutButtons（Main.cs:41395-41431）：Extra[259] 3×3 图集——
@@ -1791,7 +1791,7 @@ export class UI {
       spacer.style.flex = '1';
       row.appendChild(spacer);
       this.eqPageBtns = [];
-      for (const [label, page] of [['装备', 0], ['杂项', 1]] as const) {
+      for (const [label, page] of [[Lang.text('Mods.SandboxWorld.UI.Equipment'), 0], [Lang.text('Mods.SandboxWorld.Tabs.Misc'), 1]] as const) {
         const b = el('button', 'sw-btn');
         b.textContent = label;
         b.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
@@ -1804,7 +1804,7 @@ export class UI {
       }
       // 图鉴入口（原版 BestiaryMenuButton Main.cs:41896-41910：背包侧按钮
       // IngameFancyUI.OpenUIState(BestiaryUI)；打开逻辑由 main.ts 注入 onBestiary）
-      const bBst = el('button', 'sw-btn', '图鉴');
+      const bBst = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Tabs.Bestiary'));
       bBst.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
       bBst.addEventListener('mousedown', (e) => {
         e.stopPropagation();
@@ -1819,8 +1819,7 @@ export class UI {
       if (this.game.player.appearance?.difficulty === 3) {
         // 力量菜单入口（原版 CreativeUI.Draw :98-117：背包左上 Journey_Toggle 按钮，
         // 同样 LocalPlayer.difficulty==3 门——点击 ToggleMenu 开 UICreativePowersMenu）
-        const bPow = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.JourneyPowers.Title') !== 'Mods.SandboxWorld.JourneyPowers.Title'
-          ? Lang.text('Mods.SandboxWorld.JourneyPowers.Title') : '力量');
+        const bPow = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.JourneyPowers.Title'));
         bPow.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
         bPow.addEventListener('mousedown', (e) => {
           e.stopPropagation();
@@ -1828,7 +1827,7 @@ export class UI {
           openJourneyPowersPanel(this.game);
         });
         row.appendChild(bPow);
-        const bRes = el('button', 'sw-btn', Lang.text('LegacyInterface.112') !== 'LegacyInterface.112' ? Lang.text('LegacyInterface.112') : '研究');
+        const bRes = el('button', 'sw-btn', Lang.text('LegacyInterface.112'));
         bRes.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
         bRes.addEventListener('mousedown', (e) => {
           e.stopPropagation();
@@ -1883,7 +1882,11 @@ export class UI {
     // 杂项页：miscEquips[5]（宠物/光源/矿车/坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）
     this.miscPageEl = el('div');
     this.miscPageEl.style.cssText = 'display:none; gap:10px;';
-    const MISC_LABELS = ['宠物', '光源', '矿车', '坐骑', '抓钩'];
+    const MISC_LABELS = [
+      Lang.text('Mods.SandboxWorld.Tabs.Pet'), Lang.text('Mods.SandboxWorld.Tabs.Light'),
+      Lang.text('Mods.SandboxWorld.Tabs.Minecart'), Lang.text('Mods.SandboxWorld.Tabs.Mount'),
+      Lang.text('Mods.SandboxWorld.Tabs.Grapple'),
+    ];
     const miscCol = el('div');
     miscCol.style.cssText = 'display:flex; flex-direction:column;';
     MISC_LABELS.forEach((lbl, k) => {
@@ -1910,7 +1913,7 @@ export class UI {
       miscCol.appendChild(pair);
     });
     this.miscPageEl.appendChild(miscCol);
-    this.miscPageEl.appendChild(vcol('染料', 0, 5, 'miscDye'));
+    this.miscPageEl.appendChild(vcol(Lang.text('Mods.SandboxWorld.Tabs.Dye'), 0, 5, 'miscDye'));
     left.appendChild(this.miscPageEl);
     // 垃圾桶（持久槽；可交换取回）——原版 (448,258) scale0.85=44px、槽底 Back7（context 6）
     const trashWrap = el('div');
@@ -2037,7 +2040,7 @@ export class UI {
     const modernRow = el('div');
     modernRow.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
     this.craftSearchEl = el('input') as HTMLInputElement;
-    this.craftSearchEl.placeholder = '搜索配方成品…';
+    this.craftSearchEl.placeholder = Lang.text('Mods.SandboxWorld.Craft.SearchHint');
     this.craftSearchEl.style.cssText = 'flex:1; padding:4px 8px; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px; font-size:12px;';
     this.craftSearchEl.addEventListener('input', () => { this.craftFocus = 0; this.refreshVanillaCrafting(); });
     modernRow.appendChild(this.craftSearchEl);
@@ -2509,7 +2512,7 @@ export class UI {
     if (!inHotbar) {
       slotEl.style.backgroundImage = content?.favorited ? 'url(sprites/vanilla/Inventory_Back10.png)' : '';
     }
-    slotEl.title = content?.favorited ? '已收藏（Alt+左键取消；禁止快速转移）' : '';
+    slotEl.title = content?.favorited ? Lang.text('Mods.SandboxWorld.Toast.Favorited') : '';
   }
 
   /** rAF 合并版 refreshAll(2026-08-13 泄露 review):滚轮/拾取/背包变化等
@@ -2729,7 +2732,7 @@ export class UI {
       const cnt = el('span', 'cnt', `${have}/${req.stack}`);
       if (have >= req.stack) cnt.style.color = '#7de08a';
       chip.appendChild(cnt);
-      chip.title = `${k ? Lang.itemNameByKey(k) : req.id}（左键放入 / 右键取回）`;
+      chip.title = `${k ? Lang.itemNameByKey(k) : req.id}${Lang.text('Mods.SandboxWorld.Craft.PutTakeHint')}`;
       chip.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         if (e.button === 2) { this.craftGridReturnReq(focusR, req.id); this.refreshAll(); return; }
@@ -2741,7 +2744,7 @@ export class UI {
     }
     // 合成按钮（格子优先：格内材料齐备才可点）
     const ready = focusR.items.every((req) => this.gridCovered(req.id) >= req.stack);
-    const btn = el('button', 'sw-btn', '⚒ 合成');
+    const btn = el('button', 'sw-btn', '⚒ ' + Lang.text('Mods.SandboxWorld.UI.Crafting'));
     btn.style.cssText = `margin:0; padding:4px 10px; font-size:12px; ${ready ? '' : 'opacity:0.4;'}`;
     if (ready) {
       btn.addEventListener('mousedown', (e) => {
@@ -2900,7 +2903,7 @@ export class UI {
       ? mkBtn(Lang.text('Mods.SandboxWorld.UI.ExportSave'), () => handlers.onExport?.())
       : null;
     const bSet = mkBtn(Lang.text('LegacyMenu.14'), () => handlers.onSettings?.());
-    const bBst = mkBtn('图鉴', () => handlers.onBestiary?.());
+    const bBst = mkBtn(Lang.text('Mods.SandboxWorld.Tabs.Bestiary'), () => handlers.onBestiary?.());
     const bQuit = mkBtn(Lang.text('Mods.SandboxWorld.UI.BackToMenu'), () => { panel.remove(); handlers.onQuit(); });
     panel.append(bRes, bSave);
     if (bExp) panel.appendChild(bExp);

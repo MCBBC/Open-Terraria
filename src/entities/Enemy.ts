@@ -6584,6 +6584,17 @@ export class Enemy extends Entity {
       pl?.addDPS(dmg);
       this.playerInteracted = true;  // AnyInteractions（playerInteraction 位）——雕像门 :79651
     }
+    // 毁灭者身段受击出探针（HitEffect :90265-90281：135 身段存活受击时,ai[2]==0
+    // （本段未出过探针）掷 1/25（Mechdusa 合体态 1/50）→ 置 ai[2]=1 并于段底中心
+    // 生成探针 139——每身段至多一只）
+    if (this.vanillaId === 135 && this.hp > 0 && this.ai2 === 0) {
+      const max = mechQueenUp() ? 50 : 25;
+      if (Math.floor(Math.random() * max) === 0) {
+        this.ai2 = 1;
+        const probe = Enemy.fromVanilla(139, this.cx, this.y + this.h);
+        if (probe) addEnemy(game, probe);
+      }
+    }
     this.iframes = pierce === 1 ? 0 : 10; // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
     // 击退管线（N:82144-82236 1:1）：五段软封顶 8/10/12/14/16（超出段 ×0.9/0.8/

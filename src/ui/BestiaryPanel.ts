@@ -29,6 +29,18 @@ import { VANILLA_NPCS } from '../data/vanillaNpcs';
 // public/sprites/vanilla-npcnetid.json，与 VanillaSpawner 同源数据）
 import vanillaNetIdJson from '../data/vanilla-npcnetid.json';
 const NETID_OV: Record<string, { scale?: number; color?: number[]; alpha?: number }> = vanillaNetIdJson;
+// NPCBestiaryDrawOffset 全表（tools/extract-npcbestiaryoffset.mjs ← NPCID.cs 三段合并
+// 665 条）：图鉴头像逐 NPC 手调（Boss/巨怪 Scale 缩小 / Position 挪位 / Frame 静态帧 /
+// Rotation / CustomTexture 手绘替换图；PortraitScale 仅详情档）。Hide 条目已在
+// BESTIARY_HIDE_IDS 排除（GetExclusions 不建条目）
+import bstDrawOffsetJson from '../data/vanilla-npcbestiaryoffset.json';
+const BST_DRAW_OFFSET: Record<string, {
+  scale?: number; portraitScale?: number; position?: number[];
+  portraitX?: number; portraitY?: number; rotation?: number; frame?: number; customTexture?: string;
+}> = bstDrawOffsetJson as Record<string, {
+  scale?: number; portraitScale?: number; position?: number[];
+  portraitX?: number; portraitY?: number; rotation?: number; frame?: number; customTexture?: string;
+}>;
 
 /** 图鉴 NPC 染色帧缓存（key = sheet|npcId|帧高——负 id 变体各自成键） */
 const bstTintCache = new Map<string, HTMLCanvasElement>();
@@ -37,8 +49,9 @@ const bstTintCache = new Map<string, HTMLCanvasElement>();
  *  在离屏合成完再贴回，destination-out 不挖主画布的 MapBG 底图） */
 function bstTintedFrame(
   img: ImageBitmap | HTMLImageElement, sheetId: number, npcId: number, fh: number, colorRGBA: number[],
+  frameIdx = 0,
 ): HTMLCanvasElement | null {
-  const key = `${sheetId}|${npcId}|${fh}|${colorRGBA.join(',')}`;
+  const key = `${sheetId}|${npcId}|${fh}|${frameIdx}|${colorRGBA.join(',')}`;
   const hit = bstTintCache.get(key);
   if (hit) return hit;
   const w = (img as HTMLImageElement).width ?? (img as ImageBitmap).width;
@@ -49,12 +62,12 @@ function bstTintedFrame(
   if (!cx) return null;
   cx.imageSmoothingEnabled = false;
   // ① base 帧（白剪影原样）
-  cx.drawImage(img, 0, 0, w, fh, 0, 0, w, fh);
+  cx.drawImage(img, 0, frameIdx * fh, w, fh, 0, 0, w, fh);
   // ② 染色帧：逐像素乘 colorRGB（alpha 保留）——同 Renderer.tintedSprite
   const t = document.createElement('canvas');
   t.width = w; t.height = fh;
   const tx = t.getContext('2d')!;
-  tx.drawImage(img, 0, 0, w, fh, 0, 0, w, fh);
+  tx.drawImage(img, 0, frameIdx * fh, w, fh, 0, 0, w, fh);
   const d = tx.getImageData(0, 0, w, fh);
   const [r, g, b] = colorRGBA;
   for (let i = 0; i < d.data.length; i += 4) {
@@ -66,7 +79,7 @@ function bstTintedFrame(
   // ③ 两步混合：destination-out 削 base × colorA + lighter 加染色帧
   cx.globalCompositeOperation = 'destination-out';
   cx.globalAlpha = (colorRGBA[3] ?? 255) / 255;
-  cx.drawImage(img, 0, 0, w, fh, 0, 0, w, fh);
+  cx.drawImage(img, 0, frameIdx * fh, w, fh, 0, 0, w, fh);
   cx.globalCompositeOperation = 'lighter';
   cx.globalAlpha = 1;
   cx.drawImage(t, 0, 0);
@@ -957,18 +970,25 @@ export class BestiaryPanel {
     const size = canvas.width;
     const paint = (img: ImageBitmap | HTMLImageElement) => {
       if (!canvas.isConnected) return;  // 上代 refresh 已销毁的画布不画(解码风暴浪费源)
+      const ov = BST_DRAW_OFFSET[String(npcId)];
       // ★ frames 查【母体 sheetId】——负 netID 变体（-1..-10 史莱姆配色等）在
-      //   vanilla-npcs.json 无独立条目，查 npcId 会缺帧数→整条多帧行当一帧画
-      const frames = VANILLA_NPCS[String(sheetId)]?.frames ?? 1;
+      //   vanilla-npcs.json 无独立条目，查 npcId 会缺帧数→整条多帧行当一帧画；
+      //   CustomTexture 是单张手绘图（UnlockableNPCEntryIcon :199 原样画、无帧无染色）
+      const frames = ov?.customTexture ? 1 : VANILLA_NPCS[String(sheetId)]?.frames ?? 1;
       const iw = (img as HTMLImageElement).naturalWidth || (img as ImageBitmap).width;
       const ih = (img as HTMLImageElement).naturalHeight || (img as ImageBitmap).height;
       const fh = Math.max(1, Math.floor(ih / frames));
       // 负 id 变体：netid 表 color/scale/alpha（绿史莱姆 -3=(0,220,40,100) 等）；
       // 正 id：NPC 表自身 color（16 僵尸色等个别非 default）
       const netOv = npcId < 0 ? NETID_OV[String(npcId)] : undefined;
-      const colorRGBA = netOv?.color ?? (npcId > 0 ? VANILLA_NPCS[String(npcId)]?.color : undefined);
-      const scale = netOv?.scale ?? 1;
+      const colorRGBA = ov?.customTexture ? undefined   // 手绘图不染色（原版 Color.White :199）
+        : netOv?.color ?? (npcId > 0 ? VANILLA_NPCS[String(npcId)]?.color : undefined);
+      // scale 链（:55-58）：DrawOffset.Scale 覆盖 NPC 自身 → portrait 档 PortraitScale 再覆盖
+      let scale = netOv?.scale ?? 1;
+      if (ov?.scale != null) scale = ov.scale;
+      if (bgMode === 'portrait' && ov?.portraitScale != null) scale = ov.portraitScale;
       const alphaBase = netOv?.alpha ?? 255;
+      const frameIdx = ov?.frame ?? 0;
       const cx = canvas.getContext('2d');
       if (!cx || !iw) return;
       cx.imageSmoothingEnabled = false;
@@ -978,13 +998,30 @@ export class BestiaryPanel {
       // NPCBestiaryDrawOffset 表逐个调）。只缩不放：超画布才等比缩（防溢出）
       const s = Math.min(1, size / (iw * scale), size / (fh * scale));
       const w = iw * s * scale, h = fh * s * scale;
-      const dx = (size - w) / 2, dy = (size - h) / 2;
+      let dx = (size - w) / 2, dy = (size - h) / 2;
+      // Position 偏移（原版 72px iconbox 口径，按画布比例换算；portrait 档 X/Y Override
+      // 覆盖对应分量 :66-72——Boss 巨怪下移出框/贴边修正靠它）
+      if (ov?.position || ov?.portraitX != null || ov?.portraitY != null) {
+        const k = size / 72;
+        const px = bgMode === 'portrait' && ov?.portraitX != null ? ov.portraitX : (ov?.position?.[0] ?? 0);
+        const py = bgMode === 'portrait' && ov?.portraitY != null ? ov.portraitY : (ov?.position?.[1] ?? 0);
+        dx += px * k; dy += py * k;
+        dx = Math.max(-w * 0.45, Math.min(size - w * 0.55, dx));   // 防整图移出画布
+        dy = Math.max(-h * 0.45, Math.min(size - h * 0.55, dy));
+      }
       cx.globalAlpha = alphaBase / 255;                // 负 id alpha 变体（-5 黑史莱姆 120）
       const composed = colorRGBA && (colorRGBA[3] ?? 255) > 0
-        ? bstTintedFrame(img, sheetId, npcId, fh, colorRGBA)
+        ? bstTintedFrame(img, sheetId, npcId, fh, colorRGBA, frameIdx)
         : null;
-      if (composed) cx.drawImage(composed, dx, dy, w, h);   // base+染色离屏合成
-      else cx.drawImage(img, 0, 0, iw, fh, dx, dy, w, h);
+      if (ov?.rotation) {
+        cx.save();
+        cx.translate(dx + w / 2, dy + h / 2);
+        cx.rotate(ov.rotation);
+        if (composed) cx.drawImage(composed, -w / 2, -h / 2, w, h);
+        else cx.drawImage(img, 0, frameIdx * fh, iw, fh, -w / 2, -h / 2, w, h);
+        cx.restore();
+      } else if (composed) cx.drawImage(composed, dx, dy, w, h);   // base+染色离屏合成
+      else cx.drawImage(img, 0, frameIdx * fh, iw, fh, dx, dy, w, h);
       cx.globalAlpha = 1;
     };
     const atlas = this.flow.atlas ?? null;
@@ -1009,19 +1046,23 @@ export class BestiaryPanel {
         }
       }
     };
+    // 贴图源：CustomTexturePath 手绘图（Images/UI/Bestiary/NPCs/* 扁平化 basename）
+    // 替换母体表（UnlockableNPCEntryIcon :74-81/:199——原样画、无帧无染色）
+    const ovTex = BST_DRAW_OFFSET[String(npcId)]?.customTexture;
+    const texPath = ovTex ? `vanilla/${ovTex}.png` : `vanilla/NPC_${sheetId}.png`;
     if (bg.image) {
       bstLoadSheet(atlas, `vanilla/${bg.image}.png`, (bgImg) => {
         if (!canvas.isConnected || !bgImg) return;
         paintWithBg(bgImg);
         // NPC 表到位后叠画（晚到重绘底图再叠;统一走缓存=同表并发只解码一次）
-        bstLoadSheet(atlas, `vanilla/NPC_${sheetId}.png`, (img) => {
+        bstLoadSheet(atlas, texPath, (img) => {
           if (!img || !canvas.isConnected) return;
           paintWithBg(bgImg); paint(img);
         });
       });
       return;
     }
-    bstLoadSheet(atlas, `vanilla/NPC_${sheetId}.png`, (img) => {
+    bstLoadSheet(atlas, texPath, (img) => {
       if (img) paint(img);
     });
   }

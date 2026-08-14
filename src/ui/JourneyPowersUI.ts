@@ -152,7 +152,7 @@ export function openJourneyPowersPanel(game: Game): void {
     // ---- 主条（CreateMainPowerStrip :167-213 语义）----
     const cats: Array<[number, string, string]> = [
       [1, t('Mods.SandboxWorld.JourneyPowers.CatDuplicate', '复制'), 'CreativePowers.InfiniteItemsCategory'],
-      [2, t('Mods.SandboxWorld.JourneyPowers.CatResearch', '研究'), 'CreativePowers.ResearchItemsCategory'],
+      [2, t('Mods.SandboxWorld.JourneyPowers.CatResearch', '研究'), 'CreativePowers.ResearchItemsCategoryClosed'],
       [3, t('Mods.SandboxWorld.JourneyPowers.CatTime', '时间'), 'CreativePowers.TimeCategory'],
       [4, t('Mods.SandboxWorld.JourneyPowers.CatWeather', '天气'), 'CreativePowers.WeatherCategory'],
       [5, t('Mods.SandboxWorld.JourneyPowers.CatDifficulty', '敌人难度'), 'CreativePowers.DifficultySlider_Closed'],
@@ -377,7 +377,7 @@ export function openJourneyPowersPanel(game: Game): void {
       r1.appendChild(val);
       body.appendChild(r1);
       body.appendChild(el('div', 'sw-jp-note',
-        t('CreativePowers.DifficultySlider_Description', '调整敌人的强度')));
+        t('Mods.SandboxWorld.JourneyPowers.DifficultyNote', '调整敌人的强度')));
     } else if (category === 6) {
       // 个人条（CreatePersonalPowerStrip :339-354）
       const r1 = el('div', 'sw-jp-row');

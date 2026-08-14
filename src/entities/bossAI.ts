@@ -757,6 +757,15 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
     e.x += e.vx; e.y += e.vy;
     return;
   }
+  // ★双子 timeLeft 互保（:26548-26563）：夜晚、未消散且 timeLeft<10 时,向场上
+  //  另一只眼借生命期（DiscourageDespawn(other.timeLeft-1)：取 max 抬升,NPC.cs:7237
+  //  ——timeLeft 对应本仓 despawnTimer 屏外递减位）。效果=两只眼离屏同步消散,
+  //  不会一只先蒸发留下单眼"独眼龙"
+  if (!game.world.clock.isDay && e.despawnTimer < 10) {
+    const other = (game.enemies() as Enemy[]).find((n) => !n.dead
+      && n !== e && (n.vanillaId === 125 || n.vanillaId === 126));
+    if (other && other.despawnTimer - 1 > e.despawnTimer) e.despawnTimer = other.despawnTimer - 1;
+  }
   // reflectsProjectiles 每帧复位(:26582/:27204)——mech 变身段(:26812/:27435)置真
   e.reflectsProjectiles = false;
   // ---- 旋转瞄准(num427/num471:atan2(dy-59, 自-玩)+π/2,步进 0.1/0.15) ----

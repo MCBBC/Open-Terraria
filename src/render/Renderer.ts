@@ -3250,6 +3250,28 @@ export class Renderer {
         // ——与基础精灵同变换叠加（原版同一 position/origin 二次 Draw）
         // bx/by = 基础精灵目标左上（地面型=底锚+pad / 飞行型=中心锚），发光层与本体同锚
         this.drawNpcGlow(e, r, -r.sw / 2, anchorY + eocOff);
+        // Mech 族 oldPos 拖尾（Main.cs:24592-24605：125-131 全族 + 139 自由态（ai3==0）
+        //  + 140；oldPos 9→1 间隔 2 共 5 份，α=(10-i)/20，同帧同当前旋转——原版此块
+        // 在本体 Draw 之后求值 → 鬼影压在本体之上）
+        {
+          const mId = e.vanillaId ?? 0;
+          if ((mId >= 125 && mId <= 131) || (mId === 139 && e.ai3 === 0) || mId === 140) {
+            const depth = e.historyDepth();
+            const mOp = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+            for (let i = 9; i >= 1; i -= 2) {
+              if (i >= depth) break;
+              ctx.save();
+              ctx.translate(e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2);
+              ctx.rotate(e.spin);
+              ctx.scale(scale, scale);
+              if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1);
+              ctx.globalAlpha = ((10 - i) / 20) * mOp;
+              ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
+              ctx.restore();
+            }
+            ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+          }
+        }
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
@@ -3438,6 +3460,8 @@ export class Renderer {
     dx?: number;
     /** 世界 px Y 锚微调（orbit 族 568/569 的 num47=-3 在 NPC_GLOW_ORBIT.dy） */
     dy?: number;
+    /** 状态门（139 探针辉仅自由态 ai[3]==0，:24592/:25064 双门同源） */
+    cond?: (e: import('../entities/Enemy').Enemy) => boolean;
     /** 中心层 alpha 表达式（见上；缺省 = 旧 id 链） */
     a?: number | '255a' | '128a2' | 'opacity';
     /** Color.A 背景衰减常数（运行时态 387/414 在 drawNpcGlow 内计算覆盖） */
@@ -3537,6 +3561,18 @@ export class Renderer {
     569: { tex: 'vanilla/Glow_224.png', mode: 'orbit' },   // 枯萎兽 T3
     661: { tex: 'vanilla/NPC_661.png', mode: 'orbit' },    // 帝皇蝶（:26099-26113 自贴图 ×6 HSL 彩虹轨道——
     //                                                     原版画 value80=TextureAssets.Npc[661] 即本表 tex 同文件）
+    // ---- 第五批：Mech 族发光叠层（Main.cs:25056-25070 机械 Boss 眼/激光/探针/毁灭者
+    // 灯光叠层。原版 Color(255,255,255,0) 在 XNA (One,InvSrcAlpha) 预乘混合下 =
+    // 全强度加色（color.A 不参与源贡献）→ a:1 + lighter；Dest 族 Color×(1-α/255)
+    // 标量乘全通道（Blend One 只取 RGB）→ 'opacity'；131 BoneLaser Color(200,200,200,0)
+    // → 200/255。134-136 原版另有 npcColor!=Black 光照门（全黑不叠）——本仓无逐实体
+    // 光染色管线，按全亮叠（差异登记，与全 Glow 表同口径）----
+    125: { tex: 'vanilla/Eye_Laser.png', mode: 'frame', a: 1 },          // 斯帕兹玛眼激光辉（:25060-25063）
+    139: { tex: 'vanilla/Probe.png', mode: 'frame', a: 1, cond: (e) => e.ai3 === 0 },  // 探针辉（:25064-25067，仅自由态 ai[3]==0；Mechdusa 挂链态无）
+    131: { tex: 'vanilla/Bone_Laser.png', mode: 'frame', a: 200 / 255 }, // Prime 激光臂炮口辉（:25119-25127 Color(200,200,200,0)）
+    134: { tex: 'vanilla/Dest1.png', mode: 'frame', a: 'opacity' },      // 毁灭者头灯光（Dest[type-134] :25056-25059）
+    135: { tex: 'vanilla/Dest2.png', mode: 'frame', a: 'opacity' },      // 毁灭者身段灯
+    136: { tex: 'vanilla/Dest3.png', mode: 'frame', a: 'opacity' },      // 毁灭者尾灯
   };
 
   /** NPC_GLOW 表全量条目（[npcId, 贴图路径]）——供 tests/visual-extras.test.ts
@@ -3756,6 +3792,7 @@ export class Renderer {
     if (!this.atlas) return;
     const g = Renderer.NPC_GLOW[e.vanillaId ?? -1];
     if (!g) return;
+    if (g.cond && !g.cond(e)) return;
     const img = this.atlas.ensureVImage(g.tex);   // 懒加载（首帧 null，次帧生效）
     if (!img) return;
     const ctx = this.ctx;
@@ -7851,7 +7888,8 @@ export class Renderer {
       const hFloat = clock.hourFloat;
       const hh = String(Math.floor(hFloat)).padStart(2, '0');
       const mm2 = String(Math.floor((hFloat % 1) * 60)).padStart(2, '0');
-      const timeText = `时间 ${hh}:${mm2}`;
+      // 原版怀表显示 = Game.Time("时间: {0}")官译 12 语言(Main.cs 信息饰品链)
+      const timeText = Lang.text('Game.Time', `${hh}:${mm2}`);
       ctx.strokeText(timeText, ox + size / 2, oy + 253 + 14);
       ctx.fillText(timeText, ox + size / 2, oy + 253 + 14);
     }
