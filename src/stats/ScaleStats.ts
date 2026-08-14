@@ -94,7 +94,8 @@ export function sampleCurve(keys: readonly CurveKey[], value: number): number {
   return f32(f32(f32(value - key.input) * num2) / num + key.output);
 }
 
-// 六条难度曲线（GameDifficultyData.cs:62-70，键值逐项照抄）
+// 七条难度曲线（GameDifficultyData.cs:62-70，键值逐项照抄；
+// DebuffTimeMultiplier(:70)/LightningPlayerDamageScaling(:71) 未消费暂不列）
 export const ENEMY_MAX_LIFE_MULTIPLIER: readonly CurveKey[] = [
   { input: GDL.JOURNEY, output: 0.5 }, { input: GDL.LEGENDARY, output: 4 },
 ];
@@ -111,33 +112,70 @@ export const ENEMY_MONEY_DROP_MULTIPLIER: readonly CurveKey[] = [
   { input: GDL.CLASSIC, output: 1 }, { input: GDL.EXPERT, output: 2.5 },
   { input: GDL.MASTER, output: 2.5 }, { input: GDL.LEGENDARY, output: 3.5 },
 ];
+/** TownNPCDamageMultiplier（GameDifficultyData.cs:69）：城镇 NPC 自卫攻击伤害乘区。
+ *  键 Journey 0.5→2 / Classic 1→1 / Expert 2→1.5 / Legendary 4→2——**无 Master 键**，
+ *  Master(3) 由 Sample 在 Expert(1.5)-Legendary(2) 区间线性插值得 1.75 */
+export const TOWN_NPC_DAMAGE_MULTIPLIER: readonly CurveKey[] = [
+  { input: GDL.JOURNEY, output: 2 }, { input: GDL.CLASSIC, output: 1 },
+  { input: GDL.EXPERT, output: 1.5 }, { input: GDL.LEGENDARY, output: 2 },
+];
+
+// ---------------------------------------------------------------------------
+// CreativePowers.DifficultySliderPower.UpdateInfoFromSliderValueCache
+// （CreativePowers.cs:1023-1035）——旅程"给 NPC 的强度"滑杆 → 倍率：
+//   slider <= 0.33 → Remap(slider, 0, 0.33, 0.5, 1)
+//   else           → Remap(slider, 0.33, 1, 1, 3)
+//   再对 1/20 步进取整：(float)Math.Round(v * 20f) / 20f（银行家舍入）
+// 放本模块（难度轴域）供 mainDifficulty 消费，JourneyPowers.ts 转发导出（避免环导）
+// ---------------------------------------------------------------------------
+export function strengthOfDifficultySlider(slider: number): number {
+  const v = slider <= 0.33
+    ? remap(slider, 0, 0.33, 0.5, 1)
+    : remap(slider, 0.33, 1, 1, 3);
+  return f32(f32(roundCS(f32(f32(v) * 20))) / 20);
+}
 
 // ---------------------------------------------------------------------------
 // Main.Difficulty / expertMode / masterMode（Main.cs:2760-2786）
-//   ★ GameMode 3（旅程）**不**抬档——旅程世界的 NPC 数值=经典档；真正的旅程
-//     0.5× 由 _gameModeDifficultyOverride（Main.cs:17245，旅程"给 NPC 的强度"
-//     滑杆 StrengthMultiplierToGiveNPCs）注入，本仓未建模旅程能力滑杆 → 恒 null。
+//   ★ GameMode 3（旅程）**不**走 Expert/Master 分支；旅程的 0.5×~3× 由
+//     _gameModeDifficultyOverride（Main.cs:17238-17248 UpdateCreativeGameModeOverride
+//     ← DifficultySliderPower.StrengthMultiplierToGiveNPCs，旅程"给 NPC 的强度"滑杆）
+//     注入——**优先于** GameMode 分支求值（:2771-2773），getGoodWorld +1 仍叠加其后。
+//     已建模：world.journeyPowers.difficultySlider（JourneyPowers.ts），缺省滑杆 0
+//     → 0.5（旅程世界 NPC 半强度是原版真实缺省）。
 //   ★ getGoodWorld（for the worthy 种子）整体 +1 档（:2783-2785）——经典 FTW 世界
 //     的 expertMode 即为 true，克脑 40 爬行者/饥饿者专家分支/持械僵尸全数生效。
 //   我方 world.difficulty：0 经典 / 1 专家 / 2 大师 / 3 旅程（World.ts:73）。
 // ---------------------------------------------------------------------------
-export function mainDifficulty(world: Pick<World, 'difficulty' | 'seedFlags'> | null | undefined): number {
+/** 难度轴求值所需的世界投影（seedFlags/journeyPowers 均可缺省 = 旧档/单测裸对象） */
+export interface DifficultyWorldView {
+  difficulty: number;
+  seedFlags?: World['seedFlags'];
+  journeyPowers?: import('../world/JourneyPowers').JourneyPowersState;
+}
+
+export function mainDifficulty(world: DifficultyWorldView | null | undefined): number {
   let num: number = GDL.CLASSIC;
   if (world) {
-    if (world.difficulty === 1) num = GDL.EXPERT;
+    // 旅程强度滑杆 override（Main.cs:17241 IsJourneyMode + :2771-2773 HasValue →
+    // 直接取值覆盖 GameMode 档；GameMode==3 即 IsJourneyMode Main.cs:2696）
+    if (world.difficulty === 3) {
+      num = strengthOfDifficultySlider(world.journeyPowers?.difficultySlider ?? 0);
+    } else if (world.difficulty === 1) num = GDL.EXPERT;
     else if (world.difficulty === 2) num = GDL.MASTER;
     if (world.seedFlags?.getGoodWorld) num += 1;
   }
   return num;
 }
 
-/** Main.expertMode（Main.cs:2762）：Difficulty >= Expert（getGoodWorld 抬档后同样生效） */
-export function mainExpertMode(world: Pick<World, 'difficulty' | 'seedFlags'> | null | undefined): boolean {
+/** Main.expertMode（Main.cs:2762）：Difficulty >= Expert（getGoodWorld 抬档后同样生效；
+ *  旅程强度滑杆 ≥2× 同样置位——Difficulty 轴语义） */
+export function mainExpertMode(world: DifficultyWorldView | null | undefined): boolean {
   return mainDifficulty(world) >= GDL.EXPERT;
 }
 
 /** Main.masterMode（Main.cs:2760）：Difficulty >= Master */
-export function mainMasterMode(world: Pick<World, 'difficulty' | 'seedFlags'> | null | undefined): boolean {
+export function mainMasterMode(world: DifficultyWorldView | null | undefined): boolean {
   return mainDifficulty(world) >= GDL.MASTER;
 }
 
@@ -205,6 +243,15 @@ export function getKnockbackMultiplierScaledByDifficulty(normalKnockbackMult: nu
 /** GetAttackDamage_ScaledByDifficulty（:7015）：(int)(normal * EnemyDamageMultiplier.Sample(difficulty)) */
 export function getAttackDamageScaledByDifficulty(normalDamage: number, difficulty: number): number {
   return Math.trunc(f32(normalDamage * sampleCurve(ENEMY_DAMAGE_MULTIPLIER, difficulty)));
+}
+
+/** GetAttackDamage_ForTownNPC（NPC.cs:7041-7044）：
+ *  (int)(normalDamage * TownNPCDamageMultiplier.Sample(Main.Difficulty))
+ *  消费点 = AI_007 城镇 NPC 四攻击态发射/挥击伤害入参（近战 :54897 / 弓 :55169 /
+ *  魔法 :55319 / 挥击 :55466，四处同式 num = f(num * num2)——num2 为 Boss 击杀
+ *  进度强化链 :53400-53560，本仓未接恒 1）。注意 (int) = 向零截断非四舍五入 */
+export function getAttackDamageForTownNPC(normalDamage: number, difficulty: number): number {
+  return Math.trunc(f32(normalDamage * sampleCurve(TOWN_NPC_DAMAGE_MULTIPLIER, difficulty)));
 }
 
 /** Main.DamageVar（Main.cs:65597-65620）1:1：base ±15% ±luck 重掷。
@@ -303,13 +350,15 @@ export function bindScaleStatsWorld(ctx: ScaleStatsWorld | null): void { boundWo
 
 export function scaleStatsWorld(): ScaleStatsWorld { return boundWorld ?? CLASSIC_SCALE_WORLD; }
 
-/** World → ScaleStatsWorld 投影（Game.afterWorldLoad 用；anyNpc 由实体桶实现） */
+/** World → ScaleStatsWorld 投影（Game.afterWorldLoad 用；anyNpc 由实体桶实现）。
+ *  difficulty 为 live getter（读时重算 mainDifficulty）——旅程强度滑杆运行时
+ *  拖动即生效，无需重新绑定（对应原版 Main.Difficulty 属性每次读重算） */
 export function scaleStatsWorldOf(
-  world: Pick<World, 'difficulty' | 'seedFlags' | 'flags'>,
+  world: Pick<World, 'difficulty' | 'seedFlags' | 'flags'> & { journeyPowers?: import('../world/JourneyPowers').JourneyPowersState },
   anyNpc: (type: number) => boolean,
 ): ScaleStatsWorld {
   return {
-    difficulty: mainDifficulty(world),
+    get difficulty() { return mainDifficulty(world); },
     hardMode: !!world.flags?.hardMode,
     getGoodWorld: !!world.seedFlags?.getGoodWorld,
     tenthAnniversaryWorld: !!world.seedFlags?.tenthAnniversary,

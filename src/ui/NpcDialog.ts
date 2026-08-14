@@ -122,16 +122,10 @@ const CSS = `
 .sw-happy-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 `;
 
-/** 铜币计价格式化(原版 tooltip:金/银/铜) */
+/** 铜币计价格式化(原版 = Main.ValueToCoins,货币名走 Currency.* 官译;
+ *  旧硬编码"金/银/铜"他语言不可译) */
 export function formatCopper(v: number): string {
-  const gold = Math.floor(v / 10000);
-  const silver = Math.floor((v % 10000) / 100);
-  const copper = v % 100;
-  let s = '';
-  if (gold) s += `${gold}金`;
-  if (silver) s += `${silver}银`;
-  if (copper || !s) s += `${copper}铜`;
-  return s;
+  return Lang.valueToCoins(v);
 }
 
 export class NpcDialog {

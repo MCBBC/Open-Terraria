@@ -285,6 +285,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.golferScoreAccumulated) g.player.golferScoreAccumulated = player.golferScoreAccumulated; // PL:1792
     if (player.deathsPve !== undefined) g.player.deathsPve = player.deathsPve; // PL:53840
     if (player.anglerQuestsFinished !== undefined) g.player.anglerQuestsFinished = player.anglerQuestsFinished; // PL:1790
+    // 旅程力量·玩家侧（IPersistentPerPlayerContent）已在 loadSaveData 内合并进
+    // world.journeyPowers（SaveFile.ts 统一路径），此处无需重复回填
     if (Array.isArray(player.hideInfo)) g.player.hideInfo = player.hideInfo; // PL:776 hideInfo[13]
     if (player.hairDye !== undefined) g.player.hairDye = player.hairDye;   // PL:53805-53808 发色剂 byte（旧档缺省 0）
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
@@ -743,7 +745,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
         else {
           quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
-          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
+          // ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
         }
       }).catch((e) => {
         console.error('kvSet failed', e);

@@ -122,6 +122,10 @@ export interface EvolutionHost {
    *  FreezeTime 时 0。desiredWorldTilesUpdateRate 随 dayRate 走（Main.cs:6290——全员熟睡
    *  ×5；快进中恒 1 与 dayRate=60 解耦）。缺省 1 = 无时间倍率系统（单测/离线宿主） */
   worldUpdateRate?: number;
+  /** 旅程力量·停止感染蔓延（CreativePowers.StopBiomeSpreadPower.Enabled，
+   *  CreativePowers.cs:1550；WorldGen.UpdateWorld :71515-71519
+   *  AllowedToSpreadInfections = !Enabled）。缺省 false = 允许蔓延 */
+  journeyStopBiomeSpread?: boolean;
 }
 
 export class WorldEvolution {
@@ -135,7 +139,9 @@ export class WorldEvolution {
     const st = this.host.store;
     const { w, h } = st;
     this.hardMode = !!this.host.flags.hardMode;
-    this.allowedToSpread = true; // CreativePowers.StopBiomeSpread 无对应系统
+    // 感染蔓延门（WorldGen.cs:71513-71519：AllowedToSpreadInfections =
+    // !StopBiomeSpreadPower.Enabled——旅程力量"停止感染蔓延"）
+    this.allowedToSpread = !this.host.journeyStopBiomeSpread;
     // WorldGen.GetWorldUpdateRate（cs:71545/:72056-72063）：=0 时 UpdateWorld 整体跳过
     // （采样数全零,演化停摆——FreezeTime 语义）；desiredWorldTilesUpdateRate 随 dayRate
     // 走（Main.cs:6290：TargetTimeRate × 全员熟睡 5；快进中恒 1,与 dayRate=60 解耦）

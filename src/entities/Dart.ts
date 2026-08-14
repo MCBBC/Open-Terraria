@@ -162,25 +162,6 @@ function shotCenterSolid(game: GameHooks, e: { x: number; y: number; w: number; 
   return game.world.store.isSolid(tx, ty);
 }
 
-/** AABB 前沿三点采样(巨石 31×31 盒用;中心点判定会让半盒嵌入墙后才发现) */
-function boxEdgeSolid(game: GameHooks, e: { x: number; y: number; w: number; h: number }, axis: 'x' | 'y', dir: number): boolean {
-  const st = game.world.store;
-  if (axis === 'y') {
-    const ey = dir > 0 ? e.y + e.h - 1 : e.y;
-    const ty = Math.floor(ey / TILE);
-    for (const fx of [0.25, 0.5, 0.75]) {
-      if (st.isSolid(Math.floor((e.x + e.w * fx) / TILE), ty)) return true;
-    }
-    return false;
-  }
-  const ex = dir > 0 ? e.x + e.w - 1 : e.x;
-  const tx = Math.floor(ex / TILE);
-  for (const fy of [0.25, 0.5, 0.75]) {
-    if (st.isSolid(tx, Math.floor((e.y + e.h * fy) / TILE))) return true;
-  }
-  return false;
-}
-
 export class TrapShot extends Entity {
   w = 8; h = 8;
   vx: number;

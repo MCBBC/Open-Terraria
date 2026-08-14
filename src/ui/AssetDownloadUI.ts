@@ -6,6 +6,7 @@
 // ((33,15,91)×0.685,与 UI.ts 原版像素面板同源);全程方角/硬边框/像素字体,
 // 无圆角无渐变。
 import { assetCacheState, assetsComplete, onAssetProgress, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
+import { Lang } from '../i18n/Lang';
 
 /** 原版 packed 色(UIGenProgressBar.ts 同源):corrupt 长条填充 4283888223 */
 function packedColor(v: number): string {
@@ -143,9 +144,10 @@ function fmtPct(s: AssetCacheState): string {
   return s.total > 0 ? `${Math.floor((s.done / s.total) * 100)}%` : '…';
 }
 function phaseText(s: AssetCacheState): string {
-  if (s.phase === 'done') return '完成';
-  if (s.phase === 'idle') return '准备';
-  return PHASE_LABEL[s.phase as keyof typeof PHASE_LABEL] ?? '';
+  // 相位文案 = Mods.SandboxWorld.AssetDl.*(自制资产管线,原版无对应键)
+  if (s.phase === 'done') return Lang.text('Mods.SandboxWorld.AssetDl.Done');
+  if (s.phase === 'idle') return Lang.text('Mods.SandboxWorld.AssetDl.Ready');
+  return Lang.text(`Mods.SandboxWorld.AssetDl.Phase_${PHASE_LABEL[s.phase as keyof typeof PHASE_LABEL] ?? ''}`);
 }
 
 /** 挂载右下角进度徽标(幂等;完成自动淡出)。
@@ -168,19 +170,19 @@ export function mountAssetBadge(): void {
   badgeEl = document.createElement('div');
   badgeEl.className = 'sw-asset-badge';
   badgeEl.innerHTML = '<div class="spin"></div><span class="txt"></span>';
-  badgeEl.title = '游戏资源后台下载中(进入单人游戏前会等待完成)';
+  badgeEl.title = Lang.text('Mods.SandboxWorld.AssetDl.BadgeTitle');
   document.body.appendChild(badgeEl);
   const txt = badgeEl.querySelector('.txt') as HTMLElement;
   const update = (st: AssetCacheState) => {
     if (!badgeEl) return;
-    badgeEl.title = `${st.done}/${st.total}(失败 ${st.failed})`;
+    badgeEl.title = Lang.text('Mods.SandboxWorld.AssetDl.CountDetail', st.done, st.total, st.failed);
     // 失败终态(3 轮自动重试后仍有缺):不淡出,常显失败数——菜单上就能看到
     // 异常,不必点单人游戏才发现(2026-08-13 可靠性 review)
     if (st.phase === 'done' && st.failed > 0) {
-      txt.textContent = `资源下载失败 ${st.failed} 项`;
+      txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Failed', st.failed);
       return;
     }
-    txt.textContent = `资源下载 ${fmtPct(st)} · ${phaseText(st)}`;
+    txt.textContent = Lang.text('Mods.SandboxWorld.AssetDl.Summary', fmtPct(st), phaseText(st));
     if (st.phase === 'done' && !badgeFading) {
       badgeFading = true;
       badgeEl.style.opacity = '0';

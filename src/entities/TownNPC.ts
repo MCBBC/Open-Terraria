@@ -12,14 +12,15 @@ import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS } from '../data/tiles'
 import type { TileStore } from '../world/TileStore';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable, findShimmerFreeSpot } from '../stats/Shimmer';
-import { townNpcAltTexture, townNpcProfileSheet } from '../data/townNpcProfiles';
+import { townNpcAltTexture, townNpcProfileSheet, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
+import { getAttackDamageForTownNPC, mainDifficulty } from '../stats/ScaleStats';
 import { hslToRgb } from '../player/Appearance';
 import { newNpcName } from '../i18n/RandomText';
 import { canHit } from '../physics/LineOfSight';
 import {
   TOWN_ATTACK_TIME, TOWN_ATTACK_CHANCE, TOWN_ATTACK_TYPE, TOWN_DANGER_RANGE,
   TOWN_MELEE, TOWN_BOW, TOWN_MAGIC, TOWN_SWING, TOWN_PRETTY_SAFE,
-  type TownShotParams, townNpcDamageMult,
+  type TownShotParams,
 } from '../data/vanillaTownAttack';
 import { TownShot } from './TownShot';
 import { visEffectFrames, mouseTextColorApprox } from './Enemy';
@@ -277,6 +278,10 @@ export class TownNPC extends Entity {
   private atkBurstIdx = 0;
   /** world.flags.hardMode 缓存(attackUpdate 每 tick 刷新) */
   private hardModeFlag = false;
+  /** 633 狼人态缓存(attackUpdate 每 tick 刷新,ShouldBestiaryGirlBeLycantrope
+   *  NPC.cs:94961-94972:血月夜或满月[moonPhase==0]夜)——发射端换 proj 929 +
+   *  dmg×1.5 截断(:54782-54785) */
+  private werewolfFlag = false;
   // 表情气泡:字段/掷骰已退役——统一走 render/EmoteBubble 模块(spawnEmote,
   // 并行会话 1:1 版);空闲随机冒泡由 Game.tickNpcEmotes 窗口喂(双画修复 2026-08-13)
   // ---- 环境与互殴受击(NPC.cs :91538 族调用点的三件套)----
@@ -806,13 +811,24 @@ export class TownNPC extends Entity {
    *  - 入态:ai[1]=AttackTime,面向目标;态内每 tick ai[1]--/localAI[3]++/vx×0.8
    *  - 发射档:localAI[3]==num46/55/65;连发链 `localAI[3]>档 → 推下一档`(:55066 族)
    *  - 退出:ai[1]<=0 → 冷却 localAI[1] = cdBase/2 + rand(cdRand)(:54927-54934 族)
-   *  近似项:难度伤害缩放恒 Classic=1(Journey/Expert 切换未接);633 狼人变体/
-   *  108 连发 1-3/160·663 落点弹重掷等特化在发射端按 note 近似 */
+   *  伤害缩放(考古销项 2026-08-14):四态伤害统一走 GetAttackDamage_ForTownNPC
+   *  (NPC.cs:7041-7044 = ×TownNPCDamageMultiplier.Sample(Main.Difficulty),
+   *  GameDifficultyData.cs:69:Journey 2/Classic 1/Expert 1.5/Legendary 2,Master 3
+   *  无键→区间插值 1.75)——已接 ScaleStats.getAttackDamageForTownNPC +
+   *  mainDifficulty(旅程强度滑杆/getGoodWorld +1 同链)。
+   *  已销项:633 狼人变体 proj929+×1.5/108 连发 1-3(权重 4:2:1)±3.4/160·663
+   *  落点弹原版几何+重掷次数(10/5)。
+   *  登记未接:num2 进度强化链(:53400-53560 战斗书/19 Boss 旗标/硬模式+0.4/
+   *  醉酒×1.1/Skyblock+0.5——先于难度乘区,数值上 Expert≈进度链后期);挥击态
+   *  逐 tick 弧形判定(GetSwingStats/TweakSwingStats,近似中段一击);:55864 族
+   *  flag28 LOS 掷骰直存 */
   private attackUpdate(world: import('../world/World').World, game: GameHooks): boolean {
     if (this.atkCd > 0) this.atkCd--;
     const atkType = TOWN_ATTACK_TYPE[this.vanillaId];
     if (atkType === undefined) return false;
     this.hardModeFlag = !!(world.flags as Record<string, boolean>).hardMode;
+    this.werewolfFlag = this.vanillaId === 633
+      && shouldBestiaryGirlBeLycantrope(world.clock.moonPhase, world.clock.bloodMoon, world.clock.isDay);
     if (this.atkState === 0) {
       // 触发门:站地 + 冷却尽 + 探测范围内有 LOS 敌(:55621 flag31 + :55864 族掷骰)
       // 坐姿 ai[0]==5 不满足 flag31 的 ai[0]<2 门(:55621)——坐着不打,起身再打
@@ -871,12 +887,16 @@ export class TownNPC extends Entity {
     const base = table[this.vanillaId];
     if (!base) return undefined;
     if (base.hardMode && this.hardModeFlag) return { ...base, ...base.hardMode } as TownShotParams;
+    // 633 狼人态(:54782-54785):换 proj 929 + dmg×1.5 取(int)截断(15→22)
+    if (this.vanillaId === 633 && this.werewolfFlag) {
+      return { ...base, proj: 929, dmg: Math.trunc(base.dmg * 1.5) };
+    }
     return base;
   }
 
 
   /** 挥击态(15):前方矩形近战判定(:55469-55494;原版逐 tick 弧形挥击,近似中段一击) */
-  private swingUpdate(_world: import('../world/World').World, game: GameHooks): void {
+  private swingUpdate(world: import('../world/World').World, game: GameHooks): void {
     const sw = TOWN_SWING[this.vanillaId];
     if (!sw) return;
     const t = TOWN_ATTACK_TIME[this.vanillaId] ?? 15;
@@ -892,17 +912,19 @@ export class TownNPC extends Entity {
         hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
       if (e.dead) continue;
       if (!(rx < e.x + e.w && rx + rect > e.x && ry < e.y + e.h && ry + rect > e.y)) continue;
-      if (e.hurt(Math.round(dmg * townNpcDamageMult(0)), this.facing * kb, 0, game)) {
+      // 伤害结算(:55466):GetAttackDamage_ForTownNPC(num82*num2)——(int) 截断
+      if (e.hurt(getAttackDamageForTownNPC(dmg, mainDifficulty(world)), this.facing * kb, 0, game)) {
         game.addDamageNumber(e.x, e.y, dmg, false, '#FFD060');
       }
     }
   }
 
-  /** 探测范围内按侧取最近可打敌(:53887-53958 近侧目标;LOS=Collision.CanHit) */
+  /** 探测范围内按侧取最近可打敌(:53887-53958 近侧目标;LOS=Collision.CanHit)。
+   *  返回含实体 position/Size——160/663 落点弹几何按原版 Main.npc[n].position/Size 采样 */
   private pickSideTarget(world: import('../world/World').World, game: GameHooks, range: number):
-    { cx: number; cy: number } | null {
-    let bestL: { cx: number; cy: number; d: number } | null = null;
-    let bestR: { cx: number; cy: number; d: number } | null = null;
+    { cx: number; cy: number; x: number; y: number; w: number; h: number } | null {
+    let bestL: { cx: number; cy: number; x: number; y: number; w: number; h: number; d: number } | null = null;
+    let bestR: { cx: number; cy: number; x: number; y: number; w: number; h: number; d: number } | null = null;
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
         damage?: number; def?: { damage?: number } };
@@ -916,7 +938,7 @@ export class TownNPC extends Entity {
       const d = Math.hypot(dx, ecy - this.cy);
       if (d >= range) continue;
       if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
-      const cand = { cx: ecx, cy: ecy, d };
+      const cand = { cx: ecx, cy: ecy, x: e.x, y: e.y, w: e.w, h: e.h, d };
       if (dx < 0) { if (!bestL || d < bestL.d) bestL = cand; }
       else { if (!bestR || d < bestR.d) bestR = cand; }
     }
@@ -980,18 +1002,37 @@ export class TownNPC extends Entity {
       vx += (Math.random() * 2 - 1) * spread;
       vy += (Math.random() * 2 - 1) * spread;
     }
-    const dmgFinal = Math.round(dmg * townNpcDamageMult(0));
+    // 伤害结算(近战 :54897/弓 :55169/魔法 :55319 同式):
+    // GetAttackDamage_ForTownNPC(dmg*num2)——(int) 截断;num2 进度链未接恒 1
+    const dmgFinal = getAttackDamageForTownNPC(dmg, mainDifficulty(world));
     const sx = this.cx + this.facing * 16 - 5;
     const sy = this.cy - 2 - 5;
-    // 落点弹(160/663):目标区域生成 velocity=0;实心重掷近似 ≤5 次
+    // 落点弹(160/663):目标区域随机点生成 velocity=0;实心重掷(160≤10/:55351、
+    // 663≤5/:55369),重掷耗尽仍实心则按末次落点照常生成(原版 while 语义)
     if (speed === 0 && target) {
-      for (let k = 0; k < 5; k++) {
-        const px = target.cx - 16 + Math.random() * 32;
-        const py = target.cy - 16 + Math.random() * 32;
-        if (!st.isSolid(Math.floor(px / TILE), Math.floor(py / TILE))) {
-          game.spawnTownShot?.(new TownShot(px - 5, py - 5, 0, 0, dmgFinal, kb, proj, { noGravity: true }));
-          return;
+      const is160 = this.vanillaId === 160;
+      let retries = is160 ? 10 : 5;
+      let px = 0, py = 0;
+      do {
+        if (is160) {   // :55349 position − Size×2 + Size×rand(0..1)×5(逐轴独立)
+          px = target.x - target.w * 2 + target.w * Math.random() * 5;
+          py = target.y - target.h * 2 + target.h * Math.random() * 5;
+        } else {       // :55367 position + Size×rand(0..1)
+          px = target.x + target.w * Math.random();
+          py = target.y + target.h * Math.random();
         }
+      } while (retries-- > 0 && st.isSolid(Math.floor(px / TILE), Math.floor(py / TILE)));
+      game.spawnTownShot?.(new TownShot(px - 5, py - 5, 0, 0, dmgFinal, kb, proj, { noGravity: true }));
+      return;
+    }
+    // 108 巫师连发(:55336-55348):SelectRandom(1,1,1,1,2,2,3) 掷 1-3 发(权重 4:2:1),
+    // 每发速度额外 ±3.4 逐轴随机(共基速 vec4,叠加 vector5)
+    if (this.vanillaId === 108) {
+      const n = [1, 1, 1, 1, 2, 2, 3][Math.floor(Math.random() * 7)];
+      for (let i = 0; i < n; i++) {
+        const ox = (Math.random() * 2 - 1) * 3.4;
+        const oy = (Math.random() * 2 - 1) * 3.4;
+        game.spawnTownShot?.(new TownShot(sx, sy, vx + ox, vy + oy, dmgFinal, kb, proj, {}));
       }
       return;
     }

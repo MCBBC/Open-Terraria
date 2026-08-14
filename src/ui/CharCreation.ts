@@ -311,7 +311,7 @@ export class CharCreation {
     // 随机名（🎲）：取人类城镇 NPC 名字池并集随机（原版无玩家名字池——见 RandomText 注记）
     const randName = document.createElement('button');
     randName.textContent = '🎲';
-    randName.title = Lang.text('Mods.SandboxWorld.WorldCreation.RandomName');
+    randName.title = Lang.text('Mods.SandboxWorld.CharCreate.RandomName');
     randName.style.cssText = 'padding:4px 8px;cursor:pointer;';
     randName.addEventListener('click', () => {
       name.value = randomPlayerName();

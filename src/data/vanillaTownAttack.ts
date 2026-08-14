@@ -3,7 +3,9 @@
 //   ai[0]==10 近战 :54747-54936 / ==12 弓 :54936-55240 /
 //   ==14 魔法 :55240-55405 / ==15 挥击 :55406-55538(转录核对版)。
 // 伤害缩放:GetAttackDamage_ForTownNPC = ×GameDifficultyData.TownNPCDamageMultiplier
-//   (Journey 2 / Classic 1 / Expert 1.5 / Legendary 2,:69)。num2 恒 1(Skyblock +0.5 未接)。
+//   (Journey 2 / Classic 1 / Expert 1.5 / Legendary 2,:69;Master 3 无键→区间插值 1.75)
+//   ——已接 src/stats/ScaleStats.ts getAttackDamageForTownNPC(消费点 TownNPC.ts)。
+//   num2 恒 1(Boss 击杀进度强化链 :53400-53560 未接,Skyblock +0.5 同)。
 
 /** DangerDetectRange(NPCID.cs:4835,默认 -1 → 运行时按 200,AI_007 :53866) */
 export const TOWN_DANGER_RANGE: Record<number, number> = {
@@ -66,7 +68,7 @@ export interface TownShotParams {
 /** ai[0]==10 近战弹态(转录自 :54747-54936) */
 export const TOWN_MELEE: Record<number, TownShotParams> = {
   38:  { proj: 30,  dmg: 20, speed: 6,  shootTick: 10, cdBase: 180, cdRand: 120, spread: 0,  kb: 7,   aimLiftScaled: 16 },
-  633: { proj: 880, dmg: 15, speed: 24, shootTick: 1,  cdBase: 15,  cdRand: 10,  spread: 0,  kb: 7,   note: 'BestiaryGirl 狼人态 proj 929 / dmg ×1.5' },
+  633: { proj: 880, dmg: 15, speed: 24, shootTick: 1,  cdBase: 15,  cdRand: 10,  spread: 0,  kb: 7,   note: '狼人态(血月夜/满月夜)发射端换 proj 929 + dmg×1.5 截断(:54782-54785)' },
   550: { proj: 669, dmg: 24, speed: 6,  shootTick: 10, cdBase: 120, cdRand: 60,  spread: 0,  kb: 9,   aimLiftScaled: 16 },
   588: { proj: 721, dmg: 15, speed: 8,  shootTick: 5,  cdBase: 20,  cdRand: 10,  spread: 0,  kb: 9,   aimLiftScaled: 16, note: '弹体 timeLeft=480' },
   208: { proj: 588, dmg: 30, speed: 6,  shootTick: 10, cdBase: 60,  cdRand: 120, spread: 0,  kb: 6,   aimLiftScaled: 16 },
@@ -98,11 +100,11 @@ export const TOWN_BOW: Record<number, TownShotParams> = {
 export const TOWN_MAGIC: Record<number, TownShotParams> = {
   54:  { proj: 585, dmg: 16, speed: 10, shootTick: 30, cdBase: 20, cdRand: 15, spread: 1, kb: 2 },
   108: { proj: 15, dmg: 18, speed: 6, shootTick: 15, cdBase: 15, cdRand: 5, spread: 0, kb: 3, aimLiftScaled: 20,
-         note: '连发 1-3 发(权重 4:2:1),每发附加 ±3.4 随机速度(未接,单发近似)' },
+         note: '连发 1-3 发(SelectRandom 权重 4:2:1,:55337),每发附加 ±3.4 逐轴随机速度' },
   160: { proj: 590, dmg: 40, speed: 0, shootTick: 15, burst: [30, 45], cdBase: 10, cdRand: 1, spread: 0, kb: 3,
-         note: '落点弹:在目标区域随机生成(实心重掷≤10),velocity=0' },
+         note: '落点弹:position−Size×2+Size×rand(0..1)×5(:55349),实心重掷≤10(:55351),velocity=0' },
   663: { proj: 950, dmg: 15, speed: 0, shootTick: 15, burst: [25, 35, 45], cdBase: 0, cdRand: 1, spread: 0, kb: 3,
-         hardMode: { dmg: 20 }, note: '落点弹:目标区域生成(实心重掷≤5)' },
+         hardMode: { dmg: 20 }, note: '落点弹:position+Size×rand(0..1)(:55367),实心重掷≤5(:55369),velocity=0' },
   20:  { proj: 586, dmg: 0, speed: 0, shootTick: 24, cdBase: 10, cdRand: 1, spread: 0, kb: 3,
          note: 'dryad 净化脉冲(0 伤/0 速,弹 ai1=本体);CanHitLine 全失仍进入态' },
 };
@@ -113,15 +115,6 @@ export const TOWN_SWING: Record<number, { dmg: number; kb: number; rect: number;
   441: { dmg: 9, kb: 3.5, rect: 28, cdBase: 9, cdRand: 3, }, // note: 名字 Andrew 时 dmg/kb×2(猫单特典)
   353: { dmg: 10, kb: 5, rect: 32, cdBase: 15, cdRand: 8 },
 };
-
-/** GameDifficultyData.TownNPCDamageMultiplier(:69);本仓难度 = Classic 恒 1 */
-export function townNpcDamageMult(difficulty: number): number {
-  switch (difficulty) {
-    case 1: return 1.5;   // Expert
-    case 2: return 2;     // Legendary(含 Journey 2.0 同值)
-    default: return 1;    // Classic / Journey(原版 Journey=2,此处 0 视经典)
-  }
-}
 
 /** AttackType1(弓/枪族)持械表(DrawNPCExtras Main.cs:27121-27195)。
  *  攻击态 ai[0]==12 全程手持武器图标,旋转 = ai[2]×90°×spriteDirection

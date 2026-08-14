@@ -20,7 +20,7 @@ export class UITextBox extends UITextPanel {
   focused = false;
   private caretTime = 0;
 
-  constructor(text: string, public maxLength: number, public placeholder = '请输入…') {
+  constructor(text: string, public maxLength: number, public placeholder?: string) {
     super(text, 0.9);
     this.minWidth = StyleDimension.fromPixels(260);
     this.onClick(() => this.focus());

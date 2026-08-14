@@ -12,7 +12,8 @@
     "start": "vite build && vite preview",
     "e2e": "node scripts/run-e2e.mjs",
     "test:audit": "vitest run tests/atlas-lint.test.ts tests/extract-audit.test.ts",
-    "prebuild": "npm run test:audit"
+    "prebuild": "npm run test:audit",
+    "play": "open -na \"Google Chrome\" --args --force-gpu-mem-available-mb=16384 --js-flags=\"--max-old-space-size=8192\" --ignore-gpu-blocklist http://localhost:4173"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3"

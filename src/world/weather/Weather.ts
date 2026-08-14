@@ -66,6 +66,13 @@ export interface WeatherCtx {
    *  outsideWeatherEffectIntensity 门（:190-191 向 1.1/-0.1 以 0.005/tick 逼近）；
    *  缺省 false（露天） */
   behindBackwall?: boolean;
+  /** 旅程力量·冻结风况（CreativePowers.FreezeWindDirectionAndStrength.Enabled，
+   *  CreativePowers.cs:1482；消费 Main.cs:58247——true 时 windCounter 重掷整段
+   *  跳过，current→target 缓动仍跑）。缺省 false */
+  freezeWind?: boolean;
+  /** 旅程力量·冻结雨情（CreativePowers.FreezeRainPower.Enabled，CreativePowers.cs:1516；
+   *  消费 Main.cs:64329/:64357——true 时雨不停/不换挡/不新开）。缺省 false */
+  freezeRain?: boolean;
   /** 天气环境音循环音量下发（每帧；Sfx 常驻轨 setVolume 跟随） */
   onAmbience?: (v: WeatherLoopVolumes) => void;
   /** 金币雨玩家锚定（WorldGen.cs:71825 FindClosest 的单机等价；active/dead 门在 Weather 内判） */
@@ -479,8 +486,9 @@ export class WeatherState {
       if (this.windSpeedCurrent < target) this.windSpeedCurrent = target;
     }
     // windCounter 掷 target 增量（L58252-58295）——灯笼夜整段跳过（Main.cs:58249：
-    // LanternsUp → return；风场保持当前值漂移到既定 target，不再重掷）
-    if (ctx.lanternsUp) return;
+    // LanternsUp → return；风场保持当前值漂移到既定 target，不再重掷）；
+    // 旅程冻结风况同门（Main.cs:58247 !FreezeWindDirectionAndStrength.Enabled 才进）
+    if (ctx.lanternsUp || ctx.freezeWind) return;
     this.windCounter--;
     if (this.windCounter <= 0) {
       const prevSign = this.windSpeedTarget < 0 ? -1 : 1;
@@ -623,6 +631,9 @@ export class WeatherState {
   /** 雨调度（UpdateTime 段 Main.cs:64327-64390） */
   private updateRainSchedule(ctx: WeatherCtx) {
     if (this.raining) {
+      // 旅程冻结雨情（Main.cs:64329 !FreezeRainPower.Enabled 才推进——雨不停/
+      // 不换挡；灯笼夜停雨同受冻结门压制 :64331 在门内）
+      if (ctx.freezeRain) return;
       // 灯笼夜落雨立即停（Main.cs:64331-64335：LanternsUp → StopRain，不改雨强渐变）
       if (ctx.lanternsUp) { this.stopRain(); return; }
       this.rainTime -= ctx.dayRate;
@@ -638,7 +649,8 @@ export class WeatherState {
       // 灯笼夜当夜或次夜预约都不开新雨（Main.cs:64353 else-if 门）
       if (ctx.lanternsUp || ctx.nextNightIsLanternNight) return;
       const num2 = Math.floor(86400 / Math.max(1, ctx.dayRate));
-      let canStart = ctx.dayRate !== 0 && ctx.playerStrongEnough;
+      // 旅程冻结门（Main.cs:64357 flag = !FreezeRainPower.Enabled && dayRate != 0）
+      let canStart = ctx.dayRate !== 0 && !ctx.freezeRain && ctx.playerStrongEnough;
       if (canStart) {
         if (this.rng.int(0, Math.round(num2 * 5.75) - 1) === 0) this.tryStartRain(ctx);
         else if (this.cloudBGActive >= 1 && this.rng.int(0, Math.round(num2 * 4.25) - 1) === 0) this.tryStartRain(ctx);

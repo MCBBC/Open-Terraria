@@ -50,6 +50,13 @@ export class SaveClient {
       moonPhase: world.clock.moonPhase, moonType: world.moonType,
       difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
       journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
+      // 旅程力量·世界侧（IPersistentPerWorldContent；与 saveGame 主线程路径同源）
+      journeyPowers: {
+        freezeRain: world.journeyPowers.freezeRain,
+        freezeWind: world.journeyPowers.freezeWind,
+        stopBiomeSpread: world.journeyPowers.stopBiomeSpread,
+        difficultySlider: world.journeyPowers.difficultySlider,
+      },
       sundialCooldown: world.sundialCooldown, moondialCooldown: world.moondialCooldown,
       fastForwardTimeToDawn: world.fastForwardTimeToDawn,
       fastForwardTimeToDusk: world.fastForwardTimeToDusk,
@@ -85,6 +92,12 @@ export class SaveClient {
       taxMoney: player.taxMoney ?? 0,         // PL:53839
       deathsPve: player.deathsPve ?? 0,       // PL:53840
       anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
+      // 旅程力量·玩家侧（IPersistentPerPlayerContent；与 saveGame 主线程路径同源）
+      journeyPowers: {
+        godmode: world.journeyPowers.godmode,
+        farPlacementRange: world.journeyPowers.farPlacementRange,
+        spawnRateSlider: world.journeyPowers.spawnRateSlider,
+      },
     };
     // ★ 不 transfer:st.* 是活数组,transfer 会 detach 游戏状态;结构化克隆在发送线程
     // 完成(一次 memcpy),游戏内后续写入不影响已快照的副本

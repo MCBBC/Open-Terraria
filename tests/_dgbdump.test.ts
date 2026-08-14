@@ -80,5 +80,17 @@ it('dump dungeonC/dungeonB grids', () => {
     if (name === 'dungeonC') dump('dgC');
     if (name === 'dungeonB') dump('dgB');
     if (name === 'dungeonPa') dump('dgP');
+    if (name === 'dungeonBa') dump('dgBA');
+    // 流指纹（同 shimmer-checkpoint.streamHash 口径）
+    const ur = (rng as unknown as { ur: { seedArray: Int32Array; inext: number } }).ur;
+    let h = 0x811c9dc5;
+    const step = (b: number) => { h = Math.imul(h ^ (b & 0xff), 16777619) >>> 0; };
+    for (let i = 0; i < ur.seedArray.length; i++) {
+      const v = ur.seedArray[i] | 0;
+      for (let b = 0; b < 4; b++) step(v >>> (8 * b));
+    }
+    const ix = ur.inext >>> 0;
+    for (let b = 0; b < 4; b++) step(ix >>> (8 * b));
+    console.log(`STREAM ${name} ${h.toString(16).padStart(8, '0')}`);
   });
 }, 300000);

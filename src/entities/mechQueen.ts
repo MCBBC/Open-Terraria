@@ -25,9 +25,12 @@ let mechQueen: Enemy | null = null;
 /** queen 专属标记（原版 ai[3] = whoAmI 非零哨兵的等价物,见头注偏差登记） */
 const mechQueenMarks = new WeakSet<Enemy>();
 
-/** SpawnBoss :81472 `Main.npc[mechQueen].ai[3] = mechQueen`——召唤端落非零标记 */
+/** SpawnMechQueen :19742 `mechQueen = FindFirstNPC(127)` + SpawnBoss :81472
+ *  `Main.npc[mechQueen].ai[3] = mechQueen`——召唤端即刻登记 + 落非零标记
+ *  (不等 AI 首 tick,与原版时序一致) */
 export function markMechQueen(e: Enemy): void {
   mechQueenMarks.add(e);
+  mechQueen = e;
 }
 
 /** AI_032 :27741-27743 `if (ai[3] != 0f) mechQueen = whoAmI`——每 tick 重登记 */

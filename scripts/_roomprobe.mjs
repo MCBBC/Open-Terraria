@@ -200,10 +200,13 @@ try {
     await sleep(700);                        // 中继 + A 侧外观串变化解析（按串变化才 parse）
     if (!bDbg.sentMsg4) console.log('[dbg] B resend 未发送:', JSON.stringify(bDbg));
     // 探针页游戏循环不自动跑——代理外观解析在 simulateRemotePlayers（fixedUpdate 内），
-    // 读代理前手动驱动若干 tick（真实对局 RAF 常跑无此需要）
+    // 读代理前手动驱动若干 tick（真实对局 RAF 常跑无此需要）；驱动后复位位置，
+    // 防扰动下游"坐标零错位"断言（重力沉降 ~10px）
     await pageA.evaluate(() => {
       const g = window.__swGame;
+      const sx = g.player.x, sy = g.player.y;
       for (let i = 0; i < 12; i++) g.fixedUpdate(1 / 60);
+      g.player.x = sx; g.player.y = sy; g.player.vx = 0; g.player.vy = 0;
     });
     const dyeReads = await pageA.evaluate(() => {
       const g = window.__swGame;

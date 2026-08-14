@@ -124,11 +124,17 @@ import vanillaValueJson from '../data/vanilla-itemvalue.json';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
 import { Enemy, visEffectFrames } from '../entities/Enemy';
+import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
+import { spawnMechQueenEnsemble } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
 import { scanLuckScene, rollLuck } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
+import {
+  bindJourneyPowers, journeyPowers, shouldDisableSpawns,
+  FAR_PLACEMENT_RANGE_X, FAR_PLACEMENT_RANGE_Y, DEFAULT_TILE_RANGE_X, DEFAULT_TILE_RANGE_Y,
+} from '../world/JourneyPowers';
 import { pickMusic, newMusicState, MUSIC_SLOT, resolveEventMusic, isOldOnesArmy, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { resetGorePool, liveGorePieces, setGoreScreen, GorePiece } from '../entities/GorePiece';
@@ -648,6 +654,8 @@ export class Game implements GameHooks {
   private frameDts: number[] = [];
   /** 上一 tick 的 clock.timeOfDay（昼夜跨越检测） */
   private _lastClockT = 0.3;
+  /** 旅程 SkipToTime 落点（相位翻转帧由昼夜事件块收尾应用，Main.SkipToTime :64657） */
+  private pendingTimeSkip: number | null = null;
   /** 信息列图标点击边沿(防按住连切) */
   private _infoAccClickLatch = false;
   /** 上一 tick 的夜内时间（0-32400t；鹿角怪 16200t 午夜跨越检测，Main.cs:64602-64603） */
@@ -2312,6 +2320,8 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // Mechdusa queen 登记复位（WorldGen.clearWorld :6907 NPC.mechQueen=-1）
+    resetMechQueen();
     // 摇树状态复位（WorldGen.clearWorld :6896 ResetTreeShakes）+ 绑当前 store
     // （getTreeShake 渲染查询的树底归位需要）
     this.treeShakes.reset();
@@ -2322,6 +2332,9 @@ export class Game implements GameHooks {
     // active/netID/position），每次 fromVanilla 现场重算——绑对象引用即可读最新档
     bindScaleStatsWorld(scaleStatsWorldOf(w, (type) => this.entities.enemies.some(
       (en) => { const e2 = en as Enemy; return !e2.dead && e2.vanillaId === type; })));
+    // 旅程力量状态注入（CreativePowerManager.Instance 静态单例语义——
+    // Player.damage 的 Godmode/isExpert 轴等经 journeyPowers() 读此处绑定的对象）
+    bindJourneyPowers(w.journeyPowers);
     // 旧日军团事件依赖接线（bossAI_dd2.ts DD2_EVENT_HOOKS 占位正式落地）
     this.wireDD2Hooks();
     // 晶塔表首扫（wld 导入的既有晶塔即刻可点；放置/破坏时 refreshPylons 增量刷）
@@ -2463,6 +2476,10 @@ export class Game implements GameHooks {
       // 再走 GetWorldUpdateRate 封顶 24（WorldGen.cs:72056-72063）——睡觉 ×5 演化加速由此进链
       get worldUpdateRate() { return Math.min(w.isFastForwardingTime() ? 1 : w.dayRate(), 24); },
       playerTile: () => ({ x: this.player.cx / TILE, y: this.player.cy / TILE }),
+      // 旅程力量·停止感染蔓延（CreativePowers.StopBiomeSpreadPower，
+      // WorldGen.cs:71515-71519 AllowedToSpreadInfections = !Enabled——原版消费点
+      // 无 IsJourneyMode 门，状态随世界存档）
+      get journeyStopBiomeSpread() { return !!w.journeyPowers?.stopBiomeSpread; },
     });
     // Torch God 彩蛋事件（触发扫描/熄灭/弹幕 949/复燃/掉 5043）
     this.torchGod = new TorchGodEvent({
@@ -3693,6 +3710,9 @@ export class Game implements GameHooks {
     // （Next(spawnRate)==0；spawnRate 修正表见 VanillaSpawner.getSpawnRate）。
     // 水蜡烛（heldWaterCandle/waterCandleNear）在 getSpawnRate 内修正，不再改节流
     if (this.enemySpawnEnabled) {
+      // 旅程刷怪率滑杆=0（NPC.SpawnNPC :186-201 CanSpawnEnemiesNear :255-277——
+      // IsJourneyMode + GetShouldDisableSpawnsFor：史莱姆雨落怪与常规刷怪同受此门）
+      if (!(w.isJourney && shouldDisableSpawns(w.journeyPowers.spawnRateSlider))) {
       // 史莱姆雨天空落怪（NPC.cs:192-195：每帧先 SlimeRainSpawns 再常规链，独立概率门）
       if (this.world.weather.slimeRain) {
         const sp = this.vanillaSpawner ?? (this.vanillaSpawner = new VanillaSpawner(w));
@@ -3707,6 +3727,7 @@ export class Game implements GameHooks {
         }
       }
       this.trySpawnEnemy();
+      }
     }
 
     // ---- 压力板触发 ----
@@ -4174,6 +4195,12 @@ export class Game implements GameHooks {
         w.moondialCooldown = 0;
         this.newText(Lang.misc(8), 50, 255, 130);
       }
+      // 旅程 SkipToTime 收尾（上方相位翻转触发完整 StartDay/StartNight 链后落最终时刻）
+      if (this.pendingTimeSkip != null) {
+        w.clock.timeOfDay = this.pendingTimeSkip;
+        this._lastClockT = this.pendingTimeSkip;
+        this.pendingTimeSkip = null;
+      }
     }
     // ---- 夜间坠星（SpawnFallingObjects :71861-71898：每 tick 概率
     //      p = 10×(w/4200)×boost/8000 = w×boost/3,360,000；运气定向 RollLuck(15)==0
@@ -4308,8 +4335,16 @@ export class Game implements GameHooks {
           const n = this.spawnHardBossPending;
           this.spawnHardBossPending = 0; // 一次性机会：无论成败清零（:64596）
           if (!this.boss) {
-            // 机械自然生成同无声（Main.cs:64580-64594；Roar 只在物品 :43146 等）
-            this.summonBossAtTx(n === 1 ? 'destroyer' : n === 2 ? 'twins' : 'skeletron_prime', offTx, false);
+            // Mechdusa 世界（SpecialSeedFeatures.Mechdusa,Main.cs:64575-64577）：
+            // 机械 Boss 自然 roll 一律改召合体（SpawnMechQueen 走玩家位召唤链）
+            const sf = this.world.seedFlags ?? {};
+            const mechdusaWorld = (!!sf.remix && !!sf.getGoodWorld) || !!sf.everything;
+            if (mechdusaWorld) {
+              this.summonMechdusa();
+            } else {
+              // 机械自然生成同无声（Main.cs:64580-64594；Roar 只在物品 :43146 等）
+              this.summonBossAtTx(n === 1 ? 'destroyer' : n === 2 ? 'twins' : 'skeletron_prime', offTx, false);
+            }
           }
         }
       }
@@ -4410,7 +4445,7 @@ export class Game implements GameHooks {
       // 烘焙吞吐日志(每 60 帧汇总):dirty 队列/最近烘焙耗时/画布规模
       if (this.renderLoadLog && this.tickCount % 60 === 0) {
         const cc = this.chunks;
-        if (cc.dirtyQueue.length || cc.lastFlushMs > 2) {
+        if (cc.dirtyQueue.length > 4 || cc.lastFlushMs > 2) {  // 1-2=视野内动画 chunk 正常轮转,不刷屏
           console.log(`[rbake] t=${this.tickCount} dirty=${cc.dirtyQueue.length}/${cc.chunks.size} lastFlush=${cc.lastFlushMs.toFixed(1)}ms×${cc.lastFlushCount} arrive=${cc.arriveInvalidateChunks}`);
         }
       }
@@ -6785,10 +6820,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  （= remixWorld && getGoodWorld,SpecialSeedFeatures.cs 亲核）→ 成功才
       //  ApplyItemTime + SoundID 15 + mechQueen 链召唤（127 主 + 125/126/134 + 2×139 探针
       //  同点,公告 LegacyMisc[107] "机械美杜莎已苏醒!"——SpawnBoss :81492-81496）。
-      //  ★偏差：mechQueen 联动 AI 未实装——四 Boss 独立行动,非合体;
+      //  mechQueen 联动 AI 已实装（bossAI.ts mech 分支+蛇发绘制+蛇发段链压缩）;
       //  本仓 getfixedboi 解析不置 remix（SeedEasterEggs）,门以 everything 兜底
-      const mechActive = (this.entities.enemies as Enemy[]).some((e) => !e.dead
-        && (e.vanillaId === 127 || e.vanillaId === 125 || e.vanillaId === 126 || e.vanillaId === 134));
+      const mechActive = anyMechBossUp(this.entities.enemies);
       const sf = this.world.seedFlags ?? {};
       const mechdusaWorld = (!!sf.remix && !!sf.getGoodWorld) || !!sf.everything;
       if (mechActive) {
@@ -7745,10 +7779,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 原版 IsInTileInteractionRange（Player.cs:31548）+ GetTileRegion
    * （TileReachCheckSettings.cs:53）1:1：玩家盒外扩 tileRangeX=5 / tileRangeY=3
-   * （+tileBoost）的【矩形】判定（Simple 档 multiplier=1/上限 20）。非圆形距离 */
+   * （+tileBoost）的【矩形】判定（Simple 档 multiplier=1/上限 20）。非圆形距离。
+   * 旅程扩大放置范围（FarPlacementRangePower，Player.cs:18636-18645 每 tick 重算
+   * tileRangeX/Y：×2+8 → 18/14——Main.IsJourneyMode 门）在基础半扩上 +13/+11 */
   private inTileRange(tx: number, ty: number, tb = 0): boolean {
     const p = this.player;
-    const x = Math.min(20, 5) + tb, y = Math.min(20, 3) + tb;
+    const far = this.world?.isJourney && journeyPowers().farPlacementRange;
+    const x = Math.min(20, 5) + tb + (far ? FAR_PLACEMENT_RANGE_X - DEFAULT_TILE_RANGE_X : 0);
+    const y = Math.min(20, 3) + tb + (far ? FAR_PLACEMENT_RANGE_Y - DEFAULT_TILE_RANGE_Y : 0);
     const LX = Math.floor(p.x / TILE) - x;
     const HX = Math.ceil((p.x + p.w) / TILE) - 1 + x;
     const LY = Math.floor(p.y / TILE) - y;
@@ -10565,6 +10603,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // :58249 风场停掷）
       lanternsUp: LanternNight.lanternsUp,
       nextNightIsLanternNight: LanternNight.nextNightIsLanternNight,
+      // 旅程力量·冻结风/雨（CreativePowers.cs:1482/:1516——Main.cs:58247/:64329/:64357
+      // 原版消费点无 IsJourneyMode 门：旅程角色在经典世界开力量同样生效，状态随
+      // 该世界存档；非旅程世界缺省 false 无行为差）
+      freezeWind: !!w.journeyPowers?.freezeWind,
+      freezeRain: !!w.journeyPowers?.freezeRain,
       // 天气环境音循环门（SceneState.cs:101/190-191）：雪原带 + 是否在背景墙后
       zoneSnow: !!this.scene?.zoneSnow,
       behindBackwall: !!this.scene && (() => {
@@ -11961,6 +12004,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     void prog;
+  }
+
+  /** Main.SkipToTime（Main.cs:64657-64671，CreativePowers StartDay/Noon/Night/Midnight
+   *  :774-864 调用）：while(setIsDayTime != dayTime) 逐次跑 UpdateTime_StartDay/Night
+   *  完整链（血月 roll/渔夫任务重掷/月相推进…）再落时刻。本仓实现：先把时钟拨到
+   *  目标相位边界（_lastClockT 置边界前值 → 本帧 crossed 检测自然触发完整链），
+   *  pendingTimeSkip 由昼夜事件块收尾落到最终时刻——同帧内等价原版同步语义 */
+  skipToTime(timeOfDay: number, setIsDayTime: boolean): void {
+    const w = this.world;
+    const boundary = setIsDayTime ? Clock.DAWN : Clock.DUSK;
+    if (setIsDayTime !== w.clock.isDay) {
+      // 相位翻转：跨午夜回绕时 dayCount++（Clock.tick 的 wrap 语义）
+      if (w.clock.timeOfDay > boundary) w.clock.dayCount++;
+      w.clock.timeOfDay = boundary + 1e-6;
+      this._lastClockT = boundary - 1e-6;   // 保证 crossed() 命中
+      this.pendingTimeSkip = timeOfDay;
+    } else {
+      // 同相跳时刻：原版 while 不进——不触发昼夜事件
+      w.clock.timeOfDay = timeOfDay;
+      this._lastClockT = timeOfDay;
+    }
   }
 
   // ================= 生成 =================
@@ -14609,7 +14673,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // DropCoins :53351-53390 掉钱档按**世界难度**：经典掉一半/专家 3/4/大师全掉）
         // PvP 死亡不掉（:38321-38322 pvp → lostCoins=0，无 DropCoins）
         if (dropsCoinsOnDeath(charDiff) && !pvpDeathNoCoins) {
-          const keep = deathCoinKeepFraction(this.world.difficulty);  // Main.GameMode（Main.cs:2677）
+          // 死亡掉钱档（Player.DropCoins :53351-53380 读 Main.expertMode/masterMode =
+          // Difficulty 轴——旅程强度滑杆 ≥2× 同样按专家/大师掉钱）
+          const keep = deathCoinKeepFraction(this.world.isMaster ? 2 : this.world.isExpert ? 1 : 0);
           let lost = 0;
           const face = [1, 100, 10000, 1000000];
           // vi_71-74 单轨(本地 coin_* 双轨兼容段已随退役移除)
@@ -16610,8 +16676,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 机械美杜莎链召唤（NPC.SpawnMechQueen :19724-19750，奥库瑞姆剃刀 5334 专用）：
    *  mechQueen=-2 标记 → SpawnOnPlayer(127)（SpawnBoss :81469-81473 走 Start=100 专属
    *  分支 + LegacyMisc[107] "机械美杜莎已苏醒!"公告）→ 以其 Center 同点 NewNPC
-   *  125/126/134（Start=1）+ 2×139 探针（ai0=毁灭者 whoAmI ±1）。
-   *  调用方已过双门（无机械 Boss 在场 + Mechdusa 种子）。返回是否落位成功 */
+   *  125/126/134（Start=1）+ 2×139 探针（ai2=毁灭者引用,ai3=∓1 侧位）。
+   *  调用方已过双门（anyMechBossUp + Mechdusa 种子）。返回是否落位成功 */
   private summonMechdusa(): boolean {
     if (this.net && !this.net.policy.isHost) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
@@ -16625,17 +16691,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (st.type[st.idx(tx, ty)] !== 0) break;
     }
     const spawnY = Math.max(4, ty - 12) * TILE;
-    const prime = Enemy.fromVanilla(127, tx * TILE + 8, spawnY);
+    // 链召唤（spawnMechQueenEnsemble = :19739-19748:queen 标记 + 同点伴随 + 探针挂链）
+    const prime = spawnMechQueenEnsemble(this, tx * TILE + 8, spawnY);
     if (!prime) return false;
-    this.entities.add(prime, 'enemies');
+    prime.despawnTimer = 15000;   // SpawnBoss timeLeft = activeTime(750)×20（:81485）
     this.boss = prime;
-    // 同点伴随（SpawnMechQueen :19743-19747：取 Prime Center 为共同出生点；
-    // ai0=1 为 Start 参数，探针 ai0=毁灭者引用——本仓以同点落位近似）
-    const ccx = prime.cx, ccy = prime.cy;
-    for (const nid of [125, 126, 134, 139, 139]) {
-      const e = Enemy.fromVanilla(nid, ccx, ccy);
-      if (e) { e.id = this.entities.nextId++; this.entities.add(e, 'enemies'); }
-    }
     // 公告（SpawnBoss :81492-81496：127 且 mechQueen 命中 → misc[107]，非 HasAwoken）
     if (this.cb.onChat) this.cb.onChat(Lang.misc(107), 175, 75, 255);
     else this.cb.onToast(Lang.misc(107));

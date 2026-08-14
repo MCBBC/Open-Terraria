@@ -79,6 +79,7 @@ import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel } from './ResearchUI';
+import { openJourneyPowersPanel } from './JourneyPowersUI';
 import { CharCreation } from './CharCreation';
 import type { Appearance } from '../player/Appearance';
 import type { ChestData } from '../world/World';
@@ -1816,6 +1817,17 @@ export class UI {
       // 如需再补应落在 Settings 而非背包顶栏）
       // Journey 研究献祭入口（原版仅旅程模式 UISacrificeDialog；Appearance.difficulty===3 门）
       if (this.game.player.appearance?.difficulty === 3) {
+        // 力量菜单入口（原版 CreativeUI.Draw :98-117：背包左上 Journey_Toggle 按钮，
+        // 同样 LocalPlayer.difficulty==3 门——点击 ToggleMenu 开 UICreativePowersMenu）
+        const bPow = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.JourneyPowers.Title') !== 'Mods.SandboxWorld.JourneyPowers.Title'
+          ? Lang.text('Mods.SandboxWorld.JourneyPowers.Title') : '力量');
+        bPow.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
+        bPow.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          this.closeInventory();
+          openJourneyPowersPanel(this.game);
+        });
+        row.appendChild(bPow);
         const bRes = el('button', 'sw-btn', Lang.text('LegacyInterface.112') !== 'LegacyInterface.112' ? Lang.text('LegacyInterface.112') : '研究');
         bRes.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
         bRes.addEventListener('mousedown', (e) => {
@@ -2003,7 +2015,8 @@ export class UI {
       // 伤害减免换算（:41567-41572）：大师 ×1.0 / 专家 ×0.75 / 普通 ×0.5
       const mul = w.isMaster ? 1.0 : w.isExpert ? 0.75 : 0.5;
       const reduce = Math.ceil(st * mul);
-      const diff = w.isMaster ? '大师' : w.isExpert ? '专家' : '普通';
+      // 难度名 = 原版官译（UI.Softcore 经典 / UI.Expert 专家 / UI.Master 大师）
+      const diff = w.isMaster ? Lang.text('UI.Master') : w.isExpert ? Lang.text('UI.Expert') : Lang.text('UI.Softcore');
       this.tooltip.innerHTML = `<b>${st} 防御</b><br><span style="color:#9a8ab8">伤害减免 ${reduce}%（${diff}）</span>`;
       this.tooltip.style.display = 'block';
     });
@@ -2308,8 +2321,14 @@ export class UI {
 
   private openChestPanel(c: ChestData) {
     this.openChest = c;
-    // 容器来源标识（原版 player.chest 约定）：-2 存钱罐 / -3 保险箱 / -4 守护者熔炉 / -5 虚空保险库
-    const bankNames: Record<number, string> = { [-2]: '存钱罐', [-3]: '保险箱', [-4]: "守护者熔炉", [-5]: '虚空保险库' };
+    // 容器来源标识（原版 player.chest 约定）：-2 存钱罐 / -3 保险箱 / -4 守护者熔炉 / -5 虚空保险库。
+    // 名称 = 原版物品官译（PiggyBank 87 / Safe 346 / DefendersForge 3813 / VoidVault 4076）
+    const bankNames: Record<number, string> = {
+      [-2]: Lang.itemName(87) ?? '存钱罐',
+      [-3]: Lang.itemName(346) ?? '保险箱',
+      [-4]: Lang.itemName(3813) ?? '守护者熔炉',
+      [-5]: Lang.itemName(4076) ?? '虚空保险库',
+    };
     this.chestTitle.textContent = bankNames[c.x] ?? Lang.text('Mods.SandboxWorld.UI.Chest');
     // 按容器实际槽位数显隐（宝箱 10 / 玩家储物 40）
     const n = Math.min(40, c.items.length);

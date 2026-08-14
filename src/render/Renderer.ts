@@ -76,6 +76,7 @@ import { viIdFromKey } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
+import { mechQueenUp, getMechQueenCenter } from '../entities/mechQueen';
 import { combatFontReady, drawCombatText } from './CombatTextFont';
 import { InfoAccsLayer } from './InfoAccsLayer';
 import { buildInfoAccRows, type InfoAccCtx } from '../stats/InfoAccs';
@@ -473,10 +474,18 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   }
   // 机械骷髅王头 127（FindFrame case 127，cs:75196-75231）：ai[1]==0（悬浮段）=
   // 帧 {0,1} 每 12t 循环（眨眼）；ai[1]!=0（旋冲/白天狂暴/离场）= **恒定帧 2**
-  // （旋冲脸，counter 清零不推进）；3-5 帧为 MechQueen 合体专属（IsMechQueenUp，
-  // 未支持）。曾落通用 6t 档 → 6 帧连播=一/二阶段动画混播（2026-08-14 用户报告）。
+  // （旋冲脸，counter 清零不推进）。MechQueen 合体态（IsMechQueenUp）走 3-5 帧
+  // 分支（:75197-75212）：悬浮 0→1→2→3→4 爬坡后 3↔4 每 12t 循环、ai[1]!=0 恒帧 5。
+  // 曾落通用 6t 档 → 6 帧连播=一/二阶段动画混播（2026-08-14 用户报告）。
   // 状态近似：无引擎态计数器，12t 相位取全局 t（重进悬浮段时相位任意，差 <12t）
   if (id === 127) {
+    if (mechQueenUp()) {
+      if (e.ai1 === 0) {
+        const k = Math.floor(t / 12);
+        return k <= 4 ? k : 3 + ((k - 5) % 2 === 0 ? 0 : 1);   // 爬坡 0..4 后 3↔4
+      }
+      return 5;                                                 // :75207-75210 恒帧 5
+    }
     if (e.ai1 === 0) return Math.floor(t / 12) % 2;
     return 2;
   }
@@ -3031,8 +3040,10 @@ export class Renderer {
     if ((e.vanilla?.aiStyle ?? 0) >= 33 && (e.vanilla?.aiStyle ?? 0) <= 36 && e.master) this.drawPrimeArm(e);
     // 世纪之花钩蔓/触须链（Main.cs:22225-22285）：263/264 → 本体
     if ((e.vanillaId === 263 || e.vanillaId === 264) && e.master) this.drawPlanteraVine(e);
-    // 双子互连链（Main.cs:22177-22224，1.4.5）：125 激活时单侧向 126 画一次
-    if (e.vanillaId === 125) this.drawTwinsChain(e, entities);
+    // 双子互连链（Main.cs:22177-22224，1.4.5）：125 激活时单侧向 126 画一次；
+    // Mechdusa 合体态跳过（:22180 `!NPC.IsMechQueenUp` 门）——双子改挂 queen 蛇发
+    //（drawMechdusaHair,queen 本体绘制尾段叠画）
+    if (e.vanillaId === 125 && !mechQueenUp()) this.drawTwinsChain(e, entities);
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
       // 风气球 594（Main.cs:23380-23406 独占）：贴图是 8 列变体【横条】(256×76 =
@@ -3079,7 +3090,10 @@ export class Renderer {
       }
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
       const frameIdx = vanillaFrameIdx(e, frames);
-      const r = this.atlas.vnpc(e.vanillaId, frameIdx);
+      // Mechdusa:毁灭者头 134 换画 136 尾帧贴图（Main.cs:24980-24984 num153=136
+      // + LoadNPC——头锁位倒挂(旋转 +π),头帧贴图方向不对,原版改用尾帧绘制）
+      const drawId = e.vanillaId === 134 && mechQueenUp() ? 136 : e.vanillaId;
+      const r = this.atlas.vnpc(drawId, frameIdx);
       if (r) {
         const flying = !!e.vanilla?.noGravity; void flying; // 中心锚后地面/飞行统一,仅保留语义注释
         // 原版 NPC.scale（SetDefaults base × netID scale × 专家档体型系数）——作用于渲染。
@@ -3112,7 +3126,7 @@ export class Renderer {
         // 贴图横画、只 tilt 不转头——它们仍需镜像翻转朝向（原版同款 spriteDirection 翻转）。
         const idR = e.vanillaId ?? -1;
         const stR = e.vanilla?.aiStyle ?? 0;
-        const tiltOnly5 = stR === 5 && (idR === 42 || idR === 176 || idR === 205 || idR === 210
+        const tiltOnly5 = stR === 5 && (idR === 42 || idR === 139 || idR === 176 || idR === 205 || idR === 210
           || idR === 211 || (idR >= 231 && idR <= 235));
         const rotationDriven = !tiltOnly5
           && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 23 || stR === 40 || stR === 56);
@@ -3129,7 +3143,7 @@ export class Renderer {
           // 蜜蜂 210/211 倾斜 vx*0.2；其余（噬魂怪族等）朝目标/速度方向转头。
           // 全族统一转头会让黄蜂蜜蜂飞行中整只倒转=贴图翻转观感
           const id5 = e.vanillaId;
-          if (id5 === 42 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235) || id5 === 61) ctx.rotate(e.vx * 0.1);  // 61 秃鹫 FindFrame rotation=vx*0.1(:74240)
+          if (id5 === 42 || id5 === 139 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235) || id5 === 61) ctx.rotate(e.vx * 0.1);  // 139 探针 AI_005 rotation=vx*0.1(:51041)/61 秃鹫 FindFrame(:74240)
           else if (id5 === 210 || id5 === 211) ctx.rotate(e.vx * 0.2);
           else ctx.rotate(e.visAngle);
         }
@@ -3241,6 +3255,9 @@ export class Renderer {
         ctx.globalCompositeOperation = 'source-over';
         // 星璇塔护盾半球（在精灵之后叠画，对齐原版 DrawNPC 尾段顺序）
         if (isTowerId(e.vanillaId)) this.drawTowerShield(e, world);
+        // Mechdusa 蛇发（Main.cs:25070-25112，queen 127 的 DrawNPC 尾段叠画）：
+        // 把 125/126 当蛇头，从 queen 头部锚点向各眼铺 Chain12 链式蛇身
+        if (e.vanillaId === 127 && mechQueenUp()) this.drawMechdusaHair(e, entities);
         // 568/569 死亡紫魂环（Main.cs:26130-26155：Extra_89 ×16 @400，镜像变换外）
         if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherSoulRing(e);
         return;
@@ -5310,6 +5327,50 @@ export class Renderer {
       ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, chain.sh,
         -chain.sw / 2, -chain.sh / 2, chain.sw * scale, chain.sh * scale);
       ctx.restore();
+    }
+  }
+
+  /** Mechdusa 蛇发（Main.cs:25070-25112，queen 127 绘制段 1:1）：把双子
+   *  125/126 当蛇头——从 queen 头部锚点（GetMechQueenCenter + (∓18/20,-18)
+   *  .RotatedBy(queen.rotation)）向各眼中心铺 Chain12 链；步长 = Chain12 高×
+   *  眼 scale,距目标 <40×scale 停;每段先画后进位（:25097 先 draw 后 +=,与
+   *  双子互连链的先进位后画相反）;origin=(W/2,0) 顶锚。光照着色以无光表
+   *  近似（与 drawTwinsChain 同策略,Lighting.GetColor 合成在全屏光照层）。 */
+  private drawMechdusaHair(e: Enemy, entities: unknown[]) {
+    if (!this.atlas) return;
+    const chain = this.atlas.vmisc('vanilla/Chain12.png');
+    if (!chain) return;
+    const ctx = this.ctx;
+    const qc = getMechQueenCenter(e);
+    for (const twin of entities as Enemy[]) {
+      if (!(twin instanceof Enemy) || twin.dead || (twin.vanillaId !== 125 && twin.vanillaId !== 126)) continue;
+      const scale = (twin.vanilla?.scale ?? 1) * twin.vanillaScale;
+      const tx = twin.cx, ty = twin.cy;
+      // :25081-25084 锚点偏移 (125:-18 / 126:20, -18) 随 queen 旋转
+      const ox = (twin.vanillaId === 125 ? -18 : 20), oy = -18;
+      const cos = Math.cos(e.spin), sin = Math.sin(e.spin);
+      let px = qc.x + ox * cos - oy * sin;
+      let py = qc.y + ox * sin + oy * cos;
+      let dx = tx - px, dy = ty - py;
+      if (Math.hypot(dx, dy) > 2000) continue;      // :25091-25094 flag11
+      const rot = Math.atan2(dy, dx) - Math.PI / 2; // rotation10
+      const stop = 40 * scale;
+      let guard = 0;
+      while (guard++ < 200) {
+        const dist = Math.hypot(dx, dy);
+        if (dist < stop) break;                     // :25095-25099
+        const k = chain.sh * scale / dist;          // 步长 = Chain12 高×scale
+        dx *= k; dy *= k;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(rot);
+        // origin = (Chain12 宽/2, 0)——顶锚（:25101,与双子链的中心锚不同）
+        ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, chain.sh,
+          -chain.sw / 2, 0, chain.sw * scale, chain.sh * scale);
+        ctx.restore();
+        px += dx; py += dy;                         // :25102-25103 先画后进位
+        dx = tx - px; dy = ty - py;
+      }
     }
   }
 

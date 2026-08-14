@@ -2182,6 +2182,7 @@ export function runDungeonPass(
         x = ri(bounds.L, bounds.R - 1);
         y = ri(Math.trunc(ws), bounds.B - 1);
       }
+      if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`S ${x} ${y}`);
       for (let t = 0; t < 2; t++) {
         let n9 = x, n10 = x;
         while (n9 > 20 && actAt(n9, y) === 0 && isDW(wallAt(n9, y))) n9--;
@@ -2190,9 +2191,9 @@ export function runDungeonPass(
         n10--;
         x = Math.trunc((n9 + n10) / 2);
         let n11 = y, n12 = y;
-        while (n11 > 20 && actAt(n11, x) === 0 && isDW(wallAt(x, n11))) n11--;
+        while (n11 > 20 && actAt(x, n11) === 0 && isDW(wallAt(x, n11))) n11--;
         n11++;
-        while (n12 < h - 20 && actAt(n12, x) === 0 && isDW(wallAt(x, n12))) n12++;
+        while (n12 < h - 20 && actAt(x, n12) === 0 && isDW(wallAt(x, n12))) n12++;
         n12--;
         y = Math.trunc((n11 + n12) / 2);
       }
@@ -2202,13 +2203,14 @@ export function runDungeonPass(
       while (n10 < w - 20 && actAt(n10, y) === 0 && actAt(n10, y - 1) === 0 && actAt(n10, y + 1) === 0) n10++;
       n10--;
       let n11 = y, n12 = y;
-      while (n11 > 20 && actAt(n11, x) === 0 && actAt(n11, x - 1) === 0 && actAt(n11, x + 1) === 0) n11--;
+      while (n11 > 20 && actAt(x, n11) === 0 && actAt(x - 1, n11) === 0 && actAt(x + 1, n11) === 0) n11--;
       n11++;
-      while (n12 < h - 20 && actAt(n12, x) === 0 && actAt(n12, x - 1) === 0 && actAt(n12, x + 1) === 0) n12++;
+      while (n12 < h - 20 && actAt(x, n12) === 0 && actAt(x - 1, n12) === 0 && actAt(x + 1, n12) === 0) n12++;
       n12--;
       x = Math.trunc((n9 + n10) / 2);
       y = Math.trunc((n11 + n12) / 2);
       const n13 = n10 - n9, n14 = n12 - n11;
+      if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`A ${n13} ${n14} @${x},${y}`);
       if (n13 <= 7 || n14 <= 5) continue;
       const arr = [true, false, false];
       if (n13 > n14 * 3 && n13 > 21) arr[1] = true;
@@ -2217,6 +2219,7 @@ export function runDungeonPass(
       if (wallAt(x, y) === num2v) n15 = 0;
       while (!arr[n15]) n15 = rn(3);
       if (nearPicture2(st, x, y, wall)) n15 = -1;
+      if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`N ${n15} np2=${n15 === -1}`);
       // ★D10（2026-08-14）：Paintings 段对齐原版调用序——GetPaintingEntry 的选型掷骰在
       // 门槛判定**之前**消耗（cs:167-168/:183-184/:281-283/:296-298），即使最终不放画也耗；
       // CanGenerateFeatureInArea 的 fluff=3（cs:169/186/281/297 等，7×7 区）非 2。
@@ -2266,9 +2269,9 @@ export function runDungeonPass(
         for (let m = 0; m < 3; m++) {
           y += 7;
           let a1 = baseX, a2 = baseX;
-          while (a1 > 0 && actAt(y, a1) === 0 && actAt(y - 1, a1) === 0 && actAt(y + 1, a1) === 0) a1--;
+          while (a1 > 0 && actAt(a1, y) === 0 && actAt(a1, y - 1) === 0 && actAt(a1, y + 1) === 0) a1--;
           a1++;
-          while (a2 < w - 1 && actAt(y, a2) === 0 && actAt(y - 1, a2) === 0 && actAt(y + 1, a2) === 0) a2++;
+          while (a2 < w - 1 && actAt(a2, y) === 0 && actAt(a2, y - 1) === 0 && actAt(a2, y + 1) === 0) a2++;
           a2--;
           const nx = Math.trunc((a1 + a2) / 2);
           if (featArea3(nx, y, 3)) {
@@ -2280,9 +2283,9 @@ export function runDungeonPass(
         for (let m = 0; m < 3; m++) {
           y -= 7;
           let a1 = baseX, a2 = baseX;
-          while (a1 > 0 && actAt(y, a1) === 0 && actAt(y - 1, a1) === 0 && actAt(y + 1, a1) === 0) a1--;
+          while (a1 > 0 && actAt(a1, y) === 0 && actAt(a1, y - 1) === 0 && actAt(a1, y + 1) === 0) a1--;
           a1++;
-          while (a2 < w - 1 && actAt(y, a2) === 0 && actAt(y - 1, a2) === 0 && actAt(y + 1, a2) === 0) a2++;
+          while (a2 < w - 1 && actAt(a2, y) === 0 && actAt(a2, y - 1) === 0 && actAt(a2, y + 1) === 0) a2++;
           a2--;
           const nx = Math.trunc((a1 + a2) / 2);
           if (featArea3(nx, y, 3)) {
@@ -2305,6 +2308,7 @@ export function runDungeonPass(
   /** Paintings_GetPaintingEntry（DungeonGlobalPaintings.cs:327-360）：只取 tile 型
    * （style 走帧不入哈希，placeSimple 不落帧）——但选型掷骰必须照原版序全部消耗。 */
   function paintingEntry(x: number, y: number): number {
+    if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`E ${x} ${y}`);
     let tile = HANGING;
     if (wallAt(x, y) === wall) {
       // RandomDungeonPainting（:364-385）：Next(3)≤1→240 Next(7)(==6 重掷)style{12,13,14,15,18,19,23}；

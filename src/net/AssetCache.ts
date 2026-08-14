@@ -92,8 +92,9 @@ export function musicWarmUrls(): string[] {
 
 export type AssetPhase = 'menu' | 'game-sprites' | 'misc-sprites' | 'sounds' | 'music';
 export const PHASE_LABEL: Record<AssetPhase, string> = {
-  menu: '菜单', 'game-sprites': '游戏贴图', 'misc-sprites': '其余贴图',
-  sounds: '音效', music: '音乐',
+  // 展示文案由消费端走 l10n(Mods.SandboxWorld.AssetDl.Phase_*);此处仅相位键
+  menu: 'menu', 'game-sprites': 'game-sprites', 'misc-sprites': 'misc-sprites',
+  sounds: 'sounds', music: 'music',
 };
 
 /** 全量优先级清单 + 分段边界(进度阶段名用) */

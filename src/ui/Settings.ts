@@ -242,12 +242,13 @@ export class SettingsPanel {
     } else if (this.cat === 'ui') {
       this.content.append(
         this.slider(Lang.text('Mods.SandboxWorld.Settings.UiScale'), 0.75, 1.5, 0.05, () => d.uiScale, (v) => void options.set('uiScale', v).then(() => this.applyUi())),
-        // 资源条样式（原版 PlayerResourceSetsManager2 五样式之两主样式：
-        // 'New'=FancyClassic 金框分格（1.4.4+ 默认）/ 'Default'=Classic 朴素心星）
+        // 资源条样式（原版 PlayerResourcesDisplaySet 两主样式：'New'=FancyClassic
+        // 金框分格（1.4.4+ 默认）/ 'Default'=Classic 朴素心星）。样式名 = 原版键
+        // UI.HealthManaStyle_*（Main.cs:49379 同源;旧硬编码中文 12 语言不可译）
         this.modeRow(
           Lang.text('UI.SelectHealthStyle').replace(/:.*/, ''),
           () => d.resourceBarStyle,
-          () => d.resourceBarStyle === 'fancy' ? '华丽（金框）' : '经典（朴素）',
+          () => Lang.text(d.resourceBarStyle === 'fancy' ? 'UI.HealthManaStyle_New' : 'UI.HealthManaStyle_Default'),
           () => void options.set('resourceBarStyle', d.resourceBarStyle === 'fancy' ? 'classic' : 'fancy'),
         ),
         // 小地图边框皮肤（MinimapFrameManager 9 款；config.json "MinimapFrame" 字符串键；
@@ -270,8 +271,10 @@ export class SettingsPanel {
         // 背景 开/关（Main.BackgroundEnabled Main.cs:790，原版视频设置项 Lang.menu[100/101]；
         // 天气阴天渐变 cloudBGAlpha 的门，Game.updateWeather 注入 WeatherCtx.backgroundEnabled）
         this.toggle(Lang.menu(100).replace(/[:：].*$/, ''), () => d.backgrounds, (v) => void options.set('backgrounds', v)),
-        // 图块在风中摆动（原版视频设置 SettingsEnabled_TilesSwayInWind；WindSway 系统总门）
-        this.toggle('图块在风中摆动', () => d.swayInWind, (v) => void options.set('swayInWind', v)),
+        // 图块在风中摆动（原版视频设置 SettingsEnabled_TilesSwayInWind；WindSway 系统总门）。
+        // 原版行文案 = UI.TilesSwayInWindOn/Off 融合串（IngameOptions.cs:1055），
+        // 取 On 支去冒号做标签（同背景开关的 Lang.menu(100) 处理法）
+        this.toggle(Lang.text('UI.TilesSwayInWindOn').replace(/[:：].*$/, ''), () => d.swayInWind, (v) => void options.set('swayInWind', v)),
         // 智能光标（原版 IngameOptions :1418 Smart Cursor 段）：模式 Toggle/Hold + 三开关
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.SmartCursorMode'),

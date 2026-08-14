@@ -717,7 +717,7 @@ export class BestiaryPanel {
         <div class="sw-bst-range">0-0 (0)</div>
         <select class="sw-bst-sel" data-sort></select>
         <div class="sw-bst-chips"></div>
-        <input class="sw-bst-search" type="text" placeholder="搜索" data-search />
+        <input class="sw-bst-search" type="text" placeholder="${Lang.text('Mods.SandboxWorld.Bestiary.Search')}" data-search />
         <button class="sw-bst-nav sw-bst-back" data-close></button>
       </div>
       <div class="sw-bst-main">
@@ -800,7 +800,12 @@ export class BestiaryPanel {
   private buildChips() {
     const f = this.filter;
     const kinds: Array<BestiaryFilter['kind']> = ['all', 'enemy', 'town', 'critter'];
-    const kindLabel: Record<string, string> = { all: '全部', enemy: '敌怪', town: '城镇', critter: '小动物' };
+    const kindLabel: Record<string, string> = {
+      all: Lang.text('Mods.SandboxWorld.Bestiary.FilterAll'),
+      enemy: Lang.text('Mods.SandboxWorld.Bestiary.FilterEnemy'),
+      town: Lang.text('Mods.SandboxWorld.Bestiary.FilterTown'),
+      critter: Lang.text('Mods.SandboxWorld.Bestiary.FilterCritter'),
+    };
     this.chipsEl.replaceChildren();
     for (const k of kinds) {
       this.chipsEl.appendChild(this.chip(kindLabel[k], f.kind === k, () => {
@@ -820,7 +825,7 @@ export class BestiaryPanel {
         this.buildChips();
       }));
     this.chipsEl.appendChild(this.chip(
-      '未解锁', ul === 'no', () => {
+      Lang.text('Mods.SandboxWorld.Bestiary.Locked'), ul === 'no', () => {
         this.filter = applyBestiaryChip(f, 'unlockedNo');
         this.buildChips();
       }));
@@ -968,7 +973,10 @@ export class BestiaryPanel {
       if (!cx || !iw) return;
       cx.imageSmoothingEnabled = false;
       cx.clearRect(0, 0, canvas.width, canvas.height);
-      const s = Math.min(size / (iw * scale), size / (fh * scale));
+      // 原版图鉴（UnlockableNPCEntryIcon → DrawNPCDirect）按 NPC 原生帧尺寸×scale
+      // 直接画、不放大填框（僵尸帧 36×56 就是比绿史莱姆 40×48×0.9 高；巨怪靠
+      // NPCBestiaryDrawOffset 表逐个调）。只缩不放：超画布才等比缩（防溢出）
+      const s = Math.min(1, size / (iw * scale), size / (fh * scale));
       const w = iw * s * scale, h = fh * s * scale;
       const dx = (size - w) / 2, dy = (size - h) / 2;
       cx.globalAlpha = alphaBase / 255;                // 负 id alpha 变体（-5 黑史莱姆 120）
@@ -1050,7 +1058,7 @@ export class BestiaryPanel {
       this.infoEl.replaceChildren();
       const hint = document.createElement('div');
       hint.style.cssText = 'color:#8a90b8;text-align:center;margin-top:24px;';
-      hint.textContent = '点击条目查看详情';
+      hint.textContent = Lang.text('Mods.SandboxWorld.Bestiary.ClickHint');
       this.infoEl.appendChild(hint);
       return;
     }
@@ -1067,10 +1075,10 @@ export class BestiaryPanel {
       t.textContent = label;
       tags.appendChild(t);
     };
-    mkTag(st > UnlockState.NotKnown ? Lang.text('BestiaryInfo.IfUnlocked') : '未解锁');
+    mkTag(st > UnlockState.NotKnown ? Lang.text('BestiaryInfo.IfUnlocked') : Lang.text('Mods.SandboxWorld.Bestiary.Locked'));
     if (isBossCredit(r.entry.creditId)) mkTag(Lang.text('BestiaryInfo.IsBoss'), true);
-    if (r.entry.kind === 'critter') mkTag('小动物');
-    if (r.entry.goldGate) mkTag('金小动物');
+    if (r.entry.kind === 'critter') mkTag(Lang.text('Mods.SandboxWorld.Bestiary.FilterCritter'));
+    if (r.entry.goldGate) mkTag(Lang.text('Mods.SandboxWorld.Bestiary.GoldCritter'));
     this.infoEl.appendChild(tags);
     // 出没环境（SpawnConditionBestiaryInfoElement 族，populator :802/:1661 注册序；
     // 解锁门 = 非 NotKnown，FilterProviderInfoElement.cs:47-50——比属性更早可见）
@@ -1079,7 +1087,7 @@ export class BestiaryPanel {
       if (conds.length) {
         const sec = document.createElement('div');
         sec.className = 'sw-bst-sec';
-        sec.textContent = '出没环境'; // 原版信息页分区无独立 lang 键（与"掉落"同处理）
+        sec.textContent = Lang.text('Mods.SandboxWorld.Bestiary.Environment'); // 原版信息页分区无独立 lang 键（与"掉落"同处理）
         this.infoEl.appendChild(sec);
         const wrap = document.createElement('div');
         wrap.className = 'sw-bst-tags';
@@ -1127,7 +1135,7 @@ export class BestiaryPanel {
       // 此处以文本星近似并按星数着色 1-5 灰→金）
       const stars = bestiaryRarityStars(r.npcId);
       if (stars > 0) {
-        const starRow = this.infoRow('稀有度', '★'.repeat(stars));
+        const starRow = this.infoRow(Lang.text('Mods.SandboxWorld.Bestiary.Rarity'), '★'.repeat(stars));
         starRow.style.color = stars >= 4 ? '#e8c05a' : stars >= 2 ? '#b8c0d8' : '#8a90b8';
         this.infoEl.appendChild(starRow);
       }
@@ -1144,13 +1152,13 @@ export class BestiaryPanel {
     if (st >= UnlockState.DropsNoRates) {
       const sec = document.createElement('div');
       sec.className = 'sw-bst-sec';
-      sec.textContent = '掉落';
+      sec.textContent = Lang.text('Mods.SandboxWorld.Bestiary.Drops');
       this.infoEl.appendChild(sec);
       const drops = flattenDropsForNpc(r.npcId);
       if (drops.length === 0) {
         const none = document.createElement('div');
         none.style.cssText = 'color:#8a90b8;';
-        none.textContent = '（无掉落记录）';
+        none.textContent = Lang.text('Mods.SandboxWorld.Bestiary.NoDrops');
         this.infoEl.appendChild(none);
       }
       const shown = drops.slice(0, 30);
@@ -1182,22 +1190,22 @@ export class BestiaryPanel {
       if (drops.length > shown.length) {
         const more = document.createElement('div');
         more.style.cssText = 'color:#8a90b8;';
-        more.textContent = `…另有 ${drops.length - shown.length} 条`;
+        more.textContent = Lang.text('Mods.SandboxWorld.Bestiary.MoreDrops', drops.length - shown.length);
         this.infoEl.appendChild(more);
       }
     } else if (st === UnlockState.PortraitOnly) {
       const hint = document.createElement('div');
       hint.style.cssText = 'color:#8a90b8;margin-top:8px;';
       hint.textContent = r.entry.kind === 'town'
-        ? '与该 NPC 对话可记录更多信息'
-        : '继续击杀可解锁属性与掉落信息';
+        ? Lang.text('Mods.SandboxWorld.Bestiary.TalkToRecordMore')
+        : Lang.text('Mods.SandboxWorld.Bestiary.KillToRecordMore');
       this.infoEl.appendChild(hint);
     } else {
       const hint = document.createElement('div');
       hint.style.cssText = 'color:#8a90b8;margin-top:8px;';
       hint.textContent = r.entry.kind === 'town'
-        ? '与该 NPC 对话以记录'
-        : r.entry.kind === 'critter' ? '发现该生物以记录' : '击败该怪物以记录';
+        ? Lang.text('Mods.SandboxWorld.Bestiary.TalkToRecord')
+        : r.entry.kind === 'critter' ? Lang.text('Mods.SandboxWorld.Bestiary.DiscoverToRecord') : Lang.text('Mods.SandboxWorld.Bestiary.DefeatToRecord');
       this.infoEl.appendChild(hint);
     }
   }

@@ -26,7 +26,8 @@ import { Dart } from './Dart';
 import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
 import { daybreakStacks } from './WeaponProj';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear } from './bossAI';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear, mechProbeLock } from './bossAI';
+import { mechQueenUp } from './mechQueen';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
 import { deerclopsAI } from './bossAI_deerclops';
@@ -3404,6 +3405,9 @@ export class Enemy extends Entity {
   }
 
   private swarmerAI(game: GameHooks, player: Player | null) {
+    // ---- Mechdusa 探针挂链(NPC.cs AI_005 :50866-50920):ai3≠0 = 召唤链出生的
+    //      挂链探针 → 绕毁灭者头公转锁位(queen 在场时无敌);失效即脱落回常规 ----
+    if (this.vanillaId === 139 && this.ai3 !== 0 && mechProbeLock(this, game, player)) return;
     const isEater = this.vanillaId === 6 || this.vanillaId === 173 || this.vanillaId === 139;
     // 蜜蜂（210/211，L50768-50784）：ai[1] 计数爬坡 num3=(ai1-60)/60≤1；
     // 暖机期（num3<1）逐轴速度钳 ±6；速度档 5 / 加速 0.1×num3
@@ -3513,6 +3517,48 @@ export class Enemy extends Entity {
           const spit = Enemy.fromVanilla(112, this.cx, this.cy);
           if (spit) addEnemy(game, spit);
           this.ai2 = 0;
+        }
+      }
+    }
+    // ---- 探针 139 专属射击段（NPC.cs AI_005 :50975-51007,在位移/反弹之前）：
+    //  localAI[0] +1/t（挂链 +3 已在 mechProbeLock）、受击清零；cadence 120(常规)
+    //  /360(mech 世界)；84 号弹 25 伤——mech 弹道 = 目标中心-自身中心-玩家速度×20
+    //  归一 ×8（预判直飞），常规 = 期望速度直飞（noTileCollide 早退在前,须置于此） */
+    if (vid === 139) {
+      this.lai0 += 1;
+      if (this.justHitT > 0) this.lai0 = 0;
+      if (this.lai0 >= (mechQueenUp() ? 360 : 120)) {
+        this.lai0 = 0;
+        if (player && losClear(game, this.cx, this.cy, player.cx, player.cy)) {
+          let pvx = sx, pvy = sy;
+          if (mechQueenUp()) {
+            const ddx = player.cx - this.cx - player.vx * 20;
+            const ddy = player.cy - this.cy - player.vy * 20;
+            const dl = Math.hypot(ddx, ddy) || 1;
+            pvx = ddx / dl * 8; pvy = ddy / dl * 8;
+          }
+          shoot(game, this.cx, this.cy, pvx, pvy,
+            getAttackDamageForProjectiles(25, 22, this.difficulty), 84);
+        }
+      }
+      if (mechQueenUp()) {
+        // :51206-51224 远距(>600)朝目标增速 mech 钳 5（常规 12）,逆向 ×0.9
+        if (dist > 600) {
+          if ((this.vx > 0 && sx > 0) || (this.vx < 0 && sx < 0)) {
+            if (Math.abs(this.vx) < 5) this.vx *= 1.05;
+          } else {
+            this.vx *= 0.9;
+          }
+        }
+        // :51225-51234 mech && ai2==0（身体段掉落的散探针）：距玩家 <120 →
+        // 沿连线推到 120px 外（贴脸风筝位）
+        if (this.ai2 === 0 && player) {
+          const kx = player.cx - this.cx, ky = player.cy - this.cy;
+          const kl = Math.hypot(kx, ky);
+          if (kl < 120) {
+            this.x = player.cx - kx / (kl || 1) * 120 - this.w / 2;
+            this.y = player.cy - ky / (kl || 1) * 120 - this.h / 2;
+          }
         }
       }
     }

@@ -17,6 +17,7 @@ import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
 import { TileStore } from '../TileStore';
 import { mainExpertMode, netIdSpawnScale, scaleStatsWorld } from '../../stats/ScaleStats';
+import { spawnRateMultiplier } from '../JourneyPowers';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollBadLuck, rollLuck } from '../../stats/Luck';
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
@@ -880,6 +881,15 @@ export class VanillaSpawner {
     }
     if (spawnRate < 60) spawnRate = 60;
     if (maxSpawns > 15) maxSpawns = 15;
+    // L671-678（clamp 与 getGood 之后、地牢 rate=10 之前）：旅程刷怪率滑杆——
+    // SpawnRateSliderPerPlayerPower.GetRemappedSliderValueFor（CreativePowers.cs:1612-1619
+    // 0.1×~10×）。value<1 → spawnRate 变大（更慢出怪）/ maxSpawns 变小；>1 反之。
+    // (int) 截断；maxSpawns 可越过 15 上限（原版同——clamp 在滑杆之前不回夹）
+    if (w.isJourney) {
+      const value = spawnRateMultiplier(w.journeyPowers.spawnRateSlider);
+      spawnRate = Math.trunc(spawnRate / value);
+      maxSpawns = Math.trunc(maxSpawns * value);
+    }
     // L696：未杀骷髅王 rate=10（clamp 之后赋值，不受 ≥60 下限影响——守卫快速轮换）
     if (this.ZoneDungeon && !this.downedBoss3) spawnRate = 10;
     // ---- spawnFriendly 掷骰（NPC.cs:711-832;原版在 SetSpawnFlags 与 rate 同例程内）----

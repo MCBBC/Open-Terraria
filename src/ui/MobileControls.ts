@@ -136,7 +136,7 @@ export class MobileControls {
     this.buildFullscreen();
     const rot = document.createElement('div');
     rot.className = 'sw-mrotate';
-    rot.textContent = '📱 请横屏获得最佳体验';
+    rot.textContent = Lang.text('Mods.SandboxWorld.Mobile.RotateHint');
     this.root.appendChild(rot);
     parent.appendChild(this.root);
     // 状态刷新（药水可用/智能光标态/按钮可见性）：1s 节流
@@ -247,7 +247,7 @@ export class MobileControls {
   private buildSmartCursor(): void {
     const b = document.createElement('div');
     b.className = 'sw-mbtn sw-msmart';
-    b.textContent = '◎光标';
+    b.textContent = Lang.text('Mods.SandboxWorld.Mobile.SmartCursor');
     // 注入 ControlLeft 电平 + 同步脉冲（Toggle=点击翻转 / Hold=按住启用；
     //  脉冲直调 updateWanted 不依赖 tick 窗口——见 Game.pulseSmartCursor）
     this.bindButton(b,

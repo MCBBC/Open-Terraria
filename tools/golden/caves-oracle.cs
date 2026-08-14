@@ -4208,6 +4208,12 @@ if (Environment.GetEnvironmentVariable("DGPB_DUMP") != null) {
     return;
 }
 DgBanners(); Checkpoint("dungeonBa");     // DungeonGlobalBanners
+if (Environment.GetEnvironmentVariable("DGBA_DUMP") != null) {
+    var dbabuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dbabuf, 0, dbabuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DGBA_DUMP"), dbabuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGBA_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    return;
+}
 // Late 双地牢特征（Default 无 BiomeDungeonRoom/BrickGrass → 纯空转）
 Checkpoint("dungeon");   // #32 转录落地（原 slush 同态占位已替换）
 // ---- Dungeon 局部函数（均在隐式 Main 作用域内，可前向引用）----
@@ -6278,6 +6284,7 @@ void DgPaintings()
             x = (int)r.Next(dgBounds.L, dgBounds.R);
             y = (int)r.Next(worldSurface, dgBounds.B);
         }
+        Console.WriteLine($"S {x} {y}");
         int n9 = x, n10 = x, n11 = y, n12 = y;
         for (int t = 0; t < 2; t++)
         {
@@ -6307,6 +6314,7 @@ void DgPaintings()
         x = (n9 + n10) / 2;
         y = (n11 + n12) / 2;
         int n13 = n10 - n9, n14 = n12 - n11;
+        Console.WriteLine($"A {n13} {n14} @{x},{y}");
         if (n13 <= 7 || n14 <= 5) continue;
         var arr = new bool[3] { true, false, false };
         if (n13 > n14 * 3 && n13 > 21) arr[1] = true;
@@ -6315,6 +6323,7 @@ void DgPaintings()
         if (wal[y * W + x] == num2v) n15 = 0;
         while (!arr[n15]) n15 = (int)r.Next(3);
         if (DgNearPicture2(x, y)) n15 = -1;
+        Console.WriteLine($"N {n15} np2={n15 == -1}");
         // ★D10（2026-08-14）：对齐原版调用序——GetPaintingEntry 选型掷骰在门槛判定**之前**
         // 消耗（DungeonGlobalPaintings.cs:167-168/:183-184/:281-283/:296-298，不放画也耗）；
         // CanGenerateFeatureInArea fluff=3（7×7 区）非 2。
@@ -6434,6 +6443,7 @@ bool DgNearPicture2(int x, int y)
 //（style 不入哈希——DgPlaceSimple 不落帧；tile 型 240/241/242 入哈希）。
 int DgPaintingEntry(int x, int y)
 {
+    Console.WriteLine($"E {x} {y}");
     int tile = 240;
     if (wal[y * W + x] == dgWall)
     {

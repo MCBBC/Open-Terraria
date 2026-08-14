@@ -27,6 +27,11 @@ import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
 import { mainExpertMode, mainDifficulty, getAttackDamageScaledByDifficulty, scaleStatsWorld, GDL } from '../stats/ScaleStats';
+import { journeyPowers } from '../world/JourneyPowers';
+
+/** 旅程上帝模式激活（GodmodePower.IsEnabledForPlayer——绑定态读取，
+ *  对应原版 Player.creativeGodMode 每帧自 power 授予 Player.cs:25208） */
+function journeyGodmodeActive(): boolean { return journeyPowers().godmode; }
 import type { Enemy } from './Enemy';
 import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
 import { TRACK_SHEET } from '../data/grappleHooks';
@@ -1156,6 +1161,14 @@ export class Player extends Entity {
     if (this.debugGod) {
       this.hp = this.maxHp;
       this.mana = this.maxMana;
+    }
+    // 旅程上帝模式回满（Main.cs:17711-17715：statLife/statMana/breath 三回满——
+    // creativeGodMode 由 GodmodePower 每帧授予 Player.cs:25208-25211；战斗伤害
+    // 在 damage() 早退拦截，此处兜 DoT/溺水/摔落直改 hp 的路径）
+    if (journeyGodmodeActive()) {
+      this.hp = this.maxHp;
+      this.mana = this.maxMana;
+      this.breath = this.breathMax;
     }
 
     // Buff tick：自然回复 / 环境 DoT（负值=持续伤害,原版 lifeRegen 路径:无视防御与无敌帧）。
@@ -3341,10 +3354,13 @@ export class Player extends Entity {
       this.gravDir = 1;
     }
     if (this.y > hPx - B) {
-      // KillMe(ByOther 21, 10.0):直死——绕过防御/无敌帧(不走 damage()),
-      // hp 归零后由 fixedUpdate 尾部统一结算(死亡音/墓碑),最迟次 tick 生效
-      this.hp = 0;
-      this.lastDamageCause = { kind: 'underground' }; // ByOther(21) Underground_1..5
+      // 旅程上帝模式（Player.cs:23837-23845 creativeGodMode）：越界钳位不致死
+      if (!journeyGodmodeActive()) {
+        // KillMe(ByOther 21, 10.0):直死——绕过防御/无敌帧(不走 damage()),
+        // hp 归零后由 fixedUpdate 尾部统一结算(死亡音/墓碑),最迟次 tick 生效
+        this.hp = 0;
+        this.lastDamageCause = { kind: 'underground' }; // ByOther(21) Underground_1..5
+      }
       this.y = hPx - B;
       this.vy = 0;
     }
@@ -3446,6 +3462,9 @@ export class Player extends Entity {
   damage(dmg: number, srcX: number, srcY: number, knockback = true, pvp = false): number {
     // 调试无敌（F2）：完全免伤——不扣血/不进无敌帧/不触发受击饰品（返回 0=未受伤）
     if (this.debugGod) return 0;
+    // 旅程上帝模式（Player.cs:37595-37598 Hurt 首段 creativeGodMode → return 0
+    // ——同样免伤不进无敌帧；NPC 接触碰撞侧 Player.cs:30863 整段跳过由本早退覆盖）
+    if (journeyGodmodeActive()) return 0;
     // 微光化免伤（Player.cs:37591-37595 Hurt 前置：shimmering 且可闪避 → 直接返回 0；
     // 本仓 damage 以 false 表示完全免伤——Boss 专属弹幕 371 等不可闪避源未移植）
     if (this.shimmering) return 0;

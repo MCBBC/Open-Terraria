@@ -61,10 +61,11 @@ describe('巨石(aiStyle 25,Projectile 99)', () => {
     const b = new TrapShot(50 * TILE, 80 * TILE - 32, 0, 8, 70, 'boulder');
     b.fixedUpdate(1, g);
     expect(b.vy).toBeCloseTo(-1.66, 1);
-    // 软落:vy=1 → 撞地直接落定 0(1 ≤ 5 不反弹)——贴地 0.2px 出生,首拍即跨采样线
-    const b2 = new TrapShot(50 * TILE, 80 * TILE - 31 + 0.8, 0, 1, 70, 'boulder');
+    // 软落:vy=2 → 撞地直接落定 0(2.3 ≤ 5 不反弹)——净空 1px 出生走干净落位链
+    const b2 = new TrapShot(50 * TILE, 80 * TILE - 32, 0, 2, 70, 'boulder');
     b2.fixedUpdate(1, g);
     expect(b2.vy).toBe(0);
+    expect(b2.onGround).toBe(true);
     // 撞墙:竖墙 + 滚地加速 → 撞上碎裂
     const w2 = worldWithFloor();
     for (let y = 70; y < 80; y++) w2.store.setTileSilent(55, y, 1, 0, 0);

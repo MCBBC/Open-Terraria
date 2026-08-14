@@ -8,6 +8,8 @@ import { newOldOnesArmyState } from './OldOnesArmy';
 import { newLunarEventState } from './LunarEvent';
 import type { FurnitureItemRecord } from './FurnitureItems';
 import { BestiaryTracker, type BestiarySave } from '../data/Bestiary';
+import { createJourneyPowers, type JourneyPowersState } from './JourneyPowers';
+import { mainDifficulty, GDL } from '../stats/ScaleStats';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number } | null>; locked?: boolean; }
 
@@ -102,6 +104,12 @@ export class World {
   journeyTimeRate = 1;
   /** 旅程模式时间冻结（CreativePowers.FreezeTime，CreativePowers.cs:1448——开启时 dayRate=0） */
   journeyFreezeTime = false;
+  /** 旅程力量状态（CreativePowers 族，JourneyPowers.ts）——世界侧与单人玩家侧
+   *  合并存储；落盘时按原版归属拆：世界侧进 header（freezeRain/freezeWind/
+   *  stopBiomeSpread/difficultySlider）、玩家侧进 player 段（godmode/
+   *  farPlacementRange/spawnRateSlider，IPersistentPerPlayerContent）。
+   *  FreezeTime/ModifyTimeRate 不在此（复用上面两字段，T 键同源勿建第二套） */
+  journeyPowers = createJourneyPowers();
   /** 附魔日晷/月晷快进（Main.fastForwardTimeToDawn/Dusk + sundialCooldown/moondialCooldown，
    *  Main.cs:6240-6268 Sundialing/Moondialing：使用置旗 + 冷却 8 天；快进中 dayRate=60。
    *  清旗点 = UpdateTime_StartDay :64844-64847（dawn）/ StartNight :64691-64694（dusk），
@@ -116,10 +124,12 @@ export class World {
   allSleeping = false;
   /** IsFastForwardingTime（Main.cs:6230-6238）——事件 roll 压制门共用 */
   isFastForwardingTime(): boolean { return this.fastForwardTimeToDawn || this.fastForwardTimeToDusk; }
-  /** 专家世界（Main.cs:2775-2777：GameMode==1/2 → Difficulty≥Expert；旅程 3 不算） */
-  get isExpert(): boolean { return this.difficulty === 1 || this.difficulty === 2; }
-  /** 大师世界（Main.cs:2779-2780：仅 GameMode==2） */
-  get isMaster(): boolean { return this.difficulty === 2; }
+  /** 专家档（Main.expertMode Main.cs:2762 = Difficulty >= Expert）——Difficulty 轴
+   *  含旅程强度滑杆（Main.cs:2771-2773 override 优先于 GameMode 档）：旅程世界
+   *  滑杆 ≥2× 即专家语义（掉落条件/宝箱 ×2/血月门全链，原版同源） */
+  get isExpert(): boolean { return mainDifficulty(this) >= GDL.EXPERT; }
+  /** 大师档（Main.masterMode Main.cs:2760 = Difficulty >= Master）——同上随滑杆 */
+  get isMaster(): boolean { return mainDifficulty(this) >= GDL.MASTER; }
   /** 旅程世界（Main.cs:2696 IsJourneyMode：GameMode==3） */
   get isJourney(): boolean { return this.difficulty === 3; }
   /** 当前 dayRate（Main.cs:6270-6294 UpdateTimeRate 1:1）：快进恒 60；

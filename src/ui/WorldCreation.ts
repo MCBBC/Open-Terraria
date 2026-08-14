@@ -103,9 +103,9 @@ export class WorldCreationPanel {
       <div class="sw-wc-title">${Lang.text('LegacyMenu.47')}</div>
       <div class="sw-wc-body">
         <div class="sw-wc-main">
-          <div class="sw-wc-row"><span>${Lang.text('UI.WorldCreationName')}</span><input type="text" data-f="name" maxlength="27"><button class="sw-wc-rand" data-act="randname" title="${Lang.text('Mods.SandboxWorld.WorldCreation.RandomName')}"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomName.png"></button></div>
-          <div class="sw-wc-row"><span>种子</span><input type="text" data-f="seed" maxlength="40" placeholder="可选…"><button class="sw-wc-rand" data-act="randseed" title="随机种子"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomSeed.png"></button><img class="sw-wc-seedicon" src="sprites/vanilla-ui/UI_WorldCreation_Seed_Normal.png"></div>
-          <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('Mods.SandboxWorld.WorldCreation.Size')}</div><div class="sw-wc-opts" data-g="size"></div></div>
+          <div class="sw-wc-row"><span>${Lang.text('UI.WorldCreationName')}</span><input type="text" data-f="name" maxlength="27"><button class="sw-wc-rand" data-act="randname" title="${Lang.text('UI.WorldCreationRandomizeNameDescription')}"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomName.png"></button></div>
+          <div class="sw-wc-row"><span>${Lang.text('UI.WorldCreationSeed')}</span><input type="text" data-f="seed" maxlength="40" placeholder="${Lang.text('UI.WorldCreationSeedEmpty').replace(/^[<：: ]+|[>]+$|\s*[：:]\s*$/g, '')}"><button class="sw-wc-rand" data-act="randseed" title="${Lang.text('UI.WorldCreationRandomizeSeedDescription')}"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomSeed.png"></button><img class="sw-wc-seedicon" src="sprites/vanilla-ui/UI_WorldCreation_Seed_Normal.png"></div>
+          <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationSize')}</div><div class="sw-wc-opts" data-g="size"></div></div>
           <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationDifficulty')}</div><div class="sw-wc-opts" data-g="diff"></div></div>
           <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationEvil')}</div><div class="sw-wc-opts" data-g="evil"></div></div>
           <div class="sw-wc-desc"></div>

@@ -57,6 +57,13 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     seedFlags: { ...world.seedFlags },
     difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
     journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
+    // 旅程力量·世界侧（IPersistentPerWorldContent；玩家侧三件走 player 段下方）
+    journeyPowers: {
+      freezeRain: world.journeyPowers.freezeRain,
+      freezeWind: world.journeyPowers.freezeWind,
+      stopBiomeSpread: world.journeyPowers.stopBiomeSpread,
+      difficultySlider: world.journeyPowers.difficultySlider,
+    },
     sundialCooldown: world.sundialCooldown, moondialCooldown: world.moondialCooldown,
     fastForwardTimeToDawn: world.fastForwardTimeToDawn,
     fastForwardTimeToDusk: world.fastForwardTimeToDusk,
@@ -95,6 +102,13 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     taxMoney: player.taxMoney ?? 0,         // PL:53839
     golferScoreAccumulated: player.golferScoreAccumulated ?? 0, // PL:1792
     deathsPve: player.deathsPve ?? 0,       // PL:53840
+    // 旅程力量·玩家侧（IPersistentPerPlayerContent，CreativePowerManager.cs:183-195
+    // SaveToPlayer 等价——单人共用 World.journeyPowers 存储，落盘拆到 player 段）
+    journeyPowers: {
+      godmode: world.journeyPowers.godmode,
+      farPlacementRange: world.journeyPowers.farPlacementRange,
+      spawnRateSlider: world.journeyPowers.spawnRateSlider,
+    },
     permanentUpgrades: {
       extraAccessory: player.inv.extraAccessory,
       usedAegisCrystal: player.usedAegisCrystal,
@@ -240,6 +254,24 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   // 旅程时间倍率/冻结（CreativePowers.cs:866/:1448）——旧档缺省 1/false
   if (data.header.journeyTimeRate !== undefined) world.journeyTimeRate = data.header.journeyTimeRate;
   if (data.header.journeyFreezeTime !== undefined) world.journeyFreezeTime = data.header.journeyFreezeTime;
+  // 旅程力量·世界侧（IPersistentPerWorldContent；旧档缺段=构造器默认）——
+  // 读档后立即钳制滑杆值（对应原版 Load → UpdateInfoFromSliderValueCache 链）
+  if (data.header.journeyPowers) {
+    world.journeyPowers.freezeRain = data.header.journeyPowers.freezeRain;
+    world.journeyPowers.freezeWind = data.header.journeyPowers.freezeWind;
+    world.journeyPowers.stopBiomeSpread = data.header.journeyPowers.stopBiomeSpread;
+    const s = data.header.journeyPowers.difficultySlider;
+    world.journeyPowers.difficultySlider = Number.isFinite(s) ? Math.min(1, Math.max(0, s)) : 0;
+  }
+  // 旅程力量·玩家侧（IPersistentPerPlayerContent，CreativePowerManager.cs:197-215
+  // LoadToPlayer + ApplyLoadedDataToOutOfPlayerFields——单人运行时载体 =
+  // world.journeyPowers，此处统一合并覆盖 worker/主线程全部读档路径）
+  if (data.player?.journeyPowers) {
+    world.journeyPowers.godmode = data.player.journeyPowers.godmode;
+    world.journeyPowers.farPlacementRange = data.player.journeyPowers.farPlacementRange;
+    const s = data.player.journeyPowers.spawnRateSlider;
+    world.journeyPowers.spawnRateSlider = Number.isFinite(s) ? Math.min(1, Math.max(0, s)) : 0.5;
+  }
   // 日晷/月晷四件套（WorldFile.cs:1311/1342/1416-1417；旧档缺省=无快进无冷却）
   if (data.header.sundialCooldown !== undefined) world.sundialCooldown = data.header.sundialCooldown;
   if (data.header.moondialCooldown !== undefined) world.moondialCooldown = data.header.moondialCooldown;

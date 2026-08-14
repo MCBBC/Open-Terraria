@@ -70,6 +70,13 @@ export interface SaveData {
     journeyTimeRate?: number;
     /** 旅程时间冻结（CreativePowers.FreezeTime，CreativePowers.cs:1448；旧档缺省 false） */
     journeyFreezeTime?: boolean;
+    /** 旅程力量·世界侧（IPersistentPerWorldContent，CreativePowerManager.cs:125-137
+     *  按注册序 bool+id 帧式落盘的 JSON 等价）：冻结雨/冻结风/停止感染蔓延/
+     *  敌人难度滑杆原始 float；旧档缺省=全默认（滑杆 0 = 0.5×） */
+    journeyPowers?: {
+      freezeRain: boolean; freezeWind: boolean; stopBiomeSpread: boolean;
+      difficultySlider: number;
+    };
     /** 日晷冷却/快进到黎明（WorldFile.cs:1311/1342；旧档缺省 0/false） */
     sundialCooldown?: number; fastForwardTimeToDawn?: boolean;
     /** 月晷冷却/快进到黄昏（WorldFile.cs:1416-1417；旧档缺省 0/false） */
@@ -163,6 +170,14 @@ export interface SaveData {
       usedGummyWorm?: boolean;
       usedAmbrosia?: boolean;
     };
+    /** 旅程力量·玩家侧（IPersistentPerPlayerContent，CreativePowerManager.cs:183-195
+     *  SaveToPlayer 的 JSON 等价）：上帝模式/扩大放置范围（默认开）/刷怪率滑杆；
+     *  旧档缺省 = godmode false / farPlacement true / slider 0.5 */
+    journeyPowers?: {
+      godmode: boolean;
+      farPlacementRange: boolean;
+      spawnRateSlider: number;
+    };
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string; shimmered?: boolean }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
@@ -217,6 +232,8 @@ export interface SaveMeta {
   /** 旅程时间倍率/冻结（CreativePowers.cs:866/:1448；旧档缺省 1/false） */
   journeyTimeRate?: number;
   journeyFreezeTime?: boolean;
+  /** 旅程力量·世界侧（SaveData.header.journeyPowers 同形；缺省=全默认） */
+  journeyPowers?: SaveData['header']['journeyPowers'];
   /** 日晷/月晷快进四件套（WorldFile.cs:1311/1342/1416-1417；旧档缺省 0/0/false/false） */
   sundialCooldown?: number; moondialCooldown?: number;
   fastForwardTimeToDawn?: boolean; fastForwardTimeToDusk?: boolean;
@@ -326,6 +343,7 @@ export function serializeSave(
       difficulty: meta.difficulty ?? 0,   // Main.GameMode（旧档缺省=经典）
       journeyTimeRate: meta.journeyTimeRate ?? 1,
       journeyFreezeTime: meta.journeyFreezeTime ?? false,
+      journeyPowers: meta.journeyPowers,
       sundialCooldown: meta.sundialCooldown ?? 0,
       moondialCooldown: meta.moondialCooldown ?? 0,
       fastForwardTimeToDawn: meta.fastForwardTimeToDawn ?? false,
