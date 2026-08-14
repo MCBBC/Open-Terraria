@@ -965,7 +965,9 @@ export function runDungeonPass(
         }
       }
       if (num2 < 0) cx -= 1.0;
-      dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, rn(3) === 0 ? doorStyle : 13); // DungeonGlobalDoors:47-54(1/3 themed)
+      // 入口门零掷骰：LegacyDungeonEntrance.cs:616 硬编码 PlaceTile(...,10,...,13)。
+      // 勿在此掷 rn(3)——1/3 主题门掷骰属 dungeonD 门特征段（DungeonGlobalDoors.cs:47-50，见下方 doorData 落放处）。
+      dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, 13);
     }
   }
 

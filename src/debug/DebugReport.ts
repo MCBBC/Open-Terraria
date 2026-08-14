@@ -492,7 +492,10 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     const byType = new Map<number, number>();
     const bySheet = new Map<number, number>();
     const typeArr = st.type;
-    for (let i = 0; i < typeArr.length; i++) {
+    // ★步长采样(2026-08-14 终审:全图 5-20M 格逐个 Map set = F5 同步巨帧,
+    // 与迷雾 F4 巨帧同族)——stride 取 ~总格/8192,直方图为估算值(报告只看分布)
+    const stride = Math.max(1, Math.floor(typeArr.length / 8192));
+    for (let i = 0; i < typeArr.length; i += stride) {
       const t = typeArr[i];
       if (t === 0) continue;
       byType.set(t, (byType.get(t) ?? 0) + 1);

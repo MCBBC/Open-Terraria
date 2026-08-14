@@ -53,11 +53,18 @@ export class UIWorldLoadState extends UIState {
     if (label !== this.lastLabel) {
       this.lastLabel = label;
       const text = Lang.worldgenText(label);
-      this.header.setText(`${text} - ${Math.round(p * 100)}%`);
-    } else {
-      this.header.setText(`${this.header.text.split(' - ')[0]} - ${Math.round(p * 100)}%`);
+      // 标签自带百分比时(读档 tiles/settle 原版水位文案"…X%")不再追加
+      // " - X%"后缀——曾拼出"正在安置液体50% - 0%"双重百分比,且追加用的是
+      // 阶段内 p 与标签水位不同标尺(2026-08-14)
+      this.suffixMode = !text.includes('%');
+      this.baseText = text;
+      this.header.setText(this.suffixMode ? `${text} - ${Math.round(p * 100)}%` : text);
+    } else if (this.suffixMode) {
+      this.header.setText(`${this.baseText} - ${Math.round(p * 100)}%`);
     }
   }
+  private suffixMode = true;   // 标签不含 % 时才追加 " - X%" 后缀
+  private baseText = '';
 
   /** WorldGen.onWorldPartial 回调：挂上部分世界，开启实时预览（主线程 fallback 路径） */
   attachWorld(world: World) {

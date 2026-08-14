@@ -2836,6 +2836,8 @@ export class UI {
   // ============ 暂停菜单（原版像素风：IngameOptions.Draw + Utils.DrawInvBG） ============
 
   showPause(handlers: { onResume: () => void; onSave: () => void; onExport?: () => void; onQuit: () => void; onSettings?: () => void; onBestiary?: () => void }) {
+    // 已开守卫：移除旧面板再建新——防 ESC 快速连按/HMR 监听器堆积导致多层叠框
+    document.querySelectorAll('.sw-pause-panel').forEach((el) => el.remove());
     if (!document.getElementById('sw-pause-style')) {
       const style = document.createElement('style');
       style.id = 'sw-pause-style';

@@ -984,6 +984,8 @@ export class Renderer {
   /** 天塔柱族全屏滤镜（SceneMetrics 视区扫描 + SceneState/FilterManager 状态机；
    *  本帧器件态见 monoScan） */
   readonly monoFilters = new MonolithFilters();
+  /** Game.paused 镜像(render 每帧注入;暂停冻结天气物理/滤镜状态机) */
+  _worldPaused = false;
   /** 本帧天塔柱扫描结果（SceneMetrics.ScanOnScreenTiles :524-583；render() 每帧刷新） */
   monoScan: MonolithSceneState = emptyMonolithScene();
   private _monoFrameMs = 0;
@@ -1348,7 +1350,9 @@ export class Renderer {
 
     // 2d'. 天气层（雨滴+雪粒池更新+绘制；沙尘粒子发射——Game 每帧已 attach 状态与 hooks）
     if (this.weatherFxActive) {
-      this.weatherFx.update(world, viewW, viewH, cam.x - viewW / 2, cam.y - viewH / 2, player.vx, player.vy);
+      // ★暂停门(2026-08-14 终审:render 每帧跑,weatherFx.update 含雨滴物理+
+      // 池管理+雪/沙出生——暂停时继续跑=池持续填满/对象持续累积,原版暂停世界全冻结)
+      if (!this._worldPaused) this.weatherFx.update(world, viewW, viewH, cam.x - viewW / 2, cam.y - viewH / 2, player.vx, player.vy);
       this.weatherFx.draw(this, world);
     }
 

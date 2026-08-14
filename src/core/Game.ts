@@ -16999,6 +16999,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const cam = this.camera;
     const L = this.lighting;
     this.renderer.scene = this.scene; // 群系背景（BiomeBackground）每帧注入最新环境采样
+    this.renderer._worldPaused = this.paused; // 暂停镜像:冻结天气物理/滤镜状态机
     this.renderer.deathLostCoins = this.lostCoins; // 死亡 UI「掉了{0}」每帧注入
     this.renderer.annotateMarks = this.annotateMode ? this.marks : null;
     // 背包开合（Main.playerInventory 语义）→ 呼吸计锚点分支（Main.cs:42838/42845）

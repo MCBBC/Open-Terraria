@@ -75,6 +75,7 @@ function getDustTex(): ImageBitmap | HTMLImageElement | null {
   if (dustTex !== null) return dustTex;
   if (typeof Image === 'undefined') return null;
   dustTex = new Image();
+  dustTex.onload = () => upgradeToBitmap(dustTex as unknown as HTMLImageElement, (b) => { dustTex = b; });
   dustTex.src = 'sprites/vanilla/Dust.png';      // 1000×120 = 10px 格；雪花 = dust 76 (760,0)
   return dustTex;
 }
