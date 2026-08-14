@@ -20,7 +20,7 @@
 //   - Visuals.* 装饰叠层（MapBGOverlay1-9：Rain/Blizzard/Sun/Moon/Meteor 等）——
 //     提取数据已含 derivations 推导规则，DOM 头像暂只铺底图不叠装饰层
 //   - 筛选：稀有生物（RareSpawnBestiaryInfoElement）/ 群系 / 事件标签
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { upgradeToBitmap, USE_BITMAP } from '../assets/SpriteAtlas';
 import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
@@ -591,10 +591,14 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBi
   im.onload = () => {
     bstSheetPending.delete(file);
     if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
-    bstSheetCache.set(file, im);
-    for (const c of q!) c(im);
-    // ImageBitmap 升级(下帧起缓存命中即自持解码像素;画布 isConnected 守卫管旧引用)
-    upgradeToBitmap(im, (b) => { if (!bstSheetFailed.has(file)) bstSheetCache.set(file, b); });
+    // bitmap 就绪才入缓存+回调(Image 窗口期每格每帧发 LazyPixelRef,trace⑨)
+    upgradeToBitmap(im, (b) => {
+      if (bstSheetFailed.has(file)) return;
+      if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
+      bstSheetCache.set(file, b);
+      for (const c of q!) c(b);
+    });
+    if (!USE_BITMAP) { bstSheetCache.set(file, im); for (const c of q!) c(im); }
   };
   im.onerror = () => {
     bstSheetPending.delete(file);

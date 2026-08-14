@@ -383,11 +383,14 @@ const DOT_CHUNK: Partial<Record<BuffType, number>> = {
  *  suffocating→electrified；速率 = lifeRegen 负项 / 2 = HP/s）。每个 DoT 结算前
  *  先清零正 lifeRegen——恢复类 buff 不能抵消 DoT（tick 内消费）。
  *  ★每段另伴 lifeRegenTime=0（爬坡计时清零）与 drippingSlime 翻倍（:18782 等）——
- *  前者由 damage() 的 sinceHurt=0 近似；后者依赖 Slimed(137) buff 未移植，登记 GAP */
+ *  前者=Player.ts lifeRegenTime 模型同门（受击 :37784/DoT :18781/流血 :19000 三源
+ *  清零,Player.ts:1206-1230,旧"sinceHurt 近似"已废）;后者依赖 Slimed(137) buff
+ *  未移植,登记 GAP（OnFire 的 vampireSeed 翻番 slime 分支同理 :18803-18805） */
 const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
   [BuffType.Poisoned, -2],    // lifeRegen-4（:18782）
   [BuffType.Venom, -15],      // lifeRegen-30（:18791）
-  [BuffType.OnFire, -4],      // lifeRegen-8（:18811，vampireSeed 分支未移植）
+  [BuffType.OnFire, -4],      // lifeRegen-8（:18811；vampireSeed 世界 → -100=50HP/s,
+  //  见 tick() VAMPIRE_ON_FIRE 分支 Player.cs:18798-18813——仅 buff 24,323 不吃）
   [BuffType.OnFire3, -4],     // lifeRegen-8（:18824）
   [BuffType.Frostburn, -8],   // lifeRegen-16（:18837）
   [BuffType.Frostburn2, -8],  // lifeRegen-16（:18850）
@@ -399,6 +402,9 @@ const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
 /** Electrified 移动惩罚（Player.cs:18900-18903：controlLeft||controlRight 时
  *  lifeRegen 额外 -32 → +16 HP/s）——tick 前由 Player.fixedUpdate 写入开关 */
 const ELECTRIFIED_MOVE_EXTRA = -16;
+/** vampireSeed 世界 OnFire 特档（Player.cs:18798-18802）：lifeRegen -100 = 50 HP/s
+ *  （常规世界 -8 = 4 HP/s；slime 翻倍分支 :18803-18805 依赖 Slimed 未移植） */
+const VAMPIRE_ON_FIRE_HP_S = -50;
 
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
@@ -445,6 +451,12 @@ export class BuffState {
    *  -32）：Player.fixedUpdate 在 buffs.tick 前按本帧 inputX!==0 写入（inputX 由
    *  Game.ts:2890 先于 :2931 fixedUpdate 注入，即原版 Update 时序的当帧输入） */
   electrifiedMoving = false;
+  /** Main.vampireSeed（Main.cs:327；Dracula 秘密种子世界位，NetMessage :363 同步）：
+   *  On Fire!(24) 对玩家从 -8 提到 -100 lifeRegen（50 HP/s，Player.cs:18798-18802；
+   *  drippingSlime 再翻到 -200 :18803-18805——Slimed(137) 未移植,登记）。本仓
+   *  秘密种子系统未实装（世界创建链无种子位），常 false；分支按原版数值落地，
+   *  种子接线后置 true 即活（另 Main.cs:42715 buff 图标 <10t 不显示秒数,UI 侧未接） */
+  vampireSeed = false;
   lanternAccum = 0;
   /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */
   campfireHeal = 1;
@@ -546,6 +558,9 @@ export class BuffState {
       // lifeRegen 额外 -32 = 16 HP/s）——仅感电段专属，逐 tick 生效
       let rate = hpPerSec;
       if (t === BuffType.Electrified && this.electrifiedMoving) rate += ELECTRIFIED_MOVE_EXTRA;
+      // vampireSeed OnFire 特档（Player.cs:18798-18802）：-8 → -100 lifeRegen
+      // （4 → 50 HP/s）。仅 buff 24——onFire3(323) 恒 -8（:18819-18827 无该分支）
+      if (t === BuffType.OnFire && this.vampireSeed) rate = VAMPIRE_ON_FIRE_HP_S;
       const d = this.rateAccum(t, rate, dt);
       dots += d;
       heal += d;

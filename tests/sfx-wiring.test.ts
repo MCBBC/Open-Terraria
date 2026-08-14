@@ -171,7 +171,14 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
     e.ai0 = 127; e.ai1 = 1;              // 治疗招起手
     tickEnemy(e, h, 1);
     expect(played(h.sfx, 'dd2_dark_mage_cast_heal')).toHaveLength(1);   // ai[0]==126（:66461）
-    tickEnemy(e, h, 90);
+    // 674 脉动已实体化（DD2HealPulse）：heal_impact 移到脉动首帧（Projectile.cs
+    // :35544-35547）——魔法师与弹幕都要驱动
+    for (let i = 0; i < 90 && !e.dead; i++) {
+      tickEnemy(e, h, 1);
+      for (const p of h.projectiles as unknown as Array<{ dead?: boolean; fixedUpdate: (dt: number, g: typeof h.hooks) => void }>) {
+        if (!p.dead) p.fixedUpdate(1 / 60, h.hooks);
+      }
+    }
     expect(played(h.sfx, 'dd2_dark_mage_heal_impact').length).toBeGreaterThanOrEqual(2);
     e.ai0 = 81; e.ai1 = 2;               // 召骷髅招（ai[0] 递减过 80）
     tickEnemy(e, h, 1);

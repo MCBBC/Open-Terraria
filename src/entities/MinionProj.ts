@@ -16,6 +16,7 @@ import { canHit } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
+import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
@@ -688,7 +689,8 @@ export class MinionProj extends Entity {
       // 大力士甲虫/纸莎草 +2——首版聚合了 equipStats.minionKB 但漏消费，终审补接）
       const owner0 = this.ownerRef();
       const mkb = (owner0 as unknown as { equipStats?: { minionKB?: number } } | null)?.equipStats?.minionKB ?? 0;
-      const pen0 = (owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0;
+      const pen0 = ((owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0)
+        + (projectileData(this.projId)?.armorPenetration ?? 0); // StrikeNPC :12068:玩家AP+弹幕AP 两源
       en.hurt(res.dmg, Math.sign(en.cx - this.cx) * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
       applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
       this.attackFlash = 24;
@@ -1098,7 +1100,7 @@ export class MinionProj extends Entity {
       }
       this.x += this.vx;
       this.y += this.vy;
-      this.contact(game, dmg0 + 30, 20); // armorPen 30（:8422/:9490）
+      this.contact(game, dmg0, 20); // armorPen 30（:9494）由 contact 内 pen0 两源通道结算
       return;
     }
     // 朝向（AI_062 :62975：velocity.X>0 → spriteDirection=-1；近似取

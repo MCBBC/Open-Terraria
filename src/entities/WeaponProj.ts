@@ -557,7 +557,7 @@ export class Boomerang extends Entity {
 
 /** 每型号伸缩参数（AI_019_Spears_GetSpearOffsetRelativeToPlayer :43417-43540 switch）：
  *  [初始偏移 num6, 伸出速 num7, 缩回速 num8]——位移 = dir × shootSpeed × offset。
- *  aiStyle 161（新短剑 802/842/938-945）不在此 AI,归 spear kind 直刺近似(GAP) */
+ *  aiStyle 161（短剑刺 802/842/938-945）不走此表——见 RAPIER_PROJ 独立 AI_161 模型 */
 const SPEAR_PARAMS: Record<number, [number, number, number]> = {
   46: [3, 1.4, 1.6], 105: [3, 2.1, 2.4], 367: [3, 1.5, 1.6], 368: [3, 1.4, 1.5],
   222: [3, 2.1, 2.4], 342: [3, 2.1, 2.4], 47: [4, 0.9, 1.2], 153: [4, 1.3, 1.5],
@@ -567,23 +567,38 @@ const SPEAR_PARAMS: Record<number, [number, number, number]> = {
   130: [3, 1.0, 1.3], 1103: [4, 0.85, 1.1],
 };
 
-/** aiStyle 161 细剑/短剑族(AI_161_RapierStabs :44987):线性外伸 velocity×(t-1),
- *  16t 消失;与 AI_019 包络完全不同的直刺模型。型号 = 161 全集合 */
+/** aiStyle 161 短剑刺族（DefaultToShortsword :10158-10172 全集合：802 GladiusStab /
+ *  842 RulerStab / 938-945 七金属短剑+铁短剑刺）。AI_161_RapierStabs（:44987-45004）
+ *  独立直刺模型：Center = 玩家MountedCenter + velocity×(ai[0]−1),ai[0]≥16 Kill;
+ *  ★extraUpdates = 1（:10165）——每帧跑 2 个 AI 子步（Projectile.cs:15331-15336
+ *  numUpdates 循环）,整刺 16 步在 8 帧内完成、每帧推进 2×shootSpeed（1.4.4 短剑
+ *  重做的"快刺"节奏本体）。考古备注：1.4.5.6 的 aiStyle 161 无"掷出"独立态——
+ *  短剑重做的可投掷性体现在物品侧（useStyle 13 + noUseGraphic + shoot=刺弹）,
+ *  Projectile.AI case 161 仅持握刺击单态（无 ai[1] 分支/无 throw 站点,
+ *  938-945 唯一生成点 = ItemCheck_Shoot 通用尾段 :48637） */
 const RAPIER_PROJ = new Set([802, 842, 938, 939, 940, 941, 942, 943, 944, 945]);
+/** 802/842（Gladius/Ruler）出膛抖动族（ItemCheck_Shoot :46700-46707）：
+ *  角 ±π/8、速 ±0.7——Ruler/Gladius 的"尺子不准"机制本体 */
+const RAPIER_JITTER_PROJ = new Set([802, 842]);
 
 /** 长矛/细剑绘制角与镜像(纯函数,供 draw 与回归测试共用)。
  *  AI_019 = DrawProj_Spear 专支(Main.cs:34153-34157 按 aiStyle==19 派发,
  *  :34659-34668):num = atan2(vy,vx)+2.355(=3π/4);theOwner.direction>0(玩家朝右)
  *  → dir=FlipHorizontally 且 num -= π/2、origin.X=贴图宽。AI 侧 rotation 赋值同值
  *  (:43271-43276,:43214 spriteDirection=-direction)。
- *  AI_161 = :44990 rotation=atan2+π/2,DrawProjDirect 938-945 再 num327 -= π/4×sd
- *  (:32444);dir=spriteDirection==-1 → Flip(:29827)。
+ *  AI_161 = :44990 rotation=atan2+π/2;DrawProjDirect(:32360 族)里【仅 938-945】
+ *  再 num327 -= π/4×sd（:32443-32446）——802/842 无此偏置,只 atan2+π/2;
+ *  dir=spriteDirection==-1 → FlipHorizontally（:29825-29829,DrawProj 层级全局位,
+ *  AI_161 :44995 设 spriteDirection=sign(vx)）。
  *  ★朝向陷阱(2026-08-13 终审):AI_019 的翻转条件是"玩家朝右",曾写反成 dx<0 且丢
  *  mirror——右刺纯数值巧合仍指正右,左刺矛头指 φ-π/2(正下)偏 90°。 */
-export function spearDrawAngle(dx: number, dy: number, isRapier: boolean): { ang: number; mirror: boolean } {
+export function spearDrawAngle(
+  dx: number, dy: number, isRapier: boolean, rapierNoQuarter = false,
+): { ang: number; mirror: boolean } {
   const sd = dx >= 0 ? 1 : -1;
   if (isRapier) {
-    return { ang: Math.atan2(dy, dx) + Math.PI / 2 - Math.PI / 4 * sd, mirror: sd === -1 };
+    // rapierNoQuarter = 802/842（Main.cs:32443 只列 938-945）
+    return { ang: Math.atan2(dy, dx) + Math.PI / 2 - (rapierNoQuarter ? 0 : Math.PI / 4 * sd), mirror: sd === -1 };
   }
   let ang = Math.atan2(dy, dx) + 2.355; // :34659
   let mirror = false;
@@ -635,34 +650,49 @@ export class SpearProj extends Entity {
     this.prm = SPEAR_PARAMS[projId] ?? [3, 1.9, 2.1];
     const sz = SPEAR_SIZE[projId];
     if (sz) { this.w = sz[0]; this.h = sz[1]; } // 342 薄刃 22×2 等按型号
+    // 802/842 出膛抖动（ItemCheck_Shoot :46700-46707）：向 ±π/8 旋转 + 速 ±0.7
+    //（num8=π/4、NextFloat()−0.5 → [−π/8,+π/8];NextFloatDirection()×0.7 减速）
+    if (RAPIER_JITTER_PROJ.has(projId)) {
+      const ang = Math.atan2(this.dy, this.dx) + Math.PI / 4 * (Math.random() - 0.5);
+      this.spd = Math.max(0, this.spd - (Math.random() * 2 - 1) * 0.7);
+      this.dx = Math.cos(ang);
+      this.dy = Math.sin(ang);
+    }
   }
 
   draw(r: Renderer, cam: Camera): void {
     const isRap = RAPIER_PROJ.has(this.projId);
-    const { ang, mirror } = spearDrawAngle(this.dx, this.dy, isRap);
-    // Utils.GetLerpValue clamped:淡入 t/7(t≤7),淡出 (16-t)/4(t≥12)
+    const noQuarter = RAPIER_JITTER_PROJ.has(this.projId);
+    const { ang, mirror } = spearDrawAngle(this.dx, this.dy, isRap, noQuarter);
+    // Utils.GetLerpValue clamped(:44992):淡入 t/7(t≤7),淡出 (16-t)/4(t≥12)
     const aIn = Math.min(1, this.t / 7);
     const aOut = this.t <= 12 ? 1 : Math.max(0, (16 - this.t) / 4);
+    // 绘制尺寸：938-945 贴图原生 32×32（dw=32 恰为原生）→ 沿用;802=14×58、842=12×28
+    // 长条贴图 → drawSize=-1 原生尺寸（曾统一 32px → Gladius 2.3 倍放大,2026-08-14 修）
     drawProj(r, cam, this, this.projId, ang,
-      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? 32 : 0, mirror);
+      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? (noQuarter ? -1 : 32) : 0, mirror);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    if (this.dead) return;   // 已消亡不再推进（EntityManager compact 之外的直调防护）
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    this.t++;
     const p = game.player;
+    // melee 弹速 /meleeSpeed（ItemCheck_Shoot :46431-46434——长矛与短剑刺都不在
+    // NoMeleeSpeedVelocityScaling 排除表 {699,707,877-879,985,973} 内,ProjectileID.cs:337;
+    // attackSpeedMult = 1/meleeSpeedTotal,Player.ts 同式）。出生帧一次定型
+    if (this.t === 0) {
+      const am = (p as { attackSpeedMult?: number }).attackSpeedMult;
+      if (am && am > 0 && am !== 1) this.spd *= am;
+    }
     if (RAPIER_PROJ.has(this.projId)) {
-      // AI_161_RapierStabs(:44987-45006):线性外伸,固定 16t 消失(与 AI_019 包络无关)
-      if (this.t >= 16) { this.dead = true; return; }
-      this.x = p.cx - this.w / 2 + this.dx * this.spd * (this.t - 1);
-      this.y = p.cy - this.h / 2 + this.dy * this.spd * (this.t - 1);
-      // CutTiles（Projectile.cs:14151-14155：Center 起 10px×scale 线段扫杂草/瓦罐
-      // ——细剑戳击可清障的机制本体，曾整段漏接 2026-08-13 报障修复）
-      game.cutTile(Math.floor((this.cx + this.dx * 10) / 16), Math.floor((this.cy + this.dy * 10) / 16));
-      hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen);
+      // AI_161_RapierStabs(:44987-45004) + extraUpdates=1(DefaultToShortsword :10165;
+      // Projectile.cs:15331-15336 numUpdates 循环)：每帧 2 个 AI 子步,16 步 8 帧跑完
+      this.rapierStep(game);
+      if (!this.dead) this.rapierStep(game);
       return;
     }
+    this.t++;
     if (this.t >= this.dur) { this.dead = true; return; }
     // AI_019 伸缩包络 1:1（:43441-43540）：
     //   itemAnimation 从 max 递减；伸出相占前 2/3（num5 增长），缩回相占后 1/3（num10 增长）
@@ -678,6 +708,20 @@ export class SpearProj extends Entity {
     this.x = p.cx - this.w / 2 + this.dx * offset * this.spd;
     this.y = p.cy - this.h / 2 + this.dy * offset * this.spd;
     hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen); // 一次突刺每敌只结算一次
+  }
+
+  /** AI_161 单个 AI 子步（:44989-45003）：ai[0]++ → Center=玩家心+velocity×(ai[0]−1)
+   *  → ai[0]≥16 Kill（原版 Kill 步仍先落位再消亡——:44994 落位在 :44996 判死之前） */
+  private rapierStep(game: GameHooks): void {
+    this.t++;
+    const p = game.player;
+    this.x = p.cx - this.w / 2 + this.dx * this.spd * (this.t - 1);
+    this.y = p.cy - this.h / 2 + this.dy * this.spd * (this.t - 1);
+    if (this.t >= 16) { this.dead = true; return; }
+    // CutTiles（Projectile.cs:14151-14155：Center 起 10px×scale 线段扫杂草/瓦罐
+    // ——细剑戳击可清障的机制本体，曾整段漏接 2026-08-13 报障修复）
+    game.cutTile(Math.floor((this.cx + this.dx * 10) / 16), Math.floor((this.cy + this.dy * 10) / 16));
+    hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen);
   }
 }
 

@@ -333,15 +333,15 @@ describe('长矛伸缩包络数值（GetSpearOffsetRelativeToPlayer :43417-43540
 });
 
 describe('细剑族（aiStyle 161）', () => {
-  it('线性外伸,16t 消失', () => {
+  it('线性外伸,extraUpdates=1 → 每帧 2 AI 步,16 步 8 帧跑完（DefaultToShortsword :10165）', () => {
     const { hooks, player } = makeHooks();
     const s = new SpearProj(1, 0, 2.4, 20, 13, 4, 938);
-    run(s, hooks, 15);
-    expect(s.dead).toBe(false);
-    // 位移 = spd×(t-1):t=15 → 33.6px
-    expect(Math.abs(s.cx - player.cx - 2.4 * 14)).toBeLessThan(1.5);
-    run(s, hooks, 2);
-    expect(s.dead).toBe(true); // 16t Kill
+    run(s, hooks, 7);
+    expect(s.dead).toBe(false);          // 7 帧 = 14 步（ai[0] 0→14）
+    // 位移 = spd×(t-1):t=14 → 31.2px
+    expect(Math.abs(s.cx - player.cx - 2.4 * 13)).toBeLessThan(1.5);
+    run(s, hooks, 1);
+    expect(s.dead).toBe(true);           // 第 8 帧两步到 ai[0]=16 Kill（:44996）
   });
 
   it('戳击沿途 CutTiles（Projectile.cs:14151-14155：Center 起 10px 线扫草/瓦罐）', () => {
@@ -350,19 +350,74 @@ describe('细剑族（aiStyle 161）', () => {
     (hooks as unknown as { cutTile: () => void }).cutTile = () => { cutCalls++; };
     const s = new SpearProj(1, 0, 2.1, 13, 5, 4, 938);
     run(s, hooks, 16);
-    expect(cutCalls).toBe(15);   // 第 1-15t 每帧一次（16t 先判死 return，当帧不再扫）
+    expect(cutCalls).toBe(15);   // 子步 t=1..15 各扫一次（t=16 先落位再 Kill,不再扫）
   });
 
   it('左刺镜像锚定（AI_161 :44997 spriteDirection=-1；绘制角 Main.cs:32444 −π/4×sd）', () => {
     const { hooks, player } = makeHooks();
     const s = new SpearProj(-1, 0, 2.1, 13, 5, 4, 938);
-    run(s, hooks, 10);
-    expect(s.dead).toBe(false);
+    run(s, hooks, 5);
+    expect(s.dead).toBe(false);          // 5 帧 = 10 步
     // 左刺：cx 向左偏移 spd×(t-1)（修复前方向/镜像缺失会让贴图指向错误侧）
     expect(Math.abs(s.cx - player.cx - (-2.1 * 9))).toBeLessThan(1.5);
     expect(Math.abs(s.cy - player.cy)).toBeLessThan(1.5);
-    run(s, hooks, 7);
-    expect(s.dead).toBe(true); // t=16 消失（useAnimation 13 后仍补足 16t）
+    run(s, hooks, 3);
+    expect(s.dead).toBe(true);           // 8 帧整 = 16 步 Kill
+  });
+
+  it('刺程峰值 = spd×15（Kill 步先落位再消亡,:44994 落位在 :44996 判死之前）', () => {
+    const { hooks, player } = makeHooks();
+    const s = new SpearProj(1, 0, 2.4, 20, 13, 4, 938);
+    let peak = 0;
+    for (let i = 0; i < 9 && !s.dead; i++) {
+      s.fixedUpdate(1 / 60, hooks);
+      peak = Math.max(peak, s.cx - player.cx);
+    }
+    expect(s.dead).toBe(true);
+    expect(peak).toBeCloseTo(2.4 * 15, 5);   // 2.4×15 = 36px 峰值伸距
+  });
+
+  it('802/842 出膛抖动（ItemCheck_Shoot :46700-46707 ±π/8 角 + ±0.7 速）;938 无抖', () => {
+    const { hooks } = makeHooks();
+    let maxAng = 0, minSpd = 99, maxSpd = 0, spread = false;
+    for (let i = 0; i < 300; i++) {
+      const s = new SpearProj(1, 0, 2.4, 18, 15, 3, 802);
+      const ang = Math.atan2((s as unknown as { dy: number }).dy, (s as unknown as { dx: number }).dx);
+      const spd = (s as unknown as { spd: number }).spd;
+      maxAng = Math.max(maxAng, Math.abs(ang));
+      minSpd = Math.min(minSpd, spd);
+      maxSpd = Math.max(maxSpd, spd);
+      if (Math.abs(ang) > 1e-4) spread = true;
+      expect(s.dead).toBe(false);
+    }
+    expect(maxAng).toBeLessThanOrEqual(Math.PI / 8 + 1e-9);   // ±π/8 上界
+    expect(spread).toBe(true);                                 // 确有角散布
+    expect(minSpd).toBeGreaterThanOrEqual(2.4 - 0.7 - 1e-9);   // 速 −0.7 下界
+    expect(maxSpd).toBeLessThanOrEqual(2.4 + 0.7 + 1e-9);      // 速 +0.7 上界
+    // 938 短剑：无抖动,方向恒正右、速恒定
+    for (let i = 0; i < 50; i++) {
+      const s = new SpearProj(1, 0, 2.1, 13, 5, 4, 938);
+      expect((s as unknown as { dx: number }).dx).toBeCloseTo(1, 6);
+      expect((s as unknown as { dy: number }).dy).toBeCloseTo(0, 6);
+    }
+  });
+
+  it('melee 弹速 /meleeSpeed（:46431-46434,attackSpeedMult = 1/meleeSpeedTotal）', () => {
+    const { hooks, player } = makeHooks();
+    Object.defineProperty(player, 'attackSpeedMult', { get: () => 0.5 });      // meleeSpeed 2.0
+    const s = new SpearProj(1, 0, 2.4, 20, 13, 4, 938);
+    run(s, hooks, 3);                                            // 6 步,末步伸距 = 5×2.4×0.5
+    expect(Math.abs(s.cx - player.cx - 2.4 * 0.5 * 5)).toBeLessThan(1e-6);
+  });
+
+  it('802/842 绘制角无 −π/4 偏置（Main.cs:32443-32446 仅 938-945）;938 有', () => {
+    // Gladius/Ruler:ang = atan2+π/2（:44990）,镜像同 spriteDirection 门（:29825-29829）
+    expect(spearDrawAngle(1, 0, true, true)).toEqual({ ang: Math.PI / 2, mirror: false });
+    expect(spearDrawAngle(-1, 0, true, true).ang).toBeCloseTo(Math.PI * 1.5, 5);
+    expect(spearDrawAngle(-1, 0, true, true).mirror).toBe(true);
+    // 938-945:ang = atan2+π/2−π/4×sd
+    expect(spearDrawAngle(1, 0, true, false).ang).toBeCloseTo(Math.PI / 4, 5);
+    expect(spearDrawAngle(-1, 0, true, false).ang).toBeCloseTo(Math.PI * 1.25 + Math.PI / 2, 5);
   });
 });
 

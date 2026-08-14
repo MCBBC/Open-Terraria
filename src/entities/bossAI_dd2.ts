@@ -170,10 +170,73 @@ export const DD2_EVENT_HOOKS = {
 //（电弧 10 速 50 伤）/ 686 DD2BetsyFireball（空袭火球,继承机速）/ 687
 // DD2BetsyFlameBreath（喷焰,10 速横冲）。
 // 伤害弹（240/675/682/686/687）走 Arrow 真图（RENDER_PROXY 已退役）;三枚 0 伤
-// 效果弹（658/673/674）不生成弹体——Arrow 命中敌怪会 hurt(0)（假命中音+0 伤害数字）
-// 且瞬间耗尽 pierce,与原版"纯视觉/纯疗效"语义相反 → 降级为粒子（674 疗效已由
-// darkMageAI 在节拍帧直接结算）。
+// 效果弹（658/673）不生成弹体——Arrow 命中敌怪会 hurt(0)（假命中音+0 伤害数字）
+// 且瞬间耗尽 pierce,与原版"纯视觉"语义相反 → 降级为粒子。674 治疗脉动已实体化
+//（DD2HealPulse,独立于魔法师生死,40t 疗程节奏 1:1）。
 // ---------------------------------------------------------------------------
+/** Projectile 674 DD2DarkMageHeal（SetDefaults :6929-6939：10×10 aiStyle 133
+ *  timeLeft 900;AI :35540-35574）：落地帧播音（ai[0]==0）→ 每 AI 步 ai[0]++ →
+ *  第 40 步结算疗程后 Kill。疗程 = 弹体中心 1000px 内全部友军（active、damage≥1、
+ *  lifeMax≥30、非 564/565）各 +min(500, lifeMax−life)（HealEffect 绿字）。
+ *  ★治疗圆心 = 脉动落点（弹体 Center）,不是魔法师位置——魔法师 ai[1]==1 三连
+ *  脉动（ai[0]=56/48/56 各出一枚,各数各的 40t）后落点在 direction×240 下探 50 格
+ *  处,与魔法师本体的距离随地形拉开。 */
+export class DD2HealPulse extends Entity {
+  w = 10;
+  h = 10;
+  /** ai[0]（:35548 每 AI 步 +1;≥40 Kill） */
+  private ai0 = 0;
+
+  constructor(x: number, y: number) {
+    super();
+    this.x = x;
+    this.y = y;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.ai0 === 0) {
+      // :35544-35547 首帧 DD2_DarkMageHealImpact（PlayTrackedSound 无音量覆写 → 1）
+      game.playSfxFiles(soundTrackFiles('dd2_dark_mage_heal_impact'), 1, this.cx, this.cy);
+      // 落地紫尘（原版为 Projectile_674 贴图绘制,素材未入管线 → 粒子降级）
+      game.spawnParticles(this.cx, this.cy, '#FF7AE0', 8, 1.6, { life: 50 });
+    }
+    this.ai0++;
+    if (this.ai0 < 40) {
+      // 悬浮微光（同上视觉降级;低频防尘海）
+      if (Math.random() < 0.3) {
+        game.spawnParticles(this.cx + (Math.random() - 0.5) * 20,
+          this.cy - Math.random() * 16, '#FF7AE0', 1, 0.4, { life: 26, grav: -0.02 });
+      }
+      return;
+    }
+    // ---- 疗程结算（:35553-35572）----
+    // 原版遍历 Main.maxNPCs（敌怪+城镇 NPC 都算——伤害/生命门自然滤掉小动物）
+    for (const list of [game.enemies(), game.npcs?.() ?? []]) {
+      for (const ent of list) {
+        const n = ent as unknown as {
+          dead: boolean; vanillaId?: number | null; def?: { damage?: number };
+          damage?: number; cx: number; cy: number; hp: number; maxHp: number;
+        };
+        if (!n || n.dead || n.vanillaId === 564 || n.vanillaId === 565) continue;
+        // nPC20.damage >= 1：城镇 NPC 自卫伤害也过门（原版同式）;critter damage 0 被滤
+        const dmg = n.def?.damage ?? n.damage ?? 0;
+        if (dmg < 1 || n.maxHp < 30) continue;
+        if (Math.hypot(n.cx - this.cx, n.cy - this.cy) > 1000) continue;
+        const heal = Math.min(500, n.maxHp - n.hp);
+        if (heal > 0) {
+          n.hp += heal;
+          game.addDamageNumber(n.cx, n.cy - 10, -heal, false, '#7CFF6A');   // HealEffect 绿字
+        }
+      }
+    }
+    this.dead = true;                                   // Kill()（:35573）
+  }
+
+  draw(): void {
+    // 视觉由粒子承担（Projectile_674 贴图未入管线）
+  }
+}
+
 function shootD(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300, grav = 0, pierce = 1,
@@ -1221,26 +1284,20 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
     if (e.ai1 === 1 && e.ai0 === 126) {
       game.playSfxFiles(soundTrackFiles('dd2_dark_mage_cast_heal'), 0.7, e.cx, e.cy);
     }
-    // 治疗（:66453-66461）：ai[1]==1 且 ai[0]=40/48/56 → 674 落地脉动
+    // 治疗（:66453-66461）：ai[1]==1 且 ai[0]=40/48/56 → direction×240 下探 50 格找
+    // 实心面（Searches.Down(50)+IsSolid,含起点格——expandVertically 同式）;找到 →
+    // 生成 674 落地脉动（ToWorldCoordinates(8,0) = (tx*16+8, ty*16)）;找不到
+    //（NOT_FOUND）→ 本拍不出弹（原版 WorldUtils.Find 失败直接跳过 NewProjectile）。
+    // 脉动自身再数 40 AI 步才结算疗程（DD2HealPulse = Projectile.cs:35540-35574）：
+    // 三连拍三枚脉动各自独立计时,落地音/治疗圆心均在脉动处（非魔法师位置）,
+    // 且魔法师死亡不影响已出脉动（原版弹幕独立存活语义）。
     if (e.ai1 === 1 && (e.ai0 === 40 || e.ai0 === 48 || e.ai0 === 56)) {
-      // 674 脉动落地音（Projectile.cs:35546 首帧 DD2_DarkMageHealImpact，三连各一声）
-      game.playSfxFiles(soundTrackFiles('dd2_dark_mage_heal_impact'), 0.6, e.cx, e.cy);
       const gx = Math.floor((e.cx + e.facing * 240) / TILE);
       const gy = Math.floor(e.cy / TILE);
       const [, bottom] = expandVertically(game, gx, gy, 0, 50);
-      game.spawnParticles(gx * TILE + 8, bottom * TILE, '#FF7AE0', 8, 1.6, { life: 50 });
-      // Projectile 674 落地 40t 后的疗效（Projectile.cs:35544-35570）：1000px 内友军
-      // （伤 ≥1、lifeMax ≥30、非 564/565）各 +500（封顶补满）——事件投射物系统未实装,
-      // 疗效在此直接落地（时序 40t 差以 ±8t 粒度近似并入三连发节拍）
-      for (const n of game.enemies() as Enemy[]) {
-        if (n === e || n.dead || n.vanillaId === 564 || n.vanillaId === 565) continue;
-        if (n.def.damage < 1 || n.maxHp < 30) continue;
-        if (Math.hypot(n.cx - e.cx, n.cy - e.cy) > 1000) continue;
-        const heal = Math.min(500, n.maxHp - n.hp);
-        if (heal > 0) {
-          n.hp += heal;
-          game.addDamageNumber(n.cx, n.cy - 10, -heal, false, '#7CFF6A');
-        }
+      if (solidAt(game, gx, bottom)) {
+        (game as unknown as { entities: { add: (en: unknown, b: string) => void } }).entities.add(
+          new DD2HealPulse(gx * TILE + 8, bottom * TILE), 'projectiles');
       }
     }
     if (e.ai0 <= 0) {

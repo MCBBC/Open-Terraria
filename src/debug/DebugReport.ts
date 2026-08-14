@@ -732,6 +732,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         failedVImagesSample: g.atlas.failedVImages().slice(0, 10),
         failedUiImages: g.atlas.failedUiImages().length,
         vuiMissKeys: g.atlas.vuiMissKeys().slice(0, 10),
+        vuiFallbackMisses: g.atlas.vuiFallbackMisses().length,
       } : null,
       subsystems: {
         waterfall: optionalDebugState(g.renderer?.waterfalls ?? null),

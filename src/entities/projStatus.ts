@@ -27,7 +27,10 @@ const SUPPORTED: Record<number, string> = {
   70: 'venomT',      // Venom(:92703-92710;-60 → 30 HP/s)
   39: 'cursedT',     // Cursed Inferno(onFire2,:92684-92695;-48 → 24 HP/s)
   31: 'confusedT',   // Confused(TargetClosest direction 反转,:78569)
-  69: 'ichorT',      // Ichor(checkArmorPenetration :81916 armorPen+15;repo 近似=armorPen 7)
+  69: 'ichorT',      // Ichor(NPC 侧=checkArmorPenetration :81916 armorPenetration+15 进
+  //   共享池,非独立直伤也非防直减;玩家侧 Ichor 才是 statDefense-15,Player.cs:9756-9758)
+  //   ★Enemy.hurt 结算现状=近似平推 +7 直伤(池外),待接线 npcCheckArmorPenetration
+  //   (Enemy.ts 热文件禁改,2026-08-14 登记偏差:防≤0/池饱和两态多算)
   72: 'midasT',      // Midas(掉钱 ×1.10-1.51,Enemy.ts rollCoins)
   44: 'frostburnT',    // Frostburn(onFrostBurn,:92648-92661;-16 → 8 HP/s)
   324: 'frostburn2T',  // Frostburn2(:92668-92680;-50 → 25 HP/s)
@@ -144,4 +147,33 @@ export function applyMeleeImbue(
   if (has(BuffType.ImbueNano)) max('confusedT', 1 + Math.random() * 3);
   if (has(BuffType.ImbuePoison)) max('poisonT', 5 + Math.random() * 5);
   if (has(BuffType.ImbueParty)) partyFx?.();
+}
+
+/** NPC.checkArmorPenetration 1:1 纯函数（NPC.cs:81913-81938）。
+ *  原版语义：返回值是【加到伤害上的加成】（StrikeNPC :12808 num12 += 本值，
+ *  之后 CalculateDamageNPCsTake 才减 def/2——Main.cs:65626-65635），等价于
+ *  有效防 = def − min(pool, def)。pool 单池累加（无"每层独立"档）：
+ *    armorPenetration（StrikeNPC :12068 = 玩家 GetArmorPenetration(melee) +
+ *    弹幕自带 armorPenetration——数据层 vanillaProjectiles.armorPenetration）
+ *    + ichor 15（:81916）+ brokenArmor 20（:81919）+ betsysCurse 40（:81922）
+ *    + (int)(defense × armorPenetrationPercent)（:81927，闪电光环 688/690 传 1）。
+ *  早退：pool ≤ 0 或 defense ≤ 0 → 0（负防/零防不吃穿甲加成）；
+ *  超防钳制：pool > defense → defense/2（加成永不把伤害推过全额）。
+ *  ★待接线：Enemy.hurt 现为"armorPen 减防 + ichor 平推 +7 直伤"近似（池外混算），
+ *  2026-08-14 Enemy.ts 热文件禁改——冷却后替换 hurt 内 :6551-6557 段为
+ *  dmg + npcCheckArmorPenetration(def, armorPen, penPercent, flags) 结算链 */
+export function npcCheckArmorPenetration(
+  defense: number,
+  armorPenetration: number,
+  armorPenetrationPercent = 0,
+  flags: { ichor?: boolean; brokenArmor?: boolean; betsysCurse?: boolean } = {},
+): number {
+  let pen = armorPenetration | 0;
+  if (flags.ichor) pen += 15;             // NPC.cs:81916
+  if (flags.brokenArmor) pen += 20;       // :81919
+  if (flags.betsysCurse) pen += 40;       // :81922
+  pen += Math.trunc(defense * armorPenetrationPercent); // :81927 (int) 截断
+  if (pen <= 0 || defense <= 0) return 0; // :81929
+  if (pen > defense) return (defense / 2) | 0; // :81933 整除
+  return (pen / 2) | 0;                   // :81935 整除
 }

@@ -3,12 +3,20 @@
 //   ItemDropDatabase.cs 结构化提取；626 条注册、规则独立按注册序求值）
 // - 求值语义：ItemDropResolver.cs:23-58（CanDrop 失败=DoesntFillConditions、
 //   掷骰失败=FailedRandomRoll、成功=Success；链按父状态门控）
-// - 钱币管线：NPC.cs NPCLoot_DropMoney(:80412) luck=0 单掷 + 8 层随机放大 + 贪心拆币
+// - 钱币管线：NPC.cs NPCLoot_DropMoney(:80412) closestPlayer.luck 概率双掷取极值
+//   + 8 层随机放大 + 贪心拆币（rollCoins,与原版同源 luck——非 luck=0）
 // - 心/星：NPC.cs NPCLoot_DropCommonLifeAndMana(:80332)
 // - Boss 药水+心：DoDeathEvents_DropBossPotionsAndHearts(:79790)
 // - 初速度：Item.cs:49325-49337 vx∈[-3,3] vy∈[-4,-1.5]
-// 偏差（记录）：luck 已接（Enemy 击杀处注入 Player.luck——src/stats/Luck.ts 聚合，
-//   RecalculateLuck :28672-28697；仅未移植来源（瓢虫/微光币等）恒 0）；NotFromStatue 恒 true；
+// luck 链（2026-08-14 复核全通）：ctx.luck = 击杀处注入 Player.luck（Enemy 侧,
+//   Enemy.ts dropCtx luck: p.luck）——src/stats/Luck.ts RecalculateLuck（:28672-28697）
+//   全来源已接：瓢虫 604/605（击杀坏运/触碰好运）、微光化币 coinLuck、火炬正确性
+//   torchLuck、花园地精、灯笼夜、幸运药水三档、风筝 buff 三档、银河珍珠、恶臭、
+//   幸运装备（币/马掌）、碎镜。掷骰消费 = Luck.RollLuck 同构（rollLuck/tryRoll/
+//   rollCoins 双轮极值/rollHeartsAndStars）。遗留登记（非 luck 链缺口）：
+//   四叶草族 5574/5575/5576 物品未入表（equipmentBasedLuckBonus 三槽空挂）;
+//   多人 closestPlayer 近似为本地玩家（原版 FindClosest,Enemy 侧注入点）。
+// 偏差（记录）：NotFromStatue 恒 true；
 // 天空盒/DST 联动条件恒 false；月事件四条件已实现（ctx.moonEvent 注入，见 evalCond）。
 // RedHatSkeletron/MissingTwin/EmpressOfLightIsGenuinelyEnraged 经 ctx.ai3/
 // anyNpcOfType 接通（Enemy 注入）；MechdusaKill/NamedNPC/

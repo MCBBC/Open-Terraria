@@ -15,6 +15,11 @@ export interface ProjectileData {
   scale?: number;
   /** 每帧额外子步（SetDefaults，249 款非 0；总步数 = 1+extraUpdates——子弹 14=1、高速弹 207=2） */
   extraUpdates?: number;
+  /** 弹幕自带穿甲（Projectile.cs:260 armorPenetration；SetDefaults 逐型直写，
+   *  25 款非 0——StrikeNPC :12068 num3 = 玩家 GetArmorPenetration(melee) + 本值，
+   *  再入 NPC.checkArmorPenetration :81913 池（+ichor15/broken20/betsy40）。
+   *  条件档（148 remixWorld=20）提取器不可静态求值，未入表（登记） */
+  armorPenetration?: number;
   friendly?: boolean;
   melee?: boolean;
   ranged?: boolean;

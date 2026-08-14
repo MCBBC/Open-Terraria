@@ -249,7 +249,8 @@ export function getAttackDamageScaledByDifficulty(normalDamage: number, difficul
  *  (int)(normalDamage * TownNPCDamageMultiplier.Sample(Main.Difficulty))
  *  消费点 = AI_007 城镇 NPC 四攻击态发射/挥击伤害入参（近战 :54897 / 弓 :55169 /
  *  魔法 :55319 / 挥击 :55466，四处同式 num = f(num * num2)——num2 为 Boss 击杀
- *  进度强化链 :53400-53560，本仓未接恒 1）。注意 (int) = 向零截断非四舍五入 */
+ *  进度强化链 :53400-53557，TownNPC.townNpcProgressionBoost 1:1，2026-08-14 接）。
+ *  注意 (int) = 向零截断非四舍五入 */
 export function getAttackDamageForTownNPC(normalDamage: number, difficulty: number): number {
   return Math.trunc(f32(normalDamage * sampleCurve(TOWN_NPC_DAMAGE_MULTIPLIER, difficulty)));
 }

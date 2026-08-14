@@ -180,6 +180,147 @@ export function isItStormingNext(cloudAlpha: number, windSpeedTarget: number, pr
   return prev;
 }
 
+// ===================== Boss 击杀进度强化链（AI_007_TownEntities NPC.cs:53400-53557）=====================
+// num2 = 伤害乘区（先于难度曲线：num = GetAttackDamage_ForTownNPC(num × num2)，
+// 四攻击态入参 ：54897/:55169/:55319/:55466）；num3 = 攻击频率门除数（:55859
+// num123=(int)(AttackAverageChance×num3)，钳 ≥1 后 rand(num123)==0）。两者在同一
+// isLikeATownNPC 块内逐项累计。块内不属本函数的条目：防御档 :53401-53412
+// （dryadWard +20/15/10 按难度——树妖结界 buff 本仓无载体，hurt 侧防御链另批）、
+// type==209 num3÷3（:53548，attackUpdate 消费点内联）、对话中 num3×0.8（:55617，
+// 本仓 talking 恒不入攻击态——触发门 :835 已挡，不可达登记）。
+/** 进度强化链输入（全 bool；各字段 = 原版静态位/实例位，括注声明行+置位点） */
+export interface TownNpcProgression {
+  combatBookWasUsed: boolean;            // NPC.combatBookWasUsed（:6256；书 4382 使用 Player.cs:44710）
+  combatBookVolumeTwoWasUsed: boolean;   // NPC.combatBookVolumeTwoWasUsed（:6258；书 5336 Player.cs:44723）
+  downedSlimeKing: boolean;              // NPC.downedSlimeKing（:6270；case 50 event 11 :80217）
+  downedBoss1: boolean;                  // NPC.downedBoss1（:6262；克眼 4 event 13 :80242）
+  downedDeerclops: boolean;              // NPC.downedDeerclops（:6314；668 event 25 :80156）
+  downedBoss2: boolean;                  // NPC.downedBoss2（:6264；世吞/克脑 13/14/15/266 event 14 :80258）
+  downedBoss3: boolean;                  // NPC.downedBoss3（:6266；骷髅王 35 event 15 :80264）
+  downedQueenBee: boolean;               // NPC.downedQueenBee（:6268；蜂后 222 event 8 :80188）
+  hardMode: boolean;                     // Main.hardMode（肉山 113 → WorldGen.StartHardmode :80286）
+  downedQueenSlime: boolean;             // NPC.downedQueenSlime（:6312；657 event 24 :80159）
+  downedMechBoss1: boolean;              // NPC.downedMechBoss1（:6340；毁灭者 134 event 16 :80277）
+  downedMechBoss2: boolean;              // NPC.downedMechBoss2（:6342；双子 125/126 event 17 :80227）
+  downedMechBoss3: boolean;              // NPC.downedMechBoss3（:6344；Prime 127 event 18 :80270）
+  downedPlantBoss: boolean;              // NPC.downedPlantBoss（:6280；世花 262 event 12 :80234）
+  downedEmpressOfLight: boolean;         // NPC.downedEmpressOfLight（:6310；光女 636 event 23 :80153）
+  downedFishron: boolean;                // NPC.downedFishron（:6286；猪鲨 370 event 7 :80150）
+  downedGolemBoss: boolean;              // NPC.downedGolemBoss（:6282；石巨人 245 event 6 :80147）
+  downedAncientCultist: boolean;         // NPC.downedAncientCultist（:6298；拜月教主 439 event 9 :80195）
+  skyblockLowTiles: boolean;             // WorldGen.Skyblock.lowTiles（WorldGen.cs:3076；天空盒世界扫块率<0.1 置位 :3210-3216）
+  tipsy: boolean;                        // NPC.tipsy（:6146；buff 25 UpdateNPC_BuffSetFlags :93179）
+}
+
+/** num2/num3 进度强化链 1:1（NPC.cs:53400-53557，仅 isLikeATownNPC 块内条目）。
+ *  返回 damageMul=num2 / chanceMul=num3。顺序敏感项：Skyblock 的 num3 折半
+ *  （num3>1 才取 (num3+1)/2，:53542-53545，非乘法）在链中段；tipsy 在链尾
+ *  乘算（:53555 damage×1.1 / :53556 chance×0.9）。209 的 num3÷3（:53548）
+ *  在 Skyblock 之后、tipsy 之前——由消费点内联（对乘法项可交换，仅与 Skyblock
+ *  折半的组合序有差；skyblockLowTiles 本仓恒 false，见 fromWorld 登记） */
+export function townNpcProgressionBoost(p: TownNpcProgression): { damageMul: number; chanceMul: number } {
+  let damage = 1;                        // num2 = 1f（:53400）
+  let chance = 2;                        // num3 = 2f（:53413）
+  if (p.combatBookWasUsed) {             // :53419-53425（lifeMax+250/防+8 留 hurt 侧）
+    chance *= 0.8; damage += 0.25;
+  }
+  if (p.combatBookVolumeTwoWasUsed) {    // :53426-53432
+    chance *= 0.8; damage += 0.25;
+  }
+  if (p.downedSlimeKing) {               // :53437-53442
+    chance *= 0.985; damage += 0.05;
+  }
+  if (p.downedBoss1) {                   // :53443-53448
+    chance *= 0.985; damage += 0.05;
+  }
+  if (p.downedDeerclops) {               // :53449-53454
+    chance *= 0.985; damage += 0.1;
+  }
+  if (p.downedBoss2) {                   // :53455-53460
+    chance *= 0.985; damage += 0.1;
+  }
+  if (p.downedBoss3) {                   // :53461-53466
+    chance *= 0.985; damage += 0.1;
+  }
+  if (p.downedQueenBee) {                // :53467-53472
+    chance *= 0.985; damage += 0.1;
+  }
+  if (p.hardMode) {                      // :53473-53478（+0.4 最大单项）
+    chance *= 0.985; damage += 0.4;
+  }
+  if (p.downedQueenSlime) {              // :53479-53484
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedMechBoss1) {               // :53485-53490
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedMechBoss2) {               // :53491-53496
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedMechBoss3) {               // :53497-53502
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedPlantBoss) {               // :53503-53508
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedEmpressOfLight) {          // :53509-53514
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedFishron) {                 // :53515-53520
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedGolemBoss) {               // :53521-53526
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.downedAncientCultist) {          // :53527-53532（防 +20 最大防御项）
+    chance *= 0.985; damage += 0.15;
+  }
+  if (p.skyblockLowTiles) {              // :53540-53547（netMode!=1 单机恒过）
+    if (chance > 1) chance = (chance + 1) / 2;
+    damage += 0.5;
+  }
+  if (p.tipsy) {                         // :53552-53557（链尾乘算）
+    damage *= 1.1; chance *= 0.9;
+  }
+  return { damageMul: damage, chanceMul: chance };
+}
+
+/** world.flags → 进度强化链输入。Boss 旗标本仓 = Game Boss 槽击杀通用记账
+ *  `downed_<vanillaId>`（Game.ts 击败链，双子归一 125；世吞归一 13/克脑 266），
+ *  与 Game.shopCondOk 同源键序；旧档/导入别名（downedEyeOfCthulhu/downedSkeletron/
+ *  downedSlimeKing）双读。恒 false 两项 = 精确登记非近似：
+ *  - skyblockLowTiles：WorldGen.cs:3210-3216 需 ScanTiles 全图活跃块率 <0.1 的
+ *    扫描链，本仓无该计数系统（seedFlags.skyblock 只证世界类型，后期铺满 >10%
+ *    即失格——不可拿它近似）；
+ *  - tipsy：NPC buff 25 需城镇 NPC buff 载体（UpdateNPC_BuffSetFlags :93179），
+ *    本仓城镇 NPC 无 buff 栏 */
+export function townNpcProgressionFromWorld(world: {
+  flags: Record<string, boolean>;
+}): TownNpcProgression {
+  const f = world.flags;
+  return {
+    combatBookWasUsed: !!f.combatBookWasUsed,
+    combatBookVolumeTwoWasUsed: !!f.combatBookVolumeTwoWasUsed,
+    downedSlimeKing: !!(f['downed_50'] || f.downedSlimeKing),
+    downedBoss1: !!(f['downed_4'] || f.downedEyeOfCthulhu),
+    downedDeerclops: !!f['downed_668'],
+    downedBoss2: !!(f['downed_13'] || f['downed_266']),
+    downedBoss3: !!(f['downed_35'] || f.downedSkeletron),
+    downedQueenBee: !!f['downed_222'],
+    hardMode: !!f.hardMode,
+    downedQueenSlime: !!f['downed_657'],
+    downedMechBoss1: !!f['downed_134'],
+    downedMechBoss2: !!(f['downed_125'] || f['downed_126']),
+    downedMechBoss3: !!f['downed_127'],
+    downedPlantBoss: !!f['downed_262'],
+    downedEmpressOfLight: !!f['downed_636'],
+    downedFishron: !!f['downed_370'],
+    downedGolemBoss: !!f['downed_245'],
+    downedAncientCultist: !!f['downed_439'],
+    skyblockLowTiles: false,
+    tipsy: false,
+  };
+}
 
 export class TownNPC extends Entity {
   w = 20; h = 42;
@@ -816,12 +957,15 @@ export class TownNPC extends Entity {
    *  GameDifficultyData.cs:69:Journey 2/Classic 1/Expert 1.5/Legendary 2,Master 3
    *  无键→区间插值 1.75)——已接 ScaleStats.getAttackDamageForTownNPC +
    *  mainDifficulty(旅程强度滑杆/getGoodWorld +1 同链)。
+   *  num2 进度强化链(2026-08-14 接):AI_007 头部 :53400-53557 = 战斗书两本
+   *  +0.25/17 Boss 旗标+硬模式(+0.05~+0.4)/Skyblock+0.5/醉酒尾乘×1.1——
+   *  townNpcProgressionBoost(FromWorld) 1:1,num3(频率门除数)同链同步接;
+   *  恒 false 登记:skyblockLowTiles(无 ScanTiles 计数链)/tipsy(无 buff 载体)。
    *  已销项:633 狼人变体 proj929+×1.5/108 连发 1-3(权重 4:2:1)±3.4/160·663
    *  落点弹原版几何+重掷次数(10/5)。
-   *  登记未接:num2 进度强化链(:53400-53560 战斗书/19 Boss 旗标/硬模式+0.4/
-   *  醉酒×1.1/Skyblock+0.5——先于难度乘区,数值上 Expert≈进度链后期);挥击态
-   *  逐 tick 弧形判定(GetSwingStats/TweakSwingStats,近似中段一击);:55864 族
-   *  flag28 LOS 掷骰直存 */
+   *  登记未接:挥击态逐 tick 弧形判定(GetSwingStats/TweakSwingStats,近似中段
+   *  一击);:55864 族 flag28 LOS 掷骰直存;对话中 num3×0.8(:55617,本仓 talking
+   *  不入攻击态不可达);防御链 :53401-53531(dryadWard+Boss 防,另批) */
   private attackUpdate(world: import('../world/World').World, game: GameHooks): boolean {
     if (this.atkCd > 0) this.atkCd--;
     const atkType = TOWN_ATTACK_TYPE[this.vanillaId];
@@ -837,7 +981,8 @@ export class TownNPC extends Entity {
       const target = this.pickSideTarget(world, game, range);
       if (!target) return false;
       let chance = TOWN_ATTACK_CHANCE[this.vanillaId] ?? 1;
-      let num3 = 2;                             // :53413(Skyblock ÷1.5 未接)
+      // num3 = 进度强化链频率除数(:53413 起 19 项累计;2026-08-14 前恒 2 近似已废)
+      let num3 = townNpcProgressionBoost(townNpcProgressionFromWorld(world)).chanceMul;
       if (this.vanillaId === 209) num3 /= 3;    // :53548 蒸汽朋克人三倍勤
       const gate = Math.max(1, Math.floor(chance * num3));
       if (Math.random() >= 1 / gate) return false;  // rand(gate)==0
@@ -907,13 +1052,15 @@ export class TownNPC extends Entity {
     let dmg = sw.dmg;
     let kb = sw.kb;
     if (this.vanillaId === 441 && this.givenName === 'Andrew') { dmg *= 2; kb *= 2; } // 猫单特典 :55431
+    // num2 进度强化链(:53400-53557)先于难度曲线(:55466 同式)
+    const num2 = townNpcProgressionBoost(townNpcProgressionFromWorld(world)).damageMul;
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
         hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
       if (e.dead) continue;
       if (!(rx < e.x + e.w && rx + rect > e.x && ry < e.y + e.h && ry + rect > e.y)) continue;
       // 伤害结算(:55466):GetAttackDamage_ForTownNPC(num82*num2)——(int) 截断
-      if (e.hurt(getAttackDamageForTownNPC(dmg, mainDifficulty(world)), this.facing * kb, 0, game)) {
+      if (e.hurt(getAttackDamageForTownNPC(dmg * num2, mainDifficulty(world)), this.facing * kb, 0, game)) {
         game.addDamageNumber(e.x, e.y, dmg, false, '#FFD060');
       }
     }
@@ -1003,8 +1150,10 @@ export class TownNPC extends Entity {
       vy += (Math.random() * 2 - 1) * spread;
     }
     // 伤害结算(近战 :54897/弓 :55169/魔法 :55319 同式):
-    // GetAttackDamage_ForTownNPC(dmg*num2)——(int) 截断;num2 进度链未接恒 1
-    const dmgFinal = getAttackDamageForTownNPC(dmg, mainDifficulty(world));
+    // GetAttackDamage_ForTownNPC(dmg*num2)——(int) 截断;num2 进度强化链
+    // (:53400-53557,2026-08-14 接,2026-08-14 前恒 1 近似已废)
+    const num2 = townNpcProgressionBoost(townNpcProgressionFromWorld(world)).damageMul;
+    const dmgFinal = getAttackDamageForTownNPC(dmg * num2, mainDifficulty(world));
     const sx = this.cx + this.facing * 16 - 5;
     const sy = this.cy - 2 - 5;
     // 落点弹(160/663):目标区域随机点生成 velocity=0;实心重掷(160≤10/:55351、

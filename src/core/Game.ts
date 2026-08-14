@@ -1507,18 +1507,24 @@ export class Game implements GameHooks {
     let step = 0;
     if (inp.mouseDown) { step++; inp.mouseDown = false; }
     if (inp.rightDown) { step--; inp.rightDown = false; }
-    if (step !== 0) {
-      const ok = this.spectateNextPlayer(step, false);
-      const held = this.player.inv.heldItem();
-      if (held && viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 5644) {
-        this.playSfxFile(ok ? 'Item_197' : 'Item_198');
-      }
-    }
+    if (step !== 0) this.spectateCycle(step);
     // 目标彻底失效（死亡滞留超窗/离场）→ 换下一个；全空 → 退出（SpectateNextClosestPlayer 等价）
     if (this.spectatingSlot >= 0 && this.spectatingSlot !== this.net?.mySlot
       && !this.canSpectateNet(this.spectatingSlot) && !this.spectateNextPlayer(1, false)) {
       this.setSpectating(-1);
     }
+  }
+
+  /** HandleSpectatingControls 切换段（:16960-16971）：SpectateNextPlayer + 手持
+   *  5644 时 Item197（成功）/Item198（失败）——键位（keydownHandlers）与鼠标
+   *  （tick 半边）两路共用（原版音效块在 HandleSpectatingControls 内，两路都播） */
+  private spectateCycle(step: number): boolean {
+    const ok = this.spectateNextPlayer(step, false);
+    const held = this.player.inv.heldItem();
+    if (held && viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 5644) {
+      this.playSfxFile(ok ? 'Item_197' : 'Item_198');
+    }
+    return ok;
   }
 
   private netRemoveProjPuppets(ids: number[]) {
@@ -2124,11 +2130,11 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       // 观战键位半边（HandleSpectatingControls :16933-16955——keydown 天然边沿；
-      // 退出=Jump/Inv 族 → Space/Escape；切换=Left/Right）
+      // 退出=Jump/Inv 族 → Space/Escape；切换=Left/Right（音效走 spectateCycle 共用段））
       if (this.spectatingSlot >= 0 && this.player) {
         if (code === 'Space' || code === 'Escape') this.setSpectating(-1);
-        else if (code === 'ArrowRight') this.spectateNextPlayer(1, false);
-        else if (code === 'ArrowLeft') this.spectateNextPlayer(-1, false);
+        else if (code === 'ArrowRight') this.spectateCycle(1);
+        else if (code === 'ArrowLeft') this.spectateCycle(-1);
       }
       // 缩放调节
       if (code === 'Equal' || code === 'NumpadAdd') this.setZoom(this.camera?.zoomTarget + 0.15);

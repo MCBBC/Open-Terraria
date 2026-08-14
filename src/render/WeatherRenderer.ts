@@ -64,9 +64,9 @@ let rainTex: ImageBitmap | HTMLImageElement | null = null;
 function getRainTex(): ImageBitmap | HTMLImageElement | null {
   if (rainTex !== null) return rainTex;
   if (typeof Image === 'undefined') return null;
-  rainTex = new Image();
-  rainTex.onload = () => upgradeToBitmap(rainTex as unknown as HTMLImageElement, (b) => { rainTex = b; });
-  rainTex.src = 'sprites/vanilla/Rain.png';
+  const im = new Image();
+  im.onload = () => upgradeToBitmap(im, (b) => { rainTex = b; });  // bitmap 就绪才入缓存:Image 窗口期每粒子每帧发 LazyPixelRef(2026-08-14 trace⑨)
+  im.src = 'sprites/vanilla/Rain.png';
   return rainTex;
 }
 
@@ -74,10 +74,10 @@ let dustTex: ImageBitmap | HTMLImageElement | null = null;
 function getDustTex(): ImageBitmap | HTMLImageElement | null {
   if (dustTex !== null) return dustTex;
   if (typeof Image === 'undefined') return null;
-  dustTex = new Image();
-  dustTex.onload = () => upgradeToBitmap(dustTex as unknown as HTMLImageElement, (b) => { dustTex = b; });
-  dustTex.src = 'sprites/vanilla/Dust.png';      // 1000×120 = 10px 格；雪花 = dust 76 (760,0)
-  return dustTex;
+  const dim = new Image();
+  dim.onload = () => upgradeToBitmap(dim, (b) => { dustTex = b; });
+  dim.src = 'sprites/vanilla/Dust.png';      // 1000×120 = 10px 格；雪花 = dust 76 (760,0)
+  return null;  // bitmap 就绪才入缓存
 }
 
 export class WeatherRenderer {

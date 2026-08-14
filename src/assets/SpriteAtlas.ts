@@ -105,13 +105,36 @@ export interface VanillaData {
   armorIndex?: Record<string, { head: number; body: number; legs: number }>;
 }
 
-/** vui 键失配登记(运行期防线,2026-08-13):每键 warn 一次进 F5 报告 warn 环,
- *  miss 键集合供 DebugReport assetHealth 段展示 */
+/** vui 键失配登记(运行期防线,2026-08-13;2026-08-14 精细化):
+ *  二分类——【设计内回退查询】静默登记(仍入 F5 assetHealth 供审计);
+ *  【真失配】详细 warn+调用点定位。判别:Paper_{v}_{n} 女性变体缺通道回退男体
+ *  =PaperDoll.sheetRect 的正常路径,画面正确,不该刷屏。 */
 const _vuiKeyMisses = new Set<string>();
+const _vuiFallbackMisses = new Set<string>();
+/** 设计内回退查询的键形态(命中即静默) */
+const VUI_FALLBACK_SAFE: Array<RegExp> = [
+  /^Player_\d+_\d+\.png$/,        // 纸娃娃变体通道回退(sheetRect ?? Player_0_N)
+  /^Armor_Head_\d+\.png$/,         // 头甲可选槽(0=无头盔查询)
+];
 function vuiKeyMiss(name: string): void {
+  const isFallback = VUI_FALLBACK_SAFE.some((re) => re.test(name));
+  if (isFallback) { _vuiFallbackMisses.add(name); return; }  // 静默:F5 仍可见
   if (_vuiKeyMisses.has(name)) return;
   _vuiKeyMisses.add(name);
-  console.warn(`[SpriteAtlas] vui 键不存在: '${name}'(uiFiles 键须带 .png 后缀,裸键恒 null)`);
+  // 调用点(首帧非本模块处)辅助定位:错误栈在此不可靠,给最近消费提示
+  const near = _lastVuiConsumer ? ` 最近消费:最近一次 vui() 前 3 帧@${_lastVuiConsumer}` : '';
+  console.warn(
+    `[vui失配] '${name}' — 清单无此键。检查:①须带 .png 后缀 ②键拼写(vanilla-ui.json 为准) ` +
+    `③若是新素材先跑 node scripts/vanilla-atlas.mjs 重建清单${near}`,
+  );
+}
+/** vui() 调用方上下文记录(失配时给"谁在查"线索;只留最近 3 个消费点) */
+const _vuiConsumerRing: string[] = [];
+let _lastVuiConsumer = '';
+export function noteVuiConsumer(where: string): void {
+  _lastVuiConsumer = where;
+  _vuiConsumerRing.push(where);
+  if (_vuiConsumerRing.length > 3) _vuiConsumerRing.shift();
 }
 
 /** 整图硬 alpha：alpha ≥128 → 255，<128 → 0（并清零 RGB），消除提取 PNG 的半透明镶边 */
@@ -438,6 +461,8 @@ export class SpriteAtlas {
   failedVImages(): string[] { return [...this._vImageFailed]; }
   failedUiImages(): string[] { return [...this._uiFailed]; }
   vuiMissKeys(): string[] { return [..._vuiKeyMisses]; }
+  /** 设计内回退 miss(静默但可审计) */
+  vuiFallbackMisses(): string[] { return [..._vuiFallbackMisses]; }
   /** 后台预取全部物品图标(保留兼容入口;预载流程请用 awaited 的 preloadIcons) */
   prefetchIcons(): void {
     void this.preloadIcons();
@@ -978,3 +1003,5 @@ export function upgradeToBitmap(img: HTMLImageElement, onReady: (b: ImageBitmap)
   if (!SpriteAtlas.USE_BITMAP) return;
   createImageBitmap(img).then(onReady, () => { /* 解码失败保留 Image */ });
 }
+
+export const USE_BITMAP = SpriteAtlas.USE_BITMAP;

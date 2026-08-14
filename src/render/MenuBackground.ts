@@ -65,8 +65,7 @@ export class MenuBackground {
     const im = new Image();
     im.onload = () => upgradeToBitmap(im, (b) => this.imgs.set(n, b));
     im.src = `sprites/vanilla/Background_${n}.png`;
-    this.imgs.set(n, im);
-    return im;
+    return null;  // bitmap 就绪才入缓存(未就绪 drawLayer 跳帧)
   }
 
   /** UI 像素 → 当前屏幕像素（原版 UIScale 语义） */

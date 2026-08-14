@@ -129,7 +129,10 @@ const depth1Lines = (block) => {
   return out;
 };
 
-const NUM_FIELDS = ['aiStyle', 'width', 'height', 'penetrate', 'timeLeft', 'damage', 'light', 'scale', 'extraUpdates'];
+// armorPenetration:Projectile.cs:260 弹幕自带穿甲(SetDefaults 逐型直写,如 85=15/917=50;
+// StrikeNPC :12068 num3 = 玩家 GetArmorPenetration + 弹幕 armorPenetration)。
+// 条件档(Main.remixWorld 148=20)非纯 type 条件,按既有限制跳过(登记)
+const NUM_FIELDS = ['aiStyle', 'width', 'height', 'penetrate', 'timeLeft', 'damage', 'light', 'scale', 'extraUpdates', 'armorPenetration'];
 const BOOL_FIELDS = ['friendly', 'melee', 'ranged', 'magic', 'minion', 'hostile', 'tileCollide', 'ignoreWater', 'pierce'];
 
 // ---- DefaultTo* 辅助方法展开（1456 惯例：DefaultToSpear()/DefaultToYoyo()/DefaultToFlail() 等

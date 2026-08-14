@@ -3,6 +3,7 @@
 // 出入场物（水晶→双门）链。
 import { describe, it, expect } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
+import { DD2HealPulse } from '../src/entities/bossAI_dd2';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { TILE_BY_KEY } from '../src/data/tiles';
@@ -73,11 +74,14 @@ function spawn(h: ReturnType<typeof makeHooks>, id: number, tx: number, ty: numb
   return e;
 }
 
-/** 逐 tick 驱动（默认全部存活敌人） */
+/** 逐 tick 驱动（默认全部存活敌人 + projectiles 桶——674 治疗脉动等实体也在内） */
 function tick(h: ReturnType<typeof makeHooks>, n: number, only?: Enemy[]) {
   for (let i = 0; i < n; i++) {
     for (const e of only ?? h.enemies) {
       if (!e.dead) e.fixedUpdate(1 / 60, h.hooks);
+    }
+    for (const p of h.projectiles as unknown as Array<{ dead?: boolean; fixedUpdate: (dt: number, g: GameHooks) => void }>) {
+      if (!p.dead) p.fixedUpdate(1 / 60, h.hooks);
     }
   }
 }
@@ -245,7 +249,7 @@ describe('AI_109 黑暗魔法师 565', () => {
     expect(Math.hypot(bolts[0].vx, bolts[0].vy)).toBeCloseTo(14, 0);
   });
 
-  it('治疗招（ai[1]=1）在 ai[0]=40/48/56 三连发：1000px 内受伤友军 +500×3 封顶补满', () => {
+  it('治疗招（ai[1]=1）三连拍各出一枚 674 脉动：疗效在拍后第 40 AI 步落地（Projectile.cs:35548-35573）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 112, y: 106 });
     const e = spawn(h, 565, 100, 108);
@@ -253,8 +257,137 @@ describe('AI_109 黑暗魔法师 565', () => {
     ally.hp = ally.maxHp - 800;
     tick(h, 1, [e]);                             // 先过 bInit（避免首帧归零 ai0/ai1）
     e.ai1 = 1; e.ai0 = 60;                       // 直接进治疗招倒计时
-    tick(h, 30, [e]);
-    expect(ally.hp).toBe(ally.maxHp);            // 三连 +500 封顶补满 800 亏空
+    // 拍点：ai[0]=56/48/40 = mage tick 4/12/20（出弹当帧脉动即走第一步,同原版
+    // NPC 更新先于弹幕更新的帧序）→ 各脉动第 40 步 = tick 43/51/59
+    tick(h, 42, [e]);
+    expect(h.projectiles.length).toBe(3);        // 三枚脉动在场（未到 40 步不结算）
+    expect(ally.hp).toBe(ally.maxHp - 800);      // ★40 步前疗效不落地（原近似=拍点即刻结算）
+    tick(h, 1, [e]);                             // tick 43 = 首脉动第 40 步
+    expect(ally.hp).toBe(ally.maxHp - 300);      // 首 +500（Projectile.cs:35558-35570）
+    tick(h, 8, [e]);                             // tick 51 = 次脉动第 40 步
+    expect(ally.hp).toBe(ally.maxHp);            // 次拍 +300 封顶补满;末拍亏空 0
+    tick(h, 10, [e]);
+    expect(h.projectiles.every((p) => (p as unknown as { dead: boolean }).dead)).toBe(true);
+  });
+
+  it('疗程过滤门（Projectile.cs:35556）：564/565、damage<1、lifeMax<30、满血都不吃', () => {
+    const w = makeWorld();
+    const h = makeHooks(w, { x: 300, y: 106 });  // 玩家远离,魔法师原地施法
+    const e = spawn(h, 565, 100, 108);
+    // 纯数据体直接塞进敌怪表（脉动按结构消费,不跑 AI）
+    const allies = [
+      { dead: false, vanillaId: 564, def: { damage: 30 }, hp: 500, maxHp: 1000, cx: 1650, cy: 1740 },
+      { dead: false, vanillaId: 571, def: { damage: 0 }, hp: 900, maxHp: 1000, cx: 1700, cy: 1740 },
+      { dead: false, vanillaId: 571, def: { damage: 10 }, hp: 900, maxHp: 20, cx: 1750, cy: 1740 },
+      { dead: false, vanillaId: 571, def: { damage: 10 }, hp: 500, maxHp: 1000, cx: 1800, cy: 1740 },
+      { dead: false, vanillaId: 571, def: { damage: 10 }, hp: 1000, maxHp: 1000, cx: 1850, cy: 1740 },
+    ];
+    h.enemies.push(...(allies as unknown as Enemy[]));
+    tick(h, 1, [e]);
+    e.ai1 = 1; e.ai0 = 57;                       // 首拍 57→56
+    tick(h, 46, [e]);
+    expect(allies[0].hp).toBe(500);              // 564 同族排除
+    expect(allies[1].hp).toBe(900);              // damage<1（小动物语义）排除
+    expect(allies[2].hp).toBe(900);              // lifeMax<30 排除
+    expect(allies[3].hp).toBe(1000);             // 正常友军 +500
+    expect(allies[4].hp).toBe(1000);             // 满血无变化
+  });
+
+  it('下探 50 格无实心面 → WorldUtils.Find NOT_FOUND → 不出脉动（NPC.cs:66453 门）', () => {
+    const w = makeWorld();
+    const h = makeHooks(w, { x: 112, y: 106 });
+    const e = spawn(h, 565, 100, 108);
+    tick(h, 1, [e]);
+    e.facing = 1;
+    // 掏空落点列（gx 起 50 格全空——expandVertically 到 st.h−10 钳位仍无实心）
+    const gx = Math.floor((e.cx + 240) / 16);
+    const gy = Math.floor(e.cy / 16);
+    const st = w.store;
+    for (let y = gy; y < st.h; y++) st.setTile(gx, y, 0);
+    e.ai1 = 1; e.ai0 = 57;
+    tick(h, 3, [e]);                             // 跨过 56/48/40 三拍
+    expect(h.projectiles.length).toBe(0);        // Find 失败 → 无 NewProjectile
+  });
+});
+
+describe('674 治疗脉动实体（DD2HealPulse,Projectile.cs:35540-35574）', () => {
+  type PulseLike = { dead: boolean; fixedUpdate: (dt: number, g: GameHooks) => void };
+  function pulseHooks(enemies: unknown[]) {
+    const hooks = {
+      world: makeWorld(),
+      player: { x: 0, y: 0, w: 20, h: 42, cx: 0, cy: 0, dead: true },
+      enemies: () => enemies,
+      critters: () => [],
+      spawnDrop: () => null,
+      damagePlayer: () => {},
+      addDamageNumber: () => {},
+      cutTile: () => {},
+      onEnemyKilled: () => {},
+      spawnEnemy: () => {},
+      spawnParticles: () => {},
+      notifyInventoryChanged: () => {},
+      playSfx: () => {},
+      playSfxFiles: () => {},
+      showPickupLabel: () => {},
+    } as unknown as GameHooks;
+    return hooks;
+  }
+  const mkAlly = (id: number, hp: number, maxHp: number, d = 20, cx = 1600, cy = 1600) => ({
+    dead: false, vanillaId: id, def: { damage: d }, hp, maxHp, cx, cy,
+  });
+
+  it('疗效恰在第 40 AI 步结算,脉动随即消亡（:35548-35573）', () => {
+    const ally = mkAlly(571, 2500, 3000);
+    const hooks = pulseHooks([ally]);
+    const pulse = new DD2HealPulse(1600, 1600) as unknown as PulseLike;
+    for (let i = 0; i < 39; i++) pulse.fixedUpdate(1 / 60, hooks);
+    expect(ally.hp).toBe(2500);                  // 39 步未到
+    expect(pulse.dead).toBe(false);
+    pulse.fixedUpdate(1 / 60, hooks);            // 第 40 步
+    expect(ally.hp).toBe(3000);
+    expect(pulse.dead).toBe(true);               // Kill()
+  });
+
+  it('疗程圆心 = 脉动落点（Distance(nPC.Center) :35556,弹体中心）——900px 内吃/1100px 外不吃', () => {
+    // 脉动在 (1600,1600);友军 A 距脉动 900px（在场）,友军 B 距 1100px（在外）。
+    // 场上【无任何魔法师】——证明治疗判定只看脉动自身位置
+    const a = mkAlly(571, 500, 2000, 20, 1600 + 900, 1600);
+    const b = mkAlly(571, 500, 2000, 20, 1600 - 1100, 1600);
+    const hooks = pulseHooks([a, b]);
+    const pulse = new DD2HealPulse(1600, 1600) as unknown as PulseLike;
+    for (let i = 0; i < 40; i++) pulse.fixedUpdate(1 / 60, hooks);
+    expect(a.hp).toBe(1000);                     // 900px ≤1000 → +500
+    expect(b.hp).toBe(500);                      // 1100px >1000 → 不吃
+  });
+
+  it('魔法师死亡不影响已出脉动（原版弹幕独立存活语义）', () => {
+    const ally = mkAlly(571, 2500, 3000);
+    const hooks = pulseHooks([ally]);
+    const pulse = new DD2HealPulse(1600, 1600) as unknown as PulseLike;
+    // 无任何魔法师参与推进——脉动自走 40 步
+    for (let i = 0; i < 40; i++) pulse.fixedUpdate(1 / 60, hooks);
+    expect(ally.hp).toBe(3000);
+    expect(pulse.dead).toBe(true);
+  });
+
+  it('疗程封顶 +500/枚（:35558-35563 min(500, lifeMax−life)）', () => {
+    const ally = mkAlly(571, 1000, 3000);        // 亏空 2000 → 单枚只回 500
+    const hooks = pulseHooks([ally]);
+    const pulse = new DD2HealPulse(1600, 1600) as unknown as PulseLike;
+    for (let i = 0; i < 40; i++) pulse.fixedUpdate(1 / 60, hooks);
+    expect(ally.hp).toBe(1500);
+  });
+
+  it('城镇 NPC 也在疗程扫描内（原版遍历 Main.maxNPCs 全表,damage≥1/lifeMax≥30 过门）', () => {
+    const townNpc = mkAlly(17, 100, 250, 15);
+    let npcSeen = 0;
+    const hooks = pulseHooks([]);
+    (hooks as unknown as { npcs: () => unknown[] }).npcs = () => { npcSeen++; return [townNpc]; };
+    const pulse = new DD2HealPulse(1600, 1600) as unknown as PulseLike;
+    for (let i = 0; i < 40; i++) pulse.fixedUpdate(1 / 60, hooks);
+    expect(pulse.dead).toBe(true);
+    expect(townNpc.hp).toBe(250);                // 城镇 NPC 吃到疗程
+    expect(npcSeen).toBeGreaterThan(0);
   });
 });
 

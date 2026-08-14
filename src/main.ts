@@ -53,6 +53,14 @@ window.addEventListener('unhandledrejection', (e) =>
     origError(...args);
   };
 }
+// 资源加载失败入警告环(img/audio/script 的 error 事件不触发 console.error,
+// 此前 F5 只能靠网络面板;漏抓面补上)
+window.addEventListener('error', (e) => {
+  const t = e.target as unknown as { src?: string; href?: string } | null;
+  const src = t && (t.src || t.href);
+  if (src) pushSwWarn(`[资源加载失败] ${String(src).slice(0, 180)}`);
+}, true);
+
 // 警告 ring（F5 报告 warnings 段数据源；与错误环分离——告警刷屏不能挤掉真错误）。
 // 全量捕获 console.warn：渲染层的 warn-once（如 VanillaTiler 源矩形越界/取帧失败）
 // 随手入环，任何模块无需单独接线

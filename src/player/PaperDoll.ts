@@ -4,6 +4,7 @@
 //   11 = pants；12 = shoes；1 = 眼白(白)；2 = 瞳孔(eyeColor)；发型表 14 帧对齐身体帧 6-19。
 import { type Appearance, backHairDraw, MALE_VARIANTS } from './Appearance';
 import { UITextures } from '../vui/assets/UITextures';
+import { noteVuiConsumer } from '../assets/SpriteAtlas';
 
 export const BODY_FRAMES = 20;     // 身体帧数
 export const FRAME_W = 40;
@@ -159,6 +160,8 @@ function appearanceKey(a: Appearance): string {
 
 function sheetRect(variant: number, sheet: number): ImageBitmap | HTMLImageElement | null {
   // 女性变体缺的通道回退男体（文件分布：Player_1_ 仅有 4,6,8,11,12,13）
+  // 消费点埋点:回退 miss 时 vui 失配报告能给出"谁在查"
+  noteVuiConsumer(`PaperDoll.sheetRect(v${variant},s${sheet})`);
   const r = UITextures.get(`Player_${variant}_${sheet}.png`) ?? UITextures.get(`Player_0_${sheet}.png`);
   return r ? (r.img as HTMLImageElement) : null;
 }

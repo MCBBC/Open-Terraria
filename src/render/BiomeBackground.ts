@@ -172,8 +172,7 @@ export class BiomeBackground {
     const im = new Image();
     im.onload = () => upgradeToBitmap(im, (b) => this.hellImgs.set(n, b));
     im.src = `sprites/vanilla/Underworld_${n}.png`;
-    this.hellImgs.set(n, im);
-    return im;
+    return null;  // bitmap 就绪才入缓存(trace⑨ 窗口期)
   }
 
   private img(n: number): ImageBitmap | HTMLImageElement | null {
@@ -182,8 +181,7 @@ export class BiomeBackground {
     const im = new Image();
     im.onload = () => upgradeToBitmap(im, (b) => this.imgs.set(n, b));
     im.src = `sprites/vanilla/Background_${n}.png`;
-    this.imgs.set(n, im);
-    return im;
+    return null;  // bitmap 就绪才入缓存
   }
 
   /** 进图前预载出生点场景背景(森林初始风格的山+树 5 张,~47MB 解码)。
@@ -217,12 +215,12 @@ export class BiomeBackground {
       if (this.imgs.has(n)) return resolve();
       const im = new Image();
       im.onload = () => {
-        this.imgs.set(n, im);
-        // 背景图 2048px 级:预载阶段即完成解码(createImageBitmap 自带 decode)
+        // bitmap 就绪才入缓存+resolve(2048px 级;Image 窗口期=每帧 5 层绘制的
+        // LazyPixelRef 源,trace⑨)
         upgradeToBitmap(im, (b) => { this.imgs.set(n, b); resolve(); });
-        if (!SpriteAtlas.USE_BITMAP) resolve();
+        if (!SpriteAtlas.USE_BITMAP) { this.imgs.set(n, im); resolve(); }
       };
-      im.onerror = () => { this.imgs.set(n, im); resolve(); };
+      im.onerror = () => resolve();
       im.src = `sprites/vanilla/Background_${n}.png`;
     }))).then(() => undefined);
   }

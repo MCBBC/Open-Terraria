@@ -35,7 +35,10 @@
 //     登记→已接：微光化币（WorldItem.cs:1791-1810 钱币入微光消散 → coinLuckAmount
 //           面额放大 → LuckState.addCoinLuck 距离门+衰减；ItemDrop 钱币分支已接，
 //           回归见 tests/shimmer.test.ts「金币 73 入池」探针）。
-//     仍登记：风筝/恶臭 buff 的授予物品（风筝族 4371 等/恶臭药水 1332/弹幕 1080）未移植。
+//     仍登记：风筝/恶臭 buff 的授予物品（风筝族 4371 等/恶臭药水 1332/弹幕 1080）未移植;
+//           四叶草族 5574/5575/5576 物品未入表（luckEquipmentBonus 三槽空挂,
+//           Player.cs:12321-12332/:12628-12646）;瓢虫 releaseOwner 门（:82370
+//           玩家放生的瓢虫不给好运）——引擎无放生跟踪,当前全瓢虫视为野生,恒满足。
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 
@@ -108,7 +111,8 @@ export class LuckState {
   brokenMirrorBadLuckTime = 0;
   /** 瓢虫 luck 计时 tick（正=好运余量/负=坏运余量；UpdateLadyBugLuckTime :28654-28670 衰减） */
   ladyBugLuckTimeLeft = 0;
-  /** 钱币幸运累计（铜币面额；来源 = 微光化币 WorldItem.cs:1787-1807——微光未移植，登记） */
+  /** 钱币幸运累计（铜币面额；来源 = 微光化币 WorldItem.cs:1787-1810——ItemDrop 钱币
+   *  入微光消散分支已接 addCoinLuck（距离门+面额放大），回归见 tests/shimmer.test.ts） */
   coinLuck = 0;
 
   /** GetLadyBugLuck（:18009-18019）：timeLeft/43200 或 -timeLeft/-10800（∈[-1,1]） */

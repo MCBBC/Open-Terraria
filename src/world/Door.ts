@@ -104,12 +104,15 @@ export function closeDoor(st: TileStore, x: number, y: number, rng: () => number
   // 样式行先取（清格后 frameY 归零；原版关门不重写 frameY，样式行开门/关门一致）
   const col = Math.floor(fx / 72);
   const row = Math.floor(st.frameY[st.idx(x, ay)] / 54) % 36;
-  // 清两列再写关门列（原版 num6..num6+1 循环）
+  // 清扫区内的【开门图格】清空、关门列稍后重写（原版 :32037-32057:
+  // `tile2.type == 11` 才动——l==num2 转关门型,否则 active(false)）。
+  // ★曾 3 列无差别 setTile(0):门朝空侧开再关时 sweepR=x+1 越过门自身两列,
+  // 把旁贴工作台/墓碑的半边格直接抹掉(用户报"开关门切半贴图",2026-08-14)
   const sweepL = Math.min(closedX, x - 1), sweepR = Math.max(closedX + 1, x + 1);
   for (let sx = sweepL; sx <= sweepR; sx++) {
     for (let dy = 0; dy < 3; dy++) {
       if (!st.inBounds(sx, ay + dy)) continue;
-      st.setTile(sx, ay + dy, 0);
+      if (st.get(sx, ay + dy) === T.DOOR_OPEN) st.setTile(sx, ay + dy, 0);
     }
   }
   const [cfx] = doorClosedFrame(col * 36, Math.floor(rng() * 3));

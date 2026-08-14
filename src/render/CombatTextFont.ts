@@ -29,7 +29,7 @@ const READY: [boolean, boolean] = [false, false];
   pages.forEach((p, i) => {
     p.characters.forEach((c, k) => CHAR_INDEX[i].set(c, k));
     const img = new Image();
-    img.onload = () => { TEX[i] = img; READY[i] = true; upgradeToBitmap(img, (b) => { TEX[i] = b; }); };
+    img.onload = () => upgradeToBitmap(img, (b) => { TEX[i] = b; READY[i] = true; });
     img.src = `sprites/${p.texture}`;
   });
 })();

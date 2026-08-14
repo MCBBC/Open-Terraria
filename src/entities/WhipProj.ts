@@ -47,6 +47,22 @@ const remap = (value: number, from1: number, to1: number, from2: number, to2: nu
   return from2 + (to2 - from2) * (value - from1) / (to1 - from1);
 };
 
+/** Projectile.ApplyWhipDebuffs 1:1（Projectile.cs:11067-11090,StatusNPC :10670 逐命中调用）：
+ *  913 火鞭 Firecracker → OnFire3(323) 240t=4s（NPC -30 lifeRegen=15HP/s）；
+ *  912 酷鞭 Cool Whip → Frostburn2(324) 240t=4s（-50=25HP/s）——两者此前误并入
+ *  OnFire(24) 4s 近似（-8=4HP/s）,2026-08-14 对齐分档；914 荆棘鞭 Snapthorn →
+ *  1/5 AddBuff(20,180)；1033 电鳗鞭 5478 → 362/240 与 849 黑收成 Dark Harvest →
+ *  310/240 在原版 NPC 侧【非 DoT 字段】：362=markedByEelWhip 链电标记（NPC.cs
+ *  :93298 置位 → ApplyEelWhipDoT :92992 每 60t 对 600px 内至多 3 只标记怪放电,
+ *  依赖 TagEffectState 5478 计数——链机制整块登记 GAP）、310=markedByScytheWhip
+ *  仅视觉粒子（:92148 BlackLightningSmall,无数值效果）——两者不落本仓字段 */
+export function applyWhipDebuffs(projId: number, enemy: Record<string, number>): void {
+  if (projId === 913) enemy.onFire3T = Math.max(enemy.onFire3T ?? 0, 4);        // AddBuff(323,240)
+  else if (projId === 912) enemy.frostburn2T = Math.max(enemy.frostburn2T ?? 0, 4); // AddBuff(324,240)
+  else if (projId === 914 && Math.random() < 0.2) enemy.poisonT = Math.max(enemy.poisonT ?? 0, 3); // 1/5 AddBuff(20,180)
+  // 1033→362 / 849→310：见上,标记类 buff 无独立 DoT 语义,不写字段
+}
+
 export class WhipProj extends Entity {
   w = 18; h = 18; // DefaultToWhip :10096-10097
   dead = false;
@@ -287,12 +303,8 @@ export class WhipProj extends Entity {
               { grav: 0, life: 240 }), 'projectiles');
           }
         }
-        // 鞭敌方直伤 debuff（ApplyWhipDebuffs :11067-11090）：913 火鞭→地狱火 323/240、
-        //  912 酷鞭→霜燃 324/240（两者均为 DoT，本作复用 onFire 4s 近似）、914 荆棘鞭→
-        //  1/5 中毒 180；1033 电鳗 362/240、849 黑收成 310/240 无对应 DoT 字段（标记）
-        const deb = e as unknown as { onFireT?: number; poisonT?: number };
-        if (this.projId === 913 || this.projId === 912) deb.onFireT = Math.max(deb.onFireT ?? 0, 4);
-        if (this.projId === 914 && Math.random() < 0.2) deb.poisonT = Math.max(deb.poisonT ?? 0, 3);
+        // 鞭敌方直伤 debuff（ApplyWhipDebuffs :11067-11090 表驱动 1:1）
+        applyWhipDebuffs(this.projId, e as unknown as Record<string, number>);
         // 玩家 buff（tag 链 WhipTagEffect :42-51 与命中链 :12936-12951 两源，见表注释）
         const tb = WHIP_TAG_BUFF[this.itemId];
         const hb = WHIP_HIT_BUFF[this.itemId];

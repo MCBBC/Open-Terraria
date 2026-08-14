@@ -680,14 +680,15 @@ const DRAMA_TEX_FILE: Record<DramaPieceKind, string> = {
   explosion: 'Misc_MoonExplosion_Explosion.png',
 };
 
-const dramaTexCache = new Map<DramaPieceKind, HTMLImageElement>();
+const dramaTexCache = new Map<DramaPieceKind, ImageBitmap | HTMLImageElement>();
 function dramaTex(kind: DramaPieceKind): ImageBitmap | HTMLImageElement | null {
   if (typeof Image === 'undefined') return null;
   let t = dramaTexCache.get(kind);
   if (!t) {
-    t = new Image();
-    t.src = `sprites/vanilla/${DRAMA_TEX_FILE[kind]}`;
-    dramaTexCache.set(kind, t);
+    const im = new Image();
+    im.onload = () => upgradeToBitmap(im, (b) => dramaTexCache.set(kind, b));  // bitmap-only(trace⑨ 窗口期)
+    im.src = `sprites/vanilla/${DRAMA_TEX_FILE[kind]}`;
+    return null;
   }
   return t;
 }
@@ -861,9 +862,9 @@ export class SkyRenderer {
   private cloudTex(i: number): ImageBitmap | HTMLImageElement | null {
     let t = this.cloudTexs[i];
     if (!t) {
-      t = new Image();
-      t.src = `sprites/vanilla/Cloud_${i}.png`;
-      this.cloudTexs[i] = t;
+      const im = new Image();
+      im.onload = () => upgradeToBitmap(im, (b) => { this.cloudTexs[i] = b; });  // bitmap-only(trace⑨)
+      im.src = `sprites/vanilla/Cloud_${i}.png`;
     }
     return t;
   }
@@ -877,9 +878,9 @@ export class SkyRenderer {
   private ensureEventMoonTex(kind: 1 | 2): ImageBitmap | HTMLImageElement | null {
     let t = this.eventMoonTexs[kind];
     if (!t) {
-      t = new Image();
-      t.src = `sprites/vanilla/Moon_${kind === 2 ? 'Pumpkin' : 'Snow'}.png`;
-      this.eventMoonTexs[kind] = t;
+      const im = new Image();
+      im.onload = () => upgradeToBitmap(im, (b) => { this.eventMoonTexs[kind] = b; });  // bitmap-only(trace⑨)
+      im.src = `sprites/vanilla/Moon_${kind === 2 ? 'Pumpkin' : 'Snow'}.png`;
     }
     return t;
   }
@@ -1206,8 +1207,8 @@ export class SkyRenderer {
     if (camY > this.fx.surfaceY) return;
     if (!this.lanternTex) {
       const im = new Image();
+      im.onload = () => upgradeToBitmap(im, (b) => { this.lanternTex = b; });  // bitmap-only(trace⑨)
       im.src = 'sprites/vanilla/Extra_134.png';
-      this.lanternTex = im;
     }
     if (this.lanterns.length === 0 || (up && this.lanternsLeaving)) {
       this.generateLanterns();
@@ -1296,8 +1297,8 @@ export class SkyRenderer {
     if (this.partyTexs[0] === null) {
       for (let i = 0; i < 3; i++) {
         const im = new Image();
+        im.onload = () => upgradeToBitmap(im, (b) => { this.partyTexs[i] = b; });  // bitmap-only(trace⑨)
         im.src = `sprites/vanilla/Extra_${69 + i}.png`;
-        this.partyTexs[i] = im;
       }
     }
     while (this.partyBalloons.length < 48) this.spawnBalloon(viewH);

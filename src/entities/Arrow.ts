@@ -204,8 +204,15 @@ export class Arrow extends Entity {
   critBonus = 0;
   /** 暴击总概率阈值（0-1，spawn 侧一次性算好；未设=按 critBonus+4%） */
   critChance = 0;
-  /** 护甲穿透（N:81913 减防语义——spawn 注入，命中时传 hurt 第 5 参） */
+  /** 护甲穿透（玩家侧：spawn 注入 equipStats.armorPen+词缀 arpen，=原版
+   *  GetArmorPenetration(melee)（Player.cs:4170-4177）；弹幕自带份见 settlePen） */
   armorPen = 0;
+  /** 结算穿甲 = 玩家侧 armorPen + 本型号 armorPenetration（Projectile.cs SetDefaults
+   *  逐型直写,25 款非 0——StrikeNPC :12068 num3 两源相加后再入
+   *  NPC.checkArmorPenetration :81913 单池；独立字段,不与 Ichor 混算） */
+  private get settlePen(): number {
+    return this.armorPen + (projectileData(this.projId)?.armorPenetration ?? 0);
+  }
   /** 星云套 booster 回调（StrikeNPC :12892-12905：魔法弹命中 → Game 判定掉落） */
   nebulaCb: (() => void) | null = null;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
@@ -767,8 +774,10 @@ export class Arrow extends Entity {
         // 命中 debuff（StatusNPC:10555 表驱动——火枪弹 2 33% OnFire 180t 等,按型号掷骰）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
         if (this.betsyCurse) {
-          // Betsy's Curse 203（:10719-10721）——计时直写；防御穿透层机制暂以
-          // armorPen 语义近似（独立 -10 防/层 待后续接）
+          // Betsy's Curse 203（type 711 命中 AddBuff(203,600) :10719-10721）——
+          // 原版无"每层 -10 防"堆叠档：betsysCurse flag（NPC.cs:93287-93289）只是
+          // checkArmorPenetration 池内 +40（:81922-81924），Enemy.hurt buffPen 直读
+          // betsysCurseT 即 1:1（2026-08-14 考古销项，旧注释的"层"描述非原版）
           const rec = e as unknown as Record<string, number>;
           rec.betsysCurseT = Math.max(rec.betsysCurseT ?? 0, 600);
         }
@@ -779,7 +788,7 @@ export class Arrow extends Entity {
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
         playEnemyHitSound(game, e);
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit, true);
+        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.settlePen, crit, this.pierceInit, true);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
         // 502 喵刀弹命中：无特效音/无计数消亡（全库唯一 PlaySound(37) 在撞块
@@ -1070,7 +1079,7 @@ export class Arrow extends Entity {
       playEnemyHitSound(game, e);
       // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
       // fromPlayer=true 走 DPS/掉落门链
-      e.hurt(dmg, Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 1, true);
+      e.hurt(dmg, Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.settlePen, crit, 1, true);
       game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
       this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :13157 localNPCHitCooldown=14
       if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :12447-12450 首咬 latch
