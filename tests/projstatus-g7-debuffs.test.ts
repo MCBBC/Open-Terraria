@@ -42,6 +42,12 @@ function dotLoss(field: string, hp = 1000): number {
   const e = new Enemy('zombie', 10 * 16, 10 * 16);
   e.iframes = 0; e.hp = hp; e.hpBarT = 0;
   (e as unknown as Record<string, number>)[field] = 1;
+  // 贴附族层数模型（2026-08-15 起）：DoT = 层数池驱动（NPC.cs:92740+ num=场上附着
+  // 弹数）——buff 计时字段只开门，单层伤害须 push 一层（等价一枚贴附弹在场）
+  const STICKER: Record<string, 169 | 183 | 337 | 344> = {
+    javelinT: 169, stardustT: 183, spikeT: 337, butcherT: 344,
+  };
+  if (STICKER[field]) e.addStickerStack(STICKER[field], 900);
   e.fixedUpdate(1, makeHooks() as never);
   return hp - e.hp;
 }

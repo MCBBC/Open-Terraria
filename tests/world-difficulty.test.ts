@@ -75,8 +75,10 @@ describe('中核死亡掉物品（Player.cs:38254 DropItems(gemsOnly=false)）',
     inv.loadouts[1].armor[3] = { id: torch, stack: 4 };
     const dropped: Array<[string, number]> = [];
     dropInventoryOnDeath(inv, (key, stack) => dropped.push([key, stack]));
-    // 6 件全掉（含 Loadout 备份仓）
-    expect(dropped.length).toBe(6);
+    // 5 件掉（含 Loadout 备份仓）——slots[10] 的 3509 镐走 TurnToAir 不掉
+    // （:53414-53418 起始三件门【只在 inventory 主循环】；armor/dye/misc/loadouts
+    //  无条件掉，故 armor[0] 的 3509 照掉）
+    expect(dropped.length).toBe(5);
     expect(dropped.some(([k, n]) => k === VANILLA_ITEM_KEY_BY_ID[8] && n === 30)).toBe(true);
     expect(dropped.some(([k, n]) => k === VANILLA_ITEM_KEY_BY_ID[3509] && n === 1)).toBe(true);
     // 槽位清空

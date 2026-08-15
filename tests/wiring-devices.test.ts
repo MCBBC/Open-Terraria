@@ -94,8 +94,10 @@ describe('八音盒 SwitchMB（WorldGen.cs:50977-51021）', () => {
 });
 
 describe('BGM 覆盖（Main.cs:11002-11405：DecideOnNewMusic 之后，最高优先级）', () => {
+  // bossMusic 字段已在 4fbe8e22（2026-08-14 BGM 链重构）改名 eventMusic
+  // （原版 flag 链解析在 Game 侧 resolveEventMusic 完成后传入）
   const base = {
-    scene: { townNPCCount: 0 } as never, isDay: true, bossMusic: 5, invasionMusic: 0,
+    scene: { townNPCCount: 0 } as never, isDay: true, eventMusic: 5, invasionMusic: 0,
     worldSurface: 200, rockLevel: 400, lavaLine: 900, maxTilesX: 4200,
     centerX: 2100 * 16, centerY: 3000, state: newMusicState(),
     weather: { storm: false, rain: false, windy: false, timeOfDay01: 0.5 },

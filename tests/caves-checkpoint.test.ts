@@ -76,7 +76,18 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   const st = world.store;
   const out = new Map<string, string>();
   const outWall = new Map<string, string>();
-  const snap = (name: string) => { out.set(name, hashGrids(st)); outWall.set(name, hashWalls(st)); };
+  const snap = (name: string) => {
+    out.set(name, hashGrids(st)); outWall.set(name, hashWalls(st));
+    // 网格导出钩子(对账插桩:dormant——__cavesGridExport 存在时 dump 指定检查点的 typ/act)
+    const ex = (globalThis as { __cavesGridExport?: { at: string; dir: string } }).__cavesGridExport;
+    if (ex && ex.at === name) {
+      const n = st.w * st.h;
+      const typ = Buffer.alloc(n * 2), act = Buffer.alloc(n);
+      for (let i = 0; i < n; i++) { typ.writeUInt16LE(st.type[i] & 0xffff, i * 2); act[i] = st.flags[i] ? 1 : 0; }
+      const { writeFileSync } = require('node:fs') as typeof import('node:fs');
+      writeFileSync(`${ex.dir}.typ`, typ); writeFileSync(`${ex.dir}.act`, act);
+    }
+  };
   out.set('terrain', hashGrids(st));
   runDunesPass(st, rng, gs); out.set('dunes', hashGrids(st));
   runOceanSandPass(st, rng, gs); out.set('oceansand', hashGrids(st));

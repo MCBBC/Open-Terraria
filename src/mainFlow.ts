@@ -51,6 +51,8 @@ export interface FlowHandle {
   doExportSave(): void;
   openSettings(inGame: boolean): void;
   openBestiary(): void;
+  /** 住房面板（背包房屋按钮 B 方案,2026-08-15） */
+  openHousing?(): void;
   game: Game | null;
   playStart: number;
 }
@@ -170,6 +172,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
       onAchievementPopup: (name, title) => ui.achievementPopup(name, title),
+      onHousingCursor: (m) => {
+        // Game 单发完成/取消 → 面板同步（m=null 自毁）
+        const p = (window as unknown as { __swHousingPanel?: { cursorChanged: (m: unknown) => void } | undefined }).__swHousingPanel;
+        p?.cursorChanged(m);
+      },
       // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)；
       // width = NewTextMultiline WidthLimit（广播盒 460px 折行，-1 不限）
       onChat: (t, r, g, b, width) => ui.chatMessage(t, r, g, b, width),
@@ -678,6 +685,23 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     });
   }
 
+  /** 住房面板（原版背包房屋界面 B 方案）：不暂停世界（要点击世界分配/查询）；
+   *  光标态双向同步（面板选择 → game.housingMode;Game 单发完成 → onHousingCursor
+   *  → 面板自毁）。Esc/再点按钮 = 取消光标并关面板。 */
+  async function openHousing() {
+    const g = game;
+    if (!g) return;
+    document.querySelector('.sw-housing-panel')?.remove();
+    const { HousingPanel } = await import('./ui/HousingPanel');
+    const { TownNPC: TownNPCCls } = await import('./entities/TownNPC');
+    const panel = new HousingPanel(g, HousingPanel.entriesOf(g.entities.npcs.filter((n) => n instanceof TownNPCCls) as import('./entities/TownNPC').TownNPC[]),
+      (m) => { g.housingMode = m; },
+      () => { /* onClosed: 仅自毁 */ });
+    panel.root.classList.add('sw-housing-panel');
+    root.appendChild(panel.root);
+    (window as unknown as { __swHousingPanel?: unknown }).__swHousingPanel = panel;
+  }
+
   function showTitle() {
     audio.play('title');
     ui.closeAll();
@@ -840,6 +864,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     doExportSave,
     openSettings,
     openBestiary,
+    openHousing,
     get game() { return game; },
     playStart: 0,
     get playStartNow() { return Date.now() - playStart; },

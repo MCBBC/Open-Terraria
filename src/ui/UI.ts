@@ -313,6 +313,8 @@ export class UI {
   private toastTimer: number | null = null;
   /** 图鉴面板入口（背包按钮/暂停菜单注入；见 BestiaryPanel） */
   onBestiary?: () => void;
+  /** 住房面板入口（背包内房屋按钮 → HousingPanel；分配/查询走 game.housingMode） */
+  onHousing?: () => void;
 
   constructor(parent: HTMLElement) {
     const style = el('style');
@@ -1811,6 +1813,15 @@ export class UI {
         this.onBestiary?.();
       });
       row.appendChild(bBst);
+      // 住房入口（原版 DrawInterface_33_Housing：背包侧房屋按钮开 NPC 头像列 +
+      //  "?"查询器；点击世界分配/查询走 game.housingMode，2026-08-15 B 方案）
+      const bHouse = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Housing.Button'));
+      bHouse.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
+      bHouse.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.onHousing?.();
+      });
+      row.appendChild(bHouse);
       // 成就入口 = 背包内 AchievementAdvisor 卡（AchievementsUI.createAchievementAdvisor，
       // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
       // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
@@ -3044,14 +3055,14 @@ export class UI {
         // 行点击 = 有货商店格（PickItemMovementAction case 15 ItemSlot.cs:1426-1439）：
         // 光标持有物时 Game.npcShopBuy 内裁决——同型 CanStack（:1431）→ 买入叠光标
         // （HandleShopSlot :1910-1923，held.stack++）；异型 → result -1 整链无动作
-        (vid, bb) => {
+        (vid, bb, bulk) => {
           const held = this.heldStack;
           if (held) {
-            this.game?.npcShopBuy(vid, bb, held);   // 成交时 Game 侧 held.stack++
+            this.game?.npcShopBuy(vid, bb, held, bulk);   // 成交时 Game 侧 held.stack++
             this.refreshAll();                       // ghost 计数随叠购刷新
             return;
           }
-          this.game?.npcShopBuy(vid, bb);
+          this.game?.npcShopBuy(vid, bb, undefined, bulk);
         },
         () => {
           this.npcShop?.close();

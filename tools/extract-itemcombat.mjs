@@ -177,8 +177,13 @@ const depth1Lines = (block) => {
 };
 
 const NUM_FIELDS = ['damage', 'knockBack', 'useTime', 'useAnimation', 'shoot', 'useAmmo', 'shootSpeed', 'ammo', 'maxStack', 'crit', 'scale', 'mana'];
-// AmmoID.* 枚举引用（AmmoID.cs:114-130）
-const AMMO_ID = { Gel: 23, Arrow: 40, Coin: 71, Bullet: 97, Sand: 169, Dart: 283, Rocket: 771, Solution: 780, None: 0 };
+// AmmoID.* 枚举引用（AmmoID.cs:112-146 全表——曾缺 9 项致 Flare/Snowball/StyngerBolt/
+// CandyCorn/JackOLantern/Stake/NailFriendly/FallenStar/Acorn 全落 -1 假数据，2026-08-15 补全）
+const AMMO_ID = {
+  None: 0, Gel: 23, Arrow: 40, Coin: 71, FallenStar: 75, Bullet: 97, Sand: 169,
+  Dart: 283, Rocket: 771, Solution: 780, Flare: 931, Snowball: 949, StyngerBolt: 1261,
+  CandyCorn: 1783, JackOLantern: 1785, Stake: 1836, NailFriendly: 3108, Acorn: 27,
+};
 const BOOL_FIELDS = ['consumable', 'noMelee', 'autoReuse', 'melee', 'ranged', 'magic', 'summon'];
 
 const literal = new Map(); // id -> rec（字面 case）

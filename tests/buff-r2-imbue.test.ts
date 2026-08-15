@@ -52,7 +52,7 @@ describe('R2 敌 debuff DoT（NPC.cs:92585/92697/92708，lifeRegen/2=HP/s）', (
     expect(e.hp).toBe(1000 - 24);
   });
 
-  it('ichor：armorPenetration +15 折半 = +7 直伤（NPC.cs:81913-81938）', () => {
+  it('ichor：checkArmorPenetration 单池（NPC.cs:81913-81938）——pool>def 钳 def/2 恰抵半防', () => {
     const { hooks } = makeHooks();
     const e = new Enemy('zombie', 10 * 16, 10 * 16);
     e.hp = 1000; e.iframes = 0;
@@ -60,12 +60,13 @@ describe('R2 敌 debuff DoT（NPC.cs:92585/92697/92708，lifeRegen/2=HP/s）', (
     const noIchor = Math.max(1, Math.round(100 - def * 0.5));
     e.hurt(100, 0, 0, hooks as never);
     expect(1000 - e.hp).toBe(noIchor);
-    // 有 ichor：dmg - def*0.5 + floor(15/2)=7（超防钳制 def>2×dmg 时按 dmg）
+    // 有 ichor（2026-08-15 起 Enemy.hurt 走 npcCheckArmorPenetration 1:1）：
+    // pool=15 > 僵尸 def → 钳 floor(def/2)，恰与 -def*0.5 抵消 → 满额伤害
     e.hp = 1000; e.iframes = 0;
     e.ichorT = 5;
     e.hurt(100, 0, 0, hooks as never);
-    const effDef = Math.min(def, 200); // 2×100
-    expect(1000 - e.hp).toBe(Math.max(1, Math.round(100 - effDef * 0.5 + 7)));
+    const penAdd = def > 0 ? (15 > def ? Math.floor(def / 2) : Math.floor(15 / 2)) : 0;
+    expect(1000 - e.hp).toBe(Math.max(1, Math.round(100 + penAdd - def * 0.5)));
   });
 });
 

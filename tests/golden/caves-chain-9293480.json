@@ -1,7 +1,13 @@
 {
-  "seed": 9293480, "evil": 0,
-  "worldSurface": 337, "rockLayer": 475, "waterLine": 830, "lavaLine": 909,
-  "shimmerX": 3878, "shimmerY": 501, "dungeonRight": 0,
+  "seed": 9293480,
+  "evil": 0,
+  "worldSurface": 337,
+  "rockLayer": 475,
+  "waterLine": 830,
+  "lavaLine": 909,
+  "shimmerX": 3878,
+  "shimmerY": 501,
+  "dungeonRight": 0,
   "checkpoints": [
     "terrain|05f73b65 c44d3c2d 0bb5a9c5 0bb5a9c5",
     "dunes|df2b79b5 ae3d85bd 0bb5a9c5 0bb5a9c5",

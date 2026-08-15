@@ -80,6 +80,7 @@ function pushSwWarn(msg: unknown) {
 }
 
 ui.onBestiary = () => flow.openBestiary(); // 背包面板图鉴按钮（原版 BestiaryMenuButton）
+ui.onHousing = () => flow.openHousing?.(); // 背包面板住房按钮（原版 DrawInterface_33_Housing）
 const audio = new AudioSystem();
 let atlas: SpriteAtlas | null = null;
 

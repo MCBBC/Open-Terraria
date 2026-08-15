@@ -160,7 +160,7 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   const base = {
     damage: c.damage ?? 1,
     knockback: c.knockBack ?? 3,
-    useTime: c.useTime ?? c.useAnimation ?? 20,
+    useTime: c.useTime ?? c.useAnimation ?? 100,   // ResetStats 缺省 100（Item.cs:48626-48627）
     shootSpeed: c.shootSpeed ?? 8,
   };
   if (shoot) {

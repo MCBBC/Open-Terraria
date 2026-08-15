@@ -227,10 +227,10 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect(cc.chunks).toBe(1);
     expect(cc.dirtyQueue).toBe(1);
     expect(cc.staleSentinels).toBe(1);
-    // MAX_CHUNKS 384→224:src/render/ChunkCache.ts:80 commit 4262ee9e(2026-08-14
-    // trace③ 批,已提交);工作树后续 WIP 仅去 readonly 做 contextlost 自适应,
-    // 基值仍 224,测试环境无 contextlost → 恒 224
-    expect(cc.maxChunks).toBe(224);
+    // MAX_CHUNKS 复原 384（src/render/ChunkCache.ts:80，6db8ae90 2026-08-14：
+    // contextlost 自适应兜底就位后压力真来自动减半 384→192→96；测试环境无
+    // contextlost → 恒 384）
+    expect(cc.maxChunks).toBe(384);
     expect(cc.lastFlushMs).toBe(6.5);
 
     // render.subsystems（渲染器 debugState() 钩子收集；未绘制时 count/lastDraw 保守值）

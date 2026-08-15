@@ -23,6 +23,7 @@ const CRACKED_FOR_BRICK: Record<number, number> = {
   [PINK]: TILE_BY_KEY['v_483_cracked_pink_brick'] ?? PINK,
 };
 const DOOR = TILE_BY_KEY['door_closed']!;
+const BANNER = TILE_BY_KEY['v_91_banners']!;
 const SPIKE = TILE_BY_KEY['v_48_spike']!;
 const PLATFORM = TILE_BY_KEY['platform']!;
 const LANTERN = TILE_BY_KEY['lantern']!;
@@ -2359,7 +2360,7 @@ export function runDungeonPass(
       for (let a = x - 1; a <= x + 1; a++) {
         for (let b = y; b <= y + 3; b++) {
           if (inW(a, b, 0) && actAt(a, b) !== 0
-            && (typAt(a, b) === DOOR || typAt(a, b) === TILE_BY_KEY['door_open'] || typAt(a, b) === TILE_BY_KEY['banner'])) near = true;
+            && (typAt(a, b) === DOOR || typAt(a, b) === TILE_BY_KEY['door_open'] || typAt(a, b) === BANNER)) near = true;
         }
       }
       if (near) continue;
@@ -2367,7 +2368,11 @@ export function runDungeonPass(
       if (wallAt(x, y) === wallVariants[1]) num8 = 1;
       if (wallAt(x, y) === wallVariants[2]) num8 = 2;
       num8 = num8 * 2 + rn(2);
-      placeSimple(x, y, TILE_BY_KEY['banner']);
+      // ★横幅 key 是 v_91_banners 非 'banner'（tiles.ts:258）——曾 TILE_BY_KEY['banner']
+      //  =undefined:近旁横幅排除恒假（横幅贴横幅照放）+ placeSimple 写 type=undefined
+      //  （tile<0 拦下=横幅全部静默丢弃，JS 轨迹 134 vs oracle 129 的根因）。
+      //  双侧逐样本轨迹对账实锤（N 426,570 typ=91，2026-08-15）
+      placeSimple(x, y, BANNER);
     }
   }
   posX = x0; posY = y0;

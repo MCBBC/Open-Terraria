@@ -26,7 +26,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDo
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle } from '../world/Torch';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
-import { findFreeHouse, WALL_HOUSE } from '../world/Housing';
+import { findFreeHouse, housingCheckAt, WALL_HOUSE } from '../world/Housing';
 import {
   INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION, INVASION_MARTIAN,
   INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
@@ -529,22 +529,37 @@ function compactByLife<T extends { life: number }>(list: T[]): void {
  *  背包+盔甲+染料+杂项装备+杂项染料+三套 Loadout 全部以掉落物形式撒在死亡点
  *  （TryDroppingSingleItem :53480-53496：随机抛射速度由调用方注入），随后发还
  *  铜制起始三件套（:53463-53468 inventory[0]=3507 短剑/[1]=3509 镐/[2]=3506 斧）。
- *  软核/旅程走 gemsOnly=true 只掉宝石（1522-1527/3643）——本仓无背包宝石，近似为不掉。
- *  spawn 回调注入使其可脱离 Game 实例单测（key+stack 逐件回调） */
+ *  ★掉落前把起始三件 TurnToAir（:53414-53418）——铜短剑/镐/斧**不掉落**只清空。
+ *  软核/旅程走 gemsOnly=true 只掉【大宝石】（:53401-53410：1522-1527 六色大宝石+
+ *  3643 大琥珀=夺旗 CTF 旗物，非普通宝石）——该族物品本仓未注册（CTF 模式未实装，
+ *  引擎级缺口登记），按缺席等价为不掉。 */
+/** Shift 批量买档（ItemSlot.GetBulkBuyAmount :2861-2870）：常规货 10；
+ *  buyOnce 货架 min(10, 剩余 stack)。CanBulkBuy（:2874-2881）= Shift 按住 */
+export function bulkBuyAmount(buyOnceStack?: number): number {
+  return buyOnceStack === undefined ? 10 : Math.min(10, buyOnceStack);
+}
+
 export function dropInventoryOnDeath(
   inv: import('../items/Inventory').Inventory,
   spawn: (key: string, stack: number) => void,
 ): void {
-  const drop = (slots: Array<{ id: number; stack: number } | null>) => {
+  const drop = (slots: Array<{ id: number; stack: number } | null>, starterGate = false) => {
     for (const s of slots) {
       if (!s || s.id === 0 || s.stack <= 0) continue;
       // 槽位存的是内部 id → 先查内部表（自定义物品 key 唯一权威）；
       // VANILLA_ITEM_KEY_BY_ID 以 vanilla id 为键，不能反过来用（内部 id 撞号会掉错物品）
       const key = ITEM_DEFS[s.id]?.key ?? VANILLA_ITEM_KEY_BY_ID[s.id];
-      if (key) spawn(key, s.stack);
+      if (!key) continue;
+      // 起始三件套 TurnToAir 不掉落（:53414-53418）——★门只在 inventory 主循环；
+      // armor/dye/misc/loadouts 逐组无条件 TryDroppingSingleItem（:53421-53441），勿外扩
+      if (starterGate) {
+        const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(key);
+        if (vid === 3507 || vid === 3506 || vid === 3509) { s.stack = 0; continue; }
+      }
+      spawn(key, s.stack);
     }
   };
-  drop(inv.slots);
+  drop(inv.slots, true);
   drop(inv.armor);
   drop(inv.dye);
   drop(inv.miscEquips);
@@ -571,6 +586,8 @@ export interface GameCallbacks {
   onWorldReady: () => void;
   onInventoryChanged: () => void;
   onToast: (msg: string) => void;
+  /** 住房光标态变化（激活/单发后置 null——UI 侧同步面板高亮） */
+  onHousingCursor?: (mode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null) => void;
   /** 成就解锁弹窗(原版 InGamePopups 底部居中;UI 实现,缺省回退 onToast) */
   onAchievementPopup?: (name: string, title: string) => void;
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
@@ -1327,7 +1344,12 @@ export class Game implements GameHooks {
       if (!this.hasPaladinShield(p) || p.paladinShieldCd > 0) return;
       p.paladinShieldCd = 40;
       p.lastDamageCause = { kind: 'teamTank' };
-      const d = Math.max(1, Math.round(dmg - p.defense * 0.5)); // CalculateDamagePlayersTake 近似（难度防系数未乘,备案）
+      // 原版 :37751 转移额走持有者完整 Hurt（pvp:false / 独立冷却槽 PaladinsShield /
+      // dodgeable:false / hitDirection 0 无击退）→ CalculateDamagePlayersTake 难度
+      // 防系数 0.5/0.75/1.0 + endurance 以**持有者自身**数值再结算（Main.cs:65646-65657）
+      // ——damagePreview 即该口径；黑带 10% 闪避不吃（dodgeable:false）；日曜层
+      // 消耗/甲虫壳等 Hurt 内副作用未模拟（极端叠装场景，登记）
+      const d = p.damagePreview(dmg);
       p.hp = Math.max(0, p.hp - d);
       this.addDamageNumber(p.cx, p.y, d, false, '#FF7060');
       return;
@@ -5077,8 +5099,8 @@ export class Game implements GameHooks {
       type: f.pick ? 'pick' : f.axe ? 'axe' : 'hammer',
       power: f.pick ?? f.axe ?? f.hammer,
       damage: c?.damage ?? 5,
-      speed: c?.useAnimation ?? 25,
-      useTime: c?.useTime ?? 20,
+      speed: c?.useAnimation ?? 100,   // ResetStats 缺省 useAnimation=100（Item.cs:48627；
+      useTime: c?.useTime ?? 20,       // 武器 case 必设字段，此兜底近死代码——原 25/30 中位无据
       knockback: c?.knockBack ?? 3,
       // 双工具副力（单工具时与主 power 同值，dualToolResolve 只在多力时改道）
       pickPower: f.pick ?? undefined,
@@ -5351,8 +5373,29 @@ export class Game implements GameHooks {
     return this._smartSelectSlots;
   }
 
+  /** 住房模式（原版背包房屋面板：'query'="?"查询器 / 'assign'=选中 NPC 头像后
+   *  点世界分配。Main.cs:44674-44688 鼠标点击在住房光标激活时被完整吞掉——
+   *  本字段非 null 时 updateUse 首拍拦截,Performer/TryMovingNPC 语义） */
+  housingMode: { kind: 'query' } | { kind: 'assign'; npcKey: string } | null = null;
+
   private updateUse(_dt: number) {
     const inp = this.input;
+    // 住房光标激活（mouseNPC 持续态,Main.cs:44664-44688）：左键点世界 = 查询/
+    // 分配并吞点击；右键/开背包取消由 UI 侧处理（清 housingMode + Sound 12）
+    if (this.housingMode) {
+      if (inp.mouseDown && !this._prevMouseDown) {
+        const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        if (this.housingMode.kind === 'query') {
+          this.housingQuery(Math.floor(wx / TILE), Math.floor(wy / TILE));
+        } else {
+          this.housingAssign(Math.floor(wx / TILE), Math.floor(wy / TILE), this.housingMode.npcKey);
+        }
+        this.housingMode = null;      // 单发（原版分配成功后 SetMouseNPC(-1,-1)）
+        this.cb.onHousingCursor?.(null);
+      }
+      this.input.mouseDown = false;   // 住房模式期间持续吞使用点击
+      return;
+    }
     // 舌头禁道具（Player.cs:22032 controlUseItem=false——狂卷之舌期间不得使用物品）
     if (this.player.buffs.has(BuffType.TheTongue)) return;
     // 石化/冰冻禁道具（:24942-24950 controlUseItem/UseTile 清零段——stoned 与
@@ -5612,7 +5655,7 @@ export class Game implements GameHooks {
         if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 933, 974, 976, 1100].includes(cwMelee.shoot)) {
           const angT = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           this.player.facing = Math.cos(angT) > 0 ? 1 : -1;   // 发射型面向鼠标（:46578）
-          const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 20;
+          const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 100;  // ResetStats 缺省（Item.cs:48626-48627）
           const scaleT = ps?.size ?? 1;
           const mkArc = (projId: number, dmg: number) => {
             const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), this.player.facing, scaleT);
@@ -6241,7 +6284,7 @@ export class Game implements GameHooks {
       const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
       const mouseWorldDist = Math.hypot(mwx - p.cx, mwy - p.cy);
       const drumRange = Math.min(1, mouseWorldDist / (axis / 2));  // :46014-46020 只钳上界
-      const useTimeOf = (v: number) => itemCombat(v)?.useTime ?? 30;
+      const useTimeOf = (v: number) => itemCombat(v)?.useTime ?? 100;   // ResetStats 缺省（Item.cs:48626）
       switch (fvid) {
         case 508: { // 竖琴（Player.cs:45905-45936）：按鼠标距离 6 档音高 Item26
           this.useSwing(heldDef, Math.atan2(mwy - p.cy, mwx - p.cx));  // useStyle5 静持
@@ -6477,7 +6520,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   弹药查找：原版先扫 54-57 弹药栏（Inventory.add 已把弹药归入 54-57），再扫背包 0-53 第一组
       //   ★ vi_ 枪族（164 手枪/964 火铳/1319 雪球炮/281 吹箭筒等 useAmmo 武器）此前
       //   combatWeapon 按 useAmmo 排除后无人接管 = 静默失效；此处经
-      //   vanilla-itemcombat.useAmmo 数据驱动接入（930 信号枪 useAmmo=-1 原版语义不接）
+      //   vanilla-itemcombat.useAmmo 数据驱动接入。★2026-08-15 修正：930 信号枪
+      //   useAmmo 此前恒 -1 系提取器 AmmoID 表缺 9 项（Flare=931 等）的假数据——
+      //   原版无 -1 语义，全表补齐后信号枪/星星炮/吹叶机族弹药链天然恢复
       const rg = heldDef.ranged ?? null;
       const bowVid = rg?.vid ?? viIdFromKey(heldDef.key);
       const bowC = bowVid >= 0 ? itemCombat(bowVid) : null;
@@ -6651,7 +6696,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             && !(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
             this.player.inv.removeAt(ammoSlot, 1);
           }
-          this.player.useTime = bowC?.useTime ?? rg?.speed ?? 30;
+          this.player.useTime = bowC?.useTime ?? rg?.speed ?? 100;  // ResetStats 缺省 useTime=100（Item.cs:48626）
           this.useSwing(heldDef, ang);
           const usBow16 = itemUseSoundWav(bowVid2);
           if (usBow16) this.playSfxFile(usBow16);
@@ -6693,7 +6738,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           && !(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
           this.player.inv.removeAt(ammoSlot, 1);
         }
-        this.player.useTime = bowC?.useTime ?? rg?.speed ?? 30;
+        this.player.useTime = bowC?.useTime ?? rg?.speed ?? 100;  // ResetStats 缺省 useTime=100（Item.cs:48626）
         // useStyle 5（弓枪族恒 5）：朝鼠标静持姿势 + 身体行档（Player.cs:46708 itemRotation=瞄准角）
         this.useSwing(heldDef, ang);
         // 发射音（原版 Item.cs UseSound）：弓（useAmmo 40）=Item_5；枪械通用=Item_11；
@@ -12575,23 +12620,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const homes = npcs.filter((n) => n.home)
       .map((n) => ({ x: n.home!.x, y: n.home!.y, npcId: n.vanillaId }));
     const st = this.world.store;
-    // 入驻锚点（SpawnHomelessNPC :5014-5033）：已安家 townNPC 的 home 随机取一——
+    // 入驻锚点（SpawnHomelessNPC :5014-5036 1:1）：已安家 townNPC 的 home 随机取一——
     // 原版房表口径 townNPC && type!=37 && !homeless（:5019）：宠物算锚（宠物
-    // townNPC=true，NPC.cs:17145）；old_man(type 37) 虽有地牢驻点 home 也不可作锚
-    // （否则全图锚点被地牢劫持，出生点旁的房永不可见）。
-    // 冷启（无任何可作锚的已安家 NPC）回退锚池 = 出生点 + 玩家当前位置（原版静态
-    // LastFoundHouse(0,0) 必失败后走 randomNext homes，无家可取时 :5041 直接
-    // return——原版远程基地靠住房查询 UI moveRoom 手动塞人，本仓无该 UI，玩家位
-    // 入锚池补偿：玩家基地旁的房可被发现。首 NPC 安家后回到原版锚池语义。
-    // ★曾只回退出生点：房离出生点 >10 格（如 66 格的玩家基地）每轮都扫不到——
-    // 3 个 homeless NPC 永不入驻（用户报"NPC 没入驻我的房子",2026-08-15）
+    // townNPC=true，NPC.cs:17145）；old_man(type 37) 虽有地牢驻点 home 也不可作锚。
+    // ★锚池为空 = 原版 :5035-5037 `if (num == 0) return`——整轮不找不发（出生点/
+    // 玩家位兜底曾为两轮偏离,远程基地的正版通路=住房查询 UI 手动分配,已随
+    // moveRoom 语义实装回收偏离,2026-08-15 用户定案"百分百对齐"）
     const anchorPool = homes.filter((h) => h.npcId !== 37);   // 37 = Old Man（:5019 排除）
-    const coldStart = !anchorPool.length;
     const pickAnchor = (): { x: number; y: number } =>
-      anchorPool.length > 0 ? anchorPool[Math.floor(Math.random() * anchorPool.length)]
-        : (coldStart && !this.player.dead
-          ? { x: Math.floor(this.player.cx / TILE), y: Math.floor(this.player.cy / TILE) }
-          : { x: this.world.spawnX, y: this.world.spawnY });
+      anchorPool[Math.floor(Math.random() * anchorPool.length)];
 
     // ①' 被绑巫师【不补放】（2026-08-13 对齐原版）：106 BoundWizard 唯一来源 =
     // SpawnAnNPC 三人组链（NPC.cs:1999-2002，hardMode && 1/20 && 洞穴层深处门），
@@ -12601,22 +12638,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.placeSleepingAngler();
 
     // ① QuickFindHome（Main.cs:65072：每轮对未安家 NPC 找房入住）
+    // ★锚池空 → 原版 :5035-5037 直接 return（找/发都停）——无任何兜底
     // bound（被绑待救）不入住不搬动——原版 AI_007 bound 态原地，否则五个救援 NPC
     // 会被塞进同一间空房叠在一点（读档/新世界 7200 tick 后必现）
-    for (const n of npcs) {
-      if (n.home || n.bound || n.npcKey === 'old_man') continue;
-      const anchor = pickAnchor();
-      const house = findFreeHouse(st, homes, anchor.x, anchor.y, n.vanillaId);
-      if (!house) continue; // 该锚点 ±10 窗内无房：NPC 留 homeless，下一 NPC 换锚点重试（锚点各异不整体放弃）
-      n.home = { x: house.standX, y: house.standY };
-      n.leashHome = true; // 有家者白天在家附近游走
-      homes.push({ x: house.standX, y: house.standY, npcId: n.vanillaId });
-      n.x = house.standX * TILE + 8 - n.w / 2;
-      n.y = (house.standY + 1) * TILE - n.h;
+    if (anchorPool.length > 0) {
+      for (const n of npcs) {
+        if (n.home || n.bound || n.npcKey === 'old_man') continue;
+        const anchor = pickAnchor();
+        const house = findFreeHouse(st, homes, anchor.x, anchor.y, n.vanillaId);
+        if (!house) continue; // 该锚点 ±10 窗内无房：NPC 留 homeless，下一 NPC 换锚点重试（锚点各异不整体放弃）
+        n.home = { x: house.standX, y: house.standY };
+        n.leashHome = true; // 有家者白天在家附近游走
+        homes.push({ x: house.standX, y: house.standY, npcId: n.vanillaId });
+        n.x = house.standX * TILE + 8 - n.w / 2;
+        n.y = (house.standY + 1) * TILE - n.h;
+      }
     }
 
     // ② 优先级链（Main.cs num42 完整顺序；护士/爆破手要求商人在场，
     //    染料商 ≥4 人、油漆工 ≥8 人、派对女孩 ≥20 人且 1/40 重掷）
+    // ★锚池空 → 原版 SpawnHomelessNPC 在 num10>=1 门内(Main.cs:64530-64537),
+    //   整轮（含新 NPC 生成）不跑——冷启世界的第一个入住只能走住房 UI 手动分配
+    if (anchorPool.length === 0) return;
     const merchantHere = has('merchant');
     const allow = (key: string) => this.townNpcSpawnAllowed(key);
     const n = npcs.length; // num40：在场城镇 NPC 总数（含守卫老人，原版同）
@@ -12905,6 +12948,59 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (wd.shouldUseWindyDayMusic) { const t = pick('Windy'); if (t) return t; }
     if (wd.shouldUseStormMusic) { const t = pick('Storm'); if (t) return t; }
     return null;
+  }
+
+  // ================= 住房查询/分配（PerformHousingCheck/TryMovingNPC Main.cs:44602-44620 + moveRoom :4791-4804） =================
+
+  /** 占用表（入驻轮同口径：已安家 NPC 的 home） */
+  private housingOccupied(): Array<{ x: number; y: number; npcId?: number }> {
+    return (this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead && n.home) as TownNPC[])
+      .map((n) => ({ x: n.home!.x, y: n.home!.y, npcId: n.vanillaId }));
+  }
+
+  /** 查询（PerformHousingCheck）：合格 → inter[39]（ServerMessage 色 255,240,20）；
+   *  失败 → 缺件明细（Game.HouseMissing_n 门/桌/椅/光源）或占用/腐化/无效文案 */
+  housingQuery(x: number, y: number): void {
+    const q = housingCheckAt(this.world.store, this.housingOccupied(), x, y);
+    if (q.reason === 'ok') {
+      this.newText(Lang.inter(39), 255, 240, 20);
+      return;
+    }
+    if (q.reason === 'occupied') { this.newText(Lang.inter(41), 255, 240, 20); return; }
+    if (q.reason === 'evil') { this.newText(Lang.inter(42), 255, 240, 20); return; }
+    if (q.reason === 'needs') {
+      // RoomNeeds 缺件文案（WorldGen.cs:4680-4700）：门/光源/桌/椅序拼 HouseMissing_n
+      const missing: string[] = [];
+      if (!q.flags.door) missing.push(Lang.text('Game.HouseDoor'));
+      if (!q.flags.light) missing.push(Lang.text('Game.HouseLightSource'));
+      if (!q.flags.table) missing.push(Lang.text('Game.HouseTable'));
+      if (!q.flags.chair) missing.push(Lang.text('Game.HouseChair'));
+      if (missing.length) {
+        // HouseMissing_1..4 静态白名单(原版无 _0;动态拼串会被 l10n-audit 扫成裸键)
+        const key = (['Game.HouseMissing_1', 'Game.HouseMissing_2', 'Game.HouseMissing_3', 'Game.HouseMissing_4'] as const)[missing.length - 1];
+        this.newText(Lang.text(key, ...missing), 255, 240, 20);
+        return;
+      }
+    }
+    this.newText(Lang.inter(40), 255, 240, 20);
+  }
+
+  /** 分配（TryMovingNPC + moveRoom：MoveTownNPC 校验过 → 立即搬家 + Sound 12） */
+  housingAssign(x: number, y: number, npcKey: string): boolean {
+    const npc = (this.entities.npcs.find((n) => n instanceof TownNPC && !n.dead && n.npcKey === npcKey)) as TownNPC | undefined;
+    if (!npc) return false;
+    const q = housingCheckAt(this.world.store, this.housingOccupied(), x, y, npc.vanillaId);
+    if (q.reason !== 'ok' || !q.room) {
+      // 失败文案同查询路径（MoveTownNPC displayText 分支）
+      this.housingQuery(x, y);
+      return false;
+    }
+    // moveRoom（:4797-4803）：置 homeless→SpawnTownNPC(x,y) 在点击房内重新安家
+    npc.home = { x: q.room.standX, y: q.room.standY };
+    npc.leashHome = true;
+    this.sfx.play('menuTick');    // SoundID 12（TryMovingNPC :44618）
+    this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(npc.vanillaId) ?? npcKey), 50, 125, 255);
+    return true;
   }
 
   /** 台词 = NPC.GetChat(NPC.cs:94974+) type 17/18/22/37/19/20/38 分支 1:1。
@@ -13429,7 +13525,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const isDay = w.clock.isDay;
     let bonus = 0;
     if (p.buffs.has(BuffType.Tipsy)) bonus += 5;     // :41542-41545
-    if (p.equipStats.waterWalk) bonus += 5;          // canFloatInWater&&wet(:41546;近似取 waterWalk 资格)
+    // :41546 `canFloatInWater && wet`——canFloatInWater=装备 4404 水行靴族(:12845)或
+    // 药水 buff 265(:9595)每帧重扫；wet=WetCollision 只认水/蜂蜜(排岩浆/微光)。
+    // 坐椅钓鱼 +5(:41549-41551 sitting.TryGetSittingBlock)依赖玩家坐椅系统——
+    // 本仓未实装，登记（引擎级缺口，与 heldProj 同族）
+    if ((p.equipStats.waterWalk || p.buffs.has(BuffType.WaterWalking))
+      && (p.inWater || p.inHoney)) bonus += 5;
     const base = baitPower + polePower + p.equipStats.fishingSkill
       + (p.buffs.has(BuffType.Fishing) ? 15 : 0) + bonus;
     const level = Math.floor(base * fishingPowerMultiplier({
@@ -14043,7 +14144,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  CanStack（Item.cs:49446-4954 type+prefix 全等）且未满叠（:1890-1893）→ 3 买入
    *  叠到光标；异型 → result -1 整链无动作）。返回是否成交 */
   npcShopBuy(vanillaId: number, buybackIndex?: number,
-    held?: { id: number; stack: number; prefix?: number }): boolean {
+    held?: { id: number; stack: number; prefix?: number }, bulk?: boolean): boolean {
     const bb = buybackIndex === undefined ? undefined : this.shopBuybackStock[buybackIndex];
     if (buybackIndex !== undefined && (!bb || bb.vid !== vanillaId)) return false;
     const prefix = bb ? bb.prefix : 0;
@@ -14075,26 +14176,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         discountAvailable: this.player.equipStats.discount,
       }).buying;
     }
-    if (this.coinsOwned() < price || !this.spendCopper(price)) {
+    // 批量档（Shift+点：CanBulkBuy ItemSlot.cs:2874-2881 ShiftInUse；GetBulkBuyAmount
+    // :2861-2870 = 10，buyOnce 再 min(stack)）；逐次 BuyItem 买尽即止（:1885-1893
+    // CoinsCount<price / 满叠 continue 语义 = 提前停）
+    const times = bulk ? bulkBuyAmount(bb ? bb.stack : undefined) : 1;
+    let bought = 0;
+    for (let i = 0; i < times; i++) {
+      if (this.coinsOwned() < price || !this.spendCopper(price)) break;
+      const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
+      if (held) {
+        if (held.stack >= (ITEM_DEFS[held.id]?.maxStack ?? 1)) break;   // :1890-1893
+        held.stack++;   // :1910-1923 买叠到光标（CanStack 门已保证 prefix 全等）
+      } else if (key && ITEM_BY_KEY[key] !== undefined) {
+        this.player.inv.add(ITEM_BY_KEY[key], 1, prefix || undefined);  // :1912-1916 货架词缀随行
+      }
+      if (bb) {
+        // buyOnce 不进回购记（:1919-1922 !buyOnce 门）；减库存归零下架（:1925-1928）
+        if (--bb.stack <= 0) this.shopBuybackStock.splice(buybackIndex!, 1);
+      } else {
+        // 店内回购记（ItemSlot.cs:1919-1922：!buyOnce && shopSpecialCurrency==-1 → Add；
+        // 本仓常规商店条目两者恒假/无自定义币种 → 无条件记。prefix 恒 0：货架购买不带词缀）
+        const memoKey = `${vanillaId}:0`;
+        this.shopSellbackMemo.set(memoKey, (this.shopSellbackMemo.get(memoKey) ?? 0) + 1);
+      }
+      if (i === 0) this.sfx.play('coin');   // :1899-1908 首件音（value>0 → 18 Coins）
+      bought++;
+    }
+    if (bought === 0) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
       this.openNpcShop();
       return false;
     }
-    const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
-    if (held) held.stack++;   // :1910-1923 买叠到光标（CanStack 门已保证 prefix 全等）
-    else if (key && ITEM_BY_KEY[key] !== undefined) {
-      this.player.inv.add(ITEM_BY_KEY[key], 1, prefix || undefined);  // :1912-1916 货架词缀随行
-    }
-    if (bb) {
-      // buyOnce 不进回购记（:1919-1922 !buyOnce 门）；减库存归零下架（:1925-1928）
-      if (--bb.stack <= 0) this.shopBuybackStock.splice(buybackIndex!, 1);
-    } else {
-      // 店内回购记（ItemSlot.cs:1919-1922：!buyOnce && shopSpecialCurrency==-1 → Add；
-      // 本仓常规商店条目两者恒假/无自定义币种 → 无条件记。prefix 恒 0：货架购买不带词缀）
-      const memoKey = `${vanillaId}:0`;
-      this.shopSellbackMemo.set(memoKey, (this.shopSellbackMemo.get(memoKey) ?? 0) + 1);
-    }
-    this.sfx.play('coin');    // :1899-1908 value>0 → 18 Coins（本仓表无 value-0 货）
     this.cb.onInventoryChanged();
     this.openNpcShop();
     return true;
@@ -14648,7 +14760,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (holder) {
         const transfer = Math.floor(ok * 0.25);
         if (transfer > 0) {
-          p.hp = Math.min(p.maxHp, p.hp + transfer);   // 退还 25%（原版前置 ×0.75 等价）
+          // 原版 :37746-37747 受害实扣 = (int)(num2×0.75) **前置**扣——两截断之和
+          // 可比 num2 少 1（整除吞伤，原版行为），故退还 ok-floor(ok×0.75) 而非 transfer
+          p.hp = Math.min(p.maxHp, p.hp + (ok - Math.floor(ok * 0.75)));
           this.net.sendStrikePlayer(
             (holder as unknown as { __netSlot: number }).__netSlot,
             transfer, 0, 0, -1, 0x20);
@@ -14857,11 +14971,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发）：
-   *  碎镜 1085（Projectile.cs:67554-67574）——弹体命中盒外扩 150px 与玩家矩形
-   *  相交 → brokenMirrorBadLuckTime = 25200（luck −0.25 档，UpdateBrokenMirrorLuck
-   *  :28700-28711 衰减）。原版此处另有 Gore 1394-1397 碎片与尘 330——未移植，登记 */
-  onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0) {
+   *  碎镜 1085（Projectile.cs:67554-67574 完整链）：Item106 音 @Center →
+   *  oldVelocity×0.2 阻尼、position 回退阻尼步 → 10×尘330（velocity-=阻尼旧速）
+   *  → Gore 1394-1397（Center 出、初速=-阻尼旧速，NewGore 自带 :1347-1348 扰动）
+   *  → 命中盒外扩 150px 与玩家矩形相交 → brokenMirrorBadLuckTime = 25200
+   *  （luck −0.25 档，UpdateBrokenMirrorLuck :28700-28711 衰减） */
+  onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0, oldVx = 0, oldVy = 0) {
     if (projId !== 1085) return;
+    this.playSfxFiles(['Item_106'], 1, x + w / 2, y + h / 2);
+    const dvx = oldVx * 0.2, dvy = oldVy * 0.2;             // oldVelocity *= 0.2
+    const px = x - dvx, py = y - dvy;                       // position -= oldVelocity
+    for (let i = 0; i < 10; i++) {
+      const d = this.spawnDust(px, py, w, h, 330);
+      if (d) { d.vx -= dvx; d.vy -= dvy; }                  // dust.velocity -= oldVelocity
+    }
+    for (let g = 1394; g <= 1397; g++) {
+      GorePiece.newGore(g, px + w / 2, py + h / 2, -dvx, -dvy);
+    }
     const R = 150;
     const p = this.player;
     if (x - R < p.x + p.w && x + w + R > p.x && y - R < p.y + p.h && y + h + R > p.y) {

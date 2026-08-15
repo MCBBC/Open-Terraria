@@ -10,6 +10,7 @@ import { canHit } from '../physics/LineOfSight';
 import { MagicProj } from './MagicProj';
 import { Arrow } from './Arrow';
 import { markMechQueen, registerMechQueen, mechQueenUp, getMechQueen, getMechQueenCenter } from './mechQueen';
+import { GorePiece } from './GorePiece';
 
 const addProj = (game: GameHooks, p: MagicProj) => {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(p, 'projectiles');
@@ -369,11 +370,17 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
   if (e.ai0 < 0) {
     // ---- 二阶段（:32569-32699）----
     // :32575-32588 入场演出一次性（localAI[2] 门）：SoundID 3（Zombie_1）+
-    //   血块 gore 392-395（gore 未接 → 粒子近似，登记）+ 尘 5 号 ×20 + SoundID 15
+    //   血块 gore 392-395（position 左上角出、初速 Next(-30,31)*0.2 各自独立掷，
+    //   NewGore 尾段另有 :1347-1348 扰动）+ 尘 5 号 ×20 + SoundID 15
     //   （ZombieMoan wav 未提取 → 略，登记）
     if (e.lai2 === 0) {
       e.lai2 = 1;
       game.playSfxFiles(['NPC_Hit_1'], 1, e.cx, e.cy);
+      for (let gi = 392; gi <= 395; gi++) {
+        GorePiece.newGore(gi, e.x, e.y,
+          (Math.floor(Math.random() * 61) - 30) * 0.2,
+          (Math.floor(Math.random() * 61) - 30) * 0.2);
+      }
       game.spawnParticles(e.cx, e.cy, '#A03050', 20, 2);
       game.playSfxFiles(['Zombie_2'], 0.8, e.cx, e.cy);
     }

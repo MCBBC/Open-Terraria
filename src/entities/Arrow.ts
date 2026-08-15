@@ -519,7 +519,7 @@ export class Arrow extends Entity {
    *  按弹型分发由 Game 侧 onProjectileDeath 消费 */
   private killNow(game: GameHooks): void {
     this.dead = true;
-    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
+    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {

@@ -181,10 +181,11 @@ export class NpcShop {
   private panel: HTMLElement | null = null;
   private escHandler: ((e: KeyboardEvent) => void) | null = null;
 
-  /** onBuy(vanillaId, buybackIndex?)：buybackIndex = 卖回货架条目（buyOnce）
-   *  下标（ItemSlot.HandleShopSlot :1925-1928 减库存），缺省 = 常规货 */
+  /** onBuy(vanillaId, buybackIndex?, bulk?)：buybackIndex = 卖回货架条目（buyOnce）
+   *  下标（ItemSlot.HandleShopSlot :1925-1928 减库存），缺省 = 常规货；bulk = Shift
+   *  批量买 10（CanBulkBuy ItemSlot.cs:2874-2881 ShiftInUse + GetBulkBuyAmount :2861-2870） */
   constructor(private parent: HTMLElement,
-    private onBuy: (vanillaId: number, buybackIndex?: number) => void,
+    private onBuy: (vanillaId: number, buybackIndex?: number, bulk?: boolean) => void,
     private onClose: () => void) {}
 
   open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null) {
@@ -207,10 +208,12 @@ export class NpcShop {
       <div class="sw-shop-list">${rows}</div>
       <div class="sw-shop-foot"><button class="sw-set-back" style="background:#3a4680;color:#e8e8f4;border:1px solid #7d92d6;border-radius:4px;padding:5px 16px;cursor:pointer;font-family:inherit;">${Lang.inter(52)}</button></div>`;
     panel.querySelectorAll('.sw-shop-item').forEach((el) => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (ev) => {
         if ((el as HTMLElement).dataset.ok !== '1') return;
         const bb = (el as HTMLElement).dataset.bb;
-        this.onBuy(Number((el as HTMLElement).dataset.id), bb !== undefined ? Number(bb) : undefined);
+        this.onBuy(Number((el as HTMLElement).dataset.id),
+          bb !== undefined ? Number(bb) : undefined,
+          (ev as MouseEvent).shiftKey || undefined);   // Shift+点 = 批量买 10
       });
     });
     (panel.querySelector('.sw-set-back') as HTMLElement).addEventListener('click', () => this.onClose());

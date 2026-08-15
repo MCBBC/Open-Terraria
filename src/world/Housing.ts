@@ -302,13 +302,19 @@ function hasLooseWallEvidence(st: TileStore, x: number, y: number): boolean {
 
 /** 泛洪填充一个房间（8 向 = 原版 StartRoomCheck 邻居压栈 j,k∈-1..1，:6037-6043；
  *  对角穿墙连通是原版语义；门/平台/实心为边界） */
-function floodRoom(st: TileStore, sx: number, sy: number): Room | null {
+function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFlags): Room | null {
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
   let minX = sx, maxX = sx, minY = sy, maxY = sy;
   let head = 0;
   const queue: number[] = [st.idx(sx, sy)];
   tiles.add(queue[0]);
+  const flush = (): void => {
+    if (needsOut) needsOut.table = needsOut.table || hasTable;
+    if (needsOut) needsOut.chair = needsOut.chair || hasChair;
+    if (needsOut) needsOut.light = needsOut.light || hasLight;
+    if (needsOut) needsOut.door = needsOut.door || hasDoor;
+  };
 
   while (head < queue.length) {
     const i = queue[head++];
@@ -356,6 +362,7 @@ function floodRoom(st: TileStore, sx: number, sy: number): Room | null {
       if (ny > maxY) maxY = ny;
     }
   }
+  flush();
   if (tiles.size < MIN_TILES || !hasDoor || !hasTable || !hasChair || !hasLight) return null;
   // 站立点：起点列向下找地板
   let fy = sy;
@@ -409,4 +416,66 @@ export function findFreeHouse(
     }
   }
   return best;
+}
+
+// ================= 住房查询/分配（原版住房界面 MoveTownNPC + moveRoom，2026-08-15 B 方案） =================
+
+/** 房屋需求旗标（RoomNeeds :5616-5660 四布尔；填充由 floodRoom 完成，失败时也保留已见项） */
+export interface RoomNeedsFlags { table: boolean; chair: boolean; light: boolean; door: boolean }
+
+/** 查询失败原因（TownNPCRoomCheckFailureReason 对齐 + 我们两个合成档） */
+export type HousingFailReason =
+  | 'ok' | 'edge' | 'solid' | 'tooBig' | 'tooSmall' | 'hole' | 'occupied' | 'evil' | 'needs';
+
+export interface HousingQueryResult {
+  room: Room | null;
+  flags: RoomNeedsFlags;
+  reason: HousingFailReason;
+}
+
+/**
+ * 住房查询（原版 StartRoomCheck 自任意点泛洪——UI 的"?"查询器点世界任意格调用，
+ * MoveTownNPC(x, y, -1, feedback) :4629 语义）。失败原因按原版序：世界缘/实心起点
+ * （TooCloseToWorldEdge/StartedInASolidTile）→ 泛洪漏墙/超界（floodRoom null 统称
+ * hole；≥MAX_TILES = tooBig）→ 太小（<60）→ 缺家具（needs, 旗标明细在 flags）→
+ * 占用/腐化由调用方配 scoreRoom 判（本函数不判——查询 UI 两次调用里的第一次
+ * Rich feedback 也要打分,交给 assign/query 合并入口 housingCheckAt）。
+ */
+export function queryRoom(st: TileStore, x: number, y: number): HousingQueryResult {
+  const flags: RoomNeedsFlags = { table: false, chair: false, light: false, door: false };
+  if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) {
+    return { room: null, flags, reason: 'edge' };
+  }
+  // 起点实心（StartedInASolidTile :6025-6032）——原版仅置 canSpawn=false 后继续
+  // 泛洪（同轮后续检查会失败）；此处直接判失败等价（实心种子的泛洪无意义）
+  if (st.flags[st.idx(x, y)] && tileSolidLike(st.type[st.idx(x, y)])) {
+    return { room: null, flags, reason: 'solid' };
+  }
+  const room = floodRoom(st, x, y, flags);
+  if (!room) {
+    // floodRoom null 的两种来源：漏墙/世界边（途中 return null）与终检失败。
+    // 太小/缺家具可由 flags/无终检区分——终检失败时 flags 已 flush（见 floodRoom 尾），
+    // 而 hole 的 flags 是部分填充：以 needs 四项是否有命中来分辨太不完整=hole
+    const seen = (flags.table ? 1 : 0) + (flags.chair ? 1 : 0) + (flags.light ? 1 : 0) + (flags.door ? 1 : 0);
+    return { room: null, flags, reason: seen === 0 ? 'hole' : 'needs' };
+  }
+  return { room, flags, reason: 'ok' };
+}
+
+/**
+ * 住房查询 + 打分合并入口（PerformHousingCheck 两次 MoveTownNPC 的合并语义）：
+ * 合格且未被占用且未腐化 → reason='ok'；占用/腐化取自 scoreRoom（RoomScore
+ * score=-1=occupied、roomEvil=evil）。供查询 UI 与分配共用。
+ */
+export function housingCheckAt(
+  st: TileStore, occupied: Array<{ x: number; y: number; npcId?: number }>,
+  x: number, y: number, askingNpcId = -1,
+): HousingQueryResult & { score: number } {
+  const q = queryRoom(st, x, y);
+  if (!q.room) return { ...q, score: 0 };
+  const s = scoreRoom(st, q.room, occupied, askingNpcId);
+  if (s.score < 0) return { ...q, room: q.room, reason: 'occupied', score: -1 };
+  if (s.roomEvil) return { ...q, room: q.room, reason: 'evil', score: s.score };
+  if (s.score <= 0) return { ...q, room: q.room, reason: 'needs', score: 0 };
+  return { ...q, reason: 'ok', score: s.score };
 }

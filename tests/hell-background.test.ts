@@ -19,7 +19,9 @@ function recorder() {
   return { ctx, calls };
 }
 
-/** 伪 img:naturalWidth/Height 按地狱贴图实际尺寸;complete 恒真 */
+/** 伪 img:width/height 按地狱贴图实际尺寸;complete 恒真。
+ *  ★5c556041(2026-08-15) ImageBitmap 迁移后实现读 im.width/im.height
+ *  （ImageBitmap 形态,无 naturalWidth）——stub 同步供两组属性 */
 function stubImgs(bg: BiomeBackground) {
   const SIZES: Record<number, [number, number]> = {
     125: [160, 288], 126: [160, 288], 127: [160, 288],
@@ -30,7 +32,7 @@ function stubImgs(bg: BiomeBackground) {
   (bg as unknown as { img(n: number): ImageBitmap | HTMLImageElement | null }).img = (n: number) => {
     const s = SIZES[n];
     if (s) {
-      const fake = { tex: n, complete: true, naturalWidth: s[0], naturalHeight: s[1] } as unknown as HTMLImageElement;
+      const fake = { tex: n, complete: true, width: s[0], height: s[1], naturalWidth: s[0], naturalHeight: s[1] } as unknown as HTMLImageElement;
       map.set(n, fake);
       return fake;
     }
@@ -126,7 +128,7 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
       0: [1024, 858], 1: [2048, 1900], 2: [1024, 630], 3: [1024, 630], 4: [48, 1300],
     };
     for (const [n, [w, hh]] of Object.entries(HELL)) {
-      hellMap.set(Number(n), { tex: 200 + Number(n), complete: true, naturalWidth: w, naturalHeight: hh } as unknown as HTMLImageElement);
+      hellMap.set(Number(n), { tex: 200 + Number(n), complete: true, width: w, height: hh, naturalWidth: w, naturalHeight: hh } as unknown as HTMLImageElement);
     }
     const world = hellWorld();
     world.underworldBG = 0;                    // 风格 0 → 集 [0,1,2,3,4]
