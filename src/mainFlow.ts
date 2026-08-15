@@ -693,12 +693,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (!g) return;
     document.querySelector('.sw-housing-panel')?.remove();
     const { HousingPanel } = await import('./ui/HousingPanel');
-    const { TownNPC: TownNPCCls } = await import('./entities/TownNPC');
-    const panel = new HousingPanel(g, HousingPanel.entriesOf(g.entities.npcs.filter((n) => n instanceof TownNPCCls) as import('./entities/TownNPC').TownNPC[]),
+    const panel = new HousingPanel(g,
       (m) => { g.housingMode = m; },
       () => { /* onClosed: 仅自毁 */ });
-    panel.root.classList.add('sw-housing-panel');
-    root.appendChild(panel.root);
+    panel.canvas.classList.add('sw-housing-panel');
     (window as unknown as { __swHousingPanel?: unknown }).__swHousingPanel = panel;
   }
 

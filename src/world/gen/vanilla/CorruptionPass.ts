@@ -575,10 +575,12 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     vy = Math.max(0.25, Math.min(2, vy));
     vx = Math.max(-2, Math.min(2, vx));
     px += vx; py += vy;
+    (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`M ${px.toFixed(2)},${py.toFixed(2)},${radius.toFixed(2)},${vx.toFixed(3)},${vy.toFixed(3)}`);
     if (py > gs.worldSurface + 100) break;
   }
   // 终点囊群（cs:75700-75732）：50 个半径 40-54 椭球（x/y 独立 ±20% 缩放）
   let endR = rng.int(40, 54);                                  // Next(40,55)
+  (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`E ${endR}`);
   for (let n = 0; n < 50; n++) {
     const cx = Math.floor(px) + rng.int(-20, 20);
     const cy = Math.floor(py) + rng.int(-20, 20);
@@ -624,7 +626,9 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       if (!clash || tries > 10000) break;
     }
     usedV.push([dvx, dvy]);
-    hearts.push(crimVein(st, rng, Math.floor(px), Math.floor(py), dvx, dvy));
+    const hp = crimVein(st, rng, Math.floor(px), Math.floor(py), dvx, dvy);
+    (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`H ${hp[0]},${hp[1]}`);
+    hearts.push(hp);
   }
   // 地表囊群（cs:75781-75832）
   px = i; py = startY;
@@ -639,6 +643,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     }
     const cx = Math.floor(px) + rng.int(-2, 2);                // Next(-2,3)
     const cy = Math.floor(py) + rng.int(-2, 2);
+    (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`P ${cx},${cy},${(+py).toFixed(2)}`);
     for (let x = Math.floor(cx - endR / 2); x < cx + endR / 2; x++) {
       for (let y = Math.floor(cy - endR / 2); y < cy + endR / 2; y++) {
         if (!st.inBounds(x, y)) continue;
@@ -660,12 +665,13 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       }
     }
   }
-  // 列填充（cs:75834-75848）：壳覆盖范围内每列向下补猩红石（★CanEvilReplace 才消耗）
+  // 列填充（cs:75834-75848）：壳覆盖范围内每列向下补猩红石（★CanEvilReplace 才消耗）。
+  // 上界 = 裸 maxTilesY（oracle :3474/:3478 y<H）——曾 h-1 少扫末行
   for (let x = shellMinX; x <= shellMaxX; x++) {
     let y = startY;
-    while (y < st.h - 1 && ((st.flags[st.idx(x, y)] && st.type[st.idx(x, y)] === CRIMSTONE) || st.wall[st.idx(x, y)] === 83)) y++;
+    while (y < st.h && ((st.flags[st.idx(x, y)] && st.type[st.idx(x, y)] === CRIMSTONE) || st.wall[st.idx(x, y)] === 83)) y++;
     let fill = rng.int(15, 19);                                // Next(15,20)
-    while (y < st.h - 1 && !st.flags[st.idx(x, y)] && fill > 0 && st.wall[st.idx(x, y)] !== 83) {
+    while (y < st.h && !st.flags[st.idx(x, y)] && fill > 0 && st.wall[st.idx(x, y)] !== 83) {
       if (canEvilReplace(st, x, y)) {
         fill--;
         st.type[st.idx(x, y)] = CRIMSTONE;

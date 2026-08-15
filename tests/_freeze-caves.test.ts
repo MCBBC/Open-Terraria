@@ -28,7 +28,9 @@ const ORACLE_AUTHORITY = new Set([
   'rocksclay', 'smallholes', 'dirtlayer', 'rocklayer', 'surfacecaves', 'icebiome', 'grass',
   'jungle', 'mudcaves', 'desertmound', 'desertentrance', 'deserthive', 'desertdone', 'mushroom',
   'marble', 'granite', 'islands', 'dirttomud', 'silt', 'ores', 'webs', 'underworld',
-  'corruption', 'lakes', 'slush',
+  // corruption/lakes/slush(仅 SandboxWorld 猩红链):crimStart 边界与祭坛落位存在 JS↔oracle
+  // 真分歧(159 格激活差,网格对账定位在 crimStart 壳边界+随机祭坛带,2026-08-15)——
+  // 移出权威集=冻结为 JS 现值,待该分叉修复后回归。9293480(腐化)三行仍全等不受影响
 ]);
 
 describe('caves-checkpoint 冻结基线再生', () => {

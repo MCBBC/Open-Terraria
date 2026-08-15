@@ -23,6 +23,7 @@ export const CALMING_NO_AGGRO_TYPES: ReadonlySet<number> = new Set([
 import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
+import { BookProj } from './BookProj';
 import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
 import { daybreakStacks } from './WeaponProj';
@@ -5751,16 +5752,38 @@ export class Enemy extends Entity {
         const blast = new Dart(this.cx, this.cy, dx, dy, dmg172, 129);
         blast.hostile = true;
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(blast, 'projectiles');
+      } else if (vid === 693) {
+        // 图书管理员骷髅（NPC.cs:21208-21215）：书锚 = AI_FindNearbyBook（tile 50 放置书，
+        // Center−(10,20) 起 20×30 窗随机一本，:2684-2741）——本仓 tile 50 未注册（放书
+        // 系统缺失，引擎级缺口登记），扫描恒空 → 走原版无书兜底 Center+NextVector2Circular
+        // (30,15)（角度均匀×半径均匀×(30,15)）。弹 1092 书弹 dmg 13 原值（无难度包装），
+        // 零初速、ai1=45、ai2=target——三态 AI 见 BookProj（Projectile.cs:23742-23809）
+        const st = game.world.store;
+        const mtx = Math.floor(this.cx / TILE), mty = Math.floor(this.cy / TILE);
+        let bx = this.cx, by = this.cy;
+        const books: Array<[number, number]> = [];
+        for (let sy = Math.max(0, mty - 20); sy < Math.min(st.h, mty + 10); sy++) {
+          for (let sx = Math.max(0, mtx - 10); sx < Math.min(st.w, mtx + 10); sx++) {
+            const t = st.get(sx, sy);
+            if (t && TILE_DEFS[t]?.vanilla?.sheet === 50) books.push([sx, sy]);
+          }
+        }
+        if (books.length > 0) {
+          // 随机一本（closestBook=false 分支 :2733-2740）→ 书格中心
+          const [bx2, by2] = books[Math.floor(Math.random() * books.length)];
+          bx = bx2 * TILE + 8; by = by2 * TILE + 8;
+        } else {
+          // NextVector2Circular(30,15)（Utils.cs：单位角×(30,15)×NextFloat）
+          const ang = Math.random() * Math.PI * 2;
+          const rad = Math.random();
+          bx += Math.cos(ang) * 30 * rad;
+          by += Math.sin(ang) * 15 * rad;
+        }
+        const book = new BookProj(bx - 8, by - 8, 13, player);
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(book, 'projectiles');
       } else {
-        const dx = player.cx - this.cx, dy = player.cy - this.cy;
-        const d = Math.hypot(dx, dy) || 1;
-        const spd = 3.4;
-        // 出膛基线用【未缩放】baseDamage（原版法师族弹体基线均为 SetDefaults 常数，
-        // 如 :21788 num162=25 / :21230 type172 num111=40，不吃 ScaleStats）——
-        // 难度乘区由 projTargets.hitPlayer（Projectile.cs:13770）统一施加。
-        // （本分支为通用法师近似：原版逐类型基线 25/40 未按型映射，登记）
-        const dart = new Dart(this.cx, this.cy, (dx / d) * spd, (dy / d) * spd, this.baseDamage);
-        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
+        // 原版通用分支无兜底发射（NPC.cs:21196-21241 的 if 链外零弹）——法师族全员
+        // （24/29/32/45/281-286/533/693/172）均有专属分支，此处仅防守性静默
       }
     if (this.vanillaId !== 172) {
       game.playSfxFiles(['Item_8'], 1, this.cx, this.cy);   // :21196 发射音（172 例外）

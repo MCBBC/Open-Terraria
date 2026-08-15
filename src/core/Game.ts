@@ -27,6 +27,8 @@ import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorch
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, housingCheckAt, WALL_HOUSE } from '../world/Housing';
+import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS } from '../render/CursorItemIcon';
+import hoverIcons from '../data/vanilla-hovericons.json';
 import {
   INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION, INVASION_MARTIAN,
   INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
@@ -3724,6 +3726,9 @@ export class Game implements GameHooks {
 
     // ---- 智能光标（每帧 lookup；结果供 updateUse 覆盖目标格 + 渲染黄框） ----
     this.updateSmartCursor();
+    // ---- 指针物品/交互图标（DrawInterface_40 数据面）：五字段重置 → 悬停扫描 →
+    //      余辉验证（ItemIconCacheVerification :45929 每帧）。绘制在 Renderer 尾段 ----
+    this.tickCursorIcon();
     // ---- 智能选取（Player.cs:24923 selectedItemState.Update：Shift 按住自动换手持
     //      工具/光源；须在 updateUse 前跑，同帧换选即被使用路径看到） ----
     this.updateSmartSelect();
@@ -12960,6 +12965,71 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 查询（PerformHousingCheck）：合格 → inter[39]（ServerMessage 色 255,240,20）；
    *  失败 → 缺件明细（Game.HouseMissing_n 门/桌/椅/光源）或占用/腐化/无效文案 */
+  // ================= 指针物品/交互图标数据面（DrawInterface_40 :44474-44562） =================
+
+  /** 余辉缓存（Main._itemIconCacheTime :2478 + Update/Verification :45922-45945） */
+  readonly itemIconCache = new ItemIconCache();
+
+  /** 每帧数据面：五字段重置 → 悬停扫描(TileInteractionsMouseOver 语义) → 余辉验证 */
+  private tickCursorIcon(): void {
+    const p = this.player;
+    p.cursorItemIconEnabled = false;
+    p.cursorItemIconID = 0;
+    p.cursorItemIconPush = 0;
+    p.cursorItemIconText = '';
+    p.cursorItemIconReversed = false;
+    const inp = this.input;
+    if (!inp.uiBlocking && !p.dead) {
+      const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+      this.tileInteractionsMouseOver(Math.floor(wx / TILE), Math.floor(wy / TILE), p);
+    }
+    // 余辉验证（:45929-45945）：所选槽物品 id 与缓存比对
+    const held = p.inv.slots[p.inv.selected];
+    this.itemIconCache.verify(inp.mouseX, inp.mouseY,
+      held ? (held.key ?? 0) : 0);
+  }
+
+  /** 悬停交互图标表（Player.cs TileInteractionsMouseOver :33131-33520 + 段外站点）。
+   *  达到交互射程才设（各站点 IsWithinSnappngRange/tileBoost 门就近核对）。 */
+  /** 悬停交互图标表（Player.cs TileInteractionsMouseOver :33131-33520）。
+   *  style→item 表 = vanilla-hovericons.json（tools/extract-cursor-icon-tables.mjs
+   *  从 WorldGen 四张 GetItemDrop_* 机械转录 + Chest.Initialize 覆写）。
+   *  射程门 = 各站点 IsWithinSnappngRangeToTile 近似统一 inTileRange。 */
+  private tileInteractionsMouseOver(tx: number, ty: number, p: Player): void {
+    const st = this.world.store;
+    if (!st.inBounds(tx, ty)) return;
+    const sheet = TILE_DEFS[st.get(tx, ty)]?.vanilla?.sheet ?? -1;
+    const fx = st.frameX[st.idx(tx, ty)];
+    const fy = st.frameY[st.idx(tx, ty)];
+    if (!this.inTileRange(tx, ty)) return;
+    const set = (iconVid: number, reversed = false): void => {
+      p.cursorItemIconEnabled = true;
+      p.cursorItemIconID = iconVid;
+      p.cursorItemIconReversed = reversed;
+    };
+    const table = hoverIcons as Record<string, Record<string, number>>;
+    switch (sheet) {
+      case 314: set(2343); break;                                    // 矿车轨道(:31522)
+      case 79: {                                                     // 床(:33140-33154)
+        const style = Math.floor(fy / 36);
+        set(bottomSideOfBed(st, tx, ty, fx, fy) ? (table.beds[String(style)] ?? 224) : 5013);
+        break;
+      }
+      case 88: set(table.dressers[String(Math.floor(fx / 54))] ?? 334); break;  // 梳妆台(:31609)
+      case 621: set(3750); break;                                    // 织布机(:33208)
+      case 464: set(3814); break;                                    // 茶壶(:33214)
+      case 699: set(5482); break;                                    // :33220
+      case 335: set(2700); break;                                    // 礼盒(:33441)
+      case 386: case 387: set(3239); break;                          // 高门关(:33427-33431)
+      case 388: case 389: set(3240); break;                          // 高门开(:33436)
+      case 15: set(table.candles[String(candleStyleOf(st, tx, ty, fx, fy))] ?? 105); break;  // 蜡烛(:33227)
+      case 21: set(table.chests[String(Math.floor(fx / 36))] ?? 48); break;       // 宝箱(:33255)
+      case 467: set(table.chests2[String(Math.floor(fx / 36))] ?? 3884); break;   // 二类箱(:33276)
+      case 597: set(table.pylons[String(Math.floor(fx / 54))] ?? 4876); break;    // 传送塔(:33158)
+      default: break;
+    }
+  }
+
   housingQuery(x: number, y: number): void {
     const q = housingCheckAt(this.world.store, this.housingOccupied(), x, y);
     if (q.reason === 'ok') {
@@ -17752,15 +17822,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const maxSpd = PLAYER_WALK_MAX * (p.inWater ? 0.55 : 1);
     p.vx = Math.max(-maxSpd, Math.min(maxSpd, p.vx));
     if (p.inWater) {
+      // 水物理（:24150-24155）：gravity 0.2 / maxFall 5（与主线程 Player 同步对齐）
       if (p.inputJump) p.vy = Math.max(p.vy - 0.62, -4.4);
-      p.vy += GRAVITY * 0.3;
-      p.vy = Math.max(-4.6, Math.min(3.0, p.vy));
+      p.vy += GRAVITY * 0.5;
+      p.vy = Math.max(-6.01, Math.min(5.0, p.vy));
     } else {
+      // 原版跳模型（:20384-20396）：恒钉平台段 + vy==0 终止（代理无装备链，裸常量）
       if (p.inputJump && p.onGround) { p.vy = -PLAYER_JUMP_SPEED; p.jumpHold = PLAYER_JUMP_TICKS; }
-      if (p.inputJump && p.jumpHold > 0) { p.vy -= 0.22; p.jumpHold--; } else p.jumpHold = 0;
+      if (p.jumpHold > 0) {
+        if (p.vy === 0) p.jumpHold = 0;
+        else if (p.inputJump) { p.vy = -PLAYER_JUMP_SPEED; p.jumpHold--; }
+      }
       p.vy = Math.min(p.vy + GRAVITY, MAX_FALL_SPEED);
     }
-    if (!p.inputJump && p.vy < -2) p.vy = -2;
+    // 松键 +0.01（:22446 原版语义；曾 -2 截断）
+    if (!p.inputJump && p.vy < 0) p.vy += 0.01;
     p.dropThrough = !!p.inputDown;
     moveAndCollide(p, this.world, p.vx, p.vy);
     if (Math.abs(p.vx) > 0.3 && p.onGround) p.animTime += Math.abs(p.vx);

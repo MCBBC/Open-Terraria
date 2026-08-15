@@ -27,8 +27,12 @@ export const PLAYER_AIR_FRICTION = 0.94;
 // 掉落物独立物理（WorldItem.cs:418-450：空气 0.1/7、水 0.08/5、蜂蜜 0.05/3）——勿与玩家 GRAVITY 耦合
 export const ITEM_GRAVITY = 0.1;
 export const ITEM_MAX_FALL = 7;
-export const PLAYER_JUMP_SPEED = 6.6;
-export const PLAYER_JUMP_TICKS = 9; // 长按跳跃的持续加速度 tick 数
+// 玩家跳跃（Player.cs:2378-2380 static 默认：jumpHeight=15 / jumpSpeed=5.01）——
+// 曾自制 6.6/9 累加模型（起跳猛 32%+抛物线头），2026-08-15 起跳下落审计对齐原版：
+// 起跳 vy=-jumpSpeed，jump>0 期间 vy 恒钉 -jumpSpeed（:20391 每 tick 重置，非累加），
+// tick 尽后重力接管 → 恒速平台段+抛物线尾的原版曲线。
+export const PLAYER_JUMP_SPEED = 5.01;
+export const PLAYER_JUMP_TICKS = 15; // jumpHeight（:2378；恒速平台段 tick 数）
 export const ENEMY_GRAVITY = 0.32;   // 原版无此常量（NPC 重力 0.3 走 UpdateNPC_UpdateGravity），勿与 GRAVITY 混用
 
 // ---- 世界 ----

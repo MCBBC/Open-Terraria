@@ -3286,6 +3286,7 @@ void CrimVeinGen(double px, double py, double ivx, double ivy)
         if (Math.Abs(px - sx) + Math.Abs(py - sy) > (double)trip) flag = false;
     }
     heartPosG.Add(((int)px, (int)py));
+    if (Environment.GetEnvironmentVariable("CRIM_TRACE") != null) Console.Error.WriteLine($"H {(int)px},{(int)py}");
 }
 void CrimEntGen(double px, double py, int crimDir)
 {
@@ -3371,9 +3372,11 @@ void CrimStartGen(int i, int j)
         if (vx2 < -2.0) vx2 = -2.0;
         if (vx2 > 2.0) vx2 = 2.0;
         vx += vx2; vy += vy2;
+        if (Environment.GetEnvironmentVariable("CRIM_TRACE") != null) Console.Error.WriteLine($"M {vx:F2},{vy:F2},{rad:F2},{vx2:F3},{vy2:F3}");
         if (vy > wsN + 100.0) flag = false;
     }
     rad = (int)r.Next(40, 55);
+    if (Environment.GetEnvironmentVariable("CRIM_TRACE") != null) Console.Error.WriteLine($"E {rad}");
     for (int n = 0; n < 50; n++)
     {
         int cx = (int)vx + (int)r.Next(-20, 21);
@@ -3443,6 +3446,7 @@ void CrimStartGen(int i, int j)
         }
         int cx = (int)vx + (int)r.Next(-2, 3);
         int cy = (int)vy + (int)r.Next(-2, 3);
+        if (Environment.GetEnvironmentVariable("CRIM_TRACE") != null) Console.Error.WriteLine($"P {cx},{cy},{vy:F2}");
         for (int i2 = (int)((double)cx - rad / 2.0); (double)i2 < (double)cx + rad / 2.0; i2++)
             for (int j2 = (int)((double)cy - rad / 2.0); (double)j2 < (double)cy + rad / 2.0; j2++)
             {
