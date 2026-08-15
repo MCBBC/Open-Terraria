@@ -130,8 +130,12 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   const pick = (arr: number[]) => arr[rng.int(0, arr.length - 1)];
 
   // ---- 分支判定(cs:36283 flag23 / 36563 / 36789 / 37163)----
-  // 地表分支仅木箱(style0 flag)/天空箱(style12 flag6)(cs:36283 `flag23 && (flag || flag6)`)
-  const isSurface = gy < gs.worldSurface + 25 && !!(flags.wooden || flags.sky);
+  // 地表分支 = 木箱(style0 flag)/天空箱(style12 flag6)且深度(ws+25) 之外，
+  // ★flag11（cs:36221：tile21+style≠0+主件∈{848,857,934}）= 金字塔主件箱
+  //   **无视深度恒走地表/金字塔分支**——曾只按深度判（深层金字塔箱误入金箱分支，
+  //   掷骰序列整体偏移，金字塔出口隧道相位漂移，dump 对拍实锤）
+  const isPyrMain = mainVanillaId === 848 || mainVanillaId === 857 || mainVanillaId === 934;
+  const isSurface = isPyrMain || (gy < gs.worldSurface + 25 && !!(flags.wooden || flags.sky));
   const isGold = gy < gs.rockLevel;
 
   if (isSurface) {
@@ -340,8 +344,9 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       if (rng.int(0, 4) === 0) push(2767);
       else push(2766, rng.int(3, 7));
     }
-    // voice 门（cs:37557：恒消耗 1 掷）——1/12 命中由调用方后处理（此处保流对齐）
-    rng.int(0, 11);
+    // voice 门（cs:37557）：恒掷 Next(12)；命中 1/12 时 AddVoiceChangeItemToChest
+    // 内 Item.GetRandomVoiceItem 还要掷 Next(14)——曾漏（命中即短一掷，流漂移）
+    if (rng.int(0, 11) === 0) rng.int(0, 13);
   }
   // 键主件(如金字塔/蛛网/世界树的特殊掉落直接给 key)置首。
   // 同一原版物品可能有两个注册键:调用方显式键(如 vi_832_living_wood_wand)与
@@ -488,10 +493,13 @@ export function placeBuriedChest(
   // 由并行代理接线，此处先开通道；缺省 false = 与原版 notNearOtherChests:false 同义）
   if (opts.notNearOtherChests && nearOtherChests(st, i - 2, gy - 2)) { restoreSlopes(); return false; }
 
-  // 2×2 放置:顶行 frameY=0、frameX = style*36 + dx*18(PlaceChestDirect 语义)
+  // 2×2 放置（PlaceChest → TileObject.CanPlace 语义，cs:57828/:174）：
+  // AddBuriedChest 调 PlaceChest(i-1, num7-1)，chest TileObjectData Origin=(0,1)、
+  // Width=2 → 箱体落 **(i-1..i)×(gy-2..gy-1)**、锚腿 (i-1)/i 行 gy——曾写在
+  // (i..i+1) = 整体右移一列（金字塔箱 dump 对拍实锤；所有宝箱调用点共用此偏移）
   const topY = gy - 2;
   if (topY < 1) { restoreSlopes(); return false; }
-  for (let dx = 0; dx < 2; dx++) {
+  for (let dx = -1; dx <= 0; dx++) {
     for (let dy = 0; dy < 2; dy++) {
       if (!st.inBounds(i + dx, topY + dy) || st.flags[st.idx(i + dx, topY + dy)]) { restoreSlopes(); return false; }
     }
@@ -500,20 +508,22 @@ export function placeBuriedChest(
   if (style === 32) flags.mushroom = true;
   if (style === 16) flags.temple = true;
   if (style === 13) flags.skyTheme = true;
-  // 右腿落地判定：solid 走 GenSolid（本 pass 时点 484 滚动仙人掌/659 以太石块等
-  // 已被翻非实心,WorldGen.cs:12537/11500——原版 PlaceChest 读可变 tileSolid 同样
-  // 不认它们为可落脚地面）。左腿与锚定判定走 solidTileHB（HalfBrickPass,已 gen-aware）
-  if (!st.inBounds(i + 1, gy) || !st.flags[st.idx(i + 1, gy)]
-    || !genSolidType(st.type[st.idx(i + 1, gy)])) { restoreSlopes(); return false; }
+  // 锚腿落地判定（CanPlace AnchorBottom 两列 = i-1/i；k 扫描列 i 已验 SolidTile）：
+  // solid 走 GenSolid（本 pass 时点 484 滚动仙人掌/659 以太石块等已被翻非实心，
+  // WorldGen.cs:12537/11500——原版 PlaceChest 读可变 tileSolid 同样不认它们为地面）
+  for (let dx = -1; dx <= 0; dx++) {
+    if (!st.inBounds(i + dx, gy) || !st.flags[st.idx(i + dx, gy)]
+      || !genSolidType(st.type[st.idx(i + dx, gy)])) { restoreSlopes(); return false; }
+  }
   const fw = TILE_DEFS[tile].vanilla?.fw ?? 2;
-  for (let dx = 0; dx < 2; dx++) {
+  for (let dx = -1; dx <= 0; dx++) {
     for (let dy = 0; dy < 2; dy++) {
-      st.setTileSilent(i + dx, topY + dy, tile, style * fw * 18 + dx * 18, dy * 18);
+      st.setTileSilent(i + dx, topY + dy, tile, style * fw * 18 + (dx + 1) * 18, dy * 18);
     }
   }
   // 战利品:四深度分支完整表(此前仅主件+火把/药水,体感稀缺主因之一)
   const items = rollChestLoot({ rng, gs, gy, flags, mainKey, worldH: st.h }, mainId);
-  chests.push({ x: i, y: topY, items });
+  chests.push({ x: i - 1, y: topY, items });   // Chest.CreateChest(xCoord,yCoord)=(i-1,gy-2)
   if (flags.hell) gs.hellChestIdx++; // cs:36257-36264 放置成功才前进（失败重试取同一件）
   return true;
 }

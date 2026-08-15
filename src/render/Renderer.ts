@@ -6567,6 +6567,14 @@ export class Renderer {
         { x: p.x, y: p.y, w: p.w, h: p.h }, p.mount.heightBoost)
       : null;
     if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
+    // ---- 坐椅渲染偏移（PlayerSittingHelper.GetSittingOffsetInfo :22-37，Player
+    //      Position 消费 :4083-4087）：sittingIndex 单人恒 0 → posOffset=offsetForSeat×
+    //      Directions + seatAdjustment(−4+(int)offsetForSeat.Y) 竖移。坐姿腿帧（原版
+    //      bodyFrame 坐姿变体）未画——视觉债登记 ----
+    if (p.sitting) {
+      ctx.save();
+      ctx.translate(p.facing * p.seatOffsetX, -4 + Math.trunc(p.seatOffsetY));
+    }
     // ---- heldProj 指向（渲染层单点；模型与门见 src/render/heldProj.ts 头注）----
     // 玩家持有"挂着活体投射物"的武器（食人鱼枪 1156→190）时持物瞄准角改指向
     // 投射物；挥砍/饮用等非 useStyle 5 动画与 noGraphic 族原样让位（挥舞优先）。
@@ -6927,6 +6935,7 @@ export class Renderer {
       this.drawUseItem(ctx, p, swing, flicker);
       if (mrot) ctx.restore();
     }
+    if (p.sitting) ctx.restore();   // 坐椅偏移收口
 
     void world;
   }
@@ -7642,6 +7651,28 @@ export class Renderer {
           }
         }
       }
+    }
+    // cursorItemIconText（:44540-44543 MouseText）——孤儿箱/命名箱类型名 tooltip。
+    // MouseTextInner（Main.cs:20032-20175,rare=0 纯文本支）:无面板带影文字,
+    // 锚 mouse+14,屏幕右/下缘 40px 收边,白 × mouseTextColor 脉动
+    if (p.cursorItemIconText !== '') {
+      const mt = this.lighting?.clock.mouseTextColor ?? 255;
+      const c = Math.round((mt / 255) * 255);
+      ctx.font = '14px monospace';
+      const w = ctx.measureText(p.cursorItemIconText).width;
+      const h = 14;
+      let x = this._mouseX + 14, y = this._mouseY + 14;
+      if (x + w + 40 > this.canvas.width) x = this.canvas.width - w - 40;
+      if (y + h + 40 > this.canvas.height) y = this.canvas.height - h - 40;
+      // 字体偏差登记同 InfoAccsLayer:原版 FontAssets.MouseText → 本仓 canvas 字+四向描边
+      ctx.save();
+      for (const [ox, oy] of [[2, 0], [-2, 0], [0, 2], [0, -2]]) {
+        ctx.fillStyle = '#000';
+        ctx.fillText(p.cursorItemIconText, x + ox, y + oy);
+      }
+      ctx.fillStyle = `rgb(${c},${c},${c})`;
+      ctx.fillText(p.cursorItemIconText, x, y);
+      ctx.restore();
     }
     ctx.restore();
   }

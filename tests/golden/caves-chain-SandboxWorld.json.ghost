@@ -1,58 +1,89 @@
-terrain|0bb5a9c5
-dunes|0bb5a9c5
-oceansand|0bb5a9c5
-sandpatches|0bb5a9c5
-tunnels|0bb5a9c5
-mountaincaves|0bb5a9c5
-dirtwallbg|0bb5a9c5
-rocksclay|287508cd
-smallholes|fd557b54
-dirtlayer|15ff650c
-rocklayer|0bd6e36c
-surfacecaves|085d565c
-icebiome|df82bf7f
-grass|df82bf7f
-jungle|59503401
-mudcaves|446243f7
-desertmound|707572e0
-desertentrance|707572e0
-deserthive|d8dca596
-desertdone|d8dca596
-mushroom|a498f9d8
-marble|eddf53d9
-granite|b2435fa4
-islands|c4d47f6b
-dirttomud|63aa9433
-silt|4f291138
-ores|bfc16dcd
-webs|09722b41
-underworld|45446361
-corruption|ce88ddab
-lakes|294cb8d3
-slush|36ae65cb
-dungeonL|b802d691
-dungeonE|63d7ce48
-dungeonPD|63d7ce48
-dungeonPi|1ede9c80
-dungeonS|f560c220
-dungeonD|bf602dcc
-dungeonW|bf602dcc
-dungeonP|a53524e4
-dungeonC|0d1a3b34
-dungeonB|0dad9108
-dungeonG|29025a41
-dungeonI|f5405a89
-dungeonT|1c7ede95
-dungeonF|a8d39255
-dungeonPa|266d4ac5
-dungeonBa|b5ab6359
-dungeon|b5ab6359
-mcopenings|c749ce2d
-beaches|478b84d6
-gems|69fbccbf
-gravitatingsand|848c3be8
-oceancaves|848c3be8
-shimmershell|3d107b01
-shimmerpillars|f4ea47b9
-shimmeropen|d0050688
-shimmer|c756e5a0
+{
+  "seed": 1511931452, "evil": 1,
+  "worldSurface": 337, "rockLayer": 487, "waterLine": 809, "lavaLine": 885,
+  "shimmerX": 3869, "shimmerY": 708, "dungeonRight": 0,
+  "checkpoints": [
+    "terrain|7fc39ae4 93b70d3c 0bb5a9c5 0bb5a9c5",
+    "dunes|3512ae51 41b307a5 0bb5a9c5 0bb5a9c5",
+    "oceansand|9bf24b24 41b307a5 0bb5a9c5 0bb5a9c5",
+    "sandpatches|3eaf02b1 41b307a5 0bb5a9c5 0bb5a9c5",
+    "tunnels|3eaf02b1 023341d5 0bb5a9c5 0bb5a9c5",
+    "mountaincaves|3eaf02b1 9e851c65 0bb5a9c5 0bb5a9c5",
+    "dirtwallbg|3eaf02b1 9e851c65 43e0eeb7 0bb5a9c5",
+    "rocksclay|522224ec 9e851c65 43e0eeb7 0bb5a9c5",
+    "smallholes|a1b1c465 9ec53eb5 43e0eeb7 c72cf112",
+    "dirtlayer|501ff8ad f6578ccd 43e0eeb7 bc707f32",
+    "rocklayer|0d3c77fd 44a16d1c 43e0eeb7 19ceaead",
+    "surfacecaves|ec7b37cd 5011521d 43e0eeb7 1361af1d",
+    "icebiome|daf0b18e 5011521d ec25b41d 1361af1d",
+    "grass|776e3e9d 5011521d ec25b41d 1361af1d",
+    "jungle|254b5a19 a0f20975 1d56fd62 326403b2",
+    "mudcaves|8d4dc807 c9b1f2fc 1d56fd62 326403b2",
+    "desertmound|9adc7f4c 53a0f5f4 b1083342 31dc736a",
+    "desertentrance|9adc7f4c 53a0f5f4 b1083342 31dc736a",
+    "deserthive|2290fd55 47819634 d7305129 3ed4618d",
+    "desertdone|2290fd55 47819634 d7305129 3ed4618d",
+    "mushroom|5be75f70 3e7eeadd d7305129 557d512d",
+    "marble|7e564505 5253617d e51b8c59 d10ee002",
+    "granite|d300603d d7e8c125 927afded 5a367325",
+    "islands|ca2e121c 5dba595c 5acdb7cc 62eb8032",
+    "dirttomud|1266ca3a 5dba595c 5acdb7cc 8696a4a5",
+    "silt|d34e02f9 5dba595c 5acdb7cc 8696a4a5",
+    "ores|d2fec78b 5dba595c 5acdb7cc 8696a4a5",
+    "webs|6fb6ea28 085dba25 5acdb7cc bc4f2922",
+    "underworld|451fd062 539fe744 5acdb7cc 5da68205",
+    "corruption|cee2d71f 266bda15 2ce3ec57 5da68205",
+    "lakes|45ac9062 814fb0c5 2ce3ec57 c804b662",
+    "slush|8deb5e45 814fb0c5 2ce3ec57 c804b662",
+    "dungeonL|eec20e9a 1ededb15 5962f501 d0ff00fa",
+    "dungeonE|43265f60 df036c5d cb5618a8 d75edb8a",
+    "dungeonPD|43265f60 df036c5d cb5618a8 d75edb8a",
+    "dungeonPi|ea5fdd7b ef09ef25 ec878990 faced2c5",
+    "dungeonS|85cd83ef 1eaca6ed ec878990 faced2c5",
+    "dungeonD|4001e465 80ecd315 ec878990 faced2c5",
+    "dungeonW|4001e465 80ecd315 6e90ad51 faced2c5",
+    "dungeonP|7a9fd4ca a4a743bc 6e90ad51 faced2c5",
+    "dungeonC|c765db12 73a1d28c 6e90ad51 faced2c5",
+    "dungeonB|369147c0 364e72bc 6e90ad51 faced2c5",
+    "dungeonG|c8d0b410 293138ec 6e90ad51 faced2c5",
+    "dungeonI|b6e49116 3fd420dc 6e90ad51 faced2c5",
+    "dungeonT|633d4704 9acc4045 6e90ad51 faced2c5",
+    "dungeonF|8c0a23e8 54728c6c 6e90ad51 faced2c5",
+    "dungeonPa|fa3a24ed 8eb1571d 6e90ad51 faced2c5",
+    "dungeonBa|24d6c4c5 232bc165 6e90ad51 faced2c5",
+    "dungeon|24d6c4c5 232bc165 6e90ad51 faced2c5",
+    "mcopenings|5ae016a1 efa74605 6e90ad51 faced2c5",
+    "beaches|67634c1e ddd6636d 16a5a6a3 e254b9f2",
+    "gems|7b2eca11 20548385 16a5a6a3 e254b9f2",
+    "gravitatingsand|c48c60fb a0a577cd 16a5a6a3 ac79d102",
+    "oceancaves|c48c60fb a0a577cd 16a5a6a3 ac79d102",
+    "shimmershell|22b7d76e 66df4c25 16a5a6a3 745a42d5",
+    "shimmerpillars|b0e0e802 b9c6065d 16a5a6a3 745a42d5",
+    "shimmeropen|3801981f cdfa9304 16a5a6a3 745a42d5",
+    "shimmer|e478841e e3909ca4 16a5a6a3 745a42d5",
+    "dirtwallcleanup|e478841e e3909ca4 c8c0cd79 745a42d5",
+    "pyramids|ceae3649 23046114 6bfccf49 745a42d5",
+    "dirtrockwallrunner|ceae3649 23046114 a3f4b6f1 745a42d5",
+    "livingtrees|2d3588b7 e3e77cd4 8c7ac848 745a42d5",
+    "livingtreewalls|2d3588b7 e3e77cd4 99b85d43 745a42d5",
+    "altars|bac48a47 b411c854 99b85d43 745a42d5",
+    "surfacewaterinjungle|bac48a47 b411c854 99b85d43 070273c2"
+  ],
+  "stream": [
+    "beaches|ba86d082",
+    "gems|24bdad3f",
+    "gravitatingsand|24bdad3f",
+    "oceancaves|9ff6a006",
+    "shimmershell|5a00945d",
+    "shimmerpillars|eceacbb0",
+    "shimmeropen|6a8a5396",
+    "shimmer|07f25c25",
+    "dirtwallcleanup|4b17bff3",
+    "pyramids|0d6b8e42",
+    "dirtrockwallrunner|3c11a4e0",
+    "livingtrees|9f2efa5a",
+    "livingtreewalls|9f2efa5a",
+    "altars|16764fc1",
+    "surfacewaterinjungle|16764fc1"
+  ]
+}

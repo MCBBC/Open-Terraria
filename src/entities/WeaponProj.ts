@@ -1907,14 +1907,12 @@ export class GrenadeProj extends Entity {
         this.fuseSnd.setPos(this.cx, this.cy);
       }
     }
-    // ---- 接触引爆（Projectile.Damage :12330-12340 碰 NPC / :13533-13541 碰玩家：
-    //      timeLeft 钳 3 → 3 tick 后炸）----
+    // ---- 接触引爆（Projectile.Damage :12330-12340 仅碰 NPC；玩家不引爆）----
+    // ★原版 BombsHurtPlayers(:13944-13959) 对玩家【只伤害不置 timeLeft】——曾把
+    //   玩家也当引爆条件:炸弹出生点在玩家盒内 → 首帧 fuse=3 → 0.05s 即爆
+    //   = "炸弹没引信"根因（2026-08-16 用户实抓）。PvP 敌对玩家接触(:13533)
+    //   才写 timeLeft=3,本仓单机无此场景。
     {
-      const pl = game.player;
-      if (pl && !pl.dead
-        && this.x < pl.x + pl.w && this.x + this.w > pl.x
-        && this.y < pl.y + pl.h && this.y + this.h > pl.y
-        && this.fuse > 3) this.fuse = 3;
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead?: boolean };
         if (e.dead) continue;

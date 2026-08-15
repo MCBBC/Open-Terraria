@@ -30,6 +30,14 @@ import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
 import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
+import { runGemsPass } from '../src/world/gen/vanilla/ShiniesPass';
+import { gravitatingSandPass, vanillaCleanup } from '../src/world/gen/WorldGen';
+import { runOceanCavesPass } from '../src/world/gen/vanilla/OceanCavesPass';
+import { runShimmerPass } from '../src/world/gen/vanilla/ShimmerPass';
+import { runPyramidPass, runWetJunglePass } from '../src/world/gen/vanilla/StructuresPass';
+import { runDirtRockWallRunnerPass } from '../src/world/gen/vanilla/DirtRockWallRunnerPass';
+import { runLivingTreesPass, runLivingTreeWallsPass } from '../src/world/gen/vanilla/LivingTreePass';
+import { runAltarsPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -76,16 +84,31 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   const st = world.store;
   const out = new Map<string, string>();
   const outWall = new Map<string, string>();
+  // RNG 流指纹探针（SW_STREAM_PROBE=1 时逐检查点打印；同 oracle StreamHash 算法）
+  const streamProbe = typeof process !== 'undefined' && !!process.env.SW_STREAM_PROBE;
+  const streamHash = (): string => {
+    const ur = (rng as unknown as { ur: { seedArray: Int32Array; inext: number } }).ur;
+    let h = 0x811c9dc5;
+    const step = (b: number) => { h = Math.imul(h ^ (b & 0xff), 16777619) >>> 0; };
+    for (let i = 0; i < ur.seedArray.length; i++) {
+      const v = ur.seedArray[i] | 0;
+      for (let b = 0; b < 4; b++) step(v >>> (8 * b));
+    }
+    const ix = ur.inext >>> 0;
+    for (let b = 0; b < 4; b++) step(ix >>> (8 * b));
+    return h.toString(16).padStart(8, '0');
+  };
   const snap = (name: string) => {
     out.set(name, hashGrids(st)); outWall.set(name, hashWalls(st));
+    if (streamProbe) console.log(`STREAM ${name}|${streamHash()}`);
     // 网格导出钩子(对账插桩:dormant——__cavesGridExport 存在时 dump 指定检查点的 typ/act)
     const ex = (globalThis as { __cavesGridExport?: { at: string; dir: string } }).__cavesGridExport;
     if (ex && ex.at === name) {
       const n = st.w * st.h;
-      const typ = Buffer.alloc(n * 2), act = Buffer.alloc(n);
-      for (let i = 0; i < n; i++) { typ.writeUInt16LE(st.type[i] & 0xffff, i * 2); act[i] = st.flags[i] ? 1 : 0; }
+      const typ = Buffer.alloc(n * 2), act = Buffer.alloc(n), wal = Buffer.alloc(n * 2);
+      for (let i = 0; i < n; i++) { typ.writeUInt16LE(st.type[i] & 0xffff, i * 2); act[i] = st.flags[i] ? 1 : 0; wal.writeUInt16LE(st.wall[i] & 0xffff, i * 2); }
       const { writeFileSync } = require('node:fs') as typeof import('node:fs');
-      writeFileSync(`${ex.dir}.typ`, typ); writeFileSync(`${ex.dir}.act`, act);
+      writeFileSync(`${ex.dir}.typ`, typ); writeFileSync(`${ex.dir}.act`, act); writeFileSync(`${ex.dir}.wal`, wal);
     }
   };
   out.set('terrain', hashGrids(st));
@@ -136,6 +159,18 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runDungeonPass(st, rng, gs, world.chests, (name) => snap(name));
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
   runBeachesPass(st, rng, gs); snap('beaches');
+  // ===== 第三轮 A（#35-44，1456 注册序）=====
+  runGemsPass(st, rng, gs); snap('gems');
+  gravitatingSandPass({ store: st } as never); snap('gravitatingsand');
+  runOceanCavesPass(st, rng, gs); snap('oceancaves');
+  runShimmerPass(st, rng, gs, (nm) => snap(nm));   // shimmershell/pillars/open/shimmer 四段
+  vanillaCleanup({ store: st, rng } as never); snap('dirtwallcleanup');
+  runPyramidPass(st, rng, gs, world.chests); snap('pyramids');
+  runDirtRockWallRunnerPass(st, rng, gs); snap('dirtrockwallrunner');
+  runLivingTreesPass(st, rng, gs, world.chests); snap('livingtrees');
+  runLivingTreeWallsPass(st, gs); snap('livingtreewalls');
+  runAltarsPass(st, rng, gs); snap('altars');
+  runWetJunglePass(st, rng, gs); snap('surfacewaterinjungle');
   return { grids: out, walls: outWall };
 }
 
@@ -170,7 +205,11 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         'dungeonL', 'dungeonE', 'dungeonPD', 'dungeonPi', 'dungeonS', 'dungeonD',
         'dungeonW', 'dungeonP', 'dungeonC', 'dungeonB', 'dungeonG', 'dungeonI',
         'dungeonT', 'dungeonF', 'dungeonPa', 'dungeonBa', 'dungeon',
-        'mcopenings', 'beaches'];
+        'mcopenings', 'beaches',
+        'gems', 'gravitatingsand', 'oceancaves',
+        'shimmershell', 'shimmerpillars', 'shimmeropen', 'shimmer',
+        'dirtwallcleanup', 'pyramids', 'dirtrockwallrunner',
+        'livingtrees', 'livingtreewalls', 'altars', 'surfacewaterinjungle'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

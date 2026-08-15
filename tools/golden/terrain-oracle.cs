@@ -87,6 +87,13 @@ int dungeonLocation = !dungeonRight
     ? (int)r.Next(leftBeachEnd + 50, (int)(W * 0.2))
     : (int)r.Next((int)(W * 0.8), rightBeachStart - 50);
 
+// ★RunPass 重播（num4 悬案根因，2026-08-16 Tier B IL 探针裁决）：
+// 原版每个 GenPass 前 `Main.rand = new UnifiedRandom(_seed)`（1456
+// WorldGenerator.cs:497；服务器 exe IL RunPass: newobj UnifiedRandom::.ctor(Int32)
+// + stsfld Main::rand），GenBase._random => WorldGen.genRand => Main.rand
+//（GenBase.cs:9 / WorldGen.cs:4391）→ TerrainPass 从 stream(seed) 第 0 掷开始。
+// 探针实测（IL 注入原版服务器 7 种子逐列）：重播后 4200/4200 列位级一致。
+r = (dynamic)Activator.CreateInstance(urType, seed)!;
 // ================= TerrainPass.ApplyPass（cs:56-244 普通分支逐行转写）=================
 int flatBeachPadding = 5;
 int feature = 0; // Plateau

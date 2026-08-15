@@ -48,6 +48,15 @@ export interface GenState {
   generatingDungeonPositionX: number;
   lAltarX: number;             // 神庙祭坛 3×2 左上角（GenVars.lAltarX/Y 语义；-1=未放置）
   lAltarY: number;
+  /** GenVars.tLeft/tRight/tTop/tBottom/tRooms（makeTemple 尾 cs:34487-34491 写入：
+   *  房间 bbox 四侧各外扩 10；tRooms=房间数）——LihzahrdTemple(15911) 产出、
+   *  LihzahrdTemplePart2(17809) 消费（神庙陈设五段的采样域/预算基数）。
+   *  0 = 未写（makeTemple 早退；Part2 仍照跑，预算 0×掷骰照掷=原版语义）。 */
+  tLeft: number;
+  tRight: number;
+  tTop: number;
+  tBottom: number;
+  tRooms: number;
   dungeonEntY: number;        // 入口门厅可站立点 Y
   jungleX: number;            // 丛林（与地牢异侧）
   snowOriginLeft: number;
@@ -186,6 +195,7 @@ export function newGenState(w: number, h: number): GenState {
     crimson: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
     dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, generatingDungeonPositionX: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
+    tLeft: 0, tRight: 0, tTop: 0, tBottom: 0, tRooms: 0,    // C# GenVars 静态 int 默认 0
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,
     shellStartXLeft: 0, shellStartYLeft: 0, shellStartXRight: 0, shellStartYRight: 0,

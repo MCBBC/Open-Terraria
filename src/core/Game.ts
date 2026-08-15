@@ -27,7 +27,7 @@ import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorch
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, housingCheckAt, WALL_HOUSE } from '../world/Housing';
-import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS } from '../render/CursorItemIcon';
+import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
 
 /** IsHoveringOverABottomSideOfABed(Player.cs:32869-32881):frameX/72==1(右半)时
@@ -112,7 +112,7 @@ import {
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
-import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemUseSoundWav } from '../data/itemUseSound';
@@ -215,6 +215,7 @@ import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
+import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
 import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
 import { VUI } from '../vui/VUI';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
@@ -3538,6 +3539,7 @@ export class Game implements GameHooks {
         this.player.sleeping = false; // 床格失效（SH:98-101）
       }
     }
+    this.updateSitting();   // PlayerSittingHelper.UpdateSitting（Helper.cs:69-105）
     // ⑤ Foxparks 5664 手持喷火通道（PC:42669-42690 TryUsingFoxsparksAbility：
     // 按住期间已有 1094 进 ai[0]=1000 喷火态 + SetDummyItemTime(2) 锁 useTime）
     {
@@ -9562,7 +9564,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    if (tileId === T.CHEST) {
+    // 容器族放置登记（PlaceChest → Chest.CreateChest :57840-57842;梳妆台
+    //  PlaceDresserDirect → CreateChest(x-1,y-1) :57899——锚同为物件左上格）:
+    //  21/467/88 三族（此前只登 21 → 放置的梳妆台/二类箱成"孤儿",悬停文本支误进）
+    const placedSheet = def?.vanilla?.sheet;
+    if (placedSheet === 21 || placedSheet === 467 || placedSheet === 88) {
       this.world.chests.push({ x: tx, y: ty, items: Array(10).fill(null) });
     }
     // 挂物族放置登记（原版 TileLoader.PlaceTile → TE*.Hook_AfterPlacement：
@@ -9816,6 +9822,100 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.input.rightDown = false;
   }
 
+  /** IsWithinSnappngRangeToTile（Player.cs:17214-17222）：格中心到
+   *  (Center.X, Bottom.Y−16) 的距离 ≤ distanceInPixels */
+  private withinSnapRange(tx: number, ty: number, px: number): boolean {
+    const p = this.player;
+    return Math.hypot(tx * TILE + 8 - p.cx, ty * TILE + 8 - (p.y + p.h - 16)) <= px;
+  }
+
+  /** PlayerSittingHelper.SitDown（Helper.cs:141-183）：帧目标解析 → CanSnapToPosition
+   *  实心门 → 同位重坐=起身 → 摘钩/下车/搬锚点/朝向/velocity 清零 */
+  private sitDownAt(tx: number, ty: number): void {
+    const p = this.player;
+    const t = getSittingTargetInfo(this.world.store, tx, ty, p.facing);
+    if (!t) return;
+    this.input.rightDown = false;
+    // CanSnapToPosition（Player.cs:17235+）：落点盒 !SolidCollision
+    const offX = t.sittingX - (p.x + p.w / 2), offY = t.sittingY - (p.y + p.h);
+    const nx = p.x + offX, ny = p.y + offY;
+    const st = this.world.store;
+    for (let sx = Math.floor(nx / TILE); sx <= Math.floor((nx + p.w - 1) / TILE); sx++) {
+      for (let sy = Math.floor(ny / TILE); sy <= Math.floor((ny + p.h - 1) / TILE); sy++) {
+        if (st.inBounds(sx, sy) && st.isSolid(sx, sy)) return;
+      }
+    }
+    // 同位重坐 = 起身（Helper.cs:167-170）
+    if (p.sitting && Math.abs(p.y + p.h - t.sittingY) < 0.5
+      && Math.abs(p.x + p.w / 2 - t.sittingX) < 0.5) {
+      this.standUp();
+      return;
+    }
+    p.removeAllGrapplingHooks();          // Helper.cs:171
+    if (p.ridingCart) this.dismountMinecart();   // 坐椅优先于矿车（Helper.cs:174 TryDismount）
+    p.x = t.sittingX - p.w / 2;           // Bottom = playerSittingPosition
+    p.y = t.sittingY - p.h;
+    p.facing = t.targetDirection;         // ChangeDir
+    p.sitting = true;
+    p.seatOffsetX = t.offsetX;
+    p.seatOffsetY = t.offsetY;
+    p.seatIsToilet = t.isToilet;
+    p.sitTicks = 0;
+    p.vx = 0; p.vy = 0;
+  }
+
+  /** PlayerSittingHelper.SitUp（Helper.cs:122-140） */
+  private standUp(): void {
+    const p = this.player;
+    if (!p.sitting) return;
+    p.sitting = false;
+    p.seatOffsetX = 0; p.seatOffsetY = 0;
+    p.seatIsToilet = false;
+    p.sitTicks = 0;
+  }
+
+  /** PlayerSittingHelper.UpdateSitting（Helper.cs:69-105）：每帧维护——
+   *  椅失效 / 任意移动输入（含滑轮/坐骑）/ 朝向变化 → 起身；马桶 wellFed →
+   *  TryToPoop（:18714-18745 概率档 1/600·醉 1/200；食 tier 递降一档 + 屎堆
+   *  5395——物品未注册，粒子近似 + 登记引擎级缺口） */
+  private updateSitting(): void {
+    const p = this.player;
+    if (!p.sitting) return;
+    const st = this.world.store;
+    const cx = Math.floor(p.cx / TILE), cy = Math.floor((p.y + p.h - 2) / TILE);
+    const t = st.inBounds(cx, cy) ? getSittingTargetInfo(st, cx, cy, p.facing) : null;
+    if (!t) { this.standUp(); return; }   // 椅失效（Helper.cs:75-78）
+    const inp = this.input;
+    if (inp.down('KeyA') || inp.down('KeyD') || inp.down('KeyW') || inp.down('KeyS')
+      || inp.down('Space') || p.onRope || p.ridingCart || p.ridingMount
+      || t.targetDirection !== p.facing) {
+      this.standUp();                     // Helper.cs:79-82（pulley≈onRope）
+      return;
+    }
+    p.seatOffsetX = t.offsetX;            // Helper.cs:96-97 偏移随帧刷新
+    p.seatOffsetY = t.offsetY;
+    // TryToPoop（Helper.cs:84-90 门=夜间+长凳 89 红帽帧段 → RedHatSkeletron 依赖
+    //  killClothier 旗标未持久化，登记；马桶消化 :19058-19060）
+    if (p.seatIsToilet && p.sitTicks >= 10
+      && (p.buffs.has(BuffType.WellFed) || p.buffs.has(BuffType.WellFed2) || p.buffs.has(BuffType.WellFed3))) {
+      const denom = p.buffs.has(BuffType.Tipsy) ? 200 : 600;
+      if (Math.random() < 1 / denom) {
+        // 剥食 tier 递降一档（207→206→26，TryToPoop :18734-18740）+ 消化粒子
+        // （原版 ParticleOrchestra.Digestion；屎堆 5395 vi_ 未注册——物品侧缺口登记）
+        this.spawnParticles(p.cx, p.y + p.h - 8, '#8B5A2B', 8, 1.5, { grav: 0.4 });
+        const tiers = [BuffType.WellFed3, BuffType.WellFed2, BuffType.WellFed] as const;
+        for (let i = 0; i < tiers.length; i++) {
+          if (p.buffs.has(tiers[i])) {
+            const left = p.buffs.active.get(tiers[i]) ?? 0;
+            p.buffs.remove(tiers[i]);
+            if (i + 1 < tiers.length && left > 0) p.buffs.set(tiers[i + 1], left);
+            break;
+          }
+        }
+      }
+    }
+  }
+
   private interactAt(tx: number, ty: number) {
     const st = this.world.store;
     // 距离门（原版 Player.IsInTileInteractionRange Simple：约 5 格）——此前整个
@@ -9863,8 +9963,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.useFurnitureInteraction(tx, ty, FURNITURE_TILE_KIND.get(type)!);
       return;
     }
+    // ---- 坐椅族（Player.cs:31842-31860 右键分支：tile 15/497 一档、89/102/487
+    //  一档，均 IsWithinSnappngRangeToTile 40px 门 → sitting.SitDown）----
+    if (SITTABLE_SHEETS.has(sh) && this.withinSnapRange(tx, ty, 40)) {
+      this.sitDownAt(tx, ty);
+      return;
+    }
     // ---- 梳妆台 tile 88（Player.cs:32409-32479 右键分支）----
-    // 1.4 起梳妆台不是储物容器：右键下半（frameY!=0）→ Main.OpenClothesWindow
     //（Main.cs:43568 更衣界面：衣服样式+六色+音色，随角色档持久化）；上半（frameY==0）
     // 仅是旧版残留的关箱路径（现代档在梳妆台位找不到 chest，无操作）。
     if (type === TILE_BY_KEY['dresser']) {
@@ -12985,8 +13090,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 余辉缓存（Main._itemIconCacheTime :2478 + Update/Verification :45922-45945） */
   readonly itemIconCache = new ItemIconCache();
+  /** UI 拖拽物桥（mainFlow 注入:MouseDisplayItem 非空语义,DrawInterface_40/38 门） */
+  uiHeldStack: (() => boolean) | null = null;
 
-  /** 每帧数据面：五字段重置 → 悬停扫描(TileInteractionsMouseOver 语义) → 余辉验证 */
+  /** 每帧数据面：五字段重置 → 悬停扫描(TileInteractionsMouseOver 语义) → 余辉验证
+   *  → 组装 renderer.cursorIconCtx(绘制层消费) */
   private tickCursorIcon(): void {
     const p = this.player;
     p.cursorItemIconEnabled = false;
@@ -13003,6 +13111,72 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const held = p.inv.slots[p.inv.selected];
     const heldVid = held ? viIdFromKey(ITEM_DEFS[held.id].key) : 0;
     this.itemIconCache.verify(inp.mouseX, inp.mouseY, heldVid);
+    // 渲染上下文（DrawInterface_40 消费面）
+    const usingBiomeTorches = !!this.world.flags.unlockedBiomeTorches;
+    const zones = this.cursorBiomeZones();
+    this.renderer.cursorIconCtx = {
+      heldVid,
+      uiHeld: this.uiHeldStack?.() ?? false,
+      cacheTime: this.itemIconCache.time,
+      cacheVid: this.itemIconCache.itemId,
+      npcHover: !!this.dialogNpc || this.hoveringTownNpc(),
+      biomeTorch: usingBiomeTorches ? biomeTorchHoldStyle(heldVid, zones) : null,
+      biomeCampfire: usingBiomeTorches ? biomeCampfireHoldStyle(heldVid, zones) : null,
+      paintAmmoVid: this.findPaintOrCoatingVid(),
+      housingHead: this.housingMode?.kind === 'assign'
+        ? this.housingHeadIndexOf(this.housingMode.npcKey)
+        : null,
+    };
+  }
+
+  /** 群系快照（BiomeZones 填充;SceneMetrics + UnderworldLayer=h-200） */
+  private cursorBiomeZones() {
+    const s = this.renderer.scene;
+    const p = this.player;
+    return {
+      shimmer: !!s?.zoneShimmer,
+      dungeon: !!s?.zoneDungeon,
+      // ZoneLihzhardTemple（SceneMetrics.cs:688 wall==87 ≡ 本仓 SceneMetrics.zoneTemple 同式）
+      temple: !!s?.zoneTemple,
+      underworld: p.y > (this.world.store.h - 200) * TILE,
+      glowshroom: !!s?.zoneGlowshroom,
+      hallow: !!s?.zoneHallow,
+      corrupt: !!s?.zoneCorrupt,
+      crimson: !!s?.zoneCrimson,
+      snow: !!s?.zoneSnow,
+      jungle: !!s?.zoneJungle,
+      desertSurface: !!s?.zoneDesert && p.y < this.world.groundLevel * TILE,
+      undergroundDesert: !!s?.zoneUndergroundDesert,
+      // ZoneDesert && Main.remixWorld（"don't dig up" 种子旗;Player.cs:39661/:39795）
+      desertRemix: !!s?.zoneDesert && !!this.world.seedFlags?.remix,
+    };
+  }
+
+  /** FindPaintOrCoating（Player.cs:41272-41288）:弹药位 54-57 先,再全包;漆/涂层 */
+  private findPaintOrCoatingVid(): number {
+    const p = this.player;
+    const isPaint = (it: { id: number; stack: number } | null): boolean => {
+      if (!it || it.stack <= 0) return false;
+      const d = ITEM_DEFS[it.id];
+      return d?.paint !== undefined && d.paint > 0;
+    };
+    for (let i = 54; i < 58 && i < p.inv.slots.length; i++) if (isPaint(p.inv.slots[i])) return viIdFromKey(ITEM_DEFS[p.inv.slots[i]!.id].key);
+    for (let i = 0; i < p.inv.slots.length; i++) if (isPaint(p.inv.slots[i])) return viIdFromKey(ITEM_DEFS[p.inv.slots[i]!.id].key);
+    return 0;
+  }
+
+  /** HoveringOverAnNPC（Main.cs:44476 门）:鼠标世界点落在任一在世 NPC 盒内 */
+  private hoveringTownNpc(): boolean {
+    const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+    return (this.entities.npcs as Array<{ x: number; y: number; w: number; h: number; dead?: boolean }>)
+      .some((n) => !n.dead && wx >= n.x && wx <= n.x + n.w && wy >= n.y && wy <= n.y + n.h);
+  }
+
+  /** 住房携带头像索引（HousingPanel 'assign' 光标:TOWN_NPC_HEAD_INDEX 反查） */
+  private housingHeadIndexOf(npcKey: string): number | null {
+    const n = this.entities.npcs.find((e) => (e as { npcKey?: string }).npcKey === npcKey);
+    const vid = (n as { vanillaId?: number } | undefined)?.vanillaId;
+    return vid != null ? TOWN_NPC_HEAD_INDEX[vid] ?? null : null;
   }
 
   /** ItemIconCacheUpdate（Player.cs 使用路径 4 站点调用）:放置/通用使用/桶族/
@@ -13029,6 +13203,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       p.cursorItemIconID = iconVid;
       p.cursorItemIconReversed = reversed;
     };
+    // 文本支（原版 cursorItemIconID=-1：图标抑制,只出 MouseText——
+    // DrawInterface_40 num=-1 → 不画图标;悬孤儿箱时手持物图标同样被压掉）
+    const setSuppress = (textKey: string): void => {
+      p.cursorItemIconEnabled = true;
+      p.cursorItemIconID = -1;
+      p.cursorItemIconText = Lang.text(textKey);
+    };
     const table = hoverIcons as Record<string, Record<string, number>>;
     switch (sheet) {
       case 314: set(2343); break;                                    // 矿车轨道(:31522)
@@ -13037,7 +13218,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         set(bottomSideOfBed(fx) ? (table.beds[String(style)] ?? 224) : 5013);
         break;
       }
-      case 88: set(table.dressers[String(Math.floor(fx / 54))] ?? 334); break;  // 梳妆台(:31609)
       case 621: set(3750); break;                                    // 织布机(:33208)
       case 464: set(3814); break;                                    // 茶壶(:33214)
       case 699: set(5482); break;                                    // :33220
@@ -13046,8 +13226,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 388: case 389: set(3240); break;                          // 高门开(:33436)
       case 15: set(table.chairs[String(Math.floor(fy / 40))] ?? 34, Math.floor(fx / 18) < 1); break;  // 椅子(:33440-33450)
       case 33: set(table.candles[String(Math.floor(fy / 22))] ?? 105); break;  // 蜡烛(:33222-33230)
-      case 21: set(table.chests[String(Math.floor(fx / 36))] ?? 48); break;       // 宝箱(:33255)
-      case 467: set(table.chests2[String(Math.floor(fx / 36))] ?? 3884); break;   // 二类箱(:33276)
+      case 21: case 467: {   // 宝箱/二类箱(:33231/:33235 → Containers :34301-34367)
+        const second = sheet === 467;
+        let cx = tx, cy = ty;
+        if (fx % 36 !== 0) cx--;
+        if (fy % 36 !== 0) cy--;
+        const rec = this.world.chests.find((cc) => cc.x === cx && cc.y === cy);
+        const r = containerHover(!!rec,
+          table[second ? 'chests2' : 'chests'][String(Math.floor(fx / 36))] ?? (second ? 3884 : 48),
+          second ? 'LegacyChestType2.0' : 'LegacyChestType.0');
+        if (r.iconVid !== null) set(r.iconVid);
+        else setSuppress(r.textKey!);
+        break;
+      }
+      case 441: set(table.chests[String(Math.floor(fx / 36))] ?? 48); break;    // 虚假箱(:33240-33257 纯图标)
+      case 468: set(table.chests2[String(Math.floor(fx / 36))] ?? 3884); break; // 虚假二类箱(:33258-33277)
+      case 88: {   // 梳妆台(:33278-33315)
+        const dx = tx - Math.floor((fx % 54) / 18);   // 锚左列(:33282 frameX%54/18)
+        let dy = ty;
+        if (fy % 36 !== 0) dy--;
+        const rec = this.world.chests.find((cc) => cc.x === dx && cc.y === dy);
+        const r = dresserHover(!!rec, table.dressers[String(Math.floor(fx / 54))] ?? 334, fy);
+        if (r.iconVid !== null) set(r.iconVid);
+        else setSuppress(r.textKey!);
+        break;
+      }
       case 597: set(table.pylons[String(Math.floor(fx / 54))] ?? 4876); break;    // 传送塔(:33158)
       default: break;
     }
@@ -13620,10 +13823,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (p.buffs.has(BuffType.Tipsy)) bonus += 5;     // :41542-41545
     // :41546 `canFloatInWater && wet`——canFloatInWater=装备 4404 水行靴族(:12845)或
     // 药水 buff 265(:9595)每帧重扫；wet=WetCollision 只认水/蜂蜜(排岩浆/微光)。
-    // 坐椅钓鱼 +5(:41549-41551 sitting.TryGetSittingBlock)依赖玩家坐椅系统——
-    // 本仓未实装，登记（引擎级缺口，与 heldProj 同族）
+    // 坐椅钓鱼 +5（:41549-41551 sitting.TryGetSittingBlock——2026-08-15 坐椅系统落地接通）
     if ((p.equipStats.waterWalk || p.buffs.has(BuffType.WaterWalking))
       && (p.inWater || p.inHoney)) bonus += 5;
+    if (p.sitting) {
+      const scx = Math.floor(p.cx / TILE), scy = Math.floor((p.y + p.h - 2) / TILE);
+      if (getSittingTargetInfo(w.store, scx, scy, p.facing)) bonus += 5;
+    }
     const base = baitPower + polePower + p.equipStats.fishingSkill
       + (p.buffs.has(BuffType.Fishing) ? 15 : 0) + bonus;
     const level = Math.floor(base * fishingPowerMultiplier({

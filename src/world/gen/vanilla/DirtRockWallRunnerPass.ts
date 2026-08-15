@@ -63,10 +63,31 @@ function dirtyRockRunner(st: TileStore, rng: RNG, i: number, j: number): void {
 /** 原版 pass "Dirt Rock Wall Runner"（cs:15536） */
 export function runDirtRockWallRunnerPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w } = st;
+  const DRWR_TRACE = typeof process !== 'undefined' && !!process.env.DRWR_TRACE;
+  let hits = 0;
+  const streamHash = (): string => {
+    if (!DRWR_TRACE) return '';
+    const ur = (rng as unknown as { ur: { seedArray: Int32Array; inext: number } }).ur;
+    let h = 0x811c9dc5;
+    const step = (b: number) => { h = Math.imul(h ^ (b & 0xff), 16777619) >>> 0; };
+    for (let i = 0; i < ur.seedArray.length; i++) {
+      const v = ur.seedArray[i] | 0;
+      for (let b = 0; b < 4; b++) step(v >>> (8 * b));
+    }
+    const ix = ur.inext >>> 0;
+    for (let b = 0; b < 4; b++) step(ix >>> (8 * b));
+    return h.toString(16).padStart(8, '0');
+  };
   // cs:15540：i 仅计数——每列两次无条件采样
   for (let i = 0; i < w; i++) {
     const x = rng.int(10, w - 11);                      // Next(10, w-10)
     const y = rng.int(10, Math.trunc(gs.worldSurface) - 1); // Next(10, (int)worldSurface)
-    if (st.wall[st.idx(x, y)] === 2) dirtyRockRunner(st, rng, x, y);
+    if (st.wall[st.idx(x, y)] === 2) {
+      hits++;
+      if (DRWR_TRACE && hits <= 500) console.log(`DRWR hit#${hits} i=${i} x=${x} y=${y}`);
+      dirtyRockRunner(st, rng, x, y);
+      if (DRWR_TRACE && hits <= 500) console.log(`DRWR done#${hits} st=${streamHash()}`);
+    }
   }
+  if (DRWR_TRACE) console.log(`DRWR total hits=${hits}`);
 }

@@ -14,7 +14,10 @@ export interface BiomeZones {
   desertRemix: boolean;
 }
 
-/** BiomeTorchHoldStyle(Player.cs:39635-39689):else-if 序 1:1 */
+/** BiomeTorchHoldStyle(Player.cs:39635-39689):else-if 序 1:1。
+ *  desertRemix 语义 = ZoneDesert && Main.remixWorld（调用侧预与,原版 :39661
+ *  第三沙漠支在表面/地下沙漠两支未中时兜底）。temple = SceneMetrics.zoneTemple
+ *  （wall==87,≡ ZoneLihzhardTemple SceneMetrics.cs:688）。 */
 export function biomeTorchHoldStyle(vid: number, z: BiomeZones): number {
   if (vid !== 8) return vid;
   if (z.shimmer) return 5353;
@@ -27,7 +30,7 @@ export function biomeTorchHoldStyle(vid: number, z: BiomeZones): number {
   if (z.crimson) return 4386;
   if (z.snow) return 974;
   if (z.jungle) return 4388;
-  if ((z.desertSurface && z.desertSurface) || z.undergroundDesert) return 4383;
+  if (z.desertSurface || z.undergroundDesert) return 4383;
   if (z.desertRemix) return 4383;
   return vid;
 }
@@ -89,8 +92,36 @@ export function resolveCursorIconId(
 
 /** TryGetAmmo 油漆分支(Main.cs:44555-44576):刷/滚 → 当前漆/涂层物品;
  *  offset 刷 (22,22) / 滚 (28,28),scale 0.8。FlexibleTileWand 分支未实装
- *  (碎块魔杖族放置系统缺,登记) */
+ *  (碎块魔杖族 5324/5329/5330 放置系统缺,引擎级缺口登记) */
 export const PAINT_TOOLS = new Set([1071, 1543, 1072, 1544]);
 export function paintToolOffset(vid: number): { x: number; y: number } {
   return (vid === 1072 || vid === 1544) ? { x: 28, y: 28 } : { x: 22, y: 22 };
+}
+
+/** 悬停结果:iconVid=null 表示图标抑制(原版 cursorItemIconID=-1 语义,
+ *  DrawInterface_40 num=-1 → 不画图标,只出 textKey 的 MouseText) */
+export interface HoverIconResult { iconVid: number | null; textKey: string | null; }
+
+/** 宝箱/二类箱悬停（TileInteractionsMouseOver_Containers :34301-34367）:
+ *  无记录（FindChest<0）→ 默认类型名文本、无图标;有记录且未命名 → 类型图标。
+ *  命名箱（chest.name != ""）→ 名字文本无图标——本仓 ChestData 无 name 字段
+ *  且无重命名链,该支恒不进（引擎级缺口,勿误当悬停侧缺陷） */
+export function containerHover(
+  hasRecord: boolean, styleIconVid: number, defaultTextKey: string,
+): HoverIconResult {
+  return hasRecord
+    ? { iconVid: styleIconVid, textKey: null }
+    : { iconVid: null, textKey: defaultTextKey };
+}
+
+/** 梳妆台悬停（:33278-33315）:下半格（frameY>0）恒 icon 269（:33311-33314）;
+ *  上半格无记录 → 默认类型名文本;有记录 → 样式图标（现代档梳妆台开更衣界面,
+ *  基本无 chest 记录 → 实际常态是文本支） */
+export function dresserHover(
+  hasRecord: boolean, styleIconVid: number, frameY: number,
+): HoverIconResult {
+  if (frameY > 0) return { iconVid: 269, textKey: null };
+  return hasRecord
+    ? { iconVid: styleIconVid, textKey: null }
+    : { iconVid: null, textKey: 'LegacyDresserType.0' };
 }

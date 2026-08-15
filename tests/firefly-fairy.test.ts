@@ -20,19 +20,32 @@ describe('萤火虫成群 + 地下仙女链', () => {
     world.weather.raining = false;
     world.weather.windSpeedTarget = 0;
     spawner.setPlayerFlags(false, false);
-    // 找地表草面干燥落脚点（空气×2 + 实心底 + 草）
-    let spot: { x: number; y: number } | null = null;
-    for (let x = 600; x < st.w - 600 && !spot; x += 13) {
+    // 找地表草面干燥落脚点（空气×2 + 实心底 + 草）。★R 批(2026-08-16)起逐候选探测：
+    //   spawn() 以入参为玩家锚、findSpawnTile 在 30×18 窗内自选落脚格——世界布局随
+    //   管线重排位移后，首个草面的窗口可能整体锚到非草格（夜怪池）→ 单点断言退化为
+    //   种子布局彩票。改为最多 40 个候选逐点试掷（实测 30/40 候选可出 355），命中点
+    //   再走原 50 掷断言（同种子确定性复现）。
+    const GRASS = (await import('../src/data/tiles')).TILE_BY_KEY['grass'];
+    const cands: Array<{ x: number; y: number }> = [];
+    for (let x = 600; x < st.w - 600 && cands.length < 40; x += 13) {
       for (let y = 20; y < Math.floor(world.groundLevel); y++) {
         const g = st.type[st.idx(x, y)];
-        const grass = g === (await import('../src/data/tiles')).TILE_BY_KEY['grass'];
-        if (!grass || st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;
+        if (g !== GRASS || st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;
         if (st.liquid[st.idx(x, y - 1)] > 0) continue;
-        spot = { x, y };
+        cands.push({ x, y });
         break;
       }
     }
-    expect(spot).not.toBeNull();
+    expect(cands.length).toBeGreaterThan(0);
+    let spot: { x: number; y: number } | null = null;
+    for (const c of cands) {
+      for (let k = 0; k < 50 && !spot; k++) {
+        const e = spawner.spawn((c.x + 0.5) * 16, (c.y - 3) * 16, new RNG(k * 7919 + 3), 30, 18);
+        if (e && e.vanillaId === 355) { spot = c; break; }
+      }
+      if (spot) break;
+    }
+    expect(spot, '40 个草面候选内应存在可出萤火虫的窗口').not.toBeNull();
     let main = 0;
     spawner.pendingCritterExtras.length = 0;
     for (let k = 0; k < 50 && main === 0; k++) {

@@ -52,9 +52,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // floatCleanupPass 分支）是无 UI 入口的死代码且 hellPass 处会空指针崩溃，已删除。
   // pass 顺序对齐原版 AddGenerationPass 注册序（WorldGen.cs:11525-22660，
   // 权威对照表见 docs/worldgen/vanilla-pass-alignment.md）：
-  //   地形1 洞穴(3/7-14e) 海滩(33/34) 生物群系(15-64) 矿石(27) 液体(31)
-  //   清理(37) 结构(15426+ 结构尾) 生命水晶(55) 半砖平滑(57) 瀑布(58) 地狱(31) 地狱屋(76 前段)
-  //   地狱箱(63 地狱段) 小屋+散箱(63) 瓦罐(75) 矿骨堆(81) 表面(77/86/90)
+  //   地形1 洞穴(3/7-14e) 海滩(33/34) 生物群系(15-64,含地狱屋=Underworld 尾 13893)
+  //   矿石(27) 液体(31) 清理(37) 结构(15426-16059,止于丛林神龛) 半砖平滑(57) 瀑布(58)
+  //   生命水晶(55) 雕像宝箱(16947-17455 块) 宝石洞 苔藓 神庙陈设(17809) 洞穴墙(63)
+  //   浮空岛屋(17971) 瓦罐(75) 矿骨堆(81) 表面(77/86/90)
   //   地表装饰(76 traps/85) 出生点(19605) 海滩装饰(56)
   const passes: Pass[] = [
     { name: '原版地形', run: vanillaTerrain },
@@ -79,9 +80,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '微光', run: vanillaShimmer },
     { name: '清理', run: vanillaCleanup },
     // 结构段（原版注册序 DirtWallCleanup(15310) < Pyramids(15426) < DirtRockWallRunner(15536)
-    // < LivingTrees(15551) < ... < SwordShrine，含 DirtWallCleanup 与 Shimmer 之间的全部
-    // 结构尾）——2026-08-13 前结构尾内嵌 vanillaBiomes（微光/清理之前执行）= 顺序偏差，
-    // 拆出为独立槽插在「清理」之后；DirtRockWallRunner 同批补缺。清单见 vanillaStructures
+    // < LivingTrees(15551) < ... < JungleShrines(16059)）——2026-08-13 前结构尾内嵌
+    // vanillaBiomes（微光/清理之前执行）= 顺序偏差，拆出为独立槽插在「清理」之后；
+    // DirtRockWallRunner 同批补缺。R 批(2026-08-16) 起止于 JungleShrines：雕像+箱族块
+    // 后移「生命水晶」后、神庙陈设/浮空岛屋各归原版注册位。清单见 vanillaStructures
     { name: '结构', run: vanillaStructures },
     // 原版 SettleLiquids（cs:16215）：Lakes 之后、SmoothWorld/Waterfalls 之前的中途
     // 沉降——瀑布唇缘/半砖平滑直接读 st.liquid 判定，必须在静止水面数据上跑
@@ -114,24 +116,34 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // —— CaveWalls 主 pass（苔藓槽后）的前置墙基之一
     { name: '洞穴墙变体', run: caveWallVarietyPass },
     { name: '生命水晶', run: vanillaLifeCrystals },
-    // 地狱(Underworld 28) 已按注册序并入 vanillaBiomes（Webs 27 后、Corruption 29 前）
-    { name: '地狱屋', run: vanillaHellHouses },
-    // 地狱箱:必须在地狱地形+地狱屋之后(原版 Underworld 29 < Buried Chests 59);
-    // 曾在生物群系 pass 里随洞穴箱一起放 → 被后续 hellPass 重写 100% 抹除
-    { name: '地狱箱', run: underworldChestsPass },
+    // 雕像+箱族块（Statues 16947 → #58 四循环合一 → SurfaceChests 17226 →
+    // JungleChests 17308 → UnderwaterChests+WaterChests 17343 → SpiderCaves 17455）
+    // ——R 批(2026-08-16) 前内嵌「结构」槽尾（提前约 900 行）,整体后移至
+    // LifeCrystals(16847) 之后归位;#58 头尾 226/162/225/190 四翻接线,原「地狱箱」
+    // 槽并入循环②（地狱屋已前移「生物群系」槽 Underworld 尾 cs:13893）
+    { name: '雕像宝箱', run: statuesChestsPass },
     // 苔藓（原版 MossAndMossCaves cs:17573，注册序 BuriedChests 17066 < 本 pass <
-    // Pots 18186）：霓虹苔藓洞 + 苔藓斑/散点/地狱氦苔藓——洞穴系全部定型后只做
-    // 石→苔藓点状替换；长苔藓 pass（20915）的上游，缺它则全图 0 长苔藓
-    // 宝石洞（原版 GemCaves cs:17528，注册序 < Moss(17573) < CaveWalls(17819)）：
-    // 必须先于 CaveWalls——Spread.Gem 遇墙不扩散，先刷墙会压制宝石洞；
-    // 此前挤在"宝石系统"槽（Moss 后近 30 槽）= 顺序偏差，已归位
+    // LihzahrdTemplePart2(17809)）：霓虹苔藓洞 + 苔藓斑/散点/地狱氦苔藓——洞穴系
+    // 全部定型后只做石→苔藓点状替换；长苔藓 pass（20915）的上游，缺它则全图 0 长苔藓
+    // 宝石洞（原版 GemCaves cs:17528，注册序 SpiderCaves(17455) < 本 pass <
+    // Moss(17573) < CaveWalls(17819)）：必须先于 CaveWalls——Spread.Gem 遇墙不扩散，
+    // 先刷墙会压制宝石洞；此前挤在"宝石系统"槽（Moss 后近 30 槽）= 顺序偏差，已归位
     { name: '宝石洞', run: gemCavesPass },
     { name: '苔藓', run: vanillaMoss },
+    // 神庙陈设（原版 LihzahrdTemplePart2 cs:17809，注册序 Moss(17573) < 本 pass <
+    // CaveWalls(17819)）：templePart2 五段（陷阱→箱→雕像→家具→挂饰）——曾内嵌
+    // runTemplePass（执行位≈15911,提前约 1900 行）,R 批(2026-08-16) 拆出归位;
+    // 采样域经 gs.tLeft/tRight/tTop/tBottom/tRooms 跨槽传递
+    { name: '神庙陈设', run: templePart2Slot },
     // 洞穴自然墙（原版 CaveWallsInEnclosedSpaces cs:17819，注册序 Moss(17573) <
     // 本 pass < UndergroundJungleTrees(17952)）：封闭腔刷洞穴背景墙 + 丛林泥墙段。
     // 地下自然墙唯二来源之一（另一=DirtWallBackgrounds 近地表）——缺它全洞穴无墙,
     // 暴露晶簇(178,贴墙装饰)悬空(2026-08-12 用户标注)
     { name: '洞穴墙', run: caveWallsPass },
+    // 浮空岛屋（原版 FloatingIslandHouses cs:17971，注册序 CaveWalls(17819) <
+    // UndergroundJungleTrees(17952,本仓缺该 pass,备案) < 本 pass）：日光板房屋
+    // (Skyware 门+箱+桌椅)——曾内嵌「结构」槽尾（提前约 2000 行）,R 批归位
+    { name: '浮空岛屋', run: islandHouseSlot },
     // 瓦罐（原版 PotsGraveyardsAndBoulderPiles cs:18108,注册序 CaveWalls(17819) <
     // 本 pass < Hellforges(18298)）——曾排在熔炉后=与原版对调,2026-08-13 归位
     { name: '瓦罐', run: potPass },
@@ -313,7 +325,7 @@ import { runPilesPass } from './vanilla/PilesPass';
 import { runRemoveSurfaceWaterAboveSandPass, runFragileIcePass } from './vanilla/WaterIcePasses';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
-import { runTemplePass, runLihzahrdAltarPass } from './vanilla/TemplePass';
+import { runTemplePass, runTemplePart2Pass, runLihzahrdAltarPass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass } from './vanilla/HellFortPass';
 import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
@@ -352,10 +364,13 @@ export function runResetAndTerrain(cfg: { width: number; height: number; seedTex
   vanillaTerrain(ctx);
   const out = new Int32Array(cfg.width);
   for (let x = 0; x < cfg.width; x++) out[x] = ctx.surface[x];
-  return { gs: ctxGs[0]!, surface: out, seed, world, rng, ctx };
+  // rng 必须回传重播后的活对象（terrain 前已重绑 ctx.rng，链式对账续用同一条流）
+  return { gs: ctxGs[0]!, surface: out, seed, world, rng: ctx.rng, ctx };
 }
 
-function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
+function vanillaTerrain(ctx: GenCtx) {
+  const { store, world, surface, cfg } = ctx;
+  let rng = ctx.rng;
   const gs = newGenState(store.w, store.h);
   // 世界种子 int——DesertHive 的 FastRandom(seed).WithModifier(57005) 主种子
   // （DesertHive.cs:253，与 genRand 完全独立的第二条随机流）
@@ -496,6 +511,17 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   }
   world.dungeonX = gs.dungeonLocation;
   // ===== Terrain pass（原版第一个注册 pass，cs:11526）=====
+  // ★RunPass 重播（num4 悬案根因，2026-08-16 Tier B IL 探针裁决）：
+  // 原版每个 GenPass 执行前 `Main.rand = new UnifiedRandom(_seed)`
+  // （1456 WorldGenerator.cs:497；服务器 exe IL RunPass: newobj UnifiedRandom::
+  // ctor(Int32) + stsfld Main::rand），而 GenBase._random => WorldGen.genRand =>
+  // Main.rand（GenBase.cs:9 / WorldGen.cs:4391）→ TerrainPass 从 stream(seed)
+  // 第 0 掷开始，与 Reset 期消费无关。此前把 Reset 流续进 terrain 是 rockLayer
+  // Δrl≠0 全量分叉的根因（9293480 探针实测 num4init 464.808 vs 续流 385.648；
+  // 重播后 7 种子逐列 4200/4200 与原版位级一致）。后续 pass 续用重播后的同一
+  // 条流——与 caves-oracle 侧 r 重绑同构，JS↔oracle 检查点口径保持一致。
+  rng = new RNG(gs.seed);
+  ctx.rng = rng;
   runTerrainPass(store, rng, gs);
   // surface 数组给后续旧 pass(surfacePass 树木等)用:每列首个实心行
   for (let x = 0; x < store.w; x++) {
@@ -645,8 +671,11 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   runDirtToMudAndSiltPass(store, rng, gs); // 24 Dirt To Mud / 25 Silt
   runShiniesPass(store, rng, gs); // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
   runVanillaWebsPass(store, rng, gs); // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
-  runUnderworldPass(store, rng, gs); // 28 Underworld（cs:13697——原管线末"地狱"槽；
-                                        //  地狱屋/地狱箱/熔炉等依赖槽在数组其后 = 地狱 pass 之后 ✓）
+  runUnderworldPass(store, rng, gs); // 28 Underworld（cs:13697——原管线末"地狱"槽）
+  // AddHellHouses（cs:13893，Underworld pass **尾**段调用，Corruption(13919) 之前）：
+  // 地狱要塞 HellFort 原版属地狱 pass 尾——2026-08-16 前独立占「地狱屋」槽
+  // （LifeCrystals 之后，晚原版位约 3000 行）= 顺序偏差，R 批归位到 Underworld 尾。
+  runHellFortPass(store, rng, gs);
   runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
   runLakesPass(store, rng, gs); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
   runSlushPass(store, gs); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
@@ -683,7 +712,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   FloatingIslandHouses(17971) < MicroBiomes(21785)
   // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
   // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
-  ctxOceanTreasures[0] = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录(→结构槽 UnderwaterChests 消费)
+  ctxOceanTreasures[0] = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录(→「雕像宝箱」槽 UnderwaterChests 消费)
   // 结构尾（Pyramids 15426 起 → SwordShrine）已拆出独立「结构」槽（「清理」之后执行，
   // 原版序 DirtWallCleanup 15310 < Pyramids 15426）——见 vanillaStructures；
   // 此前内嵌于此（微光/清理之前执行）= 结构先于清理，偏差（2026-08-13 清零批）
@@ -692,17 +721,17 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
 // 结构段 pass 群（原版注册序 DirtWallCleanup(15310) < Pyramids(15426) <
 // DirtRockWallRunner(15536) < LivingTrees(15551) < LivingTreeWalls(15792) <
 // DemonAndCrimsonAltars(15825) < SurfaceWaterInJungle(15887) < Temple(15911) <
-// Beehives(16005) < JungleShrines(16059) < Statues(16947) < BuriedChests+
-// UndergroundHouses(17066) < SurfaceChests(17226) < ChestsInJungleShrines(17308) <
-// UnderwaterChests(17343) < WaterChests < SpiderCaves(17455) < FloatingIslandHouses(17971)
-// < SwordShrine）——2026-08-13 前结构尾内嵌 vanillaBiomes（微光/清理之前执行）= 顺序偏差，
-// 拆出为独立槽插在「清理」之后（清零批）；DirtRockWallRunner 同批补缺。
+// Beehives(16005) < JungleShrines(16059)）——2026-08-13 前结构尾内嵌 vanillaBiomes
+// （微光/清理之前执行）= 顺序偏差，拆出为独立槽插在「清理」之后（清零批）；
+// DirtRockWallRunner 同批补缺。2026-08-16（R 批）起止于 JungleShrines：Statues 起
+// 的雕像+箱族块整体后移至「生命水晶」之后的「雕像宝箱」槽（Statues 16947 原版就
+// 在 LifeCrystals 16847 之后）；FloatingIslandHouses(17971) 拆到「洞穴墙」槽后；
+// templePart2 五段拆到「苔藓」槽后的「神庙陈设」槽（LihzahrdTemplePart2 17809）。
 // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
-// 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
+// 神庙体内或被灌水淹没）。
 function vanillaStructures({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  const oceanTreasures = ctxOceanTreasures[0]; // OceanCaves(生物群系槽)登记的宝藏点
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
   // Dirt Rock Wall Runner(15536,近地表泥土自然墙 2 → 石墙 59 游走斑)——注册序夹在
   // 金字塔与世界树之间；2026-08-13 前整 pass 缺失
@@ -719,33 +748,69 @@ function vanillaStructures({ store, rng, world }: GenCtx) {
   // 是原版两处放置,勿合并(见 CorruptionPass.runAltarsPass 头注);2026-08-13 前整 pass 缺失。
   runAltarsPass(store, rng, gs);                      // Demon And Crimson Altars(全图祭坛)
   runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(1456 cs:15887 逐列灌水,零 RNG)
-  runTemplePass(store, rng, gs, world.chests);  // Jungle Temple(之字形房间链+走廊+门+宝箱)
+  runTemplePass(store, rng, gs);                // Jungle Temple(之字形房间链+走廊+门+祭坛+木刺;尾写 gs.tLeft… 供「神庙陈设」槽)
   runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
-  const shrineSpots = runJungleShrinePass(store, rng, gs);  // 丛林神龛(壳+腔+火把+金字塔顶)
-  runStatuesPass(store, rng, gs);                           // 雕像 73 序+陷阱雕像接线
-  // ★pass 59 头四计数连掷(cs:17081-17084:CaveHouse→Underworld→CaveChest→
-  //  AdditionalDesert)——pass 拆分后各消费 pass 流位分散,统一在此(第一个消费
-  //  pass 之前)预掷暂存 gs;此前 CaveChest→CaveHouse→AdditionalDesert 逐段自掷,
-  //  序与流位均偏
-  rollHouseChestCounts(store, rng, gs);
-  runBuriedChestsPass(store, rng, gs, world.chests); // Buried Chests(洞穴金/冰箱/沙箱;地狱箱已拆到地狱箱 pass)
-  runCaveHousesPass(store, rng, gs, world.chests);   // 地下小屋七主题(木/冰/丛林/沙/花岗岩/大理石/蘑菇)
-  runSurfaceChestsPass(store, rng, gs, world.chests); // Surface Chests(地表木箱;只放一次——曾双调致密度翻倍)
-  runJungleChestsPass(store, rng, gs, world.chests, shrineSpots); // 常春藤箱(神龛中心)
-  runUnderwaterChestsPass(store, rng, gs, world.chests, oceanTreasures); // 海洋洞窟水箱
-  runWaterChestsPass(store, rng, gs, world.chests); // Water Chests(水中 style17;1.4.4 概念保留)
-  // Webs(51) 已按注册序回到 #27 位（vanillaBiomes 前段）——此处旧迟置调用删除
-  runSpiderNestPass(store, rng, gs, world.chests); // Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
-  // WebsInSpiderCavesAndHoney(cs:20140)曾内嵌于此（提前约 40 槽）——2026-08-13
-  // 按注册序(DyePlants 20126 < 本 pass < GrassPlants 20232)拆出独立槽归位（Batch D）
-  runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
+  // 丛林神龛(壳+腔+火把+金字塔顶)——坐标经 ctxShrineSpots 跨槽传给「雕像宝箱」槽
+  // 的 ChestsInJungleShrines(17308)
+  ctxShrineSpots[0] = runJungleShrinePass(store, rng, gs);
+  // Webs(51) 已按注册序回到 #27 位（vanillaBiomes 前段）——此处旧迟置调用已删
   // 附魔剑圣地已归位到 MicroBiomes pass 内(ThinIce 与 Campsite 之间,原版 cs:21858-21908)
   // ——SwordShrinePass 曾在此槽近似执行(管线错位+洞穴中心方向颠倒),2026-08-13 移除;
   //   逻辑重写落在 MicroBiomesPass.placeEnchantedSwordShrine
 }
 
+// 雕像+箱族合并槽（原版注册序 Statues(16947) → UndergroundHousesAndBuriedChests
+// (17066,#58 四循环) → SurfaceChests(17226) → ChestsInJungleShrines(17308) →
+// UnderwaterChests+WaterChests(17343) → SpiderCaves(17455)）——2026-08-16 前内嵌
+// 「结构」槽尾（执行位≈16059 之后即刻）= 比 Statues 原版位提前约 900 行的顺序
+// 偏差，R 批整体后移至 LifeCrystals(16847) 之后归位。#58 四循环合一：洞穴箱→
+// 地狱箱→地下小屋（含沙漠附加屋）按原版循环序排列（cs:17100/17122/17139/17194），
+// 头尾 226/162/225/190 四翻接线（cs:17076-79/17220-23）——地狱箱曾独立占「地狱箱」
+// 槽、且洞窟箱/地狱箱此前在四翻窗口之外（placeBuriedChest 的 genSolidType 落地
+// 行锚定与原版相悖），R 批一并修正。
+function statuesChestsPass({ store, rng, world }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runStatuesPass(store, rng, gs);                        // 雕像 73 序+陷阱雕像接线
+  // ★#58 头四翻(cs:17076-17079)：226 蜥蜴砖/162 薄冰/225 蜂巢块/190 荧光菇块
+  //   短暂回实心——原版窗口覆盖洞穴箱+地狱箱+小屋全部四循环
+  flipGenSolid([226, 162, 225, 190], true);
+  // ★pass 59(#58) 头四计数连掷(cs:17081-17084:CaveHouse→Underworld→CaveChest→
+  //  AdditionalDesert)——pass 拆分后各消费 pass 流位分散,统一在此(第一个消费
+  //  pass 之前)预掷暂存 gs;此前 CaveChest→CaveHouse→AdditionalDesert 逐段自掷,
+  //  序与流位均偏
+  rollHouseChestCounts(store, rng, gs);
+  runBuriedChestsPass(store, rng, gs, world.chests);     // 循环① 洞穴箱(cs:17100-17118;洞穴金/冰箱/沙箱)
+  runUnderworldChestsPass(store, rng, gs, world.chests); // 循环② 地狱箱(cs:17122-17146;须在地狱地形+地狱屋之后——两者均在「生物群系」槽内 ✓)
+  runCaveHousesPass(store, rng, gs, world.chests);       // 循环③④ 地下小屋七主题+沙漠附加屋(内部头尾四翻与此处重放同值)
+  // #58 尾四翻(cs:17220-23)——runCaveHousesPass 内部尾翻已达成同值,此处重放仅存档时间线
+  flipGenSolid([226, 162, 225, 190], false);
+  runSurfaceChestsPass(store, rng, gs, world.chests);    // Surface Chests(地表木箱/天空箱;只放一次——曾双调致密度翻倍)
+  runJungleChestsPass(store, rng, gs, world.chests, ctxShrineSpots[0]); // 常春藤箱(神龛中心)
+  runUnderwaterChestsPass(store, rng, gs, world.chests, ctxOceanTreasures[0]); // 海洋洞窟水箱
+  runWaterChestsPass(store, rng, gs, world.chests);      // Water Chests(水中 style17;1.4.4 概念保留)
+  runSpiderNestPass(store, rng, gs, world.chests);       // Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
+  // WebsInSpiderCavesAndHoney(cs:20140)按注册序(DyePlants 20126 < 本 pass <
+  // GrassPlants 20232)在「蛛网蜂巢」独立槽(2026-08-13 Batch D)
+}
+
+// 神庙陈设（LihzahrdTemplePart2 cs:17809）——templePart2 五段独立槽
+function templePart2Slot({ store, rng, world }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runTemplePart2Pass(store, rng, gs, world.chests);
+}
+
+// 浮空岛日光板房屋（FloatingIslandHouses cs:17971；UndergroundJungleTrees(17952)
+// 本仓缺该 pass（备案）——原版序紧随其后，故插在「洞穴墙」槽之后）
+function islandHouseSlot({ store, rng, world }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runIslandHousePass(store, rng, gs, world.chests);
+}
+
 // 原版 pass 37 Clean Up Dirt:表层墙清理 + 连通小块(<20)清除
-function vanillaCleanup({ store, rng }: GenCtx) {
+export function vanillaCleanup({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runCleanupPass(store, rng, gs);
@@ -791,20 +856,6 @@ function beeLarvaPass({ store }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runBeeLarvaPass(store, gs);
-}
-
-// 地狱要塞 HellFort(5列×10行网格塔)——地狱层就绪后
-function vanillaHellHouses({ store, rng }: GenCtx) {
-  const gs = ctxGs[0];
-  if (!gs) return;
-  runHellFortPass(store, rng, gs);
-}
-
-// 地狱箱(独立 pass,顺序见 passes 数组注释)
-function underworldChestsPass({ store, rng, world }: GenCtx) {
-  const gs = ctxGs[0];
-  if (!gs) return;
-  runUnderworldChestsPass(store, rng, gs, world.chests);
 }
 
 // 地狱熔炉(原版 Hellforges,cs:18298)
@@ -973,7 +1024,7 @@ function vanillaBeachDecor({ store, rng }: GenCtx) {
 }
 
 // 引力沙（原版 GravitatingSandCleanup cs:15198-15226）：地表内悬空 Falling 系落定
-function gravitatingSandPass({ store }: GenCtx) {
+export function gravitatingSandPass({ store }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runGravitatingSandPass(store, gs);
@@ -981,8 +1032,10 @@ function gravitatingSandPass({ store }: GenCtx) {
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)
 const ctxGs: [GenState | null] = [null];
-/** OceanCaves(生物群系槽 15228) → UnderwaterChests(结构槽 17343) 的宝藏点跨槽传递 */
+/** OceanCaves(生物群系槽 15228) → UnderwaterChests(雕像宝箱槽 17343) 的宝藏点跨槽传递 */
 const ctxOceanTreasures: [Array<{ x: number; y: number }>] = [[]];
+/** JungleShrines(结构槽 16059) → ChestsInJungleShrines(雕像宝箱槽 17308) 的神龛坐标跨槽传递 */
+const ctxShrineSpots: [Array<{ x: number; y: number }>] = [[]];
 /** 探针/测试用：最近一次生成的 GenState（山丘坐标等） */
 export function lastGenState(): GenState | null { return ctxGs[0]; }
 

@@ -1,13 +1,7 @@
 {
-  "seed": 1511931452,
-  "evil": 1,
-  "worldSurface": 337,
-  "rockLayer": 487,
-  "waterLine": 809,
-  "lavaLine": 885,
-  "shimmerX": 3869,
-  "shimmerY": 708,
-  "dungeonRight": 0,
+  "seed": 1511931452, "evil": 1,
+  "worldSurface": 337, "rockLayer": 487, "waterLine": 809, "lavaLine": 885,
+  "shimmerX": 3869, "shimmerY": 708, "dungeonRight": 0,
   "checkpoints": [
     "terrain|7fc39ae4 93b70d3c 0bb5a9c5 0bb5a9c5",
     "dunes|3512ae51 41b307a5 0bb5a9c5 0bb5a9c5",
@@ -66,7 +60,14 @@
     "shimmershell|22b7d76e 66df4c25 16a5a6a3 745a42d5",
     "shimmerpillars|b0e0e802 b9c6065d 16a5a6a3 745a42d5",
     "shimmeropen|3801981f cdfa9304 16a5a6a3 745a42d5",
-    "shimmer|e478841e e3909ca4 16a5a6a3 745a42d5"
+    "shimmer|e478841e e3909ca4 16a5a6a3 745a42d5",
+    "dirtwallcleanup|e478841e e3909ca4 c8c0cd79 745a42d5",
+    "pyramids|ceae3649 23046114 6bfccf49 745a42d5",
+    "dirtrockwallrunner|ceae3649 23046114 a3f4b6f1 745a42d5",
+    "livingtrees|2d3588b7 e3e77cd4 8c7ac848 745a42d5",
+    "livingtreewalls|2d3588b7 e3e77cd4 99b85d43 745a42d5",
+    "altars|bac48a47 b411c854 99b85d43 745a42d5",
+    "surfacewaterinjungle|bac48a47 b411c854 99b85d43 070273c2"
   ],
   "stream": [
     "beaches|ba86d082",
@@ -76,6 +77,13 @@
     "shimmershell|5a00945d",
     "shimmerpillars|eceacbb0",
     "shimmeropen|6a8a5396",
-    "shimmer|07f25c25"
+    "shimmer|07f25c25",
+    "dirtwallcleanup|4b17bff3",
+    "pyramids|0d6b8e42",
+    "dirtrockwallrunner|3c11a4e0",
+    "livingtrees|9f2efa5a",
+    "livingtreewalls|9f2efa5a",
+    "altars|16764fc1",
+    "surfacewaterinjungle|16764fc1"
   ]
 }

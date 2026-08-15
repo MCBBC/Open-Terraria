@@ -371,6 +371,18 @@ export class Player extends Entity {
    *  ★受伤不唤醒（StopSleeping 全调用点仅 5 处，SH:98-131）。睡熟阈值 120t（SH:11） */
   sleeping = false;
   timeSleeping = 0;
+  /** 坐椅（PlayerSittingHelper 1:1，2026-08-15）：isSitting = isLockedToATile——
+   *  重力/常规移动锁死（velocity 恒 0，矿车同款早退段）；任意移动输入/朝向变化/
+   *  椅失效 → 起身（Game.updateSitting 每帧）。渲染偏移 seatOffsetX/Y =
+   *  offsetForSeat + sittingIndex 叠坐位（单人恒 0） */
+  sitting = false;
+  /** 座位渲染偏移（offsetForSeat，px） */
+  seatOffsetX = 0;
+  seatOffsetY = 0;
+  /** 马桶座位（ExtraSeatInfo.IsAToilet）——TryToPoop 门 */
+  seatIsToilet = false;
+  /** 坐椅恢复加成计时（坐满 10t 后 TryToPoop 可触发） */
+  sitTicks = 0;
   /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
    *  Player.UpdateNetOffset :28240 衰减）：模拟位置与权威快照的差，渲染时叠加。
    *  本地玩家恒 0 */
@@ -1230,6 +1242,8 @@ export class Player extends Entity {
     } else { this.solarShields = 0; this.solarCounter = 0; }
     this.lifeRegenTime += (1 + (this.buffs.has(BuffType.Honey) ? 2 : 0))
       * (this.usedAegisCrystal ? 1.2 : 1);   // 蜂蜜×3 速(:18954)/神盾水晶 +0.2(:18931)
+    // 坐/睡加成（:19053-19056）：lifeRegenTime +3/tick + 自然回血 ×1.3
+    if (this.sitting || this.sleeping) this.lifeRegenTime += 3;
     if (buffHeal < 0 || this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed) this.lifeRegenTime = 0;
     if (this.hp > 0 && this.hp < this.maxHp
       && !this.buffs.has(BuffType.Bleeding) && !this.buffs.obstructed) {
@@ -1245,6 +1259,8 @@ export class Player extends Entity {
       num5 *= (Math.abs(this.vx) > 0.01 && !this.onRope) ? 0.5 : 1.25;
       // 篝火乘区（:19057——本仓篝火为 buff,lifeRegen+1 半边在 Buffs 系,此处为乘区）
       if (this.buffs.has(BuffType.Campfire)) num5 *= 1.1;
+      // 坐/睡回血 ×1.3（:19053-19056 下半——睡中恒静止吃 1.25 静止档，坐椅同）
+      if (this.sitting || this.sleeping) num5 *= 1.3;
       // 专家且未进食 /2（:19060;闪亮石 0.75 档 skip;坐/睡 ×1.3 未实装）
       const diff = scaleStatsWorld().difficulty;
       const fed = this.buffs.has(BuffType.WellFed) || this.buffs.has(BuffType.WellFed2) || this.buffs.has(BuffType.WellFed3);
@@ -1600,6 +1616,14 @@ export class Player extends Entity {
         this.lastStoned = stonedNow;
       }
     }
+    // 坐椅（isLockedToATile Player.cs:3858-3868）：重力/常规移动锁死——velocity 恒 0
+    //（原版坐/睡态不跑 SlopingCollision 输入侧；锚点钉在座位）。buff/液体/受伤照常。
+    if (this.sitting) {
+      this.vx = 0; this.vy = 0;
+      this.onGround = true;
+      this.sitTicks++;
+      return;
+    }
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
     //（原版 Player.Update :27783-27850 的 TrackCollision 段替代常规移动链）。
     // 上面的 buff/液体/受伤逻辑照常 tick；位置每 tick 由矿车回写。
@@ -1644,7 +1668,12 @@ export class Player extends Entity {
       const mnt = this.ridingMount ? this.mount : null;   // 坐骑参数接管（Player.cs:26310-26334）
       // 游泳族坐骑（海龟 131/猪鲨崽 168/熔岩鲨 265 buff 的 ignoreWater）水下不降速
       let maxRun = PLAYER_WALK_MAX * speedMult * (this.inWater && !(mnt?.swimFree) ? 0.55 : 1);
-      let accRun = this.equipStats.accRunSpeed || 6;   // accRunSpeed 定值不随 moveSpeed(:25695 只乘 maxRunSpeed——旧误乘 speedMult,2026-08-13 修)
+      // accRunSpeed 定值不随 moveSpeed（:25694-25695 只乘 runAcceleration/maxRunSpeed
+      // ——旧误乘 speedMult,2026-08-13 修）。裸装基准 = 3：原版每 tick reset
+      // :24099 accRunSpeed = maxRunSpeed（reset 时 maxRunSpeed 尚为裸值 3，moveSpeed
+      // 乘区在其后）；6/6.75 是靴族 equip 覆写。曾 `|| 6` = 裸装极速翻倍 6 px/t
+      // （30mph vs 原版 15mph，2026-08-16 默认移速审计修）
+      let accRun = this.equipStats.accRunSpeed || 3;
       if (chilled) accRun = maxRun;                       // :19485
       if (mnt) {
         // :26329-26331：mounted 时 maxRun=RunSpeed / accRun=DashSpeed / runAcc=Acceleration
@@ -1690,6 +1719,17 @@ export class Player extends Entity {
       // 山羊/蜥蜴 → runAcceleration×3、maxRunSpeed×1.5——蜥蜴/山羊两版源码均无复位，骑乘期内常驻）
       if (mnt && mnt.mountJumpPerforming) { runAcc *= 3; maxRun *= 1.5; }
       const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0 && !mnt;
+      // 水平链 1:1（:19559-19800）：两段加速 + 【超额回落摩擦】。原版整链不设
+      // 硬钳（仅 sticky :26211 钳 maxRun）——持方向键越过帽（全速段 +0.08 过冲
+      // 到 3.04）时落入摩擦分支（地面 −0.2/空中 −0.1）→ 2.84 → 再 +0.08……
+      // 锯齿均值 ≈2.93-3.0 = 原版"15mph"的真实纹理（曾硬钳帽值=恒 3.0，2026-08-16 审计修）
+      const grounded = this.onGround || this.vy === 0;
+      const applyRunFriction = () => {
+        const fr = grounded ? runSlow : runSlow * 0.5;
+        if (this.vx > fr) this.vx -= fr;
+        else if (this.vx < -fr) this.vx += fr;
+        else this.vx = 0;
+      };
       if (ix !== 0) {
         // :19546-19556：itemAnimation 窗内仅锁【朝向】不锁移动（挥砍中可跑）——
         // useTurn 物品（工具族）豁免
@@ -1705,15 +1745,13 @@ export class Player extends Entity {
           if (ix > 0 ? this.vx < -runSlow : this.vx > runSlow) this.vx += ix * runSlow;
           this.vx += ix * runAcc * 0.2;
           if (wingAir) this.vx += ix * runAcc * 0.2;
+        } else {
+          applyRunFriction();   // 超帽回落（:19771/:19786——持键越帽同摩擦）
         }
         this._maxRunProbe = Math.max(accRun, toward);
-        this.vx = ix > 0 ? Math.min(this.vx, this._maxRunProbe) : Math.max(this.vx, -this._maxRunProbe);
       } else {
         // 无输入减速（:19771-19800:地面 0.2 / 空中 0.1 加法钳 0）
-        const fr = this.onGround ? runSlow : runSlow * 0.5;
-        if (this.vx > fr) this.vx -= fr;
-        else if (this.vx < -fr) this.vx += fr;
-        else this.vx = 0;
+        applyRunFriction();
       }
     } else if (ix !== 0) {
       if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）

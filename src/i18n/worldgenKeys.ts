@@ -20,10 +20,10 @@ export const worldgenProgressKey: Record<string, number> = {
   '薄冰': 56,       // 无原版文本 → 借"正在添加雪"
   '洞穴墙变体': 79, // CaveWallVariety :16792 "正在风化洞穴"
   '生命水晶': 28,   // LifeCrystals :16863 "正在放置生命水晶"
-  '地狱屋': 30,     // UndergroundHousesAndBuriedChests :17075 "正在隐藏宝藏"(★曾误配 36)
-  '地狱箱': 33,     // UnderwaterChests :17347 "正在隐藏水下宝藏"
+  '雕像宝箱': 30,   // 合并槽代表=UndergroundHousesAndBuriedChests :17075 "正在隐藏宝藏"(内含 16947 雕像/17226 地表箱/17308 常春藤箱/17343 水下箱/17455 蜘蛛洞)
   '宝石洞': 64,     // GemCaves :17532(原版复用 SpiderCaves 文案)"正在扩大蜘蛛洞"
   '苔藓': 61,       // MossAndMossCaves :17583 "青苔化"
+  '神庙陈设': 70,   // LihzahrdTemplePart2 :17809 无 progress.Message → 借神庙文案(Lang.gen[70])
   '洞穴墙': 63,     // CaveWallsInEnclosedSpaces :17826 "正在建造洞壁"
   '瓦罐': 35,       // PotsGraveyardsAndBoulderPiles :18112 "正在放置可破坏物"
   '地狱熔炉': 36,   // Hellforges :18302 "正在放置地狱熔炉"
@@ -57,6 +57,7 @@ export const worldgenProgressKey: Record<string, number> = {
   '完成': 87,       // "正在对世界做最后的润饰"
   // ---- 旧别名(槽改名历史)----
   '地形': 0, '海滩': 22, '矿石': 16, '清浮空': 84, '地狱': 18,
+  '地狱屋': 30, '地狱箱': 33,   // R 批(2026-08-16) 撤槽:地狱屋并入「生物群系」(Underworld 尾)、地狱箱并入「雕像宝箱」
 };
 
 /** 无 LegacyWorldGen 数字键的 pass → 完整 l10n 键(1.4 新增 pass 文案,
@@ -65,6 +66,7 @@ export const worldgenProgressStringKey: Record<string, string> = {
   '绿洲': 'WorldGeneration.Oasis',
   '长苔藓': 'WorldGeneration.LongMoss',
   '钟乳石宝石树': 'WorldGeneration.Speleothems',
+  '浮空岛屋': 'WorldGeneration.FloatingIslandHouses',  // FloatingIslandHouses :17975 原文
   '微光': 'LegacyWorldGen.26',    // 1.4.4 新 pass 无文本 → 借祭坛位
   '沙上清水': 'LegacyWorldGen.24', // RemoveSurfaceWaterAboveSand 无 Message → 借沙沉淀
 };

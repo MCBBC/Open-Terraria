@@ -21,6 +21,23 @@ import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
 
+/** 世界树对拍探针开关（种子等价期临时；默认关闭零开销） */
+const LT_TRACE = typeof process !== 'undefined' && !!process.env.LT_TRACE;
+function ltStream(): string {
+  if (!LT_TRACE) return '';
+  const ur = (ltRngCache as unknown as { ur: { seedArray: Int32Array; inext: number } }).ur;
+  let h = 0x811c9dc5;
+  const step = (b: number) => { h = Math.imul(h ^ (b & 0xff), 16777619) >>> 0; };
+  for (let i = 0; i < ur.seedArray.length; i++) {
+    const v = ur.seedArray[i] | 0;
+    for (let b = 0; b < 4; b++) step(v >>> (8 * b));
+  }
+  const ix = ur.inext >>> 0;
+  for (let b = 0; b < 4; b++) step(ix >>> (8 * b));
+  return h.toString(16).padStart(8, '0');
+}
+let ltRngCache: unknown = null;
+
 const LIVING_WOOD = TILE_BY_KEY['v_191_living_wood_block']!;
 const LEAF = TILE_BY_KEY['v_192_living_leaf_block']!;
 const PLATFORM = TILE_BY_KEY['platform']!;
@@ -247,10 +264,11 @@ function growLivingTreePassageRoom(
   // 可入箱——key 路径只影响取用哪个注册键（见 BuriedChestsPass 尾段主件去重注释）
   num8 = num < 0 ? num3 + 8 : num5 - 7;
   const mainItemKey = rng.int(0, 2) === 0 ? 'vi_4281_finch_staff' : 'vi_832_living_wood_wand';
-  // 落地行：房内 Y 行空心、Y+1 是活木地板（同 AddBuriedChest 的 i-1/num7-1 墙判定取同排）
+  // 落地行：房内 Y 行空心、Y+1 是活木地板。cs:36176 墙门读 (i-1, num7-1) =
+  // 箱体**左列**底行（PlaceChest Origin(0,1) 语义，箱体 (i-1..i)）——曾读右列
   let gy = Y;
   while (gy < st.h - 1 && !activeAt(st, num8, gy)) gy++;
-  const wallOk = wallAt(st, num8, gy - 1) === WALL_LIVING_WOOD;
+  const wallOk = wallAt(st, num8 - 1, gy - 1) === WALL_LIVING_WOOD;
   if (wallOk) {
     placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 12, loot: mainItemKey });
   } else {
@@ -527,12 +545,13 @@ export function growLivingTree(
 ): boolean {
   const j = j0;
   const worldSurface = gs.worldSurface;
+  if (LT_TRACE) ltRngCache = rng;
   // 前置门禁（cs:28158-28180）：脚下实心、锚点空、地面类型 dirt/grass/stone/clay/ore
-  if (!solidAt(st, i, j + 1)) return false;
-  if (activeAt(st, i, j)) return false;
+  if (!solidAt(st, i, j + 1)) { if (LT_TRACE) console.log(`GLT r1 x=${i} j=${j} !solid-foot`); return false; }
+  if (activeAt(st, i, j)) { if (LT_TRACE) console.log(`GLT r2 x=${i} j=${j} anchor-active`); return false; }
   const gSheet = sheetAt(st, i, j + 1);
-  if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet)) return false;
-  if (j < 150) return false;
+  if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet)) { if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
+  if (j < 150) { if (LT_TRACE) console.log(`GLT r4 x=${i} j=${j} <150`); return false; }
 
   let num3 = i - rng.int(2, 2);   // cs:28182 Next(2,3) 恒 2（保留掷骰消耗）
   let num4 = i + rng.int(2, 2);   // cs:28183
@@ -555,9 +574,9 @@ export function growLivingTree(
     for (let k = num6; k <= num7; k++) {
       for (let l = num8; l < j - 5; l++) {
         if (activeAt(st, k, l)) {
-          if (!patch) return false;
+          if (!patch) { if (LT_TRACE) console.log(`GLT r5 x=${i} j=${j} clear-hit (${k},${l})`); return false; }
           const sh = sheetAt(st, k, l);
-          if (sh !== 2 && sh !== 0 && sh !== 1 && sh !== 191 && sh !== 192 && sh !== 383 && sh !== 384) return false;
+          if (sh !== 2 && sh !== 0 && sh !== 1 && sh !== 191 && sh !== 192 && sh !== 383 && sh !== 384) { if (LT_TRACE) console.log(`GLT r6 x=${i} j=${j} patch-badtype (${k},${l}) sh=${sh}`); return false; }
         }
       }
     }
@@ -578,6 +597,7 @@ export function growLivingTree(
   let num = 0;
   const ax5 = new Int32Array(2000), ax6 = new Int32Array(2000), ax7 = new Uint8Array(2000);
   let num2 = 0;
+  if (LT_TRACE) console.log(`GLTp head st=${ltStream()} num3=${num3} num4=${num4} num5=${num5}`);
   // ---- 主干收窄循环（cs:28271-28345） ----
   while (flag2) {
     num12++;
@@ -609,6 +629,7 @@ export function growLivingTree(
     }
     num11--;
   }
+  if (LT_TRACE) console.log(`GLTp trunk st=${ltStream()} num=${num}`);
   // ---- 侧枝（cs:28347-28420） ----
   for (let n15 = 0; n15 < num - 1; n15++) {
     let n16 = ax[n15] + ax3[n15];
@@ -645,6 +666,7 @@ export function growLivingTree(
       }
     }
   }
+  if (LT_TRACE) console.log(`GLTp branches st=${ltStream()}`);
   // ---- 顶部收尖 + 枝头（cs:28421-28509） ----
   let n20 = Math.floor((num3 + num4) / 2);
   let n21 = num11;
@@ -691,6 +713,7 @@ export function growLivingTree(
     n21--;
     n22--;
   }
+  if (LT_TRACE) console.log(`GLTp top st=${ltStream()}`);
   // ---- 根系（cs:28511-28600） ----
   for (let n32 = minl; n32 <= minr; n32++) {
     let n33 = rng.int(1, 5);                              // cs:28514
@@ -729,6 +752,7 @@ export function growLivingTree(
       }
     }
   }
+  if (LT_TRACE) console.log(`GLTp roots st=${ltStream()}`);
   // ---- 叶簇（cs:28603-28720） ----
   for (let n43 = 0; n43 < num2; n43++) {
     let n44 = rng.int(5, 7);
@@ -776,6 +800,7 @@ export function growLivingTree(
       placeSmallPile(st, n50, n53, pileStyle, n55);
     }
   }
+  if (LT_TRACE) console.log(`GLTp leaves st=${ltStream()} num2=${num2}`);
   // ---- 树干贯通竖井（cs:28722-28754）：宽干(num5>=4)且地表下无既有空腔时 ----
   if (flag) {
     let flag4 = false;
@@ -811,6 +836,7 @@ export function runLivingTreesPass(
   const num3 = w / 4200;                  // cs:15563
   let num4 = rng.int(0, Math.floor(2 * num3));   // cs:15564 Next(0, (int)(2*num3)+1)
   if (num4 === 0 && rng.int(0, 1) === 0) num4++; // cs:15565 genRand.Next(2)==0（int(0,1) ≡ Next(2) 位级一致）
+  if (LT_TRACE) { ltRngCache = rng; console.log(`LT count num4=${num4}`); }
   for (let i = 0; i < num4; i++) {
     let flag = false;
     let num5 = 0;
@@ -850,7 +876,9 @@ export function runLivingTreesPass(
               }
             }
             if (flag2) {
+              if (LT_TRACE) console.log(`LT try x=${num6} j=${j} st=${ltStream()}`);
               flag = growLivingTree(st, rng, gs, chests, num6, j);
+              if (LT_TRACE) console.log(`LT result x=${num6} ok=${flag} st=${ltStream()}`);
               if (flag) {
                 // cs:15692-15763：左右两侧补种 patch 小树
                 for (let n = -1; n <= 1; n++) {
@@ -877,7 +905,7 @@ export function runLivingTreesPass(
                           if (CLOUD_SHEETS.has(sh)) { flag2 = false; break outer2; }
                         }
                       }
-                      if (flag2) growLivingTree(st, rng, gs, chests, num7, num10, true);
+                      if (flag2) { if (LT_TRACE) console.log(`LT patch x=${num7} j=${num10}`); growLivingTree(st, rng, gs, chests, num7, num10, true); }
                     }
                   }
                 }

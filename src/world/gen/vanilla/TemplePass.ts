@@ -1,13 +1,15 @@
 // 原版 "Jungle Temple"(WorldGen.cs:7190 + makeTemple L17158)1:1 移植。
 // 之字形下沉房间链(重投至与旧房不相交;锚点=中心;行程 1-2 递增)→ 全房对实心砖连线
 // → 房内双遍游走挖腔(墙 87)→ templePather 通道 → outerTempled 封壳 → 入口隧道+门框
-// → templeCleaner → 祭坛 237(末间中心 ±15) → templePart2 五段(陷阱→箱→雕像→家具→挂饰)。
+// → templeCleaner → 祭坛 237(末间中心 ±15)。
+// templePart2 五段(陷阱→箱→雕像→家具→挂饰)是独立注册的 LihzahrdTemplePart2 pass
+// (cs:17809,Moss 之后 CaveWalls 之前)——见 runTemplePart2Pass(2026-08-16 拆分)。
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeDoorClosed } from '../../Door';
-import { placeBuriedChest } from './BuriedChestsPass';
+import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { placeFurn } from './DungeonPass';
 import { flipGenSolid } from './GenSolid';
 
@@ -38,10 +40,7 @@ function solidTileST(st: TileStore, x: number, y: number): boolean {
   return !!d && d.solid && !d.platform && !st.half[j] && st.slope[j] === 0;
 }
 
-export function runTemplePass(
-  st: TileStore, rng: RNG, gs: GenState,
-  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
-): void {
+export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const s = w / 4200;
   // 种子点(cs:15917-15992):y = Next(rockLayer, maxTilesY-600)(rockLayer 先钳 ≤ h-601);
@@ -582,23 +581,39 @@ export function runTemplePass(
       if (fails > 1000) { fails = 0; budget -= 1; }        // cs:34480-34484
     }
   }
-  // ---- templePart2（1456 cs:34497-34685）1:1 五段：陷阱 → 宝箱 → 雕像 → 家具 → 挂饰 ----
-  // 顺序对齐原版：宝箱在尖刺陷阱段**之后**（旧版反序且公式为房数×1.1×(1±25%)）
-  // ★LihzahrdTemplePart2 pass 头翻转（cs:17813-17814 `tileSolid[162]=false;
-  //   tileSolid[226]=true`）：本仓神庙与 Part2 合并在 runTemplePass 内,此处在
-  //   templePart2 调用前对齐原版 Part2 pass 头（162 薄冰非实/226 蜥蜴砖实）。
-  flipGenSolid([162], false);
-  flipGenSolid([226], true);
-  templePart2(st, rng, gs, chests, rooms);
-  // ★Part2 pass 尾翻转（cs:17816 `Main.tileSolid[232] = false`）：木刺非实心——
-  //   CaveWalls 头（cs:17823）重放,BeeLarva 尾（cs:21048）还原 true。
-  //   ★本仓神庙槽远早于原版 Part2 注册位（17809）,该 false 态在本仓会覆盖神庙与
-  //   BeeLarva 之间的大量 pass（原版此间 232 恒实心）,与 pass 序偏差联动,备案。
-  flipGenSolid([232], false);
+  // ---- makeTemple 尾（cs:34487-34491）：房间 bbox 四侧各外扩 10 → GenVars ----
+  // 原版在函数尾写 GenVars.tLeft/tRight/tTop/tBottom/tRooms 供**独立注册**的
+  // LihzahrdTemplePart2 pass（cs:17809）消费；早退路径不写（字段保持初值 0，
+  // Part2 预算 0×掷骰照掷=原版语义）。2026-08-16 拆分前 templePart2 内联于此。
+  {
+    let tL = Infinity, tR = -Infinity, tT = Infinity, tB = -Infinity;
+    for (const r of rooms) {
+      tL = Math.min(tL, r.x); tR = Math.max(tR, r.x + r.w);
+      tT = Math.min(tT, r.y); tB = Math.max(tB, r.y + r.h);
+    }
+    gs.tLeft = Math.floor(tL) - 10;
+    gs.tRight = Math.ceil(tR) + 10;
+    gs.tTop = Math.floor(tT) - 10;
+    gs.tBottom = Math.ceil(tB) + 10;
+    gs.tRooms = rooms.length;
+  }
   // 注：LihzahrdAltar 终保 pass（cs:21753-21791）原版是 TileCleanup(21327) 之后、
   // MicroBiomes(21785) 之前的独立 pass（Pots/Traps/TileCleanup 可能扰动祭坛后再
   // 重放）。2026-08-13 前并入本函数末尾（执行位≈15911），已外提为
   // runLihzahrdAltarPass 独立槽位（WorldGen.ts「蜥蜴祭坛」槽）。
+}
+
+/** LihzahrdTemplePart2 pass（cs:17809-17817 注册体 1:1）：神庙陈设五段独立槽
+ *  （Moss(17573) 之后、CaveWalls(17819) 之前——WorldGen.ts「神庙陈设」槽）。
+ *  ★pass 头翻转（cs:17813-17814 `tileSolid[162]=false; tileSolid[226]=true`：
+ *  162 薄冰非实/226 蜥蜴砖实）；尾 cs:17816 `tileSolid[232]=false`（木刺非实心，
+ *  CaveWalls 头 cs:17823 重放、BeeLarva 尾 cs:21048 还原 true）。2026-08-16 拆分前
+ *  内联于 runTemplePass（执行位≈15911，比原版 Part2 注册位早约 1900 行）。 */
+export function runTemplePart2Pass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
+  flipGenSolid([162], false);
+  flipGenSolid([226], true);
+  templePart2(st, rng, gs, chests);
+  flipGenSolid([232], false);
 }
 
 /** LihzahrdAltar 终保 pass（cs:21753-21791 1:1）：重放祭坛 6 格 + 正下方三格
@@ -623,24 +638,16 @@ export function runLihzahrdAltarPass(st: TileStore, gs: GenState): void {
 }
 
 /** templePart2（1456 cs:34497-34685）1:1。tRooms=房间数；各段预算公式与
- *  失败推进语义逐掷对齐（陷阱段 fails>100 直接扣预算；其余段 fails>10000 break）。 */
+ *  失败推进语义逐掷对齐（陷阱段 fails>100 直接扣预算；其余段 fails>10000 break）。
+ *  采样域读 GenVars（runTemplePass 尾写入的**外扩后** bbox——cs:34487-34491，
+ *  T5：外扩 10 是写入侧语义；rx/by 的 -1 是 Next 上界排他换算）。 */
 function templePart2(
   st: TileStore, rng: RNG, gs: GenState,
-  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
-  rooms: Room[],
+  chests: ChestSink,
 ): void {
-  let tLeft = Infinity, tRight = -Infinity, tTop = Infinity, tBottom = -Infinity;
-  for (const r of rooms) {
-    tLeft = Math.min(tLeft, r.x); tRight = Math.max(tRight, r.x + r.w);
-    tTop = Math.min(tTop, r.y); tBottom = Math.max(tBottom, r.y + r.h);
-  }
-  const tRooms = rooms.length;
-  // ★T5(cs:34047-34050 + cs:34487-34491):原版先把房间 bbox 四侧各外扩 10
-  //   （num56-=10/num57+=10/num58-=10/num59+=10）再写入 GenVars.tLeft/tRight/
-  //   tTop/tBottom 供 templePart2 采样。此前用未外扩 bbox——箱/雕像/家具/挂饰
-  //   采样域每侧短 10 格。
-  const lx = Math.floor(tLeft) - 10, rx = Math.ceil(tRight) - 1 + 10;
-  const ty = Math.floor(tTop) - 10, by = Math.ceil(tBottom) - 1 + 10;
+  const lx = gs.tLeft, rx = gs.tRight - 1;
+  const ty = gs.tTop, by = gs.tBottom - 1;
+  const tRooms = gs.tRooms;
 
   // ---- 1. 尖刺陷阱（cs:34497-34519）：预算 = 房数×1.9×(1±15%) ----
   {

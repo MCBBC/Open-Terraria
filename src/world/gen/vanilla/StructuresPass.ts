@@ -11,6 +11,25 @@ import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree} from './TreePass';
 import { idsByVanillaSheet } from './TileRunner';
+
+/** 金字塔对拍探针开关（种子等价期临时；默认关闭零开销）。
+ *  typeof 守卫同 DungeonPass SW_DGPA_TRACE——浏览器无 process,裸引用炸模块加载 */
+const PYR_TRACE = typeof process !== 'undefined' && !!process.env.PYR_TRACE;
+/** RNG 流位置指纹（对拍探针用；同 oracle StreamHash 算法） */
+function pyrStream(rng?: { ur: { seedArray: Int32Array; inext: number } }): string {
+  if (!PYR_TRACE) return '';
+  const ur = (rng ?? (pyrRngCache as { ur: { seedArray: Int32Array; inext: number } })).ur;
+  let h = 0x811c9dc5;
+  const step = (b: number) => { h = Math.imul(h ^ (b & 0xff), 16777619) >>> 0; };
+  for (let i = 0; i < ur.seedArray.length; i++) {
+    const v = ur.seedArray[i] | 0;
+    for (let b = 0; b < 4; b++) step(v >>> (8 * b));
+  }
+  const ix = ur.inext >>> 0;
+  for (let b = 0; b < 4; b++) step(ix >>> (8 * b));
+  return h.toString(16).padStart(8, '0');
+}
+let pyrRngCache: unknown = null;
 import { solidTile as _solidTileHB } from './HalfBrickPass';
 import { flipGenSolid } from './GenSolid';
 
@@ -535,7 +554,6 @@ export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void
 }
 
 const SANDSTONE_BRICK = TILE_BY_KEY['v_151_sandstone_brick']!;
-const TORCH = TILE_BY_KEY['torch']!;
 const POT = TILE_BY_KEY['pot']!;
 const SMALL185 = TILE_BY_KEY['v_185_small_decos']!;
 const SAND = TILE_BY_KEY['sand']!;
@@ -570,9 +588,12 @@ export function runPyramidPass(
     let minDist = st.w;
     for (let l = 0; l < idx; l++) minDist = Math.min(minDist, Math.abs(num - gs.pyramidSpots[l].x));
     if (minDist >= 220) {
+      if (PYR_TRACE) console.log(`PYR cand#${idx} x=${num} k=${k} minDist=${minDist} ACCEPT`);
       k--;
       pyramid(st, rng, gs, chests, num, k, 75, 125, false);
       accepted.push({ x: num, y: k });
+    } else if (PYR_TRACE) {
+      console.log(`PYR cand#${idx} x=${num} k=${k} minDist=${minDist} REJECT-dist`);
     }
   }
 }
@@ -586,6 +607,7 @@ function pyramid(
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
   i: number, j: number, pyramidMinDepth: number, pyramidMaxDepth: number, noTunnel: boolean,
 ): boolean {
+  if (PYR_TRACE) pyrRngCache = rng;
   const num = SANDSTONE_BRICK;   // 151
   const wall = 34;               // SandstoneBrickUnsafe
   const gi = st.idx(i, j);
@@ -601,6 +623,7 @@ function pyramid(
   const num3 = rng.int(9, 12);                          // Next(9,13)
   let num4 = 1;
   const num5 = j + rng.int(pyramidMinDepth, pyramidMaxDepth - 1); // Next(75,125)
+  if (PYR_TRACE) console.log(`PYR enter i=${i} j=${j} num2=${num2} num3=${num3} num5=${num5}`);
   // 主体：逐层加宽的实心沙岩砖塔（cs:27859-27868）
   for (let k = num2; k < num5; k++) {
     for (let l = i - num4; l < i + num4 - 1; l++) setBrick(l, k);
@@ -625,8 +648,12 @@ function pyramid(
   const num11 = rng.int(5, 7);                          // Next(5,8)
   let flag2 = true;
   let num12 = rng.int(20, 29);                          // Next(20,30)
+  if (PYR_TRACE) console.log(`PYR tunnel num8=${num8} num9=${num9} num10=${num10} num11=${num11} num12=${num12}`);
+  let pyrIt = 0;
   // 入口掏空（cs:27903-27924）：自沙面斜向下切阶梯
   while (flag2) {
+    if (PYR_TRACE && pyrIt < 400) console.log(`PYR stair it${pyrIt} num9=${num9} num10=${num10}`);
+    pyrIt++;
     flag2 = false;
     let flag3 = false;
     for (let n13 = num10; n13 <= num10 + num11; n13++) {
@@ -650,7 +677,10 @@ function pyramid(
   let flag5 = false;
   flag2 = true;
   // 之字形下行隧道 + 端点房间（cs:27928-28046）
+  pyrIt = 0;
   while (flag2) {
+    if (PYR_TRACE && pyrIt < 500) console.log(`PYR zig it${pyrIt} num9=${num9} num10=${num10} num12=${num12} f4=${flag4} f5=${flag5}`);
+    pyrIt++;
     for (let n15 = num10; n15 <= num10 + num11; n15++) deact(num9, n15);
     num9 += num8;
     num10++;
@@ -686,22 +716,27 @@ function pyramid(
         if (num25 === 0) num25 = rng.int(0, 2);
         const lootKeys = ['vi_848_PharaohsMask', 'vi_857_sandstorm_in_a_bottle', 'vi_934_FlyingCarpet'];
         const lootKey = lootKeys[num25];
+        if (PYR_TRACE) console.log(`PYR room num17=${num17} n23=${num23} n24=${num24} chestX=${Math.floor((num23 + num24) / 2)} num10=${num10} main=${lootKey} st=${pyrStream()}`);
         placeBuriedChest(st, rng, gs, chests, Math.floor((num23 + num24) / 2), num10, {
           style: 1, loot: lootKey,
         });
         const num26 = rng.int(1, 9);                    // Next(1,10)
+        if (PYR_TRACE) console.log(`PYR rm1 num26=${num26} st=${pyrStream()}`);
         for (let n27 = 0; n27 < num26; n27++) {
           const i2 = rng.int(num23, num24 - 1);         // cs:28025 Next(num23, num24) 上界不含
           const j2 = num10 + num11;
           placeSmallPile(st, i2, j2, rng.int(16, 18), 1);   // Next(16,19)
         }
+        if (PYR_TRACE) console.log(`PYR rm2 piles-done st=${pyrStream()}`);
         placeTorch(st, num23 + 2, num10 - num17 + num11 + 1, rng.int(4, 6));   // Next(4,7)
         placeTorch(st, num23 + 3, num10 - num17 + num11, rng.int(4, 6));
         placeTorch(st, num24 - 2, num10 - num17 + num11 + 1, rng.int(4, 6));
         placeTorch(st, num24 - 3, num10 - num17 + num11, rng.int(4, 6));
+        if (PYR_TRACE) console.log(`PYR rm3 torches-done st=${pyrStream()}`);
         for (let n28 = num23; n28 <= num24; n28++) {
           placePotRow(st, rng, n28, num10 + num11, rng.int(25, 27));   // Next(25,28)
         }
+        if (PYR_TRACE) console.log(`PYR rm4 pots-done st=${pyrStream()}`);
       }
       if (flag4) {
         flag4 = false;
@@ -761,12 +796,24 @@ function pyramid(
   return true;
 }
 
-/** PlaceTile(91, style)（火把）：frameX=22*style */
+/** PlaceTile(x, y, 91, style)（金字塔房装饰）：PlaceTile case91 → PlaceBanner
+ *  （cs:46270）——占 (x, y..y+2) 3 格高，顶锚 (x, y-1) 须活性实心非 solidTop，
+ *  下方三格须全空；frameX = style*18（每 111 style 换行 -1998/+54Y，金字塔
+ *  style∈[4,6] 不触达）。曾误当火把（tile4 1×1 无门禁直写）——金字塔房 dump
+ *  对拍实锤：cs 4 旗×3 格 vs js 4 火把×1 格 */
+const BANNER = TILE_BY_KEY['v_91_banners']!;
 function placeTorch(st: TileStore, x: number, y: number, style: number): void {
-  if (!st.inBounds(x, y)) return;
-  // 原版 PlaceTile case4（cs:59863）：frameY = 22*style（style 在 Y 轴！）；
-  // 此前 style*22 写 X = 轴向反了 → style≥6 全部越界（Tiles_4 宽仅 6 列）
-  st.setTileSilent(x, y, TORCH, 0, style * 22);
+  if (!st.inBounds(x, y - 1) || !st.inBounds(x, y + 2)) return;
+  const ai = st.idx(x, y - 1);
+  const anchor = TILE_DEFS[st.type[ai]];
+  if (!st.flags[ai] || !anchor?.solid || anchor.platform) return;   // nactive+solid+!solidTop
+  for (let dy = 0; dy <= 2; dy++) {
+    if (st.flags[st.idx(x, y + dy)]) return;                        // 三格全空门
+  }
+  let fx = style * 18, fy = 0;
+  let s = style;
+  while (s >= 111) { s -= 111; fx -= 1998; fy += 54; }              // cs:46273-46278
+  for (let dy = 0; dy <= 2; dy++) st.setTileSilent(x, y + dy, BANNER, fx, fy + dy * 18);
 }
 
 /** PlaceSmallPile（size1=2×1）：fx=pileStyle*36(+18)，fy=18；下方双列实心 + 双格净空 */

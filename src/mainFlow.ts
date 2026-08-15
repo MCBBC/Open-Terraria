@@ -114,6 +114,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   function enterGame(g: Game) {
     game = g;
+    // 指针图标门桥(DrawInterface_40 :44476 MouseDisplayItem 非空 → 图层隐藏;
+    // DrawInterface_38 :44628 拖拽物出现 → 住房光标取消)
+    g.uiHeldStack = () => !!ui.heldStack;
     (window as unknown as { __swGame: Game }).__swGame = g;
     (window as unknown as { __swUI: UI }).__swUI = ui; // 探针/控制台直调(成就弹窗预览等)
     (window as unknown as { __swITEMS?: typeof ITEM_DEFS }).__swITEMS = ITEM_DEFS; // 信息饰品探针:vi_ key → 内部 id
