@@ -130,7 +130,7 @@ const ITEM_DRAW_POS: Record<number, readonly [number, number]> = {
 const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2];
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
-import { ITEM_DEFS } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
@@ -158,6 +158,7 @@ import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
 import { leashedBubbleVisible } from '../entities/LeashedCritter';
 import { applyHeldProjPointing, heldProjFrameBegin, noteHeldProjEntity } from './heldProj';
+import { PAINT_TOOLS, paintToolOffset } from './CursorItemIcon';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
@@ -962,6 +963,16 @@ export class Renderer {
   infoAccCtx: InfoAccCtx | null = null;
   /** 信息列悬停行(-1 无;交互在 Game) */
   infoAccHover = -1;
+  /** Game 每帧注入（DrawInterface_40 数据面）:指针图标上下文。
+   *  heldVid=手持原版 id(0 空);uiHeld=DOM 拖拽物非空(MouseDisplayItem 非空语义);
+   *  cacheTime/cacheVid=余辉;npcHover=悬 NPC(门);biomeTorch/biomeCampfire=群系
+   *  覆写结果(null=未解锁);paintAmmoVid=油漆子图标(0 无);housingHead=住房光标
+   *  携带头像索引(null=无) */
+  cursorIconCtx: {
+    heldVid: number; uiHeld: boolean; cacheTime: number; cacheVid: number;
+    npcHover: boolean; biomeTorch: number | null; biomeCampfire: number | null;
+    paintAmmoVid: number; housingHead: number | null;
+  } = { heldVid: 0, uiHeld: false, cacheTime: 0, cacheVid: 0, npcHover: false, biomeTorch: null, biomeCampfire: null, paintAmmoVid: 0, housingHead: null };
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
   /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
@@ -1542,6 +1553,11 @@ export class Renderer {
       this.drawSmartCursor(ctx, cam, hover, viewW, z,
         lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
     }
+
+    // 7b'. 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房光标
+    //      携带头像（:44622-44688 DrawInterface_38）——屏幕空间最后层
+    this.drawCursorItemIcon(ctx, player, cam,
+      lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
     // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
     this.drawMoonLordShake(ctx, cam, viewW, viewH);
@@ -7542,6 +7558,90 @@ export class Renderer {
       ctx.globalAlpha = a;
       ctx.drawImage(tex, rect.left, rect.top, rw, rh);
       ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+  }
+
+  /** 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房携带头像
+   *  （:44622-44688 DrawInterface_38）。屏幕空间;图标乘光标格光照
+   *  （ItemSlot.GetItemLight :44517）;pos=(mouse+10+push) 半 hitbox 居中。 */
+  /** 原版物品 vid → 内部 item id（atlasIcon 键）;未注册返回 -1 */
+  private itemInternalOfVid(vid: number): number {
+    const key = VANILLA_ITEM_KEY_BY_ID[vid];
+    return key ? ITEM_BY_KEY[key] : -1;
+  }
+
+  private drawCursorItemIcon(
+    ctx: CanvasRenderingContext2D, player: Player, cam: Camera,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    rx: number, ry: number, rw: number, rh: number,
+  ): void {
+    void player;
+    const c = this.cursorIconCtx;
+    // 门：悬 NPC / 手持 UI 拖拽物(MouseDisplayItem)→ 住房头像也一并取消(:44628)
+    if (c.npcHover || c.uiHeld) return;
+    if (!this.atlas) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+
+    // ---- 住房光标携带头像（:44652-44655:NPC_Head @ mouse+26-半size,cursorScale） ----
+    if (c.housingHead !== null) {
+      const head = this.atlas.ensureVImage(`vanilla/NPC_Head_${c.housingHead}.png`);
+      if (head) {
+        ctx.drawImage(head, this._mouseX + 26 - head.width / 2, this._mouseY + 26 - head.height / 2);
+      }
+      ctx.restore();
+      return;   // 携带头像时光标独占(:44662 mouseInterface 语义),物品图标不画
+    }
+
+    // ---- 图标 id 解析序（:44481-44496）:held → 群系覆写 → cursorItemIconID ----
+    const p = player;
+    let num = c.heldVid;
+    if (c.biomeTorch !== null && num === 8) num = c.biomeTorch;
+    else if (c.biomeCampfire !== null && num === 966) num = c.biomeCampfire;
+    if (p.cursorItemIconID !== 0) num = p.cursorItemIconID;
+    const flag = p.cursorItemIconEnabled && num !== 0;           // 悬停/使用支
+    const flag2 = c.cacheTime > 0 && !c.uiHeld;                   // 余辉支
+    if (flag || flag2) {
+      // 余辉支未悬停时用缓存 id（:44505-44507 Swap 语义）
+      const t = flag ? num : c.cacheVid;
+      if (t > 0) {
+        const push = 10 + p.cursorItemIconPush;
+        const icon = this.atlasIcon(this.itemInternalOfVid(t));
+        if (icon) {
+          // 光标格光照（ItemSlot.GetItemLight :44517:GetColor(cursor tile)）
+          let lr = 255, lg = 255, lb = 255;
+          const [wtx, wty] = cam.screenToWorld(this._mouseX, this._mouseY);
+          const tx = Math.floor(wtx / TILE), ty = Math.floor(wty / TILE);
+          if (tx >= rx && ty >= ry && tx < rx + rw && ty < ry + rh) {
+            const li = (ty - ry) * rw + (tx - rx);
+            lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+          }
+          ctx.save();
+          if (p.cursorItemIconReversed) { ctx.translate(this._mouseX + push + icon.sw / 2, 0); ctx.scale(-1, 1); ctx.translate(-(this._mouseX + push + icon.sw / 2), 0); }
+          ctx.globalAlpha = 1;
+          // tint:原版 GetColor 乘光——用 globalCompositeOperation 近似困难,直接
+          // 以 globalAlpha=1 画原图+光强 alpha 叠黑(视觉等价:暗处图标变暗)
+          ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
+            this._mouseX + push, this._mouseY + push, icon.sw, icon.sh);
+          const lum = (lr + lg + lb) / 765;
+          if (lum < 0.98) {
+            ctx.globalCompositeOperation = 'source-atop';
+            ctx.fillStyle = `rgba(0,0,0,${1 - lum})`;
+            ctx.fillRect(this._mouseX + push, this._mouseY + push, icon.sw, icon.sh);
+          }
+          ctx.restore();
+          // 油漆工具子图标（:44531-44538 + TryGetAmmo :44570-44576）
+          if (flag && c.paintAmmoVid > 0 && PAINT_TOOLS.has(num)) {
+            const ammo = this.atlasIcon(this.itemInternalOfVid(c.paintAmmoVid));
+            if (ammo) {
+              const off = paintToolOffset(num);
+              ctx.drawImage(ammo.img, ammo.sx, ammo.sy, ammo.sw, ammo.sh,
+                this._mouseX + 10 + off.x, this._mouseY + 10 + off.y, ammo.sw * 0.8, ammo.sh * 0.8);
+            }
+          }
+        }
+      }
     }
     ctx.restore();
   }

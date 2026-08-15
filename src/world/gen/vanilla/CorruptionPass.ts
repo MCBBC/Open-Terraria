@@ -265,11 +265,13 @@ function placeAltars(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi: nu
     while (!done) {
       tries++;
       let x = rng.int(zLo - widen, zHi - 1 + widen);            // Next(zLo-widen, zHi+widen)
-      let y = rng.int(Math.floor(gs.worldSurface - widen / 2), Math.floor(gs.worldSurface + 100 + widen) - 1);
+      // ★widen/2 是 C# int 整除（奇数 widen 截断）——JS 浮点除会偏移下界 1 格，
+      //   骰域不同 → 祭坛落位整体分叉（crimson 链 159 格激活差的根因之一，2026-08-15）
+      let y = rng.int(gs.worldSurface - Math.trunc(widen / 2), Math.floor(gs.worldSurface + 100 + widen) - 1);
       // oceanDepths 重掷环（cs:14252-14256）：落点入海洋带则两点全重掷
       while (oceanDepths(st, gs, x, y)) {
         x = rng.int(zLo - widen, zHi - 1 + widen);
-        y = rng.int(Math.floor(gs.worldSurface - widen / 2), Math.floor(gs.worldSurface + 100 + widen) - 1);
+        y = rng.int(gs.worldSurface - Math.trunc(widen / 2), Math.floor(gs.worldSurface + 100 + widen) - 1);
       }
       if (tries > 100) { widen++; tries = 0; }                  // ★原版先 widen 后找面
       if (!st.flags[st.idx(x, y)]) {
@@ -575,12 +577,10 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     vy = Math.max(0.25, Math.min(2, vy));
     vx = Math.max(-2, Math.min(2, vx));
     px += vx; py += vy;
-    (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`M ${px.toFixed(2)},${py.toFixed(2)},${radius.toFixed(2)},${vx.toFixed(3)},${vy.toFixed(3)}`);
     if (py > gs.worldSurface + 100) break;
   }
   // 终点囊群（cs:75700-75732）：50 个半径 40-54 椭球（x/y 独立 ±20% 缩放）
   let endR = rng.int(40, 54);                                  // Next(40,55)
-  (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`E ${endR}`);
   for (let n = 0; n < 50; n++) {
     const cx = Math.floor(px) + rng.int(-20, 20);
     const cy = Math.floor(py) + rng.int(-20, 20);
@@ -627,7 +627,6 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     }
     usedV.push([dvx, dvy]);
     const hp = crimVein(st, rng, Math.floor(px), Math.floor(py), dvx, dvy);
-    (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`H ${hp[0]},${hp[1]}`);
     hearts.push(hp);
   }
   // 地表囊群（cs:75781-75832）
@@ -643,7 +642,6 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     }
     const cx = Math.floor(px) + rng.int(-2, 2);                // Next(-2,3)
     const cy = Math.floor(py) + rng.int(-2, 2);
-    (globalThis as { __crimTrace?: string[] }).__crimTrace?.push(`P ${cx},${cy},${(+py).toFixed(2)}`);
     for (let x = Math.floor(cx - endR / 2); x < cx + endR / 2; x++) {
       for (let y = Math.floor(cy - endR / 2); y < cy + endR / 2; y++) {
         if (!st.inBounds(x, y)) continue;

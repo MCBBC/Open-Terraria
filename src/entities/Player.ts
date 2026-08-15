@@ -118,7 +118,8 @@ export class Player extends Entity {
   usedGummyWorm = false;
   /** 仙馔蜜酒 5342(:44796)→ pickSpeed/tileSpeed/wallSpeed ±0.05(:12455) */
   usedAmbrosia = false;
-  /** 混乱之杖冷却(ChaosState debuff 88 近似——buff 本体未实装,:44865 门) */
+  // ChaosState(88) 已走 buffs 真实装（BuffType.ChaosState=83；混乱之杖 Game 侧
+  // case 1326 的 has/apply 门）——旧"独立冷却字段"近似已退役（2026-08-15 销项）
   /** 魔力蓄能（Player.manaRegenCount :1824，UpdateManaRegen :19274 累积 ≥120 +1 魔） */
   manaRegenCount = 0;
   /** 用魔惩罚期（Player.manaRegenDelay :1826，float）：>0 时每帧产额 0（:19270-19271） */

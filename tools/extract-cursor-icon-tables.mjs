@@ -92,41 +92,37 @@ for (const m of init.matchAll(/array2\[(\d+)\] = (\d+);/g)) chests2[+m[1]] = +m[
 const data = {
   beds, candles, dressers,
   chests: chests1, chests2,
-  // GetItemDrop_Chair(椅子 :33444 悬停表;return/result 双写法——return 版直录)
+  // GetItemDrop_Chair(椅子 :33444 悬停表;`return X;` 与 `result = X;` 双写法混排)
   chairs: (() => {
     const body = methodBody('public static int GetItemDrop_Chair');
-    // 版本 A:`case N: ... return X;`(穿透到公式 `1703 + style - 18` 各自代入)
     const out = {};
-    // 先剥掉后半 result 版(40+ 段),前段 return 版逐 case 处理
-    const cut = body.indexOf('int result = 34;');
-    const retSeg = body.slice(0, cut > 0 ? cut : body.length);
-    const resSeg = cut > 0 ? body.slice(cut) : '';
     const caseRe = /case (\d+):/g;
-    const ms = [...retSeg.matchAll(caseRe)];
+    const ms = [...body.matchAll(caseRe)];
     for (let k = 0; k < ms.length; k++) {
       const from = ms[k].index + ms[k][0].length;
-      const to = k + 1 < ms.length ? ms[k + 1].index : retSeg.length;
-      const seg = retSeg.slice(from, to);
-      const dir = seg.match(/return (\d+);/);
-      const fm = seg.match(/return (\d+) \+ style - (\d+);/);
+      const to = k + 1 < ms.length ? ms[k + 1].index : body.length;
+      const seg = body.slice(from, to);
       const n = +ms[k][1];
+      const dir = seg.match(/(?:return|result =) (\d+);/);
+      const fm = seg.match(/(?:return|result =) (\d+) \+ style - (\d+);/);
+      const fs = seg.match(/(?:return|result =) style \+ (\d+);/);
       if (fm) out[n] = { base: +fm[1], off: +fm[2] };
+      else if (fs) out[n] = { base: +fs[1], off: 0, styleFirst: true };
       else if (dir) out[n] = +dir[1];
       else out[n] = '__next__';
     }
-    // return 版穿透:无 return 的 case 取下一 case 的值/【公式】(各自代入)
+    // 穿透向下:无赋值 case 取下一 case 的值/【公式】(各自代入自己的 style)
     const keys = Object.keys(out).map(Number).sort((a, b) => a - b);
-    let carry = null;
+    let carry = 34;
     for (let i = keys.length - 1; i >= 0; i--) {
       if (out[keys[i]] === '__next__') out[keys[i]] = carry;
       else carry = out[keys[i]];
     }
     for (const n of keys) {
-      if (typeof out[n] === 'object' && out[n] !== null) out[n] = out[n].base + n - out[n].off;
+      const v = out[n];
+      if (typeof v === 'object' && v !== null) out[n] = v.styleFirst ? n + v.base : v.base + n - v.off;
     }
-    // 后半 result 版(40-67)
-    Object.assign(out, expand(parseSwitch(resSeg, 'result'), 34));
-    for (let s = 0; s <= 67; s++) if (out[s] === undefined) out[s] = s === 0 ? 34 : out[s];
+    if (out[0] === undefined || out[0] === '__next__') out[0] = 34;
     return out;
   })(),
   // TETeleportationPylon.GetPylonItemTypeFromTileStyle(:116-129)

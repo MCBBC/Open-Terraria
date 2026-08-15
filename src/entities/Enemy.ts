@@ -20,6 +20,9 @@ export const CALMING_NO_AGGRO_TYPES: ReadonlySet<number> = new Set([
   1, 16, 59, 71, 81, 138, 121, 122, 141, 147, 183, 184, 204, 225, 244,
   302, 333, 335, 334, 336, 537, 676, 667,
 ]);
+/** Main.wallDungeon（Main.cs:10507-10515：主题墙 7/8/9 + 1.4 变体 94-99）——地牢之魂
+ *  双门的墙侧（SceneMetrics/WorldGen 各有一份同值表） */
+const DUNGEON_WALL_IDS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
@@ -78,6 +81,7 @@ import {
   scaleStatsWorld, applySeedAdjustments, type SeedAdjustStats, f32,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
+import { rollLuck } from '../stats/Luck';
 import { spawnNpcDeathGore } from './GorePiece';
 import { hslToRgb } from '../player/Appearance';
 
@@ -6878,12 +6882,18 @@ export class Enemy extends Entity {
         }
         // 地牢之魂（DoDeathEvents_SummonDungeonSpirit，NPC.cs:79863-79878）：世纪之花
         // 已击败 + 目标玩家身处地牢，击杀 lifeMax>100、value>0、非 288 的敌怪 →
-        // 1/13（专家 1/9，luck roll 近似为均匀掷）在原地刷 288
+        // closestPlayer.RollLuck(13/专家9)==0（★luck 改掷，2026-08-15 前误为均匀掷）
+        // 且【本 NPC 中心格墙为地牢墙】（Main.wallDungeon 7/8/9/94-99——原版双门，
+        // 此前缺墙门=误在砖外刷魂）→ 原地刷 288
         if (this.vanillaId !== 288 && ctx.lifeMax > 100 && ctx.value > 0 && ctx.hasPlayerTarget
           && ctx.hardMode && ctx.flags['downed_262']
           && (game as unknown as { scene?: { zoneDungeon?: boolean } }).scene?.zoneDungeon
-          && rng.next() < (ctx.isExpert ? 1 / 9 : 1 / 13)) {
-          spawnPart(game, this, 288);
+          && rollLuck(ctx.luck ?? 0, ctx.isExpert ? 9 : 13, () => rng.next()) === 0) {
+          const st2 = game.world.store;
+          const wx = Math.floor(this.cx / TILE), wy = Math.floor(this.cy / TILE);
+          if (st2.inBounds(wx, wy) && DUNGEON_WALL_IDS.has(st2.wall[st2.idx(wx, wy)])) {
+            spawnPart(game, this, 288);
+          }
         }
         // 双子 BeforeLoot（NPC.cs DoDeathEvents_BeforeLoot :79761）：另一只眼还活着时
         // value=0 + boss=false——钱与 Boss 药水/心只给后死的那只（先死的只出规则掉落）

@@ -29,6 +29,15 @@ import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, housingCheckAt, WALL_HOUSE } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
+
+/** IsHoveringOverABottomSideOfABed(Player.cs:32869-32881):frameX/72==1(右半)时
+ *  翻转 frameX%72<36 判定 —— 悬床头/尾侧(可设出生点)与床面(睡觉)的分区 */
+function bottomSideOfBed(fx: number): boolean {
+  const rightHalf = Math.floor(fx / 72) === 1;
+  let lower = fx % 72 < 36;
+  if (rightHalf) lower = !lower;
+  return lower;
+}
 import {
   INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION, INVASION_MARTIAN,
   INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
@@ -6080,6 +6089,8 @@ export class Game implements GameHooks {
 
     // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手/宏伟蓝图):左键,目标格可被占用
     if (heldDef?.wireTool && inp.mouseDown && !inp.rightDown) {
+      // 电路工具余辉（Player.cs:46161-46164:tileBoost+blockRange 射程门内）
+      if (this.inTileRange(tx, ty, 5)) this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
       this.useWireTool(tx, ty, heldDef);
       return;
     }
@@ -6087,6 +6098,8 @@ export class Game implements GameHooks {
     // 可放置物品：左键放置
     // 墙面物品（Player.PlaceThing_Walls，Player.cs:38937）：左键铺墙
     if (heldDef?.wallId != null && inp.mouseDown && !inp.rightDown) {
+      // 放置路径余辉（Player.cs:42930-42935:tileRange 射程门内 cache update）
+      if (this.inTileRange(tx, ty)) this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
       this.tryPlaceWall(tx, ty, heldDef);
       return;
     }
@@ -6095,6 +6108,7 @@ export class Game implements GameHooks {
     // Player.cs:42842-42847 altFunctionUse==2 才 doPlacementAction）
     if (heldDef?.tile && !inp.rightDown
       && !PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
+      if (this.inTileRange(tx, ty)) this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
       this.tryPlace(tx, ty, heldDef);
       return;
     }
@@ -7094,6 +7108,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 桶/海绵族入口门（Player.cs:45706 族表 + :45715 ItemTimeIsZero && controlUseItem）：
       // 原分支无 mouseDown/useTime 门——持桶悬停即每帧倾倒;本次补齐(autoReuse 族
       // 按住连倒是原版语义,门由 useTime 节流)
+      // 桶族余辉（Player.cs:45709-45713:Simple 射程门内 cache update）
+      if (this.inTileRange(tx, ty)) this.itemIconCacheUpdate(viIdFromKey(heldDef.key));
       this.useBucket(viIdFromKey(heldDef.key), tx, ty);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
       // ---- 高尔夫球投掷（物品 3989/染色彩蛋 4242-4253 → proj 721/739+）：
@@ -12983,10 +12999,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
       this.tileInteractionsMouseOver(Math.floor(wx / TILE), Math.floor(wy / TILE), p);
     }
-    // 余辉验证（:45929-45945）：所选槽物品 id 与缓存比对
+    // 余辉验证（:45929-45945）：所选槽物品 id 与缓存比对（缓存键 = 原版 vid）
     const held = p.inv.slots[p.inv.selected];
-    this.itemIconCache.verify(inp.mouseX, inp.mouseY,
-      held ? (held.key ?? 0) : 0);
+    const heldVid = held ? viIdFromKey(ITEM_DEFS[held.id].key) : 0;
+    this.itemIconCache.verify(inp.mouseX, inp.mouseY, heldVid);
+  }
+
+  /** ItemIconCacheUpdate（Player.cs 使用路径 4 站点调用）:放置/通用使用/桶族/
+   *  电路工具,射程门内——原版 GamepadDisableCursorItemIcon PC 无对应恒开 */
+  itemIconCacheUpdate(itemVid: number): void {
+    this.itemIconCache.update(itemVid, this.input.mouseX, this.input.mouseY);
   }
 
   /** 悬停交互图标表（Player.cs TileInteractionsMouseOver :33131-33520 + 段外站点）。
@@ -13012,7 +13034,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 314: set(2343); break;                                    // 矿车轨道(:31522)
       case 79: {                                                     // 床(:33140-33154)
         const style = Math.floor(fy / 36);
-        set(bottomSideOfBed(st, tx, ty, fx, fy) ? (table.beds[String(style)] ?? 224) : 5013);
+        set(bottomSideOfBed(fx) ? (table.beds[String(style)] ?? 224) : 5013);
         break;
       }
       case 88: set(table.dressers[String(Math.floor(fx / 54))] ?? 334); break;  // 梳妆台(:31609)
@@ -13022,7 +13044,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 335: set(2700); break;                                    // 礼盒(:33441)
       case 386: case 387: set(3239); break;                          // 高门关(:33427-33431)
       case 388: case 389: set(3240); break;                          // 高门开(:33436)
-      case 15: set(table.candles[String(candleStyleOf(st, tx, ty, fx, fy))] ?? 105); break;  // 蜡烛(:33227)
+      case 15: set(table.chairs[String(Math.floor(fy / 40))] ?? 34, Math.floor(fx / 18) < 1); break;  // 椅子(:33440-33450)
+      case 33: set(table.candles[String(Math.floor(fy / 22))] ?? 105); break;  // 蜡烛(:33222-33230)
       case 21: set(table.chests[String(Math.floor(fx / 36))] ?? 48); break;       // 宝箱(:33255)
       case 467: set(table.chests2[String(Math.floor(fx / 36))] ?? 3884); break;   // 二类箱(:33276)
       case 597: set(table.pylons[String(Math.floor(fx / 54))] ?? 4876); break;    // 传送塔(:33158)
