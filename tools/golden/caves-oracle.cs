@@ -12,7 +12,10 @@ using System.Text;
 int seed = int.Parse(args[0]);
 int evil = int.Parse(args[1]);
 string outPath = args[2];
-const int W = 4200, H = 1200;
+// 多尺寸支持（2026-08-16）：第 4 参 size ∈ {0小,1中,2大}（默认 0）——GetWorldSize() 语义
+int worldSize = args.Length > 3 ? int.Parse(args[3]) : 0;
+int W = worldSize == 1 ? 6400 : worldSize == 2 ? 8400 : 4200;
+int H = worldSize == 1 ? 1800 : worldSize == 2 ? 2400 : 1200;
 const int BEACH_DISTANCE = 380; // WorldGen.beachDistance（cs:4102）
 
 var asm = Assembly.LoadFrom("/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe");
@@ -140,13 +143,43 @@ int oreCu = oreCu166 ? 166 : 7, oreFe = oreFe167 ? 167 : 6, oreAg = oreAg168 ? 1
 bool crimson = (int)r.Next(2) == 0;
 if (evil == 0) crimson = false; if (evil == 1) crimson = true;
 r.Next(int.MaxValue);                                         // WorldId
-r.Next(1050, 3150);                                           // treeX[0]
-int ts0 = (int)r.Next(6); int ts1 = (int)r.Next(6);
-while (ts1 == ts0) ts1 = (int)r.Next(6);
-for (int i = 0; i < 2; i++) { int s = i == 0 ? ts0 : ts1; if (s == 0) r.Next(3); }
-r.Next(1050, 3150);                                           // caveBackX[0]
-int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8);
-while (cb1 == cb0) cb1 = (int)r.Next(8);
+// RandomizeTreeStyle/RandomizeCaveBackgrounds 尺寸分支（真 exe :8082/:8157，2026-08-16 多尺寸化）
+if (W == 4200)
+{
+    r.Next(1050, 3150);                                       // treeX[0]（W/2±W/4 取整=1050/3150）
+    int ts0 = (int)r.Next(6); int ts1 = (int)r.Next(6);
+    while (ts1 == ts0) ts1 = (int)r.Next(6);
+    for (int i = 0; i < 2; i++) { int s = i == 0 ? ts0 : ts1; if (s == 0) r.Next(3); }
+    r.Next(1050, 3150);                                       // caveBackX[0]
+    int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8);
+    while (cb1 == cb0) cb1 = (int)r.Next(8);
+}
+else if (W == 6400)
+{
+    r.Next(1076, 2136); r.Next(2820, 3880);                   // treeX[0/1]（0.334±0.2、0.667±0.2 取整）
+    int ts0 = (int)r.Next(6); int ts1 = (int)r.Next(6); int ts2 = (int)r.Next(6);
+    while (ts1 == ts0) ts1 = (int)r.Next(6);
+    while (ts2 == ts0 || ts2 == ts1) ts2 = (int)r.Next(6);
+    for (int i = 0; i < 3; i++) { int s = i == 0 ? ts0 : i == 1 ? ts1 : ts2; if (s == 0) r.Next(3); }
+    r.Next(1076, 2136); r.Next(2820, 3880);                   // caveBackX[0/1]
+    int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8); int cb2 = (int)r.Next(8);
+    while (cb1 == cb0) cb1 = (int)r.Next(8);
+    while (cb2 == cb0 || cb2 == cb1) cb2 = (int)r.Next(8);
+}
+else
+{
+    r.Next(840, 2520); r.Next(2520, 4200); r.Next(4200, 5880); // treeX[0/1/2]（0.25/0.5/0.75±0.15）
+    int ts0 = (int)r.Next(6); int ts1 = (int)r.Next(6); int ts2 = (int)r.Next(6); int ts3 = (int)r.Next(6);
+    while (ts1 == ts0) ts1 = (int)r.Next(6);
+    while (ts2 == ts0 || ts2 == ts1) ts2 = (int)r.Next(6);
+    while (ts3 == ts0 || ts3 == ts1 || ts3 == ts2) ts3 = (int)r.Next(6);
+    for (int i = 0; i < 4; i++) { int s = i switch { 0 => ts0, 1 => ts1, 2 => ts2, _ => ts3 }; if (s == 0) r.Next(3); }
+    r.Next(840, 2520); r.Next(2520, 4200); r.Next(4200, 5880); // caveBackX[0/1/2]
+    int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8); int cb2 = (int)r.Next(8); int cb3 = (int)r.Next(8);
+    while (cb1 == cb0) cb1 = (int)r.Next(8);
+    while (cb2 == cb0 || cb2 == cb1) cb2 = (int)r.Next(8);
+    while (cb3 == cb0 || cb3 == cb1 || cb3 == cb2) cb3 = (int)r.Next(8);
+}
 // RandomizeCaveBackgrounds 尾部无条件 3 掷(cs:8211-8213;2026-08-12 审计补,ilspycmd 对真 exe 已复核)
 r.Next(4); r.Next(3); r.Next(2);
 Func<int> RollForest = () => {
@@ -211,7 +244,7 @@ double num4w = num3w + (double)H * 0.2;
 num4w *= (double)(int)r.Next(90, 110) * 0.01;
 double num5w = num3w, num6w = num3w, num7w = num4w, num8w = num4w;
 double num9t = (double)H * 0.23;
-double num10 = 0.17 + 0.02, num11 = 0.26;
+double num10 = 0.17 + (worldSize == 0 ? 0.02 : 0.0), num11 = 0.26; // cs:129-131：仅小世界 +0.02
 var history = new List<double>();
 var surf = new int[W];
 Action<int, double> Retarget = null!;

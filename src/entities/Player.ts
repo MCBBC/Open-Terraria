@@ -161,6 +161,10 @@ export class Player extends Entity {
   appearance?: import('../player/Appearance').Appearance;
   iframes = 0;
   jumpHold = 0;          // 长按跳跃剩余加速 tick
+  /** 游泳划水动画计时（Player.swimTime :2634——脚蹼水中跳/人鱼按住刷新 30，
+   *  PlayerFrame :35307-35312 每帧 -1；帧档 0/5/0 三段 :36098-36118。仅动画语义，
+   *  本仓渲染未消费——状态位保留） */
+  swimTime = 0;
   inWater = false;
   headUnderwater = false;
   /** 税务员累积税款（Player.cs:792 taxMoney，铜币；对话「收集」领取） */
@@ -220,7 +224,6 @@ export class Player extends Entity {
   fallStartY: number | null = null;   // 矿车骑乘同步清空（车上不计摔伤），公开给 Minecart
   /** 蛛网挣扎计数（原版 stickyBreak，Player.cs:22653） */
   private stickyBreak = 0;
-  private surfaceJumpCd = 0;  // 水面起跳冷却
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
   /** 移动段当前速度上限探针（mounts.test 等消费;非原版字段） */
   _maxRunProbe = 0;
@@ -1813,61 +1816,12 @@ export class Player extends Entity {
       this.vy = this.vy * 0.8 + Math.cos((this.cx % 120) / 120 * Math.PI * 2) * 5 * 0.2;
       this.fallStartY = null;
     } else
-    // 跳跃 / 游泳
-    // 游泳族坐骑（海龟/猪鲨崽/海盗船/熔岩鲨：坐骑 buff 的 ignoreWater，Player.cs:9592-9608）
-    // 浸水走干燥分支——水下不降速（Run 段已豁免 0.55 系数）、正常重力与跳跃（+5 高/+2.5 速
-    // 在 Mount.JumpHeight/JumpSpeed 的 frameState==4 支线），帧态机自行切游泳帧
-    if (this.inWater && !this.ridingMountSwimFree) {
-      // ---- 水面行走（WaterWalkingBoots/LavaWaders 族，Player.WaterWalk 语义近似）----
-      // 装备后落向液面时站在液面（vy 清零、可正常行走/起跳/重置空中能力）；
-      // 按 ↓ 下潜。waterWalk2（水上漂靴）同效。
-      if (canWaterWalk && !this.headUnderwater && this.vy >= 0 && !this.inputDown) {
-        this.onWaterSurface = true;
-        this.vy = 0;
-        this.fallStartY = null;
-        // 站在液面等价落地：重置多段跳/飞行/飞毯，允许起跳离水面
-        this.extraJumps = [...this.equipStats.jumpOpts];
-        const eqW = this.equipStats;
-        this.wingTime = eqW.wing ? eqW.wing.time : 0;
-        this.rocketTime = 7; this.rocketRelease = true; this.rocketDelay = 0;
-        this.canCarpet = true;
-        this.carpetTime = 300;
-        if (this.inputJump && this.surfaceJumpCd <= 0) {
-          this.vy = -6.01;
-          this.jumpHold = 30;
-          this.surfaceJumpCd = 24;
-        }
-        if (this.surfaceJumpCd > 0) this.surfaceJumpCd--;
-      } else {
-        this.onWaterSurface = false;
-        // 头部露出水面（踩水状态）→ 水中起跳（:24154-24155 jumpHeight 30/jumpSpeed 6.01）
-        if (this.inputJump && !this.headUnderwater) {
-          if (this.surfaceJumpCd <= 0) {
-            this.vy = -6.01;
-            this.jumpHold = 30;
-            this.surfaceJumpCd = 24;
-          }
-      } else if (this.inputJump) {
-        // 全浸没：游泳上浮（脚蹼族 accFlipper：提速 1.5×）
-        const swimMult = (this.equipStats.flipper || this.buffs.has(BuffType.FlipperPotion)) ? 1.5 : 1;
-        this.vy = Math.max(this.vy - 0.62 * swimMult, -4.4 * swimMult);
-      }
-      if (this.surfaceJumpCd > 0) this.surfaceJumpCd--;
-      // 水物理（:24150-24155 else 分支）：gravity 0.2 / maxFallSpeed 5 /
-      // jumpHeight 30 / jumpSpeed 6.01——水中跳跃更高更缓（游泳=按住跳连续
-      // JumpMovement 平台段，本仓 surfaceJumpCd 冷却近似防同帧连跳）
-      this.vy += GRAVITY * 0.5;           // 0.2 = GRAVITY(0.4)×0.5
-      this.vy = Math.max(-6.01, Math.min(5.0, this.vy));
-      this.fallStartY = null;
-      }
-    } else {
+    // ---- 跳跃参数链（每帧先于物理求值：UpdateJumpHeight :19301-19341 + 坐骑档
+    //      Mount.JumpHeight/JumpSpeed :19307-19308——原版 jumpHeight/jumpSpeed 是
+    //      玩家字段，液体链 :24130-24155 在湿态覆写；sustain 段消费当帧生效值）----
+    {
       const gd = this.gravDir;
-      // 坐骑跳跃参数（Player.cs:19307-19308：mounted 时 jumpHeight/jumpSpeed 取
-      // Mount.JumpHeight/JumpSpeed——含驯鹿/兔兔的水平速度加成与游泳态 +5/+2.5 支线）
-      const mnt2 = this.ridingMount ? this.mount : null;   // 本块作用域（mnt2 在水平块,2026-08-13 补声明）
-      // 跳跃参数链（UpdateJumpHeight :19301-19341）：jumpBoost（云朵气球族）→
-      // jumpHeight≥20/jumpSpeed≥6.51；狼人 jumpHeight+2/jumpSpeed+0.2（:19334-19335，
-      // jumpSpd 的 0.2 已并入）；jumpSpeedBoost（蛙腿族 +1.6/empressBrooch +1.8）加算
+      const mnt2 = this.ridingMount ? this.mount : null;
       const eqJ = this.equipStats;
       let baseJumpSpd = PLAYER_JUMP_SPEED;
       let baseJumpTicks = PLAYER_JUMP_TICKS;
@@ -1879,6 +1833,70 @@ export class Player extends Entity {
       baseJumpSpd += eqJ.jumpSpd;
       const mJumpSpd = mnt2 ? mnt2.jumpSpeed(this.vx) : baseJumpSpd;
       const mJumpTicks = mnt2 ? mnt2.jumpHeight(this.vx) : baseJumpTicks;
+      // 本帧生效跳跃速度（湿态液体档覆写；长跳 sustain 钉速用它——原版钉的是当帧
+      // jumpSpeed，出水瞬间自动切回干燥档）
+      let effJumpSpd = mJumpSpd;
+      // 起跳帧标记（原版 JumpMovement 的 if(jump>0)/else-if(起跳) 同帧互斥——
+      // 起跳帧不进 sustain，平台段全长 = 起跳帧 + jumpHold 帧）
+      let jumpStartedThisTick = false;
+      // 手持三叉戟 277（UpdateEquips :12487-12490：手持即 trident，非装备槽）
+      const heldIt = this.inv.heldItem();
+      const heldVid = heldIt ? (ITEM_DEFS[heldIt.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldIt.id].key)) : -1;
+      const trident = heldVid === 277;
+    // 跳跃 / 游泳
+    // 游泳族坐骑（海龟/猪鲨崽/海盗船/熔岩鲨：坐骑 buff 的 ignoreWater，Player.cs:9592-9608）
+    // 浸水走干燥分支——水下不降速（Run 段已豁免 0.55 系数）、正常重力与跳跃（+5 高/+2.5 速
+    // 在 Mount.JumpHeight/JumpSpeed 的 frameState==4 支线），帧态机自行切游泳帧
+    if ((this.inWater || this.inLava) && !this.ridingMountSwimFree) {
+      // ---- 液体参数档（Player.cs:24130-24155 wet 链；inWater 已含蜂蜜 type3，
+      //      岩浆 wet 同链走 else 档）----
+      // honeyWet → gravity 0.1/maxFall 3（跳跃参数保持干燥档——原版分支不覆写）；
+      // merman → 0.3/7（跳跃参数同保持）；trident 且非岩浆 → 0.25/6 + jump 25/5.51
+      // （按住 ↑ 0.1/2 浮升）；其余湿态 → 0.2/5(+0.01) + jump 30/6.01
+      const flipperOn = this.equipStats.flipper || this.buffs.has(BuffType.FlipperPotion);
+      let lGrav = GRAVITY * 0.5, lMaxFall = 5.01;
+      let lJSpd = mJumpSpd, lJT = mJumpTicks;
+      if (this.inHoney) { lGrav = GRAVITY * 0.25; lMaxFall = 3; }
+      else if (this.equipStats.merman) { lGrav = GRAVITY * 0.75; lMaxFall = 7; }
+      else if (trident && !this.inLava) {
+        lGrav = GRAVITY * 0.625; lMaxFall = 6; lJSpd = 5.51; lJT = 25;
+        if (this.inputUp) { lGrav = GRAVITY * 0.25; lMaxFall = 2; }
+      } else { lJSpd = 6.01; lJT = 30; }
+      effJumpSpd = lJSpd;
+      // ---- 水面行走（WaterWalkingBoots/LavaWaders 族 + 水行药水；按 ↓ 下潜）----
+      // vy 清零 → 下方起跳门 vy==0 自然通过（原版同——水面站立即 velocity.Y==0）
+      if (canWaterWalk && !this.headUnderwater && this.vy >= 0 && !this.inputDown) {
+        this.onWaterSurface = true;
+        this.vy = 0;
+        this.fallStartY = null;
+        // 站在液面等价落地：重置多段跳/飞行/飞毯
+        this.extraJumps = [...this.equipStats.jumpOpts];
+        const eqW = this.equipStats;
+        this.wingTime = eqW.wing ? eqW.wing.time : 0;
+        this.rocketTime = 7; this.rocketRelease = true; this.rocketDelay = 0;
+        this.canCarpet = true;
+        this.carpetTime = 300;
+      } else {
+        this.onWaterSurface = false;
+      }
+      // ---- 水中起跳门（JumpMovement :20405-20496 原版语义，2026-08-16 对齐）：
+      //   vy==0（踩底 / 水行站立）或 脚蹼族湿态任意时刻（flag2&&flag3 :20407）；
+      //   均须按键边沿（releaseJump :20409）。★头露出水面【不是】原版起跳条件——
+      //   踩水悬停 vy≠0 不能跳出水面，须踩底/水行/脚蹼（旧"头露即可跳+冷却"自制
+      //   门已废）；起跳 = vy=-jumpSpeed + jump=jumpHeight（:20496-20500，脚蹼
+      //   不消费多段跳 :20449 !flag2 门），脚蹼起跳置 swimTime=30（:20419-20422）----
+      const jumpEdge = this.inputJump && !this.jumpEdgePrev;
+      const flipperJump = flipperOn && !this.ridingCart;
+      if (jumpEdge && (this.vy === 0 || flipperJump)) {
+        if (flipperOn && this.swimTime === 0) this.swimTime = 30;
+        this.vy = -lJSpd * gd;
+        this.jumpHold = lJT;
+        jumpStartedThisTick = true;
+      }
+      this.vy += lGrav;
+      this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
+      this.fallStartY = null;
+    } else {
       if (this.inputJump && this.onGround) {
         // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）；
         // 重力倒置时方向取反（gravDir，Player.cs:3207 全部 vy 乘 gravDir 语义）
@@ -1888,18 +1906,7 @@ export class Player extends Entity {
         // 落地重跳（无 releaseJump 门），autoJump 已被通用分支覆盖，无需特例分支。
         this.vy = -mJumpSpd * gd;
         this.jumpHold = mJumpTicks;
-      }
-      // ★原版长跳模型（:20384-20396 精确语义）：
-      //   vy==0（撞顶/落地）→ jump=0（:20386，平台段终止——撞头后不再把 vy 钉向天花板）；
-      //   否则按住跳期间 vy **恒钉 -jumpSpeed**（:20391 每 tick 重置，非累加）+ jump--；
-      //   松键【不清计数】只停钉（重力立即生效）——中途再按恢复剩余平台段（原版同）。
-      //   曾自制 vy-=0.22 累加 + 松键清零（2026-08-15 审计）。
-      if (this.jumpHold > 0) {
-        if (this.vy === 0) this.jumpHold = 0;
-        else if (this.inputJump) {
-          this.vy = -mJumpSpd * gd;
-          this.jumpHold--;
-        }
+        jumpStartedThisTick = true;
       }
       // ---- 坐骑特殊跳（hasJumpOption_*：UpdateEffects :4933/:4877/:4956/:4963 授予；
       //      JumpMovement :20435-20688 链——优先于装备多段跳） ----
@@ -1918,9 +1925,12 @@ export class Player extends Entity {
         }
       }
       // ---- 多段跳（JumpMovement :20521-20560）：沙暴 jumpHeight×3 / 暴雪 ×1.5 /
-      //      屁瓶·瓶中云 ×1.25 / 云朵 ×1——各段起跳 vy 同为 -jumpSpeed（平台段长度不同） ----
+      //      屁瓶·瓶中云 ×1.25 / 云朵 ×1——各段起跳 vy 同为 -jumpSpeed（平台段长度不同）。
+      //      起跳帧特效（:20522-20620）：沙暴/暴雪/屁瓶/航行 播 SoundID 16（Item_16 跳跃音）；
+      //      屁瓶 10×尘188+3×gore435-437（:20572-20593）；航行瓶 30×尘253（:20543-20572）。
+      //      持续尾迹见 doubleJumpVisuals（DoubleJumpVisuals :21615-21745） ----
       const eq = this.equipStats;
-      if (this.onGround) this.extraJumps = [...eq.jumpOpts]; // 落地重置段数
+      if (this.onGround) { this.extraJumps = [...eq.jumpOpts]; this.performingJump = null; }
       // 坐骑封段（Mount.BlockExtraJumps，Player.cs:25730）：大多数坐骑禁多段跳
       if (!this.onGround && !mnt2?.blockExtraJumps && this.inputJump && this.extraJumps.length > 0 && this.vy > -2 && this.extraJumpCd <= 0) {
         const opt = this.extraJumps.shift()!;
@@ -1929,8 +1939,39 @@ export class Player extends Entity {
         this.vy = -mJumpSpd * gd;
         this.jumpHold = Math.round(mJumpTicks * hMult);
         this.extraJumpCd = 8; // 防同帧连段
+        this.performingJump = opt;                          // isPerformingJump_* 等价标记
+        game.playSfxFiles(['Item_16'], 1, this.cx, this.cy); // SoundID 16（沙暴/暴雪/屁瓶/航行同）
+        const D = game.vanillaDust;
+        const mk = (x: number, y: number, w: number, h: number, type: number,
+          alpha: number, scale: number, vx = 0, vy = 0) => D ? D.spawn(x, y, w, h, type, vx, vy, alpha, null, scale) : null;
+        if (opt === 'Fart') {
+          const fy = gd === 1 ? this.y + this.h - 16 : this.y - 16;
+          for (let m = 0; m < 10; m++) {
+            const d = mk(this.x - 34, fy, 102, 32, 188, 100, 1.5, -this.vx * 0.5, this.vy * 0.5);
+            if (d) { d.vx = d.vx * 0.5 - this.vx * 0.1; d.vy = d.vy * 0.5 - this.vy * 0.3; }
+          }
+          for (let gi = 0; gi < 3; gi++) {
+            const gx = gi === 0 ? this.x + this.w / 2 - 16 : gi === 1 ? this.x - 36 : this.x + this.w + 4;
+            const g = GorePiece.newGore(435 + (Math.random() * 3 | 0), gx, fy, -this.vx, -this.vy, 1, false);
+            if (g) { g.vx = g.vx * 0.1 - this.vx * 0.1; g.vy = g.vy * 0.1 - this.vy * 0.05; }
+          }
+        } else if (opt === 'Sail') {
+          const sy = gd === 1 ? this.y + this.h : this.y;
+          for (let l = 0; l < 30; l++) {
+            const d = mk(this.x, sy, this.w, 12, 253, 100, 1.5, this.vx * 0.3, this.vy * 0.3);
+            if (!d) continue;
+            if (l % 2 === 0) d.vx += (30 + Math.random() * 41 | 0) * 0.1;
+            else d.vx -= (30 + Math.random() * 41 | 0) * 0.1;
+            d.vy += (Math.random() * 41 - 10 | 0) * 0.1;
+            d.noGravity = true;
+            d.scale += (Math.random() * 51 - 10 | 0) * 0.01;
+            d.vx *= d.scale * 0.7; d.vy *= d.scale * 0.7;
+          }
+        }
       }
       if (this.extraJumpCd > 0) this.extraJumpCd--;
+      // 多段跳上升尾迹（DoubleJumpVisuals，Update :26445 每帧调用位）
+      this.doubleJumpVisuals(game);
       // ---- 坐骑飞行族接管（Player.cs:26637-26700 的 else-if 链 1:1）----
       // usesHover（UFO/蜜蜂/猪鲨崽/巫婆扫帚/熔岩鲨(水中)）→ Mount.Hover 接管 vy
       //（flyTime→疲劳双池，疲劳满失升力）；非 hover 飞行坐骑（驯鹿/猪龙）→ 按住跳
@@ -2214,6 +2255,26 @@ export class Player extends Entity {
       if (this.buffs.slowFall) this.fallStartY = null;
       // 倒置时天花板即地板（TileCollision.hitHead → onGround 近似）
       if (gd === -1) this.onGround = this.hitHead;
+    }
+    // ★原版长跳平台段（:20384-20396；湿/干同链——JumpMovement 不分液体，2026-08-16
+    //   从干燥分支提出为公共段）：vy==0（撞顶/落地）→ jump=0（:20386 平台段终止）；
+    //   否则按住跳期间 vy 恒钉 -jumpSpeed（:20391 每 tick 重置，非累加）+ jump--；
+    //   人鱼湿态不减计数（:20392-20400，swimTime≤10 刷 30=无限游泳）；松键不清计数
+    //   只停钉（中途再按恢复剩余平台段）。钉速用当帧 effJumpSpd（湿态=液体档，如
+    //   水中 6.01；出水瞬间自动切回干燥档——原版 jumpSpeed 是玩家字段的天然结果）。
+    //   曾自制 vy-=0.22 累加 + 松键清零（2026-08-15 审计）；曾在干燥分支内使水下跳
+    //   丢平台段（2026-08-16 水中跳对齐批修）。
+    if (this.jumpHold > 0 && !jumpStartedThisTick) {
+      if (this.vy === 0) this.jumpHold = 0;
+      else if (this.inputJump) {
+        this.vy = -effJumpSpd * gd;
+        if ((this.inWater || this.inLava) && !this.ridingMountSwimFree
+          && this.equipStats.merman && !this.ridingCart) {
+          if (this.swimTime <= 10) this.swimTime = 30;
+        } else this.jumpHold--;
+      }
+    }
+    if (this.swimTime > 0) this.swimTime--;   // PlayerFrame :35307-35312
     }
     // 松键上升衰减（原版语义 1:1，:22435-22446）：原版无"跳高截断"——松键仅在
     // 下一个 tick 使 vy += 0.01（几乎不衰减，小跳靠 platform 段耗尽前的松键时间差
@@ -2518,6 +2579,7 @@ export class Player extends Entity {
     const maxY = world.h * TILE;
     if (this.y > maxY + 100) this.damage(9999, this.cx, this.y);
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
+    this.jumpEdgePrev = this.inputJump;  // 跳键边沿（tick 尾快照——水中起跳 releaseJump :20409 消费；prevInputJump 在 tick 头快照故不可用）
     // 血肉墙舌头（Player.WOFTongue :21993-22056，Update 内 myPlayer 段调用）
     this.wofTongue(game, world, dt);
     // 钩爪锚点表重建（Player.cs:27991-27992 Update 尾清表）：锚由 GrappleProj
@@ -2962,6 +3024,8 @@ export class Player extends Entity {
   /** 多段跳剩余段（原版 RefreshDoubleJumps：落地时重置为 equipStats.jumpOpts 拷贝） */
   extraJumps: string[] = [];
   extraJumpCd = 0;
+  /** 当前进行中的多段跳型（isPerformingJump_* 等价；落地清除——上升尾迹分支门） */
+  performingJump: string | null = null;
   /** 火箭靴 1:1（Player.cs:2612/26548-26628）：rocketTime 剩余脉冲次数（max=7）/
    *  rocketDelay 推力脉冲倒计时（每次触发=10t 加速段）/ rocketDelay2 焰间隔
    *  （1 档 30 / 2+ 档 15）/ canRocket 门（vy>-jumpSpeed 才可启动）/ rocketRelease
@@ -2980,6 +3044,81 @@ export class Player extends Entity {
    *  :29337+/:29845+/:29730+/:30025+ + 滑翔段尘 :26914+/:26958+ + 47/49/50 三函数
    *  :30063-30270）。原版 Main.rand.Next(a,b)=[a,b)；本批 Dust 池缺省（无 Game）
    *  时静默跳过。 */
+  /** DoubleJumpVisuals（:21615-21745 1:1）：多段跳上升期持续尾迹——沙暴瓶 3×尘124/
+   *  tick + 每 3t gore220-223 沙云（scale 随平台段剩余放大）、云瓶/屁瓶 脚底 1×尘16/188、
+   *  暴雪瓶 三段 8×尘76、航行瓶 1-2×尘253。门=performingJump 置位 + 上升中
+   *（vy*gravDir<0；航行瓶 <1 放宽）。Game 侧 Update :26445 每帧调用 */
+  doubleJumpVisuals(game: GameHooks): void {
+    const opt = this.performingJump;
+    if (!opt) return;
+    const gd = this.gravDir;
+    const rising = gd === 1 ? this.vy < 0 : this.vy > 0;
+    const D = game.vanillaDust;
+    const mk = (x: number, y: number, w: number, h: number, type: number,
+      alpha = 0, scale = 1, vx = 0, vy = 0) => D ? D.spawn(x, y, w, h, type, vx, vy, alpha, null, scale) : null;
+    if (opt === 'Cloud' && rising) {
+      // :21617-21626 尘16（脚底 w+8×4 条带）
+      const cy = gd === 1 ? this.y + this.h : this.y - 6;
+      const d = mk(this.x - 4, cy, this.w + 8, 4, 16, 100, 1.5, -this.vx * 0.5, this.vy * 0.5);
+      if (d) { d.vx = d.vx * 0.5 - this.vx * 0.1; d.vy = d.vy * 0.5 - this.vy * 0.3; }
+    } else if (opt === 'Sandstorm' && rising) {
+      // :21628-21649 尘124×3 + gore220-223 每 miscCounter%3（沙云随平台段缩放）
+      const cy = gd === 1 ? this.y + this.h : -6;
+      const num4 = (this.jumpHold / 75 + 1) / 2;
+      for (let i = 0; i < 3; i++) {
+        const d = mk(this.x, this.y + (cy === -6 ? -3 : this.h / 2), this.w, 32, 124, 150, 1 * num4,
+          this.vx * 0.3, this.vy * 0.3);
+        if (d) { d.vx *= 0.5 * num4; d.vy *= 0.5 * num4; d.fadeIn = 1.5 * num4; }
+      }
+      if (this.miscCounter % 3 === 0) {
+        const g = GorePiece.newGore(220 + (Math.random() * 3 | 0),
+          this.x + this.w / 2 - 18, this.y + this.h / 2, -this.vx, -this.vy, num4, false);
+        if (g) { g.vx = this.vx * 0.3 * num4; g.vy = this.vy * 0.3 * num4; g.alpha = 100; }
+      }
+    } else if (opt === 'Fart' && rising) {
+      // :21651-21661 尘188（同云瓶式再 ×0.5）
+      const cy = gd === 1 ? this.y + this.h : this.y - 6;
+      const d = mk(this.x - 4, cy, this.w + 8, 4, 188, 100, 1.5, -this.vx * 0.5, this.vy * 0.5);
+      if (d) { d.vx = d.vx * 0.5 - this.vx * 0.1; d.vy = d.vy * 0.5 - this.vy * 0.3; d.vx *= 0.5; d.vy *= 0.5; }
+    } else if (opt === 'Blizzard' && rising) {
+      // :21701-21743 三段尘76：2 粒慢散 + 3 粒顺速 + 3 粒逆速（noGravity/noLight）
+      const by = gd === 1 ? this.y + this.h - 6 : this.y + 6;
+      for (let k = 0; k < 2; k++) {
+        const d = mk(this.x, by, this.w, 12, 76, 0, 1, this.vx * 0.3, this.vy * 0.3);
+        if (!d) continue;
+        d.vx *= 0.1; d.vy *= 0.1;
+        if (k === 0) { d.vx += this.vx * 0.03; d.vy += this.vy * 0.03; }
+        else { d.vx -= this.vx * 0.03; d.vy -= this.vy * 0.03; }
+        d.vx -= this.vx * 0.1; d.vy -= this.vy * 0.1;
+        d.noGravity = true; d.noLight = true;
+      }
+      for (let l = 0; l < 3; l++) {
+        const d = mk(this.x, by, this.w, 12, 76, 0, 1, this.vx * 0.3, this.vy * 0.3);
+        if (!d) continue;
+        d.fadeIn = 1.5; d.vx = d.vx * 0.6 + this.vx * 0.8; d.vy = d.vy * 0.6 + this.vy * 0.8;
+        d.noGravity = true; d.noLight = true;
+      }
+      for (let m = 0; m < 3; m++) {
+        const d = mk(this.x, by, this.w, 12, 76, 0, 1, this.vx * 0.3, this.vy * 0.3);
+        if (!d) continue;
+        d.fadeIn = 1.5; d.vx = d.vx * 0.6 - this.vx * 0.8; d.vy = d.vy * 0.6 - this.vy * 0.8;
+        d.noGravity = true; d.noLight = true;
+      }
+    } else if (opt === 'Sail' && (gd === 1 ? this.vy < 1 : this.vy > -1)) {
+      // :21671-21700 尘253：平台段中 2 粒（顺速 −v/5）否则 1 粒（scale×0.8）
+      const n = this.jumpHold > 0 ? 2 : 1;
+      const by = gd === 1 ? this.y + this.h - 6 : this.y + 6;
+      for (let j = 0; j < n; j++) {
+        const d = mk(this.x, by, this.w, 12, 253, 100, 1.5, this.vx * 0.3, this.vy * 0.3);
+        if (!d) continue;
+        d.scale += (Math.random() * 8 - 5 | 0) * 0.1;
+        if (this.jumpHold <= 0) d.scale *= 0.8;
+        else { d.vx -= this.vx / 5; d.vy -= this.vy / 5; }
+        d.noGravity = true;
+      }
+    }
+  }
+
   private wingFx(game: GameHooks, wings: number, wingsLogic: number,
     flying: boolean, glide: boolean, justSwitched: boolean): void {
     const D = game.vanillaDust;
@@ -3392,6 +3531,8 @@ export class Player extends Entity {
   get store() { return this.lastStore; }
   /** 上一 tick 的跳跃输入（Mount.tryStartHover 的 releaseUp 边沿门 :26416） */
   prevInputJump = false;
+  /** 跳键上一 tick 按住态（tick 尾快照；水中起跳边沿=releaseJump :20409 语义） */
+  jumpEdgePrev = false;
   /** 鼠标世界坐标（Game 每帧注入；钻头坐骑瞄准 AimAbility / Scutlix 索敌回退用） */
   aimWX = 0;
   aimWY = 0;

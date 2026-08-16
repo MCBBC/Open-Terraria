@@ -46,10 +46,12 @@ export interface GenState {
   dungeonEntSeed?: number;
   dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   dungeonEntX: number;        // 入口门厅可站立点 X（DungeonPass 回填；原版 dungeonX 语义=老头锚）
-  /** GenVars.CurrentDungeonGenVars.generatingDungeonPositionX（DungeonCrawler.cs:346 初值
-   *  =爬升锚 x，:394 回写=**最高房 InnerBounds.Center.X**）。Pyramids 地牢回避带（cs:15447）
-   *  消费的是它，不是 Reset 期 dungeonLocation——两字段混用会把回避带平移数百格
-   *  （2026-08-12 金字塔会话 handoff 疑点，已核实修复） */
+  /** GenVars.CurrentDungeonGenVars.generatingDungeonPositionX。终值＝爬升入口走廊终点
+   *  （每条 LegacyEntranceDungeonHall.cs:367 回写 genVars；:346 初值与 :394 最高房中心
+   *  都是中途瞬态，随即被爬升覆写——Dungeon pass#36 先于 Pyramids#44/LihzahrdTemple#50，
+   *  cs:15450/:15994 读到的即爬升终点=入口 X）。Pyramids 地牢回避带（cs:15447）消费的
+   *  是它，不是 Reset 期 dungeonLocation——两字段混用会把回避带平移数百格
+   *  （2026-08-12 疑点核实；2026-08-16 审计修正终值语义：曾误回填 :394 瞬态 topX） */
   generatingDungeonPositionX: number;
   lAltarX: number;             // 神庙祭坛 3×2 左上角（GenVars.lAltarX/Y 语义；-1=未放置）
   lAltarY: number;

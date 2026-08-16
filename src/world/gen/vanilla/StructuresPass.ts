@@ -574,8 +574,10 @@ export function runPyramidPass(
     if (num <= 300 || num >= st.w - 300) continue;
     // 地牢侧回避（cs:15450-15452）：dungeonSide>Left 时须 num ≥ dungeonX+0.15w；
     // dungeonSide<Right 时须 num ≤ dungeonX-0.15w（任一不过即拒）。
-    // ★dungeonX 此处 = generatingDungeonPositionX（DungeonCrawler.cs:394 最高房中心 X），
-    //   非 Reset 期 dungeonLocation（2026-08-12 金字塔 handoff 疑点核实修复）
+    // ★dungeonX 此处 = generatingDungeonPositionX 的**终值**＝爬升入口走廊终点（入口 X，
+    //   LegacyEntranceDungeonHall.cs:367 每条爬升走廊回写 genVars 覆盖 :394 的最高房
+    //   中心 X 瞬态；Dungeon pass #36 先于本 pass），非 Reset 期 dungeonLocation。
+    //   2026-08-16 审计修正：曾把 :394 瞬态当终值回填 topX。
     const dgX = gs.generatingDungeonPositionX || gs.dungeonLocation;
     const band = st.w * 0.15;
     if (!(gs.dungeonSide > -1 || !(num < dgX + band))) continue;

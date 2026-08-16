@@ -168,7 +168,8 @@ interface DHall {
   sdx: number; sdy: number; edx: number; edy: number;
 }
 interface DDoor { x: number; y: number; dir: number; hall: boolean; skipOther: boolean; skipSpace: boolean; clear: boolean; fluff: number; }
-interface DPlat { x: number; y: number; hall: boolean; }
+/** hf = OverrideHeightFluff（DungeonPlatformData.cs:14）：房间候选=3、走廊/入口候选缺省=5 */
+interface DPlat { x: number; y: number; hall: boolean; hf: number; }
 
 /** #32 Dungeon pass（1456 1:1，与 caves-oracle.cs 同构）。snap 回调用于逐段检查点。 */
 export function runDungeonPass(
@@ -404,7 +405,11 @@ export function runDungeonPass(
       vy = Math.max(-1, Math.min(1, vy + hri(-10, 10) * 0.05));
     }
     rm.ex = px; rm.ey = py; rm.strength = Math.trunc(num5);
-    posX = Math.trunc(px); posY = Math.trunc(py);
+    // ★2026-08-16 审计：LegacyDungeonRoom **不回写** generatingDungeonPositionX/Y
+    //   （1456 全 Rooms 目录零赋值，仅 Halls 两处：LegacyDungeonHall.cs:862 /
+    //   LegacyEntranceDungeonHall.cs:367；1405 DungeonRoom 同样只记 dRoomX 数组）。
+    //   曾 `posX=trunc(px)` 使房间后位置瞬移到房尾——起始房后首走廊起点、循环
+    //   room-only 分支后续走廊全部错位（oracle DgRoom 同款偏差，转录时须同步摘除）。
   }
 
   // ================= LegacyDungeonHall.LegacyHall（Halls/LegacyDungeonHall.cs:65-876）=================
@@ -634,6 +639,10 @@ export function runDungeonPass(
     const hrn = (n: number): number => hr.nextInt(n);
     let px = posX + 0.0, py = posY + 0.0;
     const num = hri(5, 8);
+    // ★2026-08-16 审计：C# 掷序 num4=Next(10,30) 在 :136（startPosition 之后、
+    //   方向掷段 :148-158 **之前**）——原 JS/oracle 把它挪到了方向掷后，种子流
+    //   全体错位（strength 吃了方向骰、方向骰吃 steps 骰）。归位原版序。
+    const steps = hri(10, 29);
     let dir = px <= topX ? 1 : -1;
     if (px > w - 400) dir = -1;
     else if (px < 400) dir = 1;
@@ -648,7 +657,6 @@ export function runDungeonPass(
       if (posX < w / 2 && vx < -0.5) vx = -0.5;
       if (posX > w / 2 && vx > 0.5) vx = 0.5;
     }
-    const steps = hri(10, 29);
     const num5 = 0.5;
     const n6 = 30;
     const hb = new DBnd(w, h);
@@ -843,10 +851,10 @@ export function runDungeonPass(
       for (let k = 0; k < 20; k++) {
         n26 = Math.trunc(cx) - k;
         if (n26 <= 0) break;
-        if (actAt(n26, n27) === 0 && isDW(wallAt(n26, n27))) { platData.push({ x: n26, y: n27, hall: false }); break; }
+        if (actAt(n26, n27) === 0 && isDW(wallAt(n26, n27))) { platData.push({ x: n26, y: n27, hall: false, hf: 5 }); break; }
         n26 = Math.trunc(cx) + k;
         if (n26 >= w) break;
-        if (actAt(n26, n27) === 0 && isDW(wallAt(n26, n27))) { platData.push({ x: n26, y: n27, hall: false }); break; }
+        if (actAt(n26, n27) === 0 && isDW(wallAt(n26, n27))) { platData.push({ x: n26, y: n27, hall: false, hf: 5 }); break; }
       }
     }
     // —— 第二段（外门厅）——
@@ -972,12 +980,19 @@ export function runDungeonPass(
     {
       const dL = Math.trunc(cx - 7.5), dR = Math.trunc(cx + 7.5);
       const dT = Math.trunc(cy - 1.5), dB = Math.trunc(cy + 1.5);
+      // ★2026-08-16 审计：cs:606-611 门洞清空时对"内侧半边"（num2>0 取 x<val.X、
+      //   num2<0 取 x>val.X，val.X 为 num2<0 偏移-1 后的 zero.X）回写 brickWallType
+      //   ——曾只清 active 不写墙，门洞内半边墙缺失（渲染+wallDungeon 判定双差）。
+      if (num2 < 0) cx -= 1.0;
+      const valX = cx;
       for (let x = dL; x < dR; x++) {
         for (let y = dT; y < dB; y++) {
-          if (st.inBounds(x, y)) st.flags[st.idx(x, y)] = 0;
+          if (!st.inBounds(x, y)) continue;
+          const ti = st.idx(x, y);
+          st.flags[ti] = 0;
+          if ((num2 > 0 && x < valX) || (num2 < 0 && x > valX)) st.wall[ti] = wall;
         }
       }
-      if (num2 < 0) cx -= 1.0;
       // 入口门零掷骰：LegacyDungeonEntrance.cs:616 硬编码 PlaceTile(...,10,...,13)。
       // 勿在此掷 rn(3)——1/3 主题门掷骰属 dungeonD 门特征段（DungeonGlobalDoors.cs:47-50，见下方 doorData 落放处）。
       dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, 13);
@@ -992,10 +1007,10 @@ export function runDungeonPass(
     let f2 = false, f3 = false;
     for (let x = num; x <= num2; x++) {
       if (!f2 && inW(x, num3 - 1, 0) && actAt(x, num3 - 1) === 0) {
-        platData.push({ x, y: num3 - 1, hall: false }); f2 = true;
+        platData.push({ x, y: num3 - 1, hall: false, hf: 3 }); f2 = true;
       }
       if (!f3 && inW(x, num4 + 1, 0) && actAt(x, num4 + 1) === 0) {
-        platData.push({ x, y: num4 + 1, hall: false }); f3 = true;
+        platData.push({ x, y: num4 + 1, hall: false, hf: 3 }); f3 = true;
       }
       if (f2 && f3) break;
     }
@@ -1011,12 +1026,14 @@ export function runDungeonPass(
     }
   }
   // LegacyDungeonHall.CalculatePlatformsAndDoors（:26-34；LegacyEntrance 覆写为空）
+  // ★2026-08-16 审计：走廊门无 OverrideWidthFluff → DungeonGlobalDoors.cs:58 num4=10
+  //   （20 列扫描窗）；曾写 0 = 只扫门位单列。房间门才覆写 3。
   function hallPlatformsDoors(hl: DHall): void {
     if (hl.isEntrance) return;
-    if (Math.abs(hl.sdy) <= 0.1) doorData.push({ x: Math.trunc(hl.sx), y: Math.trunc(hl.sy), dir: 0, hall: true, skipOther: false, skipSpace: false, clear: true, fluff: 0 });
-    else platData.push({ x: Math.trunc(hl.sx), y: Math.trunc(hl.sy), hall: true });
-    if (Math.abs(hl.edy) <= 0.1) doorData.push({ x: Math.trunc(hl.ex), y: Math.trunc(hl.ey), dir: 0, hall: true, skipOther: false, skipSpace: false, clear: true, fluff: 0 });
-    else platData.push({ x: Math.trunc(hl.ex), y: Math.trunc(hl.ey), hall: true });
+    if (Math.abs(hl.sdy) <= 0.1) doorData.push({ x: Math.trunc(hl.sx), y: Math.trunc(hl.sy), dir: 0, hall: true, skipOther: false, skipSpace: false, clear: true, fluff: 10 });
+    else platData.push({ x: Math.trunc(hl.sx), y: Math.trunc(hl.sy), hall: true, hf: 5 });
+    if (Math.abs(hl.edy) <= 0.1) doorData.push({ x: Math.trunc(hl.ex), y: Math.trunc(hl.ey), dir: 0, hall: true, skipOther: false, skipSpace: false, clear: true, fluff: 10 });
+    else platData.push({ x: Math.trunc(hl.ex), y: Math.trunc(hl.ey), hall: true, hf: 5 });
   }
   // DungeonData.CanGenerateFeatureAt（:132-166）。feat: 0=常规 1=BiomeChests 2=Paintings/WallVariants
   function featOK(x: number, y: number, feat: number): boolean {
@@ -1431,7 +1448,10 @@ export function runDungeonPass(
       if (!inW(d.x, d.y, 30)) continue;
       const x = d.x, y = d.y;
       let row = -1;
-      const n3 = 5;
+      // ★2026-08-16 审计：num3 = OverrideHeightFluff ?? 5（DungeonGlobalPlatforms.cs:44-57）
+      //   ——房间候选（roomPlatformsDoors，platformFluff=3）扫 y±3；走廊/入口候选 ±5。
+      //   曾恒 5。
+      const n3 = d.hf;
       let n4 = y < ws + 50.0 ? 20 : 10;
       n4 = Math.trunc(n4 * 1.0);
       for (let j = y - n3; j <= y + n3; j++) {
@@ -1737,7 +1757,13 @@ export function runDungeonPass(
               let n10 = ri(1, 3);
               while (n10 > 0) {
                 chTile(st.idx(x, y), PLATFORM, false);
-                st.frameY[st.idx(x, y)] = 18 * platformStyle; // frameY=18*tileStyle(DungeonGlobalPlatforms:158)
+                // ★2026-08-16 审计：书架平台样式 = shelfStyles 按墙变体三档
+                //   （Bookshelves.cs:112-138：shelfStyles[0]，墙==variants[1]/[2] 换 [1]/[2]；
+                //   GetPlatformStyle 对 Default 样式恒 -1 不覆写）——曾误用
+                //   platformStyle(6/8/7，那是 dgPlatforms 平台件的样式)。
+                const swl = wallAt(x, y);
+                const shelfStyle = swl === wallVariants[1] ? shelf[1] : swl === wallVariants[2] ? shelf[2] : shelf[0];
+                st.frameY[st.idx(x, y)] = 18 * shelfStyle;
                 if (flag3) {
                   placeSimple(x, y - 1, BOOKS);
                   if (rn(50) === 0 && y > (ws + rock) / 2.0) { /* waterbolt 帧 */ }
@@ -1814,11 +1840,15 @@ export function runDungeonPass(
           const r7 = rn(7);
           if (lgTr) console.log(`DG R7 x=${x} cy=${cy} v=${r7}`);
           if (r7 === 0) {
-            let blocked = false;
-            for (let k = 0; k < 15; k++) {
+            // ★2026-08-16 审计：吊灯支要求 GetStyleForWall != null（Lights.cs:77-78）
+            //   ——Default 样式表 WallIsInStyle = wall==brickWallType，即**主砖墙才有
+            //   吊灯资格**；变体墙(94-99)返 null 直接跳过吊灯落灯笼。曾变体墙也试吊灯。
+            const chGate = wallAt(x, cy) === wall;
+            let blocked = !chGate;
+            for (let k = 0; k < 15 && !blocked; k++) {
               if (inW(x, cy + k, 0) && dgSolid(x, cy + k)) { blocked = true; break; }
             }
-            if (lgTr) console.log(`DG CH x=${x} cy=${cy} blocked=${blocked ? 1 : 0}`);
+            if (lgTr) console.log(`DG CH x=${x} cy=${cy} gate=${chGate ? 1 : 0} blocked=${blocked ? 1 : 0}`);
             if (!blocked && placeChand(x, cy)) {
               placed = true; ncount = 0; num4++;
               dgSwitch(x, cy);
@@ -2475,7 +2505,12 @@ export function runDungeonPass(
   dgBanners(); snap('dungeonBa');
   snap('dungeon');
   // —— GenState 回填（消费端：Pyramids 回避带 / 刷怪门槛 / 老头锚）——
-  gs.generatingDungeonPositionX = topX;
+  // ★2026-08-16 审计：generatingDungeonPositionX 的**终值**是爬升入口走廊的终点
+  //   （每条 LegacyEntranceDungeonHall 收尾都回写 genVars，LegacyEntranceDungeonHall.cs:367-368；
+  //   MakeDungeon:394 的最高房中心 X 是中途瞬态，随即被爬升覆写）。Dungeon pass(#36)
+  //   先于 Pyramids(#44)/LihzahrdTemple(#50)，cs:15450/:15994 读到的就是爬升终点=入口 X。
+  //   曾回填 topX（把瞬态当终值）→ 金字塔回避带整体平移数百格。
+  gs.generatingDungeonPositionX = posX;
   gs.dungeonY = dungeonY;
   gs.dungeonEntX = dungeonX; gs.dungeonEntY = dungeonY;
 }
