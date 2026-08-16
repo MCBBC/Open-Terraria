@@ -1,6 +1,9 @@
 // 一次性诊断（任务#134 收尾）：dungeonB 段 JS↔oracle 网格对拍 dump。
 // 产物 /tmp/js-dgC.bin|.act（dungeonC 后=书架前基线）与 /tmp/js-dgB.bin|.act（书架后）。
 // 格式对齐 oracle DGC_DUMP/DGB_DUMP：typ=vanilla sheet id（ushort LE 行主序）、act="0"/"1" 串。
+// ★2026-08-16 每 pass 种子重播改造后本链【未同步逐 pass replay】（dungeon dump 对拍
+//   需要的话照 chainCheckpoints 的 replay() 模式补齐）——STREAM 输出与现行金标流
+//   不可直接比对。
 import { it } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { runResetAndTerrain } from '../src/world/gen/WorldGen';

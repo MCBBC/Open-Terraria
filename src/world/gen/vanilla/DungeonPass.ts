@@ -13,6 +13,7 @@ import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/ti
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { tileRunner } from './TileRunner';
 import { furnitureStyleBase } from '../../FurnitureStyle';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 const BLUE = TILE_BY_KEY['v_41_blue_brick']!;
 const GREEN = TILE_BY_KEY['v_43_green_brick']!;
@@ -173,6 +174,15 @@ interface DPlat { x: number; y: number; hall: boolean; }
 export function runDungeonPass(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, snap: SnapFn = () => {},
 ): void {
+  // ★MakeDungeon 头 SetCrackedBrickSolidity(false)（DungeonCrawler.cs:344）——裂纹砖族
+  //   481/482/483 自本 pass 起恒非实心（还原点 SmoothWorld 头 cs:16510 在 Beaches 之后，
+  //   不在本段覆盖范围；oracle 同构内联 SOLID.Remove 于 caves-oracle.cs）。CaveWallsPass
+  //   同款 pass 内接线；WorldGen.ts 管线处的同参调用为幂等重复，保留为时间线存档。
+  //   ★dungeonI 转写债根因（2026-08-16）：此前仅 dgSolid 打了 481-483 排除补丁，
+  //   dgLights 的 canHitLocal/placeChand/灯笼上格门仍读静态 TILE_DEFS.solid(=true)，
+  //   裂纹砖对把开关视线(CanHit)整段拦死 → 开关/灯放置集两侧分叉（同型种子
+  //   1511931452 绿=数据未踩中，9293480 踩中）。消费端一律走 genSolidType。
+  flipGenSolid([481, 482, 483], false);
   const { w, h } = st;
   const ws = gs.worldSurface, rock = gs.rockLevel;
   const dgUR = (seed: number): UnifiedRandom => new UnifiedRandom(seed);
@@ -252,8 +262,8 @@ export function runDungeonPass(
     const i = st.idx(x, y);
     if (!st.flags[i]) return false;
     const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
-    if (!TILE_DEFS[st.type[i]]?.solid || DG_SOLID_TOP.has(sheet)) return false;
-    if (sheet === 481 || sheet === 482 || sheet === 483) return false;   // SetCrackedBrickSolidity(false)
+    if (!genSolidType(st.type[i]) || DG_SOLID_TOP.has(sheet)) return false;
+    if (sheet === 481 || sheet === 482 || sheet === 483) return false;   // SetCrackedBrickSolidity(false)（DC:344；pass 头 flipGenSolid 后冗余双保险）
     return true;
   }
 
@@ -1768,6 +1778,11 @@ export function runDungeonPass(
   }
   // ============ DungeonGlobalLights（:24-141）+ Lights_GenerateSwitch（:144-193）============
   function dgLights(): void {
+    const lgTr = typeof process !== 'undefined' && !!process.env.SW_DG_LIGHTS_TRACE;
+    if (lgTr) {
+      console.log(`DG LG n5=${Math.trunc(28 * (w / 4200) * 1.0)} bnd=${bounds.L},${bounds.T},${bounds.R},${bounds.B} ent=${entExists ? 1 : 0} eb=${entBounds.L},${entBounds.T},${entBounds.R},${entBounds.B}`);
+      console.log(`DG PITS${pits.map((p: DBnd) => ` ${p.L},${p.T},${p.R},${p.B}`).join('')}`);
+    }
     const num5 = Math.trunc(28 * (w / 4200) * 1.0);
     let ncount = 0, num4 = 0;
     while (num4 < num5) {
@@ -1793,13 +1808,17 @@ export function runDungeonPass(
             || (inW(x - 1, cy + 1, 0) && actAt(x - 1, cy + 1) !== 0)
             || (inW(x + 1, cy + 1, 0) && actAt(x + 1, cy + 1) !== 0)
             || (inW(x, cy + 2, 0) && actAt(x, cy + 2) !== 0)) near = true;
+          if (lgTr) console.log(`DG CAN n2=${ncount} n4=${num4} x=${x} y=${y} cy=${cy} near=${near ? 1 : 0}`);
           if (near) break;
           let placed = false;
-          if (rn(7) === 0) {
+          const r7 = rn(7);
+          if (lgTr) console.log(`DG R7 x=${x} cy=${cy} v=${r7}`);
+          if (r7 === 0) {
             let blocked = false;
             for (let k = 0; k < 15; k++) {
               if (inW(x, cy + k, 0) && dgSolid(x, cy + k)) { blocked = true; break; }
             }
+            if (lgTr) console.log(`DG CH x=${x} cy=${cy} blocked=${blocked ? 1 : 0}`);
             if (!blocked && placeChand(x, cy)) {
               placed = true; ncount = 0; num4++;
               dgSwitch(x, cy);
@@ -1808,9 +1827,12 @@ export function runDungeonPass(
           if (placed) break;
           // 灯笼（Place1x2Top :46694：上方实心且下方净空 → 42 两格）
           const aboveSheet = TILE_DEFS[typAt(x, cy - 1)]?.vanilla?.sheet ?? -1;
-          const aboveSolid = TILE_DEFS[typAt(x, cy - 1)]?.solid ?? false;
+          // 上格实心判定走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344），
+          // 勿读静态 TILE_DEFS.solid（dungeonI 转写债根因之一）
+          const aboveSolid = genSolidType(typAt(x, cy - 1));
           if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !DG_SOLID_TOP.has(aboveSheet)
             && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
+            if (lgTr) console.log(`DG LP x=${x} cy=${cy} typAbv=${aboveSheet}`);
             // 灯笼样式按墙变体三档（Lights :109-118）：wall==variants[1]/[2] 换档,余用 [0]
             const wl = wallAt(x, cy);
             const lStyle = wl === wallVariants[1] ? lantern[1] : wl === wallVariants[2] ? lantern[2] : lantern[0];
@@ -1838,7 +1860,8 @@ export function runDungeonPass(
       }
     }
     const sheet = TILE_DEFS[typAt(x, y - 1)]?.vanilla?.sheet ?? -1;
-    if (!(inW(x, y - 1, 0) && actAt(x, y - 1) !== 0 && TILE_DEFS[typAt(x, y - 1)]?.solid && !DG_SOLID_TOP.has(sheet))) return false;
+    // 上格实心走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344，勿读静态 solid）
+    if (!(inW(x, y - 1, 0) && actAt(x, y - 1) !== 0 && genSolidType(typAt(x, y - 1)) && !DG_SOLID_TOP.has(sheet))) return false;
     // PlaceChand 帧式（:52753-52824）：样式=蓝/绿/粉地牢吊灯 placeStyle 27/28/29
     //（Item.cs:25748-25757 `27 + type - 2652`，chandelierItemType 2652+theme）。
     // 页列 num2=108*(style/36)（27-29 无分页=0）、行基 num3=style*54（分页修正同式）；
@@ -1858,14 +1881,21 @@ export function runDungeonPass(
     return true;
   }
   function dgSwitch(x: number, y: number): void {
+    const swTr = typeof process !== 'undefined' && !!process.env.SW_DG_LIGHTS_TRACE;
     for (let i = 0; i < 1000; i++) {
       const a = x + ri(-12, 12);
       const b = y + ri(3, 20);
-      if (!inW(a, b, 0) || !inW(a, b + 1, 0)) continue;
-      if (actAt(a, b) !== 0 || actAt(a, b + 1) !== 0) continue;
-      if (!inW(a - 1, b, 0) || !isDT(typAt(a - 1, b))) continue;
-      if (!inW(a + 1, b, 0) || !isDT(typAt(a + 1, b))) continue;
-      if (!canHitLocal(a, b, x, y)) continue;
+      const sgInW = inW(a, b, 0) && inW(a, b + 1, 0);
+      const sgAct = sgInW && actAt(a, b) === 0 && actAt(a, b + 1) === 0;
+      const sgL = sgAct && inW(a - 1, b, 0) && isDT(typAt(a - 1, b));
+      const sgR = sgL && inW(a + 1, b, 0) && isDT(typAt(a + 1, b));
+      const sgH = sgR && canHitLocal(a, b, x, y);
+      if (swTr) console.log(`DG SW i=${i} x=${x} y=${y} a=${a} b=${b} inW=${sgInW ? 1 : 0} act=${sgAct ? 1 : 0} dtL=${sgL ? 1 : 0} dtR=${sgR ? 1 : 0} hit=${sgH ? 1 : 0} tL=${inW(a - 1, b, 0) ? TILE_DEFS[typAt(a - 1, b)]?.vanilla?.sheet ?? -1 : -1} tR=${inW(a + 1, b, 0) ? TILE_DEFS[typAt(a + 1, b)]?.vanilla?.sheet ?? -1 : -1} aL=${inW(a - 1, b, 0) ? actAt(a - 1, b) : -1} aR=${inW(a + 1, b, 0) ? actAt(a + 1, b) : -1}`);
+      if (!sgInW) continue;
+      if (!sgAct) continue;
+      if (!sgL) continue;
+      if (!sgR) continue;
+      if (!sgH) continue;
       const anchor = (dgSolid(a - 1, b) && typAt(a - 1, b) !== DOOR)
         || (dgSolid(a + 1, b) && typAt(a + 1, b) !== DOOR) || dgSolid(a, b + 1);
       if (anchor && isDW(wallAt(a, b)) && (isDT(typAt(a - 1, b)) || isDT(typAt(a + 1, b)))) {
@@ -1891,6 +1921,7 @@ export function runDungeonPass(
         st.frameX[st.idx(x, y)] = 18;
         st.frameX[st.idx(x, y + 1)] = 18;
       }
+      if (swTr) console.log(`DG SWX i=${i} a=${a} b=${b}`);
       break;
     }
   }
@@ -1900,8 +1931,10 @@ export function runDungeonPass(
     const tx = Math.max(1, Math.min(w - 1, x2)), ty = Math.max(1, Math.min(h - 41, y2));
     const blk = (x: number, y: number): boolean => {
       if (!inW(x, y, 0) || actAt(x, y) === 0) return false;
-      const d = TILE_DEFS[typAt(x, y)];
-      return !!d?.solid && !DG_SOLID_TOP.has(d.vanilla?.sheet ?? -1);
+      // 实心走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344）：
+      // ★dungeonI 转写债主根因——此前读静态 TILE_DEFS.solid，裂纹砖对把开关
+      // 视线整段拦死（金标仍放），开关位/后续灯放置集两侧分叉级联到 beaches。
+      return genSolidType(typAt(x, y)) && !DG_SOLID_TOP.has(TILE_DEFS[typAt(x, y)]?.vanilla?.sheet ?? -1);
     };
     for (;;) {
       const dx = Math.abs(cx - tx), dy = Math.abs(cy - ty);

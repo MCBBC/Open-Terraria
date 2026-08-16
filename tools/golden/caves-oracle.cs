@@ -38,6 +38,7 @@ var wal = new ushort[W * H];
 var liq = new byte[W * H];
 var liqT = new byte[W * H];
 var checkpoints = new List<string>();
+var jsegPts = new List<string>();   // jungle 段级流指纹（对拍原版 JungleProbe）
 
 static byte[] ToBytes(ushort[] a) { var b = new byte[a.Length * 2]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
 uint Fnv16(ushort[] a) { uint h = 0x811c9dc5; foreach (var v in a) { h = (h ^ (uint)(v & 0xff)) * 16777619u; h = (h ^ (uint)((v >> 8) & 0xff)) * 16777619u; } return h; }
@@ -1141,13 +1142,16 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
     Move(ref jx, ref jy, 100, 100); zeroX += jx; zeroY += jy;
     PlaceFirstPassMud(jx, jy, 3);
     PlaceGemsAt(jx, jy, 63, 2);
+    JSeg("j_r1");
     Move(ref jx, ref jy, 250, 150); zeroX += jx; zeroY += jy;
     PlaceFirstPassMud(jx, jy, 0);
     PlaceGemsAt(jx, jy, 65, 2);
+    JSeg("j_r2");
     int oldX = jx, oldY = jy;
     Move(ref jx, ref jy, 400, 150); zeroX += jx; zeroY += jy;
     PlaceFirstPassMud(jx, jy, -3);
     PlaceGemsAt(jx, jy, 67, 2);
+    JSeg("j_r3");
         jx = zeroX / 3; jy = zeroY / 3;
     int bigNum = (int)r.Next((int)(400 * ws), (int)(600 * ws));
     int pad = (int)(25 * ws);
@@ -1155,6 +1159,7 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
     mudWallFlag = true;
     TileRunner(jx, jy, bigNum, 10000, 59, false, 0.0, -20.0, true);
     mudWallFlag = false;
+    JSeg("j_big");
         // GenerateTunnelToSurface（cs:131-200）
     double num = (int)r.Next(5, 11);
     double px = jx, py = jy;
@@ -1210,6 +1215,7 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
         if (vx > 1.5) vx = 1.5; if (vx < -1.5) vx = -1.5;
     }
         var CPH = new List<string> { $"tun={(int)r.Peek()}" };
+    JSeg("j_tunnel");
     // GenerateHolesInMudWalls + MudWallRunner（cs:203-217 + 77584）
     void MudWallRunner(int i, int j)
     {
@@ -1243,6 +1249,7 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
         { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(worldSurface + 10, H - 200); }
         MudWallRunner(hx, hy);
     }
+    JSeg("j_holes");
     // GenerateFinishingTouches（cs:219-280）
     int fx = oldX, fy = oldY;
     for (int i = 0; (double)i <= 20.0 * ws; i++)
@@ -1251,6 +1258,7 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
         fy += (int)r.Next((int)(-5 * ws), (int)(6 * ws));
         TileRunner(fx, fy, (int)r.Next(40, 100), (int)r.Next(300, 500), 59);
     }
+    JSeg("j_fin1");
     for (int j = 0; (double)j <= 10.0 * ws; j++)
     {
         int c2x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1264,6 +1272,7 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
             TileRunner(c2x, c2y, (int)r.Next(10, 20), (int)r.Next(30, 70), type);
         }
     }
+    JSeg("j_fin2");
     for (int l = 0; (double)l <= 300.0 * ws; l++)
     {
         int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1277,6 +1286,7 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
         { int gt = (int)r.Next(63, 69); int gx = c3x + (int)r.Next(-1, 2); int gy = c3y + (int)r.Next(-1, 2); int gstr = (int)r.Next(3, 7); int gstp = (int)r.Next(4, 8);
           TileRunner(gx, gy, gstr, gstp, gt); }
     }
+    JSeg("j_end");
 }
 Checkpoint("jungle");
 
@@ -5950,6 +5960,14 @@ void DgBookshelves()
 // —— DungeonGlobalLights（:24-141）+ Lights_GenerateSwitch ——
 void DgLights()
 {
+    bool lgTr = Environment.GetEnvironmentVariable("DG_LIGHTS_TRACE") != null;
+    if (lgTr)
+    {
+        Console.WriteLine($"DG LG n5={(int)(28f * (W / 4200f) * 1.0)} bnd={dgBounds.L},{dgBounds.T},{dgBounds.R},{dgBounds.B} ent={(dgEntExists ? 1 : 0)} eb={dgEntBounds.L},{dgEntBounds.T},{dgEntBounds.R},{dgEntBounds.B}");
+        Console.Write("DG PITS");
+        for (int pi = 0; pi < dgPits.Count; pi++) Console.Write($" {dgPits[pi].L},{dgPits[pi].T},{dgPits[pi].R},{dgPits[pi].B}");
+        Console.WriteLine();
+    }
     int num5 = (int)(28f * (W / 4200f) * 1.0);
     int num2 = 0, num4 = 0;
     while (num4 < num5)
@@ -5973,12 +5991,16 @@ void DgLights()
                     || DgInWorld(x - 1, cy + 1, 0) && act[(cy + 1) * W + x - 1] != 0
                     || DgInWorld(x + 1, cy + 1, 0) && act[(cy + 1) * W + x + 1] != 0
                     || DgInWorld(x, cy + 2, 0) && act[(cy + 2) * W + x] != 0) near = true;
+                if (lgTr) Console.WriteLine($"DG CAN n2={num2} n4={num4} x={x} y={y} cy={cy} near={(near ? 1 : 0)}");
                 if (near) break;
                 bool placed = false;
-                if ((int)r.Next(7) == 0)
+                int r7 = (int)r.Next(7);
+                if (lgTr) Console.WriteLine($"DG R7 x={x} cy={cy} v={r7}");
+                if (r7 == 0)
                 {
                     bool blocked = false;
                     for (int k = 0; k < 15; k++) if (DgInWorld(x, cy + k, 0) && DgSolid(x, cy + k)) { blocked = true; break; }
+                    if (lgTr) Console.WriteLine($"DG CH x={x} cy={cy} blocked={(blocked ? 1 : 0)}");
                     if (!blocked && DgPlaceChand(x, cy))
                     {
                         placed = true; num2 = 0; num4++;
@@ -5990,6 +6012,7 @@ void DgLights()
                 if (DgInWorld(x, cy - 1, 0) && act[(cy - 1) * W + x] != 0 && SOLID.Contains(typ[(cy - 1) * W + x]) && !dgSolidTop.Contains(typ[(cy - 1) * W + x])
                     && DgInWorld(x, cy + 1, 0) && act[(cy + 1) * W + x] == 0)
                 {
+                    if (lgTr) Console.WriteLine($"DG LP x={x} cy={cy} typAbv={typ[(cy - 1) * W + x]}");
                     act[cy * W + x] = 1; typ[cy * W + x] = 42;
                     act[(cy + 1) * W + x] = 1; typ[(cy + 1) * W + x] = 42;
                     placed = true; num2 = 0; num4++;
@@ -6016,15 +6039,22 @@ bool DgPlaceChand(int x, int y)
 // Lights_GenerateSwitch（:144-193）：随机找开关位（Collision.CanHit 视线通）→ PlaceTile(136)
 void DgSwitch(int x, int y)
 {
+    bool swTr = Environment.GetEnvironmentVariable("DG_LIGHTS_TRACE") != null;
     for (int i = 0; i < 1000; i++)
     {
         int a = x + (int)r.Next(-12, 13);
         int b = y + (int)r.Next(3, 21);
-        if (!DgInWorld(a, b, 0) || !DgInWorld(a, b + 1, 0)) continue;
-        if (act[b * W + a] != 0 || act[(b + 1) * W + a] != 0) continue;
-        if (!DgInWorld(a - 1, b, 0) || !DgIsDT(typ[b * W + a - 1])) continue;
-        if (!DgInWorld(a + 1, b, 0) || !DgIsDT(typ[b * W + a + 1])) continue;
-        if (!DgCanHit(a, b, x, y)) continue;
+        bool sgInW = DgInWorld(a, b, 0) && DgInWorld(a, b + 1, 0);
+        bool sgAct = sgInW && act[b * W + a] == 0 && act[(b + 1) * W + a] == 0;
+        bool sgL = sgAct && DgInWorld(a - 1, b, 0) && DgIsDT(typ[b * W + a - 1]);
+        bool sgR = sgL && DgInWorld(a + 1, b, 0) && DgIsDT(typ[b * W + a + 1]);
+        bool sgH = sgR && DgCanHit(a, b, x, y);
+        if (swTr) Console.WriteLine($"DG SW i={i} x={x} y={y} a={a} b={b} inW={(sgInW ? 1 : 0)} act={(sgAct ? 1 : 0)} dtL={(sgL ? 1 : 0)} dtR={(sgR ? 1 : 0)} hit={(sgH ? 1 : 0)} tL={(sgInW && DgInWorld(a - 1, b, 0) ? typ[b * W + a - 1] : -1)} tR={(sgInW && DgInWorld(a + 1, b, 0) ? typ[b * W + a + 1] : -1)} aL={(sgInW ? act[b * W + a - 1] : -1)} aR={(sgInW ? act[b * W + a + 1] : -1)}");
+        if (!sgInW) continue;
+        if (!sgAct) continue;
+        if (!sgL) continue;
+        if (!sgR) continue;
+        if (!sgH) continue;
         bool anchor = (DgSolid(a - 1, b) && typ[b * W + a - 1] != 10) || (DgSolid(a + 1, b) && typ[b * W + a + 1] != 10) || DgSolid(a, b + 1);
         if (anchor && DgIsDW(wal[b * W + a]) && (DgIsDT(typ[b * W + a - 1]) || DgIsDT(typ[b * W + a + 1])))
         {
@@ -6032,6 +6062,7 @@ void DgSwitch(int x, int y)
         }
         if (act[b * W + a] == 0) continue;
         if ((int)r.Next(3) > 0) { }                             // frameX=18（不入哈希）
+        if (swTr) Console.WriteLine($"DG SWX i={i} a={a} b={b}");
         break;
     }
 }
@@ -6801,6 +6832,7 @@ uint StreamHash()
     return h;
 }
 void StreamPt(string n) => streamPts.Add($"{n}|{StreamHash():x8}");
+void JSeg(string n) => jsegPts.Add($"{n}|{StreamHash():x8}");
 StreamPt("beaches");
 
 Replay(); // ▶pass 头重播：Gems cs:15109
@@ -8048,6 +8080,20 @@ StreamPt("dirtrockwallrunner");
 
 Replay(); // ▶pass 头重播：LivingTrees cs:15551
 // ================= Pass 42 LivingTrees（cs:15551-15791 + GrowLivingTree cs:28123-28759）=================
+uint LtGridHash()
+{
+    // 与 JS 侧 ltGridHash 同算法：active→typ(vanilla) / inactive→0 + act + wal 的 FNV-1a
+    uint h = 0x811c9dc5;
+    for (int i = 0; i < W * H; i++)
+    {
+        ushort t = act[i] != 0 ? typ[i] : (ushort)0;
+        h = (h ^ (uint)(t & 0xff)) * 16777619u; h = (h ^ (uint)((t >> 8) & 0xff)) * 16777619u;
+        h = (h ^ act[i]) * 16777619u;
+        ushort w = wal[i];
+        h = (h ^ (uint)(w & 0xff)) * 16777619u; h = (h ^ (uint)((w >> 8) & 0xff)) * 16777619u;
+    }
+    return h;
+}
 bool GrowLivingTree_CanPlaceLeavesG(int i, int j)
 {
     if (!(i >= 5 && j >= 5 && i < W - 5 && j < H - 5)) return false;
@@ -8182,6 +8228,7 @@ bool GrowLivingTree_HorizontalTunnelG(int i, int j)
 }
 void GrowLivingTreePassageRoomG(int minl, int minr, int Y)
 {
+    bool ltTrRM = Environment.GetEnvironmentVariable("LT_TRACE") != null;
     int num = (int)r.Next(2);
     if (num == 0) num = -1;
     int num2 = Y - 2;
@@ -8189,6 +8236,7 @@ void GrowLivingTreePassageRoomG(int minl, int minr, int Y)
     if (num < 0) num3--;
     if (num > 0) num3++;
     int num4 = (int)r.Next(15, 30);
+    if (ltTrRM) Console.WriteLine($"R1 st={StreamHash():x8} num={num} num3={num3} num5num={num4}");
     int num5 = num3 + num4;
     if (num < 0) { num5 = num3; num3 -= num4; }
     for (int i = num3; i < num5; i++)
@@ -8220,9 +8268,11 @@ void GrowLivingTreePassageRoomG(int minl, int minr, int Y)
             }
         }
     }
-    PlaceTileGen((minl + minr) / 2 + 3 * num, Y, 10, 7);
+    bool door1 = PlaceTileGen((minl + minr) / 2 + 3 * num, Y, 10, 7);
+    if (ltTrRM) Console.WriteLine($"R2door ok={door1} st={StreamHash():x8}");
     int num6 = (int)r.Next(5, 9);
     int num7 = (int)r.Next(4, 6);
+    if (ltTrRM) Console.WriteLine($"R3 st={StreamHash():x8} num6={num6} num7={num7}");
     if (num < 0) { num5 = num3 + num6; num3 -= num6; }
     else { num3 = num5 - num6; num5 += num6; }
     num2 = Y - num7;
@@ -8244,28 +8294,35 @@ void GrowLivingTreePassageRoomG(int minl, int minr, int Y)
         }
     }
     int i2 = num < 0 ? num5 + 2 : num3 - 2;
-    PlaceTileGen(i2, Y, 10, 7);
+    bool door2 = PlaceTileGen(i2, Y, 10, 7);
+    if (ltTrRM) Console.WriteLine($"R4door ok={door2} st={StreamHash():x8}");
     int num8 = num < 0 ? num3 : num5;
     int num9 = 2;
     if ((int)r.Next(num9) == 0)
     {
         num9 += 2;
-        PlaceTileGen(num8, Y, 15, 5);
+        bool ch1 = PlaceTileGen(num8, Y, 15, 5);
+        if (ltTrRM) Console.WriteLine($"R5chair ok={ch1} st={StreamHash():x8} num9={num9}");
     }
     num8 = num < 0 ? num3 + 2 : num5 - 2;
-    PlaceTileGen(num8, Y, 304, 0);
+    bool loomOk = PlaceTileGen(num8, Y, 304, 0);
+    if (ltTrRM) Console.WriteLine($"R6loom ok={loomOk} st={StreamHash():x8}");
     num8 = num < 0 ? num3 + 4 : num5 - 4;
     if ((int)r.Next(num9) == 0)
     {
-        PlaceTileGen(num8, Y, 15, 5);
+        bool ch2 = PlaceTileGen(num8, Y, 15, 5);
+        if (ltTrRM) Console.WriteLine($"R7chair ok={ch2} st={StreamHash():x8}");
     }
     num8 = num < 0 ? num3 + 8 : num5 - 7;
     int mainItemInChest = 832;
     if ((int)r.Next(3) == 0) mainItemInChest = 4281;
+    if (ltTrRM) Console.WriteLine($"R8pre st={StreamHash():x8}");
     AddBuriedChestGen(num8, Y, mainItemInChest, 12, 0);
+    if (ltTrRM) Console.WriteLine($"R8chest st={StreamHash():x8}");
 }
 void GrowLivingTree_MakePassageG(int j, int Wd, ref int minl, ref int minr, bool noSecretRoom)
 {
+    bool ltTrMP = Environment.GetEnvironmentVariable("LT_TRACE") != null;
     bool flag = noSecretRoom;
     int num = minl, num2 = minr;
     bool flag2 = false;
@@ -8276,6 +8333,7 @@ void GrowLivingTree_MakePassageG(int j, int Wd, ref int minl, ref int minr, bool
     int num8 = 0;
     bool flag3 = true;
     int num9 = (int)r.Next(5, 16);
+    if (ltTrMP) Console.WriteLine($"MP enter st={StreamHash():x8} num6={num6} num9={num9}");
     while (num6 > 0)
     {
         if (num4 > H - 200 + (int)r.Next(15, 31)) num6 = 0;    // Main.UnderworldLayer = maxY-200
@@ -8368,16 +8426,19 @@ void GrowLivingTree_MakePassageG(int j, int Wd, ref int minl, ref int minr, bool
                 minl += num12;
                 minr += num12;
             }
+            if (ltTrMP) Console.WriteLine($"MP6 st={StreamHash():x8} num4={num4} num12={num12} minl={minl} minr={minr}");
             if (noSecretRoom)
             {
                 num9--;
                 if (num9 <= 0)
                     num9 = (!GrowLivingTree_HorizontalTunnelG(num10, num4)) ? (int)r.Next(2, 11) : (int)r.Next(5, 21);
+                if (ltTrMP) Console.WriteLine($"MPt st={StreamHash():x8} num4={num4}");
             }
             if (num5 <= 0 && !flag)
             {
                 flag = true;
                 GrowLivingTreePassageRoomG(minl, minr, num4);
+                if (ltTrMP) Console.WriteLine($"MPr st={StreamHash():x8} num4={num4}");
             }
         }
         if (flag2)
@@ -8402,6 +8463,7 @@ void GrowLivingTree_MakePassageG(int j, int Wd, ref int minl, ref int minr, bool
             if (flag6) num6 = 0;
         }
     }
+    if (ltTrMP) Console.WriteLine($"MP exit st={StreamHash():x8} num4={num4}");
     minl = num;
     minr = num2;
     for (int num14 = minl; num14 <= minr; num14++)
@@ -8469,6 +8531,7 @@ bool GrowLivingTreeG(int i, int j, bool patch)
     int num14 = (int)r.Next(5, 15);
     int maxValue = 2;
     int num = 0;
+    if (ltTr2) Console.WriteLine($"GLTp head st={StreamHash():x8} g={LtGridHash():x8} num3={num3} num4={num4} num5={num5}");
     while (flag2)
     {
         num12++;
@@ -8506,6 +8569,7 @@ bool GrowLivingTreeG(int i, int j, bool patch)
             }
         num11--;
     }
+    if (ltTr2) Console.WriteLine($"GLTp trunk st={StreamHash():x8} g={LtGridHash():x8} num={num}");
     for (int num15 = 0; num15 < num - 1; num15++)
     {
         int num16 = array[num15] + array3[num15];
@@ -8618,6 +8682,7 @@ bool GrowLivingTreeG(int i, int j, bool patch)
         num21--;
         num22--;
     }
+    if (ltTr2) Console.WriteLine($"GLTp top st={StreamHash():x8} g={LtGridHash():x8}");
     for (int num32 = minl; num32 <= minr; num32++)
     {
         int num33 = (int)r.Next(1, 6);
@@ -8644,12 +8709,14 @@ bool GrowLivingTreeG(int i, int j, bool patch)
             {
                 num33--;
                 num42 += num39;
-                if (InB(num42, num34) && !WALL_DUNGEON.Contains(wal[num34 * W + num42]))
+                // 1456 cs:28606/28619 主步写门 = `wall != 244`（1405:12796/12803 同）；
+                // 步进 cs:28612 `num34 += num40`——2026-08-16 对拍裁决（曾误 wallDungeon 门/步进写死 1）
+                if (InB(num42, num34) && wal[num34 * W + num42] != 244)
                 {
                     typ[num34 * W + num42] = 191; act[num34 * W + num42] = 1;
                 }
-                num34 += 1;
-                if (InB(num42, num34) && !WALL_DUNGEON.Contains(wal[num34 * W + num42]))
+                num34 += num40;
+                if (InB(num42, num34) && wal[num34 * W + num42] != 244)
                 {
                     typ[num34 * W + num42] = 191; act[num34 * W + num42] = 1;
                 }
@@ -8662,6 +8729,7 @@ bool GrowLivingTreeG(int i, int j, bool patch)
             }
         }
     }
+    if (ltTr2) Console.WriteLine($"GLTp roots st={StreamHash():x8} g={LtGridHash():x8}");
     for (int num43 = 0; num43 < num2c; num43++)
     {
         int num44 = (int)r.Next(5, 8);
@@ -8717,6 +8785,7 @@ bool GrowLivingTreeG(int i, int j, bool patch)
             PlaceSmallPileGen(num50, num53, pileStyle, num55);
         }
     }
+    if (ltTr2) Console.WriteLine($"GLTp leaves st={StreamHash():x8} g={LtGridHash():x8} num2c={num2c}");
     if (flag)
     {
         bool flag4 = false;
@@ -8981,6 +9050,7 @@ sb.AppendLine("  ]");
 sb.AppendLine("}");
 File.WriteAllText(outPath, sb.ToString());
 File.WriteAllText(outPath + ".ghost", string.Join("\n", ghostPts));
+File.WriteAllText(outPath + ".jseg", string.Join("\n", jsegPts));
 Console.WriteLine($"written {outPath} ({checkpoints.Count} checkpoints)");
 
 // ================= Terraria.Utilities.FastRandom（FastRandom.cs 1:1）=================

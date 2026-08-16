@@ -16,7 +16,6 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { placeDoorClosed } from '../../Door';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
@@ -37,6 +36,25 @@ function ltStream(): string {
   return h.toString(16).padStart(8, '0');
 }
 let ltRngCache: unknown = null;
+
+/** LT_TRACE 用：全网 active-typ(vanilla 映射)+act+wal 的 FNV-1a——与 oracle 侧
+ *  GLTp 打印同算法，逐相位网格指纹（流一致≠写入一致，见 roots/leaves 免掷骰写） */
+function ltGridHash(st: TileStore): string {
+  let h = 0x811c9dc5;
+  const step = (b: number) => { h = Math.imul(h ^ (b & 0xff), 16777619) >>> 0; };
+  for (let i = 0; i < st.type.length; i++) {
+    const v = st.flags[i] ? V_LT[st.type[i]] : 0;
+    const t = v < 0 ? 0x7fff : v;
+    step(t & 0xff); step(t >>> 8); step(st.flags[i] ? 1 : 0);
+    step(st.wall[i] & 0xff); step(st.wall[i] >>> 8);
+  }
+  return h.toString(16).padStart(8, '0');
+}
+const V_LT = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof s === 'number') V_LT[i] = s;
+}
 
 const LIVING_WOOD = TILE_BY_KEY['v_191_living_wood_block']!;
 const LEAF = TILE_BY_KEY['v_192_living_leaf_block']!;
@@ -121,39 +139,108 @@ function placePlatform(st: TileStore, x: number, y: number, style: number): void
   if (!st.inBounds(x, y)) return;
   st.setTileSilent(x, y, PLATFORM, 0, style * 18);
 }
-/** PlaceTile(x, Y, 10, …, style)（cs:29430/29466/28972/29100）：门锚=底行 Y（占 Y-2..Y），
- *  本仓库 placeDoorClosed 锚=顶行 → Y-2 */
-function placeDoor(st: TileStore, x: number, yBottom: number, style: number): void {
-  placeDoorClosed(st, x, yBottom - 2, style);
+/** TileID.Sets.Boulders（TileID.cs:195）——InvalidTileForPilesOrSpeleothems 用 */
+const PILE_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** WorldGen.InvalidTileForPilesOrSpeleothems（cs:39005）：InWorld(2) 内 active 且 Boulders 族 */
+function invalidForPiles(st: TileStore, x: number, y: number): boolean {
+  if (!inWorld(st, x, y, 2)) return false;
+  return activeAt(st, x, y) && PILE_BOULDERS.has(sheetAt(st, x, y));
 }
-/** 底锚 framed 家具（PlaceTile 锚=底行；本仓库 topY = y-(h-1)） */
-function placeFurniture(st: TileStore, tile: number, x: number, yBottom: number, style: number): boolean {
-  const d = TILE_DEFS[tile];
-  if (!d || !st.inBounds(x, yBottom)) return false;
-  const fw = d.vanilla?.fw ?? 1;
-  const w = d.w ?? fw, h = d.h ?? (d.vanilla?.fh ?? 1);
-  const topY = yBottom - (h - 1);
-  for (let dx = 0; dx < w; dx++) {
-    for (let dy = 0; dy < h; dy++) {
-      if (!st.inBounds(x + dx, topY + dy) || st.flags[st.idx(x + dx, topY + dy)] !== 0) return false;
-    }
+
+/** WorldGen.Place3x2（cs:52097,经 PlaceTile case 187 cs:60016 派发）：3×2
+ *  **底中锚** (x-1..x+1)×(y-1..y)——此前误按底左锚整体右移 1 列；足印全空 +
+ *  下列实心 + 186/187 底禁滚石（InvalidTileForPilesOrSpeleothems）。 */
+function place3x2(st: TileStore, x: number, y: number, style: number): boolean {
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:52099
+  let ok = true;
+  for (let c = x - 1; c <= x + 1; c++) {
+    for (let d = y - 1; d <= y; d++) if (activeAt(st, c, d)) ok = false;
+    if (invalidForPiles(st, c, y + 1)) ok = false;                    // cs:52143
+    if (!solidAt(st, c, y + 1)) ok = false;                           // cs:52150
   }
-  const sheet = d.vanilla?.sheet ?? -1;
-  const [bx, by] = furnitureStyleBase(sheet, style, fw);
-  for (let dx = 0; dx < w; dx++) {
-    for (let dy = 0; dy < h; dy++) {
-      st.setTileSilent(x + dx, topY + dy, tile, bx + dx * 18, by + dy * 18);
+  if (!ok) return false;
+  const d0 = TILE_DEFS[PILE2];
+  const [bx, by] = furnitureStyleBase(d0.vanilla?.sheet ?? -1, style, 3);
+  for (let c = x - 1; c <= x + 1; c++) {
+    for (let d = y - 1; d <= y; d++) {
+      st.setTileSilent(c, d, PILE2, bx + (c - (x - 1)) * 18, by + (d - (y - 1)) * 18);
     }
   }
   return true;
 }
 
-/** WorldGen.PlaceSmallPile（cs:46831）：size0 单格 / size1 2×1，frameY=size*18 */
+/** WorldGen.Place3x3 num=-2 分支（cs:53549,type 300-308 含织机 304）：3×3 底中锚
+ *  (x-1..x+1)×(y-2..y) 足印全空 + 下列实心（经 PlaceTile case 304 派发）。 */
+function place3x3(st: TileStore, x: number, y: number): boolean {
+  let ok = true;
+  for (let c = x - 1; c <= x + 1; c++) {
+    for (let d = y - 2; d <= y; d++) {
+      if (!st.inBounds(c, d) || activeAt(st, c, d)) ok = false;
+    }
+    if (!solidAt(st, c, y + 1)) ok = false;
+  }
+  if (!ok) return false;
+  const d0 = TILE_DEFS[LOOM];
+  const [bx, by] = furnitureStyleBase(d0.vanilla?.sheet ?? -1, 0, 3);
+  for (let c = x - 1; c <= x + 1; c++) {
+    for (let d = y - 2; d <= y; d++) {
+      st.setTileSilent(c, d, LOOM, bx + (c - (x - 1)) * 18, by + (d - (y - 2)) * 18);
+    }
+  }
+  return true;
+}
+
+/** WorldGen.Place1x2（cs:46665,经 PlaceTile case 15 派发）：占 (x,y-1)..(x,y)，
+ *  仅要求下方 SolidTile2 + (x,y-1) 空（不查 (x,y) 本身——原版如此）。 */
+function place1x2(st: TileStore, x: number, y: number, style: number): boolean {
+  if (!st.inBounds(x, y - 1) || !st.inBounds(x, y + 1)) return false;
+  if (!solidAt(st, x, y + 1) || activeAt(st, x, y - 1)) return false;
+  const d0 = TILE_DEFS[CHAIR];
+  const [bx, by] = furnitureStyleBase(d0.vanilla?.sheet ?? -1, style, 1);
+  st.setTileSilent(x, y - 1, CHAIR, bx, by);
+  st.setTileSilent(x, y, CHAIR, bx, by + 18);
+  return true;
+}
+
+/** WorldGen.PlaceTile case 10（cs:59870）→ PlaceDoor（cs:31938）：上行三格门框
+ *  （j-1/j-2 空、j-3 实心）→ PlaceDoor(i,j-1)；否则下行（j+1/j+2 空、j+3 实心）
+ *  → PlaceDoor(i,j+1)；否则失败。★PlaceDoor 成功放门 3 格各掷 Next(3) 帧变体
+ *  （cs:31952/31959/31966——流相关，此前 JS 无条件直写 0 掷=流错位根源之一）。 */
+function placeDoorTile(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
+  if (!st.inBounds(x, y - 3) || !st.inBounds(x, y + 3)) return false;
+  if (!activeAt(st, x, y - 1) && !activeAt(st, x, y - 2)
+    && activeAt(st, x, y - 3) && genSolidType(typeAt(st, x, y - 3))) {
+    return placeDoorCore(st, rng, x, y - 1, style);
+  }
+  if (activeAt(st, x, y + 1) || activeAt(st, x, y + 2)
+    || !activeAt(st, x, y + 3) || !genSolidType(typeAt(st, x, y + 3))) return false;
+  return placeDoorCore(st, rng, x, y + 1, style);
+}
+/** PlaceDoor 本体：占 (x,j-1..j+1)；门框上 (x,j-2) 实心 + 下 (x,j+2) SolidTile */
+function placeDoorCore(st: TileStore, rng: RNG, x: number, j: number, style: number): boolean {
+  if (!st.inBounds(x, j - 2) || !st.inBounds(x, j + 2)) return false;
+  if (!(activeAt(st, x, j - 2) && genSolidType(typeAt(st, x, j - 2)))) return false;
+  if (!solidAt(st, x, j + 2)) return false;
+  for (let dy = -1; dy <= 1; dy++) {
+    const v = rng.int(0, 2);                        // 帧变体三掷（流相关）
+    st.setTileSilent(x, j + dy, T.DOOR_CLOSED,
+      54 * Math.floor(style / 36) + v * 18, 54 * (style % 36) + (dy + 1) * 18);
+  }
+  return true;
+}
+
+/** WorldGen.PlaceSmallPile（cs:46831）：size0 单格 / size1 2×1；
+ *  锚 anyLava 拒绝（cs:46851）+ size1 底禁滚石（cs:46871）——2026-08-16 补齐 */
 function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, pileSize: number): boolean {
+  if (!st.inBounds(x + 1, y + 1) || !st.inBounds(x, y + 1)) return false;
+  const ai = st.idx(x, y);
+  if (st.liquid[ai] === 255 && st.liquidType[ai] === 2) return false; // anyLava（本仓岩浆=2）
   if (pileSize === 1) {
-    // cs:46853-46875:下方两格实心 + 上方两格空
-    if (!solidAt(st, x, y + 1) || !solidAt(st, x + 1, y + 1)) return false;
-    if (activeAt(st, x, y) || activeAt(st, x + 1, y)) return false;
+    // cs:46853-46875:下方两格实心 + 上方两格空 + 两侧底非滚石
+    let ok = solidAt(st, x, y + 1) && solidAt(st, x + 1, y + 1)
+      && !activeAt(st, x, y) && !activeAt(st, x + 1, y);
+    if (ok && (invalidForPiles(st, x, y + 1) || invalidForPiles(st, x + 1, y + 1))) ok = false;
+    if (!ok) return false;
     st.setTileSilent(x, y, SMALL_PILE, pileStyle * 36, 18);
     st.setTileSilent(x + 1, y, SMALL_PILE, pileStyle * 36 + 18, 18);
     return true;
@@ -189,6 +276,7 @@ function growLivingTreePassageRoom(
   if (num < 0) num3--;
   if (num > 0) num3++;
   const num4 = rng.int(15, 29);
+  if (LT_TRACE) console.log(`R1 st=${ltStream()} num=${num} num3=${num3} num5num=${num4}`);
   let num5 = num3 + num4;
   if (num < 0) { num5 = num3; num3 -= num4; }
   // cs:29321-29330:候选矩形碰到露天（无墙空气+地表以上）直接放弃
@@ -215,9 +303,11 @@ function growLivingTreePassageRoom(
       }
     }
   }
-  placeDoor(st, Math.floor((minl + minr) / 2) + 3 * num, Y, 7);   // cs:29363
+  const door1 = placeDoorTile(st, rng, Math.floor((minl + minr) / 2) + 3 * num, Y, 7);   // cs:29363
+  if (LT_TRACE) console.log(`R2door ok=${door1} st=${ltStream()}`);
   const num6 = rng.int(5, 8);
   const num7 = rng.int(4, 5);
+  if (LT_TRACE) console.log(`R3 st=${ltStream()} num6=${num6} num7=${num7}`);
   if (num < 0) { num5 = num3 + num6; num3 -= num6; }
   else { num3 = num5 - num6; num5 += num6; }
   num2 = Y - num7;
@@ -233,13 +323,16 @@ function growLivingTreePassageRoom(
       }
     }
   }
-  placeDoor(st, num < 0 ? num5 + 2 : num3 - 2, Y, 7);            // cs:29396
+  const door2 = placeDoorTile(st, rng, num < 0 ? num5 + 2 : num3 - 2, Y, 7);            // cs:29396
+  if (LT_TRACE) console.log(`R4door ok=${door2} st=${ltStream()}`);
   let num8 = num < 0 ? num3 : num5;
   // 椅子（tile 15 style 5，1/2 概率）——vanilla frameX += 18 是面向翻转（num 方向）
   let num9 = 2;
   if (rng.int(0, 1) === 0) {
     num9 += 2;
-    if (placeFurniture(st, CHAIR, num8, Y, 5) && num < 0) {
+    const ch1 = place1x2(st, num8, Y, 5);
+    if (LT_TRACE) console.log(`R5chair ok=${ch1} st=${ltStream()} num9=${num9}`);
+    if (ch1 && num < 0) {
       for (let dy = -1; dy <= 0; dy++) {
         const i = st.idx(num8, Y + dy);
         st.frameX[i] += 18;                                       // cs:29404
@@ -247,10 +340,13 @@ function growLivingTreePassageRoom(
     }
   }
   num8 = num < 0 ? num3 + 2 : num5 - 2;
-  placeFurniture(st, LOOM, num8, Y, 0);                           // 生命木织机 304（cs:29409）
+  const loomOk = place3x3(st, num8, Y);                           // 生命木织机 304（cs:29409）
+  if (LT_TRACE) console.log(`R6loom ok=${loomOk} st=${ltStream()}`);
   num8 = num < 0 ? num3 + 4 : num5 - 4;
   if (rng.int(0, num9 - 1) === 0) {
-    if (placeFurniture(st, CHAIR, num8, Y, 5) && num > 0) {
+    const ch2 = place1x2(st, num8, Y, 5);
+    if (LT_TRACE) console.log(`R7chair ok=${ch2} st=${ltStream()}`);
+    if (ch2 && num > 0) {
       for (let dy = -1; dy <= 0; dy++) {
         const i = st.idx(num8, Y + dy);
         st.frameX[i] += 18;                                       // cs:29415
@@ -269,11 +365,13 @@ function growLivingTreePassageRoom(
   let gy = Y;
   while (gy < st.h - 1 && !activeAt(st, num8, gy)) gy++;
   const wallOk = wallAt(st, num8 - 1, gy - 1) === WALL_LIVING_WOOD;
+  if (LT_TRACE) console.log(`R8pre st=${ltStream()} gy=${gy} wallOk=${wallOk}`);
   if (wallOk) {
     placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 12, loot: mainItemKey });
   } else {
     placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 0 });
   }
+  if (LT_TRACE) console.log(`R8chest st=${ltStream()}`);
 }
 
 // ---------- GrowLivingTree_HorizontalTunnel（cs:28783-29017） ----------
@@ -374,14 +472,14 @@ function growLivingTreeHorizontalTunnel(st: TileStore, rng: RNG, gs: GenState, i
       if (n11 <= left + 4 && !flag4) {
         if (typeAt(st, n11 - 1, n10) === T.DOOR_CLOSED || typeAt(st, n11 + 1, n10) === T.DOOR_CLOSED) flag4 = true;
         else if (rng.int(0, 2) === 0) {
-          placeDoor(st, n11, n10, style);
+          placeDoorTile(st, rng, n11, n10, style);
           if (typeAt(st, n11, n10) === T.DOOR_CLOSED) flag4 = true;
         }
       }
       if (n11 < right - 4 || flag5) continue;
       if (typeAt(st, n11 - 1, n10) === T.DOOR_CLOSED || typeAt(st, n11 + 1, n10) === T.DOOR_CLOSED) flag5 = true;
       else if (rng.int(0, 2) === 0) {
-        placeDoor(st, n11, n10, style);
+        placeDoorTile(st, rng, n11, n10, style);
         if (typeAt(st, n11, n10) === T.DOOR_CLOSED) flag5 = true;
       }
     }
@@ -408,6 +506,7 @@ function growLivingTreeMakePassage(
   let flag3 = true;
   let num9 = rng.int(5, 15);
   let minl = refs.minl, minr = refs.minr;
+  if (LT_TRACE) console.log(`MP enter st=${ltStream()} num6=${num6} num9=${num9}`);
   while (num6 > 0) {
     if (num4 > underworldLayer + rng.int(15, 30)) num6 = 0;   // cs:29053
     num4++;
@@ -490,16 +589,19 @@ function growLivingTreeMakePassage(
         minl += num12;                            // cs:29177 井筒蛇形横移
         minr += num12;
       }
+      if (LT_TRACE) console.log(`MP6 st=${ltStream()} num4=${num4} num12=${num12} minl=${minl} minr=${minr}`);
       if (noSecretRoom) {
         num9--;
         if (num9 <= 0) {
           num9 = growLivingTreeHorizontalTunnel(st, rng, gs, num10, num4)
             ? rng.int(5, 20) : rng.int(2, 10);    // cs:29182-29186
+          if (LT_TRACE) console.log(`MPt st=${ltStream()} num4=${num4}`);
         }
       }
       if (num5 <= 0 && !flag) {
         flag = true;
         growLivingTreePassageRoom(st, rng, gs, chests, minl, minr, num4);  // cs:29190
+        if (LT_TRACE) console.log(`MPr st=${ltStream()} num4=${num4}`);
       }
     }
     if (flag2) {
@@ -521,6 +623,7 @@ function growLivingTreeMakePassage(
       if (flag6) num6 = 0;                        // cs:29209
     }
   }
+  if (LT_TRACE) console.log(`MP exit st=${ltStream()} num4=${num4}`);
   refs.minl = startL; refs.minr = startR;         // cs:29216-29217 恢复
   // 井口 j-3..j 贯通 + 墙补（cs:29219-29242）
   for (let n14 = refs.minl; n14 <= refs.minr; n14++) {
@@ -597,7 +700,7 @@ export function growLivingTree(
   let num = 0;
   const ax5 = new Int32Array(2000), ax6 = new Int32Array(2000), ax7 = new Uint8Array(2000);
   let num2 = 0;
-  if (LT_TRACE) console.log(`GLTp head st=${ltStream()} num3=${num3} num4=${num4} num5=${num5}`);
+  if (LT_TRACE) console.log(`GLTp head st=${ltStream()} g=${ltGridHash(st)} num3=${num3} num4=${num4} num5=${num5}`);
   // ---- 主干收窄循环（cs:28271-28345） ----
   while (flag2) {
     num12++;
@@ -629,7 +732,7 @@ export function growLivingTree(
     }
     num11--;
   }
-  if (LT_TRACE) console.log(`GLTp trunk st=${ltStream()} num=${num}`);
+  if (LT_TRACE) console.log(`GLTp trunk st=${ltStream()} g=${ltGridHash(st)} num=${num}`);
   // ---- 侧枝（cs:28347-28420） ----
   for (let n15 = 0; n15 < num - 1; n15++) {
     let n16 = ax[n15] + ax3[n15];
@@ -666,7 +769,7 @@ export function growLivingTree(
       }
     }
   }
-  if (LT_TRACE) console.log(`GLTp branches st=${ltStream()}`);
+  if (LT_TRACE) console.log(`GLTp branches st=${ltStream()} g=${ltGridHash(st)}`);
   // ---- 顶部收尖 + 枝头（cs:28421-28509） ----
   let n20 = Math.floor((num3 + num4) / 2);
   let n21 = num11;
@@ -713,7 +816,7 @@ export function growLivingTree(
     n21--;
     n22--;
   }
-  if (LT_TRACE) console.log(`GLTp top st=${ltStream()}`);
+  if (LT_TRACE) console.log(`GLTp top st=${ltStream()} g=${ltGridHash(st)}`);
   // ---- 根系（cs:28511-28600） ----
   for (let n32 = minl; n32 <= minr; n32++) {
     let n33 = rng.int(1, 5);                              // cs:28514
@@ -737,11 +840,13 @@ export function growLivingTree(
       while (n33 > 0) {
         n33--;
         n42 += n39;
-        // 原版两次主步写均带 !wallDungeon 门（cs:28505/28511 区域）——地牢墙格
-        // 永不吃活木。★此前漏门=树根穿透地牢砖墙留 191 残留（2026-08-13 探针实锤）
-        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD && !isDungeonWall(wallAt(st, n42, n34))) setLivingWood(st, n42, n34);
-        n34 += 1;
-        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD && !isDungeonWall(wallAt(st, n42, n34))) setLivingWood(st, n42, n34);
+        // 1456 cs:28606/28619 两次主步写门 = `wall != 244`（活木墙挡写；地牢墙不挡——
+        // 1405:12796/12803 同）。★2026-08-16 对拍裁决：此前 JS 双门(wall≠244&&!wallDungeon)
+        // /oracle 单 wallDungeon 门均非原版语义；步进 cs:28612 `num34 += num40`（0=平移
+        // 不降,同格二次写幂等）此前两侧均误写死 1——n40 翻转一直被掷但从未生效。
+        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD) setLivingWood(st, n42, n34);
+        n34 += n40;
+        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD) setLivingWood(st, n42, n34);
         if (!activeAt(st, n42, n34 + 1)) { n39 = 0; n40 = 1; }   // cs:28547 悬空改竖直下扎
         if (rng.int(0, 2) === 0) {
           n39 = n41 < 0 ? (n39 === 0 ? -1 : 0) : (n41 <= 0 ? rng.int(-1, 1) : (n39 === 0 ? 1 : 0));
@@ -752,7 +857,7 @@ export function growLivingTree(
       }
     }
   }
-  if (LT_TRACE) console.log(`GLTp roots st=${ltStream()}`);
+  if (LT_TRACE) console.log(`GLTp roots st=${ltStream()} g=${ltGridHash(st)}`);
   // ---- 叶簇（cs:28603-28720） ----
   for (let n43 = 0; n43 < num2; n43++) {
     let n44 = rng.int(5, 7);
@@ -779,7 +884,7 @@ export function growLivingTree(
         if (inWorld(st, n50, n52, 5) && !activeAt(st, n50, n52)) {
           while (!activeAt(st, n50, n52 + 1) && n52 < n48) n52++;
           if (sheetAt(st, n50, n52 + 1) === 192) {
-            placeFurniture(st, PILE2, n50, n52, rng.int(50, 51));
+            place3x2(st, n50, n52, rng.int(50, 51));
           }
         }
       }
@@ -791,7 +896,7 @@ export function growLivingTree(
       while (!activeAt(st, n50, n53 + 1) && n53 < n54) n53++;
       if (sheetAt(st, n50, n53 + 1) === 192) continue;
       if (rng.int(0, 1) === 0) {
-        placeFurniture(st, PILE2, n50, n53, rng.int(47, 49));
+        place3x2(st, n50, n53, rng.int(47, 49));
         continue;
       }
       const n55 = rng.int(0, 1);
@@ -800,7 +905,7 @@ export function growLivingTree(
       placeSmallPile(st, n50, n53, pileStyle, n55);
     }
   }
-  if (LT_TRACE) console.log(`GLTp leaves st=${ltStream()} num2=${num2}`);
+  if (LT_TRACE) console.log(`GLTp leaves st=${ltStream()} g=${ltGridHash(st)} num2=${num2}`);
   // ---- 树干贯通竖井（cs:28722-28754）：宽干(num5>=4)且地表下无既有空腔时 ----
   if (flag) {
     let flag4 = false;
