@@ -366,10 +366,13 @@ function growLivingTreePassageRoom(
   while (gy < st.h - 1 && !activeAt(st, num8, gy)) gy++;
   const wallOk = wallAt(st, num8 - 1, gy - 1) === WALL_LIVING_WOOD;
   if (LT_TRACE) console.log(`R8pre st=${ltStream()} gy=${gy} wallOk=${wallOk}`);
+  // ★flags 必须显式传：rollChestLoot 的 isSurface 分支看 flags.sky/wooden（原版
+  //   cs:36171-36186 内部 fSky/fWood 等价物）——此前裸 style 12/0 掉进地下金箱
+  //   分支=掷骰流错位（2026-08-16 对拍实锤，R8chest 分歧点）
   if (wallOk) {
-    placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 12, loot: mainItemKey });
+    placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 12, loot: mainItemKey, flags: { sky: true } });
   } else {
-    placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 0 });
+    placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 0, flags: { wooden: true } });
   }
   if (LT_TRACE) console.log(`R8chest st=${ltStream()}`);
 }

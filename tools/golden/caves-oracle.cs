@@ -333,6 +333,16 @@ if (Environment.GetEnvironmentVariable("TERRAIN_ONLY") == "1") { Console.WriteLi
 
 // ================= 原语 =================
 bool mudWallFlag = false;
+// 原版 WorldGen.PlaceWall（cs:75189）：边界 (1,W-2)x(1,H-2) 内 **仅 wall==0 时**落墙，
+// 且成功落墙必经 SquareWallFrame→Framing.WallFrame(resetFrame:true) 掷 1 颗
+// genRand.Next(0,3)（cs:390；墙 15/64/178/180 均非 wallLargeFrames 1/2 表 → 必掷）。
+// 曾无条件覆写+零掷骰 → jungle 段流指纹与墙网双双分叉（j_r1 起即错）。
+void PlaceWall(int k, int l, int type)
+{
+    if (k <= 1 || l <= 1 || k >= W - 2 || l >= H - 2) return;
+    int wi = l * W + k;
+    if (wal[wi] == 0) { wal[wi] = (ushort)type; r.Next(0, 3); }
+}
 void TileRunner(double i, double j, double strength, int steps, int type,
     bool addTile = false, double speedX = 0.0, double speedY = 0.0, bool noYChange = false,
     bool overRide = true, int ignoreTileType = -1)
@@ -368,11 +378,11 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                 {
                     if (y > lavaLine - (int)r.Next(0, 4) - 50)
                     {
-                        if (wal[(y-1) * W + x] != 64 && wal[(y+1) * W + x] != 64 && wal[y * W + x - 1] != 64 && wal[y * W + x + 1] != 64) wal[ti] = 15;
+                        if (wal[(y-1) * W + x] != 64 && wal[(y+1) * W + x] != 64 && wal[y * W + x - 1] != 64 && wal[y * W + x + 1] != 64) PlaceWall(x, y, 15);
                     }
                     else if (wal[(y-1) * W + x] != 15 && wal[(y+1) * W + x] != 15 && wal[y * W + x - 1] != 15 && wal[y * W + x + 1] != 15)
                     {
-                        wal[ti] = 64;
+                        PlaceWall(x, y, 64);
                     }
                 }
                 if (type < 0)
@@ -1192,7 +1202,15 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
         for (int x = x0; x < x1; x++)
             for (int y = y0; y < y1; y++)
                 if (Math.Abs(x - px) + Math.Abs(y - py) < num * 0.5 * (1 + (int)r.Next(-10, 11) * 0.015))
-                    act[y * W + x] = 0;
+                {
+                    // 原版 WorldGen.KillTile（cs:63559，worldgen 期）：活性格 active=false
+                    // **且 type=0**（cs:63970 尾部 tile.type=0；SquareTileFrame 的
+                    // Next(0,3) 在 !generatingWorld 门内不掷）。非活性格早退不动（保留
+                    // TileRunner 挖空的幽灵 type）。曾"保留 type"→ 收尾拒绝采样
+                    //（type!=59 读幽灵）与 typ 网分叉。
+                    int ki = y * W + x;
+                    if (act[ki] == 1) { act[ki] = 0; typ[ki] = 0; }
+                }
         num2++;
         if (num2 > 10 && (int)r.Next(50) < num2)
         {

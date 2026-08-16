@@ -107,9 +107,13 @@ function generateTunnelToSurface(st: TileStore, rng: RNG, gs: GenState, i: numbe
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         if (Math.abs(x - px) + Math.abs(y - py) < radius * 0.5 * (1 + rng.int(-10, 10) * 0.015)) {
-          // 原版 KillTile：只 active(false) **保留 type**（幽灵语义）——清零会
-          // 让后续拒绝采样（查 type==59）判定分叉
-          st.flags[st.idx(x, y)] = 0;
+          // 原版 WorldGen.KillTile（cs:63559，worldgen 期）：活性格 active(false)
+          // **且 type=0**（cs:63970 尾部；SquareTileFrame 的 Next(0,3) 在
+          // !generatingWorld 门内不掷）；非活性格早退不动（TileRunner 挖空格的
+          // 幽灵 type 得以保留）。曾误记"保留 type"→ 收尾拒绝采样（查 type==59
+          // 会读到幽灵泥）与 typ 网双双分叉。
+          const ii = st.idx(x, y);
+          if (st.flags[ii]) { st.flags[ii] = 0; st.type[ii] = 0; }
         }
       }
     }

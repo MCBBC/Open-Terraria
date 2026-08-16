@@ -67,6 +67,16 @@ for (let _i = 0; _i < TILE_DEFS.length; _i++) {
   if (_d && _d.framed && !_d.decor) FRAMED_SKIP[_i] = 1;
 }
 
+/** 原版 WorldGen.PlaceWall（cs:75189）：边界 (1,W-2)×(1,H-2) 内 **仅 wall==0 时**落墙；
+ *  成功落墙必经 SquareWallFrame→Framing.WallFrame(resetFrame:true) 掷 1 颗 Next(0,3)
+ *  （cs:390——墙 15/64/178/180 均不在 wallLargeFrames 1/2 表 → 必掷）。
+ *  曾无条件覆写+零掷骰 → jungle 段流指纹与墙网从首个泥 runner 起分叉。 */
+function placeWall(st: TileStore, rng: RNG, x: number, y: number, type: number): void {
+  if (x <= 1 || y <= 1 || x >= st.w - 2 || y >= st.h - 2) return;
+  const i = st.idx(x, y);
+  if (st.wall[i] === 0) { st.wall[i] = type; rng.int(0, 2); }
+}
+
 export function tileRunner(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, o: TileRunnerOpts,
@@ -114,23 +124,24 @@ export function tileRunner(
         if (ignoreTileType >= 0 && ty[ti] === ignoreTileType && tf[ti]) continue;
         const dist = Math.abs(x - px) + Math.abs(y - py);
         if (dist >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
-        // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻)
+        // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻;落墙走
+        // PlaceWall 语义=仅空墙可落+成功必掷 1 颗 Next(0,3))
         // ★局部化:twall=st.wall 提局部 + idx 内联(泥 runner 每格 5-8 次跳读,热点)
         if (o.mudWall && y > gs.worldSurface && twall[ti - stW] !== 2
           && y < st.h - 210 - rng.int(0, 2)
           && dist < strength * 0.45 * (1 + rng.int(-10, 10) * 0.01)) {
           if (y > gs.lavaLine - rng.int(0, 3) - 50) {
             if (twall[ti - stW] !== 64 && twall[ti + stW] !== 64
-              && twall[ti - 1] !== 64 && twall[ti + 1] !== 64) twall[ti] = 15;
+              && twall[ti - 1] !== 64 && twall[ti + 1] !== 64) placeWall(st, rng, x, y, 15);
           } else if (twall[ti - stW] !== 15 && twall[ti + stW] !== 15
             && twall[ti - 1] !== 15 && twall[ti + 1] !== 15) {
-            twall[ti] = 64;
+            placeWall(st, rng, x, y, 64);
           }
         }
-        // granite/marble 伴生墙(cs L46503-46506):核心 0.3R 内同步铺墙 180/178
+        // granite/marble 伴生墙(cs:77272-77278):核心 0.3R 内 PlaceWall 180/178
         if (type === GRANITE || type === MARBLE) {
           if (dist < strength * 0.3 * (1 + rng.int(-10, 10) * 0.01)) {
-            twall[ti] = type === GRANITE ? 180 : 178;
+            placeWall(st, rng, x, y, type === GRANITE ? 180 : 178);
           }
         }
         if (type < 0) {
