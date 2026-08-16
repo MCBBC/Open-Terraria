@@ -18,6 +18,18 @@ const int BEACH_DISTANCE = 380; // WorldGen.beachDistance（cs:4102）
 var asm = Assembly.LoadFrom("/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe");
 dynamic r = Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
 
+// ★每 pass 种子重播（2026-08-16 num4 破解收尾：RunPass 语义推广全链）——
+// 原版每个 GenPass 执行前 Main.rand = new UnifiedRandom(_seed)
+// （1456 WorldGenerator.cs:497；服务器 exe IL RunPass：newobj UnifiedRandom::
+// ctor(Int32) + stsfld Main::rand），GenBase._random => genRand => Main.rand
+// ⇒ 每个 pass 的掷骰流各自从 stream(seed) 第 0 掷开始，pass 间【不续流】。
+// terrain 段下方 :199 的重绑即此语义；本改造把它推广到链内全部 44 个 pass 边界
+// （对照 AddGenerationPass 注册序 WorldGen.cs:11540-15887）。pass 内多检查点段
+// （Desert 的 mound/entrance/hive、Dungeon 的 17 段、Shimmer 的 shell/pillars/
+// open）是【一个 pass 的内部段】，只在 pass 头重播一次。
+Type URType = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+void Replay() => r = (dynamic)Activator.CreateInstance(URType, seed)!;
+
 
 // ---- 网格（vanilla tile id；行主序 y*W+x，同 JS TileStore）----
 var act = new byte[W * H];
@@ -554,8 +566,19 @@ void Mountinater(int i, int j)
     }
 }
 
+Replay(); // ▶pass 头重播：DunesAndPyramidLocations cs:11540
 // ================= Pass 1：Dunes（cs:11540-11602 + DunesBiome.cs + SurfaceMap.cs）=================
 int dungeonTheme = (int)r.Next(3); // DungeonCrawler.SetupDungeonGenVarVariables（cs:11542 + DungeonCrawler.cs:56）——地牢砖主题 0/1/2=蓝/绿/粉
+
+// ★入口三掷归位（2026-08-16 每 pass 重播改造）：SetupDungeonGenVarVariables 尾段
+//   的入口类型掷①② Next(3)（DungeonCrawler.cs:174/177，Legacy→Dome→Tower 门）
+//   + MakeDungeon_GetEntranceSettings.RandomSeed Next()（:856）原版就在【Dunes pass 头】
+//   消耗——此前 oracle/JS 同步延后到 Dungeon pass 头是续流期的历史妥协；pass 边界
+//   重播后 dunes 流须与原版逐掷对齐，三掷随主题掷后即掷。A/B 结果照掷照弃
+//   （Legacy 路径不消费——转写债，两侧同构），entSeed 供 DgEntrance 消费。
+int dgEntA = (int)r.Next(3);        // 入口类型掷①（普通世界 flag 即真只跑一轮）
+int dgEntB = (int)r.Next(3);        // 入口类型掷②
+int dgEntSeed = (int)r.Next();      // preGenDungeonEntranceSettings.RandomSeed（Legacy 不预计算位置）
 // Count：WorldGenRange(1,2,ScaleWith:WorldWidth) → Next((int)(w/4200*1), (int)(w/4200*2)+1)
 int dunesCount = (int)r.Next((int)(W / 4200.0 * 1), (int)(W / 4200.0 * 2) + 1);
 var pyrX = new List<int>(); var pyrY = new List<int>();
@@ -693,6 +716,7 @@ void PlaceCurvedLine(int sx, int sy, int ex, int ey, (int, int) anchor, int[] su
 }
 Checkpoint("dunes");
 
+Replay(); // ▶pass 头重播：OceanSand cs:11603
 // ================= Pass 2：OceanSand（cs:11603-11711）=================
 for (int i = 0; i < 3; i++)
 {
@@ -741,6 +765,7 @@ for (int i = 0; i < 3; i++)
 // 逐列沙顶剖面（诊断用）
 Checkpoint("oceansand");
 
+Replay(); // ▶pass 头重播：SandPatches cs:11712
 // ================= Pass 3：SandPatches（cs:11712-11737）=================
 {
     int num = (int)((double)W * 0.013);
@@ -755,6 +780,7 @@ Checkpoint("oceansand");
 }
 Checkpoint("sandpatches");
 
+Replay(); // ▶pass 头重播：Tunnels cs:11743
 // ================= Pass 4：Tunnels（cs:11745-11808）=================
 int dsX = 0, dsY = 0, dsR = 0, dsB = 0;
 int grassSpread = 0;   // SpreadGrass 洪水计数（mushroom/corruption 共用）   // UndergroundDesertLocation（corruption 避让消费）
@@ -797,6 +823,7 @@ Checkpoint("tunnels");
 var mCaveX = new List<int>();
 var mCaveY = new List<int>();
 
+Replay(); // ▶pass 头重播：MountainCaves cs:11809
 // ================= Pass 5：MountainCaves（cs:11809-11882，山丘本体；pass 34 开口在 Beaches 后）=================
 {
     int num = (int)((double)W * 0.001);
@@ -837,6 +864,7 @@ var mCaveY = new List<int>();
 }
 Checkpoint("mountaincaves");
 
+Replay(); // ▶pass 头重播：DirtWallBackgrounds cs:11883
 // ================= Pass 6：DirtWallBackgrounds（cs:11883-11921）=================
 {
     int num = 0;
@@ -860,6 +888,7 @@ Checkpoint("mountaincaves");
 }
 Checkpoint("dirtwallbg");
 
+Replay(); // ▶pass 头重播：RocksInDirt cs:11922
 // ================= Pass 7-9：RocksInDirt / DirtInRocks / Clay（cs:11922-12033）=================
 int oreCalls = 0;
 void OreBand(double count, int yMin, int yMax, int type, int sMin, int sMax, int stMin, int stMax)
@@ -885,7 +914,9 @@ OreBand(W * H * 0.00015, 0, (int)gvWorldSurfaceLow, 1, 4, 14, 5, 39); // Next(0,
     }
 }
 OreBand(W * H * 0.0045, (int)gvWorldSurfaceHigh, (int)gvRockLayerHigh, 1, 2, 6, 2, 22);
+Replay(); // ▶pass 头重播：DirtInRocks cs:11952（rocksclay 内部边界）
 OreBand(W * H * 0.005, (int)gvRockLayerLow, H - 1, 0, 2, 5, 2, 39);
+Replay(); // ▶pass 头重播：Clay cs:11985（rocksclay 内部边界）
 OreBand((int)(W * H * 0.00002), 0, (int)gvWorldSurfaceLow - 1, 40, 4, 13, 10, 49);
 OreBand((int)(W * H * 0.00005), (int)gvWorldSurfaceLow, (int)gvWorldSurfaceHigh, 40, 8, 13, 15, 44);
 OreBand((int)(W * H * 0.00002), (int)gvWorldSurfaceHigh, (int)gvRockLayerHigh, 40, 8, 14, 5, 49);
@@ -902,6 +933,7 @@ for (int x = 5; x < W - 5; x++)
 }
 Checkpoint("rocksclay");
 
+Replay(); // ▶pass 头重播：SmallHoles cs:12034
 // ================= Pass 10：SmallHoles（cs:12034-12092）=================
 {
     double wsh = gvWorldSurfaceHigh; // raw double
@@ -928,6 +960,7 @@ Checkpoint("rocksclay");
 }
 Checkpoint("smallholes");
 
+Replay(); // ▶pass 头重播：DirtLayerCaves cs:12094
 // ================= Pass 11：DirtLayerCaves（cs:12094-12134）=================
 {
     double wsh = gvWorldSurfaceHigh;
@@ -945,6 +978,7 @@ Checkpoint("smallholes");
 }
 Checkpoint("dirtlayer");
 
+Replay(); // ▶pass 头重播：RockLayerCaves cs:12135
 // ================= Pass 12：RockLayerCaves（cs:12135-12165）=================
 {
     int num = (int)((double)(W * H) * 0.00013);
@@ -959,6 +993,7 @@ Checkpoint("dirtlayer");
 }
 Checkpoint("rocklayer");
 
+Replay(); // ▶pass 头重播：SurfaceCaves cs:12191
 // ================= Pass 13：SurfaceCaves（cs:12191-12300）=================
 {
     int beachL = leftBeachEnd + 20, beachR = rightBeachStart - 20;
@@ -994,6 +1029,7 @@ Checkpoint("rocklayer");
 Checkpoint("surfacecaves");
 
 
+Replay(); // ▶pass 头重播：IceBiome cs:12343
 // ================= Pass 16：IceBiome（cs:12343-12440，1456 注册序紧跟 SurfaceCaves）=================
 var snowMinXArr = new int[H];
 var snowMaxXArr = new int[H];
@@ -1051,6 +1087,7 @@ var snowMaxXArr = new int[H];
 }
 Checkpoint("icebiome");
 
+Replay(); // ▶pass 头重播：Grass cs:12454
 // ================= Grass（cs:12454-12507）=================
 {
     double count = (double)(W * H) * 0.002;
@@ -1078,6 +1115,7 @@ Checkpoint("icebiome");
 }
 Checkpoint("grass");
 
+Replay(); // ▶pass 头重播：JunglePass cs:12497
 // ================= Jungle（JunglePass.cs 全文 1:1）=================
 {
     double ws = W / 4200.0 * 1.5;
@@ -1242,6 +1280,7 @@ Checkpoint("grass");
 }
 Checkpoint("jungle");
 
+Replay(); // ▶pass 头重播：MudCavesToJungleGrass cs:12499
 // ================= MudCavesToJungleGrass（cs:12499-12530，零 RNG 状态机）=================
 {
 
@@ -1316,6 +1355,7 @@ Checkpoint("jungle");
 }
 Checkpoint("mudcaves");
 
+Replay(); // ▶pass 头重播：DesertBiome cs:12532（整 pass 一次）
 // ================= Desert Sub-A（DesertBiome pass cs:12532 + DesertDescription + SandMound）=================
 // Sub-B（DesertHive）与 Sub-C（入口 4 形状）转录至 Checkpoint("desertdone")。
 // ★cs:12537 pass 首句 `Main.tileSolid[484] = false`：滚动仙人掌自本 pass 起生成期
@@ -1902,6 +1942,7 @@ if (Environment.GetEnvironmentVariable("HIVE_DUMP") != null) {
 }
 Checkpoint("desertdone");   // CleanupArea 仅 SquareWallFrame/TileFrame——无哈希效应
 
+Replay(); // ▶pass 头重播：GlowingMushroomPatches cs:12581
 // ================= Pass 20 GlowingMushroomPatches（cs:12581-12709 + ShroomPatch cs:80540 + SpreadGrass cs:75210）=================
 void SpreadGrassGen(int gi, int gj, int gdirt, int ggrass, bool grepeat = true)
 {
@@ -2143,6 +2184,7 @@ void PlaceTightGen(int tx, int ty)   // cs:38329（生成期 shimmer 恒无 → 
     PlaceStalactite(tx, ty, (int)r.Next(2) == 0, (int)r.Next(3));
 }
 
+Replay(); // ▶pass 头重播：Marble cs:12800
 // ================= Pass 21 Marble（cs:12800 + MarbleBiome.cs）=================
 bool MarblePlace(int mox, int moy)
 {
@@ -2258,6 +2300,7 @@ bool MarblePlace(int mox, int moy)
 }
 Checkpoint("marble");
 
+Replay(); // ▶pass 头重播：Granite cs:12884
 // ================= Pass 22 Granite（cs:12884 + GraniteBiome.cs）=================
 void GranitePlace(int gox0, int goy0)
 {
@@ -2421,6 +2464,7 @@ void GranitePlace(int gox0, int goy0)
 }
 Checkpoint("granite");
 
+Replay(); // ▶pass 头重播：FloatingIslands cs:12976
 // ================= Pass 23 FloatingIslands（cs:12976 + CloudIsland cs:78618 + CloudLake cs:79068）=================
 bool WaterStaysPut(int wx, int wy)   // WillWaterPlacedHereStayPut（cs:79050）
 {
@@ -2810,6 +2854,7 @@ void CloudLake(int ci, int cj)
 }
 Checkpoint("islands");
 
+Replay(); // ▶pass 头重播：DirtToMud cs:13172
 // ================= Pass 24 DirtToMud（cs:13172-13191）=================
 {
     double dmCount = (double)(W * H) * 0.001;
@@ -2818,6 +2863,7 @@ Checkpoint("islands");
 }
 Checkpoint("dirttomud");
 
+Replay(); // ▶pass 头重播：Silt cs:13192
 // ================= Pass 25 Silt（cs:13192-13231）=================
 {
     int siCount = (int)((float)(W * H) * 0.0001f);
@@ -2839,6 +2885,7 @@ Checkpoint("dirttomud");
 }
 Checkpoint("silt");
 
+Replay(); // ▶pass 头重播：OresAndShinies cs:13233
 // ================= Pass 26 OresAndShinies（cs:13233-13658 普通世界分支）=================
 void ShinyBand(double oCount, int yMin, int yMax, int sMin, int sMax, int stMin, int stMax, int oType)
 {
@@ -2863,6 +2910,7 @@ void ShinyBand(double oCount, int yMin, int yMax, int sMin, int sMax, int stMin,
 }
 Checkpoint("ores");
 
+Replay(); // ▶pass 头重播：Webs cs:13659
 // ================= Pass 27 Webs（cs:13659-13696）=================
 {
     int wbCount = (int)((double)(W * H) * 0.0006);
@@ -2942,6 +2990,7 @@ void GrowAshTree(int tx, int ty)
 }
 
 int[] uwConv={0}, uwCand={0}, uwGrow={0};
+Replay(); // ▶pass 头重播：Underworld cs:13697
 // ================= Pass 28 Underworld（cs:13697-13918 普通世界分支）=================
 // ★Liquid.QuickWater(-2)（cs:13788）两侧一致省略（液体模拟子系统，见遗留）；
 //  AddHellHouses 在 JS 侧为独立槽（本链其后）——两侧一致。
@@ -3050,6 +3099,7 @@ int[] uwConv={0}, uwCand={0}, uwGrow={0};
 }
 Checkpoint("underworld");
 
+Replay(); // ▶pass 头重播：CorruptionAndCrimson cs:13919
 // ================= Pass 29 CorruptionAndCrimson（cs:13919-14613 + ChasmRunnerSideways cs:75323 + CanEvilReplace cs:75527 + CrimStart cs:75543 + CrimPlaceHearts cs:75854 + ChasmRunner cs:76066）=================
 // 普通世界：flipInfections/drunk/remix/tenthAnniversary 全 false；dungeonSide = dungeonRight ? 1 : -1
 // WallID.Sets.WallTypeToTerrainTileType（WallID.cs:66）：40→147、71→161、15→59、
@@ -3835,6 +3885,7 @@ List<int>? lkXOut = null;            // GenVars.LakeX（Lakes 诊断导出用）
 // tileSolidTop 表（Main.tileSolidTop）——Lakes WillWater / Dungeon SolidTileX 共用
 var dgSolidTop = new HashSet<int> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
 
+Replay(); // ▶pass 头重播：Lakes cs:14613
 // ================= Pass 30 Lakes（cs:14613-14755 + SonOfLakinater cs:80354）=================
 // 注：#29 Corruption（cs:13919）未转录——插入位在本块之前（JS 侧在 vanillaBiomes 内已先跑）
 void SonOfLakinater(int li, int lj)
@@ -4031,6 +4082,7 @@ if (Environment.GetEnvironmentVariable("LAKE_DUMP") != null) {
     return;
 }
 
+Replay(); // ▶pass 头重播：Slush cs:14756
 // ================= Pass 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756-14815）=================
 {
     for (int sy = snowTopGen; sy < snowBottomGen; sy++)
@@ -4060,13 +4112,14 @@ if (Environment.GetEnvironmentVariable("LAKE_DUMP") != null) {
     }
 }
 Checkpoint("slush");
+Replay(); // ▶pass 头重播：Dungeon cs:14816（17 内部检查点不中间重播）
 // ================= Pass 32 Dungeon（cs:14816 + DungeonCrawler.cs + Legacy* 全家 1:1）=================
 // 普通世界 = Legacy 路径：LegacyDungeonLayoutProvider(LegacyDungeonLayout) +
 // LegacyDungeonHall / LegacyEntranceDungeonHall / LegacyDungeonRoom / LegacyDungeonEntrance
 // + DungeonGlobal{Early/Spikes/Doors/WallVariants/Platforms/BiomeChests/Bookshelves/
 //   BasicChests/Lights/Traps/GroundFurniture/Paintings/Banners/Late} 特征管线。
-// ★掷骰位移说明：SetupDungeonGenVarVariables 的入口类型 2 掷 + entrance RandomSeed
-// 原版在 **Dunes pass 头**消耗（cs:11542，先于中间全部 pass）；本 oracle 与 JS 侧
+// ★掷骰位移说明（2026-08-16 已消除）：入口类型 2 掷 + entrance RandomSeed
+// 原版在 **Dunes pass 头**消耗（cs:11542）——现已随每 pass 重播改造归位 Dunes 头（两侧同步），本注释留档；本 oracle 与 JS 侧
 // 同步**延后到本 pass 头**（相对序保持 A→B→Seed→shelf→lantern→skewed）——
 // pre-dungeon 检查点哈希保持现状，两端口径一致。
 var dgUR = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
@@ -4091,9 +4144,7 @@ int dgPotR = dungeonRight ? W - (int)(W * 0.05000000074505806) : (int)(W * (0.5 
 int dgPotT = Math.Clamp((int)((double)H * dgPotTp), 10, H - 10);
 int dgPotB = Math.Clamp((int)((double)H * dgPotBt), 10, H - 10);
 dgPotL = Math.Clamp(dgPotL, 10, W - 10); dgPotR = Math.Clamp(dgPotR, 10, W - 10);
-int dgEntA = (int)r.Next(3);        // 入口类型掷①（普通世界 flag 即真只跑一轮；结果不消费照掷）
-int dgEntB = (int)r.Next(3);        // 入口类型掷②
-int dgEntSeed = (int)r.Next();      // preGenDungeonEntranceSettings.RandomSeed（Legacy 不预计算位置）
+// （入口三掷 dgEntA/dgEntB/dgEntSeed 已随每 pass 重播改造归位 Dunes pass 头）
 var dgShelf = new int[3];           // cs:243-254 书架平台样式（三选不重复）
 dgShelf[0] = (int)r.Next(9, 13);
 do { dgShelf[1] = (int)r.Next(9, 13); } while (dgShelf[1] == dgShelf[0]);
@@ -6560,6 +6611,7 @@ void DgBanners()
 }
 // ★#29 Corruption（cs:13919）与 #32 Dungeon（cs:14816）尚未转录——转录后须插在
 
+Replay(); // ▶pass 头重播：MountainCaveOpenings cs:14932
 // ================= Pass 33：MountainCaveOpenings（cs:14932-14947）+ Pass 34：Beaches（cs:14947-15087）=================
 // 1456 注册序在 Dungeon(32) 之后——本 oracle 尚未转录 26-32 段（Mushroom/Marble/
 // Granite/Islands/DirtToMud/Silt/Ores/Underworld/Corruption/Lakes/Slush/Dungeon），
@@ -6657,6 +6709,7 @@ for (int i = 0; i < mCaveX.Count; i++)
 }
 Checkpoint("mcopenings");
 
+Replay(); // ▶pass 头重播：BeachesAndOceanCleanup cs:14947
 // ---- Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）----
 {
     bool floridaL = false, floridaR = false;
@@ -6750,6 +6803,7 @@ uint StreamHash()
 void StreamPt(string n) => streamPts.Add($"{n}|{StreamHash():x8}");
 StreamPt("beaches");
 
+Replay(); // ▶pass 头重播：Gems cs:15109
 // ================= Pass 35 Gems（cs:15109-15196 普通世界分支）=================
 // 头句 `Main.tileSolid[484] = false`（cs:15114）是对 cs:12537 DesertBiome 头的
 // 冗余重放——本 oracle :1284 已删 484，此处不再重复（HashSet.Remove 幂等，语义同）。
@@ -6803,6 +6857,7 @@ StreamPt("beaches");
 Checkpoint("gems");
 StreamPt("gems");
 
+Replay(); // ▶pass 头重播：GravitatingSandCleanup cs:15198
 // ================= Pass 36 GravitatingSandCleanup（cs:15198-15226）=================
 // 零掷骰纯扫描。SolidOrSlopedTile（cs:70064）= active && tileSolid && !tileSolidTop
 // （half/slope 此链位恒 0，SolidTileGen 即等价）；TileID.Sets.Falling（TileID.cs:391）。
@@ -6837,6 +6892,7 @@ StreamPt("gems");
 Checkpoint("gravitatingsand");
 StreamPt("gravitatingsand");
 
+Replay(); // ▶pass 头重播：OceanCaves cs:15228
 // ================= Pass 37 OceanCaves（cs:15228-15254 + oceanCave :76686-76990）=================
 bool BadOceanCaveTiles(int x, int y)
 {
@@ -7023,6 +7079,7 @@ void OceanCaveFn(int i, int j)
 Checkpoint("oceancaves");
 StreamPt("oceancaves");
 
+Replay(); // ▶pass 头重播：Shimmer cs:15256（shell/pillars/open 内部段不重播；重播在 SW_DUMP_SHIMMER 之前）
 // ================= Pass 38 Shimmer（cs:15256-15308 + ShimmerMakeBiome :34889-35093）=================
 // GemTreeGroundTest（cs:30461）= Conversion.Stone{1,25,117,203} ∪ Conversion.Moss
 // （Moss 表见 TileID.Sets.cs:37；本链位无苔藓格，保留全集备哈希）
@@ -7652,6 +7709,7 @@ bool AddBuriedChestGen(int i, int j, int mainItemInChest, int chestStyle, ushort
     return false;
 }
 
+Replay(); // ▶pass 头重播：DirtWallCleanup cs:15310
 // ================= Pass 39 DirtWallCleanup（cs:15310-15425）=================
 // 纯墙 pass：typ/act/liq 不动。两遍扫描（左→右 i∈[3,W-4]；右→左 num2∈[W-5..5]）。
 // 中央列墙集 {2,40,64,86}/{2,40,64}；邻列恒 {2,40}（反编译 `==2||==40||==40` 的
@@ -7705,6 +7763,7 @@ bool AddBuriedChestGen(int i, int j, int mainItemInChest, int chestStyle, ushort
 Checkpoint("dirtwallcleanup");
 StreamPt("dirtwallcleanup");
 
+Replay(); // ▶pass 头重播：Pyramids cs:15426
 // ================= Pass 40 Pyramids（cs:15426-15535 + Pyramid cs:27816-28122）=================
 // WorldGen.Pyramid（cs:27816）：沙岩砖 151 主体 + 墙 34 + 入口阶梯掏空 → 之字形
 // 下行隧道（端点房间：金箱 style1 主件 848/857/934、小堆 185、旗帜 91×4、瓦罐 28）
@@ -7930,9 +7989,12 @@ bool PyramidGen(int i, int j, int pyramidMinDepth, int pyramidMaxDepth, bool noT
         }
     }
 }
+if (Environment.GetEnvironmentVariable("GV_DUMP") != null)
+    Console.WriteLine($"GVDUMP worldSurface={worldSurface} rockLayer={rockLayer} lavaLine={lavaLine} waterLine={waterLine} worldSurfaceLow={gvWorldSurfaceLow.ToString(System.Globalization.CultureInfo.InvariantCulture)} dungeonRight={(dungeonRight ? 1 : 0)} dgPosX={dgPosX} crimson={(crimson ? 1 : 0)} shimmerX={shimmerXOut} shimmerY={shimmerYOut} pyrX={string.Join(",", pyrX)} pyrY={string.Join(",", pyrY)} mCaveX={string.Join(",", mCaveX)} mCaveY={string.Join(",", mCaveY)}");
 Checkpoint("pyramids");
 StreamPt("pyramids");
 
+Replay(); // ▶pass 头重播：DirtRockWallRunner cs:15536
 // ================= Pass 41 DirtRockWallRunner（cs:15536-15550 + DirtyRockRunner cs:77503-77579）=================
 void DirtyRockRunnerG(int i, int j)
 {
@@ -7984,6 +8046,7 @@ void DirtyRockRunnerG(int i, int j)
 Checkpoint("dirtrockwallrunner");
 StreamPt("dirtrockwallrunner");
 
+Replay(); // ▶pass 头重播：LivingTrees cs:15551
 // ================= Pass 42 LivingTrees（cs:15551-15791 + GrowLivingTree cs:28123-28759）=================
 bool GrowLivingTree_CanPlaceLeavesG(int i, int j)
 {
@@ -8775,6 +8838,7 @@ bool GrowLivingTreeG(int i, int j, bool patch)
 Checkpoint("livingtrees");
 StreamPt("livingtrees");
 
+Replay(); // ▶pass 头重播：LivingTreeWalls cs:15792
 // ================= Pass 42b LivingTreeWalls（cs:15792-15824，零掷骰）=================
 {
     for (int i = 25; i < W - 25; i++)
@@ -8802,6 +8866,7 @@ StreamPt("livingtrees");
 Checkpoint("livingtreewalls");
 StreamPt("livingtreewalls");
 
+Replay(); // ▶pass 头重播：DemonAndCrimsonAltars cs:15825
 // ================= Pass 43 DemonAndCrimsonAltars（cs:15825-15885）=================
 {
     // cs:15831 `Main.tileSolid[484] = false` —— oracle :1284 已摘除（幂等）
@@ -8834,6 +8899,7 @@ StreamPt("livingtreewalls");
 Checkpoint("altars");
 StreamPt("altars");
 
+Replay(); // ▶pass 头重播：SurfaceWaterInJungle cs:15887
 // ================= Pass 44 SurfaceWaterInJungle（cs:15887-15910，零掷骰）=================
 {
     for (int i = 0; i < W; i++)

@@ -92,51 +92,88 @@ function streamHash(rng: RNG): string {
  *  前缀段（terrain..beaches）与 caves-checkpoint.chainCheckpoints 逐行同构——
  *  为避免 import 副作用（连带其 describe 跑挂）在此独立复刻，顺序改动须两处同步。 */
 function shimmerChain(seedText: string, evil: 0 | 1) {
-  const { world, rng, gs } = runResetAndTerrain({ width: 4200, height: 1200, seedText, evil });
+  const { world, rng, gs, seed } = runResetAndTerrain({ width: 4200, height: 1200, seedText, evil });
   const st = world.store;
   const grids = new Map<string, string>();
   const streams = new Map<string, string>();
+  // ★每 pass 种子重播（RunPass 语义，WorldGenerator.cs:497）——与 caves-checkpoint
+  //   的 chainCheckpoints 逐行同构（两处顺序改动必须同步）。零掷骰 pass 照播
+  //   （oracle 同样重播，stream 指纹才能对齐）。
+  const replay = () => rng.reseed(seed);
   const snap = (n: string) => { grids.set(n, hashGrids(st)); streams.set(n, streamHash(rng)); };
   grids.set('terrain', hashGrids(st)); streams.set('terrain', streamHash(rng));
+  replay(); // ▶Dunes cs:11540
   runDunesPass(st, rng, gs); snap('dunes');
+  replay(); // ▶OceanSand cs:11603
   runOceanSandPass(st, rng, gs); snap('oceansand');
+  replay(); // ▶SandPatches cs:11712
   runSandPatchesPass(st, rng, gs); snap('sandpatches');
+  replay(); // ▶Tunnels cs:11743
   runTunnelsPass(st, rng, gs); snap('tunnels');
+  replay(); // ▶MountainCaves cs:11809
   runMountCavesPass(st, rng, gs); snap('mountaincaves');
+  replay(); // ▶DirtWallBackgrounds cs:11883
   runDirtWallBgPass(st, rng, gs); snap('dirtwallbg');
+  replay(); // ▶RocksInDirt cs:11922（内部另有 DirtInRocks/Clay 两处子 pass 重播）
   runRocksAndClayPass(st, rng, gs); snap('rocksclay');
+  replay(); // ▶SmallHoles cs:12034
   runSmallHolesPass(st, rng, gs); snap('smallholes');
+  replay(); // ▶DirtLayerCaves cs:12094（内部另有 RockLayer/SurfaceCaves 两处重播）
   runCavesPass(st, rng, gs); snap('surfacecaves');
   // 1456 注册序：SurfaceCaves(12191) → IceBiome(12343) → Grass(12454) → Jungle(12497)
   //   → MudCaves(12499) → Desert(12532) → … → Lakes(14613) → Slush(14756) →
   //   Dungeon(14816) → MCOpenings(14932) → Beaches(14947) →
   //   Gems(15109) → GravitatingSand(15198) → OceanCaves(15228) → Shimmer(15256)
+  replay(); // ▶IceBiome cs:12343
   runIceBiomePass(st, rng, gs); snap('icebiome');
+  replay(); // ▶Grass cs:12454
   runGrassPass(st, rng, gs); snap('grass');
+  replay(); // ▶JunglePass cs:12497
   runJunglePass(st, rng, gs); snap('jungle');
+  replay(); // ▶MudCavesToJungleGrass cs:12499（零掷骰）
   runMudCavesPass(st, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!); snap('mudcaves');
+  // ▶DesertBiome cs:12532 单 pass：头重播在 runDesertMoundOnly 内部
   const desc = runDesertMoundOnly(st, rng, gs); snap('desertmound');
   runDesertEntrancesAndHive(st, rng, gs, desc, () => snap('desertentrance'));
   snap('deserthive');
+  replay(); // ▶GlowingMushroomPatches cs:12581
   runMushroomPass(st, rng, gs); snap('mushroom');
+  replay(); // ▶Marble cs:12800
   runMarblePass(st, rng, gs); snap('marble');
+  replay(); // ▶Granite cs:12884
   runGranitePass(st, rng, gs); snap('granite');
+  replay(); // ▶FloatingIslands cs:12976
   runFloatingIslandsPass(st, rng, gs); snap('islands');
+  replay(); // ▶DirtToMud cs:13172
   runDirtToMudPass(st, rng, gs); snap('dirttomud');
+  replay(); // ▶Silt cs:13192
   runSiltPass(st, rng, gs); snap('silt');
+  replay(); // ▶OresAndShinies cs:13233
   runShiniesPass(st, rng, gs); snap('ores');
+  replay(); // ▶Webs cs:13659
   runWebsPass(st, rng, gs); snap('webs');
+  replay(); // ▶Underworld cs:13697
   runUnderworldPass(st, rng, gs); snap('underworld');
+  replay(); // ▶CorruptionAndCrimson cs:13919
   runCorruptionPass(st, rng, gs); snap('corruption');
+  replay(); // ▶Lakes cs:14613
   runLakesPass(st, rng, gs); snap('lakes');
+  replay(); // ▶Slush cs:14756（零掷骰）
   runSlushPass(st, gs); snap('slush');
+  replay(); // ▶Dungeon cs:14816（17 段内部不重播）
   runDungeonPass(st, rng, gs, world.chests, (n) => snap(n));
+  replay(); // ▶MountainCaveOpenings cs:14932
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
+  replay(); // ▶BeachesAndOceanCleanup cs:14947
   runBeachesPass(st, rng, gs); snap('beaches');
   // ============ 微光链裁决段（本文件新增，oracle cs:15109-15308） ============
+  replay(); // ▶Gems cs:15109
   runGemsPass(st, rng, gs); snap('gems');
-  runGravitatingSandPass(st, gs); snap('gravitatingsand');   // 零掷骰：stream 应与 gems 同指纹
+  replay(); // ▶GravitatingSandCleanup cs:15198（零掷骰：重播后 stream=新流 0 掷态）
+  runGravitatingSandPass(st, gs); snap('gravitatingsand');
+  replay(); // ▶OceanCaves cs:15228
   runOceanCavesPass(st, rng, gs); snap('oceancaves');
+  replay(); // ▶Shimmer cs:15256（shell/pillars/open 是内部段，不中间重播）
   runShimmerPass(st, rng, gs, (n) => snap(n));
   return { grids, streams, shimmerX: gs.shimmerX, shimmerY: gs.shimmerY };
 }

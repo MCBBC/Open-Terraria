@@ -153,6 +153,15 @@ export class RNG {
     return this.ur.nextInt(maxValue);
   }
 
+  /** RunPass 种子重播（1456 WorldGenerator.cs:497：每个 GenPass 执行前
+   *  `Main.rand = new UnifiedRandom(_seed)`，IL 实证 newobj+stsfld Main::rand；
+   *  GenBase._random => genRand => Main.rand ⇒ 各 pass 掷骰流均从 stream(seed)
+   *  第 0 掷开始，pass 间不续流）。原地重置内部流，保持对象引用——ctx.rng 与
+   *  闭包捕获在重播后仍然有效。 */
+  reseed(seed: number): void {
+    this.ur = new UnifiedRandom(seed);
+  }
+
   nextIntRange(minValue: number, maxValue: number): number {
     return this.ur.nextIntRange(minValue, maxValue);
   }

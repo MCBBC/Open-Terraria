@@ -259,6 +259,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   for (let i = 0; i < passes.length; i++) {
     onProgress?.(passes[i].name, i / passes.length);
     await nextFrame();
+    // ★RunPass 种子重播（1456 WorldGenerator.cs:497：每个 GenPass 执行前
+    //   Main.rand = new UnifiedRandom(_seed)，IL 实证）——槽头重播保证"每槽
+    //   至少以新流开始"；槽内含多个原版 pass 的包装（vanillaCaves/vanillaBiomes/
+    //   vanillaStructures/statuesChestsPass 等）另有内部各 pass 边界的 rng.reseed。
+    ctx.rng.reseed(world.seed);
     await passes[i].run(ctx, () => {});
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
@@ -545,6 +550,7 @@ function vanillaTerrain(ctx: GenCtx) {
 function vanillaDunes({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  rng.reseed(gs.seed); // ▶DunesAndPyramidLocations cs:11540（pass 头含地牢主题掷+入口三掷）
   runDunesPass(store, rng, gs);
 }
 
@@ -552,6 +558,7 @@ function vanillaDunes({ store, rng }: GenCtx) {
 function vanillaShimmer({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  rng.reseed(gs.seed); // ▶Shimmer cs:15256（shell/pillars/open 是内部段，不中间重播）
   runShimmerPass(store, rng, gs);
   // GenVars.shimmerPosition 落到 World（中途沉降 pass 在 finalize 之前就需要它）
   world.shimmerX = gs.shimmerX;
@@ -624,13 +631,22 @@ function vanillaCaves({ store, rng }: GenCtx) {
   // MountainCaves(11809) → DirtWallBackgrounds(11883) → RocksInDirt/DirtInRocks/Clay
   // → SmallHoles(12034) → DirtLayer/RockLayer/Surface Caves（WavyCaves 12301 仅
   // 饥荒世界，普通世界零掷骰跳过）
+  // ★每个都是独立 GenPass——RunPass 每 pass 前重播种子（WorldGenerator.cs:497）。
+  rng.reseed(gs.seed); // ▶OceanSand cs:11603
   runOceanSandPass(store, rng, gs);
+  rng.reseed(gs.seed); // ▶SandPatches cs:11712
   runSandPatchesPass(store, rng, gs);   // 地下沙团（沙漠雏形）
+  rng.reseed(gs.seed); // ▶Tunnels cs:11743
   runTunnelsPass(store, rng, gs);       // 地表隧道（dirt runner 双向填充）
+  rng.reseed(gs.seed); // ▶MountainCaves cs:11809
   runMountCavesPass(store, rng, gs);    // 山丘本体
+  rng.reseed(gs.seed); // ▶DirtWallBackgrounds cs:11883
   runDirtWallBgPass(store, rng, gs);    // 地表自然墙（wall 2/40）
+  rng.reseed(gs.seed); // ▶RocksInDirt cs:11922（函数内部另有 DirtInRocks/Clay 边界重播）
   runRocksAndClayPass(store, rng, gs);
+  rng.reseed(gs.seed); // ▶SmallHoles cs:12034
   runSmallHolesPass(store, rng, gs);    // 小空洞（每轮 2 发挖除 runner）
+  rng.reseed(gs.seed); // ▶DirtLayerCaves cs:12094（函数内部另有 RockLayer/SurfaceCaves 边界重播）
   runCavesPass(store, rng, gs);
 }
 
@@ -644,8 +660,12 @@ function vanillaCaves({ store, rng }: GenCtx) {
 function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  // ★每个都是独立 GenPass——RunPass 每 pass 前重播种子（WorldGenerator.cs:497）。
+  rng.reseed(gs.seed); // ▶IceBiome cs:12343
   runIceBiomePass(store, rng, gs);       // 16 Generate Ice Biome
+  rng.reseed(gs.seed); // ▶Grass cs:12454
   runGrassPass(store, rng, gs);          // 17 Grass
+  rng.reseed(gs.seed); // ▶JunglePass cs:12497
   const jx = runJunglePass(store, rng, gs); // JunglePass
   world.jungleX = jx;
   // 丛林表面泥化:泥柱核心区 ±0.12w 内,表层 10 格 dirt→mud(原版巨型 runner
@@ -663,21 +683,30 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   }
   // 18 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
   // 曾用近似 spreadGrassAll 中心限距+2 轮快照——caves-oracle 位级对账后替换）
+  rng.reseed(gs.seed); // ▶MudCavesToJungleGrass cs:12499（零掷骰）
   runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
-  runDesertPass(store, rng, gs); // 19 Full Desert
+  runDesertPass(store, rng, gs); // 19 Full Desert（pass 头重播在 runDesertMoundOnly 内）
+  rng.reseed(gs.seed); // ▶GlowingMushroomPatches cs:12581
   runMushroomPass(store, rng, gs); // 20 Mushroom Patches
-  runMarbleGranitePass(store, rng, gs); // 21/22 Marble/Granite
+  runMarbleGranitePass(store, rng, gs); // 21/22 Marble/Granite（函数内部含两 pass 边界重播）
+  rng.reseed(gs.seed); // ▶FloatingIslands cs:12976
   runFloatingIslandsPass(store, rng, gs); // 23 Floating Islands（原在蘑菇前——注册序修正）
-  runDirtToMudAndSiltPass(store, rng, gs); // 24 Dirt To Mud / 25 Silt
+  runDirtToMudAndSiltPass(store, rng, gs); // 24 Dirt To Mud / 25 Silt（内部含两 pass 边界重播）
+  rng.reseed(gs.seed); // ▶OresAndShinies cs:13233
   runShiniesPass(store, rng, gs); // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
+  rng.reseed(gs.seed); // ▶Webs cs:13659
   runVanillaWebsPass(store, rng, gs); // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
+  rng.reseed(gs.seed); // ▶Underworld cs:13697（AddHellHouses 是其尾段，不另重播）
   runUnderworldPass(store, rng, gs); // 28 Underworld（cs:13697——原管线末"地狱"槽）
   // AddHellHouses（cs:13893，Underworld pass **尾**段调用，Corruption(13919) 之前）：
   // 地狱要塞 HellFort 原版属地狱 pass 尾——2026-08-16 前独立占「地狱屋」槽
   // （LifeCrystals 之后，晚原版位约 3000 行）= 顺序偏差，R 批归位到 Underworld 尾。
   runHellFortPass(store, rng, gs);
+  rng.reseed(gs.seed); // ▶CorruptionAndCrimson cs:13919
   runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
+  rng.reseed(gs.seed); // ▶Lakes cs:14613
   runLakesPass(store, rng, gs); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
+  rng.reseed(gs.seed); // ▶Slush cs:14756（零掷骰）
   runSlushPass(store, gs); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
   // ★生成期 tileSolid 翻转（DungeonCrawler.cs:344 MakeDungeon 头
   //   `WorldGen.SetCrackedBrickSolidity(solid: false)` → 481/482/483 非实心）。
@@ -686,6 +715,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   还原点 = SmoothWorld 头 cs:16510 翻 true（本仓数据无法表达该窗口,备案）→
   //   SmoothWorld 尾 cs:16695 翻回 false（HalfBrickPass 接线）。
   flipGenSolid([481, 482, 483], false);
+  rng.reseed(gs.seed); // ▶Dungeon cs:14816（17 内部段不中间重播）
   runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算(legacy 入口)不迁移 dungeonLocation——但入口塔列仍可能与
   // Reset 期锚点偏差数百格,必须在此回写最终位置。优先取入口门厅可站立点:
@@ -695,7 +725,9 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   // 33 MountainCaveOpenings + 34 Beaches（原紧跟 SurfaceCaves——注册序修正移到 Dungeon 后）
+  rng.reseed(gs.seed); // ▶MountainCaveOpenings cs:14932
   runMountainCavesPass(store, rng, gs);
+  rng.reseed(gs.seed); // ▶BeachesAndOceanCleanup cs:14947
   runBeachesPass(store, rng, gs);
   // 海盆挖完后刷新 surface[](后续旧 pass 依赖;本函数之后才到那些 pass)
   for (let x = 0; x < store.w; x++) {
@@ -703,6 +735,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
       if (store.flags[store.idx(x, y)]) { surface[x] = y; break; }
     }
   }
+  rng.reseed(gs.seed); // ▶Gems cs:15109
   runGemsPass(store, rng, gs); // 35 Gems（原捆绑在 Lakes 槽——注册序修正移到 Beaches 后）
   // 原版 1456 注册序（WorldGen.cs 行号 = 唯一权威，2026-08-11 review 依此重排）：
   //   OceanCaves(15228) < Pyramids(15426) < SurfaceWaterInJungle(15887) <
@@ -712,6 +745,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   FloatingIslandHouses(17971) < MicroBiomes(21785)
   // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
   // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
+  rng.reseed(gs.seed); // ▶OceanCaves cs:15228
   ctxOceanTreasures[0] = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录(→「雕像宝箱」槽 UnderwaterChests 消费)
   // 结构尾（Pyramids 15426 起 → SwordShrine）已拆出独立「结构」槽（「清理」之后执行，
   // 原版序 DirtWallCleanup 15310 < Pyramids 15426）——见 vanillaStructures；
@@ -732,26 +766,36 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
 function vanillaStructures({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  // ★每个都是独立 GenPass——RunPass 每 pass 前重播种子（WorldGenerator.cs:497）。
+  rng.reseed(gs.seed); // ▶Pyramids cs:15426
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
   // Dirt Rock Wall Runner(15536,近地表泥土自然墙 2 → 石墙 59 游走斑)——注册序夹在
   // 金字塔与世界树之间；2026-08-13 前整 pass 缺失
+  rng.reseed(gs.seed); // ▶DirtRockWallRunner cs:15536
   runDirtRockWallRunnerPass(store, rng, gs);
   // 原版注册序 Pyramids(15426) < LivingTrees(15551) < LivingTreeWalls(15792) <
   // DemonAndCrimsonAltars(15825) < SurfaceWaterInJungle(15887)——世界树插在金字塔后、
   // 丛林灌水前（方案 A 原版位置）；全图祭坛独立 pass 卡在活木墙与灌水之间。
   // LivingTrees：GrowLivingTree 树干壳+枝叶+根系+贯通竖井+密室宝箱；LivingTreeWalls：
   // 全图 type==191 连通核补墙 244（零掷骰）。
+  rng.reseed(gs.seed); // ▶LivingTrees cs:15551
   runLivingTreesPass(store, rng, gs, world.chests);  // Living Trees(世界树)
+  rng.reseed(gs.seed); // ▶LivingTreeWalls cs:15792（零掷骰）
   runLivingTreeWallsPass(store, gs);                 // Living Tree Walls(活木墙)
   // Demon And Crimson Altars(15825,全图随机撒 16 坛)——注册序 LivingTreeWalls(15792) <
   // 本 pass < SurfaceWaterInJungle(15887)。★与 Corruption pass 内猩红逐组祭坛(cs:14241)
   // 是原版两处放置,勿合并(见 CorruptionPass.runAltarsPass 头注);2026-08-13 前整 pass 缺失。
+  rng.reseed(gs.seed); // ▶DemonAndCrimsonAltars cs:15825
   runAltarsPass(store, rng, gs);                      // Demon And Crimson Altars(全图祭坛)
+  rng.reseed(gs.seed); // ▶SurfaceWaterInJungle cs:15887（零掷骰）
   runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(1456 cs:15887 逐列灌水,零 RNG)
+  rng.reseed(gs.seed); // ▶LihzahrdTemple cs:15911
   runTemplePass(store, rng, gs);                // Jungle Temple(之字形房间链+走廊+门+祭坛+木刺;尾写 gs.tLeft… 供「神庙陈设」槽)
+  rng.reseed(gs.seed); // ▶Beehives cs:16005
   runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
   // 丛林神龛(壳+腔+火把+金字塔顶)——坐标经 ctxShrineSpots 跨槽传给「雕像宝箱」槽
   // 的 ChestsInJungleShrines(17308)
+  rng.reseed(gs.seed); // ▶JungleShrines cs:16059
   ctxShrineSpots[0] = runJungleShrinePass(store, rng, gs);
   // Webs(51) 已按注册序回到 #27 位（vanillaBiomes 前段）——此处旧迟置调用已删
   // 附魔剑圣地已归位到 MicroBiomes pass 内(ThinIce 与 Campsite 之间,原版 cs:21858-21908)
@@ -771,9 +815,13 @@ function vanillaStructures({ store, rng, world }: GenCtx) {
 function statuesChestsPass({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  // ★每个都是独立 GenPass——RunPass 每 pass 前重播种子。#58 四循环（洞穴箱/地狱箱/
+  //   小屋）同属 UndergroundHousesAndBuriedChests(17066) 一个 pass，内部不重播。
+  rng.reseed(gs.seed); // ▶Statues cs:16947
   runStatuesPass(store, rng, gs);                        // 雕像 73 序+陷阱雕像接线
   // ★#58 头四翻(cs:17076-17079)：226 蜥蜴砖/162 薄冰/225 蜂巢块/190 荧光菇块
   //   短暂回实心——原版窗口覆盖洞穴箱+地狱箱+小屋全部四循环
+  rng.reseed(gs.seed); // ▶UndergroundHousesAndBuriedChests cs:17066（#58 一个 pass）
   flipGenSolid([226, 162, 225, 190], true);
   // ★pass 59(#58) 头四计数连掷(cs:17081-17084:CaveHouse→Underworld→CaveChest→
   //  AdditionalDesert)——pass 拆分后各消费 pass 流位分散,统一在此(第一个消费
@@ -785,10 +833,14 @@ function statuesChestsPass({ store, rng, world }: GenCtx) {
   runCaveHousesPass(store, rng, gs, world.chests);       // 循环③④ 地下小屋七主题+沙漠附加屋(内部头尾四翻与此处重放同值)
   // #58 尾四翻(cs:17220-23)——runCaveHousesPass 内部尾翻已达成同值,此处重放仅存档时间线
   flipGenSolid([226, 162, 225, 190], false);
+  rng.reseed(gs.seed); // ▶SurfaceChests cs:17226
   runSurfaceChestsPass(store, rng, gs, world.chests);    // Surface Chests(地表木箱/天空箱;只放一次——曾双调致密度翻倍)
+  rng.reseed(gs.seed); // ▶ChestsInJungleShrines cs:17308
   runJungleChestsPass(store, rng, gs, world.chests, ctxShrineSpots[0]); // 常春藤箱(神龛中心)
+  rng.reseed(gs.seed); // ▶UnderwaterChests(+WaterChests) cs:17343
   runUnderwaterChestsPass(store, rng, gs, world.chests, ctxOceanTreasures[0]); // 海洋洞窟水箱
   runWaterChestsPass(store, rng, gs, world.chests);      // Water Chests(水中 style17;1.4.4 概念保留)
+  rng.reseed(gs.seed); // ▶SpiderCaves cs:17455
   runSpiderNestPass(store, rng, gs, world.chests);       // Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
   // WebsInSpiderCavesAndHoney(cs:20140)按注册序(DyePlants 20126 < 本 pass <
   // GrassPlants 20232)在「蛛网蜂巢」独立槽(2026-08-13 Batch D)
@@ -813,6 +865,7 @@ function islandHouseSlot({ store, rng, world }: GenCtx) {
 export function vanillaCleanup({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  rng.reseed(gs.seed); // ▶DirtWallCleanup cs:15310
   runCleanupPass(store, rng, gs);
 }
 
@@ -875,7 +928,9 @@ function pilesPass({ store, rng }: GenCtx) {
 function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  rng.reseed(gs.seed); // ▶地表装饰近似段（JS 简化实现，槽头新流起）
   runSurfaceDecorPass(store, rng, gs);
+  rng.reseed(gs.seed); // ▶Traps cs:18769
   runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
 }
 
@@ -991,7 +1046,10 @@ function websInSpiderCavesSlot({ store, rng }: GenCtx) {
 }
 
 function grassPlantsSlot({ store, rng }: GenCtx) {
+  // GrassPlants(20232)/GlowingMushroomPlants(20278) 是两个独立 GenPass
+  rng.reseed(ctxGs[0]!.seed); // ▶GrassPlants cs:20232
   runGrassPlantsPass(store, rng);
+  rng.reseed(ctxGs[0]!.seed); // ▶GlowingMushroomPlants cs:20278
   const gs = ctxGs[0];
   if (gs) runGlowingMushroomPlantsPass(store, rng, gs);
 }

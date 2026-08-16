@@ -194,9 +194,11 @@ export function runDungeonPass(
   const potB = Math.max(10, Math.min(h - 10, Math.trunc(h * potBt)));
   const potContains = (x: number, y: number): boolean =>
     x >= Math.max(10, Math.min(w - 10, potL)) && x < Math.max(10, Math.min(w - 10, potR)) && y >= potT && y < potB;
-  rn(3);                              // 入口类型掷①（普通世界 flag 即真一轮；结果不消费照掷）
-  rn(3);                              // 入口类型掷②
-  const entSeed = raw();              // preGenDungeonEntranceSettings.RandomSeed
+  // ★入口三掷已随每 pass 重播改造（2026-08-16）归位 **Dunes pass 头**（cs:11542
+  //   SetupDungeonGenVarVariables 尾段——主题掷后紧跟）：掷①② Next(3) 与 RandomSeed
+  //   Next() 原版在 Dunes 消耗，此处只取 Dunes 落盘的 entSeed（兜底自掷仅限绕过
+  //   Dunes 直调本 pass 的诊断路径，流位与 oracle 不同构）。
+  const entSeed = gs.dungeonEntSeed ?? raw(); // preGenDungeonEntranceSettings.RandomSeed
   const shelf = [ri(9, 12), 0, 0];    // SetupDungeonDataVariables（cs:243-254）
   do { shelf[1] = ri(9, 12); } while (shelf[1] === shelf[0]);
   shelf[2] = ri(9, 12);

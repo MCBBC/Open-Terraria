@@ -65,7 +65,10 @@ function isOreType(t: number): boolean {
 }
 
 export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
+  // Marble(12800)/Granite(12884) 各自是独立 GenPass——RunPass 每 pass 前重播种子
+  rng.reseed(gs.seed); // ▶Marble cs:12800
   runMarblePass(st, rng, gs);
+  rng.reseed(gs.seed); // ▶Granite cs:12884
   runGranitePass(st, rng, gs);
 }
 

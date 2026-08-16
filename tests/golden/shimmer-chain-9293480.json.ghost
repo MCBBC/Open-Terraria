@@ -1,75 +1,65 @@
-{
-  "seed": 9293480, "evil": 0,
-  "worldSurface": 337, "rockLayer": 475, "waterLine": 830, "lavaLine": 909,
-  "shimmerX": 3878, "shimmerY": 501, "dungeonRight": 0,
-  "checkpoints": [
-    "terrain|05f73b65 c44d3c2d 0bb5a9c5 0bb5a9c5",
-    "dunes|df2b79b5 ae3d85bd 0bb5a9c5 0bb5a9c5",
-    "oceansand|1616ac30 ae3d85bd 0bb5a9c5 0bb5a9c5",
-    "sandpatches|eba7e039 ae3d85bd 0bb5a9c5 0bb5a9c5",
-    "tunnels|eba7e039 d8c6ca6c 0bb5a9c5 0bb5a9c5",
-    "mountaincaves|eba7e039 d8c6ca6c 0bb5a9c5 0bb5a9c5",
-    "dirtwallbg|eba7e039 d8c6ca6c d084ee05 0bb5a9c5",
-    "rocksclay|67bc7e98 d8c6ca6c d084ee05 0bb5a9c5",
-    "smallholes|7f98db09 dac96efd d084ee05 649c746d",
-    "dirtlayer|dbb5c6c8 54687525 d084ee05 501f3b5d",
-    "rocklayer|90376320 a0e40f4c d084ee05 4fd065a5",
-    "surfacecaves|f4f40748 46673724 d084ee05 ad3d191d",
-    "icebiome|49eb0a26 46673724 f5de06a5 ad3d191d",
-    "grass|80b689dd 46673724 f5de06a5 ad3d191d",
-    "jungle|7f994a34 525fe42d 390e935d c5a7655a",
-    "mudcaves|3510ebf8 0d309165 390e935d c5a7655a",
-    "desertmound|8ca26b0e 40c44d5c a554431d df169c15",
-    "desertentrance|36d9c822 a25b36ac 582dd636 df169c15",
-    "deserthive|72eeca9c f7a7c864 3e03438c ad6e7d3a",
-    "desertdone|72eeca9c f7a7c864 3e03438c ad6e7d3a",
-    "mushroom|0103f7b5 f831f14d 3e03438c 2d405235",
-    "marble|acfedb20 dcc46cc4 ee3074bc 28684492",
-    "granite|fcf93db3 4da5c4fd 4578a54f dd8e480d",
-    "islands|ca49a47f 59d2ae64 8a9b5c36 4957808a",
-    "dirttomud|f3b11506 59d2ae64 8a9b5c36 dbd6a525",
-    "silt|89eb211b 59d2ae64 8a9b5c36 dbd6a525",
-    "ores|72df82b2 59d2ae64 8a9b5c36 dbd6a525",
-    "webs|0ef086c3 46105f4c 8a9b5c36 ebdd442d",
-    "underworld|c4198009 c46ee284 8a9b5c36 bfc4c1a5",
-    "corruption|aa0e34ed fd6d00c5 7faa0987 bfc4c1a5",
-    "lakes|b8a8d482 7f52468c 7faa0987 2a7535ba",
-    "slush|39d43522 7f52468c 7faa0987 2a7535ba",
-    "dungeonL|07ecf0e6 e95888ed f506c8a0 cfe581b5",
-    "dungeonE|1609a197 d194d844 34b75dcf 36cef0ca",
-    "dungeonPD|1609a197 d194d844 34b75dcf 36cef0ca",
-    "dungeonPi|1444de89 dd0f0264 3bc0f9dc 5b519fe5",
-    "dungeonS|b00a64fc 94205565 3bc0f9dc 5b519fe5",
-    "dungeonD|28134589 b5af4a25 3bc0f9dc 5b519fe5",
-    "dungeonW|28134589 b5af4a25 ac158365 5b519fe5",
-    "dungeonP|e7d82102 d7a16cbc ac158365 5b519fe5",
-    "dungeonC|63a66122 d919583c ac158365 5b519fe5",
-    "dungeonB|6c262cd2 a053947d ac158365 5b519fe5",
-    "dungeonG|bf429922 7c42e13d ac158365 5b519fe5",
-    "dungeonI|12fff0dc c1cdbb84 ac158365 5b519fe5",
-    "dungeonT|594b9e5c 3c7db334 ac158365 5b519fe5",
-    "dungeonF|2d67720c b2e1013d ac158365 5b519fe5",
-    "dungeonPa|7a0dba07 1b6d8695 ac158365 5b519fe5",
-    "dungeonBa|70949b7c deaef27c ac158365 5b519fe5",
-    "dungeon|70949b7c deaef27c ac158365 5b519fe5",
-    "mcopenings|70949b7c deaef27c ac158365 5b519fe5",
-    "beaches|62c2ca52 dc5804e5 b711d275 b72d48aa",
-    "gems|7d68f7ae 48288ced b711d275 b72d48aa",
-    "gravitatingsand|f990bea6 c9a031fc b711d275 0a453095",
-    "oceancaves|f990bea6 c9a031fc b711d275 0a453095",
-    "shimmershell|64012e82 25686c5d 0cbe2ec1 7e0b175d",
-    "shimmerpillars|64012e82 25686c5d 0cbe2ec1 7e0b175d",
-    "shimmeropen|28ea3b22 a5a62004 0cbe2ec1 7e0b175d",
-    "shimmer|2b91dc67 865f34f4 0cbe2ec1 7e0b175d"
-  ],
-  "stream": [
-    "beaches|9cf64dc9",
-    "gems|c500b975",
-    "gravitatingsand|c500b975",
-    "oceancaves|0b11a416",
-    "shimmershell|4cc9d828",
-    "shimmerpillars|4cc9d828",
-    "shimmeropen|16aedb0b",
-    "shimmer|17dd15e5"
-  ]
-}
+terrain|0bb5a9c5
+dunes|0bb5a9c5
+oceansand|0bb5a9c5
+sandpatches|0bb5a9c5
+tunnels|0bb5a9c5
+mountaincaves|0bb5a9c5
+dirtwallbg|0bb5a9c5
+rocksclay|f7981245
+smallholes|e7df08ec
+dirtlayer|3cb456ad
+rocklayer|92eac4e5
+surfacecaves|29d04aed
+icebiome|755f913e
+grass|755f913e
+jungle|93b6ab05
+mudcaves|9d0918eb
+desertmound|a401e4ba
+desertentrance|a401e4ba
+deserthive|55cc4d30
+desertdone|55cc4d30
+mushroom|413b031d
+marble|913666a0
+granite|e58ccec7
+islands|4da8ab02
+dirttomud|8b876fbe
+silt|f305ed82
+ores|cc07e543
+webs|94a68822
+underworld|8c9d4bc4
+corruption|2c02b0dc
+lakes|58752f51
+slush|a7fb6489
+dungeonL|23200d01
+dungeonE|55c7690c
+dungeonPD|55c7690c
+dungeonPi|b4c00736
+dungeonS|e6ee0eb6
+dungeonD|667a7cca
+dungeonW|667a7cca
+dungeonP|084c5106
+dungeonC|86204356
+dungeonB|398be5aa
+dungeonG|dc9c8c4a
+dungeonI|13d7fbfe
+dungeonT|53fff41e
+dungeonF|d179e02e
+dungeonPa|45a808d6
+dungeonBa|6cd88f56
+dungeon|6cd88f56
+mcopenings|da7aabce
+beaches|c7fd31d3
+gems|a5fe7a46
+gravitatingsand|e480f9c1
+oceancaves|e480f9c1
+shimmershell|874f2649
+shimmerpillars|874f2649
+shimmeropen|86496ea7
+shimmer|428eb8c6
+dirtwallcleanup|428eb8c6
+pyramids|428eb8c6
+dirtrockwallrunner|428eb8c6
+livingtrees|a7c2439b
+livingtreewalls|a7c2439b
+altars|980b6bf5
+surfacewaterinjungle|980b6bf5

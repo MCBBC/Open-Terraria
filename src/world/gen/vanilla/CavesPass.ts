@@ -13,10 +13,13 @@ import { tileRunner, digTunnel } from './TileRunner';
 const DIRT = T.DIRT;
 const CLAY = TILE_BY_KEY['clay']!;
 
-/** pass 8-10:泥石混合 + 粘土（cs:11922-12033） */
+/** pass 8-10:泥石混合 + 粘土（cs:11922-12033）。三段各自是独立 GenPass
+ *  （RocksInDirt 11922 / DirtInRocks 11952 / Clay 11985）——RunPass 每 pass 前重播
+ *  种子（WorldGenerator.cs:497），函数头与两处内部边界各 reseed 一次。 */
 export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const area = w * h;
+  rng.reseed(gs.seed); // ▶RocksInDirt cs:11922（pass 头）
   const run = (count: number, yMin: number, yMax: number, type: number, sMin: number, sMax: number, stMin: number, stMax: number) => {
     for (let n = 0; n < count; n++) {
       tileRunner(st, rng, gs, rng.int(0, w - 1), rng.int(Math.max(0, Math.floor(yMin)), Math.min(h - 1, Math.floor(yMax))), {
@@ -33,11 +36,13 @@ export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void
     tileRunner(st, rng, gs, i, j, { strength: rng.int(4, 9), steps: rng.int(5, 29), type: T.STONE });
   }
   run(area * 0.0045, gs.worldSurfaceHigh, gs.rockLevelHigh, T.STONE, 2, 6, 2, 22);
+  rng.reseed(gs.seed); // ▶DirtInRocks cs:11952（内部 pass 边界）
   // Dirt In Rocks（cs:11952）：泥嵌石
   run(area * 0.005, gs.rockLevelLow, h, DIRT, 2, 5, 2, 39);
   // Clay（cs:11985）：三带 + 表层粘土清除。
   // ★计数 (int) 截断（cs:11990/11997/12009）：area*2e-5=100.8 → 100 次，
   //  此前浮点上界多跑 1 发 runner → 其后 RNG 流永久漂移
+  rng.reseed(gs.seed); // ▶Clay cs:11985（内部 pass 边界）
   run(Math.trunc(area * 0.00002), 0, gs.worldSurfaceLow - 1, CLAY, 4, 13, 10, 49);
   run(Math.trunc(area * 0.00005), gs.worldSurfaceLow, gs.worldSurfaceHigh, CLAY, 8, 13, 15, 44);
   run(Math.trunc(area * 0.00002), gs.worldSurfaceHigh, gs.rockLevelHigh, CLAY, 8, 14, 5, 49);
@@ -53,11 +58,14 @@ export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void
   }
 }
 
-/** pass 12-14:洞穴（DirtLayer/RockLayer/Surface；SmallHoles 已在 MissingCavesPass） */
+/** pass 12-14:洞穴（DirtLayer/RockLayer/Surface；SmallHoles 已在 MissingCavesPass）。
+ *  三段各自是独立 GenPass（12094/12135/12191）——RunPass 每 pass 前重播种子，
+ *  函数头与两处内部边界各 reseed 一次。 */
 export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const area = w * h;
   const avoidBeach = 340; // smallHolesBeachAvoidance = beachSandRandomCenter(320)+20
+  rng.reseed(gs.seed); // ▶DirtLayerCaves cs:12094（pass 头）
   // Dirt Layer Caves（cs:12094-12134）：(int)(area*3e-5) 次；拒绝判定第一子句用
   // GenVars.worldSurfaceHigh raw double；中部 45-55% 为闭区间 >= <=
   {
@@ -77,6 +85,7 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
   // Rock Layer Caves（cs:12135-12165）：掷序 type→strength→steps→x→y（曾错位+改 digTunnel）
+  rng.reseed(gs.seed); // ▶RockLayerCaves cs:12135（内部 pass 边界）
   {
     const num = Math.trunc(area * 0.00013);
     for (let i = 0; i < num; i++) {
@@ -89,6 +98,7 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
   // Surface Caves（cs:12191-12300）：五组地表入口
+  rng.reseed(gs.seed); // ▶SurfaceCaves cs:12191（内部 pass 边界）
   const beachL = gs.beachLeftEnd + 20, beachR = gs.beachRightStart - 20;
   /** 14a-14d 骨架：拒绝采样（无界 while）+ 首实心行（上界 GenVars.worldSurfaceHigh
    *  raw double；找不到则整轮跳过不掷 runner 骰——原版 for-break 语义） */

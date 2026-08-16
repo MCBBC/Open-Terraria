@@ -4,6 +4,16 @@
 // 金标逐项比对。wall 暂不比（我们 Terrain 自加渲染墙，原版墙由 DirtWallBg 等后置
 // pass 铺——wall 等价是独立对账项）。
 // 金标再生成：dotnet run tools/golden/caves-oracle.cs <seedInt> <evil> <out.json>
+//
+// ★每 pass 种子重播后（2026-08-16）转写债新位置（对账层互绿硬验证已过：
+// SandboxWorld 全链仅 livingtrees 红；dungeonG 前状态逐位 dump 全等）：
+//   - 9293480：dungeonI（DgLights 灯/吊灯/开关放置）起红——dungeonG 输入态
+//     typ/act/wal 三数组 0 差异、掷骰流对齐，分歧在 dgLights 的门链
+//     （isDT/featOK/entBounds.contains/placeChand 之一，数据触发的分支差），
+//     其后全部级联红（beaches 流指纹仍 ✓=掷骰数一致，网格差为写入差）。
+//   - SandboxWorld：livingtrees 起红（原转写债位置不变；LivingTreePass 01:33
+//     在途 WIP 未 oracle 同步）。旧 oceancaves 债位已随流变消失（现双种子绿）。
+//   两处均为 JS↔oracle 转写层债（非重播改造引入），后续专门修。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -80,10 +90,18 @@ function hashGhost(st: { type: Uint16Array; flags: Uint8Array; w: number; h: num
 
 /** 导出给 tests/_freeze-caves.test.ts（SW_FREEZE_CAVES=1 冻结基线再生用） */
 export function chainCheckpoints(seedText: string, evil: 0 | 1) {
-  const { world, rng, gs } = runResetAndTerrain({ width: 4200, height: 1200, seedText, evil });
+  const { world, rng, gs, seed } = runResetAndTerrain({ width: 4200, height: 1200, seedText, evil });
   const st = world.store;
   const out = new Map<string, string>();
   const outWall = new Map<string, string>();
+  // ★每 pass 种子重播（2026-08-16 num4 破解收尾）：原版每个 GenPass 执行前
+  //   Main.rand = new UnifiedRandom(_seed)（1456 WorldGenerator.cs:497，IL 实证）
+  //   ⇒ 各 pass 掷骰流均从 stream(seed) 第 0 掷开始，pass 间不续流——与
+  //   caves-oracle 的 44 处 Replay() 调用点逐一同构。零掷骰 pass（mudcaves/slush/
+  //   gravitatingsand/livingtreewalls/surfacewaterinjungle）的重播是流空转，但
+  //   oracle 侧同样重播——为保 stream 指纹同构，一律照播。pass 内多检查点段
+  //   （desert 的 entrance/hive、dungeon 17 段、shimmer 的 pillars/open）不重播。
+  const replay = () => rng.reseed(seed);
   // RNG 流指纹探针（SW_STREAM_PROBE=1 时逐检查点打印；同 oracle StreamHash 算法）
   const streamProbe = typeof process !== 'undefined' && !!process.env.SW_STREAM_PROBE;
   const streamHash = (): string => {
@@ -112,24 +130,39 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
     }
   };
   out.set('terrain', hashGrids(st));
+  replay(); // ▶Dunes cs:11540（pass 头含地牢主题掷+入口三掷——见 DunesPass 头注）
   runDunesPass(st, rng, gs); out.set('dunes', hashGrids(st));
+  replay(); // ▶OceanSand cs:11603
   runOceanSandPass(st, rng, gs); out.set('oceansand', hashGrids(st));
+  replay(); // ▶SandPatches cs:11712
   runSandPatchesPass(st, rng, gs); out.set('sandpatches', hashGrids(st));
+  replay(); // ▶Tunnels cs:11743
   runTunnelsPass(st, rng, gs); out.set('tunnels', hashGrids(st));
+  replay(); // ▶MountainCaves cs:11809
   runMountCavesPass(st, rng, gs); out.set('mountaincaves', hashGrids(st));
+  replay(); // ▶DirtWallBackgrounds cs:11883
   runDirtWallBgPass(st, rng, gs); out.set('dirtwallbg', hashGrids(st));
+  replay(); // ▶RocksInDirt cs:11922（runRocksAndClayPass 内部另有两处子 pass 重播）
   runRocksAndClayPass(st, rng, gs); out.set('rocksclay', hashGrids(st));
+  replay(); // ▶SmallHoles cs:12034
   runSmallHolesPass(st, rng, gs); out.set('smallholes', hashGrids(st));
+  replay(); // ▶DirtLayerCaves cs:12094（runCavesPass 内部另有两处子 pass 重播）
   runCavesPass(st, rng, gs); out.set('surfacecaves', hashGrids(st));
   // 1456 注册序（执行序=注册序，WorldGenerator.cs:447）：
   //   14 SurfaceCaves → 16 IceBiome → 17 Grass → Jungle(12497) → 18 MudCaves →
   //   19 Desert → … → 32 Dungeon → 33 MCOpenings → 34 Beaches → 35 Gems。
   //   mcopenings/beaches 原紧跟 surfacecaves（注册序修正移到 Dungeon 后）。
+  replay(); // ▶IceBiome cs:12343
   runIceBiomePass(st, rng, gs); out.set('icebiome', hashGrids(st));
+  replay(); // ▶Grass cs:12454
   runGrassPass(st, rng, gs); out.set('grass', hashGrids(st));
+  replay(); // ▶JunglePass cs:12497
   runJunglePass(st, rng, gs); out.set('jungle', hashGrids(st));
+  replay(); // ▶MudCavesToJungleGrass cs:12499（零掷骰）
   runMudCavesPass(st, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
   out.set('mudcaves', hashGrids(st));
+  // ▶DesertBiome cs:12532 单 pass：头重播在 runDesertMoundOnly 内部（entrance/
+  //   hive/done 是内部段，不中间重播）
   const desc = runDesertMoundOnly(st, rng, gs); out.set('desertmound', hashGrids(st));
   // Sub-C 入口 + Sub-B 蜂巢（DesertBiome.Place 顺序：入口先于 Hive）。
   // afterEntrance 钩子对齐 oracle 的 desertentrance 检查点位（入口后、Hive 前）
@@ -137,39 +170,62 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   snap('deserthive');        // AddTileVariance 完
   snap('desertdone');        // CleanupArea 仅帧号——状态同 deserthive
   // #20-26（1456 注册序 12581/12800/12884/12976/13172/13192/13233）
+  replay(); // ▶GlowingMushroomPatches cs:12581
   runMushroomPass(st, rng, gs); snap('mushroom');
+  replay(); // ▶Marble cs:12800
   runMarblePass(st, rng, gs); snap('marble');
+  replay(); // ▶Granite cs:12884
   runGranitePass(st, rng, gs); snap('granite');
+  replay(); // ▶FloatingIslands cs:12976
   runFloatingIslandsPass(st, rng, gs); snap('islands');
+  replay(); // ▶DirtToMud cs:13172
   runDirtToMudPass(st, rng, gs); snap('dirttomud');
+  replay(); // ▶Silt cs:13192
   runSiltPass(st, rng, gs); snap('silt');
+  replay(); // ▶OresAndShinies cs:13233
   runShiniesPass(st, rng, gs); snap('ores');
   // #27/28/30/31（1456 注册序 13659/13697/14613/14756）。
-  // #29 Corruption、#32 Dungeon oracle 尚未转录——其 JS 实现仍在 vanillaBiomes 内
-  // （位置正确），转录后将插在 lakes 前与 slush 后。
+  replay(); // ▶Webs cs:13659
   runWebsPass(st, rng, gs); snap('webs');
+  replay(); // ▶Underworld cs:13697（AddHellHouses cs:13893 是其尾段，不另重播）
   runUnderworldPass(st, rng, gs); snap('underworld');
-  // #29 Corruption（cs:13919，oracle 已转录；#32 Dungeon 未转录——其 JS 实现仍在
-  // vanillaBiomes 内位置正确，转录后插 lakes 前与 slush 后之间）
+  // #29 Corruption（cs:13919，oracle 已转录）
+  replay(); // ▶CorruptionAndCrimson cs:13919
   runCorruptionPass(st, rng, gs);
   snap('corruption');
+  replay(); // ▶Lakes cs:14613
   runLakesPass(st, rng, gs); snap('lakes');
+  replay(); // ▶Slush cs:14756（零掷骰）
   runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）
-  // #32 Dungeon（1456 Legacy 路径全量转录）：snap 回调逐段落检查点
+  // #32 Dungeon（1456 Legacy 路径全量转录）：snap 回调逐段落检查点（17 段内部不重播）
+  replay(); // ▶Dungeon cs:14816
   runDungeonPass(st, rng, gs, world.chests, (name) => snap(name));
+  replay(); // ▶MountainCaveOpenings cs:14932
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
+  replay(); // ▶BeachesAndOceanCleanup cs:14947
   runBeachesPass(st, rng, gs); snap('beaches');
   // ===== 第三轮 A（#35-44，1456 注册序）=====
+  replay(); // ▶Gems cs:15109
   runGemsPass(st, rng, gs); snap('gems');
+  replay(); // ▶GravitatingSandCleanup cs:15198（零掷骰——重播后 stream=新流 0 掷态）
   gravitatingSandPass({ store: st } as never); snap('gravitatingsand');
+  replay(); // ▶OceanCaves cs:15228
   runOceanCavesPass(st, rng, gs); snap('oceancaves');
+  replay(); // ▶Shimmer cs:15256（shell/pillars/open 是内部段，不中间重播）
   runShimmerPass(st, rng, gs, (nm) => snap(nm));   // shimmershell/pillars/open/shimmer 四段
+  replay(); // ▶DirtWallCleanup cs:15310
   vanillaCleanup({ store: st, rng } as never); snap('dirtwallcleanup');
+  replay(); // ▶Pyramids cs:15426
   runPyramidPass(st, rng, gs, world.chests); snap('pyramids');
+  replay(); // ▶DirtRockWallRunner cs:15536
   runDirtRockWallRunnerPass(st, rng, gs); snap('dirtrockwallrunner');
+  replay(); // ▶LivingTrees cs:15551
   runLivingTreesPass(st, rng, gs, world.chests); snap('livingtrees');
+  replay(); // ▶LivingTreeWalls cs:15792（零掷骰）
   runLivingTreeWallsPass(st, gs); snap('livingtreewalls');
+  replay(); // ▶DemonAndCrimsonAltars cs:15825
   runAltarsPass(st, rng, gs); snap('altars');
+  replay(); // ▶SurfaceWaterInJungle cs:15887（零掷骰）
   runWetJunglePass(st, rng, gs); snap('surfacewaterinjungle');
   return { grids: out, walls: outWall };
 }

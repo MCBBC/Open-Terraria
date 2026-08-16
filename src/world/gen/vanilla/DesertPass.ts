@@ -139,6 +139,9 @@ const FOSSIL = TILE_BY_KEY['desert_fossil']!;
 
 /** 放置循环 + Description + SandMound（Sub-A；Hive/入口在 runDesertPass 续） */
 export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): DesertDesc {
+  // ▶DesertBiome cs:12532 pass 头重播（RunPass 语义；mound/entrance/hive 三个检查点
+  //   同属一个 pass，只在头重播——拆分/合并两条调用路径都经过这里）
+  rng.reseed(gs.seed);
   // ★pass 头 tileSolid 翻转（cs:12537 `Main.tileSolid[484] = false`，位于本 pass
   //   首句、mound 循环之前）：滚动仙人掌 (484) 自 DesertBiome 起生成期恒非实心
   //   （此后 Gems cs:15114 / Altars cs:15831 / SettleLiquids cs:16292 均为冗余重放，
@@ -808,6 +811,8 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
 export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
   // ★cs:12537 `Main.tileSolid[484] = false` 翻转已移入 runDesertMoundOnly 首句
   //   （caves-checkpoint 拆分调用路径同样需要，且 pass 头语义本就在 mound 循环前）。
+  // DesertBiome(12532) 是单个 GenPass——mound/entrance/hive 三个检查点是其内部段，
+  // 只在 pass 头（runDesertMoundOnly 头）重播一次，不中间重播。
   const desc = runDesertMoundOnly(st, rng, gs);
   runDesertEntrancesAndHive(st, rng, gs, desc);
   // gs.undergroundDesert 已随 runDesertEntrancesAndHive 落盘（见其尾部）

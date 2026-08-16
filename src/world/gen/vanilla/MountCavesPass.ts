@@ -69,7 +69,12 @@ export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (tries >= st.w / 5) { giveUp = true; break; }
     }
     if (giveUp) continue;
-    // 找该列地表首个实心格
+    // 找该列地表首个实心格。沙族 box 检查复用外层 flag（cs:11861-11879）：
+    // 一旦检出沙 flag 闩锁为 true——本列后续任何活性格都走不进 !flag 分支，
+    // 即「首格近沙 → 整列放弃」（扫完 worldSurface 也不放置、不消费掷骰）。
+    // 曾误读 cs:11877 为「近沙不 break 继续向下找深格放置」——漏了 flag 闩锁，
+    // 在近沙列多放山丘+多吞 Mountinater 掷（2026-08-16 num4 重播后被对账暴露）。
+    let sandLatched = false;
     for (let y = 0; y < gs.worldSurface; y++) {
       if (!st.flags[st.idx(x, y)]) continue;
       let nearSand = false;
@@ -80,13 +85,12 @@ export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (SAND_AVOID.has(st.type[st.idx(xx, yy)])) { nearSand = true; break; }
         }
       }
-      if (!nearSand) {
+      if (nearSand) sandLatched = true;
+      if (!sandLatched) {
         mountinater(st, rng, x, y);
         gs.mCaveX[gs.numMCaves] = x;
         gs.mCaveY[gs.numMCaves] = y;
         gs.numMCaves++;
-        // cs:11877-11878:break 在 !flag 内——近沙时**不**break,继续向下列扫
-        // 下一个活性格再查(曾无条件 break,近沙列被提前放弃 → 山丘少放/错位)
         break;
       }
     }

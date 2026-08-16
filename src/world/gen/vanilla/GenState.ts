@@ -39,6 +39,11 @@ export interface GenState {
   /** 地牢主题（Dunes pass 头 DungeonCrawler.SetupDungeonGenVarVariables 掷 Next(3)，
    *  cs:11542+DungeonCrawler.cs:56——掷骰时点在 Dunes，不在 Dungeon pass；-1=未掷） */
   dungeonTheme: number;
+  /** 地牢入口 RandomSeed（SetupDungeonGenVarVariables 尾段 MakeDungeon_
+   *  GetEntranceSettings.RandomSeed=Next()，随主题掷在 Dunes pass 头消耗——
+   *  2026-08-16 每 pass 重播改造归位；DungeonPass 的 dgEntrance 消费；
+   *  undefined=未跑过 Dunes（DungeonPass 兜底自掷） */
+  dungeonEntSeed?: number;
   dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   dungeonEntX: number;        // 入口门厅可站立点 X（DungeonPass 回填；原版 dungeonX 语义=老头锚）
   /** GenVars.CurrentDungeonGenVars.generatingDungeonPositionX（DungeonCrawler.cs:346 初值
