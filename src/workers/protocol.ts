@@ -73,6 +73,9 @@ export interface WorldPacket {
 /** 生成配置（主线程 → worker；GenClient.generate 入参直传） */
 export interface GenConfigDTO {
   width: number; height: number;
+  /** 世界尺寸档（0 小/1 中/2 大，GetWorldSize 语义）：给出时 generateWorld 按
+   *  SIZE_DIMS 派生 W/H（UIWorldCreation 尺寸选择语义） */
+  size?: 0 | 1 | 2;
   seedText: string;
   name?: string;
   evil?: 0 | 1 | -1;  // 0 腐化 / 1 猩红 / -1 随机

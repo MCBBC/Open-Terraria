@@ -25,6 +25,7 @@ export const worldgenProgressKey: Record<string, number> = {
   '苔藓': 61,       // MossAndMossCaves :17583 "青苔化"
   '神庙陈设': 70,   // LihzahrdTemplePart2 :17809 无 progress.Message → 借神庙文案(Lang.gen[70])
   '洞穴墙': 63,     // CaveWallsInEnclosedSpaces :17826 "正在建造洞壁"
+  '地下丛林树': 83, // UndergroundJungleTrees :17957 "正在种红木"(2026-08-16 补缺 pass)
   '瓦罐': 35,       // PotsGraveyardsAndBoulderPiles :18112 "正在放置可破坏物"
   '地狱熔炉': 36,   // Hellforges :18302 "正在放置地狱熔炉"
   '矿骨堆': 89,     // Piles :18904 "正在放置物体"
@@ -67,6 +68,7 @@ export const worldgenProgressStringKey: Record<string, string> = {
   '长苔藓': 'WorldGeneration.LongMoss',
   '钟乳石宝石树': 'WorldGeneration.Speleothems',
   '浮空岛屋': 'WorldGeneration.FloatingIslandHouses',  // FloatingIslandHouses :17975 原文
+  '快清理': 'WorldGeneration.QuickCleanup',  // QuickCleanup :17991 原文(2026-08-16 补缺 pass)
   '微光': 'LegacyWorldGen.26',    // 1.4.4 新 pass 无文本 → 借祭坛位
   '沙上清水': 'LegacyWorldGen.24', // RemoveSurfaceWaterAboveSand 无 Message → 借沙沉淀
 };

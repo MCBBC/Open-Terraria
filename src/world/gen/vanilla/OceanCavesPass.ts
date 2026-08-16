@@ -8,6 +8,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
+import { genSolidType } from './GenSolid';
 
 const SAND = TILE_BY_KEY['sand']!;            // 53
 const HARDSAND = TILE_BY_KEY['hardened_sand']!; // 397
@@ -110,7 +111,11 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
               for (let sx = xa; sx <= xb; sx++) {
                 for (let sy = y; sy < y + depth && !badOceanCaveTiles(st, sx, sy); sy++) {
                   if (sy > y + wide) {
-                    if (st.flags[st.idx(sx, sy)] && st.type[st.idx(sx, sy)] !== SAND) break;
+                    // cs:76886:`SolidTile(m,n) && type != num2` break——实心判定用
+                    // tileSolid 族(非 active 非 sand 即断),海床上的非实心活性饰物
+                    // (海草等)不挡;曾误 active&&!sand 提前断轴(8888 对拍:浅轴)。
+                    if (activeAt(st, sx, sy) && genSolidType(st.type[st.idx(sx, sy)])
+                      && st.type[st.idx(sx, sy)] !== SAND) break;
                     st.setTileSilent(sx, sy, HARDSAND);
                   } else {
                     st.setTileSilent(sx, sy, SAND);
@@ -174,7 +179,12 @@ export function runOceanCavesPass(st: TileStore, rng: RNG, gs: GenState): Array<
     if (side === 0 && gs.dungeonSide !== -1) continue;
     if (side === 1 && gs.dungeonSide !== 1) continue;
     if (rng.int(0, 2) !== 0) continue; // 1/3
-    const x = side === 0 ? rng.int(55, 94) : rng.int(w - 95, w - 56);
+    // ★cs:15249-15252:`int num = genRand.Next(55, 95); if (i == 1) num = Next(w-95, w-55);`
+    //   右洋(i==1)的首次 Next(55,95) 被丢弃但**消耗掷骰流**——此前 JS 只掷一次,
+    //   右洋蠕虫后续全部掷骰错位(8888 种子对拍实锤:HARDSAND/SAND 壳层错写 ~13k 格)。
+    let x: number;
+    if (side === 0) x = rng.int(55, 94);
+    else { rng.int(55, 94); x = rng.int(w - 95, w - 56); }
     let j = 0;
     while (j < st.h && !activeAt(st, x, j)) j++;
     if (j >= st.h) continue;

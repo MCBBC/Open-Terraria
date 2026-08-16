@@ -3,10 +3,22 @@
 import { RNG, translateSeed } from '../../core/rng';
 import type { TileStore } from '../TileStore';
 import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
-import { World } from '../World';
+import { World, worldSizeFor, type WorldSize } from '../World';
 import { randomEpitaph } from '../../i18n/RandomText';   // 墓园 pass 碑文（WorldGen.cs:25161）
 
+/** 尺寸档 → 原版 maxTilesX/Y（UIWorldCreation 三档 ↔ WorldGen.cs:11163 的 W/H 表）。
+ *  尺寸敏感分支索引：RandomizeTreeStyle(:8082)/RandomizeCaveBackgrounds(:8157)
+ *  三段分支 + TerrainPass num10 仅小世界 +0.02（cs:131）。 */
+export const SIZE_DIMS: Readonly<Record<WorldSize, { width: number; height: number }>> = {
+  0: { width: 4200, height: 1200 },
+  1: { width: 6400, height: 1800 },
+  2: { width: 8400, height: 2400 },
+};
+
 export interface GenConfig {
+  /** 世界尺寸档（原版 UI 三档，GetWorldSize 语义）：给出时 width/height 由 size 派生
+   *  （对齐原版 UIWorldCreation——UI 只选尺寸档，W/H 是派生量）。缺省用显式 width/height。 */
+  size?: WorldSize;
   width: number;
   height: number;
   seedText: string;
@@ -37,15 +49,17 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // 生成入口构造 Main.rand = new UnifiedRandom(seed)（WorldGen.cs:11159）。
   // 位级金标见 tests/unified-random.test.ts。
   const seed = translateSeed(cfg.seedText || String(Date.now()));
-  const world = new World(cfg.width, cfg.height, seed, cfg.name ?? '新世界');
+  // size 档派生 W/H（UI 语义）；显式 width/height 仍可用（探针/测试直给）
+  const { width, height } = cfg.size !== undefined ? SIZE_DIMS[cfg.size] : cfg;
+  const world = new World(width, height, seed, cfg.name ?? '新世界');
   world.seedFlags = parseSeed(cfg.seedText || '').flags; // 运行时消费（血月 1/6 十周年 / drunk 黎明翻转）
   const rng = new RNG(seed);
   // 注：曾在此 createNoise2D(() => rng.next())——simplex 构造即消耗 RNG 流
   //（建置换表 256+ 次），而全管线无消费者。种子等价必须零预耗，已删除。
   const ctx: GenCtx = {
     world, store: world.store, rng,
-    surface: new Float32Array(cfg.width),
-    cfg,
+    surface: new Float32Array(width),
+    cfg: { ...cfg, width, height },
   };
 
   // 单一 vanilla 管线。原 lgcTerrain=false 的 fbm 回退（terrainPass/cavePass/
@@ -72,9 +86,12 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // （唯一硬约束:水晶在 Lakes 之后;平滑/瀑布在其前的原版序可完整对齐）
     { name: '液体', run: vanillaLakes },
     // 引力沙（原版 GravitatingSandCleanup cs:15198，注册位 Lakes(14613) < 本 pass <
-    // Shimmer(15256)）：地表内悬空 Falling 系方块空腔落定。纯扫描零掷骰。
-    // 2026-08-12 前整 pass 缺失——海岸/沙滩带生成残留的浮空沙无人回收。
-    { name: '引力沙', run: gravitatingSandPass },
+    // OceanCaves(15228) < Shimmer(15256)）：地表内悬空 Falling 系方块空腔落定。
+    // 纯扫描零掷骰。2026-08-12 前整 pass 缺失——海岸/沙滩带生成残留的浮空沙无人回收。
+    // 海洋洞窟（OceanCaves cs:15228）2026-08-16 前在 vanillaBiomes 尾执行（早于引力沙
+    // =清点表偏差①）：引力沙自底向上扫描会作用于已被 oceanCave 削过的海岸剖面——
+    // 本批归位到引力沙之后（每 pass 重播种子,RNG 流无移位,仅状态先后修正）
+    { name: '引力沙', run: gravitatingSandSlot },
     // 原版注册序 Lakes(14613) < Shimmer(15256) < DirtWallCleanup(15310)：
     // 微光以太在此挖洞灌液，清理/沉降在其后（Slush 31 已随 Lakes 入"液体"槽）
     { name: '微光', run: vanillaShimmer },
@@ -96,8 +113,8 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 地表沙柱上方的悬空水清除——零掷骰纯扫描（2026-08-12 前整 pass 缺失）
     { name: '沙上清水', run: surfaceWaterAboveSandPass },
     // 绿洲（原版 Oasis cs:16327，注册序 RemoveSurfaceWaterAboveSand(16295) < 本 pass
-    // < ShellPiles(16385)）：PlaceOasis 挖塘+岸线，登记 gs.oasisX/Y/W（pass 98 的
-    // 绿洲棕榈/燕麦/植物 530 消费段未实现，备案）
+    // < ShellPiles(16385)）：PlaceOasis 挖塘+岸线，登记 gs.oasisX/Y/W（pass 98 头部
+    // 的绿洲棕榈/燕麦/植物 530 消费段已落地——StructuresPass cs:21129-21163 段）
     { name: '绿洲', run: oasisPass },
     // 海滩装饰（原版 ShellPiles cs:16393-16501）：贝壳堆。原版注册序
     // SettleLiquids(16215) < ShellPiles(16385) < SmoothWorld(16507)——必须在半砖平滑
@@ -140,17 +157,27 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 地下自然墙唯二来源之一（另一=DirtWallBackgrounds 近地表）——缺它全洞穴无墙,
     // 暴露晶簇(178,贴墙装饰)悬空(2026-08-12 用户标注)
     { name: '洞穴墙', run: caveWallsPass },
-    // 浮空岛屋（原版 FloatingIslandHouses cs:17971，注册序 CaveWalls(17819) <
-    // UndergroundJungleTrees(17952,本仓缺该 pass,备案) < 本 pass）：日光板房屋
+    // 地下丛林树（原版 UndergroundJungleTrees cs:17952-17970，注册序 CaveWalls(17819)
+    // < 本 pass < FloatingIslandHouses(17971)）：全列×[worldSurface-1,h-350) 每格
+    // Next(10)==0 门 → GrowUndergroundTree（cs:31007,丛林草基座的地下树）。2026-08-16
+    // 前整 pass 缺失（清点表 #68 ❌）；pass 头 tileSolid[379]=true（cs:17956,
+    // SpiderCaves cs:17459 翻 false 的还原位）
+    { name: '地下丛林树', run: undergroundJungleTreesSlot },
+    // 浮空岛屋（原版 FloatingIslandHouses cs:17971，注册序 UndergroundJungleTrees
+    // (17952) < 本 pass < QuickCleanup(17987)）：日光板房屋
     // (Skyware 门+箱+桌椅)——曾内嵌「结构」槽尾（提前约 2000 行）,R 批归位
     { name: '浮空岛屋', run: islandHouseSlot },
-    // 瓦罐（原版 PotsGraveyardsAndBoulderPiles cs:18108,注册序 CaveWalls(17819) <
+    // 快清理（原版 QuickCleanup cs:17987-18107，注册序 FloatingIslandHouses(17971) <
+    // 本 pass < Pots(18108)）：五子段常态全跑——海洋液体转水/海洋表面沙下填土
+    // （Next(4,7) 在 for 条件内逐判定掷）/沙岩墙187·硬化沙墙216 杂块转硬化沙+
+    // 液体二分/表面悬空沙墙补齐（内层 break bug-for-bug）/SaveSlopes 坡面归一。
+    // 2026-08-16 前整 pass 缺失（清点表 #70 ❌）；头尾 tileSolid 137/130 翻转接线
+    { name: '快清理', run: quickCleanupSlot },
+    // 瓦罐（原版 PotsGraveyardsAndBoulderPiles cs:18108,注册序 QuickCleanup(17987) <
     // 本 pass < Hellforges(18298)）——曾排在熔炉后=与原版对调,2026-08-13 归位
     { name: '瓦罐', run: potPass },
     // 地狱熔炉(原版 Hellforges,cs:18298:w/200 个,墙 13/14 门禁)
     { name: '地狱熔炉', run: hellforgesPass },
-    // 矿骨堆（原版 pass 81 Piles 位置）
-    { name: '矿骨堆', run: pilesPass },
     // 表面（legacy 外壳：铺草=原版 pass 77 SpreadingGrass；内嵌 vanilla TreePass
     // =原版 pass 82 Trees；AlchemyHerbs(20109)+GrassPlants(20209)）
     { name: '表面', run: surfacePass },
@@ -161,6 +188,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 给 Flowers(20592) 消费
     { name: '倒木水景', run: vanillaFallenLogs },
     { name: '地表装饰', run: vanillaSurfaceDecor },
+    // 矿骨堆（原版 Piles cs:18900-19599 七子段，注册序 Traps(18769) < 本 pass <
+    // SpawnPoint(19605)）——2026-08-16 前位于「地狱熔炉」后（提前 4 个注册位，
+    // 清点表偏差②：Piles 的地面门禁会作用于 SpreadingGrass 段①群系转换**之前**，
+    // 与原版相反），本批归位到 Traps 槽（「地表装饰」）之后
+    { name: '矿骨堆', run: pilesPass },
     // 出生点（原版 SpawnPoint cs:19605，实现 cs:19605-19724）：中心随机扩张采样自然
     // 地表 + 上空清理盒——注册序 Piles(18900) 之后的本 pass < 草墙(19734)。曾内嵌
     // finalize 尾（全部 pass 之后执行）,2026-08-13 归位（清零批）
@@ -313,7 +345,7 @@ import { runMultitileFragmentSweepPass } from './vanilla/MultitileFragmentSweep'
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
-import { runTreePass, randomizeTreeStyle, growAshTree } from './vanilla/TreePass';
+import { runTreePass, randomizeTreeStyle, randomizeCaveBackgrounds, growAshTree } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runGravitatingSandPass } from './vanilla/GravitatingSandPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
@@ -343,6 +375,8 @@ import { runCorruptionPass, runAltarsPass } from './vanilla/CorruptionPass';
 import { runSandPatchesPass, runTunnelsPass, runDirtWallBgPass, runSmallHolesPass } from './vanilla/MissingCavesPass';
 import { settleWorldLiquids } from '../liquid/settle';
 import vanillaJson from '../../../public/sprites/vanilla.json';
+import { runUndergroundJungleTreesPass } from './vanilla/UndergroundJungleTreesPass';
+import { runQuickCleanupPass } from './vanilla/QuickCleanupPass';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 async function liquidSettlePass({ world }: GenCtx) {
@@ -427,18 +461,17 @@ function vanillaTerrain(ctx: GenCtx) {
   const ts = randomizeTreeStyle(rng, W);
   gs.treeX = ts.treeX;
   gs.treeStyle = ts.treeStyle;
-  // ⑭ RandomizeCaveBackgrounds（cs:8157，4200 分支；值未消费照掷）
-  rng.nextIntRange(1050, 3150);                            // caveBackX[0]
-  {
-    const a = rng.nextInt(8);
-    let b = rng.nextInt(8);
-    while (b === a) b = rng.nextInt(8);
-  }
+  // ⑭ RandomizeCaveBackgrounds（cs:8157-8210，尺寸分支 2/3/4 段——多尺寸化 2026-08-16）
+  //    掷 caveBackX 边界 + 互异 caveBackStyle，值入 gs（.wld 头锚点可验）；掷骰序
+  //    与 4200 既有链位级兼容（同序同计数：1 边界 + 2 样式 + retry 环）
+  const cb = randomizeCaveBackgrounds(rng, W);
+  gs.caveBackX = cb.caveBackX;
+  gs.caveBackStyle = cb.caveBackStyle;
   // 尾部无条件 3 掷（cs:8211-8213：iceBackStyle/hellBackStyle/jungleBackStyle）——
   // 2026-08-12 审计发现整条 RNG 流自 Reset 起少 3 样本,后续世界形态整体平移
-  rng.nextInt(4);
-  rng.nextInt(3);
-  rng.nextInt(2);
+  gs.iceBackStyle = rng.nextInt(4);
+  gs.hellBackStyle = rng.nextInt(3);
+  gs.jungleBackStyle = rng.nextInt(2);
   // ⑮ RandomizeBackgrounds（cs:7913-7960，全部未消费照掷）
   {
     const rollForest = () => {
@@ -668,19 +701,11 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   rng.reseed(gs.seed); // ▶JunglePass cs:12497
   const jx = runJunglePass(store, rng, gs); // JunglePass
   world.jungleX = jx;
-  // 丛林表面泥化:泥柱核心区 ±0.12w 内,表层 10 格 dirt→mud(原版巨型 runner
-  // 覆盖表面所致;我们补这一步让丛林表面成草皮而非裸土)
-  {
-    const core = (gs as any).jungleCoreX ?? jx;
-    const reach = Math.floor(store.w * 0.12);
-    for (let x = Math.max(0, core - reach); x < Math.min(store.w, core + reach); x++) {
-      let sy = 0;
-      while (sy < store.h - 12 && !store.flags[store.idx(x, sy)]) sy++;
-      for (let y = sy; y < sy + 10; y++) {
-        if (store.get(x, y) === T.DIRT) store.setTileSilent(x, y, TILE_BY_KEY['mud']!);
-      }
-    }
-  }
+  // （自造「丛林表面泥化补偿块」已删 2026-08-16：原为 ±0.12w 表层 10 格 dirt→mud
+  //  的自创改写——补的是 noYChange 修复前巨型泥 runner 够不到地表的旧缺陷
+  //  （JunglePass.ts:67 注释「曾致泥柱矮」）；runner noYChange 修复后 JunglePass/
+  //  MudCaves 两检查点对 oracle 位级全绿（tests/caves-checkpoint），泥柱表面覆盖
+  //  已与原版一致，该块只在原版终态之外额外加宽泥带=偏差，故移除。清点表偏差④）
   // 18 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
   // 曾用近似 spreadGrassAll 中心限距+2 轮快照——caves-oracle 位级对账后替换）
   rng.reseed(gs.seed); // ▶MudCavesToJungleGrass cs:12499（零掷骰）
@@ -738,15 +763,16 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   rng.reseed(gs.seed); // ▶Gems cs:15109
   runGemsPass(store, rng, gs); // 35 Gems（原捆绑在 Lakes 槽——注册序修正移到 Beaches 后）
   // 原版 1456 注册序（WorldGen.cs 行号 = 唯一权威，2026-08-11 review 依此重排）：
-  //   OceanCaves(15228) < Pyramids(15426) < SurfaceWaterInJungle(15887) <
-  //   Temple(15911) < Beehives(16005) < JungleShrines(16059) < Statues(16947) <
-  //   UndergroundHouses+BuriedChests(17066) < SurfaceChests(17226) <
-  //   ChestsInJungleShrines(17308) < UnderwaterChests(17343) < SpiderCaves(17455) <
-  //   FloatingIslandHouses(17971) < MicroBiomes(21785)
+  //   GravitatingSand(15198) < OceanCaves(15228) < Pyramids(15426) <
+  //   SurfaceWaterInJungle(15887) < Temple(15911) < Beehives(16005) <
+  //   JungleShrines(16059) < Statues(16947) < UndergroundHouses+BuriedChests(17066) <
+  //   SurfaceChests(17226) < ChestsInJungleShrines(17308) < UnderwaterChests(17343) <
+  //   SpiderCaves(17455) < FloatingIslandHouses(17971) < MicroBiomes(21785)
   // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
   // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
-  rng.reseed(gs.seed); // ▶OceanCaves cs:15228
-  ctxOceanTreasures[0] = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录(→「雕像宝箱」槽 UnderwaterChests 消费)
+  // OceanCaves(15228) 2026-08-16 前在本函数尾执行（早于独立槽「引力沙」=清点表
+  // 偏差①），本批后移至「引力沙」槽内尾（gravitatingSandSlot）——引力沙须先
+  // 沉降悬空沙再挖海洋洞窟；宝藏点仍经 ctxOceanTreasures 跨槽传「雕像宝箱」槽。
   // 结构尾（Pyramids 15426 起 → SwordShrine）已拆出独立「结构」槽（「清理」之后执行，
   // 原版序 DirtWallCleanup 15310 < Pyramids 15426）——见 vanillaStructures；
   // 此前内嵌于此（微光/清理之前执行）= 结构先于清理，偏差（2026-08-13 清零批）
@@ -853,8 +879,9 @@ function templePart2Slot({ store, rng, world }: GenCtx) {
   runTemplePart2Pass(store, rng, gs, world.chests);
 }
 
-// 浮空岛日光板房屋（FloatingIslandHouses cs:17971；UndergroundJungleTrees(17952)
-// 本仓缺该 pass（备案）——原版序紧随其后，故插在「洞穴墙」槽之后）
+// 浮空岛日光板房屋（FloatingIslandHouses cs:17971；前置「地下丛林树」槽已 2026-08-16
+// 补缺（UndergroundJungleTrees cs:17952），注册序 CaveWalls < UndergroundJungleTrees
+// < 本 pass < QuickCleanup）
 function islandHouseSlot({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
@@ -1082,10 +1109,40 @@ function vanillaBeachDecor({ store, rng }: GenCtx) {
 }
 
 // 引力沙（原版 GravitatingSandCleanup cs:15198-15226）：地表内悬空 Falling 系落定
+// （导出签名保持只读 store——caves-checkpoint 直调本函数对账,勿内嵌其他 pass）
 export function gravitatingSandPass({ store }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runGravitatingSandPass(store, gs);
+}
+
+// 引力沙槽 = GravitatingSand(#36) + OceanCaves(#37)（cs:15198 → cs:15228 注册序，
+// 2026-08-16 归位——此前 OceanCaves 在 vanillaBiomes 尾早于引力沙，清点表偏差①）
+function gravitatingSandSlot(ctx: GenCtx) {
+  gravitatingSandPass(ctx);
+  const gs = ctxGs[0];
+  if (!gs) return;
+  const { store, rng } = ctx;
+  rng.reseed(gs.seed); // ▶OceanCaves cs:15228
+  // 海洋洞窟蠕虫+宝藏点记录(→「雕像宝箱」槽 UnderwaterChests 消费)
+  ctxOceanTreasures[0] = runOceanCavesPass(store, rng, gs);
+}
+
+// 地下丛林树（原版 UndergroundJungleTrees cs:17952-17970 + GrowUndergroundTree
+// cs:31007）：全列 × [worldSurface-1,h-350) Next(10)==0 门 → 丛林草基座地下树
+function undergroundJungleTreesSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  rng.reseed(gs.seed); // ▶UndergroundJungleTrees cs:17952
+  runUndergroundJungleTreesPass(store, rng, gs);
+}
+
+// 快清理（原版 QuickCleanup cs:17987-18107 五子段，见 QuickCleanupPass.ts 头注）
+function quickCleanupSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  rng.reseed(gs.seed); // ▶QuickCleanup cs:17987
+  runQuickCleanupPass(store, rng, gs);
 }
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)

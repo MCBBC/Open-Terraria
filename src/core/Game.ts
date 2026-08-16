@@ -2212,7 +2212,7 @@ export class Game implements GameHooks {
 
   // ================= 生命周期 =================
 
-  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程） */ difficulty?: number; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
+  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; /** 世界尺寸档（0 小/1 中/2 大，UIWorldCreation 三档；给出时 generateWorld 以 SIZE_DIMS 派生 W/H） */ size?: import('../world/World').WorldSize; /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程） */ difficulty?: number; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
     this.freshlyCreated = true; // NPC 入驻公告只在新生成的世界播(WorldGen 语义)
     // 原版 gen[27]"正在安置液体"(SettleLiquids :16219;UIWorldLoadState 经
     // worldgenText('水体沉降') 同键转换,双路一致)
@@ -2225,7 +2225,7 @@ export class Game implements GameHooks {
     if (await this.genClient.probe()) {
       try {
         this.world = await this.genClient.generate(
-          { width, height, seedText, name: opts?.name, evil: opts?.evil, preview: !!opts?.onPreview },
+          { width, height, size: opts?.size, seedText, name: opts?.name, evil: opts?.evil, preview: !!opts?.onPreview },
           {
             onPreview: opts?.onPreview,
             // 进度区间映射与主线程路径一致：generate 0–0.7、settle 0.72–0.87
@@ -2247,7 +2247,7 @@ export class Game implements GameHooks {
       }
     }
     // ---- 主线程 fallback（原路径原样保留：worker 不可用 + 探针依赖） ----
-    this.world = await generateWorld({ width, height, seedText, name: opts?.name, evil: opts?.evil, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
+    this.world = await generateWorld({ width, height, size: opts?.size, seedText, name: opts?.name, evil: opts?.evil, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
     // 水体预沉降：创建世界时全图激活+步进至稳定，带进度条
     onProgress?.(settleLabel(), 0.72);
     await this.settleLiquids((p) => onProgress?.(settleLabel(), 0.72 + p * 0.15));

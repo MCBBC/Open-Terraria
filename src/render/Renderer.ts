@@ -1511,7 +1511,7 @@ export class Renderer {
     //     ★必须在世界变换块【外】（restore 之后）调用——本 pass 以
     //     cam.worldToScreen 屏幕坐标直画，块内调用会被世界变换二次平移+缩放
     //     （尘埃错位+放大；与 :1446 全亮孪生 pass 同坐标系）
-    this.drawVanillaDustPass(false, cam);
+    this.drawVanillaDustPass(false, cam, player);
 
     // 6c. LitNature 晨昏光晕（NextNatureRenderer :105-170：原版像素着色器，此处
     //     可见性公式 1:1 + 太阳位暖色加性光晕近似；vis=0 时零开销）
@@ -1541,7 +1541,7 @@ export class Renderer {
 
     // 7d. 原版 Dust 全亮 pass（type 6/15/59-64 强制 White :38406——不受光照，
     //     合成后直画 = GetColor(White) 等价）
-    this.drawVanillaDustPass(true, cam);
+    this.drawVanillaDustPass(true, cam, player);
 
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
@@ -2052,13 +2052,15 @@ export class Renderer {
   /** 8×8 像素重着色暂存（GetAlpha 常色精确化：261/6/264 等非 255 通道） */
   private dustScratch: HTMLCanvasElement | null = null;
   private dustScratch2: HTMLCanvasElement | null = null;
+  /** 尘染料帧缓存（ArmorColored 静态族；key=dyeVid|fx|fy，256 上限） */
+  private dustDyeCache: Map<string, HTMLCanvasElement> | null = null;
 
   /** DrawDust 单尘（屏幕空间，经 worldToScreen + zoom）。fullbright pass 画在
    *  光照合成后（= 原版 type 6/15/59-64 强制 White :38406）；lit pass 画在合成前
    *  （逐像素乘光 ≈ 原版逐尘取光）。两段共用本体（GetAlpha）+ 自定义色
    *  （GetColor :2773 加性钳位）双 pass。屏外矩形（±1000/±1050）外尘直接失活
    *  （:38272-38284 Intersects 语义） */
-  private drawVanillaDustPass(fullbright: boolean, cam: Camera): void {
+  private drawVanillaDustPass(fullbright: boolean, cam: Camera, player?: Player): void {
     const vd = this.vanillaDust;
     if (!vd) return;
     const img = this.atlas?.ensureVImage('vanilla/Dust.png');
@@ -2068,6 +2070,10 @@ export class Renderer {
     const worldW = cam.viewW / cam.zoom, worldH = cam.viewH / cam.zoom;
     const left = cam.x - worldW / 2 - 1000, top = cam.y - worldH / 2 - 1050;
     const s1 = (this.dustScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    // 尘染料缓存（ArmorColored 静态族：输出与 uTime 无关 → 按 dyeVid|帧 缓存；
+    // 动态族（彩虹/凝胶/反射等）逐帧跑真字节码）。key 含 fx/fy（帧三行变体）
+    this.dustDyeCache ??= new Map();
+    if (this.dustDyeCache.size > 256) this.dustDyeCache.clear();
     const s2 = (this.dustScratch2 ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
     const c1 = s1.getContext('2d', { willReadFrequently: true })!;
     const c2 = s2.getContext('2d', { willReadFrequently: true })!;
@@ -2098,6 +2104,47 @@ export class Renderer {
       if (d.scale !== 1) ctx.scale(d.scale, d.scale);
       ctx.drawImage(s1, -4, -4);
       ctx.restore();
+      // 染料 pass（GetSecondaryShader：SM2 字节码 63 pass 全技术 1:1——含彩虹
+      // uTime 动态/凝胶相位/反射光照/HallowBoss 双采样。静态 ArmorColored 族走
+      // 缓存。uDirection=玩家 facing（ArmorShaderData.Apply 尾段 entity 语义））
+      if (d.dyeVid > 0) {
+        const dyeEmu = dyeApplyOf(d.dyeVid);
+        if (dyeEmu) {
+          const isStatic = dyeEmu.tech === 'ArmorColored' || dyeEmu.tech === 'ArmorColoredDefault';
+          const key = `${d.dyeVid}|${d.fx}|${d.fy}`;
+          let canvas: HTMLCanvasElement | null | undefined = isStatic ? this.dustDyeCache!.get(key) : undefined;
+          if (canvas === undefined) {
+            dyeEmu.uniforms.uTime = (performance.now() / 1000) % 3600;
+            dyeEmu.uniforms.uDirection = player ? player.facing : 1;
+            if (dyeEmu.tech === 'ArmorReflective' || dyeEmu.tech === 'ArmorReflectiveColor') {
+              dyeEmu.uniforms.uLightSource = player ? this.reflectiveLightSource(player) as [number, number, number, number] : [0, 0, 0, 0];
+            }
+            const extra = dyeEmu.needsImage1 ? [this.hallowRampSampler() ?? undefined] : [];
+            c2.clearRect(0, 0, 8, 8);
+            c2.drawImage(img, d.fx, d.fy, 8, 8, 0, 0, 8, 8);
+            const idd = c2.getImageData(0, 0, 8, 8);
+            if (applyDyePass(idd.data, 8, 8, dyeEmu, extra,
+              { sx: d.fx, sy: d.fy, sheetW: img.width, sheetH: img.height })) {
+              c2.putImageData(idd, 0, 0);
+              if (isStatic) {
+                const cc = document.createElement('canvas'); cc.width = 8; cc.height = 8;
+                cc.getContext('2d')!.drawImage(s2, 0, 0);
+                this.dustDyeCache!.set(key, cc);
+                canvas = cc;
+              } else canvas = null;   // 动态族直接用 s2 现画
+            } else canvas = null;
+          }
+          if (canvas !== null) {
+            ctx.save();
+            ctx.translate(px, py);
+            if (d.rotation) ctx.rotate(d.rotation);
+            if (d.scale !== 1) ctx.scale(d.scale, d.scale);
+            ctx.drawImage(canvas ?? s2, -4, -4);
+            ctx.restore();
+            continue;   // 染料 pass 取代本体+colorPass（shader 输出即最终色）
+          }
+        }
+      }
       // 自定义色 pass（GetColor :2773：clamp(color.ch − (255 − base.ch)) 后再乘贴图）
       const cp = VanillaDust.colorPass(d, rgb, a);
       if (cp && (cp.a > 0.004)) {

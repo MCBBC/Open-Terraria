@@ -11,13 +11,27 @@ import { FastRandom } from '../../../core/rng';
 
 const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
 const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
-import { placeTight, placeUncheckedStalactite as placeStalactiteWithRolls } from './ShimmerPass';
+import { placeTight, placeUncheckedStalactite as placeStalactiteWithRolls, frame165 } from './ShimmerPass';
 import { genSolidType } from './GenSolid';
 const STALACTITE = TILE_BY_KEY['v_165_cave_decos']!; // 仅哈希/置型用；帧走 ShimmerPass
 const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!, THIN_ICE = TILE_BY_KEY['thin_ice']!;
 const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
 const MUSH_TREE = TILE_BY_KEY['v_72_mushroom_tree']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!, HARDSAND = TILE_BY_KEY['hardened_sand']!;
+
+/** Main.wallLargeFrames 非零墙（Main.cs 全 22 项：1=phlebas 2=lazure）——这些墙的
+ *  Framing.WallFrame(resetFrame) 走查表分支 **不掷骰**；其余非零墙必掷 1×Next(0,3) */
+const WALL_LARGE_FRAMES = new Set([224, 323, 324, 325, 326, 327, 328, 329, 330, 179, 146,
+  147, 167, 185, 274, 354, 355, 358, 359, 362, 363, 366]);
+
+/** WorldGen.SquareWallFrame(i,j)（cs:80941）中心格 Framing.WallFrame(resetFrame:true)
+ *  的掷骰语义：wall==0 早退不掷；wallLargeFrames∈{1,2} 查表不掷；其余非零墙
+ *  掷 1×Next(0,3)（Framing.cs:326-390，生成期无其他分支差异）。大理石 PlaceSlab/
+ *  花岗岩 PlaceDecorations 每格调用——缺掷则 pass 内流偏移 → 后续放置全体错位。 */
+export function squareWallFrameRoll(st: TileStore, rng: RNG, x: number, y: number): void {
+  const wl = st.wall[st.idx(x, y)];
+  if (wl !== 0 && !WALL_LARGE_FRAMES.has(wl)) rng.int(0, 2);
+}
 
 /** WorldGenRange Count（Configuration.json：Marble=WorldArea、Granite=WorldWidth，均 Min4/Max8）。
  *  4200×1200 两模式 scale 均 = 1 → Next(4,9)。 */
@@ -47,13 +61,63 @@ export function biomeTileCheck(st: TileStore, x: number, y: number): boolean {
   return false;
 }
 
+/** SolidOrSlopedTile（cs:70064）：active && tileSolid && !tileSolidTop && !inActive。
+ *  slope/halfBrick 不参与（半砖/坡面仍是"实或坡"）。生成期无 actuator/平台类活性块，
+ *  tileSolidTop 恒 false（本 pass 阶段世界无平台/桌子类），inActive 恒 false。 */
+function solidOrSlopedAt(st: TileStore, x: number, y: number): boolean {
+  return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0
+    && genSolidType(st.type[st.idx(x, y)]);
+}
+
 function solidTileAt(st: TileStore, x: number, y: number): boolean {
   // ★生成期实心走 genSolidType（cs:12537 起生成期 tileSolid[484]=false）：本 pass
   // 在 Desert 之后，CA 初值/放置门/清理门的 SolidTile 查询若用裸 TILE_DEFS.solid
   // （484=true），与 oracle 的 SOLID.Remove(484) 分叉——地下沙漠边缘的 484 会被
   // JS 当实心花岗岩腔壁（granite checkpoint 三哈希全差）。
-  return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0
-    && genSolidType(st.type[st.idx(x, y)]);
+  // ★SolidTile（cs:70155）还要求 !halfBrick && slope==0——PlaceSlab 每格调
+  //  Tile.SmoothSlope 给大理石格上坡面/半砖后，后续 PlaceTight 门的 SolidTile 查询
+  //  对这些格必须判非实心（否则门骰多掷 → pass 流全体错位）
+  if (!solidOrSlopedAt(st, x, y)) return false;
+  const i = st.idx(x, y);
+  return st.half[i] === 0 && st.slope[i] === 0;
+}
+
+/** CanPoundTile（cs:81434）排除表（switch default true）：SmoothSlope 前置门 */
+const NO_POUND_SHEETS = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484]);
+const sheetOfTile = (st: TileStore, i: number): number =>
+  TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+
+/** Tile.SmoothSlope（Tile.cs:822，applyToNeighbors=true）1:1。
+ *  邻序 (x+1,y)→(x-1,y)→(x,y+1)→(x,y-1) 后自身；CanPoundTile||SolidOrSlopedTile 门；
+ *  四邻 mask（上"非空"bit3 用 TileEmpty 语义）→ 半砖/坡面重分类。无掷骰但改
+ *  half/slope 状态 → 影响后续 SolidTile 门与最终坡面。 */
+function tileSmoothSlope(st: TileStore, x: number, y: number): void {
+  for (const [nx, ny] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]] as Array<[number, number]>) {
+    smoothSlopeSelf(st, nx, ny);
+  }
+  smoothSlopeSelf(st, x, y);
+}
+
+function smoothSlopeSelf(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (NO_POUND_SHEETS.has(sheetOfTile(st, i)) || !solidOrSlopedAt(st, x, y)) return;
+  // TileEmpty(x,y-1)（cs:70037）：非 active（或 actuator 失活）即空
+  const aboveNotEmpty = st.inBounds(x, y - 1) && st.flags[st.idx(x, y - 1)] !== 0;
+  const aboveNotSolid = !solidOrSlopedAt(st, x, y - 1);
+  const mask = ((aboveNotEmpty ? 1 : 0) << 3)
+    | ((solidOrSlopedAt(st, x, y + 1) ? 1 : 0) << 2)
+    | ((solidOrSlopedAt(st, x - 1, y) ? 1 : 0) << 1)
+    | (solidOrSlopedAt(st, x + 1, y) ? 1 : 0);
+  const flag2 = aboveNotSolid && aboveNotEmpty;
+  switch (mask) {
+    case 10: if (!flag2) { st.half[i] = 0; st.slope[i] = 3; } break;
+    case 9: if (!flag2) { st.half[i] = 0; st.slope[i] = 4; } break;
+    case 6: st.half[i] = 0; st.slope[i] = 1; break;
+    case 5: st.half[i] = 0; st.slope[i] = 2; break;
+    case 4: st.slope[i] = 0; st.half[i] = 1; break;
+    default: st.half[i] = 0; st.slope[i] = 0; break;
+  }
 }
 
 /** TileID.Sets.Ore（TileID.cs:399，19 个）——大理石/花岗岩 ResetToType 的矿石保留判定。
@@ -111,8 +175,8 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
   for (let i = 0; i < bn + 2; i++) { state.push(new Array(bn2 + 2).fill(0)); hasWall.push(new Array(bn2 + 2).fill(false)); }
   const groupSolid = (x: number, y: number): boolean => {
     let cnt = 0;
-    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) if (solidTileAt(st, x + a, y + b)) cnt++;
-    return cnt > 0;                                     // scale/4*3 = 0（int 除）
+    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) if (solidOrSlopedAt(st, x + a, y + b)) cnt++;
+    return cnt > 0;                                     // scale/4*3 = 0（int 除）；IsGroupSolid 用 SolidOrSlopedTile
   };
   for (let i = -1; i < bn + 1; i++) {
     const n4 = (i - Math.trunc(bn / 2)) / bn + 0.5;
@@ -167,6 +231,8 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
       // PlaceSlab（scale=3）
       const pOX = m * 3 + ox, pOY = n * 3 + oy + Math.trunc(n11);
       const pst = state[m + 1]![n + 1]!, pWall = hasWall[m + 1]![n + 1]!;
+      const __probe = (globalThis as { __swSlabProbe?: (x: number, y: number, pst: number, pWall: boolean) => void }).__swSlabProbe;
+      if (__probe) __probe(pOX, pOY, pst, pWall);
       let pn4 = 0, pn5 = 3;
       for (let i = -1; i < 4; i++) {
         if ((i === -1 || i === 3) && rng.int(0, 1) === 0) continue;   // 边缘列 50% 跳过
@@ -179,7 +245,24 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
           st.type[ti] = isOreType(st.type[ti]) ? st.type[ti] : MARBLE;  // ResetToType：矿石保留
           st.flags[ti] = slabSolid(pst, i, j, 3) ? 1 : 0;
           st.liquid[ti] = 0; st.liquidType[ti] = 0;
+          st.half[ti] = 0; st.slope[ti] = 0;  // ResetToType 清 sTileHeader（半砖/坡面）
+          // ★wall 是 Tile.cs 独立 ushort 字段——ResetToType 的 bTileHeader*=0 不清墙，
+          // HasWall=false 时保留旧墙（SquareWallFrame 掷照旧）
           if (pWall) st.wall[ti] = 178;
+          // WorldUtils.TileFrame(frameNeighbors:true)（cs:WorldUtils.cs:79-88）：
+          // 中心 + (x+1,y)/(x-1,y)/(x,y+1)/(x,y-1) 各一次 TileFrameImportant——
+          // 165 格 → CheckStalactite 重查（支撑被后续格上坡 → 击杀/重定型掷）
+          frame165(st, rng, px, py);
+          frame165(st, rng, px + 1, py);
+          frame165(st, rng, px - 1, py);
+          frame165(st, rng, px, py + 1);
+          frame165(st, rng, px, py - 1);
+          // SquareWallFrame：中心格 WallFrame(resetFrame:true) 非零墙掷 1×Next(0,3)
+          //（PlaceSlab 每格,cs:MarbleBiome.cs:160-168）
+          squareWallFrameRoll(st, rng, px, py);
+          // Tile.SmoothSlope（applyToNeighbors=true）：无掷但写 half/slope——
+          // 影响本列/邻列后续 SolidTile 门（PlaceTight 骰）与最终坡面
+          tileSmoothSlope(st, px, py);
           if (solidTileAt(st, px, py - 1) && rng.int(0, 3) === 0) placeTight(st, rng, px, py);
           if (solidTileAt(st, px, py) && rng.int(0, 3) === 0) placeTight(st, rng, px, py - 1);
         }
@@ -214,11 +297,11 @@ export function runGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
       pts.push([x, y]); placed++;
     } else if (fails > st.w * 10) { count = placed; placed++; fails = 0; }
   }
-  for (let i = 0; i < count && i < pts.length; i++) granitePlace(st, gs, pts[i]![0]!, pts[i]![1]!);
+  for (let i = 0; i < count && i < pts.length; i++) granitePlace(st, rng, gs, pts[i]![0]!, pts[i]![1]!);
 }
 
 /** GraniteBiome.Place（GraniteBiome.cs:73-353）1:1：magma 压力 CA → 放置 → 清理 → 装饰 */
-function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void {
+function granitePlace(st: TileStore, rng: RNG, gs: GenState, x0: number, y0: number): void {
   if (!st.inBounds(x0, y0) || st.flags[st.idx(x0, y0)]) return;
   const gox = x0 - 100, goy = y0 - 100;             // 200×200 magma 图
   // let:轮末 Utils.Swap 引用交换(GraniteBiome.cs:186)
@@ -276,6 +359,10 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
           nv = Math.max(0, nv);
           tPres[ji] = nv;
           tRes[ji] = Math.max(0, res[ji]! - nv * 0.02);
+          // CreateFlow(:31)恒 active:true——整格写入含激活位。曾只写压力/电阻：
+          // 稀疏交换语义下本格 target 残留 i-2 轮 inactive 态 → CA 细胞提前死亡、
+          // 花岗岩腔边界比原版小一圈（wall 180 网大面积缺失）
+          tAct[ji] = 1;
         }
       }
     }
@@ -313,9 +400,11 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
       if (Math.max(1 - Math.max(0, gnum * gnum2), pres[mi]! / 15) > 0.35 + (solidTileAt(st, tx, ty) ? 0 : 0.5)) {
         st.type[ti] = isOreType(st.type[ti]) ? st.type[ti] : GRANITE;
         st.flags[ti] = 1; st.liquid[ti] = 0; st.liquidType[ti] = 0;
+        st.half[ti] = 0; st.slope[ti] = 0;           // ResetToType 清 sTileHeader
         st.wall[ti] = 180;
       } else if (res[mi]! < 0.01) {
         st.flags[ti] = 0;                            // ClearTile：type/wall/液体保留
+        st.half[ti] = 0; st.slope[ti] = 0;           // ClearSlope
         st.wall[ti] = 180;
       }
       if (st.liquid[ti] > 0 && useLava) st.liquidType[ti] = 2;
@@ -336,6 +425,7 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
   for (const [cx, cy] of clean) {
     const ti = st.idx(cx, cy);
     st.flags[ti] = 0; st.wall[ti] = 180;
+    st.half[ti] = 0; st.slope[ti] = 0;               // ClearTile→ClearSlope
   }
   // PlaceDecorations：FastRandom(seed).WithModifier(65440) 独立流（与 genRand 无关）
   const fr = new FastRandom(gs.seed).withModifier(65440);
@@ -344,6 +434,10 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
       const mi = i * 200 + j;
       const tx = gox + i, ty = goy + j;
       if (tx < 10 || tx >= st.w - 10 || ty < 10 || ty >= st.h - 10 || !mact[mi]) continue;
+      // WorldUtils.TileFrame → 165 格 CheckStalactite 重查（GraniteBiome.cs:345）
+      frame165(st, rng, tx, ty);
+      // SquareWallFrame：非零墙掷 1×Next(0,3)（GraniteBiome.cs:346 每活性格）
+      squareWallFrameRoll(st, rng, tx, ty);
       const fr2 = fr.withModifierXY(tx, ty);
       if (fr2.nextMax(8) === 0 && st.flags[st.idx(tx, ty)]) {
         if (ty + 1 < st.h && !st.flags[st.idx(tx, ty + 1)]) {
@@ -353,7 +447,7 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
           placeStalactiteWithRolls(st, tx, ty - 1, fr2.nextMax(2) === 0, fr2.nextMax(3));
         }
       }
-      if (fr2.nextMax(2) === 0) { /* Tile.SmoothSlope —— 坡面哈希无关 */ }
+      if (fr2.nextMax(2) === 0) tileSmoothSlope(st, tx, ty);  // Tile.SmoothSlope（GraniteBiome.cs:352）
     }
   }
 }

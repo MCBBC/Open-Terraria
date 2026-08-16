@@ -156,25 +156,25 @@ if (W == 4200)
 }
 else if (W == 6400)
 {
-    r.Next(1076, 2136); r.Next(2820, 3880);                   // treeX[0/1]（0.334±0.2、0.667±0.2 取整）
+    r.Next(857, 3417); r.Next(2988, 5548);                   // treeX[0/1]（0.334±0.2/0.667±0.2 取整=857/3417/2988/5548，7 个真实 .wld 落值佐证）
     int ts0 = (int)r.Next(6); int ts1 = (int)r.Next(6); int ts2 = (int)r.Next(6);
     while (ts1 == ts0) ts1 = (int)r.Next(6);
     while (ts2 == ts0 || ts2 == ts1) ts2 = (int)r.Next(6);
     for (int i = 0; i < 3; i++) { int s = i == 0 ? ts0 : i == 1 ? ts1 : ts2; if (s == 0) r.Next(3); }
-    r.Next(1076, 2136); r.Next(2820, 3880);                   // caveBackX[0/1]
+    r.Next(857, 3417); r.Next(2988, 5548);                   // caveBackX[0/1]（同取整）
     int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8); int cb2 = (int)r.Next(8);
     while (cb1 == cb0) cb1 = (int)r.Next(8);
     while (cb2 == cb0 || cb2 == cb1) cb2 = (int)r.Next(8);
 }
 else
 {
-    r.Next(840, 2520); r.Next(2520, 4200); r.Next(4200, 5880); // treeX[0/1/2]（0.25/0.5/0.75±0.15）
+    r.Next(840, 3360); r.Next(2940, 5460); r.Next(5040, 7560); // treeX[0/1/2]（0.25/0.5/0.75±0.15 取整，真实 .wld 佐证）
     int ts0 = (int)r.Next(6); int ts1 = (int)r.Next(6); int ts2 = (int)r.Next(6); int ts3 = (int)r.Next(6);
     while (ts1 == ts0) ts1 = (int)r.Next(6);
     while (ts2 == ts0 || ts2 == ts1) ts2 = (int)r.Next(6);
     while (ts3 == ts0 || ts3 == ts1 || ts3 == ts2) ts3 = (int)r.Next(6);
     for (int i = 0; i < 4; i++) { int s = i switch { 0 => ts0, 1 => ts1, 2 => ts2, _ => ts3 }; if (s == 0) r.Next(3); }
-    r.Next(840, 2520); r.Next(2520, 4200); r.Next(4200, 5880); // caveBackX[0/1/2]
+    r.Next(840, 3360); r.Next(2940, 5460); r.Next(5040, 7560); // caveBackX[0/1/2]（同取整）
     int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8); int cb2 = (int)r.Next(8); int cb3 = (int)r.Next(8);
     while (cb1 == cb0) cb1 = (int)r.Next(8);
     while (cb2 == cb0 || cb2 == cb1) cb2 = (int)r.Next(8);

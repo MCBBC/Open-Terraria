@@ -1,15 +1,21 @@
 // 原版 pass 28 "Underworld"（cs:13697-13918 普通世界分支）1:1。
 // ①灰烬带+界下清空（★灰烬只写 type 不激活——原版语义，腔体保持空心）
-// ②岩浆线 ③1/50 大灰烬丘陵 ④1/13 灰烬柱+横团+挖掘 ⑤随机小挖掘 ⑥底部岩浆层
-// ⑦地狱石脉 ⑧外缘 17% 带灰烬草 633 + 1/3 灰烬树 634。
-// Liquid.QuickWater(-2)（cs:13788）两侧一致省略（液体模拟子系统）；AddHellHouses
-// 为独立槽（JS 管线在地狱 pass 之后，与原版 pass 内位置等价）。
+// ②岩浆线 ③1/50 大灰烬丘陵 → Liquid.QuickWater(-2)（cs:13788，2026-08-16 接线：
+//   原版在此把云湖/岩浆板整体沉降——漏接曾致 28.9 万 liq 差；QuickWater 全程
+//   不掷 genRand，接线零流影响。LiquidInteractionsCleanup（cs:23898）只处理活性
+//   黑曜石 56/659——本时点两者均为 0（dump027 实证），可证无操作省略）
+// ④1/13 灰烬柱+横团+挖掘 ⑤随机小挖掘 ⑥底部岩浆层 ⑦地狱石脉
+// ⑧外缘 17% 带灰烬草 633 + 1/3 灰烬树 634（★633 循环条件含 Next(-1,2)——
+//   C# for 条件每迭代重掷，原版 cs:13870，非每列一掷）。
+// AddHellHouses 为本槽尾段（runHellFortPass，与原版 pass 内位置等价，不另重播）。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { growAshTree } from './TreePass';
+import { LiquidSim } from '../../liquid/LiquidSim';
+import type { World } from '../../World';
 
 const ASH = T.ASH;
 const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;
@@ -54,6 +60,21 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       strength: rng.int(15, 19), steps: 1000, type: ASH, addTile: true,
       speedX: 0, speedY: rng.int(1, 2), noYChange: true,
     });
+  }
+  // Liquid.QuickWater(-2)（cs:13788，③与④之间）：全图液体直接搬运沉降。
+  // 生成期语义：isGeneratingOrLoadingWorld=常规交互只 strip 不落块；generatingWorld=
+  // 首尾 ShimmerRemoveWater（本时点无微光腔 → 无操作）。LiquidSim 仅需 store/seed
+  // 结构（quickWater 路径不触及其它 World 字段），一次性实例用后 dispose。
+  {
+    const sim = new LiquidSim({ store: st, seed: gs.seed } as unknown as World);
+    sim.isGeneratingOrLoadingWorld = true;
+    sim.generatingWorld = true;
+    // Liquid.cs:177-190 落水越 waterLine → 岩浆（深洞岩浆池来源）。地牢豁免分支
+    // （:186-188）本时点可证无操作：地牢墙族 {7,8,9,94-99} 在 dump027 为 0
+    // （Dungeon pass 32 在其后）——不接线。
+    sim.genWaterLine = gs.waterLine;
+    sim.quickWater();
+    sim.dispose();
   }
   // ④ 1/13 列灰烬柱 + 横向灰烬团 + 挖掘隧道
   for (let x = 0; x < w; x++) {
@@ -120,8 +141,9 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
   const outer = (x: number) => x < w * 0.17 || x > w * 0.83;
   for (let x = 25; x < w - 25; x++) {
     if (!outer(x)) continue;
-    const endY = h - 100 + rng.int(-1, 1);           // Next(-1,2) 逐列
-    for (let y = h - 300; y < endY; y++) {
+    // ★条件内 Next(-1,2) 每迭代重掷（原版 cs:13870 for 条件逐次求值）——
+    //   曾按每列一掷实现，漏 ~20 万掷使尾段树/地狱屋流整体错位
+    for (let y = h - 300; y < h - 100 + rng.int(-1, 1); y++) {
       const i = st.idx(x, y);
       if (st.type[i] !== ASH || !st.flags[i]) continue;
       let exposed = false;

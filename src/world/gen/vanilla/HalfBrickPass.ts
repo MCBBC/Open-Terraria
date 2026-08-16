@@ -118,8 +118,12 @@ export function solidOrSlopedTile(st: TileStore, x: number, y: number): boolean 
 /** Tile.SmoothSlope（1456 Tile.cs:822-880, applyToNeighbors=false 生成期路径,sync 段为联机略）：
  *  按四邻实心位形自整砖/半砖/坡面 1-4 推导。num 位序:上<<3 下<<2 左<<1 右。
  *  case10(上左)→slope3;case9(上右)→slope4;case6(下左)→slope1;case5(下右)→slope2;
- *  case4(仅下)→半砖;其余→整砖 */
-function smoothSlope(st: TileStore, x: number, y: number): void {
+ *  case4(仅下)→半砖;其余→整砖。
+ *  导出供 DesertHive.PlaceClusters 后置 Smooth（DesertHive.cs:213-222 postEffectMap）
+ *  与沙漠入口 Actions.Smooth 复用——坡面/半砖会改写后续 SolidTile 族门禁
+ *  （AddTileVariance 酥化判定 + 485/484/187/165 摆放锚点），绝不可按
+ *  「哈希无关副作用」省略（#19 残余 7448 act 的根因）。 */
+export function smoothSlope(st: TileStore, x: number, y: number): void {
   const i = st.idx(x, y);
   if (!canPoundTile(st, x, y) || !solidOrSlopedTile(st, x, y)) return;
   const flag = !tileEmpty(st, x, y - 1);                                  // 上方有物

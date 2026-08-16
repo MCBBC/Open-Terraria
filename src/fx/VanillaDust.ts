@@ -54,6 +54,9 @@ export interface VDust {
   /** customData = 主角（旧位跟随；263/264/182 一次性后清除，261 持续） */
   followPlayer: boolean;
   followOnce: boolean;
+  /** 染料 vid（-1 无；GetSecondaryShader(cShoe/cWings) 等价——渲染端跑
+   *  SM2 染料字节码（63 pass 全技术，含彩虹/反射/凝胶等动态族）） */
+  dyeVid: number;
 }
 
 /** Main.maxDustToDraw 的实用上限（翅膀场景并发 ≤40；6000 池的密度门是满载启发式，
@@ -85,7 +88,7 @@ export class VanillaDust {
       this.pool.push({
         active: false, x: 0, y: 0, vx: 0, vy: 0, type: 0, scale: 1, alpha: 0,
         fadeIn: 0, noGravity: false, noLight: false, noLightEmittance: false,
-        color: null, rotation: 0, fx: 0, fy: 0, followPlayer: false, followOnce: false,
+        color: null, rotation: 0, fx: 0, fy: 0, followPlayer: false, followOnce: false, dyeVid: -1,
       });
     }
   }
@@ -121,6 +124,7 @@ export class VanillaDust {
     d.noLightEmittance = false;
     d.followPlayer = false;
     d.followOnce = false;
+    d.dyeVid = -1;
     // :221-226 烟雾族初速特例（本批 type 6 命中；59-65 等后续接入同享）
     if (type === 228 || type === 279 || type === 269 || type === 135 || type === 6
       || type === 242 || type === 75 || type === 169 || type === 29 || (type >= 59 && type <= 65)

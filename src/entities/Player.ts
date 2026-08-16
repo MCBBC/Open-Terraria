@@ -19,6 +19,7 @@ import { wingStatOf } from '../data/vanillaWingStats';
 import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
 import type { WingFrameState } from '../data/vanillaWingVisuals';
 import { accFxOfInternal } from '../data/vanillaAccFx';
+import { dyeEntryOf } from '../data/vanillaDyes';
 import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
 import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
@@ -472,6 +473,8 @@ export class Player extends Entity {
     critMelee: number; critRanged: number; critMagic: number;
     moveMult: number; meleeSpeed: number;
     accRunSpeed: number;   // 靴族 accRunSpeed 原值（0=未装备）
+    bootFx: 'hellfire' | 'sail' | 'cold' | 'desert' | 'fairy' | null;   // 跑靴奔跑尘型（:36285 switch 按装备 vid）
+    bootDyeVid: number;   // 鞋染料 vid（cShoe——尘色）
     autoReuseGlove: boolean; // 力量手套族：近战武器自动连挥（Player.cs:52040-52042）
     extraFall: number; lavaMax: number; armorPen: number;
     rocketBoots: number; autoJump: boolean; fireWalk: boolean;
@@ -535,6 +538,8 @@ export class Player extends Entity {
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
     let move = 0, meleeSpeed = 0, runSpeed = 0;
+    let bootFx: 'hellfire' | 'sail' | 'cold' | 'desert' | 'fairy' | null = null;   // 跑靴尘型（:36285）
+    let bootDyeVid = -1;   // cShoe 鞋染料 vid（尘 GetSecondaryShader 着色源）
     let fish = 0;             // fishingSkill（钓具配饰+渔夫甲）
     let setRunAccMul = 1, setMaxRunMul = 1, setRunSlowMul = 1;
     let shieldItem = false;   // 暗影套移动四参数(:26195)
@@ -611,7 +616,21 @@ export class Player extends Entity {
         if (fx.fish) fish += fx.fish;
         if (fx.shield) shieldItem = true;   // 钓具族+渔夫甲 fishingSkill（:12549-12556/:14115-14140/:13022-13027）
         if (fx.meleeSpd) meleeSpeed += fx.meleeSpd;
-        if (fx.runSpeed) runSpeed = Math.max(runSpeed, fx.runSpeed);
+        if (fx.runSpeed) {
+          runSpeed = Math.max(runSpeed, fx.runSpeed);
+          // 跑靴奔跑尘型（SpawnFastRunParticles :36285-36320 switch——按装备 vid 授予；
+          // 后装覆盖先装，原版 CancelAllBootRunVisualEffects 语义）
+          const vidDef = ITEM_DEFS[s.id];
+          const vid = vidDef ? (vidDef.vid ?? viIdFromKey(vidDef.key)) : -1;
+          bootFx = vid === 4874 ? 'hellfire'
+            : vid === 3200 || vid === 3990 ? 'sail'
+            : vid === 1579 ? 'cold'
+            : vid === 4055 ? 'desert'
+            : vid === 3993 ? 'fairy' : null;
+          // 跑靴染料（cShoe :9355-9369：shoeSlot 装备所在槽的 dye → GetSecondaryShader）
+          const dyeS = this.inv.dye[i % 10];
+          bootDyeVid = dyeS ? (ITEM_DEFS[dyeS.id]?.vid ?? viIdFromKey(ITEM_DEFS[dyeS.id]?.key ?? '')) : -1;
+        }
         if (fx.dmgMelee) dmgMelee += fx.dmgMelee;
         if (fx.dmgRanged) dmgRanged += fx.dmgRanged;
         if (fx.dmgMagic) dmgMagic += fx.dmgMagic;
@@ -832,6 +851,7 @@ export class Player extends Entity {
       critMelee, critRanged, critMagic,
       moveMult, meleeSpeed,
       accRunSpeed: runSpeed,   // 靴族 accRunSpeed（裸 0=未装备 → 消费侧取基准 3）
+      bootFx, bootDyeVid,
       extraFall, lavaMax, armorPen, rocketBoots,
       autoJump, fireWalk, noKnockback, noFallDmg, desertBoots,
       frostBurn,
@@ -1737,6 +1757,9 @@ export class Player extends Entity {
         // :19546-19556：itemAnimation 窗内仅锁【朝向】不锁移动（挥砍中可跑）——
         // useTurn 物品（工具族）豁免
         if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix;
+        // 跑靴快速奔跑尘+脚步声（:19697/:19731 两向同门 SpawnFastRunParticles）
+        if (this.runSoundDelay > 0) this.runSoundDelay--;
+        this.spawnFastRunParticles(game, maxRun, accRun);
         const canRamp = this.vy === 0 || wingAir;          // 爬坡门（地面或翼飞行）
         const toward = ix * Math.max(maxRun, wingAir ? accRun : 0);
         // 全速段（|vx| 未到 maxRun → 加速;反向先 runSlowdown 制动 :19563-19568）
@@ -3026,6 +3049,8 @@ export class Player extends Entity {
   extraJumpCd = 0;
   /** 当前进行中的多段跳型（isPerformingJump_* 等价；落地清除——上升尾迹分支门） */
   performingJump: string | null = null;
+  /** 跑靴脚步声冷却（hermesStepSound.IntendedCooldown=9 :35519） */
+  runSoundDelay = 0;
   /** 火箭靴 1:1（Player.cs:2612/26548-26628）：rocketTime 剩余脉冲次数（max=7）/
    *  rocketDelay 推力脉冲倒计时（每次触发=10t 加速段）/ rocketDelay2 焰间隔
    *  （1 档 30 / 2+ 档 15）/ canRocket 门（vy>-jumpSpeed 才可启动）/ rocketRelease
@@ -3044,6 +3069,87 @@ export class Player extends Entity {
    *  :29337+/:29845+/:29730+/:30025+ + 滑翔段尘 :26914+/:26958+ + 47/49/50 三函数
    *  :30063-30270）。原版 Main.rand.Next(a,b)=[a,b)；本批 Dust 池缺省（无 Game）
    *  时静默跳过。 */
+  /** SpawnFastRunParticles（:19935-20027 1:1）：跑靴快速奔跑尘+脚步声。
+   *  门（:19697/:19731）：|vx| > (accRunSpeed+maxRunSpeed)/2 && vy==0 && 无坐骑。
+   *  分支（按装备 vid 授予 :36285）：4874 泰拉闪耀=火尘6 / 3200·3990 航行靴=尘253×4 /
+   *  1579 冰靴=雪尘76×2 / 4055 沙丘行者=沙尘32 / 3993 仙灵火花=仙尘61族×2 /
+   *  其余跑靴（赫尔墨斯 54/闪电 405/幽灵 898/霜花 1862 等）=白尘16+脚步声
+   *  （hermesStepSound=SoundID 17 冷却 9t :35517-35519）。鞋染料 shader 不建模。 */
+  private spawnFastRunParticles(game: GameHooks, maxRun: number, accRun: number): void {
+    if (this.ridingMount || this.vy !== 0) return;
+    if (Math.abs(this.vx) <= (accRun + maxRun) / 2) return;
+    const gd = this.gravDir;
+    const off = gd === -1 ? -this.h : 0;
+    const feetY = this.y + this.h + off;
+    const D = game.vanillaDust;
+    const eq0 = this.equipStats;
+    const fx = eq0.bootFx;
+    // cShoe 鞋染料（:9355-9369）——尘带 dyeVid，渲染端跑 SM2 染料字节码（63 pass
+    // 全技术 1:1：ArmorColored 主色族静态缓存，彩虹/凝胶/反射等动态族逐帧真跑）
+    const shoeDye = eq0.bootDyeVid;
+    // 翅靴分支（:19947 if 链首，优先于五靴型）：wings==3 或 时装槽 668（Red's
+    // Leggings → vanityRocketBoots=6 :12667-12670）→ 尘186×2（翅膀染料色 cWings）
+    const vanity668 = this.inv.armor.slice(10).some((it) => {
+      if (!it) return false;
+      const d = ITEM_DEFS[it.id];
+      return d ? (d.vid ?? viIdFromKey(d.key)) === 668 : false;
+    });
+    if (eq0.wing?.logic === 3 || vanity668) {
+      const wingDye = this.wingDyeVid();
+      for (let n = 0; n < 2; n++) {
+        const d = D ? D.spawn(this.x - 4, feetY, this.w + 8, 4, 186,
+          -this.vx * 0.5, this.vy * 0.5, 50, null, 1.5) : null;
+        if (d) { d.vx *= n === 0 ? 0.025 : 0.2; d.vy *= n === 0 ? 0.025 : 0.2; d.dyeVid = wingDye; }
+      }
+      return;
+    }
+    if (fx === 'hellfire') {
+      const d = D ? D.spawn(this.x - 4, feetY, this.w + 8, 4, 6, -this.vx * 0.5, this.vy * 0.5, 50, null, 2) : null;
+      if (d) { d.dyeVid = shoeDye; d.vx *= 0.2; d.vy = -1.5 - Math.random() * 0.5; d.fadeIn = 0.5; d.noGravity = true; }
+    } else if (fx === 'sail') {
+      for (let i = 0; i < 4; i++) {
+        const d = D ? D.spawn(this.x - 4, this.y, this.w + 8, this.h, 253, -this.vx * 0.5, this.vy * 0.5, 100, null, 1.5) : null;
+        if (!d) continue;
+        d.dyeVid = shoeDye;
+        d.noGravity = true;
+        d.vx *= 0.2; d.vy *= 0.2;
+        d.scale += (Math.random() * 8 - 5 | 0) * 0.1;
+      }
+    } else if (fx === 'desert') {
+      const d = D ? D.spawn(this.x - 4, feetY, this.w + 8, 4, 32, -this.vx * 0.5, this.vy * 0.5, 0, null, 1) : null;
+      if (d) { d.dyeVid = shoeDye; d.vx *= 0.2; d.vy = d.vy * 0.2 - gd * 2; }
+    } else if (fx === 'cold') {
+      for (let j = 0; j < 2; j++) {
+        const d = D ? D.spawn(j === 0 ? this.x : this.x + this.w / 2, this.y + this.h,
+          this.w / 2, 6, 76, 0, 0, 0, null, 1.35) : null;
+        if (!d) continue;
+        d.dyeVid = shoeDye;
+        d.scale *= 1 + (20 + Math.random() * 20 | 0) * 0.01;
+        d.noGravity = true; d.noLight = true;
+        d.vx *= 0.001; d.vy = d.vy * 0.001 - 0.003;
+      }
+    } else if (fx === 'fairy') {
+      const type = [61, 61, 61, 242, 64, 63][Math.random() * 6 | 0];   // NextFromList
+      for (let k = 1; k < 3; k++) {
+        const d = D ? D.spawn(this.x - 4, feetY, this.w + 8, 4, type, -this.vx * 0.5, this.vy * 0.5,
+          0, null, k === 2 ? 1 : 1.5) : null;
+        if (!d) continue;
+        d.dyeVid = shoeDye;
+        d.vx *= 1.5; d.vy *= 1.5;
+        if (k === 2) { d.x += d.vx; d.y += d.vy; }
+        d.noGravity = true; d.noLightEmittance = true;
+      }
+    } else {
+      // 普通跑靴：尘16 + 脚步声（SoundID 17 → Item_17，IntendedCooldown 9t）
+      const d = D ? D.spawn(this.x - 4, feetY, this.w + 8, 4, 16, -this.vx * 0.5, this.vy * 0.5, 50, null, 1.5) : null;
+      if (d) { d.dyeVid = shoeDye; d.vx *= 0.2; d.vy *= 0.2; }
+      if (this.runSoundDelay <= 0) {
+        game.playSfxFiles?.(['Item_17'], 1, this.cx, this.cy);
+        this.runSoundDelay = 9;
+      }
+    }
+  }
+
   /** DoubleJumpVisuals（:21615-21745 1:1）：多段跳上升期持续尾迹——沙暴瓶 3×尘124/
    *  tick + 每 3t gore220-223 沙云（scale 随平台段剩余放大）、云瓶/屁瓶 脚底 1×尘16/188、
    *  暴雪瓶 三段 8×尘76、航行瓶 1-2×尘253。门=performingJump 置位 + 上升中
@@ -3086,7 +3192,7 @@ export class Player extends Entity {
       for (let k = 0; k < 2; k++) {
         const d = mk(this.x, by, this.w, 12, 76, 0, 1, this.vx * 0.3, this.vy * 0.3);
         if (!d) continue;
-        d.vx *= 0.1; d.vy *= 0.1;
+                d.vx *= 0.1; d.vy *= 0.1;
         if (k === 0) { d.vx += this.vx * 0.03; d.vy += this.vy * 0.03; }
         else { d.vx -= this.vx * 0.03; d.vy -= this.vy * 0.03; }
         d.vx -= this.vx * 0.1; d.vy -= this.vy * 0.1;
@@ -3095,13 +3201,13 @@ export class Player extends Entity {
       for (let l = 0; l < 3; l++) {
         const d = mk(this.x, by, this.w, 12, 76, 0, 1, this.vx * 0.3, this.vy * 0.3);
         if (!d) continue;
-        d.fadeIn = 1.5; d.vx = d.vx * 0.6 + this.vx * 0.8; d.vy = d.vy * 0.6 + this.vy * 0.8;
+                d.fadeIn = 1.5; d.vx = d.vx * 0.6 + this.vx * 0.8; d.vy = d.vy * 0.6 + this.vy * 0.8;
         d.noGravity = true; d.noLight = true;
       }
       for (let m = 0; m < 3; m++) {
         const d = mk(this.x, by, this.w, 12, 76, 0, 1, this.vx * 0.3, this.vy * 0.3);
         if (!d) continue;
-        d.fadeIn = 1.5; d.vx = d.vx * 0.6 - this.vx * 0.8; d.vy = d.vy * 0.6 - this.vy * 0.8;
+                d.fadeIn = 1.5; d.vx = d.vx * 0.6 - this.vx * 0.8; d.vy = d.vy * 0.6 - this.vy * 0.8;
         d.noGravity = true; d.noLight = true;
       }
     } else if (opt === 'Sail' && (gd === 1 ? this.vy < 1 : this.vy > -1)) {
@@ -3111,7 +3217,7 @@ export class Player extends Entity {
       for (let j = 0; j < n; j++) {
         const d = mk(this.x, by, this.w, 12, 253, 100, 1.5, this.vx * 0.3, this.vy * 0.3);
         if (!d) continue;
-        d.scale += (Math.random() * 8 - 5 | 0) * 0.1;
+                d.scale += (Math.random() * 8 - 5 | 0) * 0.1;
         if (this.jumpHold <= 0) d.scale *= 0.8;
         else { d.vx -= this.vx / 5; d.vy -= this.vy / 5; }
         d.noGravity = true;

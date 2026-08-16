@@ -68,8 +68,9 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   // JunglePass.cs:50-54：noYChange:true——vy=-20 保持原速直上；缺失时被钳到 ±1
   // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
   tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });
-  // 泥柱中心记录给后续(丛林表面草化)
-  (gs as any).jungleCoreX = i;
+  // （原 `(gs as any).jungleCoreX = i` 记录已删 2026-08-16：唯一消费者=vanillaBiomes 的
+  //  自造「丛林表面泥化补偿块」，随该块一并退役；巨型 runner 的表面覆盖已由本函数
+  //  1:1 保证（caves-checkpoint jungle/mudcaves 双种子全绿））
   const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);
   generateHolesInMudWalls(st, rng, gs);
   generateFinishingTouches(st, rng, gs, oldX, oldY, scale, van);

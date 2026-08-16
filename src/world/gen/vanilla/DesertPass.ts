@@ -13,6 +13,7 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { placeTight } from './ShimmerPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
+import { smoothSlope } from './HalfBrickPass';
 
 const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
 
@@ -115,6 +116,8 @@ export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurfac
       const ti = st.idx(cx, y);
       st.type[ti] = SAND; st.flags[ti] = 1;
       st.liquid[ti] = 0; st.liquidType[ti] = 0;
+      // PlaceSandColumn 尾的 SquareWallFrame（SandMound.cs:73）——有墙格掷骰
+      squareWallFrameDraw(st, rng, cx, y);
     }
   }
   // UpdateSurfaceMap（mound 后重扫，入口/Hive 消费）
@@ -136,6 +139,33 @@ const SAND = T.SAND;
 const SANDSTONE = TILE_BY_KEY['sandstone']!;
 const HARDSAND = TILE_BY_KEY['hardened_sand']!;
 const FOSSIL = TILE_BY_KEY['desert_fossil']!;
+
+// ★SquareWallFrame 掷骰还原(2026-08-16 #19 根因):
+// Framing.WallFrame(i,j,resetFrame=true) 对每个「有墙且非大幅墙」格掷 1 次
+// genRand.Next(0,3),墙 21 再掷 Next(2)(真源 TerrariaServer.exe Framing.cs:326-406
+// `else if (resetFrame) { num2 = genRand.Next(0,3); if (tile.wall==21 && genRand.Next(2)==0) ... }`)。
+// 墙帧位(wallFrameNumber/X/Y)不入 TileStore,但掷骰是 genRand 流的一部分——曾按
+// 「哈希无关副作用省略」跳过,导致 pass 内流错位:mound 沙柱清带走带(±1 游走)→
+// 入口 kind 掷 → 蜂巢簇散点全错(#19 W187>216×35926/W216>187×34902 主签名)。
+// 大幅墙表(Main.cs wallLargeFrames,1=phlebas/2=lazure):走查表免掷。
+const WALL_LARGE_FRAMES = new Set<number>([
+  146, 147, 167, 179, 354,          // phlebas(1)
+  185, 224, 274, 323, 324, 325, 326, 327, 328, 329, 330, 355, 358, 359, 362, 363, 366, // lazure(2)
+]);
+/** Framing.WallFrame(i,j,resetFrame=true) 的掷骰语义(边界 1..max-2;wall==0 早退) */
+function wallFrameDraw(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (x <= 0 || y <= 0 || x >= st.w - 1 || y >= st.h - 1) return;
+  const w = st.wall[st.idx(x, y)];
+  if (w === 0 || WALL_LARGE_FRAMES.has(w)) return;
+  rng.int(0, 2);                       // genRand.Next(0, 3)
+  if (w === 21 && rng.int(0, 1) === 0) { /* frameNumber=2(帧位不建模,掷骰已还原) */ }
+}
+/** WorldGen.SquareWallFrame(i,j)(cs:80937-80948):九邻域 WallFrame 中**只有中心格**
+ *  传 resetFrame(:80943),其余八邻走默认 resetFrame=false 的 wallFrameNumber() 存量
+ *  分支——零掷。故每次调用至多 1 掷(中心格有墙且非大幅墙)。 */
+function squareWallFrameDraw(st: TileStore, rng: RNG, x: number, y: number): void {
+  wallFrameDraw(st, rng, x, y);
+}
 
 /** 放置循环 + Description + SandMound（Sub-A；Hive/入口在 runDesertPass 续） */
 export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): DesertDesc {
@@ -187,8 +217,9 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   const surf2 = (ax: number) => desc.surface2[ax - desc.surface2X];
 
   // ================= WorldBuilding 微框架（入口 4 形状共用）=================
-  // 与 caves-oracle.cs 的 WC/GW 逐行对应；哈希无关副作用（SquareWallFrame/SmoothSlope）
-  // 两侧一致省略。quitOnFail 恒 false → apply 返回 false 不中断遍历。
+  // 与 caves-oracle.cs 的 WC/GW 逐行对应；SquareWallFrame 的掷骰见 wallFrameDraw，
+  // Smooth 经 SmoothA（Actions.Smooth → Tile.SmoothSlope）落地（坡面改下游门禁）。
+  // quitOnFail 恒 false → apply 返回 false 不中断遍历。
   const shapeKey = (dx: number, dy: number) => dx * 4194304 + dy + 2097152;
   abstract class Ga {
     next: Ga | null = null;
@@ -273,6 +304,19 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       return inW(x, y) && st.wall[st.idx(x, y)] !== this.wt ? this.ua(ox, oy, x, y) : false;
     }
   }
+  // Actions.Smooth（Actions.cs:600）→ Tile.SmoothSlope——坡面/半砖写入，供后续
+  // AddTileVariance 门禁消费（不再按"哈希无关"省略）
+  class SmoothA extends Ga {
+    constructor(public withNeighbors = false) { super(); }
+    apply(ox: number, oy: number, x: number, y: number): boolean {
+      if (this.withNeighbors) {              // Tile.SmoothSlope(applyToNeighbors:true) 序
+        smoothSlope(st, x + 1, y); smoothSlope(st, x - 1, y);
+        smoothSlope(st, x, y + 1); smoothSlope(st, x, y - 1);
+      }
+      smoothSlope(st, x, y);
+      return this.ua(ox, oy, x, y);
+    }
+  }
   // ---- Actions（Actions.cs 1:1）----
   class Clear extends Ga {
     apply(ox: number, oy: number, x: number, y: number): boolean {
@@ -301,6 +345,12 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     constructor(public wt: number) { super(); }
     apply(ox: number, oy: number, x: number, y: number): boolean {
       if (inW(x, y)) st.wall[st.idx(x, y)] = this.wt;
+      // Actions.PlaceWall(Actions.cs):写墙后 SquareWallFrame(x,y) + 四邻(neighbors=true 默认)
+      squareWallFrameDraw(st, rng, x, y);
+      squareWallFrameDraw(st, rng, x + 1, y);
+      squareWallFrameDraw(st, rng, x - 1, y);
+      squareWallFrameDraw(st, rng, x, y - 1);
+      squareWallFrameDraw(st, rng, x, y + 1);
       return this.ua(ox, oy, x, y);
     }
   }
@@ -471,7 +521,8 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     }
     genCircle(ox, oy - Math.trunc(holeRadius * 1.5) + 3, Math.trunc(holeRadius / 2), Math.trunc(holeRadius / 3),
       chain(new ClearTile(), new Expand(1), new PlaceWall(0)));
-    // All(data)+Smooth：仅坡面/半砖——哈希无关，两侧一致省略
+    // AnthillEntrance.cs:52：All(data)+Smooth(applyToNeighbors=false)——尾迹沙坡面
+    genAll(ox, oy, data, new SmoothA());
   }
 
   // ---- LarvaHoleEntrance.cs 1:1：地表空腔 + 尾迹洞 + 蜿蜒竖井 ----
@@ -487,7 +538,8 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     const data = new Set<number>();
     genRect(px, py, -holeRadius, -holeRadius * 2, holeRadius, 0, outA(new Clear(), data));
     genTail(px, py, holeRadius * 2, 0, holeRadius * 1.5, outA(new Clear(), data));
-    // All(data)+Offset(0,1)+Expand(1)+IsSolid+Smooth —— 仅坡面，哈希无关省略
+    // LarvaHoleEntrance.cs:29：All(data)+Offset(0,1)+Expand(1)+IsSolid+Smooth(带邻)
+    genAll(px, py, data, chain(new Offset(0, 1), new Expand(1), new IsSolid(), new SmoothA(true)));
     const pairA = chain(new Blotches(), new IsSolid(), new Clear(), new PlaceWall(187));
     const pairB = chain(new IsSolid(), new SetTile(HARDSAND), new PlaceWall(187));
     let num = px;
@@ -526,7 +578,12 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         else if (Math.abs(i) < n3 + 3 && value > 0.35) resetToType(cx, j, HARDSAND);
         let n4 = Math.abs(i / holeRadius);
         n4 *= n4;
-        if (Math.abs(i) < n3 + 3 && (j - py) > 15 - 3 * n4) st.wall[st.idx(cx, j)] = 187;
+        if (Math.abs(i) < n3 + 3 && (j - py) > 15 - 3 * n4) {
+          st.wall[st.idx(cx, j)] = 187;
+          // PitEntrance.cs:墙带写后 SquareWallFrame(x, j-1)+(x, j)
+          squareWallFrameDraw(st, rng, cx, j - 1);
+          squareWallFrameDraw(st, rng, cx, j);
+        }
       }
     }
     const hr2 = holeRadius + 4;
@@ -614,8 +671,13 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   // ---- PlaceClustersArea（场强分层）----
   // ★shell 类型骰与 0.25 门走 FastRandom（DesertHive.cs:253/366）——与 genRand
   //  完全独立的第二条流，曾误用 rng.int/rng.next 造成每格 1-2 次幽灵掷骰
+  // ★postEffectMap（DesertHive.cs:193-198/310/314/345/361/388）：各层 ResetToType/
+  //  ClearEverything 的格标 Smooth（tier3.5 恒标），循环外统一 Tile.SmoothSlope
+  //  (:213-222, applyToNeighbors=false)——坡面/半砖是后续 AddTileVariance 门禁
+  //  （SolidTile/SolidTile2/PlaceTight 锚）的一等输入，不可省略（#19 残余根因）
   const hiveW = desc.combW, hiveH = desc.hiveH;
   const fr = new FastRandom(gs.seed).withModifier(57005);
+  const smoothMark = new Uint8Array((hiveW + 40) * (hiveH + 40));
   for (let hi = -20; hi < hiveW + 20; hi++) {
     for (let hj = -20; hj < hiveH + 20; hj++) {
       const px = desc.combX + hi, py = desc.hiveTop + hj;
@@ -643,6 +705,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       const isEdge = Math.sqrt(ex * ex + ey * ey) >= 0.8;   // Vector2D.Length()
       const i = st.idx(px, py);
       if (field > 3.5) {
+        smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;          // :314 恒标
         clearEverything(px, py);
         st.wall[i] = 187;
         if (f2 % 15 === 2) resetToType(px, py, FOSSIL);     // 获胜簇索引 %15==2
@@ -650,18 +713,27 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         st.wall[i] = 187;
         if (py < gs.worldSurface) st.liquid[i] = 0;         // else lava()：液量不变
         else st.liquidType[i] = 2;                          // 仅置岩浆类型位（原版事实）
-        if (!isEdge || st.flags[i]) resetToType(px, py, SANDSTONE);
+        if (!isEdge || st.flags[i]) {
+          resetToType(px, py, SANDSTONE);
+          smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;        // :345
+        }
       } else if (field > 0.7 || !isEdge) {
         st.wall[i] = 216;
         st.liquid[i] = 0;
-        if (!isEdge || st.flags[i]) resetToType(px, py, shellType);
+        if (!isEdge || st.flags[i]) {
+          resetToType(px, py, shellType);
+          smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;        // :361
+        }
       } else if (field > 0.25) {
         const fr2 = fr.withModifierXY(hi, hj);              // fastRandom.WithModifier(x,y)
         if (fr2.nextDouble() < (field - 0.25) / 0.45) {
           st.wall[i] = 187;
           if (py < gs.worldSurface) st.liquid[i] = 0;
           else st.liquidType[i] = 2;
-          if (st.flags[i]) resetToType(px, py, shellType);
+          if (st.flags[i]) {
+            resetToType(px, py, shellType);
+            smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)] = 1;      // :388
+          }
         }
       }
       // flag2（DesertHive.cs:315 每格 true，仅末档 else 置 false）→ UpdateDesertHiveBounds
@@ -674,15 +746,36 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       }
     }
   }
+  // PlaceClusters 尾的 postEffect 循环（DesertHive.cs:213-222）：标记格 SmoothSlope
+  //（applyToNeighbors=false；SmoothSlope 只读邻格 active/tileSolid——坡面写入不回灌，
+  //  与原版逐格序等价）
+  for (let hi = -20; hi < hiveW + 20; hi++) {
+    for (let hj = -20; hj < hiveH + 20; hj++) {
+      if (!smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)]) continue;
+      smoothSlope(st, desc.combX + hi, desc.hiveTop + hj);
+    }
+  }
 
   // ---- AddTileVariance（DesertHive.cs:413-499）----
-  // 第一遍：沙 53（含幽灵 53，不判 active）下方 2 格有非实心 → 酥化 397
+  // 第一遍：沙 53（含幽灵 53，不判 active）下方 2 格有非实心 → 酥化 397。
+  // ★SolidTile(Tile)（cs:70018）：nactive && tileSolid && !tileSolidTop && !half &&
+  //  slope==0——PlaceClusters 尾 SmoothSlope 给壳面铺了坡面/半砖，酥化判定必须
+  //  含坡位（曾裸用 TILE_DEFS.solid → 53>397×739 残差）
+  const solidTileAt = (x: number, y: number): boolean => {
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    const ti = st.idx(x, y);
+    if (!st.flags[ti]) return false;
+    const t = st.type[ti];
+    if (t === 0) return false;
+    const d = TILE_DEFS[t];
+    return genSolidType(t) && !!d && !d.platform && !st.half[ti] && st.slope[ti] === 0;
+  };
   for (let vi = -20; vi < hiveW + 20; vi++) {
     for (let vj = -20; vj < hiveH + 20; vj++) {
       const px = desc.combX + vi, py = desc.hiveTop + vj;
       if (px < 1 || px >= W - 1 || py < 1 || py >= H - 1) continue;
-      const s1 = py + 1 < H && solidAt(px, py + 1);
-      const s2 = py + 2 < H && solidAt(px, py + 2);
+      const s1 = solidTileAt(px, py + 1);
+      const s2 = solidTileAt(px, py + 2);
       const i = st.idx(px, py);
       if (st.type[i] === SAND && (!s1 || !s2)) st.type[i] = HARDSAND;
     }
@@ -700,9 +793,11 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   //         (px-1..px)×(py-2..py-1)；门禁=2x2 区全空+(px-1,py)/(px,py) 双底实心。
   //   187 → Place3x2（WorldGen.cs:52097）：占 (px-1..px+1)×(py-2..py-1)；门禁=
   //         3x2 区全空+三列底实心+底非 Boulders（:39005，TileID.cs:195）。
-  //   165 → PlaceTight（placeTight 1:1，Next(2)+Next(3) 恒掷）。
-  // 注：SolidTile2/blockType()==0 的 slope==0 半砖位以"坡度不建模"近似（与既有
-  // SmoothSlope 哈希无关省略同源约定）；tileTable 区内无表类省略。
+  //   165 → PlaceTight（placeTight 1:1，Next(2)+Next(3) 恒掷；其 SolidTile 锚门禁在
+  //         ShimmerPass 内已含 slope/half——CheckStalactite(:39022) 的支撑复查与放置
+  //         门禁同谓词，坡位锚在门口即拦，无后置 kill 分支）。
+  // 注：SolidTile2/blockType()==0 的 slope==0 已随 PlaceClusters 尾 SmoothSlope
+  // （postEffectMap 循环）落地面精确建模；tileTable 区内无表类省略。
   const T485 = TILE_BY_KEY['v_485_antlion_larva']!;
   const T751 = TILE_BY_KEY['v_751_sleeping_digtoise']!;
   const T484 = TILE_BY_KEY['v_484_rolling_cactus']!;
@@ -713,8 +808,16 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   // ★实心查询走 genSolidType（cs:12537 起生成期 tileSolid[484]=false）：本遍已放置
   // 的滚动仙人掌不可当实心底座，裸 TILE_DEFS.solid（484=true）会让原版该拒放的
   // 484/485/187 混进来。入口段的 solidAt 此时图内尚无 484，两写法等价、不动。
-  const solidGenAt = (x: number, y: number) => inW(x, y) && st.flags[st.idx(x, y)] !== 0
-    && genSolidType(st.type[st.idx(x, y)]);
+  // ★SolidTile2（cs:70178）额外要求 slope==0 && !halfBrick（不查 tileSolidTop）：
+  // PlaceClusters 尾的 SmoothSlope 壳面坡位必须拦（曾漏 → 484/485/187 多放）。
+  // 帧后复查链（PlaceObject→CheckSuper / Place3x2→Check3x2 的 AnchorValid(SolidTile)
+  // /SolidTileAllowBottomSlope）与放置门禁同谓词，门禁拦下即无需另建 kill 路径。
+  const solidGenAt = (x: number, y: number) => {
+    if (!inW(x, y)) return false;
+    const ti = st.idx(x, y);
+    return st.flags[ti] !== 0 && genSolidType(st.type[ti])
+      && st.slope[ti] === 0 && !st.half[ti];
+  };
   /** Place2x2（WorldGen.cs:51352-51445）1:1：锚=右下格，先 x--/y-- 再写，
    *  占 (ax-1..ax)×(ay-1..ay)；门禁=2x2 区全空+双底列 nactive&&(solid||tileTable) */
   const place2x2 = (ax: number, ay: number, tile: number, style: number) => {
@@ -731,17 +834,39 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   };
   /** Place3x2（WorldGen.cs:52097-52240）1:1：占 (ax-1..ax+1)×(ay-1..ay)；
    *  flag2 门禁=3x2 区全空+三列底 SolidTile2+187 专属底 Boulders 禁——任一失败整组不放 */
-  const place3x2 = (ax: number, ay: number, tile: number, style: number) => {
-    if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return;
+  const place3x2 = (ax: number, ay: number, tile: number, style: number): boolean => {
+    if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return false;
     for (let k = -1; k <= 1; k++) {
-      if (!freeAt(ax + k, ay - 1) || !freeAt(ax + k, ay)) return;
+      if (!freeAt(ax + k, ay - 1) || !freeAt(ax + k, ay)) return false;
       const bi = st.idx(ax + k, ay + 1);
-      if (st.flags[bi] && BOULDERS.has(st.type[bi]!)) return;    // InvalidTileForPiles
-      if (!solidGenAt(ax + k, ay + 1)) return;
+      if (st.flags[bi] && BOULDERS.has(st.type[bi]!)) return false;    // InvalidTileForPiles
+      if (!solidGenAt(ax + k, ay + 1)) return false;
     }
     for (let k = 0; k < 3; k++) {
       for (let l = 0; l < 2; l++) {
         st.setTileSilent(ax - 1 + k, ay - 1 + l, tile, style * 54 + k * 18, l * 18);
+      }
+    }
+    return true;
+  };
+  // Check3x2 的 187 底材复核（cs:49324-49344 style 组 29-34）：PlaceTile(187) 链
+  // Place3x2 后紧跟 SquareTileFrame(:60025)→TileFrameImportant case 186/187→Check3x2，
+  // 三列底任一不在 Conversion.Sand∪HardenedSand∪Sandstone（TileID.cs:30-34；404 化石
+  // 在外！）→ 六格整组 KillTile（active=false+type=0+清坡，cs:63933-63967，生成期
+  // noItem、dust 被 isGeneratingOrLoadingWorld 拦=零掷）。首例 (2759,610) 化石/沙岩
+  // 混合底：Place3x2 自身门禁（SolidTile2）放行、Check3x2 材质复核击杀。
+  const SAND_FAM = idsByVanillaSheet(53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401);
+  const check3x2Kill187 = (ax: number, ay: number): void => {
+    for (let k = -1; k <= 1; k++) {
+      const bi = st.idx(ax + k, ay + 1);
+      if (st.flags[bi] && !SAND_FAM.has(st.type[bi]!)) {
+        for (let kk = -1; kk <= 1; kk++) {
+          for (let l = -1; l <= 0; l++) {
+            const ki = st.idx(ax + kk, ay + l);
+            st.flags[ki] = 0; st.type[ki] = 0; st.half[ki] = 0; st.slope[ki] = 0;
+          }
+        }
+        return;
       }
     }
   };
@@ -792,7 +917,20 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         // 锚点 = py+(flag?-1:+1)（:491）
         placeTight(st, rng, px, py + (flag ? -1 : 1));
       } else if (flag && rng.int(0, 4) === 0) {          // 187：style 29+Next(6)
-        place3x2(px, py - 1, T187, 29 + rng.int(0, 5));
+        if (place3x2(px, py - 1, T187, 29 + rng.int(0, 5))) check3x2Kill187(px, py - 1);
+      }
+    }
+  }
+
+  // ---- CleanupArea（DesertBiome.cs:55-71）：Hive±20 逐格 SquareWallFrame + TileFrame。
+  // TileFrame 生成期零掷（TileFrameCosmetic 被 !generatingWorld 门拦;TileFrameImportant
+  // 仅 178/苔藓/仙人掌三支掷 genRand——沙漠区无涉）;SquareWallFrame 的掷骰必须还原。
+  {
+    const cl = desc.combX - 20, cr = desc.combX + desc.combW + 20;
+    const ct = desc.hiveTop - 20, cb = desc.hiveTop + desc.hiveH + 20;
+    for (let i = cl; i < cr; i++) {
+      for (let j = ct; j < cb; j++) {
+        if (i > 0 && i < W - 1 && j > 0 && j < H - 1) squareWallFrameDraw(st, rng, i, j);
       }
     }
   }

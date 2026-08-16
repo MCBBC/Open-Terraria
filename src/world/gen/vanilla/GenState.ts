@@ -81,6 +81,13 @@ export interface GenState {
   // RandomizeTreeStyle（Reset 掷）：树冠样式边界与样式（finalize 写回 world）
   treeX: number[];
   treeStyle: number[];
+  // RandomizeCaveBackgrounds（Reset 掷，cs:8157-8213 尺寸分支 2/3/4 段）：洞穴背景
+  // 边界/样式 + 尾部 ice/hell/jungle 三背景样式（多尺寸对账锚点之一，.wld 头可验）
+  caveBackX: number[];
+  caveBackStyle: number[];
+  iceBackStyle: number;
+  hellBackStyle: number;
+  jungleBackStyle: number;
   /** 生成的树登记（{x, y=树顶, h}；finalize 写 world.trees 供砍伐整棵判定） */
   genTrees: Array<{ x: number; y: number; h: number }>;
   /** Lakes pass 记录的湖位 x（后续 pass 避让用） */
@@ -207,6 +214,7 @@ export function newGenState(w: number, h: number): GenState {
     beachLeftEnd: 0, beachRightStart: 0,
     shellStartXLeft: 0, shellStartYLeft: 0, shellStartXRight: 0, shellStartYRight: 0,
     treeX: [0, 0, 0], treeStyle: [0, 0, 0, 0], genTrees: [], lakeX: [],
+  caveBackX: [0, 0, 0], caveBackStyle: [0, 0, 0, 0], iceBackStyle: 0, hellBackStyle: 0, jungleBackStyle: 0,
     mCaveX: new Int32Array(1024), mCaveY: new Int32Array(1024), numMCaves: 0,
     snowMinX: null, snowMaxX: null, snowTop: 0, snowBottom: 0,
     jungleBounds: null,

@@ -158,6 +158,9 @@ function place3x2(st: TileStore, x: number, y: number, style: number): boolean {
     if (invalidForPiles(st, c, y + 1)) ok = false;                    // cs:52143
     if (!solidAt(st, c, y + 1)) ok = false;                           // cs:52150
   }
+  if (LT_TRACE && x >= 405 && x <= 430 && y >= 140 && y <= 175) {
+    console.log(`P3x2? x=${x} y=${y} style=${style} ok=${ok} st=${ltStream()}`);
+  }
   if (!ok) return false;
   const d0 = TILE_DEFS[PILE2];
   const [bx, by] = furnitureStyleBase(d0.vanilla?.sheet ?? -1, style, 3);
@@ -167,6 +170,104 @@ function place3x2(st: TileStore, x: number, y: number, style: number): boolean {
     }
   }
   return true;
+}
+
+// ---------- PlaceTile(187) 全链（cs:59366 头 + cs:60026 case + SquareTileFrame） ----------
+// 2026-08-16 原版服务器探针裁决（/tmp/sw-num4 growtree 链 + 041 原版输入重放）：JS 此前
+// 只移植了 Place3x2 本体,缺 PlaceTile 头的锚格 Clear 与 case 尾 SquareTileFrame(i,j)→
+// TileFrame→Check3x2 一致性清除链。后果：叶簇逐簇推进时后写叶/邻簇石堆会部分覆写已放
+// 石堆(187),原版下一次该区域的 SquareTileFrame 触发 Check3x2 校验失败 → KillTile 清除
+// 残件；JS 残件永生 → 树冠多出 187 残格（对拍实锤 (414,154)/(511-513,140) 等）。
+
+/** WorldGen.KillTile 生成期语义（cs:63559,cs:63955-63960 收尾）：active(false)+
+ *  halfBrick(false)+frameX/frameY=-1+清漆；**type/slope 保留**（幽灵 187）；
+ *  无掉落掷骰（isGeneratingOrLoadingWorld → noItem=true；type51/wall62 掷骰分支不触及）。 */
+function killTileGen(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return;
+  st.flags[i] = 0;
+  st.half[i] = 0;
+  st.frameX[i] = -1;
+  st.frameY[i] = -1;
+  st.paint[i] = 0;
+}
+
+/** WorldGen.Check3x2 type=187 分支（cs:49190-49438）：由 (i,j) 格帧重建 3×2 原点,
+ *  校验六格 type+帧一致（frameX!=(k-num5)*18+num7 / frameY!=(l-num)*18+num3*36）与
+ *  支撑行（default 档 !SolidTileAllowBottomSlope→flag;本阶段无 slope/half 等价
+ *  solidAt）。失败 → KillTile 六格中仍为 187 的 active 格。帧重建算法与 place3x2
+ *  的样式布局解耦（vanilla 54*style 平铺与本仓 35-wrap 帧均自洽重建）。
+ *  187→186 草变体转化（cs:49382,frameX∈[756,900]）不移植：vanilla 帧平铺下仅
+ *  style 14-16 可达,活树石堆 style 47-51 帧为 2538+ 恒出界。 */
+function check3x2Pile(st: TileStore, i: number, j: number): void {
+  if (!st.inBounds(i, j)) return;
+  const ii = st.idx(i, j);
+  if (!st.flags[ii] || st.type[ii] !== PILE2) return;
+  const frameX = st.frameX[ii] | 0;
+  const frameY = st.frameY[ii] | 0;
+  const num3 = Math.trunc(frameY / 36);              // cs:49206
+  const num4 = frameY % 36;
+  let num = j - Math.trunc(num4 / 18);               // cs:49208
+  let n5 = Math.trunc(frameX / 18);
+  let n6 = 0;
+  while (n5 > 2) { n5 -= 3; n6++; }                  // cs:49212-49216
+  n5 = i - n5;
+  const num7 = n6 * 54;
+  const num8 = num + 2;
+  let flag = false;
+  for (let k = n5; k < n5 + 3; k++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }
+      const idx = st.idx(k, l);
+      if (!st.flags[idx] || st.type[idx] !== PILE2
+        || st.frameX[idx] !== (k - n5) * 18 + num7
+        || st.frameY[idx] !== (l - num) * 18 + num3 * 36) {
+        flag = true;                                 // cs:49235-49241 六格一致
+      }
+    }
+    if (!solidAt(st, k, num8)) flag = true;          // default 档支撑行（cs:49379-49382）
+  }
+  if (!flag) return;                                 // cs:49416
+  for (let k = n5; k < n5 + 3; k++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const idx = st.idx(k, l);
+      if (st.flags[idx] && st.type[idx] === PILE2) killTileGen(st, k, l);  // cs:49428-49432
+    }
+  }
+}
+
+/** WorldGen.SquareTileFrame（cs:80924）3×3 逐格 TileFrame 的活树语境子集：
+ *  仅 187 → Check3x2（本 pass 区域内其余类型 TileFrame 分支无清除语义——185 的
+ *  CheckPile 支撑为恒实心叶不触发；10/15/19/304 无后续破坏写;备案见审计文档）。 */
+function squareTileFrameGen(st: TileStore, x: number, y: number): void {
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      check3x2Pile(st, x + dx, y + dy);
+    }
+  }
+}
+
+/** PlaceTile(187) 全链等价：头部门槛（187 非实心 → !tileSolid[187] 恒过）+
+ *  锚格 inactive 时 Clear(Tile|Paint|Slope)（cs:59497-59499,幽灵归零——对拍实证
+ *  (415,153)g1→0g）+ Place3x2 + case 尾 SquareTileFrame(i,j)（成败都跑）。 */
+function placeTilePile(st: TileStore, x: number, y: number, style: number): boolean {
+  if (st.inBounds(x, y)) {
+    const i = st.idx(x, y);
+    if (!st.flags[i]) {
+      // Tile.Clear(Tile|TilePaint|Slope)（Tile.cs:774-782/803-807）
+      st.type[i] = 0;
+      st.frameX[i] = 0;
+      st.frameY[i] = 0;
+      st.paint[i] = 0;
+      st.slope[i] = 0;
+      st.half[i] = 0;
+    }
+  }
+  const ok = place3x2(st, x, y, style);
+  squareTileFrameGen(st, x, y);
+  return ok;
 }
 
 /** WorldGen.Place3x3 num=-2 分支（cs:53549,type 300-308 含织机 304）：3×3 底中锚
@@ -210,11 +311,15 @@ function placeDoorTile(st: TileStore, rng: RNG, x: number, y: number, style: num
   if (!st.inBounds(x, y - 3) || !st.inBounds(x, y + 3)) return false;
   if (!activeAt(st, x, y - 1) && !activeAt(st, x, y - 2)
     && activeAt(st, x, y - 3) && genSolidType(typeAt(st, x, y - 3))) {
-    return placeDoorCore(st, rng, x, y - 1, style);
+    const ok = placeDoorCore(st, rng, x, y - 1, style);
+    squareTileFrameGen(st, x, y);                     // cs:59889 上行支尾
+    return ok;
   }
   if (activeAt(st, x, y + 1) || activeAt(st, x, y + 2)
-    || !activeAt(st, x, y + 3) || !genSolidType(typeAt(st, x, y + 3))) return false;
-  return placeDoorCore(st, rng, x, y + 1, style);
+    || !activeAt(st, x, y + 3) || !genSolidType(typeAt(st, x, y + 3))) return false;  // cs:59901-59904
+  const ok = placeDoorCore(st, rng, x, y + 1, style);
+  squareTileFrameGen(st, x, y);                       // cs:59907 下行支尾
+  return ok;
 }
 /** PlaceDoor 本体：占 (x,j-1..j+1)；门框上 (x,j-2) 实心 + 下 (x,j+2) SolidTile */
 function placeDoorCore(st: TileStore, rng: RNG, x: number, j: number, style: number): boolean {
@@ -331,6 +436,7 @@ function growLivingTreePassageRoom(
   if (rng.int(0, 1) === 0) {
     num9 += 2;
     const ch1 = place1x2(st, num8, Y, 5);
+    squareTileFrameGen(st, num8, Y);                 // cs:60063 case 15 尾
     if (LT_TRACE) console.log(`R5chair ok=${ch1} st=${ltStream()} num9=${num9}`);
     if (ch1 && num < 0) {
       for (let dy = -1; dy <= 0; dy++) {
@@ -341,10 +447,12 @@ function growLivingTreePassageRoom(
   }
   num8 = num < 0 ? num3 + 2 : num5 - 2;
   const loomOk = place3x3(st, num8, Y);                           // 生命木织机 304（cs:29409）
+  squareTileFrameGen(st, num8, Y);                   // cs:59964 case 106-308 组尾
   if (LT_TRACE) console.log(`R6loom ok=${loomOk} st=${ltStream()}`);
   num8 = num < 0 ? num3 + 4 : num5 - 4;
   if (rng.int(0, num9 - 1) === 0) {
     const ch2 = place1x2(st, num8, Y, 5);
+    squareTileFrameGen(st, num8, Y);                 // cs:60063 case 15 尾
     if (LT_TRACE) console.log(`R7chair ok=${ch2} st=${ltStream()}`);
     if (ch2 && num > 0) {
       for (let dy = -1; dy <= 0; dy++) {
@@ -497,7 +605,11 @@ function growLivingTreeMakePassage(
   j: number, W: number, refs: PassageRefs, noSecretRoom: boolean,
 ): void {
   const worldSurface = gs.worldSurface;
-  const underworldLayer = gs.lavaLine;          // Main.UnderworldLayer => maxTilesY-200（Main.cs:2863）
+  // ★Main.UnderworldLayer = maxTilesY-200（Main.cs:2863）——曾误用 gs.lavaLine
+  //   (=GenVars.lavaLine≈waterLine+50..79≈h-340±):竖井地狱截断门提前 ~60-140 行。
+  //   9293480/SandboxWorld 两链种子树井均止于 y<400 未触及界,链对账绿掩盖了该错;
+  //   caves-oracle.cs:8378 一直用 H-200（oracle 无需同步）。
+  const underworldLayer = st.h - 200;
   let flag = noSecretRoom;
   const startL = refs.minl, startR = refs.minr;  // cs:29023-29024 存档,函数末恢复
   let flag2 = false;
@@ -887,7 +999,7 @@ export function growLivingTree(
         if (inWorld(st, n50, n52, 5) && !activeAt(st, n50, n52)) {
           while (!activeAt(st, n50, n52 + 1) && n52 < n48) n52++;
           if (sheetAt(st, n50, n52 + 1) === 192) {
-            place3x2(st, n50, n52, rng.int(50, 51));
+            placeTilePile(st, n50, n52, rng.int(50, 51));
           }
         }
       }
@@ -899,7 +1011,7 @@ export function growLivingTree(
       while (!activeAt(st, n50, n53 + 1) && n53 < n54) n53++;
       if (sheetAt(st, n50, n53 + 1) === 192) continue;
       if (rng.int(0, 1) === 0) {
-        place3x2(st, n50, n53, rng.int(47, 49));
+        placeTilePile(st, n50, n53, rng.int(47, 49));
         continue;
       }
       const n55 = rng.int(0, 1);

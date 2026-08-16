@@ -264,6 +264,183 @@ export function placeTight(st: TileStore, rng: RNG, x: number, y: number): void 
   const preferSmall = rng.int(0, 1) === 0;   // genRand.Next(2) == 0
   const variation = rng.int(0, 2);           // genRand.Next(3)
   placeUncheckedStalactite(st, x, y, preferSmall, variation);
+  // PlaceTight 尾（cs:38345）：placed 165 → CheckStalactite——本仓库 placeUncheckedStalactite
+  // 直写"重定型后"的最终列（材质匹配族 style==desired 不掷）；初始列≠期望列的失配族
+  // （117/25/203/163/164/200）原版 UpdateStalagtiteStyle 重掷 1×Next(3)——此处补掷
+  if (st.flags[yi] && st.type[yi] === STALACTITE) {
+    checkStalactite(st, rng, x, y);
+  }
+}
+
+// ── CheckStalactite（cs:39022）/ UpdateStalagtiteStyle（cs:38669）/ KillTile-165 ──
+// 石笋生命周期：放置即查（PlaceTight 尾）+ 后续 TileFrame 重查（TileFrameImportant
+// case 165）——支撑被 SmoothSlope 上坡/半砖后 SolidTile 翻假 → 整体击杀（含双格伴生）。
+// 击杀改写状态且经 SquareTileFrame 级联重查邻居 165；UpdateStalagtiteStyle 仅在
+// style != desiredStyle 时掷 1×Next(3)（cs:38690）。缺失时大理石钟乳石存活数与
+// 原版分叉 → SolidTile 门/SmoothSlope mask 级联放大（biome 内流整体错位）。
+const STYLE_BY_FX54 = new Map<number, number>([
+  [0, 7], [1, 0], [2, 11], [3, 12], [4, 1], [5, 2], [6, 3], [7, 4],
+  [8, 5], [9, 6], [10, 8], [11, 9], [12, 10],
+]);
+/** 期望 style 的列基（UpdateStalagtiteStyle switch cs:38696-38720） */
+const FX_BASE_BY_STYLE = [54, 216, 270, 324, 378, 432, 486, 0, 540, 594, 648, 108, 162];
+
+/** GetDesiredStalagtiteStyle（cs:38746-38847）：按 frameY 形态取支撑格，
+ *  return null = fail2（UpdateStalagtiteStyle 返 false → 击杀）。 */
+function getDesiredStalagtiteStyle(
+  st: TileStore, x: number, j: number,
+): { fail: boolean; style: number; height: number; y: number } {
+  const i0 = st.idx(x, j);
+  const fy = st.frameY[i0]!;
+  let num = 0, y = j, height = 1;
+  let supSheet: number;
+  if (fy === 72) {
+    num = 0;
+    supSheet = sheetActive(st, x, j - 1);
+  } else if (fy === 90) {
+    num = 1;
+    supSheet = sheetActive(st, x, j + 1);
+  } else if (fy >= 36) {
+    if (fy === 54) y--;
+    height = 2;
+    num = 4;
+    supSheet = sheetActive(st, x, y + 2);
+  } else {
+    if (fy === 18) y--;
+    height = 2;
+    num = 3;
+    supSheet = sheetActive(st, x, y - 1);
+  }
+  if (supSheet === 1 || MOSS_SHEETS.has(supSheet)) {
+    return { fail: false, style: num === 3 && st.wall[i0] === 62 ? 11 : 0, height, y };
+  }
+  switch (supSheet) {
+    case 200: return { fail: false, style: 10, height, y };
+    case 164: return { fail: false, style: 8, height, y };
+    case 163: return { fail: false, style: 9, height, y };
+    case 117: case 402: case 403: return { fail: false, style: 1, height, y };
+    case 25: case 398: case 400: return { fail: false, style: 2, height, y };
+    case 203: case 399: case 401: return { fail: false, style: 3, height, y };
+    case 396: case 397: return { fail: false, style: 4, height, y };
+    case 367: return { fail: false, style: 6, height, y };
+    case 368: return { fail: false, style: 5, height, y };
+    case 147: case 161: return { fail: false, style: 7, height, y };
+  }
+  if ((num === 0 || num === 1) && supSheet === 225) return { fail: false, style: 12, height, y };
+  return { fail: true, style: 0, height, y };
+}
+
+function sheetActive(st: TileStore, x: number, y: number): number {
+  if (!st.inBounds(x, y)) return -1;
+  const i = st.idx(x, y);
+  return st.flags[i] ? (TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) : -1;
+}
+
+/** UpdateStalagtiteStyle（cs:38669）：style!=desired → 掷 1×Next(3) 并重写 height 格列。
+ *  本仓库 placeUncheckedStalactite 已直写最终列（材质匹配族），故此处重掷仅在
+ *  失配族放置后的首次重查真实发生；重写列基取原版 switch。 */
+function updateStalagtiteStyle(st: TileStore, rng: RNG, x: number, j: number): boolean {
+  const i0 = st.idx(x, j);
+  const style = STYLE_BY_FX54.get(Math.trunc(st.frameX[i0]! / 54));
+  if (style === undefined) return false;
+  const d = getDesiredStalagtiteStyle(st, x, j);
+  if (d.fail) return false;
+  if (style !== d.style) {
+    const fx = rng.int(0, 2) * 18 + FX_BASE_BY_STYLE[d.style]!;
+    for (let k = d.y; k < d.y + d.height; k++) {
+      if (st.inBounds(x, k)) st.frameX[st.idx(x, k)] = fx;
+    }
+  }
+  return true;
+}
+
+/** KillTile（生成期 noItem 路径，cs:63933-63968）：active(false)+halfBrick(false)+
+ *  frameX/Y=-1+type=0 → SquareTileFrame 级联（9 邻 TileFrame，165 邻居重查）。
+ *  ★SquareTileFrame（cs:80924）列主序：(x-1,j-1)(x-1,j)(x-1,j+1)(x,j-1)(x,j)(x,j+1)
+ *  (x+1,j-1)(x+1,j)(x+1,j+1)——击杀级联内的重查顺序影响连环击杀，曾行主序。 */
+function killStalactiteTile(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return;
+  st.flags[i] = 0; st.half[i] = 0;
+  st.frameX[i] = 65535; st.frameY[i] = 65535;  // -1（Uint16 环回；inactive 格不读帧）
+  st.type[i] = 0;
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+    frame165(st, rng, x + dx, y + dy);
+  }
+}
+
+/** 生成期 SolidTile（slope 感知）——大理石 PlaceSlab 的 SmoothSlope 之后必须如此 */
+function solidTileSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  return st.flags[i] !== 0 && genSolidType(st.type[i]) && st.half[i] === 0 && st.slope[i] === 0;
+}
+
+/** CheckStalactite（cs:39022）四分支 1:1 */
+export function checkStalactite(st: TileStore, rng: RNG, x: number, j: number): void {
+  if (!st.inBounds(x, j)) return;
+  const i0 = st.idx(x, j);
+  if (!st.flags[i0]) return;
+  const fy = st.frameY[i0]!;
+  if (fy === 72) {
+    let flag = !solidTileSlope(st, x, j - 1);
+    if (!flag && !updateStalagtiteStyle(st, rng, x, j)) flag = true;
+    if (flag) killStalactiteTile(st, rng, x, j);
+    return;
+  }
+  if (fy === 90) {
+    let flag2 = !solidTileSlope(st, x, j + 1);
+    // InvalidTileForPilesOrSpeleothems = TileID.Sets.Boulders（生成期此阶段无巨石）
+    if (!flag2 && !updateStalagtiteStyle(st, rng, x, j)) flag2 = true;
+    if (flag2) killStalactiteTile(st, rng, x, j);
+    return;
+  }
+  if (fy >= 36) {
+    let num = j;
+    if (st.frameY[i0] === 54) num--;
+    let flag3 = !solidTileSlope(st, x, num + 2);
+    const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
+    const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
+    if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num); return; }
+    if (!st.flags[a] || !st.flags[b] || st.type[b] !== st.type[a]) flag3 = true;
+    if (st.frameX[b]! !== st.frameX[a]!) flag3 = true;
+    if (!flag3 && !updateStalagtiteStyle(st, rng, x, num)) flag3 = true;
+    // ★原版击杀带类型门（cs:39146-39155/39193-39202）：仅 type == 被查格（165）的
+    // 格被 KillTile——num/num+1 被后续放置覆写成大理石等非 165 时**不得连带击杀**
+    // （曾无条件双双击杀 → 刚放的板格被抹 → SmoothSlope/SolidTile 门级联分叉，
+    // biome2 slab78 van48/js63 掷混合分歧根因）
+    if (flag3) {
+      if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num);
+      if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1);
+    }
+    return;
+  }
+  // 垂挂双格（frameY 0/18）
+  let num = j;
+  if (st.frameY[i0] === 18) num--;
+  let flag4 = !solidTileSlope(st, x, num - 1);
+  const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
+  const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
+  if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num); return; }
+  if (!st.flags[a] || !st.flags[b] || st.type[b] !== st.type[a]) flag4 = true;
+  if (st.frameX[b]! !== st.frameX[a]!) flag4 = true;
+  if (!flag4 && !updateStalagtiteStyle(st, rng, x, num)) flag4 = true;
+  // ★同上：类型门击杀（cs:39193-39202）——非 165 占位格不连带
+  if (flag4) {
+    if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num);
+    if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1);
+  }
+}
+
+/** WorldGen.TileFrame 生成期行为 1:1（cs:82067）：!active → 清 half/slope 后返回
+ *  （Tile.cs inactive 分支——对拍 MS slope 网必需）；active+165 → CheckStalactite
+ *  （cs:85995）。其余类型（solid/非 165 frameImportant）生成期无副作用无掷。 */
+export function frame165(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }
+  if ((TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) === 165) checkStalactite(st, rng, x, y);
 }
 
 /** 幼虫 tile 231（蜂巢专用；以太无蜂巢，惰性查表防硬依赖） */

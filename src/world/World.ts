@@ -13,6 +13,13 @@ import { mainDifficulty, GDL } from '../stats/ScaleStats';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number } | null>; locked?: boolean; }
 
+/** 世界尺寸档（原版 WorldGen.GetWorldSize cs:6518）：≤4200→0 小 / ≤6400→1 中 / 其余→2 大。
+ *  UIWorldCreation 三档 = 4200×1200 / 6400×1800 / 8400×2400（WorldGen.cs:11163）。 */
+export type WorldSize = 0 | 1 | 2;
+export function worldSizeFor(maxTilesX: number): WorldSize {
+  return maxTilesX <= 4200 ? 0 : maxTilesX <= 6400 ? 1 : 2;
+}
+
 /** 死亡掉钱保留比例（返回值 = 留在身上的份额；Player.DropCoins :53351-53390）：
  *  经典/旅程世界掉一半 / 专家掉 3/4 / 大师全掉——按**世界难度** Main.GameMode
  *  （0 经典 1 专家 2 大师 3 旅程按经典，Main.cs:2775-2780）。角色难度只决定
@@ -209,6 +216,8 @@ export class World {
   /** 原版树样式数据（header treeX/treeStyle）：横向 4 区森林树冠样式 */
   treeX: number[] = [];
   treeStyle: number[] = [0, 0, 0, 0];
+  /** 尺寸档 0 小/1 中/2 大（构造时按宽派生，GetWorldSize 语义——多尺寸生成/消费分支用） */
+  size: WorldSize = 0;
   /** 以太生物群系中心（GenVars.shimmerPosition；无微光世界为 0）。ShimmerPass 写入，
    *  生成期沉降 ShimmerRemoveWater（WorldGen.cs:34859）按此清腔内非微光液体 */
   shimmerX = 0;
@@ -289,6 +298,7 @@ export class World {
     }
     this.seed = seed;
     this.name = name;
+    this.size = worldSizeFor(w);
     // 1 游戏日 = 30 现实分钟（24→40 后折中）
     this.clock = new Clock(24 * 60 * 1000); // 1:1 全周期 24min（昼 15/夜 9）
   }

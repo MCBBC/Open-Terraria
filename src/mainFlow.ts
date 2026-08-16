@@ -615,7 +615,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   /** 创建新世界：原版生成页（双进度条+实时地图预览）→ 注册槽位 → 进游戏 */
-  async function createWorldFlow(cfg: { name: string; seed: string; w: number; h: number; difficulty: number; evil: -1 | 0 | 1 }) {
+  async function createWorldFlow(cfg: { name: string; seed: string; w: number; h: number; size: number; difficulty: number; evil: -1 | 0 | 1 }) {
     const loadState = new UIWorldLoadState(cfg.evil);
     VUI.setState(loadState);
     const g = makeGame();
@@ -624,6 +624,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       {
         name: cfg.name,
         evil: cfg.evil,
+        size: cfg.size as import('./world/World').WorldSize, // 尺寸档 0/1/2（generateWorld 按 SIZE_DIMS 派生 W/H）
         difficulty: cfg.difficulty,   // 世界难度 = Main.GameMode（Main.cs:2677；创建 UI 四档）
         onWorldPartial: (world) => loadState.attachWorld(world), // 主线程 fallback：列扫描预览
         onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览

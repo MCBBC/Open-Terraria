@@ -5,7 +5,7 @@ import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
 
 export interface WorldCreationFlow {
-  onCreate(cfg: { name: string; seed: string; w: number; h: number; difficulty: number; evil: -1 | 0 | 1 }): void;
+  onCreate(cfg: { name: string; seed: string; w: number; h: number; /** 尺寸档 0 小/1 中/2 大（SIZES 下标；GenConfig.size 直传，W/H 与之同源派生） */ size: number; difficulty: number; evil: -1 | 0 | 1 }): void;
   onCancel(): void;
 }
 
@@ -246,7 +246,7 @@ export class WorldCreationPanel {
     const seed = (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value.trim();
     const name = (this.panel.querySelector('[data-f=name]') as HTMLInputElement).value.trim()
       || parseSeed(seed).specialName || Lang.text('Mods.SandboxWorld.WorldCreation.DefaultName');
-    this.close(() => this.flow.onCreate({ name, seed, w: size.w, h: size.h, difficulty: this.sel.diff, evil: EVILS[this.sel.evil].value }));
+    this.close(() => this.flow.onCreate({ name, seed, w: size.w, h: size.h, size: this.sel.size, difficulty: this.sel.diff, evil: EVILS[this.sel.evil].value }));
   }
 
   private close(fn: () => void) {

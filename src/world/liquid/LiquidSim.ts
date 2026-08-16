@@ -165,6 +165,13 @@ export class LiquidSim {
   generatingWorld = false;
   /** 原版 GenVars.shimmerPosition：以太生物群系中心（无微光世界为 null） */
   shimmerCenter: { x: number; y: number } | null = null;
+  /** 生成期 QuickWater 落水越线转岩浆（Liquid.cs:177-190）：非蜜/微光液体下落到
+   *  y > GenVars.waterLine → 类型置岩浆（世界生成期深洞岩浆池的来源——曾整段
+   *  漏接，#28 Underworld 债主因之一）。null=不接线（保持旧行为） */
+  genWaterLine: number | null = null;
+  /** 地牢豁免（Liquid.cs:186-188：InAnyPotentialDungeonBounds(x,y) 且 origin 格墙
+   *  为地牢墙族 → 保持水）。QuickWater 调用方按需接线；未接线=null 不豁免 */
+  dungeonWaterExempt: ((x: number, y: number, originWall: number) => boolean) | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -987,6 +994,8 @@ export class LiquidSim {
     if (st.liquid[oi] === 0) return;
     let X = originX, Y = originY;
     const srcType = st.liquidType[oi];
+    const originWall = st.wall[oi];
+    let type = srcType;   // b：可变类型（下落越线转换后落点/配对判定用它）
     let liquid = st.liquid[oi];
     st.liquid[oi] = 0;
     let flag1 = true;
@@ -998,7 +1007,12 @@ export class LiquidSim {
         flag2 = true;
         flag1 = false;
       }
-      // （Liquid.cs:129-130 的 waterLine 岩浆转换仅世界生成期生效，读档跳过）
+      // Liquid.cs:177-190：生成/读档期且本轮有下落、源非蜜非微光 →
+      //   越过 GenVars.waterLine 落点转岩浆（b=1/本仓 2）；地牢墙豁免回水（b=0/本仓 1）
+      if (flag2 && this.isGeneratingOrLoadingWorld && srcType !== 3 && srcType !== 4) {
+        if (this.genWaterLine !== null && Y > this.genWaterLine) type = 2;
+        if (this.generatingWorld && this.dungeonWaterExempt?.(X, Y, originWall)) type = 1;
+      }
       // 2) 蛇形横向铺开（Liquid.cs:131-195）
       let dir = -1;          // num2：当前行走方向
       let step = 0;          // num3：当前行步数
@@ -1024,8 +1038,8 @@ export class LiquidSim {
         if (dir === -1 && probeX < 5) hitL = true;
         else if (dir === 1 && probeX > st.w - 5) hitR = true;
         const bi = this.idx(probeX, Y + 1);
-        // 侧下方同类型未满 → 直接灌入（Liquid.cs:149-159）
-        if (st.liquid[bi] !== 0 && st.liquid[bi] !== 255 && st.liquidType[bi] === srcType) {
+        // 侧下方同类型未满 → 直接灌入（Liquid.cs:149-159；类型比较用转换后的 b）
+        if (st.liquid[bi] !== 0 && st.liquid[bi] !== 255 && st.liquidType[bi] === type) {
           let t = 255 - st.liquid[bi];
           if (t > liquid) t = liquid;
           st.liquid[bi] += t;
@@ -1056,10 +1070,10 @@ export class LiquidSim {
       if (liquid !== 0 && dropped) Y++;
       else break;
     }
-    // 3) 写回落点（Liquid.cs:204-205）
+    // 3) 写回落点（Liquid.cs:204-205：类型用转换后的 b）
     const fi = this.idx(X, Y);
     st.liquid[fi] = liquid;
-    st.liquidType[fi] = srcType;
+    st.liquidType[fi] = type;
     if (st.liquid[fi] > 0) {
       // 落地即交互（Liquid.cs:206-210 / AttemptToMoveLava/Honey/Shimmer 248-432）
       this.attemptToMoveLiquid(X, Y, srcType, 2);

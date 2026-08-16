@@ -34,6 +34,22 @@ import { solidTile as _solidTileHB } from './HalfBrickPass';
 import { flipGenSolid } from './GenSolid';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
+/** ★SquareWallFrame 掷骰还原（2026-08-16 #23 云层债根因，同 DesertPass 机制）：
+ *  CloudIsland/CloudLake 的墙 73 填充循环（cs:78968）每格 `wall=73; SquareWallFrame(i,j)`
+ *  ——Framing.WallFrame(resetFrame=true) 对「有墙且非大幅墙」格掷 1 次 genRand.Next(0,3)
+ *  （Framing.cs:395-401；SquareWallFrame 九邻仅中心传 resetFrame，WorldGen.cs:80943）。
+ *  岛#1 实测 2041 格 wall73 新写=2041 掷——曾整段省略 → pass 内流错位：⑥水池/⑦云 puff
+ *  判定全错 + 后续岛的 x 掷漂移（4 座岛仅 1 座对位，全图 7109 掷缺失）。 */
+const WALL_LARGE_FRAMES = new Set<number>([
+  146, 147, 167, 179, 354,
+  185, 224, 274, 323, 324, 325, 326, 327, 328, 329, 330, 355, 358, 359, 362, 363, 366,
+]);
+function wallFrameDraw(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (x <= 0 || y <= 0 || x >= st.w - 1 || y >= st.h - 1) return;
+  const w = st.wall[st.idx(x, y)];
+  if (w === 0 || WALL_LARGE_FRAMES.has(w)) return;
+  rng.int(0, 2);                       // genRand.Next(0, 3)（wall 21 才有第二掷,73 无）
+}
 /** 雨云 196：CloudIsland/CloudLake 的雨云凸包（1/4）与岛上方 puff（1/2）专用；
  *  岛盘主体是云 189（cs:78724 num8）——196 误作主体会令土芯 type==189 判定恒假。
  *  云下雨幕由 WaterfallRenderer 画（WaterfallManager :204 type 11） */
@@ -227,7 +243,10 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
           if (st.flags[k] === 0 || (st.wall[k] > 0 && st.wall[k] !== 73)) all = false;
         }
       }
-      if (all) st.wall[st.idx(x, y)] = 73;
+      if (all) {
+        st.wall[st.idx(x, y)] = 73;
+        wallFrameDraw(st, rng, x, y);   // cs:78968 SquareWallFrame——wall73 格必掷 Next(0,3)
+      }
     }
   }
   for (let x = b4; x <= b5; x++) {                   // ⑥ 岛面水池
@@ -435,6 +454,35 @@ function cloudLake(st: TileStore, rng: RNG, ci: number, cj: number): void {
     if (st.inBounds(x, y)) {
       if (rng.int(0, 4) === 0 && waterStaysPut(st, x, y)) st.liquid[st.idx(x, y)] = 255;
       st.liquidType[st.idx(x, y)] = 1;
+    }
+  }
+  // ⑥ 湖上方云 puff（cs:79442-79481）——★与 CloudIsland ⑦ 的差异：数量 Next(1,4)
+  //  （非 Next(4)）、材质门反向（Next(4)!=0 → 雨云 196,==0 才云 189）。
+  //  曾整段缺失 → 湖岛上方 ~76 格雨云 puff + 中心注水丢失（#23 残余）。
+  const puffs = rng.int(1, 3);                       // Next(1,4)
+  for (let n = 0; n <= puffs; n++) {
+    const cx = rng.int(b4 - 5, b5 + 4);              // Next(num4-5, num5+5)
+    const cy = b6 - rng.int(20, 39);                 // num6 - Next(20,40)
+    const cr = rng.int(4, 7);                        // Next(4,8)
+    let mat = tile;
+    if (rng.int(0, 3) !== 0) mat = RAIN_CLOUD;       // Next(4)!=0 → 196（反向门）
+    for (let x = cx - cr; x <= cx + cr; x++) {
+      for (let y = cy - cr; y <= cy + cr; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const ddx = Math.abs(x - cx), ddy = Math.abs(y - cy) * 2;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < cr + rng.int(-1, 1)) {
+          const k = st.idx(x, y);
+          st.flags[k] = 1; st.type[k] = mat;
+        }
+      }
+    }
+    for (let x = cx - cr + 2; x <= cx + cr - 2; x++) {   // 中心注水
+      let y = cy - cr;
+      while (y < st.h && st.flags[st.idx(x, y)] === 0) y++;
+      if (st.inBounds(x, y) && waterStaysPut(st, x, y)) {
+        const k = st.idx(x, y);
+        st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+      }
     }
   }
 }

@@ -402,8 +402,12 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
 export function randomizeTreeStyle(rng: RNG, w: number): { treeX: number[]; treeStyle: number[] } {
   const treeX = [0, 0, 0], treeStyle = [0, 0, 0, 0];
   const roll6 = () => rng.int(0, 5);
-  const fix0 = (arr: number[]) => {
-    for (let i = 0; i < arr.length; i++) {
+  // fix0 原位改写 treeStyle 前 count 位（cs:8095-8101 style0 → 4，2/3 概率）。
+  // ★曾 fix0([treeStyle[0], treeStyle[1]]) 传入临时拷贝——掷骰照旧（Next(3) 无条件
+  //   消耗）但翻转落在被丢弃的副本上，4200/6400 档 style0 从未被替换成 4
+  //   （.wld 头 treeStyle 对账实锤，2026-08-16 多尺寸批修复）
+  const fix0 = (arr: number[], count: number) => {
+    for (let i = 0; i < count; i++) {
       if (arr[i] === 0 && rng.int(0, 2) !== 0) arr[i] = 4; // style0 → 4（2/3）
     }
   };
@@ -412,7 +416,7 @@ export function randomizeTreeStyle(rng: RNG, w: number): { treeX: number[]; tree
     treeStyle[0] = roll6(); treeStyle[1] = roll6();
     while (treeStyle[1] === treeStyle[0]) treeStyle[1] = roll6();
     treeX[1] = w; treeX[2] = w;
-    fix0([treeStyle[0], treeStyle[1]]);
+    fix0(treeStyle, 2);
   } else if (w === 6400) {
     treeX[0] = rng.int(Math.floor(w * 0.334 - w * 0.2), Math.floor(w * 0.334 + w * 0.2) - 1);
     treeX[1] = rng.int(Math.floor(w * 0.667 - w * 0.2), Math.floor(w * 0.667 + w * 0.2) - 1);
@@ -420,7 +424,7 @@ export function randomizeTreeStyle(rng: RNG, w: number): { treeX: number[]; tree
     while (treeStyle[1] === treeStyle[0]) treeStyle[1] = roll6();
     while (treeStyle[2] === treeStyle[0] || treeStyle[2] === treeStyle[1]) treeStyle[2] = roll6();
     treeX[2] = w;
-    fix0([treeStyle[0], treeStyle[1], treeStyle[2]]);
+    fix0(treeStyle, 3);
   } else {
     treeX[0] = rng.int(Math.floor(w * 0.25 - w * 0.15), Math.floor(w * 0.25 + w * 0.15) - 1);
     treeX[1] = rng.int(Math.floor(w * 0.5 - w * 0.15), Math.floor(w * 0.5 + w * 0.15) - 1);
@@ -429,7 +433,40 @@ export function randomizeTreeStyle(rng: RNG, w: number): { treeX: number[]; tree
     while (treeStyle[1] === treeStyle[0]) treeStyle[1] = roll6();
     while (treeStyle[2] === treeStyle[0] || treeStyle[2] === treeStyle[1]) treeStyle[2] = roll6();
     while (treeStyle[3] === treeStyle[0] || treeStyle[3] === treeStyle[1] || treeStyle[3] === treeStyle[2]) treeStyle[3] = roll6();
-    fix0(treeStyle);
+    fix0(treeStyle, 4);
   }
   return { treeX, treeStyle };
+}
+
+/** RandomizeCaveBackgrounds（1456 WorldGen.cs:8157-8210）：按世界宽掷 caveBackX 边界与
+ *  caveBackStyle（互异）。尺寸分支计数 2/3/4；掷骰序与 treeX 同族——先全量边界、
+ *  后样式（retry 环左→右）。尾部无条件 iceBackStyle/hellBackStyle/jungleBackStyle
+ *  3 掷（cs:8211-8213）在调用方（Reset 段）照掷。
+ *  区间真值（真 exe 取整，.wld 头实测锚定）：4200:[1050,3150)；
+ *  6400:[857,3417)/[2988,5548)；8400:[840,3360)/[2940,5460)/[5040,7560)。 */
+export function randomizeCaveBackgrounds(rng: RNG, w: number): { caveBackX: number[]; caveBackStyle: number[] } {
+  const caveBackX = [0, 0, 0], caveBackStyle = [0, 0, 0, 0];
+  const roll8 = () => rng.int(0, 7);
+  if (w === 4200) {
+    caveBackX[0] = rng.int(Math.floor(w * 0.5 - w * 0.25), Math.floor(w * 0.5 + w * 0.25) - 1);
+    caveBackX[1] = w; caveBackX[2] = w;
+    caveBackStyle[0] = roll8(); caveBackStyle[1] = roll8();
+    while (caveBackStyle[1] === caveBackStyle[0]) caveBackStyle[1] = roll8();
+  } else if (w === 6400) {
+    caveBackX[0] = rng.int(Math.floor(w * 0.334 - w * 0.2), Math.floor(w * 0.334 + w * 0.2) - 1);
+    caveBackX[1] = rng.int(Math.floor(w * 0.667 - w * 0.2), Math.floor(w * 0.667 + w * 0.2) - 1);
+    caveBackX[2] = w;
+    caveBackStyle[0] = roll8(); caveBackStyle[1] = roll8(); caveBackStyle[2] = roll8();
+    while (caveBackStyle[1] === caveBackStyle[0]) caveBackStyle[1] = roll8();
+    while (caveBackStyle[2] === caveBackStyle[0] || caveBackStyle[2] === caveBackStyle[1]) caveBackStyle[2] = roll8();
+  } else {
+    caveBackX[0] = rng.int(Math.floor(w * 0.25 - w * 0.15), Math.floor(w * 0.25 + w * 0.15) - 1);
+    caveBackX[1] = rng.int(Math.floor(w * 0.5 - w * 0.15), Math.floor(w * 0.5 + w * 0.15) - 1);
+    caveBackX[2] = rng.int(Math.floor(w * 0.75 - w * 0.15), Math.floor(w * 0.75 + w * 0.15) - 1);
+    caveBackStyle[0] = roll8(); caveBackStyle[1] = roll8(); caveBackStyle[2] = roll8(); caveBackStyle[3] = roll8();
+    while (caveBackStyle[1] === caveBackStyle[0]) caveBackStyle[1] = roll8();
+    while (caveBackStyle[2] === caveBackStyle[0] || caveBackStyle[2] === caveBackStyle[1]) caveBackStyle[2] = roll8();
+    while (caveBackStyle[3] === caveBackStyle[0] || caveBackStyle[3] === caveBackStyle[1] || caveBackStyle[3] === caveBackStyle[2]) caveBackStyle[3] = roll8();
+  }
+  return { caveBackX, caveBackStyle };
 }
