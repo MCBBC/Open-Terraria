@@ -2,9 +2,10 @@
 // Legacy* 全家（LegacyDungeonLayoutProvider / LegacyDungeonHall / LegacyEntranceDungeonHall /
 // LegacyDungeonRoom / LegacyDungeonEntrance）+ DungeonGlobal* 特征管线。与
 // tools/golden/caves-oracle.cs 逐段同构对账（caves-checkpoint.test.ts 逐哈希裁决）。
-// ★头部掷骰位移：SetupDungeonGenVarVariables 的入口类型 2 掷 + entrance RandomSeed 原版
-// 在 **Dunes pass 头**消耗（cs:11542）；本仓库与 oracle 同步**延后到本 pass 头**
-// （相对序 A→B→Seed→shelf→lantern→skewed）——pre-dungeon 检查点哈希保持现状。
+// ★头部掷骰：SetupDungeonGenVarVariables 的入口类型 2 掷 + entrance RandomSeed 原版在
+// **Dunes pass 头**消耗（cs:11542）——2026-08-16 每 pass 重播改造已归位 Dunes（主题掷
+// gs.dungeonTheme + 种子 gs.dungeonEntSeed 均由 DunesPass 落盘；本 pass 头只余
+// shelf→lantern→skewed 序，见 :211 兜底注释）。
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
