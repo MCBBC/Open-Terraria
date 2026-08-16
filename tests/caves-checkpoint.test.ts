@@ -13,7 +13,9 @@
 //     其后全部级联红（beaches 流指纹仍 ✓=掷骰数一致，网格差为写入差）。
 //   - SandboxWorld：livingtrees 起红（原转写债位置不变；LivingTreePass 01:33
 //     在途 WIP 未 oracle 同步）。旧 oceancaves 债位已随流变消失（现双种子绿）。
-//   两处均为 JS↔oracle 转写层债（非重播改造引入），后续专门修。
+//   两债已于 2026-08-16 收口：dungeonI=SetCrackedBrickSolidity 裂纹砖翻转
+//   （JS 四消费端 genSolidType 化）；livingtrees=石堆底中锚/门 3 掷/宝箱
+//   flags/根系门 wall!=244 四处双修。现 3/3 全绿零红。
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

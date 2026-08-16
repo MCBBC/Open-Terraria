@@ -139,7 +139,7 @@ bool oreAu169 = (int)r.Next(2) == 0;
 int oreCu = oreCu166 ? 166 : 7, oreFe = oreFe167 ? 167 : 6, oreAg = oreAg168 ? 168 : 9, oreAu = oreAu169 ? 169 : 8;
 bool crimson = (int)r.Next(2) == 0;
 if (evil == 0) crimson = false; if (evil == 1) crimson = true;
-int WorldIdV = (int)r.Next(int.MaxValue);                     // WorldId
+r.Next(int.MaxValue);                                         // WorldId
 r.Next(1050, 3150);                                           // treeX[0]
 int ts0 = (int)r.Next(6); int ts1 = (int)r.Next(6);
 while (ts1 == ts0) ts1 = (int)r.Next(6);
@@ -147,10 +147,8 @@ for (int i = 0; i < 2; i++) { int s = i == 0 ? ts0 : ts1; if (s == 0) r.Next(3);
 r.Next(1050, 3150);                                           // caveBackX[0]
 int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8);
 while (cb1 == cb0) cb1 = (int)r.Next(8);
-// RandomizeCaveBackgrounds 尾部无条件 3 掷(cs:8211-8213;2026-08-12 审计补)
-int IceV = 0, JunV = 0, HellV = 0;
-// ★诊断开关：DROP_TAIL3=1 时摘除（验证磁盘反编译与真 exe 的差）
-if (Environment.GetEnvironmentVariable("DROP_TAIL3") != "1") { IceV = (int)r.Next(4); HellV = (int)r.Next(3); JunV = (int)r.Next(2); }
+// RandomizeCaveBackgrounds 尾部无条件 3 掷(cs:8211-8213;2026-08-12 审计补,ilspycmd 对真 exe 已复核)
+r.Next(4); r.Next(3); r.Next(2);
 Func<int> RollForest = () => {
     int n = (int)r.Next(14);
     if ((n == 1 || n == 2) && (int)r.Next(2) == 0) n = (int)r.Next(14);
@@ -172,7 +170,7 @@ if (snowBG == 4 && (int)r.Next(2) == 0) r.Next(2);
 r.Next(6); r.Next(7);
 { int n = (int)r.Next(6); if (n == 5) r.Next(5); }            // Desert 背景
 r.Next(8); r.Next(5); r.Next(3);
-int MoonV = (int)r.Next(9);                                   // moonType
+r.Next(9);                                                    // moonType
 bool dungeonRight = !((int)r.Next(2) == 0);
 int jungleX = dungeonRight
     ? (int)(W * ((int)r.Next(15, 30) * 0.01))
@@ -190,13 +188,6 @@ int dungeonLocation = !dungeonRight
     ? (int)r.Next(leftBeachEnd + 50, (int)(W * 0.2))
     : (int)r.Next((int)(W * 0.8), rightBeachStart - 50);
 
-var TraceCols = new List<string>();
-// ★诊断：terrain 前额外吞 k 掷（环境变量 EXTRA_ROLLS），验证 Reset/terrain 流错位假设
-int extraK = 0;
-{ var ek = Environment.GetEnvironmentVariable("EXTRA_ROLLS"); if (ek != null) int.TryParse(ek, out extraK); }
-for (int q = 0; q < extraK; q++) r.Next();
-// ★诊断：Reset 产物逐值打印（对比 wld 头部定位首个分叉掷）
-Console.WriteLine($"RESETVALS worldId={WorldIdV} ts0={ts0} ts1={ts1} cb0={cb0} cb1={cb1} ice={IceV} jun={JunV} hell={HellV} moon={MoonV} side={dungeonRight} jx={jungleX} num7={num7} snowL={snowL} snowR={snowR} lb={leftBeachEnd} rb={rightBeachStart} dl={dungeonLocation}");
 // ★cs:11500 generateWorld 尾 `Main.tileSolid[659] = false`（Reset 期唯一翻转；659 以太石
 //   Main.cs:9538 初值 true，生成全程无还原点）——JS GenSolid.resetGenSolid+flipGenSolid
 //   ([659],false) 在 runResetAndTerrain 尾接线，生成期一切实心查询恒非实心
@@ -210,6 +201,7 @@ SOLID.Remove((ushort)659);
 // 此前把 Reset 流续进 terrain 是 rockLayer Δrl≠0 的根因（探针实测 9293480：
 // 原版 num4init=464.808=(434.4)*1.07 即 N1=108/N2=107=第 0/1 掷；续流则 385.648）。
 r = (dynamic)Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
+var TraceCols = new List<string>();   // （Tier B 对拍工具，2026-08-16 保留）
 // ================= TerrainPass（cs:56-244）=================
 int feature = 0, counter = leftBeachEnd + flatBeachPadding();
 static int flatBeachPadding() => 5;
@@ -281,15 +273,7 @@ for (int i = 0; i < W; i++)
         num3w = Math.Clamp(num3w, H * num10, num9t);
     else if (num3w < H * num10) { num3w = H * num10; counter = 0; }
     else if (num3w > H * num11) { num3w = H * num11; counter = 0; }
-    // ★诊断 NUM4FLIP/NUM4STEP/NUM4COND 变体扫描（鉴别真 IL 语义）
-    {
-        int stepHi = 3; var sh = Environment.GetEnvironmentVariable("NUM4STEP"); if (sh != null) int.TryParse(sh, out stepHi);
-        int condHi = 3; var ch2 = Environment.GetEnvironmentVariable("NUM4COND"); if (ch2 != null) int.TryParse(ch2, out condHi);
-        bool flip = Environment.GetEnvironmentVariable("NUM4FLIP") == "1";
-        bool cont = (int)r.Next(0, condHi) == 0;
-        if (flip) cont = !cont;
-        while (cont) { num4w += (int)r.Next(-2, stepHi); cont = (int)r.Next(0, condHi) == 0; if (flip) cont = !cont; }
-    }
+    while ((int)r.Next(0, 3) == 0) num4w += (int)r.Next(-2, 3);
     if (num4w < num3w + H * 0.06) num4w += 1.0;
     if (num4w > num3w + H * 0.35) num4w -= 1.0;
     history.Add(num3w);
@@ -326,10 +310,8 @@ double gvRockLayerLow = num7w, gvRockLayerHigh = num8w;
 double gvWorldSurface = num3w, gvRockLayer = num4w;
 Checkpoint("terrain");
 
-if (Environment.GetEnvironmentVariable("TRACE_COLS") != null) File.WriteAllText(Environment.GetEnvironmentVariable("TRACE_COLS"), string.Join("\n", TraceCols));
 
 Console.WriteLine($"terrain ok: worldSurface={worldSurface} rockLayer={rockLayer} waterLine={waterLine} lavaLine={lavaLine}");
-if (Environment.GetEnvironmentVariable("TERRAIN_ONLY") == "1") { Console.WriteLine("TERRAIN_ONLY exit"); return; }
 
 // ================= 原语 =================
 bool mudWallFlag = false;
@@ -1262,9 +1244,14 @@ Replay(); // ▶pass 头重播：JunglePass cs:12497
     }
     for (int i = 0; i < W / 4; i++)
     {
-        int hx = (int)r.Next(20, W - 20), hy = (int)r.Next(worldSurface + 10, H - 200);
+        // ★GenVars.worldSurface（=Terrain 游走终值 num3w，TerrainPass.cs:235）**非**
+        // Main.worldSurface（=max+25）——JunglePass.cs:220 用的是 GenVars 值！掷骰数
+        // 相同（每样本恒 1 颗）但 y 映射不同 → 拒绝采样落点不同、清墙区域平移
+        //（流哈希不变、墙网分叉，j_h12 起拒绝次数才真正分叉）。
+        int holeLo = (int)num3w + 10;
+        int hx = (int)r.Next(20, W - 20), hy = (int)r.Next(holeLo, H - 200);
         while (!(wal[hy * W + hx] == 64 || wal[hy * W + hx] == 15))
-        { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(worldSurface + 10, H - 200); }
+        { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(holeLo, H - 200); }
         MudWallRunner(hx, hy);
     }
     JSeg("j_holes");

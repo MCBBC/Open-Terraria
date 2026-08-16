@@ -1,6 +1,7 @@
 /* SandboxWorld 资产持久缓存 Service Worker(2026-08-13)。
  * 职责:①拦截 /sprites|fonts|l10n|sounds|audios 的 GET 走 Cache API 磁盘缓存
- * (cache-first,未命中网络回填)——对 new Image()/fetch/@font-face 全透明;
+ * (cache-first,未命中网络回填;l10n 例外=网络优先+离线回退,见 fetch 段注)——
+ * 对 new Image()/fetch/@font-face 全透明;
  * ②接收页面 AssetCache 驱动器的 {init/warm/warm-cancel} 消息做优先级后台下载:
  *   warm 前 cache.keys() 建已缓存集,只 fetch 缺失(不重复下载+被系统清理后
  *   只补缺=自愈);并发 6,逐文件失败跳过,进度 postMessage 回页面。
@@ -61,7 +62,25 @@ self.addEventListener('fetch', (e) => {
     })());
     return;
   }
-  // ① 资产前缀:cache-first,未命中网络回填
+  // ① 资产前缀:cache-first,未命中网络回填。
+  //    ★例外:l10n 语言包是可变配置(build-l10n 会再生成)——网络优先+离线回退。
+  //    cache-first 曾把 2026-08-14 多语言批的新键卡死在旧包(缓存版本号只由
+  //    vanilla.json/ui 哈希决定,l10n 重建不换版本 → SW 永远命中旧包,页面显示裸键)
+  if (path.startsWith('/l10n/')) {
+    e.respondWith((async () => {
+      const cache = await getCache();
+      try {
+        const res = await fetch(req);
+        if (res && res.ok && res.type === 'basic') cache.put(req, res.clone());
+        return res;
+      } catch (err) {
+        const hit = await cache.match(req);
+        if (hit) return hit;
+        throw err;
+      }
+    })());
+    return;
+  }
   if (!ASSET_RE.test(path)) return;
   e.respondWith((async () => {
     const cache = await getCache();

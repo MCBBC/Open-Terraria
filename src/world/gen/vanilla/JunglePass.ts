@@ -151,13 +151,17 @@ function generateTunnelToSurface(st: TileStore, rng: RNG, gs: GenState, i: numbe
 function generateHolesInMudWalls(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const underworld = h - 200; // Main.UnderworldLayer（Main.cs:2863）
+  // ★JunglePass.cs:220 用 **GenVars.worldSurface**（=Terrain 游走终值，TerrainPass.cs:235）
+  // 而非 Main.worldSurface（=worldSurfaceHigh+25）——每样本掷骰数相同（恒 1 颗）但
+  // y 区间不同 → 落点/清墙区域不同（流指纹不变、墙网分叉，拒绝次数随之分叉）。
+  const holeLo = Math.trunc(gs.genWorldSurface) + 10;
   const tries = Math.floor(w / 4);
   for (let n = 0; n < tries; n++) {
     let x = rng.int(20, w - 21);
-    let y = rng.int(gs.worldSurface + 10, underworld - 1); // Next(wS+10, UnderworldLayer)
+    let y = rng.int(holeLo, underworld - 1); // Next((int)GenVars.worldSurface+10, UnderworldLayer)
     while (!(st.wall[st.idx(x, y)] === 64 || st.wall[st.idx(x, y)] === 15)) {
       x = rng.int(20, w - 21);
-      y = rng.int(gs.worldSurface + 10, underworld - 1);
+      y = rng.int(holeLo, underworld - 1);
     }
     mudWallRunner(st, rng, gs, x, y);
   }

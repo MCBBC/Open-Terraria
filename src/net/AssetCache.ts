@@ -6,7 +6,9 @@
 //
 // ★版本 = fnv1a32(vanilla.json + vanilla-ui.json 内容 + CACHE_BUSTER)。
 //   贴图清单变了 → JSON 变 → bundle 变 → version 变 → 新缓存整批重建。
-//   只改 sounds/fonts/l10n 内容时 JSON 不变 → 需手动 bump CACHE_BUSTER。
+//   只改 sounds/fonts/audios 内容时 JSON 不变 → 需手动 bump CACHE_BUSTER。
+//   l10n 已豁免(2026-08-16 裸键事故):sw.js 对 /l10n/ 走网络优先+离线回退,
+//   重建语言包即时生效,不再依赖版本号/CACHE_BUSTER。
 import vanillaJson from '../../public/sprites/vanilla.json';
 import vanillaUiJson from '../../public/sprites/vanilla-ui.json';
 import assetsIndexJson from '../../public/assets-index.json';
