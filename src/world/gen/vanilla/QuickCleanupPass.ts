@@ -103,6 +103,12 @@ export function runQuickCleanupPass(st: TileStore, rng: RNG, gs: GenState): void
           k++
         ) {
           st.setTileSilent(i, k, DIRT);
+          // cs:18017-18018：type=0(active) 落格后显式 halfBrick(false)+slope(0)——
+          // setTileSilent 对非 0 内部 id 不清半砖/坡面（QQ 备案 2026-08-17；不补则
+          // 残留 slope/half 进入 (e) 段 SaveSlopes 分支 → 半砖/坡门下被误清成空气，
+          // 并污染后续 pass 的 SolidTile/树基门（#103 宝石树 half/slope 门级联）。
+          st.half[st.idx(i, k)] = 0;
+          st.slope[st.idx(i, k)] = 0;
         }
       }
 

@@ -28,6 +28,29 @@ import { downloadDebugReport } from './debug/DebugReport';
 const root = document.getElementById('game-root')!;
 const ui = new UI(root);
 
+// ---- ?imglog=1:HTMLImageElement 绘制探针(2026-08-18 trace 残余流定性工具) ----
+// 挂 drawImage 计数 wrapper(全 canvas 覆盖)+ 每 5s 报告 TOP 绘制源与
+// createImageBitmap 失败统计。headless 无 GPU 压力测不到的路径,用真机跑:
+// 打开 http://host/?imglog=1 → 复现操作 → 控制台 [imglog] 行即答案
+if (new URLSearchParams(location.search).get('imglog') === '1') {
+  const stats = new Map<string, number>();
+  const orig = CanvasRenderingContext2D.prototype.drawImage;
+  CanvasRenderingContext2D.prototype.drawImage = function (img: CanvasImageSource, ...rest: unknown[]) {
+    if (img instanceof HTMLImageElement) {
+      const k = (img.currentSrc || img.src || '').split('/').slice(-2).join('/').slice(0, 80);
+      stats.set(k, (stats.get(k) ?? 0) + 1);
+      if (stats.size > 600) stats.clear();
+    }
+    return orig.call(this, img as CanvasImageSource, ...(rest as Parameters<typeof orig>));
+  };
+  (window as unknown as { __swImgDraw?: Map<string, number> }).__swImgDraw = stats;
+  setInterval(() => {
+    const top = [...stats.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)
+      .map(([k, v]) => `${k}×${v}`).join('  ') || '(零 Image 绘制)';
+    console.log(`[imglog] 5s Image绘制TOP: ${top}`);
+  }, 5000);
+}
+
 // ---- 调试报告基础设施：错误 ring（F5 报告 errors 段唯一数据源）----
 // kind: 0=pageerror 1=unhandledrejection 2=console.error；stack 取首行
 interface SwErrorRecord { t: number; kind: number; msg: string; stack: string | null }

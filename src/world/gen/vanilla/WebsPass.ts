@@ -12,6 +12,10 @@ const WEBS = TILE_BY_KEY['v_51_cobweb']!;
 
 export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
+  // 一次性探针钩（同 GemPasses/PotsPass 模式）：Webs 入口 gs+store 快照（隔离重放用）
+  const g0 = globalThis as { __swWebsCap?: (gs: GenState, st: TileStore) => void; __swWebsLog?: (s: string) => void };
+  try { g0.__swWebsCap?.(gs, st); } catch { /* probe */ }
+  const __log = g0.__swWebsLog;
   const count = Math.trunc(w * h * 0.0006);          // (int)((X*Y)*0.0006)
   for (let i = 0; i < count; i++) {
     let x = rng.int(20, w - 21);                     // Next(20, X-20)
@@ -25,6 +29,7 @@ export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {
       for (; !st.flags[st.idx(x, y)] && x > 10 && x < w - 10; x += dir) { /* 横向找壁 */ }
       x -= dir;
       if (y > gs.worldSurface || st.wall[st.idx(x, y)] > 0) {
+        if (__log) __log(`WEB#${i} x=${x} y=${y} dir=${dir}`);
         tileRunner(st, rng, gs, x, y, {
           strength: rng.int(4, 10), steps: rng.int(2, 3),             // Next(4,11)/Next(2,4)
           type: WEBS, addTile: true, speedX: dir, speedY: -1,

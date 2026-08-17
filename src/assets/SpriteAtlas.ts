@@ -331,8 +331,8 @@ export class SpriteAtlas {
         this._uiPending.delete(file);
         this._uiFailed.delete(file);
       };
-      if (SpriteAtlas.USE_BITMAP) createImageBitmap(im).then(land, () => land(im));
-      else land(im);
+      if (!SpriteAtlas.USE_BITMAP) land(im);
+      else tryBitmapUpgrade(im, file, land, () => land(im));  // 失败回退+退避重试(2026-08-18)
     };
     im.onerror = () => { this._uiPending.delete(file); this._uiFailed.add(file); };
     im.src = `sprites/${encodeURI(file)}`;
@@ -374,8 +374,8 @@ export class SpriteAtlas {
           done++; onProgress?.(done / list.length); resolve();
           this.onVImageLoaded?.(f);
         };
-        if (SpriteAtlas.USE_BITMAP) createImageBitmap(img).then(land, () => land(img));
-        else land(img);
+        if (!SpriteAtlas.USE_BITMAP) land(img);
+        else tryBitmapUpgrade(img, f, land, () => land(img));  // 失败回退+退避重试(重试成功二次 land=晚到语义,安全)
       };
       img.onerror = () => resolve();
       img.src = `sprites/${encodeURI(f)}`;
@@ -443,8 +443,8 @@ export class SpriteAtlas {
         if (this.bakeTracker) this.bakeTracker.onLoaded(file);
         this.onVImageLoaded?.(file);  // 晚到的表 → ChunkCache 重烘焙
       };
-      if (SpriteAtlas.USE_BITMAP) createImageBitmap(im).then(land, () => land(im));
-      else land(im);
+      if (!SpriteAtlas.USE_BITMAP) land(im);
+      else tryBitmapUpgrade(im, file, land, () => land(im));  // 失败回退+退避重试(重试成功二次 land=晚到重烘,安全)
     };
     im.onerror = () => {
       this._iconPending.delete(file);
@@ -505,8 +505,15 @@ export class SpriteAtlas {
       if (this.uiimages.has(f)) { done++; onProgress?.(done / list.length); return resolve(); }
       const im = new Image();
       im.onload = () => {
-        this.uiimages.set(f, im);
-        im.decode().then(() => { done++; onProgress?.(done / list.length); resolve(); }, () => resolve());
+        // ImageBitmap 桥(2026-08-18 imglog 实锤漏网第四站:此处曾直接 set(Image)
+        // +decode() ——预载清单含 UI_Cursor_0(菜单起每帧画)与 Player_ 纸娃娃表
+        // (进世界起每帧画),永久 Image = trace 残余流两大恒定家族的全部来源)
+        const land = (store: ImageBitmap | HTMLImageElement) => {
+          this.uiimages.set(f, store);
+          done++; onProgress?.(done / list.length); resolve();
+        };
+        if (!SpriteAtlas.USE_BITMAP) { land(im); return; }
+        tryBitmapUpgrade(im, f, land, () => land(im));
       };
       im.onerror = () => resolve();
       im.src = `sprites/${encodeURI(f)}`;
@@ -1001,11 +1008,46 @@ vi_678_red_potion: 678,
  *  ——消费方每帧重查,下一帧起拿到的就是自持解码像素;契约零变化 */
 export function upgradeToBitmap(img: HTMLImageElement, onReady: (b: ImageBitmap) => void, onFail?: () => void): void {
   if (!SpriteAtlas.USE_BITMAP) return;
-  createImageBitmap(img).then(onReady, () => onFail?.());  // 失败通知调用方(缺省静默)
+  tryBitmapUpgrade(img, bitmapLabel(img), onReady, () => onFail?.());
+}
+
+/** createImageBitmap 失败统计(2026-08-18;?imglog=1 / F5 可见)。
+ *  ★压力窗口期(大世界进图/GPU 预算临界)失败并不罕见——此前静默回退 Image
+ *  且【永不重试】= 每帧绘制的贴图(天空/群系背景)永久停在 Image 阶段,
+ *  解码位图被逐出时反复 LazyPixelRef(trace 残余流 ~240/s 的主源) */
+export const bmpFailStats = { count: 0, files: new Map<string, number>() };
+function bitmapLabel(img: HTMLImageElement): string {
+  const p = (img.src || '').split('/').filter(Boolean);
+  return p.slice(-2).join('/');
+}
+const BMP_RETRY_DELAYS = [10_000, 20_000, 40_000];
+function noteBmpFail(label: string, attempt: number): void {
+  bmpFailStats.count++;
+  bmpFailStats.files.set(label, (bmpFailStats.files.get(label) ?? 0) + 1);
+  console.warn(`[bitmap失败] ${label} — createImageBitmap 失败(GPU 压力窗口期常见),已回退 Image`
+    + (attempt < BMP_RETRY_DELAYS.length ? `,${BMP_RETRY_DELAYS[attempt] / 1000}s 后自动重试` : ',放弃重试(重载页面可再试)'));
+}
+/** 带退避重试的升级:失败先让调用方落 Image(不缺图),10/20/40s 后重试;
+ *  重试成功 onReady(bitmap) 会把持有方手里的 Image 原地换掉 */
+function tryBitmapUpgrade(
+  img: HTMLImageElement, label: string,
+  onReady: (b: ImageBitmap) => void, fallback: () => void, attempt = 0,
+): void {
+  createImageBitmap(img).then(onReady, () => {
+    fallback();
+    noteBmpFail(label, attempt);
+    if (attempt < BMP_RETRY_DELAYS.length) {
+      setTimeout(() => {
+        if (!(img.width > 0)) return;   // 图已被释放,放弃
+        tryBitmapUpgrade(img, label, onReady, fallback, attempt + 1);
+      }, BMP_RETRY_DELAYS[attempt]);
+    }
+  });
 }
 /** 通用 bitmap-only 加载器(2026-08-17 修 trace⑨ 收尾两个真 bug):
  *  ①在飞守卫——此前未就绪期间每帧重 new Image = 请求风暴(雨/尘每粒子每帧)
- *  ②失败回退存 Image——此前失败静默 = 纹理永久缺(用户报"贴图丢失") */
+ *  ②失败回退存 Image——此前失败静默 = 纹理永久缺(用户报"贴图丢失")
+ *  ③(2026-08-18)失败回退非终态:退避重试,成功后 store(bitmap) 原地替换 */
 const _bmpOnlyPending = new Set<string>();
 export function loadBitmapOnly(
   file: string, has: () => boolean, store: (x: ImageBitmap | HTMLImageElement) => void,
@@ -1015,8 +1057,8 @@ export function loadBitmapOnly(
   const im = new Image();
   im.onload = () => {
     const land = (x: ImageBitmap | HTMLImageElement) => { store(x); _bmpOnlyPending.delete(file); };
-    if (SpriteAtlas.USE_BITMAP) createImageBitmap(im).then(land, () => land(im));  // 失败回退 Image,永不缺图
-    else land(im);
+    if (!SpriteAtlas.USE_BITMAP) { land(im); return; }
+    tryBitmapUpgrade(im, file, (b) => land(b), () => land(im));
   };
   im.onerror = () => _bmpOnlyPending.delete(file);
   im.src = `sprites/${file}`;

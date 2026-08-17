@@ -16,6 +16,10 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 }
 /** 槽号 → 对齐 dump（该槽【完成后】的原版边界） */
 const ALIGN: Array<[number, number, string]> = [
+  [12, 52, 'Shell_Piles'],
+  [13, 53, 'Smooth_World'],
+  [14, 54, 'Waterfalls'],
+  [17, 55, 'Life_Crystals'],
   [18, 63, 'Spider_Caves'],
   [19, 64, 'Gem_Caves'],
   [20, 65, 'Moss'],
