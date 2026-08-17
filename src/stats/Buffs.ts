@@ -200,6 +200,9 @@ export enum BuffType {
   SolarShield1 = 103,  // 日耀烈焰 1 层
   SolarShield2 = 104,  // 日耀烈焰 2 层
   SolarShield3 = 105,  // 日耀烈焰 3 层
+  // ---- 树妖祝福（NPC 20 施放 Dryad's Ward 弹 586，AI_111 半径内玩家
+  //      AddBuff(165,120) Projectile.cs:38797-38802；效果 Player.cs:9985-9991）----
+  DryadsWard = 106,    // 树妖祝福(165)：lifeRegen+6(3 HP/s)/防御+8/thorns<1 时+0.5
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -333,7 +336,17 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.SolarShield1]: { vanillaBuff: 170, descKey: 'BuffDescription.SolarShield1', fallbackName: '日耀烈焰' },
   [BuffType.SolarShield2]: { vanillaBuff: 171, descKey: 'BuffDescription.SolarShield2', fallbackName: '日耀烈焰' },
   [BuffType.SolarShield3]: { vanillaBuff: 172, descKey: 'BuffDescription.SolarShield3', fallbackName: '日耀烈焰' },
+  // 树妖祝福：名称/描述走原版键（zh-Hans"树妖祝福"/"自然的力量保护你"，12 语言现成）
+  [BuffType.DryadsWard]: { vanillaBuff: 165, descKey: 'BuffDescription.DryadsWard', fallbackName: '树妖祝福' },
 };
+
+/** BuffID.Sets.IsFedState（BuffID.cs:34 = {26,206,207}——饱腹三档互斥：
+ *  AddBuff 授予任一档前先删其它档，Player.cs:5080-5089） */
+const FED_STATE_VANILLA: ReadonlySet<number> = new Set([
+  BUFF_DEFS[BuffType.WellFed].vanillaBuff,    // 26
+  BUFF_DEFS[BuffType.WellFed2].vanillaBuff,   // 206
+  BUFF_DEFS[BuffType.WellFed3].vanillaBuff,   // 207
+]);
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
  *  含 173-181 整段 for 循环）——本仓仅存 BUFF_DEFS 已映射项,交集生效 */
@@ -482,6 +495,14 @@ export class BuffState {
     // buffImmune 门（AddBuff :5052——免疫则直接 return，不掉已有同类 buff）
     const vb = BUFF_DEFS[type]?.vanillaBuff;
     if (vb !== undefined && this.immuneVanilla.has(vb)) return;
+    // IsFedState 换档删旧（Player.cs:5080-5089：授予 26/206/207 任一档前先删
+    // 已在栏的其它档——吃高档后低档即刻被顶掉；仅饱腹三档互换，不碰 max 合并
+    // 通用语义）。循环内 DelBuff 逆序问题原版用正序逐槽 DelBuff，本仓 Map 删键无碍
+    if (vb !== undefined && FED_STATE_VANILLA.has(vb)) {
+      for (const t of [BuffType.WellFed, BuffType.WellFed2, BuffType.WellFed3]) {
+        if (t !== type) this.active.delete(t);
+      }
+    }
     // DeadCellsPotionStation(:5206-5209——buff 1-18,104-117,121-124,257,343 时长 ×1.2)
     if (vb !== undefined && BUFF_TIME_EXTENDED_BY_DEAD_CELLS.has(vb) && durationSec > 0 && this.deadCells) {
       durationSec *= 1.2;
@@ -549,6 +570,9 @@ export class BuffState {
     //      DoT 的 if(lifeRegen>0) lifeRegen=0 会把它们整池清零（见下）----
     heal += this.rateAccum(BuffType.Regen, 2, dt);
     heal += this.rateAccum(BuffType.Honey, 1, dt);
+    // 树妖祝福 165（:9986 lifeRegen += 6 = 3 HP/s）——同在 UpdateBuffs 正项段，
+    // NaturalLifeRegen 求值于其后（与 Regen/Honey 同批，可被 DoT 清零）
+    heal += this.rateAccum(BuffType.DryadsWard, 3, dt);
     if (this.active.has(BuffType.Werewolf)) {
       // 狼人 lifeRegen++（:11496）= 0.5 HP/s → 每 2 秒恒 1 HP（独立累加器，勿与篝火
       // 共用 campfireAccum/campfireHeal——曾误挂致篝火不在时狼人回复随强度归零/错峰）
@@ -645,6 +669,7 @@ export class BuffState {
     if (this.active.has(BuffType.Weak)) d -= 4;              // 虚弱 statDefense -= 4（:11509）
     if (this.active.has(BuffType.Ichor)) d -= 15;           // 灵液 statDefense -= 15（ResetEffects）
     if (this.active.has(BuffType.Werewolf)) d += 3;         // 狼人 statDefense += 3（:11497）
+    if (this.active.has(BuffType.DryadsWard)) d += 8;       // 树妖祝福 statDefense += 8（:9987）
     d += [0, 2, 3, 4][this.wellFedTier];                    // 食物 statDefense += 2/3/4（:11524+）
     return d;
   }
@@ -689,10 +714,15 @@ export class BuffState {
     if (left === undefined) return 0;
     return Math.max(0, Math.min(3, Math.floor(left / 180)));
   }
-  /** 挖掘冷却倍率（pickSpeed 语义，越小越快）：食物档 × 风筝 pickSpeed−0.15（:9616）。
-   *  tileSpeed/wallSpeed 放置速度位（:9616-9617）本仓未建模，登记 */
+  /** 挖掘冷却倍率（pickSpeed 语义，越小越快）——★已退役:原版是加法减量
+   *  （食物档 -5/10/15% :11534+ / 风筝 -0.15 :9614），乘法近似在高叠档偏差。
+   *  消费已并入 Game.ts 挖掘冷却的 pickSpeed 加法链（Mining/ambrosia/食物/风筝/
+   *  chiselSpeed 全源一处聚合）。tileSpeed/wallSpeed 放置速度位在
+   *  Game.placeSpeedTileRaw/placeSpeedWallRaw（:9616-9617） */
   get pickSpeedMult(): number {
-    return this.wellFedPickMult * (this.active.has(BuffType.KiteBuff) ? 0.85 : 1);
+    return 1
+      - (1 - this.wellFedPickMult)
+      - (this.active.has(BuffType.KiteBuff) ? 0.15 : 0);
   }
   /** 原版 buff 21（PotionSickness）无任何属性——只禁治疗（healBlocked）。
    *  旧实现 +80 maxHp 非原版（2026-08-13 对齐移除，喝药回血走 healLife 数据驱动） */
@@ -701,6 +731,19 @@ export class BuffState {
   }
   get hasThorns(): boolean {
     return this.active.has(BuffType.Thorns);
+  }
+  /** 荆棘反伤乘数 thorns（Player.cs:18228 每帧清零后 UpdateBuffs 逐 buff 赋值：
+   *  buff 14 → thorns = 1（:9703）；buff 165 → thorns<1 时 += 0.5（:9988-9990——
+   *  药水在场已为 1，树妖 0.5 不再叠）。海龟套 turtleThorns 是消费端覆写 2 非叠加
+   *  （:30912-30914），不在此 getter） */
+  get thornsAmount(): number {
+    if (this.active.has(BuffType.Thorns)) return 1;
+    if (this.active.has(BuffType.DryadsWard)) return 0.5;
+    return 0;
+  }
+  // ---- 树妖祝福 165（Player.cs:9985-9991）----
+  get dryadWard(): boolean {
+    return this.active.has(BuffType.DryadsWard);
   }
   get healBlocked(): boolean {
     return this.active.has(BuffType.Resistance);

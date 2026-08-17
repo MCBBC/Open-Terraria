@@ -19,6 +19,7 @@
   textarea { width: 100%; height: 110px; background: #14141a; color: #9f9; border: 1px solid #444; font: 11px monospace; box-sizing: border-box; }
   #hud { position: absolute; top: 6px; left: 8px; font: 11px monospace; color: #8f8; pointer-events: none; white-space: pre; }
   .legend { font-size: 11px; color: #aaa; }
+  .lg { display: inline-block; width: 10px; height: 10px; margin: 0 3px; vertical-align: -1px; }
 </style>
 </head>
 <body>
@@ -27,6 +28,15 @@
     <h3>树型</h3>
     <div class="row" id="presets"></div>
     <button id="reroll">🎲 换一套干件随机</button>
+    <h3>生物群系（地面/树干表/冠样式自然派生）</h3>
+    <div class="row" id="biomes"></div>
+    <div class="row">冠样式直覆（覆盖自然派生，用于翻查特定 Tree_Tops 表）：<br>
+      <select id="crownSel"><option value="-1">自动（按群系派生）</option></select></div>
+    <div class="row">冠变体（marker fy=198/220/242，也含 fx=0 稀有变体）：<br>
+      <select id="cvarSel">
+        <option value="22,198">v0 (22,198)</option><option value="22,220">v1 (22,220)</option>
+        <option value="22,242">v2 (22,242)</option><option value="0,198">稀有 fx=0</option>
+      </select></div>
     <h3>风况</h3>
     <div class="row" id="windModes"></div>
     <div class="row">相位滑杆（暂停下微调）<br><input type="range" id="phase" min="0" max="1000" value="0"></div>
@@ -34,11 +44,16 @@
     <div class="row" id="zooms"></div>
     <div class="row"><label><input type="checkbox" id="viaChunk" checked> 经 chunk 烘焙（与游戏完全同构）</label></div>
     <div class="row"><label><input type="checkbox" id="showGrid"> 显示 16px 网格与边界线</label></div>
+    <h3>导入你的世界（F5 报告）</h3>
+    <div class="row legend">把 F5 调试报告 JSON 全文粘贴进来，点还原——会在下方画布 1:1 重建你身边的整片林区（含所有树/地形），再配合风况/缩放/标注定位。</div>
+    <textarea id="importBox" placeholder='{"meta":...,"tiles":{"areaPlayer":...}}' style="height:70px"></textarea>
+    <button id="doImport">📥 还原报告林区</button>
+    <button id="clearImport" class="warn">清还原</button>
     <h3>标注</h3>
     <div class="row"><button id="markMode">✏️ 标注模式：关</button>
       <button id="autoDetect">🔍 自动检测全透明行</button>
       <button id="clearMarks" class="warn">清除标注</button></div>
-    <div class="row legend">标注模式：在画布上点击/拖动标记"你觉得是缝/空"的像素（红）。黄=自动检测的整行透明。导出后把 JSON 发回即可。</div>
+    <div class="row legend">标注模式：点击/拖动标记"你觉得是缝"的像素（<span class="lg" style="background:rgba(255,40,40,.9)"></span>红）。<span class="lg" style="background:rgba(255,220,0,.85)"></span>黄=整行透明自动检测；<span class="lg" style="background:rgba(80,180,255,.75)"></span>蓝=干中带内的透明针孔（冠底行漏点，机器自动）。导出 JSON 发回即可。</div>
     <button id="export">📋 导出标注 JSON（复制到剪贴板）</button>
     <textarea id="out" placeholder="导出结果会显示在这里"></textarea>
     <h3>当前帧数据</h3>
@@ -92,19 +107,82 @@ const PRESETS = {
   '巨树 h=22（EpicTree）': { h: 22, marker: [22, 242] },
 };
 
+// ── F5 报告导入 ───────────────────────────────────────
+let imported = null;
+async function importReport() {
+  const j = JSON.parse(document.getElementById('importBox').value);
+  const ap = j?.tiles?.areaPlayer;
+  if (!ap) { alert('报告里没有 tiles.areaPlayer'); return; }
+  const { TILE_DEFS } = await import('/src/data/tiles.ts');
+  // sheet → 内部 type 反查（每 sheet 取首个 def；5=树精确）
+  const sheetType = new Map();
+  for (let id = 0; id < TILE_DEFS.length; id++) {
+    const v = TILE_DEFS[id]?.vanilla;
+    if (v && !sheetType.has(v.sheet)) sheetType.set(v.sheet, id);
+  }
+  const grid = ap.rows.map((row) => {
+    const toks = [];
+    for (const part of row.split(';')) {
+      const tok = part.includes('*') ? part.slice(0, part.lastIndexOf('*')) : part;
+      const n = part.includes('*') ? Number(part.slice(part.lastIndexOf('*') + 1)) : 1;
+      for (let k = 0; k < n; k++) toks.push(tok);
+    }
+    return toks;
+  });
+  const st = new TileStore(ap.w + 4, ap.h + 4);
+  for (let y = 0; y < ap.h; y++) for (let x = 0; x < ap.w; x++) {
+    const t = grid[y][x];
+    if (t === '0') continue;
+    const [sh, fx, fy, wall, liq] = t.split(':').map(Number);
+    if (sh === -1) continue;
+    const type = sheetType.get(sh);
+    if (type === undefined) continue;
+    st.setTileSilent(x + 2, y + 2, type, fx, fy);
+  }
+  imported = { st, w: ap.w, h: ap.h };
+  buildWorld();
+}
+document.getElementById('doImport').onclick = importReport;
+document.getElementById('clearImport').onclick = () => { imported = null; buildWorld(); };
+
 // ── 状态 ─────────────────────────────────────────────
+const BIOME_GRASS = {
+  '普通草': 'grass', '腐化': 'v_23_corrupt_grass_block', '丛林': 'v_60_jungle_grass_block',
+  '神圣': 'v_109_hallowed_grass_block', '雪原': 'snow', '猩红': 'v_199_crimson_grass_block',
+  '蘑菇': 'v_70_mushroom_grass_block',
+};
 const S = {
   preset: '中树 h=7（用户报障世界实例首件 44,110）',
+  biome: '普通草', crownOverride: -1,
   zoom: 4, windMode: 'idle', paused: false, counter: 0, phaseOverride: null,
   annotate: false, marks: [], auto: [], viaChunk: true, showGrid: false,
   tree: null, store: null,
 };
 function buildWorld() {
+  if (imported) {
+    S.store = imported.st;
+    // 视口中心 = 导入区中心；树型数据用导入区（树由 store 直接渲染）
+    const c = { x: Math.floor(imported.w / 2) + 2, y: Math.floor(imported.h / 2) + 2 };
+    // 找导入区内最高的树做"当前树"（标注参考）
+    let best = null;
+    for (let y = 0; y < imported.h; y++) for (let x = 0; x < imported.w; x++) {
+      const i = imported.st.idx(x + 2, y + 2);
+      if (imported.st.type[i] === TREE && imported.st.frameY[i] >= 198 && (imported.st.frameX[i] === 22 || imported.st.frameX[i] === 0)) {
+        let h = 0;
+        for (let dy = 1; dy < 40; dy++) { if (imported.st.type[imported.st.idx(x + 2, y + 2 + dy)] === TREE) h++; else break; }
+        if (!best || h > best.h) best = { x: x + 2, markerY: y + 2, grassY: y + 2 + h + 1, h };
+      }
+    }
+    if (best) best.pieces = [];
+    S.tree = best ?? { x: c.x, markerY: c.y, grassY: c.y + 6, h: 5, pieces: [] };
+    return;
+  }
   const p = PRESETS[S.preset];
   const h = p.h;
   const W = 26, H = 44, grassY = 38;
   const st = new TileStore(W, H);
-  for (let x = 0; x < W; x++) { st.setTile(x, grassY, GRASS); for (let y = grassY + 1; y < H; y++) st.setTile(x, y, DIRT); }
+  const grassId = TILE_BY_KEY[BIOME_GRASS[S.biome]] ?? GRASS;
+  for (let x = 0; x < W; x++) { st.setTile(x, grassY, grassId); for (let y = grassY + 1; y < H; y++) st.setTile(x, y, DIRT); }
   const tx = 13;
   const pieces = rollTrunk(h);
   if (p.topPiece) pieces[0] = { f: p.topPiece, branch: pieces[0].branch };
@@ -121,7 +199,8 @@ function buildWorld() {
       pieces[k].branchMarker = [bx, y, bfx, bfy];
     }
   }
-  st.setTileSilent(tx, grassY - 1 - h, TREE, p.marker[0], p.marker[1]);
+  const mk = (S.cvar ?? '22,198').split(',').map(Number);
+  st.setTileSilent(tx, grassY - 1 - h, TREE, mk[0], mk[1]);
   S.store = st;
   S.tree = { x: tx, markerY: grassY - 1 - h, grassY, h, pieces };
 }
@@ -132,7 +211,7 @@ const cv = document.getElementById('cv');
 const ctx = cv.getContext('2d');
 const bakeCv = document.createElement('canvas');
 const trees = { treeX: [4, 8, 16, 22], treeStyle: [0, 0, 0, 0], treeTops: [], worldSurface: 30, worldW: 26 };
-const VIEW_W = 13 * T, VIEW_H = 11 * T;   // 世界像素视口（以接缝为中心）
+let VIEW_W = 13 * T, VIEW_H = 11 * T;   // 世界像素视口（以接缝为中心）
 let cam = { x: 0, y: 0 };
 
 function swayFor(x, y) {
@@ -149,7 +228,8 @@ function swayFor(x, y) {
 function render() {
   const t = S.tree;
   const boundaryY = (t.markerY + 1) * T;          // 冠底/干顶交界
-  cam.x = t.x * T + 8; cam.y = boundaryY - 2;
+  if (imported) { VIEW_W = imported.w * T; VIEW_H = imported.h * T; cam.x = imported.st.w * T / 2; cam.y = boundaryY; }
+  else { VIEW_W = 13 * T; VIEW_H = 11 * T; cam.x = t.x * T + 8; cam.y = boundaryY - 2; }
   const z = S.zoom;
   cv.width = VIEW_W * z; cv.height = VIEW_H * z;
   const cw = cv.width, ch = cv.height;
@@ -212,7 +292,8 @@ function render() {
   for (const c of swayCells) {
     const sway = swayFor(c.x, c.y);
     if (c.fx === 22 || c.fx === 0) lastSway = sway;
-    drawTreeCell(ctx, atlas, st, c.x, c.y, c.fx, c.fy, c.x * T, c.y * T, 5, true, trees, sway);
+    drawTreeCell(ctx, atlas, st, c.x, c.y, c.fx, c.fy, c.x * T, c.y * T, 5, true, trees, sway,
+      S.crownOverride >= 0 ? S.crownOverride : undefined);
   }
   ctx.restore();
 
@@ -231,8 +312,9 @@ function render() {
     ctx.restore();
   }
 
-  // 自动检测行（干列带全透明行）
+  // 自动检测行（干列带全透明行）+ 干带针孔（冠底部行内部分透明像素）
   S.auto = [];
+  S.pin = [];
   {
     const bandX0 = Math.round((t.x * T - 2 - camRX) * z + cw / 2);
     const bandW = Math.round(20 * z);
@@ -250,6 +332,11 @@ function render() {
     ctx.fillStyle = 'rgba(255,220,0,0.85)';
     ctx.fillRect(0, Math.round((a.wy - camRY) * z + ch / 2), cw, Math.max(1, z / 2));
   }
+  for (const m of S.pin) {
+    const [sx, sy] = w2s(m.wx, m.wy);
+    ctx.fillStyle = 'rgba(80,180,255,0.75)';
+    ctx.fillRect(sx - z / 8, sy, Math.max(2, z / 2), Math.max(2, z / 2));
+  }
   for (const m of S.marks) {
     const [sx, sy] = w2s(m.wx, m.wy);
     ctx.fillStyle = 'rgba(255,40,40,0.9)';
@@ -259,7 +346,7 @@ function render() {
   document.getElementById('hud').textContent =
     `sway=${lastSway === null ? '-' : lastSway.toFixed(4)}  zoom=${z}  wind=${S.windMode}` +
     (S.phaseOverride !== null ? `  phase=${S.phaseOverride.toFixed(3)}` : '') +
-    `\n自动透明行: ${S.auto.length ? S.auto.map((a) => a.wy).join(',') : '无'}`;
+    `\n自动透明行: ${S.auto.length ? S.auto.map((a) => a.wy).join(',') : '无'}  干带针孔: ${S.pin.length}`;
   document.getElementById('stats').textContent =
     `marker=(${t.x},${t.markerY}) 干高=${t.h}\n干件(top→base): ${t.pieces.slice(0, 4).map((p) => p.f.join(',')).join(' | ')} …\n标注 ${S.marks.length} 点 / 自动 ${S.auto.length} 行`;
 
@@ -294,6 +381,19 @@ radio('presets', Object.keys(PRESETS).map((k) => [k.split('（')[0], k]),
 radio('windModes', [['静止(sway=0)', 'still'], ['无风微摆(同游戏)', 'idle'], ['强风', 'gale']],
   () => S.windMode, (v) => { S.windMode = v; S.phaseOverride = null; windSway.wind = v === 'gale' ? 1 : 0; });
 radio('zooms', [['×2', 2], ['×4', 4], ['×8', 8]], () => S.zoom, (v) => { S.zoom = v; });
+radio('biomes', Object.keys(BIOME_GRASS).map((k) => [k, k]), () => S.biome, (v) => { S.biome = v; buildWorld(); });
+{
+  const sel = $('crownSel');
+  const NAMES = { 0: '草地', 1: '腐化', 2: '丛林', 3: '神圣(80×140)', 4: '雪A', 5: '猩红', 6: '棕榈叶?', 7: '', 8: '', 9: '', 10: '金草地', 11: '丛林v2(116×96)', 12: '雪B', 13: '丛林深处(116×96)', 14: '发光蘑菇', 15: '', 16: '宝石A', 17: '宝石B', 18: '宝石C/雪1/10', 19: '神圣B(120×140)', 20: '神圣C', 21: '', 22: '', 23: '', 24: '', 29: '装饰樱花(118×96)', 30: '装饰棕榈(118×96)', 31: '灰烬(116×96)' };
+  for (let i = 0; i <= 31; i++) {
+    const o = document.createElement('option');
+    o.value = String(i);
+    o.textContent = i + (NAMES[i] ? ' ' + NAMES[i] : '');
+    sel.appendChild(o);
+  }
+  sel.onchange = () => { S.crownOverride = Number(sel.value); };
+  $('cvarSel').onchange = (e) => { S.cvar = e.target.value; };
+}
 $('reroll').onclick = () => buildWorld();
 $('phase').oninput = (e) => { S.phaseOverride = Number(e.target.value) / 1000; };
 $('phase').onchange = () => { if (S.phaseOverride === 0) S.phaseOverride = null; };
@@ -321,13 +421,14 @@ $('autoDetect').onclick = () => { /* 自动行已实时叠加；此按钮仅高�
 $('export').onclick = () => {
   const t = S.tree;
   const data = {
-    tool: 'tree-inspect', preset: S.preset, zoom: S.zoom, windMode: S.windMode,
+    tool: 'tree-inspect', imported: !!imported, importW: imported?.w, importH: imported?.h, preset: S.preset, biome: S.biome, crownOverride: S.crownOverride, crownVariant: S.cvar ?? '22,198', zoom: S.zoom, windMode: S.windMode,
     phase: S.phaseOverride, viaChunk: S.viaChunk,
     tree: { x: t.x, markerY: t.markerY, grassY: t.grassY, h: t.h,
       marker: PRESETS[S.preset].marker,
       pieces: t.pieces.map((p) => p.f) },
     marks_worldpx: S.marks,
     autoTransparentRows_worldpx: S.auto,
+    trunkBandPinholes_worldpx: S.pin.slice(0, 400),
   };
   const json = JSON.stringify(data);
   $('out').value = json;
@@ -340,6 +441,7 @@ addEventListener('keydown', (e) => { if (e.key === ' ') { S.paused = !S.paused; 
 
 buildWorld();
 render();
+window.__treeInspect = S;   // 探针/自动化接口（手动标注不受影响）
 </script>
 </body>
 </html>

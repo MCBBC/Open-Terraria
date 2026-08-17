@@ -210,6 +210,107 @@ const ITEM_DRAW_POS: Record<number, readonly [number, number]> = {
  *  行 0-6→y2 / 7-9→y0 / 10-13→y2 / 14-16→y0 / 17-19→y2（X 恒 0）。
  *  useStyle 14/15（头侧持）与 holdStyle 5/6/8 的 itemLocation 都要加此偏移 */
 const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2];
+
+// ===================== Extra_N 贴图懒加载 + DrawPrettyStarSparkle 星尘原语 =====================
+// 模块级共享（Renderer 实例方法与 SwingArc 等无 atlas 实例的绘制端共用同一份缓存）。
+// 精髓：XNA 主 spriteBatch 的 BlendState.AlphaBlend 是【预乘语义】（ColorSourceBlend=
+// One, DestBlend=InverseSourceAlpha）——color.A 只削底、不缩放 src 贡献 → 原版所有
+// Color(...,A=0) 的 sparkle/glow 在 AlphaBlend 下实为纯加色（RGB 全量、背景零衰减）。
+// canvas 等价 = lighter + 染色 alpha 拉满（Extra_98 为白形状带 alpha 渐变：预乘语义
+// 下边缘 RGB 也全量加 → 染色时 destination-in 填 255 把 alpha 摊平，非保留原 alpha）。
+const extraSpriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
+/** Extra_N 贴图懒加载（sprites/vanilla/Extra_N.png；Image→Bitmap 升级同 projSprite） */
+export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | null {
+  if (typeof Image === 'undefined') return null;
+  const hit = extraSpriteCache.get(n);
+  if (hit !== undefined) return hit;
+  const im = new Image();
+  im.onload = () => {
+    if (im.width > 0 && typeof createImageBitmap === 'function') {
+      createImageBitmap(im).then((b) => extraSpriteCache.set(n, b)).catch(() => { /* 保留 Image */ });
+    }
+  };
+  im.onerror = () => extraSpriteCache.set(n, null as unknown as ImageBitmap);
+  im.src = `sprites/vanilla/Extra_${n}.png`;
+  extraSpriteCache.set(n, im);
+  return im;
+}
+
+/** Extra_98 星芒染色缓存（RGB 乘法染 + alpha 摊平 255——见上预乘语义注） */
+const sparkleTintCache = new Map<string, HTMLCanvasElement>();
+function sparkleTintedTex(rgb: readonly [number, number, number]): HTMLCanvasElement | null {
+  const img = loadExtraSprite(98);
+  if (!img || !(img.width > 0) || !(img.height > 0)) return null;
+  const key = rgb.join(',');
+  const hit = sparkleTintCache.get(key);
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const cx = c.getContext('2d')!;
+  cx.drawImage(img as CanvasImageSource, 0, 0);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+  cx.fillRect(0, 0, c.width, c.height);
+  // alpha 摊平（预乘语义：原贴图 alpha 不参与 src 贡献强度）
+  cx.globalCompositeOperation = 'destination-in';
+  cx.fillStyle = '#fff';
+  cx.fillRect(0, 0, c.width, c.height);
+  cx.globalCompositeOperation = 'source-over';
+  if (sparkleTintCache.size > 64) sparkleTintCache.clear();
+  sparkleTintCache.set(key, c);
+  return c;
+}
+
+/** DrawPrettyStarSparkle 1:1（Main.cs:34734-34750）。
+ *  envelope num = GetLerpValue(fadeInStart,fadeInEnd,flare) × GetLerpValue(fadeOutEnd,fadeOutStart,flare)
+ *  （Utils.cs:283-308 含 from>to 反向钳位）；vector=(fatnessX·0.5, scaleX)·num、
+ *  vector2=(fatnessY·0.5, scaleY)·num；四笔全 lighter 加色：
+ *  ①shine 旋 π/2+rotation @vector ②shine 旋 rotation @vector2
+ *  ③draw 旋 π/2+rotation @vector·0.6 ④draw 旋 rotation @vector2·0.6。
+ *  color = shine×opacity×0.5（A=0）、color2 = draw×0.5——A=0 预乘语义 = 纯加色，
+ *  亮度全部折进 tint·globalAlpha（原版 (int) 截断舍入差 ≤1/255 不逐笔复刻）。
+ *  消费端：402 星尘蠕虫头（:23888）/SwingArc 真刃弧族（:27424 族）/425 枪口星芒。 */
+export function prettyStarSparkle(
+  ctx: CanvasRenderingContext2D,
+  opacity: number, x: number, y: number,
+  drawColor: readonly [number, number, number], shineColor: readonly [number, number, number],
+  flareCounter: number,
+  fadeInStart: number, fadeInEnd: number, fadeOutStart: number, fadeOutEnd: number,
+  rotation: number, scale: readonly [number, number], fatness: readonly [number, number],
+  drawDim = 1, shineDim = 1,
+): void {
+  const lv = (from: number, to: number, t: number): number => {
+    if (from < to) { if (t < from) return 0; if (t > to) return 1; }
+    else { if (t < to) return 1; if (t > from) return 0; }
+    return (t - from) / (to - from);
+  };
+  const num = lv(fadeInStart, fadeInEnd, flareCounter) * lv(fadeOutEnd, fadeOutStart, flareCounter);
+  if (num <= 0) return;
+  const shine = sparkleTintedTex(shineColor);
+  const draw = sparkleTintedTex(drawColor);
+  if (!shine || !draw) return;
+  const tw = shine.width, th = shine.height;
+  const v1x = fatness[0] * 0.5 * num, v1y = scale[0] * num;
+  const v2x = fatness[1] * 0.5 * num, v2y = scale[1] * num;
+  const aShine = 0.5 * opacity * num * shineDim, aDraw = 0.5 * num * drawDim;
+  // drawDim/shineDim：原版调用侧预乘进色的因子（如 SwingArc 的 White×num3×0.5、
+  // 973 的 shine×num13）——折进 globalAlpha 而非逐帧染色（防 tintCache 打爆）
+  const stroke = (img: HTMLCanvasElement, rot: number, sw: number, sh: number, alpha: number) => {
+    if (alpha <= 0 || sw <= 0 || sh <= 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+    ctx.drawImage(img, -tw * sw / 2, -th * sh / 2, tw * sw, th * sh);
+    ctx.restore();
+  };
+  stroke(shine, Math.PI / 2 + rotation, v1x, v1y, aShine);
+  stroke(shine, rotation, v2x, v2y, aShine);
+  stroke(draw, Math.PI / 2 + rotation, v1x * 0.6, v1y * 0.6, aDraw);
+  stroke(draw, rotation, v2x * 0.6, v2y * 0.6, aDraw);
+}
+
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -231,7 +332,6 @@ import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
-import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
 import { wingDrawOf, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS, stealthFactors } from '../data/vanillaWingVisuals';
@@ -1055,6 +1155,31 @@ export class Minimap {
   }
 }
 
+/** 睡床躺平变换操作序列（PlayerSleepingHelper.cs:66-83 + PlayerDrawSet
+ *  BoringSetup:336-356 / TransformDrawData:4199-4230 合成，2026-08-17 提取为
+ *  纯函数供 drawPlayer 与单测共用）：
+ *  ① 床型视觉偏移（SetOffsetbyBed :227-280）× Directions 先做世界平移
+ *    （原版 Position += posOffset，随后枢轴 = Position+Size/2 也含偏移 → 偏移
+ *    作用于旋转前的世界空间 = 先平移再旋转）
+ *  ② 绕盒中心旋转：fullRotation = π/2·(−direction) —— ★本仓镜像 scale(facing,1)
+ *    在旋转之前：S·R(θ) = R(α)·S ⟹ θ = facing·α，两朝向化简后【恒 −π/2】
+ *    （曾写 π/2·(−facing)：视觉恒 −π/2 —— 变体B床(枕左,facing+1)碰巧正确、
+ *    变体A床(枕右,facing−1)头落在脚尾 = "躺床效果不对"根因之一） */
+export function sleepingTransformOps(
+  p: { facing: number; gravDir: number; h: number },
+  bo: readonly [number, number],
+): Array<['t', number, number] | ['r', number]> {
+  return [
+    // ★局部平移量直接传 bo 原值:镜像 scale(facing,1) 在外层会把 x 分量再乘 facing,
+    //   世界位移恰为 bo×Directions(direction,gravDir)——曾写 bo[0]·facing 双重镜像,
+    //   facing=−1 时水平偏移反向(朝左床躺位整体偏 2·bo.x)
+    ['t', bo[0], bo[1] * p.gravDir],
+    ['t', 0, -p.h / 2],
+    ['r', -Math.PI / 2],
+    ['t', 0, p.h / 2],
+  ];
+}
+
 export class Renderer {
   /** 调试面板开关（F3 切换）：碰撞盒高亮等 */
   debugMode = false;
@@ -1534,7 +1659,6 @@ export class Renderer {
       else if (e instanceof ItemDrop) this.drawDrop(e);
       else if (e instanceof TownNPC) { this.drawTownNPC(e, world); this.drawHealthBar(e); }
       else if (e instanceof Tombstone) this.drawTombstone(e);
-      else if (e instanceof Critter) this.drawCritter(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
         // 投射物等自带 draw 的实体(飞镖/陷阱弹/箭/法弹):世界变换内绘制
         noteHeldProjEntity(e);   // heldProj 账本登记(非目标弹型静默跳过)
@@ -2868,46 +2992,6 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawCritter(c: Critter) {
-    if (!this.atlas) return;
-    const meta = this.atlas.vnpcMeta(c.def.npc);
-    if (!meta) return;
-    // 帧选择优先级：分段动画（鸭子） > 鸟类栖息末帧 > 蝴蝶物种窗口 > 全表循环
-    let frame: number;
-    const anim = c.def.anim;
-    if (anim) {
-      // 状态选段（游水只认滞回锁：flying 后 inWater 冻结的历史 bug 不会再影响显示）
-      const seg = c.swimLatch > 0 ? (anim.swim ?? anim.walk)
-        : !c.onGround ? (anim.fly ?? anim.walk)
-        : Math.abs(c.vx) > 0.15 ? (anim.walk ?? anim.idle) : (anim.idle ?? anim.walk);
-      if (seg) {
-        const active = Math.abs(c.vx) > 0.15 || !c.onGround || c.swimLatch > 0;
-        frame = seg[0] + (active ? Math.floor(c.animT / 8) % seg[1] : 0);
-      } else frame = 0;
-    } else if (c.perchState === 1 && meta.count > 1) frame = meta.count - 1;
-    else {
-      const moving = Math.abs(c.vx) > 0.15 || !c.onGround;
-      if (c.animLen > 0) frame = c.animBase + (moving ? Math.floor(c.animT / 8) % c.animLen : 0);
-      else frame = moving ? Math.floor(c.animT / 8) % meta.count : 0;
-    }
-    const fr = this.atlas.vnpc(c.def.npc, frame);
-    if (!fr) return;
-    const ctx = this.ctx;
-    // 缩放贴合碰撞盒；按帧最低不透明行对齐脚底（帧底透明内边距会导致悬浮）
-    const h = c.h * 1.25;
-    const w = (fr.sw / fr.sh) * h;
-    // 帧底对齐：原版 NPC 通用公式恒 +4 下沉（Main.cs:24741——可见贴图底=盒底+4，
-    // 透明边距一并沉入地面；曾按透明行贴地补偿反而悬空 1-2px）
-    ctx.save();
-    ctx.translate(c.cx, c.y + c.h); // 脚底中心
-    ctx.scale(c.facing >= 0 ? -1 : 1, 1); // 贴图默认朝左
-    if (c.def.glow) {
-      ctx.shadowColor = 'rgba(220,255,140,0.9)';
-      ctx.shadowBlur = 6; // 萤火虫发光
-    }
-    ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + 4, w, h);
-    ctx.restore();
-  }
 
   private drawDrop(d: ItemDrop) {
     const bob = Math.sin((d.age + d.bobPhase * 60) * 0.1) * 1.5;
@@ -4289,8 +4373,8 @@ export class Renderer {
    *  语义用 lighter 还原）。本体 alpha = Opacity×(0.8−0.14·i/2)、glow = 1−0.14·i/2，
    *  全乘生命末段渐隐 num291（ai[2] 0→600 计时，最后 5% 线性淡出 :23858-23861）。
    *  头 = NPC_402 + Glow_135×num291。锚点 = 碰撞盒中心（origin halfSize），旋转
-   *  随 visAngle/oldRot。【未接登记】DrawPrettyStarSparkle（:23888 头部星尘闪光，
-   *  独立 sparkle 绘制原语）未移植。 */
+   *  随 visAngle/oldRot。头中心尾接 DrawPrettyStarSparkle（:23888 → 原语
+   *  drawPrettyStarSparkle；ai[2] 计时链在 Enemy.wormAI 402 段驱动）。 */
   /** 266 克苏鲁之脑（Main.cs:24799-24843 专家/FTW 四镜像 + :22949-22951 Y 下垂）：
    *  life<lifeMax 且（专家 || FTW）→ 以玩家中心镜像画 4 份：alpha 因子 =
    *  1-life/lifeMax（专家 ×2，FTW 置 1）平方后钳 0..1，乘进整体 alpha；
@@ -4402,6 +4486,28 @@ export class Renderer {
     }
     // 头本体 + Glow_135×num291（:23884-23887）
     drawSeg(head, glowH, e.cx, e.cy, e.visAngle, 1, fade);
+    // 头中心星尘闪光（:23888）：opacity=Remap(ai2,0,600,0,1)、drawColor=White(A0)、
+    // shine=CornflowerBlue(100,149,237)、flare=n290、fadeIn 0.5→0.95、fadeOut
+    // 0.95→1（num289/num288=570/600）、rotation=π·2·n290、scale=(2,2)、fatness=(2,2)
+    this.drawPrettyStarSparkle(
+      remap(e.ai2, 0, LIFE, 0, 1), e.cx, e.cy,
+      [255, 255, 255], [100, 149, 237], n290,
+      0.5, LIFE_LAST / LIFE, LIFE_LAST / LIFE, 1,
+      Math.PI * 2 * n290, [2, 2], [2, 2],
+    );
+  }
+
+  /** DrawPrettyStarSparkle 实例包装（Main.cs:34734-34750，1:1 参数序）：
+   *  贴图 Extra_98 经模块级缓存加载（首帧 miss 次帧生效）。坐标 = 世界系中心。 */
+  private drawPrettyStarSparkle(
+    opacity: number, x: number, y: number,
+    drawColor: readonly [number, number, number], shineColor: readonly [number, number, number],
+    flareCounter: number,
+    fadeInStart: number, fadeInEnd: number, fadeOutStart: number, fadeOutEnd: number,
+    rotation: number, scale: readonly [number, number], fatness: readonly [number, number],
+  ): void {
+    prettyStarSparkle(this.ctx, opacity, x, y, drawColor, shineColor,
+      flareCounter, fadeInStart, fadeInEnd, fadeOutStart, fadeOutEnd, rotation, scale, fatness);
   }
 
   /** 690 雕像宝箱怪（Main.cs:23103-23134 case 690 独占）：本体贴图弃用，改按
@@ -5051,7 +5157,11 @@ export class Renderer {
    *  Extra_157（原版 HallowBoss 像素着色器；此处直画贴图近似，登记）→ 本体 NPC_636
    *  帧（二阶段 ai3∈{1,3} → 帧 1，FindFrame cs:67678）→ 二阶段翅膀覆层 Extra_187
    *  （1×8 帧 + 4 向相位轨道残影）+ 头冠 Extra_188（4 向残影）→ 双臂 Extra_158/160。
-   *  攻击态 8/9/10 的彩虹残影环（:26401-26478）依赖逐 NPC hsl 轨道，登记未接。
+   *  攻击态 8/9/10 的彩虹残影环（:26394-26487）：整组精灵在多份偏移位重画——
+   *  8/9 为 hsl 彩虹 3D 轨道环（RotX·RotY·RotZ 变换 Forward 向量取 (X,Y) 平面分量，
+   *  num10=200+LerpValue(−1,1,Z)×150、整体再 RotatedBy(ai1/180·2π)）+ i>3 的速度
+   *  反向尾迹 4 份；10 为 8 向轮辐（≥90t 椭圆 (600,150)·num7、<90t 横排 200i）。
+   *  颜色 A/=3（预乘语义 → destination-out 削底 + lighter 加色两步还原）。
    *  原版 AI_120 不写 npc.rotation（grep 实证）——旋转项以 facing 镜像为准 */
   private drawEmpress(e: Enemy) {
     if (!this.atlas) return;
@@ -5071,26 +5181,172 @@ export class Renderer {
       const fh = Math.floor(r.sh / rows);
       return { r, fh, idx: Math.min(rows - 1, Math.max(0, idx)) };
     };
+    const lv = Renderer.glowLerpValue;
+    const wingFrame = Math.floor(e.animT / 4) % 11;
+    const [lf, rf] = this.empressArmFrames(e);
+    // 残影层集（:26442-26486）：wing×2 + 着色器层 + [二阶段 Extra_187] + 本体 +
+    // 帧 5 施法臂（num2/num3 = 臂帧==5 时画）。每层独立 (sx,sy,sw,sh,目标矩形,mult)
+    type GhostLayer = { src: NonNullable<ReturnType<SpriteAtlas['vmisc']>>; rows: number; idx: number; dw: number; dh: number };
+    const ghostLayers: GhostLayer[] = [];
+    if (wing) ghostLayers.push({ src: wing, rows: 11, idx: wingFrame, dw: wing.sw * 2, dh: Math.floor(wing.sh / 11) * 2 });
+    if (shader) ghostLayers.push({ src: shader, rows: 11, idx: wingFrame, dw: shader.sw * 2, dh: Math.floor(shader.sh / 11) * 2 });
+    const paintGhost = (px: number, py: number, tint: [number, number, number], addA: number, fadeA: number) => {
+      if (addA <= 0.01) return;
+      ctx.save();
+      ctx.translate(px, py);
+      if (flip) ctx.scale(-1, 1);
+      ctx.scale(scale, scale);
+      const twoPass = (src: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
+        dx: number, dy: number, dw: number, dh: number, tinted: HTMLCanvasElement | null) => {
+        // A/=3 预乘语义：destination-out 削底（fadeA=A/255）→ lighter 加色（tint×addA）
+        if (fadeA > 0.01) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.globalAlpha = Math.max(0, Math.min(1, fadeA));
+          ctx.drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh);
+        }
+        ctx.globalCompositeOperation = 'lighter';
+        if (tinted) {
+          ctx.globalAlpha = Math.max(0, Math.min(1, addA));
+          ctx.drawImage(tinted, 0, 0, tinted.width, tinted.height, dx, dy, dw, dh);
+        }
+      };
+      const tq = `${tint[0]},${tint[1]},${tint[2]}`;
+      for (const L of ghostLayers) {
+        const fh = Math.floor(L.src.sh / L.rows);
+        const tinted = this.tintedSprite(`emp|${L.src.sx}x${L.src.sw}x${L.src.sh}|${L.idx * fh}|${tq}`,
+          { img: L.src.img, sx: L.src.sx, sy: L.idx * fh, sw: L.src.sw, sh: fh }, tint);
+        twoPass(L.src.img, L.src.sx, L.idx * fh, L.src.sw, fh, -L.dw / 2, -L.dh / 2, L.dw, L.dh, tinted);
+      }
+      if (body) {
+        const tinted = this.tintedSprite(`emp|body|${body.sx},${body.sy}|${tq}`,
+          { img: body.img, sx: body.sx, sy: body.sy, sw: body.sw, sh: body.sh }, tint);
+        twoPass(body.img, body.sx, body.sy, body.sw, body.sh, -body.sw / 2, -body.sh / 2, body.sw, body.sh, tinted);
+      }
+      if (phase2 && wing2) {
+        const f2 = frameAt(wing2, 8, Math.floor(e.animT / 4) % 8);
+        const tinted = this.tintedSprite(`emp|187|${f2.idx * f2.fh}|${tq}`,
+          { img: f2.r.img, sx: f2.r.sx, sy: f2.idx * f2.fh, sw: f2.r.sw, sh: f2.fh }, tint);
+        twoPass(f2.r.img, f2.r.sx, f2.idx * f2.fh, f2.r.sw, f2.fh, -f2.r.sw / 2, -f2.fh / 2, f2.r.sw, f2.fh, tinted);
+      }
+      // 帧 5 施法臂（j==num2/num3 → 臂帧==5 才入残影 :26378-26486）
+      for (const [arm, frame] of [[armL, lf], [armR, rf]] as Array<[ReturnType<SpriteAtlas['vmisc']>, number]>) {
+        if (!arm || frame !== 5) continue;
+        const f = frameAt(arm, 7, frame);
+        const tinted = this.tintedSprite(`emp|arm|${f.idx * f.fh}|${tq}`,
+          { img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh }, tint);
+        twoPass(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh, tinted);
+      }
+      ctx.restore();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
+    };
     // num14：正弦脉动 0..1（:26500），二阶段轨道半径 Lerp(2,8)
     const pulse = Math.sin((performance.now() / 1000) * Math.PI * 2 * 0.5) * 0.5 + 0.5;
+    // ---- 攻击态 8/9/10 残影环（:26394-26441 包络 + :26442-26487 环体）----
+    const atk = e.ai0;
+    let num4 = 1;                                   // color ×= num4（:26394/26411）
+    let num5 = 0, num6 = 0;                         // 环界：i ∈ [−num6, num6+num5]
+    let e7 = 0, e8 = 0, e9 = 0;                     // 各态 num7/8/9 包络
+    if (atk === 8 || atk === 9) {
+      e7 = lv(0, 30, e.ai1) * lv(90, 30, e.ai1);
+      e8 = lv(0, 30, e.ai1) * lv(90, 70, e.ai1);
+      e9 = lv(0, 15, e.ai1) * lv(45, 30, e.ai1);
+      num4 = 1 - e9; num5 = 4; num6 = 3;
+    } else if (atk === 10) {
+      e7 = lv(30, 90, e.ai1) * lv(165, 90, e.ai1);
+      e8 = lv(0, 60, e.ai1) * lv(180, 120, e.ai1);
+      e9 = e8;
+      num4 = 1 - e9; num6 = 4;
+    }
+    if (num5 + num6 > 0) {
+      const tSec = performance.now() / 1000;        // timeForVisualEffects/60（连续钟近似）
+      const WHITE: [number, number, number] = [255, 255, 255];
+      for (let i = -num6; i <= num6 + num5; i++) {
+        if (i === 0) continue;
+        let px = e.cx, py = e.cy;
+        let tint: [number, number, number] = WHITE;
+        let addA = 0, fadeA = 0;
+        if (atk === 8 || atk === 9) {
+          // 彩虹 3D 轨道（:26445-26456）：v2 = Forward×RotX(a)·RotY(b)·RotZ(c)
+          const a = (tSec - 0.3 + i * 0.1) * 0.7 * Math.PI * 2;
+          const b = (tSec - 0.8 + i * 0.3) * 0.7 * Math.PI * 2;
+          const c = (tSec + i * 0.5) * 0.1 * Math.PI * 2;
+          const vz = -Math.cos(a) * Math.cos(b);
+          const vx = -Math.cos(a) * Math.sin(b) * Math.cos(c) - Math.sin(a) * Math.sin(c);
+          const vy = -Math.cos(a) * Math.sin(b) * Math.sin(c) + Math.sin(a) * Math.cos(c);
+          const num10 = 200 + lv(-1, 1, vz) * 150;
+          const spin = (Math.PI * 2) * e.ai1 / 180; // RotatedBy(ai1/180·2π)
+          const ox = (vx * num10 * e7) * Math.cos(spin) - (vy * num10 * e7) * Math.sin(spin);
+          const oy = (vx * num10 * e7) * Math.sin(spin) + (vy * num10 * e7) * Math.cos(spin);
+          px += ox; py += oy;
+          const lum = 0.5 + 0.5 * lv(90, 0, e.ai1); // Lerp(0.5,1,LerpValue(90,0,ai1))
+          const hue = (i + 5) / 10;
+          const rgb = Renderer.glowHslToRgb(hue, 1, lum);
+          tint = [Math.round(rgb[0] * 255), Math.round(rgb[1] * 255), Math.round(rgb[2] * 255)];
+          addA = 0.8 * e8;
+          fadeA = (204 * e8 / 3) / 255;             // color2.A = 255×0.8×num8 /3
+        } else {
+          // 态 10（:26458-26470）
+          if (e.ai1 >= 90) {
+            const t90 = tSec * 60 / 90;             // timeForVisualEffects/90
+            const n13 = i < 0 ? i + 1 : i;
+            const ang = (n13 + 0.5) * (Math.PI / 4) + Math.PI * 2 * t90;
+            px += Math.cos(ang) * 600 * e7;
+            py += Math.sin(ang) * 150 * e7;
+          } else {
+            px += 200 * i * e7;
+          }
+          addA = 0.8 * e8 * num4;
+          fadeA = (255 * 0.8 * e8 * num4 / 3) / 255;
+        }
+        // i>num6 的速度尾迹（:26471-26477，仅 8/9 有 num5=4）
+        if (i > num6) {
+          const lv2 = lv(30, 70, e.ai1);
+          if (lv2 === 0) continue;
+          px = e.cx - e.vx * 3 * (i - 4) * lv2;
+          py = e.cy - e.vy * 3 * (i - 4) * lv2;
+          addA *= 1 - e9;
+          fadeA *= 1 - e9;
+        }
+        paintGhost(px, py, tint, addA, fadeA);
+      }
+    }
     ctx.save();
     ctx.translate(e.cx, e.cy);
     if (flip) ctx.scale(-1, 1);
     ctx.scale(scale, scale);
-    ctx.globalAlpha = alpha;
+    // 攻击态主体色链（:26396-26397/26411-26413）：color = Lerp(color,White,num7)、
+    // color ×= num4(=1−num9)。RGB 缩放的精确 canvas 等价 = lighter 白版叠画（本仓
+    // 通用近似：num4 折进 globalAlpha——dst 衰减随之 ×num4，偏差 ≤num9·背景亮度）
+    const dimA = num4;
+    const whiteA = e7;
+    const paintMain = (
+      src: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+      dx: number, dy: number, dw: number, dh: number, key: string,
+    ) => {
+      ctx.globalAlpha = alpha * dimA;
+      ctx.drawImage(src.img, src.sx, src.sy, src.sw, src.sh, dx, dy, dw, dh);
+      if (whiteA > 0.01) {
+        const wt = this.tintedSprite(`empW|${key}`, src, [255, 255, 255]);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = alpha * whiteA;
+        ctx.drawImage(wt, 0, 0, wt.width, wt.height, dx, dy, dw, dh);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+    };
     // 背后大翼（:26481 scale×2）
     if (wing) {
-      const f = frameAt(wing, 11, Math.floor(e.animT / 4) % 11);
-      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
-        -f.r.sw, -f.fh, f.r.sw * 2, f.fh * 2);
+      const f = frameAt(wing, 11, wingFrame);
+      paintMain({ img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh },
+        -f.r.sw, -f.fh, f.r.sw * 2, f.fh * 2, `wing|${f.idx}`);
     }
     if (shader) {
-      const f = frameAt(shader, 11, Math.floor(e.animT / 4) % 11);
-      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
-        -f.r.sw, -f.fh, f.r.sw * 2, f.fh * 2);
+      const f = frameAt(shader, 11, wingFrame);
+      paintMain({ img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh },
+        -f.r.sw, -f.fh, f.r.sw * 2, f.fh * 2, `shd|${f.idx}`);
     }
     // 本体（FindFrame：二阶段帧 1）
-    if (body) ctx.drawImage(body.img, body.sx, body.sy, body.sw, body.sh, -body.sw / 2, -body.sh / 2, body.sw, body.sh);
+    if (body) paintMain(body, -body.sw / 2, -body.sh / 2, body.sw, body.sh, `body|${body.sy}`);
     // 二阶段：翅膀覆层 + 4 向轨道残影（:26509-26524）
     if (phase2 && wing2) {
       const f = frameAt(wing2, 8, Math.floor(e.animT / 4) % 8);
@@ -5122,15 +5378,17 @@ export class Renderer {
       }
     }
     // 双臂（帧表按攻击态）
-    const [lf, rf] = this.empressArmFrames(e);
     if (armL) {
       const f = frameAt(armL, 7, lf);
-      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh);
+      paintMain({ img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh },
+        -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh, `armL|${f.idx}`);
     }
     if (armR) {
       const f = frameAt(armR, 7, rf);
-      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh);
+      paintMain({ img: f.r.img, sx: f.r.sx, sy: f.idx * f.fh, sw: f.r.sw, sh: f.fh },
+        -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh, `armR|${f.idx}`);
     }
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 
@@ -6123,10 +6381,20 @@ export class Renderer {
 
   /** swing 形状（Game.swing / 远端 swingNet 同构）。
    *  useStyle 分族 + aim（useStyle 5/13 的瞄准角）由 Game.useSwing 写入 */
+  /** 游泳腿相位（Player.cs:35791-35805 legFrameCounter 状态机）：swimTime>0 期间
+   *  counter 每 tick +2、每 8 进一行（行 7..19 回绕钳制）——counter 只在非游泳分支
+   *  清零（vy≠0 行 5 / 站立行 0），入水时残留恒 0 → 相位 = 自进入连续游泳段起每 4t
+   *  一行。miscCounter（tick 域单调、wrap 300）差分驱动：首次入水记 m0，行推进
+   *  d=floor(((cur−m0+300)%300)/4)；人鱼 swimTime 刷新（≤10 → 30）不重置 counter
+   *  ——差分链自然保持（连续性同原版）。行序列：入水行 5 →6→钳19，之后 7..19 循环。
+   *  WeakMap 键 = Player（swimTime 归零即删——离水 vy≠0 分支清 counter 同构） */
+  private static swimPhase = new WeakMap<Player, number>();
   /** body/legs 双行（原版两条独立状态机：腿链 Player.cs:35718-35855、身体链
    *  :35874-36186——use 行/静持行只钉身体，腿照常 legFrame 循环；行走时身体同步
    *  腿（:36184-36186 bodyFrame.Y = legFrame.Y）。行序 1:1 照源码分支排布）。
-   *  legArmorId = 腿甲槽位 id（legs==217 坐/睡强制行 5 :36202-36206） */
+   *  legArmorId = 腿甲槽位 id（legs==140 神灯诅咒特殊行 :36195-36208——主链整体
+   *  跳过，行 = vy≠0?1:0、身体行∈{7,8,9,14,15,16}（OffsetsPlayerHeadgear.Y==0）→7、
+   *  翼 22/28→0；legs==217 坐/睡强制行 5 :36202-36206） */
   private playerFrameRows(p: Player,
     swing: { useStyle?: number } | null, holdStyleRaw: number,
     mnt: import('../entities/Mounts').MountInstance | null, cart: unknown,
@@ -6142,17 +6410,32 @@ export class Renderer {
     // ShouldDrawWingsThatAreAlwaysAnimated（:30271）——22/28/45 翼腿行 0 门
     const wingsAlways = p.vy !== 0 && !mountActive && !latched
       && !(p.inWater && (p.equipStats.flipper || p.buffs.has(BuffType.FlipperPotion)));
+    const leg140 = legArmorId === 140;               // :35786 legs!=140 门（主链跳过）
     // ---- 腿链（:35718-35731 坐骑钉行 / :35786-35855 循环族 / :35858-35877 覆写族）----
     let legs: number;
     if (mountActive && !noLegOverride) {
       legs = (mtype === 23 || mtype === 45 || mtype === 48) ? 0 : 6;   // 普通坐骑行6（含矿车）
-    } else if (p.swimTime > 0) {
-      // 划水循环 +2/t 行 7..19（:35792-35805）——legFrameCounter 未建模，以 miscCounter
-      // 等速率时钟近似（速率 1:1，相位不锁入水时刻，登记）
-      legs = 7 + Math.floor((p.miscCounter * 2) / 8) % 13;
+      Renderer.swimPhase.delete(p);
+    } else if (p.swimTime > 0 && !leg140) {
+      // 划水循环 +2/t 行 7..19（:35792-35805）——相位见 swimPhase 注释
+      let m0 = Renderer.swimPhase.get(p);
+      if (m0 === undefined) m0 = p.miscCounter;
+      else if (p.miscCounter < m0) m0 -= 300;        // miscCounter wrap 300 → 虚拟轴滚动
+      Renderer.swimPhase.set(p, m0);
+      const d = p.miscCounter - m0;                  // 连续游泳 tick 数（虚拟单调）
+      let row = 5;                                   // 入水时上一行（vy≠0 分支行 5）
+      const adv = Math.floor(d / 4);                 // counter=d×2，每 8 一行
+      for (let k = 0; k < adv; k++) {                // 逐行钳（while 语义）
+        row += 1;
+        if (row < 7) row = 19;
+        else if (row > 19) row = 7;
+      }
+      legs = row;
     } else if (p.vy !== 0 || latched) {
+      Renderer.swimPhase.delete(p);                  // vy≠0 分支 counter=0（:35807-35810）
       legs = (wing && (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) && wingsAlways) ? 0 : 5;
     } else if (p.vx !== 0 && p.onGround) {
+      Renderer.swimPhase.delete(p);                  // 站立/行走分支 counter=0（:35824/35850）
       // 行走循环（:35817-35847）：counter += |vx|·1.3、每 8 进一行、行 7..19 回绕；
       // 滚轴鞋（IsRollerSkates）满速档每 tick +2（:35830-35833 counter=2.0）。
       // animTime = |vx| 逐 tick 累计（走停清零）→ counter = animTime × 速率
@@ -6160,13 +6443,13 @@ export class Renderer {
       const ratePerTick = skates && Math.abs(p.vx) >= (p.equipStats.accRunSpeed || 3) ? 2 : 1.3;
       legs = 7 + Math.floor((p.animTime * ratePerTick) / 8) % 13;
     } else {
+      Renderer.swimPhase.delete(p);
       legs = 0;
     }
     if (!p.onGround && p.carpetTime > 0) legs = 0;   // 飞毯滑翔腿钉 0(:35858-35863;
     // ★门=滑翔中(airborne)非燃料>0——2026-08-16 水体批把 onGround 重置段写了
     // carpetTime=300 回满,落地恒 300 → 旧门把地面走路腿钉死站立帧(用户实报)
     if (p.performingJump === 'Sandstorm') legs = 0;                  // 沙暴跳腿钉 0（:35865-35877）
-    if (legArmorId === 217 && (p.sitting || p.sleeping)) legs = 5;   // :36202-36206
     // ---- 身体链（:35874-36186，else-if 序 1:1）----
     let body: number;
     if (useRow >= 0) body = useRow;                       // useStyle 行（:35879-36018）
@@ -6180,8 +6463,8 @@ export class Renderer {
       body = latched.y < p.y ? 2 : latched.y > p.y + p.h ? 4 : 3;     // :36061-36096
       if (p.gravDir === -1 && body !== 3) body = body === 2 ? 4 : 2;
     }
-    else if (p.inWater && !p.inputDown && (p.equipStats.flipper || p.buffs.has(BuffType.FlipperPotion))
-      && (!p.ridingMount || p.mount.type === 37)) body = 10;           // 浮水行10（:36098-36100 + :3710-3722）
+    else if (p.inWater && !p.inputDown && (p.equipStats.canFloat || p.buffs.has(BuffType.FlipperPotion))
+      && (!p.ridingMount || p.mount.type === 37)) body = 10;           // 浮水行10（:36098-36100 + :3710-3722——canFloatInWater 仅 4404 甲件∪buff265,flipper 饰品不授予）
     else if (p.swimTime > 0) body = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;     // :36102-36119
     else if (p.vy !== 0) {
       if (p.eocDash > 0) body = 6;
@@ -6193,6 +6476,15 @@ export class Renderer {
     }
     else if (p.vx !== 0 && p.onGround) body = legs;       // 行走身体同步腿（:36184-36186）
     else body = 0;
+    // ---- legs==140 神灯诅咒（3770，:36195-36208；主链已跳过，此处覆写）----
+    // 行 = vy≠0?1:0；身体行∈HEADGEAR_ZERO_ROWS（OffsetsPlayerHeadgear.Y==0：
+    // {7,8,9,14,15,16}，Main.cs:504-525）→ 行 7；翼 22/28 → 行 0
+    if (leg140) {
+      legs = p.vy !== 0 ? 1 : 0;
+      if (HEADGEAR_ZERO_ROWS.has(body)) legs = 7;
+      if (wing && (wing.slot === 22 || wing.slot === 28)) legs = 0;
+    }
+    if (legArmorId === 217 && (p.sitting || p.sleeping)) legs = 5;   // :36202-36206
     return { body, legs };
   }
 
@@ -6853,12 +7145,15 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** Ghost.png 幽灵（LegacyPlayerRenderer.cs DrawGhost :539-553）：34×176 四帧竖排，
-   *  帧 = ghostFrame；色 = mouseTextColor/2+100 脉动灰（Main.cs:18066-18075 190↔255
-   *  每 tick ±1 三角波、周期 130t——以 miscCounter 为钟，相位近似登记）；
-   *  锚 = position+(W/2,H/2) 即精灵中心；GetImmuneAlpha ×（Ghost() :6340 已清
-   *  immuneAlpha=0 → 恒满 alpha）。拖影三联（:273-281 −velocity×(2+i×2)）在
-   *  velocity=0 时与本体同位重叠——只画本体 */
+  /** Ghost.png 幽灵（LegacyPlayerRenderer.cs :272-281 三拖影 + DrawGhost :515-533）：
+   *  34×176 四帧竖排、帧 = ghostFrame（PlayerFrame :6444-6451 每 8t 进帧 0..3 循环）；
+   *  色 = Lighting(mouseTextColor/2+100 四通道) 经 GetImmuneAlpha(color, shadow) =
+   *  RGBA×(1−shadow)（immuneAlpha=0）再 A×(1−max(0.5,shadow−0.5))——恒 ×0.5。
+   *  故：本体 RGB/A ×(g/255)×0.5；拖影 i=0..1..2 落后 velocity×(2+i×2)、shadow
+   *  =0.5/0.7/0.9 → RGB×(1−shadow)、A 再×0.5（velocity=0 时三份与本体同位照画，
+   *  原版无跳过门）。mouseTextColor 脉动灰 190↔255（Main.cs:18066-18075 三角波
+   *  周期 130t——以 miscCounter 为钟，相位近似登记）；RGB×(g/255) 与 A 分离经
+   *  filter brightness（Ghost.png 灰白像素 198..221 → 染暗至 ~155..173） */
   private drawGhostSprite(p: Player): void {
     const tex = this.atlas ? this.atlas.ensureVImage('vanilla/Ghost.png') : null;
     if (!tex || tex.width === 0) return;
@@ -6867,12 +7162,24 @@ export class Renderer {
     const tri = Math.min(phase, 130 - phase);        // 0..65
     const g = Math.floor((190 + tri) / 2) + 100;     // mouseTextColor/2+100 → 195..227
     const ctx = this.ctx;
-    ctx.save();
-    ctx.globalAlpha = g / 255;
-    ctx.translate(p.x + tex.width / 2, p.y + fh / 2);
-    if (p.facing === -1) ctx.scale(-1, 1);           // direction 翻转
-    ctx.drawImage(tex, 0, p.ghostFrame * fh, tex.width, fh, -tex.width / 2, -fh / 2, tex.width, fh);
-    ctx.restore();
+    const draw = (px: number, py: number, k: number, aK: number) => {
+      if (k <= 0 || aK <= 0) return;
+      ctx.save();
+      ctx.filter = `brightness(${(g / 255 * k).toFixed(3)})`;   // RGB×(g/255)×k
+      ctx.globalAlpha = Math.min(1, (g / 255) * k * aK);
+      ctx.translate(px + tex.width / 2, py + fh / 2);
+      if (p.facing === -1) ctx.scale(-1, 1);         // direction 翻转
+      ctx.drawImage(tex, 0, p.ghostFrame * fh, tex.width, fh, -tex.width / 2, -fh / 2, tex.width, fh);
+      ctx.restore();
+    };
+    // 三拖影（:273-278）：shadow=0.5+0.2i → RGB×(1−shadow)、A×0.5；位置 −velocity×(2+i×2)
+    for (let i = 0; i < 3; i++) {
+      const shadow = 0.5 + 0.2 * i;
+      draw(p.x - p.vx * (2 + i * 2), p.y - p.vy * (2 + i * 2), 1 - shadow, 0.5);
+    }
+    // 本体（:281，netOffset 仅联机远端——本地玩家恒 0）
+    draw(p.x, p.y, 1, 0.5);
+    ctx.filter = 'none';
   }
 
   /** 眼睑叠层（DrawPlayer_21_Head_TheFace_Eyelid PlayerDrawLayers.cs:2640-2683）：
@@ -7012,6 +7319,15 @@ export class Renderer {
             } else if (hs === 8) {
               offX = 6; offY = 28 + HEADGEAR_OFFSET_Y[2];
             }
+            // 变身坐骑静持锚（AdjustmentsFor*Mount——静持 = 无动画档 animating=false）
+            if (p.ridingMount && MOUNT_SETS.PlayerIsHidden?.[p.mount.type]) {
+              const m = this.mountHeldAnchor(p.mount.type, null, hs, false,
+                vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442);
+              if (m) {
+                if (m.resetX !== undefined) { offX = m.resetX; offY = m.resetY!; }
+                else { offX += m.dx; offY += m.dy; }
+              }
+            }
             ctx.save();
             ctx.translate(p.cx + p.facing * offX, p.y + offY);
             ctx.scale(p.facing, 1);
@@ -7094,13 +7410,16 @@ export class Renderer {
     // 睡床躺平（PlayerSleepingHelper.cs:66-83）：fullRotation = π/2·(−direction)、
     // origin = Size/2（绕玩家盒中心转）。逐床型 visualOffsetOfBedBase（:227-280
     // SetOffsetbyBed）经 off×(direction,gravDir) 世界空间先平移再随转（原版
-    // Position += posOffset 后绕 Size/2 旋转 = 同一变换合成；镜像空间内 X 乘 facing）
+    // Position += posOffset 后绕 Position+Size/2 旋转 = 同一变换合成；镜像空间内 X 乘 facing）。
+    // ★本仓镜像在前（scale(facing,1) 先于旋转）:S·R(θ) = R(α)·S ⟹ θ = facing·α,
+    // α = π/2·(−direction) → θ 两朝向化简后【恒 −π/2】（曾写 π/2·(−facing) → 视觉
+    // 恒 −π/2：变体B(枕左,facing+1)碰巧对、变体A(枕右,facing−1)头睡在脚尾）
     if (p.sleeping) {
       const bo = this.sleepingBedOffset(world, p);
-      ctx.translate(bo[0] * p.facing, bo[1] * p.gravDir);
-      ctx.translate(0, -p.h / 2);
-      ctx.rotate(Math.PI / 2 * -p.facing);
-      ctx.translate(0, p.h / 2);
+      for (const op of sleepingTransformOps(p, bo)) {
+        if (op[0] === 't') ctx.translate(op[1], op[2]);
+        else ctx.rotate(op[1]);
+      }
     }
 
     // ---- 翅膀层（DrawPlayer_09_Wings :655-1040：身后，先于身体绘制）----
@@ -7133,7 +7452,8 @@ export class Renderer {
         // 非水中漂浮（mount.CanUseWings 已由上方坐骑清零门覆盖）
         const alwaysOk = !d.alwaysAir
           || (p.vy !== 0 && !p.grappleProjs.some((g) => g.latched)
-            && !(p.inWater && !!p.equipStats.flipper));
+            && !(p.inWater && ((p.equipStats.canFloat || p.buffs.has(BuffType.FlipperPotion))
+              && !p.inputDown && (!p.ridingMount || p.mount.type === 37))));   // ShouldFloatInWater :3710-3722
         if (alwaysOk) {
           const fr = wingDrawFrame(wingSlot, { frame: p.wingFrame, counter: 0 }, p.miscCounter);
           // 47/49 锚点按身体帧行（OffsetsPlayerHeadgear；行复算与下方纸娃娃同规则）
@@ -7176,6 +7496,28 @@ export class Renderer {
     // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行
     const useRow = swing ? this.useStyleBodyRow(swing, p) : -1;
     let drawn = false;
+    // 54 迅猛龙（hideEntirePlayerExceptHelmetsAndFaceAccessories :1845-1847）：
+    // 本体隐藏但头盔照画（脸饰品 faceAcc 层本仓无独立通道，登记）——
+    // Position.X −= direction·14（:1851）→ 镜像空间内平移 −14
+    const veloHead = mntHidden && p.mount.type === 54;
+    if (p.appearance && (!mntHidden || veloHead)) {
+      if (veloHead) {
+        let vh = dollEquipFromInv(p.inv, this.atlas, p.appearance, true);
+        if (p.buffs.has(BuffType.Werewolf)) vh = { head: 38, body: 21, legs: 20 };
+        if (p.merman) vh = { head: 39, body: 22, legs: 21 };
+        const vr = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, vh.legs ?? 0);
+        const headDoll = vh.head ? compositePaperDoll(p.appearance, vh, { part: 'head' }) : null;
+        if (headDoll) {
+          ctx.save();
+          ctx.translate(-14, 0);   // Position.X −= direction·14（镜像空间局部 X）
+          const hf = dollFrame(headDoll, vr.body);
+          ctx.drawImage(hf.img, hf.sx, hf.sy, hf.sw, hf.sh, -hf.sw / 2, -hf.sh + 4, hf.sw, hf.sh);
+          this.drawEyelid(ctx, p, vr.body, 4, HIDES_HEAD.has(vh.head ?? 0));
+          ctx.restore();
+          drawn = true;
+        }
+      }
+    }
     if (p.appearance && !mntHidden) {
       let dollEquip = dollEquipFromInv(p.inv, this.atlas, p.appearance, mnt?.type === 54);
       // ⑮ 狼人形态（PlayerFrame :35457-35466：wereWolf 时盔甲槽强制 38/21/20）；
@@ -7693,6 +8035,50 @@ export class Renderer {
    *  坐标约定：全部按 direction=+1 推导（offX 正=身前），朝左靠镜像空间翻转；
    *  offY 从 p.y（碰撞盒顶）起算；旋转 origin = 底角（PlayerDrawLayers.cs:3260）。
    *  图层：工具/武器挥砍在身体之前调用（身后），使用类托举在身体之后调用（身前） */
+  /** 变身坐骑手持物锚点（PlayerDrawSet.cs:385-410 AdjustmentsFor{Wolf,Velociraptor,
+   *  Rat,Bat,Pixie}Mount + Player.cs:50638-50770 ApplyItemPositionOffsetFromMount）：
+   *  52 狼：ItemLocation 表（useStyle 2/9/14/8/5、holdStyle 5/1/2；else 与 useStyle 8
+   *  重置到 vector2 = Position+(10+dir·14,12)——玩家宽 20 折局部锚 (14+dir·δ, 12+δ)）；
+   *  54 迅猛龙：ApplyItemPositionOffsetFromMount 偏移表（animating=挥舞中 itemAnimation
+   *  >0；静持 animating=false）；55/56/61 原版不改 ItemLocation（hideEntirePlayer 但
+   *  手持照画在原锚——返回 null 原样）。Position.X 的 −dir·10/−14 只平移玩家本体
+   *  绘制（ItemLocation 为世界绝对坐标不受其影响——手持端无需补）。fishingPole 与
+   *  风筝/悠悠球等特判项缺数据支撑，落 else/零偏移档（登记）。 */
+  private mountHeldAnchor(
+    mtype: number, useStyle: number | null, holdStyle: number, animating: boolean,
+    isFishingPole = false,
+  ): { dx: number; dy: number; resetX?: number; resetY?: number } | null {
+    const d = 1;   // dir=1 空间（offX 语义同域：直接 += / 赋值）
+    if (mtype === 52) {
+      // AdjustmentsForWolfMount（:1785-1840）；钓竿 flag4（fishingPole!=0）豁免原锚
+      if (isFishingPole) return null;
+      if (useStyle === 2) return { dx: d * 14, dy: -4 };
+      if (useStyle === 9) return animating ? { dx: d * 18, dy: -4 } : { dx: d * 14, dy: -18 };
+      if (useStyle === 8) return { dx: 0, dy: 0, resetX: 14 + d * 12, resetY: 12 + 2 };
+      if (useStyle === 14) return { dx: d * 5, dy: -2 };
+      if (useStyle === 5) return { dx: d * 4, dy: -4 };
+      if (holdStyle === 5) return { dx: d * 17, dy: -8 };
+      if (holdStyle === 1 && !animating) return { dx: d * 14, dy: -6 };
+      if (holdStyle === 2 && !animating) return { dx: d * 17, dy: 4 };
+      return { dx: 0, dy: 0, resetX: 14, resetY: 12 };   // else：ItemLocation = vector2
+    }
+    if (mtype === 54) {
+      // ApplyItemPositionOffsetFromMount（:50671-50770）：仅 animating || holdStyle>0
+      if (!animating && holdStyle <= 0) return null;
+      if (isFishingPole) return { dx: -2, dy: 0 };
+      if (useStyle === 2) return animating ? { dx: 7, dy: -4 } : { dx: 3, dy: 2 };
+      if (useStyle === 9) return animating ? { dx: 14, dy: -10 } : { dx: 3, dy: 2 };
+      if (useStyle === 11) return animating ? { dx: 4, dy: 0 } : { dx: 1, dy: 0 };
+      if (useStyle === 8) return { dx: 6, dy: 0 };
+      if (useStyle === 14) return animating ? { dx: -6, dy: 6 } : { dx: -10, dy: 10 };
+      if (holdStyle === 5) return { dx: 6, dy: 0 };
+      if (holdStyle === 1 && !animating) return { dx: 1, dy: 4 };
+      if (holdStyle === 2) return { dx: 6, dy: 0 };
+      return null;
+    }
+    return null;
+  }
+
   private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean }, flicker: FlickerClock | null = null) {
     const ar = this.atlasIcon(swing.item);
     const icon = ar ? null : this.itemIcon(swing.item);
@@ -7854,6 +8240,17 @@ export class Renderer {
       }
     }
     if (hide) return;
+    // 变身坐骑手持锚（AdjustmentsForWolfMount :1807-1840 / ApplyItemPositionOffset
+    // _FromMount :50671-——挥舞期 itemAnimation>0 恒真）
+    if (p.ridingMount && MOUNT_SETS.PlayerIsHidden?.[p.mount.type]) {
+      const vid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+      const m = this.mountHeldAnchor(p.mount.type, us, 0, true,
+        vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442);
+      if (m) {
+        if (m.resetX !== undefined) { offX = m.resetX; offY = m.resetY!; }
+        else { offX += m.dx; offY += m.dy; }
+      }
+    }
     ctx.save();
     ctx.translate(p.cx + p.facing * offX, p.y + offY);
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
@@ -9112,7 +9509,6 @@ export class Renderer {
     for (const e of entities) {
       const ent = e as Entity;
       if (ent instanceof Enemy) box(ent, '#FF4444', (ent as Enemy).key);
-      else if (ent instanceof Critter) box(ent, '#44AAFF', ent.key);
       else if (ent instanceof ItemDrop) box(ent, '#FFAA00');
       else if (ent instanceof Tombstone) box(ent, '#AA88FF', 'tomb');
       // 投射物族（爆炸物/箭/弹/长矛等）：橙红盒 + 型号标注——碰撞盒与贴图的对齐

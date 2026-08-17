@@ -242,10 +242,12 @@ export function runDungeonPass(
   const ws = gs.worldSurface, rock = gs.rockLevel;
   const dgUR = (seed: number): UnifiedRandom => new UnifiedRandom(seed);
   // 掷骰适配：ri(a,b)=Next(a,b+1)；rn(n)=Next(n)；rd()=NextDouble()；raw()=Next()
-  const ri = (a: number, b: number): number => rng.int(a, b);
-  const rn = (n: number): number => rng.nextInt(n);
-  const rd = (): number => rng.next();
-  const raw = (): number => rng.vanilla.next();
+  // （dgMainRolls=主流掷骰计数器——仅 __dgLayoutTrace 插桩消费，常态零开销）
+  let dgMainRolls = 0;
+  const ri = (a: number, b: number): number => { dgMainRolls++; return rng.int(a, b); };
+  const rn = (n: number): number => { dgMainRolls++; return rng.nextInt(n); };
+  const rd = (): number => { dgMainRolls++; return rng.next(); };
+  const raw = (): number => { dgMainRolls++; return rng.vanilla.next(); };
   const theme = gs.dungeonTheme >= 0 ? gs.dungeonTheme : ri(0, 2);
   const brick = theme === 0 ? BLUE : theme === 1 ? GREEN : PINK;
   const wall = theme === 0 ? 7 : theme === 1 ? 8 : 9;
@@ -407,6 +409,13 @@ export function runDungeonPass(
     dgRoom({ seed: raw(), x: posX, y: posY, start: true, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
     let roomDelay = 5;
     let s = steps;
+    // 对账插桩(dormant)：__dgLayoutTrace 存在时逐迭代记掷数/门值/roomDelay（离群种子
+    // dungeonL 微差定位用；零开销常驻，同 __dgHallTrace 惯例）
+    const LT = (globalThis as { __dgLayoutTrace?: Array<Record<string, number>> }).__dgLayoutTrace;
+    const ltIt = LT ? LT.length : 0;
+    let ltRolls0 = 0;
+    if (LT) ltRolls0 = dgMainRolls;
+    if (LT) LT.push({ it: -1, rolls: ltRolls0, gate: -1, rd: 5, branch: -1 });
     while (s > 0) {
       bounds.upd(posX, posY);
       s--;
@@ -416,20 +425,24 @@ export function runDungeonPass(
       //  同款偏差已在 caves-oracle.cs 同步修正)。TS 禁 bool &,先掷后判语义等价。
       //  入口循环(DungeonCrawler.cs:426)才是 && 短路,勿混
       const roomRoll = rn(3);
+      let ltBranch = 0;
       if (roomDelay === 0 && roomRoll === 0) {
         roomDelay = 5;
+        ltBranch = 1;
         if (rn(2) === 0) {
           const sx = posX, sy = posY;
           dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 });
-          if (rn(2) === 0) dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 });
+          if (rn(2) === 0) { ltBranch = 3; dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 }); }
           dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
           posX = sx; posY = sy;
         } else {
+          ltBranch = 2;
           dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
         }
       } else {
         dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 });
       }
+      if (LT) LT.push({ it: ltIt + (steps - s) - 1, rolls: dgMainRolls - ltRolls0, gate: roomRoll, rd: roomDelay, branch: ltBranch });
     }
     dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
   }

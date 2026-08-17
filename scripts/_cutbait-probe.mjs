@@ -1,5 +1,5 @@
 // 割草 DropBait E2E 探针（WorldGen.cs:66304-66480 1:1 验收）:
-//   1. 装饰组 185 帧带（frameY0+fx<214）割 40 次 → 蚯蚓族出生 ≥3（1/6 掷）
+//   1. 装饰组 185 帧带（frameY0+fx<214）镐破坏 40 次 → 蚯蚓族出生 ≥3（1/6 掷）
 //   2. cap：累计 ≤5（CountNPCS<5）
 //   3. 出生姿势:背玩家水平弹速 + 上抛 vy∈[-5.0,-2.1]
 //   4. 蝎/鸟族走 spawner——此处只验割草链
@@ -33,7 +33,7 @@ const res = await page.evaluate(async (tid, px, py) => {
   const births = [];
   for (let k = 0; k < 40; k++) {
     st.setTile(px, py, tid, 0, 0);          // 重放装饰(frameY0/fx0 帧带内)
-    g.cutTile(px, py);                       // 割→DropBait 掷骰
+    g.breakTile(px, py, true);               // 185 非 tileCut——原版走镐破坏(KillTile 直达)
     for (const c of g.entities.critters) {
       if (!births.includes(c) && !c.dead && (c.vanillaId === 357 || c.vanillaId === 448)) {
         births.push({ vid: c.vanillaId, vx: +c.vx.toFixed(2), vy: +c.vy.toFixed(2), facing: c.facing, playerLeft: g.player.cx < c.cx });

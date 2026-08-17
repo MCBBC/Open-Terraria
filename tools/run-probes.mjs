@@ -27,6 +27,7 @@ const PROBES = [
   { name: 'angler', file: 'scripts/_angler-probe.mjs', timeoutMs: 300_000 },
   { name: 'mounts', file: 'scripts/_mounts-probe.mjs', timeoutMs: 300_000 },
   { name: 'bunny-ai', file: 'scripts/_bunny-ai-probe.mjs', timeoutMs: 420_000 }, // 6000t 观测窗+240t 行走采样
+  { name: 'cutbait', file: 'scripts/_cutbait-probe.mjs', timeoutMs: 420_000 },   // 镐破坏装饰组→蚯蚓族出生/姿势/cap
 ];
 
 const argv = process.argv.slice(2);

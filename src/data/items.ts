@@ -381,6 +381,16 @@ item({ key: 'vi_4061_storm_spear', name: '', value: 1 });
 item({ key: 'vi_987_blizzard_in_a_bottle', name: '', value: 1 });
 item({ key: 'vi_4551_slice_of_hell_cake', name: '', value: 1 });
 item({ key: 'vi_5010_treasure_magnet', name: '', value: 1 });
+// ---- 建筑族配饰（Player.cs:14714-14746 ApplyEquipFunctional:砌砖刀=放置提速/
+// 加长握爪=射程+3+2/喷漆器=autoPaint/水泥机=铺墙提速/发明背包=全家桶/创造之手=
+// 全家桶+treasureMagnet+chiselSpeed;407 工具腰带=装备生效 blockRange++ :14873）----
+item({ key: 'vi_407_toolbelt', name: '', value: 1 });
+item({ key: 'vi_2214_brick_layer', name: '', value: 1 });
+item({ key: 'vi_2215_extendo_grip', name: '', value: 1 });
+item({ key: 'vi_2216_paint_sprayer', name: '', value: 1 });
+item({ key: 'vi_2217_portable_cement_mixer', name: '', value: 1 });
+item({ key: 'vi_3061_architect_gizmo_pack', name: '', value: 1 });
+item({ key: 'vi_5126_hand_of_creation', name: '', value: 1 });
 item({ key: 'vi_2323_heartreach_potion', name: '', value: 1 });
 item({ key: 'vi_2345_lifeforce_potion', name: '', value: 1 });
 item({ key: 'vi_290_swiftness_potion', name: '', value: 1 });

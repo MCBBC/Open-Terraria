@@ -25,6 +25,8 @@ export interface ArmorSetBonus {
   fireWalk?: boolean;
   frostBurn?: boolean;     // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
   ammoCost80?: boolean;
+  huntressAmmoCost90?: boolean;  // 省弹 1/10（:12754 case 3804 女猎手护甲——件门在
+                                  // Player.ts ARMOR_AMMO_SAVE_VID 表承载，此键为表回填预留）
   manaCostMul?: number;      // manaCost -=（折扣）
   ghostHeal?: boolean;       // 幽灵治疗头（Spectre Hood :15850-15855，魔法命中吸血 engine）
   ghostHurt?: boolean;       // 幽灵伤害头（Spectre Mask :15856-15860，engine 未接）

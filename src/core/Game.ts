@@ -115,6 +115,7 @@ import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
+import { FOOD_PARTICLE_COLORS, DRINK_PARTICLE_COLORS } from '../data/vanillaFoodColors';
 import {
   setLucySinks, tickLucyCooldowns, lucyEnterWorld, lucyTryIdle, lucyTryWithCooldown, create as lucyCreate,
 } from '../items/LucyAxe';
@@ -162,7 +163,6 @@ import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
 import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } from '../stats/Pvp';
-import { Critter } from '../entities/Critter';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
 import { CoinPortalProj } from '../entities/CoinPortalProj';
@@ -185,6 +185,7 @@ const BLOOD_MOON_EVIL = new Map<number, readonly [number, number]>([
   [148, [168, 470]], [149, [168, 470]],
 ]);
 import { CRITTER_CATCH_BY_NPC, CRITTER_RELEASE_BY_ITEM } from '../data/critters';
+import { dropBaitRoll, baitWormType } from '../world/DropBait';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
 import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bestiaryCreditId } from '../data/Bestiary';
@@ -2039,9 +2040,8 @@ export class Game implements GameHooks {
     const st = this.world.store;
     const p = this.player;
     const ptx = Math.floor(p.cx / TILE), pty = Math.floor(p.cy / TILE);
-    // TileReachCheckSettings.Simple 同款射程盒（tileReach 口径：x 5 / y 3 +
-    // 配饰 X+3/Y+2 + tileBoost；TB 此处仅 builder buff 份——配饰份在 tileReach 内）
-    const tb = p.buffs.has(BuffType.Builder) ? 1 : 0;
+    // QuickMinecart 直调 GetTileRegion 不传 TB（:5798）→ tileBoost/blockRange 均无
+    const tb = 0;
     const { x: rx, y: ry } = this.tileReach(tb);
     let best: { x: number; y: number } | null = null;
     let bestD = Infinity;
@@ -2243,6 +2243,14 @@ export class Game implements GameHooks {
         const cur = rates.indexOf(this.world.journeyTimeRate);
         this.world.journeyTimeRate = rates[(cur + 1) % rates.length];
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.JourneyTimeRate', String(this.world.journeyTimeRate)));
+      }
+      // H/J/B:QuickHeal/QuickMana/QuickBuff（PlayerInput.cs:1901-1903 默认键；
+      // Player.cs:24509 controlQuickHeal 边沿——keydown 天然单发）。UI 打开不触发
+      //（原版 lastMouseInterface/inventory 门近似）
+      if (!this.input.uiBlocking && this.player && !this.paused) {
+        if (code === 'KeyH') this.quickHeal();
+        else if (code === 'KeyJ') this.quickMana();
+        else if (code === 'KeyB') this.quickBuff();
       }
       // R:五彩扳手/宏伟蓝图模式循环(红蓝绿黄→剪线→致动器→剪致动器)
       if (code === 'KeyR') {
@@ -2990,7 +2998,7 @@ export class Game implements GameHooks {
     // :13677-13684 净化粉命中神秘青蛙 687 → Poof + Transform(683) 神秘史莱姆 +
     //  unlockedSlimeYellowSpawn 置位（世界级一次性，WorldFile :1414/:2434 持久化）
     for (const cent of this.entities.critters) {
-      const c = cent as Critter;
+      const c = cent as Enemy;
       if (c.dead || this.critterVid(c) !== 687) continue;
       if (x < c.x + c.w && x + w > c.x && y < c.y + c.h && y + h > c.y) {
         c.dead = true;
@@ -3649,9 +3657,22 @@ export class Game implements GameHooks {
     // 非 autoReuse 武器(链球/回旋镖/悠悠球/长矛)全体掷不出(2026-08-13 实锤)
     this.updateNebulaBoosters();
     if (this.player.sleeping) {
-      const bx = Math.floor(this.player.cx / TILE), by = Math.floor((this.player.y + this.player.h + 2) / TILE);
-      if (!w.store.inBounds(bx, by) || w.store.type[w.store.idx(bx, by)] !== (TILE_BY_KEY['bed'] ?? -1)) {
-        this.player.sleeping = false; // 床格失效（SH:98-101）
+      // 床格/方向/输入门（PlayerSleepingHelper.UpdateState :93-117 1:1）：
+      // coords = Bottom+(0,−2) 处必须仍是床格（GetSleepingTargetInfo :193-224 可解
+      // ——★曾读 feet+2 = 床下一行地板，入睡 1 tick 即被误杀=躺床效果一闪而过的
+      // 根因）；床 frameX/72 朝向档与 facing 不一致、任一移动/跳跃输入、骑乘 →
+      // StopSleeping（:107/:111-117；pulley 单机无链挂态不查）
+      const bx = Math.floor(this.player.cx / TILE), by = Math.floor((this.player.y + this.player.h - 2) / TILE);
+      let bedOk = false;
+      if (w.store.inBounds(bx, by)) {
+        const i = w.store.idx(bx, by);
+        if (w.store.flags[i] !== 0 && w.store.type[i] === (TILE_BY_KEY['bed'] ?? -1)) {
+          bedOk = (Math.floor(w.store.frameX[i] / 72) === 0 ? -1 : 1) === this.player.facing;
+        }
+      }
+      if (!bedOk || this.player.inputX !== 0 || this.player.inputJump
+        || this.player.inputDown || this.player.inputUp || this.player.ridingMount) {
+        this.player.sleeping = false; // StopSleeping（SH:112-117）
       }
     }
     this.updateSitting();   // PlayerSittingHelper.UpdateSitting（Helper.cs:69-105）
@@ -3822,7 +3843,7 @@ export class Game implements GameHooks {
         if (pair) e.transformTo(w.crimson ? pair[1] : pair[0], w.store);
       }
       for (const c of this.entities.critters) {
-        const cr = c as Critter;
+        const cr = c as Enemy;
         if (cr.dead) continue;
         const pair = BLOOD_MOON_EVIL.get(this.critterVid(cr));
         if (pair) {
@@ -3843,12 +3864,15 @@ export class Game implements GameHooks {
       if (player.immuneAlpha < 255) player.immuneAlpha = Math.min(255, player.immuneAlpha + 2);
       // 重生计时
       player.respawnTimer++;
-      // GetRespawnTime（Player.cs:38384-38422）：600t=10s 基准;专家 ×1.5=900;
-      // 场上有存活的 boss 时 +600（:38388 boss 扫描 `!pvp` 门——PvP 死亡不延迟）。
-      // 旧恒 180t=3s 惩罚感仅原版 1/3（2026-08-13 修）
-      if (player.respawnTimer > 600 * (mainExpertMode(this.world) ? 1.5 : 1)
-        + (player.lastPvpDeath ? 0
-          : this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead) ? 600 : 0)) this.respawnPlayer();
+      // GetRespawnTime（Player.cs:38384-38422）：600t=10s 基准 → boss 在场 +600
+      //（:38388-38398 boss 扫描 `!pvp` 门——PvP 死亡不延迟）→ 【之后】专家 ×1.5
+      //（:38402——(600+600)×1.5=1800，旧式 900+600=1500 乘加序反了）。
+      // 扫描结果同步写 player.bossNearOnDeath（硬核幽灵 isGhostPhase 同阈值门，
+      // 渲染/逻辑同源——2026-08-17 补齐幽灵相 boss 延迟）
+      player.bossNearOnDeath = !player.lastPvpDeath
+        && this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead);
+      if (player.respawnTimer > (600 + (player.bossNearOnDeath ? 600 : 0))
+        * (mainExpertMode(this.world) ? 1.5 : 1)) this.respawnPlayer();
     } else {
       this._deathHandled = false;
     }
@@ -3863,6 +3887,8 @@ export class Game implements GameHooks {
     this.updateSmartSelect();
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
+    // ---- 棉花糖烤串（holdStyle 1 静持检查，Player.cs:49604-49641）----
+    this.checkMarshmallowRoast();
     this.prevSwingMouse = !!this.input?.mouseDown; // 挥剑点击沿（非 autoReuse 武器需重新点击）
     // ⑩ 边沿门的上一帧快照（须在 updateUse 后记录,见上方注记）
     this._prevRightDown = !!inp?.rightDown;
@@ -4725,6 +4751,21 @@ export class Game implements GameHooks {
     const specCam = this.spectateCamPos();
     this.camera.follow(specCam ? specCam.x : player.cx, specCam ? specCam.y : player.cy);
     this.camera.easeZoom();
+    // 望远镜手持镜头平移（Main.cs:62195-62253 GetPlayerControlledCameraPan）：手持
+    // 1299 狙击枪 → num=2/3 且 flag=false（无需右键按住）——镜头向鼠标方向平移
+    // 至多 2/3 屏（targetPan = vector×ScaledSize/2×num，:62252）。scope/1254 档
+    // （需右键+狙击镜配饰门）未接（登记）；lastMouseInterface 门以 uiBlocking 近似。
+    // 仅手持期间叠加（follow 每帧重锚玩家——卸枪即复位，无残留状态）
+    if (!this.input.uiBlocking) {
+      const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
+      if (hDef && (hDef.vid ?? viIdFromKey(hDef.key)) === 1299) {
+        const cam = this.camera;
+        const vx = Math.min(Math.max(this.input.mouseX / cam.viewW, 0), 1) * 2 - 1;
+        const vy = Math.min(Math.max(this.input.mouseY / cam.viewH, 0), 1) * 2 - 1;
+        cam.x += vx * (cam.viewW / cam.zoom) / 2 * (2 / 3);
+        cam.y += vy * (cam.viewH / cam.zoom) / 2 * (2 / 3);
+      }
+    }
     this.camera.clamp();
     // Main.screenPosition/screenWidth/Height 快照（视区左上角世界坐标 + 画布尺寸）——
     // gore 屏幕坐标档（肉山死亡尘幕 NPC.cs:88307-88327）的求值源，实体 tick 前注入
@@ -5150,7 +5191,7 @@ export class Game implements GameHooks {
     // 怪物碾压小动物：任意敌人身体接触即杀死（不视为交战）
     if (this.tickCount % 4 === 0 && this.entities.critters.length) {
       for (const cent of this.entities.critters) {
-        const c = cent as Critter;
+        const c = cent as Enemy;
         if (c.dead) continue;
         for (const eent of this.entities.enemies) {
           const e = eent as Enemy;
@@ -5357,28 +5398,36 @@ export class Game implements GameHooks {
   private useSwing(def: (typeof ITEM_DEFS)[number] | null, aim?: number, mult = 1): void {
     if (!def) return;
     const us = this.heldUseStyle(def);
+    const vid = def.vid ?? viIdFromKey(def.key);
+    // ApplyItemAnimation +1 帧（Player.cs:4258-4261/:4280）：useStyle5 && autoReuse
+    // && reuseDelay==0 && useTime<=useAnimation && shoot>0 → 动画 +1（非 melee/
+    // summon/放置档的 else 分支——那些走 mult 乘区不吃 +1）。combat 表无
+    // reuseDelay 列（多数武器 0，缺省视为 0）
+    const uc = vid >= 0 ? itemCombat(vid) : null;
+    let extra = 0;
+    if (us === 5 && uc?.autoReuse === true && uc?.melee !== true
+      && (uc.useTime ?? 0) <= (uc.useAnimation ?? 0)
+      && (uc.shoot ?? 0) > 0 && mult === 1) extra = 1;
     // SetItemAnimation(base, mult)（Player.cs:4240-4247）：val=(int)(base×mult)，
     // base>0 时下限 1。放置物走 ApplyItemAnimation createTile/createWall 档
     //（:4270-4275：useAnimation×tileSpeed/wallSpeed）
     const base = this.heldUseAnimation(def);
-    let dur = mult === 1 ? base : Math.round(base * mult);
+    let dur = mult === 1 ? base + extra : Math.round(base * mult);
     if (base > 0) dur = Math.max(dur, 1);
     this.swing = {
       t: dur, dur, item: ITEM_BY_KEY[def.key] ?? 0,
       useStyle: us,
       aim: us === 5 || us === 13 ? aim : undefined,
-      noGraphic: us === 13, // 短剑族 noUseGraphic=true(Item.cs SetDefaults1 case 6)——投射物即本体
+      // noUseGraphic=true（vanilla-itemcombat 列，381 件：矛/炸弹/鞭/投掷/短剑族等
+      // ——Item.cs SetDefaults 逐件提取）：使用期间不画手持贴图，投射物即本体。
+      // ★铁短剑 item 6 与七金属短剑 3483+ 族在 1456 均为 true（SetDefaults1 case 6
+      // 模板倒数第二行 Item.cs:1455——旧注释"短剑无 noUseGraphic"系 1405 误记，
+      // 2026-08-17 据提取表修正）
+      noGraphic: uc?.noUseGraphic === true,
     };
     this.swingHitSet.clear();
     this.swingTileCutSet.clear();
   }
-
-  /** noUseGraphic 族小表（combat 表缺列，提取器全量回填登记遗留）。
-   *  投掷消耗手写族：投刀 279（Item.cs:4662）/骨 154（:3202）/毒刀 287（:4778）/
-   *  莫洛托夫 2590（:25409）；炸弹族：炸弹 166（:3398）/雷管 167（:3413）/手雷 168
-   *  （:3428）。★手里剑 47/投刀 48 走 DefaultToThrownWeapon（:48065 不设
-   *  noUseGraphic）——持物动画保留，不在此列 */
-  private static readonly NO_USE_GRAPHIC_VIDS = new Set([154, 166, 167, 168, 279, 287, 2590]);
 
   /** 药水病分档（Player.cs:51085-51120 ApplyPotionDelay + Item.cs:70-76 常量）：
    *  月光药水 3001 → 随机 2400-4200t（Next(2400,4201)）且当次吃贤者石乘区；
@@ -5414,6 +5463,163 @@ export class Game implements GameHooks {
     if (wav) { this.playSfxFile(wav); return; }
     if (itemFuncOfVid(vid)?.useStyle === 2) this.playSfxFile('Item_2');
     else this.sfx.play('drink');
+  }
+
+  // ================= QuickHeal / QuickMana / QuickBuff（Player.cs:5268/:5364/:5442）=================
+  /** QuickBuff_FindFoodPriority（Player.cs:5648-5656）：26→1 / 206→2 / 207→3 */
+  private static readonly QUICK_BUFF_FOOD_PRIO: Record<number, number> = { 26: 1, 206: 2, 207: 3 };
+  /** Main.meleeBuff 表（Main.cs:8888-8895）：八把武器浸剂互斥（QuickBuff_ShouldBother） */
+  private static readonly QUICK_MELEE_BUFF_VANILLA = new Set([71, 73, 74, 75, 76, 77, 78, 79]);
+  // 默认键 H/J/B（PlayerInput.cs:1901-1903——★QuickMana 是 J 非 M）；keydownHandlers
+  // 注入（事件天然边沿）。原版语义：瞬扣（ItemCheck_TryStartUse 只做 ItemTimeIsZero
+  // 门不播使用动画）+ UseSound + ApplyPotionDelay + ApplyLifeAndOrMana + buff 授予 +
+  // stack--。虚空袋 bank4 路径无载体（登记）；CanConsumeConsumableItem 的硬核不消耗
+  // 档未接（QuickHeal :5300 中核掉钱链已由死亡惩罚批承载，此取最小实现）
+
+  /** QuickHeal（Player.cs:5268-5306）：背包找最佳治疗药水即刻喝下。
+   *  选药（QuickHeal_GetItemToUse :5310-5335）：healLife 与缺口差最小（过量最小）；
+   *  227 恢复药水差为负时 +30 再钳 0（:5322-5327——可溢出 30 点的宽容档）；
+   *  bestDifference 语义：初始 -maxHp，负域取最大（欠得最少），非负域取最小（溢得最少） */
+  private quickHeal(): void {
+    const p = this.player;
+    if (!p || p.dead || p.hp >= p.maxHp || p.buffs.healBlocked) return;   // :5270
+    const lifeDiff = p.maxHp - p.hp;
+    let bestSlot = -1, bestDiff = -p.maxHp;
+    for (let i = 0; i < 58; i++) {
+      const s = p.inv.slots[i];
+      if (!s || s.stack <= 0) continue;
+      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const f = vid >= 0 ? itemFuncOfVid(vid) : null;
+      if (!f?.potion || !(f.healLife! > 0)) continue;                     // :5319
+      let num = f.healLife! - lifeDiff;
+      if (vid === 227 && num < 0) { num += 30; if (num > 0) num = 0; }    // :5322-5327
+      if (bestDiff < 0) { if (num > bestDiff) { bestSlot = i; bestDiff = num; } }
+      else if (num < bestDiff && num >= 0) { bestSlot = i; bestDiff = num; }
+    }
+    if (bestSlot < 0) return;
+    this.quickConsume(bestSlot);   // 喝下：音效+药水病+回复+buff+消耗（共用链）
+  }
+
+  /** QuickMana（Player.cs:5364-5416）：首个魔力恢复物（healMana>0；药水病中跳过
+   *  potion 类——:5399 `potionDelay == 0 || !potion` 门） */
+  private quickMana(): void {
+    const p = this.player;
+    if (!p || p.dead || p.mana >= p.maxMana) return;                      // :5369
+    for (let i = 0; i < 58; i++) {
+      const s = p.inv.slots[i];
+      if (!s || s.stack <= 0) continue;
+      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const f = vid >= 0 ? itemFuncOfVid(vid) : null;
+      if (!f || !(f.healMana! > 0)) continue;
+      if (p.buffs.healBlocked && f.potion) continue;                      // :5399
+      this.quickConsume(i);
+      return;
+    }
+  }
+
+  /** QuickBuff（Player.cs:5442-5533）：先吃最优食物（缺档/更优档），再依次使用所有
+   *  值得用的增益药水。CountBuffs()==maxBuffs 门本仓 buffs 无槽上限（登记偏离，
+   *  增益药水可全上）；光宠/ vanityPet 互斥与 603 收藏版门未接（登记） */
+  private quickBuff(): void {
+    const p = this.player;
+    if (!p || p.dead) return;                                             // :5448
+    let soundVid = -1;
+    // ---- QuickBuff_PickBestFoodItem（:5474-5646）：26/206/207 优先级 1/2/3 ----
+    let curPrio = 0;
+    for (const bt of [BuffType.WellFed, BuffType.WellFed2, BuffType.WellFed3]) {
+      if (p.buffs.has(bt)) { curPrio = Math.max(curPrio, QUICK_BUFF_FOOD_PRIO[BUFF_DEFS[bt].vanillaBuff]); }
+    }
+    let foodSlot = -1, foodPrio = curPrio, foodTime = -1;
+    for (let i = 0; i < 58; i++) {
+      const s = p.inv.slots[i];
+      if (!s || s.stack <= 0) continue;
+      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const f = vid >= 0 ? itemFuncOfVid(vid) : null;
+      const prio = f?.buffType ? QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;
+      if (prio > 0 && prio >= foodPrio && (foodSlot < 0 || (f!.buffTime ?? 0) > foodTime || prio > foodPrio)) {
+        foodSlot = i; foodPrio = prio; foodTime = f!.buffTime ?? 0;       // :5618-5624
+      }
+    }
+    if (foodSlot >= 0) { soundVid = this.quickConsume(foodSlot); }
+    // ---- 增益药水链（:5496-5518：QuickBuff_ShouldUseItem 逐件）----
+    for (let i = 0; i < 58; i++) {
+      const s = p.inv.slots[i];
+      if (!s || s.stack <= 0) continue;
+      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      const f = vid >= 0 ? itemFuncOfVid(vid) : null;
+      if (!f || !(f.buffType! > 0) || f.summon) continue;                 // :5545-5547
+      let btype = f.buffType!;
+      // QuickBuff_ShouldBotherUsingThisBuff（:5660-5697）
+      let bother = true;
+      const isFed = QUICK_BUFF_FOOD_PRIO[btype] !== undefined;
+      for (const [bt] of p.buffs.active) {
+        const vb = BUFF_DEFS[bt]?.vanillaBuff;
+        if (vb === undefined) continue;
+        if (btype === 27 && (vb === 27 || vb === 101 || vb === 102)) { bother = false; break; }
+        if (isFed && QUICK_BUFF_FOOD_PRIO[vb] !== undefined) { bother = false; break; }
+        if (vb === btype) { bother = false; break; }
+        if (QUICK_MELEE_BUFF_VANILLA.has(btype) && QUICK_MELEE_BUFF_VANILLA.has(vb)) { bother = false; break; }
+      }
+      // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件
+      if (bother && (f.mana ?? 0) > 0) {
+        if (p.mana >= f.mana!) { p.mana -= f.mana!; } else bother = false;
+      }
+      if (!bother) continue;
+      if (btype === 27) {                                                // :5566-5575 三选一
+        const r = Math.floor(Math.random() * 3);
+        btype = r === 0 ? 27 : r === 1 ? 101 : 102;
+      }
+      const bt2 = BUFF_BY_VANILLA.get(btype);
+      if (bt2 !== undefined) {
+        p.buffs.apply(bt2, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
+      }
+      if (f.consumable) p.inv.removeAt(i, 1);                            // :5545-5548
+      soundVid = vid;
+    }
+    if (soundVid >= 0) this.foodUseSound(soundVid);                       // :5530 只播一次
+    this.cb.onInventoryChanged();
+  }
+
+  /** 快用一件消耗品（QuickHeal/QuickMana 共用：音效+药水病分档+healLife/healMana+
+   *  buffType+stack--）。返回 vid 供外层音效复用 */
+  private quickConsume(slot: number): number {
+    const p = this.player;
+    const s = p.inv.slots[slot];
+    const def = s ? ITEM_DEFS[s.id] : null;
+    const vid = def ? (def.vid ?? viIdFromKey(def.key)) : -1;
+    const f = vid >= 0 ? itemFuncOfVid(vid) : null;
+    if (!s || !f) return -1;
+    if (f.buffType! > 0) {
+      const bt = BUFF_BY_VANILLA.get(f.buffType);
+      if (bt !== undefined && bt !== BuffType.Resistance) {   // 21 是副作用不主动施加
+        p.buffs.apply(bt, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
+      }
+    }
+    if (f.healLife) {
+      p.hp = Math.min(p.maxHp, p.hp + f.healLife);
+      this.addDamageNumber(p.cx, p.y, f.healLife, false, '#40E080');
+      if (f.potion) this.applyPotionSickness(vid);            // :5284-5286
+    }
+    if (f.healMana) {
+      p.mana = Math.min(p.maxMana, p.mana + f.healMana);
+      if (f.potion) p.buffs.apply(BuffType.ManaSickness, 5);  // 魔力眩晕 300t/瓶
+    }
+    p.inv.removeAt(slot, 1);                                  // CanConsume 消耗（硬核档登记）
+    this.foodUseSound(vid);                                   // item.UseSound（:5281）
+    this.cb.onInventoryChanged();
+    return vid;
+  }
+
+  /** PickAmmo 省弹掷（Player.cs:52791-52804）：四档各独立掷 Next(N)==0 命中任一
+   *  即不耗弹——huntressAmmoCost90(1/10：女猎手护甲 3804/水晶忍者胸 4983) /
+   *  chloroAmmoCost80(1/5：叶绿头盔 1002) / ammoCost80(1/5：蘑菇矿胸 1549·化石套·
+   *  弹药储备药水) / ammoCost75(1/4：星旋胸甲 2758)。装备档聚合在
+   *  equipStats.ammoSaveDenom（取激活档最小分母）；buff 档 1/5 并列独立掷。
+   *  旧实现全档合一 20% 单掷（2026-08-17 分档——25%/10% 档位此前失真） */
+  private ammoSaveRoll(): boolean {
+    const es = this.player.equipStats.ammoSaveDenom;
+    if (es > 0 && Math.random() * es < 1) return true;
+    return this.player.buffs.has(BuffType.AmmoReservation) && Math.random() * 5 < 1;
   }
 
   /** KillTile_PlaySounds 四档近似（WorldGen.cs:66483-66631）：蛛网 127 → Item27
@@ -5551,7 +5757,7 @@ export class Game implements GameHooks {
     // 工具 tileBoost=0
     const placing = heldDef?.tile != null || heldDef?.wallId != null;
     const tb = placing
-      ? (p.buffs.has(BuffType.Builder) ? 1 : 0)
+      ? this.blockRange()
       : 0;
     // EmptyTile 的占位实体（玩家 + 敌怪 + 城镇 NPC）
     const occupants: Array<{ x: number; y: number; w: number; h: number }> = [
@@ -6358,7 +6564,7 @@ export class Game implements GameHooks {
     // 手持可提取物（泥沙/雪泥/沙漠化石/垃圾/苔藓/粪块/蜂巢/贝壳堆/黑曜石，ItemID.cs:1104）
     // 对准 219/642 左键使用 → 转化；642 先查矿物兑换表。useTime 冷却 = 10×(642?0.33:1)
     if (inp.mouseDown && !inp.rightDown && this.player.useTime === 0
-      && this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) {
+      && this.inTileRange(tx, ty, this.blockRange())) {
       const esh = this.wiring?.sheetOf(tx, ty) ?? -1;
       if (esh === 219 || esh === 642) {
         if (this.useExtractinator(tx, ty, true)) {
@@ -6440,9 +6646,11 @@ export class Game implements GameHooks {
     // （召唤武器例外——交给下方 cw 分发 kind='summon'；yoyo/flail/boomerang 与
     //  长矛(aiStyle 19)族原版 noUseGraphic=true（Item.cs case 220 等,DefaultToSpear
     //  :47637 全 202 处）——投射物即本体,此处再画持物 = 角色旁多出一个静态武器图标。
-    //  ★短剑族(aiStyle 161)noUseGraphic 未设=false——使用期间【必须画手持剑】
-    //  (SetDefaults1(6) 模板无 noUseGraphic),此前随 spear 整族误排除 = 玩家空手+
-    //  剑贴图独立飞出 = "抛出"观感,2026-08-13 铜短剑报告根因）
+    //  ★短剑族(aiStyle 161)同样 noUseGraphic=true——1456 SetDefaults1 case 6 模板
+    //  倒数第二行明确 `noUseGraphic = true`（Item.cs:1455,铁短剑 item 6 与七金属
+    //  短剑 3483+ 全列）——旧注"模板无 noUseGraphic 须画手持剑"系 1405 误记，
+    //  2026-08-17 据提取表修正；挥击姿势(useStyle 13 身体帧)保留,物品贴图由
+    //  useSwing 的 noGraphic 抑制——投射物即唯一的剑）
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
       && cw?.kind !== 'summon' && cw?.kind !== 'yoyo'
       && cw?.kind !== 'flail' && cw?.kind !== 'boomerang'
@@ -7042,8 +7250,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.entities.add(rocket, 'projectiles');
           // 段尾与 Arrow 路径共用（消耗→useTime→swing→音效→UI 刷新）
           const ammoVid16 = viIdFromKey(ammoDef.key);
-          if (ammoVid16 !== 3103 && ammoVid16 !== 3104
-            && !(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
+          if (ammoVid16 !== 3103 && ammoVid16 !== 3104 && !this.ammoSaveRoll()) {
             this.player.inv.removeAt(ammoSlot, 1);
           }
           this.player.useTime = bowC?.useTime ?? rg?.speed ?? 100;  // ResetStats 缺省 useTime=100（Item.cs:48626）
@@ -7080,12 +7287,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             }
           }
         }
-        // 弹药节约（ammoCost80：20% 概率不耗弹——蘑菇矿胸甲族，Player.PickAmmo 语义）
+        // 弹药节约（PickAmmo :52791-52804 四档独立掷：huntress90 Next(10)/chloro80
+        // Next(5)/ammoCost80 Next(5)/ammoCost75 Next(4)——命中任一即省）
         // 无尽袋(3103 箭袋/3104 弹药袋) consumable=false 恒不耗(Item.cs:8232;
         // 旧实现无条件 removeAt 致无尽袋被逐发吞尽,2026-08-13 修)
         const ammoVid = viIdFromKey(ammoDef.key);
-        if (ammoVid !== 3103 && ammoVid !== 3104
-          && !(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
+        if (ammoVid !== 3103 && ammoVid !== 3104 && !this.ammoSaveRoll()) {
           this.player.inv.removeAt(ammoSlot, 1);
         }
         this.player.useTime = bowC?.useTime ?? rg?.speed ?? 100;  // ResetStats 缺省 useTime=100（Item.cs:48626）
@@ -7160,7 +7367,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.player.useTime = c?.useTime ?? 15;
           this.useSwing(heldDef);   // useStyle 1 挥（DefaultToThrownWeapon :48065）
-          if (Game.NO_USE_GRAPHIC_VIDS.has(vid) && this.swing) this.swing.noGraphic = true;
+          // noUseGraphic（莫洛托夫 2590 等）→ useSwing 已按 vanilla-itemcombat 列置 noGraphic
           this.playUseSound(vid, 'throw');
           this.cb.onInventoryChanged();
           this.input.mouseDown = false;
@@ -7178,7 +7385,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = c?.useTime ?? 15;
       this.useSwing(heldDef);   // useStyle 1 挥（DefaultToThrownWeapon :48065）——旧无动画
-      if (Game.NO_USE_GRAPHIC_VIDS.has(vid) && this.swing) this.swing.noGraphic = true;
+      // noUseGraphic（投刀 279/骨 154/毒刀 287 等手写族）→ useSwing 按数据表置 noGraphic
+      //（手里剑 47/48 表内 false——持物动画保留，与原版 DefaultToThrownWeapon 一致）
       this.playUseSound(vid, 'throw');
       this.cb.onInventoryChanged();
     } else if (heldDef && [70, 1331, 560].includes(viIdFromKey(heldDef.key))
@@ -7681,12 +7889,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   202 处）——投射物即本体，挥动再画持物会重影，这四族不加 swing
     if (cw.kind === 'grenade' || cw.kind === 'magic' || cw.kind === 'shot' || cw.kind === 'summon') {
       this.useSwing(def, ang);
-      // 炸弹族手写 noUseGraphic=true（炸弹 166:3398/雷管 167:3413/手雷 168:3428，
-      // Item.cs SetDefaults）——投射物即本体，双画重影。combat 表缺列 → 族级小表
-      //（提取器全量回填登记遗留）
-      if (cw.kind === 'grenade' && this.swing && Game.NO_USE_GRAPHIC_VIDS.has(critVid)) {
-        this.swing.noGraphic = true;
-      }
+      // 炸弹族 noUseGraphic=true（炸弹 166:3398/雷管 167:3413/手雷 168:3428 等 381 件
+      // 全量列）——useSwing 内按 vanilla-itemcombat 置 noGraphic，投射物即本体
     }
     switch (cw.kind) {
       case 'grenade': {
@@ -8393,6 +8597,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  旅程远置 = 现值×2+8(:18636-18643,含配饰加成后乘)→ GetRanges 钳 ≤20 →
    *  item.tileBoost+blockRange(TB)在钳【后】加(GetTileRegion)。FAR_*_RANGE
    *  常量(18/14)仅基座无配饰态的等价值,按公式重算覆盖配饰/远置组合 */
+  /** Player.blockRange（:2604 基 0;源全集仅两处 ++）：Builder 药水 +1（:9844）/
+   *  工具腰带 407 装备 +1（:14873-14876）。GetTileRegion 在钳 20 后统一并入——
+   *  tileReach 内联（各调用点 tb 实参只传 item.tileBoost 份） */
+  private blockRange(): number {
+    return (this.player.buffs.has(BuffType.Builder) ? 1 : 0)
+      + (this.player.equipStats.toolbelt ? 1 : 0);
+  }
+
+  /** tb 语义 = GetTileRegion 的 TB 实参(钳 20 后加):挖掘/桶 = sItem.tileBoost
+   *  (IsTargetTileInItemRange :45701);放置块/墙/刷漆 = item.tileBoost + blockRange
+   *  (:38939/:39058/:41154);QuickMinecart 直调 GetTileRegion 不传 TB=0(:5798) */
   private tileReach(tb = 0): { x: number; y: number } {
     let x = 5 + (this.player.equipStats.tileRange ? 3 : 0);
     let y = 3 + (this.player.equipStats.tileRange ? 2 : 0);
@@ -8697,16 +8912,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation——meleeSpeed
     //      不作用于 useTime（:4216），故不除 attackSpeedMult）。
     //      tileSpeed（砌砖刀/建筑背包）原版只作用【放置】（:39485），不进挖掘冷却----
-    const mineMult = (this.player.buffs.has(BuffType.Mining) ? 0.75 : 1)  // 挖掘药水 -25%（:9818）
-      * (this.player.usedAmbrosia ? 0.95 : 1);   // 仙馔蜜酒 pickSpeed-0.05(:12455-12459)
-    // 食物 pickSpeed -= 5/10/15%（Player.cs:11534+）× 风筝 −15%（:9616）→
-    // 冷却按原版 useTime/pickSpeed 缩短
-    const pickMult = this.player.buffs.pickSpeedMult;
+    // pickSpeed 加法减量链（Player.cs:18363 基 1f，越小越快，乘在冷却上）：
+    //   Mining 药水 -0.25（:9818）/ambrosia -0.05（:12457）/食物档 -5/10/15%（:11534+）/
+    //   风筝 buff -0.15（:9614）/chiselSpeed acc（古凿 4056/创造之手 5126）-0.25（:12610-12612）
+    const buffs = this.player.buffs;
+    let pickSpeed = 1
+      - (buffs.has(BuffType.Mining) ? 0.25 : 0)
+      - (this.player.usedAmbrosia ? 0.05 : 0)
+      - (buffs.has(BuffType.KiteBuff) ? 0.15 : 0)
+      - (this.player.equipStats.chiselSpeed ? 0.25 : 0)
+      - [0, 0.05, 0.10, 0.15][buffs.wellFedTier];
+    // 原版 pickSpeed 无显式下限钳（全叠满可达 0.15），冷却下限兜底（此处 8t/drill 1t
+    // ≈ ApplyItemTime val=max(val,1) 同位）
     // 钻头坐骑（drillPickTime=1）豁免手持工具的 8t 冷却下限——原版 PickTile 每束每
     // tick 可命中（Mount.cs :3092/:3139），节流由光束自身 cooldown 承担
     const cooldown = opts?.drill
-      ? Math.max(1, Math.round(useTime ?? speed) * mineMult / pickMult)
-      : Math.max(8, Math.round(useTime ?? speed) * mineMult / pickMult);
+      ? Math.max(1, Math.round((useTime ?? speed) * pickSpeed))
+      : Math.max(8, Math.round((useTime ?? speed) * pickSpeed));
     if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
       this.hardnessCache = 100;
@@ -8977,38 +9199,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  byPlayer=true = 玩家工具直接破坏（原版 AchievementsHelper.CurrentlyMining 门）：
    *  触发成就 tile 破坏通知（OOO_SHINY/EXTRA_SHINY/HEART_BREAKER/PHOTOSYNTHESIS）
    *  + BULLDOZER 挖掘计数（HandleMining） */
-  /** KillTile_DropBait（WorldGen.cs:66304-66480 1:1）：分母表 3 草 worm400/hop100、
-   *  73 腐草 worm200/hop50、185-187 装饰组指定帧带 worm6、61/74/62/233 grubby 族
-   *  80/40/250/10、637 狱草 lavaBait100（★185-187 非 tileCut——镐破坏也掷）。
-   *  花靴 ×10000 门（:66331-66381 frameX≥108 自长植株，防自刷饵；62/233/185-187
-   *  族无此门）。caps：worm/hop<5、grubby 族<8、hell 饵<8；金 1/400 → 448/446；
-   *  墓地区 worm→606 蛆（:66416-19）；出生弹跳 vy=Next(-50,-21)×0.1、
-   *  vx=(0..25)×0.1×(−dir) 背玩家（TargetClosest 后 direction*=−1 同构） */
+  /** KillTile_DropBait（WorldGen.cs:66304-66480 1:1）：分母/帧带/花靴门在
+   *  src/world/DropBait.ts（纯函数,单测锁定）；本方法管实体侧——caps
+   *  （worm/hop<5、grubby 族<8、hell 饵<8）、墓地 worm→606、出生弹跳
+   *  vy=Next(-50,-21)×0.1、vx=(0..25)×0.1×(−dir) 背玩家（TargetClosest 后
+   *  direction*=−1 同构）。挂 breakTile 顶部（一切破坏路径：剑割/镐/爆炸/
+   *  液体冲毁——185-187 非 tileCut 走镐破坏即此；noItem 不掷） */
   private killTileDropBait(x: number, y: number, def: { vanilla?: { sheet?: number } } | undefined): void {
     const sheet = def?.vanilla?.sheet;
     if (sheet == null) return;
+    // 世界生成/读档装配期 player 尚未构造（killTile 挂一切破坏路径，生成侧链亦会触
+    // 达）——原版 DropBait 在玩家破坏链内求值（花靴门 :12688 + TargetClosest 朝向），
+    // 无玩家语义=不掷；守门防 this.player.equipStats 崩引导
+    if (!this.player) return;
     const st = this.world.store;
     const ti = st.idx(x, y);
     const fx = st.frameX[ti], fy = st.frameY[ti];
-    let wormDenom = -1, hopDenom = -1, grubDenom = -1, lavaDenom = -1;
     const fb = this.player.equipStats.flowerBoots && fx >= 108;
-    if (sheet === 3) { wormDenom = 400; hopDenom = 100; if (fb) { wormDenom *= 10000; hopDenom *= 10000; } }
-    else if (sheet === 73) { wormDenom = 200; hopDenom = 50; if (fb) { wormDenom *= 10000; hopDenom *= 10000; } }
-    else if (sheet === 61) { grubDenom = 80; if (fb) grubDenom *= 10000; }
-    else if (sheet === 74) { grubDenom = 40; if (fb) grubDenom *= 10000; }
-    else if (sheet === 62) grubDenom = 250;
-    else if (sheet === 233) grubDenom = 10;
-    else if (sheet === 637) { lavaDenom = 100; if (fb) lavaDenom *= 10000; }
-    else if (sheet === 185) {
-      if ((fy === 0 && fx < 214) || (fy === 18 && (fx < 214 || fx >= 1368))) wormDenom = 6;
-    } else if (sheet === 186) {
-      if (fx >= 378 && fx <= 700) wormDenom = 6;
-    } else if (sheet === 187) {
-      if ((fx >= 756 && fx <= 916) || fx <= 322) wormDenom = 6;
-    } else return;
     const capOf = (ids: number[]) => this.entities.critters
       .filter((c) => !(c as { dead?: boolean }).dead && ids.includes(this.critterVid(c))).length;
-    const gold = () => Math.random() < 1 / 400;   // goldCritterChance=400（luck 掷近似）
     const spawnBait = (vid: number) => {
       const e = this.spawnNpcByVanilla(vid, x * TILE + 10, y * TILE);
       if (!e) return;
@@ -9017,22 +9226,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       e.vx = Math.floor(Math.random() * 26) * 0.1 * -dir;
       e.vy = -(21 + Math.floor(Math.random() * 29)) * 0.1;   // Next(-50,-21)×0.1
     };
-    if (wormDenom > 0 && capOf([357, 448, 606]) < 5 && Math.random() < 1 / wormDenom) {
-      spawnBait(this.scene?.zoneGraveyard ? 606 : gold() ? 448 : 357);
-    }
-    if (hopDenom > 0 && capOf([377, 446]) < 5 && Math.random() < 1 / hopDenom) {
-      spawnBait(gold() ? 446 : 377);
-    }
-    if (grubDenom > 0 && capOf([485, 486, 487]) < 8
-      && Math.random() < 1 / Math.floor(grubDenom * 1.25)) {   // :66452 ×1.25 掷
-      // 序贯两掷（:66455-66461）：先 Next(4)==0→486，再独立 Next(12)==0→487 覆写
-      let grub = 485;
-      if (Math.random() < 1 / 4) grub = 486;
-      if (Math.random() < 1 / 12) grub = 487;
-      spawnBait(grub);
-    }
-    if (lavaDenom > 0 && capOf([653, 654]) < 8 && Math.random() < 1 / lavaDenom) {
-      spawnBait(Math.random() < 0.5 ? 654 : 653);
+    const r = dropBaitRoll(sheet, fx, fy, fb, Math.random);
+    if (!r) return;
+    // cap 计数按原版数**基型**（:66416 CountNPCS(num7)=357|606——金蚯蚓 448 不计；
+    // :66437 蚱蜢只数 377；grubby/地狱饵两族才是三型合计 :66437/:66463）
+    if (r.kind === 'worm' && capOf([this.scene?.zoneGraveyard ? 606 : 357]) < 5) {
+      spawnBait(baitWormType(!!this.scene?.zoneGraveyard, r.gold));
+    } else if (r.kind === 'hop' && capOf([377]) < 5) {
+      spawnBait(r.gold ? 446 : 377);
+    } else if (r.kind === 'grub' && r.grubType != null && capOf([485, 486, 487]) < 8) {
+      spawnBait(r.grubType);
+    } else if (r.kind === 'lava' && r.lavaType != null && capOf([653, 654]) < 8) {
+      spawnBait(r.lavaType);
     }
   }
 
@@ -9948,7 +10153,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 射程（ItemReach，与 tryPlace 一致 5.5 格）
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (!this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
+    if (!this.inTileRange(tx, ty, this.blockRange())) return;
     if (this.player.useTime > 0) return;
     const wallId = itemDef.wallId!;
     const i0 = st.idx(tx, ty);
@@ -9977,7 +10182,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 6, 1.5); // KillWall_MakeWallDust×10 近似
       this.sfx.play('chop', 1, tx * TILE + 8, ty * TILE + 8);               // KillWall_PlaySounds
       this.player.inv.removeAt(this.player.inv.selected, 1);
-      this.player.useTime = Math.max(4, Math.round(15 * ((this.player.equipStats.wallSpeed || this.player.buffs.has(BuffType.Builder)) ? 0.75 : 1)));
+      // ApplyItemTime(item, wallSpeed)（:38960/:4221-4230）：useTime×倒数乘数，下限 1
+      this.player.useTime = Math.max(1, Math.round(15 * this.paintWallSpeed()));
       this.cb.onInventoryChanged();
       return;
     }
@@ -9985,8 +10191,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     st.setWall(tx, ty, wallId);
     this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
     this.player.inv.removeAt(this.player.inv.selected, 1);
-    // wallSpeed=1（Player.cs:2336），铺墙节奏 ≈ 常规放置；便携水泥机族 WallSpeedAcc 冷却 -25%
-    this.player.useTime = Math.max(4, Math.round(15 * ((this.player.equipStats.wallSpeed || this.player.buffs.has(BuffType.Builder)) ? 0.75 : 1)));
+    // 同上：冷却 = useTime/wallSpeed（钳 3 倒数聚合 :25628-25632）
+    this.player.useTime = Math.max(1, Math.round(15 * this.paintWallSpeed()));
     this.cb.onInventoryChanged();
     // FillEmptySpace（cs:38973-39025）：stack>1 时补铺被本墙四面包围的空洞
     if (this.player.inv.heldItem()?.stack ?? 0 > 1) {
@@ -10028,19 +10234,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // Spectre 三件套 tileBoost+=3（Item.cs:18583）；blockRange 同铺砖铺墙公式
     const spectre = itemDef.vid === 1543 || itemDef.vid === 1544 || itemDef.vid === 1545;
     const tb = (spectre ? 3 : 0)
-      + (this.player.buffs.has(BuffType.Builder) ? 1 : 0);
+      + this.blockRange();
     if (!this.inTileRange(tx, ty, tb)) return;
     const p = this.player;
     const i0 = st.idx(tx, ty);
-    const paintDust: PaintDustHook = (x, y, np, op) => {
-      // paintEffect（WorldGen.cs:44091-44112）：10 颗尘，半数 noGravity×1.2、半数×0.5
-      const [r, g, b] = paintDustColor(np, op);
-      const col = `rgb(${r},${g},${b})`;
-      for (let k = 0; k < 10; k++) {
-        this.spawnParticles(x * TILE + Math.random() * TILE, y * TILE + Math.random() * TILE,
-          col, 1, k % 2 === 0 ? 1.2 : 0.5, { life: 40, size: 1 });
-      }
-    };
+    const paintDust: PaintDustHook = this.paintDustHook();
     const useAnimation = 15; // Item.cs useAnimation 15（三件套与 Spectre 同值）
     const useTimeBase = 10;  // Item.cs useTime 10
     // ApplyItemTime(sItem, tileSpeed/wallSpeed)（Player.cs:4221-4230）：useTime×乘子，下限 1；
@@ -10113,6 +10311,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** paintEffect 尘（WorldGen.cs:44091-44112：10 颗，半数 noGravity×1.2、半数×0.5）——
+   *  刷具三通道与 autoPaint 放置上漆共用 */
+  private paintDustHook(): PaintDustHook {
+    return (x, y, np, op) => {
+      const [r, g, b] = paintDustColor(np, op);
+      const col = `rgb(${r},${g},${b})`;
+      for (let k = 0; k < 10; k++) {
+        this.spawnParticles(x * TILE + Math.random() * TILE, y * TILE + Math.random() * TILE,
+          col, 1, k % 2 === 0 ? 1.2 : 0.5, { life: 40, size: 1 });
+      }
+    };
+  }
+
   /** TryPainting/ApplyPaint（Player.cs:41291-41369）：paintingAWall 分通道，
    *  FindPaintOrCoating 取油漆，改色成功扣 1 个（同色不扣） */
   private tryPainting(tx: number, ty: number, paintingAWall: boolean, dust: PaintDustHook) {
@@ -10137,14 +10348,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
-  /** Player.tileSpeed（Player.cs:2338 = 1f；Builder 药水/便携水泥机族 +25%，:9842） */
-  private paintTileSpeed(): number {
-    return this.player.equipStats.tileRange != null || this.player.buffs.has(BuffType.Builder) ? 0.75 : 1;
+  /** Player.tileSpeed 原始聚合（Player.cs:2338 基 1f，加法叠加，更大=更快）。
+   *  来源：Builder 药水 +0.25（:9842）/ 仙馔蜜酒 +0.05（:12458）/ 风筝 buff +0.15（:9616）/
+   *  砌砖刀族配饰 +0.5（:12604-12608）——★acc 份有手持门：selectedItem.createTile≥0
+   *  且非火把（TileID.Sets.Torches 仅 tile 4，:12605-12607）。本仓 createTile≥0 ⇔
+   *  itemDef.tile 为 string（火把族走 Torch 特链无该字段，天然被排除） */
+  private placeSpeedTileRaw(): number {
+    let s = 1;
+    if (this.player.buffs.has(BuffType.Builder)) s += 0.25;
+    if (this.player.usedAmbrosia) s += 0.05;
+    if (this.player.buffs.has(BuffType.KiteBuff)) s += 0.15;
+    const es = this.player.equipStats;
+    if (es.tileSpeed) {
+      const heldDef = ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1];
+      if (heldDef?.tile !== undefined) s += 0.5;
+    }
+    return s;
   }
 
-  /** Player.wallSpeed（Player.cs:2336 = 1f；同上 +25% 加速档） */
+  /** Player.wallSpeed 原始聚合（:2336 基 1f;Builder +0.25/ambrosia +0.05/风筝 +0.15/
+   *  水泥机族 acc +0.5——:9843/:12459/:9617/:12614-12617,无手持门） */
+  private placeSpeedWallRaw(): number {
+    let s = 1;
+    if (this.player.buffs.has(BuffType.Builder)) s += 0.25;
+    if (this.player.usedAmbrosia) s += 0.05;
+    if (this.player.buffs.has(BuffType.KiteBuff)) s += 0.15;
+    if (this.player.equipStats.wallSpeed) s += 0.5;
+    return s;
+  }
+
+  /** 放置块冷却乘数（Update 尾部聚合 :25622-25627：钳 3 后取倒数 → ApplyItemTime
+   *  :4221 冷却 = useTime × 倒数 = useTime / raw；val 下限 1 在 applyItemTime 侧） */
+  private paintTileSpeed(): number {
+    return 1 / Math.min(3, this.placeSpeedTileRaw());
+  }
+
+  /** 铺墙冷却乘数（:25628-25632 钳 3 倒数,同上） */
   private paintWallSpeed(): number {
-    return this.player.equipStats.wallSpeed || this.player.buffs.has(BuffType.Builder) ? 0.75 : 1;
+    return 1 / Math.min(3, this.placeSpeedWallRaw());
   }
 
   /** 草族"转化"放置（BlockPlacementForAssortedThings :40379-40440 1:1）：
@@ -10257,7 +10498,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 距离
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (!this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
+    if (!this.inTileRange(tx, ty, this.blockRange())) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
     // 旧日军团竞技场建造封锁（Player.cs:25669-25672：DD2Event.Ongoing &&
@@ -10512,6 +10753,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // 训练假人放置：锚点生成假人 NPC（TETrainingDummy.Activate）
     if (tileId === TILE_BY_KEY['v_378_target_dummy']) this.spawnDummyAt(tx, ty);
+    // PlaceIt_AutoPaintAndActuate（Player.cs:39935-39975）：喷漆器族配饰（2216/3061/
+    // 5126，:14720-14734）→ 对本次放置覆盖的每格 TryPainting（tile 通道，
+    // applyItemAnimation:false 无挥动动画）。builderAccStatus[3] 开关默认 0=启用
+    // （开关 UI 未实装，登记 GAP）；无线/同色不耗；上漆在冷却前、成败不影响放置
+    if (this.player.equipStats.autoPaint) {
+      const dust = this.paintDustHook();
+      for (let dy2 = 0; dy2 < oh; dy2++) {
+        for (let dx2 = 0; dx2 < ow; dx2++) {
+          const px2 = tx + dx2, py2 = ty + dy2;
+          if (st.inBounds(px2, py2)) this.tryPainting(px2, py2, false, dust);
+        }
+      }
+    }
     // 消耗门（Player.cs:42602：itemTime==itemTimeMax && item.consumable 才扣 1）——
     // consumable=false 的放置物放置不消耗：5464 Mitey-Titey（Item.cs:43089 显式
     // 覆写 DefaultToPlaceableTile 的 consumable=true）。数据源 = vanilla-itemcombat
@@ -10519,9 +10773,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (itemCombat(viIdFromKey(itemDef.key) ?? -1)?.consumable !== false) {
       this.player.inv.removeAt(this.player.inv.selected, 1);
     }
-    // ApplyItemTime（PlaceIt :39485 → :4221-4230）：itemTime = useTime×tileSpeed，
-    // useTime>0 时下限 1（泥土 10/火把 10 等——此前硬编码 14 偏慢；数据缺失回退 14
-    // 维持旧值）。tileSpeed=Player.tileSpeed（Builder 药水/便携水泥机 0.75）
+    // ApplyItemTime（PlaceIt :39485 → :4221-4230）：itemTime = useTime×tileSpeed
+    // （倒数乘数，:25622-25627 尾部钳 3 取倒数——更大 raw=更快），下限 1（泥土 10/
+    // 火把 10 等——此前硬编码 14 偏慢；数据缺失回退 14 维持旧值）
     {
       const ut = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
       this.player.useTime = ut && ut > 0
@@ -10766,7 +11020,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     {
       const dx = tx - Math.floor(this.player.cx / TILE);
       const dy = ty - Math.floor(this.player.cy / TILE);
-      if (!this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) { this.input.rightDown = false; return; }
+      if (!this.inTileRange(tx, ty, this.blockRange())) { this.input.rightDown = false; return; }
     }
     const type = st.get(tx, ty);
     // 原版 tile sheet（八音盒/喷泉/天塔柱/派对柱右键分支用）
@@ -10877,34 +11131,59 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // statLifeMax<400 → +20 上限并回满该部分,放置物消耗
       this.usePlacedLifeCrystal(tx, ty);
     } else if (type === TILE_BY_KEY['bed']) {
-      // 床（PC:32183-32228）：上侧（枕）悬停=设重生点；下侧（脚）悬停=睡觉（无夜间限制）
-      const fx = this.world.store.frameX[this.world.store.idx(tx, ty)];
-      const bottomSide = (fx % 72 < 36) !== (Math.floor(fx / 72) === 1); // PC:32869-32878
-      if (bottomSide && Math.hypot(this.player.cx - (tx + 2) * TILE, this.player.cy - ty * TILE) <= 96) {
-        // StartSleeping（SH:156-191）+ GetSleepingTargetInfo（:193-224）1:1 锚点：
-        //  床段左列 = 点击列 − frameX%72/18；frameY%36≠0（下半行）行数上修 −1；
-        //  frameX/72 列位 0=朝左床/1=朝右床 → targetDirection 与锚点列偏移
-        //  （0:+1 / 1:+2）；anchor = Point(col, row+1).ToWorld(8,16)，玩家
-        //  Bottom = anchor（曾简化 x=(tx+1)·16/y=(ty−1)·16 → 水平差 ~10-16px、
-        //  垂直差 6-10px、下半行点击不修行——躺姿贴床错位根因）
-        this.player.sleeping = !this.player.sleeping;
-        if (this.player.sleeping) {
-          const fy = this.world.store.frameY[this.world.store.idx(tx, ty)];
-          const bedLeft = tx - Math.floor((fx % 72) / 18);
-          const row = fy % 36 !== 0 ? ty - 1 : ty;
+      // 床（PC:32184-32228 1:1,2026-08-17 review 修正）:
+      //  ★IsHoveringOverABottomSideOfABed(:32869-32878) = 脚端半（变体A左半/变体B
+      //    右半）。原版语义:【枕端（!bottomSide）入睡、脚端设重生点】——此前两分支
+      //    极性接反（脚端入睡/枕端设点）。
+      const iBed = this.world.store.idx(tx, ty);
+      const fx = this.world.store.frameX[iBed], fy = this.world.store.frameY[iBed];
+      const bottomSide = (fx % 72 < 36) !== (Math.floor(fx / 72) === 1); // :32871-32878 同式
+      const bedLeft = tx - Math.floor((fx % 72) / 18);   // 床段左列(变体无关)
+      const bedTop = fy % 36 !== 0 ? ty - 1 : ty;        // 床顶行(下半行点击上修)
+      if (!bottomSide) {
+        // 入睡距离门 = IsWithinSnappngRangeToTile(:17214):悬停格中心 (tx·16+8,
+        // ty·16+8) vs 玩家 (Center.X, Bottom.Y−16) ≤ 96（曾用 (tx+2)·16 角点错式）
+        const inRange = Math.hypot((tx * TILE + 8) - this.player.cx,
+          (ty * TILE + 8) - (this.player.y + this.player.h - 16)) <= 96;
+        if (inRange) {
+          // StartSleeping（SH:156-191）+ GetSleepingTargetInfo（:193-224）1:1 锚点：
+          //  frameX/72 列位 0=枕右床/1=枕左床 → targetDirection 与锚点列偏移
+          //  （0:+1 / 1:+2）；anchor = Point(col, row+1).ToWorld(8,16)，玩家
+          //  Bottom = anchor（曾简化 x=(tx+1)·16/y=(ty−1)·16 → 水平差 ~10-16px、
+          //  垂直差 6-10px、下半行点击不修行——躺姿贴床错位根因）。
+          //  CanSnapToPosition 目标格畅通检查未移植（床位放置链已保证非实心,登记）
           const col = Math.floor(fx / 72);
           const dir = col === 0 ? -1 : 1;
           const anchorX = (bedLeft + (dir === -1 ? 1 : 2)) * TILE + 8;
-          const anchorY = (row + 1) * TILE + 16;
-          this.player.timeSleeping = 0;
-          this.player.vx = 0; this.player.vy = 0;
-          this.player.x = anchorX - this.player.w / 2;   // Bottom = anchor
-          this.player.y = anchorY - this.player.h;
-          this.player.facing = dir;
+          const anchorY = (bedTop + 1) * TILE + 16;
+          // 同床再点 = 下床（:170-174 isSleeping && Bottom==anchor → StopSleeping）;
+          // 睡在 A 床点 B 床 = 换床重睡（:175 起重锚,不 toggle）
+          const sameAnchor = this.player.sleeping
+            && Math.abs(this.player.x + this.player.w / 2 - anchorX) < 1
+            && Math.abs(this.player.y + this.player.h - anchorY) < 1;
+          if (sameAnchor) {
+            this.player.sleeping = false;
+          } else {
+            // StartSleeping 前置清理（:162-168):StopVanityActions 清坐姿/
+            // 收全部钩爪/尝试下坐骑（下不了 → 唤醒门次 tick 拦,原版 mount.Active 同拦）
+            this.player.sitting = false;
+            this.player.removeAllGrapplingHooks();
+            if (this.player.ridingMount) this.player.mount.tryDismount(this.player);
+            this.player.sleeping = true;
+            this.player.timeSleeping = 0;
+            this.player.vx = 0; this.player.vy = 0;
+            this.player.gravDir = 1;   // :176 入睡恒正常重力
+            this.player.x = anchorX - this.player.w / 2;   // Bottom = anchor
+            this.player.y = anchorY - this.player.h;
+            this.player.facing = dir;
+          }
         }
       } else {
-        this.world.spawnX = tx + 1;
-        this.world.spawnY = ty - 1;
+        // 设重生点（:32212-32226）：变体A(bedLeft+2)/B(bedLeft+1)、行 = bedTop+2
+        // （床下地面行,本仓 spawnY=落脚格行约定一致;曾 (tx+1, ty−1) 帧盲近似）。
+        // 再点移除（RemoveSpawn）未移植——本仓无原始出生点存档,登记
+        this.world.spawnX = bedLeft + (Math.floor(fx / 72) === 1 ? 1 : 2);
+        this.world.spawnY = bedTop + 2;
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SpawnSet'));
       }
       this.input.rightDown = false;
@@ -12918,7 +13197,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return e.vanillaId ?? e.def?.npc ?? -1;
   }
 
-  private netCatchCritter(c: Critter): void {
+  private netCatchCritter(c: Enemy): void {   // critters 桶全 Enemy 化
     const npcId = this.critterVid(c);
     if (npcId === 687) {
       const spot = attemptToFindTeleportSpot(
@@ -12947,10 +13226,92 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     c.dead = true;                                     // :80719 active=false（非 Kill 不掉落）
   }
 
+  /** 食物/饮料咀嚼粒子（Player.cs:43033-43069 1:1）：
+   *  - 嘴区 MouthPosition（:4010-4030）= MountedCenter + (dir×8, −gravDir×4)——本仓
+   *    无坐骑覆写/旋转档，取玩家中心 + (facing×8, −4)；再 ±4px 方形随机
+   *  - food（:43033-43050）：Next(2)!=0 掷（50%）→ 尘 284，速度 = 1.3×(dir, −0.8)
+   *    旋转 ±π/5×NextFloatDirection，色 = 表内随机，scale 0.8+0.2×rand
+   *  - drink（:43052-43069）：无掷（每帧）→ 尘 284，速度 = 1.3×(dir×0.1, −0.1)
+   *    旋转 ∓π/5×NextFloatDirection，色 ×0.7，scale 同
+   *  两表独立查（原版两次调用不互斥）；表外物品不发（array 空 return） */
+  private emitFoodDrinkParticles(held: { id: number } | null): void {
+    if (!held || !this.swing) return;
+    const def = ITEM_DEFS[held.id];
+    if (!def) return;
+    const vid = def.vid ?? viIdFromKey(def.key);
+    if (vid < 0) return;
+    const p = this.player;
+    const mx = p.cx + p.facing * 8, my = p.cy - 4;          // MouthPosition 近似
+    const jx = (Math.random() * 8 - 4), jy = (Math.random() * 8 - 4);   // NextVector2Square(-4,4)
+    const px = mx + jx, py = my + jy;
+    const rot = (vx: number, vy: number, a: number): [number, number] =>
+      [vx * Math.cos(a) - vy * Math.sin(a), vx * Math.sin(a) + vy * Math.cos(a)];
+    const rngDir = () => Math.random() * 2 - 1;             // NextFloatDirection
+    const scale = 0.8 + 0.2 * Math.random();
+    const food = FOOD_PARTICLE_COLORS[vid];
+    if (food && food.length > 0 && Math.random() * 2 >= 1) {   // Next(2)!=0
+      const c = food[Math.floor(Math.random() * food.length)];
+      const [vx, vy] = rot(1.3 * p.facing, 1.3 * -0.8, Math.PI / 5 * rngDir());
+      const d = this.vanillaDust.spawn(px, py, 2, 2, 284, vx, vy, 0,
+        { r: c[0], g: c[1], b: c[2], a: 255 }, scale);
+      if (d) { d.x = px; d.y = py; d.vx = vx; d.vy = vy; d.scale = scale; d.fadeIn = 0; }
+    }
+    const drink = DRINK_PARTICLE_COLORS[vid];
+    if (drink && drink.length > 0) {
+      const c = drink[Math.floor(Math.random() * drink.length)];
+      const [vx, vy] = rot(1.3 * p.facing * 0.1, 1.3 * -0.1, -Math.PI / 5 * rngDir());
+      const d = this.vanillaDust.spawn(px, py, 2, 2, 284, vx, vy, 0,
+        { r: Math.round(c[0] * 0.7), g: Math.round(c[1] * 0.7), b: Math.round(c[2] * 0.7), a: 255 }, scale);
+      if (d) { d.x = px; d.y = py; d.vx = vx; d.vy = vy; d.scale = scale; d.fadeIn = 0; }
+    }
+  }
+
+  /** 棉花糖烤串（Player.cs:49604-49641 ItemCheck_ApplyHoldStyle 的 sItem.type==968
+   *  分支——holdStyle 1 静持即触发，无需动画）：
+   *  - itemLocation.X = pos.X + w/2 + 8×dir（:49605）；检测格 = (itemLocation.X +
+   *    heldItemFrame.Width×0.8×dir)/16、(itemLocation.Y + mountOffset + frame.Height/2)/16
+   *    （:49609-49610——heldItemFrame 取贴图帧，此处 18×18 近似 marshmallow 串贴图）
+   *  - 格为营火（TileID.Sets.Campfires={215}）且 frameY<54（点燃档）→ miscTimer++
+   *    （1/5 概率额外 ++，:49615-49618）→ >900t → 掉落熟棉花糖 969 + 手持 stack--
+   *    （:49622-49638）；否则 miscTimer 归零。selectedItem==58 的 mouseItem 同扣
+   *    档本仓无手持槽，登记 */
+  private marshmallowCookT = 0;
+  private checkMarshmallowRoast(): void {
+    const p = this.player;
+    const held = p.inv.heldItem();
+    const def = held ? ITEM_DEFS[held.id] : null;
+    if (!def || (def.vid ?? viIdFromKey(def.key)) !== 968 || p.dead || p.onRope) {
+      this.marshmallowCookT = 0;                                   // else miscTimer=0
+      return;
+    }
+    const st = this.world.store;
+    const ilx = p.x + p.w / 2 + 8 * p.facing;                      // :49605
+    const tx = Math.floor((ilx + 18 * 0.8 * p.facing) / TILE);
+    const ty = Math.floor((p.y + 18 / 2) / TILE);                  // mountOffset=0
+    if (!st.inBounds(tx, ty)) { this.marshmallowCookT = 0; return; }
+    const ti = st.idx(tx, ty);
+    const lit = st.type[ti] !== 0 && TILE_DEFS[st.type[ti]].vanilla?.sheet === 215
+      && st.frameY[ti] < 54;                                       // Campfires && 燃着档
+    if (!lit) { this.marshmallowCookT = 0; return; }
+    this.marshmallowCookT++;                                       // miscTimer++
+    if (Math.random() * 5 < 1) this.marshmallowCookT++;            // :49615-49618
+    if (this.marshmallowCookT > 900) {
+      this.marshmallowCookT = 0;
+      this.spawnDrop(p.cx - 8, p.cy - 8, 'vi_969_CookedMarshmallow', 1, 0, -1);
+      p.inv.removeAt(p.inv.selected, 1);
+      this.cb.onInventoryChanged();
+    }
+  }
+
   private updateSwingHits() {
     if (!this.swing) return;
     this.swing.t--;
     if (this.swing.t <= 0) { this.swing = null; return; }
+    // 食物/饮料咀嚼粒子（Player.cs:42171-42172 itemAnimation 全程每帧调用 →
+    // :43033 ItemCheck_EmitFoodParticles / :43052 ItemCheck_EmitDrinkParticles——
+    // 分族由颜色表承载：食物表（useStyle 2 咀嚼族）50% 掷、饮料表（useStyle 9
+    // 仰饮族）每帧，尘 284 于嘴区）
+    this.emitFoodDrinkParticles(this.player.inv.heldItem());
     const held = this.player.inv.heldItem();
     if (!held) return;
     const heldDef = ITEM_DEFS[held.id];
@@ -13079,7 +13440,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       ex < bx + bw && ex + ew > bx && ey < by + bh && ey + eh > by;
     // 小动物：网 → 捕捉（ItemCheck_CatchCritters :44079-44112）；其余挥击一击致死
     for (const cent of this.entities.critters) {
-      const c = cent as Critter;
+      const c = cent as Enemy;
       if (this.swingHitSet.has(c.id)) continue;
       if (hitRect(c.x, c.y, c.w, c.h)) {
         this.swingHitSet.add(c.id);
@@ -13229,19 +13590,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   // ================= 生成 =================
 
   /** 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
-   *  近似；同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体——589/685/686
+   *  近似；同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体——589/685
    *  json 缺条目，105/106/123/354 为真条目）。覆盖全部（2026-08-13 扩展：生成期
    *  placeBoundRescueNpcs 移除后，123 机械师/354 造型师/589 高尔夫球手的链命中
    *  也走本转换；534 税务员除外——原版是地狱敌怪 + 净化粉 Transform(441) 链）：
    *    105 BoundGoblin(:1996) / 106 BoundWizard(:1999) / 685 BoundTownSlimeOld(:2002)
    *    354 WebbedStylist(:1576) / 589 GolferRescue(:1600) / 123 BoundMechanic(:2563)
+   *  ★686 笨笨气球史莱姆不走本转换（2026-08-17 气球史莱姆批）：原版是
+   *  aiStyle 125 漂浮体（noGravity/noTileCollide，悬停于地形上方 5-8 格，
+   *  撞水/受击爆裂 → Transform(680)），转 bound 站地 NPC 会失去漂浮并可能
+   *  落位到地下卡死——现走真 Enemy AI_125（Enemy.balloonSlimeAI）。
    *  已在场则跳过——activeIds 的反查登记（BOUND_TOWN_NPC_ID）通常已在上游拦下，
    *  此处双保险。返回 true = 已消费该 picked（调用方不再走通用放置） */
   trySpawnBoundTownNpc(picked: Enemy): boolean {
     const boundKey = picked.vanillaId === 105 ? 'goblin_tinkerer'
       : picked.vanillaId === 106 ? 'wizard'
         : picked.vanillaId === 685 ? 'town_slime_old'
-          : picked.vanillaId === 686 ? 'town_slime_clumsy'
           : picked.vanillaId === 354 ? 'stylist'
             : picked.vanillaId === 589 ? 'golfer'
               : picked.vanillaId === 579 ? 'tavernkeep'
@@ -13329,7 +13693,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return !en.dead && (en.vanillaId === 583 || en.vanillaId === 584 || en.vanillaId === 585)
         && en.ai2 > 1;
     }) || this.entities.critters.some((n) => {
-      const c = n as Critter;
+      const c = n as Enemy;
       const cn = this.critterVid(c);
       return !c.dead && cn >= 583 && cn <= 585;
     });
@@ -13386,7 +13750,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 小动物并入帽计数（同上全体语义；释放出生 releaseOwner!=255 不计）
       const cc = c as Enemy;
       if (cc.releasedFromItem) return s;
-      return s + (cc.vanilla?.npcSlots ?? 0.1);
+      return s + (cc.vanilla?.npcSlots ?? 1);   // NPC.npcSlots 类默认 1f（未显式赋值的兔等）
     }, 0);
     const sHeightPx = this.camera.viewH / (this.camera.zoom || 1);
     // 联机远端玩家注入（原版 CheckNotSpawningOnScreen L5344-5366 遍历全部玩家扩展屏）
@@ -13438,7 +13802,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (extras.length > 0) {
       this.vanillaSpawner.pendingCritterExtras = [];
       for (const ex of extras) {
-        const e2 = Enemy.fromVanilla(ex.npc, ptx * TILE + 8 + ex.dx, pty * TILE + ex.dy);
+        // ax/ay 绝对坐标优先（香蒲蜻蜓附加落 cattail 顶±16——与主怪 spawn 位无关）
+        const e2 = Enemy.fromVanilla(ex.npc,
+          ex.ax ?? ptx * TILE + 8 + ex.dx, ex.ay ?? pty * TILE + ex.dy);
         if (!e2) continue;
         if (e2.vanilla?.critter) { e2.x -= e2.w / 2; this.entities.add(e2, 'critters'); }
         else this.entities.add(e2, 'enemies');
@@ -13452,6 +13818,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.entities.enemies.push(picked);
       const segs = Enemy.spawnWormChain(picked, 5 + ((rng.next() * 4) | 0));
       for (const seg of segs) { seg.id = this.entities.nextId++; this.entities.enemies.push(seg); }
+      return;
+    }
+    // 自定义落位（customSpawnPos：spawner 以非 spawn 位坐标构造——香蒲顶蜻蜓/
+    // 海滩干隙线水表/侏儒等）：位置已精确，跳过下列按 ptx/pty 的落位覆写
+    if ((picked as unknown as { customSpawnPos?: boolean }).customSpawnPos) {
+      picked.id = this.entities.nextId++;
+      if (picked.vanilla?.critter) { picked.x -= picked.w / 2; this.entities.add(picked, 'critters'); }
+      else this.entities.add(picked, 'enemies');
       return;
     }
     if (picked.vanilla?.aiStyle === 16 || picked.vanilla?.aiStyle === 18) {
@@ -13661,6 +14035,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // ①'' 睡渔夫补放（原版 SpawnNPC 海洋/沙滩分支每轮掷——补放近似其"未解救则持续在场"）
     this.placeSleepingAngler();
 
+    // ①'' 有房 NPC 每轮房况复核（Main.cs:65088-65092：!homeless 全员重跑 QuickFindHome
+    // ——房被拆/被占即换房或转无家，同轮 ① 即重找；368 旅商/37 老人/453 骷髅商 特例排除）
+    for (const n of npcs) {
+      if (!n.home || n.bound || n.vanillaId === 368 || n.vanillaId === 37 || n.vanillaId === 453) continue;
+      const hx = n.home.x, hy = n.home.y;
+      const others = homes.filter((h) => !(h.x === hx && h.y === hy));
+      const rehouse = findFreeHouse(st, others, hx, hy, n.vanillaId);
+      if (rehouse) {
+        // 复核通过：重锚 bestX/bestY（QuickFindHome 尾段语义——房内评分位漂移，不传送本体）
+        const h = homes.find((hh) => hh.x === hx && hh.y === hy);
+        n.home = { x: rehouse.standX, y: rehouse.standY };
+        if (h) { h.x = rehouse.standX; h.y = rehouse.standY; }
+      } else {
+        n.home = null;   // 房况失效 → homeless（vanilla QuickFindHome 失败尾置 homeless）
+        n.leashHome = false;
+        const hi = homes.findIndex((hh) => hh.x === hx && hh.y === hy);   // 房回收入住池
+        if (hi >= 0) homes.splice(hi, 1);
+      }
+    }
     // ① QuickFindHome（Main.cs:65072：每轮对未安家 NPC 找房入住）
     // ★锚池空 → 原版 :5035-5037 直接 return（找/发都停）——无任何兜底
     // bound（被绑待救）不入住不搬动——原版 AI_007 bound 态原地，否则五个救援 NPC
@@ -16065,7 +16458,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-30932
         if (p.thornsActive) {
-          const num2 = (p.buffs.hasThorns ? 1 : 0) + (p.turtleSet ? 1 : 0);   // :30911-30916
+          // num2 = thorns（buff14 药水=1 / dryadWard 165=0.5，:9703/:9988），
+          // turtleThorns 覆写 2（:30912-30914——非叠加，旧式相加把"仅海龟"算成 1）
+          const num2 = p.turtleSet ? 2 : p.thornsAmount;
           // Main.DamageVar :65597-65620（±15% + luck 重掷——曾裸随机丢重掷段）
           // Player.cs:30929 DamageVar(dmg×mult, -luck)——负幸运劣化重掷（曾传 +luck 方向反）
           const reflect = Math.min(1000, damageVar(dmg * num2, -p.luck));
@@ -16280,6 +16675,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const _bannerKey = VANILLA_ITEM_KEY_BY_ID[_bannerItemVid] ?? 'place_v_91_banners';
         this.spawnDrop(this.player.cx, this.player.cy, _bannerKey, 1, 0, -3, banner);
       }
+    }
+    // 笨笨气球史莱姆 686 爆裂解救（NPC.cs:82525-82555 CheckDead case 686）：
+    // 气球碎块 Gore 1143-1145×3 + 1146（近似粒子）→ position = Bottom+(0,48)
+    // → Transform(680) 笨笨史莱姆 + unlockedSlimePurpleSpawn 置旗（原版无公告）
+    if (enemy && enemy.vanillaId === 686) {
+      this.spawnParticles(enemy.cx, enemy.y + enemy.h - 50, '#E8B8D8', 8, 2.2, { life: 40, grav: 0.02 });
+      this.world.flags.unlockedSlimePurpleSpawn = true;
+      const clumsy = new TownNPC('town_slime_clumsy', enemy.cx, enemy.y + enemy.h + 32);
+      this.entities.add(clumsy, 'npcs');
     }
     // 史莱姆王死亡砸出书呆子史莱姆 670（NPC.cs:80206-80222 case 50 + ViolentlySpawnNerdySlime
     //  :80317-80330）：!unlockedSlimeBlueSpawn → 置旗 + 原地上抛生成
@@ -16988,12 +17392,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const surfaceWater = st.liquid[st.idx(tx, groundY - 1)] > 80;
     // （生态/海洋带判定随 Critter 池尾退役——蜻蜓池直接读 gTile）
     const gTile = st.type[st.idx(tx, groundY)];
-    // ---- 雨天小动物（原版 SpawnAnNPC L2288-2311 friendly 段：草族 critter 块雨天
-    //  整段替换——金鱼上岸散步 230 主导；L2107-2126 香蒲蜻蜓）。
-    //  走本 friendly 通道（原版 FindSpawnTile 独立友好点位，不占敌怪配额）----
+    // ---- 香蒲蜻蜓（L2107-2126：独立于 case2 雨块——tile {2 草,477 修剪草,53 沙}
+    //      + !TooWindyForButterflies + raining + dayTime + Next(2)==0 + y≤worldSurface
+    //      + FindCattailTop。review 修正：原并入雨块的合并门（草/土/神圣 tile 集）
+    //      两偏——香蒲含沙不含土/神圣，且缺 1/2 掷）----
     const hallowGrassT = TILE_BY_KEY['v_109_hallowed_grass_block'];
-    if (isDay && this.world.weather.raining && Math.abs(this.world.weather.windSpeedTarget) < 0.4
-      && !surfaceWater && (gTile === T.GRASS || gTile === T.DIRT || gTile === hallowGrassT)) {
+    const mowedGrassT = TILE_BY_KEY['v_477_mowed_grass_block'];
+    const hallowMowedT = TILE_BY_KEY['v_492_hallowed_mowed_grass_block'];
+    if (this.world.weather.raining && isDay
+      && Math.abs(this.world.weather.windSpeedTarget) < 0.4 && !surfaceWater
+      && (gTile === T.GRASS || gTile === mowedGrassT || gTile === T.SAND)
+      && Math.random() < 0.5) {
       // 香蒲蜻蜓（FindCattailTop :80977：±30×±20 窗口 reservoir 采样 tile519 顶段 frameX≥180）
       const cattailT = TILE_BY_KEY['v_519_cattails'];
       let cx = tx, cy = groundY, nCattail = 1;
@@ -17020,6 +17429,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (Math.random() < 1 / 3) spawnVanilla(dfly(), cx * TILE + 24, cy * TILE);
         return;
       }
+    }
+    // ---- 雨天替换块（L2288-2311：case2 四草族 {2,109,477,492} + raining +
+    //      y≤UnderworldLayer——★无昼夜/无风门（review 摘除旧合并门），夜间雨天
+    //      蚯蚓/上岸金鱼照出）----
+    if (this.world.weather.raining && !surfaceWater
+      && (gTile === T.GRASS || gTile === hallowGrassT || gTile === mowedGrassT || gTile === hallowMowedT)) {
       // 上岸金鱼块：1/400 金蚯蚓 448 → 2/3 蚯蚓 357 → 1/400 金金鱼 593 → 兜底 230
       // 洞穴层（deeperThanRockLayer）先走 gem 分支：1/5 松鼠、再 1/5 兔子（:2289-2298）
       const lavaLineT = this.world.lavaLine || st.h - 200;
@@ -18157,8 +18572,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
       return false;
     }
-    // 联机访客不召唤（Boss 权威在房主——本地召唤=幽灵 Boss 不同步；召唤物也不消耗）
+    // 联机访客不召唤（Boss 权威在房主——本地召唤=幽灵 Boss 不同步；召唤物也不消耗）。
+    // v8 serverAuth 房：改发召唤意图（msg202——服务器 SimHost 权威生成，含 GM 规则门）；
+    // 落位由本端算好（世界 tile 数据两端一致，与下方本地路径同式）。血肉墙走
+    // SpawnWOF 专用链（舌头/推进方向多实体联动）暂不支持意图，维持访客拦截（备案）
     if (this.net && !this.net.policy.isHost) {
+      const rl = this.net.policy.rules;
+      if (rl.serverAuth && key !== 'wall_of_flesh') {
+        if (rl.forbidBossSummon) {
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
+          return false;
+        }
+        const st0 = this.world.store;
+        const tx2 = Math.max(2, Math.min(st0.w - 3, tx));
+        let ty2 = 10;
+        for (; ty2 < this.world.h; ty2++) {
+          if (st0.type[st0.idx(tx2, ty2)] !== 0) break;
+        }
+        this.net.sendSummonIntent(key, tx2 * TILE + 8, Math.max(4, ty2 - 12) * TILE);
+        return true; // 意图已受理——召唤物照常消耗；服务器拒绝时另有 serverNotice
+      }
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
       return false;
     }

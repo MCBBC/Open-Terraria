@@ -322,6 +322,38 @@ export class Enemy extends Entity {
       this.eowAI(game, player);
       return;
     }
+    // ---- 402 星尘织带蠕虫 ai[2] 生命计时（NPC.cs:51402-51461，1:1）----
+    // ai[2] 每 tick +1；285→570 速度 ×1→×0.5（Remap 线性减速）；恰 570 时
+    // 50 尘暴（尘 180/176 各 50% 掷、noGravity、NextVector2Circular(8,8) 初速）
+    // + 速度归一化 ×6 冲刺 + SpawnStardustMark_StardustWorm（:44230-44314 弹 540
+    // 孵化标记 → 星尘生物链——本仓无弹 540 孵化 AI，登记缺口）；≥600 ai[2] 归零
+    // 重开（★不自灭——渐隐由渲染端 num291/drawPrettyStarSparkle 同链消费）。
+    // ★置于玩家死亡早退【前】：原版 type 段（:51402）在 target 检查（:51532）
+    // 之前——玩家死亡 ai2 计时照走（曾误放早退后：玩家被磨死即冻结、渐隐链断）。
+    if (this.vanillaId === 402) {
+      this.ai2 += 1;
+      const LIFE = 600, LIFE_LAST = 570;               // num3/num4（:51404-51405）
+      const spd = Math.hypot(this.vx, this.vy);
+      if (spd >= 1 && this.ai2 <= LIFE_LAST) {
+        // velocity *= Remap(ai2, 285, 570, 1, 0.5)（clamped 线性）
+        const half = LIFE_LAST * 0.5;
+        const k = this.ai2 <= half ? 1
+          : this.ai2 >= LIFE_LAST ? 0.5 : 1 - 0.5 * (this.ai2 - half) / (LIFE_LAST - half);
+        this.vx *= k; this.vy *= k;
+      }
+      if (this.ai2 === LIFE_LAST) {
+        // 尘 180=星尘深蓝(贴图帧均色 51,75,190)/176=星尘浅蓝白(176,194,215)
+        for (let d = 0; d < 50; d++) {
+          game.spawnParticles(this.cx, this.cy,
+            Math.random() < 0.5 ? '#334BBE' : '#B0C2D7',
+            1, 1.3 + Math.random() * 2, { life: 30, damp: 0.97 });
+        }
+        if (spd > 0) { this.vx = (this.vx / spd) * 6; this.vy = (this.vy / spd) * 6; }
+        // SpawnStardustMark_StardustWorm（405/406<2 ∪ 402<3 ∪ 407<1 随机孵化）：
+        // 依赖弹 540 星尘标记孵化链——未移植，登记
+      }
+      if (this.ai2 >= LIFE) this.ai2 = 0;
+    }
     // 玩家死亡（:51532-51539）：TargetClosest 落空 → EncourageDespawn(300) 缓慢消散
     // （EoW flag=false 不加速下钻——靠 despawn 系统离屏倒数收尾）
     if (!player) {
@@ -1234,6 +1266,7 @@ export class Enemy extends Entity {
         case 110: betsyAI(this, game, p); break;                          // AI_110 双足翼龙 551（cs:62266 八槽攻表+rotation 收敛）
         case 111: dd2LightningBugAI(this, game, p); break;                // AI_111 埃特尼亚荧光虫 578（cs:66799 悬停蓄电 682 电弧）
         case 113: this.windyBalloonAI(game, p); break;                    // AI_113 风气球 594（cs:48253 挂史莱姆 ai[0]=-999）
+        case 125: this.balloonSlimeAI(game, p); break;                    // AI_125 笨笨气球史莱姆 686（cs:44009 漂浮悬停+爆裂解救）
         case 117: this.bloodNautilusAI(game, p); break;                  // AI_117 恐惧鹦鹉螺 618（cs:47488 血月钓鱼 Boss）
         case 119: this.dandelionAI(game, p); break;                      // AI_119 蒲公英 628（cs:43254 下风喷籽；非critter勿只登 critterWanderAI）
         case 126: this.statueMimicAI(game, p); break;                    // AI_126 雕像宝箱怪 690（cs:43760 伪装/唤醒/跳跃穿墙）
@@ -4593,12 +4626,20 @@ export class Enemy extends Entity {
         if (this.maxHp === 5) {           // lifeMax==5 门（一次性升级）
           this.maxHp = 25;
           this.hp = 25;
-          this.def.defense += 6;
+          this.def.defense = (this.def.defense ?? 0) + 6;   // defense 可选字段,复合赋值须空合并
           this.def.damage = 20;
         }
         this.fighterAI(game, player);     // aiStyle=3 转战士核
         return;
       }
+    }
+    // 687 神秘青蛙点光（NPC.cs:55974-55979：type==683||687 → (0.25,0.25,0.1)×
+    //  Utils.WrappedLerp(0.75,1,t%120/120)；683 黄城镇史莱姆在 TownNPC 桶自报）
+    if (vid === 687) {
+      const p120 = (visEffectFrames() % 120) / 120;
+      const tri = p120 * 2 > 1 ? 2 - p120 * 2 : p120 * 2;
+      const l = 0.75 + 0.25 * tri;
+      this.lightRGB = [0.25 * l, 0.25 * l, 0.1 * l];
     }
     if (this.ai0 < 0 || this.ai0 > 8) this.ai0 = 0;
     if (this.ai1 < 0) this.ai1 = 100; // 初值：站立约 100t 后开始游走
@@ -5112,6 +5153,77 @@ export class Enemy extends Entity {
       this.x += this.vx; this.y += this.vy;
       if (st.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { pop(); return; }
     }
+  }
+
+  /** AI_125 笨笨气球史莱姆 686（NPC.cs:44009-44139 1:1）：noGravity+noTileCollide
+   *  漂浮体（原版 SetDefaults :17559-17570：lifeMax 1/damage 0）——水平朝
+   *  direction 加速 0.04 至 3+|wind|×2；垂直两态：玩家 400px 内且 CanHit →
+   *  ±0.035 追平高度（±2 钳内），否则前方一列（中心+direction）自底向下扫
+   *  8+num2 格——实心/液体命中 5+num2 内=近距；开阔 vy+0.05 / 有阻 vy-0.1 /
+   *  近距再 -0.2，钳 [-4,2]。湿 → 爆裂死亡（原版另含 collideX/collideY↑ 两支
+   *  ——noTileCollide 下恒 false 不可达；本仓以"嵌入实心"为 collideX 的生成
+   *  兜底等价）。死链 Transform(680)+解锁旗在 Game.onEnemyKilled 686 支。 */
+  private balloonSlimeAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (player && !player.dead) this.facing = player.cx >= this.cx ? 1 : -1;
+    const dir = this.facing;
+    this.visAngle = this.vx * 0.05;                     // rotation（cs:44019）
+    if (this.inWater
+      || st.isSolid(Math.floor(this.cx / TILE), Math.floor((this.y + 4) / TILE))) {
+      // life=-1+active=false → CheckDead 死链——走 die()（hurt 死亡管线）保证
+      // onEnemyKilled 触发（Game 侧 686 支 = Transform(680)+解锁旗+气球碎粒子）
+      this.die(game);
+      return;
+    }
+    // 水平（cs:44055-44070）：加速 0.04；逆行段 0.15/0.1 补偿（125 档，比 113 的
+    // 0.01/0.1/0.05 快——两气球非同参）
+    const num4 = 3 + Math.abs(game.world.weather.windSpeedTarget) * 2;
+    if (Math.sign(this.vx) !== dir || Math.abs(this.vx) < num4) {
+      this.vx += dir * 0.04;
+      if (this.vx * dir < 0) this.vx += Math.abs(this.vx) > num4 ? dir * 0.15 : dir * 0.1;
+      else if (Math.abs(this.vx) > num4) this.vx = dir * num4;
+    }
+    // 目标高差（cs:44017-44031）：zero = 目标中心 − 本体底边；目标在上时
+    // num2 = 高出格数；direction 与目标方位不一致则归 0
+    let num2 = 0, dist = Infinity;
+    if (player && !player.dead) {
+      const zx = player.cx - this.cx, zy = player.cy - (this.y + this.h);
+      if (zy < 0) num2 = Math.trunc(Math.trunc(zy) / -16);
+      dist = Math.hypot(zx, zy);
+      if (dir !== Math.sign(zx)) num2 = 0;
+    }
+    // 前方一列下扫（cs:44072-44092）：深度 8+num2，近距线 5+num2
+    const num5 = Math.floor((this.x + this.w / 2) / TILE) + dir;
+    const num6 = Math.floor((this.y + this.h) / TILE);
+    let open = true, near = false;
+    for (let i = num6; i < num6 + 8 + num2; i++) {
+      if (!st.inBounds(num5, i)) break;
+      const ii = st.idx(num5, i);
+      if ((st.flags[ii] !== 0 && st.isSolid(num5, i)) || st.liquid[ii] > 0) {
+        if (i < num6 + 5 + num2) near = true;
+        open = false;
+        break;
+      }
+    }
+    // 垂直（cs:44093-44138）
+    if (player && !player.dead && dist < 400
+      && canHit(st, this.cx, this.cy, this.w, this.h, player.cx, player.cy, player.w, player.h)) {
+      if (this.cy + this.h / 4 > player.cy + player.h / 4 && this.vy > -2) {
+        this.vy -= 0.035;
+        if (this.vy > 0) this.vy -= 0.035;
+      } else if (this.cy + this.h / 4 < player.cy + player.h / 4 && this.vy < 2) {
+        this.vy += 0.035;
+        if (this.vy < 0) this.vy += 0.035;
+      }
+    } else {
+      if (open) this.vy += 0.05;
+      else this.vy -= 0.1;
+      if (near) this.vy -= 0.2;
+      if (this.vy > 2) this.vy = 2;
+      if (this.vy < -4) this.vy = -4;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
   }
 
   /** AI_119 蒲公英 628（NPC.cs:43254-43318）：非风日快速消散（timeLeft=10）；

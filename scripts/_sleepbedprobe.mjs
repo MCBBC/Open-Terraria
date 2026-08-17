@@ -7,7 +7,7 @@ import puppeteer from 'puppeteer-core';
 import { writeFileSync } from 'node:fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 }, protocolTimeout: 360000 });
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
@@ -15,8 +15,8 @@ await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=sma
 
 const r = await page.evaluate(async () => {
   const t0 = Date.now();
-  while (!(window.__swGame?.player && window.__swGame.world)) {
-    if (Date.now() - t0 > 120000) return { fatal: 'timeout' };
+  while (!(window.__swGame?.player && window.__swGame.world && window.__swTiles)) {
+    if (Date.now() - t0 > 280000) return { fatal: 'timeout' };
     await new Promise((res) => setTimeout(res, 300));
   }
   const g = window.__swGame;
@@ -62,25 +62,19 @@ const r = await page.evaluate(async () => {
     // 相机对准床中心
     g.camera.x = (bx + 4) * 16; g.camera.y = (floorY - 1) * 16;
     p.timeSleeping = 300;   // 全闭眼档
+    // 渲一帧(入住当帧截图)
+
+    g.frame(performance.now());   // 同步驱动一帧(渲染+物理)
     // 存活观察:60 tick
     const alive = [];
     for (let i = 0; i < 60; i++) { g.fixedUpdate(1 / 60); alive.push(p.sleeping ? 1 : 0); }
-    // 截图(以床为中心 320×160 裁剪)
-    const cv = g.renderer.canvas;
-    const scale = cv.width / 1280;
-    const crop = document.createElement('canvas');
-    crop.width = 360; crop.height = 200;
-    const cctx = crop.getContext('2d');
-    // 屏幕坐标:床中心 world → screen
-    const sx = ((bx + 4) * 16 - (g.camera.x - 640)) * scale;
-    const sy = ((floorY - 1) * 16 - (g.camera.y - 400)) * scale;
-    cctx.drawImage(cv, sx - 180 * scale, sy - 100 * scale, 360 * scale, 200 * scale, 0, 0, 360, 200);
+    g.frame(performance.now());
     results.push({
       name, slept, facing: p.facing,
       px: Math.round(p.x), py: Math.round(p.y),
       aliveTicks: alive.reduce((a, b) => a + b, 0),
       bedBottomRow: floorY - 1,
-      png: crop.toDataURL('image/png'),
+      shotTag: name + '-' + Math.round(p.x) + '-' + p.facing,
     });
     // 清床
     for (let col = 0; col < 4; col++) for (let row = 0; row < 2; row++) st.setTileSilent(bx + 2 + col, floorY - 2 + row, 0);
@@ -91,9 +85,48 @@ const r = await page.evaluate(async () => {
 
 if (errors.length) console.log('PAGEERRORS:', errors.slice(0, 5));
 if (r.fatal) { console.log('FATAL:', r.fatal); process.exit(1); }
-for (const res of r) {
-  console.log(`${res.name}: slept=${res.slept} facing=${res.facing} pos=(${res.px},${res.py}) aliveTicks=${res.aliveTicks}/60`);
-  writeFileSync(`/tmp/sleepbed-${res.name}.png`, Buffer.from(res.png.split(',')[1], 'base64'));
-  console.log(`  PNG: /tmp/sleepbed-${res.name}.png`);
+
+
+// 逐床重做:状态设置在 page 里,截图用 page.screenshot(相机对准床中心)
+for (const name of ['A-pillow-right', 'B-pillow-left']) {
+  const st = await page.evaluate(async (nm) => {
+    const g = window.__swGame;
+    const store = g.world.store;
+    const T = window.__swTiles;
+    // 与第一轮同法重建场景(世界已生成,直接找地板)
+    const px0 = Math.floor(store.w / 2);
+    const floorY = Math.floor(g.world.groundLevel) + 3;   // 地表之上,白昼天光
+    const bx = px0 - 10;
+    for (let x = bx; x < bx + 20; x++) {
+      for (let y = floorY - 8; y < floorY; y++) store.setTileSilent(x, y, 0);
+      store.setTileSilent(x, floorY, T['stone_rock'] ?? 1);
+      store.setTileSilent(x, floorY + 1, T['stone_rock'] ?? 1);
+    }
+    const base = nm.startsWith('A') ? 0 : 72;
+    for (let col = 0; col < 4; col++) for (let row = 0; row < 2; row++)
+      store.setTileSilent(bx + 2 + col, floorY - 2 + row, T['bed'], base + col * 18, row * 18);
+    const p = g.player;
+    p.x = (bx + 2) * 16 - 24; p.y = (floorY - 1) * 16 - p.h;
+    p.vx = 0; p.vy = 0; p.sleeping = false;
+    for (let col = 0; col < 4 && !p.sleeping; col++)
+      for (let row = 0; row < 2 && !p.sleeping; row++)
+        g.interactAt(bx + 2 + col, floorY - 2 + row);
+    g.camera.x = (bx + 4) * 16; g.camera.y = (floorY - 1) * 16;
+    p.timeSleeping = 300;
+    for (let i = 0; i < 30; i++) g.fixedUpdate(1 / 60);
+    g.frame(performance.now());
+    // 亮度自检:屏中心 40×40 平均亮度(全黑=场景无光,截图不可用)
+    const cvv = g.renderer.canvas, cc = cvv.getContext('2d');
+    const d = cc.getImageData(600, 380, 40, 40).data;
+    let sum = 0; for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
+    return { slept: p.sleeping, facing: p.facing, px: Math.round(p.x), py: Math.round(p.y),
+             brightness: Math.round(sum / (d.length / 4)) };
+  }, name);
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await page.evaluate(() => { window.__swGame.frame(performance.now()); });
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await page.screenshot({ path: `/tmp/sleepbed-${name}-full.png` });
+  await page.screenshot({ path: `/tmp/sleepbed-${name}.png`, clip: { x: 640 - 200, y: 400 - 130, width: 400, height: 260 } });
+  console.log(`${name}: slept=${st.slept} facing=${st.facing} pos=(${st.px},${st.py}) brightness=${st.brightness} PNG: /tmp/sleepbed-${name}.png`);
 }
 await browser.close();

@@ -9,12 +9,14 @@
 //   origin 中心、scale×1.1、ai0<0 → FlipVertically、num3=Remap(num,0,.6,0,1)×
 //   Remap(num,.6,1,1,0) 包络、光照因子 fromValue（取 1 近似）、深色底×张开角
 //   −π/4×ai0×(1−num) + 内芯 + 主色 + 帧3 白芯层组。972 无帧3 三层（单层 0.3）。
-//   【备案】DrawPrettyStarSparkle 星尘原语未移植（粒子近似，同 402 星尘蠕虫先例）；
+//   刀尖星尘闪光 = DrawPrettyStarSparkle 原语（:27424/:27527-27530/:27568-27571/
+//   :27627/:27664-27667，经 Renderer.prettyStarSparkle——参数表见下方 SWING_SPARKLE）。
 //   997 南瓜弹 321（:12837→Player:41472 屏外 100-300px 召 321 追击）暂缓。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
 import { playEnemyHitSound } from './projTargets';
+import { prettyStarSparkle } from '../render/Renderer';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
@@ -146,6 +148,88 @@ export class SwingArc extends Entity {
       layer(3, -0.1, 0.6, [255, 255, 255], 0.4 * op);
     } else {
       layer(3, 0.01, 1, [255, 255, 255], 0.3 * op);      // NightsEdge 单层（:27422）
+    }
+    this.drawSparkle(ctx, fw);
+  }
+
+  /** 刀尖星尘闪光（各 DrawProj_* 尾段的 DrawPrettyStarSparkle 组，1:1 参数）：
+   *  - 972 永夜刃（:27424）：单笔 @刀尖（相位 Remap(num,0,1,0,π/2)·ai0）
+   *  - 982 圣剑（:27527-27530）/ 997 无头骑士剑（同结构 :27527-27530 段）：8 笔
+   *    循环（沿旋向 −2π·0.025·k 散布、径 (W/2−6)·sc）+ 刀尖大笔
+   *  - 983 真断钢（:27568-27571）：12 笔（相位 Remap(num,0,0.6,0,0.95504415)、
+   *    尺寸 ×0.75；shine=Lerp((255,255,80),(255,60,190),num3)——16 档量化防 tintCache 爆）
+   *  - 984 泰拉刃（:27664-27667）：12 笔（相位 (k−2)）+ 大笔（fatness×1.5）
+   *  flare/包络四参：num / fade(0,0.5,0.5,1)；draw=White(A0)×num3×0.5 → drawDim=op·0.5 */
+  private drawSparkle(ctx: CanvasRenderingContext2D, fw: number): void {
+    const num = this.num, op = this.op;
+    if (op <= 0 || num >= 1) return;
+    const sc = this.scaleCur * 1.1;
+    const remap = (x: number, a: number, b: number, c: number, d: number): number =>
+      x <= a ? c : x >= b ? d : c + ((d - c) * (x - a)) / (b - a);
+    const WHITE: [number, number, number] = [255, 255, 255];
+    const pos = (ang: number, r: number): [number, number] =>
+      [this.cx + Math.cos(ang) * r, this.cy + Math.sin(ang) * r];
+    const FADE: [number, number, number, number] = [0, 0.5, 0.5, 1];
+    const spark = (x: number, y: number, shine: [number, number, number], rot: number,
+      scale: [number, number], fat: [number, number], drawDim: number, shineDim = 1) => {
+      prettyStarSparkle(ctx, 1, x, y, WHITE, shine, num,
+        FADE[0], FADE[1], FADE[2], FADE[3], rot, scale, fat, drawDim, shineDim);
+    };
+    const tip = (phase: number): [number, number] => pos(this.rot + phase * this.ai0, (fw * 0.5 - 4) * sc);
+    switch (this.projId) {
+      case 972:   // :27424（drawColor=White×num3×0.5、shine=color2、rot=π/4、(2,2)/(1,1)）
+        spark(...tip(remap(num, 0, 1, 0, Math.PI / 2)), [80, 40, 180],
+          Math.PI / 4, [2, 2], [1, 1], op * 0.5);
+        break;
+      case 982:
+      case 997: {
+        // 8 笔循环（ang=rot+ai0·k·(−2π)·0.025+相位 π/4 段）+ 刀尖大笔
+        const phase = remap(num, 0, 1, 0, Math.PI / 4);
+        const shine: [number, number, number] = this.projId === 982 ? [255, 255, 80] : [255, 202, 130];
+        const wide = remap(num, 0, 1, 3, 0), tall = remap(num, 0, 1, 4, 1);
+        for (let k = 0; k < 8; k++) {
+          const ang = this.rot + this.ai0 * k * (Math.PI * -2) * 0.025 + phase * this.ai0;
+          const [x, y] = pos(ang, (fw * 0.5 - 6) * sc);
+          spark(x, y, shine, ang, [0, wide * sc], [1 * sc, 1 * sc], op * (k / 9));
+        }
+        if (this.projId === 982) {
+          spark(...tip(phase), shine, 0, [2 * sc, tall * sc], [1 * sc, 1 * sc], op * 0.5);
+        } else {
+          // 997 大笔：Vector2(Remap(num,0,1,4,1))（单分量构造 = 两轴同值）、rot=π/4
+          spark(...tip(phase), shine, Math.PI / 4, [tall * sc, tall * sc], [1 * sc, 1 * sc], op * 0.5);
+        }
+        break;
+      }
+      case 983: {
+        // 12 笔（相位 0.95504415 = 0.6·(π/2+π/4 折角)；尺寸 ×0.75）
+        const phase = remap(num, 0, 0.6, 0, 0.95504415);
+        const n5 = sc * 0.75;
+        const tq = Math.round(op * 16) / 16;
+        const shine: [number, number, number] = [255, 255 - 195 * tq, 80 + 110 * tq];
+        const wide = remap(num, 0, 1, 3, 0), tall = remap(num, 0, 1, 4, 1);
+        for (let k = 0; k < 12; k++) {
+          const ang = this.rot + this.ai0 * k * (Math.PI * -2) * 0.025 + phase * this.ai0;
+          const [x, y] = pos(ang, (fw * 0.5 - 6) * sc);
+          spark(x, y, shine, ang, [0, wide * n5], [1 * n5, 1 * n5], op * (k / 12));
+        }
+        spark(...tip(phase), shine, 0, [2 * n5, tall * n5], [1 * n5, 1 * n5], op * 0.5);
+        break;
+      }
+      case 984: {
+        // 12 笔（相位 (k−2)）+ 大笔（fatness×num×1.5）
+        const phase = remap(num, 0, 1, 0, Math.PI / 4);
+        const shine: [number, number, number] = [34, 177, 76];
+        const wide = remap(num, 0, 1, 3, 0), tall = remap(num, 0, 1, 4, 1);
+        for (let k = 0; k < 12; k++) {
+          const ang = this.rot + this.ai0 * (k - 2) * (Math.PI * -2) * 0.025 + phase * this.ai0;
+          const [x, y] = pos(ang, (fw * 0.5 - 6) * sc);
+          spark(x, y, shine, ang, [0, wide * sc], [1 * sc, 1 * sc], op * (k / 12));
+        }
+        spark(...tip(phase), shine, 0, [2 * sc, tall * sc], [1 * sc * 1.5, 1 * sc * 1.5], op * 0.5);
+        break;
+      }
+      default:
+        break;
     }
   }
 }
@@ -290,6 +374,19 @@ export class TrueNightsEdgeSlash extends Entity {
       [80, 40, 180], this.opacity * 0.95);
     this.tneLayer(ctx, img, fw, fh, this.cx, this.cy, this.rot, sc,
       [155, 255, 100], this.opacity * 0.7);
+    // 刀尖星芒（:27627）：num12=clamp(1−t/80,0.5,1)（伸长回缩半径）、num13=
+    // min(num3,1)（光照 fromValue 取 1 → num3=Remap(t,30,96,1,0)）；
+    // shine=(150,255,100)×num13、draw=White(A0)×Opacity×0.5×num13 → 双 dim；
+    // flare=Opacity、fade(0,1,1,2)、rot=π/4、scale=(2,2)、fatness=One
+    const num12 = Math.max(0.5, 1 - this.t / 80);
+    const num13 = Math.max(0, Math.min(1, (96 - this.t) / 66));
+    const spAng = this.rot + 0.47123894 * this.ai0;
+    const spR = (fw * 0.5 - 4) * sc * num12;
+    prettyStarSparkle(ctx, this.opacity,
+      this.cx + Math.cos(spAng) * spR, this.cy + Math.sin(spAng) * spR,
+      [255, 255, 255], [150, 255, 100], this.opacity,
+      0, 1, 1, 2, Math.PI / 4, [2, 2], [1, 1],
+      this.opacity * num13, num13);
   }
 
   private tneLayer(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement, fw: number, fh: number,

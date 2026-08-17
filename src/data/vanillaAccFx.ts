@@ -61,9 +61,12 @@ export interface AccFx {
   autoReuseGlove?: number; // 力量手套族：近战武器自动连挥（Player.TryAllowingItemReuse :52040-52042）
   flowerBoots?: number;    // 花靴 3017/仙灵靴 3993（GrantArmorBenefits :12682-12688 行走生花）
   yoyoString?: number;   // 悠悠球线：射程 +
-  tileSpeed?: number;    // 采矿/放置加速
-  wallSpeed?: number;    // 铺墙加速
+  tileSpeed?: number;    // 放置加速（砌砖刀族;手持可放置非火把时 tileSpeed+0.5，:12604-12610）
+  wallSpeed?: number;    // 铺墙加速（水泥机族 wallSpeed+0.5 无手持门，:12614-12617）
   tileRange?: number;    // 工具/放置射程 +
+  autoPaint?: number;    // 喷漆器族：放置后自动上漆（:14720/:39935 消费）
+  chiselSpeed?: number;  // 古凿 4056/创造之手：pickSpeed-0.25 挖掘提速（:12610-12612）
+  toolbelt?: number;     // 工具腰带 407：装备生效 blockRange+1（:14873）
   skyStone?: number;     // 天界石族：全属性复合（:12558）
   counterWeight?: number; // 配重球（悠悠球命中触发）
   manaMagnet?: number;   // 魔力磁石：魔力星吸附范围 +

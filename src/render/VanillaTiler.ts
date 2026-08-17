@@ -506,6 +506,8 @@ export function drawTreeCell(
   /** 风摆动值（GetWindCycle 树相位钟，WindSway.ts 注入；0=静态，烘焙路径不传）。
    *  偏移/旋转按原版 DrawTrees :8277-8460：树冠 ±2px/0.08rad、树枝 ±0.06rad */
   sway = 0,
+  /** 冠样式直覆（tree-inspect 解剖台专用；缺省=原版 crownStyleFor 派生，游戏路径不受影响） */
+  crownOverride?: number,
 ): void {
   const style = TREE_SHEET_STYLES[sheet] ?? 0;
   // 棕榈树（tile 323）：树冠帧藏在树干列内（frameX 88-132，无独立标记格）。
@@ -589,9 +591,10 @@ export function drawTreeCell(
     // 树型扫描列：左枝在右侧树干列找地 / 右枝在左侧（原版 xoffset）
     const scanX = x + (fx === 44 ? 1 : fx === 66 ? -1 : 0);
     const scan = scanTreeType(st, scanX, y);
-    const crown = sheet === 5 && trees
-      ? crownStyleFor(scanX, scan.type, scan.floorY, trees)
-      : style;
+    const crown = crownOverride !== undefined ? crownOverride
+      : sheet === 5 && trees
+        ? crownStyleFor(scanX, scan.type, scan.floorY, trees)
+        : style;
     let img: ImageBitmap | HTMLImageElement | null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
     if (fx === 22 || fx === 0) {   // fx=0：1/13 概率的顶冠变体（TreePass 与原版一致）

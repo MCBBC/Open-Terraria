@@ -87,11 +87,76 @@ export const enum Msg {
   NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----
-  RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems, u16 maxPlayers(v4)}
+  RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems, u16 maxPlayers(v4),
+                      //   u8 pvpAllowed(v7), u8 ruleBits(v8 服务器房)}
   SscSync = 201,      // S→C（v6，--ssc 启用时）{str recordJson}——服务器角色档下发。
                       //   record = {hp, maxHp, x, y, inv, armor, dye, savedAt}（id=内部下标，
                       //   同版本 registry 一致）。客户端进房应用覆盖本地角色。
                       //   语义=存档型 SSC（原版 ServerSideCharacter 同款信任模型，非反作弊）
+  SummonIntent = 202, // C→S（v8 服务器房）{str itemKey, f32 x, y, vx, vy}——召唤类物品使用
+                      //   意图（Boss 召唤物/雕像刷怪等 NPC 生成族）。仅 serverAuth 房接受：
+                      //   SimHost 反查物品表确认召唤类 + 规则门（forbidBossSummon）后按原版
+                      //   语义生成（含 Boss 公告链）；非 serverAuth 房整包丢弃（中继房仍走
+                      //   房主本地生成路径）。对齐设计文档 §P4"netMode==1 短路改发消息"。
+                      //   不升 PROTO_VER（增量通道纪律,同 SpectateFocus=150 先例）
+}
+
+// ================= v8 服务器房规则（RoomPolicy 尾部 ruleBits；docs/server-room-plan.md §6） =================
+
+/** 规则位（未知位双端忽略——前向兼容） */
+export const enum RuleBits {
+  /** 服务器权威模拟房：世界/NPC/事件由 SimHost 计算,客户端全按访客语义 */
+  ServerAuth = 1 << 0,
+  /** 禁召唤 Boss（SummonIntent 拒 + 客户端 UI 门禁灰显） */
+  ForbidBossSummon = 1 << 1,
+  /** 禁破坏 tile（msg17 SetTile 置 0 族拒;protectTiles = ForbidBreak|ForbidPlace 同置） */
+  ForbidBreak = 1 << 2,
+  /** 禁放置 tile */
+  ForbidPlace = 1 << 3,
+  /** 禁 PvP（= pvpAllowed 强制关;既有 msg27 bit6 / msg44 墙生效） */
+  ForbidPvp = 1 << 4,
+  /** 禁爆炸物（爆炸族 tile/物品链拒——保护建筑） */
+  ForbidExplosives = 1 << 5,
+  /** 和平模式（SimHost 刷怪短路 + 在场敌怪 EncourageDespawn） */
+  PeaceMode = 1 << 6,
+}
+
+/** 房间规则（lobby 建房/PATCH 热更;gmToken 仅服务器持有不下发） */
+export interface RoomRules {
+  serverAuth: boolean;
+  forbidBossSummon: boolean;
+  forbidBreak: boolean;
+  forbidPlace: boolean;
+  forbidPvp: boolean;
+  forbidExplosives: boolean;
+  peaceMode: boolean;
+}
+
+export const DEFAULT_ROOM_RULES: RoomRules = {
+  serverAuth: false, forbidBossSummon: false, forbidBreak: false,
+  forbidPlace: false, forbidPvp: false, forbidExplosives: false, peaceMode: false,
+};
+
+export function rulesToBits(r: RoomRules): number {
+  return (r.serverAuth ? RuleBits.ServerAuth : 0)
+    | (r.forbidBossSummon ? RuleBits.ForbidBossSummon : 0)
+    | (r.forbidBreak ? RuleBits.ForbidBreak : 0)
+    | (r.forbidPlace ? RuleBits.ForbidPlace : 0)
+    | (r.forbidPvp ? RuleBits.ForbidPvp : 0)
+    | (r.forbidExplosives ? RuleBits.ForbidExplosives : 0)
+    | (r.peaceMode ? RuleBits.PeaceMode : 0);
+}
+
+export function rulesFromBits(bits: number): RoomRules {
+  return {
+    serverAuth: !!(bits & RuleBits.ServerAuth),
+    forbidBossSummon: !!(bits & RuleBits.ForbidBossSummon),
+    forbidBreak: !!(bits & RuleBits.ForbidBreak),
+    forbidPlace: !!(bits & RuleBits.ForbidPlace),
+    forbidPvp: !!(bits & RuleBits.ForbidPvp),
+    forbidExplosives: !!(bits & RuleBits.ForbidExplosives),
+    peaceMode: !!(bits & RuleBits.PeaceMode),
+  };
 }
 
 /** NetModule 表（0-2 对齐原版 NetworkInitializer.cs 注册序：Liquid/Text/Ping；

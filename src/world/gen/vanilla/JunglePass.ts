@@ -20,8 +20,12 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   let zeroX = 0, zeroY = 0;
 
   const applyRandomMovement = (xRange: number, yRange: number) => {
-    x += rng.int(Math.floor(-xRange * scale), Math.floor(xRange * scale));
-    y += rng.int(Math.floor(-yRange * scale), Math.floor(yRange * scale));
+    // ★C# (int) 截断向零（JunglePass.cs:87 `Next((int)((double)(-xRange)*ws), …)`）：
+    //   中尺寸 ws=2.2857… 时 -100×ws=-228.57 → (int)=-228，Math.floor 会得 -229
+    //   （下界差 1 → 掷值偏差 → 胖泥 runner 起点移位 → 后续流位级联，丛林整体
+    //   左移 ~200 列=深层 59↔1 十万格对调根因）。小尺寸 ws=1.5 积恰整数无感。
+    x += rng.int(Math.trunc(-xRange * scale), Math.trunc(xRange * scale));
+    y += rng.int(Math.trunc(-yRange * scale), Math.trunc(yRange * scale));
     y = Math.max(gs.rockLevel, Math.min(h, y)); // 原版 clamp 上界 = maxTilesY（H 非 H-1）
   };
   const placeFirstPassMud = (xSpeedScale: number) => {
@@ -65,6 +69,9 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   const num2 = rng.int(Math.floor(400 * scale), Math.floor(600 * scale) - 1);
   const num3 = Math.floor(25 * scale);
   const i = Math.max(gs.beachLeftEnd + Math.floor(num2 / 2) + num3, Math.min(gs.beachRightStart - Math.floor(num2 / 2) - num3, cx));
+  if (typeof process !== 'undefined' && process.env.JUNGLE_TRACE) {
+    console.log(`[JUNGLE_TRACE] scale=${scale} origin=(${gs.jungleX},${Math.floor((h + gs.rockLevel) / 2)}) mv=(${x - gs.jungleX}) zero=(${zeroX},${zeroY}) cx,cy=(${cx},${cy}) old=(${oldX},${oldY}) giant i=${i} str=${num2} beach=[${gs.beachLeftEnd},${gs.beachRightStart}]`);
+  }
   // JunglePass.cs:50-54：noYChange:true——vy=-20 保持原速直上；缺失时被钳到 ±1
   // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
   tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });

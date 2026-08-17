@@ -523,10 +523,14 @@ export class Player extends Entity {
     wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
+    canFloat: boolean;   // canFloatInWater（:2594——仅两源：甲件 4404 水上漂靴 :12842-12846 ∪ buff265 脚蹼药水 :9592；注意 flipper 饰品不授予）
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
     infoAccs: InfoAccGates;  // 信息饰品门禁(DrawInfoAccs)
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
-    arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
+    arrowDmg: number; ammoSaveDenom: number; kbGlove: boolean; yoyoString: boolean;
+    // ↑省弹掷骰分母（0=无；4=25% 星旋胸 2758 / 5=20% ammoCost80·chloro80·蘑菇矿胸
+    //  1549·化石套·弹药储备药水 / 10=10% 女猎手 3804/4983——PickAmmo :52791-52804
+    //  各档独立掷 Next(N)==0，消费侧按激活档逐档掷）
     magmaStone: boolean;   // 近战命中点燃（岩浆石/火焰护手；StatusNPC:10866/Player.cs:6184）
     quiver: boolean;
     moltenQuiver: boolean;
@@ -536,6 +540,9 @@ export class Player extends Entity {
     beetleDef: boolean;
     wolfAcc: boolean; boc: boolean;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
+    autoPaint: boolean;    // 喷漆器族 2216/3061/5126：放置后自动上漆（:14720-14734）
+    chiselSpeed: boolean;  // 古凿 4056/5126：pickSpeed-0.25（:12610-12612/:13981）
+    toolbelt: boolean;     // 工具腰带 407：装备生效 blockRange+1（:14873-14876）
     flowerBoots: boolean;   // 花靴 3017/仙灵靴 3993（Player.cs:12688 行走生花）
     counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
     manaRegenBonus: number; manaRegenDelayBonus: number;
@@ -600,14 +607,16 @@ export class Player extends Entity {
     let shroomiteSet = false, vortexSet = false, nebulaSet = false, beetleOff = false;
     let beetleDef = false;
     let flipper = false, longInvince = false, spikedBoots = false;
+    let canFloat = false;   // canFloatInWater（4404 甲件；buff265 在消费侧并集）
     let bobberOverride = -1;   // Player.overrideFishingBobber（:1920 初值 -1；浮漂饰品覆写）
   let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
   const infoAccs: InfoAccGates = emptyInfoAccGates(); // 信息饰品门禁(RefreshInfoAccs :12198)
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
-    let ammoSave = false, kbGlove = false, yoyoString = false, autoReuseGlove = false;
+    let ammoSaveDenom = 0, kbGlove = false, yoyoString = false, autoReuseGlove = false;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
+    let autoPaint = false, chiselSpeed = false, toolbelt = false;
     let flowerBoots = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
@@ -620,6 +629,7 @@ export class Player extends Entity {
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
       const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      if (accVid === 4404) canFloat = true;   // 水上漂靴（ApplyEquipFunctional :12842-12846）
       if (accVid === 267) killGuide = true;
       else if (accVid === 1307) killClothier = true;
       // 浮漂饰品 5139-5146（Player.cs:14121-14124 accFishingBobber → fishingSkill+10
@@ -706,7 +716,8 @@ export class Player extends Entity {
         if (fx.goldRing) goldRing = true;
         if (fx.luckyCoin) luckyCoin = true;
         if (fx.discount) discount = true;
-        if (fx.ammoSave || fx.huntressSave) ammoSave = true;
+        if (fx.ammoSave) ammoSaveDenom = ammoSaveDenom ? Math.min(ammoSaveDenom, 5) : 5;
+        if (fx.huntressSave) ammoSaveDenom = ammoSaveDenom ? Math.min(ammoSaveDenom, 10) : 10;
         if (fx.kbGlove) kbGlove = true;
         if (fx.autoReuseGlove) autoReuseGlove = true;   // 力量手套族：近战自动连挥
         if (fx.yoyoString) yoyoString = true;
@@ -715,6 +726,9 @@ export class Player extends Entity {
         if (fx.tileSpeed) tileSpeed = true;
         if (fx.wallSpeed) wallSpeed = true;
         if (fx.tileRange) tileRange = true;
+        if (fx.autoPaint) autoPaint = true;      // 喷漆器族（:14720/:14726-14734）
+        if (fx.chiselSpeed) chiselSpeed = true;  // 古凿/创造之手（:12610-12612/:13981）
+        if (fx.toolbelt) toolbelt = true;        // 工具腰带 407（:14873 blockRange++）
         if (fx.skyStone) skyStone = true;
         if (fx.pStone) pStone = true;
         if (fx.flowerBoots) flowerBoots = true;   // 花靴/仙灵靴（:12688）
@@ -812,7 +826,23 @@ export class Player extends Entity {
       if (_d.move) move += _d.move;
       if (_d.meleeSpd) meleeSpeed += _d.meleeSpd;
       if (_d.manaCostMul) setManaCostMul *= _d.manaCostMul;
-      if (_d.ammoCost80) ammoSave = true;
+      if (_d.ammoCost80) ammoSaveDenom = ammoSaveDenom ? Math.min(ammoSaveDenom, 5) : 5;
+      if (_d.huntressAmmoCost90) ammoSaveDenom = ammoSaveDenom ? Math.min(ammoSaveDenom, 10) : 10;
+    }
+    // ---- 盔甲单件省弹门（Player.cs ApplyEquipFunctional armorPiece.type if-chain +
+    //      :12709 switch 逐件 1:1——提取器 accfx 表漏标 2758/1002 档位键，此处手读直表）：
+    //  星旋胸 2758 → ammoCost75=1/4（:13484）；叶绿头 1002 → chloroAmmoCost80=1/5
+    //  （:13224）；蘑菇矿胸 1549 → ammoCost80=1/5（:13289，accfx 已标 ammoSave 同值）；
+    //  水晶忍者胸 4983 → huntressAmmoCost90=1/10（:13206）；女猎手护甲 3804 →
+    //  huntressAmmoCost90=1/10（:12754）；女猎手旧衬衫 3878 → ammoCost80=1/5（:12797）。
+    //  ★2758/3804 的 accfx dmg/crit 主属性走 vanilla-accfx（配饰循环不含盔甲三件，
+    //  由 DD2_PIECE_FX/本表承载——已核对原版数值一致）----
+    const ARMOR_AMMO_SAVE_VID: Record<number, number> = {
+      2758: 4, 1002: 5, 1549: 5, 4983: 10, 3804: 10, 3878: 5,
+    };
+    for (const v of [hVid, bVid, lVid]) {
+      const dn = ARMOR_AMMO_SAVE_VID[v];
+      if (dn) ammoSaveDenom = ammoSaveDenom ? Math.min(ammoSaveDenom, dn) : dn;
     }
     const sb = activeArmorSetBonus(this);
     if (sb) {
@@ -836,7 +866,7 @@ export class Player extends Entity {
       if (sb.fireWalk) fireWalk = true;
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.anglerSet) anglerSetSpawnReduction = true;   // 渔夫套生成环（NPC.cs:627-630）
-      if (sb.ammoCost80) ammoSave = true;
+      if (sb.ammoCost80) ammoSaveDenom = ammoSaveDenom ? Math.min(ammoSaveDenom, 5) : 5;
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     manaCostMul *= setManaCostMul;   // DD2 散件魔耗乘区并入(2026-08-13)
     }
@@ -898,18 +928,18 @@ export class Player extends Entity {
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
-      jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots,
+      jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots, canFloat,
       treasureMagnet, goldRing, luckyCoin, discount,
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
-      arrowDmg, ammoSave, kbGlove, autoReuseGlove, yoyoString, magmaStone,
+      arrowDmg, ammoSaveDenom, kbGlove, autoReuseGlove, yoyoString, magmaStone,
       iceSkate,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
       beetleDef,
       wolfAcc, boc,
-      tileSpeed, wallSpeed, tileRange, pStone, counterWeight, flowerBoots,
+      tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, flowerBoots,
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
@@ -949,7 +979,12 @@ export class Player extends Entity {
     return 1 + this.equipStats.sentrySlots + (this.buffs.has(BuffType.WarTable) ? 1 : 0);
   }
   get thornsActive(): boolean {
-    return this.buffs.hasThorns || this.turtleSet;
+    return this.thornsAmount > 0 || this.turtleSet;
+  }
+  /** 荆棘反伤乘数 thorns（UpdateBuffs 赋值链：buff14=1 / dryadWard165=0.5(<1 补)）；
+   *  海龟套在消费端覆写 2（Player.cs:30912-30914 num2=turtleThorns?2:thorns——覆写非叠加） */
+  get thornsAmount(): number {
+    return this.buffs.thornsAmount;
   }
   /** 海龟套装（1316-1318 h99|b65|l54,Player.cs:15930-15934 turtleThorns → 反伤 ×2） */
   get turtleSet(): boolean {
@@ -2220,11 +2255,14 @@ export class Player extends Entity {
           wingTime: this.wingTime,
           glide,
           downDash: false,          // isPerformingJump_DownDash 未建模
-          waterFloat: this.inWater && !!eq.flipper,   // ShouldFloatInWater && wet
+          waterFloat: this.inWater
+            && (eq.canFloat || this.buffs.has(BuffType.FlipperPotion))   // canFloatInWater 两源（:12845/:9595）
+            && !this.inputDown && (!this.ridingMount || this.mount.type === 37),   // ShouldFloatInWater :3710-3722 全门
           // ShouldDrawWingsThatAreAlwaysAnimated :30271（坐骑恒禁翼 → !ridingMount）
           shouldDraw: this.vy !== 0 && !this.ridingMount
             && !this.grappleProjs.some((g) => g.latched)
-            && !(this.inWater && !!eq.flipper),
+            && !(this.inWater && ((eq.canFloat || this.buffs.has(BuffType.FlipperPotion))
+              && !this.inputDown && (!this.ridingMount || this.mount.type === 37))),   // ShouldFloatInWater :3710-3722
         });
         this.wingFrame = this.wingFrameScratch.frame;
         this.wingFrameCounter = this.wingFrameScratch.counter;
@@ -4097,12 +4135,18 @@ export class Player extends Entity {
     }
   }
 
+  /** boss 存活在场（GetRespawnTime :38388-38398 扫描结果——Game 死亡分支每帧写入；
+   *  +600t 复活延迟的开关，非 PvP 死亡才计） */
+  bossNearOnDeath = false;
   /** 硬核幽灵态（Player.cs:16894-16901 difficulty==2 → respawn 计时到点 ghost=true；
    *  本仓 Game.respawnPlayer 对 hardcoreDead 拒绝重生 → 计时越过阈值即幽灵相。
-   *  boss 存活 +600 延迟未复刻（本侧不可见 boss 列表，登记偏离——仅幽灵出现时刻） */
+   *  阈值 = GetRespawnTime（:38384-38422）：600t 基准 + boss 在场 600（:38398
+   *  `if (flag) num += 600`）→ 【之后】专家 ×1.5（:38402-38404——boss 在场专家
+   *  = (600+600)×1.5 = 1800，非 900+600） */
   isGhostPhase(world: import('../world/World').World): boolean {
     return this.dead && this.appearance?.difficulty === 2
-      && this.respawnTimer > 600 * (mainExpertMode(world) ? 1.5 : 1);
+      && this.respawnTimer > (600 + (this.bossNearOnDeath ? 600 : 0))
+      * (mainExpertMode(world) ? 1.5 : 1);
   }
 
   // ============ 眼睑状态机（PlayerEyeHelper.cs 全文 1:1） ============

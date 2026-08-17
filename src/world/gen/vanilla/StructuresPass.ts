@@ -70,7 +70,10 @@ const HEART = TILE_BY_KEY['crystal_heart']!;
 export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const isCount = Math.trunc(w * 0.0008);          // 3（4200 宽）
-  const skyLakes = 1;                               // GenVars.skyLakes（w>8000/6000 才 +1/+1）
+  // GenVars.skyLakes = Reset 段定值（WorldGen.cs:11197-11205）：1 + (w>8000) + (w>6000)
+  // → 小 4200=1 / 中 6400=2 / 大 8400=3。曾硬编码 1 → 大尺寸少 2 座天湖（中尺寸少 1），
+  // P|23 流哈希即失配（大 l2222 JS n=74908 ≠ 原版），天湖几何缺失级联下游全图。
+  const skyLakes = 1 + (w > 8000 ? 1 : 0) + (w > 6000 ? 1 : 0);
   const total = isCount + skyLakes;
   const housesX: number[] = [];
   const housesY: number[] = [];

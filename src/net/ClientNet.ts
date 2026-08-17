@@ -6,6 +6,7 @@ import {
   PROTO_MAGIC, PROTO_VER, Msg, NetModule,
   NetWriter, NetReader, FrameParser, TileOp, TileOpAction, readTileBatch, decodeStrip,
   ItemContainer, ItemSyncEntry, INV_SYNC_SIZES, writePlayerItems, readPlayerItems,
+  RoomRules, DEFAULT_ROOM_RULES, rulesFromBits,
 } from './protocol';
 import {
   writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
@@ -40,7 +41,9 @@ export interface RemotePlayerState {
   maxHp: number;
 }
 
-/** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制；v4 尾部 maxPlayers） */
+/** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制；v4 尾部 maxPlayers；
+ *  v8 尾部 ruleBits——服务器房规则，客户端 UI 门禁（召唤物品灰显等），
+ *  世界/NPC 模拟语义不受它影响（访客本地本就不模拟，见 Game.ts:13351 门） */
 export interface RoomPolicyState {
   roomCode: string;
   roomName: string;
@@ -51,6 +54,8 @@ export interface RoomPolicyState {
   maxPlayers: number;
   /** PvP 房（v7）：true 才透传玩家来源弹幕 hostile 位（room.ts 剥离墙的开关） */
   pvpAllowed: boolean;
+  /** v8 服务器房规则（旧 server 无此尾段 → 全 false = 中继房语义不变） */
+  rules: RoomRules;
 }
 
 /** NPC 快照（msg23；房主权威） */
@@ -118,7 +123,7 @@ export class ClientNet {
   mySlot = -1;
   players = new Map<number, RemotePlayerState>();
   /** 房间策略（RoomPolicy 到达前 = 自由房默认） */
-  policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false, maxPlayers: 255, pvpAllowed: false };
+  policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false, maxPlayers: 255, pvpAllowed: false, rules: DEFAULT_ROOM_RULES };
 
   private ws: WebSocket | null = null;
   private parser = new FrameParser();
@@ -459,6 +464,9 @@ export class ClientNet {
           protectItems: r.bool(),
           maxPlayers: (() => { try { return r.u16(); } catch { return 255; } })(),
           pvpAllowed: (() => { try { return !!r.u8(); } catch { return false; } })(),
+          // v8 尾部 ruleBits（旧 server 无尾段 → 全 false = 中继房语义不变）。
+          // pvpAllowed 读失败（更旧 server）时 remaining=0,rules 同样落默认
+          rules: (() => { try { return rulesFromBits(r.u8()); } catch { return DEFAULT_ROOM_RULES; } })(),
         };
         this.hooks.onPolicy?.(this.policy);
         return;
@@ -847,6 +855,13 @@ export class ClientNet {
   sendStrikePlayer(targetSlot: number, rawDmg: number, kbx: number, kby: number, weaponId: number, flags: number) {
     this.send(new NetWriter(Msg.StrikePlayer).u8(targetSlot).i16(rawDmg)
       .i16(kbx).i16(kby).u16(weaponId).u8(flags & 0xff).finish());
+  }
+
+  /** 召唤类物品使用意图（v8 msg202，仅 serverAuth 房；SimHost 校验规则门后生成 NPC。
+   *  Game 在服务器房把召唤物本地 NewNPC 分支改投此消息——对齐设计文档 P4
+   *  "netMode==1 短路改发消息"。中继房不调用（仍走房主本地生成） */
+  sendSummonIntent(itemKey: string, x: number, y: number, vx = 0, vy = 0) {
+    this.send(new NetWriter(Msg.SummonIntent).str(itemKey).f32(x).f32(y).f32(vx).f32(vy).finish());
   }
 
   // ================= 拴绳实体（msg82 module13，房主上行；见 net/leashedSync.ts） =================

@@ -121,6 +121,9 @@ const ACCESSORY = new Set([
   // (Item.cs :29000 仅 useStyle=4;游戏内确为可装备信息饰品,
   //  Player.RefreshInfoAccsFromItemType :12353-12394 将其列为全开 12 项的 OR 源)
   3124, 5358, 5359, 5360, 5361,
+  // 建筑族 4 件:SetDefaults5 default 段区间判断 type>=2214&&type<=2217 →
+  // accessory=true（Item.cs:22346-22352;case 标签不落在任何 case 块,扫描不到）
+  2214, 2215, 2216, 2217,
 ]);
 const VANITY = new Set(scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys());
 const STATS = {};
@@ -208,9 +211,13 @@ const ACC_PATTERNS = [
   ['huntressSave', /huntressAmmoCost90 = true;/], // 10% 概率不耗弹
   ['kbGlove', /kbGlove = true;/],                 // 力量手套：近战击退翻倍
   ['yoyoString', /yoyoString = true;/],            // 悠悠球线：射程 +
-  ['tileSpeed', /equippedAnyTileSpeedAcc = true;/],  // 采矿加速
-  ['wallSpeed', /equippedAnyWallSpeedAcc = true;/],  // 铺墙加速
+  ['tileSpeed', /equippedAnyTileSpeedAcc = true;/],  // 放置加速（手持可放置非火把时 tileSpeed+0.5，:12604-12610）
+  ['wallSpeed', /equippedAnyWallSpeedAcc = true;/],  // 铺墙加速（wallSpeed+0.5 无手持门，:12614-12617）
   ['tileRange', /equippedAnyTileRangeAcc = true;/],  // 工具射程 +
+  // ---- 建筑族补批（:12610-12612/:13981/:14720-14746/:14873-14876）----
+  ['autoPaint', /autoPaint = true;/],            // 喷漆器：放置自动上漆（:39935 消费）
+  ['chiselSpeed', /chiselSpeed = true;/],        // 古凿：pickSpeed-0.25（挖掘冷却 ÷ 4/3）
+  ['toolbelt', /blockRange\+\+;/],               // 工具腰带 407：装备生效 blockRange+1（:14873）
   ['skyStone', /skyStoneEffects = true;/],        // 天界石族：全属性复合（:12558）
   ['counterWeight', /counterWeight = \d+;/],      // 配重球（悠悠球命中触发，暂存）
   ['manaMagnet', /manaMagnet = true;/],           // 魔力磁石：魔力星吸附

@@ -13,15 +13,16 @@ import { Enemy } from '../src/entities/Enemy';
 import { RNG } from '../src/core/rng';
 
 function critterWorld() {
-  // ★世界宽 900：beachDistance=380 的海岸带外才有非海滩草/沙
-  //  （2026-08-17 友好轮 isBeach 支接入后,400 宽迷你世界全图落海岸带 →
-  //   friendly 轮被海鸥 602 整支截胡——原版语义即如此,非法形态世界须加宽）
-  const w = new World(900, 600, 42, 'critter-parity');
+  // ★世界宽 1300：beachDistance=380 海岸带 (0,380)∪(920,1300) 外的中央带
+  //  够宽放整片沙面——2026-08-17 友好轮 isBeach 支接入后,窄带世界沙面落
+  //  海岸带会被海鸥 602 截胡/采样窗边缘轮全被 CheckNotSpawningOnScreen 拒
+  const w = new World(1300, 600, 42, 'critter-parity');
   w.groundLevel = 100; w.rockLevel = 200;
   const st = w.store;
   // 地表 y=100 草/沙平台（surfaceSpawn = y ≤ groundLevel），玩家站 y=96
-  for (let x = 300; x < 560; x++) st.setTileSilent(x, 100, 3 /* grass=内部id3 */);
-  for (let x = 560; x < 640; x++) st.setTileSilent(x, 100, 22 /* sand=内部id22 */);
+  for (let x = 400; x < 600; x++) st.setTileSilent(x, 100, 3 /* grass=内部id3 */);
+  for (let x = 600; x < 700; x++) st.setTileSilent(x, 100, 22 /* sand=内部id22 */);
+  for (let x = 700; x < 920; x++) st.setTileSilent(x, 100, 3);
   return { w, st };
 }
 
@@ -47,7 +48,7 @@ function rollMany(w: World, _st: unknown, tileX: number,
 describe('环境小动物生成链（case 2/53 真序）', () => {
   it('沙地落脚恒出蝎 366/367（case 53 Next(366,368)）', () => {
     const { w } = critterWorld();
-    const c = rollMany(w, null as never, 600, { hour: 12 }, 200);
+    const c = rollMany(w, null as never, 650, { hour: 12 }, 200);
     const total = (c[366] ?? 0) + (c[367] ?? 0);
     expect(total).toBeGreaterThan(100);            // 无概率门：沙列落脚即出（采样窗边缘有草列稀释）
     expect(c[366] ?? 0).toBeGreaterThan(30);       // 两态各半
@@ -56,31 +57,31 @@ describe('环境小动物生成链（case 2/53 真序）', () => {
 
   it('夜猫头鹰：夜+草出 611（1/5），白天 0 只', () => {
     const { w } = critterWorld();
-    const night = rollMany(w, null as never, 430, { night: true }, 400);
+    const night = rollMany(w, null as never, 500, { night: true }, 400);
     expect((night[611] ?? 0) + (night[689] ?? 0)).toBeGreaterThan(40);  // ~1/5
-    const day = rollMany(w, null as never, 430, { hour: 12 }, 400);
+    const day = rollMany(w, null as never, 500, { hour: 12 }, 400);
     expect((day[611] ?? 0) + (day[689] ?? 0)).toBe(0);
   });
 
   it('晨间鸟表(<9:30)出 297/298/74；正午不再走晨表（有鸟表二兜着）', () => {
     const { w } = critterWorld();
-    const morn = rollMany(w, null as never, 430, { hour: 8 }, 400);
+    const morn = rollMany(w, null as never, 500, { hour: 8 }, 400);
     expect((morn[297] ?? 0) + (morn[298] ?? 0)).toBeGreaterThan(10);
-    const noon = rollMany(w, null as never, 430, { hour: 12 }, 400);
+    const noon = rollMany(w, null as never, 500, { hour: 12 }, 400);
     // 鸟表二（1/2 无昼夜门）:正午仍有鸟族
     expect((noon[297] ?? 0) + (noon[298] ?? 0) + (noon[74] ?? 0) + (noon[442] ?? 0)).toBeGreaterThan(50);
   });
 
   it('尾部表兜底：兔 46/松鼠 299|538 夜间照出（链无昼夜门）', () => {
     const { w } = critterWorld();
-    const night = rollMany(w, null as never, 430, { night: true }, 600);
+    const night = rollMany(w, null as never, 500, { night: true }, 600);
     expect(night[46] ?? 0).toBeGreaterThan(20);
     expect((night[299] ?? 0) + (night[538] ?? 0)).toBeGreaterThan(5);
   });
 
   it('白天草链：兔/松鼠照常（原版行为不受昼夜门影响）', () => {
     const { w } = critterWorld();
-    const day = rollMany(w, null as never, 430, { hour: 12 }, 400);
+    const day = rollMany(w, null as never, 500, { hour: 12 }, 400);
     expect(day[46] ?? 0).toBeGreaterThan(10);
   });
 });
@@ -164,5 +165,92 @@ describe('松鼠黑化彩蛋 + 蝴蝶物种槽（2026-08-17 修复批）', () =>
     const e = Enemy.fromVanilla(661, 40 * 16, 50 * 16)!;
     for (let t = 0; t < 30; t++) e.fixedUpdate(1 / 60, hooks);
     expect(e.ai2).toBeLessThanOrEqual(60);   // 渐隐上限 50/60,物种掷不触发
+  });
+});
+
+describe('DropBait 掷骰核心（WorldGen.cs:66304-66480 纯函数）', () => {
+  it('185 装饰帧带(fy0+fx<214) 1/6 掷蚯蚓;带外(234+)不掷', async () => {
+    const { dropBaitRoll } = await import('../src/world/DropBait');
+    // rand 首掷恒最小:0<1/6 命中,次掷(金)0<1/400 命中
+    let i = 0;
+    const hit = dropBaitRoll(185, 0, 0, false, () => { i++; return i <= 2 ? 0 : 0.9; });
+    expect(hit?.kind).toBe('worm');
+    expect(hit?.gold).toBe(true);
+    const miss = dropBaitRoll(185, 234, 0, false, () => 0);
+    expect(miss).toBeNull();                       // fx>=214 且 fy!=18 → 带外
+  });
+
+  it('花靴 ×10000:fx>=108 自长植株 1/400 命中值(0.001)不再掷;fx<108 照掷', async () => {
+    const { dropBaitRoll } = await import('../src/world/DropBait');
+    // rand=0.001:无靴 <1/400(0.0025) 命中;有靴 <1/4e6(2.5e-7) 不命中
+    expect(dropBaitRoll(3, 108, 0, false, () => 0.001)?.kind).toBe('worm');
+    expect(dropBaitRoll(3, 108, 0, true, () => 0.001)).toBeNull();
+    expect(dropBaitRoll(3, 107, 0, true, () => 0)?.kind).toBe('worm');
+  });
+
+  it('grubby 序贯族型:1/4→486;再 1/12→487 覆写;普通落 485', async () => {
+    const { dropBaitRoll } = await import('../src/world/DropBait');
+    // sheet 61:grub 80×1.25=100;rand 序列:首掷 0(命中) → 0.5(≥1/4 不改) → 0.5(≥1/12 不改)
+    let i = 0;
+    const seq = (arr: number[]) => () => arr[Math.min(i++, arr.length - 1)];
+    i = 0;
+    expect(dropBaitRoll(61, 0, 0, false, seq([0, 0.5, 0.5]))?.grubType).toBe(485);
+    i = 0;
+    expect(dropBaitRoll(61, 0, 0, false, seq([0, 0.1, 0.5]))?.grubType).toBe(486);
+    i = 0;
+    expect(dropBaitRoll(61, 0, 0, false, seq([0, 0.1, 0.01]))?.grubType).toBe(487);
+  });
+
+  it('墓地 worm→606 覆金;非墓地金→448/普通→357', async () => {
+    const { baitWormType } = await import('../src/world/DropBait');
+    expect(baitWormType(true, true)).toBe(606);
+    expect(baitWormType(false, true)).toBe(448);
+    expect(baitWormType(false, false)).toBe(357);
+  });
+
+  it('637 狱草 lava:1/100 掷,1/2 选 654/653', async () => {
+    const { dropBaitRoll } = await import('../src/world/DropBait');
+    let i = 0;
+    const seq = (a: number[]) => () => a[Math.min(i++, a.length - 1)];
+    i = 0;
+    expect(dropBaitRoll(637, 0, 0, false, seq([0, 0.4]))?.lavaType).toBe(654);  // 0.4<0.5
+    i = 0;
+    expect(dropBaitRoll(637, 0, 0, false, seq([0, 0.6]))?.lavaType).toBe(653);
+  });
+});
+
+describe('review 修正批：深度门/tile 集对齐（case 147/161/53 无 flag10）', () => {
+  function deepWorld() {
+    const w = new World(400, 600, 42, 'deep-parity');
+    w.groundLevel = 100; w.rockLevel = 200;
+    const st = w.store;
+    for (let x = 100; x < 180; x++) st.setTileSilent(x, 250, 22 /* sand 深层 */);
+    for (let x = 200; x < 280; x++) st.setTileSilent(x, 250, 23 /* snow 深层 */);
+    return { w, st };
+  }
+  function rollDeep(w: World, tileX: number, night: boolean, n: number): Record<number, number> {
+    const sp = new VanillaSpawner(w);
+    sp.setPlayerFlags(false, false);
+    w.clock.timeOfDay = night ? 0.95 : 0.5;
+    (sp as unknown as { spawnFriendlyCycle: boolean }).spawnFriendlyCycle = true;
+    const counts: Record<number, number> = {};
+    for (let k = 0; k < n; k++) {
+      const r = sp.spawn(tileX * 16 + 8, 246 * 16, new RNG(k * 104729 + 7), 24, 14);
+      if (r) {
+        const v = (r as unknown as { vanillaId: number }).vanillaId;
+        counts[v] = (counts[v] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+  it('深层沙地（surfaceSpawn=false）照样出蝎 366/367', () => {
+    const { w } = deepWorld();
+    const c = rollDeep(w, 140, false, 200);
+    expect((c[366] ?? 0) + (c[367] ?? 0)).toBeGreaterThan(80);
+  });
+  it('深层雪原照样出企鹅 148/149', () => {
+    const { w } = deepWorld();
+    const c = rollDeep(w, 240, false, 200);
+    expect((c[148] ?? 0) + (c[149] ?? 0)).toBeGreaterThan(120);
   });
 });

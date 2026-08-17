@@ -424,7 +424,9 @@ export class VanillaSpawner {
   /** 造怪入口：netId 可为负（SetDefaultsFromNetId 映射）；
    *  ai0/ai1 = 原版 SpawnNPC 第 6/7 参（如攀爬者 101 的锚点格，NPC.cs:4040） */
   /** 萤火虫四向附加（dx,dy ∈ {(-16,0),(16,0),(0,-16),(0,16)}，各独立掷
-   *  1/fireFlyMultiple；fireFlyMultiple 999999 绝迹哨兵经 1/999999 天然关闭） */
+   *  1/fireFlyMultiple；fireFlyMultiple 999999 绝迹哨兵经 1/999999 天然关闭）。
+   *  ax/ay（绝对像素）非空时 Game 侧按绝对位落（香蒲蜻蜓附加落 cattail 顶±16，
+   *  相对主怪 spawn 位无意义——review 批补） */
   private queueFireflyExtras(rng: RNG, npc: number): void {
     const m = Math.max(1, this.world.fireFlyMultiple);
     for (const [dx, dy] of [[-16, 0], [16, 0], [0, -16], [0, 16]] as const) {
@@ -451,6 +453,12 @@ export class VanillaSpawner {
     const baseId = map?.base ?? netId;
     const e = Enemy.fromVanilla(baseId, x, y);
     if (!e) return null;
+    // 非默认落位（≠spawn 位 spawnTileX*16+8 / spawnTileY*16）：Game 侧放置段
+    // （critters 找地面/water 水下扫描）不得覆写——香蒲顶蜻蜓/海滩干隙线水表等
+    // 自定义坐标会被挪到玩家落点（review 批补）
+    if (x !== this.spawnTileX * TILE + 8 || y !== this.spawnTileY * TILE) {
+      (e as unknown as { customSpawnPos?: boolean }).customSpawnPos = true;
+    }
     const ov = NET_ID_OVERRIDE[String(netId)];
     e.vanillaNetId = netId;
     // ---- sizeScaleOverride 消费链（批次B 落地，ScaleStats.netIdSpawnScale 1:1）----
@@ -1888,8 +1896,8 @@ export class VanillaSpawner {
         const main = rollLuck(this.playerLuck, 400, () => rng.next()) === 0
           ? 601 : this.rollDragonflyType(t, rng);
         const b = this.spawnNPC(ct.x * TILE + 8, ct.y * TILE, main, rng);
-        if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: -16, dy: 0 });
-        if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 16, dy: 0 });
+        if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 0, dy: 0, ax: ct.x * TILE + 8 - 16, ay: ct.y * TILE });
+        if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 0, dy: 0, ax: ct.x * TILE + 8 + 16, ay: ct.y * TILE });
         return b;
       }
     }
@@ -1901,7 +1909,7 @@ export class VanillaSpawner {
     //  tile 门 = case 2/109/477/492 或地下任意（default: y>worldSurface → goto case 2）；
     //  147/161/60/53 走各自 switch case（雪原/丛林蛙/沙地小动物），须排除
     const gemTileOK = !(t === T.JUNGLE_GRASS || t === T.SNOW || t === T.ICE || t === T.SAND);
-    if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && this.world.weather.raining && gemTileOK
+    if (this.spawnFriendlyCycle && !this.waterTile && this.world.weather.raining && gemTileOK
       && !friendlyBlocked
       && this.deeperThanRockLayer && this.spawnTileY <= st.h - 200) {
       if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
@@ -1909,24 +1917,25 @@ export class VanillaSpawner {
     }
     // ---- 小动物（spawnFriendly 段 L2006-2535，switch case 147/161/60/53/2 链）----
     //  日食白天小动物段整体关闭（L709 门，friendlyBlocked）。
-    //  （昼夜门在各支内——原版链本身无 dayTime 门，2026-08-17 摘除旧"白天"外门）
+    //  ★case 147/161/53（企鹅/蝎）原版【无 flag10/深度门】——地下雪原/沙漠同样
+    //  出（review 修正:曾误并入 surfaceSpawn 门）;case 2 草族链各支才带 flag10。
+    //  蝎的水下支已在上方水面线段先行 return。
+    if (this.spawnFriendlyCycle && !this.waterTile && !friendlyBlocked &&
+      (t === T.SNOW || t === T.SNOW_BRICK)) {
+      if (N(2)) return D(148);
+      return D(149);
+    }
+    if (this.spawnFriendlyCycle && !this.waterTile && !friendlyBlocked && t === T.SAND) {
+      return D(rng.next() < 0.5 ? 366 : 367);   // case 53：Next(366,368) 黑/普各半
+    }
+    // （2026-08-17 重构为原版 case 2 链真序：昼夜门下放到各支——链本身无 dayTime
+    //  门，兔/松鼠/鸟夜间照出；旧"N(15) 包裹 + 森林概率表(蚯蚓/蚱蜢/鼠混编)"
+    //  为自创近似已废——蚯蚓/蚱蜢的正源是割草 DropBait（Game breakTile 掷），
+    //  鼠走墓地 610/地下链 300。tile 门 = case 2/109/477/492 四草族——★DIRT 不在
+    //  原版 case 2（地表泥土落 default 空过，review 摘除旧超集））
     if (this.spawnFriendlyCycle && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
-      (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === T.MOWED_GRASS
-        || t === T.SAND)) {
-      // ---- 沙地蝎（switch case 53，NPC.cs:2223-2225：黄沙落脚即出 Next(366,368)
-      //      黑蝎 367/蝎 366 各半——水下支已在上方水面线段先行 return）----
-      if (t === T.SAND) return D(rng.next() < 0.5 ? 366 : 367);
-      // （2026-08-17 重构为原版 case 2 链真序：昼夜门下放到各支——链本身无 dayTime
-      //  门，兔/松鼠/鸟夜间照出；旧"N(15) 包裹 + 森林概率表(蚯蚓/蚱蜢/鼠混编)"
-      //  为自创近似已废——蚯蚓/蚱蜢的正源是割草 DropBait（Game 割植物分支），
-      //  鼠走墓地 610/地下链 300）
-      const grassFam = t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS
-        || t === T.HALLOW_MOWED_GRASS || t === T.DIRT;   // 草族（DIRT 随旧节保留超集）
-      // 雪原小动物（switch case 147/161：企鹅 Next(2) 两态——先于草族链）
-      if (t === T.SNOW || t === T.SNOW_BRICK) {
-        if (N(2)) return D(148);
-        return D(149);
-      }
+      (t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS)) {
+      const grassFam = true;   // 外门即草族四 tile
       // ---- 夜间猫头鹰（NPC.cs:2345-2354：!rain && 夜 && Next(5)==0 && flag10）：
       //      RollBadLuckExtreme(100)==0 → 689 金猫头鹰（1/100 近似），else 611 ----
       if (!this.dayTime && !this.world.weather.raining && grassFam && N(5)) {
@@ -1977,9 +1986,12 @@ export class VanillaSpawner {
     //  Next(3)==0 → 1/5 宝石松鼠；否则 1/5 宝石兔（合计 1/15 + 2/15 ≈ 1/5）；
     //  未命中则原版 switch 空过、落后续 else-if 链（地牢/陨石…），此处同序放行。
     //  tile 门同雨天支（case 2/default-underground；147/161/60/53 各有独立 case 须排除）。
-    //  （原版该块外层为 spawnFriendly 小动物段；本仓小动物沿用 dayTime 简化门）
-    if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && !this.surfaceSpawn && gemTileOK && !friendlyBlocked
+    //  （原版尾部链对 flag11 落点同样先滚金兔 443（1/400 无门掷,review 补）;
+    //  宝石掷未中=原版 break 空过落 null 兜底——**无**普通兔兜底(else 46 只属
+    //  flag10 地表支);昼夜门同摘——原版尾部链无 dayTime 门,夜间照出）
+    if (this.spawnFriendlyCycle && !this.waterTile && !this.surfaceSpawn && gemTileOK && !friendlyBlocked
       && this.spawnTileY >= this.world.rockLevel && this.spawnTileY <= st.h - 200) {
+      if (N(400)) return D(443);
       if (N(3)) {
         if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
       } else if (N(5)) {
@@ -2463,10 +2475,11 @@ export class VanillaSpawner {
             if (N(4)) this.pendingCritterExtras.push({ npc: 356, dx: 16, dy: 0 });
             return b;
           }
-          // 起风瓢虫 604/金 605（:4153-4185）：Next(butterflyChance/2)==0（起风日
-          //  期望≈1/5，以 1/5 近似该复合档——butterflyChance 夜掷基数不重算）+
+          // 起风瓢虫 604/金 605（:4153-4185）：Next(butterflyChance/2)==0（review 批
+          //  修正：随每日掷的 butterflyChance 收敛——曾写死 1/5，仅 butterfly=10 日等价）+
           //  四段附加（2/3+1/2+1/3+1/4 逐只 604）
-          if (tooWindyFB && dryDay && N(5) && this.surfaceSpawn) {
+          if (tooWindyFB && dryDay && N(Math.max(1, Math.floor(this.world.butterflyChance / 2)))
+            && this.surfaceSpawn) {
             const b = D(gold() ? 605 : 604);
             if (!N(3)) this.pendingCritterExtras.push({ npc: 604, dx: 0, dy: 0 });
             if (N(2)) this.pendingCritterExtras.push({ npc: 604, dx: 0, dy: 0 });
@@ -2501,8 +2514,8 @@ export class VanillaSpawner {
           if (ct) {
             const main = gold() ? 601 : this.rollDragonflyType(t, rng);
             const b = this.spawnNPC(ct.x * TILE + 8, ct.y * TILE, main, rng);
-            if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: -16, dy: 0 });
-            if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 16, dy: 0 });
+            if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 0, dy: 0, ax: ct.x * TILE + 8 - 16, ay: ct.y * TILE });
+            if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 0, dy: 0, ax: ct.x * TILE + 8 + 16, ay: ct.y * TILE });
             return b;
           }
         }
@@ -2518,7 +2531,10 @@ export class VanillaSpawner {
         };
         const birdTilesA = t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS
           || t === T.HALLOW_MOWED_GRASS;
+        // A：晨间时段门 Main.time<18000（day 轴 0=4:30 → 18000=9:30）——曾漏,
+        //  全天出晨表鸟（review 批补，原版 :4244）
         if (!this.waterTile && num46 < st.w / 3 && birdTilesA && N(4)
+          && this.world.clock.hourFloat < 9.5
           && this.spawnTileY <= this.world.groundLevel
           && this.countNpc(74) + this.countNpc(297) + this.countNpc(298) < 6) {
           return D(birdRoll());
@@ -2582,7 +2598,7 @@ export class VanillaSpawner {
             if (low > this.spawnTileY) low = this.spawnTileY;
             if (high > this.spawnTileY) high = this.spawnTileY;
           }
-          if (N(10)) return null;   // 9/10 空过
+          if (!N(10)) return null;  // 原版 Next(10)!=0 → return（9/10 空过；曾写反成 1/10）
           const r = rng.int(0, 3);
           // r=0/1 无有效线 → switch 空过 = 本轮空过（原版海滩支内 return 语义）
           if (r === 0) return low > 0 ? this.spawnNPC(x, low * TILE, 625, rng) : null;
@@ -2949,7 +2965,7 @@ export class VanillaSpawner {
   /** 萤火虫成群附加队列（原版 :2327-2344/:4419-4433/:5767-5782 主只后四向各
    *  1/fireFlyMultiple 独立掷 SpawnNPC）——spawn() 单返回值只交付主只，附加以
    *  像素偏移入队，Game.trySpawnEnemy 落位段消费（消费后清空） */
-  pendingCritterExtras: Array<{ npc: number; dx: number; dy: number }> = [];
+  pendingCritterExtras: Array<{ npc: number; dx: number; dy: number; ax?: number; ay?: number }> = [];
   /** NPC.AnyHelpfulFairies（:90885）：场上存在 ai[2]>1 的跟随态仙女 583/584/585
    *  ——Game 每周期喂入（spawner 无实体桶访问） */
   fairyHelpfulActive = false;

@@ -27,6 +27,7 @@ import {
 } from '../data/vanillaTownAttack';
 import { TownShot } from './TownShot';
 import { visEffectFrames, mouseTextColorApprox } from './Enemy';
+import { BuffType } from '../stats/Buffs';
 
 export interface NpcHome { x: number; y: number; }
 
@@ -672,6 +673,9 @@ export class TownNPC extends Entity {
   /** 当前发射档 num46/55/65(连发升级链推进) */
   private atkNextShot = 0;
   private atkBurstIdx = 0;
+  /** 树妖祝福光环弹 586 弹龄（AI_111 自身 ai[0]——出生(atkTick 24)起计，>=570 熄灭；
+   *  半径渐扩 300→600→1200 的相位源）。非树妖恒 0 */
+  private wardT = 0;
   /** world.flags.hardMode 缓存(attackUpdate 每 tick 刷新) */
   private hardModeFlag = false;
   /** 633 狼人态缓存(attackUpdate 每 tick 刷新,ShouldBestiaryGirlBeLycantrope
@@ -1625,6 +1629,15 @@ export class TownNPC extends Entity {
     }
   }
 
+  /** NewBubbleNPC 的表情挑选（EmoteBubble.cs:295-330 PickNPCEmote：多 Probe 池
+   *  随机并集——TownNPCs/Emotions/Biomes/Critters/Items/Bosses/Debuffs/Events/
+   *  Weather 各按概率注入 + ProbeExceptions NPC 专属池）。★boss 在场时整池换成
+   *  ProbeCombat（战斗表情）。全量池庞大，此处取 ProbeEmotions 基池（:Emotions
+   *  15 项）近似并登记；树妖(19↔20 勘误:对话特判是 type 19/22——ProbeExceptions
+   *  :EmoteBubble.cs 内 other 相关池未展开）。 */
+  private static readonly NPC_EMOTE_POOL: readonly number[] =
+    [0, 1, 2, 3, 15, 16, 17, 87, 91, 134, 135, 136, 137, 138, 139];
+
   /** 社交/表演帧带（FindFrame NPC.cs:69577-70152 的 ai[0]∈{2,3,4,6,7,9,16,17}
    *  分支逐条 1:1）。时间线用 tick 近似原版渲染帧 counter（本仓固定 60fps 同速）。
    *  表情触发挂在帧号精确时刻（16/70/160/216/320/40/100），天然单次 */
@@ -1664,16 +1677,18 @@ export class TownNPC extends Entity {
         break;
       }
       case 7: {
-        // 面向玩家（:69721-69760）：16t 冒 112（NPC 头像气泡 NewBubbleNPC）、
-        // 160t 冒 60；[16,128) 与 [160,220) 说话帧 −2 交替
+        // 面向玩家（:69721-69760）：16t/160t 冒 NewBubbleNPC——★第二参是【时长 tick】
+        // 非表情 id（EmoteBubble.cs:134 签名 NewBubbleNPC(anchor, time, other)，表情
+        // 由 PickNPCEmote 随机选；112/60 此前误当表情 id）；[16,128) 与 [160,220)
+        // 说话帧 −2 交替
         let f = 0;
         if (t < 16) f = 0;
         else if (t < 128) f = t % 16 < 8 ? base - 2 : 0;
         else if (t < 160) f = 0;
         else if (t < 220) f = t % 12 < 6 ? base - 2 : 0;
         this.frame = f;
-        if (t === 16) spawnEmote(this, 112);        // NewBubbleNPC(112)
-        if (t === 160) spawnEmote(this, 60);        // NewBubbleNPC(60)
+        if (t === 16) spawnEmote(this, this.npcEmotePick(this.rng), 112);   // NewBubbleNPC(anchor,112t)
+        if (t === 160) spawnEmote(this, this.npcEmotePick(this.rng), 60);   // NewBubbleNPC(anchor,60t)
         if (t >= 220) s.frameT = 0;
         break;
       }
@@ -1712,9 +1727,16 @@ export class TownNPC extends Entity {
         else if (t < 326) theirs = base - 1;
         this.frame = s.kind === 3 ? mine : theirs;
         if (s.kind === 3) {
-          if (t === 70 && s.other) spawnEmote(s.other, 90);   // 对方"…"
-          if (t === 216) spawnEmote(this, 70);                // 自己开讲
-          if (t === 320) spawnEmote(this, 100);               // 自己"?!"
+          // 结对聊天表情（:69899-69942）：num92/num93 默认 −1，仅三处置值——
+          //  ==216 → num92=70（自己）、==320 → num92=100（自己）、==70 → num93=90
+          //  （对方 nPC.CanTalk 门）。NewBubbleNPC(anchor, 时长, 对方锚)——★每次事件
+          //  【单泡】（锚在说话者/回应者间切换，非两位各一；RPS ai16 才是双泡
+          //  :70149-70150）；第二参是时长 tick 非表情 id，表情 = PickNPCEmote(other)
+          //  随机（90/70/100 此前误当表情 id）。第三锚=对方（气泡指向），本仓
+          //  facing 已朝对方=尾巴方向等效
+          if (t === 216) spawnEmote(this, this.npcEmotePick(this.rng, s.other), 70);
+          if (t === 320) spawnEmote(this, this.npcEmotePick(this.rng, s.other), 100);
+          if (t === 70 && s.other) spawnEmote(s.other, this.npcEmotePick(this.rng, this), 90);
         }
         if (t >= 420) s.frameT = 0;
         break;
@@ -1753,6 +1775,13 @@ export class TownNPC extends Entity {
       }
     }
     this.frameT = 0;
+  }
+
+  /** PickNPCEmote 近似：从情绪基池随机挑一项（见 NPC_EMOTE_POOL 注——全量 Probe
+   *  池未展开，通用情绪近似；rng=实例随机源保持种子一致性） */
+  private npcEmotePick(rng: () => number): number {
+    const pool = TownNPC.NPC_EMOTE_POOL;
+    return pool[Math.floor(rng() * pool.length) % pool.length];
   }
 
   /** 舞蹈音符尘 ×8（:69665-69678）：dust 139-143 随机（NewDust 后逐字段覆写） */
@@ -2167,7 +2196,9 @@ export class TownNPC extends Entity {
         || !this.dangerNear) return false;
       const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
       const target = this.pickSideTarget(world, game, range);
-      if (!target) return false;
+      // 树妖特例（:55936-55940）：目标全失 LOS 仍进入 ai[0]=14 施法态（净化脉冲
+      // 586 是自身光环弹不需瞄准）——else if (type == 20) 无条件入态分支
+      if (!target && this.vanillaId !== 20) return false;
       let chance = TOWN_ATTACK_CHANCE[this.vanillaId] ?? 1;
       // num3 = 进度强化链频率除数(:53413 起 19 项累计;2026-08-14 前恒 2 近似已废)
       // tipsy = 实例位（NPC.tipsy :93179,669 麦酒爆炸施加——非世界旗标）
@@ -2185,7 +2216,8 @@ export class TownNPC extends Entity {
       this.atkTick = 0;
       this.atkBurstIdx = 0;
       this.atkNextShot = (params as TownShotParams | undefined)?.shootTick ?? 1;
-      this.facing = (target as { cx: number }).cx < this.cx ? -1 : 1;
+      if (target) this.facing = target.cx < this.cx ? -1 : 1;   // 树妖无目标分支不转向
+      this.wardT = 0;             // 586 光环弹龄清零（发射于 atkTick 24）
       return true;
     }
     // ---- 态内推进 ----
@@ -2193,6 +2225,12 @@ export class TownNPC extends Entity {
     this.atkTick++;
     this.vx *= 0.8;
     const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
+    // 树妖祝福光环（弹 586 出生于 atkTick 24，AI_111 :38720-38816）：弹龄 wardT
+    //  自出生起计；Kill 门 = 本 NPC 离开 ai[0]=14 态（:38724）→ 态尽随退态熄灭
+    if (this.atkState === 14 && this.vanillaId === 20 && this.atkTick >= 24) {
+      this.wardT++;
+      this.updateDryadWardAura(game);
+    }
     if (this.atkState === 15) {
       this.swingUpdate(world, game);
     } else {
@@ -2257,6 +2295,36 @@ export class TownNPC extends Entity {
       if (e.hurt(getAttackDamageForTownNPC(dmg * num2, mainDifficulty(world)), this.facing * kb, 0, game)) {
         game.addDamageNumber(e.x, e.y, dmg, false, '#FFD060');
       }
+    }
+  }
+
+  /** 树妖祝福光环（弹 586 AI_111_DryadsWard :38720-38816 语义收口）：
+   *  - 半径（:38732-38745）：出生 300 → 300-300t 段 Lerp 至 600 → 500t 起
+   *    Lerp 至 1200（钳 600/1200 上限）
+   *  - 玩家授予（:38797-38802）：弹龄 >=30 且 FindBuffIndex(165)==-1 →
+   *    AddBuff(165,120)；本仓 buffs.apply 的 max 合并等价续期（120t=2s）
+   *  - 尘（:38754-38777）：1/4 掷光环环尘（163，2/3 尘加环向速度）
+   *  - 熄灭（:38732 Kill 门 + :38814 >=570 Kill）：本 NPC 离开施法态或弹龄 570
+   *  敌怪 186 DryadBane/城镇 NPC 165 同链（:38806-38812 每 10t）——本仓敌怪 buff
+   *  系统无 186，城镇 NPC buff 无栏，登记不接 */
+  private updateDryadWardAura(game: GameHooks): void {
+    if (this.wardT > 570) return;
+    const a = this.wardT;
+    let radius = 300;
+    if (a >= 500) radius = 600 + (1200 - 600) * Math.min(1, (a - 500) / 100);
+    else if (a >= 100) radius = 300 + (600 - 300) * Math.min(1, (a - 100) / 200);
+    if (a >= 30) {
+      const pl = game.player;
+      if (pl && !pl.dead
+        && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) <= radius) {
+        pl.buffs.apply(BuffType.DryadsWard, 2);   // AddBuff(165,120)=2s
+      }
+    }
+    if (this.rng() < 0.25 && a >= 5) {           // :38754 rand(4)==0
+      const ang = this.rng() * Math.PI * 2;
+      const rr = radius * (0.5 + this.rng() * 0.5);
+      game.spawnDust?.(this.cx + Math.cos(ang) * rr - 5, this.cy + Math.sin(ang) * rr - 5,
+        10, 10, 163, 0, 0, 100, null, 1.5, true);
     }
   }
 

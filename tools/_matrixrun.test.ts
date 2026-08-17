@@ -46,7 +46,11 @@ const BUDGET_MS = Number(process.env.SW_MATRIX_BUDGET ?? 400) * 1000;
 const FORCE = process.env.SW_MATRIX_FORCE === '1';
 const FRESH = process.env.SW_MATRIX_FRESH === '1';
 
-const VSRV = '/tmp/vserver';
+// 基线目录可覆写（SW_MATRIX_VSRV=/tmp/vserver86）：原 /tmp/vserver 基线是
+// **arm64 原生切片**生成的（genmatrix2.sh 裸调 universal bin），与本仓 JS/x86
+// 链存在 ~4.8%(小)~15%(大) 的架构 FP 分歧——2026-08-17 大尺寸分界带猎杀定案。
+// x86 基线重生成后用本变量指向新目录。
+const VSRV = process.env.SW_MATRIX_VSRV ?? '/tmp/vserver';
 const TSV = `${VSRV}/matrix-anchors.tsv`;
 const SAMPLE_SCALE = 4.656612875245797e-10;
 const INT_MAX = 2147483647;

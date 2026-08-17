@@ -478,55 +478,69 @@ const DECO187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
 const SMALL185 = TILE_BY_KEY['v_185_small_decos']!;
 const MUSHROOM_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
 const MAX_TILE_COUNT = 3500; // 原版 maxTileCount（countTiles 硬顶）
-/** 原版 pass 63 时洞穴尚无自然墙（CaveWalls pass 67 才刷）。我方 TerrainPass 预填了
- *  墙 1/2——此处按原版时序语义视作"无墙"（可穿行、可覆写为 62） */
-const treatAsNoWall = (wl: number) => wl === 0 || wl === 1 || wl === 2;
+/** wall!=0 即封（cs:9526 jungle=false 分支）。旧版把 1/2 当"无墙"是过时适配
+ *  （"TerrainPass 预填 1/2"实为误记——本仓墙初始化全 0，地表 2/40 由
+ *  DirtWallBackgrounds（pass 6/原版 7）写入，与原版时序一致）。 */
+const wallSealed = (wl: number) => wl !== 0;
 
-/** 原版 SolidTile 语义：active(flags) + tileSolid。生成期幽灵 tile（有 type 无 flags）不算实心。
- *  tileSolid 走 GenSolid：蜂巢/蜂蜜斑时点 484 滚动仙人掌（cs:12537）与 659 以太石块
- *  （cs:11500）已翻非实心,原版 Modifiers.IsSolid 读可变 tileSolid 同样不认 */
+/** 原版 WorldGen.SolidTile（cs:70155）：active && tileSolid && !tileSolidTop && !halfBrick
+ *  && slope==0 && !inActive。生成期幽灵 tile（有 type 无 flags）不算实心。
+ *  tileSolid 走 GenSolid：本 pass 头 379 已翻非实心（cs:17459）——曾漏 !solidTop/
+ *  !half/slope==0 三门（斜面/半砖腔壁被当实心 → 洪泛计数与扩散门双偏） */
 function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
-  return genSolidType(st.type[i]);
+  const def = TILE_DEFS[st.type[i]];
+  if (!def) return false;
+  return genSolidType(st.type[i]) && !def.platform && !st.half[i] && st.slope[i] === 0 && (st.wire[i] & 32) === 0;
 }
 
-/** countTiles（L9493）1:1：洪泛计数非实心格，硬顶 3500；
- *  触界/遇墙 → 直接判满（reject）；shroom 按访问次数计（蘑菇草地邻接>1 即拒绝） */
+/** 原版 SolidTile2（cs:70178）：active && tileSolid && slope==0 && !halfBrick && !inActive
+ *  ——**无** tileSolidTop 门（PlacePot 地面/PlaceSmallPile/Place3x2 底座用） */
+function solidTile2(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  return genSolidType(st.type[i]) && !st.half[i] && st.slope[i] === 0 && (st.wire[i] & 32) === 0;
+}
+
+/** countTiles/nextCount（cs:9493-9600）1:1（本 pass 实参 jungle=false, lavaOk=true）：
+ *  ★递归 DFS 原序（x-1→x+1→y-1→y+1）+ CountedTiles **只登记非实心格**（cs:9585）——
+ *  实心邻格（含蘑菇草 70）可被多路重复访问，shroom 按**访问次数**累加（曾用栈 BFS+
+ *  全格 seen → shroom 欠计，蘑菇腔 reject 门 `shroomCount>1→num6=0`（cs:17511）失灵）。
+ *  封顶：触界/墙 244/微光液/墙!=0 → count=3500；lavaOk=true 故岩浆只计数不封。 */
 function countTiles(st: TileStore, x: number, y: number): { count: number; shroom: number } {
   let count = 0, shroom = 0;
-  const seen = new Set<number>();
-  const stack: Array<[number, number]> = [];
-  if (!(x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1)) stack.push([x, y]);
-  while (stack.length) {
-    if (count >= MAX_TILE_COUNT) break;
-    const [cx, cy] = stack.pop()!;
-    if (cx <= 1 || cx >= st.w - 1 || cy <= 1 || cy >= st.h - 1) return { count: MAX_TILE_COUNT, shroom };
-    const k = cx * 100000 + cy;
-    if (seen.has(k)) continue;
+  const counted = new Set<number>();
+  const next = (cx: number, cy: number): void => {
+    if (count >= MAX_TILE_COUNT) return;                             // cs:9506 头部早退
+    if (cx <= 1 || cx >= st.w - 1 || cy <= 1 || cy >= st.h - 1) { count = MAX_TILE_COUNT; return; }
     const i = st.idx(cx, cy);
-    if (!treatAsNoWall(st.wall[i])) return { count: MAX_TILE_COUNT, shroom };
-    seen.add(k);
-    if (st.flags[i] && st.type[i] === MUSHROOM_GRASS) shroom++;
+    if (counted.has(i)) return;                                      // cs:9523（仅非实心格曾登记）
+    if (st.wall[i] === 244) { count = MAX_TILE_COUNT; return; }      // cs:9515 活木墙
+    if (st.liquid[i] > 0 && st.liquidType[i] === 4) { count = MAX_TILE_COUNT; return; } // 微光
+    if (wallSealed(st.wall[i])) { count = MAX_TILE_COUNT; return; }  // cs:9526 jungle=false
+    if (st.flags[i] && st.type[i] === MUSHROOM_GRASS) shroom++;      // cs:9565（每次访问都计）
     if (!solidTile(st, cx, cy)) {
+      counted.add(i);                                                // cs:9585
       count++;
-      stack.push([cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]);
+      next(cx - 1, cy); next(cx + 1, cy); next(cx, cy - 1); next(cx, cy + 1);
     }
-  }
+  };
+  next(x, y);
   return { count, shroom };
 }
 
-/** PlacePot（cs:54099-54105）1:1：2×2（y-1..y 行），随机 3 变体在 X 轴、style 在 Y 轴；
- *  占用格须空、脚下须 nactive && !halfBrick && slope==0 && tileSolid（原版四连门） */
+/** PlacePot（cs:54082-54115）1:1：2×2（y-1..y 行），随机 3 变体在 X 轴、style 在 Y 轴；
+ *  占用格须空、脚下四连门 nactive+!half+!slope+tileSolid（=SolidTile2 语义，
+ *  原版无 tileSolidTop 门）；Next(3) 仅在放置成功时消费（cs:54104） */
 function placePot(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   for (let k = 0; k < 2; k++) {
     for (let l = -1; l < 1; l++) {
       if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
     }
-    const gi = st.idx(x + k, y + 1);
-    if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
-    if (!solidTile(st, x + k, y + 1)) return false;
+    if (!solidTile2(st, x + k, y + 1)) return false;
   }
   const variant = rng.int(0, 2) * 36; // 原版仅在放置成功时消费 Next(3)
   for (let k = 0; k < 2; k++) {
@@ -537,8 +551,9 @@ function placePot(st: TileStore, rng: RNG, x: number, y: number, style: number):
   return true;
 }
 
-/** PlaceTight(spiders:true)（L?）1:1：垂挂蛛网 165（1×2，fx=108+variation*18）；
- *  消耗 Next(2)+Next(3)（与原版参数求值顺序一致） */
+/** PlaceTight(spiders:true)（cs:38329/38368）1:1：垂挂蛛网 165（1×2，fx=108+variation*18）；
+ *  消耗 Next(2)+Next(3)（PlaceTight 在 SolidTile 检查**前**掷,cs:38346）；成功后
+ *  CheckStalactite（cs:39022）无掷（放置前置 SolidTile(x,y-1) 保证不触发 KillTile） */
 function placeTightWebs(st: TileStore, rng: RNG, x: number, y: number): boolean {
   rng.int(0, 1); // preferSmall
   const variation = rng.int(0, 2);
@@ -551,41 +566,55 @@ function placeTightWebs(st: TileStore, rng: RNG, x: number, y: number): boolean 
   return true;
 }
 
-/** PlaceTile(187, style) 近似：3×2 覆饰，底行=air 格 y、顶行 y-1（fx=style*54 单行，Tiles_187 1890×72 实证） */
+/** Place3x2（cs:52097，经 PlaceTile case 187 派发）1:1：3×2 覆饰锚 x-1..x+1 ×
+ *  y-1..y（★曾偏 +1 列锚 x..x+2）；三列底座 SolidTile2(y+1)；186/187 的
+ *  InvalidTileForPilesOrSpeleothems 底座巨石门在蜘蛛 pass 时点恒空集（巨石陷阱
+ *  pass 更晚），备案不查。fx=style*54+col*18，fy=0/18。 */
 function placeDeco187(st: TileStore, x: number, y: number, style: number): boolean {
-  for (let k = 0; k < 3; k++) {
-    for (let l = -1; l < 1; l++) {
-      if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
+  let ok = true;
+  for (let k = x - 1; k <= x + 1 && ok; k++) {
+    for (let l = y - 1; l <= y && ok; l++) {
+      if (st.inBounds(k, l) && st.flags[st.idx(k, l)]) ok = false;
     }
+    if (ok && !solidTile2(st, k, y + 1)) ok = false;
   }
-  for (let k = 0; k < 3; k++) {
-    for (let l = -1; l < 1; l++) {
-      st.setTileSilent(x + k, y + l, DECO187, style * 54 + k * 18, (l + 1) * 18);
+  if (!ok) return false;
+  for (let k = x - 1; k <= x + 1; k++) {
+    for (let l = y - 1; l <= y; l++) {
+      st.setTileSilent(k, l, DECO187, style * 54 + (k - (x - 1)) * 18, l === y - 1 ? 0 : 18);
     }
   }
   return true;
 }
 
-/** PlaceSmallPile（L?）1:1：size0=1×1（fx=style*18）；size1=2×1（fx=style*36，fy=18） */
+/** PlaceSmallPile（cs:46831）1:1：size0=1×1（fx=style*18）；size1=2×1（fx=style*36，
+ *  fy=18）。地面 = SolidTile2（cs:46856/46880，无 tileSolidTop 门） */
 function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, pileSize: number): boolean {
   if (pileSize === 1) {
-    if (!solidTile(st, x, y + 1) || !solidTile(st, x + 1, y + 1)) return false;
+    if (!solidTile2(st, x, y + 1) || !solidTile2(st, x + 1, y + 1)) return false;
     if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;
     if (!st.inBounds(x + 1, y) || st.flags[st.idx(x + 1, y)]) return false;
     st.setTileSilent(x, y, SMALL185, pileStyle * 36, 18);
     st.setTileSilent(x + 1, y, SMALL185, pileStyle * 36 + 18, 18);
     return true;
   }
-  if (!solidTile(st, x, y + 1)) return false;
+  if (!solidTile2(st, x, y + 1)) return false;
   if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;
   st.setTileSilent(x, y, SMALL185, pileStyle * 18, 0);
   return true;
 }
 
 /** Spread.Spider（L3653）1:1：波前 BFS 逐层扩散。
- *  每格：地狱线/地表线随机带（Next(5)×2）双重拦截；实心或已有墙 → 实心且无墙时背面刷 62 后止步；
- *  空格无墙 → 刷 62+清液体+内饰（地面 1/3：1/15 蛛网宝箱(939/箱型15)否则蛛网罐 style19-20；
- *  天花板 1/3 垂网 165；否则地面放覆饰 187 style9-13 + 1/3 小堆 185×2） */
+ *  每格：地狱线/地表线随机带（Next(5)×2）双重拦截——★深门 = Main.UnderworldLayer
+ *  （= h-200 恒值属性 Main.cs:2863，曾误用 gs.lavaLine（Terrain 游走产物，本图
+ *  ≈790 < 1000）→ 蜘蛛巢整体浅 200+ 格、deep 带 62>0 1.5万格差的主根因）；
+ *  实心或已有墙 → 实心且无墙时背面刷 62 后止步；
+ *  空格无墙 → 刷 62 + SquareWallFrame(中心格 resetFrame) 1×Next(0,3)（cs:3682/
+ *  Framing.cs:390——曾漏此掷 → 后续掷全错位）+ 清液体 + 内饰（地面 1/3：
+ *  1/15 蛛网宝箱(939/箱型15)否则蛛网罐 style19-20；天花板 1/3 垂网 165；
+ *  否则地面放覆饰 187 style9-13 + 1/3 小堆 185×2）。
+ *  ★重复入队格无 hashSet 去重（cs:3672 直处理）→ 门掷/掷骰按重复次数重复消费，原样保留 */
 function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, x: number, y: number): void {
   const seen = new Set<number>();
   const key = (px: number, py: number) => px * 100000 + py;
@@ -596,15 +625,16 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
     frontier = [];
     for (const [cx, cy] of layer) {
       if (cx < 1 || cx >= st.w - 1 || cy < 1 || cy >= st.h - 1) continue;
-      if (cy >= gs.lavaLine - rng.int(0, 4)) continue; // UnderworldLayer(h-200) - Next(5)
+      if (cy >= st.h - 200 - rng.int(0, 4)) continue; // Main.UnderworldLayer(h-200) - Next(5)
       if (cy < gs.worldSurface + rng.int(0, 4)) continue;
       seen.add(key(cx, cy));
       const i = st.idx(cx, cy);
-      if (solidTile(st, cx, cy) || !treatAsNoWall(st.wall[i])) {
-        if (st.flags[i] && treatAsNoWall(st.wall[i])) st.wall[i] = 62;
+      if (solidTile(st, cx, cy) || wallSealed(st.wall[i])) {
+        if (st.flags[i] && !wallSealed(st.wall[i])) st.wall[i] = 62;
         continue;
       }
       st.wall[i] = 62;
+      rng.nextInt(3);   // SquareWallFrame(cx,cy) 中心格 WallFrame(resetFrame:true)（cs:3682）
       if (!st.flags[i]) {
         st.liquid[i] = 0; st.liquidType[i] = 0;
         if (solidTile(st, cx, cy + 1) && rng.int(0, 2) === 0) {
@@ -637,10 +667,13 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
 /** SpiderCaves pass（L17455）1:1：w*0.005 个巢；采样 x∈[200,w-200) y∈[(ws+rock)/2,h-230)；
  *  countTiles 门 500≤空腔<3500（重试上限 w/2，超限放弃该巢；重掷 y 域换 rockLevel+30） */
 export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
+  const __cap = (globalThis as { __swSpiderGsCap?: (gs: GenState, st: TileStore) => void }).__swSpiderGsCap;
+  if (__cap) __cap(gs, st);
   // ★pass 头 tileSolid 翻转（cs:17459 `Main.tileSolid[379] = false`）：泡泡块非实心
   //   （countTiles 的 SolidTile 洪泛不再被 379 阻断）。本仓生成期不放置 379,行为无差,
   //   存档时间线——原版由 UndergroundJungleTrees 头（cs:17956,本仓缺该 pass,备案）还原。
   flipGenSolid([379], false);
+  const __m = (globalThis as { __swSpiderNest?: (s: string) => void }).__swSpiderNest;
   const count = Math.floor(st.w * 0.005);
   const retryCap = Math.floor(st.w / 2);
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
@@ -657,6 +690,7 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
       c = countTiles(st, x, y);
       if (c.shroom > 1) c.count = 0;
     }
+    __m?.(`NEST#${n} x=${x} y=${y} count=${c.count} shroom=${c.shroom} tries=${tries}`);
     if (tries < retryCap) spreadSpider(st, rng, gs, chests, x, y);
   }
   // ★pass 尾 tileSolid 翻转（cs:17521 `Main.tileSolid[162] = true`）：薄冰回实心
