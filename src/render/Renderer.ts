@@ -2882,7 +2882,8 @@ export class Renderer {
     // 缩放贴合碰撞盒；按帧最低不透明行对齐脚底（帧底透明内边距会导致悬浮）
     const h = c.h * 1.25;
     const w = (fr.sw / fr.sh) * h;
-    const pad = this.spriteBottomPad(fr, `npc${c.def.npc}:f${frame}`); // 帧内底部透明行数（按 NPC+帧号稳定缓存）
+    // 帧底对齐：原版 NPC 通用公式恒 +4 下沉（Main.cs:24741——可见贴图底=盒底+4，
+    // 透明边距一并沉入地面；曾按透明行贴地补偿反而悬空 1-2px）
     ctx.save();
     ctx.translate(c.cx, c.y + c.h); // 脚底中心
     ctx.scale(c.facing >= 0 ? -1 : 1, 1); // 贴图默认朝左
@@ -3275,10 +3276,10 @@ export class Renderer {
         const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale
           * expertRenderScale(e.vanillaId ?? 0);
         ctx.save();
-        // 锚点:飞行型=帧中心(原版默认分支 Main.cs:23635 语义);地面型=底锚+逐帧
-        // 实测底部透明行数补偿(spriteBottomPad)——NPC 帧底普遍 ~2px 透明边距,
-        // 裸底锚会悬空 2px、中心锚会入地 2px(实测反馈),pad 补偿数学上保证贴地。
-        // 与纸娃娃(:1266)/legacy(:1301)/小动物(:763)四路统一
+        // 锚点:飞行型=帧中心(原版默认分支 Main.cs:23635 语义);地面型=底锚+原版恒
+        // +4 下沉(Main.cs:24741 通用公式:可见贴图底=盒底+4,帧底透明边距一并沉入
+        // 地面——原版脚部本就压住地表 ~2px;2026-08-17 前按透明行"贴地"补偿,
+        // 视觉上恒高 2-4px=悬空感的根因,全家族改 1:1)
         const grounded = !flying;
         // 416 日耀掠兽骑手（Main.cs:24508-24515 case 416 独占）：绘制位置吸附坐骑
         // 415 的 Bottom（AI 锚 Center+(-spriteDir*10,-30) 只喂碰撞盒——骑手视觉上
@@ -3340,9 +3341,11 @@ export class Renderer {
         // 帧中心 83——原版通用锚点(帧中心==碰撞盒中心)会让 100×110 的盒偏在
         // 血管尾/眼球上方。碰撞盒尺寸保持原版,绘制整体下移 (质心−帧中心)
         // 让眼球主体居中于盒(用户 2026-08-11 拍板;张嘴帧偏移略大)
-        // 地面型:底锚 + pad(帧底透明行)贴地;飞行型:中心锚。EoC 额外 +23/+30 眼球修正
-        const pad = grounded ? this.spriteBottomPad(r, `npc${e.vanillaId}:f${frameIdx}`) : 0;
-        const anchorY = grounded ? -r.sh + pad : -r.sh / 2;
+        // 地面型:底锚 + 原版恒 +4 下沉(Main.cs:24741 通用分支:Y=盒底−帧高×scale/2
+        // +4+半帧高×scale → 可见贴图底=盒底+4,帧底透明边距一并沉入地面——原版人物
+        // 脚部本就压住地表 2px,曾按透明行"贴地"补偿反而悬空 1-2px,2026-08-17 改 1:1);
+        // 飞行型:中心锚。EoC 额外 +23/+30 眼球修正
+        const anchorY = grounded ? -r.sh + 4 / scale : -r.sh / 2;
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
         // 回填实际贴图底边（世界 y），供 drawHealthBar 定位兜底（见 Enemy.spriteBottomWorld 注释）
         e.spriteBottomWorld = (grounded ? e.y + e.h : e.cy) + (anchorY + eocOff + r.sh);
@@ -3523,9 +3526,8 @@ export class Renderer {
           // 素材默认朝左：向右移动时镜像（僵尸实测需要与其它怪一致的翻转）
           const flip = -e.facing;
           ctx.scale(flip, 1);
-          // 贴底：按精灵最低不透明行对齐脚底（史莱姆贴图底部有透明留白会浮空）
-          const pad = this.spriteBottomPad(fr);
-          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + pad * (h / fr.sh), w, h);
+          // 贴底：原版恒 +4 下沉（Main.cs:24741——透明边距沉入地面，见怪物主路径注）
+          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + 4, w, h);
         } else if (e.key === 'demon_eye') {
           // 恶魔之眼：以眼球为原点按移动方向自由旋转（贴图默认朝左，与 NPC 系素材一致）
           const ang = Math.atan2(e.vy, e.vx) + Math.PI;
@@ -6007,10 +6009,9 @@ export class Renderer {
       }
       if (r) {
         ctx.save();
-        // 底锚 + 逐帧实测底部透明行数补偿(spriteBottomPad):帧底 ~2px 透明边距
-        // 裸底锚悬空 2px、中心锚入地 2px(实测反馈)——pad 补偿保证贴地,
-        // 与怪物(:854)/纸娃娃(:1266)/legacy(:1301)统一
-        const pad = this.spriteBottomPad(r, `npc${n.bound ? 'bound' : n.vanillaId}:f${n.frame}`);
+        // 底锚 + 原版恒 +4 下沉（Main.cs:24741——NPC 通用公式，见怪物主路径注；
+        // 2026-08-17 前按透明行贴地补偿恒高 2-4px=悬空感根因）
+        const pad = 4;
         ctx.translate(n.cx, n.y + n.h); // 脚底中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         // 微光转化渐显/渐隐（GetAlpha NPC.cs:94874-94878：CurrentlyShimmerTransparent
@@ -6806,7 +6807,7 @@ export class Renderer {
     // 此处以冻结的 vx/onGround 复算同一行档，等价冻结）
     const row = this.playerBodyRow(p, null, 0, null);
     const fFull = dollFrame(full, row);
-    const pad = this.spriteBottomPad(fFull, `doll:${row}`);
+    const pad = 4;   // 原版玩家层恒 +4（PlayerDrawLayers :109 等 `height−frameH+4f`）
     // 层序 + 旋转轴心（PlayerDrawSet.cs:1717-1719）：腿 legVect Y=0.75H → 身 0.5H → 头 0.4H
     const parts: Array<['legs' | 'body' | 'head', number]> = [
       ['legs', FRAME_H * 0.75], ['body', FRAME_H * 0.5], ['head', FRAME_H * 0.4],
@@ -7187,10 +7188,9 @@ export class Renderer {
       if (doll) {
         const row = rows.body;                     // 发/头甲/眼睑随身体行（bodyFrame）
         const f = dollFrameRows(doll, rows);
-        // 贴底:纸娃娃帧底有 ~2px 透明边距(Player_0_10 全帧实测),底锚会悬空——
-        // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿（坐姿切片底缘
-        // 不同，键里带 sit 档）
-        const pad = this.spriteBottomPad(f, `doll:${rows.body},${rows.legs}${sitDraw ? ',sit' : ''}`);
+        // 贴底:原版玩家层恒 +4（PlayerDrawLayers :109/:203/:343 头/身/腿全层
+        // `Position.Y+height−frameH+4f`——帧底透明边距一并沉入地面）
+        const pad = 4;
         if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, true);
         if (stealthClamp >= 1) {
           ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
@@ -7283,12 +7283,10 @@ export class Renderer {
         // 碰撞盒缩小只影响物理，贴图保持高大观感不变
         const h = 56;
         const w = (frame.sw / frame.sh) * h;
-        // 脚踏实地：按精灵最低不透明行对齐脚底（消除底部透明留白导致的浮空）
-        const pad = this.spriteBottomPad(frame);
         // Maples 精灵默认朝左 → 内层翻转，画完还原（否则手持物会被一起翻到背后）
         ctx.save();
         ctx.scale(-1, 1);
-        ctx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, -w / 2, -h + pad * (h / frame.sh), w, h);
+        ctx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, -w / 2, -h + 4, w, h);
         ctx.restore();
         drawn = true;
       }
@@ -7883,7 +7881,6 @@ export class Renderer {
   }
 
   /** 精灵底部透明留白行数（缓存）：用于脚底对齐 */
-  private bottomPadCache = new Map<string, number>();
 
   /** 逐像素染色缓存（原版 XNA SpriteBatch 的 color 乘法等价实现）：
    *  ① multiply 把 RGB 乘上 color —— canvas multiply 会把精灵透明区也铺色（方形伪影）
@@ -7913,28 +7910,6 @@ export class Renderer {
     if (this.tintCache.size > 1024) this.tintCache.clear();
     this.tintCache.set(k, c);
     return c;
-  }
-  private spriteBottomPad(frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, keyHint?: string): number {
-    // keyHint：调用方已知的稳定标识（如 npc:帧号）。默认键只含类型+矩形，同尺寸
-    // 不同精灵会碰撞（错值），且来源矩形不稳定时每帧未命中 → 逐帧 getImageData
-    // 打满 CPU（trace2 实测 drawCritter 路径 100% 单核）
-    const key = keyHint ?? `${frame.img instanceof HTMLCanvasElement ? 'c' : 'i'}:${frame.sx},${frame.sy},${frame.sw},${frame.sh}`;
-    let pad = this.bottomPadCache.get(key);
-    if (pad === undefined) {
-      pad = 0;
-      const c = document.createElement('canvas');
-      c.width = frame.sw; c.height = frame.sh;
-      const cx = c.getContext('2d')!;
-      cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, frame.sw, frame.sh);
-      const d = cx.getImageData(0, 0, frame.sw, frame.sh).data;
-      outer: for (let y = frame.sh - 1; y >= 0; y--) {
-        for (let x = 0; x < frame.sw; x++) {
-          if (d[(y * frame.sw + x) * 4 + 3] > 40) { pad = frame.sh - 1 - y; break outer; }
-        }
-      }
-      this.bottomPadCache.set(key, pad);
-    }
-    return pad;
   }
 
   /** 全亮模式（F9）：跳过光照合成，画面无暗影 */

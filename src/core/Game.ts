@@ -9125,9 +9125,64 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //   曾在清格后读帧 → fx 恒 0，蘑菇（帧 144）永远判不中 → 不掉落
       const sheet = def.vanilla?.sheet;
       const fx = st.frameX[st.idx(x, y)];
+      const fy = st.frameY[st.idx(x, y)];
       st.setTile(x, y, 0);
       this.sfx.play('chop', 1, x * TILE + 8, y * TILE + 8);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
+      // ---- 割植物小动物掷骰（KillTile_DropBait WorldGen.cs:66304-66480 1:1；
+      //      原版挂 KillTile 掉落段 :63910，涉表 tile 全在 tileCut 集即本分支）----
+      // 分母表：3 草 worm400/hop100、73 腐草 worm200/hop50、185-187 装饰组指定
+      // 帧带 worm6、61/74/62/233 grubby 族 80/40/250/10、637 狱草 lavaBait100
+      // （flowerBoots ×10000 门未实装——装备系统无该靴，登记）。caps：worm/hop<5、
+      // grubby 族<8、hell 饵<8；金 1/400 → 448 金蚯蚓/446 金蚱蜢；墓地区
+      // worm→606 蛆（:66416-66419）；出生弹跳 vy=(-50..-21)×0.1、
+      // vx=(0..25)×0.1×(−dir)、背玩家方向（TargetClosest 后 dir*=−1 同构）
+      {
+        let wormDenom = -1, hopDenom = -1, grubDenom = -1, lavaDenom = -1;
+        if (sheet === 3) { wormDenom = 400; hopDenom = 100; }
+        else if (sheet === 73) { wormDenom = 200; hopDenom = 50; }
+        else if (sheet === 61) grubDenom = 80;
+        else if (sheet === 74) grubDenom = 40;
+        else if (sheet === 62) grubDenom = 250;
+        else if (sheet === 233) grubDenom = 10;
+        else if (sheet === 637) lavaDenom = 100;
+        else if (sheet === 185) {
+          if ((fy === 0 && fx < 214) || (fy === 18 && (fx < 214 || fx >= 1368))) wormDenom = 6;
+        } else if (sheet === 186) {
+          if (fx >= 378 && fx <= 700) wormDenom = 6;
+        } else if (sheet === 187) {
+          if ((fx >= 756 && fx <= 916) || fx <= 322) wormDenom = 6;
+        }
+        const vidOf = (c: unknown) => this.critterVid(c);
+        const capOf = (ids: number[]) => this.entities.critters
+          .filter((c) => { const v = vidOf(c); return !(c as { dead?: boolean }).dead && ids.includes(v); }).length;
+        const gold = () => Math.random() < 1 / 400;   // goldCritterChance=400（luck 掷近似）
+        const spawnBait = (vid: number) => {
+          const e = this.spawnNpcByVanilla(vid, x * TILE + 10, y * TILE);
+          if (!e) return;
+          const dir = this.player.cx < e.cx ? -1 : 1;   // TargetClosest 朝玩家
+          e.facing = -dir;                              // direction *= -1 → 背玩家
+          e.vx = Math.floor(Math.random() * 26) * 0.1 * -dir;
+          e.vy = -(21 + Math.floor(Math.random() * 29)) * 0.1;   // Next(-50,-21)×0.1 = -2.1..-5.0
+        };
+        if (wormDenom > 0 && capOf([357, 448, 606]) < 5 && Math.random() < 1 / wormDenom) {
+          spawnBait(this.scene?.zoneGraveyard ? 606 : gold() ? 448 : 357);
+        }
+        if (hopDenom > 0 && capOf([377, 446]) < 5 && Math.random() < 1 / hopDenom) {
+          spawnBait(gold() ? 446 : 377);
+        }
+        if (grubDenom > 0 && capOf([485, 486, 487]) < 8
+          && Math.random() < 1 / Math.floor(grubDenom * 1.25)) {   // :66452 ×1.25 掷
+          // 序贯两掷（:66455-66461）：先 Next(4)==0→486，再独立 Next(12)==0→487 覆写
+          let grub = 485;
+          if (Math.random() < 1 / 4) grub = 486;
+          if (Math.random() < 1 / 12) grub = 487;
+          spawnBait(grub);
+        }
+        if (lavaDenom > 0 && capOf([653, 654]) < 8 && Math.random() < 1 / lavaDenom) {
+          spawnBait(Math.random() < 0.5 ? 654 : 653);
+        }
+      }
       // 原版 Main.rand：Next(40)==0 → 种子；否则 Next(2)==0 → 发光蘑菇
       const roll = sheet === 71 ? new RNG((Math.random() * 1e9) | 0) : null;
       const mushroomDrop =

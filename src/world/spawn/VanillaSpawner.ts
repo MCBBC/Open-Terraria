@@ -1840,50 +1840,70 @@ export class VanillaSpawner {
       if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
       if (N(5)) return D(this.getGemBunnyToSpawn(rng));
     }
-    // ---- 小动物（spawnFriendly 段 L2006-2535，白天 + 草/土 tile + Next(15) 门）----
-    //  日食白天小动物段整体关闭（L709 门，friendlyBlocked）
-    if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
-      (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === T.MOWED_GRASS)) {
-      // ---- 椿象/蝴蝶（cs:2381-2410，在 N(15) 近似的鸟兽链**之前**的两支 else-if）----
+    // ---- 小动物（spawnFriendly 段 L2006-2535，switch case 147/161/60/53/2 链）----
+    //  日食白天小动物段整体关闭（L709 门，friendlyBlocked）。
+    //  （昼夜门在各支内——原版链本身无 dayTime 门，2026-08-17 摘除旧"白天"外门）
+    if (this.spawnFriendlyCycle && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
+      (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === T.MOWED_GRASS
+        || t === T.SAND)) {
+      // ---- 沙地蝎（switch case 53，NPC.cs:2223-2225：黄沙落脚即出 Next(366,368)
+      //      黑蝎 367/蝎 366 各半——水下支已在上方水面线段先行 return）----
+      if (t === T.SAND) return D(rng.next() < 0.5 ? 366 : 367);
+      // （2026-08-17 重构为原版 case 2 链真序：昼夜门下放到各支——链本身无 dayTime
+      //  门，兔/松鼠/鸟夜间照出；旧"N(15) 包裹 + 森林概率表(蚯蚓/蚱蜢/鼠混编)"
+      //  为自创近似已废——蚯蚓/蚱蜢的正源是割草 DropBait（Game 割植物分支），
+      //  鼠走墓地 610/地下链 300）
+      const grassFam = t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS
+        || t === T.HALLOW_MOWED_GRASS || t === T.DIRT;   // 草族（DIRT 随旧节保留超集）
+      // 雪原小动物（switch case 147/161：企鹅 Next(2) 两态——先于草族链）
+      if (t === T.SNOW || t === T.SNOW_BRICK) {
+        if (N(2)) return D(148);
+        return D(149);
+      }
+      // ---- 夜间猫头鹰（NPC.cs:2345-2354：!rain && 夜 && Next(5)==0 && flag10）：
+      //      RollBadLuckExtreme(100)==0 → 689 金猫头鹰（1/100 近似），else 611 ----
+      if (!this.dayTime && !this.world.weather.raining && grassFam && N(5)) {
+        return D(rng.next() < 1 / 100 ? 689 : 611);
+      }
+      // ---- 晨间鸟表（NPC.cs:2358-2380：dayTime && Main.time<18000(<9:30) &&
+      //      Next(3)!=0）：金鸟 442 1/400 else Next(4) 蓝松鸦 297/红雀 298/鸟 74 ----
+      if (this.dayTime && this.world.clock.hourFloat < 9.5 && grassFam && !N(3)) {
+        return D(N(400) ? 442 : [297, 298, 74, 74][Math.floor(rng.next() * 4)]);
+      }
+      // ---- 椿象/蝴蝶（cs:2381-2410）----
       //  门：白昼草族 tile（case 2/109/477/492）+ !TooWindyForButterflies（|windSpeedTarget|
       //  ≥0.4，NPC.cs:6801）+ 无雨 + Next(每夜概率)==0。概率源 = setFireFlyChance
       //  （NPC.cs:94557-94610，每夜 StartNight 掷：4/5 的夜该族为 999999 绝迹哨兵；
       //  世界字段随存档，旧档缺省=代表值 10/绝迹）——原版另有 1/4 概率左右 ±16px
       //  附加只，单返回值 API 只交付 1 只（蜻蜓段同先例）
-      if (t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS) {
+      if (grassFam) {
         const tooWindyFB = Math.abs(this.world.weather.windSpeedTarget) >= 0.4;
         const dryDay = !this.world.weather.raining;
         // 椿象 669（cs:2381-2392）
-        if (!tooWindyFB && dryDay && N(Math.max(1, this.world.stinkBugChance))) return D(669);
+        if (this.dayTime && !tooWindyFB && dryDay && N(Math.max(1, this.world.stinkBugChance))) return D(669);
         // 蝴蝶 356 / 金蝴蝶 444（cs:2394-2410，金 = RollLuck(goldCritterChance)=1/400）
-        if (!tooWindyFB && dryDay && N(Math.max(1, this.world.butterflyChance))) {
+        if (this.dayTime && !tooWindyFB && dryDay && N(Math.max(1, this.world.butterflyChance))) {
           return D(N(400) ? 444 : 356);
         }
-      }
-      if (N(15)) {
-        if (t === T.SNOW || t === T.SNOW_BRICK) {
-          // 雪原小动物（L148→148|149 Next(2)）
-          if (N(2)) return D(148);
-          return D(149);
-        }
-        // 瓢虫 604/605（cs:2413-2445）：起风日（TooWindyForButterflies=|windSpeedTarget|
-        // ≥0.4，NPC.cs:6801）替换蝴蝶段——仅草族 tile（case 2/109/477/492）。
-        // butterflyChance 动态值 1..20（4/5 启用、1/5 关闭，cs:94582-94599），原版
-        // 门 Next(butterflyChance/2) 取期望 ≈ 1/5；金瓢虫 RollLuck(goldCritterChance)
-        // =1/400（luck 修正走 N(400)）。原版成群 1-4 只，本仓单只（API 限制同蜻蜓段）
-        if ((t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS)
-          && Math.abs(this.world.weather.windSpeedTarget) >= 0.4
-          && !this.world.weather.raining && N(5)) {
+        // 瓢虫 604/605（cs:2413-2445，起风替换支：Next(butterflyChance/2) 取期望 1/5）
+        if (this.dayTime && tooWindyFB && dryDay && N(5)) {
           return D(N(400) ? 605 : 604);
         }
-        // 森林小动物概率表（原版 butterflyChance/stinkBugChance 动态值，取代表值）
-        const r = rng.next();
-        if (r < 0.2) return D(357);       // 蚯蚓
-        if (r < 0.45) return D(377);      // 蚱蜢
-        if (r < 0.65) return D(46);       // 兔子
-        if (r < 0.8) return D(299);       // 松鼠
-        if (r < 0.9) return D(300);       // 老鼠
-        return D(74);                     // 鸟
+        // ---- 鸟表二（NPC.cs:2442-2467：Next(2)==0 无昼夜门——夜间也出鸟）：
+        //      金鸟 1/400 else Next(4) 297/298/74/74 ----
+        if (N(2)) {
+          return D(N(400) ? 442 : [297, 298, 74, 74][Math.floor(rng.next() * 4)]);
+        }
+        // ---- 尾部表（NPC.cs:2489-2534，无昼夜门）：金兔 443 → 金松鼠 539（各
+        //      1/400）→ 万圣 303 / 圣诞 337 / 派对 540（各 2/3）→ 1/3 松鼠
+        //      299|538 → 兜底兔 46 ----
+        if (N(400)) return D(443);
+        if (N(400)) return D(539);
+        if (this.world.clock.halloween && !N(3)) return D(303);
+        if (this.world.clock.xMas && !N(3)) return D(337);
+        if (this.partyUp && !N(3)) return D(540);
+        if (N(3)) return D(rng.next() < 0.5 ? 299 : 538);   // SelectRandom
+        return D(46);
       }
     }
     // ---- 洞穴层宝石松鼠/兔（NPC.cs:2456-2531 case 2 尾段：flag11 = rockLayer ≤ y ≤ UnderworldLayer）----

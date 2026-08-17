@@ -42,10 +42,12 @@ const ok = (name, pass, detail = '') => {
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
+        g.entities.enemies.length = 0;   // 清敌：dangerNear 会压制 sitFlag 走位（flee 覆写）与社交掷骰（flag30）
         await new Promise(r => setTimeout(r, 15));
         if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
       }
     };
+    g.entities.enemies.length = 0;
     g.world.clock.timeOfDay = 0.5;          // 白天正午
     g.world.weather.startRain();            // 真雨（手设 raining 会被雨调度弹回）
     p.x = (bx - 100) * 16; p.y = (F - 3) * 16;   // 玩家活体远处（防矩形传送门）
@@ -74,10 +76,12 @@ const ok = (name, pass, detail = '') => {
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
+        g.entities.enemies.length = 0;   // 清敌（同 A 段注）
         await new Promise(r => setTimeout(r, 15));
         if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
       }
     };
+    g.entities.enemies.length = 0;
     g.world.clock.timeOfDay = 0.5;
     for (let dx = 21; dx <= 140; dx++) st.setTile(bx + dx, F, 0);   // 断崖
     const n = new TownNPC('guide', (bx + 4) * 16 + 8, F * 16);
@@ -108,10 +112,12 @@ const ok = (name, pass, detail = '') => {
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
+        g.entities.enemies.length = 0;   // 清敌（同 A 段注）
         await new Promise(r => setTimeout(r, 15));
         if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
       }
     };
+    g.entities.enemies.length = 0;
     g.world.clock.timeOfDay = 0.5;
     const a = new TownNPC('guide', (bx - 6) * 16 + 8, F * 16);
     const b = new TownNPC('nurse', (bx - 2) * 16 + 8, F * 16);
@@ -147,10 +153,12 @@ const ok = (name, pass, detail = '') => {
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
+        g.entities.enemies.length = 0;   // 清敌（同 A 段注）
         await new Promise(r => setTimeout(r, 15));
         if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
       }
     };
+    g.entities.enemies.length = 0;
     g.world.clock.timeOfDay = 0.5;
     const party = await import('/src/world/wiring/party.ts');
     if (!party.partyIsUp(g.partyState)) party.toggleManualParty(g.partyState);  // 真派对（scene 手塞会被 scanScene 重写）
