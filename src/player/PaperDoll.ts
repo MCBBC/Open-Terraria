@@ -230,7 +230,9 @@ function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: number, sY: 
     }
   }
   const out: Array<{ sx: number; sy: number; sw: number; sh: number; dx: number; dy: number }> = [];
-  const dy = evY + 2 + num2 + num5 + num9;
+  // dest Y（sY 对冲后局部值）：vector.Y(−2+sY+evY) + 2(Vector2(num,2)) + num2 + num5 + num9
+  // —— −2/+2 相消 → evY + num2 + num5 + num9（默认 44；177 族可达 8+56=64 超帧底）
+  const dy = evY + num2 + num5 + num9;
   for (let n = num3; n >= 0; n--) {
     let sy: number, sh: number;
     if (full) { sy = row * FRAME_H; sh = FRAME_H; }
@@ -290,7 +292,9 @@ export function compositePaperDoll(
   const nFrames = rowsMode ? 1 : BODY_FRAMES;
   const c = document.createElement('canvas');
   c.width = FRAME_W;
-  c.height = nFrames * FRAME_H;
+  // 坐姿切片族（177/106 等）dest 可伸到 y=64（超帧底 8px——原版 DrawData 无裁剪、
+  // 站姿帧底本有 ~2px 透明边距，脚底锚由消费方 spriteBottomPad 自适应）——扩高防截
+  c.height = nFrames * FRAME_H + (sit ? 8 : 0);
   const ctx = c.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
 
@@ -469,10 +473,12 @@ export function dollFrame(doll: HTMLCanvasElement, frame: number): { img: HTMLCa
   return { img: doll, sx: 0, sy: idx * FRAME_H, sw: FRAME_W, sh: FRAME_H };
 }
 
-/** 双行帧取帧：rows 模式产物是 40×56 单帧（sy=0），整表产物按 body 行取。
+/** 双行帧取帧：rows 模式产物是单帧（sy=0，坐姿可高至 64px），整表产物按 body 行取。
  *  rows.body===rows.legs 时调用方应优先走整表缓存路径（本函数也兼容） */
 export function dollFrameRows(doll: HTMLCanvasElement, rows: DollRows): { img: HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number } {
-  if (doll.height <= FRAME_H) return { img: doll, sx: 0, sy: 0, sw: FRAME_W, sh: FRAME_H };
+  if (doll.height < BODY_FRAMES * FRAME_H) {
+    return { img: doll, sx: 0, sy: 0, sw: FRAME_W, sh: doll.height };
+  }
   return dollFrame(doll, rows.body);
 }
 

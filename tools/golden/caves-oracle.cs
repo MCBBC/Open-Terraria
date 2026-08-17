@@ -5530,6 +5530,10 @@ void DgChTile(int i, ushort t, bool reset)
     if (dgWatchIdx >= 0 && i == dgWatchIdx) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} ChTile t={t} reset={reset} (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
     if (reset) { typ[i] = 0; wal[i] = 0; liq[i] = 0; liqT[i] = 0; act[i] = 0; }
     act[i] = 1; typ[i] = t;
+    half[i] = 0; slope[i] = 0;   // ChangeTileType 无条件 Clear(Slope)（DungeonUtils.cs:1611-1612——
+                                 // Tile.Clear(Slope)=halfBrick(false)+slope(0)；JS DungeonPass chTile :361 同款。
+                                 // 链外扩展批（2026-08-17）补：曾缺此清位 → 地牢砖格残留上游坡面 203 格，
+                                 // 直至 QuickCleanup(e) 首个坡位敏感消费端显形 4 格 typ/act 分歧）
 }
 void DgChWall(int i, ushort w, bool reset)
 {

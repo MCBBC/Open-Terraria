@@ -104,6 +104,11 @@ export interface GenState {
   jungleBounds: [number, number] | null; // [minX, maxX]
   evilZones: Array<{ x0: number; x1: number }>;
   undergroundDesert: { x0: number; y0: number; x1: number; y1: number } | null;
+  /** GenVars.UndergroundDesertHiveLocation(=description.Hive,DesertBiome.cs:52)——
+   *  地下小屋沙漠追加段(cs:17196)专用【无 Inflate】蜂巢矩形;undergroundDesert
+   *  是 CombinedArea.Inflate(10)(UndergroundDesertLocation,蘑菇等避让用)——两矩形
+   *  曾混用 → 追加屋采样域偏宽(Hive.W vs +20)且上缘高 40-60 格(house40 实锤) */
+  undergroundDesertHive: { x0: number; y0: number; x1: number; y1: number } | null;
 
   // 结构候选（由早期 pass 排队、后期 pass 消费）
   pyramidSpots: Array<{ x: number; y: number }>;
@@ -248,6 +253,7 @@ export function newGenState(w: number, h: number): GenState {
     jungleBounds: null,
     evilZones: [],
     undergroundDesert: null,
+    undergroundDesertHive: null,
     pyramidSpots: [],
     floatingIslands: [],
     shimmerX: -1, shimmerY: -1,

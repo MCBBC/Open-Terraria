@@ -322,7 +322,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
 
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
-import { flipGenSolid, isGenSolid, resetGenSolid } from './vanilla/GenSolid';
+import { flipGenSolid, resetGenSolid } from './vanilla/GenSolid';
 import { parseSeed } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
@@ -1546,10 +1546,29 @@ function finalize({ store, world }: GenCtx) {
       // ★ 回绕区间（≥32768）是【刻意的有符号偏移】——棕榈 323 干身/树冠的
       // frameY=倾斜像素（65534=-2 等，VanillaTiler.ts palm 分支同约定解码），
       // 不是格位索引，绝不可清（左倾棕榈被清 → 树冠+倾斜全部消失）。
-      // 残留脏帧只会是小正值，只对正值做越表判定
+      // ★ 横越表 fx 另有【合法多带样式】——原版 wld 即存原始 fx（Tiles_187 样式
+      // 52-54 = fx 2808，绘制端 VanillaTiler 分带换算回 (918, fy+36)）。曾按越表
+      // 一律清零：沙漠头骨石堆 187 整族塌零帧 → 相邻零帧重建错位（2026-08-17）。
+      // 换算后仍在表内 = 合法帧，勿清。
       const fxv = store.frameX[i], fyv = store.frameY[i];
       if (fxv < 32768 && fyv < 32768 && (fxv >= w || fyv >= h2)) {
-        store.frameX[i] = 0; store.frameY[i] = 0;
+        let legal = false;
+        if (fxv >= 0 && fxv >= w) {
+          const objW = (d.vanilla.fw ?? 1) * 18;
+          const bandH = (d.vanilla.fh ?? 1) * 18;
+          const colsPerBand = objW > 0 ? Math.floor(w / objW) : 0;
+          if (colsPerBand > 0) {
+            const styleIdx = Math.floor(fxv / objW);
+            if (styleIdx >= colsPerBand) {
+              const wx = (styleIdx % colsPerBand) * objW + (fxv % objW);
+              const wy = fyv + Math.floor(styleIdx / colsPerBand) * bandH;
+              if (wx + 16 <= w && wy + 16 <= h2) legal = true;
+            }
+          }
+        }
+        if (!legal) {
+          store.frameX[i] = 0; store.frameY[i] = 0;
+        }
       }
     }
   }
@@ -1625,12 +1644,13 @@ function spawnPointPass({ store, rng, world }: GenCtx) {
   let widen = 10;
   const gs0 = ctxGs[0];
   while (gs0 && sy > gs0.worldSurface) {
-    const x = rng.int(Math.floor(store.w / 2) - widen, Math.floor(store.w / 2) + widen);
+    // cs:19712 `Next(num3 - num12, num3 + num12)` —— 上界独占（曾 rng.int 闭区间
+    // 多 1 个采样位）；谓词与首循环同为 active()+type!=379（cs:19717，曾误用
+    // isGenSolid —— active 含草面/装饰等非实性格，实心语义会跳到更深的首实心行）
+    const x = rng.nextIntRange(Math.floor(store.w / 2) - widen, Math.floor(store.w / 2) + widen);
     for (let y = 0; y < store.h; y++) {
       const i = store.idx(x, y);
-      // 生成期实心查询（cs:19628 期间 379 已翻非实心,GenSolid 接线后 isGenSolid
-      // 天然覆盖,显式 TILE_379 排除保留为原版 cs:19683 `type != 379` 的直比语义）
-      if (isGenSolid(store, x, y) && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
+      if (store.flags[i] && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
     }
     widen++;
   }

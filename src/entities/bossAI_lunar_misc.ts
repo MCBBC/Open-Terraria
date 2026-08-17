@@ -612,6 +612,10 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
 // ---------------------------------------------------------------------------
 export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai0 < 0 || e.ai0 > 8) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+  // noGravity 运行时位（:39525 起始 false；4/4.1 俯冲分支/5 空中态置 true——
+  // 4.1 仅"未过玩家 Y 且 ai[2]==0 的真俯冲段"(:39724-39730)，过顶回落段 false）。
+  // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
+  e.noGravity = false;
   const p = player && !player.dead ? player : null;
   const los = !!p && losClear(game, e.cx, e.cy, p.cx, p.cy);
   // ---- 玩家全灭 → 7 隐身僵坐(:39526-39534) ----
@@ -672,6 +676,7 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     grounded();
   } else if (e.ai0 === 4) {
     // ---- 飞天(:39639-39677):悬玩家上方 350px → ai[2]=1 短瞄 6t → 4.1 俯冲 ----
+    e.noGravity = true;                                    // :39661 整态置位
     if (p) e.facing = e.vx < 0 ? -1 : 1;
     const dx = p ? p.cx - e.cx : e.facing * 100;
     const dy = (p ? p.cy : e.cy) - 350 - e.cy;
@@ -701,10 +706,12 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
       moveAndCollide(e, game.world, e.vx, e.vy);          // 碰撞下坠
     } else if (e.ai2 === 0) {
+      e.noGravity = true;                                 // :39724-39730 真俯冲段
       fly(e);                                             // 未对齐前穿墙
     }
   } else if (e.ai0 === 5) {
     // ---- 穿墙归位(:39711-39734):追玩家,近 200px 且不埋块 → 回 2 ----
+    e.noGravity = true;                                    // :39743 整态置位
     if (p) e.facing = e.vx > 0 ? 1 : -1;
     let dx = p ? p.cx - e.cx : 0, dy = (p ? p.cy : e.cy) - 4 - e.cy;
     if (p && Math.hypot(dx, dy) < 200 && !inSolidBody(game, e)) {
@@ -1117,8 +1124,11 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
   const x = lunarLocalAI(e);
   // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一(-1 石化态合法保留)
   if (e.ai0 !== -1 && (e.ai0 < 0 || e.ai0 > 4)) e.ai0 = 0;
+  // noGravity 运行时位（:40688 起始 true / -1 石化态 :40699 置 false）——
+  // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
   // ---- 专家受击石化(:40692-40697,EXPERT 恒 false 不可达,代码保留) ----
   if (e.justHit && EXPERT && rnd(6) === 0) { e.ai0 = -1; e.ai1 = 0; }
+  e.noGravity = e.ai0 !== -1;   // 转移 tick 即置 false（原版 -1 分支同 tick 生效）
 
   if (e.ai0 === -1) {
     // ---- 石化(:40699-40708) ----

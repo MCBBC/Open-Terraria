@@ -987,8 +987,14 @@ function cascadePlace(st: TileStore, rng: RNG, rooms: Rect[], key: string, ceili
     for (let t = 0; t < 10; t++) {
       if (placeFurniture(st, key, rng.int(2, r.w - 3) + r.x, y)) return true;
     }
+    // 扫描段「成功」= PlaceTile 返回值 = 锚格 active(★任意件——含既有家具!
+    //   PlaceTile 尾段 `if (tile.active()) result=true`(cs:60279-60286)读的是
+    //   锚格终态,Place3x2 被占失败时锚格若原就 active → 返回 true。vanilla
+    //   house10 磨刀站 sweep 踩工作台 87 上 → flag=true 计数+1 而实际未放置
+    //   ——SharpenerCount 与 JS 分歧 → house33 丛林门翻转(3<4 vs 4≥4)实锤)
     for (let x = r.x + 2; x <= r.x + r.w - 2; x++) {
-      if (placeFurniture(st, key, x, y)) return true;
+      placeFurniture(st, key, x, y);
+      if (activeAt(st, x, y)) return true;
     }
     return false;
   };
@@ -1224,7 +1230,6 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //     级联;上限 _random.Next(2,5) 是【每屋重掷】(:835/:871,条件短路保证仅
     //     对应主题掷)——旧实现 pass 级掷一次全程复用(C7)
     if (theme === 'jungle' && sharpCount < rng.int(2, 4)) {
-      console.log(`[JGL] k=${__rn()} sharp=${sharpCount} run cascade`);
       if (cascadePlace(st, rng, rooms, 'v_377_sharpening_station', false)) sharpCount++;
     }
     if (theme === 'desert' && extractCount < rng.int(2, 4)) {
@@ -1249,8 +1254,11 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
   }
 
   // ---- 沙漠追加小屋（cs:17193-17219）：UndergroundDesertHiveLocation 内追加
-  //  AdditionalDesertHouseCount 座（RandomRectanglePoint），失败预算 10000 重试同下标
-  const ud = gs.undergroundDesert;
+  //  AdditionalDesertHouseCount 座（RandomRectanglePoint），失败预算 10000 重试同下标。
+  //  ★采样矩形 = description.Hive（DesertBiome.cs:52,无 Inflate;undergroundDesert
+  //    是 Inflate(10) 的 CombinedArea——蘑菇避让等用,两矩形曾混用 → 采样域偏宽
+  //    偏高,house40 追加屋 (2657,602) vs JS (2661,606) 位漂实锤）
+  const ud = gs.undergroundDesertHive ?? gs.undergroundDesert;
   if (ud && ud.x1 > ud.x0 && ud.y1 > ud.y0) {
     let ry = ud.y0;
     let rh = ud.y1 - ud.y0;
@@ -1263,8 +1271,11 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       let budget = 10000;
       for (let l = 0; l < desertHouses;) {
         if (budget <= 0) break;
-        const hx = rng.int(ud.x0, ud.x1);      // RandomRectanglePoint: Next(X, X+Width)
-        const hy = rng.int(ry, ry + rh);
+        // RandomRectanglePoint(cs:27240-27243)=Next(X,X+Width)/Next(Y,Y+Height)
+        //   ——上界【开区间】:ud.x1/ry+rh 是 X+Width/Y+Height,须 -1(rng.int 闭区间)。
+        //   曾 int(x0,x1) 宽一格 → 追加屋位漂(house40 vanilla (2657,602) vs JS (2661,606) 实锤)
+        const hx = rng.int(ud.x0, ud.x1 - 1);
+        const hy = rng.int(ry, ry + rh - 1);
         __hc?.('dtry', hx, hy);
         if (!placeHouse(hx, hy, false)) { budget--; __hc?.('dno', hx, hy); continue; }
         __hc?.('dok', hx, hy);

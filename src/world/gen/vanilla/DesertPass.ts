@@ -953,6 +953,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     x1: Math.min(st.w, desc.combX + desc.combW + 10),
     y1: Math.min(st.h, desc.combY + desc.combH + 10),
   };
+
 }
 
 export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {

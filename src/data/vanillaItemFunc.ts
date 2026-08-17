@@ -13,6 +13,9 @@ export interface ItemFunc {
   useStyle?: number; knockBack?: number; autoReuse?: number;
   fishingPole?: number;  // 钓竿力度（9 支；抛竿入口判定）
   bait?: number;        // 鱼饵力度（29 种；消耗率 1/(1+bait/6)）
+  /** Item.cs useTurn=true（本表 1533 件有此键=1；全量 3504 件在 combat 表同名列——
+   *  工具/食物/可放置族，Item.cs:170 缺省 false）。2026-08-17 提取器回填 */
+  useTurn?: number;
 }
 
 import funcJson from './vanilla-itemfunc.json';

@@ -115,7 +115,7 @@ export function sittingAnchor(x: number, y: number, dir: number): { x: number; y
 /** 入座时长（:53283）：ai[1] = 900 + rand(10800) */
 export const SIT_TIME_BASE = 900;
 export const SIT_TIME_RAND = 10800;
-/** 时限起身后的转向冷却（:54707 localAI[3] = 30 + rand(60)；本仓由 wanderT 承接） */
+/** 时限起身后的转向冷却（:54707 localAI[3] = 30 + rand(60)；本仓由 turnLock 承接） */
 export const SIT_STAND_WANDER_BASE = 30;
 export const SIT_STAND_WANDER_RAND = 60;
 
@@ -625,6 +625,8 @@ export class TownNPC extends Entity {
   get doorCarry(): boolean { return this.closeDoor; }
   /** 游走态只读（0 站定 / 1 行走；测试消费） */
   get walking(): boolean { return this.walkMode === 1; }
+  /** 测试/读档注入：直接置走态（原版 ai[0]=1、ai[1]=t、localAI[3]=0） */
+  setWalking(t: number): void { this.walkMode = 1; this.walkT = t; this.turnLock = 0; }
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
   hp: number;
@@ -1344,7 +1346,8 @@ export class TownNPC extends Entity {
         this.facing *= -1;
       }
     }
-    return wantDir;
+    // 行走向取拴绳翻转后的最新 facing（原版 direction 同 tick 生效于速度应用）
+    return this.walkMode === 1 ? this.facing : 0;
   }
 
   /** FindGoodRestingSpot 的 floorX/floorY（NPC.cs:53195-53215 头段）：home/anchor
@@ -2408,7 +2411,7 @@ export class TownNPC extends Entity {
    *  - 态内：vx×0.8、ai[1]--；椅格（Bottom−2px）非椅/马桶 → ai[1]=0 立即起身
    *    （:54691-54697）；对话打断在 talking 块（:53738）
    *  - 时限起身：ai[1]<=0 → ai[0]=0 / localAI[3]=30+rand(60)（:54703-54709；
-   *    本仓 wanderT 承接转向冷却）。原版 Main.sittingManager.AddNPC（:54701，
+   *    本仓 turnLock 承接转向冷却）。原版 Main.sittingManager.AddNPC（:54701，
    *    同椅叠坐错位）无对应渲染载体，略——占位互斥由 forceSit 的占位门承担 */
   private sittingUpdate(world: import('../world/World').World, _game: GameHooks): boolean {
     if (this.sitting) {

@@ -208,6 +208,23 @@ export class MinionProj extends Entity {
   facing = 1;
   /** 攻击闪光 tick（AI_062 小鬼攻击帧 +4 门：命中后 24t） */
   attackFlash = 0;
+  /** 随从世界点光（Game 实体光通道读 lightRGB——原版各 AI 的 Lighting.AddLight）：
+   *  755 血蝙蝠 = Crimson CastLightOpen（:48604 GetColor=Color.Crimson(220,20,60)）；
+   *  613 星尘细胞 (0.2,0.6,0.7)（:62191）；623 守护者 (0.9,0.9,0.7)（:41997）；
+   *  1094 Foxparks (0.5,0.3,0.1)（:55275）；533 致命球 ai0%3≠2 橙/≡2 青（:28542-
+   *  28551，无态机取橙档）；653 同伴方块白光 0.5（:46598 档位近似）。387/388/
+   *  373/375/407/423/266/蜘蛛/虎/阿比盖尔/龙链原版零自发光。 */
+  get lightRGB(): [number, number, number] | null {
+    switch (this.projId) {
+      case 755: return [220 / 255, 20 / 255, 60 / 255];
+      case 613: return [0.2, 0.6, 0.7];
+      case 623: return [0.9, 0.9, 0.7];
+      case 1094: return [0.5, 0.3, 0.1];
+      case 533: return [0.8, 0.3, 0.1];
+      case 653: return [0.5, 0.5, 0.5];
+      default: return null;
+    }
+  }
   /** 不占随从槽位（沙漠虎/阿比盖尔本体、龙身体段、星尘守护者——原版 minionSlots=0/不统计） */
   noSlot = false;
   /** 龙链父段引用（626/627/628 跟随前段） */
@@ -1481,8 +1498,43 @@ export class MinionProj extends Entity {
       ctx.strokeStyle = '#000';
       ctx.strokeRect(-8, -8, 16, 16);
     }
+    // 755 血蝙蝠红晕（Main.cs:30669-30678）：AI_156_GetColor = Crimson(220,20,60)
+    // α=120，沿旋转垂直向 4 向各偏 2px 叠画 4 层染色本体——"发红光"的视觉主体
+    if (this.projId === 755 && img) {
+      const halo = tintFrameCache(img, 'rgb(220,20,60)');
+      if (halo) {
+        ctx.globalAlpha = 120 / 255;
+        for (let k = 0; k < 4; k++) {
+          const off = this.rot + (Math.PI / 2) * k;
+          ctx.save();
+          ctx.translate(Math.cos(off) * 2, Math.sin(off) * 2);
+          ctx.drawImage(halo, -halo.width / 2, -halo.height / 2);
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
     ctx.restore();
   }
+}
+
+/** 帧图整体染色缓存（755 红晕用：source-atop 填色剪影） */
+const HALO_TINT = new Map<HTMLCanvasElement, HTMLCanvasElement>();
+function tintFrameCache(src: HTMLCanvasElement, color: string): HTMLCanvasElement | null {
+  let c = HALO_TINT.get(src);
+  if (c) return c;
+  if (typeof document === 'undefined') return null;
+  c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const cx2 = c.getContext('2d');
+  if (!cx2) return null;
+  cx2.drawImage(src, 0, 0);
+  cx2.globalCompositeOperation = 'source-atop';
+  cx2.fillStyle = color;
+  cx2.fillRect(0, 0, c.width, c.height);
+  if (HALO_TINT.size > 64) HALO_TINT.clear();   // 帧图缓存换代会自然重建
+  HALO_TINT.set(src, c);
+  return c;
 }
 
 /**

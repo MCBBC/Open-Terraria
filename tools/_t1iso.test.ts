@@ -218,7 +218,18 @@ let gsLk: GenState | null = null, gsPot: GenState | null = null, gsVn: GenState 
   // ── C) #71 Pots：dump070 → runPotsPass → dump071
   if (want('pots')) {
     const st = buildStore(70);
-    if (!process.env.SW_POTNOSLOPE) loadExtra('pot', st);   // liquidType + slope/half（PlacePot 地面门）/frame（地牢 shelf）
+    if (process.env.SW_POTX86) {
+      // x86 真值通道（/tmp/sw-ycal/van22 070_Quick_Cleanup 出口，Y 批资产）：
+      // slope/half/lty 直注（lty 原版 0水/1岩/2蜜/3微 → 本仓 +1 编码）；
+      // frameX/frameY 无 x86 通道 → 先走 loadExtra 垫 JS 管线 bin 再覆写真值三通道
+      loadExtra('pot', st);
+      const van = (ch: string) => new Uint8Array(readFileSync(`/tmp/sw-ycal/van22/070_Quick_Cleanup.${ch}`));
+      st.slope.set(van('slope').subarray(0, st.slope.length));
+      st.half.set(van('half').subarray(0, st.half.length));
+      const lty = van('lty');
+      for (let i = 0; i < st.liquidType.length; i++) st.liquidType[i] = lty[i] > 3 ? 0 : lty[i] + 1;
+      console.log('pots 输入通道=x86 真值（slope/half/lty）+ JS frame bin');
+    } else if (!process.env.SW_POTNOSLOPE) loadExtra('pot', st);   // liquidType + slope/half（PlacePot 地面门）/frame（地牢 shelf）
     const { rng, box } = countedRng(gsPot!.seed);
     if (process.env.SW_POTTRACE) {
       const intOrig = rng.int.bind(rng);

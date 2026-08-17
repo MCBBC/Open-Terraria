@@ -21,8 +21,14 @@ export interface ItemCombat {
   ranged?: boolean;
   magic?: boolean;
   summon?: boolean;
-  /** Item.cs useTurn=true（1141 件，工具族；武器 false）——itemAnimation 窗内移动改向豁免（:19546） */
+  /** Item.cs useTurn=true（3504 件：工具/食物/可放置族；显式 `useTurn = true` 1399 行经
+   *  贯穿组/区间 if/DefaultTo* 族展开后的逐物品计数；武器缺省 false）——itemAnimation
+   *  窗内移动改向豁免（:19546）。2026-08-17 提取器三通道回填 */
   useTurn?: boolean;
+  /** Item.cs noUseGraphic=true（381 件：矛/炸弹/鞭/投掷/捕获小动物/电锯族——使用期间
+   *  不画手持贴图，投射物即本体）。对照 Game.NO_USE_GRAPHIC_VIDS 手工小表（其 7 件
+   *  全含于本列），消费侧换表另批 */
+  noUseGraphic?: boolean;
 }
 
 const RAW = combatJson as unknown as Record<string, ItemCombat>;

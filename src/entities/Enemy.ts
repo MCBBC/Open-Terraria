@@ -57,7 +57,7 @@ import {
   cultistArcherStandbyAI, cultistArcherWake, phantomAI, bigMimicAI,
   mothronAI, mothronEggAI, babyMothronAI, graniteElementalAI,
   starCellAI, smallStarCellAI, flowInvaderAI, nebulaFloaterAI, solarSlimeAI,
-  crawltipedeAI,
+  crawltipedeAI, lunarLocalAI,
 } from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
@@ -588,7 +588,13 @@ export class Enemy extends Entity {
     e.vanilla = v;
     const hit = vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'];
     const kill = vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'];
-    const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14;
+    // 飞行档（StrikeNPC :82217/-0.5 受击档用）：数据 noGravity 族 + aiStyle 2/5/14
+    // （原版各 AI 开头 noGravity=true）+ aiStyle 23/44（飞行武器 83/84/179 kb0.4
+    // :25318、飞鱼/蚁狮蜂族 224/509/581/587 :31001——JSON noGravity=false 但原版
+    // AI 每 tick 置位，静态表覆盖不到，2026-08-17 补）；按态族（17/87/91）走运行时
+    // this.noGravity 位（hurt() 读 noGravity || def.flying）
+    const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14
+      || v.aiStyle === 23 || v.aiStyle === 44;
     // ---- NPC.ScaleStats（NPC.cs:18081-18105，NewNPC→SetDefaults 后调用 :8322/:17791）----
     // 世界难度轴（Main.Difficulty → 生命/伤害/钱/击退倍率 + 逐类型系数 +
     // 专家困难模式兜底增强）。Boss **不豁免**（仅 ExpertHardmode 段跳过 :18471）。
@@ -650,6 +656,7 @@ export class Enemy extends Entity {
     // 恒 0，与旧归零语义一致）
     e.hp = ss.lifeMax;
     e.maxHp = ss.lifeMax;
+    e.noGravity = flying;   // 运行时位初值=静态飞行档（按态族由各自 AI 每 tick 改写）
     // 碰撞盒乘 npc.scale(NPC.cs:17745-17747 width/height=(int)(×scale))——
     // 史莱姆王/毁灭者 1.25、血肉墙 1.2:此前未乘,贴图放大了盒子没放大,
     // 判定区比视觉小一圈(与渲染 scale 不一致的"盒贴图不匹配"来源)。
@@ -890,6 +897,13 @@ export class Enemy extends Entity {
   /** 击退抗性运行时覆写（游泳族专用）：461 wet→0 / dry→0.4（难度曲线，
    *  NPC.cs:56366/:56412 GetKnockbackMultiplier_ScaledByDifficulty）；null=用 def 值 */
   kbResistOverride: number | null = null;
+  /** 运行时 noGravity 位（原版 NPC.noGravity 逐 tick 置位，StrikeNPC :82217/:82228
+   *  受击档读【运行时值】非静态表）：AI_017 秃鹫(:24079 飞行态 true/栖息 0 态 false)、
+   *  AI_087 珍珑宝箱怪(:39525 起始 false、4/4.1/5 空中态 true)、AI_091 花岗岩元素
+   *  (:40688 起始 true、-1 石化态 false)在各自 AI 内同步置位；hurt() 读
+   *  noGravity || def.flying（def.flying=静态兜底，覆盖数据 noGravity 族与
+   *  aiStyle 2/5/14/23/44 恒飞行族） */
+  noGravity = false;
   /** 原版 justHit 语义（本 tick 内受过击） */
   get justHit(): boolean { return this.justHitT > 0; }
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
@@ -1112,6 +1126,7 @@ export class Enemy extends Entity {
         case 91: graniteElementalAI(this, game, p); break;                 // AI_091 花岗岩元素 483（cs:40686 五态寻路）
         case 120: empressOfLightAI(this, game, p); break;                 // AI_120 光之女皇(连段选招/半血变身)
         case 121: queenSlimeAI(this, game, p); break;                     // AI_121 史莱姆皇后(走路四连跳→飞行二阶段)
+        case 122: this.pirateGhostAI(game, p); break;                     // AI_122 海盗幽灵 662（穿墙追击+失标渐隐自灭）
         case 123: deerclopsAI(this, game, p); break;                      // AI_123 鹿角怪(尖刺/碎石/影手/回家)
         case 100: ancientLightAI(this, game, p); break;                  // AI_100 远古之光 522(直飞投射物型)
         case 101: ancientDoomAI(this, game, p); break;                  // AI_101 远古末日 523(锚邪教徒蓄能自爆)
@@ -1472,7 +1487,7 @@ export class Enemy extends Entity {
   private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1) {
     // 注：水中行为不在本方法——wet 减速由 npcLiquid→liqFactor 统一承担（原版
     // Collision_MoveWhileWet），浮力族（史莱姆）的弹跳漂浮在各自 AI 的 wet 段（cs:61877）
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx + accel * Math.sign(this.vx || 1) * 0));
     if (jumpV && this.onGround) this.vy = -jumpV;
     moveAndCollide(this, game.world, this.vx, this.vy);
@@ -1794,6 +1809,35 @@ export class Enemy extends Entity {
     }
   }
 
+  /** 原版 UpdateNPC_UpdateGravity（NPC.cs:91876-91953）通用重力档 1:1：
+   *  ① 高空衰减（:91916-91934）：num=(maxTilesX/4200)²、num2=(y/16−(60+10·num))/
+   *     (worldSurface/6) 钳 [0.25,1] → gravity×num2——空岛/太空高度下落明显变缓
+   *     （worldSurface=world.groundLevel，LunarEvent.ts:143 同源换算）；
+   *  ② wet 三档（:91936-91952）：0.2(水)/0.1(蜜)/0.15(微光)——原版为绝对值直替
+   *     （覆盖①的高空系数），照抄 TownNPC.ts:1200 先例；落速帽 7/4/5.5 已由
+   *     npcLiquid.ts 第 6 段每 tick 钳，此处不重复。
+   *  特例族（258/425/426/427/576/577/541/aiStyle7-ai25 的专属重力改写）由各自
+   *  AI 内自带档，不在此列。
+   *  ★GRAVITY=0.4 vs 原版 0.3 偏差已登记（constants.ts）勿动：①高空系数按原版
+   *  乘子直接叠加在现 GRAVITY 上；②wet 档取原版绝对值（0.2/0.1/0.15 对 0.4 基数
+   *  的减速比比原版更陡——与 TownNPC 先例一致，待重力专项统一）。 */
+  applyGravity(game: GameHooks) {
+    let g = GRAVITY;
+    // ① 高空衰减（worldSurface/6 与 (60+10num) 为原版双参，浮点同式；
+    //    groundLevel<=0 的手工/测试世界无地表线 → 视作全重力，防 ÷0/NaN）
+    const surf = game.world.groundLevel;
+    if (surf > 0) {
+      const num = (game.world.store.w / 4200) ** 2;
+      let alt = (this.y / TILE - (60 + 10 * num)) / (surf / 6);
+      if (alt < 0.25) alt = 0.25;
+      else if (alt > 1) alt = 1;
+      g *= alt;
+    }
+    // ② wet 三档（绝对值直替，覆盖高空系数——原版同序）
+    if (this.wet) g = this.shimmerWet ? 0.15 : this.honeyWet ? 0.1 : 0.2;
+    this.vy = Math.min(this.vy + g, MAX_FALL_SPEED);
+  }
+
   private zombieAI(game: GameHooks, player: Player | null) {
     // 卡墙脱困：朝玩家走却持续撞墙（高墙跳不过去）→ 掉头往另一侧探索
     if (this.onGround && this.hitWall && player) {
@@ -1890,7 +1934,7 @@ export class Enemy extends Entity {
     // 摇晃衰减（FindFrame 488 分支 cs:71516-71544 同步逻辑在渲染帧端）
     if (this.dummyShake > 0) this.dummyShake--;
     // 静止：仅重力站立
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     this.vx = 0;
     moveAndCollide(this, game.world, this.vx, this.vy);
     this.hp = this.maxHp; // immortal：血量恒满（cs:14535 lifeMax=1000 + immortal）
@@ -2256,7 +2300,7 @@ export class Enemy extends Entity {
       }
     }
     // 重力 + 碰撞（原版 SteepSlowing/WalkDownSlope 略）
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
     // ---- 四级跳判定（L24651-24733）：仅在朝移动方向撞到东西时 ----
     // 原版全部跳跃赋值都有 velocity.Y == 0f 前置（AI_003 内 44 处同款门）——
@@ -2494,7 +2538,7 @@ export class Enemy extends Entity {
       // 蓄力减速（cs:57135-57140）
       this.ai2 -= 1;
       this.vx *= 0.9;
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
       return true;
     }
@@ -2507,7 +2551,7 @@ export class Enemy extends Entity {
       if (d < 0.001) { dx = this.facing || 1; dy = -1; d = Math.hypot(dx, dy); }
       this.vx = (dx / d) * DASH_SPEED;
       this.vy = (dy / d) * DASH_SPEED;
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
       return true;
     }
@@ -2519,7 +2563,7 @@ export class Enemy extends Entity {
     this.reflectsProjectiles = true;
     this.takenDamageMultiplier = 3;
     if (this.justHit) this.ai2 = 60;
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
     return true;
   }
@@ -2626,11 +2670,15 @@ export class Enemy extends Entity {
     this.x = nx; this.y = ny;
     this.maxHp = v.lifeMax;
     this.hp = Math.max(1, Math.round((this.hp * v.lifeMax) / oldMax)); // life = life*lifeMax/old
+    // 飞行档表达式与 fromVanilla 同源（noGravity 数据族 + aiStyle 2/5/14/23/44）
+    const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14
+      || v.aiStyle === 23 || v.aiStyle === 44;
+    this.noGravity = flying;   // 运行时位随 Transform 重置（原版 SetDefaults 复位语义）
     this.def = {
       ...this.def,
       name: v.name, hp: v.lifeMax, damage: v.damage, defense: v.defense,
       width: nw, height: nh,
-      flying: v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14,
+      flying,
       boss: VANILLA_BOSS_IDS.has(id),
       hitSound: vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'],
       killedSound: vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'],
@@ -2793,7 +2841,7 @@ export class Enemy extends Entity {
     }
     // 静止站立 + 重力（原版 AI_042 无任何速度代码）
     this.vx = 0;
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
   }
 
@@ -2817,7 +2865,7 @@ export class Enemy extends Entity {
         return;
       }
     }
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
   }
 
@@ -2827,7 +2875,11 @@ export class Enemy extends Entity {
    *  碰撞反弹旧速×-0.5（X 朝 direction 保底 2 / Y 保底 1） */
   private vultureAI(game: GameHooks, player: Player | null) {
     if (this.ai0 < 0) this.ai0 = 0;
+    // noGravity 运行时位（:24079-24084）：AI 开头恒 true，栖息 0 态置 false——
+    // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
+    this.noGravity = true;
     if (this.ai0 === 0) {
+      this.noGravity = false;
       // 唤醒判定用重力前的速度（原版 AI 先读 velocity、重力在其后施放——
       // 落地碰撞清零后站立态 vy==0，不会被本 tick 重力误判成"有速度"）
       const preVy = this.vy;
@@ -2845,7 +2897,7 @@ export class Enemy extends Entity {
         this.vy = -6;
         return;
       }
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
       return;
     }
@@ -2915,7 +2967,7 @@ export class Enemy extends Entity {
       this.y += this.vy;
       return;
     }
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (player && !player.dead) {
       this.ai0 += 1;
@@ -2987,12 +3039,12 @@ export class Enemy extends Entity {
         this.ai0 = 1;
         return;
       }
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
       return;
     }
     if (player && !player.dead) this.facing = this.seekDirX(player);
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.onGround && this.vy === 0) {
       this.ai2 += 1;
@@ -3036,7 +3088,7 @@ export class Enemy extends Entity {
     const los = !!player && !player.dead && this.canSeePlayer(st, player);
     const inW = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
     const gravityStep = () => {
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
     };
     if (this.ai0 === 0 || this.ai0 > 5) {
@@ -3155,7 +3207,7 @@ export class Enemy extends Entity {
       this.vy -= 0.3;
       if (this.vy < -4) this.vy = -4;
     }
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.onGround && this.vy === 0) {
       this.vx *= 0.8;
@@ -3858,7 +3910,7 @@ export class Enemy extends Entity {
         if (rise > 0 && rise <= 16.1) this.y = fr * TILE - this.h;
       }
     }
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     const xBefore = this.x;
     moveAndCollide(this, game.world, this.vx, this.vy);
     // 卡墙计数（X 未动，原版 position.X == oldPosition.X 判定）
@@ -4227,6 +4279,59 @@ export class Enemy extends Entity {
     this.y += this.vy;
   }
 
+  /** AI_122 海盗幽灵 662（NPC.cs:45177-45210 1:1；SetDefaults :17302-17317
+   *  noGravity+noTileCollide+lavaImmune+trapImmune——此前误落 default zombieAI 成
+   *  地面怪，2026-08-17 修正）：
+   *  - localAI[0]==0 → 一次性出场音 NPCHit6（:45179-45183）；
+   *  - 失标（玩家死亡/无效，TargetClosest 后仍无目标，:45184-45202）：velocity×0.9、
+   *    alpha +5/t 渐隐，至 255 → StrikeNPCNoInteraction(9999) 自灭；
+   *  - 有标：alpha −5/t 渐显（:45204）；targetPos = 指向玩家向量限长 4
+   *    （Vector2.Zero.MoveTowards(Δ,4)），velocity 以 2/15 步进趋近（MoveTowards）；
+   *  - 同型互斥（:45206-45219）：50px 内另一只 662 → velocity −= unit×0.1、
+   *    X 再 −= unit.X×1（合计 X 推离 0.2 / Y 0.1）；
+   *  - noGravity+noTileCollide → 无重力直接积分位移（ghostAI 同款先例）。
+   *  FindFrame case 122（:74305，spriteDirection/rotation=vx×0.05/8t 三帧）渲染侧
+   *  未接，登记。 */
+  private pirateGhostAI(game: GameHooks, player: Player | null) {
+    const x = lunarLocalAI(this);
+    if (x[0] === 0) {
+      x[0] = 1;
+      game.playSfxFiles(['NPC_Hit_6'], 1, this.cx, this.cy);
+    }
+    if (!player) {
+      this.vx *= 0.9;
+      this.vy *= 0.9;
+      this.spawnAlpha = Math.min(255, this.spawnAlpha + 5);
+      if (this.spawnAlpha >= 255) this.hurt(9999, 0, 0, game); // 走标准死亡管线
+      return;
+    }
+    this.spawnAlpha = Math.max(0, this.spawnAlpha - 5);
+    const dx = player.cx - this.cx, dy = player.cy - this.cy;
+    const d = Math.hypot(dx, dy);
+    const tx = d > 4 ? (dx / d) * 4 : dx;   // MoveTowards(Zero, Δ, 4)：限长 4
+    const ty = d > 4 ? (dy / d) * 4 : dy;
+    const step = 2 / 15;                    // velocity.MoveTowards(targetPos, 2/15)
+    const mv = (cur: number, tgt: number) => {
+      const diff = tgt - cur;
+      return Math.abs(diff) <= step ? tgt : cur + Math.sign(diff) * step;
+    };
+    this.vx = mv(this.vx, tx);
+    this.vy = mv(this.vy, ty);
+    for (const o of game.enemies() as Enemy[]) {
+      if (o === this || o.dead || o.vanillaId !== 662) continue;
+      const ox = o.cx - this.cx, oy = o.cy - this.cy;
+      const od = Math.hypot(ox, oy);
+      if (od > 0 && od < 50) {
+        const ux = (ox / od) * 0.1, uy = (oy / od) * 0.1;
+        this.vx -= ux; this.vx -= ux;   // −unit×0.1 后 X 再 −unit.X×1 → X 合计 0.2
+        this.vy -= uy;
+      }
+    }
+    if (this.vx !== 0) this.facing = this.vx > 0 ? 1 : -1;
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
   /** 小动物被动 AI（原版 critter 语义近似）：间歇游荡 + 受击逃离玩家。
    *  各家族原版行为（蚱蜢 ai1 跳/鸟 ai24 飞/蚯蚓 ai66 爬）后续逐族 1:1，先统一温和地面行为 */
   /** AI_024 鸟（1.4.5.6 NPC.cs:25396+）：三态——0 地面踱步 / 1 飞行 / 2 降落。
@@ -4240,7 +4345,7 @@ export class Enemy extends Entity {
     const oldVx = this.vx, oldVy = this.vy;
     if (this.ai0 === 0) {
       // 地面态：重力踱步；玩家贴近/受击 → 起飞（远离方向）
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
       if (this.onGround && this.aiT % 60 === 0) this.vx = (Math.random() < 0.5 ? -1 : 1) * 0.7;
       if (this.onGround) this.vx *= 0.85;
@@ -4648,7 +4753,7 @@ export class Enemy extends Entity {
         : this.vanillaId === 487 ? 0.4 : this.vanillaId === 374 ? 0.6 : 0.2;
       this.vx = this.facing * mult;
     } else this.vx = 0;
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) this.facing *= -1;
   }
@@ -4679,7 +4784,7 @@ export class Enemy extends Entity {
       // 惊扰逃跑：正常重力爬地
       if (this.onGround) this.ai2 = 0;
       this.vx = this.facing * spd;
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
       if (this.hitWall) this.facing *= -1;
     }
@@ -4740,7 +4845,7 @@ export class Enemy extends Entity {
         return;
       }
       // 离水（cs:34887 noGravity=false → 有重力）：陆行待起飞
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       if (Math.abs(this.vx) < 2) this.vx += this.facing * 0.1;
       if (player && !player.dead
         && Math.abs(player.cx - this.cx) < 100 + (this.w + player.w) / 2
@@ -5121,7 +5226,7 @@ export class Enemy extends Entity {
       this.vy = 16;                                        // 玩家正下俯冲
       phase = true;
     } else {
-      if (this.vy > 0) this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      if (this.vy > 0) this.applyGravity(game);
       if (alive && pp) {
         if (this.facing > 0 && this.cx > pp.cx) { this.vx *= 0.96; this.vy *= 0.96; }
         if (this.facing < 0 && this.cx < pp.cx) { this.vx *= 0.96; this.vy *= 0.96; }
@@ -5540,7 +5645,8 @@ export class Enemy extends Entity {
       this.facing = this.vx > 0 ? 1 : -1;
       if (!onSurface && this.onGround) { this.vy = -2; this.ai1 = 60; }
     }
-    this.vy = this.inWater || liq > 80 ? this.vy : Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    // 水黾离水才落（wet 态浮沉本 AI 自管 :5568-5576，不走通用湿档）
+    if (!(this.inWater || liq > 80)) this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
   }
 
@@ -5575,7 +5681,7 @@ export class Enemy extends Entity {
         this.vy *= 0.95;
       }
     } else {
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       if (this.vy === 0) this.vx *= 0.95;
     }
     this.facing = this.vx > 0 ? 1 : -1;
@@ -5642,7 +5748,7 @@ export class Enemy extends Entity {
     // （传送落点即站面、受击呈正常抛物线回落）。旧实现 vx/vy 同乘 0.9 裸积分——
     // 无重力无碰撞，受击 vy<0 只缓衰减不回落 = "被击退就往上飞"（2026-08-17 用户报告）
     if (!this.vanilla?.noGravity) {
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.applyGravity(game);
       moveAndCollide(this, game.world, this.vx, this.vy);
     } else {
       this.x += this.vx; this.y += this.vy;        // 数据侧若标 noGravity 则保悬浮直移
@@ -6720,6 +6826,9 @@ export class Enemy extends Entity {
     // kby!==0 = 爆炸/光环等非武器冲量 → 加法冲量（原版同走 StrikeNPC 管线，
     //   仓内双参冲量约定，登记）
     const resist = this.kbResistOverride ?? this.def.knockbackResist;
+    // :82217/:82228 读【运行时】noGravity（AI_017 秃鹫飞行态/AI_087 空中态/AI_091
+    // 浮游态按态置位）——def.flying 仅静态兜底（数据 noGravity + aiStyle 2/5/14/23/44）
+    const kbFlying = this.noGravity || this.def.flying;
     if (kby !== 0) {
       if (resist > 0) { this.vx += kbx * resist; this.vy += kby * resist; }
     } else if (Math.abs(kbx) > 0 && resist > 0) {   // :82144 knockBack>0 && resist>0 双门
@@ -6744,13 +6853,13 @@ export class Enemy extends Entity {
           if (this.vx > num3) this.vx = num3;
         }
         if (this.vanillaId === 185) num3 *= 1.5;    // :82209-82212 小丑特例
-        num3 = this.def.flying ? num3 * -0.5 : num3 * -0.75; // :82217 noGravity 档
+        num3 = kbFlying ? num3 * -0.5 : num3 * -0.75; // :82217 noGravity 运行时档
         if (this.vy > num3) {                       // :82220-82225 Y 加法钳
           this.vy += num3;
           if (this.vy < num3) this.vy = num3;
         }
       } else {                                      // 重路 :82227-82237
-        this.vy = -num3 * (this.def.flying ? 0.5 : 0.75) * resist; // :82228-82233
+        this.vy = -num3 * (kbFlying ? 0.5 : 0.75) * resist; // :82228-82233
         this.vx = num3 * hitDir * resist;           // :82235 resist 二次乘
       }
     }

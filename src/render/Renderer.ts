@@ -6137,10 +6137,11 @@ export class Renderer {
       legs = (wing && (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) && wingsAlways) ? 0 : 5;
     } else if (p.vx !== 0 && p.onGround) {
       // 行走循环（:35817-35847）：counter += |vx|·1.3、每 8 进一行、行 7..19 回绕；
-      // 滚轴鞋（IsRollerSkates）满速档 +2/t（:35830-35833）。animTime = |vx| 累计（走停清零）
+      // 滚轴鞋（IsRollerSkates）满速档每 tick +2（:35830-35833 counter=2.0）。
+      // animTime = |vx| 逐 tick 累计（走停清零）→ counter = animTime × 速率
       const skates = !!MOUNT_SETS.IsRollerSkates?.[mtype] && mountActive;
-      const rate = skates && Math.abs(p.vx) >= (p.equipStats.accRunSpeed || 3) ? 2 : p.animTime * 1.3;
-      legs = 7 + Math.floor(rate / 8) % 13;
+      const ratePerTick = skates && Math.abs(p.vx) >= (p.equipStats.accRunSpeed || 3) ? 2 : 1.3;
+      legs = 7 + Math.floor((p.animTime * ratePerTick) / 8) % 13;
     } else {
       legs = 0;
     }
@@ -7172,10 +7173,12 @@ export class Renderer {
       // 40×56 单帧（rows 进 compositePaperDoll 缓存键）
       const rows = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, dollEquip.legs ?? 0);
       const dual = rows.body !== rows.legs;
-      // 坐姿（PlayerDrawSet.cs:332-343 isSitting）→ 腿通道走 DrawSittingLegs 切片
-      // （腿甲全档切片表 :1473；皮肤/裤/鞋默认切片 :1497；seatYOffset 供特殊档对冲）
-      const sitOpt = p.sitting
-        ? { sitting: { legIndex: dollEquip.legs ?? 0, seatYOffset: -4 + Math.trunc(p.seatOffsetY), body: dollEquip.body ?? 0 } }
+      // 坐姿（PlayerDrawSet.cs:332-343 isSitting = 坐椅 ∪ 坐骑 17 高尔夫车/23 扫帚/45
+      // 木翼）→ 腿通道走 DrawSittingLegs 切片（腿甲全档切片表 :1473；皮肤/裤/鞋默认
+      // 切片 :1497；seatYOffset 供特殊档对冲——坐骑态无座位偏移取 0）
+      const sitDraw = p.sitting || (mnt && (p.mount.type === 17 || p.mount.type === 23 || p.mount.type === 45));
+      const sitOpt = sitDraw
+        ? { sitting: { legIndex: dollEquip.legs ?? 0, seatYOffset: p.sitting ? -4 + Math.trunc(p.seatOffsetY) : 0, body: dollEquip.body ?? 0 } }
         : {};
       const dollOpts = { ...(dyeColor ? { skipHair: true } : {}), ...(dual ? { rows } : {}), ...sitOpt };
       const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);
@@ -7185,7 +7188,7 @@ export class Renderer {
         // 贴底:纸娃娃帧底有 ~2px 透明边距(Player_0_10 全帧实测),底锚会悬空——
         // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿（坐姿切片底缘
         // 不同，键里带 sit 档）
-        const pad = this.spriteBottomPad(f, `doll:${rows.body},${rows.legs}${p.sitting ? ',sit' : ''}`);
+        const pad = this.spriteBottomPad(f, `doll:${rows.body},${rows.legs}${sitDraw ? ',sit' : ''}`);
         if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, true);
         if (stealthClamp >= 1) {
           ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);

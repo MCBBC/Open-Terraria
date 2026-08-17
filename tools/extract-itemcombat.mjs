@@ -31,6 +31,7 @@ function methodBody(name) {
   return '';
 }
 const bodies = [
+  methodBody('public void SetDefaults(int Type'),
   methodBody('public void SetDefaults1(int type)'),
   methodBody('public void SetDefaults2(int type)'),
   methodBody('public void SetDefaults3(int type)'),
@@ -458,6 +459,17 @@ for (const body of bodies) {
       }
     }
   }
+}
+
+// ---- 守卫补集尾段（guard complement）补丁 ----
+// SetDefaults3 `if (type < 2192 || type > 2198) { 守卫链 }` 尾段（Item.cs:27602-27630）
+// 为守卫补集服务：2192-2198（遗物族,守卫外直落尾段）+ 2203/2204（守卫内 case 空组
+// break 贯穿到尾段）吃 `useTurn = true`。全文件仅此一处守卫+尾段带三通道
+// （SetDefaults4 3315-3317 是 goto case 别名,走既有别名通道），按源码固化。
+for (const id of [2192, 2193, 2194, 2195, 2196, 2197, 2198, 2203, 2204]) {
+  const cur = literal.get(id);
+  if (cur === undefined) literal.set(id, { useTurn: true });
+  else if (cur.useTurn === undefined) cur.useTurn = true;
 }
 
 // ---- SetFoodDefaults（Item.cs:47653）：仅三通道（食物族不进 combat 表，

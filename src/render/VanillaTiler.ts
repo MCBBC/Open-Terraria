@@ -1010,25 +1010,29 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   } else {
     // 重建帧偏移：只针对帧数据全 0 的残缺物体（wld 部分家具）。
     // 邻居必须同样存 (0,0) 才视为同物体的待重建格——已带 18px 偏移的邻居
-    // 一定是相邻物体的格子（如并排宝箱的 (18,0)），必须挡住扫描
+    // 一定是相邻物体的格子（如并排宝箱的 (18,0)），必须挡住扫描。
+    // ★扫描到整段同类零帧 run 的【左/上边界】再按 fw/fh 模数切块（2026-08-17）：
+    // run 左/上边界必是某物体的物体左/上边缘，(边界距离 % fw)*18 对相邻并排
+    // 零帧物体（沙漠石堆 187 连排/地牢相邻陈设）逐格精确。旧实现扫描截断在
+    // fw-1（ax=min(k,fw-1)），第 4 格起 ofx 恒 36 → 连排右列碎片重复=贴图错位
     let ofx = fx, ofy = fy;
     if (ofx === 0 && ofy === 0 && (fw > 1 || fh > 1)) {
-      // 向左扫描最多 fw-1 格：同类且帧全 0
       let ax = 0;
-      for (let k = 1; k < fw; k++) {
+      for (let k = 1; k <= 256; k++) {
+        if (!st.inBounds(x - k, y)) break;
         const li = st.idx(x - k, y);
-        if (st.inBounds(x - k, y) && st.type[li] === type && st.frameX[li] === 0 && st.frameY[li] === 0) ax = k;
+        if (st.type[li] === type && st.frameX[li] === 0 && st.frameY[li] === 0) ax = k;
         else break;
       }
-      ofx = ax * 18;
-      // 向上扫描最多 fh-1 格：同类且帧全 0
+      ofx = (ax % fw) * 18;
       let ay = 0;
-      for (let k = 1; k < fh; k++) {
+      for (let k = 1; k <= 256; k++) {
+        if (!st.inBounds(x, y - k)) break;
         const ui2 = st.idx(x, y - k);
-        if (st.inBounds(x, y - k) && st.type[ui2] === type && st.frameX[ui2] === 0 && st.frameY[ui2] === 0) ay = k;
+        if (st.type[ui2] === type && st.frameX[ui2] === 0 && st.frameY[ui2] === 0) ay = k;
         else break;
       }
-      ofy = ay * 18;
+      ofy = (ay % fh) * 18;
     }
     // 旧版素材表【分带布局】兼容：wld 帧按新游戏单行布局存储（样式全部横排一行），
     // 而素材包里的表较窄、样式分多带排列（一行放不下就换到下一带）。

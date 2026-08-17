@@ -6,6 +6,7 @@
 //   放置：createTile/createWall/placeStyle
 //   消耗：consumable、potion、healLife/healMana、buffType（+buffTime 近似）
 //   弹药：ammo/useAmmo/notAmmo、shoot、channel、autoReuse、holdStyle、torch
+//   改向：useTurn（=1；全量归档自 extract-itemcombat.mjs 提取库，2026-08-17）
 // 注意 case 归属 = 最近一层 switch(type)（嵌套 switch 陷阱同 extract-equip-prefix.mjs）。
 // 2026-08-17 useTurn 叠加：全量归档来自 extract-itemcombat.mjs 三通道提取库（显式字面
 // + DefaultTo* 辅助函数族 + 区间 if 块；Item.cs:170 默认 false——表内仅记 true=1）。

@@ -308,6 +308,8 @@ export class UI {
   toastEl: HTMLElement | null = null;
   achWrapEl: HTMLElement | null = null;
   heldStack: { id: number; stack: number; prefix?: number; placeStyle?: number } | null = null; // prefix/placeStyle 随实例流转
+  /** 光标持有物来源区（露西存取台词的 CountsAsStorage 判定，ItemSlot 上下文） */
+  private heldFrom: SlotWhere | null = null;
   heldFrom: SlotWhere = 'inv';
   openChest: ChestData | null = null;
   private toastTimer: number | null = null;
@@ -1017,7 +1019,7 @@ export class UI {
     else if (where === 'miscDye') this.game.player.inv.miscDyes[i] = null;
     else if (this.openChest) this.openChest.items[i] = null;
     if (this.heldStack) this.heldStack.stack += cur.stack;
-    else this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; // 保留词缀+实例样式
+    else { this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; this.heldFrom = where; } // 保留词缀+实例样式
     this.refreshAll();
   }
 
@@ -1063,6 +1065,7 @@ export class UI {
       if (cur.stack <= 0) this.openChest.items[i] = null;
     }
     this.heldStack = { id: cur.id, stack: half, prefix: cur.prefix, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; // 拆半也带词缀+实例样式
+    this.heldFrom = where;
     this.refreshAll();
   }
 
@@ -1078,6 +1081,13 @@ export class UI {
   /** 放下到背包/宝箱格（合并→交换，装备位校验） */
   private placeHeld(i: number, where: SlotWhere): void {
     if (!this.heldStack) return;
+    // 露西斧存取台词（ItemSlot_OnItemTransferred :75-99：CountsAsStorage(箱柜)
+    // 状态翻转才说话——存入 Storage / 取回 PickedUp，420t 冷却）
+    if (vanillaIdOfItemKey(ITEM_DEFS[this.heldStack.id]?.key ?? '') === 5095
+      && (this.heldFrom === 'chest') !== (where === 'chest')) {
+      if (where === 'chest') this.game.lucyTransferToStorage();
+      else this.game.lucyTransferFromStorage();
+    }
     if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
       const inv = this.game.player.inv;
       const arr = this.equipArray(where);
@@ -1183,10 +1193,13 @@ export class UI {
     if (!this.heldStack || !this.game) return;
     const p = this.game.player;
     const key = ITEM_DEFS[this.heldStack.id].key;
+    // 丢弃露西 → ThrownAway 台词（Player.cs:4984-4986）
+    if (vanillaIdOfItemKey(key) === 5095) this.game.lucyThrownAway();
     const drop = this.game.spawnDrop(p.cx + p.facing * 18, p.y + 6, key, this.heldStack.stack,
       p.facing * 4 + p.vx, -2);
     if (drop) drop.noGrabDelay = 100;
     this.heldStack = null;
+    this.heldFrom = null;
   }
 
   /** 光标持有物的 ghost 跟随 */

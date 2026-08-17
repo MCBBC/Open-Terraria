@@ -234,16 +234,41 @@ describe('仙人掌砍伐（CheckCactus :54132 级联）', () => {
     expect(cactus).toBe(4);                        // 3 干 + 1 臂，无 bonus 掷（确定性）
   });
 
-  it('挖掉脚下沙 → 整株倒（TileFrame case 80 级联接线）', () => {
+  it('挖掉脚下沙 → 被 CanKillTile 保护拦（底帽帧 c∈{0,1,4,5}，:62298-62305）', () => {
     const drops: Array<[string, number]> = [];
     const w = ground(new World(40, 60, 30, 'open'));
     const SAND = TILE_BY_KEY['sand'];
     w.store.setTileSilent(10, 40, SAND, 0, 0);
-    for (let i = 0; i < 2; i++) w.store.setTileSilent(10, 38 + i, CAC, 22, 0);
-    shell(w, drops).breakTile(10, 40);             // 破坏沙（非仙人掌本体）
-    expect(w.store.get(10, 38)).toBe(0);
-    expect(w.store.get(10, 39)).toBe(0);
-    expect(drops.some(([k]) => k.includes('vi_276'))).toBe(true);
+    for (let i = 0; i < 2; i++) w.store.setTileSilent(10, 38 + i, CAC, 22, 0);  // 底帽帧
+    shell(w, drops).breakTile(10, 40);             // 破坏沙（非仙人掌本体）→ 拦
+    expect(w.store.get(10, 40)).toBe(SAND);        // 沙未被破坏
+    expect(w.store.get(10, 39)).toBe(CAC);
+    expect(drops.length).toBe(0);
+  });
+
+  it('CanKillTile 干族保护：挖树脚下草被拦（:62277-62282），枝/冠帧例外放行', () => {
+    const g = Object.create(Game.prototype) as unknown as {
+      world: World; tileAboveProtected(x: number, y: number): boolean;
+    };
+    const w = ground(new World(40, 60, 30, 'open'));
+    g.world = w;
+    // 普通树干在草上：草(10,40) 上方干帧 (0,0) → 保护
+    w.store.setTileSilent(10, 39, T.TREE, 0, 0);
+    expect(g.tileAboveProtected(10, 40)).toBe(true);
+    // 冠标记帧（Y≥198 例外）→ 放行
+    w.store.setTileSilent(10, 39, T.TREE, 22, 198);
+    expect(g.tileAboveProtected(10, 40)).toBe(false);
+    // 枝帧例外（66, 0-44 / 88, 66-110）→ 放行
+    w.store.setTileSilent(10, 39, T.TREE, 66, 22);
+    expect(g.tileAboveProtected(10, 40)).toBe(false);
+    w.store.setTileSilent(10, 39, T.TREE, 88, 88);
+    expect(g.tileAboveProtected(10, 40)).toBe(false);
+    // 根帧（22/44 @132-176）→ 保护（挖根下的格被拦）
+    w.store.setTileSilent(10, 39, T.TREE, 44, 154);
+    expect(g.tileAboveProtected(10, 40)).toBe(true);
+    // 同类型（砍干本身）不拦
+    w.store.setTileSilent(10, 40, T.TREE, 0, 0);
+    expect(g.tileAboveProtected(10, 40)).toBe(false);
   });
 
   it('拦腰砍 → 下方保留', () => {

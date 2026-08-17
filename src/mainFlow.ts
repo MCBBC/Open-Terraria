@@ -346,7 +346,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
-          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true });
+          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: (player as { x?: number }).x ?? world.spawnX * 16, y: (player as { y?: number }).y ?? world.spawnY * 16 } });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
@@ -380,7 +380,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
-          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true });
+          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: (player as { x?: number }).x ?? world.spawnX * 16, y: (player as { y?: number }).y ?? world.spawnY * 16 } });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;

@@ -45,8 +45,9 @@ const FILES = [
   // 喵刀弹 502 命中喵叫（SoundID 37 Meowmere = LegacySoundPlayer :1329 的
   // SoundItem[57..58]，音量 ×0.5×style×0.05 音高扰动 ±0.4）
   'Item_57', 'Item_58',
-  // ---- 全量 UseSound 素材（Item.cs SetDefaults 提取 582 件的 74 个不同 Item_N；
-  // vanilla-itemusesound.json 数据驱动播放，2026-08-13）----
+  // ---- 全量 UseSound 素材（Item.cs SetDefaults 提取；vanilla-itemusesound.json 数据
+  // 驱动播放，2026-08-13。2026-08-17 三通道全量再生成 968 件/新增 Item_152 等 11 个
+  // 变体——wav 均已在库，白名单无需扩）----
   ...[
     'Item_2', 'Item_4', 'Item_7', 'Item_13', 'Item_15', 'Item_16', 'Item_21', 'Item_23',
     'Item_25', 'Item_29', 'Item_31', 'Item_32', 'Item_34', 'Item_38', 'Item_39', 'Item_40',

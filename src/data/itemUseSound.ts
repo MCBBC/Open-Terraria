@@ -1,7 +1,8 @@
-// Item.cs SetDefaults 显式 UseSound 提取（582 件；tools 侧 python 一次性提取，
-// 键=物品 id，值=SoundID 名）。Item_N 形可直接映射 public/sounds wav；
-// 命名轨（DD2_MonkStaffSwing 等 Trackable）2026-08-13 起经 vanillaSoundFiles
-// 解析为变体组 wav（SoundEngine 播放时组内随机取一）。
+// Item.cs SetDefaults 显式 UseSound 提取（968 件；tools/extract-itemcombat.mjs
+// 三通道全量再生成，2026-08-17——含嵌套 switch case/区间 if 块/SetFoodDefaults 食物族/
+// DefaultTo* 辅助函数族/委托继承；键=物品 id，值=SoundID 名）。Item_N 形可直接映射
+// public/sounds wav；命名轨（DD2_MonkStaffSwing 等 Trackable）2026-08-13 起经
+// vanillaSoundFiles 解析为变体组 wav（SoundEngine 播放时组内随机取一）。
 import sndJson from './vanilla-itemusesound.json';
 import { soundTrackName } from './vanillaNpcs';
 import soundTracksJson from './vanilla-soundtracks.json';

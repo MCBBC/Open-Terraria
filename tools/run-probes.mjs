@@ -26,6 +26,7 @@ const PROBES = [
   { name: 'pause-export', file: 'scripts/_pause-export-probe.mjs', timeoutMs: 240_000 },
   { name: 'angler', file: 'scripts/_angler-probe.mjs', timeoutMs: 300_000 },
   { name: 'mounts', file: 'scripts/_mounts-probe.mjs', timeoutMs: 300_000 },
+  { name: 'bunny-ai', file: 'scripts/_bunny-ai-probe.mjs', timeoutMs: 420_000 }, // 6000t 观测窗+240t 行走采样
 ];
 
 const argv = process.argv.slice(2);

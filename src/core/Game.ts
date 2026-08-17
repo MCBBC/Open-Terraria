@@ -115,6 +115,10 @@ import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
+import {
+  setLucySinks, tickLucyCooldowns, lucyEnterWorld, lucyTryIdle, lucyTryWithCooldown, create as lucyCreate,
+} from '../items/LucyAxe';
+import { spawnEmote } from '../render/EmoteBubble';
 import { itemUseSoundWav } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing } from '../entities/projStatus';
@@ -153,7 +157,8 @@ import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
 import { tileRunner } from '../world/gen/vanilla/TileRunner';
-import { growGemTree } from '../world/gen/vanilla/TreePass';
+import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from '../world/gen/vanilla/TreePass';
+import type { GenState } from '../world/gen/vanilla/GenState';
 import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
@@ -406,6 +411,20 @@ const TILE_NO_FAIL_SHEETS = new Set([
 // tileAxe（Main.cs:7157-7172）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
 // ★583-589 七棵宝石树全在原版表内（:7165-7171），此前漏 588 钻石树（可斧性缺失）
 const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 704]);
+// IsATreeTrunk（TileID.cs:161）：干族全表（普通树/蘑菇树/宝石树×7/观赏树×2/灰烬树）
+const TREE_TRUNK_SHEETS = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+// CanKillTile tile-above 保护清单（WorldGen.cs:62293-62297）：宝箱 21/梳妆台 26/
+// 蘑菇树 72/地狱熔炉 77/梳妆台2 88/箱2 467/倒木 488——这些多格件的支撑格不可破坏
+const PROTECTED_ABOVE_SHEETS = new Set([21, 26, 72, 77, 88, 467, 488]);
+// 橡实苗锚点档（TileObjectData.cs:4858-4900 tile20 交替档表）：绿草{2,477}=档0 /
+// 雪147=3 / 丛林60=6 / 腐化{23,661}=9 / 猩红{199,662}=12 / 神圣{109,492}=15 /
+// 沙53=18 / 珍珠沙116=21 / 猩红沙234=24 / 黑檀沙112=27 / 灰烬草633=30。
+// 帧 = (档+Next(3))×18（RandomStyleRange=3 视觉三变体）；成长分发读 frameX/54
+// = 档/3（6-9 棕榈 / 10 灰烬 / 其余普通树，AttemptToGrowTreeFromSapling :72860）
+const ACORN_ALT_BY_GROUND_SHEET: Record<number, number> = {
+  2: 0, 477: 0, 147: 3, 60: 6, 23: 9, 661: 9, 199: 12, 662: 12,
+  109: 15, 492: 15, 53: 18, 116: 21, 234: 24, 112: 27, 633: 30,
+};
 // 地牢砖族（Main.tileDungeon + 41/43/44 裂纹变体）：除数 /2 + 门槛 100
 const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 481, 482, 483]);
 // Main.wallDungeon 墙表（Main.cs:10507-10515：7/8/9/94-99）——KillWall_CheckFailure
@@ -452,6 +471,13 @@ function dropVanillaId(d: ItemDrop): number {
 /** 内部 item id → 原版 item id（vi_<id>_ 键解析;非 vi_ 键恒 -1） */
 function slotVanillaId(itemId: number): number {
   return viIdFromKey(ITEM_DEFS[itemId]?.key ?? '');
+}
+
+/** 背包扫描：任意格持有指定原版 id（hasLucyTheAxe 语义，Player.cs:12213-12215
+ *  inventory[0..57] 逐格 RefreshInfoAccsFromItemType） */
+function slotVanillaIdListIncludes(slots: ReadonlyArray<{ id: number } | null>, vid: number): boolean {
+  for (const s of slots) if (s && slotVanillaId(s.id) === vid) return true;
+  return false;
 }
 
 /** 配饰槽（armor[3..9]，原版 ApplyEquipFunctional :12543-12550）→ 原版 item id 列表 */
@@ -2274,13 +2300,17 @@ export class Game implements GameHooks {
    *  而非全量 ~250MB)——远行遇到的类型走懒加载,onVImageLoaded 回调全量标脏
    *  chunk 自动重烘焙;物品图标全量(18MB);角色 = Player_ 全量 + 当前装备的
    *  3 张 Armor 表(换装走懒加载);出生点森林背景 */
-  private async preloadSceneAssets(onProgress?: (label: string, p: number) => void): Promise<void> {
+  private async preloadSceneAssets(onProgress?: (label: string, p: number) => void, playerAt?: { x: number; y: number }): Promise<void> {
     const a = this.atlas;
     if (!a) return;
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadWorldTex'), 0.05);
-    // 出生点半径类型扫描:只预载画面涉及的图块/墙表
+    // 画面类型扫描:只预载涉及的图块/墙表。★中心=存档玩家落点(2026-08-17 用户
+    // "允许加载页停一下,全部就位再进"):读档玩家常远离出生点,只扫出生点会让玩家
+    // 区表缺席→首烘回退绿块+2.5s 保险补丁;扫玩家点则表在加载页 await 完,零回退
     const st = this.world.store;
-    const { tileSheets, wallIds } = this.collectSheetsAround(this.world.spawnX, this.world.spawnY, 240);
+    const cx0 = playerAt ? Math.floor(playerAt.x / TILE) : this.world.spawnX;
+    const cy0 = playerAt ? Math.floor(playerAt.y / TILE) : this.world.spawnY;
+    const { tileSheets, wallIds } = this.collectSheetsAround(cx0, cy0, 240);
     await Promise.all([
       a.preloadTileSheetsFor(tileSheets, wallIds),
       a.preloadMiscAndNpcs(),
@@ -2397,7 +2427,7 @@ export class Game implements GameHooks {
     return settleWorldLiquids(this.world, mode, onProgress);
   }
 
-  async loadWorld(world: World, onProgress?: (label: string, p: number) => void, opts?: { settled?: boolean }) {
+  async loadWorld(world: World, onProgress?: (label: string, p: number) => void, opts?: { settled?: boolean; playerAt?: { x: number; y: number } }) {
     this.freshlyCreated = false;
     this.world = world;
     if (!opts?.settled) {
@@ -2410,7 +2440,7 @@ export class Game implements GameHooks {
       // 活水极少，单轮快速收敛；残留交给运行时——不再跑生成期的 10 轮全沉降）
       await this.settleLiquids((p) => onProgress?.(loadSettleLabel(p), p * 0.8), 'load');
     }
-    await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2));
+    await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2), opts?.playerAt);
     this.afterWorldLoad();
     this.cb.onWorldReady();
   }
@@ -2472,6 +2502,18 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // 露西斧宿主注入 + 进世界 Idle 冷却（LucyAxeMessage.Initialize/Hooks_OnEnterWorld：
+    // 7200-14400t 起始冷却，进世界不立即说话）。sinks 用闭包动态解析 this.player
+    setLucySinks({
+      popup: (text, x, y, vx, vy) => {
+        this.dmgNumbers.push({ x, y, vx, vy, value: 0, crit: false, color: '#D46E71', label: text, life: 420, scale: 1, alpha: 1 });
+      },
+      talk: (x, y) => this.playSfxFiles(soundTrackFiles('lucyaxe_talk'), 0.4, x, y),
+      emote: () => spawnEmote(this.player, 149),      // EmoteBubble.MakeLocalPlayerEmote(149)
+      top: () => ({ x: this.player.cx, y: this.player.y }),
+      direction: () => this.player.facing,
+    });
+    lucyEnterWorld();
     // Mechdusa queen 登记复位（WorldGen.clearWorld :6907 NPC.mechQueen=-1）
     resetMechQueen();
     // 摇树状态复位（WorldGen.clearWorld :6896 ResetTreeShakes）+ 绑当前 store
@@ -3144,6 +3186,11 @@ export class Game implements GameHooks {
     // 原版 HitTile 衰减（每 2 tick 一次——原版按帧衰减配原版 ~27 帧挥速；
     // 我们的挥击间隔更长，等比减半保持"连击可积累、停手会消退"）
     if (this.tickCount % 2 === 0) this.hitTiles.update();
+    // 露西斧（Main.cs:17222 UpdateMessageCooldowns + Player.cs:24441-24444：
+    // hasLucyTheAxe = 背包任意格持有 5095（inventory[0..57] 扫描，:12214）→
+    // 每帧 TryPlayingIdleMessage）
+    tickLucyCooldowns();
+    if (slotVanillaIdListIncludes(this.player.inv.slots, 5095)) lucyTryIdle();
     const w = this.world;
     // 下落沙:消费候选队列(有界,防止沙漠整柱同帧转换尖峰)
     if (this.sandQueue.length) this.drainSandQueue();
@@ -5099,6 +5146,9 @@ export class Game implements GameHooks {
         d.life--;
         d.y += d.vy;
         d.vy *= 0.94;
+        // 水平漂移（AdvancedPopupRequest velocity：露西台词 (dir*7,-7)）对称衰减
+        d.x += d.vx ?? 0;
+        d.vx = (d.vx ?? 0) * 0.94;
         if (d.life > 0) this.dmgNumbers[wn++] = d;
         continue;
       }
@@ -8181,14 +8231,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     void def;
   }
 
-  private toolCanBreak(type: number, power: number, toolType: string): boolean {
+  /** 工具类型与 tile 族匹配门（原版 Player.cs:45039-45045 三元组：镐分支
+   *  `pick > 0 && !tileAxe && !tileHammer`、斧分支 `axe > 0 && tileAxe`——
+   *  不匹配则整个 strike 段跳过，无击打音/尘/积累。tileAxe 表权威 =
+   *  TILE_AXE_SHEETS（Main.cs:7157-7172），本地 d.axe 标志混有平台/草等
+   *  非 tileAxe 件（曾误据 d.axe<0 拒镐挖平台）。
+   *  镐力门槛【不在此】：原版门槛在 GetPickaxeDamage 的 damage 计算里归零，
+   *  每击仍走 KillTile(fail:true) → 播击打音+尘（WorldGen.cs:63600）。
+   *  power 不足的"播声不破坏"由 tryMine 击打点处理。 */
+  private toolMatchesTile(type: number, toolType: string): boolean {
     const d = TILE_DEFS[type];
     if (!d) return false;
-    // 镐排除斧族（Player.cs:45039 `sItem.pick > 0 && !Main.tileAxe[·]`——树/棕榈/
-    // 倒木等 tileAxe 集镐不可挖，斧专属；2026-08-17 棕榈砍伐审计补，曾只挡
-    // pick:-1 的件漏了 pick:0 的 v_5/v_80）
-    if (toolType === 'pick') return d.pick >= 0 && power >= d.pick && d.axe < 0;
-    if (toolType === 'axe') return d.axe >= 0;
+    const sheet = d.vanilla?.sheet ?? -1;
+    if (toolType === 'pick') return d.pick >= 0 && !TILE_AXE_SHEETS.has(sheet);
+    if (toolType === 'axe') return TILE_AXE_SHEETS.has(sheet);
     return false;
   }
 
@@ -8480,7 +8536,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
-    if (type === 0 || !this.toolCanBreak(type, power, toolType)) {
+    if (type === 0 || !this.toolMatchesTile(type, toolType)) {
       // 装饰物（杂草等）任意工具/武器一下清掉并掉落
       if (type !== 0 && TILE_DEFS[type]?.decor && (toolType === 'pick' || toolType === 'axe')) {
         this.breakTile(tx, ty, true);
@@ -8557,14 +8613,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 斧/锤点在非斧族 tile：原版该分支无伤害（hammer 墙路径在上方已分流）
       dmg = 0;
     }
+    // 通用镐力门槛（数据侧 d.pick 表 = 原版 GetPickaxeDamage 逐 tile 需求的
+    // 等价物）：镐力不足 → damage=0（每击仍播击打音+尘，不积累——原版 num2=0
+    // 也走 KillTile(fail:true) → PlaySounds，Player.cs:45148）
+    if (toolType === 'pick' && dmg > 0 && power < d.pick) dmg = 0;
+    // CanKillTile 保护门（Player.cs:45045/:45108 `if (!WorldGen.CanKillTile) num2=0`）：
+    // 上方保护族（干/棕榈干基/箱柜/蘑菇树/倒木/仙人掌底帽）→ 伤害归零不可挖
+    if (dmg > 0 && this.tileAboveProtected(tx, ty)) dmg = 0;
     const total = this.hitTiles.addDamage(tx, ty, dmg);
     this.hardnessCache = 100;
     this.mining = { x: tx, y: ty, progress: total }; // 裂缝显示 = 积累进度
+    // ★每击击打音（原版每击 KillTile(fail:true) → KillTile_PlaySounds，
+    // WorldGen.cs:63600——无论破坏与否、damage 是否为 0 都播；分档同
+    // killTileBreakSound 四档近似）。砍树即此来的"咚咚"声（树干落 dig 档）
+    this.killTileBreakSound(type, tx, ty);
     this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
+      const heldVid = slotVanillaId(this.player.inv.heldItem()?.id ?? -1);
+      // 露西斧台词（Player.cs:45115-45130）：宝石树 583-589 / 仙人掌 80（420t 冷却）/
+      // 其余干族 + 棕榈 → ChoppedTree；速度 (direction*7, -7)、锚玩家头顶
+      if (heldVid === 5095 && (TREE_TRUNK_SHEETS.has(sheet) || sheet === 323 || sheet === 80)) {
+        if (sheet >= 583 && sheet <= 589) lucyCreate('choppedGemTree', this.player.facing * 7, -7);
+        else if (sheet === 80) lucyTryWithCooldown('choppedCactus', 420);
+        else lucyCreate('choppedTree', this.player.facing * 7, -7);
+      }
+      // 再生之斧 5295：IsBottomOfTreeTrunkNoRoots（:45132 破坏前捕获）→
+      // KillTile 后 TryReplantingTree（:45143-45161 自动补种橡实苗，不耗橡实）
+      const regrow = heldVid === 5295 && this.isBottomOfTreeTrunkNoRoots(tx, ty);
       this.breakTile(tx, ty, true);
       this.mining = null;
+      if (regrow) this.placeAcornSapling(tx, ty);
       // 破坏完成音不再在此分档——统一走 breakTile 内 KillTile_PlaySounds 四档
       //（WorldGen.cs:66483-66631，见 killTileBreakSound；爆炸/液体冲毁路径同源）
     } else if (toolType === 'axe' && TREE_SHAKEABLE_SHEETS.has(sheet)) {
@@ -8665,6 +8744,75 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** CanKillTile tile-above 保护族（CanKillTile :62276-62315 挖掘门 +
+   *  CheckTileBreakability :62320-62345 爆炸/KillTile 同语义）：上方是"需本格
+   *  支撑"的件时本格不可破坏——干族（枝/冠帧例外：挂干上不落地）、棕榈干基
+   *  66/220、箱柜族 21/26/77/88/467、蘑菇树 72、倒木 488、仙人掌底帽帧
+   *  （frameX/18∈{0,1,4,5}）。同类型自身破坏链（砍干/砍仙人掌）不拦。 */
+  private tileAboveProtected(x: number, y: number): boolean {
+    if (y <= 0) return false;
+    const st = this.world.store;
+    const above = st.get(x, y - 1);
+    if (above === 0) return false;
+    if (st.get(x, y) === above) return false;
+    const asheet = TILE_DEFS[above]?.vanilla?.sheet ?? -1;
+    const ai = st.idx(x, y - 1);
+    const afx = st.frameX[ai], afy = st.frameY[ai];
+    if (TREE_TRUNK_SHEETS.has(asheet)
+      && !(afx === 66 && afy <= 44) && !(afx === 88 && afy >= 66 && afy <= 110) && afy < 198) return true;
+    if (asheet === 323 && (afx === 66 || afx === 220)) return true;
+    if (PROTECTED_ABOVE_SHEETS.has(asheet)) return true;
+    if (asheet === 80) {
+      const c = Math.floor(afx / 18);
+      if (c <= 1 || (c >= 4 && c <= 5)) return true;
+    }
+    return false;
+  }
+
+  /** IsBottomOfTreeTrunkNoRoots（Player.cs:45168-45185）：干族/棕榈 且非根帧
+   *  （frameY 132-176 && frameX∈{22,44}；棕榈无根帧豁免）——再生之斧补种门 */
+  private isBottomOfTreeTrunkNoRoots(x: number, y: number): boolean {
+    const st = this.world.store;
+    const t = st.get(x, y);
+    if (t === 0) return false;
+    const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+    if (!TREE_TRUNK_SHEETS.has(sheet) && sheet !== 323) return false;
+    const i = st.idx(x, y);
+    if (sheet !== 323 && st.frameY[i] >= 132 && st.frameY[i] <= 176
+      && (st.frameX[i] === 22 || st.frameX[i] === 44)) return false;
+    return true;
+  }
+
+  // ================= 露西斧（LucyAxeMessage UI 侧钩） =================
+
+  /** ItemSlot_OnItemTransferred（:75-99）：露西存入箱柜 → Storage 台词（420t 冷却） */
+  lucyTransferToStorage(): void { lucyTryWithCooldown('storage', 420); }
+
+  /** 从箱柜取回露西 → PickedUp 台词（420t 冷却） */
+  lucyTransferFromStorage(): void { lucyTryWithCooldown('pickedUp', 420); }
+
+  /** 丢弃露西（Player.cs:4984-4986 theItemWeDrop.type==5095 → ThrownAway） */
+  lucyThrownAway(): void { lucyCreate('thrownAway', this.player.facing * 7, -2); }
+
+  /** 放置橡实苗（TileObject.CanPlace tile20 1:1，TileObjectData.cs:4858-4900）：
+   *  目标格空 + 无液体（WaterPlacement NotAllowed）+ 下方 = 锚点表整砖 →
+   *  帧 = (档+Next(3))×18。橡实放置与再生之斧补种共用 */
+  private placeAcornSapling(tx: number, ty: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(tx, ty) || st.isActive(tx, ty)) return false;
+    if (st.liquid[st.idx(tx, ty)] > 0) return false;
+    if (!st.inBounds(tx, ty + 1)) return false;
+    const gi = st.idx(tx, ty + 1);
+    if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
+    const gs = TILE_DEFS[st.type[gi]]?.vanilla?.sheet ?? -1;
+    const alt = ACORN_ALT_BY_GROUND_SHEET[gs];
+    if (alt === undefined) return false;
+    const fx = (alt + Math.floor(Math.random() * 3)) * 18;   // RandomStyleRange=3
+    st.setTile(tx, ty, T.SAPLING, fx, 0);
+    this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 2);
+    return true;
+  }
+
   /** 破坏 tile：处理树整体砍伐与 object 锚点。
    *  byPlayer=true = 玩家工具直接破坏（原版 AchievementsHelper.CurrentlyMining 门）：
    *  触发成就 tile 破坏通知（OOO_SHINY/EXTRA_SHINY/HEART_BREAKER/PHOTOSYNTHESIS）
@@ -8673,6 +8821,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const st = this.world.store;
     const type = st.get(x, y);
     if (type === 0) return;
+    // CheckTileBreakability==2 早退（KillTile :63579-63582）：上方保护族 → 不破坏
+    // （爆炸/液体冲毁同门；成就计数亦不应触发，故在 byPlayer 段之前）
+    if (this.tileAboveProtected(x, y)) return;
     if (byPlayer) {
       const sheet = TILE_DEFS[type]?.vanilla?.sheet;
       if (sheet != null) this.achievements.notifyTileDestroyed(sheet);
@@ -9829,14 +9980,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const style = itemDef.placeStyle ?? 0;
       if (hasPylonOfType(this.pylons, style)) return;
     }
-    // 橡实: 只能种在草块正上方
+    // 橡实（TileObjectData tile20 全锚点表 1:1，见 placeAcornSapling）：绿草/
+    // 腐化/猩红/神圣/丛林/灰烬草/雪 + 沙族（棕榈苗，帧 6-9 档）/灰烬草（档 10）——
+    // 旧实现仅 T.GRASS + toast 是自创限制。原版不可种处静默失败（无 toast）
     if (viIdFromKey(itemDef.key) === 27) {
-      if (st.get(tx, ty + 1) !== T.GRASS) {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AcornGrassOnly'));
-        return;
+      if (this.player.useTime > 0) return;
+      if (this.placeAcornSapling(tx, ty)) {
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 14;
+        this.sfx.play('place');
+        this.cb.onInventoryChanged();
+        // 成就：种橡实（Player.PlantAcorn → PlantedAcorn，CONSERVATIONIST 计数）
+        this.achievements.plantedAcorn();
       }
-      // 成就：种橡实（Player.PlantAcorn → PlantedAcorn，CONSERVATIONIST 计数）
-      this.achievements.plantedAcorn();
+      return;
     }
     const ow = def.w ?? 1, oh = def.h ?? 1;
     // 绳索(RopeCoil 语义):从放置点向下延伸至实心/最多 10 格
@@ -14345,31 +14502,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   private tickNpcEmotes(): void {
+    // 社交掷骰已移 TownNPC.socialUpdate（AI_007 :55630-55835 每 NPC 每 tick
+    // 1:1：结对聊天/RPS 对局/派对舞/发呆/面向玩家/驻足看家具——2026-08-17 批
+    // 重做；本函数旧"全局 600t 挑一对+错表情池"已退役）。本窗口仅保留装饰性
+    // 空闲随机冒泡（单 NPC 也冒泡，白天每 600t 一次）
     if (this.world.clock.isDay && --this.emoteCooldown <= 0) {
       this.emoteCooldown = 600; // 每 10s 窗口一次
       const npcs = this.entities.npcs.filter(
         (n) => n instanceof TownNPC && !n.dead && !n.bound && !n.talking) as TownNPC[];
-      if (npcs.length >= 2) {
-        for (let i = 0; i < npcs.length - 1; i++) {
-          const a = npcs[i];
-          for (let j = i + 1; j < npcs.length; j++) {
-            const b = npcs[j];
-            if (Math.hypot(a.cx - b.cx, a.cy - b.cy) > 6 * TILE) continue;
-            // 表情池（EmoteID 实号：25 群系/90 道具/100 火/87 疑惑/89 睡意——原版社交段同源）
-            const pool = [25, 90, 100, 87, 89];
-            spawnEmote(a, pool[Math.floor(Math.random() * pool.length)], 180);
-            spawnEmote(b, pool[Math.floor(Math.random() * pool.length)], 180);
-            a.facing = b.cx < a.cx ? -1 : 1;  // 面向对方（原版社交状态朝向）
-            b.facing = a.cx < b.cx ? -1 : 1;
-            // 原版进入 ai[0]=7 社交态即停走；近似：重置游走计时让双方站定片刻
-            a.wanderT = Math.max(a.wanderT, 220); b.wanderT = Math.max(b.wanderT, 220);
-            a.vx *= 0.3; b.vx *= 0.3;
-            return;
-          }
-        }
-      }
       // 空闲随机冒泡(原版散落情境 NewBubble 的可见子集;emote 均匀 0..120,
-      // 240t)——单 NPC 也冒泡,喂同一 EmoteBubble 模块(TownNPC 内联版已退役)
+      // 240t)——喂同一 EmoteBubble 模块(TownNPC 内联版已退役)
       if (npcs.length >= 1 && Math.random() < 0.5) {
         const n = npcs[Math.floor(Math.random() * npcs.length)];
         spawnEmote(n, Math.floor(Math.random() * 121), 240);
@@ -16596,7 +16738,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  （旧实现只扫玩家附近 60×40，视野外永不生长——限域近似已废） */
   private growSaplings() {
     const st = this.world.store;
-    const grown: Array<[number, number]> = [];
     const plan = saplingScanPlan(st.w, st.h, this.world.groundLevel,
       Math.floor(this.tickCount / 300));
     const gemP = plan.gemP;
@@ -16625,40 +16766,64 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
+    // AttemptToGrowTreeFromSapling（:72849-72985）逐型分发（干系全走 TreePass 1:1
+    // 种植：干/枝/根/冠全套帧 + 高度 5-16 + 基座/墙/净空全套判定——旧实现自造
+    // "净空 2-3 格 + 高 5-8 光杆柱"非原版）：
+    //   tile 20（frameX/54 档）：10→灰烬树 / 6-9→棕榈 / 其余→普通树；
+    //   tile 595/615（观赏树苗）：Next(5)==0（4× 采样率，:72467-72481）
+    const SAK = TILE_BY_KEY['v_595_sakura_sapling'];
+    const WIL = TILE_BY_KEY['v_615_yellow_willow_sapling'];
+    const vanityP = Math.min(1, sapP * 4);   // 1/5 vs 1/20 采样差折算
+    const gs = { genTrees: this.world.trees } as unknown as GenState;   // 生长登记进 world.trees
+    const tryGrow = (x: number, y: number, sheet: number, fx: number): boolean => {
+      const rng = new RNG((Math.random() * 1e9) | 0);
+      const style = Math.floor(fx / 54);
+      if (sheet === 20) {
+        if (style === 10) return growAshTree(st, rng, x, y);
+        if (style >= 6 && style <= 9) return growPalmTree(st, rng, x, y, gs);
+        return growTree(st, rng, gs, x, y);
+      }
+      if (sheet === 595) return growVanityTree(st, rng, x, y, false);
+      if (sheet === 615) return growVanityTree(st, rng, x, y, true);
+      return false;
+    };
     for (let x = plan.x0; x < plan.x1; x++) {
       for (let y = plan.overY0; y < plan.overY1; y++) {
-        if (st.get(x, y) !== T.SAPLING) continue;
-        // 上方 2-3 格净空才长
-        if (st.isActive(x, y - 1) || st.isActive(x, y - 2) || st.isActive(x, y - 3)) continue;
-        if (Math.random() < sapP) { // 地表采样率折算（见函数头，原版 :71550/72471）
-          grown.push([x, y]);
+        const t = st.get(x, y);
+        if (t !== T.SAPLING && t !== SAK && t !== WIL) continue;
+        const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+        const p = sheet === 20 ? sapP : vanityP;
+        if (Math.random() >= p) continue;    // 地表采样率折算（见函数头，:71550/:72467-72481）
+        if (tryGrow(x, y, sheet, st.frameX[st.idx(x, y)])) {
+          this.chunks.markDirtyArea(x - 6, y - 14, x + 6, y + 2);
+          this.treeGrowFX(x, y, sheet === 20 ? Math.floor(st.frameX[st.idx(x, y)] / 54) : -1);
         }
       }
     }
-    for (const [x, y] of grown) {
-      const groundY = y + 1;
-      // 原版橡实生长走 WorldGen.GrowTree 全套检查(NPC.cs 之外,WorldGen.cs:29924-29969):
-      // 基座整砖(!halfBrick&&slope==0)+ 草族适树 + 至少一侧邻格适树——缺侧根地面不长
-      const gi = st.idx(x, groundY);
-      const FIT_GRASS = new Set([T.GRASS, TILE_BY_KEY['v_23_corrupt_grass_block'], TILE_BY_KEY['v_199_crimson_grass_block'],
-        TILE_BY_KEY['v_60_jungle_grass_block'], TILE_BY_KEY['v_70_mushroom_grass_block'], T.SNOW]);
-      const fitTile = (xx: number, yy: number) => {
-        if (!st.inBounds(xx, yy)) return false;
-        const ii = st.idx(xx, yy);
-        return !!st.flags[ii] && !st.half[ii] && st.slope[ii] === 0 && FIT_GRASS.has(st.type[ii]);
-      };
-      if (!fitTile(x, groundY)) continue;
-      if (!fitTile(x - 1, groundY) && !fitTile(x + 1, groundY)) continue;
-      const th = 5 + Math.floor(Math.random() * 4);
-      st.setTile(x, y, 0);
-      for (let dy2 = 1; dy2 <= th; dy2++) {
-        if (!st.inBounds(x, groundY - dy2)) break;
-        if (st.isActive(x, groundY - dy2)) break;
-        st.setTile(x, groundY - dy2, T.TREE, dy2 === th ? 22 : 0, dy2 === th ? 198 : 0); // 原版帧：顶标记(22,198)+干身(0,0)
+    // 地下区 tile 20 灰烬档（case 10 无 underground 门，:72861-72863；其余档
+    // underground=true 拒绝 :72876-72883——宝石苗 590 已在上段）
+    for (let x = plan.x0; x < plan.x1; x++) {
+      for (let y = plan.underY0; y < plan.underY1; y++) {
+        if (st.get(x, y) !== T.SAPLING) continue;
+        if (Math.floor(st.frameX[st.idx(x, y)] / 54) !== 10) continue;
+        if (Math.random() >= sapP) continue;
+        if (growAshTree(st, new RNG((Math.random() * 1e9) | 0), x, y)) {
+          this.chunks.markDirtyArea(x - 6, y - 14, x + 6, y + 2);
+          this.treeGrowFX(x, y, 10);
+        }
       }
-      this.world.registerTree(x, groundY - th, th);
-      this.chunks.markDirtyArea(x - 4, groundY - th - 4, x + 4, groundY);
     }
+  }
+
+  /** TreeGrowFXCheck（:29501-29540 + PlayerLOS 门）：视野内成树 → 绿叶爆散近似
+   *  （原版 msg112→TreeGrowFX 叶粒子效果；色按树族） */
+  private treeGrowFX(x: number, y: number, style: number): void {
+    const px = Math.abs(x * TILE - this.player.cx), py = Math.abs(y * TILE - this.player.cy);
+    if (px > this.camera.viewW / 2 + 80 || py > this.camera.viewH / 2 + 80) return;  // PlayerLOS 近似
+    const color = style === -1 || style === 0 || style === 1 || style === 2 || style === 3 || style === 4 || style === 5
+      ? '#2E8B3D' : style >= 6 && style <= 9 ? '#B68D56' : style === 10 ? '#917878' : '#2E8B3D';
+    this.spawnParticles(x * TILE + 8, (y - 4) * TILE, color, 12, 2.0, { life: 90, grav: 0.04 });
+    this.sfx.play('chop', 0.8, x * TILE + 8, y * TILE);   // 成树沙沙声近似
   }
 
   /** 索引帧修复（见 afterWorldLoad 注释）：扫一遍全图多格 vanilla framed 物体 */

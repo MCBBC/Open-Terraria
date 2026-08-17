@@ -138,8 +138,9 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
   return true;
 }
 
-/** GrowTree（1456 cs:29924-30395）：常规树。height=Next(5,17)；丛林草基座净空 +5 */
-function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
+/** GrowTree（1456 cs:29924-30395）：常规树。height=Next(5,17)；丛林草基座净空 +5。
+ *  运行期树苗成长（AttemptToGrowTreeFromSapling 默认档 :72876-72883）复用本函数 */
+export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
@@ -421,7 +422,9 @@ const WILLOW_PROFILE: TreeProfile = {
 const ASH_GROUND = idsByVanillaSheet(633);
 const ASH_PROFILE: TreeProfile = {
   treeTile: TILE_BY_KEY['v_634_ash_tree']!,
-  sapling: GEM_SAPLING,   // Tree_Ash.SaplingTileType=20（cs:3901；growTreeWithSettings 不消费）
+  // Tree_Ash.SaplingTileType=20（cs:3901）——growTreeWithSettings 头部苗越格走查
+  // 消费 sapling 字段；曾误填 590 宝石苗：运行期灰烬苗（tile 20 档 10）永不越过苗格
+  sapling: TILE_BY_KEY['acorn_sapling']!,
   ground: ASH_GROUND, walls: DEFAULT_TREE_WALLS,
   heightMin: 7, heightMax: 12, topPadding: 4,   // Tree_Ash 高度 7-12 / Padding 4（cs:3898-3901）
 };

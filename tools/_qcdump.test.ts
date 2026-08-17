@@ -1,11 +1,10 @@
 process.env.SW_FREEZE_CAVES = '1';
 import { describe, it, expect } from 'vitest';
-describe('qc dump', () => {
-  it('dump', async () => {
-    (globalThis as any).__cavesGridExport = { at: 'quickcleanup', dir: '/tmp/js-qc' };
+describe('slope bisect', () => {
+  it('dump dungeon', async () => {
+    (globalThis as any).__cavesGridExport = { at: 'dungeon', dir: '/tmp/js-dg' };
     const { chainCheckpoints } = await import('../tests/caves-checkpoint.test');
-    const r = chainCheckpoints('9293480', 0);
-    console.log('qc js =', r.grids.get('quickcleanup'));
+    chainCheckpoints('9293480', 0);
     expect(true).toBe(true);
   }, 600000);
 });
