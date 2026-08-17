@@ -40,6 +40,16 @@ var typ = new ushort[W * H];
 var wal = new ushort[W * H];
 var liq = new byte[W * H];
 var liqT = new byte[W * H];
+// ★oracle 同步批（2026-08-17）：half/slope/frX/frY 四内部通道——desert F/G 批
+//（SmoothSlope postEffectMap/入口 Actions.Smooth/坡位感知 SolidTile 族门）、
+// marble/granite I/J 批（PlaceSlab smoothSlope+165 重查）、TileRunner X 批
+//（SAVE_SLOPES 清坡）、livingtree D 批（Check3x2 帧重建）的必要状态。检查点
+// 哈希仍四通道（typ/act/wal/liq）不变——这些通道只参与门判定与写入语义。
+// frX/frY=65535 表 -1（KillTile 帧清位）；默认 0 同 TileStore。
+var half = new byte[W * H];
+var slope = new byte[W * H];
+var frX = new ushort[W * H];
+var frY = new ushort[W * H];
 var checkpoints = new List<string>();
 var jsegPts = new List<string>();   // jungle 段级流指纹（对拍原版 JungleProbe）
 
@@ -113,16 +123,57 @@ var SOLID = new HashSet<ushort> { 0,1,2,7,6,9,8,30,10,53,147,57,166,167,168,169,
    688,689,690,691,692,708,712,717,718,719,722,726,727,728,729,730,731,732,734,735,
    736,737,738,739,740,741,742,743,744,745,746,747,748,749,750, };
 
-// tileFrameImportant && !tileCut（cs:77217 TileRunner 首门禁）——项目侧近似集，
-// 与 JS TileRunner 的 `TILE_DEFS[].framed && !decor` 同源生成（pass 20 起世界出现 165 等活性 framed 物）
+// ★TileRunner framed 跳过精确集（I 批 DirtToMud 同步，cs:77217 首门禁）：
+// Main.cs 全量 frameImportant(411) 扣 tileCut(41)——484(滚动仙人掌)/485(蚁狮幼虫)
+// frameImportant=true 但 tileCut=true → **不跳**（耗 dist 掷+可被泥覆写）。旧近似集
+// 含 484/485 → DirtToMud 起 dist 流偏 ~4.7k 掷。与 JS TileRunner
+// FRAME_IMPORTANT_SKIP_SHEETS 逐元素同源（383 sheet）。
 // GrowTree 墙白名单（JS TreePass.DEFAULT_TREE_WALLS）与 EmptyTileCheck 空格白名单
 // （JS GEM_EMPTY_ALLOW = sheet 3,24,32,61,62,69,71,73,74,82,83,84,110,113,184,201,233,352,485,529,530,637,655）
 var TREE_WALLS = new HashSet<ushort> { 0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80 };
 var EMPTY_ALLOW = new HashSet<ushort> { 3, 24, 32, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 184, 201, 233, 352, 485, 529, 530, 637, 655 };
-var FRAMED_NOT_CUT = new HashSet<ushort> { 5,10,13,16,17,18,21,26,29,36,50,55,77,81,82,86,91,93,97,99,102,103,105,106,110,113,114,125,128,129,132,133,134,135,136,137,138,141,144,165,171,172,178,184,185,186,187,207,215,217,218,219,220,227,228,231,233,235,236,237,238,239,240,241,242,243,245,246,247,254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,334,337,339,349,354,355,356,358,359,360,361,362,363,364,373,374,375,376,377,378,387,388,389,390,391,392,393,394,395,405,406,411,412,413,414,427,435,436,437,438,439,443,444,453,454,456,457,461,462,463,464,465,466,467,469,470,471,475,476,484,485,486,487,488,489,490,491,493,494,499,505,506,510,511,518,519,520,521,522,523,524,525,526,527,529,530,532,533,538,542,543,544,545,547,548,549,550,551,552,553,554,555,556,558,559,560,567,568,569,570,571,572,573,579,580,581,582,583,584,585,586,587,588,589,590,591,592,595,596,597,598,599,600,601,602,603,604,605,606,607,608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,642,643,644,645,646,647,648,649,650,651,652,653,654,656,657,658,660,663,664,665,693,694,695,696,698,699,700,701,702,703,704,705,706,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,733,751,752 };
+var FRAMED_NOT_CUT = new HashSet<ushort> { 4,5,10,11,12,13,14,15,16,17,18,19,20,21,26,27,29,31,33,34,35,36,42,49,50,55,72,77,78,79,81,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,114,125,126,128,129,132,133,134,135,136,137,138,139,141,142,143,144,149,165,171,172,173,174,178,185,186,187,207,209,210,212,215,216,217,218,219,220,227,228,233,235,237,238,239,240,241,242,243,244,245,246,247,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,334,335,337,338,339,349,354,355,356,358,359,360,361,362,363,364,372,373,374,375,376,377,378,380,386,387,388,389,390,391,392,393,394,395,405,406,410,411,412,413,414,419,420,423,424,425,427,428,429,435,436,437,438,439,440,441,442,443,445,452,453,455,456,457,461,462,463,464,465,466,467,468,469,470,471,475,476,480,486,487,488,489,490,491,493,494,497,499,505,506,509,510,511,520,521,522,523,524,525,526,527,530,531,532,533,538,542,543,544,545,547,548,550,551,552,553,554,555,556,558,559,560,564,565,567,568,569,570,571,572,573,579,580,581,582,583,584,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,602,603,604,605,606,607,608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,639,640,642,643,644,645,646,647,648,649,650,651,652,653,656,657,658,660,663,664,665,693,694,695,696,698,699,700,701,702,703,704,705,706,707,709,710,712,713,714,715,716,720,721,723,724,725,726,733,751,752 };
 var NOT_CLEAR = new HashSet<ushort> { 396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237 };
 bool CanBeCleared(ushort t) => !NOT_CLEAR.Contains(t);
 bool IsSolidT(ushort t) => SOLID.Contains(t);
+// ---- oracle 同步批（2026-08-17）新表 ----
+// Main.wallLargeFrames 全 22 项（1=phlebas 2=lazure，Main.cs:9652-9820）——这些墙的
+// Framing.WallFrame(resetFrame) 走查表分支不耗掷（F/G 批 SquareWallFrame 掷骰还原）。
+var WALL_LARGE_FRAMES = new HashSet<ushort> { 146, 147, 167, 179, 185, 224, 274, 323, 324, 325, 326, 327, 328, 329, 330, 354, 355, 358, 359, 362, 363, 366 };
+// CanPoundTile 排除表（HalfBrickPass：黑名单+Boulders+生成期追加+ForbidsSloping 上格）
+// NO_POUND_SHEETS=黑名单 9 项（MarbleGranite tileSmoothSlope 的轻门只用这 9 项）
+var NO_POUND_SHEETS = new HashSet<ushort> { 10, 48, 137, 232, 380, 387, 388, 476, 484 };
+var BOULDERS_G = new HashSet<ushort> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
+var POUND_GEN_SKIP = new HashSet<ushort> { 190, 30 };
+var FORBIDS_SLOPING = new HashSet<ushort> { 21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597 };
+// TileID.Sets.SaveSlopes（X 批 TileRunner 清坡）：启动期默认 tileSolid 快照 ∪
+// NonSolidSaveSlopes{131,351,336,340-344}——生成期 tileSolid 翻转不回写（快照于
+// SOLID.Remove(484) 之前冻结，484 在默认表内）。写 type 时 !SaveSlopes → ClearSlope。
+var SAVE_SLOPES = new HashSet<ushort>(SOLID);
+SAVE_SLOPES.UnionWith(new HashSet<ushort> { 131, 351, 336, 340, 341, 342, 343, 344 });
+// 全量 tileFrameImportant（Main.cs 404 赋值 + AddEchoFurnitureTile 家族 + 循环 435-439 = 411；
+// 与 FRAMED_NOT_CUT 不同：不扣 tileCut——DgStairsCanPlace 与 CanPoundTile(!framed) 用全表。
+// ★2026-08-17 上移至头部（原在 dungeon 段 4395）：desert 段 CanPoundGen 先于其执行）
+var FRAMED_ALL = new HashSet<ushort> {
+    3,4,5,10,11,12,13,14,15,16,17,18,19,20,21,24,26,27,28,29,31,33,34,35,
+    36,42,49,50,55,61,71,72,73,74,77,78,79,81,82,83,84,85,86,87,88,89,90,91,
+    92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,110,113,114,125,126,128,129,132,133,
+    134,135,136,137,138,139,141,142,143,144,149,165,171,172,173,174,178,184,185,186,187,201,207,209,
+    210,212,215,216,217,218,219,220,227,228,231,233,235,236,237,238,239,240,241,242,243,244,245,246,
+    247,254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,
+    295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,
+    334,335,337,338,339,349,354,355,356,358,359,360,361,362,363,364,372,373,374,375,376,377,378,380,
+    386,387,388,389,390,391,392,393,394,395,405,406,410,411,412,413,414,419,420,423,424,425,427,428,
+    429,435,436,437,438,439,440,441,442,443,444,445,452,453,454,455,456,457,461,462,463,464,465,466,
+    467,468,469,470,471,475,476,480,484,485,486,487,488,489,490,491,493,494,497,499,505,506,509,510,
+    511,518,519,520,521,522,523,524,525,526,527,529,530,531,532,533,538,542,543,544,545,547,548,549,
+    550,551,552,553,554,555,556,558,559,560,564,565,567,568,569,570,571,572,573,579,580,581,582,583,
+    584,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,602,603,604,605,606,607,
+    608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,
+    642,643,644,645,646,647,648,649,650,651,652,653,654,656,657,658,660,663,664,665,693,694,695,696,
+    698,699,700,701,702,703,704,705,706,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,
+    733,751,752
+};
 var TILE_DUNGEON = new HashSet<ushort> { 41, 43, 44, 677, 678, 679 };
 var WALL_DUNGEON = new HashSet<ushort> { 7, 8, 9, 94, 95, 96, 97, 98, 99 };
 var FLAG3_ALWAYS = new HashSet<ushort> { 45, 147, 189, 190, 196, 460, 717, 718, 719 };
@@ -358,6 +409,377 @@ void PlaceWall(int k, int l, int type)
     int wi = l * W + k;
     if (wal[wi] == 0) { wal[wi] = (ushort)type; r.Next(0, 3); }
 }
+
+// ================= oracle 同步批（2026-08-17）公共 helper =================
+// Framing.WallFrame(i,j,resetFrame=true) 掷骰语义（F/G 批 #19 根因；Framing.cs:326-406）：
+// 边界 (1,max-2) 早退；wall==0 早退；wallLargeFrames 查表分支不掷；否则 1×Next(0,3)，
+// 墙 21 命中 Next(0,3) 后再掷 Next(2)。
+void WallFrameDraw(int wx, int wy)
+{
+    if (wx <= 0 || wy <= 0 || wx >= W - 1 || wy >= H - 1) return;
+    ushort wv = wal[wy * W + wx];
+    if (wv == 0 || WALL_LARGE_FRAMES.Contains(wv)) return;
+    r.Next(0, 3);
+    if (wv == 21) r.Next(2);
+}
+// WorldGen.SquareWallFrame(i,j)（cs:80937-80948）：九邻 WallFrame 仅中心格传 resetFrame
+// ——至多 1 掷。
+void SquareWallFrameDraw(int wx, int wy) => WallFrameDraw(wx, wy);
+// MarbleGranitePass.squareWallFrameRoll 同款（无边界门——JS 调用点已界内）：
+// wall!=0 且非大帧墙 → 1×Next(0,3)（大理石 PlaceSlab/花岗岩 PlaceDecorations 每格）。
+void SquareWallFrameRoll(int wx, int wy)
+{
+    if (wx < 0 || wx >= W || wy < 0 || wy >= H) return;
+    ushort wv = wal[wy * W + wx];
+    if (wv != 0 && !WALL_LARGE_FRAMES.Contains(wv)) r.Next(0, 3);
+}
+// SolidOrSlopedTile（cs:70064）：active && tileSolid && !tileSolidTop && !inActive——
+// half/slope 不参与（坡面算"实或坡"）。SOLID=tileSolid∖tileSolidTop（平台 19 族
+// 本链 pass32 前不存在，等价 JS genSolidType）。
+bool SolidOrSlopedGen(int x, int y)
+    => x >= 0 && x < W && y >= 0 && y < H && act[y * W + x] != 0 && SOLID.Contains(typ[y * W + x]);
+// WorldGen.SolidTile 五门（cs:70155）：实或坡 + !halfBrick && slope==0——I 批后
+// 大理石 PlaceSlab 的 SmoothSlope 写坡面，后续门骰必须判非实心。
+bool Solid5Gen(int x, int y)
+{
+    if (!SolidOrSlopedGen(x, y)) return false;
+    int i = y * W + x;
+    return half[i] == 0 && slope[i] == 0;
+}
+// CanPoundTile（cs:81434，HalfBrickPass 全门）：黑名单/Boulders/生成期追加/上格
+// ForbidsSloping/!framed（!framed≈!FRAMED_ALL）——Desert smoothSlope 前置门。
+bool CanPoundGen(int x, int y)
+{
+    if (!SolidOrSlopedGen(x, y)) return false;
+    ushort t = typ[y * W + x];
+    if (t == 0) return false;
+    if (NO_POUND_SHEETS.Contains(t) || BOULDERS_G.Contains(t) || POUND_GEN_SKIP.Contains(t)) return false;
+    if (y - 1 >= 0 && act[(y - 1) * W + x] != 0 && FORBIDS_SLOPING.Contains(typ[(y - 1) * W + x])) return false;
+    return !FRAMED_ALL.Contains(t);
+}
+// Tile.SmoothSlope 核心位形（Tile.cs:822-880）：num=上<<3|下<<2|左<<1|右；
+// case10→slope3/case9→slope4/case6→slope1/case5→slope2/case4→半砖/其余整砖。
+void SmoothSlopeCore(int x, int y)
+{
+    int i = y * W + x;
+    bool flag = y - 1 >= 0 && act[(y - 1) * W + x] != 0;          // TileEmpty(x,y-1)：非活性即空
+    bool flag2 = !SolidOrSlopedGen(x, y - 1) && flag;
+    bool flag3 = SolidOrSlopedGen(x, y + 1);
+    bool flag4 = SolidOrSlopedGen(x - 1, y);
+    bool flag5 = SolidOrSlopedGen(x + 1, y);
+    int num = ((flag ? 1 : 0) << 3) | ((flag3 ? 1 : 0) << 2) | ((flag4 ? 1 : 0) << 1) | (flag5 ? 1 : 0);
+    switch (num)
+    {
+        case 10: if (!flag2) { half[i] = 0; slope[i] = 3; } break;
+        case 9: if (!flag2) { half[i] = 0; slope[i] = 4; } break;
+        case 6: half[i] = 0; slope[i] = 1; break;
+        case 5: half[i] = 0; slope[i] = 2; break;
+        case 4: slope[i] = 0; half[i] = 1; break;
+        default: half[i] = 0; slope[i] = 0; break;
+    }
+}
+// HalfBrickPass.smoothSlope（applyToNeighbors=false，DesertPass 消费）：CanPound||SolidOrSloped 门
+void SmoothSlopeDesert(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    if (!CanPoundGen(x, y) || !SolidOrSlopedGen(x, y)) return;
+    SmoothSlopeCore(x, y);
+}
+// MarbleGranitePass.tileSmoothSlope（Tile.SmoothSlope applyToNeighbors=true）：
+// 邻序 (x+1,y)→(x-1,y)→(x,y+1)→(x,y-1) 后自身；轻门=NO_POUND_SHEETS||!SolidOrSloped。
+void SmoothSlopeSlabSelf(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    int i = y * W + x;
+    if (NO_POUND_SHEETS.Contains(typ[i]) || !SolidOrSlopedGen(x, y)) return;
+    SmoothSlopeCore(x, y);
+}
+void SmoothSlopeSlab(int x, int y)
+{
+    SmoothSlopeSlabSelf(x + 1, y); SmoothSlopeSlabSelf(x - 1, y);
+    SmoothSlopeSlabSelf(x, y + 1); SmoothSlopeSlabSelf(x, y - 1);
+    SmoothSlopeSlabSelf(x, y);
+}
+// ---- 钟乳石 165 生命周期（ShimmerPass 1:1；I/J 批）----
+// MOSS_SHEETS（TileID.cs tileMoss）：182,180,179,381,183,181,534,536,539,625,627
+var MOSS_SHEETS = new HashSet<ushort> { 179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627 };
+// STYLE_BY_FX54（cs:38690）/FX_BASE_BY_STYLE（cs:38696-38720）
+int StalStyleOfFx(int fx) => fx / 54 switch { 0 => 7, 1 => 0, 2 => 11, 3 => 12, 4 => 1, 5 => 2, 6 => 3, 7 => 4, 8 => 5, 9 => 6, 10 => 8, 11 => 9, 12 => 10, _ => -1 };
+int[] FX_BASE_BY_STYLE = { 54, 216, 270, 324, 378, 432, 486, 0, 540, 594, 648, 108, 162 };
+// GetDesiredStalagtiteStyle（cs:38746-38847）：fail=true → UpdateStalagtiteStyle false → 击杀
+(int fail, int style, int height, int y) GetDesiredStalStyle(int x, int j)
+{
+    int i0 = j * W + x;
+    int fy = frY[i0];
+    int num = 0, y = j, height = 1;
+    int sup;
+    int SheetActive(int sx, int sy) => (sx < 0 || sx >= W || sy < 0 || sy >= H || act[sy * W + sx] == 0) ? -1 : typ[sy * W + sx];
+    if (fy == 72) { num = 0; sup = SheetActive(x, j - 1); }
+    else if (fy == 90) { num = 1; sup = SheetActive(x, j + 1); }
+    else if (fy >= 36) { if (fy == 54) y--; height = 2; num = 4; sup = SheetActive(x, y + 2); }
+    else { if (fy == 18) y--; height = 2; num = 3; sup = SheetActive(x, y - 1); }
+    if (sup == 1 || MOSS_SHEETS.Contains((ushort)sup))
+        return (0, num == 3 && wal[i0] == 62 ? 11 : 0, height, y);
+    switch (sup)
+    {
+        case 200: return (0, 10, height, y);
+        case 164: return (0, 8, height, y);
+        case 163: return (0, 9, height, y);
+        case 117: case 402: case 403: return (0, 1, height, y);
+        case 25: case 398: case 400: return (0, 2, height, y);
+        case 203: case 399: case 401: return (0, 3, height, y);
+        case 396: case 397: return (0, 4, height, y);
+        case 367: return (0, 6, height, y);
+        case 368: return (0, 5, height, y);
+        case 147: case 161: return (0, 7, height, y);
+    }
+    if ((num == 0 || num == 1) && sup == 225) return (0, 12, height, y);
+    return (1, 0, height, y);
+}
+// UpdateStalagtiteStyle（cs:38669）：style!=desired → 掷 1×Next(3) 并重写 height 格列帧
+bool UpdateStalStyle(int x, int j)
+{
+    int i0 = j * W + x;
+    int style = StalStyleOfFx(frX[i0]);
+    if (style < 0) return false;
+    var d = GetDesiredStalStyle(x, j);
+    if (d.fail != 0) return false;
+    if (style != d.style)
+    {
+        int fx = (int)r.Next(3) * 18 + FX_BASE_BY_STYLE[d.style];
+        for (int k = d.y; k < d.y + d.height; k++)
+            if (k >= 0 && k < H) frX[k * W + x] = (ushort)fx;
+    }
+    return true;
+}
+// KillTile 生成期（cs:63933-63968，165 族零尘掷）：active(false)+half 0+帧 -1+type=0 →
+// SquareTileFrame 列主序级联（cs:80924：x-1 列先行——J 批修复）。
+void KillStalTile(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    int i = y * W + x;
+    if (act[i] == 0) return;
+    act[i] = 0; half[i] = 0; frX[i] = 65535; frY[i] = 65535; typ[i] = 0;
+    for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+            Frame165(x + dx, y + dy);
+}
+// CheckStalactite（cs:39022）四分支：击杀带类型门（J 批——仅 type==165 的格被杀）
+void CheckStalactite(int x, int j)
+{
+    if (x < 0 || x >= W || j < 0 || j >= H) return;
+    int i0 = j * W + x;
+    if (act[i0] == 0) return;
+    int fy = frY[i0];
+    if (fy == 72)
+    {
+        bool flag = !Solid5Gen(x, j - 1);
+        if (!flag && !UpdateStalStyle(x, j)) flag = true;
+        if (flag) KillStalTile(x, j);
+        return;
+    }
+    if (fy == 90)
+    {
+        bool flag2 = !Solid5Gen(x, j + 1);
+        if (!flag2 && !UpdateStalStyle(x, j)) flag2 = true;
+        if (flag2) KillStalTile(x, j);
+        return;
+    }
+    if (fy >= 36)
+    {
+        int num = j;
+        if (frY[i0] == 54) num--;
+        bool flag3 = !Solid5Gen(x, num + 2);
+        bool aOk = num >= 0 && num < H, bOk = num + 1 >= 0 && num + 1 < H;
+        if (!aOk || !bOk) { KillStalTile(x, num); return; }
+        int a = num * W + x, b = (num + 1) * W + x;
+        if (act[a] == 0 || act[b] == 0 || typ[b] != typ[a]) flag3 = true;
+        if (frX[b] != frX[a]) flag3 = true;
+        if (!flag3 && !UpdateStalStyle(x, num)) flag3 = true;
+        if (flag3)
+        {
+            if (typ[a] == typ[i0]) KillStalTile(x, num);
+            if (typ[b] == typ[i0]) KillStalTile(x, num + 1);
+        }
+        return;
+    }
+    int num2 = j;
+    if (frY[i0] == 18) num2--;
+    bool flag4 = !Solid5Gen(x, num2 - 1);
+    bool aOk2 = num2 >= 0 && num2 < H, bOk2 = num2 + 1 >= 0 && num2 + 1 < H;
+    if (!aOk2 || !bOk2) { KillStalTile(x, num2); return; }
+    int a2 = num2 * W + x, b2 = (num2 + 1) * W + x;
+    if (act[a2] == 0 || act[b2] == 0 || typ[b2] != typ[a2]) flag4 = true;
+    if (frX[b2] != frX[a2]) flag4 = true;
+    if (!flag4 && !UpdateStalStyle(x, num2)) flag4 = true;
+    if (flag4)
+    {
+        if (typ[a2] == typ[i0]) KillStalTile(x, num2);
+        if (typ[b2] == typ[i0]) KillStalTile(x, num2 + 1);
+    }
+}
+// WorldUtils.TileFrame 生成期（cs:82067）：!active → 清 half/slope 返回；165 → CheckStalactite
+void Frame165(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    int i = y * W + x;
+    if (act[i] == 0) { half[i] = 0; slope[i] = 0; return; }
+    if (typ[i] == 165) CheckStalactite(x, y);
+}
+// PlaceUncheckedStalactite（cs:38371，spiders=false）1:1：材质分派帧组（后写覆盖式）
+int StalBase(int a)
+{
+    if (a == 1 || MOSS_SHEETS.Contains((ushort)a)) return 54;
+    if (a == 117) return 216;
+    if (a == 25) return 270;
+    if (a == 203) return 324;
+    if (a == 396 || a == 397) return 378;
+    if (a == 368) return 432;
+    if (a == 367) return 486;
+    if (a == 147 || a == 161) return 0;
+    if (a == 163) return 594;
+    if (a == 164) return 540;
+    if (a == 200) return 648;
+    return -1;
+}
+void PlaceStalactiteFull(int x, int y, bool preferSmall, int variation)
+{
+    if (x < 0 || x >= W || y < 0 || y + 1 >= H) return;
+    int SheetOf(int sx, int sy) => (sx < 0 || sx >= W || sy < 0 || sy >= H || act[sy * W + sx] == 0) ? -1 : typ[sy * W + sx];
+    void Put(int ax, int ay, int fx, int fy2)
+    {
+        if (ax < 0 || ax >= W || ay < 0 || ay >= H) return;
+        int i = ay * W + ax;
+        typ[i] = 165; act[i] = 1; slope[i] = 0; frX[i] = (ushort)fx; frY[i] = (ushort)fy2;
+    }
+    bool ICE_FAM(int a) => a == 147 || a == 161 || a == 163 || a == 164 || a == 200;
+    bool Hangable(int a) => StalBase(a) >= 0 && a != 225;
+    bool Groundable(int a) => StalBase(a) >= 0 && a != 225 && !ICE_FAM(a);
+    if (Solid5Gen(x, y - 1) && act[y * W + x] == 0 && act[(y + 1) * W + x] == 0)
+    {
+        int above = SheetOf(x, y - 1);
+        if (Hangable(above))
+        {
+            int wall = wal[y * W + x];
+            int bx = (above == 1 || MOSS_SHEETS.Contains((ushort)above)) && wall == 62 ? 108 : StalBase(above);
+            if (preferSmall) Put(x, y, bx + variation * 18, 72);
+            else { Put(x, y, bx + variation * 18, 0); Put(x, y + 1, bx + variation * 18, 18); }
+        }
+        if (above == 225) Put(x, y, 162 + variation * 18, 72);
+        if (above == 396 || above == 397)
+        {
+            if (preferSmall) Put(x, y, 378 + variation * 18, 72);
+            else { Put(x, y, 378 + variation * 18, 0); Put(x, y + 1, 378 + variation * 18, 18); }
+        }
+        if (above == 368)
+        {
+            if (preferSmall) Put(x, y, 432 + variation * 18, 72);
+            else { Put(x, y, 432 + variation * 18, 0); Put(x, y + 1, 432 + variation * 18, 18); }
+        }
+        if (above == 367)
+        {
+            if (preferSmall) Put(x, y, 486 + variation * 18, 72);
+            else { Put(x, y, 486 + variation * 18, 0); Put(x, y + 1, 486 + variation * 18, 18); }
+        }
+        return;
+    }
+    if (!Solid5Gen(x, y + 1) || act[y * W + x] != 0 || act[(y - 1) * W + x] != 0) return;
+    int below = SheetOf(x, y + 1);
+    if (Groundable(below))
+    {
+        if (preferSmall) Put(x, y, StalBase(below) + variation * 18, 90);
+        else { Put(x, y - 1, StalBase(below) + variation * 18, 36); Put(x, y, StalBase(below) + variation * 18, 54); }
+    }
+    if (below == 225) Put(x, y, 162 + variation * 18, 90);
+    if (below == 368)
+    {
+        if (preferSmall) Put(x, y, 432 + variation * 18, 90);
+        else { Put(x, y - 1, 432 + variation * 18, 36); Put(x, y, 432 + variation * 18, 54); }
+    }
+    if (below == 367)
+    {
+        if (preferSmall) Put(x, y, 486 + variation * 18, 90);
+        else { Put(x, y - 1, 486 + variation * 18, 36); Put(x, y, 486 + variation * 18, 54); }
+    }
+}
+// PlaceTight（cs:38329）1:1：shimmer/幼虫门 → 恒掷 Next(2)+Next(3) → 放置 →
+// 落格 165 → CheckStalactite（cs:38345 尾）。oracle liqT：3=shimmer。
+void PlaceTightFull(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    int ti = y * W + x;
+    if (liq[ti] > 0 && liqT[ti] == 3) return;
+    if (act[ti] != 0 && typ[ti] == 231) return;
+    bool preferSmall = (int)r.Next(2) == 0;
+    int variation = (int)r.Next(3);
+    PlaceStalactiteFull(x, y, preferSmall, variation);
+    if (act[ti] != 0 && typ[ti] == 165) CheckStalactite(x, y);
+}
+// Check3x2 type=187（D 批活树/cs:49190-49438 帧重建 + G 批沙漠底材击杀）
+// 沙漠版（DesertHive）：三列底任一不在沙族（TileID.cs:30-34；404 化石在外）→ 六格整组
+// KillTile（active=false+type=0+清坡+帧 -1——cs:63933 生成期零掷）。
+var SAND_FAM = new HashSet<ushort> { 53, 112, 116, 234, 396, 397, 398, 399, 402, 400, 403, 401 };
+void Check3x2Kill187(int ax, int ay)
+{
+    for (int k = -1; k <= 1; k++)
+    {
+        int bi = (ay + 1) * W + ax + k;
+        if (bi >= 0 && bi < W * H && act[bi] != 0 && !SAND_FAM.Contains(typ[bi]))
+        {
+            for (int kk = -1; kk <= 1; kk++)
+                for (int l = -1; l <= 0; l++)
+                {
+                    int ki = (ay + l) * W + ax + kk;
+                    if (ki >= 0 && ki < W * H) { act[ki] = 0; typ[ki] = 0; half[ki] = 0; slope[ki] = 0; frX[ki] = 65535; frY[ki] = 65535; }
+                }
+            return;
+        }
+    }
+}
+// 活树版（cs:49190-49438）：由帧重建 3×2 原点，六格 type+帧一致 + 支撑行实心；
+// 失败 → KillTile 六格中仍为 187 的 active 格（类型门）。
+void Check3x2Pile(int i, int j)
+{
+    if (i < 0 || i >= W || j < 0 || j >= H) return;
+    int ii = j * W + i;
+    if (act[ii] == 0 || typ[ii] != 187) return;
+    int frameX = frX[ii], frameY = frY[ii];
+    int num3 = frameY / 36, num4 = frameY % 36;
+    int num = j - num4 / 18;
+    int n5 = frameX / 18, n6 = 0;
+    while (n5 > 2) { n5 -= 3; n6++; }
+    n5 = i - n5;
+    int num7 = n6 * 54, num8 = num + 2;
+    bool flag = false;
+    for (int k = n5; k < n5 + 3; k++)
+    {
+        for (int l = num; l < num8; l++)
+        {
+            if (k < 0 || k >= W || l < 0 || l >= H) { flag = true; continue; }
+            int idx2 = l * W + k;
+            if (act[idx2] == 0 || typ[idx2] != 187 || frX[idx2] != (ushort)((k - n5) * 18 + num7) || frY[idx2] != (ushort)((l - num) * 18 + num3 * 36)) flag = true;
+        }
+        if (!Solid5Gen(k, num8)) flag = true;
+    }
+    if (!flag) return;
+    for (int k = n5; k < n5 + 3; k++)
+        for (int l = num; l < num8; l++)
+        {
+            if (k < 0 || k >= W || l < 0 || l >= H) continue;
+            int idx2 = l * W + k;
+            if (act[idx2] != 0 && typ[idx2] == 187)
+            {
+                act[idx2] = 0; half[idx2] = 0; frX[idx2] = 65535; frY[idx2] = 65535; typ[idx2] = 0;
+            }
+        }
+}
+// SquareTileFrame（cs:80924）活树语境子集：3×3 逐格 → 仅 187 走 Check3x2Pile
+void SquareTileFramePile(int x, int y)
+{
+    for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++)
+            Check3x2Pile(x + dx, y + dy);
+}
 bool TRTRACE = Environment.GetEnvironmentVariable("DG_TR_TRACE") != null;
 int TRTRACE_STEP = 0;
 void TileRunner(double i, double j, double strength, int steps, int type,
@@ -444,7 +866,14 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                         else if (cur == 396 || cur == 397) flag4 = !IsOre(type);
                         else if (cur == 367 || cur == 368) { if (type == 59) flag4 = true; }
                     }
-                    if (!flag4) typ[ti] = (ushort)type;
+                    if (!flag4)
+                    {
+                        typ[ti] = (ushort)type;
+                        // cs:77338-77341（X 批）：flag = type>=0 && !SaveSlopes[type] → 写后
+                        // ClearSlope（Tile.cs:160=slope0+half0）——非实心类型（蛛网51/泥59/
+                        // 矿石等）覆盖已带坡格必须清坡位，否则 #19 平滑坡幸存成幻影坡。
+                        if (!SAVE_SLOPES.Contains((ushort)type)) { half[ti] = 0; slope[ti] = 0; }
+                    }
                     if (addTile) { act[ti] = 1; liq[ti] = 0; }
                     if (noYChange && y < worldSurface && type != 59) wal[ti] = 2;
                     if (type == 59 && y > waterLine && liq[ti] > 0) liq[ti] = 0;
@@ -1498,6 +1927,7 @@ bool DesertPlaceMound(int x)
         {
             if (y < 0 || y >= H) continue;
             typ[y * W + cx] = 53; act[y * W + cx] = 1; liq[y * W + cx] = 0;
+            SquareWallFrameDraw(cx, y);   // PlaceSandColumn 尾（SandMound.cs:73，F 批掷骰还原）
         }
     }
     dBC = blockCols; dBR = blockRows; dX = ox; dTop = topY; dW = dw; dH = dh; dHiveTop = hiveTop;
@@ -1531,6 +1961,7 @@ dsX = dX - 10; dsY = dTop - 10; dsR = dX + dW + 10; dsB = dTop + dHiveTop + dH -
 int[] dSurf2 = SurfFromArea(dX - 5, dW + 10);   // UpdateSurfaceMap（DesertBiome.cs:22）
 int DSurf(int ax) => dSurf2[ax - (dX - 5)];      // SurfaceMap.this[absoluteX]
 WC.A = act; WC.T = typ; WC.Wl = wal; WC.L = liq; WC.R = r; WC.SOLID = SOLID; WC.W = W; WC.H = H;
+WC.Hf = half; WC.Sl = slope; WC.SqWF = SquareWallFrameDraw; WC.SmoothSelf = SmoothSlopeDesert;
 
 // ---- ChambersEntrance.cs 1:1 ----
 void DesertChambers()
@@ -1613,7 +2044,8 @@ void DesertAnthillAt(int px, int py, int holeRadius)
         }
     }
     GW.GenCircle(ox, oy - (int)((double)holeRadius * 1.5) + 3, holeRadius / 2, holeRadius / 3, GW.Chain(new GW.ClearTileA(), new GW.ExpandA(1), new GW.PlaceWallA(0)));
-    // All(data)+Smooth：仅坡面/半砖——哈希无关，两侧一致省略
+    // AnthillEntrance.cs:52：All(data)+Smooth（F 批——坡面写入改写后续门禁，不可省略）
+    GW.GenAll(ox, oy, data, new GW.SmoothA());
 }
 
 // ---- LarvaHoleEntrance.cs 1:1 ----
@@ -1632,7 +2064,8 @@ void DesertLarvaAt(int px, int py, int holeRadius)
     var data = new HashSet<long>();
     GW.GenRect(px, py, -holeRadius, -holeRadius * 2, holeRadius, 0, GW.Out(new GW.ClearA(), data));
     GW.GenTail(px, py, holeRadius * 2, 0.0, (double)holeRadius * 1.5, GW.Out(new GW.ClearA(), data));
-    // All(data)+Offset(0,1)+Expand(1)+IsSolid+Smooth：仅坡面——哈希无关，省略
+    // LarvaHoleEntrance.cs:29：All(data)+Offset(0,1)+Expand(1)+IsSolid+Smooth（带邻）
+    GW.GenAll(px, py, data, GW.Chain(new GW.OffsetA(0, 1), new GW.ExpandA(1), new GW.IsSolidA(), new GW.SmoothA(true)));
     GA pairA = GW.Chain(new GW.BlotchesA(), new GW.IsSolidA(), new GW.ClearA(), new GW.PlaceWallA(187));
     GA pairB = GW.Chain(new GW.IsSolidA(), new GW.SetTileA(397), new GW.PlaceWallA(187));
     int num = px;
@@ -1677,7 +2110,12 @@ void DesertPit()
             else if (Math.Abs(i) < num3 + 3 && value > 0.35) { typ[ti] = 397; act[ti] = 1; liq[ti] = 0; }  // ResetToType(397)
             double num4 = Math.Abs((double)i / (double)holeRadius);
             num4 *= num4;
-            if (Math.Abs(i) < num3 + 3 && (double)(j - py) > 15.0 - 3.0 * num4) wal[ti] = 187;
+            if (Math.Abs(i) < num3 + 3 && (double)(j - py) > 15.0 - 3.0 * num4)
+            {
+                wal[ti] = 187;
+                SquareWallFrameDraw(cx, j - 1);   // PitEntrance.cs 墙带写后 SquareWallFrame(x,j-1)+(x,j)
+                SquareWallFrameDraw(cx, j);
+            }
         }
     }
     holeRadius += 4;
@@ -1710,7 +2148,7 @@ Checkpoint("desertentrance");
 
 // 沙漠装饰放置（AddTileVariance 第二遍；与 JS DesertPass.placeDeco 同锚：
 // 底行锚 yBottom、向上 fh 行；越界整组放弃——JS 侧 return 语义一致）
-void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
+void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh, int fxBase = -1)
 {
     for (int ddx = 0; ddx < dfw; ddx++)
         for (int ddy = 0; ddy < dfh; ddy++)
@@ -1719,6 +2157,8 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
             if (dax < 0 || day < 0 || dax >= W || day >= H) return;
             act[day * W + dax] = 1;
             typ[day * W + dax] = dtile;
+            // 帧写（187 帧组：fx=style*54+列*18，fy=自底向上 (1-ddy)*18——Check3x2 重建用）
+            if (fxBase >= 0) { frX[day * W + dax] = (ushort)(fxBase + ddx * 18); frY[day * W + dax] = (ushort)((dfh - 1 - ddy) * 18); }
         }
 }
 
@@ -1800,6 +2240,10 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
 
     // ---- PlaceClustersArea（场强分层；shell 类型骰与 0.25 门用 FastRandom，非 genRand！）----
     var dhFr = new FR((ulong)(long)seed).Mod(57005UL);
+    // ★G 批：postEffectMap（DesertHive.cs:193-198/310/314/345/361/388）——各层 ResetToType/
+    //  ClearEverything 的格标 Smooth（tier3.5 恒标），循环外统一 Tile.SmoothSlope
+    // （:213-222）——坡面/半砖是后续 AddTileVariance 门禁的一等输入（#19 残余根因）
+    var dhSmooth = new bool[dW + 40, dH + 40];
     for (int hi = dX - 20; hi < dX + dW + 20; hi++)
     {
         for (int hj = dHiveTop - 20; hj < dHiveTop + dH + 20; hj++)
@@ -1833,21 +2277,23 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
             if (f7 > 3.5)
             {
                 act[hti] = 0; typ[hti] = 0; wal[hti] = 0; liq[hti] = 0;  // ClearEverything
+                half[hti] = 0; slope[hti] = 0;
                 wal[hti] = 187;
-                if (f2 % 15 == 2) { typ[hti] = 404; act[hti] = 1; liq[hti] = 0; }  // ResetToType
+                if (f2 % 15 == 2) { typ[hti] = 404; act[hti] = 1; liq[hti] = 0; half[hti] = 0; slope[hti] = 0; }  // ResetToType
+                dhSmooth[n4 + 20, n5 + 20] = true;                       // :314 恒标
             }
             else if (f7 > 1.8)
             {
                 wal[hti] = 187;
                 if ((double)hj < (double)worldSurface) liq[hti] = 0;     // else lava()：liq 量不变
                 else liqT[hti] = 1;                                      // ★lava 类型位（JS liquidType=2）
-                if (!hEdge || act[hti] != 0) { typ[hti] = 396; act[hti] = 1; liq[hti] = 0; }
+                if (!hEdge || act[hti] != 0) { typ[hti] = 396; act[hti] = 1; liq[hti] = 0; half[hti] = 0; slope[hti] = 0; dhSmooth[n4 + 20, n5 + 20] = true; }  // :345
             }
             else if (f7 > 0.7 || !hEdge)
             {
                 wal[hti] = 216;
                 liq[hti] = 0;
-                if (!hEdge || act[hti] != 0) { typ[hti] = hType; act[hti] = 1; liq[hti] = 0; }
+                if (!hEdge || act[hti] != 0) { typ[hti] = hType; act[hti] = 1; liq[hti] = 0; half[hti] = 0; slope[hti] = 0; dhSmooth[n4 + 20, n5 + 20] = true; }  // :361
             }
             else if (f7 > 0.25)
             {
@@ -1858,13 +2304,17 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
                     wal[hti] = 187;
                     if ((double)hj < (double)worldSurface) liq[hti] = 0;
                     else liqT[hti] = 1;                                  // ★lava 类型位
-                    if (act[hti] != 0) { typ[hti] = hType; act[hti] = 1; liq[hti] = 0; }
+                    if (act[hti] != 0) { typ[hti] = hType; act[hti] = 1; liq[hti] = 0; half[hti] = 0; slope[hti] = 0; dhSmooth[n4 + 20, n5 + 20] = true; }  // :388
                 }
             }
             else hFlag2 = false;
             // hFlag2 → UpdateDesertHiveBounds（纯边界追踪，无哈希效应）
         }
     }
+    // PlaceClusters 尾 postEffect 循环（DesertHive.cs:213-222）：标记格 SmoothSlope
+    for (int hi = dX - 20; hi < dX + dW + 20; hi++)
+        for (int hj = dHiveTop - 20; hj < dHiveTop + dH + 20; hj++)
+            if (dhSmooth[hi - dX + 20, hj - dHiveTop + 20]) SmoothSlopeDesert(hi, hj);
 
     // ---- AddTileVariance（DesertHive.cs:413-499）----
     for (int vi = -20; vi < dW + 20; vi++)
@@ -1874,40 +2324,17 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
             int vx2 = vi + dX, vy2 = vj + dHiveTop;
             if (vx2 < 1 || vx2 >= W - 1 || vy2 < 1 || vy2 >= H - 1) continue;
             int vti = vy2 * W + vx2;
-            bool vs1 = vy2 + 1 < H && act[(vy2 + 1) * W + vx2] != 0 && SOLID.Contains(typ[(vy2 + 1) * W + vx2]);
-            bool vs2 = vy2 + 2 < H && act[(vy2 + 2) * W + vx2] != 0 && SOLID.Contains(typ[(vy2 + 2) * W + vx2]);
+            // ★SolidTile(Tile)（cs:70018）五门：含 !half && slope==0——PlaceClusters 尾
+            // SmoothSlope 给壳面铺了坡面/半砖，酥化判定必须含坡位（G 批，曾 53>397×739 残差）
+            bool vs1 = Solid5Gen(vx2, vy2 + 1);
+            bool vs2 = Solid5Gen(vx2, vy2 + 2);
             if (typ[vti] == 53 && (!vs1 || !vs2)) typ[vti] = 397;
         }
     }
-    // placeTight（ShimmerPass.ts:227）哈希镜像：两掷恒耗 + 钟乳石 1x1/1x2 放置
-    Func<int, int, bool> SolidAt = (sx, sy) => sx >= 0 && sx < W && sy >= 0 && sy < H && act[sy * W + sx] != 0 && SOLID.Contains(typ[sy * W + sx]);
+    // ★placeTight（ShimmerPass 1:1，G 批替换旧哈希镜像）：SolidTile 锚门禁含 slope/half，
+    // 放置落 165 → 尾部 CheckStalactite（坡位锚在门口即拦）；帧写入 frX/frY。
+    Func<int, int, bool> SolidAt = (sx, sy) => Solid5Gen(sx, sy);
     Func<int, int, bool> FreeAt = (fx, fy) => fx >= 0 && fx < W && fy >= 0 && fy < H && act[fy * W + fx] == 0;
-    // Boulders（TileID.cs:195）——187 底禁滚石/巨石；用 7230 行的全局 BOULDERS（局部重名曾致 CS0136）
-    Action<int, int> PlaceTightMirror = (tx, ty) =>
-    {
-        int ti0 = ty * W + tx;
-        if (liq[ti0] > 0 && liqT[ti0] == 3) return;                 // shimmer（oracle 编码 3）
-        if (act[ti0] != 0 && typ[ti0] == 231) return;               // 幼虫
-        bool preferSmall = (int)r.Next(2) == 0;
-        int variation = (int)r.Next(3);
-        if (tx < 0 || tx >= W || ty < 0 || ty + 1 >= H) return;
-        Func<int, int, int> SheetOf = (sx, sy) => (sx < 0 || sx >= W || sy < 0 || sy >= H || act[sy * W + sx] == 0) ? -1 : typ[sy * W + sx];
-        Func<int, bool> BaseOk = a => a == 1 || a == 117 || a == 25 || a == 203 || a == 396 || a == 397 || a == 368 || a == 367 || a == 147 || a == 161 || a == 163 || a == 164 || a == 200;
-        Action<int, int> Put165 = (px2, py2) => { int pi = py2 * W + px2; typ[pi] = 165; act[pi] = 1; };
-        // 垂挂：上方实心 + 本格/下格净空
-        if (SolidAt(tx, ty - 1) && act[ti0] == 0 && act[(ty + 1) * W + tx] == 0)
-        {
-            int above = SheetOf(tx, ty - 1);
-            if (BaseOk(above)) { Put165(tx, ty); if (!preferSmall) Put165(tx, ty + 1); }
-            if (above == 225) Put165(tx, ty);
-            return;
-        }
-        // 地面：下方实心 + 本格/上格净空
-        if (!SolidAt(tx, ty + 1) || act[ti0] != 0 || act[(ty - 1) * W + tx] != 0) return;
-        int below = SheetOf(tx, ty + 1);
-        if (BaseOk(below)) { if (preferSmall) Put165(tx, ty); else { Put165(tx, ty - 1); Put165(tx, ty); } }
-        if (below == 225) Put165(tx, ty);
-    };
     // Place2x2（WorldGen.cs:51352）门禁镜像：2x2 区全空 + 双底列 nactive&&(solid||tileTable)
     //（区内无 table 类；SolidTile2 的 slope==0 以坡度不建模近似）。过门才落格（原版 return）。
     Func<int, int, bool> P2Gate = (ax, ay) =>
@@ -1980,9 +2407,19 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
             else if (wFlag && (int)r.Next(5) == 0) { if (P2Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 484, 2, 2); }
             else if ((wFlag ^ wFlag2) && (int)r.Next(5) == 0)
             {
-                PlaceTightMirror(wx, wFlag ? wy - 1 : wy + 1);
+                PlaceTightFull(wx, wFlag ? wy - 1 : wy + 1);
             }
-            else if (wFlag && (int)r.Next(5) == 0) { int wS2 = (int)r.Next(6); if (P3Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 187, 3, 2); }
+            else if (wFlag && (int)r.Next(5) == 0)
+            {
+                int wS2 = (int)r.Next(6);
+                if (P3Gate(wx, wy - 1))
+                {
+                    PlaceDesertDeco(wx - 1, wy - 1, 187, 3, 2, 29 * 54 + wS2 * 54);
+                    // ★G 批根因③：PlaceTile(187)→SquareTileFrame→TileFrameImportant→Check3x2
+                    // 材质复核（cs:49324-49344，style 29-34 底须沙族；404 化石违例击杀六格）
+                    Check3x2Kill187(wx, wy - 1);
+                }
+            }
         }
     }
 }
@@ -1993,7 +2430,14 @@ if (Environment.GetEnvironmentVariable("HIVE_DUMP") != null) {
     File.WriteAllText(Environment.GetEnvironmentVariable("HIVE_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
     return;
 }
-Checkpoint("desertdone");   // CleanupArea 仅 SquareWallFrame/TileFrame——无哈希效应
+// CleanupArea（DesertBiome.cs:55-71）：Hive±20 逐格 SquareWallFrame——★F 批：每「有墙
+// 且非大幅墙」格掷 1×Next(0,3)（曾按「无哈希效应」省略 → pass 尾流错位，下游全偏）。
+// TileFrame 生成期零掷（TileFrameCosmetic 被 !generatingWorld 门拦；TileFrameImportant
+// 仅 178/苔藓/仙人掌三支掷——沙漠区无涉）。
+for (int ci = dX - 20; ci < dX + dW + 20; ci++)
+    for (int cj = dHiveTop - 20; cj < dHiveTop + dH + 20; cj++)
+        if (ci > 0 && ci < W - 1 && cj > 0 && cj < H - 1) SquareWallFrameDraw(ci, cj);
+Checkpoint("desertdone");
 
 Replay(); // ▶pass 头重播：GlowingMushroomPatches cs:12581
 // ================= Pass 20 GlowingMushroomPatches（cs:12581-12709 + ShroomPatch cs:80540 + SpreadGrass cs:75210）=================
@@ -2160,8 +2604,10 @@ void ShroomPatch(int si, int sj)
                     bool iwU = iy > 0 && act[(iy - 1) * W + ix] != 0, iwD = iy < H - 1 && act[(iy + 1) * W + ix] != 0;
                     if (act[iti] != 0)
                     {
-                        if (!iwL && !iwR) act[iti] = 0;                 // KillTile（生成期无掉落无 RNG）
-                        else if (!iwU && !iwD) act[iti] = 0;
+                        // ★K 批：KillTile 生成期语义（cs:63970 尾）= active(false) **且 type=0**
+                        //（曾只清 active 留幽灵 70 → 后续 type==70 quirk 读写踩幽灵级联）
+                        if (!iwL && !iwR) { act[iti] = 0; typ[iti] = 0; }
+                        else if (!iwU && !iwD) { act[iti] = 0; typ[iti] = 0; }
                     }
                     else if (iwL && iwR)
                     {
@@ -2172,8 +2618,10 @@ void ShroomPatch(int si, int sj)
                     else if (iwU && iwD)
                     {
                         typ[iti] = 59; act[iti] = 1;
-                        if (h2y > 0 && typ[(h2y - 1) * W + h2x] == 70) typ[(h2y - 1) * W + h2x] = 59;
-                        if (h2y < H - 1 && typ[(h2y + 1) * W + h2x] == 70) typ[(h2y + 1) * W + h2x] = 59;
+                        // ★K 批竖桥 quirk（cs:12764-12767）：写的 x 是 **ix（被放格列）**、
+                        // y 是 h2y±1（锚行）——曾误用锚列 h2x → 偏列一格的 70→59 级联
+                        if (h2y > 0 && typ[(h2y - 1) * W + ix] == 70) typ[(h2y - 1) * W + ix] = 59;
+                        if (h2y < H - 1 && typ[(h2y + 1) * W + ix] == 70) typ[(h2y + 1) * W + ix] = 59;
                     }
                 }
             if ((int)r.Next(4) == 0)
@@ -4392,28 +4840,8 @@ do { dgLantern[1] = (int)r.Next(7); } while (dgLantern[1] == dgLantern[0]);
 dgLantern[2] = (int)r.Next(7);
 while (dgLantern[2] == dgLantern[0] || dgLantern[2] == dgLantern[1]) dgLantern[2] = (int)r.Next(7);
 var dgBanner = new int[6] { 10, 11, 12, 13, 14, 15 };                          // cs:267-273
-// 全量 tileFrameImportant（Main.cs 404 赋值 + AddEchoFurnitureTile 家族 + 循环 435-439 = 411；
-// 与 FRAMED_NOT_CUT 不同：不扣 tileCut——DgStairsCanPlace 判定用全表）
-var FRAMED_ALL = new HashSet<ushort> {
-    3,4,5,10,11,12,13,14,15,16,17,18,19,20,21,24,26,27,28,29,31,33,34,35,
-    36,42,49,50,55,61,71,72,73,74,77,78,79,81,82,83,84,85,86,87,88,89,90,91,
-    92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,110,113,114,125,126,128,129,132,133,
-    134,135,136,137,138,139,141,142,143,144,149,165,171,172,173,174,178,184,185,186,187,201,207,209,
-    210,212,215,216,217,218,219,220,227,228,231,233,235,236,237,238,239,240,241,242,243,244,245,246,
-    247,254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,
-    295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,
-    334,335,337,338,339,349,354,355,356,358,359,360,361,362,363,364,372,373,374,375,376,377,378,380,
-    386,387,388,389,390,391,392,393,394,395,405,406,410,411,412,413,414,419,420,423,424,425,427,428,
-    429,435,436,437,438,439,440,441,442,443,444,445,452,453,454,455,456,457,461,462,463,464,465,466,
-    467,468,469,470,471,475,476,480,484,485,486,487,488,489,490,491,493,494,497,499,505,506,509,510,
-    511,518,519,520,521,522,523,524,525,526,527,529,530,531,532,533,538,542,543,544,545,547,548,549,
-    550,551,552,553,554,555,556,558,559,560,564,565,567,568,569,570,571,572,573,579,580,581,582,583,
-    584,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,602,603,604,605,606,607,
-    608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,
-    642,643,644,645,646,647,648,649,650,651,652,653,654,656,657,658,660,663,664,665,693,694,695,696,
-    698,699,700,701,702,703,704,705,706,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,
-    733,751,752
-};
+// 全量 tileFrameImportant（411 项）——★2026-08-17 上移至头部表区（desert 段
+// CanPoundGen 先于 dungeon 执行，顶层语句变量须先声明）；此处仅存指针。
 bool dgSkewed = (int)r.Next(4) == 0;                                           // cs:274 useSkewedDungeonEntranceHalls
 int dgDoorStyle = dungeonTheme == 0 ? 16 : dungeonTheme == 1 ? 17 : 18;        // Item 1411/1412/1413 placeStyle（Item.cs:17460/17472/17484）
 bool dgShadowKey = false, dgRamRune = false;                   // GenVars.generatedShadowKey/RamRune（AddBuriedChest 用）
@@ -9786,6 +10214,11 @@ static class WC
     public static byte[] A; public static ushort[] T, Wl; public static byte[] L;
     public static dynamic R; public static HashSet<ushort> SOLID;
     public static int W, H;
+    // ★oracle 同步批（2026-08-17）：half/slope 通道与 SquareWallFrame 掷骰/SmoothSlope
+    // 绑定顶层 helper（静态类不可直接引用顶层局部函数——以委托桥接）
+    public static byte[] Hf, Sl;
+    public static Action<int, int> SqWF;        // WallFrameDraw（SquareWallFrame 掷骰）
+    public static Action<int, int> SmoothSelf;  // HalfBrickPass.smoothSlope（self）
     public static bool InW(int x, int y) => x >= 0 && x < W && y >= 0 && y < H;
     public static long Key(int dx, int dy) => ((long)dx << 22) | (uint)(dy + (1 << 21));
 }
@@ -9890,39 +10323,53 @@ static class GW
     }
 
     // ---- Actions（Actions.cs 1:1）----
-    public class ClearA : GA   // ClearEverything
+    public class ClearA : GA   // ClearEverything（含 half/slope 清位）
     {
         public override bool Apply(int ox, int oy, int x, int y)
         {
-            if (WC.InW(x, y)) { int i = y * WC.W + x; WC.A[i] = 0; WC.T[i] = 0; WC.Wl[i] = 0; WC.L[i] = 0; }
+            if (WC.InW(x, y)) { int i = y * WC.W + x; WC.A[i] = 0; WC.T[i] = 0; WC.Wl[i] = 0; WC.L[i] = 0; WC.Hf[i] = 0; WC.Sl[i] = 0; }
             return UA(ox, oy, x, y);
         }
     }
-    public class ClearTileA : GA   // ClearTile()：active=false（type/wall/liquid 保留）
+    public class ClearTileA : GA   // ClearTile()：active=false（type/wall/liquid 保留；half/slope 清）
     {
         public override bool Apply(int ox, int oy, int x, int y)
         {
-            if (WC.InW(x, y)) WC.A[y * WC.W + x] = 0;
+            if (WC.InW(x, y)) { int i = y * WC.W + x; WC.A[i] = 0; WC.Hf[i] = 0; WC.Sl[i] = 0; }
             return UA(ox, oy, x, y);
         }
     }
-    public class SetTileA : GA  // Clear(~(Wiring|Actuator)) + type + active → wall/liquid 清零
+    public class SetTileA : GA  // Clear(~(Wiring|Actuator)) + type + active → wall/liquid/half/slope 清零
     {
         public ushort Tt;
         public SetTileA(ushort t) { Tt = t; }
         public override bool Apply(int ox, int oy, int x, int y)
         {
-            if (WC.InW(x, y)) { int i = y * WC.W + x; WC.T[i] = Tt; WC.A[i] = 1; WC.Wl[i] = 0; WC.L[i] = 0; }
+            if (WC.InW(x, y)) { int i = y * WC.W + x; WC.T[i] = Tt; WC.A[i] = 1; WC.Wl[i] = 0; WC.L[i] = 0; WC.Hf[i] = 0; WC.Sl[i] = 0; }
             return UA(ox, oy, x, y);
         }
     }
-    public class PlaceWallA : GA // wall = type（SquareWallFrame 哈希无关）
+    public class PlaceWallA : GA // Actions.PlaceWall：写墙 + SquareWallFrame(x,y)+四邻（neighbors=true）
     {
         public ushort Wt;
         public PlaceWallA(ushort w) { Wt = w; }
         public override bool Apply(int ox, int oy, int x, int y)
         {
             if (WC.InW(x, y)) WC.Wl[y * WC.W + x] = Wt;
+            // ★F 批掷骰还原（Actions.cs:516-541）：写后 SquareWallFrame(x,y)+四邻，各至多
+            // 1 掷（中心格 resetFrame）——曾按「哈希无关」省略致 pass 内流错位
+            WC.SqWF(x, y); WC.SqWF(x + 1, y); WC.SqWF(x - 1, y); WC.SqWF(x, y - 1); WC.SqWF(x, y + 1);
+            return UA(ox, oy, x, y);
+        }
+    }
+    public class SmoothA : GA   // Actions.Smooth（Actions.cs:600）→ Tile.SmoothSlope
+    {
+        public bool Wn;         // applyToNeighbors（LarvaHole :29 用 true；Anthill :52 用 false）
+        public SmoothA(bool wn = false) { Wn = wn; }
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (Wn) { WC.SmoothSelf(x + 1, y); WC.SmoothSelf(x - 1, y); WC.SmoothSelf(x, y + 1); WC.SmoothSelf(x, y - 1); }
+            WC.SmoothSelf(x, y);
             return UA(ox, oy, x, y);
         }
     }

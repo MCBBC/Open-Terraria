@@ -302,6 +302,8 @@ export function runGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
 
 /** GraniteBiome.Place（GraniteBiome.cs:73-353）1:1：magma 压力 CA → 放置 → 清理 → 装饰 */
 function granitePlace(st: TileStore, rng: RNG, gs: GenState, x0: number, y0: number): void {
+  const __probe = (globalThis as { __swGranitePlace?: (x: number, y: number) => void }).__swGranitePlace;
+  if (__probe) __probe(x0, y0);
   if (!st.inBounds(x0, y0) || st.flags[st.idx(x0, y0)]) return;
   const gox = x0 - 100, goy = y0 - 100;             // 200×200 magma 图
   // let:轮末 Utils.Swap 引用交换(GraniteBiome.cs:186)

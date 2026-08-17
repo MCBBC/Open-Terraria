@@ -553,9 +553,25 @@ export function placeBuriedChest(
     }
   }
   // ---- 沙漠箱门（cs:36066-36091 1:1）：三析取——(tile467&&style10) ||
-  // (tile21&&style42&&flag16) || (无主件 && ≤h-205 && IsUndergroundDesert)
-  const ud = gs.undergroundDesert;
-  const inUd = !mainId && ud && i >= ud.x0 && i <= ud.x1 && gy >= ud.y0 && gy <= ud.y1 && gy <= st.h - 205;
+  // (tile21&&style42&&flag16) || (无主件 && ≤h-205 && IsUndergroundDesert)。
+  //  ★IsUndergroundDesert（cs:35798-35824）= y≥worldSurface && x∈[0.15W,0.85W] &&
+  //   **±15 邻域扫描 wall∈{187,216}**——曾用 gs.undergroundDesert 矩形近似：
+  //   沙漠边缘（墙带内外 ±15）矩形判定与扫描判定不同 → 漏掷沙漠主件骰
+  //   （vanilla (2783,605) 实证：邻墙 187 → 掷 1 骰后 PlaceChest 拒 =1 耗掷，
+  //   旧 JS 矩形外 0 耗掷——流分叉，2026-08-17 箱族批）。
+  const inUd = !mainId && gy >= gs.worldSurface && i > st.w * 0.15 && i < st.w * 0.85
+    && (() => {
+      if (gy > st.h - 205) return false;
+      const num = 15;
+      for (let x = i - num; x <= i + num; x++) {
+        for (let y = gy - num; y <= gy + num; y++) {
+          if (!st.inBounds(x, y)) continue;
+          const wl = st.wall[st.idx(x, y)];
+          if (wl === 187 || wl === 216) return true;
+        }
+      }
+      return false;
+    })();
   if ((tile === CHEST2 && style === 10) || inUd) {
     tile = CHEST2;
     style = 10;

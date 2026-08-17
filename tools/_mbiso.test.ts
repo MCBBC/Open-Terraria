@@ -12,6 +12,7 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { generateWorld } from '../src/world/gen/WorldGen';
 import { World } from '../src/world/World';
 import { settleWorldLiquids } from '../src/world/liquid/settle';
+import { LiquidSim } from '../src/world/liquid/LiquidSim';
 import { runCactusPalmTreesAndCoralPass } from '../src/world/gen/vanilla/StructuresPass';
 import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
 import { snapshotGenSolid, restoreGenSolid } from '../src/world/gen/vanilla/GenSolid';
@@ -274,9 +275,80 @@ let capCc: Cap | null = null, capMb: Cap | null = null;
     const world = new World(W, H, capCc.gs.seed);
     world.store = st;
     world.genWaterLine = capCc.gs.waterLine;
-    await settleWorldLiquids(world, 'gen');
-    console.log(`settle(97) replay done`);
+    // 地牢豁免盒（镜像 liquidSettlePass 接线;Liquid.cs:186-188）
+    if (capCc.gs.dungeonSide !== 0) {
+      const edge = Math.floor(W * 0.05), mid = Math.floor(W * 0.55);
+      world.genDungeonExempt = capCc.gs.dungeonSide < 0
+        ? { x0: edge, x1: Math.floor(W * 0.45), y0: Math.floor(capCc.gs.worldSurface) + 10, y1: H - 200 - 10 }
+        : { x0: mid, x1: W - edge, y0: Math.floor(capCc.gs.worldSurface) + 10, y1: H - 200 - 10 };
+    }
+    const { rng, box } = countedRng(capCc.gs.seed);
+    if (process.env.SW_SETTLE_PHASE) {
+      // 分相拆账:手动驱动 settle 各阶段(settleWorldLiquids 同构),逐相报掷数
+      const sim = new LiquidSim(world);
+      sim.isGeneratingOrLoadingWorld = true;
+      sim.generatingWorld = true;
+      sim.shimmerCenter = world.shimmerX > 0 ? { x: world.shimmerX, y: world.shimmerY } : null;
+      if (world.genWaterLine > 0) {
+        sim.genWaterLine = world.genWaterLine;
+        const d = world.genDungeonExempt;
+        if (d) sim.dungeonWaterExempt = (x, y, w) =>
+          x >= d.x0 && x <= d.x1 && y >= d.y0 && y <= d.y1
+          && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
+      }
+      sim.passRand = (max) => rng.nextInt(max);
+      // 拆账辅助:各相液体变动量(96→当前)
+      const liq96 = load(96, 'liq');
+      const liqChg = () => { let c = 0; for (let i = 0; i < W * H; i++) if (st.liquid[i] !== liq96[i]) c++; return c; };
+      sim.quickWater();
+      console.log(`phase quickWater: draws=${box.n} active=${sim.numLiquid} buf=${sim.bufferLen} liqChg=${liqChg()}`);
+      sim.waterCheck();
+      console.log(`phase waterCheck0: draws=${box.n} active=${sim.numLiquid} buf=${sim.bufferLen} liqChg=${liqChg()}`);
+      sim.quickSettle = true;
+      for (let round = 0; round < 10; round++) {
+        const MAX_ITER = (sim.numLiquid + sim.bufferLen) * 5;
+        let it = 0;
+        while (sim.numLiquid > 0 && it < MAX_ITER) { sim.updateLiquid(); it++; }
+        sim.waterCheck();
+        console.log(`phase round${round}: iters=${it} draws=${box.n} active=${sim.numLiquid} buf=${sim.bufferLen} liqChg=${liqChg()}`);
+      }
+      sim.quickSettle = false;
+      if (!process.env.SW_SETTLE_NOTAIL) {
+        sim.waterCheck();
+        console.log(`phase tailWaterCheck: draws=${box.n} active=${sim.numLiquid}`);
+        sim.finalGenMergeCheck();
+        console.log(`phase finalMerge: draws=${box.n}`);
+      } else {
+        // vanilla #97 尾 = ClearPendingLiquid(仅清列表)+484 翻转——尾 WaterCheck 与
+        // finalGenMergeCheck 是 #102 FinalCleanup 的活,settle.ts 挂尾属时点提前
+        (sim as unknown as { liquids: unknown[] }).liquids.length = 0;
+        (sim as unknown as { numLiquid: number }).numLiquid = 0;
+      }
+      sim.dispose();
+    } else {
+      await settleWorldLiquids(world, 'gen', undefined, rng);
+    }
+    console.log(`settle(97) draws=${box.n} (vanilla 55987, diff=${box.n - 55987})`);
     diff(st, 97, 'Settle97 vs dump097');
+    // 四通道(half/slope/lty/inact) vs x86 真值 hs97:lty 仅双侧液体格比对（干格的
+    // 原版 liquidType 位是陈旧残留,非状态）;lty 解码回 0 基
+    const rd = (e: string) => new Uint8Array(readFileSync(`/tmp/sw-mb-hs97.${e}`).buffer.slice(0));
+    const tHalf = rd('half'), tSlope = rd('slope'), tLty = rd('lty'), tInact = rd('inact');
+    const tLiq = load(97, 'liq');
+    let dHalf = 0, dSlope = 0, dLty = 0, dInact = 0;
+    const ltyPairs = new Map<string, number>();
+    for (let i = 0; i < W * H; i++) {
+      if (st.half[i] !== tHalf[i]) dHalf++;
+      if (st.slope[i] !== tSlope[i]) dSlope++;
+      if (st.liquid[i] > 0 && tLiq[i]! > 0) {
+        const jl = st.liquidType[i] - 1;
+        if (jl !== tLty[i]) { dLty++; ltyPairs.set(`l${jl}>${tLty[i]}`, (ltyPairs.get(`l${jl}>${tLty[i]}`) ?? 0) + 1); }
+      }
+      const jInact = (st.wire[i] & 32) !== 0 ? 1 : 0;
+      if (jInact !== tInact[i]) dInact++;
+    }
+    console.log(`Settle97 4ch: half=${dHalf} slope=${dSlope} lty=${dLty} inact=${dInact}`);
+    if (dLty) console.log('  lty pairs:', JSON.stringify([...ltyPairs.entries()].sort((p, q) => q[1] - p[1]).slice(0, 10)));
   }
   // ── C) #101 MicroBiomes：dump100 → runMicroBiomesPass → dump101
   if (want('mb')) {

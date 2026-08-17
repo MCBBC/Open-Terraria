@@ -10,13 +10,19 @@
 // yield 按真实耗时让出（≥32ms 一次）——worker 内也保留，让 progress postMessage 流出。
 import type { World } from '../World';
 import { LiquidSim } from './LiquidSim';
+import type { RNG } from '../../core/rng';
 
 export async function settleWorldLiquids(
   world: World,
   mode: 'gen' | 'load',
   onProgress?: (p: number) => void,
+  /** pass 链 RNG（生成管线槽传入）：gen 模式沉降的掷骰（254→255 Next(30)/KillTile
+   *  尘掷族）走 pass 链流——原版 gen 期 genRand≡Main.rand 同对象，#97 二次沉降
+   *  自身耗掷 55,987（passchain stream 定标）。缺省=私有 mulberry32（兼容路径） */
+  rng?: RNG,
 ): Promise<void> {
   const sim = new LiquidSim(world);
+  if (rng) sim.passRand = (max) => rng.nextInt(max);
   // isGeneratingOrLoadingWorld（WorldGen.cs:11089 / WorldFile.cs:738）：生成与读档
   // 两态都置位——CreateLiquidMergeTile 走 LiquidOverwriteStrip 分支不落块（防沉降期
   // 全图结黑曜石），运行期由 Game.liquid 保持 false 走落块路径
@@ -55,7 +61,9 @@ export async function settleWorldLiquids(
   // p=(num5-当前)/num5 单调不减——生成期 progress.Set(num6/3+0.33)、读档 50%+num7*50%
   let num5 = sim.numLiquid + sim.bufferLen;
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const MAX_ITER = mode === 'gen' ? Math.max(1000, (sim.numLiquid + sim.bufferLen) * 5) : 100000;
+    // ★vanilla 轮上限 = 轮始活量×5（:16252/21079 num3*5）——无 1000 下限、无提前收敛
+    //   出口（10 轮恒跑满:轮尾 WaterCheck 每轮都能把稳定浅洼重新激活,尾轮仍耗掷）
+    const MAX_ITER = mode === 'gen' ? (sim.numLiquid + sim.bufferLen) * 5 : 100000;
     let roundIter = 0;
     while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
       sim.updateLiquid();
@@ -73,7 +81,8 @@ export async function settleWorldLiquids(
     // ★load 模式跳过轮尾扫描(原版 WorldFile.cs:738-770 只有一次终态 WaterCheck;
     // 轮尾扫描是生成期 pass 49 十轮结构 :16286 的,load 单轮下与终态背靠背白跑一次全图)
     if (mode === 'gen') sim.waterCheck();
-    if (sim.numLiquid === 0) break; // 收敛即止
+    // vanilla 无收敛早退（:16259 while(num<10) 恒 10 轮;load 单轮同义）——JS 曾有的
+    // `numLiquid===0 break` 掐掉了尾轮 WaterCheck 反复再激活的流掷尾段
   }
   sim.quickSettle = false;
   sim.waterCheck(); // 残留活水交给运行时收敛（原版 WorldFile.cs:769 同款）

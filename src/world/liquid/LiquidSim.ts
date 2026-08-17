@@ -82,6 +82,45 @@ const LILY_FLOOR_ROWS: Array<[Set<number>, number]> = [
   [new Set([60]), 36],
 ];
 
+// ── KillTile 尘粒掷骰族（与 HalfBrickPass U 批同源表；原版 sheet id 键）────────
+// 原版 KillTile(i,j)（cs:63747-63751）每次击杀调 KillTile_GetTileDustAmount（cs:66654）
+// × KillTile_MakeTileDust（cs:66744）——部分 tile type 的尘型选择掷 genRand
+//（633 草灰岩 Next(6)/草族与 583-589 等各 1 掷/634 两掷）。生成期 isGeneratingOr
+// LoadingWorld=true 时 Dust.NewDust 早退（Dust.cs:89 零掷）但**掷骰在 NewDust
+// 之前**、尘段无 netMode 门 → 掷骰恒占用 genRand 流位（= pass 链流，gen 期
+// Main.rand≡genRand 同对象）。沉降期 KillTile 族（#97 vanilla 实测 844 格：
+// 藤62/丛草植物61/蛛网51/苔藓184/陶罐28/69/233/12/83/84/火把4）尘掷本身为 0，
+// 唯一实掷 = 蛛网51带蜘蛛墙62 的 Next(4)（cs:63904）。
+/** KillTile_GetTileDustAmount(fail=false)（cs:66654-66742；-1=按 frameX/22>=5 取 5:10） */
+const KILL_DUST_ZERO_SHEETS = new Set([654, 630, 631, 125, 138, 172, 287, 300, 301, 302, 303, 304, 305, 306, 307, 308, 354, 355, 373, 374, 375, 376, 461, 484, 499, 564, 565, 593, 594, 617, 664, 665, 699, 709, 711, 712, 713, 714, 715, 716]);
+const KILL_DUST_FIVE_SHEETS = new Set([534, 536, 539, 625, 627]);
+function killDustAmount(sheet: number): number {
+  if (KILL_DUST_ZERO_SHEETS.has(sheet)) return 0;
+  if (sheet === 231) return 6;
+  if (sheet === 481 || sheet === 482 || sheet === 483) return 3;
+  if (sheet === 541) return 1;
+  if (sheet === 549) return 2;
+  if (KILL_DUST_FIVE_SHEETS.has(sheet)) return 5;
+  if (sheet === 184) return -1; // frameX/22>=5 ? 5 : 10
+  return 10;
+}
+/** KillTile_MakeTileDust 每次调用的掷骰数（cs:66744-69226 的 genRand 位点；
+ *  掷值只影响尘型不影响世界状态 → 统一以 nextInt(6) 占位（流位等价，U 批实证） */
+const KILL_DUST_ONE_ROLL_SHEETS = new Set([23, 24, 661, 25, 27, 32, 2, 477, 109, 492, 204, 478, 58, 76, 77, 684, 633, 641, 370, 171, 238, 231, 352, 583, 584, 585, 586, 587, 588, 589, 595, 596, 615, 616, 385, 34, 42]);
+function killDustRollsPer(sheet: number, frameX: number): number {
+  if (sheet === 634) return 2; // Next(10)+Next(12)（cs:67125-67126）
+  if (sheet === 31 || sheet === 696) return frameX < 36 ? 1 : 0; // cs:69020
+  if (sheet === 26 || sheet === 695) return frameX < 54 ? 1 : 0; // cs:69026
+  if (sheet === 35) return frameX < 36 ? 1 : 0;                   // cs:69064
+  return KILL_DUST_ONE_ROLL_SHEETS.has(sheet) ? 1 : 0;
+}
+/** 内部 tile id → 原版 sheet id（尘掷族表键；-1=无映射，走 default 档） */
+const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let q = 0; q < TILE_DEFS.length; q++) {
+  const s = TILE_DEFS[q]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF[q] = s;
+}
+
 export class LiquidSim {
   world: World;
   /** 活动液体条目（原版 Main.liquid[]，dense 数组 + swap-remove） */
@@ -119,7 +158,6 @@ export class LiquidSim {
   private readonly lavaDeathIds: Set<number>;
   private readonly lavaBurnAirIds: Set<number>;
   private readonly lavaBurnDirtIds: Set<number>;
-  private readonly dirtId: number;
   /** Main.tileObsidianKill（sheet 反查；lavaDeath ∪ 附加 − 88） */
   private readonly obsidianKillIds: Set<number>;
   /** Main.tileCut / IsAContainer / tileAlch（sheet 反查） */
@@ -134,6 +172,14 @@ export class LiquidSim {
   private readonly lilyPadId: number;
   /** 液体冲毁方块（原版 AddWater 尾 KillTile）：Game 注入 breakTile（掉落+帧刷新） */
   killTile: ((x: number, y: number) => void) | null = null;
+  /** 生成管线 pass 链掷骰钩（WorldGenerator.cs:497 pass 头 Main.rand=new UR(seed)，
+   *  gen 期 genRand≡Main.rand 同对象）：gen 模式沉降的 254→255 Next(30)（Liquid.cs:898）
+   *  与 KillTile 尘掷族必须走 pass 链——vanilla #97 SettleLiquidsAgain 沉降自身耗掷
+   *  55,987（passchain stream 定标）。null=私有 mulberry32（运行期/读档兼容路径，
+   *  掷值不回流 pass 链——pass 头重播掩盖，不跨界传染） */
+  passRand: ((max: number) => number) | null = null;
+  /** 泥块（lava 3×3 烧除 60/70/661/662 → 59 的写入目标，cs:1562） */
+  private readonly mudId: number;
   /** 交互落块音效（WorldGen.PlayLiquidChangeSound Liquid.cs:1379）：Game 注入；
    *  参数 = (x, y, thisLiquidType, mergeType)（本仓库液体编码 1水/2岩浆/3蜂蜜/4微光） */
   liquidChangeSound: ((x: number, y: number, thisType: number, mergeType: number) => void) | null = null;
@@ -154,6 +200,43 @@ export class LiquidSim {
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  /** genRand.Next(max)（Liquid.cs:898 / KillTile 尘掷族）：pass 链钩优先，
+   *  缺省回退私有 mulberry32（旧路径兼容，*[0,1) 采样与 Next 同耗 1 掷） */
+  private roll(max: number): number {
+    if (this.passRand) return this.passRand(max);
+    return Math.floor(this.genRand() * max);
+  }
+
+  /** 生成/读档期 KillTile（cs:63559 生成路径：noItem=true 无掉落掷；尘段无
+   *  netMode 门恒跑——Dust.NewDush 在 isGeneratingOrLoadingWorld 下早退零副作用，
+   *  仅掷骰占流位；active(false)+type=0 清格，液体保留）。grid 语义与
+   *  HalfBrakePass/TileCleanupPass 的生成期 killTile 同口径（setTileSilent） */
+  private killTileGen(x: number, y: number): void {
+    const st = this.world.store;
+    if (x < 0 || y < 0 || x >= st.w || y >= st.h) return;
+    const i = this.idx(x, y);
+    if (!st.flags[i]) return; // cs:63574 !active() 早退
+    const sheet = SHEET_OF[st.type[i]] ?? -1;
+    // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem，生成期本就 true）
+    if (sheet === 51 && st.wall[i] === 62) this.roll(4);
+    const n = killDustAmount(sheet);
+    const amt = n === -1 ? (st.frameX[i] / 22 >= 5 ? 5 : 10) : n;
+    const per = killDustRollsPer(sheet, st.frameX[i]);
+    for (let k = 0; k < amt; k++) for (let r = 0; r < per; r++) this.roll(6);
+    // cs:63941：地狱石(58) 击杀于 UnderworldLayer(=h-200) 之下 → 灌岩浆 128
+    if (sheet === 58 && y > st.h - 200) { st.liquid[i] = 128; st.liquidType[i] = 2; }
+    st.setTileSilent(x, y, 0);
+  }
+
+  /** KillTile 分发：运行期走 Game 注入钩子（掉落+帧刷新）；生成/读档沉降期
+   *  （钩子缺位）走 killTileGen——原版 WaterCheck(:81172-81187 死亡表击杀)/
+   *  LiquidCheck(:1288-1295 非水本格+下方裁切植物)/CreateLiquidMergeTile(:1370)
+   *  三条触发链在沉降期同样生效（#97 vanilla 实测 KillTile 844 格） */
+  private killTileAt(x: number, y: number): void {
+    if (this.killTile) { this.killTile(x, y); return; }
+    if (this.isGeneratingOrLoadingWorld) this.killTileGen(x, y);
   }
   // ---- panic 模式（Liquid.cs:975-1070）：缓冲长期超限 → 逐行 QuickWater 强制收敛 ----
   private panicMode = false;
@@ -195,7 +278,7 @@ export class LiquidSim {
     this.lavaDeathIds = bySheet(LAVA_DEATH_SHEETS);
     this.lavaBurnAirIds = bySheet(LAVA_BURN_TO_AIR);
     this.lavaBurnDirtIds = bySheet(LAVA_BURN_TO_DIRT);
-    this.dirtId = TILE_BY_KEY['dirt'];
+    this.mudId = TILE_BY_KEY['mud'];
     // tileObsidianKill = lavaDeath ∪ 附加 − {88}（Main.cs:8214-8220，88=梳妆台显式豁免）
     const okKill = bySheet(OBSIDIAN_KILL_EXTRA_SHEETS);
     for (const id of this.lavaDeathIds) okKill.add(id);
@@ -307,11 +390,13 @@ export class LiquidSim {
     this.liquids[this.numLiquid] = { x, y, kill: 0, delay: 0 };
     this.numLiquid++;
     // 1456 AddWater 尾部（L1196-1211）：岩浆/水冲毁可死亡方块（火把/植物等 KillTile）。
-    //  与 blocksLiquid 同理走 nactive（幽灵 type 不算实心）
-    if (t !== 0 && st.flags[i]) {
+    //  与 blocksLiquid 同理走 nactive（幽灵 type 不算实心）。★isGeneratingOrLoading
+    //  World 门槛（L1199 `!tile.active() || isGeneratingOrLoadingWorld → return`）：
+    //  生成/读档沉降期此链不发击杀（击杀走 WaterCheck/LiquidCheck 两链）
+    if (!this.isGeneratingOrLoadingWorld && t !== 0 && st.flags[i]) {
       const isLava = st.liquidType[i] === 2;
       const dies = isLava ? this.lavaDeathIds.has(t) : this.waterDeathIds.has(t);
-      if (dies) this.killTile?.(x, y);
+      if (dies) this.killTileAt(x, y);
     }
   }
 
@@ -609,7 +694,7 @@ export class LiquidSim {
       } else {
         // 3 格均分（Liquid.cs:613-628）：随机 254→255 补满
         let m = csRound((lq + rq + st.liquid[i5] + num1) / 3); // 1456 Math.Round=取偶
-        if (m === 254 && this.genRand() * 30 < 1) m = 255; // 原版 WorldGen.genRand.Next(30)==0（确定性）
+        if (m === 254 && this.roll(30) === 0) m = 255; // 原版 WorldGen.genRand.Next(30)==0（gen 期走 pass 链流）
         if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else st.liquidType[il] = myType;
         if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else st.liquidType[ir] = myType;
         st.liquid[i5] = m;
@@ -654,7 +739,7 @@ export class LiquidSim {
     }
     this.liquidChangeSound?.(x, y, thisType, mergeType); // WorldGen.PlayLiquidChangeSound
     const i = this.idx(x, y);
-    if (st.flags[i]) this.killTile?.(x, y); // ReplaceTile：KillTile_DropItems（火把/植物掉落）
+    if (st.flags[i]) this.killTileAt(x, y); // ReplaceTile：KillTile_DropItems（火把/植物掉落）；生成收尾=尘掷
     st.setTile(x, y, tileType);
   }
 
@@ -749,7 +834,7 @@ export class LiquidSim {
       // flag：本格容器而下方不是（Liquid.cs:1285-1288）——容器内液体允许向下合并
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
       // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
-      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTile?.(x, y + 1);
+      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       // 落块门（Liquid.cs:1294）：下方空 / tileObsidianKill / 容器位 三者其一
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
@@ -793,7 +878,7 @@ export class LiquidSim {
       const belowT = st.type[id];
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
       // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
-      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTile?.(x, y + 1);
+      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; } // 1456 统一 24
       const type = dt === 4 ? AETHERIUM : dt === 2 ? CRISPY_HONEY : HONEY_BLOCK;
@@ -835,7 +920,7 @@ export class LiquidSim {
       const belowT = st.type[id];
       const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
       // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
-      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTile?.(x, y + 1);
+      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTileAt(x, y + 1);
       if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
@@ -889,7 +974,7 @@ export class LiquidSim {
             const t = st.type[ni];
             if (t === 0) continue;
             if (this.lavaBurnAirIds.has(t)) st.setTile(nx, ny, 0);
-            else if (this.lavaBurnDirtIds.has(t)) st.setTile(nx, ny, this.dirtId);
+            else if (this.lavaBurnDirtIds.has(t)) st.setTile(nx, ny, this.mudId); // cs:1562 type=59（泥，非泥土0——曾误写 dirt）
           }
         }
       } else if (st.liquidType[i5] === 3) {
@@ -934,7 +1019,7 @@ export class LiquidSim {
       if (!this.alchSoilIds[stage].has(st.type[id])) bad = true;
       if (st.liquid[i5] > 0 && st.liquidType[i5] === 2) bad = true; // 草药泡岩浆必枯
     }
-    if (bad) { this.killTile?.(x, y); return; }
+    if (bad) { this.killTileAt(x, y); return; }
     // 阶段 5 bloom 切换（45981+ case 5 尾段）：Daybloom(82) 豁免，仅岩浆格生效
     if (stage !== 5) return;
     const t = st.type[i5];
@@ -951,7 +1036,7 @@ export class LiquidSim {
   private checkLilyPad(x: number, y: number) {
     const st = this.world.store;
     const i5 = this.idx(x, y);
-    if (st.liquidType[i5] !== 1) { this.killTile?.(x, y); return; } // 非水 → 掉落清除
+    if (st.liquidType[i5] !== 1) { this.killTileAt(x, y); return; } // 非水 → 掉落清除
     // 向下找第一个实心格（原版 tileSolid && !tileSolidTop；tileSolidTop 的家具族
     // 本仓库 defs 均 non-solid，platform 标志位近似）
     let fy = y;
@@ -959,7 +1044,7 @@ export class LiquidSim {
       const fi = this.idx(x, fy);
       const d = TILE_DEFS[st.type[fi]];
       if (st.flags[fi] && d?.solid && !d.platform) break;
-      if (fy >= st.h - 50) { this.killTile?.(x, y); return; } // 落不到底 → 清除
+      if (fy >= st.h - 50) { this.killTileAt(x, y); return; } // 落不到底 → 清除
       fy++;
     }
     const floorSheet = TILE_DEFS[st.type[this.idx(x, fy)]]?.vanilla?.sheet ?? -1;
@@ -967,7 +1052,7 @@ export class LiquidSim {
     for (const [sheets, r] of LILY_FLOOR_ROWS) {
       if (sheets.has(floorSheet)) { row = r; break; }
     }
-    if (row < 0) { this.killTile?.(x, y); return; } // 水底不是泥土族 → 清除
+    if (row < 0) { this.killTileAt(x, y); return; } // 水底不是泥土族 → 清除
     if (row !== st.frameY[i5]) st.frameY[i5] = row;
     const iu = i5 - st.w, ib = i5 + st.w;
     if (st.liquid[iu] > 0 && !st.flags[iu]) {
@@ -983,7 +1068,7 @@ export class LiquidSim {
         st.setTile(x, y, 0);
       } else if (!belowDef?.platform && (!belowDef?.solid)) {
         // 下方被非平台实心家具占据 → 掉落清除（59305-59312）
-        this.killTile?.(x, y);
+        this.killTileAt(x, y);
       }
     }
   }
@@ -1176,8 +1261,8 @@ export class LiquidSim {
         if (t !== 0 && st.flags[i]) {
           if (this.solidNP[t] === 1) { st.liquid[i] = 0; continue; } // 实心格内液体清零（1456 无 379 系统特例；nactive 门）
           // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
-          if (st.liquidType[i] === 2) { if (this.lavaDeathIds.has(t)) this.killTile?.(x, y); }
-          else if (this.waterDeathIds.has(t)) this.killTile?.(x, y);
+          if (st.liquidType[i] === 2) { if (this.lavaDeathIds.has(t)) this.killTileAt(x, y); }
+          else if (this.waterDeathIds.has(t)) this.killTileAt(x, y);
         }
         const id = i + st.w;
         const dq = st.liquid[id];

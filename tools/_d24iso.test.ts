@@ -13,7 +13,10 @@ import { TileStore } from '../src/world/TileStore';
 
 const VG = process.env.SW_VG ?? '/tmp/sw-num4/van_x86_g';
 const SEEDTXT = process.env.SW_SEED ?? '9293480';
-const VN = { '9293480': { mar: 248340, gra: 781137, d2m: 775854, silt: 463409 }, '8888': { mar: 129825, gra: 37550, d2m: 772961, silt: -1 } };
+// ★granite 78137 勘正（Y 批 2026-08-17）：J 批曾录 781137（多一位数字）→ 掷差
+// -703003 假案。passchain 第6列 a86ee76c 唯一命中 N=78137（/tmp/sw-ycal/nfind.mjs
+// 独立复算 0..1.6M 扫描；marble 248340 同法复验命中佐证算法）。真差=3 掷。
+const VN = { '9293480': { mar: 248340, gra: 78137, d2m: 775854, silt: 463409 }, '8888': { mar: 129825, gra: 37550, d2m: 772961, silt: -1 } };
 const W = 4200, H = 1200;
 const load = (idx: number, ext: string, name: string) =>
   readFileSync(`${VG}/${String(idx).padStart(3, '0')}_${name}.${ext}`);
