@@ -1,5 +1,5 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
 import type { Camera } from './Camera';
 import { SkyRenderer } from './SkyRenderer';
@@ -342,6 +342,10 @@ function applyPlayerMountRotation(ctx: CanvasRenderingContext2D, r: PlayerMountR
 const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200, 223, 251, 254, 255, 319, 320, 321, 331, 332, 342, 536, 590, 691]);
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
 const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
+// 法师族三态帧（FindFrame case 29/32/45/172/281-286/693，cs:77721-77743）——
+// 非循环状态机：帧0 待机 / 帧1 蓄力(ai[1]>0 且 vy==0) / 帧2 腾空(vy≠0)；
+// 24 火妖 / 533 沙漠幽魂另有专属 case（下方分支）
+const CASTER_STATE_FRAME_TYPES = new Set([29, 32, 45, 172, 281, 282, 283, 284, 285, 286, 693]);
 // 旋转族 NPC（原版 npc.rotation 驱动绘制朝向；FindFrame 不做朝向翻转）：
 // 35/68=骷髅王头/守卫、113-115=血肉墙/之眼/饥饿者、116=饥饿者 II(FindFrame case 116
 //   rotation=atan2(vy,vx)，vx>0 再 FlipHorizontally——drawEnemy 独占分支自带翻转，
@@ -513,6 +517,28 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   //（frames=1，通用档亦恒 0，无需特判）
   if (id === 129) return Math.floor(t / 2) % Math.max(1, frames);
   if (id === 130) return Math.floor(t / 8) % Math.max(1, frames);
+  // 法师族三态帧（case 29/32/45/172/281-286/693，cs:77721-77743）：帧0 待机 /
+  // 帧1 蓄力（vy==0 且 ai[1]>0——含传送后 ai[1]=20 的 20t 后摇，原版同）/ 帧2 腾空
+  // （vy≠0）；32 且 RedHat 变体（localAI[3]==1：红帽骷髅王 ai[3]==1 在场时 AI 段
+  // cs:20777-20784 置位永不清）整带 +3——贴图表 6 帧=上半 0-2 常态兜帽、下半 3-5
+  // 红帽形态。曾落通用 6t 全循环档 → 32 六帧连播=两种头饰形态混播（2026-08-17 用户报告）
+  if (CASTER_STATE_FRAME_TYPES.has(id)) {
+    let f = e.vy !== 0 ? 2 : (e.ai1 > 0 ? 1 : 0);
+    if (id === 32 && e.lai3 === 1) f += 3;
+    return Math.min(frames - 1, f);
+  }
+  // 火妖 24（FindFrame case 24，cs:77681-77719）：待机/行走带 0-3 每 6t 循环
+  // （无站定门，恒转）；蓄力（ai[1]>0）切攻击带 4-9——进带清零推进、每 6t 一帧、
+  // 末帧 9 钳住不回卷。无状态近似：以蓄力倒计时反推进度（elapsed=30-ai[1]，30 为
+  // 蓄力起点；传送置 5 的 5t 内会错取带内高帧，差异登记——彼时被 50 颗传送尘遮挡）
+  if (id === 24) {
+    if (e.ai1 > 0) return Math.min(9, 4 + Math.floor((30 - e.ai1) / 6));
+    return Math.floor(t / 6) % 4;
+  }
+  // 沙漠幽魂 533（FindFrame case 533，cs:70647-70661）：counter 0-48 循环、帧=
+  // floor(counter/6)（0-7 每 6t）；蓄力（ai[1]>0）整带 +8（表 16 帧=待机 8+攻击 8。
+  // 曾落通用 6t 档 → 16 帧连播两带混播）。相位取全局 t（%48），带切换时相位任意（差<48t）
+  if (id === 533) return (e.ai1 > 0 ? 8 : 0) + Math.floor((t % 48) / 6);
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -5494,17 +5520,13 @@ export class Renderer {
 
   private drawSkeletronArm(hand: Enemy, head: Enemy) {
     if (this.armBoneImg === undefined) {
-      this.armBoneImg = new Image();
-      (this.armBoneImg as HTMLImageElement).onload = () => upgradeToBitmap(this.armBoneImg as unknown as HTMLImageElement, (b) => { this.armBoneImg = b as unknown as typeof this.armBoneImg; });
-      this.armBoneImg.src = 'sprites/vanilla/Arm_Bone.png';
+      loadBitmapOnly('sprites/vanilla/Arm_Bone.png', () => !!(this.armBoneImg), (x) => { this.armBoneImg = x as unknown as typeof this.armBoneImg; });
     }
     // Red Hat 族（生成时 head.ai[3]=1 :81269-81271，手 localAI[3] 每 tick 镜像 :22304）
     // → 换 Arm_Bone_3（:22571-22578；rect/origin 两分支同用 BoneArm 尺寸，原版 quirk）
     const redHat = head.ai3 === 1;
     if (redHat && this.boneArm3Img === undefined) {
-      this.boneArm3Img = new Image();
-      (this.boneArm3Img as HTMLImageElement).onload = () => upgradeToBitmap(this.boneArm3Img as unknown as HTMLImageElement, (b) => { this.boneArm3Img = b as unknown as typeof this.boneArm3Img; });
-      this.boneArm3Img.src = 'sprites/vanilla/Arm_Bone_3.png';
+      loadBitmapOnly('sprites/vanilla/Arm_Bone_3.png', () => !!(this.boneArm3Img), (x) => { this.boneArm3Img = x as unknown as typeof this.boneArm3Img; });
     }
     const img = redHat ? this.boneArm3Img : this.armBoneImg;
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -5539,9 +5561,7 @@ export class Renderer {
    *  (W/2, 帧高/2)，rotation 0——本体贴图之下仍画在实体层（原版同段叠画） */
   private drawPumpkingCloak(e: Enemy) {
     if (this.pumpkingCloakImg === undefined) {
-      this.pumpkingCloakImg = new Image();
-      (this.pumpkingCloakImg as HTMLImageElement).onload = () => upgradeToBitmap(this.pumpkingCloakImg as unknown as HTMLImageElement, (b) => { this.pumpkingCloakImg = b as unknown as typeof this.pumpkingCloakImg; });
-      this.pumpkingCloakImg.src = 'sprites/vanilla/PumpkingCloak.png';
+      loadBitmapOnly('sprites/vanilla/PumpkingCloak.png', () => !!(this.pumpkingCloakImg), (x) => { this.pumpkingCloakImg = x as unknown as typeof this.pumpkingCloakImg; });
     }
     const img = this.pumpkingCloakImg;
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -5559,9 +5579,7 @@ export class Renderer {
    *  (-200*ai[0],+130)/(-50*ai[0],+80)，贴图 PumpkingArm（26×96）整幅 */
   private drawPumpkingArm(blade: Enemy, master: Enemy) {
     if (this.pumpkingArmImg === undefined) {
-      this.pumpkingArmImg = new Image();
-      (this.pumpkingArmImg as HTMLImageElement).onload = () => upgradeToBitmap(this.pumpkingArmImg as unknown as HTMLImageElement, (b) => { this.pumpkingArmImg = b as unknown as typeof this.pumpkingArmImg; });
-      this.pumpkingArmImg.src = 'sprites/vanilla/PumpkingArm.png';
+      loadBitmapOnly('sprites/vanilla/PumpkingArm.png', () => !!(this.pumpkingArmImg), (x) => { this.pumpkingArmImg = x as unknown as typeof this.pumpkingArmImg; });
     }
     const img = this.pumpkingArmImg;
     if (!img || !(img.width > 0) || img.width === 0) return;

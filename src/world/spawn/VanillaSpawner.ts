@@ -2670,9 +2670,9 @@ export class VanillaSpawner {
   }
 
   /** SpawnFrog（NPC.cs:5521-5535 1:1）：!unlockedSlimeYellowSpawn && RollLuck(30) 且
-   *  场上无 687 → 神秘青蛙 687（交付 pendingCritterKey 由 Game 转 Critter——687 无
-   *  Enemy 数据条目）；RollLuck(400) → 金蛙 445；else 蛙 361。 */
-  pendingCritterKey: string | null = null;
+   *  场上无 687 → 神秘青蛙 687（Enemy 直出——vanilla-npcs.json/NPC_687.png 在位，
+   *  aiStyle 7 行走族 AI 走 townCritterWalkAI；旧 pendingCritterKey→Critter 侧信道
+   *  已退役）；RollLuck(400) → 金蛙 445；else 蛙 361。 */
   /** 萤火虫成群附加队列（原版 :2327-2344/:4419-4433/:5767-5782 主只后四向各
    *  1/fireFlyMultiple 独立掷 SpawnNPC）——spawn() 单返回值只交付主只，附加以
    *  像素偏移入队，Game.trySpawnEnemy 落位段消费（消费后清空） */
@@ -2687,8 +2687,7 @@ export class VanillaSpawner {
     // 进丛林必炸);全文件其余三处均为 () => rng.next(),此处笔误(2026-08-13 用户报告)
     if (!this.world.flags.unlockedSlimeYellowSpawn && rollLuck(this.playerLuck, 30, () => rng.next()) === 0
       && !this.activeIds.has(687)) {
-      this.pendingCritterKey = 'mystic_frog';
-      return null;
+      return this.spawnNPC(x, y, 687, rng);
     }
     if (rng.next() < 1 / 400) return this.spawnNPC(x, y, 445, rng);
     return this.spawnNPC(x, y, 361, rng);

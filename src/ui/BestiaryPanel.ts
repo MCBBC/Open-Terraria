@@ -592,13 +592,14 @@ function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: ImageBi
     bstSheetPending.delete(file);
     if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
     // bitmap 就绪才入缓存+回调(Image 窗口期每格每帧发 LazyPixelRef,trace⑨)
-    upgradeToBitmap(im, (b) => {
+    const land = (x: ImageBitmap | HTMLImageElement) => {
       if (bstSheetFailed.has(file)) return;
       if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
-      bstSheetCache.set(file, b);
-      for (const c of q!) c(b);
-    });
-    if (!USE_BITMAP) { bstSheetCache.set(file, im); for (const c of q!) c(im); }
+      bstSheetCache.set(file, x);
+      for (const c of q!) c(x);
+    };
+    upgradeToBitmap(im, (b) => land(b), () => land(im));  // 失败回退 Image=永不缺图
+    if (!USE_BITMAP) land(im);
   };
   im.onerror = () => {
     bstSheetPending.delete(file);

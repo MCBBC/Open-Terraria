@@ -51,10 +51,14 @@ describe('crackedChainKill（连锁崩塌 :63838-63866）', () => {
     expect(isCrackedSheet(undefined)).toBe(false);
   });
 
-  it('掉落映射：275/276/277（同色地牢砖物品，:67003）均有物品 key', () => {
-    for (const vid of [275, 276, 277]) {
-      expect(VANILLA_ITEM_KEY_BY_ID[vid], `item ${vid}`).toBeTruthy();
-    }
+  it('掉落：无物品（KillTile_GetItemDrops :64012 dropItem=0 + 481-483 落无赋值 break 块）', () => {
+    // ★:67003 的 481→275/482→276/483→277 是 KillTile_MakeTileDust（:66744）的
+    // 碎屑 gore 槽位表（裂砖与同色普通砖共用碎屑），不是物品表——曾误读成
+    // 「掉同色地牢砖」并按 sheet-481+275 错接物品 275 珊瑚/276/277 三叉戟，
+    // 2026-08-17 修正为无掉落。负断言：物品 275/277 事实上是珊瑚/三叉戟
+    // （ItemID.cs:2089 Coral=275），绝非地牢砖——防再犯。
+    expect(VANILLA_ITEM_KEY_BY_ID[275]?.toLowerCase()).toContain('coral');
+    expect(VANILLA_ITEM_KEY_BY_ID[277]?.toLowerCase()).toContain('trident');
   });
 });
 
@@ -161,5 +165,43 @@ describe('Player.checkCrackedBrickBreak（跑/落撞碎 :23040-23110）', () => 
     } finally {
       rnd.mockRestore();
     }
+  });
+
+  it('【原版语义钉死】嵌在普通砖地板中的孤立裂砖：跑动永远踩不碎（三点支撑门 :23054-23067）', () => {
+    // 用户报告「总有几个几乎只能用武器砸裂」——原版即如此：vy<1（非快速下落）时
+    // 脚底 Bottom/BottomLeft/BottomRight 三点任一踩到实心非裂砖 → 整帧不触发。
+    // 玩家宽 20px 跨 2-3 格，嵌砖两侧的普通地牢砖必然被三点之一扫到 → 身体路径
+    // 永久封死；只有弹幕扫掠（无此门）能碎。随机真实回掷（不 mock）跑 300 帧。
+    const w = new World(60, 120, 7, 'smash3');
+    const broke: Array<[number, number]> = [];
+    const hooks = mkHooks(w, (x, y) => broke.push([x, y]));
+    const GREEN = TILE_BY_KEY['v_43_green_dungeon_brick'] ?? 43;
+    for (let x = 24; x <= 32; x++) w.store.setTileSilent(x, 30, GREEN);  // 普通地牢砖地板
+    w.store.setTileSilent(28, 30, CRACK());                              // 中央嵌一块裂砖
+    const p = new Player(27 * 16 + 8, 30 * 16 - 42, new Inventory());    // 站在嵌砖正上
+    // 贴地跑（vx=6 过速度门、vy=0 走三点门）——沿嵌砖左右往返 300 帧恒不触发
+    for (let k = 0; k < 300; k++) {
+      p.vx = ((k % 60) < 30) ? 6 : -6;
+      p.vy = 0;
+      (p as unknown as { checkCrackedBrickBreak: (g: GameHooks) => void }).checkCrackedBrickBreak(hooks);
+    }
+    expect(broke).toEqual([]);
+    expect(w.store.get(28, 30)).toBe(CRACK());             // 嵌砖完好——只能弹幕碎
+  });
+
+  it('【对照】整段纯裂砖地板：同参数跑动数帧内必然踩碎（无普通砖可取消）', () => {
+    const w = new World(60, 120, 7, 'smash4');
+    const broke: Array<[number, number]> = [];
+    const hooks = mkHooks(w, (x, y) => broke.push([x, y]));
+    for (let x = 24; x <= 32; x++) w.store.setTileSilent(x, 30, CRACK());  // 全裂砖地板
+    const p = new Player(27 * 16 + 8, 30 * 16 - 42, new Inventory());
+    let frames = 0;
+    for (; frames < 300; frames++) {
+      p.vx = 6; p.vy = 0;
+      (p as unknown as { checkCrackedBrickBreak: (g: GameHooks) => void }).checkCrackedBrickBreak(hooks);
+      if (broke.length > 0) break;
+    }
+    expect(broke.length).toBeGreaterThan(0);               // 速度门 40%/帧 → 数帧内碎
+    expect(frames).toBeLessThan(50);
   });
 });

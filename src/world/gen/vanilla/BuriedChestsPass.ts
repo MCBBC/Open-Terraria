@@ -774,7 +774,29 @@ function placeBuriedChestInner(
       }
     }
     if (ok && !(chestLegOK(st, i - 1, gy) && chestLegOK(st, i, gy))) ok = false;
-    if (!ok) { restoreSlopes(); return false; }
+    if (!ok) {
+      const __dbg = (globalThis as { __swChestDbg?: (i: number, gy: number, why: string) => void }).__swChestDbg;
+      if (__dbg) {
+        const sheetOf2 = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
+        let why = '?';
+        const legL2 = sheetOf2(st.type[st.idx(i - 1, gy)]), legR2 = sheetOf2(st.type[st.idx(i, gy)]);
+        if (PC_BOULDERS.has(legL2) || PC_BOULDERS.has(legR2)) why = `boulder ${legL2}/${legR2}`;
+        else if (!(i - 1 >= 5 && i + 1 <= st.w - 5 && topY >= 5 && topY + 2 <= st.h - 5)) why = 'bounds';
+        else if (!chestLegOK(st, i - 1, gy)) why = `legL(${i - 1},${gy}) sheet${legL2} act${st.flags[st.idx(i - 1, gy)] ? 1 : 0}`;
+        else if (!chestLegOK(st, i, gy)) why = `legR(${i},${gy}) sheet${legR2} act${st.flags[st.idx(i, gy)] ? 1 : 0}`;
+        else for (let dx = -1; dx <= 0; dx++) for (let dy = 0; dy < 2; dy++) {
+          const k = st.idx(i + dx, topY + dy);
+          if (st.liquid[k] > 0 && st.liquidType[k] === 2) { why = `lava(${i + dx},${topY + dy})`; }
+          else if (st.flags[k]) {
+            const sh = sheetOf2(st.type[k]);
+            if (!((PC_TILE_CUT.has(sh) && sh !== 484 && sh !== 654) || PC_BREAK_PLACE.has(sh))) why = `occ(${i + dx},${topY + dy}) t${st.type[k]} sheet${sh}`;
+          }
+          if (why !== '?') break;
+        }
+        __dbg(i, gy, why);
+      }
+      restoreSlopes(); return false;
+    }
   }
   // 样式派生 flag 族（cs:36201-36229）：32 蘑菇 / 16 神庙 / 13 天空主题
   if (style === 32) flags.mushroom = true;

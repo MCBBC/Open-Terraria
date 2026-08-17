@@ -14,13 +14,14 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
 /** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
-const spriteCache = new Map<number, HTMLImageElement>();
+const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
 export function projSprite(projId: number): ImageBitmap | HTMLImageElement | null {
   let img = spriteCache.get(projId);
   if (img !== undefined) return img ?? null;
   if (typeof Image === 'undefined') return null;
-  img = new Image();
-  img.onload = () => upgradeToBitmap(img, (b) => spriteCache.set(projId, b));
+  const im = new Image();
+  im.onload = () => upgradeToBitmap(im, (b) => spriteCache.set(projId, b));
+  img = im;
   img.src = `sprites/vanilla/Projectile_${projId}.png`;
   spriteCache.set(projId, img);
   return img;
@@ -173,6 +174,14 @@ interface PiranhaTarget {
  *  837（AI_001 显式 MIRROR 分支 :54715，1313 骷髅头法书 shoot）、
  *  1023（AI_001 仅 wiggle :54743，基姿态 0 朝右，5460 发射器） */
 const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023]);
+
+/** aiStyle 27 剑气族（AI_027 尾部 :24858-24861：rotation = atan2(vy,vx) + 0.785
+ *  = 速度角 + 45°，斜向剑气贴图）——曾走默认 +π/2 恒偏 45°（用户报"附魔剑
+ *  光束角度偏"）。成员：114 邪恶三叉戟弹(683)/115 敌侧/116 光束剑波(723)/
+ *  132 泰拉刃波/156 光束/173 附魔剑波(989)。例外 157 夜波=direction×0.4 旋转体
+ *  （1.4.5 已无武器射出，未移植登记） */
+const PROJ_ROT_DIAG = new Set([114, 115, 116, 132, 156, 173]);
+export { PROJ_ROT_DIAG };
 export { PROJ_ROT_RIGHT };
 
 export class Arrow extends Entity {
@@ -481,7 +490,9 @@ export class Arrow extends Entity {
       ctx.scale(-1, 1);              // 先镜像再旋转（R(π−ang)∘M ≡ 原版 flip+atan2(−vy,−vx)）
       ctx.rotate(Math.PI - ang);
     } else {
-      ctx.rotate(rightArt ? ang : ang + Math.PI / 2);
+      ctx.rotate(rightArt ? ang
+        : PROJ_ROT_DIAG.has(this.projId) ? ang + Math.PI / 4   // aiStyle 27 剑气 +45°（:24860）
+          : ang + Math.PI / 2);
     }
     // 502 朝向（:22659-22665）：spriteDirection=sign(vx)——贴图在旋转坐标系内水平镜像
     if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);

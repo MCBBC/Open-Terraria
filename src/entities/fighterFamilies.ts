@@ -349,6 +349,11 @@ export function attemptToFindTeleportSpot(
 ): { x: number; y: number } | null {
   const st = game.world.store;
   const cx = Math.floor(e.cx / TILE), cy = Math.floor(e.cy / TILE);    // :18878-18879
+  // :18901 AnyNPCs(35)：骷髅王在场（打王期间）——地牢法师墙门豁免，每 tick 求值一次
+  // （enemies 可选访问：测试桩 hooks 可能未实现）
+  const enemiesOf = (game as { enemies?: () => unknown[] }).enemies;
+  const skelUp = opts.dungeonWallGate && !!enemiesOf
+    && enemiesOf.call(game).some((n) => (n as Enemy).vanillaId === 35 && !(n as Enemy).dead);
   let num3 = 0;
   let found = false;
   if (Math.abs(cx * TILE - targetTileX * TILE) + Math.abs(cy * TILE - targetTileY * TILE) > 2000) {
@@ -365,8 +370,9 @@ export function attemptToFindTeleportSpot(
       // :18896-18899 自身 3×3 邻域跳过 + 非激活格跳过（teleportInAir=false）
       if ((i >= cy - 1 && i <= cy + 1 && num5 >= cx - 1 && num5 <= cx + 1)
         || !st.inBounds(num5, i) || st.get(num5, i) === 0) continue;
-      // :18899-18904 地牢法师门：上一格须地牢砖墙（wallDungeon 集）
-      if (opts.dungeonWallGate
+      // :18899-18904 地牢法师门：上一格须地牢砖墙（wallDungeon 集）——骷髅王 35
+      // 在场时豁免（AnyNPCs(35)：打骷髅王期间地牢法师可传到砖墙区外的地表/入口）
+      if (opts.dungeonWallGate && !skelUp
         && !(st.wall[st.idx(num5, i - 1)] >= 7 && st.wall[st.idx(num5, i - 1)] <= 9
           || (st.wall[st.idx(num5, i - 1)] >= 94 && st.wall[st.idx(num5, i - 1)] <= 99))) continue;
       // :18907-18909 头顶格岩浆面跳过（lava()）

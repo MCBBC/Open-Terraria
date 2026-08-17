@@ -932,9 +932,26 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
 // 撞墙/贴脸 20px 自爆)。全员每 tick EncourageDespawn(100)、rotation 累进。
 // ---------------------------------------------------------------------------
 
+/** 原版精灵恒隐形的弹体系：33 水球（SetDefaults alpha=255）；30/665 混沌球
+ *  （AI :21496 每帧强置 alpha=255）——视觉全靠尘迹，本仓改为显形精灵+补尘迹 */
+function invisibleSpriteBall(e: Enemy): boolean {
+  const id = e.vanillaId ?? -1;
+  return id === 33 || id === 30 || id === 665;
+}
+
 export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null) {
   const L = la(e);
-  if (!e.bInit) { e.bInit = true; e.ai0 = 0; }   // 原版 ai[0] 从 0 起步（Enemy 默认 -1120 是史莱姆族约定）
+  if (!e.bInit) {
+    e.bInit = true; e.ai0 = 0;   // 原版 ai[0] 从 0 起步（Enemy 默认 -1120 是史莱姆族约定）
+    // 弹体可见性：原版 33 SetDefaults alpha=255、30/665 AI 每帧强置 alpha=255
+    // （cs:21494-21496）——精灵恒隐形，弹体视觉【全部】由尘迹承担（33=尘172×6/t
+    // 蓝尘、30/665=尘27×4/t 阴影焰紫、25=尘6 火尘）。fromVanilla 对 alpha>=255 走
+    // 254 起步 -1/t 渐显 → 球前 ~200t 不透明度 <80%（玩家间距内全程近乎不可见）且
+    // 无尘迹补偿 = "看不到任何弹幕"（2026-08-17 用户报告 32 不发射）。本仓粒子密度/
+    // 发光弱于原版尘系，保隐形会退化成隐形弹：故三系直接全显精灵 + 补尘迹/补光
+    // （偏差登记：原版精灵隐形、仅尘迹+尘光）
+    if (invisibleSpriteBall(e)) { e.alphaFade = false; e.spawnAlpha = 0; }
+  }
   const vid = e.vanillaId ?? 25;
   // 日耀耀斑(:21354-21378)：alpha 0→220 渐隐成光团；出膛方向 = 朝玩家 ±90° 随机
   // （再固定回转 -45°），Y 分量钳 0.2，速 6+rand*4
@@ -1022,6 +1039,18 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
   } else {
     // 火球点光(:21540-21542，默认分支 = FireBall）
     if (vid === 25) e.lightRGB = [1, 0.3, 0.1];
+    // 尘迹补偿（原版 :21488-21540 每 tick 尘 2×{3-4} 颗，隐形系弹体的全部视觉）：
+    //   33=尘172 淡蓝（wiki：与水矢雷同/发光） / 30·665=尘27 阴影焰紫 / 25=尘6 火尘
+    // 33 补点光（原版光源=尘 172 自发光，本仓粒子不发光——wiki"emits a fair amount
+    // of light"）；25 的 AddLight(1,0.3,0.1) 已在上方原样接
+    if (vid === 33) {
+      e.lightRGB = [0.55, 0.75, 1];
+      game.spawnParticles(e.x + 2, e.y + 2, '#9AC8E8', 2, 0.4, { life: 30, size: 2 });
+    } else if (vid === 30 || vid === 665) {
+      game.spawnParticles(e.x + 2, e.y + 2, '#7A5AC8', 2, 0.4, { life: 30, size: 2 });
+    } else if (vid === 25) {
+      game.spawnParticles(e.x + 2, e.y + 2, '#FFB050', 1, 0.5, { life: 26, size: 2 });
+    }
     e.visAngle += 0.4 * e.facing;                    // :21547
   }
   // 位移：noTileCollide 族穿墙直积分；516（tileCollide）走碰撞

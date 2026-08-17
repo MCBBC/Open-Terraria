@@ -6,6 +6,7 @@
 //   GrenadeProj aiStyle 16 —— 弹跳 + 引信爆炸（手雷 180/炸弹 150/炸药 135 tick）
 // 贴图统一 Projectile_N.png 懒加载（Arrow.projSprite 共享缓存）。
 import { Entity } from './Entity';
+import { moveAndCollide } from '../physics/TileCollision';
 import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -1986,25 +1987,31 @@ export class GrenadeProj extends Entity {
       if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
       return;
     }
-    // ---- 普通族物理：重力 0.2（:44897）+ 反弹（tile 碰撞响应 :18339-18357） ----
+    // ---- 普通族物理：重力 0.2（:44897）+ AABB 碰撞 + 反弹 ----
+    // ★2026-08-17 重写:旧版只查中心右/底两个点(nx+w/2)——朝左飞可整弹嵌墙
+    // (左缘永远不检测)、落地判定也只在下半格命中时才生效。改用 moveAndCollide
+    // 全 AABB 碰撞(四缘+步进),碰后按原版 :18339-18357 反弹/摩擦。
     this.vy = Math.min(this.vy + 0.2, 16);
     const lastVx = this.vx, lastVy = this.vy;
-    let nx = this.x + this.vx;
-    let ny = this.y + this.vy;
-    const solidAt = (px: number, py: number) => {
-      const tx = Math.floor(px / TILE);
-      const ty = Math.floor(py / TILE);
-      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+    const body = {
+      x: this.x, y: this.y, w: this.w, h: this.h,
+      vx: this.vx, vy: this.vy,
+      onGround: false, hitWall: false, hitHead: false,
+      stepUp: false, dropThrough: false, stepDownGate: 'gravity' as const,
     };
-    // 撞墙（X 阻挡）：vx = lastVx × -0.4（炸药棍族再 ×0.8）（:18344-18350）
-    if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, this.y + this.h - 1)) {
+    moveAndCollide(body, game.world, this.vx, this.vy);
+    // 碰墙反弹（:18344-18350）：vx = lastVx × -0.4（炸药棍族再 ×0.8）
+    if (body.hitWall) {
       this.vx = lastVx * -0.4;
       if (DYN_PROJ.has(this.projId)) this.vx *= 0.8;
-      nx = this.x;
+    } else {
+      this.vx = body.vx;
     }
-    // 落地（Y 阻挡）：lastVy>0.7 才反弹 vy = lastVy × -0.4（炸药棍族 ×0.8）（:18351-18357）；
-    // 否则贴地 vy=0 + 滚动摩擦 vx×0.97（炸药棍族追加 ×0.99，|vx|<0.01 归零）（:44888-44895）
-    if (solidAt(nx + this.w / 2, ny + this.h - 1)) {
+    // 落地反弹/贴地滚动（:18351-18357 + :44888-44895）：
+    // lastVy>0.7 → vy = lastVy × -0.4（炸药棍族 ×0.8）；否则贴地 vy=0 + 滚动摩擦
+    if (body.hitHead) {
+      this.vy = 0;    // 撞顶停止上浮
+    } else if (body.onGround) {
       if (lastVy > 0.7) {
         this.vy = lastVy * -0.4;
         if (DYN_PROJ.has(this.projId)) this.vy *= 0.8;
@@ -2013,10 +2020,11 @@ export class GrenadeProj extends Entity {
         this.vx *= DYN_PROJ.has(this.projId) ? 0.97 * 0.99 : 0.97;
         if (Math.abs(this.vx) < 0.01) this.vx = 0;
       }
-      ny = this.y;
+    } else {
+      this.vy = body.vy;
     }
-    this.x = nx;
-    this.y = ny;
+    this.x = body.x;
+    this.y = body.y;
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
   }
 }

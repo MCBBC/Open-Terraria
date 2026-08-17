@@ -86,6 +86,44 @@ describe('站台面（tileSolidTop）通行语义', () => {
     expect(up.hitHead).toBe(false);
     expect(up.y).toBeLessThan(20 * 16);       // 已穿到平台上方
   });
+
+  // ★平台行为族 frameY=材质行（Collision.cs:2331 flag=tileSolid 恒真,Main.cs:7841-7842
+  //   tileSolid[19]=true）——可站与 frameY 无关。曾把家具的 frameY==0 门套到平台族
+  //   → 世界生成放的 13+ 材质平台（CaveHouse PlatformStyle frameY=18*style）全体穿透
+  it('平台材质行(frameY≠0)可站：19 族 frameY 与站立无关', () => {
+    const w = mkWorld();
+    const PLAT = idOf('platform');
+    // 模拟生成端放置的 boreal 平台（style 19 → frameY=342）
+    for (let x = 10; x <= 12; x++) w.store.setTileSilent(x, 20, PLAT, 0, 342);
+    const b = body(10 * 16 + 4, 20 * 16 - 42 - 4);
+    moveAndCollide(b, w, 0, 8);
+    expect(b.onGround).toBe(true);            // 材质行平台照样接住
+    expect(b.y + b.h).toBe(20 * 16);
+    // 家具族对照（frameY≠0 不可站语义保持）
+    const TABLE = idOf('table');
+    for (let x = 10; x <= 12; x++) w.store.setTileSilent(x, 24, TABLE, 0, 18);
+    const b2 = body(10 * 16 + 4, 24 * 16 - 42 - 4);
+    moveAndCollide(b2, w, 0, 8);
+    expect(b2.onGround).toBe(false);          // 桌上排格照旧穿过
+  });
+
+  it('矿锭/花盆箱（239/380，tileSolid∩tileSolidTop）恒可站', () => {
+    const w = mkWorld();
+    const sheetOf = (s: number) => TILE_DEFS.findIndex(
+      (d) => (d as unknown as { vanilla?: { sheet?: number } }).vanilla?.sheet === s);
+    const BARS = sheetOf(239), PLANTER = sheetOf(380);
+    expect(BARS).toBeGreaterThan(0);
+    expect(PLANTER).toBeGreaterThan(0);
+    // 材质行 frameY=18*style ≠ 0 也要能站（Main.cs:9568-9571 tileSolid 双真）
+    w.store.setTileSilent(10, 20, BARS, 0, 18 * 3);
+    w.store.setTileSilent(12, 20, PLANTER, 0, 18 * 2);
+    for (const [x, id] of [[10, BARS], [12, PLANTER]] as const) {
+      const b = body(x * 16 + 4, 20 * 16 - 42 - 4);
+      moveAndCollide(b, w, 0, 8);
+      expect(b.onGround, `sheet ${x === 10 ? 239 : 380}`).toBe(true);
+      expect(b.y + b.h).toBe(20 * 16);
+    }
+  });
 });
 
 describe('StepUp holdsMatching（:3713-3721 踏上站台面）', () => {

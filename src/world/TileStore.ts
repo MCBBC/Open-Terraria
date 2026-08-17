@@ -115,10 +115,18 @@ export class TileStore {
     return !!d && d.solid;
   }
 
-  /** 站顶单向面（原版 tileSolidTop 消费语义 = Collision.TileCollision :2165/:2331：
-   *  `tileSolidTop[type] && tile.frameY == 0`——多格家具仅【顶行】可站；nactive 门
-   *  （:2064）→ 已致动(inActive)的平台/家具顶不可站）。平台/铁砧/桌子/钢琴/笼子/
-   *  金属条/种植箱等 84 类（vanilla-tilecollision.json 全表）。
+  /** 站顶单向面（原版 Collision.TileCollision :2330-2333 的 flag 门：
+   *  `flag = tileSolid[type]; if (tileSolidTop[type] && frameY == 0) flag = true`
+   *  分两族语义——
+   *  ① 平台行为族 = tileSolid∩tileSolidTop 四件套（Main.cs:7841/:9568/:9570/:9888）：
+   *    19 平台/239 矿锭/380 花盆箱/427 团队平台。flag=tileSolid **恒真**——其 frameY 是
+   *    材质行（PlaceTile case 19/380 `frameY = 18*style`，TileFrameImportant 只重写
+   *    frameX 连接形态），**可站与 frameY 无关**。曾把家具的 frameY==0 门套到平台族
+   *    → 世界生成放的 13+ 材质平台（CaveHouse/HouseBuilder PlatformStyle）全体穿透。
+   *  ② 家具族（tileSolid=false：桌/铁砧/工作台/钢琴/书架/笼子等）：frameY==0=底行
+   *    才可站，上半格（frameY>0）不站。
+   *  nactive 门（:2327）：已致动(inActive)的平台/家具顶不可站。
+   *  单向性（X 轴/上顶不拦）由消费端保证：TileCollision X/上顶分支不查 isPlatform。
    *  注：SolidCollision(acceptTopSurfaces) :2771 对 Platforms 集合改用
    *  PlatformProperTopFrame(frameX)——该查询路径本仓无消费者，不移植（登记）。 */
   isPlatform(x: number, y: number): boolean {
@@ -126,7 +134,11 @@ export class TileStore {
     const i = this.idx(x, y);
     if (this.wire[i] & TileStore.WIRE_ACTUATED) return false;   // nactive()（致动=不可站）
     const d = TILE_DEFS[this.type[i]];
-    return !!d && d.platform && this.frameY[i] === 0;
+    if (!d?.platform) return false;
+    // 平台行为族（tileSolid∩tileSolidTop）：材质行在 frameY，可站与 frameY 无关
+    const sheet = d.vanilla?.sheet;
+    if (sheet === 19 || sheet === 239 || sheet === 380 || sheet === 427) return true;
+    return this.frameY[i] === 0;   // 家具族：底行才可站
   }
 
   onTileChanged(fn: (x: number, y: number) => void) {

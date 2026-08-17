@@ -879,7 +879,11 @@ export class Enemy extends Entity {
   lai0 = 0;              // localAI 语义位（萤火虫：闪烁间隔计时）
   lai1 = 0;              // localAI 语义位（萤火虫：发光剩余帧）
   lai2 = 0;              // localAI[2] 语义位（AI_054 克脑：二阶段入场演出门）
-  lai3 = 0;              // localAI[3] 语义位（AI_054 克脑：玩家死/离场下坠计数）
+  lai3 = 0;              // localAI[3] 语义位（AI_054 克脑：玩家死/离场下坠计数；AI_008 法师 32：RedHat 变体带 +3）
+  /** 红帽骷髅王标记（NPC.cs:81262-81266 redHatMode 召唤置 ai[3]=1；RedHatSkeletron
+   *  AdjustmentsEnabled :67282 消费）。本仓 Chippy 沙发召唤链未实装 → 恒 false，
+   *  32 的 lai3 变体带/双倍计时因此不触发（常态=单一头饰形态，2026-08-17 帧修复的门） */
+  redHat = false;
   /** 原版 NPC.dontTakeDamage（SetDefaults 静态置位，如 266 克脑 :12372 一阶段
    *  不可击；AI 段自行清除）。与 iframes 不同：持续态而非帧计数 */
   dontTakeDamage = false;
@@ -5619,8 +5623,28 @@ export class Enemy extends Entity {
       this.casterTeleportBurst(game);
     }
     this.ai0 += 1;                                 // :20971 每帧计时
-    this.vx *= 0.9; this.vy *= 0.9;
-    this.x += this.vx; this.y += this.vy;          // noGravity 悬浮直移
+    // :20777-20784 RedHat 变体（红帽骷髅王 35 ai[3]==1 在场 → localAI[3]=1 置位永不清；
+    // 帧侧整带 +3、计时双倍）。本仓红帽召唤链未实装（Enemy.redHat 恒 false）→ 恒 0
+    // （enemies 可选访问：测试桩 hooks 可能未实现）
+    if (vid === 32 && this.lai3 === 0) {
+      const enemiesOf = (game as { enemies?: () => unknown[] }).enemies;
+      const sk = enemiesOf
+        ? (enemiesOf.call(game) as Enemy[]).find((n) => n.vanillaId === 35 && !n.dead)
+        : undefined;
+      if (sk?.redHat) this.lai3 = 1;
+    }
+    // :20787-20791 X 摩擦 0.93 + |vx|<0.1 归零（Y 不阻尼——重力由引擎共享段承担）
+    this.vx *= 0.93;
+    if (this.vx > -0.1 && this.vx < 0.1) this.vx = 0;
+    // 物理：全族 SetDefaults 均无 noGravity/noTileCollide → 受重力+瓦片碰撞
+    // （传送落点即站面、受击呈正常抛物线回落）。旧实现 vx/vy 同乘 0.9 裸积分——
+    // 无重力无碰撞，受击 vy<0 只缓衰减不回落 = "被击退就往上飞"（2026-08-17 用户报告）
+    if (!this.vanilla?.noGravity) {
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+    } else {
+      this.x += this.vx; this.y += this.vy;        // 数据侧若标 noGravity 则保悬浮直移
+    }
     // ---- 点光（cs:21274-21341 粉尘链后的 AddLight 分支，在移动后每帧执行）----
     if (vid === 693) {
       // :21272-21276 图书管理员骷髅：num116=Remap(ai[0],0,60,0,1)²>0 时 Top 位
@@ -5647,7 +5671,13 @@ export class Enemy extends Entity {
     else if (vid === 172) at([75, 150, 225, 300, 375, 450]);
     else if (vid === 281 || vid === 282) at([100, 120, 140, 200, 220, 240, 300, 320, 340]);
     else if (vid === 533) { if (this.ai0 === 180) this.ai1 = 181; }   // :21006 特殊循环支
-    else at([100, 200, 300]);                       // :21042 默认（24/29/32/45/285-286/693）
+    else {
+      // :21033-21037 flag4（RedHat 变体 32）双倍计时：+1 后奇数回退 → 恒落偶数、
+      // 净 +2/t（蓄力点 100/200/300 均偶数照常命中 = 红帽法师整轮 2 倍速）。
+      // （getGood+24+血肉墙在场的同型双倍档 :21029-21032 未接，FTW 种子消费登记）
+      if (this.lai3 === 1) { this.ai0 += 1; if (this.ai0 % 2 === 1) this.ai0 -= 1; }
+      at([100, 200, 300]);                          // :21042 默认（24/29/32/45/285-286/693）
+    }
     // ---- ③ 提前传送上限（族内阈值 → 直拉 650/700 档）----
     if ((vid === 283 || vid === 284) && this.ai0 >= 450) this.ai0 = 700;    // :20991
     else if ((vid === 281 || vid === 282) && this.ai0 >= 540) this.ai0 = 700; // :21019
@@ -5686,10 +5716,18 @@ export class Enemy extends Entity {
       const ballByCaster: Record<number, number> = { 24: 25, 29: 30, 32: 33, 45: 665 };
       const ballId = ballByCaster[this.vanillaId ?? -1];
       if (ballId) {
+        // 出膛锚（NewNPC :81547 Bottom 锚点换算回中心）：其余 = (X+width/2, Y-8)
+        // → 中心 y = top-16；Imp 25 = (X+width/2+dir*8, Y+20) → 中心 y = top+12
+        // （:21134/:21199-21201；曾用 cy±偏移 → 球生在法师躯体中部）
         const ball = Enemy.fromVanilla(ballId,
           this.cx + (ballId === 25 ? this.facing * 8 : 0),
-          this.cy + (ballId === 25 ? 20 : -8));
-        if (ball) addEnemy(game, ball);
+          this.y + (ballId === 25 ? 12 : -16));
+        if (ball) {
+          // :21204 NewNPC(33,...,flag4?1:0) → 末参 ai[3]：RedHat 变体标记（球侧
+          // RedHatSkeletronAdjustmentsEnabled 消费，getGood 提速档用）
+          if (vid === 32) ball.ai3 = this.lai3 === 1 ? 1 : 0;
+          addEnemy(game, ball);
+        }
       } else if (this.vanillaId != null && this.vanillaId >= 281 && this.vanillaId <= 286) {
         // 史后三法师（NPC.cs:21146-21191 num100/104/105）：布道者 281/282 迷失之魂 293
         // （速 4、伤 40、timeLeft 300）;死灵法师 283/284 暗影束 290（速 6、伤 30,散布 ±30
@@ -6713,6 +6751,18 @@ export class Enemy extends Entity {
         this.vy = -num3 * (this.def.flying ? 0.5 : 0.75) * resist; // :82228-82233
         this.vx = num3 * hitDir * resist;           // :82235 resist 二次乘
       }
+    }
+    // 法师族受击打断（StrikeNPC cs:82061-82088：aiStyle 8 受击即跳 ai[0]——已过全部
+    // 蓄力点(100/200/300)、650 传送前不再发射 = "攻击中挨一下就取消本轮齐射"）：
+    // 172→450 / 283·284 掷 1/2→390 / 533 掷 2/3→181 / 其余（24/29/32/45/281-286）→400
+    // （693 的 localAI[1]/[2] 受击段 :82083-82087 未接，登记）
+    if (this.vanilla?.aiStyle === 8) {
+      if (this.vanillaId === 172) this.ai0 = 450;
+      else if (this.vanillaId === 283 || this.vanillaId === 284) {
+        if (Math.random() < 0.5) this.ai0 = 390;
+      } else if (this.vanillaId === 533) {
+        if (Math.random() < 2 / 3) this.ai0 = 181;
+      } else this.ai0 = 400;
     }
     // 联机傀儡受击：上报房主权威结算（本地视觉反馈已生效：扣血/飘字/击退）
     if (this.netPuppet) entityNet.reportStrike?.(this.netId, rawDmg, kbx, kby);

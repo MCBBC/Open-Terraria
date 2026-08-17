@@ -56,8 +56,11 @@ function applyStepUp(b: Body, world: World, holds: boolean, npcMode: boolean): v
     st.inBounds(x, y) && !!st.half[st.idx(x, y)];
   const slopeAt = (x: number, y: number): number =>
     st.inBounds(x, y) ? st.slope[st.idx(x, y)] : 0;
-  // 站台面（tileSolidTop && frameY==0；isPlatform 已含 nactive/致动门）
-  const platAt = (x: number, y: number): boolean => st.inBounds(x, y) && st.isPlatform(x, y);
+  // 站台面（:3713 holdsMatching 门 = `(tileSolidTop&&frameY==0) || Platforms(19/427/
+  //  435-439) || type==380`）——★不含 239 矿锭（可站可下穿但 StepUp 不踏），
+  //  在 isPlatform（平台行为族含 239）基础上排除
+  const platAt = (x: number, y: number): boolean => st.inBounds(x, y) && st.isPlatform(x, y)
+    && TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet !== 239;
   // IgnoredByNpcStepUp（TileID.cs:209：14 篝火桌?/469 Tables2/18 工作台/16 铁砧/134 秘银砧——NPC 不踏）
   const NPC_STEPUP_IGNORE = new Set([14, 469, 18, 16, 134]);
   const sheetAt = (x: number, y: number): number => {

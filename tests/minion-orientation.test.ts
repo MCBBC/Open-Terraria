@@ -220,4 +220,16 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     expect(s.x + s.w / 2).toBeCloseTo(m.cx + 24 * Math.sign(60 * 16 + 300 - m.cx), 6);
     expect(s.y + s.h / 2).toBeCloseTo(m.cy - 2, 6);
   });
+
+  it('双子互斥：同点出生的两只眼会分开（AI_66 :28514-28539 曼哈顿距<40 互推）', () => {
+    const { hooks, player, projectiles } = makeHooks();   // 无敌怪 → 悬停态
+    const a = new MinionProj(player.cx, player.cy - 60, 387, 10, 2, false, 0, false, () => player);
+    const b = new MinionProj(player.cx, player.cy - 60, 388, 10, 2, false, 0, false, () => player);
+    projectiles.push(a, b);                           // 互斥扫描走 entities.projectiles
+    const d0 = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    expect(d0).toBe(0);                               // 成对同点出生
+    for (let i = 0; i < 90; i++) { a.fixedUpdate(1, hooks); b.fixedUpdate(1, hooks); }
+    const d1 = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    expect(d1).toBeGreaterThanOrEqual(20);            // 分开（原版互斥平衡 ~40px）
+  });
 });

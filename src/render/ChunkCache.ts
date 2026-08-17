@@ -4,7 +4,7 @@ import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
-import { TILE_ANIM_RATE, tileAnim, animYOffset, campfireYOffset } from './TileAnim';
+import { TILE_ANIM_RATE, tileAnim, campfireYOffset } from './TileAnim';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
@@ -423,8 +423,11 @@ export class ChunkCache {
             if (!setC) { setC = new Set(); this.animChunksBySheet.set(def.vanilla.sheet, setC); }
             setC.add(ChunkCache.key(cx, cy));
           } else if (TILE_ANIM_RATE[def.vanilla.sheet]) {
-            const rows = this.autotiler.atlas.vmeta(def.vanilla.sheet)?.rows ?? 0;
-            fy += animYOffset(def.vanilla.sheet, rows * 18);
+            // 动画家具换帧行：此处只登记重烘焙——帧带偏移由 drawVanillaCell 在
+            // 零帧重建/分带换算之后叠加（原版 GetTileDrawData addFrY 语义）。
+            // 曾在此预加进 fy：零帧多格物体（生成端 dgWr 系放置未写帧）的
+            // 重建门 (ofx===0 && ofy===0) 被动画偏移破坏 → 炼金台 355/巫惑台 354
+            // 在 idx≥1 帧整物塌成 9 块重复左上角碎片（idx=0 时偶发正常）
             let set = this.animChunksBySheet.get(def.vanilla.sheet);
             if (!set) { set = new Set(); this.animChunksBySheet.set(def.vanilla.sheet, set); }
             set.add(ChunkCache.key(cx, cy));

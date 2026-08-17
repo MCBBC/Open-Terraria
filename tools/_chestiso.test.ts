@@ -249,6 +249,8 @@ function footprints(st: TileStore, inIdx: number, outIdx: number) {
     const ageGen: Array<[number, number, number, number, number, number]> = [];
     (globalThis as unknown as { __swAgeGen?: (o: number, x: number, y: number, w: number, h: number, k: number) => void }).__swAgeGen
       = (o, x, y, w, h, k) => { ageGen.push([o, x, y, w, h, k]); };
+    (globalThis as unknown as { __swChestDbg?: (i: number, j: number, why: string) => void }).__swChestDbg
+      = (i, j, why) => { console.log(`[DBG] chestfail (${i},${j}) ${why}`); };
     const { rng, box } = countedRng(gs.seed);
     flipGenSolid([226, 162, 225, 190], true);
     rollHouseChestCounts(st, rng, gs);

@@ -15,6 +15,11 @@
 //  其余(桌14/工作台18/钢琴87/雕像105 等 TileObjectData 显式 H):横排 X 步 fw*18
 export function furnitureStyleBase(sheet: number, style: number, fw: number): [number, number] {
   switch (sheet) {
+    // 19 平台 / 380 花盆箱（WorldGen.PlaceTile case 19/380：`tile.frameY = 18*style`——
+    // 材质行在 frameY；frameX 留给 TileFrameImportant 写连接形态，放置时置 0）。
+    // 曾落 default（材质误进 frameX）→ 非 0 材质平台贴图错位。Tiles_19 486×1260
+    // （27 连接列×70 材质行）实证
+    case 19: case 380: return [0, style * 18];
     case 42: return [0, style * 36];
     case 33: case 49: return [0, style * 22];
     case 34: return [Math.floor(style / 37) * 108, (style % 37) * 54];

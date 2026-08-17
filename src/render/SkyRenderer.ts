@@ -872,13 +872,10 @@ export class SkyRenderer {
   private eventMoonTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null]; // [1]=Snow [2]=Pumpkin
   /** 事件月亮贴图(首用懒加载,未就绪调用方跳帧) */
   private ensureEventMoonTex(kind: 1 | 2): ImageBitmap | HTMLImageElement | null {
-    let t = this.eventMoonTexs[kind];
-    if (!t) {
-      const im = new Image();
-      im.onload = () => upgradeToBitmap(im, (b) => { this.eventMoonTexs[kind] = b; });  // bitmap-only(trace⑨)
-      im.src = `sprites/vanilla/Moon_${kind === 2 ? 'Pumpkin' : 'Snow'}.png`;
-    }
-    return t;
+    const t = this.eventMoonTexs[kind];
+    if (!t) loadBitmapOnly(`vanilla/Moon_${kind === 2 ? 'Pumpkin' : 'Snow'}.png`,
+      () => !!this.eventMoonTexs[kind], (x) => { this.eventMoonTexs[kind] = x; });
+    return this.eventMoonTexs[kind];
   }
   /** 世界月亮样式(原版 header moonType 0-8;默认 0 标准月) */
   moonType = 0;
@@ -1201,11 +1198,8 @@ export class SkyRenderer {
     }
     // 相机在地表以下不画（Draw :165：screenPosition.Y > worldSurface×16 直接返回）
     if (camY > this.fx.surfaceY) return;
-    if (!this.lanternTex) {
-      const im = new Image();
-      im.onload = () => upgradeToBitmap(im, (b) => { this.lanternTex = b; });  // bitmap-only(trace⑨)
-      im.src = 'sprites/vanilla/Extra_134.png';
-    }
+    if (!this.lanternTex) loadBitmapOnly('vanilla/Extra_134.png',
+      () => !!this.lanternTex, (x) => { this.lanternTex = x; });
     if (this.lanterns.length === 0 || (up && this.lanternsLeaving)) {
       this.generateLanterns();
       this.lanternsLeaving = false;
@@ -1292,9 +1286,8 @@ export class SkyRenderer {
     // 相机在地表以下不画（PartySky.Draw :172：screenPosition.Y > worldSurface*16 直接返回）
     if (this.partyTexs[0] === null) {
       for (let i = 0; i < 3; i++) {
-        const im = new Image();
-        im.onload = () => upgradeToBitmap(im, (b) => { this.partyTexs[i] = b; });  // bitmap-only(trace⑨)
-        im.src = `sprites/vanilla/Extra_${69 + i}.png`;
+        loadBitmapOnly(`vanilla/Extra_${69 + i}.png`,
+          () => !!this.partyTexs[i], (x) => { this.partyTexs[i] = x; });
       }
     }
     while (this.partyBalloons.length < 48) this.spawnBalloon(viewH);

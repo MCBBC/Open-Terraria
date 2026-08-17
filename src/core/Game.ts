@@ -180,7 +180,7 @@ const BLOOD_MOON_EVIL = new Map<number, readonly [number, number]>([
   [55, [57, 465]], [230, [57, 465]], [592, [57, 465]], [593, [57, 465]],
   [148, [168, 470]], [149, [168, 470]],
 ]);
-import { CRITTER_DEFS, CRITTER_BY_KEY, CRITTER_CATCH_BY_NPC, CRITTER_RELEASE_BY_ITEM, CRITTER_KEY_BY_NPC } from '../data/critters';
+import { CRITTER_CATCH_BY_NPC, CRITTER_RELEASE_BY_ITEM } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
 import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bestiaryCreditId } from '../data/Bestiary';
@@ -2753,7 +2753,7 @@ export class Game implements GameHooks {
         this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
       // 守卫老人：存档未击败骷髅王时按原地牢口位置恢复（存档无条目则重扫地牢口）
-      if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron
+      if (this.world.dungeonX > 0 && !this.skeletronDowned()
         && !savedNpcs.some((n) => n.key === 'old_man')) {
         this.maybeRespawnOldMan();
       }
@@ -2765,7 +2765,7 @@ export class Game implements GameHooks {
         this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
       // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
-      if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron) {
+      if (this.world.dungeonX > 0 && !this.skeletronDowned()) {
         this.maybeRespawnOldMan();
       }
       // ★bound 救援 NPC 生成期【不放置】（2026-08-13 对齐原版，实证链）：
@@ -2915,7 +2915,7 @@ export class Game implements GameHooks {
     //  unlockedSlimeYellowSpawn 置位（世界级一次性，WorldFile :1414/:2434 持久化）
     for (const cent of this.entities.critters) {
       const c = cent as Critter;
-      if (c.dead || CRITTER_BY_KEY[c.key]?.npc !== 687) continue;
+      if (c.dead || this.critterVid(c) !== 687) continue;
       if (x < c.x + c.w && x + w > c.x && y < c.y + c.h && y + h > c.y) {
         c.dead = true;
         this.spawnParticles(c.cx, c.cy, '#DCE8E2', 10, 1.5, { life: 24 });
@@ -2959,11 +2959,21 @@ export class Game implements GameHooks {
     }
   }
 
+  /** 骷髅王已击败（NPC.downedBoss3）——双键：击杀链写 downed_35（:4050
+   *  `downed_${vanillaId}`），旧档/导入可能写 downedSkeletron（同 :3971/:12673
+   *  双键惯例）。★曾有五处只查 downedSkeletron 恒 undefined：杀王同帧 boss 结束
+   *  块即在门口复活老人（用户报"老人没有消失"根因），读档复活+地牢砖挖掘门同病 */
+  private skeletronDowned(): boolean {
+    return !!(this.world.flags.downedSkeletron || this.world.flags['downed_35']);
+  }
+
   /** 守卫老人(NPC 37)生成/重生（原版 dungeonX/Y = 入口站立点 cs L72510-72527）。
    *  诅咒召唤时被置 dead；骷髅王离场/被击败未记账时原版会让他重新出现——
-   *  Boss 战斗结束块调用本方法（已在场/已击败时直接跳过） */
+   *  Boss 战斗结束块调用本方法（已在场/已击败时直接跳过）。
+   *  原版对位：老人 AI 每帧 downedBoss3 → ai[3]=1 自灭（NPC.cs:53754-53760）——
+   *  王已败后老人绝不在场 */
   private maybeRespawnOldMan() {
-    if (this.world.dungeonX <= 0 || this.world.flags.downedSkeletron) return;
+    if (this.world.dungeonX <= 0 || this.skeletronDowned()) return;
     if (this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === 'old_man' && !n.dead)) return;
     const st = this.world.store;
     const dX = this.world.dungeonX;
@@ -3733,7 +3743,7 @@ export class Game implements GameHooks {
       for (const c of this.entities.critters) {
         const cr = c as Critter;
         if (cr.dead) continue;
-        const pair = BLOOD_MOON_EVIL.get(cr.def.npc);
+        const pair = BLOOD_MOON_EVIL.get(this.critterVid(cr));
         if (pair) {
           cr.dead = true;
           const en = Enemy.fromVanilla(w.crimson ? pair[1] : pair[0], cr.x, cr.y);
@@ -4102,8 +4112,18 @@ export class Game implements GameHooks {
         }
         // 骷髅王战斗结束（无论胜负）且未击败 → 守卫老人次日重新出现在地牢门口
         // （原版：老人在诅咒时消失，骷髅王离场/未被击败后重新生成；击败后转为裁缝）
-        if (this.boss.vanillaId === 35 && !w.flags.downedSkeletron) {
-          this.maybeRespawnOldMan();
+        if (this.boss.vanillaId === 35) {
+          if (!!(w.flags.downedSkeletron || w.flags['downed_35'])) {
+            // 王已败 → 老人绝不在场（原版老人 AI 每帧 downedBoss3 → ai[3]=1 自灭，
+            // NPC.cs:53754-53760；含"非诅咒途径召唤（裁缝巫毒娃娃）杀王"的在场老人）
+            for (const n of this.entities.npcs) {
+              if (n instanceof TownNPC && n.npcKey === 'old_man' && !n.dead) n.dead = true;
+            }
+          } else {
+            // 离场/未被击败 → 老人重新出现（原版语义）。★此前本门只查
+            // downedSkeletron 恒 undefined——杀王同帧即复活老人（用户报根因）
+            this.maybeRespawnOldMan();
+          }
         }
         // EoW/BoC 击杀 → 陨石坠落置位（NPC.cs:80241-80259：
         // 首杀（!downedBoss2）必掉，之后 50%）
@@ -6249,16 +6269,16 @@ export class Game implements GameHooks {
       && !(cw?.kind === 'spear' && projectileData(cw.shoot)?.aiStyle === 19)) {
       // aim 朝鼠标角——useStyle 13(短剑突刺持位)/5 静持需方向化(Renderer case 13)
       // 捕获小动物释放（ItemCheck_ReleaseCritter :43377-43396 + NPC.ReleaseNPC
-      //  :80900-80964）：鼠标世界格非实心 → 原地放出 + 消耗 1（consumable）
+      //  :80900-80964）：鼠标世界格非实心 → 原地放出真 NPC（Enemy 进 critters 桶，
+      //  ReleaseNPC default 分支 NewNPC(x,y,Type) 中心锚）+ 消耗 1（consumable）
       {
         const relNpc = CRITTER_RELEASE_BY_ITEM[viIdFromKey(heldDef.key) ?? -1];
         if (relNpc) {
-          const relKey = CRITTER_KEY_BY_NPC[relNpc];
           const mtx = Math.floor((this.camera.x + (inp.mouseX - vw2 / 2)) / TILE);
           const mty = Math.floor((this.camera.y + (inp.mouseY - vh2 / 2)) / TILE);
           const st = this.world.store;
-          if (relKey && st.inBounds(mtx, mty) && !st.isSolid(mtx, mty)) {
-            this.entities.add(new Critter(relKey, mtx * TILE + 8 - 10, mty * TILE + 16 - 10), 'critters');
+          if (st.inBounds(mtx, mty) && !st.isSolid(mtx, mty)) {
+            this.spawnNpcByVanilla(relNpc, mtx * TILE + 8, mty * TILE + 8);
             this.player.inv.removeAt(this.player.inv.selected, 1);
             this.cb.onInventoryChanged();
             this.player.useTime = 15;                 // useAnimation 15（:47616）
@@ -8154,7 +8174,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private toolCanBreak(type: number, power: number, toolType: string): boolean {
     const d = TILE_DEFS[type];
     if (!d) return false;
-    if (toolType === 'pick') return d.pick >= 0 && power >= d.pick;
+    // 镐排除斧族（Player.cs:45039 `sItem.pick > 0 && !Main.tileAxe[·]`——树/棕榈/
+    // 倒木等 tileAxe 集镐不可挖，斧专属；2026-08-17 棕榈砍伐审计补，曾只挡
+    // pick:-1 的件漏了 pick:0 的 v_5/v_80）
+    if (toolType === 'pick') return d.pick >= 0 && power >= d.pick && d.axe < 0;
     if (toolType === 'axe') return d.axe >= 0;
     return false;
   }
@@ -8672,15 +8695,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.smashPot(x, y);
       return;
     }
-    // 地牢裂砖族（481-483）：连锁崩塌 + Debris 弹片 + 掉同色地牢砖 + 专属音
-    // （KillTile :63837-63895 段，见 breakCrackedBrick）。须在 object 锚点/
-    // 通用 1×1 路径前拦（drop:null 会吞掉同色砖掉落）
+    // 地牢裂砖族（481-483）：连锁崩塌 + Debris 弹片 + 专属音；无物品掉落
+    // （KillTile :63837-63895 段，见 breakCrackedBrick——GetItemDrops 无 481-483
+    // 赋值项）。须在 object 锚点/通用 1×1 路径前拦（通用路径 drop:null 同样无掉落，
+    // 但会走错的音效/粒子链）
     if (isCrackedSheet(def.vanilla?.sheet)) {
-      this.breakCrackedBrick(x, y, true);   // 主动破坏（挖/炸/撞/扫掠/钩爪）默认 noItem=false
+      this.breakCrackedBrick(x, y);
       return;
     }
     if (IMPORTED_TREE_TYPES.has(type)) {
       this.fellImportedTree(x, y, type);
+      return;
+    }
+    // 仙人掌（tile 80，tileAxe 族）：破坏格及以上整株倒 + 每格掉仙人掌 276
+    // （CheckCactus :54132 级联 + GetItemDrops case 80）——须在 1×1 通用路径前拦
+    // （旧路径掉 place_v_ 假物品、上方柱悬空）
+    if (type === TILE_BY_KEY['v_80_cactus']) {
+      this.fellCactus(x, y);
       return;
     }
     // 幼虫（原版 KillTile case 231, WorldGen.cs:53254-53280）：整件破碎无掉落，
@@ -8929,6 +8960,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 破坏树木正下方的支撑方块 → 整棵树倒下（掉木材）
     const treeOnTop = this.world.trees.find((t) => t.x === x && t.y + t.h === y);
     if (treeOnTop) this.fellTree(x, y - 1);
+    // 破坏仙人掌脚下的沙 → 整株倒下（CheckCactus :54132-54143 支撑仅沙族
+    // 53/112/116/234 整砖——沙被挖后 TileFrame 级联逐格上行）
+    if (st.get(x, y - 1) === TILE_BY_KEY['v_80_cactus']) this.fellCactus(x, y - 1);
     if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
     else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     this.killTileBreakSound(type, x, y);
@@ -9048,56 +9082,101 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
   }
 
+  /** bonusWood 掷骰用的手持斧力（KillTile_GetTreeDrops :66306-66307 读最近玩家
+   *  选中物品的 axe——单机即本地玩家手持） */
+  private heldAxePower(): number {
+    const s = (this.player as Player | undefined)?.inv?.heldItem?.();
+    if (!s) return 0;
+    return this.itemFuncTool(s.id)?.axePower ?? 0;
+  }
+
+  /** v_5 族树掉落 1:1（KillTile_GetTreeDrops :66245-66309 + GetTreeType :63106）：
+   *  ①木材种类按基座草族——丛林草→红木 620/腐化→乌木 619/猩红→阴森木 911/
+   *  雪原→针叶木 2503/神圣→珍珠木 621/灰烬草→灰烬木 5215/蘑菇草 70→每格 50%
+   *  发光蘑菇 183 或无掉落；②每 killed 格 1 木材 + bonusWood（:66306-66308
+   *  genRand.Next(35)<=手持斧力 || 1/3 → 该格 2）；③橡实仅树冠标记格
+   *  （X≥22 && Y≥198，即树顶 12/13 帧）50% ×1，TreeTypeDropsAcorns :63140 门
+   *  （None/Mushroom/Jungle 不掉橡实）。★帧必须在清格前捕获（调用方已做） */
+  private dropVanillaTreeLoot(
+    st: TileStore, x: number, groundFromY: number, treeType: number,
+    killed: Array<[number, number]>, crownFX: number, crownFY: number, crownY: number,
+  ) {
+    // 基座 = 干列向下穿过树格后的第一格（GetTreeBottom :63478-63520）
+    let gy = groundFromY;
+    while (gy < st.h && st.get(x, gy) === treeType) gy++;
+    const ground = st.get(x, gy);
+    const gs = ground !== 0 ? TILE_DEFS[ground]?.vanilla?.sheet ?? -1 : -1;
+    let vid = 9, acorns = false, mushroomRoll = false;
+    if (gs === 23 || gs === 661) { vid = 619; acorns = true; }            // Corrupt → Ebonwood
+    else if (gs === 199 || gs === 662) { vid = 911; acorns = true; }      // Crimson → Shadewood
+    else if (gs === 60) { vid = 620; }                                    // Jungle → Rich Mahogany（不掉橡实）
+    else if (gs === 70) { mushroomRoll = true; }                          // Mushroom → 50% 发光蘑菇/无
+    else if (gs === 147) { vid = 2503; acorns = true; }                   // Snow → Boreal Wood
+    else if (gs === 109 || gs === 492) { vid = 621; acorns = true; }      // Hallowed → Pearlwood
+    else if (gs === 633) { vid = 5215; acorns = true; }                   // Ash → Ash Wood
+    else if (gs === 2 || gs === 477 || gs === 53 || gs === 112 || gs === 116 || gs === 234) { acorns = true; } // Forest/Palm 族基座
+    const axePower = this.heldAxePower();
+    for (const [kx, ky] of killed) {
+      if (mushroomRoll && Math.random() >= 0.5) continue;                 // 50% 无掉落
+      const key = VANILLA_ITEM_KEY_BY_ID[mushroomRoll ? 183 : vid];
+      if (!key || ITEM_BY_KEY[key] === undefined) continue;
+      const bonus = Math.floor(Math.random() * 35) <= axePower || Math.floor(Math.random() * 3) === 0;
+      this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 14, ky * TILE, key, bonus ? 2 : 1,
+        (Math.random() - 0.5) * 2, -2 - Math.random());
+    }
+    if (crownFX >= 22 && crownFY >= 198 && acorns && Math.random() < 0.5) {
+      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 2.5, crownY * TILE, VI_KEY.ACORN, 1,
+        (Math.random() - 0.5) * 3, -3 - Math.random());
+    }
+  }
+
   private fellTree(x: number, y: number) {
-    // 向上找树顶（同列 TREE tile），向下到 Grass
+    // 原版砍伐语义（Player.cs:45120 单格 KillTile → SquareTileFrame 3×3 → CheckTree
+    // :54598 逐格上行级联）：被砍格及其以上整段倒下，切口以下的树桩保留（其下方
+    // 仍是树干/草 → CheckTree 存活门通过）——旧实现整列连桩清除（含切口以下）非原版
     const st = this.world.store;
     let top = y;
     while (st.get(x, top - 1) === T.TREE) top--;
-    let bottom = y;
-    while (st.get(x, bottom + 1) === T.TREE) bottom++;
-    const height = bottom - top + 1;
-    // 树冠 80×80 以树顶为中心外扩 2-3 格：显式区域标脏，
-    // 否则不含树干格的邻 chunk 不会重绘 → 树叶残留
+    const bottom = y;
     this.chunks.markDirtyArea(x - 4, top - 4, x + 4, bottom + 1);
-    // 清除树干 + 两侧树枝（支干只在紧邻树干处生成，不会误伤邻树），并记录枝干位置
-    const branchSpots: Array<{ x: number; y: number }> = [];
+    // ★清格前捕获干列逐格 frame（树冠橡实门读帧；setTile(0) 双轴清零）
+    const trunkFX: number[] = [];
+    const trunkFY: number[] = [];
+    for (let yy = top; yy <= bottom; yy++) {
+      const fi = st.idx(x, yy);
+      trunkFX.push(st.frameX[fi]);
+      trunkFY.push(st.frameY[fi]);
+    }
+    // 清除倒下段：干列 + 两侧枝/根（支干只在紧邻树干处，不会误伤邻树；根在基座行
+    // ±1，随整段倒下同清——切口以下不动）
+    const killed: Array<[number, number]> = [];
     for (let yy = top; yy <= bottom; yy++) {
       st.setTile(x, yy, 0);
+      killed.push([x, yy]);
       for (const s of [-1, 1]) {
         if (st.get(x + s, yy) === T.TREE) {
-          branchSpots.push({ x: x + s, y: yy });
           st.setTile(x + s, yy, 0);
+          killed.push([x + s, yy]);
         }
       }
     }
-    // 清除树冠（树顶周围半径 3 的 LEAVES）
+    // 清除旧树冠（T.LEAVES 遗留系统的树叶，世界生成树无此项）
     for (let dx = -3; dx <= 3; dx++) {
       for (let dy = -4; dy <= 1; dy++) {
         if (st.get(x + dx, top + dy) === T.LEAVES) st.setTile(x + dx, top + dy, 0);
       }
     }
-    // 掉木材：树干每段 1 个独立掉落物沿干散落；每根枝干也额外掉 1 份（掉在枝干处）
-    const wood = Math.max(1, Math.floor(height * 0.8));
-    for (let p = 0; p < wood; p++) {
-      const dropY = (top + Math.floor((p + 0.5) * height / wood)) * TILE;
-      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, VI_KEY.WOOD, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
-    }
-    for (const b of branchSpots) {
-      this.spawnDrop(b.x * TILE + 8, b.y * TILE + 8, VI_KEY.WOOD, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
-    }
-    // 橡实：较大概率（75%）掉 2-3 颗，沿树冠区域散落供补种
-    if (Math.random() < 0.75) {
-      const nAcorn = 2 + Math.floor(Math.random() * 2);
-      for (let a = 0; a < nAcorn; a++) {
-        const ax = x + (Math.random() - 0.5) * 2.5;
-        const ay = top + Math.random() * height * 0.4;
-        this.spawnDrop(ax * TILE + 8, ay * TILE, VI_KEY.ACORN, 1, (Math.random() - 0.5) * 3, -3 - Math.random());
-      }
-    }
+    // 掉落（KillTile_GetTreeDrops 1:1，见 dropVanillaTreeLoot）
+    this.dropVanillaTreeLoot(st, x, bottom + 1, T.TREE, killed, trunkFX[0] ?? 0, trunkFY[0] ?? 0, top);
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
-    // 从登记表移除
-    const t = this.world.trees.findIndex((tr) => tr.x === x && Math.abs(tr.y - top) <= 2);
-    if (t >= 0) this.world.trees.splice(t, 1);
+    // 登记表：砍到基座（整棵倒）→ 移除；拦腰砍 → 收缩为树桩段（y=切口下格起）
+    const t = this.world.trees.findIndex((tr) => tr.x === x && y >= tr.y && y < tr.y + tr.h);
+    if (t >= 0) {
+      const tr = this.world.trees[t];
+      const oldBottom = tr.y + tr.h - 1;
+      if (bottom >= oldBottom) this.world.trees.splice(t, 1);
+      else { tr.y = bottom + 1; tr.h = oldBottom - bottom; }
+    }
   }
 
   /** 砍导入的原版树（tile 5 / 宝石树 / 装饰树 / 灰烬树）：
@@ -9161,84 +9240,149 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   private fellImportedTree(x: number, y: number, type: number) {
+    // 原版砍伐语义同 fellTree：单格 KillTile → CheckTree/CheckTreeWithSettings
+    // （tile 5/583-589/596/616/634，TileFrameImportant :86608+）/ 蘑菇树 case 72
+    // （:86582-86606）/ 棕榈 323 逐格上行级联——切口以下树桩保留
     const st = this.world.store;
+    const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? 0;
     let top = y;
     while (st.get(x, top - 1) === type) top--;
-    let bottom = y;
-    while (st.get(x, bottom + 1) === type) bottom++;
-    const height = bottom - top + 1;
+    const bottom = y;
     this.chunks.markDirtyArea(x - 6, top - 7, x + 6, bottom + 1);
-    // 清树干列 + 紧邻的侧枝（同类型，仅 ±1 防 "格洞" 残留）
+    // ★清格前捕获干列逐格 frame（setTile(0) 双轴清零——棕榈树冠橡实门 X 88-132
+    // 与宝石树树冠 gemcorn 门 X≥22/Y≥198 都依赖；2026-08-17 棕榈砍伐审计修复）
+    const trunkFX: number[] = [];
+    const trunkFY: number[] = [];
+    for (let yy = top; yy <= bottom; yy++) {
+      const fi = st.idx(x, yy);
+      trunkFX.push(st.frameX[fi]);
+      trunkFY.push(st.frameY[fi]);
+    }
+    // 清倒下段：干列 + 紧邻侧枝/根（±1，切口以下不动）
+    const killed: Array<[number, number]> = [];
     for (let yy = top; yy <= bottom; yy++) {
       st.setTile(x, yy, 0);
+      killed.push([x, yy]);
       for (const s of [-1, 1]) {
-        if (st.get(x + s, yy) === type) st.setTile(x + s, yy, 0);
+        if (st.get(x + s, yy) === type) {
+          st.setTile(x + s, yy, 0);
+          killed.push([x + s, yy]);
+        }
       }
     }
     // 蘑菇树（sheet 72）：不走树干木材/橡实——原版 KillTile_GetTreeDrops 仅覆盖
     // tile 5/596/616/634（WorldGen.cs:65267），72 走 case 71/72 掷骰（:65697-65707）：
     //   每格 1/40 蘑菇草种子(194) / 否则 1/2 发光蘑菇(183) / 否则无掉落
-    if (TILE_DEFS[type]?.vanilla?.sheet === 72) {
+    if (sheet === 72) {
       const roll = new RNG((Math.random() * 1e9) | 0);
-      for (let yy = top; yy <= bottom; yy++) {
+      for (const [kx, ky] of killed) {
         const key = roll.nextInt(40) === 0 ? VI_KEY.MUSHROOM_GRASS_SEEDS
           : roll.nextInt(2) === 0 ? 'vi_183_glowing_mushroom' : null;
         if (key && ITEM_BY_KEY[key] !== undefined) {
-          this.spawnDrop(x * TILE + 8, yy * TILE + 8, key, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+          this.spawnDrop(kx * TILE + 8, ky * TILE + 8, key, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
         }
       }
       this.spawnParticles(x * TILE + 8, top * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#2E8B3D', 14, 2.2);
       return;
     }
-    // 宝石树（sheet 583-589；KillTile_GetItemDrops :65754-65802 + SetGemTreeDrops :66149-66163）：
-    // 每格 1/10 对应宝石×1 / 否则石块×1-2；干基格（frameX≥22 && frameY≥198）50% gemcorn
-    const gemSheet = TILE_DEFS[type]?.vanilla?.sheet ?? 0;
-    if (gemSheet >= 583 && gemSheet <= 589) {
-      // 干基帧在清格前捕获（setTile(0) 清零 frame）
-      const baseFi = st.idx(x, bottom);
-      const isBase = st.frameX[baseFi] >= 22 && st.frameY[baseFi] >= 198;
+    // 宝石树（sheet 583-589；GetItemDrops :65754-65802 + SetGemTreeDrops :66149-66163）：
+    // 每格 1/10 对应宝石×1 / 否则石块 Next(1,3)；gemcorn 门 = 树冠标记格（X≥22 &&
+    // Y≥198——growTreeWithSettings 树顶覆写帧 cs:30932-30967，★是树顶不是干基，
+    // 2026-08-17 二审修正：旧查干底格实际树恒 132-176 基座帧 → 仍永假）50% ×1
+    if (sheet >= 583 && sheet <= 589) {
+      const isCrown = trunkFX[0] >= 22 && trunkFY[0] >= 198;
       const gemOf: Record<number, [number, number]> = {
         583: [180, 4851], 584: [181, 4852], 585: [177, 4853],
         586: [179, 4854], 587: [178, 4855], 588: [182, 4856], 589: [999, 4857],
       };
-      const [gemId, seedId] = gemOf[gemSheet];
-      const height2 = bottom - top + 1;
-      for (let yy = top; yy <= bottom; yy++) {
+      const [gemId, seedId] = gemOf[sheet];
+      for (const [kx, ky] of killed) {
         const dropId = Math.random() < 0.1 ? gemId : 3;   // 1/10 宝石 / 9/10 石块
         const stack = dropId === 3 ? 1 + Math.floor(Math.random() * 2) : 1;
         const key = dropId === 3 ? VI_KEY.STONE : VANILLA_ITEM_KEY_BY_ID[dropId];
         if (key && ITEM_BY_KEY[key] !== undefined) {
-          this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, yy * TILE,
+          this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 14, ky * TILE,
             key, stack, (Math.random() - 0.5) * 2, -2 - Math.random());
         }
       }
-      // 干基格 50% gemcorn（树苗种子；frameX≥22 即主干底格）
-      if (isBase && Math.random() < 0.5) {
+      if (isCrown && Math.random() < 0.5) {
         const seedKey = VANILLA_ITEM_KEY_BY_ID[seedId];
         if (seedKey && ITEM_BY_KEY[seedKey] !== undefined) {
-          this.spawnDrop(x * TILE + 8, bottom * TILE, seedKey, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+          this.spawnDrop(x * TILE + 8, top * TILE, seedKey, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
         }
       }
-      void height2;
       this.spawnParticles(x * TILE + 8, top * TILE + 8, '#B46BD8', 14, 2.2);
       return;
     }
-    // 掉木材（与自有树同比例）+ 树顶枝条额外几份
-    const wood = Math.max(1, Math.floor(height * 0.8));
-    for (let p = 0; p < wood; p++) {
-      const dropY = (top + Math.floor((p + 0.5) * height / wood)) * TILE;
-      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, VI_KEY.WOOD, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+    // 棕榈（sheet 323，GetItemDrops case 323 :65277-65317）：每干格掉棕榈木 2504
+    // （邪恶沙地变体：crimsand 234→Shadewood 911 / pearlsand 116→Pearlwood 621 /
+    // ebonsand 112→Ebonwood 619）；树冠格（frameX 88-132）附橡实 secondaryItem=27
+    if (sheet === 323) {
+      // 地面变体：干列之下第一个实性格（cs:65298 `for (j=y; !active || !solid; j++)`
+      // ——★非实心活性格（火把/草饰等）跳过继续下扫，旧实现 break 致变体漏判）
+      let gs = -1;
+      for (let yy = bottom + 1; yy < st.h; yy++) {
+        const t = st.get(x, yy);
+        if (t !== 0 && st.isSolid(x, yy)) { gs = TILE_DEFS[t]?.vanilla?.sheet ?? -1; break; }
+      }
+      const palmWood = gs === 234 ? VANILLA_ITEM_KEY_BY_ID[911]
+        : gs === 116 ? VANILLA_ITEM_KEY_BY_ID[621]
+          : gs === 112 ? VANILLA_ITEM_KEY_BY_ID[619]
+            : VANILLA_ITEM_KEY_BY_ID[2504];
+      for (let yy = top; yy <= bottom; yy++) {
+        if (palmWood && ITEM_BY_KEY[palmWood] !== undefined) {
+          this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, yy * TILE,
+            palmWood, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+        }
+        // 树冠格橡实（frameX 88-132 → secondaryItem=27，:65285-65287）——读清格前
+        // 捕获段 trunkFX（清格后帧恒 0）
+        const fx = trunkFX[yy - top];
+        if (fx >= 88 && fx <= 132) {
+          this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 10, yy * TILE,
+            VI_KEY.ACORN, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+        }
+      }
+      this.spawnParticles(x * TILE + 8, top * TILE + 8, '#B68D56', 14, 2.2);
+      return;
     }
-    // 橡实：与自有树同规则（75% 掉 2-3 颗，沿树冠区域散落供补种）
-    if (Math.random() < 0.75) {
-      const nAcorn = 2 + Math.floor(Math.random() * 2);
-      for (let a = 0; a < nAcorn; a++) {
-        const ax = x + (Math.random() - 0.5) * 2.5;
-        const ay = top + Math.random() * height * 0.4;
-        this.spawnDrop(ax * TILE + 8, ay * TILE, VI_KEY.ACORN, 1, (Math.random() - 0.5) * 3, -3 - Math.random());
+    // 普通树族（5/596/616/634，KillTile_GetItemDrops case :65267-65275 →
+    // KillTile_GetTreeDrops）：与 fellTree 共用 dropVanillaTreeLoot（基座草族
+    // → 群系木材 + 每格 1 木 + bonusWood + 树冠橡实门）——旧实现恒掉普通木材
+    this.dropVanillaTreeLoot(st, x, bottom + 1, type, killed, trunkFX[0] ?? 0, trunkFY[0] ?? 0, top);
+    this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
+  }
+
+  /** 仙人掌砍伐（CheckCactus :54132 级联语义）：破坏格及以上整株倒（TileFrame
+   *  case 80 → CheckCactus 逐格上行；切口以下保留）；侧臂在下方无仙人掌支撑时
+   *  随主干同落（:54166-54174 臂分支：below/left/right 全非 80 即死）。每格掉
+   *  仙人掌 276 ×1（GetItemDrops case 80 :64767，无 bonus 掷）——此前 1×1 通用
+   *  路径掉 place_v_ 假物品且上方柱悬空 */
+  private fellCactus(x: number, y: number) {
+    const st = this.world.store;
+    const CAC = TILE_BY_KEY['v_80_cactus'];
+    const cactusKey = VANILLA_ITEM_KEY_BY_ID[276];
+    const killed: Array<[number, number]> = [];
+    let yy = y;
+    while (yy >= 0 && st.get(x, yy) === CAC) {
+      st.setTile(x, yy, 0);
+      killed.push([x, yy]);
+      for (const s of [-1, 1]) {
+        const ax = x + s;
+        if (st.get(ax, yy) === CAC && st.get(ax, yy + 1) !== CAC) {
+          st.setTile(ax, yy, 0);
+          killed.push([ax, yy]);
+        }
+      }
+      yy--;
+    }
+    this.chunks.markDirtyArea(x - 2, yy, x + 2, y + 1);
+    if (cactusKey && ITEM_BY_KEY[cactusKey] !== undefined) {
+      for (const [kx, ky] of killed) {
+        this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 10, ky * TILE, cactusKey, 1,
+          (Math.random() - 0.5) * 2, -2 - Math.random());
       }
     }
-    this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, '#497811', 10, 1.8);
   }
 
   /** 电路工具使用(原版 Player.cs:30289-30444 ItemCheck_UseWiringTools) */
@@ -9366,7 +9510,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (st.wall[i0] !== 0) {
       const oldWall = st.wall[i0];
       if (oldWall === 350) return;
-      if (WALL_DUNGEON.has(oldWall) && !this.world.flags.downedSkeletron) return;
+      if (WALL_DUNGEON.has(oldWall) && !this.skeletronDowned()) return;
       if (oldWall === 87 && !this.world.flags['downed_245']) return;
       // NearFriendlyWall：自身/四邻任一格墙为空或房墙（WALL_HOUSE 表）
       const friendly = (ax: number, ay: number) =>
@@ -12009,23 +12153,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   // ================= 战斗 =================
 
   /** 地牢裂砖族破坏链（KillTile :63837-63895 段 1:1）：
-   *  ① 掉落：同色普通地牢砖（:67003：481→275 / 482→276 / 483→277）——仅主动破坏
-   *    （挖/炸/撞碎/弹幕扫掠/钩爪，原版 KillTile 默认 noItem=false）；连锁格 noItem 不掉。
+   *  ① 掉落：**无**——原版 KillTile_GetItemDrops（:64012 dropItem=0 起步，481-483
+   *    落 :65970-66148 的无赋值 break 块）碎裂不掉任何物品。★:67003 的
+   *    481→275 / 482→276 / 483→277 是 KillTile_MakeTileDust（:66744）的
+   *    【碎屑 gore 槽位表】（裂砖与同色普通砖共用碎屑）——曾被误读成物品表，
+   *    错接成掉落物品 275 珊瑚 / 276 / 277 三叉戟，2026-08-17 修正。
    *  ② 连锁崩塌（:63838-63866）：8 邻域掷签——正上 1/3、其余 1/6，命中 KillTile(noItem)
    *    递归链式（crackedChainKill）。
    *  ③ 每块喷 Debris 弹片（:63887-63895：proj 736-738，伤 20，v=(0,0.41)）。
    *  ④ 专属音 Item_127（:66551 sound switch）。原序=连锁先、弹片后。 */
-  private breakCrackedBrick(x: number, y: number, dropLoot: boolean): void {
+  private breakCrackedBrick(x: number, y: number): void {
     const st = this.world.store;
     const t = st.get(x, y);
     const sheet = TILE_DEFS[t]?.vanilla?.sheet;
     if (!isCrackedSheet(sheet)) return;
     const mapColor = TILE_DEFS[t]?.mapColor ?? '#888';
     st.setTile(x, y, 0);
-    if (dropLoot) {
-      const key = VANILLA_ITEM_KEY_BY_ID[sheet! - 481 + 275];   // 同色地牢砖物品
-      if (key) this.spawnDrop(x * TILE + 8, y * TILE + 8, key, 1);
-    }
     const fx = (fx: number, fy: number, sh: number) => {
       this.playSfxFiles(['Item_127'], 1, fx * TILE + 8, fy * TILE + 8);
       this.entities.add(new DebrisProj(sh, fx * TILE + 8, fy * TILE + 8), 'projectiles');
@@ -12064,7 +12207,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               if (bs === 78 || bs === 380 || bs === 579) continue;  // 下方种植族不切
             }
           }
-          this.breakTile(x, y);   // KillTile（默认 noItem=false——掉同色地牢砖）
+          this.breakTile(x, y);   // KillTile → breakCrackedBrick（主动破坏，无物品掉落）
         }
       }
     }
@@ -12219,9 +12362,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  捕获物掉在【玩家中心】可秒拾（noGrabDelay）；687 神秘青蛙永远传送逃走
    *  （TryTeleportingCaughtMysticFrog :80657-80682：±15 格采样 telefrag 8，
    *   Teleport style 13 = 每侧 Item8 + 21 尘 27；失败 PoofOfSmoke 消散）。 */
+  /** critters 桶实体的原版 NPC id（桶内混装 Enemy 与遗留 Critter：
+   *  Enemy.vanillaId 优先，Critter 走 def.npc 兜底；均无 = -1） */
+  private critterVid(c: unknown): number {
+    const e = c as { vanillaId?: number; dead?: boolean; def?: { npc?: number } };
+    return e.vanillaId ?? e.def?.npc ?? -1;
+  }
+
   private netCatchCritter(c: Critter): void {
-    const def = CRITTER_BY_KEY[c.key];
-    const npcId = def?.npc ?? -1;
+    const npcId = this.critterVid(c);
     if (npcId === 687) {
       const spot = attemptToFindTeleportSpot(
         c as unknown as Enemy, this as unknown as GameHooks,
@@ -12241,7 +12390,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
-    const catchItemId = def ? CRITTER_CATCH_BY_NPC[npcId] : undefined;
+    const catchItemId = npcId > 0 ? CRITTER_CATCH_BY_NPC[npcId] : undefined;
     if (!catchItemId) return;                          // :44084 catchItem<=0 跳过（不伤不死）
     const key = VANILLA_ITEM_KEY_BY_ID[catchItemId];
     if (key) this.spawnDrop(this.player.cx - 8, this.player.cy - 8, key, 1, 0, -1);
@@ -12583,6 +12732,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       moonCounts.set(en.vanillaId, (moonCounts.get(en.vanillaId) ?? 0) + 1);
       if (MOON_BOSS_IDS.has(en.vanillaId)) moonBossSlotSum += en.vanilla?.npcSlots ?? 1;
     }
+    // 小动物桶并入 AnyNPCs 集（原版 Main.npc 全表一体：AnyNPCs(687) 等门对
+    //  critters 桶可见；moonCounts 不并——小动物不计月事件 Boss 槽）
+    for (const e of this.entities.critters) {
+      const en = e as Enemy;
+      const vid = this.critterVid(en);
+      if (!en.dead && vid > 0) activeIds.add(vid);
+    }
     // bound TownNPC → 绑缚原版 id 登记（原版被缚 NPC 本体就是 105/106/123/354/589/685
     // 类型，AnyNPCs 直接可见；本仓 bound 态以 TownNPC 近似 → 反查登记，使三人组链的
     // !AnyNPCs(105/106/685) 场上唯一门与机械师/造型师/高尔夫球手各支同语义）
@@ -12620,7 +12776,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && en.ai2 > 1;
     }) || this.entities.critters.some((n) => {
       const c = n as Critter;
-      const cn = CRITTER_BY_KEY[c.key]?.npc ?? 0;
+      const cn = this.critterVid(c);
       return !c.dead && cn >= 583 && cn <= 585;
     });
     // downedBoss3 双键（骷髅王击杀链写 downed_35，旧档/导入可能写 downedSkeletron——
@@ -12698,24 +12854,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const viewHalfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
     const rng = new RNG((Math.random() * 1e9) | 0);
     const picked = this.vanillaSpawner.spawn(p.cx, p.cy, rng, viewHalfW, viewHalfH);
-    if (!picked) {
-      // SpawnFrog 687 交付（:5521-5535）：无 Enemy 数据条目 → 转 Critter；
-      // AnyNPCs(687) 去重的 Critter 侧补判（activeIds 不含小动物桶）
-      const ck = this.vanillaSpawner.pendingCritterKey;
-      if (ck) {
-        this.vanillaSpawner.pendingCritterKey = null;
-        const dupe = this.entities.critters.some((n) => {
-          const c = n as Critter;
-          return !c.dead && CRITTER_BY_KEY[c.key]?.npc === 687;
-        });
-        if (!dupe) {
-          this.entities.add(new Critter(ck,
-            this.vanillaSpawner.currentSpawnX * TILE + 8,
-            this.vanillaSpawner.currentSpawnY * TILE), 'critters');
-        }
-      }
-      return;
-    }
+    if (!picked) return;
     // 骷髅商（NPC.cs:4906-4910）：转 TownNPC 进 npcs 桶；场上已有则跳过（CountNPCS(453)==0）
     if (picked.vanillaId === 453) {
       if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant')) return;
@@ -16276,22 +16415,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (pty > this.world.groundLevel + 20) return; // 玩家不在地表（±20 容纳丘陵起伏）
     const halfView = Math.ceil((this.camera.viewW / (this.camera.zoom || 1)) / 2 / TILE) + 8;
     const side = Math.random() < 0.5 ? -1 : 1;
-    // 找列：蝴蝶优先附近 8 格内有 FLOWER 的列
-    let tx = Math.floor(this.player.cx / TILE) + side * (halfView + Math.floor(Math.random() * 18));
-    const isButterflyTentative = isDay && Math.random() < 0.35;
-    if (isButterflyTentative) {
-      for (let attempt = 0; attempt < 6; attempt++) {
-        const fx = tx + Math.floor((Math.random() - 0.5) * 16);
-        if (fx < 4 || fx >= st.w - 4) continue;
-        let found = false;
-        for (let dx = -4; dx <= 4 && !found; dx++) {
-          for (let y = Math.max(4, Math.floor(this.player.cy / TILE) - 24); y < Math.min(st.h - 4, Math.floor(this.player.cy / TILE) + 30); y++) {
-            if (st.type[st.idx(fx + dx, y)] === T.FLOWER) { found = true; break; }
-          }
-        }
-        if (found) { tx = fx; break; }
-      }
-    }
+    // 找列（旧"蝴蝶优先花丛列"随 Critter 池尾一并退役：蝴蝶 356 由 spawner
+    //  butterflyChance 段供给）
+    const tx = Math.floor(this.player.cx / TILE) + side * (halfView + Math.floor(Math.random() * 18));
     if (tx < 4 || tx >= st.w - 4) return;
     // 找地表
     const startY = Math.max(4, Math.floor(this.player.cy / TILE) - 24);
@@ -16304,21 +16430,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 深层地面——直接拒绝（地狱地面 groundY≈h-200 远超 groundLevel+20）
     if (groundY > this.world.groundLevel + 20) return;
     const surfaceWater = st.liquid[st.idx(tx, groundY - 1)] > 80;
-    // 生态判定
+    // （生态/海洋带判定随 Critter 池尾退役——蜻蜓池直接读 gTile）
     const gTile = st.type[st.idx(tx, groundY)];
-    let biome: 'forest' | 'snow' | 'sand' = 'forest';
-    if (gTile === T.SNOW) biome = 'snow';
-    else if (gTile === T.SAND || gTile === TILE_BY_KEY['sandstone'] || gTile === TILE_BY_KEY['hardened_sand']) biome = 'sand';
-    const nearWater = surfaceWater || (() => {
-      for (let dx = -2; dx <= 2; dx++) {
-        for (let dy = 0; dy <= 2; dy++) {
-          if (st.liquid[st.idx(tx + dx, groundY + dy)] > 80) return true;
-        }
-      }
-      return false;
-    })();
-    // 海洋带判定（地图外沿 8%——螃蟹/海鸥 oceanOnly 门，防止进沙漠）
-    const inOceanBand = tx < st.w * 0.08 || tx > st.w * 0.92;
     // ---- 雨天小动物（原版 SpawnAnNPC L2288-2311 friendly 段：草族 critter 块雨天
     //  整段替换——金鱼上岸散步 230 主导；L2107-2126 香蒲蜻蜓）。
     //  走本 friendly 通道（原版 FindSpawnTile 独立友好点位，不占敌怪配额）----
@@ -16382,50 +16495,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
       }
     }
-    // 按昼夜 + 栖息生态过滤（水面列只出 water 生态或飞行种）
-    const pool = CRITTER_DEFS.filter((c) => {
-      if (c.dayOnly && !isDay) return false;
-      if (c.nightOnly && isDay) return false;
-      // 鸭子是两栖：水面列可生成（落在岸边浅水/滩涂），其余地面种不能在水列
-      if (surfaceWater && !c.water && c.kind !== 'fly' && c.key !== 'duck') return false;
-      if (c.oceanOnly && !inOceanBand) return false;
-      if (!c.biomes.includes(biome) && !(nearWater && c.biomes.includes('water'))) return false;
-      return true;
-    });
-    if (!pool.length) return;
-    // 小动物已由 VanillaSpawner 的 spawnFriendly 段（SpawnAnNPC L2006-2535）接管，
-    // 此处仅保留自研 Critter 兜底（过渡期）
-    const total = pool.reduce((s2, c) => s2 + c.weight, 0);
-    let r = Math.random() * total;
-    let pick = pool[0];
-    for (const c of pool) { r -= c.weight; if (r <= 0) { pick = c; break; } }
-
-    if (pick.kind === 'fly') {
-      // 飞行种：地表不能是水（水面飞鸟/蝴蝶不合理，鸭子除外但鸭子不是 fly）
-      if (surfaceWater) return;
-      // 开阔天空检查（洞穴/地底不生成）
-      for (let k = 2; k <= 30; k++) {
-        if (groundY - k < 4) return;
-        if (st.isSolid(tx, groundY - k)) return;
-      }
-      // 蝴蝶低空（1-4 格）、鸟/萤火虫中高空
-      const lowFly = pick.key === 'butterfly' || pick.key === 'gold_butterfly';
-      const flyY = lowFly ? (groundY - 1 - Math.random() * 3) * TILE : (groundY - 8 - Math.random() * 12) * TILE;
-      this.entities.add(new Critter(pick.key, tx * TILE + 8, flyY), 'critters');
-    } else if (pick.water && surfaceWater) {
-      // 水生种（鸭子）：落在水面上（自上而下第一个液体格），不是湖底
-      let surfY = 4;
-      while (surfY < st.h - 4 && st.liquid[st.idx(tx, surfY)] <= 80) surfY++;
-      if (surfY >= st.h - 4) return;
-      this.entities.add(new Critter(pick.key, tx * TILE + 8, surfY * TILE), 'critters');
-    } else {
-      // 地面种：参数即脚底 y（构造器内减 h），精确站上地表格顶
-      const c = new Critter(pick.key, tx * TILE + 8, groundY * TILE);
-      // 安全兜底：身体中心在实心块内则放弃（防卡死）
-      const ci = st.idx(Math.floor(c.cx / TILE), Math.floor(c.cy / TILE));
-      if (st.type[ci] !== 0 && st.isSolid(Math.floor(c.cx / TILE), Math.floor(c.cy / TILE))) return;
-      this.entities.add(c, 'critters');
-    }
+    // （自研 Critter 池尾已退役 2026-08-17：环境小动物唯一来源 = VanillaSpawner 的
+    //  spawnFriendly 段（SpawnAnNPC L2006-2535，1:1）。旧池按 kind 给兔/松鼠/青蛙
+    //  等行走族（原版 aiStyle 7）套史莱姆式弹跳 = "兔子像蚱蜢"根因；蚱蜢本体
+    //  aiStyle 1 在 spawner :1884 侧同样供给）
   }
 
   spawnEnemy(key: string, x: number, y: number) {

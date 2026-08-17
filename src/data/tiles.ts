@@ -253,7 +253,7 @@ def({ key: 'v_634_ash_tree', name: '', solid: false, framed: true, opacity: 0.05
 def({ key: 'v_26_altars', name: '', solid: false, framed: true, opacity: 0.05, pick: -1,  // 原版祭坛镐不可破坏(仅锤≥80+hardMode,Player.cs:45058)
   w: 3, h: 2, mapColor: '#77657D', drop: null, light: undefined /* 动态光 → specialTileLight case 26：祭坛双色态（余烬/暗紫，cs:2642-2659） */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 26, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_82_herbs_sprout', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F6C51A', drop: null, vanilla: { sheet: 82, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_323_palm_trees', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#B68D56', drop: null, vanilla: { sheet: 323, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_323_palm_trees', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#B68D56', drop: null, vanilla: { sheet: 323, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_135_pressure_plates', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#FD7272', drop: null, vanilla: { sheet: 135, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_91_banners', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#0D5882', drop: null, vanilla: { sheet: 91, frame: 'style', fw: 1, fh: 3 } });
 def({ key: 'v_242_paintings_6x4', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 4, mapColor: '#63321E', drop: null, vanilla: { sheet: 242, frame: 'style', fw: 6, fh: 4 } });
@@ -311,7 +311,7 @@ def({ key: 'v_220_solidifier', name: '', solid: false, framed: true, opacity: 0.
 def({ key: 'v_303_lihzahrd_furnace', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 303, frame: 'style', fw: 3, fh: 3 } });
 def({ platform: true, key: 'v_469_tables_group_2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 469, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_304_living_loom', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 304, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_488_fallen_log', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 488, frame: 'style', fw: 3, fh: 2 } });
+def({ key: 'v_488_fallen_log', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 3, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 488, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_548_potted_trees_group_2', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 6, mapColor: '#786E64', drop: null, light: undefined /* 动态光 → specialTileLight case 548：盆栽树 frameX/54>=7 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 548, frame: 'style', fw: 3, fh: 6 } });
 def({ key: 'v_614_potted_ember_tendrils', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 6, mapColor: '#FA6432', drop: null, light: [179, 77, 51], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 614, frame: 'style', fw: 3, fh: 6 } });
 def({ key: 'v_598_lava_serpent_bowl', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, light: [255, 185, 110], vanilla: { sheet: 598, frame: 'style', fw: 2, fh: 2 } });
@@ -833,7 +833,7 @@ def({ key: 'v_700_abigails_flower_replica', name: '', solid: false, framed: true
 def({ key: 'v_701_glow_tulip_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#157CD4', drop: null, vanilla: { sheet: 701, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_702_life_fruit_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#95E857', drop: null, vanilla: { sheet: 702, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_703_jungle_plants_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#87C41A', drop: null, vanilla: { sheet: 703, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_704_fallen_log_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 704, frame: 'style', fw: 3, fh: 2 } });
+def({ key: 'v_704_fallen_log_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 3, h: 2, mapColor: '#7F5C45', drop: null, vanilla: { sheet: 704, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_705_oasis_plants_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6BB600', drop: null, vanilla: { sheet: 705, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_706_terragrim_shrine_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#1cd86d', drop: null, vanilla: { sheet: 706, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_707_books_echo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#AA3072', drop: null, vanilla: { sheet: 707, frame: 'style', fw: 1, fh: 1 } });

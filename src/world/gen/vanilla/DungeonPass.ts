@@ -2499,7 +2499,16 @@ export function runDungeonPass(
       for (let j = y - 2; j < y + 1; j++) if (!dgClr(i, j)) return false;
       if (!solidTile2D(i, y + 1)) return false;
     }
-    for (let i = x - 1; i < x + 2; i++) for (let j = y - 2; j < y + 1; j++) dgWr(i, j, t);
+    // Place3x3（WorldGen.cs:53610-53652）逐格帧：frameX/frameY = 0/18/36
+    // （num2 = style*54，地牢恒 style 0）。此前 dgWr 只写 type 帧全 0——静态
+    // 家具靠渲染端零帧重建兜底无恙，动画家具（炼金台 355/巫惑台 354，本函数
+    // 唯二调用方）曾因动画偏移破坏重建门而整物碎裂
+    for (let i = x - 1; i < x + 2; i++) for (let j = y - 2; j < y + 1; j++) {
+      dgWr(i, j, t);
+      const fi = st.idx(i, j);
+      st.frameX[fi] = (i - x + 1) * 18;
+      st.frameY[fi] = (j - y + 2) * 18;
+    }
     return true;
   }
   // Place3x3Wall（cs:44281 画240）/ Place4x3Wall（cs:44874 画241）/ Place6x4Wall（cs:44959 画242）

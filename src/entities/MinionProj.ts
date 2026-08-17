@@ -1135,6 +1135,22 @@ export class MinionProj extends Entity {
         const d = Math.hypot(dx, dy) || 1;
         this.vx = (dx / d) * 5;
         this.vy = (dy / d) * 5;
+      } else if (this.projId === 387 || this.projId === 388) {
+        // 双子专属悬停（AI_66 :28790-28860）：锚点 = 玩家中心+(0,-60)；距锚
+        // >70px 才有阻尼趋近（v=(v×15+dir×spd)/16，spd 跟随玩家速度链），≤70px
+        // 【无任何驱动力】——这是互斥自由区，±0.05/t 的互推累积把两眼分开到
+        // 曼哈顿 ~40px 并保持（通用槽位硬弹簧会压回互斥，曾致两眼恒叠）
+        const hx = p.cx, hy = p.cy - 60;
+        const dx = hx - this.cx, dy = hy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        if (d > 70) {
+          const spd = Math.max(15, Math.abs(p.vx) + Math.abs(p.vy));   // :28806-28814
+          this.vx = (this.vx * 15 + (dx / d) * spd) / 16;
+          this.vy = (this.vy * 15 + (dy / d) * spd) / 16;
+        } else if (this.vx === 0 && this.vy === 0) {
+          this.vx = -0.15; this.vy = -0.05;                            // :28846-28849
+        }
+        if (Math.hypot(this.vx, this.vy) > 15) { this.vx *= 0.95; this.vy *= 0.95; }  // :28853-28856
       } else {
         const hoverAng = this.slot * Math.PI * 0.5;
         const hx = p.cx - p.facing * 36 + Math.cos(hoverAng) * 22;
@@ -1144,6 +1160,22 @@ export class MinionProj extends Entity {
         const spd = Math.min(4, d * 0.08);
         this.vx = (dx / d) * spd;
         this.vy = (dy / d) * spd;
+      }
+      // 双子互斥（AI_66 :28514-28539）：同主另一只双子（387/388）曼哈顿距 <
+      // 判定盒宽(40) → 双轴速度各互推 ±0.05/t——原版两只眼不叠在一起的本体机制。
+      // 精确同位（成对出生同点）时按 id 决胜一侧，防对称死锁（原版靠浮点噪声散开）
+      if (this.projId === 387 || this.projId === 388) {
+        for (const ent of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+          const o = ent as MinionProj;
+          if (!(o instanceof MinionProj) || o === this || o.dead) continue;
+          if (o.projId !== 387 && o.projId !== 388) continue;
+          if (o.ownerRef() !== p) continue;                  // 同主
+          if (Math.abs(this.x - o.x) + Math.abs(this.y - o.y) >= this.w) continue;
+          const ltx = this.x < o.x || (this.x === o.x && this.id < o.id);
+          const lty = this.y < o.y || (this.y === o.y && this.id < o.id);
+          this.vx += ltx ? -0.05 : 0.05;
+          this.vy += lty ? -0.05 : 0.05;
+        }
       }
       this.x += this.vx;
       this.y += this.vy;
@@ -1222,8 +1254,11 @@ export class MinionProj extends Entity {
         }
       }
     }
-    // 接触伤害（同敌 20t 冷却；tag + TagCrit 语义见 contact()）
-    this.contact(game, dmg0, 20);
+    // 接触伤害（tag + TagCrit 语义见 contact()）。同型静态免疫冷却按弹型：
+    // 双子 387=16t / 388=12t（idStaticNPCHitCooldown :4436/:4451——激光眼也有
+    // 近身接触伤，非纯远程；388 另有 25 穿甲由 contact 内弹型数据通道自动带）；
+    // 其余随从沿用 20t 近似
+    this.contact(game, dmg0, this.projId === 387 ? 16 : this.projId === 388 ? 12 : 20);
     // 玩家死亡/过远不消失（原版随从持续到上限驱逐或卸装）——仅跟随
     void TILE;
   }
