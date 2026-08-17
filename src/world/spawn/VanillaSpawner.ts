@@ -1826,6 +1826,73 @@ export class VanillaSpawner {
       if (!this.waterTile) return D(N(2) ? 610 : 606);
       return null;
     }
+    // ---- 友好轮海滩支（NPC.cs:2021-2097：!xRange && isBeach[y≤ws 且海岸带]，
+    //      整支 return——命中后不再落后续小动物链。★原版在 spawnFriendly 段内
+    //      （:2006 else-if 链），敌怪轮不进——曾漏外层门致敌怪轮被 602 截胡）----
+    //  水落点：干隙扫描（同 :4297 敌怪轮版）→ Next(2)==0 才掷 Next(4) 表
+    //  （625 低线/615 高线/金 627|626 高线/688 高线）；else 低线有效 → 602。
+    //  干落点：直接 602 海鸥
+    if (this.spawnFriendlyCycle && !this.xRange && this.isBeach) {
+      if (this.waterTile) {
+        let fLow = -1, fHigh = -1;
+        if (this.spawnTileY <= this.world.groundLevel && this.spawnTileY > 50) {
+          const solidAt = (xxx: number, yyy: number): boolean => {
+            if (!st.inBounds(xxx, yyy)) return false;
+            const ii = st.idx(xxx, yyy);
+            const d = TILE_DEFS[st.type[ii]];
+            return !!st.flags[ii] && !!d?.solid && !d?.platform
+              && !st.half[ii] && st.slope[ii] === 0
+              && !(st.wire[ii] & TileStore.WIRE_ACTUATED);
+          };
+          for (let yy = this.spawnTileY - 1; yy > this.spawnTileY - 50; yy--) {
+            const i1 = st.idx(this.spawnTileX, yy);
+            if (st.liquid[i1] === 0 && !solidAt(this.spawnTileX, yy)
+              && !solidAt(this.spawnTileX, yy + 1) && !solidAt(this.spawnTileX, yy + 2)) {
+              fLow = yy + 2;
+              if (!solidAt(this.spawnTileX, fLow + 1) && !solidAt(this.spawnTileX, fLow + 2)) {
+                fHigh = fLow + 2;
+              }
+              break;
+            }
+          }
+          if (fLow > this.spawnTileY) fLow = this.spawnTileY;
+          if (fHigh > this.spawnTileY) fHigh = this.spawnTileY;
+        }
+        if (N(2)) {
+          const r = rng.int(0, 3);
+          if (r === 0) { if (fLow > 0) return this.spawnNPC(x, fLow * TILE, 625, rng); return null; }
+          if (r === 1) { if (fHigh > 0) return this.spawnNPC(x, fHigh * TILE, 615, rng); return null; }
+          if (r === 2) {
+            const yy2 = fHigh > 0 ? fHigh : this.spawnTileY;
+            return this.spawnNPC(x, yy2 * TILE,
+              rollLuck(this.playerLuck, 400, () => rng.next()) === 0 ? 627 : 626, rng);
+          }
+          const yy3 = fHigh > 0 ? fHigh : this.spawnTileY;
+          return this.spawnNPC(x, yy3 * TILE, 688, rng);
+        }
+        if (fLow > 0 && !this.xRange) return this.spawnNPC(x, fLow * TILE, 602, rng);
+        return null;
+      }
+      return D(602);
+    }
+    // ---- 友好轮雨天香蒲蜻蜓（NPC.cs:2105-2123：草沙{2,477,53} && !tooWindy &&
+    //      raining && day && Next(2)==0 && y≤ws && FindCattailTop → 金 601 else
+    //      RollDragonflyType + 1/3 左右附加；整支 return。spawnFriendly 段内
+    //      （:2006 链，敌怪轮不进））----
+    if (this.spawnFriendlyCycle
+      && (t === T.GRASS || t === T.MOWED_GRASS || t === T.SAND)
+      && Math.abs(this.world.weather.windSpeedTarget) < 0.4 && this.world.weather.raining && this.dayTime
+      && N(2) && this.spawnTileY <= this.world.groundLevel) {
+      const ct = this.findCattailTop(this.spawnTileX, this.spawnTileY, rng);
+      if (ct) {
+        const main = rollLuck(this.playerLuck, 400, () => rng.next()) === 0
+          ? 601 : this.rollDragonflyType(t, rng);
+        const b = this.spawnNPC(ct.x * TILE + 8, ct.y * TILE, main, rng);
+        if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: -16, dy: 0 });
+        if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 16, dy: 0 });
+        return b;
+      }
+    }
     // ---- 雨天深层宝石松鼠/兔（NPC.cs:2289-2296，case 2/109/477/492 雨分支首两支）----
     //  门：raining && spawnTileY <= UnderworldLayer && deeperThanRockLayer，各 1/5；
     //  未命中则原版继续雨块尾段（金蚯蚓/蚯蚓/上岸金鱼——本仓雨块仅地表简化版，深处放行
@@ -2032,6 +2099,31 @@ export class VanillaSpawner {
       const fe = this.spawnNPC(this.spawnTileX * TILE + 8, this.spawnTileY * TILE, fType, rng);
       if (fe) fe.ai2 = 2;   // SpawnNPC(..., 2f) 第 9 参 = ai[2]（跟随态基线）
       return fe;
+    }
+    // ---- 侏儒 624 两支（NPC.cs:3532-3538，仙女段之后蘑菇段之前；gnomeChance=
+    //      GetGnomeChance 基档 10[:5281]，skyblock lowTiles 档未建模恒 10）----
+    //  ① livingTree 支：非 remix && !waterTile && (夜 || 落脚格有墙) && 玩家所站格
+    //    墙 244（SetSpawnFlags :324 livingTree）&& !日食 && !血月 &&
+    //    RollLuck(10×3)==0 && CountNPCS(624) <= Next(3)（上限 0-2 只随机）
+    //  ② 地下侏儒支（CheckToSpawnUndergroundGnomes :5647-5686）：!ZoneCorrupt &&
+    //    !ZoneCrimson && !waterTile && !日食 && !血月 && RollLuck(10)==0 &&
+    //    y∈[ws×0.8, ws×1.1] && CountNPCS(624)<=Next(3) && (夜||落脚格墙>0) &&
+    //    落脚格墙∈{2,63,196,197,198,199}
+    const gnWall = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
+    const gnNightOrWall = !this.dayTime || gnWall > 0;
+    const gnEvOK = !this.world.clock.eclipse && !this.world.clock.bloodMoon;
+    const gnCap = () => this.countNpc(624) <= rng.int(0, 2);   // Next(3)
+    if (!this.world.seedFlags?.remix && !this.waterTile && gnNightOrWall
+      && st.wall[st.idx(this.pX, this.pY)] === 244 && gnEvOK
+      && rollLuck(this.playerLuck, 30, () => rng.next()) === 0 && gnCap()) {
+      return D(624);
+    }
+    if (!this.ZoneCorrupt && !this.ZoneCrimson && !this.waterTile && gnEvOK
+      && rollLuck(this.playerLuck, 10, () => rng.next()) === 0
+      && this.spawnTileY >= this.world.groundLevel * 0.8 && this.spawnTileY <= this.world.groundLevel * 1.1
+      && gnCap() && gnNightOrWall
+      && (gnWall === 2 || gnWall === 63 || (gnWall >= 196 && gnWall <= 199))) {
+      return D(624);
     }
     // ---- 蘑菇地（L3540-3610，tile 70；三支 else-if 1:1）----
     if (t === T.MUSHROOM_GRASS) {
@@ -2343,6 +2435,98 @@ export class VanillaSpawner {
       if (this.dayTime && !this.ZoneGraveyard) {
         // num46 = |落脚 x - 世界出生点 x|（L4108）
         const num46 = Math.abs(this.spawnTileX - this.world.spawnX);
+        // ---- 昼池 critter 链（NPC.cs:4110-4266，敌怪轮版——友好轮 case 2 链的
+        //      姊妹分支；门 = !waterTile && num46<图宽/2 && Next(15)==0 &&
+        //      落脚∈{2,477,109,492,147,161}）----
+        const dayGrassTiles = t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS
+          || t === T.HALLOW_MOWED_GRASS || t === T.SNOW || t === T.ICE;
+        const gold = () => rollLuck(this.playerLuck, 400, () => rng.next()) === 0;
+        if (!this.waterTile && num46 < st.w / 2 && N(15) && dayGrassTiles) {
+          // 雪/冰落脚（:4117）：50/50 企鹅 148/149
+          if (t === T.SNOW || t === T.ICE) {
+            return D(N(2) ? 148 : 149);
+          }
+          const tooWindyFB = Math.abs(this.world.weather.windSpeedTarget) >= 0.4;
+          const dryDay = !raining;
+          // 椿象 669（:4125）：!tooWindy&&!rain&&Next(stinkBugChance)==0&&surfaceSpawn
+          //  + 1/4 左/右 ±16px 附加只
+          if (!tooWindyFB && dryDay && N(Math.max(1, this.world.stinkBugChance)) && this.surfaceSpawn) {
+            const b = D(669);
+            if (N(4)) this.pendingCritterExtras.push({ npc: 669, dx: -16, dy: 0 });
+            if (N(4)) this.pendingCritterExtras.push({ npc: 669, dx: 16, dy: 0 });
+            return b;
+          }
+          // 蝴蝶 356/金 444（:4136）：RollLuck(400) 金 else 356 + 1/4 左右附加 356
+          if (!tooWindyFB && dryDay && N(Math.max(1, this.world.butterflyChance)) && this.surfaceSpawn) {
+            const b = D(gold() ? 444 : 356);
+            if (N(4)) this.pendingCritterExtras.push({ npc: 356, dx: -16, dy: 0 });
+            if (N(4)) this.pendingCritterExtras.push({ npc: 356, dx: 16, dy: 0 });
+            return b;
+          }
+          // 起风瓢虫 604/金 605（:4153-4185）：Next(butterflyChance/2)==0（起风日
+          //  期望≈1/5，以 1/5 近似该复合档——butterflyChance 夜掷基数不重算）+
+          //  四段附加（2/3+1/2+1/3+1/4 逐只 604）
+          if (tooWindyFB && dryDay && N(5) && this.surfaceSpawn) {
+            const b = D(gold() ? 605 : 604);
+            if (!N(3)) this.pendingCritterExtras.push({ npc: 604, dx: 0, dy: 0 });
+            if (N(2)) this.pendingCritterExtras.push({ npc: 604, dx: 0, dy: 0 });
+            if (N(3)) this.pendingCritterExtras.push({ npc: 604, dx: 0, dy: 0 });
+            if (N(4)) this.pendingCritterExtras.push({ npc: 604, dx: 0, dy: 0 });
+            return b;
+          }
+          // 金兔 443 / 金松鼠 539（:4186-4192）
+          if (gold()) return D(443);
+          if (gold() && this.spawnTileY <= this.world.groundLevel) return D(539);
+          // 节日档（:4193-4204）：万圣 303 / 圣诞 337 / 派对 540（各 Next(3)!=0）
+          if (this.world.clock.halloween && !N(3)) return D(303);
+          if (this.world.clock.xMas && !N(3)) return D(337);
+          if (this.partyUp && !N(3)) return D(540);
+          // 1/3 松鼠（SelectRandom 299|538）/ else 兔 46（:4205-4210）
+          if (N(3)) return D(rng.next() < 0.5 ? 299 : 538);
+          return D(46);
+        }
+        // ---- 海滩内带蝎（:4215）：!waterTile && beachX<x<w-beachX（内带,不含
+        //      海岸线）&& Next(12)==0 && 落脚=黄沙 → Next(366,368)=366|367 ----
+        if (!this.waterTile && this.spawnTileX > 380 && this.spawnTileX < st.w - 380
+          && N(12) && t === T.SAND) {
+          return D(rng.next() < 0.5 ? 366 : 367);
+        }
+        // ---- 香蒲蜻蜓（:4221-4233）：草沙落脚{2,477,53} && !tooWindy && !rain &&
+        //      Next(3)!=0 && y<=worldSurface && FindCattailTop（±30×±20 加权采样）
+        //      → 金 601 else RollDragonflyType + 1/3 左右附加 ----
+        if ((t === T.GRASS || t === T.MOWED_GRASS || t === T.SAND)
+          && Math.abs(this.world.weather.windSpeedTarget) < 0.4 && !raining
+          && !N(3) && this.spawnTileY <= this.world.groundLevel) {
+          const ct = this.findCattailTop(this.spawnTileX, this.spawnTileY, rng);
+          if (ct) {
+            const main = gold() ? 601 : this.rollDragonflyType(t, rng);
+            const b = this.spawnNPC(ct.x * TILE + 8, ct.y * TILE, main, rng);
+            if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: -16, dy: 0 });
+            if (N(3)) this.pendingCritterExtras.push({ npc: this.rollDragonflyType(t, rng), dx: 16, dy: 0 });
+            return b;
+          }
+        }
+        // ---- 晨间鸟两支（:4243/:4251；num46<图宽/3 近出生点）----
+        //  A：day && time<18000(<9:30) && 草{2,477,109,492} && Next(4)==0 &&
+        //     y<=ws && CountNPCS(74+297+298)<6（场上鸟上限）
+        //  B：草{2,477,109,492,147} && Next(15)==0（无时段/上限门——夜间也出）
+        //  两支同表：金 442 return else Next(4)：0→297 / 1→298 / 2|3→74
+        const birdRoll = (): number => {
+          if (gold()) return 442;
+          const r = rng.int(0, 3);
+          return r === 0 ? 297 : r === 1 ? 298 : 74;
+        };
+        const birdTilesA = t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS
+          || t === T.HALLOW_MOWED_GRASS;
+        if (!this.waterTile && num46 < st.w / 3 && birdTilesA && N(4)
+          && this.spawnTileY <= this.world.groundLevel
+          && this.countNpc(74) + this.countNpc(297) + this.countNpc(298) < 6) {
+          return D(birdRoll());
+        }
+        if (!this.waterTile && num46 < st.w / 3
+          && (birdTilesA || t === T.SNOW) && N(15)) {
+          return D(birdRoll());
+        }
         // L4277-4280：自然刷史莱姆王——!waterTile && num46>maxTilesX/3 && 落脚=草(2)
         //  && 1/300 && 场上无 50 → SpawnOnPlayer(target, 50)（刷在玩家身上而非落脚点）。
         //  SpawnOnPlayer（NPC.cs:81273+，500 次玩家 spawnArea 内选点）未移植，以
@@ -2351,6 +2535,64 @@ export class VanillaSpawner {
           this.currentSpawnX = this.pX;
           this.currentSpawnY = this.pY;
           return D(50);
+        }
+        // ---- Town Slime 695/696（:4281-4288）：!waterTile && num46>图宽/8（离
+        //      出生点）&& 落脚∈{2,147,60,161} && Next(200)==0 && 场上无 695/696
+        //      → 695 基础；RollLuck(100)<40 → 696（≈40% 换装档）----
+        if (!this.waterTile && num46 > st.w / 8
+          && (t === T.GRASS || t === T.SNOW || t === T.JUNGLE_GRASS || t === T.ICE)
+          && N(200) && !any(696) && !any(695)) {
+          const type5 = rollLuck(this.playerLuck, 100, () => rng.next()) < 40 ? 696 : 695;
+          return D(type5);
+        }
+        // ---- 海滩边缘支（:4290-4366）：!xRange && 落脚=黄沙 && 落点在海岸带
+        //      （x<beachX || x>w-beachX，无 y 门）。干落点 1/10 海鸥 602；水落点：
+        //      上扫 50 格干隙线（连续 3 格非实心锚 anchor+2，再 2 格非实心 → 高线
+        //      +2，均钳 ≤spawnTileY）→ 9/10 空过 else Next(4)：0→625 海豚鼠（低线）
+        //      /1→615 海鸥?（高线）/2→金 627 else 626 蜻蜓（高线）/3→688 蝴蝶（高线）----
+        if (!this.xRange && t === T.SAND
+          && (this.spawnTileX < 380 || this.spawnTileX > st.w - 380)) {
+          if (!this.waterTile && N(10)) return D(602);
+          if (!this.waterTile) {
+            return null;    // 原版干落点非 1/10 直接 return（不出后续怪）
+          }
+          let low = -1, high = -1;
+          if (this.spawnTileY < this.world.groundLevel && this.spawnTileY > 50) {
+            // WorldGen.SolidTile（:70155）：active && tileSolid && !tileSolidTop &&
+            // !halfBrick && slope==0 && !inActive
+            const solidAt = (xxx: number, yyy: number): boolean => {
+              if (!st.inBounds(xxx, yyy)) return false;
+              const ii = st.idx(xxx, yyy);
+              const d = TILE_DEFS[st.type[ii]];
+              return !!st.flags[ii] && !!d?.solid && !d?.platform
+                && !st.half[ii] && st.slope[ii] === 0
+                && !(st.wire[ii] & TileStore.WIRE_ACTUATED);
+            };
+            for (let yy = this.spawnTileY - 1; yy > this.spawnTileY - 50; yy--) {
+              const i1 = st.idx(this.spawnTileX, yy);
+              if (st.liquid[i1] === 0 && !solidAt(this.spawnTileX, yy)
+                && !solidAt(this.spawnTileX, yy + 1) && !solidAt(this.spawnTileX, yy + 2)) {
+                low = yy + 2;
+                if (!solidAt(this.spawnTileX, low + 1) && !solidAt(this.spawnTileX, low + 2)) {
+                  high = low + 2;
+                }
+                break;
+              }
+            }
+            if (low > this.spawnTileY) low = this.spawnTileY;
+            if (high > this.spawnTileY) high = this.spawnTileY;
+          }
+          if (N(10)) return null;   // 9/10 空过
+          const r = rng.int(0, 3);
+          // r=0/1 无有效线 → switch 空过 = 本轮空过（原版海滩支内 return 语义）
+          if (r === 0) return low > 0 ? this.spawnNPC(x, low * TILE, 625, rng) : null;
+          if (r === 1) return high > 0 ? this.spawnNPC(x, high * TILE, 615, rng) : null;
+          if (r === 2) {
+            const yy2 = high > 0 ? high : this.spawnTileY;
+            return this.spawnNPC(x, yy2 * TILE, gold() ? 627 : 626, rng);
+          }
+          const yy3 = high > 0 ? high : this.spawnTileY;
+          return this.spawnNPC(x, yy3 * TILE, 688, rng);
         }
         // L4374-4381：蚁狮/秃鹫（昼池内——原版在海滩海鸥支之后、哥布林侦察兵之前；
         //  夜间沙地不出蚁狮/秃鹫，走僵尸族）。蚁狮门 = !waterTile && 黄沙 53 && 1/5 &&
@@ -2775,6 +3017,33 @@ export class VanillaSpawner {
    *  WorldGen.InWorld(x,y,10) 外 → false；自落脚格向下 ≤8 行逐行计数——本行须为
    *  沙族 tile（中断止），并向两侧各延伸 ≤4 格（遇非沙族中断）；
    *  计数 ≥40 通过（remixWorld 阈值 10 未接——本仓无 remix 世界恒 40） */
+  /** FindCattailTop（NPC.cs:80978-81001）：落脚 ±30×±20 窗扫香蒲顶格
+   *  （tile 519 && frameX≥180——水上/水下株顶帧段），`Next(num)==0` 加权
+   *  reservoir 均匀取一（每匹配格一掷，掷序=扫描序）。null=窗口内无香蒲 */
+  private findCattailTop(landX: number, landY: number, rng: RNG): { x: number; y: number } | null {
+    const st = this.world.store;
+    let cx = landX, cy = landY, num = 1;
+    for (let i = landX - 30; i <= landX + 30; i++) {
+      for (let j = landY - 20; j <= landY + 20; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const ti = st.idx(i, j);
+        if (st.flags[ti] && st.type[ti] === T.CATTAIL && st.frameX[ti] >= 180
+          && rng.int(0, num - 1) === 0) {
+          cx = i; cy = j;
+          num++;
+        }
+      }
+    }
+    return cx !== landX || cy !== landY ? { x: cx, y: cy } : null;
+  }
+
+  /** RollDragonflyType（NPC.cs:5426）：沙地 53 → SelectRandom(595,598,600)；
+   *  其余（草 2/477）→ SelectRandom(596,597,599)（均匀三选） */
+  private rollDragonflyType(tileType: number, rng: RNG): number {
+    const pool = tileType === T.SAND ? [595, 598, 600] : [596, 597, 599];
+    return pool[Math.floor(rng.next() * 3)]!;
+  }
+
   private spawningSandstoneCheck(x: number, y: number): boolean {
     const st = this.world.store;
     if (x < 10 || y < 10 || x > st.w - 10 || y > st.h - 10) return false;

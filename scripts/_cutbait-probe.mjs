@@ -4,7 +4,7 @@
 //   3. 出生姿势:背玩家水平弹速 + 上抛 vy∈[-5.0,-2.1]
 //   4. 蝎/鸟族走 spawner——此处只验割草链
 import puppeteer from 'puppeteer-core';
-const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
+const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 }, protocolTimeout: 300_000 });
 const page = await browser.newPage();
 await page.goto(process.env.SW_ORIGIN ?? 'http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 2500));

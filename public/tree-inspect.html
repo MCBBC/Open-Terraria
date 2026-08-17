@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<title>单树渲染解剖台（游戏同源渲染）</title>
+<style>
+  body { margin: 0; background: #1b1b22; color: #ddd; font: 13px/1.5 system-ui, sans-serif; }
+  #wrap { display: flex; height: 100vh; }
+  #side { width: 340px; padding: 12px; box-sizing: border-box; overflow-y: auto; background: #23232c; }
+  #stage { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; flex-direction: column; gap: 8px; }
+  canvas { background: #101018; image-rendering: pixelated; border: 1px solid #444; cursor: crosshair; }
+  canvas.annotate { cursor: cell; }
+  h3 { margin: 14px 0 6px; font-size: 13px; color: #9fd0ff; }
+  .row { margin: 4px 0; }
+  button { background: #3a5a8c; color: #fff; border: 0; border-radius: 4px; padding: 5px 10px; margin: 2px 2px 2px 0; cursor: pointer; font-size: 12px; }
+  button.sel { background: #7c5cd6; }
+  button.warn { background: #8c3a3a; }
+  select, input[type=range] { width: 100%; }
+  textarea { width: 100%; height: 110px; background: #14141a; color: #9f9; border: 1px solid #444; font: 11px monospace; box-sizing: border-box; }
+  #hud { position: absolute; top: 6px; left: 8px; font: 11px monospace; color: #8f8; pointer-events: none; white-space: pre; }
+  .legend { font-size: 11px; color: #aaa; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="side">
+    <h3>树型</h3>
+    <div class="row" id="presets"></div>
+    <button id="reroll">🎲 换一套干件随机</button>
+    <h3>风况</h3>
+    <div class="row" id="windModes"></div>
+    <div class="row">相位滑杆（暂停下微调）<br><input type="range" id="phase" min="0" max="1000" value="0"></div>
+    <h3>缩放 / 视角</h3>
+    <div class="row" id="zooms"></div>
+    <div class="row"><label><input type="checkbox" id="viaChunk" checked> 经 chunk 烘焙（与游戏完全同构）</label></div>
+    <div class="row"><label><input type="checkbox" id="showGrid"> 显示 16px 网格与边界线</label></div>
+    <h3>标注</h3>
+    <div class="row"><button id="markMode">✏️ 标注模式：关</button>
+      <button id="autoDetect">🔍 自动检测全透明行</button>
+      <button id="clearMarks" class="warn">清除标注</button></div>
+    <div class="row legend">标注模式：在画布上点击/拖动标记"你觉得是缝/空"的像素（红）。黄=自动检测的整行透明。导出后把 JSON 发回即可。</div>
+    <button id="export">📋 导出标注 JSON（复制到剪贴板）</button>
+    <textarea id="out" placeholder="导出结果会显示在这里"></textarea>
+    <h3>当前帧数据</h3>
+    <div id="stats" class="legend"></div>
+  </div>
+  <div id="stage">
+    <canvas id="cv"></canvas>
+    <div id="hud"></div>
+  </div>
+</div>
+
+<script type="module">
+import { SpriteAtlas } from '/src/assets/SpriteAtlas.ts';
+import { TileStore } from '/src/world/TileStore.ts';
+import { TILE_BY_KEY } from '/src/data/tiles.ts';
+import { drawTreeCell } from '/src/render/VanillaTiler.ts';
+import { getWindCycle, windSway } from '/src/render/WindSway.ts';
+
+// ── 常量 ─────────────────────────────────────────────
+const T = 16;
+const TREE = TILE_BY_KEY['tree'];
+const GRASS = TILE_BY_KEY['grass'];
+const DIRT = TILE_BY_KEY['dirt'];
+
+// 干件全表（TreePass.TRUNK 同表：case → 3 变体）
+const TRUNK = {
+  0: [[0,0],[0,22],[0,44]], 1: [[0,66],[0,88],[0,110]], 2: [[22,0],[22,22],[22,44]],
+  3: [[44,66],[44,88],[44,110]], 4: [[22,66],[22,88],[22,110]], 5: [[88,0],[88,22],[88,44]],
+  6: [[66,66],[66,88],[66,110]], 7: [[110,66],[110,88],[110,110]],
+  8: [[0,0],[0,22],[0,44]], 9: [[0,0],[0,22],[0,44]],
+};
+const rnd = (n) => Math.floor(Math.random() * n);
+// 随机干列（模拟 growTrunk：顶/底强制 case0，中段随机，5/6/7 出侧枝标记）
+function rollTrunk(h) {
+  const pieces = [];
+  let flagL = false, flagR = false;
+  for (let k = 0; k < h; k++) {
+    const v = rnd(3);
+    let c = rnd(10);
+    if (k === h - 1 || k === 0) c = 0;
+    while (((c === 5 || c === 7) && flagL) || ((c === 6 || c === 7) && flagR)) c = rnd(10);
+    flagL = c === 5 || c === 7; flagR = c === 6 || c === 7;
+    pieces.push({ f: TRUNK[c][v], branch: c === 5 || c === 7 ? -1 : c === 6 || c === 7 ? 1 : 0 });
+  }
+  return pieces;
+}
+const PRESETS = {
+  '矮树 h=4': { h: 4, marker: [22, 220] },
+  '中树 h=7（用户报障世界实例首件 44,110）': { h: 7, marker: [22, 198], topPiece: [44, 110] },
+  '高树 h=14': { h: 14, marker: [22, 242] },
+  '巨树 h=22（EpicTree）': { h: 22, marker: [22, 242] },
+};
+
+// ── 状态 ─────────────────────────────────────────────
+const S = {
+  preset: '中树 h=7（用户报障世界实例首件 44,110）',
+  zoom: 4, windMode: 'idle', paused: false, counter: 0, phaseOverride: null,
+  annotate: false, marks: [], auto: [], viaChunk: true, showGrid: false,
+  tree: null, store: null,
+};
+function buildWorld() {
+  const p = PRESETS[S.preset];
+  const h = p.h;
+  const W = 26, H = 44, grassY = 38;
+  const st = new TileStore(W, H);
+  for (let x = 0; x < W; x++) { st.setTile(x, grassY, GRASS); for (let y = grassY + 1; y < H; y++) st.setTile(x, y, DIRT); }
+  const tx = 13;
+  const pieces = rollTrunk(h);
+  if (p.topPiece) pieces[0] = { f: p.topPiece, branch: pieces[0].branch };
+  for (let k = 0; k < h; k++) {
+    const y = grassY - 1 - k;              // k=0 是干顶
+    st.setTileSilent(tx, y, TREE, pieces[k].f[0], pieces[k].f[1]);
+    if (k >= 2 && k <= h - 3 && pieces[k].branch !== 0 && Math.random() < 0.8) {
+      const side = pieces[k].branch;
+      const bx = tx + side;
+      const bVar = rnd(3);
+      const bfx = side < 0 ? 44 : 66;
+      const bfy = rnd(2) < 2 ? 198 + bVar * 22 : (side < 0 ? bVar * 22 : 66 + bVar * 22);
+      st.setTileSilent(bx, y, TREE, bfx, bfy);
+      pieces[k].branchMarker = [bx, y, bfx, bfy];
+    }
+  }
+  st.setTileSilent(tx, grassY - 1 - h, TREE, p.marker[0], p.marker[1]);
+  S.store = st;
+  S.tree = { x: tx, markerY: grassY - 1 - h, grassY, h, pieces };
+}
+
+// ── 渲染（与 Renderer/ChunkCache/WindSway 同构）────────
+const atlas = new SpriteAtlas();
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const bakeCv = document.createElement('canvas');
+const trees = { treeX: [4, 8, 16, 22], treeStyle: [0, 0, 0, 0], treeTops: [], worldSurface: 30, worldW: 26 };
+const VIEW_W = 13 * T, VIEW_H = 11 * T;   // 世界像素视口（以接缝为中心）
+let cam = { x: 0, y: 0 };
+
+function swayFor(x, y) {
+  if (S.windMode === 'still') return 0;
+  if (S.phaseOverride !== null) {
+    const w = S.windMode === 'gale' ? 1 : 0;
+    const base = Math.cos(S.phaseOverride * Math.PI * 2 + x * 0.5 + Math.floor(y / 100) * 0.5) * 0.5 + w;
+    const lerp = Math.max(0, Math.min(1, (Math.abs(w) - 0.08) / 0.1));
+    return base * (w === 0 ? 0.08 : lerp);
+  }
+  return getWindCycle(x, y, S.counter, 30, false);
+}
+
+function render() {
+  const t = S.tree;
+  const boundaryY = (t.markerY + 1) * T;          // 冠底/干顶交界
+  cam.x = t.x * T + 8; cam.y = boundaryY - 2;
+  const z = S.zoom;
+  cv.width = VIEW_W * z; cv.height = VIEW_H * z;
+  const cw = cv.width, ch = cv.height;
+  // Renderer 同款：像素吸附 + 最近邻
+  const camRX = Math.round(cam.x * z) / z, camRY = Math.round(cam.y * z) / z;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.imageSmoothingEnabled = false;
+
+  const st = S.store;
+  // —— 静态层（干/基座/枝标记）：经 chunk 烘焙（1:1 离屏 → ×z nearest）或直画
+  const drawStatic = (c2, ox, oy) => {
+    c2.imageSmoothingEnabled = false;
+    for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
+      const i = st.idx(x, y);
+      const ty = st.type[i];
+      if (ty === GRASS) { c2.fillStyle = '#3d8f3d'; c2.fillRect(x * T - ox, y * T - oy, T, T); }
+      else if (ty === DIRT) { c2.fillStyle = '#6b4a2b'; c2.fillRect(x * T - ox, y * T - oy, T, T); }
+      else if (ty === TREE) {
+        const fx = st.frameX[i], fy = st.frameY[i];
+        if (fy >= 198) continue;                                   // 冠/枝标记 → 摆动层
+        drawTreeCell(c2, atlas, st, x, y, fx, fy, x * T - ox, y * T - oy, 5, false, trees, 0);
+      }
+    }
+  };
+  if (S.viaChunk) {
+    bakeCv.width = st.w * T; bakeCv.height = st.h * T;
+    const bc = bakeCv.getContext('2d');
+    bc.clearRect(0, 0, bakeCv.width, bakeCv.height);
+    drawStatic(bc, 0, 0);
+    ctx.save();
+    ctx.translate(Math.round(cw / 2), Math.round(ch / 2));
+    ctx.scale(z, z);
+    ctx.translate(-camRX, -camRY);
+    ctx.drawImage(bakeCv, 0, 0);
+    ctx.restore();
+  } else {
+    ctx.save();
+    ctx.translate(Math.round(cw / 2), Math.round(ch / 2));
+    ctx.scale(z, z);
+    ctx.translate(-camRX, -camRY);
+    drawStatic(ctx, 0, 0);
+    ctx.restore();
+  }
+
+  // —— 摆动层（冠/枝：WindSway.drawTreeSway 同源——drawTreeCell(foliageOnly=true, sway)）
+  const swayCells = [];
+  for (let y = 0; y < st.h; y++) for (let x = 0; x < st.w; x++) {
+    const i = st.idx(x, y);
+    if (st.type[i] !== TREE) continue;
+    const fx = st.frameX[i], fy = st.frameY[i];
+    if (fy >= 198) swayCells.push({ x, y, fx, fy });
+  }
+  ctx.save();
+  ctx.translate(Math.round(cw / 2), Math.round(ch / 2));
+  ctx.scale(z, z);
+  ctx.translate(-camRX, -camRY);
+  ctx.imageSmoothingEnabled = false;
+  let lastSway = null;
+  for (const c of swayCells) {
+    const sway = swayFor(c.x, c.y);
+    if (c.fx === 22 || c.fx === 0) lastSway = sway;
+    drawTreeCell(ctx, atlas, st, c.x, c.y, c.fx, c.fy, c.x * T, c.y * T, 5, true, trees, sway);
+  }
+  ctx.restore();
+
+  // 网格/边界线
+  if (S.showGrid) {
+    ctx.save();
+    ctx.translate(Math.round(cw / 2), Math.round(ch / 2));
+    ctx.scale(z, z);
+    ctx.translate(-camRX, -camRY);
+    ctx.strokeStyle = 'rgba(120,180,255,0.28)';
+    ctx.lineWidth = 1 / z;
+    for (let gx = 0; gx <= st.w; gx++) { ctx.beginPath(); ctx.moveTo(gx * T, 0); ctx.lineTo(gx * T, st.h * T); ctx.stroke(); }
+    for (let gy = 0; gy <= st.h; gy++) { ctx.beginPath(); ctx.moveTo(0, gy * T); ctx.lineTo(st.w * T, gy * T); ctx.stroke(); }
+    ctx.strokeStyle = 'rgba(255,80,80,0.8)';
+    ctx.beginPath(); ctx.moveTo(0, boundaryY); ctx.lineTo(st.w * T, boundaryY); ctx.stroke();
+    ctx.restore();
+  }
+
+  // 自动检测行（干列带全透明行）
+  S.auto = [];
+  {
+    const bandX0 = Math.round((t.x * T - 2 - camRX) * z + cw / 2);
+    const bandW = Math.round(20 * z);
+    for (let dy = -8; dy <= 12; dy++) {
+      const sy = Math.round((boundaryY + dy - camRY) * z + ch / 2);
+      if (sy < 0 || sy + 1 >= ch) continue;
+      const d = ctx.getImageData(bandX0, sy, bandW, 1).data;
+      let op = 0;
+      for (let j = 3; j < d.length; j += 4) if (d[j] > 40) op++;
+      if (op === 0) S.auto.push({ wy: boundaryY + dy });
+    }
+  }
+  // 标注（红=人工，黄=自动）
+  for (const a of S.auto) {
+    ctx.fillStyle = 'rgba(255,220,0,0.85)';
+    ctx.fillRect(0, Math.round((a.wy - camRY) * z + ch / 2), cw, Math.max(1, z / 2));
+  }
+  for (const m of S.marks) {
+    const [sx, sy] = w2s(m.wx, m.wy);
+    ctx.fillStyle = 'rgba(255,40,40,0.9)';
+    ctx.fillRect(sx, sy, Math.max(2, z / 2), Math.max(2, z / 2));
+  }
+
+  document.getElementById('hud').textContent =
+    `sway=${lastSway === null ? '-' : lastSway.toFixed(4)}  zoom=${z}  wind=${S.windMode}` +
+    (S.phaseOverride !== null ? `  phase=${S.phaseOverride.toFixed(3)}` : '') +
+    `\n自动透明行: ${S.auto.length ? S.auto.map((a) => a.wy).join(',') : '无'}`;
+  document.getElementById('stats').textContent =
+    `marker=(${t.x},${t.markerY}) 干高=${t.h}\n干件(top→base): ${t.pieces.slice(0, 4).map((p) => p.f.join(',')).join(' | ')} …\n标注 ${S.marks.length} 点 / 自动 ${S.auto.length} 行`;
+
+  requestAnimationFrame(render);
+}
+
+const w2s = (wx, wy) => {
+  const z = S.zoom;
+  const camRX = Math.round(cam.x * z) / z, camRY = Math.round(cam.y * z) / z;
+  return [Math.round((wx - camRX) * z + cv.width / 2), Math.round((wy - camRY) * z + cv.height / 2)];
+};
+const s2w = (sx, sy) => {
+  const z = S.zoom;
+  const camRX = Math.round(cam.x * z) / z, camRY = Math.round(cam.y * z) / z;
+  return [(sx - cv.width / 2) / z + camRX, (sy - cv.height / 2) / z + camRY];
+};
+
+// ── 交互 ─────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+function radio(container, items, get, set) {
+  const el = $(container);
+  for (const [label, val] of items) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.onclick = () => { set(val); [...el.children].forEach((c) => c.classList.remove('sel')); b.classList.add('sel'); };
+    if (get() === val) b.classList.add('sel');
+    el.appendChild(b);
+  }
+}
+radio('presets', Object.keys(PRESETS).map((k) => [k.split('（')[0], k]),
+  () => S.preset, (v) => { S.preset = Object.keys(PRESETS).find((k) => k.startsWith(v)); buildWorld(); });
+radio('windModes', [['静止(sway=0)', 'still'], ['无风微摆(同游戏)', 'idle'], ['强风', 'gale']],
+  () => S.windMode, (v) => { S.windMode = v; S.phaseOverride = null; windSway.wind = v === 'gale' ? 1 : 0; });
+radio('zooms', [['×2', 2], ['×4', 4], ['×8', 8]], () => S.zoom, (v) => { S.zoom = v; });
+$('reroll').onclick = () => buildWorld();
+$('phase').oninput = (e) => { S.phaseOverride = Number(e.target.value) / 1000; };
+$('phase').onchange = () => { if (S.phaseOverride === 0) S.phaseOverride = null; };
+$('viaChunk').onchange = (e) => { S.viaChunk = e.target.checked; };
+$('showGrid').onchange = (e) => { S.showGrid = e.target.checked; };
+$('markMode').onclick = () => {
+  S.annotate = !S.annotate;
+  cv.classList.toggle('annotate', S.annotate);
+  $('markMode').textContent = `✏️ 标注模式：${S.annotate ? '开' : '关'}`;
+};
+let painting = false;
+const paint = (e) => {
+  if (!S.annotate || !painting) return;
+  const r = cv.getBoundingClientRect();
+  const sx = Math.round((e.clientX - r.left) * (cv.width / r.width));
+  const sy = Math.round((e.clientY - r.top) * (cv.height / r.height));
+  const [wx, wy] = s2w(sx, sy);
+  if (!S.marks.some((m) => m.wx === wx && m.wy === wy)) S.marks.push({ wx, wy });
+};
+cv.addEventListener('mousedown', (e) => { painting = true; paint(e); });
+cv.addEventListener('mousemove', paint);
+addEventListener('mouseup', () => { painting = false; });
+$('clearMarks').onclick = () => { S.marks = []; };
+$('autoDetect').onclick = () => { /* 自动行已实时叠加；此按钮仅高亮提示 */ };
+$('export').onclick = () => {
+  const t = S.tree;
+  const data = {
+    tool: 'tree-inspect', preset: S.preset, zoom: S.zoom, windMode: S.windMode,
+    phase: S.phaseOverride, viaChunk: S.viaChunk,
+    tree: { x: t.x, markerY: t.markerY, grassY: t.grassY, h: t.h,
+      marker: PRESETS[S.preset].marker,
+      pieces: t.pieces.map((p) => p.f) },
+    marks_worldpx: S.marks,
+    autoTransparentRows_worldpx: S.auto,
+  };
+  const json = JSON.stringify(data);
+  $('out').value = json;
+  navigator.clipboard?.writeText(json).then(() => { $('out').value = json + '\n（已复制到剪贴板）'; }, () => {});
+};
+
+// 计时（GetWindCycle 同源节律：1/240 + 风加成）
+setInterval(() => { if (!S.paused && S.phaseOverride === null) S.counter += 1 / 240 + (1 / 240) * (S.windMode === 'gale' ? 2 : 0); }, 1000 / 60);
+addEventListener('keydown', (e) => { if (e.key === ' ') { S.paused = !S.paused; e.preventDefault(); } });
+
+buildWorld();
+render();
+</script>
+</body>
+</html>

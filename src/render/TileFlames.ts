@@ -379,7 +379,11 @@ function tintedFlameCell(
   sx: number, sy: number, sw: number, sh: number,
   r: number, g: number, b: number,
 ): HTMLCanvasElement | null {
-  const key = `${sx},${sy},${sw},${sh},${r},${g},${b}`;
+  // ★键必须含贴图身份(Flame_N)：各族源矩形同格同 tint 时会跨表命中——
+  //   例如同为 (0,0,18,18)+(100,100,100) 的 default 族,后画的会拿到先画族的
+  //   颜色(水蜡烛拿到暖色焰=蓝+红叠加观感)。src 属性各 Flame_N 唯一。
+  const imgId = (img as { src?: string }).src ?? String((img as { width: number }).width);
+  const key = `${imgId},${sx},${sy},${sw},${sh},${r},${g},${b}`;
   let c = _tintCache.get(key);
   if (c) return c;
   if (typeof document === 'undefined') return null;
