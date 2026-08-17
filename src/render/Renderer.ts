@@ -943,12 +943,14 @@ export class Minimap {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   dirtyChunks = new Set<number>();
-  constructor(public world: World) {
+  /** deferBuild：跳过构造期同步全量重建（大世界 80MB 级，见 buildStriped），
+   *  由调用方跑分行构建；测试/小世界默认同步行为不变 */
+  constructor(public world: World, deferBuild = false) {
     this.canvas = document.createElement('canvas');
     this.canvas.width = world.w;
     this.canvas.height = world.h;
     this.ctx = this.canvas.getContext('2d')!;
-    this.redrawAll();
+    if (!deferBuild) this.redrawAll();
     world.store.onTileChanged((x, y) => {
       this.dirtyChunks.add(ChunkCache.key(Math.floor(x / CHUNK), Math.floor(y / CHUNK)));
     });
@@ -1018,10 +1020,53 @@ export class Minimap {
   redrawAll() {
     // 性能（2026-08-10，trace 实测 redrawAll 占 1.7s CPU/次进世界）：旧版每格走
     // colorFor 字符串分配 + parseInt（1150 万格 ≈ 秒级冻结 + GC 压力）。改为
-    // 类型/墙 id 数值 LUT + Uint32 直写（小端 ABGR 打包），纯数组循环 ~50ms 级
+    // 类型/墙 id 数值 LUT + Uint32 直写（小端 ABGR 打包），纯数组循环
+    // ★大世界（8400×2400）仍是 80MB ImageData + 2000 万格单微任务巨帧
+    //  （2026-08-18 trace 石锤 811/943ms），Game 进世界路径走 buildStriped 分行
     const { world, ctx } = this;
-    const st = world.store;
-    if (!this._mapLUT || this._mapLUT.tiles.length < TILE_DEFS.length) {
+    this.ensureLUT();
+    const img = ctx.createImageData(world.w, world.h);
+    this.fillBand(0, world.h, img);
+    ctx.putImageData(img, 0, 0);
+    this.dirtyChunks.clear();
+  }
+
+  /** 大世界首次全量构建的分行版（2026-08-18）：new Minimap 构造里同步 redrawAll
+   *  曾把 80MB 画布 + 80MB ImageData + 2000 万格循环全砸进进世界 onload 微任务
+   *  续体（trace 811/943ms 巨帧；GPU 预算临界时直接 contextlost→解码位图逐出
+   *  风暴）。拆 64 行/带、带间让路（MessageChannel，后台页不被节流——setTimeout
+   *  隐藏页 1s/带会让探针/挂机读档假冻结），Game 加载页 await 完成再 onWorldReady。
+   *  构建期间 onTileChanged 照常入 dirtyChunks，完成后 clear（带构建已覆盖全图）；
+   *  flushDirty 的增量重画与本构建写同色，并发安全 */
+  async buildStriped(onProgress?: (p: number) => void): Promise<void> {
+    if (this._stripedDone) return;
+    this._stripedDone = true;
+    const { world, ctx } = this;
+    this.ensureLUT();
+    const BAND = 64;                       // ≈8400×64×4=2.1MB/带，单带 ~15-25ms
+    const bandImg = ctx.createImageData(world.w, Math.min(BAND, world.h));
+    const yieldToEventLoop = () => new Promise<void>((r) => {
+      const { port1, port2 } = new MessageChannel();
+      port1.onmessage = () => { port1.close(); r(); };
+      port2.postMessage(0);
+    });
+    for (let y0 = 0; y0 < world.h; y0 += BAND) {
+      const y1 = Math.min(y0 + BAND, world.h);
+      const rows = y1 - y0;
+      // 末带不足 BAND 时收缩 ImageData（putImageData 以位图实际尺寸为准）
+      const use = rows === bandImg.height ? bandImg : ctx.createImageData(world.w, rows);
+      this.fillBand(y0, y1, use);
+      ctx.putImageData(use, 0, y0);
+      onProgress?.(y1 / world.h);
+      await yieldToEventLoop();
+    }
+    this.dirtyChunks.clear();
+  }
+  private _stripedDone = false;
+
+  /** redrawAll/buildStriped 共用的颜色 LUT 构建（tile/wall id → ABGR，一次性） */
+  private ensureLUT() {
+    if (this._mapLUT && this._mapLUT.tiles.length >= TILE_DEFS.length) return;
       const parse = (hex: string): number => {
         const v = parseInt(hex.slice(1), 16);
         return 0xff000000 | ((v & 255) << 16) | (v & 0xff00) | ((v >> 16) & 255); // 小端 ABGR
@@ -1055,10 +1100,16 @@ export class Minimap {
       liq[1] = rgb(vanillaLiquidColor(0)); liq[2] = rgb(vanillaLiquidColor(1));
       liq[3] = rgb(vanillaLiquidColor(2)); liq[4] = rgb(vanillaLiquidColor(3));
       this._mapLUT = { tiles, walls, liq, dirtBg: rgb(VANILLA_DIRT_BG), rockBg: rgb(VANILLA_ROCK_BG) };
-    }
-    const lut = this._mapLUT;
-    const img = ctx.createImageData(world.w, world.h);
+  }
+
+  /** 行带填充：y0..y1（不含）行写入 band 位图——buf 索引相对带顶（base=y0*world.w）。
+   *  全量（y0=0,y1=h,全幅 img）与分行（64 行带）共用同一热循环 */
+  private fillBand(y0: number, y1: number, img: ImageData) {
+    const world = this.world;
+    const st = world.store;
+    const lut = this._mapLUT!;
     const buf = new Uint32Array(img.data.buffer);
+    const base = y0 * world.w;
     const { type, wall, liquid, liquidType, frameX, frameY, paint, paintWall } = st;
     const surf = Math.max(1, world.groundLevel), rock = Math.max(surf + 1, world.rockLevel);
     // MapHelper.GetMapTileXnaColor（:1865-1882）：colorLookup[type] 后过 MapColor 换漆。
@@ -1087,7 +1138,7 @@ export class Minimap {
       const nr = (c[0] * n6) | 0, ng = (c[1] * n6) | 0, nb = (c[2] * n6) | 0;
       return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
     };
-    for (let y = 0; y < world.h; y++) {
+    for (let y = y0; y < y1; y++) {
       // 背景（无 tile/液体/墙）：天空渐变（y<世界面，CalcSkyGradient lerp）/ 土层底 / 石层底
       const skyC = vanillaSkyColor(y, surf);
       const bg = y < surf ? (0xff000000 | ((skyC[2] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[0] & 255))
@@ -1100,7 +1151,7 @@ export class Minimap {
           // 小地图按原像素色显示，此前走 sheet:0 泥土色恒为 #976B4B
           if (t === PIXEL_ART_TILE) {
             const r = frameX[i] >> 8, g = frameX[i] & 255, b = frameY[i];
-            buf[i] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
+            buf[i - base] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
             continue;
           }
           let c = lut.tiles[t] ?? lut.tiles[0];
@@ -1108,11 +1159,11 @@ export class Minimap {
           if (paint[i] > 0 && TILE_SHEET_OF[t] !== MAP_TILE_NO_PAINT_SHEET) {
             c = mapPaintPacked(c, paint[i], false);
           }
-          buf[i] = c; continue;
+          buf[i - base] = c; continue;
         }
         if (liquid[i] > 32) {
           const lt = liquidType[i];
-          buf[i] = lut.liq[lt >= 1 && lt <= 4 ? lt : 1];
+          buf[i - base] = lut.liq[lt >= 1 && lt <= 4 ? lt : 1];
           continue;
         }
         const wl = wall[i];
@@ -1122,14 +1173,12 @@ export class Minimap {
           if (paintWall[i] > 0 && !MAP_WALL_NO_PAINT.has(wl)) {
             c = mapPaintPacked(c, paintWall[i], true);
           }
-          buf[i] = c;
+          buf[i - base] = c;
         } else {
-          buf[i] = bg;
+          buf[i - base] = bg;
         }
       }
     }
-    ctx.putImageData(img, 0, 0);
-    this.dirtyChunks.clear();
   }
   /** redrawAll 用的颜色 LUT（tile/wall id → ABGR） */
   private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number } | null = null;
@@ -5860,13 +5909,13 @@ export class Renderer {
 
   private drawSkeletronArm(hand: Enemy, head: Enemy) {
     if (this.armBoneImg === undefined) {
-      loadBitmapOnly('sprites/vanilla/Arm_Bone.png', () => !!(this.armBoneImg), (x) => { this.armBoneImg = x as unknown as typeof this.armBoneImg; });
+      loadBitmapOnly('vanilla/Arm_Bone.png', () => !!(this.armBoneImg), (x) => { this.armBoneImg = x as unknown as typeof this.armBoneImg; });
     }
     // Red Hat 族（生成时 head.ai[3]=1 :81269-81271，手 localAI[3] 每 tick 镜像 :22304）
     // → 换 Arm_Bone_3（:22571-22578；rect/origin 两分支同用 BoneArm 尺寸，原版 quirk）
     const redHat = head.ai3 === 1;
     if (redHat && this.boneArm3Img === undefined) {
-      loadBitmapOnly('sprites/vanilla/Arm_Bone_3.png', () => !!(this.boneArm3Img), (x) => { this.boneArm3Img = x as unknown as typeof this.boneArm3Img; });
+      loadBitmapOnly('vanilla/Arm_Bone_3.png', () => !!(this.boneArm3Img), (x) => { this.boneArm3Img = x as unknown as typeof this.boneArm3Img; });
     }
     const img = redHat ? this.boneArm3Img : this.armBoneImg;
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -5901,7 +5950,7 @@ export class Renderer {
    *  (W/2, 帧高/2)，rotation 0——本体贴图之下仍画在实体层（原版同段叠画） */
   private drawPumpkingCloak(e: Enemy) {
     if (this.pumpkingCloakImg === undefined) {
-      loadBitmapOnly('sprites/vanilla/PumpkingCloak.png', () => !!(this.pumpkingCloakImg), (x) => { this.pumpkingCloakImg = x as unknown as typeof this.pumpkingCloakImg; });
+      loadBitmapOnly('vanilla/PumpkingCloak.png', () => !!(this.pumpkingCloakImg), (x) => { this.pumpkingCloakImg = x as unknown as typeof this.pumpkingCloakImg; });
     }
     const img = this.pumpkingCloakImg;
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -5919,7 +5968,7 @@ export class Renderer {
    *  (-200*ai[0],+130)/(-50*ai[0],+80)，贴图 PumpkingArm（26×96）整幅 */
   private drawPumpkingArm(blade: Enemy, master: Enemy) {
     if (this.pumpkingArmImg === undefined) {
-      loadBitmapOnly('sprites/vanilla/PumpkingArm.png', () => !!(this.pumpkingArmImg), (x) => { this.pumpkingArmImg = x as unknown as typeof this.pumpkingArmImg; });
+      loadBitmapOnly('vanilla/PumpkingArm.png', () => !!(this.pumpkingArmImg), (x) => { this.pumpkingArmImg = x as unknown as typeof this.pumpkingArmImg; });
     }
     const img = this.pumpkingArmImg;
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -8658,19 +8707,21 @@ export class Renderer {
     Retro:    { fo: [-10, -10], reset: [150, 236], zoomIn: [202, 236], zoomOut: [176, 236] },
     Valkyrie: { fo: [-10, -10], reset: [154, 242], zoomIn: [206, 240], zoomOut: [180, 244] },
   };
-  /** 选中皮肤的 4 张贴图（懒加载缓存，切皮肤自动换批） */
-  private minimapSkinTex = new Map<string, { frame: ImageBitmap | HTMLImageElement; reset: ImageBitmap | HTMLImageElement; zoomIn: ImageBitmap | HTMLImageElement; zoomOut: HTMLImageElement }>();
-  private minimapSkinAssets(): { skin: typeof Renderer.MINIMAP_SKINS[string]; tex: { frame: ImageBitmap | HTMLImageElement; reset: ImageBitmap | HTMLImageElement; zoomIn: ImageBitmap | HTMLImageElement; zoomOut: HTMLImageElement } } {
+  /** 选中皮肤的 4 张贴图（懒加载缓存，切皮肤自动换批）。bitmap-only：未就绪槽
+   *  为 null，minimapSkinAssets 每次调用补查（在飞守卫防重发） */
+  private minimapSkinTex = new Map<string, Partial<Record<'frame' | 'reset' | 'zoomIn' | 'zoomOut', ImageBitmap | HTMLImageElement>>>();
+  private minimapSkinAssets(): { skin: typeof Renderer.MINIMAP_SKINS[string]; tex: Partial<Record<'frame' | 'reset' | 'zoomIn' | 'zoomOut', ImageBitmap | HTMLImageElement>> } {
     const name = Renderer.MINIMAP_SKINS[options.data.minimapFrame] ? options.data.minimapFrame : 'Default';
     let tex = this.minimapSkinTex.get(name);
-    if (!tex) {
-      tex = {
-        frame: this.loadUiTex(`UI_Minimap_${name}_MinimapFrame`),
-        reset: this.loadUiTex(`UI_Minimap_${name}_MinimapButton_Reset`),
-        zoomIn: this.loadUiTex(`UI_Minimap_${name}_MinimapButton_ZoomIn`),
-        zoomOut: this.loadUiTex(`UI_Minimap_${name}_MinimapButton_ZoomOut`),
-      };
-      this.minimapSkinTex.set(name, tex);
+    if (!tex) { tex = {}; this.minimapSkinTex.set(name, tex); }
+    const want: Record<'frame' | 'reset' | 'zoomIn' | 'zoomOut', string> = {
+      frame: `UI_Minimap_${name}_MinimapFrame`,
+      reset: `UI_Minimap_${name}_MinimapButton_Reset`,
+      zoomIn: `UI_Minimap_${name}_MinimapButton_ZoomIn`,
+      zoomOut: `UI_Minimap_${name}_MinimapButton_ZoomOut`,
+    };
+    for (const k of Object.keys(want) as Array<'frame' | 'reset' | 'zoomIn' | 'zoomOut'>) {
+      if (!tex[k]) { const v = this.loadUiTex(want[k]); if (v) tex[k] = v; }
     }
     return { skin: Renderer.MINIMAP_SKINS[name], tex };
   }
@@ -8690,12 +8741,18 @@ export class Renderer {
   /** UI 点击边沿检测（render 存 _mouseDown，drawMinimap 末尾更新） */
   private _uiPrevMouseDown = false;
 
-  private loadUiTex(name: string, onUp?: (b: ImageBitmap) => void): HTMLImageElement {
-    const img = new Image();
-    // 小地图皮肤 4 张:升级后替换持有者(minimapSkinTex 查表处宽类型)
-    img.onload = () => upgradeToBitmap(img, (b) => { onUp?.(b); });
-    img.src = `sprites/vanilla-ui/${name}.png`;
-    return img;
+  /** UI 贴图 bitmap-only 缓存（loadBitmapOnly：在飞守卫 + 失败回退 Image 永不缺图）。
+   *  未就绪返回 null（消费方跳帧自愈）。★旧版返回 Image 且升级位图被丢弃——
+   *  小地图框等每帧 HUD 绘制持 Image，解码位图被逐出时反复 LazyPixelRef
+   *  （trace 2026-08-18 残余流 ~500/s×4s 的主源） */
+  private uiTexCache = new Map<string, ImageBitmap | HTMLImageElement>();
+  private loadUiTex(name: string): ImageBitmap | HTMLImageElement | null {
+    const hit = this.uiTexCache.get(name);
+    if (hit) return hit;
+    loadBitmapOnly(`vanilla-ui/${name}.png`,
+      () => this.uiTexCache.has(name),
+      (v) => this.uiTexCache.set(name, v));
+    return null;
   }
 
   /** 洞穴探险/危险感/狩猎/群系视觉 tile 高亮集（TILE_DEFS key 启发式，模块级缓存） */
@@ -8816,18 +8873,18 @@ export class Renderer {
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
     const { skin, tex } = this.minimapSkinAssets();
     const fx = ox + 4 + skin.fo[0], fy = oy + 4 + skin.fo[1];
-    if ((tex.frame.width > 0)) ctx.drawImage(tex.frame, fx, fy);
+    if (tex.frame && tex.frame.width > 0) ctx.drawImage(tex.frame, fx, fy);
     // 按钮：悬停高亮 + 按住生效（MinimapFrame.Update/Click：mouseLeft 持续，×1.025/0.975 步进）
     this.minimapUiHover = false;
-    const btns: Array<[HTMLImageElement, readonly [number, number], 'in' | 'out' | 'reset']> = [
-      [tex.zoomIn as HTMLImageElement, skin.zoomIn, 'in'],
-      [tex.zoomOut as HTMLImageElement, skin.zoomOut, 'out'],
-      [tex.reset as HTMLImageElement, skin.reset, 'reset'],
+    const btns: Array<[ImageBitmap | HTMLImageElement | undefined, readonly [number, number], 'in' | 'out' | 'reset']> = [
+      [tex.zoomIn, skin.zoomIn, 'in'],
+      [tex.zoomOut, skin.zoomOut, 'out'],
+      [tex.reset, skin.reset, 'reset'],
     ];
     for (const [tex, [bx, by], kind] of btns) {
       const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
       const hovering = Math.abs(lmX(this._mouseX) - cx) < 11 && Math.abs(lmY(this._mouseY) - cy) < 11;
-      if (!hovering || !(tex.width > 0)) continue;
+      if (!hovering || !tex || !(tex.width > 0)) continue;
       this.minimapUiHover = true;
       ctx.drawImage(tex, fx + bx, fy + by);
       if (this._mouseDown) {

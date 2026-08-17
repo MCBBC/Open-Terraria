@@ -1234,7 +1234,10 @@ export class FlailProj extends Entity {
     const ctx = r.canvas.getContext('2d');
     if (ctx) this.drawChain(ctx, r);
     // alpha 原版语义(Main.cs:28965 color *= (255-alpha)/255——越大越透明)
-    drawProj(r, cam, this, this.projId, this.rotation, '#E04040', Math.max(0, (255 - this.alpha) / 255));
+    // 链球族（25/26/35/63/154/247/757）都在 :32360 中心锚组——球心=盒中心、
+    // origin=贴图中心（曾走 num145 偏置锚：球体枢轴偏移+链连接点错位）
+    drawProj(r, cam, this, this.projId, this.rotation, '#E04040',
+      Math.max(0, (255 - this.alpha) / 255), 0, false, true);
   }
 
   /** 链条（DrawProj_FlailChains Main.cs:34752-34842 1:1）：球心 → 手臂方向逐节

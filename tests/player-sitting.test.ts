@@ -7,6 +7,7 @@ import { getSittingTargetInfo, SITTABLE_SHEETS } from '../src/player/PlayerSitti
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TILE } from '../src/core/constants';
+import { TileStore } from '../src/world/TileStore';
 
 function worldWithChair(): { w: World; chairX: number; chairY: number } {
   const w = new World(80, 80, 7, 'open');
@@ -110,5 +111,45 @@ describe('睡床锚点（GetSleepingTargetInfo :193-224）', () => {
     expect(row).toBe(20);
     expect(dir).toBe(-1);
     expect(anchorX).toBe(344);
+  });
+});
+
+// 睡眠物理锁 + 输入起床（SH:103-105 + isLockedToATile :3858-3868，2026-08-17 复查批）
+import { Inventory } from '../src/items/Inventory';
+import { Player } from '../src/entities/Player';
+
+function sleepPlayer(): { p: Player; hooks: import('../src/entities/types').GameHooks } {
+  const store = new TileStore(40, 30);
+  for (let x = 0; x < 40; x++) store.setTile(x, 25, 1);
+  const p = new Player(100, 100, new Inventory());
+  p.sleeping = true;
+  const hooks = {
+    world: { store }, enemies: () => [], critters: () => [],
+    spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+    onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
+    notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
+  } as never;
+  return { p, hooks };
+}
+
+describe('睡眠物理锁与输入起床', () => {
+  it('睡中无输入：velocity 恒 0、位置钉死（物理锁含 sleeping）', () => {
+    const { p, hooks } = sleepPlayer();
+    p.vx = 5; p.vy = 3;
+    const y0 = p.y;
+    p.fixedUpdate(1, hooks);
+    expect(p.sleeping).toBe(true);
+    expect(p.vx).toBe(0);
+    expect(p.vy).toBe(0);
+    expect(p.y).toBe(y0);              // 无重力下坠（曾 sleeping 漏锁）
+  });
+
+  it('睡中按方向/跳跃 → 当帧起床（SH:103-105）', () => {
+    const a = sleepPlayer(); a.p.inputX = -1;
+    a.p.fixedUpdate(1, a.hooks);
+    expect(a.p.sleeping).toBe(false);
+    const b = sleepPlayer(); b.p.inputJump = true;
+    b.p.fixedUpdate(1, b.hooks);
+    expect(b.p.sleeping).toBe(false);
   });
 });

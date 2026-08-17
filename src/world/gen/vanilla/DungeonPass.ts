@@ -1397,7 +1397,9 @@ export function runDungeonPass(
   const FENCE = 245;
   const dgTW = (globalThis as { __dgTowerTrace?: Record<string, number | string> }).__dgTowerTrace;
   function dgPlaceWallFence(x: number, y: number): void {
-    // 实验位：write-gated 掷（H2 假说：PlaceWall 掷在写门内）
+    // ★PlaceWall(245) 掷在写门内（XX 批 x86 对拍定谳：s4444 tower 段 E 哈希
+    //   b4788d7e 仅在 write-gated 模型下命中——与 jungle 段 PlaceWall
+    //   "成功落墙必掷 SquareWallFrame" 同口径；155 次调用仅 151 写=151 掷）
     if (x > 1 && y > 1 && x < w - 2 && y < h - 2 && wallAt(x, y) === 0) { raw(); st.wall[st.idx(x, y)] = FENCE; }
   }
   // TowerEntrance_LineOfFence（:463-476）：y<=10 直退；条件循环不变量→全或无

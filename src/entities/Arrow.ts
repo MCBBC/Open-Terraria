@@ -193,8 +193,9 @@ const PROJ_SPIN: Record<number, (a: Arrow) => number> = {
 
 /** 直立族（aiStyle 29 全链 :24994-25207 零 rotation 赋值=恒不旋转）：宝石法杖箭
  *  121-126（739-744 六色杖）/521 水晶脉冲/597 琥珀箭——曾走默认 +π/2 对速度
- *  旋转（宝石随飞行方向翻滚），原版恒直立 */
-const PROJ_NO_ROT = new Set([121, 122, 123, 124, 125, 126, 521, 597]);
+ *  旋转（宝石随飞行方向翻滚），原版恒直立；79 彩虹光弹 = :32420-32423 显式
+ *  num327=0 直立（另带按 12 帧前位移的 scale 渐缩——scale 通道登记未接） */
+const PROJ_NO_ROT = new Set([121, 122, 123, 124, 125, 126, 521, 597, 79]);
 export { PROJ_NO_ROT };
 export { PROJ_ROT_RIGHT };
 

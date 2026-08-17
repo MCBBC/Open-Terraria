@@ -1764,12 +1764,20 @@ export class Player extends Entity {
         this.lastStoned = stonedNow;
       }
     }
-    // 坐椅（isLockedToATile Player.cs:3858-3868）：重力/常规移动锁死——velocity 恒 0
-    //（原版坐/睡态不跑 SlopingCollision 输入侧；锚点钉在座位）。buff/液体/受伤照常。
-    if (this.sitting) {
+    // 睡中移动/跳跃/下移/上坐骑输入 → 起床（SH:103-105 controlLeft/Right/Up/Down/
+    // Jump/pulley/mount → StopSleeping；须在物理锁【之前】判，睡中不响应移动）
+    if (this.sleeping
+      && (this.inputX !== 0 || this.inputJump || this.inputUp || this.inputDown
+        || this.ridingMount)) {
+      this.sleeping = false;
+    }
+    // 坐椅/睡床（isLockedToATile Player.cs:3858-3868）：重力/常规移动锁死——velocity
+    // 恒 0（原版坐/睡态不跑 SlopingCollision 输入侧；锚点钉在座位/床锚）。buff/液体/
+    // 受伤照常。★sleeping 曾漏在条件外——睡中重力/移动链照跑（按方向键"边睡边走"）
+    if (this.sitting || this.sleeping) {
       this.vx = 0; this.vy = 0;
       this.onGround = true;
-      this.sitTicks++;
+      if (this.sitting) this.sitTicks++;
       return;
     }
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管

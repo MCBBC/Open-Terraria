@@ -55,6 +55,17 @@ import { runStatuesPass } from '../src/world/gen/vanilla/StatuesPass';
 import { runCaveWallsPass } from '../src/world/gen/vanilla/CaveWallsPass';
 import { runUndergroundJungleTreesPass } from '../src/world/gen/vanilla/UndergroundJungleTreesPass';
 import { runQuickCleanupPass } from '../src/world/gen/vanilla/QuickCleanupPass';
+// QQ 批追加（2026-08-18）：Beehives/Piles/Trees/SettleLiquidsPart2/Cactus——oracle 末尾追加区同序
+import { runBeehivePass } from '../src/world/gen/vanilla/HiveSpiderPass';
+import { runPilesPass } from '../src/world/gen/vanilla/PilesPass';
+import { runTreePass } from '../src/world/gen/vanilla/TreePass';
+import { runCactusPalmTreesAndCoralPass } from '../src/world/gen/vanilla/StructuresPass';
+import { LiquidSim } from '../src/world/liquid/LiquidSim';
+import { snapshotGenSolid, flipGenSolid } from '../src/world/gen/vanilla/GenSolid';
+import type { World } from '../src/world/World';
+import type { TileStore } from '../src/world/TileStore';
+import type { GenState } from '../src/world/gen/vanilla/GenState';
+import type { RNG } from '../src/core/rng';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -253,7 +264,65 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runUndergroundJungleTreesPass(st, rng, gs); snap('undergroundjungletrees');
   replay(); // ▶QuickCleanup cs:17987（island：#69 IslandHouses 跳段）
   runQuickCleanupPass(st, rng, gs); snap('quickcleanup');
+  // ===== QQ 批追加（2026-08-18）：与 caves-oracle 末尾追加区同序 =====
+  // Beehives 原版注册位 cs:16005（statues 之前）——受 oracle 段位协商约束（YY 独占
+  // dungeon 段，本批只动末尾追加区）延后到 quickcleanup 之后执行，两侧同序推进，
+  // 链内 parity 不受影响；与绝对原版序的网格差为备案偏差（终局金标窗口再生时归位）。
+  // 追加区内保持相对注册序：Beehives(16005) < Piles(18900) < Trees(20085) <
+  // SettleLiquidsPart2(21051) < Cactus(21115)。
+  replay(); // ▶Beehives cs:16005（追加区延后位）
+  runBeehivePass(st, rng, gs); snap('beehives');
+  replay(); // ▶Piles cs:18900
+  runPilesPass(st, rng, gs); snap('piles');
+  replay(); // ▶Trees cs:20085
+  runTreePass(st, rng, gs); snap('trees');
+  replay(); // ▶SettleLiquidsPart2 cs:21051
+  settlePart2ChainSync(world, st, gs, rng); snap('settle2');
+  replay(); // ▶CactusPalmTreesAndCoral cs:21115
+  runCactusPalmTreesAndCoralPass(st, rng, gs); snap('cactus');
   return { grids: out, walls: outWall };
+}
+
+/** settleWorldLiquids(world,'gen') 的同步镜像（src/liquid/settle.ts gen 路径零 await 版）——
+ *  掷骰走 pass 链流（passRand=rng），与 oracle settle2 段同构：quickWater → waterCheck →
+ *  10 轮 quickSettle updateLiquid（轮预算=轮始活量×5 恒跑满）→ 尾部 waterCheck →
+ *  finalGenMergeCheck + tileSolid[484]=false。 */
+function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RNG): void {
+  const sim = new LiquidSim(world);
+  sim.passRand = (max) => rng.nextInt(max);
+  sim.isGeneratingOrLoadingWorld = true;
+  sim.generatingWorld = true;
+  sim.shimmerCenter = gs.shimmerX > 0 ? { x: gs.shimmerX, y: gs.shimmerY } : null;
+  sim.genWaterLine = gs.waterLine;
+  if (gs.dungeonSide !== 0) {
+    const edge = Math.floor(world.w * 0.05);
+    const mid = Math.floor(world.w * 0.55);
+    const x0 = gs.dungeonSide < 0 ? edge : mid;
+    const x1 = gs.dungeonSide < 0 ? Math.floor(world.w * 0.45) : world.w - edge;
+    const y0 = Math.floor(gs.worldSurface) + 10;
+    const y1 = (world.h - 200) - 10;
+    sim.dungeonWaterExempt = (x, y, w) =>
+      x >= x0 && x <= x1 && y >= y0 && y <= y1
+      && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
+  }
+  sim.applyGenSolidOverrides(snapshotGenSolid());
+  sim.worldGenTilesIgnoreWater(true);
+  sim.quickWater();
+  sim.waterCheck();
+  sim.quickSettle = true;
+  for (let round = 0; round < 10; round++) {
+    const maxIter = (sim.numLiquid + sim.bufferLen) * 5;   // 轮预算=轮始活量×5（无下限）
+    let roundIter = 0;
+    while (sim.numLiquid > 0 && roundIter < maxIter) { sim.updateLiquid(); roundIter++; }
+    sim.waterCheck();
+  }
+  sim.quickSettle = false;
+  sim.worldGenTilesIgnoreWater(false);
+  sim.waterCheck();
+  sim.finalGenMergeCheck();
+  sim.dispose();
+  // pass 尾 tileSolid[484]=false（cs:21111，liquidSettlePass 同款——desert 头已翻，幂等）
+  flipGenSolid([484], false);
 }
 
 // SW_FREEZE_CAVES=1 时本对账 describe 让位给 _freeze-caves.test.ts（避免导入副作用
@@ -294,7 +363,9 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         'livingtrees', 'livingtreewalls', 'altars', 'surfacewaterinjungle',
         // 链外扩展批（2026-08-17，整 pass 跳段——金标终局窗口再生前这些名在旧
         // 金标中不存在=预期红，见 chainCheckpoints 尾注）
-        'statues', 'cavewalls', 'undergroundjungletrees', 'quickcleanup'];
+        'statues', 'cavewalls', 'undergroundjungletrees', 'quickcleanup',
+        // QQ 批追加（2026-08-18，oracle 末尾追加区同序——预期红同上）
+        'beehives', 'piles', 'trees', 'settle2', 'cactus'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

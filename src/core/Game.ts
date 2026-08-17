@@ -702,6 +702,9 @@ export class Game implements GameHooks {
   player!: Player;
   camera!: Camera;
   renderer: Renderer;
+  /** 小地图拆带构建的完成 Promise（afterWorldLoad 内启动；三条进世界路径
+   *  await 后才 onWorldReady——见 Minimap.buildStriped 大世界巨帧注释） */
+  minimapReady: Promise<void> | null = null;
   chunks!: ChunkCache;
   lighting!: LightingEngine;
   liquid!: LiquidSim;
@@ -2303,6 +2306,7 @@ export class Game implements GameHooks {
         onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
         applyDifficulty();
         this.afterWorldLoad();
+        await this.minimapReady;   // 小地图拆带构建完成(见 new Minimap 注释)再进图
         this.cb.onWorldReady();
         return;
       } catch (e) {
@@ -2320,6 +2324,7 @@ export class Game implements GameHooks {
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
     applyDifficulty();
     this.afterWorldLoad();
+    await this.minimapReady;       // 同 worker 路径:拆带构建完成再进图
     this.cb.onWorldReady();
   }
 
@@ -2470,6 +2475,7 @@ export class Game implements GameHooks {
     }
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2), opts?.playerAt);
     this.afterWorldLoad();
+    await this.minimapReady;       // 同生成路径:大世界拆带构建完成再进图
     this.cb.onWorldReady();
   }
 
@@ -2760,7 +2766,12 @@ export class Game implements GameHooks {
     this.sfx.setListener(w.spawnX * TILE, w.spawnY * TILE);
     this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
     this.camera = new Camera(w.w, w.h);
-    this.renderer.minimap = new Minimap(w);
+    // 大世界小地图全量构建拆带(2026-08-18 trace 石锤 811/943ms 进世界巨帧 =
+    //  new Minimap 构造同步 redrawAll:80MB 画布+80MB ImageData+2000 万格循环
+    //  全在 onload 微任务续体一次砸下):deferBuild + buildStriped 分行让路,
+    //  三条进世界路径 await 完成再 onWorldReady(加载页多停 ~1s,进图零巨帧)
+    this.renderer.minimap = new Minimap(w, true);
+    this.minimapReady = this.renderer.minimap.buildStriped();
     // 火把锚定（TileObjectData tile4）：支撑被挖掉时火把掉落（WorldGen.TileFrame 火把语义）
     w.store.onTileChanged((x, y) => this.checkTorchDetach(x, y));
     // 训练假人（tile 378 + NPC 488，TETrainingDummy L131 语义）：
@@ -6547,6 +6558,9 @@ export class Game implements GameHooks {
       if (this.player.useTime === 0 && (!this.swing || this.swing.t <= 1)) {
         this.swing = { t: spd, dur: spd, item: held!.id };
         this.player.useTime = spd;
+        // 使用转身（Player.cs:46561-46589：flag 对全物品默认 true——镐/斧/锤同样
+        // ChangeDir 向使用方向，仅 723/3611 例外；方向 = 目标格侧，武器族同款）
+        this.player.facing = tx * TILE + 8 >= this.player.cx ? 1 : -1;
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
         // 挥击音 = 工具 UseSound（镐/斧/锤 SetDefaults UseSound=Item1，Player.cs

@@ -306,7 +306,14 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     //   至少以新流开始"；槽内含多个原版 pass 的包装（vanillaCaves/vanillaBiomes/
     //   vanillaStructures/statuesChestsPass 等）另有内部各 pass 边界的 rng.reseed。
     ctx.rng.reseed(world.seed);
-    await passes[i].run(ctx, () => {});
+    try {
+      await passes[i].run(ctx, () => {});
+    } catch (err) {
+      // pass 级错误包一层名字——worker 端最小化栈只有 "Maximum call stack size
+      // exceeded" 时无从定位（2026-08-18 用户报 21% 栈溢出）；重抛保原栈
+      throw new Error(`[pass ${i + 1}/${passes.length} ${passes[i].name}] ${(err as Error)?.message ?? err}`,
+        { cause: err });
+    }
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
   }
