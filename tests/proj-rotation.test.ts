@@ -2,7 +2,7 @@
 // (用户报"食人鱼枪的鱼要转 90 度"——根因 = 通用绘制恒 +π/2)
 // 数据锚:scripts/_projrot-audit.mjs 扫 AI_001 type 链 + 各 AI 的 rotation 赋值
 import { describe, it, expect } from 'vitest';
-import { PROJ_ROT_RIGHT, PROJ_ROT_DIAG } from '../src/entities/Arrow';
+import { PROJ_ROT_RIGHT, PROJ_ROT_DIAG, PROJ_NO_ROT } from '../src/entities/Arrow';
 import { Arrow } from '../src/entities/Arrow';
 
 describe('PROJ_ROT_RIGHT 朝右贴图族(原版 rotation=ToRotation,非 +π/2)', () => {
@@ -48,5 +48,41 @@ describe('PROJ_ROT_DIAG 剑气族(aiStyle 27,rotation=atan2+0.785 即 +45°,:248
     a.draw({ canvas: { getContext: () => ctx } } as never, {} as never);
     expect(rotate).toHaveLength(1);
     expect(rotate[0]).toBeCloseTo(Math.PI / 4, 5);
+  });
+});
+
+describe('武器弹幕旋转全审计（AI_001 异常分支 ∩ 武器可达，2026-08-17 复查批）', () => {
+  // 直立族：宝石法杖箭恒不旋转（aiStyle 29 :24994-25207 零 rotation 赋值）
+  it('NO_ROT：121-126/521/597（六色宝石杖 739-744）恒直立', () => {
+    for (const id of [121, 122, 123, 124, 125, 126, 521, 597]) {
+      expect(PROJ_NO_ROT.has(id), `proj ${id}`).toBe(true);
+    }
+  });
+
+  it('660 天穹碎裂 → DIAG(+45°)；485 地狱之翼 → RIGHT(朝右+flip)', () => {
+    expect(PROJ_ROT_DIAG.has(660)).toBe(true);
+    expect(PROJ_ROT_RIGHT.has(485)).toBe(true);
+  });
+
+  it('312 南瓜灯恒旋：两 tick spinRot = 2×vx×0.02，绘制不对齐速度', () => {
+    const a = new Arrow(0, 0, 10, 0, 10, 2, 312, null, { grav: 0 });
+    const hooks = {
+      world: {
+        store: {
+          inBounds: () => true, get: () => 0, isSolid: () => false,
+          w: 100, h: 100, liquid: new Uint8Array(1), liquidType: new Uint8Array(1),
+        },
+      },
+      enemies: () => [], critters: () => [], spawnDrop: () => null,
+      addDamageNumber: () => {}, cutTile: () => {}, onEnemyKilled: () => {},
+      spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
+      damagePlayer: () => {}, notifyInventoryChanged: () => {}, showPickupLabel: () => {},
+      spawnEnemy: () => {},
+    } as never;
+    a.fixedUpdate(1, hooks);
+    const r1 = a.spinRot;
+    a.fixedUpdate(1, hooks);
+    expect(r1).toBeCloseTo(0.2, 6);
+    expect(a.spinRot).toBeCloseTo(0.4, 6);
   });
 });

@@ -173,15 +173,29 @@ interface PiranhaTarget {
  *  190 食人鱼（aiStyle 39，1156 食人鱼枪；曾恒 +π/2 → 鱼 90° 侧翻）、
  *  837（AI_001 显式 MIRROR 分支 :54715，1313 骷髅头法书 shoot）、
  *  1023（AI_001 仅 wiggle :54743，基姿态 0 朝右，5460 发射器） */
-const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023]);
+const PROJ_ROT_RIGHT = new Set([16, 34, 190, 837, 1023, 485]);
 
 /** aiStyle 27 剑气族（AI_027 尾部 :24858-24861：rotation = atan2(vy,vx) + 0.785
  *  = 速度角 + 45°，斜向剑气贴图）——曾走默认 +π/2 恒偏 45°（用户报"附魔剑
  *  光束角度偏"）。成员：114 邪恶三叉戟弹(683)/115 敌侧/116 光束剑波(723)/
  *  132 泰拉刃波/156 光束/173 附魔剑波(989)。例外 157 夜波=direction×0.4 旋转体
  *  （1.4.5 已无武器射出，未移植登记） */
-const PROJ_ROT_DIAG = new Set([114, 115, 116, 132, 156, 173]);
+const PROJ_ROT_DIAG = new Set([114, 115, 116, 132, 156, 173, 660]);
 export { PROJ_ROT_DIAG };
+
+/** 恒旋族（AI_001 尾链 :54741-54749/:54822-54825：rotation 每帧累加、不对齐速度）：
+ *  312 南瓜灯 += vx*0.02；772 晶洞 += sign(vx)·(|vx|+|vy|)·0.05。
+ *  同链其余（248 花瓣/483 种子/532 骨手套/675 黑法师弹/921·926·937）无武器可达。 */
+const PROJ_SPIN: Record<number, (a: Arrow) => number> = {
+  312: a => a.vx * 0.02,
+  772: a => Math.sign(a.vx) * (Math.abs(a.vx) + Math.abs(a.vy)) * 0.05,
+};
+
+/** 直立族（aiStyle 29 全链 :24994-25207 零 rotation 赋值=恒不旋转）：宝石法杖箭
+ *  121-126（739-744 六色杖）/521 水晶脉冲/597 琥珀箭——曾走默认 +π/2 对速度
+ *  旋转（宝石随飞行方向翻滚），原版恒直立 */
+const PROJ_NO_ROT = new Set([121, 122, 123, 124, 125, 126, 521, 597]);
+export { PROJ_NO_ROT };
 export { PROJ_ROT_RIGHT };
 
 export class Arrow extends Entity {
@@ -251,6 +265,8 @@ export class Arrow extends Entity {
   tumblePoseLock: boolean;
   /** 翻滚累积角（tumble 专用，勿与 Enemy.spin 混） */
   tumbleRot = 0;
+  /** 恒旋累积角（PROJ_SPIN 族：312 南瓜灯/772 晶洞，AI_001 :54741/:54824） */
+  spinRot = 0;
   /** 已存活 tick（延迟重力/追踪门用） */
   age = 0;
   // ---- 大地法杖巨石 261（AI_014 type 段 :18235/:12745）专属态 ----
@@ -489,11 +505,17 @@ export class Arrow extends Entity {
     if (rightArt && flipLeft) {
       ctx.scale(-1, 1);              // 先镜像再旋转（R(π−ang)∘M ≡ 原版 flip+atan2(−vy,−vx)）
       ctx.rotate(Math.PI - ang);
+    } else if (PROJ_SPIN[this.projId]) {
+      ctx.rotate(this.spinRot);      // 恒旋族（:54741/:54824 累加不对齐速度）
+    } else if (PROJ_NO_ROT.has(this.projId)) {
+      /* 直立族（aiStyle 29 零 rotation）：恒不旋转 */
     } else {
       ctx.rotate(rightArt ? ang
         : PROJ_ROT_DIAG.has(this.projId) ? ang + Math.PI / 4   // aiStyle 27 剑气 +45°（:24860）
           : ang + Math.PI / 2);
     }
+    // 469 蜂箭（:54789-54798）：vx>0 → spriteDirection=-1（贴图朝左，源翻转语义）
+    if (this.projId === 469 && this.vx > 0) ctx.scale(-1, 1);
     // 502 朝向（:22659-22665）：spriteDirection=sign(vx)——贴图在旋转坐标系内水平镜像
     if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
@@ -571,6 +593,9 @@ export class Arrow extends Entity {
     if (this.tumble) {
       this.tumbleRot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx >= 0 ? 1 : -1);
     }
+    // 恒旋族（AI_001 :54741-54749/:54822-54825）：rotation 逐 update 累加
+    const spinFn = PROJ_SPIN[this.projId];
+    if (spinFn) this.spinRot += spinFn(this);
     // 大地巨石 261：慢速消亡（|v|<1.5）+ 墙撞爆岩视觉（:18235-18244）
     if (this.boulder) {
       const spd261 = Math.hypot(this.vx, this.vy);

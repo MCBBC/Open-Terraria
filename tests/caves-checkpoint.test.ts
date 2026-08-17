@@ -50,6 +50,11 @@ import { runPyramidPass, runWetJunglePass } from '../src/world/gen/vanilla/Struc
 import { runDirtRockWallRunnerPass } from '../src/world/gen/vanilla/DirtRockWallRunnerPass';
 import { runLivingTreesPass, runLivingTreeWallsPass } from '../src/world/gen/vanilla/LivingTreePass';
 import { runAltarsPass } from '../src/world/gen/vanilla/CorruptionPass';
+// 链外扩展批（2026-08-17）：FF 批跳过清单的链外项——整 pass 跳段推进
+import { runStatuesPass } from '../src/world/gen/vanilla/StatuesPass';
+import { runCaveWallsPass } from '../src/world/gen/vanilla/CaveWallsPass';
+import { runUndergroundJungleTreesPass } from '../src/world/gen/vanilla/UndergroundJungleTreesPass';
+import { runQuickCleanupPass } from '../src/world/gen/vanilla/QuickCleanupPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -232,6 +237,22 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runAltarsPass(st, rng, gs); snap('altars');
   replay(); // ▶SurfaceWaterInJungle cs:15887（零掷骰）
   runWetJunglePass(st, rng, gs); snap('surfacewaterinjungle');
+  // ===== 链外扩展批（2026-08-17）：FF 批跳过清单的链外项补检查点 =====
+  // 「整 pass 跳段」推进——被跳 pass（#46 Temple、#48-#57、#59-#66、#69）两侧
+  // （本链与 caves-oracle 扩展段）同 skip：每 pass 头 replay() 隔离掷骰流，跳段
+  // 对在跑 pass 的流零影响；tileSolid 翻转由各 runner 内部 flipGenSolid 与 oracle
+  // SOLID 增删同点位镜像。被跳 pass 补转录后本段值将整体变化（预期——终局窗口
+  // 统一再生金标）。仍无法覆盖：#47 Beehives（StructureMap 保护登记链 oracle 未
+  // 移植）/ #59-#60（CaveHouse 族 ~1.3k 行）/ #82 Trees / #97 SettleLiquidsPart2
+  // （液体模拟）/ #98 Cactus / #101 MicroBiomes（各 0.6k-1.8k 行，另批）。
+  replay(); // ▶Statues cs:16947（island：#46-#57 跳段）
+  runStatuesPass(st, rng, gs); snap('statues');
+  replay(); // ▶CaveWallsInEnclosedSpaces cs:17819（island：#59-#66 跳段）
+  runCaveWallsPass(st, rng, gs); snap('cavewalls');
+  replay(); // ▶UndergroundJungleTrees cs:17952
+  runUndergroundJungleTreesPass(st, rng, gs); snap('undergroundjungletrees');
+  replay(); // ▶QuickCleanup cs:17987（island：#69 IslandHouses 跳段）
+  runQuickCleanupPass(st, rng, gs); snap('quickcleanup');
   return { grids: out, walls: outWall };
 }
 
@@ -270,7 +291,10 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         'gems', 'gravitatingsand', 'oceancaves',
         'shimmershell', 'shimmerpillars', 'shimmeropen', 'shimmer',
         'dirtwallcleanup', 'pyramids', 'dirtrockwallrunner',
-        'livingtrees', 'livingtreewalls', 'altars', 'surfacewaterinjungle'];
+        'livingtrees', 'livingtreewalls', 'altars', 'surfacewaterinjungle',
+        // 链外扩展批（2026-08-17，整 pass 跳段——金标终局窗口再生前这些名在旧
+        // 金标中不存在=预期红，见 chainCheckpoints 尾注）
+        'statues', 'cavewalls', 'undergroundjungletrees', 'quickcleanup'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

@@ -16,7 +16,7 @@ interface Hooks {
   world: World;
   player: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vx: number; vy: number };
   sfx: string[][];
-  shots: Array<{ vanillaId: number | null; hp: number; def: { damage: number }; spawnAlpha: number; vx: number; vy: number }>;
+  shots: Enemy[];
   dust: number;
   playSfxFiles(files: string[]): void;
   spawnParticles(_x: number, _y: number, _c: string, count: number): void;
@@ -40,9 +40,7 @@ function casterWorld() {
     enemies: () => [],
     entities: {
       add(e, b) {
-        if (b === 'enemies') {
-          hooks.shots.push(e as Hooks['shots'][number]);
-        }
+        if (b === 'enemies') hooks.shots.push(e as Enemy);
       },
     },
   };

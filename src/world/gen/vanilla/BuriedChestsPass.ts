@@ -15,7 +15,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { solidTile as solidTileHB } from './HalfBrickPass';
-import { genSolidType } from './GenSolid';
+import { genSolidType, vanGenSolidType } from './GenSolid';
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
@@ -782,8 +782,8 @@ function placeBuriedChestInner(
         const legL2 = sheetOf2(st.type[st.idx(i - 1, gy)]), legR2 = sheetOf2(st.type[st.idx(i, gy)]);
         if (PC_BOULDERS.has(legL2) || PC_BOULDERS.has(legR2)) why = `boulder ${legL2}/${legR2}`;
         else if (!(i - 1 >= 5 && i + 1 <= st.w - 5 && topY >= 5 && topY + 2 <= st.h - 5)) why = 'bounds';
-        else if (!chestLegOK(st, i - 1, gy)) why = `legL(${i - 1},${gy}) sheet${legL2} act${st.flags[st.idx(i - 1, gy)] ? 1 : 0}`;
-        else if (!chestLegOK(st, i, gy)) why = `legR(${i},${gy}) sheet${legR2} act${st.flags[st.idx(i, gy)] ? 1 : 0}`;
+        else if (!chestLegOK(st, i - 1, gy)) why = `legL(${i - 1},${gy}) sheet${legL2} act${st.flags[st.idx(i - 1, gy)] ? 1 : 0} half${st.half[st.idx(i - 1, gy)]} slope${st.slope[st.idx(i - 1, gy)]}`;
+        else if (!chestLegOK(st, i, gy)) why = `legR(${i},${gy}) sheet${legR2} act${st.flags[st.idx(i, gy)] ? 1 : 0} half${st.half[st.idx(i, gy)]} slope${st.slope[st.idx(i, gy)]}`;
         else for (let dx = -1; dx <= 0; dx++) for (let dy = 0; dy < 2; dy++) {
           const k = st.idx(i + dx, topY + dy);
           if (st.liquid[k] > 0 && st.liquidType[k] === 2) { why = `lava(${i + dx},${topY + dy})`; }

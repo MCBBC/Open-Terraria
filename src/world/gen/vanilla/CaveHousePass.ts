@@ -486,12 +486,15 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
     case 'offset':
       return applyChain(st, rng, steps, i + 1, x + s.dx, y + s.dy);
     case 'setTileKeepWall':
-      // Actions.cs:272-301:存墙→Clear(~(Wiring|Actuator))【液体/坡度/块漆全清】→
-      //   写 type+active→还原墙(+墙帧)。setTileSilent 不清液体——液体清位补齐。
+      // Actions.cs:272-301:存墙→Clear(~(Wiring|Actuator))【液体/坡度/半砖/块漆全清】→
+      //   写 type+active→还原墙(+墙帧)。setTileSilent 不清液体/坡度——两处补齐
+      //   （坡度残留曾致 house27 (1210,957) 腿 slope=2 拒箱,vanilla 落 957 成箱）。
       if (st.inBounds(x, y)) {
         const ci = st.idx(x, y);
         st.liquid[ci] = 0;
         st.liquidType[ci] = 0;
+        st.slope[ci] = 0;
+        st.half[ci] = 0;
       }
       st.setTileSilent(x, y, s.tile);
       return applyChain(st, rng, steps, i + 1, x, y);
@@ -507,6 +510,8 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
         st.wall[ci] = 0;
         st.liquid[ci] = 0;
         st.liquidType[ci] = 0;
+        st.slope[ci] = 0;
+        st.half[ci] = 0;
       }
       st.setTileSilent(x, y, s.tile);
       return applyChain(st, rng, steps, i + 1, x, y);
@@ -1162,9 +1167,14 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     for (const r of rooms) {
       for (let x = r.x; x < r.x + r.w; x++) {
         for (let y = r.y; y < r.y + r.h; y++) {
+          // SetTileKeepWall(TileType)(HouseBuilder.cs:416)——Clear 掩码含坡度/半砖
+          //   （斜坡残留曾致 house27 宝箱腿 (1210,957) slope=2 误拒）
+          const ci0 = st.idx(x, y);
+          st.slope[ci0] = 0;
+          st.half[ci0] = 0;
           st.setTileSilent(x, y, def.tile);
-          st.liquid[st.idx(x, y)] = 0;
-          st.liquidType[st.idx(x, y)] = 0;
+          st.liquid[ci0] = 0;
+          st.liquidType[ci0] = 0;
         }
       }
       for (let x = r.x + 1; x < r.x + r.w - 1; x++) {
@@ -1214,6 +1224,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //     级联;上限 _random.Next(2,5) 是【每屋重掷】(:835/:871,条件短路保证仅
     //     对应主题掷)——旧实现 pass 级掷一次全程复用(C7)
     if (theme === 'jungle' && sharpCount < rng.int(2, 4)) {
+      console.log(`[JGL] k=${__rn()} sharp=${sharpCount} run cascade`);
       if (cascadePlace(st, rng, rooms, 'v_377_sharpening_station', false)) sharpCount++;
     }
     if (theme === 'desert' && extractCount < rng.int(2, 4)) {

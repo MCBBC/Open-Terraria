@@ -313,16 +313,18 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
 // P1-3 白天随机坐椅
 // =====================================================================
 describe('P1-3 行走随机坐椅（NPC.cs:55774-55814，无昼夜门）', () => {
-  /** 白天从左走向 110 列椅。stub：白天游走掷骰块消费 3 掷（wanderT/facing/置零门，
-   *  TownNPC.fixedUpdate），头 3 掷 0.7 → facing=1 恒向右；其后 0 让坐椅掷必中 */
+  /** 白天从左走向 110 列椅。rng 序列注入（2026-08-17 游走双态批）：走态每 tick
+   *  掷序 = ①看家具 1/600 ②拴绳转身 1/80（锁尽才掷）③随机坐椅 1/300——
+   *  循环 [0.9, 0.9, 0]：家具/拴绳恒不中、坐椅恒中（踩上椅格即坐） */
   function dayChairScene(player?: Record<string, unknown>, style = 0) {
     const world = flatWorld('day-chair');
     world.store.setTileSilent(110, F - 2, CHAIR, 0, style * 40);
     world.store.setTileSilent(110, F - 1, CHAIR, 0, style * 40 + 18);
     const npc = new TownNPC('guide', 104 * 16, F * 16);
     const { game } = makeGame(world, { npcs: [npc], player });
-    let calls = 0;
-    Math.random = () => (calls++ < 3 ? 0.7 : 0);
+    const seq = [0.9, 0.9, 0];
+    let i = 0;
+    npc.rng = () => seq[i++ % 3];
     return { world, npc, game };
   }
 

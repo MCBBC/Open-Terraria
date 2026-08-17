@@ -542,8 +542,9 @@ function vanillaTerrain(ctx: GenCtx) {
     rng.nextInt(5);                                        // setBG(8, mushroom)
     rng.nextInt(3);                                        // setBG(9, underworld)
   }
-  // ⑯ RandomizeMoonState（cs:7748）——Next(9)，未消费
-  rng.nextInt(9);
+  // ⑯ RandomizeMoonState（cs:7748 → 调用点 cs:11357，guaranteeNewStyle=false）
+  //    ——单次 Next(9) 赋 Main.moonType（wld 头锚点；曾掷而未存致 moon 恒 0）
+  world.moonType = rng.nextInt(9);
   // （TreeTops.CopyExistingWorldInfoForWorldGeneration / SetupDungeonGenVars：零掷骰）
   // ⑰ dungeonSide（cs:11360）：Next(2)==0 → Left(我们 -1)
   gs.dungeonSide = rng.nextIntRange(0, 2) === 0 ? -1 : 1;

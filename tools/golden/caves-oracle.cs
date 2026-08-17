@@ -10452,6 +10452,439 @@ Replay(); // ▶pass 头重播：SurfaceWaterInJungle cs:15887
 Checkpoint("surfacewaterinjungle");
 StreamPt("surfacewaterinjungle");
 
+// ================= 检查点链向链外 pass 扩展（2026-08-17 扩展批）=================
+// FF 批跳过清单的链外项补检查点：Statues(#58) / CaveWalls(#67) / UndergroundJungle
+// Trees(#68) / QuickCleanup(#70)。当前以「整 pass 跳段」推进：被跳 pass（#46-#57、
+// #59-#66、#69）两侧（本 oracle 与 JS tests/caves-checkpoint chainCheckpoints）同
+// skip——每 pass 头 Replay() 隔离掷骰流，跳段对在跑 pass 的流零影响；tileSolid
+// 翻转由各转录段头尾自镜像（与 JS runner 内 flipGenSolid 同点位同值，SOLID 集合
+// 直接增删）。后续批次补转录被跳 pass 后，本段检查点值将整体变化——预期（终局
+// 窗口统一再生金标）。仍未覆盖项及原因（2026-08-17 现况）：
+//   #47 Beehives——主巢/蜂蜜斑选址门依赖全链 StructureMap 保护登记（protectedRects）
+//     + GeneralPlacementTiles 内容扫描：oracle 无该基础设施，须先移植登记链；
+//   #59-#60 BuriedChests/SurfaceChests——洞穴房 CaveHouse 族 ~1.3k 行（另批）；
+//   #82 Trees / #97 SettleLiquidsPart2 / #98 Cactus / #101 MicroBiomes——各自
+//     0.6k-1.8k 行转录量 + #97 需液体模拟引擎（另批）。
+
+Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
+// ================= Pass 58 Statues（cs:16947-17055 + statueList cs:4395-4433）=================
+{
+    // statueList 73 项 (tile,style)：0-43 段 (105,i) 但 [34]=(349,0)、[43]=(105,50)，
+    // 尾接 29 项样式（JS StatuesPass.STATUE_LIST 同构，R 批归位后对该 x86 归零）。
+    var statueList = new (int tile, int style)[73];
+    for (int si = 0; si < 44; si++) statueList[si] = (105, si);
+    statueList[34] = (349, 0);
+    statueList[43] = (105, 50);
+    int[] tailStyles = { 63, 64, 65, 66, 68, 69, 70, 71, 72, 73, 75, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 77, 78, 67, 74, 37, 2 };
+    for (int si = 0; si < tailStyles.Length; si++) statueList[44 + si] = (105, tailStyles[si]);
+    var trapStatueIdx = new HashSet<int> { 4, 7, 10, 18 };   // GenVars.StatuesWithTraps（列表索引）
+    void PlaceStatueTrapG(int x, int y)      // cs:4436（wire 布线不入四通道哈希——JS 写 wire 位对 typ/act/wal/liq 零影响，两侧同省略）
+    {
+        if (!InB(x, y) || x < 20 || x > W - 21 || y < 20 || y > H - 21) return;
+        for (int i = -10; i <= 10; i++)
+        {
+            for (int j = -10; j <= 10; j++)
+            {
+                int tx = x + i, ty = y + j;
+                if (tx < 0 || tx >= W || ty < 0 || ty + 1 >= H) continue;
+                if (act[ty * W + tx] != 0) continue;                                   // 上格须空
+                if (act[(ty + 1) * W + tx] == 0 || !SOLID.Contains(typ[(ty + 1) * W + tx])) continue; // 下格实心
+                if (typ[(ty + 1) * W + tx] == 162) continue;                            // 冰特判
+                int ti = ty * W + tx;
+                typ[ti] = 137; act[ti] = 1; frX[ti] = 0; frY[ti] = 0;
+                return;
+            }
+        }
+    }
+    int stCount = (int)Math.Floor(73 * 2 * ((double)W / 4200.0));
+    int num = 0;                                          // 样式游标（cs:16970 顺序轮换）
+    int yMin = (int)Math.Floor(((double)worldSurface * 2.0 + (double)rockLayer) / 3.0);
+    for (int i2 = 0; i2 < stCount; i2++)
+    {
+        if (num >= 73) num = 0;
+        int sheet = statueList[num].tile, style = statueList[num].style;
+        bool done = false; int fail = 0;
+        while (!done)
+        {
+            int x = (int)r.Next(20, W - 20);
+            int y = (int)r.Next(yMin, H - 300);
+            // 海洋回避（cs:16989 oceanDepths）：y>oceanLevel 直接放行（前置判定防深层海滩列误拒）
+            double oceanTop = ((double)worldSurface + (double)rockLayer) / 2.0 + 40.0;
+            int guard = 100;
+            while ((double)y <= oceanTop && (x < BEACH_DISTANCE || x > W - BEACH_DISTANCE) && guard-- > 0)
+            { x = (int)r.Next(20, W - 20); y = (int)r.Next(yMin, H - 300); }
+            if (guard <= 0) { done = true; break; }
+            while (y < H && act[y * W + x] == 0) y++;    // 向下扫到首个 active 格
+            if (y >= H) { done = true; break; }
+            y--;
+            if (y < 2 || x + 1 >= W || y - 2 < 0) { fail++; if (fail >= 10000) done = true; continue; }
+            bool ok = true;                               // 2×3 净空（PlaceTile forced 占用门）
+            for (int dx = 0; dx < 2 && ok; dx++) for (int dy = -2; dy <= 0 && ok; dy++)
+                if (act[(y + dy) * W + x + dx] != 0) ok = false;
+            if (!ok) { fail++; if (fail >= 10000) done = true; continue; }
+            int row = style / 55;                         // 雕像帧换行（Tiles_105 宽 55 列）
+            for (int dx = 0; dx < 2; dx++) for (int dy = 0; dy < 3; dy++)
+            {
+                int ii = (y - 2 + dy) * W + x + dx;
+                typ[ii] = (ushort)(sheet == 349 ? 349 : 105); act[ii] = 1;
+                frX[ii] = (ushort)((style - row * 55) * 36 + dx * 18);
+                frY[ii] = (ushort)(row * 54 + dy * 18);
+            }
+            if (trapStatueIdx.Contains(num)) PlaceStatueTrapG(x, y);
+            num++; done = true;
+        }
+    }
+}
+Checkpoint("statues");
+StreamPt("statues");
+
+Replay(); // ▶pass 头重播：CaveWallsInEnclosedSpaces cs:17819（island：#59-#66 跳段）
+// ================= Pass 67 CaveWallsInEnclosedSpaces（cs:17819-17948）=================
+// pass 头 tileSolid 翻转（cs:17821-17823，持久不还原）：162 薄冰/232 木刺→非实心，
+// 226 蜥蜴砖→实心（默认已实心，幂等）——countTiles 洪泛与选点门随之判定。
+SOLID.Remove(162); SOLID.Add(226); SOLID.Remove(232);
+{
+    (int count, int shroom, int rock, int ice, int sand, int lava) CountTilesG(int sx, int sy, bool jungle, bool lavaOk)
+    {
+        var cr = (count: 0, shroom: 0, rock: 0, ice: 0, sand: 0, lava: 0);
+        var counted = new HashSet<int>();                // ★只登记非实心格（cs:9585）——实心邻格可被
+        void Nxt(int x, int y)                           //   多路重复访问，类型计数器随之重复累加
+        {
+            if (cr.count >= 1500) return;
+            if (x <= 1 || x >= W - 1 || y <= 1 || y >= H - 1) { cr.count = 1500; return; }
+            int ii = y * W + x;
+            if (counted.Contains(ii)) return;
+            if (wal[ii] == 244) { cr.count = 1500; return; }               // 活木墙封顶
+            if (liq[ii] > 0 && liqT[ii] == 3) { cr.count = 1500; return; } // 微光（oracle 3=JS liquidType 4）
+            if (!jungle)
+            {
+                if (wal[ii] != 0) { cr.count = 1500; return; }             // 已有墙封顶
+                if (liq[ii] > 0 && liqT[ii] == 1)                          // 岩浆（oracle 1=JS 2）
+                { cr.lava++; if (!lavaOk) { cr.count = 1500; return; } }
+            }
+            if (act[ii] != 0)
+            {
+                if (typ[ii] == 70) cr.shroom++;
+                if (typ[ii] == 1) cr.rock++;
+                if (typ[ii] == 147 || typ[ii] == 161) cr.ice++;
+                if (typ[ii] == 53 || typ[ii] == 396 || typ[ii] == 397) cr.sand++;
+            }
+            if (!Solid5Gen(x, y))
+            {
+                counted.Add(ii); cr.count++;
+                Nxt(x - 1, y); Nxt(x + 1, y); Nxt(x, y - 1); Nxt(x, y + 1);
+            }
+        }
+        Nxt(sx, sy);
+        return cr;
+    }
+    void SpreadWallG(int sx, int sy, ushort wallType)    // Spread.Wall（cs:3327-3385）波前 BFS
+    {
+        if (!InB(sx, sy)) return;
+        var seen = new HashSet<int>();
+        var frontier = new List<(int x, int y)> { (sx, sy) };
+        while (frontier.Count > 0)
+        {
+            var nxt = new List<(int x, int y)>();
+            foreach (var (x, y) in frontier)
+            {
+                if (x < 1 || y < 1 || x >= W - 1 || y >= H - 1) continue;  // InWorld(x,y,1)
+                int ii = y * W + x;
+                if (seen.Contains(ii)) continue;
+                seen.Add(ii);
+                if (Solid5Gen(x, y) || wal[ii] != 0)
+                {
+                    if (act[ii] != 0 && wal[ii] == 0) wal[ii] = wallType;  // 实心背面墙
+                    continue;
+                }
+                wal[ii] = wallType;
+                foreach (var (dx, dy) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) })
+                    if (!seen.Contains((y + dy) * W + x + dx)) nxt.Add((x + dx, y + dy));
+            }
+            frontier = nxt;
+        }
+    }
+    // ---- 主段（cs:17827-17871）：w*0.04 次，封闭腔(10≤air<1500)刷洞穴背景墙 ----
+    int maxY = H - 220;
+    int minY = (int)(((double)worldSurface + (double)rockLayer) / 2.0);
+    int n1 = (int)((double)W * 0.04);
+    for (int i = 0; i < n1; i++)
+    {
+        int tries = 0;
+        int x = (int)r.Next(200, W - 200);
+        int y = (int)r.Next(minY, maxY);
+        var c = CountTilesG(x, y, false, true);
+        while ((c.count >= 1500 || c.count < 10) && tries < 500)
+        {
+            tries++;
+            x = (int)r.Next(200, W - 200); y = (int)r.Next(minY, maxY);
+            c = CountTilesG(x, y, false, true);
+        }
+        if (tries >= 500) continue;
+        int wallType = (int)r.Next(2);                   // 恒消费一次（cs:17856，分支可整体覆写）
+        if ((double)c.shroom > (double)c.rock * 0.75) wallType = 80;
+        else if (c.ice > 0) wallType = wallType == 0 ? 40 : 71;
+        else if (c.lava > 0) wallType = 79;
+        else { int[] pick = { 59, 61, 170, 171 }; wallType = pick[(int)r.Next(4)]; }
+        SpreadWallG(x, y, (ushort)wallType);
+    }
+    // ---- 次段（cs:17920-17946）：w*0.02 次，丛林墙(64)腔刷泥墙 15（Spread.Wall2）----
+    int maxY2 = (int)lavaLine;
+    int n2 = (int)((double)W * 0.02);
+    var WALL_CANNOT_REPLACE = new HashSet<ushort> { 4, 40, 3, 83, 87, 244, 34 };
+    void SpreadWall2G(int sx, int sy, ushort wallType)   // Spread.Wall2（cs:3387-3492；墙 15 非 stopsAtAir 族）
+    {
+        if (!InB(sx, sy)) return;
+        int out2 = 0;
+        var seen = new HashSet<int>();
+        var frontier = new List<(int x, int y)> { (sx, sy) };
+        while (frontier.Count > 0)
+        {
+            var nxt = new List<(int x, int y)>();
+            foreach (var (x, y) in frontier)
+            {
+                if (x < 1 || x >= W - 1 || y < 1 || y >= H - 1) continue;
+                int ii = y * W + x;
+                if (seen.Contains(ii)) continue;
+                seen.Add(ii);
+                if (wal[ii] == wallType || WALL_CANNOT_REPLACE.Contains(wal[ii])) continue;
+                if (!Solid5Gen(x, y))
+                {
+                    out2++;
+                    if (out2 >= 5000) continue;           // maxWallOut2（cs:4196）
+                    wal[ii] = wallType;
+                    nxt.Add((x - 1, y)); nxt.Add((x + 1, y)); nxt.Add((x, y - 1)); nxt.Add((x, y + 1));
+                }
+                else if (act[ii] != 0) wal[ii] = wallType;  // 实心背面墙，不入队扩散
+            }
+            frontier = nxt;
+        }
+    }
+    for (int k = 0; k < n2; k++)
+    {
+        int tries = 0;
+        int x = (int)r.Next(200, W - 200);
+        int y = (int)r.Next((int)worldSurface, maxY2);
+        int c = wal[y * W + x] == 64 ? CountTilesG(x, y, true, false).count : 0;
+        while ((c >= 1500 || c < 10) && tries < 1000)
+        {
+            tries++;
+            x = (int)r.Next(200, W - 200); y = (int)r.Next((int)worldSurface, maxY2);
+            int wl = wal[y * W + x];
+            if (wl != 244) c = wl == 64 ? CountTilesG(x, y, true, false).count : 0;
+        }
+        if (tries < 1000) SpreadWall2G(x, y, 15);
+    }
+}
+Checkpoint("cavewalls");
+StreamPt("cavewalls");
+
+Replay(); // ▶pass 头重播：UndergroundJungleTrees cs:17952
+// ================= Pass 68 UndergroundJungleTrees（cs:17952-17970 + GrowUndergroundTree cs:31007-31457）=================
+{
+    SOLID.Add(379);   // cs:17956 头 tileSolid[379]=true（本表已含，幂等——JS flipGenSolid 同值）
+    bool EmptyTileCheckSapling(int x0, int x1, int y0, int y1)  // EmptyTileCheck(…,20)（cs:31611-31699）
+    {
+        if (x0 < 0 || x1 >= W || y0 < 0 || y1 >= H) return false;
+        for (int x = x0; x <= x1; x++) for (int y = y0; y <= y1; y++)
+        {
+            int ii = y * W + x;
+            if (act[ii] == 0) continue;
+            ushort t = typ[ii];
+            if (t == 20 || t == 590 || t == 595 || t == 615) continue;      // CommonSapling
+            if (t == 3 || t == 24 || t == 32 || t == 61 || t == 62 || t == 69 || t == 71 || t == 73
+                || t == 74 || t == 82 || t == 83 || t == 84 || t == 110 || t == 113 || t == 184
+                || t == 201 || t == 233 || t == 352 || t == 485 || t == 529 || t == 530
+                || t == 637 || t == 655) continue;                           // 植物白名单（cs:31669-31691）
+            return false;
+        }
+        return true;
+    }
+    int[][] TRUNKU = {                                                    // Trees_5 干身帧表（num5×num4）
+        new[]{0,0},   new[]{0,22},  new[]{0,44},      // case 0 default
+        new[]{0,66},  new[]{0,88},  new[]{0,110},     // case 1
+        new[]{22,0},  new[]{22,22}, new[]{22,44},     // case 2
+        new[]{44,66}, new[]{44,88}, new[]{44,110},    // case 3
+        new[]{22,66}, new[]{22,88}, new[]{22,110},    // case 4
+        new[]{88,0},  new[]{88,22}, new[]{88,44},     // case 5 左枝
+        new[]{66,66}, new[]{66,88}, new[]{66,110},    // case 6 右枝
+        new[]{110,66},new[]{110,88},new[]{110,110},   // case 7 双枝
+        new[]{0,0},   new[]{0,22},  new[]{0,44},      // case 8 default
+        new[]{0,0},   new[]{0,22},  new[]{0,44},      // case 9 default
+    };
+    void PutTree(int x, int y, int fx, int fy2)
+    {
+        if (x < 0 || x >= W || y < 0 || y >= H) return;
+        int ii = y * W + x;
+        typ[ii] = 5; act[ii] = 1; frX[ii] = (ushort)fx; frY[ii] = (ushort)fy2;
+    }
+    void GrowUndergroundTreeG(int i, int y)
+    {
+        if (i < 0 || i >= W || y < 0 || y >= H) return;
+        int gi = y * W + i;
+        if (act[gi] == 0 || typ[gi] != 60 || half[gi] == 1 || slope[gi] != 0) return;  // 基座=丛林草整砖
+        bool sideL = InB(i - 1, y) && act[y * W + i - 1] != 0 && typ[y * W + i - 1] == 60;
+        bool sideR = InB(i + 1, y) && act[y * W + i + 1] != 0 && typ[y * W + i + 1] == 60;
+        if (!sideL && !sideR) return;                                     // 左右邻至少一侧丛林草
+        int num2 = (int)r.Next(5, 15);                                    // 高度（EmptyTileCheck 前消耗）
+        int num3 = num2 + 2 + 5;                                          // +2（cs:31015）+5（type==60 恒真）
+        if (!EmptyTileCheckSapling(i - 1, i + 1, y - num3, y - 1)) return;
+        bool flagL = false, flagR = false;
+        for (int j = y - num2; j < y; j++)                                // ★num4 先掷 num5 后掷（GrowTree 反序）
+        {
+            int num4 = (int)r.Next(3);
+            int num5 = (int)r.Next(10);
+            if (j == y - 1 || j == y - num2) num5 = 0;
+            while (((num5 == 5 || num5 == 7) && flagL) || ((num5 == 6 || num5 == 7) && flagR))
+                num5 = (int)r.Next(10);
+            flagL = false; flagR = false;
+            if (num5 == 5 || num5 == 7) flagL = true;
+            if (num5 == 6 || num5 == 7) flagR = true;
+            var fr = TRUNKU[num5 * 3 + num4];
+            PutTree(i, j, fr[0], fr[1]);
+            if (num5 == 5 || num5 == 7)                                   // 左枝（变体掷在 <2 门之前）
+            {
+                int k = (int)r.Next(3);
+                if ((int)r.Next(3) < 2) PutTree(i - 1, j, 44, 198 + k * 22);
+                else PutTree(i - 1, j, 66, k * 22);
+            }
+            if (num5 == 6 || num5 == 7)                                   // 右枝
+            {
+                int k = (int)r.Next(3);
+                if ((int)r.Next(3) < 2) PutTree(i + 1, j, 66, 198 + k * 22);
+                else PutTree(i + 1, j, 88, 66 + k * 22);
+            }
+        }
+        int num6 = (int)r.Next(3);                                        // 根部方向
+        bool RootFit(int dx)
+        {
+            if (!InB(i + dx, y)) return false;
+            int si = y * W + i + dx;
+            ushort st = typ[si];
+            return act[si] != 0 && half[si] == 0 && slope[si] == 0
+                && (st == 2 || st == 23 || st == 60 || st == 109 || st == 147);
+        }
+        bool fitL = RootFit(-1), fitR = RootFit(1);
+        if (!fitL) { if (num6 == 0) num6 = 2; else if (num6 == 1) num6 = 3; }
+        if (!fitR) { if (num6 == 0) num6 = 1; else if (num6 == 2) num6 = 3; }
+        if (fitL && !fitR) num6 = 2;
+        if (fitR && !fitL) num6 = 1;
+        if (num6 == 0 || num6 == 1) PutTree(i + 1, y - 1, 22, 132 + (int)r.Next(3) * 22);  // 三掷各自独立
+        if (num6 == 0 || num6 == 2) PutTree(i - 1, y - 1, 44, 132 + (int)r.Next(3) * 22);
+        int baseK = (int)r.Next(3);                                       // 无条件掷（num6==3 掷而不用）
+        int baseFx = num6 == 0 ? 88 : num6 == 1 ? 0 : num6 == 2 ? 66 : -1;
+        if (baseFx >= 0) PutTree(i, y - 1, baseFx, 132 + baseK * 22);
+        int crownFx = (int)r.Next(8) != 0 ? 22 : 0;                       // 树冠门 Next(8)（GrowTree 是 13，勿搬）
+        PutTree(i, y - num2, crownFx, 198 + (int)r.Next(3) * 22);
+        // gs.genTrees 砍伐登记（JS 侧）不入四通道哈希——省略
+    }
+    int yStart = (int)worldSurface - 1;
+    int yEnd = H - 350;
+    for (int i = 0; i < W; i++)
+        for (int j = yStart; j < yEnd; j++)
+            if ((int)r.Next(10) == 0) GrowUndergroundTreeG(i, j);         // Next(10)==0 门
+}
+Checkpoint("undergroundjungletrees");
+StreamPt("undergroundjungletrees");
+
+Replay(); // ▶pass 头重播：QuickCleanup cs:17987（island：#69 IslandHouses 跳段）
+// ================= Pass 70 QuickCleanup（cs:17987-18107 五子段）=================
+{
+    SOLID.Remove(137); SOLID.Remove(130);                 // cs:17997-98 头翻（尾 cs:18104-05 还原）
+    var NON_SOLID_SAVE_SLOPES = new HashSet<ushort> { 131, 351, 336, 340, 341, 342, 343, 344 };
+    var PLATFORMS_QC = new HashSet<ushort> { 19, 427, 435, 436, 437, 438, 439 };
+    bool SaveSlopeQ(ushort t) => SOLID.Contains(t) || NON_SOLID_SAVE_SLOPES.Contains(t);
+    bool SolidQC(int x, int y)                            // WorldGen.SolidTile（tileSolidTop 以 platform 近似=JS 同口径）
+    {
+        if (!InB(x, y)) return false;
+        int i = y * W + x;
+        return act[i] != 0 && SOLID.Contains(typ[i]) && !PLATFORMS_QC.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+    }
+    bool OceanDepthsQ(int x, int y)
+    {
+        if ((double)y > ((double)worldSurface + (double)rockLayer) / 2.0 + 40.0) return false;
+        return x < BEACH_DISTANCE || x > W - BEACH_DISTANCE;
+    }
+    for (int i = 20; i < W - 20; i++)
+    {
+        for (int j = 20; j < H - 20; j++)
+        {
+            int t = j * W + i;
+            // (a) 海洋带非水液体 → 水（cs:18005-18008）
+            if (OceanDepthsQ(i, j) && liq[t] > 0 && liqT[t] != 0) liqT[t] = 0;
+            // (b) 海洋带表面沙下方填土（cs:18009-18022）。Next(4,7) 在 for 条件内=逐判定掷
+            if ((double)j < worldSurface && OceanDepthsQ(i, j) && act[t] != 0 && typ[t] == 53)
+            {
+                if (slope[t] == 3 || slope[t] == 4) slope[t] = 0;        // bottomSlope → slope(0)
+                for (int k = j + 1;
+                    k < j + (int)r.Next(4, 7)
+                    && (act[k * W + i] == 0 || (typ[k * W + i] != 397 && typ[k * W + i] != 53))
+                    && (act[(k + 1) * W + i] == 0 || (typ[(k + 1) * W + i] != 397 && typ[(k + 1) * W + i] != 53 && typ[(k + 1) * W + i] != 495))
+                    && (act[(k + 2) * W + i] == 0 || (typ[(k + 2) * W + i] != 397 && typ[(k + 2) * W + i] != 53 && typ[(k + 2) * W + i] != 495));
+                    k++)
+                {
+                    int ki = k * W + i;                                   // 泥土=vanilla type 0（active 置位区分于清格）
+                    typ[ki] = 0; act[ki] = 1; half[ki] = 0; slope[ki] = 0; // 原版 type=0+active(true)+halfBrick(false)+slope(0)
+                }
+            }
+            // (c) 沙岩/硬化沙墙内杂块转硬化沙 + 液体二分（cs:18023-18045，不查 active——幽灵 type 同改）
+            if (wal[t] == 187 || wal[t] == 216)
+            {
+                if (typ[t] == 59 || typ[t] == 123 || typ[t] == 224) typ[t] = 397;
+                if (typ[t] == 368 || typ[t] == 367) typ[t] = 397;
+                if ((double)j <= rockLayer) liq[t] = 0;
+                else if (liq[t] > 0) { liq[t] = 255; liqT[t] = 1; }
+            }
+            // (d) 表面悬空沙下墙补齐（cs:18046-18069）。★break 只断内层 m 循环——num=最右
+            //     一列（含墙者）的最上方墙值（bug-for-bug 保留）
+            if ((double)j < worldSurface && act[t] != 0 && typ[t] == 53
+                && wal[(j + 1) * W + i] == 0 && !SolidQC(i, j + 1))
+            {
+                ushort numW = 0;
+                for (int l = i - 3; l <= i + 3; l++)
+                {
+                    for (int m = j - 3; m <= j + 3; m++)
+                    {
+                        if (!InB(l, m)) continue;                          // JS OOB 读 wall=undefined>0=false（等价跳过）
+                        if (wal[m * W + l] > 0) { numW = wal[m * W + l]; break; }
+                    }
+                }
+                if (numW > 0)
+                {
+                    wal[(j + 1) * W + i] = numW;
+                    if (wal[t] == 0) wal[t] = numW;
+                }
+            }
+            // (e) SaveSlopes 坡面/半砖归一（cs:18070-18101）
+            if (act[t] == 0 || !SaveSlopeQ(typ[t]))
+            {
+                slope[t] = 0; half[t] = 0;                                // ClearSlope
+            }
+            else if (!PLATFORMS_QC.Contains(typ[t]) && !NOT_CLEAR.Contains(typ[t]))
+            {
+                bool topSlope = slope[t] == 1 || slope[t] == 2;
+                bool bottomSlope = slope[t] == 3 || slope[t] == 4;
+                if (topSlope || half[t] == 1)
+                {
+                    if (typ[t] != 225 || half[t] == 0)                    // 蜂巢块半砖档豁免（cs:18078）
+                    {
+                        if (!SolidQC(i, j + 1)) { act[t] = 0; typ[t] = 0; half[t] = 0; slope[t] = 0; }
+                        if (typ[j * W + i + 1] == 137 || typ[j * W + i - 1] == 137) { act[t] = 0; typ[t] = 0; half[t] = 0; slope[t] = 0; }
+                    }
+                }
+                else if (bottomSlope)
+                {
+                    if (!SolidQC(i, j - 1)) { act[t] = 0; typ[t] = 0; half[t] = 0; slope[t] = 0; }
+                    if (typ[j * W + i + 1] == 137 || typ[j * W + i - 1] == 137) { act[t] = 0; typ[t] = 0; half[t] = 0; slope[t] = 0; }
+                }
+            }
+        }
+    }
+    SOLID.Add(137); SOLID.Add(130);                       // cs:18104-05 尾还原
+}
+Checkpoint("quickcleanup");
+StreamPt("quickcleanup");
+
 double TuneOceanDepth(int count, double depth, bool florida)
 {
     double Inc(double f) => depth + (int)r.Next(10, 20) * f;

@@ -1,5 +1,11 @@
 // 小动物实体：无害被动生物（兔/鸟/松鼠/萤火虫等，原版素材）
-// 行为：闲逛（hop 跳行 / walk 爬行 / fly 飞行），玩家靠近时逃离；可被一击杀死
+// ⚠ 已退役（2026-08-17）：环境生成/捕获释放/神秘青蛙 687 出生全部改走
+//   Enemy.fromVanilla（aiStyle 路由：7 行走族 townCritterWalkAI / 1 弹跳族 slimeAI /
+//   64/65 蝶萤 / 24 鸟…见 Enemy.critterWanderAI）。本类零构造点，保留仅因
+//   Renderer/Game 的 as Critter 兼容 cast 与 drawCritter 遗留分支——拆除需同步
+//   EntityManager critters 桶类型，留待无并行会话窗口。
+// 旧说明：行为分 hop 跳行/walk 爬行/fly 飞行三 kind——hop 把 aiStyle 7 行走族
+//   （兔/松鼠/蛙/鸭）也套成史莱姆弹跳，是"兔子像蚱蜢"观感的根因。
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';

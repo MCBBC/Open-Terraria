@@ -7,7 +7,10 @@
 //   消耗：consumable、potion、healLife/healMana、buffType（+buffTime 近似）
 //   弹药：ammo/useAmmo/notAmmo、shoot、channel、autoReuse、holdStyle、torch
 // 注意 case 归属 = 最近一层 switch(type)（嵌套 switch 陷阱同 extract-equip-prefix.mjs）。
+// 2026-08-17 useTurn 叠加：全量归档来自 extract-itemcombat.mjs 三通道提取库（显式字面
+// + DefaultTo* 辅助函数族 + 区间 if 块；Item.cs:170 默认 false——表内仅记 true=1）。
 import { readFileSync, writeFileSync } from 'node:fs';
+import { EXTRA_USETURN } from './extract-itemcombat.mjs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const itemSrc = readFileSync(`${ROOT}/Terarria1456/Terraria/Item.cs`, 'utf8');
@@ -120,6 +123,24 @@ for (const [id, seg] of SEGS) {
 for (const [id, pow] of Object.entries({ 2291: 15, 2293: 20, 2292: 30, 2295: 35, 2296: 40, 2294: 50 })) {
   FUNC[id] = { ...(FUNC[id] ?? {}), fishingPole: pow };
 }
+// 嵌套块首匹配错位补丁（collectCaseSegments 是文本段正则——嵌套 switch/`int num` 分支
+// 里的同字段多赋值取首匹配；以下逐 case 按源码校对，2026-08-17 与提交态对账固化）：
+//  · 2674-2676 诱饵三连（Item.cs:25851-25870 嵌套 switch：2675=30 / 2676=50 / default 2674=15，
+//    首匹配把 2676 吃成 2675 的 30）
+//  · 2001 蠕虫笼族（:21313-21350 `int num = type - 1994` 逐分支：num=7→25，
+//    首匹配吃到 num=0 的 5）
+//  · 2422 熔线钓钩（SetDefaults2 `if (type >= 2421 && type <= 2422)` 区间块，case 标签外
+//    ——同 2291 族漏提形态；:23048-23066 `else` 分支 fishingPole 45（1405 同位 :25413 同读
+//    45）。此前提交态手记 25 与两版反编译均不符，2026-08-17 按 1456 最终态校正；
+//    melee/autoReuse 为旧手记误加，源块未设，随校正摘除）
+for (const [id, patch] of Object.entries({
+  2674: { bait: 15, consumable: 1 },
+  2676: { bait: 50 },
+  2001: { bait: 25 },
+  2422: { fishingPole: 45 },
+})) {
+  FUNC[id] = { ...(FUNC[id] ?? {}), ...patch };
+}
 
 // ---- SetFoodDefaults（Item.cs:47653）：食物族走 SetDefaults 的 IsFood 分支直转此方法，
 // SetDefaults1-5 扫不到——85 个 case 全靠此 switch 补。逐 case 解析
@@ -162,6 +183,16 @@ for (const [id, pow] of Object.entries({ 2291: 15, 2293: 20, 2292: 30, 2295: 35,
     FUNC[id] = { ...(FUNC[id] ?? {}), ...f };
   }
   console.error(`foodfunc: ${Object.keys(foodFunc).length} 件（SetFoodDefaults）`);
+}
+// useTurn 全量叠加（只在已有条目上补键，不新增 id）：EXTRA_USETURN 含 SetDefaults1-5
+// case 显式 + DefaultToPlaceableTile/Wall/Torch/Food/HealingPotion/CapturedCritter/MusicBox
+// 等辅助函数族 + 区间 if 块 + 委托继承 + SetFoodDefaults 食物族
+{
+  let n = 0;
+  for (const [id, f] of Object.entries(FUNC)) {
+    if (EXTRA_USETURN.get(Number(id)) === true) { f.useTurn = 1; n++; }
+  }
+  console.error(`useTurn=1: ${n} 件（EXTRA_USETURN 全量 ${EXTRA_USETURN.size}）`);
 }
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemfunc.json`, JSON.stringify(FUNC));
 console.error(`itemfunc: ${Object.keys(FUNC).length} 件`);

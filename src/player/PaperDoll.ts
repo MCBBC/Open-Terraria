@@ -178,14 +178,86 @@ export type DollLayer = 'skin' | 'armor' | 'armorNoHead';
  *  'legs'=腿皮肤/裤/鞋+腿甲——对应原版 headPosition/bodyPosition/legPosition 三层组
  *  （PlayerDrawLayers 逐层 + drawPlayer.headPosition/bodyPosition/legPosition 偏移） */
 export type DollPart = 'head' | 'body' | 'legs';
+/** body/legs 双行（原版身体帧 bodyFrame 与腿帧 legFrame 是两条独立状态机：
+ *  Player.cs 腿链 :35718-35855、身体链 :35874-36186——use 行/静持行只钉身体，
+ *  腿照常走 legFrame 循环；行走时身体同步腿（:36184-36186 bodyFrame.Y=legFrame.Y））。
+ *  rows 模式烘焙出 40×56 单帧（身体件取 body 行、腿件取 legs 行） */
+export interface DollRows { body: number; legs: number }
+/** 坐姿腿切片参数（DrawSittingLegs PlayerDrawLayers.cs:1585-1735 照抄） */
+export interface DollSitting {
+  /** 腿甲槽位 id（特殊切片表按 legIndex 分档；0/-1=默认切片） */
+  legIndex: number;
+  /** seatYOffset = -4 + (int)offsetForSeat.Y（PlayerSittingHelper.cs:29-31）——
+   *  149/169/238/223 族切片表内用 vector.Y -= seatYOffset 对冲，需逐座位传值 */
+  seatYOffset: number;
+  /** 身甲槽位 id（193/194 族只在 body==218 时改切片） */
+  body: number;
+}
+/** ArmorIDs.Head.Sets.HidesHead（ArmorIDs.cs:18）：头甲自带全脸时跳过 base 头/眼/眼睑
+ *  （DrawPlayer_21_Head_TheFace :2577 flag 门——狼人头 38 全脸、幽灵脸 135 等） */
+export const HIDES_HEAD = new Set([38, 135, 269, 282, 288]);
+
+/** DrawSittingLegs 切片计划（局部坐标 = 帧锚点左上、朝右空间；外层 translate 已含
+ *  seatYOffset 的整体座位偏移，故 evY 中 -sY 的对冲项即恢复原版净偏移）。
+ *  n 从 num3 降到 0：源条 = 帧 srcRow 起 y+2n+num2、高 (n==num3 ? 56-num2-2n : 2)；
+ *  目标 = (xShift+num+num4·n+num6+(n?num7:0)+num8, evY+2+num2+num5+num9) */
+function sittingSlicePlan(legIndex: number, skin: boolean, bodyIdx: number, sY: number, srcRow: number):
+  Array<{ sx: number; sy: number; sw: number; sh: number; dx: number; dy: number }> {
+  // 默认档（PlayerDrawLayers.cs:1594-1602）：num=2/num2=42/num3=2/num4=2/num5=2
+  let num = 2, num2 = 42, num3 = 2, num4 = 2, num5 = 2;
+  let num6 = 0, num7 = 0, num8 = 0, num9 = 0;
+  let evY = 0, xShift = 0, row = srcRow, full = false;
+  if (legIndex === 169 || !skin) {
+    switch (legIndex) {
+      case 217: num = 0; num4 = 0; num5 = 0; num3 = 1; num2 = 0; full = true; break;
+      case 149: case 171: case 172:
+        num = -6; num4 = 2; num5 = 2; num3 = 4; num2 = 6; evY = 6 - sY; break;
+      case 169:
+        if (skin) { num = -6; num4 = 2; num5 = 2; num3 = 4; num2 = 6; evY = 6 - sY; }
+        else { num = 0; num4 = 0; num5 = 0; num3 = 1; num2 = 0; evY = -sY; }  // flag(长袍) 族忽略
+        break;
+      case 238: case 239: num = 2; num4 = 2; num5 = -2; num2 = 42; evY = -sY; break;
+      case 214: case 215: case 216:
+        num = -6; num4 = 2; num5 = 2; num3 = 4; num2 = 6; evY = 6; break;
+      case 106: case 143: case 226:
+        num = 0; num4 = 0; num2 = 6; num5 = 0; evY = 4; row = 5; break;
+      case 222: xShift = -2; break;
+      case 223: xShift = -2; evY = -sY; break;
+      case 132: num = -2; num7 = 2; break;
+      case 193: case 194: if (bodyIdx === 218) { num = -2; num7 = 2; evY = 2; } break;
+      case 177: case 178: case 181: case 182: case 206:
+        num = 0; num4 = 0; num5 = 0; num3 = 1; num2 = 0; num8 = 4; num9 = 6; break;
+    }
+  }
+  const out: Array<{ sx: number; sy: number; sw: number; sh: number; dx: number; dy: number }> = [];
+  const dy = evY + 2 + num2 + num5 + num9;
+  for (let n = num3; n >= 0; n--) {
+    let sy: number, sh: number;
+    if (full) { sy = row * FRAME_H; sh = FRAME_H; }
+    else {
+      sy = row * FRAME_H + n * 2 + num2;
+      sh = n === num3 ? FRAME_H - num2 - n * 2 : 2;
+    }
+    if (sh <= 0) continue;
+    out.push({
+      sx: 0, sy, sw: FRAME_W, sh,
+      dx: xShift + num + num4 * n + num6 + (n !== 0 ? num7 : 0) + num8,
+      dy,
+    });
+  }
+  return out;
+}
+
 export function compositePaperDoll(
   a: Appearance,
   equip?: { head?: number | null; body?: number | null; legs?: number | null },
-  opts?: { skipHair?: boolean; layer?: DollLayer; part?: DollPart },
+  opts?: { skipHair?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting },
 ): HTMLCanvasElement | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
     + (opts?.skipHair ? '|nohair' : '') + (opts?.layer ? `|L${opts.layer}` : '')
-    + (opts?.part ? `|P${opts.part}` : '');
+    + (opts?.part ? `|P${opts.part}` : '')
+    + (opts?.rows ? `|R${opts.rows.body},${opts.rows.legs}` : '')
+    + (opts?.sitting ? `|S${opts.sitting.legIndex},${opts.sitting.seatYOffset},${opts.sitting.body}` : '');
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -212,9 +284,13 @@ export function compositePaperDoll(
   if (equip?.body && (!part || part === 'body') && !UITextures.get(`Armor_Armor_${equip.body}.png`)) return null;
   if (equip?.head && (!part || part === 'head') && !UITextures.get(`Armor_Head_${equip.head}.png`)) return null;
 
+  // rows 模式：单帧 40×56（body 件取 rows.body、legs 件取 rows.legs）
+  const rowsMode = opts?.rows ?? null;
+  const sit = opts?.sitting ?? null;
+  const nFrames = rowsMode ? 1 : BODY_FRAMES;
   const c = document.createElement('canvas');
   c.width = FRAME_W;
-  c.height = BODY_FRAMES * FRAME_H;
+  c.height = nFrames * FRAME_H;
   const ctx = c.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
 
@@ -227,11 +303,15 @@ export function compositePaperDoll(
   const wantHead = !part || part === 'head';
   const wantBody = !part || part === 'body';
   const wantLegs = !part || part === 'legs';
+  // HIDES_HEAD 头甲（ArmorIDs.Head.Sets.HidesHead）：狼人头 38 等全脸头甲跳过 base
+  // 头皮肤/眼白/瞳（DrawPlayer_21_TheFace :2577-2580 flag 门；眼睑由渲染侧同门跳过）
+  const hidesFace = HIDES_HEAD.has(equip?.head ?? 0);
   // 后发层（1.4.4+ PlayerDrawLayers:206-212：backHairDraw 时画在身体之后，即先画）
   if (!onlyArmor && wantHead && hairTinted && hasBackHair) {
-    for (let row = 0; row < BODY_FRAMES; row++) {
+    for (let i = 0; i < nFrames; i++) {
+      const row = rowsMode ? rowsMode.body : i;
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
-      ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+      ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
     }
   }
 
@@ -241,18 +321,36 @@ export function compositePaperDoll(
     // part 拆分：竖条通道仅 10/11/12（腿组）与 0/1/2（头组）——body 件无竖条
     if (part && part !== (ch.sheet >= 10 && ch.sheet <= 12 ? 'legs' : 'head')) continue;
     if (legsArmor && (ch.sheet === 10 || ch.sheet === 11 || ch.sheet === 12)) continue; // 腿甲整体替代腿皮肤/裤/鞋（DrawPlayer_02 else-if）
+    if (hidesFace && ch.sheet <= 2) continue;   // HidesHead：跳过头/眼白/瞳
     const img = sheetRect(a.skinVariant, ch.sheet);
     if (!img) continue;
     const color = ch.color === 'white' ? { r: 255, g: 255, b: 255 } : (a[ch.color] as { r: number; g: number; b: number });
     const tinted = tint(img, color);
-    for (let row = 0; row < BODY_FRAMES; row++) {
-      ctx.drawImage(tinted, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+    const isLegCh = ch.sheet >= 10 && ch.sheet <= 12;
+    for (let i = 0; i < nFrames; i++) {
+      const row = rowsMode ? (isLegCh ? rowsMode.legs : rowsMode.body) : i;
+      if (sit && isLegCh) {
+        // 坐姿腿切片（DrawPlayer_12_Skin_Composite :1289 / 13_Leggings :1497：皮肤族
+        // legIndex==169 才走特殊表，其余默认切片）
+        for (const s of sittingSlicePlan(equip?.legs ?? 0, true, equip?.body ?? 0, sit.seatYOffset, row)) {
+          ctx.drawImage(tinted, s.sx, s.sy, s.sw, s.sh, s.dx, i * FRAME_H + s.dy, s.sw, s.sh);
+        }
+        continue;
+      }
+      ctx.drawImage(tinted, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
     }
   }
-  // 腿甲（竖条 20 帧，Armor_Legs_{id} 替代 pants+shoes）
+  // 腿甲（竖条 20 帧，Armor_Legs_{id} 替代 pants+shoes；坐姿走切片表全档 :1473）
   if (legsArmor && !noArmor && wantLegs) {
-    for (let row = 0; row < BODY_FRAMES; row++) {
-      ctx.drawImage(legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+    for (let i = 0; i < nFrames; i++) {
+      const row = rowsMode ? rowsMode.legs : i;
+      if (sit) {
+        for (const s of sittingSlicePlan(equip?.legs ?? 0, false, equip?.body ?? 0, sit.seatYOffset, row)) {
+          ctx.drawImage(legsArmor.img, s.sx, s.sy, s.sw, s.sh, s.dx, i * FRAME_H + s.dy, s.sw, s.sh);
+        }
+        continue;
+      }
+      ctx.drawImage(legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
     }
   }
 
@@ -266,7 +364,8 @@ export function compositePaperDoll(
   const gridRect = (sheet: number, x: number, y: number, color: { r: number; g: number; b: number }) => {
     return { sheet, x, y, color };
   };
-  for (let row = 0; row < BODY_FRAMES; row++) {
+  for (let i = 0; i < nFrames; i++) {
+    const row = rowsMode ? rowsMode.body : i;    // 复合网格属 body 件（bodyFrame 行）
     if (!wantBody) break;                        // part 拆分：复合网格只属 body 件
     if (onlyArmor && !bodyArmorImg) continue;    // armor 层无身甲槽则该层为空
     if (noArmor && bodyArmorImg) continue;       // skin 层身甲槽留空（甲覆盖语义）
@@ -275,11 +374,11 @@ export function compositePaperDoll(
     const drawTinted = (img: ImageBitmap | HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }) => {
       // 全部部件左上角对齐帧锚点(原版 position-origin 相消;臂偏移仅是旋转 pivot,见文件头)
       ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-        0, row * FRAME_H, FRAME_W, FRAME_H);
+        0, i * FRAME_H, FRAME_W, FRAME_H);
     };
     const drawArmorCell = (img: ImageBitmap | HTMLImageElement, x: number, y: number) => {
       ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-        0, row * FRAME_H, FRAME_W, FRAME_H);
+        0, i * FRAME_H, FRAME_W, FRAME_H);
     };
     if (bodyArmorImg) {
       // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层
@@ -322,9 +421,10 @@ export function compositePaperDoll(
   // 前发层（1.4.4+ PlayerDrawSet:1751-1753：backHairDraw 时裁 26px 高，与后发层分离）
   if (!onlyArmor && wantHead && hairTinted) {
     const frontH = hasBackHair ? 26 : FRAME_H;
-    for (let row = 0; row < BODY_FRAMES; row++) {
+    for (let i = 0; i < nFrames; i++) {
+      const row = rowsMode ? rowsMode.body : i;
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
-      ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, frontH, 0, row * FRAME_H, FRAME_W, frontH);
+      ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, frontH, 0, i * FRAME_H, FRAME_W, frontH);
     }
   }
 
@@ -333,8 +433,9 @@ export function compositePaperDoll(
   if (equip?.head && !opts?.skipHair && !noArmor && opts?.layer !== 'armorNoHead' && wantHead) {
     const headArmor = UITextures.get(`Armor_Head_${equip.head}.png`);
     if (headArmor) {
-      for (let row = 0; row < BODY_FRAMES; row++) {
-        ctx.drawImage(headArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+      for (let i = 0; i < nFrames; i++) {
+        const row = rowsMode ? rowsMode.body : i;
+        ctx.drawImage(headArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, i * FRAME_H, FRAME_W, FRAME_H);
       }
     }
   }
@@ -366,6 +467,13 @@ export function eyelidFrame(a: Appearance): HTMLCanvasElement | null {
 export function dollFrame(doll: HTMLCanvasElement, frame: number): { img: HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number } {
   const idx = Math.max(0, Math.min(BODY_FRAMES - 1, frame));
   return { img: doll, sx: 0, sy: idx * FRAME_H, sw: FRAME_W, sh: FRAME_H };
+}
+
+/** 双行帧取帧：rows 模式产物是 40×56 单帧（sy=0），整表产物按 body 行取。
+ *  rows.body===rows.legs 时调用方应优先走整表缓存路径（本函数也兼容） */
+export function dollFrameRows(doll: HTMLCanvasElement, rows: DollRows): { img: HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number } {
+  if (doll.height <= FRAME_H) return { img: doll, sx: 0, sy: 0, sw: FRAME_W, sh: FRAME_H };
+  return dollFrame(doll, rows.body);
 }
 
 /** 行走动画帧号（UICharacter.UpdateAnim：(time/0.07 % 14 + 6)） */

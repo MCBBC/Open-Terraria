@@ -10,7 +10,8 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
-import { compositePaperDoll, dollFrame, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, FRAME_W, FRAME_H } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H } from '../player/PaperDoll';
+import { MALE_VARIANTS } from '../player/Appearance';
 import { hairDyeColor } from '../player/HairDyeColor';
 import type { Inventory } from '../items/Inventory';
 import { options } from '../core/Options';
@@ -19,7 +20,7 @@ import { FancyResourceBars } from './FancyResourceBars';
 import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
-import { SMART_CURSOR_DIRECTION_LOCKS } from '../player/SmartCursor';
+import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale } from '../ui/MobileControls';
 import { TEAM_COLORS } from '../stats/Pvp';
 
@@ -30,12 +31,63 @@ export interface HoverTarget {
   arrow?: { x: number; y: number } | null;
 }
 
+/** SetMatch body→legs 长袍腿替表（Player.cs:36761-36856 ArmorSlotRequested==1 全 switch
+ *  提取）：身甲自带裙摆时腿贴图整体换裙（PlayerFrame :35334-35341 消费——wearsRobe 族）。
+ *  81 例外：仅当无腿甲（Legs==-1||0）才换 169；165/166/167/183 随性别分档 */
+function setMatchBodyToLegs(body: number, legs: number, male: boolean): number {
+  switch (body) {
+    case 15: return 88; case 36: return 89; case 41: return 97; case 42: return 90;
+    case 58: return 91; case 59: return 92; case 60: return 93; case 61: return 94;
+    case 62: return 95; case 63: return 96; case 77: return 121;
+    case 165: return male ? 118 : 99;
+    case 166: return male ? 119 : 100;
+    case 167: return male ? 101 : 102;
+    case 180: return 115; case 181: return 116;
+    case 183: return male ? 136 : 123;
+    case 191: return 131;
+    case 93: return 165; case 90: return 166; case 88: return 168;
+    case 81: return (legs <= 0) ? 169 : -1;
+    case 213: return 187; case 215: return 189; case 219: return 196; case 221: return 199;
+    case 223: return 204; case 231: return 214; case 232: return 215; case 233: return 216;
+    case 241: return 229; case 256: return 244;
+    default: return -1;
+  }
+}
+
+/** SetMatch legs 槽性别换装表（Player.cs:36858-36974 ArmorSlotRequested==2 全 switch
+ *  提取）：同一件腿甲男女贴图档不同（女 146→147 等）；-1 = 不替换 */
+function setMatchLegs(legs: number, male: boolean): number {
+  switch (legs) {
+    case 83: return male ? 117 : -1;
+    case 84: return male ? 120 : -1;
+    case 132: return male ? 135 : -1;
+    case 57: return male ? 137 : -1;
+    case 180: return !male ? 179 : -1;
+    case 184: return !male ? 183 : -1;
+    case 146: return male ? 146 : 147;
+    case 154: return male ? 155 : 154;
+    case 158: return male ? 157 : -1;
+    case 191: return !male ? 192 : -1;
+    case 193: return !male ? 194 : -1;
+    case 197: return !male ? 198 : -1;
+    case 203: return !male ? 202 : -1;
+    case 208: return !male ? 207 : -1;
+    case 219: return !male ? 220 : -1;
+    case 232: return !male ? 233 : -1;
+    case 236: return !male ? 248 : -1;
+    case 249: return !male ? 250 : -1;
+    default: return -1;
+  }
+}
+
 /** 装备 → 纸娃娃渲染参数。贴图索引 = item.head/body/legs 槽位序号（原版语义，
  *  非物品 id——铁甲三件的槽位序号都是 2）；原版物品 id 经 vanilla.json armorIndex 查表。
  *  ★vi_ 物品无 legacy def.armor——部位/贴图序号改走 vanilla-itemstats（s + hs/bs/ls，
  *  与 armorIndex 同源;2026-08-14 前只认 def.armor → vi_ 盔甲/面具全不渲染,
- *  "时装头不显示"根因）。armorIndex 兜底保留（legacy/place_ 物品）。 */
-function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas').SpriteAtlas | null): { head: number | null; body: number | null; legs: number | null } {
+ *  "时装头不显示"根因）。armorIndex 兜底保留（legacy/place_ 物品）。
+ *  app 传入时跑 SetMatch 三查（PlayerFrame :35336-35374：①身甲裙腿替 ②腿甲性别
+ *  换装 ③头 201 女换 202——armor[10-12] 时装覆盖优先已由 displayArmor 处理 ✓） */
+function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas').SpriteAtlas | null, app?: import('../player/Appearance').Appearance | null, onVelociraptor = false): { head: number | null; body: number | null; legs: number | null } {
   const idx = (itemId: number | null | undefined, slot: 0 | 1 | 2): number | null => {
     if (itemId == null) return null;
     const def = ITEM_DEFS[itemId];
@@ -59,7 +111,19 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
     return slot === 0 ? (entry.head || null) : slot === 1 ? (entry.body || null) : (entry.legs || null);
   };
   const disp = inv.displayArmor();
-  return { head: idx(disp[0], 0), body: idx(disp[1], 1), legs: idx(disp[2], 2) };
+  let head = idx(disp[0], 0), body = idx(disp[1], 1), legs = idx(disp[2], 2);
+  if (app) {
+    const male = MALE_VARIANTS.includes(app.skinVariant);
+    // ① body→legs 长袍腿替（:35334-35341——request.Legs 取换装前原值）
+    const robe = setMatchBodyToLegs(body ?? 0, legs ?? 0, male);
+    if (robe >= 0) legs = robe;
+    // ② legs 槽性别换装（:35342-35349）
+    const swap = setMatchLegs(legs ?? 0, male);
+    if (swap >= 0) legs = swap;
+    // ③ head 201（狐狸套头）女换 202（:36755-36759；迅猛龙坐骑 54 上强制 201）
+    if (head === 201) head = male || onVelociraptor ? 201 : 202;
+  }
+  return { head, body, legs };
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly } from './VanillaLiquidRenderer';
@@ -152,7 +216,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
-import { mountFallbackColor, mountLights, fishronWashFactor } from '../entities/Mounts';
+import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
@@ -6042,6 +6106,76 @@ export class Renderer {
 
   /** swing 形状（Game.swing / 远端 swingNet 同构）。
    *  useStyle 分族 + aim（useStyle 5/13 的瞄准角）由 Game.useSwing 写入 */
+  /** body/legs 双行（原版两条独立状态机：腿链 Player.cs:35718-35855、身体链
+   *  :35874-36186——use 行/静持行只钉身体，腿照常 legFrame 循环；行走时身体同步
+   *  腿（:36184-36186 bodyFrame.Y = legFrame.Y）。行序 1:1 照源码分支排布）。
+   *  legArmorId = 腿甲槽位 id（legs==217 坐/睡强制行 5 :36202-36206） */
+  private playerFrameRows(p: Player,
+    swing: { useStyle?: number } | null, holdStyleRaw: number,
+    mnt: import('../entities/Mounts').MountInstance | null, cart: unknown,
+    legArmorId: number,
+  ): { body: number; legs: number } {
+    const useRow = swing ? this.useStyleBodyRow(swing as never, p) : -1;
+    const mountActive = !!(mnt || (p.ridingCart && cart));
+    const mtype = p.mount.type;
+    const noLegOverride = !!MOUNT_SETS.DoesNotOverrideLegFrames?.[mtype];   // 57-60 滚轴鞋
+    const noBodyOverride = !!MOUNT_SETS.DoesNotOverrideBodyFrames?.[mtype];
+    const latched = p.grappleProjs.find((g) => g.latched) ?? null;
+    const wing = p.equipStats.wing;
+    // ShouldDrawWingsThatAreAlwaysAnimated（:30271）——22/28/45 翼腿行 0 门
+    const wingsAlways = p.vy !== 0 && !mountActive && !latched
+      && !(p.inWater && (p.equipStats.flipper || p.buffs.has(BuffType.FlipperPotion)));
+    // ---- 腿链（:35718-35731 坐骑钉行 / :35786-35855 循环族 / :35858-35877 覆写族）----
+    let legs: number;
+    if (mountActive && !noLegOverride) {
+      legs = (mtype === 23 || mtype === 45 || mtype === 48) ? 0 : 6;   // 普通坐骑行6（含矿车）
+    } else if (p.swimTime > 0) {
+      // 划水循环 +2/t 行 7..19（:35792-35805）——legFrameCounter 未建模，以 miscCounter
+      // 等速率时钟近似（速率 1:1，相位不锁入水时刻，登记）
+      legs = 7 + Math.floor((p.miscCounter * 2) / 8) % 13;
+    } else if (p.vy !== 0 || latched) {
+      legs = (wing && (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) && wingsAlways) ? 0 : 5;
+    } else if (p.vx !== 0 && p.onGround) {
+      // 行走循环（:35817-35847）：counter += |vx|·1.3、每 8 进一行、行 7..19 回绕；
+      // 滚轴鞋（IsRollerSkates）满速档 +2/t（:35830-35833）。animTime = |vx| 累计（走停清零）
+      const skates = !!MOUNT_SETS.IsRollerSkates?.[mtype] && mountActive;
+      const rate = skates && Math.abs(p.vx) >= (p.equipStats.accRunSpeed || 3) ? 2 : p.animTime * 1.3;
+      legs = 7 + Math.floor(rate / 8) % 13;
+    } else {
+      legs = 0;
+    }
+    if (p.carpetTime > 0) legs = 0;                                  // 飞毯腿钉 0（:35858-35863）
+    if (p.performingJump === 'Sandstorm') legs = 0;                  // 沙暴跳腿钉 0（:35865-35877）
+    if (legArmorId === 217 && (p.sitting || p.sleeping)) legs = 5;   // :36202-36206
+    // ---- 身体链（:35874-36186，else-if 序 1:1）----
+    let body: number;
+    if (useRow >= 0) body = useRow;                       // useStyle 行（:35879-36018）
+    else if (holdStyleRaw === 1 || holdStyleRaw === 3 || holdStyleRaw === 5) body = 3;   // :36025-36040
+    else if (holdStyleRaw === 2) body = 2;                // :36036
+    else if (holdStyleRaw === 4 && p.onGround && p.gravDir === 1) body = 0;             // :36042-36049
+    else if (holdStyleRaw === 7) body = 11;               // :36042-36045（物品本身不画）
+    else if (p.shieldRaised) body = 10;                   // 盾举行10（:36052-36055）
+    else if (mountActive && !noBodyOverride) body = p.mount.bodyFrame;  // :36056-36060（矿车=3）
+    else if (latched) {
+      body = latched.y < p.y ? 2 : latched.y > p.y + p.h ? 4 : 3;     // :36061-36096
+      if (p.gravDir === -1 && body !== 3) body = body === 2 ? 4 : 2;
+    }
+    else if (p.inWater && !p.inputDown && (p.equipStats.flipper || p.buffs.has(BuffType.FlipperPotion))
+      && (!p.ridingMount || p.mount.type === 37)) body = 10;           // 浮水行10（:36098-36100 + :3710-3722）
+    else if (p.swimTime > 0) body = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;     // :36102-36119
+    else if (p.vy !== 0) {
+      if (p.eocDash > 0) body = 6;
+      else if (p.performingJump === 'Sandstorm' || p.carpetTime > 0) body = 6;         // :36123-36134
+      else if (wing) {
+        if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) body = 0;
+        else body = (p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0) ? 6 : 5;   // :36135-36155
+      } else body = 5;
+    }
+    else if (p.vx !== 0 && p.onGround) body = legs;       // 行走身体同步腿（:36184-36186）
+    else body = 0;
+    return { body, legs };
+  }
+
   /** 身体帧行复算（47/49 锚点行修正用——与下方纸娃娃/legacy 行选择同规则，
    *  独立复算避免改动并行会话在改的帧选择主体） */
   private playerBodyRow(p: Player,
@@ -6660,8 +6794,9 @@ export class Renderer {
       ctx.restore();
       return;
     }
-    let dollEquip = dollEquipFromInv(p.inv, this.atlas);
+    let dollEquip = dollEquipFromInv(p.inv, this.atlas, a);
     if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
+    if (p.merman) dollEquip = { head: 39, body: 22, legs: 21 };   // 人鱼强制三件（:35473-35494，死亡态同置）
     const full = compositePaperDoll(a, dollEquip);
     if (!full) return;
     // 死亡帧行冻结（原版 UpdateDead 不跑 PlayerFrame——bodyFrame 停在死亡瞬间值；
@@ -6690,8 +6825,8 @@ export class Renderer {
       ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
       if (part === 'head') {
         // 眼睑属头层组（DrawPlayer_21_Head_TheFace_Eyelid）——同 headPosition/Rotation
-        // 变换；眼帧冻结于死亡值（dead 后 updateEyeState 停）
-        this.drawEyelid(ctx, p, row, pad);
+        // 变换；眼帧冻结于死亡值（dead 后 updateEyeState 停）；HidesHead 头甲下跳过
+        this.drawEyelid(ctx, p, row, pad, HIDES_HEAD.has(dollEquip.head ?? 0));
       }
       ctx.restore();
     }
@@ -6725,8 +6860,8 @@ export class Renderer {
    *  eyeFrame 叠画于头/眼之上——头层组同一基座坐标 + OffsetsPlayerHeadgear[row] Y−2
    *  （行 7/8/9/14/15/16 → −2，其余 0；gravDir 镜像空间内同值即原版 ×(−1) 语义）；
    *  色 = colorHead → skinColor（eyelidFrame 调色）；帧 0=睁眼为空帧不画 */
-  private drawEyelid(ctx: CanvasRenderingContext2D, p: Player, row: number, pad: number): void {
-    if (p.eyeFrame === 0 || !p.appearance) return;
+  private drawEyelid(ctx: CanvasRenderingContext2D, p: Player, row: number, pad: number, hideFace = false): void {
+    if (p.eyeFrame === 0 || !p.appearance || hideFace) return;
     const lid = eyelidFrame(p.appearance);
     if (!lid) return;
     const offY = (HEADGEAR_ZERO_ROWS.has(row) ? 0 : 2) - 2;
@@ -6734,9 +6869,46 @@ export class Renderer {
       -FRAME_W / 2, -FRAME_H + pad + offY, FRAME_W, FRAME_H);
   }
 
+  /** SetOffsetbyBed 逐床型 visualOffsetOfBedBase（PlayerSleepingHelper.cs:229-280
+   *  照抄；bedStyle = 床 tile frameY/36，缺省档 (-9,1)）。世界空间消费 =
+   *  off×(direction,gravDir)（GetSleepingOffsetInfo :33-40 → PlayerDrawSet.cs:345-348
+   *  Position += posOffset） */
+  private static readonly BED_VISUAL_OFFSET: Record<number, readonly [number, number]> = {
+    8: [-11, 1], 10: [-9, -1], 11: [-11, 1], 13: [-11, -3],
+    15: [-7, -3], 16: [-7, -3], 17: [-7, -3], 18: [-9, -3], 19: [-3, -1],
+    20: [-9, -5], 21: [-9, 5], 22: [-7, 1], 23: [-5, -1], 24: [-7, 1], 25: [-7, 1],
+    27: [-9, 3], 28: [-9, 5], 29: [-11, -1], 30: [-9, 3], 31: [-7, 5], 32: [-7, -1],
+    34: [-13, 1], 35: [-13, 1], 36: [-13, 1], 37: [-13, 1], 38: [-11, -3],
+  };
+  private static readonly BED_VISUAL_OFFSET_DEFAULT: readonly [number, number] = [-9, 1];
+
+  /** 只读床型反查（玩家侧无 bedStyle 追踪字段——禁改 Player.ts）：扫玩家脚下 7×4 窗
+   *  内床 tile（sheet 79，TileID.Sets.CanBeSleptIn），bedStyle = floor(frameY/36)
+   *  （GetSleepingTargetInfo :193-224 同式；上下行均 floor 到同 style），取最近者 */
+  private sleepingBedOffset(world: World, p: Player): readonly [number, number] {
+    const st = world.store;
+    const tx = Math.floor((p.x + p.w / 2) / TILE), ty = Math.floor((p.y + p.h - 2) / TILE);
+    let best: number | null = null, bestD = 1e9;
+    for (let dy = -2; dy <= 1; dy++) for (let dx = -3; dx <= 3; dx++) {
+      const x = tx + dx, y = ty + dy;
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      if (!(st.flags[i] & 1) || sheetOf(st.type[i]) !== 79) continue;
+      const d = Math.abs(dx) + Math.abs(dy) * 2;
+      if (d < bestD) { bestD = d; best = Math.floor(st.frameY[i] / 36); }
+    }
+    return Renderer.BED_VISUAL_OFFSET[best ?? -1] ?? Renderer.BED_VISUAL_OFFSET_DEFAULT;
+  }
+
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null, flicker: FlickerClock | null = null) {
     const ctx = this.ctx;
     if (p.dead) { this.drawDeadPlayerParts(p, world); return; }
+    // ---- 变身坐骑隐藏玩家本体（PlayerDrawSet.cs:385-410 AdjustmentsFor{Wolf,
+    //      Velociraptor,Rat,Bat,Pixie}Mount → hideEntirePlayer；MountID.Sets.
+    //      PlayerIsHidden = {52,54,55,56,61}）：本体/翅膀/眼睑/盾球/手持层全让位，
+    //      坐骑贴图即全部视觉。手持物原版由 AdjustmentsForWolfMount 单独改锚续画，
+    //      此处以原锚近似续画（登记） ----
+    const mntHidden = p.ridingMount && !!MOUNT_SETS.PlayerIsHidden?.[p.mount.type];
     // ---- 玩家本体随坐骑机身倾斜（UFO 7/钻头 8/扫帚 23）----
     // 原版 DrawPlayerFull 把 fullRotation/fullRotationOrigin 整组传进 PlayerDrawSet
     // （LegacyPlayerRenderer.cs:481），TransformDrawData（PlayerDrawLayers.cs:4199-4230）
@@ -6754,8 +6926,10 @@ export class Renderer {
     if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
     // ---- 坐椅渲染偏移（PlayerSittingHelper.GetSittingOffsetInfo :22-37，Player
     //      Position 消费 :4083-4087）：sittingIndex 单人恒 0 → posOffset=offsetForSeat×
-    //      Directions + seatAdjustment(−4+(int)offsetForSeat.Y) 竖移。坐姿腿帧（原版
-    //      bodyFrame 坐姿变体）未画——视觉债登记 ----
+    //      Directions + seatAdjustment(−4+(int)offsetForSeat.Y) 竖移。此平移 = 原版
+    //      身体链各层 Position.Y += torsoOffset（=seatYOffset，PlayerDrawSet.cs:341）
+    //      的等价整体施加——腿切片族内带的 −2/+seatYOffset 已在 PaperDoll 切片表
+    //      中对冲（sittingSlicePlan 的 evY−sY 项） ----
     if (p.sitting) {
       ctx.save();
       ctx.translate(p.facing * p.seatOffsetX, -4 + Math.trunc(p.seatOffsetY));
@@ -6777,6 +6951,7 @@ export class Renderer {
     // 在 SetDefaults 公共尾部强制——在库食物 4023/4291/5275/5277/5278/1912/1919 等提取漏，
     // 此前静持不显示）；7 无持位分支（仅 bodyFrame 行 11）不画
     let staticHoldStyle = 0;
+    let holdStyleRaw = 0;   // 未置零的静持档（holdStyle 7 无持位绘制但身体行 11 :36042-36045）
     if (!swing) {
       const held = p.inv.heldItem();
       const def = held ? ITEM_DEFS[held.id] : undefined;
@@ -6789,6 +6964,9 @@ export class Renderer {
         const hs = vid >= 0 && VANILLA_IS_FOOD.has(vid) ? 1
           : vid >= 0 ? itemFuncOfVid(vid)?.holdStyle ?? (HOLD_STYLE_ITEMS.has(vid) ? 1 : 0) : 0;
         staticHoldStyle = hs === 7 ? 0 : hs;
+        holdStyleRaw = hs;
+        // 变身坐骑（PlayerIsHidden）原版由 AdjustmentsForWolfMount 改锚续画手持物——
+        // 此处原锚近似续画（不隐藏，登记锚点偏差）
         if (staticHoldStyle) {
           const ar = this.atlasIcon(held.id);
           const icon = ar ? null : this.itemIcon(held.id);
@@ -6894,9 +7072,12 @@ export class Renderer {
     // 翻转（脚到盒顶 y=0_world、头到盒底），锚点随转（原版各层锚点 *gravDir 语义）
     if (p.gravDir === -1) { ctx.translate(0, -p.h); ctx.scale(1, -1); }
     // 睡床躺平（PlayerSleepingHelper.cs:66-83）：fullRotation = π/2·(−direction)、
-    // origin = Size/2（绕玩家盒中心转）。逐床型 visualOffsetOfBedBase 偏移表
-    // （:227-280）未提取——登记（视觉债清单 docs/behavior-parity-audit C1 批）
+    // origin = Size/2（绕玩家盒中心转）。逐床型 visualOffsetOfBedBase（:227-280
+    // SetOffsetbyBed）经 off×(direction,gravDir) 世界空间先平移再随转（原版
+    // Position += posOffset 后绕 Size/2 旋转 = 同一变换合成；镜像空间内 X 乘 facing）
     if (p.sleeping) {
+      const bo = this.sleepingBedOffset(world, p);
+      ctx.translate(bo[0] * p.facing, bo[1] * p.gravDir);
       ctx.translate(0, -p.h / 2);
       ctx.rotate(Math.PI / 2 * -p.facing);
       ctx.translate(0, p.h / 2);
@@ -6914,7 +7095,11 @@ export class Renderer {
     // 合成后绘制（原版 DrawData 常色不受光照——合成前画会被全屏乘光压暗=偏差）。
     {
       // wings（绘制侧）随坐骑清零（Player.cs:26316-26322：禁翼族 wings=wingsLogic=0）
-      const wingSlot = p.equipStats.wing && !mnt ? p.equipStats.wing.logic : 0;
+      // 人鱼湿态清翼（Player.cs:35487-35494 flag4 = wet && !lavaWet && (!mount ||
+      // !史莱姆坐骑) → wings=0）
+      const merfolkClearWings = p.merman && p.inWater && !p.inLava
+        && !(mnt && p.mount.type === 3);
+      const wingSlot = p.equipStats.wing && !mnt && !merfolkClearWings && !mntHidden ? p.equipStats.wing.logic : 0;
       if (wingSlot > 0 && this.atlas) {
         const d = wingDrawOf(wingSlot);
         const dyeEmu = dyeApplyOf(p.wingDyeVid());
@@ -6971,63 +7156,36 @@ export class Renderer {
     // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行
     const useRow = swing ? this.useStyleBodyRow(swing, p) : -1;
     let drawn = false;
-    if (p.appearance) {
-      let dollEquip = dollEquipFromInv(p.inv, this.atlas);
-      // ⑮ 狼人形态（PlayerFrame :35457-35484：wereWolf 时盔甲槽强制 38/21/20）
+    if (p.appearance && !mntHidden) {
+      let dollEquip = dollEquipFromInv(p.inv, this.atlas, p.appearance, mnt?.type === 54);
+      // ⑮ 狼人形态（PlayerFrame :35457-35466：wereWolf 时盔甲槽强制 38/21/20）；
+      // 人鱼形态（:35473-35494：merman 强制 39/22/21——原版同段后置，覆盖狼人；
+      // 全脸头甲 38∈HidesHead 时 base 脸已由 PaperDoll HIDES_HEAD 门跳过，39 原版
+      // 不在 HidesHead——base 脸画在 39 号全脸甲之下，与原版一致）
       if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
+      if (p.merman) dollEquip = { head: 39, body: 22, legs: 21 };
       // 发色剂（Player.hairDye 1..12）：动态染料逐帧变色——头发/头甲拆出烘焙，
       // 此处按 后发→本体→前发→头甲 叠画（PlayerDrawSet 发层序同构）
       const dyeColor = this.hairDyeRenderColor(p, world, flicker);
-      const doll = compositePaperDoll(p.appearance, dollEquip, dyeColor ? { skipHair: true } : undefined);
+      // ★body/legs 双行（原版 PlayerFrame 两条独立状态机，见 playerFrameRows）：
+      // 行等同时走整表缓存路径（行走 = 身体同步腿 :36184-36186）；不等时烘焙
+      // 40×56 单帧（rows 进 compositePaperDoll 缓存键）
+      const rows = this.playerFrameRows(p, swing, holdStyleRaw, mnt, cart, dollEquip.legs ?? 0);
+      const dual = rows.body !== rows.legs;
+      // 坐姿（PlayerDrawSet.cs:332-343 isSitting）→ 腿通道走 DrawSittingLegs 切片
+      // （腿甲全档切片表 :1473；皮肤/裤/鞋默认切片 :1497；seatYOffset 供特殊档对冲）
+      const sitOpt = p.sitting
+        ? { sitting: { legIndex: dollEquip.legs ?? 0, seatYOffset: -4 + Math.trunc(p.seatOffsetY), body: dollEquip.body ?? 0 } }
+        : {};
+      const dollOpts = { ...(dyeColor ? { skipHair: true } : {}), ...(dual ? { rows } : {}), ...sitOpt };
+      const doll = compositePaperDoll(p.appearance, dollEquip, dollOpts);
       if (doll) {
-        let row = 0; // 0 站立
-        if (useRow >= 0) row = useRow;
-        else if (cart || mnt) row = mnt ? mnt.bodyFrame : 3;  // 坐骑 BodyFrame（Player.cs:36059 bodyFrame=Height*mount.BodyFrame；全坐骑=3）
-        else if (Math.abs(p.vx) > 0.3 && p.onGround) {
-          // ★行走循环优先于静持行——原版身体/腿分图层（静持只钉身体行、腿走
-          // legFrame 循环 cs:36184-36186）；单层合成帧近似下静持行让位。
-          // 帧行集/速率 1:1（Player.cs:35829-35847）：legFrameCounter += |vx|·1.3、
-          // 每 8 进一行、行 7..19 共 13 行回绕（曾 6+animTime/6%14——起点/行数/
-          // 速率全偏，混入行6 下落帧每圈闪一帧）
-          row = 7 + Math.floor((p.animTime * 1.3) / 8) % 13;
-        }
-        else if (staticHoldStyle) {
-          // 静持 bodyFrame 行（Player.cs:36007-36040）：1/3/5→行3、2→行2、
-          // 4→站定行 0（:36046 需 gravDir==1）；6/8 无行分支（7 已在上方置 0 不画）
-          if (staticHoldStyle === 2) row = 2;
-          else if (staticHoldStyle === 4 && p.onGround && p.gravDir === 1) row = 0;
-          else row = 3;
-        }
-        else if (p.inWater && p.swimTime > 0) {
-          // 游泳划水（Player.cs:35791-35807 腿 + :36102-36119 身体三段）：
-          // 腿行 7..19 匀速 counter+2/t；body swimTime>20→行0、>10→行5、≤10→行0
-          // （入水/出水过渡档）。单层帧：body 档为主、划水循环并入下方行档不可分
-          //——腿循环近似为 body 同档（登记：分图层后拆两通道）
-          row = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;
-        }
-        else if (!p.onGround) {
-          // 空中姿态 1:1（Player.cs:35808-35816 腿恒行5 + :36121-36161 身体）：
-          // 滑板 sliding→3、沙暴跳/飞毯→6（:36123-36134 eocDash→6 同段）；
-          // 钩爪悬空段（:36061-36096）：锚点上方→行2、下方→行4、侧向→行3；
-          // 无翼升降均行5；有翼升/按住跳降=行6、松跳降=行5；翼 22/28/45 恒行0。
-          // （曾 vy<0?1:4——行1/4 是挥动动作行，跳跃腿不收、姿态错）
-          if (p.eocDash > 0) row = 6;
-          else if (p.performingJump === 'Sandstorm' || p.carpetTime > 0) row = 6;
-          else {
-            const gr = p.grappleProjs.find((g) => g.latched);
-            if (gr) row = gr.y < p.y ? 2 : gr.y > p.y + p.h ? 4 : 3;
-            else {
-              const wing = p.equipStats.wing;
-              if (!wing) row = 5;
-              else if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) row = 0;
-              else row = (p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0) ? 6 : 5;
-            }
-          }
-        }
-        const f = dollFrame(doll, row);
+        const row = rows.body;                     // 发/头甲/眼睑随身体行（bodyFrame）
+        const f = dollFrameRows(doll, rows);
         // 贴底:纸娃娃帧底有 ~2px 透明边距(Player_0_10 全帧实测),底锚会悬空——
-        // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿
-        const pad = this.spriteBottomPad(f, `doll:${row}`);
+        // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿（坐姿切片底缘
+        // 不同，键里带 sit 档）
+        const pad = this.spriteBottomPad(f, `doll:${rows.body},${rows.legs}${p.sitting ? ',sit' : ''}`);
         if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, true);
         if (stealthClamp >= 1) {
           ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
@@ -7038,9 +7196,9 @@ export class Renderer {
           // 走皮肤公式，与原版逐 DrawData color 一致
           const s2 = stF.skinMul;                      // s'²
           const skinDoll = compositePaperDoll(p.appearance, dollEquip,
-            { skipHair: !!dyeColor, layer: 'skin' });
+            { skipHair: !!dyeColor, layer: 'skin', ...(dual ? { rows } : {}), ...sitOpt });
           if (skinDoll) {
-            const fs = dollFrame(tintRGBA(skinDoll, [s2, s2, s2]), row);
+            const fs = dollFrameRows(tintRGBA(skinDoll, [s2, s2, s2]), rows);
             const ga = ctx.globalAlpha;
             ctx.globalAlpha = ga * s2;
             ctx.drawImage(fs.img, fs.sx, fs.sy, fs.sw, fs.sh, -fs.sw / 2, -fs.sh + pad, fs.sw, fs.sh);
@@ -7052,12 +7210,12 @@ export class Renderer {
           //   ×armorMul——原版 colorHair×s'² / colorArmorHead×s'）：发色剂+潜行同开
           //   时该叠层不衰减，集成点在 drawDollHairOverlays（发色剂会话在途）
           const armorDoll = compositePaperDoll(p.appearance, dollEquip,
-            { layer: dyeColor ? 'armorNoHead' : 'armor' });
+            { layer: dyeColor ? 'armorNoHead' : 'armor', ...(dual ? { rows } : {}), ...sitOpt });
           if (armorDoll) {
             const armorMul: [number, number, number] = stEq.vortexSet
               ? [vortexTint![0], vortexTint![1], vortexTint![2]]   // Lerp 通道（:1641-1644）
               : [stealthClamp, stealthClamp, stealthSettled];      // B×settled（:1539-1541）
-            const fa = dollFrame(tintRGBA(armorDoll, armorMul), row);
+            const fa = dollFrameRows(tintRGBA(armorDoll, armorMul), rows);
             const ga2 = ctx.globalAlpha;
             ctx.globalAlpha = ga2 * stealthClamp;                  // A×s'
             ctx.drawImage(fa.img, fa.sx, fa.sy, fa.sw, fa.sh, -fa.sw / 2, -fa.sh + pad, fa.sw, fa.sh);
@@ -7066,12 +7224,13 @@ export class Renderer {
           if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
         }
         // ---- 眼睑叠层（DrawPlayer_21_Head_TheFace_Eyelid :2640-2683：叠画于
-        //      头/眼之上——眨眼/眯眼/耷拉眼/床闭眼/致盲/受击，见 Player.updateEyeState） ----
-        this.drawEyelid(ctx, p, row, pad);
+        //      头/眼之上——眨眼/眯眼/耷拉眼/床闭眼/致盲/受击，见 Player.updateEyeState；
+        //      HidesHead 头甲（狼人 38 族）下随 base 脸一并跳过（:2577 flag 门）） ----
+        this.drawEyelid(ctx, p, row, pad, HIDES_HEAD.has(dollEquip.head ?? 0));
         drawn = true;
       }
     }
-    if (!drawn && this.atlas) {
+    if (!drawn && this.atlas && !mntHidden) {
       const idle = this.atlas.rect('角色/Player.png', 'Player_0');
       const runFrames = this.runFramesCache ??= this.atlas.animFrames('Player/Run');
       // 动作帧池（Player.png 12-22 号帧）
@@ -7129,7 +7288,7 @@ export class Renderer {
         drawn = true;
       }
     }
-    if (!drawn) {
+    if (!drawn && !mntHidden) {
       // 程序化兜底（锚点同样为脚底中心）
       const sheet = this.assets.playerSheet;
       const fw = this.assets.playerFrameW, fh = this.assets.playerFrameH;
@@ -7142,7 +7301,7 @@ export class Renderer {
     // Extra_61+shields-1 单贴图（1/2/3 层各一张,整簇）；锚 = 玩家中心+solarShieldPos[0]；
     // 旋转 = atan2(pos.y·0.5, pos.x)（(pos×(1,0.5)).ToRotation()）+ 左朝向 π + π/50·dir；
     // α 127/255；shader = cBody（身体染料,逐帧真跑 SM2 字节码——贴图仅 ~420px）
-    if (p.solarShields > 0 && !p.dead) {
+    if (p.solarShields > 0 && !p.dead && !mntHidden) {
       const tex = this.atlas ? this.atlas.ensureVImage(`vanilla/Extra_${61 + p.solarShields - 1}.png`) : null;
       if (tex) {
         const pos = p.solarShieldPos[0];

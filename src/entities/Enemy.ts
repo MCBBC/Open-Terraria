@@ -4531,7 +4531,9 @@ export class Enemy extends Entity {
       }
     }
     moveAndCollide(this, game.world, this.vx, this.vy);
-    if (this.onGround) this.vx *= 0.85;
+    // （原版行走态无地面摩擦：velocity.X 持续到 cap，仅站立刻车 ±0.1——旧
+    //  `onGround && vx*=0.85` 自创衰减把巡航压到 0.397px/t（稳态 0.07/0.15），
+    //  约为原版 1.0 的一半，已删）
     if (this.hitWall && !rat) this.facing *= -1;
   }
 

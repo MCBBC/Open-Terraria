@@ -2721,6 +2721,16 @@ export class Game implements GameHooks {
     this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.AXE], 1);
     this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
     this.prefetchInvProjectiles();
+    // 载入终态保险(2026-08-17 用户报花墙 68 绿块回退):读档玩家远离出生点时
+    // 出生点预载不含玩家区墙表,首烘回退后晚到重烘偶发漏达(挖一格=markDirty
+    // 自愈/重进=全重建自愈,皆旁证)。读档后 2.5s 单次全量标脏一次性对齐——
+    // 有界(单次,非 per-arrival 风暴),此时表已基本就位,重烘即正确
+    setTimeout(() => {
+      if (this.chunks && this.world && this.running) {
+        this.chunks.invalidateAll();
+        if (this.renderLoadLog) console.log('[rbake] 载入终态保险:全量标脏一次(晚到表对齐)');
+      }
+    }, 2500);
     prefetchTrapProjectiles();
     this.attachRenderLogHandle();
     this.attachMemSentinel();
@@ -9087,7 +9097,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private heldAxePower(): number {
     const s = (this.player as Player | undefined)?.inv?.heldItem?.();
     if (!s) return 0;
-    return this.itemFuncTool(s.id)?.axePower ?? 0;
+    // itemFuncTool 的 axePower 是运行时附加字段（双工具副力，类型上未声明）
+    return (this.itemFuncTool(s.id) as { axePower?: number } | undefined)?.axePower ?? 0;
   }
 
   /** v_5 族树掉落 1:1（KillTile_GetTreeDrops :66245-66309 + GetTreeType :63106）：
@@ -9101,10 +9112,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     st: TileStore, x: number, groundFromY: number, treeType: number,
     killed: Array<[number, number]>, crownFX: number, crownFY: number, crownY: number,
   ) {
-    // 基座 = 干列向下穿过树格后的第一格（GetTreeBottom :63478-63520）
+    // 基座 = 干列向下穿过树格/空格后的第一个活性格（GetTreeBottom :63519-63523
+    // `while (!active || IsATreeTrunk || type==72) y++`——砍侧枝时也能溯源基座草族）
     let gy = groundFromY;
-    while (gy < st.h && st.get(x, gy) === treeType) gy++;
-    const ground = st.get(x, gy);
+    while (gy < st.h) {
+      const t = st.get(x, gy);
+      if (t !== 0 && t !== treeType) break;
+      gy++;
+    }
+    const ground = gy < st.h ? st.get(x, gy) : 0;
     const gs = ground !== 0 ? TILE_DEFS[ground]?.vanilla?.sheet ?? -1 : -1;
     let vid = 9, acorns = false, mushroomRoll = false;
     if (gs === 23 || gs === 661) { vid = 619; acorns = true; }            // Corrupt → Ebonwood
@@ -9352,30 +9368,70 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
   }
 
+  /** CheckCactus :54132 单格失撑判定（三规则忠实版）：
+   *  ①根列溯源——沿干下走，断干处经"斜叠臂"（邻列有干且其上也是干）平移列，
+   *    到底后无沙族(53/112/116/234)整砖支撑 → 死（整株无根）；
+   *  ②臂格（i ≠ 溯源列）：below/left/right 全非仙人掌 → 死；
+   *  ③干格：正下方非仙人掌且非沙族 → 死。 */
+  private cactusUnsupported(st: TileStore, i: number, j: number, CAC: number): boolean {
+    const isCac = (xx: number, yy: number) => st.inBounds(xx, yy) && st.get(xx, yy) === CAC;
+    const sandFullBrick = (xx: number, yy: number): boolean => {
+      if (!st.inBounds(xx, yy) || yy >= st.h) return false;
+      const t = st.get(xx, yy);
+      if (t === 0) return false;
+      const ii = st.idx(xx, yy);
+      if (!st.flags[ii] || st.half[ii] || st.slope[ii] !== 0) return false;
+      const s = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+      return s === 53 || s === 112 || s === 116 || s === 234;
+    };
+    let num = j, num2 = i;
+    let guard = 0;
+    while (isCac(num2, num)) {
+      num++;
+      if (!isCac(num2, num)) {
+        if (isCac(num2 - 1, num) && isCac(num2 - 1, num - 1) && num2 >= i) num2--;
+        if (isCac(num2 + 1, num) && isCac(num2 + 1, num - 1) && num2 <= i) num2++;
+      }
+      if (++guard > 64) break;   // 防御：异常结构不悬挂
+    }
+    // ①整株根支撑：溯源列底格须为沙族整砖
+    if (!isCac(num2, num) && !sandFullBrick(num2, num)) return true;
+    // ②臂格三邻无撑
+    if (i !== num2 && !isCac(i, j + 1) && !isCac(i - 1, j) && !isCac(i + 1, j)) return true;
+    // ③干格正下方
+    if (i === num2 && !isCac(i, j + 1) && !sandFullBrick(i, j + 1)) return true;
+    return false;
+  }
+
   /** 仙人掌砍伐（CheckCactus :54132 级联语义）：破坏格及以上整株倒（TileFrame
-   *  case 80 → CheckCactus 逐格上行；切口以下保留）；侧臂在下方无仙人掌支撑时
-   *  随主干同落（:54166-54174 臂分支：below/left/right 全非 80 即死）。每格掉
-   *  仙人掌 276 ×1（GetItemDrops case 80 :64767，无 bonus 掷）——此前 1×1 通用
-   *  路径掉 place_v_ 假物品且上方柱悬空 */
+   *  case 80 → CheckCactus 逐格上行；切口以下保留）；不动点迭代收敛（叠臂/
+   *  干臂互撑也按三规则逐格解）。每格掉仙人掌 276 ×1（GetItemDrops case 80
+   *  :64767，无 bonus 掷）——此前 1×1 通用路径掉 place_v_ 假物品且上方柱悬空 */
   private fellCactus(x: number, y: number) {
     const st = this.world.store;
     const CAC = TILE_BY_KEY['v_80_cactus'];
     const cactusKey = VANILLA_ITEM_KEY_BY_ID[276];
     const killed: Array<[number, number]> = [];
-    let yy = y;
-    while (yy >= 0 && st.get(x, yy) === CAC) {
-      st.setTile(x, yy, 0);
-      killed.push([x, yy]);
-      for (const s of [-1, 1]) {
-        const ax = x + s;
-        if (st.get(ax, yy) === CAC && st.get(ax, yy + 1) !== CAC) {
-          st.setTile(ax, yy, 0);
-          killed.push([ax, yy]);
+    if (st.get(x, y) !== CAC) return;
+    st.setTile(x, y, 0);
+    killed.push([x, y]);
+    // 支撑收敛：切口以上 40 格 × 三列迭代至不动点（仙人掌高度上限 12）
+    const topY = Math.max(0, y - 40);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let yy = y - 1; yy >= topY; yy--) {
+        for (const cx of [x - 1, x, x + 1]) {
+          if (st.get(cx, yy) !== CAC) continue;
+          if (this.cactusUnsupported(st, cx, yy, CAC)) {
+            st.setTile(cx, yy, 0);
+            killed.push([cx, yy]);
+            changed = true;
+          }
         }
       }
-      yy--;
     }
-    this.chunks.markDirtyArea(x - 2, yy, x + 2, y + 1);
+    this.chunks.markDirtyArea(x - 2, topY, x + 2, y + 1);
     if (cactusKey && ITEM_BY_KEY[cactusKey] !== undefined) {
       for (const [kx, ky] of killed) {
         this.spawnDrop(kx * TILE + 8 + (Math.random() - 0.5) * 10, ky * TILE, cactusKey, 1,
