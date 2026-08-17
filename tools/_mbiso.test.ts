@@ -275,6 +275,9 @@ let capCc: Cap | null = null, capMb: Cap | null = null;
     const world = new World(W, H, capCc.gs.seed);
     world.store = st;
     world.genWaterLine = capCc.gs.waterLine;
+    world.shimmerX = capCc.gs.shimmerX;   // 真值以太中心(QuickWater 首尾 ShimmerRemoveWater)
+    world.shimmerY = capCc.gs.shimmerY;
+    restoreGenSolid(capCc.solid);          // 生成期 tileSolid 覆写(settle.ts 内部快照注入)
     // 地牢豁免盒（镜像 liquidSettlePass 接线;Liquid.cs:186-188）
     if (capCc.gs.dungeonSide !== 0) {
       const edge = Math.floor(W * 0.05), mid = Math.floor(W * 0.55);
@@ -288,7 +291,11 @@ let capCc: Cap | null = null, capMb: Cap | null = null;
       const sim = new LiquidSim(world);
       sim.isGeneratingOrLoadingWorld = true;
       sim.generatingWorld = true;
-      sim.shimmerCenter = world.shimmerX > 0 ? { x: world.shimmerX, y: world.shimmerY } : null;
+      // DD 终清批对齐:真值以太中心(3966,724)——隔离重放须从 gs 取(isGenerating
+      // 洞窟液体清除链);生成期 tileSolid 覆写 + worldGenTilesIgnoreWater 同 settle.ts
+      sim.shimmerCenter = capCc.gs.shimmerX > 0 ? { x: capCc.gs.shimmerX, y: capCc.gs.shimmerY } : null;
+      restoreGenSolid(capCc.solid);
+      sim.applyGenSolidOverrides(capCc.solid);
       if (world.genWaterLine > 0) {
         sim.genWaterLine = world.genWaterLine;
         const d = world.genDungeonExempt;
@@ -297,6 +304,7 @@ let capCc: Cap | null = null, capMb: Cap | null = null;
           && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
       }
       sim.passRand = (max) => rng.nextInt(max);
+      sim.worldGenTilesIgnoreWater(true);   // cs:21067 pass 委托首
       // 拆账辅助:各相液体变动量(96→当前)
       const liq96 = load(96, 'liq');
       const liqChg = () => { let c = 0; for (let i = 0; i < W * H; i++) if (st.liquid[i] !== liq96[i]) c++; return c; };
@@ -313,6 +321,7 @@ let capCc: Cap | null = null, capMb: Cap | null = null;
         console.log(`phase round${round}: iters=${it} draws=${box.n} active=${sim.numLiquid} buf=${sim.bufferLen} liqChg=${liqChg()}`);
       }
       sim.quickSettle = false;
+      sim.worldGenTilesIgnoreWater(false);  // cs:21110 pass 尾
       if (!process.env.SW_SETTLE_NOTAIL) {
         sim.waterCheck();
         console.log(`phase tailWaterCheck: draws=${box.n} active=${sim.numLiquid}`);

@@ -10,6 +10,7 @@
 // yield 按真实耗时让出（≥32ms 一次）——worker 内也保留，让 progress postMessage 流出。
 import type { World } from '../World';
 import { LiquidSim } from './LiquidSim';
+import { snapshotGenSolid } from '../gen/vanilla/GenSolid';
 import type { RNG } from '../../core/rng';
 
 export async function settleWorldLiquids(
@@ -46,6 +47,13 @@ export async function settleWorldLiquids(
           && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
       }
     }
+    // 生成期 Main.tileSolid 覆写快照注入（裂纹砖 481-483=false/484=false/192=false 等
+    // ——原版液体模块读被各 pass 改写后的全局面板，solidNP LUT 须同步）。★先注入
+    // 再 wg 包裹——wg 快照须含覆写（否则 191=true 覆写会在 wg(false) 复原时翻回实心）
+    sim.applyGenSolidOverrides(snapshotGenSolid());
+    // Liquid.worldGenTilesIgnoreWater(true)（cs:21067/16239，pass 委托首）：10 关闭门/
+    // 190/191/192 全程非实心；pass 尾（轮环后、quickSettle=false 之后）恢复（cs:21110/16293）
+    sim.worldGenTilesIgnoreWater(true);
   }
   onProgress?.(0.05);
   sim.quickWater();
@@ -61,8 +69,10 @@ export async function settleWorldLiquids(
   // p=(num5-当前)/num5 单调不减——生成期 progress.Set(num6/3+0.33)、读档 50%+num7*50%
   let num5 = sim.numLiquid + sim.bufferLen;
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    // ★vanilla 轮上限 = 轮始活量×5（:16252/21079 num3*5）——无 1000 下限、无提前收敛
-    //   出口（10 轮恒跑满:轮尾 WaterCheck 每轮都能把稳定浅洼重新激活,尾轮仍耗掷）
+    // ★vanilla 轮上限 = 轮始活量×5（:16252/21079 num3*5）——无下限。#97 x86 实证：
+    //   尾轮 2 振子格 numLiquid=2 → 每轮恰 10 迭代打满预算 break（下限 1000 会多跑
+    //   8×990 迭代 = 掷流/末态双漂移）。无提前收敛出口（10 轮恒跑满:轮尾 WaterCheck
+    //   每轮都能把稳定浅洼重新激活）
     const MAX_ITER = mode === 'gen' ? (sim.numLiquid + sim.bufferLen) * 5 : 100000;
     let roundIter = 0;
     while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
@@ -85,6 +95,9 @@ export async function settleWorldLiquids(
     // `numLiquid===0 break` 掐掉了尾轮 WaterCheck 反复再激活的流掷尾段
   }
   sim.quickSettle = false;
+  // 原版 pass 尾恢复（cs:21110/16293：worldGenTilesIgnoreWater(false)——在 ClearPendingLiquid
+  // 之后）；尾部 WaterCheck/finalGenMergeCheck（本仓 #102 补挂段）按原版时点在恢复之后跑
+  sim.worldGenTilesIgnoreWater(false);
   sim.waterCheck(); // 残留活水交给运行时收敛（原版 WorldFile.cs:769 同款）
   // 生成收尾：全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-22650）
   // ——生成/读档期常规交互只做类型 strip 不落块，唯独这一次允许残余接触结块

@@ -12,6 +12,11 @@ import { TILE_DEFS } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
 
 const VG = process.env.SW_VG ?? '/tmp/sw-num4/van_x86_g';
+// ★Y 批：8 通道真值目录（/tmp/sw-ycal/van22，Y 批产出，typ/act/wal/liq 与 VG 逐字节
+// 复核 SAME + slope/half 与 sw-hsv/hs52 复核 SAME）。隔离重放必须回注 slope/half——
+// granite CA 初值 res=SolidTile?4:1 坡面敏感：缺通道 → biome5 区 7 格残差+掷差 -3
+// 假案（详见 docs content-parity 2026-08-17 Y 批节）。
+const HS = process.env.SW_HS ?? '/tmp/sw-ycal/van22';
 const SEEDTXT = process.env.SW_SEED ?? '9293480';
 // ★granite 78137 勘正（Y 批 2026-08-17）：J 批曾录 781137（多一位数字）→ 掷差
 // -703003 假案。passchain 第6列 a86ee76c 唯一命中 N=78137（/tmp/sw-ycal/nfind.mjs
@@ -27,6 +32,11 @@ function buildStore(idx: number) {
   const a = load(idx, 'act', NAMES[idx]!);
   const w = new Uint16Array(load(idx, 'wal', NAMES[idx]!).buffer.slice(0));
   const l = load(idx, 'liq', NAMES[idx]!);
+  let sl: Uint8Array | null = null, hf: Uint8Array | null = null;
+  try {
+    sl = new Uint8Array(readFileSync(`${HS}/${String(idx).padStart(3, '0')}_${NAMES[idx]!}.slope`).buffer.slice(0));
+    hf = new Uint8Array(readFileSync(`${HS}/${String(idx).padStart(3, '0')}_${NAMES[idx]!}.half`).buffer.slice(0));
+  } catch { /* 8 通道真值缺席则坡位全 0（旧口径） */ }
   const REV = new Map<number, number>();
   for (let i = 0; i < TILE_DEFS.length; i++) {
     const s = TILE_DEFS[i]?.vanilla?.sheet;
@@ -39,6 +49,7 @@ function buildStore(idx: number) {
     st.wall[i] = w[i];
     st.liquid[i] = l[i];
     st.liquidType[i] = 0;
+    if (sl && hf) { st.slope[i] = sl[i]!; st.half[i] = hf[i]!; }  // 真值坡位回注
   }
   return st;
 }
@@ -185,7 +196,7 @@ function countedRng(seed: number) {
       }
     }
   }
-  // #22 Granite：输入 dump021，输出 dump022。原版 N=781137
+  // #22 Granite：输入 dump021(+真值 slope/half 回注)，输出 dump022。原版 N=78137
   {
     const st = buildStore(21);
     const { rng, box } = countedRng(gs.seed);

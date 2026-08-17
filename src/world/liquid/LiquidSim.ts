@@ -129,8 +129,12 @@ export class LiquidSim {
   /** tile.checkingLiquid / tile.skipLiquid 位图 */
   private checking: Uint8Array;
   private skip: Uint8Array;
-  /** 调度参数（单机客户端高质量档：cycles = 17-10*1 = 7；Main.cs:12240-12243） */
-  private cycles = 7;
+  /** 调度参数：默认 10 = Liquid 静态初值/ReInit 态（Liquid.cs:24 `cycles = 10`——
+   *  生成期 Reset 调 ReInit 维持 10；WorldGen.cs:11242）。运行期由 Main.cs:12240-43
+   * 画质档改写（单机高质量 17-10*1=7）——Game 构造后调 setRuntimeCycles()。
+   * ★曾默认 7：生成期沉降轮分片错序（每 7 次一全量片 vs 原版每 10 次）→
+   * round0 更新次序/侧流事件全漂移（#97 x86 实证 wc 后首分叉） */
+  private cycles = 10;
   private curMaxLiquid = 25000;
   private wetCounter = 0;
   /** 读档沉降：quickSettle=true 时 cycles=1 全量处理、下灌快速补满（WorldFile.cs:365-389 / Main.cs:12251） */
@@ -257,13 +261,21 @@ export class LiquidSim {
   dungeonWaterExempt: ((x: number, y: number, originWall: number) => boolean) | null = null;
   /** tilesIgnoreWater 家族（Liquid.cs:68-72 → WorldGen.SetBoulderSolidity cs:11026）：
    *  138 巨石 / 484 滚动仙人掌 / 664 / 711-716（1.4.5 巨石家族）+ 546。
-   *  QuickWater 全程全局置非实心（原版直接改写 Main.tileSolid——SettleWaterAt 通行
-   *  门与 LiquidCheck 的 WorldGen.SolidTile 等一切读者同步生效）。484 活性格在
+   *  QuickWater/WaterCheck/UpdateLiquid 全程全局置非实心（原版直接改写 Main.tileSolid——
+   *  SettleWaterAt 通行门与 LiquidCheck 的 WorldGen.SolidTile 等一切读者同步生效；
+   *  ★WaterCheck（WorldGen.cs:81156）与 UpdateLiquid（Liquid.cs:993）同样首尾包裹，
+   *  缺此=沉降轮期巨石家族被当墙 → 液体列表构成/侧流路径整体错位）。484 活性格在
    *  地下沙漠大量存在：缺此翻转=沙漠水池沉降路径整体错位（#28 复验实测 430 格）。 */
   private readonly boulderFamilyIds: Set<number>;
   private readonly id546: number;
   private readonly id379: number;
   private solidNPBackup: Uint8Array | null = null;
+  /** worldGenTilesIgnoreWater 家族（Liquid.cs:74-79）：10 关闭门 / 190 发光蘑菇块 /
+   *  191 活木块 / 192 活叶块——生成期两次沉降 pass（49/97）全程非实心（雪屋冰屋门、
+   *  蘑菇生物群系、活树腔体的液体可穿过）。缺此=#97 二次沉降首分叉（雪屋 y=1140
+   *  60 深水洼不合并，x86 实证 SettleProbe qw 相位 317 格）。读档/运行期不翻转 */
+  private readonly worldGenIgnoreIds: Set<number>;
+  private solidNPBackupWG: Uint8Array | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -293,6 +305,7 @@ export class LiquidSim {
     this.herbBloomId = bySheet(new Set([84])).values().next().value ?? 0;
     this.lilyPadId = bySheet(new Set([518])).values().next().value ?? 0;
     this.boulderFamilyIds = bySheet(new Set([138, 484, 664, 711, 712, 713, 714, 715, 716]));
+    this.worldGenIgnoreIds = bySheet(new Set([10, 190, 191, 192]));
     this.id546 = bySheet(new Set([546])).values().next().value ?? -1;
     this.id379 = bySheet(new Set([379])).values().next().value ?? -1;
     // genRand 初态：world.seed 派生（避免与生成管线的 genRand 状态纠缠，仅求双路径一致）
@@ -322,6 +335,10 @@ export class LiquidSim {
 
   /** 溢出缓冲长度（Game 的生成期轮上限计算用，原版 LiquidBuffer.numLiquidBuffer） */
   get bufferLen(): number { return this.bufTail - this.bufHead; }
+
+  /** 运行期画质档分片数（Main.cs:12240-12243：17-10*gfxQuality；高质量单机=7）。
+   *  生成/读档沉降保持 ReInit 态 10（构造默认）——Game 在创建运行实例后调用 */
+  setRuntimeCycles(c = 7): void { this.cycles = c; }
 
   /** 丢弃模拟器：预沉降临时实例调用，停止响应唤醒 */
   dispose() {
@@ -362,7 +379,8 @@ export class LiquidSim {
     if (this.checking[i] || st.liquid[i] === 0) return;
     const t = st.type[i];
     if (t !== 0 && st.flags[i]) {
-      if (this.solidNP[t] === 1) return;
+      // Liquid.cs:1165：546（栅栏）例外——实心但允许液体驻留入列
+      if (this.solidNP[t] === 1 && t !== this.id546) return;
     }
     if (this.numLiquid >= this.curMaxLiquid - 1) {
       // 原版走 LiquidBuffer 缓冲、清扫轮回灌（Liquid.cs:840-843），超缓冲上限才丢
@@ -408,6 +426,19 @@ export class LiquidSim {
   updateLiquid() {
     const st = this.world.store;
     const killThreshold = 8; // 单机 num（1456 Liquid.cs:995）
+    // Liquid.cs:993：整个调度首尾 tilesIgnoreWater(true/false)——巨石家族/546 在
+    // 轮期内可通行（含快速沉降轮；panic 早退路径原版不恢复,靠下次调用入口自愈）
+    this.tilesIgnoreWater(true);
+    try {
+      this.updateLiquidInner();
+    } finally {
+      this.tilesIgnoreWater(false);
+    }
+  }
+
+  private updateLiquidInner() {
+    const st = this.world.store;
+    const killThreshold = 8;
     // panic 模式（1456 Liquid.cs:1019-1070）：缓冲 ≥45000 持续 3600 次未解 →
     // 自底向上逐行 QuickWater 强制沉降，每次调用处理 5 行，到顶后 WaterCheck 退出
     if (!this.quickSettle) {
@@ -1091,6 +1122,30 @@ export class LiquidSim {
     }
   }
 
+  /** Liquid.worldGenTilesIgnoreWater（Liquid.cs:74-79）：生成期沉降 pass 全程把
+   *  10/190/191/192 置非实心。原版在 pass 委托首尾调用（cs:21067/21110）——
+   *  由 settleWorldLiquids('gen') 接线 */
+  worldGenTilesIgnoreWater(ignoreSolids: boolean): void {
+    if (ignoreSolids) {
+      if (this.solidNPBackupWG) return;
+      this.solidNPBackupWG = this.solidNP.slice();
+      for (const id of this.worldGenIgnoreIds) this.solidNP[id] = 0;
+    } else if (this.solidNPBackupWG) {
+      this.solidNP.set(this.solidNPBackupWG);
+      this.solidNPBackupWG = null;
+    }
+  }
+
+  /** 生成期 tileSolid 覆写注入（原版 Main.tileSolid 在生成期被各 pass 直接改写：
+   *  裂纹砖 481-483（SmoothWorld 尾起恒 false）、484 滚动仙人掌（恒 false）、
+   *  192 活叶块（false）等——LiquidSim 的 solidNP LUT 取 TILE_DEFS 静态初值，
+   *  不读 GenSolid 覆写表 → 生成期沉降把这些族当实心墙（#97 wc 相位 17 格：
+   *  (343..359,880) 裂纹砖 170 液被误清零）。gen 模式沉降前由 settleWorldLiquids
+   *  注入当前 GenSolid 快照；sim 用后即弃（dispose），无需还原 */
+  applyGenSolidOverrides(overrides: Map<number, boolean>): void {
+    for (const [id, solid] of overrides) this.solidNP[id] = solid ? 1 : 0;
+  }
+
   /** 自底向上逐湿格直接搬运沉降（原版 QuickWater(verbose, -1, -1)：y 从 h-3 到 3）。
    *  生成期首尾各调一次 ShimmerRemoveWater（Liquid.cs:107/137 + WorldGen.cs:34859）；
    *  全程 tileSolid[379]=true + tilesIgnoreWater(true)（巨石家族非实心） */
@@ -1107,6 +1162,50 @@ export class LiquidSim {
     }
     this.tilesIgnoreWater(false);
     if (this.generatingWorld) this.shimmerRemoveWater();
+    if (this.generatingWorld) this.liquidInteractionsCleanup();
+  }
+
+  /** WorldGen.LiquidInteractionsCleanup（cs:23898-24015，QuickWater 尾 generatingWorld
+   *  门）：黑曜石56/Aetherium659 活性格——先清自身液体；四邻（非活且湿才计数）按
+   *  类型计数 water/lava/honey/shimmer；≥2 种异型邻 → 保持清空（continue）；否则整格
+   *  ClearEverything 并注满 255 的对应类型（无湿邻：56→岩浆/659→微光——把生成期
+   *  误产块还原成液体）。★原版笔误保留：上邻==3（微光）计入 num5（水）而非 num8 */
+  private liquidInteractionsCleanup() {
+    const st = this.world.store;
+    for (let x = 1; x < st.w - 2; x++) {
+      for (let y = 1; y < st.h - 2; y++) {
+        const i = this.idx(x, y);
+        if (!st.flags[i]) continue;
+        const t = st.type[i];
+        const sheet = SHEET_OF[t] ?? -1;
+        if (sheet !== 56 && sheet !== 659) continue;
+        st.liquid[i] = 0;
+        st.liquidType[i] = 0;
+        const l = this.idx(x - 1, y), r = this.idx(x + 1, y), u = this.idx(x, y - 1), d = this.idx(x, y + 1);
+        const wet = (j: number) => (!st.flags[j] && st.liquid[j] > 0 ? st.liquidType[j] - 1 : -1); // 0基
+        const num = wet(l), num2 = wet(r), num3 = wet(u), num4 = wet(d);
+        let n5 = 0, n6 = 0, n7 = 0, n8 = 0;
+        if (num === 0) n5++; if (num2 === 0) n5++; if (num3 === 0) n5++; if (num4 === 0) n5++;
+        if (num === 1) n6++; if (num2 === 1) n6++; if (num3 === 1) n6++; if (num4 === 1) n6++;
+        if (num === 2) n7++; if (num2 === 2) n7++; if (num3 === 2) n7++; if (num4 === 2) n7++;
+        if (num === 3) n8++; if (num2 === 3) n8++;
+        if (num3 === 3) n5++; // 原版笔误（cs:23968）：上邻微光计水
+        if (num4 === 3) n8++;
+        if ((n5 > 0 && (n6 > 0 || n7 > 0 || n8 > 0)) || (n6 > 0 && (n5 > 0 || n7 > 0 || n8 > 0))
+          || (n7 > 0 && (n5 > 0 || n6 > 0 || n8 > 0)) || (n8 > 0 && (n5 > 0 || n6 > 0 || n7 > 0))) continue;
+        let liquidType = 0;
+        if (n5 === 0 && n6 === 0 && n7 === 0 && n8 === 0) liquidType = sheet === 56 ? 1 : 3;
+        if (n5 > 0) liquidType = 0;
+        else if (n6 > 0) liquidType = 1;
+        else if (n7 > 0) liquidType = 2;
+        else if (n8 > 0) liquidType = 3;
+        // ClearEverything：活性/类型/墙/液体/线全清 + 注满 255
+        st.setTileSilent(x, y, 0);
+        st.wall[i] = 0;
+        st.liquid[i] = 255;
+        st.liquidType[i] = liquidType + 1;
+      }
+    }
   }
 
   /** WorldGen.ShimmerRemoveWater（cs:34859-34886）：以太腔 150 半径球内清除
@@ -1134,6 +1233,8 @@ export class LiquidSim {
   private settleWaterAt(originX: number, originY: number) {
     const st = this.world.store;
     const oi = this.idx(originX, originY);
+    // cs:118-122：379（泡泡,QuickWater 已置实心）活性格液体原地保留不沉降
+    if (st.flags[oi] && SHEET_OF[st.type[oi]] === 379) return;
     if (st.liquid[oi] === 0) return;
     let X = originX, Y = originY;
     const srcType = st.liquidType[oi];
@@ -1248,6 +1349,17 @@ export class LiquidSim {
 
   /** 全图自底向上重建活动列表：能流的/液面不齐的/岩浆旁有异种的都入列 */
   waterCheck() {
+    // WorldGen.cs:81156：首尾 tilesIgnoreWater(true/false)——重建期间巨石家族/546
+    // 非实心（液体可停留其内并入列）
+    this.tilesIgnoreWater(true);
+    try {
+      this.waterCheckInner();
+    } finally {
+      this.tilesIgnoreWater(false);
+    }
+  }
+
+  private waterCheckInner() {
     const st = this.world.store;
     this.liquids.length = 0;
     this.numLiquid = 0;
@@ -1259,7 +1371,12 @@ export class LiquidSim {
         if (st.liquid[i] === 0) continue;
         const t = st.type[i];
         if (t !== 0 && st.flags[i]) {
-          if (this.solidNP[t] === 1) { st.liquid[i] = 0; continue; } // 实心格内液体清零（1456 无 379 系统特例；nactive 门）
+          // 实心格内液体清零——379（泡泡,QuickWater 已置实心）例外保留液体且不复查
+          // （cs:81173-81177 `if (tile.type != 379) tile.liquid = 0;`）
+          if (this.solidNP[t] === 1) {
+            if (SHEET_OF[t] !== 379) st.liquid[i] = 0;
+            continue;
+          }
           // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
           if (st.liquidType[i] === 2) { if (this.lavaDeathIds.has(t)) this.killTileAt(x, y); }
           else if (this.waterDeathIds.has(t)) this.killTileAt(x, y);

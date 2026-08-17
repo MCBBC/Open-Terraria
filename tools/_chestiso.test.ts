@@ -84,10 +84,12 @@ function buildStore(idx: number, cap: Cap): TileStore {
   //   漂移，hs54 已陈旧）。
   let hHalf: Uint8Array | null = null, hSlope: Uint8Array | null = null, hLty: Uint8Array | null = null, hWire: Uint8Array | null = null;
   try {
-    hHalf = new Uint8Array(readFileSync('/tmp/chestd59.half'));
-    hSlope = new Uint8Array(readFileSync('/tmp/chestd59.slope'));
-    hLty = new Uint8Array(readFileSync('/tmp/chestd59.lty'));
-    hWire = new Uint8Array(readFileSync('/tmp/chestd59.wire'));
+    // ★尾批 2-C：/tmp/hg/chestd59v2 = SW_EVIL=0 与金标 dump 同跑的四通道（旧
+    //   /tmp/chestd59 是自然邪恶首跑产物——half 有 10,939 格漂移，曾致落定/锚腿判定分叉）
+    hHalf = new Uint8Array(readFileSync('/tmp/hg/chestd59v2.half'));
+    hSlope = new Uint8Array(readFileSync('/tmp/hg/chestd59v2.slope'));
+    hLty = new Uint8Array(readFileSync('/tmp/hg/chestd59v2.lty'));
+    hWire = new Uint8Array(readFileSync('/tmp/hg/chestd59v2.wire'));
   } catch { /* 缺真值回退管线捕获 */ }
   const st = new TileStore(W, H);
   for (let i = 0; i < N; i++) {
@@ -238,6 +240,12 @@ function footprints(st: TileStore, inIdx: number, outIdx: number) {
     const houseEv: Array<[string, number, number, number]> = [];
     (globalThis as unknown as { __swHouseEv?: (p: string, x: number, y: number) => void }).__swHouseEv
       = (p, x, y) => { houseEv.push([p, x, y, (globalThis as { __swRollN?: number }).__swRollN ?? -1]); };
+    const chestEv: Array<[string, number, number, number]> = [];
+    (globalThis as unknown as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv
+      = (p, i, j, x) => { chestEv.push([p, i, j, x ?? (globalThis as { __swRollN?: number }).__swRollN ?? -1]); };
+    const stageEv: Array<[string, number, number, number, number]> = [];
+    (globalThis as unknown as { __swHouseStage?: (tag: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage
+      = (tag, a, b, c, d) => { stageEv.push([tag, a, b, c, d]); };
     const { rng, box } = countedRng(gs.seed);
     flipGenSolid([226, 162, 225, 190], true);
     rollHouseChestCounts(st, rng, gs);
@@ -263,9 +271,13 @@ function footprints(st: TileStore, inIdx: number, outIdx: number) {
       wf('/tmp/sw-chest/js59.chests.json', JSON.stringify(chests.map((c) => ({ x: c.x, y: c.y, items: c.items }))));
       wf('/tmp/sw-chest/js59.rolls.json', JSON.stringify((globalThis as { __swRollLog?: Array<[number, string, number, number, number]> }).__swRollLog ?? []));
       wf('/tmp/sw-chest/js59.houses.json', JSON.stringify(houseEv));
+      wf('/tmp/sw-chest/js59.chestev.json', JSON.stringify(chestEv));
+      wf('/tmp/sw-chest/js59.stageev.json', JSON.stringify(stageEv));
     } catch (e) { console.log('save fail', String(e).slice(0, 120)); }
     (globalThis as { __swRollLog?: unknown }).__swRollLog = undefined;
     (globalThis as unknown as { __swHouseEv?: unknown }).__swHouseEv = undefined;
+    (globalThis as unknown as { __swChestEv?: unknown }).__swChestEv = undefined;
+    (globalThis as unknown as { __swHouseStage?: unknown }).__swHouseStage = undefined;
     const d = diff(st, 59, '[#58] vs dump059');
     footprints(st, 58, 59);
     // 宝箱清单对拍：vanilla 新增 2×2 箱组（dump058→059）vs JS chests[]（cell 序）
@@ -317,9 +329,24 @@ function footprints(st: TileStore, inIdx: number, outIdx: number) {
     restoreGenSolid(cap.solid);
     const gs = cloneGs(cap.gs);
     const chests: ChestSink = [];
+    // GG 批尾案②：AB 逐次事件 + 全量掷骰日志落盘（vs /tmp/hg/houseprobe4.txt pass60 段）
+    //   ★__swRollLog 须在 countedRng 之前置（门面在构造时绑定）
+    (globalThis as { __swRollLog?: unknown }).__swRollLog = [];
     const { rng, box } = countedRng(gs.seed);
+    const abEv: Array<[string, number, number, number, number]> = [];
+    (globalThis as unknown as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv
+      = (p, i, j, x) => { abEv.push([p, i, j, x ?? -1, (globalThis as { __swRollN?: number }).__swRollN ?? -1]); };
     runSurfaceChestsPass(st, rng, gs, chests);
-    console.log(`\n[#60 重放] draws=${box.n} chests=${chests.length}`);
+    try {
+      const fsmod = await import('node:fs');
+      fsmod.mkdirSync('/tmp/sw-chest', { recursive: true });
+      fsmod.writeFileSync('/tmp/sw-chest/js60.ab.json', JSON.stringify(abEv));
+      fsmod.writeFileSync('/tmp/sw-chest/js60.rolls.json', JSON.stringify((globalThis as { __swRollLog?: Array<[number, string, number, number, number]> }).__swRollLog ?? []));
+      fsmod.writeFileSync('/tmp/sw-chest/js60.chests.json', JSON.stringify(chests.map((c) => ({ x: c.x, y: c.y }))));
+    } catch (e) { console.log('js60 save fail', String(e).slice(0, 120)); }
+    (globalThis as { __swRollLog?: unknown }).__swRollLog = undefined;
+    (globalThis as unknown as { __swChestEv?: unknown }).__swChestEv = undefined;
+    console.log(`\n[#60 重放] draws=${box.n} chests=${chests.length} abCalls=${abEv.filter((e) => e[0] === 'ab').length}`);
     diff(st, 60, '[#60] vs dump060');
     footprints(st, 59, 60);
   }

@@ -1069,6 +1069,92 @@ const CACTUS_WATER_LIMIT = 25;
  *  （[num-2,num+2]×[j-(11-num6),j+num6] 盒内仙人掌数 ≥ Next(11,13) 即停，drunkWorld
  *  分支不触发）→ num7==0 时横向分叉三选一（Next(3)：0 西臂 / 1 东臂 / 否则
  *  num6 < Next(2,8) 且上格净空继续上长）；num7!=0 时臂上补格。 */
+/** CheckCactus（cs:54132-54174）：仙人掌支撑复查——自 (i,j) 向下扫基列（含臂列
+ *  平移），落底格非整砖沙族 → KillTile(i,j)；臂列（i≠基列）无邻仙人掌 → KillTile；
+ *  正列下格非仙人掌/沙族 → KillTile。KillTile(80) 尘段 10 尘 × 0 掷（MakeTileDust
+ *  case 80/81→num32 无掷）——纯格效应；随后 SquareTileFrame 3×3 引发邻仙人掌
+ *  级联复查（KillTile 尾 cs:63991）。BB 批 #98 -7,120 掷根因：旧移植静默放置漏了
+ *  此链——vanilla 击杀的悬空/失托仙人掌残留（+39 格），地形演化差异改变列扫描
+ *  的 PlantCactus 命中数 → 掷流漂移 */
+function checkCactus(st: TileStore, i: number, j: number): boolean {
+  let num = j, num2 = i;
+  const cactusAt = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && st.flags[st.idx(x, y)] === 1 && st.type[st.idx(x, y)] === CACTUS;
+  while (cactusAt(num2, num)) {
+    num++;
+    if (!cactusAt(num2, num)) {
+      // 臂列平移（cs:54145-54152）：邻列同深+其上一格均为仙人掌 → 基列横移
+      if (cactusAt(num2 - 1, num) && cactusAt(num2 - 1, num - 1) && num2 >= i) num2--;
+      if (cactusAt(num2 + 1, num) && cactusAt(num2 + 1, num - 1) && num2 <= i) num2++;
+    }
+  }
+  // 落底支撑：整砖（非半/坡）沙族（cs:54155）
+  if (!st.inBounds(num2, num)) return false; // 生成域内不可达（底为基岩）
+  const bi = st.idx(num2, num);
+  if (!st.flags[bi] || st.half[bi] !== 0 || st.slope[bi] !== 0
+    || !SAND_CONV.has(st.type[bi])) {
+    killCactus(st, i, j);
+    return true;
+  }
+  if (i !== num2) {
+    // 臂列：下/左/右均无仙人掌 → 击杀（cs:54162）
+    if (!cactusAt(i, j + 1) && !cactusAt(i - 1, j) && !cactusAt(i + 1, j)) {
+      killCactus(st, i, j);
+      return true;
+    }
+  } else {
+    // 正列：下格非活性或非仙人掌/沙族 → 击杀（cs:54168）
+    const below = st.inBounds(i, j + 1) ? st.idx(i, j + 1) : -1;
+    const belowOk = below >= 0 && st.flags[below] === 1
+      && (st.type[below] === CACTUS || SAND_CONV.has(st.type[below]));
+    if (!belowOk) {
+      killCactus(st, i, j);
+      return true;
+    }
+  }
+  return false;
+}
+
+/** KillTile(80) 生成期子集（cs:63559 noItem=true 尘 10×0 掷）：清格 + 半砖/坡面
+ *  归零（active(false) 与 TileFrame 入口的死格重置）+ SquareTileFrame 3×3 级联 */
+/** DD #98 列级事件链钩（一次性诊断 tools/_ddfin.test.ts；vanilla CactusProbe 对拍：
+ *  PlantCactus 入口 / CheckCactus 三处 KillTile 位点）。null=零开销 */
+let ccTraceHook: { plant: (i: number, j: number) => void; kill: (i: number, j: number) => void; place?: (x: number, y: number) => void } | null = null;
+export function setCcTrace(h: { plant: (i: number, j: number) => void; kill: (i: number, j: number) => void; place?: (x: number, y: number) => void } | null): void {
+  ccTraceHook = h;
+}
+function killCactus(st: TileStore, i: number, j: number): void {
+  ccTraceHook?.kill(i, j);
+  if (!st.inBounds(i, j)) return;
+  const k = st.idx(i, j);
+  if (!st.flags[k]) return;
+  st.setTileSilent(i, j, 0, 0, 0);   // 原版 frameX/Y=-1（Uint16 无符号位域,0 等价清零）
+  st.half[k] = 0;
+  st.slope[k] = 0;
+  frameAroundCactus(st, i, j);
+}
+
+/** SquareTileFrame(x,y) 生成期有效子集（cs:80924）：3×3 逐格 TileFrame——死格
+ *  半砖/坡面重置；活性仙人掌 80 → CheckCactus（其余类型：frameImportant 归
+ *  TileFrameImportant、实心族归 Cosmetic——均无掷骰无格写，备案省略）。
+ *  ★遍历序照原版列主序（x-1 列自上而下 → x → x+1）——级联击杀下顺序影响结果 */
+function frameAroundCactus(st: TileStore, x: number, y: number): void {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const cx = x + dx, cy = y + dy;
+      if (!st.inBounds(cx, cy)) continue;   // cs:82069 边界早退
+      const k = st.idx(cx, cy);
+      if (!st.flags[k]) {
+        // cs:82077-82081 死格重置（含涂装清零——生成期无涂装）
+        st.half[k] = 0;
+        st.slope[k] = 0;
+        continue;
+      }
+      if (st.type[k] === CACTUS) checkCactus(st, cx, cy);
+    }
+  }
+}
+
 export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void {
   if (j <= 0 || !st.inBounds(i, j) || !st.inBounds(i, j - 1)) return;   // cs:56586 + C# OOB 读 = 空格
   const anchor = st.idx(i, j);
@@ -1089,8 +1175,9 @@ export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void 
   const isCactus = (x: number, y: number): boolean =>
     st.inBounds(x, y) && st.flags[st.idx(x, y)] === 1 && st.type[st.idx(x, y)] === CACTUS;
   const place = (x: number, y: number): void => {
+    ccTraceHook?.place?.(x, y);
     st.setTileSilent(x, y, CACTUS, 0, 0);   // CopyPaintAndCoating：生成期无涂装
-    // SquareTileFrame（cs:56638 等）：仙人掌帧由渲染端 cactusFrameAt 实时求（备案）
+    frameAroundCactus(st, x, y);            // SquareTileFrame（cs:56638 等）→ CheckCactus 击杀链
   };
 
   if (SAND_CONV.has(anchorType)) {
@@ -1185,6 +1272,7 @@ export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void 
 /** PlantCactus（cs:54176-54187）：锚点一次 GrowCactus + 150 次随机邻域尝试
  *  （x∈[i-1,i+1]、y∈[j-10,j+1]）→ 天然成簇 */
 export function plantCactus(st: TileStore, rng: RNG, i: number, j: number): void {
+  ccTraceHook?.plant(i, j);
   growCactus(st, rng, i, j);
   for (let k = 0; k < 150; k++) {
     const i2 = rng.int(i - 1, i + 1);        // Next(i-1, i+2)

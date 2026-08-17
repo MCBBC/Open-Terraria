@@ -346,15 +346,24 @@ export function runDungeonPass(
       || rm.outer.containsF(Math.trunc(mx), Math.trunc(my), fluff)
       || rm.outer.containsF(Math.trunc(ex), Math.trunc(ey), fluff));
   }
+  // ★EE 批清坡（2026-08-17）：DungeonUtils.ChangeTileType（DU:1605-1618）= 可选
+  //   ClearEverything + active(true) + **无条件 Clear(TileDataType.Slope)**（slope=0+
+  //   halfBrick=false，Tile.cs:815-818）+ type。JS 此前只写 flags/type → 地牢砖压在
+  //   洞穴坡面格上不清坡 → @52 全图残余 219 格幻影坡主根（Y 批定谳移交）。
+  //   全部调用点（房/厅/入口城堡/垛口/顶齿/阶梯/坑陷阱/门柱/平台/灯/箱/书架/陷阱族）
+  //   走此一处收口，同 X 批 TemplePass.setBrick 修法。
   function chTile(i: number, t: number, reset: boolean): void {
     if (reset) {
       st.type[i] = 0; st.wall[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0; st.flags[i] = 0;
+      st.slope[i] = 0; st.half[i] = 0;   // ClearEverything（Tile.cs:140-151）含坡位
     }
     st.flags[i] = 1; st.type[i] = t;
+    st.slope[i] = 0; st.half[i] = 0;     // Clear(Slope) 无条件（DU:1612；非 reset 也清）
   }
   function chWall(i: number, wl: number, reset: boolean): void {
     if (reset) {
       st.type[i] = 0; st.wall[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0; st.flags[i] = 0;
+      st.slope[i] = 0; st.half[i] = 0;   // ClearEverything；ChangeWallType 本体不清坡（DU:1620-1631）
     }
     st.wall[i] = wl;
   }
@@ -670,9 +679,10 @@ export function runDungeonPass(
           if (dangerous) {
             if ((st.flags[i] || !isDW(st.wall[i])) && y < h - 200) {
               st.flags[i] = 0;
+              st.slope[i] = 0; st.half[i] = 0;   // ClearTile()（LDH:820 清坡+半砖，f18=false 支也清）
               if (f18) chTile(i, crack, false);
             }
-          } else st.flags[i] = 0;
+          } else { st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0; }   // ClearTile()（LDH:830）
           if (f19 && y < h - 200) chWall(i, wall, false);
         }
       }
@@ -772,6 +782,7 @@ export function runDungeonPass(
           let f4 = true;
           if (p === 2 && isDW(st.wall[i])) f4 = false;
           st.flags[i] = 0;
+          st.slope[i] = 0; st.half[i] = 0;       // ClearTile()（LEDH:348 内挖——清坡+半砖）
           if (f4) chWall(i, wall, false);
         }
       }
@@ -788,7 +799,7 @@ export function runDungeonPass(
     const hr = dgUR(preSeed);
     const hri = (a: number, b: number): number => hr.nextIntRange(a, b + 1);
     const hrn = (n: number): number => hr.nextInt(n);
-    const dgEntProbe = process.env.DG_ENT_PROBE != null;   // 诊断钩：入口 rr 掷序对拍
+    const dgEntProbe = typeof process !== 'undefined' && process.env?.DG_ENT_PROBE != null;   // 诊断钩：入口 rr 掷序对拍
     if (dgEntProbe) {
       const pv = new UnifiedRandom(preSeed);
       const pdraws: number[] = [];
@@ -1305,23 +1316,23 @@ export function runDungeonPass(
         n11 = 0;
         continue;
       }
-      st.type[st.idx(fx, fy)] = SPIKE;
+      st.type[st.idx(fx, fy)] = SPIKE;   // 支承格本就 active（DGS:81 直写 type 不清坡）
       if (round === 0) {
         if (inW(cx - 1, wy - d, 0) && actAt(cx - 1, wy - d) === 0
           && inW(cx + 1, wy - d, 0) && actAt(cx + 1, wy - d) === 0) {
           let ti = st.idx(cx, wy - d);
-          st.type[ti] = SPIKE; st.flags[ti] = 1;
+          st.type[ti] = SPIKE; st.flags[ti] = 1; st.slope[ti] = 0; st.half[ti] = 0;   // DGS:84-86
           ti = st.idx(cx, wy - d * 2);
-          st.type[ti] = SPIKE; st.flags[ti] = 1;
+          st.type[ti] = SPIKE; st.flags[ti] = 1; st.slope[ti] = 0; st.half[ti] = 0;   // DGS:89-91
         }
         cx += step;
       } else {
         if (inW(wx - d, cy - 1, 0) && actAt(wx - d, cy - 1) === 0
           && inW(wx - d, cy + 1, 0) && actAt(wx - d, cy + 1) === 0) {
           let ti = st.idx(wx - d, cy);
-          st.type[ti] = SPIKE; st.flags[ti] = 1;
+          st.type[ti] = SPIKE; st.flags[ti] = 1; st.slope[ti] = 0; st.half[ti] = 0;   // DGS:110-116 同款
           ti = st.idx(wx - d * 2, cy);
-          st.type[ti] = SPIKE; st.flags[ti] = 1;
+          st.type[ti] = SPIKE; st.flags[ti] = 1; st.slope[ti] = 0; st.half[ti] = 0;
         }
         cy += step;
       }
@@ -1444,7 +1455,7 @@ export function runDungeonPass(
         for (const off of [-1, -2, 1, 2]) {
           if (inW(n16 + off, y, 0) && actAt(n16 + off, y) !== 0 && canKill(n16 + off, y)) {
             const k = st.idx(n16 + off, y);
-            st.flags[k] = 0; st.wall[k] = wall;
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
           }
         }
       }
@@ -1459,7 +1470,7 @@ export function runDungeonPass(
           for (const off of [-1, -2]) {
             if (d.clear || typAt(n16 + off, y) === brick) {
               const k = st.idx(n16 + off, y);
-              st.flags[k] = 0; st.wall[k] = wall;
+              st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
             }
           }
         }
@@ -1474,7 +1485,7 @@ export function runDungeonPass(
           for (const off of [1, 2]) {
             if (d.clear || typAt(n16 + off, y) === brick) {
               const k = st.idx(n16 + off, y);
-              st.flags[k] = 0; st.wall[k] = wall;
+              st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
             }
           }
         }
@@ -1485,7 +1496,7 @@ export function runDungeonPass(
         for (const off of [2, 3, -2, -3]) {
           if (d.clear || typAt(n16 + off, y) === brick) {
             const k = st.idx(n16 + off, y);
-            st.flags[k] = 0; st.wall[k] = wall;
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
           }
         }
       }
@@ -1517,9 +1528,13 @@ export function runDungeonPass(
     // 用户报告"地牢门是木门"根因(2026-08-13)
     const fx0 = 54 * Math.floor(style / 36);
     const fy0 = 54 * (style % 36);
+    const wasInactive = st.flags[st.idx(i2, j2)] === 0;   // PlaceTile(10) 前奏清坡门
     for (let k = -1; k <= 1; k++) {
       const ti = st.idx(i2, j2 + k);
       st.flags[ti] = 1; st.type[ti] = DOOR;
+      // PlaceTile(10) 前奏（:59499）仅作用锚格且仅原 inactive 时清；PlaceDoor（:31957-31966）
+      // 三格直写 active+type 不清坡——j2±1 格保留原坡位（原版如此）
+      if (k === 0 && wasInactive) { st.slope[ti] = 0; st.half[ti] = 0; }
       st.frameX[ti] = fx0 + rn(3) * 18;
       st.frameY[ti] = fy0 + (k + 1) * 18;
     }
@@ -1949,6 +1964,7 @@ export function runDungeonPass(
     const anchor = st.wall[ti] > 0 || solidNb(x - 1, y) || solidNb(x + 1, y) || solidNb(x, y + 1);
     if (!anchor) return false;
     st.flags[ti] = 1; st.type[ti] = tile;
+    st.slope[ti] = 0; st.half[ti] = 0;   // PlaceTile 前奏（目标格 inactive 才到达此）
     return true;
   }
   // ============ DungeonGlobalLights（:24-141）+ Lights_GenerateSwitch（:144-193）============
@@ -2078,7 +2094,11 @@ export function runDungeonPass(
       const anchor = (dgSolid(a - 1, b) && typAt(a - 1, b) !== DOOR)
         || (dgSolid(a + 1, b) && typAt(a + 1, b) !== DOOR) || dgSolid(a, b + 1);
       if (anchor && isDW(wallAt(a, b)) && (isDT(typAt(a - 1, b)) || isDT(typAt(a + 1, b)))) {
-        if (actAt(a, b) === 0) { st.flags[st.idx(a, b)] = 1; st.type[st.idx(a, b)] = DSWITCH; }
+        if (actAt(a, b) === 0) {
+          const si = st.idx(a, b);
+          st.flags[si] = 1; st.type[si] = DSWITCH;
+          st.slope[si] = 0; st.half[si] = 0;   // PlaceTile(136)（DGL Lights_GenerateSwitch:173）
+        }
       }
       if (actAt(a, b) === 0) continue;
       // L 形红线逐格铺（Lights_GenerateSwitch :173-185）：横一步铺线、纵一步铺线，
@@ -2385,6 +2405,9 @@ export function runDungeonPass(
   const dgWr = (x: number, y: number, t: number): void => {
     const i = st.idx(x, y);
     st.flags[i] = 1; st.type[i] = t;
+    // PlaceTile 前奏（WorldGen.cs:59499-59501 !active → Clear(Tile|TilePaint|Slope)）；
+    // 全部调用方先 dgClr（inactive）→ 此处清坡=原版逐格语义
+    st.slope[i] = 0; st.half[i] = 0;
   };
   const dgClr = (x: number, y: number): boolean => inW(x, y, 0) && st.flags[st.idx(x, y)] === 0;
   // Place3x2（cs:52097 桌14/钢琴87/梳妆台88/长凳89）
@@ -2860,6 +2883,10 @@ export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: numb
     for (let dy = 0; dy < fh; dy++) {
       const fx = flip < 0 ? fw - 1 - dx : dx;
       st.setTileSilent(x0 + dx, yTop + dy, tile, bx + fx * 18, by + dy * 18);
+      // PlaceTile 前奏清坡（WorldGen.cs:59499-59501 !active → Clear(Slope)）；目标格
+      // 已全量校验 inactive（见上）——EE 批清坡收口（X 批 Temple 同族）
+      const ci = st.idx(x0 + dx, yTop + dy);
+      st.slope[ci] = 0; st.half[ci] = 0;
     }
   }
   return true;
@@ -2907,6 +2934,8 @@ function placeWallArt(st: TileStore, x: number, y: number, tile: number, style: 
   for (let dx = 0; dx < fw; dx++) {
     for (let dy = 0; dy < fh; dy++) {
       st.setTileSilent(x0 + dx, y + dy, tile, bx + dx * 18, by + dy * 18);
+      const ci = st.idx(x0 + dx, y + dy);
+      st.slope[ci] = 0; st.half[ci] = 0;   // PlaceTile 前奏清坡（目标格已验 inactive）
     }
   }
 }

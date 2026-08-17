@@ -1757,9 +1757,8 @@ export class Player extends Entity {
         // :19546-19556：itemAnimation 窗内仅锁【朝向】不锁移动（挥砍中可跑）——
         // useTurn 物品（工具族）豁免
         if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix;
-        // 跑靴快速奔跑尘+脚步声（:19697/:19731 两向同门 SpawnFastRunParticles）
+        // 跑靴脚步声冷却（Item_17，IntendedCooldown 9t :35517）
         if (this.runSoundDelay > 0) this.runSoundDelay--;
-        this.spawnFastRunParticles(game, maxRun, accRun);
         const canRamp = this.vy === 0 || wingAir;          // 爬坡门（地面或翼飞行）
         const toward = ix * Math.max(maxRun, wingAir ? accRun : 0);
         // 全速段（|vx| 未到 maxRun → 加速;反向先 runSlowdown 制动 :19563-19568）
@@ -1771,6 +1770,12 @@ export class Player extends Entity {
           if (ix > 0 ? this.vx < -runSlow : this.vx > runSlow) this.vx += ix * runSlow;
           this.vx += ix * runAcc * 0.2;
           if (wingAir) this.vx += ix * runAcc * 0.2;
+          // 跑靴快速奔跑尘+脚步声（:19697/:19731）：★尘门【嵌套在爬坡分支内】——
+          // 分支入口门 vx<accRunSpeed 与尘门 vx>(accRunSpeed+maxRunSpeed)/2 构成
+          // 互斥带，裸装 accRun==maxRun==3 → 带 [3,3) 为空 → 永不触发（原版裸装
+          // 跑动无尘无声，2026-08-17 用户原版实测纠偏；此前误作全局门，裸装锯齿
+          // 3.04 越线误触发）
+          this.spawnFastRunParticles(game, maxRun, accRun);
         } else {
           applyRunFriction();   // 超帽回落（:19771/:19786——持键越帽同摩擦）
         }
@@ -3071,6 +3076,8 @@ export class Player extends Entity {
    *  时静默跳过。 */
   /** SpawnFastRunParticles（:19935-20027 1:1）：跑靴快速奔跑尘+脚步声。
    *  门（:19697/:19731）：|vx| > (accRunSpeed+maxRunSpeed)/2 && vy==0 && 无坐骑。
+   *  ★调用点必须嵌在爬坡分支（else-if B）内——分支入口门 |vx|<accRunSpeed 与尘门
+   *  中点构成互斥带；裸装 accRun==maxRun → 带空永不触发（勿再提升为全局判定）。
    *  分支（按装备 vid 授予 :36285）：4874 泰拉闪耀=火尘6 / 3200·3990 航行靴=尘253×4 /
    *  1579 冰靴=雪尘76×2 / 4055 沙丘行者=沙尘32 / 3993 仙灵火花=仙尘61族×2 /
    *  其余跑靴（赫尔墨斯 54/闪电 405/幽灵 898/霜花 1862 等）=白尘16+脚步声

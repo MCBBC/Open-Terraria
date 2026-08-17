@@ -55,6 +55,10 @@ describe('液体沉降 golden(优化等价性闸门)', () => {
     const st = world.store;
     const hash = [st.liquid, st.liquidType, st.type, st.flags].map((a) =>
       fnv1a(new Uint8Array(a.buffer, a.byteOffset, a.byteLength))).join(' ');
-    expect(hash).toBe('f4f6614e d6806ecf b6f70ec5 e84ee6b5');   // golden(与优化前逐字节一致,冻结快照 A/B 验证)
+    expect(hash).toBe('3675701a d6806ecf b6f70ec5 e84ee6b5');
+    // golden 更新（DD 终清批 2026-08-17）：轮上限 max(1000,n3*5) → 原版精确 n3*5
+    // （WorldGen.cs:16252/21079；#97 x86 实证尾轮 2 振子格每轮恰 10 迭代打满预算
+    // break——下限 1000 多跑 8×990 迭代=末态/掷流漂移）。旧哈希 f4f6614e 为下限版
+    // 快照;type/flags/liquidType 三通道不变,仅 liquid 通道随尾轮提前止损更新。
   }, 120000);
 });

@@ -163,8 +163,9 @@ export function nextJungleItem(gs: GenState, rng: RNG): number {
 // 3069,3084,4341,4978,5010,5011,5465}（WorldGen.cs 36240-37580 逐行提取）；
 // 其余物品（158/159/2219/277/274/220/112/218/3019/863/4404/187 等主件与全部杂物）
 // 原版【不调 Prefix】→ 零掷。可前缀化并真正耗掷的交集：
-//   49/53/54/285/906/953/975/3068/3084/4341/4978/5465=acc、280=spears、281=guns、
-//   284=boom、946=swords、3069=magic、5011=spears（50 魔镜/997/930/5010 调而不耗）。
+//   49/53/54/285/906/953/975/3068/3084/4341/4978/5465/5010=acc、280=spears、
+//   281=guns、284=boom、946=swords、3069=magic、5011=spears
+//   （50 魔镜非武器非配饰/997 提炼机可放置/930 信号枪不在 GunsBows 集 → 真零掷）。
 const PRE_POOLS: Record<string, number[]> = {
   swords: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 81],
   spears: [36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 59, 60, 61],
@@ -178,15 +179,122 @@ const PRE_CLASS: Record<number, string> = {
   49: 'acc', 53: 'acc', 54: 'acc', 285: 'acc', 906: 'acc', 953: 'acc', 975: 'acc',
   3068: 'acc', 3084: 'acc', 4341: 'acc', 4978: 'acc', 5465: 'acc',
 };
+// ---- 主件 Prefix(-1)（尾批 2-C）：四分支头 SetDefaults(num10)+Prefix(-1) 无条件调用
+//   （surface cs:36287 / gold cs:36554 / cave cs:36841 / hell cs:37167）——可前缀化
+//   即耗掷。类表 = PrefixLegacy.ItemSets 全集合逐一对号（x86 实证：冰箱 (1149,654)
+//   vanilla 25 掷 vs JS 18 = 雪球炮 1319 Prefix Next(4) 早退 1 掷 + 门级联 6）。
+Object.assign(PRE_CLASS, {
+  // guns（GunsBows 集）：1319 雪球炮/964 巨口枪/3019 地狱翼弓
+  1319: 'guns', 964: 'guns', 3019: 'guns',
+  // swords（SwordsHammersAxesPicks 集）：724 寒冰刃/213 再生法杖/186 呼吸苇/65 星怒
+  724: 'swords', 213: 'swords', 186: 'swords', 65: 'swords',
+  // spears（SpearsMacesChainsaws… 集）：4061 风暴矛/277 三叉戟/274 暗黑长枪/220 日怒
+  4061: 'spears', 277: 'spears', 274: 'spears', 220: 'spears',
+  // magic（Magic 集）：4062 雷击杖/112 火之花/218 烈焰鞭
+  4062: 'magic', 112: 'magic', 218: 'magic',
+  // boom（BoomerangsChakrams 集）：670 寒冰回旋镖
+  670: 'boom',
+  // acc（accessory&&!vanity&&CanGetPrefixes 全过）：冰 950/987/1579、沙 4055/4056、
+  // 丛林 211/212/3017、水 863/4404/187、金字塔 848/857、天空 159/158/2219
+  950: 'acc', 987: 'acc', 1579: 'acc', 4055: 'acc', 4056: 'acc',
+  211: 'acc', 212: 'acc', 3017: 'acc', 863: 'acc', 4404: 'acc', 187: 'acc',
+  848: 'acc', 857: 'acc', 159: 'acc', 158: 'acc', 2219: 'acc',
+  // ★5010 宝藏磁铁（GG 尾案①）：CanGetPrefixes 默认 true、非排除表（ItemID.cs:175
+  //   CreateBoolSet(true, 排除 90 件) 无 5010）→ acc 可前缀化【耗掷】——曾两处注释
+  //   自相矛盾（cs:37173-37177 调用点已接、类表漏登记："调而不耗"系误判）。
+  //   x86 实证：(1318,1003) 双 PFX 且 vanilla loot 段比 JS 多掷（地狱尾 3-4 掷族）
+  5010: 'acc',
+  // 不可前缀化（零掷，勿加）：4262/4263/4276 沙漠杂件、753 海草、2292 玻璃钢鱼竿
+  //   （GetRollablePrefixes 无 fishing 分支）、934 法老面罩、832 活木魔棒、997/669
+});
 const PRE_REDUCED = new Set([7, 8, 9, 10, 11, 22, 23, 24, 29, 30, 31, 39, 40, 56, 41, 47, 48, 49]);
-/** Prefix(-1) 耗掷（结果不入箱——原版前缀只改数值；此函数只保流） */
+// ---- TryGetPrefixStatMultipliersForItem 四失败门（Item.cs:1045-1060，GG 批尾案）：
+//   dmg≠1 && Math.Round(damage×dmg)==damage（.NET 银行家舍入 + float32 乘）
+//   spd≠1 && Math.Round(useAnimation×spd)==useAnimation
+//   mcst≠1 && Math.Round(mana×mcst)==mana
+//   kb≠1 && knockBack==0
+//   失败 → Prefix while 环重进（rolledPrefix=-1 → 再掷 Next(4)+池(+Next3)）。
+//   池内前缀乘子表（switch 1-61/81-83，只记检查消费的 dmg/kb/spd/mcst 四元）：
+const PRE_MULT: Record<number, readonly [number, number, number, number]> = {
+  //                    dmg    kb    spd   mcst
+  3: [1.05, 1, 1, 1], 4: [1.1, 1.1, 1, 1], 5: [1.15, 1, 1, 1], 6: [1.1, 1, 1, 1],
+  8: [0.85, 0.85, 1, 1], 10: [0.85, 1, 1, 1],
+  11: [1, 0.9, 1.1, 1], 12: [1.05, 1.1, 1.15, 1], 13: [0.9, 0.8, 1, 1],
+  14: [1, 1.15, 1.1, 1], 15: [1, 0.9, 0.85, 1],
+  16: [1.1, 1, 1, 1], 17: [1, 1, 0.85, 1], 18: [1, 1, 0.9, 1],
+  19: [1, 1.15, 1, 1], 20: [1.1, 1.05, 0.95, 1], 21: [1.1, 1.15, 1, 1],
+  22: [0.85, 0.9, 1, 1], 23: [1, 1, 1.15, 1], 24: [1, 0.8, 1.1, 1],
+  25: [1.15, 1, 1.1, 1], 58: [0.85, 1, 0.85, 1],
+  26: [1.1, 1, 1, 0.85], 27: [1, 1, 1, 0.85], 28: [1.15, 1.05, 1, 0.85],
+  29: [1, 1, 1, 1.1], 30: [0.9, 1, 1, 1.2], 31: [0.9, 0.9, 1, 1],
+  32: [1.1, 1, 1, 1.15], 33: [1, 1.1, 0.9, 1.1], 34: [1.1, 1.1, 1.1, 0.9],
+  35: [1.15, 1.15, 1, 1.2], 52: [0.9, 1, 0.9, 0.9],
+  81: [1.15, 1.15, 0.9, 1], 82: [1.15, 1.15, 0.9, 1], 83: [1.15, 1.15, 0.9, 0.9],
+  37: [1.1, 1.1, 1, 1], 38: [1, 1.15, 1, 1], 53: [1.1, 1, 1, 1],
+  54: [1, 1.15, 1, 1], 55: [1.05, 1.15, 1, 1], 56: [1, 0.8, 1, 1],
+  57: [1.18, 0.9, 1, 1], 59: [1.15, 1.15, 1, 1], 60: [1.15, 1, 1, 1],
+  39: [0.7, 0.8, 1, 1], 40: [0.85, 1, 1, 1], 41: [0.9, 0.85, 1, 1],
+  42: [1, 1, 0.9, 1], 43: [1.1, 1, 0.9, 1], 44: [1, 1, 0.9, 1],
+  45: [1, 1, 0.95, 1], 46: [1.07, 1, 0.94, 1], 47: [1, 1, 1.15, 1],
+  48: [1, 1, 1.2, 1], 49: [1, 1, 1.08, 1], 50: [0.8, 1, 1.15, 1],
+  51: [1.05, 0.9, 0.9, 1],
+  // 62-80 配饰前缀无 case（全乘子=1）→ 恒通过；1/2/7/9/36/61 等仅动 size/crt → 恒通过
+};
+// per-item 基础属性（SetDefaults 终值；4061/4062 为 DefaultToSpear/Staff 派生，
+// itemcombat 提取表缺这两件故手抄源码）。kb 只需区分 ==0（四失败门之四）。
+const PRE_STATS: Record<number, { d: number; ua: number; mana: number; kb0: boolean }> = {
+  280: { d: 8, ua: 31, mana: 0, kb0: false }, 281: { d: 9, ua: 25, mana: 0, kb0: false },
+  284: { d: 10, ua: 20, mana: 0, kb0: false }, 946: { d: 10, ua: 22, mana: 0, kb0: false },
+  // ★3069：mana=2（全 mcst≠1 前缀失败）+ knockBack=0（全 kb≠1 前缀失败）——
+  //   池 36 项中 12 项失败 → 地表木箱十选一的主要再掷源
+  3069: { d: 14, ua: 26, mana: 2, kb0: true },
+  5011: { d: 9, ua: 45, mana: 0, kb0: false }, 1319: { d: 10, ua: 19, mana: 0, kb0: false },
+  964: { d: 14, ua: 40, mana: 0, kb0: false }, 3019: { d: 22, ua: 13, mana: 0, kb0: false },
+  724: { d: 17, ua: 20, mana: 0, kb0: false }, 213: { d: 7, ua: 25, mana: 0, kb0: false },
+  186: { d: 10, ua: 27, mana: 0, kb0: false }, 65: { d: 25, ua: 20, mana: 0, kb0: false },
+  277: { d: 14, ua: 31, mana: 0, kb0: false }, 274: { d: 34, ua: 22, mana: 0, kb0: false },
+  220: { d: 32, ua: 45, mana: 0, kb0: false }, 112: { d: 48, ua: 16, mana: 12, kb0: false },
+  218: { d: 32, ua: 30, mana: 21, kb0: false }, 670: { d: 21, ua: 20, mana: 0, kb0: false },
+  4061: { d: 14, ua: 28, mana: 0, kb0: false }, 4062: { d: 24, ua: 17, mana: 6, kb0: false },
+};
+const __fr = Math.fround;
+/** .NET Math.Round(float32 积, MidpointRounding.ToEven) == base（银行家舍入） */
+function netRoundEq(base: number, mult: number): boolean {
+  const v = __fr(__fr(base) * __fr(mult));   // (float)base * mult 在 float32 域
+  const fl = Math.floor(v);
+  const diff = v - fl;
+  let r: number;
+  if (diff > 0.5) r = fl + 1;
+  else if (diff < 0.5) r = fl;
+  else r = fl % 2 === 0 ? fl : fl + 1;       // 恰 .5 → 取偶
+  return r === base;
+}
+/** Item.Prefix while 环四失败门（cs:546-550 → flag=true 重进环） */
+function prefixTryGetFails(rolled: number, item: number): boolean {
+  const s = PRE_STATS[item];
+  if (!s) return false;                      // 配饰池（62-80）无乘子 → 恒通过
+  const m = PRE_MULT[rolled];
+  if (!m) return false;                      // 前缀无四项乘子 → 恒通过
+  if (m[0] !== 1 && netRoundEq(s.d, m[0])) return true;
+  if (m[2] !== 1 && netRoundEq(s.ua, m[2])) return true;
+  if (m[3] !== 1 && netRoundEq(s.mana, m[3])) return true;
+  if (m[1] !== 1 && s.kb0) return true;
+  return false;
+}
+/** Prefix(-1) 耗掷（结果不入箱——原版前缀只改数值；此函数只保流）。
+ *  1:1 while 环（cs:523-556）：Next(4)==0 早退 → 池 Next(len) → Reduced Next(3)
+ *  → TryGet 四失败门失败则重进环（Next(4)+池再掷——GG 批残余①：地狱尾 3-4 掷） */
 function prefixRolls(rng: RNG, item: number): void {
   const cls = PRE_CLASS[item];
   if (!cls) return;                       // 调用点但不可前缀化（50/997/930/5010…）或原版未调
-  if (rng.int(0, 3) !== 0) {              // Next(4)==0 → 无前缀（cs:531）
-    const arr = PRE_POOLS[cls]!;
-    const rolled = arr[rng.int(0, arr.length - 1)]!;
-    if (PRE_REDUCED.has(rolled)) rng.int(0, 2);   // Next(3)!=0 → 弃（cs:541）
+  const arr = PRE_POOLS[cls]!;
+  let rolled = -1;
+  for (let flag = true; flag; ) {
+    flag = false;
+    if (rolled === -1 && rng.int(0, 3) === 0) rolled = 0;          // cs:526 Next(4)
+    if (rolled === -1) rolled = arr[rng.int(0, arr.length - 1)]!;  // cs:534 RollAPrefix
+    if (PRE_REDUCED.has(rolled) && rng.int(0, 2) !== 0) rolled = 0; // cs:538 Next(3)
+    if (prefixTryGetFails(rolled, item)) { flag = true; rolled = -1; } // cs:546 失败重掷
   }
 }
 
@@ -220,6 +328,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     // ===== 地表木箱/天空箱(cs:36283-36468)=====
     if (mainVanillaId > 0) {
       push(mainVanillaId);
+      prefixRolls(rng, mainVanillaId);   // cs:36287 SetDefaults+Prefix(-1)
       if (mainVanillaId === 832) push(933); // cs:36287-36291 世界树主件后插叶法杖
       if (mainVanillaId === 848) push(866); // cs:36283-36286 金字塔主件附赠法老袍
       if (flags.sky) {
@@ -264,6 +373,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (mainVanillaId > 0) {
       if (mainVanillaId === 832) push(933); // cs:36549-36553 主件前插叶法杖
       push(mainVanillaId);
+      prefixRolls(rng, mainVanillaId);   // cs:36554 SetDefaults+Prefix(-1)
       if (flags.water) {
         if (rng.int(0, 1) === 0) push(4425);
         if (rng.int(0, 1) === 0) push(4460);
@@ -314,6 +424,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     // 曾误并一道门带出地狱战利品装洞穴箱
     if (mainVanillaId > 0) {
       push(mainVanillaId);
+      prefixRolls(rng, mainVanillaId);   // cs:36841 SetDefaults+Prefix(-1)（★冰箱 ±7 根因）
       if (flags.ice && rng.int(0, 4) === 0) push(3199);       // 1/5 冰镜
       if (flags.desert) {
         if (rng.int(0, 6) === 0) push(4346);                  // 1/7 沙漠矿车
@@ -373,12 +484,19 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     // ===== 地狱箱(gy > h-205,cs:37163-37360;与 style 4 同门)=====
     if (mainVanillaId > 0) {
       push(mainVanillaId);
-      if (rng.int(0, 4) === 0) push(5010);                    // 1/5 宝藏磁铁
+      prefixRolls(rng, mainVanillaId);   // cs:37167 SetDefaults+Prefix(-1)
+      // cs:37173-37177：5010 宝藏磁铁命中也 Prefix(-1)（acc 可前缀化耗掷——
+      //   x86 PFX 探针实证 #458 (1318,1003) 双 PFX；4443/4737/4551 无 Prefix）
+      if (rng.int(0, 4) === 0) { push(5010); prefixRolls(rng, 5010); }
       if (rng.int(0, 9) === 0) push(4443);
       if (rng.int(0, 9) === 0) push(4737);
       if (rng.int(0, 9) === 0) push(4551);
     } else {
-      push([49, 50, 53, 54][rng.int(0, 3)]);
+      // cs:37220-37242：四选一各配 Prefix(-1)（49/53/54 acc 耗掷；50 魔镜 0 掷）
+      // ——★曾缺（尾批 2-C：(179,950) 实证 vanilla +2 掷 + 门级联 9）
+      const m = [49, 50, 53, 54][rng.int(0, 3)];
+      push(m);
+      prefixRolls(rng, m);
     }
     if (rng.int(0, 2) === 0) push(167);                       // 1/3 炸药
     if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 117 : bars.gold, rng.int(15, 29)); // 陨铁锭/金锭
@@ -389,10 +507,15 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     }
     if (rng.int(0, 1) === 0) push(227, rng.int(15, 20));      // 再生药水 cs:37290 Next(6)+15=[15,20]（曾 15,29）
     if (rng.int(0, 3) > 0) push(pick([296, 295, 293, 288, 294, 297, 304, 2323]), rng.int(1, 2));
-    if (rng.int(0, 2) > 1) push(pick([305, 301, 302, 288, 300, 2351, 2348, 2345]), rng.int(1, 2));
-    { // cs:37375-37376：先掷 stack27=Next(1,3) 再 Next(2) 选物（顺序对齐种子流）
-      const stack27 = rng.int(1, 2);
-      push(rng.int(0, 1) === 0 ? 2350 : 4870, stack27); // 回城/回归药水
+    // ★cs:37334 门是 Next(3)>0（非洞穴分支的 >1——曾误抄 >1 致 2/3 概率漏整组掷，
+    //   地狱尾 3-4 掷残余族：(1318,1003) vanilla ABX k=2094 vs JS 2091 实锤）
+    if (rng.int(0, 2) > 0) push(pick([305, 301, 302, 288, 300, 2351, 2348, 2345]), rng.int(1, 2));
+    { // cs:37370-37384：门 Next(3)==0 → stack27=Next(1,3) → Next(2) 选物（★门掷曾缺，
+      //   尾批 2-C 补——地狱无主件箱 (1615,911) 实证 JS 欠 1 掷致流漂）
+      if (rng.int(0, 2) === 0) {
+        const stack27 = rng.int(1, 2);
+        push(rng.int(0, 1) === 0 ? 2350 : 4870, stack27); // 回城/回归药水
+      }
     }
     if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 282, rng.int(15, 29));    // 火把/荧光棒
     if (rng.int(0, 1) === 0) push(73, rng.int(2, 4));         // 金币
@@ -459,6 +582,24 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
  *  notNearOtherChests:true 时经 Chest.NearOtherChests（±25×±8 已有箱）拒绝（cs:36253 透传）。
  *  样式/战利品解析与 2×2 放置沿用本仓库 rollChestLoot 管线。 */
 export function placeBuriedChest(
+  st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
+  i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean; notNearOtherChests?: boolean } = {},
+): boolean {
+  // 探针（AB/ABX 对拍 vanilla ChestProbe；无钩零开销）
+  const __ab = (globalThis as { __swChestEv?: (p: string, i: number, j: number, x?: number) => void }).__swChestEv;
+  const __n0 = (globalThis as { __swRollN?: number }).__swRollN ?? -1;
+  __ab?.('ab', i, j, __n0);
+  try {
+    const r = placeBuriedChestInner(st, rng, gs, chests, i, j, opts);
+    __ab?.('abx', i, j, r ? 1 : 0);
+    return r;
+  } catch (e) {
+    __ab?.('abx', i, j, -1);
+    throw e;
+  }
+}
+
+function placeBuriedChestInner(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
   i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean; notNearOtherChests?: boolean } = {},
 ): boolean {
@@ -529,7 +670,8 @@ export function placeBuriedChest(
   }
   if (style === undefined) {
     if (gy > st.h - 205) {
-      // 地狱箱:style 4 + 地狱武器序(cs:36158-36171)
+      // 地狱箱:style 4 + 地狱武器序(cs:36158-36171)。★同门置 flag13（cs:36167 反编译
+      //   命名——消费点 = 尾段 2195 蜥蜴炉恒给 + 日耀碑 1/5 门，cs:37428/37479）
       style = 4;
       flags.hell = true;
       if (!mainId) mainId = nextHellItem(gs);
@@ -586,6 +728,14 @@ export function placeBuriedChest(
     }
   }
 
+  // ---- 位置地牢门（cs:36211-36213）：tile21 && style≠0 && IsDungeon(i,gy)
+  //   （cs:35798 同款：y≥worldSurface && wallDungeon[wall(落定格)]）→ flag9 地牢战利品
+  //   （首暗影钥匙/Ram Rune+Prefix/尾段 1/8 血腥砍刀）。曾漏：坠入地牢的洞穴箱
+  //   (2930,830) vanilla 多掷 2（Ram Rune Prefix Next(4)+池选）→ 流分叉（尾批 2-C）
+  if (tile === CHEST && style !== 0 && gy >= gs.worldSurface && isDungeonWall(st.wall[st.idx(i, gy)])) {
+    flags.dungeon = true;
+  }
+
   // ---- notNearOtherChests 通道（cs:36253 透传 → PlaceChest cs:57838-57840）：
   // 原版 `notNearOtherChests && Chest.NearOtherChests(x-1, y-1)` → 拒。PlaceChest 收到
   // (i-1, num7-1)（num7=落定行 gy），故 NearOtherChests 实扫锚 = (i-2, gy-2)。
@@ -614,6 +764,10 @@ export function placeBuriedChest(
         const x = i + dx, y = topY + dy;
         if (!st.inBounds(x, y)) { ok = false; break; }
         const k = st.idx(x, y);
+        // ⑤液体放置门（TileObject.cs:342 flag3=！LiquidPlace；chest 默认
+        //   WaterPlacement=Allowed/LavaPlacement=NotAllowed，TileObjectData.cs:1767）：
+        //   箱体格液体=岩浆 → 拒（尾批 2-C：(3283,903) 岩浆 255 vanilla 拒/JS 放实锤）
+        if (st.liquid[k] > 0 && st.liquidType[k] === 2) { ok = false; break; }
         if (!st.flags[k]) continue;                       // 空 → 可放
         const sh = sheetOf(st.type[k]);
         if (!((PC_TILE_CUT.has(sh) && sh !== 484 && sh !== 654) || PC_BREAK_PLACE.has(sh))) { ok = false; break; }
@@ -651,12 +805,17 @@ export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chest
   const target = gs.caveChestCount >= 0 ? gs.caveChestCount
     : rng.int(Math.trunc(35 * (w * h) / 5040000), Math.trunc(40 * (w * h) / 5040000));
   let fail = 10000;
+  // cs:17112-17124 拒绝门：wallDungeon[wall] || wall==87 || oceanDepths(x,y)
+  //   （oceanDepths = y ≤ oceanLevel(=(ws+rl)/2+40) 且 x<380 || x>w-380——尾批 2-C 补；
+  //   曾漏致海带尝试多掷 1 次 AB，流分叉 @AB#69 (3826,490) 实证）
+  const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
   for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);
     const y = rng.int(yMin, h - 231);
     const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
     // cs:17109：wallDungeon[wall] || wall == 87（神庙墙 87 独立门）→ 整体重掷
-    if (isDungeonWall(wl) || wl === 87 || !placeBuriedChest(st, rng, gs, chests, x, y)) {
+    if (isDungeonWall(wl) || wl === 87 || (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance))
+      || !placeBuriedChest(st, rng, gs, chests, x, y)) {
       fail--; continue;
     }
     n++;
@@ -675,7 +834,9 @@ export function runUnderworldChestsPass(st: TileStore, rng: RNG, gs: GenState, c
   for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);
     const y = rng.int(h - 200, h - 51);
-    if (!placeBuriedChest(st, rng, gs, chests, x, y)) {
+    // cs:17134-17140：wallDungeon[wall] → 整体重掷（无 wall==87/oceanDepths 门）
+    const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
+    if (isDungeonWall(wl) || !placeBuriedChest(st, rng, gs, chests, x, y)) {
       fail--; continue;
     }
     n++;
@@ -712,10 +873,14 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
           continue;   // flag3=false → 本轮作废
         }
       } else {
+        // ★GG 批尾案②根因：原版扫描界用**固定锚** num6/num7（cs:17274 = 初掷 x/y），
+        //   命中点写进独立的 num3/num4——曾直接用 cx/cy 兼任界与选中点，命中后界随
+        //   选中点漂移（越扫越远+候选序错乱：初掷 (409,252) 选中 (547,328) 越出
+        //   [359,459] 框，AB#2 k=314 vs vanilla k=175 实锤 → 位置半数差+8.2k 欠掷）
         let num8 = 1;
         let hit = false;
-        for (let j = cx - 50; j <= cx + 50; j += 2) {
-          for (let k = cy - 50; k <= cy + 50; k += 2) {
+        for (let j = x - 50; j <= x + 50; j += 2) {
+          for (let k = y - 50; k <= y + 50; k += 2) {
             if (k >= gs.worldSurface) continue;
             if (!st.inBounds(j, k) || st.flags[st.idx(j, k)]) continue;
             if (st.wall[st.idx(j, k)] !== 244) continue;
@@ -729,7 +894,10 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
         if (!hit) continue;   // 蓄水池无墙 244 空格 → 本轮作废
       }
       const flags: ChestFlags = sky ? { sky: true } : { wooden: true };
-      if (placeBuriedChest(st, rng, gs, chests, cx, cy, { style: sky ? 12 : 0, flags })) ok = true;
+      // cs:17282：notNearOtherChests:true（NearOtherChests 拒绝 → 重试多掷——#60 欠掷
+      //   15.9k 主因之一，2026-08-17 尾批 2-C 补传）；style 原版传 flag2?12:-1，
+      //   -1 走落点解析（地表恒 y<worldSurface → style 0）与显式 0 等价
+      if (placeBuriedChest(st, rng, gs, chests, cx, cy, { style: sky ? 12 : 0, flags, notNearOtherChests: true })) ok = true;
     }
   }
 }

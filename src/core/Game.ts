@@ -2601,6 +2601,7 @@ export class Game implements GameHooks {
     this.lighting = new LightingEngine(w);
     this.renderer.lighting = this.lighting; // 岩浆瀑布 AddLight 等渲染端光源注入
     this.liquid = new LiquidSim(w);
+    this.liquid.setRuntimeCycles();   // Main.cs:12240-12243 运行期画质档（生成期保持 ReInit=10）
     // 世界运行时演化（WorldGen.UpdateWorld 1:1）：草蔓延/藤蔓/药草/邪恶神圣扩散等
     this.evolution = new WorldEvolution({
       store: w.store,
