@@ -2891,7 +2891,7 @@ export class Renderer {
       ctx.shadowColor = 'rgba(220,255,140,0.9)';
       ctx.shadowBlur = 6; // 萤火虫发光
     }
-    ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + pad * (h / fr.sh), w, h);
+    ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + 4, w, h);
     ctx.restore();
   }
 
@@ -3384,7 +3384,9 @@ export class Renderer {
           // 普通 drawImage 会把染色 RGB 再乘 alpha（蓝色糊成灰绿）——改为两步：
           // ① 原始精灵 destination-out 按 colorA 削弱底下内容 ② lighter 全量加染色精灵
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
-          const anchorY2 = grounded ? -r.sh + pad : -r.sh / 2;
+          // 与基础层同锚（底锚=−帧高+原版恒 +4 下沉，见主路径注；曾残留旧底锚
+          // pad 变量在恒+4 改造时漏改——染色层 ReferenceError）
+          const anchorY2 = grounded ? -r.sh + 4 / scale : -r.sh / 2;
           const anchorY = anchorY2 + eocOff; // 与基础层同锚——曾残留旧底锚条件,
           // 基础/染色两层错位 → 史莱姆"彩色+灰影"双画
           ctx.globalCompositeOperation = 'destination-out';

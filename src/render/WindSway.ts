@@ -162,6 +162,8 @@ const lerpValue = (a: number, b: number, x: number) =>
   Math.max(0, Math.min(1, (x - a) / (b - a)));
 
 const counters = { tree: 0, grass: 0, sunflower: 0, vine: 0 };
+/** 只读出口（探针/调试：读当前风摆相位计数） */
+export const windCounters = () => counters;
 const windGrid = new WindGrid();
 /** UpdateLeafFrequency（:7839-7903）档位表 + 尾乘 ×7 */
 let leafFrequency = 2000 * 7;

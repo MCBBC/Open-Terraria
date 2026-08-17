@@ -28,16 +28,12 @@ check('世界就绪', true);
 // vanilla.json（public 产物）→ 键解析全走游戏侧
 const keys = await page.evaluate(async () => {
   const v = await fetch('/sprites/vanilla.json').then((r) => r.json());
+  // items 段以数字 vid 为键、内含权威 PascalKey → ITEM_BY_KEY 键 = vi_<vid>_<PascalKey>
   const out = {};
-  const scan = (o) => {
-    if (!o || typeof o !== 'object') return;
-    for (const [k, val] of Object.entries(o)) {
-      const m = /^vi_(\d+)_/.exec(k);
-      if (m && ['27', '5095', '5295'].includes(m[1]) && val && typeof val === 'object') out[+m[1]] = k;
-      else if (typeof val === 'object') scan(val);
-    }
-  };
-  scan(v);
+  for (const vid of ['27', '5095', '5295']) {
+    const e = v.items[vid];
+    if (e?.key) out[+vid] = `vi_${vid}_${e.key}`;
+  }
   window.__keys = out;
   return out;
 });
@@ -48,14 +44,19 @@ const give = async (vid) => {
   await page.evaluate(async (v) => {
     const g = window.__swGame;
     const key = window.__keys[v];
-    g.spawnDrop(g.player.cx, g.player.y + 4, key, 5, 0, -1);
+    const d = g.spawnDrop(g.player.cx, g.player.y + 4, key, 5, 0, -1);
+    if (!d) { window.__giveFail = key; return; }
+    const wantId = d.itemId;              // 内部物品 id（拾取后按此找槽选中）
     g.player.useTime = 0;
     for (let i = 0; i < 40; i++) g.fixedUpdate(1 / 60);
-    // 找到刚拾取的槽并选中
     const inv = g.player.inv;
-    let sel = -1;
-    for (let i = 0; i < inv.slots.length; i++) if (inv.slots[i]) { sel = i; break; }
-    if (sel >= 0) inv.selected = sel;
+    const sel = inv.slots.findIndex((sl) => sl && sl.id === wantId);
+    if (sel < 0) {
+      window.__giveFail = 'no pickup ' + wantId + ' slots=' + inv.slots.filter(Boolean).map((sl) => sl.id).join(',')
+        + ' drops=' + (g.entities.drops || []).map((dd) => dd.itemId).slice(0, 6).join(',');
+      return;
+    }
+    inv.selected = sel;
   }, vid);
   await sleep(200);
 };
@@ -119,6 +120,8 @@ const lucy = await page.evaluate(() => {
     return { tree, labels0, labels, em0, em1: window.__swEmotes.count(), cleared: st.type[st.idx(tree.x, tree.bottom)] === 0 };
   });
 });
+const giveInfo = await page.evaluate(() => ({ fail: window.__giveFail ?? null, heldKey: null }));
+check('②露西注入掉落成功', !giveInfo.fail, JSON.stringify(giveInfo));
 check('②露西砍树 → 树倒', lucy.cleared === true, JSON.stringify(lucy).slice(0, 100));
 check('②台词弹字出现', (lucy.labels || []).length > 0, JSON.stringify((lucy.labels || []).slice(0, 1)).slice(0, 60));
 check('②表情气泡', (lucy.em1 ?? 0) > (lucy.em0 ?? 0), `em ${lucy.em0}→${lucy.em1}`);

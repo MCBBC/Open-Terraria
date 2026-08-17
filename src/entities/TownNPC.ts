@@ -292,21 +292,36 @@ export function headSubmerged(st: TileStore, x: number, y: number, w: number): b
   return st.liquid[st.idx(hx, hy)] > 30;
 }
 
-/** AI_007_TownEntities_GetWalkPrediction（NPC.cs:56093-56165）1:1（avoidFalling 主链）：
- *  前视列扫 j=−1..+4：液体累计 num / 岩浆 flag2 / 首个实心格记落点 p 并放行；
- *  avoidFalling |= flag2（岩浆恒避）；num ≥ ceil(h/16)（深水没身）→ 避；
- *  落点水淹（DrownCollision）→ 避。豁免（:56120-56123）：TownCritter 恒不避；
- *  不在 home±35 且正朝 home 走 → 不避（远处赶路愿意跳坑） */
+/** AI_007_TownEntities_GetWalkPrediction（NPC.cs:56093-56165）1:1：
+ *  keepwalking 三路（:56098-56117）：①起步期（isLikeATownNPC && ai[1]<30，即
+ *  走程剩余 <30t）身体竖线（Top→Bottom × width 展开 = 自身占据列）命中
+ *  AvoidedByNPCs 块 → 续走（SearchAvoidedByNPCs：命中集合块=阻断，keepwalking
+ *  取反 = 挤开走）；②未阻断时前方盒（X−20/宽+40）内有 velocity.X==0 的
+ *  friendly NPC → 续走（挤人绕行）；③溺水恒续走。①②由调用方合算为
+ *  crowdedOrBlocked 传入（plotAvoidClear 反相 + crowdedByStationaryNpc）。
+ *  消费点（:54609-54613 障碍段尾）：keepwalking → 走程重置 90t。
+ *  avoidFalling 主链：前视列扫 j=−1..+4：液体累计 num / 岩浆 flag2 / 首个实心
+ *  格记落点 p 并放行；avoidFalling |= flag2（岩浆恒避）；num ≥ ceil(h/16)
+ *  （深水没身）→ 避；落点水淹（DrownCollision）→ 避。豁免（:56120-56123）：
+ *  TownCritter 恒不避；不在 home±35 且正朝 home 走 → 不避（远处赶路愿意跳坑） */
 export function walkPrediction(
   st: TileStore, myTileX: number, homeFloorX: number, isTownCritter: boolean,
   dir: number, tileX: number, tileY: number, heightPx: number,
-): { avoidFalling: boolean } {
+  startLeg = false, drowning = false, crowdedOrBlocked = false,
+): { keepwalking: boolean; avoidFalling: boolean } {
+  // ---- keepwalking（:56098-56117）----
+  let keepwalking = false;
+  if (startLeg && crowdedOrBlocked) {
+    keepwalking = true;                    // ① 贴 AvoidedByNPCs 块 / ② 挤站定友方
+  }
+  if (!keepwalking && drowning) keepwalking = true;       // ③ 溺水续走（:56116）
+  // ---- avoidFalling（:56119-56165）----
   let avoidFalling = true;
   if (isTownCritter || (!(myTileX >= homeFloorX - HOME_DRIFT_RANGE && myTileX <= homeFloorX + HOME_DRIFT_RANGE)
     && dir === Math.sign(homeFloorX - myTileX))) {
     avoidFalling = false;                     // :56120-56123
   }
-  if (!avoidFalling) return { avoidFalling };
+  if (!avoidFalling) return { keepwalking, avoidFalling };
   let lava = false;
   let px = 0, py = 0;                         // 落点 p（X!=0 判有效）
   let depth = 0;
@@ -331,10 +346,9 @@ export function walkPrediction(
     // 落点检验（:56160-56164）：站位在 p 格上是否没顶
     avoidFalling = headSubmerged(st, px * TILE + 2, py * TILE - heightPx, 8);
   }
-  return { avoidFalling };
+  return { keepwalking, avoidFalling };
 }
-// keepwalking 出参（:56098-56115：ai[1]<30 起步期贴 AvoidedByNPCs → 走程重置
-// 90t）未接——起步期贴块重置走程的场景极罕见，登记。
+
 
 /** 软帽链（StrikeNPC :82147-82166）：kb>8 起每段衰减 0.9/0.8/0.7/0.6、>16 封顶 */
 export function knockbackCap(kb: number): number {
@@ -1151,7 +1165,13 @@ export class TownNPC extends Entity {
       const ax = Math.floor((this.cx + 15 * wantDir) / TILE);   // num26 前方列（:54405）
       const fy = Math.floor((this.y + this.h - 16) / TILE);     // num27 脚部行（:54406）
       const isCritter = IS_TOWN_PET.has(this.vanillaId);
-      const pred = walkPrediction(st, myX, homeX, isCritter, wantDir, ax, fy, this.h);
+      // keepwalking 三参（:56098-56117）：起步期 = 走态且走程剩余 <30t；挤人 =
+      // 前方盒（X−20/宽+40）内有站定（vx==0）城镇 NPC（:56105-56115）
+      const startLeg = this.walkMode === 1 && this.walkT < 30;
+      const crowdedOrBlocked = startLeg
+        && (!this.plotAvoidClear(st) || this.crowdedByStationaryNpc(game));
+      const pred = walkPrediction(st, myX, homeX, isCritter, wantDir, ax, fy, this.h,
+        startLeg, drowningNow, crowdedOrBlocked);
       let jumpedOut = false;                                    // flag23 溺水跳出
       // 溺水跳出（:54408-54427）：wet+没顶+跳出冷却尽（localAI[3]<=0 → turnLock
       // 承接）→ 向上数 11 格液体深度，跳速 −sqrt((d×16+16)×2×0.3) cap 26；
@@ -1194,6 +1214,13 @@ export class TownNPC extends Entity {
       // 转身；flag16 危险中再叠冻结）——站坑口停走已把 wantDir 归 0 则跳过
       if (wantDir !== 0) {
         turned = this.obstacleJump(world, wantDir, pred.avoidFalling && !jumpedOut);
+      }
+      // keepwalking 消费（:54609-54613 障碍段尾）：起步期贴 AvoidedByNPCs 块 /
+      // 前方站定友方 / 溺水 → 走程重置 90t（继续挤开走，直接赋值非 max——原版
+      // ai[1]=90 同式）。被逼停（flag27 → keepwalking=false :54597）由 corneredT>0
+      // 的冻结态天然覆盖（不走即不消费）
+      if (pred.keepwalking && this.corneredT <= 0) {
+        this.walkT = 90;
       }
     }
     const preX = this.x;
@@ -1351,6 +1378,19 @@ export class TownNPC extends Entity {
     }
     // 行走向取拴绳翻转后的最新 facing（原版 direction 同 tick 生效于速度应用）
     return this.walkMode === 1 ? this.facing : 0;
+  }
+
+  /** 前方站定友方挤人扫（:56105-56115）：自身盒 X−20/宽+40 的扩展盒内，任一
+   *  非自身城镇 NPC velocity.X==0（站定）→ true（keepwalking ②路） */
+  private crowdedByStationaryNpc(game: GameHooks): boolean {
+    const ex = this.x - 20, ew = this.w + 40;
+    for (const o of game.npcs?.() ?? []) {
+      const n = o as TownNPC;
+      if (!(n instanceof TownNPC) || n === this || n.dead) continue;
+      if (n.vx !== 0) continue;                     // velocity.X == 0 站定
+      if (ex < n.x + n.w && ex + ew > n.x && this.y < n.y + n.h && this.y + this.h > n.y) return true;
+    }
+    return false;
   }
 
   /** FindGoodRestingSpot 的 floorX/floorY（NPC.cs:53195-53215 头段）：home/anchor

@@ -148,6 +148,25 @@ const DG_ITEM_TILE: Record<number, number> = {};
 for (const k of Object.keys(DG_ITEM_SHEET)) {
   DG_ITEM_TILE[Number(k)] = TILE_INTERNAL_BY_SHEET.get(DG_ITEM_SHEET[+k]) ?? -1;
 }
+/** 地牢陈设 item → placeStyle（Item.cs SetDefaults 提取，2026-08-17）：
+ *  主题 0/1/2 = 蓝/绿/粉砖（item 三连号），5739+ = 1.4.4 新砖族专列。
+ *  调用方按此写帧（style*objW+col*18 / row*18，raw 存储绘制端分带换算）。 */
+const DG_ITEM_STYLE: Record<number, number> = {
+  1396: 13, 1399: 14, 1402: 15, 1509: 17,
+  1397: 10, 1400: 11, 1403: 12, 1510: 14,
+  1398: 11, 1401: 12, 1404: 13, 1511: 15,
+  1405: 1, 1406: 2, 1407: 3, 5743: 46,
+  1408: 46, 1409: 47, 1410: 48,
+  1414: 1, 1415: 2, 1416: 3, 1512: 5,
+  1470: 5, 1471: 6, 1472: 7, 5740: 47,
+  2376: 11, 2377: 12, 2378: 13, 5750: 47,
+  2386: 5, 2387: 6, 2388: 7, 5741: 47,
+  2402: 6, 2403: 7, 2404: 8, 5753: 51,
+  2658: 21, 2659: 22, 2660: 23, 5739: 47,
+  2664: 22, 2665: 23, 2666: 24, 5742: 47,
+  2645: 24, 2646: 25, 2647: 26, 5748: 47,
+  3900: 30, 3901: 31, 3902: 32, 5746: 48,
+};
 
 // DungeonBounds（DungeonBounds.cs）：Left/Right 钳 [10,w-10]、Top/Bottom 钳 [10,h-10]；
 // CalculateHitbox 保证 R>L、B>T；Contains=Rectangle.Contains 半开区间。

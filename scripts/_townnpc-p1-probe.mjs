@@ -1,9 +1,10 @@
 // 城镇 NPC P1 生活行为批验证探针（2026-08-17）：
 //  A 雨天白天回家（:53383-53402 flag / :54056-54091 走位门）
 //  B 悬崖避让（GetWalkPrediction :56093-56165 + 停走 :54444-54467）
-//  C RPS 对局出现（:55675-55701 1/1800）+ 聊天对照（:55630 1/300）
+//  C 聊天（1/300）+ RPS 对局（1/1800）+ RPS 表情 36/37/38 族
 //  D 派对跳舞（:55704-55730）舞帧 num58−5/−4 交替 + 音符尘 139-143（:69665-69678）
-// 驱动：g.tickCount 轮询（tick 数为准，免疫负载）；分段 evaluate 防 protocolTimeout。
+// 驱动：g.tickCount 轮询；分段 evaluate + 段级 try（单段异常不吞后续段结果）；
+// 轮询内周期清敌（dangerNear 会压制 sitFlag 走位与社交掷骰 flag30）。
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
@@ -29,22 +30,24 @@ const setup = await page.evaluate(() => {
   return { bx, F: by + 2, under };
 });
 const { bx, F, under } = setup;
-const lines = [];
 const ok = (name, pass, detail = '') => {
-  lines.push(`${pass ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
+  console.log(`${pass ? 'PASS' : 'FAIL'} ${name}${detail ? ' — ' + detail : ''}`);
+};
+const seg = async (name, fn) => {
+  try { await fn(); } catch (e) { ok(`${name} 段执行`, false, String(e).slice(0, 140)); }
 };
 
 // ============ A 雨天白天回家 ============
-{
+await seg('A', async () => {
   const r = await page.evaluate(async (bx, F) => {
     const g = window.__swGame, p = g.player;
     const { TownNPC } = await import('/src/entities/TownNPC.ts');
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
-        g.entities.enemies.length = 0;   // 清敌：dangerNear 会压制 sitFlag 走位（flee 覆写）与社交掷骰（flag30）
+        g.entities.enemies.length = 0;   // 清敌：dangerNear 压制 sitFlag 走位与 flag30
         await new Promise(r => setTimeout(r, 15));
-        if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
+        if (performance.now() - tm > 120000) throw new Error('TICK_STALL');
       }
     };
     g.entities.enemies.length = 0;
@@ -66,24 +69,24 @@ const ok = (name, pass, detail = '') => {
   const moved = r.x1 - r.x0;
   ok('A 雨天白天走回家（>28 格 / 40 格）', moved > 28,
     `col ${r.x0.toFixed(1)} → ${r.x1.toFixed(1)} (home=bx+40)`);
-}
+});
 
 // ============ B 悬崖避让 ============
-{
+await seg('B', async () => {
   const r = await page.evaluate(async (bx, F, under) => {
     const g = window.__swGame, st = g.world.store;
     const { TownNPC } = await import('/src/entities/TownNPC.ts');
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
-        g.entities.enemies.length = 0;   // 清敌（同 A 段注）
+        g.entities.enemies.length = 0;
         await new Promise(r => setTimeout(r, 15));
-        if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
+        if (performance.now() - tm > 120000) throw new Error('TICK_STALL');
       }
     };
     g.entities.enemies.length = 0;
     g.world.clock.timeOfDay = 0.5;
-    for (let dx = 21; dx <= 140; dx++) st.setTile(bx + dx, F, 0);   // 断崖
+    for (let dx = 21; dx <= 140; dx++) st.setTile(bx + dx, F, 0);   // 断崖（bx+21 起）
     const n = new TownNPC('guide', (bx + 4) * 16 + 8, F * 16);
     n.setWalking(3000);
     g.entities.npcs.push(n);
@@ -101,20 +104,20 @@ const ok = (name, pass, detail = '') => {
     return { startCol, maxCol, fell, yEnd };
   }, bx, F, under);
   ok('B 悬崖前停走/转身永不下坠', !r.fell,
-    `start=${r.startCol.toFixed(1)} max=${r.maxCol.toFixed(1)} cliffEdge=21 yEnd=${r.yEnd.toFixed(1)}(F=${F})`);
-}
+    `start=${r.startCol.toFixed(1)} max=${r.maxCol.toFixed(1)} cliffEdge=bx+21 yEnd=${r.yEnd.toFixed(1)}(F=${F})`);
+});
 
-// ============ C RPS 对局 + 聊天 ============
-{
+// ============ C 聊天 + RPS ============
+await seg('C', async () => {
   const r = await page.evaluate(async (bx, F) => {
     const g = window.__swGame;
     const { TownNPC } = await import('/src/entities/TownNPC.ts');
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
-        g.entities.enemies.length = 0;   // 清敌（同 A 段注）
+        g.entities.enemies.length = 0;
         await new Promise(r => setTimeout(r, 15));
-        if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
+        if (performance.now() - tm > 120000) throw new Error('TICK_STALL');
       }
     };
     g.entities.enemies.length = 0;
@@ -143,25 +146,25 @@ const ok = (name, pass, detail = '') => {
   ok('C1 结对聊天出现（1/300）', r.chat);
   ok('C2 RPS 对局出现（1/1800）', r.rps);
   ok('C3 RPS 对局掷出表情（36/37/38 族）', r.rps && r.rpsEmotes >= 2, `对局新表情 ${r.rpsEmotes} 个`);
-}
+});
 
 // ============ D 派对跳舞 ============
-{
+await seg('D', async () => {
   const r = await page.evaluate(async (bx, F) => {
     const g = window.__swGame, p = g.player;
     const { TownNPC } = await import('/src/entities/TownNPC.ts');
     const waitTicks = async (n) => {
       const t0 = g['tickCount'], tm = performance.now();
       while (g['tickCount'] - t0 < n) {
-        g.entities.enemies.length = 0;   // 清敌（同 A 段注）
+        g.entities.enemies.length = 0;
         await new Promise(r => setTimeout(r, 15));
-        if (performance.now() - tm > 40000) throw new Error('TICK_STALL');
+        if (performance.now() - tm > 120000) throw new Error('TICK_STALL');
       }
     };
     g.entities.enemies.length = 0;
     g.world.clock.timeOfDay = 0.5;
     const party = await import('/src/world/wiring/party.ts');
-    if (!party.partyIsUp(g.partyState)) party.toggleManualParty(g.partyState);  // 真派对（scene 手塞会被 scanScene 重写）
+    if (!party.partyIsUp(g.partyState)) party.toggleManualParty(g.partyState);  // 真派对
     p.x = (bx - 3) * 16; p.y = (F - 3) * 16;   // 玩家在 NPC 旁 50px
     const n = new TownNPC('nurse', (bx + 0) * 16 + 8, F * 16);
     g.entities.npcs.push(n);
@@ -191,7 +194,6 @@ const ok = (name, pass, detail = '') => {
   ok('D2 舞帧带 num58−5/−4（护士 num58=19：帧 18/19）',
     r.frames.includes(18) || r.frames.includes(19), `observed=[${r.frames.join(',')}]`);
   ok('D3 音符尘 139-143（≥8）', r.dustNotes >= 8, `dust notes=${r.dustNotes}`);
-}
+});
 
-console.log(lines.join('\n'));
 await browser.close();

@@ -516,6 +516,48 @@ describe('P1-1 游走双态+拴绳（NPC.cs:54135-54288）', () => {
 // P1-2 悬崖/坑洞避让（GetWalkPrediction :56093-56165 + 停走 :54444-54467）
 // =====================================================================
 describe('P1-2 悬崖避让（NPC.cs:56093-56165/:54444-54467）', () => {
+  it('keepwalking 三路（:56098-56117）：起步贴 AvoidedByNPCs 块 / 挤站定友方 / 溺水', () => {
+    const world = flatWorld('keepwalk');
+    const st = world.store;
+    const CHEST = TILE_BY_KEY['chest']!;
+    // ①② 起步期（walkT<30）贴 AvoidedByNPCs 块或前方站定友方（调用方合算
+    //    crowdedOrBlocked 传入：宝箱 sheet 21 ∈ 集合，plotAvoidClear 反相为 true）
+    st.setTileSilent(101, F - 2, CHEST);
+    expect(walkPrediction(st, 100, 100, false, 1, 101, F - 1, 42,
+      true, false, true).keepwalking).toBe(true);
+    // ③ 溺水恒续走（无视起步门）
+    expect(walkPrediction(st, 100, 100, false, 1, 120, F - 1, 42,
+      false, true, false).keepwalking).toBe(true);
+    // ④ 常态起步（无贴块无挤人）不续走
+    st.setTileSilent(101, F - 2, 0);
+    expect(walkPrediction(st, 100, 100, false, 1, 101, F - 1, 42,
+      true, false, false).keepwalking).toBe(false);
+  });
+
+  it('keepwalking 消费（:54609-54613）：起步贴宝箱 → 走程重置 90t（25t 走程走出 80t+）', () => {
+    const mkNpc = (chest: boolean) => {
+      const world = flatWorld(chest ? 'keepwalk2' : 'keepwalk2b');
+      if (chest) world.store.setTileSilent(101, F - 2, TILE_BY_KEY['chest']!);
+      const npc = new TownNPC('guide', 100 * 16, F * 16);
+      npc.setWalking(25);                             // 起步期（<30）
+      const { game } = makeGame(world, { npcs: [npc] });
+      npc.rng = () => 0.9;
+      let walkTicks = 0;
+      for (let t = 0; t < 200; t++) {
+        npc.fixedUpdate(1 / 60, game);
+        if (npc.walking) walkTicks++;
+      }
+      return walkTicks;
+    };
+    const withChest = mkNpc(true), noChest = mkNpc(false);
+    // 重置后走程 90t：贴宝箱组 ≥80t 走；对照组 25t 走程 + 站定起身掷（0.9 不中
+    // avoidFalling 门为起身……起身掷不消费 rng——起身直接走态 200+rand300）——
+    // 对照组首停后立即起身（站定 ai[1] 初始 60 递减），窗口内也会再走——只断
+    // 贴宝箱组显著更长
+    expect(withChest).toBeGreaterThanOrEqual(80);
+    expect(withChest - noChest).toBeGreaterThanOrEqual(30);
+  });
+
   it('walkPrediction：悬空列避 / 实心落点放行 / 岩浆避 / 深水没身避 / 远处赶路豁免', () => {
     // 悬崖世界（20..119 地面；120 列 F 行起全空）
     const world = new World(200, 200, 100, 'pred');

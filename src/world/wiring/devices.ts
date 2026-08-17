@@ -72,15 +72,24 @@ function swapTile(w: Wiring, x: number, y: number, fromKey: string, toKey: strin
 
 /** 多格器件整体翻帧(篝火/壁炉/吊灯等通用模式,Wiring.cs:1003-1052 等):
  *  锚点 = (x - frameX%blockW/18, y - frameY%blockH/18);delta 由锚点帧阈值定;整体 SkipWire */
+/** 多格块锚点归一 + 整块帧翻转。
+ *  锚点折叠 = frame % (tiles×18) / 18——统一规律覆盖原版全部 Toggle 变体：
+ *  状态位（delta）与样式页都是块宽（tiles×18）的整数倍，模后只剩块内偏移
+ *  （ToggleHangingLantern 的 fy 折 2 / Toggle2x2Light 的 fx 折 2 / ToggleChandelier
+ *  的 fx%108+折 3 / ToggleFirePlace 的 fx%54·fy%36 均与本式等价）。
+ *  ★此前 blockW/blockH 由调用点手传，6 处误传「页宽」（72/108）而非「块宽」
+ *  （36/54/18）——状态位渗进列偏移：灯笼 fx=18 灭档被当列 1 → 锚点挪到空气列
+ *  （开关点灯无反应，2026-08-17 用户报告）；2×2 灯/造雾机/大火山/巴斯特雕像
+ *  亮档 fx≥36 锚点整体偏移 → 翻错块。块宽一律由 tilesW/tilesH 推导，参数删除 */
 function flipBlock(
   w: Wiring, x: number, y: number,
-  blockW: number, blockH: number, tilesW: number, tilesH: number,
+  tilesW: number, tilesH: number,
   axis: 'x' | 'y', threshold: number, delta: number,
 ): void {
   const st = w.st;
   const i = st.idx(x, y);
-  const ox = x - Math.floor(st.frameX[i] % blockW / 18);
-  const oy = y - Math.floor(st.frameY[i] % blockH / 18);
+  const ox = x - Math.floor(st.frameX[i] % (tilesW * 18) / 18);
+  const oy = y - Math.floor(st.frameY[i] % (tilesH * 18) / 18);
   let d = delta;
   const ai = st.idx(ox, oy);
   if (axis === 'y' ? st.frameY[ai] >= threshold : st.frameX[ai] >= threshold) d = -delta;
@@ -560,7 +569,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       flipCell(w, x, y, 18);
       return true;
     case 34: // 吊灯 3×3 frameX ±54(:1405-1428)
-      flipBlock(w, x, y, 108, 54, 3, 3, 'x', 54, 54);
+      flipBlock(w, x, y, 3, 3, 'x', 54, 54);
       return true;
     case 35: case 139: // 南瓜灯/八音盒：SwitchMB（WorldGen.cs:50977-51021；Wiring.cs:2019-2022）
       switchMB(w, x, y);
@@ -573,16 +582,16 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       switchMonolith(w, x, y);
       return true;
     case 42: // 挂链灯笼 1×2 frameX ±18(:1214-1227)
-      flipBlock(w, x, y, 36, 36, 1, 2, 'x', 18, 18);
+      flipBlock(w, x, y, 1, 2, 'x', 18, 18);
       return true;
     case 92: // 路灯柱 1×6 frameX ±18(:1483-1494)
-      flipBlock(w, x, y, 18, 108, 1, 6, 'x', 18, 18);
+      flipBlock(w, x, y, 1, 6, 'x', 18, 18);
       return true;
     case 93: // 蒂基火炬 1×3 frameX ±18(:1228-1243)
-      flipBlock(w, x, y, 18, 54, 1, 3, 'x', 18, 18);
+      flipBlock(w, x, y, 1, 3, 'x', 18, 18);
       return true;
     case 95: case 100: case 126: case 173: case 564: // 2×2 灯具族 frameX ±36(:1381-1404)
-      flipBlock(w, x, y, 72, 36, 2, 2, 'x', 36, 36);
+      flipBlock(w, x, y, 2, 2, 'x', 36, 36);
       return true;
     case 105:
       fireStatue(w, ctx, x, y);
@@ -750,7 +759,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     }
     case 215: // 篝火 3×2 frameY ±36(:1003-1020)
-      flipBlock(w, x, y, 54, 36, 3, 2, 'y', 36, 36);
+      flipBlock(w, x, y, 3, 2, 'y', 36, 36);
       return true;
     case 216: { // 烟花火箭（Wiring.cs:1492-1495 → WorldGen.LaunchRocket WorldGen.cs:62184-62206）
       // LaunchRocket：行 = frameY/40（0-3 → 弹 167-170 红/绿/蓝/黄）；frameY%40==18 说明
@@ -766,7 +775,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     }
     case 244: // 泡泡机 3×2 frameX ±54(:1272-1293)
-      flipBlock(w, x, y, 54, 36, 3, 2, 'x', 54, 54);
+      flipBlock(w, x, y, 3, 2, 'x', 54, 54);
       return true;
     case 255: case 256: case 257: case 258: case 259: case 260: case 261: { // 宝石块 off→on(:863-873)
       if (st.wire[i] & 16) return true; // 原版有致动器时不响应
@@ -843,13 +852,13 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     }
     case 405: // 壁炉 3×2 frameX ±54(:1021-1038)
-      flipBlock(w, x, y, 54, 36, 3, 2, 'x', 54, 54);
+      flipBlock(w, x, y, 3, 2, 'x', 54, 54);
       return true;
     case 406: // 烟囱 3×3 frameY +54/-108(:1039-1056)
-      flipBlock(w, x, y, 54, 54, 3, 3, 'y', 108, 54);
+      flipBlock(w, x, y, 3, 3, 'y', 108, 54);
       return true;
     case 411: // 引爆器 2×2 frameX ±36(:1057-1074)
-      flipBlock(w, x, y, 36, 36, 2, 2, 'x', 36, 36);
+      flipBlock(w, x, y, 2, 2, 'x', 36, 36);
       return true;
     case 421: case 422: { // 传送带反向互换(:844-861;有致动器不响应)
       if (st.wire[i] & 16) return true;
@@ -877,7 +886,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       geyserTrap(w, ctx, x, y);
       return true;
     case 452: // 呆萌气球机 3×3 frameX ±54(:1132-1149)
-      flipBlock(w, x, y, 54, 54, 3, 3, 'x', 54, 54);
+      flipBlock(w, x, y, 3, 3, 'x', 54, 54);
       return true;
     case 455: // 派对纪念碑（Wiring.cs:2037-2039 → BirthdayParty.ToggleManualParty，
       // BirthdayParty.cs:145-163）：切换 ManualParty（开→升气球天/彩带，入夜 CheckNight 结束）
@@ -888,7 +897,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       fireworkToilet(w, ctx, x, y);
       return true;
     case 506: // 巴斯特雕像 2×3 frameX ±72(:2239-2261)
-      flipBlock(w, x, y, 72, 54, 2, 3, 'x', 72, 72);
+      flipBlock(w, x, y, 2, 3, 'x', 72, 72);
       return true;
     case 531:
       fireBoulderStatue(w, ctx, x, y);
@@ -897,14 +906,14 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       swapTile(w, x, y, 'v_546_grate', 'v_557_grateclosed');
       return true;
     case 565: // 造雾机 2×2 frameX ±36(:1358-1379)
-      flipBlock(w, x, y, 72, 36, 2, 2, 'x', 36, 36);
+      flipBlock(w, x, y, 2, 2, 'x', 36, 36);
       return true;
     case 593: // 小火山 frameX ±18(:1434-1445;动画近似粒子)
       flipCell(w, x, y, 18);
       ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
     case 594: // 大火山 2×2 frameX ±36(:1446-1470)
-      flipBlock(w, x, y, 72, 36, 2, 2, 'x', 36, 36);
+      flipBlock(w, x, y, 2, 2, 'x', 36, 36);
       ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
   }

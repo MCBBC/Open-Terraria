@@ -424,7 +424,7 @@ const ASH_PROFILE: TreeProfile = {
   treeTile: TILE_BY_KEY['v_634_ash_tree']!,
   // Tree_Ash.SaplingTileType=20（cs:3901）——growTreeWithSettings 头部苗越格走查
   // 消费 sapling 字段；曾误填 590 宝石苗：运行期灰烬苗（tile 20 档 10）永不越过苗格
-  sapling: TILE_BY_KEY['acorn_sapling']!,
+  sapling: TILE_BY_KEY["acorn_sapling"]!,
   ground: ASH_GROUND, walls: DEFAULT_TREE_WALLS,
   heightMin: 7, heightMax: 12, topPadding: 4,   // Tree_Ash 高度 7-12 / Padding 4（cs:3898-3901）
 };

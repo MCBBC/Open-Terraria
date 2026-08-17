@@ -148,9 +148,12 @@ export class NpcDialog {
     panel.className = 'sw-npc-dialog';
     const btns = buttons.map((b) => `<button data-b="${b.id}">${b.label}</button>`).join('');
     // 头像(原版 Main.npcChatPortrait = Images/TownNPCs/Portraits/Portrait_<Name>，SetTalkNPC :4196;
-    // 打开时 DoNPCPortraitHop 弹跳)——无头像类型(如骷髅商人外的野兽)原版也不显示
+    // 打开时 DoNPCPortraitHop 弹跳)——无头像类型(如骷髅商人外的野兽)原版也不显示。
+    // ★原版画法（Main.cs DrawNPCPortrait :39745）：200×200 原尺寸画在圆形底框上、
+    //  头部居中——贴图自带 ~50% 透明留白是圆框设计的一部分；本仓是矩形头像框，
+    //  整图塞入头像只占一半 → 打开时 canvas 按 alpha 内容包围盒裁剪 + 等比铺满
     const portraitHtml = portrait
-      ? `<img class="sw-npc-portrait" src="${portrait}">`
+      ? `<canvas class="sw-npc-portrait" width="152" height="184"></canvas>`
       : '';
     panel.innerHTML = `<div class="sw-npc-body">${portraitHtml}<div class="sw-npc-main">`
       + `<div class="sw-npc-name">${name}</div><div class="sw-npc-chat">${chat}</div>`
@@ -163,8 +166,47 @@ export class NpcDialog {
     });
     this.parent.appendChild(panel);
     this.panel = panel;
+    if (portrait) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait);
     this.escHandler = (e: KeyboardEvent) => { if (e.code === 'Escape') this.onButton('close'); };
     window.addEventListener('keydown', this.escHandler);
+  }
+
+  /** 头像裁剪填充：alpha 包围盒 → cover 式铺满 76×92 框（canvas 2× 抗糊，pixelated） */
+  private drawPortrait(canvas: HTMLCanvasElement | null, src: string): void {
+    if (!canvas) return;
+    const img = new Image();
+    img.onload = () => {
+      // alpha 包围盒（贴图自带大透明留白）
+      const probe = document.createElement('canvas');
+      probe.width = img.naturalWidth; probe.height = img.naturalHeight;
+      const pc = probe.getContext('2d', { willReadFrequently: true });
+      if (!pc) return;
+      pc.drawImage(img, 0, 0);
+      let data: Uint8ClampedArray;
+      try { data = pc.getImageData(0, 0, probe.width, probe.height).data; } catch { return; }
+      let minX = probe.width, minY = probe.height, maxX = -1, maxY = -1;
+      for (let y = 0; y < probe.height; y++) {
+        for (let x = 0; x < probe.width; x++) {
+          if (data[(y * probe.width + x) * 4 + 3] > 8) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < 0) return;   // 全透明防御
+      const bw = maxX - minX + 1, bh = maxY - minY + 1;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.imageSmoothingEnabled = false;
+      // cover：等比放大铺满，居中裁溢出
+      const scale = Math.max(canvas.width / bw, canvas.height / bh);
+      const dw = bw * scale, dh = bh * scale;
+      ctx.drawImage(img, minX, minY, bw, bh,
+        (canvas.width - dw) / 2, (canvas.height - dh) / 2, dw, dh);
+    };
+    img.src = src;
   }
 
   close() {

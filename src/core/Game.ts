@@ -280,6 +280,7 @@ import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
 import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
 import { repairZeroFramePileStyles } from '../world/gen/vanilla/PilesPass';
+import { repairZeroFrameDungeonDecor } from '../world/gen/vanilla/DungeonDecorRepair';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -2800,6 +2801,20 @@ export class Game implements GameHooks {
           for (let cx = 0; cx < Math.ceil(st.w / 16); cx++) this.chunks.markDirty(cx, cy);
         }
         console.log(`[repairZeroFramePileStyles] 修复 ${fixedPiles} 格零帧 187 石堆（按地面群系回填样式）`);
+      }
+    }
+
+    // ---- 历史存档零帧地牢陈设修复（2026-08-17 同批）----
+    // 旧版 dgWr 系放置不写帧 → 地牢家具/旗帜/挂画整族零帧（渲染只能按样式 0）。
+    // 按物体所在格的墙主题回填（7/8/9 经典三色 + 94-105 新族 + 骨墙挂画族）
+    {
+      const fixedDecor = repairZeroFrameDungeonDecor(this.world.store);
+      if (fixedDecor > 0) {
+        const st = this.world.store;
+        for (let cy = 0; cy < Math.ceil(st.h / 16); cy++) {
+          for (let cx = 0; cx < Math.ceil(st.w / 16); cx++) this.chunks.markDirty(cx, cy);
+        }
+        console.log(`[repairZeroFrameDungeonDecor] 修复 ${fixedDecor} 格零帧地牢陈设（按墙主题回填样式）`);
       }
     }
 

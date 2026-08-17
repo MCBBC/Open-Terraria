@@ -170,3 +170,34 @@ describe('动画家具帧偏移 × 零帧重建（炼金台 355）', () => {
     expect(repairZeroFramePileStyles(st)).toBe(0);
   });
 });
+
+describe('读档修复 repairZeroFrameDungeonDecor（2026-08-17 地牢陈设）', () => {
+  it('蓝砖墙 7 → 家具主题 0 列样式；旗帜 16-21；幂等；非地牢墙不动', async () => {
+    const { repairZeroFrameDungeonDecor } = await import('../src/world/gen/vanilla/DungeonDecorRepair');
+    const st = new TileStore(48, 48);
+    const CHAIR = TILE_BY_KEY['chair']!;
+    const TABLE = TILE_BY_KEY['table']!;
+    const BANNER = TILE_BY_KEY['v_91_banners']!;
+    const setWall = (x: number, y: number, wall: number) => { st.wall[st.idx(x, y)] = wall; };
+    // 蓝砖墙房：桌(3×2) + 椅(1×2) + 旗(1×3)
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) { st.setTileSilent(10 + dx, 10 + dy, TABLE, 0, 0); setWall(10 + dx, 10 + dy, 7); }
+    for (let dy = 0; dy < 2; dy++) { st.setTileSilent(15, 10 + dy, CHAIR, 0, 0); setWall(15, 10 + dy, 7); }
+    for (let dy = 0; dy < 3; dy++) { st.setTileSilent(18, 10 + dy, BANNER, 0, 0); setWall(18, 10 + dy, 7); }
+    // 泥土地上一组桌（非地牢墙 → 不动）
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) st.setTileSilent(30 + dx, 10 + dy, TABLE, 0, 0);
+    const fixed = repairZeroFrameDungeonDecor(st);
+    expect(fixed).toBe(6 + 2 + 3);                       // 桌 6 + 椅 2 + 旗 3；泥桌 0
+    // 桌样式 10（蓝列）→ 原始帧 fx = 10*54 = 540 + 列偏移
+    expect(st.frameX[st.idx(10, 10)]).toBe(10 * 54);
+    expect(st.frameX[st.idx(12, 11)]).toBe(10 * 54 + 36);
+    // 椅样式 13 → fx = 13*18 = 234（1 宽）
+    expect(st.frameX[st.idx(15, 10)]).toBe(13 * 18);
+    // 旗样式 ∈ 16-17（蓝族 variant 0）
+    const bs = st.frameX[st.idx(18, 10)] / 18;
+    expect(bs).toBeGreaterThanOrEqual(16); expect(bs).toBeLessThanOrEqual(17);
+    // 泥桌保持零帧
+    expect(st.frameX[st.idx(30, 10)]).toBe(0);
+    // 幂等
+    expect(repairZeroFrameDungeonDecor(st)).toBe(0);
+  });
+});
