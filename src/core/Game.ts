@@ -2248,9 +2248,9 @@ export class Game implements GameHooks {
     }
     // ---- 主线程 fallback（原路径原样保留：worker 不可用 + 探针依赖） ----
     this.world = await generateWorld({ width, height, size: opts?.size, seedText, name: opts?.name, evil: opts?.evil, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
-    // 水体预沉降：创建世界时全图激活+步进至稳定，带进度条
-    onProgress?.(settleLabel(), 0.72);
-    await this.settleLiquids((p) => onProgress?.(settleLabel(), 0.72 + p * 0.15));
+    // 水体预沉降：原版二次沉降(cs:21051)自 2026-08-17 起已归位 generateWorld 管线内
+    //（蜂巢幼虫之后、仙人掌珊瑚之前——曾在此处/worker 生成后补跑 = 时点晚 8 个 pass，
+    //  #98 珊瑚/水盒/燕麦液体门读到未沉降水体）。此处不再重复沉降。
     // 进图前贴图预载(用户要求:不进图后才动态加载)
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.87 + p * 0.13));
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);

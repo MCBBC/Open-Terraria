@@ -27,6 +27,49 @@ const TALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 const LARVA = TILE_BY_KEY['v_231_larva']!;
 /** TileID.Sets.Boulders（TileID.cs:195）：138/484/664/665/711-716 */
 const BOULDER_TILES = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+// ---- PlaceChest → TileObject.CanPlace 全链（TileObject.cs:174-857；sheet 空间表。
+//      与 DungeonPass U 批同源（表副本，2026-08-17 箱族批移植——DungeonPass 为并行
+//      会话禁区，不 import 防耦合））。旧 placeBuriedChest 只查「2×2 全空 + 双腿实心」，
+//      漏：可切覆盖门（tileCut∖{484,654}∪BreakableWhenPlacing——vanilla 落箱可覆蛛网
+//      51/洞穴装饰 165 等，首例 (2759,567) 隔离重放+vanilla AB 探针实锤）/边界 5 垫/
+//      PlaceChest 双腿巨石门（读 type 不读 act）/锚腿平台-桌变体。 */
+const PC_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** Main.tileCut（Main.cs；TileObject.cs:337-375 可覆盖集 = tileCut∖{484,654}）∪
+ *  TileID.Sets.BreakableWhenPlacing（TileObjectData.cs:1768） */
+const PC_TILE_CUT = new Set([3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201, 205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637, 638, 654, 655, 711]);
+const PC_BREAK_PLACE = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
+/** Main.tileSolidTop（sheet 空间，U 批 DG_SOLID_TOP 同表）——锚腿②类门 */
+const PC_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** TileID.Sets.TileAnchorIfZero... noAttach 族（U 批 DG_NO_ATTACH 同表） */
+const PC_NO_ATTACH = new Set([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 507, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
+/** 锚定无效表（U 批 DG_CHEST_ANCH_INVALID 同表） */
+const PC_CHEST_ANCH_INVALID = new Set([127, 138, 664, 665, 484, 711, 712, 713, 714, 715, 716]);
+const PC_PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** 桌族（AnchorBottom 的 Table 类锚，U 批 DG_TILE_TABLE 同表） */
+const PC_TILE_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+
+/** 锚腿判定（TileObject.cs:376-442 AnchorBottom 链 = U 批 chestLegOK 同构）：
+ *  ①SolidTile（tileSolid&&!solidTop&&!noAttach&&!anchorInvalid）②平台 ③solidTop
+ *  ④桌。★SolidTile 路须 blockType()==0（cs:388 `FlattenAnchors || blockType()==0`，
+ *  chest FlattenAnchors=false）——半砖/坡腿不算实心锚。野外洞穴地形有大量半砖/坡
+ *  （SmoothWorld 产物），曾漏检致 (755,695) 站坡腿上 vanilla 拒/JS 收的流分叉
+ *  （2026-08-17 x86 AB 探针+hs54 half/slope 真值实锤）。 */
+function chestLegOK(st: TileStore, lx: number, ly: number): boolean {
+  if (!st.inBounds(lx, ly)) return false;
+  const i = st.idx(lx, ly);
+  if (!st.flags[i]) return false;                                   // nactive()=false
+  const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+  const internal = st.type[i];
+  const blockType0 = st.half[i] === 0 && st.slope[i] === 0;
+  if (blockType0 && genSolidType(internal) && !PC_SOLID_TOP.has(sheet) && !PC_NO_ATTACH.has(sheet) && !PC_CHEST_ANCH_INVALID.has(sheet)) return true;
+  if (PC_PLATFORMS.has(sheet)) return !PC_CHEST_ANCH_INVALID.has(sheet) && st.half[i] === 0;  // !halfBrick（properTopFrame 帧位不建模，备案）
+  if (genSolidType(internal) && PC_SOLID_TOP.has(sheet)) return true;                          // solidTop 路（cs:402 无 blockType 门）
+  if (PC_TILE_TABLE.has(sheet)) return blockType0;                   // Table 路（cs:407 blockType==0）
+  return false;
+}
 
 export type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
 
@@ -112,6 +155,41 @@ export function nextJungleItem(gs: GenState, rng: RNG): number {
   return result;
 }
 
+// ---- Item.Prefix(-1) 耗掷模型（cs:36253+ 战利品区 SetDefaults→Prefix(-1) 调用点 ×
+// PrefixLegacy 前缀池，2026-08-17 箱族批）：原版每件【调用了 Prefix(-1) 且可前缀化】
+// 的战利品消耗 1×Next(4)（25% 无前缀早退）；否则池内 Next(len) 选 1；命中
+// ReducedNaturalChance 集（PrefixID.cs:9）再掷 Next(3)（2/3 弃前缀）。调用点全集 =
+// {49,50,53,54,280,281,284,285,517,900,906,930,946,953,975,997,1260,1800,3068,
+// 3069,3084,4341,4978,5010,5011,5465}（WorldGen.cs 36240-37580 逐行提取）；
+// 其余物品（158/159/2219/277/274/220/112/218/3019/863/4404/187 等主件与全部杂物）
+// 原版【不调 Prefix】→ 零掷。可前缀化并真正耗掷的交集：
+//   49/53/54/285/906/953/975/3068/3084/4341/4978/5465=acc、280=spears、281=guns、
+//   284=boom、946=swords、3069=magic、5011=spears（50 魔镜/997/930/5010 调而不耗）。
+const PRE_POOLS: Record<string, number[]> = {
+  swords: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 81],
+  spears: [36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 59, 60, 61],
+  guns: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 58, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 82],
+  magic: [26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 52, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 83],
+  boom: [36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 59, 60, 61],
+  acc: [62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80],
+};
+const PRE_CLASS: Record<number, string> = {
+  280: 'spears', 281: 'guns', 284: 'boom', 946: 'swords', 3069: 'magic', 5011: 'spears',
+  49: 'acc', 53: 'acc', 54: 'acc', 285: 'acc', 906: 'acc', 953: 'acc', 975: 'acc',
+  3068: 'acc', 3084: 'acc', 4341: 'acc', 4978: 'acc', 5465: 'acc',
+};
+const PRE_REDUCED = new Set([7, 8, 9, 10, 11, 22, 23, 24, 29, 30, 31, 39, 40, 56, 41, 47, 48, 49]);
+/** Prefix(-1) 耗掷（结果不入箱——原版前缀只改数值；此函数只保流） */
+function prefixRolls(rng: RNG, item: number): void {
+  const cls = PRE_CLASS[item];
+  if (!cls) return;                       // 调用点但不可前缀化（50/997/930/5010…）或原版未调
+  if (rng.int(0, 3) !== 0) {              // Next(4)==0 → 无前缀（cs:531）
+    const arr = PRE_POOLS[cls]!;
+    const rolled = arr[rng.int(0, arr.length - 1)]!;
+    if (PRE_REDUCED.has(rolled)) rng.int(0, 2);   // Next(3)!=0 → 弃（cs:541）
+  }
+}
+
 interface LootCtx { rng: RNG; gs: GenState; gy: number; flags: ChestFlags; mainKey: string | null; worldH: number }
 
 /**
@@ -150,7 +228,9 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 2) !== 0) push(5528);
       }
     } else {
-      push(pick([280, 281, 284, 285, 953, 946, 3068, 3069, 3084, 4341]));
+      const m = pick([280, 281, 284, 285, 953, 946, 3068, 3069, 3084, 4341]);
+      push(m);
+      prefixRolls(rng, m);   // cs:36322-36415：十选一 SetDefaults+Prefix(-1)
     }
     if (rng.int(0, 5) === 0) push(282, rng.int(40, 75));   // 1/6 荧光棒
     if (rng.int(0, 5) === 0) push(279, rng.int(150, 300)); // 1/6 飞刀
@@ -188,7 +268,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 1) === 0) push(4425);
         if (rng.int(0, 1) === 0) push(4460);
       }
-      if (flag12 && rng.int(0, 39) === 0) push(4978); // cs:36568 1/40 幼翼
+      if (flag12 && rng.int(0, 39) === 0) { push(4978); prefixRolls(rng, 4978); } // cs:36568 1/40 幼翼（Prefix 调用点）
       // 蘑菇箱 flag7（cs:36689-36702）：1/2 蘑菇矿车；1/3 三件套
       if (flags.mushroom) {
         if (rng.int(0, 1) === 0) push(4450);
@@ -204,12 +284,15 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (!gs.generatedRamRune || rng.int(0, 7) === 0) {
           gs.generatedRamRune = true;
           push(5465);
+          prefixRolls(rng, 5465);
         }
       }
       // ★ivy(3360/3361/4426/5525) 附赠原版只在洞穴分支（cs:36864-36880）——
       // 金箱分支无 flag4 段（cs:36545-36703），曾误带致常春藤箱落金箱深度多整套附赠
     } else {
-      push(pick([49, 50, 53, 54, 5011, 975]));
+      const m = pick([49, 50, 53, 54, 5011, 975]);
+      push(m);
+      prefixRolls(rng, m);   // cs:36563+：金箱主件 SetDefaults+Prefix(-1)（50 魔镜 0 掷）
       if (rng.int(0, 19) === 0) push(997);                    // 1/20 提炼机
       else if (rng.int(0, 19) === 0) { push(930); push(931, rng.int(25, 50)); } // 1/20 信号枪+闪光弹
     }
@@ -262,16 +345,17 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (!gs.generatedRamRune || rng.int(0, 7) === 0) {
           gs.generatedRamRune = true;
           push(5465);
+          prefixRolls(rng, 5465);
         }
       }
     } else {
       // 主件(cs:36911-36975)：num25=Next(7) 先掷恒消耗（种子对齐），再掷 906/997 门
       const num25 = rng.int(0, 6);
-      if (rng.int(0, 19) === 0 && gy > gs.lavaLine) push(906);
+      if (rng.int(0, 19) === 0 && gy > gs.lavaLine) { push(906); prefixRolls(rng, 906); }
       else if (rng.int(0, 14) === 0) push(997);
       else {
         if (num25 === 6) { push(930); push(931, rng.int(25, 50)); }
-        else push([49, 50, 53, 54, 5011, 975][num25]);
+        else { const m = [49, 50, 53, 54, 5011, 975][num25]!; push(m); prefixRolls(rng, m); }
       }
     }
     if (rng.int(0, 4) === 0) push(flags.ice ? 5120 : 43);     // 1/5(冰箱特殊项/可疑眼球)
@@ -493,28 +577,39 @@ export function placeBuriedChest(
   // 由并行代理接线，此处先开通道；缺省 false = 与原版 notNearOtherChests:false 同义）
   if (opts.notNearOtherChests && nearOtherChests(st, i - 2, gy - 2)) { restoreSlopes(); return false; }
 
-  // 2×2 放置（PlaceChest → TileObject.CanPlace 语义，cs:57828/:174）：
-  // AddBuriedChest 调 PlaceChest(i-1, num7-1)，chest TileObjectData Origin=(0,1)、
-  // Width=2 → 箱体落 **(i-1..i)×(gy-2..gy-1)**、锚腿 (i-1)/i 行 gy——曾写在
-  // (i..i+1) = 整体右移一列（金字塔箱 dump 对拍实锤；所有宝箱调用点共用此偏移）
+  // 2×2 放置（PlaceChest → TileObject.CanPlace 全链，cs:57828/:174-857；★2026-08-17
+  // 箱族批移植 U 批引擎）：AddBuriedChest 调 PlaceChest(i-1, num7-1)，chest
+  // TileObjectData Origin=(0,1)、Width=2 → 箱体落 **(i-1..i)×(gy-2..gy-1)**、
+  // 锚腿 (i-1)/i 行 gy。四道门：①PlaceChest 双腿巨石（读 type 不读 act）
+  // ②边界 5 垫 ③内盒可覆盖（空 或 tileCut∖{484,654}∪BreakableWhenPlacing——
+  // 原版落箱可切掉蛛网 51/洞穴饰 165 等；旧"2×2 全空"过严，首例 (2759,567)
+  // vanilla AB 探针 ret=1 vs JS 拒——#58 窗 14.7k 自因主根因）④双腿锚定
+  // （SolidTile|平台|solidTop|桌，chestLegOK）。
   const topY = gy - 2;
   if (topY < 1) { restoreSlopes(); return false; }
-  for (let dx = -1; dx <= 0; dx++) {
-    for (let dy = 0; dy < 2; dy++) {
-      if (!st.inBounds(i + dx, topY + dy) || st.flags[st.idx(i + dx, topY + dy)]) { restoreSlopes(); return false; }
+  {
+    const sheetOf = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
+    const legL = sheetOf(st.type[st.idx(i - 1, gy)]);
+    const legR = sheetOf(st.type[st.idx(i, gy)]);
+    let ok = !(PC_BOULDERS.has(legL) || PC_BOULDERS.has(legR));
+    if (ok) ok = i - 1 >= 5 && i + 1 <= st.w - 5 && topY >= 5 && topY + 2 <= st.h - 5;
+    for (let dx = -1; ok && dx <= 0; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        const x = i + dx, y = topY + dy;
+        if (!st.inBounds(x, y)) { ok = false; break; }
+        const k = st.idx(x, y);
+        if (!st.flags[k]) continue;                       // 空 → 可放
+        const sh = sheetOf(st.type[k]);
+        if (!((PC_TILE_CUT.has(sh) && sh !== 484 && sh !== 654) || PC_BREAK_PLACE.has(sh))) { ok = false; break; }
+      }
     }
+    if (ok && !(chestLegOK(st, i - 1, gy) && chestLegOK(st, i, gy))) ok = false;
+    if (!ok) { restoreSlopes(); return false; }
   }
   // 样式派生 flag 族（cs:36201-36229）：32 蘑菇 / 16 神庙 / 13 天空主题
   if (style === 32) flags.mushroom = true;
   if (style === 16) flags.temple = true;
   if (style === 13) flags.skyTheme = true;
-  // 锚腿落地判定（CanPlace AnchorBottom 两列 = i-1/i；k 扫描列 i 已验 SolidTile）：
-  // solid 走 GenSolid（本 pass 时点 484 滚动仙人掌/659 以太石块等已被翻非实心，
-  // WorldGen.cs:12537/11500——原版 PlaceChest 读可变 tileSolid 同样不认它们为地面）
-  for (let dx = -1; dx <= 0; dx++) {
-    if (!st.inBounds(i + dx, gy) || !st.flags[st.idx(i + dx, gy)]
-      || !genSolidType(st.type[st.idx(i + dx, gy)])) { restoreSlopes(); return false; }
-  }
   const fw = TILE_DEFS[tile].vanilla?.fw ?? 2;
   for (let dx = -1; dx <= 0; dx++) {
     for (let dy = 0; dy < 2; dy++) {

@@ -26,9 +26,20 @@ const MAX_WALL_OUT = 5000;  // maxWallOut2（cs:4196）
 const MAX_TILE_COUNT = 3500;
 
 const isSolidTile = (st: TileStore, x: number, y: number): boolean =>
-  // tileSolid 走 GenSolid：本 pass 时点 484(cs:12537)/659(cs:11500) 非实心,
-  //  190/225/192 等已由各自翻转点归位——与原版 cs:19734 时点态一致
-  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && genSolidType(st.type[st.idx(x, y)]);
+  // WorldGen.SolidTile(x,y)（cs:70155）全谓词：active && tileSolid && !tileSolidTop
+  //  && !halfBrick && slope==0 && !inActive。曾只写 active&&tileSolid（W 批 #67 二段
+  //  根因：Spread.Wall2（cs:3387）实心门与 countDirtTiles（cs:9659）洪泛门同用本
+  //  谓词,半砖/坡面/致动格在原版算实心（只刷背面墙/洪泛截断）,本仓漏 half/slope
+  //  查询 → 墙蔓延穿透坡面格 + 丛林泥墙腔计数偏大）。tileSolid 走 GenSolid：
+  //  本 pass 时点 484(cs:12537)/659(cs:11500) 非实心, 190/225/192 等已由各自
+  //  翻转点归位——与原版 cs:19734 时点态一致
+  st.inBounds(x, y) && (() => {
+    const i = st.idx(x, y);
+    if (!st.flags[i]) return false;
+    const d = TILE_DEFS[st.type[i]];
+    return !!d && genSolidType(st.type[i]) && !d.platform
+      && !st.half[i] && st.slope[i] === 0 && (st.wire[i] & 32) === 0;
+  })();
 
 /** countDirtTiles/nextDirtCount（cs:9618-9653）1:1：无实心且墙为泥土墙(2)/洞穴墙
  *  (59) 的连通腔计数；遇冰块(147/161)或 {244,83,3,187,216} 墙直接封顶 */
@@ -64,6 +75,7 @@ export function countDirtTiles(st: TileStore, sx: number, sy: number): number {
  *  实心活性格只刷背面墙不扩散（cs:3489-3492）。
  *  导出供 CaveWallsPass（丛林泥墙段 cs:17946）复用 */
 export function spreadWall2(st: TileStore, sx: number, sy: number, wallType: number): void {
+  (globalThis as { __swMark?: (s: string) => void }).__swMark?.(`CWW2 ${sx},${sy} t=${wallType}`);
   if (!st.inBounds(sx, sy)) return;
   let out = 0;
   const seen = new Set<number>();
@@ -72,7 +84,9 @@ export function spreadWall2(st: TileStore, sx: number, sy: number, wallType: num
   while (frontier.length) {
     const next: Array<[number, number]> = [];
     for (const [x, y] of frontier) {
-      if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) continue;
+      // InWorld(x,y,1)（cs:3411）：x>=1 && y>=1 && x<max-1 && y<max-1——下界放行
+      // x==1/y==1（countTiles 的字面 x<=1 是它自己的边界写法,勿混;曾误抄到这）
+      if (x < 1 || x >= st.w - 1 || y < 1 || y >= st.h - 1) continue;
       const ii = st.idx(x, y);
       if (seen.has(ii)) continue;
       seen.add(ii);

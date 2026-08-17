@@ -1,6 +1,8 @@
 // 原版生成管线共享状态（对应 WorldGen.GenerateWorld 闭包变量 L4694-4741 + Reset pass 掷的骰子）。
 // 105 个 pass 按序读写,顺序不可调换。
 import type { SeedFlags } from '../SeedEasterEggs';
+import type { TileStore } from '../../TileStore';
+import { TILE_DEFS } from '../../../data/tiles';
 
 export interface GenState {
   // 世界常量（Reset / Terrain pass 输出）
@@ -167,20 +169,46 @@ export interface GenState {
   protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number; pad: number }>;
 }
 
-/** StructureMap.CanPlace（StructureMap.cs:19-56）的互斥判定移植：
+/** TileID.Sets.GeneralPlacementTiles 黑名单（TileID.cs:311，CreateBoolSet(true, …)：
+ *  28 个列举 id 置 false、其余全 true——即"列举者拒放"）。StructureMap.CanPlace 单参
+ *  重载（cs:21）默认用它做内容扫描。此处为**内部 id 换算集**（vanilla.sheet → 数组
+ *  下标,同 sheet 多内部键全收；陷阱先例 ignoreID 双空间——黑名单是原版 id,拿内部
+ *  type 直接比对必错）。 */
+const GENERAL_PLACEMENT_SHEETS = new Set([225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70,
+  151, 21, 31, 696, 467, 12, 665, 639, 138, 664, 711, 712, 713, 714, 715, 716]);
+export const GENERAL_PLACEMENT_FORBID = new Set<number>();
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = TILE_DEFS[i]?.vanilla?.sheet;
+  if (s !== undefined && GENERAL_PLACEMENT_SHEETS.has(s)) GENERAL_PLACEMENT_FORBID.add(i);
+}
+
+/** StructureMap.CanPlace（StructureMap.cs:19-56）的移植：
  *  ① 越界拒绝（cs:28：area 超出 [0,w-1]×[0,h-1] 即 false）；
- *  ② 与全部既有保护矩形（各自已含 pad 扩张）按候选 pad 扩张后不相交（cs:32-39）。
- *  ★原版还有第 ③ 步 validTiles 内容扫描（cs:40-53：扩张域内所有 active tile 须在
- *  TileID.Sets.GeneralPlacementTiles 白名单内）——本仓各 pass 已有本地 tile 内容
- *  判定（蜂巢丛林草占比/小屋岩浆回避/神龛坏块扫描等），该扫描暂不移植（备案），
- *  以免双重收紧改变既有行为。 */
+ *  ② 与全部既有保护矩形（各自已含 pad 扩张）按候选 pad 扩张后不相交（cs:32-39）；
+ *  ③ validTiles 内容扫描（cs:40-53）：**pad 扩张域内**每个 active tile 的 type 须
+ *    validTiles[type]（默认=GeneralPlacementTiles 黑名单外全放）。传 `st` 即启用
+ *    （默认 forbid 集）；自定义白名单的调用方（HouseUtils.BlacklistedTiles /
+ *    EnchantedSwordBiome 派生表）传自己的 forbid 集,`null` 显式关闭扫描。
+ *    域为半开 [x0,x1)×[y0,y1)（cs:40-43 j<Width/k<Height）;越界格跳过（原版
+ *    pad 域不做二次界检,靠调用域保证;此处安全跳过等价）。 */
 export function canPlaceStructure(
   gs: GenState, rect: { x0: number; y0: number; x1: number; y1: number }, pad: number,
+  st?: TileStore, forbid?: Set<number> | null,
 ): boolean {
   if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > gs.genW - 1 || rect.y1 > gs.genH - 1) return false;
   const px0 = rect.x0 - pad, py0 = rect.y0 - pad, px1 = rect.x1 + pad, py1 = rect.y1 + pad;
   for (const r of gs.protectedRects) {
     if (px0 < r.x1 && r.x0 < px1 && py0 < r.y1 && r.y0 < py1) return false;
+  }
+  if (st && forbid !== null) {
+    const bad = forbid ?? GENERAL_PLACEMENT_FORBID;
+    for (let x = px0; x < px1; x++) {
+      for (let y = py0; y < py1; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        if (st.flags[i] && bad.has(st.type[i])) return false;
+      }
+    }
   }
   return true;
 }

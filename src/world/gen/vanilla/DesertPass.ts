@@ -306,13 +306,21 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   }
   // Actions.Smooth（Actions.cs:600）→ Tile.SmoothSlope——坡面/半砖写入，供后续
   // AddTileVariance 门禁消费（不再按"哈希无关"省略）
+  // 取证钩（W 批 #19 幻影坡归因;默认无钩零开销,同 HalfBrickPass.__swSWAct 约定）
+  const d19 = (site: string, x: number, y: number) => {
+    const h = (globalThis as { __swD19?: (s: string, x: number, y: number) => void }).__swD19;
+    if (h) h(site, x, y);
+  };
   class SmoothA extends Ga {
     constructor(public withNeighbors = false) { super(); }
     apply(ox: number, oy: number, x: number, y: number): boolean {
       if (this.withNeighbors) {              // Tile.SmoothSlope(applyToNeighbors:true) 序
-        smoothSlope(st, x + 1, y); smoothSlope(st, x - 1, y);
-        smoothSlope(st, x, y + 1); smoothSlope(st, x, y - 1);
+        d19('L+', x + 1, y); smoothSlope(st, x + 1, y);
+        d19('L-', x - 1, y); smoothSlope(st, x - 1, y);
+        d19('Lv', x, y + 1); smoothSlope(st, x, y + 1);
+        d19('L^', x, y - 1); smoothSlope(st, x, y - 1);
       }
+      d19('Lo', x, y);
       smoothSlope(st, x, y);
       return this.ua(ox, oy, x, y);
     }
@@ -752,6 +760,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   for (let hi = -20; hi < hiveW + 20; hi++) {
     for (let hj = -20; hj < hiveH + 20; hj++) {
       if (!smoothMark[(hi + 20) * (hiveH + 40) + (hj + 20)]) continue;
+      d19('hive', desc.combX + hi, desc.hiveTop + hj);
       smoothSlope(st, desc.combX + hi, desc.hiveTop + hj);
     }
   }

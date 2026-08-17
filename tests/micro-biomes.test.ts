@@ -124,7 +124,7 @@ describe('DeadMansChestBiome(DeadMansChestBiome.cs)', () => {
     const gs = newGenState(140, 120);
     gs.beachDistance = 10;   // 测试世界窄,缩海滩回避带
     const rng = new RNG(424242);
-    const biome = new DeadMansChestBiome(st, rng, gs);
+    const biome = new DeadMansChestBiome(st, rng, gs, [{ x: 50, y: 57 }]);   // 候选序 = chest sink(2026-08-17 起非栅格扫描)
     expect(biome.getPossibleChests()).toEqual([{ x: 50, y: 57 }]);
     expect(biome.place(50, 57)).toBe(true);
     // TurnGoldChestIntoDeadMansChest(cs:479-492):467 + 帧 144+i*18 / j*18
@@ -153,7 +153,7 @@ describe('DeadMansChestBiome(DeadMansChestBiome.cs)', () => {
     st.setTileSilent(51, 58, CHEST, 54, 18);
     const gs = newGenState(140, 120);
     gs.beachDistance = 10;
-    const biome = new DeadMansChestBiome(st, new RNG(1), gs);
+    const biome = new DeadMansChestBiome(st, new RNG(1), gs, []);
     expect(biome.getPossibleChests()).toEqual([]);   // 箱体嵌死在土里,countTiles<40
   });
 });

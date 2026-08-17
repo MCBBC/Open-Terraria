@@ -3,17 +3,23 @@
 // 5 列(左右界数组,列宽 8-20/中央 ±4-10)× 10 行(层高 6-12)房间网格塔;
 // 占用 = 2 轮侧翼(1/3 概率,双列同行标记 + 单列随机走)+ 中央列 [num1..num2] 跨度;
 // 边缘格实心砖(75 黑曜石 4/5 或 76 狱石),内部墙(14/13)+清空;
-// 门洞 style19 参数(列间 1/3 + 左右外门;PlaceTile 该几何恒 return false,实际从不出门)/
+// 门洞 style19 参数(列间 1/3 + 左右外门;四门位 PlaceTile→PlaceDoor 落 3 格门
+// +每门 3 掷 Next(3)——2026-08-17 dump28 typ=10 实证推翻旧 H2「从不出门」结论)/
 // 平台 style13(层间 + 顶层口);恶魔火把独立 pass(cs:32334-32379);
 // ★2026-08-16 补齐 AddHellHouses 后三环(此前整段缺失=地狱 pass 掷流短 ~74 万):
 //   家具环 m<4200000/w(cs:32386-32643) / 挂画环 num23<420000/w(cs:32645-32744) /
-//   旗帜吊灯环 array[3]+num35<420000/w(cs:32746-32843)。掷骰 1:1;放置走
-//   placeHF(footprint+帧,近似 PlaceTile 各 helper 的边角判定,已备案)。
+//   旗帜吊灯环 array[3]+num35<420000/w(cs:32746-32843)。
+// ★2026-08-17 终清批(N 批):掷数 185,299=原版精确、隔离重放 act/wal/liq 全 0:
+//   ① 四门位落门(PlaceDoor 3 掷/门);② 右外门 num37<20 恒 break(原版 bug,
+//   正常世界右外门从不触发);③ 家具/挂画/旗灯放置 Place* 家族逐 helper 1:1
+//   (替代旧 placeHF 近似:逐列底检/床浴缸 direction 镜像帧/挂画锚点几何);
+//   ④ 旗灯环锚点格判活「内列任意类型拒」分支;⑤ styles 三元素先掷再判重。
+//   残余=10 格 ghost(原版 KillTile 级联清 type=0 vs 本仓保留输入 ghost——
+//   非内容通道,见 docs/worldgen/content-parity 文档 N 批节)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { furnitureStyleBase } from '../../FurnitureStyle';
 
 const OBS_BRICK = TILE_BY_KEY['v_75_obsidian_brick']!;
 const HELL_BRICK = TILE_BY_KEY['v_76_hellstone_brick'] ?? OBS_BRICK;
@@ -42,6 +48,54 @@ const PIC_240 = TILE_BY_KEY['v_240_wall_hangings_3x3']!;
 const PIC_242 = TILE_BY_KEY['v_242_paintings_6x4']!;
 const PIC_245 = TILE_BY_KEY['v_245_paintings_2x3']!;
 const PIC_246 = TILE_BY_KEY['v_246_paintings_3x2']!;
+const T_DOOR = TILE_BY_KEY['door_closed']!;
+const T_STATUE = TILE_BY_KEY['v_105_statue']!;
+
+/** PlaceDoor（cs:31938）1:1：门 gate（j-2 活性+tileSolid 且 SolidTile(j+2)）→
+ *  三格门(type10) frameY=54*(style%36)+{0,18,36}、frameX 每格独立 Next(3)*18
+ *  ——★每格 1 掷共 3 掷是 HF 掷流此前缺失的主根因(2026-08-17 dump28 实证
+ *  (1190,1071-1073) typ=10 act=1 wal=14)。不写 wall/liquid/half/slope。 */
+function placeDoorHF(st: TileStore, rng: RNG, x: number, j: number, style: number): boolean {
+  if (!st.inBounds(x, j - 2) || !st.inBounds(x, j + 2)) return false;
+  const iUp = st.idx(x, j - 2);
+  if (!st.flags[iUp]) return false;
+  const d = TILE_DEFS[st.type[iUp]];
+  if (!d || !d.solid) return false;
+  if (!solidTileHF(st, x, j + 2)) return false;
+  const num3 = 54 * Math.floor(style / 36);
+  const num4 = 54 * (style % 36);
+  for (let k = -1; k <= 1; k++) {
+    const ti = st.idx(x, j + k);
+    st.flags[ti] = 1;
+    st.type[ti] = T_DOOR;
+    st.frameX[ti] = num3 + rng.nextInt(3) * 18;
+    st.frameY[ti] = num4 + (k + 1) * 18;
+  }
+  return true;
+}
+
+/** PlaceTile(x, j, 10, forced:false)（cs:59868-59906）1:1：分支 A 向上门
+ *  （j-1/j-2 空 + j-3 活性实心 → PlaceDoor(x, j-1)）、分支 B 向下门
+ *  （j+1/j+2 空 + j+3 活性实心 → PlaceDoor(x, j+1)），否则 return false。
+ *  HF 门洞几何(打 3 格 + rowB 地板)恒走分支 A。 */
+function placeTileDoorHF(st: TileStore, rng: RNG, x: number, j: number, style: number): boolean {
+  const inact = (a: number, b: number): boolean => !!st.inBounds(a, b) && st.flags[st.idx(a, b)] === 0;
+  const actSolid = (a: number, b: number): boolean => {
+    if (!st.inBounds(a, b)) return false;
+    const i = st.idx(a, b);
+    if (!st.flags[i]) return false;
+    const d = TILE_DEFS[st.type[i]];
+    return !!d && !!d.solid;
+  };
+  if (inact(x, j - 1) && inact(x, j - 2) && actSolid(x, j - 3)) {
+    placeDoorHF(st, rng, x, j - 1, style);
+    return true;
+  }
+  if (st.inBounds(x, j + 1) && (st.flags[st.idx(x, j + 1)] !== 0 || st.flags[st.idx(x, j + 2)] !== 0
+    || !actSolid(x, j + 3))) return false;
+  placeDoorHF(st, rng, x, j + 1, style);
+  return true;
+}
 
 /** WorldGen.SolidTile（cs:42370）：nactive && solid && !solidTop && !半砖 && 无坡 */
 function solidTileHF(st: TileStore, x: number, y: number): boolean {
@@ -61,63 +115,254 @@ function solidTile2HF(st: TileStore, x: number, y: number): boolean {
   return !!d && !!d.solid && !d.platform;
 }
 
-/** 家具放置（近似 PlaceTile→Place3x2/1x2/2x1/2x2/3x4/1x2Top 家族）：
- *  底锚/顶锚 + footprint 净空 + 帧基 furnitureStyleBase。备案近似项：
- *  Place3x2 的 SolidTile2 逐列底检简化为中央列底检、床/浴缸 direction 镜像帧
- *  未区分——typ/act 通道与掷流均不受影响。 */
-function placeHF(st: TileStore, tile: number, x: number, y: number, style: number, anchor: 'bottom' | 'top' = 'bottom', needFloor = true): boolean {
-  const d = TILE_DEFS[tile];
-  if (!d) return false;
-  const fw = d.vanilla?.fw ?? 1;
-  const w = d.w ?? fw, h = d.h ?? (d.vanilla?.fh ?? 1);
-  const topY = anchor === 'bottom' ? y - (h - 1) : y;
-  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
-  for (let dx = 0; dx < w; dx++) {
-    for (let dy = 0; dy < h; dy++) {
-      if (!st.inBounds(x + dx, topY + dy) || st.flags[st.idx(x + dx, topY + dy)]) return false;
+/** 家具放置——PlaceTile 各 helper 1:1（2026-08-17 终清,替代旧 placeHF 近似：
+ *  旧版把 Place3x2 逐列底检简化为中央列、床/浴缸 direction 镜像帧未分、
+ *  挂画锚点几何近似——act/typ 差 ~127 格 + 挂画环掷流 +277 的根因)。 */
+const inB5 = (st: TileStore, x: number, y: number): boolean =>
+  x >= 5 && x <= st.w - 5 && y >= 5 && y <= st.h - 5;
+
+/** Place3x2（cs:52097）：桌14/钢琴87/梳妆台88/长凳89。x-1..x+1 × y-1..y 净空
+ *  + 逐列 SolidTile2(y+1)；frameX=54*style+col*18,frameY=row*18。
+ *  梳妆台 88 的 Chest.CreateChest 门（:52169）按恒成功处理（生成期箱位充裕；
+ *  箱登记不在 dump 四通道,备案）。 */
+function place3x2HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  if (!inB5(st, x, y)) return false;
+  let ok = true;
+  for (let i = x - 1; i < x + 2; i++) {
+    for (let j = y - 1; j < y + 1; j++) {
+      if (st.flags[st.idx(i, j)]) ok = false;
     }
+    if (!solidTile2HF(st, i, y + 1)) ok = false;
   }
-  if (needFloor && anchor === 'bottom' && !solidTile2HF(st, x, y + 1)) return false;
-  const sheet = d.vanilla?.sheet ?? -1;
-  const [bx, by] = furnitureStyleBase(sheet, style, fw);
-  for (let dx = 0; dx < w; dx++) {
-    for (let dy = 0; dy < h; dy++) {
-      st.setTileSilent(x + dx, topY + dy, tile, bx + dx * 18, by + dy * 18);
+  if (!ok) return false;
+  const fx = 54 * style;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++)
+    st.setTileSilent(x - 1 + i, y - 1 + j, tile, fx + i * 18, j * 18);
+  return true;
+}
+
+/** Place2x1（cs:47371,工作台 18）：x..x+1 × y 净空 + SolidTile2 两列(y+1)；
+ *  frameX=36*style+col*18,frameY=0。 */
+function place2x1HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  if (st.flags[st.idx(x, y)] || st.flags[st.idx(x + 1, y)]) return false;
+  if (!solidTile2HF(st, x, y + 1) || !solidTile2HF(st, x + 1, y + 1)) return false;
+  const fx = 36 * style;
+  st.setTileSilent(x, y, tile, fx, 0);
+  st.setTileSilent(x + 1, y, tile, fx + 18, 0);
+  return true;
+}
+
+/** Place1x2（cs:46665,椅 15）：SolidTile2(x,y+1) 且 (x,y-1) 空；
+ *  frameY=40*style+{0,18},frameX=0。 */
+function place1x2HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  if (!solidTile2HF(st, x, y + 1) || st.flags[st.idx(x, y - 1)]) return false;
+  const fy = style * 40;
+  st.setTileSilent(x, y - 1, tile, 0, fy);
+  st.setTileSilent(x, y, tile, 0, fy + 18);
+  return true;
+}
+
+/** Place1x2Top（cs:46694,灯笼 42）：(x,y-1) 活性+tileSolid+非 solidTop 且
+ *  (x,y+1) 空；frameY=36*style+{0,18},frameX=0。 */
+function place1x2TopHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  const up = st.idx(x, y - 1);
+  const dUp = TILE_DEFS[st.type[up]];
+  if (!st.flags[up] || !dUp || !dUp.solid || dUp.platform) return false;
+  if (st.flags[st.idx(x, y + 1)]) return false;
+  const fy = style * 36;
+  st.setTileSilent(x, y, tile, 0, fy);
+  st.setTileSilent(x, y + 1, tile, 0, fy + 18);
+  return true;
+}
+
+/** Place1xX（cs:39203,落地灯 93）：高 3（92 为 6）,格子净空（93 另需无液体）
+ *  + SolidTile2(x,y+1)；frameY=3*style*18+j*18,frameX=0。 */
+function place1xXHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  const hgt = 3;
+  let ok = true;
+  for (let j = y - hgt + 1; j <= y; j++) {
+    if (st.flags[st.idx(x, j)] || st.liquid[st.idx(x, j)] > 0) ok = false;
+  }
+  if (!ok || !solidTile2HF(st, x, y + 1)) return false;
+  for (let j = 0; j < hgt; j++)
+    st.setTileSilent(x, y - hgt + 1 + j, tile, 0, j * 18 + hgt * (style * 18));
+  return true;
+}
+
+/** Place2x2（cs:51352,烛台 100）：x-1..x × y-1..y 净空 + 逐列
+ *  (i,y+1) 活性且（SolidTile2 或 tileTable）；frameX=col*18,frameY=style*36+row*18。 */
+function place2x2HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  if (!inB5(st, x, y)) return false;
+  for (let i = x - 1; i < x + 1; i++) {
+    for (let j = y - 1; j < y + 1; j++) {
+      if (st.flags[st.idx(i, j)]) return false;
     }
+    const bi = st.idx(i, y + 1);
+    if (!st.flags[bi] || (!solidTile2HF(st, i, y + 1) && !TABLE_FAMILY.has(st.type[bi]))) return false;
+  }
+  for (let k = 0; k < 2; k++) for (let l = 0; l < 2; l++)
+    st.setTileSilent(x - 1 + k, y - 1 + l, tile, k * 18, style * 36 + l * 18);
+  return true;
+}
+
+/** Place2xX（cs:39705,落地钟 104 高 5/雕像 105 高 3）：x..x+1 × y-h+1..y 净空
+ *  + SolidTile2 两列(y+1)；雕像 55 样式绕回（style 49 无绕回）；
+ *  frameX=style*36(+54 绕回列)+{0,18},frameY=j*18。 */
+function place2xXHF(st: TileStore, x: number, y: number, tile: number, style: number, hgt: number): boolean {
+  let fx = style * 36, fy0 = 0;
+  if (tile === T_STATUE) {
+    const wrap = Math.floor(style / 55);
+    fx -= 1980 * wrap;
+    fy0 += 54 * wrap;
+  }
+  let ok = true;
+  for (let j = y - hgt + 1; j <= y; j++) {
+    if (st.flags[st.idx(x, j)] || st.flags[st.idx(x + 1, j)]) ok = false;
+  }
+  if (!ok || !solidTile2HF(st, x, y + 1) || !solidTile2HF(st, x + 1, y + 1)) return false;
+  for (let j = 0; j < hgt; j++) {
+    st.setTileSilent(x, y - hgt + 1 + j, tile, fx, fy0 + j * 18);
+    st.setTileSilent(x + 1, y - hgt + 1 + j, tile, fx + 18, fy0 + j * 18);
   }
   return true;
 }
 
-/** Place4x2（cs:50534,床 79/浴缸 90）：x-1..x+2 × y-1..y 净空 + 下方逐列实心 */
-function place4x2HF(st: TileStore, tile: number, x: number, y: number, style: number): boolean {
-  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
+/** Place3x4（cs:51943,书架 101）：x-1..x+1 × y-3..y 净空 + 逐列 SolidTile2(y+1)；
+ *  frameX=54*style+col*18,frameY=row*18。 */
+function place3x4HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  if (!inB5(st, x, y)) return false;
+  let ok = true;
+  for (let i = x - 1; i < x + 2; i++) {
+    for (let j = y - 3; j < y + 1; j++) {
+      if (st.flags[st.idx(i, j)]) ok = false;
+    }
+    if (!solidTile2HF(st, i, y + 1)) ok = false;
+  }
+  if (!ok) return false;
+  const fx = style * 54;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 4; j++)
+    st.setTileSilent(x - 1 + i, y - 3 + j, tile, fx + i * 18, j * 18);
+  return true;
+}
+
+/** PlaceChand（cs:52753,吊灯 34）：3×3(x-1..x+1,y..y+2) 净空 + (x,y-1) 活性
+ *  +tileSolid+非 solidTop；frameX=(style/36)*108+col*18,
+ *  frameY=style*54(-54*(num2/108)*37 绕回)+row*18。 */
+function placeChandHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  let ok = true;
+  for (let i = x - 1; i < x + 2; i++) {
+    for (let j = y; j < y + 3; j++) {
+      if (st.flags[st.idx(i, j)]) ok = false;
+    }
+  }
+  const up = st.idx(x, y - 1);
+  const dUp = TILE_DEFS[st.type[up]];
+  if (!st.flags[up] || !dUp || !dUp.solid || dUp.platform) ok = false;
+  if (!ok) return false;
+  const fx0 = Math.floor(style / 36) * 108;
+  let fy0 = style * 54;
+  if (fx0 >= 108) fy0 -= 54 * Math.floor(fx0 / 108) * 37;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+    st.setTileSilent(x - 1 + i, y + j, tile, fx0 + i * 18, fy0 + j * 18);
+  return true;
+}
+
+/** PlaceBanner（cs:46270,旗帜 91）：(x,y-1) 活性+tileSolid+非 solidTop 且
+ *  (x,y..y+2) 净空；frameX=style*18(111 绕回),frameY={0,18,36}+绕回基。 */
+function placeBannerHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  let fx = style * 18, fy0 = 0, s3 = style;
+  while (s3 >= 111) { s3 -= 111; fx -= 1998; fy0 += 54; }
+  const up = st.idx(x, y - 1);
+  const dUp = TILE_DEFS[st.type[up]];
+  if (!st.flags[up] || !dUp || !dUp.solid || dUp.platform) return false;
+  if (st.flags[st.idx(x, y)] || st.flags[st.idx(x, y + 1)] || st.flags[st.idx(x, y + 2)]) return false;
+  for (let j = 0; j < 3; j++) st.setTileSilent(x, y + j, tile, fx, fy0 + j * 18);
+  return true;
+}
+
+/** Place4x2（cs:50534,床 79/浴缸 90）：x-1..x+2 × y-1..y 净空 + 逐列 SolidTile2；
+ *  direction=1 时 frameX 基 72（镜像帧）；frameY=36*style+row*18。 */
+function place4x2HF(st: TileStore, x: number, y: number, tile: number, direction: number, style: number): boolean {
+  if (!inB5(st, x, y)) return false;
   for (let a = x - 1; a < x + 3; a++) {
     for (let b = y - 1; b < y + 1; b++) {
-      if (!st.inBounds(a, b) || st.flags[st.idx(a, b)]) return false;
+      if (st.flags[st.idx(a, b)]) return false;
     }
     if (!solidTile2HF(st, a, y + 1)) return false;
   }
-  const d = TILE_DEFS[tile]!;
-  const fw = d.vanilla?.fw ?? 1;
-  const [bx, by] = furnitureStyleBase(d.vanilla?.sheet ?? -1, style, fw);
-  for (let a = 0; a < 4; a++) {
-    for (let b = 0; b < 2; b++) {
-      st.setTileSilent(x - 1 + a, y - 1 + b, tile, bx + a * 18, by + b * 18);
-    }
-  }
+  const fx0 = direction === 1 ? 72 : 0;
+  const fy0 = 36 * style;
+  for (let a = 0; a < 4; a++) for (let b = 0; b < 2; b++)
+    st.setTileSilent(x - 1 + a, y - 1 + b, tile, fx0 + a * 18, fy0 + b * 18);
   return true;
 }
 
-/** PlaceOnTable1x1（cs:45346,蜡烛 33）：下方活性桌族(tileTable)才放 */
+/** PlaceOnTable1x1（cs:45346,蜡烛 33）：下方活性桌族(tileTable)才放；
+ *  frameX=0,frameY=style*22。 */
 const TABLE_FAMILY = new Set<number>([T_TABLE, TILE_BY_KEY['v_555_picnic_tables'] ?? T_TABLE, T_BENCH_W, T_PIANO, T_DRESSER, T_BENCH, T_BOOKCASE, TILE_BY_KEY['v_577_toilet'] ?? -1]);
 function placeOnTableHF(st: TileStore, tile: number, x: number, y: number, style: number): boolean {
   if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return false;
   const i = st.idx(x, y), bi = st.idx(x, y + 1);
   if (st.flags[i]) return false;
   if (!st.flags[bi] || !TABLE_FAMILY.has(st.type[bi])) return false;
-  const d = TILE_DEFS[tile]!;
-  const [bx, by] = furnitureStyleBase(d.vanilla?.sheet ?? -1, style, d.vanilla?.fw ?? 1);
-  st.setTileSilent(x, y, tile, bx, by);
+  st.setTileSilent(x, y, tile, 0, style * 22);
+  return true;
+}
+
+/** Place3x3Wall（cs:44281,画 240）：x-1..x+1 × y-1..y+1 净空且 wall≠0；
+ *  frameX=(style%36)*54+col*18,frameY=(style/36)*54+row*18。 */
+function place3x3WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  for (let i = x - 1; i < x + 2; i++) {
+    for (let j = y - 1; j < y + 2; j++) {
+      if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
+    }
+  }
+  const s = ((style % 36) + 36) % 36;
+  const fx0 = s * 54, fy0 = Math.floor(style / 36) * 54;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++)
+    st.setTileSilent(x - 1 + i, y - 1 + j, tile, fx0 + i * 18, fy0 + j * 18);
+  return true;
+}
+
+/** Place6x4Wall（cs:44959,画 242）：x-2..x+3 × y-2..y+1 净空且 wall≠0；
+ *  frameX=(style/27)*108+col*18,frameY=(style%27)*72+row*18。 */
+function place6x4WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  for (let i = x - 2; i < x + 4; i++) {
+    for (let j = y - 2; j < y + 2; j++) {
+      if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
+    }
+  }
+  const fx0 = Math.floor(style / 27) * 108, fy0 = (style % 27) * 72;
+  for (let i = 0; i < 6; i++) for (let j = 0; j < 4; j++)
+    st.setTileSilent(x - 2 + i, y - 2 + j, tile, fx0 + i * 18, fy0 + j * 18);
+  return true;
+}
+
+/** Place2x3Wall（cs:44595,画 245）：x..x+1 × y-1..y+1 净空且 wall≠0；
+ *  frameX=style*36+col*18,frameY=row*18。 */
+function place2x3WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  for (let i = x; i < x + 2; i++) {
+    for (let j = y - 1; j < y + 2; j++) {
+      if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
+    }
+  }
+  const fx0 = style * 36;
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 3; j++)
+    st.setTileSilent(x + i, y - 1 + j, tile, fx0 + i * 18, j * 18);
+  return true;
+}
+
+/** Place3x2Wall（cs:44752,画 246）：x-1..x+1 × y..y+1 净空且 wall≠0；
+ *  frameX=col*18,frameY=style*36+row*18。 */
+function place3x2WallHF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+  for (let i = x - 1; i < x + 2; i++) {
+    for (let j = y; j < y + 2; j++) {
+      if (st.flags[st.idx(i, j)] || st.wall[st.idx(i, j)] === 0) return false;
+    }
+  }
+  const fy0 = style * 36;
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++)
+    st.setTileSilent(x - 1 + i, y + j, tile, i * 18, fy0 + j * 18);
   return true;
 }
 
@@ -157,7 +402,13 @@ function randHellPicture(rng: RNG): [number, number] {
   }
 }
 
-export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
+/** 诊断钩(tools/_uwp7):逐塔五元组+四环写点跟踪;null 时零开销 */
+let hfTrace: ((s: string) => void) | null = null;
+export function setHfTrace(f: ((s: string) => void) | null): void { hfTrace = f; }
+const tr = (s: string): void => { hfTrace?.(s); };
+
+export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
+  phaseMark?: (name: string) => void): void {
   const { w, h } = st;
   const hellTop = h - 200;
   if (hellTop >= h - 60) return;
@@ -167,6 +418,7 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
   // 扫下一列——旧实现改成 while 无论成败都跳格+耗骰,塔数量级直接错(H1);
   // 有效起点域到 w-num(=0.75w),旧 endX-30 截尾同批修正
   const num = Math.floor(w * 0.25);
+  let towerNo = 0;
   for (let i = 100; i < w - 100; i++) {
     if (i < num || i > w - num) continue;
     // 找落点(cs:32307-32310):从 h-40 向上跳过 active/液体格,首格空气即塔底锚点。
@@ -179,11 +431,14 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
       let tileType = rng.int(75, 76) === 75 ? OBS_BRICK : HELL_BRICK;
       if (rng.nextInt(5) > 0) tileType = OBS_BRICK;
       const wallType = tileType === OBS_BRICK ? 14 : 13;
-      hellFort(st, rng, i, j, tileType, wallType);
+      tr(`T#${towerNo} i=${i} j=${j} tile=${tileType === OBS_BRICK ? 75 : 76}`);
+      hellFort(st, rng, i, j, tileType, wallType, towerNo);
+      towerNo++;
       i += rng.int(30, 129); // cs:32331:Next(30,130)
       if (rng.nextInt(10) === 0) i += rng.int(0, 199); // cs:32332-32335
     }
   }
+  phaseMark?.('torch');
   // ---- 恶魔火把(cs:32334-32379):200×(w/4200) 个,贴砖放置,±8 内无其他火把 ----
   const torchCount = Math.floor(200 * Math.floor(w / 4200));
   for (let n = 0; n < torchCount; n++) {
@@ -217,6 +472,7 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
       placed = true;
     }
   }
+  phaseMark?.('furn');
   // ---- 家具环（cs:32386-32643）：m < 4200000/w 次，拒绝采样墙 13/14 空格 ----
   const num9 = 4200000 / w;
   for (let m = 0; m < num9; m++) {
@@ -265,53 +521,55 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
     };
     switch (kind) {
       case 0: {
-        placeHF(st, T_TABLE, cx, fy, 13);
+        place3x2HF(st, cx, fy, T_TABLE, 13);
         const n22 = rng.nextInt(6);
         if (n22 < 3) placeOnTableHF(st, T_CANDLE, cx + n22, fy - 2, 25);
         if (!st.flags[st.idx(cx, fy)]) break;
         if (!st.flags[st.idx(cx - 2, fy)]) {
-          if (placeHF(st, T_CHAIR, cx - 2, fy, 16)) chairMirror(cx - 2, fy);
+          if (place1x2HF(st, cx - 2, fy, T_CHAIR, 16)) chairMirror(cx - 2, fy);
         }
-        if (!st.flags[st.idx(cx + 2, fy)]) placeHF(st, T_CHAIR, cx + 2, fy, 16);
+        if (!st.flags[st.idx(cx + 2, fy)]) place1x2HF(st, cx + 2, fy, T_CHAIR, 16);
         break;
       }
       case 1: {
-        placeHF(st, T_BENCH_W, cx, fy, 14);
+        place2x1HF(st, cx, fy, T_BENCH_W, 14);
         const n21 = rng.nextInt(4);
         if (n21 < 2) placeOnTableHF(st, T_CANDLE, cx + n21, fy - 1, 25);
         if (!st.flags[st.idx(cx, fy)]) break;
         if (rng.nextInt(2) === 0) {
           if (!st.flags[st.idx(cx - 1, fy)]) {
-            if (placeHF(st, T_CHAIR, cx - 1, fy, 16)) chairMirror(cx - 1, fy);
+            if (place1x2HF(st, cx - 1, fy, T_CHAIR, 16)) chairMirror(cx - 1, fy);
           }
         } else if (!st.flags[st.idx(cx + 2, fy)]) {
-          placeHF(st, T_CHAIR, cx + 2, fy, 16);
+          place1x2HF(st, cx + 2, fy, T_CHAIR, 16);
         }
         break;
       }
-      case 2: placeHF(st, TILE_BY_KEY['v_105_statue']!, cx, fy, 49); break;
-      case 3: placeHF(st, T_BOOKCASE, cx, fy, 4); break;
+      case 2: place2xXHF(st, cx, fy, T_STATUE, 49, 3); break;
+      case 3: place3x4HF(st, cx, fy, T_BOOKCASE, 4); break;
       case 4:
         if (rng.nextInt(2) === 0) {
-          if (placeHF(st, T_CHAIR, cx, fy, 16)) chairMirror(cx, fy);
-        } else placeHF(st, T_CHAIR, cx, fy, 16);
+          if (place1x2HF(st, cx, fy, T_CHAIR, 16)) chairMirror(cx, fy);
+        } else place1x2HF(st, cx, fy, T_CHAIR, 16);
         break;
       case 5:
-        if (rng.nextInt(2) === 0) place4x2HF(st, T_BED, cx, fy, 8);
-        else place4x2HF(st, T_BED, cx, fy, 8);   // direction=-1 仅镜像帧（备案）
+        // direction=1/-1 → Place4x2 镜像帧基 72/0（cs:50563-50567）
+        if (rng.nextInt(2) === 0) place4x2HF(st, cx, fy, T_BED, 1, 8);
+        else place4x2HF(st, cx, fy, T_BED, -1, 8);
         break;
-      case 6: placeHF(st, T_PIANO, cx, fy, 15); break;
-      case 7: placeHF(st, T_DRESSER, cx, fy, 9); break;
-      case 8: placeHF(st, T_BENCH, cx, fy, 10); break;
-      case 9: placeHF(st, T_CLOCK, cx, fy, 17); break;
+      case 6: place3x2HF(st, cx, fy, T_PIANO, 15); break;
+      case 7: place3x2HF(st, cx, fy, T_DRESSER, 9); break;
+      case 8: place3x2HF(st, cx, fy, T_BENCH, 10); break;
+      case 9: place2xXHF(st, cx, fy, T_CLOCK, 17, 5); break;
       case 10:
-        if (rng.nextInt(2) === 0) place4x2HF(st, T_BATHTUB, cx, fy, 25);
-        else place4x2HF(st, T_BATHTUB, cx, fy, 25);
+        if (rng.nextInt(2) === 0) place4x2HF(st, cx, fy, T_BATHTUB, 1, 25);
+        else place4x2HF(st, cx, fy, T_BATHTUB, -1, 25);
         break;
-      case 11: placeHF(st, T_LAMP, cx, fy, 23); break;
-      case 12: placeHF(st, T_CANDELABRA, cx, fy, 25); break;
+      case 11: place1xXHF(st, cx, fy, T_LAMP, 23); break;
+      case 12: place2x2HF(st, cx, fy, T_CANDELABRA, 25); break;
     }
   }
+  phaseMark?.('pic');
   // ---- 挂画环（cs:32645-32744）：num23 < 420000/w 次 ----
   const num9b = 420000 / w;
   for (let n23 = 0; n23 < num9b; n23++) {
@@ -369,13 +627,28 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
     if (nearPicture2HF(st, px, py)) ok = -1;
     if (ok === 0) {
       const [tile, style] = randHellPicture(rng);
-      if (!nearPictureHF(st, px, py)) placeHF(st, tile, px, py, style, 'top', false);
+      // PlaceTile 挂画族 1:1 分派:240=Place3x3Wall/242=Place6x4Wall/
+      // 245=Place2x3Wall/246=Place3x2Wall(各自锚点几何不同!)
+      let placed = false;
+      if (!nearPictureHF(st, px, py)) {
+        if (tile === PIC_240) placed = place3x3WallHF(st, px, py, tile, style);
+        else if (tile === PIC_242) placed = place6x4WallHF(st, px, py, tile, style);
+        else if (tile === PIC_245) placed = place2x3WallHF(st, px, py, tile, style);
+        else placed = place3x2WallHF(st, px, py, tile, style);
+      }
+      void 0;
+      tr(`P# n${n23} retry=${tries} c=(${px},${py}) t${tile === PIC_240 ? 240 : tile === PIC_242 ? 242 : tile === PIC_245 ? 245 : 246} s${style} ${placed ? '放' : '拒'}`);
+    } else {
+      tr(`P# n${n23} retry=${tries} c=(${px},${py}) near2拒`);
     }
   }
   // ---- 旗帜/吊灯环（cs:32746-32843）：array[3] 互异 style + num35 < 420000/w ----
-  const styles = [rng.nextIntRange(16, 22), 0, 0];
+  // ★原版三元素先各自掷 Next(16,22) 再判重补掷（cs:32744-32757）——旧实现只掷
+  //   styles[0] 用 0 占位判重,少掷 1-2 次+styles[1] 恒 0 的错帧。
+  const styles = [rng.nextIntRange(16, 22), rng.nextIntRange(16, 22), rng.nextIntRange(16, 22)];
   while (styles[1] === styles[0]) styles[1] = rng.nextIntRange(16, 22);
   while (styles[2] === styles[0] || styles[2] === styles[1]) styles[2] = rng.nextIntRange(16, 22);
+  phaseMark?.('banner');   // ★原版 IL 锚(第二个 420000)在 styles 初始化之后——边界含 3+掷
   for (let n35 = 0; n35 < num9b; n35++) {
     let tries = 0;
     let bx = num, by = h - 250;
@@ -396,31 +669,37 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (st.wall[i] !== 13 && st.wall[i] !== 14) continue;
     }
     let pick2 = rng.nextInt(3);
+    tr(`T#- banner n${n35} @(${bx},${by}) pick=${pick2}`);
     const sz = pick2 === 1 ? [3, 3] : pick2 === 2 ? [1, 2] : [1, 3];
-    // ★原版此处内层读锚点格 (num37,num38) 而非 (num42,num43)（cs:32807 反编译事实,
-    //   等效为对锚点格反复判活）——1:1 保留
+    // ★原版此处内层读锚点格 (num37,num38) 而非 (num42,num43)（cs:32808-32834 反编译
+    //   事实,等效于对锚点格反复判活）:边界列(a<bx 或 a==bx+sz[0])仅门类型
+    //   {10,11,34,42,91},内列任意活性类型都拒——净效=锚点格只要 active 即
+    //   pick2=-1 不放置。旧实现漏「内列任意类型」分支,致灯笼覆写真火把(2026-08-17
+    //   (2574,1045) 实证)。
     {
       const i = st.idx(bx, by);
       const anchorActive = st.flags[i] !== 0;
+      const anchorType = st.type[i];
+      const HANG_SET = anchorType === T_DOOR || anchorType === 10 || anchorType === 11
+        || anchorType === T_CHANDELIER || anchorType === T_LANTERN || anchorType === T_BANNER;
       for (let a = bx - 1; a <= bx + sz[0]; a++) {
         for (let b = by; b <= by + sz[1]; b++) {
-          if (anchorActive) {
-            const t = st.type[i];
-            if (t === 10 || t === 11 || t === 34 || t === 42 || t === 91) pick2 = -1;
+          if (a < bx || a === bx + sz[0]) {
+            if (anchorActive && HANG_SET) pick2 = -1;
           } else if (anchorActive) pick2 = -1;
         }
       }
     }
     switch (pick2) {
-      case 0: placeHF(st, T_BANNER, bx, by, styles[rng.nextInt(3)]!, 'top', false); break;
-      case 1: placeHF(st, T_CHANDELIER, bx, by, 32, 'top', false); break;
-      case 2: placeHF(st, T_LANTERN, bx, by, 32, 'top', false); break;
+      case 0: placeBannerHF(st, bx, by, T_BANNER, styles[rng.nextInt(3)]!); break;
+      case 1: placeChandHF(st, bx, by, T_CHANDELIER, 32); break;
+      case 2: place1x2TopHF(st, bx, by, T_LANTERN, 32); break;
     }
   }
   void gs;
 }
 
-function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: number, wallType: number): void {
+function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: number, wallType: number, tno = -1): void {
   const { w, h } = st;
   const hellTop = h - 200;
   // ---- 列左右界(cs L16563-16572):中央 ±4-9,其余依次外扩 8-19 ----
@@ -492,6 +771,11 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
       if (occ[c][r] && (rowT[r] < hellTop || rowB[r] > h - 20)) occ[c][r] = false;
     }
   }
+  if (hfTrace) {
+    tr(`T#${tno} colL=[${colL.join(',')}] colR=[${colR.join(',')}]`);
+    tr(`T#${tno} rowT=[${rowT.join(',')}] rowB=[${rowB.join(',')}]`);
+    for (let c = 0; c < 5; c++) tr(`T#${tno} occ[${c}]=${occ[c].map((v) => (v ? 1 : 0)).join('')}`);
+  }
   // ---- 绘制(cs L16691-16718):四边实心砖,内部墙+清空 ----
   for (let c = 0; c < 5; c++) {
     for (let r = 0; r < 10; r++) {
@@ -504,9 +788,11 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
           st.liquid[ti] = 0;
           if (x === colL[c] || x === colR[c] || y === rowT[r] || y === rowB[r]) {
             st.type[ti] = tileType; st.flags[ti] = 1;
+            st.half[ti] = 0; st.slope[ti] = 0;   // 原版 halfBrick(false)+slope(0)（cs:33065-33067）
           } else {
+            // 原版室内只 active(false)+wall——type 保留幽灵（★勿清零,曾致 ~1.4 万 typ 差）
             st.wall[ti] = wallType;
-            st.type[ti] = 0; st.flags[ti] = 0;
+            st.flags[ti] = 0;
           }
         }
       }
@@ -523,16 +809,18 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
       const r = rng.int(0, 9);
       if (rows[r]) {
         any = false;
+        tr(`T#${tno} colDoor c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
         for (let k = 1; k <= 3; k++) {
           const y = rowB[r] - k;
           if (!st.inBounds(colR[c], y)) continue;
           const ti = st.idx(colR[c], y);
-          st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = wallType;
+          st.flags[ti] = 0; st.wall[ti] = wallType;
         }
-        // 原版此处 PlaceTile(col,rowB-1,10,mute,forced:false,style19)(cs:33091):
-        // case10(cs:59867-59906)分支 A 需 j-3 实心(室内已清空,不成立)、
-        // 分支 B 需 j+1/j+2 空(rowB 是地板砖 active,不成立)→ cs:59900 直接
-        // return false——原版地狱塔只留 3 格门洞从不出门,强放门已删(H2)
+        // 原版 PlaceTile(col,rowB-1,10,mute,forced:false,style19)(cs:33091):
+        // 分支 A 条件 j-1/j-2 空(刚打)+j-3 实心(rowB-4=房内边列砖,层高≥7 恒真)
+        // → PlaceDoor 落 3 格门+3 掷(H2 旧结论「恒 return false 从不出门」已被
+        // dump28 typ=10 实证推翻,2026-08-17 复核 cs:59868-59906 修正)
+        placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
       }
     }
   }
@@ -551,23 +839,26 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
           tries++;
         }
         if (tries <= 10000) {
+          tr(`T#${tno} plat c=${c} r=${r} x=${x1}..${x2} y=${rowT[r]}`);
           for (let x = x1; x <= x2; x++) {
             if (x < 20 || x > w - 20 || !st.inBounds(x, rowT[r])) continue;
             const ti = st.idx(x, rowT[r]);
-            st.type[ti] = 0; st.flags[ti] = 0;
+            st.flags[ti] = 0;
             st.setTileSilent(x, rowT[r], PLATFORM, 0, 13 * 18);
             st.wall[ti] = wallType;
           }
         } else break;
       }
       if (c < 4 && occ[c + 1][r] && rng.int(0, 2) === 0) {
+        tr(`T#${tno} door13 c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
         for (let k = 1; k <= 3; k++) {
           const y = rowB[r] - k;
           if (!st.inBounds(colR[c], y)) continue;
           const ti = st.idx(colR[c], y);
-          st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = wallType;
+          st.flags[ti] = 0; st.wall[ti] = wallType;
         }
-        // 同上:原版 PlaceTile(cs:33157)该几何下 return false,只留门洞(H2)
+        // 原版 PlaceTile(cs:33157)同 colDoor 几何 → 落门+3 掷(H2 修正)
+        placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
       }
     }
   }
@@ -593,13 +884,15 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
         const r = rng.int(0, 9);
         if (rows[r]) {
           ok = false;
+          tr(`T#${tno} leftDoor c=${c} r=${r} x=${colL[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
           for (let k = 1; k <= 3; k++) {
             const y = rowB[r] - k;
             if (!st.inBounds(colL[c], y)) continue;
             const ti = st.idx(colL[c], y);
-            st.type[ti] = 0; st.flags[ti] = 0;
+            st.flags[ti] = 0;
           }
-          // 原版 PlaceTile(cs:33196)同几何 return false,门洞保留无门(H2)
+          // 原版 PlaceTile(cs:33196)同 colDoor 几何 → 落门+3 掷;外门不打墙(H2 修正)
+          placeTileDoorHF(st, rng, colL[c], rowB[r] - 1, 19);
         }
       }
       break;
@@ -616,6 +909,11 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
       let ok = false;
       for (let r = 0; r < 10; r++) {
         if (!rows[r]) continue;
+        // ★原版 cs:33218 的界外判据用的是列号 num37(0-4)而非 x 坐标——恒 <20 →
+        //   恒 break:右外门校验循环在首个占用行即中断,flag8 恒 false,**正常世界
+        //   右外门从不触发**(0 掷 0 打洞;dump28 x1113/x1231 列全砖实证)。旧实现
+        //   自作主张改成 x 判据致右门误发+多耗掷(T#1 尾段流位 +13 的根因)。
+        if (c < 20 || c > w - 20) break;
         const x = colR[c] + 1;
         if (x > w - 2) { rows[r] = false; continue; }
         if (!st.flags[st.idx(x, rowB[r] - 1)] && !st.flags[st.idx(x, rowB[r] - 2)] && !st.flags[st.idx(x, rowB[r] - 3)]
@@ -627,13 +925,15 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
         const r = rng.int(0, 9);
         if (rows[r]) {
           ok = false;
+          tr(`T#${tno} rightDoor c=${c} r=${r} x=${colR[c]} y=${rowB[r] - 1}..${rowB[r] - 3}`);
           for (let k = 1; k <= 3; k++) {
             const y = rowB[r] - k;
             if (!st.inBounds(colR[c], y)) continue;
             const ti = st.idx(colR[c], y);
-            st.type[ti] = 0; st.flags[ti] = 0;
+            st.flags[ti] = 0;
           }
-          // 原版 PlaceTile(cs:33236)同几何 return false,门洞保留无门(H2)
+          // 原版 PlaceTile(cs:33236)同 colDoor 几何 → 落门+3 掷;外门不打墙(H2 修正)
+          placeTileDoorHF(st, rng, colR[c], rowB[r] - 1, 19);
         }
       }
       break;
@@ -667,10 +967,11 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
             if (st.flags[ti] || st.liquid[ti] > 0) { clear = false; break; }
           }
           if (clear) {
+            tr(`T#${tno} topPlat c=${c} r=${r} x=${x1}..${x2} y=${rowT[r]}`);
             for (let x = x1; x <= x2; x++) {
               if (x < 10 || x > w - 10 || !st.inBounds(x, rowT[r])) continue;
               const ti = st.idx(x, rowT[r]);
-              st.type[ti] = 0; st.flags[ti] = 0;
+              st.flags[ti] = 0;
               st.setTileSilent(x, rowT[r], PLATFORM, 0, 13 * 18);
             }
           }

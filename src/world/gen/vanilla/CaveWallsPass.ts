@@ -26,6 +26,10 @@ const ICE = idsByVanillaSheet(147, 161);
 const SANDY = idsByVanillaSheet(53, 396, 397);
 /** CaveWallVariety 的 IsTouching 无效集（cs:16826-16835：冰/沙/蘑菇草/191） */
 const INVALID_TOUCH = idsByVanillaSheet(147, 161, 396, 397, 70, 191);
+/** ModShapes.OuterOutline POINT_OFFSETS 顺序（cs:ModShapes.cs:30-34） */
+const OUTLINE_OFFSETS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const;
+/** Main.wallLargeFrames 1/2 全表（Main.cs:9652-9820）——Framing.WallFrame 走查表分支不耗掷 */
+const WALL_LARGE_FRAMES = new Set([146, 147, 167, 179, 185, 224, 274, 323, 324, 325, 326, 327, 328, 329, 330, 354, 355, 358, 359, 362, 363, 366]);
 /** 微光安全距离（WorldGen.cs:4104 shimmerSafetyDistance） */
 const SHIMMER_SAFETY = 150;
 
@@ -45,26 +49,29 @@ interface CountResult { count: number; shroom: number; rock: number; ice: number
 
 /** countTiles/nextCount（cs:9493-9600）1:1：空气连通腔计数 + 类型计数。
  *  jungle=false：遇任何墙/微光液封顶；lavaOk=false 遇岩浆也封顶。
- *  递归四邻（迭代栈等价——计数与封顶均单调，与遍历序无关） */
+ *  ★递归 DFS 原序（next(x-1)→(x+1)→(y-1)→(y+1)，每次入口先查 1500 帽）+
+ *    CountedTiles **只登记非实心格**（cs:9585 Add 在 !SolidTile 分支内）——实心
+ *    邻格可被多路重复访问：类型计数器（70/1/147/161/53/396/397）随之重复累加，
+ *    shroom>rock*0.75 等墙型门与 1500 截断序都依赖此语义。曾用「栈 BFS+全格
+ *    seen」等价近似 → 计数与截断集合双偏（#67 自债 wal40.8k 根因） */
 function countTiles(st: TileStore, sx: number, sy: number, jungle: boolean, lavaOk: boolean): CountResult {
+  const mk0 = (globalThis as { __swMark?: (s: string) => void }).__swMark;
+  mk0?.(`CWC ${sx},${sy} j=${jungle ? 1 : 0} l=${lavaOk ? 1 : 0}`);
   const MAX = 1500; // 调用方语义：本 pass 恒 maxTileCount=1500（cs:17827/:17920）
   const r: CountResult = { count: 0, shroom: 0, rock: 0, ice: 0, sand: 0, lava: 0 };
-  const seen = new Set<number>();
-  const stack: Array<[number, number]> = [[sx, sy]];
-  while (stack.length) {
-    if (r.count >= MAX) { r.count = MAX; return r; }
-    const [x, y] = stack.pop()!;
-    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) { r.count = MAX; return r; }
+  const counted = new Set<number>();
+  const next = (x: number, y: number): void => {
+    if (r.count >= MAX) return;                                       // cs:9506 头部早退
+    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) { r.count = MAX; return; }
     const ii = st.idx(x, y);
-    if (seen.has(ii)) continue;
-    seen.add(ii);
-    if (st.wall[ii] === 244) { r.count = MAX; return r; }           // 活木墙封顶（cs:9515）
-    if (st.liquid[ii] > 0 && st.liquidType[ii] === 4) { r.count = MAX; return r; } // 微光液
+    if (counted.has(ii)) return;                                      // cs:9523（仅非实心格曾登记）
+    if (st.wall[ii] === 244) { r.count = MAX; return; }               // 活木墙封顶（cs:9515）
+    if (st.liquid[ii] > 0 && st.liquidType[ii] === 4) { r.count = MAX; return; } // 微光液
     if (!jungle) {
-      if (st.wall[ii] !== 0) { r.count = MAX; return r; }           // 已有墙封顶（cs:9526）
-      if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) {           // 岩浆
+      if (st.wall[ii] !== 0) { r.count = MAX; return; }               // 已有墙封顶（cs:9526）
+      if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) {             // 岩浆
         r.lava++;
-        if (!lavaOk) { r.count = MAX; return r; }
+        if (!lavaOk) { r.count = MAX; return; }
       }
     }
     if (st.flags[ii]) {
@@ -75,23 +82,28 @@ function countTiles(st: TileStore, sx: number, sy: number, jungle: boolean, lava
       if (SANDY.has(t)) r.sand++;
     }
     if (!solidAt(st, x, y)) {
+      counted.add(ii);                                                // cs:9585
       r.count++;
-      stack.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
+      next(x - 1, y); next(x + 1, y); next(x, y - 1); next(x, y + 1);
     }
-  }
+  };
+  next(sx, sy);
   return r;
 }
 
 /** Spread.Wall（cs:3327-3385）1:1：封闭腔 BFS 刷墙。实心/有墙格不扩散
  *  （实心且 active 且无墙 → 背面也刷）；空气格刷墙后四邻入队 */
 function spreadWall(st: TileStore, sx: number, sy: number, wallType: number): void {
+  (globalThis as { __swMark?: (s: string) => void }).__swMark?.(`CWW ${sx},${sy} t=${wallType}`);
   if (!st.inBounds(sx, sy)) return;
   const seen = new Set<number>();
   let frontier: Array<[number, number]> = [[sx, sy]];
   while (frontier.length) {
     const next: Array<[number, number]> = [];
     for (const [x, y] of frontier) {
-      if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) continue; // InWorld(,1)
+      // InWorld(x,y,1)：x>=1 && y>=1 && x<max-1 && y<max-1（上界不含等号已正确,
+      //   下界曾写 x<=1 多杀 x==1 一列）
+      if (x < 1 || y < 1 || x >= st.w - 1 || y >= st.h - 1) continue;
       const ii = st.idx(x, y);
       if (seen.has(ii)) continue;
       seen.add(ii);
@@ -113,6 +125,8 @@ function spreadWall(st: TileStore, sx: number, sy: number, wallType: number): vo
  *  RNG 消费顺序严格 1:1（主段：每迭代 2 掷 + 重掷 2 掷/次 + 恒 Next(2) +
  *  else 分支补 Next(4)；次段：每迭代 2 掷 + 重掷按墙值条件掷） */
 export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const __cap = (globalThis as { __swWallCap?: (tag: string, gs: GenState, st: TileStore) => void }).__swWallCap;
+  if (__cap) __cap('cavewalls', gs, st);
   // ★pass 头 tileSolid 翻转（cs:17821-17823,原版写在 denyAll 门之外无条件执行）：
   //   162 薄冰非实心 / 226 蜥蜴砖实心 / 232 木刺非实心——countTiles 的 SolidTile
   //   洪泛与主段选点随之判定。原为本文件局部 SOLID_OVERRIDES 表,已迁移 GenSolid
@@ -172,6 +186,33 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
   const num2 = Math.floor(300 * (st.w * st.h) / 5040000);
   let remaining = num2;
   let budget = 100000;
+  // ★CW3 PlaceWall 掷骰债（rig 陷阱①框架耗掷）：Actions.PlaceWall 置墙后调
+  //   WorldGen.SquareWallFrame(x,y)+四邻（neighbors=true）——每次 SquareWallFrame 的
+  //   中心格 Framing.WallFrame(i,j,resetFrame=true) 耗 genRand.Next(0,3)（Framing.cs:390，
+  //   wall==21 再耗 Next(2):391）；wall==0/越界/WallID 大帧墙（Main.cs wallLargeFrames
+  //   1/2 表）不耗。变体墙 196-215 不在大帧表 → 自身格必耗。漏此耗掷 = 整条流后续
+  //   候选/门掷全错位（#56 债根因：139k wal 残余主源）。
+  const frameDraw = (fx: number, fy: number): void => {
+    if (fx <= 0 || fy <= 0 || fx >= st.w - 1 || fy >= st.h - 1) return; // WallFrame 边界早退
+    const wl = st.wall[st.idx(fx, fy)];
+    if (wl === 0) return;                       // cs:337 wall==0 早退
+    if (WALL_LARGE_FRAMES.has(wl)) return;      // cs:378/383 大帧分支（无掷）
+    rng.nextInt(3);                             // cs:390 Next(0,3)
+    if (wl === 21) rng.nextInt(2);              // cs:391
+  };
+  const applyAt = (wx: number, wy: number): void => {
+    if (wx < 0 || wy < 0 || wx >= st.w || wy >= st.h) return;
+    const wi = st.idx(wx, wy);
+    const wl = st.wall[wi];
+    if (wl === 87 || wl === 86 || wl === 244) return; // SkipWalls Fail → PlaceWall 不执行
+    st.wall[wi] = wallTypeCache;
+    frameDraw(wx, wy);                          // SquareWallFrame(x,y) 中心格
+    frameDraw(wx + 1, wy);                      // neighbors=true 四邻（cs:534-537 顺序）
+    frameDraw(wx - 1, wy);
+    frameDraw(wx, wy - 1);
+    frameDraw(wx, wy + 1);
+  };
+  let wallTypeCache = 0;
   while (remaining > 0 && budget > 0) {
     // RandomWorldPoint((int)GenVars.worldSurface, 2, 190, 2)（cs:16799）：x∈[2,w-3]、
     // y∈[ws,h-191]。★CW1：下界是 **GenVars.worldSurface**（Terrain 游走终值 double，
@@ -201,6 +242,7 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
       else wallType = 212 + rng.nextInt(4);
     }
     if (wallType !== 0 && !st.flags[above]) {
+      wallTypeCache = wallType;
       // ShapeFloodFill(1000)（cs:16827）+ IsNotSolid + ContinueWrapper(IsTouching×2)
       // → foundInvalidTile；Gen 返回 = 队列耗尽（腔 ≤1000 格）
       const cells = new Set<number>();
@@ -235,27 +277,17 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
       }
       if (quota <= 0 && queue.length) complete = false; // Gen 返回 = 队列耗尽
       if (cells.size > 50 && complete && !invalid) {
-        // OuterOutline(useDiagonals+useInterior)：铺腔体 + 腔外 8 邻环。
+        // OuterOutline(useDiagonals+useInterior) 1:1：逐 datum 先 interior 后 8 邻环
+        // （POINT_OFFSETS 顺序），环点在 shape 内则跳过（cs:ModShapes.OuterOutline:50-62）。
         // 形状记录相对洪泛 origin (px,py-1)，铺放 origin=(px,py) → 整体下移 1 行
-        // （原版原文如此：cs:16827 洪泛 origin 与 :16836 铺放 origin 的差，勿"修正"）
+        // （原版原文如此：cs:16827 洪泛 origin 与 :16836 铺放 origin 的差，勿"修正"）。
+        // cells 迭代序 = 洪泛访问序 = C# HashSet<Point16> 无删除时的 entries 序 ✓。
         for (const ci of cells) {
-          const cx = ci % st.w, cy = Math.floor(ci / st.w) + 1;
-          const paint = (wx: number, wy: number): void => {
-            if (!st.inBounds(wx, wy)) return;
-            const wi = st.idx(wx, wy);
-            const wl = st.wall[wi];
-            if (wl === 87 || wl === 86 || wl === 244) return; // SkipWalls
-            st.wall[wi] = wallType;
-          };
-          paint(cx + 1, cy);
-          paint(cx - 1, cy);
-          paint(cx, cy + 1);
-          paint(cx, cy - 1);
-          paint(cx + 1, cy + 1);
-          paint(cx + 1, cy - 1);
-          paint(cx - 1, cy + 1);
-          paint(cx - 1, cy - 1);
-          paint(cx, cy); // useInterior
+          const qx = ci % st.w, qy = Math.floor(ci / st.w);
+          applyAt(qx, qy + 1); // useInterior（+1 行偏移）
+          for (const [ox, oy] of OUTLINE_OFFSETS) {
+            if (!cells.has(st.idx(qx + ox, qy + oy))) applyAt(qx + ox, qy + 1 + oy);
+          }
         }
         remaining--;
       } else {

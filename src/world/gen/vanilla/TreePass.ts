@@ -12,14 +12,18 @@ import { T, TILE_BY_KEY } from '../../../data/tiles';
 const TREE = TILE_BY_KEY['tree']!;              // tile 5
 const PALM = TILE_BY_KEY['v_323_palm_trees']!;  // tile 323
 const GEM_SAPLING = TILE_BY_KEY['v_590_gem_saplings']!; // tile 590（宝石树苗）
-/** IsTileTypeFitForTree（L14147）：草族 9 种 */
-const FIT = idsByVanillaSheet(2, 23, 60, 70, 109, 147, 199, 477, 492);
-/** GrowTree 头部墙白名单（L14176：0/80/106/107/138-141/145/150/152） */
-const TREE_WALLS = new Set([0, 80, 106, 107, 138, 139, 140, 141, 145, 150, 152]);
-/** 棕榈基座沙族（L11793：53/234/116/112） */
+/** IsTileTypeFitForTree（1456 cs:29852）：草族 12 种（含 633 灰烬草/661/662——
+ *  1405 是 9 种，1456 终态为准） */
+const FIT = idsByVanillaSheet(2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662);
+/** GrowTree 头部墙门（1456 cs:29941-29943）：DefaultTreeWallTest =
+ *  WallID.Sets.AllowsPlantsToGrow（WallID.cs:58）27 项——1405 旧表只有 11 项
+ *  （cs:14176 硬编码），缺 63-69 泥/石墙族等 16 项，曾致墙门误拒 */
+const TREE_WALLS = new Set([0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80]);
+/** 棕榈基座沙族（1456 cs:27290：53/234/116/112） */
 const PALM_GROUND = idsByVanillaSheet(53, 234, 116, 112);
 const JUNGLE_GRASS = idsByVanillaSheet(60);
-/** 植物（vanilla tile 20）：GrowTree 头部越过找基座（原版 while type==20） */
+const MUSHROOM_GRASS = idsByVanillaSheet(70);
+/** 树苗（vanilla tile 20 = acorn sapling）：GrowTree 头部越过找基座（原版 while type==20） */
 const PLANTS = idsByVanillaSheet(20);
 
 /** 干身帧表：num5 case → num4(变体 0-2) → [fx,fy]（L14213-14425 逐 case 提取） */
@@ -36,35 +40,64 @@ const TRUNK: Record<number, Array<[number, number]>> = {
   9: [[0, 0], [0, 22], [0, 44]],
 };
 
-/** EmptyTileCheck（L15685，ignoreID=-1 简化：出界 false，任何实心 false） */
-function emptyTileCheck(st: TileStore, x0: number, x1: number, y0: number, y1: number): boolean {
+/** CommonSapling（TileID.cs:173）：{20,590,595,615}——EmptyTileCheck 的
+ *  ignoreID 语义核心：ignoreID ∈ 该集时，盒内同类树苗格全容忍。
+ *  ★id 空间注意：ignoreID 形参与本表都是**原版 id**（C# 同签名），格内 t 比较用
+ *  内部 id 集（idsByVanillaSheet 产物）——曾把形参 20 直接丢进内部 id 集查询，
+ *  saplingMode 恒 false → 盒检查变全容忍（树爆炸 8×，2026-08-17 实锤） */
+const COMMON_SAPLING_VAN = new Set([20, 590, 595, 615]);
+const COMMON_SAPLING = idsByVanillaSheet(20, 590, 595, 615);
+const IGNORE_ID_VAN = idsByVanillaSheet(11, 71);
+/** EmptyTileCheck ignoreID∈CommonSapling 时的额外装饰容忍表（1456 cs:31653-31665）：
+ *  3 杂草/24 邪恶草/32/61 丛林草丛/62 丛林藤/69/73/74/82/83/84/110 神圣草丛/113/184/201/
+ *  233 丛林大株/352/485 倒木/529/530/637/655——树苗门下这些装饰格不算占位 */
+const EMPTY_DECOR = idsByVanillaSheet(3, 24, 32, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 184, 201, 233, 352, 485, 529, 530, 637, 655);
+
+/** EmptyTileCheck（1456 cs:31611-31683）1:1：出界 false；活跃格按 ignoreID 分派——
+ *  -1：任何活跃格 false；11/71：仅容忍同 id；∈CommonSapling（GrowTree/GrowEpicTree/
+ *  GrowPalmTree/GrowTreeWithSettings 全部传 20）：容忍树苗族 + 装饰表。
+ *  ★旧实现 ignoreID=-1 简化（任何实心 false）——表面杂草(3)/倒木(485)等把净空盒
+ *  全部判死，普通树数量差的主根因之一（vanilla 161 vs 我们 62，seed 9293480） */
+function emptyTileCheck(st: TileStore, x0: number, x1: number, y0: number, y1: number, ignoreVan = -1): boolean {
   if (x0 < 0 || x1 >= st.w || y0 < 0 || y1 >= st.h) return false;
+  const saplingMode = ignoreVan !== -1 && COMMON_SAPLING_VAN.has(ignoreVan);
   for (let x = x0; x <= x1; x++) {
     for (let y = y0; y <= y1; y++) {
-      if (st.flags[st.idx(x, y)]) return false;
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      const t = st.type[i];
+      if (ignoreVan === -1) return false;
+      if (ignoreVan === 11 || ignoreVan === 71) { if (!IGNORE_ID_VAN.has(t)) return false; continue; }
+      if (saplingMode) {
+        if (COMMON_SAPLING.has(t)) continue;
+        if (EMPTY_DECOR.has(t)) continue;
+        return false;
+      }
     }
   }
   return true;
 }
 
-/** 树干+枝+根+冠 共体（GrowTree L14203-14606 / GrowEpicTree 同表）。
- *  groundType：基座 tile（判丛林加高）；返回是否成树 */
+/** 树干+枝+根+冠 共体（GrowTree 1456 cs:29983-30395 / GrowEpicTree cs:27405-27760 同表）。
+ *  groundType：基座 tile（判丛林加高）；返回是否成树。
+ *  ★cs:29983-29986 掷序：先 num4=Next(3)（干身变体）**再** num5=Next(10)（枝型），
+ *    强制直干/重投只作用在 num5——旧实现枝型先掷致流值互换（1405 反编译的
+ *    frameNumber 位已废弃，1456 无该掷）。growTreeWithSettings 掷序相同（cs:30595）。 */
 function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: number, height: number): boolean {
   let flagL = false, flagR = false; // 侧枝去重（num5 5/7 左、6/7 右不同帧连续限制）
   for (let y = index1 - height; y < index1; y++) {
-    // num4 = 枝型 0-9；顶/底强制 0；5/7 与 6/7 连续出现需重投
-    let num5 = rng.int(0, 9);
-    if (y === index1 - 1 || y === index1 - height) num5 = 0;
+    const num4 = rng.int(0, 2);                     // 干身变体（Next(3)，先掷）
+    let num5 = rng.int(0, 9);                       // 枝型 0-9（Next(10)，后掷）
+    if (y === index1 - 1 || y === index1 - height) num5 = 0;  // 顶/底强制直干
     while (((num5 === 5 || num5 === 7) && flagL) || ((num5 === 6 || num5 === 7) && flagR)) {
       num5 = rng.int(0, 9);
     }
     flagL = false; flagR = false;
     if (num5 === 5 || num5 === 7) flagL = true;
     if (num5 === 6 || num5 === 7) flagR = true;
-    const num4 = rng.int(0, 2);
     const [fx, fy] = TRUNK[num5][num4];
     st.setTileSilent(i, y, TREE, fx, fy);
-    // 侧枝帧（L14362-14426）：Next(3)<2 走 198+ 行（贴干枝），否则行内变体
+    // 侧枝帧（cs:30201-30247）：变体骰先掷，Next(3)<2 走 198+ 行（贴干枝）
     if (num5 === 5 || num5 === 7) {
       const k = rng.int(0, 2);
       const [bfx, bfy] = rng.int(0, 2) < 2 ? [44, 198 + k * 22] : [66, k * 22];
@@ -76,8 +109,8 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
       st.setTileSilent(i + 1, y, TREE, bfx, bfy);
     }
   }
-  // 基座方向 num7（L14439-14543）：两侧地面适配 → 决定根部与基座帧。
-  //  侧根放置前提 = 邻格整砖(L30230/30234:!halfBrick && slope==0)——半砖/坡面侧不出根
+  // 基座方向 num6（cs:30248-30272）：先掷 Next(3)，再按两侧整砖适配翻转。
+  //  侧根放置前提 = 邻格 nactive 且整砖（cs:30251-30258）——半砖/坡面侧不出根
   const fitSide = (dx: number) => {
     if (!st.inBounds(i + dx, index1)) return false;
     const si = st.idx(i + dx, index1);
@@ -89,44 +122,55 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
   if (!sideR) { if (num7 === 0) num7 = 1; else if (num7 === 2) num7 = 3; }
   if (sideL && !sideR) num7 = 2;
   if (sideR && !sideL) num7 = 1;
-  const k8 = rng.int(0, 2);
-  if (num7 === 0 || num7 === 1) st.setTileSilent(i + 1, index1 - 1, TREE, 22, 132 + k8 * 22); // 右根
-  if (num7 === 0 || num7 === 2) st.setTileSilent(i - 1, index1 - 1, TREE, 44, 132 + k8 * 22); // 左根
-  // 基座干身（switch num7，L14519-14566）
+  // ★根部掷骰结构（cs:30273-30323）：右根/左根各自条件内独立掷，基座骰无条件掷
+  //  （num6==3 时基座无帧写但仍耗掷）——旧实现三处共用 1 骰，每棵成树少耗 1-2 骰，
+  //  流位漂移殃及后续树的接拒判定
+  if (num7 === 0 || num7 === 1) st.setTileSilent(i + 1, index1 - 1, TREE, 22, 132 + rng.int(0, 2) * 22); // 右根
+  if (num7 === 0 || num7 === 2) st.setTileSilent(i - 1, index1 - 1, TREE, 44, 132 + rng.int(0, 2) * 22); // 左根
+  // 基座干身（switch num6，cs:30326-30371；num6==3 无写但掷骰照耗）
   const baseFx = num7 === 0 ? 88 : num7 === 1 ? 0 : num7 === 2 ? 66 : -1;
+  const k8 = rng.int(0, 2);
   if (baseFx >= 0) st.setTileSilent(i, index1 - 1, TREE, baseFx, 132 + k8 * 22);
-  // 树冠标记帧（L14568-14600）：12/13 fx=22，否则 fx=0；fy=198+22*k
+  // 树冠标记帧（cs:30372-30395）：Next(13)!=0 → fx=22，否则 fx=0；fy=198+22*k
   const crownFx = rng.int(0, 12) !== 0 ? 22 : 0;
   st.setTileSilent(i, index1 - height, TREE, crownFx, 198 + rng.int(0, 2) * 22);
   gs.genTrees.push({ x: i, y: index1 - height, h: height }); // 砍伐整棵判定用
   return true;
 }
 
-/** GrowTree（L14171）：常规树。height=Next(5,17)；丛林草基座净空 +5 */
+/** GrowTree（1456 cs:29924-30395）：常规树。height=Next(5,17)；丛林草基座净空 +5 */
 function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
   const gi = st.idx(i, index1);
-  // 头部适配检查：基座上一格三列无液体 / 基座活跃且适树且整砖(L29934:!halfBrick&&slope==0) /
-  // 上格墙白名单 / 至少一侧邻格适树（侧根前提同款整砖检查）
+  // 头部适配检查（cs:29934-29949）：基座上一格三列无液体 / 基座 nactive+整砖+适树 /
+  // 上格墙 ∈ AllowsPlantsToGrow / 至少一侧邻格 active+适树——
+  // ★侧格门只查 active+IsTileTypeFitForTree（cs:29949），不查半砖/坡面！
+  //  旧实现照搬基座整砖检查到侧格→坡地邻列全拒（数量差主根因之一）
   if (st.liquid[st.idx(i - 1, index1 - 1)] > 0 || st.liquid[st.idx(i, index1 - 1)] > 0 || st.liquid[st.idx(i + 1, index1 - 1)] > 0) return false;
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !FIT.has(st.type[gi])) return false;
   if (!TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
   const fitSide = (dx: number) => {
     if (!st.inBounds(i + dx, index1)) return false;
     const si = st.idx(i + dx, index1);
-    return !!st.flags[si] && !st.half[si] && st.slope[si] === 0 && FIT.has(st.type[si]);
+    return !!st.flags[si] && FIT.has(st.type[si]);
   };
   if (!fitSide(-1) && !fitSide(1)) return false;
   const height = rng.int(5, 16);                       // Next(5,17)
   let clear = height + 4;                              // num3
   if (JUNGLE_GRASS.has(st.type[gi])) clear += 5;
-  if (!emptyTileCheck(st, i - 2, i + 2, index1 - clear, index1 - 1)) return false;
+  // 净空盒（cs:29962-29972）：ignoreID=20——蘑菇草(70)基座有专属双段通道，
+  // 常规通道盒 [i-2,i+2]×[j-clear,j-1]（盒内树苗/杂草族不算占位）
+  let flag2 = false;
+  if (MUSHROOM_GRASS.has(st.type[gi]) && emptyTileCheck(st, i - 2, i + 2, index1 - clear, index1 - 3, 20) && emptyTileCheck(st, i - 1, i + 1, index1 - 2, index1 - 1, 20)) flag2 = true;
+  if (emptyTileCheck(st, i - 2, i + 2, index1 - clear, index1 - 1, 20)) flag2 = true;
+  if (!flag2) return false;
   return growTrunk(st, rng, gs, i, index1, height);
 }
 
-/** GrowEpicTree（L11850）：巨型树。基座严格草(2)、邻格草族、净空 55、height=Next(20,30) */
+/** GrowEpicTree（1456 cs:27361-27760）：巨型树。基座严格草(2)、邻格草族、
+ *  净空 55（ignoreID=20）、height=Next(20,30) */
 function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
@@ -140,24 +184,28 @@ function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: numbe
   const fitSide = (dx: number) => st.inBounds(i + dx, index1)
     && st.flags[st.idx(i + dx, index1)] && family.has(st.type[st.idx(i + dx, index1)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
-  if (!emptyTileCheck(st, i - 2, i + 2, index1 - 55, index1 - 1)) return false;
+  if (!emptyTileCheck(st, i - 2, i + 2, index1 - 55, index1 - 1, 20)) return false;
   return growTrunk(st, rng, gs, i, index1, rng.int(20, 29)); // Next(20,30)
 }
 
-/** GrowPalmTree（L11785）：沙滩棕榈，干身倾斜帧 fy=num4（±2 步进趋向 num3） */
-/** 1456 GrowPalmTree(cs:27270-27340)1:1;导出供 StructuresPass 绿洲消费段复用(2026-08-13 去重) */
+/** GrowPalmTree（1456 cs:27260-27359）：沙滩棕榈，干身倾斜帧 fy=num4（±2 步进趋向 num3） */
+/** 导出供 StructuresPass 绿洲消费段复用(2026-08-13 去重) */
 export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
   if (!st.inBounds(i, y)) return false;
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
   const gi = st.idx(i, index1);
-  // 基座整砖检查(GrowPalmTree:27280-27285 active && !halfBrick && slope==0)
-  if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !PALM_GROUND.has(st.type[gi])) return false;
-  if (st.wall[st.idx(i, index1 - 1)] !== 0 || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
-  if (!emptyTileCheck(st, i, i, index1 - 2, index1 - 1)) return false;
-  // 1456 终态(cs:27302):侧净空 num-num2 = index1-20(1405 :11800 是 index1-30,已换)
-  if (!emptyTileCheck(st, i - 1, i + 1, index1 - 20, index1 - 3)) return false;
+  // 基座整砖检查(cs:27282-27286 active && !halfBrick && slope==0)
+  if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
+  // ★墙门（cs:27288-27292）：DefaultTreeWallTest(AllowsPlantsToGrow 27 项)——
+  //  1405 是 wall==0；1456 放宽。液体门只查 num-1 一格
+  if (!TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)]) || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
+  if (!PALM_GROUND.has(st.type[gi])) return false;
+  // 净空盒两段（cs:27296-27304）：中柱 [i,i]×[num-2,num-1] + 侧柱 [i-1,i+1]×[num-20,num-3]，
+  // 均 ignoreID=20（1405 无 ignore 语义→杂草/倒木误拒）
+  if (!emptyTileCheck(st, i, i, index1 - 2, index1 - 1, 20)) return false;
+  if (!emptyTileCheck(st, i - 1, i + 1, index1 - 20, index1 - 3, 20)) return false;
   const height = rng.int(10, 20);                 // Next(10,21)
   const target = rng.int(-8, 8) * 2;              // Next(-8,9)*2
   let tilt = 0;
@@ -235,8 +283,7 @@ const DEFAULT_TREE_WALLS = new Set<number>([
 ]);
 /** VanityTreeGroundTest（cs:30474）：Conversion.Grass{2,23,199,109,477,492} 去掉 23/199 */
 const VANITY_GROUND = idsByVanillaSheet(2, 109, 477, 492);
-/** EmptyTileCheck ignoreID=20（树苗族门）：活跃格仅容忍树族 tile 残留（cs:31611-31683） */
-const GEM_EMPTY_ALLOW = idsByVanillaSheet(3, 24, 32, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 184, 201, 233, 352, 485, 529, 530, 637, 655);
+/** （已退役）旧 EmptyTileCheck ignoreID=20 手工表——统一走 emptyTileCheck 忠实语义 */
 
 const GEM_PROFILE: TreeProfile = {
   treeTile: -1, sapling: GEM_SAPLING, ground: GEM_GROUND, walls: GEM_WALLS,
@@ -267,9 +314,10 @@ const ASH_PROFILE: TreeProfile = {
  *  干身帧表与 GrowTree 同构（同一 switch，cs:30604-30700），复用 TRUNK。 */
 export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: number, p: TreeProfile): boolean {
 
-  // 越过树苗找地面行（cs:30547-30550）
+  // 越过树苗找地面行（cs:30547-30550）——★active() 读的是**原始 checkedY** 行
+  //  （原版反编译实况），type 读推进中的 num 行
   let num = y;
-  while (st.inBounds(x, num) && st.flags[st.idx(x, num)] && st.type[st.idx(x, num)] === p.sapling) num++;
+  while (st.inBounds(x, y) && st.flags[st.idx(x, y)] && st.inBounds(x, num) && st.type[st.idx(x, num)] === p.sapling) num++;
   if (!st.inBounds(x, num) || num < 1) return false;
   // 基座上一格三列无液体（cs:30551-30554）
   if (st.liquid[st.idx(x - 1, num - 1)] !== 0 || st.liquid[st.idx(x, num - 1)] !== 0 || st.liquid[st.idx(x + 1, num - 1)] !== 0) return false;
@@ -284,22 +332,15 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   if (!fitSide(-1) && !fitSide(1)) return false;
   const height = rng.int(p.heightMin, p.heightMax);    // Next(TreeHeightMin, TreeHeightMax+1)
   const num4 = height + p.topPadding;                  // + TreeTopPaddingNeeded
-  // EmptyTileCheck(x-2, x+2, num-num4, num-1, 20)（cs:30580-30582）
-  if (x - 2 < 0 || x + 2 >= st.w || num - num4 < 0) return false;
-  for (let ex = x - 2; ex <= x + 2; ex++) {
-    for (let ey = num - num4; ey <= num - 1; ey++) {
-      const ei = st.idx(ex, ey);
-      if (!st.flags[ei]) continue;
-      if (!GEM_EMPTY_ALLOW.has(st.type[ei])) return false;
-    }
-  }
-  // 干身帧循环（cs:30590-30816）：与 GrowTree 同表，tile 换成宝石树干
+  // EmptyTileCheck(x-2, x+2, num-num4, num-1, 20)（cs:30580-30582）——统一走
+  // emptyTileCheck 忠实语义（比旧 GEM_EMPTY_ALLOW 表多容忍 CommonSapling 族）
+  if (!emptyTileCheck(st, x - 2, x + 2, num - num4, num - 1, 20)) return false;
+  // 干身帧循环（cs:30590-30816）：与 GrowTree 同表，tile 换成宝石树干。
+  // ★掷序与 GrowTree 相同（cs:30595-30596）：先 num5=Next(3)（干身变体）再
+  //   num6=Next(10)（枝型）——旧实现曾 num6 先掷致流值互换（shimmer 金标
+  //   2026-08-13 暴露：成树 x=3865 reroll 2 vs 1）
   let flagL = false, flagR = false;
   for (let i = num - height; i < num; i++) {
-    // ★cs:30595-30596 掷序：先 num5=Next(3)（干身帧变体）**再** num6=Next(10)（枝型）。
-    //   旧实现 num6 先 num5 后——两骰虽都无条件（总掷数同），但 num6 取自不同流位，
-    //   枝型/重投序列整体漂移（shimmer 金标 2026-08-13 暴露：成树 x=3865 reroll 2 vs 1）。
-    //   GrowTree（growTrunk）的顺序相反（枝型先），勿互搬。
     const num5 = rng.int(0, 2);
     let num6 = rng.int(0, 9);
     if (i === num - 1 || i === num - height) num6 = 0; // 顶/底强制直干

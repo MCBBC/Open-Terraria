@@ -172,6 +172,15 @@ export class LiquidSim {
   /** 地牢豁免（Liquid.cs:186-188：InAnyPotentialDungeonBounds(x,y) 且 origin 格墙
    *  为地牢墙族 → 保持水）。QuickWater 调用方按需接线；未接线=null 不豁免 */
   dungeonWaterExempt: ((x: number, y: number, originWall: number) => boolean) | null = null;
+  /** tilesIgnoreWater 家族（Liquid.cs:68-72 → WorldGen.SetBoulderSolidity cs:11026）：
+   *  138 巨石 / 484 滚动仙人掌 / 664 / 711-716（1.4.5 巨石家族）+ 546。
+   *  QuickWater 全程全局置非实心（原版直接改写 Main.tileSolid——SettleWaterAt 通行
+   *  门与 LiquidCheck 的 WorldGen.SolidTile 等一切读者同步生效）。484 活性格在
+   *  地下沙漠大量存在：缺此翻转=沙漠水池沉降路径整体错位（#28 复验实测 430 格）。 */
+  private readonly boulderFamilyIds: Set<number>;
+  private readonly id546: number;
+  private readonly id379: number;
+  private solidNPBackup: Uint8Array | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -200,6 +209,9 @@ export class LiquidSim {
     this.herbMatureId = bySheet(new Set([83])).values().next().value ?? 0;
     this.herbBloomId = bySheet(new Set([84])).values().next().value ?? 0;
     this.lilyPadId = bySheet(new Set([518])).values().next().value ?? 0;
+    this.boulderFamilyIds = bySheet(new Set([138, 484, 664, 711, 712, 713, 714, 715, 716]));
+    this.id546 = bySheet(new Set([546])).values().next().value ?? -1;
+    this.id379 = bySheet(new Set([379])).values().next().value ?? -1;
     // genRand 初态：world.seed 派生（避免与生成管线的 genRand 状态纠缠，仅求双路径一致）
     this.genState = (world.seed ^ 0x9e3779b9) | 0;
     // 挖掘/放置唤醒：原版 SquareTileFrame 会对 3×3 内每格 TileFrame→AddWater（WorldGen.cs:49664）
@@ -676,9 +688,35 @@ export class LiquidSim {
     }
   }
 
+  /** UndergroundDesertCheck（Liquid.cs:1217-1231）：(x,y) 周围 7×7 有地下沙漠墙
+   *  （187 沙岩墙 / 216 硬化沙墙）即真。dump027 实证本时点沙漠墙 18.5 万格。 */
+  private undergroundDesertCheck(x: number, y: number): boolean {
+    const st = this.world.store;
+    for (let j = y - 3; j <= y + 3; j++) {
+      for (let i = x - 3; i <= x + 3; i++) {
+        if (i < 0 || j < 0 || i >= st.w || j >= st.h) continue; // InWorld(fluff=0)
+        const wv = st.wall[this.idx(i, j)];
+        if (wv === 187 || wv === 216) return true;
+      }
+    }
+    return false;
+  }
+
   /** 岩浆格与水/蜂蜜/微光接触 → 黑曜石 56 / 脆蜂蜜块 230 / Aetherium 659（阈值 24） */
   private lavaCheck(x: number, y: number) {
     const st = this.world.store;
+    // LavaCheck 头部沙漠分支（Liquid.cs:1457-1465）：生成期 + 7×7 含地下沙漠墙 →
+    // 整块 7×7 液体**类型**转岩浆（lava(true) 不动量）——地下沙漠底岩浆池来源，且使
+    // 沙漠内水岩接触不互湮（转同型后 LiquidCheck 无异种邻）。remixWorldGen/
+    // dualDungeonsSeed 为特殊种子旗标，本工程不启用。须在 SolidTile 门之前（原版序）。
+    if (this.generatingWorld && this.undergroundDesertCheck(x, y)) {
+      for (let j = y - 3; j <= y + 3; j++) {
+        for (let i = x - 3; i <= x + 3; i++) {
+          if (i < 0 || j < 0 || i >= st.w || j >= st.h) continue;
+          st.liquidType[this.idx(i, j)] = 2;
+        }
+      }
+    }
     if (this.solidTileFull(x, y)) return; // WorldGen.SolidTile：半砖/坡面放行（Liquid.cs:898）
     const i5 = this.idx(x, y);
     const il = i5 - 1, ir = i5 + 1, iu = i5 - st.w, id = i5 + st.w;
@@ -952,17 +990,37 @@ export class LiquidSim {
 
   // ================= 读档沉降：QuickWater（Liquid.cs:85-103 / 105-212） =================
 
+  /** Liquid.tilesIgnoreWater（cs:68-72）：SetBoulderSolidity(!ignoreSolids) + tileSolid[546]。
+   *  实现为 solidNP 原位翻转+备份恢复——等价原版全局 Main.tileSolid 改写（含
+   *  LiquidCheck 侧 WorldGen.SolidTile 等全部读者）。SettleWaterAt 逐调用的
+   *  首/尾再翻转（cs:119/211）在 quickWater 包裹下语义等价，不重复执行。 */
+  private tilesIgnoreWater(ignoreSolids: boolean): void {
+    if (ignoreSolids) {
+      if (this.solidNPBackup) return;
+      this.solidNPBackup = this.solidNP.slice();
+      for (const id of this.boulderFamilyIds) this.solidNP[id] = 0;
+      if (this.id546 >= 0) this.solidNP[this.id546] = 0;
+    } else if (this.solidNPBackup) {
+      this.solidNP.set(this.solidNPBackup);
+      this.solidNPBackup = null;
+    }
+  }
+
   /** 自底向上逐湿格直接搬运沉降（原版 QuickWater(verbose, -1, -1)：y 从 h-3 到 3）。
-   *  生成期首尾各调一次 ShimmerRemoveWater（Liquid.cs:107/137 + WorldGen.cs:34859） */
+   *  生成期首尾各调一次 ShimmerRemoveWater（Liquid.cs:107/137 + WorldGen.cs:34859）；
+   *  全程 tileSolid[379]=true + tilesIgnoreWater(true)（巨石家族非实心） */
   quickWater(minY = 3, maxY = -1) {
     const st = this.world.store;
     if (this.generatingWorld) this.shimmerRemoveWater();
+    if (this.id379 >= 0) this.solidNP[this.id379] = 1; // Main.tileSolid[379]=true（原版持续不恢复）
+    this.tilesIgnoreWater(true);
     const yMax = maxY < 0 ? st.h - 3 : maxY;
     for (let y = yMax; y >= minY; y--) {
       for (let x = 4; x < st.w - 4; x++) {
         if (st.liquid[this.idx(x, y)] !== 0) this.settleWaterAt(x, y);
       }
     }
+    this.tilesIgnoreWater(false);
     if (this.generatingWorld) this.shimmerRemoveWater();
   }
 

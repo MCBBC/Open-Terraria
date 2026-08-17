@@ -40,8 +40,8 @@ ctx.onmessage = async (e) => {
         },
         (label, p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'generate', label, p }),
       );
-      await settleWorldLiquids(world, 'gen',
-        (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'settle', label: '水体沉降', p }));
+      // 二次沉降(cs:21051)自 2026-08-17 起归位 generateWorld 管线内（蜂巢幼虫之后、
+      // 仙人掌珊瑚之前）——此处不再生成后补跑（曾晚 8 个 pass：#98 液体门读到未沉水体）
       const { packet, transfer } = packWorld(world); // 转移所有权（本分支最后一步）
       ctx.postMessage({ id: req.id, type: 'result', world: packet }, transfer);
       return;

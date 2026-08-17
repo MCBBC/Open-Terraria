@@ -37,6 +37,20 @@ export const NOT_CLEARABLE = idsByVanillaSheet(
   226, 237);                           // 蜥蜴砖/陨石
 // 原版 switch case 45/147/189/190/196/460/717/718/719:无条件 flag3(金砖/雪/云/荧光菇/雨云/雪云+1.4.5新增)
 const FLAG3_ALWAYS = idsByVanillaSheet(45, 147, 189, 190, 196, 460, 717, 718, 719);
+// ★TileID.Sets.SaveSlopes（TileID.cs:425-429，静态初始化=启动期默认 tileSolid 表快照，
+//   生成期 Main.tileSolid 翻转不回写）：SaveSlopes[t]=默认实心 ∪ NonSolidSaveSlopes
+//   {131,351,336,340,341,342,343,344}。TileRunner 写 type 时 !SaveSlopes[type] →
+//   ClearSlope()（cs:77338-77341,Tile.cs:160=slope0+half0）——蛛网(51)/泥(59)/矿石等
+//   非实心类型覆盖已带坡格必须清坡位（W 批 #19 残余根因:Webs #27 的 web runner 覆盖
+//   沙漠带 #19 平滑坡 109 格,漏清 → truth@52 幻影坡）。
+const SAVE_SLOPES = new Uint8Array(TILE_DEFS.length);
+{
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const s = TILE_DEFS[i]?.vanilla?.sheet;
+    SAVE_SLOPES[i] = ((TILE_DEFS[i]?.solid ?? false)
+      || (s !== undefined && [131, 351, 336, 340, 341, 342, 343, 344].includes(s))) ? 1 : 0;
+  }
+}
 // TileID.Sets.Ore:铺设 396/397 时矿石可覆盖
 const ORE_SET = new Set<number>();
 {
@@ -132,6 +146,7 @@ export function tileRunner(
   // 热循环局部化(零语义:typed array 引用与 w 提为局部;idx 内联 y*w+x)
   const stW = st.w;
   const ty = st.type, tf = st.flags, twall = st.wall, tliq = st.liquid, tltype = st.liquidType;
+  const thalf = st.half, tslope = st.slope;
   while (num1 > 0 && num2 > 0) {
     // 泥向上钻出世界顶即停(原版)
     if (py < 0 && num2 > 0 && type === MUD) num2 = 0;
@@ -215,7 +230,11 @@ export function tileRunner(
               flag4 = !ORE_SET.has(type);
             }
           }
-          if (!flag4) ty[ti] = type;
+          if (!flag4) {
+            ty[ti] = type;
+            // cs:77338-77341:flag = type>=0 && !SaveSlopes[type] → 写后 ClearSlope()
+            if (!SAVE_SLOPES[type]) { thalf[ti] = 0; tslope[ti] = 0; }
+          }
           if (addTile) {
             tf[ti] = 1;
             tliq[ti] = 0;

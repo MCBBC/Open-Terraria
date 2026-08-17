@@ -218,6 +218,14 @@ export class World {
   treeStyle: number[] = [0, 0, 0, 0];
   /** 尺寸档 0 小/1 中/2 大（构造时按宽派生，GetWorldSize 语义——多尺寸生成/消费分支用） */
   size: WorldSize = 0;
+  /** 生成期水线（GenVars.waterLine，TerrainPass 写入）。生成期沉降的落水越线转
+   *  岩浆（Liquid.cs:177-190；SettleLiquids 49/97 消费）。读档期原版把 waterLine
+   *  置 maxTilesY 天然豁免（WorldFile.cs:739）——settle.ts 只在 gen 模式设值即同义 */
+  genWaterLine = 0;
+  /** 地牢豁免盒（DungeonUtils.CreatePotentialDungeonBounds 的 outerPotential
+   *  DungeonBounds=半图矩形）。落水点在盒内且水源格墙 ∈ wallDungeon{7,8,9,94-99}
+   *  → 回水不转岩浆（Liquid.cs:186-188） */
+  genDungeonExempt: { x0: number; y0: number; x1: number; y1: number } | null = null;
   /** 以太生物群系中心（GenVars.shimmerPosition；无微光世界为 0）。ShimmerPass 写入，
    *  生成期沉降 ShimmerRemoveWater（WorldGen.cs:34859）按此清腔内非微光液体 */
   shimmerX = 0;

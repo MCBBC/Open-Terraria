@@ -10,12 +10,15 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_BY_KEY } from '../src/data/tiles';
 
 describe('管线尾部五项修复回归', () => {
-  it('种子 42：向日葵/丛林大株植物/丛林泥墙/祭坛终保全部生效', async () => {
+  it('种子 44：向日葵/丛林大株植物/丛林泥墙/祭坛终保全部生效', async () => {
     // 注：向日葵自然生成是稀疏采样（w*0.002 带宽 × 2×4 净空 + 整砖门，
     // 原版期望 0-46 株/世界），种子 9293480 实测 0 株（采样未命中，原版语义），
-    // 本测试用实测 38 株的种子 42 锁定非零路径
+    // 本测试用非零种子锁定非零路径。★种子 42(38 株)随 2026-08-17 Q 批上游
+    // 蜂巢/结构互斥门原版化（canPlace 扫门+锚点门/圆公式/IsSolid 语义）后流移
+    // 归 0——非回归,采样窗口本来就有 0 命中种子（9293480 同理）;改用实测 40 株
+    // 的种子 44（tools/_sunseed.test.ts 重扫）
     const world = await generateWorld({
-      width: 4200, height: 1200, seedText: '42', evil: 0,
+      width: 4200, height: 1200, seedText: '44', evil: 0,
     });
     const st = world.store;
     const ws = Math.floor(world.groundLevel);

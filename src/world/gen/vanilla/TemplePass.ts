@@ -28,6 +28,12 @@ function setBrick(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   st.type[i] = BRICK; st.flags[i] = 1; st.liquid[i] = 0; st.liquidType[i] = 0;
+  // ★写砖必清坡位（cs:33760-33763 房连线列 / 33786-33788 房实心 / 33563-33566
+  //   outerTempled / 33499-33503 templeCleaner else / 34161-34165+34181-34185 门框柱,
+  //   全部六处 226 写入点都是 active(true)+type=226+liquid=0+slope(0)+halfBrick(false)
+  //   五连写）。神庙壳压在丛林泥/洞穴坡面格上,不清坡 → 幻影坡幸存到 @52
+  //   （W 批全图残余 351 格根源;与 TileRunner ClearSlope 同族写入语义）。
+  st.slope[i] = 0; st.half[i] = 0;
 }
 
 /** SolidTile(i, j)（cs:70155）：active + tileSolid + !tileSolidTop + 非半砖 + slope 0。
@@ -41,6 +47,9 @@ function solidTileST(st: TileStore, x: number, y: number): boolean {
 }
 
 export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
+  const __cap = (globalThis as { __swWallCap?: (tag: string, gs: GenState, st: TileStore) => void }).__swWallCap;
+  if (__cap) __cap('temple', gs, st);
+  const tmMark = (s: string) => { const f = (globalThis as { __swTmMark?: (s: string) => void }).__swTmMark; if (f) f(s); };
   const { w, h } = st;
   const s = w / 4200;
   // 种子点(cs:15917-15992):y = Next(rockLayer, maxTilesY-600)(rockLayer 先钳 ≤ h-601);
@@ -76,10 +85,14 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     sx = st.w - gs.generatingDungeonPositionX;
     sy = Math.floor(gs.rockLevel) + 100;
   }
+  tmMark('seed');
   // ---- 房间链(L17185-17231):重投至与全部旧房不相交;overlap 每次相交测试 1% 递增 ----
   let roomCount = rng.int(Math.max(2, Math.floor(10 * s)), Math.floor(16 * s) - 1);
   const rooms: Room[] = [];
-  let dir = rng.next() < 0.5 ? 1 : -1;   // num2
+  // ★cs:33596-33599 `int num3 = 1; if (genRand.Next(2) == 0) num3 = -1;`——
+  //   Next(2)==0（sample<0.5）取 **-1**。曾写反（<0.5→+1）→ 房间链行进方向整体
+  //   镜像（本种子神庙左移 58 格、房间集合全错 → #46 自债 typ28k/act15k/wal19k）
+  let dir: 1 | -1 = rng.nextInt(2) === 0 ? -1 : 1;   // num2
   const startDir = dir;                   // num3
   let runLen = rng.int(1, 2);             // num8:行程阈值,每次换向后 +1
   let runStep = 0;                        // num9
@@ -135,6 +148,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   // (原版无 rooms.length<3 闸——曾自制;T4 地狱截断后深种子世界可能截到 1-2 房,
   //  该闸会把整座神庙连同祭坛一起吞掉=花后进度断链,已删。下游仅相对下标,安全)
+  tmMark('rooms');
+  {
+    const f = (globalThis as { __swTmRooms?: (r: Room[], sx: number, sy: number) => void }).__swTmRooms;
+    if (f) f(rooms.map((r) => ({ ...r })), sx, sy);
+  }
   // ---- 全房对实心砖连线(L17240-17278):四角组合插值走,每步铺整列砖 ----
   for (let a = 0; a < rooms.length; a++) {
     for (let b = 0; b < rooms.length; b++) {
@@ -173,7 +191,10 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const carveCell = (x: number, y: number) => {
       if (!st.inBounds(x, y)) return;
       const i = st.idx(x, y);
-      st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+      // ★cs:33852-33853 挖腔=active(false)+wall=87——type 保留为幽灵（原版直写
+      //   失活从不清 type；清 0 会造 ~12k RAW typ 差）。挖腔前刚被 226 实心填充
+      //   覆写，故此处幽灵恒 226；pather 走廊穿神庙外原石时幽灵=原石型
+      st.flags[i] = 0; st.wall[i] = 87;
     };
     // 正向(列优先)
     for (let x = l0; x < r0; x++) {
@@ -213,8 +234,10 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
+  tmMark('carve');
   // ---- templePather 通道(L17392-17458):从种子游走穿各房,方块清空+墙 87 ----
   const pather = (px: number, py: number, destX: number, destY: number): [number, number] => {
+    { const f = (globalThis as { __swTmPath?: (s: string) => void }).__swTmPath; if (f) f(`${px},${py}->${destX},${destY}`); }
     let x = px, y = py;
     let steps = rng.int(5, 19);
     const rad = rng.int(2, 4);
@@ -228,7 +251,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
         for (let iy = y - rad; iy < y + rad; iy++) {
           if (!st.inBounds(ix, iy)) continue;
           const i = st.idx(ix, iy);
-          st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+          st.flags[i] = 0; st.wall[i] = 87;   // cs:33541-33542 active(false)+wall=87，幽灵 type 保留
         }
       }
     }
@@ -239,13 +262,14 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const r = rooms[n];
     const inner: Room = { x: r.x + 8, y: r.y + 8, w: Math.max(1, r.w - 16), h: Math.max(1, r.h - 16) };
     for (;;) {
-      let destX: number, destY: number;
+      // ★cs:33944-33951：基础随机点两掷**无条件先掷**，末房再用中心±10 两掷覆写
+      //   （4 掷/迭代）。曾只掷覆写 2 掷 → 每末房迭代 -2 掷（本种子 -10）→ 木刺段
+      //   流位漂移（act 差 ~1k）
+      let destX = rng.int(inner.x, inner.x + inner.w - 1);
+      let destY = rng.int(inner.y, inner.y + inner.h - 1);
       if (n === rooms.length - 1) {
         destX = inner.x + Math.floor(inner.w / 2) + rng.int(-10, 9);
         destY = inner.y + Math.floor(inner.h / 2) + rng.int(-10, 9);
-      } else {
-        destX = rng.int(inner.x, inner.x + inner.w - 1);
-        destY = rng.int(inner.y, inner.y + inner.h - 1);
       }
       [tpx, tpy] = pather(tpx, tpy, destX, destY);
       if (tpx === destX && tpy === destY) break;
@@ -256,8 +280,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       let tx: number, ty: number;
       if (rng.int(0, 2) !== 0) {
         if (b2.y >= a.y + a.h) {
+          // ★cs:33966 `if (num3 > 0)`——num3 是房间链**终态**方向（每房尾 num3=num14
+          //   滚动更新），非 startDir。曾用 startDir → 额外通道目标偏 → pather 重试
+          //   次数差 → 掷流后移（-26 掷、木刺 232 摆位漂移）
           tx = b2.x + (n === 0
-            ? (startDir > 0 ? Math.floor(b2.w * 0.8) : Math.floor(b2.w * 0.2))
+            ? (dir > 0 ? Math.floor(b2.w * 0.8) : Math.floor(b2.w * 0.2))
             : (b2.x < a.x ? Math.floor(b2.w * 0.2) : Math.floor(b2.w * 0.8)));
           ty = b2.y;
         } else {
@@ -276,6 +303,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
+  tmMark('pather');
   // ---- 外壳范围 + outerTempled 四遍扫描(L17461-17499)----
   let bx0 = w - 20, bx1 = 20, by0 = h - 20, by1 = 20;
   for (const r of rooms) {
@@ -303,6 +331,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   for (let x = ox1; x >= ox0; x--) for (let y = oy0; y < oy1; y++) outerTempled(x, y);
   for (let y = oy0; y < oy1; y++) for (let x = ox0; x < ox1; x++) outerTempled(x, y);
   for (let y = oy1; y >= oy0; y--) for (let x = ox0; x < ox1; x++) outerTempled(x, y);
+  tmMark('outer');
   // ---- 入口隧道(L17500-17527):固定高度、固定间隔下沉,穿出神庙即停 ----
   const edir = -startDir;
   let ex = sx + 0.0, ey = sy + 0.0;
@@ -358,7 +387,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     for (let y = jy - 1; y < jy + 3; y++) {
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
-      st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+      st.flags[i] = 0; st.wall[i] = 87;   // cs:34171-34173 active(false)+wall=87，type 保留
     }
   }
   for (let x = i1 - 1; x <= i1 + 1; x++) {
@@ -369,7 +398,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (!st.inBounds(x, y)) continue;
       if (y >= jy || x < sx - 1 || x > sx + 1) {
         const i = st.idx(x, y);
-        st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+        st.flags[i] = 0; st.wall[i] = 87;   // cs:34197-34199 active(false)+wall=87，type 保留
       }
     }
   }
@@ -378,6 +407,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   // 门占 j..j+2）。此处 jy=地板-4：门顶=jy、门底=jy+2，站地板 jy+3。
   // 此前放 jy-2 = 整门悬空 2 格（标注实测）
   placeDoorClosed(st, i1, jy, 11);
+  tmMark('door');
   // ---- templeCleaner 两遍(L17579-17588)----
   const cleaner = (x: number, y: number) => {
     if (!st.inBounds(x, y)) return;
@@ -390,7 +420,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     const i = st.idx(x, y);
     if (st.flags[i] && st.type[i] === BRICK) {
       if (num > 1) return;
-      st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+      st.flags[i] = 0; st.wall[i] = 87;   // cs:33493-33495 active(false)+wall=87，type 保留
     } else {
       if (st.flags[i] || num !== 3) return;
       setBrick(st, x, y);
@@ -413,6 +443,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (all) st.wall[st.idx(x, y)] = 87;
     }
   }
+  tmMark('cleaner');
   // ---- 祭坛 237（makeTemple 尾 cs:34241-34315 1:1）：末间中心 ±15 拒绝采样，
   //      Place3x2 锚点门（底行下三列 SolidTile2）；1000 次失败走强制兜底 ----
   // SolidTile2（cs:70178）：active+tileSolid+slope0+非半砖
@@ -427,33 +458,29 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
   const acx = lastR.x + Math.floor(lastR.w / 2);
   const acy = lastR.y + Math.floor(lastR.h / 2);
   let altarX = -1, altarY = -1;
+  let mainPath = false;
   for (let tries = 0; tries < 1000 && altarX < 0; tries++) {
+    // ★cs:34244-34245 采样点=Place3x2 中心锚（占位 [i-1..i+1]×[j-1..j]、锚定行
+    //   j+1 三列 SolidTile2）。曾把采样点当 3×2 左上角用（占位/锚均下移 1 行）+
+    //   自加 wall==87 前置门——PlaceTile(237) 前导门因 tileSolid[237]=false 恒过，
+    //   唯一真门=Place3x2 清空+SolidTile2 锚。错位+错门 → 1000 次全拒 → 走兜底
+    //   （掷数 +1978、神庙装饰/祭坛全偏）
     const ax = acx + 15 - rng.int(0, 29);
     const ay = acy + 15 - rng.int(0, 29);
-    if (!st.inBounds(ax, ay) || st.wall[st.idx(ax, ay)] !== 87) continue;
-    // PlaceTile 语义:落点须在挖空区(墙 87 且非实心)
-    if (st.flags[st.idx(ax, ay)]) continue;
-    // Place3x2 空置门（cs:52109-52120）：3×2 全空
-    let clear = true;
-    for (let dx = 0; dx <= 2 && clear; dx++) {
-      for (let dy = 0; dy <= 1; dy++) {
-        if (!st.inBounds(ax + dx, ay + dy) || st.flags[st.idx(ax + dx, ay + dy)]) { clear = false; break; }
+    let ok = true;
+    for (let dx = -1; dx <= 1 && ok; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        if (!st.inBounds(ax + dx, ay + dy) || st.flags[st.idx(ax + dx, ay + dy)]) { ok = false; break; }
+      }
+      if (ok && !solidTile2(ax + dx, ay + 1)) ok = false;
+    }
+    if (!ok) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        st.setTileSilent(ax + dx, ay + dy, ALTAR, (dx + 1) * 18, (dy + 1) * 18);
       }
     }
-    if (!clear) continue;
-    // ★ Place3x2 锚点门（cs:52127-52153，default 分支）：底行下三列 SolidTile2
-    // ——此前缺此门：采样框下方几乎必然是空气 → 祭坛悬空
-    let anchored = true;
-    for (let dx = 0; dx <= 2; dx++) {
-      if (!solidTile2(ax + dx, ay + 2)) { anchored = false; break; }
-    }
-    if (!anchored) continue;
-    for (let dx = 0; dx <= 2; dx++) {
-      for (let dy = 0; dy <= 1; dy++) {
-        st.setTileSilent(ax + dx, ay + dy, ALTAR, dx * 18, dy * 18);
-      }
-    }
-    altarX = ax; altarY = ay;
+    altarX = ax; altarY = ay; mainPath = true;
   }
   // ---- 兜底（cs:34261-34315 1:1）：中心 ±10 抖动 → 向下扫到首个实心 →
   //      强制铺 3 格蜥蜴砖地板 → 锚点改地板上一格、x 左移 1 → 清周围 → 强制放置
@@ -474,7 +501,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
           for (let dy = -1; dy <= 1; dy++) {
             if (st.inBounds(fx + dx, fy + dy)) {
               const j = st.idx(fx + dx, fy + dy);
-              st.type[j] = 0; st.flags[j] = 0;
+              st.flags[j] = 0;   // cs:34291-34293 active(false)——type 保留
             }
           }
         }
@@ -487,7 +514,10 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
-  gs.lAltarX = altarX; gs.lAltarY = altarY;
+  // cs:34250-34251：主路径 lAltar = 采样锚 - frame/18（中心底格 fx=18/fy=18 → 3×2
+  // 左上角）；兜底路径锚点本就是左上角（cs:34288-34289）。mainPath 区分两者。
+  gs.lAltarX = altarX - (mainPath ? 1 : 0); gs.lAltarY = altarY - (mainPath ? 1 : 0);
+  tmMark('altar');
   // ---- 尾部木刺 232 预算段（cs:34315-34483 1:1）：num111 = 房数×1.1×(1±25%)。
   //      每轮随机选一间 → 房内随机点（须墙 87 且空），Next(2) 定竖/横走线方向,
   //      沿该向找首个实心后回退一格,以落点为心 ±(3..9) 方框把【贴走线面】的实心格
@@ -581,6 +611,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       if (fails > 1000) { fails = 0; budget -= 1; }        // cs:34480-34484
     }
   }
+  tmMark('spikes');
   // ---- makeTemple 尾（cs:34487-34491）：房间 bbox 四侧各外扩 10 → GenVars ----
   // 原版在函数尾写 GenVars.tLeft/tRight/tTop/tBottom/tRooms 供**独立注册**的
   // LihzahrdTemplePart2 pass（cs:17809）消费；早退路径不写（字段保持初值 0，

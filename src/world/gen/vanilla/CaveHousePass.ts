@@ -844,11 +844,29 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     }
     // ★HouseUtils.AreRoomsValid 的结构图半边（HouseUtils.cs:280/285
     //   `structures.CanPlace(room, BlacklistedTiles, 5)`——notTheBees 用 BeelistedTiles）：
-    //   每个房间 pad5 与既有保护结构（蜂巢主巢/蜂蜜斑/神龛/微光/剑冢等）互斥。
-    //   原版还有 BlacklistedTiles 内容扫描（StructureMap.cs:40-53 的 validTiles 半边）,
-    //   此处以本地主题/岩浆/红线/宝箱判定近似,不重复收紧（备案）。
+    //   每个房间 pad5 与既有保护结构（蜂巢主巢/蜂蜜斑/神龛/微光/剑冢等）互斥
+    //   + BlacklistedTiles 内容扫描（HouseUtils.cs:11 CreateBoolSet(true, 225,41,43,
+    //   44,226,203,112,25,151,21,467)——比 GeneralPlacementTiles 窄的 11 id 自有表,
+    //   非 StructureMap 默认表,故传显式 forbid 集）。本地主题/岩浆/红线/宝箱判定
+    //   仍是 HouseBuilder 自身的额外门,两者原版并存。
+    const houseForbid = new Set<number>();
+    const houseSheets = new Set([225, 41, 43, 44, 226, 203, 112, 25, 151, 21, 467]);
+    for (let id = 0; id < TILE_DEFS.length; id++) {
+      const sh = TILE_DEFS[id]?.vanilla?.sheet;
+      if (sh !== undefined && houseSheets.has(sh)) houseForbid.add(id);
+    }
     for (const r of rooms) {
-      if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 5)) return false;
+      if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 5, st, houseForbid)) return false;
+    }
+
+    // ---- ★builder 构造掷（Wood/Ice/Jungle/DesertHouseBuilder ctor →
+    //   PotentiallyConvertToSeedHouse,HouseBuilder.cs:224）：普通种子恒耗
+    //   **1 颗 NextFloat**（>0.4f 早退；≤0.4f 走特殊种子转换表，普通种子
+    //   list 恒空 → 无后续掷）。Granite/Marble/Mushroom 三构造器不调用本方法
+    //   → 不耗。曾整段漏掷：每成功一屋流漂 1 颗，后续所有小屋/宝箱位置级联
+    //   （#58 窗 typ≈15k 自因主根因，2026-08-17 隔离重放实锤）
+    if (theme === 'wood' || theme === 'ice' || theme === 'jungle' || theme === 'desert') {
+      rng.next(); // NextFloat() > 0.4f —— 普通种子无转化分支，仅保流
     }
 
     // ---- HouseBuilder.Place 原序 ----
@@ -905,12 +923,15 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
 
   // 主循环(cs:17152-17192):失败(oceanDepths/放置失败)消耗共享预算 10000 并
   // 重掷同名额(k--)——旧实现失败即弃、名额白丢(C8)
+  const __hc = (globalThis as { __swHouseEv?: (phase: string, x: number, y: number) => void }).__swHouseEv;
   let fail = 10000;
   for (let n = 0; n < count; ) {
     if (fail <= 0) break;
     const ox = rng.int(80, w - 81);
     const oy = rng.int(Math.ceil(gs.worldSurfaceHigh + 20), h - 231);
-    if (!placeHouse(ox, oy, true)) { fail--; continue; }
+    __hc?.('try', ox, oy);
+    if (!placeHouse(ox, oy, true)) { fail--; __hc?.('no', ox, oy); continue; }
+    __hc?.('ok', ox, oy);
     n++;
   }
 
@@ -931,7 +952,9 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
         if (budget <= 0) break;
         const hx = rng.int(ud.x0, ud.x1);      // RandomRectanglePoint: Next(X, X+Width)
         const hy = rng.int(ry, ry + rh);
-        if (!placeHouse(hx, hy, false)) { budget--; continue; }
+        __hc?.('dtry', hx, hy);
+        if (!placeHouse(hx, hy, false)) { budget--; __hc?.('dno', hx, hy); continue; }
+        __hc?.('dok', hx, hy);
         l++;
       }
     }

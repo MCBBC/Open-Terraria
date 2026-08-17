@@ -26,6 +26,20 @@ export async function settleWorldLiquids(
   if (mode === 'gen') {
     sim.generatingWorld = true;
     sim.shimmerCenter = world.shimmerX > 0 ? { x: world.shimmerX, y: world.shimmerY } : null;
+    // ★落水越 waterLine 转岩浆（Liquid.cs:177-190，H 批备案的缺口）：非蜜/微光液体
+    //   下落到 y>waterLine → 岩浆（世界生成期深洞岩浆池来源）。读档期原版置
+    //   maxTilesY 天然豁免（WorldFile.cs:739）→ 不设值即同义。地牢豁免：落点在
+    //   outerPotentialDungeonBounds 半图盒内且水源墙 ∈ wallDungeon{7,8,9,94-99}
+    //   （Main.cs:10507-10515）→ 回水（:186-188）
+    if (world.genWaterLine > 0) {
+      sim.genWaterLine = world.genWaterLine;
+      const d = world.genDungeonExempt;
+      if (d) {
+        sim.dungeonWaterExempt = (x, y, w) =>
+          x >= d.x0 && x <= d.x1 && y >= d.y0 && y <= d.y1
+          && (w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99));
+      }
+    }
   }
   onProgress?.(0.05);
   sim.quickWater();

@@ -62,6 +62,8 @@ function dirtyRockRunner(st: TileStore, rng: RNG, i: number, j: number): void {
 
 /** 原版 pass "Dirt Rock Wall Runner"（cs:15536） */
 export function runDirtRockWallRunnerPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const __cap = (globalThis as { __swWallCap?: (tag: string, gs: GenState, st: TileStore) => void }).__swWallCap;
+  if (__cap) __cap('dirtrock', gs, st);
   const { w } = st;
   const DRWR_TRACE = typeof process !== 'undefined' && !!process.env.DRWR_TRACE;
   let hits = 0;

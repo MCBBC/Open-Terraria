@@ -86,7 +86,9 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
       //   等）互斥,失败则继续重试。原版还有 validTiles 内容扫描（StructureMap.cs:40-53）,
       //   上面的 ±30 坏块扫描已是本地等价判定,不重复收紧。
       const area = { x0: x - halfW - 1, y0: y - halfH - 1, x1: x, y1: y };
-      if (!canPlaceStructure(gs, area, 1)) continue;
+      // cs:16101 CanPlace(area, 1)：pad1 + 默认 GeneralPlacementTiles 内容扫描
+      //   （±30 坏块扫描是神龛自有的额外门,两者原版并存——勿视作等价替换）
+      if (!canPlaceStructure(gs, area, 1, st)) continue;
       // 实体壳(cs:16116-16127)
       for (let lx = x - halfW - 1; lx <= x + halfW + 1; lx++) {
         for (let ly = y - halfH - 1; ly <= y + halfH + 1; ly++) {

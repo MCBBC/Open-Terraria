@@ -14,6 +14,7 @@ export const worldgenProgressKey: Record<string, number> = {
   '清理': 25,       // DirtWallCleanup :15320 "正在清理土背景"
   '结构': 76,       // MicroBiomes 等 :21789 "正在生成建筑物"
   '水体沉降': 27,   // SettleLiquids :16219 "正在安置液体"
+  '二次沉降': 27,   // SettleLiquidsPart2 :21051 同键 gen[27]（尾批 2-A 归位管线）
   '海滩装饰': 22,   // BeachesAndOceanCleanup :14958 "正在创建沙滩"
   '半砖平滑': 60,   // SmoothWorld :16509 "正在让世界变得更平顺"
   '瀑布唇缘': 69,   // Waterfalls :16701 "正在创建瀑布"

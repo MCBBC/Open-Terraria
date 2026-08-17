@@ -358,18 +358,23 @@ void PlaceWall(int k, int l, int type)
     int wi = l * W + k;
     if (wal[wi] == 0) { wal[wi] = (ushort)type; r.Next(0, 3); }
 }
+bool TRTRACE = Environment.GetEnvironmentVariable("DG_TR_TRACE") != null;
+int TRTRACE_STEP = 0;
 void TileRunner(double i, double j, double strength, int steps, int type,
     bool addTile = false, double speedX = 0.0, double speedY = 0.0, bool noYChange = false,
     bool overRide = true, int ignoreTileType = -1)
 {
     double num1 = strength, num2 = steps;
     double px = i, py = j;
+    int trR0 = DgRolls();
     double vx = (int)r.Next(-10, 11) * 0.1, vy = (int)r.Next(-10, 11) * 0.1;
     if (speedX != 0.0 || speedY != 0.0) { vx = speedX; vy = speedY; }
     int num3l = 0;
     r.Next(4); // num3 液体类型（普通世界结果弃用）
+    if (TRTRACE) Console.Error.WriteLine($"TR in @({i},{j}) s={strength} st={steps} t={type} rolls0={trR0}");
     while (num1 > 0.0 && num2 > 0.0)
     {
+        if (TRTRACE) Console.Error.WriteLine($"TR step {TRTRACE_STEP++} num1={num1:F3} px={px:F2} py={py:F2} box=x[{(int)(px - num1 * 0.5)},{(int)(px + num1 * 0.5)}) y[{(int)(py - num1 * 0.5)},{(int)(py + num1 * 0.5)}) rolls={DgRolls()}");
         if (py < 0.0 && num2 > 0.0 && type == 59) num2 = 0.0;
         num1 = strength * (num2 / steps);
         num2 -= 1.0;
@@ -4161,7 +4166,190 @@ Replay(); // ▶pass 头重播：Slush cs:14756
 }
 Checkpoint("slush");
 Replay(); // ▶pass 头重播：Dungeon cs:14816（17 内部检查点不中间重播）
+// —— DG_ROLL_SEARCH：从本 pass 头流态直推 K 步后的 FNV，反解 x86 真值掷数 ——
+//   DG_ROLL_SEARCH2=<hex>:<from>:<to>：任意目标哈希反解（U 批：段级真值掷数定位）
+if (Environment.GetEnvironmentVariable("DG_ROLL_SEARCH2") != null)
+{
+    var parts2 = Environment.GetEnvironmentVariable("DG_ROLL_SEARCH2")!.Split(':');
+    var targets2 = new HashSet<uint>(parts2[0].Split(',').Select(s => uint.Parse(s, System.Globalization.NumberStyles.HexNumber)));
+    int from2 = int.Parse(parts2[1]), to2 = int.Parse(parts2[2]);
+    var probe2 = Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
+    for (int k = 0; k < from2; k++) probe2.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe2, null);
+    for (int k = from2; k <= to2; k++)
+    {
+        uint fv2 = FnvState2(probe2);
+        if (targets2.Contains(fv2)) Console.Error.WriteLine($"DG_ROLL_SEARCH2 {fv2:x8} hit at k={k}");
+        probe2.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe2, null);
+    }
+    Console.Error.WriteLine("DG_ROLL_SEARCH2 done");
+}
+uint FnvState2(object o)
+{
+    var urtRS2 = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+    var usa2 = (int[])urtRS2.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
+    uint uix2 = (uint)urtRS2.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
+    uint fh2 = 2166136261u;
+    for (int q = 0; q < 56; q++) { uint v = (uint)usa2[q]; for (int s = 0; s < 32; s += 8) fh2 = (fh2 ^ ((v >> s) & 0xffu)) * 16777619u; }
+    for (int s = 0; s < 32; s += 8) fh2 = (fh2 ^ ((uix2 >> s) & 0xffu)) * 16777619u;
+    return fh2;
+}
+if (Environment.GetEnvironmentVariable("DG_ROLL_SEARCH") != null)
+{
+    var urtRS = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+    dynamic mkState = null;
+    var probe = Activator.CreateInstance(urtRS, seed)!;
+    uint FnvState(object o)
+    {
+        var usa = (int[])urtRS.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
+        uint uix = (uint)urtRS.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(o)!;
+        uint fh = 2166136261u;
+        for (int q = 0; q < 56; q++) { uint v = (uint)usa[q]; for (int s = 0; s < 32; s += 8) fh = (fh ^ ((v >> s) & 0xffu)) * 16777619u; }
+        for (int s = 0; s < 32; s += 8) fh = (fh ^ ((uix >> s) & 0xffu)) * 16777619u;
+        return fh;
+    }
+    for (int k = 0; k < 200000; k++) probe.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe, null);
+    for (int k = 200000; k <= 300000; k++)
+    {
+        uint fv = FnvState(probe);
+        if (fv == 0xf890f8a6u) Console.Error.WriteLine($"DG_ROLL_SEARCH truth at k={k}");
+        probe.GetType().GetMethod("Next", Type.EmptyTypes)!.Invoke(probe, null);
+    }
+    Console.Error.WriteLine("DG_ROLL_SEARCH done");
+}
+// —— DG_ISO=<dumpBase>：隔离重放钩（_d24iso 同款口径，oracle 侧）——
+//    用真原版 pass 边界 dump（typ/act/wal/liq 四面）覆写本 pass 输入态，剥离上游
+//    未同步段的网格噪声，使 dungeon 段流指纹/网格对拍只反映本段保真度。
+//    liquidType 不在 dump 内 → liqT 归零（地牢段清水场景为主，通道外）。
+var dgIsoBase = Environment.GetEnvironmentVariable("DG_ISO");
+if (dgIsoBase != null)
+{
+    Buffer.BlockCopy(File.ReadAllBytes(dgIsoBase + ".act"), 0, act, 0, W * H);
+    Buffer.BlockCopy(File.ReadAllBytes(dgIsoBase + ".typ"), 0, typ, 0, W * H * 2);
+    Buffer.BlockCopy(File.ReadAllBytes(dgIsoBase + ".wal"), 0, wal, 0, W * H * 2);
+    Buffer.BlockCopy(File.ReadAllBytes(dgIsoBase + ".liq"), 0, liq, 0, W * H);
+    for (int dgi = 0; dgi < W * H; dgi++) liqT[dgi] = 0;
+    Console.Error.WriteLine($"DG_ISO loaded {dgIsoBase} (typ/act/wal/liq; liqT zeroed)");
+}
+// 段级 genRand 掷数对账（DGFLOW）：r 包一层计数器，逐检查点打点（stderr）
+r = new DgCR { inner = r };
+int DgRolls() => ((object)r) is DgCR dc ? dc.n : -1;
+// DG_SEG_HASH=1：DgFlow 追打主流态 FNV（与 vanilla DgSegProbe/PassChainProbe.StreamHash
+// 逐字节同构——SeedArray[56]+inext 的 FNV-1a）→ 段级掷数真值对拍（U 批 2026-08-17）
+void DgFlow(string tag)
+{
+    Console.Error.WriteLine($"DGFLOWSEC {tag} rolls={DgRolls()}");
+    if (Environment.GetEnvironmentVariable("DG_SEG_HASH") != null)
+    {
+        var urtSH = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+        var innerR = ((object)r) is DgCR dc2 ? dc2.inner : r;
+        var usaSH = (int[])urtSH.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerR)!;
+        uint uixSH = (uint)urtSH.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerR)!;
+        uint fhSH = 2166136261u;
+        for (int q = 0; q < 56; q++) { uint v = (uint)usaSH[q]; for (int s = 0; s < 32; s += 8) fhSH = (fhSH ^ ((v >> s) & 0xffu)) * 16777619u; }
+        for (int s = 0; s < 32; s += 8) fhSH = (fhSH ^ ((uixSH >> s) & 0xffu)) * 16777619u;
+        Console.Error.WriteLine($"DGSEGHASH {tag} {fhSH:x8}");
+    }
+}
+// —— DG_WATCH=x,y：单格写点观察哨（ChTile/ChWall 全钩）——
+int dgWatchIdx = -1;
+string dgWriter = "?";
+{
+    var wEnv = Environment.GetEnvironmentVariable("DG_WATCH");
+    if (wEnv != null) { var wx = int.Parse(wEnv.Split(',')[0]); var wy = int.Parse(wEnv.Split(',')[1]); dgWatchIdx = wy * W + wx; }
+}
+bool dgCTrace = Environment.GetEnvironmentVariable("DG_C_TRACE") != null;   // C/G 箱落位逐 attempt 观测（DG_C_TRACE）
+DgCR.LogRolls = Environment.GetEnvironmentVariable("DG_ROLL_LOG") != null;        // 逐掷值日志（DG_ROLL_LOG）
+// —— TileObject.CanPlace chest21/467 锚定门常量（Main.cs tileCut/tileNoAttach/tileTable 原值）——
+// tileCut（Main.cs:7312-10158 全 41 项）∩ 可放覆盖 = ∖{484,654}；BreakableWhenPlacing（TileID.cs:379）
+var DG_TILE_CUT_DG = new HashSet<ushort> { 3,24,28,32,51,52,61,62,69,71,73,74,82,83,84,110,113,115,184,201,205,231,236,254,352,382,444,454,484,485,518,519,528,529,549,636,637,638,654,655,711 };
+var DG_BREAK_PLACE_DG = new HashSet<ushort> { 324,186,187,185,165,530,233,227,485,81,624 };
+var DG_BOULDERS_DG = new HashSet<ushort> { 138,484,664,665,711,712,713,714,715,716 };
+// tileNoAttach（Main.cs:7725-9901 含 435-439 循环）/ anchorInvalidTiles（TileObjectData.cs:2113）
+// / Platforms（TileID.cs:243）/ tileTable（Main.cs:9900 段，含 435-439 循环）
+var DG_NO_ATTACH_DG = new HashSet<ushort> { 3,4,10,13,14,15,16,17,18,19,20,21,27,50,86,87,88,89,90,91,92,93,94,95,96,97,98,99,101,102,110,114,134,387,388,390,427,435,436,437,438,439,441,467,468,469,486,487,488,489,490,497,507,564,565,568,569,570,572,580,590,593,594,595,615,620,704,707 };
+var DG_CHEST_ANCH_INVALID = new HashSet<ushort> { 127,138,664,665,484,711,712,713,714,715,716 };
+var DG_PLATFORMS_DG = new HashSet<ushort> { 19,427,435,436,437,438,439 };
+var DG_TILE_TABLE_DG = new HashSet<ushort> { 14,18,19,87,88,101,114,275,276,277,278,279,281,285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,435,436,437,438,439,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
+// 锚腿判定（TileObject.cs:376-442 AnchorBottom 链，chest 21/467）：
+//   ①SolidTile：tileSolid&&!solidTop&&!noAttach&&!anchorInvalid（FlattenAnchors=false 须
+//     blockType()==0——pass 内无半砖/坡（HalfBrick/Smooth 均在后段），恒成立）；
+//   ②SolidWithTop|Table：平台（Platforms 含 19/427/435-439）properTopFrame——帧面未建模，
+//     P 段平台运行段帧均在 0-7 族（备案：seed1/seed2 实测 G/C 箱腿全 41/43/44 砖，不触达）；
+//     或 tileSolid&&tileSolidTop（直过）；或 tileTable（F 段前不存在，恒不触达）；
+//   ③SolidSide blockType∈{4,5}：pass 内无半砖/坡，不触达。
+//   EmptyTile 不在 chest 锚类型 → 非活动腿恒 false。
+bool DgChestLegOK(int lx, int ly)
+{
+    int li = ly * W + lx;
+    if (act[li] == 0) return false;
+    ushort t = typ[li];
+    bool invalid = DG_CHEST_ANCH_INVALID.Contains(t);
+    if (SOLID.Contains(t) && !dgSolidTop.Contains(t) && !DG_NO_ATTACH_DG.Contains(t) && !invalid) return true;
+    if (DG_PLATFORMS_DG.Contains(t)) return !invalid;
+    if (SOLID.Contains(t) && dgSolidTop.Contains(t)) return true;
+    if (DG_TILE_TABLE_DG.Contains(t)) return true;
+    return false;
+}
 // ================= Pass 32 Dungeon（cs:14816 + DungeonCrawler.cs + Legacy* 全家 1:1）=================
+// ★2026-08-17 oracle 侧同步终态（对照 /tmp/sw-num4/van_x86_g/032_Dungeon.* 真值，DG_ISO 隔离重放）：
+//   已同步 §5 全 8 件（A1 房位不回写/A2 steps 掷序/A3 门洞半边墙+eb.Upd/B1 走廊门 Fluff10/
+//   B2 平台 hf 房3廊5/B3 书架注释/B4 吊灯墙门）+ 新发现两件（见各 ★ 注）：
+//   · GenerateDungeonStairs 整段缺失（HasStairs 普通世界=TRUE）→ 堡右 45° 阶梯 ~3.9k 格已补；
+//   · 门洞 Bounds.UpdateBounds 缺（仅影响 BiomeChests 排除带）。
+//   ★2026-08-17 终清批重定位（推翻旧 (207,876) 墙带假说，方法与证据链）：
+//   · 掷数真值精确锚定：DG_ROLL_SEARCH 从本 pass 头流态直推 → x86 真值 FNV f890f8a6 命中
+//     **k=243,293**（oracle 232,392，差 -10,901 属实）。
+//   · (207,876) 洗清：pit a44(199,865,w8) 全部门读（±width 墙/锚/清障窗/内盒门）与 vanilla
+//     逐格核对一致——DgHall 墙带写语义无差；该格 oracle 墙 9 系 pre-pit 大厅带真值
+//     （vanilla-final 亦 9），旧"oracle 有 9/vanilla 无"为跨段误读。
+//   · 真根因=pre-pit 流位差 + 后段转录差：vanilla 首个 pit 命中（真值流唯一签名）
+//     k=6977=x3 343/y2 836/w 16/h 27/num2 870/num 881（洪泛盒 [327..359]×[870..908] 逐格
+//     实证，num44=337=worldSurface），为 6 掷/attempt 布局 → vanilla Pi 段起点 k0≡6977 mod 6
+//     （≠oracle 6664≡4 mod 6）。DG_SET_ROLLS 全模族扫描：k0≡0/1/2/3/4/5(mod 6) 各得
+//     206,241/225,844/214,444/226,926/232,392/209,351（模族内平移不变——pit 值序列随 6 掷
+//     平移完全重复），无一=243,293 ⇒ 除 k0 残差外，S/D/W/P/C/B/G/I/T/F/Pa/Ba 段仍有
+//     转录掷差（族内最大 232,392 距真值仍 -10,901）。
+//   · Pit 转录本体无罪：k0=6665 直跑 Python 全 gate 复算+写集仿真，洪泛对拍 5,037,446/
+//     5,040,000=99.95% 一致（残差来自简化 solid 模型，非转录）。
+//   诊断钩（本批新增）：DG_ROLL_SEARCH（真值掷数反解）、DG_WATCH=x,y（单格写点观察哨，
+//   ChTile/ChWall 全钩带 writer 态）、DG_PIT_FAIL_AT=n（强拒某 pit——判翻转归因）、
+//   DG_PREPIT_EXTRA=N / DG_SET_ROLLS=k（流位拨针——k0 模族定标）、PIT num44 首attempt打印。
+//   ★2026-08-17 凌晨终清批（详见 docs/worldgen/content-parity-vs-vanilla-2026-08-16.md #32 三件）：
+//   · k0 定界完成：family≡5 组全门仿真（/tmp/dgu/pitgates.py）在静态 pre-pit 网格仅 6731/6977
+//     命中 ⇒ k0_v∈[6737,6977]（≡5 mod 6）；DG_SET_ROLLS=6977 时 oracle 首 hit=(343,836,16,27)
+//     逐位复现真值、Pi=9433 与 pitloop.py 仿真一致（pit2/3 与真值 blob 精确一致）。
+//   · F 段三漏掷已补（椅 Next(2) 方向/床/浴缸 Next(2) dir）；Place* 家族 14 helper（DgP*）+
+//     TILE_TABLE/TILE_LIGHTED 全表替换 DgPlaceSimple 一格近似；B 段书/瓶 OnTable1x1、Pa 三型
+//     墙挂（240/241/242）、Ba PlaceBanner。END(k0=6977)=237,730（真值 243,293，残 -5,563）。
+//   · 残差定位：S/D/W/P(0掷正确)/C/B(书177/178)/I(灯笼56=56)/T(飞镖8=8) 全对齐 ⇒ 债在 F 内部
+//     自级联，根因=G 段宝箱落位（TileObject.CanPlace 锚点调整未移植，15/18 箱位差）。
+//     B 段 61% 嫌疑排除（Default 样式 item 数组全 int[0]，无 GetPlatformStyle 掷）。
+//   · JS 侧 468 格垛口差=rig 假差（_dgestairs 缺 Dunes reseed→entSeed 落 #17259 而非 #4），
+//     已修，JS↔oracle E 四通道 0 差。JS DungeonPass 已同构镜像（14 helper+3 漏掷+tileLighted 门）。
+//   ★2026-08-17 U 批收官（三探针 IL 注入 vanilla 实证：DgSegProbe=UpdateDungeonProgress 头
+//   19 点段级流指纹 / DgChestProbe=AddBuriedChest 7 参入口 / DgItemProbe=SetDefaults·Prefix
+//   / DgCanPlaceProbe=TileObject.CanPlace / DgPlaceTileProbe+DgTileFrameProbe——app 副本
+//   /tmp/dgu/TerrariaSeg.app + segpatch Cecil 注入器，全 /tmp 不触共享 app）：
+//   · **k0_v = 6977 证明**：DG_SEG_HASH 段级指纹 ↔ vanilla DgSegProbe 逐段对拍——
+//     Pi=3b7d0182 / S=5358192a / D=3cafec22 / W=P=2214dd4d **四段哈希逐位全等**
+//     （Mark(p) 语义=该段前流态；DG_SET_ROLLS=6977 即 vanilla 真位）。
+//   · **C 段收口（roll=14400/hash=6e16ad9d 双精确）**，三根因（JS 侧同步）：
+//     ① TileObject.CanPlace 锚定门全链（DgChestLegOK 双腿 SolidTile 路 + 内盒可切覆盖
+//       + 边界 5 垫 + 巨石双腿读 typ）；
+//     ② cs:37578 单次落位语义——PlaceChest 败即 return false（k 扫描只在首实心行掷一次；
+//       DgCanPlaceProbe 实证失败调用恰 1 条 CanPlace 记录，旧续扫=箱位差第二根因）；
+//     ③ 上锁箱尾段三掷：flag9 Next(8)（:37432 无 !flag10 门，21 块内）+ (num9∈23..27
+//       &&Next(2)) 残片（:37476）/ 467 块 (num9==13&&Next(2))（:37543）+ Next(12) 命中
+//       再 GetRandomVoiceItem=Next(14)（DgItemProbe 逐 SetDefaults 段账实证 +1/箱）。
+//     另修：PlaceOnTable1x1 书 50 命中即 frameX=18*Next(5)（cs:45377，B 段 177 本全带）。
+//   · 残余（-6,183 → END=237,110）：**B 段 +2,092**（oracle 158,133 vs vanilla 156,041）——
+//     224 件书/瓶/烛 PlaceTile 事件全对齐（k 逐位），首分歧在尾段（末书 k=151,816 后
+//     vanilla 另落 ~9 座隐形书架（flag3=false 无书无瓶）为本端口所拒；TileFrame 平台
+//     帧副作用为首选嫌疑——书架 tile 写后 TileFrameImportant(19) 递归邻格可改实占）；
+//     G/F/Pa/Ba 段随之全数流偏（19/19 箱数已对，7/19 箱位待 B 收口后收敛）。
+//     E 段 pre-pit +313（oracle 6664 vs vanilla 6977）维持 DG_SET_ROLLS 拨针备案。
+//   下一步：① B 段 TileFrame(19) 平台帧副作用建模（DgTileFrameProbe 已采证）；
+//   ② B 收口后 G/F 对拍；③ E 段 +313 根因（pre-pit 上游）。
 // 普通世界 = Legacy 路径：LegacyDungeonLayoutProvider(LegacyDungeonLayout) +
 // LegacyDungeonHall / LegacyEntranceDungeonHall / LegacyDungeonRoom / LegacyDungeonEntrance
 // + DungeonGlobal{Early/Spikes/Doors/WallVariants/Platforms/BiomeChests/Bookshelves/
@@ -4204,6 +4392,28 @@ do { dgLantern[1] = (int)r.Next(7); } while (dgLantern[1] == dgLantern[0]);
 dgLantern[2] = (int)r.Next(7);
 while (dgLantern[2] == dgLantern[0] || dgLantern[2] == dgLantern[1]) dgLantern[2] = (int)r.Next(7);
 var dgBanner = new int[6] { 10, 11, 12, 13, 14, 15 };                          // cs:267-273
+// 全量 tileFrameImportant（Main.cs 404 赋值 + AddEchoFurnitureTile 家族 + 循环 435-439 = 411；
+// 与 FRAMED_NOT_CUT 不同：不扣 tileCut——DgStairsCanPlace 判定用全表）
+var FRAMED_ALL = new HashSet<ushort> {
+    3,4,5,10,11,12,13,14,15,16,17,18,19,20,21,24,26,27,28,29,31,33,34,35,
+    36,42,49,50,55,61,71,72,73,74,77,78,79,81,82,83,84,85,86,87,88,89,90,91,
+    92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,110,113,114,125,126,128,129,132,133,
+    134,135,136,137,138,139,141,142,143,144,149,165,171,172,173,174,178,184,185,186,187,201,207,209,
+    210,212,215,216,217,218,219,220,227,228,231,233,235,236,237,238,239,240,241,242,243,244,245,246,
+    247,254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,
+    295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,
+    334,335,337,338,339,349,354,355,356,358,359,360,361,362,363,364,372,373,374,375,376,377,378,380,
+    386,387,388,389,390,391,392,393,394,395,405,406,410,411,412,413,414,419,420,423,424,425,427,428,
+    429,435,436,437,438,439,440,441,442,443,444,445,452,453,454,455,456,457,461,462,463,464,465,466,
+    467,468,469,470,471,475,476,480,484,485,486,487,488,489,490,491,493,494,497,499,505,506,509,510,
+    511,518,519,520,521,522,523,524,525,526,527,529,530,531,532,533,538,542,543,544,545,547,548,549,
+    550,551,552,553,554,555,556,558,559,560,564,565,567,568,569,570,571,572,573,579,580,581,582,583,
+    584,585,586,587,588,589,590,591,592,593,594,595,596,597,598,599,600,601,602,603,604,605,606,607,
+    608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,
+    642,643,644,645,646,647,648,649,650,651,652,653,654,656,657,658,660,663,664,665,693,694,695,696,
+    698,699,700,701,702,703,704,705,706,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,
+    733,751,752
+};
 bool dgSkewed = (int)r.Next(4) == 0;                                           // cs:274 useSkewedDungeonEntranceHalls
 int dgDoorStyle = dungeonTheme == 0 ? 16 : dungeonTheme == 1 ? 17 : 18;        // Item 1411/1412/1413 placeStyle（Item.cs:17460/17472/17484）
 bool dgShadowKey = false, dgRamRune = false;                   // GenVars.generatedShadowKey/RamRune（AddBuriedChest 用）
@@ -4239,6 +4449,167 @@ bool dgPitFlood = true;             // makeNextPitTrapFlooded（cs:345 初值 tr
 int dgLootStyle = 0;                // genVars.dungeonLootStyle
 int dgPosX, dgPosY, dgTopX;         // generatingDungeonPositionX/Y + generatingDungeonTopX
 int dgDungeonX = 0, dgDungeonY = 0; // Main.dungeonX/Y（老头锚；Early pit 陷阱 num44 下限用）
+
+// —— ★2026-08-17 终清批：Place* 家族（帧不入 dump 四通道，只保成功判定+写集
+//    footprint——对拍口径 act/typ/wal；Main.cs tileTable/tileLighted 全表提取）——
+var TILE_TABLE = new HashSet<ushort> { 14,18,19,87,88,101,114,275,276,277,278,279,280,281,285,286,296,297,298,
+   299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,
+   544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,
+   629,632,640,643,644,645,710 };
+var TILE_LIGHTED = new HashSet<ushort> { 4,17,19,20,22,26,27,31,33,34,35,37,42,49,58,61,70,71,72,76,77,83,
+   84,92,93,95,96,98,100,109,125,126,129,133,140,149,160,171,173,174,184,190,204,209,215,237,238,270,271,
+   286,302,316,317,318,327,336,340,341,342,343,344,346,347,348,349,350,354,356,370,372,381,390,391,405,
+   415,416,417,418,429,463,491,500,501,502,503,517,519,528,534,535,536,537,539,540,548,564,568,569,570,
+   572,578,580,581,582,592,593,594,597,598,613,614,619,620,625,626,627,628,633,634,637,638,646,656,658,
+   659,660,663,667,684,687,688,689,690,691,692,695,696,699,701,703,708,711,717,718,719,739 };
+void DgWr(int x, int y, int t) { int ti = y * W + x; act[ti] = 1; typ[ti] = (ushort)t; }
+bool DgClr(int x, int y) { return DgInWorld(x, y, 0) && act[y * W + x] == 0; }
+// Place3x2（cs:52097 桌14/钢琴87/梳妆台88/长凳89）：x-1..x+1 × y-1..y 净空 + 逐列 SolidTile2(y+1)
+bool DgP3x2(int x, int y, int t)
+{
+    if (x < 5 || x > W - 5 || y < 5 || y > H - 5) return false;
+    for (int i = x - 1; i < x + 2; i++)
+    {
+        for (int j = y - 1; j < y + 1; j++) if (!DgClr(i, j)) return false;
+        if (!DgSolid2(i, y + 1)) return false;
+    }
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 1; j++) DgWr(i, j, t);
+    return true;
+}
+// Place2x1（cs:47371 工作台18）：x..x+1 × y 净空 + 两列 SolidTile2(y+1)；103 骷髅=桌上版（tileTable 支撑）
+bool DgP2x1(int x, int y, int t)
+{
+    bool skull = t == 103;
+    for (int i = x; i <= x + 1; i++)
+    {
+        if (!DgClr(i, y)) return false;
+        int bi = (y + 1) * W + i;
+        if (skull) { if (act[bi] == 0 || !TILE_TABLE.Contains(typ[bi])) return false; }
+        else if (!DgSolid2(i, y + 1)) return false;
+    }
+    DgWr(x, y, t); DgWr(x + 1, y, t);
+    return true;
+}
+// Place1x2（cs:46665 椅15）：SolidTile2(x,y+1) 且 (x,y-1) 净空 → (x,y-1)+(x,y)
+bool DgP1x2(int x, int y, int t)
+{
+    if (!DgSolid2(x, y + 1) || !DgClr(x, y - 1)) return false;
+    if (!DgClr(x, y)) return false;
+    DgWr(x, y - 1, t); DgWr(x, y, t);
+    return true;
+}
+// PlaceOnTable1x1（cs:45346 蜡烛33/水瓶49/书50/瓶13）：净空 + 下方 nactive 且 tileTable
+// ★type 50 书：命中放置即 frameX = 18*Next(5)（cs:45377）——每次成功的书放置耗 1 骰
+//   （DgPlaceTileProbe 实证 B 段 177 本书全带此掷；曾漏掷 → B 段流偏）
+bool DgPOnTable(int x, int y, int t)
+{
+    if (!DgClr(x, y) || !DgInWorld(x, y + 1, 0)) return false;
+    int bi = (y + 1) * W + x;
+    if (act[bi] == 0 || !TILE_TABLE.Contains(typ[bi])) return false;
+    DgWr(x, y, t);
+    if (t == 50) r.Next(5);                          // cs:45377 frameX=18*Next(5)
+    return true;
+}
+// Place2xX（cs:39705 钟104 h5/雕像105 h3）：x..x+1 × y-h+1..y 净空 + 两列 SolidTile2
+bool DgP2xX(int x, int y, int t, int hgt)
+{
+    for (int j = y - hgt + 1; j <= y; j++)
+        if (!DgClr(x, j) || !DgClr(x + 1, j)) return false;
+    if (!DgSolid2(x, y + 1) || !DgSolid2(x + 1, y + 1)) return false;
+    for (int j = y - hgt + 1; j <= y; j++) { DgWr(x, j, t); DgWr(x + 1, j, t); }
+    return true;
+}
+// Place1xX（cs:39203 路灯93 h3）：单列净空+无液 + SolidTile2(x,y+1)
+bool DgP1xX(int x, int y, int t, int hgt)
+{
+    for (int j = y - hgt + 1; j <= y; j++)
+        if (!DgClr(x, j) || liq[y * W + x] > 0) return false;
+    if (!DgSolid2(x, y + 1)) return false;
+    for (int j = y - hgt + 1; j <= y; j++) DgWr(x, j, t);
+    return true;
+}
+// Place3x4（cs:51943 书架101）：x-1..x+1 × y-3..y 净空 + 逐列 SolidTile2
+bool DgP3x4(int x, int y, int t)
+{
+    for (int i = x - 1; i < x + 2; i++)
+    {
+        for (int j = y - 3; j < y + 1; j++) if (!DgClr(i, j)) return false;
+        if (!DgSolid2(i, y + 1)) return false;
+    }
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 3; j < y + 1; j++) DgWr(i, j, t);
+    return true;
+}
+// Place4x2（cs:50534 床79/浴缸90 direction）：x-1..x+2 × y-1..y 净空 + 逐列 SolidTile2
+bool DgP4x2(int x, int y, int t, int dir)
+{
+    if (x < 5 || x > W - 5 || y < 5 || y > H - 5) return false;
+    for (int a = x - 1; a < x + 3; a++)
+    {
+        for (int b = y - 1; b < y + 1; b++) if (!DgClr(a, b)) return false;
+        if (!DgSolid2(a, y + 1)) return false;
+    }
+    for (int a = x - 1; a < x + 3; a++) for (int b = y - 1; b < y + 1; b++) DgWr(a, b, t);
+    return true;
+}
+// Place2x2（cs:51352 烛台100）：x-1..x × y-1..y 净空 + 下方活性且（SolidTile2 或 tileTable）
+bool DgP2x2(int x, int y, int t)
+{
+    for (int i = x - 1; i < x + 1; i++)
+    {
+        for (int j = y - 1; j < y + 1; j++) if (!DgClr(i, j)) return false;
+        int bi = (y + 1) * W + i;
+        if (act[bi] == 0 || (!DgSolid2(i, y + 1) && !TILE_TABLE.Contains(typ[bi]))) return false;
+    }
+    for (int i = x - 1; i < x + 1; i++) for (int j = y - 1; j < y + 1; j++) DgWr(i, j, t);
+    return true;
+}
+// Place3x3（cs:53549 354/355 分支A）：x-1..x+1 × y-2..y 净空 + 逐列 SolidTile2(y+1)
+bool DgP3x3(int x, int y, int t)
+{
+    for (int i = x - 1; i < x + 2; i++)
+    {
+        for (int j = y - 2; j < y + 1; j++) if (!DgClr(i, j)) return false;
+        if (!DgSolid2(i, y + 1)) return false;
+    }
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 2; j < y + 1; j++) DgWr(i, j, t);
+    return true;
+}
+// Place3x3Wall（cs:44281 画240）：3×3 净空 + wall≠0
+bool DgP3x3Wall(int x, int y, int t)
+{
+    for (int i = x - 1; i < x + 2; i++)
+        for (int j = y - 1; j < y + 2; j++)
+            if (!DgClr(i, j) || wal[j * W + i] == 0) return false;
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 2; j++) DgWr(i, j, t);
+    return true;
+}
+// Place4x3Wall（cs:44874 画241）：x-1..x+2 × y-1..y+1 净空 + wall≠0
+bool DgP4x3Wall(int x, int y, int t)
+{
+    for (int i = x - 1; i < x + 3; i++)
+        for (int j = y - 1; j < y + 2; j++)
+            if (!DgClr(i, j) || wal[j * W + i] == 0) return false;
+    for (int i = x - 1; i < x + 3; i++) for (int j = y - 1; j < y + 2; j++) DgWr(i, j, t);
+    return true;
+}
+// Place6x4Wall（cs:44959 画242）：x-2..x+3 × y-2..y+1 净空 + wall≠0
+bool DgP6x4Wall(int x, int y, int t)
+{
+    for (int i = x - 2; i < x + 4; i++)
+        for (int j = y - 2; j < y + 2; j++)
+            if (!DgClr(i, j) || wal[j * W + i] == 0) return false;
+    for (int i = x - 2; i < x + 4; i++) for (int j = y - 2; j < y + 2; j++) DgWr(i, j, t);
+    return true;
+}
+// PlaceBanner（cs:46270 旗91）：(x,y-1) 活性+solid+非solidTop；(x,y..y+2) 净空 → 竖 3 格
+bool DgPBanner(int x, int y, int t)
+{
+    int ui = (y - 1) * W + x;
+    if (!DgInWorld(x, y - 1, 0) || act[ui] == 0 || !SOLID.Contains(typ[ui]) || dgSolidTop.Contains(typ[ui])) return false;
+    if (!DgClr(x, y) || !DgClr(x, y + 1) || !DgClr(x, y + 2)) return false;
+    DgWr(x, y, t); DgWr(x, y + 1, t); DgWr(x, y + 2, t);
+    return true;
+}
 double dgS1X = (int)r.Next(25, 30), dgS1Y = (int)r.Next(20, 25);   // cs:349-352
 double dgS2X = (int)r.Next(35, 50), dgS2Y = (int)r.Next(10, 15);
 int dgNum = W / 60; dgNum += (int)r.Next(0, dgNum / 3);             // cs:353-355（dungeonStepScalar=1）
@@ -4258,7 +4629,7 @@ DgLayout(dgNum);                                   // LegacyDungeonLayoutProvide
     }
     dgPosX = (int)bx; dgPosY = (int)by; dgTopX = (int)bx;
 }
-Checkpoint("dungeonL");
+Checkpoint("dungeonL"); DgFlow("L");
 if (Environment.GetEnvironmentVariable("DGL_DUMP") != null) {
     var dgbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dgbuf, 0, dgbuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGL_DUMP"), dgbuf);
@@ -4277,6 +4648,8 @@ if (Environment.GetEnvironmentVariable("DGL_DUMP") != null) {
 // 插入 halls(forceX)+room 分支（位置还原）；legacy 无预计算 → 只走盲爬 ——
 dgEntOnSurface = false;
 {
+    bool clTr = Environment.GetEnvironmentVariable("DG_CLIMB_TRACE") != null;
+    int clIt = 0;
     int roomDelay = 5;
     int guard = 100;
     while (!dgEntOnSurface)
@@ -4284,23 +4657,26 @@ dgEntOnSurface = false;
         guard--;
         if (guard <= 0) break;
         if (roomDelay > 0) roomDelay--;
+        if (clTr) Console.Error.WriteLine($"CLB i{clIt++} g={guard} rd={roomDelay} pos={dgPosX},{dgPosY} rolls={DgRolls()}");
         if (roomDelay == 0 && (int)r.Next(5) == 0 && (double)dgPosY > worldSurface + 100.0)
         {
             roomDelay = 10;
             int sx = dgPosX, sy = dgPosY;
             DgHall(new DHall { Seed = (int)r.Next(), ForceX = false });       // MakeDungeon_GetHallSettings(Legacy)
+            if (clTr) Console.Error.WriteLine($"CLB-INSERT hall posAfterHall={dgPosX},{dgPosY}");
             DgRoom(new DRoom { Seed = (int)r.Next(), X = dgPosX, Y = dgPosY, Start = false });
             dgPosX = sx; dgPosY = sy;
         }
         DgEntHall((int)r.Next());                                             // GenerateNextEntranceHall_Legacy
+        if (clTr) Console.Error.WriteLine($"CLB-ENT done pos={dgPosX},{dgPosY} rolls={DgRolls()}");
     }
 }
 DgEntrance((int)r.Next(), dgEntSeed);   // MakeDungeon_GetEntrance（含 GetEntranceSettings 的 1 颗废弃掷）
-Checkpoint("dungeonE");
+Checkpoint("dungeonE"); DgFlow("E");
 // —— 门/平台候选收集（cs:456-471：仅 Processed 即 generated 的房/廊）——
 for (int i = 0; i < dgRooms.Count; i++) if (dgRooms[i].Generated) DgRoomPlatformsDoors(dgRooms[i]);
 for (int i = 0; i < dgHalls.Count; i++) if (dgHalls[i].Generated) DgHallPlatformsDoors(dgHalls[i]);
-Checkpoint("dungeonPD");
+Checkpoint("dungeonPD"); DgFlow("PD");
 if (Environment.GetEnvironmentVariable("DPD_DUMP") != null) {
     var pdbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(wal, 0, pdbuf, 0, pdbuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DPD_DUMP"), pdbuf);
@@ -4309,7 +4685,16 @@ if (Environment.GetEnvironmentVariable("DPD_DUMP") != null) {
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DPD_DUMP") + ".typ", pdt);
     return;
 }
-DgEarly(); Checkpoint("dungeonPi");     // DungeonGlobalEarlyDualDungeonFeatures（Default → 仅 pit 陷阱循环）
+// —— DG_PREPIT_EXTRA=N：pit 循环前把主流多拨 N 骰（δ 定标实验：判 vanilla Pi 起点 6665 假说）——
+{
+    var pe = Environment.GetEnvironmentVariable("DG_PREPIT_EXTRA");
+    if (pe != null) { int pn = int.Parse(pe); for (int pq = 0; pq < pn; pq++) r.Next(); Console.Error.WriteLine($"DG_PREPIT_EXTRA consumed {pn}, rolls now {DgRolls()}"); }
+    // ★Z 批：DG_SET_ROLLS 硬跳已撤——E 段 +169（PlaceWall 连掷）归位后主流自然
+    //   在 k=6833 起坑；坑前 144 掷=24 次 6 掷失败尝试（makeNextPitTrapFlooded=true
+    //   短路 Next(8)，首中前每尝试恰 6 骰），第 25 次尝试 k=6977 命中 (343,836)。
+    //   旧 6977 拨针的 Pi/S/D/W/P 对拍结论全部保留（自然收敛到同一位）。
+}
+DgEarly(); Checkpoint("dungeonPi"); DgFlow("Pi");     // DungeonGlobalEarlyDualDungeonFeatures（Default → 仅 pit 陷阱循环）
 if (Environment.GetEnvironmentVariable("DGP_DUMP") != null) {
     var dpbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dpbuf, 0, dpbuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGP_DUMP"), dpbuf);
@@ -4317,37 +4702,37 @@ if (Environment.GetEnvironmentVariable("DGP_DUMP") != null) {
     File.WriteAllText(Environment.GetEnvironmentVariable("DGP_DUMP") + ".wall", string.Join(",", wal.Select(a => a.ToString())));
     return;
 }
-DgSpikes(); Checkpoint("dungeonS");     // DungeonGlobalSpikes
-DgDoorsF(); Checkpoint("dungeonD");     // DungeonGlobalDoors
-DgWallVariants(); Checkpoint("dungeonW"); // DungeonGlobalWallVariants
-DgPlatforms(); Checkpoint("dungeonP");    // DungeonGlobalPlatforms
-DgBiomeChests(); Checkpoint("dungeonC");  // DungeonGlobalBiomeChests（5 个上锁生物群系箱）
+DgSpikes(); Checkpoint("dungeonS"); DgFlow("S");     // DungeonGlobalSpikes
+DgDoorsF(); Checkpoint("dungeonD"); DgFlow("D");     // DungeonGlobalDoors
+DgWallVariants(); Checkpoint("dungeonW"); DgFlow("W"); // DungeonGlobalWallVariants
+DgPlatforms(); Checkpoint("dungeonP"); DgFlow("P");    // DungeonGlobalPlatforms
+DgBiomeChests(); Checkpoint("dungeonC"); DgFlow("C");  // DungeonGlobalBiomeChests（5 个上锁生物群系箱）
 if (Environment.GetEnvironmentVariable("DGC_DUMP") != null) {
     var dcbbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dcbbuf, 0, dcbbuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGC_DUMP"), dcbbuf);
     File.WriteAllText(Environment.GetEnvironmentVariable("DGC_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
     return;
 }
-DgBookshelves(); Checkpoint("dungeonB");  // DungeonGlobalBookshelves
+DgBookshelves(); Checkpoint("dungeonB"); DgFlow("B");  // DungeonGlobalBookshelves
 if (Environment.GetEnvironmentVariable("DGB_DUMP") != null) {
     var dbbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dbbuf, 0, dbbuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGB_DUMP"), dbbuf);
     File.WriteAllText(Environment.GetEnvironmentVariable("DGB_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
     return;
 }
-DgBasicChests(); Checkpoint("dungeonG");  // DungeonGlobalBasicChests（房间金箱）
+DgBasicChests(); Checkpoint("dungeonG"); DgFlow("G");  // DungeonGlobalBasicChests（房间金箱）
 dgBounds.Inflate(25);                     // cs:489-490
-DgLights(); Checkpoint("dungeonI");       // DungeonGlobalLights
-DgTraps(); Checkpoint("dungeonT");        // DungeonGlobalTraps
-DgFurniture(); Checkpoint("dungeonF");    // DungeonGlobalGroundFurniture
-DgPaintings(); Checkpoint("dungeonPa");   // DungeonGlobalPaintings
+DgLights(); Checkpoint("dungeonI"); DgFlow("I");       // DungeonGlobalLights
+DgTraps(); Checkpoint("dungeonT"); DgFlow("T");        // DungeonGlobalTraps
+DgFurniture(); Checkpoint("dungeonF"); DgFlow("F");    // DungeonGlobalGroundFurniture
+DgPaintings(); Checkpoint("dungeonPa"); DgFlow("Pa");   // DungeonGlobalPaintings
 if (Environment.GetEnvironmentVariable("DGPB_DUMP") != null) {
     var dppbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dppbuf, 0, dppbuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGPB_DUMP"), dppbuf);
     File.WriteAllText(Environment.GetEnvironmentVariable("DGPB_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
     return;
 }
-DgBanners(); Checkpoint("dungeonBa");     // DungeonGlobalBanners
+DgBanners(); Checkpoint("dungeonBa"); DgFlow("Ba");     // DungeonGlobalBanners
 if (Environment.GetEnvironmentVariable("DGBA_DUMP") != null) {
     var dbabuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dbabuf, 0, dbabuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGBA_DUMP"), dbabuf);
@@ -4355,7 +4740,23 @@ if (Environment.GetEnvironmentVariable("DGBA_DUMP") != null) {
     return;
 }
 // Late 双地牢特征（Default 无 BiomeDungeonRoom/BrickGrass → 纯空转）
-Checkpoint("dungeon");   // #32 转录落地（原 slush 同态占位已替换）
+Checkpoint("dungeon"); DgFlow("END");   // #32 转录落地（原 slush 同态占位已替换）
+// —— Dungeon pass 流指纹（passchain 第 6 列口径：pass 末 Main.rand 态 FNV-1a
+//    over SeedArray[56]+inext；x86 真值 f890f8a6，seed 9293480/evil0）——
+{
+    object rTarget = ((object)r) is DgCR dcr ? dcr.inner : (object)r;
+    var urt2 = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+    var usa2 = (int[])urt2.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rTarget)!;
+    var uix2 = (uint)urt2.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rTarget)!;
+    uint fh = 2166136261u;
+    for (int q = 0; q < 56; q++)
+    {
+        uint v = (uint)usa2[q];
+        for (int s = 0; s < 32; s += 8) fh = (fh ^ ((v >> s) & 0xffu)) * 16777619u;
+    }
+    for (int s = 0; s < 32; s += 8) fh = (fh ^ ((uix2 >> s) & 0xffu)) * 16777619u;
+    Console.Error.WriteLine($"DGFLOW dungeon-rand-fnv={fh:x8} (x86真值 f890f8a6)");
+}
 // ---- Dungeon 局部函数（均在隐式 Main 作用域内，可前向引用）----
 // InAnyPotentialDungeonBounds（outer，fluff=0 → Rectangle.Contains 半开区间）
 bool DgPotContains(int x, int y) => x >= dgPotL && x < dgPotR && y >= dgPotT && y < dgPotB;
@@ -4402,11 +4803,13 @@ List<DRoom> DgRoomsInSpots(double sx, double sy, double ex, double ey, int fluff
 }
 void DgChTile(int i, ushort t, bool reset)
 {
+    if (dgWatchIdx >= 0 && i == dgWatchIdx) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} ChTile t={t} reset={reset} (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
     if (reset) { typ[i] = 0; wal[i] = 0; liq[i] = 0; liqT[i] = 0; act[i] = 0; }
     act[i] = 1; typ[i] = t;
 }
 void DgChWall(int i, ushort w, bool reset)
 {
+    if (dgWatchIdx >= 0 && i == dgWatchIdx) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} ChWall w={w} reset={reset} (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
     if (reset) { typ[i] = 0; wal[i] = 0; liq[i] = 0; liqT[i] = 0; act[i] = 0; }
     wal[i] = w;
 }
@@ -4519,7 +4922,10 @@ void DgRoom(DRoom s)
         vy = Math.Max(-1.0, Math.Min(1.0, vy + (int)rr.Next(-10, 11) * 0.05 * 1.0));
     }
     rm.SX = s.X; rm.SY = s.Y - num2 / 2.0; rm.EX = px; rm.EY = py; rm.Strength = (int)num5;
-    dgPosX = (int)px; dgPosY = (int)py;
+    // ★2026-08-16 审计 A1：LegacyDungeonRoom **不回写** generatingDungeonPositionX/Y
+    //   （1456 全 Rooms 目录零赋值，仅 LegacyDungeonHall.cs:862 / LegacyEntranceDungeonHall.cs:367
+    //   两处写）。曾 `dgPosX=(int)px` 使房间后位置瞬移房尾——起始房后首走廊起点、
+    //   循环 room-only 分支后续走廊全部错位（原版"房团"形态来源）。已同步 JS 修复摘除。
 }
 // LegacyDungeonHall.LegacyHall（Halls/LegacyDungeonHall.cs:65-876）
 void DgHall(DHall s)
@@ -4806,6 +5212,10 @@ void DgEntHall(int seed)
     double px = dgPosX, py = dgPosY;
     double sx = px, sy = py;
     int num = (int)rr.Next(5, 9);
+    // ★2026-08-16 审计 A2：steps=Next(10,30) 原版在 :136（num=Next(5,9) :131 之后、
+    //   方向/增幅掷 :148-158 **之前**）。曾挪到方向掷后 → strength 吃方向骰、方向骰
+    //   吃 steps 骰，整条爬升走廊轨迹错位。已归位原版掷序（同 JS 修复）。
+    int steps = (int)rr.Next(10, 30);
     int dir = (px <= dgTopX) ? 1 : -1;
     if (px > W - 400) dir = -1;
     else if (px < 400) dir = 1;
@@ -4823,9 +5233,10 @@ void DgEntHall(int seed)
         if (dgPosX < W / 2 && vx < -0.5) vx = -0.5;
         if (dgPosX > W / 2 && vx > 0.5) vx = 0.5;
     }
-    int steps = (int)rr.Next(10, 30);
     double num5 = 0.5;
     int n6 = 30, n7 = 10;
+    if (Environment.GetEnvironmentVariable("DG_CLIMB_TRACE") != null)
+        Console.Error.WriteLine($"ENT seed={seed} px={px:F1} py={py:F1} num={num} steps={steps} vx={vx:F3} vy={vy:F3}");
     var hb = new DBnd();
     hb.Set((int)px, (int)py, (int)px, (int)py);
     var hall = new DHall { Seed = seed, Generated = true, Bounds = hb, IsEntrance = true };
@@ -4898,6 +5309,9 @@ void DgEntHall(int seed)
         px += vx; py += vy;
         if (py < worldSurface) vy *= 0.9800000190734863;
     }
+    // ★2026-08-16 审计 A4：cs:367-368 每条爬升走廊终点都覆写 generatingDungeonPosition
+    //   ——pass 终值=最后一条爬升走廊终点（入口 X），:394 最高房中心只是瞬态。
+    //   下游金字塔回避带（cs:15450）/神庙镜像（cs:15991）消费的正是该终值。
     dgPosX = (int)px; dgPosY = (int)py;
     hall.SX = sx; hall.SY = sy; hall.EX = px; hall.EY = py;
     hall.SDX = vx; hall.SDY = vy; hall.EDX = vx; hall.EDY = vy;
@@ -5017,8 +5431,13 @@ void DgEntrance(int seed, int preSeed)
             }
     }
     // 门厅平台候选（:269-303：自塔心向两侧找 非实心+地牢墙 列）
+    // ★Z 批修复 2：vanilla :270-275 的 0.5 框把 num5/num6 重赋为 ±S1Y*0.5，
+    //   :277 num27=num6 取的是 0.5 框底（=zero.Y+S1Y*0.5≈j），非首段城堡盒的
+    //   num6（zero.Y+S1Y*0.6+Next(8,16)）。曾沿用旧 n6 → 平台行落到 251..263
+    //   （实测 257）而 vanilla 在 249（=num26 扫描起点列）。
     {
-        int n26 = (int)cx, n27 = n6;
+        int n27 = Math.Max(0, Math.Min(H - 1, (int)(cy + dgS1Y * 0.5)));   // = 0.5 框底 b1（:275 num6）
+        int n26 = (int)cx;
         for (int k = 0; k < 20; k++)
         {
             n26 = (int)cx - k;
@@ -5129,6 +5548,18 @@ void DgEntrance(int seed, int preSeed)
             }
         dgDungeonX = (int)cx; dgDungeonY = b1;    // SetOldManSpawnAndSpawnOldManIfDefaultDungeon
     }
+    // ★2026-08-17 真值对拍发现（堡右 45° 下行阶梯整体缺失 ~3.9k 格）：
+    //   SpecialSeedFeatures.DungeonEntranceHasStairs 普通世界为 TRUE（= !IsUnderground
+    //   && !roundLandmasses，SpecialSeedFeatures.cs:41-48）——LegacyDungeonEntrance.cs:462-468
+    //   在老头锚后、条纹窗墙前调 DungeonUtils.GenerateDungeonStairs（DungeonUtils.cs:1222-1310）。
+    //   曾整段缺失 → 堡侧阶梯丢失 + S 段起墙判定/变体锚/掷流全错位。JS 侧 DungeonPass.ts 同缺。
+    {
+        int sti = num2 == 1 ? Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.5)))
+                            : Math.Max(0, Math.Min(W - 1, (int)(cx - sX * 0.5)));   // i2 = num4/num3（0.5 盒缘，:463）
+        int stj = Math.Max(0, Math.Min(H - 1, (int)(cy + sY * 0.5)));              // j = num6
+        int stdep = (dgPotT - 10) - stj + 5;                   // GetDualDungeonBrickSupportCutoffY(=outerPotTop-10) - num6 + 5
+        DgStairs(sti, stj, num2, stdep);
+    }
     // 条纹窗墙（PlaceWall，墙==0 才写）
     {
         int n16c = 1 + (int)rr.Next(2);
@@ -5141,7 +5572,14 @@ void DgEntrance(int seed, int preSeed)
         for (int x = a0; x < a1; x++)
         {
             for (int y = b0; y < b1 + 1; y++)
+            {
+                // ★Z 批修复 1：WorldGen.PlaceWall 每次调用耗 1 颗主流骰（vanilla
+                //   DgZProbe 实证：条纹窗墙 169 连调用=169 连掷 6661→6830 逐位 k+1，
+                //   PlaceWall→SquareWallFrame 链，与 wall==0 门无关——每次调用恒耗）。
+                //   曾零耗 → E 段少掷 +169（X 批误判为"入口走廊少掷"的真根）。
+                r.Next();
                 if (x > 1 && y > 1 && x < W - 2 && y < H - 2 && wal[y * W + x] == 0) wal[y * W + x] = (ushort)dgWall;
+            }
             n17++;
             if (n17 >= n15c) { x += n15c * 2; n17 = 0; }
         }
@@ -5153,12 +5591,79 @@ void DgEntrance(int seed, int preSeed)
     {
         int dL = (int)(cx - 7.5), dR = (int)(cx + 7.5);
         int dT = (int)(cy - 1.5), dB = (int)(cy + 1.5);
+        eb.Upd(dL, dT, dR, dB);                              // ★Bounds.UpdateBounds(:600，num2<0 偏移前)——曾缺
         for (int x = dL; x < dR; x++)
             for (int y = dT; y < dB; y++)
-                if (DgInWorld(x, y, 0)) act[y * W + x] = 0;
+            {
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                act[ti] = 0;
+                // ★2026-08-16 审计 A3：cs:606-611 门洞清空时对"内侧半边"
+                //   （num2>0 取 x<val.X、num2<0 取 x>val.X，val.X=num2<0 偏移-1 后
+                //   的 zero.X）回写 wall=brickWallType——曾只清 active 不写墙
+                //   （门洞内半边墙缺失，wallDungeon 判定双差）。underground/buried
+                //   = SpecialSeedFeatures（普通世界恒 false）不计。
+                double valX = num2 < 0 ? cx - 1.0 : cx;
+                if ((num2 > 0 && x < valX) || (num2 < 0 && x > valX)) wal[ti] = (ushort)dgWall;
+            }
         if (num2 < 0) cx -= 1.0;
         int dx = (int)cx, dy = (int)cy + 1;                  // PlaceTile((int)val.X, (int)val.Y+1)（val.Y=cy+1）
         DgPlaceDoor(dx, dy, 13);
+    }
+}
+// —— DungeonUtils.GenerateDungeonStairs（:1222-1310）+ CanPlaceTile（:1312-1329）——
+// 全量 tileFrameImportant（Main.cs 404 赋值 + AddEchoFurnitureTile 家族 + 循环 435-439 = 411；
+// 与 FRAMED_NOT_CUT 不同：不扣 tileCut——CanPlaceTile 判定用全表）
+// （FRAMED_ALL 声明已上移至 dungeon 段头部——顶层流先于 DgEntrance 执行）
+bool DgStairsCanPlace(int x, int y)
+{
+    if (y >= dgPotT - 5) return false;                       // outerPotentialBounds.Top-5 门（:1316）
+    if (x < 0 || x >= W || y < 0 || y >= H) return false;
+    int ti = y * W + x;
+    if (act[ti] != 0)
+    {
+        if (!DgCanKill(x, y)) return false;                  // WorldGen.CanKillTile（§4-B 同款建模）
+        if (FRAMED_ALL.Contains(typ[ti])) return false;      // tileFrameImportant（:1324）
+    }
+    return true;
+}
+void DgStairs(int i, int j, int dir, int depth)
+{
+    if (!DgInWorld(i, j, 20)) return;                        // :1226
+    int num = depth, num2 = depth;
+    int num3 = dir == 1 ? 1 : -1;
+    int num4 = 0;
+    for (int k = i; (dir == 1) ? (k < i + num2) : (k > i - num2); k += num3)
+    {
+        num4++;
+        for (int l = j + num4; l < j + num; l++)
+            if (DgInWorld(k, l, 10) && !DgStairsCanPlace(k, l + 5) && num > l) { num = l; break; }
+    }
+    num2 = num;
+    int sdep = num;
+    num4 = 0;
+    for (int m = i; (dir == 1) ? (m < i + num2) : (m > i - num2); m += num3)
+    {
+        num4++;
+        for (int n = j + num4; n < j + sdep; n++)
+        {
+            if (!DgInWorld(m, n, 10) || n >= dgPotT - 5) continue;
+            for (int q = 0; q < 4; q++)                      // n..n-3 清液（:1276-1279）
+                if (n - q >= 0 && m >= 0 && m < W) liq[(n - q) * W + m] = 0;
+            if (!DgStairsCanPlace(m, n)) continue;
+            int ti = n * W + m;
+            bool fl = wal[ti] == dgWall;                      // WallIsInStyle（Default 单样式）
+            if (fl)
+            {
+                if (act[ti] != 0) { act[ti] = 1; typ[ti] = (ushort)dgBrick; }
+                wal[ti] = (ushort)dgWall;
+            }
+            else
+            {
+                act[ti] = 1; typ[ti] = (ushort)dgBrick;
+                if (n != j + num4) wal[ti] = (ushort)dgWall;  // 台面行不写墙（:1301-1304）
+            }
+        }
     }
 }
 // —— 门/平台候选 ——
@@ -5171,9 +5676,9 @@ void DgRoomPlatformsDoors(DRoom rm)
     for (int x = num; x <= num2; x++)
     {
         if (!f2 && !DgInWorld(x, num3 - 1, 0) == false && act[(num3 - 1) * W + x] == 0)
-        { dgPlats.Add(new DPlat { X = x, Y = num3 - 1, Hall = false }); f2 = true; }
+        { dgPlats.Add(new DPlat { X = x, Y = num3 - 1, Hall = false, Hf = 3 }); f2 = true; }   // ★B2：platformFluff=3（DungeonRoom.cs:161）
         if (!f3 && DgInWorld(x, num4 + 1, 0) && act[(num4 + 1) * W + x] == 0)
-        { dgPlats.Add(new DPlat { X = x, Y = num4 + 1, Hall = false }); f3 = true; }
+        { dgPlats.Add(new DPlat { X = x, Y = num4 + 1, Hall = false, Hf = 3 }); f3 = true; }
         if (f2 && f3) break;
     }
     bool f4 = false, f5 = false;
@@ -5190,14 +5695,25 @@ void DgRoomPlatformsDoors(DRoom rm)
 void DgHallPlatformsDoors(DHall h)
 {
     if (h.IsEntrance) return;
-    if (Math.Abs(h.SDY) <= 0.1) dgDoors.Add(new DDoor { X = (int)h.SX, Y = (int)h.SY, Dir = 0, Hall = true, Clear = true });
-    else dgPlats.Add(new DPlat { X = (int)h.SX, Y = (int)h.SY, Hall = true });
-    if (Math.Abs(h.EDY) <= 0.1) dgDoors.Add(new DDoor { X = (int)h.EX, Y = (int)h.EY, Dir = 0, Hall = true, Clear = true });
-    else dgPlats.Add(new DPlat { X = (int)h.EX, Y = (int)h.EY, Hall = true });
+    // ★2026-08-16 审计 B1：走廊门无 OverrideWidthFluff → DungeonGlobalDoors.cs:56
+    //   缺省 num4=10（20 列扫描窗；仅房间门 OverrideWidthFluff=3）。曾 Fluff=0
+    //   只扫门位单列 → 大量走廊门放不出。平台候选无 OverrideHeightFluff → hf=5。
+    if (Math.Abs(h.SDY) <= 0.1) dgDoors.Add(new DDoor { X = (int)h.SX, Y = (int)h.SY, Dir = 0, Hall = true, Fluff = 10, Clear = true });
+    else dgPlats.Add(new DPlat { X = (int)h.SX, Y = (int)h.SY, Hall = true, Hf = 5 });
+    if (Math.Abs(h.EDY) <= 0.1) dgDoors.Add(new DDoor { X = (int)h.EX, Y = (int)h.EY, Dir = 0, Hall = true, Fluff = 10, Clear = true });
+    else dgPlats.Add(new DPlat { X = (int)h.EX, Y = (int)h.EY, Hall = true, Hf = 5 });
 }
 // —— DungeonGlobalEarlyDualDungeonFeatures（Default：仅尾部 pit 陷阱循环，cs:662-700）——
 void DgEarly()
 {
+    bool pitTr = Environment.GetEnvironmentVariable("DG_PIT_TRACE") != null;
+    // —— DG_PIT44_FAIL：a44 强制拒绝（n==88）——判"-10,901 掷差是否全部来自 a44 翻转"——
+    int pitFailAt = -1;
+    {
+        var pf = Environment.GetEnvironmentVariable("DG_PIT_FAIL_AT");
+        if (pf != null) pitFailAt = int.Parse(pf);
+    }
+    int pitAtt = 0;
     int cnt = (int)(W * 2.0 * 1.0);
     for (int n = 0; n < cnt; n++)
     {
@@ -5206,11 +5722,16 @@ void DgEarly()
         if (n44 < dgDungeonY + 25) n44 = dgDungeonY + 25;
         if (n44 < worldSurface) n44 = worldSurface;
         int y2 = (int)r.Next(n44, dgBounds.B);
+        if (pitTr && n == 0) Console.Error.WriteLine($"PIT num44={n44} (bounds.T={dgBounds.T} dungeonY+25={dgDungeonY + 25} worldSurface={worldSurface})");
         bool flooded = dgPitFlood || (int)r.Next(8) == 0;
         int n45 = (int)r.Next(6, 10);
         int wid = (int)r.Next(8, 19), hgt = (int)r.Next(19, 46), ew = (int)r.Next(6, 10);
-        if (DgPitTrap(x3, y2, wid, hgt, ew, n45, flooded))
+        if (pitTr) Console.Error.WriteLine($"PIT a{pitAtt++} n={n} rolls={DgRolls()} x3={x3} y2={y2} fl={flooded} w={wid} h={hgt} ew={ew} td={n45} anchorW={wal[y2 * W + x3]} anchorA={act[y2 * W + x3]}");
+        bool pitHit = DgPitTrap(x3, y2, wid, hgt, ew, n45, flooded);
+        if (pitHit && pitFailAt >= 0 && n == pitFailAt) { pitHit = false; if (pitTr) Console.Error.WriteLine($"PIT a{pitAtt - 1} FORCED-FAIL"); }
+        if (pitHit)
         {
+            if (pitTr) Console.Error.WriteLine($"PITHIT a{pitAtt - 1} x3={x3} y2={y2} fl={flooded} n={n}");
             if (flooded) dgPitFlood = false;
             n += 1500;
         }
@@ -5309,9 +5830,11 @@ bool DgCanSupportSpike(int x, int y)
 }
 void DgSpikes()
 {
+    bool spTr = Environment.GetEnvironmentVariable("DG_SPIKE_TRACE") != null;
+    int spAtt = 0;
     int num = dgWallVariants[0];
     double num6 = Math.Max(1.0, 1.0 * 0.25);
-    int num7 = (int)(42f * (W / 4200f) * num6);
+    int num7 = (int)(42f * ((float)W / 4200f) * num6);   // ★cs:41 (float)maxTilesX/4200f——曾 int 除法（size1/2 世界 42≠64/84）
     for (int round = 0; round < 2; round++)
     {
         int n3 = 0, n4 = 1000, n5 = 0;
@@ -5320,6 +5843,7 @@ void DgSpikes()
             n3++;
             int x = (int)r.Next(dgBounds.L, dgBounds.R);
             int y = (int)r.Next(worldSurface + 25, dgBounds.B);
+            if (spTr) Console.Error.WriteLine($"SPK r{round} a{spAtt++} x={x} y={y} rolls={DgRolls()} wall={wal[y * W + x]} act={act[y * W + x]}");
             if (wal[y * W + x] == num && act[y * W + x] == 0)
             {
                 int d = 1;
@@ -5350,6 +5874,7 @@ void DgSpikes()
                 if (okA && okB && okC && okD2 && okE)
                 {
                     n5++;
+                    if (spTr) Console.Error.WriteLine($"SPKHIT r{round} a{spAtt - 1} x={x} y={y} wx={wx} wy={wy} d={d} n5={n5} rolls={DgRolls()}");
                     // ★D8：两段起点对齐原版（DungeonGlobalSpikes.cs:66-72/:163-170）——命中判定后
                     // 不预偏移，首刺落在命中格本身，while 条件查"步进方向下一格"支撑、放置当前格
                     //（:73-96/:170-193）。曾先 -1 使整段尖刺列整体错位一格、丢命中格尖刺。
@@ -5462,7 +5987,7 @@ void DgDoorsF()
         ushort bt = brickTile, bw = brickWall;
         int style = 13;
         if ((int)r.Next(3) == 0) style = dgDoorStyle;          // 1/3 换蓝/绿/粉门（无 OverrideStyle）
-        int num2 = 20, num4 = d.Fluff;
+        int num2 = 20, num4 = d.Fluff;   // ★B1：d.Fluff——房间门 3（OverrideWidthFluff）、走廊门 10（cs:56 缺省）
         int n5 = Math.Max(25, Math.Min(W - 25, d.X - num4));
         int n6 = Math.Max(25, Math.Min(W - 25, Math.Max(n5, d.X + num4 - 1)));
         int n7 = 100, n8 = 0, n9 = 0, n10 = 0;
@@ -5581,6 +6106,88 @@ void DgPlaceDoorAt(int i2, int j2, int style)
 // —— DungeonGlobalWallVariants（:1149-1252）——
 void DgWallVariants()
 {
+    // —— DG_W_SEARCH=<vanBase032>：W 段流偏移 Δ 搜索（判 pre-W 漂移量的诊断钩）——
+    // 以本 oracle 的 W 输入墙图为底，把流拨到 k+Δ 重建 15 锚，跑同款变体铺放，
+    // 与 vanilla 终态 96/97 图对分；命中 Δ≠0 ⇒ 漂移在 W 之前（E/Pi/S/D 段）。
+    var wSearch = Environment.GetEnvironmentVariable("DG_W_SEARCH");
+    if (wSearch != null)
+    {
+        var van = File.ReadAllBytes(wSearch + ".wal");
+        var snap = (ushort[])wal.Clone();
+        int k0 = DgRolls();
+        Console.Error.WriteLine($"DG_W_SEARCH k0={k0} bounds={dgBounds.L},{dgBounds.T},{dgBounds.R},{dgBounds.B}");
+        var urtW = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+        void setInnerAt(int offset)
+        {
+            dynamic nr = Activator.CreateInstance(urtW, seed)!;
+            for (int q = 0; q < offset; q++) nr.Next();
+            if (((object)r) is DgCR dc2) { dc2.inner = nr; dc2.n = offset; }
+            else r = nr;
+        }
+        // 阶段①：原始样本预取（Next()=InternalSample；Next(a,b)=(int)(s*C*(b-a))+a），
+        // 对每个 Δ 只做 45 次算术重建，按"锚点中心==其变体墙"打分（真 Δ 应近满分）。
+        int maxK = k0 + 40000 + 64;
+        var smp = new int[maxK + 1];
+        {
+            dynamic sr = Activator.CreateInstance(urtW, seed)!;
+            for (int q = 0; q <= maxK; q++) smp[q] = sr.Next();
+        }
+        const double C = 4.656612875245797E-10;
+        int bw = dgBounds.R - dgBounds.L, bh = dgBounds.B - dgBounds.T;
+        int bestEx = -1, bestDelta = int.MinValue, bestNear = -1;
+        var tops = new List<(int d, int ex, int near)>();
+        for (int delta = -k0; delta <= 40000; delta++)
+        {
+            int ex = 0, near = 0;
+            for (int t = 0; t < 15; t++)
+            {
+                int j = t % 3;
+                if (j == 0) continue;
+                double s0 = smp[k0 + delta + 3 * t] * C, s1 = smp[k0 + delta + 3 * t + 1] * C, s2 = smp[k0 + delta + 3 * t + 2] * C;
+                int n3 = dgBounds.L + (int)(s1 * bw), n4 = dgBounds.T + (int)(s2 * bh);
+                if (n3 < 2 || n3 >= W - 2 || n4 < 2 || n4 >= H - 2) continue;
+                ushort want = (ushort)dgWallVariants[j];
+                int vi = n4 * W + n3;
+                ushort vw = (ushort)(van[vi * 2] | (van[vi * 2 + 1] << 8));
+                if (vw == want) ex++;
+                int cnt = 0;
+                for (int a = -2; a <= 2 && cnt < 3; a++)
+                    for (int b = -2; b <= 2; b++)
+                    {
+                        int xx = n3 + a, yy = n4 + b;
+                        if (xx < 0 || xx >= W || yy < 0 || yy >= H) continue;
+                        int vj = yy * W + xx;
+                        if ((ushort)(van[vj * 2] | (van[vj * 2 + 1] << 8)) == want) cnt++;
+                    }
+                if (cnt >= 3) near++;
+            }
+            if (ex > bestEx || (ex == bestEx && near > bestNear)) { bestEx = ex; bestNear = near; bestDelta = delta; }
+            if (ex >= 5 || (ex >= 4 && near >= 6)) tops.Add((delta, ex, near));
+        }
+        Console.Error.WriteLine($"DG_W_SEARCH stage1 bestDelta={bestDelta} exact={bestEx}/10 near={bestNear}/10 (candidates={tops.Count})");
+        for (int ti = 0; ti < tops.Count && ti < 12; ti++) Console.Error.WriteLine($"DG_W_CAND delta={tops[ti].Item1} exact={tops[ti].Item2} near={tops[ti].Item3}");
+        // 阶段②：对 bestDelta 做一次完整铺放对分（击中/越界）
+        if (bestDelta != int.MinValue)
+        {
+            Buffer.BlockCopy(snap, 0, wal, 0, snap.Length * 2);
+            setInnerAt(k0 + bestDelta);
+            DgWallVariantsRun();
+            long hit = 0, over = 0;
+            for (int q = 0; q < W * H; q++)
+            {
+                ushort vw = (ushort)(van[q * 2] | (van[q * 2 + 1] << 8));
+                if (vw == 96 || vw == 97) { if (wal[q] == vw) hit++; }
+                else if (wal[q] == 96 || wal[q] == 97) over++;
+            }
+            Console.Error.WriteLine($"DG_W_VERIFY delta={bestDelta} hit={hit} over={over} (van-variants=56420)");
+        }
+        Buffer.BlockCopy(snap, 0, wal, 0, snap.Length * 2);
+        return;   // 诊断运行：不落正常 W 段（后续检查点无意义）
+    }
+    DgWallVariantsRun();
+}
+void DgWallVariantsRun()
+{
     for (int i = 0; i < 5; i++)
         for (int j = 0; j < 3; j++)
         {
@@ -5639,7 +6246,7 @@ void DgPlatforms()
         int style = -1;                                        // platformItemType 1384-1386 不消费（OverrideStyle=-1）
         int x = d.X, y = d.Y;
         int row = -1;
-        int n3 = 5, n4 = y < worldSurface + 50.0 ? 20 : 10;
+        int n3 = d.Hf, n4 = y < worldSurface + 50.0 ? 20 : 10; // ★B2：num3=OverrideHeightFluff（房间 3 / 走廊·入口 5，cs:44-57）
         double n5 = d.Hall ? 1.0 : 1.0;                        // HallSizeScalar=RoomSizeScalar=1
         n4 = (int)(n4 * n5);
         for (int j = y - n3; j <= y + n3; j++)
@@ -5733,22 +6340,41 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
         bool flag2 = false, flag3 = false, flag6 = false, flag7 = false, flag9 = false, flag10 = false, flag12 = false;
         if (chestTile == 21 && num9 != 0 && num7 >= worldSurface && DgIsDW(wal[num7 * W + i])) flag9 = true;
         if ((chestTile == 21 && (uint)(num9 - 23) <= 4u) || (chestTile == 467 && num9 == 13)) { flag9 = true; flag10 = true; }
-        // PlaceChest（:57828）：±2 无滚石 + 2×2 净空
+        // —— PlaceChest（:57828）→ TileObject.CanPlace chest21/467 全链（TileObject.cs:174-857）——
+        // ★G 落位根因修复（2026-08-17）：旧近似只查右列实心+2×2 act==0——缺左腿锚定门/
+        //   可切覆盖/边界 5 垫/巨石双腿门（读 typ 不读 act，:57832 语义）→ 15/18 箱位差+
+        //   C/G 重试流级联。chest TileObjectData（TileObjectData.cs:3459-3466）：Style2x2、
+        //   Origin(0,1)、AnchorBottom=SolidTile|SolidWithTop|Table|SolidSide ×2 列、
+        //   LavaDeath=false（LavaPlacement 承基 NotAllowed）、Alternates 空、RandomStyleRange=0。
+        //   调用点 PlaceChest(i-1, num7-1)（cs:36254）→ 内盒占 (px,py-1)..(px+1,py)、
+        //   锚腿 (px,num7)/(px+1,num7) 双过（num24==num25=2 → num35=1）。
         int px = i - 1, py = num7 - 1;
-        if (!DgInWorld(px, py, 0) || !DgInWorld(px + 1, py + 1, 0)) continue;
-        if (typ[(py + 1) * W + px] == 138 || typ[(py + 1) * W + px + 1] == 138) continue;
-        // 宝箱 TileObjectData Origin=(0,1)：2×2 占 (px,py-1)..(px+1,py)——首实心行上一格起
-        bool free = true;
-        for (int a = 0; a < 2 && free; a++)
-            for (int b = -1; b <= 0; b++)
-                if (act[(py + b) * W + px + a] != 0) { free = false; break; }
-        if (!free) continue;
-        for (int a = 0; a < 2; a++)
-            for (int b = -1; b <= 0; b++)
-            {
-                int ti = (py + b) * W + px + a;
-                act[ti] = 1; typ[ti] = chestTile;              // PlaceChestDirect 语义
-            }
+        {
+            int cx = px, cy = py - 1;                          // num8/num9 = 入参 - Origin(0,1)
+            bool ok = !(DG_BOULDERS_DG.Contains(typ[num7 * W + px]) || DG_BOULDERS_DG.Contains(typ[num7 * W + px + 1]));
+            if (ok) ok = cx >= 5 && cx + 2 <= W - 5 && cy >= 5 && cy + 2 <= H - 5;   // :215 边界 5 垫
+            for (int a = 0; ok && a < 2; a++)                  // 内盒 :337-375（LavaPlacement=NotAllowed；
+                for (int b = 0; b < 2; b++)                    // 地牢段无岩浆+DG_ISO liqT 清零 → 液检不触达）
+                {
+                    int ci = (cy + b) * W + cx + a;
+                    if (act[ci] == 0) continue;
+                    ushort t2 = typ[ci];
+                    if (!((DG_TILE_CUT_DG.Contains(t2) && t2 != 484 && t2 != 654) || DG_BREAK_PLACE_DG.Contains(t2)))
+                    { ok = false; break; }                      // 可覆盖=tileCut∖{484,654}∪BreakableWhenPlacing
+                }
+            if (ok && !(DgChestLegOK(px, num7) && DgChestLegOK(px + 1, num7))) ok = false;
+            if (dgCTrace) Console.Error.WriteLine($"DGC   k-scan num7={num7} legs=({typ[num7 * W + px]}/{act[num7 * W + px]},{typ[num7 * W + px + 1]}/{act[num7 * W + px + 1]}) interiorFree={ok} -> {(ok ? "PLACE" : "FAIL")}");
+            // ★cs:37578：PlaceChest 败 = 本调用即 return false——k 循环只在**首实心行**掷一次
+            //   （DgCanPlaceProbe 实证：vanilla 每失败调用恰 1 条 CanPlace 记录）。旧版续扫
+            //   会在更深处凭空落箱（原 15/18 箱位差的第二根因，与锚定门叠加）。
+            if (!ok) return false;
+            for (int a = 0; a < 2; a++)
+                for (int b = 0; b < 2; b++)
+                {
+                    int ti = (cy + b) * W + cx + a;            // TileObject.Place：占格 active+type
+                    act[ti] = 1; typ[ti] = chestTile;          // （可切格先 KillTile=无掷，覆盖等价）
+                }
+        }
         // —— 战利品掷骰（深/金/表三分支 + 尾段；与 JS rollChestLoot 同构 + Prefix(-1) 补齐）——
         bool surf = num7 < worldSurface + 25 && false;          // flag/flag6 恒 false
         bool gold = num7 < rockLayer;
@@ -5846,10 +6472,16 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
             if (r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }
             if (r.Next(2) == 0) r.Next(2, 5);
         }
-        // 尾段（cs:37361-37560）：地牢 flag9 1/8 砍刀 + 上锁箱 1/2 残片 + voice 门 1 掷
-        if (flag9 && !flag10) { if (r.Next(8) == 0) { } }
-        if (flag10) { if (r.Next(2) == 0) { } }
-        r.Next(12);
+        // 尾段（cs:37414-37560）：21 块 = flag9 1/8 砍刀（:37432 无 !flag10 门——上锁箱也掷！）
+        //   + (num9∈23..27)&&1/2 残片 5234（:37476）+ voice 门 Next(12)（:37554，命中再
+        //   GetRandomVoiceItem=Next(14)）；467 块独立 = (num9==13)&&Next(2) 残片（:37543）。
+        //   ★U 批修正（DgItemProbe 逐 SetDefaults/Prefix 实证 call0 段账）：旧近似把
+        //   flag9 Next(8) 误挂 !flag10 门 + 残片门误并 flag10 → 上锁 21 箱每箱少掷 1 颗
+        //   → C 段起全段流偏（vanilla 尾 = Next(8)+Next(2)+Next(12) 三掷）。
+        if (flag9 && chestTile == 21) { if (r.Next(8) == 0) { } }   // :37432（21 尾块内——467 走 467 块无此掷）
+        if (chestTile == 21 && num9 >= 23 && num9 <= 27) { if (r.Next(2) == 0) { } }
+        else if (chestTile == 467 && num9 == 13) { if (r.Next(2) == 0) { } }
+        if (r.Next(12) == 0) r.Next(14);              // AddVoiceChangeItemToChest → GetRandomVoiceItem
         return true;
     }
     return false;
@@ -5857,6 +6489,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
 // —— DungeonGlobalBiomeChests.BiomeChests（:104-180，Default 分支）——
 void DgBiomeChests()
 {
+    if (dgCTrace) Console.Error.WriteLine($"DGC bounds L={dgBounds.L} R={dgBounds.R} T={dgBounds.T} B={dgBounds.B} ws={worldSurface} ent={(dgEntExists ? $"{dgEntBounds.L},{dgEntBounds.T},{dgEntBounds.R},{dgEntBounds.B}" : "none")}");
     int num = 5;
     for (int i = 0; i < num; i++)
     {
@@ -5868,6 +6501,7 @@ void DgBiomeChests()
             if (n3 <= 0) break;
             int x = (int)r.Next(dgBounds.L, dgBounds.R);
             int y = (int)r.Next(worldSurface, dgBounds.B);
+            if (dgCTrace) Console.Error.WriteLine($"DGC i={i} n3={n3} roll={DgRolls()} try=({x},{y}) ent={(dgEntExists && dgEntBounds.Contains(x, y))} dw={DgIsDW(wal[y * W + x])} act={act[y * W + x]}");
             if ((dgEntExists && dgEntBounds.Contains(x, y)) || !DgIsDW(wal[y * W + x]) || act[y * W + x] != 0) continue;
             ushort chestTile = 21;
             int mainItem = 0, chestStyle = 0;
@@ -5936,6 +6570,7 @@ void DgBookshelves()
         num++;
         int x = (int)r.Next(dgBounds.L, dgBounds.R);
         int y = (int)r.Next(dgBounds.T, dgBounds.B);
+        if (dgCTrace) Console.Error.WriteLine($"DGB iter n3={num3} n={num} roll={DgRolls()} try=({x},{y}) dw={DgIsDW(wal[y * W + x])} act={act[y * W + x]}");
         bool flag = true;
         if (DgIsDW(wal[y * W + x]) && act[y * W + x] == 0)
         {
@@ -5967,13 +6602,18 @@ void DgBookshelves()
                     if (k > 5)
                     {
                         int n10 = (int)r.Next(1, 4);
+                        if (dgCTrace) Console.Error.WriteLine($"DGB shelf start=({x},{y}) n10={n10} flag3={flag3} roll={DgRolls()}");
                         while (n10 > 0)
                         {
                             int ti = y * W + x;
-                            act[ti] = 1; typ[ti] = 19;          // frameY = 18*shelfStyle（不入哈希）
+                            // ★B3：frameY = 18*shelfStyles[档]（cs:112-138：墙==wallVariants[1]/[2]
+                            //   换档；Default GetPlatformStyle 恒 -1 不覆写）。曾误用 dgPlatforms
+                            //   的 platformStyle（那是平台件样式）→ 书架长成主题平台贴图。
+                            //   frameY 通道不在 typ/act/wal/liq dump 内，此处仅注释留档。
+                            act[ti] = 1; typ[ti] = 19;
                             if (flag3)
                             {
-                                DgPlaceSimple(x, y - 1, 50);
+                                DgPOnTable(x, y - 1, 50);          // ★PlaceTile(50)→PlaceOnTable1x1（平台19 ∈ tileTable）
                                 if ((int)r.Next(50) == 0 && (double)y > (worldSurface + rockLayer) / 2.0) { }
                             }
                             x += n7;
@@ -5985,7 +6625,7 @@ void DgBookshelves()
                             x = num8; y--;
                             int n12 = (int)r.Next(4) == 0 ? 1 : 0;
                             n12 = n12 == 0 ? 13 : 49;
-                            DgPlaceSimple(x, y, n12);
+                            DgPOnTable(x, y, n12);                 // ★13/49 同为 PlaceOnTable1x1
                             if (DgInWorld(x, y, 0) && typ[y * W + x] == 13) r.Next(2);
                         }
                     }
@@ -6039,7 +6679,11 @@ void DgLights()
                     bool blocked = false;
                     for (int k = 0; k < 15; k++) if (DgInWorld(x, cy + k, 0) && DgSolid(x, cy + k)) { blocked = true; break; }
                     if (lgTr) Console.WriteLine($"DG CH x={x} cy={cy} blocked={(blocked ? 1 : 0)}");
-                    if (!blocked && DgPlaceChand(x, cy))
+                    // ★2026-08-16 审计 B4：cs:77-78 吊灯支要求 GetStyleForWall!=null ——
+                    //   Default 样式 WallIsInStyle 仅 wall==主砖墙命中，变体墙(94-99)
+                    //   返 null → 跳过吊灯直接落灯笼。曾变体墙也试吊灯（Next(7) 掷序
+                    //   两侧一致，仅放置集分叉）。
+                    if (!blocked && wal[cy * W + x] == dgWall && DgPlaceChand(x, cy))
                     {
                         placed = true; num2 = 0; num4++;
                         DgSwitch(x, cy);
@@ -6298,73 +6942,93 @@ bool DgFurnAt(int i, int j, ref int alch, ref int bew, bool stricter)
         {
             if (alch > 0)
             {
-                if (DgPlaceSimple(num3, j, 355)) { alch--; return true; }
+                if (DgP3x3(num3, j, 355)) { alch--; return true; }
             }
-            else if (DgPlaceSimple(num3, j, 354)) { bew--; return true; }
+            else if (DgP3x3(num3, j, 354)) { bew--; return true; }
         }
         else if (num18 == 0)
         {
-            if (DgPlaceSimple(num3, j, DgTileOf(iTable)))
+            if (DgP3x2(num3, j, DgTileOf(iTable)))
             {
                 if (iChair > -1)
                 {
-                    if (DgInWorld(num3 - 2, j, 0) && act[j * W + num3 - 2] == 0) DgPlaceSimple(num3 - 2, j, DgTileOf(iChair));
-                    if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgPlaceSimple(num3 + 2, j, DgTileOf(iChair));
+                    if (DgInWorld(num3 - 2, j, 0) && act[j * W + num3 - 2] == 0) DgP1x2(num3 - 2, j, DgTileOf(iChair));
+                    if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgP1x2(num3 + 2, j, DgTileOf(iChair));
                 }
                 for (int n = num3 - 1; n <= num3 + 1; n++)
                 {
                     if ((int)r.Next(2) != 0 || !DgInWorld(n, j - 2, 0) || act[(j - 2) * W + n] != 0) continue;
                     int n23 = (int)r.Next(5);
-                    if (iCandle > -1 && n23 <= 1) DgPlaceSimple(n, j - 2, DgTileOf(iCandle));
-                    else if (n23 == 2) DgPlaceSimple(n, j - 2, 49);
-                    else if (n23 == 3) DgPlaceSimple(n, j - 2, 50);
-                    else if (n23 == 4) DgPlaceSimple(n, j - 2, 103);
+                    ushort lt = DgInWorld(n - 1, j - 2, 0) ? typ[(j - 2) * W + n - 1] : (ushort)0;   // tileLighted 门（ghost type 亦读）
+                    if (iCandle > -1 && n23 <= 1 && !TILE_LIGHTED.Contains(lt)) DgPOnTable(n, j - 2, DgTileOf(iCandle));
+                    else if (n23 == 2 && !TILE_LIGHTED.Contains(lt)) DgPOnTable(n, j - 2, 49);
+                    else if (n23 == 3) DgPOnTable(n, j - 2, 50);
+                    else if (n23 == 4) DgP2x1(n, j - 2, 103);
                 }
                 return true;
             }
         }
         else if (num18 == 1)
         {
-            if (DgPlaceSimple(num3, j, DgTileOf(iWork)))
+            if (DgP2x1(num3, j, DgTileOf(iWork)))
             {
                 if (iChair > -1)
                 {
                     if ((int)r.Next(2) == 0)
                     {
-                        if (DgInWorld(num3 - 1, j, 0) && act[j * W + num3 - 1] == 0) DgPlaceSimple(num3 - 1, j, DgTileOf(iChair));
+                        if (DgInWorld(num3 - 1, j, 0) && act[j * W + num3 - 1] == 0) DgP1x2(num3 - 1, j, DgTileOf(iChair));
                     }
-                    else if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgPlaceSimple(num3 + 2, j, DgTileOf(iChair));
+                    else if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgP1x2(num3 + 2, j, DgTileOf(iChair));
                 }
                 for (int n = num3; n <= num3 + 1; n++)
                 {
                     if ((int)r.Next(2) != 0 || !DgInWorld(n, j - 1, 0) || act[(j - 1) * W + n] != 0) continue;
                     int n26 = (int)r.Next(5);
-                    if (iCandle > -1 && n26 <= 1) DgPlaceSimple(n, j - 1, DgTileOf(iCandle));
-                    else if (n26 == 2) DgPlaceSimple(n, j - 1, 49);
-                    else if (n26 == 3) DgPlaceSimple(n, j - 1, 50);
-                    else if (n26 == 4) DgPlaceSimple(n, j - 1, 103);
+                    ushort lt = DgInWorld(n - 1, j - 1, 0) ? typ[(j - 1) * W + n - 1] : (ushort)0;
+                    if (iCandle > -1 && n26 <= 1 && !TILE_LIGHTED.Contains(lt)) DgPOnTable(n, j - 1, DgTileOf(iCandle));
+                    else if (n26 == 2 && !TILE_LIGHTED.Contains(lt)) DgPOnTable(n, j - 1, 49);
+                    else if (n26 == 3) DgPOnTable(n, j - 1, 50);
+                    else if (n26 == 4) DgP2x1(n, j - 1, 103);
                 }
                 return true;
             }
         }
-        else if (num18 == 2) { if (iVase > -1 && DgPlaceSimple(num3, j, DgTileOf(iVase))) return true; }
-        else if (num18 == 3) { if (iBook > -1) DgPlaceSimple(num3, j, DgTileOf(iBook)); }
+        else if (num18 == 2) { if (iVase > -1 && DgP2xX(num3, j, DgTileOf(iVase), 3)) return true; }
+        else if (num18 == 3) { if (iBook > -1) DgP3x4(num3, j, DgTileOf(iBook)); }
         else if (num18 == 4)
         {
+            // ★cs:794-807 椅分支：Next(2) 方向掷（frameX+18 镜像，帧不入 dump 但掷必耗）
             if (iChair > -1)
             {
-                DgPlaceSimple(num3, j, DgTileOf(iChair));
+                bool mir = (int)r.Next(2) == 0;
+                DgP1x2(num3, j, DgTileOf(iChair));
                 if (DgInWorld(num3, j, 0) && act[j * W + num3] != 0 && typ[j * W + num3] == DgTileOf(iChair)) return true;
             }
         }
-        else if (num18 == 5) { if (iBed > -1 && DgPlace4x2(num3, j, DgTileOf(iBed))) return true; }
-        else if (num18 == 6) { if (iPiano > -1 && DgPlaceSimple(num3, j, DgTileOf(iPiano))) return true; }
-        else if (num18 == 7) { if (iDress > -1 && DgPlaceSimple(num3, j, DgTileOf(iDress))) return true; }
-        else if (num18 == 8) { if (iSofa > -1 && DgPlaceSimple(num3, j, DgTileOf(iSofa))) return true; }
-        else if (num18 == 9) { if (iTub > -1 && DgPlace4x2(num3, j, DgTileOf(iTub))) return true; }
-        else if (num18 == 10) { if (iLamp > -1 && DgPlaceSimple(num3, j, DgTileOf(iLamp))) return true; }
-        else if (num18 == 11) { if (iCand > -1 && DgPlaceSimple(num3, j, DgTileOf(iCand))) return true; }
-        else if (num18 == 12) { if (iClock > -1 && DgPlaceSimple(num3, j, DgTileOf(iClock))) return true; }
+        else if (num18 == 5)
+        {
+            // ★cs:820-829 床分支：Next(2) direction 掷 → Place4x2(dir)
+            if (iBed > -1)
+            {
+                int dir = (int)r.Next(2) == 0 ? 1 : -1;
+                if (DgP4x2(num3, j, DgTileOf(iBed), dir)) return true;
+            }
+        }
+        else if (num18 == 6) { if (iPiano > -1 && DgP3x2(num3, j, DgTileOf(iPiano))) return true; }
+        else if (num18 == 7) { if (iDress > -1 && DgP3x2(num3, j, DgTileOf(iDress))) return true; }
+        else if (num18 == 8) { if (iSofa > -1 && DgP3x2(num3, j, DgTileOf(iSofa))) return true; }
+        else if (num18 == 9)
+        {
+            // ★cs:833-842 浴缸分支：Next(2) direction 掷
+            if (iTub > -1)
+            {
+                int dir = (int)r.Next(2) == 0 ? 1 : -1;
+                if (DgP4x2(num3, j, DgTileOf(iTub), dir)) return true;
+            }
+        }
+        else if (num18 == 10) { if (iLamp > -1 && DgP1xX(num3, j, DgTileOf(iLamp), 3)) return true; }
+        else if (num18 == 11) { if (iCand > -1 && DgP2x2(num3, j, DgTileOf(iCand))) return true; }
+        else if (num18 == 12) { if (iClock > -1 && DgP2xX(num3, j, DgTileOf(iClock), 5)) return true; }
     }
     return false;
 }
@@ -6630,7 +7294,11 @@ int DgPaintingEntry(int x, int y)
 }
 void DgPlacePainting(int x, int y, int tile)
 {
-    DgPlaceSimple(x, y, tile);
+    // ★cs:59962-59985：240→Place3x3Wall / 241→Place4x3Wall / 242→Place6x4Wall（帧不入 dump）
+    if (tile == 240) DgP3x3Wall(x, y, tile);
+    else if (tile == 241) DgP4x3Wall(x, y, tile);
+    else if (tile == 242) DgP6x4Wall(x, y, tile);
+    else DgPlaceSimple(x, y, tile);
     if (wal[y * W + x] == 87) dgLihzPlaced++;
 }
 // —— DungeonGlobalBanners（:24-104）——
@@ -6675,7 +7343,8 @@ void DgBanners()
         num8 *= 2;
         num8 += (int)r.Next(2);
         int style = dgBanner[num8];
-        DgPlaceSimple(x, y, 91);
+        // ★cs:100 PlaceTile(91) → PlaceBanner（cs:46270 竖 3 格，上挂实心非 solidTop）
+        DgPBanner(x, y, 91);
     }
 }
 // ★#29 Corruption（cs:13919）与 #32 Dungeon（cs:14816）尚未转录——转录后须插在
@@ -9395,6 +10064,20 @@ sealed class DPlat
 {
     public int X, Y;
     public bool Hall;
+    public int Hf = 5;             // OverrideHeightFluff（B2：房间 3 / 走廊·入口缺省 5）
+}
+// Dungeon pass 段 genRand 计数包装（流对账用：passchain 指纹只计 Main.rand 掷数，
+// 结构内 new UnifiedRandom(seed) 子流不计——两口径分离见 2026-08-17 段落盘注）
+sealed class DgCR
+{
+    public dynamic inner = null!;
+    public int n;
+    public static bool LogRolls;                                  // DG_ROLL_LOG=1：逐掷值日志（stderr）
+    void Log(string op, object ret) { if (LogRolls) Console.Error.WriteLine($"DGROLL {n} {op} -> {ret}"); }
+    public int Next() { n++; var v = inner.Next(); Log("Next()", v); return v; }
+    public int Next(int maxValue) { n++; var v = inner.Next(maxValue); Log($"Next({maxValue})", v); return v; }
+    public int Next(int minValue, int maxValue) { n++; var v = inner.Next(minValue, maxValue); Log($"Next({minValue},{maxValue})", v); return v; }
+    public double NextDouble() { n++; var v = inner.NextDouble(); Log("NextDouble()", v); return v; }
 }
 
 // PrefixLegacy.Prefixes 前缀池（PrefixLegacy.cs:9-64）+ PrefixID.Sets.ReducedNaturalChance（:9）

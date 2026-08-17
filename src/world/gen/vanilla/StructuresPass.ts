@@ -1364,6 +1364,8 @@ function placeOasisPlant(st: TileStore, rng: RNG, gs: GenState, X: number, Y: nu
 
 /** pass 96 本体。Skyblock.denyAllGeneration（cs:21117）→ 整段跳过（零掷骰）。 */
 export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const g0 = globalThis as { __swCcCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swCcCap?.(gs, st); } catch { /* probe */ }
   if (gs.seedFlags.skyblock) return;
   const w = st.w;
   const num = 8;                             // cs:21120（remixWorldGen=2 不触发）

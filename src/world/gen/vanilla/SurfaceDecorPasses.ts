@@ -847,6 +847,8 @@ const putVine = (st: TileStore, x: number, y: number, id: number): void => {
 
 /** Vines pass（cs:20338-20590）1:1：六类藤蔓逐列垂直生长 + 丛林蜂巢凹龛 444 */
 export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const g0 = globalThis as { __swVnCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swVnCap?.(gs, st); } catch { /* probe */ }
   const w = st.w, h = st.h;
   const grassWalls = new Set([68, 65, 66, 63]);
   for (let i = 5; i < w - 5; i++) {

@@ -368,6 +368,8 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
 
 // ============ SpeleothemsAndGemTrees 钟乳石+宝石树（:22196-22282） ============
 export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const g0 = globalThis as { __swSpCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swSpCap?.(gs, st); } catch { /* probe */ }
   const f = gs.seedFlags ?? {};
   const alwaysTry = !!(f.tenthAnniversary || f.drunkWorld);
   const oceanDepths = (x: number, y: number): boolean => {

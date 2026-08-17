@@ -20,16 +20,22 @@
 //      炸药陷阱屋——ShapeRunner(10,20,dir) 矿石地板 + Circle(5) 房间 + 炸药桶 141 +
 //      起爆器 411 + 红线直连。位置 RandomWorldPoint(rockLayer, beachDistance, 200,
 //      beachDistance)。数量 ExplosiveTrapCount 14-29 × WorldArea。
-//   5. TrackGenerator(cs:22014-22091,实现见 TrackPass.ts):长/标准矿轨 314。
-//   6. placeLavaTrap(cs:22093-22127 调用 + :8648 实现):地狱熔岩陷阱——
+//   5. Mahogany 丛林活桃花心木树(cs:22052-22077 + MahoganyTreeBiome.cs):
+//      LivingTreeCount 6-11 ×WorldWidth 棵——五段干身 383 + 中心井墙 78 + 冠枝
+//      (ShapeBranch)+叶球 384(Circle(4)+Blotches(4,2))+四根(ShapeRoot)+
+//      常春藤箱(style10)。★2026-08-17 前整段缺失 = 尾部全部子群系掷流漂移。
+//   6. TrackGenerator(cs:22014-22091,实现见 TrackPass.ts):长/标准矿轨 314。
+//   7. placeLavaTrap(cs:22093-22127 调用 + :8648 实现):地狱熔岩陷阱——
 //      岩浆湖底致动石栅 + 压板 135 style7 + 红线。w*0.02 次 × 10150 尝试。
 // 已知偏差(注明):
-//  - 无全局 StructureMap:仅本 pass 内部互斥保护(原版结构与全图其它结构共享保护图);
-//    DeadMans 候选的 structures.CanPlace(GeneralPlacementTiles, pad 10)跳过
+//  - DeadMans 候选序 = chest sink(world.chests)创建序——与 Main.chest 槽位序一致
+//    的前提是全管线宝箱按原版注册序入 sink(2026-08-17 由栅格扫描归正;上游 pass
+//    债务期个别箱位/缺箱仍会错位,见 docs 尾批 2-A 备案)
 //  - Main.tileDungeon 用 dungeon 砖 tile 近似(41/43/44),容器用 chest 族 key 近似
-//  - DeadMans 候选枚举用栅格扫描替代 Main.chest 下标序(候选集相同,掷骰总数一致)
 //  - 剑冢 ShapeData 枚举序:.NET HashSet<Point16> 不可移植,藤蔓(382)/铺草(3/73)
 //    两步按行主序近似——掷骰总数一致,逐格落点可能分叉
+//  - Mahogany SetTile(383/384)/PlaceWall(78) 的 TileFrame/SquareWallFrame 帧写
+//    未移植(帧落 0;四通道无帧,dump 对拍不受影响,渲染端帧备案)
 //  - TurnGoldChestIntoDeadMansChest 的 1/3 战利品前插(Item 5007)无 chest sink,掷骰保留、
 //    写入跳过
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
@@ -39,6 +45,9 @@ import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
+import { vanGenSolidType } from './GenSolid';
+import { placeBuriedChest, nextJungleItem, type ChestSink } from './BuriedChestsPass';
+import { GENERAL_PLACEMENT_FORBID } from './GenState';
 
 const SAND = TILE_BY_KEY['sand']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!;
@@ -83,12 +92,6 @@ const TALL_PLANTS = TILE_BY_KEY['v_73_forest_tall_plants']!;
 const FLOWER_VINES = TILE_BY_KEY['v_382_flower_vines']!;   // ActionVines(3,5,382)
 /** Modifiers.SkipTiles(191,192):竖井挖穿活木/活木叶(EnchantedSwordBiome.cs:90) */
 const SHAFT_SKIP = idsByVanillaSheet(191, 192);
-/** TileID.Sets.GeneralPlacementTiles(TileID.cs:311)黑名单——CreateBoolSet(true, …)
- *  = 默认全 true、列出的 id 置 false;剑冢克隆后再剔 21/467(cs:63-64,本就在黑名单) */
-const PLACEMENT_FORBID = idsByVanillaSheet(
-  225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70, 151, 21, 31, 696, 467,
-  12, 665, 639, 138, 664, 711, 712, 713, 714, 715, 716,
-);
 /** ThinIceBiome.OnlyTiles(147,161,224,0,1):雪/冰/细雪/泥/石 → 162 */
 const ICE_SRC = idsByVanillaSheet(147, 161, 224, 0, 1);
 /** ThinIceBiome.SkipTiles(21,467,226,237) */
@@ -122,7 +125,9 @@ function solidTileStrict(st: TileStore, x: number, y: number): boolean {
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
 
-export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests?: ChestSink): void {
+  const g0 = globalThis as { __swMbCap?: (gs: GenState, st: TileStore, chests?: ChestSink) => void };
+  try { g0.__swMbCap?.(gs, st, chests); } catch { /* probe */ }
   // Skyblock.denyAllGeneration 包裹整个 pass(cs:21787)——1.4.5.6 skyblock 种子全段跳过
   if (gs.seedFlags.skyblock) return;
   const { w, h } = st;
@@ -140,7 +145,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
 
   // ---- 1. Dead Man's Chests(cs:21801-21919 段 21801-21819)----
   {
-    const deadMans = new DeadMansChestBiome(st, rng, gs);
+    const deadMans = new DeadMansChestBiome(st, rng, gs, chests ?? []);
     // GetPossibleChestsToTrapify 先于计数掷骰(cs:21806-21807)——每候选 4 掷
     const possible = deadMans.getPossibleChests();
     const deadCount = rng.int(scW(10), scW(20));   // DeadManChests 10-20 ×WorldWidth
@@ -227,6 +232,22 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (placeMiningExplosives(st, rng, gs, ox, oy)) placed++;
   }
 
+  // ---- 4.5 Mahogany 丛林活桃花心木树(cs:22052-22077 + MahoganyTreeBiome.cs)----
+  // ★2026-08-17 前整段缺失:原版在 MiningExplosives 与 TrackGenerator 之间,
+  //   LivingTreeCount 6-11 ×WorldWidth 棵(尝试上限 20000)——缺失 = 尾部全部
+  //   子群系(矿轨/岩浆陷阱)及 @101 摆放整体掷流漂移(尾批 2-A 实锤 -43,845 掷)。
+  {
+    const treeCount = rng.int(scW(6), scW(11));   // LivingTreeCount 6-11 ×WorldWidth
+    let mDone = 0, mTries = 0;
+    while (mDone < treeCount && mTries < 20000) {
+      // RandomWorldPoint(worldSurface+50, 50, 500, 50):X=Next(50,W-50), Y=Next(ws+50,H-500)
+      const ox = rng.int(50, w - 51);
+      const oy = rng.int(Math.floor(gs.worldSurface) + 50, h - 501);
+      if (placeMahoganyTree(st, rng, gs, chests, ox, oy)) mDone++;
+      mTries++;
+    }
+  }
+
   // ---- 5. TrackGenerator(cs:22014-22091)----
   const trackGen = new TrackGenerator(st, gs);
   const trackFailLimit = Math.floor(w / 2);        // num25
@@ -289,7 +310,8 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   const num2 = rng.int(1, 4); // Next(1,5)
   const rect: Rect = { x0: ox - num, y0: oy - num, x1: ox + num + 1, y1: oy + num + 1 };
   // structures.CanPlace(rect, pad 0)（CampsiteBiome.cs:20）——全局保护图互斥
-  if (!canPlaceStructure(gs, rect, 0)) return false;
+  //   + GeneralPlacementTiles 默认内容扫描（单参重载）
+  if (!canPlaceStructure(gs, rect, 0, st)) return false;
   // (num+3)² 内禁地牢砖/容器/神庙砖/祭坛(cs:24-35)
   {
     const n3 = num + 3;
@@ -519,7 +541,8 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   if (solid < Math.trunc(total / 2)) return false; // cs:35-38
   const area: Rect = { x0: x - 15, y0: y - 10, x1: x + 15, y1: y + 10 };
   // structures.CanPlace(area, pad 0)（MiningExplosivesBiome.cs:40）——全局保护图互斥
-  if (!canPlaceStructure(gs, area, 0)) return false;
+  //   + GeneralPlacementTiles 默认内容扫描（单参重载）
+  if (!canPlaceStructure(gs, area, 0, st)) return false;
   // 矿石地板(cs:44)
   for (const key of data) {
     const qx = key % st.w, qy = Math.trunc(key / st.w);
@@ -602,6 +625,297 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
 }
 
 // ============================================================
+// 4.5 MahoganyTreeBiome(Terraria.GameContent.Biomes/MahoganyTreeBiome.cs:9-84 全文)
+// 丛林活桃花心木树:树干 383(五段矩形上下堆叠,正弦横向摆动)+墙 78 中心井+
+// 顶部分枝(ShapeBranch×4)+叶球(Circle(4)+Blotches(4,2)→384)+四条根
+// (ShapeRoot)+常春藤箱(style10,flag4 ivy)。掷骰:成功路径 3(摆幅)+每枝
+// 1(长度)+每段 2(旋转)+每叶球格 2+(Blotches)+每根步 2(NextFloat×2)+
+// 常春藤主件序+AddBuriedChest 战利品。
+// ============================================================
+
+const LIVING_MAHOGANY = TILE_BY_KEY['v_383_living_mahogany_block']!;
+const LIVING_M_LEAVES = TILE_BY_KEY['v_384_living_mahogany_leaves_block']!;
+/** MahoganyTreeBiome.SkipTiles(21,467,226,237) */
+const MAHOGANY_SKIP = idsByVanillaSheet(21, 467, 226, 237);
+/** C# float 精度 π(MahoganyTreeBiome 正弦族字面量 3.1415927410125732,非 Math.PI) */
+const PI_F = 3.1415927410125732;
+
+/** Utils.PlotLine(Tools 端 1:1,DesertPass 同款):jump=false 时斜步双落点;
+ *  start==end 恰落一次;否则终点本身不落。 */
+function mahogPlotLine(
+  x0: number, y0: number, x1: number, y1: number,
+  plot: (x: number, y: number) => boolean, jump: boolean,
+): boolean {
+  if (x0 === x1 && y0 === y1) return plot(x0, y0);
+  let sx0 = x0, sy0 = y0, sx1 = x1, sy1 = y1;
+  const flag = Math.abs(sy1 - sy0) > Math.abs(sx1 - sx0);
+  if (flag) {
+    const tx = sx0; sx0 = sy0; sy0 = tx;
+    const tx1 = sx1; sx1 = sy1; sy1 = tx1;
+  }
+  const num = Math.abs(sx1 - sx0), num2 = Math.abs(sy1 - sy0);
+  let num3 = Math.trunc(num / 2), num4 = sy0;
+  const num5 = sx0 < sx1 ? 1 : -1, num6 = sy0 < sy1 ? 1 : -1;
+  for (let i = sx0; i !== sx1; i += num5) {
+    if (!plot(flag ? num4 : i, flag ? i : num4)) return false;
+    num3 -= num2;
+    if (num3 >= 0) continue;
+    num4 += num6;
+    if (!jump && !plot(flag ? num4 : i, flag ? i : num4)) return false;
+    num3 += num;
+  }
+  return true;
+}
+
+/** MahoganyTreeBiome.Place(cs:9-84)1:1 */
+function placeMahoganyTree(
+  st: TileStore, rng: RNG, gs: GenState, chests: ChestSink | undefined, ox: number, oy: number,
+): boolean {
+  const sink: ChestSink = chests ?? [];
+  // ① Find((origin.X-3, origin.Y), Chain(Down(200), IsSolid().AreaAnd(6,1)))(cs:11-13)
+  const condSolid = (x: number, y: number): boolean => {
+    if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) return false;   // InWorld(x,y,10)
+    const i = st.idx(x, y);
+    return st.flags[i] !== 0 && vanGenSolidType(st.type[i]);                  // Main.tileSolid
+  };
+  let rx = -1, ry = -1;
+  {
+    const px = ox - 3;
+    let found = false;
+    for (let i = 0; i < 200 && oy + i < st.h; i++) {
+      const y = oy + i;
+      let allSolid = true;
+      for (let k = px; k < px + 6 && allSolid; k++) {
+        if (!condSolid(k, y)) allSolid = false;     // AreaAnd(6,1):[px,px+5]×[y,y]
+      }
+      if (allSolid) { rx = px; ry = y; found = true; break; }
+    }
+    if (!found) return false;
+  }
+  // ② Find((result.X, result.Y-5), Chain(Up(120), IsSolid().AreaOr(6,1)))(cs:15-21)
+  let r2y = -1;
+  {
+    const y0 = ry - 5;
+    let found = false;
+    for (let i = 0; i < 120; i++) {
+      const y = y0 - i;
+      let anySolid = false;
+      for (let k = rx; k < rx + 6 && !anySolid; k++) {
+        if (condSolid(k, y)) anySolid = true;       // AreaOr(6,1)
+      }
+      if (anySolid) { r2y = y; found = true; break; }
+    }
+    if (!found || ry - 5 - r2y > 60 || ry - r2y < 30) return false;
+  }
+  // ③ structures.CanPlace(Rectangle(result.X-30, result.Y-60, 60, 90))(cs:23-25)
+  if (!canPlaceStructure(gs, { x0: rx - 30, y0: ry - 60, x1: rx + 30, y1: ry + 30 }, 0, st)) return false;
+  // ④ 50×50 TileScanner 材质门(cs:27-44):非 drunk 必扫(零掷骰)
+  {
+    const idOf = (vanilla: number): number => {
+      for (const t of idsByVanillaSheet(vanilla)) return t;
+      return -1;
+    };
+    const DIRT_T = idOf(0), MUD_T = idOf(59), JG_T = idOf(60), SNOW_T = idOf(147);
+    const STONE_T = idOf(1), EBON_T = idOf(25), PEARL_T = idOf(203), CRIM_T = idOf(117);
+    const ICE_T = idOf(161), FROZEN_T = idOf(163), FLOWER_T = idOf(200), FLOWER2_T = idOf(164);
+    const countIds = new Set([DIRT_T, MUD_T, JG_T, SNOW_T, ICE_T, FROZEN_T, FLOWER_T, FLOWER2_T, STONE_T, EBON_T, PEARL_T, CRIM_T]);
+    const counts = new Map<number, number>();
+    for (let dx = 0; dx < 50; dx++) {
+      for (let dy = 0; dy < 50; dy++) {
+        const x = rx - 25 + dx, y = ry - 25 + dy;
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        if (!st.flags[i] || !countIds.has(st.type[i])) continue;
+        counts.set(st.type[i], (counts.get(st.type[i]) ?? 0) + 1);
+      }
+    }
+    const c = (t: number): number => counts.get(t) ?? 0;
+    const num = c(STONE_T) + c(EBON_T) + c(PEARL_T) + c(CRIM_T);
+    const num2 = c(DIRT_T) + num;
+    const num3 = c(MUD_T) + c(JG_T);
+    const num4 = c(ICE_T) + c(FROZEN_T) + c(FLOWER_T) + c(FLOWER2_T);
+    if (c(SNOW_T) + num4 > num3 || num2 > num3 || num3 < 50) return false;
+  }
+  // ⑤ 摆幅三掷(cs:46-52)
+  const num5 = Math.trunc((ry - r2y - 9) / 5);
+  const num6 = num5 * 5;
+  let num7 = 0;
+  const num8 = rng.next() + 1.0;
+  let num9 = rng.next() + 2.0;
+  if (rng.nextInt(2) === 0) num9 = -num9;
+  // 干身段动作链(纯写入,零掷骰):
+  //   A: SkipTiles→SkipWalls(87)→RemoveWall→SetTile(383)→SetFrames
+  //   B/C: SkipTiles→SkipWalls(87)→ClearTile(frameNeighbors)→PlaceWall(78)
+  const setMahog = (x: number, y: number): void => {
+    if (!st.inBounds(x, y)) return;
+    const i = st.idx(x, y);
+    // SkipTiles(21,467,226,237):活性且命中 → 整链 Fail(跳过本格)
+    if (st.flags[i] && MAHOGANY_SKIP.has(st.type[i])) return;
+    if (st.wall[i] === 87) return;                       // SkipWalls(87)
+    // RemoveWall → SetTile(383):Clear(~(Wiring|Actuator)) 连墙带液全清 + type
+    st.wall[i] = 0;
+    st.liquid[i] = 0; st.liquidType[i] = 0;
+    st.frameX[i] = 0; st.frameY[i] = 0;
+    st.slope[i] = 0; st.half[i] = 0;
+    st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;       // SetFrames 帧写入备案:帧 0
+  };
+  const shaftCell = (x: number, y: number): void => {
+    if (!st.inBounds(x, y)) return;
+    const i = st.idx(x, y);
+    if (st.flags[i] && MAHOGANY_SKIP.has(st.type[i])) return;
+    if (st.wall[i] === 87) return;
+    st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;    // ClearTile(frameNeighbors)
+    st.wall[i] = 78;                                     // PlaceWall(78)(SquareWallFrame 帧备案)
+  };
+  const genRect = (x: number, y: number, width: number, height: number,
+    act: (x: number, y: number) => void): void => {
+    for (let i = x; i < x + width; i++) {
+      for (let j = y; j < y + height; j++) act(i, j);    // Shapes.Rectangle:x 外层
+    }
+  };
+  // ⑥ 五段干身(cs:53-69)
+  for (let i = 0; i < num5; i++) {
+    const num10 = Math.trunc(Math.sin((i + 1) / 12 * num8 * PI_F) * num9);
+    const num11 = num10 < num7 ? num10 - num7 : 0;
+    const span = Math.abs(num10 - num7);
+    genRect(rx + num7 + num11, ry - (i + 1) * 5, 6 + span, 7, setMahog);
+    genRect(rx + num7 + num11 + 2, ry - (i + 1) * 5, 2 + span, 5, shaftCell);
+    genRect(rx + num7 + 2, ry - i * 5, 2, 2, shaftCell);
+    num7 = num10;
+  }
+  // ⑦⑧ 树冠分枝(ShapeBranch ×4,cs:70-81)+叶球(cs:82-87)
+  const endpoints: Array<[number, number]> = [];
+  const branchCell = (x: number, y: number): void => {
+    if (!st.inBounds(x, y)) return;
+    const i = st.idx(x, y);
+    if (st.flags[i] && MAHOGANY_SKIP.has(st.type[i])) return;
+    if (st.wall[i] === 87) return;
+    st.liquid[i] = 0; st.liquidType[i] = 0;
+    st.frameX[i] = 0; st.frameY[i] = 0;
+    st.slope[i] = 0; st.half[i] = 0;
+    st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;
+  };
+  /** ShapeBranch.Perform(ShapeBranch.cs:44-77)1:1(含掷序) */
+  const shapeBranch = (angle: number, distance: number, bx: number, by: number): void => {
+    const offX = Math.trunc(Math.cos(angle) * distance);
+    const offY = Math.trunc(Math.sin(angle) * distance);
+    const len = Math.sqrt(offX * offX + offY * offY);
+    const size = Math.trunc(len / 6);
+    const performSegment = (sx: number, sy: number, ex: number, ey: number, seg: number): void => {
+      const sz = Math.max(1, seg);
+      for (let i = -(sz >> 1); i < sz - (sz >> 1); i++) {
+        for (let j = -(sz >> 1); j < sz - (sz >> 1); j++) {
+          // quitOnFail=false → plot 恒 true,PlotLine 只负责遍历落点
+          mahogPlotLine(sx + i, sy + j, ex, ey, (tx, ty) => { branchCell(tx, ty); return true; }, false);
+        }
+      }
+    };
+    endpoints.push([bx + offX, by + offY]);
+    performSegment(bx, by, bx + offX, by + offY, size);
+    const segs = Math.trunc(len / 8);
+    for (let i = 0; i < segs; i++) {
+      const num4 = (i + 1) / (segs + 1);
+      const pX = Math.trunc(num4 * offX), pY = Math.trunc(num4 * offY);
+      // val2 = new Vector2D(offset - point) 每轮新造(非累积),旋转后 ×0.75
+      const dx = offX - pX, dy = offY - pY;
+      const rot = (rng.next() * 0.5 + 1.0) * (rng.nextInt(2) !== 0 ? 1 : -1);
+      const vx = (dx * Math.cos(rot) - dy * Math.sin(rot)) * 0.75;
+      const vy = (dx * Math.sin(rot) + dy * Math.cos(rot)) * 0.75;
+      const p2x = Math.trunc(vx) + pX, p2y = Math.trunc(vy) + pY;
+      endpoints.push([p2x + bx, p2y + by]);
+      performSegment(pX + bx, pY + by, p2x + bx, p2y + by, size - 1);
+    }
+  };
+  let num12 = 6;
+  if (num9 < 0) num12 = 0;
+  for (let j = 0; j < 2; j++) {
+    const num13 = (j + 1) / 3;
+    const num14 = num12 + Math.trunc(Math.sin(num5 * num13 / 12 * num8 * PI_F) * num9);
+    let num15 = rng.next() * 0.7853981852531433 - 0.7853981852531433 - 0.2;
+    if (num12 === 0) num15 -= 1.5707963705062866;
+    shapeBranch(num15, rng.int(12, 15), rx + num14, ry - Math.trunc(num5 * 5 * num13));
+    num12 = 6 - num12;
+  }
+  const num16 = Math.trunc(Math.sin(num5 / 12 * num8 * PI_F) * num9);
+  shapeBranch(-0.6853981852531433, rng.int(16, 21), rx + 6 + num16, ry - num6);
+  shapeBranch(-2.45619455575943, rng.int(16, 21), rx + num16, ry - num6);
+  // 叶球:每个 endpoint 的 Circle(4)+Blotches(4,2)+SkipTiles(383,21,467,226,237)+
+  //        SkipWalls(78,87)+SetTile(384)(cs:82-87)。endpoints 在迭代中追加——
+  //        C# List foreach 对增长集合抛异常?否:此处 list 只被叶球循环前填满,
+  //        叶球循环本身不追加(Blotches/Circle 不 OutputEndpoints)——快照安全。
+  const LEAF_SKIP = idsByVanillaSheet(383, 21, 467, 226, 237);
+  for (const [cx, cy] of endpoints) {
+    const r = 4, rr = (r + 1) * (r + 1);
+    for (let dy = -r; dy <= r; dy++) {
+      const half = Math.min(r, Math.trunc(Math.sqrt(rr - dy * dy)));
+      for (let dx = -half; dx <= half; dx++) {
+        // Modifiers.Blotches(4,2).Apply:先掷 1 次 NextDouble 丢弃,再判 0.3
+        rng.next();
+        const pts: Array<[number, number]> = [];
+        if (rng.next() < 0.3) {
+          const bx0 = rng.int(-3, 0), bx1 = rng.int(0, 3);
+          const by0 = rng.int(-1, 0), by1 = rng.int(0, 1);
+          for (let bi = bx0; bi <= bx1; bi++) {
+            for (let bj = by0; bj <= by1; bj++) pts.push([cx + dx + bi, cy + dy + bj]);
+          }
+        } else {
+          pts.push([cx + dx, cy + dy]);
+        }
+        for (const [lx, ly] of pts) {
+          if (!st.inBounds(lx, ly)) continue;
+          const i = st.idx(lx, ly);
+          if (st.flags[i] && LEAF_SKIP.has(st.type[i])) continue;   // SkipTiles(383,21,...)
+          if (st.wall[i] === 78 || st.wall[i] === 87) continue;     // SkipWalls(78,87)
+          st.liquid[i] = 0; st.liquidType[i] = 0;
+          st.frameX[i] = 0; st.frameY[i] = 0;
+          st.slope[i] = 0; st.half[i] = 0;
+          st.type[i] = LIVING_M_LEAVES; st.flags[i] = 1;
+        }
+      }
+    }
+  }
+  // ⑨ 四条根(ShapeRoot,cs:88-92):每步 2 掷(NextFloat×2=float 精度)
+  const rootCell = (x: number, y: number): void => {
+    if (!st.inBounds(x, y)) return;
+    const i = st.idx(x, y);
+    if (st.flags[i] && MAHOGANY_SKIP.has(st.type[i])) return;
+    if (st.wall[i] === 87) return;
+    st.liquid[i] = 0; st.liquidType[i] = 0;
+    st.frameX[i] = 0; st.frameY[i] = 0;
+    st.slope[i] = 0; st.half[i] = 0;
+    st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;
+  };
+  for (let k = 0; k < 4; k++) {
+    const angle0 = k / 3 * 2 + 0.57075;
+    const distance = rng.int(40, 59);   // Next(40, 60)
+    let num = rx, num2 = ry;
+    let angle = angle0;
+    for (let step = 0; step < distance * 0.85; step++) {
+      const num4 = step / distance;
+      const num5r = 4 + (1 - 4) * num4;                 // Utils.Lerp(4,1,num4)
+      num += Math.cos(angle);
+      num2 += Math.sin(angle);
+      const f1 = Math.fround(rng.next());
+      const f2 = Math.fround(rng.next());
+      angle += f1 - 0.5 + f2 * (angle0 - 1.5707963705062866) * 0.1 * (1 - num4);
+      const lim = 2 * (1 - 0.5 * num4);
+      const clamped = Math.min(Math.max(angle, angle0 - lim), angle0 + lim);   // Utils.Clamp
+      angle = angle * 0.4 + 0.45 * clamped + (angle0 + (1.5707963705062866 - angle0) * num4) * 0.15;
+      const n = Math.trunc(num5r);
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) rootCell(Math.trunc(num) + i, Math.trunc(num2) + j);
+      }
+    }
+  }
+  // ⑩ 常春藤箱(cs:93):AddBuriedChest(x+3, y-1, GetNextJungleChestItem(), false, 10, false, 0)
+  placeBuriedChest(st, rng, gs, sink, rx + 3, ry - 1,
+    { style: 10, loot: nextJungleItem(gs, rng), trySlope: false, notNearOtherChests: false, flags: { ivy: true } });
+  // ⑪ structures.AddProtectedStructure(Rectangle(result.X-30, result.Y-30, 60, 60))(cs:94)
+  addProtectedStructure(gs, { x0: rx - 30, y0: ry - 30, x1: rx + 30, y1: ry + 30 }, 0);
+  return true;
+}
+
+// ============================================================
 // 1. DeadMansChestBiome(Terraria.GameContent.Biomes/DeadMansChestBiome.cs 全文)
 // ============================================================
 
@@ -654,34 +968,41 @@ export class DeadMansChestBiome {
   private readonly st: TileStore;
   private readonly rng: RNG;
   private readonly gs: GenState;
+  private readonly chestList: Array<{ x: number; y: number }>;
   private readonly darts: DartSpot[] = [];
   private readonly wires: WireSpot[] = [];
   private readonly boulders: BoulderSpot[] = [];
   private readonly explosives: Array<{ x: number; y: number }> = [];
 
-  constructor(st: TileStore, rng: RNG, gs: GenState) {
-    this.st = st; this.rng = rng; this.gs = gs;
+  constructor(st: TileStore, rng: RNG, gs: GenState, chestList: Array<{ x: number; y: number }>) {
+    this.st = st; this.rng = rng; this.gs = gs; this.chestList = chestList;
   }
 
-  /** GetPossibleChestsToTrapify(cs:405-442):全图金箱(style 1)扫描。
-   *  原版按 Main.chest 下标序;此处栅格行扫描——候选集相同,每候选掷骰数一致(4),
-   *  对后续全局 RNG 状态无影响。structures.CanPlace 检查无全局 StructureMap,跳过 */
+  /** GetPossibleChestsToTrapify(cs:405-442):按 Main.chest 槽位序(=创建序)扫金箱
+   *  (style 1)。本仓 chest sink(world.chests)即创建序——2026-08-17 前用栅格行扫描
+   *  近似,候选集相同但**顺序不同**→Next(count) 选中的箱不同→陷阱屋整体错位。
+   *  structures.CanPlace(1×1, 扩展白名单+21/467/138/664/712-715, pad 10)(cs:433):
+   *  GeneralPlacementTiles 黑名单集剔除七类(本方法专有白名单扩展)。 */
   getPossibleChests(): Array<{ x: number; y: number }> {
     const st = this.st;
+    const forbid = new Set(GENERAL_PLACEMENT_FORBID);
+    for (const t of idsByVanillaSheet(21, 467, 138, 664, 712, 713, 714, 715)) forbid.delete(t);
     const out: Array<{ x: number; y: number }> = [];
-    for (let y = 0; y < st.h; y++) {
-      for (let x = 0; x < st.w; x++) {
-        const i = st.idx(x, y);
-        // 金箱锚点:type 21 + style 1 + 2×2 左上角(frameX%36==0 且 /36==1 且 frameY==0)。
-        // 原版经 Main.chest 下标天然只有锚点;栅格扫描须自剔除非锚点格(右格 frameX=54)
-        if (st.type[i] !== CHEST || st.frameY[i] !== 0 || st.frameX[i] % 36 !== 0
-          || Math.trunc(st.frameX[i] / 36) !== 1) continue;
-        if (!this.isAGoodSpot(x, y)) continue;
-        this.clearCaches();
-        const px = x, py = y + 1;
-        this.findBoulderTrapSpots(px, py);
-        this.findDartTrapSpots(px, py);
-        if (this.areThereEnoughTraps()) out.push({ x, y });
+    for (const ch of this.chestList) {
+      const { x, y } = ch;
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      // 金箱锚点:type 21 + style 1 + 2×2 左上角(frameX%36==0 且 /36==1 且 frameY==0)
+      if (st.type[i] !== CHEST || st.frameY[i] !== 0 || st.frameX[i] % 36 !== 0
+        || Math.trunc(st.frameX[i] / 36) !== 1) continue;
+      if (!this.isAGoodSpot(x, y)) continue;
+      this.clearCaches();
+      const px = x, py = y + 1;
+      this.findBoulderTrapSpots(px, py);
+      this.findDartTrapSpots(px, py);
+      if (this.areThereEnoughTraps()
+        && canPlaceStructure(this.gs, { x0: x, y0: y, x1: x + 1, y1: y + 1 }, 10, st, forbid)) {
+        out.push({ x, y });
       }
     }
     return out;
@@ -1157,20 +1478,11 @@ function shrineBlotches(
 
 /** StructureMap.CanPlace(StructureMap.cs:22-53):区域在界内(留 1 格边距) +
  *  padding 扩张后不撞已保护结构 + 扩张区内活性 tile 全在白名单。
- *  结构互斥半边走全局 StructureMap（GenState.protectedRects / canPlaceStructure,
- *  含 cs:28 越界判定）；内容扫描半边为本地 PLACEMENT_FORBID 近似（白名单本体=
- *  GeneralPlacementTiles 排除 21/467,EnchantedSwordBiome.cs:68-74,未提取,备案） */
+ *  EnchantedSwordBiome.cs:63-74 的表 = GeneralPlacementTiles 克隆再剔 21/467
+ *  （两者本就在 28 id 黑名单内,冗余重申）→ 与 StructureMap 单参默认重载等价,
+ *  直接走 canPlaceStructure(st) 的 GeneralPlacementTiles 扫描。 */
 function shrineCanPlace(st: TileStore, gs: GenState, area: Rect, padding: number): boolean {
-  if (!canPlaceStructure(gs, area, padding)) return false;
-  const r: Rect = { x0: area.x0 - padding, y0: area.y0 - padding, x1: area.x1 + padding, y1: area.y1 + padding };
-  for (let x = r.x0; x < r.x1; x++) {
-    for (let y = r.y0; y < r.y1; y++) {
-      if (!st.inBounds(x, y)) continue;
-      const i = st.idx(x, y);
-      if (st.flags[i] && PLACEMENT_FORBID.has(st.type[i])) return false;
-    }
-  }
-  return true;
+  return canPlaceStructure(gs, area, padding, st);
 }
 
 /** EnchantedSwordBiome.Place(cs:19-111)1:1:水潭洞穴 + 中央土丘 + 内缘草 + 花墙藤蔓 +

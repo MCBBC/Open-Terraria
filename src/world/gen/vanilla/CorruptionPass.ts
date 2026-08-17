@@ -57,6 +57,10 @@ const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔
 const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空保护 :76191）
 
 export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ▶探针钩（隔离重放 rig tools/_c29iso.test.ts 用）：管线时点 gs 快照 + 分段标记
+  const __cap = (globalThis as { __swCorGsCap?: (gs: GenState) => void }).__swCorGsCap;
+  if (__cap) __cap(gs);
+  const __mark = (globalThis as { __swCorMark?: (s: string) => void }).__swCorMark;
   const { w, h } = st;
   setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁
   // 丛林/雪原横向范围(±10 回避, cs:13936-13952)
@@ -102,6 +106,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
     }
     gs.evilZones.push({ x0: zLo, x1: zHi });
+    __mark?.(`zone${g}:${zLo}-${zHi}:cx${cx}`);
 
     if (gs.crimson) {
       crimStart(st, rng, gs, cx, gs.worldSurfaceLow - 10, hearts);
@@ -136,10 +141,14 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
               sy = y;
               if (x === cx) {
                 cooldown = 20;
-                chasmRunner(st, rng, gs, x, y, rng.int(0, 149) + 150, true);  // Next(150)+150
+                const __st = rng.int(0, 149) + 150;                           // Next(150)+150
+                __mark?.(`chasMain@${x},${y},${__st}`);
+                chasmRunner(st, rng, gs, x, y, __st, true);
               } else if (rng.int(0, 34) === 0 && cooldown === 0) {
                 cooldown = 30;
-                chasmRunner(st, rng, gs, x, y, rng.int(0, 49) + 50, true);    // Next(50)+50
+                const __st = rng.int(0, 49) + 50;                             // Next(50)+50
+                __mark?.(`chasSat@${x},${y},${__st}`);
+                chasmRunner(st, rng, gs, x, y, __st, true);
               }
               break;
             }
@@ -159,8 +168,10 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       convertSurface(st, rng, gs, zLo, zHi, false);
+      __mark?.('converted');
       // 暗影球周黑檀石囊（cs:14546-14581，★仅本组区间；第二条件仅清 active 保 type 幽灵）
       cleanOrbPockets(st, rng, zLo, zHi);
+      __mark?.('orbs');
     }
   }
   // CrimPlaceHearts（cs:14331）：全组结束后一次性（曾逐组内联 → 流序错位）
@@ -351,6 +362,7 @@ function addShadowOrb(st: TileStore, x: number, y: number, crimson: boolean): vo
  *  壳1 = 激活+type=25（非坛才写 type），壳2 = type=25+激活+墙3（y>j+Next(3,20)）。
  *  球只放一次；第二裂隙尾部祭坛 = 纯随机点+IsTileNearby+Place3x2 重试 ≤10000。 */
 function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, steps: number, makeOrb: boolean): void {
+  const __mark = (globalThis as { __swCorMark?: (s: string) => void }).__swCorMark;
   let sideways = false, orbPlaced = !makeOrb, altarPlaced = false;
   let num1 = steps + 0.0;
   let px = i + 0.0, py = j + 0.0;
@@ -371,8 +383,12 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
     num1--;
     if (!sideways && py > gs.worldSurface + 20) {
       sideways = true;
-      chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), -1, rng.int(20, 39));  // Next(20,40)
-      chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), 1, rng.int(20, 39));
+      const __s1 = rng.int(20, 39);   // Next(20,40)
+      chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), -1, __s1);
+      __mark?.(`swL@${Math.floor(px)},${Math.floor(py)},${__s1}`);
+      const __s2 = rng.int(20, 39);
+      chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), 1, __s2);
+      __mark?.(`swR@${Math.floor(px)},${Math.floor(py)},${__s2}`);
     }
     // 挖空（cs:76110-76119：num2>5 才挖；CanEvilReplace+非坛/魔矿/猩红矿三门）
     if (num1 > 5) {
@@ -444,8 +460,9 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
   }
 }
 
-/** ChasmRunnerSideways（cs:75323-75523）1:1：水平裂隙。挖空三门同竖直版；
- *  壳 = 非31/22/204 才写 type、恒激活、墙2 清零；壳2 = 同门 + 墙3。
+/** ChasmRunnerSideways（cs:75323-75523）1:1：水平裂隙。挖空三门同竖直版（★门序
+ *  CanEvilReplace 在掷骰前，cs:75462）；壳1 = 非31/22/204 才写 type、恒激活、墙2 清零；
+ *  壳2 = 同门 + PlaceWall(3)（仅 wall==0 写 + 中心格 WallFrame 1 掷，cs:75508/75189）。
  *  末端 1/3 TileRunner 魔矿脉（Next(2,6)/Next(3,7), type 22）。 */
 function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, direction: number, steps: number): void {
   let num1 = steps + 0.0;
@@ -467,8 +484,8 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         const ti = st.idx(x, y);
-        if (Math.abs(x - px) + Math.abs(y - py) < radius * 0.5 * (1 + rng.int(-10, 10) * 0.015)
-          && canEvilReplace(st, x, y)
+        if (canEvilReplace(st, x, y)                              // ★cs:75462 门序在掷骰前（CanEvilReplace 先）
+          && Math.abs(x - px) + Math.abs(y - py) < radius * 0.5 * (1 + rng.int(-10, 10) * 0.015)
           && st.type[ti] !== ORB && st.type[ti] !== DEMONITE && st.type[ti] !== CRIMTANE) {
           st.flags[ti] = 0;
         }
@@ -499,7 +516,10 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
         }
       }
     }
-    // 壳2（cs:75496-75508）：同门 → type=25+激活+墙3
+    // 壳2（cs:75496-75508）：同门 → type=25+激活+PlaceWall(3)。★墙写入走 PlaceWall
+    //  （cs:75508）：仅 wall==0 才写（曾裸写=3 覆掉墙 2/15/64 等）且每次必经
+    //  SquareWallFrame 中心格 WallFrame(resetFrame:true) → 墙3 非大幅墙掷 1×Next(0,3)
+    //  （Framing.cs:390；PlaceWall 界外门 i/j∈(1, maxTiles-2)）。
     for (let x = x2; x < x3; x++) {
       for (let y = y2; y < y3; y++) {
         const ti = st.idx(x, y);
@@ -510,7 +530,10 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
             st.type[ti] = EBONSTONE;
           }
           st.flags[ti] = 1;
-          st.wall[ti] = 3;
+          if (x > 1 && y > 1 && x < st.w - 2 && y < st.h - 2 && st.wall[ti] === 0) {
+            st.wall[ti] = 3;
+            rng.int(0, 2);   // SquareWallFrame → Framing.WallFrame(resetFrame:true)
+          }
         }
       }
     }

@@ -247,6 +247,16 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 本 pass < SettleLiquidsPart2(21051)）：蜂巢 pass 只登记坐标，托台清空+幼虫
     // 放置推迟到这里——过早放置会被中途宝箱/装饰 pass 破坏
     { name: '蜂巢幼虫', run: beeLarvaPass },
+    // 二次沉降（原版 SettleLiquidsPart2AndNotTheBees cs:21051-21113，注册序
+    // BeeLarva(21018) < 本 pass < CactusPalmTreesAndCoral(21115)）：管线尾二次
+    // 沉降 + 尾部 tileSolid[484]=false。★2026-08-17 前由 worker/Game 的
+    // settleWorldLiquids('gen') 在 generateWorld 之后承担 = 时点晚 8 个 pass：
+    // vanilla #97 在 #98 之前已二次沉降（x86 实证：dump096→097 浮空岛云格水
+    // 255→0），而 JS #98 珊瑚 81/贝壳 324/水盒棕榈/燕麦水检全部读到未沉液体
+    // ——尾批 2-A rig #98 newLiq 16,534 的根因。与 #49 中途沉降复用同一实现
+    //（liquidSettlePass：settle('gen') + 484 翻转;getGoodWorld tileSolid[56]
+    // 与 notTheBees 分支为种子旗标,普通种子 no-op）。
+    { name: '二次沉降', run: liquidSettlePass },
     // 仙人掌/棕榈/珊瑚（原版 CactusPalmTreesAndCoral cs:21115-21325，注册序
     // SettleLiquidsPart2(21051) < 本 pass < TileCleanup(21327)）：GrowCactus 全量
     //（PlantCactus 150 次邻域成簇）+两端海滩珊瑚 81/贝壳 324+中段水盒棕榈
@@ -347,6 +357,7 @@ import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
 import { runTreePass, randomizeTreeStyle, randomizeCaveBackgrounds, growAshTree } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
+import { runPotsPass } from './vanilla/PotsPass';
 import { runGravitatingSandPass } from './vanilla/GravitatingSandPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
@@ -380,6 +391,25 @@ import { runQuickCleanupPass } from './vanilla/QuickCleanupPass';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 async function liquidSettlePass({ world }: GenCtx) {
+  const gs = ctxGs[0];
+  if (gs) {
+    // ★落水越 waterLine 转岩浆接线（Liquid.cs:177-190；WorldGen.ts:383 旧禁改
+    //   已解除）：水线=TerrainPass 的 GenVars.waterLine；地牢豁免盒=
+    //   CreatePotentialDungeonBounds(percentInMiddle=0.1,percentOnEdges=0.05) 的
+    //   outerPotentialDungeonBounds 半图矩形（DungeonCrawler.cs:109；y 界=
+    //   worldSurface+10 .. UnderworldLayer-10）——落点在盒内且水源墙∈wallDungeon
+    //   才豁免。world 字段化后续尾沉降（worker 'gen'）同享
+    world.genWaterLine = gs.waterLine;
+    if (gs.dungeonSide === 0) {
+      world.genDungeonExempt = null;
+    } else {
+      const edge = Math.floor(world.w * 0.05);
+      const mid = Math.floor(world.w * 0.55);
+      world.genDungeonExempt = gs.dungeonSide < 0
+        ? { x0: edge, x1: Math.floor(world.w * 0.45), y0: Math.floor(gs.worldSurface) + 10, y1: (world.h - 200) - 10 }
+        : { x0: mid, x1: world.w - edge, y0: Math.floor(gs.worldSurface) + 10, y1: (world.h - 200) - 10 };
+    }
+  }
   await settleWorldLiquids(world, 'gen');
   // ★pass 尾 tileSolid 翻转（cs:16292 `Main.tileSolid[484] = false`）——DesertBiome
   //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
@@ -643,10 +673,11 @@ function vanillaLilypads({ store, rng }: GenCtx) {
 }
 
 // 原版 pass "Micro Biomes"(cs:21785):露营地标 + 炸药陷阱屋
-function vanillaMicroBiomes({ store, rng }: GenCtx) {
+function vanillaMicroBiomes({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runMicroBiomesPass(store, rng, gs);
+  // chests sink:MahoganyTreeBiome 常春藤箱(cs:22070 AddBuriedChest)写入
+  runMicroBiomesPass(store, rng, gs, world.chests);
 }
 
 function vanillaLakes({ store, rng }: GenCtx) {
@@ -1336,13 +1367,8 @@ export function spawnGraveyardBiomesEverywhere(
 
 // ---------- 瓦罐散布 ----------
 function potPass({ store, rng, world }: GenCtx) {
-  // 原版 Pots pass(1.4.5.6 WorldGen.cs:18186-18286)1:1:
-  // count = 面积×0.0008(小 4200×1200 = 4032 个),每个成功点放 1 罐;
-  // 进度 >75% 强制从地表浅层起扫、>93% 强制地狱行;2 宽×2 高 PlacePot
-  // (cs:54082:frameX = k*18 + 变体*36、frameY = (l+1)*18 + style*36);
-  // 样式按地面 tile/墙(冰雪 4-6/丛林草 7-9/地牢 10-12/腐化 16-18/猩红 22-24/
-  // 花岗岩 31-33/蜥蜴砖 28-30/大理石墙 34-36/地狱 13-15/默认 0-3)。
-  // 旧实现 w/6 次尝试+12 格排斥 → 只有原版 ~5%
+  // 原版 Pots pass(1.4.5.6 WorldGen.cs:18108-18286)——实现体外提 vanilla/PotsPass.ts
+  // （尾部清剿批 2026-08-17：行为/掷序零变化；样式链/PlacePot 细注见彼处）。
   const gs = ctxGs[0];
   if (!gs) return;
   // ---- 墓园群系（cs:18110-18120：本 pass 首段，先于瓦罐消耗 RNG 流）----
@@ -1350,113 +1376,11 @@ function potPass({ store, rng, world }: GenCtx) {
   if (graveyardSeedGate(gs.seedFlags)) {
     spawnGraveyardBiomesEverywhere(store, rng, world, gs);
   }
-  const { w, h } = store;
-  const POT = TILE_BY_KEY['pot']!;
-  const count = Math.floor(w * h * 0.0008);
-  const surfHigh = Math.max(1, Math.floor(gs.worldSurfaceHigh));
-  const surfLow = Math.floor(gs.worldSurfaceLow);
-
-  const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!;
-  const JUNGLE = TILE_BY_KEY['v_60_jungle_grass_block']!;
-  const LIHZARD = TILE_BY_KEY['v_226_lihzahrd_brick'] ?? -1;
-  const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-  const MARBLE_WALLS = new Set([187, 216, 223]);
-
-  for (let n = 0; n < count; n++) {
-    const progress = n / count;
-    // 原版外层 while(!flag) 重试：每罐最多 10000 次全列尝试（cs:18198/18290 num7）
-    let placed = false;
-    for (let attempt = 0; attempt < 10000 && !placed; attempt++) {
-      let y0 = rng.int(surfHigh, Math.max(surfHigh + 1, h - 10));
-      if (progress > 0.93) y0 = h - 150;          // 尾段强制地狱行(cs:18194)
-      else if (progress > 0.75) y0 = surfLow;     // 后 1/4 起地表浅层(cs:18196)
-      const x = rng.int(20, w - 20);
-      // 向下扫描(cs:18210-18286):遇首个实心(且上格非岩浆/微光)后进入候选模式
-      let foundSolid = false;
-      for (let y = y0; y < h - 20 && !placed; y++) {
-        const t = store.get(x, y);
-        if (!foundSolid) {
-          const liq = store.liquid[store.idx(x, y - 1)];
-          const ltype = store.liquidType[store.idx(x, y - 1)];
-          // ★cs:18220 `active() && tileSolid[type]`:必须查激活位——TileStore.get 返回
-          //   裸 type,TileRunner 幽灵格(有 type 无 flags)会提前触发候选模式,
-          //   把瓦罐 pass 的首实心锚点整体上移(根因)
-          if (store.flags[store.idx(x, y)] !== 0 && TILE_DEFS[t]?.solid
-            && !(liq > 0 && ltype === 2) && !(liq > 0 && ltype === 4)) foundSolid = true;
-          continue;
-        }
-        // cs:18216 门禁:y < Main.worldSurface(平均地表线)时必须有墙——
-        // 曾误用 worldSurfaceLow(谷底线,几乎恒小于 y)→ 地表露天处全放,陶罐泛滥
-        if (y < gs.worldSurface && store.wall[store.idx(x, y)] === 0) continue;
-        // cs:18220：style=Next(0,4) 在该行通过墙门禁后立即掷（ground 门禁之前——
-        // 消费顺序 1:1，漏掷会平移后续 RNG 流）
-        let style = rng.int(0, 3);
-        const ground = store.get(x, y + 1);
-        if (ground === 0 || !store.flags[store.idx(x, y + 1)]) continue;
-        const liq2 = store.liquid[store.idx(x, y)];
-        const ltype2 = store.liquidType[store.idx(x, y)];
-        if ((liq2 > 0 && ltype2 === 2) || (liq2 > 0 && ltype2 === 4)) continue; // anyLava/anyShimmer 才拒（水/蜜可放）
-        if (oceanDepthsAt(store, gs, x, y)) continue;
-        // 样式覆写链（cs:18235-18266，非互斥、后命中覆盖先命中；RNG 仅在命中时消耗）
-        const sheetOf = (id: number) => TILE_DEFS[id]?.vanilla?.sheet ?? -1;
-        const gs2 = sheetOf(ground);
-        if (ground === SNOW || ground === ICE || gs2 === 162) style = rng.int(4, 6);
-        if (ground === JUNGLE) style = rng.int(7, 9);
-        {
-          const wl = store.wall[store.idx(x, y)];
-          // IsDungeonPlatformOrShelf（cs:11507）：type19 且 frameY/18 ∈ {6,7,8,9..12}
-          const shelfRow = Math.floor(store.frameY[store.idx(x, y + 1)] / 18);
-          const inDun = DUNGEON_WALLS.has(wl)
-            || gs2 === 41 || gs2 === 43 || gs2 === 44 || gs2 === 481 || gs2 === 482 || gs2 === 483
-            || (gs2 === 19 && shelfRow >= 6 && shelfRow <= 12);
-          if (inDun) style = rng.int(10, 12);
-        }
-        if (gs2 === 23 || gs2 === 25 || gs2 === 22 || gs2 === 163) style = rng.int(16, 18); // 腐化草/黑檀石/魔矿/紫冰
-        if (gs2 === 199 || gs2 === 203 || gs2 === 204 || gs2 === 200) style = rng.int(22, 24);
-        if (sheetOf(ground) === 367) style = rng.int(31, 33);  // cs:18264：大理石 367 → 31-33（曾错查 368 花岗岩）
-        if (ground === LIHZARD) style = rng.int(28, 30);
-        if (MARBLE_WALLS.has(store.wall[store.idx(x, y)])) style = rng.int(34, 36);
-        if (y > h - 200) style = rng.int(13, 15);  // Main.UnderworldLayer = maxTilesY-200
-        // PlacePot（cs:54082）：2×2 净空 + 双列下方 nactive/整砖/无坡/实心
-        if (!placePot(store, rng, x, y, POT, style)) continue;
-        placed = true;
-      }
-    }
-  }
-}
-
-/** PlacePot（1456 WorldGen.cs:54082）1:1：2×2（x..x+1, y-1..y）须净空；
- *  下方双列须 nactive && !halfBrick && slope==0 && tileSolid；成功才掷 Next(3) 变体 */
-function placePot(store: TileStore, rng: RNG, x: number, y: number, type: number, style: number): boolean {
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = -1; dy <= 0; dy++) {
-      if (!store.inBounds(x + dx, y + dy) || store.flags[store.idx(x + dx, y + dy)]) return false;
-    }
-    if (!store.inBounds(x + dx, y + 1)) return false;
-    const gi = store.idx(x + dx, y + 1);
-    if (!store.flags[gi] || store.half[gi] || store.slope[gi] !== 0) return false;
-    const d = TILE_DEFS[store.type[gi]];
-    if (!d?.solid) return false;
-  }
-  const variant = rng.int(0, 2) * 36;   // genRand.Next(3)*36（仅成功时消费）
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = -1; dy <= 0; dy++) {
-      store.setTileSilent(x + dx, y + dy, type, dx * 18 + variant, (dy + 1) * 18 + style * 36);
-      store.half[store.idx(x + dx, y + dy)] = 0;
-    }
-  }
-  return true;
+  runPotsPass(store, rng, gs);
 }
 
 /** tile 379（SpawnPoint 回避族，cs:19683/19704-19707：列扫描跳过 + IsTileNearby(10) 重试） */
 const TILE_379 = TILE_BY_KEY['v_379_bubble'] ?? -1;
-
-/** oceanDepths（WorldGen.cs:10968）：y > oceanLevel 直接 false；海滩列才 true */
-function oceanDepthsAt(store: TileStore, gs: GenState, x: number, y: number): boolean {
-  const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
-  if (y > oceanLevel) return false;
-  return x < gs.beachDistance || x > store.w - gs.beachDistance;
-}
 
 // ---------- 矿石 ----------
 // 已由 vanilla/ShiniesPass.ts（原版 pass 27/36）整体替换，旧 orePass/growOreBlob 删除

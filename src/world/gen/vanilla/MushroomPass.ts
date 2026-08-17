@@ -85,6 +85,10 @@ const NOT_CLEARABLE = new Set<number>([
   396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237,
 ]);
 export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ▶探针钩（隔离重放 rig tools/_c29iso.test.ts 用）：管线时点 gs 快照 + cleanup 事件
+  const __cap = (globalThis as { __swMushGsCap?: (gs: GenState, st: TileStore) => void }).__swMushGsCap;
+  if (__cap) __cap(gs, st);
+  const __ev = (globalThis as { __swMushEv?: (s: string) => void }).__swMushEv;
 
   const { w, h } = st;
   setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁用   // SpreadGrass 的 dirt==0 地表门禁用
@@ -146,6 +150,7 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
     for (let y = gs.worldSurface; y < h; y++) {
       const ti = st.idx(x, y);
       if (!st.flags[ti] || st.type[ti] !== MUSH_GRASS) continue;
+      __ev?.(`A(${x},${y})`);
       for (let ix = x - 1; ix <= x + 1; ix++) {
         for (let iy = y - 1; iy <= y + 1; iy++) {
           if (ix < 0 || ix >= w || iy < 0 || iy >= h) continue;
@@ -155,16 +160,24 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
           const iU = iy > 0 && st.flags[st.idx(ix, iy - 1)];
           const iD = iy < h - 1 && st.flags[st.idx(ix, iy + 1)];
           if (st.flags[ii]) {
-            if (!iL && !iR) { st.flags[ii] = 0; }
-            else if (!iU && !iD) { st.flags[ii] = 0; }
+            // ★原版 KillTile（cs:63970 尾）生成期语义：active(false) **且 type=0**
+            // （SquareTileFrame 生成期零掷；70 非 TruncatesWalls 无 SquareWallFrame）。
+            // 曾只清 active 留幽灵 70 → 后续 type==70 的 quirk 读写全踩幽灵 → 级联。
+            if (!iL && !iR) { __ev?.(`K(${ix},${iy})t${st.type[ii]}H`); st.flags[ii] = 0; st.type[ii] = 0; }
+            else if (!iU && !iD) { __ev?.(`K(${ix},${iy})t${st.type[ii]}V`); st.flags[ii] = 0; st.type[ii] = 0; }
+            else __ev?.(`N(${ix},${iy})t${st.type[ii]}${iL ? 'l' : '-'}${iR ? 'r' : '-'}${iU ? 'u' : '-'}${iD ? 'd' : '-'}`);
           } else if (iL && iR) {
+            __ev?.(`P(${ix},${iy})H`);
             st.type[ii] = MUD; st.flags[ii] = 1;
             if (ix > 0 && st.type[st.idx(ix - 1, y)] === MUSH_GRASS) { st.type[st.idx(ix - 1, y)] = MUD; }
             if (ix < w - 1 && st.type[st.idx(ix + 1, y)] === MUSH_GRASS) { st.type[st.idx(ix + 1, y)] = MUD; }
           } else if (iU && iD) {
+            __ev?.(`P(${ix},${iy})V`);
             st.type[ii] = MUD; st.flags[ii] = 1;
-            if (y > 0 && st.type[st.idx(x, y - 1)] === MUSH_GRASS) { st.type[st.idx(x, y - 1)] = MUD; }
-            if (y < h - 1 && st.type[st.idx(x, y + 1)] === MUSH_GRASS) { st.type[st.idx(x, y + 1)] = MUD; }
+            // ★cs:12764-12767 原版 quirk：竖桥写的 x 是 **num18（被放格列）**，
+            // y 是 num17±1（锚 y）——曾误用锚 x → 偏列一格的 70→59 级联
+            if (y > 0 && st.type[st.idx(ix, y - 1)] === MUSH_GRASS) { st.type[st.idx(ix, y - 1)] = MUD; }
+            if (y < h - 1 && st.type[st.idx(ix, y + 1)] === MUSH_GRASS) { st.type[st.idx(ix, y + 1)] = MUD; }
           }
         }
       }

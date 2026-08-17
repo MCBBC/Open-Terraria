@@ -12,6 +12,8 @@ const EBONSAND = TILE_BY_KEY['v_112_ebonsand_block']!;
 const CRIMSAND = TILE_BY_KEY['v_234_crimsand_block']!;
 
 export function runCleanupPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const __cap = (globalThis as { __swWallCap?: (tag: string, gs: GenState, st: TileStore) => void }).__swWallCap;
+  if (__cap) __cap('cleanup', gs, st);
   const { w } = st;
   // 1) 表层墙清理两遍(cs L6877-6938):
   //    左→右(3..w-4):中央清 2/40/64/86;右→左(w-5..5):中央清 2/40/64(不重复清蜂巢墙)。

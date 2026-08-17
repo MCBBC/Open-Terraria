@@ -91,11 +91,37 @@ export function flipGenSolid(sheetIds: number[], solid: boolean): void {
   }
 }
 
+/** 生成期覆写表快照/回放（隔离重放对拍用：管线时点状态原样搬运,不重演翻转序）。 */
+export function snapshotGenSolid(): Map<number, boolean> {
+  return new Map(solidOverrides);
+}
+export function restoreGenSolid(snap: Map<number, boolean>): void {
+  solidOverrides.clear();
+  for (const [k, v] of snap) solidOverrides.set(k, v);
+}
+
 /** 按内部 tile id 查生成期实心值（Main.tileSolid[type] 等价）。 */
 export function genSolidType(t: number): boolean {
   const o = solidOverrides.get(t);
   if (o !== undefined) return o;
   return !!TILE_DEFS[t]?.solid;
+}
+
+/** 原版 Main.tileSolid=true 而 TILE_DEFS.solid(运行时碰撞)=false 的 9 类 sheet：
+ *  19 平台族(Main.cs:7842)/239/380/427/435-439(Echo 族)——vanilla-tilecollision.json
+ *  对账差集（这 9 类无生成期翻转记录）。genSolidType() 兜底是 TILE_DEFS.solid
+ *  （碰撞语义），凡语义上要读「生成期 Main.tileSolid」的调用方（Pots 首实心门/
+ *  PlacePot 地面门、SpreadGrass 3×3 实心扫描等）须经由本包装——尾部清剿批
+ *  2026-08-17。 */
+const VAN_TILE_SOLID_EXTRA = new Set([19, 239, 380, 427, 435, 436, 437, 438, 439]);
+const SHEET_OF_TYPE = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF_TYPE[i] = s;
+}
+export function vanGenSolidType(t: number): boolean {
+  if (VAN_TILE_SOLID_EXTRA.has(SHEET_OF_TYPE[t] ?? -1)) return true;
+  return genSolidType(t);
 }
 
 /** 生成期实心查询（供消费端替代裸 `TILE_DEFS[t]?.solid`）：

@@ -6,6 +6,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { vanGenSolidType } from './GenSolid';
 
 const MUD = TILE_BY_KEY['mud']!;
 /** WallID.Sets.WallTypeToTerrainTileType（WallID.cs:66）：墙→地形 tile（vanilla sheet id），
@@ -36,6 +37,37 @@ function willWaterStayPut(st: TileStore, x: number, y: number): boolean {
     return !!st.flags[i] && !!d?.solid && !d?.platform;
   };
   return ok(x, y + 1) && ok(x - 1, y) && ok(x + 1, y);
+}
+
+/** SpreadGrass(i, j, 59, 60)（cs:75210 普通种子路径）1:1：活跃泥→丛林草传播。
+ *  零掷骰（Lakes pass 718 掷定标实证：原版此链含 SquareTileFrame 级联亦不耗流）。
+ *  门：InWorld(10)+active+type==59；3×3 邻域任一 !active||!tileSolid 才转化、
+ *  邻岩浆(liquid>0&&type==lava)直接阻断；成功转 60 后 3×3 内活跃泥递归续传
+ *  （grassSpread<1000 深度闸）。CanBeClearedDuringGeneration(59)=true（泥可清）。 */
+let grassSpreadDepth = 0;
+function spreadJungleGrass(st: TileStore, i: number, j: number): void {
+  if (i < 10 || i >= st.w - 10 || j < 10 || j >= st.h - 10) return;
+  const ii = st.idx(i, j);
+  if (!st.flags[ii] || st.type[ii] !== MUD) return;
+  let flag = true;
+  outer: for (let k = i - 1; k <= i + 1; k++) {
+    for (let l = j - 1; l <= j + 1; l++) {
+      const ki = st.idx(k, l);
+      if (!st.flags[ki] || !vanGenSolidType(st.type[ki])) flag = false;
+      if (st.liquid[ki] > 0 && st.liquidType[ki] === 2) { flag = true; break outer; }
+    }
+  }
+  if (flag) return;
+  st.type[ii] = JUNGLE_GRASS;   // type=60（SquareTileFrame 无 dump 通道影响、零掷）
+  if (grassSpreadDepth >= 1000) return;
+  grassSpreadDepth++;
+  for (let k = i - 1; k <= i + 1; k++) {
+    for (let l = j - 1; l <= j + 1; l++) {
+      const ki = st.idx(k, l);
+      if (st.flags[ki] && st.type[ki] === MUD) spreadJungleGrass(st, k, l);
+    }
+  }
+  grassSpreadDepth--;
 }
 
 /** SonOfLakinater（L48516）：向下蜿蜒湖腔。lava 恒 false（getGoodWorld 不支持） */
@@ -87,7 +119,13 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
             }
           }
           st.flags[ti] = 0;   // ★原版 cs:80469 仅 active(false)——type 保留为幽灵格（曾误清 type）
-          // 原版此处 type==59/60 时 SpreadGrass 邻格——草传播未移植，跳过（后续 pass 铺草）
+          // cs:80470-80475：被清格（幽灵）type==59/60 时对左/右/下三邻 SpreadGrass
+          // 59→60（曾注释"跳过后续铺草"——原版在 pass 30 内即时传播，ghost 差 59>60×1202）
+          if (st.type[ti] === MUD || st.type[ti] === JUNGLE_GRASS) {
+            spreadJungleGrass(st, x - 1, y);
+            spreadJungleGrass(st, x + 1, y);
+            spreadJungleGrass(st, x, y + 1);
+          }
         } else if (y > j + 1 && dist < r && st.liquid[ti] === 0) {
           // 腔壁壳（cs:80477-80484）：窄处 + ★非活性 + 自身/左/右/下有墙 →
           //   type = WallTypeToTerrainTileType[wall]（WallID.cs:66：40→147、71→161、
@@ -111,6 +149,12 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
             const pow = width ** 4;
             if (y < entranceY && fx < r * 0.4 + Math.abs(y - entranceY) * 0.5 * pow) {
               st.flags[ti] = 0;   // ★原版 cs:80506 仅 active(false)——type 保留为幽灵格
+              // cs:80512-80519：漏斗挖掘同样触发 59→60 邻格传播
+              if (st.type[ti] === MUD || st.type[ti] === JUNGLE_GRASS) {
+                spreadJungleGrass(st, x - 1, y);
+                spreadJungleGrass(st, x + 1, y);
+                spreadJungleGrass(st, x, y + 1);
+              }
             }
           }
         }
@@ -129,6 +173,8 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
 
 /** pass 31 Lakes（L6450-6560）：num3 = Next(n*3, n*6) 次尝试（n=w/4200），上限 maxLakes-1 */
 export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const g0 = globalThis as { __swLkCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swLkCap?.(gs, st); } catch { /* probe */ }
   const { w } = st;
   // cs:14619-14620：double 先乘后截——Next((int)(w/4200*3), (int)(w/4200*6))。
   // 曾 n=floor(w/4200) 整数化再乘（6400 宽原版 Next(4,9) vs 复刻 [3,5]）
