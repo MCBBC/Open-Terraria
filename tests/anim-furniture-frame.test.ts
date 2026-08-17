@@ -43,6 +43,22 @@ function mockAtlas() {
   } as unknown as SpriteAtlas;
 }
 
+/** mock atlas：Tiles_187 几何（1890×72 两带样式，grid16 stride18 rows4） */
+function mockAtlas187() {
+  const fakeImg = { width: 1890, height: 72 };
+  const meta = {
+    sheet: 'Tiles_187.png', name: 'Decos 3x2 Group 2', key: 'v_187_decos_3x2_group_2',
+    grid: [16, 16], stride: [18, 18], cols: 105, rows: 4,
+  };
+  return {
+    vmeta: (s: number) => (s === 187 ? meta : null),
+    ensureVImage: () => fakeImg as unknown as HTMLImageElement,
+    vframeAt: (_s: number, x: number, y: number): DrawRect =>
+      ({ img: fakeImg as unknown as HTMLImageElement, sx: x, sy: y, sw: 16, sh: 16 }),
+    vImageFailed: () => false,
+  } as unknown as SpriteAtlas;
+}
+
 /** 放一张 3×3 炼金台：framed=true 写逐格帧；否则全零帧（dgWr 系放置/存量存档形态） */
 function placeTable(st: TileStore, x0: number, y0: number, framed: boolean): void {
   for (let dx = 0; dx < 3; dx++) {
@@ -103,5 +119,54 @@ describe('动画家具帧偏移 × 零帧重建（炼金台 355）', () => {
       () => true, 0, 0, 0, 0);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({ sx: 36, sy: 36 });
+  });
+
+  it('相邻零帧 3×2 石堆（187）：整段 run 模数切块，ofx 序列 [0,18,36,0,18,36]（2026-08-17 沙漠石堆错位）', () => {
+    const st = new TileStore(32, 32);
+    const PILE = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
+    // 两台并排零帧 3×2（用户存量档形态：sanitize 前生成的沙漠头骨堆）
+    for (const ox of [10, 13]) {
+      for (let dx = 0; dx < 3; dx++) {
+        for (let dy = 0; dy < 2; dy++) st.setTileSilent(ox + dx, 20 + dy, PILE, 0, 0);
+      }
+    }
+    const def = TILE_DEFS[PILE]!;
+    const atlas = mockAtlas187();
+    const xs: number[] = [];
+    for (let dx = 0; dx < 6; dx++) {
+      const { ctx, calls } = recCtx();
+      drawVanillaCell(ctx, atlas, 187, def.vanilla!.frame as 'style',
+        def.vanilla!.fw!, def.vanilla!.fh!, st, 10 + dx, 21, PILE,
+        () => true, 0, 0, 0, 0);
+      expect(calls).toHaveLength(1);
+      xs.push(calls[0].sx);
+    }
+    // 新重建：整段 run 边界对齐 → 列偏移按 fw=3 循环（旧截断扫描为 0,18,36,36,36,36）
+    expect(xs).toEqual([0, 18, 36, 0, 18, 36]);
+  });
+
+  it('读档修复 repairZeroFramePileStyles：沙地→头骨堆 52-54、草地→14-16、幂等', async () => {
+    const { repairZeroFramePileStyles } = await import('../src/world/gen/vanilla/PilesPass');
+    const SAND = TILE_BY_KEY['sand']!;
+    const GRASS = TILE_BY_KEY['grass']!;
+    const PILE = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
+    const st = new TileStore(32, 32);
+    // 沙地上一组零帧 3×2（底行 y=11，地面 y=12=沙）
+    for (let dx = 0; dx < 3; dx++) st.setTileSilent(10 + dx, 12, SAND, 0, 0);
+    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) st.setTileSilent(10 + dx, 10 + dy, PILE, 0, 0);
+    // 草地连排两组零帧（整段 run 按 3 宽切块逐组修复——地面须铺满 run 下方）
+    for (let dx = 0; dx < 6; dx++) st.setTileSilent(17 + dx, 12, GRASS, 0, 0);
+    for (const ox of [17, 20]) for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 2; dy++) st.setTileSilent(ox + dx, 10 + dy, PILE, 0, 0);
+    const fixed = repairZeroFramePileStyles(st);
+    expect(fixed).toBe(18);   // 3 组 × 6 格
+    const styleOf = (x: number) => Math.floor(st.frameX[st.idx(x, 10)] / 54);
+    expect(styleOf(10)).toBeGreaterThanOrEqual(52); expect(styleOf(10)).toBeLessThanOrEqual(54);
+    expect(st.frameX[st.idx(12, 11)] - st.frameX[st.idx(10, 11)]).toBe(36);   // 组内 dx=2
+    for (const ox of [17, 20]) {
+      const s = styleOf(ox);
+      expect(s).toBeGreaterThanOrEqual(14); expect(s).toBeLessThanOrEqual(16);
+    }
+    // 幂等：再跑零修复
+    expect(repairZeroFramePileStyles(st)).toBe(0);
   });
 });

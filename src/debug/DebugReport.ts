@@ -747,6 +747,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         ? { tx: g.lighting.heldLight.tx, ty: g.lighting.heldLight.ty,
           r: +g.lighting.heldLight.r.toFixed(3), g: +g.lighting.heldLight.g.toFixed(3), b: +g.lighting.heldLight.b.toFixed(3) }
         : null,
+      buffLights: g.lighting.buffLights.map((L) => ({ tx: L.tx, ty: L.ty, r: +L.r.toFixed(3), g: +L.g.toFixed(3), b: +L.b.toFixed(3) })),
       perFrameCount: g.lighting.perFrameCount ?? 0,
       // 可疑格采样（区域外 lightAt 返回 0 —— 与 rx/ry/rw/rh 合读可判定"光照全黑"是否越区）
       samples: {

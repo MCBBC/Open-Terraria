@@ -2478,6 +2478,11 @@ export class Player extends Entity {
     this.dropThrough = !!this.inputDown;
     this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
     this.stepUpHolds = this.inputUp;   // holdsMatching=controlUp：按住↑行走可踏上站台面（桌子/平台/铁砧…）
+    // 跑动/下落撞碎裂砖（Player.Update :27733 CheckIceBreak 后紧随——在 StepDown/StepUp
+    // （:27745-27760）与 TileCollision（:27783+）【之前】调用：读碰撞前的完整速度与
+    // 上 tick 已落定位置。曾挂在 fixedUpdate 尾部（碰撞后）——空中横移（跳跃顶点
+    // vy<1）以 vx 撞脚行裂砖的场景碰撞已清零 vx，速度门必失败，2026-08-17 归位）
+    this.checkCrackedBrickBreak(game);
     // 钩爪牵引（GrappleMovement 1:1，Player.cs:22338-22483）——moveAndCollide 前覆写速度
     this.grappleMovement(game);
     // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；
@@ -2725,8 +2730,6 @@ export class Player extends Entity {
     // 每帧自登记（挂墙 :49797-49801 / 锚定段 :49954-49957），下 tick 消费前重建
     this.grappling[0] = null;
     this.grapCount = 0;
-    // 跑动/下落撞碎裂砖（Player.Update 每帧调 CheckCrackedBrickBreak :23040）
-    this.checkCrackedBrickBreak(game);
   }
 
   /** CheckCrackedBrickBreak（Player.cs:23040-23110 全 1:1）：跑动/下落撞上地牢

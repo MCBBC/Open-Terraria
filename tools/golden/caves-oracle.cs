@@ -8343,11 +8343,16 @@ Replay(); // ▶pass 头重播：GravitatingSandCleanup cs:15198
                 {
                     for (int j = num2; j < num; j++)
                     {
-                        // Tile.ResetToType（Tile.cs:279-289）：换 type+active 位+液体清零，wall 不动
+                        // Tile.ResetToType（Tile.cs:279-289）：sTileHeader=32（=active 位 0x20，
+                        // 其余位清零→slope/halfBrick 归零）+液体清零+帧清零，wall 不动。
+                        // 链外扩展批（2026-08-17）补 slope/half 清位——曾漏 → 落沙格残留
+                        // 上游坡面（(2626,235) 坡 4），QuickCleanup(e) 首个坡位消费端显形。
                         typ[j * W + i] = type;
                         act[j * W + i] = 1;
                         liq[j * W + i] = 0;
                         liqT[j * W + i] = 0;
+                        half[j * W + i] = 0;
+                        slope[j * W + i] = 0;
                     }
                 }
                 flag = true;

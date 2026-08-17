@@ -65,16 +65,21 @@ describe('棕榈树砍伐（tileAxe 族对齐）', () => {
     expect(missing, `缺 axe 的 sheet: ${missing}`).toEqual([]);
   });
 
-  it('镐排除门（:45039）：树/棕榈/倒木/仙人掌 pick 不可挖，镐可挖普通块', () => {
-    // toolCanBreak 经 (game as any) 直调——private 仅编译期
+  it('镐排除门（:45039）：树/棕榈/倒木/仙人掌 pick 不可挖，镐可挖普通块/平台', () => {
+    // toolMatchesTile 经 (game as any) 直调——private 仅编译期。
+    // 2026-08-17 砍树击打音对齐批：拆成 toolMatchesTile（类型门，查
+    // TILE_AXE_SHEETS 原版表）+ tryMine 内 d.pick 通用门槛（镐力不足仍
+    // 播击打音不积累）——平台 19 非 tileAxe，镐可挖（曾据 d.axe<0 误拒）
     const g = Object.create(Game.prototype) as unknown as {
-      toolCanBreak(t: number, power: number, tool: string): boolean;
+      toolMatchesTile(t: number, tool: string): boolean;
     };
     for (const t of [PALM, TREE, CAC, TILE_BY_KEY['v_488_fallen_log'], TILE_BY_KEY['v_704_fallen_log_echo']]) {
-      expect(g.toolCanBreak(t, 100, 'pick'), `sheet ${TILE_DEFS[t].vanilla?.sheet} pick`).toBe(false);
-      expect(g.toolCanBreak(t, 0, 'axe'), `sheet ${TILE_DEFS[t].vanilla?.sheet} axe`).toBe(true);
+      expect(g.toolMatchesTile(t, 'pick'), `sheet ${TILE_DEFS[t].vanilla?.sheet} pick`).toBe(false);
+      expect(g.toolMatchesTile(t, 'axe'), `sheet ${TILE_DEFS[t].vanilla?.sheet} axe`).toBe(true);
     }
-    expect(g.toolCanBreak(DIRT, 50, 'pick')).toBe(true);
+    expect(g.toolMatchesTile(DIRT, 'pick')).toBe(true);
+    expect(g.toolMatchesTile(TILE_BY_KEY['platform'], 'pick')).toBe(true);   // 平台非 tileAxe：镐可拆
+    expect(g.toolMatchesTile(TILE_BY_KEY['platform'], 'axe')).toBe(false);  // 斧不可拆（原版）
   });
 
   it('fellImportedTree 棕榈分支：每干格棕榈木 + 树冠格橡实（帧前捕获）', () => {

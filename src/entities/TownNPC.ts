@@ -333,6 +333,8 @@ export function walkPrediction(
   }
   return { avoidFalling };
 }
+// keepwalking 出参（:56098-56115：ai[1]<30 起步期贴 AvoidedByNPCs → 走程重置
+// 90t）未接——起步期贴块重置走程的场景极罕见，登记。
 
 /** 软帽链（StrikeNPC :82147-82166）：kb>8 起每段衰减 0.9/0.8/0.7/0.6、>16 封顶 */
 export function knockbackCap(kb: number): number {
@@ -1062,8 +1064,9 @@ export class TownNPC extends Entity {
       // :53990-54024：非攻击态（ai[0]∉{10,12,13,14,15}）背向最近敌走逃——
       // 坐姿不豁免（原版 ai[0]==5 不在攻击态排除列，扫描直接改 ai[0]=1 = 拽起逃跑）；
       // 社交态同被打断（:54000-54015：ai[0]∈{3,4,16,17} 时对偶 NPC 也被踢回
-      // 走态 ai[1]=120+rand(120)——"聊着聊着一起跑"）——前视有坑（avoidFalling）
-      // 时不打断（站在原地等越障链处理）
+      // 走态 ai[1]=120+rand(120)——"聊着跟一起跑"）。前视有坑（avoidFalling）
+      // 时不逃不转身（原版 :53991-54024 的 !avoidFalling 门同构——坑前站定，
+      // 攻击态照常接管还击）
       if (this.sitting) {
         this.sitting = false;
         this.sitTimer = 0;

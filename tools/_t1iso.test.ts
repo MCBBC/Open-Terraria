@@ -236,9 +236,13 @@ let gsLk: GenState | null = null, gsPot: GenState | null = null, gsVn: GenState 
       let k = 0;
       rng.int = (a: number, b: number) => { const v = intOrig(a, b); if (k++ < 120) console.log(`roll#${k} int(${a},${b})=${v}`); return v; };
     }
-    // pots 时点生成期 tileSolid 翻转态（GenSolid 时间线；481-483/192 数据已预翻 false）
+    // pots 时点生成期 tileSolid 翻转态（GenSolid 时间线）——★481-483/192 须显式翻
+    // （管线侧由 HalfBrickPass:395-396 在 SmoothWorld 尾翻、PilesPass:465 才还原；
+    //   「数据已预翻 false」旧注释不实——tiles.ts 数据 481-483/192 solid=true，
+    //   隔离重放绕过管线 pass 序列，缺此两条 → 首实心锚在裂砖 5458 格/活叶
+    //   4223 格上错位 → 每 attempt 掷数漂移，_potsolid 对账实证）
     resetGenSolid();
-    flipGenSolid([659, 484, 190, 162, 225, 232], false);
+    flipGenSolid([659, 484, 190, 162, 225, 232, 481, 482, 483, 192], false);
     runPotsPass(st, rng, gsPot!);
     console.log(`Pots draws=${box.n} (vanilla ${VN.pots}, diff=${box.n - VN.pots})`);
     diff(st, 71, 'Pots vs dump071');

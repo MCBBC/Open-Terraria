@@ -204,4 +204,35 @@ describe('Player.checkCrackedBrickBreak（跑/落撞碎 :23040-23110）', () => 
     expect(broke.length).toBeGreaterThan(0);               // 速度门 40%/帧 → 数帧内碎
     expect(frames).toBeLessThan(50);
   });
+
+  it('【位序回归】空中横移撞脚行裂砖：fixedUpdate 碰撞【前】以完整 vx 触发（:27733）', () => {
+    // 原版 CheckCrackedBrickBreak 调用点在 StepUp/TileCollision 之前——空中
+    // （跳跃顶点 vy<1，脚底三点悬空不触发取消门）以 vx 撞上脚行高度的裂砖时，
+    // 碰撞还没把 vx 清零，速度门可过。曾挂在 fixedUpdate 尾部（碰撞后）该场景
+    // vx 已被水平碰撞清零 → 永不触发，2026-08-17 归位到碰撞前。
+    const w = new World(60, 120, 7, 'airhit');
+    const broke: Array<[number, number]> = [];
+    const hooks = {
+      world: w,
+      enemies: () => [], critters: () => [],
+      spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {},
+      cutTile: () => {}, onEnemyKilled: () => {}, spawnEnemy: () => {},
+      spawnParticles: () => {}, notifyInventoryChanged: () => {},
+      playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
+      spawnBurst: () => {},
+      breakTile: (x: number, y: number) => { w.store.setTileSilent(x, y, 0); broke.push([x, y]); },
+    } as unknown as GameHooks;
+    w.store.setTileSilent(30, 30, CRACK());        // 脚行高度、正前方 0.5px 处的裂砖
+    // 脚底 y+h=479.5（砖顶 480，距 0.5px < 1px 进检测窗）；右缘 x+w=479.5（砖左缘 480，0.5px）
+    const p = new Player(459.5, 437.5, new Inventory());
+    p.vx = 6; p.vy = 0;
+    const rnd = vi.spyOn(Math, 'random').mockReturnValue(0);   // 速度门 roll=2 < vx 恒过
+    try {
+      p.fixedUpdate(1 / 60, hooks);
+      expect(broke).toContainEqual([30, 30]);      // 碰撞前已碎
+      expect(w.store.get(30, 30)).toBe(0);
+    } finally {
+      rnd.mockRestore();
+    }
+  });
 });

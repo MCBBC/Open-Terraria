@@ -279,6 +279,7 @@ import { npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
 import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
+import { repairZeroFramePileStyles } from '../world/gen/vanilla/PilesPass';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -2787,6 +2788,21 @@ export class Game implements GameHooks {
     // 物体的全部格帧 <18 且非全 0（合法块必有一格 ≥18；全 0 由渲染端锚点扫描重建）
     this.repairIndexFrames();
 
+    // ---- 历史存档零帧石堆修复（2026-08-17）----
+    // 旧版 finalize 净化器曾把合法多带样式（原版 wld 语义=原始 fx，沙地头骨堆
+    // 187 样式 52-54 = fx 2808）按"越表"清零 → 存量世界沙漠石堆全显示样式 0
+    // （长草石堆）。按地面群系回填正确样式（PilesPass 地面→样式表同源推断）
+    {
+      const fixedPiles = repairZeroFramePileStyles(this.world.store);
+      if (fixedPiles > 0) {
+        const st = this.world.store;
+        for (let cy = 0; cy < Math.ceil(st.h / 16); cy++) {
+          for (let cx = 0; cx < Math.ceil(st.w / 16); cx++) this.chunks.markDirty(cx, cy);
+        }
+        console.log(`[repairZeroFramePileStyles] 修复 ${fixedPiles} 格零帧 187 石堆（按地面群系回填样式）`);
+      }
+    }
+
     // ---- 城镇 NPC 恢复（原版 WorldFile 加载：存档里的 town NPC 原位生成）----
     const savedNpcs = this.world.pendingTownNpcs ?? [];
     this.world.pendingTownNpcs = [];
@@ -4762,8 +4778,9 @@ export class Game implements GameHooks {
         3002: [1.05, 0.95, 0.55], 4776: [0.9, 0.35, 1],
       };
       if (gvid === 5643) {
-        const ph = Math.floor(this.tickCount / 10) % 6;
-        heldRGB = ([[1, 0.2, 0.2], [1, 1, 0.2], [0.2, 1, 0.2], [0.2, 1, 1], [0.2, 0.2, 1], [1, 0.2, 1]] as Array<[number, number, number]>)[ph];
+        // :49390-49410：r/g/b = Main.DiscoR/G/B ÷255（连续渐变）——曾近似 6 档
+        // 跳变，改同源 discoColor()（discoR/G/B 与 TorchID Disco 档同一时钟）
+        heldRGB = this.lighting.clock.discoColor();
       } else if (gvid >= 0 && GLOWSTICK_LIGHT[gvid]) {
         heldRGB = GLOWSTICK_LIGHT[gvid];
       }
@@ -4822,16 +4839,45 @@ export class Game implements GameHooks {
         }
       }
     }
-    // 光芒药水（buff 11 shine，Player.cs:9872 Light.AddLight 玩家格 1.3/1.3/1.3）与
-    // 狱火药水（:9899 0.65/0.4/0.1）——无条件常亮，与手持火把同通道
-    if (!heldRGB && player.buffs.has(BuffType.Shine)) heldRGB = [1.3, 1.3, 1.3];
-    if (!heldRGB && player.buffs.has(BuffType.Inferno)) heldRGB = [0.65, 0.4, 0.1];
-    const torchOn = !!heldRGB;
+    // 光芒药水（buff 11 shine，Player.cs:9687-9690 中心格 AddLight **(0.8,0.95,1.0)**——
+    // 旧 1.3/1.3/1.3 为误值）与狱火药水（:9896-9898 0.65/0.4/0.1）：
+    // 原版在 UpdateBuffs【无条件】独立发射，与手持物**并存**——引擎侧 ApplyPerFrameLights
+    // 逐通道取最大（Vector3.Max，LightingEngine.cs:205-220），不叠加也非手持优先；
+    // 旧实现 `!heldRGB &&` 优先链（持火把时药水不发光）已废
+    const buffLights: Array<{ tx: number; ty: number; r: number; g: number; b: number }> = [];
     const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
+    if (player.buffs.has(BuffType.Shine)) buffLights.push({ tx: ptx, ty: pty, r: 0.8, g: 0.95, b: 1 });
+    if (player.buffs.has(BuffType.Inferno)) buffLights.push({ tx: ptx, ty: pty, r: 0.65, g: 0.4, b: 0.1 });
+    // 手持光源落【手部位移格】（完整原版链）：
+    //  idle itemLocation（Player.cs:50387-50389 默认分支）= (cx − 2·direction,
+    //  cy − itemFrame.H/2)；各族帧高实测（Item_N.png）：火把族16 / 蜡烛·148·5322=20 /
+    //  3002=18 / 4952=40 / 荧光棒族16。
+    //  光位 = itemLocation + (X: 火把族 ±12 对称 :49093/:49127；非火把族 −16/+6
+    //  :49153/:49175 等，右向 +6 勿与火把的 +12 混) + (Y: −14)。
+    //  RotatedRelativePoint（站立恒等）/mount 偏移/+velocity 三项从略。
+    const heldVidLight = heldDef ? viIdFromKey(heldDef.key) : -1;
+    let htx = -1, hty = -1;
+    if (heldRGB) {
+      const dir = player.facing < 0 ? -1 : 1;
+      const TORCH_SHAPE = new Set([8, 427, 428, 429, 430, 431, 432, 433, 974, 1245, 2274, 3004,
+        3045, 3114, 4383, 4384, 4385, 4386, 4387, 4388, 5293, 5353, 523, 1333]);
+      const isTorch = TORCH_SHAPE.has(heldVidLight);
+      const frameH = heldVidLight === 4952 ? 40 : heldVidLight === 3002 ? 18
+        : heldVidLight === 105 || heldVidLight === 713 || heldVidLight === 148 || heldVidLight === 5322 ? 20 : 16;
+      const offX = isTorch ? 12 * dir : (dir < 0 ? -16 : 6);
+      htx = Math.floor((player.cx - 2 * dir + offX) / TILE);
+      hty = Math.floor((player.cy - frameH / 2 - 14) / TILE);
+    }
+    const torchOn = !!heldRGB;
     const prevLight = this.lighting.heldLight;
-    this.lighting.heldLight = heldRGB ? { tx: ptx, ty: pty, r: heldRGB[0], g: heldRGB[1], b: heldRGB[2] } : null;
-    if (torchOn !== !!prevLight ||
-      (torchOn && prevLight && (prevLight.tx !== ptx || prevLight.ty !== pty
+    const prevBuffs = this.lighting.buffLights;
+    this.lighting.heldLight = heldRGB ? { tx: htx, ty: hty, r: heldRGB[0], g: heldRGB[1], b: heldRGB[2] } : null;
+    this.lighting.buffLights = buffLights;
+    const buffChanged = prevBuffs.length !== buffLights.length
+      || prevBuffs.some((p, i) => p.tx !== buffLights[i].tx || p.ty !== buffLights[i].ty
+        || p.r !== buffLights[i].r || p.g !== buffLights[i].g || p.b !== buffLights[i].b);
+    if (buffChanged || torchOn !== !!prevLight ||
+      (torchOn && prevLight && (prevLight.tx !== htx || prevLight.ty !== hty
         || prevLight.r !== heldRGB![0] || prevLight.g !== heldRGB![1] || prevLight.b !== heldRGB![2]))) {
       this.lighting.dirty = true;
     }

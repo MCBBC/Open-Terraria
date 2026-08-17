@@ -47,7 +47,7 @@ const ok = (name, pass, detail = '') => {
       }
     };
     g.world.clock.timeOfDay = 0.5;          // 白天正午
-    g.world.weather.raining = true;         // 雨 → sitFlag
+    g.world.weather.startRain();            // 真雨（手设 raining 会被雨调度弹回）
     p.x = (bx - 100) * 16; p.y = (F - 3) * 16;   // 玩家活体远处（防矩形传送门）
     p.dead = false; p.hp = 100; p.maxHp = 100;
     const n = new TownNPC('guide', (bx + 0) * 16 + 8, F * 16);
@@ -58,7 +58,7 @@ const ok = (name, pass, detail = '') => {
     await waitTicks(900);
     const x1 = n.cx / 16;
     n.dead = true;
-    g.world.weather.raining = false;
+    g.world.weather.stopRain();
     return { x0, x1 };
   }, bx, F);
   const moved = r.x1 - r.x0;
@@ -89,7 +89,7 @@ const ok = (name, pass, detail = '') => {
     for (let k = 0; k < 50 && !fell; k++) {
       await waitTicks(20);
       maxCol = Math.max(maxCol, n.cx / 16);
-      if (n.cx / 16 >= 21 || n.y > F * 16 + 4) fell = true;
+      if (n.cx / 16 >= bx + 21 || n.y > F * 16 + 4) fell = true;
     }
     const yEnd = n.y / 16;
     n.dead = true;
@@ -125,8 +125,10 @@ const ok = (name, pass, detail = '') => {
       if ((ka === 16 && kb === 17) || (ka === 17 && kb === 16)) {
         rps = true;
         const c0 = window.__swEmotes.count();
-        await waitTicks(170);
-        rpsEmotes = window.__swEmotes.count() - c0;
+        for (let s = 0; s < 17; s++) {
+          await waitTicks(10);
+          rpsEmotes = Math.max(rpsEmotes, window.__swEmotes.count() - c0);
+        }
       }
     }
     a.dead = true; b.dead = true;
@@ -150,8 +152,8 @@ const ok = (name, pass, detail = '') => {
       }
     };
     g.world.clock.timeOfDay = 0.5;
-    g.world.scene = g.world.scene ?? {};
-    g.world.scene.partyUp = true;
+    const party = await import('/src/world/wiring/party.ts');
+    if (!party.partyIsUp(g.partyState)) party.toggleManualParty(g.partyState);  // 真派对（scene 手塞会被 scanScene 重写）
     p.x = (bx - 3) * 16; p.y = (F - 3) * 16;   // 玩家在 NPC 旁 50px
     const n = new TownNPC('nurse', (bx + 0) * 16 + 8, F * 16);
     g.entities.npcs.push(n);
@@ -173,7 +175,7 @@ const ok = (name, pass, detail = '') => {
       }
     }
     if (vd && origSpawn) vd.spawn = origSpawn;
-    g.world.scene.partyUp = false;
+    if (party.partyIsUp(g.partyState)) party.toggleManualParty(g.partyState);
     n.dead = true;
     return { dancing, dustNotes, frames: [...danceFrames] };
   }, bx, F);

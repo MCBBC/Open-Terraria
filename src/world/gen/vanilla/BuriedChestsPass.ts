@@ -15,7 +15,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { solidTile as solidTileHB } from './HalfBrickPass';
-import { genSolidType, vanGenSolidType } from './GenSolid';
+import { genSolidType } from './GenSolid';
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;

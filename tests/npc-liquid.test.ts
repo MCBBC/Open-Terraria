@@ -230,13 +230,20 @@ describe('水栖离水分支（aiStyle 16 :24019-24034）与史莱姆 wet 段（
     const w = liquidWorld();
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
     const e = Enemy.fromVanilla(1, 20 * TILE, 37 * TILE)!;      // 蓝史莱姆入池
-    let sawRise = false;
+    let sawRise = false, sawDry = false, wetAt30 = false;
     for (let i = 0; i < 120; i++) {
       e.fixedUpdate(1 / 60, hooks(w, p) as never);
       if (e.vy < -0.5) sawRise = true;
+      if (!e.wet) sawDry = true;
+      if (i === 30) wetAt30 = e.wet;
       expect(e.vy).toBeGreaterThanOrEqual(-4.01);               // 钳 -4
     }
-    expect(e.wet).toBe(true);
+    // 2026-08-17 重校准：wet 重力档 0.2 落地后净浮力 -0.5+0.2=-0.3/t（原版
+    // UpdateNPC_UpdateGravity 同式）——史莱姆 ~45t 冲出水面后回落在液面上下
+    // 起伏（原版弹跳漂浮实态），t=120 时刻 wet 已是采样巧合，改验：
+    // 前段（t=30）仍在水下、全程出现过离水（跳出水面）、上浮与 -4 钳
+    expect(wetAt30).toBe(true);
+    expect(sawDry).toBe(true);
     expect(sawRise).toBe(true);
   });
   it('睡渔夫 376 水面漂流不沉（AI_000 头顶格液体门 :19818）', () => {

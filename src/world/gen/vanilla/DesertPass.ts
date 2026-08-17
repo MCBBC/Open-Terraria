@@ -953,7 +953,14 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     x1: Math.min(st.w, desc.combX + desc.combW + 10),
     y1: Math.min(st.h, desc.combY + desc.combH + 10),
   };
-
+  // UndergroundDesertHiveLocation = description.Hive(DesertBiome.cs:52)——追加小屋段
+  //   采样矩形(Hive=(origin.X, origin.Y+num7, num4, num5-num7)),与 Inflate 后的
+  //   CombinedArea 是两个矩形,不得混用(house40 追加屋位漂根因)
+  gs.undergroundDesertHive = {
+    x0: Math.max(0, desc.combX), y0: Math.max(0, desc.hiveTop),
+    x1: Math.min(st.w, desc.combX + desc.combW),
+    y1: Math.min(st.h, desc.hiveTop + desc.hiveH),
+  };
 }
 
 export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {

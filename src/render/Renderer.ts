@@ -6145,7 +6145,9 @@ export class Renderer {
     } else {
       legs = 0;
     }
-    if (p.carpetTime > 0) legs = 0;                                  // 飞毯腿钉 0（:35858-35863）
+    if (!p.onGround && p.carpetTime > 0) legs = 0;   // 飞毯滑翔腿钉 0(:35858-35863;
+    // ★门=滑翔中(airborne)非燃料>0——2026-08-16 水体批把 onGround 重置段写了
+    // carpetTime=300 回满,落地恒 300 → 旧门把地面走路腿钉死站立帧(用户实报)
     if (p.performingJump === 'Sandstorm') legs = 0;                  // 沙暴跳腿钉 0（:35865-35877）
     if (legArmorId === 217 && (p.sitting || p.sleeping)) legs = 5;   // :36202-36206
     // ---- 身体链（:35874-36186，else-if 序 1:1）----
@@ -6166,7 +6168,7 @@ export class Renderer {
     else if (p.swimTime > 0) body = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;     // :36102-36119
     else if (p.vy !== 0) {
       if (p.eocDash > 0) body = 6;
-      else if (p.performingJump === 'Sandstorm' || p.carpetTime > 0) body = 6;         // :36123-36134
+      else if (p.performingJump === 'Sandstorm' || (!p.onGround && p.carpetTime > 0)) body = 6;  // :36123-36134(同上门修)
       else if (wing) {
         if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) body = 0;
         else body = (p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0) ? 6 : 5;   // :36135-36155

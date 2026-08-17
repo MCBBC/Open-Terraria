@@ -30,6 +30,10 @@ export class LightingEngine {
   dirty = true;
   liquidDirty = false;
   heldLight: { tx: number; ty: number; r: number; g: number; b: number } | null = null;
+  /** 玩家 buff 点光（光芒 11 / 狱火 116，Player.cs:9687-9690/:9896-9898 中心格
+   *  【无条件】独立发射——与手持光源并存，引擎侧逐通道 max 合并
+   *  （ApplyPerFrameLights :744 同原版 Vector3.Max，不叠加不优先） */
+  buffLights: Array<{ tx: number; ty: number; r: number; g: number; b: number }> = [];
   /** 动态点光 API(原版 Lighting.AddLight;0-1 RGB)——每周期消费后清空 */
   addLight(x: number, y: number, r: number, g: number, b: number): void {
     this.perFrame.push({ x, y, r, g, b });
@@ -133,6 +137,7 @@ export class LightingEngine {
     // 手持光源:RGB 来自 TorchID.TorchColor(原版 ItemCheck_EmitHeldItemLight 按火把种类取色)
     const perFrame = this.perFrame;
     if (this.heldLight) perFrame.push({ x: this.heldLight.tx, y: this.heldLight.ty, r: this.heldLight.r, g: this.heldLight.g, b: this.heldLight.b });
+    for (const L of this.buffLights) perFrame.push({ x: L.tx, y: L.ty, r: L.r, g: L.g, b: L.b });
     this.scanner.exportTo(w, this.work, this.rx, this.ry, perFrame);
     perFrame.length = 0;
   }
