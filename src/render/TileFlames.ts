@@ -68,6 +68,17 @@ export const BRAZIER_FLAME_TILE: Record<number, number> = {
 };
 const BRAZIER_TINT: readonly [number, number, number] = [200, 200, 200];
 
+/** 火焰族的【绘制尺寸】(GetTileDrawData 各 case 的 tileWidth/tileHeight,非图集格):
+ *  火把 20×20(:4724-4730) | 蜡烛族 33/49/174/372/646 = 16×20(:4887-4893) |
+ *  烛台 100/173/壁灯 93/吊灯 34/灯笼 42/骷髅灯 98/南瓜灯 35 无 override = 16×16。
+ *  ★此前按图集格(蜡烛 18×18/火把 22×22)绘制 → 蜡烛族火焰外溢邻格 1px×7 份叠加
+ *  = 相邻火把/蜡烛的暖焰盖进水蜡烛格(用户报"蓝+红火焰叠加",2026-08-17);
+ *  原版蜡烛族 16px 恰好零外溢,火把 20px 外溢 2px。 */
+const FLAME_DRAW_SIZE: Record<number, [number, number]> = {
+  4: [20, 20],
+  33: [16, 20], 49: [16, 20], 174: [16, 20], 372: [16, 20], 646: [16, 20],
+};
+
 /** 篝火 215 走独占分支（TileDrawing.cs:2729-2747）：单份无抖动、frameY<36 门、
  *  颜色按 frameX/54（5=Disco / 14=(50,50,100,20) / 15=白），addFrY 参与取帧。 */
 const CAMPFIRE_FLAME = { sheet: 215, flame: 15, frameYPitch: 54 };
@@ -468,8 +479,14 @@ export function drawTileFlames(
       }
       const img = imgFor(flameIdx);
       if (!img) continue;
-      const r = atlas.vframeAt(sheet, frameX, frameY);
-      if (!r) continue;
+      const r0 = atlas.vframeAt(sheet, frameX, frameY);
+      if (!r0) continue;
+      // 原版绘制尺寸覆盖（FLAME_DRAW_SIZE 表注）：源矩形同格左上取 w×h，
+      // dx = x*16-(w-16)/2(:2718)——蜡烛族 16px 零外溢(治邻焰盖格)
+      const size = FLAME_DRAW_SIZE[sheet];
+      const r = size
+        ? { ...r0, sw: size[0], sh: size[1] }
+        : r0;
       const top = flameTileTop(sheet, st, x, y, frameX, st.frameY[i]);
       const dx = x * TILE - (r.sw - TILE) / 2;          // :2718 X = x*16-(w-16)/2
       const dy = y * TILE + top;

@@ -94,6 +94,10 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     const world = hellWorld();
     // 相机移到 UnderworldLayer(h-200)附近:岩浆带底+表面波纹条同屏(:52488 条在带底)
     const camY = (600 - 215) * 16;
+    // ★该深度地狱多层远景也会画(DrawUnderworldBackground)——Node 无 Image,
+    //   置空缓存(=未加载态,hellImg 命中缓存返回 null 跳过绘制)防 loadBitmapOnly 崩
+    const hellMap = (bg as unknown as { hellImgs: Map<number, unknown> }).hellImgs;
+    for (let n = 0; n <= 13; n++) hellMap.set(n, null);
     // 推到第 2 帧:magmaBGFrame 每 8 tick(133.33ms)推一次 → 16 tick = 266.7ms
     (bg as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
       .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 266.7);
@@ -107,6 +111,8 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     // 因 magmaFrameT 跨帧调用累计——原版 magmaBGFrame 同为全局持久计数)
     const bg2 = new BiomeBackground();
     stubImgs(bg2);
+    const hellMap2 = (bg2 as unknown as { hellImgs: Map<number, unknown> }).hellImgs;
+    for (let n = 0; n <= 13; n++) hellMap2.set(n, null);
     (bg2 as unknown as { ugAlpha: number; ugOld: number }).ugAlpha = 1;
     (bg2 as unknown as { ugAlpha: number; ugOld: number }).ugOld = bg2.ugStyle;
     const { ctx: ctx2, calls: calls2 } = recorder();

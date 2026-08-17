@@ -536,6 +536,7 @@ export class Player extends Entity {
     beetleDef: boolean;
     wolfAcc: boolean; boc: boolean;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
+    flowerBoots: boolean;   // 花靴 3017/仙灵靴 3993（Player.cs:12688 行走生花）
     counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
     manaRegenBonus: number; manaRegenDelayBonus: number;
     setBonus: ReturnType<typeof activeArmorSetBonus> | null;
@@ -607,6 +608,7 @@ export class Player extends Entity {
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
+    let flowerBoots = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
     let divingHelm = false, merman = false;
@@ -715,6 +717,7 @@ export class Player extends Entity {
         if (fx.tileRange) tileRange = true;
         if (fx.skyStone) skyStone = true;
         if (fx.pStone) pStone = true;
+        if (fx.flowerBoots) flowerBoots = true;   // 花靴/仙灵靴（:12688）
         if (fx.manaMagnet) manaMagnet = true;
         if (fx.magicCuffs) magicCuffs = true;
         if (fx.manaFlower) manaFlower = true;
@@ -906,7 +909,7 @@ export class Player extends Entity {
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
       beetleDef,
       wolfAcc, boc,
-      tileSpeed, wallSpeed, tileRange, pStone, counterWeight,
+      tileSpeed, wallSpeed, tileRange, pStone, counterWeight, flowerBoots,
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)

@@ -59,6 +59,7 @@ export interface AccFx {
   huntressSave?: number; // 10% 概率不耗弹
   kbGlove?: number;      // 力量手套族：近战击退翻倍
   autoReuseGlove?: number; // 力量手套族：近战武器自动连挥（Player.TryAllowingItemReuse :52040-52042）
+  flowerBoots?: number;    // 花靴 3017/仙灵靴 3993（GrantArmorBenefits :12682-12688 行走生花）
   yoyoString?: number;   // 悠悠球线：射程 +
   tileSpeed?: number;    // 采矿/放置加速
   wallSpeed?: number;    // 铺墙加速
@@ -104,6 +105,9 @@ const BEHAVIOR_FX: Record<string, AccFx> = {
   '497': { merman: 1 },
   '861': { merman: 1, nightWolf: 1 },   // Moon Shell：accMerman + wolfAcc（:14585-14591）
   '3110': { merman: 1, nightWolf: 1 },  // Celestial Shell：同（:14853-14859；json 的 skyStone 保留）
+  // 花靴/仙灵靴 flowerBoots（GrantArmorBenefits :12682-12688：行走生花）
+  '3017': { flowerBoots: 1 },
+  '3993': { flowerBoots: 1 },
 };
 
 const FX_BY_IID = (() => {

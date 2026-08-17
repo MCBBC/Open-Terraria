@@ -148,7 +148,6 @@ import { scanLuckScene, rollLuck } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
 import {
   bindJourneyPowers, journeyPowers, shouldDisableSpawns,
-  FAR_PLACEMENT_RANGE_X, FAR_PLACEMENT_RANGE_Y, DEFAULT_TILE_RANGE_X, DEFAULT_TILE_RANGE_Y,
 } from '../world/JourneyPowers';
 import { pickMusic, newMusicState, MUSIC_SLOT, resolveEventMusic, isOldOnesArmy, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
@@ -2040,9 +2039,10 @@ export class Game implements GameHooks {
     const st = this.world.store;
     const p = this.player;
     const ptx = Math.floor(p.cx / TILE), pty = Math.floor(p.cy / TILE);
-    // TileReachCheckSettings.Simple 同款射程盒（inTileRange 口径：x 5 / y 3 + tileBoost）
-    const tb = (p.equipStats.tileRange ? 3 : 0) + (p.buffs.has(BuffType.Builder) ? 1 : 0);
-    const rx = Math.min(20, 5) + tb, ry = Math.min(20, 3) + tb;
+    // TileReachCheckSettings.Simple 同款射程盒（tileReach 口径：x 5 / y 3 +
+    // 配饰 X+3/Y+2 + tileBoost；TB 此处仅 builder buff 份——配饰份在 tileReach 内）
+    const tb = p.buffs.has(BuffType.Builder) ? 1 : 0;
+    const { x: rx, y: ry } = this.tileReach(tb);
     let best: { x: number; y: number } | null = null;
     let bestD = Infinity;
     for (let x = ptx - rx; x <= ptx + rx; x++) {
@@ -3912,6 +3912,19 @@ export class Game implements GameHooks {
       if (this.liquid.numLiquid > 0) this.lighting.liquidDirty = true;
     }
 
+    // ---- 花靴行走生花（Player.ApplyEquipFunctional :12688-12692 每帧 + DoBootsEffect
+    //      :13657-13666 自门：miscCounter%2==0（每 2t）+ 落地 + 无钩爪 +
+    //      CanSpawnWalkingEffects（|vx|+|vy|>1）；PlaceFlowersOnTile :13681-13758：
+    //      脚下格空且无液体、脚格实心 → 按脚格草族放植株）----
+    if (this.player.equipStats.flowerBoots && this.tickCount % 2 === 0
+      && this.player.onGround && Math.abs(this.player.vx) + Math.abs(this.player.vy) > 1
+      && !this.player.grappleProjs.some((g) => g.latched)) {
+      this.flowerBootsPlaceFlowers(
+        Math.floor(this.player.cx / TILE),
+        Math.floor((this.player.y + this.player.h - 1) / TILE),
+      );
+    }
+
     // ---- 敌人生成（F8 可关闭；频率语义见 trySpawnEnemy，每帧概率门） ----
     // 水蜡烛(Main.waterCandle 语义):手持或 32 格内有放置态 → 刷怪率修正（getSpawnRate 内）
     const held2 = this.player.inv.heldItem();
@@ -5408,6 +5421,50 @@ export class Game implements GameHooks {
    *  （长表 :66559 → Tink 档）→ Tink；泥土默认 → Dig（:66576 PlaySound(0)）。
    *  罐=Shatter 走 smashPot、裂砖 481-483=Item127 走 breakCrackedBrick
    *  （全表 1:1 登记遗留）。专用分支（树/罐/裂砖/轨道/锚桩）各有其音不经过此 */
+  /** 花靴/仙灵靴行走生花（Player.DoBootsEffect_PlaceFlowersOnTile :13681-13758 1:1）：
+   *  脚下格 (X,Y) 空且无液体、脚格 (X,Y+1) 实心 → 按脚格草族放植株：
+   *  - 草 2/修剪草 477 → 森林短草 3，frameX=18×num：NextFromList 等权
+   *    {6,7,9..21,24,27,30,33,36,39,42}（22 值），尾段 8 值再 +Next(3)
+   *  - 神圣草 109/神圣修剪草 492 → 1/2 矮圣草 110（18×Next(4,7)，≠90 重掷）/
+   *    高圣草 113（18×Next(2,8)，≠90 重掷）
+   *  - 丛林草 60 → 高丛林草 74（18×Next(9,17)）
+   *  - 灰烬草 633 → 灰烬短草 637（18×Next(6,11)）
+   *  帧语义=style 帧（frame 'style'）；CopyPaintAndCoating 涂料复制未建模（涂装系统缺席） */
+  private flowerBootsPlaceFlowers(x: number, y: number): void {
+    const st = this.world.store;
+    if (!st.inBounds(x, y + 1)) return;
+    const ti = st.idx(x, y);
+    if (st.type[ti] !== 0 || st.liquid[ti] !== 0) return;   // !active && liquid==0
+    if (!st.isSolid(x, y + 1)) return;                      // WorldGen.SolidTile
+    const below = st.type[st.idx(x, y + 1)];
+    const put = (key: string, fx: number): void => {
+      const id = TILE_BY_KEY[key];
+      if (!id) return;
+      st.setTile(x, y, id, fx, 0);
+    };
+    if (below === TILE_BY_KEY['grass'] || below === TILE_BY_KEY['v_477_mowed_grass_block']) {
+      const LIST = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 27, 30, 33, 36, 39, 42];
+      let num = LIST[Math.floor(Math.random() * LIST.length)];   // NextFromList 等权
+      if (num >= 21) num += Math.floor(Math.random() * 3);       // :13699-13705 尾段 +Next(3)
+      put('v_3_forest_short_plants', num * 18);
+    } else if (below === TILE_BY_KEY['v_109_hallowed_grass_block']
+      || below === TILE_BY_KEY['v_492_hallowed_mowed_grass_block']) {
+      if (Math.random() < 0.5) {
+        let fx = 18 * (4 + Math.floor(Math.random() * 3));       // Next(4,7)
+        while (fx === 90) fx = 18 * (4 + Math.floor(Math.random() * 3));
+        put('v_110_hallow_short_plants', fx);
+      } else {
+        let fx = 18 * (2 + Math.floor(Math.random() * 6));       // Next(2,8)
+        while (fx === 90) fx = 18 * (2 + Math.floor(Math.random() * 6));
+        put('v_113_hallow_tall_plants', fx);
+      }
+    } else if (below === TILE_BY_KEY['v_60_jungle_grass_block']) {
+      put('v_74_jungle_tall_plants', 18 * (9 + Math.floor(Math.random() * 8)));   // Next(9,17)
+    } else if (below === TILE_BY_KEY['v_633_ash_grass_block']) {
+      put('v_637_ash_short_plants', 18 * (6 + Math.floor(Math.random() * 5)));    // Next(6,11)
+    }
+  }
+
   private killTileBreakSound(type: number, x: number, y: number): void {
     const def = TILE_DEFS[type];
     if (!def) return;
@@ -5494,7 +5551,7 @@ export class Game implements GameHooks {
     // 工具 tileBoost=0
     const placing = heldDef?.tile != null || heldDef?.wallId != null;
     const tb = placing
-      ? (p.equipStats.tileRange ? 3 : 0) + (p.buffs.has(BuffType.Builder) ? 1 : 0)
+      ? (p.buffs.has(BuffType.Builder) ? 1 : 0)
       : 0;
     // EmptyTile 的占位实体（玩家 + 敌怪 + 城镇 NPC）
     const occupants: Array<{ x: number; y: number; w: number; h: number }> = [
@@ -5859,6 +5916,15 @@ export class Game implements GameHooks {
     //  纯近战(剑/vi_ melee)与本仓库 legacy sword 走本分支
     const cw = heldDef ? combatWeapon(heldDef) : null;
     const cwMelee = cw?.kind === 'melee' ? cw : null;
+    // ── 武器/工具兼放置物（Player.cs TryUsingItem：melee 挥击/工具挖掘与
+    //  PlaceThing 并行）：再生法杖 213（melee+createTile 2）/再生之斧 5295
+    //  （axe+createTile 2）。近战/工具分支的 return 曾把放置链整个截胡
+    //  ＝"再生法杖没效果"主根因。先试转化（noCooldown——冷却由随后的分支
+    //  统一设置，同一按键挥击+放置并行），非可转目标静默落空不影响战斗
+    if (heldDef?.tile && (cwMelee || tool)
+      && !PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
+      this.tryGrassConvert(tx, ty, heldDef, { noCooldown: true });
+    }
     if (tool?.type === 'sword' || (cwMelee && !tool)) {
       // ★挥击时长 = useAnimation、复用冷却 = useTime（Player.ItemCheck：itemAnimationMax 与
       // itemTime 分立；1790 件 vi 武器两者不同——此前把 useTime 当动画时长，挥速虚快 35%+）
@@ -6292,7 +6358,7 @@ export class Game implements GameHooks {
     // 手持可提取物（泥沙/雪泥/沙漠化石/垃圾/苔藓/粪块/蜂巢/贝壳堆/黑曜石，ItemID.cs:1104）
     // 对准 219/642 左键使用 → 转化；642 先查矿物兑换表。useTime 冷却 = 10×(642?0.33:1)
     if (inp.mouseDown && !inp.rightDown && this.player.useTime === 0
-      && this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) {
+      && this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) {
       const esh = this.wiring?.sheetOf(tx, ty) ?? -1;
       if (esh === 219 || esh === 642) {
         if (this.useExtractinator(tx, ty, true)) {
@@ -6397,7 +6463,7 @@ export class Game implements GameHooks {
             // ReleaseNPC case 356 ai[2]=Style）
             const relStyle = relNpc === 356 && relItemId >= 1994 && relItemId <= 2001
               ? 1 + relItemId - 1994 : undefined;
-            this.spawnNpcByVanilla(relNpc, mtx * TILE + 8, mty * TILE + 8, relStyle);
+            this.spawnNpcByVanilla(relNpc, mtx * TILE + 8, mty * TILE + 8, relStyle, true);
             this.player.inv.removeAt(this.player.inv.selected, 1);
             this.cb.onInventoryChanged();
             this.player.useTime = 15;                 // useAnimation 15（:47616）
@@ -6823,8 +6889,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 箭速：射手 buff ×1.2（cap 20，:52717）+ 箭袋族 ×1.1（:52711）——仅箭族吃
         const isArrowKind = bowC?.useAmmo !== 97 && bowC?.useAmmo !== 771 && bowC?.useAmmo !== 283;
         let speed = (bowC?.shootSpeed ?? rg?.projSpeed ?? 7) + (ammoC?.shootSpeed ?? 0);
-        if (isArrowKind) speed = Math.min(20, speed * this.player.buffs.arrowSpeedMult
-          * (this.player.equipStats.quiver ? 1.1 : 1));
+        // PickAmmo 速度链(Player.cs:52707-52723):魔法箭袋 ×1.1(箭/桩,无钳)→
+        // 射手 buff 仅在 speed<20 时 ×1.2 且钳 20。旧实现整体 min(20,×buff×quiver)
+        // 把高速弓箭组合(速度>20)也压回 20=射程缩水,且乘算顺序在边界处与原版有差
+        if (isArrowKind) {
+          if (this.player.equipStats.quiver) speed *= 1.1;
+          const archMult = this.player.buffs.arrowSpeedMult;
+          if (archMult > 1 && speed < 20) {
+            speed *= archMult;
+            if (speed > 20) speed = 20;
+          }
+        }
         // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）；
         // 装备远程伤害乘区（侦察镜/复仇者徽章等）
         const ps = this.heldPrefixStat();
@@ -8312,11 +8387,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    * （+tileBoost）的【矩形】判定（Simple 档 multiplier=1/上限 20）。非圆形距离。
    * 旅程扩大放置范围（FarPlacementRangePower，Player.cs:18636-18645 每 tick 重算
    * tileRangeX/Y：×2+8 → 18/14——Main.IsJourneyMode 门）在基础半扩上 +13/+11 */
+  /** Simple 档射程 XY(IsInTileInteractionRange 链):tileRangeX/Y 默认 5/3
+   *  (:2360-2364)→ 任一射程配饰【布尔门】X+3/Y+2(ApplyEquipFunctional
+   *  :12619-12622,非逐件叠加;★Y 轴是 +2 非 +3——曾两轴同 +3,竖向多够 1 格)→
+   *  旅程远置 = 现值×2+8(:18636-18643,含配饰加成后乘)→ GetRanges 钳 ≤20 →
+   *  item.tileBoost+blockRange(TB)在钳【后】加(GetTileRegion)。FAR_*_RANGE
+   *  常量(18/14)仅基座无配饰态的等价值,按公式重算覆盖配饰/远置组合 */
+  private tileReach(tb = 0): { x: number; y: number } {
+    let x = 5 + (this.player.equipStats.tileRange ? 3 : 0);
+    let y = 3 + (this.player.equipStats.tileRange ? 2 : 0);
+    if (this.world?.isJourney && journeyPowers().farPlacementRange) { x = x * 2 + 8; y = y * 2 + 8; }
+    return { x: Math.min(20, x) + tb, y: Math.min(20, y) + tb };
+  }
+
   private inTileRange(tx: number, ty: number, tb = 0): boolean {
     const p = this.player;
-    const far = this.world?.isJourney && journeyPowers().farPlacementRange;
-    const x = Math.min(20, 5) + tb + (far ? FAR_PLACEMENT_RANGE_X - DEFAULT_TILE_RANGE_X : 0);
-    const y = Math.min(20, 3) + tb + (far ? FAR_PLACEMENT_RANGE_Y - DEFAULT_TILE_RANGE_Y : 0);
+    const { x, y } = this.tileReach(tb);
     const LX = Math.floor(p.x / TILE) - x;
     const HX = Math.ceil((p.x + p.w) / TILE) - 1 + x;
     const LY = Math.floor(p.y / TILE) - y;
@@ -9167,13 +9253,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // vx=(0..25)×0.1×(−dir)、背玩家方向（TargetClosest 后 dir*=−1 同构）
       {
         let wormDenom = -1, hopDenom = -1, grubDenom = -1, lavaDenom = -1;
-        if (sheet === 3) { wormDenom = 400; hopDenom = 100; }
-        else if (sheet === 73) { wormDenom = 200; hopDenom = 50; }
-        else if (sheet === 61) grubDenom = 80;
-        else if (sheet === 74) grubDenom = 40;
+        // 花靴 ×10000 门（:66331-66381：装备花靴且割的是自长植株 frameX≥108——
+        // 花靴产物帧带 108+，防自刷饵；62/233/185-187 族原版无此门）
+        const fb = this.player.equipStats.flowerBoots && fx >= 108;
+        if (sheet === 3) { wormDenom = 400; hopDenom = 100; if (fb) { wormDenom *= 10000; hopDenom *= 10000; } }
+        else if (sheet === 73) { wormDenom = 200; hopDenom = 50; if (fb) { wormDenom *= 10000; hopDenom *= 10000; } }
+        else if (sheet === 61) { grubDenom = 80; if (fb) grubDenom *= 10000; }
+        else if (sheet === 74) { grubDenom = 40; if (fb) grubDenom *= 10000; }
         else if (sheet === 62) grubDenom = 250;
         else if (sheet === 233) grubDenom = 10;
-        else if (sheet === 637) lavaDenom = 100;
+        else if (sheet === 637) { lavaDenom = 100; if (fb) lavaDenom *= 10000; }
         else if (sheet === 185) {
           if ((fy === 0 && fx < 214) || (fy === 18 && (fx < 214 || fx >= 1368))) wormDenom = 6;
         } else if (sheet === 186) {
@@ -9850,7 +9939,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 射程（ItemReach，与 tryPlace 一致 5.5 格）
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
+    if (!this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
     if (this.player.useTime > 0) return;
     const wallId = itemDef.wallId!;
     const i0 = st.idx(tx, ty);
@@ -9930,7 +10019,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // Spectre 三件套 tileBoost+=3（Item.cs:18583）；blockRange 同铺砖铺墙公式
     const spectre = itemDef.vid === 1543 || itemDef.vid === 1544 || itemDef.vid === 1545;
     const tb = (spectre ? 3 : 0)
-      + (this.player.equipStats.tileRange ? 3 : 0)
       + (this.player.buffs.has(BuffType.Builder) ? 1 : 0);
     if (!this.inTileRange(tx, ty, tb)) return;
     const p = this.player;
@@ -10050,43 +10138,50 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return this.player.equipStats.wallSpeed || this.player.buffs.has(BuffType.Builder) ? 0.75 : 1;
   }
 
+  /** 草族"转化"放置（BlockPlacementForAssortedThings :40379-40440 1:1）：
+   *  种子/再生法杖的放置目标是【已有可转化块】（非空格）——草种/圣种→泥土(0)、
+   *  腐化/猩红种→泥土或泥(59)、丛林/蘑菇/661/662 种→泥(59)、灰烬草种→灰烬块(57)；
+   *  再生法杖 213/再生之斧 5295（createTile=2）额外可转石头(1)/灰砖(38)＝"凭空
+   *  种草"。八向暴露门（exposed8ForPlant）。转化走 setTile(active→active)：保
+   *  半砖/坡面/油漆（PlaceTile :59499 语义）。noCooldown=武器/工具并行路径
+   *  （冷却由工具/近战分支统一设置，Player.cs 挥击与 PlaceThing 并行）。
+   *  返回 true=已转化（调用方据此终止通用放置链） */
+  private tryGrassConvert(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number], opts?: { noCooldown?: boolean }): boolean {
+    const st = this.world.store;
+    const gt = TILE_BY_KEY[itemDef.tile!];
+    const gsheet = TILE_DEFS[gt]?.vanilla?.sheet ?? -1;
+    if (!GRASS_CONVERT_SHEETS.has(gsheet)) return false;
+    if (!opts?.noCooldown && this.player.useTime > 0) return false;
+    const heldVid = viIdFromKey(itemDef.key);
+    const staff = heldVid === 213 || heldVid === 5295;
+    const target = st.get(tx, ty);
+    const tsheet = target !== 0 ? TILE_DEFS[target]?.vanilla?.sheet ?? -1 : -1;
+    const okTarget =
+      (gsheet === 2 && (staff ? (tsheet === 0 || tsheet === 1 || tsheet === 38) : tsheet === 0))
+      || ((gsheet === 23 || gsheet === 199) && (tsheet === 0 || tsheet === 59))
+      || ((gsheet === 60 || gsheet === 70 || gsheet === 661 || gsheet === 662) && tsheet === 59)
+      || (gsheet === 109 && tsheet === 0)
+      || (gsheet === 633 && tsheet === 57);
+    if (target === 0 || !okTarget || !exposed8ForPlant(st, tx, ty)) return false;
+    st.setTile(tx, ty, gt);
+    this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+    // 种子 consumable 扣 1；法杖/斧非消耗（Item.cs 213 无 consumable）
+    if (itemFuncOfVid(heldVid)?.consumable) {
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.cb.onInventoryChanged();
+    }
+    if (!opts?.noCooldown) this.player.useTime = 14;
+    this.sfx.play('place');
+    return true;
+  }
+
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
 
-    // ── 草族"转化"放置（BlockPlacementForAssortedThings :40379-40440 1:1）：
-    // 种子/再生法杖的放置目标是【已有可转化块】（非空格）——泥土→草、泥→丛林/
-    // 蘑菇草等。法杖 213/斧 5295 可转泥土/石头/灰砖 = "凭空种草"。八向暴露门。
-    // 转化走 setTile(active→active)：保半砖/坡面/油漆（PlaceTile :59499 语义）
-    {
-      const gt = itemDef.tile ? TILE_BY_KEY[itemDef.tile] : undefined;
-      const gsheet = gt !== undefined ? TILE_DEFS[gt]?.vanilla?.sheet ?? -1 : -1;
-      if (gsheet !== undefined && GRASS_CONVERT_SHEETS.has(gsheet)) {
-        if (this.player.useTime > 0) return;
-        const heldVid = viIdFromKey(itemDef.key);
-        const staff = heldVid === 213 || heldVid === 5295;
-        const target = st.get(tx, ty);
-        const tsheet = target !== 0 ? TILE_DEFS[target]?.vanilla?.sheet ?? -1 : -1;
-        const okTarget =
-          (gsheet === 2 && (staff ? (tsheet === 0 || tsheet === 1 || tsheet === 38) : tsheet === 0))
-          || ((gsheet === 23 || gsheet === 199) && (tsheet === 0 || tsheet === 59))
-          || ((gsheet === 60 || gsheet === 70 || gsheet === 661 || gsheet === 662) && tsheet === 59)
-          || (gsheet === 109 && tsheet === 0)
-          || (gsheet === 633 && tsheet === 57);
-        if (target === 0 || !okTarget || !exposed8ForPlant(st, tx, ty)) return;
-        st.setTile(tx, ty, gt!);
-        this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
-        // 种子 consumable 扣 1；法杖/斧非消耗（Item.cs 213 无 consumable）
-        if (itemFuncOfVid(heldVid)?.consumable) {
-          this.player.inv.removeAt(this.player.inv.selected, 1);
-          this.cb.onInventoryChanged();
-        }
-        this.player.useTime = 14;
-        this.sfx.play('place');
-        return;
-      }
-    }
+    // 草族"转化"放置（见 tryGrassConvert；非草族物品落空继续通用链）
+    if (itemDef.tile && this.tryGrassConvert(tx, ty, itemDef)) return;
     // ---- 方块交换 Block Swap（1.4.4+,Player.cs:39182/:39260-39383;原版默认开
     //  builderAccStatus[10]==0 → TileReplacementEnabled）。手持放置物对准【可替换
     //  块】→ 先破坏旧块（完整掉落链）再走正常放置。门禁（:39275-39284 + 核心支线）:
@@ -10103,62 +10198,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const NO_SWAP_PLACE = new Set([2, 60, 70, 109, 199, 23, 661, 662, 633]);
         const NO_SWAP_TARGET = new Set([58, 225, 171, 127, 481, 482, 483, 423]);
         const tsheet = tdef?.vanilla?.sheet ?? -1;
+        // ★NO_SWAP_PLACE 原表口径 = DoesntPlace 的 createTile（tile sheet）——
+        //  曾误拿物品 vid 比对：草种子族（62/59…）从没被排除，指向实心块时先敲掉
+        //  再放置（2026-08-17 再生法杖批连带修）。种子/法杖族只走 tryGrassConvert 转化
+        const placeTileSheet = itemDef.tile !== undefined
+          ? TILE_DEFS[TILE_BY_KEY[itemDef.tile]]?.vanilla?.sheet ?? -1 : -1;
         // tileCut 族(草类)由 decor 近似覆盖;framed 家具不换;solid!==false 排除非实心
         // (|| 平台 19 族可换——优先级括号已显式)
         const solidish = tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false;
-        let swapOk = !NO_SWAP_PLACE.has(placeVid) && !NO_SWAP_TARGET.has(tsheet)
-          && !(tdef?.decor ?? false) && !tdef?.framed && solidish;
-        // style 族交换分支(:39299-39349——平台/火把/篝火/箱/柜的逐 style 换,
-        // 同型不同 style 可换;frameX/frameY 偏差超出该 style 的宽 → swap。2026-08-13)
-        let styleSwap = false;
-        if (!swapOk) {
-          const ts = tdef?.vanilla?.sheet ?? -1;
-          if (ts === 19 && placeVid >= 0) {
-            // 平台(:39299-39301):frameY/18 != placeStyle → 换
-            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 18) !== (itemDef.placeStyle ?? 0);
-          } else if (ts === 4 && placeVid >= 0) {
-            // 火把(:39308-39321):frameY/22 != placeStyle → 换
-            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 22) !== (itemDef.placeStyle ?? 0);
-          } else if (ts === 215 && placeVid >= 0) {
-            // 篝火(:39324-39335):frameX/54 != placeStyle → 换
-            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
-          } else if (tdef?.vanilla?.sheet === 21 && placeVid >= 0) {
-            // 箱(:39337-39344):frameX/36 != placeStyle → 换
-            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 36) !== (itemDef.placeStyle ?? 0);
-          } else if (tdef?.vanilla?.sheet === 88 && placeVid >= 0) {
-            // 柜(:39346-39349):frameX/54 != placeStyle → 换
-            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
-          }
-        }
-        if (styleSwap) { swapOk = true; }
-        if (swapOk) {
-          const tileIdHere = TILE_BY_KEY[itemDef.tile!];
-          if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
-            this.breakTile(tx, ty, true);   // 旧块完整掉落链(音效+成就同破坏)
-          }
-        }
-      }
-    }
-    // ---- 方块交换 Block Swap（1.4.4+,Player.cs:39182/:39260-39383;原版默认开
-    //  builderAccStatus[10]==0 → TileReplacementEnabled）。手持放置物对准【可替换
-    //  块】→ 先破坏旧块（完整掉落链）再走正常放置。门禁（:39275-39284 + 核心支线）:
-    //  放置物黑名单 DoesntPlace{2,60,70,109,199,23,661,662,633}(草/丛/蘑菇族);
-    //  目标黑名单 DoesntGetReplaced{58,225,171,127,481,482,483,423}(狱岩/晶簇等);
-    //  tileCut 族/家具(frameImportant)非平台不换;同型不换;旧块掉落物==放置物
-    //  不换(:39371-39377 防土换土无限);绳索目标仅换轨道/平台(:39354-39359 简化:
-    //  绳一律不换)。平台/火把/篝火/箱/柜 style 族分支(:39299-39349)登记未接。
-    if (itemDef.tile) {
-      const targetType = st.get(tx, ty);
-      if (targetType !== 0) {
-        const placeVid = viIdFromKey(itemDef.key);
-        const tdef = TILE_DEFS[targetType];
-        const NO_SWAP_PLACE = new Set([2, 60, 70, 109, 199, 23, 661, 662, 633]);
-        const NO_SWAP_TARGET = new Set([58, 225, 171, 127, 481, 482, 483, 423]);
-        const tsheet = tdef?.vanilla?.sheet ?? -1;
-        // tileCut 族(草类)由 decor 近似覆盖;framed 家具不换;solid!==false 排除非实心
-        // (|| 平台 19 族可换——优先级括号已显式)
-        const solidish = tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false;
-        let swapOk = !NO_SWAP_PLACE.has(placeVid) && !NO_SWAP_TARGET.has(tsheet)
+        let swapOk = !NO_SWAP_PLACE.has(placeTileSheet) && !NO_SWAP_TARGET.has(tsheet)
           && !(tdef?.decor ?? false) && !tdef?.framed && solidish;
         // style 族交换分支(:39299-39349——平台/火把/篝火/箱/柜的逐 style 换,
         // 同型不同 style 可换;frameX/frameY 偏差超出该 style 的宽 → swap。2026-08-13)
@@ -10200,7 +10248,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 距离
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
+    if (!this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
     // 旧日军团竞技场建造封锁（Player.cs:25669-25672：DD2Event.Ongoing &&
@@ -10709,7 +10757,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     {
       const dx = tx - Math.floor(this.player.cx / TILE);
       const dy = ty - Math.floor(this.player.cy / TILE);
-      if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) { this.input.rightDown = false; return; }
+      if (!this.inTileRange(tx, ty, (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) { this.input.rightDown = false; return; }
     }
     const type = st.get(tx, ty);
     // 原版 tile sheet（八音盒/喷泉/天塔柱/派对柱右键分支用）
@@ -13319,8 +13367,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //  在玩家附近，直接全量求和。蠕虫段也是独立 NPC，原版同样计入）
     const nearby = this.entities.enemies.reduce((s, e) => {
       const en = e as Enemy;
-      if (en.def.boss) return s;
-      return s + (en.vanilla?.npcSlots ?? 1);
+      // 全体 NPC 按 npcSlots 计入（NPC.cs:78709-78714——无 Boss 豁免；25/30/33/
+      // releaseOwner/lifeMax 门对桶内成员均不适用）；史莱姆雨蓝史莱姆 1 计
+      // npcSlots×0.65（Main.cs:8800/1114 slimeRainNPC/slimeRainNPCSlots）
+      const slots = en.vanilla?.npcSlots ?? 1;
+      if (this.world.weather.slimeRain && en.vanillaId === 1) return s + slots * 0.65;
+      return s + slots;
+    }, 0) + this.entities.critters.reduce((s, c) => {
+      // 小动物并入帽计数（同上全体语义；释放出生 releaseOwner!=255 不计）
+      const cc = c as Enemy;
+      if (cc.releasedFromItem) return s;
+      return s + (cc.vanilla?.npcSlots ?? 0.1);
     }, 0);
     const sHeightPx = this.camera.viewH / (this.camera.zoom || 1);
     // 联机远端玩家注入（原版 CheckNotSpawningOnScreen L5344-5366 遍历全部玩家扩展屏）
@@ -17004,7 +17061,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 按原版 NPC id 出生（小动物入微光 NPC.GetShimmered→Transform、WorldItem 放生
    *  ReleaseNPC 的落点）。联机访客拒绝——转化权威在房主（同 spawnEnemy 门禁）。
    *  入 critters 桶：spawnCritter 的 spawnVanilla 同语义（原版小动物表全量走桶） */
-  spawnNpcByVanilla(id: number, x: number, y: number, style?: number): Enemy | null {
+  spawnNpcByVanilla(id: number, x: number, y: number, style?: number, released = false): Enemy | null {
     if (this.net && !this.net.policy.isHost) return null;
     // 城镇史莱姆族（670/678-684 townNPC=true）→ TownNPC 落 npcs 桶（WorldItem 681 微光链等）
     const townKey = Object.entries(TOWN_NPC_IDS).find(([, v]) => v.id === id)?.[0];
@@ -17019,6 +17076,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 捕获物 1994-2001 → placeStyle=1+item-1994,Item.cs:21307-21318）；661 渐隐
     // 槽/其余族 Style 仅雕像语义不适用释放
     if (id === 356 && style != null && style >= 1 && style <= 8) e.ai2 = style;
+    e.releasedFromItem = style !== undefined || released;   // releaseOwner!=255 不计 nearby 槽
     e.id = this.entities.nextId++;
     this.entities.add(e, 'critters');
     return e;

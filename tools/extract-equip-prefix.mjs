@@ -217,6 +217,8 @@ const ACC_PATTERNS = [
   ['magicCuffs', /magicCuffs = true;/],           // 魔力手铐：受伤回蓝
   ['manaFlower', /manaFlower = true;/],           // 磁花：耗魔 -8%+魔力不足自动喝蓝
   ['pStone', /pStone = true;/],                   // 贤者之石（药水 CD -25%，暂存）
+  // ---- 六轮：花靴（Player.cs:12688 行走生花 + DropBait ×10000 门一并消费）----
+  ['flowerBoots', /flowerBoots = true;/],         // 花靴 3017 / 仙灵靴 3993
   // ---- 魔力回复直值（:14379-14383 魔力斗篷 982：+20 魔 + 回复双字段）----
   ['manaRegenBonus', /manaRegenBonus \+= (\d+);/],            // 每帧产额加成（UpdateManaRegen :19254）
   ['manaRegenDelayBonus', /manaRegenDelayBonus \+= ([\d.]+)f;/], // 惩罚期额外衰减/tick（:19237）

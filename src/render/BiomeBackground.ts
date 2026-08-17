@@ -54,6 +54,9 @@ const MUSHROOM_STYLES: Array<[number, number, number]> = [
 const DESERT_STYLES: Array<[number, number, number]> = [
   [21, 20, -1], [108, 109, -1], [207, 208, -1], [217, 218, -1],
 ];
+/** 地下带状背景横向视差（Main.cs:1172 caveParallax 默认 0.88;设置项 "Parallax" 可调） */
+const CAVE_PARALLAX = 0.88;
+
 // 远山层（bgAlphaFarBackLayer；DrawBG_ModifyBGFarBackLayerAlpha :63703 映射 + setBG 各组）
 const FAR_TEX: Record<number, number> = {
   [Corruption]: 23, [Desert]: 24, [CrimsonDesert]: 24, [CorruptDesert]: 24,
@@ -459,6 +462,20 @@ export class BiomeBackground {
   }
 
   // ---- 地下层 ----
+  // 几何 1:1（Main.cs DrawBackground :52217-53517 各带方法,2026-08-17 重写）：
+  //  · 水平周期 = 贴图宽-32（160 宽贴图取中间 128 列,两侧 16px 是 wrap padding——
+  //    像素级验证 63/65 在列 16..144 逐像素完美循环;按整宽 160 平铺会每 160px 出一条
+  //    图案断缝 = "蘑菇区远景平铺错位"根因）;岩石/岩浆带原版硬编码 128。
+  //  · 横向滚动 bgStartX = -IEEERemainder(P+screenX*caveParallax, P) - P/2
+  //    （caveParallax=0.88 默认,Main.cs:1172）+ diff = round(-IEEERemainder(
+  //    bgStartX+screenX,16))（-8→8）——采样窗对齐世界 16px 网格,src/dst 同移,
+  //    防视差平移下纹理"游动"。
+  //  · 垂直相位：深层（带顶远在屏上）bgStartY = IEEERemainder(bgTopY,96)-96 行相位
+  //    锁到带顶（世界锁定）;浅层 = 带顶原值。步进 96（backgroundHeight[2]/[3]）。
+  //  · 带序: slot0 表面条@ws-16 → slot1 泥土带 → slot2 岩石上 16px 条@rockTP-16
+  //    → slot3 岩石主体（底=magmaLayer*16+600 行边界）→ slot4 岩浆过渡条@岩石带底
+  //    行边界 → slot5 岩浆体（3帧×96,底=UnderworldLayer）→ slot6 波纹条@岩浆带底行边界。
+  //  · 逐 16px 切片光照（暗洞挖空/贴墙裁剪）未实装——整行绘制近似,几何与原版一致。
   private drawUnderground(
     ctx: CanvasRenderingContext2D, world: World, cam: Cam,
     camTopY: number, viewW: number, viewH: number, dtMs: number,
@@ -467,140 +484,150 @@ export class BiomeBackground {
     const newSlots = ugSlots(this.ugStyle, this.iceBack, this.jungleBack, this.hellBack, worldID);
     const oldSlots = ugSlots(this.ugOld, this.iceBack, this.jungleBack, this.hellBack, worldID);
     const alpha = this.ugAlpha;
-    // 垂直分层边界（屏幕空间 y；原版 bgTopY 语义 = 层世界 y - screenPosition.Y）
-    const dirtTop = world.groundLevel * 16 - camTopY + 16;             // DrawBackground_DirtBackground :52824
-    // 岩浆带顶（:52237 magmaLayer 公式：ws + floor((h-330-ws)/6)*6 - 5——★曾误用
-    // lavaLine(h-200) 整条带低 ~135 格）;bgTopY = magmaLayer*16 - screenY + 16 + 600 - 8
+    const screenX = cam.x - viewW / 2;
+    const screenY = camTopY;
+    const surfacePx = (world.groundLevel | 0) * 16;
+    // GetRockTransitionPoint :52509 —— span 按 int 截断;步进/取模恒 96(backgroundHeight[2])
+    const rockSpan = ((world.rockLevel | 0) - (world.groundLevel | 0)) * 16;
+    let rockSteps = Math.trunc(rockSpan / 96);
+    if (rockSpan % 96 !== 0) rockSteps++;
+    const rockTP = (world.groundLevel | 0) * 16 + rockSteps * 96 + 32;
+    // :52237 magmaLayer 公式：ws + floor((h-330-ws)/6)*6 - 5（★曾误用 lavaLine(h-200)）
     const magmaLayerTile = Math.floor(world.groundLevel
       + Math.floor((world.store.h - 330 - world.groundLevel) / 6) * 6) - 5;
-    const magmaTop = magmaLayerTile * 16 - camTopY + 16 + 600 - 8;     // DrawBackground_DrawMagmaLayer :52276
-    // UnderworldLayer（h-200）屏幕 y——岩浆带底 + 表面波纹条位置 + 黑盒下界
-    const uwScreenY = (world.store.h - 200) * 16 - camTopY;
+    const magmaPx = magmaLayerTile * 16;
+    const uwPx = (world.store.h - 200) * 16;   // UnderworldLayer
     // 岩浆 3 帧动画（Main.cs:61657-61665：magmaBGFrameCounter 每 8 tick 推进,mod 3;
-    // 8 tick = 133.33ms）。岩浆体 125+hell(160×288=3 帧×96px)与表面条 185+hell
+    // 8 tick = 133.33ms）。岩浆体 125+hell(160×288=3 帧×96px)与过渡/波纹条
     // (160×48,取 16px 行×3 帧)共用同一 frame
     this.magmaFrameT += dtMs;
     const magmaFrame = Math.floor(this.magmaFrameT / 133.33) % 3;
-    // ★层序（:52265-52270）：SurfaceTransition → Dirt → 【黑盒最先打底】→ Rock → Magma。
-    // 原版黑盒高度 min(screenH+200, hellBlackBoxBottom) 的钳制只在【清屏色=纯黑】下成立
-    // （深层时各带层 loopsY≤0 全不画、黑盒也退化为负高不画 → 清屏黑兜底）;本仓清屏非黑,
-    // 视觉等价做法:岩浆带可见时整屏黑底先铺,带层随后重画——深处(UnderworldLayer 之下)
-    // 即原版的纯黑地狱背景(曾露天空渐变="远景背景完全空白"报告根因)
-    if (magmaTop < viewH) {
+    // ★层序（:52265-52270）：SurfaceTransition → Dirt → 【黑盒打底】→ Rock → Magma。
+    // 黑盒 gate = magmaLayer*16 ≤ 屏底（:52815）——带层随后重画覆盖;深处(UnderworldLayer
+    // 之下)即原版纯黑地狱背景（本仓清屏非黑,靠这层兜底,曾露天空渐变）
+    if (magmaPx <= screenY + viewH) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, viewW, viewH);
     }
     // 地狱多层远景背景(DrawUnderworldBackground :52082-52228,画在带层之下):
-    // gate = 屏底 ≥ (h-220)*16(:52086);原版画在 DrawBG 相位(带层之前),深层带层退化
-    // 后整屏由本层接管——层0 底部黑补 (11,3,7) 兜底(:52219-52223)
+    // gate = 屏底 ≥ (h-220)*16(:52086);深层带层退化后整屏由本层接管——
+    // 层0 底部黑补 (11,3,7) 兜底(:52219-52223)
     this.drawHellLayers(ctx, world, cam, viewW, viewH, dtMs);
+    /** C# Math.IEEERemainder（IEEE round-half-even） */
+    const ieeeRem = (a: number, b: number): number => {
+      const r = a / b;
+      const f = Math.floor(r);
+      const d = r - f;
+      const n = d < 0.5 ? f : d > 0.5 ? f + 1 : f % 2 === 0 ? f : f + 1;
+      return a - b * n;
+    };
     const drawSlots = (slots: number[], a: number) => {
       if (a <= 0.01) return;
       ctx.save();
       ctx.globalAlpha = a;
-      const tile = (n: number, y: number, hHint?: number) => {
-        const im = n > 0 ? this.img(n) : null;
-        if (!im || !(im.width > 0) || im.width === 0) return;
-        const wS = im.width;
-        // 横向平铺（地下层无水平视差：caveParallax=0）
-        const loops = Math.ceil(viewW / wS) + 1;
+      /** 横向滚动参数（:52277/:52836 bgStartX/num2 公式;drawOffset=0 屏幕空间） */
+      const scroll = (P: number): { startX: number; diff: number; loops: number } => {
+        const startX = Math.trunc(-ieeeRem(P + screenX * CAVE_PARALLAX, P) - P / 2);
+        let diff = Math.round(-ieeeRem(startX + screenX, 16));
+        if (diff === -8) diff = 8;
+        return { startX, diff, loops: Math.trunc(viewW / P) + 2 };
+      };
+      /** 单带一行绘制（切片几何合并:src/dst 同 +diff,源取中间 P 列） */
+      const bandRow = (
+        im: ImageBitmap | HTMLImageElement, P: number, startX: number, diff: number,
+        loops: number, destY: number, srcY: number, srcH: number,
+      ) => {
+        // 源窗越界钳制（128 宽老贴图 style0 tex3 原版靠 UV clamp 吃掉,Canvas 需手钳）
+        const sx = 16 + diff;
+        const w = Math.min(P, im.width - sx);
+        if (w <= 0) return;
+        const sh = Math.min(srcH, im.height - srcY);
+        if (sh <= 0) return;
         for (let i = 0; i < loops; i++) {
-          // 纵向：从层顶平铺到（下一层顶或屏底）
-          let yy = y;
-          const bottom = viewH;
-          while (yy < bottom) {
-            ctx.drawImage(im, i * wS, yy, wS, im.height);
-            yy += im.height;
-            if (hHint && yy > y + hHint) break;
-          }
+          ctx.drawImage(im, sx, srcY, w, sh, startX + P * i + diff, destY, w, sh);
         }
       };
-      // 岩石带（GetRockTransitionPoint :52532 + DrawRockLayer/53127 语义）：
-      // 带顶 = worldSurface*16 + ceil((rockLevel-worldSurface)*16 / slot3纹理高)*slot3纹理高 + 32
-      //（泥土带按 slot3 纹理高整数倍对齐收口）；
-      // slot2 仅是带顶上一条 16px 过渡条（纹理只取第 0 行，画一次——
-      // 此前误当"岩石带上 1/3"平铺，深层时整屏都是过渡条纹理=错误贴图）；
-      // slot3 = 岩石带主体，按自身纹理高平铺至 magmaTop。
-      const rockTop2 = (() => {
-        const im3 = slots[3] ? this.img(slots[3]) : null;
-        const h3 = im3 && (im3.width > 0) && im3.height ? im3.height : 96;
-        const span = (world.rockLevel - world.groundLevel) * 16;
-        const steps = Math.ceil(span / h3);
-        return world.groundLevel * 16 + steps * h3 + 32 - camTopY;
-      })();
-      // 泥土带（slot1）：dirtTop → 岩石带顶
-      const dirtIm = slots[1] ? this.img(slots[1]) : null;
-      if (dirtIm && (dirtIm.width > 0) && dirtIm.width) {
-        const wS = dirtIm.width;
-        const loops = Math.ceil(viewW / wS) + 1;
-        for (let i = 0; i < loops; i++) {
-          let yy = dirtTop;
-          while (yy < Math.min(rockTop2, viewH)) {
-            ctx.drawImage(dirtIm, i * wS, yy, wS, dirtIm.height);
-            yy += dirtIm.height;
-          }
+      const im0 = slots[0] > 0 ? this.img(slots[0]) : null;
+      const im1 = slots[1] > 0 ? this.img(slots[1]) : null;
+      const im2 = slots[2] > 0 ? this.img(slots[2]) : null;
+      const im3 = slots[3] > 0 ? this.img(slots[3]) : null;
+      const im4 = slots[4] > 0 ? this.img(slots[4]) : null;
+      const im5 = slots[5] > 0 ? this.img(slots[5]) : null;
+      const im6 = slots[6] > 0 ? this.img(slots[6]) : null;
+      const ok = (im: ImageBitmap | HTMLImageElement | null): im is ImageBitmap | HTMLImageElement =>
+        !!im && im.width > 0;
+      // ---- slot0 表面过渡条（:53137-53170: bgTopY = ws*16-16-screenY+16,行 0,16px）----
+      if (ok(im0)) {
+        const P = im0.width - 32;
+        const s = scroll(P);
+        const topY = surfacePx - 16 - screenY + 16;
+        if (topY > -32 && topY < viewH) bandRow(im0, P, s.startX, s.diff, s.loops, topY, 0, 16);
+      }
+      // ---- slot1 泥土带（:52826 起: bgTopY = ws*16-screenY+16 → rockTP 截止）----
+      if (ok(im1) && surfacePx <= screenY + viewH + 64) {
+        const P = im1.width - 32;
+        const s = scroll(P);
+        const bgTopY = surfacePx - screenY + 16;
+        const deep = surfacePx < screenY - 16;
+        const startY = deep ? Math.trunc(ieeeRem(bgTopY, 96) - 96) : Math.trunc(bgTopY);
+        let loopsY = deep
+          ? Math.trunc((viewH - startY) / 96) + 1
+          : Math.trunc((viewH - bgTopY) / 96) + 1;
+        if (rockTP < screenY + viewH - 16) loopsY = Math.trunc((rockTP - screenY - startY) / 96);
+        for (let j = 0; j < loopsY; j++) {
+          bandRow(im1, P, s.startX, s.diff, s.loops, startY + im1.height * j, 0, im1.height);
         }
       }
-      {
-        // slot3 主体
-        const im3 = slots[3] ? this.img(slots[3]) : null;
-        if (im3 && (im3.width > 0) && im3.width) {
-          const wS = im3.width;
-          const loops = Math.ceil(viewW / wS) + 1;
-          for (let i = 0; i < loops; i++) {
-            let yy = Math.max(rockTop2, -im3.height);
-            while (yy < Math.min(magmaTop, viewH)) {
-              ctx.drawImage(im3, i * wS, yy, wS, im3.height);
-              yy += im3.height;
-            }
-          }
-        }
-        // slot2 单条过渡条（带顶 -16px，仅纹理第 0 行 16px 高）
-        const im2 = slots[2] ? this.img(slots[2]) : null;
-        if (im2 && (im2.width > 0) && im2.width && rockTop2 - 16 > -32 && rockTop2 - 16 < viewH) {
-          const wS = im2.width;
-          const loops = Math.ceil(viewW / wS) + 1;
-          for (let i = 0; i < loops; i++) {
-            ctx.drawImage(im2, 0, 0, wS, Math.min(16, im2.height), i * wS, rockTop2 - 16, wS, Math.min(16, im2.height));
-          }
+      // ---- slot2 岩石上过渡条（DirtBackground 尾段 :53155-53189: @rockTP-16,P=128,行 0）----
+      if (ok(im2)) {
+        const s = scroll(128);
+        const topY = rockTP - screenY - 16;
+        if (topY > -32 && topY < viewH) bandRow(im2, 128, s.startX, s.diff, s.loops, topY, 0, 16);
+      }
+      // ---- slot3 岩石带主体（DrawRockLayer :52523 起;底 = magmaLayer*16+600 行边界）----
+      let rockStartY = 0, rockLoopsY = 0;
+      if (ok(im3) && rockTP <= screenY + viewH) {
+        const s = scroll(128);
+        const bgTopY = rockTP - screenY;
+        const deep = rockTP + viewH < screenY - 16;
+        const startY = deep ? Math.trunc(ieeeRem(bgTopY, 96) - 96) : Math.trunc(bgTopY);
+        let loopsY = deep
+          ? Math.trunc((viewH - startY) / 96) + 1
+          : Math.trunc((viewH - bgTopY) / 96) + 1;
+        if (magmaPx < screenY + viewH) loopsY = Math.trunc((magmaPx + 600 - startY - screenY) / 96);
+        rockStartY = startY; rockLoopsY = loopsY;
+        for (let j = 0; j < loopsY; j++) {
+          bandRow(im3, 128, s.startX, s.diff, s.loops, startY + im3.height * j, 0, im3.height);
         }
       }
-      // 岩浆带（slot5=125+hell 岩浆体 = 原版 backTexture[5](:52423),3 帧动画行
-      // sourceY=frame*96;带区 magmaTop→UnderworldLayer）
-      {
-        const im6 = slots[5] ? this.img(slots[5]) : null;
-        if (im6 && (im6.width > 0) && im6.width) {
-          const frameH = im6.height / 3;   // 160×288 = 3 帧 × 96px
-          const sy = Math.min(2, magmaFrame) * frameH;
-          const wS = im6.width;
-          const loops = Math.ceil(viewW / wS) + 1;
-          for (let i = 0; i < loops; i++) {
-            let yy = magmaTop;
-            while (yy < Math.min(uwScreenY, viewH)) {
-              ctx.drawImage(im6, 0, sy, wS, frameH, i * wS, yy, wS, frameH);
-              yy += frameH;
-            }
-          }
+      // ---- slot4 岩浆过渡条（DrawMagmaTransition :52765: @岩石带底行边界,行 = frame*16）----
+      const magmaTransition = rockTP <= screenY + viewH && magmaPx < screenY + viewH;
+      if (ok(im4) && magmaTransition && rockLoopsY > 0) {
+        const s = scroll(128);
+        bandRow(im4, 128, s.startX, s.diff, s.loops, rockStartY + rockLoopsY * 96, magmaFrame * 16, 16);
+      }
+      // ---- slot5 岩浆体 + slot6 表面波纹条（DrawMagmaLayer :52276 起）----
+      if (ok(im5) && magmaPx <= screenY + viewH) {
+        const s = scroll(128);
+        const bgTopY = magmaPx - screenY + 16 + 600 - 8;
+        const deep = magmaPx + viewH < screenY - 16;
+        const startY = deep ? Math.trunc(ieeeRem(bgTopY, 96) - 96) : Math.trunc(bgTopY);
+        let loopsY = deep
+          ? Math.trunc((viewH - startY) / 96) + 1
+          : Math.trunc((viewH - bgTopY) / 96) + 1;
+        let ripple = false;
+        if (uwPx < screenY + viewH) {
+          loopsY = Math.ceil((uwPx - screenY - startY) / 96);
+          ripple = true;
         }
-        // slot4 岩浆过渡条（DrawMagmaTransition :52765）
-        tile(slots[4], magmaTop - 200, 200);
-        // 岩浆海表面波纹条（slot6=185+hell = 原版 backTexture[6](:52495),160×48 取
-        // 16px 行 sourceY=frame*16,画在 UnderworldLayer 高度——★曾从未绘制)
-        const im5 = slots[6] ? this.img(slots[6]) : null;
-        if (im5 && (im5.width > 0) && im5.width) {
-          const sy = Math.min(2, magmaFrame) * 16;
-          const wS = im5.width;
-          const loops = Math.ceil(viewW / wS) + 1;
-          const stripY = Math.max(magmaTop, uwScreenY);
-          if (stripY > -32 && stripY < viewH) {
-            for (let i = 0; i < loops; i++) {
-              ctx.drawImage(im5, 0, sy, wS, 16, i * wS, stripY, wS, 16);
-            }
-          }
+        const frameH = im5.height / 3;   // 160×288 = 3 帧 × 96px
+        for (let j = 0; j < loopsY; j++) {
+          bandRow(im5, 128, s.startX, s.diff, s.loops, startY + 96 * j, Math.min(2, magmaFrame) * frameH, frameH);
+        }
+        if (ripple && ok(im6)) {
+          bandRow(im6, 128, s.startX, s.diff, s.loops, startY + loopsY * 96, magmaFrame * 16, 16);
         }
       }
-      // 表面过渡条（slot0：地表附近横条）
-      if (dirtTop > -64 && dirtTop < viewH + 64) tile(slots[0], dirtTop - 16, 32);
       ctx.restore();
     };
     drawSlots(oldSlots, 1 - alpha);

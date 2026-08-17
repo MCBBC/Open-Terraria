@@ -9,25 +9,20 @@ await page.goto(`${process.env.SW_ORIGIN}/?play=small`, { waitUntil: 'domcontent
 await page.waitForFunction(() => window.__swGame?.player && window.__swGame.world, { timeout: 300000 });
 await new Promise((r) => setTimeout(r, 2000));
 const placed = await page.evaluate(async () => {
-  const { TILE_BY_KEY, TILE_DEFS } = await import('/src/data/tiles.ts');
+  const { TILE_BY_KEY } = await import('/src/data/tiles.ts');
   const g = window.__swGame;
   const st = g.world.store;
+  const p = g.player;
+  const cx = Math.floor(p.cx / 16), cy = Math.floor(p.cy / 16) - 10;
+  for (let dx = -2; dx <= 1; dx++) st.setTile(cx + dx, cy, 2, 0, 0);
+  // ★骷髅灯在左(先画→缓存先占),水蜡烛在右(后画→命中缓存?)
+  const skull = TILE_BY_KEY['v_98_skull_lantern'];
+  st.setTile(cx - 2, cy - 2, skull, 0, 0);   // 2x2 顶格 cy-2
   const wc = TILE_BY_KEY['water_candle'];
-  const dx = g.world.dungeonX, dy = g.world.dungeonY;
-  // 地牢区扫生成端水蜡烛(带其残留帧)
-  const found = [];
-  for (let y = Math.max(2, dy - 60); y < Math.min(st.h - 200, dy + 500) && found.length < 6; y++) {
-    for (let x = Math.max(2, dx - 220); x < Math.min(st.w - 2, dx + 220); x++) {
-      const i = st.idx(x, y);
-      if (st.flags[i] && st.type[i] === wc) found.push({ x, y, fx: st.frameX[i], fy: st.frameY[i] });
-    }
-  }
-  if (!found.length) return { none: true };
-  const t = found[0];
-  g.player.x = t.x * 16 + 8; g.player.y = t.y * 16 - 32;
-  g.camera.x = g.player.cx; g.camera.y = g.player.cy;
-  g.world.clock.timeOfDay = 0; g.world.clock.isDay = false;   // 夜间(用户场景)
-  return { list: found.slice(0, 6), first: t };
+  st.setTile(cx, cy - 1, wc, 0, 0);
+  g.chunks.invalidateAll();
+  g.camera.x = cx * 16; g.camera.y = cy * 16 - 16;
+  return { wcX: cx, wcY: cy - 1 };
 });
 await new Promise((r) => setTimeout(r, 1200));
 const px = await page.evaluate((pl) => {
@@ -53,8 +48,7 @@ const px = await page.evaluate((pl) => {
       .map(([k, n]) => `(${k.split(',').map(v => (Number(v) << 5) + 16).join(',')})×${n}`);
     return { label, op, red, warm, blue, top };
   };
-  if (!pl.first) return [{ label: '无水蜡烛', op: 0 }];
-  return [grab(pl.first.x, pl.first.y, '地牢生成水蜡烛@' + pl.first.fx + ',' + pl.first.fy), pl.list];
+  return [grab(pl.wcX, pl.wcY, '水蜡烛(同屏有骷髅灯)')];
 }, placed);
 console.log(JSON.stringify(px, null, 1));
 console.log('errors:', errors.length ? errors.slice(0, 2) : 0);

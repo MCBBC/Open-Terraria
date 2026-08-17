@@ -234,6 +234,8 @@ export class Enemy extends Entity {
   /** 雕像产怪（Wiring.cs:2480 SpawnedFromStatue）：value=0 不掉钱、
    *  肉前集合不掉战利品、StatueSpawnedDropRarity 概率门（NPCLoot :79648-79654） */
   spawnedFromStatue = false;
+  /** 捕获物释放出生（NPC.releaseOwner != 255 语义，NPC.cs:78709 不计 nearby 槽） */
+  releasedFromItem = false;
   /** NPC.AnyInteractions（NPC.cs:5431 playerInteraction[who] 任一 true）——本仓 hurt 调用方
    *  全为玩家武器/弹幕/荆棘链 → hurt 生效即等价玩家交互；雕像门 :79651 消费 */
   playerInteracted = false;

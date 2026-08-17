@@ -2,16 +2,15 @@
 // 扫附近水蜡烛并像素采样(红焰来源)
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 }, protocolTimeout: 600000 });
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-await page.goto(`${process.env.SW_ORIGIN}/?play=small`, { waitUntil: 'domcontentloaded', timeout: 90000 });
-await page.waitForFunction(() => window.__swGame?.player && window.__swGame.world, { timeout: 300000 });
-// 用同种子重建用户世界(大规模,慢)
-// 后台等待,分步轮询避免 evaluate 长 Promise 超时
-  await page.evaluate(() => { window.__mkWorld = window.__swFlow.newWorld('1814620304', 8400, 2400); });
-await page.waitForFunction(() => window.__swGame?.world?.w === 8400 && window.__swGame.player, { timeout: 300000 });
+await page.goto(`${process.env.SW_ORIGIN}/`, { waitUntil: 'domcontentloaded', timeout: 90000 });
+// 直接开造用户世界(标题屏起手;__swFlow 挂载即调)
+await page.waitForFunction(() => !!window.__swFlow, { timeout: 60000 });
+await page.evaluate(() => { window.__mkWorld = window.__swFlow.newWorld('1814620304', 8400, 2400); });
+await page.waitForFunction(() => window.__swGame?.world?.w === 8400 && window.__swGame?.player, { timeout: 570000, polling: 2000 });
 await new Promise((r) => setTimeout(r, 2500));
 const found = await page.evaluate(async () => {
   const { TILE_BY_KEY } = await import('/src/data/tiles.ts');

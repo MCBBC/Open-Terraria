@@ -42,7 +42,7 @@ function shell(w: World, drops: Array<[string, number]>, heldVid = 0): Shell {
   g.spawnParticles = () => {};
   g.spawnDrop = (_x, _y, key, n) => { drops.push([key, n]); };
   g.player = {
-    cx: 10 * 16, cy: 10 * 16, facing: 1, useTime: 0,
+    cx: 10 * 16 + 8, cy: 19 * 16 + 8, x: 10 * 16 + 2, y: 19 * 16 - 6, w: 12, h: 28, facing: 1, useTime: 0,
     buffs: { has: () => false }, equipStats: {},
     inv: {
       selected: 0, slots: new Array(50).fill(null),
@@ -53,14 +53,15 @@ function shell(w: World, drops: Array<[string, number]>, heldVid = 0): Shell {
   return g;
 }
 
+// ★ITEM_DEFS 的 id = 数组索引（item() 不写 id 字段）
 let cachedVidToId: Record<number, number> | null = null;
 function heldItemIdOf(vid: number): number {
   if (!cachedVidToId) {
     cachedVidToId = {};
-    for (const d of ITEM_DEFS) {
+    ITEM_DEFS.forEach((d, i) => {
       const m = /^vi_(\d+)_/.exec(d.key);
-      if (m) cachedVidToId[+m[1]] = d.id;
-    }
+      if (m) cachedVidToId![+m[1]] = i;
+    });
   }
   return cachedVidToId[vid] ?? -1;
 }
