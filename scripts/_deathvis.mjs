@@ -78,21 +78,25 @@ const death = await page.evaluate(async () => {
   p.damage(99999, p.cx + 20, p.y);   // 右侧来刀 → deathHitDir = -1
   await new Promise(r => setTimeout(r, 60));
   const t0 = {
-    dead: p.dead, hp: p.hp,
+    dead: p.dead, hp: p.hp, hd: p.deathHitDir,
     seg: JSON.parse(JSON.stringify(p.deadParts)),
     px: bodyPx(), immuneAlpha: p.immuneAlpha, respawn: p.respawnTimer,
   };
   await new Promise(r => setTimeout(r, 450));
   const tMid = { seg: JSON.parse(JSON.stringify(p.deadParts)), px: bodyPx(), immuneAlpha: p.immuneAlpha };
-  await new Promise(r => setTimeout(r, 1750));   // 合计 ~2.26s
+  await new Promise(r => setTimeout(r, 750));   // 合计 ~1.26s：immuneAlpha>125 散飞体全隐
+  const tHide = { px: bodyPx(), immuneAlpha: p.immuneAlpha };   // 地形/墓碑对照（无散飞体）
+  await new Promise(r => setTimeout(r, 1000));   // 合计 ~2.26s
   const tFade = { px: bodyPx(), immuneAlpha: p.immuneAlpha, respawn: p.respawnTimer };
   const vy0 = [before.parts.head.vy, before.parts.body.vy, before.parts.legs.vy];
   return {
-    before, t0, tMid, tFade, px0,
+    before, t0, tMid, tHide, tFade, px0,
     vyRangeOk: t0.seg.head.vy >= -4.01 && t0.seg.head.vy <= -1.09 && t0.seg.legs.vy < 0,
     xHitDir: t0.seg.head.vx < 0,   // deathHitDir −1 → X = rand*0.1 − 2（大概率负向）
     scattered: Math.abs(tMid.seg.head.px - tMid.seg.legs.px) + Math.abs(tMid.seg.head.py - tMid.seg.legs.py) > 4,
     rolled: tMid.seg.head.rot !== 0 || tMid.seg.body.rot !== 0,
+    // 像素实证：可见期(t0/tMid)显著高于全隐期地形对照(tHide) = 散飞体真的画出来了
+    pxVisible: Math.max(t0.px.body, tMid.px.body) - tHide.px.body,
     vy0,
   };
 });
@@ -100,24 +104,39 @@ const death = await page.evaluate(async () => {
 // ---- ③ 硬核幽灵 ----
 const ghost = await page.evaluate(async () => {
   const g = window.__swGame, p = g.player;
-  // 软核下 10s 自动重生复活——重杀一次并钉死硬核难度
+  // 前一段死亡在软核下 ~10s 自动重生——先等复活（软核阈值 600t）
+  const t0 = performance.now();
+  while (p.dead && performance.now() - t0 < 12500) await new Promise(r => setTimeout(r, 200));
+  if (p.dead) return { skipped: 'player never respawned', respawn: p.respawnTimer };
+  // 钉死硬核难度再杀（Game 侧会标 hardcoreDead → respawnPlayer 永拒 → 计时越 600 即幽灵）
   p.appearance = { ...p.appearance, difficulty: 2 };
+  p.hp = Math.min(p.hp, 100);
   p.damage(99999, p.cx, p.cy);
-  await new Promise(r => setTimeout(r, 300));
+  const t1 = performance.now();
+  while (!p.dead && performance.now() - t1 < 2000) await new Promise(r => setTimeout(r, 60));
+  if (!p.dead) return { skipped: 'kill failed', hp: p.hp };
   const deadX = p.x, deadY = p.y;
   const phaseEarly = p.isGhostPhase(g.world);
-  // 等待 respawn 阈值（600t=10s；世界经典档非专家）+ 一点余量
-  await new Promise(r => setTimeout(r, 10900));
+  // 等 respawn 阈值（经典档 600t=10s；专家 900t）+余量
+  const t2 = performance.now();
+  while (!p.isGhostPhase(g.world) && performance.now() - t2 < 20500) await new Promise(r => setTimeout(r, 200));
+  const ghostPhase = p.isGhostPhase(g.world);
   const cv = g.renderer.canvas, cam = g.camera;
-  const sx = Math.round((p.x + 17 - cam.x) * cam.zoom + cv.width / 2);
-  const sy = Math.round((p.y + 22 - cam.y) * cam.zoom + cv.height / 2);
-  const img = g.renderer.ctx.getImageData(Math.max(0, sx - 20), Math.max(0, sy - 26), 40, 52).data;
-  let bright = 0;
-  for (let i = 0; i < img.length; i += 4) if (img[i + 3] > 100) bright++;
+  const ghostPx = () => {
+    const sx = Math.round((p.x + 17 - cam.x) * cam.zoom + cv.width / 2);
+    const sy = Math.round((p.y + 22 - cam.y) * cam.zoom + cv.height / 2);
+    const img = g.renderer.ctx.getImageData(Math.max(0, sx - 17), Math.max(0, sy - 22), 34, 44).data;
+    let n = 0;
+    for (let i = 0; i < img.length; i += 4) if (img[i + 3] > 100 && Math.abs(img[i] - img[i + 1]) < 24 && Math.abs(img[i + 1] - img[i + 2]) < 24 && img[i] > 140) n++;
+    return n;
+  };
+  const px = ghostPx();
+  const fA = p.ghostFrame;
+  await new Promise(r => setTimeout(r, 700));   // 8t/帧 → 至少推进 5 帧
+  const fB = p.ghostFrame;
   return {
-    phaseEarly, ghostPhase: p.isGhostPhase(g.world), dead: p.dead,
-    respawn: p.respawnTimer, ghostFrame: p.ghostFrame, at: [deadX, deadY],
-    px: bright,
+    phaseEarly, ghostPhase, dead: p.dead, hardcoreDead: !!p.appearance.hardcoreDead,
+    respawn: p.respawnTimer, frameA: fA, frameB: fB, at: [deadX, deadY], px,
   };
 });
 

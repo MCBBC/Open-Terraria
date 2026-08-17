@@ -643,6 +643,14 @@ function vanillaMainTime(timeOfDay: number): number {
   return (((timeOfDay - Clock.DUSK) % 1) + 1) % 1 * 86400;
 }
 
+/** 随从槽位权重（Projectile.minionSlots，Projectile.cs:487 默认 1=0 表外全 1）：
+ *  双子 387/388 各 0.5（:4434/:4450，一对=1 槽）。召唤腾位（FreeUpPetsAndMinions
+ *  :51022）与每 tick 上限自裁（Projectile.cs:15370-15392，按实体序累加权重自裁）
+ *  两处共用——勿改回实体计数（曾致 388 双子每 tick 被补杀）。 */
+function minionSlotsOf(m: MinionProj): number {
+  return m.projId === 387 || m.projId === 388 ? 0.5 : 1;
+}
+
 export class Game implements GameHooks {
   assets: AssetBundle;
   atlas: SpriteAtlas | null = null;
@@ -4704,6 +4712,8 @@ export class Game implements GameHooks {
       else if (hv === 5322 && !player.inWater) heldRGB = [0.2, 0.3, 0.32];
       else if (hv === 4952) heldRGB = [1.3, 0.91, 1.04];
     }
+    // 普通火把族水下熄（:48997 `Torches && !wet` 半边）——水炬三件已在上方
+    // WATER_TORCH_ITEMS 段先置 heldRGB，此处自然跳过
     if (!heldRGB && heldDef && !player.inWater) {
       const vid = viIdFromKey(heldDef.key);
       if (Number.isFinite(vid)) {
@@ -7581,8 +7591,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       case 'summon': {
         // 召唤：上限链 = Player.maxMinions（1+buff+散件+套装）/ maxSentries；
-        // 超限驱逐最旧（原版 FreeUpPetsAndMinions 最便宜优先——本作全 1 槽=最旧先死）；
+        // 槽位=Projectile.minionSlots 权重求和（双子 387/388 各 0.5=一对 1 槽，
+        // Projectile.cs:4434/:4450；其余随从 1）——曾按实体数计数且 388 noSlot
+        // 不入池 → 388 永不驱逐越积越多（用户报"5 只眼仅 1 激光眼"根因）；
+        // 驱逐=最旧先死循环到腾够（原版 FreeUpPetsAndMinions :51022-51047 按
+        // cheapest-first，本作插入序近似——双子对自然成对死，与原版常态一致）；
         // damage 传武器基伤——随从每 tick 按当时装备重算（Projectile.cs:15368 live 刷新）
+        const slotsOf = (m: MinionProj): number => (m.projId === 387 || m.projId === 388 ? 0.5 : 1);
         const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry && !(e as MinionProj).noSlot) as MinionProj[];
         // 星尘龙：已有龙头 → 不出新头，尾前插 2 段（SpawnMinionOnCursor :47906-47963）
         if (cw.shoot === 625) {
@@ -7596,7 +7611,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         }
         if (!cw.sentry) {
-          if (minions.length >= this.player.maxMinions) minions[0].dead = true; // 驱逐最旧
+          // 腾挪到 used+1(StaffMinionSlotsRequired 默认 1) ≤ maxMinions（:51022）；
+          // 驱逐序 = 槽位升序稳定排序（原版 :50976-50988 按 minionSlots 升序插入，
+          // 同权重保插入序——混编池先杀 0.5 双子再杀 1 槽怪，与原版一致）
+          let used = minions.reduce((s, m) => s + slotsOf(m), 0);
+          const pool = minions.filter((m) => !m.dead)
+            .sort((a, b) => slotsOf(a) - slotsOf(b));
+          while (used > this.player.maxMinions - 1 && pool.length) {
+            const victim = pool.shift()!;
+            victim.dead = true;
+            used -= slotsOf(victim);
+          }
         } else {
           const sentries = this.entities.projectiles.filter((e) => e instanceof MinionProj && e.sentry) as MinionProj[];
           if (sentries.length >= this.player.maxSentries) sentries[0].dead = true;
@@ -7604,24 +7629,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const owner = this.player;
         const summonDmg = Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))); // 基伤×词缀（乘区由 MinionProj live 结算，勿用预乘的 cw.damage）
         const slotIdx = this.entities.projectiles.filter((e) => e instanceof MinionProj && !(e as MinionProj).sentry).length;
-        const spawnMinion = (pid: number, noSlot = false): void => {
-          const m = new MinionProj(
+        const spawnMinion = (pid: number): void => {
+          this.entities.add(new MinionProj(
             px, py, pid, summonDmg,
             cw.knockback, !!cw.sentry,
             slotIdx,
             false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
             () => (owner.dead ? null : owner),
-          );
-          if (noSlot) m.noSlot = true;
-          this.entities.add(m, 'projectiles');
+          ), 'projectiles');
         };
         // 魔眼法杖 2535：一次施放成对双子（Player.cs:47872-47883——projToShoot 387
-        // 激光眼 + projToShoot+1 388 痉挛眼 双 SpawnMinionOnCursor；两只各
-        // minionSlots=0.5（Projectile.cs:4435/:4450）= 一对 1 槽——388 以 noSlot
-        // 不占计数槽，保持"对"的槽位语义）
+        // 激光眼 + projToShoot+1 388 痉挛眼 双 SpawnMinionOnCursor；两只各占
+        // 0.5 槽且【都可被驱逐】——FreeUpPetsAndMinions 把 388 也算进池）
         if (cw.shoot === 387) {
           spawnMinion(387);
-          spawnMinion(388, true);
+          spawnMinion(388);
         } else if (critVid === 2551) {
           // 蜘蛛法杖：三型轮换 390/391/392（:47885-47888 先用后 ++%3）
           spawnMinion(390 + this.spiderMinionCycle);
@@ -7633,9 +7655,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           spawnMinion(cw.shoot);
         }
         // 成就：9+ 随从（Player.cs:51059 num+num2>=9 → event 6 YOU_AND_WHAT_ARMY；
-        //  本作随从恒 1 槽 = 数量口径，召唤后计数；noSlot（对偶件/伴生）不计）
+        //  口径=槽位权重和（同 num 累加 minionSlots；noSlot 伴生不计））
         if (!cw.sentry
-          && this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry && !(e as MinionProj).noSlot).length >= 9) {
+          && this.entities.projectiles
+            .filter((e) => e instanceof MinionProj && !e.sentry && !(e as MinionProj).noSlot)
+            .reduce((s, e) => s + slotsOf(e as MinionProj), 0) >= 9) {
           this.achievements.handleSpecialEvent(6,
             { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
         }

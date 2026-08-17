@@ -747,13 +747,18 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
     ['keg', 0],
     ['bookcase', def.bookcase],
   ];
-  // 画/烛台交替:switch(i + parity%2) 仅 0/1 两档有内容(i≥2 落空,原版同款)
+  // 画/烛台交替:switch(i + parity%2) 仅 0/1 两档有内容(i≥2 落空,原版同款)。
+  //   ★HouseBuilder.cs:434-458 是裸 switch case 0/1——i≥2(w≥24 房 n=3 的第三档)
+  //   【无 case 落空:零放置零掷】;曾用 %2 取模回卷 → i=2 误放画/吊灯+多掷
+  //   RandHousePicture/Next(6)(house8 首个 30 宽房 FillRooms 61 vs vanilla 58 实锤)
   const n = Math.floor(r.w / 8);
   const step = Math.floor(r.w / (n + 1));
   const parity = rng.int(0, 1);
   for (let i = 0; i < n; i++) {
     const x = (i + 1) * step + r.x;
-    if ((i + (parity % 2)) % 2 === 0) {
+    const sw = i + (parity % 2);
+    if (sw > 1) continue;
+    if (sw === 0) {
       // 画:Y + min(H/2, H-5)
       const y = r.y + Math.min(Math.floor(r.h / 2), r.h - 5);
       const [key, style] = theme === 'desert' ? randHousePictureDesert(rng) : randHousePicture(rng);

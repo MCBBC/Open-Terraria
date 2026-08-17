@@ -92,9 +92,10 @@ const HOLD_STYLE_ITEMS = new Set([
 
 /** 原版 noWet=true 物品集（Item.cs 逐 case 字面 `noWet = true` 63 件 + DefaultToTorch
  *  无 allowWaterPlacement 族 7 件（4383,4385-4388,5293,5353；:48086 `noWet = !allowWater`
- *  ——4384 水可放火把 allowWater=true → noWet=false 排除）。★523/1333 手写火把块
- *  【无 noWet】（vanilla 自身不一致——珊瑚火把水下不熄），4952 信号枪/3823 骨焰
- *  火苗武器 holdStyle≠火把语义不涉。
+ *  ——4384 水可放火把 allowWater=true → noWet=false 排除）。★523/1333/4384 手写火把块
+ *  【无 noWet】是**有意为之**——三件 = ItemID.Sets.WaterTorches（ItemID.cs:1194），
+ *  水下火把：渲染不熄（本表不在集）+ 手持光不熄（Game 侧 WATER_TORCH_ITEMS）；
+ *  4952 信号枪/3823 骨焰火苗武器 holdStyle≠火把语义不涉。
  *  持位渲染门 = `(!wet || !noWet)`（Player.cs:36026/:36030）——**逐件判定**，
  *  芦苇呼吸管 186（holdStyle 2 无 noWet）水下照常显示（此前全局 !inWater 门
  *  误伤：火把的熄灭语义被扩到所有手持物，呼吸管在水下反而隐身——它的主场景） */
@@ -6750,7 +6751,9 @@ export class Renderer {
     // ---- 手持物（PlayerDrawLayers.cs:3857 门槛）：itemAnimation>0 || (holdStyle!=0) ----
     // 武器/工具 holdStyle=0 → 仅使用中渲染（下方挥舞动画）；火把/荧光棒族 holdStyle=1、
     // 雨伞族 holdStyle=2 等静持时也渲染（ItemCheck_ApplyHoldStyle :49496 逐值持位）；
-    // noWet（火把 noWet=true）→ 水下不显示（与手持光源熄灭同步）。
+    // noWet 逐件判定（Player.cs:36026 `(!wet || !noWet)`）——火把/蜡烛族水下隐
+    // （熄灭语义）；WaterTorches 三件（523/1333/4384，恰好 noWet=false）与
+    // 芦苇管等其余手持物水下照常渲染。
     // holdStyle 数据源 = vanilla-itemfunc（40 件）∪ DefaultToTorch 批量族（提取漏，
     // HOLD_STYLE_ITEMS 手工补）∪ IsFood 批量（Item.cs:48519 `if (Sets.IsFood) holdStyle=1`
     // 在 SetDefaults 公共尾部强制——在库食物 4023/4291/5275/5277/5278/1912/1919 等提取漏，
@@ -6804,8 +6807,10 @@ export class Renderer {
             }
             // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
             // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）。
-            // 与本体同变换（本 save 块内），dest 即本体矩形；水下熄灭门已在上方
-            // （FLAME_ITEMS ⊆ NO_WET_ITEMS——火把族水下整块不进本分支）
+            // 与本体同变换（本 save 块内），dest 即本体矩形。水下熄灭门在本体上方
+            // （FLAME_ITEMS ⊄ NO_WET_ITEMS——12/16/23/33/49 等武器火苗无 noWet，
+            // 但多为 holdStyle=0 走挥舞路径不进本分支；523/1333/4384 水火把
+            // 有意水下带火苗——与本体同生共死）
             if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
               drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: -fh, w: ar.sw, h: ar.sh }, flicker);
             }
