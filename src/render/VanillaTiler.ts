@@ -399,7 +399,13 @@ const TREE_SHEET_STYLES: Record<number, number> = { 5: 0, 596: 29, 616: 30, 634:
 for (let i = 583; i <= 589; i++) TREE_SHEET_STYLES[i] = 22 + (i - 583);
 /** 树冠帧尺寸按 PNG 实际宽度推导（3 变体等分 + 2px 间隔；高度 -2）：
  *  自动覆盖全部样式（森林 80×80 / 丛林·宝石 114-116×96 / 装饰 118×96 / 神圣 80-114×140） */
-function treeTopSize(img: ImageBitmap | HTMLImageElement): [number, number] {
+function treeTopSize(img: ImageBitmap | HTMLImageElement, style?: number): [number, number] {
+  // 权威帧表（WorldGen FoliageData 出参，:62814-63060）：多数 style 3 帧 ×(w+2)
+  // 步长与 PNG 推导一致；例外=非 3 帧表——style 3（神圣，738×142 = 9 帧 80×140，
+  // 出参 h=140 :63011）/style 19（1098×142 = 9 帧 120×140）。PNG 推导对这两档
+  // 会得出 244/364 宽三联冠（神圣树冠明显破碎）——按表取
+  if (style === 3) return [80, 140];
+  if (style === 19) return [120, 140];
   return [Math.floor(img.width / 3) - 2, img.height - 2];
 }
 // 树下草地 → 生物群系树干变体（TEdit treeType；-1 = 基础 Tiles_5）
@@ -592,9 +598,17 @@ export function drawTreeCell(
       img = atlas.ensureVImage(`vanilla/Tree_Tops_${crown}.png`)
         ?? atlas.ensureVImage(`vanilla/Tree_Tops_${style}.png`) ?? null;
       if (!img) return;
-      // 帧尺寸按 PNG 实宽推导（3 变体 + 2px 间隔），自动覆盖全部样式（含神圣 140 高）
-      [sw, sh] = treeTopSize(img);
-      sx = frame * (sw + 2); anchor = 0;
+      // 帧尺寸：多数 style=3 帧×(w+2)（PNG 推导同值）；例外按原版出参表
+      // （style 3/19 九帧表，见 treeTopSize 注释）
+      [sw, sh] = treeTopSize(img, crown);
+      // 神圣族变体帧推进（GetCommonTreeFoliageData case 109/492 :63026-63033：
+      // 非 style 20 时 i%3==1 → +3 / ==2 → +6——9 帧表用满，非本仓 marker 帧 0-2 独占）
+      let frame9 = frame;
+      if (crown === 3 && scan.type === 2) {
+        if (x % 3 === 1) frame9 += 3;
+        else if (x % 3 === 2) frame9 += 6;
+      }
+      sx = frame9 * (sw + 2); anchor = 0;
     } else {
       // 分叉枝（原版固定 40×40 帧、42px 步长；左枝 X=0 / 右枝 X=42；Y = frame*42）
       img = atlas.ensureVImage(`vanilla/Tree_Branches_${crown}.png`)

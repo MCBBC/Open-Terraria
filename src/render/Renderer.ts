@@ -1454,13 +1454,19 @@ export class Renderer {
     }
     // 2c''.5 风摆动图层（原版 TileDrawing 特殊绘制路径）：摆动图块已摘出烘焙，
     // 此处逐帧动态绘制（草/药草/藤蔓/吊挂植物/树冠树枝；世界变换内世界坐标，
-    // 光照合成在后自动受光）——渲染共享态 renderEnv.wind 已在 render() 顶部注入
+    // 光照合成在后自动受光）——渲染共享态 renderEnv.wind 已在 render() 顶部注入。
+    // ★采样模式=线性（XNA SpriteBatch 同款）：摆动层全部带旋转/小数偏移，
+    // 全局最近邻下旋转边缘会"整像素跳脱"（偶发 1px 透明缝——树冠/干接缝
+    // 用户报障的机制类）；线性采样边缘柔化但永不丢像素，与原版渲染一致。
+    // 静态 chunk/tile 路径保持最近邻（1:1 缩放贴图无重采样，锐度不受影响）
     if (this.atlas) {
+      ctx.imageSmoothingEnabled = true;
       drawWindSwayTiles(ctx, this.atlas, world, cam, z, clock, this.waterStyle, {
         corrupt: !!this.scene?.zoneCorrupt,
         crimson: !!this.scene?.zoneCrimson,
         hallow: !!this.scene?.zoneHallow,
       });
+      ctx.imageSmoothingEnabled = false;
       // 自然层粒子（原版 Gore：落叶/滴水——DrawGores 在 tile 层后实体前）
       natureParticles.draw(ctx, this.atlas);
     }

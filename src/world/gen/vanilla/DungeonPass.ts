@@ -2244,9 +2244,35 @@ export function runDungeonPass(
     }
     if (typAt(num26, num27) === TILE_BY_KEY['v_190_glowing_mushroom_block']) return false;
     if (wallAt(num26, num27) === 350) return false;
+    // 压板（:9104-9110）：PlaceTile(135, style)——墙>0（地牢内）style 2，否则
+    // Next(2,4)∈{2,3}；样式写 frameX=style*18（1×1 横排样式）、fy 归零
+    // （★chTile 不重置帧——被 KillTile 的墙砖残留帧会渗进样式位）
+    const pStyle = wallAt(x2, num) > 0 ? 2 : ri(2, 3);
     chTile(st.idx(x2, num), TILE_BY_KEY['v_135_pressure_plates'], false);
+    st.frameX[st.idx(x2, num)] = pStyle * 18;
+    st.frameY[st.idx(x2, num)] = 0;
     st.flags[st.idx(num26, num27)] = 0;                         // KillTile（生成期 noItem）
     chTile(st.idx(num26, num27), TILE_BY_KEY['v_137_traps'], false);
+    // 朝向（:9069-9085 num32 + :9119-9121 `if (num32==1) frameX += 18`）：
+    // 左锚（num28，num32=1）→ fx=18 朝右射向压板；右锚（num29，num32=-1）→
+    // fx=0 朝左（Wiring case 137：fx 0=左 18=右）。fy 归零 = 飞镖档（弹种=fy/18）
+    const n32 = num26 === num28 ? 1 : -1;
+    st.frameX[st.idx(num26, num27)] = n32 === 1 ? 18 : 0;
+    st.frameY[st.idx(num26, num27)] = 0;
+    // 铺线（:9122-9136）：压板 (x2,num) → 机关 (num26,num27) L 形楼梯红线
+    // （横一步铺线、纵一步铺线，与 Lights_GenerateSwitch 同款循环——含两端格）
+    {
+      let wa = x2, wb = num;
+      while (wa !== num26 || wb !== num27) {
+        if (inW(wa, wb, 0)) st.wire[st.idx(wa, wb)] |= TileStore.WIRE_RED;
+        if (wa > num26) wa--;
+        if (wa < num26) wa++;
+        if (inW(wa, wb, 0)) st.wire[st.idx(wa, wb)] |= TileStore.WIRE_RED;
+        if (wb > num27) wb--;
+        if (wb < num27) wb++;
+        if (inW(wa, wb, 0)) st.wire[st.idx(wa, wb)] |= TileStore.WIRE_RED;
+      }
+    }
     return true;
   }
   // ============ DungeonGlobalGroundFurniture（Default，:187-253 + :255-861）============

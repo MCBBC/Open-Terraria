@@ -2,7 +2,7 @@
 // 逐树采样冠底/干顶交界，检测全透明行与半透明缝线（亚像素相机相位矩阵）。
 import puppeteer from 'puppeteer-core';
 const ORIGIN = process.env.SW_ORIGIN || 'http://localhost:5199';
-const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1360, height: 860 } });
+const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1360, height: 860, deviceScaleFactor: 2 } });   // Retina DPR=2（用户环境）
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
@@ -130,7 +130,7 @@ const res = await page.evaluate(async () => {
         seamFrames ? `缝帧=${seamFrames} 首例=${JSON.stringify(worst)}` : '');
     };
     for (const [biome, list] of Object.entries(perBiome)) {
-      for (const t of list.slice(0, 3)) await testTree(biome + '@1.25x', t.x, t.y);
+      for (const t of list.slice(0, 3)) await testTree(biome + '@1.25x-DPR2', t.x, t.y);
     }
     for (const t of palms.slice(0, 2)) await testTree('palm', t.x, t.y);
     ok('至少测到一棵树', Object.keys(perBiome).length > 0 || palms.length > 0, JSON.stringify(out.biomeCounts));

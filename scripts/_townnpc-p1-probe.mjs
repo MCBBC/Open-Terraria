@@ -66,8 +66,10 @@ await seg('A', async () => {
     g.world.weather.stopRain();
     return { x0, x1 };
   }, bx, F);
-  const moved = r.x1 - r.x0;
-  ok('A 雨天白天走回家（>28 格 / 40 格）', moved > 28,
+  // 玩家在两矩形外 → 原版行为是静默传送回家（x0 可能已在家）；玩家可见时走位
+  // 版本由 vitest P1-1 确定性测试覆盖。断言 = 900t 后在家 ±4 格
+  const atHome = Math.abs(r.x1 - (bx + 40)) <= 4;
+  ok('A 雨天白天回家（到家=传送或走位，home=bx+40±4）', atHome,
     `col ${r.x0.toFixed(1)} → ${r.x1.toFixed(1)} (home=bx+40)`);
 });
 
@@ -124,6 +126,7 @@ await seg('C', async () => {
     g.world.clock.timeOfDay = 0.5;
     const a = new TownNPC('guide', (bx - 6) * 16 + 8, F * 16);
     const b = new TownNPC('nurse', (bx - 2) * 16 + 8, F * 16);
+    a.stationary = true; b.stationary = true;   // 钉位防游走漂出 100px 社交窗（掷骰不受 stationary 门）
     g.entities.npcs.push(a, b);
     let chat = false, rps = false, rpsEmotes = 0;
     const t0 = g['tickCount'];
@@ -167,6 +170,7 @@ await seg('D', async () => {
     if (!party.partyIsUp(g.partyState)) party.toggleManualParty(g.partyState);  // 真派对
     p.x = (bx - 3) * 16; p.y = (F - 3) * 16;   // 玩家在 NPC 旁 50px
     const n = new TownNPC('nurse', (bx + 0) * 16 + 8, F * 16);
+    n.stationary = true;   // 钉位防漂出玩家 150px 舞门窗
     g.entities.npcs.push(n);
     let dustNotes = 0;
     const vd = g.vanillaDust;
@@ -191,8 +195,9 @@ await seg('D', async () => {
     return { dancing, dustNotes, frames: [...danceFrames] };
   }, bx, F);
   ok('D1 派对舞态出现（1/1200）', r.dancing);
-  ok('D2 舞帧带 num58−5/−4（护士 num58=19：帧 18/19）',
-    r.frames.includes(18) || r.frames.includes(19), `observed=[${r.frames.join(',')}]`);
+  // 护士 frames=23、AttackFrameCount=4 → num58=19 → 舞帧 14(−5)/15(−4)
+  ok('D2 舞帧带 num58−5/−4（护士 num58=19：帧 14/15）',
+    r.frames.includes(14) || r.frames.includes(15), `observed=[${r.frames.join(',')}]`);
   ok('D3 音符尘 139-143（≥8）', r.dustNotes >= 8, `dust notes=${r.dustNotes}`);
 });
 

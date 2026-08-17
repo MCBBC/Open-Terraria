@@ -1934,7 +1934,9 @@ export class VanillaSpawner {
         let variant = 0;
         if (wallA === 94 || wallA === 96 || wallA === 98 || wallB === 94 || wallB === 96 || wallB === 98) variant = 1;
         if (wallA === 95 || wallA === 97 || wallA === 99 || wallB === 95 || wallB === 97 || wallB === 99) variant = 2;
-        if (N(7)) variant = rng.int(0, 3);
+        // RollLuck(7)==0 → Next(3)∈{0,1,2}（L2551；曾 rng.int(0,3)=Next(4) 多出档 3 →
+        // 蓝砖权重虚高 ½）
+        if (rollLuck(this.playerLuck, 7, () => rng.next()) === 0) variant = rng.int(0, 2);
         // 未杀骷髅王（flag12）→ 地牢守卫 68（9999 伤，1:1 原版劝退机制）
         if (!this.downedBoss3) return D(68);
         // L2562 机械师(123)：1/5，未救出(!savedMech)+场内唯一+深层门（(ws*4+rl)/5）
@@ -2075,15 +2077,19 @@ export class VanillaSpawner {
       return D(7);
     }
     // ---- 洞穴稀有怪/小动物（L3644-3719；原版位于蘑菇地之后、丛林草之前）----
-    //  RollLuck(n)≈Next(n)（玩家幸运度未接入）；goldCritterChance=400
-    // L3644：hard && y>worldSurface && RollLuck(75) → 群系稀有元素怪。
+    //  RollLuck(n)（Luck.RollLuck(player.luck, n)——luck 0 中性=Next(n)，正运收窄
+    //  1/(n-luck·n)、负运放宽；rollLuck 已导入）；goldCritterChance=400
+    // L3644：hard && y>worldSurface && RollLuck(十周年?50:75) → 群系稀有元素怪。
     //  473/474/475/476 与 629 在 vanilla-npcs.json 无条目（fromVanilla→null 静默丢弃），
     //  实际可达的只有兜底 85（hellstone turtle）；分支按原版顺序保留
-    if (hardMode && this.spawnTileY > this.world.groundLevel && N(75)) {
+    const rareRoll = rollLuck(this.playerLuck, this.world.seedFlags?.tenthAnniversary ? 50 : 75, () => rng.next());
+    if (hardMode && this.spawnTileY > this.world.groundLevel && rareRoll === 0) {
       if (N(2) && this.ZoneCorrupt && !any(473)) return D(473);
       if (N(2) && this.ZoneCrimson && !any(474)) return D(474);
       if (N(2) && this.ZoneHallow && !any(475)) return D(475);
-      if (N(2) && this.ZoneJungle && !any(476)) return D(476);   // 原版还要求 tenthAnniversaryWorld
+      // 476 仅十周年世界（L3657 `Main.tenthAnniversaryWorld && Next(2)`——曾缺此门，
+      // 普通世界丛林也出 476）
+      if (this.world.seedFlags?.tenthAnniversary && N(2) && this.ZoneJungle && !any(476)) return D(476);
       if (this.ZoneSnow) return D(629);
       return D(85);
     }
@@ -2236,9 +2242,12 @@ export class VanillaSpawner {
     //  ⑤兜底妖精 75
     if (hardMode && this.underGround && !this.waterTile && hallowFloor) {
       const downedPlant = !!this.world.flags['downed_262'];
-      if (downedPlant && !this.dayTime && this.world.clock.hourFloat >= 19.5
-        && this.surfaceSpawn && N(10) && !any(661)) return D(661);
-      if (this.world.weather.raining && !any(244) && N(10)) return D(244);
+      // ★夜前半上界：Main.time<16200 = 午夜 24:00（夜晚独立时间轴，Midnight 命令
+      //  实证 time=16200）→ hourFloat ∈ [19.5, 24)。曾缺上界整夜可出。
+      //  RollLuck(10) 非 Next(10)（luck 收窄/放宽）
+      if (downedPlant && !this.dayTime && this.world.clock.hourFloat >= 19.5 && this.world.clock.hourFloat < 24
+        && this.surfaceSpawn && rollLuck(this.playerLuck, 10, () => rng.next()) === 0 && !any(661)) return D(661);
+      if (this.world.weather.raining && !any(244) && rollLuck(this.playerLuck, 10, () => rng.next()) === 0) return D(244);
       if (!this.dayTime && N(2)) return D(122);
       // :3960 Next(10)==0 || (ZoneWaterCandle && Next(10)==0)：水蜡烛下独角兽双掷
       if (N(10) || (this.zoneWaterCandle && N(10))) return D(86);
@@ -2369,9 +2378,9 @@ export class VanillaSpawner {
         const downwind = (this.pX - this.spawnTileX) * this.world.weather.windSpeedTarget > 0;
         if (!this.waterTile && spawnWallEmpty && windyDay && downwind) {
           if (!N(3)) return D(594);
-          // NPC.cs:4112:草族门 = 2/477/109/492/147/161(修剪草/神圣修剪草/雪/冰全在内)
-          if ((t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS
-            || t === T.SNOW || t === T.ICE) && !N(10)) return D(628);
+          // :4398 蒲公英门 = tile∈{2 草, 477 修剪草}（仅此两 tile——曾扩到神圣草/
+          // 雪原/冰族,注释误引 :4112[昼池 critter 门草族全集]）
+          if ((t === T.GRASS || t === T.MOWED_GRASS) && !N(10)) return D(628);
         }
         // L4435：池底基础史莱姆
         if (!this.waterTile) return D(this.getBasicSlimeToSpawn(true, t, rng));
@@ -2612,7 +2621,9 @@ export class VanillaSpawner {
       if (N(3)) return D(cavernMonsterType[rng.int(0, 1)][rng.int(0, 2)]);
       // L5010：ZoneGlowshroom && tile 70/190 → 孢子骷髅 635（蘑菇草/发光蘑菇块落脚）
       if (this.ZoneGlowshroom && (t === T.MUSHROOM_GRASS || t === T.MUSHROOM_BLOCK)) return D(635);
-      // L5018：halloween 南瓜精略；L5029：专家模式骨堆小动物 449-452 略（无专家模式）
+      // L5029：专家模式骨堆小动物（expertMode && 1/3 → Next(4) 选 449-452；
+      //  曾注"无专家模式"略——expert 已实装，2026-08-17 出怪池审计补）
+      if (this.world.isExpert && N(3)) return D(449 + rng.int(0, 3));
       // switch(Next(4)) 骷髅系（L5050-5099）：2/3 本体，1/3 大小变体二选一
       const sv = rng.int(0, 3);
       const sm = [21, 201, 202, 203][sv] ?? 21;
