@@ -10,6 +10,7 @@
 // ④ 963 阿比盖尔特判 ×-1（:62992）贴图朝右——常规 facing=sign(目标方向) 不变
 import { describe, expect, it } from 'vitest';
 import { MinionProj } from '../src/entities/MinionProj';
+import { Arrow } from '../src/entities/Arrow';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { TileStore } from '../src/world/TileStore';
@@ -58,7 +59,7 @@ function makeHooks(enemies: MockEnemy[] = []) {
     add: (e: unknown) => { projectiles.push(e); },
     projectiles,
   };
-  return { hooks, player };
+  return { hooks, player, projectiles };
 }
 
 /** 记录型 ctx 桩：捕获 rotate/scale/drawImage 调用序 */
@@ -158,5 +159,21 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     m.fixedUpdate(1, hooks);
     expect(m.vx).toBeGreaterThan(0);
     expect(m.facing).toBe(1);                  // 朝右不翻（贴图朝右）
+  });
+
+  it('387 激光出弹锚点 = 本体中心（NewProjectile @Center :28977-38981）', () => {
+    const { hooks, player, projectiles } = makeHooks([mkEnemy(1, 60 * 16 + 600, 90 * 16 - 40)]);
+    const m = mkMinion(387, false, player);
+    const before = projectiles.length;
+    m.fixedUpdate(1, hooks);                   // 首帧即射（shootCd 初 0）
+    const shots = projectiles.slice(before)
+      .filter((e): e is Arrow => e instanceof Arrow);
+    expect(shots.length).toBeGreaterThanOrEqual(1);
+    const s = shots[0];
+    expect(s.projId).toBe(389);                // MiniRetinaLaser
+    expect(s.life).toBe(300);                  // :28981 timeLeft=300
+    // 4×4 判定盒 → 左上 = Center−2；弹体中心精确等于随从中心（曾 -5 写死偏 3px）
+    expect(s.x + s.w / 2).toBeCloseTo(m.cx, 6);
+    expect(s.y + s.h / 2).toBeCloseTo(m.cy, 6);
   });
 });

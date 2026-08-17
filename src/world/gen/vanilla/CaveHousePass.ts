@@ -848,21 +848,26 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
 
 /** FindSideExit(Up 搜索 + AreaOr(4,3) 任一非实心) */
 function findSideExit(st: TileStore, wallX: number, wallY: number, wallH: number, isLeft: boolean): number | null {
+  // FindSideExit（HouseBuilder.cs:554）：Up 搜索 + IsSolid().Not().AreaOr(4,3)。
+  //   ★GenCondition.IsValid Or 分支（GenCondition.cs:52-61）+InvertResults：任一格
+  //   CheckValidity(=实心)成立→返回 !Invert=false；全空才 true——即 4×3 窗口必须
+  //   【整体无实心】才命中。曾误读成 any-非实心 → 门/平台滥发（house0 右窗外
+  //   (769,869) 一格泥土即否决,旧 any 语义误命中实锤）
   const startX = wallX + (isLeft ? -4 : 0);
   for (let k = 0; k < wallH - 3; k++) {
     const y = wallY + wallH - 3 - k;
-    let any = false;
-    for (let dx = 0; dx < 4 && !any; dx++) {
-      for (let dy = 0; dy < 3 && !any; dy++) {
-        if (!solidAt(st, startX + dx, y + dy)) any = true;
+    let allAir = true;
+    for (let dx = 0; dx < 4 && allAir; dx++) {
+      for (let dy = 0; dy < 3 && allAir; dy++) {
+        if (solidAt(st, startX + dx, y + dy)) allAir = false;
       }
     }
-    if (any) return y;
+    if (allAir) return y;
   }
   return null;
 }
 
-function placeDoors(st: TileStore, rooms: Rect[], def: ThemeDef): void {
+function placeDoors(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void {
   for (const r of rooms) {
     // 墙列矩形 (X, Y+1, 1, H-2)
     // 门禁（原版 PlaceTile(x, exitY)→PlaceDoor(j+1)，WorldGen.cs:31946）：mount
@@ -870,7 +875,18 @@ function placeDoors(st: TileStore, rooms: Rect[], def: ThemeDef): void {
     // 的 forced=true 仅绕过首道空格门，门分支的锚点条件仍生效
     const tryDoor = (x: number, exitY: number) => {
       for (let dy = 0; dy < 3; dy++) st.setTileSilent(x, exitY + dy, 0);
-      if (solidAt(st, x, exitY - 1) && solidAt(st, x, exitY + 3)) {
+      // PlaceTile case10（cs:59867-59906，forced=true 仅过首道空格门）：分支 A
+      // （exitY-1/-2 空 + exitY-3 实心）→ PlaceDoor(i,j-1) 门落 (exitY-2..exitY)；
+      // 分支 B（exitY+1/+2 空 + exitY+3 实心）→ 门落 (exitY..exitY+2)；双败→无门零掷
+      const solidAtV = (yy: number) => st.inBounds(x, yy) && !!st.flags[st.idx(x, yy)] && vanGenSolidType(st.type[st.idx(x, yy)]);
+      const inactiveAt = (yy: number) => st.inBounds(x, yy) && st.flags[st.idx(x, yy)] === 0;
+      if (inactiveAt(exitY - 1) && inactiveAt(exitY - 2) && solidAtV(exitY - 3)) {
+        // PlaceDoor（cs:31938-31960）：三格门框 frameX 各独立掷 Next(3)——每门 3 掷
+        // （N 批 HellFort 同源；house3 vanilla DO→PL=6 掷=双门×3 实锤）
+        rng.int(0, 2); rng.int(0, 2); rng.int(0, 2);
+        placeDoorClosed(st, x, exitY - 2, def.door);
+      } else if (inactiveAt(exitY + 1) && inactiveAt(exitY + 2) && solidAtV(exitY + 3)) {
+        rng.int(0, 2); rng.int(0, 2); rng.int(0, 2);
         placeDoorClosed(st, x, exitY, def.door);
       }
     };
@@ -890,13 +906,14 @@ function findVerticalExit(st: TileStore, rectX: number, rectY: number, rectW: nu
   const startY = rectY + (isUp ? -5 : 0);
   for (let k = 0; k < rectW - 3; k++) {
     const x = startX - k;
-    let any = false;
-    for (let dx = 0; dx < 3 && !any; dx++) {
-      for (let dy = 0; dy < 5 && !any; dy++) {
-        if (!solidAt(st, x + dx, startY + dy)) any = true;
+    // 同 findSideExit：AreaOr(3,5)+Not = 3×5 窗口整体无实心才命中（曾误 any 语义）
+    let allAir = true;
+    for (let dx = 0; dx < 3 && allAir; dx++) {
+      for (let dy = 0; dy < 5 && allAir; dy++) {
+        if (solidAt(st, x + dx, startY + dy)) allAir = false;
       }
     }
-    if (any) return x;
+    if (allAir) return x;
   }
   return null;
 }
@@ -1157,7 +1174,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     // 2-4) 楼梯 / 门 / 平台
     placeStairs(st, rng, rooms, def);
     __st?.('st', ox, oy, 0, __rn());
-    placeDoors(st, rooms, def);
+    placeDoors(st, rng, rooms, def);
     __st?.('do', ox, oy, 0, __rn());
     placePlatforms(st, rooms, def);
     __st?.('pl', ox, oy, 0, __rn());

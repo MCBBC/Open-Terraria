@@ -66,25 +66,28 @@ const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
 
 /** 远程射击随从表（Projectile.cs AI_062/AI_026/aiStyle66 射击分支提取）：
  *  shot=射出弹幕 speed=弹速 cd=冷却 t(源码 ai[1] 递增率折算：373 rand(1,4)/t>90≈36；
- *  375/407/423/613 +1~2/t 折算) range=射击门距 dmgMul=伤害倍率 jitter=瞄准随机抖动 px。
+ *  375/407/423/613 +1~2/t 折算) range=射击门距 dmgMul=伤害倍率 jitter=瞄准随机抖动 px
+ *  muzzleY=出生锚点相对本体中心的 Y 偏移（AI_026 vector15 = Center-8 :58764；
+ *  Foxparks 分支再 -2 :58784）；life=出生 timeLeft 覆写（AI_062 全族 300 :63210，
+ *  唯 423→433 分支不覆写→433 SetDefaults 100）。
  *  373 黄蜂→374 毒刺(:63116 sp10)；375 小鬼→376 火球(sp11)；
  *  407 风暴(鲨鱼龙卷)→408(sp20)；423 Xeno UFO→433 光束(sp4,≤400px 门,:63136)；
  *  613 星尘细胞→614(sp14,≤500px 门)；
  *  191-194 俾格米→195 掷矛(AI_026 :58795,sp11,CD30,射程800,抖动±20)；
  *  387 双子激光眼→389(:28982 sp8 ×1.15 伤,CD~45,需视线)；
  *  1094 Foxparks→1097 火球(:58815 sp11 CD42 无抖动) */
-const MINION_SHOOT: Record<number, { shot: number; speed: number; cd: number; range: number; dmgMul?: number; jitter?: number; grav?: number; life?: number }> = {
-  373: { shot: 374, speed: 10, cd: 36, range: 1000 },
-  375: { shot: 376, speed: 11, cd: 68, range: 1000, life: 100 },  // 火球 timeLeft=100
-  407: { shot: 408, speed: 20, cd: 30, range: 1000 },
-  423: { shot: 433, speed: 4, cd: 24, range: 400 },
-  613: { shot: 614, speed: 14, cd: 36, range: 500 },
-  191: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 }, // 掷矛抛物线(aiStyle 1)
-  192: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 },
-  193: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 },
-  194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 },
-  387: { shot: 389, speed: 8, cd: 45, range: 1000, dmgMul: 1.15 },
-  1094: { shot: 1097, speed: 11, cd: 42, range: 800 },
+const MINION_SHOOT: Record<number, { shot: number; speed: number; cd: number; range: number; dmgMul?: number; jitter?: number; grav?: number; life?: number; muzzleY?: number }> = {
+  373: { shot: 374, speed: 10, cd: 36, range: 1000, life: 300 },
+  375: { shot: 376, speed: 11, cd: 68, range: 1000, life: 300 },  // AI 覆写 300 压过 SetDefaults 100（:63210）
+  407: { shot: 408, speed: 20, cd: 30, range: 1000, life: 300 },
+  423: { shot: 433, speed: 4, cd: 24, range: 400, life: 100 },    // 423 分支无覆写 → SetDefaults 100
+  613: { shot: 614, speed: 14, cd: 36, range: 500, life: 300 },   // 613 分支覆写 300（:63175）
+  191: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8 }, // 掷矛抛物线(aiStyle 1) 手部高度 :58764
+  192: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8 },
+  193: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8 },
+  194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3, life: 300, muzzleY: -8 },
+  387: { shot: 389, speed: 8, cd: 45, range: 1000, dmgMul: 1.15, life: 300 },  // timeLeft=300(:28981)
+  1094: { shot: 1097, speed: 11, cd: 42, range: 800, life: 300, muzzleY: -10 }, // Foxparks 分支 :58784 再 -2
 };
 
 /** aiStyle 53 定点哨兵表（AI :27172-27382 1:1）：初冷 ai[0]=120（:27180），
@@ -826,8 +829,9 @@ export class MinionProj extends Entity {
               const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
               vx = ((tgt.cx - mx) / d) * 9; vy = ((tgt.cy - my) / d) * 9;
             }
+            // 668 烈焰弹 16×16（SetDefaults）→ 炮口 − 8（曾 -5 偏 3px）
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              Object.assign(new Arrow(mx - 5, my - 5, vx, vy, dmgOf(), this.knockback, 668, null, { grav: 0.2 }), { whipTagShot: true }),
+              Object.assign(new Arrow(mx - 8, my - 8, vx, vy, dmgOf(), this.knockback, 668, null, { grav: 0.2 }), { whipTagShot: true }),
               'projectiles');
           }
           if (++this.sFireT >= 24) { this.sFire = 0; this.sCool = 60; } // num6*num7=24、num8=60
@@ -846,14 +850,17 @@ export class MinionProj extends Entity {
           if (this.sFireT === 12) {
             const tgt = this.nearestEnemy(game, 900);
             game.playSfxFiles(soundTrackFiles('dd2_ballista_tower_shot'), 0.9, this.cx, this.cy); // AI_134 :65674（开火帧同弩箭）
+            // 原版瞄准与出弹都从本体 Center（:65590 center=base.Center → :65693
+            // NewProjectile(center)；680 弩箭 16×16 → 左上 = Center−8。曾误把
+            // (cx, y+20) 当左上角传 → 弹心恒偏右下半格+炮口近似高度）
             let vx = this.facing * 16, vy = 0;
             if (tgt) {
-              const d = Math.hypot(tgt.cx - this.cx, tgt.cy - (this.y + 20)) || 1;
-              vx = ((tgt.cx - this.cx) / d) * 16; vy = ((tgt.cy - (this.y + 20)) / d) * 16;
+              const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+              vx = ((tgt.cx - this.cx) / d) * 16; vy = ((tgt.cy - this.cy) / d) * 16;
             }
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
               // 680 弩箭：AI_001 默认档（0.1@15 缓坠）——重力缺省走规格链（2026-08-14 对账）
-              Object.assign(new Arrow(this.cx, this.y + 20, vx, vy, dmgOf(), this.knockback, 680, null), { whipTagShot: true }),
+              Object.assign(new Arrow(this.cx - 8, this.cy - 8, vx, vy, dmgOf(), this.knockback, 680, null), { whipTagShot: true }),
               'projectiles');
           }
           if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = 160; }
@@ -974,9 +981,9 @@ export class MinionProj extends Entity {
         }
         if (tgt && this.sCool <= 0) {
           this.sCool = s53.cd; // :27282-27288（num427=60，966→90）
-          // 炮口偏移（:27290-27305）：966 固定 Center-16Y；308/377 按扇区，
-          // 朝左再 +10X（spriteDirection<0 补偿）
-          let ox = 0, oy = -2;
+          // 炮口偏移（:27290-27347）：966 flag24 分支 zero 保持 (0,0)=本体中心；
+          // 308/377 按扇区，朝左再 +10X（!flag24 && spriteDirection<0 :27351-27354）
+          let ox = 0, oy = 0;
           if (this.projId !== 966) {
             switch (sector) {
               case 0: ox = 24 * this.facing; oy = 12; break;
@@ -986,16 +993,19 @@ export class MinionProj extends Entity {
               default: ox = 2 * this.facing; oy = -14; break;
             }
             if (this.facing < 0) ox += 10;
-          } else {
-            oy = -16;
           }
           const mx = this.cx + ox, my = this.cy + oy;
           const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
           const shotSfx = MINION_SHOT_SFX[s53.shot];
           if (shotSfx) game.playSfxFiles(soundTrackFiles(shotSfx.track), shotSfx.vol, this.cx, this.cy);
+          // 出弹锚点 = 炮口 − 弹型判定盒/2（:27357 vector34=Center+zero；
+          // 309/967 = 14×14、378 = 16×16——曾写死 -5 偏 2-3px）
+          const sp53 = projectileData(s53.shot);
+          const s53hw = (sp53?.width ?? 10) / 2, s53hh = (sp53?.height ?? 10) / 2;
+          const s53life = sp53?.timeLeft ?? 1200;
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            Object.assign(new Arrow(mx - 5, my - 5, ((tgt.cx - mx) / d) * s53.speed, ((tgt.cy - my) / d) * s53.speed,
-              dmgOf(), this.knockback, s53.shot, null, { grav: 0 }), { whipTagShot: true }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）
+            Object.assign(new Arrow(mx - s53hw, my - s53hh, ((tgt.cx - mx) / d) * s53.speed, ((tgt.cy - my) / d) * s53.speed,
+              dmgOf(), this.knockback, s53.shot, null, { grav: 0, life: s53life }), { whipTagShot: true }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）
             'projectiles');
         }
         if (this.sCool > 0) this.sCool--; // :27377-27380（目标有无均递减）
@@ -1008,9 +1018,9 @@ export class MinionProj extends Entity {
         if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
         if (tgt && this.sCool <= 0) {
           this.sCool = ss.cd;
-          // 炮口（641 月门本体中心上方 2px 近似；643 彩虹水晶走 volley 落点分支）
+          // 炮口（641 月门 = 本体 Center :33993；643 彩虹水晶走 volley 落点分支）
           const mx = this.cx;
-          const my = this.cy - 2;
+          const my = this.cy;
           if (ss.volley) {
             // 彩虹水晶 643：3 连目标区随机落点（:34005——距离越远散布越大 0.5-1.25×）
             for (let i = 0; i < ss.volley; i++) {
@@ -1031,8 +1041,10 @@ export class MinionProj extends Entity {
             }
           } else {
             const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
+            // 641 月门原版锚点 = 本体 Center（:33993），642 传送门弹 18×18 → −9
+            // （曾 mx-5 写死 + 锚点 -2 近似 → 弹心偏移半格）
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              Object.assign(new Arrow(mx - 5, my - 5, ((tgt.cx - mx) / d) * ss.speed, ((tgt.cy - my) / d) * ss.speed,
+              Object.assign(new Arrow(mx - 9, my - 9, ((tgt.cx - mx) / d) * ss.speed, ((tgt.cy - my) / d) * ss.speed,
                 dmgOf(), this.knockback, ss.shot, null, { grav: 0 }), { whipTagShot: true }),
               'projectiles');
           }
@@ -1050,7 +1062,7 @@ export class MinionProj extends Entity {
           this.shootCd = 60;
           const ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            Object.assign(new Arrow(this.cx, this.cy, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId, null), { whipTagShot: true }),
+            Object.assign(new Arrow(this.cx - 5, this.cy - 5, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId, null), { whipTagShot: true }),
             'projectiles');
         }
       }
@@ -1194,7 +1206,14 @@ export class MinionProj extends Entity {
           const ay = tgt.cy + (Math.random() * 2 - 1) * j - this.cy;
           const al = Math.hypot(ax, ay) || 1;
           const dmg = Math.max(1, Math.round(dmg0 * (shooter.dmgMul ?? 1)));
-          const shot = new Arrow(this.cx - 5, this.cy - 5, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
+          // 出弹锚点 = 本体 Center + 表内 muzzleY（NewProjectile @Center，:28977-
+          // 38981/:63209；俾格米/Foxparks AI_026 有 -8/-10 手部高度 :58764/:58784）
+          // → 弹体左上角 = 锚点 − 弹型判定盒/2（曾写死 -5 按 10×10 假设：389 激光
+          // 4×4 → 恒偏左上 3px；376 火球 12×12/614 细胞弹 16×16 各有偏差）
+          const ps = projectileData(shooter.shot);
+          const hw = (ps?.width ?? 10) / 2, hh = (ps?.height ?? 10) / 2;
+          const ay0 = this.cy + (shooter.muzzleY ?? 0);
+          const shot = new Arrow(this.cx - hw, ay0 - hh, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
             dmg, this.knockback, shooter.shot, null, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 });
           shot.whipTagShot = true; // MinionShot 吃鞭 tag（WhipTagEffect.cs:73-84）
           const shotSfx = MINION_SHOT_SFX[shooter.shot];

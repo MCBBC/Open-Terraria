@@ -151,5 +151,6 @@ interface Draw { at: number; kind: string; v: number }
     console.log('dice seq:', dice.slice(-30).map((d) => `${d.at % 100000}:${d.v}`).join(' '));
     const pm = marks.filter((m) => m.at > 833000 && m.at < 880500);
     console.log('marks:', pm.slice(0, 12).map((m) => `${m.at} ${m.tag}`).join(' | '), '...', pm.slice(-4).map((m) => `${m.at} ${m.tag}`).join(' | '));
+    console.log('P-marks:', marks.filter((m) => m.tag.startsWith('P#')).map((m) => `${m.tag}@${m.at}`).slice(-8).join(' '));
   }
 }, 480000);

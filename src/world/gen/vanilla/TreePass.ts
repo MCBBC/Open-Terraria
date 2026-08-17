@@ -7,7 +7,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 
 const TREE = TILE_BY_KEY['tree']!;              // tile 5
 const PALM = TILE_BY_KEY['v_323_palm_trees']!;  // tile 323
@@ -188,9 +188,124 @@ function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: numbe
   return growTrunk(st, rng, gs, i, index1, rng.int(20, 29)); // Next(20,30)
 }
 
+
+// ══ 棕榈尾帧扫（RangeFrame cs:27354 / cs:80924-81070 生成期有效子集）════════
+// SeaOatWaterCheck（cs:58269-58313）——自 StructuresPass 迁入（棕榈域 Check 复用）
+export function seaOatWaterCheck(st: TileStore, gs: GenState, x: number, y: number): boolean {
+  let num = 45, num2 = 20;
+  let flag = false;
+  if (x <= gs.beachDistance || x >= st.w - gs.beachDistance) { flag = true; num = 65; num2 += 5; }
+  let sum = 0;
+  for (let i = x - num; i <= x + num; i++) {
+    for (let j = y - num2; j <= y + num2; j++) {
+      if (st.inBounds(i, j) && !solidTileHB(st, i, j) && st.liquid[st.idx(i, j)] > 0) {
+        sum += st.liquid[st.idx(i, j)];
+      }
+    }
+  }
+  if (Math.trunc(sum / 255) >= 20) return !flag;
+  return flag;
+}
+const SEAOAT_ID = TILE_BY_KEY['v_529_sea_oats']!;
+const OASIS_PLANT_ID = TILE_BY_KEY['v_530_oasis_plants']!;
+const SAND_CONV_IDS = idsByVanillaSheet(53, 112, 116, 234);
+
+/** 死格/燕麦/绿洲植物之外的 TileFrame 生成期子集：沙族/棕榈/空气的帧均无格效应 */
+function frameCellGen(st: TileStore, gs: GenState, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;             // cs:82069 边界早退
+  const k = st.idx(x, y);
+  if (!st.flags[k]) { st.half[k] = 0; st.slope[k] = 0; return; }  // cs:82077 死格重置
+  const t = st.type[k];
+  if (t === OASIS_PLANT_ID) { checkOasisPlantAt(st, gs, x, y); return; }
+  if (t === SEAOAT_ID) { checkSeaOatAt(st, gs, x, y); return; }
+  // 80 仙人掌（CheckCactus）：棕榈域内仙人掌恒有支撑（本 pass 仙人掌只落在整砖沙
+  // 面，棕榈不毁沙），K 事件链实证零击杀——备案省略。其余类型帧为渲染态。
+}
+
+/** KillTile(i,j) 生成期有效子集（cs:63559）：type=0 + SquareTileFrame 3×3 级联 */
+function killTileGenSilent(st: TileStore, gs: GenState, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const k = st.idx(x, y);
+  if (!st.flags[k]) return;
+  st.setTileSilent(x, y, 0, 0, 0);
+  st.half[k] = 0;
+  st.slope[k] = 0;
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) frameCellGen(st, gs, x + dx, y + dy);
+}
+
+/** CheckSeaOat（cs:58352-58365）：水检失败 → KillTile */
+function checkSeaOatAt(st: TileStore, gs: GenState, x: number, y: number): void {
+  if (!seaOatWaterCheck(st, gs, x, y)) killTileGenSilent(st, gs, x, y);
+}
+
+/** CheckOasisPlant（cs:47617-47690）：按帧重建 3×2 块原点，6 格帧型/下基校验
+ *  失败 → 整块 KillTile + 尾扫 (num3-1..num3+4)×(num-1..num+2) */
+function checkOasisPlantAt(st: TileStore, gs: GenState, i: number, j: number): void {
+  const k = st.idx(i, j);
+  let num = j;
+  const num2 = st.frameY[k]! % 36;
+  num += Math.trunc(num2 / 18) * -1;
+  let num3 = Math.trunc(st.frameX[k]! / 18);
+  let num4 = 0;
+  while (num3 > 2) { num3 -= 3; num4++; }
+  num3 = i - num3;
+  const num5 = num4 * 54;
+  let flag = false;
+  for (let kk = num3; kk < num3 + 3; kk++) {
+    for (let ll = num; ll < num + 2; ll++) {
+      // C# OOB 读 = new Tile() 空格（active 假 → 校验失败）
+      if (!st.inBounds(kk, ll)) { flag = true; continue; }
+      const k2 = st.idx(kk, ll);
+      if (!st.flags[k2] || st.type[k2] !== OASIS_PLANT_ID
+        || st.frameX[k2] !== (kk - num3) * 18 + num5
+        || st.frameY[k2] !== (ll - num) * 18) flag = true;
+    }
+    if (!st.inBounds(kk, num + 2)) { flag = true; continue; }
+    const kb = st.idx(kk, num + 2);
+    if (!st.flags[kb] || st.half[kb] !== 0 || st.slope[kb] !== 0
+      || !SAND_CONV_IDS.has(st.type[kb])) flag = true;    // SolidTile+Sand
+  }
+  if (!flag) return;
+  for (let kk = num3; kk < num3 + 3; kk++) {
+    for (let ll = num; ll < num + 2; ll++) {
+      if (!st.inBounds(kk, ll)) continue;
+      const k2 = st.idx(kk, ll);
+      if (st.flags[k2] && st.type[k2] === OASIS_PLANT_ID) killTileGenSilent(st, gs, kk, ll);
+    }
+  }
+  for (let kk = num3 - 1; kk <= num3 + 4; kk++)
+    for (let ll = num - 1; ll <= num + 2; ll++) frameCellGen(st, gs, kk, ll);
+}
+
+/** RangeFrame(x1,y1,x2,y2)（cs:80924）生成期子集：逐格 TileFrame（上面的
+ *  frameCellGen）。棕榈尾扫入口。 */
+export function palmRangeFrame(st: TileStore, gs: GenState, x0: number, y0: number, x1: number, y1: number): void {
+  for (let x = x0; x <= x1; x++)
+    for (let y = y0; y <= y1; y++) frameCellGen(st, gs, x, y);
+}
+
+
+/** SolidTile(i,j)（cs:70155）子集：active && tileSolid && !half && slope==0。
+ *  本域内无平台/门差异（沙/棕榈/植物），用 genSolidType LUT 近似 SolidTile。 */
+function solidTileHB(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const k = st.idx(x, y);
+  if (!st.flags[k]) return false;
+  const t = st.type[k];
+  if (t === 0) return false;
+  const d = TILE_DEFS[t];
+  return !!d && d.solid && !d.platform && !st.half[k] && st.slope[k] === 0;
+}
+
 /** GrowPalmTree（1456 cs:27260-27359）：沙滩棕榈，干身倾斜帧 fy=num4（±2 步进趋向 num3） */
-/** 导出供 StructuresPass 绿洲消费段复用(2026-08-13 去重) */
-export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
+/** 导出供 StructuresPass 绿洲消费段复用(2026-08-13 去重)。
+ *  ★尾段 RangeFrame（cs:27354 `RangeFrame(i-2, num-num3-1, i+2, num+1)`）：
+ *  帧扫的生成期有效子集 = CheckOasisPlant(530 块校验+整块 KillTile)与
+ *  CheckSeaOat(529 水检失败击杀)。棕榈干身覆写 530 块边列后，该扫会把残缺块
+ *  整块清除——II 批 #98 实证：漏此扫时 JS 残留 530 块（2815..2816×252..253 等
+ *  9 处）挡掉 vanilla 后续 PlantSeaOat（(2815,253) 首掷差 840350-52）→ 列命中
+ *  平移 2913 vs 2940 → band1 -26,863 掷。零掷骰（纯格效应）。 */
+export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number, gs?: GenState): boolean {
   if (!st.inBounds(i, y)) return false;
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
@@ -228,6 +343,7 @@ export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boo
     }
     st.setTileSilent(i, index1 - 1 - k, PALM, 22 * rng.int(0, 2), tilt); // fx=22*Next(0,3)
   }
+  if (gs) palmRangeFrame(st, gs, i - 2, index1 - height - 1, i + 2, index1 + 1);
   return true;
 }
 
@@ -237,7 +353,7 @@ export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boo
  *  时掷 Next(4)==0 → GrowPalmTree（TryGrowingTreeByType(323) → cs:30508-30509）。
  *  返回 true = 水盒超限（Next(4) 已掷，可能已种棕榈）→ 仙人掌段不再 PlantCactus；
  *  返回 false = 水盒未超限 → 由调用方走 PlantCactus（cs:21274）。 */
-export function waterBoxPalmCheck(st: TileStore, rng: RNG, x: number, y: number): boolean {
+export function waterBoxPalmCheck(st: TileStore, rng: RNG, x: number, y: number, gs?: GenState): boolean {
   let sum = 0;
   for (let k = x - 50; k < x + 50; k++) {
     for (let l = y - 25; l < y + 25; l++) {
@@ -245,7 +361,7 @@ export function waterBoxPalmCheck(st: TileStore, rng: RNG, x: number, y: number)
     }
   }
   if (Math.trunc(sum / 255) > 25) {
-    if (rng.int(0, 3) === 0) growPalmTree(st, rng, x, y);
+    if (rng.int(0, 3) === 0) growPalmTree(st, rng, x, y, gs);
     return true;
   }
   return false;
@@ -421,9 +537,9 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
   for (let x = 1; x < st.w - 1; x++) {
     for (let y = 20; y < gs.worldSurface; y++) {
       if (x < 380) {
-        if (rng.next() < palmL && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y);
+        if (rng.next() < palmL && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y, gs);
       } else if (x > st.w - 380) {
-        if (rng.next() < palmR && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y);
+        if (rng.next() < palmR && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y, gs);
       }
       // 1/20 观赏树（cs:31558-31566）：active 且 type==2 且 Next(20)==0 → 柳/樱对半
       const yi = st.idx(x, y);

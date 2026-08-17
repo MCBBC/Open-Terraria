@@ -175,6 +175,18 @@ function runUntil(npc: TownNPC, game: unknown, cond: () => boolean, maxT = 2000)
 }
 
 describe('发射端消费 num2（shootAt/swingUpdate）', () => {
+  /** 危险逃离(2026-08-17 接 NPC.cs:53864-54024)后 NPC 背敌走逃——伤害断言改用
+   *  敌贴身追踪保持危险态(逃/打循环=原版观感),防逃出探测圈后不再触发 */
+  function chaseUntil(
+    npc: TownNPC, enemy: TestEnemy, game: unknown, cond: () => boolean,
+    maxT = 2000, dx = 2 * 16,
+  ) {
+    for (let t = 0; t < maxT && !cond(); t++) {
+      enemy.x = npc.cx + dx;
+      npc.fixedUpdate(1 / 60, game as never);
+    }
+  }
+
   it('酒保(550)近战弹 669：基线 24 / downed_4 后 trunc(24×1.05)=25', () => {
     for (const [flags, want] of [
       [{}, 24],
@@ -185,7 +197,7 @@ describe('发射端消费 num2（shootAt/swingUpdate）', () => {
         x: 102 * 16, y: 98 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true,
       };
       const { game, shots } = makeGame({ flags: flags as Record<string, boolean>, enemies: [enemy] });
-      runUntil(keep, game, () => shots.length > 0);
+      chaseUntil(keep, enemy, game, () => shots.length > 0);
       expect(shots.length, JSON.stringify(flags)).toBeGreaterThan(0);
       expect(shots[0].projId).toBe(669);
       expect(shots[0].damage).toBe(want);
@@ -198,7 +210,7 @@ describe('发射端消费 num2（shootAt/swingUpdate）', () => {
       x: 102 * 16, y: 98 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true,
     };
     const { game, shots } = makeGame({ difficulty: 1, flags: { hardMode: true }, enemies: [enemy] });
-    runUntil(keep, game, () => shots.length > 0);
+    chaseUntil(keep, enemy, game, () => shots.length > 0);
     expect(shots[0].damage).toBe(Math.trunc(24 * 1.4 * 1.5));   // 50
   });
 
@@ -211,7 +223,8 @@ describe('发射端消费 num2（shootAt/swingUpdate）', () => {
       hurt: (d) => { got.push(d); return true; },
     };
     const { game } = makeGame({ flags: { hardMode: true }, enemies: [enemy] });
-    runUntil(stylist, game, () => got.length > 0);
+    // 挥击矩形 32px：敌须与 [cx, cx+32] 重叠——贴距 16（32 会恰好零重叠）
+    chaseUntil(stylist, enemy, game, () => got.length > 0, 2000, 16);
     expect(got.length).toBeGreaterThan(0);
     expect(got[0]).toBe(14);
   });
@@ -223,7 +236,7 @@ describe('发射端消费 num2（shootAt/swingUpdate）', () => {
     };
     const { game, shots } = makeGame({ enemies: [enemy] });
     keep.applyTipsy(600);                       // buff 25 在列 → NPC.tipsy
-    runUntil(keep, game, () => shots.length > 0);
+    chaseUntil(keep, enemy, game, () => shots.length > 0);
     expect(shots[0].damage).toBe(26);
     // 快照语义：剩余 1t 的最后一 tick 仍 true（:93174 递减后置位,次 tick :93333 重置）
     const tail = new TownNPC('tavernkeep', 100 * 16, 99 * 16);
@@ -234,16 +247,17 @@ describe('发射端消费 num2（shootAt/swingUpdate）', () => {
     expect(tail.tipsy).toBe(false);
     // 衰减尽 → 伤害回基线（time=2 在第 1/2 tick 均生效,第 3 tick 起 false）
     const sober = new TownNPC('tavernkeep', 100 * 16, 99 * 16);
-    const { game: g2, shots: s2 } = makeGame({ enemies: [{
+    const soberEnemy: TestEnemy = {
       x: 102 * 16, y: 98 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true,
-    }] });
+    };
+    const { game: g2, shots: s2 } = makeGame({ enemies: [soberEnemy] });
     sober.applyTipsy(2);
     sober.fixedUpdate(1 / 60, g2);
     sober.fixedUpdate(1 / 60, g2);
     expect(sober.tipsy).toBe(true);             // 第二 tick 仍生效（guard 1>0 → 递减后置位）
     sober.fixedUpdate(1 / 60, g2);
     expect(sober.tipsy).toBe(false);
-    runUntil(sober, g2, () => s2.length > 0);
+    chaseUntil(sober, soberEnemy, g2, () => s2.length > 0);
     expect(s2[0].damage).toBe(24);
   });
 });

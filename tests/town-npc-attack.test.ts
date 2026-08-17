@@ -27,12 +27,19 @@ function makeGame(npc: TownNPC, enemy: { x: number; y: number; w: number; h: num
 }
 
 describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
+  /** 危险逃离(2026-08-17 接:53864-54024)后 NPC 会背敌走逃——攻击断言用敌贴身
+   *  追踪保持危险态(逃/打循环=原版观感),否则逃出探测圈后不再触发 */
+  function chase(npc: TownNPC, enemy: { x: number }, dx = 6 * 16) {
+    enemy.x = npc.cx + dx;
+  }
+
   it('向导(22):范围内有敌 → 发射木箭 proj 1,方向朝敌', () => {
     const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
     const enemy = { x: 106 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(guide, enemy);
     let fired = false;
     for (let t = 0; t < 900 && !fired; t++) {
+      chase(guide, enemy);
       guide.fixedUpdate(1 / 60, game);
       if (shots.length) fired = true;
     }
@@ -48,6 +55,7 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
     const { game, shots } = makeGame(merch, enemy);
     let fired = false;
     for (let t = 0; t < 1500 && !fired; t++) {
+      chase(merch, enemy, 3 * 16);
       merch.fixedUpdate(1 / 60, game);
       if (shots.length) fired = true;
     }
@@ -69,12 +77,18 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
     const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
     const enemy = { x: 106 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(guide, enemy);
-    for (let t = 0; t < 400; t++) guide.fixedUpdate(1 / 60, game);
+    for (let t = 0; t < 400; t++) {
+      chase(guide, enemy);
+      guide.fixedUpdate(1 / 60, game);
+    }
     const n1 = shots.length;
     expect(n1).toBeGreaterThan(0);
     // 冷却期(退出 cd = 30/2 + rand(20) ≈ 15-35 tick)内 40 tick 不再翻倍发
     const before = shots.length;
-    for (let t = 0; t < 40; t++) guide.fixedUpdate(1 / 60, game);
+    for (let t = 0; t < 40; t++) {
+      chase(guide, enemy);
+      guide.fixedUpdate(1 / 60, game);
+    }
     expect(shots.length - before).toBeLessThanOrEqual(1);
   });
 
@@ -85,6 +99,7 @@ describe('城镇 NPC 自卫攻击(AI_007 攻击态)', () => {
     const { game, shots } = makeGame(guide, enemy);
     let aimAtFire = 0;
     for (let t = 0; t < 900; t++) {
+      chase(guide, enemy);
       guide.fixedUpdate(1 / 60, game);
       if (shots.length) { aimAtFire = guide.holdoutAim; break; }
     }

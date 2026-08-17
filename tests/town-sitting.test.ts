@@ -166,13 +166,20 @@ describe('坐姿状态机（fixedUpdate 集成）', () => {
     expect(npc.cx).toBe(SPOT_X * 16 + 10);
   });
 
-  it('白天不坐（FindGoodRestingSpot :53209-53212 白天早退）', () => {
+  it('白天不走夜椅路径（FindGoodRestingSpot :53209-53212 白天早退；随机坐椅路另见 townnpc-behavior）', () => {
     const world = makeWorld();
     world.clock.timeOfDay = 0.5;   // 正午
     const npc = new TownNPC('guide', spotCenter(SPOT_X) - 10, FLOOR * 16);
     npc.home = { x: SPOT_X, y: FLOOR - 1 };
     const { game } = makeGame(world, { npcs: [npc] });
-    for (let t = 0; t < 300; t++) npc.fixedUpdate(1 / 60, game);
+    // 行走随机坐椅（NPC.cs:55774-55814 rand(300)）掷骰接管不中——隔离"回家路径"变量
+    const realRandom = Math.random;
+    Math.random = () => 0.999;
+    try {
+      for (let t = 0; t < 300; t++) npc.fixedUpdate(1 / 60, game);
+    } finally {
+      Math.random = realRandom;
+    }
     expect(npc.sitting).toBe(false);
   });
 
@@ -213,21 +220,49 @@ describe('坐姿状态机（fixedUpdate 集成）', () => {
     expect(both.filter((n) => n.sitting).length).toBe(1);
   });
 
-  it('与攻击态互斥：坐着不打（flag31 ai[0]<2 门 :55621），起身恢复攻击', () => {
+  it('坐姿 vs 危险：敌近被拽起逃跑（原版 ai[0]==5 不在扫描豁免列 :53990-54024）+ 站定恢复还击', () => {
     const world = makeWorld();
     const npc = new TownNPC('guide', spotCenter(SPOT_X) - 10, FLOOR * 16);
     npc.home = { x: SPOT_X, y: FLOOR - 1 };
-    const enemy = { x: 115 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
-    const { game, shots } = makeGame(world, { npcs: [npc], enemies: [enemy] });
+    // 敌后入场（敌在场时危险扫描每刻拽起——先坐稳再加敌）
+    const foes: unknown[] = [];
+    const { game, shots } = makeGame(world, { npcs: [npc], enemies: foes });
     for (let t = 0; t < 120 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.sitting).toBe(true);
-    for (let t = 0; t < 300; t++) npc.fixedUpdate(1 / 60, game);
-    expect(shots.length).toBe(0);   // 坐姿中攻击触发门被挡
-    // 拆椅起身 → 攻击恢复
-    world.store.setTileSilent(SPOT_X, FLOOR - 2, 0);
-    world.store.setTileSilent(SPOT_X, FLOOR - 1, 0);
+    // 敌在右侧 ~84px（< PrettySafe 200）→ 次刻拽起背向左逃（2026-08-17 接危险扫描）
+    const enemy = { x: 115 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+    foes.push(enemy);
+    npc.fixedUpdate(1 / 60, game);
+    expect(npc.sitting).toBe(false);
+    const x0 = npc.cx;
+    for (let t = 0; t < 180; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.cx).toBeLessThan(x0 - 16);   // 已向左逃出 ≥1 格（含还击停顿窗口）
+    // 站定后还击恢复（flag31 只挡 ai[0]==5 本身——起身即打）
     let fired = false;
     for (let t = 0; t < 1500 && !fired; t++) {
+      enemy.x = npc.cx + 6 * 16;   // 贴身追踪防逃出 PrettySafe
+      npc.fixedUpdate(1 / 60, game);
+      if (shots.length) fired = true;
+    }
+    expect(fired).toBe(true);
+  });
+
+  it('拆椅起身 → 站定恢复攻击（椅没了 ai[1]=0 立即起身 :54691-54697）', () => {
+    const world = makeWorld();
+    const npc = new TownNPC('guide', spotCenter(SPOT_X) - 10, FLOOR * 16);
+    npc.home = { x: SPOT_X, y: FLOOR - 1 };
+    const foes: unknown[] = [];
+    const { game, shots } = makeGame(world, { npcs: [npc], enemies: foes });
+    for (let t = 0; t < 120 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
+    expect(npc.sitting).toBe(true);
+    // 拆椅 + 敌入场（拆椅与危险同帧——椅没了即起身，攻击门不再被坐姿挡）
+    world.store.setTileSilent(SPOT_X, FLOOR - 2, 0);
+    world.store.setTileSilent(SPOT_X, FLOOR - 1, 0);
+    const enemy = { x: 115 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
+    foes.push(enemy);
+    let fired = false;
+    for (let t = 0; t < 1500 && !fired; t++) {
+      enemy.x = npc.cx + 6 * 16;
       npc.fixedUpdate(1 / 60, game);
       if (shots.length) fired = true;
     }

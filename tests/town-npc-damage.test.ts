@@ -43,6 +43,16 @@ function runUntil(npc: TownNPC, game: unknown, cond: () => boolean, maxT = 1500)
   for (let t = 0; t < maxT && !cond(); t++) npc.fixedUpdate(1 / 60, game as never);
 }
 
+/** 危险逃离(2026-08-17 接 NPC.cs:53864-54024)后 NPC 背敌走逃——PrettySafe 短窗族
+ *  (108/160 PrettySafe=100)会先逃出圈再无触发窗口;敌贴身追踪保持危险态(逃/打循环
+ *  =原版观感)。dx=2 格(敌中心距 ~42px < 100,保 PrettySafe 收口不触发) */
+function chaseUntil(npc: TownNPC, enemy: TestEnemy, game: unknown, cond: () => boolean, maxT = 1500): void {
+  for (let t = 0; t < maxT && !cond(); t++) {
+    enemy.x = npc.cx + 2 * 16;
+    npc.fixedUpdate(1 / 60, game as never);
+  }
+}
+
 describe('TownNPC 攻击伤害难度缩放(GetAttackDamage_ForTownNPC)', () => {
   it('纯函数五档:Classic 1 / Expert 1.5 / Master 1.75 插值 / Legendary 2 / Journey 2', () => {
     expect(getAttackDamageForTownNPC(12, GDL.CLASSIC)).toBe(12);
@@ -64,7 +74,7 @@ describe('TownNPC 攻击伤害难度缩放(GetAttackDamage_ForTownNPC)', () => {
       const guide = new TownNPC('guide', 100 * 16, 99 * 16);
       const enemy: TestEnemy = { x: 106 * 16, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
       const { game, shots } = makeGame(enemy, Number(diff));
-      runUntil(guide, game, () => shots.length > 0);
+      chaseUntil(guide, enemy, game, () => shots.length > 0);
       expect(shots.length, `difficulty=${diff}`).toBeGreaterThan(0);
       expect(shots[0].projId, `difficulty=${diff}`).toBe(1);        // 肉前木箭
       expect(shots[0].damage, `difficulty=${diff}`).toBe(dmg);
@@ -104,7 +114,7 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
       const wiz = new TownNPC('wizard', 100 * 16, 99 * 16);
       const enemy: TestEnemy = { x: 103 * 16, y: 97 * 16, w: 20, h: 40, dead: false, damage: 40, hurt: () => true };
       const { game, shots } = makeGame(enemy, diff);                // DangerDetectRange[108]=100
-      runUntil(wiz, game, () => shots.length > 0);
+      chaseUntil(wiz, enemy, game, () => shots.length > 0);
       expect(shots.length, `difficulty=${diff}`).toBeGreaterThanOrEqual(1);
       expect(shots.length, `difficulty=${diff}`).toBeLessThanOrEqual(3);   // :55337 SelectRandom
       for (const s of shots) {
@@ -137,15 +147,16 @@ describe('TownNPC 攻击特化(发射端考古销项)', () => {
 
   it('松露人(160)落点弹:position−Size×2+Size×rand×5 采样盒,velocity=0,dmg 40', () => {
     const truffle = new TownNPC('truffle', 100 * 16, 99 * 16);
-    const ex = 104 * 16, ey = 96 * 16, ew = 20, eh = 40;
-    const enemy: TestEnemy = { x: ex, y: ey, w: ew, h: eh, dead: false, damage: 40, hurt: () => true };
+    const ey = 96 * 16, ew = 20, eh = 40;
+    const enemy: TestEnemy = { x: 104 * 16, y: ey, w: ew, h: eh, dead: false, damage: 40, hurt: () => true };
     const { game, shots } = makeGame(enemy, 0);
-    runUntil(truffle, game, () => shots.some((s) => s.projId === 590));
+    chaseUntil(truffle, enemy, game, () => shots.some((s) => s.projId === 590));
     const shot = shots.find((s) => s.projId === 590);
     expect(shot).toBeDefined();
     expect(shot!.vx).toBe(0);
     expect(shot!.vy).toBe(0);
     expect(shot!.damage).toBe(40);
+    const ex = enemy.x;   // 发射档敌位（追踪定格于触发刻）
     const px = shot!.x + 5;
     const py = shot!.y + 5;
     expect(px).toBeGreaterThanOrEqual(ex - ew * 2);                 // :55349 [x−2w, x+3w]

@@ -2821,8 +2821,17 @@ export class Game implements GameHooks {
         const x = x0 + dir * k;
         if (x < 8 || x > st.w - 9) break;
         for (let y = Math.max(4, surface - 40); y < surface; y++) {
-          if (!sands.has(st.get(x, y)) || st.liquid[st.idx(x, y)] > 0) continue;   // !waterTile
+          // ★液查须查 NPC 站的空气格(y-1),不是沙格(y=实心,liquid 恒 0=形同虚设)
+          //   → 此前从边缘扫到海底沙就放人=渔夫泡在海里(2026-08-17 用户实锤)
+          if (!sands.has(st.get(x, y)) || st.liquid[st.idx(x, y - 1)] > 0) continue; // 干沙+无水
           if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;              // 空气×2
+          // ★露天门(2026-08-17 用户实锤"渔夫在海底"):头顶 20 格须全空——
+          // 此前只查空气×2,沙洞/沙顶穴内也通过(地表上方但地下),渔夫藏在洞里
+          let sky = true;
+          for (let sy = y - 3; sy >= y - 20 && sy >= 4; sy--) {
+            if (st.isSolid(x, sy)) { sky = false; break; }
+          }
+          if (!sky) continue;
           if (this.placeBoundNpc('angler', 'savedAngler', x, y - 1)) return true;
           break;
         }

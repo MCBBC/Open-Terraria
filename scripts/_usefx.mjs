@@ -60,7 +60,7 @@ const out = await page.evaluate(async () => {
 
   // ---- ③ 钓竿抛竿：useTime 30→8 + swing（Item.cs:22988-23009）----
   const poleKey = keyOf(/fishing/i);
-  const baitKey = keyOf(/bait/i);
+  const baitKey = keyOf(/^vi_2676_/) ?? keyOf(/bait/i);
   res.keys.pole = poleKey; res.keys.bait = baitKey;
   p.inv.slots[p.inv.selected] = { id: items[poleKey], stack: 1 };
   p.inv.slots[10] = { id: items[baitKey], stack: 50 };      // 鱼饵（背包扫描位）

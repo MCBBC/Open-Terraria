@@ -139,9 +139,10 @@ export function townNpcBaseFrame(vanillaId: number, frames: number): number {
   return frames - (TOWN_ATTACK_FRAME_COUNT[vanillaId] ?? 0);
 }
 
-/** GetShootingFrame（NPC.cs:67061-67083）：弓态瞄准帧偏移——ai[2]（= holdAim，
- *  钳 ±0.5）分五档 −4/0/1/2/3；枪族五人 {22 向导,209 电子人,228 巫医,229 海盗,
- *  368 游商} +1 档移（平射 −4→1、≥−0.1 再 +1） */
+/** GetShootingFrame（NPC.cs:67061-67083）1:1：弓态瞄准帧偏移——ai[2]（= holdAim，
+ *  钳 ±0.5）走原版**顺序 if 链**：<−0.3 置 1 恒被 <−0.1 置 0 覆写（原版死分支，
+ *  实际档位 = <−0.1→0 / [−0.1,0.1]→−4 / >0.1→2 / >0.3→3）；枪族五人
+ *  {22 向导,209 电子人,228 巫医,229 海盗,368 游商}再 +1 档移（−4→1、≥−0.1 再 +1） */
 export function shootingFrameOffset(vanillaId: number, aimY: number): number {
   let n = -4;
   if (aimY < -0.3) n = 1;
@@ -487,6 +488,9 @@ export class TownNPC extends Entity {
   get cornered(): boolean { return this.corneredT > 0; }
   /** StepUp 无位移卡墙计数（:54409-54422：每 10t 强制折返） */
   private stuckT = 0;
+  /** 拽起防重坐锁：危险扫描踢出坐姿的原刻阻止 sittingUpdate 走 TryForcingSitting
+   *  再坐回（原版扫描先改 ai[0]=1 → 当刻坐姿块整段跳过，:53990 vs :54682） */
+  private sitKickLock = 0;
 
   constructor(key: string, x: number, y: number) {
     super();
@@ -836,7 +840,11 @@ export class TownNPC extends Entity {
     } else if (this.dangerNear && this.atkState === 0) {
       // :53990-54024：非攻击态（ai[0]∉{10,12,13,14,15}）背向最近敌走逃——
       // 坐姿不豁免（原版 ai[0]==5 不在攻击态排除列，扫描直接改 ai[0]=1 = 拽起逃跑）
-      if (this.sitting) { this.sitting = false; this.sitTimer = 0; }
+      if (this.sitting) {
+        this.sitting = false;
+        this.sitTimer = 0;
+        this.sitKickLock = 1;   // 原刻防坐回（见字段注）
+      }
       this.fleeing = true;
       wantDir = -this.dangerSide;
     }
@@ -1605,7 +1613,9 @@ export class TownNPC extends Entity {
       }
       return this.sitting;
     }
-    if (!this.restSpot || this.talking || this.atkState !== 0 || !this.home) return false;
+    if (this.sitKickLock > 0) { this.sitKickLock--; return false; }   // 危险拽起当刻
+    if (!this.restSpot || this.talking || this.atkState !== 0 || !this.home
+      || this.corneredT > 0) return false;   // 被逼停 ai[0]==8 非空闲态（原版无 TryForcingSitting）
     if (!this.teleportedHome) {
       if (!this.onGround || Math.abs(this.vx) > 0.05) return false;
       // 站定同格门（:54074）：myTile == rest spot

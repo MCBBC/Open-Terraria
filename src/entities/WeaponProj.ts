@@ -667,10 +667,12 @@ export class SpearProj extends Entity {
     // Utils.GetLerpValue clamped(:44992):淡入 t/7(t≤7),淡出 (16-t)/4(t≥12)
     const aIn = Math.min(1, this.t / 7);
     const aOut = this.t <= 12 ? 1 : Math.max(0, (16 - this.t) / 4);
-    // 绘制尺寸：938-945 贴图原生 32×32（dw=32 恰为原生）→ 沿用;802=14×58、842=12×28
-    // 长条贴图 → drawSize=-1 原生尺寸（曾统一 32px → Gladius 2.3 倍放大,2026-08-14 修）
+    // 绘制尺寸：投射物一律贴图原生尺寸（原版 SpriteBatch scale=1 语义）。
+    // ★非细剑族曾 drawSize=0 → 取碰撞盒 w=18px,而三叉戟 47=70×70、圣骑矛 153=84×84、
+    //   暗黑长枪 222=116×116 全被缩到 18px = "特别小"根因（2026-08-17 用户抓到）。
+    //   细剑族 938-945 恰 32×32 沿用固定 32（等值无差）;jitter 族仍 -1 原生
     drawProj(r, cam, this, this.projId, ang,
-      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? (noQuarter ? -1 : 32) : 0, mirror);
+      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? (noQuarter ? -1 : 32) : -1, mirror);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {

@@ -36,8 +36,11 @@ const out = await page.evaluate(async () => {
   const hermesKey = Object.keys(window.__swItems).find(k => /^vi_54_/.test(k));
   const hermesId = hermesKey ? window.__swItems[hermesKey] : -1;
   // Item_17 脚步声计数（spawnFastRunParticles → playSfxFiles）
+  // ★origPlay 必须 bind(g)：Game.playSfxFiles 用 this.sfx——未绑定的方法引用转发
+  //   会以 this=undefined 抛 TypeError 炸死 rAF 主循环（此前"停摆"的全部真相：
+  //   Item_17 是流程里第一个 playSfxFiles 调用，靴尘首声即死锁）
   let stepSounds = 0;
-  const origPlay = g.playSfxFiles;
+  const origPlay = g.playSfxFiles?.bind(g);
   if (origPlay) g.playSfxFiles = (files, ...a) => { if (files?.includes('Item_17')) stepSounds++; return origPlay(files, ...a); };
   // 平地跑道（±120 净空）+ 两端 3 格厚坝墙（防水外溢扩散）+ 可开关的 1 格深水层
   //（feet 行灌满 255，头露水面——inWater 采样点=脚底上方 4px 命中该行）
@@ -122,7 +125,7 @@ if (out.error === 'TICK_STALL') {           // 负载饥饿一次 → 前台重�
       await waitTicks(40);
     };
     let stepSounds = 0;
-    const origPlay = g.playSfxFiles;
+    const origPlay = g.playSfxFiles?.bind(g);
     g.playSfxFiles = (files, ...a) => { if (files?.includes('Item_17')) stepSounds++; return origPlay(files, ...a); };
     const runFor = async (ticks) => {
       const before = g.vanillaDust.pool.filter(d => d.type === 16).length;

@@ -77,11 +77,16 @@ describe('bound 救援 NPC 原版链（生成期放置已移除）', () => {
     // ③ 哥布林三人组 105（洞穴层深处任意点 + downedGoblins）
     world.flags['downedGoblins'] = true;
     delete world.flags['savedGoblin'];
+    // 落点扫描仅脚手架：房屋段流对齐批（2026-08-17）后世界态微移，x+=37 单深度
+    // 采样可全空——扩为双深度+细步长保住「105 链行为」本旨
     const caveSpots: Array<{ x: number; y: number }> = [];
-    for (let x = 600; x < st.w - 600 && caveSpots.length < 8; x += 37) {
-      const y = Math.floor(world.rockLevel) + 120;
-      if (st.isSolid(x, y) && !st.isSolid(x, y - 1) && !st.isSolid(x, y - 2)) {
-        caveSpots.push({ x, y });
+    for (let x = 600; x < st.w - 600 && caveSpots.length < 8; x += 11) {
+      for (const dy of [120, 160]) {
+        const y = Math.floor(world.rockLevel) + dy;
+        if (st.isSolid(x, y) && !st.isSolid(x, y - 1) && !st.isSolid(x, y - 2)) {
+          caveSpots.push({ x, y });
+          break;
+        }
       }
     }
     expect(caveSpots.length).toBeGreaterThan(0);

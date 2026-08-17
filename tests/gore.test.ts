@@ -361,7 +361,9 @@ describe('③ 表驱动死亡钩', () => {
     expect(deathGoreFor(3).length).toBe(npcEntries(3).length);
     expect(npcEntries(4).length).toBe(4);
     expect(npcEntries(4).every((e) => e.loop === 2)).toBe(true);
-    expect(npcEntries(13).map((e) => e.id)).toEqual([24, 25, 28, 29]);
+    // 世吞 13 死亡 gore=[24,25]（else-if 链 28,29 只归尾段 15——提取器 else
+    // 剔除修复后正确化,曾 [24,25,28,29] 误摊,2026-08-17）
+    expect(npcEntries(13).map((e) => e.id)).toEqual([24, 25]);
     expect(npcEntries(222).slice(0, 3).map((e) => e.id)).toEqual([303, 304, 305]);
     expect(npcEntries(262).length).toBeGreaterThanOrEqual(9);
     expect(npcEntries(113).slice(0, 4).map((e) => e.id)).toEqual([137, 138, 138, 137]);
@@ -464,16 +466,18 @@ describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', 
     const gates = [...new Set(npcEntries(35).map((e) => JSON.stringify(e.gates)))];
     expect(gates).toContain(JSON.stringify([{ k: 'redhat' }]));
     expect(gates).toContain(JSON.stringify([{ k: 'redhat', not: true }]));
-    // type 35 + ai[3]==1 → 红帽 1398/1399/1400 + 1401/1402×3（7 块）
+    // type 35 + ai[3]==1 → 红帽 1398/1399/1400（3 块——1401/1402×3 与 56/57×3 是
+    // `if(t==35||t==68){A} else if(RedHat){B} else{C}` 的 B/C 支=只归手 36,
+    // 曾误摊给 35/68,提取器 else-if 续链剔除修复后正确化,2026-08-17）
     const red: GorePiece[] = [];
     spawnDeathGore(src({ vanillaId: 35, ai3: 1 }), (p) => red.push(p));
-    expect(red.length).toBe(7);
+    expect(red.length).toBe(3);
     expect(red.filter((p) => p.goreId === 1398).length).toBe(1);
-    expect(red.filter((p) => p.goreId === 1402).length).toBe(3);
-    // ai[3]!=1 → 常规 54/55 + 56/57×3（6 块）
+    expect(red.some((p) => p.goreId === 1402)).toBe(false);
+    // ai[3]!=1 → 常规 54/55（2 块——56/57×3 同上只归 36）
     const plain: GorePiece[] = [];
     spawnDeathGore(src({ vanillaId: 35, ai3: 0 }), (p) => plain.push(p));
-    expect(plain.length).toBe(6);
+    expect(plain.length).toBe(2);
     expect(plain.some((p) => p.goreId === 54)).toBe(true);
     expect(plain.some((p) => p.goreId >= 1398)).toBe(false);
     resetGorePool();

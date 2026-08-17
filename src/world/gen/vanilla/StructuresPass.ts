@@ -9,7 +9,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
-import { waterBoxPalmCheck, growPalmTree} from './TreePass';
+import { waterBoxPalmCheck, growPalmTree, seaOatWaterCheck, palmRangeFrame } from './TreePass';
 import { idsByVanillaSheet } from './TileRunner';
 
 /** 金字塔对拍探针开关（种子等价期临时；默认关闭零开销）。
@@ -1358,8 +1358,8 @@ function palmEmptyCheck(st: TileStore, x0: number, x1: number, y0: number, y1: n
  *  1456 终态 -20。 */
 /** cs:21151-21152 棕榈种植代理——复用 TreePass.growPalmTree(1456 :27270-27340 终态;
  * 2026-08-13 前是同源复制的 growPalmTreeAt,已去重) */
-function growPalmTreeAt(st: TileStore, rng: RNG, i: number, y: number): boolean {
-  return growPalmTree(st, rng, i, y);
+function growPalmTreeAt(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
+  return growPalmTree(st, rng, i, y, gs);
 }
 
 /** SolidTileAllowBottomSlope（cs:70211）：active && (tileSolid||tileSolidTop) &&
@@ -1375,24 +1375,7 @@ function solidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
     && st.slope[i] !== 1 && st.slope[i] !== 2 && !st.half[i];
 }
 
-/** SeaOatWaterCheck（cs:58269-58313）：邻域非实心格液量和 /255 ≥ 20 时——非海滩带放行、
- *  海滩带（x ≤ beachDistance 或 x ≥ w-beachDistance）反转拒绝（盒同时扩大到 131×50）。
- *  num4/num5（最近水距）算后不用，返回只依赖液量和 flag，已省。 */
-function seaOatWaterCheck(st: TileStore, gs: GenState, x: number, y: number): boolean {
-  let num = 45, num2 = 20;
-  let flag = false;
-  if (x <= gs.beachDistance || x >= st.w - gs.beachDistance) { flag = true; num = 65; num2 += 5; }
-  let sum = 0;
-  for (let i = x - num; i <= x + num; i++) {
-    for (let j = y - num2; j <= y + num2; j++) {
-      if (st.inBounds(i, j) && !_solidTileHB(st, i, j) && st.liquid[st.idx(i, j)] > 0) {
-        sum += st.liquid[st.idx(i, j)];
-      }
-    }
-  }
-  if (Math.trunc(sum / 255) >= 20) return !flag;
-  return flag;
-}
+/** SeaOatWaterCheck 已迁 TreePass（棕榈尾帧扫复用；本文件经 import 使用） */
 
 /** PlantSeaOat（cs:58315-58350）：本格空气/无墙/无液 + 下格整砖沙族 + 水检过 →
  *  种燕麦 529（frameX=18*Next(5)、frameY=0）。Next(5) 只在成功路径消耗。
@@ -1450,7 +1433,14 @@ function placeOasisPlant(st: TileStore, rng: RNG, gs: GenState, X: number, Y: nu
   // 强制 noItem，529 不进任何 genRand 分支 → 零掷骰；随后 6 格全被覆写，帧残留无影响）
   for (let i = X - 1; i <= X + 1; i++) {
     for (let j = Y - 1; j <= Y; j++) {
-      if (st.inBounds(i, j)) st.flags[st.idx(i, j)] = 0;
+      // KillTile(noItem) 生成期子集:清格 + SquareTileFrame 3×3 级联(cs:63974;
+      // 529/530 不进任何 genRand 分支 → 零掷)
+      if (st.inBounds(i, j) && st.flags[st.idx(i, j)]) {
+        st.setTileSilent(i, j, 0, 0, 0);
+        st.half[st.idx(i, j)] = 0;
+        st.slope[st.idx(i, j)] = 0;
+        palmRangeFrame(st, gs, i - 1, j - 1, i + 1, j + 1);
+      }
     }
   }
   const fx = 54 * style;                                     // cs:47593 num3 = 54*num
@@ -1486,7 +1476,7 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
             if (st.inBounds(l, m) && st.flags[st.idx(l, m)] && st.type[st.idx(l, m)] === PALM) num9 = 0.13;
           }
         }
-        if (rng.next() < num9) growPalmTreeAt(st, rng, j, k);   // cs:21151-21152 NextDouble < num9
+        if (rng.next() < num9) growPalmTreeAt(st, rng, gs, j, k);   // cs:21151-21152 NextDouble < num9
         if (plantSeaOat(st, rng, gs, j, k)) {                   // cs:21154
           if (rng.nextInt(2) === 0) growSeaOat(st, j, k);       // cs:21156
           if (rng.nextInt(2) === 0) growSeaOat(st, j, k);       // cs:21160
@@ -1523,7 +1513,7 @@ export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenS
         if (flag) {
           // ---- 中段：湖畔水盒棕榈 / 仙人掌（cs:21257-21279；水盒逻辑在
           //      TreePass.waterBoxPalmCheck——超限已掷 Next(4) 时不再 PlantCactus）----
-          if (!waterBoxPalmCheck(st, rng, x, y)) plantCactus(st, rng, x, y);
+          if (!waterBoxPalmCheck(st, rng, x, y, gs)) plantCactus(st, rng, x, y);
         } else {
           // ---- 两端海滩段：珊瑚 81 / 贝壳 324（cs:21283-21299）----
           if (st.inBounds(x, y - 4)

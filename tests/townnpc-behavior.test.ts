@@ -18,6 +18,7 @@ import {
 } from '../src/entities/TownNPC';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { VANILLA_NPCS } from '../src/data/vanillaNpcs';
+import { GRAVITY } from '../src/core/constants';
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const STONE = TILE_BY_KEY['stone']!;
@@ -136,9 +137,10 @@ describe('P0-1 危险逃离（NPC.cs:53864-54024/:54319-54326/:54597-54603）', 
 
   it('被逼停（flag27 :54597-54603）：逃向前方跳不过 → ai[0]==8 冻结 240t、vx=0、仍可还击', () => {
     const world = flatWorld();
-    // 右墙 3 格高（F-1..F-3，col 130）+ 顶 F-5 压 3 列 → 案 A 净空全堵
-    for (let y = F - 3; y <= F - 1; y++) world.store.setTileSilent(130, y, STONE);
-    for (let x = 128; x <= 132; x++) world.store.setTileSilent(x, F - 5, STONE);
+    // 右墙 3 格高（F-1..F-3，col 122）+ 顶 F-5 压 3 列 → 案 A 净空全堵；
+    // 墙距起位 6 格——撞墙时敌距 ~184px < PrettySafe 200，危险持续在
+    for (let y = F - 3; y <= F - 1; y++) world.store.setTileSilent(122, y, STONE);
+    for (let x = 120; x <= 124; x++) world.store.setTileSilent(x, F - 5, STONE);
     const npc = new TownNPC('guide', 116 * 16, F * 16);
     npc.stationary = true;
     const foe = enemyAt(110);   // 左侧 96px → 向右逃进墙
@@ -150,7 +152,7 @@ describe('P0-1 危险逃离（NPC.cs:53864-54024/:54319-54326/:54597-54603）', 
       if (npc.cornered) corneredAt = t;
     }
     expect(corneredAt).toBeGreaterThanOrEqual(0);   // 撞墙跳不过 → 冻结
-    expect(npc.vx).toBe(0);
+    expect(Math.abs(npc.vx)).toBe(0);               // 冻结 vx=0（转身翻转产生 −0）
     // 冻结中危险未消 → :54686-54690 在险续冻（<60 续 180，永不自行解冻）
     for (let t = 0; t < 400; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.cornered).toBe(true);
@@ -181,18 +183,18 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
     expect(townNpcBaseFrame(22, 26)).toBe(21);
   });
 
-  it('GetShootingFrame（:67061-67083）：五档 + 枪族五人 +1 档移', () => {
-    // 通用族（无 +1 档移）
-    expect(shootingFrameOffset(19, -0.5)).toBe(1);
+  it('GetShootingFrame（:67061-67083）：顺序 if 链（<-0.3 的 1 档被 <-0.1 的 0 档覆写=原版死分支）+ 枪族 +1 档移', () => {
+    // 通用族（无 +1 档移）：< -0.1 → 0（含深仰射——-0.3 档恒被覆盖）
+    expect(shootingFrameOffset(19, -0.5)).toBe(0);
     expect(shootingFrameOffset(19, -0.2)).toBe(0);
     expect(shootingFrameOffset(19, 0)).toBe(-4);
     expect(shootingFrameOffset(19, 0.2)).toBe(2);
     expect(shootingFrameOffset(19, 0.4)).toBe(3);
     // 枪族 {22,209,228,229,368}：平射 -4→1、≥−0.1 再 +1
     expect(shootingFrameOffset(22, 0)).toBe(2);
-    expect(shootingFrameOffset(22, -0.5)).toBe(1);
-    expect(shootingFrameOffset(22, -0.05)).toBe(1);   // -4→1 后 -0.05≥-0.1 → 2? 注意：
-    expect(shootingFrameOffset(368, 0.4)).toBe(4);
+    expect(shootingFrameOffset(22, -0.05)).toBe(2);   // ≥−0.1：-4→1 后再 +1
+    expect(shootingFrameOffset(22, -0.5)).toBe(0);    // <−0.1 档 0，不吃 +1
+    expect(shootingFrameOffset(368, 0.4)).toBe(4);    // 3 → +1
   });
 
   it('坐姿帧 = num58−3（:69638-69644）：向导夜间入座 → 帧 18', () => {
@@ -234,32 +236,33 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
 
   it('弓态 12 = num58+GetShootingFrame(ai[2])（:69827）：向导平射帧 23 / 仰射帧 22', () => {
     stubRand(0);
-    // 平射：敌同高
+    // 平射：敌同高（帧取态内第 2t——发射档 :55191 已写 ai[2]=0）
     {
       const world = flatWorld('bow-flat');
       const npc = new TownNPC('guide', 100 * 16, F * 16);
       npc.stationary = true;
       const { game } = makeGame(world, { npcs: [npc], enemies: [enemyAt(106)] });
-      let frame = -1;
-      for (let t = 0; t < 40 && frame < 0; t++) {
+      const frames: number[] = [];
+      for (let t = 0; t < 40; t++) {
         npc.fixedUpdate(1 / 60, game);
-        if (npc.attackState === 12) frame = npc.frame;
+        if (npc.attackState === 12) frames.push(npc.frame);
       }
-      // holdAim=0 → 枪族 22：-4→1、0≥-0.1 → +1 = 2 → 21+2=23
-      expect(frame).toBe(21 + 2);
+      expect(frames[0]).toBe(21 + 2);   // holdAim=0：-4→1、0≥-0.1 → +1
+      expect(frames[1]).toBe(21 + 2);   // 发射档写入 aim 0 同档
     }
-    // 仰射：敌高 96px、dx 96px → aim=-0.707 钳 -0.5 → 档 1（不再 +1）→ 22
+    // 仰射：敌高 96px、dx 96px → aim 钳 -0.5 → <−0.1 档 0（-0.3 的 1 档被覆写）
     {
       const world = flatWorld('bow-up');
       const npc = new TownNPC('guide', 100 * 16, F * 16);
       npc.stationary = true;
       const { game } = makeGame(world, { npcs: [npc], enemies: [enemyAt(106, 96)] });
-      let frame = -1;
-      for (let t = 0; t < 40 && frame < 0; t++) {
+      const frames: number[] = [];
+      for (let t = 0; t < 40; t++) {
         npc.fixedUpdate(1 / 60, game);
-        if (npc.attackState === 12) frame = npc.frame;
+        if (npc.attackState === 12) frames.push(npc.frame);
       }
-      expect(frame).toBe(21 + 1);
+      expect(frames[0]).toBe(21 + 2);   // 入态 ai[2]=0（:54931 清零）→ 平射档
+      expect(frames[1]).toBe(21 + 0);   // 发射档 aim=-0.5 → <−0.1 档 0
     }
   });
 
@@ -275,9 +278,9 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
       if (npc.attackState === 14) frames.push(npc.frame);
     }
     expect(frames.length).toBeGreaterThan(13);
-    expect(frames[0]).toBe(21);
-    expect(frames[12]).toBe(21);
-    expect(frames[13]).toBe(22);   // 计数 %24 ≥12 翻档
+    expect(frames[0]).toBe(21);         // 态内计数 0
+    expect(frames[11]).toBe(21);        // 计数 11 仍在下档
+    expect(frames[12]).toBe(22);        // 计数 %24 ≥12 翻档
   });
 
   it('挥击态 15 按 ai[1]/AttackTime 比例四档（:69787-69802）：染料商 15t 内 21→22→23→24', () => {
@@ -298,9 +301,11 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
     }
     expect(t0).toBeGreaterThanOrEqual(0);
     const base = townNpcBaseFrame(207, VANILLA_NPCS['207']!.frames);   // 25−4=21
-    expect(frames.length).toBeGreaterThanOrEqual(10);
-    expect(frames[0]).toBe(base);        // r=1 > 0.65
-    expect(frames[8]).toBe(base + 1);    // r=7/15≈0.467 > 0.5? 否 → 0.35..0.5 → +2?
+    expect(frames.length).toBeGreaterThanOrEqual(12);
+    expect(frames[0]).toBe(base);        // r = 15/15 = 1 > 0.65
+    expect(frames[6]).toBe(base + 1);    // r = 9/15 = 0.6 ∈ (0.5,0.65]
+    expect(frames[8]).toBe(base + 2);    // r = 7/15 ≈ 0.467 ∈ (0.35,0.5]
+    expect(frames[11]).toBe(base + 3);   // r = 4/15 ≈ 0.267 ∈ (0,0.35]
   });
 });
 
@@ -308,7 +313,8 @@ describe('P0-2 帧带基准（FindFrame :69320 num58 族）', () => {
 // P1-3 白天随机坐椅
 // =====================================================================
 describe('P1-3 行走随机坐椅（NPC.cs:55774-55814，无昼夜门）', () => {
-  /** 白天从左走向 110 列椅（stub：头两掷 0.7 定向右走，其后 0 让坐椅掷必中） */
+  /** 白天从左走向 110 列椅。stub：白天游走掷骰块消费 3 掷（wanderT/facing/置零门，
+   *  TownNPC.fixedUpdate），头 3 掷 0.7 → facing=1 恒向右；其后 0 让坐椅掷必中 */
   function dayChairScene(player?: Record<string, unknown>, style = 0) {
     const world = flatWorld('day-chair');
     world.store.setTileSilent(110, F - 2, CHAIR, 0, style * 40);
@@ -316,7 +322,7 @@ describe('P1-3 行走随机坐椅（NPC.cs:55774-55814，无昼夜门）', () =>
     const npc = new TownNPC('guide', 104 * 16, F * 16);
     const { game } = makeGame(world, { npcs: [npc], player });
     let calls = 0;
-    Math.random = () => (calls++ < 2 ? 0.7 : 0);
+    Math.random = () => (calls++ < 3 ? 0.7 : 0);
     return { world, npc, game };
   }
 
@@ -337,13 +343,13 @@ describe('P1-3 行走随机坐椅（NPC.cs:55774-55814，无昼夜门）', () =>
     world.store.setTileSilent(110, F - 1, CHAIR, 0, 18);
     const npc = new TownNPC('guide', 104 * 16, F * 16);
     npc.home = { x: 140, y: F - 1 };   // home 在右 → 向右走
-    // 玩家在 NPC 身旁活着 → 回家传送的双视野门不触发
+    // 玩家在 NPC 身旁活着 → 回家传送的双视野门不触发；夜归不掷游走骰——
+    // 恒 0 让坐椅掷必中
     const { game } = makeGame(world, {
       npcs: [npc],
       player: { x: 104 * 16, y: F * 16 - 40, w: 20, h: 40, dead: false, sitting: false },
     });
-    let calls = 0;
-    Math.random = () => (calls++ < 2 ? 0.7 : 0);
+    Math.random = () => 0;
     for (let t = 0; t < 600 && !npc.sitting; t++) npc.fixedUpdate(1 / 60, game);
     expect(npc.sitting).toBe(true);   // 中途坐上 110 列椅
     expect(npc.cx).toBe(110 * 16 + 6);
@@ -379,7 +385,7 @@ describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611
     return { npc, game };
   }
 
-  it('一格上障碍（t4 实心）→ vy=−5（:54533-54537）', () => {
+  it('一格上障碍（t4 实心）→ vy=−5（:54533-54537；观测值含当 tick 重力 +GRAVITY）', () => {
     stubRand(0.7);
     const { npc, game } = walker(120, (w) => {
       w.store.setTileSilent(130, F - 1, STONE);
@@ -390,7 +396,7 @@ describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611
       npc.fixedUpdate(1 / 60, game);
       if (npc.vy < 0) jumpV = npc.vy;
     }
-    expect(jumpV).toBe(-5);
+    expect(jumpV).toBe(-5 + GRAVITY);
   });
 
   it('两格上障碍（t5+t4 实心，矮身门）→ vy=−6（:54522-54526）', () => {
@@ -403,7 +409,7 @@ describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611
       npc.fixedUpdate(1 / 60, game);
       if (npc.vy < 0) jumpV = npc.vy;
     }
-    expect(jumpV).toBe(-6);
+    expect(jumpV).toBe(-6 + GRAVITY);
   });
 
   it('净空被堵 → 不跳、转身折返（flag26 :54604-54608）', () => {
@@ -412,13 +418,14 @@ describe('P1-7 越障三档跳 + 转身/逼停/卡墙折返（NPC.cs:54514-54611
       for (let y = F - 3; y <= F - 1; y++) w.store.setTileSilent(130, y, STONE);
       for (let x = 128; x <= 132; x++) w.store.setTileSilent(x, F - 5, STONE);   // 压顶
     });
-    let jumped = false;
+    let jumped = false, turned = false;
     for (let t = 0; t < 600; t++) {
       npc.fixedUpdate(1 / 60, game);
       if (npc.vy < 0) jumped = true;
+      if (npc.facing === -1) turned = true;
     }
     expect(jumped).toBe(false);       // 全程未跳
-    expect(npc.facing).toBe(-1);      // 撞墙转身
+    expect(turned).toBe(true);        // 撞墙转身
   });
 
   it('StepUp 无位移卡墙 10t → 强制折返（:54409-54422）', () => {

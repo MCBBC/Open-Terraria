@@ -328,6 +328,7 @@ let ctxSeq = 0;
 let pendingGuard = null;
 const caseAt = new Map(); // depth → { label, types:Set|null }
 const lastCtxAt = new Map(); // depth → 该层最近弹出的守卫上下文（else 取反用）
+const siblingTypesAt = new Map(); // depth → 当前 if 链已领走的 type 并集（else 剔除用）
 
 /** else 分支门取反（`if (spriteDirection != -1) … else …` → else 段带 `== -1` 门） */
 const NEG_OP = { '==': '!=', '!=': '==', '<': '>=', '<=': '>', '>': '<', '>=': '<=' };
@@ -1261,6 +1262,24 @@ for (const { text, line: lineNo } of logical) {
     if ((m = rest.match(/^(else\s+if|if)\s*\(/))) {
       const cond = parenBody(rest, m[0].length - 1);
       guard = makeGuard(m[1].replace(/\s+/g, ''), cond);
+      const isChainStart = m[1] === 'if';
+      const sib = siblingTypesAt.get(depth);
+      // ★else if 续链：同链先行 if/else-if 已领走的 type 剔除（C# 只执行一支；
+      //  无自身 type 谓词的门分支（如 RedHatSkeletron 门）继承外层全集时必须
+      //  减去先行兄弟已消费的 type——`if(t==35||t==68){A} else if(RedHat){B}`
+      //  的 B 只归 36 等剩余型。2026-08-17）
+      if (!isChainStart && sib?.size) {
+        guard.exclude = new Set([...(guard.exclude ?? []), ...sib]);
+      }
+      // 同链兄弟 type 累计（if 开新链重置 / else if 续链并集；供后续分支剔除）
+      if (guard.types || guard.staticTypes) {
+        const acc = isChainStart
+          ? new Set([...(guard.types ?? []), ...(guard.staticTypes ?? [])])
+          : new Set([...(sib ?? []), ...(guard.types ?? []), ...(guard.staticTypes ?? [])]);
+        siblingTypesAt.set(depth, acc);
+      } else if (isChainStart) {
+        siblingTypesAt.delete(depth);
+      }
       i += m[0].length + cond.length + 1;
     } else if ((m = rest.match(/^else\b/))) {
       const g = makeGuard('else', 'else');
@@ -1270,6 +1289,11 @@ for (const { text, line: lineNo } of logical) {
         g.gates = negateGates(prev.gates);
         g.gateFree = prev.gateFree ?? null;
       }
+      // ★同链 if/else-if 已领走的 type 从 else 剔除（C# if/else-if 只执行一支：
+      //  `if(t==57){84} else if(t==58){85} … else {78,79}` 的 else 只归 47 等
+      //  未命中型——曾漏扣致 57/58/464/465 多炸兔肉块 78/79,2026-08-17）
+      const sib = siblingTypesAt.get(depth);
+      if (sib?.size) g.exclude = new Set([...(g.exclude ?? []), ...sib]);
       guard = g;
       i += m[0].length;
     } else if ((m = rest.match(/^switch\s*\(/))) {
