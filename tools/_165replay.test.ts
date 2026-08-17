@@ -83,18 +83,20 @@ function cloneGs(gs: GenState): GenState {
   }
   console.log(`replay store built; 输入 typ 分歧格=${mixed}`);
 
-  // ③ 重放（fresh RNG(seed)，槽头 reseed 同构）——ur 层 draw 日志（所有 RNG 入口
-  //    每次调用恰耗 1 个流采样；包装 nextDouble/nextInt/nextIntRange 全捕获）
+  // ③ 重放（fresh RNG(seed)，槽头 reseed 同构）——ur 层 draw 日志（扫描位钩注上下文）
   const rng = new RNG(cap.gs.seed);
-  const draws: Array<{ n: number; kind: string; v: number }> = [];
+  const draws: Array<{ n: number; kind: string; v: number; x: number; y: number; ph: number }> = [];
   const urObj = (rng as unknown as { ur: { nextDouble: () => number; nextInt: (n: number) => number; nextIntRange: (a: number, b: number) => number } }).ur;
   const rawND = urObj.nextDouble.bind(urObj);
   const rawNI = urObj.nextInt.bind(urObj);
   const rawNIR = urObj.nextIntRange.bind(urObj);
-  let logging = true;
-  urObj.nextDouble = () => { const v = rawND(); if (logging) draws.push({ n: draws.length, kind: 'f', v: +v.toFixed(4) }); if (draws.length > 20000) logging = false; return v; };
-  urObj.nextInt = (n: number) => { const v = rawNI(n); if (logging) draws.push({ n: draws.length, kind: `i${n}`, v }); if (draws.length > 20000) logging = false; return v; };
-  urObj.nextIntRange = (a: number, b: number) => { const v = rawNIR(a, b); if (logging) draws.push({ n: draws.length, kind: `r${a}-${b}`, v }); if (draws.length > 20000) logging = false; return v; };
+  const g1 = globalThis as { __swScanCap?: (x: number, y: number, ph: number) => void };
+  let scX = -1, scY = -1, scPh = -1;
+  g1.__swScanCap = (x, y, ph) => { scX = x; scY = y; scPh = ph; };
+  const push = (kind: string, v: number) => draws.push({ n: draws.length, kind, v, x: scX, y: scY, ph: scPh });
+  urObj.nextDouble = () => { const v = rawND(); push('f', +v.toFixed(4)); return v; };
+  urObj.nextInt = (n: number) => { const v = rawNI(n); push(`i${n}`, v); return v; };
+  urObj.nextIntRange = (a: number, b: number) => { const v = rawNIR(a, b); push(`r${a}-${b}`, v); return v; };
   {
     // 独立列段重放（x∈[20,23]，fresh 流）：验证 (22,671) 是否在无前序列时被放置
     const rs2 = new TileStore(W, H);
@@ -154,7 +156,50 @@ function cloneGs(gs: GenState): GenState {
     }
     console.log(`vanilla 列[20,23] 可见事件: ${evts.length} 个: ${evts.slice(0, 24).join(' ')}`);
   }
+  // 手术实验：清 (22,664) 的 slope（JS=2）后重放，看 (22,671) 是否回归放置、
+  // 列 20-23 是否与 vanilla 17 事件全对齐
+  if (process.env.SW_165R === '1' && process.env.SW_165R_PATCH === 'slope') {
+    const rs3 = new TileStore(W, H);
+    for (let i = 0; i < W * H; i++) {
+      rs3.flags[i] = va[i] ? 1 : 0;
+      rs3.type[i] = va[i] ? (REV.get(vt[i]!) ?? 0) : 0;
+      rs3.wall[i] = vw[i]!;
+      rs3.liquid[i] = vl[i]!;
+      rs3.liquidType[i] = cap.st.liquidType[i]!;
+      rs3.half[i] = cap.st.half[i]!;
+      rs3.slope[i] = cap.st.slope[i]!;
+      rs3.frameX[i] = cap.st.frameX[i]!;
+      rs3.frameY[i] = cap.st.frameY[i]!;
+    }
+    rs3.slope[664 * W + 22] = 0;
+    const rng3 = new RNG(cap.gs.seed);
+    runGemTreesPass(rs3, rng3, cap.gs);
+    let ok = 0, bad = 0;
+    for (const [ex, ey] of [[20, 589], [20, 590], [20, 602], [21, 556], [21, 557], [21, 602], [21, 759], [21, 850], [22, 578], [22, 581], [22, 582], [22, 659], [22, 660], [22, 671], [22, 672], [23, 913], [23, 914]] as Array<[number, number]>) {
+      const i = ey * W + ex;
+      const jr = rs3.flags[i] ? SHEET[rs3.type[i]] : -1;
+      if (jr === 165) ok++; else { bad++; console.log(`  patch 后仍缺: (${ex},${ey}) js=${jr}`); }
+    }
+    console.log(`slope 补丁实验: 17 事件匹配 ${ok}/${ok + bad}`);
+  }
+  g1.__swScanCap = undefined;
   runGemTreesPass(rs, rng, cap.gs);
+
+  // 精确逐格 draw 报告（列 22 y∈[650,680]，钩注上下文——无重建误差）
+  {
+    const byCell = new Map<string, string[]>();
+    for (const d of draws) {
+      if (d.x !== 22 || d.y < 650 || d.y > 680) continue;
+      const k = `(${d.x},${d.y})ph${d.ph}`;
+      if (!byCell.has(k)) byCell.set(k, []);
+      byCell.get(k)!.push(`${d.kind}=${d.v}`);
+    }
+    for (const [k, v] of [...byCell.entries()].sort((a, b) => parseInt(a[0].split(',')[1]!) - parseInt(b[0].split(',')[1]!))) {
+      const y = parseInt(k.split(',')[1]!);
+      const i = y * W + 22;
+      console.log(`  ${k}: ${v.join(' ')} in=${va[i] ? vt[i] : '·'} lq=${vl[i]} v103=${oA[i] ? oT[i] : '·'}`);
+    }
+  }
 
   // ③b draw 序列解析：按扫描结构逐格消费（运行态 = 输入 + vanilla 本 pass 放置），
   //    找首个"vanilla 放置事件 ⇔ JS roll==0 事件"失配格 + 每事件掷窗结构
@@ -210,6 +255,39 @@ function cloneGs(gs: GenState): GenState {
     console.log(`  consumed draws=${p}/${draws.length}`);
     // raw 序列窗口 n265-285 + 输入态（列20 y555-565）
     console.log('raw draws n265-285:', draws.slice(265, 286).map((d) => `${d.n}:${d.kind}=${d.v}`).join(' '));
+    // 列 22 y∈[655,675]：每格 draw 消费明细 + 输入态（分歧收窄窗）
+    {
+      // 重新手工走列 20-22 记录每格 draw 区间（结构同 runGemTreesPass）
+      const seq = draws.map((d) => d);
+      let q = 0;
+      const cellLog: string[] = [];
+      for (let x = 20; x <= 22; x++) {
+        for (let y = Math.floor(cap.gs.worldSurface); y < H - 20 && q < seq.length; y++) {
+          const start = q;
+          const t1 = seq[q++]!;
+          let desc = `${t1.kind}=${t1.v}`;
+          if (t1.kind === 'i5' && t1.v === 0 && vl[(y - 1) * W + x] === 0) {
+            const t2 = seq[q++]!;
+            desc += ` ${t2.kind}=${t2.v}`;
+            while (q < seq.length && seq[q]!.kind !== 'i5') { desc += ` ${seq[q]!.kind}=${seq[q]!.v}`; q++; }
+          }
+          const i = y * W + x;
+          const oce = y <= (cap.gs.worldSurface + cap.gs.rockLevel) / 2 + 40 && (x < cap.gs.beachDistance || x > W - cap.gs.beachDistance);
+          const air = !(va[i] || (oA[i] === 1 && oT[i] === 165));
+          if (!oce && air) {
+            const r = seq[q++]!;
+            desc += ` | stal:${r.kind}=${r.v}`;
+            if (r.v === 0) {
+              while (q < seq.length && seq[q]!.kind !== 'i5') { desc += ` ${seq[q]!.kind}=${seq[q]!.v}`; q++; }
+            }
+          }
+          if (x === 22 && y >= 655 && y <= 675) {
+            cellLog.push(`(22,${y}) n${start}-${q - 1}: ${desc} in=${va[i] ? vt[i] : '·'} hs=${cap.st.half[i]}/${cap.st.slope[i]} v103=${oA[i] ? oT[i] : '·'}`);
+          }
+        }
+      }
+      for (const l of cellLog) console.log('  ', l);
+    }
     // 静默树事件的基座格状态（门读 half/slope——JS 侧真值；非零=嫌疑）
     for (const [tx, ty] of [[20, 381], [20, 383], [20, 533], [20, 545], [20, 548], [20, 552], [20, 555]] as Array<[number, number]>) {
       const rows: string[] = [];

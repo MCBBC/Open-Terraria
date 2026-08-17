@@ -243,7 +243,11 @@ const CSS = `
   image-rendering:pixelated; pointer-events:none; filter:brightness(0.39); opacity:0.39; }
 .sw-lbl { font-size:12px; color:#9fb0dd; margin:6px 0 2px 0; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
-.sw-drag-ghost { position:fixed; z-index:200; pointer-events:none; width:40px; height:40px; }
+/* will-change+transform 移动(2026-08-18):left/top 每帧触发布局+所在层整体
+   重记录——压力窗口期层内 Inventory_Back 背景等被逐出解码位图就反复
+   LazyPixelRef(trace 残余流);独立合成层后移动只走合成器,零重记录 */
+.sw-drag-ghost { position:fixed; left:0; top:0; z-index:200; pointer-events:none;
+  width:40px; height:40px; will-change:transform; }
 .sw-drag-ghost img { width:40px; height:40px; image-rendering:pixelated;
   filter:drop-shadow(2px 3px 2px rgba(0,0,0,0.6)); }
 .sw-drag-ghost .cnt { position:absolute; right:-2px; bottom:-4px; font-size:12px; font-weight:bold;
@@ -1227,8 +1231,7 @@ export class UI {
       if (!cnt) { cnt = el('span', 'cnt'); this.ghostEl.appendChild(cnt); }
       cnt.textContent = String(this.heldStack.stack);
     } else cnt?.remove();
-    this.ghostEl.style.left = `${this.mouseX - 20}px`;
-    this.ghostEl.style.top = `${this.mouseY - 20}px`;
+    this.ghostEl.style.transform = `translate(${this.mouseX - 20}px, ${this.mouseY - 20}px)`;
   }
 
   /** 稀有度着色（Main.cs GetItemNameColor :20415-20473 主干） */

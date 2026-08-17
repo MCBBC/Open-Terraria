@@ -12800,7 +12800,14 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     // tilesIgnoreWater 家族（Liquid.cs:68-72 boulder+546 / 74-79 worldGen 族）
     var LS_BOULDER = new HashSet<ushort> { 138, 484, 664, 711, 712, 713, 714, 715, 716 };
     var LS_WG_IGNORE = new HashSet<ushort> { 10, 190, 191, 192 };
-    int LSRoll(int max) => (int)r.Next(max);               // passRand：pass 链流
+    int qqRollN = 0;
+    int LSRoll(int max)                                    // passRand：pass 链流
+    {
+        var v = (int)r.Next(max);
+        if (Environment.GetEnvironmentVariable("QQ_ROLL_LOG") != null && qqRollN < 100000)
+            Console.Error.WriteLine($"QQROLL {qqRollN++} Next({max}) -> {v}");
+        return v;
+    }
     int LsDustAmount(ushort s)
     {
         if (LS_DUST_ZERO.Contains(s)) return 0;

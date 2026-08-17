@@ -450,7 +450,7 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
 
 // ============ SpeleothemsAndGemTrees 钟乳石+宝石树（:22196-22282） ============
 export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const g0 = globalThis as { __swSpCap?: (gs: GenState, st: TileStore) => void };
+  const g0 = globalThis as { __swSpCap?: (gs: GenState, st: TileStore) => void; __swScanCap?: (x: number, y: number, phase: number) => void };
   try { g0.__swSpCap?.(gs, st); } catch { /* probe */ }
   const f = gs.seedFlags ?? {};
   const alwaysTry = !!(f.tenthAnniversary || f.drunkWorld);
@@ -467,6 +467,7 @@ export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
     STONE_FAMILY.has(s) || TILE_MOSS.has(s);
   for (let x = 20; x < st.w - 20; x++) {
     for (let y = Math.floor(gs.worldSurface); y < st.h - 20; y++) {
+      g0.__swScanCap?.(x, y, 0);
       // 宝石树段（:22208-22237）：掷骰在液体判定之前（短路与求值序 1:1）
       const treeRoll = alwaysTry ? true : rng.nextInt(5) === 0;
       if (treeRoll && st.liquid[st.idx(x, y - 1)] === 0) {
@@ -487,6 +488,7 @@ export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
     // 地表钟乳石（:22264-22278）：k∈[5, worldSurface)；冰上 147/161、沙 25/203 上/下
     for (let k = 5; k < gs.worldSurface; k++) {
+      g0.__swScanCap?.(x, k, 1);
       const up = sheetActive(x, k - 1), down = sheetActive(x, k + 1);
       const clearAbove = () => {
         if (!st.flags[st.idx(x, k)] && !st.flags[st.idx(x, k + 1)]) st.slope[st.idx(x, k - 1)] = 0;

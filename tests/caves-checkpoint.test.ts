@@ -289,7 +289,13 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
  *  finalGenMergeCheck + tileSolid[484]=false。 */
 function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RNG): void {
   const sim = new LiquidSim(world);
-  sim.passRand = (max) => rng.nextInt(max);
+  const rollLog = typeof process !== 'undefined' && !!process.env.QQ_ROLL_LOG;
+  let rollN = 0;
+  sim.passRand = (max) => {
+    const v = rng.nextInt(max);
+    if (rollLog && rollN < 100000) console.log(`QQROLL ${rollN++} Next(${max}) -> ${v}`);
+    return v;
+  };
   sim.isGeneratingOrLoadingWorld = true;
   sim.generatingWorld = true;
   sim.shimmerCenter = gs.shimmerX > 0 ? { x: gs.shimmerX, y: gs.shimmerY } : null;
