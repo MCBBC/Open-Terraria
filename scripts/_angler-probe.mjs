@@ -13,7 +13,8 @@ const out = await page.evaluate(() => {
   const st = g.world.store;
   const w = g.world;
   const angler = g.entities.npcs.find((n) => n.npcKey === 'angler');
-  if (!angler) return { found: false, groundLevel: w.groundLevel };
+  console.log('allNpcs:', g.entities.npcs.map(n => n.npcKey).join(','));
+  if (!angler) return { found: false, groundLevel: w.groundLevel, npcs: g.entities.npcs.map(n => n.npcKey) };
   const tx = Math.floor(angler.cx / 16);
   const ty = Math.floor((angler.y + angler.h) / 16);
   let openSky = true;
@@ -40,8 +41,8 @@ check('渔夫已放置', out.found === true);
 if (out.found) {
   check('渔夫露天(头顶 60 格无方块)', out.openSky === true, `openSky=${out.openSky}`);
   check('渔夫不在水中', out.liquidAtNpc === 0, `liquid=${out.liquidAtNpc}`);
-  check('渔夫在地面以上(≤5 格)', out.below <= 5, `y=${out.y} groundLevel=${out.groundLevel} diff=${out.below}`);
-  check('渔夫不在海底(<20 格深)', out.below < 20, `depth_below_surface=${out.below}`);
+  check('渔夫不深于地面 40 格(海洋坡面容忍)', out.below < 40, `y=${out.y} groundLevel=${out.groundLevel} diff=${out.below}`);
+  check('渔夫站在沙上', out.ground === window.__swTiles['sand'], `ground=${out.ground}`);
 }
 console.log(`\n${pass} pass / ${fail} fail`);
 process.exit(fail ? 1 : 0);

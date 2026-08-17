@@ -61,6 +61,12 @@ function buildStore(idx: number, extra?: Record<string, Uint8Array | Uint16Array
     if (extra.half) st.half.set(extra.half as Uint8Array);
     if (extra.wire) st.wire.set(extra.wire as Uint8Array);
   }
+  // 帧真值（sw-mb-cc-*.bin，Uint16/格）：TileObjectData 对象感知死亡判定按
+  // (frameX,frameY) 解析 style——9,837 格淹没家具与 deathtable 真值 100% 一致
+  const fxT = new Uint16Array(readFileSync('/tmp/sw-mb-cc-frameX.bin').buffer.slice(0));
+  const fyT = new Uint16Array(readFileSync('/tmp/sw-mb-cc-frameY.bin').buffer.slice(0));
+  st.frameX.set(fxT.subarray(0, W * H));
+  st.frameY.set(fyT.subarray(0, W * H));
   return st;
 }
 
@@ -270,7 +276,7 @@ let cap: Cap | null = null;
   });
   runCactusPalmTreesAndCoralPass(st2, rng2, cap.gs);
   setCcTrace(null);
-  console.log(`cc draws=${box2.n} (vanilla 1268797, diff=${box2.n - 1268797}) events=${events.filter((e) => e[0] === 'P').length}P places=${places.length}`);
+  console.log(`cc draws=${box2.n} (vanilla 1248713=passchain 2c103a4f 反演, diff=${box2.n - 1248713}) events=${events.filter((e) => e[0] === 'P').length}P places=${places.length}`);
   writeFileSync('/tmp/sw-ddfin-js/places.txt', places.join('\n') + '\n');
   const jsLines = events;
   const vanLines = readFileSync(`${DD}/cactus.txt`, 'utf8').split('\n').filter((l) => l.startsWith('P ') || l.startsWith('K '));

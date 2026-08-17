@@ -176,4 +176,48 @@ describe('召唤兽朝向/旋转语义（镜像修复回归）', () => {
     expect(s.x + s.w / 2).toBeCloseTo(m.cx, 6);
     expect(s.y + s.h / 2).toBeCloseTo(m.cy, 6);
   });
+
+  it('俾格米 191 掷矛锚点 = Center−8（AI_026 vector15 :58764）+ timeLeft 300', () => {
+    const { hooks, player, projectiles } = makeHooks([mkEnemy(1, 60 * 16 + 400, 90 * 16 - 8)]);
+    const m = new MinionProj(player.cx, player.cy - 40, 191, 10, 2, false, 0, true, () => player);
+    const before = projectiles.length;
+    m.fixedUpdate(1, hooks);
+    const shots = projectiles.slice(before).filter((e): e is Arrow => e instanceof Arrow);
+    expect(shots.length).toBeGreaterThanOrEqual(1);
+    const s = shots[0];
+    expect(s.projId).toBe(195);
+    expect(s.life).toBe(300);                       // :58798 timeLeft=300
+    expect(s.x + s.w / 2).toBeCloseTo(m.cx, 6);     // 水平 = 中心
+    expect(s.y + s.h / 2).toBeCloseTo(m.cy - 8, 6); // 手部高度 −8（曾缺此偏移）
+  });
+
+  it('弩车哨兵 677 弩箭 680 锚点 = 本体 Center−8（AI_134 :65590/:65693）', () => {
+    const { hooks, player, projectiles } = makeHooks([mkEnemy(1, 60 * 16 + 300, 90 * 16 - 30)]);
+    // 哨兵 16×16 落在地面行(100)之上——避免下落漂移干扰锚点断言
+    const m = new MinionProj(player.cx, 100 * 16 - 16, 677, 20, 6, true, 0, false, () => player);
+    const before = projectiles.length;
+    // 初冷 120 + 开火 12t（SentryCooldown 后第 12 帧出弹）
+    for (let i = 0; i < 200; i++) m.fixedUpdate(1, hooks);
+    const shots = projectiles.slice(before).filter((e): e is Arrow => e instanceof Arrow);
+    expect(shots.length).toBeGreaterThanOrEqual(1);
+    const s = shots[0];
+    expect(s.projId).toBe(680);
+    expect(s.x + s.w / 2).toBeCloseTo(m.cx, 6);     // 原版 center=base.Center（曾 y+20 左上角语义偏半格）
+    expect(s.y + s.h / 2).toBeCloseTo(m.cy, 6);
+  });
+
+  it('冰九头蛇哨兵 308 冰弹 309 按 14×14 判定盒居中（309 SetDefaults）', () => {
+    const { hooks, player, projectiles } = makeHooks([mkEnemy(1, 60 * 16 + 300, 90 * 16 - 60)]);
+    const m = new MinionProj(player.cx, 100 * 16 - 16, 308, 20, 3, true, 0, false, () => player);
+    const before = projectiles.length;
+    for (let i = 0; i < 200; i++) m.fixedUpdate(1, hooks);
+    const shots = projectiles.slice(before).filter((e): e is Arrow => e instanceof Arrow);
+    expect(shots.length).toBeGreaterThanOrEqual(1);
+    const s = shots[0];
+    expect(s.projId).toBe(309);
+    expect(s.w).toBe(14);                            // 14×14 判定盒
+    // 目标在右上 ~35° → 扇区 2：炮口 = Center+(24×facing,−2)（:27291-27318）
+    expect(s.x + s.w / 2).toBeCloseTo(m.cx + 24 * Math.sign(60 * 16 + 300 - m.cx), 6);
+    expect(s.y + s.h / 2).toBeCloseTo(m.cy - 2, 6);
+  });
 });

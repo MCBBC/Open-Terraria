@@ -1078,7 +1078,14 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
   const __st = (globalThis as { __swHouseStage?: (tag: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage;
   const __rn = () => (globalThis as { __swRollN?: number }).__swRollN ?? -1;
   const placeHouse = (ox: number, oy: number, oceanGate: boolean): boolean => {
-    if (oceanGate && (ox < gs.beachDistance || ox > w - gs.beachDistance)) return false; // oceanDepths 回避
+    // oceanDepths 1:1(cs:10978-10988):【先 y 门】y > oceanLevel((Main.worldSurface
+    //   + Main.rockLayer)/2+40,双 double)即非海洋直接 false——地下小屋 oy 取自
+    //   worldSurfaceHigh+20 起的深域,恒 > oceanLevel,原版此门从不触发;曾只抄
+    //   x 半边 → 海滩 x 带内深埋尝试被误拒 → createRooms 的 above/below 2 掷被吞
+    //   → 流漂(house5 前尝试 (3901,718) vanilla 2 掷 vs JS 0 掷,AB#565 (579,445)
+    //   vs (885,736) 首异实锤)
+    if (oceanGate && !(oy > (gs.worldSurface + gs.rockLevel) / 2 + 40)
+      && (ox < gs.beachDistance || ox > w - gs.beachDistance)) return false;
     // CaveHouseBiome.Place 前置拒绝(CaveHouseBiome.cs:36-54,C9 曾整体缺失):
     //   InWorld(origin,30) + 原点 ±25 内有红线或 BasicChest(21/467,TileID.cs:315)
     //   → 整屋放弃。须在 createRooms 之前(不耗 RNG)。

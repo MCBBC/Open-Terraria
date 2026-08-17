@@ -46,6 +46,7 @@ function csRound(v: number): number {
   return f % 2 === 0 ? f : f + 1;
 }
 
+import { TILE_OBJECT_DEATH, type TodEntry } from './tile-object-death-table';
 /** Main.tileWaterDeath 表（Main.cs:7182-7240 区段提取，vanilla tile id） */
 const WATER_DEATH_SHEETS = new Set([215, 4, 51, 697, 93, 98, 552, 405, 646, 372]);
 /** Main.tileLavaDeath 表（Main.cs 同区段，vanilla tile id） */
@@ -160,6 +161,8 @@ export class LiquidSim {
   /** 水死/岩浆死内部 tile id 集（Main.tileWaterDeath/tileLavaDeath 经 sheet 反查） */
   private readonly waterDeathIds: Set<number>;
   private readonly lavaDeathIds: Set<number>;
+  /** TileObjectData 死亡真值表（内部 id → [lavaDeath,waterDeath]|null(=glob 回退)） */
+  private readonly todDeath: Map<number, [boolean, boolean] | null> = new Map();
   private readonly lavaBurnAirIds: Set<number>;
   private readonly lavaBurnDirtIds: Set<number>;
   /** Main.tileObsidianKill（sheet 反查；lavaDeath ∪ 附加 − 88） */
@@ -287,6 +290,17 @@ export class LiquidSim {
       TILE_DEFS.reduce<number[]>((acc, d, id) => { if (d.vanilla && sheets.has(d.vanilla.sheet)) acc.push(id); return acc; }, []),
     );
     this.waterDeathIds = bySheet(WATER_DEATH_SHEETS);
+    // TileObjectData 对象感知死亡表（内部 id → [lavaDeath, waterDeath|null]）——
+    // 见 diesIn。★96 格地牢家具（vanilla 不杀/旧全局表误杀）由此归位；
+    // 32 格上游帧债：JS 生成管线中部分家具 frameX/frameY 未写（默认 0）→ style
+    // 解析按 0 档——这些格仍按 style0 档判定（备案，见报告 2-C 节）。
+    const TOD_BY_ID = new Map<number, [boolean, boolean] | null>();
+    for (const [sheet, rec] of Object.entries(TILE_OBJECT_DEATH)) {
+      const id = SHEET_OF.indexOf(Number(sheet));
+      if (id < 0) continue;
+      TOD_BY_ID.set(id, rec.d === null ? null : [rec.d[0] === 1, rec.d[1] === 1]);
+    }
+    this.todDeath = TOD_BY_ID;
     this.lavaDeathIds = bySheet(LAVA_DEATH_SHEETS);
     this.lavaBurnAirIds = bySheet(LAVA_BURN_TO_AIR);
     this.lavaBurnDirtIds = bySheet(LAVA_BURN_TO_DIRT);
@@ -413,7 +427,7 @@ export class LiquidSim {
     //  生成/读档沉降期此链不发击杀（击杀走 WaterCheck/LiquidCheck 两链）
     if (!this.isGeneratingOrLoadingWorld && t !== 0 && st.flags[i]) {
       const isLava = st.liquidType[i] === 2;
-      const dies = isLava ? this.lavaDeathIds.has(t) : this.waterDeathIds.has(t);
+      const dies = this.diesIn(t, st.frameX[i]!, st.frameY[i]!, isLava);
       if (dies) this.killTileAt(x, y);
     }
   }
@@ -1359,6 +1373,40 @@ export class LiquidSim {
     }
   }
 
+  /** TileObjectData.CheckLavaDeath/CheckWaterDeath（cs:5064-5111）对象感知镜像：
+   *  _data[type] 无条目或 UsesGlobalLiquidChecks → 全局表；否则按 (frameX,frameY)
+   *  解析 style/alt 取对象值。style 解析用 C# int 除法（向零截断——frameX=-1 时
+   *  floor 会差 1 档）。 */
+  private diesIn(t: number, fx: number, fy: number, isLava: boolean): boolean {
+    const rec: TodEntry | undefined = TILE_OBJECT_DEATH[SHEET_OF[t]!];
+    if (rec === undefined || rec.d === null && !Object.keys(rec.subs).length && !rec.alts.length) {
+      return isLava ? this.lavaDeathIds.has(t) : this.waterDeathIds.has(t);
+    }
+    const tr = (v: number, d: number) => Math.trunc(v / d);   // C# int 除法
+    const num = tr(fx, rec.fw), num2 = tr(fy, rec.fh);
+    const swl = rec.swl === 0 ? 1 : rec.swl;
+    const n4 = rec.sh === 1 ? num2 * swl + num : num * swl + num2;
+    let style = tr(n4, rec.sm), alt = ((n4 % rec.sm) + rec.sm) % rec.sm;
+    if (rec.sls > 1) {
+      if (rec.sh === 1) { style = tr(num2, rec.sls) * swl + num; alt = ((num2 % rec.sls) + rec.sls) % rec.sls; }
+      else { style = tr(num, rec.sls) * swl + num2; alt = ((num % rec.sls) + rec.sls) % rec.sls; }
+    }
+    let d: readonly [number, number] | null = rec.d;
+    let alts = rec.alts;
+    const sub = rec.subs[String(style)];
+    if (sub !== undefined) { d = sub.d; alts = sub.alts; }
+    for (const a of alts) {
+      if (a[0] <= alt && alt <= a[0] + a[1]) {
+        d = [a[2] === null ? -1 : a[2], a[3] === null ? -1 : a[3]];
+        break;
+      }
+    }
+    if (d === null || d[isLava ? 0 : 1] === -1) {
+      return isLava ? this.lavaDeathIds.has(t) : this.waterDeathIds.has(t);
+    }
+    return d[isLava ? 0 : 1] === 1;
+  }
+
   private waterCheckInner() {
     const st = this.world.store;
     this.liquids.length = 0;
@@ -1378,8 +1426,8 @@ export class LiquidSim {
             continue;
           }
           // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
-          if (st.liquidType[i] === 2) { if (this.lavaDeathIds.has(t)) this.killTileAt(x, y); }
-          else if (this.waterDeathIds.has(t)) this.killTileAt(x, y);
+          if (st.liquidType[i] === 2) { if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, true)) this.killTileAt(x, y); }
+          else if (this.diesIn(t, st.frameX[i]!, st.frameY[i]!, false)) this.killTileAt(x, y);
         }
         const id = i + st.w;
         const dq = st.liquid[id];

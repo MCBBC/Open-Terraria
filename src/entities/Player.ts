@@ -219,8 +219,30 @@ export class Player extends Entity {
   itemUseTurn = false;
   dead = false;
   respawnTimer = 0;
-  /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费） */
+  /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费）
+   *  ——兼作散飞体渐隐（GetImmuneAlpha :53253：(255−值)/255，>125 直接全透明） */
   immuneAlpha = 0;
+  /** 死亡三段散飞（KillMe :38287-38298 初速 / UpdateDead :16878-16888 翻滚解体）：
+   *  头/身/腿各带 pos（相对死亡位像素偏移）/vel/rot——渲染 drawDeadPlayerParts
+   *  按三件分离绘制（原版 PlayerDrawLayers 逐层 + headPosition/bodyPosition/legPosition） */
+  deadParts = {
+    head: { px: 0, py: 0, vx: 0, vy: 0, rot: 0 },
+    body: { px: 0, py: 0, vx: 0, vy: 0, rot: 0 },
+    legs: { px: 0, py: 0, vx: 0, vy: 0, rot: 0 },
+  };
+  /** 击杀击退方向（KillMe hitDirection 参：X 初速 +2×dir；环境死（岩浆/窒息/溺水
+   *  等无击退源）=0——damage() 击退段捕获，同原版 Hurt 的 hitDirection 口径） */
+  deathHitDir = 0;
+  /** 硬核幽灵帧 0-3（Ghost() :6444-6450：ghostFrameCounter 每 8t 推进 %4） */
+  ghostFrame = 0;
+  private ghostFrameCounter = 0;
+  /** 死亡初速已掷标记（见死亡结算门——dead 可能被 Game 侧先直置） */
+  private _deathPartsInit = false;
+  /** 眼睑帧 0-2（PlayerEyeHelper.EyeFrameToShow：0 睁 1 半闭 2 全闭——
+   *  渲染叠 Player_0_15 帧于头/眼之上；死亡态不更新（UpdateDead 无该链）） */
+  eyeFrame = 0;
+  private eyeState = 0;      // PlayerEyeHelper.EyeState 枚举序（见文件尾 EYE_* 常量）
+  private eyeTimeInState = 0;
   // 摔伤追踪
   fallStartY: number | null = null;   // 矿车骑乘同步清空（车上不计摔伤），公开给 Minecart
   /** 蛛网挣扎计数（原版 stickyBreak，Player.cs:22653） */
@@ -1613,10 +1635,28 @@ export class Player extends Entity {
         '#BFE3FF', 1, 0.2, { life: 30, grav: -0.03, size: 2 });
     }
 
+    // ---- 眼睑状态机（PlayerEyeHelper.Update，Player.cs:25812 每 tick；死亡态不更新
+    //      ——原版 dead 早退到 UpdateDead，无该链） ----
+    if (!this.dead) {
+      if (this._deathPartsInit) this._deathPartsInit = false;  // 重生复位（respawnPlayer 在 Game 侧）
+      this.updateEyeState(game);
+    }
+
     // 死亡等待重生（任何死法统一在此发声——溺水/岩浆/摔落/受击都经过这里）
     if (this.hp <= 0) {
-      if (!this.dead) game.playSfx('pkilled');
-      this.dead = true;
+      if (!this.dead) {
+        game.playSfx('pkilled');
+        this.dead = true;
+      }
+      // 初速掷骰用独立标记：Game.damagePlayer 接触死路径会先直置 dead（Game.ts:15360）
+      // ——不能拿 !dead 当 init 门；首 tick 只掷不推进（原版 KillMe 在 Hurt 中段置 dead，
+      // 物理自下一 tick UpdateDead 起）
+      if (!this._deathPartsInit) {
+        this._deathPartsInit = true;
+        this.initDeathParts();          // KillMe :38287-38298 三段初速
+      } else {
+        this.updateDeathParts(game);    // UpdateDead :16878-16888 翻滚解体
+      }
       return;
     }
 
@@ -3909,6 +3949,9 @@ export class Player extends Entity {
     const solarMul = solarConsumed ? 0.2 : 1;
     const reduction = Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance) * solarMul));
     this.hp -= reduction;
+    // 受击闭眼 20t（Player.Hurt :37916 eyeHelper.BlinkBecausePlayerGotHurt——
+    // 与无敌帧同步的全闭眼优先档，仅对真正造成伤害的命中）
+    this.eyeBlinkHurt();
     // 无敌帧（:37769）：PvP 恒 8t（连射可高频命中）；PvE 40t / 十字项链族 ×2
     this.iframes = pvp ? 8 : PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);
     // PvP 击杀（KillMe :38208-38210 if(pvp) pvpDeath=true）——重生端消费
@@ -3933,9 +3976,14 @@ export class Player extends Entity {
     if (knockback && !eq.noKnockback
       && !(this.ridingMount && this.mount.dashNoKnockback(this.vx))) {
       const dir = this.cx < srcX ? -1 : 1;
+      this.deathHitDir = dir;   // KillMe :38291-38292 X 初速 +2×hitDirection 的方向源
       this.vx = dir * 4.5;   // Player.cs:37910
       this.vy = -3.5;        // Player.cs:37911
       this.fallStartY = this.y;  // fallStart = position.Y/16（:37912，像素口径同源）
+    } else if (knockback) {
+      // 钴护盾免击退：速度不弹但击退方向照记（KillMe hitDirection 用 Hurt 参——
+      // noKnockback 只清 velocity 不改 hitDirection 口径）
+      this.deathHitDir = this.cx < srcX ? -1 : 1;
     }
     return reduction;
   }
@@ -4003,4 +4051,135 @@ export class Player extends Entity {
   }
 
   draw() { /* 由 Renderer 统一绘制 */ }
+
+  // ============ 死亡散飞 + 硬核幽灵（KillMe/UpdateDead/Ghost 1:1） ============
+
+  /** KillMe 尾段（Player.cs:38287-38298）：头/身/腿三段散飞初速——
+   *  Y = Next(-40,-10)×0.1（-4.0..-1.1 向上抛）、X = Next(-20,21)×0.1 + 2×hitDirection；
+   *  stoned 时三段 Position 归零（初速照掷——原版门字面照抄） */
+  private initDeathParts(): void {
+    const hitDir = this.deathHitDir;
+    for (const seg of [this.deadParts.head, this.deadParts.body, this.deadParts.legs]) {
+      seg.px = 0; seg.py = 0; seg.rot = 0;
+      seg.vy = (Math.floor(Math.random() * 30) - 40) * 0.1;        // Next(-40,-10)×0.1
+      seg.vx = (Math.floor(Math.random() * 41) - 20) * 0.1 + 2 * hitDir;  // Next(-20,21)×0.1 + 2×hitDir
+    }
+    // :38294-38298 stoned → 三段 Position 归零
+    if (this.buffs.has(BuffType.Stoned)) {
+      for (const seg of [this.deadParts.head, this.deadParts.body, this.deadParts.legs]) {
+        seg.px = 0; seg.py = 0;
+      }
+    }
+  }
+
+  /** UpdateDead（Player.cs:16878-16888）：三段 pos += vel / rot += vel.X×0.1（翻滚）/
+   *  vel.Y += 0.1（重力）/ vel.X ×= 0.99（水平阻尼）。immuneAlpha 的 +2 钳 255 由
+   *  Game 死亡分支执行（同一段逻辑，不重复）。ghost 态帧推进（Ghost() :6444-6450） */
+  private updateDeathParts(game: GameHooks): void {
+    for (const seg of [this.deadParts.head, this.deadParts.body, this.deadParts.legs]) {
+      seg.px += seg.vx;
+      seg.py += seg.vy;
+      seg.rot += seg.vx * 0.1;
+      seg.vy += 0.1;
+      seg.vx *= 0.99;
+    }
+    if (this.isGhostPhase(game.world)) {
+      if (++this.ghostFrameCounter >= 8) {
+        this.ghostFrameCounter = 0;
+        this.ghostFrame = (this.ghostFrame + 1) % 4;
+      }
+    }
+  }
+
+  /** 硬核幽灵态（Player.cs:16894-16901 difficulty==2 → respawn 计时到点 ghost=true；
+   *  本仓 Game.respawnPlayer 对 hardcoreDead 拒绝重生 → 计时越过阈值即幽灵相。
+   *  boss 存活 +600 延迟未复刻（本侧不可见 boss 列表，登记偏离——仅幽灵出现时刻） */
+  isGhostPhase(world: import('../world/World').World): boolean {
+    return this.dead && this.appearance?.difficulty === 2
+      && this.respawnTimer > 600 * (mainExpertMode(world) ? 1.5 : 1);
+  }
+
+  // ============ 眼睑状态机（PlayerEyeHelper.cs 全文 1:1） ============
+
+  /** PlayerEyeHelper.Update（:32-37）：SetStateByPlayerInfo → UpdateEyeFrameToShow →
+   *  _timeInState++。逐 tick 由 fixedUpdate 驱动（原版 Player.Update :25812 调用点） */
+  private updateEyeState(game: GameHooks): void {
+    // SetStateByPlayerInfo（:75-122）——优先级：致盲 > 受击锁存 > 床 > 中度伤 > 醉 >
+    // 毒 > 风暴眯眼 > 正常眨眼
+    if (this.buffs.has(BuffType.Blackout) || this.buffs.has(BuffType.Darkness)) {
+      this.switchEyeState(EYE_BLIND);        // blackout/blind（:77-80）
+    } else if (this.eyeState === EYE_HURT && this.eyeTimeInState < 20) {
+      // 受击档锁存 20t（:83-86——期间更高优先级判定也让位）
+    } else if (this.sleeping) {
+      this.switchEyeState(EYE_BED, this.itemAnimTicks > 0);   // :87-91 reset=itemAnimation>0
+    } else if (this.hp <= this.maxHp * 0.25) {
+      this.switchEyeState(EYE_HURTDMG);      // :93-96 中度伤 = statLife ≤ statLifeMax2×0.25（:133-136）
+    } else if (this.buffs.has(BuffType.Tipsy)) {
+      this.switchEyeState(EYE_TIPSY);        // :98-101
+    } else if (this.buffs.has(BuffType.Poisoned) || this.buffs.has(BuffType.Venom)) {
+      this.switchEyeState(EYE_POISON);       // :103-106（starving 本仓无此 buff——缺省不触发）
+    } else {
+      // :108-120 风暴眯眼 = ZoneSandstorm || (ZoneSnow && IsItRaining)；behindBackWall
+      // 抑制位本仓无追踪（恒 false，登记偏离）
+      const storm = !!game.scene?.zoneSandstorm
+        || (!!game.scene?.zoneSnow && !!game.world.weather.raining);
+      this.switchEyeState(storm ? EYE_STORM : EYE_BLINK);
+    }
+    // UpdateEyeFrameToShow（:39-73）——输出 0 睁 / 1 半闭 / 2 全闭
+    const t = this.eyeTimeInState;
+    let frame: number;
+    switch (this.eyeState) {
+      case EYE_BLINK: {
+        // :46-47 正常眨眼：240t 周期末 6t——半闭 2t→闭 2t→半闭 2t
+        const n = t % 240 - 234;
+        frame = n >= 4 ? 1 : n < 2 ? (n >= 0 ? 1 : 0) : 2;
+        break;
+      }
+      case EYE_STORM:
+        frame = t % 120 - 114 < 0 ? 1 : 2;   // :51 眯眼 + 每 120t 末 6t 全闭
+        break;
+      case EYE_HURTDMG:
+      case EYE_TIPSY:
+      case EYE_POISON:
+        frame = t % 120 - 100 < 0 ? 1 : 2;   // :56 耷拉眼 + 每 120t 末 20t 全闭
+        break;
+      case EYE_BED: {
+        // :58-63 计时被 timeSleeping 覆写；<60 中度伤半闭/否则睁，60-119 半闭，≥120 全闭
+        this.eyeTimeInState = this.timeSleeping;
+        const base = this.hp <= this.maxHp * 0.25 ? 1 : 0;
+        frame = this.timeSleeping >= 120 ? 2 : this.timeSleeping >= 60 ? 1 : base;
+        break;
+      }
+      case EYE_BLIND:
+      case EYE_HURT:
+      default:
+        frame = 2;                            // :65-70 致盲/受击恒全闭
+        break;
+    }
+    this.eyeFrame = frame;
+    this.eyeTimeInState++;                    // :36（EYE_BED 已被覆写为 timeSleeping）
+  }
+
+  /** SwitchToState（:124-131）：换态清零计时（同态不重置，除显式 reset） */
+  private switchEyeState(state: number, reset = false): void {
+    if (this.eyeState !== state || reset) {
+      this.eyeState = state;
+      this.eyeTimeInState = 0;
+    }
+  }
+
+  /** BlinkBecausePlayerGotHurt（:138-141）：受击全闭 20t（Hurt :37916 调用） */
+  eyeBlinkHurt(): void {
+    this.switchEyeState(EYE_HURT, true);
+  }
 }
+
+/** PlayerEyeHelper.EyeState 枚举序（PlayerEyeHelper.cs:12-22） */
+const EYE_BLINK = 0;    // NormalBlinking
+const EYE_STORM = 1;    // InStorm
+const EYE_BED = 2;      // InBed
+const EYE_HURT = 3;     // JustTookDamage
+const EYE_HURTDMG = 4;  // IsModeratelyDamaged
+const EYE_BLIND = 5;    // IsBlind
+const EYE_TIPSY = 6;    // IsTipsy
+const EYE_POISON = 7;   // IsPoisoned

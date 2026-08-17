@@ -10,7 +10,7 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
-import { compositePaperDoll, dollFrame, dollHairLayer, hairFrameTinted, headArmorImage, tintRGBA, FRAME_W, FRAME_H } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, FRAME_W, FRAME_H } from '../player/PaperDoll';
 import { hairDyeColor } from '../player/HairDyeColor';
 import type { Inventory } from '../items/Inventory';
 import { options } from '../core/Options';
@@ -168,7 +168,7 @@ import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
-import { wingDrawOf, wingDrawFrame, wingAnchorForRow, stealthFactors } from '../data/vanillaWingVisuals';
+import { wingDrawOf, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS, stealthFactors } from '../data/vanillaWingVisuals';
 import { dyeApplyOf, applyDyePass, type DyeApply } from '../data/vanillaDyes';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Uniforms } from '../fx/SM2Effect';
 import { VanillaDust } from '../fx/VanillaDust';
@@ -6613,9 +6613,111 @@ export class Renderer {
     if (head) ctx.drawImage(head, 0, row * FRAME_H, FRAME_W, FRAME_H, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
   }
 
+  /** 死亡散飞渲染（审计#1：原版 dead 不跳绘制——LegacyPlayerRenderer.cs:479-482
+   *  无条件 DrawPlayer；头/身/腿三层组各带 headPosition/bodyPosition/legPosition
+   *  偏移与 headRotation/bodyRotation/legRotation 绕 headVect(20,22.4)/bodyVect(20,28)/
+   *  legVect(20,42)（PlayerDrawSet.cs:1717-1719），层序 腿→身→头（DrawPlayer_02 → 12 → 21）。
+   *  渐隐 = GetImmuneAlpha（Player.cs:53253：(255−immuneAlpha)/255；:53261-53264
+   *  immuneAlpha>125 直接 Color.Transparent——≈63t 后散飞体彻底隐没） */
+  private drawDeadPlayerParts(p: Player, world: World): void {
+    const ctx = this.ctx;
+    // 硬核幽灵（Player.cs:16894-16901 difficulty==2 respawn 到点 ghost=true）
+    if (p.isGhostPhase(world)) { this.drawGhostSprite(p); return; }
+    if (p.immuneAlpha > 125) return;          // 全透明档
+    const alpha = (255 - p.immuneAlpha) / 255;
+    const a = p.appearance;
+    if (!a) {
+      // 兜底（登记偏离）：无纸娃娃数据 → 整体单帧带 headRotation 翻滚下坠
+      const sheet = this.assets.playerSheet;
+      const fw = this.assets.playerFrameW, fh = this.assets.playerFrameH;
+      const seg = p.deadParts.head;
+      ctx.save();
+      ctx.globalAlpha *= alpha;
+      ctx.translate(p.cx + p.netOffX, p.y + p.h + p.stepRenderY + p.netOffY);
+      ctx.translate(seg.px, seg.py);
+      ctx.rotate(seg.rot);
+      ctx.scale(p.facing, 1);
+      ctx.drawImage(sheet, p.frame * fw, 0, fw, fh, -fw / 2, -fh, fw, fh);
+      ctx.restore();
+      return;
+    }
+    let dollEquip = dollEquipFromInv(p.inv, this.atlas);
+    if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
+    const full = compositePaperDoll(a, dollEquip);
+    if (!full) return;
+    // 死亡帧行冻结（原版 UpdateDead 不跑 PlayerFrame——bodyFrame 停在死亡瞬间值；
+    // 此处以冻结的 vx/onGround 复算同一行档，等价冻结）
+    const row = this.playerBodyRow(p, null, 0, null);
+    const fFull = dollFrame(full, row);
+    const pad = this.spriteBottomPad(fFull, `doll:${row}`);
+    // 层序 + 旋转轴心（PlayerDrawSet.cs:1717-1719）：腿 legVect Y=0.75H → 身 0.5H → 头 0.4H
+    const parts: Array<['legs' | 'body' | 'head', number]> = [
+      ['legs', FRAME_H * 0.75], ['body', FRAME_H * 0.5], ['head', FRAME_H * 0.4],
+    ];
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + p.netOffY);
+    ctx.scale(p.facing, 1);
+    for (const [part, pivotY] of parts) {
+      const doll = compositePaperDoll(a, dollEquip, { part });
+      if (!doll) continue;
+      const seg = p.deadParts[part];
+      const f = dollFrame(doll, row);
+      const pivotLocalY = -FRAME_H + pad + pivotY;   // 头/身/腿各件的刚体旋转轴
+      ctx.save();
+      ctx.translate(seg.px, seg.py + pivotLocalY);
+      ctx.rotate(seg.rot);
+      ctx.translate(0, -pivotLocalY);
+      ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -FRAME_W / 2, -FRAME_H + pad, FRAME_W, FRAME_H);
+      if (part === 'head') {
+        // 眼睑属头层组（DrawPlayer_21_Head_TheFace_Eyelid）——同 headPosition/Rotation
+        // 变换；眼帧冻结于死亡值（dead 后 updateEyeState 停）
+        this.drawEyelid(ctx, p, row, pad);
+      }
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /** Ghost.png 幽灵（LegacyPlayerRenderer.cs DrawGhost :539-553）：34×176 四帧竖排，
+   *  帧 = ghostFrame；色 = mouseTextColor/2+100 脉动灰（Main.cs:18066-18075 190↔255
+   *  每 tick ±1 三角波、周期 130t——以 miscCounter 为钟，相位近似登记）；
+   *  锚 = position+(W/2,H/2) 即精灵中心；GetImmuneAlpha ×（Ghost() :6340 已清
+   *  immuneAlpha=0 → 恒满 alpha）。拖影三联（:273-281 −velocity×(2+i×2)）在
+   *  velocity=0 时与本体同位重叠——只画本体 */
+  private drawGhostSprite(p: Player): void {
+    const tex = this.atlas ? this.atlas.ensureVImage('vanilla/Ghost.png') : null;
+    if (!tex || tex.width === 0) return;
+    const fh = Math.floor(tex.height / 4);
+    const phase = p.miscCounter % 130;
+    const tri = Math.min(phase, 130 - phase);        // 0..65
+    const g = Math.floor((190 + tri) / 2) + 100;     // mouseTextColor/2+100 → 195..227
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = g / 255;
+    ctx.translate(p.x + tex.width / 2, p.y + fh / 2);
+    if (p.facing === -1) ctx.scale(-1, 1);           // direction 翻转
+    ctx.drawImage(tex, 0, p.ghostFrame * fh, tex.width, fh, -tex.width / 2, -fh / 2, tex.width, fh);
+    ctx.restore();
+  }
+
+  /** 眼睑叠层（DrawPlayer_21_Head_TheFace_Eyelid PlayerDrawLayers.cs:2640-2683）：
+   *  Players[skinVar,15]（Player_0_15.png 40×168 三帧竖排，全变体共用）按
+   *  eyeFrame 叠画于头/眼之上——头层组同一基座坐标 + OffsetsPlayerHeadgear[row] Y−2
+   *  （行 7/8/9/14/15/16 → −2，其余 0；gravDir 镜像空间内同值即原版 ×(−1) 语义）；
+   *  色 = colorHead → skinColor（eyelidFrame 调色）；帧 0=睁眼为空帧不画 */
+  private drawEyelid(ctx: CanvasRenderingContext2D, p: Player, row: number, pad: number): void {
+    if (p.eyeFrame === 0 || !p.appearance) return;
+    const lid = eyelidFrame(p.appearance);
+    if (!lid) return;
+    const offY = (HEADGEAR_ZERO_ROWS.has(row) ? 0 : 2) - 2;
+    ctx.drawImage(lid, 0, p.eyeFrame * FRAME_H, FRAME_W, FRAME_H,
+      -FRAME_W / 2, -FRAME_H + pad + offY, FRAME_W, FRAME_H);
+  }
+
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null, flicker: FlickerClock | null = null) {
     const ctx = this.ctx;
-    if (p.dead) return;
+    if (p.dead) { this.drawDeadPlayerParts(p, world); return; }
     // ---- 玩家本体随坐骑机身倾斜（UFO 7/钻头 8/扫帚 23）----
     // 原版 DrawPlayerFull 把 fullRotation/fullRotationOrigin 整组传进 PlayerDrawSet
     // （LegacyPlayerRenderer.cs:481），TransformDrawData（PlayerDrawLayers.cs:4199-4230）
@@ -6940,6 +7042,9 @@ export class Renderer {
           }
           if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
         }
+        // ---- 眼睑叠层（DrawPlayer_21_Head_TheFace_Eyelid :2640-2683：叠画于
+        //      头/眼之上——眨眼/眯眼/耷拉眼/床闭眼/致盲/受击，见 Player.updateEyeState） ----
+        this.drawEyelid(ctx, p, row, pad);
         drawn = true;
       }
     }

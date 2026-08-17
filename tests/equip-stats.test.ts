@@ -143,7 +143,7 @@ describe('Player 装备属性聚合', () => {
     const p = mkPlayer();
     // 恶魔之翼 492：wingSlot 1 → 100t / 6.25 速度（WingStatsInitializer）
     p.inv.armor[3] = { id: _iid(492), stack: 1 };
-    expect(p.equipStats.wing).toEqual({ logic: 1, time: 100, accSpeed: 6.25, accelMult: 1, hover: false });
+    expect(p.equipStats.wing).toEqual({ logic: 1, slot: 1, time: 100, accSpeed: 6.25, accelMult: 1, hover: false });
     // 忍者大师装备 984：dash 1 + blackBelt
     p.inv.armor[4] = { id: _iid(984), stack: 1 };
     expect(p.equipStats.dash).toBe(1);

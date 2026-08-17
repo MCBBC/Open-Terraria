@@ -658,6 +658,8 @@ export class Game implements GameHooks {
   evolution!: WorldEvolution;
   /** Torch God 彩蛋事件（Player.cs:17585-17770）：>100 根点燃火把地下触发 */
   torchGod!: TorchGodEvent;
+  /** 蜘蛛法杖 2551 三型轮换游标（Player.nextCycledSpiderMinionType :47885-47888） */
+  private spiderMinionCycle = 0;
   /** Journey 研究内核（Research：need 表 6089 条 + 覆盖 12 对 + event 45 半数门） */
   research = new Research();
   /** 成就系统（AchievementManager + AchievementsHelper 移植；跨世界 localStorage 持久化） */
@@ -2812,7 +2814,7 @@ export class Game implements GameHooks {
     // Main.tileSand（NPC.cs:7177-7180）：黄沙/黑檀沙/珍珠沙/猩红沙
     const sands = new Set(['sand', 'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block']
       .map((k) => TILE_BY_KEY[k]).filter((v): v is number => v !== undefined));
-    const surface = Math.floor(w.groundLevel);                              // y < worldSurface 门（:1835）
+    const surface = Math.floor(w.groundLevel);  // 原版门 y<ws(:1835)仅干沙分支;此处扩展至 +40 捕获沙滩坡面
     const sides: Array<[number, number]> = [[8, 1], [st.w - 9, -1]];        // 双侧海洋，向外到内
     const spawnTx = Math.floor((this.player.cx || w.spawnX * TILE) / TILE);
     sides.sort((a, b) => Math.abs(a[0] - spawnTx) - Math.abs(b[0] - spawnTx));
@@ -2820,18 +2822,12 @@ export class Game implements GameHooks {
       for (let k = 0; k < 380; k++) {         // WorldGen.beachDistance（WorldGen.cs:4102）
         const x = x0 + dir * k;
         if (x < 8 || x > st.w - 9) break;
-        for (let y = Math.max(4, surface - 40); y < surface; y++) {
-          // ★液查须查 NPC 站的空气格(y-1),不是沙格(y=实心,liquid 恒 0=形同虚设)
-          //   → 此前从边缘扫到海底沙就放人=渔夫泡在海里(2026-08-17 用户实锤)
-          if (!sands.has(st.get(x, y)) || st.liquid[st.idx(x, y - 1)] > 0) continue; // 干沙+无水
-          if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;              // 空气×2
-          // ★露天门(2026-08-17 用户实锤"渔夫在海底"):头顶 20 格须全空——
-          // 此前只查空气×2,沙洞/沙顶穴内也通过(地表上方但地下),渔夫藏在洞里
-          let sky = true;
-          for (let sy = y - 3; sy >= y - 20 && sy >= 4; sy--) {
-            if (st.isSolid(x, sy)) { sky = false; break; }
-          }
-          if (!sky) continue;
+        for (let y = Math.max(4, surface - 40); y < Math.min(st.h, surface + 40); y++) {
+          if (!sands.has(st.get(x, y))) continue;                                 // 沙
+          if (st.liquid[st.idx(x, y - 1)] > 0) continue;                         // ★NPC 位无水(非沙格)
+          if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;            // 空气×2
+          // 轻量天顶门:y-3/y-5 各查一处,排除沙洞(两处全=深洞,一处=有草/树枝可过)
+          if (st.isSolid(x, y - 3) && st.isSolid(x, y - 5)) continue;
           if (this.placeBoundNpc('angler', 'savedAngler', x, y - 1)) return true;
           break;
         }
@@ -7606,17 +7602,40 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (sentries.length >= this.player.maxSentries) sentries[0].dead = true;
         }
         const owner = this.player;
-        this.entities.add(new MinionProj(
-          px, py, cw.shoot, Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))), // 基伤×词缀（乘区由 MinionProj live 结算，勿用预乘的 cw.damage）
-          cw.knockback, !!cw.sentry,
-          this.entities.projectiles.filter((e) => e instanceof MinionProj && !(e as MinionProj).sentry).length,
-          false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
-          () => (owner.dead ? null : owner),
-        ), 'projectiles');
+        const summonDmg = Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))); // 基伤×词缀（乘区由 MinionProj live 结算，勿用预乘的 cw.damage）
+        const slotIdx = this.entities.projectiles.filter((e) => e instanceof MinionProj && !(e as MinionProj).sentry).length;
+        const spawnMinion = (pid: number, noSlot = false): void => {
+          const m = new MinionProj(
+            px, py, pid, summonDmg,
+            cw.knockback, !!cw.sentry,
+            slotIdx,
+            false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
+            () => (owner.dead ? null : owner),
+          );
+          if (noSlot) m.noSlot = true;
+          this.entities.add(m, 'projectiles');
+        };
+        // 魔眼法杖 2535：一次施放成对双子（Player.cs:47872-47883——projToShoot 387
+        // 激光眼 + projToShoot+1 388 痉挛眼 双 SpawnMinionOnCursor；两只各
+        // minionSlots=0.5（Projectile.cs:4435/:4450）= 一对 1 槽——388 以 noSlot
+        // 不占计数槽，保持"对"的槽位语义）
+        if (cw.shoot === 387) {
+          spawnMinion(387);
+          spawnMinion(388, true);
+        } else if (critVid === 2551) {
+          // 蜘蛛法杖：三型轮换 390/391/392（:47885-47888 先用后 ++%3）
+          spawnMinion(390 + this.spiderMinionCycle);
+          this.spiderMinionCycle = (this.spiderMinionCycle + 1) % 3;
+        } else if (critVid === 2584) {
+          // 海盗法杖：随机三变体 393+Next(3)（:47893）
+          spawnMinion(393 + Math.floor(Math.random() * 3));
+        } else {
+          spawnMinion(cw.shoot);
+        }
         // 成就：9+ 随从（Player.cs:51059 num+num2>=9 → event 6 YOU_AND_WHAT_ARMY；
-        //  本作随从恒 1 槽 = 数量口径，召唤后计数）
+        //  本作随从恒 1 槽 = 数量口径，召唤后计数；noSlot（对偶件/伴生）不计）
         if (!cw.sentry
-          && this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry).length >= 9) {
+          && this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry && !(e as MinionProj).noSlot).length >= 9) {
           this.achievements.handleSpecialEvent(6,
             { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
         }

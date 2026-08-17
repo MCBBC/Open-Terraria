@@ -174,13 +174,18 @@ function sheetRect(variant: number, sheet: number): ImageBitmap | HTMLImageEleme
  *   'armorNoHead' 发色剂激活时头甲归叠层路径）。原版腿甲/身甲整体替代对应皮肤衣着
  *   （DrawPlayer_02/13 else-if 链）→ skin 层在有甲的槽位同样留空（甲覆盖语义一致） */
 export type DollLayer = 'skin' | 'armor' | 'armorNoHead';
+/** 三件拆分（死亡散飞用）：'head'=头皮肤/眼/发/头甲；'body'=躯干手臂复合网格+身甲；
+ *  'legs'=腿皮肤/裤/鞋+腿甲——对应原版 headPosition/bodyPosition/legPosition 三层组
+ *  （PlayerDrawLayers 逐层 + drawPlayer.headPosition/bodyPosition/legPosition 偏移） */
+export type DollPart = 'head' | 'body' | 'legs';
 export function compositePaperDoll(
   a: Appearance,
   equip?: { head?: number | null; body?: number | null; legs?: number | null },
-  opts?: { skipHair?: boolean; layer?: DollLayer },
+  opts?: { skipHair?: boolean; layer?: DollLayer; part?: DollPart },
 ): HTMLCanvasElement | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
-    + (opts?.skipHair ? '|nohair' : '') + (opts?.layer ? `|L${opts.layer}` : '');
+    + (opts?.skipHair ? '|nohair' : '') + (opts?.layer ? `|L${opts.layer}` : '')
+    + (opts?.part ? `|P${opts.part}` : '');
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -193,14 +198,19 @@ export function compositePaperDoll(
   // ---- 懒加载就绪预检(vanilla-ui 按需加载后必需):任一必需贴图未就绪 → 返回 null
   // 且【不缓存】(查询本身触发后台加载,消费方下帧重试)。否则首帧的空纸娃娃会被
   // 永久缓存——角色选择界面人物贴图就再也出不来了
-  const needSheets = new Set<number>([...VERTICAL_CHANNELS.map((ch) => ch.sheet), 3, 4, 5, 6, 7, 8, 13]);
+  // part 拆分时只预检该件所需通道（死亡散飞只走 head/body/legs 各自的层组）
+  const part = opts?.part;
+  const needSheets = part === 'head' ? new Set<number>([0, 1, 2])
+    : part === 'body' ? new Set<number>([3, 4, 5, 6, 7, 8, 13])
+    : part === 'legs' ? new Set<number>([10, 11, 12])
+    : new Set<number>([...VERTICAL_CHANNELS.map((ch) => ch.sheet), 3, 4, 5, 6, 7, 8, 13]);
   for (const s of needSheets) {
     if (!sheetRect(a.skinVariant, s)) return null;
   }
-  if (hairMode !== 'none' && !UITextures.get(hairSrc)) return null;
-  if (equip?.legs && !UITextures.get(`Armor_Legs_${equip.legs}.png`)) return null;
-  if (equip?.body && !UITextures.get(`Armor_Armor_${equip.body}.png`)) return null;
-  if (equip?.head && !UITextures.get(`Armor_Head_${equip.head}.png`)) return null;
+  if (hairMode !== 'none' && (!part || part === 'head') && !UITextures.get(hairSrc)) return null;
+  if (equip?.legs && (!part || part === 'legs') && !UITextures.get(`Armor_Legs_${equip.legs}.png`)) return null;
+  if (equip?.body && (!part || part === 'body') && !UITextures.get(`Armor_Armor_${equip.body}.png`)) return null;
+  if (equip?.head && (!part || part === 'head') && !UITextures.get(`Armor_Head_${equip.head}.png`)) return null;
 
   const c = document.createElement('canvas');
   c.width = FRAME_W;
@@ -213,8 +223,12 @@ export function compositePaperDoll(
   const hairTinted = hairRect ? tint(hairRect.img as HTMLImageElement, a.hairColor) : null;
   const onlyArmor = opts?.layer === 'armor' || opts?.layer === 'armorNoHead';
   const noArmor = opts?.layer === 'skin';
+  // part 拆分门：head=发/头皮肤/眼白/瞳+头甲；body=复合网格+身甲；legs=腿皮肤/裤/鞋+腿甲
+  const wantHead = !part || part === 'head';
+  const wantBody = !part || part === 'body';
+  const wantLegs = !part || part === 'legs';
   // 后发层（1.4.4+ PlayerDrawLayers:206-212：backHairDraw 时画在身体之后，即先画）
-  if (!onlyArmor && hairTinted && hasBackHair) {
+  if (!onlyArmor && wantHead && hairTinted && hasBackHair) {
     for (let row = 0; row < BODY_FRAMES; row++) {
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
       ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
@@ -224,6 +238,8 @@ export function compositePaperDoll(
   // ---- 竖条通道（腿/裤/鞋/头/眼：20 帧直排） ----
   const legsArmor = equip?.legs ? UITextures.get(`Armor_Legs_${equip.legs}.png`) : null;
   for (const ch of onlyArmor ? [] : VERTICAL_CHANNELS) {
+    // part 拆分：竖条通道仅 10/11/12（腿组）与 0/1/2（头组）——body 件无竖条
+    if (part && part !== (ch.sheet >= 10 && ch.sheet <= 12 ? 'legs' : 'head')) continue;
     if (legsArmor && (ch.sheet === 10 || ch.sheet === 11 || ch.sheet === 12)) continue; // 腿甲整体替代腿皮肤/裤/鞋（DrawPlayer_02 else-if）
     const img = sheetRect(a.skinVariant, ch.sheet);
     if (!img) continue;
@@ -234,7 +250,7 @@ export function compositePaperDoll(
     }
   }
   // 腿甲（竖条 20 帧，Armor_Legs_{id} 替代 pants+shoes）
-  if (legsArmor && !noArmor) {
+  if (legsArmor && !noArmor && wantLegs) {
     for (let row = 0; row < BODY_FRAMES; row++) {
       ctx.drawImage(legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
     }
@@ -251,6 +267,7 @@ export function compositePaperDoll(
     return { sheet, x, y, color };
   };
   for (let row = 0; row < BODY_FRAMES; row++) {
+    if (!wantBody) break;                        // part 拆分：复合网格只属 body 件
     if (onlyArmor && !bodyArmorImg) continue;    // armor 层无身甲槽则该层为空
     if (noArmor && bodyArmorImg) continue;       // skin 层身甲槽留空（甲覆盖语义）
     const torsoX = row === 5 ? 1 : 0;
@@ -303,7 +320,7 @@ export function compositePaperDoll(
   }
 
   // 前发层（1.4.4+ PlayerDrawSet:1751-1753：backHairDraw 时裁 26px 高，与后发层分离）
-  if (!onlyArmor && hairTinted) {
+  if (!onlyArmor && wantHead && hairTinted) {
     const frontH = hasBackHair ? 26 : FRAME_H;
     for (let row = 0; row < BODY_FRAMES; row++) {
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
@@ -313,7 +330,7 @@ export function compositePaperDoll(
 
   // 头甲（Armor_Head_{id} 竖条 20 帧，画在头发之后——头盔覆盖发型）。
   // skipHair 时一并让出（发色剂叠层路径由调用方在发层之后补画，保层序）
-  if (equip?.head && !opts?.skipHair && !noArmor && opts?.layer !== 'armorNoHead') {
+  if (equip?.head && !opts?.skipHair && !noArmor && opts?.layer !== 'armorNoHead' && wantHead) {
     const headArmor = UITextures.get(`Armor_Head_${equip.head}.png`);
     if (headArmor) {
       for (let row = 0; row < BODY_FRAMES; row++) {
@@ -332,6 +349,17 @@ export function compositePaperDoll(
     }
   }
   return c;
+}
+
+/** 眼睑帧表（DrawPlayer_21_Head_TheFace_Eyelid PlayerDrawLayers.cs:2640-2683：
+ *  TextureAssets.Players[skinVar,15] = Player_0_15.png 40×168 三帧竖排（全变体共用
+ *  此一张——terraria-assets 解包实证无 Player_1_15），色通道 = colorHead → skinColor
+ *  调色（tint 缓存）。帧序 0 睁(空) 1 半闭 2 全闭（EyeFrameToShow） */
+export function eyelidFrame(a: Appearance): HTMLCanvasElement | null {
+  const r = UITextures.get('Player_0_15.png');
+  if (!r) return null;
+  noteVuiConsumer('PaperDoll.eyelidFrame');
+  return tint(r.img as HTMLImageElement, a.skinColor);
 }
 
 /** 取某一帧的绘制参数（供 UISpriteBatch.draw 直接使用） */

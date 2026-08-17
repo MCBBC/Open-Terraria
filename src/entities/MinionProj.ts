@@ -61,7 +61,7 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
  *  - MINION_ROT_ONLY：旋转制不与翻转叠用（原版 dir 恒 None）——双子387/388
  *    （vel+π）、致命球533、雪花917、龙链625-628、同伴方块653 */
 const AI62_LEFT_ART = new Set([373, 375, 407, 423, 613]);
-const MINION_NO_FLIP = new Set([191, 192, 193, 194, 266, 313, 379, 390, 391, 831, 970, 1094]);
+const MINION_NO_FLIP = new Set([191, 192, 193, 194, 266, 313, 379, 390, 391, 392, 831, 970, 1094]);
 const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
 
 /** 远程射击随从表（Projectile.cs AI_062/AI_026/aiStyle66 射击分支提取）：
