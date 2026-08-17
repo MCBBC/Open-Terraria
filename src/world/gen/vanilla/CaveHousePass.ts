@@ -14,7 +14,6 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { placeDoorClosed } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
-import { furnitureStyleBase } from '../../FurnitureStyle';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
@@ -221,7 +220,63 @@ function placeFloorObject(st: TileStore, x0: number, y0: number, w: number, h: n
   for (let dx = 0; dx < w; dx++) {
     for (let dy = 0; dy < h; dy++) st.setTileSilent(x0 + dx, y0 + dy, tile, fx(dx), fy(dy));
   }
+  regHouseObj(st, x0, y0, w, h, 'floor');
   return true;
+}
+
+// ---------- 房内家具登记表（③ 清格击杀重验用）----------
+interface HouseObj { x0: number; y0: number; w: number; h: number; kind: 'floor' | 'chand' }
+/** 对象每格 → 对象元数据；placeHouse 头清空（对象生命周期=本屋） */
+const houseObjCells = new Map<number, HouseObj>();
+function regHouseObj(st: TileStore, x0: number, y0: number, w: number, h: number, kind: 'floor' | 'chand'): void {
+  const obj: HouseObj = { x0, y0, w, h, kind };
+  for (let dx = 0; dx < w; dx++) {
+    for (let dy = 0; dy < h; dy++) {
+      if (st.inBounds(x0 + dx, y0 + dy)) houseObjCells.set(st.idx(x0 + dx, y0 + dy), obj);
+    }
+  }
+}
+
+/** SolidTileAllowBottomSlope（WorldGen.cs）：active && (tileSolid||tileSolidTop) && !half && 非顶坡 */
+function supportOk(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;              // 界外恒 true（原版 InWorld 早退）
+  const i = st.idx(x, y);
+  if (st.flags[i] === 0) return false;
+  if (!vanGenSolidType(st.type[i]) && !HOUSE_SOLID_TOP.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1)) return false;
+  if (st.half[i] !== 0) return false;
+  if (st.slope[i] === 1 || st.slope[i] === 2) return false;  // 顶坡（平台正规顶帧例外略——房内地板无此形态）
+  return true;
+}
+
+/**
+ * ③ ClearTile(frameNeighbors:true) 四邻重验（Check3x2/Check2xX/CheckChand/CheckPile 的
+ * KillTile 段）：支承行任一格失实（floor 族）/顶锚失实（吊灯）→ 整件清除。worldgen 期
+ * KillTile 零掷（house1 ③ 掷数精确含击杀实证）。级联 KillTile 的再邻接重验不建模
+ * （vanilla Check 链在 destroyObject 门内同样短路）。
+ */
+function killUnsupportedFurniture(st: TileStore, cx: number, cy: number): void {
+  if (!st.inBounds(cx, cy)) return;
+  const i = st.idx(cx, cy);
+  if (st.flags[i] === 0) return;
+  const obj = houseObjCells.get(i);
+  if (!obj) return;                                  // 非登记家具（画作/蛛网/主题块）各有别的 Check，不在本路径
+  let dead = false;
+  if (obj.kind === 'chand') {
+    const ai = st.idx(obj.x0 + 1, obj.y0 - 1);       // CheckChand：顶锚 nactive && tileSolid && !solidTop
+    dead = st.flags[ai] === 0 || !vanGenSolidType(st.type[ai]) || HOUSE_SOLID_TOP.has(TILE_DEFS[st.type[ai]]?.vanilla?.sheet ?? -1);
+  } else {
+    for (let k = obj.x0; k < obj.x0 + obj.w; k++) {
+      if (!supportOk(st, k, obj.y0 + obj.h)) { dead = true; break; }
+    }
+  }
+  if (!dead) return;
+  for (let dx = 0; dx < obj.w; dx++) {
+    for (let dy = 0; dy < obj.h; dy++) {
+      const ci = st.idx(obj.x0 + dx, obj.y0 + dy);
+      houseObjCells.delete(ci);
+      st.setTileSilent(obj.x0 + dx, obj.y0 + dy, 0);
+    }
+  }
 }
 
 /** WorldGen.PlaceTile 派发到各型放置器（FillRooms/cascadePlace 用到的型别全收） */
@@ -243,9 +298,22 @@ function placeFurniture(st: TileStore, key: string, x: number, y: number, style 
       return placeWallArt(st, x - 1, y - 1, 4, 3, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
     case 242:                       // Place6x4Wall(cs:44959)：(x-2,y-2) 6×4
       return placeWallArt(st, x - 2, y - 2, 6, 4, t, (dx) => (style % 27) * 72 + dx * 18, (dy) => Math.floor(style / 27) * 108 + dy * 18);
-    case 34: {                      // PlaceChand(cs:52753)：(x-1,y) 3×3 吊挂；(x,y-1) 实心非 solidTop
+    case 34: {                      // PlaceChand(cs:52753)：(x-1,y) 3×3 吊挂；门=九格 !active
+      //   + (x,y-1) nactive && tileSolid && !tileSolidTop——【无下方承地门】(吊灯
+      //   悬顶),曾误走 placeFloorObject 的 below 检查 → 房内吊灯全灭(room1 实锤)
       if (!st.inBounds(x, y - 1) || !solid2(st, x, y - 1) || HOUSE_SOLID_TOP.has(sheetOf(st, x, y - 1))) return false;
-      return placeFloorObject(st, x - 1, y, 3, 3, t, (dx) => (Math.floor(style / 36) * 108) + dx * 18, (dy) => style * 54 + dy * 18);
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = 0; dy < 3; dy++) {
+          if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)] !== 0) return false;
+        }
+      }
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = 0; dy < 3; dy++) {
+          st.setTileSilent(x + dx, y + dy, t, Math.floor(style / 36) * 108 + (dx + 1) * 18, style * 54 + dy * 18);
+        }
+      }
+      regHouseObj(st, x - 1, y, 3, 3, 'chand');
+      return true;
     }
     case 14: case 26: case 86: case 87: case 88: case 89: case 114: case 187: case 215: case 217: case 218:
     case 377: case 469:             // Place3x2(cs:52097)：(x-1,y-1) 3×2，下方逐列 SolidTile2
@@ -289,6 +357,7 @@ function placeStatue(st: TileStore, x: number, y: number, idx: number): boolean 
       st.setTileSilent(x + dx, y - 2 + dy, tile, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
     }
   }
+  regHouseObj(st, x, y - 2, 2, 3, 'floor');
   if (STATUES_WITH_TRAPS.has(idx)) placeStatueTrap(st, x, y);
   return true;
 }
@@ -443,6 +512,16 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'clearTile':
       st.setTileSilent(x, y, 0);
+      // ★ClearTile(frameNeighbors:true)（木屋③专属路径）→ 四邻 WorldGen.TileFrame →
+      //   TileFrameImportant → Check3x2/Check2xX/CheckChand… 重验支承：支承行任一格
+      //   （或吊灯顶锚）已失实 → destroyObject+KillTile 整件（Check3x2 cs KillTile 段）
+      //   ——worldgen 期 KillTile 零掷（house1 ③ 120 掷精确含四件击杀实锤）。不建模则
+      //   家具滞留 → 箱级联占位失败流漂（house1 钢琴占 (2037..2039,353) 挡 vanilla 箱
+      //   (2038,355) 的 AB#560 首异实锤）。
+      killUnsupportedFurniture(st, x + 1, y);
+      killUnsupportedFurniture(st, x - 1, y);
+      killUnsupportedFurniture(st, x, y - 1);
+      killUnsupportedFurniture(st, x, y + 1);
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'clearWall':
       // WorldUtils.ClearWall(x,y,frame)：清墙后 frame=true 时四邻 SquareWallFrame
@@ -686,9 +765,10 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
       // PlaceObject 派发，已撤。
       placeFurniture(st, key, x, y, style);
     } else {
-      // 烛台:顶行悬挂(原版 +54 点亮帧——本引擎烛台恒点亮,帧差不建模)
+      // 烛台:PlaceChand(34)吊灯——key=chandelier(sheet 34;旧误用 'candelabra'
+      // =sheet 100 的独立件,case 34 永不命中 → 吊灯从未放置,room1 实锤)
       const y = r.y + 1;
-      placeFurniture(st, 'candelabra', x, y, rng.int(0, 5), 'top');
+      placeFurniture(st, 'chandelier', x, y, rng.int(0, 5));
     }
   }
   // 装饰循环:W/8+3 件
@@ -711,6 +791,7 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
           && st.inBounds(x + 1, y) && !activeAt(st, x, y) && !activeAt(st, x + 1, y)) {
           st.setTileSilent(x, y, SMALL_PILE, style * 36, 18);
           st.setTileSilent(x + 1, y, SMALL_PILE, style * 36 + 18, 18);
+          regHouseObj(st, x, y, 2, 1, 'floor');
         }
         break;
       }
@@ -793,7 +874,10 @@ function placeDoors(st: TileStore, rooms: Rect[], def: ThemeDef): void {
         placeDoorClosed(st, x, exitY, def.door);
       }
     };
-    const exitR = findSideExit(st, r.x + r.w - 1, r.y + 1, r.h - 2, false);
+    // 右侧扫描起点 = room.X+W（墙体列外一格,HouseBuilder.cs:562 wall=(X+W,Y+1,1,H-2)）
+    // ——曾误用墙体列 X+W-1 → 扫描窗含恒实心墙列,门外洞穴 4×3 极易命中 → 门滥发
+    // （house1 vanilla 无门 vs JS 误门 (2045,352) 实锤）
+    const exitR = findSideExit(st, r.x + r.w, r.y + 1, r.h - 2, false);
     if (exitR !== null) tryDoor(r.x + r.w - 1, exitR);
     const exitL = findSideExit(st, r.x, r.y + 1, r.h - 2, true);
     if (exitL !== null) tryDoor(r.x, exitL);
@@ -890,6 +974,9 @@ function cascadePlace(st: TileStore, rng: RNG, rooms: Rect[], key: string, ceili
 
 // ---------- 宝箱四级联(PlaceChests) ----------
 function placeChests(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, rooms: Rect[], def: ThemeDef, theme: Theme): void {
+  // 头掷（HouseBuilder.cs:672）：`NextDouble() > ChestChance` —— ChestChance=1.0
+  // 恒过门但【掷骰照耗】。旧实现缺此掷 → 箱段流漂 -1（house0 AB#558 dk=-1 实锤）
+  rng.next();
   const tryAt = (x: number, y: number): boolean => {
     const underground = y > gs.worldSurface;
     // 冰屋：显式 style 11 直入冰箱门（cs:36107 第一析取）→ 主件池 + 1/20 提炼机 +
@@ -1029,6 +1116,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 5, st, houseForbid)) return false;
     }
 
+    houseObjCells.clear();   // 家具登记表生命周期=本屋
     // ---- ★builder 构造掷（Wood/Ice/Jungle/DesertHouseBuilder ctor →
     //   PotentiallyConvertToSeedHouse,HouseBuilder.cs:224）：普通种子恒耗
     //   **1 颗 NextFloat**（>0.4f 早退；≤0.4f 走特殊种子转换表，普通种子

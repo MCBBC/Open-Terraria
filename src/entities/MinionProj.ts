@@ -44,7 +44,7 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
   423: [3, 4, 0],  613: [3, 4, 0], // 暴风雨/星尘细胞
   266: [5, 8, 0],   // 史莱姆：fc>4 → frame++，frame≥8 → 0
   317: [5, 4, 0],   // 乌鸦：fc≥4 → frame++，frame>3 → 0
-  387: [4, 3, 0],   // 魔眼：fc>3 → frame++，cap 2
+  387: [4, 3, 0],  388: [4, 3, 0], // 双子眼球：fc>3 → frame++，cap 2（:28878-28888）
   533: [2, 3, 0],   // 致命球：fc>1 → frame++，cap 2
   755: [6, 5, 0],   // 血红杖：fc≥6 循环 5 帧
   759: [6, 4, 0],   // 雀杖：fc≥6，cap projFrames-1=4
@@ -52,6 +52,17 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
   970: [4, 6, 0],   // 阿比盖尔：fc≥4，frame≥6 → 0
   1025: [8, 4, 0],  // 藤壶：慢循环
 };
+
+/** 朝向语义表（原版 spriteDirection/rotation 真值，2026-08-17 镜像修复批）：
+ *  - AI62_LEFT_ART：AI_062（:62983-62990）velocity.X>0 → spriteDirection=-1
+ *    ——贴图朝左、右行才翻转 → facing=-sign(vx)（曾误 facing=sign(vx) 全族镜像）
+ *  - MINION_NO_FLIP：AI_026/AI_164 全程零 spriteDirection 赋值（俾格米191-194/
+ *    宝宝史莱姆266/蜘蛛313·379·390·391/Foxparks1094/计数器831·970）恒不翻转
+ *  - MINION_ROT_ONLY：旋转制不与翻转叠用（原版 dir 恒 None）——双子387/388
+ *    （vel+π）、致命球533、雪花917、龙链625-628、同伴方块653 */
+const AI62_LEFT_ART = new Set([373, 375, 407, 423, 613]);
+const MINION_NO_FLIP = new Set([191, 192, 193, 194, 266, 313, 379, 390, 391, 831, 970, 1094]);
+const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
 
 /** 远程射击随从表（Projectile.cs AI_062/AI_026/aiStyle66 射击分支提取）：
  *  shot=射出弹幕 speed=弹速 cd=冷却 t(源码 ai[1] 递增率折算：373 rand(1,4)/t>90≈36；
@@ -1082,6 +1093,8 @@ export class MinionProj extends Entity {
     if (this.projId === 917 || this.projId === 1036) {
       // 生命与玩家 buff 绑定（AI_177 :42468：coolWhipBuff/cobWhipBuff → timeLeft=2 续命）
       if (!p.whipBuffs[this.projId === 917 ? 312 : 365]) { this.dead = true; return; }
+      // 917 雪花 wobble：rotation = vx*0.0125（AI_177 :42571 旋转制不翻转）
+      if (this.projId === 917) this.rot = this.vx * 0.0125;
       const tgt = this.nearestEnemy(game, 400);
       if (tgt) {
         const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
@@ -1102,12 +1115,6 @@ export class MinionProj extends Entity {
       this.y += this.vy;
       this.contact(game, dmg0, 20); // armorPen 30（:9494）由 contact 内 pen0 两源通道结算
       return;
-    }
-    // 朝向（AI_062 :62975：velocity.X>0 → spriteDirection=-1；近似取
-    // 追敌方向/移动方向的水平符号）
-    {
-      const dirX = tgt ? Math.sign(tgt.cx - this.cx) : Math.sign(this.vx);
-      if (dirX !== 0) this.facing = dirX;
     }
     if (!this.ground) {
       // 飞行：无目标 → 环形槽位悬停玩家侧后；有目标 → 俯冲
@@ -1147,6 +1154,28 @@ export class MinionProj extends Entity {
       }
       this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(this, game.world, this.vx, this.vy);
+    }
+    // 朝向（AI_062 :62983-62990：velocity.X>0 → spriteDirection=-1——贴图朝左，
+    // 右行才翻转 = facing 取 -sign(vx)；963 阿比盖尔特判 ×-1 自带朝右贴图已在其
+    // 专属分支）。原版在移动后的 FindFrame 取 velocity——故置于移动段之后。
+    // AI_026/164 族（俾格米/宝宝史莱姆/蜘蛛/计数器/Foxparks）零 spriteDirection
+    // 赋值恒不翻——渲染端 MINION_NO_FLIP 表承接
+    {
+      const dirX = Math.sign(this.vx);
+      if (dirX !== 0) this.facing = AI62_LEFT_ART.has(this.projId) ? -dirX : dirX;
+    }
+    // 旋转制族：双子 387/388 rotation = velocity.ToRotation()+π（:28859-28861/
+    // :28864-28868——贴图朝左 +π 补偿；387 交战中朝 LOS 目标 :28867）；
+    // 533 致命球滚动 rotation += vx*0.04（:28874-28877）
+    if (this.projId === 387 || this.projId === 388) {
+      let ang = Math.atan2(this.vy, this.vx);
+      if (this.projId === 387 && tgt
+        && canHit(game.world.store, this.x, this.y, this.w, this.h, tgt.x, tgt.y, tgt.w, tgt.h)) {
+        ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
+      }
+      this.rot = ang + Math.PI;
+    } else if (this.projId === 533) {
+      this.rot += this.vx * 0.04;
     }
     // 远程射击（AI_062/AI_026/aiStyle66 射击族：射程门内且冷却好 → 朝目标发射专属弹幕）。
     // 俾格米掷矛带 ±20px 随机抖动（AI_026 :58788 rand(-20,21)/rand(-20,20)）；射击与接触
@@ -1378,8 +1407,11 @@ export class MinionProj extends Entity {
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.imageSmoothingEnabled = false;
-    if (this.rot !== 0) ctx.rotate(this.rot); // 龙链旋转（rotation=vel 方向+PI/2）
-    else if (this.facing < 0) ctx.scale(-1, 1); // spriteDirection 翻转（随从+哨兵通用）
+    // 旋转制族（双子/致命球/雪花/龙链/方块，MINION_ROT_ONLY）：rotation 绘制、
+    // 恒不水平翻转（原版 dir=SpriteEffects.None）；翻转制族 spriteDirection=-1
+    // 才翻（AI_026/164 族零赋值恒不翻，MINION_NO_FLIP）
+    if (this.rot !== 0 || MINION_ROT_ONLY.has(this.projId)) ctx.rotate(this.rot);
+    else if (this.facing < 0 && !MINION_NO_FLIP.has(this.projId)) ctx.scale(-1, 1);
     if (this.projId === 653) {
       // 同伴方块：SetDefaults scale=0.8（:6740）+ rotation 独立累计（cubeRot,
       // rotation+=vx/20——不走龙链 rot,直接套用）;34×34 单帧

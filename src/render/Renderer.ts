@@ -90,6 +90,23 @@ const HOLD_STYLE_ITEMS = new Set([
   282, 286, 3112, 3002, 4776, 5643,
 ]);
 
+/** 原版 noWet=true 物品集（Item.cs 逐 case 字面 `noWet = true` 63 件 + DefaultToTorch
+ *  无 allowWaterPlacement 族 7 件（4383,4385-4388,5293,5353；:48086 `noWet = !allowWater`
+ *  ——4384 水可放火把 allowWater=true → noWet=false 排除）。★523/1333 手写火把块
+ *  【无 noWet】（vanilla 自身不一致——珊瑚火把水下不熄），4952 信号枪/3823 骨焰
+ *  火苗武器 holdStyle≠火把语义不涉。
+ *  持位渲染门 = `(!wet || !noWet)`（Player.cs:36026/:36030）——**逐件判定**，
+ *  芦苇呼吸管 186（holdStyle 2 无 noWet）水下照常显示（此前全局 !inWater 门
+ *  误伤：火把的熄灭语义被扩到所有手持物，呼吸管在水下反而隐身——它的主场景） */
+const NO_WET_ITEMS = new Set([
+  8, 105, 427, 428, 429, 430, 431, 432, 433, 583, 584, 585, 713, 856, 974, 1245,
+  1405, 1406, 1407, 2054, 2144, 2191, 3004, 3045, 3114, 3117, 3173, 3890, 3936,
+  3962, 4150, 4171, 4192, 4213, 4303, 4383, 4385, 4386, 4387, 4388, 4485, 4571,
+  5153, 5174, 5195, 5293, 5322, 5353, 5553, 5606, 5694, 5717, 5743, 5760, 5781,
+  5802, 5823, 5844, 5862, 5883, 5902, 5936, 5959, 5979, 6002, 6025, 6048, 6071,
+  6094, 6115,
+]);
+
 /** useStyle 5 的"法杖持位"物品（Main.cs:6695-6740 Item.staff=true 全 34 件）：
  *  ApplyUseStyle 5 的 staff 分支（Player.cs:50374）把 itemLocation 钉在
  *  MountedCenter + 瞄准向量×6（贴图斜持指向鼠标），与默认持位不同 */
@@ -6640,7 +6657,10 @@ export class Renderer {
     if (!swing) {
       const held = p.inv.heldItem();
       const def = held ? ITEM_DEFS[held.id] : undefined;
-      if (held && def && !p.inWater) {
+      // 水下门 = 逐件 noWet（Player.cs:36026 `(!wet || !noWet)`）——火把/蜡烛族
+      // 水下隐（熄灭语义），芦苇呼吸管 186 等其余手持物水下照常渲染（2026-08-17
+      // 修：曾全局 !p.inWater 把呼吸管在水下隐身）
+      if (held && def && (!p.inWater || !NO_WET_ITEMS.has(viIdFromKey(def.key)))) {
         const vid = viIdFromKey(def.key); // vi_8_Torch 自动解析 8(本地特判已退役)
         // IsFood 门在最前：原版公共尾段无条件覆盖（即使 itemfunc 已录也以 1 为准）
         const hs = vid >= 0 && VANILLA_IS_FOOD.has(vid) ? 1
@@ -6682,8 +6702,8 @@ export class Renderer {
             }
             // 手持火苗（PlayerDrawLayers.cs:3519-3561）：flame 物品在武器贴图之上叠
             // ItemFlame_{id} 单帧 × itemFlamePos 7 槽抖动（每 5 绘制帧重掷）。
-            // 与本体同变换（本 save 块内），dest 即本体矩形；水下门已在上方
-            // （!p.inWater = noWet 熄灭语义）
+            // 与本体同变换（本 save 块内），dest 即本体矩形；水下熄灭门已在上方
+            // （FLAME_ITEMS ⊆ NO_WET_ITEMS——火把族水下整块不进本分支）
             if (ar && vid >= 0 && FLAME_ITEMS.has(vid) && this.atlas) {
               drawHeldItemFlame(ctx, this.atlas, vid, p.facing, { x: 0, y: -fh, w: ar.sw, h: ar.sh }, flicker);
             }
@@ -6744,6 +6764,18 @@ export class Renderer {
     const mOff = mnt ? mnt.playerOffset : 0;
     ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + gfxOff + p.netOffY - mOff); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
+    // 重力反转（gravDir=-1）整体垂直镜像（PlayerDrawSet 全层 FlipVertically）：
+    // 脚底锚 y=0、身体占 y∈[-h,0]——先 translate(0,-h) 再 scale(1,-1) 绕玩家盒
+    // 翻转（脚到盒顶 y=0_world、头到盒底），锚点随转（原版各层锚点 *gravDir 语义）
+    if (p.gravDir === -1) { ctx.translate(0, -p.h); ctx.scale(1, -1); }
+    // 睡床躺平（PlayerSleepingHelper.cs:66-83）：fullRotation = π/2·(−direction)、
+    // origin = Size/2（绕玩家盒中心转）。逐床型 visualOffsetOfBedBase 偏移表
+    // （:227-280）未提取——登记（视觉债清单 docs/behavior-parity-audit C1 批）
+    if (p.sleeping) {
+      ctx.translate(0, -p.h / 2);
+      ctx.rotate(Math.PI / 2 * -p.facing);
+      ctx.translate(0, p.h / 2);
+    }
 
     // ---- 翅膀层（DrawPlayer_09_Wings :655-1040：身后，先于身体绘制）----
     // 表驱动（src/data/vanillaWingVisuals.ts）：逐款切帧数 num14（generic=4，曾误写 7/6）
@@ -6827,21 +6859,46 @@ export class Renderer {
         if (useRow >= 0) row = useRow;
         else if (cart || mnt) row = mnt ? mnt.bodyFrame : 3;  // 坐骑 BodyFrame（Player.cs:36059 bodyFrame=Height*mount.BodyFrame；全坐骑=3）
         else if (Math.abs(p.vx) > 0.3 && p.onGround) {
-          // ★行走循环优先于静持行——原版 PlayerFrame（cs:36012 静持 vs :36178
-          // velocity.X!=0 走路）静持行确实在前，但原版身体/腿是【分图层】：静持只钉
-          // 身体行（手臂持物）、腿照常走 legFrame 循环；本项目纸娃娃是单层合成帧，
-          // 钉行会把腿一起冻结=走路无动画。单层近似：走路时静持行让位（手持物
-          // 仍按上方 holdStyle 持位渲染）
-          row = 6 + Math.floor(p.animTime / 6) % 14;
+          // ★行走循环优先于静持行——原版身体/腿分图层（静持只钉身体行、腿走
+          // legFrame 循环 cs:36184-36186）；单层合成帧近似下静持行让位。
+          // 帧行集/速率 1:1（Player.cs:35829-35847）：legFrameCounter += |vx|·1.3、
+          // 每 8 进一行、行 7..19 共 13 行回绕（曾 6+animTime/6%14——起点/行数/
+          // 速率全偏，混入行6 下落帧每圈闪一帧）
+          row = 7 + Math.floor((p.animTime * 1.3) / 8) % 13;
         }
         else if (staticHoldStyle) {
           // 静持 bodyFrame 行（Player.cs:36007-36040）：1/3/5→行3、2→行2、
-          // 4→站定行 0；6/8 无行分支（7 已在上方置 0 不画）
+          // 4→站定行 0（:36046 需 gravDir==1）；6/8 无行分支（7 已在上方置 0 不画）
           if (staticHoldStyle === 2) row = 2;
-          else if (staticHoldStyle === 4 && p.onGround) row = 0;
+          else if (staticHoldStyle === 4 && p.onGround && p.gravDir === 1) row = 0;
           else row = 3;
         }
-        else if (!p.onGround) row = p.vy < 0 ? 1 : 4;
+        else if (p.inWater && p.swimTime > 0) {
+          // 游泳划水（Player.cs:35791-35807 腿 + :36102-36119 身体三段）：
+          // 腿行 7..19 匀速 counter+2/t；body swimTime>20→行0、>10→行5、≤10→行0
+          // （入水/出水过渡档）。单层帧：body 档为主、划水循环并入下方行档不可分
+          //——腿循环近似为 body 同档（登记：分图层后拆两通道）
+          row = p.swimTime > 20 ? 0 : p.swimTime > 10 ? 5 : 0;
+        }
+        else if (!p.onGround) {
+          // 空中姿态 1:1（Player.cs:35808-35816 腿恒行5 + :36121-36161 身体）：
+          // 滑板 sliding→3、沙暴跳/飞毯→6（:36123-36134 eocDash→6 同段）；
+          // 钩爪悬空段（:36061-36096）：锚点上方→行2、下方→行4、侧向→行3；
+          // 无翼升降均行5；有翼升/按住跳降=行6、松跳降=行5；翼 22/28/45 恒行0。
+          // （曾 vy<0?1:4——行1/4 是挥动动作行，跳跃腿不收、姿态错）
+          if (p.eocDash > 0) row = 6;
+          else if (p.performingJump === 'Sandstorm' || p.carpetTime > 0) row = 6;
+          else {
+            const gr = p.grappleProjs.find((g) => g.latched);
+            if (gr) row = gr.y < p.y ? 2 : gr.y > p.y + p.h ? 4 : 3;
+            else {
+              const wing = p.equipStats.wing;
+              if (!wing) row = 5;
+              else if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) row = 0;
+              else row = (p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0) ? 6 : 5;
+            }
+          }
+        }
         const f = dollFrame(doll, row);
         // 贴底:纸娃娃帧底有 ~2px 透明边距(Player_0_10 全帧实测),底锚会悬空——
         // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿
@@ -6910,17 +6967,22 @@ export class Renderer {
       } else if (Math.abs(p.vx) > 0.3 && p.onGround) {
         // ★行走循环优先于静持行（与纸娃娃路径同因：原版身体/腿分图层，静持只钉
         // 身体行、腿照常走 legFrame 循环（cs:36178）；单层帧近似下静持行让位）
-        const idx = Math.floor(p.animTime / 6) % runFrames.length;
+        const idx = Math.floor((p.animTime * 1.3) / 8) % runFrames.length;   // 行走速率 1:1（:35829-35847 ×1.3/8）
         frame = runFrames[idx] ?? idle;
       } else if (staticHoldStyle === 2) {
         frame = af['Player_20'] ?? idle; // holdStyle 2 → bodyFrame 行 2
-      } else if (staticHoldStyle === 4 && p.onGround) {
-        frame = idle;                    // holdStyle 4 → 站定行 0
+      } else if (staticHoldStyle === 4 && p.onGround && p.gravDir === 1) {
+        frame = idle;                    // holdStyle 4 → 站定行 0（:36046 需 gravDir==1）
       } else if (staticHoldStyle) {
         frame = af['Player_21'] ?? idle; // holdStyle 1/3/5 → bodyFrame 行 3
       } else if (!p.onGround) {
-        // 空中：上升用 12（收腿）、下落用 14（张腿）
-        frame = (p.vy < 0 ? af['Player_12'] : af['Player_14']) ?? runFrames[0] ?? idle;
+        // 空中（:35808-35816/:36121-36161）：无翼升降恒行5（收腿）→ 12；有翼
+        // 升/按住跳降=行6（张腿）→ 14；翼 22/28/45 恒行0 → idle
+        const wing = p.equipStats.wing;
+        if (!wing) frame = af['Player_12'] ?? runFrames[0] ?? idle;
+        else if (wing.slot === 22 || wing.slot === 28 || wing.slot === 45) frame = idle;
+        else frame = ((p.vy * p.gravDir < 0) || (p.inputJump && p.vy * p.gravDir > 0)
+          ? af['Player_14'] : af['Player_12']) ?? runFrames[0] ?? idle;
       } else {
         frame = idle;
       }
@@ -6948,6 +7010,41 @@ export class Renderer {
     }
 
     ctx.restore();
+    // ---- 日曜盾球（DrawPlayer_26_SolarShield, PlayerDrawLayers.cs:3128-3146）----
+    // Extra_61+shields-1 单贴图（1/2/3 层各一张,整簇）；锚 = 玩家中心+solarShieldPos[0]；
+    // 旋转 = atan2(pos.y·0.5, pos.x)（(pos×(1,0.5)).ToRotation()）+ 左朝向 π + π/50·dir；
+    // α 127/255；shader = cBody（身体染料,逐帧真跑 SM2 字节码——贴图仅 ~420px）
+    if (p.solarShields > 0 && !p.dead) {
+      const tex = this.atlas ? this.atlas.ensureVImage(`vanilla/Extra_${61 + p.solarShields - 1}.png`) : null;
+      if (tex) {
+        const pos = p.solarShieldPos[0];
+        let rot = Math.atan2(pos.y * 0.5, pos.x);
+        if (p.facing === -1) rot += Math.PI;
+        rot += Math.PI / 50 * p.facing;
+        const bodyDye = p.inv.dye[1];
+        const dyeVid = bodyDye ? viIdFromKey(ITEM_DEFS[bodyDye.id]?.key ?? '') ?? -1 : -1;
+        const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
+        let src: HTMLImageElement | ImageBitmap | HTMLCanvasElement = tex;
+        if (emu) {
+          const sc = document.createElement('canvas');
+          sc.width = tex.width; sc.height = tex.height;
+          const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+          sctx.drawImage(tex, 0, 0);
+          const id = sctx.getImageData(0, 0, sc.width, sc.height);
+          emu.uniforms.uDirection = p.facing;
+          this.applyDyeToImageData(id.data, sc.width, sc.height, emu);
+          sctx.putImageData(id, 0, 0);
+          src = sc;
+        }
+        ctx.save();
+        ctx.translate(p.x + p.w / 2 + pos.x, p.y + p.h / 2 + pos.y);
+        ctx.rotate(rot);
+        if (p.facing === -1) ctx.scale(-1, 1);   // playerEffect 水平翻转（纹理空间）
+        ctx.globalAlpha = 127 / 255;
+        ctx.drawImage(src, -tex.width / 2, -tex.height / 2);
+        ctx.restore();
+      }
+    }
     // ---- 坐骑身前层（Mount.Draw frontTexture：玩家本体之后绘制）----
     if (mnt) this.drawMountLayer(ctx, p, mnt, 'front', world.groundLevel);
     // ---- 矿车车身（Mount.Draw frontTexture :5500/5826-5835 1:1）----
@@ -7251,15 +7348,27 @@ export class Renderer {
         return n >= 0.5 ? 3 : 2;
       }
       case 5: {
-        // :35986-36005：默认行3；itemRotation*dir < -0.75 → 行2、> 0.6 → 行4。
+        // :35986-36011：默认行3；itemRotation*dir < -0.75 → 行2、> 0.6 → 行4。
         // itemRotation = Atan2(aimY*dir, aimX*dir)（:46730）——朝左时与裸 aim 相差 ±π，
-        // 此前直接 aim*facing 同源错位
+        // 此前直接 aim*facing 同源错位。gravDir=-1 行2↔4 互换（:35996-36011）
         const irot = Math.atan2(Math.sin(swing.aim ?? 0) * p.facing, Math.cos(swing.aim ?? 0) * p.facing);
         const n21 = irot * p.facing;
+        if (p.gravDir === -1) {
+          if (n21 < -0.75) return 4;
+          if (n21 > 0.6) return 2;
+          return 3;
+        }
         if (n21 < -0.75) return 2;
         if (n21 > 0.6) return 4;
         return 3;
       }
+      case 8:
+        return 0;   // :35963-35965 割草机（DefaultToLawnMower）
+      case 11:
+        // :35912-35925 高尔夫球杆三段：>0.5→行4、>0.15→行3、else 行2
+        return pAnim > 0.5 ? 4 : pAnim > 0.15 ? 3 : 2;
+      case 12:
+        return 3;   // :35967-35969 吉他
       case 14:
       case 15:
       case 10:

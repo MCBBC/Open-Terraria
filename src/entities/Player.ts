@@ -235,6 +235,10 @@ export class Player extends Entity {
   /** 日曜冲撞进行中（solarDashing,:20855）;命中已耗盾标记（solarDashConsumedFlare） */
   solarDashing = false;
   private solarDashConsumed = false;
+  /** 盾球环绕偏移/速度（Player.solarShieldPos/Vel :876;轨道更新 :16258-16283,
+   *  渲染 DrawPlayer_26_SolarShield——Extra_61+shields-1 单贴图含全簇） */
+  solarShieldPos = [ { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 } ];
+  solarShieldVel = [ { x: 0, y: 0 }, { x: 0, y: 0 }, { x: 0, y: 0 } ];
   /** 自然回血爬坡计时（Player.lifeRegenTime：受击 :37784 / DoT :18781+ / 流血 :19000 清零，
    *  每 tick 基础 +1（:18930）、蜂蜜 +2（:18954）；本仓自然回血为恒 1HP/s 简化，爬坡只
    *  决定"出伤后多久开始回"（首档阈值 300t :19003）——蜂蜜 3 倍速抵达 */
@@ -467,6 +471,15 @@ export class Player extends Entity {
     return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
   }
 
+  /** 盔甲套染料 vid（Player.cs:9456 ArmorSetDye：Next(3) → 0=cHead/1=cBody/2=cLegs,
+   *  兜底 cBody——dye[0..2] 对应头/身/腿；无染料 → 0=无 shader） */
+  armorSetDyeVid(): number {
+    const pick = Math.floor(Math.random() * 3);
+    const dye = this.inv.dye[pick === 0 ? 0 : pick === 1 ? 1 : 2] ?? this.inv.dye[1];
+    if (!dye) return -1;
+    return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
+  }
+
   get equipStats(): {
     def: number; mana: number; hpPerSec: number;
     dmgMelee: number; dmgRanged: number; dmgMagic: number;
@@ -485,7 +498,7 @@ export class Player extends Entity {
     iceSkate: boolean;   // 冰刀族 950/1861/1862/5000：冰面不滑+加速（:26237-26255）
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
     jumpOpts: string[];
-    wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
+    wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
     killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
@@ -554,7 +567,7 @@ export class Player extends Entity {
     const immuneBuffs = new Set<number>(); // Player.buffImmune（十字章族装备扫描累积）
     let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
     const jumpSet = new Set<string>();
-    let wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
+    let wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
     let jumpSpd = 0, arrowDmg = 0;
     let equipHasQuiver = false;
@@ -600,7 +613,7 @@ export class Player extends Entity {
       const wingSlot = statOfInternal(s.id)?.wing;
       if (wingSlot && wingSlot > 0 && !wing) {
         const ws = wingStatOf(wingSlot);
-        wing = { logic: wingSlot, time: ws.time, accSpeed: ws.accSpeed, accelMult: ws.accelMult, hover: ws.hover };
+        wing = { logic: wingSlot, slot: wingSlot, time: ws.time, accSpeed: ws.accSpeed, accelMult: ws.accelMult, hover: ws.hover };
       }
       // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
       if (statOfInternal(s.id)?.str) yoyoString = true;
@@ -1253,16 +1266,50 @@ export class Player extends Entity {
     // 流血 Bleeding/遮挡 Obstructed 清 lifeRegenTime → 阻断(:18998/:11424);
     // DoT 同清（:18781+）——DoT 期间自然回血重启爬坡
     this.sinceHurt++;
-    // 日曜护盾回充（Player.cs:16227-16260:solarCounter≥180 且 shields<3 → +1 层,重置;
-    // 视觉 buff 170-172/粒子/盾位环绕登记未接）
+    // 日曜护盾回充（Player.cs ApplySetBonus_Solar :16222-16296 全链：
+    //   回充 +1 层时 16×尘6(ArmorSetDye 染料) + AddBuff(170+shields,5)；
+    //   盾球环绕轨道 :16258-16283——Y=半径 6 圆×相位(miscCounter/100·2π+l·2π/shields),
+    //   X 钉朝向 20px(坐骑 52/54/56/61 推远 50/54/40),vel=(target-pos)×0.2 弹簧）
     if (this.equipStats.solarSet) {
       this.solarCounter++;
       if (this.solarCounter >= 180 && this.solarShields < 3) {
         this.solarShields++;
         this.solarCounter = 0;
-        this.buffs.apply(170 + this.solarShields - 1 as never, 5);  // buff 170-172 层视觉(:16240)
+        // :16240-16250 层视觉 buff + 16×尘6（noGravity/scale1.7/fadeIn0.5/v×5/套染料）
+        for (let j = 0; j < 16; j++) {
+          const d = game.vanillaDust?.spawn(this.x, this.y, this.w, this.h, 6,
+            0, 0, 100, null, 1.7);
+          if (d) {
+            d.noGravity = true; d.fadeIn = 0.5;
+            d.vx *= 5; d.vy *= 5;
+            d.dyeVid = this.armorSetDyeVid();
+          }
+        }
       }
     } else { this.solarShields = 0; this.solarCounter = 0; }
+    // 盾球轨道（:16258-16283）+ buff 对账（:10044-10066：层数变即清多余档,
+    // setSolar 在场持续续期 5t；卸套清零）
+    {
+      const mntType = this.ridingMount ? this.mount.type : -1;
+      for (let k = this.solarShields; k < 3; k++) this.solarShieldPos[k].x = this.solarShieldPos[k].y = 0;
+      for (let l = 0; l < this.solarShields; l++) {
+        const pos = this.solarShieldPos[l], vel = this.solarShieldVel[l];
+        pos.x += vel.x; pos.y += vel.y;
+        const ang = (this.miscCounter / 100) * Math.PI * 2 + l * (Math.PI * 2 / this.solarShields);
+        const tx0 = Math.cos(ang) * 6, ty0 = Math.sin(ang) * 6;   // ToRotationVector2 × 6
+        let tx = this.facing * 20;                                 // X 钉朝向（:16269）
+        if (mntType === 52) tx = this.facing * 50;
+        else if (mntType === 54) tx = this.facing * 54;
+        else if (mntType === 56 || mntType === 61) tx = this.facing * 40;
+        vel.x = (tx - pos.x) * 0.2;
+        vel.y = (ty0 - pos.y) * 0.2;
+      }
+      const tiers = [BuffType.SolarShield1, BuffType.SolarShield2, BuffType.SolarShield3] as const;
+      tiers.forEach((bt, i) => {
+        if (this.solarShields > 0 && i + 1 === this.solarShields) this.buffs.apply(bt, 0.5);   // :10046 buffTime=5 持续续期
+        else this.buffs.remove(bt);
+      });
+    }
     this.lifeRegenTime += (1 + (this.buffs.has(BuffType.Honey) ? 2 : 0))
       * (this.usedAegisCrystal ? 1.2 : 1);   // 蜂蜜×3 速(:18954)/神盾水晶 +0.2(:18931)
     // 坐/睡加成（:19053-19056）：lifeRegenTime +3/tick + 自然回血 ×1.3
@@ -1689,8 +1736,12 @@ export class Player extends Entity {
       const slowDebuff = this.buffs.has(BuffType.Slow) || this.buffs.has(BuffType.Burning);
       const chilled = this.buffs.has(BuffType.Chilled);
       const mnt = this.ridingMount ? this.mount : null;   // 坐骑参数接管（Player.cs:26310-26334）
-      // 游泳族坐骑（海龟 131/猪鲨崽 168/熔岩鲨 265 buff 的 ignoreWater）水下不降速
-      let maxRun = PLAYER_WALK_MAX * speedMult * (this.inWater && !(mnt?.swimFree) ? 0.55 : 1);
+      // ★水中不缩 Run 参数：原版 reset(:24096-24099)/moveSpeed 乘区(:25694-25695)/
+      // 装备链(:26184-26300) 全链无任何 wet 因子——水中减速全在位移积分层
+      //（:27874-27888 WetCollision：位移 ×0.5/蜜 0.25/微光 0.375，见下方 liqFactor 段）。
+      // 旧 `inWater→maxRun×0.55` 是自造速度模型：accRun 不缩 → 裸装水中爬坡带
+      // [1.65,3) 非空 → 尘门 vx>(3+1.65)/2=2.325 可越 → 跑尘+脚步声误触发（2026-08-17 修）
+      let maxRun = PLAYER_WALK_MAX * speedMult;
       // accRunSpeed 定值不随 moveSpeed（:25694-25695 只乘 runAcceleration/maxRunSpeed
       // ——旧误乘 speedMult,2026-08-13 修）。裸装基准 = 3：原版每 tick reset
       // :24099 accRunSpeed = maxRunSpeed（reset 时 maxRunSpeed 尚为裸值 3，moveSpeed
@@ -1715,7 +1766,7 @@ export class Player extends Entity {
       // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）
       if (duneBoost && !mnt) { maxRun *= 1.75; accRun *= 1.75; }
       let runAcc = mnt ? mnt.acceleration
-        : RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
+        : RUN_ACCELERATION * (duneBoost ? 1.75 : 1);
       // 冰面滑移（Player.cs:26234-26255，与沙丘靴同链 else-if 语义）：
       //   slippy=IceSkateSlippery 集 {161,162,127,163,164,200,659}、slippy2=197 冻结
       //   史莱姆块（FloorCheck :23454，floorTileT 已带坡面门 :23466）。slippy2：
@@ -1873,7 +1924,8 @@ export class Player extends Entity {
       const trident = heldVid === 277;
     // 跳跃 / 游泳
     // 游泳族坐骑（海龟/猪鲨崽/海盗船/熔岩鲨：坐骑 buff 的 ignoreWater，Player.cs:9592-9608）
-    // 浸水走干燥分支——水下不降速（Run 段已豁免 0.55 系数）、正常重力与跳跃（+5 高/+2.5 速
+    // 浸水走干燥分支——水下不降速（Run 段本就无水因子；位移层 liqFactor 由积分段
+    // ridingMountSwimFree 门豁免）、正常重力与跳跃（+5 高/+2.5 速
     // 在 Mount.JumpHeight/JumpSpeed 的 frameState==4 支线），帧态机自行切游泳帧
     if ((this.inWater || this.inLava) && !this.ridingMountSwimFree) {
       // ---- 液体参数档（Player.cs:24130-24155 wet 链；inWater 已含蜂蜜 type3，
@@ -2392,6 +2444,25 @@ export class Player extends Entity {
     // 碰撞前捕获——碰撞会清零 vy。Game 侧消费：落在起爆器 411 上触发电路）
     const impactVy = this.vy;
     const preY = this.y;
+    // ---- 水中位移减速（Player.cs:27858-27888 湿态碰撞选档 + WetCollision :23157-23172：
+    //      velocity 原值进碰撞、位移 ×factor——水中 vx 照常加速到 3，只是每 tick 只走
+    //      一半路程。经 moveAndCollide 的 liqFactor 入口（NPC MoveWhileWet 同机制）。
+    //      选档：shimmerWet→0.375(num111) > honeyWet&&!ignoreWater→0.25 >
+    //      wet&&!merman&&!ignoreWater&&!trident→0.5（岩浆同 0.5，num109/num110）>
+    //      其余 DryCollision=1。ignoreWater = 游泳族坐骑(:9585-9604) ∪ 脚蹼药 109
+    //      (:9852) ∪ 星旋强化翼 wingSlot26(:14906-14908)；trident=手持三叉戟 277
+    //      (:12487-12490)。shimmering 穿墙分支不走 moveAndCollide，不消费此值。----
+    {
+      const ignoreWater = this.ridingMountSwimFree
+        || this.buffs.has(BuffType.FlipperPotion)
+        || this.equipStats.wing?.slot === 26;
+      const heldIt2 = this.inv.heldItem();
+      const heldVid2 = heldIt2 ? (ITEM_DEFS[heldIt2.id]?.vid ?? viIdFromKey(ITEM_DEFS[heldIt2.id].key)) : -1;
+      this.liqFactor = this.inShimmer ? 0.375
+        : this.inHoney && !ignoreWater ? 0.25
+        : (this.inWater || this.inLava) && !this.merman && !ignoreWater && heldVid2 !== 277 ? 0.5
+        : 1;
+    }
     if (this.shimmering) {
       // 穿墙下坠（Player.cs:27868-27870）：position += velocity × 0.375（num111）——
       // **完全绕过 tile collision**（moveAndCollide/DryCollision 不跑），穿湖底与

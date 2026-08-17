@@ -195,6 +195,11 @@ export enum BuffType {
                       //   melee/ranged/magic/minion/rangedMult 伤害全 ×0.5
                       //   （:25712-25719）。授予 = DD2 萤火虫电击 682 直中 300t
                       //   （:11546-11548）。伤害链消费点在 Player.damageMult，登记
+  // ---- 日曜套护盾层视觉（Player.cs ApplySetBonus_Solar :16240 AddBuff(170+shields,5)；
+  //      纯层位标记 buff——效果在 solarShields 主状态（dashType 3 冲撞吸收 :10044-10066） ----
+  SolarShield1 = 103,  // 日耀烈焰 1 层
+  SolarShield2 = 104,  // 日耀烈焰 2 层
+  SolarShield3 = 105,  // 日耀烈焰 3 层
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -324,6 +329,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.WitheredWeapon]: { vanillaBuff: 196, descKey: 'BuffDescription.WitheredWeapon', fallbackName: '枯萎武器' },
   // 潮湿：描述走原版 BuffDescription.Wet（"你在滴水"，12 语言现成，同 Chilled 先例）
   [BuffType.Wet]: { vanillaBuff: 103, descKey: 'BuffDescription.Wet', fallbackName: '潮湿' },
+  // 日耀护盾三档（170-172）：名称 BuffName.SolarShieldN（日耀烈焰）+ 原版描述
+  [BuffType.SolarShield1]: { vanillaBuff: 170, descKey: 'BuffDescription.SolarShield1', fallbackName: '日耀烈焰' },
+  [BuffType.SolarShield2]: { vanillaBuff: 171, descKey: 'BuffDescription.SolarShield2', fallbackName: '日耀烈焰' },
+  [BuffType.SolarShield3]: { vanillaBuff: 172, descKey: 'BuffDescription.SolarShield3', fallbackName: '日耀烈焰' },
 };
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;

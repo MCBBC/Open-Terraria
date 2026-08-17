@@ -121,6 +121,41 @@ export function sittingHatY(id: number): number {
   return SITTING_HAT_OFFSET_Y[id] ?? SITTING_HAT_OFFSET_Y_DEFAULT;
 }
 
+// ===================== 攻击/坐姿帧带基准（FindFrame NPC.cs:69320 num58 族）=====================
+/** NPCID.Sets.AttackFrameCount（NPCID.cs:4833，默认 0）。num58 =
+ *  npcFrameCount − AttackFrameCount（NPC.cs:69320）——坐姿帧 num58−3
+ *  （:69637-69643）、攻击帧 num58..num58+3（:69765-69847）、聊天/表演帧
+ *  num58−1..−5 族全部以它为带基 */
+export const TOWN_ATTACK_FRAME_COUNT: Record<number, number> = {
+  17: 4, 18: 4, 19: 4, 20: 2, 22: 5, 37: 0, 38: 4, 54: 2, 107: 4, 108: 2,
+  124: 4, 142: 4, 160: 2, 178: 4, 207: 4, 208: 4, 209: 5, 227: 4, 228: 5,
+  229: 5, 353: 4, 633: 4, 368: 5, 369: 4, 453: 4, 441: 4, 550: 4, 588: 4,
+  663: 2, 637: 0, 638: 0, 656: 0, 670: 0, 678: 0, 679: 0, 680: 0, 681: 0,
+  682: 0, 683: 0, 684: 0,
+};
+
+/** num58（NPC.cs:69320）：frames = vanilla-npcs.json frames（= Main.npcFrameCount） */
+export function townNpcBaseFrame(vanillaId: number, frames: number): number {
+  return frames - (TOWN_ATTACK_FRAME_COUNT[vanillaId] ?? 0);
+}
+
+/** GetShootingFrame（NPC.cs:67061-67083）：弓态瞄准帧偏移——ai[2]（= holdAim，
+ *  钳 ±0.5）分五档 −4/0/1/2/3；枪族五人 {22 向导,209 电子人,228 巫医,229 海盗,
+ *  368 游商} +1 档移（平射 −4→1、≥−0.1 再 +1） */
+export function shootingFrameOffset(vanillaId: number, aimY: number): number {
+  let n = -4;
+  if (aimY < -0.3) n = 1;
+  if (aimY < -0.1) n = 0;
+  if (aimY > 0.1) n = 2;
+  if (aimY > 0.3) n = 3;
+  if (vanillaId === 228 || vanillaId === 229 || vanillaId === 209
+    || vanillaId === 22 || vanillaId === 368) {
+    if (n === -4) n = 1;
+    if (aimY >= -0.1) n++;
+  }
+  return n;
+}
+
 // ===================== shimmerTransparency（NPC.cs:6112，0..1）=====================
 export const SHIMMER_ST_RAMP = 0.01;      // 浸微光 +0.01/t（:92469）
 export const SHIMMER_ST_TRANSFORM = 0.9;  // >0.9 触发 GetShimmered（:92471）
@@ -436,6 +471,22 @@ export class TownNPC extends Entity {
   /** 溺水呼吸(NPC.CheckDrowning :96118:初始 200,水内每 7t -1,离水 +3/t) */
   private breath = 200;
   private breathCounter = 0;
+  // ---- 危险逃离（AI_007 危险扫描 NPC.cs:53864-54024 + 逃速 :54319-54326 +
+  //      被逼停冻结 ai[0]==8 :54597-54603/:54682-54690）----
+  /** 本 tick 危险评估 = flag16（扫描命中且未被 PrettySafe 收口，:53876/:53998） */
+  private dangerNear = false;
+  /** num15 最近敌所在侧（-1 左 / 1 右，:53960-53963）——逃离向 = −dangerSide */
+  private dangerSide = 0;
+  /** 本 tick 逃走中（friendly && flag16 → 逃速提档，:54319-54326） */
+  private fleeing = false;
+  /** ai[0]==8 被逼停：前方跳不过且逃命中 flag27 → ai[1]=240 冻结（:54597-54603）；
+   *  态内 ai[1]--、<60 且仍在险 → 续 180（:54686-54690）——站定但仍可还击
+   *  （触发门 flag31 含 ai[0]==8，:55621）；解冻 = 危险侧换到背后（:53969-53977）*/
+  private corneredT = 0;
+  /** ai[0]==8 只读（渲染/测试消费） */
+  get cornered(): boolean { return this.corneredT > 0; }
+  /** StepUp 无位移卡墙计数（:54409-54422：每 10t 强制折返） */
+  private stuckT = 0;
 
   constructor(key: string, x: number, y: number) {
     super();
@@ -681,6 +732,12 @@ export class TownNPC extends Entity {
       && !NO_SIT_NPC_IDS.has(this.vanillaId))
       ? findChairSpot(world.store, this.home.x, this.home.y) : null;
 
+    // ---- 危险评估（NPC.cs:53864-53990 扫描 + 侧选 num15 + PrettySafe 收口）：
+    //      原版在 AI 头部、状态机之前跑。结果 dangerNear/dangerSide 供四处消费：
+    //      逃离覆写（:53990-54024）/ 逃速提档（:54319-54326）/ 越障冻结门
+    //      （:54597-54603 flag16）/ 白天随机坐椅门（flag30 = !flag16，:55620）----
+    this.dangerUpdate(world, game);
+
     let wantDir = 0;
     // 对话中站定并面向玩家（原版 AI_007 NPC.cs:53721-53742：talkNPC==本体 →
     // ai[0]=0 停走、ai[1]=300、direction 指向玩家——杜绝"聊着聊着走开丢对话"）
@@ -763,19 +820,51 @@ export class TownNPC extends Entity {
       }
     }
 
+    // ---- 危险逃离覆写（NPC.cs:53990-54024 + 被逼停推进 :54682-54690）----
+    this.fleeing = false;
+    if (this.corneredT > 0) {
+      // ai[0]==8 冻结态：站定（vx 走下方 wantDir==0 刹车）但仍可还击——attackUpdate
+      // 无 cornered 门（flag31 含 ai[0]==8，:55621），攻击态照常触发/推进
+      this.corneredT--;                                          // :54685 ai[1]--
+      if (this.corneredT < 60 && this.dangerNear) this.corneredT = 180;   // :54686-54690 在险续冻
+      // 解冻（:53969-53977）：危险已换侧到面前（facing == −num15）→ 恢复走路
+      if (this.dangerNear && this.facing === -this.dangerSide) {
+        this.corneredT = 0;
+        this.wanderT = 300 + Math.floor(Math.random() * 300);
+      }
+      wantDir = 0;
+    } else if (this.dangerNear && this.atkState === 0) {
+      // :53990-54024：非攻击态（ai[0]∉{10,12,13,14,15}）背向最近敌走逃——
+      // 坐姿不豁免（原版 ai[0]==5 不在攻击态排除列，扫描直接改 ai[0]=1 = 拽起逃跑）
+      if (this.sitting) { this.sitting = false; this.sitTimer = 0; }
+      this.fleeing = true;
+      wantDir = -this.dangerSide;
+    }
+
     // ---- 坐姿（ai[0]==5 族，见 sittingUpdate 注）----
     if (this.sittingUpdate(world, game)) wantDir = 0;
 
     // ---- 自卫攻击（AI_007 攻击态 ：54747-55538;攻击中站定替代游走）----
     if (this.attackUpdate(world, game)) wantDir = 0;
 
+    // ---- 行走随机坐椅（NPC.cs:55774-55814，原版无昼夜门：flag30 = ai[0]<2 &&
+    //      !flag16 && !wet（:55620）→ ai[0]==1 行走态 && 站地 && rand(300)==0
+    //      （num=300；宠物/城镇史莱姆 0 恒不触发）→ 脚下格（Bottom−2px）为椅/
+    //      马桶且无其他坐姿 NPC/玩家占位 → 坐 900+rand(10800)）----
+    if (this.tryRandomChairSit(world, game, wantDir)) wantDir = 0;
+
     // ---- 环境与互殴受击(NPC.cs:91534-91544:townNPC 每帧 CheckDrowning +
     //      GetHurtByOtherNPCs;岩浆走 Collision_LavaCollision :94511-94530)----
     this.envHurtUpdate(world, game);
 
 
-    this.vx += wantDir * 0.06;
-    this.vx = Math.max(-0.8, Math.min(0.8, this.vx));
+    // 逃速提档（:54319-54326）：num22 = 1.5+失血比例×0.9、num23 = 0.1（常态
+    // 1 / 0.07）——按本仓常走校准（max 0.8 / accel 0.06）同比缩放保 1.5× 手感；
+    // flag21 溺水快游档本仓城镇 NPC 无涉水走路场景，略
+    const fleeSpd = this.fleeing ? 0.8 * (1.5 + (1 - this.hp / this.maxHp) * 0.9) : 0.8;
+    const walkAcc = this.fleeing ? 0.06 * (0.1 / 0.07) : 0.06;
+    this.vx += wantDir * walkAcc;
+    this.vx = Math.max(-fleeSpd, Math.min(fleeSpd, this.vx));
     if (wantDir === 0) {
       // 原版驻留刹车（NPC.cs:54096-54106）：不走路时每 tick ±0.1 主动减速。
       // 缺此刹车时 facing=0（站立意图）仍以 0.8px/tick 惯性滑行且贴图不镜像
@@ -784,11 +873,35 @@ export class TownNPC extends Entity {
       else if (this.vx < -0.1) this.vx += 0.1;
       else this.vx = 0;
     }
-    if (this.onGround && this.hitWall && wantDir !== 0) this.vy = -6; // 跳台阶
+    // ---- 越障三档跳 + 净空失败转身/被逼停（NPC.cs:54514-54611；替代旧单档
+    //      hitWall→vy=−6）。门 = 站地且正沿行向移动（velocity.X 与 direction
+    //      同号，:54517）；三档 = 障碍两格上 −6 / 一格上 −5 / 半格 −4.4，跳前
+    //      查头顶净空（SolidTilesVersatile，越界视为堵），跳不过 → 转身
+    //      （flag26），逃命中再叠加冻结 240t（flag27 → ai[0]=8）----
+    let turned = false;
+    if (this.onGround && wantDir !== 0 && this.vx !== 0 && Math.sign(this.vx) === wantDir) {
+      turned = this.obstacleJump(world, wantDir);
+    }
+    const preX = this.x;
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, world, this.vx, this.vy);
     if (this.hitWall) this.vx *= 0.5;
-    if (wantDir !== 0) this.facing = wantDir;
+    // ---- StepUp 卡墙折返（NPC.cs:54409-54422）：站地行走中 StepUp 无位移
+    //      （x 一格未动）累计满 10t → 强制折返（ai[0]=1、ai[1]=200+rand(300)、
+    //      direction/vx 双翻）。原版另有 ai[1]<100 门（走态末段才折）——本仓
+    //      wanderT 语义（随机转向计时）与 ai[1] 不同源，以 10t 节流近似 ----
+    if (wantDir !== 0 && this.onGround && Math.abs(this.x - preX) < 0.01) {
+      this.stuckT++;
+      if (this.stuckT % 10 === 0) {
+        this.facing = -this.facing;
+        this.vx = -this.vx;
+        this.wanderT = 200 + Math.floor(Math.random() * 300);
+        turned = true;
+      }
+    } else {
+      this.stuckT = 0;
+    }
+    if (!turned && wantDir !== 0) this.facing = wantDir;
     // 开关门（原版 54478-54500：撞到关着的门 → 1/10（或卡住必试）开门，两方向回退；
     // 54243-54252：走过门 >2 格关门，>4 格放弃）
     this.npcDoorUpdate(world, game);
@@ -798,18 +911,36 @@ export class TownNPC extends Entity {
 
   }
 
-  /** FindFrame 城镇分支（NPC.cs:70172-70262）：腾空=帧1；地面站定=帧0、计数清零；
+  /** FindFrame 城镇分支（NPC.cs:70172-70262 + 前置 ai 态链 :69310-69847）：
+   *  腾空（velocity.Y!=0 整链旁落）= 帧1；坐姿 ai[0]==5 = num58−3（:69637-69643）；
+   *  攻击态 ai[0]∈{10,12,14,15} 按原版分档（attackFrame）；地面站定=帧0、计数清零；
    *  行走 frameCounter += |vx|*2+1，>6 推进，帧区间 2..frames-extra-1（越界回卷
-   *  帧2）。微光上升态同样调（原版 FindFrame 在 AI 早退之后仍执行 :91565） */
+   *  帧2）。微光上升态同样调（原版 FindFrame 在 AI 早退之后仍执行 :91565）。
+   *  被逼停 ai[0]==8 不在原版 ai 态链（落 velocity.X==0 空闲帧 0）；玩家对话
+   *  （talkNPC==本体 :53721 置 ai[0]=0）原版同落帧 0——NPC↔NPC 聊天表演帧
+   *  （num58−1..−5 族 :69678-69930，ai[0]∈{3,4,7,16,17}）本仓无对应状态机，
+   *  登记未接 */
   private updateWalkFrame(): void {
     if (!this.onGround) {
       this.frame = 1;
       this.frameT = 0;
-    } else if (Math.abs(this.vx) < 0.05) {
+      return;
+    }
+    const total = VANILLA_NPCS[String(this.vanillaId)]?.frames ?? 1;
+    const base = townNpcBaseFrame(this.vanillaId, total);   // num58（:69320）
+    if (this.sitting) {
+      this.frame = base - 3;                                // :69638-69644（637 例外不在本仓）
+      this.frameT = 0;
+      return;
+    }
+    if (this.atkState !== 0) {
+      this.attackFrame(base);
+      return;
+    }
+    if (Math.abs(this.vx) < 0.05) {
       this.frame = 0;
       this.frameT = 0;
     } else {
-      const total = VANILLA_NPCS[String(this.vanillaId)]?.frames ?? 1;
       const extra = TOWN_NPC_IDS[this.npcKey]?.extra ?? 2;
       this.frameT += Math.abs(this.vx) * 2 + 1;
       if (this.frame < 2) this.frame = 2;
@@ -819,6 +950,34 @@ export class TownNPC extends Entity {
       }
       if (this.frame >= total - extra) this.frame = 2;
     }
+  }
+
+  /** 攻击态帧（FindFrame NPC.cs:69765-69847）：
+   *  - 近战 10：态内计数（frameCounter，入态清零 :54756）四档 0→num58→+1→+2→+3，
+   *    档距 num79=6（633 狼人 0/2），windup num78=10（633:0）（:69765-69786）
+   *  - 挥击 15：按 ai[1]/AttackTime 比例四档 >0.65/0.5/0.35/0（:69787-69802）
+   *  - 弓 12：num58+GetShootingFrame(ai[2])（:69827，表 :67061）
+   *  - 魔法 14：每 12t 交替 num58/num58+1（:69832-69847） */
+  private attackFrame(base: number): void {
+    if (this.atkState === 10) {
+      const windup = this.vanillaId === 633 ? 0 : 10;   // num78
+      const step = this.vanillaId === 633 ? 2 : 6;      // num79
+      const c = this.atkTick;
+      this.frame = c < windup ? 0
+        : c < windup + step ? base
+          : c < windup + step * 2 ? base + 1
+            : c < windup + step * 3 ? base + 2
+              : c < windup + step * 4 ? base + 3 : 0;
+    } else if (this.atkState === 15) {
+      const t = TOWN_ATTACK_TIME[this.vanillaId] ?? 15;
+      const r = this.atkTimer / t;                      // num82 = ai[1]/AttackTime
+      this.frame = r > 0.65 ? base : r > 0.5 ? base + 1 : r > 0.35 ? base + 2 : r > 0 ? base + 3 : 0;
+    } else if (this.atkState === 12) {
+      this.frame = base + shootingFrameOffset(this.vanillaId, this.holdAim);
+    } else {                                            // 14 魔法
+      this.frame = this.atkTick % 24 < 12 ? base : base + 1;
+    }
+    this.frameT = 0;
   }
 
   /** AI_007 ai[0]==25 微光上升态（NPC.cs:53594-53682）1:1，返回 true = 态中。
@@ -981,6 +1140,130 @@ export class TownNPC extends Entity {
     }
   }
 
+  /** 危险扫描（NPC.cs:53864-53990）1:1（单机 netMode!=1）：
+   *  - num11 = DangerDetectRange（默认 200；对话中 AttackType==3（挥击族）钳 ≥250，
+   *    :53866-53874 flag5）
+   *  - 敌门（:53887-53891）：!friendly && damage>0 且 < num12 距离 且 LOS
+   *    （noTileCollide 敌直通——本仓敌实体均 tileCollide，canHit 统一）
+   *  - num13/num14 = 左/右侧最近敌 dx（左取最大负、右取最小正，:53923-53945）
+   *  - num15 危险侧（:53960-53963）：仅右 → 1；仅左 → −1；两侧 → 近者侧
+   *  - PrettySafe 收口（:53998-54002）：最近敌距离仍 > PrettySafe → 不算险
+   *    （向导 200 等远程族"够远就当没看见"——逃与还击（flag31 同源）一起停） */
+  private dangerUpdate(world: import('../world/World').World, game: GameHooks): void {
+    this.dangerNear = false;
+    this.dangerSide = 0;
+    let range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
+    if (this.talking && TOWN_ATTACK_TYPE[this.vanillaId] === 3 && range < 250) range = 250;
+    let bestL = -1, bestR = -1;                       // num13/num14
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+        damage?: number; def?: { damage?: number } };
+      if (e.dead) continue;
+      const edmg = e.damage ?? e.def?.damage ?? 0;
+      if (edmg <= 0) continue;                        // friendly||damage<=0 不算（:53887）
+      const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
+      const dx = ecx - this.cx;
+      if (Math.hypot(dx, ecy - this.cy) >= range) continue;   // num12==num11（本仓无 250 扩程态）
+      if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+      if (dx < 0) { if (bestL === -1 || dx > bestL) bestL = dx; }
+      else { if (bestR === -1 || dx < bestR) bestR = dx; }
+    }
+    if (bestL === -1 && bestR === -1) return;
+    this.dangerSide = bestL === -1 ? 1 : (bestR !== -1 ? (bestR < -bestL ? 1 : -1) : -1);
+    let nearest = bestL !== -1 ? -bestL : 0;          // num20
+    if (nearest === 0 || (bestR !== -1 && bestR < nearest && bestR > 0)) nearest = bestR;
+    const pretty = TOWN_PRETTY_SAFE[this.vanillaId];
+    if (pretty !== undefined && pretty < nearest) return;   // :53998-54002 收口
+    this.dangerNear = true;
+  }
+
+  /** 越障三档跳 + 净空失败转身/被逼停（NPC.cs:54514-54611）。返回 true = 已折返
+   *  （调用方保住翻转后的 facing 不被 wantDir 回写）。
+   *  tile 探针（:54499-54501）：num26 = 前方列（center+15×dir）、num27 = 脚部行
+   *  （Bottom−16px）；tileSafely5/4/3 = num27−2/−1/num27 本行。净空检查
+   *  SolidTilesVersatile（Collision.cs:3450，越界视为堵 :3468-3479）——isSolid
+   *  已排除 solidTop 家具（≈ tileSolid && !tileSolidTop）。flag25 = 身高 <3 格
+   *  （42px → true）：两格档需 t5&&t4 同实心（矮个头顶要能过） */
+  private obstacleJump(world: import('../world/World').World, wantDir: number): boolean {
+    const st = world.store;
+    const dir = wantDir;
+    const ax = Math.floor((this.cx + 15 * dir) / TILE);          // num26（:54515）
+    const fy = Math.floor((this.y + this.h - 16) / TILE);        // num27（:54516）
+    const solidRange = (x1: number, x2: number, y1: number, y2: number): boolean => {
+      if (x1 < 0 || x2 >= st.w || y1 < 0 || y2 >= st.h - 40) return true;
+      for (let x = x1; x <= x2; x++) for (let y = y1; y <= y2; y++) if (st.isSolid(x, y)) return true;
+      return false;
+    };
+    const t5 = st.isSolid(ax, fy - 2), t4 = st.isSolid(ax, fy - 1), t3 = st.isSolid(ax, fy);
+    const shortBody = this.h / 16 < 3;                  // flag25（:54502）
+    let turn = false, freeze = false;
+    if (t5 && (!shortBody || t4)) {
+      // 两格上障碍：净空 = 身侧两列 num27−5..−1 + 障碍列 −5..−3（:54522-54526）
+      if (!solidRange(ax - dir * 2, ax - dir, fy - 5, fy - 1)
+        && !solidRange(ax, ax, fy - 5, fy - 3)) this.vy = -6;
+      else if (this.dangerNear) { freeze = true; turn = true; }   // flag16（:54527-54530）
+      else turn = true;
+    } else if (t4) {
+      // 一格上障碍：净空 −4..−1 / 障碍列 −4..−2（:54533-54537）
+      if (!solidRange(ax - dir * 2, ax - dir, fy - 4, fy - 1)
+        && !solidRange(ax, ax, fy - 4, fy - 2)) this.vy = -5;
+      else if (this.dangerNear) { freeze = true; turn = true; }
+      else turn = true;
+    } else if (this.y + this.h - fy * 16 > 20 && t3
+      && st.slope[st.idx(ax, fy)] !== 1 && st.slope[st.idx(ax, fy)] !== 2) {
+      // 半格障碍（bottom 沉入脚部行 >20px 且非上坡面，:54542-54546）：净空 −3..−1
+      if (!solidRange(ax - dir * 2, ax, fy - 3, fy - 1)) this.vy = -4.4;
+      else if (this.dangerNear) { freeze = true; turn = true; }
+      else turn = true;
+    }
+    if (freeze) {                                        // flag27（:54596-54600）
+      this.corneredT = 240;                              // ai[0]=8 / ai[1]=240
+      this.fleeing = false;
+      this.vx = 0;
+    }
+    if (turn) {                                          // flag26（:54604-54608）
+      this.facing = -dir;
+      this.vx = -this.vx;
+    }
+    return turn;
+  }
+
+  /** 行走随机坐椅（NPC.cs:55774-55814）：行走态（wantDir!=0 ≈ ai[0]==1）站地
+   *  rand(300)==0 → 脚下格（Bottom−2px）为椅/马桶（canSitAt 含 style 27 排除，
+   *  :55803-55807）且无占位 → 坐。占位门 = 其他坐姿城镇 NPC（Bottom−2px 同格，
+   *  :55782-55790）+ 坐姿玩家（Center 同格，:55791-55799）。落座锚与夜路径同构：
+   *  原版 Bottom=(x*16+8+2*dir, y*16+16)（:55810）≡ sittingAnchor(x, y+1, dir)，
+   *  故复用 forceSit（占位/朝向/锚点/时长 900+rand(10800) 全同链） */
+  private tryRandomChairSit(
+    world: import('../world/World').World, game: GameHooks, wantDir: number,
+  ): boolean {
+    if (wantDir === 0 || !this.onGround || this.sitting || this.talking
+      || this.atkState !== 0 || this.corneredT > 0
+      || this.dangerNear                                  // flag30 的 !flag16（:55620）
+      || NO_SIT_NPC_IDS.has(this.vanillaId)) return false; // num=0 恒不触发（:53369-53373）
+    if (Math.random() >= 1 / 300) return false;           // rand(num)==0（num=300）
+    const st = world.store;
+    const px = Math.floor(this.cx / TILE);
+    const py = Math.floor((this.y + this.h - 2) / TILE);  // Bottom−2px（:55777）
+    if (!st.inBounds(px, py)) return false;
+    const ti = st.idx(px, py);
+    if (!canSitAt(st.type[ti], st.frameY[ti])) return false;
+    for (const o of game.npcs?.() ?? []) {                // NPC 占位（:55782-55790）
+      const n = o as { sitting?: boolean; cx?: number; y?: number; h?: number; dead?: boolean };
+      if (o === this || n.dead || !n.sitting) continue;
+      const ox = Math.floor((n.cx ?? 0) / TILE);
+      const oy = Math.floor(((n.y ?? 0) + (n.h ?? 0) - 2) / TILE);
+      if (ox === px && oy === py) return false;
+    }
+    const pl = (game as unknown as {
+      player?: { x: number; y: number; w: number; h: number; sitting?: boolean };
+    }).player;                                            // 玩家占位（:55791-55799）
+    if (pl?.sitting
+      && Math.floor((pl.x + pl.w / 2) / TILE) === px
+      && Math.floor((pl.y + pl.h / 2) / TILE) === py) return false;
+    return this.forceSit(world, game, { x: px, y: py + 1 });   // 落座地面行 = 椅格+1
+  }
+
   /** 城镇 NPC 自卫攻击（AI_007 攻击态机,NPC.cs:54747-55538 + 触发门 :55621-55966）。
    *  返回 true = 攻击态中(调用方停走)。语义对照:
    *  - flag31 门 ≈ 空闲+站地+触发冷却尽+探测范围内有可打敌(flag16;stinky 分支无系统跳过)
@@ -1013,8 +1296,12 @@ export class TownNPC extends Entity {
       && shouldBestiaryGirlBeLycantrope(world.clock.moonPhase, world.clock.bloodMoon, world.clock.isDay);
     if (this.atkState === 0) {
       // 触发门:站地 + 冷却尽 + 探测范围内有 LOS 敌(:55621 flag31 + :55864 族掷骰)
-      // 坐姿 ai[0]==5 不满足 flag31 的 ai[0]<2 门(:55621)——坐着不打,起身再打
-      if (!this.onGround || this.atkCd > 0 || this.talking || this.sitting) return false;
+      // 坐姿 ai[0]==5 不满足 flag31 的 ai[0]<2 门(:55621)——坐着不打,起身再打;
+      // flag31 的 (flag16||flag18) 门(:55621)= 危险扫描命中(dangerNear,PrettySafe
+      // 收口后)——远程族"敌在 PrettySafe 外"时逃/打一起停;flag18/flag17=stinky
+      // 双路,本仓无 stinky 载体恒空。被逼停 ai[0]==8 在 flag31 豁免列——站定仍还击
+      if (!this.onGround || this.atkCd > 0 || this.talking || this.sitting
+        || !this.dangerNear) return false;
       const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
       const target = this.pickSideTarget(world, game, range);
       if (!target) return false;

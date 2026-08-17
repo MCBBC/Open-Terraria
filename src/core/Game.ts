@@ -3424,9 +3424,19 @@ export class Game implements GameHooks {
     // itemAnimation 等效注入（CheckDrowning 芦苇管门禁用；swing 在 postUpdate 递减，
     // 此处读到上一帧尾值，≤1 tick 偏差）
     player.itemAnimTicks = this.swing?.t ?? 0;
-    // 手持物品 useTurn 注入（Player :19546 移动改向门的豁免旗——工具镐/斧 true，
-    // 武器 false；vanilla-itemcombat.json 2026-08-13 提取 1141 件）
-    player.itemUseTurn = !!itemCombat(player.inv.heldItem()?.id ?? -1)?.useTurn;
+    // 手持物品 useTurn 注入（Player :19546 移动改向门的豁免旗——工具/食物 true，
+    // 武器 false）。combat 表无 useTurn 列（提取器回填登记遗留）——按 itemfunc
+    // 归档：食物 useStyle 2/9（DefaultToFood :48166 useTurn=true）/可放置族
+    // （DefaultToPlaceableTile :48105 / PlaceableWall :48085 同 true）。
+    // ★旧表达式把本仓 item id 误传给 itemCombat(vid) 恒 undefined → 恒 false
+    {
+      const turnHeld = player.inv.heldItem();
+      const turnDef = turnHeld ? ITEM_DEFS[turnHeld.id] : undefined;
+      const turnVid = turnDef ? (turnDef.vid ?? viIdFromKey(turnDef.key)) : -1;
+      const tf = turnVid >= 0 ? itemFuncOfVid(turnVid) : null;
+      player.itemUseTurn = !!tf && ((tf.useStyle === 2 || tf.useStyle === 9)
+        || !!(tf.createTile || tf.createWall));
+    }
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
     // FlameParticle 步进（Main.UpdateParticles Main.cs:3951-3952 的
@@ -5198,6 +5208,67 @@ export class Game implements GameHooks {
     this.swingTileCutSet.clear();
   }
 
+  /** noUseGraphic 族小表（combat 表缺列，提取器全量回填登记遗留）。
+   *  投掷消耗手写族：投刀 279（Item.cs:4662）/骨 154（:3202）/毒刀 287（:4778）/
+   *  莫洛托夫 2590（:25409）；炸弹族：炸弹 166（:3398）/雷管 167（:3413）/手雷 168
+   *  （:3428）。★手里剑 47/投刀 48 走 DefaultToThrownWeapon（:48065 不设
+   *  noUseGraphic）——持物动画保留，不在此列 */
+  private static readonly NO_USE_GRAPHIC_VIDS = new Set([154, 166, 167, 168, 279, 287, 2590]);
+
+  /** 药水病分档（Player.cs:51085-51120 ApplyPotionDelay + Item.cs:70-76 常量）：
+   *  月光药水 3001 → 随机 2400-4200t（Next(2400,4201)）且当次吃贤者石乘区；
+   *  恢复药水 227/126 → restorationDelay 2700t(45s)；蛋奶酒 1912 → eggnogDelay
+   *  2400t(40s)；蘑菇 5 → mushroomDelay 1800t(30s)；其余 → potionDelay 3600t(60s)。
+   *  贤者石 ×0.75（PhilosopherStoneDurationMultiplier :2276）只作用 potion/
+   *  restoration/mushroom 三档（每帧档位重设 :25193-25200——eggnog 档不在其中），
+   *  不作用已进行的 buff。施加 = AddBuff(21, delay)（max 合并 → buffs.apply） */
+  private applyPotionSickness(vid: number): void {
+    let ticks: number;
+    const p75 = (t: number) => Math.floor(t * 0.75);
+    const ps = this.player.equipStats.pStone;
+    if (vid === 3001) {
+      ticks = 2400 + Math.floor(Math.random() * 1801);   // Main.rand.Next(2400, 4201)
+      if (ps) ticks = p75(ticks);                        // :51094 当次乘区
+    } else if (vid === 227 || vid === 126) {
+      ticks = ps ? p75(2700) : 2700;
+    } else if (vid === 1912) {
+      ticks = 2400;                                      // eggnog 档不吃贤者石
+    } else if (vid === 5) {
+      ticks = ps ? p75(1800) : 1800;
+    } else {
+      ticks = ps ? p75(3600) : 3600;
+    }
+    this.player.buffs.apply(BuffType.Resistance, Math.round(ticks / 60));
+  }
+
+  /** 食物/药水使用音（DefaultToFood Item.cs:48156-48168：非饮族 useStyle 2 =
+   *  SoundID.Item2 咀嚼；useGulp → useStyle 9 = Item3；DefaultToHealingPotion
+   *  :48173 恒 Item3）。UseSound 表缺的按 useStyle 分档兜底 */
+  private foodUseSound(vid: number): void {
+    const wav = vid > 0 ? itemUseSoundWav(vid) : null;
+    if (wav) { this.playSfxFile(wav); return; }
+    if (itemFuncOfVid(vid)?.useStyle === 2) this.playSfxFile('Item_2');
+    else this.sfx.play('drink');
+  }
+
+  /** KillTile_PlaySounds 四档近似（WorldGen.cs:66483-66631）：蛛网 127 → Item27
+   *  （:66487）；草/植物（tileCut/草族表 → Grass 档 :66524）→ Grass.wav；石/矿/砖
+   *  （长表 :66559 → Tink 档）→ Tink；泥土默认 → Dig（:66576 PlaySound(0)）。
+   *  罐=Shatter 走 smashPot、裂砖 481-483=Item127 走 breakCrackedBrick
+   *  （全表 1:1 登记遗留）。专用分支（树/罐/裂砖/轨道/锚桩）各有其音不经过此 */
+  private killTileBreakSound(type: number, x: number, y: number): void {
+    const def = TILE_DEFS[type];
+    if (!def) return;
+    const px = x * TILE + 8, py = y * TILE + 8;
+    if (def.vanilla?.sheet === 127) { this.playSfxFile('Item_27', 1, px, py); return; }
+    if (type !== POT_TILE && TILE_CUT.has(type)) { this.sfx.play('chop', 1, px, py); return; }  // chop=Grass.wav
+    if (/stone|ore|brick|obsidian|ash|gem_|fossil|silt|slate/i.test(def.key)) {
+      this.sfx.play('tink', 1, px, py);
+      return;
+    }
+    this.sfx.play('dig', 1, px, py);
+  }
+
   /** 709 天龙弹的 1110 星圈挂接（Kill 链 :70218-70290）：亡爆消费 80×80 内
    *  同主旧圈（ai1=1 渐隐）+ 新圈 timeLeft=30×Next(2,6) + 圈音 */
   private hookSkyDragonCircle(shot: SkyDragonShot): void {
@@ -6054,18 +6125,11 @@ export class Game implements GameHooks {
         this.player.useTime = spd;
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
-        // 每次挥砍一声：斧砍植物纤维、镐按材质区分土闷/石金（跟随挥砍节奏，不再密集连响）。
-        // 没有生效对象（镐没对准可挖方块 / 斧没对准树）则不出声
-        const hType = this.world.store.get(tx, ty);
-        const hovered = TILE_DEFS[hType];
-        const axeOnTarget = hType === T.TREE || TILE_AXE_SHEETS.has(hovered?.vanilla?.sheet ?? -1)
-          || (hovered?.decor ?? false);
-        const pickOnTarget = hType !== 0 && this.toolCanBreak(hType, dual.power, dual.type);
-        if (dual.type === 'axe' ? axeOnTarget : pickOnTarget) {
-          if (dual.type === 'axe') this.sfx.play('chop');
-          else if (hovered && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(hovered.key)) this.sfx.play('tink');
-          else this.sfx.play('dig');
-        }
+        // 挥击音 = 工具 UseSound（镐/斧/锤 SetDefaults UseSound=Item1，Player.cs
+        // ApplyItemAnimation :50935-50950 每次 (re)start 动画即播——对空挥也响，
+        // 无"对准目标"门）。旧自创 chop/tink/dig 按材质分档已废：材质分档属
+        // 破坏完成音（KillTile_PlaySounds 四档，见 killTileBreakSound/tryMine 尾）
+        this.playUseSound(heldDef!.vid ?? viIdFromKey(heldDef!.key), 'throw');
       }
       // HitTile 节流窗 = 实际挥击间隔（含攻速配饰加成），保证一挥一击
       this.tryMine(tx, ty, dual.power, dual.type, spd, tool.useTime ?? spd);
@@ -6235,15 +6299,20 @@ export class Game implements GameHooks {
         this.player.useTime = 30;
       } else {
         const bt = buffTypeMap[p.buff];
-        // 贤者之石（pStone：药水 CD -25%，Player.pStone → PotionSickness 2850→2140）
-        this.player.buffs.apply(bt, Math.round(p.duration * (this.player.equipStats.pStone ? 0.75 : 1)));
+        // 贤者石不缩增益 buff 时长（PhilosopherStoneDurationMultiplier 只作用药水病
+        // 档位，Player.cs:25193-25200 / ApplyPotionDelay :51085-51120——旧 pStone
+        // 乘区误伤 buff 时长已删；治疗类药水病走 vi 桥 applyPotionSickness 分档）
+        this.player.buffs.apply(bt, Math.round(p.duration));
         if (heldDef.heal) {
           this.player.hp = Math.min(this.player.maxHp, this.player.hp + heldDef.heal);
           this.addDamageNumber(this.player.cx, this.player.y, heldDef.heal, false, '#40E080');
         }
         this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.player.useTime = 60;
-        this.sfx.play('drink');
+        // useTime/useAnimation 17（DefaultToHealingPotion Item.cs:48173-48183；
+        // 旧写死 60——表缺兜 17）
+        this.player.useTime = itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.useTime ?? 17;
+        this.useSwing(heldDef);   // useStyle 9 饮用姿势（:48174）——旧全程无动画
+        this.playUseSound(heldDef.vid ?? viIdFromKey(heldDef.key), 'drink');
         this.cb.onInventoryChanged();
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BuffSeconds', heldDef.name, p.duration));
       }
@@ -6363,6 +6432,9 @@ export class Game implements GameHooks {
       const p = this.player;
       const consume = () => { p.inv.removeAt(p.inv.selected, 1); this.cb.onInventoryChanged(); };
       const flagOnce = (setter: () => void) => { setter(); consume(); };
+      // useStyle 4 举持动画（5337-5342 诸矿晶 45/45、2756/4870 饮用 30、1326 挥 20
+      // ——Item.cs SetDefaults 各 case；useStyle 数据在 itemfunc 表）——旧全程无动画
+      this.useSwing(heldDef);
       switch (pvid) {
         case 3335: // 恶魔之心(:44575-44583):解锁第六配饰槽(专家)
           if (this.world.isExpert || this.world.isMaster) flagOnce(() => { p.inv.extraAccessory = true; });
@@ -6525,6 +6597,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
           this.player.useTime = 30;
         } else {
+          const fvid = fm ? +fm[1] : -1;
           // 原版 buff id → BuffType（BUFF_DEFS 反查；耐药性 21 是治疗副作用不主动施加）
           if (ff.buffType && ff.buffType > 0) {
             const bt = BUFF_BY_VANILLA.get(ff.buffType);
@@ -6535,20 +6608,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (ff.healLife) {
             this.player.hp = Math.min(this.player.maxHp, this.player.hp + ff.healLife);
             this.addDamageNumber(this.player.cx, this.player.y, ff.healLife, false, '#40E080');
-            this.player.buffs.apply(BuffType.Resistance, 60); // 药水病（PotionSickness 近似）
+            this.applyPotionSickness(fvid);   // 药水病分档（ApplyPotionDelay :51085-51120）
           }
           if (ff.healMana) {
             this.player.mana = Math.min(this.player.maxMana, this.player.mana + ff.healMana);
             this.player.buffs.apply(BuffType.ManaSickness, 5); // 魔力眩晕（300t/瓶,max 合并）
           }
           this.player.inv.removeAt(this.player.inv.selected, 1);
-          this.player.useTime = 60;
-          this.sfx.play('drink');
+          // useTime/useAnimation 17（DefaultToFood/HealingPotion Item.cs:48171/:48176；
+          // 旧写死 60——表缺兜 17）
+          this.player.useTime = itemCombat(fvid)?.useTime ?? 17;
+          this.useSwing(heldDef);   // useStyle 2 咀嚼/9 饮用（DefaultToFood :48164）
+          this.foodUseSound(fvid);  // 咀嚼族 Item_2/饮族 Item_3（:48156-48168）
           this.cb.onInventoryChanged();
         }
       }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
-      && (heldDef.ranged || rangedAmmoWeapon(heldDef))) {
+      && (heldDef.ranged || rangedAmmoWeapon(heldDef))
+      // ⑩ autoReuse 边沿门（ItemCheck :42058 controlUseItem && releaseUseItem +
+      //  ItemCheck_AutoReuseLogic :52011-52037——非 autoReuse 件必须真实松开重按）：
+      //  DefaultToBow/RangedWeapon 默认 autoReuse=false（Item.cs:48037/:48057）——
+      //  木弓 39/火枪 96/手枪 164 逐发；真连发件以 combat.autoReuse===true 为准
+      //  （undefined 视为 false，防高阶连发枪被误伤）
+      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true
+        || (inp.mouseDown && !this._prevMouseDown))) {
       // 远程武器（弓/枪/吹箭筒）：PickAmmo + ItemCheck_Shoot 1:1（Player.cs:52590+/46426）
       //   速度 = 弓 shootSpeed + 弹药 shootSpeed；伤害 = 弓 damage + 弹药 damage；
       //   击退 = 弓 kb + 弹药 kb；投射物类型 = 弹药 shoot；音效 = 弓 UseSound(Item5)
@@ -6844,6 +6927,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.entities.add(mol, 'projectiles');
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.player.useTime = c?.useTime ?? 15;
+          this.useSwing(heldDef);   // useStyle 1 挥（DefaultToThrownWeapon :48065）
+          if (Game.NO_USE_GRAPHIC_VIDS.has(vid) && this.swing) this.swing.noGraphic = true;
           this.playUseSound(vid, 'throw');
           this.cb.onInventoryChanged();
           this.input.mouseDown = false;
@@ -6860,6 +6945,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = c?.useTime ?? 15;
+      this.useSwing(heldDef);   // useStyle 1 挥（DefaultToThrownWeapon :48065）——旧无动画
+      if (Game.NO_USE_GRAPHIC_VIDS.has(vid) && this.swing) this.swing.noGraphic = true;
       this.playUseSound(vid, 'throw');
       this.cb.onInventoryChanged();
     } else if (heldDef && [70, 1331, 560].includes(viIdFromKey(heldDef.key))
@@ -6880,7 +6967,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 本仓以"召唤成功才扣"为准（审计 2026-08-13）
         if (summoned) {
           this.player.inv.removeAt(this.player.inv.selected, 1);
-          this.player.useTime = 60;
+          // useStyle 4 举持（70/1331/560 均 Item.cs SetDefaults；useTime 表值 45）
+          this.useSwing(heldDef);
+          this.player.useTime = itemCombat(svid)?.useTime ?? 60;
           this.cb.onInventoryChanged();
         }
       }
@@ -6899,7 +6988,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         else if (mvid === 544) this.summonBoss('twins');
         else this.summonBoss('skeletron_prime');
         this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.player.useTime = 60;
+        this.useSwing(heldDef);   // useStyle 4 举持（556/544/557，Item.cs 机械召唤物）
+        this.player.useTime = itemCombat(mvid)?.useTime ?? 60;
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
@@ -6911,6 +7001,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.scene?.zoneSnow) {
         this.summonBoss('deerclops');
         this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.useSwing(heldDef);   // useStyle 4 举持（5120 useTime 45，Item.cs:43225 族）
         this.player.useTime = 45;
         this.cb.onInventoryChanged();
       }
@@ -7063,7 +7154,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
-    } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) { // 原生 magic 无 autoReuse 字段，维持连发
+    } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0
+      // ⑩ autoReuse 边沿门（ItemCheck :42058 + AutoReuseLogic :52011-52037）：
+      //  DefaultToMagicWeapon 默认 autoReuse=false（Item.cs:48045）——按住连发
+      //  不再成立，须真实松开重按；vi_ 表 autoReuse===true 才连发（undefined
+      //  视为 false，legacy magic 无 vid 数据 → 单发）
+      && (itemCombat(heldDef.vid ?? viIdFromKey(heldDef.key))?.autoReuse === true
+        || (inp.mouseDown && !this._prevMouseDown))) {
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
       const mg = heldDef.magic;
       // 魔力花族：耗魔 -8%（manaCost -= 0.08，Player.cs:14040）；不足时自动喝蓝
@@ -7110,6 +7207,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const triggerAt = tvid === 2350 ? 20 : tvid === 2351 ? 2 : Math.floor(useTime / 2);
       this.player.useTime = useTime;                    // ApplyItemTime
       this.player.itemAnimTicks = useTime;              // 引导姿势(useStyle 4/6/9 holdup)
+      // 渲染层持物姿势认 this.swing（只设 itemAnimTicks 无视觉）——魔镜 50 useStyle 4
+      //（Item.cs:22514 族）/回忆药水 2350 useStyle 6/海螺 4263 useStyle 4 持物
+      this.useSwing(heldDef);
       this.recallChannel = { vid: tvid, kind, triggerAt, consume: tvid === 2350 || tvid === 2351 };
       if (tvid === 2350) {
         this.sfx.play('drink');                         // SoundID.Item3(:42432)
@@ -7203,7 +7303,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const fm = /^vi_(\d+)_/.exec(heldDef.key);
       const ff = fm ? itemFuncOfVid(+fm[1]) : null;
       if (ff?.fishingPole) {
-        this.player.useTime = 30;
+        // 钓竿族统一 useAnimation=useTime=8 + UseSound=Item1（Item.cs:22988-23009
+        // case 2289/2291-2296——combat 表缺 useTime 列，兜 8；旧写死 30）
+        this.player.useTime = itemCombat(fm ? +fm[1] : -1)?.useTime ?? 8;
+        this.useSwing(heldDef);   // useStyle 1 挥竿（:22990）
+        if (this.swing) { this.swing.t = 8; this.swing.dur = 8; }
         // 已有浮标 → 收竿（咬钩中给渔获，否则收回）
         const bobber = this.entities.projectiles.find((e) => e instanceof Bobber && !e.dead) as Bobber | undefined;
         if (bobber) {
@@ -7345,6 +7449,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //   202 处）——投射物即本体，挥动再画持物会重影，这四族不加 swing
     if (cw.kind === 'grenade' || cw.kind === 'magic' || cw.kind === 'shot' || cw.kind === 'summon') {
       this.useSwing(def, ang);
+      // 炸弹族手写 noUseGraphic=true（炸弹 166:3398/雷管 167:3413/手雷 168:3428，
+      // Item.cs SetDefaults）——投射物即本体，双画重影。combat 表缺列 → 族级小表
+      //（提取器全量回填登记遗留）
+      if (cw.kind === 'grenade' && this.swing && Game.NO_USE_GRAPHIC_VIDS.has(critVid)) {
+        this.swing.noGraphic = true;
+      }
     }
     switch (cw.kind) {
       case 'grenade': {
@@ -7456,6 +7566,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const whipAtk = Math.min(3, 1 + swb * owner.equipStats.whipSpd);
         this.player.useTime = Math.max(1, Math.round(whip.useTime / whipAtk));
         whipObj.bonusTagDmg = ps?.tagdmg ?? 0; // I:567 bonusTagDamage
+        // 鞭 useStyle 1 挥动动画 + noUseGraphic=true（DefaultToWhip Item.cs:47473
+        // ——投射物即本体，全族置，不逐 vid 建表）
+        this.useSwing(def, ang);
+        if (this.swing) this.swing.noGraphic = true;
         this.sfx.playWav('whipCrack', 1, owner.cx, owner.cy); // DefaultToWhip UseSound=Item152（鞭响）
         this.input.mouseDown = false;
         break;
@@ -7471,7 +7585,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (head && !head.dead) {
             head.extendDragon(this);
             this.player.useTime = cw.useTime;
-            this.sfx.playWav('summon', 1, this.player.cx, this.player.cy);
+            this.playUseSound(critVid, 'summon');   // UseSound 数据驱动（缺表兜 Item_44）
             this.input.mouseDown = false;
             break;
           }
@@ -7498,7 +7612,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
         }
         this.player.useTime = cw.useTime;
-        this.sfx.playWav('summon', 1, this.player.cx, this.player.cy); // 召唤杖 UseSound=Item44
+        // 召唤音按件（Item.cs UseSound）：缺表兜 Item_44——黄蜂杖 2364=Item_76 等
+        // 真值待提取器补列（表缺时 fallback 'summon'）
+        this.playUseSound(critVid, 'summon');
         this.input.mouseDown = false;
         break;
       }
@@ -8361,10 +8477,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.hitTiles.clear(tx, ty);
       this.breakTile(tx, ty, true);
       this.mining = null;
-      // 破坏完成音：按材质区分
-      if (toolType === 'axe') this.sfx.play('chop');
-      else if (/stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(d.key)) this.sfx.play('tink');
-      else this.sfx.play('dig');
+      // 破坏完成音不再在此分档——统一走 breakTile 内 KillTile_PlaySounds 四档
+      //（WorldGen.cs:66483-66631，见 killTileBreakSound；爆炸/液体冲毁路径同源）
     } else if (toolType === 'axe' && TREE_SHAKEABLE_SHEETS.has(sheet)) {
       // 未砍倒的斧击 → WorldGen.KillTile fail 分支（WorldGen.cs:63759）→ ShakeTree(:63169)。
       // 门 = IsShakeable（TileID.cs:163，仙人掌 80/倒木 488/假人 704 在 tileAxe 但不摇）；
@@ -8702,6 +8816,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 挂物族：空物破坏 → 移除存放记录（TileEntityType.Kill，TileEntity.cs:110-116；
       //  挂物族锚点公式与通用锚点算法在这些 tile 上一致，直接用 ax/ay）
       if (FURNITURE_TILE_KIND.has(type)) removeFurnitureAt(this.world.furnitureItems, ax, ay);
+      this.killTileBreakSound(type, x, y);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
@@ -8761,6 +8876,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (treeOnTop) this.fellTree(x, y - 1);
     if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
     else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
+    this.killTileBreakSound(type, x, y);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
   }
 
@@ -11628,6 +11744,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.player.inv.slots[this.player.inv.selected] = { id: ITEM_BY_KEY[VI(op.swapTo)], stack: 1 };
       this.cb.onInventoryChanged();
     }
+    // 桶族 useStyle 1 挥动（205/206/207 useAnimation 15/useTime 10/autoReuse，
+    // Item.cs 桶族 SetDefaults）——旧成功路径无动画
+    this.useSwing(ITEM_DEFS[ITEM_BY_KEY[VI(bucketVid)]] ?? null);
     this.player.useTime = op.useTime;                       // ApplyItemTime（:45761/:45830 族）
   }
 
@@ -18064,13 +18183,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     p.inWater = st.liquid[st.idx(Math.floor(p.cx / TILE), Math.floor((p.y + p.h - 4) / TILE))] > 100;
     const ix = p.inputX;
     if (ix !== 0) {
-      p.vx += ix * PLAYER_WALK_ACCEL * (p.inWater ? 0.6 : 1);
+      // 水中不缩 vx（Run 参数无水因子，Player.cs:24096-24099 起）——减速全靠下方
+      // moveAndCollide 的 liqFactor ×0.5 位移（WetCollision :27874-27888 同模型）
+      p.vx += ix * PLAYER_WALK_ACCEL;
       p.facing = ix;
     } else {
       p.vx *= p.onGround ? PLAYER_FRICTION : PLAYER_AIR_FRICTION;
       if (Math.abs(p.vx) < 0.05) p.vx = 0;
     }
-    const maxSpd = PLAYER_WALK_MAX * (p.inWater ? 0.55 : 1);
+    const maxSpd = PLAYER_WALK_MAX;
     p.vx = Math.max(-maxSpd, Math.min(maxSpd, p.vx));
     if (p.inWater) {
       // 水物理（:24150-24155）：gravity 0.2 / maxFall 5（与主线程 Player 同步对齐）
@@ -18089,6 +18210,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 松键 +0.01（:22446 原版语义；曾 -2 截断）
     if (!p.inputJump && p.vy < 0) p.vy += 0.01;
     p.dropThrough = !!p.inputDown;
+    p.liqFactor = p.inWater ? 0.5 : 1;   // 湿态位移 ×0.5（WetCollision num109；代理粗判无蜜/微光分档）
     moveAndCollide(p, this.world, p.vx, p.vy);
     if (Math.abs(p.vx) > 0.3 && p.onGround) p.animTime += Math.abs(p.vx);
     else p.animTime = 0;
