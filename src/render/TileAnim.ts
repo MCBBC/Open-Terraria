@@ -81,7 +81,9 @@ const TILE_ANIM_FRAMES: Record<number, number> = {
  *  36px 无缝排布——曾按默认 38 导致每帧 +2px 漂移，火焰像胶片滚动）；
  *  frameY≥36 的行（熄灭/灰烬变体）恒取静止帧 252 */
 export function campfireYOffset(frameY: number): number {
-  return frameY < 36 ? animFrameIdx(215, 324) * 36 : 252;
+  // 熄灭态门 = frameY >= 288（vanilla off 帧带 y=288-323）；fy=0(顶)/18(底) 均 <288
+  // 恒动画。曾 <36 门:style>0 的底行 fy=18+18=36 撞门走熄灭静止 = 另一半错位源。
+  return frameY < 288 ? animFrameIdx(215, 324) * 36 : 0;
 }
 
 /** 全局动画时钟（Game 主循环每帧 +1；暂停时冻结） */

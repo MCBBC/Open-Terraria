@@ -425,6 +425,23 @@ const ACORN_ALT_BY_GROUND_SHEET: Record<number, number> = {
   2: 0, 477: 0, 147: 3, 60: 6, 23: 9, 661: 9, 199: 12, 662: 12,
   109: 15, 492: 15, 53: 18, 116: 21, 234: 24, 112: 27, 633: 30,
 };
+// 草族"转化"放置族（BlockPlacementForAssortedThings :40379-40440）：种子/法杖
+// 的 createTile 落在这些草 tile 上时，放置语义 = 转化【已有】块而非铺空格——
+// 草种 62/圣种→泥土(0)；腐化/猩红种→泥土或泥(59)；丛林/蘑菇/661/662 种→泥(59)；
+// 灰烬草种→灰烬块(57)。再生法杖 213/再生之斧 5295（createTile=2）额外可转
+// 石头(1)/灰砖(38)——"凭空种草"的本体（Item.cs:4003-4016 createTile=2）
+const GRASS_CONVERT_SHEETS = new Set([2, 23, 60, 70, 109, 199, 633, 661, 662]);
+/** 八向至少一格暴露（草种/苔藓/再生法杖放置门共用，SmartCursor :273-274 同源） */
+function exposed8ForPlant(st: TileStore, x: number, y: number): boolean {
+  for (let oy = -1; oy <= 1; oy++) {
+    for (let ox = -1; ox <= 1; ox++) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox, ny = y + oy;
+      if (!st.inBounds(nx, ny) || !st.flags[st.idx(nx, ny)]) return true;
+    }
+  }
+  return false;
+}
 // 地牢砖族（Main.tileDungeon + 41/43/44 裂纹变体）：除数 /2 + 门槛 100
 const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 481, 482, 483]);
 // Main.wallDungeon 墙表（Main.cs:10507-10515：7/8/9/94-99）——KillWall_CheckFailure
@@ -1831,6 +1848,9 @@ export class Game implements GameHooks {
    *  原版 FallenLogDestroyed 在 KillTile【尾部】（tile 清掉之后）才重扫
    *  （WorldGen.cs:49863-49869），曾挂在 breakTile 头部=已毁倒木当夜仍在桩表 */
   private _fallenLogRescan = false;
+  /** 再生法杖/斧采收加成（staffOfRegrowthBonus，Player.cs:40383/:44013——仅在
+   *  法杖定向采收期间置位，消耗于掉落求值） */
+  private _staffHarvestBonus = false;
   private lastMusic = -1;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
@@ -6366,13 +6386,18 @@ export class Game implements GameHooks {
       //  :80900-80964）：鼠标世界格非实心 → 原地放出真 NPC（Enemy 进 critters 桶，
       //  ReleaseNPC default 分支 NewNPC(x,y,Type) 中心锚）+ 消耗 1（consumable）
       {
-        const relNpc = CRITTER_RELEASE_BY_ITEM[viIdFromKey(heldDef.key) ?? -1];
+        const relItemId = viIdFromKey(heldDef.key) ?? -1;
+        const relNpc = CRITTER_RELEASE_BY_ITEM[relItemId];
         if (relNpc) {
           const mtx = Math.floor((this.camera.x + (inp.mouseX - vw2 / 2)) / TILE);
           const mty = Math.floor((this.camera.y + (inp.mouseY - vh2 / 2)) / TILE);
           const st = this.world.store;
           if (st.inBounds(mtx, mty) && !st.isSolid(mtx, mty)) {
-            this.spawnNpcByVanilla(relNpc, mtx * TILE + 8, mty * TILE + 8);
+            // 蝴蝶八物种 Style（Item.cs:21307-21310 placeStyle=1+type-1994 →
+            // ReleaseNPC case 356 ai[2]=Style）
+            const relStyle = relNpc === 356 && relItemId >= 1994 && relItemId <= 2001
+              ? 1 + relItemId - 1994 : undefined;
+            this.spawnNpcByVanilla(relNpc, mtx * TILE + 8, mty * TILE + 8, relStyle);
             this.player.inv.removeAt(this.player.inv.selected, 1);
             this.cb.onInventoryChanged();
             this.player.useTime = 15;                 // useAnimation 15（:47616）
@@ -8803,6 +8828,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return false;
   }
 
+  /** IsAlchemyPlantHarvestable（WorldGen.cs:66203-66227，83 成熟草药的时辰门；
+   *  84 开花恒可收不走此判）：0 日耀草-昼 / 1 月光花-夜 / 3 死亡草-血月或满月夜 /
+   *  4 火叶草-雨 / 5 火焰花-15:45 后且（雨中须地下 y>worldSurface）。2 闪根草、
+   *  6 颠茄无时辰门（仅开花掉种）。Main.time>40500 → timeOfDay > 15.75/24 */
+  private isAlchemyPlantHarvestable(style: number, y: number): boolean {
+    const c = this.world.clock;
+    const raining = !!this.world.weather?.raining;
+    if (style === 0 && c.isDay) return true;
+    if (style === 1 && !c.isDay) return true;
+    if (style === 3 && !c.isDay && (c.bloodMoon || c.moonPhase === 0)) return true;
+    if (style === 4 && raining) return true;
+    if (style === 5 && (!raining || y > this.world.groundLevel) && c.timeOfDay > 15.75 / 24) return true;
+    return false;
+  }
+
   /** IsBottomOfTreeTrunkNoRoots（Player.cs:45168-45185）：干族/棕榈 且非根帧
    *  （frameY 132-176 && frameX∈{22,44}；棕榈无根帧豁免）——再生之斧补种门 */
   private isBottomOfTreeTrunkNoRoots(x: number, y: number): boolean {
@@ -9183,6 +9223,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
                 : null;
       if (mushroomDrop && ITEM_BY_KEY[mushroomDrop] !== undefined) {
         this.spawnDrop(x * TILE + 8, y * TILE + 8, mushroomDrop, 1);
+      }
+      // 药草 83/84（KillTile_GetItemDrops case 83/84，:65726-65750）：style=
+      // frameX/18 → 草药 313+style（6→2358 颠茄）×1；开花附种子 307+style
+      // （6→2357）×Next(1,4)。84 恒开花；83 按 IsAlchemyPlantHarvestable 时辰门。
+      // 再生法杖/斧（staffOfRegrowthBonus :65740-65746）：草 ×Next(1,3)、种子 ×Next(1,6)
+      if (sheet === 83 || sheet === 84) {
+        const style = Math.floor(fx / 18);
+        const herbVid = style === 6 ? 2358 : 313 + style;
+        const seedVid = style === 6 ? 2357 : 307 + style;
+        const bonus = this._staffHarvestBonus;
+        this._staffHarvestBonus = false;
+        const herbKey = VANILLA_ITEM_KEY_BY_ID[herbVid];
+        if (herbKey && ITEM_BY_KEY[herbKey] !== undefined) {
+          this.spawnDrop(x * TILE + 8, y * TILE + 8, herbKey, bonus ? 1 + Math.floor(Math.random() * 2) : 1);
+        }
+        if (sheet === 84 || this.isAlchemyPlantHarvestable(style, y)) {
+          const seedKey = VANILLA_ITEM_KEY_BY_ID[seedVid];
+          if (seedKey && ITEM_BY_KEY[seedKey] !== undefined) {
+            const n = bonus ? 1 + Math.floor(Math.random() * 5) : 1 + Math.floor(Math.random() * 3);
+            this.spawnDrop(x * TILE + 8, y * TILE + 8, seedKey, n);
+          }
+        }
       }
       return;
     }
@@ -9992,6 +10054,91 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
+
+    // ── 草族"转化"放置（BlockPlacementForAssortedThings :40379-40440 1:1）：
+    // 种子/再生法杖的放置目标是【已有可转化块】（非空格）——泥土→草、泥→丛林/
+    // 蘑菇草等。法杖 213/斧 5295 可转泥土/石头/灰砖 = "凭空种草"。八向暴露门。
+    // 转化走 setTile(active→active)：保半砖/坡面/油漆（PlaceTile :59499 语义）
+    {
+      const gt = itemDef.tile ? TILE_BY_KEY[itemDef.tile] : undefined;
+      const gsheet = gt !== undefined ? TILE_DEFS[gt]?.vanilla?.sheet ?? -1 : -1;
+      if (gsheet !== undefined && GRASS_CONVERT_SHEETS.has(gsheet)) {
+        if (this.player.useTime > 0) return;
+        const heldVid = viIdFromKey(itemDef.key);
+        const staff = heldVid === 213 || heldVid === 5295;
+        const target = st.get(tx, ty);
+        const tsheet = target !== 0 ? TILE_DEFS[target]?.vanilla?.sheet ?? -1 : -1;
+        const okTarget =
+          (gsheet === 2 && (staff ? (tsheet === 0 || tsheet === 1 || tsheet === 38) : tsheet === 0))
+          || ((gsheet === 23 || gsheet === 199) && (tsheet === 0 || tsheet === 59))
+          || ((gsheet === 60 || gsheet === 70 || gsheet === 661 || gsheet === 662) && tsheet === 59)
+          || (gsheet === 109 && tsheet === 0)
+          || (gsheet === 633 && tsheet === 57);
+        if (target === 0 || !okTarget || !exposed8ForPlant(st, tx, ty)) return;
+        st.setTile(tx, ty, gt!);
+        this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+        // 种子 consumable 扣 1；法杖/斧非消耗（Item.cs 213 无 consumable）
+        if (itemFuncOfVid(heldVid)?.consumable) {
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.cb.onInventoryChanged();
+        }
+        this.player.useTime = 14;
+        this.sfx.play('place');
+        return;
+      }
+    }
+    // ---- 方块交换 Block Swap（1.4.4+,Player.cs:39182/:39260-39383;原版默认开
+    //  builderAccStatus[10]==0 → TileReplacementEnabled）。手持放置物对准【可替换
+    //  块】→ 先破坏旧块（完整掉落链）再走正常放置。门禁（:39275-39284 + 核心支线）:
+    //  放置物黑名单 DoesntPlace{2,60,70,109,199,23,661,662,633}(草/丛/蘑菇族);
+    //  目标黑名单 DoesntGetReplaced{58,225,171,127,481,482,483,423}(狱岩/晶簇等);
+    //  tileCut 族/家具(frameImportant)非平台不换;同型不换;旧块掉落物==放置物
+    //  不换(:39371-39377 防土换土无限);绳索目标仅换轨道/平台(:39354-39359 简化:
+    //  绳一律不换)。平台/火把/篝火/箱/柜 style 族分支(:39299-39349)登记未接。
+    if (itemDef.tile) {
+      const targetType = st.get(tx, ty);
+      if (targetType !== 0) {
+        const placeVid = viIdFromKey(itemDef.key);
+        const tdef = TILE_DEFS[targetType];
+        const NO_SWAP_PLACE = new Set([2, 60, 70, 109, 199, 23, 661, 662, 633]);
+        const NO_SWAP_TARGET = new Set([58, 225, 171, 127, 481, 482, 483, 423]);
+        const tsheet = tdef?.vanilla?.sheet ?? -1;
+        // tileCut 族(草类)由 decor 近似覆盖;framed 家具不换;solid!==false 排除非实心
+        // (|| 平台 19 族可换——优先级括号已显式)
+        const solidish = tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false;
+        let swapOk = !NO_SWAP_PLACE.has(placeVid) && !NO_SWAP_TARGET.has(tsheet)
+          && !(tdef?.decor ?? false) && !tdef?.framed && solidish;
+        // style 族交换分支(:39299-39349——平台/火把/篝火/箱/柜的逐 style 换,
+        // 同型不同 style 可换;frameX/frameY 偏差超出该 style 的宽 → swap。2026-08-13)
+        let styleSwap = false;
+        if (!swapOk) {
+          const ts = tdef?.vanilla?.sheet ?? -1;
+          if (ts === 19 && placeVid >= 0) {
+            // 平台(:39299-39301):frameY/18 != placeStyle → 换
+            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 18) !== (itemDef.placeStyle ?? 0);
+          } else if (ts === 4 && placeVid >= 0) {
+            // 火把(:39308-39321):frameY/22 != placeStyle → 换
+            styleSwap = Math.floor(st.frameY[st.idx(tx, ty)] / 22) !== (itemDef.placeStyle ?? 0);
+          } else if (ts === 215 && placeVid >= 0) {
+            // 篝火(:39324-39335):frameX/54 != placeStyle → 换
+            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
+          } else if (tdef?.vanilla?.sheet === 21 && placeVid >= 0) {
+            // 箱(:39337-39344):frameX/36 != placeStyle → 换
+            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 36) !== (itemDef.placeStyle ?? 0);
+          } else if (tdef?.vanilla?.sheet === 88 && placeVid >= 0) {
+            // 柜(:39346-39349):frameX/54 != placeStyle → 换
+            styleSwap = Math.floor(st.frameX[st.idx(tx, ty)] / 54) !== (itemDef.placeStyle ?? 0);
+          }
+        }
+        if (styleSwap) { swapOk = true; }
+        if (swapOk) {
+          const tileIdHere = TILE_BY_KEY[itemDef.tile!];
+          if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
+            this.breakTile(tx, ty, true);   // 旧块完整掉落链(音效+成就同破坏)
+          }
+        }
+      }
+    }
     // ---- 方块交换 Block Swap（1.4.4+,Player.cs:39182/:39260-39383;原版默认开
     //  builderAccStatus[10]==0 → TileReplacementEnabled）。手持放置物对准【可替换
     //  块】→ 先破坏旧块（完整掉落链）再走正常放置。门禁（:39275-39284 + 核心支线）:
@@ -10677,13 +10824,26 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const fx = this.world.store.frameX[this.world.store.idx(tx, ty)];
       const bottomSide = (fx % 72 < 36) !== (Math.floor(fx / 72) === 1); // PC:32869-32878
       if (bottomSide && Math.hypot(this.player.cx - (tx + 2) * TILE, this.player.cy - ty * TILE) <= 96) {
-        // StartSleeping（SH:155-191）：搬锚点+清速；再点同床=起床（SH:170-173）
+        // StartSleeping（SH:156-191）+ GetSleepingTargetInfo（:193-224）1:1 锚点：
+        //  床段左列 = 点击列 − frameX%72/18；frameY%36≠0（下半行）行数上修 −1；
+        //  frameX/72 列位 0=朝左床/1=朝右床 → targetDirection 与锚点列偏移
+        //  （0:+1 / 1:+2）；anchor = Point(col, row+1).ToWorld(8,16)，玩家
+        //  Bottom = anchor（曾简化 x=(tx+1)·16/y=(ty−1)·16 → 水平差 ~10-16px、
+        //  垂直差 6-10px、下半行点击不修行——躺姿贴床错位根因）
         this.player.sleeping = !this.player.sleeping;
         if (this.player.sleeping) {
+          const fy = this.world.store.frameY[this.world.store.idx(tx, ty)];
+          const bedLeft = tx - Math.floor((fx % 72) / 18);
+          const row = fy % 36 !== 0 ? ty - 1 : ty;
+          const col = Math.floor(fx / 72);
+          const dir = col === 0 ? -1 : 1;
+          const anchorX = (bedLeft + (dir === -1 ? 1 : 2)) * TILE + 8;
+          const anchorY = (row + 1) * TILE + 16;
           this.player.timeSleeping = 0;
           this.player.vx = 0; this.player.vy = 0;
-          this.player.x = (tx + 1) * TILE; this.player.y = (ty - 1) * TILE; // 锚点=床上格
-          this.player.facing = Math.floor(fx / 72) === 0 ? -1 : 1; // SH:204-210 床朝向
+          this.player.x = anchorX - this.player.w / 2;   // Bottom = anchor
+          this.player.y = anchorY - this.player.h;
+          this.player.facing = dir;
         }
       } else {
         this.world.spawnX = tx + 1;
@@ -10739,14 +10899,44 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 已接 Game.fixedUpdate landImpactVy）——本作并入右键交互
       this.toggleSwitch(tx, ty, type);
     } else if (type === TILE_BY_KEY['v_83_herbs_mature'] || type === TILE_BY_KEY['v_84_herbs_bloom']) {
-      // 药草收获:成熟/开花态右键 → 掉种子(style = frameX/18,WorldGen.cs:38731)
+      // 药草定向采收（PlaceThing :40611-40637 链 1:1；本右键入口是对原版"砍取"
+      // 的 QoL 快捷——原版无右键采收，掉落语义与砍取完全一致）：开花 84 恒可收；
+      // 成熟 83 按时辰门（IsAlchemyPlantHarvestable）。掉落 = case 83/84：
+      // 草药 313+style ×1 + 开花附种子 307+style ×Next(1,4)。手持再生法杖 213/
+      // 再生之斧 5295（:40383 flag）→ 加成（草 1-2 + 种子 1-5）+ 盆栽自动补种
+      // （TryReplantingHerbs :45209-45217：下方 ∈ {78 陶盆, 380 种植箱, 579} →
+      // 原地回种 82 苗，免种子）。★种子表曾 style3/4 序错（310 死亡草/311 水叶
+      // 互换）——改 307+style 权威式
       const i = st.idx(tx, ty);
       const style = Math.floor(st.frameX[i] / 18);
+      const bloomGate = type === TILE_BY_KEY['v_84_herbs_bloom'] || this.isAlchemyPlantHarvestable(style, ty);
+      if (!bloomGate) { this.input.rightDown = false; return; }
+      const heldVid = slotVanillaId(this.player.inv.heldItem()?.id ?? -1);
+      const staff = heldVid === 213 || heldVid === 5295;
+      const herbVid = style === 6 ? 2358 : 313 + style;
+      const seedVid = style === 6 ? 2357 : 307 + style;
+      // 盆栽补种捕获（清格前）：下方 78/380/579 且法杖持有
+      const belowSheet = (() => {
+        const b = st.get(tx, ty + 1);
+        return b !== 0 ? TILE_DEFS[b]?.vanilla?.sheet ?? -1 : -1;
+      })();
+      const replant = staff && (belowSheet === 78 || belowSheet === 380 || belowSheet === 579);
       st.setTile(tx, ty, 0);
-      const seedKeys = ['vi_307_daybloom_seeds', 'vi_308_moonglow_seeds', 'vi_309_blinkroot_seeds',
-        'vi_311_waterleaf_seeds', 'vi_310_deathweed_seeds', 'vi_312_fireblossom_seeds', 'vi_2357_shiverthorn_seeds'];
-      const sk = seedKeys[style] ?? seedKeys[0];
-      this.spawnDrop(tx * 16 + 8, ty * 16, sk, 1);
+      const herbKey = VANILLA_ITEM_KEY_BY_ID[herbVid];
+      if (herbKey && ITEM_BY_KEY[herbKey] !== undefined) {
+        this.spawnDrop(tx * TILE + 8, ty * TILE, herbKey, staff ? 1 + Math.floor(Math.random() * 2) : 1);
+      }
+      const seedKey = VANILLA_ITEM_KEY_BY_ID[seedVid];
+      if (seedKey && ITEM_BY_KEY[seedKey] !== undefined) {
+        const n = staff ? 1 + Math.floor(Math.random() * 5) : 1 + Math.floor(Math.random() * 3);
+        this.spawnDrop(tx * TILE + 8, ty * TILE, seedKey, n);
+      }
+      if (replant) {
+        // PlaceTile(82, herbStyle)：原地回种该草药苗（style 帧 = frameX/18）
+        st.setTile(tx, ty, TILE_BY_KEY['v_82_herbs_sprout'], style * 18, 0);
+        this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+      }
+      this.sfx.play('chop', 1, tx * TILE + 8, ty * TILE + 8);
       this.input.rightDown = false;
     } else if (sh === 35 || sh === 139) {
       // 八音盒/南瓜灯右键（Player.cs:31759-31764）：SoundID 28 + SwitchMB（与电路共用）
@@ -12721,9 +12911,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const noMelee = heldDef.magic || swingCombat?.noMelee;
     const isNet = swingVid === 1991 || swingVid === 3183 || swingVid === 4821;  // :42962 网特判
     // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
-    // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）+ **恒 32×32**
-    // （cs:44489 new Rectangle(itemLocation.X, itemLocation.Y, 32, 32) ×adjustedItemScale≈1，
-    // 与武器贴图尺寸无关——此前误用贴图帧宽高当基底，小武器欠打大武器超打）；
+    // 基础矩形锚 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）；
+    // 尺寸 = **手持贴图帧宽高**（cs:44485-44498 !Main.dedServ 分支整盒替换,
+    // :44483 的 32×32 仅服务器兜底——勿再读成恒 32!）×adjustedItemScale；
     // 方向/重力翻转（cs:44506-44513）；useStyle1 三段扩展（cs:44516-44540）：
     // **早段(anim≥0.666max) 宽×2 高×1.4 X 退 1.2宽 / 中段原样 / 晚段(anim<0.333max)
     // 宽×1.4 高×1.1 Y 下移半高**——此前早/晚段扩展对调，注释也反
@@ -12756,7 +12946,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const p = this.player;
     let bx = p.cx + p.facing * offX;
     let by = p.y + offY;
-    let bw = 32, bh = 32; // 恒定基底（cs:44489），与武器贴图无关
+    // ★基底 = 手持贴图帧宽高(Player.cs:44485-44498 !Main.dedServ 分支:num/num2 =
+    // heldItemFrame 尺寸,×adjustedItemScale——:44483 的 32×32 仅 dedServ 兜底。
+    // 曾误读成"恒 32 与贴图无关"导致长武器判定缩半:村正贴图 64×64 → 判定盒被
+    // 砍到 32(体感"够不着"),小剑反而超打。5094-5097 缩框特例(仓内无此物)与
+    // meleeScaleGlove ×1.1(泰坦手套未实装)不涉及,scale 恒 1)
+    let bw = sprW, bh = sprH;
     if (p.facing === -1) bx -= bw;
     by -= bh;
     if (hitUs === 3) {
@@ -15586,13 +15781,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return this.entities.critters;
   }
 
-  /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义）：瓦罐→整罐碎裂，其余→breakTile */
+  /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义）：瓦罐→整罐碎裂，其余→breakTile。
+   *  手持再生法杖 213/再生之斧 5295 挥割药草 → staffOfRegrowthBonus（:44013-44016，
+   *  ItemCheck_CutTiles 挥击期间置位，breakTile 掉落求值时消费） */
   cutTile(x: number, y: number) {
     const st = this.world.store;
     if (!st.inBounds(x, y)) return;
     const t = st.get(x, y);
     if (t === POT_TILE) this.smashPot(x, y);
-    else if (TILE_CUT.has(t)) this.breakTile(x, y);
+    else if (TILE_CUT.has(t)) {
+      if (t === TILE_BY_KEY['v_83_herbs_mature'] || t === TILE_BY_KEY['v_84_herbs_bloom']) {
+        const hv = slotVanillaId(this.player.inv.heldItem()?.id ?? -1);
+        if (hv === 213 || hv === 5295) this._staffHarvestBonus = true;
+      }
+      this.breakTile(x, y);
+    }
   }
 
   spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2, placeStyle?: number): ItemDrop | null {
@@ -16801,7 +17004,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 按原版 NPC id 出生（小动物入微光 NPC.GetShimmered→Transform、WorldItem 放生
    *  ReleaseNPC 的落点）。联机访客拒绝——转化权威在房主（同 spawnEnemy 门禁）。
    *  入 critters 桶：spawnCritter 的 spawnVanilla 同语义（原版小动物表全量走桶） */
-  spawnNpcByVanilla(id: number, x: number, y: number): Enemy | null {
+  spawnNpcByVanilla(id: number, x: number, y: number, style?: number): Enemy | null {
     if (this.net && !this.net.policy.isHost) return null;
     // 城镇史莱姆族（670/678-684 townNPC=true）→ TownNPC 落 npcs 桶（WorldItem 681 微光链等）
     const townKey = Object.entries(TOWN_NPC_IDS).find(([, v]) => v.id === id)?.[0];
@@ -16812,6 +17015,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const e = Enemy.fromVanilla(id, x, y);
     if (!e) return null;
+    // ReleaseNPC case 356（NPC.cs:80916-80920）：蝴蝶 ai[2] = Style（八物种带,
+    // 捕获物 1994-2001 → placeStyle=1+item-1994,Item.cs:21307-21318）；661 渐隐
+    // 槽/其余族 Style 仅雕像语义不适用释放
+    if (id === 356 && style != null && style >= 1 && style <= 8) e.ai2 = style;
     e.id = this.entities.nextId++;
     this.entities.add(e, 'critters');
     return e;

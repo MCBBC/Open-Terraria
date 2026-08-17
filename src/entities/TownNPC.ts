@@ -1224,6 +1224,9 @@ export class TownNPC extends Entity {
       }
     }
     const preX = this.x;
+    // 湿身上浮助跑（:54646：velocity.Y<0 且 wet → ×1.2——水中跳出更高，与
+    // :54647-54650 TownCritter 的同款 ×1.2 分列）
+    if (this.vy < 0 && this.wet) this.vy *= 1.2;
     // 湿身重力档（UpdateNPC_UpdateGravity :91940-91956）：浸水 0.2/蜜 0.1/
     // 微光 0.15（常态 GRAVITY=0.4 为本仓全仓既有档）；落速帽 7/4/5.5 由
     // updateNpcLiquid 第 6 段钳

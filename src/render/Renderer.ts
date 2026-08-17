@@ -224,7 +224,8 @@ import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSk
 import { mapPaintColor, PAINT_RGB } from '../world/Paint';
 import { Enemy } from '../entities/Enemy';
 import { visEffectFrames } from '../entities/Enemy';
-import { projFrameCount, projFrameImg } from '../entities/Arrow';
+import { projFrameCount, projFrameImg, Arrow } from '../entities/Arrow';
+import { GrenadeProj, SpearProj } from '../entities/WeaponProj';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
@@ -495,6 +496,17 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     const cycLen = Math.max(1, frames - 2);
     const step = Math.floor((e.walkCycleT * (Math.abs(e.vx) * 2 + 1)) / 6);
     return 2 + (step % cycLen);
+  }
+  // 蝶族（FindFrame case 356/444/653/661，cs:73419-73455）：拍翅四段 [0,1,2,1]
+  //  （7t 档；原版 counter 加 (|vx|+|vy|)/2 速度敏感——速率随速近似取定档）。
+  //  356 物种带：frame.Y += 3 帧×(ai[2]-1)（cs:73452-55）——八物种按 ai2 分带
+  //  （出生加权掷/释放 Style 定；444/653/661 单物种帧表 3 帧不分带）
+  if (ai === 65) {
+    const anim = [0, 1, 2, 1][Math.floor(t / 7) % 4];
+    if (id === 356 && e.ai2 >= 1 && e.ai2 <= 8) {
+      return Math.min(frames - 1, (e.ai2 - 1) * 3 + anim);
+    }
+    return Math.min(frames - 1, anim);
   }
   // 游泳族（case 65 鲨鱼 L75386+）：frame = (counter/4) % 4
   if (ai === 16) return frames > 3 ? Math.floor(t / 4) % Math.min(4, frames) : Math.floor(t / 6) % frames;
@@ -9107,6 +9119,20 @@ export class Renderer {
       else if (ent instanceof Critter) box(ent, '#44AAFF', ent.key);
       else if (ent instanceof ItemDrop) box(ent, '#FFAA00');
       else if (ent instanceof Tombstone) box(ent, '#AA88FF', 'tomb');
+      // 投射物族（爆炸物/箭/弹/长矛等）：橙红盒 + 型号标注——碰撞盒与贴图的对齐
+      // 目视核对工具（贴图含引线/柄等非碰撞区域,盒偏小属原版行为）
+      else if (ent instanceof GrenadeProj) {
+        const gp = ent as unknown as { projId: number; damage: number; fuse: number };
+        box(ent, '#FF6600', `proj${gp.projId} ${ent.w}×${ent.h} fuse:${gp.fuse}`);
+      } else if (ent instanceof Arrow) {
+        const ap = ent as unknown as { projId?: number; hostile?: boolean };
+        box(ent, ap.hostile ? '#FF0066' : '#66FF99', `arrow${ap.projId ?? ''} ${ent.w}×${ent.h}`);
+      } else if (ent instanceof SpearProj) {
+        box(ent, '#FFCC00', `spear${(ent as unknown as { projId: number }).projId} ${ent.w}×${ent.h}`);
+      } else if (typeof (ent as { draw?: unknown }).draw === 'function' && ent.constructor.name !== 'Player') {
+        // 其余带 draw 的投射物（Dart/TrapShot/MagicProj/Celeb2 等）
+        box(ent, 'rgba(255,120,0,0.6)', `${ent.constructor.name} ${ent.w}×${ent.h}`);
+      }
     }
     // 鼠标指向 tile
     const [htx, hty] = cam.tileUnder(mouseX, mouseY);

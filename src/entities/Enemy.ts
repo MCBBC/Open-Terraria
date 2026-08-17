@@ -81,12 +81,16 @@ import {
   scaleStatsWorld, applySeedAdjustments, type SeedAdjustStats, f32,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
-import { rollLuck } from '../stats/Luck';
+import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { spawnNpcDeathGore } from './GorePiece';
 import { hslToRgb } from '../player/Appearance';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
+
+/** NPCID.Sets.CritterThatCanTurnOnPlayers（NPCID.cs:4779）：松鼠族 + 宝石松鼠——
+ *  玩家 CanHit 内 1/3000 厄运掷 → 黑化反咬（townCritterWalkAI 头部，NPC.cs:53797） */
+const CRITTER_TURN_ON_PLAYERS = new Set([299, 538, 539, 639, 640, 641, 642, 643, 644, 645]);
 
 // ================= NPC 侧点光的共享近似源（GameHooks 取不到 FlickerClock/Main 计数器） =========
 /** 近似 Main.timeForVisualEffects（Main.cs:17110-17113：每帧 +1、216000 回卷）。
@@ -324,6 +328,25 @@ export class Enemy extends Entity {
       this.x += this.vx; this.y += this.vy;
       this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI * 0.5;
       return;
+    }
+    // ---- 地下蠕虫 flag 型脱战（:51506-51546，2026-08-17 仇恨审计补）----
+    //  flag 表：10/39/95/117/510（地下蠕虫）恒 true 且 num11=0.2；513 玩家不在
+    //  地下沙漠 → true 且 num11=0.1；621 恒 false。玩家死亡 || (flag && 玩家升到
+    //  地表之上) → EncourageDespawn(300) + flag 时下潜 velocity.Y += num11
+    const wormFlagType = this.vanillaId === 10 || this.vanillaId === 39 || this.vanillaId === 95
+      || this.vanillaId === 117 || this.vanillaId === 510;
+    const wormFlag = wormFlagType || (this.vanillaId === 513
+      && !game.world.scene?.zoneUndergroundDesert);
+    const wormDive = wormFlagType ? 0.2 : this.vanillaId === 513 ? 0.1 : 0;
+    const playerAboveSurface = player.cy < game.world.groundLevel * TILE;
+    if (player.dead || (wormFlag && playerAboveSurface)) {
+      this.encourageDespawn(300);
+      if (wormFlag) this.vy += wormDive;
+    }
+    // 621（Dune Splicer 成虫）白天 → EncourageDespawn(60) + vy += 1（:51541-51544）
+    if (this.vanillaId === 621 && game.world.clock.isDay) {
+      this.encourageDespawn(60);
+      this.vy += 1;
     }
     const maxSpd = 8, accel = 0.07;
     // 朝向：有玩家朝玩家，无玩家缓慢巡游
@@ -1660,9 +1683,10 @@ export class Enemy extends Entity {
     const underground = this.cy / TILE > game.world.groundLevel;
     const grasshopper = this.vanillaId === 377 || this.vanillaId === 446;
     const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
-    // flag3 激愤判定（L61446-61448）
+    // flag3 激愤判定（:61459-61463）：!白天 || 受伤 || 地下 || ★史莱姆雨
+    //  （第四项曾缺——史莱姆雨白天满血地表史莱姆应主动追人 :61462）
     const hurt = this.hp < this.maxHp;
-    let flag3 = !game.world.clock.isDay || hurt || underground;
+    let flag3 = !game.world.clock.isDay || hurt || underground || !!game.world.weather.slimeRain;
     if (grasshopper) {
       // 蚱蜢（cs:61479-61483）：只有玩家 200px 内且非 wet 才激愤蹦跳，平时走路档
       flag3 = !!player && !player.dead && !inWater
@@ -3947,6 +3971,13 @@ export class Enemy extends Entity {
     let dirX: number, dirY: number;
     if (player) { dirX = player.cx > this.cx ? 1 : -1; dirY = player.cy > this.cy ? 1 : -1; }
     else { dirX = this.facing; dirY = -1; }
+    // 吸血蝙蝠白天离场（cs:22944-22949）：158 且在地表之上 && 白天 && 非日食 →
+    // directionY=-1 上飞、direction 翻转水平远离（曾缺——白天吸血蝙蝠赖场不退）
+    if (vampireBat && this.y < game.world.groundLevel * TILE
+      && game.world.clock.isDay && !game.world.clock.eclipse) {
+      dirY = -1;
+      dirX = -dirX;
+    }
     this.facing = dirX;
     // X 轴（L23314-23345）
     if (dirX === -1 && this.vx > -cx) {
@@ -4420,6 +4451,16 @@ export class Enemy extends Entity {
     const st = game.world.store;
     if (!this.aiInit) { this.aiInit = true; this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; }
     const isLacewing = this.vanillaId === 661;
+    // ---- 物种槽（cs:45292-45307）：ai[2]==0 且非 661 → 加权掷八物种
+    //  （Next(100) 映射:1%→5/2%→1/6%→2/10%→7/15%→3/19%→6/25%→0/其余 22%→4），
+    //  ai[2]=1+物种；释放入口带 Style 直存（ReleaseNPC case 356 ai[2]=Style——
+    //  捕获物 1994-2001 → placeStyle=1+item-1994）不掷 ----
+    if (!isLacewing && this.ai2 < 1) {
+      const r100 = Math.floor(Math.random() * 100);
+      const sp = r100 === 0 ? 5 : r100 < 3 ? 1 : r100 < 9 ? 2 : r100 < 19 ? 7
+        : r100 < 34 ? 3 : r100 < 53 ? 6 : r100 >= 75 ? 0 : 4;
+      this.ai2 = 1 + sp;
+    }
     // ---- 点光（AI_065_Butterflies，cs:45233-45241 / :45448-45453）----
     if (isLacewing) {
       // :45233-45237 光皇蝴蝶：hslToRgb(GlobalTimeWrappedHourly×0.33 % 1, 1, 0.5)×0.3
@@ -4448,9 +4489,10 @@ export class Enemy extends Entity {
         game.spawnParticles(this.cx, this.cy, '#E8B0FF', 1, 0.5, { life: 30, damp: 0.94 });
       }
     }
-    // 漂移目标重选（661 计时在 lai0 = 原版 localAI[0]；其余族沿用 ai2）
-    const driftGet = (): number => (isLacewing ? this.lai0 : this.ai2);
-    const driftSet = (v: number): void => { if (isLacewing) this.lai0 = v; else this.ai2 = v; };
+    // 漂移目标重选（计时槽 = localAI[0]（cs:45310 lai0 递减）——ai[2] 留给
+    //  蝴蝶物种/661 渐隐，曾误把蝴蝶漂移计时也写 ai2（会随重选覆写物种带））
+    const driftGet = (): number => this.lai0;
+    const driftSet = (v: number): void => { this.lai0 = v; };
     if (driftGet() <= 0) {
       this.ai0 = (Math.random() * 2 - 1) * (0.26 + Math.random() * 2.74);
       this.ai1 = (Math.random() * 2 - 1) * (0.26 + Math.random() * 2.74);
@@ -4535,6 +4577,27 @@ export class Enemy extends Entity {
   private townCritterWalkAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     const vid = this.vanillaId ?? 0;
+    // ---- 松鼠黑化彩蛋（NPC.cs:53797-53812）：CritterThatCanTurnOnPlayers
+    //  （NPCID.cs:4779 = 松鼠 299/红 538/金 539 + 宝石松鼠 639-645）玩家 CanHit
+    //  内 RollOnlyBadLuckExtreme(3000)==0 → ai[3]=2 → lifeMax 25/防+6/伤 20/
+    //  aiStyle=3 反咬（永久转战士；IsThisCenx 彩蛋不移植）----
+    if (CRITTER_TURN_ON_PLAYERS.has(vid)) {
+      if (this.ai3 !== 2 && player && !player.dead
+        && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)
+        && rollOnlyBadLuckExtreme((player as unknown as { luck: number }).luck, 3000) === 0) {
+        this.ai3 = 2;
+      }
+      if (this.ai3 === 2) {
+        if (this.maxHp === 5) {           // lifeMax==5 门（一次性升级）
+          this.maxHp = 25;
+          this.hp = 25;
+          this.def.defense += 6;
+          this.def.damage = 20;
+        }
+        this.fighterAI(game, player);     // aiStyle=3 转战士核
+        return;
+      }
+    }
     if (this.ai0 < 0 || this.ai0 > 8) this.ai0 = 0;
     if (this.ai1 < 0) this.ai1 = 100; // 初值：站立约 100t 后开始游走
     // 危险扫描（每 15t）

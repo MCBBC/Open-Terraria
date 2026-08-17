@@ -436,7 +436,9 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
     if (ok) {
       for (let dx = 0; dx < 3; dx++) {
         for (let dy = -1; dy <= 0; dy++) {
-          st.setTileSilent(ox + dx, num4 + dy, CAMPFIRE, dx * 18, dy * 18 + 36);
+          // frameY = (dy+1)*18：dy=-1(顶行)→0(火焰区)、dy=0(底行)→18(柴火区)。
+          // ★曾 dy*18+36 → 顶=18(读柴火)、底=36(读第二帧火焰) = 行反+帧偏一根因
+          st.setTileSilent(ox + dx, num4 + dy, CAMPFIRE, dx * 18, (dy + 1) * 18);
         }
       }
     }

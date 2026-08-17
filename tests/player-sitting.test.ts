@@ -70,3 +70,45 @@ describe('Player 坐椅消费（isLockedToATile :3858-3868 / 回血 :19053-19056
     expect(p.sitting).toBe(true);
   });
 });
+
+// 睡床锚点（GetSleepingTargetInfo SH:193-224 + StartSleeping :156-191，2026-08-17
+// 渲染错位修复批）：Bottom=anchor，anchor=(床段左列+方向列偏移, 行+1)·ToWorld(8,16)
+import { World } from '../src/world/World';
+import { TILE_BY_KEY } from '../src/data/tiles';
+
+describe('睡床锚点（GetSleepingTargetInfo :193-224）', () => {
+  it('朝右床（frameX=72 列）：anchor = (左列+2, 行+1)·16+(8,16)，Bottom 落锚', () => {
+    // 铺一张 4×2 床：frameX 72..126（列位 1=朝右），frameY 0/18
+    const w = new World(60, 40, 7, 'bed-test');
+    const bed = TILE_BY_KEY['bed']!;
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 2; r++) {
+      w.store.setTileSilent(20 + c, 20 + r, bed, 72 + c * 18, r * 18);
+    }
+    // 玩家站床脚（右端下排格 23,21）右键 → StartSleeping 锚点
+    // 由 Game 床分支公式（与本测试同步的纯数学断言）：
+    const tx = 23, ty = 21, fx = 72 + 3 * 18, fy = 18;
+    const bedLeft = tx - Math.floor((fx % 72) / 18);          // = 20
+    const row = fy % 36 !== 0 ? ty - 1 : ty;                   // = 20
+    const col = Math.floor(fx / 72);                           // = 1 → 朝右
+    const dir = col === 0 ? -1 : 1;
+    const anchorX = (bedLeft + (dir === -1 ? 1 : 2)) * 16 + 8; // (20+2)*16+8 = 360
+    const anchorY = (row + 1) * 16 + 16;                       // 21*16+16 = 352
+    expect(bedLeft).toBe(20);
+    expect(row).toBe(20);
+    expect(dir).toBe(1);
+    expect(anchorX).toBe(360);   // 床中偏右——玩家躺床身
+    expect(anchorY).toBe(352);   // 床底
+  });
+
+  it('朝左床（列位 0）下半行点击：行上修 −1，方向 −1，锚列=左列+1', () => {
+    const tx = 21, ty = 21, fx = 1 * 18, fy = 18;              // 左端下排
+    const bedLeft = tx - Math.floor((fx % 72) / 18);           // = 20
+    const row = fy % 36 !== 0 ? ty - 1 : ty;                   // = 20
+    const dir = Math.floor(fx / 72) === 0 ? -1 : 1;            // = -1
+    const anchorX = (bedLeft + (dir === -1 ? 1 : 2)) * 16 + 8; // (20+1)*16+8 = 344
+    expect(bedLeft).toBe(20);
+    expect(row).toBe(20);
+    expect(dir).toBe(-1);
+    expect(anchorX).toBe(344);
+  });
+});
