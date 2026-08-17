@@ -222,8 +222,12 @@ interface DHall {
   sdx: number; sdy: number; edx: number; edy: number;
 }
 interface DDoor { x: number; y: number; dir: number; hall: boolean; skipOther: boolean; skipSpace: boolean; clear: boolean; fluff: number; }
-/** hf = OverrideHeightFluff（DungeonPlatformData.cs:14）：房间候选=3、走廊/入口候选缺省=5 */
-interface DPlat { x: number; y: number; hall: boolean; hf: number; }
+/** hf = OverrideHeightFluff（DungeonPlatformData.cs:14）：房间候选=3、走廊/入口候选缺省=5。
+ *  XX 批（2026-08-18）扩：Tower/Dome 入口候选带 ForcePlacement + 置物概率
+ *  （pots/bottles/books/candles——IsAShelf=任一>0（DungeonPlatformData.cs:34-43
+ *  计算属性），书架链每列 1-3 道门掷 + 命中放置掷）。 */
+interface DPlat { x: number; y: number; hall: boolean; hf: number;
+  force?: boolean; pots?: number; bottles?: number; books?: number; candles?: number; }
 
 /** #32 Dungeon pass（1456 1:1，与 caves-oracle.cs 同构）。snap 回调用于逐段检查点。 */
 export function runDungeonPass(
@@ -263,9 +267,15 @@ export function runDungeonPass(
     x >= Math.max(10, Math.min(w - 10, potL)) && x < Math.max(10, Math.min(w - 10, potR)) && y >= potT && y < potB;
   // ★入口三掷已随每 pass 重播改造（2026-08-16）归位 **Dunes pass 头**（cs:11542
   //   SetupDungeonGenVarVariables 尾段——主题掷后紧跟）：掷①② Next(3) 与 RandomSeed
-  //   Next() 原版在 Dunes 消耗，此处只取 Dunes 落盘的 entSeed（兜底自掷仅限绕过
+  //   Next() 原版在 Dunes 消耗，此处只取 Dunes 落盘的 entSeed/A/B（兜底自掷仅限绕过
   //   Dunes 直调本 pass 的诊断路径，流位与 oracle 不同构）。
+  // ★XX 批（2026-08-18）：②==0→Tower、①==0→Dome＝PrecalculateEntrancePosition 路径
+  //   （MakeDungeon_GetEntranceSettings data==null 支 DC.cs:802-838：Dome/Tower 置
+  //   precalc=true，RoughHeight=Legacy40/Dome55/Tower120）。entKind: 0=Legacy 1=Dome 2=Tower。
   const entSeed = gs.dungeonEntSeed ?? raw(); // preGenDungeonEntranceSettings.RandomSeed
+  const entA = gs.dungeonEntA ?? rn(3);       // 入口类型掷①（Dome 候选）
+  const entB = gs.dungeonEntB ?? rn(3);       // 入口类型掷②（Tower 覆盖）
+  const entKind = entB === 0 ? 2 : entA === 0 ? 1 : 0;
   const shelf = [ri(9, 12), 0, 0];    // SetupDungeonDataVariables（cs:243-254）
   do { shelf[1] = ri(9, 12); } while (shelf[1] === shelf[0]);
   shelf[2] = ri(9, 12);
@@ -278,6 +288,59 @@ export function runDungeonPass(
   const skewed = rn(4) === 0;         // cs:274 useSkewedDungeonEntranceHalls
   const doorStyle = theme === 0 ? 16 : theme === 1 ? 17 : 18;  // Item 1411-1413 placeStyle
   const platformStyle = theme === 0 ? 6 : theme === 1 ? 8 : 7; // Item 1384-1386 placeStyle(蓝6/绿8/粉7)
+  // ★窗口玻璃/边墙/窗台平台样式（SetupDungeonGenVarVariables cs:80-105 + Item 表）：
+  //   玻璃 glass/closed、边墙 edge；窗台平台=WindowPlatformItemTypes 单元素
+  //   （蓝1386/绿1385/粉1384 → placeStyle 8/7/6——与主平台 6/8/7 恰为倒置，原版如此）
+  const winGlass = theme === 0 ? 91 : theme === 1 ? 92 : 90;
+  const winGlassClosed = theme === 0 ? 96 : theme === 1 ? 94 : 98;
+  const winEdge = theme === 0 ? 8 : theme === 1 ? 9 : 7;
+  const winPlatStyle = theme === 0 ? 8 : theme === 1 ? 7 : 6;
+  // ============ PrecalculateEntrancePosition 拒绝环（DungeonCrawler.cs:275-322）============
+  // ★XX 批（2026-08-18）双侧转录：Tower/Dome 入口（entKind 1/2）在 SetupDungeon-
+  //   DataVariables 尾段预计算入口位置——3000 次尝试内掷 Next(200) 偏移 dungeonLocation
+  //   ±100，海滩带内从 y=10 下爬到首个 active/liquid/wall 格，双云层排除（±15 /
+  //   max(50,y-50)±50，TileID.Sets.Clouds={189,196,460,717,718,719}）+ RoughHeight
+  //   门槛（num2-40-rough>0）。成功：dungeonLocation ← num+25-Next(50)（**genVars 被
+  //   改写**——pass :14827 随后读的就是新值，本 pass 的 y0 锚/初始 bounds/MakeDungeon
+  //   x 全部跟着走）+ entrancePosition=(num,num2)；失败：回退 Legacy 设置（无掷）。
+  //   Legacy 种子（b≠0）整段零掷零触碰——caves-checkpoint 9293480 金标不动。
+  const BEACH = 380;                  // WorldGen.beachDistance（cs:4102）
+  const DG_CLOUDS = new Set([189, 196, 460, 717, 718, 719]);
+  const cloudsNear = (cx: number, cy: number, dist: number): boolean => {
+    for (let x = cx - dist; x <= cx + dist; x++) {
+      for (let y = cy - dist; y <= cy + dist; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        if (st.flags[i] && DG_CLOUDS.has(TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1)) return true;
+      }
+    }
+    return false;
+  };
+  let dgLoc = gs.dungeonLocation;
+  let entX = 0, entY = 0, precalcOK = false;   // dungeonEntrancePosition（Zero=未预计算）
+  if (entKind !== 0) {
+    const rough = entKind === 2 ? 120 : 55;    // RoughHeight：Tower 120 / Dome 55（DC.cs:830-834）
+    let tries = 3000;
+    while (true) {
+      tries--;
+      if (tries <= 0) break;
+      const nx = dgLoc - 100 + rn(200);
+      if (nx > BEACH && nx < w - BEACH) {
+        let ny = 10;
+        // tile!=null ⟺ 界内；界外/首 active/liquid/wall 格停（此处直读 st——actAt/
+        // wallAt 常量在函数尾才初始化，TDZ）
+        while (ny < h && st.flags[st.idx(nx, ny)] === 0
+          && st.liquid[st.idx(nx, ny)] <= 0 && st.wall[st.idx(nx, ny)] <= 0) ny++;
+        if (!cloudsNear(nx, ny, 15) && !cloudsNear(nx, Math.max(50, ny - 50), 50)
+          && ny - 40 - rough > 0) {
+          dgLoc = nx + 25 - rn(50);            // genVars.dungeonLocation 改写（:308）
+          entX = nx; entY = ny;
+          precalcOK = true;
+          break;
+        }
+      }
+    }
+  }
   // —— 状态（DungeonData/GenVars）——
   const rooms: DRoom[] = [];
   const halls: DHall[] = [];
@@ -294,8 +357,10 @@ export function runDungeonPass(
   let posX = 0, posY = 0, topX = 0;
   let dungeonX = 0, dungeonY = 0;
   let shadowKey = false, ramRune = false;
-  // —— 深度锚点（cs:14828-14870）——
-  const x0 = gs.dungeonLocation;
+  // —— 深度锚点（cs:14828-14870）——★x0 取 precalc 改写后的 genVars.dungeonLocation
+  //   （原版 :14827 在 SetupDungeonDataVariables 之后才读——precalc 成功时已偏移
+  //   num+25-Next(50)；Legacy/失败路径原值不动）
+  const x0 = dgLoc;
   let y0 = Math.trunc((ws + rock) / 2) + ri(-200, 199);
   {
     const cap = Math.trunc((ws + rock) / 2) + 200;
@@ -401,7 +466,12 @@ export function runDungeonPass(
   }
   // ================= LegacyDungeonLayoutProvider.LegacyDungeonLayout（:25-98）=================
   function dgLayout(steps: number): void {
-    bounds.set(posX, posY, posX, posY);
+    // ★XX 批（2026-08-18）：LegacyDungeonLayoutProvider.cs:27-31 precalc 起点漂移——
+    //   posX=-10+entranceX+Next(20)（1 掷）、posY=entranceY+30。初始 bounds 由
+    //   MakeDungeon 头（:348 SetBounds(x,y,x,y)）以改写后 dungeonLocation/y0 落定，
+    //   provider 内不重置——原 dgLayout 首行 bounds.set(posX,posY) 对 Legacy 与调用
+    //   点同值冗余、precalc 时会错抹锚点，已收口到调用侧（:2847 bounds.set(x0,y0)）。
+    if (precalcOK) { posX = -10 + entX + rn(20); posY = entY + 30; }
     // ★LegacyDungeonLayoutProvider.cs:37/:42——起始房之前先耗两颗 settings.RandomSeed
     //  (hall-settings 与 room-settings 对象的种子;本仓 settings 复用单流,掷而不用。
     //  曾缺失→起始房种子前移 2 颗,全地牢分叉;oracle 对账时揪出)
@@ -1124,6 +1194,645 @@ export function runDungeonPass(
     }
   }
 
+  // ============ LegacyEntranceDungeonHall precalc 支（:23-380，UsePrecalculatedEntrance=true）============
+  // XX 批（2026-08-18）。CalculateHall(OverrideStart=currentPos→OverrideEnd=lerp 目标)
+  // 后生成：方向/步数被覆写成**直线 + steps=ceil(段距)**（:157-171 v=End-Start 归一），
+  // strength=Next(5,9) 存活；无出地表探测（!UsePrecalc 门）/TileRunner/0.98 衰减
+  //（!flag 门）；每 10 步记平台候选（InAHallway → hf=5）。头部掷序与 Legacy 支逐位
+  // 同构（strength→steps→方向链），覆写值弃而位次保留——种子流两支等价推进。
+  function dgEntHallPrecalc(seed: number, sx0: number, sy0: number, tgx: number, tgy: number): void {
+    const hr = dgUR(seed);
+    const hri = (a: number, b: number): number => hr.nextIntRange(a, b + 1);
+    const hrn = (n: number): number => hr.nextInt(n);
+    const num = hri(5, 8);                       // strength（存活——盒宽/Fluff 用）
+    hri(10, 29);                                 // steps 掷（覆写弃值保位）
+    if (hrn(3) !== 0) hri(0, 199);               // 方向掷链（覆写弃值保位）
+    else if (hrn(3) === 0) hri(50, 75);
+    else if (hrn(6) === 0) { /* vy*=2 分支无掷 */ }
+    // flag 支直线：v=End-Start，SafeNormalize(v,UnitX)，steps=ceil(|v|/1)
+    const dvx = tgx - sx0, dvy = tgy - sy0;
+    const len = Math.sqrt(dvx * dvx + dvy * dvy);
+    const vx = len === 0 ? 1 : dvx / len, vy = len === 0 ? 0 : dvy / len;
+    let steps = Math.ceil(len);
+    let px = sx0 + 0.0, py = sy0 + 0.0;
+    const num5 = 0.5;
+    const n6 = 30;
+    const hb = new DBnd(w, h);
+    hb.set(Math.trunc(px), Math.trunc(py), Math.trunc(px), Math.trunc(py));
+    const hall: DHall = { seed, generated: true, forceX: false, isEntrance: true, bounds: hb, sx: px, sy: py, ex: 0, ey: 0, sdx: vx, sdy: vy, edx: vx, edy: vy };
+    halls.push(hall);
+    const roomsArea = roomsInSpots(px, py, px + vx * steps, py + vy * steps, Math.trunc(steps / 2 + num));
+    let n8 = 0;                                  // 平台节奏计数（num8 初 0，num7=10）
+    while (steps > 0) {
+      steps--;
+      if (!inW(Math.trunc(px), Math.trunc(py), n6 + 5)) break;
+      const x0 = Math.max(n6, Math.min(w - n6 - 1, Math.trunc(px - num - 4.0 - hrn(6))));
+      const x1 = Math.max(n6, Math.min(w - n6 - 1, Math.trunc(px + num + 4.0 + hrn(6))));
+      const y0 = Math.max(n6, Math.min(h - n6 - 1, Math.trunc(py - num - 4.0)));
+      const y1 = Math.max(n6, Math.min(h - n6 - 1, Math.trunc(py + num + 4.0 + hrn(6))));
+      bounds.upd(x0, y0, x1, y1);
+      hb.upd(x0, y0, x1, y1);
+      for (let x = x0; x < x1; x++) {
+        for (let y = y0; y < y1; y++) {
+          const i = st.idx(x, y);
+          const p = prot(x, y, roomsArea);
+          if (p === 3) continue;
+          const f2 = p !== 1;
+          st.liquid[i] = 0;
+          if (f2 && canPlaceTileAt(i)) chTile(i, brick, true);
+        }
+      }
+      for (let x = x0 + 1; x < x1 - 1; x++) {
+        for (let y = y0 + 1; y < y1 - 1; y++) {
+          const i = st.idx(x, y);
+          const p = prot(x, y, roomsArea);
+          if (p === 3) continue;
+          let f3 = true;
+          if (p === 2 && isDW(st.wall[i])) f3 = false;
+          if (f3) chWall(i, wall, false);
+        }
+      }
+      let n16 = 0;
+      if (hrn(num) === 0) n16 = hri(1, 2);
+      const kx0 = Math.max(n6, Math.min(w - n6 - 1, Math.trunc(px - num * num5 - n16)));
+      const kx1 = Math.max(n6, Math.min(w - n6 - 1, Math.trunc(px + num * num5 + n16)));
+      const ky0 = Math.max(n6, Math.min(h - n6 - 1, Math.trunc(py - num * num5 - n16)));
+      const ky1 = Math.max(n6, Math.min(h - n6 - 1, Math.trunc(py + num * num5 + n16)));
+      n8--;
+      if (n8 <= 0) { n8 = 10; platData.push({ x: Math.trunc(px), y: Math.trunc(py), hall: true, hf: 5, pots: 0.25 }); }
+      for (let x = kx0; x < kx1; x++) {
+        for (let y = ky0; y < ky1; y++) {
+          const i = st.idx(x, y);
+          const p = prot(x, y, roomsArea);
+          if (p === 3) continue;
+          let f4 = true;
+          if (p === 2 && isDW(st.wall[i])) f4 = false;
+          st.flags[i] = 0;
+          st.slope[i] = 0; st.half[i] = 0;       // ClearTile()（清坡+半砖）
+          if (f4) chWall(i, wall, false);
+        }
+      }
+      px += vx; py += vy;                        // flag=true → 无 0.98 纵向衰减
+    }
+    posX = Math.trunc(px); posY = Math.trunc(py);
+    hall.ex = px; hall.ey = py;
+  }
+
+  // ================= TowerDungeonEntrance.TowerEntrance（Entrances/TowerDungeonEntrance.cs:40-461）=================
+  // XX 批（2026-08-18）1:1 转录。常量族（:80-97）：num2=5/num3=35/num4=40（基座半宽）
+  // /num5=100（阶梯深）/num6=30（基线抬升）/num7=j-30（塔基线）/num8=30/num9=25/
+  // num10=30/num11=20/num12=50/num13=15/num14=20/num15=40/num16=95（顶层高）。
+  // ★Tile.SmoothSlope（Tile.cs:821-880 applyToNeighbors=false）：CanPound&&SolidOrSloped
+  //   门后按 上<<3|下<<2|左<<1|右 位形写坡（10→slope3/9→slope4/6→slope1/5→slope2/
+  //   4→半砖/余→平）。近似备案：CanPound 全门（NO_POUND/BOULDERS/FORBIDS 表）以
+  //   !FRAMED_ALL 简化——楔底平滑目标全是砖/泥土岩（均不在豁免表）；BlockActuated
+  //   的 inActive 位不入四通道，跳过建模。
+  const solidOrSlopedD = (x: number, y: number): boolean =>
+    inW(x, y, 0) && actAt(x, y) !== 0 && genSolidType(typAt(x, y));
+  function dgSmoothSlope(x: number, y: number): void {
+    if (!solidOrSlopedD(x, y)) return;
+    const sheet = TILE_DEFS[typAt(x, y)]?.vanilla?.sheet ?? -1;
+    if (DG_FRAMED_ALL.has(sheet)) return;
+    const i = st.idx(x, y);
+    const fUp = inW(x, y - 1, 0) && actAt(x, y - 1) !== 0;
+    const f2 = fUp && !solidOrSlopedD(x, y - 1);
+    const num = ((fUp ? 1 : 0) << 3) | ((solidOrSlopedD(x, y + 1) ? 1 : 0) << 2)
+      | ((solidOrSlopedD(x - 1, y) ? 1 : 0) << 1) | (solidOrSlopedD(x + 1, y) ? 1 : 0);
+    if (num === 10 && !f2) { st.slope[i] = 3; st.half[i] = 0; }
+    else if (num === 9 && !f2) { st.slope[i] = 4; st.half[i] = 0; }
+    else if (num === 6) { st.slope[i] = 1; st.half[i] = 0; }
+    else if (num === 5) { st.slope[i] = 2; st.half[i] = 0; }
+    else if (num === 4) { st.slope[i] = 0; st.half[i] = 1; }
+    else { st.slope[i] = 0; st.half[i] = 0; }
+  }
+  // DungeonPillar.GenerateTileStrip（Features/DungeonPillar.cs:88-190，Pillar 版）
+  // ——height 0=自动扫描（向 scan 向至首个 active，上限 100，InWorld fluff10）；
+  // up 支 num6<=10 break、down 支 num8>=H-10 break；!always 时遇 active break。
+  // 返回 [topY, bottomY]（写入带）。
+  function dgPillarStrip(px: number, py: number, height: number, up: boolean,
+    smoothTop: boolean, smoothBottom: boolean, always: boolean): [number, number] {
+    let placeY = py;
+    let num3 = height;
+    if (num3 === 0) {
+      num3 = 0;
+      let i2 = 0;
+      if (up) { while (i2 > -100 && inW(px, placeY + i2, 10) && actAt(px, placeY + i2) === 0) i2--; num3 = -i2; }
+      else {
+        while (i2 < 100 && inW(px, placeY + i2, 10) && actAt(px, placeY + i2) === 0) i2++;
+        num3 = i2;
+        placeY += num3 - 1;
+      }
+    }
+    if (num3 === 0) return [placeY, placeY];
+    const lo = -num3 + 1, hi = 0;
+    let topY = placeY, bottomY = placeY;
+    if (up) {
+      for (let j = lo; j <= hi; j++) {
+        const cy = placeY + j;
+        if (cy <= 10) break;
+        if (!st.inBounds(px, cy)) continue;
+        const ti = st.idx(px, cy);
+        if (!always && st.flags[ti] !== 0) break;
+        st.flags[ti] = 1; st.type[ti] = brick; st.slope[ti] = 0; st.half[ti] = 0;   // ClearTile+active+type
+        if ((j === lo && smoothTop) || (j === hi && smoothBottom)) dgSmoothSlope(px, cy);
+        if (cy < topY) topY = cy;
+        if (cy > bottomY) bottomY = cy;
+      }
+    } else {
+      for (let j = hi; j >= lo; j--) {
+        const cy = placeY + j;
+        if (cy >= h - 10) break;
+        if (!st.inBounds(px, cy)) continue;
+        const ti = st.idx(px, cy);
+        if (!always && st.flags[ti] !== 0) break;
+        st.flags[ti] = 1; st.type[ti] = brick; st.slope[ti] = 0; st.half[ti] = 0;
+        if ((j === lo && smoothTop) || (j === hi && smoothBottom)) dgSmoothSlope(px, cy);
+        if (cy < topY) topY = cy;
+        if (cy > bottomY) bottomY = cy;
+      }
+    }
+    return [topY, bottomY];
+  }
+  // DungeonPillar.Pillar（:28-84）——逐列主带（height，crownStops=false→crown 高 0=
+  // 自动扫描）+ 顶/底冠（k==0/-1 列外扩 1，num=3 间距；smoothBottom/Top:true）
+  function dgPillar(px: number, py: number, width: number, crownTop: boolean, crownBottom: boolean,
+    height: number, always: boolean): void {
+    const num = 3;
+    for (let k = 0; k < width; k++) {
+      const cx = px + k - Math.trunc(width / 2);
+      const [topY2, bottomY] = dgPillarStrip(cx, py, height, true, false, false, always);
+      if (crownTop) {
+        if (k === 0) dgPillarStrip(cx - 1, topY2 + num, 0, true, false, true, always);
+        else if (k === width - 1) dgPillarStrip(cx + 1, topY2 + num, 0, true, false, true, always);
+      }
+      if (crownBottom) {
+        if (k === 0) dgPillarStrip(cx - 1, bottomY - num, 0, false, true, false, always);
+        else if (k === width - 1) dgPillarStrip(cx + 1, bottomY - num, 0, false, true, false, always);
+      }
+    }
+  }
+  // DungeonUtils.GenerateTileStrip（DU:461-539，Wedge 版——无 active-break、InWorld
+  // continue）+ GenerateBottomWedge（:447-459）：crowningBottom → width+=2；逐列三角
+  // 带（left? i+1 : width-(i-1)）+ 尾部 SmoothSlope——★原版平滑的是**中心列 placeX**
+  // 逐深度（非逐列，机械照抄）
+  function dgBottomWedge(px: number, py: number, width0: number, left: boolean): void {
+    const width = width0 + 2;
+    for (let i2 = 0; i2 <= width; i2++) {
+      const cx = px + i2 - Math.trunc(width / 2);
+      const hgt = left ? i2 + 1 : width - (i2 - 1);
+      for (let j = 0; j <= hgt - 1; j++) {
+        const cy = py + j;
+        if (!inW(cx, cy, 10)) continue;
+        const ti = st.idx(cx, cy);
+        st.flags[ti] = 1; st.type[ti] = brick; st.slope[ti] = 0; st.half[ti] = 0;
+      }
+    }
+    for (let j2 = 0; j2 <= width; j2++) {
+      const num = left ? j2 + 1 : width - (j2 - 1);
+      dgSmoothSlope(px, py + num);
+    }
+  }
+  // WorldGen.PlaceWall(...,245)：每次调用耗 1 颗主流骰（Z 批 169 连调实证），写门
+  //   x>1&&y>1&&x<w-2&&y<h-2 且 wall==0（245=铅栅栏）
+  const FENCE = 245;
+  const dgTW = (globalThis as { __dgTowerTrace?: Record<string, number | string> }).__dgTowerTrace;
+  function dgPlaceWallFence(x: number, y: number): void {
+    // 实验位：write-gated 掷（H2 假说：PlaceWall 掷在写门内）
+    if (x > 1 && y > 1 && x < w - 2 && y < h - 2 && wallAt(x, y) === 0) { raw(); st.wall[st.idx(x, y)] = FENCE; }
+  }
+  // TowerEntrance_LineOfFence（:463-476）：y<=10 直退；条件循环不变量→全或无
+  function dgLineOfFence(lx: number, rx: number, y: number): void {
+    if (y <= 10) return;
+    if (!(lx >= 10 && rx <= w - 10)) return;
+    for (let x = lx; x <= rx; x++) { dgPlaceWallFence(x, y); if (dgTW) dgTW.fence = (dgTW.fence as number) + 1; }
+  }
+  // TowerEntrance_OuterPillar（:478-516）：7×3+5×7 方柱（DungeonPillar 无冠）+
+  // PlaceTile(215 篝火,Place3x2 门)+9 格 245 栅栏墙
+  const CAMPFIRE = TILE_INTERNAL_BY_SHEET.get(215) ?? -1;
+  function dgOuterPillar(px: number, py: number): void {
+    if (dgTW) dgTW.opw = (dgTW.opw as number) + 1;
+    dgPillar(px, py - 1, 7, false, false, 3, false);
+    dgPillar(px, py - 4, 5, false, false, 7, false);
+    if (py - 11 >= 10 && CAMPFIRE > 0) place3x2D(px, py - 11, CAMPFIRE);   // PlaceTile(215)→Place3x2 零掷
+    for (let k = 0; k < 5; k++) dgPlaceWallFence(px - 2 + k, py - 11);
+    if (py - 12 >= 10) { dgPlaceWallFence(px - 2, py - 12); dgPlaceWallFence(px + 2, py - 12); }
+    if (py - 10 >= 10) { dgPlaceWallFence(px - 2, py - 10); dgPlaceWallFence(px + 2, py - 10); }
+  }
+  // DungeonWindowBasic.Window（:26-105）——GetWindowPlatformStyle 恒耗 1 骰
+  // （WindowPlatformItemTypes 单元素 Next(1)）；十字边墙+玻璃墙；下缘越界处放
+  // 平台窗台（type19+frameY=style*18；TileFrame 不建模——帧不入四通道）
+  const winValidSpot = (x: number, y: number, ww: number, wh: number): boolean => {
+    if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
+    return !(y === 0 && (x === 0 || x === ww - 1));
+  };
+  function dgWindowBasic(px: number, py: number, ww: number, wh: number, overrideGlass: number): void {
+    rn(1);                                        // style.GetWindowPlatformStyle（Next(1) 单元素）
+    if (dgTW) dgTW.win = (dgTW.win as number) + 1;
+    const glass = overrideGlass > 0 ? overrideGlass : winGlass;
+    const setW = (x: number, y: number, v: number): void => {
+      if (st.inBounds(x, y)) st.wall[st.idx(x, y)] = v;
+    };
+    for (let i2 = 0; i2 < ww; i2++) {
+      const cx = px + i2 - Math.trunc(ww / 2);
+      for (let j2 = 0; j2 < wh; j2++) {
+        if (!winValidSpot(i2, j2, ww, wh)) continue;
+        const cy = py + j2 - Math.trunc(wh / 2);
+        if (i2 === Math.trunc(ww / 2) || j2 === Math.trunc(wh / 2)) setW(cx, cy, winEdge);
+        else setW(cx, cy, glass);
+        if (!winValidSpot(i2 - 1, j2, ww, wh)) setW(cx - 1, cy, winEdge);
+        if (!winValidSpot(i2 + 1, j2, ww, wh)) setW(cx + 1, cy, winEdge);
+        if (!winValidSpot(i2, j2 - 1, ww, wh)) setW(cx, cy - 1, winEdge);
+        if (!winValidSpot(i2, j2 + 1, ww, wh)) {
+          setW(cx, cy + 1, winEdge);
+          if (st.inBounds(cx, cy + 1)) {
+            const ti = st.idx(cx, cy + 1);
+            st.flags[ti] = 1; st.type[ti] = PLATFORM; st.slope[ti] = 0; st.half[ti] = 0;
+            st.frameY[ti] = winPlatStyle * 18;
+          }
+        }
+      }
+    }
+  }
+  // DungeonWindowMosaic.Window_Skeletron（:46-190）——17×15 颅 + 11×7 颚 + 边缘描线
+  function dgWindowMosaicSkel(px: number, py: number, glass: number): void {
+    const setW = (x: number, y: number, v: number): void => {
+      if (st.inBounds(x, y)) st.wall[st.idx(x, y)] = v;
+    };
+    const skullOK = (x: number, y: number, ww: number, wh: number): boolean => {
+      if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
+      if (y === 0 && (x <= 5 || x >= ww - 6)) return false;
+      if (y === 1 && (x <= 3 || x >= ww - 4)) return false;
+      if (y === 2 && (x <= 1 || x >= ww - 2)) return false;
+      if (y === 3 && (x === 0 || x >= ww - 1)) return false;
+      if ((x === 0 && y >= wh - 2) || (x <= 1 && y === wh - 1) || (x === ww - 1 && y >= wh - 2) || (x >= ww - 2 && y === wh - 1)) return false;
+      return true;
+    };
+    const jawOK = (x: number, y: number, isGlass: boolean, ww: number, wh: number): boolean => {
+      if (isGlass) return true;
+      if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
+      if (y === wh - 1 && (x <= 2 || x >= ww - 3)) return false;
+      if (y === wh - 2 && (x <= 1 || x >= ww - 2)) return false;
+      if (y === wh - 3 && (x === 0 || x === ww - 1)) return false;
+      return true;
+    };
+    const n1 = 17, n2 = Math.trunc(n1 / 2), n3 = 15, n4 = Math.trunc(n3 / 2);
+    const n5 = 11, n6 = Math.trunc(n5 / 2), n7 = 7, n8 = Math.trunc(n7 / 2);
+    for (let i2 = 0; i2 < n1; i2++) {
+      const cx = px + i2 - n2;
+      for (let j2 = 0; j2 < n3; j2++) {
+        if (!skullOK(i2, j2, n1, n3)) continue;
+        const cy = py + j2 - n4;
+        setW(cx, cy, glass);
+        if (!skullOK(i2 - 1, j2, n1, n3)) setW(cx - 1, cy, winEdge);
+        if (!skullOK(i2 + 1, j2, n1, n3)) setW(cx + 1, cy, winEdge);
+        if (!skullOK(i2, j2 - 1, n1, n3)) setW(cx, cy - 1, winEdge);
+        if (j2 < n3 - 1 && !skullOK(i2, j2 + 1, n1, n3)) setW(cx, cy + 1, winEdge);
+      }
+    }
+    for (let k = 0; k < n5; k++) {
+      const cx = px + k - n6;
+      for (let l = 0; l < n7; l++) {
+        const cy = py + l + n4 + n8 - 2;
+        if (!st.inBounds(cx, cy)) continue;
+        const jawIsGlass = wallAt(cx, cy) === glass;
+        if (!jawOK(k, l, jawIsGlass, n5, n7)) continue;
+        setW(cx, cy, glass);
+        if (!jawOK(k - 1, l, wallAt(cx - 1, cy) === glass, n5, n7)) setW(cx - 1, cy, winEdge);
+        if (!jawOK(k + 1, l, wallAt(cx + 1, cy) === glass, n5, n7)) setW(cx + 1, cy, winEdge);
+        if (!jawOK(k, l - 1, wallAt(cx, cy - 1) === glass, n5, n7)) setW(cx, cy - 1, winEdge);
+        if (!jawOK(k, l + 1, wallAt(cx, cy + 1) === glass, n5, n7)) setW(cx, cy + 1, winEdge);
+      }
+    }
+    const p2y = py + n4 - 2;
+    for (let m = 0; m < n1; m++) {
+      const cx = px - n2 + m;
+      if (m >= 2 && m <= 5) {
+        const n14 = m - 2;
+        for (let n9 = 0; n9 < 6; n9++)
+          if ((n14 !== 3 || n9 > 1) && (n14 !== 2 || n9 !== 0) && (n14 !== 1 || n9 !== 5) && (n14 !== 0 || n9 < 4))
+            setW(cx, py + n9 - 1, winEdge);
+      }
+      if (m >= 11 && m <= 14) {
+        const n15 = m - 11;
+        for (let n16v = 0; n16v < 6; n16v++)
+          if ((n15 !== 0 || n16v > 1) && (n15 !== 1 || n16v !== 0) && (n15 !== 2 || n16v !== 5) && (n15 !== 3 || n16v < 4))
+            setW(cx, py + n16v - 1, winEdge);
+      }
+      if (m >= 7 && m <= 9) {
+        const n17 = m - 7;
+        for (let n18 = 0; n18 < 4; n18++)
+          if (((n17 !== 0 && n17 !== 2) || n18 !== 0) && (n17 !== 1 || n18 !== 3))
+            setW(cx, py + n18 + 3, winEdge);
+      }
+      let n19 = p2y + 1;
+      if (m >= 2 && m <= 3) n19++;
+      else if (m >= 4 && m <= 6) n19 += 2;
+      else if (m >= 7 && m <= 9) n19 += 3;
+      else if (m >= 10 && m <= 12) n19 += 2;
+      else if (m >= 13 && m <= 14) n19++;
+      setW(cx, n19, winEdge);
+      if (m === 0 || m === n1 - 1) { setW(cx, n19 - 1, winEdge); setW(cx, n19 + 1, winEdge); }
+      if (m === 4 || m === 6 || m === 8 || m === 10 || m === 12)
+        for (let n20 = 0; n20 < 4; n20++) setW(cx, n19 + n20, winEdge);
+      if (m >= 5 && m <= 11) {
+        let n21 = p2y + 7;
+        if (m >= 7 && m <= 9) n21++;
+        setW(cx, n21, winEdge);
+      }
+    }
+  }
+  // DungeonWindowMosaic.Window_MoonLord（:192-330）——左右 8×7+7×6 侧眼 + 7×8 中眼
+  function dgWindowMosaicMoon(px: number, py: number, glass: number): void {
+    const setW = (x: number, y: number, v: number): void => {
+      if (st.inBounds(x, y)) st.wall[st.idx(x, y)] = v;
+    };
+    const sideOK = (x: number, y: number, left: boolean, ww: number, wh: number): boolean => {
+      if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
+      if (left && ((x <= 1 && y === wh - 1) || (x === ww - 1 && y <= 1))) return false;
+      if (left && ((x === 0 && y >= wh - 2) || (x >= ww - 2 && y === 0))) return false;
+      if (!left && ((x <= 1 && y === 0) || (x >= ww - 2 && y === wh - 1))) return false;
+      if (!left && ((x === 0 && y <= 1) || (x === ww - 1 && y >= wh - 2))) return false;
+      return true;
+    };
+    const midOK = (x: number, y: number, ww: number, wh: number): boolean => {
+      if (x < 0 || y < 0 || x >= ww || y >= wh) return false;
+      if ((y === 1 && (x === 0 || x === ww - 1)) || (y === wh - 2 && (x === 0 || x === ww - 1))) return false;
+      if (y === 0 && ((x >= 0 && x <= 1) || (x >= ww - 2 && x <= ww - 1))) return false;
+      if (y === wh - 1 && ((x >= 0 && x <= 1) || (x >= ww - 2 && x <= ww - 1))) return false;
+      return true;
+    };
+    const n1 = 8, n2 = n1 - 1, n3 = 7, n4 = n3 - 1, n5 = 7, n6 = n5 + 1, n7 = 9;
+    for (let side = 0; side < 2; side++) {
+      const left = side === 0;
+      for (let j = 0; j < n1; j++) {
+        for (let k = 0; k < n2; k++) {
+          if (!sideOK(j, k, left, n1, n2)) continue;
+          const cx = px + j + (left ? -n7 - 1 : n7 - n1 + 2);
+          const cy = py + k + n2 - 2;
+          setW(cx, cy, glass);
+          if (!sideOK(j - 1, k, left, n1, n2)) setW(cx - 1, cy, winEdge);
+          if (!sideOK(j + 1, k, left, n1, n2)) setW(cx + 1, cy, winEdge);
+          if (!sideOK(j, k - 1, left, n1, n2)) setW(cx, cy - 1, winEdge);
+          if (!sideOK(j, k + 1, left, n1, n2)) setW(cx, cy + 1, winEdge);
+        }
+      }
+      for (let l = 0; l < n3; l++) {
+        for (let m = 0; m < n4; m++) {
+          if (!sideOK(l, m, left, n3, n4)) continue;
+          const cx = px + l + (left ? -n7 + 1 : n7 - n3);
+          const cy = py + m - n4 + 2;
+          setW(cx, cy, glass);
+          if (!sideOK(l - 1, m, left, n3, n4)) setW(cx - 1, cy, winEdge);
+          if (!sideOK(l + 1, m, left, n3, n4)) setW(cx + 1, cy, winEdge);
+          if (!sideOK(l, m - 1, left, n3, n4)) setW(cx, cy - 1, winEdge);
+          if (!sideOK(l, m + 1, left, n3, n4)) setW(cx, cy + 1, winEdge);
+        }
+      }
+    }
+    for (let n9 = 0; n9 < n5; n9++) {
+      for (let n12 = 0; n12 < n6; n12++) {
+        if (!midOK(n9, n12, n5, n6)) continue;
+        const cx = px + n9 - Math.trunc(n5 / 2);
+        const cy = py + n12 - n4 - n6;
+        setW(cx, cy, glass);
+        if (!midOK(n9 - 1, n12, n5, n6)) setW(cx - 1, cy, winEdge);
+        if (!midOK(n9 + 1, n12, n5, n6)) setW(cx + 1, cy, winEdge);
+        if (!midOK(n9, n12 - 1, n5, n6)) setW(cx, cy - 1, winEdge);
+        if (!midOK(n9, n12 + 1, n5, n6)) setW(cx, cy + 1, winEdge);
+      }
+    }
+  }
+  // TowerEntrance_Door（:433-461）：num/num2 门洞扫带 + 墙清/k≥-2..0 清块 +
+  // 双 PlaceTile(10,style13)（PlaceDoor 3×Next(3) 成功即掷）
+  function dgTowerDoor(i: number, floorY: number, outer: number, inner: number, left: boolean): void {
+    const num = left ? inner - 1 : -outer - 2;
+    const num2 = left ? outer + 2 : -inner + 1;
+    const p1x = i + (left ? outer - 1 : -outer + 1);
+    const p2x = i + (left ? inner + 1 : -inner - 1);
+    for (let j = num; j <= num2; j++) {
+      for (let k = -3; k <= 1; k++) {
+        const x = i + j, y = floorY + k;
+        if (!st.inBounds(x, y)) continue;
+        const ti = st.idx(x, y);
+        if ((left && x >= p1x) || (!left && x <= p1x)) st.wall[ti] = 0;
+        if (k >= -2 && k <= 0) { st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0; }
+      }
+    }
+    dgPlaceDoor(p1x, floorY, 13);
+    dgPlaceDoor(p2x, floorY, 13);
+  }
+  function dgTowerEntrance(i: number, j: number, preSeed: number): void {
+    if (dgTW) { dgTW.tower0 = dgMainRolls; dgTW.i = i; dgTW.j = j; dgTW.pw = 0; dgTW.win = 0; dgTW.door = 0; dgTW.fence = 0; dgTW.opw = 0; dgTW.wt = 'na'; }
+    const hr = dgUR(preSeed);
+    const hrn = (n: number): number => hr.nextInt(n);
+    const windowType = hrn(3);                    // 0=Regular 1=Skeletron 2=MoonLord
+    if (dgTW) dgTW.wt = ['reg', 'skel', 'moon'][windowType];
+    const leftSide = gs.dungeonSide < 0;          // flag = dungeonSide==Left
+    // 120×120 清液+清坡（:62-76 Clear(Slope)）
+    for (let x = i - 60; x < i + 60; x++) {
+      for (let y = j - 60; y < j + 60; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const ti = st.idx(x, y);
+        st.liquid[ti] = 0; st.liquidType[ti] = 0;
+        st.slope[ti] = 0; st.half[ti] = 0;
+      }
+    }
+    const n2 = 5, n3 = 35, n4 = 40, n5 = 100;
+    const n7 = j - 30;                            // 塔基线（num7=j-num6, num6=30）
+    const n8 = 30, n9 = 25, n10 = 30, n11 = 20, n12 = 50, n13 = 15, n14 = 20, n16 = 95;
+    const minY = n7 - n16, maxY = n7 + 10;
+    // 塔侧地表圆清 Circle(15)（:92-98 Shapes.Circle.Perform 椭圆逐行 + Actions.Clear
+    // =ClearEverything）
+    {
+      const cx = leftSide ? i + n3 - 1 : i - n3 + 1;
+      const cy = n7 - 15, rad = 15, sq = (rad + 1) * (rad + 1);
+      for (let yy = cy - rad; yy <= cy + rad; yy++) {
+        const num2 = yy - cy;
+        const num3 = Math.min(rad, Math.trunc(Math.sqrt(sq - num2 * num2)));
+        for (let xx = cx - num3; xx <= cx + num3; xx++) {
+          if (!st.inBounds(xx, yy)) continue;
+          const ti = st.idx(xx, yy);
+          st.type[ti] = 0; st.wall[ti] = 0; st.liquid[ti] = 0; st.liquidType[ti] = 0;
+          st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;
+        }
+      }
+    }
+    entBounds.set(i - n4, minY, i + n4 + 1, maxY);
+    entExists = true;
+    // 基座箱（:100-213）：n∈[-40,40]×m∈[-5,100)——m<0 全清；0..5/5..10 双带（窗带
+    // ClearEverything+!flag4 补墙 / 实体带 !flag4 置砖）；m≥10 表层换装（!flag4 或
+    // (active&&!inStyle) 置砖 / inWall 但 !WallInStyle 补墙）
+    const tileInStyle = (t: number): boolean => t === brick || t === crack;
+    const wallInStyle = (v: number): boolean => v === wall;
+    const clrAll = (ti: number): void => {
+      st.type[ti] = 0; st.wall[ti] = 0; st.liquid[ti] = 0; st.liquidType[ti] = 0;
+      st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;
+    };
+    for (let n = -n4; n <= n4; n++) {
+      for (let m = -5; m < n5; m++) {
+        const x = i + n, y = n7 + m;
+        if (!st.inBounds(x, y)) continue;
+        const ti = st.idx(x, y);
+        const f2 = st.flags[ti] !== 0 && !tileInStyle(st.type[ti]);
+        const f3 = !wallInStyle(st.wall[ti]);
+        const f4 = isDW(st.wall[ti]);
+        if (m < 0) clrAll(ti);
+        else if (m < 5) {
+          if ((n >= -n4 + n2 && n <= -n4 + n2 * 2 - 1) || (n >= n4 - n2 * 2 + 1 && n <= n4 - n2)) {
+            clrAll(ti);
+            if (!f4) st.wall[ti] = wall;
+          } else if (!f4) {
+            st.liquid[ti] = 0; st.liquidType[ti] = 0;
+            chTile(ti, brick, false);
+            if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+          }
+        } else if (m < 10) {
+          if (n >= -n4 + n2 && n <= n4 - n2) {
+            clrAll(ti);
+            st.wall[ti] = wall;                   // ClearEverything 后判恒真——无条件补墙
+          } else if (!f4) {
+            st.liquid[ti] = 0; st.liquidType[ti] = 0;
+            chTile(ti, brick, false);
+            if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+          }
+        } else if ((st.flags[ti] !== 0 && f2) || !f4) {
+          st.liquid[ti] = 0; st.liquidType[ti] = 0;
+          chTile(ti, brick, false);
+          if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+        } else if (f3) {
+          st.liquid[ti] = 0; st.liquidType[ti] = 0;
+          if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+        }
+        if (m === 1 && (n === -n4 + n2 || n === n4 - n2 * 2)) platData.push({ x, y, hall: false, hf: 0, force: true, pots: 0.33000001311302185 });
+        if (m === 10 && n === 0) platData.push({ x, y, hall: false, hf: 0, force: true, pots: 0.33000001311302185 });
+      }
+    }
+    // 下行收敛通道（:214-244）：num23 计数器（首 inactive 起 15 递减，尾 5 步收窄）
+    {
+      let num23 = -1, num24 = 6;
+      for (let m = 10; m < 50; m++) {
+        if (num23 === -1 && actAt(i, n7 + m) === 0) num23 = 15;
+        if (num23 > 0) {
+          num23--;
+          if (num23 <= 0) break;
+          if (num23 <= 5) num24--;
+        }
+        for (let k = -num24; k <= num24; k++) {
+          const x = i + k, y = n7 + m;
+          if (!st.inBounds(x, y)) continue;
+          const ti = st.idx(x, y);
+          clrAll(ti);
+          st.wall[ti] = wall;                     // Clear 后 IsConsideredDungeonWall 恒假
+        }
+      }
+    }
+    // 塔体（:246-301）：三段收窄（0..30 |n|≤40 / 25..50 |n|≤30 / 45..95 |n|≤20），
+    // 内芯 ChangeWallType(reset)（清空+墙），环带 ChangeTileType(reset:false) 叠砖
+    for (let n26 = -n4; n26 <= n4; n26++) {
+      const x = i + n26;
+      for (let n28 = 0; n28 <= n16; n28++) {
+        const y = n7 - n28;
+        if (!inW(x, y, 5)) continue;
+        const ti = st.idx(x, y);
+        if (n28 <= n8) {
+          if (n26 >= -n3 && n26 <= n3) chWall(ti, wall, true);
+          else {
+            if (n26 > -n4 && n26 < n4) chWall(ti, wall, true);
+            chTile(ti, brick, false);
+          }
+          if (n28 >= n8 - n2 && (n26 < -n9 || n26 > n9)) chTile(ti, brick, false);
+        } else if (n28 >= n8 - n2 && n28 <= n12 && n26 >= -n10 && n26 <= n10) {
+          if (n26 >= -n9 && n26 <= n9) chWall(ti, wall, true);
+          else {
+            if (n26 > -n10 && n26 < n10) chWall(ti, wall, true);
+            chTile(ti, brick, false);
+          }
+          if (n28 >= n12 - n2 && (n26 < -n13 || n26 > n13)) chTile(ti, brick, false);
+        } else {
+          if (n28 < n12 - n2 || n28 > n16 || n26 < -n14 || n26 > n14) continue;
+          if (n26 >= -n13 && n26 <= n13) chWall(ti, wall, true);
+          else {
+            if (n26 > -n14 && n26 < n14) chWall(ti, wall, true);
+            chTile(ti, brick, false);
+          }
+          if (n28 >= n16 - n2) chTile(ti, brick, false);
+        }
+      }
+    }
+    // 四根 3 宽 BlockActuated 立柱（:303-313，actuated 位不入通道跳过）
+    dgPillar(i - n9 - 3, n7, 3, true, true, 0, true);
+    dgPillar(i + n9 + 3, n7, 3, true, true, 0, true);
+    dgPillar(i - n13 - 3, n7, 3, true, true, 0, true);
+    dgPillar(i + n13 + 3, n7, 3, true, true, 0, true);
+    // 六组楔底+外柱（:315-331）
+    dgBottomWedge(i - n4 - 4, n7 - n8, 5, true);
+    dgOuterPillar(i - n4 - 4, n7 - n8);
+    dgBottomWedge(i - n10 - 4, n7 - n12, 5, true);
+    dgOuterPillar(i - n10 - 4, n7 - n12);
+    dgBottomWedge(i - n14 - 4, n7 - n16, 5, true);
+    dgOuterPillar(i - n14 - 4, n7 - n16);
+    dgBottomWedge(i + n4 + 3, n7 - n8, 5, false);
+    dgOuterPillar(i + n4 + 4, n7 - n8);
+    dgBottomWedge(i + n10 + 3, n7 - n12, 5, false);
+    dgOuterPillar(i + n10 + 4, n7 - n12);
+    dgBottomWedge(i + n14 + 3, n7 - n16, 5, false);
+    dgOuterPillar(i + n14 + 4, n7 - n16);
+    // 檐口 5 宽方柱 + 栅栏线 + 双顶楔（:333-360）
+    dgPillar(i - n4 + 5, n7 - n8 - 1, 5, false, false, 2, false);
+    dgLineOfFence(i - n4 - 2, i - n10 + 1, n7 - n8 - 1);
+    dgPillar(i - n10 + 5, n7 - n12 - 1, 5, false, false, 2, false);
+    dgLineOfFence(i - n10 - 2, i - n14 + 1, n7 - n12 - 1);
+    dgPillar(i - n14 + 5, n7 - n16 - 1, 5, false, false, 2, false);
+    dgPillar(i - n14 + 13, n7 - n16 - 1, 5, false, false, 2, false);
+    dgPillar(i + n4 - 5, n7 - n8 - 1, 5, false, false, 2, false);
+    dgLineOfFence(i + n10 - 1, i + n4 + 2, n7 - n8 - 1);
+    dgPillar(i + n10 - 5, n7 - n12 - 1, 5, false, false, 2, false);
+    dgLineOfFence(i + n14 - 1, i + n10 + 2, n7 - n12 - 1);
+    dgPillar(i + n14 - 5, n7 - n16 - 1, 5, false, false, 2, false);
+    dgPillar(i + n14 - 13, n7 - n16 - 1, 5, false, false, 2, false);
+    dgLineOfFence(i - n14 - 2, i + n14 + 2, n7 - n16 - 1);
+    dgBottomWedge(i - n13, n7 - n16 + n2, 3, false);
+    dgBottomWedge(i + n13 - 1, n7 - n16 + n2, 3, true);
+    // 九处平台候选（:362-373，OverrideHeightFluff=0）
+    platData.push({ x: i - n10 - 2, y: n7 - n8 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i - n10 - 2, y: n7 - n8 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i - n14 - 2, y: n7 - n12 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i - n14 - 2, y: n7 - n12 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i + n10 + 2, y: n7 - n8 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i + n10 + 2, y: n7 - n8 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i + n14 + 2, y: n7 - n12 + 15, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i + n14 + 2, y: n7 - n12 + 21, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i, y: n7 - n12 + n2 - 3, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    // 窗族（:375-429）——num30=n7-75；Regular=3+2+2+1 八窗 / Mosaic=大窗+2+2+1 五窗
+    {
+      const n30 = n7 - n16 + 20;
+      if (windowType === 0) {
+        dgWindowBasic(i - 9, n30 + 4, 5, 24, -1);
+        dgWindowBasic(i + 9, n30 + 4, 5, 24, -1);
+        dgWindowBasic(i, n30 + 3, 5, 28, -1);
+      } else if (windowType === 1) {
+        dgWindowMosaicSkel(i, n30 - 1, 89);       // OverrideGlassType=89（非地下）
+      } else {
+        dgWindowMosaicMoon(i, n30 + 5, 91);       // OverrideGlassType=91
+      }
+      dgWindowBasic(i - 8, n7 - 16, 9, 24, -1);
+      dgWindowBasic(i + 8, n7 - 16, 9, 24, -1);
+      dgWindowBasic(i - 10, n7 - 37, 7, 11, -1);
+      dgWindowBasic(i + 10, n7 - 37, 7, 11, -1);
+      dgWindowBasic(i, n7 - 39, 7, 13, -1);
+    }
+    // 双侧门洞（:431-433）
+    dgTowerDoor(i, n7, n4, n3, leftSide);
+    dgTowerDoor(i, n7, n4, n3, !leftSide);
+    // 老头锚（SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——dungeonX/Y=(i,num7)）
+    dungeonX = i; dungeonY = n7;
+    // 阶梯双侧（:437-443，depth=num5=100）
+    dgStairs(i + n4, n7, 1, n5);
+    dgStairs(i - n4, n7, -1, n5);
+    if (dgTW) dgTW.tower1 = dgMainRolls;
+  }
+  // shelf 段定标（dgPlatforms 尾）——dormant 计数
+
   // ============ DungeonUtils.GenerateDungeonStairs（:1222-1310）+ CanPlaceTile（:1312-1329）============
   // GenerateDungeonStairs_CanPlaceTile：outerPotTop-5 门 + CanKillTile + tileFrameImportant 全表
   function stairsCanPlace(x: number, y: number): boolean {
@@ -1560,6 +2269,7 @@ export function runDungeonPass(
     // 用户报告"地牢门是木门"根因(2026-08-13)
     const fx0 = 54 * Math.floor(style / 36);
     const fy0 = 54 * (style % 36);
+    if (dgTW) dgTW.door = (dgTW.door as number) + 3;
     const wasInactive = st.flags[st.idx(i2, j2)] === 0;   // PlaceTile(10) 前奏清坡门
     for (let k = -1; k <= 1; k++) {
       const ti = st.idx(i2, j2 + k);
@@ -1618,53 +2328,63 @@ export function runDungeonPass(
     }
   }
   // ============ DungeonGlobalPlatforms（:24-214）============
+  // ★XX 批（2026-08-18）扩 ForcePlacement/IsAShelf 支（DGP.cs:66-121 力置门 +
+  // :168-213 书架链）：force 候选跳中心 active 拒绝/长度门/邻平台门/净空门，
+  // 尾门改 (!force || num2<=0)；IsAShelf（pots/bottles/books/candles 任一>0，
+  // DungeonPlatformData.cs:34-43 计算属性）逐列 else-if 链——门掷短路（上位
+  // 概率>0 才掷本位），命中即放置（pot: Next(10,13)+PlacePot(28) 内含成功
+  // Next(3)；bottle: PlaceOnTable1x1(13)+type==13 后 Next(2)；book: 内含
+  // Next(5)（NoWaterbolt=true 无 Next(50)）；candle: 零掷）。Default 房/廊候选
+  // 概率全 0 → IsAShelf=false 链整段跳过——Legacy 种子流零变化。
   function dgPlatforms(): void {
     for (const d of platData) {
       if (!inW(d.x, d.y, 30)) continue;
+      const force = !!d.force;
       const x = d.x, y = d.y;
       let row = -1;
       // ★2026-08-16 审计：num3 = OverrideHeightFluff ?? 5（DungeonGlobalPlatforms.cs:44-57）
       //   ——房间候选（roomPlatformsDoors，platformFluff=3）扫 y±3；走廊/入口候选 ±5。
-      //   曾恒 5。
       const n3 = d.hf;
       let n4 = y < ws + 50.0 ? 20 : 10;
-      n4 = Math.trunc(n4 * 1.0);
+      n4 = Math.trunc(n4 * ((d.hall ? 1.0 : 1.0)));   // Hall/RoomSizeScalar=(1+1)/2=1（DungeonData.cs:88）
       for (let j = y - n3; j <= y + n3; j++) {
         let n6 = x, n7 = x;
         let bad = false;
-        if (actAt(x, j) !== 0) bad = true;
+        if (!force && actAt(x, j) !== 0) bad = true;
         else {
           while (inW(n6, j, 0) && actAt(n6, j) === 0) {
             n6--;
             if (!inW(n6, j, 0)) break;
-            if (actAt(n6, j) !== 0 && !isDT(typAt(n6, j))) { bad = true; break; }
+            if (!force && (actAt(n6, j) !== 0 && !isDT(typAt(n6, j)) || n6 === 0)) { bad = true; break; }
             if (n6 <= 10) break;
           }
           while (inW(n7, j, 0) && actAt(n7, j) === 0) {
             n7++;
             if (!inW(n7, j, 0)) break;
-            if (actAt(n7, j) !== 0 && !isDT(typAt(n7, j))) { bad = true; break; }
+            if (!force && (actAt(n7, j) !== 0 && !isDT(typAt(n7, j)) || n7 === w - 1)) { bad = true; break; }
             if (n7 >= w - 10) break;
           }
         }
-        if (bad || n7 - n6 > n4) continue;
+        if (bad || (!force && n7 - n6 > n4)) continue;
         let ok = true;
-        const a0 = Math.max(0, x - Math.trunc(n4 / 2) - 2), a1 = Math.min(w - 1, x + Math.trunc(n4 / 2) + 2);
-        const b0 = j - n3, b1 = j + n3;
-        outer3:
-        for (let a = a0; a <= a1; a++) {
-          for (let b = b0; b <= b1; b++) {
-            if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === PLATFORM) { ok = false; break outer3; }
+        if (!force) {
+          const a0 = Math.max(0, x - Math.trunc(n4 / 2) - 2), a1 = Math.min(w - 1, x + Math.trunc(n4 / 2) + 2);
+          const b0 = j - n3, b1 = j + n3;
+          outer3:
+          for (let a = a0; a <= a1; a++) {
+            for (let b = b0; b <= b1; b++) {
+              if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === PLATFORM) { ok = false; break outer3; }
+            }
           }
-        }
-        if (ok) {
-          for (let b = j + 3; b >= j - 5; b--) {
-            if (inW(x, b, 0) && actAt(x, b) !== 0) { ok = false; break; }
+          if (ok) {
+            for (let b = j + 3; b >= j - 5; b--) {
+              if (inW(x, b, 0) && actAt(x, b) !== 0) { ok = false; break; }
+            }
           }
         }
         if (ok) { row = j; break; }
       }
-      if (row <= y - n3 - 5 || row >= y + n3 + 5) continue;
+      if ((!force || row <= 0) && (row <= y - n3 - 5 || row >= y + n3 + 5)) continue;
       let px = x;
       const py = row;
       let qx = x + 1;
@@ -1680,7 +2400,48 @@ export function runDungeonPass(
         qx++;
         if (qx >= w - 10) break;
       }
-      // 书架平台（PlaceBooksChance 等）Default 无 → IsAShelf=false
+      // 书架链（:168-213）——num13/num15 为两侧首个 active 格（含端点）
+      if ((d.pots ?? 0) > 0 || (d.bottles ?? 0) > 0 || (d.books ?? 0) > 0 || (d.candles ?? 0) > 0) {
+        if (dgTW) { dgTW.shelfC = (dgTW.shelfC as number) + 1; dgTW.shelfM = ((dgTW.shelfM as number) || 0) + (qx - px); }
+        for (let m = px; m < qx; m++) {
+          if ((d.candles ?? 0) > 0 && rd() < (d.candles ?? 0)) {
+            placeOnTableD(m, py - 1, WATER_CANDLE);          // GenerateDungeonWaterCandle（PlaceOnTable1x1 零掷）
+          } else if ((d.pots ?? 0) > 0 && rd() < (d.pots ?? 0)) {
+            dgDungeonPot(m, py - 1);                          // style=Next(10,13)+PlacePot(28)
+          } else if ((d.bottles ?? 0) > 0 && rd() < (d.bottles ?? 0)) {
+            placeOnTableD(m, py - 1, TILE_BY_KEY['v_13_placed_bottles']!);
+            if (typAt(m, py - 1) === TILE_BY_KEY['v_13_placed_bottles']) rn(2);   // type==13 后 Next(2)
+          } else if ((d.books ?? 0) > 0 && rd() < (d.books ?? 0)) {
+            placeOnTableD(m, py - 1, BOOKS);                  // NoWaterbolt=true → 无 Next(50)；内含 Next(5)
+          }
+        }
+      }
+    }
+  }
+  // GenerateDungeonPot（DU:447-452）：style=Next(10,13) + PlacePot(28,style)
+  //（2×2 净空+双列 nactive 整砖无坡；成功即 Next(3) 变体掷——PotsPass.placePot 同构）
+  const DGPOT = TILE_BY_KEY['pot']!;
+  function dgDungeonPot(x: number, y: number): void {
+    const style = ri(10, 12);
+    let ok = true;
+    for (let dx = 0; dx < 2 && ok; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)] !== 0) { ok = false; break; }
+      }
+      if (!st.inBounds(x + dx, y + 1)) { ok = false; break; }
+      const gi = st.idx(x + dx, y + 1);
+      if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !genSolidType(st.type[gi])) { ok = false; break; }
+    }
+    if (!ok) return;
+    const variant = rn(3) * 36;
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = -1; dy <= 0; dy++) {
+        const ti = st.idx(x + dx, y + dy);
+        st.flags[ti] = 1; st.type[ti] = DGPOT;
+        st.slope[ti] = 0; st.half[ti] = 0;
+        st.frameX[ti] = dx * 18 + variant;
+        st.frameY[ti] = (dy + 1) * 18 + style * 36;
+      }
     }
   }
   // ============ 宝箱：BiomeChests/BasicChests + AddBuriedChest（战利品掷骰流对齐）============
@@ -2870,10 +3631,22 @@ export function runDungeonPass(
     posX = Math.trunc(bx); posY = Math.trunc(by); topX = Math.trunc(bx);
   }
   snap('dungeonL');
-  // —— 爬升入口大厅（cs:398-449）——
+  // —— 爬升入口大厅（cs:398-449）——★XX 批（2026-08-18）precalc 支：
+  //   MakeDungeon :418-420 dungeonEntrancePosition!=Zero（=precalc 成功）时改走
+  //   MakeDungeon_GenerateNextEntranceHall_Precalculated（DC.cs:558-585）：dist=爬升
+  //   起点到入口的全程距离（循环外一次定格）、amountPassed=(int)dist 递减 Next(10,30)
+  //   （超余量钳 max(1,(int)dist-amountPassed)）、目标=Lerp(currentPos,entrance,
+  //   amountPassed/dist)、每厅 2 掷（步数+种子）；amountPassed<=0 → 出地表门。
+  //   currentPos 是**上一厅的 lerp 目标**（非实际走终点—— halls 链由目标点接力，
+  //   与 genVars 终值解耦，原版如此）。Legacy 支照旧盲爬。
   entOnSurface = false;
   {
+    const TT = (globalThis as { __dgTowerTrace?: Record<string, number | string> }).__dgTowerTrace;
+    let curX = posX + 0.0, curY = posY + 0.0;               // currentPos（局部，不随 genVars）
+    const dist = precalcOK ? Math.hypot(entX - curX, entY - curY) : 0.0;   // Vector2D.Distance
+    let amountPassed = Math.trunc(dist);
     let roomDelay = 5, guard = 100;
+    if (TT) { TT.dist = dist; TT.entX = entX; TT.entY = entY; TT.climb0 = dgMainRolls; TT.inserts = 0; TT.halls = 0; }
     while (!entOnSurface) {
       guard--;
       if (guard <= 0) break;
@@ -2884,11 +3657,32 @@ export function runDungeonPass(
         dgHall({ seed: raw(), generated: true, forceX: false, isEntrance: false, bounds: new DBnd(w, h), sx: 0, sy: 0, ex: 0, ey: 0, sdx: 0, sdy: 0, edx: 0, edy: 0 });
         dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
         posX = sx; posY = sy;
+        if (TT) TT.inserts = (TT.inserts as number) + 1;
       }
-      dgEntHall(raw());
+      if (precalcOK) {
+        let nsteps = ri(10, 29);                            // genRand.Next(10,30)
+        if (nsteps > dist - amountPassed) nsteps = Math.max(1, Math.trunc(dist) - amountPassed);
+        const t = dist > 0 ? amountPassed / dist : 0;
+        const tgX = curX + (entX - curX) * t;               // Vector2D.Lerp
+        const tgY = curY + (entY - curY) * t;
+        dgEntHallPrecalc(raw(), curX, curY, tgX, tgY);
+        amountPassed -= nsteps;
+        curX = tgX; curY = tgY;
+        if (TT) { TT.halls = (TT.halls as number) + 1; TT['ns' + TT.halls] = nsteps; TT['ap' + TT.halls] = amountPassed; }
+        if (amountPassed <= 0) entOnSurface = true;
+      } else {
+        dgEntHall(raw());
+      }
     }
+    if (TT) TT.climb1 = dgMainRolls;
   }
-  dgEntrance(raw(), entSeed);
+  // MakeDungeon_GetEntrance（:450）——Tower=TowerDungeonEntrance（XX 批 1:1 转录）；
+  // Dome 体未转录（WorldUtils 形状族+窗/柱特征另案）——precalc 链（掷/位置）照走、
+  // 入口体暂以 Legacy 城堡近似（备案：Dome 种子 x86 网格不裁决）。
+  // GetEntranceSettings 的 1 颗废弃掷在两支同位（settings.RandomSeed=Next() 后被
+  // preSettings.RandomSeed 覆写）——tower 支先 raw() 再传 entSeed。
+  if (entKind === 2) { raw(); dgTowerEntrance(posX, posY, entSeed); }
+  else dgEntrance(raw(), entSeed);
   snap('dungeonE');
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);
@@ -2897,6 +3691,7 @@ export function runDungeonPass(
   dgSpikes(); snap('dungeonS');
   dgDoorsF(); snap('dungeonD');
   dgWallVariants(); snap('dungeonW');
+  if (dgTW) dgTW.plat1 = dgMainRolls;
   dgPlatforms(); snap('dungeonP');
   dgBiomeChests(); snap('dungeonC');
   dgBookshelves(); snap('dungeonB');

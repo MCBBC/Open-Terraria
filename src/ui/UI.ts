@@ -1218,7 +1218,10 @@ export class UI {
     }
     const img = this.ghostEl.querySelector('img') as HTMLImageElement;
     const url = iconUrl(this.game, this.heldStack.id);
-    if (img.src !== url) img.src = url;
+    // ★getAttribute 比较(2026-08-17 trace 定位):img.src 属性返回绝对化 URL,
+    // dataURL 场景恒不等 → 每次 mousemove 重设 src = 同图反复重新光栅化
+    // (trace 实锤:同一 pixelRef id 被画 1573 次,270/s 持续流)
+    if (img.getAttribute('src') !== url) img.src = url;
     let cnt = this.ghostEl.querySelector('.cnt') as HTMLElement | null;
     if (this.heldStack.stack > 1) {
       if (!cnt) { cnt = el('span', 'cnt'); this.ghostEl.appendChild(cnt); }

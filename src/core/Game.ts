@@ -17399,6 +17399,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const hallowGrassT = TILE_BY_KEY['v_109_hallowed_grass_block'];
     const mowedGrassT = TILE_BY_KEY['v_477_mowed_grass_block'];
     const hallowMowedT = TILE_BY_KEY['v_492_hallowed_mowed_grass_block'];
+    // 小动物入桶 helper（香蒲蜻蜓块与雨天替换块共用——曾定义在香蒲块内，
+    // 雨天块块外引用 → ReferenceError，上提至函数作用域）
+    const spawnVanilla = (id: number, px: number, py: number) => {
+      const e = Enemy.fromVanilla(id, px, py);
+      if (e) { e.id = this.entities.nextId++; this.entities.add(e, 'critters'); }
+    };
     if (this.world.weather.raining && isDay
       && Math.abs(this.world.weather.windSpeedTarget) < 0.4 && !surfaceWater
       && (gTile === T.GRASS || gTile === mowedGrassT || gTile === T.SAND)
@@ -17414,10 +17420,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         }
       }
-      const spawnVanilla = (id: number, px: number, py: number) => {
-        const e = Enemy.fromVanilla(id, px, py);
-        if (e) { e.id = this.entities.nextId++; this.entities.add(e, 'critters'); }
-      };
       if (nCattail > 1) {
         // 金蜻蜓 601（1/goldCritterChance=400）；池按 tile（RollDragonflyType L5426）；
         // 1/3 附加只 ×2（±16px）——原版 SpawnNPC 多只
@@ -18582,6 +18584,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (rl.forbidBossSummon) {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
           return false;
+        }
+        // 服务器房 Boss 在场预检：本地 this.boss 恒 null（怪全是傀儡）——查傀儡表，
+        // 防白烧召唤物（服务器侧也有同门，双保险；物品消耗语义=false 不扣）
+        for (const [, pup] of this.netNpcPuppets) {
+          if (pup.e && !pup.e.dead && (pup.e as Enemy).def.boss) {
+            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
+            return false;
+          }
         }
         const st0 = this.world.store;
         const tx2 = Math.max(2, Math.min(st0.w - 3, tx));

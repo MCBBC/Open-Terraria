@@ -54,10 +54,11 @@ export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i:
   //   入口类型掷①② Next(3)（DungeonCrawler.cs:174/177 Legacy→Dome→Tower 门）+
   //   MakeDungeon_GetEntranceSettings.RandomSeed Next()（:856）原版就在 Dunes pass 头
   //   消耗——此前 JS/oracle 同步延后到 DungeonPass 头是续流期妥协；pass 边界重播后
-  //   dunes 流须逐掷对齐。A/B 结果照掷照弃（Legacy 路径不消费——转写债，两侧同构），
+  //   dunes 流须逐掷对齐。A/B 结果落 gs（XX 批 2026-08-18：②==0→Tower/①==0→Dome
+  //   走 PrecalculateEntrancePosition 路径，DungeonPass 消费；Legacy 路径不用），
   //   entSeed 落 gs 供 DungeonPass 的 DgEntrance 消费。
-  rng.nextIntRange(0, 3);              // 入口类型掷①（普通世界 flag 即真只跑一轮）
-  rng.nextIntRange(0, 3);              // 入口类型掷②
+  gs.dungeonEntA = rng.nextIntRange(0, 3);  // 入口类型掷①（普通世界 flag 即真只跑一轮）
+  gs.dungeonEntB = rng.nextIntRange(0, 3);  // 入口类型掷②
   gs.dungeonEntSeed = rng.vanilla.next(); // preGenDungeonEntranceSettings.RandomSeed
   // WorldGenRange(1,2,ScaleWith:WorldWidth).GetRandom:ScaleValue=(int)(w/4200×v)
   const ws = w / 4200;

@@ -576,12 +576,12 @@ function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSma
   if (!solidAt(st, x, y - 1) || activeAt(st, x, y) || activeAt(st, x, y + 1)) return;
   const above = st.type[st.idx(x, y - 1)];
   if (above !== SNOW147 && above !== ICE161
-    && above !== TILE_BY_KEY['v_163_corrupt_ice_block']! && above !== sheetTile(164)
-    && above !== TILE_BY_KEY['v_200_crimson_ice_block']!) return;
+    && above !== TILE_BY_KEY['v_163_purple_ice_block']! && above !== sheetTile(164)
+    && above !== TILE_BY_KEY['v_200_red_ice_block']!) return;
   // 冰族专属列（GetDesiredStalagtiteStyle :38800-38808 重定型）：147/161→0、
   // 163→594、164→540、200→648——曾全写 fx0 冰柱列（163/164/200 错列）
   const base = above === SNOW147 || above === ICE161 ? 0
-    : above === TILE_BY_KEY['v_163_corrupt_ice_block']! ? 594
+    : above === TILE_BY_KEY['v_163_purple_ice_block']! ? 594
     : above === sheetTile(164) ? 540 : 648;
   if (preferSmall) {
     st.setTileSilent(x, y, STALACTITE, base + variation * 18, 72);

@@ -78,6 +78,20 @@ let gsSp: GenState | null = null;
     if (!gsSp) {
       gsSp = cloneGs(gs);
       try { writeFileSync('/tmp/sw-spider-liqtype.bin', st.liquidType); } catch { /* ignore */ }
+      // 我方管线 spider 入口四通道 vs vanilla dump062（直查差异）
+      const t62 = new Uint16Array(load(IDX_IN, 'typ').buffer.slice(0));
+      const a62 = load(IDX_IN, 'act');
+      const w62 = new Uint16Array(load(IDX_IN, 'wal').buffer.slice(0));
+      const l62 = load(IDX_IN, 'liq');
+      let dT = 0, dA = 0, dW = 0, dL = 0;
+      for (let i = 0; i < W * H; i++) {
+        let jT = st.type[i]; if (jT !== 0) jT = SHEET[jT] ?? -1;
+        if (jT !== t62[i]) dT++;
+        if ((st.flags[i] !== 0) !== (a62[i] !== 0)) dA++;
+        if (st.wall[i] !== w62[i]) dW++;
+        if (st.liquid[i] !== l62[i]) dL++;
+      }
+      console.log(`[entry-state] JS管线 spider 入口 vs dump062: typ=${dT} act=${dA} wal=${dW} liq=${dL}`);
     }
   };
   try {

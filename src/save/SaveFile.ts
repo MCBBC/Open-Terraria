@@ -133,6 +133,16 @@ export function loadSave(json: string): ReturnType<typeof loadSaveData> {
  *  注意：serializeSave 的幽灵净化会就地写 store——服务器存储由 setTileSilent/
  *  loadSaveData 保持 type/flags 一致，该循环为 no-op，活存储不受影响。 */
 export function saveWorldOnly(world: World): string {
+  const parts = buildSaveParts(world);
+  return serializeSave(parts.view, parts.meta, parts.player, 0);
+}
+
+/** 只构建序列化输入(视图+元数据+占位玩家),不做 RLE/stringify——ioWorker 路径用:
+ *  主线程出 parts(廉价视图引用)→ worker 克隆 memcpy 后做重的 RLE 编码+stringify
+ *  (server/src/workers/ioWorkerClient.ts)。saveWorldOnly 语义不变(同源部件) */
+export function buildSaveParts(world: World): {
+  view: SaveStoreView; meta: SaveMeta; player: SaveData['player'];
+} {
   const st = world.store;
   const view: SaveStoreView = {
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
@@ -174,7 +184,7 @@ export function saveWorldOnly(world: World): string {
     hp: 0, x: world.spawnX * 16, y: world.spawnY * 16,
     inventory: [], selected: 0,
   };
-  return serializeSave(view, meta, placeholderPlayer, 0);
+  return { view, meta, player: placeholderPlayer };
 }
 
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,

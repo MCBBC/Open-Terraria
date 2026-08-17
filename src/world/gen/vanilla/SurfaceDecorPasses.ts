@@ -111,7 +111,9 @@ const BAMBOO = TILE_BY_KEY['v_571_bamboo']!;
 const SEAWEED = TILE_BY_KEY['v_549_seaweed']!;
 const PILE_SMALL = TILE_BY_KEY['v_185_small_decos']!;
 const PILE_LARGE = TILE_BY_KEY['v_186_decos_3x2']!;
-const HIVE = TILE_BY_KEY['v_444_hive']!;
+const HIVE = TILE_BY_KEY['v_444_bee_hive']!;  // ★s111 定罪 2026-08-17：曾引 'v_444_hive'
+//  （local-item 退役批已更名 v_444_bee_hive）→ undefined 被 Uint16Array 静默吞成 0
+//  → 藤蔓 pass 蜂巢凹龛全部"击杀后放空"= 2×2 洞（t0>444 ×192/种子）。掷流不受影响。
 
 // ---------- 通用小工具 ----------
 const inWorld = (st: TileStore, x: number, y: number, fluff = 0): boolean =>

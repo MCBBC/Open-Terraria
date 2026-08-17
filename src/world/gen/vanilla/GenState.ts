@@ -46,6 +46,11 @@ export interface GenState {
    *  2026-08-16 每 pass 重播改造归位；DungeonPass 的 dgEntrance 消费；
    *  undefined=未跑过 Dunes（DungeonPass 兜底自掷） */
   dungeonEntSeed?: number;
+  /** 入口类型掷①②（DungeonCrawler.cs:174/177：①==0→Dome 候选，②==0→Tower 覆盖，
+   *  余 Legacy）。掷在 Dunes pass 头；Tower/Dome=PrecalculateEntrancePosition 路径
+   *  （XX 批 2026-08-18 接线）；undefined=未跑过 Dunes（DungeonPass 兜底自掷） */
+  dungeonEntA?: number;
+  dungeonEntB?: number;
   dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   dungeonEntX: number;        // 入口门厅可站立点 X（DungeonPass 回填；原版 dungeonX 语义=老头锚）
   /** GenVars.CurrentDungeonGenVars.generatingDungeonPositionX。终值＝爬升入口走廊终点

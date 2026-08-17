@@ -124,12 +124,54 @@ let gsCor: GenState | null = null;
 
   const st = buildStore(D1, 'p28');
   const { rng, box } = countedRng(gsCor.seed);
+  // P32 事件流对拍 vanilla /tmp/sw-cor111/cor.log（首个分叉动作定位）
+  const jsP32: string[] = [];
+  (globalThis as { __swP32?: unknown }).__swP32 = (x: number, y: number, t: number) => {
+    jsP32.push(`COR|P32|${x}|${y}|${TILE_DEFS[t]?.vanilla?.sheet ?? t}`);
+  };
   g0.__swCorMark = (s) => { marks.push([s, box.n]); };
   try {
     runCorruptionPass(st, rng, gsCor);
   } finally {
     g0.__swCorMark = undefined;
+    (globalThis as { __swP32?: unknown }).__swP32 = undefined;
   }
+  // P32 序列对拍：vanilla 侧按 CR 段切（CR 行号索引）
+  try {
+    const vanAll = readFileSync('/tmp/sw-cor111/cor.log', 'utf8').split('\n').filter(Boolean);
+    const vanCR = vanAll.map((l, i) => ({ l, i })).filter((e) => e.l.startsWith('COR|CR|'));
+    const jsCR = marks.filter(([s]) => s.startsWith('chasMain') || s.startsWith('chasSat'));
+    console.log(`\nP32 对拍: js=${jsP32.length} van=${vanAll.filter((l) => l.startsWith('COR|P32|')).length}`);
+    let vPtr = 0;
+    for (let k = 0; k < Math.min(jsCR.length, vanCR.length - 1); k++) {
+      const vSeg = vanAll.slice(vanCR[k]!.i + 1, vanCR[k + 1]!.i).filter((l) => l.startsWith('COR|P32|'));
+      // js 段：由 jsP32 无法分段——改为整体首分叉定位（见下）
+      void vSeg;
+      vPtr = vanCR[k + 1]!.i;
+    }
+    void vPtr;
+    // 整序列首分叉（vanilla 侧裁到腐化 pass 窗口：首个 CR 之后、直到首个
+    // 「非 26 型或出腐化区」的 P32——#44 全图祭坛 pass 在后,位置任意可分）
+    const firstCRi = vanAll.findIndex((l) => l.startsWith('COR|CR|'));
+    const vanP32: string[] = [];
+    for (let k3 = firstCRi + 1; k3 < vanAll.length; k3++) {
+      const l = vanAll[k3]!;
+      if (!l.startsWith('COR|P32|')) { if (l.startsWith('COR|CR|') || l.startsWith('COR|SW|') || l.startsWith('COR|ORB|')) continue; else break; }
+      const c = l.split('|');
+      if (c[4] !== '26' || +c[2]! < 2340 || +c[2]! > 2910 || +c[3]! > 700) break;
+      vanP32.push(l);
+    }
+    let firstDiff = -1, common = 0;
+    for (let k2 = 0; k2 < Math.max(jsP32.length, vanP32.length); k2++) {
+      if (jsP32[k2] !== vanP32[k2]) { firstDiff = k2; break; }
+      common++;
+    }
+    console.log(`P32 首分叉: idx=${firstDiff}（前 ${common} 个逐位全同）`);
+    if (firstDiff >= 0) {
+      console.log(`  js 上下文: ${jsP32.slice(Math.max(0, firstDiff - 2), firstDiff + 3).join('  ')}`);
+      console.log(`  van 上下文: ${vanP32.slice(Math.max(0, firstDiff - 2), firstDiff + 3).join('  ')}`);
+    }
+  } catch (e) { console.log('P32 cmp skip:', String(e).slice(0, 100)); }
   console.log(`draws=${box.n} (vanilla ${VAN_N}, diff=${box.n - VAN_N})`);
   console.log('marks:', marks.map(([s, n]) => `${s}@${n}`).join(' '));
   // 球(31)/坛(26) 锚点提取（topleft）：与 p29 对照定位首分叉裂隙

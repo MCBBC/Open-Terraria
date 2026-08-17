@@ -472,8 +472,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     await makeGame().joinNetGame(url, () => {}, hostToken);
   }
 
-  /** 探针桥：当前世界序列化后向中央服务器建房（返回 {code, hostToken}） */
-  async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean; maxPlayers?: number } = {}): Promise<{ code: string; hostToken: string; error?: string }> {
+  /** 探针桥：当前世界序列化后向中央服务器建房（返回 {code, hostToken}）。
+   *  v8 rules 透传（serverAuth=true = 服务器权威房,世界由 SimHost 计算,建房者亦为访客） */
+  async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean; maxPlayers?: number; rules?: Partial<import('./net/protocol').RoomRules> } = {}): Promise<{ code: string; hostToken: string; gmToken?: string; error?: string }> {
     try {
       if (!game) return { error: 'no game', code: '', hostToken: '' };
       const { saveGame } = await import('./save/SaveFile');
@@ -497,12 +498,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           protectTiles: !!opts.protectTiles,
           protectItems: !!opts.protectItems,
           maxPlayers: opts.maxPlayers,
+          rules: opts.rules,
           save: json,
         }),
       });
-      const data = await r.json() as { ok: boolean; code?: string; hostToken?: string; error?: string };
+      const data = await r.json() as { ok: boolean; code?: string; hostToken?: string; gmToken?: string; error?: string };
       if (!data.ok || !data.code || !data.hostToken) return { error: data.error ?? 'bad response', code: '', hostToken: '' };
-      return { code: data.code, hostToken: data.hostToken };
+      return { code: data.code, hostToken: data.hostToken, gmToken: data.gmToken };
     } catch (e) {
       return { error: String((e as Error).message ?? e), code: '', hostToken: '' };
     }

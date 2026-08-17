@@ -9,6 +9,7 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef } from './MushroomPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
+import { idsByVanillaSheet } from './TileRunner';
 
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
 const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block']!;
@@ -52,6 +53,8 @@ function canEvilReplace(st: TileStore, x: number, y: number): boolean {
 }
 const ORB = TILE_BY_KEY['v_31_orb_heart']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!;
+/** TileID.Sets.Platforms（SolidTile2 cs:70500 的半砖/上坡特赦族） */
+const PLATFORMS = idsByVanillaSheet(19, 427, 435, 436, 437, 438, 439);
 const HARDSAND = TILE_BY_KEY['hardened_sand']!;
 const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔矿脉 + 挖空保护 :76191）
 const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空保护 :76191）
@@ -95,8 +98,13 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (zHi > w - beachAvoid) zHi = w - beachAvoid;
       if (cx < zLo + midFixer) cx = zLo + midFixer;
       if (cx > zHi - midFixer) cx = zHi - midFixer;
-      if (gs.dungeonSide < 0 && zLo < 400) zLo = 400;          // dungeonSide<=Left
-      else if (gs.dungeonSide > 0 && zLo > w - 400) zLo = w - 400;
+      // ★dungeonSide 钳制是猩红分支专属（cs:14042-14049）；腐化分支（cs:14358-14384）
+      //   没有这两行——曾两分支共用 → corruption 侧 zLo 被错误钳到 400/w-400，
+      //   s6666 首组起整条流分叉（+1.14M 掷）。1405 无此钳制（1456 猩红新增）。
+      if (gs.crimson) {
+        if (gs.dungeonSide < 0 && zLo < 400) zLo = 400;          // dungeonSide<=Left
+        else if (gs.dungeonSide > 0 && zLo > w - 400) zLo = w - 400;
+      }
       if (zLo < gs.dungeonLocation + dungeonAvoid && zHi > gs.dungeonLocation - dungeonAvoid) ok = false;
       const mid = w / 2;
       if (Math.abs(cx - mid) < 200 || Math.abs(zLo - mid) < 200 || Math.abs(zHi - mid) < 200) ok = false;
@@ -323,6 +331,8 @@ function isTileNearby(st: TileStore, x: number, y: number, type: number, radius:
 /** Place3x2（cs:52097）type=26 语义：界内 + 3×2 区域净空 + 三列底座实心（★active 实心，
  *  曾用 st.isSolid 不判 flags）+ 底座非巨石(523)。锚点=中下，帧 style*54+col*18。 */
 function place3x2(st: TileStore, x: number, y: number, type: number, style: number): void {
+  const __p32 = (globalThis as { __swP32?: (x: number, y: number, t: number) => void }).__swP32;
+  if (__p32) __p32(x, y, type);   // 取证钩（默认零开销；tools/_cor29iso 用）
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return;
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 0; dy++) {
@@ -331,9 +341,15 @@ function place3x2(st: TileStore, x: number, y: number, type: number, style: numb
   }
   for (let dx = -1; dx <= 1; dx++) {
     const bi = st.idx(x + dx, y + 1);
-    if (!st.flags[bi]) return;                                  // SolidTile2 = active+tileSolid
+    if (!st.flags[bi]) return;
     // tileSolid 走 GenSolid（本 pass 时点 484 滚动仙人掌 cs:12537 已翻非实心）
     if (!genSolidType(st.type[bi])) return;
+    // SolidTile2（cs:70497）坡位/半砖门（s111 定罪 2026-08-17：底座 (2702/2704,413) 带坡，
+    // 原版拒放祭坛 → 祭坛重试环继续耗掷 → JS 早退 = 腐化 pass -63 万掷的根因）：
+    // 平台族半砖/上坡特赦，其余 slope!=0 一律拒；半砖恒拒（inActive 生成期恒 false 不建）
+    const topSlope = st.slope[bi] === 1 || st.slope[bi] === 2;
+    if (!((PLATFORMS.has(st.type[bi]) && (st.half[bi] !== 0 || topSlope)) || st.slope[bi] === 0)) return;
+    if (st.half[bi] !== 0) return;
     if (BOULDERS.has(st.type[bi])) return;  // TileID.Sets.Boulders（TileID.cs:195：138/484/664/665/711-716）
   }
   for (let dx = -1; dx <= 1; dx++) {

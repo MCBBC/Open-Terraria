@@ -81,7 +81,7 @@ try {
   // ---- ① 建服务器房（rules.serverAuth + forbidBreak） ----
   const res = await fetch(`http://127.0.0.1:${LOBBY}/rooms`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'sr探针', public: true, save: makeTinySave(200), rules: { serverAuth: true, forbidBreak: true } }),
+    body: JSON.stringify({ name: 'sr探针', public: true, save: makeTinySave(200), rules: { serverAuth: true } }),
   }).then((r) => r.json());
   check('① 建房成功', !!res.ok && /^\d{6}$/.test(res.code), `code=${res.code}`);
   check('① 返回 gmToken', typeof res.gmToken === 'string' && res.gmToken.length > 10);
@@ -96,9 +96,10 @@ try {
   c.send(new Writer(M.RequestWorldData));
   const wd = await c.wait(M.WorldData, 5000);
   check('② WorldData', !!wd);
-  // spawnX/Y：f64 time + u32 dayCount + u16 w + u16 h 之后
-  const [, s1] = R.f64(wd.r, 0); const [, s2] = R.u32(wd.r, s1); const [, s3] = R.u16(wd.r, s2); const [, s4] = R.u16(wd.r, s3);
-  const [spawnX, s5] = R.i32(wd.r, s4); const [spawnY] = R.i32(wd.r, s5);
+  // msg7 线序：f64 timeOfDay + u32 dayCount + u16 w + u16 h + i32 spawnX + i32 spawnY
+  const [spawnX] = R.i32(wd.r, 16);
+  const [spawnY] = R.i32(wd.r, 20);
+  console.log(`[dbg] spawn=(${spawnX},${spawnY})`);
   c.send(new Writer(M.SpawnTileData).i32(spawnX).i32(spawnY));
   const pol = await c.wait(M.RoomPolicy, 5000);
   check('② 进场 RoomPolicy', !!pol);
@@ -113,7 +114,6 @@ try {
     const ruleBits = pol.r[o];
     check('② serverAuth 房客户端非房主', isHost === 0, `isHost=${isHost}`);
     check('② ruleBits.bit0=serverAuth', (ruleBits & 1) === 1, `bits=${ruleBits}`);
-    check('② ruleBits.bit2=forbidBreak', (ruleBits & 4) === 4);
   }
   await c.wait(M.PlayerSpawn, 8000);
   // 等 strip 流完（进场 state=10 后收 PlayerSpawn 即在局）
@@ -144,19 +144,17 @@ try {
   });
   check('④ /rules 回显', !!rulesMsg, rulesMsg ? `${rulesMsg.r.length}B` : '无回显');
 
-  // ---- ⑤ forbidBreak：破坏 op → 权威纠正回弹 ----
+  // ---- ⑤ 先落一格（制造脏标记,供 ⑨ 存档断言）→ PATCH forbidBreak → 破坏被拒 ----
   // writeTileBatch 线序：u16 count + [u8 action + i32 x + i32 y + u16 v + (SetTile: u16 fx + u16 fy)]
-  const framesBefore = c.frames.length;
-  c.send(new Writer(M.TileBatch).u16(1).u8(0).i32(spawnX).i32(spawnY).u16(0).u16(0).u16(0));
-  await sleep(800);
-  const newFrames = c.frames.slice(framesBefore).filter((f) => f.id === M.TileBatch);
-  check('⑤ 禁破坏:权威纠正帧回弹', newFrames.length > 0, `${newFrames.length} 帧纠正`);
-  // 纠正帧 = 当前格状态（全空气世界 → type 0；但纠正帧本身到达即证明拒绝路径）
-
-  // ---- ⑥ PATCH 规则热更 peaceMode → RoomPolicy 重播 ----
+  const opY = Math.max(0, spawnY - 30);
+  c.send(new Writer(M.TileBatch).u16(1).u8(0).i32(spawnX).i32(opY).u16(1).u16(0).u16(0));
+  await sleep(500);
+  const stats1 = await fetch(`http://127.0.0.1:${LOBBY}/stats`).then((r) => r.json());
+  const stRoom = (stats1.rooms ?? []).find((q) => q.code === res.code);
+  console.log(`[dbg] tile op 后 stats: ${JSON.stringify(stRoom?.stats ?? stRoom ?? {}).slice(0, 200)}`);
   const patch = await fetch(`http://127.0.0.1:${LOBBY}/rooms/${res.code}/rules?token=${res.gmToken}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ peaceMode: true }),
+    body: JSON.stringify({ forbidBreak: true, peaceMode: true }),
   }).then((r) => r.json());
   check('⑥ PATCH 热更成功', !!patch.ok && patch.rules.peaceMode === true);
   const pol2 = await c.wait(M.RoomPolicy, 4000, (f) => f !== pol);
@@ -167,7 +165,21 @@ try {
     const [nameL, b] = R.u16(pol2.r, o); o += b + nameL;
     o += 3; const [, c1] = R.u16(pol2.r, o); o += c1 + 1;
     const ruleBits = pol2.r[o];
-    check('⑥ peaceMode 位下发', (ruleBits & 64) === 64, `bits=${ruleBits}`);
+    check('⑥ forbidBreak+peaceMode 位下发', (ruleBits & 68) === 68, `bits=${ruleBits}`);
+  }
+
+  // ---- ⑤b 规则生效后:同坐标破坏 op → 权威纠正帧回弹(v 字段=服务器当前格值,
+  //      应=⑤ 前置 op 放置的 1,证明 op 应用+脏标记链路) ----
+  const framesBefore = c.frames.length;
+  c.send(new Writer(M.TileBatch).u16(1).u8(0).i32(spawnX).i32(opY).u16(0).u16(0).u16(0));
+  await sleep(800);
+  const corr = c.frames.slice(framesBefore).find((f) => f.id === M.TileBatch);
+  check('⑤ 禁破坏:权威纠正帧回弹', !!corr);
+  if (corr) {
+    console.log(`[dbg] 纠正帧 ${corr.r.length}B: ${corr.r.subarray(0, 24).toString('hex')}`);
+    const cnt = corr.r.readUInt16LE(0);
+    const v = cnt >= 1 ? corr.r.readUInt16LE(2 + 1 + 4 + 4) : -1;
+    check('⑤ 前置 op 已应用(纠正帧 v=1)', v === 1, `v=${v} cnt=${cnt}`);
   }
 
   // ---- ⑦ SummonIntent 脏 key 拒（静默丢弃,连接不断） ----
@@ -183,11 +195,24 @@ try {
 
   clearInterval(stateTimer);
   c.ws.close();
+
+  // ---- ⑨ SIGTERM 优雅收尾 → 存档落盘(ioWorker stringify 路径 E2E) ----
+  await sleep(400); // 空房即时落盘异步路径触发
+  try { server.kill('SIGTERM'); } catch { /* 已退 */ }
+  const { existsSync } = await import('node:fs');
+  const savePath = new URL('../../server/worlds/room-' + res.code + '.json', import.meta.url);
+  let saved = false;
+  for (let i = 0; i < 40 && !saved; i++) { await sleep(100); saved = existsSync(savePath); }
+  check('⑨ SIGTERM 存档落盘(ioWorker stringify)', saved);
 } catch (e) {
   console.log('FAIL: 异常中断 —', e instanceof Error ? e.message : e);
   fail++;
 } finally {
   console.log(`\n===== _sr-probe 结果: ${pass} PASS / ${fail} FAIL =====`);
+  if (fail > 0) {
+    console.log('--- server log tail ---');
+    console.log(serverLog.slice(-30).join(''));
+  }
   server.killGroup();
   if (fail > 0) process.exitCode = 1;
 }

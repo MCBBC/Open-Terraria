@@ -58,10 +58,13 @@ const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
  *    num145 = (贴图宽 + 盒宽)/2 → 展开后贴图左上角落于 (盒左 + num144, 盒上 − num143),
  *    旋转绕 anchor 进行。非方贴图(W≠盒宽)按此公式为"盒左对齐"而非居中。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
-function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number; h: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false): void {
+function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number; h: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false, centerAnchor = false): void {
   // drawSize=绘制尺寸(0=取碰撞盒 w；-1=贴图原生尺寸——原版投射物绘制语义,
   // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
   // mirror=旋转坐标系内水平镜像（XNA dir=FlipHorizontally 等价，绕 origin 翻转）
+  // centerAnchor=Main.cs:32360 专属组（802/842/938-945 短剑刺族等）：锚=盒中心、
+  // origin=贴图中心、无 num143/144 偏置——曾误走通用 num145 偏置锚（枢轴≈剑尖），
+  // 右刺角度巧合正常、左刺 −π/4×sd 与镜像叠加后枢轴错位=剑柄朝前（2026-08-17 用户报）
   const img0 = projSprite(projId);
   const natural = drawSize < 0 && img0 && (img0.width > 0) && img0.width > 0;
   const dw = natural ? img0!.width : drawSize > 0 ? drawSize : e.w;
@@ -75,6 +78,21 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const s = dw / W;                                   // 绘制缩放(原生尺寸=1)
   ctx.save();
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
+  if (centerAnchor) {
+    // :32361-32367：vector75=盒中心+gfxOffY、origin=贴图中心、scale=proj.scale(1)
+    ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
+    ctx.rotate(ang);
+    if (mirror) ctx.scale(-1, 1);
+    ctx.imageSmoothingEnabled = false;
+    if (hasImg) {
+      ctx.drawImage(img!, -W / 2, -(img!.height / 2), W, img!.height);
+    } else {
+      ctx.fillStyle = fallbackColor;
+      ctx.fillRect(-dw / 2, -dw / 2, dw, dw);
+    }
+    ctx.restore();
+    return;
+  }
   ctx.translate(e.x + num145 + off144, e.y + e.h / 2);
   ctx.rotate(ang);
   if (mirror) ctx.scale(-1, 1);
@@ -715,7 +733,7 @@ export class SpearProj extends Entity {
     //   暗黑长枪 222=116×116 全被缩到 18px = "特别小"根因（2026-08-17 用户抓到）。
     //   细剑族 938-945 恰 32×32 沿用固定 32（等值无差）;jitter 族仍 -1 原生
     drawProj(r, cam, this, this.projId, ang,
-      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? (noQuarter ? -1 : 32) : -1, mirror);
+      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? (noQuarter ? -1 : 32) : -1, mirror, isRap);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {

@@ -16,7 +16,89 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { growGemTree } from './TreePass';
-import { placeTight } from './ShimmerPass';
+import { checkStalactite } from './ShimmerPass';
+
+const STALACTITE_TILE = TILE_BY_KEY['v_165_cave_decos']!;
+const LARVA_TILE = TILE_BY_KEY['v_231_larva'] ?? 0;
+
+/** PlaceTight（cs:38329，spiders=false）**初始列语义**副本（#103 专用，2026-08-17
+ *  s111 定罪）：原版 PlaceUncheckedStalactite 写**初始列**——冰族(147/161/163/164/200)
+ *  与石质族(1/苔/117/25/203)分别以 0 基/54 基落格（**117/25/203 初始也在 54 族**），
+ *  随后的 CheckStalactite→UpdateStalagtiteStyle 对失配族（117/25/203、冰 163/164/200、
+ *  墙62 垂挂双）掷 1×Next(3) 才重写为材质专属列（216/270/324/594/540/648/108）。
+ *  曾直写最终列 → 失配族 style==desired 永不掷 → s111 #103 -848 掷流漂移 + 14.6k
+ *  格 165 双向差。ShimmerPass.placeTight 属禁区不动，本副本按 cs:38355-38667 逐族
+ *  1:1（含 ground 分支无冰族 + 225 单格）。 */
+function placeTightInitial(st: TileStore, rng: RNG, x: number, y: number): void {
+  const yi = st.idx(x, y);
+  const liq = st.liquid[yi];
+  if (liq > 0 && st.liquidType[yi] === 4 /* LIQ_SHIMMER（+1 编码） */) return;
+  if (st.flags[yi] && st.type[yi] === LARVA_TILE) return;
+  const preferSmall = rng.int(0, 1) === 0;   // genRand.Next(2) == 0
+  const variation = rng.int(0, 2);           // genRand.Next(3)
+  placeUncheckedInitial(st, x, y, preferSmall, variation);
+  if (st.flags[yi] && st.type[yi] === STALACTITE_TILE) checkStalactite(st, rng, x, y);
+}
+
+/** PlaceUncheckedStalactite（cs:38355-38667，spiders=false）初始列 1:1 */
+function placeUncheckedInitial(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
+  if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return;
+  const sheetOf = (xx: number, yy: number): number => {
+    if (!st.inBounds(xx, yy)) return -1;
+    const i = st.idx(xx, yy);
+    return st.flags[i] ? SHEET[st.type[i]] : -1;
+  };
+  const put = (xx: number, yy: number, fx: number, fy: number): void => {
+    if (!st.inBounds(xx, yy)) return;
+    const i = st.idx(xx, yy);
+    st.type[i] = STALACTITE_TILE; st.flags[i] = 1; st.slope[i] = 0;
+    st.frameX[i] = fx; st.frameY[i] = fy;
+  };
+  if (solidTileAt(st, x, y - 1) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {
+    const above = sheetOf(x, y - 1);
+    if (above === 147 || above === 161 || above === 163 || above === 164 || above === 200) {
+      if (preferSmall) put(x, y, variation * 18, 72);
+      else { put(x, y, variation * 18, 0); put(x, y + 1, variation * 18, 18); }
+    }
+    if (above === 1 || TILE_MOSS.has(above) || above === 117 || above === 25 || above === 203) {
+      if (preferSmall) put(x, y, 54 + variation * 18, 72);
+      else { put(x, y, 54 + variation * 18, 0); put(x, y + 1, 54 + variation * 18, 18); }
+    }
+    if (above === 225) put(x, y, 162 + variation * 18, 72);
+    if (above === 396 || above === 397) {
+      if (preferSmall) put(x, y, 378 + variation * 18, 72);
+      else { put(x, y, 378 + variation * 18, 0); put(x, y + 1, 378 + variation * 18, 18); }
+    }
+    if (above === 368) {
+      if (preferSmall) put(x, y, 432 + variation * 18, 72);
+      else { put(x, y, 432 + variation * 18, 0); put(x, y + 1, 432 + variation * 18, 18); }
+    }
+    if (above === 367) {
+      if (preferSmall) put(x, y, 486 + variation * 18, 72);
+      else { put(x, y, 486 + variation * 18, 0); put(x, y + 1, 486 + variation * 18, 18); }
+    }
+    return;
+  }
+  if (!solidTileAt(st, x, y + 1) || st.flags[st.idx(x, y)] || st.flags[st.idx(x, y - 1)]) return;
+  const below = sheetOf(x, y + 1);
+  if (below === 1 || TILE_MOSS.has(below) || below === 117 || below === 25 || below === 203) {
+    if (preferSmall) put(x, y, 54 + variation * 18, 90);
+    else { put(x, y - 1, 54 + variation * 18, 36); put(x, y, 54 + variation * 18, 54); }
+  }
+  if (below === 225) put(x, y, 162 + variation * 18, 90);
+  if (below === 396 || below === 397) {
+    if (preferSmall) put(x, y, 378 + variation * 18, 90);
+    else { put(x, y - 1, 378 + variation * 18, 36); put(x, y, 378 + variation * 18, 54); }
+  }
+  if (below === 368) {
+    if (preferSmall) put(x, y, 432 + variation * 18, 90);
+    else { put(x, y - 1, 432 + variation * 18, 36); put(x, y, 432 + variation * 18, 54); }
+  }
+  if (below === 367) {
+    if (preferSmall) put(x, y, 486 + variation * 18, 90);
+    else { put(x, y - 1, 486 + variation * 18, 36); put(x, y, 486 + variation * 18, 54); }
+  }
+}
 
 const EXPOSED = TILE_BY_KEY['v_178_gems']!;   // tile 178
 const STONE = TILE_BY_KEY['stone']!;
@@ -400,7 +482,7 @@ export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (rockFamily(below) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y - 1)]) {
           st.slope[st.idx(x, y + 1)] = 0;
         }
-        placeTight(st, rng, x, y);
+        placeTightInitial(st, rng, x, y);
       }
     }
     // 地表钟乳石（:22264-22278）：k∈[5, worldSurface)；冰上 147/161、沙 25/203 上/下
@@ -411,15 +493,15 @@ export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
       };
       if ((up === 147 || up === 161) && rng.nextInt(5) === 0) {
         clearAbove();
-        placeTight(st, rng, x, k);
+        placeTightInitial(st, rng, x, k);
       }
       if ((up === 25 || up === 203) && rng.nextInt(5) === 0) {
         clearAbove();
-        placeTight(st, rng, x, k);
+        placeTightInitial(st, rng, x, k);
       }
       if ((down === 25 || down === 203) && rng.nextInt(5) === 0) {
         if (!st.flags[st.idx(x, k)] && !st.flags[st.idx(x, k - 1)]) st.slope[st.idx(x, k + 1)] = 0;
-        placeTight(st, rng, x, k);
+        placeTightInitial(st, rng, x, k);
       }
     }
   }
