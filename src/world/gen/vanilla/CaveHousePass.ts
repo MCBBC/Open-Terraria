@@ -16,7 +16,7 @@ import { placeDoorClosed } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
-import { flipGenSolid, genSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -160,29 +160,112 @@ function getHouseType(st: TileStore, rooms: Rect[]): Theme {
   return best[0];
 }
 
-// ---------- 家具/陈设放置 ----------
-/** 底锚(bottom)/顶锚(top)放置 framed 物件;帧 = style*fw*18 步长 */
-function placeFurniture(st: TileStore, key: string, x: number, y: number, style = 0, anchor: 'bottom' | 'top' = 'bottom'): boolean {
-  const t = TILE_BY_KEY[key];
-  if (t === undefined) return false;
-  const d = TILE_DEFS[t];
-  const fw = d.vanilla?.fw ?? 1;
-  const w = d.w ?? fw, h = d.h ?? (d.vanilla?.fh ?? 1);
-  const topY = anchor === 'bottom' ? y - (h - 1) : y;
+// ---------- 家具/陈设放置（2026-08-17 重写：PlaceTile 派发 1:1）----------
+// FillRooms/cascadePlace 全部经 WorldGen.PlaceTile → 逐型专属放置器（锚点/前置
+// 各异）。旧 placeFurniture 是"左对齐+底锚"通用几何——画作 240 偏 1 行、骨头/织机
+// 3×2 偏 1 列、织机该 Fail 却放置（少查占用列）、小堆 1 格非 2 格——家具态错位
+// 反噬 ① 蛛网 IsEmpty 与 ② 墙链 OnlyWalls 的掷位（house0 ② 238 vs vanilla 215
+// 之外的剩余残差来源）。本层按 vanilla 放置器逐型转录（几何+门 1:1；帧公式尽量
+// 对齐,渲染期量,不参与掷位）。
+
+/** SolidTile2（WorldGen.cs:70178）：active && tileSolid && slope==0 && !half。
+ *  ★tileSolid 须走 vanGenSolidType——Main.tileSolid[19]=true（Main.cs:7842，
+ *  平台在原版生成期是实心），裸 genSolidType 会把平台当地板拒掉骨堆/雕像
+ *  （house0 骨堆 (762..764,870) 下方 872 行是楼梯顶平台，实锤） */
+function solid2(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  return st.flags[i] !== 0 && vanGenSolidType(st.type[i]) && st.slope[i] === 0 && st.half[i] === 0;
+}
+
+/** Main.tileSolidTop（sheet 空间，与 BuriedChestsPass.PC_SOLID_TOP 同表） */
+const HOUSE_SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+const sheetOf = (st: TileStore, x: number, y: number): number => {
+  const t = st.type[st.idx(x, y)];
+  return TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+};
+
+/** Place*Wall 族画作公共体：全格 !active && wall≠0 才放（画作真前置） */
+function placeWallArt(st: TileStore, x0: number, y0: number, w: number, h: number, tile: number,
+  fx: (dx: number) => number, fy: (dy: number) => number): boolean {
   for (let dx = 0; dx < w; dx++) {
     for (let dy = 0; dy < h; dy++) {
-      if (!st.inBounds(x + dx, topY + dy) || st.flags[st.idx(x + dx, topY + dy)]) return false;
+      if (!st.inBounds(x0 + dx, y0 + dy)) return false;
+      const i = st.idx(x0 + dx, y0 + dy);
+      if (st.flags[i] !== 0 || st.wall[i] === 0) return false;
     }
   }
-  // 样式基偏移:权威布局表(FurnitureStyle.ts,竖排/换行族与通用横排统一)
-  const sheet = d.vanilla?.sheet ?? -1;
-  const [bx, by] = furnitureStyleBase(sheet, style, fw);
   for (let dx = 0; dx < w; dx++) {
-    for (let dy = 0; dy < h; dy++) {
-      st.setTileSilent(x + dx, topY + dy, t, bx + dx * 18, by + dy * 18);
-    }
+    for (let dy = 0; dy < h; dy++) st.setTileSilent(x0 + dx, y0 + dy, tile, fx(dx), fy(dy));
   }
   return true;
+}
+
+/** 底承族公共体：每列下方 SolidTile2（186/187 族再拒 Boulders 垫）+ 全格 !active */
+const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+function placeFloorObject(st: TileStore, x0: number, y0: number, w: number, h: number, tile: number,
+  fx: (dx: number) => number, fy: (dy: number) => number, rejectBoulderFloor = false): boolean {
+  for (let dx = 0; dx < w; dx++) {
+    if (!solid2(st, x0 + dx, y0 + h)) return false;
+    if (rejectBoulderFloor && st.inBounds(x0 + dx, y0 + h) && BOULDERS.has(sheetOf(st, x0 + dx, y0 + h))) return false;
+  }
+  for (let dx = 0; dx < w; dx++) {
+    for (let dy = 0; dy < h; dy++) {
+      const i = st.idx(x0 + dx, y0 + dy);
+      if (!st.inBounds(x0 + dx, y0 + dy) || st.flags[i] !== 0) return false;
+    }
+  }
+  for (let dx = 0; dx < w; dx++) {
+    for (let dy = 0; dy < h; dy++) st.setTileSilent(x0 + dx, y0 + dy, tile, fx(dx), fy(dy));
+  }
+  return true;
+}
+
+/** WorldGen.PlaceTile 派发到各型放置器（FillRooms/cascadePlace 用到的型别全收） */
+function placeFurniture(st: TileStore, key: string, x: number, y: number, style = 0, _anchor?: string): boolean {
+  const t = TILE_BY_KEY[key];
+  if (t === undefined) return false;
+  const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+  switch (sheet) {
+    case 240: case 440: {           // Place3x3Wall(cs:44281)：(x-1,y-1) 3×3，style>35 行卷绕
+      let s = style, row = 0;
+      while (s > 35) { row++; s -= 36; }
+      return placeWallArt(st, x - 1, y - 1, 3, 3, t, (dx) => s * 54 + dx * 18, (dy) => row * 54 + dy * 18);
+    }
+    case 245:                       // Place2x3Wall(cs:44595)：(x,y-1) 2×3
+      return placeWallArt(st, x, y - 1, 2, 3, t, (dx) => style * 36 + dx * 18, (dy) => dy * 18);
+    case 246:                       // Place3x2Wall(cs:44752)：(x-1,y) 3×2
+      return placeWallArt(st, x - 1, y, 3, 2, t, (dx) => dx * 18, (dy) => style * 36 + dy * 18);
+    case 241:                       // Place4x3Wall(cs:44874)：(x-1,y-1) 4×3
+      return placeWallArt(st, x - 1, y - 1, 4, 3, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
+    case 242:                       // Place6x4Wall(cs:44959)：(x-2,y-2) 6×4
+      return placeWallArt(st, x - 2, y - 2, 6, 4, t, (dx) => (style % 27) * 72 + dx * 18, (dy) => Math.floor(style / 27) * 108 + dy * 18);
+    case 34: {                      // PlaceChand(cs:52753)：(x-1,y) 3×3 吊挂；(x,y-1) 实心非 solidTop
+      if (!st.inBounds(x, y - 1) || !solid2(st, x, y - 1) || HOUSE_SOLID_TOP.has(sheetOf(st, x, y - 1))) return false;
+      return placeFloorObject(st, x - 1, y, 3, 3, t, (dx) => (Math.floor(style / 36) * 108) + dx * 18, (dy) => style * 54 + dy * 18);
+    }
+    case 14: case 26: case 86: case 87: case 88: case 89: case 114: case 187: case 215: case 217: case 218:
+    case 377: case 469:             // Place3x2(cs:52097)：(x-1,y-1) 3×2，下方逐列 SolidTile2
+      return placeFloorObject(st, x - 1, y - 1, 3, 2, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
+    case 186:                       // Place3x2 + InvalidTileForPilesOrSpeleothems（拒 Boulders 垫）
+      return placeFloorObject(st, x - 1, y - 1, 3, 2, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18, true);
+    case 16: case 18: case 29: case 103: case 134: case 462:   // Place2x1(cs:47371)：(x,y) 2×1
+      return placeFloorObject(st, x, y, 2, 1, t, (dx) => style * 36 + dx * 18, () => 0);
+    case 94: case 95: case 97: case 98: case 99: case 100: case 125: case 126: case 172: case 173:
+    case 287: case 751: case 752:   // Place2x2(cs:51352)：(x-1,y-1) 2×2（94 keg 在此）
+      return placeFloorObject(st, x - 1, y - 1, 2, 2, t, (dx) => style * 36 + dx * 18, (dy) => dy * 18);
+    case 101:                       // Place3x4(cs:51943)：(x-1,y-3) 3×4 + SquareTileFrame（零掷）
+      return placeFloorObject(st, x - 1, y - 3, 3, 4, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
+    case 219:                       // case106 族 Place3x3(cs:53549 num=-2 段)：(x-1,y-2) 3×3
+      return placeFloorObject(st, x - 1, y - 2, 3, 3, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
+    case 506:                       // Place2xX(case 104 族)：(x,y-2) 2×3
+      return placeFloorObject(st, x, y - 2, 2, 3, t, (dx) => style * 36 + dx * 18, (dy) => dy * 18);
+    default:
+      return false;                 // 未收录型别保守拒绝（勿静默错位）
+  }
 }
 
 /** 雕像(2×3,style*36 步长);STATUES_WITH_TRAPS 命中 → 邻近飞镖陷阱+接线 */
@@ -190,6 +273,8 @@ function placeStatue(st: TileStore, x: number, y: number, idx: number): boolean 
   const [sheet, style] = STATUE_LIST[idx];
   const tile = sheet === 349 ? STATUE_349 : STATUE_105;
   if (!tile || !st.inBounds(x + 1, y - 2)) return false;
+  // Place2xX 前置(cs:39755)：下方双格 SolidTile2（旧缺此门）
+  if (!solid2(st, x, y + 1) || !solid2(st, x + 1, y + 1)) return false;
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = -2; dy <= 0; dy++) {
       if (st.flags[st.idx(x + dx, y + dy)]) return false;
@@ -332,10 +417,28 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
     case 'offset':
       return applyChain(st, rng, steps, i + 1, x + s.dx, y + s.dy);
     case 'setTileKeepWall':
-      // Actions.cs:272-301:清块保墙(墙由本仓墙段独立处理)+ type + active,恒成功
+      // Actions.cs:272-301:存墙→Clear(~(Wiring|Actuator))【液体/坡度/块漆全清】→
+      //   写 type+active→还原墙(+墙帧)。setTileSilent 不清液体——液体清位补齐。
+      if (st.inBounds(x, y)) {
+        const ci = st.idx(x, y);
+        st.liquid[ci] = 0;
+        st.liquidType[ci] = 0;
+      }
       st.setTileSilent(x, y, s.tile);
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'setTile':
+      // Actions.cs:203-218:setSelfFrames 之外的默认 clearTile=true →
+      //   tile.Clear(~(Wiring|Actuator)) —— Tile.cs Clear 掩码含 Wall/WallPaint/
+      //   Liquid(含 liquidType)/Slope：置块同时【把墙清 0】。木屋①蛛网 SetTile(51)/
+      //   蘑菇② SetTile(71) 因此把内腔墙抹掉 → 后续②墙链 OnlyWalls(WallType) 在
+      //   这些格 Fail 不掷——曾漏此语义（setTileSilent 不动墙）致 ② 过掷
+      //   （house0 ② vanilla 215 vs JS 238，AB#558 段实测）。
+      if (st.inBounds(x, y)) {
+        const ci = st.idx(x, y);
+        st.wall[ci] = 0;
+        st.liquid[ci] = 0;
+        st.liquidType[ci] = 0;
+      }
       st.setTileSilent(x, y, s.tile);
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'clearTile':
@@ -373,9 +476,13 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
 
 /** WorldUtils.Gen + Shapes.Rectangle(Shapes.cs Rectangle.Perform):x 外层 / y 内层 */
 function genRect(st: TileStore, rng: RNG, steps: ChainStep[], ox: number, oy: number, w: number, h: number): void {
+  const __g = (globalThis as { __swAgeGen?: (o: number, x: number, y: number, w: number, h: number, k: number) => void }).__swAgeGen;
+  const __rn = () => (globalThis as { __swRollN?: number }).__swRollN ?? -1;
+  __g?.(__rn(), ox, oy, w, h, steps[0]?.k === 'dither' && steps[1]?.k === 'blotches' ? 1 : 0);
   for (let x = ox; x < ox + w; x++) {
-    for (let y = oy; y < oy + h; y++) applyChain(st, rng, steps, 0, x, y);
+    for (let y = oy; oy + h > y; y++) applyChain(st, rng, steps, 0, x, y);
   }
+  __g?.(__rn(), ox, oy, w, h, -1);
 }
 
 // ---------- 钟乳石(WorldGen.PlaceTight 1:1) ----------
@@ -571,11 +678,13 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
       // 画:Y + min(H/2, H-5)
       const y = r.y + Math.min(Math.floor(r.h / 2), r.h - 5);
       const [key, style] = theme === 'desert' ? randHousePictureDesert(rng) : randHousePicture(rng);
-      if (placeFurniture(st, key, x, y, style) && key === 'v_245_paintings_2x3') {
-        // 245 RandomStyleRange=4（TileObjectData.cs:4821）——PlaceObject→TileObject.Place
-        // 恒掷 Main.rand.Next(4)（TileObject.cs:792，CanPlace 过门后；沙漠 245 同掷）
-        rng.int(0, 3);
-      }
+      // 画放置零掷【勘误 2026-08-17】：PlaceTile(240/241/242/245/246) 走专属 Place*Wall
+      // 分支（WorldGen.cs:59962-59990），Place2x3Wall(245)/Place3x3Wall(240) 等纯放置
+      // 全零 genRand（:44595/:44281 实读）；TileObject.Place 的 Main.rand.Next(4)
+      // （TileObject.cs:792）永不达——且 genRand=>Main.rand（WorldGen.cs:4391）单流下
+      // houseprobe4 PT(240) 事件 Δ0 掷实锤。旧「245 补 Next(4)」系误判 PlaceTile→
+      // PlaceObject 派发，已撤。
+      placeFurniture(st, key, x, y, style);
     } else {
       // 烛台:顶行悬挂(原版 +54 点亮帧——本引擎烛台恒点亮,帧差不建模)
       const y = r.y + 1;
@@ -588,9 +697,23 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
     const x = rng.int(0, r.w - 4) + 1 + r.x;
     const y = r.y + r.h - 2;
     switch (rng.int(0, 3)) {
-      case 0: // 小堆 185(PlaceSmallPile size1:style*18)
-        if (!activeAt(st, x, y)) st.setTileSilent(x, y, SMALL_PILE, rng.int(31, 33) * 18, 0);
+      case 0: {
+        // 小堆 185(HouseBuilder.cs:479)：style=Next(31,34) 在【调用点】恒掷
+        // （_random.Next(31,34) 先求值再进 PlaceSmallPile，占用与否是体内判定）——
+        // 旧实现把掷骰关进 !activeAt 门 → 占用格漏掷（houseprobe4 实锤：house0
+        // roomA it3 (765,871) 掷位 3079 处 vanilla 已掷 style、JS 直落下一迭代）。
+        // PlaceSmallPile size1(cs:46831)：2 宽 (x..x+1,y)，门=!anyLava+下方双格
+        // SolidTile2+双格 !active+type185 拒 Boulders 垫；帧 frameX=style*36(+18)/frameY=18
+        const style = rng.int(31, 33);
+        const lava = st.inBounds(x, y) && st.liquid[st.idx(x, y)] > 0 && st.liquidType[st.idx(x, y)] === 2;
+        if (!lava && solid2(st, x, y + 1) && solid2(st, x + 1, y + 1)
+          && !BOULDERS.has(sheetOf(st, x, y + 1)) && !BOULDERS.has(sheetOf(st, x + 1, y + 1))
+          && st.inBounds(x + 1, y) && !activeAt(st, x, y) && !activeAt(st, x + 1, y)) {
+          st.setTileSilent(x, y, SMALL_PILE, style * 36, 18);
+          st.setTileSilent(x + 1, y, SMALL_PILE, style * 36 + 18, 18);
+        }
         break;
+      }
       case 1: // 骨堆 186
         placeFurniture(st, 'v_186_decos_3x2', x, y, rng.int(22, 25));
         break;

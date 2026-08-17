@@ -5179,10 +5179,15 @@ export class Game implements GameHooks {
   /** 启动一次使用动画（itemAnimation>0 的本项目等价）。
    *  useStyle 5/13（弓/枪/法杖/短剑）附 aim 瞄准角——Renderer 持物姿势与
    *  bodyFrame 行档（Player.cs:35986 useStyle==5 的 itemRotation*direction 档）依赖 */
-  private useSwing(def: (typeof ITEM_DEFS)[number] | null, aim?: number): void {
+  private useSwing(def: (typeof ITEM_DEFS)[number] | null, aim?: number, mult = 1): void {
     if (!def) return;
     const us = this.heldUseStyle(def);
-    const dur = this.heldUseAnimation(def);
+    // SetItemAnimation(base, mult)（Player.cs:4240-4247）：val=(int)(base×mult)，
+    // base>0 时下限 1。放置物走 ApplyItemAnimation createTile/createWall 档
+    //（:4270-4275：useAnimation×tileSpeed/wallSpeed）
+    const base = this.heldUseAnimation(def);
+    let dur = mult === 1 ? base : Math.round(base * mult);
+    if (base > 0) dur = Math.max(dur, 1);
     this.swing = {
       t: dur, dur, item: ITEM_BY_KEY[def.key] ?? 0,
       useStyle: us,
@@ -5554,7 +5559,9 @@ export class Game implements GameHooks {
         // doPlacementAction）：捕获小动物 → 锚桩 724（tryPlace 内登记 TECritterAnchor
         // 等价记录）。不消费 rightDown：按住连放由 tryPlace 的 useTime 门节流
         // （autoReuse，DefaultToCapturedCritter :47614）；放置失败（占位/无支撑）
-        // 落空即可，不透传 interactAt
+        // 落空即可，不透传 interactAt。动画同 createTile 档（ApplyItemAnimation
+        // :4270-4272——使用即挥动，放置成败不影响）
+        if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
         this.tryPlace(tx, ty, heldDef);
         return;
       } else {
@@ -6103,6 +6110,10 @@ export class Game implements GameHooks {
     if (heldDef?.wallId != null && inp.mouseDown && !inp.rightDown) {
       // 放置路径余辉（Player.cs:42930-42935:tileRange 射程门内 cache update）
       if (this.inTileRange(tx, ty)) this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
+      // ItemCheck_StartActualUse→ApplyItemAnimation（:4255/:4273-4275 createWall→
+      // useAnimation×wallSpeed）：useStyle 1 挥动动画，周期独立于 itemTime/useTime
+      // 复用节流（持键按 useAnimation 节拍循环重启；此前缺动画=放置无动作）
+      if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintWallSpeed());
       this.tryPlaceWall(tx, ty, heldDef);
       return;
     }
@@ -6112,6 +6123,8 @@ export class Game implements GameHooks {
     if (heldDef?.tile && !inp.rightDown
       && !PLACE_TILE_ON_ALT_USE.has(viIdFromKey(heldDef.key) ?? -1)) {
       if (this.inTileRange(tx, ty)) this.itemIconCacheUpdate(viIdFromKey(heldDef.key) ?? 0);
+      // 同上 createTile 档（:4270-4272 useAnimation×tileSpeed）
+      if (!this.swing || this.swing.t <= 1) this.useSwing(heldDef, undefined, this.paintTileSpeed());
       this.tryPlace(tx, ty, heldDef);
       return;
     }
@@ -9685,7 +9698,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (itemCombat(viIdFromKey(itemDef.key) ?? -1)?.consumable !== false) {
       this.player.inv.removeAt(this.player.inv.selected, 1);
     }
-    this.player.useTime = 14;
+    // ApplyItemTime（PlaceIt :39485 → :4221-4230）：itemTime = useTime×tileSpeed，
+    // useTime>0 时下限 1（泥土 10/火把 10 等——此前硬编码 14 偏慢；数据缺失回退 14
+    // 维持旧值）。tileSpeed=Player.tileSpeed（Builder 药水/便携水泥机 0.75）
+    {
+      const ut = itemCombat(viIdFromKey(itemDef.key) ?? -1)?.useTime;
+      this.player.useTime = ut && ut > 0
+        ? Math.max(1, Math.round(ut * this.paintTileSpeed()))
+        : 14;
+    }
     this.sfx.play('place');
     this.cb.onInventoryChanged();
   }

@@ -246,6 +246,9 @@ function footprints(st: TileStore, inIdx: number, outIdx: number) {
     const stageEv: Array<[string, number, number, number, number]> = [];
     (globalThis as unknown as { __swHouseStage?: (tag: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage
       = (tag, a, b, c, d) => { stageEv.push([tag, a, b, c, d]); };
+    const ageGen: Array<[number, number, number, number, number, number]> = [];
+    (globalThis as unknown as { __swAgeGen?: (o: number, x: number, y: number, w: number, h: number, k: number) => void }).__swAgeGen
+      = (o, x, y, w, h, k) => { ageGen.push([o, x, y, w, h, k]); };
     const { rng, box } = countedRng(gs.seed);
     flipGenSolid([226, 162, 225, 190], true);
     rollHouseChestCounts(st, rng, gs);
@@ -273,11 +276,13 @@ function footprints(st: TileStore, inIdx: number, outIdx: number) {
       wf('/tmp/sw-chest/js59.houses.json', JSON.stringify(houseEv));
       wf('/tmp/sw-chest/js59.chestev.json', JSON.stringify(chestEv));
       wf('/tmp/sw-chest/js59.stageev.json', JSON.stringify(stageEv));
+      wf('/tmp/sw-chest/js59.agegen.json', JSON.stringify(ageGen));
     } catch (e) { console.log('save fail', String(e).slice(0, 120)); }
     (globalThis as { __swRollLog?: unknown }).__swRollLog = undefined;
     (globalThis as unknown as { __swHouseEv?: unknown }).__swHouseEv = undefined;
     (globalThis as unknown as { __swChestEv?: unknown }).__swChestEv = undefined;
     (globalThis as unknown as { __swHouseStage?: unknown }).__swHouseStage = undefined;
+    (globalThis as unknown as { __swAgeGen?: unknown }).__swAgeGen = undefined;
     const d = diff(st, 59, '[#58] vs dump059');
     footprints(st, 58, 59);
     // 宝箱清单对拍：vanilla 新增 2×2 箱组（dump058→059）vs JS chests[]（cell 序）

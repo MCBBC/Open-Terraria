@@ -1118,9 +1118,10 @@ function checkCactus(st: TileStore, i: number, j: number): boolean {
 /** KillTile(80) 生成期子集（cs:63559 noItem=true 尘 10×0 掷）：清格 + 半砖/坡面
  *  归零（active(false) 与 TileFrame 入口的死格重置）+ SquareTileFrame 3×3 级联 */
 /** DD #98 列级事件链钩（一次性诊断 tools/_ddfin.test.ts；vanilla CactusProbe 对拍：
- *  PlantCactus 入口 / CheckCactus 三处 KillTile 位点）。null=零开销 */
-let ccTraceHook: { plant: (i: number, j: number) => void; kill: (i: number, j: number) => void; place?: (x: number, y: number) => void } | null = null;
-export function setCcTrace(h: { plant: (i: number, j: number) => void; kill: (i: number, j: number) => void; place?: (x: number, y: number) => void } | null): void {
+ *  PlantCactus 入口 / CheckCactus 三处 KillTile 位点）。null=零开销。
+ *  grow?(i2, j2, rolls)：PlantCactus 150 试环逐试掷耗记录（II 批掷差定位） */
+let ccTraceHook: { plant: (i: number, j: number) => void; kill: (i: number, j: number) => void; place?: (x: number, y: number) => void; grow?: (i2: number, j2: number) => void } | null = null;
+export function setCcTrace(h: { plant: (i: number, j: number) => void; kill: (i: number, j: number) => void; place?: (x: number, y: number) => void; grow?: (i2: number, j2: number) => void } | null): void {
   ccTraceHook = h;
 }
 function killCactus(st: TileStore, i: number, j: number): void {
@@ -1274,6 +1275,16 @@ export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void 
 export function plantCactus(st: TileStore, rng: RNG, i: number, j: number): void {
   ccTraceHook?.plant(i, j);
   growCactus(st, rng, i, j);
+  const hook = ccTraceHook?.grow;
+  if (hook) {
+    for (let k = 0; k < 150; k++) {
+      const i2 = rng.int(i - 1, i + 1);        // Next(i-1, i+2)
+      const j2 = rng.int(j - 10, j + 1);       // Next(j-10, j+2)
+      growCactus(st, rng, i2, j2);
+      hook(i2, j2);
+    }
+    return;
+  }
   for (let k = 0; k < 150; k++) {
     const i2 = rng.int(i - 1, i + 1);        // Next(i-1, i+2)
     const j2 = rng.int(j - 10, j + 1);       // Next(j-10, j+2)
