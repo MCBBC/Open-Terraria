@@ -1,7 +1,6 @@
 // 死亡散飞三件拆分 + 眼睑状态机视觉验证（审计#1/#5）。
-// ① 清血致死 → dead 三件 pos/rot 散飞 + 画布死亡位非空像素 + ~1.05s 后全隐（immuneAlpha>125）
-// ② 眨眼：240t 周期内 eyeFrame 出现 1(半闭)/2(全闭)；受击全闭 20t
-// ③ 硬核幽灵：difficulty=2 死亡 + respawn 阈值后 Ghost.png 帧动画在死亡位
+// 快速游玩无 appearance → 探针注入默认外观（Player.cs:199-205 默认色），
+// 瞳色用霓虹绿（场景无纯绿 → 瞳孔像素可精确采样，闭眼=眼睑皮肤色覆盖即消失）。
 import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
@@ -10,136 +9,133 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5201') + '/?play=small', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 110000 });
-await new Promise(r => setTimeout(r, 1500));
+await new Promise(r => setTimeout(r, 1200));
 
-// ---- ② 眨眼（先测——不弄脏玩家状态） ----
-const eye = await page.evaluate(async () => {
-  const g = window.__swGame, p = g.player;
-  const seen = new Set();
-  const seq = [];   // [t, eyeFrame]
-  const t0 = performance.now();
-  while (performance.now() - t0 < 4600) {   // > 240t（60Hz）
-    seen.add(p.eyeFrame);
-    seq.push([Math.round(performance.now() - t0), p.eyeFrame]);
-    await new Promise(r => setTimeout(r, 60));
-  }
-  // 受击全闭（BlinkBecausePlayerGotHurt :138——damage 落伤后立即 2，锁存 20t）
-  p.eyeBlinkHurt();
-  const hurtA = p.eyeFrame;
-  await new Promise(r => setTimeout(r, 150));   // 20t+ 后回落（无其他触发时回正常眨眼档）
-  const hurtAfter = p.eyeFrame;
-  return { frames: [...seen].sort(), blinkSamples: seq.filter(s => s[1] !== 0).length, hurtA, hurtAfter };
-});
-
-// ---- 眼睑像素实证：闭眼时眼区瞳孔暗像素被皮肤色眼睑覆盖 ----
-const lid = await page.evaluate(async () => {
+const out = await page.evaluate(async () => {
   const g = window.__swGame, p = g.player;
   const cv = g.renderer.canvas, cam = g.camera;
-  const darkInHead = () => {
-    const top = p.y + p.h - 56 + 2;    // 纸娃娃帧顶（脚底锚 −56+pad2）
-    const sx = Math.round((p.cx - p.facing * 2.5 - cam.x) * cam.zoom + cv.width / 2);
-    const sy = Math.round((top - cam.y) * cam.zoom + cv.height / 2);
-    const w = Math.round(26 * cam.zoom), h = Math.round(24 * cam.zoom);
-    const img = g.renderer.ctx.getImageData(Math.max(0, sx - w / 2), Math.max(0, sy), w, h).data;
-    let dark = 0, skin = 0;
-    for (let i = 0; i < img.length; i += 4) {
-      if (img[i + 3] > 100 && img[i] < 165 && img[i + 1] < 150) dark++;        // 瞳/眼线暗像素
-      else if (img[i + 3] > 100 && img[i] > 200 && img[i + 1] > 90 && img[i + 1] < 175) skin++; // 皮肤/衣亮像素
-    }
-    return { dark, skin };
+  // ---- 注入外观（默认色 + 霓虹瞳） ----
+  p.appearance ??= {
+    name: 'probe', hair: 0, skinVariant: 0,
+    hairColor: { r: 215, g: 90, b: 55 }, skinColor: { r: 255, g: 125, b: 90 }, eyeColor: { r: 0, g: 255, b: 0 },
+    shirtColor: { r: 175, g: 165, b: 140 }, undershirtColor: { r: 160, g: 180, b: 215 },
+    pantsColor: { r: 255, g: 230, b: 175 }, shoeColor: { r: 160, g: 105, b: 60 },
+    difficulty: 0, team: 0,
   };
-  await new Promise(r => setTimeout(r, 300));
-  const open = darkInHead();
-  p.eyeBlinkHurt();
-  await new Promise(r => setTimeout(r, 120));
-  const closed = darkInHead();
-  return { open, closed, covered: closed.dark < open.dark };
-});
+  p.appearance = { ...p.appearance, eyeColor: { r: 0, g: 255, b: 0 } };
+  await new Promise(r => setTimeout(r, 1200));   // 纸娃娃贴图懒加载就绪
 
-// ---- ① 死亡散飞 ----
-const death = await page.evaluate(async () => {
-  const g = window.__swGame, p = g.player;
-  const cv = g.renderer.canvas, cam = g.camera;
-  // 死亡位周边皮肤/衣色像素采样（排除红色粉碎粒子：g<95 全是血尘色带）
-  const bodyPx = () => {
-    const sx = Math.round((p.x + p.w / 2 - cam.x) * cam.zoom + cv.width / 2);
-    const sy = Math.round((p.y + p.h / 2 - cam.y) * cam.zoom + cv.height / 2);
-    const w = Math.round(140 * cam.zoom), h = Math.round(160 * cam.zoom);
-    const img = g.renderer.ctx.getImageData(Math.max(0, sx - w / 2), Math.max(0, sy - h / 2), w, h).data;
-    let body = 0, blood = 0;
-    for (let i = 0; i < img.length; i += 4) {
-      if (img[i + 3] > 80 && img[i] > 180 && img[i + 1] > 95 && img[i + 2] > 55) body++;
-      else if (img[i + 3] > 80 && img[i] > 140 && img[i] > img[i + 1] * 2 && img[i] > img[i + 2] * 2) blood++;
-    }
-    return { body, blood };
-  };
-  const px0 = bodyPx();   // 死前存活基线（完整身体）
-  const before = { dead: p.dead, hp: p.hp, parts: JSON.parse(JSON.stringify(p.deadParts)) };
-  p.damage(99999, p.cx + 20, p.y);   // 右侧来刀 → deathHitDir = -1
-  await new Promise(r => setTimeout(r, 60));
-  const t0 = {
-    dead: p.dead, hp: p.hp, hd: p.deathHitDir,
-    seg: JSON.parse(JSON.stringify(p.deadParts)),
-    px: bodyPx(), immuneAlpha: p.immuneAlpha, respawn: p.respawnTimer,
-  };
-  await new Promise(r => setTimeout(r, 450));
-  const tMid = { seg: JSON.parse(JSON.stringify(p.deadParts)), px: bodyPx(), immuneAlpha: p.immuneAlpha };
-  await new Promise(r => setTimeout(r, 750));   // 合计 ~1.26s：immuneAlpha>125 散飞体全隐
-  const tHide = { px: bodyPx(), immuneAlpha: p.immuneAlpha };   // 地形/墓碑对照（无散飞体）
-  await new Promise(r => setTimeout(r, 1000));   // 合计 ~2.26s
-  const tFade = { px: bodyPx(), immuneAlpha: p.immuneAlpha, respawn: p.respawnTimer };
-  const vy0 = [before.parts.head.vy, before.parts.body.vy, before.parts.legs.vy];
-  return {
-    before, t0, tMid, tHide, tFade, px0,
-    vyRangeOk: t0.seg.head.vy >= -4.01 && t0.seg.head.vy <= -1.09 && t0.seg.legs.vy < 0,
-    xHitDir: t0.seg.head.vx < 0,   // deathHitDir −1 → X = rand*0.1 − 2（大概率负向）
-    scattered: Math.abs(tMid.seg.head.px - tMid.seg.legs.px) + Math.abs(tMid.seg.head.py - tMid.seg.legs.py) > 4,
-    rolled: tMid.seg.head.rot !== 0 || tMid.seg.body.rot !== 0,
-    // 像素实证：可见期(t0/tMid)显著高于全隐期地形对照(tHide) = 散飞体真的画出来了
-    pxVisible: Math.max(t0.px.body, tMid.px.body) - tHide.px.body,
-    vy0,
-  };
-});
-
-// ---- ③ 硬核幽灵 ----
-const ghost = await page.evaluate(async () => {
-  const g = window.__swGame, p = g.player;
-  // 前一段死亡在软核下 ~10s 自动重生——先等复活（软核阈值 600t）
-  const t0 = performance.now();
-  while (p.dead && performance.now() - t0 < 12500) await new Promise(r => setTimeout(r, 200));
-  if (p.dead) return { skipped: 'player never respawned', respawn: p.respawnTimer };
-  // 钉死硬核难度再杀（Game 侧会标 hardcoreDead → respawnPlayer 永拒 → 计时越 600 即幽灵）
-  p.appearance = { ...p.appearance, difficulty: 2 };
-  p.hp = Math.min(p.hp, 100);
-  p.damage(99999, p.cx, p.cy);
-  const t1 = performance.now();
-  while (!p.dead && performance.now() - t1 < 2000) await new Promise(r => setTimeout(r, 60));
-  if (!p.dead) return { skipped: 'kill failed', hp: p.hp };
-  const deadX = p.x, deadY = p.y;
-  const phaseEarly = p.isGhostPhase(g.world);
-  // 等 respawn 阈值（经典档 600t=10s；专家 900t）+余量
-  const t2 = performance.now();
-  while (!p.isGhostPhase(g.world) && performance.now() - t2 < 20500) await new Promise(r => setTimeout(r, 200));
-  const ghostPhase = p.isGhostPhase(g.world);
-  const cv = g.renderer.canvas, cam = g.camera;
-  const ghostPx = () => {
-    const sx = Math.round((p.x + 17 - cam.x) * cam.zoom + cv.width / 2);
-    const sy = Math.round((p.y + 22 - cam.y) * cam.zoom + cv.height / 2);
-    const img = g.renderer.ctx.getImageData(Math.max(0, sx - 17), Math.max(0, sy - 22), 34, 44).data;
+  const scr = (wx, wy) => [
+    Math.round((wx - cam.x) * cam.zoom + cv.width / 2),
+    Math.round((wy - cam.y) * cam.zoom + cv.height / 2),
+  ];
+  /** 世界矩形内霓虹瞳像素计数（r<60 g>200 b<80） */
+  const neon = (x, y, w, h) => {
+    const [sx, sy] = scr(x, y);
+    const W = Math.round(w * cam.zoom), H = Math.round(h * cam.zoom);
+    const img = g.renderer.ctx.getImageData(Math.max(0, sx), Math.max(0, sy), W, H).data;
     let n = 0;
-    for (let i = 0; i < img.length; i += 4) if (img[i + 3] > 100 && Math.abs(img[i] - img[i + 1]) < 24 && Math.abs(img[i + 1] - img[i + 2]) < 24 && img[i] > 140) n++;
+    for (let i = 0; i < img.length; i += 4) if (img[i] < 60 && img[i + 1] > 200 && img[i + 2] < 80 && img[i + 3] > 100) n++;
     return n;
   };
-  const px = ghostPx();
-  const fA = p.ghostFrame;
-  await new Promise(r => setTimeout(r, 700));   // 8t/帧 → 至少推进 5 帧
-  const fB = p.ghostFrame;
-  return {
-    phaseEarly, ghostPhase, dead: p.dead, hardcoreDead: !!p.appearance.hardcoreDead,
-    respawn: p.respawnTimer, frameA: fA, frameB: fB, at: [deadX, deadY], px,
+  // 头部眼区（帧顶 = 脚底 −56+pad2；眼在第 12-22px 带内）
+  const eyeRegion = () => neon(p.cx - 14, p.y + p.h - 56 + 10, 28, 16);
+
+  // ---- ② 眨眼状态机（模型 + 像素） ----
+  const frames = new Set(), seq = [];
+  const tEye0 = performance.now();
+  while (performance.now() - tEye0 < 4600) {   // > 240t（60Hz）
+    frames.add(p.eyeFrame);
+    if (p.eyeFrame !== 0) seq.push([Math.round(performance.now() - tEye0), p.eyeFrame]);
+    await new Promise(r => setTimeout(r, 55));
+  }
+  const neonOpen = eyeRegion();
+  p.eyeBlinkHurt();                            // BlinkBecausePlayerGotHurt（:138）
+  await new Promise(r => setTimeout(r, 130));  // 20t 锁存期内恒全闭
+  const eyeHurtLocked = p.eyeFrame;
+  const neonClosed = eyeRegion();
+  await new Promise(r => setTimeout(r, 320));  // 20t 后回落
+  const eyeHurtAfter = p.eyeFrame;
+  const eye = {
+    frames: [...frames].sort(), blinkHits: seq.length, eyeHurtLocked, eyeHurtAfter,
+    neonOpen, neonClosed, eyelidCoversPupils: neonClosed < neonOpen * 0.5 && neonOpen >= 2,
   };
+
+  // ---- ① 死亡散飞（三件拆分） ----
+  const boxPx = () => {
+    // 死亡位 ±80/±90：霓虹瞳（头件）+ 淡黄裤（腿件）——裤色 (255,230,175) g>210 场景稀有
+    const [sx, sy] = scr(p.x + p.w / 2, p.y + p.h / 2);
+    const W = Math.round(160 * cam.zoom), H = Math.round(180 * cam.zoom);
+    const img = g.renderer.ctx.getImageData(Math.max(0, sx - W / 2), Math.max(0, sy - H / 2), W, H).data;
+    let neonN = 0, pantsN = 0;
+    for (let i = 0; i < img.length; i += 4) {
+      if (img[i + 3] < 100) continue;
+      if (img[i] < 60 && img[i + 1] > 200 && img[i + 2] < 80) neonN++;
+      else if (img[i] > 200 && img[i + 1] > 200 && img[i + 2] > 120 && img[i + 2] < 220) pantsN++;
+    }
+    return { neon: neonN, pants: pantsN };
+  };
+  const pxAlive = boxPx();
+  p.damage(99999, p.cx + 20, p.y);             // 右侧来刀 → deathHitDir = −1
+  await new Promise(r => setTimeout(r, 90));
+  const t0 = {
+    dead: p.dead, hp: p.hp, hd: p.deathHitDir, seg: JSON.parse(JSON.stringify(p.deadParts)),
+    px: boxPx(), immuneAlpha: p.immuneAlpha,
+  };
+  await new Promise(r => setTimeout(r, 430));
+  const tMid = { seg: JSON.parse(JSON.stringify(p.deadParts)), px: boxPx(), immuneAlpha: p.immuneAlpha };
+  const deathShot = 'mid';   // 标记（外层截图）
+  await new Promise(r => setTimeout(r, 800));   // 合计 ~1.32s：immuneAlpha>125 全隐
+  const tHide = { px: boxPx(), immuneAlpha: p.immuneAlpha };
+  const death = {
+    pxAlive, t0, tMid, tHide, deathShot,
+    vyRangeOk: t0.seg.head.vy >= -4.01 && t0.seg.head.vy <= -1.09 && t0.seg.legs.vy < 0 && t0.seg.body.vy < 0,
+    xHitDir: t0.seg.head.vx <= 0 && t0.seg.legs.vx <= 0,   // deathHitDir−1 → X∈[−4,0]
+    scattered: Math.abs(tMid.seg.head.px - tMid.seg.legs.px) + Math.abs(tMid.seg.head.py - tMid.seg.legs.py) > 4,
+    rolled: Math.abs(tMid.seg.head.rot) > 0.5 || Math.abs(tMid.seg.body.rot) > 0.5,
+    partsVisible: t0.px.neon + t0.px.pants - tHide.px.neon - tHide.px.pants,
+  };
+
+  // ---- ③ 硬核幽灵 ----
+  const tw = performance.now();
+  while (p.dead && performance.now() - tw < 12500) await new Promise(r => setTimeout(r, 200));   // 软核 10s 重生
+  let ghost = { skipped: 'no respawn' };
+  if (!p.dead) {
+    p.iframes = 0;                             // 重生赠 180t 无敌帧——探针清零以便直杀
+    p.appearance = { ...p.appearance, difficulty: 2 };
+    p.damage(99999, p.cx, p.cy);
+    const tk = performance.now();
+    while (!p.dead && performance.now() - tk < 2000) await new Promise(r => setTimeout(r, 60));
+    if (p.dead) {
+      const phaseEarly = p.isGhostPhase(g.world);
+      const grayPx = () => {
+        const [sx, sy] = scr(p.x + 17, p.y + 22);
+        const img = g.renderer.ctx.getImageData(Math.max(0, sx - 17), Math.max(0, sy - 22), 34, 44).data;
+        let n = 0;
+        for (let i = 0; i < img.length; i += 4) {
+          if (img[i + 3] > 100 && img[i] > 120 && Math.abs(img[i] - img[i + 1]) < 28 && Math.abs(img[i + 1] - img[i + 2]) < 28) n++;
+        }
+        return n;
+      };
+      const t2 = performance.now();
+      while (!p.isGhostPhase(g.world) && performance.now() - t2 < 21000) await new Promise(r => setTimeout(r, 250));
+      const base = grayPx();                  // 阈值前（同位无幽灵）地形灰基线
+      await new Promise(r => setTimeout(r, 700));
+      const withGhost = grayPx();
+      const fA = p.ghostFrame;
+      await new Promise(r => setTimeout(r, 700));   // 8t/帧 → ≥5 帧推进
+      ghost = {
+        phaseEarly, ghostPhase: p.isGhostPhase(g.world), hardcoreDead: !!p.appearance.hardcoreDead,
+        respawn: p.respawnTimer, frameA: fA, frameB: p.ghostFrame,
+        baseGray: base, ghostGray: withGhost, ghostPx: withGhost - base,
+      };
+    } else {
+      ghost = { skipped: 'kill failed', hp: p.hp };
+    }
+  }
+  return { eye, death, ghost };
 });
 
-console.log(JSON.stringify({ eye, lid, death, ghost }, null, 1));
+console.log(JSON.stringify(out, null, 1));
 await page.screenshot({ path: '/tmp/deathvis.png' });
 await browser.close();

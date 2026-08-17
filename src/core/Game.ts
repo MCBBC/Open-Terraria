@@ -3671,17 +3671,20 @@ export class Game implements GameHooks {
         this.renderer.golfPower = null;
       }
     }
-    // ---- 召唤上限缩水驱逐（Projectile.cs:15370-15392：每帧按实体序登记，超限自裁——
-    // 实际效果=最后召唤的先死）。召唤时腾位驱逐在 useCombatWeapon 内（最旧先死）。
-    // noSlot 实体（虎/阿比盖尔本体、龙身、守护者）不参与。
+    // ---- 召唤上限缩水自裁（Projectile.cs:15370-15392：每帧每随从按实体序累加
+    // 自己的 minionSlots，slotsMinions+own > maxMinions → 自裁 Kill——即"槽位
+    // 权重制、末位先死"；双子 0.5+0.5=1 槽恰好成对存活，曾误按实体数计数把
+    // 388 补杀）。noSlot 实体（鞭伴生/虎·阿比盖尔本体、龙身、守护者）不参与。
     {
-      let n = 0;
+      let slotsUsed = 0;
       for (const e of this.entities.projectiles) {
         const m = e as MinionProj;
         if (!(m instanceof MinionProj) || m.dead || m.sentry || m.noSlot) continue;
-        if (++n > this.player.maxMinions) m.dead = true;
+        const w = minionSlotsOf(m);
+        if (slotsUsed + w > this.player.maxMinions) m.dead = true;   // :15377 自裁
+        else slotsUsed += w;
       }
-      n = 0;
+      let n = 0;
       for (const e of this.entities.projectiles) {
         const m = e as MinionProj;
         if (!(m instanceof MinionProj) || m.dead || !m.sentry || m.noSlot) continue;
@@ -7597,7 +7600,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 驱逐=最旧先死循环到腾够（原版 FreeUpPetsAndMinions :51022-51047 按
         // cheapest-first，本作插入序近似——双子对自然成对死，与原版常态一致）；
         // damage 传武器基伤——随从每 tick 按当时装备重算（Projectile.cs:15368 live 刷新）
-        const slotsOf = (m: MinionProj): number => (m.projId === 387 || m.projId === 388 ? 0.5 : 1);
+        const slotsOf = minionSlotsOf;
         const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry && !(e as MinionProj).noSlot) as MinionProj[];
         // 星尘龙：已有龙头 → 不出新头，尾前插 2 段（SpawnMinionOnCursor :47906-47963）
         if (cw.shoot === 625) {

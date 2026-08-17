@@ -1,7 +1,7 @@
 // 天空渲染：昼夜渐变、太阳/月亮、星星、云
 // 注意:Clock 必须值导入——DAWN/DUSK 是运行时常量,import type 会被擦除
 // (:528/:561 运行时取值 → "Clock is not defined" 每帧崩渲染循环)
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { Clock } from '../world/World';
 import { Clock as ClockVal } from '../world/World';
 
@@ -860,12 +860,8 @@ export class SkyRenderer {
 
   /** 云贴图首用懒加载(in-flight 去重:占位即标记;未就绪时调用方以 complete 守卫跳帧) */
   private cloudTex(i: number): ImageBitmap | HTMLImageElement | null {
-    let t = this.cloudTexs[i];
-    if (!t) {
-      const im = new Image();
-      im.onload = () => upgradeToBitmap(im, (b) => { this.cloudTexs[i] = b; });  // bitmap-only(trace⑨)
-      im.src = `sprites/vanilla/Cloud_${i}.png`;
-    }
+    const t = this.cloudTexs[i];
+    if (!t) loadBitmapOnly(`vanilla/Cloud_${i}.png`, () => !!this.cloudTexs[i], (x) => { this.cloudTexs[i] = x; });
     return t;
   }
 

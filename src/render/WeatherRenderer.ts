@@ -4,7 +4,7 @@
 //   - 闪电：由 SkyRenderer 读 weather.lightning 把天空色向白 lerp（不画贴图，原版同语义）
 // 绘制在世界坐标变换内调用（与实体一致），雨层画在瀑布后实体前（原版 DrawRain 在
 // tile 层后）。光照着色由调用方注入 lightAt 回调（LightingEngine.lightAt 同源）。
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE } from '../core/constants';
 import type { World } from '../world/World';
 import type { Camera } from './Camera';
@@ -62,22 +62,14 @@ export interface WeatherFxHooks {
 
 let rainTex: ImageBitmap | HTMLImageElement | null = null;
 function getRainTex(): ImageBitmap | HTMLImageElement | null {
-  if (rainTex !== null) return rainTex;
-  if (typeof Image === 'undefined') return null;
-  const im = new Image();
-  im.onload = () => upgradeToBitmap(im, (b) => { rainTex = b; });  // bitmap 就绪才入缓存:Image 窗口期每粒子每帧发 LazyPixelRef(2026-08-14 trace⑨)
-  im.src = 'sprites/vanilla/Rain.png';
+  loadBitmapOnly('vanilla/Rain.png', () => rainTex !== null, (x) => { rainTex = x; });
   return rainTex;
 }
 
 let dustTex: ImageBitmap | HTMLImageElement | null = null;
 function getDustTex(): ImageBitmap | HTMLImageElement | null {
-  if (dustTex !== null) return dustTex;
-  if (typeof Image === 'undefined') return null;
-  const dim = new Image();
-  dim.onload = () => upgradeToBitmap(dim, (b) => { dustTex = b; });
-  dim.src = 'sprites/vanilla/Dust.png';      // 1000×120 = 10px 格；雪花 = dust 76 (760,0)
-  return null;  // bitmap 就绪才入缓存
+  loadBitmapOnly('vanilla/Dust.png', () => dustTex !== null, (x) => { dustTex = x; });
+  return dustTex;  // 1000×120 = 10px 格；雪花 = dust 76 (760,0)
 }
 
 export class WeatherRenderer {

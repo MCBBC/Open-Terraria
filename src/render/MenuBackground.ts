@@ -6,7 +6,7 @@
 //     树层0 y=320（-50 若 50 / -100 若 53…:60815）、树层1 y=400、树层2 y=480
 //     树层 scale=1.25 parallax=0.4（:60710）；基准 UI 高 982（1920×1080 UIScale1.1）
 //   昼夜循环（UpdateTime:64426 菜单也走 time）→ 天空/日月/星 + 夜间 multiply 压暗。
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { loadBitmapOnly } from '../assets/SpriteAtlas';
 import { SkyRenderer } from './SkyRenderer';
 import { Clock } from '../world/World';
 
@@ -62,10 +62,8 @@ export class MenuBackground {
   private img(n: number): ImageBitmap | HTMLImageElement | null {
     if (n < 0) return null;
     if (this.imgs.has(n)) return this.imgs.get(n) ?? null;
-    const im = new Image();
-    im.onload = () => upgradeToBitmap(im, (b) => this.imgs.set(n, b));
-    im.src = `sprites/vanilla/Background_${n}.png`;
-    return null;  // bitmap 就绪才入缓存(未就绪 drawLayer 跳帧)
+    loadBitmapOnly(`vanilla/Background_${n}.png`, () => this.imgs.has(n), (x) => this.imgs.set(n, x));
+    return null;
   }
 
   /** UI 像素 → 当前屏幕像素（原版 UIScale 语义） */

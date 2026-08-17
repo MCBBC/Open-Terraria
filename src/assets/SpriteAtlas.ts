@@ -999,9 +999,27 @@ vi_678_red_potion: 678,
 /** 独立加载器共用 ImageBitmap 桥(二期,2026-08-14):
  *  用法:im.onload 里先照旧 set(Image),再调 upgradeToBitmap(im, b => map.set(k, b))
  *  ——消费方每帧重查,下一帧起拿到的就是自持解码像素;契约零变化 */
-export function upgradeToBitmap(img: HTMLImageElement, onReady: (b: ImageBitmap) => void): void {
+export function upgradeToBitmap(img: HTMLImageElement, onReady: (b: ImageBitmap) => void, onFail?: () => void): void {
   if (!SpriteAtlas.USE_BITMAP) return;
-  createImageBitmap(img).then(onReady, () => { /* 解码失败保留 Image */ });
+  createImageBitmap(img).then(onReady, () => onFail?.());  // 失败通知调用方(缺省静默)
+}
+/** 通用 bitmap-only 加载器(2026-08-17 修 trace⑨ 收尾两个真 bug):
+ *  ①在飞守卫——此前未就绪期间每帧重 new Image = 请求风暴(雨/尘每粒子每帧)
+ *  ②失败回退存 Image——此前失败静默 = 纹理永久缺(用户报"贴图丢失") */
+const _bmpOnlyPending = new Set<string>();
+export function loadBitmapOnly(
+  file: string, has: () => boolean, store: (x: ImageBitmap | HTMLImageElement) => void,
+): void {
+  if (has() || _bmpOnlyPending.has(file)) return;
+  _bmpOnlyPending.add(file);
+  const im = new Image();
+  im.onload = () => {
+    const land = (x: ImageBitmap | HTMLImageElement) => { store(x); _bmpOnlyPending.delete(file); };
+    if (SpriteAtlas.USE_BITMAP) createImageBitmap(im).then(land, () => land(im));  // 失败回退 Image,永不缺图
+    else land(im);
+  };
+  im.onerror = () => _bmpOnlyPending.delete(file);
+  im.src = `sprites/${file}`;
 }
 
 export const USE_BITMAP = SpriteAtlas.USE_BITMAP;

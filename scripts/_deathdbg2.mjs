@@ -11,8 +11,14 @@ await new Promise(r => setTimeout(r, 1500));
 const out = await page.evaluate(async () => {
   const g = window.__swGame, p = g.player;
   const cv = g.renderer.canvas, cam = g.camera;
-  const a = p.appearance;
-  if (!a) return { noAppearance: true };
+  const a = p.appearance ?? (p.appearance = {
+    name: 'probe', hair: 0, skinVariant: 0,
+    hairColor: { r: 215, g: 90, b: 55 }, skinColor: { r: 255, g: 125, b: 90 }, eyeColor: { r: 105, g: 90, b: 75 },
+    shirtColor: { r: 175, g: 165, b: 140 }, undershirtColor: { r: 160, g: 180, b: 215 },
+    pantsColor: { r: 255, g: 230, b: 175 }, shoeColor: { r: 160, g: 105, b: 60 },
+    difficulty: 0, team: 0,
+  });
+  await new Promise(r => setTimeout(r, 900));   // 纸娃娃贴图懒加载就绪
   // 用实际皮肤色全画布找簇
   const img = g.renderer.ctx.getImageData(0, 0, cv.width, cv.height).data;
   const near = (v, t, tol) => Math.abs(v - t) <= tol;
@@ -50,4 +56,18 @@ const out = await page.evaluate(async () => {
   };
 });
 console.log(JSON.stringify(out, null, 1));
+// 裁剪玩家预期区域截图（clip 以 CSS 像素=canvas 像素比 1 假设；zoom 1.25 已含在 expected）
+const shot = await page.evaluate(() => {
+  const g = window.__swGame, p = g.player, cam = g.camera, cv = g.renderer.canvas;
+  const expX = Math.round((p.cx - cam.x) * cam.zoom + cv.width / 2);
+  const expFootY = Math.round((p.y + p.h - cam.y) * cam.zoom + cv.height / 2);
+  return { expX, expFootY, scale: cv.width / window.innerWidth };
+});
+console.log('shotAnchor', JSON.stringify(shot));
+await page.screenshot({ path: '/tmp/deathdbg_full.png' });
+const r = 100;
+await page.screenshot({
+  path: '/tmp/deathdbg_player.png',
+  clip: { x: (shot.expX - r) / shot.scale, y: (shot.expFootY - 2 * r) / shot.scale, width: 2 * r / shot.scale, height: 2 * r / shot.scale },
+});
 await browser.close();

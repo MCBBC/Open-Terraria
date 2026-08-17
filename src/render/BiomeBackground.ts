@@ -5,7 +5,7 @@
 // 地下：PickUndergroundBackgroundStyle :53454 → style→7 槽贴图表（UpdateBackgroundStyles :53221）
 // → 表面过渡/泥土/岩石/岩浆分层（ugBackTransition 0.25/帧 新旧双绘）。
 // 贴图懒加载（vanilla/Background_N.png，不进 SpriteAtlas 常驻表）。
-import { upgradeToBitmap, SpriteAtlas } from '../assets/SpriteAtlas';
+import { upgradeToBitmap, loadBitmapOnly, SpriteAtlas } from '../assets/SpriteAtlas';
 import type { World } from '../world/World';
 import type { SceneFlags } from '../world/SceneMetrics';
 
@@ -168,20 +168,15 @@ export class BiomeBackground {
   private hellImg(n: number): ImageBitmap | HTMLImageElement | null {
     if (n < 0) return null;
     if (this.hellImgs.has(n)) return this.hellImgs.get(n) ?? null;
-    if (typeof Image === 'undefined') return null;   // node 测试环境(浏览器外无 Image)
-    const im = new Image();
-    im.onload = () => upgradeToBitmap(im, (b) => this.hellImgs.set(n, b));
-    im.src = `sprites/vanilla/Underworld_${n}.png`;
-    return null;  // bitmap 就绪才入缓存(trace⑨ 窗口期)
+    loadBitmapOnly(`vanilla/Underworld_${n}.png`, () => this.hellImgs.has(n), (x) => this.hellImgs.set(n, x));
+    return null;
   }
 
   private img(n: number): ImageBitmap | HTMLImageElement | null {
     if (n < 0) return null;
     if (this.imgs.has(n)) return this.imgs.get(n) ?? null;
-    const im = new Image();
-    im.onload = () => upgradeToBitmap(im, (b) => this.imgs.set(n, b));
-    im.src = `sprites/vanilla/Background_${n}.png`;
-    return null;  // bitmap 就绪才入缓存
+    loadBitmapOnly(`vanilla/Background_${n}.png`, () => this.imgs.has(n), (x) => this.imgs.set(n, x));
+    return null;
   }
 
   /** 进图前预载出生点场景背景(森林初始风格的山+树 5 张,~47MB 解码)。
@@ -215,9 +210,8 @@ export class BiomeBackground {
       if (this.imgs.has(n)) return resolve();
       const im = new Image();
       im.onload = () => {
-        // bitmap 就绪才入缓存+resolve(2048px 级;Image 窗口期=每帧 5 层绘制的
-        // LazyPixelRef 源,trace⑨)
-        upgradeToBitmap(im, (b) => { this.imgs.set(n, b); resolve(); });
+        // bitmap 就绪才 resolve(2048px 级;失败回退存 Image=永不缺图)
+        upgradeToBitmap(im, (b) => { this.imgs.set(n, b); resolve(); }, () => { this.imgs.set(n, im); resolve(); });
         if (!SpriteAtlas.USE_BITMAP) { this.imgs.set(n, im); resolve(); }
       };
       im.onerror = () => resolve();
