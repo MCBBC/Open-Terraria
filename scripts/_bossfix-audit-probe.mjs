@@ -109,7 +109,7 @@ console.log(JSON.stringify(out, null, 1));
 check('T2a 天界印记石巨人前：静默不消耗', out.t2a_stack === 1, `stack=${out.t2a_stack}`);
 check('T2a 石巨人前：倒计时不动', out.t2a_countdown === 0, `countdown=${out.t2a_countdown}`);
 check('T2b 石巨人后：过门消耗', out.t2b_stack === 0, `stack=${out.t2b_stack}`);
-check('T2b 石巨人后：倒计时 720（StartImpendingDoom）', out.t2b_countdown === 720, `countdown=${out.t2b_countdown}`);
+check('T2b 石巨人后：倒计时 720 起逐 tick 递减（StartImpendingDoom）', out.t2b_countdown > 700 && out.t2b_countdown <= 720, `countdown=${out.t2b_countdown}`);
 check('T3 史后水晶白天神圣区：可用并消耗', out.t3_stack === 0 && out.t3_queen, `stack=${out.t3_stack} queen=${out.t3_queen} spawned=${out.t3_spawned}`);
 check('T1 机械眼首用：双子生成 + 消耗一件', out.t1_firstSpawn >= 1 && out.t1_stackAfterFirst === 1, `twins=${out.t1_firstSpawn} stack=${out.t1_stackAfterFirst}`);
 check('T1 双子在场再放机械眼：不消耗（stack 不减）', out.t1_stackAfterSecond === 1, `stack=${out.t1_stackAfterSecond}`);

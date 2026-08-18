@@ -9404,7 +9404,8 @@ export class Renderer {
     let glMap = false;
     if (this.mapGlEnabled && this.minimap) {
       if (!this.glfx) this.glfx = new GLSpriteLayer();
-      if (!this.glfx.unavailable) {
+      const maxTex = this.glfx.maxTextureSize;
+      if (!this.glfx.unavailable && this.minimap.canvas.width <= maxTex && this.minimap.canvas.height <= maxTex) {
         const gl = this.glfx;
         glMap = true;
         gl.resize(viewW, viewH);

@@ -68,6 +68,10 @@ export class GLSpriteLayer {
   static MAX_TEXTURES = 96;
   /** GL 不可用(WebGL2 缺失/初始化失败)时置 true,调用方回退 2D 路径 */
   unavailable = false;
+  /** 设备最大纹理边长(大世界整幅 8400 超限的 GPU 走 2D 回退,防静默花屏) */
+  get maxTextureSize(): number {
+    return this.gl ? this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number : 0;
+  }
 
   constructor() {
     this.canvas = document.createElement('canvas');
