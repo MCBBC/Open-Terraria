@@ -1028,17 +1028,11 @@ void 0;
 //  2755 活性超亮火块(344) / 2262 蓝王朝瓦(313)。
 //  +5464 Mitey-Titey(693,Item.cs:43085-43093 DefaultToPlaceableTile(693,0) 后
 //   consumable=false 覆写——放置不消耗,消耗门见 Game.tryPlace) ----
-const BLOCK_TILE_BACKFILL: ReadonlyArray<readonly [number, number]> = [
-  [3576, 418], [3637, 434], [3738, 448], [2755, 344], [2262, 313], [5464, 693],
-  // 5395 屎堆（Item.cs:42883 DefaultToPlaceableTile(666,0)；itemfunc 提取缺条目）
-  [5395, 666],
-];
-for (const [vid, sheet] of BLOCK_TILE_BACKFILL) {
-  const k = VANILLA_ITEM_KEY_BY_ID[vid];
-  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
-  const tk = TILE_KEY_BY_SHEET.get(sheet);
-  if (d && d.tile === undefined && tk !== undefined) d.tile = tk;
-}
+// （2026-08-18 退役）BLOCK_TILE_BACKFILL 手表 [3576/3637/3738/2755/2262/5464/5395]
+// 七条已全部被上方 createTile 双源回填的 vanilla.json 源覆盖（逐条核验值一致）——
+// 手维护面归零；覆盖完整性由 tests/item-id-stability.test.ts 覆盖闸门守门，
+// 再出现"提取漏"时先落 vanilla.json 数据而非新增手表。
+void 0;
 //  油漆 1073-1099 → PaintID 1-27（:13374-13535，含深层 13-24），
 //  棕/暗影/负相 1966/1967/1968 → 28/29/30（:21168-21185）。
 //  工具族 paintTool（Player.cs PlaceThing 分派 :41152/:41236/:41254）：1071/1543 刷、

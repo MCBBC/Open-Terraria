@@ -47,12 +47,13 @@ check('活木魔杖：消耗 木材 行', rod.text?.includes('消耗') && rod.te
 // 亮度脉冲：两次采样 filter 变化
 const pulse = await page.evaluate(async () => {
   const ui = window.__swUI;
-  const f1 = ui.tooltip.style.filter;
+  const el = ui.tooltip.querySelector('.sw-tooltip-lines');
+  if (!el) return { f1: null, f2: null };
+  const f1 = el.style.filter;
   await new Promise((r) => setTimeout(r, 700));
-  const f2 = ui.tooltip.style.filter;
-  return { f1, f2 };
+  return { f1, f2: el.style.filter };
 });
-check('亮度脉冲（mouseTextColor 190↔255 呼吸）', pulse.f1 !== pulse.f2 && !!pulse.f1, `${pulse.f1} → ${pulse.f2}`);
+check('亮度脉冲（文字层 190↔255 呼吸，面板恒定）', pulse.f1 !== pulse.f2 && !!pulse.f1, `${pulse.f1} → ${pulse.f2}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();

@@ -359,8 +359,8 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   } else if (player && e.ai0 === 1) {
     // ---- 跳跃段(NPC.cs:19646-19708) ----
     if (e.vy === 0) {
-      // 落地(:19648-19661):Item14 音效 + 落地尘/Gore
-      game.playSfx('roar', 0.35);
+      // 落地(:19648-19661):Item14 音效 + 落地尘/Gore(曾借 roar 0.35,2026-08-18 对账修)
+      game.playSfxWav?.('Item_14', 1, e.cx, e.cy);
       game.spawnParticles(e.cx, e.y + e.h, '#9A8FA0', 12, 2.2, { life: 40 });
       e.ai0 = 0;
     } else {
@@ -421,7 +421,7 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
         if (!n.dead && n !== e && n.vanillaId !== null && n.vanillaId >= 245 && n.vanillaId <= 249) n.dead = true;
       }
       game.spawnParticles(e.cx, e.cy, '#C04030', 20, 3, { life: 40 });
-      game.playSfx('roar', 1);
+      // 原版自由头消亡零吼(aiStyle54 块仅 32577/32587/Item8)——曾自加 roar,2026-08-18 对账删
       return;
     }
     golemHeadGoFree(e, game);
@@ -647,7 +647,7 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
       smashTorches(game.world.store, e.x - TILE, e.x + e.w + TILE, e.y - TILE, e.y + e.w + TILE);
     }
     e.ai1 += 1;
-    if (e.ai1 === 1) game.playSfx('roar', 0.4);   // SoundID.Item14(:19344-19346)
+    if (e.ai1 === 1) game.playSfxWav?.('Item_14', 1, e.cx, e.cy);   // SoundID.Item14(:19344-19346;曾借 roar 0.4)
     if (e.aiT % 2 === 0) {                        // :19348-19356 焰尾尘(粒子近似)
       game.spawnParticles(e.cx + e.vx * 0.5, e.cy + e.vy * 0.5, '#E08040', 1, 0.6, { life: 20 });
     }

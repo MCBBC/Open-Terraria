@@ -116,6 +116,7 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   } else if (e.ai1 === 1) {
     // 旋冲段(:22115-22179):rot+=0.3*dir,1.5 倍速直冲,伤害 ×1.3,防御 -10。
     // 原版在进入冲撞时一次性应用——每 tick 重乘会把伤害放大 1.3^400,故缓存基值按基值设置
+    if (e.ai2 === 2) game.playSfx('roar', 1, e.cx, e.cy);   // :22155-22157 ai[2]==2 入场吼(style0 满响,2026-08-18 对账补)
     if (e.ai2 >= 400) { e.ai2 = 0; e.ai1 = 0; }
     let base = baseStats.get(e);
     if (!base) { base = baseOf(e); }
@@ -976,6 +977,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   } else if (e.ai1 === 1) {
     // 冲撞:雷眼 侧 340 8/0.2 / 180t 循环;魔眼 直冲 14 速(50/80t 减速,连 6)
     if (spaz) {
+      // :27674 二阶段冲刺启动帧吼(style0 满响;雷眼无此吼——全树 case15 仅此一处
+      // 二阶段专属,2026-08-18 对账补)
+      game.playSfx('roar', 1, e.cx, e.cy);
       e.spin = target;
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;

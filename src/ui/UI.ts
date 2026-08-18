@@ -330,6 +330,7 @@ const CSS = `
   padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:280px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   text-shadow: 1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }   /* 原版 MouseText 字体+字影（:20256 DrawColorCodedStringWithShadow） */
+.sw-tooltip-lines { display:inline; }   /* 文字层容器：脉冲 brightness 只作用于此（面板恒定） */
 .sw-yoyo-logo { width:16px; height:16px; image-rendering:pixelated; vertical-align:-3px;
   filter:drop-shadow(1px 0 #000) drop-shadow(-1px 0 #000) drop-shadow(0 1px #000) drop-shadow(0 -1px #000); } /* OneDropLogo 五层影（:20263-20289） */
 .sw-buff { pointer-events:auto; position:relative; width:30px; height:30px; background:rgba(40,32,60,0.9);
@@ -1407,12 +1408,15 @@ export class UI {
       // 社交槽语义（dye 槽 / armor 社交位——本仓 dye 槽 = 原版 social dye 位）
       socialSlot: where === 'dye' || where === 'miscDye',
     };
+    let linesHtml = '';
     for (const ln of assembleTooltipLines(def, s, tps, staticTip, ctx)) {
       const color = ln.journeyColor ? '#B46BD8' : ln.color;   // Colors.JourneyMode 紫
-      if (ln.yoyoLogo) { html += `<br><img class="sw-yoyo-logo" src="sprites/vanilla/OneDropLogo.png" alt="">`; continue; }
-      html += `<br>${color ? `<span style="color:${color}">${ln.text}</span>` : ln.text}`;
+      if (ln.yoyoLogo) { linesHtml += `<br><img class="sw-yoyo-logo" src="sprites/vanilla/OneDropLogo.png" alt="">`; continue; }
+      linesHtml += `<br>${color ? `<span style="color:${color}">${ln.text}</span>` : ln.text}`;
     }
-    this.tooltip.innerHTML = html;
+    // 脉冲只作用于文字层（.sw-tooltip-lines）——面板底色恒定（原版 :20256 逐行
+    // lineColors[k] *= mouseTextColor/255 只乘文字色，DrawInvBG 面板色不变）
+    this.tooltip.innerHTML = `<div class="sw-tooltip-lines">${html}<span style="display:none"></span>${linesHtml ? linesHtml.replace(/^<br>/, '') : ''}</div>`;
     this.tooltip.style.display = 'block';
     this.startTooltipPulse();
     this.applyTooltipBg();
@@ -1457,18 +1461,20 @@ export class UI {
   private tooltipPulseDir = -1;
   private startTooltipPulse(): void {
     cancelAnimationFrame(this.tooltipPulseRaf);
+    this.tooltip.style.filter = '';   // 清历史整元素滤镜（面板恒定，勿再暗化）
+    const lines = this.tooltip.querySelector('.sw-tooltip-lines') as HTMLElement | null;
+    if (!lines) return;
     let last = performance.now();
     const step = (now: number) => {
       if (this.tooltip.style.display !== 'block') return;
-      // 60t/s 语义：每 16.7ms 一步
       for (let t = 0; t < Math.round((now - last) / 16.7); t++) {
         this.tooltipPulseVal += this.tooltipPulseDir;
         if (this.tooltipPulseVal >= 255) { this.tooltipPulseVal = 255; this.tooltipPulseDir = -1; }
         if (this.tooltipPulseVal <= 190) { this.tooltipPulseVal = 190; this.tooltipPulseDir = 1; }
       }
       last = now;
-      const b = this.tooltipPulseVal / 255;
-      this.tooltip.style.filter = `brightness(${(0.75 + b * 0.25).toFixed(3)})`;
+      // 文字层亮度 = mouseTextColor/255（:20256 语义——面板不参与）
+      lines.style.filter = `brightness(${(this.tooltipPulseVal / 255).toFixed(3)})`;
       this.tooltipPulseRaf = requestAnimationFrame(step);
     };
     this.tooltipPulseRaf = requestAnimationFrame(step);
@@ -2735,10 +2741,19 @@ export class UI {
 
   private refreshAllNow() {
     if (!this.game) return;
+    // 快捷栏最先刷（数字键/选槽视觉的最小闭环）——后续任一段抛错也不再吞掉
+    // 快捷栏刷新（2026-08-18 用户报"数字键失效"：advisor 段异常曾把 rAF 回调
+    // 整体炸掉，selected 已变而画面不动）
+    this.refreshHotbar();
     this.moveGhost();
     this.paintTrash();
-    this.achAdvisorEl?.update();
-    this.refreshHotbar();
+    try {
+      this.achAdvisorEl?.update();
+    } catch (e) {
+      this.achAdvisorEl?.remove();
+      this.achAdvisorEl = null;   // 坏 advisor 自摘（成就顾问是 QoL 件，不拖垮背包刷新）
+      console.warn('[UI] achAdvisor update failed, detached:', e);
+    }
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {
       const slotEl = this.slotEl(i, 'inv');

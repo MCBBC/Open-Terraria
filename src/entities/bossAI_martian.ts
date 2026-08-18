@@ -399,7 +399,7 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
           if (d > 0.001) { sx = (sx / d) * 7; sy = (sy / d) * 7; }
           else { sx = 0; sy = -7; }
           shootM(game, oxp, oyp, sx, sy, 30, 438);
-          game.playSfxFiles(['Item_39'], 1, e.cx, e.cy);   // :36272 骑手(Scutlix 390)射弹音
+          game.playSfxFiles?.(['Item_39'], 1, e.cx, e.cy);   // :36272 骑手(Scutlix 390)射弹音
         }
       }
     }
@@ -438,7 +438,7 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
       if (n % 6 === 0) {
         const ang = e.ai2 + (Math.random() - 0.5) * (0.7853982 / 3);
         shootM(game, e.cx, e.cy, Math.cos(ang) * 16, Math.sin(ang) * 16, 35, 449);
-        game.playSfxFiles(['Item_12'], 1, e.cx, e.cy);     // :36140 部件激光(392 段 Item12)
+        game.playSfxFiles?.(['Item_12'], 1, e.cx, e.cy);     // :36140 部件激光(392 段 Item12)
       }
     }
     return;

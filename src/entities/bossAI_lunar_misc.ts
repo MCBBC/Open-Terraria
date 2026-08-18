@@ -140,7 +140,9 @@ const ML_EYE_ATTACKS: ReadonlyArray<readonly [number, number]> = [
 ];
 
 export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
-  if (rnd(420) === 0) game.playSfx('roar', 0.15, e.cx, e.cy);   // :38227 SoundID 29(100-101)
+  // :38227 PlaySound(29,…,Next(100,101))——含头不含尾=恒 100 → Zombie_100,
+  // case29 style100 ×0.25 由 FILE_CASE_VOL 自动乘(曾借 roar 轨 0.15,2026-08-18 对账修)
+  if (rnd(420) === 0) game.playSfxWav?.('Zombie_100', 1, e.cx, e.cy);
   // ---- 核心锚定(:38231-38237):ai[3]=核心 id,亡→静默消散 ----
   const core = enemies(game).find((n) => n.id === e.ai3 && n.vanillaId === 398);
   if (!core || core.dead) { e.dead = true; return; }
@@ -190,7 +192,7 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
     x[0] = angleLerp(x[0], Math.atan2(dy, dx), 0.5);
     x[1] = Math.min(1, x[1] + 0.05);
     x[2] = lerp(x[2], t < 20 ? 1.1 : 0.4, 0.2);
-    if (t === dur - 35) game.playSfx('roar', 0.3, e.cx, e.cy);   // :38389 SoundID 4 style 6
+    if (t === dur - 35) game.playSfxWav?.('NPC_Hit_6', 1, e.cx, e.cy);   // :38389 PlaySound(4,…,6)=NPCHit style6(曾借 roar 0.3)
     if (t === dur - 14 || t === dur - 7 || t === dur) {          // :38392-38398
       const ox = Math.cos(x[0]) * 30 * x[1], oy = Math.sin(x[0]) * 30 * x[1];
       const d = Math.hypot(dx, dy) || 1;
@@ -233,7 +235,7 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
       e.spin = angleTowards(e.spin, e.ai2, Math.PI / 30);
     } else if (t < 120) {
       // :38487-38505 发射:沿瞄准向 24 速冲出;已发 454 改归巢(ai[0]=-1),略
-      game.playSfx('roar', 0.4, e.cx, e.cy);                 // :38487 SoundID 29 style 102
+      game.playSfxWav?.('Zombie_102', 1, e.cx, e.cy);        // :38487 PlaySound(29,…,102)——case29 style102 ×0.4 自动档(曾借 roar 0.4 恰同值)
       e.vx = Math.cos(e.ai2 - Math.PI / 2) * 24;
       e.vy = Math.sin(e.ai2 - Math.PI / 2) * 24;
     } else {

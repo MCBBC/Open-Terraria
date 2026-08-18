@@ -295,7 +295,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     e.ai0 = -1; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     la.la0 = 1;
     e.spawnAlpha = 254;
-    game.playSfx('roar', 0.6);
+    game.playSfxWav?.('Zombie_89', 1, e.cx, e.cy);   // :65093 PlaySound(29,…,89)——case29 style89 ×0.7 自动档(曾借 roar 0.6)
   }
   const b = baseOf(e);
   const phase2 = e.hp <= e.maxHp / 2;                       // flag :64928
@@ -402,7 +402,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65375-65397
       const aim = aimLead(e, player, e.facing);
       shoot(game, e.cx + e.facing * 30, e.cy + 12, aim.x * 4, aim.y * 4, 35, 464); // :65411-65421
-      game.playSfx('roar', 0.35);
+      // 原版冰雾发射零吼(:65040-65900 全段仅 65093/65122 两声)——曾借 roar 0.35,2026-08-18 对账删
     }
     e.ai1 += 1;
     if (e.ai1 >= 4 + numIce) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
@@ -438,7 +438,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     if (isReal && e.ai1 >= 20 && (e.ai1 - 20) % numBolt === 0) {
       if (e.ai1 === 20) {
         cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622);
-        game.playSfx('roar', 0.5);
+        // 原版闪电发射零吼(同上全段普查)——曾借 roar 0.5,2026-08-18 对账删
       }
       // 原版 465 零速悬停后从天引雷(Projectile.AI 收敛:直飞 6 速朝玩家)
       const dx = player.cx - e.cx, dy = player.cy - (e.cy - 100);
@@ -500,7 +500,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
         e.y += fy;
         e.vx = 0; e.vy = 0;
         game.spawnParticles(e.cx, e.cy, '#8060D0', 18, 2.6);
-        game.playSfx('roar', 0.7);
+        // 原版仪式圈就位零吼(同上全段普查)——曾借 roar 0.7,2026-08-18 对账删
       }
     } else if (t >= 90 && t < 120) {
       e.spawnAlpha = Math.floor(254 * (1 - (t - 90) / 30));
@@ -552,7 +552,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
           n.vx = dvx; n.vy = dvy;
         }
       }
-      game.playSfx('roar', 0.5);
+      // 原版火球(522)发射零吼(同上全段普查)——曾借 roar 0.5,2026-08-18 对账删
     }
     e.ai1 += 1;
     if (e.ai1 >= 4 + 20 * 2) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
@@ -762,7 +762,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           const [ox, oy] = rot(ux, uy, -Math.PI / 2);
           shoot(game, e.cx + 55 + ox * 30, e.cy - 30 + oy * 30, ux * 8, uy * 8, dayEnrage ? 9999 : 45, 872);
         }
-        game.playSfx('roar', 0.4);
+        game.playSfxWav?.('Item_163', 1, e.cx, e.cy);   // :46805 彩虹发射(曾借 roar 0.4)
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -806,7 +806,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           const ox = cx0 + dirX * (t - 0.5), oy = cy0 + dirY * (t - 0.5);
           shoot(game, ox, oy, (axX / al) * 12, (axY / al) * 12, dayEnrage ? 9999 : 70, 919, 240);
         }
-        game.playSfx('roar', 0.45);
+        game.playSfxWav?.('Item_160', 1, e.cx, e.cy);   // :46997 四线发射(曾借 roar 0.45)
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -1120,7 +1120,7 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
           const prev = e.ai1;
           e.ai1 += 1;
           if (e.ai1 >= num13) {
-            if (prev < num13) game.playSfx('roar', 0.5);
+            if (prev < num13) { /* 原版蓄冲零吼——曾借 roar 0.5,2026-08-18 对账删 */ }
             e.vy += 1;
             // FTW(:45947-45952):额外 +1/t、钳 15.99
             if (game.world.seedFlags?.getGoodWorld) {
@@ -1141,7 +1141,7 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
           // 落地冲击(:45870-45890):922 冲击波 + 尘暴 + 回待机
           shoot(game, e.cx, e.y + e.h, 0, 0, 40, 922, 240);
           game.spawnParticles(e.cx, e.y + e.h, '#B090E0', 20, 3);
-          game.playSfx('roar', 0.7);
+          game.playSfxWav?.('Item_167', 1, e.cx, e.cy);   // :45902 落地冲击(曾借 roar 0.7)
           e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;
         }
       } else {
@@ -1182,7 +1182,8 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
             const a = (-i * Math.PI * 2) / num6;
             shoot(game, e.cx, e.cy, Math.cos(a) * 9, Math.sin(a) * 9, 30, 926);
           }
-          game.playSfx('roar', 0.5);
+          // 原版凝胶环发射零吼(:46105 的 65 号声是 QueenSlime 1/360 环境声,
+          // 与发射时机无关)——曾借 roar 0.5,2026-08-18 对账删
           e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;
         }
       } else {

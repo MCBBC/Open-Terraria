@@ -12204,6 +12204,40 @@ StreamPt("surfacewaterinjungle");
 //   #82 Trees / #97 SettleLiquidsPart2 / #98 Cactus / #101 MicroBiomes——各自
 //     0.6k-1.8k 行转录量 + #97 需液体模拟引擎（另批）。
 
+var FC_SOLID = new HashSet<int> {
+   0,1,2,6,7,8,9,10,22,23,25,30,37,38,39,40,41,43,44,45,
+   46,47,48,53,54,56,57,58,59,60,63,64,65,66,67,68,70,75,76,107,
+   108,109,111,112,115,116,117,118,119,120,121,122,123,127,130,137,138,140,145,146,
+   147,148,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,166,167,168,
+   169,170,175,176,177,179,180,181,182,183,188,189,190,191,192,193,194,195,196,197,
+   198,199,200,202,203,204,206,208,211,221,222,223,224,225,226,229,230,232,234,235,
+   248,249,250,251,252,253,255,256,257,258,259,260,261,262,263,264,265,266,267,268,
+   272,273,274,284,311,312,313,315,321,322,325,326,327,328,329,336,341,342,343,344,
+   345,346,347,348,350,351,357,365,366,367,368,369,370,371,381,383,384,385,387,388,
+   396,397,398,399,400,401,402,403,404,407,408,409,415,416,417,418,421,422,426,430,
+   431,432,433,434,446,447,448,449,450,451,458,459,460,472,473,474,476,477,478,479,
+   481,482,483,484,492,495,496,498,500,501,502,503,507,508,512,513,514,515,516,517,
+   534,535,536,537,539,540,541,546,557,562,563,566,618,625,626,627,628,633,635,641,
+   659,661,662,664,666,667,668,669,670,671,672,673,674,675,676,677,678,679,680,681,
+   682,683,684,685,686,687,688,689,690,691,692,708,711,712,713,714,715,716,717,718,
+   719,722,726,727,728,729,730,731,732,734,735,736,737,738,739,740,741,742,743,744,
+   745,746,747,748,749,750,
+};
+var FC_PLAT = new HashSet<int> {
+   14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,
+   297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,
+   414,427,435,436,437,438,439,469,532,533,538,542,544,550,551,553,554,555,556,558,
+   559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,
+   643,644,645,710,
+};
+
+// ★HHHH：JS gen-solid 基差谓词。JS 侧 GenSolid=TILE_DEFS.solid+翻转史，对本表 SOLID
+//（vanilla tileSolid+同一翻转史）的唯一差集=平台族 427/435-439 与花盆箱 380
+//（TILE_DEFS.solid=false，vanilla=true；19 两边皆无；五者无任何翻转写点）。
+// 尾段各 pass 的 JS 实现读 vanGenSolidType/genSolidType → 本区谓词一律走 JGS。
+//（★239 矿石锭=TILE_DEFS.platform:true 而 vanilla tileSolid=true 的双属格，一并排除）
+bool JGS(ushort t) => SOLID.Contains(t) && t != 239 && t != 380 && t != 427 && !(t >= 435 && t <= 439);
+
 Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
 // ================= Pass 58 Statues（cs:16947-17055 + statueList cs:4395-4433）=================
 {
@@ -12229,7 +12263,7 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
                 int bi2 = (ty + 1) * W + tx;
                 // SolidTile2（cs:70178）：active && 生成期 tileSolid && slope==0 && !halfBrick
                 //   && !inActive（inActive=wire bit5，生成期恒 0—— statues 前链内无写点）
-                if (act[bi2] == 0 || half[bi2] != 0 || slope[bi2] != 0 || !SOLID.Contains(typ[bi2])) continue;
+                if (act[bi2] == 0 || half[bi2] != 0 || slope[bi2] != 0 || !JGS(typ[bi2])) continue;
                 if (typ[bi2] == 162) continue;                                         // 冰特判
                 int ti = ty * W + tx;
                 // ★HHHH：超级飞镖陷阱=135（cs:4451 PlaceTile(135)——ZZZ 批 JS 修正，曾误 137）
@@ -12276,7 +12310,7 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
             if (ok) for (int bx = x; bx <= x + 1 && ok; bx++)
             {
                 int bi = (y + 1) * W + bx;
-                if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0 || !SOLID.Contains(typ[bi])) ok = false;
+                if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0 || !JGS(typ[bi])) ok = false;
             }
             if (!ok) { fail++; if (fail >= 10000) done = true; continue; }
             int row = style / 55;                         // 雕像帧换行（Tiles_105 宽 55 列）
@@ -16827,6 +16861,1211 @@ Replay(); // ▶MicroBiomes cs:21785
 }
 Checkpoint("microbiomes");
 StreamPt("microbiomes");
+
+// ═════════ HHHH 批（2026-08-18）：Pass 105 FinalCleanup 逐格 TileFrame 扫掷 + ShimmerCleanUp ═════════
+// ZZZ 批 FinalCleanupPass.ts（+890 行扫掷）+ ShimmerCleanUp（cs:22639→34750）的 C# 镜像
+//（JS 为蓝本，逐函数同源）。验证锚（种子 9293480，金标 104 基座）：苔藓 184 终数 10697 /
+//   苔藓块 625→石 ×1358 / ⑭ 位点 (1049,412)(471,479)(514,535)。
+// 模式：正常链模式跑在链态上（不追加 Checkpoint 名——75 名口径不变，WWW 批加链侧名后
+//   本段状态即被对拍）；HHHH_FC_BASE=<金标槽前缀>（如 /tmp/sw-slp/g/104_Remove_Broken_Traps）
+//   时先以金标槽覆写八通道（frames 空→frameSparse 语义，与 ZZZ _wwwrep 探针同构）；
+//   HHHH_FC_DUMP=<前缀> 落扫后九通道（typ/act/wal/liq/lty/slope/half/frx/fry）供 JS 侧
+//   head-to-head 逐格对拍。
+// ★谓词口径：本段 solid 谓词一律用 TILE_DEFS 折叠表（FC_SOLID=JS d.solid / FC_PLAT=JS
+//   d.platform，sheet 折叠 clash=0 已验证）+ 显式 484=false 与 Platforms 补真——与
+//   FinalCleanupPass.ts 的 tileSolidT/solid2/solidTile 同构；【非】链期翻转表 SOLID。
+//   唯一例外=case 165 的支撑谓词（ShimmerPass.solidTileSlope→genSolidType）——以
+//   FC_SOLID-{484} 近似（162/232/229 等链期翻转为实心对钟乳石支撑判定的差域，ZZZ 锚
+//   已证本种子零命中；异种子若红先查此处）。
+var FC_PLATFORMS = new HashSet<int> { 19, 427, 435, 436, 437, 438, 439 };   // TileID.Sets.Platforms
+var FC_BOULDERS = new HashSet<int> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
+var FC_CLOUDS = new HashSet<int> { 189, 196, 460, 717, 718, 719 };
+var FC_PAINTINGS = new HashSet<int> { 245, 246, 240, 241, 242 };
+var FC_WALL_DUNGEON = new HashSet<int> { 7, 8, 9, 94, 95, 96, 97, 98, 99 };
+var FC_CONV_MOSS = new HashSet<int> { 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627 };
+var FC_MOSS_COLOR = new Dictionary<int, int> {
+    [179]=0,[512]=0,[180]=1,[513]=1,[181]=2,[514]=2,[182]=3,[515]=3,[183]=4,[516]=4,
+    [381]=5,[517]=5,[534]=6,[535]=6,[536]=7,[537]=7,[539]=8,[540]=8,[625]=9,[626]=9,[627]=10,[628]=10,
+};
+var FC_IS_VINE = new HashSet<int> { 52, 382, 62, 115, 205, 528, 636, 638 };
+var FC_TILE_TABLE = new HashSet<int> {
+   280,275,276,277,278,279,281,605,604,603,602,601,599,600,612,611,610,609,
+   608,606,607,558,554,553,551,550,542,413,309,297,296,645,643,644,632,640,
+   559,414,359,358,285,286,582,555,538,533,532,394,393,392,391,339,310,299,
+   298,629,619,556,544,364,363,362,361,710,376,380,14,469,18,19,114,101,87,
+   88,405,427,
+};
+var FC_NO_ATTACH = new HashSet<int> {
+   568,569,570,580,620,572,564,565,593,594,590,595,615,110,3,4,10,50,707,
+   20,19,13,14,469,486,488,704,487,489,490,15,497,16,134,17,18,21,467,441,
+   468,27,114,86,87,88,89,90,101,102,94,95,96,97,98,99,91,92,93,387,388,
+   427,390,
+};
+var FC_IS_DRIP = new HashSet<int> { 373, 374, 375, 461, 709 };
+var FC_C3X2_PLATFORM = new HashSet<int> { 285, 286, 298, 299, 310, 339, 538, 532, 544, 533, 555, 556, 582, 619, 629, 361, 362, 363, 364 };
+var FC_C3X2_TYPES = new HashSet<int> { 14, 17, 26, 77, 86, 87, 88, 89, 114, 133, 186, 187, 215, 217, 218, 237, 244, 285, 286, 298, 299, 310, 339, 361, 362, 363, 364, 377, 469, 532, 533, 538, 544, 555, 556, 582, 619, 629 };
+var FC_PLANTS = new HashSet<int> { 3, 24, 61, 71, 73, 74, 110, 113, 201, 637, 703 };
+var FC_IS_BEAM = new HashSet<int> { 124, 561, 574, 575, 576, 577, 578 };
+var FC_IS_TREE_TRUNK = new HashSet<int> { 5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634 };
+var FC_SPARSE_SKIP = new HashSet<int>(FC_C3X2_TYPES) { 165, 185, 28, 653, 240, 440, 485, 72 };
+int FcSandFallBase(int s) => s == 53 ? 397 : s == 112 ? 398 : s == 234 ? 399 : s == 224 ? 147 : s == 123 ? 1 : -1;
+bool FcIsSandFall(int s) => s == 53 || s == 112 || s == 234 || s == 224 || s == 123;
+bool fcSparse = false;
+bool fcDestroy = false;
+bool FcInB2(int x, int y) => x >= 0 && y >= 0 && x < W && y < H;
+bool FcAct(int x, int y) => FcInB2(x, y) && act[y * W + x] != 0;
+int FcSheet(int x, int y) => typ[y * W + x];      // active 格=真 sheet；inactive 残留 ghost（JS sheetAt2 同域）
+bool FcTSolid(int sh) => sh != 484 && FC_SOLID.Contains(sh);   // tileSolidT（① 覆写）
+bool FcSolid2(int x, int y)                        // SolidTile2（平台族补真；inActive 生成期恒 0）
+{
+    if (!FcInB2(x, y)) return true;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    int sh = typ[i];
+    return (FC_SOLID.Contains(sh) || FC_PLATFORMS.Contains(sh)) && slope[i] == 0 && half[i] == 0;
+}
+bool FcSolidTileP(int x, int y)                    // FinalCleanup solidTile（pristine+484+!platform）
+{
+    if (!FcInB2(x, y)) return false;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    int sh = typ[i];
+    return FcTSolid(sh) && !FC_PLAT.Contains(sh) && half[i] == 0 && slope[i] == 0;
+}
+bool FcSolidAllowBottom(int x, int y)              // cs:70211
+{
+    if (!FcInB2(x, y)) return true;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    int sh = typ[i];
+    if (!(FC_SOLID.Contains(sh) || FC_PLAT.Contains(sh))) return false;
+    int sl = slope[i];
+    bool topSlope = sl == 1 || sl == 2;
+    if (topSlope && !(FC_PLATFORMS.Contains(sh) && (frX[i] / 18 is >= 0 and <= 7 or >= 12 and <= 16 or >= 25 and <= 26))) return false;
+    return half[i] == 0;
+}
+bool FcSolidAllowTop(int x, int y)                 // cs:70325
+{
+    if (!FcInB2(x, y)) return true;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    int sh = typ[i];
+    if (!(FC_SOLID.Contains(sh) || sh == 380)) return false;
+    bool plat = FC_PLATFORMS.Contains(sh);
+    bool bottomSlope = slope[i] == 3 || slope[i] == 4;
+    return (!plat && !bottomSlope) || (plat && half[i] != 0);
+}
+bool FcSolidAllowSide(int x, int y, bool left)     // cs:70345/70365
+{
+    if (!FcInB2(x, y)) return true;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    int sh = typ[i];
+    if (!FC_SOLID.Contains(sh) || half[i] != 0) return false;
+    if (FC_PLATFORMS.Contains(sh)) return false;
+    return left ? slope[i] != 2 : slope[i] != 1;
+}
+bool FcNActive(int x, int y) => FcAct(x, y);       // nactive（inActive 位生成期恒 0——金标 104 inact 全零实证）
+bool FcAnchorSolidTile(int x, int y)               // AnchorValid(SolidTile)（cs:51866）
+{
+    if (!FcNActive(x, y)) return false;
+    if (!FcInB2(x, y)) return false;
+    int sh = typ[y * W + x];
+    if (!FC_SOLID.Contains(sh) || FC_PLAT.Contains(sh) || FC_NO_ATTACH.Contains(sh)) return false;
+    return slope[y * W + x] == 0 && half[y * W + x] == 0;
+}
+void FcFlatten(int x, int y)
+{
+    if (!FcInB2(x, y)) return;
+    int i = y * W + x; slope[i] = 0; half[i] = 0;
+}
+void FcSetTile(int x, int y, int t, int fx = 0, int fy = 0)   // setTileSilent（非 0 不清半砖/坡面）
+{
+    if (!FcInB2(x, y)) return;
+    int i = y * W + x;
+    typ[i] = (ushort)t; act[i] = (byte)(t != 0 ? 1 : 0); frX[i] = (ushort)fx; frY[i] = (ushort)fy;
+    if (t == 0) { half[i] = 0; slope[i] = 0; }
+}
+void FcClearEverything(int x, int y)
+{
+    if (!FcInB2(x, y)) return;
+    FcSetTile(x, y, 0);
+    int i = y * W + x; wal[i] = 0; liq[i] = 0; liqT[i] = 0;   // wire 通道省略（不入哈希、生成期恒 0）
+}
+bool FcOceanDepth(int x, int y)
+{
+    if ((double)y > (worldSurface + rockLayer) / 2.0 + 40.0) return false;
+    return x < BEACH_DISTANCE || x > W - BEACH_DISTANCE;
+}
+void FcKillTile(int x, int y)                      // killTileGen（setTileSilent(0)+SquareTileFrame 级联）
+{
+    if (!FcInB2(x, y)) return;
+    int i = y * W + x;
+    if (act[i] == 0) return;
+    FcSetTile(x, y, 0);
+    FcSquareTileFrame(x, y);
+}
+void FcSquareTileFrame(int x, int y)               // cs:80924 列主序
+{
+    FcTileFrame(x - 1, y - 1); FcTileFrame(x - 1, y); FcTileFrame(x - 1, y + 1);
+    FcTileFrame(x, y - 1); FcTileFrame(x, y); FcTileFrame(x, y + 1);
+    FcTileFrame(x + 1, y - 1); FcTileFrame(x + 1, y); FcTileFrame(x + 1, y + 1);
+}
+int FcRoll3() => (int)r.Next(3);
+int FcRollRange(int min, int maxIncl) => (int)r.Next(min, maxIncl + 1);
+void FcKillStal(int x, int y)                      // killStalactiteTile（帧 -1=65535；dx 外层 9 邻全分派）
+{
+    if (!FcInB2(x, y)) return;
+    int i = y * W + x;
+    if (act[i] == 0) return;
+    act[i] = 0; half[i] = 0; frX[i] = 65535; frY[i] = 65535; typ[i] = 0;
+    for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++) FcTileFrame(x + dx, y + dy);
+}
+bool FcSolidSlopeStal(int x, int y)                // ShimmerPass.solidTileSlope（genSolidType 近似=FC_SOLID-{484}）
+{
+    if (!FcInB2(x, y)) return false;
+    int i = y * W + x;
+    return act[i] != 0 && FcTSolid(typ[i]) && half[i] == 0 && slope[i] == 0;
+}
+void FcCheckStal(int x, int j)                     // CheckStalactite 四分支（击杀走 FcKillStal 全分派）
+{
+    if (!FcInB2(x, j)) return;
+    int i0 = j * W + x;
+    if (act[i0] == 0) return;
+    int fy = frY[i0];
+    if (fy == 72)
+    {
+        bool flag = !FcSolidSlopeStal(x, j - 1);
+        if (!flag && !UpdateStalStyle(x, j)) flag = true;
+        if (flag) FcKillStal(x, j);
+        return;
+    }
+    if (fy == 90)
+    {
+        bool flag2 = !FcSolidSlopeStal(x, j + 1);
+        if (!flag2 && !UpdateStalStyle(x, j)) flag2 = true;
+        if (flag2) FcKillStal(x, j);
+        return;
+    }
+    if (fy >= 36)
+    {
+        int num = j;
+        if (frY[i0] == 54) num--;
+        bool flag3 = !FcSolidSlopeStal(x, num + 2);
+        if (num < 0 || num + 1 >= H) { FcKillStal(x, num); return; }
+        int a = num * W + x, b = (num + 1) * W + x;
+        if (act[a] == 0 || act[b] == 0 || typ[b] != typ[a]) flag3 = true;
+        if (frX[b] != frX[a]) flag3 = true;
+        if (!flag3 && !UpdateStalStyle(x, num)) flag3 = true;
+        if (flag3)
+        {
+            if (typ[a] == typ[i0]) FcKillStal(x, num);
+            if (typ[b] == typ[i0]) FcKillStal(x, num + 1);
+        }
+        return;
+    }
+    int num2 = j;
+    if (frY[i0] == 18) num2--;
+    bool flag4 = !FcSolidSlopeStal(x, num2 - 1);
+    if (num2 < 0 || num2 + 1 >= H) { FcKillStal(x, num2); return; }
+    int a2 = num2 * W + x, b2 = (num2 + 1) * W + x;
+    if (act[a2] == 0 || act[b2] == 0 || typ[b2] != typ[a2]) flag4 = true;
+    if (frX[b2] != frX[a2]) flag4 = true;
+    if (!flag4 && !UpdateStalStyle(x, num2)) flag4 = true;
+    if (flag4)
+    {
+        if (typ[a2] == typ[i0]) FcKillStal(x, num2);
+        if (typ[b2] == typ[i0]) FcKillStal(x, num2 + 1);
+    }
+}
+// ---- TileFrame 生成期（cs:82067）+ TileFrameImportant 分派（cs:85703+）----
+void FcTileFrame(int x, int y)
+{
+    if (x <= 5 || y <= 5 || x >= W - 5 || y >= H - 5) return;   // 边距 5 早退
+    int i = y * W + x;
+    if (act[i] == 0) { half[i] = 0; slope[i] = 0; return; }
+    int sh = typ[i];
+    if (FcFrameImportant(x, y, sh)) return;
+    if (!FC_SOLID.Contains(sh))                                 // 非实心非 frameImportant：仙人掌/藤
+    {
+        if (sh == 80) { FcCheckCactus(x, y); return; }
+        if (FC_IS_VINE.Contains(sh)) { FcCheckVines(x, y, sh); return; }
+    }
+}
+bool FcFrameImportant(int x, int y, int sh)
+{
+    if (fcSparse && FC_SPARSE_SKIP.Contains(sh)) return true;   // 探针缺帧族跳过（_wwwrep 同构）
+    switch (sh)
+    {
+        case 518: FcLilyPad(x, y); return true;
+        case 519: FcCatTail(x, y); return true;
+        case 549: FcSeaweed(x, y); return true;
+        case 571: FcBamboo(x, y); return true;
+        case 72: FcFrame72(x, y); return true;
+        case 184: FcFrame184(x, y); return true;
+        case 165: FcCheckStal(x, y); return true;
+        case 3: case 24: case 61: case 71: case 73: case 74:
+        case 110: case 113: case 201: case 637: case 703:
+            FcPlantCheck(x, y, sh); return true;
+        case 13: case 33: case 49: case 50: case 78: case 174: case 372: case 646: case 707:
+            FcOnTable(x, y, sh); return true;
+        case 185: FcPile(x, y); return true;
+        case 28: case 653: FcPot(x, y, sh); return true;
+        case 240: case 440: Fc3x3Wall(x, y); return true;
+        case 485: FcSuper485(x, y); return true;
+        case 136: FcFrame136(x, y); return true;
+        case 129: case 149: FcFrame129(x, y); return true;
+        case 529: FcFrame529(x, y); return true;
+        case 81: FcFrame81(x, y); return true;
+        case 324:
+            if (!FcSolidAllowBottom(x, y + 1) || (FcAct(x, y + 1) && FC_BOULDERS.Contains(typ[(y + 1) * W + x]))) FcKillTile(x, y);
+            return true;
+        case 373: case 374: case 375: case 461: case 709:
+        {
+            int up = (y - 1) * W + x;
+            if (!FcInB2(x, y - 1) || act[up] == 0 || slope[up] == 3 || slope[up] == 4
+                || !FC_SOLID.Contains(typ[up]) || FC_PLAT.Contains(typ[up])) FcKillTile(x, y);
+            return true;
+        }
+        default:
+            if (FC_C3X2_TYPES.Contains(sh)) { Fc3x2(x, y, sh); return true; }
+            return false;
+    }
+}
+void FcFrame184(int x, int y)                      // case 184（cs:85888-85952）：先掷后判
+{
+    int i = y * W + x;
+    int num20 = FcRoll3() * 18;
+    int Side(int dx, int dy)
+    {
+        if (!FcInB2(x + dx, y + dy)) return -1;
+        int k = (y + dy) * W + x + dx;
+        if (act[k] == 0) return -1;
+        if (dy == -1 && (slope[y * W + x - W] == 3 || slope[y * W + x - W] == 4)) return -1;
+        if (dy == 1 && (half[k] == 1 || slope[y * W + x + W] == 1 || slope[y * W + x + W] == 2)) return -1;
+        return typ[k];
+    }
+    int below = Side(0, 1), above = Side(0, -1), leftS = Side(-1, 0), rightS = Side(1, 0);
+    bool Apply(int src, int lo, int hi, int bse)
+    {
+        if (!FC_MOSS_COLOR.ContainsKey(src)) return false;
+        frX[i] = (ushort)(22 * FC_MOSS_COLOR[src]);
+        if (frY[i] < lo || frY[i] > hi) frY[i] = (ushort)(bse + num20);
+        return true;
+    }
+    if (!(Apply(below, 0, 36, 0) || Apply(above, 54, 90, 54)
+        || Apply(leftS, 108, 144, 108) || Apply(rightS, 162, 198, 162)))
+        FcKillTile(x, y);                          // 无苔藓邻格 → 杀
+}
+void FcFrame72(int x, int y)                       // case 72（cs:86598-86620）
+{
+    int i = y * W + x;
+    int abv = FcAct(x, y - 1) ? typ[(y - 1) * W + x] : -1;
+    int blw = FcAct(x, y + 1) ? typ[(y + 1) * W + x] : -1;
+    if (blw != 72 && blw != 70) { FcKillTile(x, y); return; }
+    if (abv != 72 && frX[i] == 0)
+    {
+        int n = FcRoll3();
+        frX[i] = 18;
+        frY[i] = (ushort)(n == 0 ? 0 : n == 1 ? 18 : 36);
+    }
+}
+void FcFrame136(int x, int y)                      // case 136（cs:85738-85803）
+{
+    int i = y * W + x;
+    int TypeOf(int xx, int yy) => FcNActive(xx, yy) && FcInB2(xx, yy) ? typ[yy * W + xx] : -1;
+    int below = TypeOf(x, y + 1), leftT = TypeOf(x - 1, y), rightT = TypeOf(x + 1, y);
+    bool SolidAtSh(int sh) => FC_SOLID.Contains(sh) && !FC_NO_ATTACH.Contains(sh);
+    bool centerOk = below >= 0 && SolidAtSh(below) && half[(y + 1) * W + x] == 0
+        && (slope[(y + 1) * W + x] == 0 || slope[(y + 1) * W + x] == 3 || slope[(y + 1) * W + x] == 4);
+    bool leftOk = (leftT >= 0 && SolidAtSh(leftT) && (slope[y * W + x - 1] == 1 || slope[y * W + x - 1] == 0) && half[y * W + x - 1] == 0)
+        || (leftT >= 0 && FC_IS_BEAM.Contains(leftT))
+        || (FC_IS_TREE_TRUNK.Contains(leftT) && FC_IS_TREE_TRUNK.Contains(TypeOf(x - 1, y - 1)) && FC_IS_TREE_TRUNK.Contains(TypeOf(x - 1, y + 1)));
+    bool rightOk = (rightT >= 0 && SolidAtSh(rightT) && (slope[y * W + x + 1] == 2 || slope[y * W + x + 1] == 0) && half[y * W + x + 1] == 0)
+        || (rightT >= 0 && FC_IS_BEAM.Contains(rightT))
+        || (FC_IS_TREE_TRUNK.Contains(rightT) && FC_IS_TREE_TRUNK.Contains(TypeOf(x + 1, y - 1)) && FC_IS_TREE_TRUNK.Contains(TypeOf(x + 1, y + 1)));
+    if (centerOk) frX[i] = 0;
+    else if (leftOk) frX[i] = 18;
+    else if (rightOk) frX[i] = 36;
+    else if (wal[i] > 0) frX[i] = 54;
+    else FcKillTile(x, y);
+}
+void FcFrame129(int x, int y)                      // case 129/149（CheckAndAdjustMultiDirectionalTile 失败杀）
+{
+    if (!(x >= 2 && y >= 2 && x < W - 2 && y < H - 2)) { FcKillTile(x, y); return; }
+    int Valid(int xx, int yy, int dir)
+    {
+        if (!FcInB2(xx, yy)) return -1;
+        int ki = yy * W + xx;
+        int sh = typ[ki];
+        if (FC_BOULDERS.Contains(sh) || sh == 10) return -1;
+        if (dir == 0 && !FcSolidAllowTop(xx, yy)) return -1;
+        if (dir == 1 && !FcSolidAllowBottom(xx, yy)) return -1;
+        if (dir == 2 && !FcSolidAllowSide(xx, yy, true)) return -1;
+        if (dir == 3 && !FcSolidAllowSide(xx, yy, false)) return -1;
+        return sh;
+    }
+    int up = Valid(x, y - 1, 0), below = Valid(x, y + 1, 1);
+    int leftT = Valid(x - 1, y, 2), rightT = Valid(x + 1, y, 3);
+    bool SolidNS(int sh) => FC_SOLID.Contains(sh) && !FC_PLAT.Contains(sh);
+    bool ok = (below >= 0 && SolidNS(below)) || (leftT >= 0 && SolidNS(leftT))
+        || (rightT >= 0 && SolidNS(rightT)) || (up >= 0 && SolidNS(up));
+    if (!ok) FcKillTile(x, y);
+}
+void FcFrame529(int x, int y)                      // case 529（cs:85954-85970）
+{
+    if (!FcSolidAllowBottom(x, y + 1)) { FcKillTile(x, y); return; }
+    int g = FcAct(x, y + 1) ? typ[(y + 1) * W + x] : -1;
+    if (g < 0 || !(g == 53 || g == 112 || g == 116 || g == 234)) FcKillTile(x, y);
+}
+void FcFrame81(int x, int y)                       // case 81（cs:85753-85780）
+{
+    if (FcAct(x, y - 1)) { FcKillTile(x, y); return; }
+    int below = FcAct(x, y + 1) ? typ[(y + 1) * W + x] : -1;
+    bool solidBelow = below >= 0 && FC_SOLID.Contains(below);
+    if (below < 0 || !solidBelow || half[(y + 1) * W + x] != 0
+        || (slope[(y + 1) * W + x] == 1 || slope[(y + 1) * W + x] == 2)) FcKillTile(x, y);
+}
+bool FcPlantBadMatch(int down, int type)           // cs:81421
+{
+    if ((type != 3 || down == 2 || down == 477 || down == 78 || down == 380 || down == 579)
+        && (type != 73 || down == 2 || down == 477 || down == 78 || down == 380 || down == 579)
+        && (type != 24 || down == 23 || down == 661)
+        && (type != 61 || down == 60 || down == 226)
+        && (type != 74 || down == 60 || down == 226)
+        && (type != 71 || down == 70)
+        && (type != 110 || down == 109 || down == 492)
+        && (type != 113 || down == 109 || down == 492)
+        && (type != 201 || down == 199 || down == 662))
+    {
+        if (type == 637) return down != 633;
+        return false;
+    }
+    return true;
+}
+(int type, int fx) FcPlantNewType(int sheet, int down, int fx)   // cs:81334-81418
+{
+    int type = sheet, nfx = fx;
+    if ((type == 3 || type == 73) && down != 2 && down != 477 && nfx >= 162) nfx = 126;
+    if (type == 74 && down != 60 && down != 226 && nfx >= 162) nfx = 126;
+    switch (down)
+    {
+        case 23: case 661: type = 24; if (nfx >= 162) nfx = 126; break;
+        case 2: case 477: type = type == 113 ? 73 : 3; break;
+        case 109: case 492: type = type == 73 ? 113 : 110; break;
+        case 199: case 662: type = 201; break;
+        case 60: case 226: type = 61; while (nfx > 126) nfx -= 126; break;
+        case 70: type = 71; while (nfx > 72) nfx -= 72; break;
+    }
+    return (type, nfx);
+}
+void FcPlantCheck(int x, int y, int sheet)         // PlantCheck（cs:81280-81313）
+{
+    if (fcDestroy) return;
+    x = Math.Max(1, Math.Min(W - 2, x));
+    y = Math.Max(1, Math.Min(H - 2, y));
+    int down = -1;
+    if (y + 1 < H && FcNActive(x, y + 1) && half[(y + 1) * W + x] == 0 && slope[(y + 1) * W + x] == 0)
+        down = typ[(y + 1) * W + x];
+    if (sheet == 703)
+    {
+        if (!FcSolidAllowBottom(x, y + 1))
+        {
+            fcDestroy = true; FcKillTile(x, y); fcDestroy = false;
+        }
+        return;
+    }
+    if (!FcPlantBadMatch(down, sheet)) return;
+    int i = y * W + x;
+    var (nt, nfx) = FcPlantNewType(sheet, down, frX[i]);
+    if (nt != sheet)
+    {
+        typ[i] = (ushort)nt; frX[i] = (ushort)nfx;
+        bool mushroom = (sheet == 3 || sheet == 110 || sheet == 24) && nfx == 144 ? true : (sheet == 201 && nfx == 270);
+        if (mushroom) frX[i] = (ushort)(sheet == 201 ? 270 : 144);
+    }
+    else
+    {
+        fcDestroy = true; FcKillTile(x, y); fcDestroy = false;
+    }
+}
+void FcOnTable(int x, int y, int sheet)            // CheckOnTable1x1（cs:43548）
+{
+    if (!FcInB2(x, y + 1)) return;
+    int i = (y + 1) * W + x;
+    int sl = slope[i];
+    int bsh = typ[i];
+    if (sl == 1 || sl == 2)
+    {
+        if (FC_PLATFORMS.Contains(bsh))
+        {
+            bool FlatPlatform(int xx) => FcInB2(xx, y + 1) && FcAct(xx, y + 1) && slope[(y + 1) * W + xx] == 0
+                && half[(y + 1) * W + xx] == 0 && FC_PLATFORMS.Contains(typ[(y + 1) * W + xx]);
+            int bt = half[i] != 0 ? 1 : sl + 1;
+            if ((bt != 3 || FlatPlatform(x - 1)) && (bt != 2 || FlatPlatform(x + 1))) FcKillTile(x, y);
+        }
+        else FcKillTile(x, y);
+    }
+    else if (half[i] != 0) FcKillTile(x, y);
+    else
+    {
+        bool tableOk = FcNActive(x, y + 1) && FC_TILE_TABLE.Contains(bsh)
+            && slope[i] == 0 && half[i] == 0;
+        if (tableOk || (act[i] != 0 && FC_SOLID.Contains(bsh) && FC_PLAT.Contains(bsh))) return;
+        if (sheet == 78) { if (!FcSolidAllowBottom(x, y + 1)) FcKillTile(x, y); }
+        else FcKillTile(x, y);
+    }
+}
+void Fc2x1(int x, int y, int sheet)                // Check2x1（cs:46989）
+{
+    if (fcDestroy) return;
+    int i = y * W + x;
+    int x0 = x - (frX[i] / 18 % 2);
+    if (!FcInB2(x0 + 1, y + 1) || !FcInB2(x0, y + 1)) return;
+    bool ok = frX[y * W + x0 + 1] == frX[y * W + x0] + 18
+        && typ[y * W + x0] == sheet && typ[y * W + x0 + 1] == sheet
+        && act[y * W + x0] != 0 && act[y * W + x0 + 1] != 0;
+    if (sheet == 29 || sheet == 103 || sheet == 462)
+    {
+        for (int xx = x0; xx <= x0 + 1; xx++)
+        {
+            int bi = (y + 1) * W + xx;
+            if (act[bi] == 0 || !FC_TILE_TABLE.Contains(typ[bi]) || half[bi] != 0
+                || slope[bi] == 1 || slope[bi] == 2) ok = false;
+        }
+    }
+    if (ok) return;
+    fcDestroy = true;
+    for (int xx = x0; xx <= x0 + 1; xx++)
+        if (typ[y * W + xx] == sheet && act[y * W + xx] != 0) FcKillTile(xx, y);
+    fcDestroy = false;
+}
+void FcPile(int x, int y)                          // CheckPile（cs:46891）+Check2x1
+{
+    int i = y * W + x;
+    if (frY[i] == 18 || typ[i] == 649) { Fc2x1(x, y, typ[i]); return; }
+    if (!FcSolidAllowBottom(x, y + 1)) { FcKillTile(x, y); return; }
+    int fx18 = frX[i] / 18;
+    int belowSh = FcAct(x, y + 1) ? typ[(y + 1) * W + x] : -1;
+    if (belowSh < 0) return;
+    if (fx18 >= 36 && fx18 <= 47)
+    {
+        if (belowSh != 147 && belowSh != 161 && belowSh != 163 && belowSh != 164
+            && belowSh != 200 && belowSh != 162 && belowSh != 224) FcKillTile(x, y);
+    }
+    else if ((fx18 >= 54 && fx18 <= 59) || fx18 >= 73)   // 54-59 ∪ 73-76（60-72 无查）
+    {
+        if (!(belowSh == 53 || belowSh == 112 || belowSh == 116 || belowSh == 234
+            || belowSh == 397 || belowSh == 398 || belowSh == 399 || belowSh == 402
+            || belowSh == 396 || belowSh == 400 || belowSh == 401 || belowSh == 403)) FcKillTile(x, y);
+    }
+}
+void FcPot(int x, int y, int sheet)                // CheckPot（cs:56807）
+{
+    if (fcDestroy) return;
+    int i = y * W + x;
+    int num = frX[i] / 18;
+    while (num > 1) num -= 2;
+    int x0 = x - num;
+    int num3 = frY[i] / 18;
+    int num4 = 0;
+    while (num3 > 1) { num3 -= 2; num4++; }
+    int y0 = y - num3;
+    bool bad = false;
+    for (int k = x0; k < x0 + 2 && !bad; k++)
+    {
+        for (int l = y0; l < y0 + 2; l++)
+        {
+            if (!FcInB2(k, l)) { bad = true; break; }
+            int ki = l * W + k;
+            int fx18 = frX[ki] / 18;
+            while (fx18 > 1) fx18 -= 2;
+            if (act[ki] == 0 || typ[ki] != sheet || fx18 != k - x0
+                || frY[ki] != (l - y0) * 18 + num4 * 36) bad = true;
+        }
+    }
+    for (int k = x0; k < x0 + 2; k++)
+    {
+        if (sheet == 653) { if (!FcSolidAllowBottom(k, y0 + 2)) bad = true; }
+        else if (!FcSolid2(k, y0 + 2)) bad = true;
+    }
+    if (!bad) return;
+    fcDestroy = true;
+    for (int k = x0; k < x0 + 2; k++)
+        for (int l = y0; l < y0 + 2; l++)
+            if (FcInB2(k, l) && typ[l * W + k] == sheet && act[l * W + k] != 0) FcKillTile(k, l);
+    fcDestroy = false;
+}
+void Fc3x3Wall(int x, int y)                       // Check3x3Wall（cs:44321）
+{
+    if (fcDestroy) return;
+    int i = y * W + x;
+    int sheet = typ[i];
+    int num = 0, num2 = 0;
+    int cx = frX[i] / 18;
+    while (cx >= 3) { cx -= 3; num++; }
+    int x0 = x - cx;
+    int cy = frY[i] / 18;
+    while (cy >= 3) { cy -= 3; num2++; }
+    int y0 = y - cy;
+    int fxBase = num * 54, fyBase = num2 * 54;
+    bool bad = false;
+    for (int xx = x0; xx < x0 + 3 && !bad; xx++)
+    {
+        for (int yy = y0; yy < y0 + 3; yy++)
+        {
+            if (!FcInB2(xx, yy)) { bad = true; break; }
+            int ki = yy * W + xx;
+            if (typ[ki] != sheet || act[ki] == 0 || wal[ki] <= 0
+                || frX[ki] != fxBase + (xx - x0) * 18
+                || frY[ki] != fyBase + (yy - y0) * 18) bad = true;
+        }
+    }
+    if (!bad) return;
+    fcDestroy = true;
+    for (int xx = x0; xx < x0 + 3; xx++)
+        for (int yy = y0; yy < y0 + 3; yy++)
+            if (FcInB2(xx, yy) && typ[yy * W + xx] == sheet && act[yy * W + xx] != 0) FcKillTile(xx, yy);
+    fcDestroy = false;
+}
+void FcSuper485(int x, int y)                      // CheckSuper 485（cs:48117）
+{
+    if (fcDestroy) return;
+    int i = y * W + x;
+    int sheet = typ[i];
+    int style = frX[i] / 36;
+    int x0 = x - (frX[i] / 18 % 2);
+    int y0 = y - (frY[i] / 18 % 2);
+    bool bad = false;
+    for (int xx = 0; xx < 2; xx++)
+        for (int yy = 0; yy < 2; yy++)
+        {
+            if (!FcInB2(x0 + xx, y0 + yy)) { bad = true; continue; }
+            int ki = (y0 + yy) * W + x0 + xx;
+            if (act[ki] == 0 || typ[ki] != sheet
+                || frX[ki] != style * 36 + xx * 18 || frY[ki] != yy * 18) bad = true;
+        }
+    for (int xx = 0; xx < 2; xx++)
+        if (!FcAnchorSolidTile(x0 + xx, y0 + 2)) bad = true;
+    if (!bad) return;
+    fcDestroy = true;
+    for (int xx = 0; xx < 2; xx++)
+        for (int yy = 0; yy < 2; yy++)
+            if (FcInB2(x0 + xx, y0 + yy) && typ[(y0 + yy) * W + x0 + xx] == sheet
+                && act[(y0 + yy) * W + x0 + xx] != 0) FcKillTile(x0 + xx, y0 + yy);
+    fcDestroy = false;
+}
+void Fc3x2(int x, int y, int sheet)                // Check3x2（cs:49190）
+{
+    if (fcDestroy) return;
+    int i = y * W + x;
+    bool bad = false;
+    int num3 = frY[i] / 36;
+    int y0 = y - (frY[i] % 36) / 18;
+    int num5 = frX[i] / 18;
+    int num6 = 0;
+    while (num5 > 2) { num5 -= 3; num6++; }
+    int x0 = x - num5;
+    int styleCol = num6;
+    int yEnd = y0 + 2;
+    for (int k = x0; k < x0 + 3; k++)
+    {
+        for (int l = y0; l < yEnd; l++)
+        {
+            if (!FcInB2(k, l)) { bad = true; continue; }
+            int ki = l * W + k;
+            if (act[ki] == 0 || typ[ki] != sheet
+                || frX[ki] != (k - x0) * 18 + styleCol * 54
+                || frY[ki] != (l - y0) * 18 + num3 * 36) bad = true;
+        }
+        if (FC_C3X2_PLATFORM.Contains(sheet))
+        {
+            int bi = yEnd * W + k;
+            bool support = FcSolidAllowBottom(k, yEnd)
+                || (FcNActive(k, yEnd) && FC_PLAT.Contains(typ[bi]) && frY[bi] == 0)
+                || (act[bi] != 0 && FC_PLATFORMS.Contains(typ[bi]));
+            if (!support) bad = true;
+        }
+        else
+        {
+            switch (sheet)
+            {
+                case 704: case 705:
+                    if (!FcSolidAllowBottom(k, yEnd)) bad = true;
+                    break;
+                case 488:
+                {
+                    int g = FcAct(k, yEnd) ? typ[yEnd * W + k] : 0;
+                    bool okG = g == 2 || g == 477 || g == 109 || g == 492 || g == 147
+                        || g == 53 || g == 60 || g == 70;
+                    if (!okG) bad = true;
+                    break;
+                }
+                case 26: case 695:
+                    if (!FcSolidAllowBottom(k, yEnd) || (FcAct(k, yEnd) && FC_BOULDERS.Contains(typ[yEnd * W + k]))) bad = true;
+                    break;
+                case 186:
+                {
+                    if (!FcSolidAllowBottom(k, yEnd) || (FcAct(k, yEnd) && FC_BOULDERS.Contains(typ[yEnd * W + k]))) { bad = true; break; }
+                    int g = FcAct(k, yEnd) ? typ[yEnd * W + k] : -1;
+                    if (g < 0) break;
+                    if (styleCol >= 26 && styleCol <= 31)
+                    {
+                        if (g != 147 && g != 161 && g != 163 && g != 164 && g != 200
+                            && g != 162 && g != 224) bad = true;
+                    }
+                    else if (styleCol >= 32 && styleCol <= 34)
+                    {
+                        if (g != 59 && g != 70) bad = true;
+                    }
+                    break;
+                }
+            }
+            if (sheet == 187)
+            {
+                if (!FcSolidAllowBottom(k, yEnd) || (FcAct(k, yEnd) && FC_BOULDERS.Contains(typ[yEnd * W + k]))) { bad = true; continue; }
+                int g = FcAct(k, yEnd) ? typ[yEnd * W + k] : -1;
+                if (g >= 0)
+                {
+                    if (styleCol <= 5) { if (g != 59 && g != 60 && g != 226) bad = true; }
+                    else if (styleCol <= 8) { if (g != 57 && g != 58 && g != 75 && g != 76) bad = true; }
+                    else if (styleCol >= 29 && styleCol <= 34)
+                    {
+                        if (!(g == 53 || g == 112 || g == 116 || g == 234
+                            || g == 397 || g == 398 || g == 399 || g == 402
+                            || g == 396 || g == 400 || g == 401 || g == 403)) bad = true;
+                    }
+                }
+            }
+            else if (!FcSolidAllowBottom(k, yEnd)) bad = true;
+        }
+    }
+    // 187 草基缺失 → 顶幅转 186（cs:49343-49360）。OOB 读（y0+2=H）JS sheetAt2 → -1
+    int SheetQ(int qx, int qy) => FcInB2(qx, qy) ? typ[qy * W + qx] : -1;
+    if (sheet == 187 && FcInB2(x0, y0) && FcInB2(x0 + 2, y0 + 1))
+    {
+        int topFx = frX[y0 * W + x0];
+        int g0 = SheetQ(x0, y0 + 2), g1 = SheetQ(x0 + 1, y0 + 2), g2 = SheetQ(x0 + 2, y0 + 2);
+        if (topFx >= 756 && topFx <= 900 && g0 != 2 && g1 != 2 && g2 != 2
+            && g0 != 477 && g1 != 477 && g2 != 477 && g0 != 492 && g1 != 492 && g2 != 492)
+        {
+            for (int k = x0; k < x0 + 3; k++)
+                for (int l = y0; l < y0 + 2; l++)
+                {
+                    int ki = l * W + k;
+                    frX[ki] = (ushort)(frX[ki] - 378);
+                    typ[ki] = 186;
+                }
+            return;
+        }
+    }
+    // 488 生成期再生（cs:49361-49377）
+    if (bad && sheet == 488)
+    {
+        for (int k = x0; k < x0 + 3; k++)
+        {
+            for (int l = y0; l < y0 + 2; l++) FcSetTile(k, l, 488, (k - x0) * 18, (l - y0) * 18);
+            if (FcInB2(k, y0 + 2)) FcSetTile(k, y0 + 2, 2, 0, 0);
+        }
+        return;
+    }
+    if (!bad) return;
+    fcDestroy = true;
+    for (int k = x0; k < x0 + 3; k++)
+        for (int l = y0; l < yEnd; l++)
+            if (FcInB2(k, l) && typ[l * W + k] == sheet && act[l * W + k] != 0) FcKillTile(k, l);
+    fcDestroy = false;
+}
+void FcCheckVines(int x, int y, int sheet)         // CheckVines（cs:85599）
+{
+    int i = y * W + x;
+    int up = -1;
+    if (FcNActive(x, y - 1) && FcInB2(x, y - 1) && slope[(y - 1) * W + x] != 3 && slope[(y - 1) * W + x] != 4)
+        up = typ[(y - 1) * W + x];
+    if (up == sheet) return;
+    (int[] hosts, int)[] map = {
+        (new[]{633, 638}, 638), (new[]{70, 528}, 528), (new[]{109, 115, 492}, 115),
+        (new[]{60, 226, 62}, 62), (new[]{23, 636, 661}, 636), (new[]{199, 205, 662}, 205),
+        (new[]{382}, 382),
+    };
+    int conv = 0;
+    foreach (var (hosts, o) in map) if (hosts.Contains(up)) conv = o;
+    if (up == 2 || up == 52 || up == 477) { if (sheet != 382) conv = 52; }
+    if (conv != 0 && conv != sheet)
+    {
+        typ[i] = (ushort)conv;
+        FcSquareTileFrame(x, y);
+        return;
+    }
+    bool dead = up == -1;
+    if ((sheet == 52 || sheet == 382) && up != 2 && up != 477 && up != 192) dead = true;
+    if (sheet == 62 && up != 60 && up != 384 && up != 226) dead = true;
+    if (sheet == 115 && up != 109 && up != 492) dead = true;
+    if (sheet == 528 && up != 70) dead = true;
+    if (sheet == 636 && up != 23 && up != 661) dead = true;
+    if (sheet == 205 && up != 199 && up != 662) dead = true;
+    if (sheet == 638 && up != 633) dead = true;
+    if (dead) FcKillTile(x, y);
+}
+void FcCheckCactus(int x, int y)                   // CheckCactus（cs:54132）：追底杀
+{
+    int ny = y, nx = x;
+    while (FcInB2(nx, ny) && act[ny * W + nx] != 0 && typ[ny * W + nx] == 80)
+    {
+        ny++;
+        if (!FcInB2(nx, ny)) return;
+        if (act[ny * W + nx] == 0 || typ[ny * W + nx] != 80)
+        {
+            if (FcAct(nx - 1, ny) && typ[ny * W + nx - 1] == 80
+                && FcAct(nx - 1, ny - 1) && typ[(ny - 1) * W + nx - 1] == 80 && nx >= x) nx--;
+            if (FcAct(nx + 1, ny) && typ[ny * W + nx + 1] == 80
+                && FcAct(nx + 1, ny - 1) && typ[(ny - 1) * W + nx + 1] == 80 && nx <= x) nx++;
+        }
+    }
+    if (!FcInB2(nx, ny)) return;
+    int bi = ny * W + nx;
+    int bsh = typ[bi];
+    if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0
+        || (bsh != 53 && bsh != 112 && bsh != 116 && bsh != 234))
+    {
+        FcKillTile(x, y);
+        return;
+    }
+    if (nx != x)
+    {
+        if ((act[(y + 1) * W + x] == 0 || typ[(y + 1) * W + x] != 80)
+            && (act[y * W + x - 1] == 0 || typ[y * W + x - 1] != 80)
+            && (act[y * W + x + 1] == 0 || typ[y * W + x + 1] != 80))
+        {
+            FcKillTile(x, y);
+            return;
+        }
+    }
+    else
+    {
+        int below = (y + 1) * W + x;
+        if (act[below] == 0
+            || (typ[below] != 80 && typ[below] != 53
+                && typ[below] != 112 && typ[below] != 116 && typ[below] != 234))
+        {
+            FcKillTile(x, y);
+            return;
+        }
+    }
+}
+void FcLilyPad(int x, int y)                       // CheckLilyPad（cs:59227）
+{
+    int i = y * W + x;
+    if (liq[i] > 0 && liqT[i] != 0) { FcKillTile(x, y); return; }   // 非水液体杀（oracle liqT 0=水）
+    int ny = y;
+    while (ny < H - 50 && (act[ny * W + x] == 0 || !FC_SOLID.Contains(typ[ny * W + x]) || FC_PLAT.Contains(typ[ny * W + x]))) ny++;
+    int g = FcInB2(x, ny) ? typ[ny * W + x] : -1;
+    int fy = -1;
+    if (g == 2 || g == 477) fy = 0;
+    else if (g == 109 || g == 116) fy = 18;
+    else if (g == 60) fy = 36;
+    if (fy >= 0)
+    {
+        frY[i] = (ushort)fy;
+        int up = (y - 1) * W + x;
+        if (FcInB2(x, y - 1) && liq[up] > 0 && act[up] == 0)
+            FcSetTile(x, y - 1, 518, frX[i], frY[i]);
+    }
+}
+void FcCatTail(int x, int y)                       // CheckCatTail（cs:58764，生成期分支）
+{
+    bool flag = false;
+    int num2 = y;
+    while (num2 < H - 50 && (act[num2 * W + x] == 0
+        || !FC_SOLID.Contains(typ[num2 * W + x]) || FC_PLAT.Contains(typ[num2 * W + x])))
+    {
+        if (act[num2 * W + x] != 0 && typ[num2 * W + x] != 519) flag = true;
+        if (act[num2 * W + x] == 0) break;
+        num2++;
+    }
+    int num = num2 - 1;
+    while (num > 50 && liq[num * W + x] > 0)
+    {
+        if ((act[num * W + x] != 0 && typ[num * W + x] != 519)
+            || (liq[num * W + x] > 0 && liqT[num * W + x] != 0)) flag = true;   // 非水液体
+        num--;
+    }
+    num++;
+    int num3 = num;
+    if (num2 - num3 > 40) flag = true;
+    int g = FcInB2(x, num2) ? typ[num2 * W + x] : -1;
+    int fy = -1;
+    if (g == 2 || g == 477) fy = 0;
+    else if (g == 53) fy = 18;
+    else if (g == 199 || g == 234 || g == 662) fy = 36;
+    else if (g == 23 || g == 112 || g == 661) fy = 54;
+    else if (g == 70) fy = 72;
+    else if (g == 90) fy = 90;
+    if (!FcInB2(x, num2) || act[num2 * W + x] == 0) flag = true;
+    if (fy < 0) flag = true;
+    if (FcInB2(x, num2 - 1) && liq[(num2 - 1) * W + x] < 127) flag = true;
+    int ki = num * W + x;
+    if (frX[ki] >= 180 && liq[ki] > 127) flag = true;
+    if (num2 > num + 4 && FcInB2(x, num + 4) && FcInB2(x, num + 3)
+        && liq[(num + 4) * W + x] == 0 && typ[(num + 3) * W + x] == 519) flag = true;
+    if (flag)
+    {
+        int from = num3;
+        if (num < num3) from = num;
+        from -= 4;
+        for (int yy = from; yy <= num2; yy++)
+        {
+            if (FcInB2(x, yy) && act[yy * W + x] != 0 && typ[yy * W + x] == 519)
+            {
+                FcKillTile(x, yy);
+                FcSquareTileFrame(x, yy);
+            }
+        }
+    }
+    else if (fy >= 0 && frY[num * W + x] != fy)
+    {
+        for (int yy = num; yy < num2; yy++)
+        {
+            if (FcInB2(x, yy) && act[yy * W + x] != 0 && typ[yy * W + x] == 519) frY[yy * W + x] = (ushort)fy;
+        }
+    }
+}
+void FcSeaweed(int x, int y)                       // CheckUnderwaterPlant 549（cs:58597）
+{
+    bool CanGrow()
+    {
+        if (!(x >= 50 && y >= 50 && x < W - 50 && y < H - 50)) return false;
+        for (int k = 0; k < 3; k++)
+        {
+            int wi = (y - k) * W + x;
+            if (liq[wi] == 0 || liqT[wi] != 0) return false;    // 须水（oracle 0=水）
+        }
+        if (!FcNActive(x, y + 1)) return false;
+        int g = typ[(y + 1) * W + x];
+        bool sand = g == 53 || g == 112 || g == 116 || g == 234;
+        if (!sand && g != 549) return false;
+        int wall = wal[y * W + x];
+        if (wall != 0 && !(wall >= 63 && wall <= 69) && wall != 80 && wall != 81) return false;
+        return true;
+    }
+    int i = y * W + x;
+    if (!CanGrow())
+    {
+        FcKillTile(x, y);
+        FcSquareTileFrame(x, y);
+        return;
+    }
+    bool above = FcAct(x, y - 1) && typ[(y - 1) * W + x] == 549;
+    bool below = FcAct(x, y + 1) && typ[(y + 1) * W + x] == 549;
+    int n2 = frX[i] / 18;
+    frY[i] = 0;
+    if (fcSparse) return;
+    if (above)
+    {
+        if (n2 < 1 || n2 > 7) frX[i] = (ushort)(FcRollRange(1, 7) * 18);
+    }
+    else if (below)
+    {
+        if (n2 < 7 || n2 > 12) frX[i] = (ushort)(FcRollRange(7, 12) * 18);
+    }
+    else if (n2 != 0) frX[i] = 0;
+}
+void FcBamboo(int x, int y)                        // CheckBamboo 571（cs:58466）
+{
+    if (!FcInB2(x, y + 1)) return;
+    int bi = (y + 1) * W + x;
+    int bsh = act[bi] != 0 ? typ[bi] : -1;
+    if (bsh != 60 && bsh != 571)
+    {
+        FcKillTile(x, y);
+        FcSquareTileFrame(x, y);
+        return;
+    }
+    int i = y * W + x;
+    bool above = FcAct(x, y - 1) && typ[(y - 1) * W + x] == 571;
+    bool below = bsh == 571;
+    int n2 = frX[i] / 18;
+    frY[i] = 0;
+    if (fcSparse) return;
+    if (above)
+    {
+        if (below) { if (n2 < 5 || n2 > 14) frX[i] = (ushort)(FcRollRange(5, 14) * 18); }
+        else if (n2 < 1 || n2 > 4) frX[i] = (ushort)(FcRollRange(1, 4) * 18);
+    }
+    else if (below)
+    {
+        if (n2 < 15 || n2 > 19) frX[i] = (ushort)(FcRollRange(15, 19) * 18);
+    }
+    else if (n2 != 0) frX[i] = 0;
+}
+// ---- pass 体 ----
+var fcBase = Environment.GetEnvironmentVariable("HHHH_FC_BASE");
+if (fcBase != null)
+{
+    // 金标槽基座覆写（typ/wal LE16；act/liq/lty/slope/half u8；frames 置 0 → sparse 语义）
+    var b16 = File.ReadAllBytes(fcBase + ".typ");
+    for (int q = 0; q < W * H; q++) { typ[q] = (ushort)(b16[q * 2] | (b16[q * 2 + 1] << 8)); frX[q] = 0; frY[q] = 0; }
+    var bact = File.ReadAllBytes(fcBase + ".act"); Buffer.BlockCopy(bact, 0, act, 0, W * H);
+    var bwal = File.ReadAllBytes(fcBase + ".wal");
+    for (int q = 0; q < W * H; q++) wal[q] = (ushort)(bwal[q * 2] | (bwal[q * 2 + 1] << 8));
+    var bliq = File.ReadAllBytes(fcBase + ".liq"); Buffer.BlockCopy(bliq, 0, liq, 0, W * H);
+    var blty = File.ReadAllBytes(fcBase + ".lty"); Buffer.BlockCopy(blty, 0, liqT, 0, W * H);
+    var bsl = File.ReadAllBytes(fcBase + ".slope"); Buffer.BlockCopy(bsl, 0, slope, 0, W * H);
+    var bh = File.ReadAllBytes(fcBase + ".half"); Buffer.BlockCopy(bh, 0, half, 0, W * H);
+    fcSparse = true;
+    Console.WriteLine($"fc-base loaded {fcBase} (sparse mode)");
+}
+Replay(); // ▶pass 头重播：FinalCleanup cs:22304（pass 105；ShimmerCleanUp 同 pass 尾段不重播）
+// ① tileSolid[484]=false（cs:22305）——FC 谓词表内联（FcTSolid），无 SOLID 翻转
+for (int fci = 0; fci < W; fci++)
+{
+    for (int fcj = 0; fcj < H; fcj++)
+    {
+        int t = fcj * W + fci;
+        int type = typ[t];
+        // ③ 悬空落体柱（cs:22312-22385）。OOB 读（j+1=H）JS=undefined→falsy/≠191 等价
+        bool fcBelowInB = fcj + 1 < H;
+        int fcBelowAct = fcBelowInB ? act[t + W] : 0;          // JS !undefined → 恒“空格”
+        int fcBelowWal = fcBelowInB ? wal[t + W] : 0;          // JS undefined != 191 → 恒真侧
+        if (act[t] != 0 && !FcSolidTileP(fci, fcj + 1) && FcIsSandFall(type))
+        {
+            if ((double)fcj < worldSurface + 10.0 && fcBelowAct == 0 && fcBelowWal != 191 && !FcOceanDepth(fci, fcj))
+            {
+                int num = 10;
+                for (int k = fcj + 1; k <= fcj + 10; k++)
+                {
+                    if (k < H && act[k * W + fci] != 0 && typ[k * W + fci] == 314) { num = 0; break; }
+                }
+                int num2 = fcj + 1;
+                while (act[num2 * W + fci] == 0 && num > 0 && num2 < H - 50)
+                {
+                    FcFlatten(fci, num2 - 1);
+                    FcSetTile(fci, num2, type);
+                    FcFlatten(fci, num2);
+                    num2++; num--;
+                }
+                if (num == 0 && act[num2 * W + fci] == 0)
+                {
+                    FcSetTile(fci, num2, FcSandFallBase(type));
+                }
+                else
+                {
+                    int below = num2 * W + fci;
+                    if (act[below] != 0 && FcTSolid(typ[below]) && !FC_PLAT.Contains(typ[below]))
+                    {
+                        FcFlatten(fci, num2);
+                    }
+                }
+            }
+            else if (fcj + 1 < H && FcTSolid(typ[t + W]) && !FC_PLAT.Contains(typ[t + W])
+                && ((slope[t + W] == 1 || slope[t + W] == 2) || half[t + W] == 1))
+            {
+                FcFlatten(fci, fcj + 1);
+            }
+            else
+            {
+                typ[t] = (ushort)FcSandFallBase(type);          // 深层悬空 → 硬化沙族
+            }
+        }
+        // ④ 墙 187/216 液体 → 满岩浆（cs:22387-22392）
+        if ((wal[t] == 187 || wal[t] == 216) && liq[t] > 0)
+        {
+            liq[t] = 255; liqT[t] = 1;
+        }
+        // ⑤ 137 复位 slope/halfBrick（cs:22394-22398，无 active 门）
+        if (type == 137) FcFlatten(fci, fcj);
+        // ⑥ 巨石重帧+补支撑（cs:22400-22458）
+        if (act[t] != 0 && FC_BOULDERS.Contains(type))
+        {
+            int x0 = fci - frX[t] / 18;
+            int y0 = fcj - frY[t] / 18;
+            bool hasAltar = false;
+            for (int l = 0; l < 2; l++)
+            {
+                if (FcInB2(x0 + l, y0 - 1) && act[(y0 - 1) * W + x0 + l] != 0 && typ[(y0 - 1) * W + x0 + l] == 26) { hasAltar = true; break; }
+                for (int m = 0; m < 2; m++) FcSetTile(x0 + l, y0 + m, type, l * 18, m * 18);
+            }
+            if (hasAltar)
+            {
+                int repl = type == 484 ? 397 : 0;               // 484 滚动仙人掌→397，其余→空
+                for (int n = 0; n < 2; n++)
+                    for (int o = 0; o < 2; o++) FcSetTile(x0 + n, y0 + o, repl, 0, 0);
+            }
+        }
+        // ⑦ 液体中棕榈杀（cs:22460-22463）
+        if (type == 323 && liq[t] > 0) FcKillTile(fci, fcj);
+        // ⑧ 地牢墙内液体规范化（cs:22465-22477）
+        if (FC_WALL_DUNGEON.Contains(wal[t]))
+        {
+            liqT[t] = 0;
+            if (type == 374) typ[t] = 373;
+            if (act[t] != 0 && type == 56)
+            {
+                FcKillTile(fci, fcj);
+                int tt = fcj * W + fci;
+                liqT[tt] = 0; liq[tt] = 255;
+            }
+        }
+        // ⑨ 314 矿轨上下清液（cs:22479-22491：上 15 格+下 1 格）
+        if (act[t] != 0 && type == 314)
+        {
+            for (int y2 = fcj; fcj - y2 < 15; y2--) if (y2 >= 0) liq[y2 * W + fci] = 0;
+            for (int y2 = fcj; y2 - fcj < 1; y2++) if (y2 < H) liq[y2 * W + fci] = 0;
+        }
+        // ⑩ 金币堆下方补 332（cs:22493-22498）
+        if (act[t] != 0 && type == 332 && fcj + 1 < H && act[t + W] == 0)
+        {
+            FcClearEverything(fci, fcj + 1);
+            FcSetTile(fci, fcj + 1, 332);
+        }
+        // ⑪ 地表散水清除（cs:22500-22510）。OOB 读（j+1=H）JS=undefined → <255 恒 false → 不清
+        if (fci > BEACH_DISTANCE && fci < W - BEACH_DISTANCE && (double)fcj < worldSurface
+            && liq[t] > 0 && liq[t] < 255
+            && liq[t - 1] < 255 && liq[t + 1] < 255 && (!fcBelowInB || liq[t + W] < 255)
+            && (act[t - 1] == 0 || !FC_CLOUDS.Contains(typ[t - 1]))
+            && (act[t + 1] == 0 || !FC_CLOUDS.Contains(typ[t + 1]))
+            && (!fcBelowInB || act[t + W] == 0 || !FC_CLOUDS.Contains(typ[t + W])))
+        {
+            liq[t] = 0;
+        }
+        // ⑫ 无墙画作继承邻墙（cs:22512-22543，序：左→右→上→下）
+        if (act[t] != 0 && FC_PAINTINGS.Contains(type) && wal[t] <= 0
+            && fci >= 2 && fcj >= 2 && fci < W - 2 && fcj < H - 2)
+        {
+            int inherit = 0;
+            if (inherit == 0 && wal[t - 1] > 0) inherit = wal[t - 1];
+            if (inherit == 0 && wal[t + 1] > 0) inherit = wal[t + 1];
+            if (inherit == 0 && wal[t - W] > 0) inherit = wal[t - W];
+            if (inherit == 0 && wal[t + W] > 0) inherit = wal[t + W];
+            if (inherit != 0) wal[t] = (ushort)inherit;
+        }
+        // 逐格 TileFrame(i,j)（cs:22544）——ZZZ 扫掷
+        FcTileFrame(fci, fcj);
+    }
+}
+// ⑭ Dirtiest Block（cs:22546-22587）：数量=GetWorldSize 档（4200→3/6400→6/8400→9）
+{
+    int sizeId = W <= 4200 ? 0 : W <= 6400 ? 1 : 2;
+    int target = sizeId == 1 ? 6 : sizeId == 2 ? 9 : 3;
+    int placed = 0;
+    int budget = 3000;
+    while (placed < target)
+    {
+        budget--;
+        if (budget <= 0) break;
+        int dx14 = (int)r.Next(50, W - 50);
+        int dy14 = (int)r.Next(50, H - 200);
+        if (!FcInB2(dx14, dy14)) continue;
+        int t14 = dy14 * W + dx14;
+        if (act[t14] != 0 && (typ[t14] == 0 || typ[t14] == 668))     // Dirt 集 {0,668}
+        {
+            placed++;
+            slope[t14] = 0; half[t14] = 0;                            // ClearTile（inActive 位生成期恒 0）
+            act[t14] = 1;
+            typ[t14] = 668;
+        }
+    }
+}
+// ── ShimmerCleanUp（cs:22639→34750，⑭ 之后同 pass 尾段；ZZZ 批补）──
+if (shimmerXOut >= 0 && shimmerYOut >= 0)
+{
+    int SX = shimmerXOut, SY = shimmerYOut;
+    // ShimmerRemoveWater（cs:34859）：上半球 r<150 清非微光液体 + 162 失活
+    for (int yy = SY - 150; yy <= SY + 75; yy++)
+        for (int xx = SX - 150; xx <= SX + 150; xx++)
+        {
+            if (!FcInB2(xx, yy)) continue;
+            double d = Math.Sqrt((xx - SX) * (xx - SX) + (yy - SY) * (yy - SY));
+            if (d < 150)
+            {
+                int i = yy * W + xx;
+                if (liqT[i] != 3) liq[i] = 0;                         // oracle 3=微光
+                if (act[i] != 0 && typ[i] == 162) act[i] = 0;
+            }
+        }
+    // r<120 环带（cs:34762-34790）：盒=X±120×Y±120（num5/num6 均 120；曾误 Y±90）
+    for (int yy = SY - 120; yy <= SY + 120; yy++)
+        for (int xx = SX - 120; xx <= SX + 120; xx++)
+        {
+            bool inB = FcInB2(xx, yy);
+            if (inB)
+            {
+                double d1 = Math.Sqrt((xx - SX) * (xx - SX) + (yy - SY) * (yy - SY));
+                if (d1 < 120)
+                {
+                    int i = yy * W + xx;
+                    int sh = act[i] != 0 ? typ[i] : -1;
+                    if (sh == 22 || sh == 204) typ[i] = 1;
+                    if (sh == 51 || sh == 56 || sh == 229 || sh == 230 || sh == 659) act[i] = 0;
+                    if (sh >= 0 && FC_CONV_MOSS.Contains(sh)) typ[i] = 1;
+                    if (sh == 184) act[i] = 0;
+                }
+            }
+            // r<90 num7 重算（cs:34791：每格 2×NextDouble——⑭ 后不回流）
+            double squash = yy <= SY ? 1.4 : 1.2;
+            double ax = Math.Abs(xx - SX) * (1.0 + r.NextDouble() * 0.02);
+            double ay = Math.Abs(yy - SY) * squash * (1.0 + r.NextDouble() * 0.02);
+            int d2 = (int)Math.Truncate(Math.Sqrt(ax * ax + ay * ay));
+            if (d2 < 90 && inB)
+            {
+                int i = yy * W + xx;
+                if (act[i] != 0 && typ[i] == 162) act[i] = 0;
+                wal[i] = 0;
+                // Convert(j,i,0,3) 结构性 no-op（微光 pass 塑形已写石/空气/无墙）——不移植
+            }
+        }
+    // 微光池补液（cs:34802-34820）：自中心逐行下探，活性格封边
+    int bx = SX, by = SY, b = 127;
+    int guard = 0;
+    while (FcInB2(bx, by) && !(liq[by * W + bx] > b && liqT[by * W + bx] == 3))
+    {
+        while (FcInB2(bx, by) && act[by * W + bx] == 0)
+        {
+            int i = by * W + bx;
+            liq[i] = (byte)b; liqT[i] = 3;
+            bx--;
+        }
+        for (bx = SX; FcInB2(bx, by) && act[by * W + bx] == 0; bx++)
+        {
+            int i = by * W + bx;
+            liq[i] = (byte)b; liqT[i] = 3;
+        }
+        bx = SX;
+        by++;
+        b = 255;
+        if (!FcInB2(bx, by) || act[by * W + bx] != 0 || ++guard > H) break;
+    }
+    // 全图微光淹没树击杀（cs:34833-34843）
+    for (int xx = 10; xx < W - 10; xx++)
+        for (int yy = 10; yy < H - 10; yy++)
+        {
+            int i = yy * W + xx;
+            if (liq[i] > 0 && liqT[i] == 3 && act[i] != 0 && typ[i] == 5)
+                FcKillTile(xx, yy);
+        }
+}
+// 终态九通道 dump（head-to-head 用）
+var fcDump = Environment.GetEnvironmentVariable("HHHH_FC_DUMP");
+if (fcDump != null)
+{
+    File.WriteAllBytes(fcDump + ".typ", ToBytes(typ));
+    File.WriteAllBytes(fcDump + ".act", act);
+    File.WriteAllBytes(fcDump + ".wal", ToBytes(wal));
+    File.WriteAllBytes(fcDump + ".liq", liq);
+    File.WriteAllBytes(fcDump + ".lty", liqT);
+    File.WriteAllBytes(fcDump + ".slope", slope);
+    File.WriteAllBytes(fcDump + ".half", half);
+    File.WriteAllBytes(fcDump + ".frx", ToBytes(frX));
+    File.WriteAllBytes(fcDump + ".fry", ToBytes(frY));
+    int mossN = 0, dirtiest = 0;
+    for (int q = 0; q < W * H; q++)
+    {
+        if (act[q] != 0 && typ[q] == 184) mossN++;
+        if (act[q] != 0 && typ[q] == 668) dirtiest++;
+    }
+    Console.WriteLine($"FC anchors: moss184={mossN} dirtiest668={dirtiest}");
+    Console.WriteLine($"fc-dump -> {fcDump}");
+}
 // ==QQ-APPEND-TAIL==
 
 double TuneOceanDepth(int count, double depth, bool florida)

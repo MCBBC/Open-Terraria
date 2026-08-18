@@ -368,7 +368,7 @@ import { runLakesPass } from './vanilla/LakesPass';
 import { runPotsPass } from './vanilla/PotsPass';
 import { runGravitatingSandPass } from './vanilla/GravitatingSandPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
-import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
+import { runFloatingIslandsPass, runLifeCrystalsPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
 import {
   runSurfaceOreAndStonePass, runFallenLogsPass, runDyePlantsPass, runVinesPass,
   runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
@@ -991,12 +991,14 @@ function pilesPass({ store, rng }: GenCtx) {
   runPilesPass(store, rng, gs);
 }
 
-// 生物群系感知地表装饰(替代旧 surfacePass 的种树部分)
+// 原版 pass 76 Traps（cs:18769）。★EEEE 批 2026-08-18：槽 76 在原版只有 Traps——
+// 旧"地表装饰近似段"（runSurfaceDecorPass：JS 自造流写 TALLGRASS/FLOWER/VINE，
+// 无原版对应物）整段退役（WWW 批定罪 #76 自因 1048 格；与 #78 Spawn_Point 自造
+// 清理盒同类自创写入）。杂草/花/藤/蘑菇由后续槽 86-91（GrassPlants/Vines/Flowers/
+// Mushrooms，均 1:1）承担，雪原不长草测试不受影响。
 function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  rng.reseed(gs.seed); // ▶地表装饰近似段（JS 简化实现，槽头新流起）
-  runSurfaceDecorPass(store, rng, gs);
   rng.reseed(gs.seed); // ▶Traps cs:18769
   runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
 }

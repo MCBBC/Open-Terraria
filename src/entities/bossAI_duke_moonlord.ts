@@ -273,7 +273,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       } else if (e.spawnAlpha < 255) e.spawnAlpha = 255;
       if (e.ai2 === DUKE.nadoT - 30) { // :49392 出生尘环
         game.spawnParticles(e.cx, e.cy, '#8FD8FF', 18, 2.4, { life: 40 });
-        game.playSfx('roar', 0.8);
+        game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49404 PlaySound(29,…,20) 满响(曾借 roar 0.8)
       }
       e.ai2 += 1;
       if (e.ai2 >= DUKE.spawnT) { e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; }
@@ -308,7 +308,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       const d = Math.hypot(dx, dy) || 1;
       e.vx = accelTo(e.vx, (dx / d) * DUKE.bubbleSpd, DUKE.bubbleAcc);
       e.vy = accelTo(e.vy, (dy / d) * DUKE.bubbleSpd, DUKE.bubbleAcc);
-      if (e.ai2 === 0) game.playSfx('roar', 0.5);
+      if (e.ai2 === 0) game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49608 PlaySound(29,…,20) 满响(曾借 roar 0.5)
       if (e.ai2 % DUKE.bubbleEvery === 0) { // :49610-49618 每 4t 吐一颗爆裂泡泡(NPC 371)
         const ddx = player.cx - e.cx, ddy = player.cy - e.cy;
         const dd = Math.hypot(ddx, ddy) || 1;
@@ -329,7 +329,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       invuln = true;
       e.vx *= 0.98;
       e.vy = lerp(e.vy, 0, 0.02);
-      if (e.ai2 === DUKE.p1T - 60) game.playSfx('roar', 0.9);
+      if (e.ai2 === DUKE.p1T - 60) game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49668 PlaySound(29,…,20)(曾借 roar 0.9)
       e.ai2 += 1;
       if (e.ai2 >= DUKE.p1T) { e.ai0 = 5; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
       break;
@@ -364,7 +364,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       break;
     }
     case 7: { // 旋转泡泡冲刺(:49835-49864)
-      if (e.ai2 === 0) game.playSfx('roar', 0.6);
+      if (e.ai2 === 0) game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49839 PlaySound(29,…,20)(曾借 roar 0.6)
       if (e.ai2 % DUKE.spinEvery === 0) { // 每 4t 沿垂直方向甩一颗泡泡
         const vlen = Math.hypot(e.vx, e.vy) || 1;
         const bub = spawnPart(game, e, 371);
@@ -397,7 +397,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       else e.spawnAlpha = Math.min(255, e.spawnAlpha + 4);
       e.vx *= 0.98;
       e.vy = lerp(e.vy, 0, 0.02);
-      if (e.ai2 === DUKE.p2T - 60) game.playSfx('roar', 0.9);
+      if (e.ai2 === DUKE.p2T - 60) game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :49920 PlaySound(29,…,20)(曾借 roar 0.9)
       e.ai2 += 1;
       if (e.ai2 >= DUKE.p2T) { e.ai0 = 10; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
       break;
@@ -434,7 +434,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
         const s = Math.sign(player.cx - e.cx) || st.dir;
         st.dir = s; st.spr = -s;
         game.spawnParticles(e.cx, e.cy, '#8FD8FF', 14, 2.4, { life: 30 });
-        game.playSfx('roar', 0.6);
+        game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :50064 PlaySound(29,…,20)(曾借 roar 0.6)
       }
       e.ai2 += 1;
       if (e.ai2 >= DUKE.teleT) {
@@ -444,7 +444,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       break;
     }
     case 13: { // expert 狂暴段旋转冲刺(:50108-50125;不吐泡泡)
-      if (e.ai2 === 0) game.playSfx('roar', 0.6);
+      if (e.ai2 === 0) game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :50112 PlaySound(29,…,20)(曾借 roar 0.6)
       {
         const r = -DUKE_SPIN_RATE * st.dir;
         const cos = Math.cos(r), sin = Math.sin(r);
@@ -473,11 +473,14 @@ function dukeSharknado(e: Enemy, game: GameHooks, player: Player, st: DukeX, big
   e.vx *= 0.98;
   e.vy = lerp(e.vy, 0, 0.02);
   if (e.ai2 === DUKE.nadoT - 30) {
-    game.playSfx('roar', 0.7);
     if (big) {
+      // :49871 大龙卷 = PlaySound(29,…,20) Zombie_20 满响(曾借 roar 0.7)
+      game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);
       // 状态 8:克苏龙卷弹(:49873-49876;ai2=flag6 狂暴→追踪速度 +12)
       addProj(game, new DukeSharknadoBolt(e.cx, e.cy, 0, 0, true, dukeEnraged(game, player), e));
     } else {
+      // :49644 小龙卷 = PlaySound(29,…,9) Zombie_9 满响
+      game.playSfxWav?.('Zombie_9', 1, e.cx, e.cy);
       // 状态 3:左右两发斜落(:49646-49651;vector8 = rotation·(dir,0)·(w+20)/2 偏移)
       const ox = Math.cos(e.spin) * st.dir * (e.w + 20) / 2;
       addProj(game, new DukeSharknadoBolt(e.cx + ox, e.cy, st.dir * 2, 8, false, false, e));
@@ -1191,7 +1194,7 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
         hd.y = e.cy - 400 - hd.h / 2;
         hd.ai0 = 0; hd.ai1 = 0; hd.ai2 = 0; hd.ai3 = e.id; hd.bInit = true;
       }
-      game.playSfx('roar', 1);
+      game.playSfxWav?.('Zombie_92', 1, e.cx, e.cy);   // :36816 PlaySound(29,…,92)——case29 style92 ×0.5 自动档(曾借 roar 1.0)
     }
   } else if (e.ai0 === 0 || e.ai0 === 1) {
     // 三部件(锚定本核心)
@@ -1417,7 +1420,7 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
     const dx = player.cx + pvx * 20 - e.cx, dy = player.cy + pvy * 20 - e.cy; // :37455 预判 20t
     x.l0 = angleLerp(x.l0, Math.atan2(dy, dx), 0.5);
     x.l1 = Math.min(1, x.l1 + 0.05);
-    if (inSlot === dur - 35) game.playSfx('roar', 0.5); // :37462-37465
+    if (inSlot === dur - 35) game.playSfxWav?.('NPC_Hit_6', 1, e.cx, e.cy);   // :37464 PlaySound(4,…,6)=NPCHit style6(曾借 roar 0.5)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
       // :37466-37471 从眼球位置射 462(30 伤,8 速)
       const exx = Math.cos(x.l0) * 30 * x.l1, eyy = Math.sin(x.l0) * 66 * x.l1;
@@ -1565,7 +1568,7 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
       // 束体以 ±2π/540 每 t 扫射 180t(束体自转见 MLDeathray)
       if (inSlot === 180) {
         e.ai2 = mlDeathray(game, e, 'head', player, 75 * 2); // :37913 扫射编码角初值
-        game.playSfx('roar', 0.8);
+        // 原版 NPC 侧死光发射零吼(:37700-37970 无 PlaySound)——曾借 roar 0.8,2026-08-18 对账删
       }
       // :37917-37947 头部瞳角与束体同角速度扫射(ai2 存编码角,逐 t 解码步进)
       if (inSlot >= 180) {
@@ -1611,7 +1614,7 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
     const dx = player.cx + pvx * 20 - e.cx, dy = player.cy + pvy * 20 - e.cy;
     x.l0 = angleLerp(x.l0, Math.atan2(dy, dx), 0.5);
     x.l1 = Math.min(1, x.l1 + 0.05);
-    if (inSlot === dur - 35) game.playSfx('roar', 0.5);
+    if (inSlot === dur - 35) game.playSfxWav?.('NPC_Hit_6', 1, e.cx, e.cy);   // :38007 PlaySound(4,…,6)(曾借 roar 0.5)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
       // 眼球椭圆 (27,59)(:37727 vector200),8 速 30 伤
       const exx = Math.cos(x.l0) * 27 * x.l1, eyy = Math.sin(x.l0) * 59 * x.l1;

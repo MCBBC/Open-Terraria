@@ -335,7 +335,7 @@ export class Enemy extends Entity {
     //  回退全向）;2026-08-18 修 tsc: opts 恒不认 vx）
     if (this.vanillaId === 117 && this.ai1 === 0 && !this._wormSpawnFx) {
       this._wormSpawnFx = true;
-      game.playSfxFiles(['NPC_Killed_13'], 1, this.cx, this.cy);
+      game.playSfxFiles?.(['NPC_Killed_13'], 1, this.cx, this.cy);
       const dir = this.vx < 0 ? Math.PI : 0;   // 朝速度反方向喷
       if (game.spawnBurst) {
         game.spawnBurst(this.cx, this.cy, '#B0A080', 20, 3, dir, Math.PI, { life: 30 });
@@ -346,7 +346,7 @@ export class Enemy extends Entity {
     // 幻影龙 454 出生音（:51372-51376 localAI[3]==0 首帧）：Item119
     if (this.vanillaId === 454 && !this._wormSpawnFx) {
       this._wormSpawnFx = true;
-      game.playSfxFiles(['Item_119'], 1, this.cx, this.cy);
+      game.playSfxFiles?.(['Item_119'], 1, this.cx, this.cy);
     }
     // ---- 402 星尘织带蠕虫 ai[2] 生命计时（NPC.cs:51402-51461，1:1）----
     // ai[2] 每 tick +1；285→570 速度 ×1→×0.5（Remap 线性减速）；恰 570 时
@@ -3185,7 +3185,7 @@ export class Enemy extends Entity {
       this.ai0 += 1;
       if (this.ai0 >= 200 && player.cy < this.cy && this.canSeePlayer(st, player)) {
         this.ai0 = 0;
-        game.playSfxFiles(['Item_5'], 1, this.cx, this.cy);   // :24503 开火音（bowShoot 同轨）
+        game.playSfxFiles?.(['Item_5'], 1, this.cx, this.cy);   // :24503 开火音（bowShoot 同轨）
         this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10, 31);
       }
     }
@@ -3858,7 +3858,7 @@ export class Enemy extends Entity {
     const st = game.world.store;
     const isHornet = vid === 42 || vid === 176 || (vid >= 231 && vid <= 235);
     if (player && !player.dead && (isHornet || vid === 94)) {
-      if (this.ai1 === 101) { this.ai1 = 0; game.playSfxFiles(['Item_17'], 1, this.cx, this.cy); } // :51147 发射音
+      if (this.ai1 === 101) { this.ai1 = 0; game.playSfxFiles?.(['Item_17'], 1, this.cx, this.cy); } // :51147 发射音
       if (isHornet) {
         this.ai1 += (Math.random() * 15 + 5) * 0.1;
         if (vid === 176) this.ai1 += (Math.random() * 15 + 5) * 0.1;
@@ -4112,7 +4112,7 @@ export class Enemy extends Entity {
       } else if (this.ai3 === 1) {
         if (this.ai2 > 30) { this.ai2 = 0; this.ai3 = 0; }
         if (this.ai2 === 17) {
-          game.playSfxFiles(['Item_8'], 1, this.cx, this.cy);
+          game.playSfxFiles?.(['Item_8'], 1, this.cx, this.cy);
           // NewNPC 锚 = 底边对齐 center4（16px 球 → 中心再 -8）
           const ball = Enemy.fromVanilla(33, mcx, mcy - 8);
           if (ball) addEnemy(game, ball);
@@ -4645,7 +4645,7 @@ export class Enemy extends Entity {
     // 幽灵 316 消散（cs:24750-24758）：ai[3]==1 首帧 → NPCDeath55
     if (this.vanillaId === 316 && this.ai3 === 1 && !(this as unknown as { _g316snd?: boolean })._g316snd) {
       (this as unknown as { _g316snd?: boolean })._g316snd = true;
-      game.playSfxFiles(['NPC_Killed_55'], 1, this.cx, this.cy);
+      game.playSfxFiles?.(['NPC_Killed_55'], 1, this.cx, this.cy);
     }
     if (!player) { this.vx *= 0.95; this.vy *= 0.95; return; }
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
@@ -4717,7 +4717,7 @@ export class Enemy extends Entity {
     const x = lunarLocalAI(this);
     if (x[0] === 0) {
       x[0] = 1;
-      game.playSfxFiles(['NPC_Hit_6'], 1, this.cx, this.cy);
+      game.playSfxFiles?.(['NPC_Hit_6'], 1, this.cx, this.cy);
     }
     if (!player) {
       this.vx *= 0.9;
@@ -5534,7 +5534,7 @@ export class Enemy extends Entity {
           const col = k % 2 === 0 ? c1 : c2;
           game.spawnParticles(this.cx, this.cy, col, 1, 2.2, { life: 32, grav: 0, size: 2 });
         }
-        game.playSfxFiles(['Item_4'], 1, this.cx, this.cy);
+        game.playSfxFiles?.(['Item_4'], 1, this.cx, this.cy);
         this.dead = true; return;
       }
     } else if (this.ai2 === 6) {
@@ -5622,7 +5622,7 @@ export class Enemy extends Entity {
     const pop = () => {
       if (slave) { slave.ai0 = 0; slave.y -= 10; } // HitEffect :82590 解冻落地
       this.dead = true;
-      game.playSfxFiles(this.def.killedSound, 1, this.cx, this.cy);
+      game.playSfxFiles?.(this.def.killedSound, 1, this.cx, this.cy);
     };
     if (slave) {
       // 湿/入墙 → 爆（cs:43089-43102）
@@ -6418,7 +6418,7 @@ export class Enemy extends Entity {
   };
   private casterTeleportBurst(game: GameHooks) {
     const color = Enemy.CASTER_TP_DUST[this.vanillaId ?? -1] ?? '#FFA040'; // 默认 dust 6 火把焰
-    game.playSfxFiles(['Item_8'], 1, this.cx, this.cy);   // :20818/:20901 双端各一次
+    game.playSfxFiles?.(['Item_8'], 1, this.cx, this.cy);   // :20818/:20901 双端各一次
     game.spawnParticles(this.cx, this.cy, color, 50, 3, { life: 30 });    // :20819-20885 ×50
   }
 
@@ -6656,7 +6656,7 @@ export class Enemy extends Entity {
         // （24/29/32/45/281-286/533/693/172）均有专属分支，此处仅防守性静默
       }
     if (this.vanillaId !== 172) {
-      game.playSfxFiles(['Item_8'], 1, this.cx, this.cy);   // :21196 发射音（172 例外）
+      game.playSfxFiles?.(['Item_8'], 1, this.cx, this.cy);   // :21196 发射音（172 例外）
     }
   }
 
@@ -6881,7 +6881,7 @@ export class Enemy extends Entity {
               s.vy = (dy / dist) * num18;
               (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(s, 'enemies');
               // SoundID 3 = NPCHit（:20140，原版在仆从落点播，非召唤音）
-              game.playSfxFiles(['NPC_Hit_1'], 1, this.cx, this.cy);
+              game.playSfxFiles?.(['NPC_Hit_1'], 1, this.cx, this.cy);
               game.spawnParticles(s.cx, s.cy, '#9A8FA0', 10, 2);
             }
           }
@@ -6979,7 +6979,7 @@ export class Enemy extends Entity {
             this.spinSpeed = 0;
           } else {
             // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 20 + Roar(15)
-            game.playSfxFiles(['NPC_Hit_1'], 1, this.cx, this.cy);
+            game.playSfxFiles?.(['NPC_Hit_1'], 1, this.cx, this.cy);
             game.playSfx('roar');
             game.spawnParticles(this.cx, this.cy, '#8A1A1A', 12, 3);   // gore 8/7/6 ×2 份
             game.spawnParticles(this.cx, this.cy, '#FF3030', 20, 2.5); // 尘 20
@@ -7263,7 +7263,7 @@ export class Enemy extends Entity {
       }
       // 每 60t 音效（:41118-41121 SoundID 4/22 双音——NPC_Killed_1 + Unlock，roar 近似销核）
       if (this.ai1 % 60 === 1) {
-        game.playSfxFiles(['NPC_Killed_1'], 1, this.cx, this.cy);
+        game.playSfxFiles?.(['NPC_Killed_1'], 1, this.cx, this.cy);
         game.playSfxFile?.('Unlock', 1, this.cx, this.cy);
       }
       this.x += this.vx;
@@ -7278,7 +7278,7 @@ export class Enemy extends Entity {
 
     // ---- 2. 受击闪光 ai3>0（:41130-41161；ai3 由扣盾置 1，>120 归零）----
     if (this.ai3 > 0) {
-      if (this.ai3 === 1) game.playSfxFiles(['NPC_Killed_3'], 1, this.cx, this.cy); // :41152-41155
+      if (this.ai3 === 1) game.playSfxFiles?.(['NPC_Killed_3'], 1, this.cx, this.cy); // :41152-41155
       this.ai3++;
       if (this.ai3 > 120) this.ai3 = 0;
     }
@@ -7817,7 +7817,7 @@ export class Enemy extends Entity {
         game.playSfx('roar', 1, this.cx, this.cy);
       }
       if (this.vanillaId !== 398) {
-        if (this.def.killedSound.length) game.playSfxFiles(this.def.killedSound, 1, this.cx, this.cy);
+        if (this.def.killedSound.length) game.playSfxFiles?.(this.def.killedSound, 1, this.cx, this.cy);
         else game.playSfx('killed', 1, this.cx, this.cy);
       }
       // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →

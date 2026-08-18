@@ -19,7 +19,7 @@ import { settleWorldLiquids } from '../src/world/liquid/settle';
 import { runWaterfallLipPass } from '../src/world/gen/vanilla/HalfBrickPass';
 import { runFragileIcePass } from '../src/world/gen/vanilla/WaterIcePasses';
 import { runCaveWallVarietyPass, runCaveWallsPass, runJungleMudWallsPass } from '../src/world/gen/vanilla/CaveWallsPass';
-import { runLifeCrystalsPass, runSurfaceDecorPass, runCactusPalmTreesAndCoralPass, runAlchemyHerbsPass } from '../src/world/gen/vanilla/StructuresPass';
+import { runLifeCrystalsPass, runCactusPalmTreesAndCoralPass, runAlchemyHerbsPass } from '../src/world/gen/vanilla/StructuresPass';
 import { runStatuesPass } from '../src/world/gen/vanilla/StatuesPass';
 import { rollHouseChestCounts, runCaveHousesPass } from '../src/world/gen/vanilla/CaveHousePass';
 import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from '../src/world/gen/vanilla/BuriedChestsPass';
@@ -265,7 +265,7 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
   P.set(31, {
     entry: 's30',
     steps: [
-      { base: 75, run: (st, gs, rng) => runSurfaceDecorPass(st, rng, gs) },   // JS 自造前置段（槽头新流）
+      // EEEE 批 2026-08-18：JS 自造 runSurfaceDecorPass 前置段已退役（WWW 定罪 1048 格）
       { dump: 76, base: 75, run: (st, gs, rng) => runTrapsPass(st, rng, gs) },
     ],
   });

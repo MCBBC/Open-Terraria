@@ -195,7 +195,7 @@ function squareFrameTree(st: TileStore, x: number, y: number): void {
 }
 
 /** KillTile + 尾部 SquareTileFrame（cs:63559 的生成期有效子集）——树坍塌入口 */
-function killTileTree(st: TileStore, x: number, y: number): void {
+export function killTileTree(st: TileStore, x: number, y: number): void {
   if (!activeAt(st, x, y)) return;
   st.setTileSilent(x, y, 0);
   squareFrameTree(st, x, y);
@@ -216,7 +216,7 @@ function checkTreeAt(st: TileStore, x: number, y: number, vanity: boolean): void
     return st.flags[i] ? SHEET[st.type[i]] : -1;          // inactive → -1（幽灵 type 不读）
   };
   const num2 = typeAt(x - 1, y), num3 = typeAt(x + 1, y), num = typeAt(x, y - 1);
-  let num4 = typeAt(x, y);
+  let num4 = typeAt(x, y + 1);                                          // cs:54613 下方格
   if (!vanity && TREE_GROUND_NORM.has(num4)) num4 = 2;    // cs:54620-54636 归一化（仅 CheckTree）
   const groundOk = vanity ? VANITY_GROUND.has(num4) : num4 === 2;
   let cfx = frameX0, cfy = frameY0;

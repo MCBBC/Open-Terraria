@@ -908,13 +908,11 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 565: // 造雾机 2×2 frameX ±36(:1358-1379)
       flipBlock(w, x, y, 2, 2, 'x', 36, 36);
       return true;
-    case 593: // 小火山 frameX ±18(:1434-1445;动画近似粒子)
+    case 593: // 小火山 frameX ±18(Wiring.cs:1697-1709;仅临时动画零声音——曾自加 roar,2026-08-18 对账删)
       flipCell(w, x, y, 18);
-      ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
-    case 594: // 大火山 2×2 frameX ±36(:1446-1470)
+    case 594: // 大火山 2×2 frameX ±36(Wiring.cs:1711-1741;同上零声音)
       flipBlock(w, x, y, 2, 2, 'x', 36, 36);
-      ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
   }
   return false;

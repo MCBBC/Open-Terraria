@@ -18044,7 +18044,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.entities.add(new TowerBolt(enemy.cx, enemy.cy, findTower, (t) => {
       const res = onTowerBoltHit(this.world, towerId);
       if (res.flash) t.ai3 = 1;  // 盾非 0 时塔 ai[3]=1（闪光 120t）
-      if (res.shieldZero) this.sfx.play('roar', 0.8, t.cx, t.cy);
+      // 塔盾归零原版零吼（aiStyle 92 段 :40871-42500 无 PlaySound；全树 case15
+      // 普查亦无塔调用）——曾自加 roar 0.8，2026-08-18 对账删
     }), 'projectiles');
   }
 
@@ -18451,8 +18452,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 单 wav 直播（环境声三表专用,失败静默——与 playSfxFiles 不同,不回退合成音） */
-  playSfxWav(file: string, vol?: number, x?: number, y?: number) {
-    this.sfx.playWavFile(file, vol ?? 1, x, y);
+  playSfxWav(file: string, vol?: number, x?: number, y?: number, pitch?: number) {
+    this.sfx.playWavFile(file, vol ?? 1, x, y, pitch);
   }
 
   /** 按原版文件名直播（无合成兜底——音色精确的场景如蜂后吼/仪式圈）：

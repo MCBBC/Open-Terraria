@@ -280,18 +280,17 @@ function killUnsupportedFurniture(st: TileStore, rng: RNG, cx: number, cy: numbe
     }
   }
   if (!dead) return;
-  // ★DDDD KillTile 尘粒耗掷（x86 三级探针实锤：PST(kill)→10×MD(逐 MD +1 掷)→
-  //   SquareTileFrame×9；house17-room1 ③ 清 (1859,541) → 邻帧 CheckChand 击杀
-  //   room2 吊灯 (1858..1860,542..544) 9 格×10 掷=90 掷 = #59 首分歧主根因）。
-  //   谓词 = KillTile_GetTileDustAmount(fail=false)=10（cs:66661 默认）×
-  //   KillTile_MakeTileDust 的 num≥0 → NewDust +1 掷；num=-1 族零掷
-  //   （桌/琴/书架 {14,87,88,469,101} + 门 {10,11}——cs:67417/67455/68432 反编译
-  //   -1 表；x86 k=4658 等 6 格桌击杀 0 掷组对拍互证。吊灯 34 反编译标 -1 但
-  //   x86 实测每 MD +1 掷——按实测）。
-  const KILL_NO_DUST_ROLL = new Set([10, 11, 14, 87, 88, 101, 469]);
+  // ★DDDD KillTile 尘粒耗掷（x86 三级探针 TF/MD/KillTile 织入实测）：
+  //   每击杀格 = KillTile_GetTileDustAmount(fail=false)=10 次 MakeTileDust（cs:66661
+  //   默认 10）→ KillTile 尾 SquareTileFrame。吊灯(34) 每 MD +1 掷（house17-room1
+  //   ③ 清 (1859,541)→邻帧 CheckChand 击杀 room2 吊灯 9 格×10 掷=90 掷 = #59 首分歧
+  //   主根因）；小堆(185)/骨堆(186)/桌族(14/87/88/469)/琴(87) 击杀 0 掷（house0
+  //   (752..753,878) 双格杀 20 MD 同 k 0 掷 + 多组 6 格杀 60 MD 0 掷实锤）。
+  //   ★反编译 MakeTileDust 的 num 表控制流不可信（34 标 -1 实测掷、185/186 标 ≥0
+  //   实测零掷）——全按 x86 实测：仅 34 耗掷。
   const anchorI = st.inBounds(obj.x0, obj.y0) ? st.idx(obj.x0, obj.y0) : -1;
   const killSheet = anchorI >= 0 ? (TILE_DEFS[st.type[anchorI]!]?.vanilla?.sheet ?? -1) : -1;
-  if (!KILL_NO_DUST_ROLL.has(killSheet)) {
+  if (killSheet === 34) {                       // 吊灯族：每击杀格 10 掷
     for (let c = 0; c < obj.w * obj.h * 10; c++) rng.int(0, 2);
   }
   for (let dx = 0; dx < obj.w; dx++) {
@@ -861,10 +860,10 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
       if (!st.inBounds(sx, sy)) continue;
       // 平台帧 = PlaceTile(19, PlatformStyle)(HouseBuilder.cs:518)——case 19 走
       // frameY = 18*style(WorldGen.cs:60245-60249),非 frameX;曾恒写 (0,0)(C6)。
-      // ★DDDD:Actions.PlaceTile→WorldGen.PlaceTile(forced:false) 首门 =
-      //   Collision.EmptyTile（格非 active）——active 格整笔拒写（但链上 SetSlope
-      //   仍施加，HouseBuilder.cs:515-517 Actions 各自独立执行）
-      if (!st.flags[st.idx(sx, sy)]) st.setTileSilent(sx, sy, PLATFORM, 0, def.platformStyle * 18);
+      // ★DDDD 勘误:曾按 PlaceTile 首门(EmptyTile)推「active 格拒写」——x86 对拍
+      //   证伪:jungle house3 ① ③ 的 OnlyTiles(158) 通道数+6=vanilla 顶/底竖直
+      //   出口平台照写壳行(该语境 tileSolid[19] 表值对门不可见/门恒过),恢复恒写。
+      st.setTileSilent(sx, sy, PLATFORM, 0, def.platformStyle * 18);
       st.slope[st.idx(sx, sy)] = dir === 1 ? 1 : 2;
     }
     // 顶步上方 4×1 平台(HouseBuilder.cs:519)：Gen(Chain(Clear(), PlaceWall(WallType),
@@ -982,12 +981,10 @@ function placePlatforms(st: TileStore, rooms: Rect[], def: ThemeDef): void {
   const top = rooms[0], bot = rooms[rooms.length - 1];
   // 顶层顶壁(isUp:候选自壁上 5 格起);帧同楼梯(C6):HouseBuilder.cs:574
   //   PlaceTile(19, PlatformStyle) → frameY = 18*style。
-  // ★DDDD:Actions.PlaceTile→WorldGen.PlaceTile(forced:false) 首门 = EmptyTile
-  //   （格非 active）——竖直出口的目标行 = 房体外壳行（SetTileKeepWall 恒写满），
-  //   故 vanilla PlacePlatforms 在本语境【恒 no-op】（曾无条件写 3 格平台 =
-  //   SSS 批门/平台异位与 ① isEmpty 扰动源）；inactive 格才写（兜底镜像）。
+  // ★DDDD 勘误:曾按 PlaceTile 首门推「壳行 active → no-op」——x86 jungle house3
+  //   ① 掷数对拍证伪(vanilla 照写,JS 撤写后 ① 少 +6 掷流漂),恢复恒写。
   const tryPlatform = (x: number, y: number) => {
-    if (st.inBounds(x, y) && !st.flags[st.idx(x, y)]) {
+    if (st.inBounds(x, y)) {
       st.setTileSilent(x, y, PLATFORM, 0, def.platformStyle * 18);
     }
   };
