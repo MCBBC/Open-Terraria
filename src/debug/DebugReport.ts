@@ -156,22 +156,31 @@ function canvasShot(c: { toDataURL?: (t: string) => string } | null | undefined)
 
 /** 小地图截图：从全图 minimap canvas 裁玩家周围 (2R)² tile 局部，避免整图 PNG 撑爆体积 */
 function minimapShot(
-  mini: { canvas?: { width: number; height: number } & { toDataURL?: (t: string) => string } } | null | undefined,
-  ctx2d: CanvasRenderingContext2D | null,
+  mini: { pix?: Uint8ClampedArray | null; w?: number; h?: number } | null | undefined,
+  _ctx2d: CanvasRenderingContext2D | null,
   ptx: number, pty: number,
 ): { url: string | null; omitted: boolean } {
-  if (!mini?.canvas || !ctx2d || typeof document === 'undefined' || typeof document.createElement !== 'function') {
+  if (!mini?.pix || !mini.w || typeof document === 'undefined' || typeof document.createElement !== 'function') {
     return { url: null, omitted: false };
   }
-  const sx = Math.max(0, Math.min(ptx - MINIMAP_CROP_R, mini.canvas.width - 2 * MINIMAP_CROP_R));
-  const sy = Math.max(0, Math.min(pty - MINIMAP_CROP_R, mini.canvas.height - 2 * MINIMAP_CROP_R));
+  const sx = Math.max(0, Math.min(ptx - MINIMAP_CROP_R, mini.w - 2 * MINIMAP_CROP_R));
+  const sy = Math.max(0, Math.min(pty - MINIMAP_CROP_R, mini.h! - 2 * MINIMAP_CROP_R));
   try {
     const c = document.createElement('canvas');
     c.width = 2 * MINIMAP_CROP_R;
     c.height = 2 * MINIMAP_CROP_R;
     const cx = c.getContext('2d');
     if (!cx) return { url: null, omitted: true };
-    cx.drawImage(mini.canvas as unknown as CanvasImageSource, sx, sy, 2 * MINIMAP_CROP_R, 2 * MINIMAP_CROP_R, 0, 0, 2 * MINIMAP_CROP_R, 2 * MINIMAP_CROP_R);
+    // CPU pix → 裁窗 ImageData(小地图已无画布后备)
+    const R = MINIMAP_CROP_R;
+    const region = new ImageData(2 * R, 2 * R);
+    const src = new Uint32Array(mini.pix.buffer);
+    const dst = new Uint32Array(region.data.buffer);
+    for (let y = 0; y < 2 * R; y++) {
+      const s0 = (sy + y) * mini.w + sx;
+      dst.set(src.subarray(s0, s0 + 2 * R), y * 2 * R);
+    }
+    cx.putImageData(region, 0, 0);
     return canvasShot(c);
   } catch {
     return { url: null, omitted: true };

@@ -1,7 +1,7 @@
 // NPC 环境声三表回归（IdleSounds/闲话/Critter + AI 事件音批,2026-08-18）：
 //   数据表 data/vanillaNpcAmbience.ts 全量对账 + 代表性触发验证
 import { describe, it, expect } from 'vitest';
-import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS } from '../src/data/vanillaNpcAmbience';
+import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS, PET_SLIME_HIT_VOICES, petSlimeHitVoice } from '../src/data/vanillaNpcAmbience';
 import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import type { GameHooks } from '../src/entities/types';
@@ -71,6 +71,27 @@ describe('环境声三表数据对账', () => {
     }
     expect(missing.join(',')).toBe('');
   });
+  it('宠物史莱姆受击语音表（StrikeNPC :82255-82302）：13 id + 鸡稀有掷骰', () => {
+    // 13 条（5484 铃铛素材缺跳过）；音量档 = SoundID WithVolume（鸡 0.8 其余 0.5）
+    expect(Object.keys(PET_SLIME_HIT_VOICES).length).toBe(13);
+    expect(PET_SLIME_HIT_VOICES[5507]).toEqual({ file: 'player_hit_balloon', vol: 0.5 });
+    expect(PET_SLIME_HIT_VOICES[5485]).toEqual({ file: 'player_hit_chicken', vol: 0.8 });
+    expect(PET_SLIME_HIT_VOICES[5509]).toEqual({ file: 'player_hit_vampire', vol: 0.5 });
+    expect(petSlimeHitVoice(1345)).toBeNull();          // 派对帽 ai[1] → 默认 HitSound
+    expect(petSlimeHitVoice(5484)).toBeNull();          // 铃铛素材缺（Player_Hit_35 不在库）
+    // 鸡稀有变体：多次掷骰两种结果都合法（1/5 rare 0.5 档）
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i++) seen.add(petSlimeHitVoice(5485)!.file);
+    expect(seen.has('player_hit_chicken')).toBe(true);
+    expect([...seen].every((f) => f === 'player_hit_chicken' || f === 'player_hit_chicken_rare')).toBe(true);
+    // 全表 wav 在库（player_hit_bell 不在表——素材提取无 Player_Hit_35）
+    const missing: string[] = [];
+    for (const v of Object.values(PET_SLIME_HIT_VOICES)) {
+      try { readFileSync(`${ROOT}/public/sounds/${v.file}.wav`); } catch { missing.push(v.file); }
+    }
+    try { readFileSync(`${ROOT}/public/sounds/player_hit_chicken_rare.wav`); } catch { missing.push('player_hit_chicken_rare'); }
+    expect(missing.join(',')).toBe('');
+  });
 });
 
 describe('蠕虫出生音触发', () => {
@@ -89,5 +110,27 @@ describe('蠕虫出生音触发', () => {
     const e = Enemy.fromVanilla(454, 25 * 16, 25 * 16)!;
     e.fixedUpdate(1 / 60, g);
     expect(sounds).toContain('Item_119');
+  });
+});
+
+describe('音效遗留缺口批（2026-08-18 审计收尾）', () => {
+  it('TransformVisuals 158⇄159（NPC.cs:81742-81749）：吸血鬼离远化蝙蝠 → Item_8', () => {
+    const w = new World(50, 50, 7, 't');
+    const sounds: string[] = [];
+    const g = makeGame(w, sounds);   // 玩家 (30*16+16,30*16)
+    const e = Enemy.fromVanilla(159, 4 * 16, 4 * 16)!;   // 距玩家 >300 → Transform(158)
+    e.fixedUpdate(1 / 60, g);
+    expect(e.vanillaId).toBe(158);
+    expect(sounds).toContain('Item_8');
+  });
+  it('378 咬齿炸弹自爆链（NPC.cs:30044-30107）：玩家 <64 触发 → ai2==9 播 Item_14,倒计时尽自灭', () => {
+    const w = new World(50, 50, 7, 't');
+    const sounds: string[] = [];
+    const g = makeGame(w, sounds);
+    const e = Enemy.fromVanilla(378, 30 * 16, 30 * 16 - 40)!;   // 贴玩家（<64px）
+    for (let i = 0; i < 20 && !e.dead; i++) e.fixedUpdate(1 / 60, g);
+    expect(e.dead).toBe(true);          // ai[2]==1 消散（:30087-30090,不走掉落）
+    expect(sounds).toContain('Item_14');  // :30082 自爆音（ai2==9 首 tick）
+    expect(e.dontTakeDamage).toBe(true);  // 引爆态免疫（:30054）
   });
 });

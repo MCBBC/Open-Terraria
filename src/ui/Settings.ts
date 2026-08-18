@@ -294,6 +294,16 @@ export class SettingsPanel {
             : d.frameCap === 120 ? '120 FPS' : '60 FPS',
           () => void options.set('frameCap', d.frameCap === 60 ? 120 : d.frameCap === 120 ? 0 : 60),
         ),
+        // 渲染模式三档(2026-08-18):GPU 加速(默认)/CPU 软渲染(零 GPU 预算,
+        // 多开稳定)/自动(GPU 优先,崩溃自动切 CPU,稳定回切)
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.RenderMode'),
+          () => d.renderMode,
+          () => d.renderMode === 'gpu' ? Lang.text('Mods.SandboxWorld.Settings.RenderModeGpu')
+            : d.renderMode === 'cpu' ? Lang.text('Mods.SandboxWorld.Settings.RenderModeCpu')
+            : Lang.text('Mods.SandboxWorld.Settings.RenderModeAuto'),
+          () => void options.set('renderMode', d.renderMode === 'gpu' ? 'cpu' : d.renderMode === 'cpu' ? 'auto' : 'gpu'),
+        ),
         // 跳帧三态(原版 FrameSkipMode:Off/On/Subtle,默认温和):渲染超预算只跑
         // 逻辑不画,保逻辑恒 60Hz——弱机卡顿时"画面慢但游戏不慢"
         this.modeRow(

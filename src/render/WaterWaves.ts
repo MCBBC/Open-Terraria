@@ -81,7 +81,8 @@
 // 【Canvas2D 取舍（非静默近似，逐条登记）】
 // · 原版 Filter 是全屏 pass：位移采样的是【合成后屏幕】，水线两侧内容一起扭。
 //   Canvas2D 无屏幕纹理——本移植把位移施加在【液体绘制侧】：表层格水线随 dy
-//   升降 + 纹样横移 dx；水线处的背景/前景内容不扭。
+//   升降；水线处的背景/前景内容不扭。
+// · 瀑布（WaterfallRenderer，另一套系统——"两套瀑布系统勿混淆"案）未接波动位移。
 // · 水体内部 20% 权重纹样位移在环境波量级下 ≤0.3px，视觉不可辨——不施加。
 // · 波光 tint 的 (r+g+b) 为屏幕实际亮度，此处以固定 0.75 亮度近似（亮处波光略
 //   强、暗处略弱，幅度差 <2%）。
@@ -249,6 +250,9 @@ export function setWaveTextures(
   if (ripple) _rippleData = ripple.data;
   _texReady = !!(noise && ripple);
 }
+
+/** 纹理是否已提取（探针/调试） */
+export function waveTexReady(): boolean { return _texReady; }
 
 /** 从 atlas 提取两张原版贴图像素（Images/Misc/noise 256×256、Images/Misc/Ripples
  *  64×128；各一次，离屏 canvas getImageData）。Renderer 每帧幂等调用。 */
@@ -456,6 +460,13 @@ class WaterWaveSystem {
         G[i] = q256(G[i] * inv);
       }
     }
+  }
+
+  /** 0 档停机（Renderer 早退路径调用；重置步进计数防陈旧读数 + 清缓冲/队列） */
+  disable(): void {
+    this._clear();
+    _rqCount = 0;
+    this._stepsLast = 0;
   }
 
   /** 调试快照（F5 / 探针；activeTexels 全格扫描，勿每帧调） */

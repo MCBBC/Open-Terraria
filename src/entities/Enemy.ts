@@ -413,14 +413,18 @@ export class Enemy extends Entity {
     }
     const maxSpd = 8, accel = 0.07;
     // 掘地/咆哮音效（AI_006 :52375-52395 通用段，与 eowAI 同源）：间隔 = 距离/40 钳
-    // 10..20；【SoundID 15 Roar】——骨蛇 39-41/食世者 95 等接近时的周期咆哮
-    // （用户报"地狱骨龙接近有音效"，2026-08-18）；排除表 621/87/117/454/412
+    // 10..20；PlaySound(15,x,y) 无 style → style 默认 1 = Roar_1(LegacySoundPlayer
+    // :366 签名 Style=1;boss 唤醒才是显式 style0=Roar_0)——骨蛇 39-41/食世者 95 等
+    // 接近时的周期咆哮（用户报"地狱骨龙接近有音效"，2026-08-18；同日修正:曾用
+    // 'roar' 键随机双轨 → 一半概率播成 boss 唤醒音,且 Roar_1 被 FILE_CASE_VOL 误
+    // 乘 0.25 几不可闻 = "地底全是 boss 咆哮"根因）；排除表 621/87/117/454/412；
+    // Roar_1 单实例互斥在 Sfx 层(case 15 播着跳过)
     if (this.vanillaId !== 621 && this.vanillaId !== 87 && this.vanillaId !== 117
       && this.vanillaId !== 454 && this.vanillaId !== 412) {
       if (this.digSndDelay <= 0) {
         const dd = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : 400;
         this.digSndDelay = Math.round(Math.min(20, Math.max(10, dd / 40)));
-        game.playSfx('roar', 1, this.cx, this.cy);
+        game.playSfxWav?.('Roar_1', 1, this.cx, this.cy);
       } else {
         this.digSndDelay--;
       }

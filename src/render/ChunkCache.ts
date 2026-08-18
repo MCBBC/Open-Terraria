@@ -77,7 +77,9 @@ export class ChunkCache {
   private animChunksByWall = new Map<number, Set<number>>();
   /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
    *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
-  static MAX_CHUNKS = 384;  // 起高(2026-08-14 复原 224:contextlost 自适应兜底已就位,压力真来自动减半 384→192→96;配合 npm run play 的 --force-gpu-mem-available-mb=16384,64GB 机器常驻集不再是瓶颈)
+  static MAX_CHUNKS = 384;
+  /** CPU 软渲染门(Renderer.setRenderMode 写入):烘焙画布走 willReadFrequently */
+  static CPU_RENDER = false;  // 起高(2026-08-14 复原 224:contextlost 自适应兜底已就位,压力真来自动减半 384→192→96;配合 npm run play 的 --force-gpu-mem-available-mb=16384,64GB 机器常驻集不再是瓶颈)
   /** 最近一次 flushDirty 实测耗时 ms（F5 调试报告：烘焙尖峰证据面） */
   lastFlushMs = 0;
   lastFlushCount = 0;
@@ -332,9 +334,13 @@ export class ChunkCache {
 
   private renderChunkInner(cx: number, cy: number): ChunkPair {
     // 双层画布：墙层 / tile 层分离 —— 水渲染在两层之间（墙之上、图块之下）
+    // CPU 软渲染门:willReadFrequently 让画布后备走 CPU 内存(零 GPU 预算;
+    // 多开/弱 GPU 场景 160 张 × 1MB = 160MB 从 GPU 池移出)
     const wall = document.createElement('canvas');
+    if (ChunkCache.CPU_RENDER) { wall.getContext('2d', { willReadFrequently: true }); }
     wall.width = CHUNK * TILE; wall.height = CHUNK * TILE;
     const tile = document.createElement('canvas');
+    if (ChunkCache.CPU_RENDER) { tile.getContext('2d', { willReadFrequently: true }); }
     tile.width = CHUNK * TILE; tile.height = CHUNK * TILE;
     let ctx = wall.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;

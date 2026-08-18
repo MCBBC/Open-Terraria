@@ -82,7 +82,11 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   pkilled: ['Player_Killed'],
   // case 14 默认变体组 Main.rand.Next(3)（LegacySoundPlayer.cs:816）；音量 ×0.4 见 FILE_CASE_VOL
   zombie: ['Zombie_0', 'Zombie_1', 'Zombie_2'],
-  roar: ['Roar_0', 'Roar_1'],
+  // roar = boss 吼(Roar_0)——原版 NPC.cs 16 处 PlaySound(15,x,y,0) 全显式 style0;
+  // 蠕虫掘地(:52393)/毁灭者(:50473)是 PlaySound(15,x,y) 无 style(style 默认 1)=Roar_1,
+  // 走 playSfxWav('Roar_1') 直文件,勿用本键(曾随机二选一→一半概率播成 boss 唤醒音,
+  // 2026-08-18 用户报"地底蠕虫音全变 boss 咆哮"修正)
+  roar: ['Roar_0'],
   eowDig: ['eow_dig'],   // EoW 掘地专属轨（单文件;AI_006 :52389）
   pickup: ['Grab'],
   dig: ['Dig_0', 'Dig_1', 'Dig_2'],
@@ -176,7 +180,11 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   // case 29 Zombie 怪物声（:1007-1049）：24-87 ×0.5、88-91 ×0.7、92 ×0.5、93-99 ×0.4、
   //   100/101 ×0.25、102/103 ×0.4、104 ×0.55
   for (let s = 24; s <= 87; s++) m[`Zombie_${s}`] = 0.5;
-  m.Roar_1 = 0.25;   // case15 style4(:829-833 沙鲨游弋 Roar_1 ×0.25)
+  // ★Roar_1 无文件级音量档:case15 style1(蠕虫掘地 :52393/:50473)num18=1 满响;
+  //   0.25 是 style4(沙鲨游弋 :42661)调用点专属,由调用方显式传(bossAI_dd2)——
+  //   曾按文件名统一乘 → 蠕虫掘地被压 1/4,2026-08-18 修正
+  m.Zombie_109 = 0.3;  // case45 Dolphin(:1063 ×0.3)——海豚跃出声
+  m.Zombie_7 = 0.4;    // case14 style542(:793-799 沙鲨出沙扑咬 = Zombie_7 ×0.4)
   for (let s = 88; s <= 91; s++) m[`Zombie_${s}`] = 0.7;
   m.Zombie_92 = 0.5;
   for (let s = 93; s <= 99; s++) m[`Zombie_${s}`] = 0.4;
@@ -258,6 +266,14 @@ export class Sfx {
    *  只盖一次性播放入口（play/playWavFile/startTrackedLoop——playWav/playFiles
    *  漏斗进 playWavFile 已被盖）；循环轨（天气/BGM/雨声）不经此门 */
   suppress = false;
+
+  /** 原版单实例"播着跳过"族(LegacySoundPlayer.cs case 15 :825-841:实例 State==Playing
+   *  时 return null 不重触发)——仅 Roar:多段蠕虫(毁灭者 80 段各自掷 soundDelay)靠
+   *  同槽互斥收敛为单声,否则每 10-20t 满响吼叫叠成音墙。NPC_Hit(case3)是 Stop-重播、
+   *  NPC_Killed(case4)/僵尸族(case14/26/29)每次都播,均不在此列 */
+  private static readonly SINGLE_INSTANCE = new Set(['Roar_0', 'Roar_1']);
+  /** 单实例槽:file → 正在播的 source(onended 清) */
+  private singlePlaying = new Map<string, AudioBufferSourceNode>();
 
   /** 按需取缓冲：未命中时后台 fetch+decode，同步返回已就位缓冲或 null */
   private ensureBuffer(file: string): AudioBuffer | null {
@@ -487,6 +503,8 @@ export class Sfx {
    *  传该参时跳过默认 ±0.08 抖动（音符音高是语义本体，不容扰动） */
   playWavFile(file: string, vol = 1, x?: number, y?: number, pitch?: number): boolean {
     if (this.suppress) return false;         // 载入期静音门（见字段注释）
+    // 单实例互斥（case 15 Roar 播着跳过——见 SINGLE_INSTANCE 注释）
+    if (Sfx.SINGLE_INSTANCE.has(file) && this.singlePlaying.has(file)) return false;
     const ctx = this.ensure();
     if (!ctx) return false;
     const v = this.atten(vol, x, y);
@@ -503,6 +521,13 @@ export class Sfx {
     g.gain.value = Math.min(1, vol * trackVolumeFor(file, this.ambient, this.master));
     src.connect(g).connect(ctx.destination);
     src.start();
+    // 单实例占槽（onended=自然播完/stop 均触发,清槽后可重播）
+    if (Sfx.SINGLE_INSTANCE.has(file)) {
+      this.singlePlaying.set(file, src);
+      src.onended = () => {
+        if (this.singlePlaying.get(file) === src) this.singlePlaying.delete(file);
+      };
+    }
     return true;
   }
 

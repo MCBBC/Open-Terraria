@@ -116,6 +116,7 @@ describe('像素方块地图缩略色（F2 导入）', () => {
       const { Minimap } = await import('../src/render/Renderer');
       const { World } = await import('../src/world/World');
       const w = new World(60, 60, 42, 'open');
+      w.groundLevel = 20; w.rockLevel = 40;   // 真实分层(退化 gl=0 档 fillBand/colorFor 有历史边角差)
       const mm = new Minimap(w);
       // 构造时 redrawAll 已清空 dirtyChunks；placeArt 走 setTile → onTileChanged → MarkDirty
       const g = grid2x2([
@@ -126,9 +127,14 @@ describe('像素方块地图缩略色（F2 导入）', () => {
       ]);
       expect(placeArt(w.store, g, { x: 10, y: 45 })).toBe(2);
       expect(mm.dirtyChunks.size).toBeGreaterThan(0); // 放置确实落进脏块队列
-      mm.flushDirty(); // 增量刷新（不重跑 redrawAll）
-      expect(fills.get('10,45')).toBe('#c86432');
-      expect(fills.get('10,46')).toBe('#0c2238');
+      mm.flushDirty(); // 增量刷新(2026-08-18 CPU 化:写入 pix 而非画布 fillRect)
+      // pix 打包(小端 ABGR)→ '#RRGGBB' 还原断言
+      const px = (x: number, y: number): string => {
+        const v = new Uint32Array(mm.pix!.buffer)[w.store.idx(x, y)] >>> 0;
+        return `#${((v & 255) << 16 | (v >>> 8 & 255) << 8 | (v >>> 16 & 255)).toString(16).padStart(6, '0')}`;
+      };
+      expect(px(10, 45)).toBe('#c86432');
+      expect(px(10, 46)).toBe('#0c2238');
       // colorFor 直查（与 redrawAll :498 分支同公式/同字节序）
       expect(mm.colorFor(10, 45)).toBe('#c86432');
       expect(mm.colorFor(10, 46)).toBe('#0c2238');

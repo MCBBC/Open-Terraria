@@ -538,8 +538,8 @@ export function drawTreeCell(
       const leanCrown = fy >= 32768 ? fy - 65536 : fy;
       // 风摆（原版 :8423-8457 case 323：off ×2/|×2|、rot 0.08、绕底部中心）
       if (sway !== 0) {
-        const dx15 = px + (TILE - 80) / 2 + leanCrown + sway * 2;
-        const dy15 = py + TILE - 80 + Math.abs(sway) * 2;
+        const dx15 = devSnap(px + (TILE - 80) / 2 + leanCrown + sway * 2);
+        const dy15 = devSnap(py + TILE - 80 + Math.abs(sway) * 2);
         ctx.save();
         ctx.translate(dx15 + 40, dy15 + 80);
         ctx.rotate(sway * 0.08);
@@ -635,12 +635,16 @@ export function drawTreeCell(
       if (anchor === 0) { offX = sway * 2; offY = Math.abs(sway) * 2; rot = sway * 0.08; pivOX = sw / 2; pivOY = sh; }
       else if (anchor === 1) { offX = (sway > 0 ? sway : 0) + Math.abs(sway) * 2; rot = sway * 0.06; pivOX = 40; pivOY = 24; }
       else { offX = (sway < 0 ? sway : 0) - Math.abs(sway) * 2; rot = sway * 0.06; pivOX = 0; pivOY = 30; }
+      // ★设备像素吸附（2026-08-18 夜间横缝收官）：offX/offY 带小数 → 冠底边缘
+      //   行逐帧落在不同设备像素行（最近邻），夜间剪影下 = 闪烁横缝
+      const dsx = devSnap(dx + offX), dsy = devSnap(dy + offY);
+      dx = dsx; dy = dsy; offX = 0; offY = 0;
       ctx.save();
-      ctx.translate(dx + offX + pivOX, dy + offY + pivOY);
+      ctx.translate(dx + pivOX, dy + pivOY);
       ctx.rotate(rot);
-      ctx.translate(-(dx + offX + pivOX), -(dy + offY + pivOY));
-      ctx.drawImage(img, sx, sy, sw, sh, dx + offX, dy + offY, sw, sh);
-      drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, dx + offX, dy + offY);
+      ctx.translate(-(dx + pivOX), -(dy + pivOY));
+      ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+      drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, dx, dy);
       ctx.restore();
     } else {
       ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
@@ -1390,6 +1394,15 @@ export const renderEnv = {
   wind: 0,
   /** Main.worldSurface(DoesWindBlowAtThisHeight 用) */
   worldSurface: 0,
+  /** 当前渲染 zoom（Renderer 每帧注入；摆动层设备像素吸附用——0=缺省 1） */
+  zoom: 0,
+};
+/** 设备像素吸附：世界坐标 → 1/zoom 网格（冠/枝逐帧重绘的小数偏移在最近邻下
+ *  会整行跳变——夜间剪影高对比下即用户报的"横缝"；吸附后运动按设备像素步进
+ *  （1.25× 下 0.8 世界 px 步长，肉眼不可察），边缘恒稳定 */
+const devSnap = (v: number): number => {
+  const gz = renderEnv.zoom || 1;
+  return Math.round(v * gz) / gz;
 };
 /** 428 测重板被踩状态(Game.triggerTiles428 镜像;原版 PressurePlateHelper.PressurePlatesPressed) */
 export const plates428Pressed = new Set<number>();

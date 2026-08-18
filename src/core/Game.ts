@@ -113,7 +113,7 @@ import {
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
-import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { FOOD_PARTICLE_COLORS, DRINK_PARTICLE_COLORS } from '../data/vanillaFoodColors';
@@ -146,7 +146,7 @@ import { spawnMechQueenEnsemble } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
-import { scanLuckScene, rollLuck } from '../stats/Luck';
+import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
 import {
   bindJourneyPowers, journeyPowers, shouldDisableSpawns,
@@ -222,7 +222,6 @@ import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
-import { GamePresence } from './GamePresence';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
@@ -721,8 +720,6 @@ export class Game implements GameHooks {
   /** 小地图拆带构建的完成 Promise（afterWorldLoad 内启动；三条进世界路径
    *  await 后才 onWorldReady——见 Minimap.buildStriped 大世界巨帧注释） */
   minimapReady: Promise<void> | null = null;
-  /** 同源实例互认(双开协同降耗,src/core/GamePresence) */
-  presence = new GamePresence();
   chunks!: ChunkCache;
   lighting!: LightingEngine;
   liquid!: LiquidSim;
@@ -2226,19 +2223,6 @@ export class Game implements GameHooks {
     // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限;
     // 熔断态(2026-08-18 双开崩溃:抖动环 1.7 万次/3s)加一次 toast 提示
     this.renderer.installGpuPressureGuard();
-    // 同源实例互认(2026-08-18 双开崩溃协同降耗):另一窗口同游戏在场时,
-    // 双方各降一半 GPU 常驻预算(chunk 上限/GL 纹理池),把共享配额分着用
-    this.presence.onChange = (n) => {
-      if (n > 1) {
-        ChunkCache.MAX_CHUNKS = Math.min(ChunkCache.MAX_CHUNKS, 160);
-        GLSpriteLayer.MAX_BYTES = Math.min(GLSpriteLayer.MAX_BYTES, 96 * 1024 * 1024);
-        this.renderer.glfx?.dispose();          // 池按新预算重建
-        this.renderer.glfx = null;
-        this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.MultiInstance'));
-        console.warn(`[Game] 检测到 ${n} 个同源游戏实例——已进入双开经济档(chunk≤160/GL≤96MB)`);
-      }
-    };
-    this.presence.start();
     // 主画布重建(熔断后上下文死亡的最后手段)→ 重绑输入与 resize
     this.renderer.onCanvasRecreated = (canvas) => {
       this.input.destroy();
@@ -2246,20 +2230,31 @@ export class Game implements GameHooks {
       this.renderer.installGpuPressureGuard();      // 新画布挂回单点监听(window 哨兵常在)
     };
     let gpuTripToasted = false;
+    // 渲染模式切换 toast(自动降级/回切)
+    this.renderer.cbOnRenderModeSwitch = (mode) => {
+      this.cb.onToast?.(Lang.text(mode === 'cpu'
+        ? 'Mods.SandboxWorld.Toast.CpuRender'
+        : 'Mods.SandboxWorld.Toast.GpuRender'));
+    };
     this.renderer.cbOnGpuRecover = () => {
       this.chunks?.dispose();
-      // 小地图画布死亡 → 重建 + 拆带重建(异步,不阻塞)
-      const mm = this.renderer.minimap;
-      if (mm && (mm.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.()) {
-        mm.dispose();
-        const w = this.world;
-        if (w) {
-          this.renderer.minimap = new Minimap(w, true);
-          void this.renderer.minimap.buildStriped();
-        }
+      // 小地图已 CPU 化(无画布可死);pix 为空(极端 OOM)→ 重建
+      if (!this.renderer.minimap?.pix && this.world) {
+        this.renderer.minimap = new Minimap(this.world, true);
+        void this.renderer.minimap.buildStriped();
       }
     };
     this.renderer.installGpuHealthWatchdog();
+    // 渲染模式手动切换 → 立即重建画布(不等下次进世界)
+    // auto→gpu/cpu:cpuRender 标志按选项独立判定(isCpuRender 里 cpu 恒真)
+    options.onChange((d) => {
+      // renderer 可能未构造(构造首帧立即回调)——守卫
+      if (!this.renderer?.canvas) return;
+      const wantCpu = d.renderMode === 'cpu';
+      if (this.renderer.cpuRender !== wantCpu) {
+        this.renderer.setRenderMode(wantCpu);
+      }
+    });
     this.renderer.cbOnGpuPressure = () => {
       this.shrinkChunks();
       if (this.renderer.gpuDegraded && !gpuTripToasted) {
@@ -2684,6 +2679,25 @@ export class Game implements GameHooks {
     // 敌怪弹幕发射音（Dart DART_STYLE sfx 直放文件名）：箭 Item_5 已在 bowShoot 预热,
     // 其余不预热则各射击怪本局首射静音
     this.sfx.preloadFiles(['Item_8', 'Item_11', 'Item_12', 'Item_17', 'Item_20', 'Item_28', 'Item_154']);
+    // 敌怪专属受击/死亡音随世界怪池预热（vanillaSoundFiles → wav 组）：否则每只怪
+    // 本局首次受击/死亡静音（按需加载首播 fetch 在途 playWavFile false——用户报
+    // "杀死洞穴蝙蝠无死亡音"第二根因，第二只起命中缓存才响）；原版 LoadAll 全量
+    // 预载，此处按 VANILLA_SPAWN_POOLS 池定向预热（Boss/稀有怪仍走召唤时定向预热）
+    {
+      const poolSounds = new Set<string>();
+      for (const pool of Object.values(VANILLA_SPAWN_POOLS)) {
+        for (const id of pool as number[]) {
+          const v = vanillaNpc(id);
+          if (!v) continue;
+          for (const f of vanillaSoundFiles(v.HitSound) ?? []) poolSounds.add(f);
+          for (const f of vanillaSoundFiles(v.DeathSound) ?? []) poolSounds.add(f);
+        }
+      }
+      this.sfx.preloadFiles(poolSounds);
+    }
+    // 蠕虫掘地双轨（Roar_1 骨蛇/巨蠕虫族 + eow_dig EoW 专属）——AI 周期音不在
+    // Hit/Death 预热面，首播在途会静默一声
+    this.sfx.preloadFiles(['Roar_1', 'eow_dig']);
     // 滴水溅落音钩子（Gore.cs :971-984：落地 Drip_0/1 随机、入水 Drip_2、位置 +8；
     // 带坐标走 2500px 距离衰减，flag4 水型已在 NatureParticles 内静音）
     natureParticles.onDripSplash = (x, y, wet) => {
@@ -11469,22 +11483,28 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    // TryToPoop（马桶消化 Player.cs:19058-19060；1/600·醉 1/200）
+    // TryToPoop（马桶消化 Player.cs:19058-19060 掷门 + :18714-18760 全函数 1:1：
+    // 1/600·醉 1/200 → 移除当前饱食 buff（207 顶级/206/26 逐级回退），
+    // 屎堆 5395 叠数 = clamp(剩余秒/3600×tier, tier, 999)（OnlyBadLuckExtreme(10)
+    // 命中再 ×1.2），MountedCenter 落物 noGrabDelay 100 + Digestion 消化粒子）
     if (p.seatIsToilet && p.sitTicks >= 10
       && (p.buffs.has(BuffType.WellFed) || p.buffs.has(BuffType.WellFed2) || p.buffs.has(BuffType.WellFed3))) {
       const denom = p.buffs.has(BuffType.Tipsy) ? 200 : 600;
       if (Math.random() < 1 / denom) {
-        // 剥食 tier 递降一档（207→206→26，TryToPoop :18734-18740）+ 消化粒子
-        // （原版 ParticleOrchestra.Digestion；屎堆 5395 vi_ 未注册——物品侧缺口登记）
-        this.spawnParticles(p.cx, p.y + p.h - 8, '#8B5A2B', 8, 1.5, { grav: 0.4 });
         const tiers = [BuffType.WellFed3, BuffType.WellFed2, BuffType.WellFed] as const;
+        const tierN = [3, 2, 1];
         for (let i = 0; i < tiers.length; i++) {
-          if (p.buffs.has(tiers[i])) {
-            const left = p.buffs.active.get(tiers[i]) ?? 0;
-            p.buffs.remove(tiers[i]);
-            if (i + 1 < tiers.length && left > 0) p.buffs.set(tiers[i + 1], left);
-            break;
+          if (!p.buffs.has(tiers[i])) continue;
+          const left = p.buffs.active.get(tiers[i]) ?? 0;
+          p.buffs.remove(tiers[i]);
+          let stack = Math.max(tierN[i], Math.min(999, Math.floor(left / 3600) * tierN[i]));
+          if (rollOnlyBadLuckExtreme(p.luck, 10, () => Math.random()) === 0) {
+            stack = Math.floor(stack * 1.2);        // :18741-18745 RollOnlyBadLuckExtreme(10)
           }
+          const drop = this.spawnDrop(p.cx, p.cy, VI(5395), stack);
+          if (drop) drop.noGrabDelay = 100;         // :18758-18759 noGrabDelay 100t
+          this.spawnParticles(p.cx, p.cy, '#8B5A2B', 8, 1.5, { grav: 0.4 });   // Digestion 近似
+          break;
         }
       }
     }
@@ -15522,7 +15542,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       .replace(/\{Demolitionist\}/g, townName('demolitionist'))
       .replace(/\{ArmsDealer\}/g, townName('arms_dealer'))
       .replace(/\{Merchant\}/g, townName('merchant'))
-      .replace(/\{Bartender\}/g, Lang.npcName(550) ?? 'Bartender') // 酒馆老板未实装,恒用类型名
+      .replace(/\{Bartender\}/g, townName('tavernkeep'))
       .replace(/\{WorldEvilStone\}/g,
         Lang.itemName(this.world.crimson ? 836 : 61)   // ItemID.cs:3211/1661：Crimstone/Ebonstone Block
         ?? (this.world.crimson ? 'Crimstone' : 'Ebonstone'));

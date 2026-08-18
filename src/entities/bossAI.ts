@@ -45,7 +45,7 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   if (game.world.clock.isDay && !isGuardian && e.ai1 !== 3) {
     if (e.ai1 !== 2) {
       e.ai3 = player && player.cx > e.cx ? 1 : -1;
-      // :21943-21947 转换瞬间 Roar 一声（SoundID 15=Roar→'roar' 轨 Roar_0/1 随机）
+      // :21943-21947 转换瞬间 Roar 一声（SoundID 15 style0 = Roar_0,'roar' 键恒此轨）
       game.playSfx('roar', 1, e.cx, e.cy);
     }
     e.ai1 = 2;
@@ -1485,6 +1485,17 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
   };
   fadeNpc(e);
   for (let s = e.wormNext; s; s = s.wormNext) fadeNpc(s);
+  // ---- 掘地周期音（AI_037 :50459-50473 else 段）：soundDelay==0 → 玩家距/40 钳
+  // 10..20 → PlaySound(15,x,y) 无 style = style 默认 1 = Roar_1 满响（与 AI_006
+  // 蠕虫掘地同构;原版 80 段各自掷、靠 case15 单实例互斥收敛为单声——本仓段链
+  // 由头驱动,头单点掷即等价,2026-08-18 补） ----
+  if (e.digSndDelay <= 0) {
+    const dd = player ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : 400;
+    e.digSndDelay = Math.round(Math.min(20, Math.max(10, dd / 40)));
+    game.playSfxWav?.('Roar_1', 1, e.cx, e.cy);
+  } else {
+    e.digSndDelay--;
+  }
   const st = game.world.store;
   // 接地判定(flag2):AABB 外扩 1-2 格内实心块或液体>64(:50278-50298)
   let buried = false;

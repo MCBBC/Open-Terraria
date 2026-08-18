@@ -8,7 +8,7 @@ import { TileStore } from '../src/world/TileStore';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { restoreGenSolid, flipGenSolid, vanGenSolidType } from '../src/world/gen/vanilla/GenSolid';
 import { __setGenStateForProbe } from '../src/world/gen/WorldGen';
-import { runTrapsPass, placeTrap, eeeeLog } from '../src/world/gen/vanilla/TrapsPass';
+import { runTrapsPass, placeTrap, placeSandTrap as placeSandTrapPub, eeeeLog, SAND_REJ } from '../src/world/gen/vanilla/TrapsPass';
 
 const RUN = process.env.SW_EEEE4 === '1';
 const G2 = '/tmp/sw-slp/g';
@@ -102,6 +102,24 @@ const rd16 = (p: string) => new Uint16Array(readFileSync(p).buffer.slice(0));
     if (n === 208) flips.push([0, false]);
   }
   void flips;
+  // 沙子循环（镜像 runTrapsPass 尾段）+ k4 登记
+  const gsSand = structuredClone(gs);
+  let wallHits = 0, tries = 0;
+  for (let n = 0; n < st2.w * 0.003; n++) {
+    for (let k = 0; k < 20000; k++) {
+      tries++;
+      const x = rng.int(Math.floor(st2.w * 0.15), Math.floor(st2.w * 0.85) - 1);
+      const y = rng.int(gsSand.worldSurface + 20, st2.h - 211);
+      if (st2.wall[st2.idx(x, y)] === 187) {
+        wallHits++;
+        if (placeSandTrapPub(st2, rng, gsSand, x, y)) break;
+      }
+    }
+  }
+  console.log(`sand stats: tries=${tries} wall187hits=${wallHits}`);
+  console.log('sand rejects:', JSON.stringify(Object.fromEntries(Object.entries(SAND_REJ).sort((a, b) => b[1] - a[1]))));
+  const k4 = eeeeLog.filter(e => e.k === 4);
+  console.log(`k4 sand accepts: ${k4.length}: ${k4.map((e, q) => `(${e.x2},${e.py})`).join(' ')}`);
   // eeeeLog 由 placeTrap 填充（SW_EEEE_DBG）
   __setGenStateForProbe(null);
   const acc173 = atts.find(a => a.accept === 173)!;
@@ -212,6 +230,8 @@ const rd16 = (p: string) => new Uint16Array(readFileSync(p).buffer.slice(0));
   for (const i of newExpl) if (!jsExpl.has(i)) gOnly.expl++;
   for (const i of newBoulderAnchor) if (!jsAnchors.has(i)) { gOnly.anchor++; if (gOnlyList.length < 20) gOnlyList.push(`anchor(${i % W},${(i / W) | 0})`); }
   console.log(`golden-only traps: ${JSON.stringify(gOnly)}`);
+  console.log(`entries near 3787 site (x2∈[3775,3800]): ${eeeeLog.map((e, q) => ({ q, ...e })).filter(e => e.x2! >= 3775 && e.x2! <= 3800).map(e => `#${e.q}k${e.k}(${e.x2},${e.py})a(${e.ax},${e.ay})`).join(' ')}`);
+  console.log(`entries near 878/880 site (x2∈[870,890]): ${eeeeLog.map((e, q) => ({ q, ...e })).filter(e => e.x2! >= 870 && e.x2! <= 890).map(e => `#${e.q}k${e.k}(${e.x2},${e.py})a(${e.ax},${e.ay})`).join(' ')}`);
   console.log(`JS kinds count: k0=${eeeeLog.filter(e => e.k === 0).length} k1=${eeeeLog.filter(e => e.k === 1).length} k2=${eeeeLog.filter(e => e.k === 2).length} k3=${eeeeLog.filter(e => e.k === 3).length}`);
   // 邻域细看：golden (2022,581) 巨石 2×2 vs JS 的对应
   console.log(`entries near x2∈[2015,2035]: ${eeeeLog.map((e, q) => ({ q, ...e })).filter(e => e.x2! >= 2015 && e.x2! <= 2035).map(e => `#${e.q}k${e.k}(${e.x2},${e.py})a(${e.ax},${e.ay})`).join(' ')}`);

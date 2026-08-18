@@ -1667,10 +1667,9 @@ export class VanillaSpawner {
     //  "友好刷怪位"——该帧只刷小动物。门语义：友好轮**只**被"渔夫未救且场上无 376"
     //  拦截（此时渔夫优先占位），敌怪轮恒放行——此前写成 !any(376) 整体封门，
     //  睡渔夫在场时海洋敌怪（鲨鱼/水母/鱿鱼）全部断供。
-    //  savedAngler（NPC.savedAngler 静态）：由 AI_007_TownEntities_UpdateSavedStates
-    //  （NPC.cs:53337-53361 case 369）在渔夫 369 城镇化运行 AI 时置位；本仓渔夫
-    //  救援链未实装（376 睡渔夫可由本段刷出，但无 376→369 转换、flags 亦无
-    //  savedAngler 位）→ 恒 false。AnyNPCs(376) 用 activeIds 现查
+    //  savedAngler（NPC.savedAngler 静态）：渔夫救援链在 Game 侧闭环（placeSleepingAngler
+    //  放 bound 渔夫 → 右键 freeBoundNpc 置 savedAngler，Game:3008）——放置走确定性
+    //  补放非本段掷出，本门恒 false 语义等价（何时放差异已登记）。AnyNPCs(376) 用 activeIds 现查
     if ((!this.spawnFriendlyCycle || !any(376)) && this.waterTile && this.isOcean) {
       // 渔夫 376（L1708-1728）：表层水（spawnTileY < worldSurface-10）→ 向上 50 格
       //  找干隙线 num15 → 抬到该线落点；!xRange 才出（L1723）

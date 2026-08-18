@@ -72,6 +72,7 @@ import { TileStore } from '/src/world/TileStore.ts';
 import { TILE_BY_KEY } from '/src/data/tiles.ts';
 import { drawTreeCell } from '/src/render/VanillaTiler.ts';
 import { getWindCycle, windSway } from '/src/render/WindSway.ts';
+import { renderEnv } from '/src/render/VanillaTiler.ts';
 
 // ── 常量 ─────────────────────────────────────────────
 const T = 16;
@@ -232,6 +233,7 @@ function render() {
   if (imported) { VIEW_W = imported.w * T; VIEW_H = imported.h * T; cam.x = imported.st.w * T / 2; cam.y = boundaryY; }
   else { VIEW_W = 13 * T; VIEW_H = 11 * T; cam.x = t.x * T + 8; cam.y = boundaryY - 2; }
   const z = S.zoom;
+  renderEnv.zoom = z;   // 摆动层设备像素吸附（与游戏同源）
   cv.width = VIEW_W * z; cv.height = VIEW_H * z;
   const cw = cv.width, ch = cv.height;
   // Renderer 同款：像素吸附 + 最近邻

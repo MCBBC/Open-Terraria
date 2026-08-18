@@ -966,6 +966,11 @@ item({ key: 'vi_4317_haemorrhaxe', name: '', value: 1, tool: { type: 'hammer', p
 item({ key: 'vi_1844_PumpkinMoonMedallion', name: '', vid: 1844, value: 1, desc: '夜晚使用:召唤南瓜月' });
 item({ key: 'vi_1958_NaughtyPresent', name: '', vid: 1958, value: 1, desc: '夜晚使用:召唤霜月' });
 
+// 屎堆块 5395（vanilla.json 图标条目在但 itemfunc 缺 createTile——自动注册成了
+// 无 tile 的摆设物品，本条补放置链）。Item.cs:42883 DefaultToPlaceableTile(666, 0)
+// → tile v_666_poo；maxStack 缺省 9999（1456 默认）；value 0（无卖价）
+item({ key: 'vi_5395_PoopBlock', name: '', vid: 5395, value: 0, tile: 'v_666_poo' });
+
 export const VANILLA_ITEM_KEY_BY_ID: Record<number, string> = {};
 const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
 for (const [idStr, m] of Object.entries(_vim)) {

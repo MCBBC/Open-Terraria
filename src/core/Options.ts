@@ -59,6 +59,9 @@ export interface OptionsData {
    *  NPC 恒开；0 = WaterDistortion 滤镜整体关闭 SceneState.cs:129）；
    *  config.json 键 "WaveQuality"（Main.cs:4215/4465），读档钳 [0,3]（:4466-4473） */
   waveQuality: number;
+  /** 渲染模式:gpu=硬件加速(默认);cpu=软渲染(willReadFrequently,零 GPU 预算,
+   *  多开/弱 GPU 稳定);auto=GPU 优先,连续崩溃自动切 CPU,稳定 2 分钟回 GPU */
+  renderMode: 'gpu' | 'cpu' | 'auto';
 }
 
 const KEY = 'sandboxworld.options';
@@ -73,6 +76,7 @@ export class OptionsStore {
     pvpEnabled: false,
     frameCap: 60,
     frameSkipMode: 'subtle',
+    renderMode: 'auto',
     waveQuality: 3,   // Main.cs:405 WaveQuality = 3（默认高）
     pvpTeam: 0,
     lang: DEFAULT_LANG,

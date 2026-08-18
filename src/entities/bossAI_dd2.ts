@@ -820,12 +820,13 @@ export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
     && Math.hypot(tgt!.x - e.cx, tgt!.y - e.cy) > 150;
   if (x[0] === -1 && !inSand) x[0] = 20;           // 跃出后落回非沙 → 短冷却（:42643-42645）
   if (x[0] > 0) x[0] -= 1;
-  // 游弋周期音（:42652-42663）：soundDelay==0 时播 (15,4)=Roar_1 ×0.25(legacy
-  //   style4 音量档),delay = 玩家距/40 钳 10..20——与蠕虫掘地音同构
+  // 游弋周期音（:42652-42663）：soundDelay==0 时播 (15,Center,4)——case15 style4
+  //   映射 num=1+num18=0.25 → Roar_1 ×0.25(音量是调用点参数非文件档,FILE_CASE_VOL
+  //   不登记,2026-08-18 修正),delay = 玩家距/40 钳 10..20——与蠕虫掘地音同构
   if (inSand && e.digSndDelay <= 0) {
     const dd = tgt ? Math.hypot(tgt.x - e.cx, tgt.y - e.cy) : 400;
     e.digSndDelay = Math.round(Math.min(20, Math.max(10, dd / 40)));
-    game.playSfxWav?.('Roar_1', 1, e.cx, e.cy);
+    game.playSfxWav?.('Roar_1', 0.25, e.cx, e.cy);
   } else if (e.digSndDelay > 0) {
     e.digSndDelay--;
   }

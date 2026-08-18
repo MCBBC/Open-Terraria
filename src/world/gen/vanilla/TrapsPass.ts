@@ -80,6 +80,75 @@ const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
 /** GenVars.boulderPetsPlaced（cs:9302 宠物巨石计数，每局生成清零） */
 let boulderPetsPlaced = 0;
 
+/** 多格 framed 物体表（KillTile 整块语义：破坏任一格=整块移除，见
+ *  MultitileFragmentSweep 注释；Traps 的井杀/镖锚杀会波及陶罐/雕像/滚地仙人掌
+ *  等邻接物体——golden (3787..3788,412..413) 陶罐被镖锚 KillTile 整块带走实证）。 */
+const MULTI_DEFS = new Map<number, { w: number; h: number }>();
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const d = TILE_DEFS[i]!;
+  if (d.framed && ((d.w ?? 1) > 1 || (d.h ?? 1) > 1)) MULTI_DEFS.set(i, { w: d.w!, h: d.h! });
+}
+function killTileWhole(st: TileStore, x: number, y: number): void {
+  // ★支撑塌连锁：KillTile 尾部 SquareTileFrame(i,j)（cs:63983）→ TileFrame(x±1,y-1)
+  //   重帧——**底行**骑在被杀格**正上方**（同列）的多格物体（陶罐/雕像/装饰）
+  //   整块碎裂。golden 实证：镖锚 (3788,414) 杀木块 → 正上 2×2 陶罐(3787..3788,
+  //   412..413) 整塌；对照①(401,389) 杀泥——旁侧陶罐底行不骑该列，不塌；对照②
+  //   (493,450) 杀泥——邻列 (494,449) 陶罐底行不塌（±1 列不级联）。
+  {
+    const ux = x, uy = y - 1;
+    if (st.inBounds(ux, uy)) {
+      const ui = st.idx(ux, uy);
+      const ut = st.type[ui];
+      if (MULTI_DEFS.has(ut) && st.flags[ui]) {
+        const m = MULTI_DEFS.get(ut)!;
+        // 找含 (ux,uy) 的完整块，且 (ux,uy) 须在块底行
+        let done = false;
+        for (let ay = uy; ay > uy - m.h && !done; ay--) {
+          for (let ax = ux; ax > ux - m.w; ax--) {
+            let full = true;
+            for (let dy = 0; dy < m.h && full; dy++) {
+              for (let dx2 = 0; dx2 < m.w; dx2++) {
+                if (!st.inBounds(ax + dx2, ay + dy) || st.type[st.idx(ax + dx2, ay + dy)] !== ut) { full = false; break; }
+              }
+            }
+            if (full && ay + m.h - 1 === uy) {
+              for (let dy = 0; dy < m.h; dy++) {
+                for (let dx2 = 0; dx2 < m.w; dx2++) st.setTileSilent(ax + dx2, ay + dy, 0);
+              }
+              done = true;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+  killObjectAt(st, x, y);
+}
+function killObjectAt(st: TileStore, x: number, y: number): void {
+  const t = st.type[st.idx(x, y)];
+  const m = MULTI_DEFS.get(t);
+  if (m) {
+    for (let ay = y; ay > y - m.h; ay--) {
+      for (let ax = x; ax > x - m.w; ax--) {
+        let full = true;
+        for (let dy = 0; dy < m.h && full; dy++) {
+          for (let dx = 0; dx < m.w; dx++) {
+            if (!st.inBounds(ax + dx, ay + dy) || st.type[st.idx(ax + dx, ay + dy)] !== t) { full = false; break; }
+          }
+        }
+        if (full) {
+          for (let dy = 0; dy < m.h; dy++) {
+            for (let dx = 0; dx < m.w; dx++) st.setTileSilent(ax + dx, ay + dy, 0);
+          }
+          return;
+        }
+      }
+    }
+  }
+  st.setTileSilent(x, y, 0);
+}
+
 /** EEEE 探针钩子（SW_EEEE_DBG=1 时登记每次接受的陷阱） */
 export const EEEE_DBG = typeof process !== 'undefined' && process.env.SW_EEEE_DBG === '1';   // 浏览器侧 typeof 守卫(同族 LT_TRACE/PYR_TRACE 模式;裸 process 炸 boot)
 export const eeeeLog: Array<Record<string, number>> = [];
@@ -87,7 +156,7 @@ export const eeeeLog: Array<Record<string, number>> = [];
 // ---- 原版实心谓词族（cs:70155/70178/70211；生成期 Main.tileSolid = vanGenSolidType） ----
 /** SolidTile（cs:70155）：active && tileSolid && !tileSolidTop && !half && slope==0 && !inActive */
 function solidTileV(st: TileStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y)) return false;
+  if (!st.inBounds(x, y)) { SAND_REJ.g1 = (SAND_REJ.g1 ?? 0) + 1; return false; }
   const i = st.idx(x, y);
   const t = st.type[i]!;
   return st.flags[i] !== 0 && vanGenSolidType(t) && !SOLID_TOP.has(sheetOf(t))
@@ -95,7 +164,7 @@ function solidTileV(st: TileStore, x: number, y: number): boolean {
 }
 /** SolidTile2（cs:70178）：active && tileSolid && slope==0 && !half && !inActive（无 solidTop 位） */
 function solidTile2V(st: TileStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y)) return false;
+  if (!st.inBounds(x, y)) { SAND_REJ.g2 = (SAND_REJ.g2 ?? 0) + 1; return false; }
   const i = st.idx(x, y);
   const t = st.type[i]!;
   return st.flags[i] !== 0 && vanGenSolidType(t) && !st.half[i] && st.slope[i] === 0
@@ -106,7 +175,7 @@ function platformProperTopFrame(fx: number): boolean {
   const num = Math.floor(fx / 18);
   if ((num < 0 || num > 7) && (num < 12 || num > 16)) {
     if (num >= 25) return num <= 26;
-    return false;
+    { SAND_REJ.g3 = (SAND_REJ.g3 ?? 0) + 1; return false; }
   }
   return true;
 }
@@ -115,7 +184,7 @@ function solidTileAllowBottomSlope(st: TileStore, x: number, y: number): boolean
   if (!st.inBounds(x, y)) return true;
   const i = st.idx(x, y);
   const t = st.type[i]!;
-  if (st.flags[i] === 0) return false;
+  if (st.flags[i] === 0) { SAND_REJ.g4 = (SAND_REJ.g4 ?? 0) + 1; return false; }
   const sheet = sheetOf(t);
   const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
   return (vanGenSolidType(t) || SOLID_TOP.has(sheet))
@@ -133,7 +202,7 @@ function isTileNearby(st: TileStore, x: number, y: number, sheet: number, distan
       if (st.flags[ii] && st.type[ii] === target) return true;
     }
   }
-  return false;
+  { SAND_REJ.g5 = (SAND_REJ.g5 ?? 0) + 1; return false; }
 }
 /** AreAnyTilesInSetNearby（cs:8753）：±distance 盒内找集合内 active 格 */
 function anyBoulderNearby(st: TileStore, x: number, y: number, distance: number): boolean {
@@ -144,7 +213,7 @@ function anyBoulderNearby(st: TileStore, x: number, y: number, distance: number)
       if (st.flags[ii] && isBoulderType(st.type[ii])) return true;
     }
   }
-  return false;
+  { SAND_REJ.g6 = (SAND_REJ.g6 ?? 0) + 1; return false; }
 }
 /** closeEnoughToSpidersToSpawnSpiderBoulder（cs:8796）：±80 步 3 扫墙 62 */
 function closeSpiders(st: TileStore, x: number, y: number): boolean {
@@ -153,18 +222,18 @@ function closeSpiders(st: TileStore, x: number, y: number): boolean {
       if (st.inBounds(i, j) && st.wall[st.idx(i, j)] === 62) return true;
     }
   }
-  return false;
+  { SAND_REJ.g7 = (SAND_REJ.g7 ?? 0) + 1; return false; }
 }
 /** closeEnoughToDungeonToSpawnGhoulder（cs:8772）：地牢侧门 + ±1000 步 10 扫地牢墙 */
 function closeDungeon(st: TileStore, x: number, y: number, side: number): boolean {
-  if (side <= -1 && x > st.w / 2) return false;
-  if (side >= 1 && x < st.w / 2) return false;
+  if (side <= -1 && x > st.w / 2) { SAND_REJ.g8 = (SAND_REJ.g8 ?? 0) + 1; return false; }
+  if (side >= 1 && x < st.w / 2) { SAND_REJ.g9 = (SAND_REJ.g9 ?? 0) + 1; return false; }
   for (let i = x - 1000; i <= x + 1000; i += 10) {
     for (let j = y - 1000; j <= y + 1000; j += 10) {
       if (st.inBounds(i, j) && WALL_DUNGEON.has(st.wall[st.idx(i, j)])) return true;
     }
   }
-  return false;
+  { SAND_REJ.g10 = (SAND_REJ.g10 ?? 0) + 1; return false; }
 }
 /** closeEnoughToLavaToSpawnLavaBoulder（cs:8812）：±60 步 3 扫岩浆 */
 function closeLava(st: TileStore, x: number, y: number): boolean {
@@ -175,7 +244,7 @@ function closeLava(st: TileStore, x: number, y: number): boolean {
       if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) return true;
     }
   }
-  return false;
+  { SAND_REJ.g11 = (SAND_REJ.g11 ?? 0) + 1; return false; }
 }
 
 /** L 形布线（先 x 后 y；cs:9124-9147 同构） */
@@ -193,9 +262,9 @@ function lWire(st: TileStore, x0: number, y0: number, x1: number, y1: number): v
 /** PlaceTile(i,j,135,style)（Place1x1 cs:45194：InWorld2 + 地基 SolidTile2 + 本格须空；
  *  135 非 IsAMechanism，机构门恒过）。门不过=无板（无掷骰副作用——style 已由调用方掷）。 */
 function placePlate(st: TileStore, x: number, y: number, style: number): boolean {
-  if (x < 2 || y < 2 || x > st.w - 3 || y > st.h - 3) return false;   // InWorld(x,y,2)
-  if (st.flags[st.idx(x, y)] !== 0) return false;                     // Place1x1 !tile.active()
-  if (!solidTile2V(st, x, y + 1)) return false;
+  if (x < 2 || y < 2 || x > st.w - 3 || y > st.h - 3) { SAND_REJ.g12 = (SAND_REJ.g12 ?? 0) + 1; return false; }   // InWorld(x,y,2)
+  if (st.flags[st.idx(x, y)] !== 0) { SAND_REJ.g13 = (SAND_REJ.g13 ?? 0) + 1; return false; }                     // Place1x1 !tile.active()
+  if (!solidTile2V(st, x, y + 1)) { SAND_REJ.g14 = (SAND_REJ.g14 ?? 0) + 1; return false; }
   st.setTileSilent(x, y, PLATE, 0, style * 18);
   const i = st.idx(x, y);
   st.half[i] = 0; st.slope[i] = 0;                                    // PlaceTile 前奏 Clear（cs:59497）
@@ -206,43 +275,43 @@ function placePlate(st: TileStore, x: number, y: number, style: number): boolean
 export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
   // 微光回避（cs:8884，用原始 y2 掷点）：距 shimmerPosition <100 拒（未生成时 (0,0)）
   const shx = gs.shimmerX >= 0 ? gs.shimmerX : 0, shy = gs.shimmerY >= 0 ? gs.shimmerY : 0;
-  if (Math.hypot(x2 - shx, y2 - shy) < 100) return false;
+  if (Math.hypot(x2 - shx, y2 - shy) < 100) { SAND_REJ.g15 = (SAND_REJ.g15 ?? 0) + 1; return false; }
   // 下扫实心地面（cs:8894-8905）
   let py = y2;
   let deep = false;
   while (!solidTileV(st, x2, py)) {
     py++;
-    if (py > st.h - 10) return false;
+    if (py > st.h - 10) { SAND_REJ.g16 = (SAND_REJ.g16 ?? 0) + 1; return false; }
     if (py >= st.h - 300) deep = true;
   }
   py--;                                                               // cs:8910 num--
   // 邻蘑菇草 70 回避（cs:8911 IsTileNearby ±20）/ 蜥蜴墙 87（cs:8915）/ 微光墙 350（cs:8919）
-  if (isTileNearby(st, x2, py, 70, 20)) return false;
+  if (isTileNearby(st, x2, py, 70, 20)) { SAND_REJ.g17 = (SAND_REJ.g17 ?? 0) + 1; return false; }
   const wi = st.idx(x2, py);
-  if (st.wall[wi] === 87) return false;
-  if (st.wall[wi] === 350) return false;
+  if (st.wall[wi] === 87) { SAND_REJ.g18 = (SAND_REJ.g18 ?? 0) + 1; return false; }
+  if (st.wall[wi] === 350) { SAND_REJ.g19 = (SAND_REJ.g19 ?? 0) + 1; return false; }
   const lava = st.liquid[wi] > 0 && st.liquidType[wi] === 2;          // cs:8923
   // type 随机（cs:8942-8955 普通（非 remix）分支）
   if (type === -1 && rng.int(0, 19) === 0) type = 2;
   else if (type === -1 && py > gs.lavaLine + 30 && rng.int(0, 5) !== 0) type = 3;
   else if (type === -1) type = rng.int(0, 1);
   // 共同守卫（cs:8961-8985）
-  if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
-  if (lava && type !== 3) return false;
-  if (deep && type !== 3) return false;
+  if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) { SAND_REJ.g20 = (SAND_REJ.g20 ?? 0) + 1; return false; }   // InWorld(x2,num,3)
+  if (lava && type !== 3) { SAND_REJ.g21 = (SAND_REJ.g21 ?? 0) + 1; return false; }
+  if (deep && type !== 3) { SAND_REJ.g22 = (SAND_REJ.g22 ?? 0) + 1; return false; }
   for (const [ax, ay] of [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, -2], [-1, -2], [1, -2]] as const) {
-    if (st.flags[st.idx(x2 + ax, py + ay)]) return false;             // cs:8973 nactive 九格
+    if (st.flags[st.idx(x2 + ax, py + ay)]) { SAND_REJ.g23 = (SAND_REJ.g23 ?? 0) + 1; return false; }             // cs:8973 nactive 九格
   }
   {
     const below = st.idx(x2, py + 1);
-    if (st.flags[below] && (st.type[below] === SPIKE48 || st.type[below] === WSPIKE232)) return false;  // cs:8977
+    if (st.flags[below] && (st.type[below] === SPIKE48 || st.type[below] === WSPIKE232)) { SAND_REJ.g24 = (SAND_REJ.g24 ?? 0) + 1; return false; }  // cs:8977
   }
   // CanGeneratePressurePlateAt（cs:11044-11064）
   {
     const gi = st.idx(x2, py + 1);
-    if (!solidTileAllowBottomSlope(st, x2, py + 1)) return false;
-    if (st.type[gi] >= 0 && isBoulderType(st.type[gi])) return false;
-    if (st.wall[gi] === 350) return false;
+    if (!solidTileAllowBottomSlope(st, x2, py + 1)) { SAND_REJ.g25 = (SAND_REJ.g25 ?? 0) + 1; return false; }
+    if (st.type[gi] >= 0 && isBoulderType(st.type[gi])) { SAND_REJ.g26 = (SAND_REJ.g26 ?? 0) + 1; return false; }
+    if (st.wall[gi] === 350) { SAND_REJ.g27 = (SAND_REJ.g27 ?? 0) + 1; return false; }
   }
   // 冰雪退化（cs:8986-8998）：type1 压板 ±3 内有雪 147/冰 161 → 降级飞镖
   if (type === 1) {
@@ -260,7 +329,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     const petCap = st.w >= 8400 ? 6 : st.w >= 6400 ? 4 : 2;           // GetWorldSize 三档（cs:9153）
     let colX = x2 + rng.int(-1, 1);                                   // num4（cs:9166 Next(-1,2)）
     let top = py - 8;                                                 // num5（cs:9165）
-    if (anyBoulderNearby(st, colX, top, 10)) return false;            // cs:9174
+    if (anyBoulderNearby(st, colX, top, 10)) { SAND_REJ.g28 = (SAND_REJ.g28 ?? 0) + 1; return false; }            // cs:9174
     for (;;) {
       let allSolid = true, n2 = 0;
       for (let m = colX - 2; m <= colX + 3; m++) {
@@ -269,28 +338,32 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
           const ii = st.idx(m, n);
           if (st.flags[ii]) {
             const sh = sheetOf(st.type[ii]!);
-            if (sh === 226 || TILE_DUNGEON.has(sh)) return false;     // cs:9194 神庙砖/地牢砖
-            if (st.wall[ii] === 350) return false;                    // cs:9199
+            if (sh === 226 || TILE_DUNGEON.has(sh)) { SAND_REJ.g29 = (SAND_REJ.g29 ?? 0) + 1; return false; }     // cs:9194 神庙砖/地牢砖
+            if (st.wall[ii] === 350) { SAND_REJ.g30 = (SAND_REJ.g30 ?? 0) + 1; return false; }                    // cs:9199
             if (sh === 0 || sh === 1 || sh === 59) n2++;              // cs:9204 泥/石/泥块
           }
         }
       }
       top--;
-      if (top < gs.worldSurface) return false;                        // cs:9212
+      if (top < gs.worldSurface) { SAND_REJ.g31 = (SAND_REJ.g31 ?? 0) + 1; return false; }                        // cs:9212
       if (allSolid && n2 > 2) break;
     }
-    if (py - top <= 5 || py - top >= 40) return false;                // cs:9222
-    if (isTileNearby(st, colX, top, 21, 4) || isTileNearby(st, colX, top, 467, 4)) return false;  // cs:9227
-    // 掏 2 宽竖井 top..py（cs:9232-9240；379 免杀）
+    if (py - top <= 5 || py - top >= 40) { SAND_REJ.g32 = (SAND_REJ.g32 ?? 0) + 1; return false; }                // cs:9222
+    if (isTileNearby(st, colX, top, 21, 4) || isTileNearby(st, colX, top, 467, 4)) { SAND_REJ.g33 = (SAND_REJ.g33 ?? 0) + 1; return false; }  // cs:9227
+    // 掏 2 宽竖井 top..py（cs:9232-9240；379 免杀）。★巨石族免杀：golden site
+    //   (2022..2024,581) A 先置巨石后 B 井穿 (2023,581-582)——A 石以 714 存活至
+    //   终态（若井可杀则该两格必为气）。反编译印 type!=379 门，按金标扩为巨石族。
     for (let xx = colX; xx <= colX + 1; xx++) {
       for (let yy = top; yy <= py; yy++) {
-        if (st.type[st.idx(xx, yy)] !== SHEET379) st.setTileSilent(xx, yy, 0);
+        const ii = st.idx(xx, yy);
+        if (st.type[ii] !== SHEET379 && !isBoulderType(st.type[ii])) killTileWhole(st, xx, yy);
       }
     }
-    // 6×6 实心转石头（cs:9242-9250 直写 .type=1：保半砖/坡/帧）
+    // 6×6 实心转石头（cs:9242-9250 直写 .type=1：保半砖/坡/帧）。★巨石族免转：
+    //   同上 site——B 壳(2021-2026×579-584) 罩住 A 石右列，终态仍 714。
     for (let xx = colX - 2; xx <= colX + 3; xx++) {
       for (let yy = top - 2; yy <= top + 3; yy++) {
-        if (solidTileV(st, xx, yy)) {
+        if (solidTileV(st, xx, yy) && !isBoulderType(st.type[st.idx(xx, yy)])) {
           const ii = st.idx(xx, yy);
           st.type[ii] = STONE1; st.flags[ii] = 1;
         }
@@ -312,13 +385,15 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       // ★cs:9307 反编译印 PlaceTile(num4+1, num5+1)，x86 金标实证锚=(num4, num5)
       //   （site 对账：(533,603) 板/num4=532/num5=579 → 巨石 532-533×579-580；
       //   井/壳/栅行界全按 num5 直读对齐，仅此锚差 (-1,-1)）。
-      //   ★Place2x2 空置门（cs:51364 检查 (x-1..x)×(y-1..y) 四格任一 active 即整写
-      //   放弃）：邻陷阱巨石占位时 B 陷阱只留井/栅/板（golden site (2022..2024,581)
-      //   A/B 双陷阱实证——缺此门 JS 会覆写 A 的巨石且多出 B 石）。
+      //   ★空置门：巨石 2×2 目标格任一 active 即整写放弃（保留井/栅/板/线，仍
+      //   return true）——golden 双站点实证：site(878..882,729..734) A/B 双陷阱各自
+      //   落石（无重叠）；site(2022..2024,581) B 陷阱 2×2 与先置 A 石重叠 → 只留
+      //   板(2024,613)+井杀列。反编译 Place2x2 的 (x-1..x)×(y-1..y) 门与两站均
+      //   矛盾（门格恒活却仍落石），以金标为准取目标格判定。
       const bx = colX, by = top;
       let blocked = false;
-      for (let gx = bx - 1; gx <= bx; gx++) {
-        for (let gy = by - 1; gy <= by; gy++) {
+      for (let gx = bx; gx <= bx + 1; gx++) {
+        for (let gy = by; gy <= by + 1; gy++) {
           if (st.inBounds(gx, gy) && st.flags[st.idx(gx, gy)]) blocked = true;
         }
       }
@@ -351,31 +426,31 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     let by = py;
     for (let k = 0; k < drop; k++) {
       by++;
-      if (!solidTileV(st, bx, by)) return false;
+      if (!solidTileV(st, bx, by)) { SAND_REJ.g34 = (SAND_REJ.g34 ?? 0) + 1; return false; }
     }
     for (let xx = bx - 2; xx <= bx + 2; xx++) {
       for (let yy = by - 2; yy <= by + 2; yy++) {
         if (st.inBounds(xx, yy)) {
           const ii = st.idx(xx, yy);
-          if (st.wall[ii] === 350) return false;                      // cs:9369
-          if (!solidTileV(st, xx, yy)) return false;
+          if (st.wall[ii] === 350) { SAND_REJ.g35 = (SAND_REJ.g35 ?? 0) + 1; return false; }                      // cs:9369
+          if (!solidTileV(st, xx, yy)) { SAND_REJ.g36 = (SAND_REJ.g36 ?? 0) + 1; return false; }
         }
       }
     }
-    st.setTileSilent(bx, by, 0);                                      // KillTile（cs:9382，清半砖/坡）
+    killTileWhole(st, bx, by);                                        // KillTile（cs:9382，清半砖/坡）
     st.setTileSilent(bx, by, EXPLOSIVES, 0, rng.int(0, 1) * 18);      // cs:9383-9386
     placePlate(st, x2, py, rng.int(2, 3));                            // cs:9387
     lWire(st, x2, py, bx, by);
     if (EEEE_DBG) eeeeLog.push({ k: 2, x2, py, ax: bx, ay: by });
-    return false;                                                     // cs:9413 break → 9459 return false
+    { SAND_REJ.g37 = (SAND_REJ.g37 ?? 0) + 1; return false; }                                                     // cs:9413 break → 9459 return false
   }
 
   if (type === 3) {
     // ---- 热喷泉（cs:9415-9452）：2×1，frameX = 18*k + 36*Next(2)；直写保半砖/坡 ----
-    if (st.flags[st.idx(x2 + 1, py)]) return false;
-    if (st.liquid[st.idx(x2, py)] > 0 && st.liquidType[st.idx(x2, py)] !== 2) return false;   // cs:9421 非岩浆液体拒
+    if (st.flags[st.idx(x2 + 1, py)]) { SAND_REJ.g38 = (SAND_REJ.g38 ?? 0) + 1; return false; }
+    if (st.liquid[st.idx(x2, py)] > 0 && st.liquidType[st.idx(x2, py)] !== 2) { SAND_REJ.g39 = (SAND_REJ.g39 ?? 0) + 1; return false; }   // cs:9421 非岩浆液体拒
     for (let xx = x2; xx <= x2 + 1; xx++) {
-      if (!solidTileV(st, xx, py + 1)) return false;
+      if (!solidTileV(st, xx, py + 1)) { SAND_REJ.g40 = (SAND_REJ.g40 ?? 0) + 1; return false; }
     }
     const fx = rng.int(0, 1);
     for (let k = 0; k < 2; k++) {
@@ -390,10 +465,10 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   const solidFor = (x: number, y: number) => solidTileV(st, x, y)
     || (st.inBounds(x, y) && st.flags[st.idx(x, y)] && isCracked(st.type[st.idx(x, y)]));
   let i1 = x2;
-  while (!solidFor(i1, j2)) { i1--; if (i1 < 0) return false; }
+  while (!solidFor(i1, j2)) { i1--; if (i1 < 0) { SAND_REJ.g41 = (SAND_REJ.g41 ?? 0) + 1; return false; } }
   const i2 = i1;
   let i3 = x2;
-  while (!solidFor(i3, j2)) { i3++; if (i3 > st.w) return false; }
+  while (!solidFor(i3, j2)) { i3++; if (i3 > st.w) { SAND_REJ.g42 = (SAND_REJ.g42 ?? 0) + 1; return false; } }
   const i4 = i3;
   let f3 = x2 - i2 > 5 && x2 - i2 < 50;
   let f4 = i4 - x2 > 5 && i4 - x2 < 50;
@@ -408,11 +483,11 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     if (rng.int(0, 1) === 0) { i5 = i4; dir = -1; }
   } else if (f4) { i5 = i4; dir = -1; }
   else if (f3) { i5 = i2; dir = 1; }
-  else return false;
-  if (st.type[st.idx(i5, j2)] === GLOW190) return false;              // cs:9087
-  if (st.wall[st.idx(i5, j2)] === 350) return false;                  // cs:9092
+  else { SAND_REJ.g43 = (SAND_REJ.g43 ?? 0) + 1; return false; }
+  if (st.type[st.idx(i5, j2)] === GLOW190) { SAND_REJ.g44 = (SAND_REJ.g44 ?? 0) + 1; return false; }              // cs:9087
+  if (st.wall[st.idx(i5, j2)] === 350) { SAND_REJ.g45 = (SAND_REJ.g45 ?? 0) + 1; return false; }                  // cs:9092
   placePlate(st, x2, py, st.wall[st.idx(x2, py)] > 0 ? 2 : rng.int(2, 3));   // cs:9097-9104
-  st.setTileSilent(i5, j2, 0);                                        // KillTile（cs:9105）
+  killTileWhole(st, i5, j2);                                          // KillTile（cs:9105，整块语义）
   st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 0);           // cs:9115（style0）
   lWire(st, x2, py, i5, j2);
   if (EEEE_DBG) eeeeLog.push({ k: 0, x2, py, ax: i5, ay: j2, dir });
@@ -425,17 +500,19 @@ function isCracked(t: number): boolean {
 }
 
 /** PlaceSandTrap（cs:35505-35781）：地下沙漠蜂窝墙内的塌沙陷阱（1456 全尾段） */
-function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
+/** PlaceSandTrap（cs:35505-35781）——导出仅供探针对账 */
+export const SAND_REJ: Record<string, number> = {};
+export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
   const num2 = 4, num3 = 25;
   let k = j;
   while (k < st.h - 200 && !st.flags[st.idx(i, k)]) k++;              // cs:35515 UnderworldLayer
-  if (k >= st.h - 200) return false;
+  if (k >= st.h - 200) { SAND_REJ.g46 = (SAND_REJ.g46 ?? 0) + 1; return false; }
   {
     const gi = st.idx(i, k);
     const t = st.type[gi]!;
-    if (!vanGenSolidType(t) || st.half[gi] || st.slope[gi] === 1 || st.slope[gi] === 2) return false;  // cs:35522
+    if (!vanGenSolidType(t) || st.half[gi] || st.slope[gi] === 1 || st.slope[gi] === 2) { SAND_REJ.g47 = (SAND_REJ.g47 ?? 0) + 1; return false; }  // cs:35522
     const s = sheetOf(t);
-    if ((s !== 53 && s !== 397 && s !== 396) || (st.wall[gi] !== 216 && st.wall[gi] !== 187)) return false;  // cs:35526
+    if ((s !== 53 && s !== 397 && s !== 396) || (st.wall[gi] !== 216 && st.wall[gi] !== 187)) { SAND_REJ.g48 = (SAND_REJ.g48 ?? 0) + 1; return false; }  // cs:35526
   }
   k--;                                                                // cs:35530
   const pocketW = rng.int(6, 11);                                     // num5（cs:35532 ★掷在 ±25 扫前）
@@ -446,46 +523,46 @@ function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
       const xx = i + dx, yy = k + dy;
       if (!st.inBounds(xx, yy)) continue;
       const ii = st.idx(xx, yy);
-      if (st.wire[ii]) return false;
-      if (SAND_FORBID.has(sheetOf(st.type[ii]!))) return false;       // 无 active 门（cs:35542 原样读 type）
+      if (st.wire[ii]) { SAND_REJ.g49 = (SAND_REJ.g49 ?? 0) + 1; return false; }
+      if (SAND_FORBID.has(sheetOf(st.type[ii]!))) { SAND_REJ.g50 = (SAND_REJ.g50 ?? 0) + 1; return false; }       // 无 active 门（cs:35542 原样读 type）
     }
   }
   // ±2 下 3 格实心（cs:35572-35581：active && tileSolid）
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = 1; dy <= 3; dy++) {
       const ii = st.idx(i + dx, k + dy);
-      if (!st.flags[ii] || !vanGenSolidType(st.type[ii]!)) return false;
+      if (!st.flags[ii] || !vanGenSolidType(st.type[ii]!)) { SAND_REJ.g51 = (SAND_REJ.g51 ?? 0) + 1; return false; }
     }
   }
-  if (sheetOf(st.type[st.idx(i, k + 1)]!) === 162) return false;      // cs:35582 BreakableIce
+  if (sheetOf(st.type[st.idx(i, k + 1)]!) === 162) { SAND_REJ.g52 = (SAND_REJ.g52 ?? 0) + 1; return false; }      // cs:35582 BreakableIce
   // 上扫砂岩顶（cs:35586-35605）
   let sandTop = -1;
   for (let yy = k; yy > k - 30; yy--) {
     const ii = st.idx(i, yy);
     if (st.flags[ii]) {
-      if (sheetOf(st.type[ii]!) !== 396) return false;
+      if (sheetOf(st.type[ii]!) !== 396) { SAND_REJ.g53 = (SAND_REJ.g53 ?? 0) + 1; return false; }
       sandTop = yy;
       break;
     }
   }
-  if (sandTop <= -1) return false;
-  if (k - sandTop < pocketH + num2) return false;
+  if (sandTop <= -1) { SAND_REJ.g54 = (SAND_REJ.g54 ?? 0) + 1; return false; }
+  if (k - sandTop < pocketH + num2) { SAND_REJ.g55 = (SAND_REJ.g55 ?? 0) + 1; return false; }
   // 腰线全空 + 下方实心率 75%（cs:35606-35633：ore 检查对任意 active 格）
   const mid = Math.floor((k + sandTop) / 2);
   let solidN = 0;
   for (let dx = -pocketW; dx <= pocketW; dx++) {
     const ii = st.idx(i + dx, mid);
-    if (st.flags[ii] && vanGenSolidType(st.type[ii]!)) return false;
+    if (st.flags[ii] && vanGenSolidType(st.type[ii]!)) { SAND_REJ.g56 = (SAND_REJ.g56 ?? 0) + 1; return false; }
     for (let dy = sandTop - pocketH; dy <= sandTop; dy++) {
       const jj = st.idx(i + dx, dy);
       if (st.flags[jj]) {
         const s = sheetOf(st.type[jj]!);
-        if (ORE_SHEETS.has(s) || s === 404) return false;             // cs:35618 Ore ∪ DesertFossil 404
+        if (ORE_SHEETS.has(s) || s === 404) { SAND_REJ.g57 = (SAND_REJ.g57 ?? 0) + 1; return false; }             // cs:35618 Ore ∪ DesertFossil 404
         if (vanGenSolidType(st.type[jj]!)) solidN++;
       }
     }
   }
-  if (solidN < (pocketW * 2 + 1) * (pocketH + 1) * 0.75) return false;
+  if (solidN < (pocketW * 2 + 1) * (pocketH + 1) * 0.75) { SAND_REJ.g58 = (SAND_REJ.g58 ?? 0) + 1; return false; }
   // 掏沙穴 + 壳（cs:35634-35687）
   for (let dx = -pocketW - 1; dx <= pocketW + 1; dx++) {
     for (let dy = sandTop - pocketH; dy <= sandTop; dy++) {
@@ -548,7 +625,7 @@ function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
     }
   }
   // 压板两侧清空 + 压板 style7（cs:35741-35745）
-  for (const dx of [-2, -1, 1, 2]) st.setTileSilent(i + dx, k, 0);
+  for (const dx of [-2, -1, 1, 2]) killTileWhole(st, i + dx, k);
   placePlate(st, i, k, 7);
   // 致动沙栅 + 阶梯掏空 + 中心红线（cs:35746-35780）
   for (let x20 = i - pocketW; x20 <= i + pocketW; x20++) {
@@ -561,7 +638,7 @@ function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
       const ii = st.idx(x20, y22);
       if (st.flags[ii] && vanGenSolidType(st.type[ii]!)) {
         if (y22 < sandTop + 2) st.wire[ii] |= WIRE_ACTUATOR | WIRE_RED;
-        else if (y22 < y21) st.setTileSilent(x20, y22, 0);
+        else if (y22 < y21) killTileWhole(st, x20, y22);
       }
     }
   }

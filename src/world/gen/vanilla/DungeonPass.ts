@@ -2714,7 +2714,15 @@ export function runDungeonPass(
             placeOnTableD(m, py - 1, TILE_BY_KEY['v_13_placed_bottles']!);
             if (typAt(m, py - 1) === TILE_BY_KEY['v_13_placed_bottles']) rn(2);   // type==13 后 Next(2)
           } else if ((d.books ?? 0) > 0 && rd() < (d.books ?? 0)) {
-            placeOnTableD(m, py - 1, BOOKS);                  // NoWaterbolt=true → 无 Next(50)；内含 Next(5)
+            // ★FFFF 批（2026-08-18）：NoWaterbolt=false（Dome 下对平台）走
+            //   GenerateDungeonBook 默认支（DU:432-435）——Next(50) 掷在参数位
+            //   （PlaceTile(50) 内的 Next(5) 之前）；waterbolt 帧门 :441 原版手滑读
+            //   Main.tile[placeY, placeY]（非 placeX,placeY）——1:1 照抄
+            const wb = d.nowb === false && rn(50) === 0;
+            placeOnTableD(m, py - 1, BOOKS);                  // 内含 Next(5)（cs:45377）
+            if (wb && py - 1 > (ws + rock) / 2 && typAt(py - 1, py - 1) === BOOKS) {
+              st.frameX[st.idx(m, py - 1)] = 90;              // frameX=90（水书帧，DU:439-444）
+            }
           }
         }
       }
@@ -3061,7 +3069,15 @@ export function runDungeonPass(
                 st.frameY[st.idx(x, y)] = 18 * shelfStyle;
                 if (flag3) {
                   placeOnTableD(x, y - 1, BOOKS);   // ★平台19 ∈ tileTable
-                  if (rn(50) === 0 && y > (ws + rock) / 2.0) { /* waterbolt 帧 */ }
+                  // GenerateDungeonBook（DungeonUtils.cs:437-446）：Next(50) 水书掷 +
+                  // 深度门 (ws+rock)/2 + ★1456 typo 检查 Main.tile[placeY, placeY].type==50
+                  // （X/Y 互换读对角格—— DungeonGlobalPlatforms.cs:206 唯一调用链，
+                  // 实战对角格几乎恒非书 → 帧恒不落；1405 同处是正确的 [i2, j2-1]。
+                  // RNG 序两版亦反（1456 先掷 50 后掷 5；本仓 5→50 已冻结金标，保留）
+                  if (rn(50) === 0 && y > (ws + rock) / 2.0
+                    && inW(y, y, 0) && typAt(y, y) === BOOKS) {
+                    st.frameX[st.idx(x, y - 1)] = 90;   // frameX = 90 水书伪装帧
+                  }
                 }
                 x += n7;
                 n10--;
@@ -3681,7 +3697,8 @@ export function runDungeonPass(
     const bi = st.idx(x, y + 1);
     if (st.flags[bi] === 0 || !TILE_TABLE_D.has(st.type[bi])) return false;
     dgWr(x, y, t);
-    if (t === BOOKS) rn(5);                     // cs:45377 frameX=18*Next(5)
+    // cs:45377 书帧 = 18*Next(5)（五书色随机；掷值此前被丢弃=恒帧 0，2026-08-18 补写）
+    if (t === BOOKS) st.frameX[st.idx(x, y)] = 18 * rn(5);
     return true;
   }
   // Place2xX（cs:39705 钟104 h5/雕像105 h3）
@@ -4120,20 +4137,13 @@ export function runDungeonPass(
     if (TT) TT.climb1 = dgMainRolls;
   }
   // MakeDungeon_GetEntrance（:450）——Tower=TowerDungeonEntrance（XX 批 1:1 转录）；
-  // Dome 体未转录（WorldUtils 形状族+窗/柱特征另案）——precalc 链（掷/位置）照走、
-  // 入口体暂以 Legacy 城堡近似（备案：Dome 种子 x86 网格不裁决）。
+  // Dome=DomeDungeonEntrance（FFFF 批 2026-08-18 1:1 转录——XX 批备案的"Legacy 近似
+  // 体"已退役；AAAA 批的 Dome 锚补丁同步本体化进 dgDomeEntrance 尾部）。
   // GetEntranceSettings 的 1 颗废弃掷在两支同位（settings.RandomSeed=Next() 后被
-  // preSettings.RandomSeed 覆写）——tower 支先 raw() 再传 entSeed。
+  // preSettings.RandomSeed 覆写）——tower/dome 支先 raw() 再传 entSeed。
   if (entKind === 2) { raw(); dgTowerEntrance(posX, posY, entSeed); }
+  else if (entKind === 1) { raw(); dgDomeEntrance(posX, posY, entSeed); }
   else dgEntrance(raw(), entSeed);
-  // ★AAAA 批（2026-08-18）：Dome 种子（entKind=1）老头锚语义 = (i, num7) =
-  // (posX, posY-30)（DomeDungeonEntrance.cs:49 num7=j-num6,num6=30 + :430
-  // SetOldManSpawnAndSpawnOldManIfDefaultDungeon(i, num7)——GenerateEntrance 入参
-  // DC.cs:450 = genVars.generatingDungeonPositionX/Y）。Dome 体仍为 Legacy 近似
-  // （上注备案），但 dungeonX/Y 头字段按 Dome 语义回填（s12345 实测 3377,220→
-  // 3413,190 = x86 头锚全等；纯 gs 元数据写，无 tile/掷流影响——gs.dungeonEntX/Y
-  // 唯一消费端 WorldGen.ts:790 world.dungeonX/Y）。
-  if (entKind === 1) { dungeonX = posX; dungeonY = posY - 30; }
   snap('dungeonE');
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);

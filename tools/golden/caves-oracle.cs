@@ -10596,19 +10596,41 @@ bool PlaceTileGen(int i, int j, int type, int style)
         }
         case 26:   // 祭坛（#43 直调 Place3x2）：同 3×2 底锚
         {
+            bool altTr = Environment.GetEnvironmentVariable("DG_ALTARS_TRACE") != null;
+            if (altTr)
+            {
+                string g(int c) => act[(j + 1) * W + c] != 0 ? $"{typ[(j + 1) * W + c]}s{slope[(j + 1) * W + c]}h{half[(j + 1) * W + c]}" : "ia";
+                string clr(int c) => (act[(j - 1) * W + c] != 0 ? "1" : "0") + (act[j * W + c] != 0 ? "1" : "0");
+                Console.WriteLine($"ALT i={i} j={j} bases=[{g(i - 1)},{g(i)},{g(i + 1)}] clr=[{clr(i - 1)},{clr(i)},{clr(i + 1)}]");
+            }
             if (i < 5 || i > W - 5 || j < 5 || j > H - 5) return false;
             bool ok = true;
             for (int c = i - 1; c <= i + 1; c++)
             {
                 for (int d = j - 1; d <= j; d++)
                     if (act[d * W + c] != 0) ok = false;
-                if (type == 26 && act[(j + 1) * W + c] != 0 && BOULDERS.Contains(typ[(j + 1) * W + c])) ok = false;
-                if (!SolidTileGen(c, j + 1)) ok = false;
+                // ★s111 定罪门镜像（2026-08-17 JS place3x2 :345-356，BBBB 转录）：底座
+                //   SolidTile2 坡位/半砖门（平台族上坡/半砖过坡门、半砖终拒）+ BOULDERS
+                //   ghost 裸读（不查 active，同原版 Sets 读取）——带坡底座原版拒放祭坛
+                //   → 重试环继续耗掷（曾 JS 早退 = 腐化 pass -63 万掷的同族根因）。
+                int bi = (j + 1) * W + c;
+                ushort bt = typ[bi];
+                bool topSlope = slope[bi] == 1 || slope[bi] == 2;
+                if (act[bi] == 0 || !SOLID.Contains(bt) || bt == 481 || bt == 482 || bt == 483) ok = false;   // 裂纹砖 DC:344 起非实心（SmoothWorld 头才还原）
+                if (!((DG_PLATFORMS_DG.Contains(bt) && (half[bi] != 0 || topSlope)) || slope[bi] == 0)) ok = false;
+                if (half[bi] != 0) ok = false;
+                if (BOULDERS.Contains(bt)) ok = false;
             }
             if (ok)
             {
                 for (int c = i - 1; c <= i + 1; c++)
-                    for (int d = j - 1; d <= j; d++) { typ[d * W + c] = (ushort)type; act[d * W + c] = 1; }
+                    for (int d = j - 1; d <= j; d++)
+                    {
+                        int wi = d * W + c;
+                        typ[wi] = (ushort)type; act[wi] = 1;
+                        frX[wi] = (ushort)(style * 54 + (c - i + 1) * 18);   // Place3x2 帧（cs:52097）
+                        frY[wi] = (ushort)((d - j + 1) * 18);
+                    }
                 return true;
             }
             return false;

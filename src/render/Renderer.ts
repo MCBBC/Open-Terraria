@@ -1056,30 +1056,42 @@ export class Minimap {
   /** 实例序号(GL 全屏地图纹理键;切世界换实例即换键自动重传) */
   private static uidGen = 0;
   readonly uid = ++Minimap.uidGen;
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
+  /** ★CPU 像素后备(2026-08-18 GPU 预算瘦身):整幅小地图(大世界 80MB)曾是
+   *  GPU 画布后备——Chrome 画布表面计入 GPU 进程预算,是双开 contextlost 风暴
+   *  的常驻大头。改纯 CPU 内存(pix):HUD 缩略图只 blit 可见小窗(~≤512² ≈1MB
+   *  GPU),全屏地图打开期才整幅上传 GL 纹理、关闭即释放。像素语义零变化
+   *  (小端 ABGR Uint32 直写,与旧 fillBand 约定一致) */
+  readonly w: number;
+  readonly h: number;
+  pix: Uint8ClampedArray | null = null;
+  /** pix 的 ImageData 包装(共享 buffer;GL 上传源。node 测试环境无 ImageData
+   *  则为 null——测试只读 pix) */
+  image: ImageData | null = null;
+  /** Uint32 视图(HUD blit/全屏地图消费方共用) */
+  p32: Uint32Array | null = null;
   dirtyChunks = new Set<number>();
   /** 本帧 flushDirty 实际重画的像素区 [px,py,w,h](GL 地图纹理 texSubImage2D
    *  增量上传消费,消费方清空;上限=flushDirty 每帧 24 chunk) */
   flushedPixelRects: Array<[number, number, number, number]> = [];
-  /** deferBuild：跳过构造期同步全量重建（大世界 80MB 级，见 buildStriped），
-   *  由调用方跑分行构建；测试/小世界默认同步行为不变 */
   constructor(public world: World, deferBuild = false) {
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = world.w;
-    this.canvas.height = world.h;
-    this.ctx = this.canvas.getContext('2d')!;
-    if (!deferBuild) this.redrawAll();
+    this.w = world.w;
+    this.h = world.h;
+    const pix = new Uint8ClampedArray(world.w * world.h * 4);
+    this.pix = pix;
+    this.p32 = new Uint32Array(pix.buffer);
+    if (typeof ImageData !== 'undefined') this.image = new ImageData(pix, world.w, world.h);
     world.store.onTileChanged((x, y) => {
       this.dirtyChunks.add(ChunkCache.key(Math.floor(x / CHUNK), Math.floor(y / CHUNK)));
     });
+    if (!deferBuild) this.redrawAll();
   }
 
-  /** 释放全幅小地图画布(6400×1800 ≈ 46MB;退出世界时调用防累积) */
   dispose(): void {
-    this.canvas.width = 0;
-    this.canvas.height = 0;
+    this.pix = null;
+    this.p32 = null;
+    this.image = null;
     this.dirtyChunks.clear();
+    this.flushedPixelRects.length = 0;
   }
 
   colorFor(x: number, y: number): string | null {
@@ -1137,46 +1149,29 @@ export class Minimap {
   }
 
   redrawAll() {
-    // 性能（2026-08-10，trace 实测 redrawAll 占 1.7s CPU/次进世界）：旧版每格走
-    // colorFor 字符串分配 + parseInt（1150 万格 ≈ 秒级冻结 + GC 压力）。改为
-    // 类型/墙 id 数值 LUT + Uint32 直写（小端 ABGR 打包），纯数组循环
-    // ★大世界（8400×2400）仍是 80MB ImageData + 2000 万格单微任务巨帧
-    //  （2026-08-18 trace 石锤 811/943ms），Game 进世界路径走 buildStriped 分行
-    const { world, ctx } = this;
+    // 性能注释沿革:旧 canvas 版每格字符串分配秒级冻结→LUT Uint32 直写;再后
+    // 811/943ms 巨帧→buildStriped 分行。本版直接写 CPU pix(无画布无 putImageData)
     this.ensureLUT();
-    const img = ctx.createImageData(world.w, world.h);
-    this.fillBand(0, world.h, img);
-    ctx.putImageData(img, 0, 0);
+    this.fillBand(0, this.world.h);
     this.dirtyChunks.clear();
   }
 
-  /** 大世界首次全量构建的分行版（2026-08-18）：new Minimap 构造里同步 redrawAll
-   *  曾把 80MB 画布 + 80MB ImageData + 2000 万格循环全砸进进世界 onload 微任务
-   *  续体（trace 811/943ms 巨帧；GPU 预算临界时直接 contextlost→解码位图逐出
-   *  风暴）。拆 64 行/带、带间让路（MessageChannel，后台页不被节流——setTimeout
-   *  隐藏页 1s/带会让探针/挂机读档假冻结），Game 加载页 await 完成再 onWorldReady。
-   *  构建期间 onTileChanged 照常入 dirtyChunks，完成后 clear（带构建已覆盖全图）；
-   *  flushDirty 的增量重画与本构建写同色，并发安全 */
+  /** 大世界首次全量构建的分行版(带间 MessageChannel 让路,详见旧注释沿革):
+   *  Game 加载页 await 完成再 onWorldReady;期间 onTileChanged 入 dirtyChunks,
+   *  完成后 clear(带构建已覆盖全图) */
   async buildStriped(onProgress?: (p: number) => void): Promise<void> {
     if (this._stripedDone) return;
     this._stripedDone = true;
-    const { world, ctx } = this;
     this.ensureLUT();
-    const BAND = 64;                       // ≈8400×64×4=2.1MB/带，单带 ~15-25ms
-    const bandImg = ctx.createImageData(world.w, Math.min(BAND, world.h));
+    const BAND = 64;                       // ≈8400×64×4=2.1MB/带,单带 ~15-25ms
     const yieldToEventLoop = () => new Promise<void>((r) => {
       const { port1, port2 } = new MessageChannel();
       port1.onmessage = () => { port1.close(); r(); };
       port2.postMessage(0);
     });
-    for (let y0 = 0; y0 < world.h; y0 += BAND) {
-      const y1 = Math.min(y0 + BAND, world.h);
-      const rows = y1 - y0;
-      // 末带不足 BAND 时收缩 ImageData（putImageData 以位图实际尺寸为准）
-      const use = rows === bandImg.height ? bandImg : ctx.createImageData(world.w, rows);
-      this.fillBand(y0, y1, use);
-      ctx.putImageData(use, 0, y0);
-      onProgress?.(y1 / world.h);
+    for (let y0 = 0; y0 < this.world.h; y0 += BAND) {
+      this.fillBand(y0, Math.min(y0 + BAND, this.world.h));
+      onProgress?.(Math.min(y0 + BAND, this.world.h) / this.world.h);
       await yieldToEventLoop();
     }
     this.dirtyChunks.clear();
@@ -1221,21 +1216,20 @@ export class Minimap {
       this._mapLUT = { tiles, walls, liq, dirtBg: rgb(VANILLA_DIRT_BG), rockBg: rgb(VANILLA_ROCK_BG) };
   }
 
-  /** 行带填充：y0..y1（不含）行写入 band 位图——buf 索引相对带顶（base=y0*world.w）。
-   *  全量（y0=0,y1=h,全幅 img）与分行（64 行带）共用同一热循环 */
-  private fillBand(y0: number, y1: number, img: ImageData) {
+  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number } | null = null;
+
+  /** 行带填充:y0..y1(不含)行直写 pix(绝对索引;与旧版同热循环,仅落点从
+   *  ImageData 换 CPU 缓冲) */
+  private fillBand(y0: number, y1: number) {
     const world = this.world;
     const st = world.store;
     const lut = this._mapLUT!;
-    const buf = new Uint32Array(img.data.buffer);
-    const base = y0 * world.w;
+    const buf = this.p32!;
     const { type, wall, liquid, liquidType, frameX, frameY, paint, paintWall } = st;
     const surf = Math.max(1, world.groundLevel), rock = Math.max(surf + 1, world.rockLevel);
-    // MapHelper.GetMapTileXnaColor（:1865-1882）：colorLookup[type] 后过 MapColor 换漆。
-    // ABGR 打包直算（热循环零分配）：默认分支 = paintColor × max(r,g,b)（:1854-1861）
     const mapPaintPacked = (packed: number, colorType: number, isWall: boolean): number => {
       const r = packed & 255, g = (packed >>> 8) & 255, b = (packed >>> 16) & 255;
-      if (colorType === 29) { // ShadowPaint :1832-1839（num3 = 两次交换后的中位通道）
+      if (colorType === 29) {
         let n = r / 255, n2 = g / 255, n3 = b / 255;
         if (n2 > n) { const t = n; n = n2; n2 = t; }
         if (n3 > n) { const t = n; n = n3; n3 = t; }
@@ -1244,7 +1238,7 @@ export class Minimap {
         const nr = (c[0] * sc) | 0, ng = (c[1] * sc) | 0, nb = (c[2] * sc) | 0;
         return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
       }
-      if (colorType === 30) { // NegativePaint :1840-1853（墙半幅反转）
+      if (colorType === 30) {
         if (isWall) {
           const nr = ((255 - r) * 0.5) | 0, ng = ((255 - g) * 0.5) | 0, nb = ((255 - b) * 0.5) | 0;
           return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
@@ -1252,59 +1246,54 @@ export class Minimap {
         const nr = 255 - r, ng = 255 - g, nb = 255 - b;
         return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
       }
-      const n6 = Math.max(r, g, b) / 255; // :1856 num = 最大通道
+      const n6 = Math.max(r, g, b) / 255;
       const c = PAINT_RGB[colorType];
       const nr = (c[0] * n6) | 0, ng = (c[1] * n6) | 0, nb = (c[2] * n6) | 0;
       return 0xff000000 | ((nb & 255) << 16) | ((ng & 255) << 8) | (nr & 255);
     };
     for (let y = y0; y < y1; y++) {
-      // 背景（无 tile/液体/墙）：天空渐变（y<世界面，CalcSkyGradient lerp）/ 土层底 / 石层底
       const skyC = vanillaSkyColor(y, surf);
       const bg = y < surf ? (0xff000000 | ((skyC[2] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[0] & 255))
         : y < rock ? lut.dirtBg : lut.rockBg;
+      const rowOff = y * world.w;
       for (let x = 0; x < world.w; x++) {
-        const i = y * world.w + x;
+        const i = rowOff + x;
         const t = type[i];
         if (t !== 0) {
-          // 自研像素方块（F2 图片导入）：RGB 编码在 frameX/Y（r<<8|g, b，0→1 兜底）——
-          // 小地图按原像素色显示，此前走 sheet:0 泥土色恒为 #976B4B
           if (t === PIXEL_ART_TILE) {
             const r = frameX[i] >> 8, g = frameX[i] & 255, b = frameY[i];
-            buf[i - base] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
+            buf[i] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
             continue;
           }
           let c = lut.tiles[t] ?? lut.tiles[0];
-          // GetTileType :1962-1972：sheet 160 恒 newColor=0（不吃漆）
           if (paint[i] > 0 && TILE_SHEET_OF[t] !== MAP_TILE_NO_PAINT_SHEET) {
             c = mapPaintPacked(c, paint[i], false);
           }
-          buf[i - base] = c; continue;
+          buf[i] = c; continue;
         }
         if (liquid[i] > 32) {
           const lt = liquidType[i];
-          buf[i - base] = lut.liq[lt >= 1 && lt <= 4 ? lt : 1];
+          buf[i] = lut.liq[lt >= 1 && lt <= 4 ? lt : 1];
           continue;
         }
         const wl = wall[i];
         if (wl !== 0) {
           let c = lut.walls[wl] ?? lut.walls[0];
-          // GetWallType :1993-2005：墙 21/88-93/168/241 恒 newColor=0（不吃漆）
           if (paintWall[i] > 0 && !MAP_WALL_NO_PAINT.has(wl)) {
             c = mapPaintPacked(c, paintWall[i], true);
           }
-          buf[i - base] = c;
+          buf[i] = c;
         } else {
-          buf[i - base] = bg;
+          buf[i] = bg;
         }
       }
     }
   }
-  /** redrawAll 用的颜色 LUT（tile/wall id → ABGR） */
-  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number } | null = null;
 
   flushDirty() {
-    if (this.dirtyChunks.size === 0) return;
+    if (this.dirtyChunks.size === 0 || !this.p32) return;
     const st = this.world.store;
+    const buf = this.p32;
     let n = 0;
     for (const k of this.dirtyChunks) {
       if (n++ > 24) break;
@@ -1316,8 +1305,10 @@ export class Minimap {
         for (let x = x0; x < x0 + CHUNK; x++) {
           if (!st.inBounds(x, y)) continue;
           const c = this.colorFor(x, y);
-          this.ctx.fillStyle = c ?? '#000';
-          this.ctx.fillRect(x, y, 1, 1);
+          // colorFor '#RRGGBB' → 小端 ABGR 直写(与 fillBand 同打包)
+          buf[st.idx(x, y)] = c
+            ? (() => { const v = parseInt(c.slice(1), 16); return 0xff000000 | ((v & 255) << 16) | (v & 0xff00) | ((v >> 16) & 255); })()
+            : 0xff000000;
         }
       }
     }
@@ -1356,6 +1347,17 @@ export function sleepingTransformOps(
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
+  /** CPU 软渲染态(渲染模式 cpu 或 auto 降级后为 true):主画布/chunk 烘焙/
+   *  光照画布全部走 willReadFrequently(软件光栅化,零 GPU 预算) */
+  cpuRender = false;
+  /** CPU 模式起始时刻(稳定 120s 后 auto 尝试回 GPU) */
+  cpuRenderSince = 0;
+  /** 渲染模式切换回调(Game 接线 toast) */
+  cbOnRenderModeSwitch: ((mode: 'cpu' | 'gpu') => void) | null = null;
+  /** 实际是否 CPU 渲染(选项 cpu 恒真;auto 看 cpuRender 降级态) */
+  isCpuRender(): boolean {
+    return options.data.renderMode === 'cpu' || this.cpuRender;
+  }
   /** ?mapgl=0 逃生门(#2);GL 初始化失败自动回退;可运行时切换(对拍探针用) */
   mapGlEnabled = (() => {
     try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('mapgl') !== '0'; }
@@ -1416,8 +1418,13 @@ export class Renderer {
     // 8s 冷却让系统释放,期满以最小足迹重试;再抖再熔断。
     let losses: number[] = [];
     let tripped = false;
-    let cooldown = 8_000;                 // ★逐次翻倍(8→16→32→60s 封顶):曾固定 8s,
-    let trips = 0;                        //   冷却期满重新放行→再抖→再熔 = 永久 8s 振荡
+    let cooldown = 8_000;                 // ★逐次翻倍(8→16→32→60s 封顶)
+    let trips = 0;
+    // 自动降级(用户方案 2026-08-18:不检测多实例,GPU 崩即切 CPU,稳定回切):
+    // auto 模式下第 2 次熔断 → 切 CPU 软渲染 + toast;CPU 稳定 120s 后尝试回
+    // GPU(立即再熔 → 切回 CPU,5 分钟内不重试)。gpu/cpu 模式不自动切。
+    let lastTripAt = 0;
+    let gpuRetryAfter = 0;
     const onLost = (e: Event) => {
       const now = performance.now();
       losses = losses.filter((t) => now - t < 10_000);
@@ -1429,6 +1436,18 @@ export class Renderer {
         tripped = true;
         trips++;
         this.gpuDegraded = true;
+        // auto 模式:60s 内第 2 次熔断 = GPU 不可持续 → 自动切 CPU 软渲染
+        const now2 = performance.now();
+        if (options.data.renderMode === 'auto' && trips >= 2 && now2 - lastTripAt < 60_000) {
+          this.setRenderMode(true);
+          this.cbOnRenderModeSwitch?.('cpu');
+          console.warn('[Renderer] GPU 连续崩溃 → 自动切换 CPU 软渲染(稳定 2 分钟后尝试回 GPU)');
+          tripped = false;      // CPU 模式下不再需要 GPU 熔断
+          this.gpuDegraded = false;
+          losses = [];
+          return;
+        }
+        lastTripAt = now2;
         // ★熔断即硬释放(2026-08-18 双开 trace:16 万次风暴下 JS 堆 35MB 稳定,
         // 纯显存预算问题):GL 纹理池整体丢弃 + 预算腰斩,给 GPU 立刻让出空间
         GLSpriteLayer.MAX_BYTES = Math.max(48 * 1024 * 1024, Math.floor(GLSpriteLayer.MAX_BYTES / 2));
@@ -1440,6 +1459,16 @@ export class Renderer {
           losses = [];
           this.gpuDegraded = false;
           cooldown = Math.min(60_000, cooldown * 2);   // 连续熔断逐次升级
+          // CPU 稳定回切:auto 模式 + CPU 运行中 + 已稳定 120s + 不在重试冷却期
+          if (options.data.renderMode === 'auto' && this.cpuRender && this.cpuRenderSince > 0
+            && performance.now() - this.cpuRenderSince > 120_000 && performance.now() > gpuRetryAfter) {
+            this.cpuRenderSince = 0;
+            gpuRetryAfter = performance.now() + 300_000;   // 本次尝试失败 → 5 分钟内不再试
+            this.setRenderMode(false);                     // 切回 GPU
+            this.cbOnRenderModeSwitch?.('gpu');
+            console.warn('[Renderer] CPU 已稳定 2 分钟 → 尝试切回 GPU 加速(失败将自动回 CPU)');
+            // 给 10s 观察窗:若立刻再熔断,上面 trips>=2 分支会兜回 CPU
+          }
           // 恢复前健康检查(2026-08-18 白屏案):主画布上下文若仍处丢失态
           // (防御路径),重建画布元素;chunk 池可能含死画布 → 全量重烘
           const ctxAny = this.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean };
@@ -1480,10 +1509,10 @@ export class Renderer {
       const nu = document.createElement('canvas');
       nu.width = w; nu.height = h;
       this.lightCanvas = nu;
-      this.lightCtx = nu.getContext('2d')!;
+      this.lightCtx = this.isCpuRender() ? nu.getContext('2d', { willReadFrequently: true })! : nu.getContext('2d')!;
       console.warn('[Renderer] 光照画布已死,已重建');
     }
-    if (this.fogCanvas) { this.fogCanvas.width = 0; this.fogCanvas.height = 0; this.fogCanvas = null; this._mapFogRowSeen = -1; }
+    this.fogPix = null; this.fogP32 = null; this.fogImage = null; this.fogVersion = -1; this._mapFogRowSeen = -1;
   }
 
   /** GPU 看门狗(2026-08-18 用户实报"关掉另一窗口也不恢复"):熔断链终止后
@@ -1515,8 +1544,41 @@ export class Renderer {
     if (css) nu.setAttribute('style', css);
     this.canvas.replaceWith(nu);
     this.canvas = nu;
-    this.ctx = nu.getContext('2d')!;
+    // CPU 软渲染:willReadFrequently 强制软件光栅化(画布后备走 CPU 内存,
+    // 不占 Chrome GPU 进程预算——多开/弱 GPU 的稳定出路)
+    this.ctx = this.isCpuRender()
+      ? nu.getContext('2d', { willReadFrequently: true })!
+      : nu.getContext('2d')!;
     this.onCanvasRecreated?.(nu);
+  }
+
+  /** 切换 CPU/GPU 渲染模式:重建全部画布(主/光照/GL 池/chunk 池) */
+  setRenderMode(cpu: boolean): void {
+    if (this.cpuRender === cpu) return;
+    this.cpuRender = cpu;
+    this.cpuRenderSince = cpu ? performance.now() : 0;   // 稳定计时(回切判定用)
+    // 主画布(换 ctx 属性=必须换元素)
+    this.recreateMainCanvas();
+    // 光照画布
+    if (this.lightCanvas) {
+      const w = this.lightCanvas.width, h = this.lightCanvas.height;
+      this.lightCanvas.width = 0; this.lightCanvas.height = 0;
+      const nu = document.createElement('canvas');
+      nu.width = w; nu.height = h;
+      this.lightCanvas = nu;
+      this.lightCtx = cpu ? nu.getContext('2d', { willReadFrequently: true })! : nu.getContext('2d')!;
+    }
+    // GL 池:切 CPU 时释放;切回 GPU 时恢复默认预算(熔断可能腰斩过)
+    if (cpu) {
+      this.glfx?.dispose();
+      this.glfx = null;
+    } else {
+      GLSpriteLayer.MAX_BYTES = 192 * 1024 * 1024;   // 恢复默认(不继承熔断减半)
+    }
+    // chunk 池:烘焙侧按新模式创建(静态标志)
+    ChunkCache.CPU_RENDER = cpu;
+    this.cbOnGpuRecover?.();
+    console.warn(`[Renderer] 渲染模式切换 → ${cpu ? 'CPU 软渲染(零 GPU 预算)' : 'GPU 加速'}`);
   }
   /** 主画布重建回调(Game 重绑输入/ resize 监听) */
   onCanvasRecreated: ((canvas: HTMLCanvasElement) => void) | null = null;
@@ -1607,9 +1669,9 @@ export class Renderer {
 
   constructor(public assets: AssetBundle, public atlas: SpriteAtlas | null = null) {
     this.canvas = document.createElement('canvas');
-    this.ctx = this.canvas.getContext('2d')!;
+    this.ctx = this.canvas.getContext('2d', this.isCpuRender() ? { willReadFrequently: true } : undefined)!;
     this.lightCanvas = document.createElement('canvas');
-    this.lightCtx = this.lightCanvas.getContext('2d')!;
+    this.lightCtx = this.lightCanvas.getContext('2d', this.isCpuRender() ? { willReadFrequently: true } : undefined)!;
     // 群系前景层 alpha（≈Main.bgAlphaFrontLayer）注入天空渲染器——AmbientSky.GetColor
     // 六族乘子（Pegasus×神圣槽 等，AmbientSky.cs:334/:383/:556/:987/:1198/:1222）消费源
     this.sky.attachBiomeBgAlpha(this.biomeBg.frontLayer());
@@ -1625,9 +1687,11 @@ export class Renderer {
     window.removeEventListener('resize', this.onResize);
     this.canvas.width = 0; this.canvas.height = 0;
     this.lightCanvas.width = 0; this.lightCanvas.height = 0;
-    if (this.fogCanvas) { this.fogCanvas.width = 0; this.fogCanvas.height = 0; this.fogCanvas = null; this._mapFogRowSeen = -1; }
+    this.fogPix = null; this.fogP32 = null; this.fogImage = null; this.fogVersion = -1; this._mapFogRowSeen = -1;
     this.minimap?.dispose();
     this.minimap = null;
+    if (this._mmHudCanvas) { this._mmHudCanvas.width = 0; this._mmHudCanvas.height = 0; this._mmHudCanvas = null; this._mmHudCtx = null; this._mmHudImg = null; }
+    this._fm2dMap = null; this._fm2dFog = null;
     // GL 纹理池同链清空(★曾漏:连续读档逐次叠满 LRU=GB 级显存打爆→contextlost
     // 风暴;背景纹理懒加载重传成本低,不值得跨世界持有)
     this.glfx?.dispose();
@@ -1685,6 +1749,16 @@ export class Renderer {
     invasion: { name: string; pct: number; label?: string } | null = null,
     leashed: import('../entities/LeashedCritter').LeashedEntityManager | null = null,
   ) {
+    // 全屏地图关闭 → 释放整幅资源(GL 纹理 + 2D 临时画布;开图期才占 GPU,
+    // 常态零占用——2026-08-18 CPU 化的核心收益点)
+    if (this._fmWasOpen && !this.fullMap.open) {
+      if (this.glfx && this.minimap) this.glfx.dropTexture(`mm:${this.minimap.uid}`);
+      if (this.fogWorld) this.glfx?.dropTexture(`fog:${this.fogWorld.seed}`);
+      this._fm2dMap = null;
+      this._fm2dFog = null;
+      this._mapFogRowSeen = -1;
+    }
+    this._fmWasOpen = this.fullMap.open;
     // GPU 熔断期跳过全部画布工作(contextlost 抖动环,见 installGpuPressureGuard):
     // 世界模拟照跑(fixedUpdate 独立),画面冻结——向已死上下文刷绘制只会喂大事件风暴
     if (this.gpuDegraded) return;
@@ -1780,7 +1854,7 @@ export class Renderer {
       // GL 路径:离屏画布整段画完单次合成(层序/透明度与 2D 完全一致);
       // 2D 回退路径保留(?bggl=0 / GL 不可用)
       let bgDone = false;
-      if (this.bgGlEnabled) {
+      if (this.bgGlEnabled && !this.isCpuRender()) {
         // 死实例丢弃(双开风暴中 GL 反复死亡;5s 退避防重建风暴)
         if (this.glfx?.unavailable) {
           if (performance.now() - this.glfx.diedAt > 5000) {
@@ -2361,7 +2435,7 @@ export class Renderer {
     ensureWaveTextures(this.atlas);
     const q = options.data.waveQuality;
     if (q !== this._waveQ) { this._waveQ = q; waterWaves.setQuality(q); }
-    if (waterWaves.quality === 0) return;
+    if (waterWaves.quality === 0) { waterWaves.disable(); return; }
 
     // 模拟系用 CSS 像素（与原版"backbuffer/4"的设备无关语义对齐——DPR 高时波速
     // 不变）；绘制侧换算 world = cssPx/cssZoom
@@ -9321,6 +9395,50 @@ export class Renderer {
 
   /** 小地图节流游标(mapTimeMax 语义,Main.cs:16941-16945;q≥0.8 → 0 = 每帧) */
   private _lastMapFlush = 0;
+  /** HUD 缩略图小窗画布(CPU pix → ≤512² GPU 画布;迷雾逐像素合成) */
+  private _mmHudCanvas: HTMLCanvasElement | null = null;
+  private _mmHudCtx: CanvasRenderingContext2D | null = null;
+  private _mmHudImg: ImageData | null = null;
+  private mmHudBlit(world: World, sx: number, sy: number, viewTiles: number): HTMLCanvasElement | null {
+    const mm = this.minimap;
+    if (!mm?.pix || !mm.p32) return null;
+    // ≤512 上限:极低缩放(视窗 >512 tile)时按步长最近邻抽样(小地图本就近邻渲染)
+    const cap = 512;
+    const step = viewTiles > cap ? viewTiles / cap : 1;
+    const size = Math.min(cap, viewTiles);
+    const sizeI = Math.ceil(size);
+    if (!this._mmHudCanvas) {
+      this._mmHudCanvas = document.createElement('canvas');
+      this._mmHudCtx = this._mmHudCanvas.getContext('2d')!;
+    }
+    if (this._mmHudCanvas.width !== sizeI) {
+      this._mmHudCanvas.width = sizeI;
+      this._mmHudCanvas.height = sizeI;
+      this._mmHudImg = this._mmHudCtx!.createImageData(sizeI, sizeI);
+    }
+    const dst = new Uint32Array(this._mmHudImg!.data.buffer);
+    const src = mm.p32;
+    const fog = this.fogP32;               // 迷雾 CPU 缓冲(可能 null=无探索数据)
+    const fogW = this.fogW;
+    const FOG = 0xff080505;                // 小端 ABGR (5,5,8,255)
+    for (let y = 0; y < sizeI; y++) {
+      const my = Math.min(mm.h - 1, sy + Math.floor(y * step));
+      const rowOff = my * mm.w;
+      const dRow = y * sizeI;
+      for (let x = 0; x < sizeI; x++) {
+        const mx = Math.min(mm.w - 1, sx + Math.floor(x * step));
+        let c = src[rowOff + mx];
+        if (fog) {
+          const fi = (my >> 1) * fogW + (mx >> 1);
+          if (fog[fi] !== 0) c = FOG;      // 未探索 → 迷雾色(与旧 drawFog 像素一致)
+        }
+        dst[dRow + x] = c;
+      }
+    }
+    this._mmHudCtx!.putImageData(this._mmHudImg!, 0, 0);
+    return this._mmHudCanvas;
+  }
+
   private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock, entities: Entity[] = []) {
     if (!this.minimap) return;
     const now = performance.now();
@@ -9355,13 +9473,14 @@ export class Renderer {
     // 框底黑垫（MinimapFrame.DrawBackground：MinimapPosition=(ox+4,oy+4)，-6 → 244×244 黑 * mapMinimapAlpha）
     ctx.fillStyle = '#000';
     ctx.fillRect(ox - 2, oy - 2, size + 4, size + 4);
-    // 地图内容（alpha=mapMinimapAlpha=1）
-    ctx.drawImage(this.minimap.canvas, sx, sy, viewTiles, viewTiles, ox, oy, size, size);
-    // 迷雾（缩略图 1 tile = size/viewTiles px；世界→屏幕偏移）
-    this.drawFog(ctx, world,
-      ox - sx * size / viewTiles, oy - sy * size / viewTiles,
-      size / viewTiles, 2 * size / viewTiles,
-      { x: ox, y: oy, w: size, h: size });
+    // 迷雾数据推进(★CPU 化遗漏:旧 drawFog 在 HUD 路径每帧调 getFogCanvas
+    // 推进分带重建;改造后 ensureFogData 只在全屏地图被调,HUD 路径没人建
+    // 迷雾 = 入场全图无雾(用户实报)。此处补推:每帧调一次,脏矩形/分带
+    // 逻辑内建,首帧全雾,探索即增量清)
+    this.ensureFogData(world);
+    // 地图内容+迷雾合成(CPU pix blit ≤512² 小窗 + 迷雾逐像素合成)
+    const hud = this.mmHudBlit(world, sx, sy, viewTiles);
+    if (hud) ctx.drawImage(hud, ox, oy, size, size);
     // 头像层(原版 mapStyle1 支 :55140 + DrawNPCMapIcons2 :55602):玩家头/城镇 NPC 头/
     // Boss 头;headScale=min(1,(minimapZoom×0.5+1)/3)×UIScale(mapMinimapScale=1.05 :890;
     // 原写死 0.47 不随缩放且漏 UIScale≈1.1)。裁剪到小地图框内——窗口外实体头像不外溢
@@ -9544,37 +9663,51 @@ export class Renderer {
   // 版本并给出脏包围盒 → 此处仅对脏区（雾坐标 ~14×14 块）putImageData。
   // 旧版每 15 tick 无条件整幅重建 4200×1200（20MB createImageData + 500 万格循环 ≈
   // 672ms 长任务），首次导入大世界时每秒 4 次 × 20MB 垃圾 → GC 风暴 → 白屏闪烁 + OOM
-  private fogCanvas: HTMLCanvasElement | null = null;
+  /** 迷雾 CPU 缓冲(2026-08-18 GPU 瘦身:曾是 20MB GPU 画布;像素 = 未探索
+   *  (5,5,8,255)/探索 0(透明),2×2 tile 一像素) */
+  private fogPix: Uint8ClampedArray | null = null;
+  private fogP32: Uint32Array | null = null;
+  private fogImage: ImageData | null = null;
+  private fogW = 0;
+  private fogH = 0;
   private fogVersion = -1;
   /** GL 迷雾纹理已上传到的行带游标(稳定键增量上传) */
   private _mapFogRowSeen = -1;
+  /** 2D 回退全屏地图的临时整幅画布(开图期持有,关图释放) */
+  private _fm2dMap: HTMLCanvasElement | null = null;
+  private _fm2dFog: HTMLCanvasElement | null = null;
+  private _fm2dFogRowSeen = 0;
+  private _fmWasOpen = false;
   /** 整幅重建的分帧行游标(0=未在重建) */
   private fogRebuildRow = 0;
   private fogWorld: World | null = null;
 
-  private getFogCanvas(world: World): HTMLCanvasElement | null {
+  /** 迷雾数据构建(原 getFogCanvas 的 CPU 版:脏矩形增量 + 分帧行带逻辑 1:1,
+   *  落点从画布换 CPU 缓冲)。返回 ImageData(GL 上传源)或 null */
+  private ensureFogData(world: World): ImageData | null {
     const ex = world.explored;
     if (!ex) return null;
-    // 世界实例切换（读档/导入另一世界）：版本号数值可能巧合相等，必须按实例强制重建
     if (this.fogWorld !== world) { this.fogWorld = world; this.fogVersion = -1; this.fogRebuildRow = 0; }
-    if (this.fogCanvas && this.fogVersion === world.exploredVersion) return this.fogCanvas;
     const st = world.store;
     const w = Math.ceil(st.w / 2), h = Math.ceil(st.h / 2);
-    if (!this.fogCanvas) {
-      this.fogCanvas = document.createElement('canvas');
-      this.fogCanvas.width = w;
-      this.fogCanvas.height = h;
+    if (this.fogPix && this.fogVersion === world.exploredVersion) return this.fogImage;
+    if (!this.fogPix || this.fogW !== w || this.fogH !== h) {
+      const pix = new Uint8ClampedArray(w * h * 4);
+      this.fogPix = pix;
+      this.fogP32 = new Uint32Array(pix.buffer);
+      this.fogW = w; this.fogH = h;
+      this.fogImage = typeof ImageData !== 'undefined' ? new ImageData(pix, w, h) : null;
+      this.fogRebuildRow = 0;
     }
-    const fc = this.fogCanvas.getContext('2d')!;
-    // 脏矩形增量：有画布 + 有脏包围盒（markExplored 记录）→ 只更新受影响块；
-    // 全图点亮（F4/devMode 手动 bump，无脏信息）或首帧 → 整幅重建
+    const buf = this.fogP32!;
+    const FOG = 0xff080505;
+    // 脏矩形增量(有缓冲 + 有脏包围盒 → 只更新受影响块;全图点亮/首帧 → 整幅重建)
     const dirty = world.exploredDirty;
     if (this.fogVersion !== -1 && dirty) {
       const bx0 = Math.max(0, dirty.x0 >> 1), by0 = Math.max(0, dirty.y0 >> 1);
       const bx1 = Math.min(w - 1, dirty.x1 >> 1), by1 = Math.min(h - 1, dirty.y1 >> 1);
       const dw = bx1 - bx0 + 1, dh = by1 - by0 + 1;
       if (dw > 0 && dh > 0) {
-        const img = fc.createImageData(dw, dh);
         for (let by = 0; by < dh; by++) {
           for (let bx = 0; bx < dw; bx++) {
             const x0 = (bx0 + bx) * 2, y0 = (by0 + by) * 2;
@@ -9583,72 +9716,34 @@ export class Renderer {
               const xx = x0 + dx, yy = y0 + dy;
               if (xx < st.w && yy < st.h && ex[yy * st.w + xx]) { seen = true; break; }
             }
-            if (!seen) {
-              const i = (by * dw + bx) * 4;
-              img.data[i] = 5; img.data[i + 1] = 5; img.data[i + 2] = 8; img.data[i + 3] = 255;
-            }
+            if (!seen) buf[(by0 + by) * w + (bx0 + bx)] = FOG;
           }
         }
-        fc.putImageData(img, bx0, by0);
         this.fogVersion = world.exploredVersion;
-        return this.fogCanvas;
+        return this.fogImage;
       }
     }
-    // 整幅重建（首帧 / 全图点亮 / 版本跳跃无脏信息）。
-    // ★分帧行带(2026-08-14 trace⑥:同步 O(世界) 循环 2100×600×4 探测+5MB
-    // ImageData = 单帧 640ms 巨帧,GPU 压力临界时直接崩)——摊到 ROWS_PER_FRAME
-    // 行/帧(~10 帧完),画布立即可用(迷雾迟 ~150ms 无感)
-    if (this.fogCanvas.width !== w || this.fogCanvas.height !== h) {
-      this.fogCanvas.width = w; this.fogCanvas.height = h;
-      this.fogRebuildRow = 0;
-    }
-    if (this.fogRebuildRow === 0) { fc.clearRect(0, 0, w, h); }
-    fc.fillStyle = '#050508';
-    const ROWS = 120;  // 每帧行数(600 行 ≈ 5 帧完;单帧 <20ms)
+    // 整幅重建(首帧/全图点亮/版本跳跃):分帧行带摊帧
+    if (this.fogRebuildRow === 0) buf.fill(0);
+    const ROWS = 120;
     const yEnd = Math.min(h, this.fogRebuildRow + ROWS);
-    const bh = yEnd - this.fogRebuildRow;
-    const img = fc.createImageData(w, bh);
-    for (let by = 0; by < bh; by++) {
-      const wy = this.fogRebuildRow + by;
+    for (let by = this.fogRebuildRow; by < yEnd; by++) {
+      const rowOff = by * w;
       for (let bx = 0; bx < w; bx++) {
-        const x0 = bx * 2, y0 = wy * 2;
+        const x0 = bx * 2, y0 = by * 2;
         let seen = false;
         for (let dy = 0; dy < 2 && !seen; dy++) for (let dx = 0; dx < 2; dx++) {
           const xx = x0 + dx, yy = y0 + dy;
           if (xx < st.w && yy < st.h && ex[yy * st.w + xx]) { seen = true; break; }
         }
-        if (!seen) {
-          const i = (by * w + bx) * 4;
-          img.data[i] = 5; img.data[i + 1] = 5; img.data[i + 2] = 8; img.data[i + 3] = 255;
-        }
+        if (!seen) buf[rowOff + bx] = FOG;
       }
     }
-    fc.putImageData(img, 0, this.fogRebuildRow);
     this.fogRebuildRow = yEnd;
-    if (yEnd < h) {
-      // 未完成:版本号不落定(下帧续),画布半新半旧可先用
-      return this.fogCanvas;
-    }
-    this.fogRebuildRow = 0;
-    this.fogVersion = world.exploredVersion;
-    return this.fogCanvas;
+    if (yEnd >= h) this.fogVersion = world.exploredVersion;   // 完成才落版本(带重建期半新半旧可先用)
+    return this.fogImage;
   }
 
-  private drawFog(ctx: CanvasRenderingContext2D, world: World, ox: number, oy: number, scale: number, blockPx: number, clip?: { x: number; y: number; w: number; h: number }) {
-    const fc = this.getFogCanvas(world);
-    if (!fc) return;
-    ctx.save();
-    if (clip) {
-      ctx.beginPath();
-      ctx.rect(clip.x, clip.y, clip.w, clip.h);
-      ctx.clip();
-    }
-    void blockPx;
-    // 缓存画布 1 像素 = 2 tile；目标绘制按 scale×2 缩放
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(fc, 0, 0, fc.width, fc.height, ox, oy, fc.width * 2 * scale, fc.height * 2 * scale);
-    ctx.restore();
-  }
 
   /** 地图玩家标记：优先 Maples 主角帧（与游戏内形象一致），程序化仅兜底 */
 
@@ -9829,10 +9924,10 @@ export class Renderer {
     // GL 化后=纹理 quad,小地图按 flushDirty 的脏区 texSubImage2D 增量上传。
     // 头像/标记/文字仍走 2D(在合成之后画,层序不变)。逃生门 ?mapgl=0。
     let glMap = false;
-    if (this.mapGlEnabled && this.minimap) {
+    if (this.mapGlEnabled && this.minimap && !this.isCpuRender()) {
       if (!this.glfx) this.glfx = new GLSpriteLayer();
       const maxTex = this.glfx.maxTextureSize;
-      if (!this.glfx.unavailable && this.minimap.canvas.width <= maxTex && this.minimap.canvas.height <= maxTex) {
+      if (!this.glfx.unavailable && this.minimap.image && this.minimap.w <= maxTex && this.minimap.h <= maxTex) {
         const gl = this.glfx;
         glMap = true;
         gl.resize(viewW, viewH);
@@ -9851,31 +9946,42 @@ export class Renderer {
           const sr = Renderer.fullMapScrollRect(world.w, fm.zoom, cx0, cy0, scroll.sw, scroll.sh);
           gl.drawRect(scroll, sr.x, sr.y, sr.w, sr.h, { smooth: true });
         }
-        // 地图内容:世界画布 → 纹理(整幅一次 + 脏区增量),单 quad 缩放
+        // 地图内容:CPU ImageData → 纹理(整幅一次 + 脏区增量),单 quad 缩放
         // (smoothing 与 2D 同款:zoom≥1 线性、<1 最近邻)
         const mmKey = `mm:${this.minimap.uid}`;
-        const mmTex = gl.texFromImage(mmKey, this.minimap.canvas, false, true);  // noMip:mip 永不生效,却要全链重生成
-        if (mmTex) {
+        const mmTex = this.minimap.image ? gl.texFromImage(mmKey, this.minimap.image, false, true) : null;  // noMip
+        if (mmTex && this.minimap.image) {
           for (const [px, py, pw, ph] of this.minimap.flushedPixelRects) {
-            gl.texSubUpdate(mmKey, this.minimap.canvas, px, py, pw, ph);
+            const region = new ImageData(pw, ph);
+            const src32 = this.minimap.p32!;
+            const dst32 = new Uint32Array(region.data.buffer);
+            for (let r = 0; r < ph; r++) {
+              const s0 = (py + r) * this.minimap.w + px;
+              dst32.set(src32.subarray(s0, s0 + pw), r * pw);
+            }
+            gl.texSubUpdateData(mmKey, region, px, py);
           }
           gl.quad(mmTex, 0, 0, mmTex.w, mmTex.h, cx0, cy0, mapW, mapH, { smooth: fm.zoom >= 1 });
         }
         this.minimap.flushedPixelRects.length = 0;
         // 迷雾:getFogCanvas 每帧推进分带重建(2D/GL 共用),纹理按版本+行号重传
-        const fc = this.getFogCanvas(world);
-        if (fc && fc.width > 0) {
+        const fogImg = this.ensureFogData(world);
+        if (fogImg && fogImg.width > 0) {
           // ★稳定键+行带增量(曾 version:row 换键:重建一步=一张新 20MB 纹理,
           // 探索期持续换血把字节预算烧穿)。首载整幅,之后只补重建过的行带
           const fogKey = `fog:${world.seed}`;
           const rowBefore = this._mapFogRowSeen;
-          const fogTex = gl.texFromImage(fogKey, fc, false, true);
+          const fogTex = gl.texFromImage(fogKey, fogImg, false, true);
           if (fogTex) {
-            if (this._mapFogRowSeen >= 0 && this.fogRebuildRow > rowBefore) {
-              const rows = Math.min(this.fogRebuildRow - rowBefore, fc.height);
-              gl.texSubUpdate(fogKey, fc, 0, rowBefore, fc.width, rows);
-            } else if (this.fogRebuildRow > 0 && rowBefore < 0) {
-              gl.texSubUpdate(fogKey, fc, 0, 0, fc.width, Math.min(this.fogRebuildRow, fc.height));
+            const rows = this._mapFogRowSeen >= 0
+              ? Math.min(this.fogRebuildRow - rowBefore, this.fogH)
+              : Math.min(this.fogRebuildRow, this.fogH);
+            if (rows > 0) {
+              const y0 = this._mapFogRowSeen >= 0 ? rowBefore : 0;
+              const region = new ImageData(this.fogW, rows);
+              const dst32 = new Uint32Array(region.data.buffer);
+              dst32.set(this.fogP32!.subarray(y0 * this.fogW, (y0 + rows) * this.fogW));
+              gl.texSubUpdateData(fogKey, region, 0, y0);
             }
             this._mapFogRowSeen = this.fogRebuildRow;
             gl.quad(fogTex, 0, 0, fogTex.w, fogTex.h,
@@ -9905,11 +10011,40 @@ export class Renderer {
         ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
         ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, sr.x, sr.y, sr.w, sr.h);
       }
-      ctx.imageSmoothingEnabled = fm.zoom >= 1;
-      ctx.drawImage(this.minimap!.canvas, cx0, cy0, mapW, mapH);
-      ctx.imageSmoothingEnabled = false;
-      // 迷雾
-      this.drawFog(ctx, world, cx0, cy0, fm.zoom, 2 * fm.zoom);
+      // 2D 回退:CPU ImageData → 开图期临时整幅画布(关闭即弃,GPU 只在开图期占用)
+      if (!this._fm2dMap && this.minimap?.image) {
+        this._fm2dMap = document.createElement('canvas');
+        this._fm2dMap.width = this.minimap.w;
+        this._fm2dMap.height = this.minimap.h;
+        this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
+      }
+      if (this._fm2dMap) {
+        ctx.imageSmoothingEnabled = fm.zoom >= 1;
+        ctx.drawImage(this._fm2dMap, cx0, cy0, mapW, mapH);
+        ctx.imageSmoothingEnabled = false;
+      }
+      // 迷雾(2D 回退):同款临时画布 + 行带增量
+      const fogImg2 = this.ensureFogData(world);
+      if (fogImg2 && (!this._fm2dFog || this._fm2dFogRowSeen < this.fogRebuildRow)) {
+        if (!this._fm2dFog) {
+          this._fm2dFog = document.createElement('canvas');
+          this._fm2dFog.width = this.fogW;
+          this._fm2dFog.height = this.fogH;
+          this._fm2dFogRowSeen = 0;
+        }
+        const rows = Math.min(this.fogRebuildRow - this._fm2dFogRowSeen, this.fogH);
+        if (rows > 0) {
+          const region = new ImageData(this.fogW, rows);
+          const dst32 = new Uint32Array(region.data.buffer);
+          dst32.set(this.fogP32!.subarray(this._fm2dFogRowSeen * this.fogW, (this._fm2dFogRowSeen + rows) * this.fogW));
+          this._fm2dFog.getContext('2d')!.putImageData(region, 0, this._fm2dFogRowSeen);
+          this._fm2dFogRowSeen = this.fogRebuildRow;
+        }
+      }
+      if (this._fm2dFog) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(this._fm2dFog, cx0, cy0, this._fm2dFog.width * 2 * fm.zoom, this._fm2dFog.height * 2 * fm.zoom);
+      }
     }
     // 头像层(原版 DrawNPCMapIcons2 :55602 + MapPlayerRenderer:玩家头/城镇 NPC 头/
     // Boss 头;headScale=min(1,(zoom×0.5+1)/3)——Main.cs:55140)
