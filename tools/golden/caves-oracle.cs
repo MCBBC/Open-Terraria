@@ -12226,10 +12226,14 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
                 int tx = x + i, ty = y + j;
                 if (tx < 0 || tx >= W || ty < 0 || ty + 1 >= H) continue;
                 if (act[ty * W + tx] != 0) continue;                                   // 上格须空
-                if (act[(ty + 1) * W + tx] == 0 || !SOLID.Contains(typ[(ty + 1) * W + tx])) continue; // 下格实心
-                if (typ[(ty + 1) * W + tx] == 162) continue;                            // 冰特判
+                int bi2 = (ty + 1) * W + tx;
+                // SolidTile2（cs:70178）：active && 生成期 tileSolid && slope==0 && !halfBrick
+                //   && !inActive（inActive=wire bit5，生成期恒 0—— statues 前链内无写点）
+                if (act[bi2] == 0 || half[bi2] != 0 || slope[bi2] != 0 || !SOLID.Contains(typ[bi2])) continue;
+                if (typ[bi2] == 162) continue;                                         // 冰特判
                 int ti = ty * W + tx;
-                typ[ti] = 137; act[ti] = 1; frX[ti] = 0; frY[ti] = 0;
+                // ★HHHH：超级飞镖陷阱=135（cs:4451 PlaceTile(135)——ZZZ 批 JS 修正，曾误 137）
+                typ[ti] = 135; act[ti] = 1; frX[ti] = 0; frY[ti] = 0;
                 return;
             }
         }
@@ -12255,10 +12259,25 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
             while (y < H && act[y * W + x] == 0) y++;    // 向下扫到首个 active 格
             if (y >= H) { done = true; break; }
             y--;
+            // ★HHHH（WWW 批 JS 镜像）：cs:17036 anyShimmer 门 + cs:59501 PlaceTile 前奏
+            //   tile.Clear(Tile|TilePaint|Slope)——任何失败尝试也会清 inactive 锚格的
+            //   half/slope/type/帧（须在一切本地门之前；原版 pass 无边界门 PlaceTile 照调）
+            {
+                int ai = y * W + x;
+                bool shimmerC = liq[ai] > 0 && liqT[ai] == 3;   // oracle 3=JS liquidType 4
+                if (!shimmerC && act[ai] == 0) { half[ai] = 0; slope[ai] = 0; typ[ai] = 0; frX[ai] = 0; frY[ai] = 0; }
+            }
             if (y < 2 || x + 1 >= W || y - 2 < 0) { fail++; if (fail >= 10000) done = true; continue; }
             bool ok = true;                               // 2×3 净空（PlaceTile forced 占用门）
             for (int dx = 0; dx < 2 && ok; dx++) for (int dy = -2; dy <= 0 && ok; dy++)
                 if (act[(y + dy) * W + x + dx] != 0) ok = false;
+            // ★HHHH（WWW 批 JS 镜像）：Place2xX 底座门（cs:39762）——SolidTile2(x,y+1)
+            //   && SolidTile2(x+1,y+1)（无 solidTop 条件）；曾缺门 → 半砖/坡面/非实心底座误收
+            if (ok) for (int bx = x; bx <= x + 1 && ok; bx++)
+            {
+                int bi = (y + 1) * W + bx;
+                if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0 || !SOLID.Contains(typ[bi])) ok = false;
+            }
             if (!ok) { fail++; if (fail >= 10000) done = true; continue; }
             int row = style / 55;                         // 雕像帧换行（Tiles_105 宽 55 列）
             for (int dx = 0; dx < 2; dx++) for (int dy = 0; dy < 3; dy++)

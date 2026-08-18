@@ -112,12 +112,39 @@ const rd16 = (p: string) => new Uint16Array(readFileSync(p).buffer.slice(0));
       const y = rng.int(gsSand.worldSurface + 20, st2.h - 211);
       if (st2.wall[st2.idx(x, y)] === 187) {
         wallHits++;
-        if (placeSandTrapPub(st2, rng, gsSand, x, y)) break;
+        if (wallHits <= 5) {
+          let kk = y;
+          while (kk < st2.h - 200 && !st2.flags[st2.idx(x, kk)]) kk++;
+          console.log(`  hit#${wallHits} (${x},${y}) scan-exit k=${kk} type@k=${kk < st2.h - 200 ? (TILE_DEFS[st2.type[st2.idx(x, kk)]]?.vanilla?.sheet ?? -1) : 'oob'} flags@y=${st2.flags[st2.idx(x, y)]}`);
+        }
+        const before = { ...SAND_REJ };
+        const r = placeSandTrapPub(st2, rng, x, y);
+        if (wallHits <= 6) {
+          const delta: string[] = [];
+          for (const k2 of Object.keys(SAND_REJ)) {
+            const d = SAND_REJ[k2]! - (before[k2] ?? 0);
+            if (d > 0) delta.push(`${k2}+${d}`);
+          }
+          console.log(`  call#${wallHits} result=${r} gates=${delta.join(',')}`);
+        }
+        if (r) break;
       }
     }
   }
   console.log(`sand stats: tries=${tries} wall187hits=${wallHits}`);
   console.log('sand rejects:', JSON.stringify(Object.fromEntries(Object.entries(SAND_REJ).sort((a, b) => b[1] - a[1]))));
+  {
+    // 区域对账：golden76 vs JS 沙循环后（x 2578-2602, y 600-640）
+    const g2t = rd16(gPath(76, 'typ')), g2a = rd8(gPath(76, 'act'));
+    for (let y = 600; y < 640; y++) {
+      for (let x = 2578; x < 2602; x++) {
+        const gi = y * W + x, ji = st2.idx(x, y);
+        const gt = g2a[gi] ? g2t[gi]! : -1;
+        const jt = st2.flags[ji] ? (TILE_DEFS[st2.type[ji]!]?.vanilla?.sheet ?? -1) : -1;
+        if (gt !== jt) console.log(`  SITEDIFF (${x},${y}) golden=${gt} js=${jt}`);
+      }
+    }
+  }
   const k4 = eeeeLog.filter(e => e.k === 4);
   console.log(`k4 sand accepts: ${k4.length}: ${k4.map((e, q) => `(${e.x2},${e.py})`).join(' ')}`);
   // eeeeLog 由 placeTrap 填充（SW_EEEE_DBG）

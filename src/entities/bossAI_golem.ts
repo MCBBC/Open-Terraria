@@ -241,7 +241,7 @@ function golemHeadGoFree(e: Enemy, game: GameHooks): void {
   e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;
   e.hp = e.maxHp;     // 原版 249 满血登场
   game.spawnParticles(e.cx, e.cy, '#C04030', 16, 2.6, { life: 30 });
-  game.playSfx('roar', 0.8);
+  game.playSfx('roar', 1, e.cx, e.cy);   // :32587 style0 满响(曾 0.8,2026-08-18 对账修)
 }
 
 export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
@@ -252,7 +252,8 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
     x.dying = true; x.deadT = 0;
     e.ai3 = 1;          // 死亡标记(头据此转自由态)
     e.hp = e.maxHp;     // 满血续命防每 tick 重入
-    game.playSfx('roar', 0.9);
+    // 原版本体血尽零吼(aiStyle54 块仅头自由 :32587 一声 Item8/:32577)——
+    // 曾 0.9 吼与头自由吼构成同事件双吼,2026-08-18 对账删除
   }
 
   // ---- 首帧:localAI[0]==0 生成部件(NPC.cs:19458-19467) ----

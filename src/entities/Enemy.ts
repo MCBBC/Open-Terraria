@@ -1148,6 +1148,9 @@ export class Enemy extends Entity {
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
     this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）
+    // 原版 case46 族 vx==0 清 frameCounter（NPC.cs:77571-77577）——站定即清相位，
+    // 起步必从帧 0 起稳走（2026-08-18 审查：曾保留相位起步首帧非 0）
+    if (Math.abs(this.vx) <= 0.05) this.walkCycleT = 0;
 
     // 出生渐显（alphaFade 族，AI 分发【前】的近似段）——静态半透明不受影响。
     // EoW 族（13-15）除外：走下方 AI 分发后的 1:1 段（移动门 -42/t，NPC.cs:52650-52670）
@@ -7032,9 +7035,9 @@ export class Enemy extends Entity {
           this.state = 3; this.ai2 = 0; this.chargesLeft -= 1000;
         }
       } else if (this.state === 1) {
-        // ---- 冲刺预备（:20452-20478）：ForceRoar(36)；6.8（专家第 2/3 冲 ×1.15/×1.30；
-        //      FTW ×1.2 :20465-20468） ----
-        game.playSfx('roar', 0.7);
+        // ---- 冲刺预备（:20452-20478）：ForceRoar(36) style0 = Roar_0 满响带坐标衰减；
+        //      6.8（专家第 2/3 冲 ×1.15/×1.30；FTW ×1.2 :20465-20468） ----
+        game.playSfx('roar', 1, this.cx, this.cy);
         this.visAngle = face;
         let num44 = 6.8;
         if (expert && this.chargesLeft === 1) num44 *= 1.15;
@@ -7143,7 +7146,9 @@ export class Enemy extends Entity {
         }
       } else if (this.state === 4) {
         // ---- 连冲（:20645-20698）：冲程 num4（20 / 狂暴 10），+13t 摩擦尾，5 连后回悬浮 ----
-        if (this.ai2 === 0) game.playSfx('roar', 0.7);   // SoundID 36 ForceRoar（:20647-20650）
+        // SoundID 36 ForceRoar style-1（:20647-20650/:1312-1325）= Roar_0 满响 + pitch0.6
+        // （升调吼——playWavFile 第 5 参直传 2^0.6;曾 0.7 音量+无变调,2026-08-18 对账修）
+        if (this.ai2 === 0) game.playSfxWav?.('Roar_0', 1, this.cx, this.cy, 0.6);
         this.dashing = true;
         if (this.ai2 % 2 === 0) {
           game.spawnParticles(this.cx, this.cy, '#FF4040', 2, 2);

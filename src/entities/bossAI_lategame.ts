@@ -653,7 +653,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   e.def.defense = Math.floor(phase2 ? b.def * 1.2 : b.def);
 
   // 目标失效/超 6400px → 淡出退场(:46437-46444/:46595 num36=13;此后只有 13 态不触 player)
-  if ((!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 6400) && e.ai0 !== 13) {
+  // 真狂暴入夜强制离场（:46580-46595：IsGenuinelyEnraged(ai3∈{2,3}) 且 !dayTime →
+  // 选招强制 13 态淡出——白天召出的女皇入夜即飞走,2026-08-18 审查补）
+  const nightLeave = (e.ai3 === 2 || e.ai3 === 3) && !dayEnrage;
+  if ((!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 6400 || nightLeave) && e.ai0 !== 13) {
     e.ai0 = 13; e.ai1 = 0; e.ai2 += 1;
     e.vx /= 4; e.vy /= 4;
   }
@@ -672,7 +675,9 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   // （白天 9999 基伤同样参与 ×1.5——原版 flag4 先把 num 全置 9999 再乘 num16;
   //  曾按 b.dmg 重算把 9999 整档覆盖掉,白天暴怒伤害从未生效）
   const dashBoost = (e.ai0 === 8 || e.ai0 === 9) && e.ai1 > 40 && e.ai1 <= 90;
-  e.def.damage = Math.round((dayEnrage ? 9999 : b.dmg) * (dashBoost ? 1.5 : 1));
+  // :47294-47299 damage = def×num16 后 flag4 **直接覆写 9999**（不乘 1.5）——
+  //  曾得 9999×1.5=14999（乘区序错，2026-08-18 审查勘误）
+  e.def.damage = dayEnrage ? 9999 : Math.round(b.dmg * (dashBoost ? 1.5 : 1));
 
   switch (e.ai0) {
     // ---- 0 出生(:46370-46422):velocity=(0,5) 后 0.95 阻尼,180t 渐显;全程无敌(flag6=false) ----
@@ -708,7 +713,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       const dur = 60 + (90 - (phase2 ? 15 : 0)); // num90 - num17 :46517/:46356
       if (Math.floor(e.ai1) % 3 === 0 && e.ai1 < 60) {
         const [dvx, dvy] = rot(0, -6, (Math.PI / 2) * (Math.random() * 2 - 1));
-        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, 45, 873);
+        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, dayEnrage ? 9999 : 45, 873);
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -739,7 +744,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         const ax = leadX - px, ay = leadY - py;
         const al = Math.hypot(ax, ay) || 1;
         // 原版 919 零速预告后沿 v4 方向冲刺(Projectile.AI 收敛:12 速直飞)
-        shoot(game, px, py, (ax / al) * 12, (ay / al) * 12, 50, 919, 240);
+        shoot(game, px, py, (ax / al) * 12, (ay / al) * 12, dayEnrage ? 9999 : 50, 919, 240);
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
@@ -755,7 +760,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           const t = k / 13;
           const [ux, uy] = rot(0, 1, Math.PI / 2 + Math.PI * 2 * t + base);
           const [ox, oy] = rot(ux, uy, -Math.PI / 2);
-          shoot(game, e.cx + 55 + ox * 30, e.cy - 30 + oy * 30, ux * 8, uy * 8, 45, 872);
+          shoot(game, e.cx + 55 + ox * 30, e.cy - 30 + oy * 30, ux * 8, uy * 8, dayEnrage ? 9999 : 45, 872);
         }
         game.playSfx('roar', 0.4);
       }
@@ -774,7 +779,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           const slot = (t + (1 / 6) * 0.5 + volley * (1 / 6) * 0.5) % 1;
           const a = Math.PI * 2 * (slot + flip);
           // 原版 923 零速绕体公转(收敛:8 速放射)
-          shoot(game, e.cx, e.cy - 100, Math.cos(a) * 8, Math.sin(a) * 8, 50, 923, 240);
+          shoot(game, e.cx, e.cy - 100, Math.cos(a) * 8, Math.sin(a) * 8, dayEnrage ? 9999 : 50, 923, 240);
         }
       }
       e.ai1 += 1;
@@ -799,7 +804,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         const al = Math.hypot(axX, axY) || 1;
         for (let t = 0; t <= 1.0001; t += 1 / 13) {
           const ox = cx0 + dirX * (t - 0.5), oy = cy0 + dirY * (t - 0.5);
-          shoot(game, ox, oy, (axX / al) * 12, (axY / al) * 12, 70, 919, 240);
+          shoot(game, ox, oy, (axX / al) * 12, (axY / al) * 12, dayEnrage ? 9999 : 70, 919, 240);
         }
         game.playSfx('roar', 0.45);
       }

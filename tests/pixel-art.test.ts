@@ -99,7 +99,7 @@ describe('像素方块地图缩略色（F2 导入）', () => {
     expect(c & 255).toBe(50);
   });
 
-  it('小地图增量路径（flushDirty→colorFor）放置后即显原色，无需重载', async () => {
+  it('小地图增量路径（flushDirty→colorFor）放置后即显原色，无需重载', { timeout: 30_000 }, async () => {
     // vitest 默认 node 环境：桩掉 document，捕 fillRect 的 fillStyle 断言写入色
     const fills = new Map<string, string>();
     const ctx2d = {

@@ -12,7 +12,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
-import { placeDoorClosed } from '../../Door';
+import { doorClosedFrame } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
@@ -82,6 +82,16 @@ const SC367 = TILE_BY_KEY['v_367_marble_block']!;
 const solidAt = (st: TileStore, x: number, y: number) =>
   st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && genSolidType(st.type[st.idx(x, y)]);
 const activeAt = (st: TileStore, x: number, y: number) => st.inBounds(x, y) && !!st.flags[st.idx(x, y)];
+
+/** 关门三连写（WorldGen.PlaceDoor cs:31949-31960 1:1）：三格 frameX 各取独立
+ *  variant（Next(3)×3 在调用方掷毕后传入），frameY = 54*(style%36)+row*18。 */
+function placeDoorClosedRows(st: TileStore, x: number, y: number, style: number, variants: [number, number, number]): void {
+  for (let dy = 0; dy < 3; dy++) {
+    if (!st.inBounds(x, y + dy)) continue;
+    const [fx, fy] = doorClosedFrame(style, variants[dy]!);
+    st.setTileSilent(x, y + dy, T.DOOR_CLOSED, fx, fy + dy * 18);
+  }
+}
 
 // ---------- 房间生成(HouseUtils) ----------
 function findRoom(st: TileStore, ox: number, oy: number): Rect {
@@ -254,7 +264,7 @@ function supportOk(st: TileStore, x: number, y: number): boolean {
  * KillTile 零掷（house1 ③ 掷数精确含击杀实证）。级联 KillTile 的再邻接重验不建模
  * （vanilla Check 链在 destroyObject 门内同样短路）。
  */
-function killUnsupportedFurniture(st: TileStore, cx: number, cy: number): void {
+function killUnsupportedFurniture(st: TileStore, rng: RNG, cx: number, cy: number): void {
   if (!st.inBounds(cx, cy)) return;
   const i = st.idx(cx, cy);
   if (st.flags[i] === 0) return;
@@ -270,6 +280,20 @@ function killUnsupportedFurniture(st: TileStore, cx: number, cy: number): void {
     }
   }
   if (!dead) return;
+  // ★DDDD KillTile 尘粒耗掷（x86 三级探针实锤：PST(kill)→10×MD(逐 MD +1 掷)→
+  //   SquareTileFrame×9；house17-room1 ③ 清 (1859,541) → 邻帧 CheckChand 击杀
+  //   room2 吊灯 (1858..1860,542..544) 9 格×10 掷=90 掷 = #59 首分歧主根因）。
+  //   谓词 = KillTile_GetTileDustAmount(fail=false)=10（cs:66661 默认）×
+  //   KillTile_MakeTileDust 的 num≥0 → NewDust +1 掷；num=-1 族零掷
+  //   （桌/琴/书架 {14,87,88,469,101} + 门 {10,11}——cs:67417/67455/68432 反编译
+  //   -1 表；x86 k=4658 等 6 格桌击杀 0 掷组对拍互证。吊灯 34 反编译标 -1 但
+  //   x86 实测每 MD +1 掷——按实测）。
+  const KILL_NO_DUST_ROLL = new Set([10, 11, 14, 87, 88, 101, 469]);
+  const anchorI = st.inBounds(obj.x0, obj.y0) ? st.idx(obj.x0, obj.y0) : -1;
+  const killSheet = anchorI >= 0 ? (TILE_DEFS[st.type[anchorI]!]?.vanilla?.sheet ?? -1) : -1;
+  if (!KILL_NO_DUST_ROLL.has(killSheet)) {
+    for (let c = 0; c < obj.w * obj.h * 10; c++) rng.int(0, 2);
+  }
   for (let dx = 0; dx < obj.w; dx++) {
     for (let dy = 0; dy < obj.h; dy++) {
       const ci = st.idx(obj.x0 + dx, obj.y0 + dy);
@@ -523,10 +547,10 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
       //   ——worldgen 期 KillTile 零掷（house1 ③ 120 掷精确含四件击杀实锤）。不建模则
       //   家具滞留 → 箱级联占位失败流漂（house1 钢琴占 (2037..2039,353) 挡 vanilla 箱
       //   (2038,355) 的 AB#560 首异实锤）。
-      killUnsupportedFurniture(st, x + 1, y);
-      killUnsupportedFurniture(st, x - 1, y);
-      killUnsupportedFurniture(st, x, y - 1);
-      killUnsupportedFurniture(st, x, y + 1);
+      killUnsupportedFurniture(st, rng, x + 1, y);
+      killUnsupportedFurniture(st, rng, x - 1, y);
+      killUnsupportedFurniture(st, rng, x, y + 1);
+      killUnsupportedFurniture(st, rng, x, y - 1);
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'clearWall':
       // WorldUtils.ClearWall(x,y,frame)：清墙后 frame=true 时四邻 SquareWallFrame
@@ -836,8 +860,11 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
       const sx = from.x + dir * (s + 1), sy = from.y + s;
       if (!st.inBounds(sx, sy)) continue;
       // 平台帧 = PlaceTile(19, PlatformStyle)(HouseBuilder.cs:518)——case 19 走
-      // frameY = 18*style(WorldGen.cs:60245-60249),非 frameX;曾恒写 (0,0)(C6)
-      st.setTileSilent(sx, sy, PLATFORM, 0, def.platformStyle * 18);
+      // frameY = 18*style(WorldGen.cs:60245-60249),非 frameX;曾恒写 (0,0)(C6)。
+      // ★DDDD:Actions.PlaceTile→WorldGen.PlaceTile(forced:false) 首门 =
+      //   Collision.EmptyTile（格非 active）——active 格整笔拒写（但链上 SetSlope
+      //   仍施加，HouseBuilder.cs:515-517 Actions 各自独立执行）
+      if (!st.flags[st.idx(sx, sy)]) st.setTileSilent(sx, sy, PLATFORM, 0, def.platformStyle * 18);
       st.slope[st.idx(sx, sy)] = dir === 1 ? 1 : 2;
     }
     // 顶步上方 4×1 平台(HouseBuilder.cs:519)：Gen(Chain(Clear(), PlaceWall(WallType),
@@ -880,25 +907,48 @@ function findSideExit(st: TileStore, wallX: number, wallY: number, wallH: number
 function placeDoors(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void {
   for (const r of rooms) {
     // 墙列矩形 (X, Y+1, 1, H-2)
-    // 门禁（原版 PlaceTile(x, exitY)→PlaceDoor(j+1)，WorldGen.cs:31946）：mount
-    // （exitY-1 实心）+ 地板（exitY+3 实心）缺一即不放门只留门洞——HouseBuilder
-    // 的 forced=true 仅绕过首道空格门，门分支的锚点条件仍生效
+    // ★DDDD 逐谓词重对齐（WorldGen.PlaceTile case10 cs:59867-59906 + PlaceDoor
+    //   cs:31938-31960，x86 事件流+门格对拍实锤）：
+    //   ①清洞 = WorldUtils.ClearTile×3（tile.ClearTile()=active/slope/half 清零，
+    //     type/wall/liquid 保留——曾 setTileSilent(0) 连 type 清掉，PlaceChest 双腿
+    //     巨石门读 type 不读 act 会误判）。
+    //   ②PlaceTile 分支 A（j-1/-2 空 + j-3 active+tileSolid）→ PlaceDoor(i,j-1)：
+    //     内部再查 mount(j-3) + SolidTile(i,j+1)——j+1 恰为刚清的门洞格恒非实心
+    //     ⇒ 分支 A 在本语境【必败：零掷零写】（曾按 A 放门+耗 3 掷=幻影门主源）。
+    //   ③分支 B（j+1/+2 空 + j+3 active+tileSolid）→ PlaceDoor(i,j+1)：mount =
+    //     (j-1).nactive && tileSolid[type]（墙上格，仅表查不含半砖/坡）+ 地板 =
+    //     SolidTile(j+3)（含 !tileSolidTop/!half/slope==0）——任一败 → 零掷零写。
+    //   ④成门：3 格 frameX 各独立 Next(3)（variant 逐行独立——曾弃掷值全写 variant0，
+    //     SSS 批 (3706,699) [18,0]vs[0,0] 帧差实锤）。
     const tryDoor = (x: number, exitY: number) => {
-      for (let dy = 0; dy < 3; dy++) st.setTileSilent(x, exitY + dy, 0);
-      // PlaceTile case10（cs:59867-59906，forced=true 仅过首道空格门）：分支 A
-      // （exitY-1/-2 空 + exitY-3 实心）→ PlaceDoor(i,j-1) 门落 (exitY-2..exitY)；
-      // 分支 B（exitY+1/+2 空 + exitY+3 实心）→ 门落 (exitY..exitY+2)；双败→无门零掷
-      const solidAtV = (yy: number) => st.inBounds(x, yy) && !!st.flags[st.idx(x, yy)] && vanGenSolidType(st.type[st.idx(x, yy)]);
-      const inactiveAt = (yy: number) => st.inBounds(x, yy) && st.flags[st.idx(x, yy)] === 0;
-      if (inactiveAt(exitY - 1) && inactiveAt(exitY - 2) && solidAtV(exitY - 3)) {
-        // PlaceDoor（cs:31938-31960）：三格门框 frameX 各独立掷 Next(3)——每门 3 掷
-        // （N 批 HellFort 同源；house3 vanilla DO→PL=6 掷=双门×3 实锤）
-        rng.int(0, 2); rng.int(0, 2); rng.int(0, 2);
-        placeDoorClosed(st, x, exitY - 2, def.door);
-      } else if (inactiveAt(exitY + 1) && inactiveAt(exitY + 2) && solidAtV(exitY + 3)) {
-        rng.int(0, 2); rng.int(0, 2); rng.int(0, 2);
-        placeDoorClosed(st, x, exitY, def.door);
+      for (let dy = 0; dy < 3; dy++) {
+        if (!st.inBounds(x, exitY + dy)) continue;
+        const i = st.idx(x, exitY + dy);
+        st.flags[i] = 0;                 // Tile.ClearTile()：留 type/wall/liquid
+        st.slope[i] = 0;
+        st.half[i] = 0;
       }
+      const actAt = (yy: number) => st.inBounds(x, yy) && st.flags[st.idx(x, yy)] !== 0;
+      const tableSolidAt = (yy: number) => {   // Main.tileSolid[type]（生成期翻转表）
+        if (!st.inBounds(x, yy)) return false;
+        return vanGenSolidType(st.type[st.idx(x, yy)]);
+      };
+      const solidTileAt = (yy: number) => {    // WorldGen.SolidTile（cs:70155 全谓词）
+        if (!st.inBounds(x, yy)) return false;
+        const i = st.idx(x, yy);
+        if (!st.flags[i]) return false;
+        const t = st.type[i];
+        return vanGenSolidType(t) && !HOUSE_SOLID_TOP.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)
+          && st.half[i] === 0 && st.slope[i] === 0;
+      };
+      if (!actAt(exitY - 1) && !actAt(exitY - 2) && actAt(exitY - 3) && tableSolidAt(exitY - 3)) {
+        return;                             // 分支 A：PlaceDoor 必败（地板=刚清格），零掷
+      }
+      if (actAt(exitY + 1) || actAt(exitY + 2) || !actAt(exitY + 3) || !tableSolidAt(exitY + 3)) return;
+      if (!(actAt(exitY - 1) && tableSolidAt(exitY - 1))) return;   // PlaceDoor mount
+      if (!solidTileAt(exitY + 3)) return;                          // PlaceDoor floor
+      const v0 = rng.int(0, 2), v1 = rng.int(0, 2), v2 = rng.int(0, 2);
+      placeDoorClosedRows(st, x, exitY, def.door, [v0, v1, v2]);
     };
     // 右侧扫描起点 = room.X+W（墙体列外一格,HouseBuilder.cs:562 wall=(X+W,Y+1,1,H-2)）
     // ——曾误用墙体列 X+W-1 → 扫描窗含恒实心墙列,门外洞穴 4×3 极易命中 → 门滥发
@@ -931,15 +981,24 @@ function findVerticalExit(st: TileStore, rectX: number, rectY: number, rectW: nu
 function placePlatforms(st: TileStore, rooms: Rect[], def: ThemeDef): void {
   const top = rooms[0], bot = rooms[rooms.length - 1];
   // 顶层顶壁(isUp:候选自壁上 5 格起);帧同楼梯(C6):HouseBuilder.cs:574
-  //   PlaceTile(19, PlatformStyle) → frameY = 18*style
+  //   PlaceTile(19, PlatformStyle) → frameY = 18*style。
+  // ★DDDD:Actions.PlaceTile→WorldGen.PlaceTile(forced:false) 首门 = EmptyTile
+  //   （格非 active）——竖直出口的目标行 = 房体外壳行（SetTileKeepWall 恒写满），
+  //   故 vanilla PlacePlatforms 在本语境【恒 no-op】（曾无条件写 3 格平台 =
+  //   SSS 批门/平台异位与 ① isEmpty 扰动源）；inactive 格才写（兜底镜像）。
+  const tryPlatform = (x: number, y: number) => {
+    if (st.inBounds(x, y) && !st.flags[st.idx(x, y)]) {
+      st.setTileSilent(x, y, PLATFORM, 0, def.platformStyle * 18);
+    }
+  };
   const exitT = findVerticalExit(st, top.x + 2, top.y, top.w - 4, true);
   if (exitT !== null) {
-    for (let dx = 0; dx < 3; dx++) st.setTileSilent(exitT + dx, top.y, PLATFORM, 0, def.platformStyle * 18);
+    for (let dx = 0; dx < 3; dx++) tryPlatform(exitT + dx, top.y);
   }
   if (rooms.length > 1) {
     const exitB = findVerticalExit(st, bot.x + 2, bot.y + bot.h - 1, bot.w - 4, false);
     if (exitB !== null) {
-      for (let dx = 0; dx < 3; dx++) st.setTileSilent(exitB + dx, bot.y + bot.h - 1, PLATFORM, 0, def.platformStyle * 18);
+      for (let dx = 0; dx < 3; dx++) tryPlatform(exitB + dx, bot.y + bot.h - 1);
     }
   }
 }

@@ -966,10 +966,9 @@ item({ key: 'vi_4317_haemorrhaxe', name: '', value: 1, tool: { type: 'hammer', p
 item({ key: 'vi_1844_PumpkinMoonMedallion', name: '', vid: 1844, value: 1, desc: '夜晚使用:召唤南瓜月' });
 item({ key: 'vi_1958_NaughtyPresent', name: '', vid: 1958, value: 1, desc: '夜晚使用:召唤霜月' });
 
-// 屎堆块 5395（vanilla.json 图标条目在但 itemfunc 缺 createTile——自动注册成了
-// 无 tile 的摆设物品，本条补放置链）。Item.cs:42883 DefaultToPlaceableTile(666, 0)
-// → tile v_666_poo；maxStack 缺省 9999（1456 默认）；value 0（无卖价）
-item({ key: 'vi_5395_PoopBlock', name: '', vid: 5395, value: 0, tile: 'v_666_poo' });
+// （屎堆 5395 见下方 BLOCK_TILE_BACKFILL——★勿在此 item() 手写：ITEM_DEFS id=数组
+//  下标，自动注册循环【前】插条会把后续全部物品 id 平移+1（2026-08-18 金鱼掉恐惧
+//  之魂事故根因）；补 tile 走回填表零位移）
 
 export const VANILLA_ITEM_KEY_BY_ID: Record<number, string> = {};
 const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
@@ -1031,6 +1030,8 @@ void 0;
 //   consumable=false 覆写——放置不消耗,消耗门见 Game.tryPlace) ----
 const BLOCK_TILE_BACKFILL: ReadonlyArray<readonly [number, number]> = [
   [3576, 418], [3637, 434], [3738, 448], [2755, 344], [2262, 313], [5464, 693],
+  // 5395 屎堆（Item.cs:42883 DefaultToPlaceableTile(666,0)；itemfunc 提取缺条目）
+  [5395, 666],
 ];
 for (const [vid, sheet] of BLOCK_TILE_BACKFILL) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];
@@ -1632,14 +1633,23 @@ import { TILE_KEY_BY_SHEET } from './tiles';
   for (let i = 0; i < ITEM_DEFS.length; i++) {
     const m = /^vi_(\d+)_/.exec(ITEM_DEFS[i].key);
     if (!m) continue;
-    const f = itemFuncOfVid(Number(m[1]));
-    if (!f) continue;
+    const vid = Number(m[1]);
+    const f = itemFuncOfVid(vid);
     const d = ITEM_DEFS[i];
-    if (d.tile === undefined && f.createTile !== undefined && f.createTile !== -1) {
-      const tk = TILE_KEY_BY_SHEET.get(f.createTile);
+    // createTile 双源：itemfunc 提取优先；缺时回退 vanilla.json .items.createTile
+    // （游戏数据导出的【最终态】——共享算式段提取器解不开的 2189 件由此覆盖；
+    // 双源交集 1042 件中 1039 一致，3 件分歧均为源码二次赋值、vanilla.json 是
+    // 终态更准（498=470 见 :853 注），此处不覆写已提取值、仅补缺）
+    let ct = f?.createTile;
+    if (ct === undefined || ct === -1) {
+      const vm = _vim[String(vid)] as { createTile?: number } | undefined;
+      if (vm && vm.createTile !== undefined && vm.createTile !== -1) ct = vm.createTile;
+    }
+    if (d.tile === undefined && ct !== undefined && ct !== -1) {
+      const tk = TILE_KEY_BY_SHEET.get(ct);
       if (tk !== undefined) { d.tile = tk; filled++; }
     }
-    if (f.placeStyle !== undefined && f.placeStyle !== 0 && d.placeStyle === undefined) {
+    if (f?.placeStyle !== undefined && f.placeStyle !== 0 && d.placeStyle === undefined) {
       d.placeStyle = f.placeStyle;
     }
   }
@@ -1752,7 +1762,10 @@ const CRITTER_ANCHOR_ITEMS: ReadonlyArray<number> = [
 for (const vid of CRITTER_ANCHOR_ITEMS) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];
   const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
-  if (!d || d.tile !== undefined) continue;
+  // tile 双源回填（vanilla.json createTile=724）已先置同名 tile——只在指向
+  // 【别的】tile 时跳过；placeStyle（锚桩帧档）必须照写（2026-08-18 双源
+  // 回填落地后此门曾把 261 等锚桩物品的 placeStyle 吞掉）
+  if (!d || (d.tile !== undefined && d.tile !== CRITTER_ANCHOR_TILE)) continue;
   d.tile = CRITTER_ANCHOR_TILE;
   // 蝶族：placeStyle = 物种变体（绘制窗），锚桩帧档由放置钩按 anchorStyle 覆写
   if (BUTTERFLY_VARIANT_ITEMS.includes(vid)) {

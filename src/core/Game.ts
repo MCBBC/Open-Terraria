@@ -2223,10 +2223,17 @@ export class Game implements GameHooks {
     // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限;
     // 熔断态(2026-08-18 双开崩溃:抖动环 1.7 万次/3s)加一次 toast 提示
     this.renderer.installGpuPressureGuard();
-    // 主画布重建(熔断后上下文死亡的最后手段)→ 重绑输入与 resize
+    // 主画布重建(熔断后上下文死亡的最后手段)→ 重绑输入与 resize。
+    // ★构造期守卫:options.onChange 注册即派发(Options.ts:95-98 loaded 同步回调),
+    // 持久化 renderMode:'cpu' 会在 input 构造(下方 :2270)之前就走进
+    // setRenderMode→recreateMainCanvas——此时 input 尚 undefined(裸 .destroy() 崩
+    // 整个 boot),且预建会造成 2270 二次 new Input=双实例双监听。input 未建时跳过,
+    // 2270 自会用【重建后的】renderer.canvas 绑定,单实例不变
     this.renderer.onCanvasRecreated = (canvas) => {
-      this.input.destroy();
-      this.input = new Input(canvas);
+      if (this.input) {
+        this.input.destroy();
+        this.input = new Input(canvas);
+      }
       this.renderer.installGpuPressureGuard();      // 新画布挂回单点监听(window 哨兵常在)
     };
     let gpuTripToasted = false;
@@ -11475,7 +11482,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (noSk && this.summonBossAtTx('skeletron_head', Math.floor(clothier.cx / TILE), false)) {
             const head = this.boss as Enemy | null;
             if (head && head.vanillaId === 35) {
-              head.redHat = true;                 // ai[3]=1（红帽变体，渲染/浸剂带消费）
+              head.redHat = true;                 // 红帽变体旗（AI_32 lai3 变体带消费）
+              head.ai3 = 1;                       // ★ai[3]=1（SpawnSkeletron :81262-81266 直接写 ai[3]
+                                                  //  ——NpcDrops 五条 RedHat 规则/Renderer 红臂骨/
+                                                  //  GorePiece 全读 ai3；此前只写旗致掉落不可达）
               head.x = clothier.cx - head.w / 2;  // NewNPC Bottom=裁缝师中心（:81256）
               head.y = clothier.cy - head.h;
             }
@@ -17396,8 +17406,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // BOSS_SPAWN_SILENT（SpawnBoss switch 口径，boss-music-parity 冻结）暂静默，
     // 由该表另案收口——本点直发公告不经 announceBossSummon
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
-      const downedSK = !!(this.world.flags as Record<string, boolean>).downedSlimeKing;
-      if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId, downedSK)) {
+      // downedSK 双读（击杀链写 downed_50；Weather :415 注释口径）+ 王在场第三参
+      // （NPC.cs:79882 !AnyNPCs(50)——王在场击杀不计数，2026-08-18 审查：此前两断线）
+      const wf = this.world.flags as Record<string, boolean>;
+      const downedSK = !!(wf.downedSlimeKing ?? wf.downed_50);
+      const kingOnField = (this.entities.enemies as Enemy[]).some((e) => !e.dead && e.vanillaId === 50);
+      if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId, downedSK, kingOnField)) {
         const ks = this.summonBoss('king_slime', { roar: false });
         if (ks) {
           const text = Lang.text('Announcement.HasAwoken', Lang.npcName(50) ?? 'King Slime');

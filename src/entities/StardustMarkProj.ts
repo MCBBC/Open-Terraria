@@ -81,7 +81,10 @@ export class StardustMarkProj extends Entity {
           this.hatched = true;
           // NPC.NewNPC(source, (int)Center.X, (int)Bottom.Y, (int)localAI[0])——
           // NewNPC 为中心锚语义，fromVanilla/spawnVanillaEnemy 同（e.x=x−w/2）
-          spawnVanillaEnemy(game, this.hatchType, this.cx, this.y + this.h);
+          // ★NewNPC 是 Bottom 锚（NPC.cs:81547 nPC.Bottom=(X,Y)）——Enemy 构造是中心锚
+          //  （x-w/2, y-h/2）→ 须传弹底再回退半身高（2026-08-18 审查：曾差 h/2 半身嵌地）
+          const hatched = spawnVanillaEnemy(game, this.hatchType, this.cx, this.y + this.h);
+          if (hatched) { hatched.y -= hatched.h / 2; }
         }
       }
     }

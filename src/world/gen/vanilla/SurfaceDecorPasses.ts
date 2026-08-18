@@ -15,6 +15,11 @@
 //    CheckDye/CheckLog/PlantCheck/CheckLilyPad 因放置门已保证支撑，恒为 no-op，未移植。
 //  - KillTile 生成期语义（active=false + type=0，保留液体）经 setTileSilent(0) 达成；
 //    原版还把 frameX/frameY 置 -1（本仓库 Uint16 无法存 -1，帧对渲染/对账均无影响）。
+//  - ★GGGG 2026-08-18：Flowers 击杀位改走 killTileTree（KillTile 尾部 SquareTileFrame →
+//    TileFrame case 5 → CheckTree 整树坍塌级联，零 genRand）——此前只杀单格 = 干基被
+//    花草替换后整干浮空一格（"无根树"，seed 12345 小世界 15 列实锤）；原版整树消失。
+//    其余击杀位（185/186/187 堆、香蒲、海藻、蜂巢凹龛、233 容忍格）邻域无树干/级联
+//    恒 no-op，维持单格杀；529/530 邻接重帧为存量近似（稀有、零掷骰）备案不改。
 //  - 秘密种子分支（notTheBees / remix / frozen / extraLiquid）全部不触发，未移植。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
@@ -152,6 +157,143 @@ const killTile = (st: TileStore, x: number, y: number): void => {
   if (!activeAt(st, x, y)) return;
   st.setTileSilent(x, y, 0);
 };
+
+// ============================================================
+// 0. 树坍塌级联（GGGG 2026-08-18）：
+//    KillTile(干基) → SquareTileFrame(cs:80924) → TileFrame(cs:82067) →
+//    TileFrameImportant case 5 → CheckTree(cs:54598)——下方支撑失效时
+//    干身逐格上杀 + 侧枝/根须按邻干判定连杀 = 整树坍塌（游戏内砍树同机制）。
+//    Flowers pass（cs:20692）的 KillTile 干基格在原版因此绝不留下浮空树：
+//    整树消失 + PlaceTile(3) 在原干基位放花/草。
+//    级联全程零 genRand（CheckTree 纯格效应；KillTile 尘埃走 Main.rand，
+//    且 type 5/3/73/185-187 分支均无 genRand 掷点）——掷流零扰动。
+// ============================================================
+
+/** CheckTree num4 归一化族（cs:54620-54636）：下方这些 sheet 一律视作 2（草） */
+const TREE_GROUND_NORM = new Set([23, 661, 477, 60, 70, 109, 147, 199, 662, 492]);
+/** VanityTreeGroundTest（cs:30474）：Conversion.Grass{2,23,199,109,477,492} 去 23/199（无归一化） */
+const VANITY_GROUND = new Set([2, 109, 477, 492]);
+
+/** TileFrame 生成期树域子集（cs:82067 边界 + inactive 早退；TileFrameCosmetic
+ *  生成期跳过；PlantCheck(3/73 on 草)恒 no-op）。宝石树 583-589/灰烬树 634 在
+ *  地下/地狱，花圃扫描窗（地表 ±30）不可达；棕榈 323 只长在沙族上、花圃击杀门
+ *  要求下方草 2，恒不触发——均不派发（CheckPalmTree 在本域亦恒 no-op）。 */
+function frameCellTree(st: TileStore, x: number, y: number): void {
+  if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;   // cs:82069 边界
+  const k = st.idx(x, y);
+  if (!st.flags[k]) return;                                          // inactive 早退
+  const s = SHEET[st.type[k]];
+  if (s === 5) checkTreeAt(st, x, y, false);
+  else if (s === 596 || s === 616) checkTreeAt(st, x, y, true);
+}
+
+/** SquareTileFrame（cs:80926-80934）列优先 3×3 调用序 */
+function squareFrameTree(st: TileStore, x: number, y: number): void {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) frameCellTree(st, x + dx, y + dy);
+  }
+}
+
+/** KillTile + 尾部 SquareTileFrame（cs:63559 的生成期有效子集）——树坍塌入口 */
+function killTileTree(st: TileStore, x: number, y: number): void {
+  if (!activeAt(st, x, y)) return;
+  st.setTileSilent(x, y, 0);
+  squareFrameTree(st, x, y);
+}
+
+/** CheckTree（cs:54598-54808）/ CheckTreeWithSettings·Vanity（cs:54430-54597）1:1。
+ *  vanity=true 走 CheckTreeWithSettings 分支（地面谓词换 VANITY_GROUND、
+ *  R3 杀后不再重帧——两版 cs 差异逐条保留）。帧读写走 cfx/cfy 虚拟值：
+ *  原版 KillTile 置 frameX/Y=-1 后续规则仍重读（死格重帧对输出无影响，
+ *  但尾部传播判定消费），Uint16 数组无法存 -1 故用虚拟值跟踪。 */
+function checkTreeAt(st: TileStore, x: number, y: number, vanity: boolean): void {
+  const k = st.idx(x, y);
+  const frameX0 = st.frameX[k], frameY0 = st.frameY[k];
+  const self = SHEET[st.type[k]];
+  const typeAt = (cx: number, cy: number): number => {
+    if (!st.inBounds(cx, cy)) return -1;                 // 原版 null tile → -1
+    const i = st.idx(cx, cy);
+    return st.flags[i] ? SHEET[st.type[i]] : -1;          // inactive → -1（幽灵 type 不读）
+  };
+  const num2 = typeAt(x - 1, y), num3 = typeAt(x + 1, y), num = typeAt(x, y - 1);
+  let num4 = typeAt(x, y);
+  if (!vanity && TREE_GROUND_NORM.has(num4)) num4 = 2;    // cs:54620-54636 归一化（仅 CheckTree）
+  const groundOk = vanity ? VANITY_GROUND.has(num4) : num4 === 2;
+  let cfx = frameX0, cfy = frameY0;
+  let dead = false;
+  const kill = (): void => {
+    if (dead) return;                                      // 原版 KillTile inactive 早退
+    st.setTileSilent(x, y, 0);
+    dead = true; cfx = -1; cfy = -1;
+    squareFrameTree(st, x, y);                             // cs:63950 KillTile 尾扫
+  };
+  const wr = (nfx: number, nfy: number): void => {
+    cfx = nfx; cfy = nfy;
+    if (!dead) { st.frameX[k] = nfx; st.frameY[k] = nfy; }
+  };
+  // R1（cs:54640 / 54449）：下方非草族非同类干 + 直干帧（fx∈{0,22,44} 且 fy≤130）
+  if (!groundOk && num4 !== self
+    && ((cfx === 0 && cfy <= 130) || (cfx === 22 && cfy <= 130) || (cfx === 44 && cfy <= 130))) kill();
+  // R2 根须/基座侧格（cs:54646 / 54455）：fx∈[22,44]×fy∈[132,176]，须站草且贴干
+  if (cfx >= 22 && cfx <= 44 && cfy >= 132 && cfy <= 176) {
+    if (!groundOk) kill();
+    else if ((cfx !== 22 || num2 !== self) && (cfx !== 44 || num3 !== self)) kill();
+  } else if ((cfx === 88 && cfy >= 0 && cfy <= 44) || (cfx === 66 && cfy >= 66 && cfy <= 130)
+    || (cfx === 110 && cfy >= 66 && cfy <= 110) || (cfx === 132 && cfy >= 0 && cfy <= 176)) {
+    // R2else 侧枝干身重帧（cs:54685 / 54483）：按左右邻干选变体帧
+    const n5 = cfy % 66;
+    if (num2 === self && num3 === self) wr(110, 66 + n5);
+    else if (num2 === self) wr(88, n5);
+    else if (num3 === self) wr(66, 66 + n5);
+    else wr(0, n5);
+  }
+  // R3 基座干身（cs:54708 / 54525）：fy∈[132,176] 且 fx∈{0,66,88}
+  if (cfy >= 132 && cfy <= 176 && (cfx === 0 || cfx === 66 || cfx === 88)) {
+    const n6 = cfy % 66;
+    if (vanity) {
+      if (!groundOk) kill();                               // CheckTreeWithSettings：杀后不重帧
+      else if (num2 !== self && num3 !== self) wr(0, n6);
+      else if (num2 !== self) wr(0, 132 + n6);
+      else if (num3 !== self) wr(66, 132 + n6);
+      else wr(88, 132 + n6);
+    } else {
+      if (!groundOk) kill();                               // CheckTree：杀后仍重帧（写死格对象）
+      if (num2 !== self && num3 !== self) wr(0, n6);
+      else if (num2 !== self) wr(0, 132 + n6);
+      else if (num3 !== self) wr(66, 132 + n6);
+      else wr(88, 132 + n6);
+    }
+  }
+  // R4 侧枝贴干存活链（cs:54734-54749 / 54550-54565）
+  if ((cfx === 66 && (cfy === 0 || cfy === 22 || cfy === 44)) || (cfx === 44 && (cfy === 198 || cfy === 220 || cfy === 242))) {
+    if (num3 !== self) kill();
+  } else if ((cfx === 88 && (cfy === 66 || cfy === 88 || cfy === 110)) || (cfx === 66 && (cfy === 198 || cfy === 220 || cfy === 242))) {
+    if (num2 !== self) kill();
+  } else if (num4 === -1) {
+    kill();                                                 // cs:54747（|| num4==23 被前置归一化致死代码）
+  } else if (num !== self && cfy < 198 && ((cfx !== 22 && cfx !== 44) || cfy < 132)) {
+    // R4else3 干身孤立重帧（cs:54750-54796 / 54568-54597）
+    const n7 = cfy % 66;
+    if (num2 === self || num3 === self) {
+      if (num4 === self) {
+        if (num2 === self && num3 === self) wr(132, 132 + n7);
+        else if (num2 === self) wr(132, n7);
+        else wr(132, 66 + n7);
+      } else {
+        if (num2 === self && num3 === self) wr(154, 132 + n7);
+        else if (num2 === self) wr(154, n7);
+        else wr(154, 66 + n7);
+      }
+    } else wr(110, n7);
+  }
+  // 尾部传播（cs:54798-54806 / 54593-54601）：双帧均变才四邻重帧
+  if (cfx !== frameX0 && cfy !== frameY0 && frameX0 >= 0 && frameY0 >= 0) {
+    frameCellTree(st, x - 1, y);
+    frameCellTree(st, x + 1, y);
+    frameCellTree(st, x, y - 1);
+    frameCellTree(st, x, y + 1);
+  }
+}
 
 // ============================================================
 // 1. SurfaceOreAndStone（cs:18559）
@@ -1031,7 +1173,7 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
                 st.type[t5] = GRASS;                                    // 基座矿石/石 → 草
                 if (oreLike(t6)) st.type[t6] = GRASS;
               }
-              killTile(st, m, n);
+              killTileTree(st, m, n);   // 干基被杀 → CheckTree 级联整树坍塌（原版语义，见文件头）
               if (rng.int(0, 1) === 0) {                                // Next(2)
                 st.slope[t5] = 0;
                 st.half[t5] = 0;
@@ -1063,6 +1205,11 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
       }
       break;                                                            // 每个锚点只做一圈
     }
+  }
+  // 坍塌树的登记表修剪：基座格已失活 = 整树已消（花圃击杀链），
+  // 残留条目会被运行期砍伐判定/树冠摆动误读——按基座活性过滤
+  if (gs.genTrees.length) {
+    gs.genTrees = gs.genTrees.filter((e) => activeAt(st, e.x, e.y + e.h - 1));
   }
 }
 

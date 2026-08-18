@@ -89,41 +89,53 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (d.framed && ((d.w ?? 1) > 1 || (d.h ?? 1) > 1)) MULTI_DEFS.set(i, { w: d.w!, h: d.h! });
 }
 function killTileWhole(st: TileStore, x: number, y: number): void {
-  // ★支撑塌连锁：KillTile 尾部 SquareTileFrame(i,j)（cs:63983）→ TileFrame(x±1,y-1)
-  //   重帧——**底行**骑在被杀格**正上方**（同列）的多格物体（陶罐/雕像/装饰）
-  //   整块碎裂。golden 实证：镖锚 (3788,414) 杀木块 → 正上 2×2 陶罐(3787..3788,
-  //   412..413) 整塌；对照①(401,389) 杀泥——旁侧陶罐底行不骑该列，不塌；对照②
-  //   (493,450) 杀泥——邻列 (494,449) 陶罐底行不塌（±1 列不级联）。
-  {
-    const ux = x, uy = y - 1;
-    if (st.inBounds(ux, uy)) {
+  // ★KillTile 级联（cs:63983 尾部 SquareTileFrame(i,j) → 3×3 TileFrame 重帧）：
+  //   邻接多格物体经锚校验失败整块碎裂。golden 四站点实证：
+  //   ①镖锚(3788,414)杀木块→上方陶罐右支撑列悬空→整塌；
+  //   ②(493,450)杀泥→邻陶罐(494..495,448..449)双支撑列完好→存活（±1 列非无条件塌）；
+  //   ③沙陷阱(2587,624)杀砂岩→正上仙人掌塌→其 KillTile 再 SquareTileFrame→
+  //     左邻钟乳石(2586,622..623)顶锚悬空→塌（锚校验按附着向：165 族查上方，
+  //     余者查底行下方逐列）；
+  //   ④(401,389)杀泥→旁侧陶罐底行不骑该列→存活。
+  killObjectAt(st, x, y);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const ux = x + dx, uy = y + dy;
+      if (!st.inBounds(ux, uy)) continue;
       const ui = st.idx(ux, uy);
       const ut = st.type[ui];
-      if (MULTI_DEFS.has(ut) && st.flags[ui]) {
-        const m = MULTI_DEFS.get(ut)!;
-        // 找含 (ux,uy) 的完整块，且 (ux,uy) 须在块底行
-        let done = false;
-        for (let ay = uy; ay > uy - m.h && !done; ay--) {
-          for (let ax = ux; ax > ux - m.w; ax--) {
-            let full = true;
-            for (let dy = 0; dy < m.h && full; dy++) {
-              for (let dx2 = 0; dx2 < m.w; dx2++) {
-                if (!st.inBounds(ax + dx2, ay + dy) || st.type[st.idx(ax + dx2, ay + dy)] !== ut) { full = false; break; }
-              }
-            }
-            if (full && ay + m.h - 1 === uy) {
-              for (let dy = 0; dy < m.h; dy++) {
-                for (let dx2 = 0; dx2 < m.w; dx2++) st.setTileSilent(ax + dx2, ay + dy, 0);
-              }
-              done = true;
-              break;
+      if (!MULTI_DEFS.has(ut) || !st.flags[ui]) continue;
+      // 找含 (ux,uy) 的完整块锚
+      const m = MULTI_DEFS.get(ut)!;
+      for (let ay = uy; ay > uy - m.h; ay++) {
+        let hit = false;
+        for (let ax = ux; ax > ux - m.w; ax++) {
+          let full = true;
+          for (let ddy = 0; ddy < m.h && full; ddy++) {
+            for (let ddx = 0; ddx < m.w; ddx++) {
+              if (!st.inBounds(ax + ddx, ay + ddy) || st.type[st.idx(ax + ddx, ay + ddy)] !== ut) { full = false; break; }
             }
           }
+          if (!full) continue;
+          // 锚校验：165 族（钟乳石）顶锚，余者底锚
+          let ok = true;
+          const ceiling = sheetOf(ut) === 165;
+          for (let c = 0; c < m.w && ok; c++) {
+            const sx = ax + c, sy = ceiling ? ay - 1 : ay + m.h - 1 + 1;
+            if (!st.inBounds(sx, sy) || !st.flags[st.idx(sx, sy)] || !vanGenSolidType(st.type[st.idx(sx, sy)]!)) ok = false;
+          }
+          if (!ok) {
+            for (let ddy = 0; ddy < m.h; ddy++) {
+              for (let ddx = 0; ddx < m.w; ddx++) st.setTileSilent(ax + ddx, ay + ddy, 0);
+            }
+          }
+          hit = true;
+          break;
         }
+        if (hit) break;
       }
     }
   }
-  killObjectAt(st, x, y);
 }
 function killObjectAt(st: TileStore, x: number, y: number): void {
   const t = st.type[st.idx(x, y)];

@@ -58,9 +58,10 @@ describe('StardustMarkProj（aiStyle 103，Projectile.cs:32272-32299）', () => 
     m.fixedUpdate(1 / 60, hooks);                    // t=11：−20 → 归 0 → NewNPC
     expect(enemies.length).toBe(1);
     expect(enemies[0].vanillaId).toBe(402);
-    // NewNPC((int)Center.X, (int)Bottom.Y) 中心锚 → fromVanilla 同语义再中心化
+    // NewNPC((int)Center.X, (int)Bottom.Y) 是 **Bottom 锚**（NPC.cs:81547）→ 孵化怪
+    // 底边中心 = 弹底（2026-08-18 审查勘误：曾按中心锚断言 cy=520，差 h/2）
     expect(enemies[0].cx).toBeCloseTo(1010, 5);
-    expect(enemies[0].cy).toBeCloseTo(520, 5);
+    expect(enemies[0].cy).toBeCloseTo(520 - enemies[0].h / 2, 5);   // 中心 = 底 - h/2
     let t = 11;                                      // 前面已手动推过 11 tick
     for (; t < 60 && !m.dead; t++) {
       m.fixedUpdate(1 / 60, hooks);

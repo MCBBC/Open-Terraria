@@ -1496,9 +1496,16 @@ export class Renderer {
     this.canvas.addEventListener('contextlost', onLost);
     // ★全局画布哨兵(2026-08-18 双开 trace 实锤:16k 次/秒的风暴打在几百个
     // 无守卫画布上——chunk 烘焙/GL/光照/VUI 等,主画布单点监听是聋的)。
-    // capture 阶段 window 级监听捕获全部画布的 contextlost,统一计入熔断
+    // capture 阶段 window 级监听捕获全部画布的 contextlost,统一计入熔断。
+    // ★单例替换(2026-08-18):本函数会被 onCanvasRecreated 每次重建再调——
+    // 裸 add 会让 window 累积 N 个哨兵(同一事件计数 N 次且各持独立熔断状态机
+    // 分裂);先摘旧哨兵再挂新闭包,恒保一份且状态机与最新画布监听同源
+    this.gpuSentinelRemove?.();
+    this.gpuSentinelRemove = () => window.removeEventListener('contextlost', onLost, true);
     window.addEventListener('contextlost', onLost, true);
   }
+  /** window 级 contextlost 哨兵的摘除器(installGpuPressureGuard 单例替换用) */
+  private gpuSentinelRemove: (() => void) | null = null;
   /** 辅画布健康重建(2026-08-18):光照/迷雾画布的 2D 上下文在风暴中
    * 丢弃后备后多数自愈,但极端态会滞死——重建为同尺寸新画布(内容由
    * 各自的每帧写入自然重填;迷雾走 null→懒重建) */
@@ -7880,8 +7887,14 @@ export class Renderer {
             // 变身坐骑静持锚（AdjustmentsFor*Mount——静持 = 无动画档 animating=false；
             // num=静持身体行：hold1/3/5→3、hold2→2、无→0（:36025-36040））
             if (p.ridingMount && MOUNT_SETS.PlayerIsHidden?.[p.mount.type]) {
-              const m = this.mountHeldAnchor(p.mount.type, null, hs, false,
-                vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442,
+              // ★传物品真实 useStyle：原版 flag4/5/10/8/7 档只读 heldItem.useStyle
+              //（:50684-50690）,静持同样命中（IsFood us2 静持 54 上应 (3,2)/52 上 (14,-4)）;
+              // 曾传 null 直接落 holdStyle 档差 2px（2026-08-18 审查）
+              const heldDef = held ? ITEM_DEFS[held.id] : undefined;
+              const heldVid = heldDef ? viIdFromKey(heldDef.key) : -1;
+              const heldUs = heldVid >= 0 ? itemFuncOfVid(heldVid)?.useStyle ?? null : null;
+              const m = this.mountHeldAnchor(p.mount.type, typeof heldUs === 'number' ? heldUs : null, hs, false,
+                vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 2421 || vid === 2422 || vid === 4325 || vid === 4442,
                 { vid, bodyRow: hs === 2 ? 2 : hs ? 3 : 0 });
               if (m) {
                 if (m.resetX !== undefined) { offX = m.resetX; offY = m.resetY!; }
@@ -8878,7 +8891,7 @@ export class Renderer {
       // 悠悠球/3542 分档；-1 族（us14/15 等）该两档不消费 num，钳 0）
       const rowRaw = this.useStyleBodyRow(swing, p);
       const m = this.mountHeldAnchor(p.mount.type, us, 0, true,
-        vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442,
+        vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 2421 || vid === 2422 || vid === 4325 || vid === 4442,
         { vid, bodyRow: rowRaw < 0 ? 0 : rowRaw });
       if (m) {
         if (m.resetX !== undefined) { offX = m.resetX; offY = m.resetY!; }
@@ -9716,7 +9729,10 @@ export class Renderer {
               const xx = x0 + dx, yy = y0 + dy;
               if (xx < st.w && yy < st.h && ex[yy * st.w + xx]) { seen = true; break; }
             }
-            if (!seen) buf[(by0 + by) * w + (bx0 + bx)] = FOG;
+            // ★双向写:未探索=FOG,已探索=0(清雾)。旧 canvas 版用全新 ImageData
+            // (全零)+putImageData 隐式清了探索区;CPU 直写共享缓冲后漏了 else
+            // 分支 → 新探索格保持旧 FOG 值 = 迷雾不清(用户实报 10 秒延迟)
+            buf[(by0 + by) * w + (bx0 + bx)] = seen ? 0 : FOG;
           }
         }
         this.fogVersion = world.exploredVersion;

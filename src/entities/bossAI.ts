@@ -44,7 +44,10 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   //  (每帧 vx 符号)致旋冲过头贴脸时 spin 反复换号 = "只会两边摇动不旋转"
   if (game.world.clock.isDay && !isGuardian && e.ai1 !== 3) {
     if (e.ai1 !== 2) {
-      e.ai3 = player && player.cx > e.cx ? 1 : -1;
+      // 旋冲方向用独立字段（原版读 direction 持久朝向）——★勿写 ai3：ai[3]==1 是
+      // RedHatSkeletron 变体位（NpcDrops/Renderer/GorePiece 消费），曾挪用致普通
+      // 骷髅王击杀时 ai3 常为 1 → 必掉全套 Chippy 时装（刷物品漏洞，2026-08-18 审查抓出）
+      (e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir = player && player.cx > e.cx ? 1 : -1;
       // :21943-21947 转换瞬间 Roar 一声（SoundID 15 style0 = Roar_0,'roar' 键恒此轨）
       game.playSfx('roar', 1, e.cx, e.cy);
     }
@@ -58,7 +61,7 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     // 8 速恒直追——此前只改了伤害没改防御，且玩家死后 null 解引用
     e.def.damage = 9999;
     e.def.defense = 9999;
-    e.spin += (e.ai3 || 1) * 0.3;
+    e.spin += ((e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir || 1) * 0.3;
     if (player) {
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
@@ -86,8 +89,8 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     if (e.ai2 >= 800) {
       e.ai2 = 0;
       e.ai1 = 1;
-      // 旋冲方向冻结 = 目标侧(TargetClosest direction 语义,见上 ai1=2 注)
-      e.ai3 = player.cx > e.cx ? 1 : -1;
+      // 旋冲方向冻结 = 目标侧(TargetClosest direction 语义,见上 ai1=2 注)——独立字段勿占 ai3
+      (e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir = player.cx > e.cx ? 1 : -1;
     }
     // 回悬浮:恢复冲撞前的伤害/防御基值
     const base = baseStats.get(e);
@@ -118,7 +121,7 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     if (!base) { base = baseOf(e); }
     e.def.defense = Math.max(0, base.def - 10);
     e.def.damage = Math.round(base.dmg * 1.3);
-    e.spin += (e.ai3 || 1) * 0.3;
+    e.spin += ((e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir || 1) * 0.3;
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const d = Math.hypot(dx, dy) || 1;
     const spd = 12; // (1.5x 追击速)
@@ -890,7 +893,7 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.ai0 += 1; e.ai1 = 0;
       if (e.ai0 === 3) e.ai2 = 0;
       else {
-        game.playSfx('roar', 0.7);
+        game.playSfx('roar', 1, e.cx, e.cy);   // :26855/:27478 PlaySound(15,style0) 满响
         game.spawnParticles(e.cx, e.cy, '#FF6040', 20, 2);
       }
     }
@@ -1078,7 +1081,7 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
   if (game.world.clock.isDay && e.ai1 !== 3 && e.ai1 !== 2) {
     e.ai3 = player && player.cx > e.cx ? 1 : -1;
     e.ai1 = 2;
-    game.playSfx('roar', 0.8);
+    game.playSfx('roar', 1, e.cx, e.cy);   // :27785 style0 满响带坐标
   }
   if (e.ai1 === 0) {
     // 悬浮段(:27787-27874):Y 带 [玩家-200, 玩家-500] 0.1/±2;X 窗 ±100 0.1/±8;
@@ -1126,7 +1129,7 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
     e.def.defense = b.def * 2;
     e.def.damage = b.dmg * 2;
     e.ai2 += 1;
-    if (e.ai2 === 2) game.playSfx('roar', 0.6);
+    if (e.ai2 === 2) game.playSfx('roar', 1, e.cx, e.cy);   // :27882 style0 满响
     if (e.ai2 >= 400) { e.ai2 = 0; e.ai1 = 0; }
     if (mq) {
       const tilt = (e.vx / 15) * 0.5;

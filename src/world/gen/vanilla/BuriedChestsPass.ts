@@ -14,7 +14,6 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
-import { solidTile as solidTileHB } from './HalfBrickPass';
 import { genSolidType } from './GenSolid';
 
 const CHEST = TILE_BY_KEY['chest']!;
@@ -611,6 +610,18 @@ function placeBuriedChestInner(
   i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean; notNearOtherChests?: boolean } = {},
 ): boolean {
   // 下落到地面（cs:35931 `for k=j; k<maxTilesY-10; k++`）
+  // ★DDDD:坠落谓词 = WorldGen.SolidTile(i,k)（cs:70155:active && tileSolid && !tileSolidTop
+  //   && !half && slope==0 && !inActive）——平台/桌族(solidTop)不拦截坠落,vanilla house17
+  //   宝箱(1863,541)穿过楼梯平台落 548(x86 CPB 实锤);曾用 solidTileHB(!d.platform)——
+  //   桌族(87 等无 d.platform 旗)误当拦截层。六谓词与 PC_SOLID_TOP 表一致。
+  const solidDrop = (lx: number, ly: number): boolean => {
+    if (!st.inBounds(lx, ly)) return false;
+    const i = st.idx(lx, ly);
+    if (!st.flags[i]) return false;
+    const t = st.type[i];
+    return genSolidType(t) && !PC_SOLID_TOP.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)
+      && st.half[i] === 0 && st.slope[i] === 0;
+  };
   let gy = j;
   let slopeL = -1, slopeR = -1;   // trySlope 压平的坡度（失败时回填，cs:37567-37575）
   for (; gy < st.h - 10; gy++) {
@@ -630,7 +641,7 @@ function placeBuriedChestInner(
         if (BOULDER_TILES.has(tt) || tt === ALTAR || tt === TALTAR) return false;
       }
     }
-    if (solidTileHB(st, i, gy)) {
+    if (solidDrop(i, gy)) {
       // trySlope 门（cs:35951-35968）：style 17 时 ±30 盒内不得有箱/越界；
       // 压平 (i-1,gy)/(i,gy) 的顶坡供放置（失败时回填）
       if (opts.trySlope && opts.style === 17) {
@@ -656,7 +667,7 @@ function placeBuriedChestInner(
     }
   }
   if (gy >= st.h - 10) return false;
-  if (!solidTileHB(st, i, gy)) return false;
+  if (!solidDrop(i, gy)) return false;
   // trySlope 失败回填（cs:37567-37575：仅压平过的格才恢复）
   const restoreSlopes = (): void => {
     if (slopeL > -1) st.slope[st.idx(i - 1, gy)] = slopeL;
