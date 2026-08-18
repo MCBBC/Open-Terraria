@@ -49,6 +49,9 @@ export interface OptionsData {
   /** 渲染帧率上限(2026-08-18 原版对齐):原版锁 60fps;0=不锁(跟随显示器 rAF)。
    *  逻辑 tick 恒 60Hz 不受影响(fixedUpdate 累加器);仅 gate 渲染帧 */
   frameCap: number;
+  /** 跳帧(原版视频设置 Frame Skip,默认开):渲染超预算时本帧只跑逻辑不画,
+   *  保逻辑恒 60Hz——弱机卡顿时"画面慢但游戏不慢" */
+  frameSkip: boolean;
 }
 
 const KEY = 'sandboxworld.options';
@@ -62,6 +65,7 @@ export class OptionsStore {
     devMode: false,
     pvpEnabled: false,
     frameCap: 60,
+    frameSkip: true,
     pvpTeam: 0,
     lang: DEFAULT_LANG,
     smartCursorMode: 'toggle',

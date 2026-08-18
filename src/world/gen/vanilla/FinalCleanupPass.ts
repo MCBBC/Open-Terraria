@@ -40,6 +40,7 @@ import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid } from './GenSolid';
+import { checkStalactite } from './ShimmerPass';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();

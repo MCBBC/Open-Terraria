@@ -22,23 +22,28 @@ const out = await page.evaluate(async () => {
   };
 
   // ---------- #3 冰面滑行无输入腿行（Player.cs:35818-35826） ----------
-  const save3 = { vx: p.vx, vy: p.vy, onGround: p.onGround, floorTileT: p.floorTileT, inputX: p.inputX, animTime: p.animTime, swimTime: p.swimTime };
-  const legs3 = (o) => R.playerFrameRows.call(g.renderer, Object.assign(p, {
-    vy: 0, onGround: true, swimTime: 0, animTime: 12, vx: 2.4, inputX: 0, floorTileT: -1,
-  }, o), null, 0, o.mnt ?? null, null, 0).legs;
+  const save3 = { vx: p.vx, vy: p.vy, onGround: p.onGround, floorTileT: p.floorTileT, inputX: p.inputX, animTime: p.animTime, swimTime: p.swimTime, mType: p.mount.type };
+  const legs3 = (o) => {
+    if (o.mountType !== undefined) p.mount.type = o.mountType;   // mtype 取自 p.mount.type（:6641）
+    return R.playerFrameRows.call(g.renderer, Object.assign(p, {
+      vy: 0, onGround: true, swimTime: 0, animTime: 12, vx: 2.4, inputX: 0, floorTileT: -1,
+    }, o), null, 0, o.mnt ?? null, null, 0).legs;
+  };
   res.ice_noInput = legs3({ floorTileT: 161, inputX: 0 });              // 期望 0
   res.ice197_noInput = legs3({ floorTileT: 197, inputX: 0 });           // slippy2 冻史莱姆块 期望 0
   res.ice_input = legs3({ floorTileT: 161, inputX: 1 });                // 有输入 → 行走循环 7..19
   res.ground_noInput = legs3({ floorTileT: -1, inputX: 0 });            // 普通地面无输入（击退余速）→ 原版走循环
-  res.skates_noInput = legs3({ mnt: { type: 57 }, inputX: 0 });         // 滚轴鞋 57 无输入 期望 0
-  res.skates_input = legs3({ mnt: { type: 57 }, inputX: 1, vx: 4 });    // 滚轴鞋有输入 → 循环
+  // mtype 取自 p.mount.type（:6641），滚轴鞋用例须连 p.mount.type 一起置 57
+  res.skates_noInput = legs3({ mnt: { type: 57 }, inputX: 0, mountType: 57 });
+  res.skates_input = legs3({ mnt: { type: 57 }, inputX: 1, vx: 4, mountType: 57 });
+  p.mount.type = save3.mType;
   eq('#3 冰161无输入', res.ice_noInput, 0);
   eq('#3 冻197无输入', res.ice197_noInput, 0);
   eq('#3 冰有输入走循环', res.ice_input >= 7 && res.ice_input <= 19, true);
   eq('#3 普地无输入走循环', res.ground_noInput >= 7 && res.ground_noInput <= 19, true);
   eq('#3 滚轴鞋无输入', res.skates_noInput, 0);
   eq('#3 滚轴鞋有输入走循环', res.skates_input >= 7 && res.skates_input <= 19, true);
-  Object.assign(p, save3);
+  Object.assign(p, save3); p.mount.type = save3.mType;
 
   // ---------- #2 mountHeldAnchor 表值（Player.cs:50671-50793 原文数字） ----------
   const M = (mtype, us, hs, anim, fish, held) => R.mountHeldAnchor.call(g.renderer, mtype, us, hs, anim, fish, held);
@@ -74,23 +79,26 @@ const out = await page.evaluate(async () => {
     // ridingMount 是只读 getter（= mount.active && !isCart）→ 改写 mount 三字段
     const save2 = { mActive: p.mount.active, mType: p.mount.type, mCart: p.mount.isCart, facing: p.facing, gravDir: p.gravDir };
     p.mount.active = true; p.mount.type = 54; p.mount.isCart = false; p.facing = 1; p.gravDir = 1;
-    const cv = document.createElement('canvas'); cv.width = 360; cv.height = 300;
+    const cv = document.createElement('canvas'); cv.width = 1280; cv.height = 800;
     const c2 = cv.getContext('2d');
     const spyArgs = [];
     const orig = R.mountHeldAnchor;
     R.mountHeldAnchor = function (...a) { spyArgs.push(a.slice(0, 6)); return orig.apply(this, a); };
     // 质心成像（含贴图懒加载重试）：行2(aim-1.2) vs 行3(aim0)，锚差 (10,-10)vs(8,0)
+    // 锚点/帧源矩形间谍：drawUseItem 的锚=drawImage 前最后一个 translate（旋转前、
+    // 无质心污染）；帧规格=drawImage 源矩形 (sx,sy,sw,sh)——透明边/旋转均不影响
+    const cam = g.camera, zm = cam.zoom ?? 1;
+    const applyCam = () => c2.setTransform(zm, 0, 0, zm, cv.width / 2 - cam.x * zm, cv.height / 2 - cam.y * zm);
+    const bag = { draws: [], translates: [] };
+    const od = c2.drawImage.bind(c2), ot = c2.translate.bind(c2);
+    c2.drawImage = function (img, sx, sy, sw, sh, ...rest) { bag.draws.push([sx, sy, sw, sh]); return od(img, sx, sy, sw, sh, ...rest); };
+    c2.translate = function (x, y) { bag.translates.push([x, y]); return ot(x, y); };
     const snap = async (aim) => {
       for (let k = 0; k < 12; k++) {
-        c2.clearRect(0, 0, cv.width, cv.height);
+        bag.draws.length = 0; bag.translates.length = 0;
+        c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, cv.width, cv.height); applyCam();
         R.drawUseItem.call(g.renderer, c2, p, { t: 30, dur: 60, item: yoyoItem, useStyle: 5, aim }, null);
-        const d = c2.getImageData(0, 0, cv.width, cv.height).data;
-        let sx = 0, sy = 0, n = 0;
-        for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
-          const a = d[(y * cv.width + x) * 4 + 3];
-          if (a > 8) { sx += x; sy += y; n++; }
-        }
-        if (n > 40) return { cx: sx / n, cy: sy / n, n };
+        if (bag.draws.length) return { anchor: bag.translates[bag.translates.length - 1], src: bag.draws[bag.draws.length - 1] };
         await new Promise(r => setTimeout(r, 250));
       }
       return null;
@@ -101,9 +109,14 @@ const out = await page.evaluate(async () => {
     p.mount.active = save2.mActive; p.mount.type = save2.mType; p.mount.isCart = save2.mCart;
     p.facing = save2.facing; p.gravDir = save2.gravDir;
     if (a3 && a2) {
-      res.pixelDiff = { r3: a3, r2: a2, dx: +(a2.cx - a3.cx).toFixed(2), dy: +(a2.cy - a3.cy).toFixed(2) };
-      eq('#2 像素差分dy≈-10', Math.abs(res.pixelDiff.dy + 10) <= 5, true);
-      eq('#2 像素差分dx≈+2', Math.abs(res.pixelDiff.dx - 2) <= 6, true);
+      res.zoom = zm;
+      res.e2e = { r3: a3, r2: a2 };
+      // us5 基锚 offX=−2（:50387）→ 行3 offX=−2+8=6、行2 offX=−2+10=8 → Δ=(+2,−10) 整像素
+      const o3 = { x: a3.anchor[0] - p.cx, y: a3.anchor[1] - p.y };
+      const o2 = { x: a2.anchor[0] - p.cx, y: a2.anchor[1] - p.y };
+      res.anchorOff = { r3: [+o3.x.toFixed(2), +o3.y.toFixed(2)], r2: [+o2.x.toFixed(2), +o2.y.toFixed(2)] };
+      res.anchorDelta = [+(o2.x - o3.x).toFixed(2), +(o2.y - o3.y).toFixed(2)];
+      eq('#2 端到端锚差Δ=(2,-10)', res.anchorDelta, [2, -10]);
       res.spyWiring = spyArgs.filter(a => a[0] === 54).map(a => ({ us: a[1], anim: a[3], vid: a[5]?.vid, row: a[5]?.bodyRow }));
       const rowsSeen = new Set(res.spyWiring.map(w => w.row));
       eq('#2 端到端传参含行2/3', rowsSeen.has(2) && rowsSeen.has(3), true);
@@ -113,36 +126,45 @@ const out = await page.evaluate(async () => {
 
   // ---------- #4 食物手持帧（GetItemDrawFrame :41901-41903 Frame(1,3,0,1)） ----------
   const itemOf = (vid) => ITEM_DEFS.findIndex((d) => new RegExp(`^vi_${vid}_`).test(d?.key ?? ''));
-  const bbox = async (vid, useStyle) => {
+  // 帧规格取 drawImage 源矩形（透明边/旋转无污染）：969→竖3条第2行 12×17、
+  // 353→18×20、968→32×10 整图（GetItemDrawFrame :41901-41903 / GetDrawHitbox :49200）
+  const srcOf = async (vid, useStyle) => {
     const id = itemOf(vid);
     if (id < 0) return null;
     const save4 = { mActive: p.mount.active, mType: p.mount.type, mCart: p.mount.isCart, facing: p.facing, gravDir: p.gravDir };
     p.mount.active = false; p.facing = 1; p.gravDir = 1;
-    const cv = document.createElement('canvas'); cv.width = 260; cv.height = 260;
+    const cv = document.createElement('canvas'); cv.width = 1280; cv.height = 800;
     const c2 = cv.getContext('2d');
+    const cam = g.camera, zm = cam.zoom ?? 1;
+    const bag = { draws: [] };
+    const od = c2.drawImage.bind(c2);
+    c2.drawImage = function (img, sx, sy, sw, sh, ...rest) { bag.draws.push([sx, sy, sw, sh]); return od(img, sx, sy, sw, sh, ...rest); };
     let r = null;
     for (let k = 0; k < 12; k++) {
-      c2.clearRect(0, 0, cv.width, cv.height);
+      bag.draws.length = 0;
+      c2.setTransform(1, 0, 0, 1, 0, 0); c2.clearRect(0, 0, cv.width, cv.height);
+      c2.setTransform(zm, 0, 0, zm, cv.width / 2 - cam.x * zm, cv.height / 2 - cam.y * zm);
       R.drawUseItem.call(g.renderer, c2, p, { t: 30, dur: 60, item: id, useStyle }, null);
-      const d = c2.getImageData(0, 0, cv.width, cv.height).data;
-      let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1, n = 0;
-      for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
-        if (d[(y * cv.width + x) * 4 + 3] > 8) { n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-      }
-      if (n > 4) { r = { w: x1 - x0 + 1, h: y1 - y0 + 1, n }; break; }
-      void d;
+      if (bag.draws.length) { r = bag.draws[bag.draws.length - 1]; break; }
       await new Promise(rr => setTimeout(rr, 250));
     }
     p.mount.active = save4.mActive; p.mount.type = save4.mType; p.mount.isCart = save4.mCart;
     p.facing = save4.facing; p.gravDir = save4.gravDir;
-    return r;
+    const raw = g.renderer.atlas.vicon(vid);
+    return { src: r, raw: raw ? [raw.sx, raw.sy, raw.sw, raw.sh] : null };
   };
-  res.food969_us2 = await bbox(969, 2);    // 12×51 竖3条 → 第2行 12×17
-  res.food353_us9 = await bbox(353, 9);    // 18×60 竖3条 → 第2行 18×20
-  res.mm968_us1 = await bbox(968, 1);      // 32×10 单帧整图
-  eq('#4 熟棉花糖969=12×17', res.food969_us2 && res.food969_us2.w === 12 && res.food969_us2.h === 17, true);
-  eq('#4 麦酒353=18×20', res.food353_us9 && res.food353_us9.w === 18 && res.food353_us9.h === 20, true);
-  eq('#4 棉花糖串968=32×10整图', res.mm968_us1 && res.mm968_us1.w === 32 && res.mm968_us1.h === 10, true);
+  res.food969_us2 = await srcOf(969, 2);
+  res.food353_us9 = await srcOf(353, 9);
+  res.mm968_us1 = await srcOf(968, 1);
+  eq('#4 熟棉花糖969源=第2行12×17', res.food969_us2 && res.food969_us2.src
+    && res.food969_us2.src[2] === 12 && res.food969_us2.src[3] === 17
+    && res.food969_us2.src[1] - res.food969_us2.raw[1] === 17, true);
+  eq('#4 麦酒353源=第2行18×20', res.food353_us9 && res.food353_us9.src
+    && res.food353_us9.src[2] === 18 && res.food353_us9.src[3] === 20
+    && res.food353_us9.src[1] - res.food353_us9.raw[1] === 20, true);
+  eq('#4 棉花糖串968源=整图32×10', res.mm968_us1 && res.mm968_us1.src
+    && res.mm968_us1.src[2] === 32 && res.mm968_us1.src[3] === 10
+    && res.mm968_us1.src[1] - res.mm968_us1.raw[1] === 0, true);
   res.foodHeldFrame = (() => {   // 静态助手直检：969 原条 12×51 → 行1 12×17
     const raw = g.renderer.atlas.vicon(969);
     if (!raw) return null;

@@ -13,8 +13,17 @@ import { equipKindOfInternal } from '../data/vanillaEquip';
 import { prefixStat, prefixLines, type PrefixStat } from '../data/vanillaPrefixes';
 import { VANILLA_RECIPES } from '../data/vanillaRecipes';
 import { Lang } from '../i18n/Lang';
+import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 
-export interface TooltipLine { text: string; color?: string; tag?: string }
+/** 原版物品 PascalCase 名键（ItemName.Xxx 查 l10n） */
+const vanillaItemNameKey = (vid: number): string => ITEM_NAME_BY_ID[vid] ?? `Item${vid}`;
+
+export interface TooltipLine { text: string; color?: string; tag?: string
+  /** 悠悠球商标装饰位（:20262-20290 OneDropLogo 五层影，本行文本置 " "） */
+  yoyoLogo?: boolean;
+  /** 研究行（:20295-20298 Colors.JourneyMode 紫） */
+  journeyColor?: boolean;
+}
 export interface TooltipPlayerStats {
   /** 各系伤害乘区（Player.damageMult） */
   dmgMult: { melee: number; ranged: number; magic: number; summon: number };
@@ -22,6 +31,20 @@ export interface TooltipPlayerStats {
   crit: { melee: number; ranged: number; magic: number };
   /** 耗魔乘区（equipStats.manaCostMul） */
   manaCostMul: number;
+}
+/** 悬停上下文（低频行族的门数据——UI 侧现取注入，缺省全关） */
+export interface TooltipContext {
+  /** 旅程角色（difficulty==3）研究进度：have/need（TryGetSacrificeNumbers，
+   *  :21163-21178 CreativeSacrificeNeeded 行 + JourneyMode 紫色） */
+  research?: { have: number; need: number } | null;
+  /** 商店上下文（npcShop>0，:20309-20402）：买入价（buy=true）/卖出价（铜计）。
+   *  null=非商店。价格行按最高币种着色（:20380-20397 四档） */
+  shop?: { buy: boolean; priceCopper: number } | null;
+  /** 社交栏槽（dye/armor vanity 位——tip[0]/[61]，:20499-20502 social 位） */
+  socialSlot?: boolean;
+  /** 专家/大师物品旗（item.expert / rare==-13，:21146-21157 GameUI.Expert/Master） */
+  expert?: boolean;
+  master?: boolean;
 }
 export type TooltipSlot = { id: number; stack: number; prefix?: number; favorited?: boolean };
 
@@ -38,6 +61,17 @@ function materialIids(): Set<number> {
   MATERIAL_IIDS = s;
   return s;
 }
+
+/** 鞭（IsAWhip = proj aiStyle 165 全 18 枚）——鞭是 summon 但显速度档
+ *  （:20545 useStyle 门 `!summon || IsAWhip[shoot]` 例外） */
+const WHIP_PROJS = new Set([841, 847, 848, 849, 912, 913, 914, 915, 952,
+  1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1104]);
+/** 悠悠球物品（yoyoLogo 装饰位，:20845-20853） */
+const YOYO_ITEMS = new Set([3262, 3282, 3283, 3284, 3285, 3286, 3316, 3315, 3317, 3291, 3389]);
+/** 泥土魔杖（item.tileWand=2，tip[52] "消耗 泥土"——itemfunc 无 tileWand 字段，
+ *  数据面唯一在表族：Dirt Rod 114 消耗泥土 item 126）；其余魔杖族（活木/树叶/
+ *  红木 832/933/3360/3361）tileWand 对应物按 vanilla.json 常量登表 */
+const TILE_WAND_CONSUME: Record<number, number> = { 114: 126 };
 
 /** 击退档（:20602-20632） */
 const KB_TIERS: Array<[number, number]> = [
@@ -63,11 +97,14 @@ export interface TooltipBody {
   lines: TooltipLine[];
   durationLine: TooltipLine | null;
   prefixDiff: TooltipLine[];
+  yoyoLogoLine: TooltipLine | null;
+  researchLine: TooltipLine | null;
 }
 
 /** 悬停气泡统计行（vi_ 全量 + legacy 兜底） */
 export function buildTooltipBody(
   def: ItemDef, slot: TooltipSlot, player: TooltipPlayerStats | null,
+  ctx: TooltipContext = {},
 ): TooltipBody {
   const lines: TooltipLine[] = [];
   const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
@@ -86,7 +123,7 @@ export function buildTooltipBody(
     const d0 = def.armor?.defense ?? st0?.def;
     if (d0) lines.push({ text: d0 + T('LegacyTooltip.25'), tag: 'defense' });
     if (def.heal) lines.push({ text: T('CommonItemTooltip.RestoresLife', def.heal), tag: 'heallife' });
-    return { lines, durationLine: null, prefixDiff: ps ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' })) : [] };
+    return { lines, durationLine: null, yoyoLogoLine: null, researchLine: null, prefixDiff: ps ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' })) : [] };
   }
 
   const f = itemFuncOfVid(vid);
@@ -107,8 +144,9 @@ export function buildTooltipBody(
       const crit = 4 + (player ? player.crit[kind] : 0) + (ps ? ps.crt * 2 : 0);
       lines.push({ text: crit + T('LegacyTooltip.5'), tag: 'crit' });
     }
-    // 速度档（useStyle!=0 且非召唤——鞭例外未辨；useAnimation/词条 spd）
-    if ((f?.useStyle ?? 0) !== 0 && !f?.summon) {
+    // 速度档（useStyle!=0 且（非召唤 || 鞭），:20545；useAnimation/词条 spd）
+    const whip = WHIP_PROJS.has(c!.shoot ?? -1);
+    if ((f?.useStyle ?? 0) !== 0 && (!f?.summon || whip)) {
       const anim = Math.max(1, Math.round((c!.useAnimation ?? c!.useTime ?? 20) / pm('spd')));
       lines.push({ text: T(`LegacyTooltip.${speedTierIndex(anim)}`), tag: 'speed' });
     }
@@ -172,6 +210,33 @@ export function buildTooltipBody(
   if (f?.createTile === 21 || f?.createTile === 467) lines.push({ text: T('CommonItemTooltip.Container'), tag: 'container' });
   if (f?.createTile === 441 || f?.createTile === 468) lines.push({ text: T('CommonItemTooltip.WireTrigger'), tag: 'wiretrigger' });
 
+  // ── 泥土魔杖消耗行（:20666-20670 tip[52] "消耗 X"——itemfunc 无 tileWand，
+  //    数据面表登记：Dirt Rod 114 → 泥土 126）──
+  const wandConsume = TILE_WAND_CONSUME[vid];
+  if (wandConsume !== undefined) {
+    lines.push({ text: T('LegacyTooltip.52') + T(`ItemName.${vanillaItemNameKey(wandConsume)}`), tag: 'tilewand' });
+  }
+
+  // ── 专家/大师物品行（:21146-21157 GameUI.Expert / GameUI.Master）──
+  if (ctx?.expert) lines.push({ text: T('GameUI.Expert'), tag: 'expert' });
+  if (ctx?.master) lines.push({ text: T('GameUI.Master'), tag: 'master' });
+
+  // ── 悠悠球商标位（:20845-20853——文本 " " 占位 + yoyoLogo 标记，UI 画
+  //    OneDropLogo 五层影；原版行序在 buffTime 之后）──
+  const yoyoLogoLine: TooltipLine | null = YOYO_ITEMS.has(vid)
+    ? { text: ' ', yoyoLogo: true, tag: 'yoyologo' } : null;
+
+  // ── 研究行（:21163-21178 旅程角色：未满 → CreativeSacrificeNeeded 紫色
+  //    JourneyMode；已满 → 由装配层静态注入 CreativeSacrificeComplete 行——原版
+  //    TryGetTeammateUnlockCredit 联机队友署名，单机走已满省略）──
+  let researchLine: TooltipLine | null = null;
+  if (ctx.research && ctx.research.have < ctx.research.need) {
+    researchLine = {
+      text: T('CommonItemTooltip.CreativeSacrificeNeeded', ctx.research.need - ctx.research.have),
+      journeyColor: true, tag: 'research',
+    };
+  }
+
   // ── Buff 持续（:20834-20843；原版排在自带说明之后——装配时并入）──
   let durationLine: TooltipLine | null = null;
   if ((f?.buffType ?? 0) > 0 && (f?.buffTime ?? 0) > 0) {
@@ -186,18 +251,55 @@ export function buildTooltipBody(
     ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' }))
     : [];
 
-  return { lines, durationLine, prefixDiff };
+  return { lines, durationLine, prefixDiff, yoyoLogoLine, researchLine };
 }
 
-/** 完整装配（静态说明 + 持续行按原版序并入 + 差分收尾）——UI 侧消费 */
+/** 完整装配（静态说明 + 持续行按原版序并入 + 研究行/悠悠球位 + 商店价格行 +
+ *  差分收尾）——UI 侧消费。行序尾段（原版）：ToolTip → 特殊种子行(略) →
+ *  buffTime → yoyoLogo → prefix 差分 → 商店价格行（AddShopLines 在全部之后）*/
 export function assembleTooltipLines(
   def: ItemDef, slot: TooltipSlot, player: TooltipPlayerStats | null,
-  staticTipText: string | null,
+  staticTipText: string | null, ctx: TooltipContext = {},
 ): TooltipLine[] {
-  const body = buildTooltipBody(def, slot, player);
+  const body = buildTooltipBody(def, slot, player, ctx);
   const out = [...body.lines];
   if (staticTipText) for (const ln of staticTipText.split('\n')) out.push({ text: ln, tag: 'static' });
   if (body.durationLine) out.push(body.durationLine);
+  if (body.yoyoLogoLine) out.push(body.yoyoLogoLine);
   out.push(...body.prefixDiff);
+  if (body.researchLine) out.push(body.researchLine);
+  // 商店价格行（:20309-20402）：买入 tip[50]/卖出 tip[49]，币种四档着色
+  // （:20380-20397 铂 220,220,198 / 金 224,201,92 / 银 181,192,193 / 铜 246,138,96；
+  //  价格 0 → tip[51] 无价值 灰 120,120,120）
+  if (ctx.shop) {
+    const pc = ctx.shop.priceCopper;
+    if (pc > 0) {
+      const plat = Math.floor(pc / 1000000), gold = Math.floor(pc % 1000000 / 10000);
+      const silver = Math.floor(pc % 10000 / 100), copper = pc % 100;
+      let text = '';
+      if (plat > 0) text += `${plat} ${T('LegacyTooltip.15')} `;
+      if (gold > 0) text += `${gold} ${T('LegacyTooltip.16')} `;
+      if (silver > 0) text += `${silver} ${T('LegacyTooltip.17')} `;
+      if (copper > 0) text += `${copper} ${T('LegacyTooltip.18')} `;
+      // 注意：inter[15-18] 才是币种名——LegacyTooltip 15-18 是击退档！查 inter
+      const color = plat > 0 ? 'rgb(220,220,198)' : gold > 0 ? 'rgb(224,201,92)'
+        : silver > 0 ? 'rgb(181,192,193)' : 'rgb(246,138,96)';
+      out.push({ text: `${T(ctx.shop.buy ? 'LegacyTooltip.50' : 'LegacyTooltip.49')} ${coinText(pc)}`, color, tag: 'shopprice' });
+    } else {
+      out.push({ text: T('LegacyTooltip.51'), color: 'rgb(120,120,120)', tag: 'noworth' });
+    }
+  }
   return out;
+}
+
+/** 币种串（Lang.inter[15-18]，:20357-20373） */
+function coinText(copper: number): string {
+  const plat = Math.floor(copper / 1000000), gold = Math.floor(copper % 1000000 / 10000);
+  const silver = Math.floor(copper % 10000 / 100), cop = copper % 100;
+  let text = '';
+  if (plat > 0) text += `${plat} ${T('LegacyChat.15')} `;
+  if (gold > 0) text += `${gold} ${T('LegacyChat.16')} `;
+  if (silver > 0) text += `${silver} ${T('LegacyChat.17')} `;
+  if (cop > 0) text += `${cop} ${T('LegacyChat.18')} `;
+  return text.trim();
 }

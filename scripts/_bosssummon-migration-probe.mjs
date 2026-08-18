@@ -137,6 +137,14 @@ await page.evaluate(() => {
 // ============ ③ 史莱姆雨自然出王公告 ============
 const r3 = await page.evaluate(() => {
   const g = window.__swGame;
+  // 玩家传回地表（自然出王走 ±55 列地表扫描，地下会因过远 EncourageDespawn 逃走）
+  const st = g.world.store;
+  const px = Math.floor(g.player.cx / 16);
+  let py = 10;
+  for (; py < g.world.h; py++) if (st.type[st.idx(px, py)] !== 0) break;
+  for (let dx = -2; dx <= 2; dx++) for (let dy = -3; dy <= 0; dy++) st.setTile(px + dx, py + dy, 0, 0, 0);
+  g.player.x = px * 16; g.player.y = (py - 2) * 16; g.player.vx = 0; g.player.vy = 0;
+  g.camera.x = g.player.cx; g.camera.y = g.player.cy;
   const chats = [];
   const orig = g.cb.onChat;
   g.cb.onChat = (t, r, gg, b) => { chats.push(String(t)); orig?.(t, r, gg, b); };
@@ -151,12 +159,17 @@ const r3 = await page.evaluate(() => {
   }
   if (!slime) { g.cb.onChat = orig; return { phase: 'spawn', ok: false }; }
   slime.hurt(99999, 0, 1, g, 0, false, -1, true);
-  for (let t = 0; t < 20; t++) g.fixedUpdate(1 / 60);
+  let kingEver = false;
+  for (let t = 0; t < 20; t++) {
+    g.fixedUpdate(1 / 60);
+    if (g.entities.enemies.some((e) => !e.dead && e.vanillaId === 50)) kingEver = true;
+  }
   g.cb.onChat = orig;
   const ks = g.entities.enemies.find((e) => !e.dead && e.vanillaId === 50);
   return {
     phase: 'done', ok: true,
-    kingSpawned: !!ks,
+    kingSpawned: kingEver || !!ks,
+    kingStillAlive: !!ks,
     chats,
     hasAwokenText: chats.some((t) => t.includes('苏醒') || t.includes('awoken') || t.includes('Awoken')),
     countAfter: g.world.weather.slimeRainKillCount,

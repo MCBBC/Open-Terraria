@@ -2413,10 +2413,15 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh, int fxB
             if (wFlag && (int)r.Next(20) == 0)
             {
                 int wStyle = (int)r.Next(4);
-                if ((int)r.Next(30) == 0) { if (P2Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 751, 2, 2); }
-                else { int _ = (int)r.Next(4); if (P485Gate(wx, wy - 1)) PlaceDesertDeco(wx, wy - 1, 485, 2, 2); }
+                // ★YYY（2026-08-18 镜像）：485 TileObjectData[485] StyleHorizontal=true
+                //   （TileObjectData.cs:3511）→ 样式偏移落 **frameX**（fx=style*36+列*18、
+                //   fy=行*18）——曾竖排轴（或不落帧）会让 settle 段 CheckSuper 按
+                //   frameX/36 解样式列误判完好组整组杀（JS place485 :896-904 同源）。
+                //   751/484 = Place2x2 竖排样式轴 frameY（style=0 → fx=k*18、fy=l*18）。
+                if ((int)r.Next(30) == 0) { if (P2Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 751, 2, 2, 0); }
+                else { int _ = (int)r.Next(4); if (P485Gate(wx, wy - 1)) PlaceDesertDeco(wx, wy - 1, 485, 2, 2, wStyle * 36); }
             }
-            else if (wFlag && (int)r.Next(5) == 0) { if (P2Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 484, 2, 2); }
+            else if (wFlag && (int)r.Next(5) == 0) { if (P2Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 484, 2, 2, 0); }
             else if ((wFlag ^ wFlag2) && (int)r.Next(5) == 0)
             {
                 PlaceTightFull(wx, wFlag ? wy - 1 : wy + 1);
@@ -6217,12 +6222,20 @@ bool DgP6x4Wall(int x, int y, int t)
     return true;
 }
 // PlaceBanner（cs:46270 旗91）：(x,y-1) 活性+solid+非solidTop；(x,y..y+2) 净空 → 竖 3 格
-bool DgPBanner(int x, int y, int t)
+// ★SSS（2026-08-18 镜像）：PlaceBanner 帧写（cs:46293-46313）——fx=style*18（s≥111 时
+//   fx-=1998/fy+=54，dungeon styles 10-15 不触发）、fy=0/18/36。零掷零流扰动；帧供
+//   settle 段 LsDiesIn TOD 样式解算与 CheckSuper 锚定（JS placeBannerD 同源）。
+bool DgPBanner(int x, int y, int t, int style)
 {
     int ui = (y - 1) * W + x;
     if (!DgInWorld(x, y - 1, 0) || act[ui] == 0 || !SOLID.Contains(typ[ui]) || dgSolidTop.Contains(typ[ui])) return false;
     if (!DgClr(x, y) || !DgClr(x, y + 1) || !DgClr(x, y + 2)) return false;
     DgWr(x, y, t); DgWr(x, y + 1, t); DgWr(x, y + 2, t);
+    int fx = style * 18, fy = 0, s3 = style;
+    while (s3 >= 111) { s3 -= 111; fx -= 1998; fy += 54; }
+    frX[y * W + x] = (ushort)fx; frY[y * W + x] = (ushort)fy;
+    frX[(y + 1) * W + x] = (ushort)fx; frY[(y + 1) * W + x] = (ushort)(fy + 18);
+    frX[(y + 2) * W + x] = (ushort)fx; frY[(y + 2) * W + x] = (ushort)(fy + 36);
     return true;
 }
 double dgS1X = (int)r.Next(25, 30), dgS1Y = (int)r.Next(20, 25);   // cs:349-352
@@ -8339,14 +8352,17 @@ void DgDoorsF()
         {
             int ti = y * W + n16;
             DgChTile(ti, bt, false);
+            // ★OOO①（2026-08-18 镜像）：ClearEverything（Tile.cs:140）本体清 **type=0**（+液/坡）
+            //   +ChangeWallType——只写 act=0 会留 stale type 44，IsConsideredDungeonTile 读裸
+            //   .type 不查 active → Lights 开关搜索提前 break（JS DungeonPass :2225 修复同源）。
             if (DgInWorld(n16 - 1, y, 0) && act[y * W + n16 - 1] != 0 && DgCanKill(n16 - 1, y))
-            { int k = y * W + n16 - 1; act[k] = 0; wal[k] = bw; }
+            { int k = y * W + n16 - 1; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
             if (DgInWorld(n16 - 2, y, 0) && act[y * W + n16 - 2] != 0 && DgCanKill(n16 - 2, y))
-            { int k = y * W + n16 - 2; act[k] = 0; wal[k] = bw; }
+            { int k = y * W + n16 - 2; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
             if (DgInWorld(n16 + 1, y, 0) && act[y * W + n16 + 1] != 0 && DgCanKill(n16 + 1, y))
-            { int k = y * W + n16 + 1; act[k] = 0; wal[k] = bw; }
+            { int k = y * W + n16 + 1; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
             if (DgInWorld(n16 + 2, y, 0) && act[y * W + n16 + 2] != 0 && DgCanKill(n16 + 2, y))
-            { int k = y * W + n16 + 2; act[k] = 0; wal[k] = bw; }
+            { int k = y * W + n16 + 2; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
         }
         DgPlaceDoor(n16, n17, style);
         n16--;
@@ -8358,8 +8374,8 @@ void DgDoorsF()
             for (int y = n17 - 4 - (int)r.Next(3); y > n20; y--)
             {
                 if (f3) DgChTile(y * W + n16, bt, false);
-                if (d.Clear || typ[y * W + n16 - 1] == bt) { int k = y * W + n16 - 1; act[k] = 0; wal[k] = bw; }
-                if (d.Clear || typ[y * W + n16 - 2] == bt) { int k = y * W + n16 - 2; act[k] = 0; wal[k] = bw; }
+                if (d.Clear || typ[y * W + n16 - 1] == bt) { int k = y * W + n16 - 1; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
+                if (d.Clear || typ[y * W + n16 - 2] == bt) { int k = y * W + n16 - 2; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
             }
         }
         n16 += 2;
@@ -8371,18 +8387,18 @@ void DgDoorsF()
             for (int y = n17 - 4 - (int)r.Next(3); y > n20; y--)
             {
                 if (f3) DgChTile(y * W + n16, bt, false);
-                if (d.Clear || typ[y * W + n16 + 1] == bt) { int k = y * W + n16 + 1; act[k] = 0; wal[k] = bw; }
-                if (d.Clear || typ[y * W + n16 + 2] == bt) { int k = y * W + n16 + 2; act[k] = 0; wal[k] = bw; }
+                if (d.Clear || typ[y * W + n16 + 1] == bt) { int k = y * W + n16 + 1; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
+                if (d.Clear || typ[y * W + n16 + 2] == bt) { int k = y * W + n16 + 2; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
             }
         }
         n17++;
         n16--;
         for (int y = n17 - 8; y < n17; y++)
         {
-            if (d.Clear || typ[y * W + n16 + 2] == bt) { int k = y * W + n16 + 2; act[k] = 0; wal[k] = bw; }
-            if (d.Clear || typ[y * W + n16 + 3] == bt) { int k = y * W + n16 + 3; act[k] = 0; wal[k] = bw; }
-            if (d.Clear || typ[y * W + n16 - 2] == bt) { int k = y * W + n16 - 2; act[k] = 0; wal[k] = bw; }
-            if (d.Clear || typ[y * W + n16 - 3] == bt) { int k = y * W + n16 - 3; act[k] = 0; wal[k] = bw; }
+            if (d.Clear || typ[y * W + n16 + 2] == bt) { int k = y * W + n16 + 2; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
+            if (d.Clear || typ[y * W + n16 + 3] == bt) { int k = y * W + n16 + 3; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
+            if (d.Clear || typ[y * W + n16 - 2] == bt) { int k = y * W + n16 - 2; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
+            if (d.Clear || typ[y * W + n16 - 3] == bt) { int k = y * W + n16 - 3; typ[k] = 0; liq[k] = 0; liqT[k] = 0; act[k] = 0; slope[k] = 0; half[k] = 0; wal[k] = bw; }
         }
         DgChTile(n17 * W + n16 - 1, bt, false);
         DgChTile(n17 * W + n16 + 1, bt, false);
@@ -9473,8 +9489,10 @@ int dgLihzPlaced = 0, dgLihzMax = 1;
 void DgPaintings()
 {
     dgLihzPlaced = 0;
-    dgLihzMax = 1;                                             // 世界尺寸中档（GetWorldSize==1 → 2）★按 4200=large 取 2？——Configuration：4200=Large → case 2 → 2+Next(2)
-    dgLihzMax = 2 + (int)r.Next(2);
+    // ★OOO④（2026-08-18 镜像）：GetWorldSize()（WG:6518）——≤4200→**0**→switch default：
+    //   max=1 **零掷**（DungeonGlobalPaintings.cs:36-42 仅 >6400 的 case 2 才掷 Next(2)；
+    //   4201-6400 的 case 1 = 2 亦零掷）。曾恒掷 Next(2) → Pa 段全程流错位 +1。
+    dgLihzMax = W > 6400 ? 2 + (int)r.Next(2) : W > 4200 ? 2 : 1;
     int num2v = dgWallVariants[0];
     double num3v = Math.Max(1.0, 1.0 * 0.75);
     int num4 = (int)(100f * (W / 4200f) * num3v);
@@ -9548,15 +9566,19 @@ void DgPaintings()
             if (act[y * W + x] == 0) DgPlacePainting(x, y, e);
             if (act[y * W + x] != 0) continue;
             int baseY = y;
+            // ★OOO⑤（2026-08-18 镜像）：攀爬起点**链式**（vanilla :198/:221——第 m 轮从上轮
+            //   中心起爬，非每轮从 baseY 起）；向后循环前重置（JS DungeonPass :3626-3658 同源）。
+            int nyPrev = baseY;
             for (int m = 0; m < 2; m++)
             {
                 x += 7;
-                int a1 = baseY, a2 = baseY;
+                int a1 = nyPrev, a2 = nyPrev;
                 while (a1 > 0 && act[a1 * W + x] == 0 && act[a1 * W + x - 1] == 0 && act[a1 * W + x + 1] == 0) a1--;
                 a1++;
                 while (a2 < H - 1 && act[a2 * W + x] == 0 && act[a2 * W + x - 1] == 0 && act[a2 * W + x + 1] == 0) a2++;
                 a2--;
                 int ny = (a1 + a2) / 2;
+                nyPrev = ny;
                 if (DgFeatArea3(x, ny, 3))
                 {
                     e = DgPaintingEntry(x, ny);
@@ -9564,15 +9586,17 @@ void DgPaintings()
                     DgPlacePainting(x, ny, e);
                 }
             }
+            nyPrev = baseY;
             for (int m = 0; m < 2; m++)
             {
                 x -= 7;
-                int a1 = baseY, a2 = baseY;
+                int a1 = nyPrev, a2 = nyPrev;
                 while (a1 > 0 && act[a1 * W + x] == 0 && act[a1 * W + x - 1] == 0 && act[a1 * W + x + 1] == 0) a1--;
                 a1++;
                 while (a2 < H - 1 && act[a2 * W + x] == 0 && act[a2 * W + x - 1] == 0 && act[a2 * W + x + 1] == 0) a2++;
                 a2--;
                 int ny = (a1 + a2) / 2;
+                nyPrev = ny;
                 if (DgFeatArea3(x, ny, 3))
                 {
                     e = DgPaintingEntry(x, ny);
@@ -9588,15 +9612,17 @@ void DgPaintings()
             if (act[y * W + x] == 0) DgPlacePainting(x, y, e);
             if (act[y * W + x] != 0) continue;
             int baseX = x;
+            int nxPrev = baseX;                 // ★OOO⑤：num16 链式（:265-291 同款）
             for (int m = 0; m < 3; m++)
             {
                 y += 7;
-                int a1 = baseX, a2 = baseX;
+                int a1 = nxPrev, a2 = nxPrev;
                 while (a1 > 0 && act[y * W + a1] == 0 && act[(y - 1) * W + a1] == 0 && act[(y + 1) * W + a1] == 0) a1--;
                 a1++;
                 while (a2 < W - 1 && act[y * W + a2] == 0 && act[(y - 1) * W + a2] == 0 && act[(y + 1) * W + a2] == 0) a2++;
                 a2--;
                 int nx = (a1 + a2) / 2;
+                nxPrev = nx;
                 if (DgFeatArea3(nx, y, 3))
                 {
                     e = DgPaintingEntry(nx, y);
@@ -9604,15 +9630,17 @@ void DgPaintings()
                     DgPlacePainting(nx, y, e);
                 }
             }
+            nxPrev = baseX;
             for (int m = 0; m < 3; m++)
             {
                 y -= 7;
-                int a1 = baseX, a2 = baseX;
+                int a1 = nxPrev, a2 = nxPrev;
                 while (a1 > 0 && act[y * W + a1] == 0 && act[(y - 1) * W + a1] == 0 && act[(y + 1) * W + a1] == 0) a1--;
                 a1++;
                 while (a2 < W - 1 && act[y * W + a2] == 0 && act[(y - 1) * W + a2] == 0 && act[(y + 1) * W + a2] == 0) a2++;
                 a2--;
                 int nx = (a1 + a2) / 2;
+                nxPrev = nx;
                 if (DgFeatArea3(nx, y, 3))
                 {
                     e = DgPaintingEntry(nx, y);
@@ -9728,7 +9756,8 @@ void DgBanners()
         num8 += (int)r.Next(2);
         int style = dgBanner[num8];
         // ★cs:100 PlaceTile(91) → PlaceBanner（cs:46270 竖 3 格，上挂实心非 solidTop）
-        DgPBanner(x, y, 91);
+        // ★SSS：style 传入（曾算了 num8 却不传 → 帧恒第一样式；PlaceTile(91,style) 链）
+        DgPBanner(x, y, 91, style);
     }
 }
 // ★#29 Corruption（cs:13919）与 #32 Dungeon（cs:14816）尚未转录——转录后须插在
@@ -12674,11 +12703,20 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
                         liqT[ti] = 2;                       // honey（JS 编码 3 → oracle 2）
                         wal[ti] = 86;
                         act[ti] = 0;                       // active(false) 保留幽灵 type
+                        // ★TTT（2026-08-18 镜像）：蜜核四连写尾 halfBrick(false)+slope(0)
+                        //   （HiveBiome.cs:262-263——失活格 slope 位一并复位；斜面泥/苔
+                        //   核转蜜腔不留残坡；JS HiveSpiderPass :78-85 同源）。
+                        half[ti] = 0; slope[ti] = 0;
                     }
                     else if (d2 < baseR * 0.75 * (1 + (int)r.Next(-10, 11) * 0.005))
                     {
                         liq[ti] = 0;
-                        if (wal[ti] != 86 && wal[ti] != 244) { typ[ti] = 225; act[ti] = 1; }
+                        if (wal[ti] != 86 && wal[ti] != 244)
+                        {
+                            // ★TTT：蜂壳四连写 active(true)→half(false)→slope(0)→type=225
+                            //   （HiveBiome.cs:271-272；#47 起 3 格 slope 债 = #53 雪崩点火源）
+                            act[ti] = 1; half[ti] = 0; slope[ti] = 0; typ[ti] = 225;
+                        }
                     }
                     if (d2 < baseR * 0.6 * (1 + (int)r.Next(-10, 11) * 0.005)) wal[ti] = 86;
                 }
@@ -13751,6 +13789,14 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         if (act[i] == 0) return false;
         return SolidNP(typ[i]) && half[i] == 0 && slope[i] == 0;
     }
+    // ★YYY（2026-08-18 镜像）：KillTile 尾 SquareTileFrame（cs:63947）→3×3 TileFrame
+    //   锚点级联——帧重要族整组拆除（巨石族 Check2x2 / 485 CheckSuper；JS LiquidSim
+    //   killTileGen 尾 + check2x2Gen/checkSuperGen/solidTileAllowBottomSlopeGen 同源）。
+    //   液体唤醒段（cs:82083-86）生成期被 !generatingWorld 门挡（VVV 同口径不唤醒）；
+    //   级联零掷（巨石尘量 0/485 尘 10×0 掷），RNG 流位不动。
+    var LS_CHECK2X2 = new HashSet<ushort> { 138, 484, 664, 665, 711, 712 };      // TileID Boulders 去 713-716（cs:86398 空 break 列表）
+    var LS_CHEST_PROTECT = new HashSet<ushort> { 21, 467, 441, 468, 88, 470, 475 };  // cs:48473-48490 上方箱族豁免
+    bool lsDestroyObj = false;                                // destroyObject 再入闸（cs:48408/48266/48799）
     void LsKillTileGen(int kx, int ky)                      // 生成期 KillTile（尘掷占流位）
     {
         if (!QQInW(kx, ky)) return;
@@ -13764,6 +13810,130 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         for (int k = 0; k < amt; k++) for (int q = 0; q < per; q++) LSRoll(6);
         if (sheet == 58 && ky > H - 200) { liq[ki] = 128; liqT[ki] = 1; }   // 地狱石灌岩浆 128
         typ[ki] = 0; act[ki] = 0; half[ki] = 0; slope[ki] = 0;
+        LsSquareTileFrame(kx, ky);                            // cs:63947 尾 SquareTileFrame 锚点级联（YYY）
+    }
+    // TileFrame 生成期子集（cs:82067）：边界闸 + 非活性清 half/slope 残基 + 帧重要族派发
+    void LsTileFrame(int x, int y)
+    {
+        if (x <= 5 || y <= 5 || x >= W - 5 || y >= H - 5) return;   // cs:82069
+        int i = y * W + x;
+        if (act[i] == 0) { half[i] = 0; slope[i] = 0; return; }     // cs:82078-83
+        ushort t = typ[i];
+        if (LS_CHECK2X2.Contains(t)) LsCheck2x2(x, y, t);           // cs:86688→Check2x2
+        else if (t == 485) LsCheckSuper(x, y, t);                   // cs:86443→CheckSuper
+    }
+    // SquareTileFrame（cs:80924）：3×3 逐格 TileFrame，列主序
+    void LsSquareTileFrame(int x, int y)
+    {
+        LsTileFrame(x - 1, y - 1); LsTileFrame(x - 1, y); LsTileFrame(x - 1, y + 1);
+        LsTileFrame(x, y - 1); LsTileFrame(x, y); LsTileFrame(x, y + 1);
+        LsTileFrame(x + 1, y - 1); LsTileFrame(x + 1, y); LsTileFrame(x + 1, y + 1);
+    }
+    // PlatformProperTopFrame（cs:70198）：合法顶帧段 [0,7]∪[12,16]∪[25,26]（帧宽 18）
+    static bool LsPlatformProperTop(int frameX)
+    {
+        int n = frameX / 18;
+        if ((n < 0 || n > 7) && (n < 12 || n > 16)) return n >= 25 && n <= 26;
+        return true;
+    }
+    // SolidTileAllowBottomSlope（cs:70211-70233）：!InWorld→true；active && (tileSolid||tileSolidTop)
+    // && (!topSlope || (Platforms&&合法顶帧)) && !halfBrick（tileSolidTop 表=dgSolidTop）
+    bool LsSolidAllowBottomSlope(int x, int y)
+    {
+        if (x < 0 || y < 0 || x >= W || y >= H) return true;
+        int i = y * W + x;
+        if (act[i] == 0) return false;
+        ushort t = typ[i];
+        bool topSlope = slope[i] == 1 || slope[i] == 2;
+        if (topSlope && !(dgSolidTop.Contains(t) && LsPlatformProperTop(frX[i]))) return false;
+        return (SOLID.Contains(t) || dgSolidTop.Contains(t)) && half[i] == 0;
+    }
+    // AnchorValid(SolidTile)（cs:51866-51873）：active && tileSolid && !solidTop && flat
+    bool LsAnchorValidSolid(int x, int y)
+    {
+        if (x < 0 || y < 0 || x >= W || y >= H) return false;
+        int i = y * W + x;
+        if (act[i] == 0) return false;
+        return SOLID.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+    }
+    // Check2x2 巨石族子集（cs:48405-48805）：2×2 块帧校验（失配 break 内层）+ 上方箱族豁免
+    // + 底部双列 SolidTileAllowBottomSlope 支撑 → destroyObject 闸内整组杀 + 尾 4×4 TileFrame
+    void LsCheck2x2(int x, int y, ushort type)
+    {
+        if (lsDestroyObj) return;                                  // cs:48408
+        int i0 = y * W + x;
+        int ax = -(frX[i0] / 18);
+        int styleX = 0;
+        if (ax < -1) { ax += 2; styleX = 36; }
+        ax += x;
+        int fy = frY[i0];
+        int row = 0;
+        while (fy >= 36) { fy -= 36; row++; }                      // num3=36
+        int ay = y - fy / 18;
+        bool bad = false;
+        for (int k = ax; k < ax + 2; k++)
+            for (int l = ay; l < ay + 2; l++)
+            {
+                if (k < 0 || l < 0 || k >= W || l >= H) { bad = true; break; }
+                int q = l * W + k;
+                if (act[q] == 0 || typ[q] != type
+                    || frX[q] != (k - ax) * 18 + styleX
+                    || frY[q] != (l - ay) * 18 + row * 36) { bad = true; break; }
+            }
+        bool chestAbove(int cx, int cy) => cx >= 0 && cy >= 0 && cx < W && cy < H
+            && LS_CHEST_PROTECT.Contains(typ[cy * W + cx]);        // type 裸读（ghost 保真，同原版）
+        if (!chestAbove(ax, ay - 1) && !chestAbove(ax + 1, ay - 1)
+            && !LsSolidAllowBottomSlope(ax, ay + 2)
+            && !LsSolidAllowBottomSlope(ax + 1, ay + 2)) bad = true;
+        if (!bad) return;
+        lsDestroyObj = true;                                       // cs:48562
+        for (int k = ax; k < ax + 2; k++)
+            for (int l = ay; l < ay + 2; l++)
+            {
+                if (k < 0 || l < 0 || k >= W || l >= H) continue;
+                int q = l * W + k;
+                if (typ[q] == type && act[q] != 0) LsKillTileGen(k, l);
+            }
+        lsDestroyObj = false;
+        for (int k = ax - 1; k < ax + 3; k++)
+            for (int l = ay - 1; l < ay + 3; l++) LsTileFrame(k, l);   // cs:48799-48805
+    }
+    // CheckSuper 的 485 分支（cs:48117-48270）：Style2x2+StyleHorizontal——样式列 frameX/36、
+    // 块帧校验无 break；flag4 支撑门=双底列 AnchorValid(SolidTile) → 整组杀 + 尾 4×4 TileFrame
+    void LsCheckSuper(int x, int y, ushort type)
+    {
+        if (lsDestroyObj) return;                                  // cs:48120
+        int i0 = y * W + x;
+        int fx = frX[i0], fyv = frY[i0];
+        int ax = x - (fx / 18) % 2;                                // cs:48133-48137（width=2）
+        int ay = y - (fyv / 18) % 2;                               // height=2
+        int styleX = fx / 36;                                      // StyleHorizontal → num4=frameX/36
+        bool bad = false;
+        for (int k = 0; k < 2; k++)
+            for (int l = 0; l < 2; l++)
+            {
+                if (ax + k < 0 || ay + l < 0 || ax + k >= W || ay + l >= H) { bad = true; continue; }
+                int q = (ay + l) * W + ax + k;
+                if (act[q] == 0 || typ[q] != type
+                    || frX[q] != styleX * 36 + k * 18              // cs:48147-48150
+                    || frY[q] != l * 18) bad = true;               // 无 break（与 Check2x2 不同）
+            }
+        bool supported = true;                                     // flag4（cs:48252-48262）
+        for (int k = 0; k < 2; k++)
+            if (!LsAnchorValidSolid(ax + k, ay + 2)) supported = false;
+        if (!supported) bad = true;
+        if (!bad) return;
+        lsDestroyObj = true;                                       // cs:48266
+        for (int k = 0; k < 2; k++)
+            for (int l = 0; l < 2; l++)
+            {
+                if (ax + k < 0 || ay + l < 0 || ax + k >= W || ay + l >= H) continue;
+                int q = (ay + l) * W + ax + k;
+                if (typ[q] == type && act[q] != 0) LsKillTileGen(ax + k, ay + l);
+            }
+        lsDestroyObj = false;
+        for (int k = -1; k < 3; k++)
+            for (int l = -1; l < 3; l++) LsTileFrame(ax + k, ay + l);   // cs:48266-48270
     }
     bool LsDiesIn(ushort t, int fx, int fy2, bool isLava)   // TileObjectData.CheckLava/WaterDeath
     {
@@ -14541,7 +14711,10 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     }
     quickSettle = false;
     wgOff = new HashSet<ushort>();                          // worldGenTilesIgnoreWater(false)
-    WaterCheck();
+    // ★VVV（2026-08-18 镜像）：恢复后【无尾部 WaterCheck】——生成期两 pass（cs:16286-16293/
+    //   21109-21113）在 worldGenTilesIgnoreWater(false) 后直接结束；尾部 WaterCheck 仅读档
+    //   路径有（WorldFile.cs:765-769）。曾借读档尾 → 10/190/191/192 翻回实心后轮内合法
+    //   驻留的水/岩浆被 clear 分支整片抹零（#49 活木水池 L=47 根因；settle.ts :108 门同源）。
     // finalGenMergeCheck（cs:22639-22650 收尾全图 LiquidCheck，允许落块）
     mergeTilesDuringGen = true;
     for (int y = 1; y < H - 1; y++)

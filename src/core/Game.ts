@@ -3299,8 +3299,24 @@ export class Game implements GameHooks {
         steps++;
       }
     }
-    this.render();
+    // 跳帧(原版视频设置 Frame Skip,默认开;Main.cs 帧率不足时 SkipDraw 族):
+    // 上一帧渲染耗时 > 预算×1.5 → 本帧只跑逻辑不渲染,把预算还给逻辑追帧;
+    // 连跳 ≤2 帧(极端下不许画面长期冻结)。帧预算按上限档算,不锁=60 兜底
+    if (options.data.frameSkip
+      && this._lastRenderMs > (1000 / Math.max(30, options.data.frameCap || 60)) * 1.5
+      && this._skipStreak < 2) {
+      this._skipStreak++;
+    } else {
+      this._skipStreak = 0;
+      const r0 = performance.now();
+      this.render();
+      this._lastRenderMs = performance.now() - r0;
+    }
   }
+  /** 上一帧渲染耗时(跳帧判定信号) */
+  private _lastRenderMs = 0;
+  /** 连续跳帧计数(≤2 钳) */
+  private _skipStreak = 0;
 
   // ================= 固定步逻辑 =================
 
@@ -3797,7 +3813,9 @@ export class Game implements GameHooks {
       // ItemID.Sets.ForcesBreaksSleeping {1991 手机, 4821 贝壳手机, 3183 魔法海螺}
       //（ItemID.cs:137-142——传送族;其余物品使用只打断熟睡计时不唤醒）
       let itemWake = false;
-      if (this.player.itemAnimTicks > 0) {
+      // 使用窗代理:itemAnimTicks(挥砍,swing.t 注入 :3627) ∪ useTime>0(饮用/
+      // 工具等非挥砍使用——ForcesBreaksSleeping 三件非挥砍,单查 swing 会漏)
+      if (this.player.itemAnimTicks > 0 || this.player.useTime > 0) {
         const held = this.player.inv.heldItem();
         const hd = held ? ITEM_DEFS[held.id] : undefined;
         const vid = hd ? hd.vid ?? viIdFromKey(hd.key) : -1;
@@ -11591,28 +11609,32 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  （0:+1 / 1:+2）；anchor = Point(col, row+1).ToWorld(8,16)，玩家
           //  Bottom = anchor（曾简化 x=(tx+1)·16/y=(ty−1)·16 → 水平差 ~10-16px、
           //  垂直差 6-10px、下半行点击不修行——躺姿贴床错位根因）。
-          //  CanSnapToPosition 目标格畅通检查未移植（床位放置链已保证非实心,登记）
+          // ★原版序（SH:165-175）:CanSnapToPosition 先行（:165-169 flag 门:目标
+          // 嵌实心/两盒无视线 → 整个交互静默终止,含 toggle——堵塞态连"下床点击"
+          // 都不响应,只能靠移动键醒）;然后才是同床再点 = 下床（:170-174）,
+          // 睡在 A 床点 B 床 = 换床重睡（:175 起重锚,不 toggle）。
+          // MP 双人同床 stack<2 门（:166/:169）无 net 睡眠同步,N/A
           const col = Math.floor(fx / 72);
           const dir = col === 0 ? -1 : 1;
           const anchorX = (bedLeft + (dir === -1 ? 1 : 2)) * TILE + 8;
           const anchorY = (bedTop + 1) * TILE + 16;
-          // 同床再点 = 下床（:170-174 isSleeping && Bottom==anchor → StopSleeping）;
-          // 睡在 A 床点 B 床 = 换床重睡（:175 起重锚,不 toggle）
-          const sameAnchor = this.player.sleeping
+          if (!this.canSnapPlayerTo(anchorX - this.player.cx, anchorY - (this.player.y + this.player.h))) {
+            // 静默终止(不睡不下床)
+          } else if (this.player.sleeping
             && Math.abs(this.player.x + this.player.w / 2 - anchorX) < 1
-            && Math.abs(this.player.y + this.player.h - anchorY) < 1;
-          if (sameAnchor) {
+            && Math.abs(this.player.y + this.player.h - anchorY) < 1) {
             this.player.sleeping = false;
-          } else if (this.canSnapPlayerTo(anchorX - this.player.cx, anchorY - (this.player.y + this.player.h))) {
-            // CanSnapToPosition（:165-169 flag 门:目标嵌实心/两盒无视线 → 整个
-            // 入睡静默不发生,2026-08-18 补齐;此前缺失=隔墙隔石也能上床）
+          } else {
             // StartSleeping 前置清理（:162-168):StopVanityActions 清坐姿/
-            // 收全部钩爪/收全部鱼漂（:33120-33131）/尝试下坐骑（下不了 →
-            // 唤醒门次 tick 拦,原版 mount.Active 同拦）
+            // 收全部钩爪/收自有鱼漂（:33120-33131 owner==whoAmI——联机不误杀
+            // 远端玩家的漂）/尝试下坐骑（下不了 → 唤醒门次 tick 拦,原版 mount.Active 同拦）
             this.player.sitting = false;
             this.player.removeAllGrapplingHooks();
             for (const pr of this.entities.projectiles) {
-              if (pr instanceof Bobber && !pr.dead) pr.dead = true;
+              if (pr instanceof Bobber && !pr.dead
+                && (pr as unknown as { ownerRef?: () => unknown }).ownerRef?.() === this.player) {
+                pr.dead = true;
+              }
             }
             if (this.player.ridingMount) this.player.mount.tryDismount(this.player);
             this.player.sleeping = true;

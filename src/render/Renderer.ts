@@ -2031,7 +2031,7 @@ export class Renderer {
 
     // 7b'. 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房光标
     //      携带头像（:44622-44688 DrawInterface_38）——屏幕空间最后层
-    this.drawCursorItemIcon(ctx, player, cam);
+    this.drawCursorItemIcon(ctx, player);
 
     // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
     this.drawMoonLordShake(ctx, cam, viewW, viewH);
@@ -8747,7 +8747,7 @@ export class Renderer {
   }
 
   private drawCursorItemIcon(
-    ctx: CanvasRenderingContext2D, player: Player, cam: Camera,
+    ctx: CanvasRenderingContext2D, player: Player,
   ): void {
     void player;
     const c = this.cursorIconCtx;
