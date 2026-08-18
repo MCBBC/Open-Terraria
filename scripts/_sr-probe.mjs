@@ -193,6 +193,48 @@ try {
   check('⑧ 无异常日志', errs.length === 0, errs.slice(0, 3).join(' | ').slice(0, 200));
   if (fail > 0) console.log('--- server log tail ---\n' + serverLog.slice(-25).join(''));
 
+  // ---- ⑩ 世界频道（跨房全服;含中继房型） ----
+  const res2 = await fetch(`http://127.0.0.1:${LOBBY}/rooms`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'sr2', public: true, save: makeTinySave(150) }),  // 无 serverAuth=中继房
+  }).then((r) => r.json());
+  check('⑩ 中继房2创建', !!res2.ok, `code=${res2.code}`);
+  const c2 = new FakeClient(`ws://127.0.0.1:${PORT}/${res2.code}`);
+  await c2.open;
+  c2.send(new Writer(M.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str('crossBot').str(res2.hostToken));
+  await c2.wait(M.PlayerSlot, 5000);
+  c2.send(new Writer(M.RequestWorldData));
+  await c2.wait(M.WorldData, 5000);
+  c2.send(new Writer(M.SpawnTileData).i32(75).i32(75));
+  await sleep(600);
+  // 世界消息：c(房1,serverAuth) 发 → c 回显 + c2(房2,中继) 跨房收到
+  const chat = (cl, text, world) => {
+    const w = new Writer(M.NetModules).u16(1).str(text);
+    if (world) w.u8(1);
+    cl.send(w);
+  };
+  chat(c, 'hello world channel', true);
+  const echo = await c.wait(M.NetModules, 4000, (f) => f.r.readUInt16LE(0) === 1 && f.r[2] === 255 && f.r.length > 10);
+  check('⑩ 世界频道回显(发送者)', !!echo);
+  const cross = await c2.wait(M.NetModules, 4000, (f) => f.r.readUInt16LE(0) === 1 && f.r[2] === 255);
+  check('⑩ 世界频道跨房收达(房1→房2)', !!cross);
+  // 房间消息隔离:c2 发房间频道 → c(房1) 不应收到
+  const cFramesBefore = c.frames.length;
+  chat(c2, 'room only msg', false);
+  await sleep(700);
+  const leaked = c.frames.slice(cFramesBefore).some((f) => f.id === M.NetModules && f.r.length > 5 && f.r.readUInt16LE(0) === 1);
+  check('⑩ 房间频道不跨房(隔离)', !leaked);
+  // 反刷屏:连发 9 条世界 → 第 9 条触发提示(10s 窗 8 条上限;此前 ⑩ 已用 1 条)
+  for (let i = 0; i < 9; i++) chat(c, `spam${i}`, true);
+  const spamNotice = await c.wait(M.NetModules, 3000, (f) => {
+    if (f.r.readUInt16LE(0) !== 1 || f.r[2] !== 255) return false;
+    // serverNotice 帧:读文本段找 '过快'
+    let o = 3; const len = f.r.readUInt16LE(o); o += 2;
+    return f.r.toString('utf8', o, o + len).includes('过快');
+  });
+  check('⑩ 世界频道反刷屏', !!spamNotice);
+  c2.ws.close();
+
   clearInterval(stateTimer);
   c.ws.close();
 

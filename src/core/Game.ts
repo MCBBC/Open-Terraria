@@ -279,6 +279,7 @@ import { npcValueOf } from '../drops/NpcDrops';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
 import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
+import { ChatInput } from '../ui/ChatInput';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -2218,6 +2219,20 @@ export class Game implements GameHooks {
     // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）。
     // 背包打开时不切栏（原版 inventory 开启时数字键归 UI 导航）
     this.input.keydownHandlers.push((code) => {
+      // 聊天输入（原版 Enter 开聊语义）：联机态 + 无 UI 阻塞时打开。
+      // 输入期键位豁免由 Input 的 INPUT 元素守卫承担（打字不触发跳跃/数字键）。
+      // onSend 发送时解析 window.__swGame 活实例——不经构造期 this 闭包
+      // （联机重连/世界切换会产生多 Game 实例,构造期捕获可能指向已退场实例）
+      if (code === 'Enter' && this.net?.active && !this.input.uiBlocking && this.spectatingSlot < 0) {
+        this.chatInput ??= new ChatInput({
+          onSend: (text, world) => {
+            const g = (window as unknown as { __swGame?: Game }).__swGame;
+            g?.sendChat(text, world);
+          },
+        });
+        this.chatInput.open();
+        return;
+      }
       if (this.player && /^Digit[0-9]$/.test(code) && !this.input.uiBlocking) {
         this.player.inv.selected = code === 'Digit0' ? 9 : Number(code.slice(5)) - 1;
         this.cb.onInventoryChanged();
@@ -2771,7 +2786,10 @@ export class Game implements GameHooks {
     //  全在 onload 微任务续体一次砸下):deferBuild + buildStriped 分行让路,
     //  三条进世界路径 await 完成再 onWorldReady(加载页多停 ~1s,进图零巨帧)
     this.renderer.minimap = new Minimap(w, true);
-    this.minimapReady = this.renderer.minimap.buildStriped();
+    // .catch 保险:极端 OOM 等构建异常只降级(小地图部分缺色),不阻断进世界
+    // (await 该 promise 的三条路径在 reject 时会直接断读档链)
+    this.minimapReady = this.renderer.minimap.buildStriped()
+      .catch((err) => { console.warn('[minimap] 拆带构建异常,降级为部分构建:', err); });
     // 火把锚定（TileObjectData tile4）：支撑被挖掉时火把掉落（WorldGen.TileFrame 火把语义）
     w.store.onTileChanged((x, y) => this.checkTorchDetach(x, y));
     // 训练假人（tile 378 + NPC 488，TETrainingDummy L131 语义）：
@@ -19068,6 +19086,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 拴绳实体（锚桩 724 小动物 / 风筝桩 723 风筝）——Renderer 3.8 段绘制
       this.leashed,
     );
+  }
+
+  /** 聊天输入框（Enter 懒建;ChatInput 自管 Esc/Tab/blur;断线后随 blur 自清） */
+  chatInput: ChatInput | null = null;
+
+  /** 聊天发送（v8 世界频道批）：房间频道本地即时回显（服务器不回发发送者,
+   *  原版同语义）;世界频道回显来自服务器全服广播（含自己,约 1RTT） */
+  private sendChat(text: string, world: boolean) {
+    const net = this.net;
+    if (!net?.active) return;
+    if (world) {
+      net.sendChat(text, true);
+      return;
+    }
+    net.sendChat(text, false);
+    const name = (this.player as { appearance?: { name?: string } }).appearance?.name ?? '玩家';
+    this.cb.onChat?.(`<${name}> ${text}`, 255, 220, 120);
   }
 
   /** 加入联机服务器（mainFlow 的加入流程调用；world 就绪回调内进 loadWorld）。

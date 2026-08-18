@@ -140,6 +140,62 @@ try {
     check('⑤ 服务器结算击杀回流（傀儡死亡/移除）', bossGone, hpAfter ? JSON.stringify(hpAfter) : '移除');
   }
 
+  // ---- ⑤c 聊天输入 E2E：Enter 开框 + 双频道发送收达 ----
+  // （键盘逐键发送跳点在 headless 语境有环境性悬案——见 plan §14;此处断言稳定的
+  //  两环:输入框交互 + onSend→sendChat→服务器→陪练端全链（与监听器内调用等价））
+  {
+    const { WebSocket, Writer, PROTO_MAGIC, PROTO_VER, Msg } = await import('./_netfake.mjs');
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/${created.code}`);
+    const frames = [];
+    let wbuf = Buffer.alloc(0);
+    await new Promise((res) => {
+      ws.on('open', () => {
+        ws.send(new Writer(Msg.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str('chatPeer').str('').finish());
+        ws.send(new Writer(Msg.RequestWorldData).finish());
+        ws.send(new Writer(Msg.SpawnTileData).i32(2100).i32(237).finish());
+        res();
+      });
+      ws.on('message', (d) => {
+        wbuf = Buffer.concat([wbuf, d]);
+        for (;;) {
+          if (wbuf.length < 3) break;
+          const len = wbuf.readUInt16LE(0);
+          if (wbuf.length < len) break;
+          frames.push({ id: wbuf[2], r: wbuf.subarray(3, len) });
+          wbuf = wbuf.subarray(len);
+        }
+      });
+    });
+    await sleep(1200);
+    const chatTextOf = (f) => {
+      if (f.id !== 82 || f.r.length < 6 || f.r.readUInt16LE(0) !== 1) return '';
+      const len = f.r.readUInt16LE(3);
+      return f.r.toString('utf8', 5, 5 + len);
+    };
+    // Enter 开框 + 打字可见 + Esc 关闭（输入框交互）
+    await page.keyboard.press('Enter');
+    await sleep(350);
+    check('⑤c Enter 打开聊天输入框', await page.evaluate(() => !!document.querySelector('body > div input')));
+    await page.keyboard.type('draft', { delay: 25 });
+    const typedOk = await page.evaluate(() => {
+      const i = [...document.querySelectorAll('input')].find((x) => x.maxLength === 200);
+      return i?.value === 'draft';
+    });
+    check('⑤c 输入框可打字', !!typedOk);
+    await page.keyboard.press('Escape');
+    await sleep(250);
+    check('⑤c Esc 关闭', await page.evaluate(() => ![...document.querySelectorAll('input')].some((x) => x.maxLength === 200)));
+    // 双频道发送收达（经 ChatInput 同款入口:sendChat）
+    await page.evaluate(() => window.__swGame.sendChat('e2e-room-msg', false));
+    await sleep(500);
+    check('⑤c 房间频道消息收达(陪练端)', frames.some((f) => chatTextOf(f) === 'e2e-room-msg'));
+    await page.evaluate(() => window.__swGame.sendChat('e2e-world-msg', true));
+    let wFrame = null;
+    for (let i = 0; i < 12 && !wFrame; i++) { await sleep(250); wFrame = frames.find((f) => chatTextOf(f).includes('e2e-world-msg')); }
+    check('⑤c 世界频道消息收达(含[世界]前缀)', !!wFrame && chatTextOf(wFrame).startsWith('[世界]'), wFrame ? chatTextOf(wFrame).slice(0, 40) : '未收到');
+    try { ws.close(); } catch { }
+  }
+
   // ---- ⑥ 服务器健康 ----
   check('⑥ 服务器进程存活', server.exitCode === null);
   const errs = serverLog.join('').split('\n').filter((l) => l.includes('TypeError') || l.includes('uncaught'));

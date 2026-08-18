@@ -506,29 +506,35 @@ function solidTile2(st: TileStore, x: number, y: number): boolean {
 }
 
 /** countTiles/nextCount（cs:9493-9600）1:1（本 pass 实参 jungle=false, lavaOk=true）：
- *  ★递归 DFS 原序（x-1→x+1→y-1→y+1）+ CountedTiles **只登记非实心格**（cs:9585）——
+ *  ★DFS 原序（x-1→x+1→y-1→y+1）+ CountedTiles **只登记非实心格**（cs:9585）——
  *  实心邻格（含蘑菇草 70）可被多路重复访问，shroom 按**访问次数**累加（曾用栈 BFS+
  *  全格 seen → shroom 欠计，蘑菇腔 reject 门 `shroomCount>1→num6=0`（cs:17511）失灵）。
- *  封顶：触界/墙 244/微光液/墙!=0 → count=3500；lavaOk=true 故岩浆只计数不封。 */
+ *  封顶：触界/墙 244/微光液/墙!=0 → count=3500；lavaOk=true 故岩浆只计数不封。
+ *  ★2026-08-18 显式栈化：原为真递归（深至 3500）——Chrome worker 栈仅主线程约半
+ *  （实测空帧 4544 vs 8840），3500 层真实帧在 worker 必爆栈（用户"雕像宝箱"槽
+ *  21% 崩溃根因）。逆序压栈后出序 = 递归 pre-order 逐帧等价（先根后子、子序
+ *  x-1→x+1→y-1→y+1 不变），封顶/重复访问/shroom 语义全部保持。 */
 function countTiles(st: TileStore, x: number, y: number): { count: number; shroom: number } {
   let count = 0, shroom = 0;
   const counted = new Set<number>();
-  const next = (cx: number, cy: number): void => {
-    if (count >= MAX_TILE_COUNT) return;                             // cs:9506 头部早退
-    if (cx <= 1 || cx >= st.w - 1 || cy <= 1 || cy >= st.h - 1) { count = MAX_TILE_COUNT; return; }
+  const stack: number[] = [x, y];
+  while (stack.length) {
+    const cy = stack.pop()!, cx = stack.pop()!;
+    if (count >= MAX_TILE_COUNT) continue;                           // cs:9506 头部早退
+    if (cx <= 1 || cx >= st.w - 1 || cy <= 1 || cy >= st.h - 1) { count = MAX_TILE_COUNT; continue; }
     const i = st.idx(cx, cy);
-    if (counted.has(i)) return;                                      // cs:9523（仅非实心格曾登记）
-    if (st.wall[i] === 244) { count = MAX_TILE_COUNT; return; }      // cs:9515 活木墙
-    if (st.liquid[i] > 0 && st.liquidType[i] === 4) { count = MAX_TILE_COUNT; return; } // 微光
-    if (wallSealed(st.wall[i])) { count = MAX_TILE_COUNT; return; }  // cs:9526 jungle=false
+    if (counted.has(i)) continue;                                    // cs:9523（仅非实心格曾登记）
+    if (st.wall[i] === 244) { count = MAX_TILE_COUNT; continue; }    // cs:9515 活木墙
+    if (st.liquid[i] > 0 && st.liquidType[i] === 4) { count = MAX_TILE_COUNT; continue; } // 微光
+    if (wallSealed(st.wall[i])) { count = MAX_TILE_COUNT; continue; } // cs:9526 jungle=false
     if (st.flags[i] && st.type[i] === MUSHROOM_GRASS) shroom++;      // cs:9565（每次访问都计）
     if (!solidTile(st, cx, cy)) {
       counted.add(i);                                                // cs:9585
       count++;
-      next(cx - 1, cy); next(cx + 1, cy); next(cx, cy - 1); next(cx, cy + 1);
+      // 逆序压栈（出序 = 递归子序 x-1→x+1→y-1→y+1）
+      stack.push(cx, cy + 1, cx, cy - 1, cx + 1, cy, cx - 1, cy);
     }
-  };
-  next(x, y);
+  }
   return { count, shroom };
 }
 

@@ -131,6 +131,10 @@ export function spawnWOF(game: GameHooks, px: number, py: number): Enemy | null 
     const name = Lang.npcName(113) ?? 'Wall of Flesh';
     (game as unknown as { announce?: (k: string, w: string, r: number, g: number, b: number) => void })
       .announce?.('Announcement.HasAwoken', name, 175, 75, 255);
+    // ★击败链挂 Game.boss 槽（调试 spawnBoss 路径同款 :18660）：巫毒娃娃入熔岩路径
+    //   此前漏设 → 肉山死亡时 bossBlock 整段跳过 = 无砖盒/无 StartHardmode/无击败
+    //   公告/无 downed_113（2026-08-18 用户报"杀肉山无小屋无肉后变化"根因）
+    (game as { boss?: Enemy | null }).boss = wof;
   }
   return wof;
 }

@@ -857,6 +857,16 @@ export class ClientNet {
       .i16(kbx).i16(kby).u16(weaponId).u8(flags & 0xff).finish());
   }
 
+  /** 聊天发送（msg82 module1）：text + 尾部 u8 channel（0=房间广播/1=世界频道
+   *  跨房全服——v8 世界频道批;旧 server remaining=0 默认房间,语义不变） */
+  sendChat(text: string, world = false) {
+    const w = new NetWriter(Msg.NetModules);
+    w.u16(NetModule.Text);
+    w.str(text);
+    w.u8(world ? 1 : 0);
+    this.send(w.finish());
+  }
+
   /** 召唤类物品使用意图（v8 msg202，仅 serverAuth 房；SimHost 校验规则门后生成 NPC。
    *  Game 在服务器房把召唤物本地 NewNPC 分支改投此消息——对齐设计文档 P4
    *  "netMode==1 短路改发消息"。中继房不调用（仍走房主本地生成） */

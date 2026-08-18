@@ -244,8 +244,8 @@ describe('随从世界点光（AI 侧 AddLight/CastLightOpen，2026-08-17 血蝙
 
   it('613 细胞(0.2,0.6,0.7)/623 守护者(0.9,0.9,0.7)/1094 狐火(0.5,0.3,0.1)', () => {
     const { player } = makeHooks();
-    const mk = (id: number) => (new MinionProj(0, 0, id, 10, 2, false, 0, false, () => player)
-      as unknown as { lightRGB: [number, number, number] | null }).lightRGB;
+    const mk = (id: number): [number, number, number] | null =>
+      (new MinionProj(0, 0, id, 10, 2, false, 0, false, () => player) as unknown as { lightRGB: [number, number, number] | null }).lightRGB;
     expect(mk(613)).toEqual([0.2, 0.6, 0.7]);
     expect(mk(623)).toEqual([0.9, 0.9, 0.7]);
     expect(mk(1094)).toEqual([0.5, 0.3, 0.1]);
@@ -253,8 +253,8 @@ describe('随从世界点光（AI 侧 AddLight/CastLightOpen，2026-08-17 血蝙
 
   it('387/388 双子原版零自发光（AI_66 仅 533 有 AddLight）', () => {
     const { player } = makeHooks();
-    const mk = (id: number) => (new MinionProj(0, 0, id, 10, 2, false, 0, false, () => player)
-      as unknown as { lightRGB: [number, number, number] | null }).lightRGB;
+    const mk = (id: number): [number, number, number] | null =>
+      (new MinionProj(0, 0, id, 10, 2, false, 0, false, () => player) as unknown as { lightRGB: [number, number, number] | null }).lightRGB;
     expect(mk(387)).toBeNull();
     expect(mk(388)).toBeNull();
   });

@@ -15,6 +15,18 @@ const ctx = self as unknown as {
   onmessage: ((e: MessageEvent<WorldWorkerRequest>) => void) | null;
 };
 
+// 兜底回传：unhandled rejection / 运行时错误（栈溢出等 catch 块自身可能再溢出，
+// 2026-08-18 排查实践：onerror 在主线程侧拿不到 worker 栈，必须在 worker 内自报）
+self.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {
+  const r = ev.reason as Error | undefined;
+  ctx.postMessage({ id: -1, type: 'error', message: 'unhandled: ' + (r?.message ?? String(ev.reason)),
+    stack: r?.stack });
+});
+self.addEventListener('error', (ev: ErrorEvent) => {
+  ctx.postMessage({ id: -1, type: 'error', message: 'runtime: ' + ev.message,
+    stack: (ev.error as Error | undefined)?.stack ?? `${ev.filename}:${ev.lineno}:${ev.colno}` });
+});
+
 ctx.onmessage = async (e) => {
   const req = e.data;
   try {

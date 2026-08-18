@@ -193,11 +193,64 @@ if (process.env.SW_DGREP === '1') {
       return fh >>> 0;
     };
     const snapFn = (name: string): void => {
-      if (process.env.SW_DGREP_SEG) console.log(`DGFLOWSEC ${name} rolls=${rolls}`);
+      if (process.env.SW_DGREP_SEG) {
+        const uS = (rng2 as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
+        console.log(`DGFLOWSEC ${name} rolls=${rolls} fnv=${fnvState(uS.seedArray, uS.inext).toString(16).padStart(8, '0')}`);
+      }
       if (name === 'dungeonB' && process.env.SW_DGREP_SCAN) {
         const ur0 = (rng2 as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
         bState = { sa: ur0.seedArray.slice(), ix: ur0.inext };
         console.log(`B-end FNV=${fnvState(bState.sa, bState.ix).toString(16)} (vanilla truth 8d169afd)`);
+      }
+      if (name === 'dungeonB' && process.env.SW_DGREP_PEEK) {
+        const wr = (nm: string, a2: Uint8Array | Uint16Array) => {
+          const b2 = Buffer.from(a2.buffer, a2.byteOffset, a2.byteLength);
+          writeFileSync(`/tmp/dgcap/${nm}`, b2.slice());
+        };
+        wr('bEnd.wal', st.wall); wr('bEnd.flags', st.flags); wr('bEnd.type', st.type);
+      }
+      if (name === 'dungeonG' && process.env.SW_DGREP_PEEK) {
+        const ur0g = (rng2 as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
+        const saG = Buffer.alloc(56 * 4 + 4);
+        for (let q = 0; q < 56; q++) saG.writeInt32LE(ur0g.seedArray[q]!, q * 4);
+        saG.writeInt32LE(ur0g.inext, 56 * 4);
+        writeFileSync('/tmp/dgcap/gEnd.state', saG);
+      }
+      if (process.env.SW_DGREP_PEEK_DONE) { /* noop */ }
+      if (name === 'dungeonG' && process.env.SW_DGREP_PEEK) {
+        // 对齐态后前 N 采样模拟（候选 T/L 推演 vanilla 首锚 (347,774)）
+        const ur0 = (rng2 as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
+        const ur = new UnifiedRandom(0) as unknown as { seedArray: Int32Array; inext: number; next(): number };
+        ur.seedArray.set(ur0.seedArray); ur.inext = ur0.inext;
+        const wall2 = new Uint16Array(N), act2 = new Uint8Array(N);
+        {
+          const wsrc = le16('/tmp/dgcap/bEnd.wal'), fsrc = readFileSync('/tmp/dgcap/bEnd.flags'), tsrc = le16('/tmp/dgcap/bEnd.type');
+          for (let i = 0; i < N; i++) { wall2[i] = wsrc[i]!; act2[i] = fsrc[i]! & 1; void tsrc; }
+        }
+        const DW = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+        const sims: Array<[string, number, number, number, number]> = [
+          ['JS  113,195,693,920', 113, 195, 693, 920],
+          ['T193', 113, 193, 693, 920],
+          ['noInflate 138,220,668,895', 138, 220, 668, 895],
+        ];
+        for (const [nm, L, T, R, B] of sims) {
+          const ur2 = new UnifiedRandom(0) as unknown as { seedArray: Int32Array; inext: number; next(): number };
+          ur2.seedArray.set(ur.seedArray); ur2.inext = ur.inext;
+          // 注意：peek 用的是 ur（已耗 2 掷）——此处应从未耗态起。重建:
+          const urX = new UnifiedRandom(0) as unknown as { seedArray: Int32Array; inext: number; next(): number };
+          urX.seedArray.set(ur0.seedArray); urX.inext = ur0.inext;
+          const v1 = urX.next() * 4.656612875245797e-10, v2 = urX.next() * 4.656612875245797e-10;
+          void v1; void v2;
+          const uY = new UnifiedRandom(0) as unknown as { seedArray: Int32Array; inext: number; next(): number };
+          uY.seedArray.set(ur0.seedArray); uY.inext = ur0.inext;
+          let found = '';
+          for (let k = 1; k <= 60 && !found; k++) {
+            const sx = uY.next() * 4.656612875245797e-10, sy = uY.next() * 4.656612875245797e-10;
+            const x = L + Math.trunc((R - L) * sx), y = T + Math.trunc((B - T) * sy);
+            if (DW.has(wall2[y * W + x]!)) found = `#${k} (${x},${y})`;
+          }
+          console.log(`bnd ${nm}: first isDW sample = ${found}`);
+        }
       }
       if ((name === 'dungeonB' || name === 'dungeonG') && process.env.SW_DGREP_G0) {
         // vanilla 0.92=B 末（G 入口）网格：VANG0；JS snap('dungeonB')=B 末、'dungeonG'=G 末

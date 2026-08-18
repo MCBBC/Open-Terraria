@@ -98,14 +98,19 @@ const CSS = `
   touch-action: none;
 }
 .sw-title-celestial.grabbing { cursor: grabbing; }
+/* (抓取态 .body 显示规则在下方 .body 块处) */
 .sw-title-celestial .body {
   position: absolute; inset: 0; pointer-events: none;
   image-rendering: pixelated; background-repeat: no-repeat;
   background-size: 100% 100%;
-  opacity: 0;                    /* 常态隐藏:让位给画布日/月(正确的遮挡语义) */
-  transition: opacity .15s;
+  /* 常态隐藏:让位给画布日/月(正确的遮挡语义)。★visibility 非 opacity
+     (2026-08-18 review):opacity:0 的层仍每帧参与绘制——syncCelestial 每帧
+     写 left/top/transform,菜单全程都在无谓重记录一张隐形日/月贴图
+     (解码逐出窗口期=LazyPixelRef 候补源);visibility:hidden 跳过绘制,
+     布局与命中热区保留,grab 瞬间可见位置已同步 */
+  visibility: hidden;
 }
-.sw-title-celestial.grabbing .body { opacity: 1; }  /* 抓取中:跟手可见反馈 */
+.sw-title-celestial.grabbing .body { visibility: visible; }  /* 抓取中:跟手可见反馈 */
 .sw-title-celestial.night .body { background-size: 100% 800%; } /* 月相竖条 8 帧 */
 `;
 

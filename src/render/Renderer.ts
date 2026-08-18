@@ -225,11 +225,10 @@ export function loadExtraSprite(n: number): ImageBitmap | HTMLImageElement | nul
   const hit = extraSpriteCache.get(n);
   if (hit !== undefined) return hit;
   const im = new Image();
-  im.onload = () => {
-    if (im.width > 0 && typeof createImageBitmap === 'function') {
-      createImageBitmap(im).then((b) => extraSpriteCache.set(n, b)).catch(() => { /* 保留 Image */ });
-    }
-  };
+  // 共享升级链(2026-08-18 review):曾裸 createImageBitmap 静默 catch——失败
+  // 永久停在 Image 且无警告无重试;改走 upgradeToBitmap(失败可见+退避重试,
+  // 失败回退 Image 已在下方 set 过,重试成功原地替换)
+  im.onload = () => upgradeToBitmap(im, (b) => { extraSpriteCache.set(n, b); });
   im.onerror = () => extraSpriteCache.set(n, null as unknown as ImageBitmap);
   im.src = `sprites/vanilla/Extra_${n}.png`;
   extraSpriteCache.set(n, im);
@@ -8334,7 +8333,9 @@ export class Renderer {
     if (this.emoteSheetFailed) return null; // 404 终态:不重发(2026-08-13 前无 onerror=坏图滞留永久)
     if (!this.emoteSheetImg) {
       const im = new Image();
-      im.onload = () => { /* 就绪 */ };
+      // bitmap 桥(2026-08-18 review 漏网站):此处曾完全裸 Image——表情气泡
+      // 激活期间每帧绘制,压力窗口期解码逐出 = LazyPixelRef 流同族
+      im.onload = () => upgradeToBitmap(im, (b) => { this.emoteSheetImg = b; });
       im.onerror = () => { this.emoteSheetFailed = true; this.emoteSheetImg = null; };
       im.src = 'sprites/vanilla/Extra_48.png';
       this.emoteSheetImg = im;

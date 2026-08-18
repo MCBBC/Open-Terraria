@@ -5910,6 +5910,31 @@ bool DgChestLegOK(int lx, int ly)
 //   · III 批已落地：JS+oracle 四件套转录（零掷差留档）、JS flooded-pit liquidType
 //     0→1（本仓水=+1 编码；032 Lt 946→0 实证）、oracle AddHellHouses 补录（#28-31
 //     四哈希恢复 x86 全等）。遗留 #32 T/A/W=pre-pit 布局债（另案）。
+//   ★★★ #32 终清批 II（2026-08-18 下午，G 段核销 + I 段定界）：
+//   · 谱系澄清（先决）：①dgseg/dgchest/feat 全部 vanilla 探针真值出自 **Evil:-1 随机掷**
+//     世界（/tmp/dgu/home/9293480.wld 实证 crim203=22704）；g/ 真值 = SW_EVIL=0 强制谱系
+//     （PassChainProbe.EvilSetup，pc.txt "#evil-forced 0"）。两谱系地牢段流哈希 **逐段全同**
+//     （SW_EVIL=0 重跑 /tmp/dgseg-g.txt 实证 a8c34b94/f890f8a6 等全等）——evil 只改网格
+//     不改掷（每 pass 重播隔离）。跨谱系对拍网格类差（VANG0 vs g/031 差 15k ebonstone 格）
+//     均为 evil 噪声勿当 bug。VANG0=0.92（G 入口）四通道网格、VANL3=0.65、VAND3=0.8。
+//   · **G 段核销**：真因=DgBasicChests 候选中心用 double EX 直接 ±half，原文
+//     LegacyDungeonRoom.cs:86-87 是 `(int)endPosition.X - num`（**先截断后 ±**）。
+//     房尾 EX=369.999… 类小数尾把 Lerp 产物抬 1 格（dgchest 逐箱对拍 #19 例：v369 j370
+//     **同入口哈希**——掷同而格异铁证）。修后（双侧）：G rolls=158,415 / hash=a8c34b94
+//     = vanilla 0.935 真值逐位全等；1044 连 AddBuriedChest 逐箱对拍全绿（仅 crimson
+//     谱系 1569|25 vs 强制 1571|24 两行=evil 噪声）。
+//   · **I 段定界（#33 下一战）**：vanilla I=+36,856 掷（B 末 a8c34b94 起 stream 扫描
+//     68806871@+39,230 反解），修前 oracle 35,036（流错位下测）。结构：双侧均 28 灯
+//     （27 灯笼+1 吊灯）；vanilla PlaceTile(136)=14（ZP|136 计）vs JS 开关 break 15/耗尽
+//     13——JS 开关搜索均 ~107 掷提前命中（~2,354 迭代差）。canHitLocal 已按 Collision.cs
+//     388-475 全三重终止转录（①到点 ②邻对 slope0/非半砖/非致动 ③踩格 while 条件）——
+//     I 段掷数 26,272(旧)→32,149(新)→36,856(真值)。残余嫌疑=PlaceTile(136) 的
+//     TileObject.CanPlace 内部门（JS 无条件放→提前 break）；switch 首选嫌疑格用
+//     SW_DG_LIGHTS_TRACE 逐迭代日志 vs dump032 开关 14 位对照。
+//   · 工具沉淀：tools/_dgentiso.test.ts（▶Dungeon 态捕获 /tmp/dgcap + dump031 隔离重放
+//     0.3s + 段级 FNV/掷数 + stream 扫描定位段真值 + SW_DGREP_MAP 差图）；DungeonPass
+//     SW_DG_CHEST_TRACE（C|行=dgchest.txt 同格式对拍）/SW_DG_LIGHTS_TRACE（A|行=dgfeat.txt
+//     同格式）；canHitLocal A/B 门 SW_DG_CANHIT_LEGACY。
 // 普通世界 = Legacy 路径：LegacyDungeonLayoutProvider(LegacyDungeonLayout) +
 // LegacyDungeonHall / LegacyEntranceDungeonHall / LegacyDungeonRoom / LegacyDungeonEntrance
 // + DungeonGlobal{Early/Spikes/Doors/WallVariants/Platforms/BiomeChests/Bookshelves/
@@ -8860,11 +8885,15 @@ void DgBasicChests()
     for (int i = 0; i < dgRooms.Count; i++)
     {
         var rm = dgRooms[i];
+        // ★#32 终清（2026-08-18）：LegacyDungeonRoom.cs:86-87 原文 `(int)endPosition.X - num`
+        //   ——先 (int) 截断再 ±half；曾以 double EX 直接 ±half（小数尾抬格）→ 箱位 ±1
+        //   （dgchest 对拍 #19 例 v369 j370 同哈希）→ G 段流差 +7 掷。修后 G-exit=a8c34b94。
         int half = (int)(rm.Strength * 0.4f);
+        int exI = (int)rm.EX, eyI = (int)rm.EY;
         for (int j = 0; j < 1000; j++)
         {
-            int num = (int)((double)(rm.EX - half) + ((double)(rm.EX + half) - (double)(rm.EX - half)) * (double)r.NextDouble());
-            int num2 = (int)((double)(rm.EY - half) + ((double)(rm.EY + half) - (double)(rm.EY - half)) * (double)r.NextDouble());
+            int num = (int)((double)(exI - half) + ((double)(exI + half) - (double)(exI - half)) * (double)r.NextDouble());
+            int num2 = (int)((double)(eyI - half) + ((double)(eyI + half) - (double)(eyI - half)) * (double)r.NextDouble());
             if (!DgFeatAreaOK(num, num2, 1)) continue;          // CanGenerateFeatureInArea(feature, num, num2, 1)
             int itemType, chestStyle = 2;
             DgLootStyle(num2, out itemType, ref chestStyle);

@@ -368,14 +368,17 @@ export class SpriteAtlas {
       const img = new Image();
       img.onload = () => {
         // ImageBitmap 桥(字节+解码双就绪的原生语义,替代 img.decode());
-        // 晚到钩子须在 bitmap 落地后触发(消费方读的是表内对象)
+        // 晚到钩子须在 bitmap 落地后触发(消费方读的是表内对象)。
+        // settled 门:进度/resolve 只结算一次;onVImageLoaded 在"失败落 Image→
+        // 重试成功换 bitmap"路径会发第二次(=晚到表语义,触发对应 chunk 重烘,故意的)
+        let settled = false;
         const land = (store: ImageBitmap | HTMLImageElement) => {
           this.vimages.set(f, store);
-          done++; onProgress?.(done / list.length); resolve();
+          if (!settled) { settled = true; done++; onProgress?.(done / list.length); resolve(); }
           this.onVImageLoaded?.(f);
         };
         if (!SpriteAtlas.USE_BITMAP) land(img);
-        else tryBitmapUpgrade(img, f, land, () => land(img));  // 失败回退+退避重试(重试成功二次 land=晚到语义,安全)
+        else tryBitmapUpgrade(img, f, land, () => land(img));
       };
       img.onerror = () => resolve();
       img.src = `sprites/${encodeURI(f)}`;
@@ -508,8 +511,12 @@ export class SpriteAtlas {
         // ImageBitmap 桥(2026-08-18 imglog 实锤漏网第四站:此处曾直接 set(Image)
         // +decode() ——预载清单含 UI_Cursor_0(菜单起每帧画)与 Player_ 纸娃娃表
         // (进世界起每帧画),永久 Image = trace 残余流两大恒定家族的全部来源)
+        // settled 门:进度/resolve 只结算一次(失败重试成功会二次 land,只换表项)
+        let settled = false;
         const land = (store: ImageBitmap | HTMLImageElement) => {
           this.uiimages.set(f, store);
+          if (settled) return;
+          settled = true;
           done++; onProgress?.(done / list.length); resolve();
         };
         if (!SpriteAtlas.USE_BITMAP) { land(im); return; }
@@ -1021,28 +1028,41 @@ function bitmapLabel(img: HTMLImageElement): string {
   return p.slice(-2).join('/');
 }
 const BMP_RETRY_DELAYS = [10_000, 20_000, 40_000];
+const _bmpFailWarned = new Set<string>();
 function noteBmpFail(label: string, attempt: number): void {
   bmpFailStats.count++;
   bmpFailStats.files.set(label, (bmpFailStats.files.get(label) ?? 0) + 1);
+  // 每文件只警告一次(压力爆发期 50 张×3 重试=200 行会淹没警告环;计数仍全量入 stats)
+  if (_bmpFailWarned.has(label)) return;
+  _bmpFailWarned.add(label);
   console.warn(`[bitmap失败] ${label} — createImageBitmap 失败(GPU 压力窗口期常见),已回退 Image`
     + (attempt < BMP_RETRY_DELAYS.length ? `,${BMP_RETRY_DELAYS[attempt] / 1000}s 后自动重试` : ',放弃重试(重载页面可再试)'));
 }
-/** 带退避重试的升级:失败先让调用方落 Image(不缺图),10/20/40s 后重试;
- *  重试成功 onReady(bitmap) 会把持有方手里的 Image 原地换掉 */
+/** 带退避重试的升级:失败先让调用方落一次 Image(不缺图),10/20/40s 后重试;
+ *  重试成功 onReady(bitmap) 把持有方的 Image 原地换掉。
+ *  ★fallback 只在【首次失败】触发——后续重试失败不再重复落钩
+ *  (ensureVImage 的 land 会发 onVImageLoaded→chunk 重烘,重复触发=重烘风暴) */
 function tryBitmapUpgrade(
   img: HTMLImageElement, label: string,
   onReady: (b: ImageBitmap) => void, fallback: () => void, attempt = 0,
 ): void {
-  createImageBitmap(img).then(onReady, () => {
-    fallback();
-    noteBmpFail(label, attempt);
-    if (attempt < BMP_RETRY_DELAYS.length) {
-      setTimeout(() => {
-        if (!(img.width > 0)) return;   // 图已被释放,放弃
-        tryBitmapUpgrade(img, label, onReady, fallback, attempt + 1);
-      }, BMP_RETRY_DELAYS[attempt]);
-    }
-  });
+  let fellBack = false;
+  const attemptOnce = (n: number): void => {
+    createImageBitmap(img).then((b) => {
+      if (n > 0) console.log(`[bitmap重试成功] ${label}(第 ${n} 次)`);
+      onReady(b);
+    }, () => {
+      if (!fellBack) { fellBack = true; fallback(); }
+      noteBmpFail(label, n);
+      if (n < BMP_RETRY_DELAYS.length) {
+        setTimeout(() => {
+          if (!(img.width > 0)) return;   // 图已被释放,放弃
+          attemptOnce(n + 1);
+        }, BMP_RETRY_DELAYS[n]);
+      }
+    });
+  };
+  attemptOnce(attempt);
 }
 /** 通用 bitmap-only 加载器(2026-08-17 修 trace⑨ 收尾两个真 bug):
  *  ①在飞守卫——此前未就绪期间每帧重 new Image = 请求风暴(雨/尘每粒子每帧)

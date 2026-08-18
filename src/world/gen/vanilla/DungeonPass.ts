@@ -2469,6 +2469,14 @@ export function runDungeonPass(
     }
   }
   function dgAddBuriedChest(ix: number, jy: number, mainItem: number, style: number, chestTile: number): boolean {
+    if (typeof process !== 'undefined' && process.env.SW_DG_CHEST_TRACE) {
+      const uL = (rng as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
+      let fh = 0x811c9dc5;
+      for (let q = 0; q < 56; q++) { const v = uL.seedArray[q]! >>> 0; for (let s2 = 0; s2 < 32; s2 += 8) fh = Math.imul(fh ^ ((v >>> s2) & 0xff), 16777619) >>> 0; }
+      const uix = uL.inext >>> 0;
+      for (let s2 = 0; s2 < 32; s2 += 8) fh = Math.imul(fh ^ ((uix >>> s2) & 0xff), 16777619) >>> 0;
+      console.log(`C|${ix}|${jy}|${mainItem}|${style}|${chestTile === CHEST ? 21 : 467}|${fh.toString(16)}`);
+    }
     for (let k = jy; k < h - 10; k++) {
       if (actAt(ix, k) !== 0 && typAt(ix, k) === TILE_BY_KEY['v_231_larva']) return false;
       let boulder = false;
@@ -2666,11 +2674,17 @@ export function runDungeonPass(
   }
   function dgBasicChests(): void {
     for (const rm of rooms) {
+      // ★#32 终清（2026-08-18）：LegacyDungeonRoom.cs:86-87 原文
+      //   `(int)endPosition.X - num`——**先 (int) 截断再 ± half**。曾以 double 的
+      //   rm.ex 直接 ±half 后 Lerp → 房尾坐标 369.9999 类小数尾巴把 (int)(Lerp)
+      //   抬高 1 格（dgchest 逐箱对拍 #19 例：v369 j370 同哈希）→ 箱位错 → G 段
+      //   流差（+7 掷）→ I/T/F/Pa/Ba 全段级联（#32 残余 A=1319 主根因）。
       const half = Math.trunc(rm.strength * 0.4);
+      const exI = Math.trunc(rm.ex), eyI = Math.trunc(rm.ey);
       for (let j = 0; j < 1000; j++) {
-        const lo = rm.ex - half, hi = rm.ex + half;
+        const lo = exI - half, hi = exI + half;
         const num = Math.trunc(lo + (hi - lo) * rd());
-        const num2 = Math.trunc((rm.ey - half) + ((rm.ey + half) - (rm.ey - half)) * rd());
+        const num2 = Math.trunc((eyI - half) + ((eyI + half) - (eyI - half)) * rd());
         if (!featAreaOK(num, num2, 1)) continue;
         let itemType = 0, chestStyle = 2;
         if (lootStyle >= 8) lootStyle = 0;
@@ -2813,6 +2827,14 @@ export function runDungeonPass(
       const y = ri(bounds.T, bounds.B - 1);
       if (isDW(wallAt(x, y))) {
         for (let cy = y; cy > bounds.T; cy--) {
+          if (lgTr && inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && isDT(typAt(x, cy - 1))) {
+            const uL = (rng as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
+            let fh = 0x811c9dc5;
+            for (let q = 0; q < 56; q++) { const v = uL.seedArray[q]! >>> 0; for (let s2 = 0; s2 < 32; s2 += 8) fh = Math.imul(fh ^ ((v >>> s2) & 0xff), 16777619) >>> 0; }
+            const uix = uL.inext >>> 0;
+            for (let s2 = 0; s2 < 32; s2 += 8) fh = Math.imul(fh ^ ((uix >>> s2) & 0xff), 16777619) >>> 0;
+            console.log(`A|${x}|${cy}|${fh.toString(16)}`);
+          }
           if (!(inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && isDT(typAt(x, cy - 1))
             && featOK(x, cy, 0)
             && ((entExists && entBounds.contains(x, cy)) || isDW(wallAt(x, cy))))) continue;
@@ -2955,15 +2977,55 @@ export function runDungeonPass(
       break;
     }
   }
-  // Collision.CanHit（Collision.cs:388-460）——两点视线（实心非 solidTop 成对拦截）
+  // Collision.CanHit（Collision.cs:388-460）——两点视线。★#32 终清（2026-08-18）：
+  //   原版是 do-while，**三重**终止：①到点 true；②步进后邻对（横步查上下格/
+  //   纵步查左右格）双双「非致动+active+solid+非solidTop+slope0+非半砖」→false；
+  //   ③while 条件=当前格是「非致动+active+solid+非solidTop」（此处不看坡/半砖）
+  //   →**步进踩上实心格即退出循环 return false**。此前缺 ③、②也缺坡/半砖/致动
+  //   三门槛 → 视线恒偏松 → dgSwitch 提前命中 → Lights 段少 ~910 掷（B 末流全等
+  //   而 END 差 -1906 的主项 -1820 即此）。
   function canHitLocal(x1: number, y1: number, x2: number, y2: number): boolean {
+    if (typeof process !== 'undefined' && process.env.SW_DG_CANHIT_LEGACY) return canHitLegacy(x1, y1, x2, y2);
+    let cx = Math.max(1, Math.min(w - 1, x1)), cy = Math.max(1, Math.min(h - 40, y1));
+    const tx = Math.max(1, Math.min(w - 1, x2)), ty = Math.max(1, Math.min(h - 40, y2));
+    // ②邻对门槛：slope==0 且非半砖且非致动（Collision.cs:437-440/447-450）
+    const pairBlk = (x: number, y: number): boolean => {
+      if (!inW(x, y, 0) || actAt(x, y) === 0) return false;
+      if ((st.wire[st.idx(x, y)] >>> 5) & 1) return false;        // inActive() 豁免
+      const t = typAt(x, y);
+      // 实心走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344）：
+      // ★dungeonI 转写债主根因——此前读静态 TILE_DEFS.solid，裂纹砖对把开关
+      // 视线整段拦死（金标仍放），开关位/后续灯放置集两侧分叉级联到 beaches。
+      return genSolidType(t) && !DG_SOLID_TOP.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)
+        && st.slope[st.idx(x, y)] === 0 && st.half[st.idx(x, y)] === 0;
+    };
+    // ③踩格门槛：不看坡/半砖（while 条件 :470-472）
+    const stepBlk = (x: number, y: number): boolean => {
+      if (!inW(x, y, 0) || actAt(x, y) === 0) return false;
+      if ((st.wire[st.idx(x, y)] >>> 5) & 1) return false;        // inActive() → while 续走
+      return genSolidType(typAt(x, y)) && !DG_SOLID_TOP.has(TILE_DEFS[typAt(x, y)]?.vanilla?.sheet ?? -1);
+    };
+    for (;;) {
+      const dx = Math.abs(cx - tx), dy = Math.abs(cy - ty);
+      if (cx === tx && cy === ty) return true;                    // ①到点
+      if (dx > dy) {
+        cx += cx >= tx ? -1 : 1;
+        if (!inW(cx, cy - 1, 0) || !inW(cx, cy + 1, 0)) return false;
+        if (pairBlk(cx, cy - 1) && pairBlk(cx, cy + 1)) return false;
+      } else {
+        cy += cy >= ty ? -1 : 1;
+        if (!inW(cx - 1, cy, 0) || !inW(cx + 1, cy, 0)) return false;
+        if (pairBlk(cx - 1, cy) && pairBlk(cx + 1, cy)) return false;
+      }
+      if (stepBlk(cx, cy)) return false;                          // ③踩上实心格
+    }
+  }
+  /** A/B 对照用：旧版视线（缺 ③ 踩格终止 + ②坡/半砖/致动门槛） */
+  function canHitLegacy(x1: number, y1: number, x2: number, y2: number): boolean {
     let cx = Math.max(1, Math.min(w - 1, x1)), cy = Math.max(1, Math.min(h - 41, y1));
     const tx = Math.max(1, Math.min(w - 1, x2)), ty = Math.max(1, Math.min(h - 41, y2));
     const blk = (x: number, y: number): boolean => {
       if (!inW(x, y, 0) || actAt(x, y) === 0) return false;
-      // 实心走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344）：
-      // ★dungeonI 转写债主根因——此前读静态 TILE_DEFS.solid，裂纹砖对把开关
-      // 视线整段拦死（金标仍放），开关位/后续灯放置集两侧分叉级联到 beaches。
       return genSolidType(typAt(x, y)) && !DG_SOLID_TOP.has(TILE_DEFS[typAt(x, y)]?.vanilla?.sheet ?? -1);
     };
     for (;;) {

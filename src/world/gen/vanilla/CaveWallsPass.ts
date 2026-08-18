@@ -60,18 +60,22 @@ function countTiles(st: TileStore, sx: number, sy: number, jungle: boolean, lava
   const MAX = 1500; // 调用方语义：本 pass 恒 maxTileCount=1500（cs:17827/:17920）
   const r: CountResult = { count: 0, shroom: 0, rock: 0, ice: 0, sand: 0, lava: 0 };
   const counted = new Set<number>();
-  const next = (x: number, y: number): void => {
-    if (r.count >= MAX) return;                                       // cs:9506 头部早退
-    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) { r.count = MAX; return; }
+  // 2026-08-18 显式栈化（原真递归深至 1500——Chrome worker 栈≈主线程一半，与
+  // HiveSpiderPass 同日爆栈修复；逆序压栈出序 = 递归 pre-order 逐帧等价）
+  const stack: number[] = [sx, sy];
+  while (stack.length) {
+    const y = stack.pop()!, x = stack.pop()!;
+    if (r.count >= MAX) continue;                                     // cs:9506 头部早退
+    if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) { r.count = MAX; continue; }
     const ii = st.idx(x, y);
-    if (counted.has(ii)) return;                                      // cs:9523（仅非实心格曾登记）
-    if (st.wall[ii] === 244) { r.count = MAX; return; }               // 活木墙封顶（cs:9515）
-    if (st.liquid[ii] > 0 && st.liquidType[ii] === 4) { r.count = MAX; return; } // 微光液
+    if (counted.has(ii)) continue;                                    // cs:9523（仅非实心格曾登记）
+    if (st.wall[ii] === 244) { r.count = MAX; continue; }             // 活木墙封顶（cs:9515）
+    if (st.liquid[ii] > 0 && st.liquidType[ii] === 4) { r.count = MAX; continue; } // 微光液
     if (!jungle) {
-      if (st.wall[ii] !== 0) { r.count = MAX; return; }               // 已有墙封顶（cs:9526）
+      if (st.wall[ii] !== 0) { r.count = MAX; continue; }             // 已有墙封顶（cs:9526）
       if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) {             // 岩浆
         r.lava++;
-        if (!lavaOk) { r.count = MAX; return; }
+        if (!lavaOk) { r.count = MAX; continue; }
       }
     }
     if (st.flags[ii]) {
@@ -84,10 +88,9 @@ function countTiles(st: TileStore, sx: number, sy: number, jungle: boolean, lava
     if (!solidAt(st, x, y)) {
       counted.add(ii);                                                // cs:9585
       r.count++;
-      next(x - 1, y); next(x + 1, y); next(x, y - 1); next(x, y + 1);
+      stack.push(x, y + 1, x, y - 1, x + 1, y, x - 1, y);             // 出序=递归子序
     }
-  };
-  next(sx, sy);
+  }
   return r;
 }
 
