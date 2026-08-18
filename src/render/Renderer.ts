@@ -1621,7 +1621,11 @@ export class Renderer {
       this.lightCtx = this.isCpuRender() ? nu.getContext('2d', { willReadFrequently: true })! : nu.getContext('2d')!;
       console.warn('[Renderer] 光照画布已死,已重建');
     }
-    this.fogPix = null; this.fogP32 = null; this.fogImage = null; this.fogVersion = -1; this._mapFogRowSeen = -1;
+    // ★迷雾 CPU 缓冲不清(2026-08-19 用户实报雾闪):fogPix 是纯 CPU 数据,
+    // 与画布上下文死活无关——曾被此链每 20s 误清一次(看门狗巡检)→ 整幅
+    // 重建全亮闪。只有 _mapFogRowSeen(GL 纹理增量游标)与死上下文相关需重置。
+    // fog 缓冲的生命周期归 dispose/换世界管
+    this._mapFogRowSeen = -1;
   }
 
   /** GPU 看门狗(2026-08-18 用户实报"关掉另一窗口也不恢复"):熔断链终止后
@@ -9062,7 +9066,11 @@ export class Renderer {
   private tintedSprite(
     key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, color: number[],
   ): HTMLCanvasElement {
-    const k = `${key}|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${color.join(',')}`;
+    // ★色键量化步进 8(2026-08-19 canvas 哨兵三捕:drawEnemy/掉落物每帧调此,
+    // color=光照染色连续漂移 → 每帧新键 → 用户真机 60/s 持续 9 分钟、暂停中
+    // 照跑(渲染循环不停)。烘焙用桶内首个精确色,敌怪受击闪白等瞬态不受影响)
+    const q = (v: number) => Math.round(v) & ~7;
+    const k = `${key}|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${q(color[0])},${q(color[1])},${q(color[2])}`;
     let c = this.tintCache.get(k);
     if (c) return c;
     c = document.createElement('canvas');
@@ -9078,7 +9086,11 @@ export class Renderer {
     cx.globalCompositeOperation = 'destination-in';
     cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
     cx.globalCompositeOperation = 'source-over';
-    if (this.tintCache.size > 1024) this.tintCache.clear();
+    if (this.tintCache.size > 1024) {
+      // 逐条淘汰最旧(★整表 clear = 下帧全量重染雪崩,与 BiomeBackground 同病)
+      const first = this.tintCache.keys().next().value;
+      if (first !== undefined) this.tintCache.delete(first);
+    }
     this.tintCache.set(k, c);
     return c;
   }
@@ -9803,6 +9815,12 @@ export class Renderer {
   /** 整幅重建的分帧行游标(0=未在重建) */
   private fogRebuildRow = 0;
   private fogWorld: World | null = null;
+  /** 迷雾路径观测(探针/F5:整幅重建次数——应只在进场/换世界/F4;
+   *  周期性增长 = 闪烁源) */
+  fogFullRebuilds = 0;
+  fogIncrUpdates = 0;
+  /** 最近一次整幅重建入口快照(探针定位触发源) */
+  fogFullWhy = '';
 
   /** 迷雾数据构建(原 getFogCanvas 的 CPU 版:脏矩形增量 + 分帧行带逻辑 1:1,
    *  落点从画布换 CPU 缓冲)。返回 ImageData(GL 上传源)或 null */
@@ -9845,11 +9863,21 @@ export class Renderer {
           }
         }
         this.fogVersion = world.exploredVersion;
+        this.fogIncrUpdates++;
         return this.fogImage;
       }
     }
     // 整幅重建(首帧/全图点亮/版本跳跃):分帧行带摊帧
-    if (this.fogRebuildRow === 0) buf.fill(0);
+    // ★row 完成态(=h)必须复位(2026-08-19 用户实报 F4 失效):完成后 row 停在
+    //   h,下次整幅入口 row≠0 → 分带循环零迭代 → 9868 直接落版本 = "空同步",
+    //   F4/版本跳跃被静默吞掉
+    if (this.fogRebuildRow >= h) this.fogRebuildRow = 0;
+    this.fogFullWhy = `row=${this.fogRebuildRow} dirty=${dirty ? 'y' : 'n'} v=${world.exploredVersion} fv=${this.fogVersion}`;
+    if (this.fogRebuildRow === 0) this.fogFullRebuilds++;
+    // ★不清零缓冲(2026-08-19 用户实报雾闪):旧版 row===0 时 fill(0) = 全图
+    //   全亮一闪再 5 帧扫回(20s 看门狗误清 fogPix 时周期触发)。分带循环改
+    //   双向写(seen?0:FOG),扫到哪改哪——新缓冲天然全 0,旧缓冲逐带纠正,
+    //   重建期无全亮帧
     const ROWS = 120;
     const yEnd = Math.min(h, this.fogRebuildRow + ROWS);
     for (let by = this.fogRebuildRow; by < yEnd; by++) {
@@ -9861,7 +9889,7 @@ export class Renderer {
           const xx = x0 + dx, yy = y0 + dy;
           if (xx < st.w && yy < st.h && ex[yy * st.w + xx]) { seen = true; break; }
         }
-        if (!seen) buf[rowOff + bx] = FOG;
+        buf[rowOff + bx] = seen ? 0 : FOG;   // 双向写:探索清雾/未探索上雾
       }
     }
     this.fogRebuildRow = yEnd;

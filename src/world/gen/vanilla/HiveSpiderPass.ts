@@ -9,6 +9,7 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { tileRunner } from './TileRunner';
+import { genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';
 import { solidTile as solidTileHB, poundTile as poundTileHB } from './HalfBrickPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType } from './GenSolid';
@@ -234,6 +235,9 @@ function placeHoneyPatch(
       st.wall[i] = 0;
       st.liquid[i] = 0; st.liquidType[i] = 0;
       st.slope[i] = 0; st.half[i] = 0;
+      // setSelfFrames+setNeighborFrames 默认真（Actions.cs:228）：TileFrame 中心+四邻
+      //   ——邻格 frameImportant 的 Check* 击杀级联入口
+      genFrameNeighbors(st, rng, rx + dx, ry + dy, 'setTile');
     }
   });
   // cs:43:圆(4,3) + Blotches(scale2,chance0.3) + IsSolid + ClearTile
@@ -255,6 +259,11 @@ function placeHoneyPatch(
       const i = st.idx(rx + qx, ry + qy);
       st.flags[i] = 0;   // ClearTile（Tile.ClearTile：active/halfBrick/slope 复位,幽灵 type 留）
       st.slope[i] = 0; st.half[i] = 0;
+      // ClearTile(frameNeighbors:true)（WorldUtils.cs:58-63）：四邻 TileFrame
+      //   ——★12345 链 #47 祭坛债主根因：挖蜜池清掉 (429-431,661) 蜂壳支撑列时
+      //   邻帧打到坛底 (430,660) → Check3x2(26) 支撑失守 → KillTile×6 整坛坍塌
+      //   （active=false+type=0,水体保留——KillTile cs:63935）
+      genFrameNeighbors(st, rng, rx + qx, ry + qy, 'clearTile');
       if (qx >= -6 && qx <= 6 && qy >= 0 && qy <= 3) {
         data.add(key(qx, qy));
         st.liquid[i] = 255; st.liquidType[i] = 3;   // 蜂蜜
@@ -279,6 +288,7 @@ function placeHoneyPatch(
     st.wall[i] = 0;
     st.liquid[i] = 0; st.liquidType[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;
+    genFrameNeighbors(st, rng, px, py, 'setTile');
   }
   // cs:45:All(data)@origin + Expand(1) + IsBelowHeight(ry,inclusive) + IsNotSolid
   //   + NoLiquid(蜂蜜) → 蜂壳 229
@@ -295,6 +305,7 @@ function placeHoneyPatch(
         st.wall[i] = 0;
         st.liquid[i] = 0; st.liquidType[i] = 0;
         st.slope[i] = 0; st.half[i] = 0;
+        genFrameNeighbors(st, rng, px, py, 'setTile');
       }
     }
   }
@@ -400,6 +411,10 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       for (let ix = fx0; ix < fx1; ix++) {
         for (let iy = fy0; iy < fy1; iy++) {
           const ii = st.idx(ix, iy);
+          // HiveBiome.cs:137-139：active-225 → SquareTileFrame 九宫（tile 侧）——225
+          //   自身实心非 frameImportant 恒 no-op,但邻格 frameImportant 族可被击杀
+          //   （同 honey patch 邻帧级联,PPPP 补齐）
+          if (st.flags[ii] && st.type[ii] === HIVE) genSquareTileFrame(st, rng, ix, iy);
           if (st.wall[ii] === 86) rng.nextInt(3);   // SquareWallFrame 中心格
         }
       }

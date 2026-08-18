@@ -6452,7 +6452,7 @@ void DgDomeEntrance(int i, int j, int preSeed)
     DgPillar(i - n3 + 8, n7 - 28, 4, false, false, 14, true, false);
     DgPillar(i + n3 - 8, n7 - 28, 4, false, false, 14, true, false);
     DgPillar(i - n3 + 21, n7 - 37, 3, false, false, 13, true, false);
-    DgPillar(i + n3 + 21, n7 - 37, 3, false, false, 13, true, false);
+    DgPillar(i + n3 - 21, n7 - 37, 3, false, false, 13, true, false);
     // 柱顶树（cs:420-428，flag2=3/4）：补土掷走 hr 流、GrowTree 走主流（ignoreWalls）
     if (flag2)
     {
@@ -6481,7 +6481,7 @@ void DgDomeEntrance(int i, int j, int preSeed)
         DomeTreeOnPillar(i - n3 + 21, n7 - 37 - 16 + 3 + 1);
         DomeTreeOnPillar(i + n4 - 2, n7 - 10 - 16 + 1);
         DomeTreeOnPillar(i + n3 - 8, n7 - 28 - 16 + 2 + 1);
-        DomeTreeOnPillar(i + n3 + 21, n7 - 37 - 16 + 3 + 1);
+        DomeTreeOnPillar(i + n3 - 21, n7 - 37 - 16 + 3 + 1);
     }
     // 老头锚（cs:430 SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——
     //   CurrentDungeon==0 时 Main.dungeonX/Y=(i,num7)）

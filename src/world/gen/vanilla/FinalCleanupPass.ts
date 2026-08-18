@@ -347,6 +347,42 @@ function squareTileFrame(st: TileStore, ctx: SweepCtx, x: number, y: number): vo
   tileFrameGen(st, ctx, x + 1, y, false);
   tileFrameGen(st, ctx, x + 1, y + 1, false);
 }
+/** PPPP：跨 pass 复用的生成期帧链（WorldUtils 侧 frameNeighbors 支的 1:1 入口）。
+ *  vanilla 用 Actions.SetTile（setSelfFrames+setNeighborFrames 默认真）与
+ *  Actions.ClearTile(frameNeighbors:true) 的所有 Gen 步骤，其邻帧 WorldGen.TileFrame
+ *  会分派 frameImportant Check* 击杀链——典型：蜂蜜斑挖蜜池 ClearTile 四邻帧打到
+ *  下方祭坛格 → Check3x2(26) 支撑失守 → KillTile×6 整坛坍塌（12345 链 #47 债）。
+ *  - 'clearTile'：WorldUtils.ClearTile（cs:55-64）——先清本格（调用方自理）再四邻
+ *    +x/-x/+y/-y，resetFrame=false；
+ *  - 'setTile'：WorldUtils.TileFrame（cs:79-92）——中心 resetFrame=true 在前，
+ *    四邻 resetFrame=true 在后。 */
+export function genFrameNeighbors(
+  st: TileStore, rng: RNG,
+  x: number, y: number,
+  mode: 'clearTile' | 'setTile',
+): void {
+  const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: false, stats: undefined };
+  if (mode === 'clearTile') {
+    tileFrameGen(st, ctx, x + 1, y, false);
+    tileFrameGen(st, ctx, x - 1, y, false);
+    tileFrameGen(st, ctx, x, y + 1, false);
+    tileFrameGen(st, ctx, x, y - 1, false);
+  } else {
+    tileFrameGen(st, ctx, x, y, true);
+    tileFrameGen(st, ctx, x + 1, y, true);
+    tileFrameGen(st, ctx, x - 1, y, true);
+    tileFrameGen(st, ctx, x, y + 1, true);
+    tileFrameGen(st, ctx, x, y - 1, true);
+  }
+}
+
+/** SquareTileFrame 生成期（cs:80924，九宫、仅中心 resetFrame=true）——
+ *  FrameOutAllHiveContents 的 tile 侧等消费端（cs:22544 同构邻格击杀级联） */
+export function genSquareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+  const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: false, stats: undefined };
+  squareTileFrame(st, ctx, x, y);
+}
+
 const roll3 = (ctx: SweepCtx): number => {
   if (ctx.stats) ctx.stats.roll184++;
   return ctx.rng ? ctx.rng.int(0, 2) : 0;

@@ -103,11 +103,20 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
       // tile.Clear(Tile|TilePaint|Slope)：**任何失败尝试也会清** inactive 锚格的
       // half/slope/type/帧（golden 半砖位 v0 的来源；须在一切本地门之前——
       // 原版 pass 无边界门，PlaceTile 照调）。WWW 批 2026-08-18 接线。
+      // ★PPPP 补 else-if 支（cs:59503-59507）：锚格 **活性** 且非 frameImportant 时
+      //   ResetsHalfBrickPlacementAttempt[num]（105/349 不在例外表 → 恒 true）→
+      //   halfBrick(false)+帧归零（type/active 保留）。触发场景=随机 y 落在岩体内 →
+      //   下扫首格即活性 → y-- 锚到活性半砖泥/石 → 放置必败但半砖被原版清掉
+      //   （#58 残余 7 Hf：(3063,475) 等七格 H0>1 的真身）。
       {
         const ai = st.idx(x, y);
         const shimmer = st.liquid[ai] > 0 && st.liquidType[ai] === 4 /* LIQ_SHIMMER */;
-        if (!shimmer && !st.flags[ai]) {
-          st.half[ai] = 0; st.slope[ai] = 0; st.type[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
+        if (!shimmer) {
+          if (!st.flags[ai]) {
+            st.half[ai] = 0; st.slope[ai] = 0; st.type[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
+          } else if (!TILE_DEFS[st.type[ai]]?.framed) {
+            st.half[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
+          }
         }
       }
       if (y < 2 || !st.inBounds(x + 1, y - 2)) { fail++; if (fail >= 10000) { done = true; } continue; }

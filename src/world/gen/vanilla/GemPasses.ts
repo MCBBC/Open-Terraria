@@ -172,7 +172,11 @@ function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): b
   if (!st.flags[i]) return false;
   const d = TILE_DEFS[t];
   if (!d) return false;
-  const solid = d.solid, platform = d.platform;
+  // ★OOOO：SolidTileAllow* 族读的是 Main.tileSolid=**生成期表**（G8 六族翻 false：
+  // 190/225/226/481-483/659/484）——曾读静态 d.solid，地下/琥珀段（穿 226 蜥蜴砖、
+  // 481-483 裂砖带）JS 多收锚 → 多放晶簇（#93 T178>0×273 主根因）；tileSolidTop/
+  // 平台不翻表，d.platform 照用
+  const solid = vanGenSolidType(t), platform = !!d.platform;
   const half = st.half[i] === 1, sl = st.slope[i];
   // ★G1：topSlope/bottomSlope 原来整体写反（旧 3|4/1|2）——Tile.cs:320-350 实为
   //   topSlope()=1|2、bottomSlope()=3|4，方向基带随之纠正
@@ -212,7 +216,7 @@ function checkMultiDirAnchor(st: TileStore, i: number, j: number): number {
     if (!st.inBounds(x, y)) return false;
     const k = st.idx(x, y);
     const d = TILE_DEFS[st.type[k]];
-    return !!d && d.solid && !d.platform;
+    return !!d && vanGenSolidType(st.type[k]) && !d.platform;   // 生成期 tileSolid（同上）
   };
   if (belowOk && solidNonTop(i, j + 1)) return 0;
   if (leftOk && solidNonTop(i - 1, j)) return 2;
@@ -233,8 +237,12 @@ const GEM_DIR_BASE: Record<number, number> = { 0: 0, 1: 54, 2: 108, 3: 162 };
  *     num21=Next(3)*18（roll2；resetFrame=true 恒走 genRand 分支）。roll1∈{0,18,36}
  *     恒落在 dir0 带宽 [0,36] → num22=-1 保留 roll1；dir1/2/3 基带错位 → 覆写为
  *     基带+roll2。★G3：此前只掷 1 骰，每颗宝石少掷 1 骰，全链 RNG 流分叉。
+ *  ③ PlaceTile 成功尾部（cs:60275-60281 `if (tile.active()) SquareTileFrame(i,j)`，
+ *  resetFrame 默认 true）→ 第三次 Next(3)（roll3）。此时帧已在基带内 → num22=-1
+ *  恒 no-write——纯幽灵掷，只移流。★OOOO：此前缺此掷，每颗宝石少 1 掷 ×13 ≈
+ *  IIII 实测 site#0 d=+23 的 +13 半边（另 +10=Next(20) 转换计数差）。
  *  邻域 8 格 TileFrame(resetFrame=false)：num21=frameY%54 无掷骰，且 178 非实心、
- *  不改变邻格锚定 → 不存在"邻域触发的第三掷"（cs:85844-85880 判定结论，免补）。 */
+ *  不改变邻格锚定 → 不存在"邻域触发的第四掷"（cs:85844-85880 判定结论，免补）。 */
 export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
   const dir = checkMultiDirAnchor(st, x, y);
   if (dir < 0) return;                       // CheckAndAdjust 失败：不放置、不掷骰
@@ -242,6 +250,7 @@ export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, styl
   st.setTile(x, y, EXPOSED, style * 18, roll1);
   const roll2 = rng.nextInt(3) * 18;         // ② cs:85855（resetFrame=true 无条件掷）
   if (dir !== 0) st.frameY[st.idx(x, y)] = GEM_DIR_BASE[dir] + roll2; // num22 基带覆写
+  rng.nextInt(3);                            // ③ cs:60281 尾部帧（band 内 no-write 幽灵掷）
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============

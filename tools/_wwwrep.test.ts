@@ -292,7 +292,7 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
     entry: 's44',
     steps: [
       { dump: 92, base: 91, run: (st, gs, rng) => runExposedGemsIcePass(st, rng, gs) },           // ▶ExposedGemsInIceBiome
-      { dump: 93, base: 91, run: (st, gs, rng) => runExposedGemsUndergroundPass(st, rng, gs) },   // ▶ExposedGemsUnderground（独立新流）
+      { dump: 93, base: 92, run: (st, gs, rng) => runExposedGemsUndergroundPass(st, rng, gs) },   // ▶ExposedGemsUnderground（新流；世界基座=post-ice 92——OOOO 修：曾误用 91，金标 93 含冰段 178 → 281 假差）
     ],
   });
   P.set(46, { entry: 's45', steps: [{ dump: 94, base: 93, run: (st, gs, rng) => runLongMossPass(st, rng, gs) }] });

@@ -3,7 +3,7 @@
 //  游泳族曾被通用 t/4 档通吃（原版多为 6t 且湿/离水分帧）。
 //  此处逐档钉住 FindFrame 专属 case 的节拍（NPC.cs 行号见 Renderer 注释）。
 import { describe, expect, it } from 'vitest';
-import { vanillaFrameIdx } from '../render/Renderer';
+import { vanillaFrameIdx } from '../src/render/Renderer';
 import type { Enemy } from '../src/entities/Enemy';
 
 type Shell = Partial<Enemy> & { vanillaId: number; aiStyle: number };
@@ -27,7 +27,7 @@ describe('小动物帧速档（FindFrame 专属 case）', () => {
     e.walkCycleT = 33; e.animT = 0; expect(vanillaFrameIdx(e, 6)).toBe(0);  // 66/11=6 → %6=0
     // 腾空=帧0（非城镇档腾空帧1）
     expect(vanillaFrameIdx(shell(230, 7, { onGround: false }), 6)).toBe(0);
-    expect(vanillaFrameIdx(shell(593, 7, { walkCycleT: 22 }), 6)).toBe(2);
+    expect(vanillaFrameIdx(shell(593, 7, { walkCycleT: 22 }), 6)).toBe(4); // counter=44 → 4/6
   });
 
   it('企鹅 148：counter=|vx| 相位 0/1/2（15 回卷），腾空=帧2', () => {

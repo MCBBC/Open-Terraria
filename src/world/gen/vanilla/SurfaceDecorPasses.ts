@@ -1401,8 +1401,15 @@ function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
     const nx = x + dx, ny = y + dy;
     if (!st.inBounds(nx, ny)) continue;
     const kk = st.idx(nx, ny);
+    if (!st.flags[kk]) {
+      // TileFrame 头（cs:82077-82082）：非活跃格清 half/slope/块漆（type 保留——
+      // 生成期 liquid 分支因 generatingWorld 短路）。OOOO 批：槽 87 残 8 格 S0>n 根因
+      st.half[kk] = 0;
+      st.slope[kk] = 0;
+      st.paint[kk] = 0;
+      continue;
+    }
     const s = SHEET[st.type[kk]];
-    if (!st.flags[kk]) continue;
     if (s === 571) checkBamboo(st, rng, nx, ny);
     else if (s === 519) checkCatTail(st, rng, nx, ny);
     else if (s === 549) checkUnderwaterPlant(st, rng, nx, ny);
@@ -1808,30 +1815,51 @@ const CRIMSON_PLANTS = TILE_BY_KEY['v_201_crimson_short_plants']!;
 const plantTileOf = (num: number): number =>
   num === 24 ? CORRUPT_PLANTS : num === 201 ? CRIMSON_PLANTS : num === 637 ? ASH_SHORT : PLANT_SHORT;
 
+/** PlaceTile 通用前置清（cs:59497-59500）：目标格原 inactive 时 Clear(Tile|TilePaint|Slope)
+ *  ——type/帧归零、半砖/坡归零、油漆清。调用方保证已过液体拒绝门（cs:59492，门在清之前）。
+ *  OOOO 批新增：槽 87 残 11 格（S0>1/2/3 + H0>1）= 放置失败/成功均未清 stale 坡半旗。 */
+function placeTilePreambleClear(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (st.flags[i]) return;                // active 目标不走 Clear（cs:59497 !tile.active()）
+  st.type[i] = 0;
+  st.frameX[i] = 0;
+  st.frameY[i] = 0;
+  st.half[i] = 0;
+  st.slope[i] = 0;
+  st.paint[i] = 0;
+}
+
 /** PlaceTile 的 num∈{3,24,201,637} 分支（cs:59533-59654）1:1。
  *  门禁：液体拒绝（cs:59492）+ IsFitToPlaceFlowerIn（cs:58247：下方草族整砖）；
  *  帧：1/13 荆棘化（24→32 / 201→352）→ 蘑菇草基座特殊帧表 → 墙门内
  *  1/50 蘑菇帧(144/270) / 花窗 / Next(6) 草丛。返回是否放置。 */
 export function placePlantTile(st: TileStore, rng: RNG, x: number, y: number, num: number): boolean {
   const i = st.idx(x, y);
-  if (st.liquid[i] > 0) return false;
+  if (st.liquid[i] > 0) return false;                 // 液体门（cs:59492：3/24/201/637 在拒绝表）
+  placeTilePreambleClear(st, x, y);                   // cs:59497 Clear(Tile|Paint|Slope)——液体门之后、花门之前
   const bi = st.idx(x, y + 1);
   if (!st.flags[bi] || st.slope[bi] !== 0 || st.half[bi]) return false;
   const below = SHEET[st.type[bi]];
   const fit = PLANT_FIT[num];
   if (!fit || !fit.has(below)) return false;
   if (num === 24 && rng.int(0, 12) === 0) {                               // Next(13) → 荆棘 32
-    st.setTileSilent(x, y, CORRUPT_THORNS, 0, 0);                         // SquareTileFrame
+    st.setTileSilent(x, y, CORRUPT_THORNS, 0, 0);
+    squareTileFrame(st, rng, x, y);                                       // cs:59539 显式帧
+    squareTileFrame(st, rng, x, y);                                       // cs:60281 尾部帧
     return true;
   }
   if (num === 201 && rng.int(0, 12) === 0) {                              // Next(13) → 352
     st.setTileSilent(x, y, CRIMSON_THORNS, 0, 0);
+    squareTileFrame(st, rng, x, y);                                       // cs:59545 显式帧
+    squareTileFrame(st, rng, x, y);                                       // cs:60281 尾部帧
     return true;
   }
   if (below === 78 || below === 380 || below === 579) {                   // 蘑菇草基座（cs:59546）
     let fx = MUSHROOM_FX_LIST[rng.int(0, MUSHROOM_FX_LIST.length - 1)];
     if (fx >= 21 && fx % 3 === 0) fx += rng.int(0, 2);                    // 21/24/27/…/42 抽中再 +Next(3)
     st.setTileSilent(x, y, plantTileOf(num), fx * 18, 0);
+    squareTileFrame(st, rng, x, y);                                       // cs:60281 尾部帧
     return true;
   }
   if (WALL_ALLOWS_PLANTS.has(st.wall[i]) && WALL_ALLOWS_PLANTS.has(st.wall[bi])) {
@@ -1845,6 +1873,7 @@ export function placePlantTile(st: TileStore, rng: RNG, x: number, y: number, nu
       fx = rng.int(0, 5);                                                 // Next(6) 草丛
     }
     st.setTileSilent(x, y, plantTileOf(num), fx * 18, 0);
+    squareTileFrame(st, rng, x, y);                                       // cs:60281 尾部帧
     return true;
   }
   return false;                                                           // 墙不允许植物生长 → 不放
@@ -1868,8 +1897,11 @@ function tooManyJunglePlants(st: TileStore, i: number, j: number): boolean {
   return false;
 }
 
-/** PlaceTile(61) 分支（cs:59603-59652）1:1：下方 60/226 整砖门 + 五段帧链 */
+/** PlaceTile(61) 分支（cs:59603-59652）1:1：下方 60/226 整砖门 + 五段帧链。
+ *  入口先做 PlaceTile 前置清（cs:59497-59500：目标 inactive → Clear(Tile|Paint|Slope)
+ *  ——61 非实心恒过大门、不在液体拒绝表，清无条件发生于 case 门之前，失败也清）。 */
 function placeJunglePlant(st: TileStore, rng: RNG, gs: GenState, x: number, y: number): void {
+  placeTilePreambleClear(st, x, y);
   const bi = st.idx(x, y + 1);
   if (y + 1 >= st.h || !st.flags[bi] || st.slope[bi] !== 0 || st.half[bi]) return;
   const below = SHEET[st.type[bi]];
@@ -1879,6 +1911,8 @@ function placeJunglePlant(st: TileStore, rng: RNG, gs: GenState, x: number, y: n
   const deepOk = temple ? false : deep;
   if (rng.int(0, 15) === 0 && y > gs.worldSurface && !temple) {           // Next(16) → 孢子 69
     st.setTileSilent(x, y, JUNGLE_SPORES, 0, 0);
+    squareTileFrame(st, rng, x, y);                                       // cs:59620（孢子支显式帧）
+    squareTileFrame(st, rng, x, y);                                       // cs:60281 PlaceTile 成功尾部帧
     return;
   }
   let fx: number;
@@ -1892,6 +1926,7 @@ function placeJunglePlant(st: TileStore, rng: RNG, gs: GenState, x: number, y: n
     fx = rng.int(0, 5);                                                   // Next(6)
   }
   st.setTileSilent(x, y, JUNGLE_SHORT, fx, 0);
+  squareTileFrame(st, rng, x, y);                                         // cs:60281 PlaceTile 成功尾部帧
 }
 
 /** GrassPlantsEvilPlantsAndPumpkinsOnSurface pass（cs:20232-20263）：
@@ -1923,6 +1958,7 @@ export function runGrassPlantsPass(st: TileStore, rng: RNG): void {
  *  失败才落 71（frameX=Next(5)*18）。OOOO 批前整个 case 71 只移植了末段 else
  *  的 Next(5) 帧，香蒲支缺失 = 槽 87 的 T519 族差 + 流分位级联主根因之一。 */
 function placeTile71(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): void {
+  placeTilePreambleClear(st, i, j);                       // cs:59497（71 非实心、不在液体拒绝表）
   if (j + 1 >= st.h) return;
   const bi = st.idx(i, j + 1);
   if (!st.flags[bi] || st.slope[bi] !== 0 || st.half[bi] || SHEET[st.type[bi]] !== 70) return;
@@ -1934,6 +1970,7 @@ function placeTile71(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
     squareTileFrame(st, rng, px, py);                                   // cs:59693（checkCatTail 零掷）
   } else {
     st.setTileSilent(i, j, GLOW_SHROOM, rng.int(0, 4) * 18, 0);         // Next(5) 帧
+    squareTileFrame(st, rng, i, j);                                   // cs:60281 PlaceTile 成功尾部帧
   }
 }
 

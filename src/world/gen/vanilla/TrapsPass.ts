@@ -10,6 +10,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid, vanGenSolidType } from './GenSolid';
+import { checkStalactite } from './ShimmerPass';
 
 // ---- 内部 id / sheet 解析（表均为原版 sheet id 空间，消费端经 sheetOf 换算） ----
 const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
@@ -88,7 +89,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const d = TILE_DEFS[i]!;
   if (d.framed && ((d.w ?? 1) > 1 || (d.h ?? 1) > 1)) MULTI_DEFS.set(i, { w: d.w!, h: d.h! });
 }
-function killTileWhole(st: TileStore, x: number, y: number): void {
+function killTileWhole(st: TileStore, x: number, y: number, rng?: RNG): void {
   // ★KillTile 级联（cs:63983 尾部 SquareTileFrame(i,j) → 3×3 TileFrame 重帧）：
   //   邻接多格物体经锚校验失败整块碎裂。golden 四站点实证：
   //   ①镖锚(3788,414)杀木块→上方陶罐右支撑列悬空→整塌；
@@ -97,6 +98,10 @@ function killTileWhole(st: TileStore, x: number, y: number): void {
   //     左邻钟乳石(2586,622..623)顶锚悬空→塌（锚校验按附着向：165 族查上方，
   //     余者查底行下方逐列）；
   //   ④(401,389)杀泥→旁侧陶罐底行不骑该列→存活。
+  //   ★PPPP 补：165 族改走 CheckStalactite 帧分派（vanilla TileFrameImportant
+  //   case 165 的真语义——矩形锚搜对**单格短钟乳石**必失败（非完整 1×2 矩形），
+  //   (2546,787) 沙穴掏空杀顶板后短钟乳石存活实证）。支撑已失分支短路不掷
+  //   （cs:38690 前置门），流安全。
   killObjectAt(st, x, y);
   for (let dy = -1; dy <= 1; dy++) {
     for (let dx = -1; dx <= 1; dx++) {
@@ -104,7 +109,12 @@ function killTileWhole(st: TileStore, x: number, y: number): void {
       if (!st.inBounds(ux, uy)) continue;
       const ui = st.idx(ux, uy);
       const ut = st.type[ui];
-      if (!MULTI_DEFS.has(ut) || !st.flags[ui]) continue;
+      // KillTile 尾 SquareTileFrame（cs:63953→80924）九宫重帧：TileFrame 对失活格
+      //   清 half/slope（cs:82078-82082，零掷零杀）——PPPP 补（曾缺 → (3952,861)
+      //   镖锚杀邻帧本应清的失活残坡 s2 存活）
+      if (!st.flags[ui]) { st.half[ui] = 0; st.slope[ui] = 0; continue; }
+      if (sheetOf(ut) === 165 && rng) { checkStalactite(st, rng, ux, uy); continue; }
+      if (!MULTI_DEFS.has(ut)) continue;
       // 找含 (ux,uy) 的完整块锚
       const m = MULTI_DEFS.get(ut)!;
       for (let ay = uy; ay > uy - m.h; ay--) {
@@ -281,6 +291,16 @@ function placePlate(st: TileStore, x: number, y: number, style: number): boolean
   st.setTileSilent(x, y, PLATE, 0, style * 18);
   const i = st.idx(x, y);
   st.half[i] = 0; st.slope[i] = 0;                                    // PlaceTile 前奏 Clear（cs:59497）
+  // case 135 尾 SquareTileFrame(i,j)（cs:60162-60163）——失活格清 half/slope 支
+  //   （TileFrame cs:82078-82082，零掷零杀；活性格帧派发本种子零命中）。PPPP 补
+  //   （曾缺 → (3952,861) 板 (3953,860) 邻帧本应清的失活残坡 s2 存活）
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (!st.inBounds(x + dx, y + dy)) continue;
+      const ni = st.idx(x + dx, y + dy);
+      if (!st.flags[ni]) { st.half[ni] = 0; st.slope[ni] = 0; }
+    }
+  }
   return true;
 }
 
@@ -363,20 +383,24 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     }
     if (py - top <= 5 || py - top >= 40) return false;                // cs:9222
     if (isTileNearby(st, colX, top, 21, 4) || isTileNearby(st, colX, top, 467, 4)) return false;  // cs:9227
-    // 掏 2 宽竖井 top..py（cs:9232-9240；379 免杀）。★巨石族免杀：golden site
-    //   (2022..2024,581) A 先置巨石后 B 井穿 (2023,581-582)——A 石以 714 存活至
-    //   终态（若井可杀则该两格必为气）。反编译印 type!=379 门，按金标扩为巨石族。
+    // 掏 2 宽竖井 top..py（cs:9232-9240；379 免杀）。★PPPP 定罪修正：井杀对巨石
+    //   **照杀**（vanilla type!=379 门无巨石豁免）——巨石的存活语义在 KillTile 尾
+    //   SquareTileFrame→TileFrame→Check2x2(48405) 的 2×2 完整性级联：井杀先杀巨石
+    //   一格 → 邻格帧检完整性破 → 整块 KillTile。site(2021/2024,613) 双陷阱实证
+    //   （golden 序=B(x2=2024,colX=2023) 先置石 → A(x2=2021,colX=2022) 后井穿杀 B 石
+    //   → A 石落 (2022-2023,581-582)=终态金标）：曾按"EE 免杀"误豁免 → B 石错存、
+    //   A 被占位 → 接受序假象。killTileWhole 直接命中=整块移除同构该级联终态。
     for (let xx = colX; xx <= colX + 1; xx++) {
       for (let yy = top; yy <= py; yy++) {
         const ii = st.idx(xx, yy);
-        if (st.type[ii] !== SHEET379 && !isBoulderType(st.type[ii])) killTileWhole(st, xx, yy);
+        if (st.type[ii] !== SHEET379) killTileWhole(st, xx, yy, rng);
       }
     }
-    // 6×6 实心转石头（cs:9242-9250 直写 .type=1：保半砖/坡/帧）。★巨石族免转：
-    //   同上 site——B 壳(2021-2026×579-584) 罩住 A 石右列，终态仍 714。
+    // 6×6 实心转石头（cs:9242-9250 直写 .type=1：保半砖/坡/帧，无巨石豁免——
+    //   被井杀后的巨石格已非实心自然跳过）
     for (let xx = colX - 2; xx <= colX + 3; xx++) {
       for (let yy = top - 2; yy <= top + 3; yy++) {
-        if (solidTileV(st, xx, yy) && !isBoulderType(st.type[st.idx(xx, yy)])) {
+        if (solidTileV(st, xx, yy)) {
           const ii = st.idx(xx, yy);
           st.type[ii] = STONE1; st.flags[ii] = 1;
         }
@@ -449,7 +473,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
         }
       }
     }
-    killTileWhole(st, bx, by);                                        // KillTile（cs:9382，清半砖/坡）
+    killTileWhole(st, bx, by, rng);                                        // KillTile（cs:9382，清半砖/坡）
     st.setTileSilent(bx, by, EXPLOSIVES, 0, rng.int(0, 1) * 18);      // cs:9383-9386
     placePlate(st, x2, py, rng.int(2, 3));                            // cs:9387
     lWire(st, x2, py, bx, by);
@@ -497,7 +521,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (st.type[st.idx(i5, j2)] === GLOW190) return false;              // cs:9087
   if (st.wall[st.idx(i5, j2)] === 350) return false;                  // cs:9092
   placePlate(st, x2, py, st.wall[st.idx(x2, py)] > 0 ? 2 : rng.int(2, 3));   // cs:9097-9104
-  killTileWhole(st, i5, j2);                                          // KillTile（cs:9105，整块语义）
+  killTileWhole(st, i5, j2, rng);                                          // KillTile（cs:9105，整块语义）
   st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 0);           // cs:9115（style0）
   lWire(st, x2, py, i5, j2);
   return true;
@@ -616,9 +640,13 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
       if (!st.flags[ci] || !vanGenSolidType(st.type[ci]!)) { st.type[ci] = SANDSTONE; st.flags[ci] = 1; }
     }
   }
-  // 壳侧四列清坡/半砖（cs:35721-35731：i-num5-2/-1/+1/+2）
+  // 壳侧四列清坡/半砖（cs:35721-35731）——★原版字面列 = **i-num5-2/-1/+1/+2**
+  //   （四列全在左侧！i-num5+1/+2 落在穴内已被掏空段清过=空转；右侧两列
+  //   **从不清坡**——vanilla 1.4.5.6 原样 bug，勿"修正"为对称 ±。golden 实证：
+  //   (2668,817)s1/(2676,844)s4 右侧斜面存活至终态）。PPPP 修（曾对称 ± →
+  //   #76 残 S1>0/S4>0 两格）。
   for (let y17 = sandTop - pocketH; y17 <= sandTop; y17++) {
-    for (const dx of [-pocketW - 2, -pocketW - 1, pocketW + 1, pocketW + 2]) {
+    for (const dx of [-pocketW - 2, -pocketW - 1, -pocketW + 1, -pocketW + 2]) {
       const ii = st.idx(i + dx, y17);
       st.slope[ii] = 0; st.half[ii] = 0;
     }
@@ -633,7 +661,7 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
     }
   }
   // 压板两侧清空 + 压板 style7（cs:35741-35745）
-  for (const dx of [-2, -1, 1, 2]) killTileWhole(st, i + dx, k);
+  for (const dx of [-2, -1, 1, 2]) killTileWhole(st, i + dx, k, rng);
   placePlate(st, i, k, 7);
   // 致动沙栅 + 阶梯掏空 + 中心红线（cs:35746-35780）
   for (let x20 = i - pocketW; x20 <= i + pocketW; x20++) {
@@ -646,7 +674,7 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
       const ii = st.idx(x20, y22);
       if (st.flags[ii] && vanGenSolidType(st.type[ii]!)) {
         if (y22 < sandTop + 2) st.wire[ii] |= WIRE_ACTUATOR | WIRE_RED;
-        else if (y22 < y21) killTileWhole(st, x20, y22);
+        else if (y22 < y21) killTileWhole(st, x20, y22, rng);
       }
     }
   }

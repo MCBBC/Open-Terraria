@@ -432,8 +432,12 @@ export class SpriteAtlas {
   ensureVImage(file: string): ImageBitmap | ImageBitmap | HTMLImageElement | null {
     const hit = this.vimages.get(file);
     if (hit) return hit;
-    if (this._iconPending.has(file) || this._vImageFailed.has(file)) return null;
+    // ★note 先于 pending/failed 早退(2026-08-19 用户实报"生命树贴图不及时,
+    // 手动破坏才渲染"):加载已在飞行中(预载/他人发起)时烘焙期 ensure 会早退,
+    // 曾把 note 一起吞掉 → 表晚到无人重烘 = 缺表 fallback 钉死。failed 同 note:
+    // 重试成功会二次 land → onLoaded → 重烘,链路反而闭环
     if (this.bakeTracker?._baking) this.bakeTracker.note(file);
+    if (this._iconPending.has(file) || this._vImageFailed.has(file)) return null;
     this._iconPending.add(file);
     const im = new Image();
     im.onload = () => {
