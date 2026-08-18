@@ -69,7 +69,7 @@ const gPath = (idx: number, ext: string) => `${G2}/${String(idx).padStart(3, '0'
   const logPrev = () => {
     if (px < 0) return;
     const i = st.idx(px, py);
-    lines.push(`eff ${px} ${py} ${st.flags[i] ? String(SHEET[st.type[i]]) : '-'}`);
+    lines.push(`eff ${px} ${py} ${st.flags[i] ? 'A' + String(SHEET[st.type[i]]) : st.type[i] === 0 ? 'i0' : 'i' + String(SHEET[st.type[i]])}`);
   };
   (globalThis as { __swPilesCap?: (x: number, y: number, t: number, s: number, z: number, k: number) => void }).__swPilesCap =
     (x, y, t, s, z, k) => {

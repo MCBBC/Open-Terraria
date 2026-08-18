@@ -102,6 +102,7 @@ import {
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
 import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_TABLE_SHEETS } from '../data/tiles';
+import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
@@ -711,6 +712,11 @@ function minionSlotsOf(m: MinionProj): number {
 }
 
 export class Game implements GameHooks {
+  /** FlexibleWandCycleOffset（Player.cs:3028 静态；持碎块魔杖族按 ↑/↓ 循环样式，
+   *  UpdateControlHolds :28614-28626） */
+  flexWandCycle = 0;
+  private flexLatchUp = false;
+  private flexLatchDown = false;
   assets: AssetBundle;
   atlas: SpriteAtlas | null = null;
   autotiler: AutoTiler | null = null;
@@ -3702,6 +3708,21 @@ export class Game implements GameHooks {
       player.aimWY = awy;
       player.inputUseItem = !!inp.mouseDown;
       player.inputUseTile = !!inp.rightDown;
+    }
+    // FlexibleTileWand 样式循环（UpdateControlHolds :28614-28626）：持碎块魔杖族
+    // 按 ↑/↓ 边沿 ±cycleOffset（Gravitation 用 Up——wand 用 Up+Down 两键互不挤占：
+    // 原版同为 controlUp/controlDown 双边沿，重力药水会与其共享 Up 键系原版实况）
+    {
+      const held = player.inv.slots[player.inv.selected];
+      const heldWand = held ? flexibleWandOf(viIdFromKey(ITEM_DEFS[held.id]?.key ?? '')) : null;
+      if (heldWand) {
+        if (player.inputUp && !this.flexLatchUp) this.flexWandCycle--;
+        if (player.inputDown && !this.flexLatchDown) this.flexWandCycle++;
+      }
+      if (!player.inputUp) this.flexLatchUp = false;
+      if (player.inputDown) this.flexLatchDown = false;
+      if (player.inputUp) this.flexLatchUp = true;
+      if (!player.inputDown) this.flexLatchDown = false;
     }
     // 重力药水（buff 18，:9720）：Up 边沿切换 gravDir（按住不连切）
     if (player.buffs.has(BuffType.Gravitation) && player.inputUp && !this.gravLatch) {
@@ -10944,6 +10965,43 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
+
+    // ---- FlexibleTileWand 族（Player.cs:39133-39157 PlaceThing_GetTileToPlace）：
+    //      碎块魔杖 5324/5329/5330 / MiteyTitey 5464 / 便携窑 5481 / 沙堡桶 4460 /
+    //      花园侏儒 4609 / 火烈鸟 4420 / 珊瑚贝星族 / 南瓜灯 / 生日礼物 / 书 149 /
+    //      洞穴晶体六宝石等 30 件——放置物 = 背包首个命中弹药桶的 tile+style
+    //      （cycleOffset 模容量，持杖 ↑/↓ 循环）；弹药非耗材族不扣 ----
+    const wandVid = viIdFromKey(itemDef.key);
+    const wand = wandVid > 0 ? flexibleWandOf(wandVid) : null;
+    if (wand) {
+      const slots = this.player.inv.slots;
+      const invVids = slots.map((s) => s
+        ? { vid: viIdFromKey(ITEM_DEFS[s.id]?.key ?? ''), favorited: !!s.favorited }
+        : { vid: -1, favorited: false });
+      const opt = tryGetPlacementOption(wand, invVids, this.flexWandCycle);
+      if (!opt) return;   // 背包无弹药 → 不可放（TryGetPlacementOption false → canUse false）
+      const wandTile = TILE_INTERNAL_BY_SHEET.get(opt.tileSheet);
+      if (wandTile === undefined) return;
+      if (st.get(tx, ty) !== 0) return;
+      // 落地锚（单件装饰族多 1×1；碎块族亦 1×1 帧 style 帧）：下方须桌面/实心支撑
+      const belowOk = st.inBounds(tx, ty + 1)
+        && (st.isSolid(tx, ty + 1) || TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1));
+      if (!belowOk) return;
+      st.setTile(tx, ty, wandTile, 18 * opt.style, 0);
+      this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+      if (wand.consumesAmmo && opt.ammoVid > 0) {
+        const idx = slots.findIndex((s) => {
+          if (!s) return false;
+          const d = ITEM_DEFS[s.id];
+          return d != null && viIdFromKey(d.key) === opt.ammoVid;
+        });
+        if (idx >= 0) this.player.inv.removeAt(idx, 1);
+      }
+      this.player.useTime = 14;
+      this.sfx.play('place');
+      this.cb.onInventoryChanged();
+      return;
+    }
 
     // 草族"转化"放置（见 tryGrassConvert；非草族物品落空继续通用链）
     if (itemDef.tile && this.tryGrassConvert(tx, ty, itemDef)) return;

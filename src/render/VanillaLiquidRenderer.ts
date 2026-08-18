@@ -654,6 +654,12 @@ export function drawLiquidBehindTilesOnly(
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number, waterStyle = 0,
 ): void {
+  // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 审计登记):
+  //  ①:3906 半砖+侧液>160+CheckForWaterfall 跳过门(需瀑布管理器接入,瀑布盖
+  //    半砖场景边缘);②:3921 type 546 自液体特例;③:3910 BlocksWaterDrawingBehindSelf
+  //    族门;④:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D
+  //    近似代价高;洞穴暗背景下视觉差极小)。其余分支(含 flag5 自身液体/坡面
+  //    边角门/半砖墙后门/蜂蜜 alpha/致动门)均已对齐。
   // Liquid_N 贴图(16×16 纯液体块;水 Liquid_0 多 style 但取首 16px)
   const texCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const texFor = (vt: number) => {
@@ -682,8 +688,12 @@ export function drawLiquidBehindTilesOnly(
     for (let y = Math.max(1, ty0); y <= Math.min(st.h - 2, ty1); y++) {
       const i = st.idx(x, y);
       if (!st.flags[i]) continue; // 空格没有"方块后面"
+      if ((st.wire[i] & 32) !== 0) continue; // 致动幽灵格不画浸润(:3906 !active() 同族)
       const def = TILE_DEFS[st.type[i]];
       if (!def || !def.solid || def.platform) continue; // 仅实心方块(:4075 tileSolid 排除)
+      const slope = st.slope[i];
+      // blockType(num4)语义:0=整块 / 1=半砖 / 2-5=坡面(:3907 blockType())
+      const num4 = slope !== 0 ? slope : (st.half[i] ? 1 : 0);
 
       // 四邻液体(TileDrawing.cs:3861-3900;379=conveyor 按 vanilla 视为无液体)。
       // ★零分配版(2026-08-18):旧 lq() 每调用 new {lq,lt} ×4/格——水邻屏每帧
@@ -704,7 +714,6 @@ export function drawLiquidBehindTilesOnly(
       if (nb(0, 1)) { Dq = nLq; Dqt = nLt; }
       // 坡面格的"实心侧"邻格不计入（:3967/:3989/:4011/:4028 的 slope 门）：
       // slope 1/3 忽略左、2/4 忽略右、3/4 忽略上、1/2 忽略下——液体只从坡面开放侧来
-      const slope = st.slope[i];
       const slopeBlocksLeft = slope === 1 || slope === 3;
       const slopeBlocksRight = slope === 2 || slope === 4;
       const slopeBlocksUp = slope === 3 || slope === 4;
@@ -714,7 +723,12 @@ export function drawLiquidBehindTilesOnly(
       let fR = Rq > 0 && !slopeBlocksRight;
       const fU = Uq > 0 && !slopeBlocksUp;
       const fD = Dq > 240 && !slopeBlocksDown;
-      if (!fL && !fR && !fU && !fD) continue; // :4055-4057 四邻无液体跳过
+      // ★flag5 自身格液体(:3943-3963,2026-08-19 用户实报"半格方块浸润未处理"):
+      //   半砖/坡面格【自己格内】的液体也画浸润(半砖需 >160)——本格既是容器
+      //   又是方块,水搁在半砖上时原版从本格取液位画带,旧实现只读四邻 = 整类缺失
+      const selfLq = st.liquid[i];
+      const f5 = selfLq > 0 && num4 !== 0 && (num4 !== 1 || selfLq > 160);
+      if (!fL && !fR && !fU && !fD && !f5) continue; // :4054 五旗全空跳过
 
       // 液体类型与最大液位(:3940-3965 取最高液位邻居;顺序 L→R→U→D 严格大于才覆盖)
       let maxLq = 0, lt = 0;
@@ -722,6 +736,10 @@ export function drawLiquidBehindTilesOnly(
       if (fR && Rq > maxLq) { maxLq = Rq; lt = toVanillaType(Rqt); }
       if (fU && Uq > maxLq) { maxLq = Uq; lt = toVanillaType(Uqt); }
       if (fD && Dq > maxLq) { maxLq = Dq; lt = toVanillaType(Dqt); }
+      if (f5 && selfLq > maxLq) { maxLq = selfLq; lt = toVanillaType(st.liquidType[i] || 1); }
+      // ★坡面边角门(:4155-4162):slope4 左侧无液无实心 / slope3 右侧同 → 整带不画
+      if (slope === 4 && Lq === 0 && !st.isSolid(x - 1, y)) continue;
+      if (slope === 3 && Rq === 0 && !st.isSolid(x + 1, y)) continue;
       const tex = texFor(lt); // lt=3 微光走 Liquid_14
       if (!tex) continue;
 
@@ -744,7 +762,9 @@ export function drawLiquidBehindTilesOnly(
           // 侧向有水(:4095-4123)
           let y0 = 4;
           const upNi = st.idx(x, y - 1);
-          if (st.liquid[upNi] === 0 && !st.isSolid(x, y - 1)) y0 = 0; // 上方无液无实心→从格顶画(:4098-4101)
+          // ★num4!=0 门(:4084-4087):半砖/坡面格即便上格实心也从格顶画——
+          //   (num4 != 0 || !SolidTile(above)),旧版漏前半 = 半格带矮 4px
+          if (st.liquid[upNi] === 0 && (num4 !== 0 || !st.isSolid(x, y - 1))) y0 = 0;
           const num6 = Math.floor((256 - maxLq) / 32) * 2; // 深度=液位不足时从底收(:4096,4102)
           const isHalf = st.half[i];
           if (slope !== 0) {
@@ -800,15 +820,18 @@ export function drawLiquidBehindTilesOnly(
         continue;
       }
 
-      // ---- 不透明度(:4126-4146) ----
-      // 地上=1.0(有墙压 0.6,墙 21→0.9);地下=0.5 基线
+      // ---- 不透明度(:4126-4151) ----
+      // 地上=1.0(有墙压 0.6,墙 21→0.9);地下=0.5 基线;蜂蜜恒 1(:4141 max(0.5*1.7,1))
       let alpha = 0.5;
+      if (lt === 2) alpha = 1.0;
       if (y <= Math.floor(groundLevel)) {
         alpha = 1.0;
         const wi = st.wall[i];
         if (wi === 21) alpha = 0.9;
         else if (wi > 0) alpha = 0.6;
       }
+      // ★半砖+上格有液+有墙 → 整带不画(:4148-4151;地下半砖上的水由水体本体呈现)
+      if (st.half[i] && Uq > 0 && st.wall[i] > 0) continue;
       ctx.globalAlpha = alpha;
       ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py, dstW, dstH);
     }

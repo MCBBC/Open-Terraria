@@ -118,7 +118,7 @@ const SET_HARDENED_SAND = new Set([397, 398, 402, 399]);
 const SET_SANDSTONE = new Set([396, 400, 403, 401]);
 
 /** PlaceTile(186/187) → Place3x2(i,j,type,style)（cs:60018 case 路由 + cs:52097-52235）
- *  + 尾随 SquareTileFrame(i,j)→TileFrame→Check3x2（cs:49199-49400）整链。
+ *  + 尾随 SquareTileFrame(i,j)→TileFrame→Check3x2（cs:49199-49869）整链。
  *  ★IIII 批（2026-08-18）修正三件：
  *  ① 几何 = **中心锚**（列 x-1..x+1 × 行 y-1..y，frameX 基 54*style 按列 +0/+18/+36，
  *    顶行 frameY=0 底行 18）——曾左对齐 x..x+2 整体右移一列（#77 首差 (2761,95)
@@ -127,26 +127,95 @@ const SET_SANDSTONE = new Set([396, 400, 403, 401]);
  *    && !inActive）+ InvalidTileForPilesOrSpeleothems（cs:52149：186/187 底座
  *    Boulders 拒）——曾用 SolidTileAllowBottomSlope（那是 Check3x2 的复核谓词，
  *    放宽了底坡/平台，错源=把 cs:49284/49300 误当放置门）；
- *  ③ 放置后 Check3x2 复核不通过 → destroyObject 击杀（底行 3 格 KillTile →
- *    重帧 7×3 → 顶行经 TileFrame 再杀，净效果 6 格全灭，cs:49217-49246）。
+ *  ③ Check3x2 样式族门复核。OOOO 批重写击杀链（探针实证 5339/5339 击杀格 type=0）：
+ *    - 门谓词曾 `type===186/187` 比内部 id 恒假 → 整链死代码（残 1227 主根因）；
+ *    - KillTile **清 type**（cs:63965——IIII"不清 type"系误读 cs:63935 为 type 行；
+ *      击杀后 `rawSheetAt==186||187` 命中判定失败 → 该 attempt 不算命中 → 预算
+ *      续耗重试——掷流结构随之对齐）；
+ *    - KillTile 尾 SquareTileFrame（cs:63967）= 3×3 非活跃格清 half/slope/paint
+ *      （TileFrame 头 cs:82077；活格 186/187 邻 → Check3x2 因 destroyObject 早退）；
+ *    - Check3x2 尾 destroyObject=false + **5×5 TileFrame 扫**（cs:49856-49862）：
+ *      非活跃清坡；活格 186/187 → 递归复核可**连杀相邻堆**（35 例实测）。
  *    样式族门：186 styles 26-31 须 Snow∪Ice∪{162,224}、32-34 须 Mud∪{70}；
- *    187 styles 0-5 须 Mud∪{60,226}、6-8 须 {57,58,75,76}、29-34 须 沙/硬化沙/
- *    砂岩族（cs:49317-49365）。击杀态 = active=false+half=false+帧 -1（Uint16
- *    存 0——帧不入八通道）、type 保留残值（cs:63935 KillTile 不清 type →
- *    上游 `tile.type==186||187` 命中判定照过 → flag=true 消耗该次 attempt，
- *    本函数返回 true 即此语义）。
- *    KillTile 尘掷：DDDD 实测 185/186=0 掷/格（MakeTileDust 表），187 同族按 0
- *    掷处理（未实测，备案）。 */
+ *    187 styles 0-5 须 Mud∪{60,226}、6-8 须 {57,58,75,76}、29-34 须
+ *    Sand∪HardenedSand∪Sandstone（cs:49317-49365——**404 沙漠化石不在族内**，
+ *    vanilla 对 404 地基 187 自放置自击杀，首例 (2701,413)）。
+ *    KillTile 尘掷/物品：生成期 noItem 全跳（零掷）。 */
+let __destroyObj = false;
+/** TileFrame 头（cs:82077-82082）非活跃清 + case 186/187 → Check3x2 递归（OOOO） */
+function __pileFrameCell(st: TileStore, cx: number, cy: number): void {
+  if (cx <= 5 || cy <= 5 || cx >= st.w - 5 || cy >= st.h - 5) return;   // TileFrame 边界早退（cs:82069）
+  const i = st.idx(cx, cy);
+  if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0; return; }
+  const s = SHEET[st.type[i]];
+  if (s === 186 || s === 187) __pileCheck3x2(st, cx, cy, s);
+  // 其他 frameImportant 族的重帧不在 Piles 语境仿真（备案）
+}
+/** Check3x2（cs:49190-49868）：样式族门 → destroyObject 击杀链 → 5×5 扫 */
+function __pileCheck3x2(st: TileStore, cx: number, cy: number, sheet: number): void {
+  if (__destroyObj) return;                                             // cs:49193 早退
+  const i = st.idx(cx, cy);
+  const style = Math.floor(st.frameX[i]! / 54);                         // cs:49208-49215 num6
+  const y0 = cy - ((st.frameY[i]! % 36) / 18 | 0);                      // num（布局恒新写对齐）
+  let bad = false;
+  for (let c = cx - 1; c <= cx + 1; c++) {
+    if (!solidTileAllowBottomSlope(st, c, y0 + 2) || invalidPiles(st, c, y0 + 2)) { bad = true; continue; }
+    const b = sheetAt(st, c, y0 + 2);
+    if (b < 0) continue;
+    if (sheet === 186) {
+      if (style >= 26 && style <= 31 && !SET_SNOW.has(b) && !SET_ICE.has(b) && b !== 162 && b !== 224) bad = true;
+      else if (style >= 32 && style <= 34 && !SET_MUD.has(b) && b !== 70) bad = true;
+    } else if (sheet === 187) {
+      if (style <= 5 && !SET_MUD.has(b) && b !== 60 && b !== 226) bad = true;
+      else if (style >= 6 && style <= 8 && b !== 57 && b !== 58 && b !== 75 && b !== 76) bad = true;
+      else if (style >= 29 && style <= 34
+        && !SET_SAND.has(b) && !SET_HARDENED_SAND.has(b) && !SET_SANDSTONE.has(b)) bad = true;
+    }
+  }
+  if (!bad) return;
+  __destroyObj = true;                                                  // cs:49421
+  for (let c = cx - 1; c <= cx + 1; c++) {
+    for (let r = y0; r <= y0 + 1; r++) {
+      const k = st.idx(c, r);
+      if (st.flags[k] && SHEET[st.type[k]] === sheet) {
+        // KillTile（cs:63933-63967）：失活+清半砖/帧/油漆/**type=0**（cs:63965）+
+        // 尾 SquareTileFrame = 3×3 非活跃格清 half/slope/paint（活格 186/187 邻的
+        // Check3x2 因 destroyObj 早退=无连杀）
+        st.flags[k] = 0; st.half[k] = 0; st.slope[k] = 0;
+        st.frameX[k] = 0; st.frameY[k] = 0; st.paint[k] = 0; st.type[k] = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nxc = c + dx, nyc = r + dy;
+            if (nxc <= 5 || nyc <= 5 || nxc >= st.w - 5 || nyc >= st.h - 5) continue;
+            const ni = st.idx(nxc, nyc);
+            if (!st.flags[ni]) { st.half[ni] = 0; st.slope[ni] = 0; st.paint[ni] = 0; }
+          }
+        }
+      }
+    }
+  }
+  __destroyObj = false;                                                 // cs:49856
+  for (let c = cx - 2; c <= cx + 2; c++) {
+    for (let r = y0 - 1; r <= y0 + 3; r++) __pileFrameCell(st, c, r);   // cs:49857-49862 5×5 扫
+  }
+}
+
 function placePile3x2(st: TileStore, x: number, y: number, type: number, style: number): boolean {
   (globalThis as { __swPilesCap?: (x: number, y: number, t: number, s: number, z: number, k: number) => void }).__swPilesCap?.(x, y, SHEET[type] ?? -1, style, 0, 0);
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:52102 边距门
+  // ★OOOO：vanilla 的 type 比较全在 sheet 空间（186/187），本函数形参 type 是内部 id
+  //  （PILE186=150/PILE187=145）——曾直接 `type === 186/187` 恒假，InvalidTile 门与
+  //  Check3x2 样式族击杀链整段死代码（#77 残 1227/1270 主根因；首例 = 沙漠化石 404
+  //  地基 187-style32，vanilla Check3x2 沙族不含 404 → 击杀，JS 保留）
+  const sheet = SHEET[type] ?? -1;
+  const isPile = sheet === 186 || sheet === 187;
   let ok = true;
   for (let c = x - 1; c <= x + 1; c++) {
     for (let r = y - 1; r <= y; r++) {
       const i = st.idx(c, r);
       if (st.flags[i]) ok = false;                                     // 占用净空（cs:52117）
     }
-    if ((type === 186 || type === 187) && invalidPiles(st, c, y + 1)) ok = false;  // cs:52149
+    if (isPile && invalidPiles(st, c, y + 1)) ok = false;              // cs:52141+52149
     if (!solidTile2(st, c, y + 1)) ok = false;                         // cs:52156
   }
   if (!ok) return false;
@@ -160,34 +229,18 @@ function placePile3x2(st: TileStore, x: number, y: number, type: number, style: 
       // 原版 Place3x2 只写 active/frameX/frameY/type（cs:52200-52234）——不清坡/半砖/液体
     }
   }
-  // Check3x2 复核（cs:49199+；布局恒新写对齐，仅锚/样式族门可达）
-  let bad = false;
-  for (let c = x - 1; c <= x + 1; c++) {
-    if (!solidTileAllowBottomSlope(st, c, y + 1) || invalidPiles(st, c, y + 1)) { bad = true; continue; }
-    const b = sheetAt(st, c, y + 1);
-    if (b < 0) continue;
-    if (type === 186) {
-      if (style >= 26 && style <= 31 && !SET_SNOW.has(b) && !SET_ICE.has(b) && b !== 162 && b !== 224) bad = true;
-      else if (style >= 32 && style <= 34 && !SET_MUD.has(b) && b !== 70) bad = true;
-    } else if (type === 187) {
-      if (style <= 5 && !SET_MUD.has(b) && b !== 60 && b !== 226) bad = true;
-      else if (style >= 6 && style <= 8 && b !== 57 && b !== 58 && b !== 75 && b !== 76) bad = true;
-      else if (style >= 29 && style <= 34
-        && !SET_SAND.has(b) && !SET_HARDENED_SAND.has(b) && !SET_SANDSTONE.has(b)) bad = true;
+  // 尾随 SquareTileFrame(i,j)（cs:60026+cs:60281 两次，效果合并）：中心 → Check3x2
+  __pileCheck3x2(st, x, y, sheet);
+  // 3×3 非活跃格清（两帧调用的 TileFrame 头并集；活格侧 Check3x2 已覆盖）
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const nxc = x + dx, nyc = y + dy;
+      if (nxc <= 5 || nyc <= 5 || nxc >= st.w - 5 || nyc >= st.h - 5) continue;
+      const ni = st.idx(nxc, nyc);
+      if (!st.flags[ni]) { st.half[ni] = 0; st.slope[ni] = 0; st.paint[ni] = 0; }
     }
   }
-  if (bad) {
-    // destroyObject 击杀链：底行 3 格 KillTile → 重帧后顶行连带（净 6 格失活）
-    for (let c = x - 1; c <= x + 1; c++) {
-      for (let r = y - 1; r <= y; r++) {
-        const i = st.idx(c, r);
-        st.flags[i] = 0; st.half[i] = 0;
-        st.frameX[i] = 0; st.frameY[i] = 0;    // 原版 -1；帧不入八通道
-        // type 保留（cs:63935 KillTile 不清 type——上游命中判定读残值）
-      }
-    }
-  }
-  return true;   // 写入即命中（含被 Check3x2 击杀——原版读残值 type==186||187 同为 true）
+  return true;
 }
 
 /** Piles pass 主体（cs:18900-19599） */

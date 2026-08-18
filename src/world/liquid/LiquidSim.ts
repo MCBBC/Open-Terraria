@@ -997,7 +997,9 @@ export class LiquidSim {
   }
 
   /** 生成收尾全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-22650）：
-   *  常规生成期交互不落块（strip 分支），唯独收尾这一次允许把残余接触转成块 */
+   *  常规生成期交互不落块（strip 分支），唯独收尾这一次允许把残余接触转成块。
+   *  ★原版此处对湿格直接调 Liquid.LiquidCheck(x,y,liquidType(),...)——岩浆格
+   *  不走 LavaCheck 包装（无 7×7 沙漠 blast 前导），故 t==2 以 desertBlast=false */
   finalGenMergeCheck() {
     const st = this.world.store;
     this.createMergeTilesDuringGen = true;
@@ -1008,7 +1010,7 @@ export class LiquidSim {
           const i = row + x;
           if (st.liquid[i] === 0) continue;
           const t = st.liquidType[i];
-          if (t === 2) this.lavaCheck(x, y);
+          if (t === 2) this.lavaCheck(x, y, false);
           else if (t === 3) this.honeyCheck(x, y);
           else if (t === 4) this.shimmerCheck(x, y);
         }
@@ -1032,14 +1034,22 @@ export class LiquidSim {
     return false;
   }
 
-  /** 岩浆格与水/蜂蜜/微光接触 → 黑曜石 56 / 脆蜂蜜块 230 / Aetherium 659（阈值 24） */
-  private lavaCheck(x: number, y: number) {
+  /** 岩浆格与水/蜂蜜/微光接触 → 黑曜石 56 / 脆蜂蜜块 230 / Aetherium 659（阈值 24）。
+   *  desertBlast=false = 跳过头部沙漠分支（生成收尾全图检查口径，见分支注释） */
+  private lavaCheck(x: number, y: number, desertBlast = true) {
     const st = this.world.store;
     // LavaCheck 头部沙漠分支（Liquid.cs:1457-1465）：生成期 + 7×7 含地下沙漠墙 →
     // 整块 7×7 液体**类型**转岩浆（lava(true) 不动量）——地下沙漠底岩浆池来源，且使
-    // 沙漠内水岩接触不互湮（转同型后 LiquidCheck 无异种邻）。remixWorldGen/
-    // dualDungeonsSeed 为特殊种子旗标，本工程不启用。须在 SolidTile 门之前（原版序）。
-    if (this.generatingWorld && this.undergroundDesertCheck(x, y)) {
+    // 沙漠内水岩接触不互湮（转同型后 LiquidCheck 无异种邻）。★此分支只属于
+    // LavaCheck 包装——原版生成收尾全图检查（WorldGen.cs:22639-22650）对湿格直接
+    // 调 Liquid.LiquidCheck(x,y,type,createMergeTilesDuringGen:true)，**不带本
+    // 前导**（finalGenMergeCheck 以 desertBlast=false 走此口径）：密闭岩浆格
+    // （不在活动列表、四邻无液体→AttemptToMoveLava 不触发）在原版沉降全程无人调
+    // LavaCheck；若收尾全扫带 blast，会把 7×7 内异型液体（如对角密闭水袋）整片
+    // 转岩浆（12345 链 #49 Lt=1 @ (1982,661) 根因——vanilla 同位恒水）。
+    // remixWorldGen/dualDungeonsSeed 为特殊种子旗标，本工程不启用。须在
+    // SolidTile 门之前（原版序）。
+    if (desertBlast && this.generatingWorld && this.undergroundDesertCheck(x, y)) {
       for (let j = y - 3; j <= y + 3; j++) {
         for (let i = x - 3; i <= x + 3; i++) {
           if (i < 0 || j < 0 || i >= st.w || j >= st.h) continue;

@@ -103,6 +103,15 @@ describe('鹿角怪 668 数据 + AI_123', () => {
     expect(e.despawnTimer).toBeGreaterThan(86000);
   });
 
+  it('位置积分回归（2026-08-19 冻结修复）:AI 内部直写位移,追击时 x 前进/y 落地', () => {
+    const h = makeHooks(makeWorld(), { x: 160, y: GROUND - 3 });
+    const e = spawnDeer(h);
+    const x0 = e.x, y0 = e.y;
+    tick(e, h, 90);   // 玩家在右 10 格外 → 追击
+    expect(e.x).toBeGreaterThan(x0 + 100);        // 实际前进（修复前恒冻结）
+    expect(e.y + e.h).toBeLessThanOrEqual(GROUND * TILE + 1);   // 落到地面（探针贴地）
+  });
+
   it('远距 ≥450px 拉满 → 免伤;靠近回落', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 130, y: GROUND - 3 });   // 初始即 480px 远
