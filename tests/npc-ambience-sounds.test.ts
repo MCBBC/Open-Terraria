@@ -71,20 +71,22 @@ describe('环境声三表数据对账', () => {
     }
     expect(missing.join(',')).toBe('');
   });
-  it('宠物史莱姆受击语音表（StrikeNPC :82255-82302）：13 id + 鸡稀有掷骰', () => {
-    // 13 条（5484 铃铛素材缺跳过）；音量档 = SoundID WithVolume（鸡 0.8 其余 0.5）
-    expect(Object.keys(PET_SLIME_HIT_VOICES).length).toBe(13);
+  it('宠物史莱姆受击语音表（StrikeNPC :82255-82302）：14 id 全键 + 鸡稀有掷骰', () => {
+    // 14 条全键（5484 铃铛=BellHurt=LegacySoundStyle(2,35)→Item_35 ×0.75 自动档;
+    // 曾误判"素材缺"实为 wav 名搞错,2026-08-18 补齐）；音量=WithVolume（鸡 0.8 其余 0.5）
+    expect(Object.keys(PET_SLIME_HIT_VOICES).length).toBe(14);
     expect(PET_SLIME_HIT_VOICES[5507]).toEqual({ file: 'player_hit_balloon', vol: 0.5 });
     expect(PET_SLIME_HIT_VOICES[5485]).toEqual({ file: 'player_hit_chicken', vol: 0.8 });
+    expect(PET_SLIME_HIT_VOICES[5484]).toEqual({ file: 'Item_35', vol: 1 });
     expect(PET_SLIME_HIT_VOICES[5509]).toEqual({ file: 'player_hit_vampire', vol: 0.5 });
     expect(petSlimeHitVoice(1345)).toBeNull();          // 派对帽 ai[1] → 默认 HitSound
-    expect(petSlimeHitVoice(5484)).toBeNull();          // 铃铛素材缺（Player_Hit_35 不在库）
+    expect(petSlimeHitVoice(5484)).toEqual({ file: 'Item_35', vol: 1 });
     // 鸡稀有变体：多次掷骰两种结果都合法（1/5 rare 0.5 档）
     const seen = new Set<string>();
     for (let i = 0; i < 60; i++) seen.add(petSlimeHitVoice(5485)!.file);
     expect(seen.has('player_hit_chicken')).toBe(true);
     expect([...seen].every((f) => f === 'player_hit_chicken' || f === 'player_hit_chicken_rare')).toBe(true);
-    // 全表 wav 在库（player_hit_bell 不在表——素材提取无 Player_Hit_35）
+    // 全表 wav 在库（含 Item_35——case2 音库 35 号档）
     const missing: string[] = [];
     for (const v of Object.values(PET_SLIME_HIT_VOICES)) {
       try { readFileSync(`${ROOT}/public/sounds/${v.file}.wav`); } catch { missing.push(v.file); }

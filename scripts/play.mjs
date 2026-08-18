@@ -19,12 +19,29 @@ import net from 'node:net';
 import readline from 'node:readline/promises';
 
 const CHROME = 'Google Chrome';
+// ★2026-08-18 实证(Chromium 源码 + 双窗探针):--force-gpu-mem-available-mb 已移除——
+// 它只设 cc 合成器 tile 光栅预算(blink/common/switches.cc 注释 "GPU resources in
+// cc"),与画布后备存储/WebGL 纹理/SharedImage 无关,对我们的多开崩溃是安慰剂。
+// 双开风暴真根因=GPU 进程 IOSurface 分配失败(io_surface.cc "Failed to allocate
+// IOSurface of size 16x16" 级,按张计费非字节),Chrome 旗标救不了,靠游戏侧
+// renderMode=cpu / 减画布张数 / 单窗口双世界方案。
 const FLAGS = [
-  '--force-gpu-mem-available-mb=16384',   // GPU 画布预算 8GB → 16GB
-  '--js-flags=--max-old-space-size=8192', // JS 堆 4GB → 8GB
+  '--js-flags=--max-old-space-size=8192', // JS 堆 4GB → 8GB(真有效)
   '--ignore-gpu-blocklist',
 ];
-const url = process.argv[2] || 'http://localhost:4173';
+// 双开联机测试模式:npm run playsoft(★勿用 `npm run play --soft`——npm 会把
+// --soft 吞成自身配置不传给脚本;须 `npm run play -- --soft` 或 env SW_PLAY_SOFT=1):
+// 追加 --disable-gpu 浏览器全域软
+// 渲染。2026-08-18 三组双窗对照实测:GPU 模式 27 次 IOSurface 分配失败+3 熔断;
+// 游戏内 renderMode=cpu 仍有 6 次(主画布合成链仍产 IOSurface);--disable-gpu
+// 全域软渲染 = 0 失败 0 熔断 0 丢失(双窗完全干净)。代价:帧率降(合成器也软
+// 渲染,M 系列仍可玩);单窗高质量游玩不要开。
+const SOFT = process.argv.includes('--soft') || process.env.SW_PLAY_SOFT === '1';
+if (SOFT) FLAGS.push('--disable-gpu');
+// 位置参数只认不以 - 开头的(URL);--soft 等旗标不得落入 url(曾把 '--soft'
+// 当 URL 解析直接报"无效 URL"退出)
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('-'));
+const url = positional[0] || 'http://localhost:4173';
 const DRY = !!process.env.SW_PLAY_DRY;
 const AUTO_QUIT = !!process.env.SW_PLAY_QUIT;
 
@@ -69,7 +86,7 @@ if (chromeRunning()) {
 }
 
 spawnSync('open', ['-na', CHROME, '--args', ...FLAGS, url], { stdio: 'inherit' });
-console.log(`已冷启动 ${CHROME}(GPU 画布预算 16GB / JS 堆 8GB)→ ${url}`);
+console.log(`已冷启动 ${CHROME}(JS 堆 8GB;GPU 侧无旗标可救,双开请用游戏内 renderMode=cpu)→ ${url}`);
 console.log('若 Chrome 设置了"继续浏览上次打开的页面",之前的标签会一并恢复。');
 
 async function ask() {

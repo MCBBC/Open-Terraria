@@ -87,7 +87,8 @@ export function playEnemyHitSound(
   if (e.vanillaId === 1 && e.ai1 != null) {
     const v = petSlimeHitVoice(e.ai1);
     if (v) {
-      game.playSfxWav?.(v.file, v.vol, e.cx, e.cy);
+      // WithPitchVariance(0.4)（SoundID.cs:1115-1147 全表）——±0.4 音高抖动
+      game.playSfxWav?.(v.file, v.vol, e.cx, e.cy, Math.random() * 0.8 - 0.4);
       return;
     }
   }

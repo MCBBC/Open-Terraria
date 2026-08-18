@@ -12231,16 +12231,21 @@ var FC_PLAT = new HashSet<int> {
    643,644,645,710,
 };
 
-// ★HHHH：JS gen-solid 基差谓词。JS 侧 GenSolid=TILE_DEFS.solid+翻转史，对本表 SOLID
-//（vanilla tileSolid+同一翻转史）的唯一差集=平台族 427/435-439 与花盆箱 380
-//（TILE_DEFS.solid=false，vanilla=true；19 两边皆无；五者无任何翻转写点）。
-// 尾段各 pass 的 JS 实现读 vanGenSolidType/genSolidType → 本区谓词一律走 JGS。
-//（★239 矿石锭=TILE_DEFS.platform:true 而 vanilla tileSolid=true 的双属格，一并排除）
-bool JGS(ushort t) => SOLID.Contains(t) && t != 239 && t != 380 && t != 427 && !(t >= 435 && t <= 439);
+// ★HHHH：JS gen-solid 双谓词。JS GenSolid.ts 两口径（GenSolid.ts:104-125）：
+//   genSolidType   = TILE_DEFS.solid + 翻转史 —— 对本表 SOLID（vanilla tileSolid+同
+//                    一翻转史）的差集=239/380/427/435-439 五类（TILE_DEFS.solid=false
+//                    而 vanilla=true）→ JGS=排除五类；
+//   vanGenSolidType= genSolidType ∪ VAN_TILE_SOLID_EXTRA{19,239,380,427,435-439}
+//                    （19 平台 vanilla tileSolid=true 但两边表皆缺）→ JVS=SOLID∪{19}。
+//   尾段各 JS pass 按各自 import 的口径选谓词——读错口径=落点门翻转（statues (520,786)
+//   平台底座案实证）。
+bool JGS(ushort t) => SOLID.Contains(t) && t != 239 && t != 380 && t != 427 && !(t >= 435 && t <= 439);   // ≡ JS genSolidType
+bool JVS(ushort t) => t == 19 || SOLID.Contains(t);   // ≡ JS vanGenSolidType
 
 Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
 // ================= Pass 58 Statues（cs:16947-17055 + statueList cs:4395-4433）=================
 {
+    bool statTrace = Environment.GetEnvironmentVariable("STATUE_TRACE") != null;
     // statueList 73 项 (tile,style)：0-43 段 (105,i) 但 [34]=(349,0)、[43]=(105,50)，
     // 尾接 29 项样式（JS StatuesPass.STATUE_LIST 同构，R 批归位后对该 x86 归零）。
     var statueList = new (int tile, int style)[73];
@@ -12263,7 +12268,7 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
                 int bi2 = (ty + 1) * W + tx;
                 // SolidTile2（cs:70178）：active && 生成期 tileSolid && slope==0 && !halfBrick
                 //   && !inActive（inActive=wire bit5，生成期恒 0—— statues 前链内无写点）
-                if (act[bi2] == 0 || half[bi2] != 0 || slope[bi2] != 0 || !JGS(typ[bi2])) continue;
+                if (act[bi2] == 0 || half[bi2] != 0 || slope[bi2] != 0 || !JVS(typ[bi2])) continue;
                 if (typ[bi2] == 162) continue;                                         // 冰特判
                 int ti = ty * W + tx;
                 // ★HHHH：超级飞镖陷阱=135（cs:4451 PlaceTile(135)——ZZZ 批 JS 修正，曾误 137）
@@ -12289,9 +12294,10 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
             int guard = 100;
             while ((double)y <= oceanTop && (x < BEACH_DISTANCE || x > W - BEACH_DISTANCE) && guard-- > 0)
             { x = (int)r.Next(20, W - 20); y = (int)r.Next(yMin, H - 300); }
-            if (guard <= 0) { done = true; break; }
+            if (statTrace) Console.Error.WriteLine($"STTR i={i2} num={num} ROLL=({x},{y})");
+            if (guard <= 0) { if (statTrace) Console.Error.WriteLine($"STT i={i2} num={num} st={style} GUARD0"); done = true; break; }
             while (y < H && act[y * W + x] == 0) y++;    // 向下扫到首个 active 格
-            if (y >= H) { done = true; break; }
+            if (y >= H) { if (statTrace) Console.Error.WriteLine($"STT i={i2} num={num} st={style} SCANH"); done = true; break; }
             y--;
             // ★HHHH（WWW 批 JS 镜像）：cs:17036 anyShimmer 门 + cs:59501 PlaceTile 前奏
             //   tile.Clear(Tile|TilePaint|Slope)——任何失败尝试也会清 inactive 锚格的
@@ -12301,7 +12307,7 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
                 bool shimmerC = liq[ai] > 0 && liqT[ai] == 3;   // oracle 3=JS liquidType 4
                 if (!shimmerC && act[ai] == 0) { half[ai] = 0; slope[ai] = 0; typ[ai] = 0; frX[ai] = 0; frY[ai] = 0; }
             }
-            if (y < 2 || x + 1 >= W || y - 2 < 0) { fail++; if (fail >= 10000) done = true; continue; }
+            if (y < 2 || x + 1 >= W || y - 2 < 0) { if (statTrace) Console.Error.WriteLine($"STT i={i2} num={num} st={style} BOUNDS ({x},{y})"); fail++; if (fail >= 10000) done = true; continue; }
             bool ok = true;                               // 2×3 净空（PlaceTile forced 占用门）
             for (int dx = 0; dx < 2 && ok; dx++) for (int dy = -2; dy <= 0 && ok; dy++)
                 if (act[(y + dy) * W + x + dx] != 0) ok = false;
@@ -12310,9 +12316,9 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
             if (ok) for (int bx = x; bx <= x + 1 && ok; bx++)
             {
                 int bi = (y + 1) * W + bx;
-                if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0 || !JGS(typ[bi])) ok = false;
+                if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0 || !JVS(typ[bi])) ok = false;
             }
-            if (!ok) { fail++; if (fail >= 10000) done = true; continue; }
+            if (!ok) { if (statTrace) Console.Error.WriteLine($"STT i={i2} num={num} st={style} GATE ({x},{y})"); fail++; if (fail >= 10000) done = true; continue; }
             int row = style / 55;                         // 雕像帧换行（Tiles_105 宽 55 列）
             for (int dx = 0; dx < 2; dx++) for (int dy = 0; dy < 3; dy++)
             {
@@ -12323,6 +12329,7 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
             }
             if (trapStatueIdx.Contains(num)) PlaceStatueTrapG(x, y);
             num++; done = true;
+            if (statTrace) Console.Error.WriteLine($"STT i={i2} num={num - 1} st={style} anchor=({x},{y}) OK");
         }
     }
 }
@@ -12334,6 +12341,14 @@ Replay(); // ▶pass 头重播：CaveWallsInEnclosedSpaces cs:17819（island：#
 // pass 头 tileSolid 翻转（cs:17821-17823，持久不还原）：162 薄冰/232 木刺→非实心，
 // 226 蜥蜴砖→实心（默认已实心，幂等）——countTiles 洪泛与选点门随之判定。
 SOLID.Remove(162); SOLID.Add(226); SOLID.Remove(232);
+// ★HHHH（JS 镜像）：solidAt = act && genSolid(JGS) && !def.platform(FC_PLAT 86 集)
+//   && !half && slope==0（越界 true——洪泛前已边界闸,不可达）
+bool CwSolid(int cx, int cy)
+{
+    if (cx < 0 || cy < 0 || cx >= W || cy >= H) return true;
+    int ci = cy * W + cx;
+    return act[ci] != 0 && JGS(typ[ci]) && !FC_PLAT.Contains(typ[ci]) && half[ci] == 0 && slope[ci] == 0;
+}
 {
     (int count, int shroom, int rock, int ice, int sand, int lava) CountTilesG(int sx, int sy, bool jungle, bool lavaOk)
     {
@@ -12360,7 +12375,7 @@ SOLID.Remove(162); SOLID.Add(226); SOLID.Remove(232);
                 if (typ[ii] == 147 || typ[ii] == 161) cr.ice++;
                 if (typ[ii] == 53 || typ[ii] == 396 || typ[ii] == 397) cr.sand++;
             }
-            if (!Solid5Gen(x, y))
+            if (!CwSolid(x, y))
             {
                 counted.Add(ii); cr.count++;
                 Nxt(x - 1, y); Nxt(x + 1, y); Nxt(x, y - 1); Nxt(x, y + 1);
@@ -12383,7 +12398,7 @@ SOLID.Remove(162); SOLID.Add(226); SOLID.Remove(232);
                 int ii = y * W + x;
                 if (seen.Contains(ii)) continue;
                 seen.Add(ii);
-                if (Solid5Gen(x, y) || wal[ii] != 0)
+                if (CwSolid(x, y) || wal[ii] != 0)
                 {
                     if (act[ii] != 0 && wal[ii] == 0) wal[ii] = wallType;  // 实心背面墙
                     continue;
@@ -12439,7 +12454,7 @@ SOLID.Remove(162); SOLID.Add(226); SOLID.Remove(232);
                 if (seen.Contains(ii)) continue;
                 seen.Add(ii);
                 if (wal[ii] == wallType || WALL_CANNOT_REPLACE.Contains(wal[ii])) continue;
-                if (!Solid5Gen(x, y))
+                if (!CwSolid(x, y))
                 {
                     out2++;
                     if (out2 >= 5000) continue;           // maxWallOut2（cs:4196）
@@ -12584,12 +12599,16 @@ Replay(); // ▶pass 头重播：QuickCleanup cs:17987（island：#69 IslandHous
     SOLID.Remove(137); SOLID.Remove(130);                 // cs:17997-98 头翻（尾 cs:18104-05 还原）
     var NON_SOLID_SAVE_SLOPES = new HashSet<ushort> { 131, 351, 336, 340, 341, 342, 343, 344 };
     var PLATFORMS_QC = new HashSet<ushort> { 19, 427, 435, 436, 437, 438, 439 };
-    bool SaveSlopeQ(ushort t) => SOLID.Contains(t) || NON_SOLID_SAVE_SLOPES.Contains(t);
+    // ★HHHH（JS 镜像）：isSaveSlope = genSolidType && TILE_DEFS.solid ∪ NonSolidSaveSlopes
+    //   （pristine=FC_SOLID ∧ gen=JGS——484 生成期已翻非实心/379 pristine false 等差格归位）
+    bool SaveSlopeQ(ushort t) => (JGS(t) && FC_SOLID.Contains(t)) || NON_SOLID_SAVE_SLOPES.Contains(t);
     bool SolidQC(int x, int y)                            // WorldGen.SolidTile（tileSolidTop 以 platform 近似=JS 同口径）
     {
         if (!InB(x, y)) return false;
         int i = y * W + x;
-        return act[i] != 0 && SOLID.Contains(typ[i]) && !PLATFORMS_QC.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+        // ★HHHH（JS 镜像）：solidTile = act && genSolid && d.solid && !d.platform（FC_PLAT 86 集，
+        //   非 7 集平台——239 矿石锭等 solidTop 双属格被 JS 排除）
+        return act[i] != 0 && JGS(typ[i]) && FC_SOLID.Contains(typ[i]) && !FC_PLAT.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
     }
     bool OceanDepthsQ(int x, int y)
     {
@@ -12719,7 +12738,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
     {
         if (!QQInW(hx, hy)) return false;
         int hi = hy * W + hx;
-        return act[hi] != 0 && SOLID.Contains(typ[hi]) && !QQ_PLATFORMS.Contains(typ[hi]);
+        return act[hi] != 0 && JGS(typ[hi]) && !FC_PLAT.Contains(typ[hi]);   // HHHH: JS solidOrSloped（!platform=86 集）
     }
     // WorldGen.SolidTile 五门（HiveSpiderPass solidTileHB：含 !half/slope==0）
     bool HvSolidTile(int hx, int hy)
@@ -12727,7 +12746,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
         if (!QQInW(hx, hy)) return false;
         int hi = hy * W + hx;
         if (act[hi] == 0) return false;
-        return SOLID.Contains(typ[hi]) && !QQ_PLATFORMS.Contains(typ[hi]) && half[hi] == 0 && slope[hi] == 0;
+        return JGS(typ[hi]) && !FC_PLAT.Contains(typ[hi]) && half[hi] == 0 && slope[hi] == 0;   // HHHH: JS solidTile
     }
     // CanPoundTile（HalfBrickPass：黑名单+巨石+生成期跳过+上格禁坡+实心非平台非框架物）
     bool HvCanPound(int hx, int hy)
@@ -12738,7 +12757,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
         ushort t = typ[hi];
         if (NO_POUND_SHEETS.Contains(t) || BOULDERS_G.Contains(t) || POUND_GEN_SKIP.Contains(t)) return false;
         if (hy - 1 >= 0 && act[(hy - 1) * W + hx] != 0 && FORBIDS_SLOPING.Contains(typ[(hy - 1) * W + hx])) return false;
-        return SOLID.Contains(t) && !QQ_PLATFORMS.Contains(t) && !FRAMED_ALL.Contains(t);
+        return JGS(t) && !FC_PLAT.Contains(t) && !FRAMED_ALL.Contains(t);   // HHHH: JS canPoundTile 尾门（!platform=86 集+!framed）
     }
     void HvPoundTile(int hx, int hy)
     {
@@ -12864,7 +12883,7 @@ Replay(); // ▶pass 头重播：Beehives cs:16005
         bool CondSolid(int px, int py)
         {
             if (px < 10 || py < 10 || px >= W - 10 || py >= H - 10) return false;
-            return act[py * W + px] != 0 && SOLID.Contains(typ[py * W + px]);
+            return act[py * W + px] != 0 && JGS(typ[py * W + px]);   // HHHH: JS condSolid（genSolid 无 solidTop 门）
         }
         for (int k = 0; k < 80 && oy + k < H; k++)
             if (CondSolid(ox, oy + k)) { ry = oy + k; break; }
@@ -13100,7 +13119,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
     {
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
-        return act[i] != 0 && SOLID.Contains(typ[i]) && slope[i] == 0 && half[i] == 0;
+        return act[i] != 0 && JGS(typ[i]) && slope[i] == 0 && half[i] == 0;   // HHHH: JS PilesPass.solidTile2（genSolid）
     }
     // SolidTileAllowBottomSlope（cs:70211）：active && (solid||platform) && !half && 非顶坡(1/2)
     bool SolidAllowBottom(int ax, int ay)
@@ -13612,7 +13631,7 @@ Replay(); // ▶pass 头重播：Trees cs:20085
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
         if (act[i] == 0 || typ[i] == 0) return false;
-        return SOLID.Contains(typ[i]) && !QQ_PLATFORMS.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+        return FC_SOLID.Contains(typ[i]) && !FC_PLAT.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;   // HHHH: JS TreePass.solidTileHB（pristine d.solid∧¬d.platform——非 gen 翻转态）
     }
     // SeaOatWaterCheck（cs:58269-58313）
     bool SeaOatWaterCheck(int ax, int ay)
@@ -13871,7 +13890,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
     int dgEx0 = dgSide < 0 ? (int)(W * 0.05) : (int)(W * 0.55);
     int dgEx1 = dgSide < 0 ? (int)(W * 0.45) : W - (int)(W * 0.05);
     int dgEy0 = worldSurface + 10, dgEy1 = (H - 200) - 10;
-    bool SolidNP(ushort t) => SOLID.Contains(t) && !tiwOff.Contains(t) && !wgOff.Contains(t);
+    bool SolidNP(ushort t) => JGS(t) && !FC_PLAT.Contains(t) && !tiwOff.Contains(t) && !wgOff.Contains(t);   // HHHH: JS solidNP（pristine∧¬platform 叠 GenSolid 覆写）
     bool BlocksLiquid(int bx, int by)
     {
         if (bx < 0 || by < 0 || bx >= W || by >= H) return true;
@@ -13951,7 +13970,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         if (x < 0 || y < 0 || x >= W || y >= H) return false;
         int i = y * W + x;
         if (act[i] == 0) return false;
-        return SOLID.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+        return JGS(typ[i]) && !FC_PLAT.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;   // HHHH: JS solidTileFull
     }
     // Check2x2 巨石族子集（cs:48405-48805）：2×2 块帧校验（失配 break 内层）+ 上方箱族豁免
     // + 底部双列 SolidTileAllowBottomSlope 支撑 → destroyObject 闸内整组杀 + 尾 4×4 TileFrame
@@ -14853,7 +14872,7 @@ Replay(); // ▶pass 头重播：Cactus cs:21115
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
         if (act[i] == 0 || typ[i] == 0) return false;
-        return SOLID.Contains(typ[i]) && !QQ_PLATFORMS.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+        return JGS(typ[i]) && !FC_PLAT.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;   // HHHH: JS HalfBrickPass.solidTile（genSolid）
     }
     // ---- CheckCactus（cs:54132-54174）：支撑复查 + 击杀链 ----
     void KillCactus(int ax, int ay)
@@ -15038,7 +15057,7 @@ Replay(); // ▶pass 头重播：Cactus cs:21115
         if (!QQInW(ax, ay) || !QQInW(ax, ay - 1) || !QQInW(ax, ay + 1)) return false;
         if (act[(ay - 1) * W + ax] != 0) return false;
         int bi = (ay + 1) * W + ax;
-        if (act[bi] == 0 || !SOLID.Contains(typ[bi]) || half[bi] != 0 || slope[bi] != 0) return false;
+        if (act[bi] == 0 || !FC_SOLID.Contains(typ[bi]) || half[bi] != 0 || slope[bi] != 0) return false;   // HHHH: JS placeCoral 底座（pristine d.solid）
         SetTS(ax, ay, 81, 26 * (int)r.Next(6), 0);
         return true;
     }
@@ -15046,7 +15065,7 @@ Replay(); // ▶pass 头重播：Cactus cs:21115
     {
         if (!QQInW(ax, ay) || !QQInW(ax, ay + 1)) return false;
         int bi = (ay + 1) * W + ax;
-        if (!(act[bi] != 0 && SOLID.Contains(typ[bi]) && slope[bi] == 0 && half[bi] == 0)) return false;
+        if (!(act[bi] != 0 && FC_SOLID.Contains(typ[bi]) && slope[bi] == 0 && half[bi] == 0)) return false;   // HHHH: JS placeSeaShell 底座（pristine d.solid）
         SetTS(ax, ay, 324, 22 * (int)r.Next(3), 22 * style);
         return true;
     }
@@ -15056,7 +15075,7 @@ Replay(); // ▶pass 头重播：Cactus cs:21115
         if (!QQInW(ax, ay)) return true;
         int i = ay * W + ax;
         if (act[i] == 0 || typ[i] == 0) return false;
-        return (SOLID.Contains(typ[i]) || QQ_PLATFORMS.Contains(typ[i]))
+        return (FC_SOLID.Contains(typ[i]) || FC_PLAT.Contains(typ[i]))   // HHHH: JS 本地 solidAllowBottomSlope（pristine）
             && slope[i] != 1 && slope[i] != 2 && half[i] == 0;
     }
     bool SeaOatWaterCheck(int ax, int ay)

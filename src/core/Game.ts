@@ -14118,7 +14118,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 饰品物品 id → player_hit_* 直播替换（鸡 1/5 稀有变体在 petSlimeHitVoice 掷）
       {
         const pv = e.vanillaId === 1 ? petSlimeHitVoice(e.ai1) : null;
-        if (pv) this.sfx.playWavFile(pv.file, pv.vol, e.cx, e.cy);
+        // WithPitchVariance(0.4) 全表（SoundID.cs:1115-1147）——±0.4 音高抖动
+        if (pv) this.sfx.playWavFile(pv.file, pv.vol, e.cx, e.cy, Math.random() * 0.8 - 0.4);
         else if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
       }
       const crit = Math.random() < 0.04 + this.player.critChance('melee') / 100
@@ -18452,8 +18453,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 单 wav 直播（环境声三表专用,失败静默——与 playSfxFiles 不同,不回退合成音） */
-  playSfxWav(file: string, vol?: number, x?: number, y?: number, pitch?: number) {
-    this.sfx.playWavFile(file, vol ?? 1, x, y, pitch);
+  playSfxWav(file: string, vol?: number, x?: number, y?: number, pitch?: number, replace?: boolean) {
+    this.sfx.playWavFile(file, vol ?? 1, x, y, pitch, replace);
   }
 
   /** 按原版文件名直播（无合成兜底——音色精确的场景如蜂后吼/仪式圈）：

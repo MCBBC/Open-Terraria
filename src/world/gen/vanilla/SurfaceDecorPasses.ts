@@ -1206,10 +1206,11 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
       break;                                                            // 每个锚点只做一圈
     }
   }
-  // 坍塌树的登记表修剪：基座格已失活 = 整树已消（花圃击杀链），
-  // 残留条目会被运行期砍伐判定/树冠摆动误读——按基座活性过滤
+  // 坍塌树的登记表修剪：树冠格 (x,y) 失活 = 整树已消（花圃击杀链级联到顶）。
+  // ★不能查基座格——花圃 PlaceTile(3) 恰在原干基位放花草（活性非树）会漏筛
+  //（spawn-tree-regression 种子 x=976 实锤：登记树残留 → 运行期砍伐/树冠摆动误读）
   if (gs.genTrees.length) {
-    gs.genTrees = gs.genTrees.filter((e) => activeAt(st, e.x, e.y + e.h - 1));
+    gs.genTrees = gs.genTrees.filter((e) => activeAt(st, e.x, e.y));
   }
 }
 

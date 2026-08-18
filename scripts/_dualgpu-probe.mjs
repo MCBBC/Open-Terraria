@@ -50,15 +50,18 @@ const SENTINEL = () => {
   window.addEventListener('contextrestored', () => { window.__restored++; }, true);
   window.addEventListener('webglcontextlost', () => { window.__lost++; window.__kinds.webgl = (window.__kinds.webgl || 0) + 1; }, true);
   window.addEventListener('webglcontextrestored', () => { window.__restored++; }, true);
-  // renderMode 钉死 gpu(默认 auto 会在第 2 次熔断后切 CPU 软渲染掩盖风暴)
-  try { localStorage.setItem('sandboxworld.options', JSON.stringify({ renderMode: 'gpu' })); } catch {}
+  // renderMode 钉死:gpu=看裸风暴;cpu=A/B 对照(willReadFrequently 软渲染);
+  // 默认 gpu(auto 档会在第 2 次熔断后自动切 CPU 掩盖风暴)
+  try { localStorage.setItem('sandboxworld.options', JSON.stringify({ renderMode: '%MODE%' })); } catch {}
 };
+const MODE = process.env.DGP_MODE || 'gpu';
+const sentinelSrc = '(' + SENTINEL.toString().replace(/%MODE%/g, MODE) + ')()';
 
 const mkPage = async (tag) => {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log(`[${tag} pageerror]`, String(e.message).slice(0, 200)));
   page.on('console', (m) => { const t = m.text(); if (/contextlost|GPU|熔断|降级/i.test(t)) console.log(`[${tag} console]`, t.slice(0, 160)); });
-  await page.evaluateOnNewDocument(SENTINEL);
+  await page.evaluateOnNewDocument(sentinelSrc);
   page.setDefaultTimeout(300000);
   await page.goto(ORIGIN, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await sleep(1500);
@@ -91,7 +94,12 @@ const gpuProcs = () => {
     const out = execSync(`ps -axo pid,rss,command | grep "Google Chrome Helper" | grep "type=gpu" | grep -v grep`, { encoding: 'utf8' });
     return out.trim().split('\n').filter(Boolean).map((l) => {
       const m = l.trim().match(/^(\d+)\s+(\d+)/);
-      return m ? { pid: +m[1], rss: Math.round(+m[2] / 1024) } : null;
+      if (!m) return null;
+      const pid = +m[1];
+      // FD 采样:IOSurface 在 macOS 走 fileport,句柄耗尽会"字节随便、张数不够"
+      let fds = -1;
+      try { fds = +execSync(`lsof -p ${pid} 2>/dev/null | wc -l`, { encoding: 'utf8' }).trim(); } catch {}
+      return { pid, rss: Math.round(+m[2] / 1024), fds };
     }).filter(Boolean);
   } catch { return []; }
 };
@@ -118,7 +126,7 @@ while (Date.now() - t0 < SECS * 1000) {
   const a = await snap(pageA), b = await snap(pageB);
   const g = gpuProcs();
   g.forEach((x) => gpuPids.add(x.pid));
-  console.log(`t=${Math.round((Date.now() - t0) / 1000)}s A.lost=${a.lost}/rest=${a.restored}/heap=${a.heapMB} | B.lost=${b.lost}/rest=${b.restored}/heap=${b.heapMB} | gpu=[${g.map((x) => `pid${x.pid}:${x.rss}MB`).join(', ')}] gpuPids总见=${gpuPids.size}`);
+  console.log(`t=${Math.round((Date.now() - t0) / 1000)}s A.lost=${a.lost}/rest=${a.restored}/heap=${a.heapMB} | B.lost=${b.lost}/rest=${b.restored}/heap=${b.heapMB} | gpu=[${g.map((x) => `pid${x.pid}:${x.rss}MB,fd${x.fds}`).join(', ')}] gpuPids总见=${gpuPids.size}`);
   samples.push({ a, b, g });
 }
 clearInterval(timer);

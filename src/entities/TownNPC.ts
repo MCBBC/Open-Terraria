@@ -10,7 +10,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
-import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
+import { TOWN_NPC_IDS, VANILLA_NPCS, vanillaSoundFiles } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable, findShimmerFreeSpot } from '../stats/Shimmer';
 import { townNpcAltTexture, townNpcProfileSheet, shouldBestiaryGirlBeLycantrope } from '../data/townNpcProfiles';
 import { getAttackDamageForTownNPC, mainDifficulty } from '../stats/ScaleStats';
@@ -773,13 +773,18 @@ export class TownNPC extends Entity {
       this.dead = true;
       game.spawnParticles(this.cx, this.cy, '#C03030', 8, 2);
       game.spawnParticles(this.cx, this.cy, '#8A1818', 4, 1.2);
-      // checkDead 死亡音（NPC.cs:78978-78982）：type 229 海盗且微光变体
+      // checkDead 死亡音（NPC.cs:78978-78982）：PlaySound(DeathSound, position)
+      // 满响——per-NPC 数据驱动（城镇宠物 637/656=NPCDeath6 等,曾硬编码
+      // NPC_Killed_1 ×0.8,2026-08-18 对齐）；type 229 海盗且微光变体
       // （IsShimmerVariant = townNpcVariationIndex==1 = 本仓 shimmered）→
-      // NPCDeath6 替代默认 DeathSound
-      game.playSfxFiles([this.vanillaId === 229 && this.shimmered ? 'NPC_Killed_6' : 'NPC_Killed_1'], 0.8);
+      // NPCDeath6 特判保留（数据层无变体区分）
+      const deathFiles = vanillaSoundFiles(VANILLA_NPCS[String(this.vanillaId)]?.DeathSound) ?? ['NPC_Killed_1'];
+      game.playSfxFiles?.([this.vanillaId === 229 && this.shimmered ? 'NPC_Killed_6' : deathFiles[0]], 1);
       this.voodooSkeletronOnDeath(game);
     } else {
-      game.playSfxFiles(['NPC_Hit_1'], 0.6);
+      // StrikeNPC 受击音 = per-NPC HitSound 满响（曾硬编码 NPC_Hit_1 ×0.6）
+      const hitFiles = vanillaSoundFiles(VANILLA_NPCS[String(this.vanillaId)]?.HitSound) ?? ['NPC_Hit_1'];
+      game.playSfxFiles?.(hitFiles, 1);
     }
     return true;
   }

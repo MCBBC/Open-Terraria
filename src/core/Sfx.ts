@@ -500,11 +500,14 @@ export class Sfx {
    *  音量修正（FILE_CASE_VOL）在此单点统一乘，调用方无需手传修正系数。
    *  pitch = XNA SoundEffectInstance.Pitch（-1..1，频率倍率 2^pitch）——乐器族
    *  （Player.cs:45928 Main.musicPitch 直传 PlaySound 第 4 参）需要逐音符变调，
-   *  传该参时跳过默认 ±0.08 抖动（音符音高是语义本体，不容扰动） */
-  playWavFile(file: string, vol = 1, x?: number, y?: number, pitch?: number): boolean {
+   *  传该参时跳过默认 ±0.08 抖动（音符音高是语义本体，不容扰动）。
+   *  replace = case 36 ForceRoar 语义（:1312-1325 直接 CreateInstance 覆盖槽、
+   *  旧实例在 _trackedInstances 里继续自然播完）——无视互斥每次都播、槽位换绑
+   *  新实例（旧 onended 因槽已换绑不误删）。case 15 调用勿传（保持播着跳过） */
+  playWavFile(file: string, vol = 1, x?: number, y?: number, pitch?: number, replace?: boolean): boolean {
     if (this.suppress) return false;         // 载入期静音门（见字段注释）
-    // 单实例互斥（case 15 Roar 播着跳过——见 SINGLE_INSTANCE 注释）
-    if (Sfx.SINGLE_INSTANCE.has(file) && this.singlePlaying.has(file)) return false;
+    // 单实例互斥（case 15 Roar 播着跳过——见 SINGLE_INSTANCE 注释；case36 replace 豁免）
+    if (!replace && Sfx.SINGLE_INSTANCE.has(file) && this.singlePlaying.has(file)) return false;
     const ctx = this.ensure();
     if (!ctx) return false;
     const v = this.atten(vol, x, y);

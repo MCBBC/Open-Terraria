@@ -6980,7 +6980,7 @@ export class Enemy extends Entity {
           } else {
             // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 20 + Roar(15)
             game.playSfxFiles?.(['NPC_Hit_1'], 1, this.cx, this.cy);
-            game.playSfx('roar');
+            game.playSfx('roar', 1, this.cx, this.cy);   // :20329 style0(带坐标衰减,曾缺坐标)
             game.spawnParticles(this.cx, this.cy, '#8A1A1A', 12, 3);   // gore 8/7/6 ×2 份
             game.spawnParticles(this.cx, this.cy, '#FF3030', 20, 2.5); // 尘 20
           }
@@ -7036,8 +7036,9 @@ export class Enemy extends Entity {
         }
       } else if (this.state === 1) {
         // ---- 冲刺预备（:20452-20478）：ForceRoar(36) style0 = Roar_0 满响带坐标衰减；
+        //      case36 直接覆盖槽(旧实例续播)——replace=true 豁免互斥；
         //      6.8（专家第 2/3 冲 ×1.15/×1.30；FTW ×1.2 :20465-20468） ----
-        game.playSfx('roar', 1, this.cx, this.cy);
+        game.playSfxWav?.('Roar_0', 1, this.cx, this.cy, undefined, true);
         this.visAngle = face;
         let num44 = 6.8;
         if (expert && this.chargesLeft === 1) num44 *= 1.15;
@@ -7147,8 +7148,9 @@ export class Enemy extends Entity {
       } else if (this.state === 4) {
         // ---- 连冲（:20645-20698）：冲程 num4（20 / 狂暴 10），+13t 摩擦尾，5 连后回悬浮 ----
         // SoundID 36 ForceRoar style-1（:20647-20650/:1312-1325）= Roar_0 满响 + pitch0.6
-        // （升调吼——playWavFile 第 5 参直传 2^0.6;曾 0.7 音量+无变调,2026-08-18 对账修）
-        if (this.ai2 === 0) game.playSfxWav?.('Roar_0', 1, this.cx, this.cy, 0.6);
+        // （升调吼——playWavFile 第 5 参直传 2^0.6;case36 覆盖槽语义 replace=true;
+        //  曾 0.7 音量+无变调,2026-08-18 对账修）
+        if (this.ai2 === 0) game.playSfxWav?.('Roar_0', 1, this.cx, this.cy, 0.6, true);
         this.dashing = true;
         if (this.ai2 % 2 === 0) {
           game.spawnParticles(this.cx, this.cy, '#FF4040', 2, 2);
@@ -7176,7 +7178,7 @@ export class Enemy extends Entity {
             // 矩形传 boss 自身 w/h（原版即如此，:20686）
             if (ftw && canHit(game.world.store, this.x, this.y, this.w, this.h,
               player.x, player.y, this.w, this.h)) {
-              game.playSfx('roar');
+              game.playSfx('roar', 1, this.cx, this.cy);   // :20685 style0(带坐标衰减,曾缺坐标)
               this.ai0 = 2; this.state = 0; this.ai2 = 0;
               this.spinSpeed = 0; this.chargesLeft = 1;
             } else {

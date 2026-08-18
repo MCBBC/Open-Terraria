@@ -136,15 +136,16 @@ export const CRITTER_SOUNDS: Record<number, CritterSoundSpec> = {
 };
 
 /** :82255-82302 宠物史莱姆受击语音——SoundID.cs CreateTrackable().WithVolume 档
- *  （鸡 0.8、其余全 0.5，:1115-1147）。5484 铃铛 = BellHurt = LegacySoundStyle(2,35)
- *  = Player_Hit_35.wav——素材提取管线两处（game/public/sounds 与 terraria-assets/
- *  Sounds）均无该文件，跳过该 id（落回默认 HitSound），素材入库后补一行即可。 */
+ *  （鸡 0.8、其余全 0.5，:1115-1147），全表带 WithPitchVariance(0.4)（调用方掷
+ *  ±0.4 音高抖动）。5484 铃铛 = BellHurt = LegacySoundStyle(2,35)（:1115）——
+ *  走 case2 音库 = Item_35.wav（×0.75 自动档；曾误判为 Player_Hit_35"素材缺"，
+ *  实为 wav 名搞错，2026-08-18 修正补齐，全 14 键无缺）。 */
 export interface PetHitVoice { file: string; vol: number; }
 export const PET_SLIME_HIT_VOICES: Record<number, PetHitVoice> = {
   5507: { file: 'player_hit_balloon', vol: 0.5 },
   5502: { file: 'player_hit_cat', vol: 0.5 },
   5485: { file: 'player_hit_chicken', vol: 0.8 },
-  // 5484: 铃铛——Player_Hit_35 素材缺（见上注）
+  5484: { file: 'Item_35', vol: 1 },   // 铃铛 BellHurt=LegacySoundStyle(2,35)→Item_35,×0.75 自动
   5506: { file: 'player_hit_crow', vol: 0.5 },
   5503: { file: 'player_hit_dog', vol: 0.5 },
   5534: { file: 'player_hit_fairy', vol: 0.5 },

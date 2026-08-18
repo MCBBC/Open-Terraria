@@ -83,7 +83,7 @@ export interface GameHooks {
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
-  playSfxWav?(file: string, vol?: number, x?: number, y?: number, pitch?: number): void;   // 单 wav 直播（环境声三表;pitch=乐器变调/EoC 连冲 ForceRoar style-1 的 0.6;可选=测试 mock 兼容）
+  playSfxWav?(file: string, vol?: number, x?: number, y?: number, pitch?: number, replace?: boolean): void;   // 单 wav 直播（环境声三表;pitch=变调/EoC 连冲 0.6;replace=case36 ForceRoar 覆盖语义;可选=测试 mock 兼容）
   /** 跟踪式循环音（SoundEngine.PlayTrackedLoopedSound——AI_016 引信嘶声等；
    *  返回句柄 stop/setPos；Game 实现 = Sfx.startTrackedLoop，缺省无循环音） */
   startTrackedLoop?(

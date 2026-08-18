@@ -110,6 +110,8 @@ describe('Roar 单实例互斥（case 15）', () => {
     expect(sfx.playWavFile('Roar_1', 1)).toBe(false);   // 播着跳过
     expect(sfx.playWavFile('Roar_0', 1)).toBe(true);    // 分槽:Roar_0 独立
     expect(sfx.playWavFile('NPC_Killed_4', 1)).toBe(true);  // 非互斥族不拦
+    // case36 ForceRoar 语义(:1312-1325 直接覆盖槽,旧实例续播):replace 豁免互斥
+    expect(sfx.playWavFile('Roar_0', 1, undefined, undefined, undefined, true)).toBe(true);
     started[0].onended?.();                             // Roar_1 自然播完
     expect(sfx.playWavFile('Roar_1', 1)).toBe(true);    // 槽释放可重播
     vi.unstubAllGlobals();

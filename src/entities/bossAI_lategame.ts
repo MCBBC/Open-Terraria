@@ -1117,10 +1117,9 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
         const num13 = game.world.seedFlags?.getGoodWorld ? 0 : phase2 ? 10 : 30; // :45856-45860
         e.vx *= 0.8;
         if (!e.onGround) {
-          const prev = e.ai1;
+          // (首帧越过 num13 的原版蓄冲吼经对账证伪删除——:45856-45960 零 PlaySound)
           e.ai1 += 1;
           if (e.ai1 >= num13) {
-            if (prev < num13) { /* 原版蓄冲零吼——曾借 roar 0.5,2026-08-18 对账删 */ }
             e.vy += 1;
             // FTW(:45947-45952):额外 +1/t、钳 15.99
             if (game.world.seedFlags?.getGoodWorld) {

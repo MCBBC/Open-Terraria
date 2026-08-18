@@ -894,6 +894,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.ai0 += 1; e.ai1 = 0;
       if (e.ai0 === 3) e.ai2 = 0;
       else {
+        // :26844 雷眼变身完成双声=NPCHit1(style 缺省 1)+Roar;魔眼(:27478)只吼无
+        // 前置受击声——双门按 spaz 分流(2026-08-18 对账补)
+        if (!spaz) game.playSfxFiles?.(['NPC_Hit_1'], 1, e.cx, e.cy);
         game.playSfx('roar', 1, e.cx, e.cy);   // :26855/:27478 PlaySound(15,style0) 满响
         game.spawnParticles(e.cx, e.cy, '#FF6040', 20, 2);
       }
@@ -975,7 +978,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.vy = (e.vy * 59 + dy) / 60;
     }
   } else if (e.ai1 === 1) {
-    // 冲撞:雷眼 侧 340 8/0.2 / 180t 循环;魔眼 直冲 14 速(50/80t 减速,连 6)
+    // 冲撞(直冲启动帧):雷眼 :26746-26763 直冲 12(expert 15/getGood +2)/
+    // 魔眼 :27674-27690 直冲 14(expert +2.5=16.5,无 FTW 档)——原版两侧同构,
+    // 曾以"雷眼=侧移 seek 8 速+每 60t 射弹"近似(自造),2026-08-18 对齐替换
     if (spaz) {
       // :27674 二阶段冲刺启动帧吼(style0 满响;雷眼无此吼——全树 case15 仅此一处
       // 二阶段专属,2026-08-18 对账补)
@@ -983,26 +988,22 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.spin = target;
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
-      e.vx = dx / d * 14; e.vy = dy / d * 14;
+      const spd = mainExpertMode(game.world) ? 16.5 : 14;
+      e.vx = dx / d * spd; e.vy = dy / d * spd;
       e.ai1 = 2;
     } else {
-      const side = e.cx < player.x + player.w ? -1 : 1;
-      // FTW ×1.15(:27015-27025)
-      let spd2 = 8, acc2 = 0.2;
-      if (ftw) { spd2 *= 1.15; acc2 *= 1.15; }
-      seek(e, player.cx + side * 340, player.cy, spd2, acc2);
-      e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-      if (e.aiT % 60 === 0 && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
-        const dx = player.cx - e.cx, dy = player.cy - e.cy;
-        const d = Math.hypot(dx, dy) || 1;
-        shoot(game, e.cx + dx / d * 15, e.cy + dy / d * 15, dx / d * 9, dy / d * 9, 18, 100);
-      }
-      e.ai2 += 1;
-      if (e.ai2 >= 180) { e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+      e.spin = target;
+      const dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      let spd2 = mainExpertMode(game.world) ? 15 : 12;
+      if (game.world.seedFlags?.getGoodWorld) spd2 += 2;
+      e.vx = dx / d * spd2; e.vy = dy / d * spd2;
+      e.ai1 = 2;
     }
   } else if (e.ai1 === 2 && spaz) {
-    // 魔眼冲撞减速段(50t 起阻尼,80t 一循环,6 循环回悬浮)
-    e.ai2 += 1;
+    // 魔眼冲撞减速段(50t 起阻尼,80t 一循环,6 循环回悬浮;expert 计时 ×1.5
+    // —— :27696-27700 ai[2]+=1 且 expert 再 +0.5,2026-08-18 补)
+    e.ai2 += mainExpertMode(game.world) ? 1.5 : 1;
     if (e.ai2 >= 50) {
       e.vx *= 0.93; e.vy *= 0.93;
       if (Math.abs(e.vx) < 0.1) e.vx = 0;

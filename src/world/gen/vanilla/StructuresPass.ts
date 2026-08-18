@@ -58,7 +58,6 @@ const EBONSAND = TILE_BY_KEY['v_112_ebonsand_block']!;
 const CRIMSAND = TILE_BY_KEY['v_234_crimsand_block']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const CACTUS = TILE_BY_KEY['v_80_cactus']!;
-const VINE = TILE_BY_KEY['v_52_vines']!;
 const HEART = TILE_BY_KEY['crystal_heart']!;
 
 
@@ -564,56 +563,6 @@ function addLifeCrystal(st: TileStore, i: number, j: number): boolean {
     return true;
   }
   return false;
-}
-
-/** 地表装饰:按生物群系种树/仙人掌/藤蔓/蘑菇(原版 pass 60+ 系列简化) */
-export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const { w, h } = st;
-  const isSoft = (t: number) => t === T.TALLGRASS || t === T.FLOWER || t === T.MUSHROOM || t === VINE;
-  let x = rng.int(6, 14);
-  let sinceLast = 0;
-  while (x < w - 6) {
-    let sy = -1;
-    for (let y = 0; y < h; y++) {
-      if (st.flags[st.idx(x, y)]) { sy = y; break; }
-    }
-    if (sy >= 0) {
-      const ground = st.type[st.idx(x, sy)];
-      const relaxed = sinceLast >= 24;
-      // ---- 树已由 vanilla/TreePass.ts 替换（原版 AddTrees 逐列语义）----
-      // ---- 仙人掌已由本文件 runCactusPalmTreesAndCoralPass 替换（原版 pass 96
-      //      CactusPalmTreesAndCoral：GrowCactus 成簇语义；旧「12% 直柱 2-5 格」简化已删）----
-      // ---- 杂草/花/蘑菇 ----(藤蔓在下方统一扫描)
-      // 门禁对齐原版 GrassPlantsEvilPlantsAndPumpkinsOnSurface(WorldGen.cs:20209-20260):
-      // 草 2→杂草 3 / 腐化草 23→24 / 猩红草 199→201——【雪 147 不长任何植物】
-      // (雪原只有针叶树;SNOW 曾混入门内 = 用户报"杂草花长在冰雪环境"根因)
-      if (!st.flags[st.idx(x, sy - 1)] && (ground === T.GRASS || ground === JUNGLE_GRASS)) {
-        const r = rng.next();
-        if (r < 0.3) st.setTileSilent(x, sy - 1, T.TALLGRASS, [0, 18, 36, 54, 72, 90][rng.int(0, 5)], 0);
-        else if (r < 0.42) st.setTileSilent(x, sy - 1, T.FLOWER, [108, 126, 162, 180, 216, 252, 342, 540, 594][rng.int(0, 8)], 0);
-        else if (r < 0.45) st.setTileSilent(x, sy - 1, T.MUSHROOM, 144, 0);
-      }
-    }
-    x++;
-    sinceLast++;
-  }
-  // ---- 藤蔓:挂在悬空草根/草皮下方(洞穴顶/崖底)----
-  for (let vx = 2; vx < w - 2; vx++) {
-    for (let vy = 2; vy < h - 2; vy++) {
-      const i = st.idx(vx, vy);
-      if (st.type[i] !== JUNGLE_GRASS && st.type[i] !== T.GRASS) continue;
-      if (!st.flags[i] || st.flags[st.idx(vx, vy + 1)]) continue;
-      if (st.liquid[st.idx(vx, vy + 1)] > 0) continue;
-      if (rng.next() < 0.5) continue;
-      const len = rng.int(1, 8);
-      for (let k = 1; k <= len; k++) {
-        const ii = st.idx(vx, vy + k);
-        if (vy + k >= h - 1 || st.flags[ii] || st.type[ii] !== 0) break;
-        st.setTileSilent(vx, vy + k, VINE, 0, 0);
-      }
-      vy += 10; // 稀疏
-    }
-  }
 }
 
 const SANDSTONE_BRICK = TILE_BY_KEY['v_151_sandstone_brick']!;
