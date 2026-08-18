@@ -55,7 +55,7 @@ export interface SaveData {
   idScheme?: 'sheet';
   header: {
     name: string; seed: number; width: number; height: number;
-    spawn: [number, number]; groundLevel: number; rockLevel: number; lavaLine?: number;
+    spawn: [number, number]; spawn0?: [number, number]; groundLevel: number; rockLevel: number; lavaLine?: number;
     crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
     treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
     created: number; playTimeMs: number;
@@ -221,7 +221,7 @@ export interface SaveStoreView {
 /** 序列化所需的世界元数据(全部可结构化克隆) */
 export interface SaveMeta {
   name: string; seed: number; w: number; h: number;
-  spawnX: number; spawnY: number; groundLevel: number; rockLevel: number; lavaLine?: number;
+  spawnX: number; spawnY: number; spawnX0?: number; spawnY0?: number; groundLevel: number; rockLevel: number; lavaLine?: number;
   treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
   crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
   timeOfDay: number; dayCount: number;
@@ -334,6 +334,7 @@ export function serializeSave(
     header: {
       name: meta.name, seed: meta.seed, width: meta.w, height: meta.h,
       spawn: [meta.spawnX, meta.spawnY], groundLevel: meta.groundLevel, rockLevel: meta.rockLevel,
+      spawn0: meta.spawnX0 !== undefined ? [meta.spawnX0, meta.spawnY0 ?? meta.spawnY] : undefined,
       lavaLine: meta.lavaLine,
       treeX: meta.treeX, treeStyle: meta.treeStyle, treeTops: meta.treeTops,
       crimson: meta.crimson, dungeonX: meta.dungeonX, dungeonY: meta.dungeonY, jungleX: meta.jungleX,

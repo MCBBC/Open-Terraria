@@ -155,6 +155,9 @@ export class World {
   name: string;
   seed: number;
   spawnX = 0; spawnY = 0;
+  /** 原始世界出生点（床 RemoveSpawn 回退锚——Player.RemoveSpawn :53686 清覆盖位语义;
+   *  生成/wld 导入/存档回填时快照;header.spawn0 缺省回退当前 spawn（旧档兼容） */
+  spawnX0 = 0; spawnY0 = 0;
   groundLevel = 0; rockLevel = 0;   // tile 坐标
   /** 地狱顶（原版 UnderworldLayer = maxTilesY-200；TerrainPass 设定，SceneMetrics/BGM/背景共用） */
   lavaLine = 0;
@@ -320,6 +323,8 @@ export class World {
     w.store = new TileStore(p.w, p.h, p.buf);
     w.explored = p.buf.explored ? new Uint8Array(p.buf.explored) : new Uint8Array(p.w * p.h);
     w.spawnX = p.spawnX; w.spawnY = p.spawnY;
+    w.spawnX0 = (p as { spawnX0?: number }).spawnX0 ?? w.spawnX;
+    w.spawnY0 = (p as { spawnY0?: number }).spawnY0 ?? w.spawnY;
     w.groundLevel = p.groundLevel; w.rockLevel = p.rockLevel; w.lavaLine = p.lavaLine;
     w.crimson = p.crimson; w.dungeonX = p.dungeonX; w.dungeonY = p.dungeonY; w.jungleX = p.jungleX;
     w.exploredVersion = p.exploredVersion;

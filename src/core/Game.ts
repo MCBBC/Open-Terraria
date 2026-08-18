@@ -26,7 +26,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDo
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle } from '../world/Torch';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
-import { findFreeHouse, housingCheckAt, WALL_HOUSE } from '../world/Housing';
+import { findFreeHouse, housingCheckAt, checkRoom, lastRoomCheckFail, WALL_HOUSE } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
 
@@ -154,6 +154,7 @@ import { pickMusic, newMusicState, MUSIC_SLOT, resolveEventMusic, isOldOnesArmy,
 import { Tombstone } from '../entities/Tombstone';
 import { resetGorePool, liveGorePieces, setGoreScreen, GorePiece } from '../entities/GorePiece';
 import { Lang } from '../i18n/Lang';
+import { setNpcNameResolver, setGlobalSubstitutionContext } from '../i18n/LanguageManager';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
 import { tileRunner } from '../world/gen/vanilla/TileRunner';
@@ -2569,6 +2570,26 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // 全局替换表 NPC 名解析注入（Lang.cs:102-110 GetFirstNPCNameOrNull：{Nurse}
+    // 等 token → 场上第一名该类型城镇 NPC 的随机名；缺位保留 token——null 语义）
+    // 全局替换表动态值（Lang.cs:126-144：WorldName/PlayerName/InventoryKey/
+    // AnglerCompletedQuestsCount/TotalDeathsCount/WorldEvilStone/ToggleArmorSetBonusKey）
+    setGlobalSubstitutionContext({
+      worldName: () => w.name,
+      playerName: () => this.player.name,
+      inventoryKey: () => 'Escape',          // Main.cInv（默认绑定,无重绑系统）
+      anglerQuests: () => this.player.anglerQuestsFinished,
+      totalDeaths: () => this.player.numberOfDeathsPVE,
+      crimson: () => !!w.crimson,
+      reversedArmorBonusKey: () => false,    // Main.ReversedUpDownArmorSetBonuses 默认 false
+    });
+    setNpcNameResolver((npcType) => {
+      const tn = this.entities.npcs.find((n) => {
+        const t = n as TownNPC;
+        return t instanceof TownNPC && !t.dead && t.vanillaId === npcType;
+      }) as TownNPC | undefined;
+      return tn?.givenName || null;
+    });
     // 露西斧宿主注入 + 进世界 Idle 冷却（LucyAxeMessage.Initialize/Hooks_OnEnterWorld：
     // 7200-14400t 起始冷却，进世界不立即说话）。sinks 用闭包动态解析 this.player
     setLucySinks({
@@ -3295,7 +3316,10 @@ export class Game implements GameHooks {
     if (this.player.sleeping) {
       const actUp = (w.clock.bloodMoon && !w.clock.isDay) || (w.clock.eclipse && w.clock.isDay)
         || w.lunarEvent.moonLordCountdown > 0 || w.invasionType > 0 || moonEventActive(w)
-        || w.oldOnesArmy.ongoing || this.player.useTime > 0;
+        || w.oldOnesArmy.ongoing || this.player.useTime > 0
+        // AnyDanger(quickBossNPCCheck:true)（NPC.cs:81040-81057）终项 AnyActiveBossNPC
+        // = 场上任一活跃 boss（其余事件项已逐一对应;2026-08-18 补齐）
+        || this.entities.enemies.some((e) => !e.dead && (e as Enemy).def.boss);
       this.player.timeSleeping = actUp ? 0 : this.player.timeSleeping + 1;
     } else {
       this.player.timeSleeping = 0;
@@ -3752,7 +3776,22 @@ export class Game implements GameHooks {
           bedOk = (Math.floor(w.store.frameX[i] / 72) === 0 ? -1 : 1) === this.player.facing;
         }
       }
-      if (!bedOk || this.player.inputX !== 0 || this.player.inputJump
+      // 使用中的物品唤醒（SH:112-121）：damage>0 且 !noMelee / fishingPole>0 /
+      // ItemID.Sets.ForcesBreaksSleeping {1991 手机, 4821 贝壳手机, 3183 魔法海螺}
+      //（ItemID.cs:137-142——传送族;其余物品使用只打断熟睡计时不唤醒）
+      let itemWake = false;
+      if (this.player.itemAnimTicks > 0) {
+        const held = this.player.inv.heldItem();
+        const hd = held ? ITEM_DEFS[held.id] : undefined;
+        const vid = hd ? hd.vid ?? viIdFromKey(hd.key) : -1;
+        if (vid >= 0) {
+          const is = statOfInternal(vid);
+          const fc = itemFuncOfVid(vid);
+          itemWake = ((is?.damage ?? 0) > 0 && !(is?.noMelee ?? 0)) || (fc?.fishingPole ?? 0) > 0
+            || vid === 1991 || vid === 4821 || vid === 3183;
+        }
+      }
+      if (!bedOk || itemWake || this.player.inputX !== 0 || this.player.inputJump
         || this.player.inputDown || this.player.inputUp || this.player.ridingMount) {
         this.player.sleeping = false; // StopSleeping（SH:112-117）
       }
@@ -9194,8 +9233,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             radius, radius > 0, 64, this.player.equipStats.armorPen, vid));
         this.entities.add(p, 'projectiles');
       },
-      // 弹 655 蜂巢（AI_016 蜂巢裂蜂）未实装——登记跳过（见摇树报告跳过清单）
-      beehive: () => { /* engine gap: Projectile 655 */ },
+      // 弹 655 蜂巢（AI_025 :17856-17867 落地反弹/撞墙裂 + Kill :72110-72155
+      // 裂 2+Next(3)³ 蜂 210/211、ai[1]=1 蜂群待命、初速 Next(-200,201)×0.002、
+      // CanBeReplacedByOtherNPCs；出怪上限门 GetAvailableAmountOfNPCsToSpawnUpToSlot）
+      beehive: (px, py) => {
+        const gp = new GrenadeProj(px, py, 0, 2, 10, 2, 655,
+          (ex, ey, ed) => { void ex; void ey; void ed; });
+        gp.w = 31; gp.h = 31;   // SetDefaults :6761-6768
+        gp.onBeehiveKill = (_wet, bx, by, ovx, ovy) => {
+          let n = 2;
+          if (Math.random() < 1 / 3) n++;
+          if (Math.random() < 1 / 3) n++;
+          if (Math.random() < 1 / 3) n++;
+          for (let k = 0; k < n; k++) {
+            const bee = Enemy.fromVanilla(Math.random() < 0.5 ? 210 : 211, bx, by);
+            if (!bee) continue;
+            bee.vx = (Math.floor(Math.random() * 401) - 200) * 0.002 + ovx * 0.05;
+            bee.vy = (Math.floor(Math.random() * 401) - 200) * 0.002 + ovy * 0.05;
+            bee.id = this.entities.nextId++;
+            this.entities.add(bee, 'enemies');
+          }
+        };
+        this.entities.add(gp, 'projectiles');
+      },
       leaf: (px, py, gore) => natureParticles.spawnLeaf(px, py, gore),
       ashDust: (px, py) => {
         // TreeGrowFX_AshShake :29796-29822 尘 31×~10 + 尘 6×~16 的粒子近似
@@ -11183,6 +11243,83 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** Player.CanSnapToPosition（PC:32945-32981）1:1:目标盒不嵌实心（Collision.
+   *  SolidCollision,tileSolid 口径——平台 solid:false 天然豁免）+ 两盒视线可达
+   *  （CanHit 直判 → TryAllowingSnappingToPosition 四组 (w−2,0) 2px 窄条回退
+   *  :32973-32988 → 横向 ±width 一步再试 :32964-32971——原版 TileCollision(x)==x
+   *  无阻挡判以扫掠盒无实心近似）。mount 自定义尺寸子支（Delegations.
+   *  PlayerSize <20×42 改按默认盒）本仓坐骑不改碰撞盒,N/A */
+  private canSnapPlayerTo(offX: number, offY: number): boolean {
+    const p = this.player, st = this.world.store;
+    const tx = p.x + offX, ty = p.y + offY;
+    const solidFree = (x0: number, y0: number, x1: number, y1: number): boolean => {
+      for (let x = Math.floor(x0 / TILE); x <= Math.floor((x1 - 0.001) / TILE); x++) {
+        for (let y = Math.floor(y0 / TILE); y <= Math.floor((y1 - 0.001) / TILE); y++) {
+          if (st.inBounds(x, y) && st.isSolid(x, y)) return false;
+        }
+      }
+      return true;
+    };
+    if (!solidFree(tx, ty, tx + p.w, ty + p.h)) return false;   // SolidCollision 目标盒
+    if (canHit(st, p.x, p.y, p.w, p.h, tx, ty, p.w, p.h)) return true;
+    // TryAllowingSnappingToPosition:pos1 侧四组窄条（vx = width−2）
+    const vx = p.w - 2;
+    const allowAt = (x0: number): boolean => {
+      const strip = (ax: number, bx: number): boolean =>
+        canHit(st, ax, p.y, 2, p.h, bx, ty, 2, p.h);
+      return strip(x0 + vx, tx) || strip(x0 + vx, tx + vx)
+        || strip(x0, tx) || strip(x0, tx + vx);
+    };
+    if (allowAt(p.x)) return true;
+    // 横向 ±width 一步（TileCollision 无阻挡 ≈ 扫掠盒无实心）再试
+    const num = Math.sign(offX);
+    if (num !== 0) {
+      const sx = p.x + num * p.w;
+      if (solidFree(Math.min(p.x, sx), p.y, Math.max(p.x, sx) + p.w, p.y + p.h)) {
+        return allowAt(sx);
+      }
+    }
+    return false;
+  }
+
+  /** Player.CheckSpawn（PC:53608-53666）1:1:床设重生点的房间校验。
+   *  返回 null=通过；''=静默失败（无提示）；其余=失败文案 key（Game.Bed*）。
+   *  · 边界 y 上界照抄原版 maxTilesX 笔误（:53621,应为 maxTilesY）
+   *  · (x,y−1) 必须仍是床格（:53627-53631 静默失败）
+   *  · 床上 3×3 净空（nactive && tileSolid && !tileSolidTop → BedObstructed;
+   *    原版临时翻转 tileSolid[379] 泡沫块——本仓 defs 该格已 solid,等效）
+   *  · StartRoomCheck(x,y−1) = Housing.checkRoom（房间泛洪 1:1）;失败原因经
+   *    lastRoomCheckFail 映射五档文案（TooManyUnsafeWalls 档本仓泛洪并入 hole,
+   *    门禁一致文案折叠,登记） */
+  private checkBedSpawn(x: number, y: number): null | '' | string {
+    const st = this.world.store;
+    if (x < 10 || x > st.w - 10 || y < 10 || y > st.w - 10) return '';   // :53621 ★y 界用 maxTilesX 原版笔误照抄
+    if (!st.inBounds(x, y - 1)) return '';
+    const it = st.idx(x, y - 1);
+    if (st.flags[it] === 0 || st.type[it] !== (TILE_BY_KEY['bed'] ?? -1)) return '';
+    for (let i = x - 1; i <= x + 1; i++) {
+      for (let j = y - 3; j < y; j++) {
+        if (!st.inBounds(i, j)) return '';   // tile==null → 静默
+        const ii = st.idx(i, j);
+        if (st.flags[ii] !== 0 && st.isSolid(i, j)
+          && !TILE_DEFS[st.type[ii]]?.platform) {
+          return 'Game.BedObstructed';
+        }
+      }
+    }
+    if (!checkRoom(st, x, y - 1)) {
+      const msg: Record<string, string> = {
+        edge: 'Game.BedTooCloseToWorldEdge',
+        tooBig: 'Game.BedRoomIsTooBig',
+        tooSmall: 'Game.BedRoomIsTooSmall',
+        hole: 'Game.BedRoomHasHolesInWall',
+        notValid: 'Game.BedRoomIsNotValid',
+      };
+      return msg[lastRoomCheckFail] ?? 'Game.BedRoomIsNotValid';
+    }
+    return null;
+  }
+
   private interactAt(tx: number, ty: number) {
     const st = this.world.store;
     // 距离门（原版 Player.IsInTileInteractionRange Simple：约 5 格）——此前整个
@@ -11333,11 +11470,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             && Math.abs(this.player.y + this.player.h - anchorY) < 1;
           if (sameAnchor) {
             this.player.sleeping = false;
-          } else {
+          } else if (this.canSnapPlayerTo(anchorX - this.player.cx, anchorY - (this.player.y + this.player.h))) {
+            // CanSnapToPosition（:165-169 flag 门:目标嵌实心/两盒无视线 → 整个
+            // 入睡静默不发生,2026-08-18 补齐;此前缺失=隔墙隔石也能上床）
             // StartSleeping 前置清理（:162-168):StopVanityActions 清坐姿/
-            // 收全部钩爪/尝试下坐骑（下不了 → 唤醒门次 tick 拦,原版 mount.Active 同拦）
+            // 收全部钩爪/收全部鱼漂（:33120-33131）/尝试下坐骑（下不了 →
+            // 唤醒门次 tick 拦,原版 mount.Active 同拦）
             this.player.sitting = false;
             this.player.removeAllGrapplingHooks();
+            for (const pr of this.entities.projectiles) {
+              if (pr instanceof Bobber && !pr.dead) pr.dead = true;
+            }
             if (this.player.ridingMount) this.player.mount.tryDismount(this.player);
             this.player.sleeping = true;
             this.player.timeSleeping = 0;
@@ -11349,12 +11492,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         }
       } else {
-        // 设重生点（:32212-32226）：变体A(bedLeft+2)/B(bedLeft+1)、行 = bedTop+2
+        // 设重生点（:32212-32226）：坐标 = 变体A(bedLeft+2)/B(bedLeft+1)、行 = bedTop+2
         // （床下地面行,本仓 spawnY=落脚格行约定一致;曾 (tx+1, ty−1) 帧盲近似）。
-        // 再点移除（RemoveSpawn）未移植——本仓无原始出生点存档,登记
-        this.world.spawnX = bedLeft + (Math.floor(fx / 72) === 1 ? 1 : 2);
-        this.world.spawnY = bedTop + 2;
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SpawnSet'));
+        // CheckSpawn 房间校验（:32223,PC:53608-53666:床必须处于合格房间——
+        // 边界/床上 3×3 净空/StartRoomCheck 房间泛洪,失败发对应 Game.Bed* 文案,
+        // ChatColors.ServerMessage=(255,240,20);曾无任何校验直接设点,2026-08-18 补）
+        const sx = bedLeft + (Math.floor(fx / 72) === 1 ? 1 : 2);
+        const sy = bedTop + 2;
+        if (this.world.spawnX === sx && this.world.spawnY === sy) {
+          // 再点同点 = RemoveSpawn（:32215-32218 + Player.RemoveSpawn :53686:
+          // 清覆盖位回世界原始出生点——spawnX0 生成/导入/存档链快照）
+          this.world.spawnX = this.world.spawnX0;
+          this.world.spawnY = this.world.spawnY0;
+          this.newText(Lang.text('Game.SpawnPointRemoved') ?? '', 255, 240, 20);
+        } else {
+          const fail = this.checkBedSpawn(sx, sy);
+          if (fail === null) {
+            this.world.spawnX = sx;
+            this.world.spawnY = sy;
+            this.newText(Lang.text('Game.SpawnPointSet') ?? '', 255, 240, 20);
+          } else if (fail !== '') {
+            this.newText(Lang.text(fail) ?? '', 255, 240, 20);
+          }
+        }
       }
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_356_enchanted_sundial']
@@ -16560,9 +16720,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     if (ok && p.solarShields < shieldsBefore && attacker && !attacker.dead) {
+      // 日曜爆闪 608 1:1（Player.cs:37707 NewProjectile(608,150×melee,kb15) +
+      // 立即 Kill → Projectile.Kill :68941-68960：penetrate=-1 全穿 + Damage()
+      // 命中盒 160×160（SetDefaults :6275-6282）+ 音 Item14 + 尘 31×4 环 +
+      // 尘 6×30×3.7 爆闪。本仓以同参数 AoE 一次结算等价（160 盒半宽 80）
       const retaliation = Math.max(1, Math.round(150 * p.damageMult('melee')));
-      attacker.hurt(retaliation, Math.sign(attacker.cx - p.cx) * 10, -3, this);
+      attacker.hurt(retaliation, Math.sign(attacker.cx - p.cx) * 15, -3, this,
+        0, false, -1, true);
       this.addDamageNumber(attacker.cx, attacker.y, retaliation, false, '#FFC040');
+      this.spawnParticles(p.cx, p.cy, '#FFD060', 30, 3.7, { life: 24 });
+      this.spawnParticles(p.cx, p.cy, '#FF9040', 4, 1.5, { life: 20 });
+      this.playSfxFiles(['Item_14'], 1, p.cx, p.cy);   // SoundID.Item14
     }
     if (ok) {
       // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）

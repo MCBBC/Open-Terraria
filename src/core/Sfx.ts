@@ -23,6 +23,8 @@ export type SfxName =
   | 'dd2Zap'         // DD2_LightningAuraZap（AI_137 :65947）
   | 'whipCrack'   // 原版 Item_152（DefaultToWhip UseSound——鞭甩响，Item.cs:47448）
   | 'summon'      // 原版 Item_44（召唤杖通用 UseSound）
+  | 'eowDig'      // EOWDiggin（CreateTrackable("eow_dig") SoundID.cs:1151——EoW 三段掘地专属,
+                  //   AI_006 :52389；此前误用 Dig_0/1/2 近似,2026-08-18 对齐）
   // ---- 液体六配对专属轨（SoundID.cs:823-827 CreateTrackable("liquids_*",3,Ambient)，原 Sounds/Custom/）----
   | 'liquidWaterLava'   // 水岩浆（TileChangeType.LavaWater）
   | 'liquidHoneyWater'  // 水蜂蜜
@@ -81,6 +83,7 @@ export const WAV_MAP: Record<SfxName, string[]> = {
   // case 14 默认变体组 Main.rand.Next(3)（LegacySoundPlayer.cs:816）；音量 ×0.4 见 FILE_CASE_VOL
   zombie: ['Zombie_0', 'Zombie_1', 'Zombie_2'],
   roar: ['Roar_0', 'Roar_1'],
+  eowDig: ['eow_dig'],   // EoW 掘地专属轨（单文件;AI_006 :52389）
   pickup: ['Grab'],
   dig: ['Dig_0', 'Dig_1', 'Dig_2'],
   chop: ['Grass'],
@@ -531,6 +534,7 @@ export class Sfx {
       case 'pkilled': osc('sawtooth', 160, 40, 0.6, 0.18); break;
       case 'zombie': osc('sawtooth', 90, 55, 0.5, 0.1); break;
       case 'roar': osc('sawtooth', 70, 40, 0.9, 0.2); break;
+      case 'eowDig': osc('square', 120, 70, 0.12, 0.08); break;   // 缺文件兜底(实体在库)
       case 'pickup': osc('sine', 520, 990, 0.09, 0.1); osc('sine', 780, 1320, 0.08, 0.06, 0.05); break;
       case 'dig': osc('square', 140, 90, 0.05, 0.06); break;
       case 'tink': osc('sine', 900, 500, 0.06, 0.08); break;

@@ -18,13 +18,15 @@ function anchorValid(st: TileStore, x: number, y: number): boolean {
   const t = st.type[i];
   const d = TILE_DEFS[t];
   if (!d) return false;
-  const solid = !!d.solid && !d.platform;
-  const solidTop = !!d.platform;   // tileSolidTop 家族=平台（19/239/380/427）
+  const sheet = d.vanilla?.sheet ?? -1;
+  const PLATFORMS = sheet === 19 || sheet === 427 || (sheet >= 435 && sheet <= 439); // TileID.Sets.Platforms（TileID.cs:243）
+  const solid = !!d.solid;
+  const solidTop = PLATFORMS || sheet === 239 || sheet === 380;   // tileSolidTop 家族
   const bt = st.half[i] ? 1 : st.slope[i];
   // SolidTile（cs:51857）：tileSolid && !solidTop && blockType==0
   if (solid && !solidTop && bt === 0) return true;
   // SolidWithTop（cs:51870）：平台帧合法 或 tileSolid&&tileSolidTop
-  if (d.platform) {
+  if (PLATFORMS) {
     const num = st.frameX[i] / 36 | 0;
     if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
   } else if (solid && solidTop) return true;

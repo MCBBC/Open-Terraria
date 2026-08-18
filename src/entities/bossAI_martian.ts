@@ -304,7 +304,8 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     if (inWin !== wasWin) {
       if (inWin === 1) {
         e.ai2 = player && player.cx > center.x ? 1 : -1;
-        shootM(game, e.cx, e.cy, 0, 6, 80, 447, 300, 20);   // Projectile 447 + Item12
+        const ray = new MartianDeathray(e, 80);   // 447 死光电报（AI_079 实体）
+        (game as unknown as { entities: { add(el: unknown, b: string): void } }).entities.add(ray, 'projectiles');
       }
     }
     if (e.ai3 >= 3600) { e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
@@ -455,7 +456,11 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
   }
   // 死光电报（:36201-36219）：巡航态 ai[3]∈[20,260) 首帧（n==0）→ Projectile 447
   if (e.ai3 >= 20 && e.ai3 < 260 && saucer.ai0 === 0) {
-    if (e.ai3 - 20 === 0) shootM(game, e.cx, e.cy, 0, 5, 50, 447, 300, 20);
+    if (e.ai3 - 20 === 0) {
+      // 447 死光电报实体（AI_079）——束体独立类（锚定电报塔/母舰，束高逐tick重算）
+      const ray = new MartianDeathray(e, 50);
+      (game as unknown as { entities: { add(el: unknown, b: string): void } }).entities.add(ray, 'projectiles');
+    }
   }
   // 空巢发射器（:36221-36279）：窗口内对已灭槽位按概率补射 450 导弹
   {
@@ -805,5 +810,85 @@ export function martianFighterExtras(e: Enemy, game: GameHooks, player: Player |
       }
     }
     if (e.ai2 === 60) e.ai2 = -120;                 // :59427-59429
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 火星死光电报 447（Projectile.cs AI_079 :29714-29798 1:1）：垂直向下光束，
+// 锚定母舰 UFO（ai[0]=npcIdx+1），束高 = 母舰 Y+46 到最近实心格（≤150 格），
+// 每 tick 重算；母舰不在/电报窗关（395 ai[3]%120 窗）即 Kill。尘 228×2/t。
+// ---------------------------------------------------------------------------
+import { Entity } from './Entity';
+
+export class MartianDeathray extends Entity {
+  w = 30; h = 30;
+  x = 0; y = 0; vx = 0; vy = 0;
+  dead = false;
+  private srcId: number;
+  private dmg: number;
+  private age = 0;
+
+  constructor(src: Enemy, dmg: number) {
+    super();
+    this.srcId = src.id;
+    this.dmg = dmg;
+    this.x = src.cx - 15; this.y = src.cy + 46;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.dead) return;
+    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    // :29718-29722 门：锚不在场（或非 392/395 电报者/窗口关）→ Kill
+    if (!src || src.dead || (src.vanillaId !== 392 && src.vanillaId !== 395)) {
+      this.dead = true; return;
+    }
+    if (src.vanillaId === 395 && !(src.ai3 % 120 >= 60 && src.ai0 === 2)) { this.dead = true; return; }
+    const p = game.player;
+    if (!p || p.dead) { this.dead = true; return; }   // timeLeft 240 兜底简化
+    if (++this.age > 240) { this.dead = true; return; }
+    // :29726-29758 束高：y = 锚 cy+46，向下扫 ≤150 格找首个实心格
+    const st = game.world.store;
+    const colX = Math.floor(src.cx / 16);
+    const startY = Math.floor((src.cy + 46) / 16);
+    const endY = Math.floor(p.y + p.h);   // num652 = 目标盒底（:29733-29740）
+    let span = 0;
+    if (startY >= endY && st.isSolid(colX, startY)) {
+      span = 1;
+    } else {
+      for (; span < 150 && startY + span < st.h; span++) {
+        const row = startY + span;
+        if (row >= endY && st.isSolid(colX, row)) { span--; break; }
+      }
+    }
+    this.x = src.cx - this.w / 2;
+    this.y = src.cy + 46;
+    this.h = (span + 1) * 16;
+    // 尘 228×2（:29770-29778，束脚）
+    if (this.age % 2 === 0) {
+      game.spawnParticles(this.cx, this.y + this.h - 16, '#B048E0', 1, 2.8,
+        { life: 18, grav: 0, size: 3 });
+    }
+    // 接触伤害（hostile 447 伤害链简化为玩家盒重叠每 6t 一跳）
+    if (this.age % 6 === 0
+      && p.x < this.x + this.w && p.x + p.w > this.x
+      && p.y < this.y + this.h && p.y + p.h > this.y) {
+      (game as unknown as { damagePlayer(d: number, x: number, y: number, kx?: number): void })
+        .damagePlayer(this.dmg, this.cx, this.cy, Math.sign(p.cx - this.cx));
+    }
+  }
+
+  draw(r: import('../render/Renderer').Renderer): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    // 光柱近似（Projectile_447.png 30×4 帧条——竖束以原色半透明柱呈现）
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    const grd = ctx.createLinearGradient(this.x, 0, this.x + this.w, 0);
+    grd.addColorStop(0, 'rgba(196,84,255,0)');
+    grd.addColorStop(0.5, 'rgba(230,160,255,0.9)');
+    grd.addColorStop(1, 'rgba(196,84,255,0)');
+    ctx.fillStyle = grd;
+    ctx.fillRect(this.x, this.y, this.w, this.h);
+    ctx.restore();
   }
 }

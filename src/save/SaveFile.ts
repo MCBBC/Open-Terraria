@@ -48,6 +48,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
   const meta: SaveMeta = {
     name: world.name, seed: world.seed, w: st.w, h: st.h,
     spawnX: world.spawnX, spawnY: world.spawnY,
+      spawnX0: world.spawnX0, spawnY0: world.spawnY0,   // 原始出生点（床 RemoveSpawn 回退）
     groundLevel: world.groundLevel, rockLevel: world.rockLevel, lavaLine: world.lavaLine,
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
     crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
@@ -154,6 +155,7 @@ export function buildSaveParts(world: World): {
   const meta: SaveMeta = {
     name: world.name, seed: world.seed, w: st.w, h: st.h,
     spawnX: world.spawnX, spawnY: world.spawnY,
+      spawnX0: world.spawnX0, spawnY0: world.spawnY0,   // 原始出生点（床 RemoveSpawn 回退）
     groundLevel: world.groundLevel, rockLevel: world.rockLevel, lavaLine: world.lavaLine,
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
     crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
@@ -238,6 +240,9 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
   const world = new WorldClass(data.header.width, data.header.height, data.header.seed, data.header.name);
   world.spawnX = data.header.spawn[0];
   world.spawnY = data.header.spawn[1];
+  // 原始出生点：旧档无 spawn0 → 回退当前 spawn（床移除重生点后第一次存档前的近似）
+  world.spawnX0 = data.header.spawn0?.[0] ?? world.spawnX;
+  world.spawnY0 = data.header.spawn0?.[1] ?? world.spawnY;
   world.groundLevel = data.header.groundLevel;
   world.rockLevel = data.header.rockLevel;
   // 旧档缺 lavaLine（原版 UnderworldLayer = maxTilesY-200）

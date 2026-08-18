@@ -25,6 +25,115 @@ interface LoadedPack {
 
 const MAX_PACK_CACHE = 2; // LRU 上限(性能审计:语言包 ~1MB/份,不无限缓存)
 
+// ===================== 全局替换表（Lang.cs:86-160 RegisterGlobalSubstitution）=====================
+// 原版 GetTextValue → LocalizedText.Format 对 {Token} 逐个查 _globalSubstitutions。
+// 键盘档键位名（本作无手柄；PlayerInput.cs:1880+ 默认键盘绑定 + GenerateInputTag
+// → LocalizeKey：仅 Mouse1/Mouse2 走 Controls.*，其余按绑定名展示；键盘未绑
+// 触发器（LockOn/Radial*/Hotbar±）GenerateRawInputList 空列表 → 空串）：
+//   MouseRight=Mouse2 → Controls.RightClick、MouseLeft=Mouse1 → Controls.LeftClick、
+//   SmartCursor=LeftControl → Controls.Control、SmartSelect=LeftShift → Controls.Shift、
+//   Grapple/QuickEquip=E、QuickMount=R（UI.BuildFromInventory 同 QuickMount）、
+//   Trash=Controls.Shift、FavoriteItem=Alt。
+// NPC 名替换（:102-110）：{Nurse}/{Merchant}/... → 场上第一名该类型城镇 NPC 的
+// 随机名——经 setNpcNameResolver 注入实体桶访问；缺位/无该 NPC 保留 token（原版
+// GetFirstNPCNameOrNull → null 不替换语义）。
+let npcNameResolver: ((npcType: number) => string | null) | null = null;
+/** 动态值注入器（Lang.cs:124-144 的 Main.* / Player.* 读取——由 Game 活取） */
+export interface GlobalSubstitutionContext {
+  worldName: () => string;
+  playerName: () => string;
+  /** Main.cInv（Inventory 键位名,键盘默认 Escape） */
+  inventoryKey: () => string;
+  /** Player.anglerQuestsFinished */
+  anglerQuests: () => number;
+  /** Player.numberOfDeathsPVE */
+  totalDeaths: () => number;
+  /** WorldGen.crimson（false=黑檀石 Ebonstone / true=猩红石 Crimstone） */
+  crimson: () => boolean;
+  /** Main.ReversedUpDownArmorSetBonuses（false=Key.DOWN / true=Key.UP） */
+  reversedArmorBonusKey: () => boolean;
+}
+let subCtx: GlobalSubstitutionContext | null = null;
+
+/** Game.afterWorldLoad 注入（闭包活取,幂等） */
+export function setGlobalSubstitutionContext(ctx: GlobalSubstitutionContext): void {
+  subCtx = ctx;
+}
+
+interface LangTextSource {
+  getText(key: string): string;
+  getTextValue(key: string, ...args: (string | number)[]): string;
+}
+
+/** Game 侧注入（afterWorldLoad 后每帧或事件驱动重设均可；幂等） */
+export function setNpcNameResolver(fn: (npcType: number) => string | null): void {
+  npcNameResolver = fn;
+}
+
+function buildGlobalSubstitutions(lang: LangTextSource): Map<string, () => string | null> {
+  const m = new Map<string, () => string | null>();
+  const k = (code: string) => () => code;                     // 原样键名（E/R 等）
+  const l = (key: string) => () => lang.getTextValue(key);    // Controls.* 本地化键名
+  // 键位（Lang.cs:146-160，键盘分支）
+  m.set('InputTrigger_ToggleOrOpen', l('Controls.RightClick'));
+  m.set('InputTrigger_InteractWithTile', l('Controls.RightClick'));
+  m.set('InputTrigger_InteractWithTileUI', l('Controls.RightClick'));
+  m.set('InputTrigger_UseOrAttack', l('Controls.LeftClick'));
+  m.set('InputTrigger_SmartCursor', l('Controls.Control'));
+  m.set('InputTrigger_Grapple', k('E'));
+  m.set('InputTrigger_QuickEquip', k('E'));
+  m.set('InputTrigger_SmartSelect', l('Controls.Shift'));
+  m.set('InputTrigger_LockOn', k(''));
+  m.set('InputTrigger_RadialQuickbar', k(''));
+  m.set('InputTrigger_RadialHotbar', k(''));
+  m.set('InputTriggerUI_BuildFromInventory', k('R'));
+  m.set('InputTriggerUI_FavoriteItem', k('Alt'));
+  m.set('InputTriggerUI_Trash', l('Controls.Shift'));
+  // NPC 名（Lang.cs:101-125 全 23 名——GetFirstNPCNameOrNull,缺位 null 保留 token）
+  const npc = (type: number) => () => npcNameResolver?.(type) ?? null;
+  m.set('Nurse', npc(18)); m.set('Merchant', npc(17)); m.set('ArmsDealer', npc(19));
+  m.set('Dryad', npc(20)); m.set('Demolitionist', npc(38)); m.set('Clothier', npc(54));
+  m.set('Guide', npc(22)); m.set('Wizard', npc(108)); m.set('GoblinTinkerer', npc(107));
+  m.set('Mechanic', npc(124)); m.set('Truffle', npc(160)); m.set('Steampunker', npc(178));
+  m.set('DyeTrader', npc(207)); m.set('PartyGirl', npc(208)); m.set('Cyborg', npc(209));
+  m.set('Painter', npc(227)); m.set('WitchDoctor', npc(228)); m.set('Pirate', npc(229));
+  m.set('Stylist', npc(353)); m.set('TravelingMerchant', npc(368)); m.set('Angler', npc(369));
+  m.set('Bartender', npc(550)); m.set('GolfGuy', npc(588)); m.set('TaxCollector', npc(441));
+  // 动态值（Lang.cs:126-144）——注入器缺位保留 token（null 语义同 NPC 名）
+  const dyn = (fn: () => string | number | boolean | null) => () => {
+    const v = subCtx ? fn() : null;
+    return v === null || v === undefined ? null : String(v);
+  };
+  m.set('WorldName', dyn(() => subCtx!.worldName()));
+  m.set('PlayerName', dyn(() => subCtx!.playerName()));
+  m.set('InventoryKey', dyn(() => subCtx!.inventoryKey()));
+  m.set('AnglerCompletedQuestsCount', dyn(() => subCtx!.anglerQuests()));
+  m.set('TotalDeathsCount', dyn(() => subCtx!.totalDeaths()));
+  // WorldEvilStone（:142-143）: Misc.Ebonstone / Misc.Crimstone
+  m.set('WorldEvilStone', () => lang.getTextValue(subCtx?.crimson() ? 'Misc.Crimstone' : 'Misc.Ebonstone'));
+  // ToggleArmorSetBonusKey（:161）: Key.DOWN（默认）/ Key.UP（ReversedUpDown 选项）
+  m.set('ToggleArmorSetBonusKey', () => lang.getTextValue(subCtx?.reversedArmorBonusKey() ? 'Key.UP' : 'Key.DOWN'));
+  return m;
+}
+
+const TOKEN_RE = /\{([A-Za-z][A-Za-z0-9_]*)\}/g;
+
+let substitutionTable: Map<string, () => string | null> | null = null;
+
+/** LocalizedText.Format 的 {Token} 段：注册表内替换（null=保留原文 token），
+ *  未注册 token 原样保留（与原版一致——{0} 数字位已被上一段消化）。
+ *  表惰性建一次（closure 捕获单例 lang，NPC 名经 resolver 活取） */
+function applyGlobalSubstitutions(s: string, lang: LangTextSource): string {
+  if (s.indexOf('{') < 0) return s;   // 快路径
+  if (!substitutionTable) substitutionTable = buildGlobalSubstitutions(lang);
+  return s.replace(TOKEN_RE, (whole, tok: string) => {
+    const gen = substitutionTable!.get(tok);
+    if (!gen) return whole;
+    const v = gen();
+    return v === null ? whole : v;
+  });
+}
+
 function buildTables(pack: Pack): LoadedPack {
   const texts = new Map<string, string>();
   const groupedKeys = new Map<string, string[]>();
@@ -171,11 +280,14 @@ class LanguageManager {
     return v;
   }
 
-  /** 取文案并做 {0}/{1} 位置参数替换(LanguageManager.cs:455-498 GetTextValue) */
+  /** 取文案并做 {0}/{1} 位置参数替换 + **全局替换表**（LanguageManager.cs:455-498
+   *  GetTextValue → LocalizedText.Format：先位置参数后 {Token} 全局替换——
+   *  Lang.cs:102-110 NPC 名 / :146-160 InputTrigger 键位名，此前未移植导致
+   *  171 条 ItemTooltip 裸显 "{InputTrigger_ToggleOrOpen} to open打开"） */
   getTextValue(key: string, ...args: (string | number)[]): string {
     let s = this.getText(key);
     for (let i = 0; i < args.length; i++) s = s.split(`{${i}}`).join(String(args[i]));
-    return s;
+    return applyGlobalSubstitutions(s, this);
   }
 
   /** $ 变体查询(对标 TryGetVariation,LanguageManager.cs:509) */

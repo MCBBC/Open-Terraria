@@ -67,6 +67,7 @@ function invBgDataUrl(w: number, h: number): string | null {
 import { atlasIconForKey, sliceItemAnimFrame, upgradeToBitmap } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
+import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
@@ -1303,7 +1304,13 @@ export class UI {
       if (nameKey) {
         const path = `ItemTooltip.${nameKey}`;
         if (Lang.has(path)) {
-          const tip = Lang.text(path);
+          let tip = Lang.text(path);
+          // 旗帜族 tooltip（{$NPCName.None} 构建期已落为裸键名,原版 L171 语义）:
+          // NPCName.None → 该旗对应 NPC 的显示名（原版由旗帜 tooltip 代码动态注入）
+          if (tip.includes('NPCName.None')) {
+            const bn = bannerNpcOfItem(vid);
+            if (bn > 0) tip = tip.split('NPCName.None').join(Lang.npcName(bn) ?? '');
+          }
           if (tip) html += tip.split('\n').map((ln) => `<br>${ln}`).join('');
         }
       }
@@ -2508,9 +2515,12 @@ export class UI {
       }
       x += Math.floor(52 * scale) + 4;
     }
-    // 选中物品名（:43003-43009：居中 x=236、mouseTextColor 脉动；空手回退 inter[37]）
+    // 选中物品名（:43003-43009：居中 x=236、mouseTextColor 脉动；空手回退 inter[37]）。
+    // 走 itemNameByKey 全链（vi_ key 前缀→官方 l10n→id-maps 兜底→place_v_ 方块名→
+    // Mods 自有键→def.name）：vi_ def 的 vid 字段不落、name 恒 ''（items.ts 自动注册
+    // 循环不写 vid），裸取 def.vid 会级联落空 → 恒显 inter(37)"物品"（退役批回归）
     const held = inv.slots[inv.selected];
-    const name = held ? (Lang.itemName(ITEM_DEFS[held.id]?.vid ?? -1) ?? ITEM_DEFS[held.id]?.name) : null;
+    const name = held ? Lang.itemNameByKey(ITEM_DEFS[held.id]?.key ?? '') : null;
     this.hotbarNameEl.textContent = name || Lang.inter(37);
   }
 

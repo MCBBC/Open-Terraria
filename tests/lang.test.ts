@@ -117,3 +117,53 @@ describe('LanguageManager', () => {
     }
   });
 });
+
+describe('全局替换表（Lang.cs:102-110/:146-160 RegisterGlobalSubstitution）', () => {
+  beforeEach(() => {
+    languageManager.resetForTest();
+  });
+  it('{InputTrigger_ToggleOrOpen} → Controls.RightClick 本地化键名（蠕虫罐头/礼袋 171 条 tooltip 的裸 token 修复）', () => {
+    languageManager.loadPackJson({
+      Controls: { RightClick: '右键点击', LeftClick: '左键点击', Control: 'Ctrl', Shift: 'Shift' },
+      ItemTooltip: { CanOfWorms: '{InputTrigger_ToggleOrOpen} to open打开' },
+    });
+    const out = languageManager.getTextValue('ItemTooltip.CanOfWorms');
+    expect(out).toBe('右键点击 to open打开');       // "to open打开"是 1.4.5.6 官中数据终态
+    expect(out).not.toContain('{');
+  });
+
+  it('其余键位 token：UseOrAttack→左键点击 / SmartCursor→Ctrl / Grapple→E / 未绑(LockOn)→空串', () => {
+    languageManager.loadPackJson({
+      Controls: { RightClick: '右键点击', LeftClick: '左键点击', Control: 'Ctrl', Shift: 'Shift' },
+      UI: {
+        A: '按住{InputTrigger_UseOrAttack}攻击',
+        B: '{InputTrigger_SmartCursor}切换光标',
+        C: '{InputTrigger_Grapple}抛出钩爪',
+        D: '[{InputTrigger_LockOn}]锁定',
+      },
+    });
+    expect(languageManager.getTextValue('UI.A')).toBe('按住左键点击攻击');
+    expect(languageManager.getTextValue('UI.B')).toBe('Ctrl切换光标');
+    expect(languageManager.getTextValue('UI.C')).toBe('E抛出钩爪');
+    expect(languageManager.getTextValue('UI.D')).toBe('[]锁定');
+  });
+
+  it('{Nurse} NPC 名：resolver 命中→随机名；未注入/无该 NPC→保留 token（null 语义）', async () => {
+    const { setNpcNameResolver } = await import('../src/i18n/LanguageManager');
+    languageManager.loadPackJson({ UI: { NurseHere: '{Nurse}已到达！' } });
+    expect(languageManager.getTextValue('UI.NurseHere')).toBe('{Nurse}已到达！');
+    setNpcNameResolver((t) => (t === 18 ? '安娜' : null));
+    expect(languageManager.getTextValue('UI.NurseHere')).toBe('安娜已到达！');
+    setNpcNameResolver(() => null);
+    expect(languageManager.getTextValue('UI.NurseHere')).toBe('{Nurse}已到达！');
+  });
+
+  it('{0} 位置参数与未注册 token 不受影响', () => {
+    languageManager.loadPackJson({
+      CommonItemTooltip: { RestoresLife: '恢复{0}生命' },
+      UI: { Weird: '造成{PowerUnit}点伤害' },
+    });
+    expect(languageManager.getTextValue('CommonItemTooltip.RestoresLife', 20)).toBe('恢复20生命');
+    expect(languageManager.getTextValue('UI.Weird')).toBe('造成{PowerUnit}点伤害');
+  });
+});

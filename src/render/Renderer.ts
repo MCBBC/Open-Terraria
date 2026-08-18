@@ -596,6 +596,20 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 骷髅王头/手（case 35/36, L67378+）：仅 RedHatSkeletron（ai[3]==1 红帽变种）才切帧；
   // 常规骷髅王恒帧 0——此前走通用全循环会闪到表内"红帽骷髅"帧
   if (ai === 11 || ai === 12) return 0;
+  // 兔/地面小动物族（FindFrame case 46，cs:77553-77600：46/47 兔·病害兔、303/337/
+  // 443/464/540/614、646-652）：站定=帧0 清计数；腾空 vy<0=帧4 / vy>0=帧6；
+  // 行走 counter += |vx|+1，**>6 才进一帧**、0..frames-1 全帧含帧 0 循环回 0。
+  // （曾错走城镇 NPC 档帧 2 起每 |vx|*2+1 计——兔子 3 倍速闪帧,2026-08-18 用户报告）
+  if (id === 46 || id === 47 || id === 303 || id === 337 || id === 443 || id === 464
+    || id === 540 || id === 614 || (id >= 646 && id <= 652)) {
+    if (!e.onGround) {
+      if (e.vy < 0) return Math.min(4, frames - 1);
+      return Math.min(6, frames - 1);
+    }
+    if (!walking) return 0;
+    // counter ≡ walkCycleT + t（每 tick += |vx| + 1）；越过 7 即进帧
+    return Math.floor((e.walkCycleT + t) / 7) % frames;
+  }
   // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 cs:70159-70240）：腾空=1；
   // 站定帧（cs:70163-70181）：638 是 0-7 待机循环（4t 推进）、140/489=帧1、其余=帧0；
   // 行走帧 2..frames-extra-1 循环（frameCounter += |vx|*2+1，阈值 num109：
@@ -739,6 +753,29 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // floor(counter/6)（0-7 每 6t）；蓄力（ai[1]>0）整带 +8（表 16 帧=待机 8+攻击 8。
   // 曾落通用 6t 档 → 16 帧连播两带混播）。相位取全局 t（%48），带切换时相位任意（差<48t）
   if (id === 533) return (e.ai1 > 0 ? 8 : 0) + Math.floor((t % 48) / 6);
+  // 鸟族 74/297/298/442（FindFrame case 74,cs:74326-74350）：站定(vx==0&&vy==0)=
+  // 帧 4 收翅站立;移动/飞行=帧 0..frames-2 每 4t 推进(回卷 frames-1→0——末帧行
+  // =站立帧不参与循环)。曾落末尾通用 6t 全帧循环 → 落地也播飞行动画(2026-08-18 报)
+  if (id === 74 || id === 297 || id === 298 || id === 442) {
+    if (e.vx === 0 && e.vy === 0) return Math.min(4, frames - 1);
+    return Math.floor(t / 4) % Math.max(1, frames - 1);
+  }
+  // 丛林鸟族 671-675（case 671,cs:74352-74377）：站定=帧 0;移动/飞行=帧 1..frames-1
+  // 每 4t 推进(回卷 frames→1,首帧行=站立不参与循环)
+  if (id >= 671 && id <= 675) {
+    if (e.vx === 0 && e.vy === 0) return 0;
+    return 1 + Math.floor(t / 4) % Math.max(1, frames - 1);
+  }
+  // 鸮族 611/689（case 611,cs:74379-74443）：站定=8 帧转头待机(三段 40t 序列
+  // {0,1,2,1}/{0,3,4,3}/{0,5,6,7} 各帧 10t;原版随机换段/1-80 跳帧近似为顺序轮播,
+  // 差异登记);移动/飞行=帧 8..frames-1 每 5t(<8 抬回 8)。表 13 帧=待机 8+飞行 5
+  if (id === 611 || id === 689) {
+    if (e.vx === 0 && e.vy === 0) {
+      const seq = [0, 1, 2, 1, 0, 3, 4, 3, 0, 5, 6, 7];
+      return seq[Math.floor(t / 10) % seq.length];
+    }
+    return 8 + Math.floor(t / 5) % Math.max(1, frames - 8);
+  }
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -3563,9 +3600,11 @@ export class Renderer {
         else if (stR === 18) ctx.rotate(e.visAngle);   // AI_018 水母族:漂移形 rotation=vx*0.4 / 攻击形 atan2(v)+π/2 / 离水 vx*0.1(cs:24371/24422/24459)
         else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
         else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection 仍镜像
+        else if (stR === 24) ctx.rotate(e.vx * 0.1);   // AI_024 鸟族:仅倾斜 vx*0.1(cs:74332/:74359/:74382);spriteDirection 仍镜像(611/689 取反见下)
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
+        if (!rotationDriven && (e.vanillaId === 611 || e.vanillaId === 689) && e.facing < 0) ctx.scale(-1, 1); // 鸮族 spriteDirection=-direction（:74381）:镜像取反
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐

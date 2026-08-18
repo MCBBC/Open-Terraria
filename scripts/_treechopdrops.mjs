@@ -37,7 +37,7 @@ const res = await page.evaluate(() => {
   return import('/src/data/tiles.ts').then((tm) => {
     const T = tm.T;
     const trees = [];
-    for (let x = 100; x < st.w - 100 && trees.length < 40; x++) {
+    for (let x = 5; x < st.w - 5 && trees.length < 400; x++) {
       for (let y = 30; y < st.h - 200; y++) {
         if (st.type[st.idx(x, y)] === T.TREE) {
           let bottom = y; while (st.type[st.idx(x, bottom + 1)] === T.TREE) bottom++;
@@ -46,19 +46,15 @@ const res = await page.evaluate(() => {
         }
       }
     }
-    let chops = 0;
+    let shakes = 0;
     for (const t of trees) {
       g.player.x = (t.x - 2) * 16; g.player.y = (t.y - 3) * 16;
-      g.player.vx = 0; g.player.vy = 0; g.player.useTime = 0;
-      for (let k = 0; k < 40; k++) {
-        g.tickCount += 60;
-        g.player.useTime = 0;
-        g['tryMine'](t.x, t.y, 100, 'axe', 16, 16);
-        chops++;
-        if (st.type[st.idx(t.x, t.y)] === 0) break;
-      }
+      g.player.vx = 0; g.player.vy = 0;
+      g.tickCount += 60;
+      g['tryShakeTree'](t.x, t.y);   // 纯摇树入口（每树每日一次）
+      shakes++;
     }
-    return { trees: trees.length, chops };
+    return { trees: trees.length, shakes };
   });
 });
 check('砍树执行', res.trees > 0, JSON.stringify(res));

@@ -42,6 +42,7 @@ export class SaveClient {
     const meta: Omit<SaveMeta, 'w' | 'h'> = {
       name: world.name, seed: world.seed,
       spawnX: world.spawnX, spawnY: world.spawnY,
+      spawnX0: world.spawnX0, spawnY0: world.spawnY0,   // 原始出生点（床 RemoveSpawn 回退）
       groundLevel: world.groundLevel, rockLevel: world.rockLevel, lavaLine: world.lavaLine,
       treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
       crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,

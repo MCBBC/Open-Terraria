@@ -539,12 +539,16 @@ export class Enemy extends Entity {
         this.vx += this.vx < 0 ? acc * 0.9 : -acc * 0.9;
       }
     } else {
-      // 掘地音效（:52375-52395）：间隔 = num63/40 钳 10..20；SoundID.EOWDiggin
-      // （eow_dig 音轨未提取，Dig_0/1/2 近似）+ 穿块碎屑（:51985-51988 KillTile
-      // fail:effectOnly 1/100 → 粒子近似）
-      if (this.digSndDelay <= 0) {
+      // 掘地/咆哮音效（:52375-52395）：间隔 = num63/40 钳 10..20；
+      // EoW 三段(13-15) = eow_dig 专属轨；【其余蠕虫族 = SoundID 15 Roar】——
+      // 骨蛇 39-41/食世者等接近时的周期咆哮(用户报"骨龙接近有音效",2026-08-18)；
+      // 排除表 621/87/117/454/412 不发声；EoW 另有 skyblock lowTiles 门(不涉)
+      const isEow = this.vanillaId >= 13 && this.vanillaId <= 15;
+      const digSndType = this.vanillaId === 621 || this.vanillaId === 87
+        || this.vanillaId === 117 || this.vanillaId === 454 || this.vanillaId === 412;
+      if (!digSndType && this.digSndDelay <= 0) {
         this.digSndDelay = Math.round(Math.min(20, Math.max(10, dist / 40)));
-        game.playSfx('dig', 1, this.cx, this.cy);
+        game.playSfx(isEow ? 'eowDig' : 'roar', 1, this.cx, this.cy);
       } else {
         this.digSndDelay--;
       }
@@ -997,6 +1001,8 @@ export class Enemy extends Entity {
   dirY = 1;
   /** AI 首帧初始化标记（原版 ai[0]==0 门在 ai0 初值 -1120 的史莱姆语义下不可用） */
   aiInit = false;
+  /** AI_024 鸮族 localAI[0]（出生即飞行一次性门,NPC.cs:25410-25416） */
+  owlAirborneInit = false;
   /** 原版 timeLeft（CheckActive 屏内每 tick 重置；activeTime=750，非 7500） */
   despawnTimer = 750;
   /** Boss 离场逃走标记（EncourageDespawn/天亮撤离等非击杀消亡）：
@@ -4402,79 +4408,136 @@ export class Enemy extends Entity {
     this.y += this.vy;
   }
 
-  /** 小动物被动 AI（原版 critter 语义近似）：间歇游荡 + 受击逃离玩家。
-   *  各家族原版行为（蚱蜢 ai1 跳/鸟 ai24 飞/蚯蚓 ai66 爬）后续逐族 1:1，先统一温和地面行为 */
-  /** AI_024 鸟（1.4.5.6 NPC.cs:25396+）：三态——0 地面踱步 / 1 飞行 / 2 降落。
-   *  飞行：X 轴同飘浮眼（0.1 步进 ±4 cap）；Y 轴探测前方下方 15 格——
-   *  全空 vy+=0.05 缓沉，受阻 vy-=0.1，近障 5 格内再 -0.2（L25568-25605）；
-   *  撞墙 direction 反转 + 旧速×-0.5（最小 ±3/±1，L25500+）；落水上浮 */
+  /** AI_024 鸟（NPC.cs:25396-25622 1:1）：三态——0 地面站立 / 1 飞行 / 2 降落。
+   *  鸮族(611/689)专属：出生即飞行；夜间栖息城镇 NPC 屋檐(ai0=2)；689 夜间
+   *  玩家 <80px 有视线 → Transform(317 魔眼)。
+   *  飞行：X 轴 0.1 步进,帽 3(丛林鸟 671-675 帽 4,:25495-25499);Y 轴前方
+   *  下探 15 格——全空 vy+=0.05 缓沉,受阻 vy-=0.1,近障 5 格内再 -0.2(:25568-25605);
+   *  撞墙 direction 反转 + 旧速×-0.5(最小 ±(cap-1)/±1);湿态上浮(:25596-25610)。
+   *  鸟粪弹(BirdThatCanPoop→proj 1080,:25398-25407)未接——缺小动物→弹幕钩子,备案 */
   private birdAI(game: GameHooks, player: Player | null) {
     // ai0===0/2 等值门：类默认 -1120 全空转 = 鸟永久滞空（地面/降落态成死代码）
     if (this.ai0 < 0) this.ai0 = 0;
     const st = game.world.store;
     const oldVx = this.vx, oldVy = this.vy;
-    if (this.ai0 === 0) {
-      // 地面态：重力踱步；玩家贴近/受击 → 起飞（远离方向）
-      this.applyGravity(game);
-      moveAndCollide(this, game.world, this.vx, this.vy);
-      if (this.onGround && this.aiT % 60 === 0) this.vx = (Math.random() < 0.5 ? -1 : 1) * 0.7;
-      if (this.onGround) this.vx *= 0.85;
-      const flee = player && Math.abs(player.cx - this.cx) < 48;
-      if ((flee || this.iframes > 0) && this.onGround) {
-        this.ai0 = 1;
-        this.vy = -6;
-        if (player) this.facing = player.cx > this.cx ? -1 : 1; // 远离玩家起飞
-      }
+    const id = this.vanillaId ?? 0;
+    const owl = id === 611 || id === 689;
+    const day = game.world.clock.isDay;
+    const cloud = (game.world.weather.cloudAlpha ?? 0) > 0;
+    // ---- 鸮族专属段（:25408-25451）----
+    // 689 夜间玩家 <80px 有视线 → Transform(317 魔眼)（:25409-25416）
+    if (id === 689 && !day && player && !player.dead
+      && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 80
+      && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)) {
+      this.tryTransformTo(317, st);
       return;
     }
-    if (this.ai0 === 2) {
-      // 降落态：缓降，落地回地面
+    // 出生即飞行（localAI[0]==0 → TargetClosest+ai[0]=1,:25410-25416）
+    if (owl && !this.owlAirborneInit) {
+      this.owlAirborneInit = true;
+      this.ai0 = 1;
+      if (player) this.facing = player.cx > this.cx ? 1 : -1;
+    } else if (owl && this.ai0 === 1 && !cloud && !day) {
+      // 夜间晴空栖息轮（:25426-25451）：城镇 NPC 下方（|dx|<96、dy 32-320、无视线）
+      // → ai0=2 降落栖息；同型非飞行个体 320px 内 → 回 ai0=1 防扎堆
+      for (const n of (game.npcs?.() ?? []) as Array<{ x: number; y: number; w: number; h: number; dead?: boolean }>) {
+        if ((n as { dead?: boolean }).dead) continue;
+        const ncx = n.x + n.w / 2, ncy = n.y + n.h / 2;
+        if (Math.abs(this.cx - ncx) < 96) {
+          const dy = ncy - this.cy;
+          if (dy > 32 && dy < 320
+            && !canHit(st, this.x, this.y, this.w, this.h, n.x, n.y, n.w, n.h)) {
+            this.ai0 = 2;
+          }
+        }
+      }
+      for (const c of (game.critters?.() ?? []) as Array<{ cx?: number; x?: number; w?: number; vanillaId?: number; ai0?: number; dead?: boolean }>) {
+        if ((c as { dead?: boolean }).dead || c === (this as unknown) || c.vanillaId !== id || c.ai0 === 1) continue;
+        const ccx = (c.cx ?? (c.x ?? 0) + (c.w ?? 0) / 2);
+        if (Math.abs(this.cx - ccx) < 320) { this.ai0 = 1; break; }
+      }
+    }
+    if (this.ai0 === 0) {
+      // 地面态（NPC.cs:25453-25481 1:1）：重力站立，**不踱步**——原版 vx 恒 0
+      // （降落态 :25488 归零后不再赋值），FindFrame 站定门 vx==0&&vy==0 → 站立帧。
+      // 曾自创 ±0.7 随机踱步 → vx 永不为 0，地面恒播飞行动画（2026-08-18 报）。
+      this.applyGravity(game);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      // 鸮族白天/阴天自动起飞（:25456-25459）——不翻向不设速
+      if (owl && (day || cloud)) {
+        this.ai0 = 1;
+      } else if (this.vx !== 0 || this.vy < 0 || this.vy > 0.3) {
+        // 被释放/被推动 → 起飞 + 翻向（:25463-25468；releaseOwner 未建字段,
+        // 释放路径落速即触发生效）
+        this.ai0 = 1;
+        this.facing = -(this.facing || 1);
+      } else if (!owl && player && !player.dead) {
+        // 玩家进 ±100px 盒（:25472 position-100±(w+200) 相交）或受伤 → 起飞：
+        // vy-=6 + direction 翻转（TargetClosest 朝玩家后取反 = 远离玩家）
+        const near = player.x < this.x + this.w + 100 && player.x + player.w > this.x - 100
+          && player.y < this.y + this.h + 100 && player.y + player.h > this.y - 100;
+        if (near || this.hp !== this.maxHp) {
+          this.ai0 = 1;
+          this.vy -= 6;
+          this.facing = player.cx > this.cx ? -1 : 1;
+        }
+      }
+    } else if (this.ai0 === 2) {
+      // 降落态（:25482-25493）：vx×0.98 缓降 vy+0.05 帽 2;落地（vy==0 检查在重力前,
+      // onGround 旗标等价）→ 回地面态 + vx 归零（站定门的保证）
       this.vx *= 0.98;
       this.vy = Math.min(this.vy + 0.05, 2);
       moveAndCollide(this, game.world, this.vx, this.vy);
       if (this.onGround) { this.ai0 = 0; this.vx = 0; }
-      return;
-    }
-    // 飞行态：X 轴
-    const dir = this.facing;
-    const cap = 4;
-    if (dir === -1 && this.vx > -cap) {
-      this.vx -= 0.1;
-      if (this.vx > 0) this.vx -= 0.05;
-      if (this.vx < -cap) this.vx = -cap;
-    } else if (dir === 1 && this.vx < cap) {
-      this.vx += 0.1;
-      if (this.vx < 0) this.vx += 0.05;
-      if (this.vx > cap) this.vx = cap;
-    }
-    // Y 轴：前方 15 格下探（L25569-25602）
-    const aheadX = Math.floor(this.cx / TILE) + dir;
-    const footY = Math.floor((this.y + this.h) / TILE);
-    let allClear = true, nearBlock = false;
-    for (let k = 0; k < 15; k++) {
-      const yy = footY + k;
-      if (yy >= st.h) continue;
-      if (st.isSolid(aheadX, yy) || st.liquid[st.idx(aheadX, yy)] > 0) {
-        if (k < 5) nearBlock = true;
-        allClear = false;
-        break;
+    } else if (player && !player.dead) {
+      // 飞行态（:25495-25595;目标玩家死亡时整段跳过——鸟保持惯性）
+      const dir = this.facing;
+      const cap = (id >= 671 && id <= 675) ? 4 : 3;   // num356:丛林鸟 4 其余 3
+      if (dir === -1 && this.vx > -cap) {
+        this.vx -= 0.1;
+        if (this.vx > 0) this.vx -= 0.05;
+        if (this.vx < -cap) this.vx = -cap;
+      } else if (dir === 1 && this.vx < cap) {
+        this.vx += 0.1;
+        if (this.vx < 0) this.vx += 0.05;
+        if (this.vx > cap) this.vx = cap;
+      }
+      // Y 轴：前方 15 格下探（:25568-25602）
+      const aheadX = Math.floor(this.cx / TILE) + dir;
+      const footY = Math.floor((this.y + this.h) / TILE);
+      let allClear = true, nearBlock = false;
+      for (let k = 0; k < 15; k++) {
+        const yy = footY + k;
+        if (yy >= st.h) continue;
+        if (st.isSolid(aheadX, yy) || st.liquid[st.idx(aheadX, yy)] > 0) {
+          if (k < 5) nearBlock = true;
+          allClear = false;
+          break;
+        }
+      }
+      if (allClear) this.vy += 0.05;
+      else this.vy -= 0.1;
+      if (nearBlock) this.vy -= 0.2;
+      this.vy = Math.max(-4, Math.min(2, this.vy));
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.hitWall) {
+        this.facing *= -1;
+        this.vx = -oldVx * 0.5;
+        if (this.facing === -1 && this.vx > 0 && this.vx < cap - 1) this.vx = cap - 1;
+        if (this.facing === 1 && this.vx < 0 && this.vx > -(cap - 1)) this.vx = -(cap - 1);
+      }
+      if (this.hitHead || this.onGround) {
+        this.vy = -oldVy * 0.5;
+        if (this.vy > 0 && this.vy < 1) this.vy = 1;
+        if (this.vy < 0 && this.vy > -1) this.vy = -1;
       }
     }
-    if (allClear) this.vy += 0.05;
-    else this.vy -= 0.1;
-    if (nearBlock) this.vy -= 0.2;
-    this.vy = Math.max(-4, Math.min(2, this.vy));
-    moveAndCollide(this, game.world, this.vx, this.vy);
-    if (this.hitWall) {
-      this.facing *= -1;
-      this.vx = -oldVx * 0.5;
-      if (this.facing === -1 && this.vx > 0 && this.vx < cap - 1) this.vx = cap - 1;
-      if (this.facing === 1 && this.vx < 0 && this.vx > -(cap - 1)) this.vx = -(cap - 1);
-    }
-    if (this.hitHead || this.onGround) {
-      this.vy = -oldVy * 0.5;
-      if (this.vy > 0 && this.vy < 1) this.vy = 1;
-      if (this.vy < 0 && this.vy > -1) this.vy = -1;
+    // 湿态上浮（:25596-25610,三态通用）：ai[1]=0 + vy>0×0.95 + vy-=0.5 钳 -4
+    //  + TargetClosest（朝玩家）
+    if (this.wet) {
+      this.vy = (this.vy > 0 ? this.vy * 0.95 : this.vy) - 0.5;
+      if (this.vy < -4) this.vy = -4;
+      if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
     }
   }
 

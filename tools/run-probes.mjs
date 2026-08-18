@@ -28,6 +28,7 @@ const PROBES = [
   { name: 'mounts', file: 'scripts/_mounts-probe.mjs', timeoutMs: 300_000 },
   { name: 'bunny-ai', file: 'scripts/_bunny-ai-probe.mjs', timeoutMs: 420_000 }, // 6000t 观测窗+240t 行走采样
   { name: 'cutbait', file: 'scripts/_cutbait-probe.mjs', timeoutMs: 420_000 },   // 镐破坏装饰组→蚯蚓族出生/姿势/cap
+  { name: 'l10n-subst', file: 'scripts/_l10n-subst-probe.mjs', timeoutMs: 240_000 }, // {InputTrigger_*} 全局替换(蠕虫罐头 171 条 tooltip)
 ];
 
 const argv = process.argv.slice(2);

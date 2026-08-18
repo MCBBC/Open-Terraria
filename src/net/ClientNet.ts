@@ -599,6 +599,7 @@ export class ClientNet {
     world.clock.timeOfDay = time;
     world.clock.dayCount = dayCount;
     world.spawnX = spawnX; world.spawnY = spawnY;
+    world.spawnX0 = spawnX; world.spawnY0 = spawnY;   // 网线协议未传原始点,回退 spawn（联机床重生回退近似）
     world.groundLevel = groundLevel; world.rockLevel = rockLevel; world.lavaLine = lavaLine;
     world.crimson = crimson;
     world.dungeonX = dungeonX; world.dungeonY = dungeonY; world.jungleX = jungleX;

@@ -1671,10 +1671,12 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
     widen++;
   }
   world.spawnX = sx;
+  world.spawnX0 = sx;   // 原始出生点快照（床 RemoveSpawn 回退锚）
   // spawnY = 地面行本身（原版 spawnTileY = j 直存,cs:19724）。消费端自行抬高：
   // Game.ts Player 用 (spawnY-3)*TILE（玩家 3 格高）。此前这里也 -3 → 双重偏移,
   // 玩家浮空 6 格后坠落
   world.spawnY = Math.max(4, sy);
+  world.spawnY0 = Math.max(4, sy);
   // ★原版 SpawnPoint（cs:19605-19731）不做任何地形清理——只写 spawnTileX/Y +
   //   tileSolid[379] 还原。此前自造"上空净空清理盒"（豁免树干/草面的 3×3+5×5 清空）
   //   = 8 通道外的自创写入：#78 干净基座下 4 格硬化沙被误清（T187>0×4）。

@@ -25,6 +25,24 @@ const BANNER_TO_NPCS = (() => {
   return m;
 })();
 
+/** 物品 → 旗帜对应 NPC id（tooltip 显示名注入用;非旗帜物品 -1）。
+ *  itemToBanner 满表在 ItemID.Sets（Main.cs 同源）——此处由 npcToBanner 全表
+ *  反查构建（一次性,290 条）;bannerToItem 仅 6 条显式项（多 banner 共享 item 的
+ *  特例,反查自然覆盖）。 */
+const ITEM_TO_NPC: Map<number, number> = (() => {
+  const m = new Map<number, number>();
+  for (const [npc, banner] of Object.entries(NPC_TO_BANNER)) {
+    const item = bannerItemId(Number(banner));
+    if (item > 0 && !m.has(item)) m.set(item, Number(npc));
+  }
+  // 共享 item 的家族取最小 npc id（如 104 族共用一旗——名取家族首位）
+  return m;
+})();
+
+export function bannerNpcOfItem(itemId: number): number {
+  return ITEM_TO_NPC.get(itemId) ?? -1;
+}
+
 export function bannerOfNpc(npcId: number): number {
   return D.npcToBanner[String(npcId)] ?? D.npcToBanner[npcId] ?? 0;
 }

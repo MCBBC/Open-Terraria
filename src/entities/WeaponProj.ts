@@ -1775,6 +1775,11 @@ export class GrenadeProj extends Entity {
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
   /** 911 首贴标记（原版 localAI[0]，:44364/:44372） */
   private stuckOnce = false;
+  /** 655 摇树蜂巢（AI_025 :17856-17867）：落地 vy>5 反弹×0.2（且只弹不杀）；
+   *  水平撞墙即 Kill → 裂 2+Next(3)³ 蜂（Kill :72110-72155）；wet Kill 落
+   *  蜂王浆 1124×Next(2,6)（:72124-72128）。裂蜂回调由 Game 注入（出怪上限门
+   *  GetAvailableAmountOfNPCsToSpawnUpToSlot 在 Game 侧） */
+  onBeehiveKill?: (wet: boolean, px: number, py: number, vx: number, vy: number) => void;
 
   // ---- 发射器弹药族（AI_016 else 发射支 :44542-44911，2026-08-14 对账新增）----
   /** fired = 发射族（无 PrepareBombToBlow 投掷臂路径；无重力直线/加速/追踪） */
@@ -1797,6 +1802,16 @@ export class GrenadeProj extends Entity {
     778, 782, 786, 789, 792, 795, 798, 801]);
   /** 发射支 ai[0]（追踪 ramp 用） */
   private firedAi0 = 0;
+
+  /** 655 蜂巢落地/撞墙 Kill（:72110-72155）：音 4 + 尘 147×30 + 裂蜂回调
+   *  （数量/出怪上限门在 Game 侧）。引信耗尽走 onExplode 不入此路。 */
+  private killBeehive(game: GameHooks, lastVx: number, lastVy: number): void {
+    if (this.dead) return;
+    this.dead = true;
+    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
+    game.spawnParticles(this.cx, this.cy, '#B8D878', 30, 1.8, { life: 20 });
+    this.onBeehiveKill?.(false, this.cx, this.cy, lastVx * 1.9, lastVy * 1.9);
+  }
   /** 火箭贴墙待爆标记（vel=0 后停物理） */
   private stickPending = false;
   /** 感应雷布防 alpha（0 常态 → 200 布防） */
@@ -2063,6 +2078,14 @@ export class GrenadeProj extends Entity {
       stepUp: false, dropThrough: false, stepDownGate: 'gravity' as const,
     };
     moveAndCollide(body, game.world, this.vx, this.vy);
+    // 655 蜂巢专属（:17856-17867）：落地 vy>5 → 反弹×0.2（无摩擦档）；撞墙即裂
+    if (this.projId === 655) {
+      if (body.onGround && lastVy > 5) this.vy = -lastVy * 0.2;
+      else if (body.onGround) { this.vy = 0; this.x = body.x; this.y = body.y; return; }
+      else { this.x = body.x; this.y = body.y; }
+      if (body.hitWall) this.killBeehive(game, lastVx, lastVy);
+      return;
+    }
     // 碰墙反弹（:18344-18350）：vx = lastVx × -0.4（炸药棍族再 ×0.8）
     if (body.hitWall) {
       this.vx = lastVx * -0.4;

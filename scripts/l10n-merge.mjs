@@ -97,7 +97,10 @@ export function expandCopyCommands(table, maxIterations = 100) {
         const next = value.replace(re, (m, ref) => {
           const [cat, sub] = ref.split('.');
           const v = table[cat]?.[sub];
-          return v !== undefined ? v : m; // 未命中保留原样(原版 L171 行为)
+          // 未命中 → 裸键名(原版 LanguageManager.cs L171 `: text2`——替换为引用名
+          // 本身而非保留 {$};旗帜族 {$NPCName.None} 即此形态,由 tooltip 层
+          // 动态换成 NPC 显示名,2026-08-18 纠正曾"保留原样"的误读)
+          return v !== undefined ? v : ref;
         });
         if (next !== value) {
           entries[key] = next;
