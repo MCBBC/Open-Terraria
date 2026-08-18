@@ -203,5 +203,19 @@ if (process.env.SW_AAA_DGREP === '1') {
     const t0 = Date.now();
     runDungeonPass(st, rng2, gs, chests as never, snapFn);
     console.log(`replay ${((Date.now() - t0) / 1000).toFixed(0)}s rolls=${rolls} fnv=${fnvState()}`);
+    // AAAA 追加：replay 末态 dungeon 锚 + 砖外接盒（x86 dome 定位对拍）
+    const g2 = gs as unknown as Record<string, number>;
+    console.log(`replay anchor: dungeonEntX=${g2.dungeonEntX} dungeonEntY=${g2.dungeonEntY} gs.dungeonY=${g2.dungeonY} genPosX=${g2.generatingDungeonPositionX}`);
+    const BRICK = REV.get(41)!;
+    let bx0 = 1e9, bx1 = -1, by0 = 1e9, by1 = -1, cnt = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      if (st.flags[i] && st.type[i] === BRICK) {
+        if (x < bx0) bx0 = x; if (x > bx1) bx1 = x;
+        if (y < by0) by0 = y; if (y > by1) by1 = y;
+        cnt++;
+      }
+    }
+    console.log(`replay brick bbox=(${bx0},${by0})-(${bx1},${by1}) count=${cnt}`);
   }, 900_000);
 }

@@ -820,6 +820,15 @@ export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
     && Math.hypot(tgt!.x - e.cx, tgt!.y - e.cy) > 150;
   if (x[0] === -1 && !inSand) x[0] = 20;           // 跃出后落回非沙 → 短冷却（:42643-42645）
   if (x[0] > 0) x[0] -= 1;
+  // 游弋周期音（:42652-42663）：soundDelay==0 时播 (15,4)=Roar_1 ×0.25(legacy
+  //   style4 音量档),delay = 玩家距/40 钳 10..20——与蠕虫掘地音同构
+  if (inSand && e.digSndDelay <= 0) {
+    const dd = tgt ? Math.hypot(tgt.x - e.cx, tgt.y - e.cy) : 400;
+    e.digSndDelay = Math.round(Math.min(20, Math.max(10, dd / 40)));
+    game.playSfxWav?.('Roar_1', 1, e.cx, e.cy);
+  } else if (e.digSndDelay > 0) {
+    e.digSndDelay--;
+  }
   if (inSand) {
     // ---- 沙中巡游（:42652-42745） ----
     e.ai2 = Math.min(e.ai2 + 1, 30);               // 扑咬回充（:42660-42662）
@@ -841,7 +850,7 @@ export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (!aheadSand && sign(e.vx) === e.facing
         && Math.hypot(tgt!.x - e.cx, tgt!.y - e.cy) < range
         && (e.ai2 >= 30 || e.ai2 < 0)) {
-        if (x[0] === 0) x[0] = -1;                 // 出沙音效节拍（:42704-42707）
+        if (x[0] === 0) { x[0] = -1; game.playSfxWav?.('Zombie_7', 1, e.cx, e.cy); }  // :42713 (14,542) 出沙扑咬音
         e.ai2 = -30;
         const d = dirTo(e, tgt!.x, tgt!.y - 80);   // 跃沙扑咬 12 速（:42708-42711）
         e.vx = d.x * 12;

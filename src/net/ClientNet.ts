@@ -39,6 +39,8 @@ export interface RemotePlayerState {
   /** 权威 HP（msg16 镜像——Game 接线到 proxy.hp 供头顶血条/死亡表现） */
   hp: number;
   maxHp: number;
+  /** msg13 flagBits[0]（原版 bitsByte26[0]）:躺床态 */
+  sleeping: boolean;
 }
 
 /** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制；v4 尾部 maxPlayers；
@@ -347,7 +349,7 @@ export class ClientNet {
               slot, name, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
-              hostile: false, team: 0, hp: 100, maxHp: 100,
+              hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
             };
             this.players.set(slot, p);
           }
@@ -391,7 +393,7 @@ export class ClientNet {
             up: false, down: false, left: false, right: false, jump: false, useItem: false,
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
             fresh: true, active: true, lastFresh: performance.now(),
-            hostile, team, hp: 100, maxHp: 100,
+            hostile, team, hp: 100, maxHp: 100, sleeping: false,
           };
           this.players.set(slot, p);
         }
@@ -402,6 +404,7 @@ export class ClientNet {
         p.jump = !!(ctrl & 16); p.useItem = !!(ctrl & 32);
         p.facing = ctrl & 64 ? 1 : -1;   // ctrlBits[6] = direction（原版）
         p.selectedItem = sel;
+        p.sleeping = !!(flag & 1);   // flagBits[0]（原版 bitsByte26[0] sleeping.isSleeping）
         p.dead = !!(flag & 64);           // flagBits[6] = ghost
         p.hostile = hostile; p.team = team;
         p.fresh = true;                   // Game 侧注入 netOffset 后清零
@@ -599,7 +602,10 @@ export class ClientNet {
     world.clock.timeOfDay = time;
     world.clock.dayCount = dayCount;
     world.spawnX = spawnX; world.spawnY = spawnY;
-    world.spawnX0 = spawnX; world.spawnY0 = spawnY;   // 网线协议未传原始点,回退 spawn（联机床重生回退近似）
+    // 尾部追加字段(v8):spawnX0/spawnY0 原始出生点(床 RemoveSpawn 回退)——旧服
+    // 无此两 i32 时 remaining 不足,回退当前 spawn
+    if (r.remaining >= 8) { world.spawnX0 = r.i32(); world.spawnY0 = r.i32(); }
+    else { world.spawnX0 = spawnX; world.spawnY0 = spawnY; }
     world.groundLevel = groundLevel; world.rockLevel = rockLevel; world.lavaLine = lavaLine;
     world.crimson = crimson;
     world.dungeonX = dungeonX; world.dungeonY = dungeonY; world.jungleX = jungleX;
@@ -668,7 +674,8 @@ export class ClientNet {
     const sel = (p.inv as unknown as { selected: number }).selected & 0xff;
     // 控制位变化即时发（原版 TrySyncingInput Player.cs:6484：任一 control/selectedItem
     // 变化立刻 SendData(13)）——原地起跳这类"位置未动"的操作不再等静止心跳
-    const ctrlChanged = ctrl !== this.lastSentCtrl || sel !== this.lastSentSel || p.dead !== this.lastSentDead;
+    const ctrlChanged = ctrl !== this.lastSentCtrl || sel !== this.lastSentSel || p.dead !== this.lastSentDead
+      || (p as unknown as { sleeping: boolean }).sleeping !== this.lastSentSleep;   // 躺床切换即时发(原版 Start/StopSleeping SendData(13))
     const now = performance.now();
     const moved = Math.abs(p.x - this.lastSentPos.x) > 1 || Math.abs(p.y - this.lastSentPos.y) > 1;
     const pvpChanged = this.lastSentHostile !== this.game.player.hostile || this.lastSentTeam !== this.game.player.team;
@@ -683,9 +690,11 @@ export class ClientNet {
     this.lastSentDead = p.dead;
     this.lastSentHostile = this.game.player.hostile;
     this.lastSentTeam = this.game.player.team;
-    // flagBits: [2]hasVelocity [6]ghost [7]hostile(v7)；v7 尾部追加 u8 team(0-5)
+    // flagBits: [0]sleeping(原版 bitsByte26[0]) [2]hasVelocity [6]ghost [7]hostile(v7)；v7 尾部追加 u8 team(0-5)
     const gp = this.game.player as unknown as { hostile: boolean; team: number };
-    const flag = 4 | (p.dead ? 64 : 0) | (gp.hostile ? 128 : 0);
+    this.lastSentSleep = (p as unknown as { sleeping: boolean }).sleeping;
+    const flag = 4 | ((p as unknown as { sleeping: boolean }).sleeping ? 1 : 0)
+      | (p.dead ? 64 : 0) | (gp.hostile ? 128 : 0);
     this.send(new NetWriter(Msg.PlayerState)
       .u8(this.mySlot)
       .u8(ctrl).u8(flag)
@@ -702,6 +711,7 @@ export class ClientNet {
   private lastSentCtrl = -1;
   private lastSentSel = -1;
   private lastSentDead = false;
+  private lastSentSleep = false;   // msg13 flagBits[0] 躺床位(变化即时发)
   private lastSentHostile = false;
   private lastSentTeam = 0;
 

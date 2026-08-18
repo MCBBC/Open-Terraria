@@ -270,6 +270,21 @@ export function scoreRoom(
  * 从一扇门向内检查房间。doorX/doorY = 门顶格；门两侧/三行逐一尝试作填充起点。
  * 返回 null = 不构成合格房屋（漏墙 / 太大太小 / 缺桌椅灯）。
  */
+/** 纯围合房间判定（WorldGen.StartRoomCheck 1:1 语义——床 CheckSpawn 专用:
+ *  只查边界/漏墙/墙型/尺寸,无家具(RoomNeeds)/站位要求）。extraSolid = 视为
+ *  实心的 sheet 集（CheckSpawn 期 tileSolid[379] 泡沫块翻转同构） */
+export function checkRoomEnclosure(st: TileStore, x: number, y: number, extraSolid?: Set<number>): Room | null {
+  for (const side of [-1, 1]) {
+    for (let dy = 0; dy <= 2; dy++) {
+      const sx = x + side, sy = y + dy;
+      if (!st.inBounds(sx, sy) || st.isSolid(sx, sy)) continue;
+      const room = floodRoom(st, sx, sy, undefined, { requireFurniture: false, requireStand: false, extraSolid });
+      if (room) return room;
+    }
+  }
+  return null;
+}
+
 export function checkRoom(st: TileStore, doorX: number, doorY: number): Room | null {
   for (const side of [-1, 1]) {
     for (let dy = 0; dy <= 2; dy++) {
@@ -302,7 +317,20 @@ function hasLooseWallEvidence(st: TileStore, x: number, y: number): boolean {
 
 /** 泛洪填充一个房间（8 向 = 原版 StartRoomCheck 邻居压栈 j,k∈-1..1，:6037-6043；
  *  对角穿墙连通是原版语义；门/平台/实心为边界） */
-function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFlags): Room | null {
+/** floodRoom 选项：requireFurniture/requireStand 关掉 = 原版 StartRoomCheck 的
+ *  纯围合语义（床 CheckSpawn 用——原版床设点只查围合,家具是 TownNPC RoomNeeds
+ *  的独立步骤）;extraSolid = 临时视为实心的 sheet 集（原版 CheckSpawn 期间翻转
+ *  tileSolid[379] 泡沫块的同构）。 */
+interface FloodOpts {
+  requireFurniture?: boolean;
+  requireStand?: boolean;
+  extraSolid?: Set<number>;
+}
+
+function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFlags, opts: FloodOpts = {}): Room | null {
+  const requireFurniture = opts.requireFurniture !== false;
+  const requireStand = opts.requireStand !== false;
+  const extraSolid = opts.extraSolid;
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
   let minX = sx, maxX = sx, minY = sy, maxY = sy;
@@ -325,8 +353,10 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
     // （WorldGen.cs:6150-6185）：自身无房墙时，横/竖各 ±2 的 5×1 窗口内出现
     // 房墙或实心/HousingWalls tile（nactive）即算有墙——横竖两向须都有证据
     if (!st.flags[i] && !WALL_HOUSE.has(st.wall[i]) && !hasLooseWallEvidence(st, x, y)) {
-      lastRoomCheckFail = 'hole';
-      return null;   // 漏墙（HoleInWallIsTooBig）
+      // WorldGen.CheckRoom :6171-6181 尾：有墙但非房墙 = TooManyUnsafeWalls（天然
+      // 墙不安全）;无墙 = HoleInWallIsTooBig（漏墙）
+      lastRoomCheckFail = st.wall[i] > 0 ? 'unsafeWalls' : 'hole';
+      return null;
     }
     if (st.flags[i] && def) {
       if (isDoorType(t)) { hasDoor = true; }
@@ -337,7 +367,7 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
       const nx = x + dx, ny = y + dy;
       if (nx < 1 || ny < 1 || nx >= st.w - 1 || ny >= st.h - 1) {
-        lastRoomCheckFail = 'hole';   // 泛洪越界 = 没封好
+        lastRoomCheckFail = 'edge';   // 原版 CheckRoom 越界 = TooCloseToWorldEdge
         return null;
       }
       const ni = st.idx(nx, ny);
@@ -349,7 +379,8 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
       // → 平台地板封房、桌/砧/笼等家具（tileSolid=false）为房内格可穿透。
       // 原版先 roomTiles.Add 再拒绝（6076-6080）——边界格也入集合，
       // ScoreRoom 的 Housing_CheckIfInRoom(地板格) 依赖这一点
-      if (tileSolidLike(nt) || isDoorType(nt)) {
+      if (tileSolidLike(nt) || isDoorType(nt) || (extraSolid !== undefined && nt !== 0
+        && extraSolid.has(sheetOf(nt)))) {
         if (isDoorType(nt)) hasDoor = true;
         tiles.add(ni);
         if (nx < minX) minX = nx;
@@ -375,10 +406,15 @@ function floodRoom(st: TileStore, sx: number, sy: number, needsOut?: RoomNeedsFl
     }
   }
   flush();
-  if (tiles.size < MIN_TILES || !hasDoor || !hasTable || !hasChair || !hasLight) {
-    lastRoomCheckFail = tiles.size < MIN_TILES ? 'tooSmall' : 'notValid';
+  if (tiles.size < MIN_TILES) {
+    lastRoomCheckFail = 'tooSmall';
     return null;
   }
+  if (requireFurniture && (!hasDoor || !hasTable || !hasChair || !hasLight)) {
+    lastRoomCheckFail = 'notValid';   // RoomNeeds 家具档（TownNPC 住房用;床围合档跳过）
+    return null;
+  }
+  if (!requireStand) return { standX: sx, standY: sy, tiles };
   // 站立点：起点列向下找地板
   let fy = sy;
   while (fy < st.h - 2 && !st.isSolid(sx, fy)) fy++;
@@ -462,7 +498,7 @@ export interface HousingQueryResult {
 /** 最近一次 floodRoom/checkRoom 失败原因（WorldGen.roomCheckFailureReason 对齐；
  *  床 CheckSpawn 的失败文案映射消费：tooBig=格数/跨度上限、tooSmall=格数下限、
  *  hole=漏墙/泛洪越界、notValid=缺家具/站位失败；'edge' 为调用方边界预检保留） */
-export type RoomCheckFailReason = 'edge' | 'tooBig' | 'tooSmall' | 'hole' | 'notValid';
+export type RoomCheckFailReason = 'edge' | 'tooBig' | 'tooSmall' | 'hole' | 'unsafeWalls' | 'notValid';
 export let lastRoomCheckFail: RoomCheckFailReason = 'notValid';
 
 export function queryRoom(st: TileStore, x: number, y: number): HousingQueryResult {

@@ -256,15 +256,34 @@ function render() {
     }
   };
   if (S.viaChunk) {
-    bakeCv.width = st.w * T; bakeCv.height = st.h * T;
-    const bc = bakeCv.getContext('2d');
-    bc.clearRect(0, 0, bakeCv.width, bakeCv.height);
-    drawStatic(bc, 0, 0);
+    // ★真实 chunk 拼装（Renderer :1789 同款）：16×16 tile 一块独立画布，
+    // 世界变换内 drawImage(chunk, cx*256, cy*256, 256+1, 256+1)——非整数 zoom
+    // 下 256*z 非整数 → chunk 落小数设备像素 → 边缘最近邻采样缝隙复现
+    const CH = 16;                       // CHUNK tile
+    const CHW = st.w, CHH = st.h;
+    const chunkCanvases = [];
+    for (let cy = 0; cy < Math.ceil(CHH / CH); cy++) {
+      for (let cx = 0; cx < Math.ceil(CHW / CH); cx++) {
+        const c2 = document.createElement('canvas');
+        c2.width = CH * T; c2.height = CH * T;
+        const cc = c2.getContext('2d');
+        cc.imageSmoothingEnabled = false;
+        cc.translate(-cx * CH * T, -cy * CH * T);
+        drawStatic(cc, 0, 0);
+        chunkCanvases.push({ c: c2, cx, cy });
+      }
+    }
+    const ts = T;
     ctx.save();
-    ctx.translate(Math.round(cw / 2), Math.round(ch / 2));
-    ctx.scale(z, z);
-    ctx.translate(-camRX, -camRY);
-    ctx.drawImage(bakeCv, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    for (const { c, cx, cy } of chunkCanvases) {
+      const xd0 = Math.round((cx * CH * ts - camRX) * z);
+      const yd0 = Math.round((cy * CH * ts - camRY) * z);
+      const xd1 = Math.round(((cx + 1) * CH * ts - camRX) * z);
+      const yd1 = Math.round(((cy + 1) * CH * ts - camRY) * z);
+      ctx.drawImage(c, xd0, yd0, xd1 - xd0 + 1, yd1 - yd0 + 1);
+    }
     ctx.restore();
   } else {
     ctx.save();
@@ -380,7 +399,7 @@ radio('presets', Object.keys(PRESETS).map((k) => [k.split('（')[0], k]),
   () => S.preset, (v) => { S.preset = Object.keys(PRESETS).find((k) => k.startsWith(v)); buildWorld(); });
 radio('windModes', [['静止(sway=0)', 'still'], ['无风微摆(同游戏)', 'idle'], ['强风', 'gale']],
   () => S.windMode, (v) => { S.windMode = v; S.phaseOverride = null; windSway.wind = v === 'gale' ? 1 : 0; });
-radio('zooms', [['×2', 2], ['×4', 4], ['×8', 8]], () => S.zoom, (v) => { S.zoom = v; });
+radio('zooms', [['×1.27', 1.27], ['×1.25', 1.25], ['×2', 2], ['×4', 4], ['×8', 8]], () => S.zoom, (v) => { S.zoom = v; });
 radio('biomes', Object.keys(BIOME_GRASS).map((k) => [k, k]), () => S.biome, (v) => { S.biome = v; buildWorld(); });
 {
   const sel = $('crownSel');

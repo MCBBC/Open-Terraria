@@ -244,6 +244,11 @@ const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg
 export class VanillaSpawner {
   // ---- SpawnFlags（Spawner 字段 L39-137） ----
   private pX = 0; private pY = 0;
+  /** 本轮半屏格数（spawn() 注入）——书怪 693/694 的书屏外门（CheckNotSpawningOnScreen
+   *  对【书位】而非落点求值，NPC.cs:26275 AI_FindNearbyBook checkPlayerScreenRanges） */
+  private viewHalfW = 0; private viewHalfH = 0;
+  /** 本地玩家中心 px（spawn() 注入）——书屏外门用（原版 player.Center px，:5356） */
+  private playerPx = 0; private playerPy = 0;
   private dayTime = true;
   private hardMode = false;
   private expert = false;
@@ -1070,9 +1075,17 @@ export class VanillaSpawner {
    *  落脚格 16×16 与"玩家屏幕 ±safeRange"矩形相交 → 拒绝。
    *  注意原版单位混用（L5354）：safeRangeX/Y 是格数但直接当像素偏移加——实际外扩仅 ~2 格 */
   private checkNotSpawningOnScreen(px: number, py: number, viewHalfW: number, viewHalfH: number): boolean {
+    this.viewHalfW = viewHalfW; this.viewHalfH = viewHalfH;
+    return this.tileClearOfPlayerScreens(this.spawnTileX, this.spawnTileY, px, py);
+  }
+
+  /** CheckNotSpawningOnScreen 的格坐标版：tx/ty 的 16×16 盒与任一活跃玩家
+   *  "屏幕 ±safeRange"矩形相交 → false（本地 + remotePlayers 全查，:5350-5365） */
+  private tileClearOfPlayerScreens(tx: number, ty: number, px: number, py: number): boolean {
+    const viewHalfW = this.viewHalfW, viewHalfH = this.viewHalfH;
     const sW = viewHalfW * 2 * TILE, sH = viewHalfH * 2 * TILE;
     const safePxX = viewHalfW * 1.04, safePxY = viewHalfH * 1.04; // 格数直接当像素（原版 L5354 原样）
-    const tX = this.spawnTileX * TILE, tY = this.spawnTileY * TILE;
+    const tX = tx * TILE, tY = ty * TILE;
     const clear = (cx: number, cy: number): boolean => {
       const rectX = cx - sW / 2 - safePxX, rectY = cy - sH / 2 - safePxY;
       const rectW = sW + safePxX * 2, rectH = sH + safePxY * 2;
@@ -2054,7 +2067,24 @@ export class VanillaSpawner {
         if (variant === 2 && N(5)) return D(72);
         if (variant === 0 && N(7)) return D(34);   // 诅咒头骨
         if (N(7)) return D(32);    // 黑魔法师
-        // 书架书怪 693/694（AI_FindNearbyBook）：书架实体系统未实现，暂缺
+        // ---- 书怪 693/694（NPC.cs:2655-2677）：Next(8)==0 → 694 水书宝箱怪（ai[3]=3
+        //      伪装态出生），else Next(10)==0 → 693 图书管理员骷髅；两者都在【书位】出生
+        //      （AI_FindNearbyBook :62751：spawnTile−16 起 32×32 窗 closestBook +
+        //      屏外门）。掷中但无书（flag13 false）→ 空过落下方 num44 掷（1:1）。
+        //      书 = 玩家放置的 tile 50 书（v_50_books，放书架 101 破坏掉书物再放置）。
+        if (N(8)) {
+          const book = this.findNearestBookForSpawn();
+          if (book) {
+            const m = this.spawnNPC(book.x * TILE + 8, book.y * TILE, 694, rng);
+            if (m) { m.ai3 = 3; return m; }   // SpawnNPC(...,694,0,0,0,0,3f)——伪装态
+          }
+        } else if (N(10)) {
+          const book = this.findNearestBookForSpawn();
+          if (book) {
+            const m = this.spawnNPC(book.x * TILE + 8, book.y * TILE, 693, rng);
+            if (m) return m;
+          }
+        }
         // L2674：num44 = Next(5) → 0..4（本仓 rng.int 闭区间——此前误写 int(0,5) 多出
         //  第 6 档 undefined id，已改 int(0,4)；case 3/4 落空走下方大小变体支）
         const av = rng.int(0, 4);
@@ -2917,6 +2947,28 @@ export class VanillaSpawner {
     return this.activeIds.has(70);
   }
 
+  /** AI_FindNearbyBook（NPC.cs:2656/2667 调用档：spawnTile−16 起 32×32 窗，
+   *  closestBook=true + checkPlayerScreenRanges=true，:62751-62804）：
+   *  扫玩家放置的书（tile 50），屏内书跳过，返回距窗角最近的书格；无书 → null */
+  private findNearestBookForSpawn(): { x: number; y: number } | null {
+    const st = this.world.store;
+    const x0 = Math.max(0, this.spawnTileX - 16), x1 = Math.min(st.w, this.spawnTileX + 16);
+    const y0 = Math.max(0, this.spawnTileY - 16), y1 = Math.min(st.h, this.spawnTileY + 16);
+    // vector2 = 窗角（spawnTile−16,−16）——closestBook 距离基准（:62769-62770）
+    const refX = this.spawnTileX - 16, refY = this.spawnTileY - 16;
+    let best = Infinity, bx = -1, by = -1;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const t = st.get(x, y);
+        if (!t || TILE_DEFS[t]?.vanilla?.sheet !== 50) continue;
+        if (!this.tileClearOfPlayerScreens(x, y, this.playerPx, this.playerPy)) continue;  // :62782-62786
+        const d = (x - refX) * (x - refX) + (y - refY) * (y - refY);
+        if (d < best) { best = d; bx = x; by = y; }
+      }
+    }
+    return bx >= 0 ? { x: bx, y: by } : null;
+  }
+
   /** CanSpawnDevourer（NPC.cs:5478-5492 1:1）：!infectedSeed → 恒 true；
    *  infectedSeed && teamBasedSpawnsSeed → false；|X-spawnTileX|>maxTilesX×0.08 → true。
    *  本仓无种子系统（恒非 infectedSeed）→ 恒 true（后两分支不可达，保留签名对齐原文） */
@@ -3111,6 +3163,8 @@ export class VanillaSpawner {
   spawn(playerX: number, playerY: number, rng: RNG, viewHalfW: number, viewHalfH: number): Enemy | null {
     this.pX = Math.floor(playerX / TILE);
     this.pY = Math.floor(playerY / TILE);
+    this.viewHalfW = viewHalfW; this.viewHalfH = viewHalfH;
+    this.playerPx = playerX; this.playerPy = playerY;
     this.dayTime = this.world.clock.isDay;
     this.hardMode = !!this.world.flags.hardMode;
     this.expert = mainExpertMode(this.world);          // Main.expertMode（GetBasicSlimeToSpawn 绿/紫门用）

@@ -125,9 +125,16 @@ function solidTileStrict(st: TileStore, x: number, y: number): boolean {
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
 
+/** 诊断段钩子(CCCC 批):SW_CCCC 探针消费,零开销可选调用 */
+const segProbe = (name: string, detail?: unknown): void => {
+  const g = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
+  try { g.__swSeg?.(name, detail); } catch { /* probe */ }
+};
+
 export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests?: ChestSink): void {
   const g0 = globalThis as { __swMbCap?: (gs: GenState, st: TileStore, chests?: ChestSink) => void };
   try { g0.__swMbCap?.(gs, st, chests); } catch { /* probe */ }
+  segProbe('passStart');
   // Skyblock.denyAllGeneration 包裹整个 pass(cs:21787)——1.4.5.6 skyblock 种子全段跳过
   if (gs.seedFlags.skyblock) return;
   const { w, h } = st;
@@ -148,7 +155,9 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     const deadMans = new DeadMansChestBiome(st, rng, gs, chests ?? []);
     // GetPossibleChestsToTrapify 先于计数掷骰(cs:21806-21807)——每候选 4 掷
     const possible = deadMans.getPossibleChests();
+    segProbe('deadCands', possible.map(p => [p.x, p.y]));
     const deadCount = rng.int(scW(10), scW(20));   // DeadManChests 10-20 ×WorldWidth
+    segProbe('deadCount', deadCount);
     let done = 0;
     let guard = 3000;                              // num4
     while (done < deadCount && possible.length > 0) {
@@ -156,6 +165,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       const pick = rng.int(0, possible.length - 1);
       const c = possible[pick];
       deadMans.place(c.x, c.y);                    // 返回值原版丢弃(cs:21814)
+      segProbe('deadPlace', [c.x, c.y]);
       done++;
       possible.splice(pick, 1);
     }
@@ -164,12 +174,14 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   // ---- 2. Thin Ice(cs:21825-21854)----
   if (!gs.seedFlags.notTheBees || gs.seedFlags.remix) {
     const iceCount = rng.int(scW(3), scW(5));      // ThinIcePatchCount 3-5 ×WorldWidth
+    segProbe('iceCount', iceCount);
     let iceDone = 0, iceFail = 0;
     const iceFailLimit = 1000;                     // num9
     while (iceDone < iceCount) {
       // RandomWorldPoint(worldSurface+20, 50, 200, 50)(cs:21836)
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 20, h - 201);
+      segProbe('iceTry', [ox, oy]);
       if (placeThinIcePatch(st, rng, gs, ox, oy)) {
         iceDone++;
         iceFail = 0;
@@ -188,6 +200,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   //   (普通世界行为一致);errorWorld 分支(cs:21879-21882/21890)未建模。
   {
     const swordAttempts = rng.int(scW(1), scW(2));   // SwordShrineAttempts 1-2 ×WorldWidth
+    segProbe('swordAttempts', swordAttempts);
     for (let i = 0; i < swordAttempts; i++) {
       // !(NextDouble < SwordShrinePlacementChance 0.5) 才放置(cs:21886)——注意极性
       if (!(rng.next() < 0.5)) {
@@ -197,7 +210,8 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
           const ox = rng.int(0, 1) === 0                               // Next(2) == 0 → 左 30%
             ? rng.int(50, Math.floor(w * 0.3) - 1)                     // Next(50, w*0.3)
             : rng.int(Math.floor(w * 0.7), w - 51);                    // Next(w*0.7, w-50)
-          if (placeEnchantedSwordShrine(st, rng, gs, ox, oy)) break;
+          segProbe('swordTry', [ox, oy]);
+          if (placeEnchantedSwordShrine(st, rng, gs, ox, oy)) { segProbe('swordOk', [ox, oy]); break; }
         }
       }
     }
@@ -209,10 +223,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     ? rng.int(Math.max(1, Math.trunc(areaScale * 6)), Math.max(1, Math.trunc(areaScale * 11)))
     : 0;
   let placed = 0, tries = 0;
+  segProbe('campCount', campCount);
   while (placed < campCount) {
     if (++tries > 1000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1); // RandomWorldPoint(top,right,bottom,left)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
+    segProbe('campTry', [ox, oy]);
     if (placeCampsite(st, rng, gs, ox, oy)) placed++;
   }
 
@@ -225,10 +241,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
     trapCount = Math.trunc(trapCount * 1.5);       // cs:21958-21961
   }
   placed = 0; tries = 0;
+  segProbe('trapCount', trapCount);
   while (placed < trapCount) {
     if (++tries > 3000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
     const oy = rng.int(Math.floor(gs.rockLevel), h - 201);
+    segProbe('trapTry', [ox, oy]);
     if (placeMiningExplosives(st, rng, gs, ox, oy)) placed++;
   }
 
@@ -238,11 +256,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   //   子群系(矿轨/岩浆陷阱)及 @101 摆放整体掷流漂移(尾批 2-A 实锤 -43,845 掷)。
   {
     const treeCount = rng.int(scW(6), scW(11));   // LivingTreeCount 6-11 ×WorldWidth
+    segProbe('treeCount', treeCount);
     let mDone = 0, mTries = 0;
     while (mDone < treeCount && mTries < 20000) {
       // RandomWorldPoint(worldSurface+50, 50, 500, 50):X=Next(50,W-50), Y=Next(ws+50,H-500)
       const ox = rng.int(50, w - 51);
       const oy = rng.int(Math.floor(gs.worldSurface) + 50, h - 501);
+      segProbe('treeTry', [ox, oy]);
       if (placeMahoganyTree(st, rng, gs, chests, ox, oy)) mDone++;
       mTries++;
     }
@@ -253,11 +273,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   const trackFailLimit = Math.floor(w / 2);        // num25
   // 长轨:LongTrackCount 1-2 ×WorldWidth,长 400-1000 ×WorldWidth
   let trackCount = rng.int(scW(1), scW(2));
+  segProbe('longTrackCount', trackCount);
   let tDone = 0, tFail = 0;
   while (tDone < trackCount) {
     const ox = rng.int(10, w - 11);                // RandomWorldPoint(worldSurface, 10, 200, 10)
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
     if (trackGen.place(ox, oy, scW(400), scW(1000), rng)) {
+      segProbe('longTrackOk', [ox, oy]);
       tDone++; tFail = 0;
     } else {
       tFail++;
@@ -266,11 +288,13 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
   // 标准轨:StandardTrackCount 4-7 ×WorldArea,长 150-300 ×WorldWidth
   trackCount = rng.int(Math.max(1, Math.trunc(areaScale * 4)), Math.max(1, Math.trunc(areaScale * 7)));
+  segProbe('stdTrackCount', trackCount);
   tDone = 0; tFail = 0;
   while (tDone < trackCount) {
     const ox = rng.int(10, w - 11);
     const oy = rng.int(Math.floor(gs.worldSurface), h - 201);
     if (trackGen.place(ox, oy, scW(150), scW(300), rng)) {
+      segProbe('stdTrackOk', [ox, oy]);
       tDone++; tFail = 0;
     } else {
       tFail++;
@@ -285,10 +309,11 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       for (let k = 0; k < 10150; k++) {
         const x = rng.int(200, w - 201);
         const y = rng.int(gs.lavaLine - 100, h - 211);   // Next(lavaLine-100, h-210)
-        if (placeLavaTrap(st, gs, x, y)) break;
+        if (placeLavaTrap(st, gs, x, y)) { segProbe('lavaOk', [x, y]); break; }
       }
     }
   }
+  segProbe('passEnd');
 }
 
 /** CampsiteBiome.Place(CampsiteBiome.cs:9-116) */

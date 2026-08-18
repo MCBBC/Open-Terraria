@@ -26,7 +26,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate, isLockedDoor, unlockDo
 import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle } from '../world/Torch';
 import { xmasDecorOfItem, xmasCell, xmasDecorStyle, xmasSetDecor, xmasDecorItem } from '../world/XmasTree';
 import { TorchGodEvent } from '../world/TorchGod';
-import { findFreeHouse, housingCheckAt, checkRoom, lastRoomCheckFail, WALL_HOUSE } from '../world/Housing';
+import { findFreeHouse, housingCheckAt, checkRoomEnclosure, lastRoomCheckFail, WALL_HOUSE } from '../world/Housing';
 import { ItemIconCache, biomeTorchHoldStyle, biomeCampfireHoldStyle, PAINT_TOOLS, containerHover, dresserHover } from '../render/CursorItemIcon';
 import hoverIcons from '../data/vanilla-hovericons.json';
 
@@ -100,7 +100,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_TABLE_SHEETS } from '../data/tiles';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
@@ -220,6 +220,7 @@ import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpM
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
+import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
 import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
@@ -3299,19 +3300,27 @@ export class Game implements GameHooks {
         steps++;
       }
     }
-    // 跳帧(原版视频设置 Frame Skip,默认开;Main.cs 帧率不足时 SkipDraw 族):
-    // 上一帧渲染耗时 > 预算×1.5 → 本帧只跑逻辑不渲染,把预算还给逻辑追帧;
-    // 连跳 ≤2 帧(极端下不许画面长期冻结)。帧预算按上限档算,不锁=60 兜底
-    if (options.data.frameSkip
-      && this._lastRenderMs > (1000 / Math.max(30, options.data.frameCap || 60)) * 1.5
-      && this._skipStreak < 2) {
-      this._skipStreak++;
-    } else {
-      this._skipStreak = 0;
-      const r0 = performance.now();
-      this.render();
-      this._lastRenderMs = performance.now() - r0;
+    // 跳帧(原版 FrameSkipMode 三态,Main.cs:16950-16975):
+    //  on     激进——渲染耗时 > 预算×1.5 即跳,连跳 ≤2
+    //  subtle 温和——落后整帧(> 预算×2)才跳,连跳 ≤1(原版 successiveSkipped
+    //         Draws <= num3(0) 语义:最多连跳一次必须画一帧)
+    //  off    不跳。帧预算按上限档算,不锁 = 60 兜底
+    const fsm = options.data.frameSkipMode;
+    if (fsm !== 'off') {
+      const budget = 1000 / Math.max(30, options.data.frameCap || 60);
+      const over = this._lastRenderMs > budget * (fsm === 'subtle' ? 2 : 1.5);
+      const maxStreak = fsm === 'subtle' ? 1 : 2;
+      if (over && this._skipStreak < maxStreak) {
+        this._skipStreak++;
+        return;                       // 本帧只跑逻辑不渲染(SuppressDraw 语义)
+      }
     }
+    this._skipStreak = 0;
+    const r0 = performance.now();
+    this.render();
+    this._lastRenderMs = performance.now() - r0;
+    gfxQuality.drawsThisSecond++;
+    gfxQuality.tick(r0);
   }
   /** 上一帧渲染耗时(跳帧判定信号) */
   private _lastRenderMs = 0;
@@ -3830,6 +3839,41 @@ export class Game implements GameHooks {
         || this.player.inputDown || this.player.inputUp || this.player.ridingMount) {
         this.player.sleeping = false; // StopSleeping（SH:112-117）
       }
+    }
+    // ---- MP 睡眠（2026-08-18）：msg13 只传 isSleeping 位——熟睡计时/叠床序全由
+    //      各端本地推导（原版 Main.cs:17676-17707 各端为所有玩家跑 UpdateState;
+    //      AnchoredEntitiesCollection 同床 ≤2 人,序 = slot 序稳定近似） ----
+    if (this.net?.active) {
+      for (const rpEnt of this.remotePlayerProxies) {
+        const rp = rpEnt as Player;
+        if (rp.sleeping) rp.timeSleeping++;
+        else rp.timeSleeping = 0;
+      }
+      if (this.player.sleeping) {
+        const bx = Math.floor(this.player.cx / TILE);
+        const by = Math.floor((this.player.y + this.player.h - 2) / TILE);
+        const mySlot = this.net.mySlot;
+        let others = 0, beforeMe = 0;
+        for (const rpEnt of this.remotePlayerProxies) {
+          const rp = rpEnt as Player & { __netSlot?: number };
+          if (!rp.sleeping) continue;
+          if (Math.floor(rp.cx / TILE) === bx && Math.floor((rp.y + rp.h - 2) / TILE) === by) {
+            others++;
+            if ((rp.__netSlot ?? 255) > mySlot) continue;
+            if ((rp.__netSlot ?? 255) < mySlot) beforeMe++;
+          }
+        }
+        if (others >= 2) {
+          this.player.sleeping = false;   // GetNextPlayerStackIndexInCoords >= 2（SH:123-125）
+        } else {
+          // 视觉叠位序（GetSleepingOffsetInfo 第二项:(0, sleepingIndex·gravDir·−4)）
+          (this.player as unknown as { __sleepIdx?: number }).__sleepIdx = beforeMe;
+        }
+      } else {
+        (this.player as unknown as { __sleepIdx?: number }).__sleepIdx = 0;
+      }
+    } else {
+      (this.player as unknown as { __sleepIdx?: number }).__sleepIdx = 0;
     }
     this.updateSitting();   // PlayerSittingHelper.UpdateSitting（Helper.cs:69-105）
     // ⑤ Foxparks 5664 手持喷火通道（PC:42669-42690 TryUsingFoxsparksAbility：
@@ -9797,6 +9841,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       } else if (framedSheet === 207) {
         const fDrop = fountainDropItemOf(Math.floor(preFrameX / 36));
         if (fDrop > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[fDrop] ?? dropKey;
+      } else if (framedSheet === 50) {
+        // 书（KillTile_DropItems case 50，WorldGen.cs:65709-65716）：水书伪装帧
+        // （frameX==90）掉 Water Bolt 法书 165，其余掉 Book 149——地牢书架书挖取/
+        // 水书怪之外的水术获取链本体
+        dropKey = preFrameX === 90 ? (VANILLA_ITEM_KEY_BY_ID[165] ?? '')
+          : (VANILLA_ITEM_KEY_BY_ID[149] ?? '');
       }
       if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
       // 告示牌族（Main.tileSign {55,85,425,573}，Main.cs:9990-9993）破坏 → 注销
@@ -10933,6 +10983,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const isTrack = def.vanilla?.sheet === TRACK_SHEET;
     const needSupport = !isTrack && (def.solid || def.platform || def.framed);
     if (needSupport && !this.hasSupport(tx, ty, ow, oh)) return;
+    // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
+    //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
+    const ON_TABLE_1X1_SHEETS = new Set([13, 33, 49, 50, 174, 372, 646]);
+    if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
+      const below = st.inBounds(tx, ty + 1) ? st.get(tx, ty + 1) : 0;
+      const belowSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
+      if (!TILE_TABLE_SHEETS.has(belowSheet)) return;
+    }
     if (this.player.useTime > 0) return;
 
     // 矿车轨道（WorldGen.PlaceTile case 314 → Minecart.PlaceTrack + SquareTileFrame：
@@ -10960,8 +11018,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 单格帧合成统一走 framedCellFrame（旗帜 91 逆写 / 竖排族布局表 / 通用
         // style*fw*18）——tests/cage-placement 用同一入口做放置帧锚端到端断言
         if (isVanillaStyle) {
-          const [fx2, fy2] = framedCellFrame(
+          let [fx2, fy2] = framedCellFrame(
             def.vanilla?.sheet ?? -1, def.vanilla?.fw ?? 1, itemDef.placeStyle ?? 0, dx2, dy2);
+          // 书（50）放置帧随机 0-4（PlaceOnTable1x1 WorldGen.cs:45379
+          // `frameX = 18*genRand.Next(5)`——style 参数被无条件覆盖，五书色随机）
+          if (def.vanilla?.sheet === 50) fx2 = 18 * Math.floor(Math.random() * 5);
           st.setTile(px, py, tileId, fx2, fy2);
         } else {
           st.setTile(px, py, tileId, dx2, dy2);
@@ -11422,12 +11483,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         || strip(x0, tx) || strip(x0, tx + vx);
     };
     if (allowAt(p.x)) return true;
-    // 横向 ±width 一步（TileCollision 无阻挡 ≈ 扫掠盒无实心）再试
+    // 横向 ±width 一步（TileCollision(position,vector)==vector 的精确同构:
+    // scratch Body 走 moveAndCollide,位移完整 = 无阻挡;stepUp 关/平台穿透开 =
+    // 原版 fallThrough:true, ignorePlats:true 口径）
     const num = Math.sign(offX);
     if (num !== 0) {
-      const sx = p.x + num * p.w;
-      if (solidFree(Math.min(p.x, sx), p.y, Math.max(p.x, sx) + p.w, p.y + p.h)) {
-        return allowAt(sx);
+      const body = {
+        x: p.x, y: p.y, w: p.w, h: p.h, vx: 0, vy: 0,
+        onGround: false, hitWall: false, hitHead: false, dropThrough: true,
+      };
+      moveAndCollide(body, this.world, num * p.w, 0);
+      if (body.x === p.x + num * p.w) {
+        return allowAt(body.x);
       }
     }
     return false;
@@ -11452,18 +11519,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let j = y - 3; j < y; j++) {
         if (!st.inBounds(i, j)) return '';   // tile==null → 静默
         const ii = st.idx(i, j);
-        if (st.flags[ii] !== 0 && st.isSolid(i, j)
+          // 379 泡沫块按实心算（原版翻转 tileSolid[379]=true 的同构——本仓 defs 已
+        // 改 non-solid,此处补回检查期语义）
+        const sh = TILE_DEFS[st.type[ii]]?.vanilla?.sheet ?? 0;
+        if (st.flags[ii] !== 0 && (st.isSolid(i, j) || sh === 379)
           && !TILE_DEFS[st.type[ii]]?.platform) {
           return 'Game.BedObstructed';
         }
       }
     }
-    if (!checkRoom(st, x, y - 1)) {
+    // ★纯围合判定（StartRoomCheck 不查家具——家具是 TownNPC RoomNeeds 的独立
+    //   步骤,床设点无此要求;曾用带家具的 checkRoom 过严,围合无家具房被误拒）;
+    //   extraSolid={379} = 原版 CheckSpawn 期 tileSolid[379] 翻转同构
+    if (!checkRoomEnclosure(st, x, y - 1, new Set([379]))) {
       const msg: Record<string, string> = {
         edge: 'Game.BedTooCloseToWorldEdge',
         tooBig: 'Game.BedRoomIsTooBig',
         tooSmall: 'Game.BedRoomIsTooSmall',
         hole: 'Game.BedRoomHasHolesInWall',
+        unsafeWalls: 'Game.BedRoomHasUnsafeWalls',   // CheckRoom :6175-6176 有墙非房墙
         notValid: 'Game.BedRoomIsNotValid',
       };
       return msg[lastRoomCheckFail] ?? 'Game.BedRoomIsNotValid';
@@ -18283,6 +18357,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!this.sfx.playFiles(files, vol ?? 1, x, y)) this.sfx.play('hit', vol ?? 1, x, y);
   }
 
+  /** 单 wav 直播（环境声三表专用,失败静默——与 playSfxFiles 不同,不回退合成音） */
+  playSfxWav(file: string, vol?: number, x?: number, y?: number) {
+    this.sfx.playWavFile(file, vol ?? 1, x, y);
+  }
+
   /** 按原版文件名直播（无合成兜底——音色精确的场景如蜂后吼/仪式圈）：
    *  缓冲未就位时触发后台懒加载，本播静默（下次命中真声） */
   playSfxFile(file: string, vol?: number, x?: number, y?: number) {
@@ -19911,6 +19990,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       proxy.inputUp = !stale && rp.up;
       proxy.facing = rp.facing;
       proxy.dead = rp.dead;
+      proxy.sleeping = rp.sleeping;   // msg13 flagBits[0]——远端躺床渲染/叠床分组
       // PvP（v7）：hostile/team 拷入代理——命中链 InOpposingTeam 门禁与头顶血条消费；
       // hp/maxHp 为 msg16 中继的权威值（proxy 无 buff 同步，baseMaxHp 直写即可令
       // maxHp getter 吻合——头顶血条按 hp/maxHp 比例画）

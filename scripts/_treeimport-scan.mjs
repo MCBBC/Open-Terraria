@@ -44,11 +44,11 @@ const res = await page.evaluate(async () => {
       const camY = B;   // render 里 imported 分支 cam.y=boundaryY
       const camRY = Math.round(camY * z) / z;
       const camRX = Math.round((st.w * 16 / 2) * z) / z;
-      const sx0 = Math.round((m.x * 16 - 2 - camRX) * z + cv.width / 2);
+      const sx0 = Math.round((m.x * 16 + 0 - camRX) * z + cv.width / 2);   // 干真带：中心±8px
       for (let dy = -4; dy <= 6; dy++) {
         const sy = Math.round((B + dy - camRY) * z + cv.height / 2);
-        if (sx0 < 0 || sy < 0 || sx0 + 26 >= cv.width || sy >= cv.height) continue;
-        const d = ctx.getImageData(sx0, sy, 26, 1).data;
+        if (sx0 < 0 || sy < 0 || sx0 + 16 * z >= cv.width || sy >= cv.height) continue;
+        const d = ctx.getImageData(sx0, sy, Math.round(16 * z), 1).data;
         let op = 0, semi = 0, n = 0;
         for (let j = 3; j < d.length; j += 4) { n++; if (d[j] > 200) op++; else if (d[j] > 10) semi++; }
         const isGap = op / n === 0;

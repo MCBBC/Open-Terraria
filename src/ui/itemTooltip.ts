@@ -12,6 +12,10 @@ import { statOfInternal } from '../data/vanillaItemStats';
 import { equipKindOfInternal } from '../data/vanillaEquip';
 import { prefixStat, prefixLines, type PrefixStat } from '../data/vanillaPrefixes';
 import { VANILLA_RECIPES } from '../data/vanillaRecipes';
+import whipsJson from '../data/vanilla-whips.json';
+
+/** 鞭物品表（combat json 缺鞭族 damage——数据在 vanilla-whips.json） */
+const WHIP_ITEMS: Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }> = whipsJson as never;
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID } from '../i18n/idNames.generated';
 
@@ -68,10 +72,12 @@ const WHIP_PROJS = new Set([841, 847, 848, 849, 912, 913, 914, 915, 952,
   1028, 1029, 1030, 1031, 1032, 1033, 1034, 1035, 1104]);
 /** 悠悠球物品（yoyoLogo 装饰位，:20845-20853） */
 const YOYO_ITEMS = new Set([3262, 3282, 3283, 3284, 3285, 3286, 3316, 3315, 3317, 3291, 3389]);
-/** 泥土魔杖（item.tileWand=2，tip[52] "消耗 泥土"——itemfunc 无 tileWand 字段，
- *  数据面唯一在表族：Dirt Rod 114 消耗泥土 item 126）；其余魔杖族（活木/树叶/
- *  红木 832/933/3360/3361）tileWand 对应物按 vanilla.json 常量登表 */
-const TILE_WAND_CONSUME: Record<number, number> = { 114: 126 };
+/** 魔杖消耗表（item.tileWand，Item.cs 各 case：832 活木魔杖→木材 9 /
+ *  932 骨魔杖→骨头 154 / 933 树叶魔杖→木材 9 / 1129 蜂巢魔杖→蜂巢块 1124 /
+ *  3360+3361 红木魔杖→红木 620——泥土魔杖 114 无 tileWand（它发射移土弹非消耗） */
+const TILE_WAND_CONSUME: Record<number, number> = {
+  832: 9, 933: 9, 932: 154, 1129: 1124, 3360: 620, 3361: 620,
+};
 
 /** 击退档（:20602-20632） */
 const KB_TIERS: Array<[number, number]> = [
@@ -131,11 +137,21 @@ export function buildTooltipBody(
   const st = statOfInternal(slot.id);
   const equipKind = equipKindOfInternal(slot.id);
 
-  // ── 伤害族四行（damage>0 门，:20511-20632）──
-  if ((c?.damage ?? 0) > 0) {
-    const kind = f?.melee ? 'melee' : f?.ranged ? 'ranged' : f?.magic ? 'magic' : f?.summon ? 'summon' : null;
+  // ── 伤害族四行（damage>0 门，:20511-20632；鞭族 damage 在 vanilla-whips 表，
+  //    combat json 缺——按鞭档合成 c 等价物）──
+  // ★鞭族在 combat json 里有残缺条目（{noUseGraphic} 等非 null 但无 damage）——
+  //  `c ??` 兜底够不着；鞭档存在时无条件覆写
+  const whipData = WHIP_ITEMS[String(vid)];
+  const cd = whipData ? {
+    ...(c ?? {}), damage: whipData.dmg, knockBack: whipData.kb, shoot: whipData.proj,
+    useAnimation: whipData.anim, useTime: whipData.speed,
+    summon: true, useStyle: 5,
+  } as NonNullable<typeof c> : c;
+  const f2 = f ?? (whipData ? { summon: 1, useStyle: 5, shoot: whipData.proj } as NonNullable<typeof f> : null);
+  if ((cd?.damage ?? 0) > 0) {
+    const kind = f2?.melee ? 'melee' : f2?.ranged ? 'ranged' : f2?.magic ? 'magic' : f2?.summon ? 'summon' : null;
     const mult = player ? player.dmgMult[kind ?? 'melee'] : 1;
-    const dmg = Math.round(c!.damage! * pm('dmg') * mult + 5e-6);
+    const dmg = Math.round(cd!.damage! * pm('dmg') * mult + 5e-6);
     const tipSuffix = kind === 'melee' ? 2 : kind === 'ranged' ? 3 : kind === 'magic' ? 4 : kind === 'summon' ? 53 : 55;
     lines.push({ text: dmg + T(`LegacyTooltip.${tipSuffix}`), tag: 'damage' });
     // 暴击（近/远/魔，:20518-20544）：视觉暴击 = 4 基础 + 装备/buff + 词条
@@ -145,13 +161,13 @@ export function buildTooltipBody(
       lines.push({ text: crit + T('LegacyTooltip.5'), tag: 'crit' });
     }
     // 速度档（useStyle!=0 且（非召唤 || 鞭），:20545；useAnimation/词条 spd）
-    const whip = WHIP_PROJS.has(c!.shoot ?? -1);
-    if ((f?.useStyle ?? 0) !== 0 && (!f?.summon || whip)) {
-      const anim = Math.max(1, Math.round((c!.useAnimation ?? c!.useTime ?? 20) / pm('spd')));
+    const whip = WHIP_PROJS.has(cd!.shoot ?? -1);
+    if ((f2?.useStyle ?? 0) !== 0 && (!f2?.summon || whip)) {
+      const anim = Math.max(1, Math.round((cd!.useAnimation ?? cd!.useTime ?? 20) / pm('spd')));
       lines.push({ text: T(`LegacyTooltip.${speedTierIndex(anim)}`), tag: 'speed' });
     }
     // 击退档（kb×词条 kb；召唤 +minionKB 修正略）
-    const kb = (c!.knockBack ?? 0) * pm('kb');
+    const kb = (cd!.knockBack ?? 0) * pm('kb');
     lines.push({ text: T(`LegacyTooltip.${kbTierIndex(kb)}`), tag: 'knockback' });
   }
 
@@ -275,13 +291,7 @@ export function assembleTooltipLines(
     const pc = ctx.shop.priceCopper;
     if (pc > 0) {
       const plat = Math.floor(pc / 1000000), gold = Math.floor(pc % 1000000 / 10000);
-      const silver = Math.floor(pc % 10000 / 100), copper = pc % 100;
-      let text = '';
-      if (plat > 0) text += `${plat} ${T('LegacyTooltip.15')} `;
-      if (gold > 0) text += `${gold} ${T('LegacyTooltip.16')} `;
-      if (silver > 0) text += `${silver} ${T('LegacyTooltip.17')} `;
-      if (copper > 0) text += `${copper} ${T('LegacyTooltip.18')} `;
-      // 注意：inter[15-18] 才是币种名——LegacyTooltip 15-18 是击退档！查 inter
+      const silver = Math.floor(pc % 10000 / 100);
       const color = plat > 0 ? 'rgb(220,220,198)' : gold > 0 ? 'rgb(224,201,92)'
         : silver > 0 ? 'rgb(181,192,193)' : 'rgb(246,138,96)';
       out.push({ text: `${T(ctx.shop.buy ? 'LegacyTooltip.50' : 'LegacyTooltip.49')} ${coinText(pc)}`, color, tag: 'shopprice' });
@@ -297,9 +307,9 @@ function coinText(copper: number): string {
   const plat = Math.floor(copper / 1000000), gold = Math.floor(copper % 1000000 / 10000);
   const silver = Math.floor(copper % 10000 / 100), cop = copper % 100;
   let text = '';
-  if (plat > 0) text += `${plat} ${T('LegacyChat.15')} `;
-  if (gold > 0) text += `${gold} ${T('LegacyChat.16')} `;
-  if (silver > 0) text += `${silver} ${T('LegacyChat.17')} `;
-  if (cop > 0) text += `${cop} ${T('LegacyChat.18')} `;
+  if (plat > 0) text += `${plat} ${T('LegacyInterface.15')} `;
+  if (gold > 0) text += `${gold} ${T('LegacyInterface.16')} `;
+  if (silver > 0) text += `${silver} ${T('LegacyInterface.17')} `;
+  if (cop > 0) text += `${cop} ${T('LegacyInterface.18')} `;
   return text.trim();
 }

@@ -330,6 +330,8 @@ const CSS = `
   padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:280px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   text-shadow: 1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }   /* 原版 MouseText 字体+字影（:20256 DrawColorCodedStringWithShadow） */
+.sw-yoyo-logo { width:16px; height:16px; image-rendering:pixelated; vertical-align:-3px;
+  filter:drop-shadow(1px 0 #000) drop-shadow(-1px 0 #000) drop-shadow(0 1px #000) drop-shadow(0 -1px #000); } /* OneDropLogo 五层影（:20263-20289） */
 .sw-buff { pointer-events:auto; position:relative; width:30px; height:30px; background:rgba(40,32,60,0.9);
   border:1px solid #6a5a8a; border-radius:4px; align-items:center; justify-content:center; }
 .sw-recipe { pointer-events:auto; display:flex; align-items:center; gap:6px; padding:5px 8px; margin:3px 0;
@@ -861,7 +863,7 @@ export class UI {
       this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
     });
     s.addEventListener('mouseenter', () => this.showTooltipFor(i, where));
-    s.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
+    s.addEventListener('mouseleave', () => { this.tooltip.style.display = 'none'; cancelAnimationFrame(this.tooltipPulseRaf); });
     s.addEventListener('contextmenu', (e) => e.preventDefault());
     return s;
   }
@@ -1371,11 +1373,30 @@ export class UI {
       }
     }
     if (def.desc) staticTip = staticTip ? `${staticTip}\n${def.desc}` : def.desc;
-    for (const ln of assembleTooltipLines(def, s, tps, staticTip)) {
-      html += `<br>${ln.color ? `<span style="color:${ln.color}">${ln.text}</span>` : ln.text}`;
+    // ---- 悬停上下文（低频行族门数据，Main.cs:20178-20220）----
+    const vid = def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1;
+    // 研究（:21163-21178 旅程角色 difficulty==3）
+    const research = (g as unknown as {
+      research?: { tryGetSacrificeNumbers(id: number): { have: number; need: number } | null };
+      world?: { isJourney?: boolean };
+    });
+    const ctx: import('./itemTooltip').TooltipContext = {
+      research: research.research && (g as unknown as { world: { difficulty: number } }).world?.difficulty === 3
+        ? research.research.tryGetSacrificeNumbers(vid) : undefined,
+      // 商店（:20310-20402 npcShop>0——NpcShop 面板开着时以买入价显示）：
+      // 价格 = item.value×5 买入 / ÷5 卖出（GetItemExpectedPrice 近似走 def.value）
+      shop: this.shopTooltipContext(def, vid),
+      expert: rare === -12,
+      master: rare === -13,
+    };
+    for (const ln of assembleTooltipLines(def, s, tps, staticTip, ctx)) {
+      const color = ln.journeyColor ? '#B46BD8' : ln.color;   // Colors.JourneyMode 紫
+      if (ln.yoyoLogo) { html += `<br><img class="sw-yoyo-logo" src="sprites/vanilla/OneDropLogo.png" alt="">`; continue; }
+      html += `<br>${color ? `<span style="color:${color}">${ln.text}</span>` : ln.text}`;
     }
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';
+    this.startTooltipPulse();
     this.applyTooltipBg();
     // 定位：锚槽右侧（原版跟鼠标+toolTipDistance；槽锚定确定性更好），屏幕钳制
     // （:20241-20250 num4=18 边距）
@@ -1389,6 +1410,39 @@ export class UI {
       this.tooltip.style.left = `${left}px`;
       this.tooltip.style.top = `${top}px`;
     }
+  }
+
+  /** 商店悬停上下文（:20310-20402）：NpcShop 开着 → 买入价（value×5）；
+   *  非商店 null（背包内不显价格——原版同门 npcShop<=0 早退） */
+  private shopTooltipContext(def: (typeof ITEM_DEFS)[number], vid: number): { buy: boolean; priceCopper: number } | null {
+    if (!this.game.npcShopOpen) return null;   // Main.npcShop<=0 早退（:20310-20312）
+    const v = def.value ?? 0;
+    if (v <= 0) return { buy: true, priceCopper: 0 };   // 无价值行
+    return { buy: true, priceCopper: v * 5 };           // 买入 = value×5（GetItemExpectedPrice）
+  }
+
+  /** mouseTextColor 亮度脉冲（DoUpdate_AnimateCursorColors :18064-18075：+1/tick
+   *  往返 190↔255；tooltip 显示期间持续驱动 filter 亮度） */
+  private tooltipPulseRaf = 0;
+  private tooltipPulseVal = 255;
+  private tooltipPulseDir = -1;
+  private startTooltipPulse(): void {
+    cancelAnimationFrame(this.tooltipPulseRaf);
+    let last = performance.now();
+    const step = (now: number) => {
+      if (this.tooltip.style.display !== 'block') return;
+      // 60t/s 语义：每 16.7ms 一步
+      for (let t = 0; t < Math.round((now - last) / 16.7); t++) {
+        this.tooltipPulseVal += this.tooltipPulseDir;
+        if (this.tooltipPulseVal >= 255) { this.tooltipPulseVal = 255; this.tooltipPulseDir = -1; }
+        if (this.tooltipPulseVal <= 190) { this.tooltipPulseVal = 190; this.tooltipPulseDir = 1; }
+      }
+      last = now;
+      const b = this.tooltipPulseVal / 255;
+      this.tooltip.style.filter = `brightness(${(0.75 + b * 0.25).toFixed(3)})`;
+      this.tooltipPulseRaf = requestAnimationFrame(step);
+    };
+    this.tooltipPulseRaf = requestAnimationFrame(step);
   }
 
   /** tooltip 九宫底应用（Inventory_Back13 × (23,25,81)×0.925，:20252-20255）：

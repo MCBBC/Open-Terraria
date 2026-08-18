@@ -357,8 +357,14 @@ function updateStalagtiteStyle(st: TileStore, rng: RNG, x: number, j: number): b
 /** KillTile（生成期 noItem 路径，cs:63933-63968）：active(false)+halfBrick(false)+
  *  frameX/Y=-1+type=0 → SquareTileFrame 级联（9 邻 TileFrame，165 邻居重查）。
  *  ★SquareTileFrame（cs:80924）列主序：(x-1,j-1)(x-1,j)(x-1,j+1)(x,j-1)(x,j)(x,j+1)
- *  (x+1,j-1)(x+1,j)(x+1,j+1)——击杀级联内的重查顺序影响连环击杀，曾行主序。 */
-function killStalactiteTile(st: TileStore, rng: RNG, x: number, y: number): void {
+ *  (x+1,j-1)(x+1,j)(x+1,j+1)——击杀级联内的重查顺序影响连环击杀，曾行主序。
+ *  ZZZ 批：可选 reframe 钩子——FinalCleanup 全图扫传入完整 TileFrame 分派
+ *  （邻格 184 苔藓芽等须掷骰重查）；缺省仍为本 pass 时序正确的行为（彼时
+ *  全图尚无 184，165-only 重查等价）。 */
+function killStalactiteTile(
+  st: TileStore, rng: RNG, x: number, y: number,
+  reframe?: (st: TileStore, rng: RNG, x: number, y: number) => void,
+): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
@@ -366,7 +372,8 @@ function killStalactiteTile(st: TileStore, rng: RNG, x: number, y: number): void
   st.frameX[i] = 65535; st.frameY[i] = 65535;  // -1（Uint16 环回；inactive 格不读帧）
   st.type[i] = 0;
   for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
-    frame165(st, rng, x + dx, y + dy);
+    if (reframe) reframe(st, rng, x + dx, y + dy);
+    else frame165(st, rng, x + dx, y + dy);
   }
 }
 
@@ -378,7 +385,10 @@ function solidTileSlope(st: TileStore, x: number, y: number): boolean {
 }
 
 /** CheckStalactite（cs:39022）四分支 1:1 */
-export function checkStalactite(st: TileStore, rng: RNG, x: number, j: number): void {
+export function checkStalactite(
+  st: TileStore, rng: RNG, x: number, j: number,
+  reframe?: (st: TileStore, rng: RNG, x: number, y: number) => void,
+): void {
   if (!st.inBounds(x, j)) return;
   const i0 = st.idx(x, j);
   if (!st.flags[i0]) return;
@@ -386,14 +396,14 @@ export function checkStalactite(st: TileStore, rng: RNG, x: number, j: number): 
   if (fy === 72) {
     let flag = !solidTileSlope(st, x, j - 1);
     if (!flag && !updateStalagtiteStyle(st, rng, x, j)) flag = true;
-    if (flag) killStalactiteTile(st, rng, x, j);
+    if (flag) killStalactiteTile(st, rng, x, j, reframe);
     return;
   }
   if (fy === 90) {
     let flag2 = !solidTileSlope(st, x, j + 1);
     // InvalidTileForPilesOrSpeleothems = TileID.Sets.Boulders（生成期此阶段无巨石）
     if (!flag2 && !updateStalagtiteStyle(st, rng, x, j)) flag2 = true;
-    if (flag2) killStalactiteTile(st, rng, x, j);
+    if (flag2) killStalactiteTile(st, rng, x, j, reframe);
     return;
   }
   if (fy >= 36) {
@@ -402,7 +412,7 @@ export function checkStalactite(st: TileStore, rng: RNG, x: number, j: number): 
     let flag3 = !solidTileSlope(st, x, num + 2);
     const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
     const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
-    if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num); return; }
+    if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num, reframe); return; }
     if (!st.flags[a] || !st.flags[b] || st.type[b] !== st.type[a]) flag3 = true;
     if (st.frameX[b]! !== st.frameX[a]!) flag3 = true;
     if (!flag3 && !updateStalagtiteStyle(st, rng, x, num)) flag3 = true;
@@ -411,8 +421,8 @@ export function checkStalactite(st: TileStore, rng: RNG, x: number, j: number): 
     // （曾无条件双双击杀 → 刚放的板格被抹 → SmoothSlope/SolidTile 门级联分叉，
     // biome2 slab78 van48/js63 掷混合分歧根因）
     if (flag3) {
-      if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num);
-      if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1);
+      if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num, reframe);
+      if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1, reframe);
     }
     return;
   }
@@ -422,14 +432,14 @@ export function checkStalactite(st: TileStore, rng: RNG, x: number, j: number): 
   let flag4 = !solidTileSlope(st, x, num - 1);
   const a = st.inBounds(x, num) ? st.idx(x, num) : -1;
   const b = st.inBounds(x, num + 1) ? st.idx(x, num + 1) : -1;
-  if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num); return; }
+  if (a < 0 || b < 0) { killStalactiteTile(st, rng, x, num, reframe); return; }
   if (!st.flags[a] || !st.flags[b] || st.type[b] !== st.type[a]) flag4 = true;
   if (st.frameX[b]! !== st.frameX[a]!) flag4 = true;
   if (!flag4 && !updateStalagtiteStyle(st, rng, x, num)) flag4 = true;
   // ★同上：类型门击杀（cs:39193-39202）——非 165 占位格不连带
   if (flag4) {
-    if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num);
-    if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1);
+    if (st.type[a] === st.type[i0]) killStalactiteTile(st, rng, x, num, reframe);
+    if (st.type[b] === st.type[i0]) killStalactiteTile(st, rng, x, num + 1, reframe);
   }
 }
 

@@ -306,7 +306,7 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
   P.set(54, { entry: 's53', steps: [{ dump: 102, base: 101, run: (st, gs, rng) => runLilypadsPass(st, rng, gs) }] });
   P.set(55, { entry: 's54', steps: [{ dump: 103, base: 102, run: (st, gs, rng) => runGemTreesPass(st, rng, gs) }] });
   P.set(56, { entry: 's55', steps: [{ dump: 104, base: 103, run: (st) => runBrokenTrapCleanupPass(st) }] });
-  P.set(57, { entry: 's56', steps: [{ dump: 105, base: 104, run: (st, gs) => runFinalCleanupPass(st, gs) }] });
+  P.set(57, { entry: 's56', steps: [{ dump: 105, base: 104, run: (st, gs, rng) => runFinalCleanupPass(st, gs, rng, { frameSparse: true }) }] });  // ZZZ:传 rng(扫掷耗+⑭+ShimmerCleanUp);frameSparse=跳读帧杀族(s56 帧边界仅覆盖 JS 写过格)
   return P;
 }
 

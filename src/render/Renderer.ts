@@ -134,6 +134,7 @@ import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
+import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
 /** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制。
  *  ★smooth 恒 false:主循环 :1623 等处关闭的 imageSmoothingEnabled 跨帧残留,
@@ -549,6 +550,9 @@ let wofDrawFrameIndex = 0;
 
 /** 按原版 FindFrame 分族规则算当前帧 index（导出供 DebugReport tiles.focus.frameEngine 复算） */
 export function vanillaFrameIdx(e: Enemy, frames: number): number {
+  // AI 侧算定的帧号直读（694 水书宝箱怪态机帧——态切换清零的 frameCounter
+  // 无法从全局 t 推出，cursedSkullAI 的 mimic694Frame 维护）
+  if (e.customFrameIdx != null) return Math.min(frames - 1, e.customFrameIdx);
   const id = e.vanillaId ?? 0;
   const ai = e.vanilla?.aiStyle ?? 0;
   const t = e.animT; // tick 计数（≈原版 frameCounter 驱动源）
@@ -1333,12 +1337,15 @@ export class Minimap {
 export function sleepingTransformOps(
   p: { facing: number; gravDir: number; h: number },
   bo: readonly [number, number],
+  sleepingIndex = 0,
 ): Array<['t', number, number] | ['r', number]> {
   return [
     // ★局部平移量直接传 bo 原值:镜像 scale(facing,1) 在外层会把 x 分量再乘 facing,
     //   世界位移恰为 bo×Directions(direction,gravDir)——曾写 bo[0]·facing 双重镜像,
-    //   facing=−1 时水平偏移反向(朝左床躺位整体偏 2·bo.x)
-    ['t', bo[0], bo[1] * p.gravDir],
+    //   facing=−1 时水平偏移反向(朝左床躺位整体偏 2·bo.x)。
+    //   叠床第二玩家上移 4px/层（GetSleepingOffsetInfo :29-31 第二项
+    //   (0, sleepingIndex·gravDir·−4)——世界 y 位移,局部恒 (0,−4·idx)）
+    ['t', bo[0], bo[1] * p.gravDir - 4 * sleepingIndex],
     ['t', 0, -p.h / 2],
     ['r', -Math.PI / 2],
     ['t', 0, p.h / 2],
@@ -1742,15 +1749,35 @@ export class Renderer {
     //     有墙的水格由墙盖住、只留前景 0.6 层 → 墙在水中可见
     this.drawLiquids(world, cam, viewW, viewH, z, true);
 
-    // 2b. 背景墙层(+1 canvas px 保险重叠:相邻 chunk 独立光栅化接缝的兜底,
-    //      nearest 采样下重叠=复制边缘像素,视觉无感)
-    const over = 1;
-    for (let cy = y0; cy <= y1; cy++) {
-      for (let cx = x0; cx <= x1; cx++) {
-        if (!chunkVisible(cx, cy)) continue;
-        ctx.drawImage(chunks.get(cx, cy).wall, cx * CHUNK * ts, cy * CHUNK * ts, CHUNK * ts + over, CHUNK * ts + over);
+    // 2b/2c. chunk 拼装（背景墙层 + 前景 tile 层共用）
+    // ★整数设备矩形绘制（2026-08-18 修复"非整数 zoom 下树冠/仙人掌-地形接缝"）：
+    //   旧公式在世界变换内 drawImage(chunk, cx*256, cy*256, 257, 257)——z=1.25 时
+    //   256*z=320 整除无感；用户 z=1.27 → 325.12 设备像素，chunk 落小数像素，
+    //   各 chunk 独立最近邻采样在边缘产生周期性 1px 透明缝（跨 chunk 行的大物件
+    //   ——树冠-干交界/仙人掌柱——最醒目；解剖台 A/B 实锤：单画布零缝、
+    //   旧 chunk 公式 16/16 帧缝）。修复 = 退出缩放变换，逐 chunk 取整设备矩形
+    //   （xd1-xd0+1 保底 1px 重叠）——任意 zoom 下 chunk 边缘恒落整数像素，无缝。
+    //   内部 256→非整数倍上采样与单画布路径完全一致（逐行复制，视觉无感）
+    const drawChunkGrid = (layer: 'wall' | 'tile') => {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      // ★世界变换 = translate(round(viewW/2), round(viewH/2)) · scale(z) · translate(-camRX, -camRY)
+      //   ——退出变换后必须补回中心偏移（曾漏加 = 整层 chunk 左上偏半屏，2026-08-18 用户实抓）
+      const ox = Math.round(viewW / 2), oy = Math.round(viewH / 2);
+      for (let cy = y0; cy <= y1; cy++) {
+        for (let cx = x0; cx <= x1; cx++) {
+          if (!chunkVisible(cx, cy)) continue;
+          const xd0 = ox + Math.round((cx * CHUNK * ts - camRX) * z);
+          const yd0 = oy + Math.round((cy * CHUNK * ts - camRY) * z);
+          const xd1 = ox + Math.round(((cx + 1) * CHUNK * ts - camRX) * z);
+          const yd1 = oy + Math.round(((cy + 1) * CHUNK * ts - camRY) * z);
+          ctx.drawImage(chunks.get(cx, cy)[layer], xd0, yd0, xd1 - xd0 + 1, yd1 - yd0 + 1);
+        }
       }
-    }
+      ctx.restore();
+    };
+    drawChunkGrid('wall');
 
     // 2b'. behindTiles 族实体（Main.cs:56457 DrawNPCs(behindTiles:true)：原版在
     //      非实心 tile(:56437/:56441) 之后、实心 tile(:56462/:56466) 之前绘制——钻地蠕虫族
@@ -1776,13 +1803,8 @@ export class Renderer {
     //       DrawLiquidBehindTiles :449-466 背景层调用,两 pass 并存）
     this.drawLiquidBehindSolidTiles(world, cam, viewW, viewH, z);
 
-    // 2c. 前景 tile/物体层(同款保险重叠)
-    for (let cy = y0; cy <= y1; cy++) {
-      for (let cx = x0; cx <= x1; cx++) {
-        if (!chunkVisible(cx, cy)) continue;
-        ctx.drawImage(chunks.get(cx, cy).tile, cx * CHUNK * ts, cy * CHUNK * ts, CHUNK * ts + over, CHUNK * ts + over);
-      }
-    }
+    // 2c. 前景 tile/物体层（drawChunkGrid 整数设备矩形——见 2b 注释）
+    drawChunkGrid('tile');
 
     // 2c'.0 火苗叠画（原版 DrawSingleTile_Flames，TileDrawing.cs:1746 在本体绘制之后
     //   调用）：火把/蜡烛/烛台/吊灯/篝火等 Flame_N 平行表逐帧种子化抖动——动态层
@@ -3657,6 +3679,7 @@ export class Renderer {
         else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
         else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection 仍镜像
         else if (stR === 24) ctx.rotate(e.vx * 0.1);   // AI_024 鸟族:仅倾斜 vx*0.1(cs:74332/:74359/:74382);spriteDirection 仍镜像(611/689 取反见下)
+        else if (stR === 10) ctx.rotate(e.visAngle);   // AI_010 诅咒头骨族:rotation=atan2(v)(vx<0 再+π,cs:21713-21721;694 伪装/觉醒态钉 0);spriteDirection 仍镜像→不进 rotationDriven
         else if (stR === 68) ctx.rotate(e.vx * 0.1);   // AI_068 水鸟族:同款倾斜 vx*0.1(cs:74487,湿态归零近似省略)
         else if (stR === 65) ctx.rotate(e.vx * 0.3);   // AI_065 蝶族:倾斜 vx*0.3(cs:73426)
         else if (rotId) ctx.rotate(e.spin);
@@ -7459,12 +7482,20 @@ export class Renderer {
   };
   private static readonly BED_VISUAL_OFFSET_DEFAULT: readonly [number, number] = [-9, 1];
 
-  /** 只读床型反查（玩家侧无 bedStyle 追踪字段——禁改 Player.ts）：扫玩家脚下 7×4 窗
-   *  内床 tile（sheet 79，TileID.Sets.CanBeSleptIn），bedStyle = floor(frameY/36)
-   *  （GetSleepingTargetInfo :193-224 同式；上下行均 floor 到同 style），取最近者 */
+  /** 只读床型反查（玩家侧无 bedStyle 追踪字段——禁改 Player.ts）：
+   *  精确档 = 玩家 Bottom+(0,−2) 处床格的 floor(frameY/36)（GetSleepingTargetInfo
+   *  :203 同格同式——本地玩家唤醒门已保证该格必为床;代理插值边界偶发脱格时
+   *  退化 7×4 近窗扫描兜底取最近床） */
   private sleepingBedOffset(world: World, p: Player): readonly [number, number] {
     const st = world.store;
     const tx = Math.floor((p.x + p.w / 2) / TILE), ty = Math.floor((p.y + p.h - 2) / TILE);
+    if (st.inBounds(tx, ty)) {
+      const iE = st.idx(tx, ty);
+      if (st.flags[iE] !== 0 && sheetOf(st.type[iE]) === 79) {
+        return Renderer.BED_VISUAL_OFFSET[Math.floor(st.frameY[iE] / 36)]
+          ?? Renderer.BED_VISUAL_OFFSET_DEFAULT;
+      }
+    }
     let best: number | null = null, bestD = 1e9;
     for (let dy = -2; dy <= 1; dy++) for (let dx = -3; dx <= 3; dx++) {
       const x = tx + dx, y = ty + dy;
@@ -7595,6 +7626,17 @@ export class Renderer {
               }
             }
             ctx.save();
+            // 静持物随躺转（原版手持层在 DrawDataCache 内,TransformDrawData 整组
+            // 旋转——睡中持火把等也横躺;世界空间直接施加,无镜像纠缠）
+            if (p.sleeping) {
+              const bo = this.sleepingBedOffset(world, p);
+              const sleepIdx = (p as unknown as { __sleepIdx?: number }).__sleepIdx ?? 0;
+              ctx.translate(bo[0] * p.facing, bo[1] * p.gravDir - 4 * sleepIdx * p.gravDir);
+              const ccx = p.cx, ccy = p.y + p.h / 2;
+              ctx.translate(ccx, ccy);
+              ctx.rotate(Math.PI / 2 * -p.facing);
+              ctx.translate(-ccx, -ccy);
+            }
             ctx.translate(p.cx + p.facing * offX, p.y + offY);
             ctx.scale(p.facing, 1);
             ctx.rotate(rot);
@@ -7682,7 +7724,8 @@ export class Renderer {
     // 恒 −π/2：变体B(枕左,facing+1)碰巧对、变体A(枕右,facing−1)头睡在脚尾）
     if (p.sleeping) {
       const bo = this.sleepingBedOffset(world, p);
-      for (const op of sleepingTransformOps(p, bo)) {
+      const sleepIdx = (p as unknown as { __sleepIdx?: number }).__sleepIdx ?? 0;
+      for (const op of sleepingTransformOps(p, bo, sleepIdx)) {
         if (op[0] === 't') ctx.translate(op[1], op[2]);
         else ctx.rotate(op[1]);
       }
@@ -9087,9 +9130,15 @@ export class Renderer {
     }
   }
 
+  /** 小地图节流游标(mapTimeMax 语义,Main.cs:16941-16945;q≥0.8 → 0 = 每帧) */
+  private _lastMapFlush = 0;
   private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock, entities: Entity[] = []) {
     if (!this.minimap) return;
-    this.minimap.flushDirty();
+    const now = performance.now();
+    if (now - this._lastMapFlush >= mapUpdateMinIntervalMs()) {
+      this._lastMapFlush = now;
+      this.minimap.flushDirty();
+    }
     // 移动端整体缩小（右锚缩放变换：小地图+框+按钮+时间文字同尺度；
     // 桌面 uiS=1 → 与原实现逐像素一致）
     const uiS = mobileUiScale();

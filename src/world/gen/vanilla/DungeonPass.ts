@@ -3854,6 +3854,14 @@ export function runDungeonPass(
   // preSettings.RandomSeed 覆写）——tower 支先 raw() 再传 entSeed。
   if (entKind === 2) { raw(); dgTowerEntrance(posX, posY, entSeed); }
   else dgEntrance(raw(), entSeed);
+  // ★AAAA 批（2026-08-18）：Dome 种子（entKind=1）老头锚语义 = (i, num7) =
+  // (posX, posY-30)（DomeDungeonEntrance.cs:49 num7=j-num6,num6=30 + :430
+  // SetOldManSpawnAndSpawnOldManIfDefaultDungeon(i, num7)——GenerateEntrance 入参
+  // DC.cs:450 = genVars.generatingDungeonPositionX/Y）。Dome 体仍为 Legacy 近似
+  // （上注备案），但 dungeonX/Y 头字段按 Dome 语义回填（s12345 实测 3377,220→
+  // 3413,190 = x86 头锚全等；纯 gs 元数据写，无 tile/掷流影响——gs.dungeonEntX/Y
+  // 唯一消费端 WorldGen.ts:790 world.dungeonX/Y）。
+  if (entKind === 1) { dungeonX = posX; dungeonY = posY - 30; }
   snap('dungeonE');
   for (const rm of rooms) if (rm.generated) roomPlatformsDoors(rm);
   for (const hl of halls) if (hl.generated) hallPlatformsDoors(hl);

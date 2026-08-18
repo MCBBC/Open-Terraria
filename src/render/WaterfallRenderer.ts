@@ -23,11 +23,16 @@
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
+import { gfxQuality } from '../core/GfxQuality';
 
 interface Waterfall { x: number; y: number; type: number; } // type: 0水 1岩浆 2蜂蜜 3雨幕 4雪幕 5灰烬雨幕（本仓库编码）
 
-const MAX_FALLS = 1000;      // 原版 qualityMax = maxWaterfallCount(1000) * gfxQuality(1)
-const WATERFALL_DIST = 100;  // 原版 waterfallDist = 75*gfxQuality + 25
+const BASE_MAX_FALLS = 1000;   // 原版 maxWaterfallCount
+/** 原版 qualityMax = maxWaterfallCount(1000) × gfxQuality(WaterfallManager.cs:117)
+ *  ——自动画质系统接入(2026-08-18):q 降则瀑布数量上限同缩 */
+const MAX_FALLS = () => Math.floor(BASE_MAX_FALLS * gfxQuality.value);
+/** 原版 waterfallDist = 75×gfxQuality + 25(WaterfallManager.cs:116) */
+const WATERFALL_DIST = () => Math.floor(75 * gfxQuality.value) + 25;
 
 /** 雨幕用的实心判定（WorldGen.SolidTile 等价，非半砖非坡） */
 function solidSimple(st: TileStore, x: number, y: number): boolean {
@@ -56,8 +61,9 @@ export class WaterfallRenderer {
     this.falls.length = 0;
     // 扫描窗口：原版 FindWaterfalls 屏幕四周外扩 waterfallDist(100)/下 +20（L74-81），
     // 视口外起点的长瀑也要登记（水柱会流进画面）
-    const x0 = Math.max(2, tx0 - WATERFALL_DIST), x1 = Math.min(st.w - 3, tx1 + WATERFALL_DIST);
-    const y0 = Math.max(2, ty0 - WATERFALL_DIST), y1 = Math.min(st.h - 3, ty1 + 20);
+    const WD = WATERFALL_DIST();
+    const x0 = Math.max(2, tx0 - WD), x1 = Math.min(st.w - 3, tx1 + WD);
+    const y0 = Math.max(2, ty0 - WD), y1 = Math.min(st.h - 3, ty1 + 20);
     const solid = (x: number, y: number) => {
       if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
       const t = st.type[st.idx(x, y)];
@@ -84,7 +90,7 @@ export class WaterfallRenderer {
         if (isLava(ui) || isLava(ri) || isLava(li)) type = 1;
         else if (isHoney(ui) || isHoney(ri) || isHoney(li)) type = 2;
         this.falls.push({ x, y, type });
-        if (this.falls.length >= MAX_FALLS) return;
+        if (this.falls.length >= MAX_FALLS()) return;
       }
     }
     // ---- 雨幕（WaterfallManager :204-260）：雨云 196 / 雪云 460 / 灰烬云 717，
@@ -105,7 +111,7 @@ export class WaterfallRenderer {
         if (y + 1 >= st.h) continue;
         if (solid(x, y + 1) || st.liquid[bi] !== 0 || st.slope[bi] !== 0) continue;
         this.falls.push({ x, y: y + 1, type });
-        if (this.falls.length >= MAX_FALLS) return;
+        if (this.falls.length >= MAX_FALLS()) return;
       }
     }
   }
@@ -244,7 +250,7 @@ export class WaterfallRenderer {
         ctx.drawImage(texImg, sx, sy, sw, sh, 0, 0, dw, dh);
         ctx.restore();
       };
-      for (let step = 0; step < WATERFALL_DIST; step++) {
+      for (let step = 0, WD2 = WATERFALL_DIST(); step < WD2; step++) {
         if (turns >= 2) break;                          // 循环头 :533-536
         if (cx < 1 || cy < 1 || cx >= st.w - 1 || cy >= st.h - 1) break;
         const ci = st.idx(cx, cy);
@@ -282,7 +288,7 @@ export class WaterfallRenderer {
         if (wf.type === 1) this.litCells.push(cx, cy);
         let alpha = wf.type === 1 ? 1.0 : wf.type === 2 ? 0.8
           : (st.wall[ci] !== 0 || cy >= groundLevel ? 0.6 : 1.0);
-        if (step > WATERFALL_DIST - 10) alpha *= (WATERFALL_DIST - step) / 10;
+        if (step > WD2 - 10) alpha *= (WD2 - step) / 10;
         ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
         const num43 = Math.floor(liq / 16);             // 格内液量裁剪（:709）
         const x0 = cx * 16, y0 = cy * 16;

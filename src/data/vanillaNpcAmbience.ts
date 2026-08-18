@@ -85,8 +85,8 @@ export const CHATTER_SOUNDS: Record<number, ChatterSpec> = (() => {
   //   直文件名 = Zombie_{type%...}——style 489/586 超变体范围,取近似 21/22/23 池由调用方掷)
   m[489] = { denom: 800, file: 'Zombie_21' };
   m[586] = { denom: 800, file: 'Zombie_22' };
-  // 木乃伊（:57748,(26)→Mummy=Mummy_0/1;原版变体 Next(2)）
-  for (const t of [78, 79, 80, 630]) m[t] = { denom: 500, file: 'Mummy_0' };
+  // 木乃伊（:57748,(26)→LegacySoundPlayer case26 = Zombie_{3,4} ×0.9(:968-976 Next(3,5)））
+  for (const t of [78, 79, 80, 630]) m[t] = { denom: 500, file: 'Zombie_3' };
   // 吸血鬼 159（:57753,(29,7)）;弗兰肯 162→(29,6);面怪 181→(29,8)
   m[159] = { denom: 500, file: 'Zombie_7' };
   m[162] = { denom: 500, file: 'Zombie_6' };
@@ -110,10 +110,11 @@ export const CRITTER_SOUNDS: Record<number, CritterSoundSpec> = {
   689: { denom: 700, file: 'Zombie_46', gate: 'night' },   // 灰猫头鹰
   602: { denom: 1200, file: 'Zombie_44', gate: 'day' },    // 海鸥(:93430,(44))
   603: { denom: 1200, file: 'Zombie_44', gate: 'day' },
-  362: { denom: 200, file: 'Zombie_10', gate: 'day' },     // 鸭族 362-365(:93435,(30)→10-12 变体)
-  363: { denom: 200, file: 'Zombie_10', gate: 'day' },
-  364: { denom: 200, file: 'Zombie_10', gate: 'day' },
-  365: { denom: 200, file: 'Zombie_10', gate: 'day' },
+  // 鸭族 362-365(:93435,(30)→case30 = Next(10,12) 池 1/300 换 Zombie_12(:1101-1122)）
+  362: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
+  363: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
+  364: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
+  365: { denom: 200, file: 'Zombie_10', gate: 'day', pool: ['Zombie_10', 'Zombie_11', 'Zombie_12'] },
   361: { denom: 200, file: 'Zombie_13', gate: 'still' },   // 青蛙族(:93441,夜或地下+|vx|<0.5)
   445: { denom: 200, file: 'Zombie_13', gate: 'still' },
   687: { denom: 200, file: 'Zombie_13', gate: 'still' },

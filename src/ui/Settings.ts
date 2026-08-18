@@ -284,9 +284,16 @@ export class SettingsPanel {
             : d.frameCap === 120 ? '120 FPS' : '60 FPS',
           () => void options.set('frameCap', d.frameCap === 60 ? 120 : d.frameCap === 120 ? 0 : 60),
         ),
-        // 跳帧(原版视频设置 Frame Skip,默认开):渲染超预算只跑逻辑不画,
-        // 保逻辑恒 60Hz——弱机卡顿时"画面慢但游戏不慢"
-        this.toggle(Lang.text('Mods.SandboxWorld.Settings.FrameSkip'), () => d.frameSkip, (v) => void options.set('frameSkip', v)),
+        // 跳帧三态(原版 FrameSkipMode:Off/On/Subtle,默认温和):渲染超预算只跑
+        // 逻辑不画,保逻辑恒 60Hz——弱机卡顿时"画面慢但游戏不慢"
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.FrameSkip'),
+          () => d.frameSkipMode,
+          () => d.frameSkipMode === 'off' ? Lang.text('Mods.SandboxWorld.Settings.FrameSkipOff')
+            : d.frameSkipMode === 'subtle' ? Lang.text('Mods.SandboxWorld.Settings.FrameSkipSubtle')
+            : Lang.text('Mods.SandboxWorld.Settings.FrameSkipOn'),
+          () => void options.set('frameSkipMode', d.frameSkipMode === 'off' ? 'subtle' : d.frameSkipMode === 'subtle' ? 'on' : 'off'),
+        ),
         // 智能光标（原版 IngameOptions :1418 Smart Cursor 段）：模式 Toggle/Hold + 三开关
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.SmartCursorMode'),

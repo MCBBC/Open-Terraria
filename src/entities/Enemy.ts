@@ -7,9 +7,11 @@ import { paintColor } from '../world/Paint';
 import { liquidCollision } from '../stats/TouchDamage';
 import { updateNpcLiquid, getWaterLine } from './npcLiquid';
 import type { GameHooks } from './types';
+import { Clock } from '../world/World';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
 import { vanillaNpc, vanillaSoundFiles, type VanillaNpc } from '../data/vanillaNpcs';
+import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS } from '../data/vanillaNpcAmbience';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 
 /** 镇静药水(物品 3090)的 npcTypeNoAggro 置位表（Player.cs:14144-14168：
@@ -65,6 +67,7 @@ import { TOWER_KEY } from '../world/LunarEvent';
 import { openDoor } from '../world/Door';
 import {
   fighterMoveStep, chaosElementalStep, swampThingAmbushStep, attemptToFindTeleportSpot,
+  attemptToFindTeleportSpotNearBooks,
   psychoStealthStep, nailheadHitScatter, butcherKbStep, possessedStep, fritzPounceStep,
   stormDiverStep, FIGHTER_NO_DOOR,
 } from './fighterFamilies';
@@ -275,6 +278,8 @@ export class Enemy extends Entity {
   prevY = 0;
   /** EoW 掘地音效间隔（:52375-52395 soundDelay，距离/40 钳 10..20） */
   digSndDelay = 0;
+  /** 蠕虫出生特效一次性门（117 水蛭爆尘/454 幻影龙音效,localAI 首帧哨兵） */
+  _wormSpawnFx = false;
   /** 击杀时生效的 npc.boss 位（DropEoWLoot :79212-79228：场上再无 13/14/15 才置位；
    *  掉落门/图鉴/Boss 药水心共用。仅 EoW 三段非恒 true，其余 = def.boss） */
   killBossFlag = false;
@@ -324,6 +329,24 @@ export class Enemy extends Entity {
     if (this.vanillaId !== null && this.vanillaId >= 13 && this.vanillaId <= 15) {
       this.eowAI(game, player);
       return;
+    }
+    // 水蛭 117 出生爆尘+音（:51357-51370 localAI[1]==0 首帧）：NPCDeath13 + 20 尘
+    // （原版 velocity*3 定向散——本仓 opts 无 vx/vy,用 spawnBurst 定向近似（若不可用
+    //  回退全向）;2026-08-18 修 tsc: opts 恒不认 vx）
+    if (this.vanillaId === 117 && this.ai1 === 0 && !this._wormSpawnFx) {
+      this._wormSpawnFx = true;
+      game.playSfxFiles(['NPC_Killed_13'], 1, this.cx, this.cy);
+      const dir = this.vx < 0 ? Math.PI : 0;   // 朝速度反方向喷
+      if (game.spawnBurst) {
+        game.spawnBurst(this.cx, this.cy, '#B0A080', 20, 3, dir, Math.PI, { life: 30 });
+      } else {
+        game.spawnParticles(this.cx, this.cy, '#B0A080', 20, 1, { life: 30 });
+      }
+    }
+    // 幻影龙 454 出生音（:51372-51376 localAI[3]==0 首帧）：Item119
+    if (this.vanillaId === 454 && !this._wormSpawnFx) {
+      this._wormSpawnFx = true;
+      game.playSfxFiles(['Item_119'], 1, this.cx, this.cy);
     }
     // ---- 402 星尘织带蠕虫 ai[2] 生命计时（NPC.cs:51402-51461，1:1）----
     // ai[2] 每 tick +1；285→570 速度 ×1→×0.5（Remap 线性减速）；恰 570 时
@@ -979,6 +1002,10 @@ export class Enemy extends Entity {
   /** 击退抗性运行时覆写（游泳族专用）：461 wet→0 / dry→0.4（难度曲线，
    *  NPC.cs:56366/:56412 GetKnockbackMultiplier_ScaledByDifficulty）；null=用 def 值 */
   kbResistOverride: number | null = null;
+  /** 694 水书宝箱怪专用帧计数（FindFrame case 694 frameCounter，态切换清零） */
+  npcFrameT = 0;
+  /** AI 侧算定的帧号直读位（694 态机帧；null=走渲染端 vanillaFrameIdx 通用档） */
+  customFrameIdx: number | null = null;
   /** 运行时 noGravity 位（原版 NPC.noGravity 逐 tick 置位，StrikeNPC :82217/:82228
    *  受击档读【运行时值】非静态表）：AI_017 秃鹫(:24079 飞行态 true/栖息 0 态 false)、
    *  AI_087 珍珑宝箱怪(:39525 起始 false、4/4.1/5 空中态 true)、AI_091 花岗岩元素
@@ -1535,7 +1562,56 @@ export class Enemy extends Entity {
         }
       }
     }
+    this.ambientSoundTick(game);   // 环境声三表（IdleSounds/闲话/Critter,2026-08-18 批）
     this.pushHistory();   // 原版 npc.oldPos/oldRot（DrawNPC 拖尾族 419/125-131 读）
+  }
+
+  /** 环境声三表（UpdateNPC IdleSounds :91119-91246 + AI_003 闲话 :57735-57764 +
+   *  CritterSounds :93420-93517,数据在 data/vanillaNpcAmbience.ts）。
+   *  每 tick 每 NPC 至多一次掷骰（原版各表独立掷,同帧双中概率≈0 取先闲话后 idle）。
+   *  playSfxWav = GameHooks→Sfx.playWavFile 直 wav（FILE_CASE_VOL 带 Zombie_24-87
+   *  ×0.5 等档,零新增 SfxName）。 */
+  private ambientSoundTick(game: GameHooks): void {
+    const id = this.vanillaId;
+    if (id == null || this.dead) return;
+    const world = game.world;
+    const clock = world.clock;
+    const st = world.store;
+    // 小动物声（:93420-93517）——门控族(day/night/dawn/still)
+    const cs = CRITTER_SOUNDS[id];
+    if (cs) {
+      let ok = true;
+      if (cs.gate === 'day') ok = clock.isDay;
+      else if (cs.gate === 'night') ok = !clock.isDay;
+      else if (cs.gate === 'dawn') ok = clock.isDay && clock.timeOfDay < Clock.DAWN + (Clock.DUSK - Clock.DAWN) / 3;  // Main.time<18000(清晨 1/3)
+      else if (cs.gate === 'still') ok = Math.abs(this.vx) < 0.5
+        && (!clock.isDay || this.y > world.groundLevel * 16);
+      if (ok && Math.floor(Math.random() * cs.denom) === 0) {
+        const f = cs.pool ? cs.pool[Math.floor(Math.random() * cs.pool.length)] : cs.file;
+        game.playSfxWav?.(f, 1, this.cx, this.cy);
+      }
+      return;   // 原版 critter 段互斥(else-if 链)
+    }
+    // AI_003 闲话（:57735-57764）——仅战士族 aiStyle 3
+    if (this.vanilla?.aiStyle === 3) {
+      const ch = CHATTER_SOUNDS[id];
+      if (ch && Math.floor(Math.random() * ch.denom) === 0) {
+        game.playSfxWav?.(ch.file, 1, this.cx, this.cy);
+        return;
+      }
+    }
+    // IdleSounds（:91119-91246）
+    const is = IDLE_SOUNDS[id];
+    if (is) {
+      if (is.gate === 'wet') {
+        const ti = st.idx(Math.floor(this.cx / 16), Math.floor(this.cy / 16));
+        if (st.liquid[ti] <= 0) return;
+      }
+      if (Math.floor(Math.random() * is.denom) === 0) {
+        const n = is.range[0] + Math.floor(Math.random() * (is.range[1] - is.range[0]));
+        game.playSfxWav?.(`Zombie_${n}`, 1, this.cx, this.cy);
+      }
+    }
   }
 
   /** NPC.AnyNPCs（NPC.cs:6611-6630 子集）：场上是否存在指定 vanilla id 的存活段
@@ -3015,6 +3091,19 @@ export class Enemy extends Entity {
       this.vy -= 0.05;
       if (this.vy > 0) this.vy -= 0.01;
     }
+    // 沙球攻击（AI_017 共用段 :24475-24506）：与蚁狮同构——玩家上方+LOS →
+    // ai[0]=200 冷却,投掷弹 31(速 12 伤 10);==200 时播 Item5（:24485/:24503 同帧）
+    if (player && !player.dead) {
+      if (this.ai0 > 0) {
+        if (this.ai0 === 200) game.playSfxFiles(['Item_5'], 1, this.cx, this.cy);
+        this.ai0 -= 1;
+      } else if (player.cy < this.cy && this.canSeePlayer(game.world.store, player)) {
+        this.ai0 = 200;
+        const dx = player.cx - this.cx, dy = player.cy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        this.shootDart(game, this.cx, this.cy, (dx / d) * 12, (dy / d) * 12, 10, 31);
+      }
+    }
     this.vy = Math.max(-3, Math.min(3, this.vy));
     const oldVx = this.vx, oldVy = this.vy;
     moveAndCollide(this, game.world, this.vx, this.vy);
@@ -3060,6 +3149,7 @@ export class Enemy extends Entity {
       this.ai0 += 1;
       if (this.ai0 >= 200 && player.cy < this.cy && this.canSeePlayer(st, player)) {
         this.ai0 = 0;
+        game.playSfxFiles(['Item_5'], 1, this.cx, this.cy);   // :24503 开火音（bowShoot 同轨）
         this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10, 31);
       }
     }
@@ -3427,6 +3517,11 @@ export class Enemy extends Entity {
    *  撞墙/撞地按 旧速度*-0.5 反弹并保证最小弹速（L19124-19140）；
    *  白天地表驱散（cs:52707/53152 昼散表）：EncourageDespawn(10)+保持水平方向上飞 */
   private floatEyeAI(game: GameHooks, player: Player | null) {
+    // 猪龙 grunt（AI_002 :52677-52680）：170/171/180 → PlaySound(29,9)=Zombie_9 1/1000
+    if ((this.vanillaId === 170 || this.vanillaId === 171 || this.vanillaId === 180)
+      && Math.floor(Math.random() * 1000) === 0) {
+      game.playSfxWav?.('Zombie_9', 1, this.cx, this.cy);
+    }
     // 撞墙反弹（collideX/Y → hitWall/hitHead/onGround + 上一帧速度近似 oldVelocity）
     const oldVx = this.vx, oldVy = this.vy;
     // ---- 白天地表驱散（cs:52707-52715 + IsDiscouraged :53152）：
@@ -3688,7 +3783,7 @@ export class Enemy extends Entity {
     const st = game.world.store;
     const isHornet = vid === 42 || vid === 176 || (vid >= 231 && vid <= 235);
     if (player && !player.dead && (isHornet || vid === 94)) {
-      if (this.ai1 === 101) this.ai1 = 0; // 上一发余音帧
+      if (this.ai1 === 101) { this.ai1 = 0; game.playSfxFiles(['Item_17'], 1, this.cx, this.cy); } // :51147 发射音
       if (isHornet) {
         this.ai1 += (Math.random() * 15 + 5) * 0.1;
         if (vid === 176) this.ai1 += (Math.random() * 15 + 5) * 0.1;
@@ -3810,39 +3905,100 @@ export class Enemy extends Entity {
    *  ai[1] 追击计数 >600 加速档（×8/速度4）>650 清零；贴脸 <100 时 ai[1]=-60（L21620-21634）；
    *  noTileCollide 穿墙直移 */
   private cursedSkullAI(game: GameHooks, player: Player | null) {
-    let maxSpd = 1, accel = 0.011;
-    const dx = player ? player.cx - this.cx : this.facing * 100;
-    const dy = player ? player.cy - this.cy : -100;
-    const dist = Math.hypot(dx, dy) || 1;
-    this.ai1 += 1; // ai[3]≠3 恒真（34 无状态机）
-    if (this.ai1 > 600) {
-      accel *= 8; maxSpd = 4;
-      if (this.ai1 > 650) this.ai1 = 0;
-    } else if (player && dist < 100 && this.ai1 >= 0) {
-      this.ai1 = -60; // 贴脸冷却重置
-    } else if (dist < 250) {
-      if (this.ai0 < -200) this.ai0 = 0; // 类默认 -1120 钳回原版下界（同 swarmerAI 清查）
-      this.ai0 += 0.9;
-      this.vy += this.ai0 > 0 ? 0.019 : -0.019;
-      this.vx += Math.abs(this.ai0) > 100 ? 0.019 : -0.019;
-      if (this.ai0 > 200) this.ai0 = -200;
+    // AI_010 全块 1:1（NPC.cs:21552-21888）。flag9 族员 = 694 水书宝箱怪（多状态机）；
+    // 34 诅咒头骨/289 巨型诅咒颅走通用悬浮档
+    const isMimic = this.vanillaId === 694;
+    let maxSpd = 1, accel = 0.011;                 // num145/num146（:21562-21563）
+    const num147 = 600, num148 = 650;              // 脱离加速门（:21564-21565）
+    let dx = player ? player.cx - this.cx : this.facing * 100;
+    let dy = player ? player.cy - this.cy : -100;
+    const dist = Math.hypot(dx, dy) || 1;          // num153
+    if (this.ai3 !== 3) this.ai1 += 1;             // :21577-21579
+    const flag13 = this.ai2 >= 0 && this.ai3 === 2;   // 冲刺态（694 专属）
+    const flag14 = this.ai2 >= 0 && this.ai3 === 1;   // 咒球态（694 专属）
+    const flag15 = this.ai1 > num147;
+    const flag16 = this.ai1 < -30;
+    const flag17 = isMimic && !flag13 && !flag14 && !flag15 && flag16;  // 逃逸档
+    // 帧机（FindFrame case 694 :77905-77980——AI 侧维护，customFrameIdx 供渲染端直读；
+    // 34/289 单帧恒 0 由渲染端缺省，不进此链）
+    if (isMimic) this.mimic694Frame();
+    // ---- 伪装态 ai[3]==3（:21581-21590）：钉死成"放着的书"——静止、无旋转、
+    //      击退免疫；受击 → ai[3]=4 觉醒。AI 早退（不移动不索敌）----
+    if (this.ai3 === 3) {
+      this.facing = 1; this.visAngle = 0;
+      this.vx = 0; this.vy = 0;
+      this.kbResistOverride = 0;                   // knockBackResist=0f（:21586）
+      if (this.justHit) this.ai3 = 4;              // :21587-21589（frameCounter 清零在帧机）
+      return;
     }
-    // 距离分档（L21655-21672）
-    if (dist > 350) { maxSpd = 5; accel = 0.3; }
+    // ---- 觉醒态 ai[3]==4（:21592-21601）：翻书动画 80t，静止，结束转 0----
+    if (this.ai3 === 4) {
+      this.facing = 1; this.visAngle = 0;
+      this.vx = 0; this.vy = 0;
+      this.kbResistOverride = 1;                   // knockBackResist=1f（:21597）
+      if (this.ai1 > 80) { this.ai1 = 0; this.ai3 = 0; }   // :21598-21600 num149=80
+      return;
+    }
+    if (isMimic) this.kbResistOverride = null;     // :21603-21605 knockBackResist=0.2（def 数据）
+    // ---- 逼近/悬停段（:21607-21636；冲刺态跳过）----
+    if (!flag13) {
+      if (flag15) {
+        accel *= 8; maxSpd = 4;                    // 超时脱离加速（:21609-21611）
+        if (this.ai1 > num148) this.ai1 = 0;
+      } else if (isMimic && player && dist < 100 && this.ai1 >= 0) {
+        this.ai1 = -60;                            // 贴脸重置冷却（:21615-21621 flag10 专属）
+      } else if (dist < 250) {
+        this.ai0 += 0.9;                           // 近距 8 字漂移（:21622-21635）
+        if (this.ai0 < -200) this.ai0 = 0;         // 类默认 -1120 钳回（同 swarmerAI 清查）
+        this.vy += this.ai0 > 0 ? 0.019 : -0.019;
+        this.vx += (this.ai0 < -100 || this.ai0 > 100) ? 0.019 : -0.019;
+        if (this.ai0 > 200) this.ai0 = -200;
+      }
+    }
+    // 速度档（:21638-21658）：逃逸 8/0.25 → >350 5/0.3 → >300 3/0.2 → >250 1.5/0.1 → 默认 1/0.011
+    if (flag17) { maxSpd = 8; accel = 0.25; }
+    else if (dist > 350) { maxSpd = 5; accel = 0.3; }
     else if (dist > 300) { maxSpd = 3; accel = 0.2; }
     else if (dist > 250) { maxSpd = 1.5; accel = 0.1; }
-    let sx = (dx / dist) * maxSpd, sy = (dy / dist) * maxSpd;
-    if (!player) { sx = this.facing * maxSpd / 2; sy = -maxSpd / 2; } // 玩家死亡漂移（L21686-21689）
-    if (this.vx < sx) this.vx += accel;
-    else if (this.vx > sx) this.vx -= accel;
-    if (this.vy < sy) this.vy += accel;
-    else if (this.vy > sy) this.vy -= accel;
-    if (player) this.facing = dx > 0 ? 1 : -1;
-    // ---- 巨型诅咒颅 289 暗影焰（cs:21762-21790）：≤500px 时 ai[3] 状态机
-    // （0 累计 120t → 1 冲刺段 40t），冲刺段 ai[2]==20 发射暗影焰（速 6、伤 25，
-    // 无视线门——冲刺贴脸语义）；脱距双清
+    let sx = (dx / dist) * maxSpd, sy = (dy / dist) * maxSpd;   // num150/num151
+    const num154 = sx, num155 = sy;                // 未反向的目标方向（朝向判据）
+    if (flag17) { sx = -sx; sy = -sy; }            // :21662-21665 逃逸反向
+    if (!player) { sx = this.facing * maxSpd / 2; sy = -maxSpd / 2; }  // 玩家死亡漂移（:21666-21669）
+    if (flag13) {
+      // 冲刺态速度（:21700-21711）：前 10t 速度 ×0.5（≥18t 归零）；之后以 14px/t
+      // 直线冲（方向 = 当前速度，慢于 0.1 时改取朝玩家）
+      const n156 = this.ai2;
+      if (n156 < 10) {
+        this.vx *= 0.5; this.vy *= 0.5;
+        if (n156 >= 18) { this.vx = 0; this.vy = 0; }
+      } else {
+        let vx2 = this.vx, vy2 = this.vy;
+        if (Math.hypot(this.vx, this.vy) < 0.1) { vx2 = player!.cx - this.cx; vy2 = player!.cy - this.cy; }
+        const vl = Math.hypot(vx2, vy2) || 1;
+        this.vx = (vx2 / vl) * 14;
+        this.vy = (vy2 / vl) * 14;
+      }
+    } else {
+      if (this.vx < sx) this.vx += accel;
+      else if (this.vx > sx) this.vx -= accel;
+      if (this.vy < sy) this.vy += accel;
+      else if (this.vy > sy) this.vy -= accel;
+    }
+    // 朝向/旋转（:21713-21727；冲刺态冻结）：num154>0 → 右向不翻 + atan2；
+    // <0 → 翻转 + atan2+π；694 的 spriteDirection 再取反（贴图口朝向与 34 相反）
+    if (!flag13) {
+      if (num154 > 0) { this.facing = -1; this.visAngle = Math.atan2(num155, num154); }
+      else if (num154 < 0) { this.facing = 1; this.visAngle = Math.atan2(num155, num154) + Math.PI; }
+      if (isMimic) this.facing *= -1;
+    }
+    // ---- 巨型诅咒颅 289 暗影焰（:21730-21761）：justHit 清态 + ≤500px 状态机
+    //      （0 累计 120t → 1 冲刺段 40t），冲刺段 ai[2]==20 发射暗影焰（速 6、伤 25）----
     if (this.vanillaId === 289) {
-      if (player && dist <= 500) {
+      if (this.justHit) { this.ai2 = 0; this.ai3 = 0; }    // :21733-21735（受击打断蓄力）
+      dx = player ? player.cx - this.cx : this.facing * 100;
+      dy = player ? player.cy - this.cy : -100;
+      const d289 = Math.hypot(dx, dy) || 1;
+      if (player && d289 <= 500) {
         this.ai2 += 1;
         if (this.ai3 === 0) {
           if (this.ai2 > 120) { this.ai2 = 0; this.ai3 = 1; }
@@ -3854,6 +4010,78 @@ export class Enemy extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
+    // ---- 694 水书宝箱怪攻击状态机（:21763-21888）----
+    if (!isMimic) return;
+    if (this.justHit) { this.ai2 = 0; this.ai3 = 0; }      // :21765-21767
+    const mcx = this.cx, mcy = this.cy + 10;               // center4 = Center+(0,10)（:21768）
+    const mdx = player ? player.cx - mcx : this.facing * 100;
+    const mdy = player ? player.cy - mcy : -100;
+    const md = Math.hypot(mdx, mdy);                       // num152
+    // :21776-21783 flag18 = 中距带[100,300]+态 0/2（冲刺蓄力）;flag19 = ≤500+态 0/1（咒球蓄力）
+    const flag18 = md >= 100 && md <= 300 && this.ai2 >= 0 && (this.ai3 === 0 || this.ai3 === 2);
+    const flag19 = md <= 500 && this.ai2 >= 0 && (this.ai3 === 0 || this.ai3 === 1);
+    if (flag18 && (!flag19 || Math.floor(Math.random() * 3) === 0)) {
+      // 冲刺链（:21786-21797）：态 0 蓄 120t → 态 2 冲刺 60t → ai[2]=-300 冷却
+      this.ai2 += 1;
+      if (this.ai3 === 0) {
+        if (this.ai2 > 120) { this.ai2 = 0; this.ai3 = 2; }
+      } else if (this.ai3 === 2 && this.ai2 > 60) {
+        this.ai2 = -300; this.ai3 = 0;
+      }
+    } else if (flag19) {
+      // 咒球链（:21798-21827）：态 0 蓄 120t → 态 1 发射段；态 1 内 30t 结束，
+      // ai[2]==17 时 Center+(0,10) 出一颗水球 33（NewNPC :21820-21824）
+      this.ai2 += 1;
+      if (this.ai3 === 0) {
+        if (this.ai2 > 120) { this.ai2 = 0; this.ai3 = 1; }
+      } else if (this.ai3 === 1) {
+        if (this.ai2 > 30) { this.ai2 = 0; this.ai3 = 0; }
+        if (this.ai2 === 17) {
+          game.playSfxFiles(['Item_8'], 1, this.cx, this.cy);
+          // NewNPC 锚 = 底边对齐 center4（16px 球 → 中心再 -8）
+          const ball = Enemy.fromVanilla(33, mcx, mcy - 8);
+          if (ball) addEnemy(game, ball);
+        }
+      }
+    } else {
+      // 脱档衰减（:21879-21886）：ai[2] 归零、态回 0
+      this.ai2 += 1;
+      if (this.ai2 > 0) this.ai2 = 0;
+      this.ai3 = 0;
+    }
+  }
+
+  /** 694 帧机（FindFrame case 694，NPC.cs:77905-77980）：
+   *  态 3 伪装 → 帧 0；态 4 觉醒 → 帧 0..16（5t/帧）；态 2 冲刺 → 17..19(<40t)/..23；
+   *  态 1 咒球 → 24..29；态 0 巡航 → 17/22/23 三帧循环（6t/帧）。
+   *  npcFrameT = frameCounter（态切换清零），customFrameIdx 供渲染端直读 */
+  private mimic694Frame(): void {
+    this.npcFrameT += 1;
+    let n = this.customFrameIdx ?? 0;
+    if (this.ai3 === 3) {
+      n = 0; this.npcFrameT = 0;
+    } else if (this.ai3 === 4) {
+      if (this.npcFrameT >= 5) { this.npcFrameT = 0; n = Math.min(16, n + 1); }
+    } else if (this.ai3 === 2) {
+      if (this.ai2 === 0) n = 17;
+      if (n < 17 || n > 23) n = 17;
+      if (this.npcFrameT >= 5) {
+        this.npcFrameT = 0; n += 1;
+        if (this.ai2 < 40 && n > 19) n = 19;
+        if (n > 23) n = 23;
+      }
+    } else if (this.ai3 === 1) {
+      if (n < 24 || n > 29) n = 24;
+      if (this.npcFrameT >= 5) { this.npcFrameT = 0; n = Math.min(29, n + 1); }
+    } else {
+      if (n < 17 || n > 23) n = 17;
+      if (this.npcFrameT >= 6) {
+        this.npcFrameT = 0;
+        n = n === 17 ? 22 : n === 22 ? 23 : 17;
+      }
+      if (n >= 30) n = 0;
+    }
+    this.customFrameIdx = n;
   }
 
   // AI_011 骷髅王(35)战斗状态机在 bossAI.ts skeletronBossAI；68 守卫走下方专用分支
@@ -4000,6 +4228,13 @@ export class Enemy extends Entity {
     this.applyGravity(game);
     const xBefore = this.x;
     moveAndCollide(this, game.world, this.vx, this.vy);
+    // 怒滚虫 546 追击跳（AI_026 :63012-63017）：落地(vy==0) + |vx|>3 + 朝玩家侧 →
+    // vy-=4 + PlaySound(3,11)=NPC_Hit_11（跳沙坑声）
+    if (this.vanillaId === 546 && this.vy === 0 && Math.abs(this.vx) > 3 && player
+      && ((this.cx < player.cx && this.vx > 0) || (this.cx > player.cx && this.vx < 0))) {
+      this.vy -= 4;
+      game.playSfxWav?.('NPC_Hit_11', 1, this.cx, this.cy);
+    }
     // 卡墙计数（X 未动，原版 position.X == oldPosition.X 判定）
     if (Math.abs(this.x - xBefore) < 0.01) this.stuckT++;
     // 跳梯（前方探测带 5×vx 提前量）
@@ -4161,6 +4396,13 @@ export class Enemy extends Entity {
         if (inWater) {
           this.vy -= 0.4;
           if (this.vy < -6) this.vy = -6;
+          // 跃出叫声（cs:23735-23740）：ai[3] 每 tick +1（≥300 清零回落），
+          // ==60 且 1/2 掷 → (45)=Zombie_109 海豚音
+          this.ai3 += 1;
+          if (this.ai3 >= 300) { this.ai2 = 0; this.ai3 = 0; this.vy = 4; }
+          else if (this.ai3 === 60 && Math.floor(Math.random() * 2) === 0) {
+            game.playSfxWav?.('Zombie_109', 1, this.cx, this.cy);
+          }
         } else {
           this.vy = Math.min(this.vy + 0.3, 10); // 出水抛物线
         }
@@ -4320,6 +4562,16 @@ export class Enemy extends Entity {
     // ---- 点光（cs:24858-24860 蜗牛怪 / cs:24934-24936 冰雪元素，Center，恒亮）----
     if (this.vanillaId === 122) this.lightRGB = [0.4, 0, 0.25];
     else if (this.vanillaId === 169) this.lightRGB = [0, 0.6, 0.75];
+    // 小精灵 75 环境声（cs:24928）：1/40 掷 → PlaySound(27)=Pixie.wav（闪烁伴随 55 尘
+    //   1/6 已在通用尘段;音频在 type==75 专属块）
+    if (this.vanillaId === 75 && Math.floor(Math.random() * 40) === 0) {
+      game.playSfxWav?.('Pixie', 1, this.cx, this.cy);
+    }
+    // 幽灵 316 消散（cs:24750-24758）：ai[3]==1 首帧 → NPCDeath55
+    if (this.vanillaId === 316 && this.ai3 === 1 && !(this as unknown as { _g316snd?: boolean })._g316snd) {
+      (this as unknown as { _g316snd?: boolean })._g316snd = true;
+      game.playSfxFiles(['NPC_Killed_55'], 1, this.cx, this.cy);
+    }
     if (!player) { this.vx *= 0.95; this.vy *= 0.95; return; }
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
     const d = Math.hypot(dx, dy) || 1;
@@ -5141,7 +5393,7 @@ export class Enemy extends Entity {
       // ---- 状态 3 绕目标宝箱圆舞（:48688-48742）：210t（音 27@15t 起）；
       //      毕 → 状态 4 带路；目标失效 → 状态 1 ----
       this.noTileCollide = true;
-      if (this.ai3 === 15) game.playSfx('roar', 0.5, this.cx, this.cy); // 近似音 27
+      if (this.ai3 === 15) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);   // :48692 音27=Pixie(曾误 roar 近似)
       if (this.ai3 <= 15) { this.vx *= 0.9; this.vy *= 0.9; }
       else {
         // 简化圆舞：绕目标顺时针环绕（原版 GetFairyCircleOffset 三段摆）
@@ -5167,8 +5419,8 @@ export class Enemy extends Entity {
         } else if (player) {
           const dp = Math.hypot(player.cx - this.cx, player.cy - this.cy);
           if (dp > 300) {
-            // 等玩家（环形徘徊 + 召唤音 1/30）
-            if (Math.random() < 1 / 30) game.playSfx('roar', 0.4, this.cx, this.cy);
+            // 等玩家（环形徘徊 + 召唤音 1/30,:48839 音27=Pixie）
+            if (Math.random() < 1 / 30) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);
             const d2 = Math.hypot(this.cx - tx, this.cy - ty) || 1;
             this.vx += (this.cx - tx) / d2 * 0.1;
             this.vy += (this.cy - ty) / d2 * 0.1;
@@ -5186,7 +5438,7 @@ export class Enemy extends Entity {
       //      消失 + FairyEffects（尘 278×40 爆散 + 音 Item4）----
       this.noTileCollide = true;
       const valid = fairyTreasureValidAt(st, this.ai0, this.ai1);
-      if (this.ai3 === 15) game.playSfx('roar', 0.5, this.cx, this.cy);
+      if (this.ai3 === 15) game.playSfxWav?.('Pixie', 1, this.cx, this.cy);   // :48913 音27=Pixie
       if (this.ai3 <= 15) { this.vx *= 0.9; this.vy *= 0.9; }
       else {
         // 绕目标小圆舞（同状态 3 简化）
@@ -6181,9 +6433,15 @@ export class Enemy extends Entity {
     // ---- ④ 传送触发（:21056-21078）：≥650 → ai0=1 + 采样落点（失败=整轮重来）----
     if (this.ai0 >= 650) {
       this.ai0 = 1;
-      const spot = attemptToFindTeleportSpot(this, game,
-        Math.floor(player.cx / TILE), Math.floor(player.cy / TILE),
-        20, 5, { dungeonWallGate: vid === 32 || (vid >= 281 && vid <= 286) });  // :21070 caster 参数 telefrag=5
+      // :21068-21072 693 图书管理员骷髅：先尝试贴书落点（NearBooks 30 格窗，
+      // AI_AttemptToFindTeleportSpotNearBooks :18948），失败落回通用法师传送
+      const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
+      let spot = vid === 693
+        ? attemptToFindTeleportSpotNearBooks(this, game, ptx, pty, 30) : null;
+      if (!spot) {
+        spot = attemptToFindTeleportSpot(this, game, ptx, pty,
+          20, 5, { dungeonWallGate: vid === 32 || (vid >= 281 && vid <= 286) });  // :21070 caster 参数 telefrag=5
+      }
       if (spot) {
         this.ai1 = vid === 24 ? 5 : 20;            // :21062-21066（Imp 短冷却 → 跳过 ==25 发射门）
         this.ai2 = spot.x; this.ai3 = spot.y;
@@ -6290,10 +6548,10 @@ export class Enemy extends Entity {
         blast.hostile = true;
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(blast, 'projectiles');
       } else if (vid === 693) {
-        // 图书管理员骷髅（NPC.cs:21208-21215）：书锚 = AI_FindNearbyBook（tile 50 放置书，
-        // Center−(10,20) 起 20×30 窗随机一本，:2684-2741）——本仓 tile 50 未注册（放书
-        // 系统缺失，引擎级缺口登记），扫描恒空 → 走原版无书兜底 Center+NextVector2Circular
-        // (30,15)（角度均匀×半径均匀×(30,15)）。弹 1092 书弹 dmg 13 原值（无难度包装），
+        // 图书管理员骷髅（NPC.cs:21208-21215）：书锚 = AI_FindNearbyBook（tile 50 放置书
+        // = 本仓 v_50_books，Center−(10,20) 起 20×30 窗随机一本，:26275-62804）——
+        // 书由玩家放置（书架 101 掉书物 → 桌面/书架放置），无书走原版兜底
+        // Center+NextVector2Circular(30,15)。弹 1092 书弹 dmg 13 原值（无难度包装），
         // 零初速、ai1=45、ai2=target——三态 AI 见 BookProj（Projectile.cs:23742-23809）
         const st = game.world.store;
         const mtx = Math.floor(this.cx / TILE), mty = Math.floor(this.cy / TILE);

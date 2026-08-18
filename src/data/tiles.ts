@@ -226,7 +226,7 @@ def({ key: 'v_562_bamboo_block', name: '', solid: true, opacity: 1, pick: 0, map
 def({ key: 'v_371_pink_slime_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#F965BD', blend: true, drop: null, vanilla: { sheet: 371, frame: 'auto' } });
 def({ key: 'v_668_the_dirtiest_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: null, vanilla: { sheet: 668, frame: 'auto' } });
 def({ key: 'v_398_corrupt_hardened_sand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#64527E', blend: true, drop: null, vanilla: { sheet: 398, frame: 'auto' } });
-def({ key: 'v_379_bubble', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FBD1F0', blend: true, drop: null, vanilla: { sheet: 379, frame: 'auto' } });
+def({ key: 'v_379_bubble', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#FBD1F0', blend: true, drop: null, vanilla: { sheet: 379, frame: 'auto' } });   // ★solid=false:原版静态表 true 但 DoUpdateInWorld(Main.cs:17675)每帧改 false——游戏内非实心;CheckSpawn 期间翻转实心由 Game.checkBedSpawn 的 extraSolid 同构
 def({ key: 'v_618_stone_accent_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: null, vanilla: { sheet: 618, frame: 'auto' } });
 
 // framed 物体（frame:style 显式 18px 帧）
@@ -923,6 +923,15 @@ export const TILE_KEY_BY_SHEET = new Map<number, string>();
     TILE_KEY_BY_SHEET.set(sh, TILE_DEFS[i].key);
   }
 }
+
+/** Main.tileTable 全表（Main.cs:1449 + 初始化段；DungeonPass TILE_TABLE_D 同源提取）：
+ *  桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：书 50/水蜡 49/瓶 13 等）
+ *  与地牢 Place* 家族的"下方须桌面集"锚点判定共用 */
+export const TILE_TABLE_SHEETS = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393,
+  394, 405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582,
+  599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644,
+  645, 710]);
 
 // ===================== 开门砍切白名单（原版 OpenDoor cs:37698-37724 1:1） =====================
 // 侧列仅许 tileCut / 165 洞穴装饰 / IsADripTile，其余实心才拒绝开门；可砍格随后碎掉。

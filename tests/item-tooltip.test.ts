@@ -1,7 +1,7 @@
 // 物品悬停气泡统计行（MouseText_DrawItemTooltip_GetLinesInfo，Main.cs:20488-20920）：
 //   vi_ 物品全量行族对照原版。断言用 tag 序列（l10n 未载时文案回退键名，不比中文串）。
 import { describe, it, expect } from 'vitest';
-import { buildTooltipBody } from '../src/ui/itemTooltip';
+import { buildTooltipBody, assembleTooltipLines } from '../src/ui/itemTooltip';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
 
 const NOPLAYER = null;
@@ -103,5 +103,54 @@ describe('悬停气泡统计行（vi_ 全量）', () => {
     }).lines.find((l) => l.tag === 'crit')!;
     expect(parseInt(boosted.text, 10)).toBe(parseInt(base.text, 10) * 2);
     expect(parseInt(boostCrit.text, 10)).toBe(parseInt(baseCrit.text, 10) + 10);
+  });
+});
+
+describe('低频行族（2026-08-18 二批）', () => {
+  it('鞭（summon+IsAWhip）：显速度档（:20545 例外）', () => {
+    const r = tags(4672);   // 皮鞭 Leather Whip（shoot=841 ∈ IsAWhip）
+    expect(r.tags).toContain('damage');
+    expect(r.lines.find((l) => l.tag === 'damage')!.text).toContain('LegacyTooltip.53');  // 召唤伤害
+    expect(r.tags).toContain('speed');   // 鞭例外显速度档
+  });
+
+  it('悠悠球（3262 Code 1）：yoyoLogo 装饰位', () => {
+    const def = defOfVid(3262)!;
+    const body = buildTooltipBody(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null);
+    expect(body.yoyoLogoLine?.yoyoLogo).toBe(true);
+  });
+
+  it('活木魔杖 832：消耗行（tip52 + 木材名）；泥土魔杖 114 无消耗行', () => {
+    expect(tags(832).tags).toContain('tilewand');
+    expect(tags(932).tags).toContain('tilewand');
+    expect(tags(114).tags).not.toContain('tilewand');   // Dirt Rod 发射移土弹非消耗（:2725-2737 无 tileWand）
+  });
+
+  it('研究行（旅程未满）：CreativeSacrificeNeeded + journeyColor 紫', () => {
+    const def = defOfVid(4)!;   // 铜短剑可研究
+    const body = buildTooltipBody(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null, {
+      research: { have: 1, need: 25 },
+    });
+    expect(body.researchLine?.journeyColor).toBe(true);
+    expect(body.researchLine?.text).toContain('CreativeSacrificeNeeded');
+  });
+
+  it('商店价格行（ctx.shop）：买入价 + 金档色', () => {
+    const def = defOfVid(4)!;
+    const lines = assembleTooltipLines(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null, null, {
+      shop: { buy: true, priceCopper: 12000 },   // 1金20银
+    });
+    const shop = lines.find((l) => l.tag === 'shopprice')!;
+    expect(shop.text).toContain('LegacyTooltip.50');   // 买入价:
+    expect(shop.color).toBe('rgb(224,201,92)');        // 金档色
+  });
+
+  it('专家/大师行（ctx 旗）', () => {
+    const def = defOfVid(4)!;
+    const lines = assembleTooltipLines(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null, null, {
+      expert: true, master: true,
+    });
+    expect(lines.some((l) => l.tag === 'expert')).toBe(true);
+    expect(lines.some((l) => l.tag === 'master')).toBe(true);
   });
 });

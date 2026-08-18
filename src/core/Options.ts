@@ -49,9 +49,11 @@ export interface OptionsData {
   /** 渲染帧率上限(2026-08-18 原版对齐):原版锁 60fps;0=不锁(跟随显示器 rAF)。
    *  逻辑 tick 恒 60Hz 不受影响(fixedUpdate 累加器);仅 gate 渲染帧 */
   frameCap: number;
-  /** 跳帧(原版视频设置 Frame Skip,默认开):渲染超预算时本帧只跑逻辑不画,
-   *  保逻辑恒 60Hz——弱机卡顿时"画面慢但游戏不慢" */
-  frameSkip: boolean;
+  /** 跳帧三态(原版 FrameSkipMode:Off/On/Subtle,默认 Subtle——原版 improved 路径
+   *  默认温和档):On=激进(超预算 1.5×即跳,连跳≤2);Subtle=温和(落后整帧才跳,
+   *  连跳≤1,原版 successiveSkippedDraws<=0 语义 Main.cs:16968);
+   *  渲染超预算时本帧只跑逻辑不画,保逻辑恒 60Hz */
+  frameSkipMode: 'off' | 'on' | 'subtle';
 }
 
 const KEY = 'sandboxworld.options';
@@ -65,7 +67,7 @@ export class OptionsStore {
     devMode: false,
     pvpEnabled: false,
     frameCap: 60,
-    frameSkip: true,
+    frameSkipMode: 'subtle',
     pvpTeam: 0,
     lang: DEFAULT_LANG,
     smartCursorMode: 'toggle',
@@ -90,7 +92,15 @@ export class OptionsStore {
     this.loaded = true;
     try {
       const raw = await kvGet(KEY);
-      if (raw) Object.assign(this.data, JSON.parse(raw));
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<OptionsData> & { frameSkip?: boolean };
+        // 迁移:旧布尔 frameSkip(2026-08-18 当天版本)→ 三态
+        if (typeof parsed.frameSkip === 'boolean') {
+          parsed.frameSkipMode = parsed.frameSkip ? 'on' : 'off';
+          delete parsed.frameSkip;
+        }
+        Object.assign(this.data, parsed);
+      }
       // 语言归一化:旧数字 legacyId → culture 名;非法值落 en-US(对齐原版 LoadSettings)
       this.data.lang = normalizeLang(this.data.lang);
       // 小地图皮肤归一化:存档里的未知/旧键 → Default

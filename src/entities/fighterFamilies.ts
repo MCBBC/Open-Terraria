@@ -23,6 +23,7 @@ import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { getKnockbackMultiplierScaledByDifficulty, getAttackDamageForProjectiles } from '../stats/ScaleStats';
+import { TILE_DEFS } from '../data/tiles';
 
 /** :57462-57471 flag8=false 全表（NPC.cs:57468）。flag8 的两处下游消费：
  *  ① 攻门段 :60383 `… && flag8`——表内型**不攻门**（Psycho 466/Possessed 469/
@@ -427,6 +428,104 @@ export function swampThingAmbushStep(e: Enemy, canSee: boolean): boolean {
     return true;
   }
   return false;
+}
+
+// ---------------------------------------------------------------------------
+// 693 图书管理员骷髅——贴书传送（NPC.cs AI_AttemptToFindTeleportSpotNearBooks
+// :18948-19046，caster AI :21068-21076 消费：先贴书、失败落回通用法师传送）
+// ---------------------------------------------------------------------------
+
+/** SearchWall（:19026-19046）：从墙面格 (x,y) 沿垂直向找第一本贴墙书。
+ *  返回 [bookY, outOfBounds]：找到书 → [书 y,false]；撞实心/出界终止 → [0,标记]；
+ *  书在玩家扩展盒（命中盒 ∪ 速度×20 外推盒，再外扩 80px）内 → 视同终止 [0,false]。
+ *  （do-while 条件 = !active || !solid：穿空气与非实心续走；书格 type 50 半途截获） */
+function nearBooksSearchWall(
+  e: Enemy, game: GameHooks, x: number, y0: number, downwards: boolean,
+): { bookY: number; outOfBounds: boolean } {
+  const st = game.world.store;
+  const step = downwards ? 1 : -1;
+  let y = y0;
+  let tileActive = false, tileSolid = false;
+  // do-while：先走一格再判（:19035-19044）
+  for (;;) {
+    y += step;
+    if (y < 0 || y >= st.h) return { bookY: 0, outOfBounds: true };
+    const t = st.get(x, y);
+    tileActive = t !== 0;
+    tileSolid = tileActive && st.isSolid(x, y);
+    if (tileActive && TILE_DEFS[t]?.vanilla?.sheet === 50) {
+      // :19040-19044 书格 16×16 外扩 80px 与玩家并集盒相交 → 弃书终止本列
+      const p = game.player as Player;
+      if (p && !p.dead) {
+        const ux0 = Math.min(p.x, p.x + p.vx * 20), ux1 = Math.max(p.x + p.w, p.x + p.w + p.vx * 20);
+        const uy0 = Math.min(p.y, p.y + p.vy * 20), uy1 = Math.max(p.y + p.h, p.y + p.h + p.vy * 20);
+        if (x * TILE - 80 < ux1 && x * TILE + TILE + 80 > ux0
+          && y * TILE - 80 < uy1 && y * TILE + TILE + 80 > uy0) {
+          return { bookY: 0, outOfBounds: false };
+        }
+      }
+      return { bookY: y, outOfBounds: false };
+    }
+    if (tileActive && tileSolid) return { bookY: 0, outOfBounds: false };
+  }
+}
+
+/** AI_AttemptToFindTeleportSpotNearBooks（:18948-19024）1:1：玩家 30 格窗内
+ *  随机取"地牢墙背景 + 无实块"列，交替方向水平推进至墙面，贴墙面垂直扫书，
+ *  落点 = 书格向墙面外退一格（destination.X -= num5）+ 下一格（Y+1）。
+ *  @returns 落点（格坐标 float 语义； caster AI 存 ai[2]/ai[3]）| null */
+export function attemptToFindTeleportSpotNearBooks(
+  e: Enemy, game: GameHooks, targetTileX: number, targetTileY: number, maxRangeInTiles: number,
+): { x: number; y: number } | null {
+  const st = game.world.store;
+  const num = Math.floor(e.cx / TILE), num2 = Math.floor(e.cy / TILE);   // :18950-18951
+  // :18954-18958 自身距目标 >125 格 → 直接放弃（贴书传送只做近距）
+  if (Math.hypot(num - targetTileX, num2 - targetTileY) > 125) return null;
+  let num5 = (Math.floor(Math.random() * 2)) * 2 - 1;                    // :18959
+  for (let i = 0; i < 100; i++) {                                        // :18960
+    const num6 = targetTileX - maxRangeInTiles + Math.floor(Math.random() * (maxRangeInTiles * 2 + 1));
+    const num7 = targetTileY - maxRangeInTiles + Math.floor(Math.random() * (maxRangeInTiles * 2 + 1));
+    if (num6 < 0 || num7 < 0 || num6 >= st.w || num7 >= st.h) {
+      return null;    // WorldGen.InWorld(Point) 默认 fluff=0（:18966-18968——整轮放弃非 continue）
+    }
+    // :18970-18973 落列须地牢墙背景（7-9/94-99）且无激活块
+    const wHere = st.wall[st.idx(num6, num7)];
+    const isDungeonWall = (wHere >= 7 && wHere <= 9) || (wHere >= 94 && wHere <= 99);
+    if (!isDungeonWall || st.get(num6, num7) !== 0) continue;
+    num5 *= -1;                                                          // :18975 每次有效尝试换向
+    // :18977-18990 沿 num5 方向走到第一块实心（墙面），越窗 → 弃本轮
+    let x = num6;
+    const xLo = Math.max(0, targetTileX - maxRangeInTiles);
+    const xHi = Math.min(st.w - 1, targetTileX + maxRangeInTiles);
+    let outOfBounds = false;
+    for (;;) {
+      x += num5;
+      if (x < xLo || x > xHi) { outOfBounds = true; break; }
+      if (st.get(x, num7) !== 0 && st.isSolid(x, num7)) break;
+    }
+    if (outOfBounds) continue;
+    x -= num5;                                                           // :18995 退回墙面外一格
+    // :18996-19012 墙列向下扫书；同列连续多本（避自身格 ±1 内续找下一本）
+    let y = num7;
+    for (;;) {
+      const r = nearBooksSearchWall(e, game, x, y, true);
+      if (!r.bookY && !r.outOfBounds) break;
+      if (r.outOfBounds) { y = -1; break; }
+      if (Math.abs(r.bookY - num2) <= 1 && Math.abs(x - num) <= 1) { y = r.bookY; continue; }
+      return { x: x - num5, y: r.bookY + 1 };                            // :19006-19008
+    }
+    if (y < 0) continue;
+    // :19013-19023 同列向上扫书（同语义）
+    y = num7;
+    for (;;) {
+      const r = nearBooksSearchWall(e, game, x, y, false);
+      if (!r.bookY && !r.outOfBounds) break;
+      if (r.outOfBounds) break;
+      if (Math.abs(r.bookY - num2) <= 1 && Math.abs(x - num) <= 1) { y = r.bookY; continue; }
+      return { x: x - num5, y: r.bookY + 1 };
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------

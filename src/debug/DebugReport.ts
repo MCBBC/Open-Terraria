@@ -5,6 +5,7 @@
 //   - 区域转储 = 行 RLE 串：cell = "sheet:fx:fy:wall:liquid"，空格记 "0"，连续相同 cell 记 "cell*runLen"，行内以 ";" 分隔
 //   - tiles.focus = 焦点格贴图解析链（hover/相机中心/玩家脚下三格 × cell/atlas/sample/frameEngine）
 // 收集全程防御式访问（缺字段 → null/0），保证 node 单测无 DOM 样本也能跑通。
+import { gfxQuality } from '../core/GfxQuality';
 import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import { TILE } from '../core/constants';
@@ -720,6 +721,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         dirtyQueue: g.chunks.dirtyQueue.length,
         staleSentinels: [...g.chunks.chunks.values()].filter((v) => v === undefined).length,
         maxChunks: (g.chunks.constructor as { MAX_CHUNKS?: number }).MAX_CHUNKS ?? -1,
+        gfxQuality: gfxQuality.value,
         lastFlushMs: +g.chunks.lastFlushMs.toFixed(2),
         lastFlushCount: g.chunks.lastFlushCount,
       } : null,

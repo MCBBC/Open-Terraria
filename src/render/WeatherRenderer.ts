@@ -7,6 +7,7 @@
 import { loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE } from '../core/constants';
 import type { World } from '../world/World';
+import { gfxQuality } from '../core/GfxQuality';
 import type { Camera } from './Camera';
 import type { Renderer } from './Renderer';
 import type { WeatherState } from '../world/weather/Weather';
@@ -106,6 +107,9 @@ export class WeatherRenderer {
     num *= 0.25 + 1 * w.cloudAlpha;              // Rain.cs:28
     if (hooks.bossDanger) num = Math.max(1, num * 0.05);
     for (let i = 0; i < num; i++) {
+      // 自动画质密度门(Rain.cs:123 rand(100)<gfxQuality×100):q 降则雨滴
+      // 按比例稀疏(每滴独立掷门,原版同款)
+      if (Math.random() * 100 >= gfxQuality.value * 100) continue;
       // 屏外缓冲 ±600（玩家上跳 ×30，Rain.cs:44-48）
       let margin = 600;
       if (playerVy < 0) margin += Math.floor(Math.abs(playerVy) * 30);
@@ -171,8 +175,10 @@ export class WeatherRenderer {
         d.active = false;
         // 落水花（Rain.cs:120-133）：dust 生在 position−velocity（退回表面一步），
         // 再 X−2/Y+2；速度 = −v×0.025 且 Y−2。概率门 rand(100)<gfxQuality×100
-        // ——gfxQuality 默认 1（Main.cs:1012）= 恒溅。★曾误 0.5（少一半水花）
-        hooks.emitSand(d.x - d.vx - 2, d.y - d.vy + 2, -d.vx * 0.025, -d.vy * 0.025 - 2, '#B8D0E8', 3);
+        // (2026-08-18 接自动画质;q=1 恒溅;★曾误 0.5 少一半水花)
+        if (Math.random() * 100 < gfxQuality.value * 100) {
+          hooks.emitSand(d.x - d.vx - 2, d.y - d.vy + 2, -d.vx * 0.025, -d.vy * 0.025 - 2, '#B8D0E8', 3);
+        }
       }
     }
     // ---- 雪粒更新（Dust.cs:1810-1828 dust 76 分支）----
@@ -228,9 +234,9 @@ export class WeatherRenderer {
     for (const f of this.snow) if (f.active) live++;
     const st = world.store;
     for (let i = 0; i < attempts; i++) {
-      // 活片门（:12997）：num4×(gfxQuality/2+0.5)+num4×0.1——gfxQuality 默认 1（:1012）= 1.1×target。
-      // ★曾误 0.5 档（0.6×target）= 雪密度只有原版 55%
-      if (!(live < target * 1.1)) break;
+      // 活片门（:12997）：num4×(gfxQuality/2+0.5)+num4×0.1(2026-08-18 接自动画质,
+      // q=1 → 1.1×target)。★曾误 0.5 档（0.6×target）= 雪密度只有原版 55%
+      if (!(live < target * (gfxQuality.value / 2 + 0.5) + target * 0.1)) break;
       if (Math.random() >= num) continue;
       let sx = Math.floor(Math.random() * (viewW + 1500)) - 750;
       let sy = camY - Math.floor(Math.random() * 50);
