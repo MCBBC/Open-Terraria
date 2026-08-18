@@ -46,6 +46,9 @@ export interface OptionsData {
   pvpEnabled: boolean;
   /** 队伍 0-5（Player.team,PlayerTeamID）——镜像角色档 team,UI 可运行时改并回写角色档 */
   pvpTeam: number;
+  /** 渲染帧率上限(2026-08-18 原版对齐):原版锁 60fps;0=不锁(跟随显示器 rAF)。
+   *  逻辑 tick 恒 60Hz 不受影响(fixedUpdate 累加器);仅 gate 渲染帧 */
+  frameCap: number;
 }
 
 const KEY = 'sandboxworld.options';
@@ -58,6 +61,7 @@ export class OptionsStore {
     uiScale: 1,
     devMode: false,
     pvpEnabled: false,
+    frameCap: 60,
     pvpTeam: 0,
     lang: DEFAULT_LANG,
     smartCursorMode: 'toggle',

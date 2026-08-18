@@ -275,6 +275,15 @@ export class SettingsPanel {
         // 原版行文案 = UI.TilesSwayInWindOn/Off 融合串（IngameOptions.cs:1055），
         // 取 On 支去冒号做标签（同背景开关的 Lang.menu(100) 处理法）
         this.toggle(Lang.text('UI.TilesSwayInWindOn').replace(/[:：].*$/, ''), () => d.swayInWind, (v) => void options.set('swayInWind', v)),
+        // 渲染帧率上限(2026-08-18 原版对齐:原版锁 60fps;60/120/不锁 三档循环。
+        // 逻辑 tick 恒 60Hz 不变——仅 gate 渲染,高分屏省一半渲染/GPU 负载)
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.FrameCap'),
+          () => String(d.frameCap),
+          () => d.frameCap === 0 ? Lang.text('Mods.SandboxWorld.Settings.FrameCapOff')
+            : d.frameCap === 120 ? '120 FPS' : '60 FPS',
+          () => void options.set('frameCap', d.frameCap === 60 ? 120 : d.frameCap === 120 ? 0 : 60),
+        ),
         // 智能光标（原版 IngameOptions :1418 Smart Cursor 段）：模式 Toggle/Hold + 三开关
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.SmartCursorMode'),

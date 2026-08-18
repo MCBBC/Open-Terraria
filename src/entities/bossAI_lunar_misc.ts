@@ -1523,7 +1523,9 @@ export function nebulaFloaterAI(e: Enemy, game: GameHooks, player: Player | null
     // ---- 消散段(:41582-41601):3t 倒数后 active=false ----
     if (lai[3] === 0) {
       lai[3] = 1; e.ai3 = 3;
-      game.playSfx('menuOpen', 0.4, e.cx, e.cy);     // 消散音（原键名 menu_open 拼错恒静音）
+      // 消散音 = Item8（:41584 原文 PlaySound(SoundID.Item8)，与传送同款）。
+      // ★曾播 menuOpen(UI 菜单声)——"原键名拼错"的修补方向反了，应改真轨（审计 #22）
+      game.playSfxFiles(['Item_8'], 1, e.cx, e.cy);
       game.spawnParticles(e.cx, e.cy, '#C060FF', 20, 3, { life: 40 });
     }
     e.ai3 -= 1;

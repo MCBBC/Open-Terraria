@@ -108,44 +108,73 @@ async function warm(tag, urls, base) {
   const total = done0 + urls.length;
   let done = total - missing.length;
   let failed = 0;
-  // 背压:降并发 + 每 400 文件 250ms 喘息(Cache API 磁盘落盘缓冲排空窗口)
-  const CONC = 3;
+  // ---- 自适应并发(2026-08-18 用户"按下载/处理速度自适应并行";曾固定 3 路) ----
+  // AIMD:按实测单文件完成延迟 EMA 在 [MIN_CONC, MAX_CONC] 间调节——
+  //   快(本地/内网,ema<30ms)每 32 文件 +1 路;慢(弱网/磁盘拥塞,ema>150ms)
+  //   路数减半。MAX=8:HTTP/1.1 浏览器同源也就 6 连接,更高无意义(HTTP/2 部署
+  //   下 8 路流也够吃带宽)。重试等待不计入延迟(那是网络瞬态,不是容量信号)。
+  const MIN_CONC = 2, MAX_CONC = 8, START_CONC = 3;
   const BREATH_EVERY = 400;
-  const BREATH_MS = 250;
+  const BREATH_MS = 250;         // 喘息保持:Cache API 磁盘落盘缓冲排空窗口
+  let conc = START_CONC;
+  let ema = 60;                  // 单文件毫秒 EMA(初值中性)
+  let sinceTune = 0;
   let cursor = 0;
   let sinceBreath = 0;
+  let active = 0;
   const breath = () => new Promise((r) => setTimeout(r, BREATH_MS));
-  const workers = Array.from({ length: Math.min(CONC, missing.length) }, async () => {
+  // 固定开 MAX 路 worker,用动态 conc 信号量闸住——升/降路不重建 worker 池
+  const workers = Array.from({ length: Math.min(MAX_CONC, missing.length) }, async () => {
     for (;;) {
       if (warmAbort) return;
-      if (sinceBreath >= BREATH_EVERY) { sinceBreath = 0; await breath(); }
-      const i = cursor++;
-      if (i >= missing.length) return;
-      const u = missing[i];
-      // 单文件即时重试 ×3(间隔 300/600ms):弱网瞬断就地恢复,不必等全量
-      // 跑完后的整轮补拉(2026-08-13 可靠性 review)
-      let ok = false;
-      for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+      // 信号量:活跃数超过当前 conc 档 → 让出(微任务轮询,无计时器开销)
+      while (active >= conc) {
         if (warmAbort) return;
-        try {
-          const res = await fetch(u);
-          if (res && res.ok) { await cache.put(u, res); ok = true; }
-          else if (attempt === 2) failed++;
-        } catch (err) {
-          if (attempt === 2) failed++;
-        }
-        if (!ok && attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, 15));
       }
-      done++;
-      sinceBreath++;
-      lastWarm.done = done; lastWarm.failed = failed;
-      if ((done & 7) === 0 || done === total) postProgress(tag, done, total, failed);
+      active++;
+      try {
+        if (sinceBreath >= BREATH_EVERY) { sinceBreath = 0; await breath(); }
+        const i = cursor++;
+        if (i >= missing.length) return;
+        const u = missing[i];
+        const t0 = Date.now();
+        // 单文件即时重试 ×3(间隔 300/600ms):弱网瞬断就地恢复,不必等全量
+        // 跑完后的整轮补拉(2026-08-13 可靠性 review)
+        let ok = false;
+        for (let attempt = 0; attempt < 3 && !ok; attempt++) {
+          if (warmAbort) return;
+          try {
+            const res = await fetch(u);
+            if (res && res.ok) { await cache.put(u, res); ok = true; }
+            else if (attempt === 2) failed++;
+          } catch (err) {
+            if (attempt === 2) failed++;
+          }
+          if (!ok && attempt < 2) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+        }
+        // 延迟采样与调参(仅成功文件计入;失败重试的等待会污染信号)
+        if (ok) {
+          ema = ema * 0.9 + (Date.now() - t0) * 0.1;
+          if (++sinceTune >= 32) {
+            sinceTune = 0;
+            if (ema < 30 && conc < MAX_CONC) conc++;
+            else if (ema > 150 && conc > MIN_CONC) conc = Math.max(MIN_CONC, Math.floor(conc / 2));
+          }
+        }
+        done++;
+        sinceBreath++;
+        lastWarm.done = done; lastWarm.failed = failed;
+        if ((done & 7) === 0 || done === total) postProgress(tag, done, total, failed);
+      } finally {
+        active--;
+      }
     }
   });
   await Promise.all(workers);
   lastWarm = { done, total, failed, running: false };
   postProgress(tag, done, total, failed);
-  postMessageToPages({ type: 'warm-done', tag, done, total, failed, aborted: warmAbort });
+  postMessageToPages({ type: 'warm-done', tag, done, total, failed, aborted: warmAbort, conc, emaMs: Math.round(ema) });
 }
 
 /** 缓存现状查询(页面初始完成判定/清理检测;附最近一轮 warm 统计) */

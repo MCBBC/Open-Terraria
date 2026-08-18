@@ -25,6 +25,52 @@ function invBgEnsure(): ImageBitmap | HTMLImageElement | null {
   }
   return invBgImg;
 }
+/** tooltip 底（Inventory_Back13 × (23,25,81)×0.925，Utils.DrawInvBG :20252-20255）：
+ *  与面板 invBgDataUrl 同贴图不同染色；按 (w,h) 取整缓存 */
+let tooltipBgTinted: HTMLCanvasElement | null = null;
+const tooltipBgCache = new Map<string, string>();
+function tooltipBgDataUrl(w: number, h: number): string | null {
+  const img = invBgEnsure();
+  if (!img || !(img.width > 0) || img.width === 0) return null;
+  const key = `${Math.max(20, Math.round(w))}x${Math.max(20, Math.round(h))}`;
+  const hit = tooltipBgCache.get(key);
+  if (hit) return hit;
+  if (!tooltipBgTinted) {
+    const t = document.createElement('canvas');
+    t.width = img.width; t.height = img.height;
+    const tc = t.getContext('2d')!;
+    tc.imageSmoothingEnabled = false;
+    tc.drawImage(img, 0, 0);
+    const d = tc.getImageData(0, 0, t.width, t.height);
+    const tmul = [23 / 255, 25 / 255, 81 / 255, 0.925];
+    for (let i = 0; i < d.data.length; i += 4) {
+      d.data[i] = Math.round(d.data[i] * tmul[0]);
+      d.data[i + 1] = Math.round(d.data[i + 1] * tmul[1]);
+      d.data[i + 2] = Math.round(d.data[i + 2] * tmul[2]);
+      d.data[i + 3] = Math.round(d.data[i] * tmul[3]);
+    }
+    tc.putImageData(d, 0, 0);
+    tooltipBgTinted = t;
+  }
+  const t = tooltipBgTinted, W = t.width, H = t.height;
+  const c = document.createElement('canvas');
+  c.width = Number(key.split('x')[0]); c.height = Number(key.split('x')[1]);
+  const x = c.getContext('2d')!;
+  x.imageSmoothingEnabled = false;
+  x.drawImage(t, 0, 0, 10, 10, 0, 0, 10, 10);
+  x.drawImage(t, W - 10, 0, 10, 10, c.width - 10, 0, 10, 10);
+  x.drawImage(t, 0, H - 10, 10, 10, 0, c.height - 10, 10, 10);
+  x.drawImage(t, W - 10, H - 10, 10, 10, c.width - 10, c.height - 10, 10, 10);
+  x.drawImage(t, 10, 0, 10, 10, 10, 0, c.width - 20, 10);
+  x.drawImage(t, 10, H - 10, 10, 10, 10, c.height - 10, c.width - 20, 10);
+  x.drawImage(t, 0, 10, 10, 10, 0, 10, 10, c.height - 20);
+  x.drawImage(t, W - 10, 10, 10, 10, c.width - 10, 10, 10, c.height - 20);
+  x.drawImage(t, 10, 10, 10, 10, 10, 10, c.width - 20, c.height - 20);
+  const url = c.toDataURL();
+  tooltipBgCache.set(key, url);
+  return url;
+}
+
 function invBgDataUrl(w: number, h: number): string | null {
   const img = invBgEnsure();
   if (!img || !(img.width > 0) || img.width === 0) return null;
@@ -280,8 +326,10 @@ const CSS = `
 .sw-ach .icn .bdr { position:absolute; width:24px; height:24px; image-rendering:pixelated;
   left:-1.5px; top:-1.5px; }
 @keyframes sw-ach-in { from { opacity:0; transform:translateY(12px) scale(0.9); } }
-.sw-tooltip { position:fixed; background:rgba(10,8,16,0.95); border:1px solid #6a5a8a; border-radius:4px;
-  padding:6px 10px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:260px; }
+.sw-tooltip { position:fixed; background:rgba(21,23,75,0.93);
+  padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:280px;
+  font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }   /* 原版 MouseText 字体+字影（:20256 DrawColorCodedStringWithShadow） */
 .sw-buff { pointer-events:auto; position:relative; width:30px; height:30px; background:rgba(40,32,60,0.9);
   border:1px solid #6a5a8a; border-radius:4px; align-items:center; justify-content:center; }
 .sw-recipe { pointer-events:auto; display:flex; align-items:center; gap:6px; padding:5px 8px; margin:3px 0;
@@ -1281,7 +1329,9 @@ export class UI {
     const nameColor = this.rarityColor(rare);
     // 词缀名前缀（Lang.GetPrefixedItemName：Prefix.{ConstName} + 物品名）
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
-    let html = `<b style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
+    // 名称行（GetHoverName :420-427：不加粗、堆叠>1 追加 " (N)"；稀有度色）
+    const stackSuffix = s.stack > 1 ? ` (${s.stack})` : '';
+    let html = `<span style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}${stackSuffix}</span>`;
     if (s.favorited) html += ` <span style="color:#ffb347">★</span>`;
     // ---- 统计行（MouseText_DrawItemTooltip_GetLinesInfo，Main.cs:20488-20920 1:1，
     //      构建器在 ui/itemTooltip.ts）：vi_ 全量——伤害[+类型后缀]/暴击/速度档/击退档/
@@ -1326,13 +1376,37 @@ export class UI {
     }
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';
-    // 背景：原版不透明面板色 (23,25,81)×0.925（:20242-20245）
-    this.tooltip.style.background = 'rgba(21,23,75,0.95)';
+    this.applyTooltipBg();
+    // 定位：锚槽右侧（原版跟鼠标+toolTipDistance；槽锚定确定性更好），屏幕钳制
+    // （:20241-20250 num4=18 边距）
     const slotEl = this.slotEl(i, where);
     if (slotEl) {
       const r = slotEl.getBoundingClientRect();
-      this.tooltip.style.left = `${r.right + 8}px`;
-      this.tooltip.style.top = `${r.top}px`;
+      const tw = this.tooltip.offsetWidth, th = this.tooltip.offsetHeight;
+      let left = r.right + 8, top = r.top;
+      if (left + tw > window.innerWidth - 18) left = Math.max(0, window.innerWidth - tw - 18);
+      if (top + th > window.innerHeight - 18) top = Math.max(0, window.innerHeight - th - 18);
+      this.tooltip.style.left = `${left}px`;
+      this.tooltip.style.top = `${top}px`;
+    }
+  }
+
+  /** tooltip 九宫底应用（Inventory_Back13 × (23,25,81)×0.925，:20252-20255）：
+   *  素材未就绪时挂一次性 onload 补刷（首次悬停竞态走兜底色） */
+  private applyTooltipBg(): void {
+    if (this.tooltip.style.display !== 'block') return;
+    const w = Math.ceil(this.tooltip.offsetWidth), h = Math.ceil(this.tooltip.offsetHeight);
+    const bgUrl = tooltipBgDataUrl(w, h);
+    if (bgUrl) {
+      this.tooltip.style.background = `url(${bgUrl})`;
+      this.tooltip.style.border = 'none';
+      this.tooltip.style.borderRadius = '0';
+    } else {
+      this.tooltip.style.background = 'rgba(21,23,75,0.93)';   // 兜底色
+      const img = invBgEnsure();
+      if (img instanceof HTMLImageElement && !(img.width > 0)) {
+        img.addEventListener('load', () => this.applyTooltipBg(), { once: true });
+      }
     }
   }
 

@@ -3661,8 +3661,12 @@ export class Renderer {
         else if (stR === 65) ctx.rotate(e.vx * 0.3);   // AI_065 蝶族:倾斜 vx*0.3(cs:73426)
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
-        if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
-        if (!rotationDriven && (e.vanillaId === 611 || e.vanillaId === 689) && e.facing < 0) ctx.scale(-1, 1); // 鸮族 spriteDirection=-direction（:74381）:镜像取反
+        // 原版默认朝左(flip 当 spriteDirection==1);旋转族(rotationDriven)禁镜像;
+        // 鸮族 611/689 spriteDirection=-direction(:74381)→仅 facing<0 时翻,
+        // ★须从通用行排除,否则两条叠加成"恒翻转"(2026-08-18 终审抓出)
+        const owlMirror = e.vanillaId === 611 || e.vanillaId === 689;
+        if (!rotationDriven && !owlMirror && e.facing > 0) ctx.scale(-1, 1);
+        if (!rotationDriven && owlMirror && e.facing < 0) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
@@ -6672,8 +6676,22 @@ export class Renderer {
       // 滚轴鞋（IsRollerSkates）满速档每 tick +2（:35830-35833 counter=2.0）。
       // animTime = |vx| 逐 tick 累计（走停清零）→ counter = animTime × 速率
       const skates = !!MOUNT_SETS.IsRollerSkates?.[mtype] && mountActive;
-      const ratePerTick = skates && Math.abs(p.vx) >= (p.equipStats.accRunSpeed || 3) ? 2 : 1.3;
-      legs = 7 + Math.floor((p.animTime * ratePerTick) / 8) % 13;
+      // ★打滑面/滚轴鞋上无左右输入（:35818-35826）：(slippy||slippy2||windPushed||
+      // flag8) && !controlLeft && !controlRight → counter=0、腿钉行 0（惯性滑行
+      // vx≠0 但无输入，不走循环）。slippy={161,162,127,163,164,200,659}、slippy2=197
+      // （FloorCheck :23454-23455，读 p.floorTileT）；windPushed（:35819 原版风推旗，
+      // :11432 置位）本引擎无风推模拟不列——普通地面无输入滑行（击退余速）原版走
+      // 行走循环，与本门不冲突。曾有门 |vx|>0.3 无输入照走循环 = 冰面滑行腿跑步
+      const ft = p.floorTileT;
+      const slideNoInput = (ft === 197 || ft === 161 || ft === 162 || ft === 127
+        || ft === 163 || ft === 164 || ft === 200 || ft === 659 || skates)
+        && p.inputX === 0;
+      if (slideNoInput) {
+        legs = 0;
+      } else {
+        const ratePerTick = skates && Math.abs(p.vx) >= (p.equipStats.accRunSpeed || 3) ? 2 : 1.3;
+        legs = 7 + Math.floor((p.animTime * ratePerTick) / 8) % 13;
+      }
     } else {
       Renderer.swimPhase.delete(p);
       legs = 0;
@@ -7527,7 +7545,12 @@ export class Renderer {
         // 变身坐骑（PlayerIsHidden）原版由 AdjustmentsForWolfMount 改锚续画手持物——
         // 此处原锚近似续画（不隐藏，登记锚点偏差）
         if (staticHoldStyle) {
-          const ar = this.atlasIcon(held.id);
+          // ★手持帧规格同 drawUseItem（GetItemDrawFrame :41901-41903）：IsFood 取
+          // 竖 3 帧条第 2 行（atlasIcon 切的是掉落物顶行 → 从 vicon 原条重切）
+          const arRaw = this.atlasIcon(held.id);
+          const ar = vid >= 0 && arRaw && VANILLA_IS_FOOD.has(vid) && this.atlas
+            ? Renderer.foodHeldFrame(this.atlas.vicon(vid), arRaw)
+            : arRaw;
           const icon = ar ? null : this.itemIcon(held.id);
           if (ar || icon) {
             const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
@@ -7541,6 +7564,15 @@ export class Renderer {
             if (hs === 1 && vid >= 0 && (vid === 282 || vid === 286 || vid === 3112 || vid === 4776 || vid === 5643)) {
               offX = fw * 0.5; offY = 28;   // (fw/2+2-2, 24+4)
             }
+            // holdStyle 1 链特判（:49606-49663 else-if 序）：968 棉花糖串 X=中心+8
+            // （Y 走默认 24；整图 32×10 直画非 IsFood）→ 营火 miscTimer>900 烤成
+            // 969（:49610-49645，模型侧）；856 独角兽棒 (4,34)；353 麦酒 (6,中心+11)；
+            // IsFood 族 (4, 中心+fh/2)（:49709-49713——锚=itemLocation 底左角，
+            // MountedCenter.Y = p.y+p.h/2）
+            else if (hs === 1 && vid === 968) { offX = 8; }
+            else if (hs === 1 && vid === 856) { offX = 4; offY = 34; }
+            else if (hs === 1 && vid === 353) { offX = 6; offY = p.h * 0.5 + 11; }
+            else if (hs === 1 && vid >= 0 && VANILLA_IS_FOOD.has(vid)) { offX = 4; offY = p.h * 0.5 + fh * 0.5; }
             if (hs === 2) {
               if (vid === 946 || vid === 4707) { offX = -16; offY = 22; }
               else { offX = 6; offY = 16; rot = -0.79; }
@@ -7551,10 +7583,12 @@ export class Renderer {
             } else if (hs === 8) {
               offX = 6; offY = 28 + HEADGEAR_OFFSET_Y[2];
             }
-            // 变身坐骑静持锚（AdjustmentsFor*Mount——静持 = 无动画档 animating=false）
+            // 变身坐骑静持锚（AdjustmentsFor*Mount——静持 = 无动画档 animating=false；
+            // num=静持身体行：hold1/3/5→3、hold2→2、无→0（:36025-36040））
             if (p.ridingMount && MOUNT_SETS.PlayerIsHidden?.[p.mount.type]) {
               const m = this.mountHeldAnchor(p.mount.type, null, hs, false,
-                vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442);
+                vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442,
+                { vid, bodyRow: hs === 2 ? 2 : hs ? 3 : 0 });
               if (m) {
                 if (m.resetX !== undefined) { offX = m.resetX; offY = m.resetY!; }
                 else { offX += m.dx; offY += m.dy; }
@@ -7728,9 +7762,15 @@ export class Renderer {
     // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行
     const useRow = swing ? this.useStyleBodyRow(swing, p) : -1;
     let drawn = false;
-    // 54 迅猛龙（hideEntirePlayerExceptHelmetsAndFaceAccessories :1845-1847）：
-    // 本体隐藏但头盔照画（脸饰品 faceAcc 层本仓无独立通道，登记）——
-    // Position.X −= direction·14（:1851）→ 镜像空间内平移 −14
+    // 54 迅猛龙（hideEntirePlayerExceptHelmetsAndFaceAccessories :1843-1854）：
+    // 本体隐藏但头盔照画（ArmorIDs.Head.Sets.CanDrawOnVelociraptorMount 门
+    // :2103-2108）。脸饰品在迅猛龙上原版仍画：face/faceMask/faceFlower 走
+    // DrawPlayer_22_FaceAcc :2801-2852（CanDrawOnVelociraptorMount 门 :2823/:2843，
+    // 锚 = DrawPlayer_GetMountOffsetForFaceAcc :2773-2799——52 狼 (28,-2)·Directions、
+    // 54/55/56/61 走 ApplyHeadOffsetFromMount − GetHelmetOffsetAddonFromMount；
+    // faceMask 头下层变体另在 :2124-2137）——本仓无 face/faceMask/faceFlower
+    // 装备槽与 AccFace 贴图族（引擎级缺口，勿在渲染层硬造；补系统时 wolf 52 的
+    // (28,-2) 偏移同表在此）。Position.X −= direction·14（:1851）→ 镜像空间内平移 −14
     const veloHead = mntHidden && p.mount.type === 54;
     if (p.appearance && (!mntHidden || veloHead)) {
       if (veloHead) {
@@ -8268,53 +8308,105 @@ export class Renderer {
    *  offY 从 p.y（碰撞盒顶）起算；旋转 origin = 底角（PlayerDrawLayers.cs:3260）。
    *  图层：工具/武器挥砍在身体之前调用（身后），使用类托举在身体之后调用（身前） */
   /** 变身坐骑手持物锚点（PlayerDrawSet.cs:385-410 AdjustmentsFor{Wolf,Velociraptor,
-   *  Rat,Bat,Pixie}Mount + Player.cs:50638-50770 ApplyItemPositionOffsetFromMount）：
+   *  Rat,Bat,Pixie}Mount + Player.cs:50638-50794 ApplyItemPositionOffsetFromMount）：
    *  52 狼：ItemLocation 表（useStyle 2/9/14/8/5、holdStyle 5/1/2；else 与 useStyle 8
-   *  重置到 vector2 = Position+(10+dir·14,12)——玩家宽 20 折局部锚 (14+dir·δ, 12+δ)）；
+   *  重置到 vector2 = Position+(10+dir·14,12)——玩家宽 20 折局部锚 (14+dir·δ, 12+δ)；
+   *  狼表无悠悠球/风筝/3542 特判——原版即无，三件是 54 迅猛龙专属档）；
    *  54 迅猛龙：ApplyItemPositionOffsetFromMount 偏移表（animating=挥舞中 itemAnimation
-   *  >0；静持 animating=false）；55/56/61 原版不改 ItemLocation（hideEntirePlayer 但
-   *  手持照画在原锚——返回 null 原样）。Position.X 的 −dir·10/−14 只平移玩家本体
-   *  绘制（ItemLocation 为世界绝对坐标不受其影响——手持端无需补）。fishingPole 与
-   *  风筝/悠悠球等特判项缺数据支撑，落 else/零偏移档（登记）。 */
+   *  >0；静持 animating=false；:50671-50793 全分支 1:1——风筝 flag12 :50713、悠悠球
+   *  flag9 按身体行 num :50730-50743、3542 星云烈焰 flag11 :50744-50760、useStyle 5
+   *  flag3 :50761-50764、default 族按 num :50765-50777；num = bodyFrame.Y/56 由调用
+   *  方传 useStyleBodyRow/静持行）；55/56/61 原版不改 ItemLocation（hideEntirePlayer
+   *  但手持照画在原锚——返回 null 原样）。Position.X 的 −dir·10/−14 只平移玩家本体
+   *  绘制（ItemLocation 为世界绝对坐标不受其影响——手持端无需补）。使用中火把 186
+   *  在 54 上走 (-4,0)·(pos−Center) 角旋转（:50722-50728，异形旋转项登记不近似）。 */
+  /** 悠悠球族（ItemID.cs:1166 Yoyo = Factory.CreateBoolSet，21 件） */
+  private static YOYO_ITEMS = new Set([3262, 3278, 3279, 3280, 3281, 3282, 3283, 3284,
+    3285, 3286, 3287, 3288, 3289, 3290, 3291, 3292, 3315, 3316, 3317, 3389, 5294]);
+  /** 风筝族（ItemID.cs:153 IsAKite = Factory.CreateBoolSet(false, …)，25 件） */
+  private static KITE_ITEMS = new Set([4367, 4368, 4369, 4370, 4371, 4379, 4610, 4611,
+    4612, 4613, 4648, 4649, 4650, 4651, 4669, 4670, 4671, 4674, 4675, 4676, 4677,
+    4681, 4683, 4684]);
   private mountHeldAnchor(
     mtype: number, useStyle: number | null, holdStyle: number, animating: boolean,
     isFishingPole = false,
+    held?: { vid?: number; bodyRow?: number },
   ): { dx: number; dy: number; resetX?: number; resetY?: number } | null {
     const d = 1;   // dir=1 空间（offX 语义同域：直接 += / 赋值）
     if (mtype === 52) {
-      // AdjustmentsForWolfMount（:1785-1840）；钓竿 flag4（fishingPole!=0）豁免原锚
+      // AdjustmentsForWolfMount（:1785-1842）；钓竿 flag4（fishingPole!=0）豁免原锚
       if (isFishingPole) return null;
       if (useStyle === 2) return { dx: d * 14, dy: -4 };
       if (useStyle === 9) return animating ? { dx: d * 18, dy: -4 } : { dx: d * 14, dy: -18 };
       if (useStyle === 8) return { dx: 0, dy: 0, resetX: 14 + d * 12, resetY: 12 + 2 };
       if (useStyle === 14) return { dx: d * 5, dy: -2 };
-      if (useStyle === 5) return { dx: d * 4, dy: -4 };
+      if (useStyle === 5) return { dx: d * 4, dy: -4 };   // flag = us5||SelectedDrawnProjectile（悠悠球线挂中同档）
       if (holdStyle === 5) return { dx: d * 17, dy: -8 };
       if (holdStyle === 1 && !animating) return { dx: d * 14, dy: -6 };
       if (holdStyle === 2 && !animating) return { dx: d * 17, dy: 4 };
       return { dx: 0, dy: 0, resetX: 14, resetY: 12 };   // else：ItemLocation = vector2
     }
     if (mtype === 54) {
-      // ApplyItemPositionOffsetFromMount（:50671-50770）：仅 animating || holdStyle>0
+      // ApplyItemPositionOffsetFromMount（:50671-50793）：仅 animating || holdStyle>0
       if (!animating && holdStyle <= 0) return null;
+      const vid = held?.vid ?? -1;
+      const num = held?.bodyRow ?? 0;              // :50646 num = bodyFrame.Y / 56
       if (isFishingPole) return { dx: -2, dy: 0 };
       if (useStyle === 2) return animating ? { dx: 7, dy: -4 } : { dx: 3, dy: 2 };
       if (useStyle === 9) return animating ? { dx: 14, dy: -10 } : { dx: 3, dy: 2 };
       if (useStyle === 11) return animating ? { dx: 4, dy: 0 } : { dx: 1, dy: 0 };
       if (useStyle === 8) return { dx: 6, dy: 0 };
       if (useStyle === 14) return animating ? { dx: -6, dy: 6 } : { dx: -10, dy: 10 };
+      if (vid >= 0 && Renderer.KITE_ITEMS.has(vid)) return { dx: 4, dy: -4 };   // :50713-50715 风筝（不分动画态）
       if (holdStyle === 5) return { dx: 6, dy: 0 };
       if (holdStyle === 1 && !animating) return { dx: 1, dy: 4 };
       if (holdStyle === 2) return { dx: 6, dy: 0 };
-      return null;
+      if (vid >= 0 && Renderer.YOYO_ITEMS.has(vid)) {                           // :50730-50743 悠悠球按身体行
+        if (num === 2) return { dx: 10, dy: -10 };
+        if (num === 3) return { dx: 8, dy: 0 };
+        if (num === 4) return { dx: 2, dy: 2 };
+        return { dx: 0, dy: 0 };
+      }
+      if (vid === 3542) {                                                       // :50744-50760 星云烈焰按身体行
+        if (num === 2) return { dx: -10, dy: 0 };
+        if (num === 3 || num === 4) return { dx: 10, dy: 0 };
+        return { dx: 0, dy: 0 };
+      }
+      if (useStyle === 5) return { dx: 4, dy: 0 };                              // :50761-50764
+      if (num === 1) return { dx: 1, dy: -1 };          // :50765-50777 default 族按身体行
+      if (num === 2) return { dx: 4, dy: 2 };
+      if (num === 3) return { dx: 2, dy: 0 };
+      return null;                                      // 行 0/4+ = Vector2.Zero 等价
     }
     return null;
   }
 
+  /** IsFood 手持帧 = 竖 3 帧条第 2 行（GetItemDrawFrame :41901-41903
+   *  Frame(1,3,0,1)——手持取中行、掉落物动画恒顶行，两套取帧互斥）；
+   *  原条缺失/高度非 3 整除时回退 atlasIcon 已切片（帧 0，尺寸正确仅行号近似） */
+  private static foodHeldFrame(
+    raw: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number } | null | undefined,
+    fallback: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+  ) {
+    if (!raw || raw.sh < 3 || raw.sh % 3 !== 0) return fallback;
+    const fh = raw.sh / 3;
+    return { img: raw.img, sx: raw.sx, sy: raw.sy + fh, sw: raw.sw, sh: fh };
+  }
+
   private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean }, flicker: FlickerClock | null = null) {
-    const ar = this.atlasIcon(swing.item);
-    const icon = ar ? null : this.itemIcon(swing.item);
+    const arRaw = this.atlasIcon(swing.item);
+    const icon = arRaw ? null : this.itemIcon(swing.item);
     const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
+    // ★手持帧规格（Player.cs:41896-41916 GetItemDrawFrame ≡ Item.cs:49192-49216
+    // GetDrawHitbox——AnimatePlayerAndGetItemFrame :42701 的 drawHitbox 同源）：
+    // IsFood 族手持取竖 3 帧条第 2 行 Frame(1,3,0,1)（掉落物动画恒帧 0 是另一套
+    // 取帧——atlasIcon 已按帧 0 切片，故从 vicon 原条重切第 2 行）；968 棉花糖串
+    // 非 IsFood 无动画 → 32×10 整图直画（atlasIcon 原样，勿再切片）。此前整条/
+    // 帧 0 近似 → 食物手持三帧叠画/取错行
+    const heldVid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+    const ar = heldVid >= 0 && arRaw && VANILLA_IS_FOOD.has(heldVid) && this.atlas
+      ? Renderer.foodHeldFrame(this.atlas.vicon(heldVid), arRaw)
+      : arRaw;
     const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
     const us = swing.useStyle ?? 1;
     // ★aim 方向化（Player.cs:46730/46737：itemRotation = Atan2(aimY*dir, aimX*dir)——
@@ -8476,8 +8568,12 @@ export class Renderer {
     // _FromMount :50671-——挥舞期 itemAnimation>0 恒真）
     if (p.ridingMount && MOUNT_SETS.PlayerIsHidden?.[p.mount.type]) {
       const vid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+      // num = 身体行（:50646）：挥舞期取 useStyle 行（useStyle 5 的 2/3/4 恰为
+      // 悠悠球/3542 分档；-1 族（us14/15 等）该两档不消费 num，钳 0）
+      const rowRaw = this.useStyleBodyRow(swing, p);
       const m = this.mountHeldAnchor(p.mount.type, us, 0, true,
-        vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442);
+        vid === 2289 || (vid >= 2291 && vid <= 2296) || vid === 4325 || vid === 4442,
+        { vid, bodyRow: rowRaw < 0 ? 0 : rowRaw });
       if (m) {
         if (m.resetX !== undefined) { offX = m.resetX; offY = m.resetY!; }
         else { offX += m.dx; offY += m.dy; }

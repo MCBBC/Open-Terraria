@@ -3249,6 +3249,8 @@ export class Game implements GameHooks {
     VUI.smartCursorOn = false;
   }
 
+  /** 渲染锁帧时间戳(帧率上限用;逻辑 tick 恒 60Hz 不受影响) */
+  private _lastCapTs = 0;
   start() {
     if (this.running) return;
     this.running = true;
@@ -3256,6 +3258,15 @@ export class Game implements GameHooks {
     const loop = (now: number) => {
       if (!this.running) return;
       try {
+        // 渲染帧率上限(2026-08-18,原版锁 60fps 对齐):档内提前到达的 rAF 直接
+        // 跳过(逻辑恒 60Hz——fixedUpdate 累加器在下个渲染帧补步,≤5 步钳内);
+        // -1ms 余量防 vsync 抖动下的漂移卡顿
+        const cap = options.data.frameCap;
+        if (cap > 0 && now - this._lastCapTs < 1000 / cap - 1) {
+          requestAnimationFrame(loop);
+          return;
+        }
+        this._lastCapTs = now;
         this.frame(now);
         requestAnimationFrame(loop);
       } catch (err) {
@@ -5637,53 +5648,104 @@ export class Game implements GameHooks {
   // 默认键 H/J/B（PlayerInput.cs:1901-1903——★QuickMana 是 J 非 M）；keydownHandlers
   // 注入（事件天然边沿）。原版语义：瞬扣（ItemCheck_TryStartUse 只做 ItemTimeIsZero
   // 门不播使用动画）+ UseSound + ApplyPotionDelay + ApplyLifeAndOrMana + buff 授予 +
-  // stack--。虚空袋 bank4 路径无载体（登记）；CanConsumeConsumableItem 的硬核不消耗
-  // 档未接（QuickHeal :5300 中核掉钱链已由死亡惩罚批承载，此取最小实现）
+  // stack--。虚空袋 bank4 路径已接（2026-08-18：QuickHeal :5325-5332 / QuickMana
+  // :5405-5413 / QuickBuff 食物 :5629-5646 与药水 :5508-5527 四处同式——useVoidBag
+  // 门 + p.banks[3] 40 槽；存钱罐 bank/保险箱 bank2/熔炉 bank3 原版快用链【不搜】，
+  // 无对应路径不登记）；CanConsumeConsumableItem 的硬核不消耗档未接（QuickHeal
+  // :5300 中核掉钱链已由死亡惩罚批承载，此取最小实现）
+
+  /** useVoidBag（Player.cs:22892-22901）：主背包 58 格内持有虚空袋 4131 →
+   *  快用链把 bank4 虚空保险库（p.banks[3]）纳入搜索 */
+  private useVoidBag(): boolean {
+    const p = this.player;
+    for (let i = 0; i < 58; i++) {
+      const s = p.inv.slots[i];
+      if (!s || s.stack <= 0) continue;
+      const d = ITEM_DEFS[s.id];
+      if ((d?.vid ?? viIdFromKey(d?.key ?? '')) === 4131) return true;
+    }
+    return false;
+  }
 
   /** QuickHeal（Player.cs:5268-5306）：背包找最佳治疗药水即刻喝下。
    *  选药（QuickHeal_GetItemToUse :5310-5335）：healLife 与缺口差最小（过量最小）；
    *  227 恢复药水差为负时 +30 再钳 0（:5322-5327——可溢出 30 点的宽容档）；
-   *  bestDifference 语义：初始 -maxHp，负域取最大（欠得最少），非负域取最小（溢得最少） */
+   *  bestDifference 语义：初始 -maxHp，负域取最大（欠得最少），非负域取最小（溢得最少）；
+   *  主背包 58 格后追加 bank4（useVoidBag 门，:5325-5332） */
   private quickHeal(): void {
     const p = this.player;
     if (!p || p.dead || p.hp >= p.maxHp || p.buffs.healBlocked) return;   // :5270
     const lifeDiff = p.maxHp - p.hp;
-    let bestSlot = -1, bestDiff = -p.maxHp;
-    for (let i = 0; i < 58; i++) {
-      const s = p.inv.slots[i];
-      if (!s || s.stack <= 0) continue;
+    type SlotArr = Array<{ id: number; stack: number } | null>;
+    let bestArr: SlotArr | null = null, bestSlot = -1, bestDiff = -p.maxHp;
+    const consider = (arr: SlotArr, i: number): void => {
+      const s = arr[i];
+      if (!s || s.stack <= 0) return;
       const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-      if (!f?.potion || !(f.healLife! > 0)) continue;                     // :5319
+      if (!f?.potion || !(f.healLife! > 0)) return;                       // :5319
       let num = f.healLife! - lifeDiff;
       if (vid === 227 && num < 0) { num += 30; if (num > 0) num = 0; }    // :5322-5327
-      if (bestDiff < 0) { if (num > bestDiff) { bestSlot = i; bestDiff = num; } }
-      else if (num < bestDiff && num >= 0) { bestSlot = i; bestDiff = num; }
+      if (bestDiff < 0) { if (num > bestDiff) { bestArr = arr; bestSlot = i; bestDiff = num; } }
+      else if (num < bestDiff && num >= 0) { bestArr = arr; bestSlot = i; bestDiff = num; }
+    };
+    for (let i = 0; i < 58; i++) consider(p.inv.slots, i);
+    if (this.useVoidBag()) {
+      for (let j = 0; j < (p.banks[3]?.length ?? 0); j++) consider(p.banks[3], j);
     }
-    if (bestSlot < 0) return;
-    this.quickConsume(bestSlot);   // 喝下：音效+药水病+回复+buff+消耗（共用链）
+    if (bestSlot < 0 || !bestArr) return;
+    this.quickConsume(bestArr, bestSlot);   // 喝下：音效+药水病+回复+buff+消耗（共用链）
   }
 
   /** QuickMana（Player.cs:5364-5416）：首个魔力恢复物（healMana>0；药水病中跳过
-   *  potion 类——:5399 `potionDelay == 0 || !potion` 门） */
+   *  potion 类——:5399 `potionDelay == 0 || !potion` 门）；主背包后追加 bank4
+   *  （useVoidBag 门，:5405-5413） */
   private quickMana(): void {
     const p = this.player;
     if (!p || p.dead || p.mana >= p.maxMana) return;                      // :5369
-    for (let i = 0; i < 58; i++) {
-      const s = p.inv.slots[i];
-      if (!s || s.stack <= 0) continue;
-      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
-      const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-      if (!f || !(f.healMana! > 0)) continue;
-      if (p.buffs.healBlocked && f.potion) continue;                      // :5399
-      this.quickConsume(i);
-      return;
+    const tryUse = (arr: Array<{ id: number; stack: number } | null>): boolean => {
+      for (let i = 0; i < arr.length; i++) {
+        const s = arr[i];
+        if (!s || s.stack <= 0) continue;
+        const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+        const f = vid >= 0 ? itemFuncOfVid(vid) : null;
+        if (!f || !(f.healMana! > 0)) continue;
+        if (p.buffs.healBlocked && f.potion) continue;                    // :5399
+        this.quickConsume(arr, i);
+        return true;
+      }
+      return false;
+    };
+    if (tryUse(p.inv.slots)) return;   // INV_SIZE=58，全数组即主背包
+    if (this.useVoidBag() && p.banks[3]) tryUse(p.banks[3]);
+  }
+
+  /** 光宠/宠物 buff 分类（QuickBuff_ShouldBotherUsingThisBuff :5684-5695 消费
+   *  Main.lightPet/vanityPet 布尔表成员集；vanillaPets 提取表 vid→{buff,light}
+   *  反查成 buff 集——light=true 入光宠集，false 入宠物集；非宠物 buff 两集皆无）。
+   *  懒建一次（62 件全表扫 vid 1..5700） */
+  private static _petBuffLight: Set<number> | null = null;
+  private static _petBuffVanity: Set<number> | null = null;
+  private static petBuffKinds(): { light: Set<number>; vanity: Set<number> } {
+    if (!Game._petBuffLight || !Game._petBuffVanity) {
+      const light = new Set<number>(), vanity = new Set<number>();
+      for (let vid = 1; vid <= 5700; vid++) {
+        const pi = petInfoOfVid(vid);
+        if (!pi) continue;
+        (pi.light ? light : vanity).add(pi.buff);
+      }
+      Game._petBuffLight = light;
+      Game._petBuffVanity = vanity;
     }
+    return { light: Game._petBuffLight, vanity: Game._petBuffVanity! };
   }
 
   /** QuickBuff（Player.cs:5442-5533）：先吃最优食物（缺档/更优档），再依次使用所有
-   *  值得用的增益药水。CountBuffs()==maxBuffs 门本仓 buffs 无槽上限（登记偏离，
-   *  增益药水可全上）；光宠/ vanityPet 互斥与 603 收藏版门未接（登记） */
+   *  值得用的增益药水（主背包 58 格 + bank4 虚空袋档）。
+   *  ★CountBuffs()==maxBuffs 槽上限门（:5452-5453 + 链内 :5490/:5512/:5526 满
+   *  槽即断）未接：本仓 buffs 为 Map 无槽位上限（登记偏离，增益药水可全上）；
+   *  光宠/宠物同类互斥已接（:5684-5695，petBuffKinds 反查表）；603 收藏版宠物
+   *  门（:5574 runningCollectorsEdition）无载体，登记 */
   private quickBuff(): void {
     const p = this.player;
     if (!p || p.dead) return;                                             // :5448
@@ -5693,62 +5755,88 @@ export class Game implements GameHooks {
     for (const bt of [BuffType.WellFed, BuffType.WellFed2, BuffType.WellFed3]) {
       if (p.buffs.has(bt)) { curPrio = Math.max(curPrio, Game.QUICK_BUFF_FOOD_PRIO[BUFF_DEFS[bt].vanillaBuff]); }
     }
+    let foodArr: Array<{ id: number; stack: number } | null> | null = null;
     let foodSlot = -1, foodPrio = curPrio, foodTime = -1;
-    for (let i = 0; i < 58; i++) {
-      const s = p.inv.slots[i];
-      if (!s || s.stack <= 0) continue;
+    const considerFood = (arr: Array<{ id: number; stack: number } | null>, i: number): void => {
+      const s = arr[i];
+      if (!s || s.stack <= 0) return;
       const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
       const prio = f?.buffType ? Game.QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;
       if (prio > 0 && prio >= foodPrio && (foodSlot < 0 || (f!.buffTime ?? 0) > foodTime || prio > foodPrio)) {
-        foodSlot = i; foodPrio = prio; foodTime = f!.buffTime ?? 0;       // :5618-5624
+        foodArr = arr; foodSlot = i; foodPrio = prio; foodTime = f!.buffTime ?? 0;   // :5618-5624
       }
+    };
+    for (let i = 0; i < 58; i++) considerFood(p.inv.slots, i);
+    if (this.useVoidBag() && p.banks[3]) {
+      for (let j = 0; j < p.banks[3].length; j++) considerFood(p.banks[3], j);       // :5629-5646
     }
-    if (foodSlot >= 0) { soundVid = this.quickConsume(foodSlot); }
-    // ---- 增益药水链（:5496-5518：QuickBuff_ShouldUseItem 逐件）----
-    for (let i = 0; i < 58; i++) {
-      const s = p.inv.slots[i];
-      if (!s || s.stack <= 0) continue;
-      const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
-      const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-      if (!f || !(f.buffType! > 0) || f.summon) continue;                 // :5545-5547
-      let btype = f.buffType!;
-      // QuickBuff_ShouldBotherUsingThisBuff（:5660-5697）
-      let bother = true;
-      const isFed = Game.QUICK_BUFF_FOOD_PRIO[btype] !== undefined;
-      for (const [bt] of p.buffs.active) {
-        const vb = BUFF_DEFS[bt]?.vanillaBuff;
-        if (vb === undefined) continue;
-        if (btype === 27 && (vb === 27 || vb === 101 || vb === 102)) { bother = false; break; }
-        if (isFed && Game.QUICK_BUFF_FOOD_PRIO[vb] !== undefined) { bother = false; break; }
-        if (vb === btype) { bother = false; break; }
-        if (Game.QUICK_MELEE_BUFF_VANILLA.has(btype) && Game.QUICK_MELEE_BUFF_VANILLA.has(vb)) { bother = false; break; }
+    if (foodSlot >= 0 && foodArr) { soundVid = this.quickConsume(foodArr, foodSlot); }
+    // ---- 增益药水链（:5496-5527：QuickBuff_ShouldUseItem 逐件；主背包 → bank4）----
+    const tryBuffs = (arr: Array<{ id: number; stack: number } | null>): void => {
+      for (let i = 0; i < arr.length; i++) {
+        const s = arr[i];
+        if (!s || s.stack <= 0) continue;
+        const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+        const f = vid >= 0 ? itemFuncOfVid(vid) : null;
+        if (!f || !(f.buffType! > 0) || f.summon) continue;               // :5545-5547
+        let btype = f.buffType!;
+        // QuickBuff_ShouldBotherUsingThisBuff（:5660-5697）
+        let bother = true;
+        const isFed = Game.QUICK_BUFF_FOOD_PRIO[btype] !== undefined;
+        for (const [bt] of p.buffs.active) {
+          const vb = BUFF_DEFS[bt]?.vanillaBuff;
+          if (vb === undefined) continue;
+          if (btype === 27 && (vb === 27 || vb === 101 || vb === 102)) { bother = false; break; }
+          if (isFed && Game.QUICK_BUFF_FOOD_PRIO[vb] !== undefined) { bother = false; break; }
+          if (vb === btype) { bother = false; break; }
+          if (Game.QUICK_MELEE_BUFF_VANILLA.has(btype) && Game.QUICK_MELEE_BUFF_VANILLA.has(vb)) { bother = false; break; }
+        }
+        // 光宠/宠物同类互斥（:5684-5695：attempted 是 lightPet/vanityPet → 同类
+        // 已在场即不 bother——Main.lightPet/vanityPet 成员集经 petBuffKinds 反查）
+        if (bother) {
+          const pk = Game.petBuffKinds();
+          if (pk.light.has(btype) || pk.vanity.has(btype)) {
+            for (const [bt] of p.buffs.active) {
+              const vb = BUFF_DEFS[bt]?.vanillaBuff;
+              if (vb === undefined) continue;
+              if (pk.light.has(vb) && pk.light.has(btype)) { bother = false; break; }
+              if (pk.vanity.has(vb) && pk.vanity.has(btype)) { bother = false; break; }
+            }
+          }
+        }
+        // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件
+        if (bother && (f.mana ?? 0) > 0) {
+          if (p.mana >= f.mana!) { p.mana -= f.mana!; } else bother = false;
+        }
+        if (!bother) continue;
+        if (btype === 27) {                                              // :5566-5575 三选一
+          const r = Math.floor(Math.random() * 3);
+          btype = r === 0 ? 27 : r === 1 ? 101 : 102;
+        }
+        const bt2 = BUFF_BY_VANILLA.get(btype);
+        if (bt2 !== undefined) {
+          p.buffs.apply(bt2, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
+        }
+        if (f.consumable) {                                              // :5545-5548
+          if (arr === p.inv.slots) p.inv.removeAt(i, 1);
+          else { s.stack -= 1; if (s.stack <= 0) arr[i] = null; }
+        }
+        soundVid = vid;
       }
-      // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件
-      if (bother && (f.mana ?? 0) > 0) {
-        if (p.mana >= f.mana!) { p.mana -= f.mana!; } else bother = false;
-      }
-      if (!bother) continue;
-      if (btype === 27) {                                                // :5566-5575 三选一
-        const r = Math.floor(Math.random() * 3);
-        btype = r === 0 ? 27 : r === 1 ? 101 : 102;
-      }
-      const bt2 = BUFF_BY_VANILLA.get(btype);
-      if (bt2 !== undefined) {
-        p.buffs.apply(bt2, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
-      }
-      if (f.consumable) p.inv.removeAt(i, 1);                            // :5545-5548
-      soundVid = vid;
-    }
+    };
+    tryBuffs(p.inv.slots);   // INV_SIZE=58，全数组即主背包
+    if (this.useVoidBag() && p.banks[3]) tryBuffs(p.banks[3]);            // :5508-5527
     if (soundVid >= 0) this.foodUseSound(soundVid);                       // :5530 只播一次
     this.cb.onInventoryChanged();
   }
 
-  /** 快用一件消耗品（QuickHeal/QuickMana 共用：音效+药水病分档+healLife/healMana+
-   *  buffType+stack--）。返回 vid 供外层音效复用 */
-  private quickConsume(slot: number): number {
+  /** 快用一件消耗品（QuickHeal/QuickMana/QuickBuff 共用：音效+药水病分档+
+   *  healLife/healMana+buffType+stack--）。slots 可为主背包或 bank4 数组。
+   *  返回 vid 供外层音效复用 */
+  private quickConsume(slots: Array<{ id: number; stack: number } | null>, slot: number): number {
     const p = this.player;
-    const s = p.inv.slots[slot];
+    const s = slots[slot];
     const def = s ? ITEM_DEFS[s.id] : null;
     const vid = def ? (def.vid ?? viIdFromKey(def.key)) : -1;
     const f = vid >= 0 ? itemFuncOfVid(vid) : null;
@@ -5768,7 +5856,10 @@ export class Game implements GameHooks {
       p.mana = Math.min(p.maxMana, p.mana + f.healMana);
       if (f.potion) p.buffs.apply(BuffType.ManaSickness, 5);  // 魔力眩晕 300t/瓶
     }
-    p.inv.removeAt(slot, 1);                                  // CanConsume 消耗（硬核档登记）
+    // CanConsume 消耗（硬核档登记）；bank 数组无 Inventory.removeAt——同语义手写
+    if (slots === p.inv.slots) p.inv.removeAt(slot, 1);
+    else if (s.stack > 1) s.stack -= 1;
+    else slots[slot] = null;
     this.foodUseSound(vid);                                   // item.UseSound（:5281）
     this.cb.onInventoryChanged();
     return vid;
@@ -7126,14 +7217,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         case 1133: // 蜜蜂分泌物(:43181-43191):召唤蜂王(无门;SummonItemCheck 1133↔222 同型拦)
           // 成功才扣（Player.cs:43073 ItemCheck_UseBossSpawners 头门 SummonItemCheck
-          // false → 整支 return，无 ApplyItemTime 无消耗）+ useTime 45（Item.cs:13919）
-          if (this.summonBoss('queen_bee')) { consume(); p.useTime = 45; }
+          // false → 整支 return，无 ApplyItemTime 无消耗）+ useTime 45（Item.cs:13919）；
+          // 落位 = SpawnOnPlayer(222)（:43189，2026-08-18 迁移）
+          if (this.summonBoss('queen_bee', { onPlayer: true })) { consume(); p.useTime = 45; }
           break;
         case 4988: // 史莱姆皇后水晶(:43210-43224):门仅 ZoneHallow（无昼夜/hardMode 合取项）
           // 成功才扣（同 :43073 SummonItemCheck 4988↔657 同型拦）+ useTime 45（Item.cs:40165）
           if (!(this.scene?.zoneHallow)) {
             this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightHallowOnly'));
-          } else if (this.summonBoss('queen_slime')) {
+          } else if (this.summonBoss('queen_slime', { onPlayer: true })) {   // :43219 SpawnOnPlayer(657)
             consume();
             p.useTime = 45;
           }
@@ -7572,9 +7664,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const zoneOk = svid === 70 ? (scene == null || scene.zoneCorrupt)
         : svid === 1331 ? (scene == null || scene.zoneCrimson) : true;
       if (zoneOk) {
-        const summoned = svid === 70 ? this.summonBoss('eater_of_worlds_head')
-          : svid === 1331 ? this.summonBoss('brain_of_cthulhu')
-            : this.summonBoss('king_slime');
+        // 落位 = SpawnOnPlayer（Player.cs:43107-43121：70→13 :43112 / 1331→266
+        // :43199 / 560→50 :43089——全族屏幕外寻点，2026-08-18 迁移）
+        const summoned = svid === 70 ? this.summonBoss('eater_of_worlds_head', { onPlayer: true })
+          : svid === 1331 ? this.summonBoss('brain_of_cthulhu', { onPlayer: true })
+            : this.summonBoss('king_slime', { onPlayer: true });
         // 门拦下（同型 Boss 在场/访客）不消耗——原版 SpawnOnPlayer 失败不回滚物品，
         // 本仓以"召唤成功才扣"为准（审计 2026-08-13）
         if (summoned) {
@@ -7599,9 +7693,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const mvid = viIdFromKey(heldDef.key);
         // 成功才扣（Player.cs:43073 头门 SummonItemCheck 同型拦 544↔125/126、
         // 556↔134、557↔127——false 无 ApplyItemTime 无消耗，2026-08-18 统一）
-        const summoned = mvid === 556 ? this.summonBoss('destroyer')
-          : mvid === 544 ? this.summonBoss('twins')
-            : this.summonBoss('skeletron_prime');
+        // 落位 = SpawnOnPlayer（Player.cs:43140-43179：556→134 / 544→125+126 /
+        // 557→127——寻点原值无地下覆写，2026-08-18 迁移）
+        const summoned = mvid === 556 ? this.summonBoss('destroyer', { onPlayer: true })
+          : mvid === 544 ? this.summonBoss('twins', { onPlayer: true })
+            : this.summonBoss('skeletron_prime', { onPlayer: true });
         if (summoned) {
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.useSwing(heldDef);   // useStyle 4 举持（556/544/557，Item.cs 机械召唤物）
@@ -7617,7 +7713,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       //  非雪原【静默】不可用（原版 ZoneSnow 合取外整支不生效，不消耗无提示）；
       //  SummonItemCheck :43073 头门 5120↔668 同型拦 → 成功才扣（2026-08-18 统一）
       if (this.scene?.zoneSnow) {
-        if (this.summonBoss('deerclops')) {
+        if (this.summonBoss('deerclops', { onPlayer: true })) {   // :43231 SpawnOnPlayer(668)
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.useSwing(heldDef);   // useStyle 4 举持（5120 useTime 45，Item.cs:41028）
           this.player.useTime = 45;
@@ -11227,8 +11323,39 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     p.seatOffsetX = t.offsetX;            // Helper.cs:96-97 偏移随帧刷新
     p.seatOffsetY = t.offsetY;
-    // TryToPoop（Helper.cs:84-90 门=夜间+长凳 89 红帽帧段 → RedHatSkeletron 依赖
-    //  killClothier 旗标未持久化，登记；马桶消化 :19058-19060）
+    // ---- 红帽骷髅王（PlayerSittingHelper.cs:84-95 → NPC.RedHatSkeletron
+    //  NPC.cs:81193-81218，2026-08-18 接通；旧注"killClothier 未持久化，登记"——
+    //  该旗标本就是装备派生位（equipStats.killClothier，裁缝巫毒娃娃 1307 装备即
+    //  置位），可直查。触发 = 夜间 + 坐长凳 89 款式 43（frameX∈[2322,2358]=43×54
+    //  全行三列，即"Chippy 沙发"；★非马桶非 1/40 掷——原版是每帧确定性判定，
+    //  无随机）+ killClothier + 裁缝师 54 在场且可见（Collision.CanHit）→
+    //  SpawnSkeletron(redHatMode:true)（NPC.cs:81230-81270）：场上无骷髅王 35 时
+    //  以裁缝师中心为 Bottom 生成 35（ai[3]=1 红帽变体 → Enemy.redHat）+
+    //  HasAwoken 公告（:81267，由 summonBossAtTx 尾部 announceBossSummon(35) 播）。
+    //  RedHatSkeletron 内对裁缝师 ai[3]=1 的置位是联机 netUpdate 附带，城镇 NPC
+    //  无消费，略）----
+    if (!this.world.clock.isDay && p.equipStats.killClothier) {
+      const bi = st.inBounds(cx, cy) ? st.idx(cx, cy) : -1;
+      if (bi >= 0 && st.type[bi] === TILE_BY_KEY['bench']
+        && st.frameX[bi] >= 2322 && st.frameX[bi] <= 2358) {
+        const clothier = (this.entities.npcs as TownNPC[]).find((n) =>
+          n instanceof TownNPC && !n.dead && n.vanillaId === 54
+          && canHit(st, p.x, p.y, p.w, p.h, n.x, n.y, n.w, n.h));
+        if (clothier) {
+          const noSk = !(this.entities.enemies as Enemy[]).some(
+            (e) => !e.dead && e.vanillaId === 35);
+          if (noSk && this.summonBossAtTx('skeletron_head', Math.floor(clothier.cx / TILE), false)) {
+            const head = this.boss as Enemy | null;
+            if (head && head.vanillaId === 35) {
+              head.redHat = true;                 // ai[3]=1（红帽变体，渲染/浸剂带消费）
+              head.x = clothier.cx - head.w / 2;  // NewNPC Bottom=裁缝师中心（:81256）
+              head.y = clothier.cy - head.h;
+            }
+          }
+        }
+      }
+    }
+    // TryToPoop（马桶消化 Player.cs:19058-19060；1/600·醉 1/200）
     if (p.seatIsToilet && p.sitTicks >= 10
       && (p.buffs.has(BuffType.WellFed) || p.buffs.has(BuffType.WellFed2) || p.buffs.has(BuffType.WellFed3))) {
       const denom = p.buffs.has(BuffType.Tipsy) ? 200 : 600;
@@ -17083,14 +17210,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.NpcArrived', Lang.npcName(670) ?? ''));
     }
     // 史莱姆雨击杀推进（NPC.cs:79880-79897：阈值 150、杀过王减半 75；场上无王 → 召王）。
-    // 自然召王无公告无咆哮（SpawnOnPlayer(50) → SpawnBoss case 50 静默 :81504；
-    // Roar 只随史莱姆王冠物品 :43080）。计数重置随 spawn 无条件（:79893-79894）；
-    // 原版召王无"其他 Boss 在场"门——2026-08-18 收窄为同型门（king_slime:[50]
-    // 家族，BOSS_FAMILY 表；advance 三重门已含 !AnyNPCs(50)，防双刷足够）
+    // ★自然出王有公告（2026-08-18 修正旧注"静默无公告"）：SpawnBoss switch 的
+    // case 50 静默组（NPC.cs:81505-81512）只免 switch 自身的公告，SpawnBoss 内部
+    // NewNPC 的 Type==50 分支（NPC.cs:81564-81567）恒播 Announcement.HasAwoken——
+    // 1456 语义 = 史莱姆王【任何】生成路径都公告（含王冠物品 :43089 与本自然点
+    // :79893 SpawnOnPlayer(50)）。咆哮仍只随王冠物品（:43086 PlaySound 15）。
+    // 计数重置随 spawn 无条件（:79893-79894）；原版召王无"其他 Boss 在场"门——
+    // 2026-08-18 收窄为同型门（king_slime:[50] 家族，BOSS_FAMILY 表；advance 三重
+    // 门已含 !AnyNPCs(50)，防双刷足够）。物品王冠路径公告走冻结表
+    // BOSS_SPAWN_SILENT（SpawnBoss switch 口径，boss-music-parity 冻结）暂静默，
+    // 由该表另案收口——本点直发公告不经 announceBossSummon
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
       const downedSK = !!(this.world.flags as Record<string, boolean>).downedSlimeKing;
       if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId, downedSK)) {
-        this.summonBoss('king_slime', { roar: false });
+        const ks = this.summonBoss('king_slime', { roar: false });
+        if (ks) {
+          const text = Lang.text('Announcement.HasAwoken', Lang.npcName(50) ?? 'King Slime');
+          if (this.cb.onChat) this.cb.onChat(text, 175, 75, 255);
+          else this.cb.onToast(text);
+        }
       }
     }
     // 月事件计分（NPC.cs CheckProgressFrostMoon/PumpkinMoon :79245/:79487）：
@@ -18900,13 +19038,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** SpawnOnPlayer 等价（NPC.cs:81273-81506）：灯泡破坏召唤走此链——在玩家
    *  【屏幕外】找点（500 次尝试，最后一次强制落点），非地表顶部扫描；
    *  SpawnBoss 段 timeLeft×20=15000、AnyNPCs 独占、HasAwoken 公告。
-   *  与 summonBoss(地表±55 列)的分野：物品召唤维持既有路径（后续统一迁移）。 */
+   *  物品召唤路径（summonBoss onPlayer 档）2026-08-18 已统一迁移共用寻点器。 */
   spawnBossOnPlayer(vanillaId: number): void {
     if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
     if (this.net && !this.net.policy.isHost) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
       return;
     }
+    const pt = this.findOffscreenSpawnPoint();
+    const sx = pt.tx, sy = pt.ty;
+    const head = Enemy.fromVanilla(vanillaId, sx * TILE + 8, sy * TILE + 8);
+    if (!head) return;
+    head.despawnTimer = 15000;   // SpawnBoss timeLeft = activeTime(750)×20（NPC.cs:81485）
+    this.entities.add(head, 'enemies');
+    this.boss = head;
+    this.announceBossSummon(vanillaId);
+  }
+
+  /** SpawnOnPlayer 屏幕外寻点（NPC.cs:81370-81430 主干近似，自 spawnBossOnPlayer
+   *  抽出的共用体）：500 次尝试、末次强制落点、落点区块 6×6 无实心。消费方 =
+   *  spawnBossOnPlayer（灯泡/世花/猪鲨/月总）+ summonBoss({onPlayer})（物品召唤
+   *  全族，ItemCheck_UseBossSpawners Player.cs:43080-43237 皆走 SpawnOnPlayer）。
+   *  原版寻点在 spawnArea 随机取点 + 向下扫首个实心 + KS 专属墙体/视线两道附加门
+   *  （:81398-81418，本近似未建模，登记）；返回 (tx, ty) 世界 tile 坐标 */
+  private findOffscreenSpawnPoint(): { tx: number; ty: number } {
     const st = this.world.store;
     const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
     const halfW = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE) + 5;
@@ -18931,12 +19086,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       if (!blocked) { sx = tx; sy = ty; break; }
     }
-    const head = Enemy.fromVanilla(vanillaId, sx * TILE + 8, sy * TILE + 8);
-    if (!head) return;
-    head.despawnTimer = 15000;   // SpawnBoss timeLeft = activeTime(750)×20（NPC.cs:81485）
-    this.entities.add(head, 'enemies');
-    this.boss = head;
-    this.announceBossSummon(vanillaId);
+    return { tx: sx, ty: sy };
   }
 
   /** 机械美杜莎链召唤（NPC.SpawnMechQueen :19724-19750，奥库瑞姆剃刀 5334 专用）：
@@ -18969,12 +19119,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** Boss 同型家族表（"任意 Boss 活跃"门 → 同型门，审计 2026-08-13）：
-   *  EoW {13,14,15} / BoC {266,267}——同型在场才拦（原版 Worm Food/Bloody Spine
-   *  对已活 Boss 照召 SpawnOnPlayer :43107-43208 无门；本仓单 Boss 槽，
-   *  跨型召唤放行、同型拦下防双刷）；未列出的 boss key 维持原"任意 Boss"门 */
+   *  未列出的 boss key 维持原"任意 Boss"门。
+   *  ★EoW/BoC 只列【头】id（2026-08-18 收口）：SummonItemCheck（Player.cs:
+   *  41518-41520）逐对 70↔13 / 1331↔266 只查头 NPC——身段（14/15 段体、267
+   *  飞眼）存活不拦，头死后原版可用蠕虫食物/血腥脊椎再召一头（残躯+新链
+   *  并存）。此前查全家族 {13,14,15}/{266,267} 过严，双刷语义失真已修 */
   private static readonly BOSS_FAMILY: Record<string, number[]> = {
-    eater_of_worlds_head: [13, 14, 15],
-    brain_of_cthulhu: [266, 267],
+    eater_of_worlds_head: [13],
+    brain_of_cthulhu: [266],
     // SummonItemCheck 逐物品↔NPC 对照表（Player.cs:41514-41527 只拦同型）增补：
     // 43↔4 / 560↔50 / 1133↔222 / 5120↔668——史王/蜂王/鹿角怪召唤与自然 EoC
     // 消费点（spawnBossAtTx('eye_of_cthulhu')）同型门，其余 Boss 在场不再拦
@@ -18993,7 +19145,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 召唤入口（物品使用默认带 Roar——ItemCheck_UseBossSpawners 语义；
    *  自然/剧情路径传 { roar: false }：原版生成瞬间无声，见 announceBossSummon 注） */
-  summonBoss(key: string, opts: { roar?: boolean } = {}): boolean {
+  summonBoss(key: string, opts: { roar?: boolean; onPlayer?: boolean } = {}): boolean {
     const family = Game.BOSS_FAMILY[key];
     if (family) {
       if (this.bossFamilyActive(family)) {
@@ -19004,6 +19156,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
       return false;
     }
+    if (opts.onPlayer) {
+      // 物品召唤落位（2026-08-18 统一迁移）：ItemCheck_UseBossSpawners（Player.cs:
+      // 43080-43237）全族走 NPC.SpawnOnPlayer——500 次屏幕外寻点，替换旧 ±55 列
+      // 地表顶扫。生成位特例核对：史王 560 无专属落位（SpawnBoss case 50，
+      // NPC.cs:81505-81512 是"静默公告"组而非落位分支；KS 专属墙体/视线附加门
+      // 属 SpawnOnPlayer 内部逻辑，随寻点近似登记）；双子 126 仍随 125 落点
+      // （原版 :43128-43133 是两次独立 SpawnOnPlayer(125)/(126)，本仓单寻点 +
+      // 旁置 4 列近似，保留）；毁灭者 556 物品路径用寻点原值——无地下 Y 覆写
+      // （地下落位是自然生成路径 SpawnNPC 语义，onPlayerTy 传入时跳过）
+      const pt = this.findOffscreenSpawnPoint();
+      return this.summonBossAtTx(key, pt.tx, opts.roar ?? true, pt.ty);
+    }
     const side = Math.random() < 0.5 ? -1 : 1;
     const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
     return this.summonBossAtTx(key, tx, opts.roar ?? true);
@@ -19011,8 +19175,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王)。
    *  roar = 是否播召唤咆哮（物品召唤 true；自然/灯泡/诅咒等生成路径 false）。
+   *  onPlayerTy = SpawnOnPlayer 寻点结果的 ty（summonBoss onPlayer 档传入）：
+   *  传入时跳过 ±55 列地表顶扫与毁灭者地下 Y 覆写，落点直用（与 spawnBossOnPlayer
+   *  同约定 sy*TILE+8）；缺省维持既有列顶扫行为（自然/调试/诅咒路径，2026-08-18）。
    *  返回是否真的召唤成功（false = 门拦下/访客/落位失败）——召唤物消耗方据此决定扣不扣 */
-  private summonBossAtTx(key: string, tx: number, roar = true): boolean {
+  private summonBossAtTx(key: string, tx: number, roar = true, onPlayerTy?: number): boolean {
     const family = Game.BOSS_FAMILY[key];
     if (family ? this.bossFamilyActive(family) : !!this.boss) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
@@ -19040,6 +19207,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const st0 = this.world.store;
         const tx2 = Math.max(2, Math.min(st0.w - 3, tx));
         let ty2 = 10;
+        if (onPlayerTy !== undefined) {
+          // SpawnOnPlayer 寻点落点直传（物品路径）
+          this.net.sendSummonIntent(key, tx2 * TILE + 8, Math.max(4, onPlayerTy) * TILE + 8);
+          return true;
+        }
         for (; ty2 < this.world.h; ty2++) {
           if (st0.type[st0.idx(tx2, ty2)] !== 0) break;
         }
@@ -19051,11 +19223,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     const st = this.world.store;
     tx = Math.max(2, Math.min(st.w - 3, tx));
-    let ty = 10;
-    for (; ty < this.world.h; ty++) {
-      if (st.type[st.idx(tx, ty)] !== 0) break;
-    }
-    const spawnY = Math.max(4, ty - 12) * TILE;
+    // SpawnOnPlayer 落点直用（与 spawnBossOnPlayer 同约定：ty*TILE+8）；否则 ±55
+    // 列自世界顶向下首格扫描、抬 12 格（旧行为，自然/调试/诅咒路径）
+    const spawnY = onPlayerTy !== undefined
+      ? Math.max(4, onPlayerTy) * TILE + 8
+      : (() => {
+        let ty = 10;
+        for (; ty < this.world.h; ty++) {
+          if (st.type[st.idx(tx, ty)] !== 0) break;
+        }
+        return Math.max(4, ty - 12) * TILE;
+      })();
     const vanillaId = key === 'eye_of_cthulhu' ? 4 : key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266
       : key === 'skeletron_head' ? 35 : key === 'queen_bee' ? 222 : key === 'skeletron_prime' ? 127
       : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113
@@ -19098,8 +19276,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const twin = Enemy.fromVanilla(126, (tx + 4) * TILE + 8, spawnY);
           if (twin) { twin.id = this.entities.nextId++; this.entities.add(twin, 'enemies'); }
         }
-        if (vanillaId === 134) {
-          // 毁灭者:地下落位(原版 SpawnNPC 走地下生成;80 段链由 destroyerAI 首帧补)
+        if (vanillaId === 134 && onPlayerTy === undefined) {
+          // 毁灭者:地下落位(原版 SpawnNPC 自然生成走地下;80 段链由 destroyerAI 首帧补)。
+          // 物品路径（onPlayerTy 直传）不覆写——原版 556 → SpawnOnPlayer(134)（Player.cs
+          // :43140-43152）用寻点原值，无地下特例（2026-08-18 迁移）
           head.y = Math.min(st.h - 10, Math.floor(this.world.rockLevel) + 30) * TILE;
         }
         // （血肉墙 113 已在上方 SpawnWOF 分支单独处理，不落通用路径）
@@ -19123,7 +19303,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 生成公告静默集（两组合并）：
    *  ① SpawnBoss switch case-break 组（NPC.cs:81505-81512）：50 史王 / 82 幽灵 /
-   *    126 帕拉丁之眼(双子由 125 一次性公告) / 316 幽灵 / 551 Betsy / 662 海盗幽灵；
+   *    126 帕拉丁之眼(双子由 125 一次性公告) / 316 幽灵 / 551 Betsy / 662 海盗幽灵。
+   *    ★口径注意：本表只镜像 switch 本身——SpawnBoss 内部的 NewNPC Type==50 分支
+   *    （NPC.cs:81564-81567）会再恒播一次 HasAwoken，故 1456 里史王实际【非静默】
+   *    （自然出王点已直发公告，见 onEnemyKilled 史莱姆雨段；本表 50 条目维持
+   *    boss-music-parity 冻结口径，物品王冠路径公告缺口另案收口）；
    *  ② 从不经 SpawnBoss 的生成路径（实际游戏永不公告）：68 地牢守卫（地牢入口
    *    刷怪链直接 NewNPC）/ 395 火星飞碟（事件刷怪链）/ 439 拜月教邪教徒（石碑
    *    仪式 NewNPC :38877）/ 396/397 月总头与手（核心 398 的 AI 生成）/
@@ -19191,22 +19375,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const e2 = en as Enemy;
       return !e2.dead && e2.vanillaId === 4;
     })) return false;
-    // 从远处地表生成（离玩家 ~55 格），Boss 会自己飞过来
-    const side = Math.random() < 0.5 ? -1 : 1;
-    const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
-    let ty = 10;
-    for (; ty < this.world.h; ty++) {
-      if (this.world.store.type[this.world.store.idx(tx, ty)] !== 0) break;
-    }
-    const spawnY = Math.max(4, ty - 12) * TILE;
-    // fromVanilla(4) 取原版 NPC_4 贴图(6 帧)+rotation;数值与 ENEMY_DEFS 一致(2800/15/12/0)
-    const e = Enemy.fromVanilla(4, tx * TILE + 8, spawnY);
-    if (!e) return false;
-    e.id = this.entities.nextId++;
-    this.entities.add(e, 'enemies');
-    this.boss = e;
-    // 物品召唤（可疑眼球 43）：公告 + Roar（Player.cs:43095 PlaySound(15)）
-    this.announceBossSummon(4, true);
+    // 落位迁移（2026-08-18）：43 → NPC.SpawnOnPlayer(4)（Player.cs:43094-43105）——
+    // 500 次屏幕外寻点（findOffscreenSpawnPoint），替换旧"±55 列地表顶扫"；公告 +
+    // Roar（:43095 PlaySound 15）由 summonBossAtTx 尾部 announceBossSummon(4, roar)
+    // 统一播。fromVanilla(4) 取原版 NPC_4 贴图(6 帧)+rotation;数值与 ENEMY_DEFS 一致
+    const pt = this.findOffscreenSpawnPoint();
+    if (!this.summonBossAtTx('eye_of_cthulhu', pt.tx, true, pt.ty)) return false;
     // WorldGen.spawnEye = false（Player.cs:43103）——手动召 EoC 即消费掉当夜
     // 自然 EoC 机会（此前漏，物品与自然召唤可能同夜双出）
     this.spawnEyePending = false;

@@ -48,3 +48,32 @@ it('golden 104→105 transition table', () => {
   for (let i = 0; i < N; i++) { if (A.sl[i] !== B.sl[i]) dS++; if (A.hf[i] !== B.hf[i]) dH++; }
   console.log(`slope diffs=${dS} half diffs=${dH}`);
 });
+
+it('wall removal + shimmer zone detail', () => {
+  const A = load(104, 'Remove_Broken_Traps');
+  const B = load(105, 'Final_Cleanup');
+  let wRem = 0, wRemSamples: string[] = [];
+  for (let i = 0; i < N; i++) {
+    if (A.w[i] !== 0 && B.w[i] === 0) {
+      wRem++;
+      if (wRemSamples.length < 5) wRemSamples.push(`(${i % W},${(i / W) | 0}) w${A.w[i]}`);
+    }
+  }
+  console.log(`wall removals (X>0 → 0): ${wRem} ${wRemSamples.join(' ')}`);
+  // shimmer 中心估计:625→1 转换质心
+  let sx = 0, sy = 0, n = 0;
+  for (let i = 0; i < N; i++) {
+    if (A.a[i] && A.t[i] === 625 && B.a[i] && B.t[i] === 1) { sx += i % W; sy += (i / W) | 0; n++; }
+  }
+  console.log(`moss625→stone centroid: (${Math.round(sx / n)},${Math.round(sy / n)}) n=${n}`);
+  const cx = Math.round(sx / n), cy = Math.round(sy / n);
+  // 半径分布
+  let in120 = 0, out120 = 0;
+  for (let i = 0; i < N; i++) {
+    if (A.a[i] && A.t[i] === 184 && !(B.a[i] && B.t[i] === 184)) {
+      const d = Math.hypot((i % W) - cx, ((i / W) | 0) - cy);
+      if (d < 120) in120++; else out120++;
+    }
+  }
+  console.log(`moss184 kills: in(shimmer r120)=${in120} out(sweep)=${out120}`);
+});

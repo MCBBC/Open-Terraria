@@ -49,21 +49,20 @@ describe('蠕虫族掘地音效（AI_006 :52375-52395）', () => {
   it('骨蛇 39(埋地)周期性 roar', () => {
     const sounds: string[] = [];
     runWorm(39, sounds);
-    if (!sounds.some((s) => s === 'roar')) {
-      const w2 = makeWorld();
-      const g2 = makeGame(w2, []);
-      const h2 = Enemy.fromVanilla(39, 40 * 16, 20 * 16)!;
-      for (let t = 0; t < 10; t++) h2.fixedUpdate(1 / 60, g2);
-      console.log('DEBUG', JSON.stringify({ dead: h2.dead, hp: h2.hp, x: Math.round(h2.x), y: Math.round(h2.y), dig: h2.digSndDelay, aiStyle: h2.vanilla?.aiStyle, key: h2.key }));
-    }
     const roars = sounds.filter((s) => s === 'roar');
     expect(roars.length).toBeGreaterThanOrEqual(3);   // 240t / 间隔≤20 → ≥3 次
     expect(sounds).not.toContain('dig');              // ★曾误用 dig 近似
   });
 
   it('EoW 头段 13 → eowDig 专属轨(非 roar)', () => {
+    // EoW 断链自查(:51886 头无下段即灭)=原版语义——须手工建双段链
     const sounds: string[] = [];
-    runWorm(13, sounds);
+    const w = makeWorld();
+    const g = makeGame(w, sounds);
+    const head = Enemy.fromVanilla(13, 40 * 16, 20 * 16)!;
+    const tail = Enemy.fromVanilla(15, 41 * 16, 20 * 16)!;
+    head.wormNext = tail; tail.wormFollow = head;
+    for (let t = 0; t < 240; t++) { head.fixedUpdate(1 / 60, g); tail.fixedUpdate(1 / 60, g); }
     expect(sounds.filter((s) => s === 'eowDig').length).toBeGreaterThanOrEqual(3);
     expect(sounds).not.toContain('roar');
   });

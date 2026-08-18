@@ -24,6 +24,7 @@ export const CALMING_NO_AGGRO_TYPES: ReadonlySet<number> = new Set([
  *  双门的墙侧（SceneMetrics/WorldGen 各有一份同值表） */
 const DUNGEON_WALL_IDS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 import { canHit } from '../physics/LineOfSight';
+import { spawnStardustMarks } from './StardustMarkProj';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { BookProj } from './BookProj';
@@ -327,8 +328,9 @@ export class Enemy extends Entity {
     // ---- 402 星尘织带蠕虫 ai[2] 生命计时（NPC.cs:51402-51461，1:1）----
     // ai[2] 每 tick +1；285→570 速度 ×1→×0.5（Remap 线性减速）；恰 570 时
     // 50 尘暴（尘 180/176 各 50% 掷、noGravity、NextVector2Circular(8,8) 初速）
-    // + 速度归一化 ×6 冲刺 + SpawnStardustMark_StardustWorm（:44230-44314 弹 540
-    // 孵化标记 → 星尘生物链——本仓无弹 540 孵化 AI，登记缺口）；≥600 ai[2] 归零
+    // + SpawnStardustMark_StardustWorm（:44230-44314 弹 540 孵化标记 BFS 链 →
+    //   星尘生物链，StardustMarkProj.spawnStardustMarks 已接）+ 速度归一化 ×6 冲刺
+    //   （原版序：先孵化标记后冲刺，:51455-51458）；≥600 ai[2] 归零
     // 重开（★不自灭——渐隐由渲染端 num291/drawPrettyStarSparkle 同链消费）。
     // ★置于玩家死亡早退【前】：原版 type 段（:51402）在 target 检查（:51532）
     // 之前——玩家死亡 ai2 计时照走（曾误放早退后：玩家被磨死即冻结、渐隐链断）。
@@ -350,9 +352,11 @@ export class Enemy extends Entity {
             Math.random() < 0.5 ? '#334BBE' : '#B0C2D7',
             1, 1.3 + Math.random() * 2, { life: 30, damp: 0.97 });
         }
+        // SpawnStardustMark_StardustWorm（:44230-44314，先于冲刺 :51455-51458）：
+        // 孵化池 405/406<2 ∪ 402<3 ∪ 407<1 随机选一 → BFS 世代标记弹 540 链，
+        // 末端标记淡入破零时于 (Center.X, Bottom.Y) 孵化（StardustMarkProj）
+        spawnStardustMarks(game, this.cx, this.cy, 'worm');
         if (spd > 0) { this.vx = (this.vx / spd) * 6; this.vy = (this.vy / spd) * 6; }
-        // SpawnStardustMark_StardustWorm（405/406<2 ∪ 402<3 ∪ 407<1 随机孵化）：
-        // 依赖弹 540 星尘标记孵化链——未移植，登记
       }
       if (this.ai2 >= LIFE) this.ai2 = 0;
     }
@@ -385,6 +389,19 @@ export class Enemy extends Entity {
       this.vy += 1;
     }
     const maxSpd = 8, accel = 0.07;
+    // 掘地/咆哮音效（AI_006 :52375-52395 通用段，与 eowAI 同源）：间隔 = 距离/40 钳
+    // 10..20；【SoundID 15 Roar】——骨蛇 39-41/食世者 95 等接近时的周期咆哮
+    // （用户报"地狱骨龙接近有音效"，2026-08-18）；排除表 621/87/117/454/412
+    if (this.vanillaId !== 621 && this.vanillaId !== 87 && this.vanillaId !== 117
+      && this.vanillaId !== 454 && this.vanillaId !== 412) {
+      if (this.digSndDelay <= 0) {
+        const dd = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : 400;
+        this.digSndDelay = Math.round(Math.min(20, Math.max(10, dd / 40)));
+        game.playSfx('roar', 1, this.cx, this.cy);
+      } else {
+        this.digSndDelay--;
+      }
+    }
     // 朝向：有玩家朝玩家，无玩家缓慢巡游
     let dx: number, dy: number;
     if (player) {
@@ -6998,7 +7015,9 @@ export class Enemy extends Entity {
         if (pool.length > 0) {
           const pick = pool[(Math.random() * pool.length) | 0];
           this.ai1 = 30 * (5 + ((Math.random() * 11) | 0));   // 30*Next(5,16)
-          // 投射物 540 星尘标记 → 末端生成该 NPC：折叠为塔顶随机点直接 spawn（无飞行演出）
+          // 投射物 540 星尘标记 → 末端生成该 NPC：折叠为塔顶随机点直接 spawn（无飞行演出）。
+          // （真 540 链已落地 StardustMarkProj.spawnStardustMarks——蠕虫 402 侧已接，
+          //  塔侧差异仅根锚点 Top−120 与 402 池 <2，二期迁移时可直换）
           const mark = spawnPart(game, this, pick);
           if (mark) {
             mark.x = this.cx + (Math.random() - 0.5) * 160 - mark.w / 2;

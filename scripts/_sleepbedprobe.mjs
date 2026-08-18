@@ -195,6 +195,24 @@ const extra = await page.evaluate(async () => {
     out.itemWake = p.sleeping === false;
     out.swordKey = swordKey;
   } else out.itemWake = 'no-sword-key';
+  // CanSnapToPosition 拒绝路径:床上方两行堵实心(目标盒嵌实心) → 入睡应被拒
+  for (let col = 0; col < 5; col++) {
+    store.setTileSilent(bx + 1 + col, floorY - 4, T['stone_rock'] ?? 1);
+    store.setTileSilent(bx + 1 + col, floorY - 3, T['stone_rock'] ?? 1);
+  }
+  p.sleeping = false; p.useTime = 0; g.swing = null;
+  p.x = (bx + 2) * 16 - 40; p.y = (floorY - 1) * 16 - p.h;   // 玩家挪到堵塞带旁
+  let sleptBlocked = false;
+  for (let col = 0; col < 4 && !sleptBlocked; col++)
+    for (let row = 0; row < 2 && !sleptBlocked; row++) {
+      g.interactAt(bx + 2 + col, floorY - 2 + row);
+      sleptBlocked = p.sleeping;
+    }
+  out.snapBlockedRefused = !sleptBlocked;
+  for (let col = 0; col < 5; col++) {
+    store.setTileSilent(bx + 1 + col, floorY - 4, 0);
+    store.setTileSilent(bx + 1 + col, floorY - 3, 0);
+  }
   return out;
 });
 console.log('EXTRA', JSON.stringify(extra));
