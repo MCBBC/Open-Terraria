@@ -1124,6 +1124,68 @@ export const __zzzLastStats: ZzzStats = {
   rolls165: 0, rollsOther: 0,
 };
 
+/** FillWallHolesInSpot（cs:9888-10013）：墙洞 BFS 洪泛——≥150 格弃填；膨胀仅从
+ *  "触空"格发起（本行三格或本列三格任一 !active——含自身）；周边墙型计数取众数
+ *  （平票取首入序——Dictionary 严格大于）；空计分时兜底墙 2（泥墙）；只补 wall==0 格。 */
+function fillWallHolesInSpot(st: TileStore, ox: number, oy: number, maxWalls: number): boolean {
+  if (!(ox >= 2 && oy >= 2 && ox < st.w - 2 && oy < st.h - 2)) return false;   // InWorld(,2)
+  const key = (x: number, y: number): number => x * 65536 + y;
+  const inSet = new Set<number>();
+  const counts = new Map<number, number>();
+  const inW1 = (x: number, y: number): boolean => x >= 1 && y >= 1 && x < st.w - 1 && y < st.h - 1;
+  let next: Array<[number, number]> = [[ox, oy]];
+  while (next.length > 0) {
+    const cur = next;
+    next = [];
+    while (cur.length > 0) {
+      if (inSet.size >= maxWalls) return false;                     // cs:9915 阈值弃填
+      const [x, y] = cur.shift()!;
+      const k = key(x, y);
+      if (inSet.has(k)) continue;
+      if (!inW1(x, y)) continue;                                    // cs:9923 InWorld(,1)
+      inSet.add(k);
+      const i = st.idx(x, y);
+      if (st.wall[i] !== 0) {                                       // 有墙格：计数+断流
+        counts.set(st.wall[i]!, (counts.get(st.wall[i]!) ?? 0) + 1);
+        continue;
+      }
+      let exposed = false;
+      for (let dx = -1; dx <= 1 && !exposed; dx++) if (!st.flags[st.idx(x + dx, y)]) exposed = true;
+      if (!exposed) for (let dy = -1; dy <= 1 && !exposed; dy++) if (!st.flags[st.idx(x, y + dy)]) exposed = true;
+      if (exposed) {
+        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as Array<[number, number]>) {
+          if (!inSet.has(key(nx, ny))) next.push([nx, ny]);
+        }
+      }
+    }
+  }
+  if (inSet.size === 1) return false;                               // cs:9982 单格不填
+  let best = 0, bestN = -1;
+  for (const [wallId, n] of counts) if (n > bestN) { best = wallId; bestN = n; }
+  if (bestN === -1) best = 2;                                       // cs:9993 空计分兜底泥墙
+  for (const k of inSet) {
+    const x = Math.floor(k / 65536), y = k % 65536;
+    const i = st.idx(x, y);
+    if (st.wall[i] === 0) st.wall[i] = best;
+  }
+  return true;
+}
+
+/** FillWallHolesInArea/InColumn（cs:9846-9886）：逐列扫描 [2,endY)——wall==0 且前格
+ *  有墙（每次墙带后的首个洞格）触发 InSpot；x 钳 [2,w-3]。 */
+function fillWallHolesInArea(st: TileStore, gs: GenState): void {
+  const endY = Math.min(Math.floor(gs.worldSurface), st.h - 2);
+  for (let x = 0; x < st.w; x++) {
+    const cx = Math.min(Math.max(x, 2), st.w - 3);
+    let hadWall = false;
+    for (let y = 2; y < endY; y++) {
+      if (st.wall[st.idx(cx, y)] === 0) {
+        if (hadWall) { hadWall = false; fillWallHolesInSpot(st, cx, y, 150); }
+      } else hadWall = true;
+    }
+  }
+}
+
 export function runFinalCleanupPass(
   st: TileStore, gs: GenState, rng?: RNG,
   opts?: { frameSparse?: boolean; stats?: ZzzStats },
@@ -1134,6 +1196,9 @@ export function runFinalCleanupPass(
   //   （484 生成期恒非实心,生成结束亦不还原）。写在 denySomeGeneration 门之外,
   //   原版无条件执行。
   flipGenSolid([484], false);
+  // ② FillWallHolesInArea（cs:22307，PPPP 实装——原备案跳过；区域=[0,w)×[0,worldSurface)
+  //   仅地表带）。W247 残差（(2776-2786,98) 墙 82 补洞）清偿。
+  fillWallHolesInArea(st, gs);
   const stats = ctx.stats!;
   for (const k of Object.keys(stats) as Array<keyof ZzzStats>) stats[k] = 0;
   const { w, h } = st;

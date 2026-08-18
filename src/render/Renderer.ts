@@ -1509,6 +1509,30 @@ export class Renderer {
     try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('bggl') !== '0'; }
     catch { return false; }
   })();
+  /** GL 初始化失败重试闩(2026-08-19 哨兵三捕真凶):WebGL2 缺失/浏览器拒发
+   *  (playsoft --disable-gpu、上下文数满)时 30s 退避——否则 5s 档对"永远
+   *  失败"的环境仍是每 5s 一次 getContext+canvas 分配 */
+  private glInitRetryAt = 0;
+  /** 统一 GL 实例获取:活实例直取;死亡 5s 退避;初始化失败 30s 闩。
+   *  ★旧 bg 路径 diedAt=0 时退避判恒真 = 每帧 new GLSpriteLayer(构造器
+   *  createElement)= 60 张/秒,暂停中也持续(渲染循环不停) */
+  private acquireGL(): GLSpriteLayer | null {
+    if (this.glfx) {
+      if (!this.glfx.unavailable) return this.glfx;
+      if (performance.now() - this.glfx.diedAt < 5000) { this.glfx = null; return null; }
+      this.glfx.dispose();
+      this.glfx = null;
+    }
+    if (performance.now() < this.glInitRetryAt) return null;
+    const inst = new GLSpriteLayer();
+    if (inst.unavailable) {
+      inst.dispose();
+      this.glInitRetryAt = performance.now() + 30_000;
+      return null;
+    }
+    this.glfx = inst;
+    return inst;
+  }
   /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
    *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
    *  释放最旧一半,恢复后续跑;连续丢失连续收缩(下限 64) */
@@ -1687,6 +1711,7 @@ export class Renderer {
       this.glfx = null;
     } else {
       GLSpriteLayer.MAX_BYTES = 192 * 1024 * 1024;   // 恢复默认(不继承熔断减半)
+      this.glInitRetryAt = 0;                         // 模式回切:重置初始化失败闩
     }
     // 云 GL:cpuRender 禁用并释放;切回 GPU 重新启用(2D cloudTint 兜底常在)
     this.sky.useGLClouds = !cpu;
@@ -1973,21 +1998,16 @@ export class Renderer {
       let bgDone = false;
       if (this.bgGlEnabled && !this.isCpuRender()) {
         // 死实例丢弃(双开风暴中 GL 反复死亡;5s 退避防重建风暴)
-        if (this.glfx?.unavailable) {
-          if (performance.now() - this.glfx.diedAt > 5000) {
-            this.glfx.dispose();
-            this.glfx = null;
-          } else {
-            this.glfx = null;             // 退避期内走 2D,实例下轮再建
-          }
-        }
-        if (!this.glfx) this.glfx = new GLSpriteLayer();
-        if (!this.glfx.unavailable) {
-          this.glfx.resize(this.canvas.width, this.canvas.height);
-          this.glfx.begin();
-          this.biomeBg.draw(new GLBgBlit(this.glfx), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
-          this.glfx.end();
-          ctx.drawImage(this.glfx.canvas, 0, 0);
+        // ★统一走 acquireGL(2026-08-19 哨兵三捕真凶):初始化失败(WebGL2 缺失/
+        // 浏览器拒发,如 playsoft --disable-gpu)时旧逻辑 diedAt=0 → 退避判
+        // 恒真 → 每帧 new GLSpriteLayer(构造器 createElement)= 60 张/秒风暴
+        const glbg = this.acquireGL();
+        if (glbg) {
+          glbg.resize(this.canvas.width, this.canvas.height);
+          glbg.begin();
+          this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
+          glbg.end();
+          ctx.drawImage(glbg.canvas, 0, 0);
           bgDone = true;
         }
       }
@@ -10078,10 +10098,10 @@ export class Renderer {
     // 头像/标记/文字仍走 2D(在合成之后画,层序不变)。逃生门 ?mapgl=0。
     let glMap = false;
     if (this.mapGlEnabled && this.minimap && !this.isCpuRender()) {
-      if (!this.glfx) this.glfx = new GLSpriteLayer();
-      const maxTex = this.glfx.maxTextureSize;
-      if (!this.glfx.unavailable && this.minimap.image && this.minimap.w <= maxTex && this.minimap.h <= maxTex) {
-        const gl = this.glfx;
+      const glAcq = this.acquireGL();   // 统一闩:失败 null → glMap=false 走 2D
+      const maxTex = glAcq ? glAcq.maxTextureSize : 0;
+      if (glAcq && this.minimap.image && this.minimap.w <= maxTex && this.minimap.h <= maxTex) {
+        const gl = glAcq;
         glMap = true;
         gl.resize(viewW, viewH);
         gl.begin();

@@ -251,6 +251,19 @@ export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, styl
   const roll2 = rng.nextInt(3) * 18;         // ② cs:85855（resetFrame=true 无条件掷）
   if (dir !== 0) st.frameY[st.idx(x, y)] = GEM_DIR_BASE[dir] + roll2; // num22 基带覆写
   rng.nextInt(3);                            // ③ cs:60281 尾部帧（band 内 no-write 幽灵掷）
+  // ②③ 两次 SquareTileFrame 的 3×3 TileFrame 头语义（cs:82077-82082，幂等清一次即可）：
+  // 非活跃邻格清 half/slope/blockPaint（type 保留）；TileFrame 边界早退（cs:82069，
+  // i/j ≤5 或 ≥max-5 不帧）。★OOOO：#93 残 6 格 S0>n 主根因。锚定装饰邻格（165/485
+  // 等帧杀）不在此仿真——深层帧引擎债，留档。
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const nx = x + dx, ny = y + dy;
+      if (nx <= 5 || ny <= 5 || nx >= st.w - 5 || ny >= st.h - 5) continue;
+      const k = st.idx(nx, ny);
+      if (!st.flags[k]) { st.half[k] = 0; st.slope[k] = 0; st.paint[k] = 0; }
+    }
+  }
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============

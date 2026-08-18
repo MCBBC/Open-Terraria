@@ -76,10 +76,7 @@ function spawnDeer(h: Harness, tx = 100): Enemy {
 
 function tick(e: Enemy, h: Harness, n: number): void {
   for (let i = 0; i < n; i++) {
-    deerclopsAI(e, h.hooks, h.player);
-    // 自管位移（noTileCollide 语义:Enemy 物理不接手,AI 直写）
-    e.x += e.vx;
-    e.y += e.vy;
+    deerclopsAI(e, h.hooks, h.player);   // 位移已在 deerclopsMovement 尾积分（2026-08-19 修复）
     if (e.y + e.h > GROUND * TILE) { e.y = GROUND * TILE - e.h; e.vy = 0; } // 地面兜
   }
 }
@@ -115,7 +112,7 @@ describe('鹿角怪 668 数据 + AI_123', () => {
     for (let i = 0; i < 35; i++) {
       stub.x += 8; stub.cx = stub.x + 10;
       deerclopsAI(e, h.hooks, h.player);
-      e.x += e.vx; e.y += e.vy;
+      if (e.y + e.h > GROUND * TILE) { e.y = GROUND * TILE - e.h; e.vy = 0; }
     }
     expect(e.lai3).toBe(30);
     expect(e.dontTakeDamage).toBe(true);

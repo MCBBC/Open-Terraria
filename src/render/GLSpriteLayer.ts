@@ -93,7 +93,10 @@ export class GLSpriteLayer {
       alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
       preserveDrawingBuffer: true,   // 离屏合成:drawImage 时缓冲必须仍在
     }) as WebGL2RenderingContext | null;
-    if (!gl) { this.unavailable = true; return; }
+    // ★初始化失败也记 diedAt(2026-08-19 哨兵三捕真凶):消费方退避判
+    // now-diedAt>5000,diedAt=0 时恒真 = 每帧重建(playsoft --disable-gpu 下
+    // WebGL2 必失败 → 60 张/秒 createElement 风暴,暂停中也持续)
+    if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
     this.gl = gl;
     const compile = (type: number, src: string): WebGLShader | null => {
       const sh = gl.createShader(type)!;
@@ -107,14 +110,14 @@ export class GLSpriteLayer {
     };
     const vs = compile(gl.VERTEX_SHADER, VERT_SRC);
     const fs = compile(gl.FRAGMENT_SHADER, FRAG_SRC);
-    if (!vs || !fs) { this.unavailable = true; return; }
+    if (!vs || !fs) { this.unavailable = true; this.diedAt = performance.now(); return; }
     const prog = gl.createProgram()!;
     gl.attachShader(prog, vs);
     gl.attachShader(prog, fs);
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
       console.warn('[GLSpriteLayer] program 链接失败:', gl.getProgramInfoLog(prog));
-      this.unavailable = true;
+      this.unavailable = true; this.diedAt = performance.now();
       return;
     }
     this.prog = prog;

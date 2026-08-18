@@ -10,7 +10,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const browser = await puppeteer.launch({
   executablePath: CHROME, headless: 'new', userDataDir: `${TMP}/canvasborn-profile`,
-  args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
+  args: ['--no-first-run', ...(process.env.CB_ARGS ?? '').split(/\s+/).filter(Boolean)],
+  defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
 let sentinelWarned = 0;
