@@ -15,7 +15,7 @@ import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/it
 import { tileRunner } from './TileRunner';
 import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
-import { flipGenSolid, genSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
 // worker bundle 被 vite 外部化炸构建（2026-08-18 实锤：writeFileSync is not
 // exported by "__vite-browser-external"）。改运行时 require，浏览器恒 false 门
@@ -400,6 +400,7 @@ export function runDungeonPass(
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
     if (!st.flags[i]) return false;
+    if ((st.wire[i] >>> 5) & 1) return false;    // SolidTile(i,j) !inActive()（WG:70155）——MMMM 批：Dome/Tower 致动柱入实心语义
     const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
     if (!genSolidType(st.type[i]) || DG_SOLID_TOP.has(sheet)) return false;
     if (sheet === 481 || sheet === 482 || sheet === 483) return false;   // SetCrackedBrickSolidity(false)（DC:344；pass 头 flipGenSolid 后冗余双保险）
@@ -1311,10 +1312,11 @@ export function runDungeonPass(
   // ★Tile.SmoothSlope（Tile.cs:821-880 applyToNeighbors=false）：CanPound&&SolidOrSloped
   //   门后按 上<<3|下<<2|左<<1|右 位形写坡（10→slope3/9→slope4/6→slope1/5→slope2/
   //   4→半砖/余→平）。近似备案：CanPound 全门（NO_POUND/BOULDERS/FORBIDS 表）以
-  //   !FRAMED_ALL 简化——楔底平滑目标全是砖/泥土岩（均不在豁免表）；BlockActuated
-  //   的 inActive 位不入四通道，跳过建模。
+  //   !FRAMED_ALL 简化——楔底平滑目标全是砖/泥土岩（均不在豁免表）；SolidOrSloped
+  //   含 !inActive()（MMMM 批——致动柱邻格平滑语义对齐，#32 Sl 8 格差根因）。
   const solidOrSlopedD = (x: number, y: number): boolean =>
-    inW(x, y, 0) && actAt(x, y) !== 0 && genSolidType(typAt(x, y));
+    inW(x, y, 0) && actAt(x, y) !== 0 && genSolidType(typAt(x, y))
+    && ((st.wire[st.idx(x, y)] >>> 5) & 1) === 0;   // SolidOrSlopedTile !inActive()（WG:70046）
   function dgSmoothSlope(x: number, y: number): void {
     if (!solidOrSlopedD(x, y)) return;
     const sheet = TILE_DEFS[typAt(x, y)]?.vanilla?.sheet ?? -1;
@@ -1336,7 +1338,7 @@ export function runDungeonPass(
   // up 支 num6<=10 break、down 支 num8>=H-10 break；!always 时遇 active break。
   // 返回 [topY, bottomY]（写入带）。
   function dgPillarStrip(px: number, py: number, height: number, up: boolean,
-    smoothTop: boolean, smoothBottom: boolean, always: boolean): [number, number] {
+    smoothTop: boolean, smoothBottom: boolean, always: boolean, inact = false): [number, number] {
     let placeY = py;
     let num3 = height;
     if (num3 === 0) {
@@ -1359,8 +1361,13 @@ export function runDungeonPass(
         if (!st.inBounds(px, cy)) continue;
         const ti = st.idx(px, cy);
         if (!always && st.flags[ti] !== 0) break;
-        st.flags[ti] = 1; st.type[ti] = brick; st.slope[ti] = 0; st.half[ti] = 0;   // ClearTile+active+type
+        // ClearTile()（Tile.cs:153——清 slope/half/active/**inActive**）+active+type
+        st.flags[ti] = 1; st.type[ti] = brick; st.slope[ti] = 0; st.half[ti] = 0;
+        st.wire[ti] &= ~32;
         if ((j === lo && smoothTop) || (j === hi && smoothBottom)) dgSmoothSlope(px, cy);
+        // ★MMMM 批：DungeonPillar.GenerateTileStrip :151-154/:200-203——BlockActuated 族
+        //   平滑后置 inActive(true)（wire bit5；SolidTop/Bottom 变体的 ±2 豁免不涉 Dome/Tower）
+        if (inact) st.wire[ti] |= 32;
         if (cy < topY) topY = cy;
         if (cy > bottomY) bottomY = cy;
       }
@@ -1372,7 +1379,9 @@ export function runDungeonPass(
         const ti = st.idx(px, cy);
         if (!always && st.flags[ti] !== 0) break;
         st.flags[ti] = 1; st.type[ti] = brick; st.slope[ti] = 0; st.half[ti] = 0;
+        st.wire[ti] &= ~32;
         if ((j === lo && smoothTop) || (j === hi && smoothBottom)) dgSmoothSlope(px, cy);
+        if (inact) st.wire[ti] |= 32;
         if (cy < topY) topY = cy;
         if (cy > bottomY) bottomY = cy;
       }
@@ -1382,18 +1391,18 @@ export function runDungeonPass(
   // DungeonPillar.Pillar（:28-84）——逐列主带（height，crownStops=false→crown 高 0=
   // 自动扫描）+ 顶/底冠（k==0/-1 列外扩 1，num=3 间距；smoothBottom/Top:true）
   function dgPillar(px: number, py: number, width: number, crownTop: boolean, crownBottom: boolean,
-    height: number, always: boolean): void {
+    height: number, always: boolean, inact = false): void {
     const num = 3;
     for (let k = 0; k < width; k++) {
       const cx = px + k - Math.trunc(width / 2);
-      const [topY2, bottomY] = dgPillarStrip(cx, py, height, true, false, false, always);
+      const [topY2, bottomY] = dgPillarStrip(cx, py, height, true, false, false, always, inact);
       if (crownTop) {
-        if (k === 0) dgPillarStrip(cx - 1, topY2 + num, 0, true, false, true, always);
-        else if (k === width - 1) dgPillarStrip(cx + 1, topY2 + num, 0, true, false, true, always);
+        if (k === 0) dgPillarStrip(cx - 1, topY2 + num, 0, true, false, true, always, inact);
+        else if (k === width - 1) dgPillarStrip(cx + 1, topY2 + num, 0, true, false, true, always, inact);
       }
       if (crownBottom) {
-        if (k === 0) dgPillarStrip(cx - 1, bottomY - num, 0, false, true, false, always);
-        else if (k === width - 1) dgPillarStrip(cx + 1, bottomY - num, 0, false, true, false, always);
+        if (k === 0) dgPillarStrip(cx - 1, bottomY - num, 0, false, true, false, always, inact);
+        else if (k === width - 1) dgPillarStrip(cx + 1, bottomY - num, 0, false, true, false, always, inact);
       }
     }
   }
@@ -1787,11 +1796,11 @@ export function runDungeonPass(
         }
       }
     }
-    // 四根 3 宽 BlockActuated 立柱（:303-313，actuated 位不入通道跳过）
-    dgPillar(i - n9 - 3, n7, 3, true, true, 0, true);
-    dgPillar(i + n9 + 3, n7, 3, true, true, 0, true);
-    dgPillar(i - n13 - 3, n7, 3, true, true, 0, true);
-    dgPillar(i + n13 + 3, n7, 3, true, true, 0, true);
+    // 四根 3 宽 BlockActuated 立柱（:303-313）——MMMM 批补 inActive 位（wire bit5）
+    dgPillar(i - n9 - 3, n7, 3, true, true, 0, true, true);
+    dgPillar(i + n9 + 3, n7, 3, true, true, 0, true, true);
+    dgPillar(i - n13 - 3, n7, 3, true, true, 0, true, true);
+    dgPillar(i + n13 + 3, n7, 3, true, true, 0, true, true);
     // 六组楔底+外柱（:315-331）
     dgBottomWedge(i - n4 - 4, n7 - n8, 5, true);
     dgOuterPillar(i - n4 - 4, n7 - n8);
@@ -2044,7 +2053,7 @@ export function runDungeonPass(
     slime(i, n7, n3, 1.0, 1.0, (x, y) => {
       if (y >= num18 || !st.inBounds(x, y)) return;
       const ti = st.idx(x, y);
-      st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;       // ClearTile（inActive 位不建模，同 Tower 备案）
+      st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;       // Actions.ClearTile→Tile.ClearTile（亦清 inActive；本段在柱族①之前无交叉）
     });
     // 门（cs:264-271）：DomeEntrance_Door 与 TowerEntrance_Door 逐行同源——正常种子
     //   仅 dungeon 侧单门（buried/underground 特典才补镜像门）
@@ -2074,10 +2083,10 @@ export function runDungeonPass(
         dgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, 88);
       }
     }
-    // 柱族①（cs:344-358）：两根 3 宽 BlockActuated 全高柱@i±(num3-21)（actuated 位
-    //   不入四通道，同 Tower 备案；Height=0=上行自动扫描至穹顶）
-    dgPillar(i - n3 + 21, n7, 3, true, true, 0, true);
-    dgPillar(i + n3 - 21, n7, 3, true, true, 0, true);
+    // 柱族①（cs:344-358）：两根 3 宽 BlockActuated 全高柱@i±(num3-21)——MMMM 批补
+    //   inActive 位（wire bit5；Height=0=上行自动扫描至穹顶）
+    dgPillar(i - n3 + 21, n7, 3, true, true, 0, true, true);
+    dgPillar(i + n3 - 21, n7, 3, true, true, 0, true, true);
     // 四平台候选（cs:359-400）：上对 NoWaterbolt=true / 下对无（books 链 Next(50) 分野）
     platData.push({ x: i - n3 + 15, y: n7 - 25, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });
     platData.push({ x: i + n3 - 15, y: n7 - 25, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });
@@ -2220,6 +2229,11 @@ export function runDungeonPass(
     }
     return true;
   }
+  // ★MMMM 批：Dome/Tower 入口盒内拒 Spikes/Bookshelves/Paintings——DomeDungeonEntrance.cs:31-38
+  //   与 TowerDungeonEntrance.cs:31-38 的 CanGenerateFeatureAt 覆写同款（Legacy 只拒
+  //   BiomeChests=feat1，上表已覆）。入口 hitbox=Bounds（CalculateHitbox 后）=entBounds。
+  const entNoFeat = (x: number, y: number): boolean =>
+    entKind !== 0 && entExists && entBounds.contains(x, y);
   const featAreaOK = (x: number, y: number, fluff: number): boolean => {
     for (let a = x - fluff; a <= x + fluff; a++) {
       for (let b = y - fluff; b <= y + fluff; b++) {
@@ -2350,7 +2364,8 @@ export function runDungeonPass(
       }
       if (!cond) break;
       const fx = round === 0 ? cx : wx, fy = round === 0 ? wy : cy;
-      if (!featOK(fx, fy, 0) || !featOK(fx, round === 0 ? wy - d : cy - d, 0)) {
+      if (!featOK(fx, fy, 0) || entNoFeat(fx, fy) || !featOK(fx, round === 0 ? wy - d : cy - d, 0)
+        || entNoFeat(fx, round === 0 ? wy - d : cy - d)) {
         if (round === 0) cx += step; else cy += step;
         n11 = 0;
         continue;
@@ -2717,8 +2732,10 @@ export function runDungeonPass(
             // ★FFFF 批（2026-08-18）：NoWaterbolt=false（Dome 下对平台）走
             //   GenerateDungeonBook 默认支（DU:432-435）——Next(50) 掷在参数位
             //   （PlaceTile(50) 内的 Next(5) 之前）；waterbolt 帧门 :441 原版手滑读
-            //   Main.tile[placeY, placeY]（非 placeX,placeY）——1:1 照抄
-            const wb = d.nowb === false && rn(50) === 0;
+            //   Main.tile[placeY, placeY]（非 placeX,placeY）——1:1 照抄。
+            //   ★MMMM 批：`=== false` 对缺省 nowb（undefined）不成立——Dome 下对平台
+            //   （候选无 NoWaterbolt 字段=false）曾整族漏掷 Next(50) → #32 全链掷位漂移。
+            const wb = d.nowb !== true && rn(50) === 0;
             placeOnTableD(m, py - 1, BOOKS);                  // 内含 Next(5)（cs:45377）
             if (wb && py - 1 > (ws + rock) / 2 && typAt(py - 1, py - 1) === BOOKS) {
               st.frameX[st.idx(m, py - 1)] = 90;              // frameX=90（水书帧，DU:439-444）
@@ -2740,7 +2757,13 @@ export function runDungeonPass(
       }
       if (!st.inBounds(x + dx, y + 1)) { ok = false; break; }
       const gi = st.idx(x + dx, y + 1);
-      if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !genSolidType(st.type[gi])) { ok = false; break; }
+      // ★MMMM 批：WorldGen.PlacePot（:54082，门 :54099-54102）支撑门=**nactive()
+      //   （含 !inActive）+ Main.tileSolid[type]**——平台 19 在生成期 tileSolid=true
+      //   （GenSolid vanGenSolidType 差集 9 类之一）。曾用碰撞语义 genSolidType →
+      //   Dome 平台上的瓦罐全数放置失败 → 每罐少掷 1 颗 Next(3) → 全链掷位漂移
+      //   （#32 残余的主根因——Legacy 种子平台无 pots 候选故 9293480 不可见）。
+      if (!st.flags[gi] || ((st.wire[gi] >>> 5) & 1) !== 0 || st.half[gi] || st.slope[gi] !== 0
+        || !vanGenSolidType(st.type[gi])) { ok = false; break; }
     }
     if (!ok) return;
     const variant = rn(3) * 36;
@@ -3034,7 +3057,7 @@ export function runDungeonPass(
           if (flag && inW(x, y - 1, 0) && actAt(x, y - 1) === 0
             && inW(x, y - 2, 0) && actAt(x, y - 2) === 0
             && inW(x, y - 3, 0) && actAt(x, y - 3) === 0) {
-            if (!featOK(x, y, 0)) { flag = false; continue; }
+            if (!featOK(x, y, 0) || entNoFeat(x, y)) { flag = false; continue; }
             let k = x;
             const num8 = x;
             while (k > bounds.L && k < bounds.R && actAt(k, y) === 0 && actAt(k, y - 1) === 0 && actAt(k, y + 1) === 0) k += n7;
@@ -3204,7 +3227,9 @@ export function runDungeonPass(
           // 上格实心判定走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344），
           // 勿读静态 TILE_DEFS.solid（dungeonI 转写债根因之一）
           const aboveSolid = genSolidType(typAt(x, cy - 1));
-          if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !DG_SOLID_TOP.has(aboveSheet)
+          // nactive()（active&&!inActive）——MMMM 批：致动柱格不可挂灯笼（Place1x2Top :46705）
+          const abvInact = inW(x, cy - 1, 0) && ((st.wire[st.idx(x, cy - 1)] >>> 5) & 1) !== 0;
+          if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !abvInact && !DG_SOLID_TOP.has(aboveSheet)
             && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
             if (lgTr) console.log(`DG LP x=${x} cy=${cy} typAbv=${aboveSheet}`);
             // 灯笼样式按墙变体三档（Lights :109-118）：wall==variants[1]/[2] 换档,余用 [0]
@@ -3234,8 +3259,10 @@ export function runDungeonPass(
       }
     }
     const sheet = TILE_DEFS[typAt(x, y - 1)]?.vanilla?.sheet ?? -1;
-    // 上格实心走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344，勿读静态 solid）
-    if (!(inW(x, y - 1, 0) && actAt(x, y - 1) !== 0 && genSolidType(typAt(x, y - 1)) && !DG_SOLID_TOP.has(sheet))) return false;
+    // 上格实心走生成期覆写表（裂纹砖 481-483 本 pass 起非实心——DC:344，勿读静态 solid）；
+    // nactive()（active&&!inActive）——MMMM 批：致动柱格不可挂吊灯（PlaceChand :52769）
+    if (!(inW(x, y - 1, 0) && actAt(x, y - 1) !== 0 && ((st.wire[st.idx(x, y - 1)] >>> 5) & 1) === 0
+      && genSolidType(typAt(x, y - 1)) && !DG_SOLID_TOP.has(sheet))) return false;
     // PlaceChand 帧式（:52753-52824）：样式=蓝/绿/粉地牢吊灯 placeStyle 27/28/29
     //（Item.cs:25748-25757 `27 + type - 2652`，chandelierItemType 2652+theme）。
     // 页列 num2=108*(style/36)（27-29 无分页=0）、行基 num3=style*54（分页修正同式）；
@@ -3695,7 +3722,8 @@ export function runDungeonPass(
   function placeOnTableD(x: number, y: number, t: number): boolean {
     if (!dgClr(x, y) || !inW(x, y + 1, 0)) return false;
     const bi = st.idx(x, y + 1);
-    if (st.flags[bi] === 0 || !TILE_TABLE_D.has(st.type[bi])) return false;
+    // PlaceOnTable1x1 :45360 锚=!active && **nactive()** && tileTable（MMMM 批补 !inActive）
+    if (st.flags[bi] === 0 || ((st.wire[bi] >>> 5) & 1) !== 0 || !TILE_TABLE_D.has(st.type[bi])) return false;
     dgWr(x, y, t);
     // cs:45377 书帧 = 18*Next(5)（五书色随机；掷值此前被丢弃=恒帧 0，2026-08-18 补写）
     if (t === BOOKS) st.frameX[st.idx(x, y)] = 18 * rn(5);
@@ -3989,7 +4017,7 @@ export function runDungeonPass(
   const featArea3 = (x: number, y: number, fluff: number): boolean => {
     for (let a = x - fluff; a <= x + fluff; a++) {
       for (let b = y - fluff; b <= y + fluff; b++) {
-        if (!featOK(a, b, 2)) return false;
+        if (!featOK(a, b, 2) || entNoFeat(a, b)) return false;   // Paintings 入口盒拒（Dome/Tower 覆写）
       }
     }
     return true;

@@ -7,6 +7,9 @@
 // 星璇塔增量（2026-08-11）：403/404（星尘蠕虫身/尾，字段复制 402 改宽高——1456 无独立
 // SetDefaults，原版由 DrawNPC case 402 自绘 trail；本仓蠕虫链 spawnWormChain 需要
 // 头+1/头+2 条目）、408（小水流入侵者，复制 407 缩小——1456 无独立 SetDefaults）。
+// 城镇宠物声音增量（2026-08-18）：637/638/656 补 HitSound/DeathSound（1456
+// SetDefaults :17142-17180/:17230-17244，提取器漏——637 猫 Hit1/Death6、
+// 638 狗 Hit1/Death1、656 兔 Hit1/Death6；消费端 TownNPC.hurt/checkDead 数据驱动）。
 // aiStyle 与 AI_XXX 方法的对应见 NPC.cs AI() 分发；此处先覆盖高频家族，
 // 未移植 AI 家族的 aiStyle 回退到最接近的已移植行为（注释标注）。
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';

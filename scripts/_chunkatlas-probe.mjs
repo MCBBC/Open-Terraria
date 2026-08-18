@@ -1,6 +1,8 @@
 // chunk atlas 化 E2E 三重验证(2026-08-18):
 //  ① 像素对拍:atlas cell(bakeChunkInto 页路径)vs 独立 256² 目标(cell=-1 同函数)
 //    逐字节一致——clip/translate 语义等价性的直接证明
+//  ①' 含油漆对拍:涂漆后 cell=5(页内 256,256 偏移位)vs 独立目标——油漆 pass 的
+//    读(页内绝对)/写(cell 局部)坐标分离回归网(曾双重偏移静默丢漆,review 修)
 //  ② 运行期画布 churn:createElement('canvas') 计数,玩家横移 ~6000px 后
 //    新建画布数应 ≈ 0(旧结构 = 每帧 8 张,数百张量级)
 //  ③ 页数上限:pageCount 随移动有界(≤ ceil(活动chunk/16)+1)
@@ -80,6 +82,64 @@ if (parity && !parity.err) {
   check('像素对拍(atlas cell == 独立目标,逐字节)', parity.ok === stable && stable >= 3,
     `一致 ${parity.ok}/${stable} 稳定样本(动画漂移跳过 ${parity.unstable};<3 稳定样本=采样不足)`);
 } else check('像素对拍', false, JSON.stringify(parity).slice(0, 120));
+
+// ---- ①' 含油漆对拍(坐标分离回归网;重试 3 次防动画帧竞态) ----
+const paintParity = await page.evaluate(() => {
+  const g = window.__swGame;
+  const w = g.world, st = w.store, cc = g.chunks;
+  // 从地表线往下逐 chunk 行探测,找到有 tile/墙的实体层(出生点正下方多为空腔)
+  // ★player.cx 是像素(px),除 16 得格;后续一律格坐标(曾误把格又×16 当像素→全越界)
+  const cx = Math.floor(g.player.cx / 16);
+  let cy = -1, pt = 0, pw = 0, px0 = cx, py0 = 0;
+  for (const tryRow of [40, 70, 100, 130, 30, 55, 85, 115, 160, 200]) {
+    const t = Math.floor(w.groundLevel + tryRow);
+    const cyT = Math.floor(t / 16);
+    const pyT = cyT * 16;
+    let a = 0, b = 0;
+    for (let y = pyT; y < pyT + 16; y++) {
+      for (let x = px0; x < px0 + 16; x++) {
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        if (st.type[i] && st.flags[i]) a++;
+        if (st.wall[i]) b++;
+      }
+    }
+    if (a + b >= 8) { cy = cyT; py0 = pyT; pt = a; pw = b; break; }
+  }
+  if (cy >= 0) {
+    for (let y = py0; y < py0 + 16; y++) {
+      for (let x = px0; x < px0 + 16; x++) {
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        if (st.type[i] && st.flags[i]) st.paint[i] = 9;   // 红漆
+        if (st.wall[i]) st.paintWall[i] = 12;             // 蓝漆
+      }
+    }
+  }
+  const mk = (s) => { const c = document.createElement('canvas'); c.width = s; c.height = s; return c; };
+  const cmp = (a, b) => {
+    let d = 0;
+    for (let i = 0; i < a.data.length; i += 4) {
+      if (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1] || a.data[i + 2] !== b.data[i + 2] || a.data[i + 3] !== b.data[i + 3]) d++;
+    }
+    return d;
+  };
+  let best = -1;
+  for (let t = 0; t < 3; t++) {
+    const bw = mk(1024), bt = mk(1024);
+    cc.bakeChunkInto(cx, cy, bw, bt, 5);            // cell=5 → 页内 (256,256) 偏移位
+    const sw = mk(256), sT = mk(256);
+    cc.bakeChunkInto(cx, cy, sw, sT, -1);           // 独立目标(基准)
+    const d1 = cmp(bw.getContext('2d').getImageData(256, 256, 256, 256), sw.getContext('2d').getImageData(0, 0, 256, 256));
+    const d2 = cmp(bt.getContext('2d').getImageData(256, 256, 256, 256), sT.getContext('2d').getImageData(0, 0, 256, 256));
+    best = Math.max(best, d1 + d2);
+    if (best === 0) break;
+  }
+  return { paintedTiles: pt, paintedWalls: pw, bestDiff: best };
+}).catch((e) => ({ err: String(e).slice(0, 200) }));
+console.log('[油漆对拍]', JSON.stringify(paintParity));
+check('含油漆对拍(cell=5 偏移位 == 独立目标)', !paintParity.err && paintParity.paintedTiles + paintParity.paintedWalls > 0 && paintParity.bestDiff === 0,
+  JSON.stringify(paintParity).slice(0, 140));
 
 // ---- ② 移动 churn + ③ 页数 ----
 const before = await page.evaluate(() => ({

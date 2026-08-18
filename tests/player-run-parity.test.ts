@@ -143,3 +143,99 @@ describe('默认移动速度对账（实现）', () => {
     expect(p.vx).toBeLessThanOrEqual(6.05);
   });
 });
+
+describe('地面材质链（Player.cs:26210-26255 else-if 真序;2026-08-18 冰面死码修复批）', () => {
+  async function mkPlayer(floorKey: string) {
+    const w = new World(480, 80, 30, 'mat');
+    const { TILE_BY_KEY } = await import('../src/data/tiles');
+    const fid = TILE_BY_KEY[floorKey];
+    for (let x = 0; x < 480; x++) w.store.setTileSilent(x, 70, fid, 0, 0);
+    const game = makeGame(w);
+    const inv = new (await import('../src/items/Inventory')).Inventory();
+    const p = new Player(60 * TILE, 66 * TILE, inv);
+    for (let i = 0; i < 30; i++) step(p, game);
+    expect(p.onGround).toBe(true);
+    p.vx = 0;
+    return { p, game, TILE_BY_KEY };
+  }
+
+  it('冰面:起步加速 ×0.7(30t vx 显著低于平地)——旧死码曾全程 0.08 满加速', async () => {
+    const { p, game } = await mkPlayer('ice');
+    for (let t = 0; t < 30; t++) { p.inputX = 1; step(p, game); }
+    const vxAbs = Math.abs(p.vx);
+    // 0.7×0.08×30 ≈ 1.68(尚在 <maxRun 直加段);死码时 = 2.4
+    expect(vxAbs).toBeGreaterThan(1.4);
+    expect(vxAbs).toBeLessThan(2.0);
+  });
+
+  it('冰面无冰刀:松键 slowdown ×0.1(惯性滑行 ≈10 倍距离)', async () => {
+    const { p, game } = await mkPlayer('ice');
+    p.vx = 2.5;
+    let t = 0;
+    for (; t < 600; t++) { p.inputX = 0; step(p, game); if (p.vx === 0) break; }
+    expect(t).toBeGreaterThan(100);   // 0.02/t 减速:2.5→0 需 ~125t(平地 13t)
+  });
+
+  it('冻结史莱姆块 197:松键零摩擦(600t 仍 >0)——slippy2 滑到底', async () => {
+    const { p, game } = await mkPlayer('v_197_frozen_slime_block');
+    p.vx = 2.5;
+    for (let t = 0; t < 600; t++) { p.inputX = 0; step(p, game); }
+    expect(Math.abs(p.vx)).toBeGreaterThan(2.4);   // runSlow=0:理论上永不停(撞界前)
+  });
+
+  it('蜂蜜块地面:maxRun ×0.25 钳速(推满 <0.85)', async () => {
+    const { p, game } = await mkPlayer('v_229_honey_block');
+    for (let t = 0; t < 120; t++) { p.inputX = 1; step(p, game); }
+    expect(Math.abs(p.vx)).toBeLessThanOrEqual(0.85);   // 3×0.25=0.75+过冲
+    expect(Math.abs(p.vx)).toBeGreaterThan(0.5);
+  });
+
+  it('沥青 198:maxRun ×3.5 跑道(极速 >8)', async () => {
+    const { p, game } = await mkPlayer('v_198_asphalt_block');
+    for (let t = 0; t < 300; t++) { p.inputX = 1; step(p, game); }
+    expect(Math.abs(p.vx)).toBeGreaterThan(8);          // 3×3.5=10.5 帽
+    expect(Math.abs(p.vx)).toBeLessThanOrEqual(11);
+  });
+
+  it('蜂蜜地面跳削弱:jumpTicks/10 + jumpSpd/5(跳起高度骤降)', async () => {
+    const { p, game } = await mkPlayer('v_229_honey_block');
+    let peakHoney = 0;
+    p.inputJump = true;
+    for (let t = 0; t < 60; t++) {
+      step(p, game);
+      peakHoney = Math.max(peakHoney, 66 * TILE - p.y);
+      if (t === 5) p.inputJump = false;
+    }
+    const { p: p2, game: g2 } = await mkPlayer('stone');
+    let peakStone = 0;
+    p2.inputJump = true;
+    for (let t = 0; t < 60; t++) {
+      step(p2, g2);
+      peakStone = Math.max(peakStone, 66 * TILE - p2.y);
+      if (t === 5) p2.inputJump = false;
+    }
+    expect(peakHoney).toBeLessThan(peakStone * 0.4);    // /10 高度 + /5 速度 → ~4%
+  });
+});
+
+describe('冰刀族（Ice Skates 950：冰面 acc×0.7×3.5 + maxRun×1.25;slippy2 同）', () => {
+  it('穿冰刀冰上起步:0.7×3.5×0.08≈0.196/t——30t vx≈5.8 帽 3.75', async () => {
+    const w = new World(480, 80, 30, 'skate');
+    const { TILE_BY_KEY } = await import('../src/data/tiles');
+    const { ITEM_BY_KEY } = await import('../src/data/items');
+    const { vanillaItemKey } = await import('../src/data/vanillaRecipes');
+    for (let x = 0; x < 480; x++) w.store.setTileSilent(x, 70, TILE_BY_KEY['ice'], 0, 0);
+    const game = makeGame(w);
+    const inv = new (await import('../src/items/Inventory')).Inventory();
+    const p = new Player(60 * TILE, 66 * TILE, inv);
+    // 真穿冰刀（equipStats 逐次重算——假旗会被 getter 覆写）
+    p.inv.armor[3] = { id: ITEM_BY_KEY[vanillaItemKey(950)!], stack: 1 };
+    for (let i = 0; i < 30; i++) step(p, game);
+    expect(p.onGround).toBe(true);
+    p.vx = 0;
+    for (let t = 0; t < 30; t++) { p.inputX = 1; step(p, game); }
+    const v = Math.abs(p.vx);
+    expect(v).toBeGreaterThan(3.7);    // 到帽 3×1.25=3.75(无冰刀死码时 ≈1.68)
+    expect(v).toBeLessThanOrEqual(3.75 + 0.6);   // maxRun 3×1.25=3.75(过冲一档)
+  });
+});

@@ -226,6 +226,8 @@ const ACC_PATTERNS = [
   ['pStone', /pStone = true;/],                   // 贤者之石（药水 CD -25%，暂存）
   // ---- 六轮：花靴（Player.cs:12688 行走生花 + DropBait ×10000 门一并消费）----
   ['flowerBoots', /flowerBoots = true;/],         // 花靴 3017 / 仙灵靴 3993
+  // ---- 七轮：冰刀（Player.cs:14542/:14703/:14843/:14846——冰面移动修正 :26237+）----
+  ['iceSkate', /iceSkate = true;/],               // 冰刀 950/北极潜水装 1861/沙漠潜水装 1862/泰拉靴 5000
   // ---- 魔力回复直值（:14379-14383 魔力斗篷 982：+20 魔 + 回复双字段）----
   ['manaRegenBonus', /manaRegenBonus \+= (\d+);/],            // 每帧产额加成（UpdateManaRegen :19254）
   ['manaRegenDelayBonus', /manaRegenDelayBonus \+= ([\d.]+)f;/], // 惩罚期额外衰减/tick（:19237）

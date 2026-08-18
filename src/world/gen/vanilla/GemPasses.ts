@@ -235,7 +235,7 @@ const GEM_DIR_BASE: Record<number, number> = { 0: 0, 1: 54, 2: 108, 3: 162 };
  *     基带+roll2。★G3：此前只掷 1 骰，每颗宝石少掷 1 骰，全链 RNG 流分叉。
  *  邻域 8 格 TileFrame(resetFrame=false)：num21=frameY%54 无掷骰，且 178 非实心、
  *  不改变邻格锚定 → 不存在"邻域触发的第三掷"（cs:85844-85880 判定结论，免补）。 */
-function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
+export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
   const dir = checkMultiDirAnchor(st, x, y);
   if (dir < 0) return;                       // CheckAndAdjust 失败：不放置、不掷骰
   const roll1 = rng.nextInt(3) * 18;         // ① cs:59724

@@ -40,12 +40,16 @@ const tintCanvas = typeof document !== 'undefined' ? document.createElement('can
 if (tintCanvas) { tintCanvas.width = TILE; tintCanvas.height = TILE; }
 const tintCtx = tintCanvas ? tintCanvas.getContext('2d') : null;
 
-/** 对 canvas 的 (px,py) 16×16 区域按 paint 着色（就地回写） */
-function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, px: number, py: number, paint: number): void {
+/** 对 canvas 的 (readX,readY) 16×16 区域按 paint 着色,回写到 ctx 的 (writeX,writeY)。
+ *  ★读/写坐标分离(2026-08-18 atlas 化 review 修):atlas 页路径读=页内绝对、写=cell 内
+ *  局部(ctx 挂 translate(ox,oy));旧签名读写同参 → 回写落 (ox+px,oy+py) 双重偏移,
+ *  ox>0 的 cell 油漆被 clip 挡掉 = 静默丢失(新世界无油漆的对拍探针抓不到) */
+function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, readX: number, readY: number, paint: number,
+  writeX = readX, writeY = readY): void {
   if (!tintCtx || !tintCanvas) return;
   tintCtx.globalCompositeOperation = 'source-over';
   tintCtx.clearRect(0, 0, TILE, TILE);
-  tintCtx.drawImage(src, px, py, TILE, TILE, 0, 0, TILE, TILE);
+  tintCtx.drawImage(src, readX, readY, TILE, TILE, 0, 0, TILE, TILE);
   if (paint === 30) {
     // 负相漆：difference × 白 = 反转（MapHelper.MapColor :1849-1851 同式）
     tintCtx.globalCompositeOperation = 'difference';
@@ -58,11 +62,11 @@ function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, px: n
   }
   tintCtx.fillRect(0, 0, TILE, TILE);
   tintCtx.globalCompositeOperation = 'destination-in';
-  tintCtx.drawImage(src, px, py, TILE, TILE, 0, 0, TILE, TILE);
+  tintCtx.drawImage(src, readX, readY, TILE, TILE, 0, 0, TILE, TILE);
   tintCtx.globalCompositeOperation = 'source-over';
   // 不 clearRect 直接覆盖回写：着色像素与本区域原内容 alpha 完全一致，
   // source-over 叠加即替换色值；clearRect 反而会打穿邻格溢出的跨格精灵
-  ctx.drawImage(tintCanvas, px, py);
+  ctx.drawImage(tintCanvas, writeX, writeY);
 }
 
 export class ChunkCache {
@@ -103,6 +107,9 @@ export class ChunkCache {
   private static readonly PAGE_COLS = 4;
   private wallPages: HTMLCanvasElement[] = [];
   private tilePages: HTMLCanvasElement[] = [];
+  /** 每页在用 cell 数(与 wallPages 同长;页全空可被 trimFreePages 回收——
+   *  熔断软收缩路径的显存释放在 atlas 化后不能只还 cell 不放页,每页 2×4MB) */
+  private pageUsed: number[] = [];
   /** 空闲 cell 栈(page*16+slot;栈顶复用 = 热页优先) */
   private cellFree: number[] = [];
   /** 调试/F5:当前 atlas 页数(墙+tile 双层各一摞,画布张数 = 2×页数) */
@@ -113,7 +120,24 @@ export class ChunkCache {
    *  外部 stub(测试)/独立目标(cell=-1)无页可还 = no-op */
   releasePair(pair: ChunkPair | undefined): void {
     const c = pair?.cell;
-    if (typeof c === 'number' && c >= 0) this.cellFree.push(c);
+    if (typeof c !== 'number' || c < 0) return;
+    this.cellFree.push(c);
+    this.pageUsed[Math.floor(c / ChunkCache.CELLS_PER_PAGE)]--;
+  }
+
+  /** 回收尾部全空页(GPU 软收缩后调用:LRU 淘汰只还 cell,页的 4MB 背板仍在;
+   *  中段空页留待复用不毁——索引稳定性,只从尾部收缩) */
+  trimFreePages(): void {
+    while (this.wallPages.length && this.pageUsed[this.wallPages.length - 1] === 0) {
+      const wp = this.wallPages.pop()!, tp = this.tilePages.pop()!;
+      this.pageUsed.pop();
+      wp.width = 0; wp.height = 0;
+      tp.width = 0; tp.height = 0;
+    }
+    const live = this.wallPages.length * ChunkCache.CELLS_PER_PAGE;
+    if (this.cellFree.some((c) => c >= live)) {
+      this.cellFree = this.cellFree.filter((c) => c < live);
+    }
   }
 
   private allocCell(): number {
@@ -128,11 +152,14 @@ export class ChunkCache {
       };
       this.wallPages.push(mkPage());
       this.tilePages.push(mkPage());
+      this.pageUsed.push(0);
       for (let s = ChunkCache.CELLS_PER_PAGE - 1; s >= 0; s--) {
         this.cellFree.push(pageIdx * ChunkCache.CELLS_PER_PAGE + s);
       }
     }
-    return this.cellFree.pop()!;
+    const cell = this.cellFree.pop()!;
+    this.pageUsed[Math.floor(cell / ChunkCache.CELLS_PER_PAGE)]++;
+    return cell;
   }
 
   dispose(): void {
@@ -141,6 +168,7 @@ export class ChunkCache {
     for (const p of this.tilePages) { p.width = 0; p.height = 0; }
     this.wallPages.length = 0;
     this.tilePages.length = 0;
+    this.pageUsed.length = 0;
     this.cellFree.length = 0;
     this.chunks.clear();
     this.dirtyQueue.length = 0;
@@ -374,6 +402,7 @@ export class ChunkCache {
       return this.bakeChunkInto(cx, cy, this.wallPages[page], this.tilePages[page], cell);
     } catch (e) {
       this.cellFree.push(cell); // 烘焙异常:cell 归还,防页池泄漏
+      this.pageUsed[Math.floor(cell / ChunkCache.CELLS_PER_PAGE)]--;
       throw e;
     } finally {
       if (tracker) tracker._baking = false;
@@ -404,6 +433,20 @@ export class ChunkCache {
     }
     let ctx = tctx; // 前景层(下文 tile pass);墙层=wctx
     const wall = wallPage, tile = tilePage;
+    // ★异常安全:save 后必须 restore——异常逃逸会让【共享页】上下文残留 clip+
+    // translate,下次烘焙错位到 2×偏移(独立画布时代异常自含,页化后必须显式复位)
+    try {
+      this.bakeChunkBody(cx, cy, wctx, ctx, wall, tile, ox, oy);
+    } finally {
+      wctx.restore();
+      ctx.restore();
+    }
+    return { wall, tile, sx: ox, sy: oy, cell };
+  }
+
+  /** bakeChunkInto 的绘制主体(私有;坐标全为 cell 内局部,translate 已由外层挂好) */
+  private bakeChunkBody(cx: number, cy: number, wctx: CanvasRenderingContext2D, ctx: CanvasRenderingContext2D,
+    wall: HTMLCanvasElement, tile: HTMLCanvasElement, ox: number, oy: number): void {
     const st = this.world.store;
     const x0 = cx * CHUNK, y0 = cy * CHUNK;
 
@@ -580,9 +623,9 @@ export class ChunkCache {
         if (!st.inBounds(x, y)) continue;
         const i = st.idx(x, y);
         const pw = st.paintWall[i];
-        if (pw > 0 && st.wall[i] !== 0) tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw);
+        if (pw > 0 && st.wall[i] !== 0) tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw, lx * TILE, ly * TILE);
         const pt = st.paint[i];
-        if (pt > 0 && st.flags[i] && st.type[i] !== 0) tintRegion(ctx, tile, ox + lx * TILE, oy + ly * TILE, pt);
+        if (pt > 0 && st.flags[i] && st.type[i] !== 0) tintRegion(ctx, tile, ox + lx * TILE, oy + ly * TILE, pt, lx * TILE, ly * TILE);
       }
     }
 
@@ -629,9 +672,7 @@ export class ChunkCache {
         }
       }
     }
-
-    wctx.restore();
-    ctx.restore();
-    return { wall, tile, sx: ox, sy: oy, cell };
+    // restore/return 在外层 bakeChunkInto(异常安全 try/finally)
   }
 }
+

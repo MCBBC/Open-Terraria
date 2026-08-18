@@ -65,11 +65,14 @@ const WOODEN_SPIKE = sheetId(232);
 const LIHZARD_BRICK = sheetId(226);
 const BEE_WALL = 86;                    // 蜂巢墙 → 强制蜂蜜滴头(cs:21404)
 
-/** SaveSlopes[t] = tileSolid[t](含 ① 的 379=false 覆写)∪ NonSolidSaveSlopes。
- *  tileSolid 走 GenSolid：pass 头翻转（cs:21331）已把 379 置非实心,原 BUBBLE
- *  特判并入 genSolidType（pass 尾 cs:21750 还原后自动恢复实心） */
+/** SaveSlopes[t] = tileSolid[t] ∪ NonSolidSaveSlopes（TileID.cs:425-429 静态构造）。
+ *  ★IIII 批勘误（2026-08-18）：SaveSlopes 数组在 TileID 静态构造时**一次性**从
+ *  Main.tileSolid 拷贝——之后生成期的一切 tileSolid 翻转（含本 pass 头的 379=false）
+ *  都不再影响它。曾用 genSolidType 叠加（379 等生成期翻非实心族被误清坡 →
+ *  solidTile 门连锁放行 → #99 T0>373 滴水石笋族 + S1/S2 残坡双症状）。
+ *  379 静态初值即 false（数据表同），静态读法对本种子零差——但语义必须静态。 */
 function isSaveSlope(t: number): boolean {
-  return (genSolidType(t) && !!TILE_DEFS[t]?.solid) || NON_SOLID_SAVE_SLOPES.has(t);
+  return !!TILE_DEFS[t]?.solid || NON_SOLID_SAVE_SLOPES.has(t);
 }
 
 /** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0。
@@ -192,7 +195,23 @@ export function runTileCleanupPass(st: TileStore, rng: RNG, _gs: GenState): void
         st.liquid[i] = 0;
       }
 
-      // ⑦⑧⑨⑩ 帧规范化族(cs:21461-21741)——跳过(我方放置端已保证帧,审计裁决)
+      // ⑦ 137/162 击杀族（cs:21461-21478——★IIII 批补：非纯帧,含 activity 写）
+      //    137（雕像,frameY/18 ≤2 或 ==5 时其朝向邻格半砖/坡 → 邻格失活）
+      //    162（薄冰,下方无液体且 CanKillTile → 失活——T0>162×387 根因）
+      if (st.flags[i] && st.type[i] === sheetId(137)) {
+        const fy = Math.floor(st.frameY[i]! / 18);
+        if (fy <= 2 || fy === 5) {
+          const dir = st.frameX[i]! >= 18 ? 1 : -1;
+          const ni2 = st.idx(k + dir, l);
+          if (st.half[ni2] === 1 || st.slope[ni2] !== 0) {
+            st.flags[ni2] = 0;   // 原版 active(false)——type 残留（八通道不可见）
+          }
+        }
+      } else if (st.flags[i] && st.type[i] === sheetId(162) && st.liquid[st.idx(k, l + 1)] === 0 && canKillTile(st, k, l)) {
+        st.flags[i] = 0;
+      }
+      // ⑦ 31/12/639/箱/28/祭坛帧规范化（cs:21484-21741）——纯帧/自放置端已保证,
+      //    除 12 的下行补格（罕见,墙→地形 tile 映射）外无八通道可见写,维持跳过
 
       // ⑪ 祭坛 237 正下方 232 木刺 → 226 蜥蜴砖(cs:21743-21746)
       if (st.flags[i] && st.type[i] === LIHZARD_ALTAR && st.type[st.idx(k, l + 1)] === WOODEN_SPIKE) {

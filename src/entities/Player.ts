@@ -50,6 +50,17 @@ import { flameParticles } from '../fx/FlameParticles';
 
 // 沙族地格集合（TileID.Sets.Conversion：Sand{53,112,116,234} / HardenedSand{397,398,399,402}
 // / Sandstone{396,400,401,403}——TileID.cs:30-34）。53/396/397 是本地基础方块键。
+/** 地面材质内部 id 集（Player.cs FloorCheck :23453-23455 五旗的 tile 族——
+ *  内部 id 经 TILE_BY_KEY 反查；★曾直接拿原版 sheet id 对比 st.type 永不命中
+ *  = 冰面滑移整链死代码（"角色在冰面不脚滑"根因，2026-08-18 修）） */
+export const ICE_SLIP_IDS = new Set<number>([
+  'ice', 'thin_ice', 'v_127_ice_ice_rod', 'v_163_purple_ice_block',
+  'v_164_pink_ice_block', 'v_200_red_ice_block', 'v_659_aetherium_block',
+].map((k) => TILE_BY_KEY[k] ?? 0).filter((id) => id > 0));   // IceSkateSlippery(TileID.cs:149)
+export const FROZEN_SLIME_ID = TILE_BY_KEY['v_197_frozen_slime_block'] ?? 0;   // slippy2
+export const ASPHALT_ID = TILE_BY_KEY['v_198_asphalt_block'] ?? 0;             // powerrun
+export const HONEY_FLOOR_ID = TILE_BY_KEY['v_229_honey_block'] ?? 0;           // sticky(地面材质档,与 StickyTiles 泡块阻尼不同链)
+
 const SAND_FLOOR_IDS = new Set<number>([
   'sand', 'sandstone', 'hardened_sand',
   'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block',
@@ -1879,20 +1890,29 @@ export class Player extends Entity {
       if (duneBoost && !mnt) { maxRun *= 1.75; accRun *= 1.75; }
       let runAcc = mnt ? mnt.acceleration
         : RUN_ACCELERATION * (duneBoost ? 1.75 : 1);
-      // 冰面滑移（Player.cs:26234-26255，与沙丘靴同链 else-if 语义）：
-      //   slippy=IceSkateSlippery 集 {161,162,127,163,164,200,659}、slippy2=197 冻结
-      //   史莱姆块（FloorCheck :23454，floorTileT 已带坡面门 :23466）。slippy2：
-      //   acc×0.6+slowdown=0；slippy：acc×0.7；有冰刀：acc 再×3.5+maxRun×1.25；
-      //   无冰刀 slippy 档 slowdown×0.1（打滑）
+      // ---- 地面材质链（Player.cs:26210-26255 原版 else-if 真序：sticky→powerrun→
+      //      sand→slippy2→slippy；floorTileT 已带坡面门 :23466）----
+      // sticky 蜂蜜块地面（:26210-26221）：maxRun/acc×0.25、slowdown×2 + 钳 ±maxRun
+      //   ——与 StickyTiles 泡块阻尼（:22650+，上面已接）是两条链
+      // powerrun 沥青（:26222-26224）：maxRun×3.5、slowdown×2（跑道）
+      // slippy2 冻结史莱姆块（:26234-26240）：acc×0.6、slowdown=0（无摩擦滑到底）；
+      //   冰刀族 acc 再×3.5+maxRun×1.25
+      // slippy 冰族七 tile（:26244-26255）：acc×0.7；冰刀 acc×3.5+maxRun×1.25，
+      //   无冰刀 slowdown×0.1（打滑）
       if (!mnt && this.floorTileT >= 0) {
         const iceSkate = !!eqEarly.iceSkate;
-        if (this.floorTileT === 197) {                     // slippy2（:26234-26240）
+        const ft = this.floorTileT;
+        if (ft === HONEY_FLOOR_ID) {                        // sticky（:26210-26221）
+          maxRun *= 0.25; runAcc *= 0.25; runSlow *= 2;
+          if (this.vx > maxRun) this.vx = maxRun;
+          if (this.vx < -maxRun) this.vx = -maxRun;
+        } else if (ft === ASPHALT_ID) {                     // powerrun（:26222-26224）
+          maxRun *= 3.5; runSlow *= 2;
+        } else if (ft === FROZEN_SLIME_ID) {                // slippy2（:26234-26240）
           runAcc *= 0.6;
           runSlow = 0;
           if (iceSkate) { runAcc *= 3.5; maxRun *= 1.25; }
-        } else if (this.floorTileT === 161 || this.floorTileT === 162 || this.floorTileT === 127
-          || this.floorTileT === 163 || this.floorTileT === 164 || this.floorTileT === 200
-          || this.floorTileT === 659) {                    // slippy（:26244-26255）
+        } else if (ICE_SLIP_IDS.has(ft)) {                  // slippy（:26244-26255）
           runAcc *= 0.7;
           if (iceSkate) { runAcc *= 3.5; maxRun *= 1.25; }
           else runSlow *= 0.1;
@@ -2022,6 +2042,9 @@ export class Player extends Entity {
       }
       if (this.buffs.has(BuffType.Werewolf)) baseJumpTicks += 2;   // :19334 jumpHeight += 2（速度 +0.2 已在 jumpSpd）
       baseJumpSpd += eqJ.jumpSpd;
+      // 蜂蜜块【地面】sticky 跳削弱（Player.cs:19343-19346：jumpHeight/=10、
+      // jumpSpeed/=5——与泡块阻尼（StickyTiles :22650+）不同链，站蜂蜜上跳不高）
+      if (this.floorTileT === HONEY_FLOOR_ID) { baseJumpTicks = Math.max(1, Math.floor(baseJumpTicks / 10)); baseJumpSpd /= 5; }
       const mJumpSpd = mnt2 ? mnt2.jumpSpeed(this.vx) : baseJumpSpd;
       const mJumpTicks = mnt2 ? mnt2.jumpHeight(this.vx) : baseJumpTicks;
       // 本帧生效跳跃速度（湿态液体档覆写；长跳 sustain 钉速用它——原版钉的是当帧
@@ -2409,6 +2432,26 @@ export class Player extends Entity {
       }
       // ---- 攀壁钉鞋（spikedBoots：攀爬爪/鞋钉/忍者大师装备——贴墙缓降+蹬墙跳）----
       this.wallCling = false;
+      // ---- 老鼠坐骑 55 爬墙（WallClimbMovement :21329-21450 非 spikedBoots 支）：
+      //      按向墙方向 + 墙延到脚下一格 → 上 -2/t、下 4/t、松手 0.5/t 缓滑；
+      //      fallStart 重置免坠伤；爬墙期间平台穿透（:27777 flag29 num107!=0）----
+      this.ratClimbVy = null;
+      const ratClimb = this.mount.active && this.mount.type === 55
+        && !this.onGround && this.hitWall && this.inputX !== 0
+        && Math.sign(this.inputX) === Math.sign(this.vx || this.facing);
+      if (ratClimb) {
+        const st = game.world.store;
+        const sideX = this.inputX > 0
+          ? Math.floor((this.x + this.w + 1) / TILE) : Math.floor((this.x - 1) / TILE);
+        const footY = Math.floor((this.y + this.h + 1) / TILE);
+        if (st.inBounds(sideX, footY) && st.isSolid(sideX, footY)) {
+          this.ratClimbVy = this.inputUp ? -2 : this.inputDown ? 4 : 0.5;
+          this.fallStartY = null;
+          this.wallCling = true;
+          game.spawnParticles(this.inputX > 0 ? this.x + this.w : this.x,
+            this.cy, '#B0907A', 1, 0.5, { life: 20 });
+        }
+      }
       if (!this.onGround && eq.spikedBoots && this.hitWall && this.inputX !== 0 && this.vy > 0) {
         this.vy = Math.min(this.vy, 1.5); // 贴墙缓降
         this.fallStartY = null;
@@ -2447,6 +2490,9 @@ export class Player extends Entity {
       this.vy = gd === 1
         ? Math.min(this.vy + grav, MAX_FALL_SPEED)
         : Math.max(this.vy - grav, -MAX_FALL_SPEED);
+      // 老鼠坐骑爬墙速度钉（原版序：重力 :26200s 先行、WallClimb :26436 直写
+      // velocity.Y 覆盖）——上 -2/下 4/松手 0.5 精确落碰撞
+      if (this.ratClimbVy !== null) this.vy = this.ratClimbVy;
       if (this.buffs.slowFall) this.fallStartY = null;
       // 倒置时天花板即地板（TileCollision.hitHead → onGround 近似）
       if (gd === -1) this.onGround = this.hitHead;
@@ -2550,7 +2596,7 @@ export class Player extends Entity {
     }
     if (fallVy < -0.1) this.fallStartY = null; // 重新上升则重置
 
-    this.dropThrough = !!this.inputDown;
+    this.dropThrough = !!this.inputDown || this.ratClimbVy !== null;   // 爬墙期间平台穿透（:27777）
     this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
     this.stepUpHolds = this.inputUp;   // holdsMatching=controlUp：按住↑行走可踏上站台面（桌子/平台/铁砧…）
     // 跑动/下落撞碎裂砖（Player.Update :27733 CheckIceBreak 后紧随——在 StepDown/StepUp
@@ -3884,6 +3930,8 @@ export class Player extends Entity {
   }
   /** 贴墙缓降中（spikedBoots 攀壁） */
   wallCling = false;
+  /** 老鼠坐骑 55 爬墙钉速（WallClimbMovement :21329-21450 非 spiked 支：-2/4/0.5；null=未爬） */
+  ratClimbVy: number | null = null;
   /** 拾取范围扩展（宝藏磁石/金戒指族，px；defaultItemGrabRange=42） */
   get grabRangeBonus(): number {
     return this.equipStats.treasureMagnet ? 94 : this.equipStats.goldRing ? 12 : 0;

@@ -1368,9 +1368,14 @@ export class SkyRenderer {
   ) {
     if (!clouds.length) return;
     const atmo = this.atmoValue(camY);
-    const wr = this.weatherRef;
-    const basis = wr ? Math.max(wr.cloudAlpha, (wr.graveyardVisual ?? 0) * 0.92) : 0;
-    const globalCloudAlpha = basis * atmo;
+    // ProcessCloudAlpha(SkyManager.cs)1:1:num5 = ProcessCloudAlpha() × atmo,
+    // 其中 ProcessCloudAlpha = 1 × Π(激活 CustomSky.GetCloudAlpha())——原版仅
+    // 月总/四塔天空 override 为 1-fade(MoonLordSky.cs:72),默认恒 1,墓园不压云。
+    // ★wr.cloudAlpha 是【雨云浓度】(IsItRaining 门;雨天 UpdateClouds 换风暴云族
+    // 18-21 用),不进此门——曾误接 max(cloudAlpha,墓园×.92) → 晴天云全透明
+    // (2026-08-18 用户实报"好多云不渲染";本仓暂无塔/月总天空 fade,乘积恒 1)
+    const globalCloudAlpha = atmo;
+    void this.weatherRef;
     const sky = hexRGB(this.lastSkyTop, atmo);
     const sorted = [...clouds].sort((a, b) => b.scale - a.scale);   // scale 交换序等价
     ctx.save();
@@ -1405,16 +1410,31 @@ export class SkyRenderer {
   private cloudTexIds = new WeakMap<object, number>();
   private cloudTexIdSeq = 0;
   /** 云朵着色缓存（multiply + destination-in 保形）。
+   *  为什么存在:原版画云 = spritebatch.Draw(tex, …, new Color(r*i,g*i,b*i))
+   *  ——绘制调用自带颜色乘法(shader 一条指令);Canvas 2D 的 drawImage 没有
+   *  颜色参数,等价实现只能预烘焙"贴图×天色"副本。天色因子 = 天空渐变 ×
+   *  (scale×alpha×pass 系数) × 大气态,每朵云不同且随时间连续漂移 → 按
+   *  (纹理,量化色) 键缓存复用。
    *  ★色键量化步进 8(2026-08-18 canvas 出生栈普查:旧键含逐帧漂移的
    *  Math.round(r,g,b) → 每帧每云 miss → ~340 张/秒 createElement('canvas'),
    *  是移动期 IOSurface churn 主源;量化后键只在天色跨桶时换,churn 趋零。
-   *  步进 8 = 通道 3% 内误差,软边低对比云上不可感知) */
+   *  步进 8 = 通道 3% 内误差,软边低对比云上不可感知)
+   *  ★真 LRU + cap 24(2026-08-18 二轮):实测工作集 = 同屏云色桶 ~10-16,
+   *  旧 FIFO+64 会把历史冷桶全留下(cap 打满 64 张常驻画布)。命中重插到
+   *  Map 尾 = 冷桶先走;miss 重染成本 = 3 次 ~200×100 drawImage,即使偶发
+   *  超工作集也无感。总画布上限 = cap 24 + free 池 8 = 32 */
   private cloudTint(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement {
     let tid = this.cloudTexIds.get(tex);
     if (tid === undefined) { tid = ++this.cloudTexIdSeq; this.cloudTexIds.set(tex, tid); }
     const key = `${tid}|${r & ~7},${g & ~7},${b & ~7}`;
     const hit = this.cloudTintCache.get(key);
-    if (hit) return hit;
+    if (hit) {
+      // 真 LRU:命中重插到 Map 尾——旧 FIFO 不认热,历史冷桶赖着不走,曾把 cap
+      // 塞满 64 张常驻画布(实测工作集只有 ~10-16 色桶)
+      this.cloudTintCache.delete(key);
+      this.cloudTintCache.set(key, hit);
+      return hit;
+    }
     // ★画布池复用(2026-08-18):同屏多云色桶并存,纯量化仍 ~55 张/秒;
     // 逐桶弃旧新建 = createElement churn(曾 340 张/秒)。改为 LRU 淘汰的画布
     // 进 free 池,miss 时原位重画——零画布出生,活集恒 ≤64(与 chunk atlas 同哲学)
@@ -1423,6 +1443,10 @@ export class SkyRenderer {
     if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
     const cx = c.getContext('2d')!;
     cx.imageSmoothingEnabled = true;
+    // ★copy 整体替换(review 修,池化复用双坑):①上一轮遗留 globalCompositeOperation
+    //  =destination-in 会让首绘变擦除;②残留旧云像素会透过新贴图透明区串色。
+    //  copy 连状态带像素一次归零;后续 multiply/destination-in 各自显式设定
+    cx.globalCompositeOperation = 'copy';
     cx.drawImage(tex, 0, 0);
     cx.globalCompositeOperation = 'multiply';
     cx.fillStyle = `rgb(${r},${g},${b})`;
@@ -1430,17 +1454,18 @@ export class SkyRenderer {
     cx.globalCompositeOperation = 'destination-in';
     cx.drawImage(tex, 0, 0);
     this.cloudTintCache.set(key, c);
-    if (this.cloudTintCache.size > 64) {
-      const first = this.cloudTintCache.keys().next().value;
+    if (this.cloudTintCache.size > 24) {
+      const first = this.cloudTintCache.keys().next().value;   // Map 头 = 最久未用(LRU)
       if (first !== undefined) {
         const evicted = this.cloudTintCache.get(first);
         this.cloudTintCache.delete(first);
-        if (evicted) this.cloudTintFree.push(evicted);   // 归池复用,不弃
+        // 归池复用,不弃;封顶 8——总画布上限 = 24 cap + 8 池 = 32
+        if (evicted && this.cloudTintFree.length < 8) this.cloudTintFree.push(evicted);
       }
     }
     return c;
   }
-  /** cloudTint 淘汰画布的复用池(容量隐性 = 缓存上限 64) */
+  /** cloudTint 淘汰画布的复用池(封顶 8:miss 优先取池;工作集收缩时 surplus 弃) */
   private cloudTintFree: HTMLCanvasElement[] = [];
 
   // ================= AmbientSky 天空实体（渲染层：群系背景之上、实体之下） =================

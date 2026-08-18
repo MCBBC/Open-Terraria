@@ -343,6 +343,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
+import { ICE_SLIP_IDS, FROZEN_SLIME_ID } from '../entities/Player';
 import { mountFallbackColor, mountLights, fishronWashFactor, MOUNT_SETS } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
@@ -6979,8 +6980,8 @@ export class Renderer {
       // :11432 置位）本引擎无风推模拟不列——普通地面无输入滑行（击退余速）原版走
       // 行走循环，与本门不冲突。曾有门 |vx|>0.3 无输入照走循环 = 冰面滑行腿跑步
       const ft = p.floorTileT;
-      const slideNoInput = (ft === 197 || ft === 161 || ft === 162 || ft === 127
-        || ft === 163 || ft === 164 || ft === 200 || ft === 659 || skates)
+      // 内部 id 集（Player.ICE_SLIP_IDS——★曾用原版 sheet id 对比永不命中=死门）
+      const slideNoInput = (ICE_SLIP_IDS.has(ft) || ft === FROZEN_SLIME_ID || skates)
         && p.inputX === 0;
       if (slideNoInput) {
         legs = 0;

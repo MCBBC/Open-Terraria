@@ -13,6 +13,8 @@ const browser = await puppeteer.launch({
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
+let sentinelWarned = 0;
+page.on('console', (m) => { const t = m.text(); if (t.includes('[canvas哨兵]')) { sentinelWarned++; console.log('[哨兵警告原文]', t.slice(0, 260)); } });
 await page.evaluateOnNewDocument(() => {
   // 聚栈:按第 2-4 帧(跳过 patch 自身)聚合;只记 window 开始计数之后的
   window.__bornStacks = new Map();
@@ -46,4 +48,7 @@ const stacks = await page.evaluate(() => [...window.__bornStacks.entries()]
   .sort((a, b) => b[1] - a[1]).slice(0, 12));
 console.log(`== canvas 出生栈 TOP12(12s 移动期) ==`);
 for (const [st, n] of stacks) console.log(`${String(n).padStart(6)}  ${st.slice(0, 220)}`);
+// 哨兵侧验证:已装 + 静默(正常游玩不误报)+ 速率读数就绪
+const cw = await page.evaluate(() => window.__swCanvasWatch?.() ?? null);
+console.log(`[canvas哨兵] ${JSON.stringify(cw)} 误报=${sentinelWarned}(应 0)`);
 await browser.close();

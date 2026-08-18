@@ -284,6 +284,7 @@ import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles } from '../fx/FlameParticles';
 import { createBrickBoxForWallOfFlesh, startHardmode } from '../world/gen/vanilla/HardmodePass';
 import { ChatInput } from '../ui/ChatInput';
+import { canvasWatchStats } from '../render/CanvasWatch';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -2597,6 +2598,7 @@ export class Game implements GameHooks {
         uiimages: this.atlas?.uiimages.size ?? -1,
         chunkCached: this.chunks.chunks.size,
         chunkPages: this.chunks.pageCount, // atlas 页数(画布张数=2×页数;IOSurface 张数观测量)
+        canvasWatch: canvasWatchStats(),   // canvas 出生率哨兵(泄漏/不合理分配早期警告)
         chunkMax: (this.chunks.constructor as { MAX_CHUNKS?: number }).MAX_CHUNKS,
         dirty: this.chunks.dirtyQueue.length,
         lastFlushMs: +this.chunks.lastFlushMs.toFixed(2),
@@ -3261,7 +3263,8 @@ export class Game implements GameHooks {
   }
 
   /** 销毁：停止循环并移除画布（退出到主菜单时调用） */
-  /** GPU 压力收缩:释放最旧 chunk 至当前上限(画布 width=0 即归还) */
+  /** GPU 压力收缩:释放最旧 chunk 至当前上限 + 回收尾部空页(atlas 化后
+   *  只还 cell 不放页 = 每页 2×4MB 背板滞留,软收缩失去显存释放效力) */
   shrinkChunks(): void {
     const cc = this.chunks; if (!cc) return;
     while (cc.chunks.size > ChunkCache.MAX_CHUNKS) {
@@ -3271,6 +3274,7 @@ export class Game implements GameHooks {
       cc.releasePair(pair); // atlas 化:归还 cell(页共享,不能 width=0 毁页)
       cc.chunks.delete(oldest);
     }
+    cc.trimFreePages();
   }
 
   destroy() {
@@ -9231,8 +9235,43 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       // 原版锤循环（Player.cs:45625-45695）：整砖→半砖→slope1→2→3→4→整砖。
       // 方向感知：右实左空 → 先 slope2；上实下空（天花板模式）→ 先 slope3/4。
-      // 平台族的锤循环（:45394-45440 平台坡面/楼梯）未接入——依赖登记：
-      // 平台 slope 帧的楼梯绘制 + 对应坡面碰撞（平台 slope1-4 的可行走楼梯几何）
+      // ---- 平台族锤循环（Player.cs:45394-45440 1:1）：半砖 → PoundTile 回整；
+      //      整砖 → slope(num) → slope(另一侧) → CanPoundTile 过门 → slope0+半砖。
+      //      num 默认 1；右邻(y-1)/左下邻(y+1) 是平台或"右实左空" → num=2。
+      //      坡面平台的可行走楼梯碰撞在 TileCollision.slopeCollide 平台单向门 ----
+      const hdP = TILE_DEFS[type];
+      if (type !== 0 && hdP?.platform && this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
+        this.lastMineHitTick = this.tickCount;
+        const st = this.world.store;
+        const i = st.idx(tx, ty);
+        if (st.half[i]) {
+          st.setHalfBrick(tx, ty, false);           // :45398-45402 PoundTile（半砖回整）
+        } else {
+          const solidFullP = (x: number, y: number): boolean => {
+            if (!st.inBounds(x, y)) return false;
+            const j = st.idx(x, y);
+            const dj = TILE_DEFS[st.type[j]];
+            return !!st.flags[j] && !!dj && dj.solid && !dj.platform && !st.half[j] && st.slope[j] === 0;
+          };
+          const platAt = (x: number, y: number): boolean =>
+            st.inBounds(x, y) && !!TILE_DEFS[st.type[st.idx(x, y)]]?.platform;
+          let num = 1, other = 2;                   // :45406-45415
+          if (platAt(tx + 1, ty - 1) || platAt(tx - 1, ty + 1)
+            || (solidFullP(tx + 1, ty) && !solidFullP(tx - 1, ty))) { num = 2; other = 1; }
+          const s = st.slope[i];
+          if (s === 0) {
+            st.setSlope(tx, ty, num);               // :45417-45421 SlopeTile(num)
+          } else if (s === num) {
+            st.setSlope(tx, ty, other);             // :45422-45428 SlopeTile(另一侧)
+          } else if (this.canPoundTile(tx, ty)) {
+            st.setSlope(tx, ty, 0);                 // :45429-45438 slope0 + PoundTile → 半砖
+            st.setHalfBrick(tx, ty, true);
+          }
+        }
+        this.sfx.play('tink');
+        this.mining = null;
+        return;
+      }
       const hd = TILE_DEFS[type];
       const poundable = type !== 0 && !!hd && hd.solid && !hd.platform && !hd.framed;
       if (poundable && this.world.store.isSolid(tx, ty) && this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
@@ -9527,6 +9566,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case T.ORE_GOLD: return 5000;
       default: return 1000;
     }
+  }
+
+  /** WorldGen.CanPoundTile（:81434-81457，平台锤循环第三档门）：
+   *  不可砸型集 {10 祭坛/48 箱/137 陷阱/232/380/387/388/476/484} ∪ Boulders
+   *  {138,484,664,665,711-716} → false；上方格 ForbidsSloping（:81480+
+   *  {21,26,77,88,235,237,441,467,468,470,475,488,597}）→ false；
+   *  其余落 CanKillTile（本仓 = tileAboveProtected 上方保护门等价）。 */
+  private canPoundTile(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return false;
+    const sheet = TILE_DEFS[st.get(x, y)]?.vanilla?.sheet ?? -1;
+    const NO_POUND = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484,
+      138, 664, 665, 711, 712, 713, 714, 715, 716]);   // CanPoundTile 型集 ∪ Sets.Boulders
+    if (NO_POUND.has(sheet)) return false;
+    const FORBIDS_SLOPING = new Set([21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597]);
+    const aboveSheet = y > 0 && st.get(x, y - 1) !== 0
+      ? TILE_DEFS[st.get(x, y - 1)]?.vanilla?.sheet ?? -1 : -1;
+    if (FORBIDS_SLOPING.has(aboveSheet)) return false;
+    return !this.tileAboveProtected(x, y);            // CanKillTile 上方保护等价
   }
 
   /** CanKillTile tile-above 保护族（CanKillTile :62276-62315 挖掘门 +

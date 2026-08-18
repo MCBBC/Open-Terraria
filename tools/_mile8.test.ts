@@ -13,6 +13,9 @@ import { RNG } from '../src/core/rng';
 const RUN = process.env.SW_M8 === '1';
 const VG = process.env.SW_M8_VG ?? '/tmp/sw-num4/van_x86_g';  // 名表源
 const G2 = process.env.SW_M8_G2 ?? '/tmp/sw-slp/g';            // 8 通道真值
+// JJJJ 批旁路参：第二种子对拍（默认 9293480/0 保持原行为不变）
+const SEED = process.env.SW_M8_SEED ?? '9293480';
+const EVIL = process.env.SW_M8_EVIL !== undefined ? Number(process.env.SW_M8_EVIL) : 0;
 const W = 4200, H = 1200, N = W * H;
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -158,7 +161,7 @@ function labelOf(file: string, line: number): string {
   try {
     try {
       await generateWorld({
-        width: W, height: H, seedText: '9293480', evil: 0,
+        width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1,
         onWorldPartial: (w, i) => {
           if (!curStore) curStore = w.store as never as typeof curStore;
           const idx = SLOT_END.get(i);

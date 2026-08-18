@@ -264,7 +264,21 @@ function slopeCollide(b: Body, world: World): void {
       if (!st.inBounds(tx, ty)) continue;
       const i = st.idx(tx, ty);
       const slope = st.slope[i];
-      if (slope === 0 || st.half[i] || !st.isSolid(tx, ty)) continue;
+      if (slope === 0 || st.half[i]) continue;
+      // 坡面平台（平台锤楼梯，slope 恒 1/2——3/4 不存在于平台锤循环）：单向门
+      // 1:1（Collision.cs:1851-1866）——上升中不挡（交给 stepUp 爬楼梯）；
+      // 脚带内 [格顶, 格底+1+|vx|] 才接；上行方向档（slope1 且 vx≥0 /
+      // slope2 且 vx≤0 且脚恰在上一行）不接
+      const isPlatSlope = !st.isSolid(tx, ty) && st.isPlatform(tx, ty)
+        && (slope === 1 || slope === 2);
+      if (!st.isSolid(tx, ty) && !isPlatSlope) continue;
+      if (isPlatSlope) {
+        if (b.dropThrough) continue;   // 按住下 = 楼梯下穿（stairFall 可见语义）
+        if (b.vy < 0) continue;
+        if (b.y + b.h < ty * TILE || b.y + b.h - (1 + Math.abs(b.vx)) > ty * TILE + TILE) continue;
+        if (((slope === 1 && b.vx >= 0) || (slope === 2 && b.vx <= 0))
+          && Math.floor((b.y + b.h) / TILE) - 1 === ty) continue;
+      }
       const vx0 = tx * TILE, vy0 = ty * TILE;
       if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) continue;
       // 对角线水平偏移（:1882-1893/1927-1934）：slope1/3 取身体左缘进格深度,
@@ -273,8 +287,15 @@ function slopeCollide(b: Body, world: World): void {
       // 落地门槛不补救 → 角色沉进坡格;钳位后贴合保持到水平重叠结束,送脚到
       // 对角线高端点(=相邻整砖顶),由常规落地无缝接管
       let num4: number;
-      if (slope === 1 || slope === 3) num4 = Math.max(0, b.x - vx0);
-      else num4 = Math.max(0, vx0 + TILE - (b.x + b.w));
+      // 平台坡【不钳 0】（原版 :1935+ num4<0 即跳过 = 高端侧外脱钩，楼梯竖柱
+      // 里侧可走过）；实心坡维持钳 0（坡顶过渡贴合，见函数头注释）
+      if (slope === 1 || slope === 3) num4 = b.x - vx0;
+      else num4 = vx0 + TILE - (b.x + b.w);
+      if (isPlatSlope) {
+        if (num4 < 0) continue;
+      } else {
+        num4 = Math.max(0, num4);
+      }
       if (slope === 3 || slope === 4) {
         // 天花板坡（:1883-1921）：头在斜面上方才贴合下推
         if (b.y <= vy0 + TILE - num4) {

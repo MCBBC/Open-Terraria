@@ -121,7 +121,10 @@ function killDustRollsPer(sheet: number, frameX: number): number {
  *     K(2680,713) 的 3×3 触发整组杀 → (2680,714) 转孤立凸起被砸半砖。
  *  其余 TileFrameImportant 族（容器/画框/49 桌上物/80 仙人掌/藤蔓）生成期在
  *  本 pass 足迹零触发——clean 重放 draws 与 vanilla 精确相等（5,097,254）实证
- *  无 RNG 消耗型级联,不移植（若未来 pass 出现尘掷级联需扩表）。 */
+ *  无 RNG 消耗型级联,不移植（若未来 pass 出现尘掷级联需扩表）。
+ *  LLLL 批（2026-08-18）扩表：CheckSuper 家族 485 蚁狮幼虫（零掷但**非零写**——
+ *  9293480 单种子足迹恰好为零,12345 地下沙漠构型触发 (1856,476) 首分叉,见
+ *  checkSuper 注）。 */
 const CHEST_PROTECT_2X2 = idsByVanillaSheet(21, 467, 441, 468, 88, 470, 475);
 /** WorldGen.destroyObject（Check2x2 再入闸,cs:48408/48564/48799）：
  *  级联击杀期间嵌套 TileFrame 不再发起新 Check2x2（非活性清残基不受闸限）。 */
@@ -135,6 +138,7 @@ function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
   const i = st.idx(x, y);
   if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }  // cs:82078-83
   if (BOULDERS.has(st.type[i])) check2x2(st, rng, x, y);
+  else if (LARVA.has(st.type[i])) checkSuper(st, rng, x, y);      // cs:86437-40 case 485
 }
 
 /** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame,列主序与原版逐条一致。 */
@@ -145,13 +149,15 @@ function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
 }
 
 /** SolidTileAllowBottomSlope（cs:70211-70233）：!InWorld→true;active &&
- *  (tileSolid||tileSolidTop) && !topSlope(平台合法顶帧除外) && !halfBrick。
+ *  (tileSolid||tileSolidTop) && !topSlope(平台合法顶帧除外) && !halfBrick && !inActive()
+ *  （LLL 批补致动腿,cs:70228 原文）。
  *  tileSolidTop≈d.platform（本文件既有近似口径）;PlatformProperTopFrame
  *  （cs:70198,帧宽 18）合法段 [0,7]∪[12,16]∪[25,26]。 */
 function solidTileAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  if (st.wire[i] & 0x20) return false; // cs:70228 !inActive()
   const t = st.type[i];
   const d = TILE_DEFS[t];
   const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
@@ -213,6 +219,84 @@ function check2x2(st: TileStore, rng: RNG, x: number, y: number): void {
   }
 }
 
+/* ── CheckSuper（cs:48117-48406）:LLL 批 2026-08-18 第二种子定罪补链 ──────────
+ * TileFrameImportant 的 CheckSuper 家族 = case 376/443/444/485（cs:86437-40）。
+ * 生成期（本 pass）在场成员仅 **485 蚁狮幼虫**：
+ *  - 376 渔获箱：非 worldgen（钓鱼产物）;443 间歇泉：Traps pass（#76,本 pass 之后）;
+ *  - 444 蜂巢块：仅 notTheBees 特殊种子写入（cs:20445/20494）——常态种子 #53 时点
+ *    均不在场,不建模（备案:特种子移植时按 cs:48220-48256 flag3 上锚+液体门扩展）。
+ * 12345 种子实锤案 (1856,476)：主扫描 K(1857,475) 尾 SquareTileFrame 触到邻格
+ * 485 → CheckSuper 完整性破（2×2 组伴已被大理岩 166 顶替）→ 整组杀 + 残凸被砸
+ * 半砖（P(1857,476)）——JS 无此派发 → 首分叉动作 #34276（vanilla 多两枚零掷动作,
+ * 掷流恒对齐,故 9293480 单种子全绿掩盖至此;12345 地下沙漠蚁狮窝构型首触）。
+ * 485 TileObjectData（TileObjectData.cs:3504-3511）：CopyFrom(Style2x2)+StyleHorizontal
+ * → W=2 H=2 CW16 pad2（CFW=CFH=36,格步 18）;num4=fx/36（横排样式）,num5=0。 */
+const LARVA = idsByVanillaSheet(485);
+/** Main.tileSolid∩tileSolidTop（AnchorValid SolidTile 的 !solidTop 腿;含 Echo 族） */
+const SOLID_AND_TOP = idsByVanillaSheet(19, 239, 380, 427, 435, 436, 437, 438, 439);
+/** Main.tileNoAttach（U 批 DG_NO_ATTACH 同表,BuriedChestsPass PC_NO_ATTACH） */
+const NO_ATTACH = idsByVanillaSheet(
+  3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93,
+  94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437,
+  438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 507, 564, 565, 568, 569,
+  570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707);
+
+/** WorldGen.AnchorValid(tile, AnchorType.SolidTile)（cs:51867-77）：
+ *  nactive（active&&!actuator）&& tileSolid && !tileSolidTop && !tileNoAttach
+ *  && blockType()==0（整砖,半砖/坡不算）。tileSolid 走 vanGenSolidType
+ *  （生成期 Main.tileSolid 口径）。 */
+function anchorSolidTile(st: TileStore, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || (st.wire[i] & 0x20)) return false; // nactive()
+  const t = st.type[i];
+  if (SOLID_AND_TOP.has(t) || NO_ATTACH.has(t)) return false;
+  if (st.half[i] || st.slope[i] !== 0) return false;
+  return vanGenSolidType(t);
+}
+
+/** CheckSuper 485 生成期路径（cs:48117-48406）：2×2 锚定校验 + 整组杀 + 尾 4×4 帧。
+ *  锚点 num2/num3 = 本格减帧偏移（cs:48145-46）;完整性 = 四格 type+帧全等,
+ *  外加 flag4 底部两腿 AnchorValid(SolidTile)（cs:48246-54）。485 生成期无
+ *  物品/NPC/弹幕掷（num13=0;NPC 门被 !isGeneratingOrLoadingWorld 挡）。 */
+function checkSuper(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (destroyObject) return; // cs:48119
+  const i0 = st.idx(x, y);
+  const type = st.type[i0];
+  const num2 = x - Math.floor(st.frameX[i0] / 18) % 2;
+  const num3 = y - Math.floor(st.frameY[i0] / 18) % 2;
+  const num4 = Math.floor(st.frameX[i0] / 36);
+  const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
+  let flag5 = false;
+  for (let i = 0; i < 2; i++) {
+    for (let j = 0; j < 2; j++) {
+      if (!inW(num2 + i, num3 + j)) { flag5 = true; continue; } // GetTileSafely=非活性→失配
+      const q = st.idx(num2 + i, num3 + j);
+      if (!st.flags[q] || st.type[q] !== type
+        || st.frameX[q] !== num4 * 36 + i * 18
+        || st.frameY[q] !== j * 18) flag5 = true;
+    }
+  }
+  let flag10 = true;
+  for (let k = 0; k < 2; k++) {
+    if (!inW(num2 + k, num3 + 2) || !anchorSolidTile(st, num2 + k, num3 + 2)) flag10 = false;
+  }
+  if (!flag10) flag5 = true;
+  if (!flag5) return;
+  destroyObject = true;
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num3; l < num3 + 2; l++) {
+      if (!inW(k, l)) continue;
+      const q = st.idx(k, l);
+      if (st.type[q] === type && st.flags[q]) killTile(st, rng, k, l);
+    }
+  }
+  destroyObject = false;
+  for (let k = num2 - 1; k < num2 + 3; k++) {
+    for (let l = num3 - 1; l < num3 + 3; l++) tileFrame(st, rng, k, l);
+  }
+}
+
 /** 原版 KillTile(i,j) 生成期路径的完整掷骰模型 + 击杀（type=0 清型）。
  *  生成期 noItem=true 无掉落掷;isGeneratingOrLoadingWorld=true 时尘段恒跑
  *  （cs:63747 dust 段在 effectOnly 早退之前,无 netMode 门）。 */
@@ -233,8 +317,11 @@ function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   squareTileFrame(st, rng, x, y);
 }
 
-/** WorldGen.SolidTile(i, j, false) 等价（WorldGen.cs:42370）：
- *  active && tileSolid && !tileSolidTop && !halfBrick && slope==0 —— 半砖/坡面格不算实心。
+/** WorldGen.SolidTile(i, j, false) 等价（WorldGen.cs:70155）：
+ *  active && tileSolid && !tileSolidTop && !halfBrick && slope==0 && **!inActive()**
+ *  —— 半砖/坡面格不算实心;致动（actuator）格也不算实心（cs:70170 尾腿,LLL 批
+ *  12345 定罪:vanilla 地牢穹顶立柱自带致动位 234 格,漏此腿则穹壳角/立柱顶的
+ *  悬顶坡面分支 (3396,158) 等 6 格错写 slope——9293480 无致动柱故单种子全绿掩盖）。
  *  这对 PoundTile（toggle 语义）至关重要：已砸的半砖不会被后续 pass 再"砸回"整砖。
  *  ★tileSolid 走 GenSolid（生成期 Main.tileSolid 翻转表）：SmoothWorld 期间 137
  *  陷阱（cs:16212 起非实心）/190 荧光菇块（cs:16693 起非实心）/484 滚动仙人掌
@@ -245,6 +332,7 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
   // 原版 SolidTile 检查 active()（=flags）：TileRunner 幽灵 tile（有 type 无 flags）
   // 不得当实心——曾致补角分支实体化天空幽灵块成浮空半砖（2583 个）
   if (!st.flags[i]) return false;
+  if (st.wire[i] & 0x20) return false; // cs:70170 !inActive()（致动位=wire bit5）
   const t = st.type[i];
   if (t === 0) return false;
   const d = TILE_DEFS[t];
@@ -309,12 +397,14 @@ function tileEmpty(st: TileStore, x: number, y: number): boolean {
   return !st.flags[st.idx(x, y)];
 }
 
-/** WorldGen.SolidOrSlopedTile（70046）：active && tileSolid && !tileSolidTop（坡面算实心）。
+/** WorldGen.SolidOrSlopedTile（70046）：active && tileSolid && !tileSolidTop（坡面算实心）
+ *  && !inActive()（LLL 批同 solidTile 补致动腿——cs:70050-53 原文即有）。
  *  tileSolid 走 GenSolid（生成期翻转表,同 solidTile） */
 export function solidOrSlopedTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  if (st.wire[i] & 0x20) return false; // cs:70052 !inActive()
   const d = TILE_DEFS[st.type[i]];
   return genSolidType(st.type[i]) && !!d && !d.platform;
 }

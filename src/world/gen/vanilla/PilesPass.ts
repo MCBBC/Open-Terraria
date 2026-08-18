@@ -35,6 +35,12 @@ const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627
 /** TileID.Sets.Boulders（TileID.cs:195）——PlaceSmallPile 的 InvalidTile 门 */
 const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
 
+/** 原版 `Main.tile[x,y].type ==` 直读（不查 active——击杀/放置失败后的残值 type
+ *  仍会命中上游 flag 判定，cs:18989/19103/19177/19254） */
+const rawSheetAt = (st: TileStore, x: number, y: number): number => {
+  if (!st.inBounds(x, y)) return -1;
+  return SHEET[st.type[st.idx(x, y)]] ?? -1;
+};
 const activeAt = (st: TileStore, x: number, y: number): boolean =>
   st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
 /** 活性格的 sheet id（非 active 返回 -1）——原版 Main.tile[x,y].type 直比的 sheet 化 */
@@ -54,7 +60,10 @@ const solidTile2 = (st: TileStore, x: number, y: number): boolean => {
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   const d = TILE_DEFS[st.type[i]];
-  return !!d && genSolidType(st.type[i]) && st.slope[i] === 0 && !st.half[i];
+  // cs:70186：active && tileSolid && slope==0 && !halfBrick && !inActive
+  // （★IIII 批补 !inActive——SolidTile2 含致动位；Dome 致动柱在表面段可达）
+  return !!d && genSolidType(st.type[i]) && st.slope[i] === 0 && !st.half[i]
+    && ((st.wire[i]! >>> 5) & 1) === 0;
 };
 
 /** SolidTileAllowBottomSlope（cs:70211-70235）：active && (tileSolid||tileSolidTop)
@@ -75,6 +84,7 @@ const solidTileAllowBottomSlope = (st: TileStore, x: number, y: number): boolean
 /** PlaceSmallPile（cs:46831）1:1：size0=1×1（fx=style*18, fy=0）；size1=2×1（fx=style*36, fy=18）。
  *  anyLava 拒绝；type==185 时下方 Boulders 拒绝（InvalidTileForPilesOrSpeleothems）。 */
 function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, pileSize: number): boolean {
+  (globalThis as { __swPilesCap?: (x: number, y: number, t: number, s: number, z: number, k: number) => void }).__swPilesCap?.(x, y, 185, pileStyle, pileSize, 1);
   const i = st.idx(x, y);
   if (st.liquid[i] > 0 && st.liquidType[i] === 2) return false;
   if (pileSize === 1) {
@@ -91,25 +101,93 @@ function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, 
   return true;
 }
 
-/** PlaceTile(186/187, style) 的 3×2 对象放置（Tiles_186/187 表 stride 54px）：
- *  占用 (x..x+2, y-1..y) 须净空；下方 3 列须实心（AnchorBottom 语义）。
- *  返回是否放置成功（原版 PlaceTile 后 type==186/187 才算命中）。 */
+/** InvalidTileForPilesOrSpeleothems（cs:39005）：active && TileID.Sets.Boulders。
+ *  （InWorld(x,y,2) 越界 → false=放行） */
+const invalidPiles = (st: TileStore, x: number, y: number): boolean => {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  return st.flags[i] !== 0 && BOULDERS.has(SHEET[st.type[i]] ?? -1);
+};
+
+/** TileID.Sets 家族（Check3x2 186/187 样式门用；TileID.cs:24-34/287） */
+const SET_SNOW = new Set([147]);
+const SET_ICE = new Set([161, 163, 164, 200]);
+const SET_MUD = new Set([59]);
+const SET_SAND = new Set([53, 112, 116, 234]);
+const SET_HARDENED_SAND = new Set([397, 398, 402, 399]);
+const SET_SANDSTONE = new Set([396, 400, 403, 401]);
+
+/** PlaceTile(186/187) → Place3x2(i,j,type,style)（cs:60018 case 路由 + cs:52097-52235）
+ *  + 尾随 SquareTileFrame(i,j)→TileFrame→Check3x2（cs:49199-49400）整链。
+ *  ★IIII 批（2026-08-18）修正三件：
+ *  ① 几何 = **中心锚**（列 x-1..x+1 × 行 y-1..y，frameX 基 54*style 按列 +0/+18/+36，
+ *    顶行 frameY=0 底行 18）——曾左对齐 x..x+2 整体右移一列（#77 首差 (2761,95)
+ *    T0>186/T186>0 对称位移族根因）；
+ *  ② 锚定 = SolidTile2（cs:70178：active && 生成期 tileSolid && slope==0 && !half
+ *    && !inActive）+ InvalidTileForPilesOrSpeleothems（cs:52149：186/187 底座
+ *    Boulders 拒）——曾用 SolidTileAllowBottomSlope（那是 Check3x2 的复核谓词，
+ *    放宽了底坡/平台，错源=把 cs:49284/49300 误当放置门）；
+ *  ③ 放置后 Check3x2 复核不通过 → destroyObject 击杀（底行 3 格 KillTile →
+ *    重帧 7×3 → 顶行经 TileFrame 再杀，净效果 6 格全灭，cs:49217-49246）。
+ *    样式族门：186 styles 26-31 须 Snow∪Ice∪{162,224}、32-34 须 Mud∪{70}；
+ *    187 styles 0-5 须 Mud∪{60,226}、6-8 须 {57,58,75,76}、29-34 须 沙/硬化沙/
+ *    砂岩族（cs:49317-49365）。击杀态 = active=false+half=false+帧 -1（Uint16
+ *    存 0——帧不入八通道）、type 保留残值（cs:63935 KillTile 不清 type →
+ *    上游 `tile.type==186||187` 命中判定照过 → flag=true 消耗该次 attempt，
+ *    本函数返回 true 即此语义）。
+ *    KillTile 尘掷：DDDD 实测 185/186=0 掷/格（MakeTileDust 表），187 同族按 0
+ *    掷处理（未实测，备案）。 */
 function placePile3x2(st: TileStore, x: number, y: number, type: number, style: number): boolean {
-  for (let k = 0; k < 3; k++) {
-    for (let l = -1; l <= 0; l++) {
-      if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
+  (globalThis as { __swPilesCap?: (x: number, y: number, t: number, s: number, z: number, k: number) => void }).__swPilesCap?.(x, y, SHEET[type] ?? -1, style, 0, 0);
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:52102 边距门
+  let ok = true;
+  for (let c = x - 1; c <= x + 1; c++) {
+    for (let r = y - 1; r <= y; r++) {
+      const i = st.idx(c, r);
+      if (st.flags[i]) ok = false;                                     // 占用净空（cs:52117）
     }
-    // ★锚定门补齐：原版走 PlaceTile → SolidTileAllowBottomSlope（cs:49284/49300 →
-    //   cs:70211）——active && (solid||platform) && !half && !顶坡。曾只查
-    //   TILE_DEFS?.solid：半砖/顶坡格上照放（3×2 悬脚），且漏 pass 头非实心覆写
-    if (!solidTileAllowBottomSlope(st, x + k, y + 1)) return false;
+    if ((type === 186 || type === 187) && invalidPiles(st, c, y + 1)) ok = false;  // cs:52149
+    if (!solidTile2(st, c, y + 1)) ok = false;                         // cs:52156
   }
-  for (let k = 0; k < 3; k++) {
-    for (let l = -1; l <= 0; l++) {
-      st.setTileSilent(x + k, y + l, type, style * 54 + k * 18, (l + 1) * 18);
+  if (!ok) return false;
+  const base = style * 54;
+  for (let c = x - 1; c <= x + 1; c++) {
+    for (let r = y - 1; r <= y; r++) {
+      const i = st.idx(c, r);
+      st.type[i] = type; st.flags[i] = 1;
+      st.frameX[i] = base + (c - (x - 1)) * 18;
+      st.frameY[i] = r === y - 1 ? 0 : 18;
+      // 原版 Place3x2 只写 active/frameX/frameY/type（cs:52200-52234）——不清坡/半砖/液体
     }
   }
-  return true;
+  // Check3x2 复核（cs:49199+；布局恒新写对齐，仅锚/样式族门可达）
+  let bad = false;
+  for (let c = x - 1; c <= x + 1; c++) {
+    if (!solidTileAllowBottomSlope(st, c, y + 1) || invalidPiles(st, c, y + 1)) { bad = true; continue; }
+    const b = sheetAt(st, c, y + 1);
+    if (b < 0) continue;
+    if (type === 186) {
+      if (style >= 26 && style <= 31 && !SET_SNOW.has(b) && !SET_ICE.has(b) && b !== 162 && b !== 224) bad = true;
+      else if (style >= 32 && style <= 34 && !SET_MUD.has(b) && b !== 70) bad = true;
+    } else if (type === 187) {
+      if (style <= 5 && !SET_MUD.has(b) && b !== 60 && b !== 226) bad = true;
+      else if (style >= 6 && style <= 8 && b !== 57 && b !== 58 && b !== 75 && b !== 76) bad = true;
+      else if (style >= 29 && style <= 34
+        && !SET_SAND.has(b) && !SET_HARDENED_SAND.has(b) && !SET_SANDSTONE.has(b)) bad = true;
+    }
+  }
+  if (bad) {
+    // destroyObject 击杀链：底行 3 格 KillTile → 重帧后顶行连带（净 6 格失活）
+    for (let c = x - 1; c <= x + 1; c++) {
+      for (let r = y - 1; r <= y; r++) {
+        const i = st.idx(c, r);
+        st.flags[i] = 0; st.half[i] = 0;
+        st.frameX[i] = 0; st.frameY[i] = 0;    // 原版 -1；帧不入八通道
+        // type 保留（cs:63935 KillTile 不清 type——上游命中判定读残值）
+      }
+    }
+  }
+  return true;   // 写入即命中（含被 Check3x2 击杀——原版读残值 type==186||187 同为 true）
 }
 
 /** Piles pass 主体（cs:18900-19599） */
@@ -190,9 +268,9 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (WALL_DUNGEON.has(wall) && rng.int(0, 2) !== 0) {
               flag = true;                    // 地牢墙 2/3 直接视为命中
             } else {
-              let placed = false;
-              if (!shimmerAt(x, y)) placed = placePile3x2(st, x, y, pick(type), style);
-              if (placed) flag = true;
+              if (!shimmerAt(x, y)) placePile3x2(st, x, y, pick(type), style);
+              // cs:18989：残值 type==186||187 即命中（shimmer 拒置后残值同样可命中）
+              if (rawSheetAt(st, x, y) === 186 || rawSheetAt(st, x, y) === 187) flag = true;
               if (flag && type === 186 && style <= 7) scatter(x, y);
             }
           }
@@ -222,8 +300,8 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (y > h - 300 || WALL_DUNGEON.has(wall) || below === 30 || below === 19) style = rng.int(0, 6);
             if ((below === 57 || below === 58) && rng.int(0, 2) < 2) { type = 187; style = rng.int(6, 8); }
             if (below === 147 || below === 161 || below === 162) style = rng.int(26, 31);
-            const placed = placePile3x2(st, x, y, pick(type), style);
-            if (placed) flag = true;
+            placePile3x2(st, x, y, pick(type), style);
+            if (rawSheetAt(st, x, y) === 186 || rawSheetAt(st, x, y) === 187) flag = true;  // cs:19103
             if (flag && type === 186 && style <= 7) scatter(x, y);
           }
         }
@@ -257,8 +335,8 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (below === 2 || (activeAt(st, x - 1, y + 1) && sheetAt(st, x - 1, y + 1) === 2)
               || (activeAt(st, x + 1, y + 1) && sheetAt(st, x + 1, y + 1) === 2)) { type = 187; style = rng.int(14, 16); }
             if (below === 151 || below === 274) { type = 186; style = rng.int(0, 6); }
-            const placed = style >= 0 ? placePile3x2(st, x, y, pick(type), style) : false;
-            if (placed) flag = true;          // 原版：tile.type == num23 才命中
+            if (style >= 0) placePile3x2(st, x, y, pick(type), style);
+            if (rawSheetAt(st, x, y) === type) flag = true;   // cs:19177：残值 type == num23
           }
         }
       }
@@ -289,8 +367,8 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (below === 2 || (activeAt(st, x - 1, y + 1) && sheetAt(st, x - 1, y + 1) === 2)
               || (activeAt(st, x + 1, y + 1) && sheetAt(st, x + 1, y + 1) === 2)) { type = 187; style = rng.int(14, 16); }
             if (below === 151 || below === 274) { type = 186; style = rng.int(0, 6); }
-            const placed = style >= 0 ? placePile3x2(st, x, y, pick(type), style) : false;
-            if (placed) flag = true;
+            if (style >= 0) placePile3x2(st, x, y, pick(type), style);
+            if (rawSheetAt(st, x, y) === type) flag = true;   // cs:19254
             if (flag && style <= 7) scatter(x, y);
           }
         }
@@ -445,12 +523,14 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
               if (size === 0) style = rng.int(12, 27);
               if (size === 1) style = rng.int(12, 18);
             }
-            // cs:19560 特例：水 255 + 沙 53 + 无墙 → 放行（本分支前半为 ! 条件）
-            const special = st.liquid[st.idx(x, y)] === 255 && below === 53 && wall === 0;
-            const bad = (!special) && (WALL_DUNGEON.has(wall) || below === 30 || below === 19
+            // cs:19583 门：`(liquid!=255 || type!=53 || wall!=0) && !wallDungeon && type!=30 && …`
+            // ——水 255+沙 53+无墙（special）使首析取为假 → **整门为假 → 不放**。
+            //  ★IIII 批勘误：曾把 special 写成"放行"（方向反了，JS 多放 T0>185 族）
+            const specialFail = st.liquid[st.idx(x, y)] === 255 && below === 53 && wall === 0;
+            const bad = specialFail || WALL_DUNGEON.has(wall) || below === 30 || below === 19
               || below === 41 || below === 43 || below === 44 || below === 481 || below === 482
               || below === 483 || below === 45 || below === 46 || below === 47 || below === 175
-              || below === 176 || below === 177 || below === 25 || below === 203 || TILE_DUNGEON.has(below));
+              || below === 176 || below === 177 || below === 25 || below === 203 || TILE_DUNGEON.has(below);
             if (!bad) flag = placeSmallPile(st, x, y, style, size);
           }
         }

@@ -24,6 +24,12 @@ import { VuiDemoState } from './vui/states/VuiDemoState';
 import { createFlow } from './mainFlow';
 import type { FlowHandle } from './mainFlow';
 import { downloadDebugReport } from './debug/DebugReport';
+import { installCanvasWatch } from './render/CanvasWatch';
+
+// canvas 分配哨兵(2026-08-18):出生率 >20/s 持续 10s → console.warn 带出生栈
+// (cloudTint 340 张/秒事故的常驻防线;?cwatch=0 静默)。须在 UI/游戏模块
+// 构造前装——模块加载期的单例画布不计入,可接受(一次性常量非泄漏面)
+installCanvasWatch();
 
 const root = document.getElementById('game-root')!;
 const ui = new UI(root);

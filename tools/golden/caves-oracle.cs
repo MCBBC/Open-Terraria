@@ -15369,6 +15369,17 @@ Replay(); // ▶MicroBiomes cs:21785
     bool MbSolidAt(int x, int y) => QQInW(x, y) && act[y * W + x] != 0 && MbStaticSolid(typ[y * W + x]);   // JS solidAt（无 half/slope 门）
     bool MbSolidTopAt(int x, int y) => QQInW(x, y) && MB_PLATFORM.Contains(typ[y * W + x]);                // JS solidTopAt（不看 act）
     bool MbActiveAt(int x, int y) => QQInW(x, y) && act[y * W + x] != 0;
+    // ★HHHH（CCCC 分型落地）：Conditions.IsSolid（Conditions.cs:85=InWorld(10)∧active∧
+    //   生成期 tileSolid，无 half/slope/inact 排除）/ SolidOrSlopedTile（:70046=vanSolid
+    //   ∧!platform∧!inact）/ SolidTile 严式（+!half∧!slope）——搜索/扫描/入口各归各位。
+    bool MbCondIsSolid(int x, int y) => x >= 10 && y >= 10 && x < W - 10 && y < H - 10
+        && act[y * W + x] != 0 && JVS(typ[y * W + x]);
+    bool MbSolidOrSloped(int x, int y) => QQInW(x, y) && act[y * W + x] != 0
+        && JVS(typ[y * W + x]) && !FC_PLAT.Contains(typ[y * W + x]);
+    var MB_BOULDER_TILES = new HashSet<ushort> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };   // TileID.Sets.Boulders
+    bool MbEntryStrict(int x, int y) => QQInW(x, y) && act[y * W + x] != 0
+        && JVS(typ[y * W + x]) && !FC_PLAT.Contains(typ[y * W + x])
+        && half[y * W + x] == 0 && slope[y * W + x] == 0;
     var mbWire = new byte[W * H];   // 本 pass 自有 wire 通道（红=bit0 致动=bit4；既有 wire 省略——备案②）
     const byte MB_RED = 1, MB_ACTUATOR = 16;
     // WorldGenRange：scW(v)=(int)trunc(w/4200*v)；areaScale=w*h/5040000
@@ -15771,7 +15782,7 @@ Replay(); // ▶MicroBiomes cs:21785
                 for (int dx = -half2; dx <= half2; dx++)
                 {
                     total++;
-                    if (MbSolidAt(ox + dx, oy + dy)) solid++;
+                    if (MbSolidOrSloped(ox + dx, oy + dy)) solid++;   // HHHH: Modifiers.IsSolid=SolidOrSlopedTile
                 }
             }
             if (solid < total - 5) return false;
@@ -15831,12 +15842,19 @@ Replay(); // ▶MicroBiomes cs:21785
                         int px = ox + dx + bi, py = oy + dy + bj;
                         long key = (long)py * W + px;
                         if (dataSet.Add(key)) dataKeys.Add(key);
+                        // ★HHHH（CCCC 2）：链序=Blotches.Output(data)→Offset(0,-2)→OnlyTiles(53)
+                        //   →SetTile(397+全清)→OnlyWalls(0)→PlaceWall——Offset 对其后所有动作生效,
+                        //   OnlyTiles 是整链门（非沙格墙也不写）
                         if (QQInW(px, py - 2))
                         {
                             int ui = (py - 2) * W + px;
-                            if (act[ui] != 0 && typ[ui] == 53) typ[ui] = 397;
+                            if (act[ui] != 0 && typ[ui] == 53)
+                            {
+                                typ[ui] = 397; act[ui] = 1; frX[ui] = 0; frY[ui] = 0;
+                                slope[ui] = 0; half[ui] = 0; wal[ui] = 0; liq[ui] = 0; liqT[ui] = 0;
+                                wal[ui] = (ushort)wallType;
+                            }
                         }
-                        if (QQInW(px, py) && wal[py * W + px] == 0) wal[py * W + px] = (ushort)wallType;
                     }
             }
         }
@@ -15845,7 +15863,8 @@ Replay(); // ▶MicroBiomes cs:21785
             int px = (int)(key % W), py = (int)(key / W);
             if (!QQInW(px, py)) continue;
             int i = py * W + px;
-            act[i] = 0; liq[i] = 0; liqT[i] = 0;
+            // HHHH（CCCC 3）：ClearTile=ClearSlope+active(false)（+致动位生成期恒 0）
+            act[i] = 0; slope[i] = 0; half[i] = 0; liq[i] = 0; liqT[i] = 0;
             if (wal[i] == 0) wal[i] = (ushort)wallType;
         }
         int groundY = oy;
@@ -15904,7 +15923,7 @@ Replay(); // ▶MicroBiomes cs:21785
     // ═══ 4. Mining Explosives（cs:21951-21975）═══
     bool MbPlaceMiningExplosives(int ox, int oy)
     {
-        if (MbSolidAt(ox, oy)) return false;
+        if (MbEntryStrict(ox, oy)) return false;   // HHHH: JS solidTileStrict（严式五门）
         if (QQInW(ox, oy))
         {
             ushort wl = wal[oy * W + ox];
@@ -15915,14 +15934,16 @@ Replay(); // ▶MicroBiomes cs:21785
         double dir = r.NextDouble() * 2 - 1;
         int x = ox, y = oy;
         {
+            // ★HHHH（CCCC 4a）：Searches.Right/Left 的 i 从 0 起——**含起点格**（Searches.cs:15）
             int step = dir > 0 ? 1 : -1;
             bool found = false;
-            for (int k = 0; k < 40 && !found; k++) { x += step; if (MbSolidAt(x, y)) found = true; }
+            for (int k = 0; k < 40 && !found; k++) { if (MbCondIsSolid(ox + k * step, oy)) { x = ox + k * step; found = true; } }
             if (!found) return false;
         }
         {
+            // ★HHHH：Searches.Down 含起点（Searches.cs:55）——起点=Right 结果恒实心→恒原格
             bool found = false;
-            for (int k = 0; k < 80 && !found; k++) { y++; if (MbSolidAt(x, y)) found = true; }
+            for (int k = 0; k < 80 && !found; k++) { if (MbCondIsSolid(x, y + k)) { y = y + k; found = true; } }
             if (!found) return false;
         }
         // ShapeRunner(10,20,(dir,1)) + Blotches(2,0.3) 矿石地板
@@ -15942,6 +15963,9 @@ Replay(); // ▶MicroBiomes cs:21785
                     for (int j = by0; j < by1; j++)
                     {
                         if (Math.Abs(i - px) + Math.Abs(j - py) >= strength * 0.5 * (1 + (int)r.Next(-10, 11) * 0.015)) continue;
+                        // ★HHH（CCCC 4b）：ShapeRunner.Output(shapeData) 只加 **raw 格**——
+                        //   Blotches 扩张格只喂 Scanner（计数），不进矿石地板覆盖集
+                        { long key0 = (long)j * W + i; if (dataSet.Add(key0)) dataKeys.Add(key0); }
                         r.NextDouble();
                         var pts = new List<(int qx, int qy)>();
                         if (r.NextDouble() < 0.3)
@@ -15952,10 +15976,8 @@ Replay(); // ▶MicroBiomes cs:21785
                         else pts.Add((i, j));
                         foreach (var (qx, qy) in pts)
                         {
-                            long key = (long)qy * W + qx;
-                            if (dataSet.Add(key)) dataKeys.Add(key);
                             total++;
-                            if (MbSolidAt(qx, qy)) solid++;
+                            if (MbSolidOrSloped(qx, qy)) solid++;   // HHHH: Modifiers.IsSolid=SolidOrSlopedTile
                         }
                     }
                 int n8 = (int)Math.Truncate(strength / 50) + 1;
@@ -15974,11 +15996,15 @@ Replay(); // ▶MicroBiomes cs:21785
             int qx = (int)(key % W), qy = (int)(key / W);
             if (!QQInW(qx, qy)) continue;
             int i = qy * W + qx;
-            typ[i] = barType; act[i] = 1;
+            // HHHH（CCCC 4c）：SetTile(type,setSelfFrames)=Clear(~(Wiring|Actuator))——
+            //   连墙带液带帧带坡全清后写 type
+            typ[i] = barType; act[i] = 1; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
+            wal[i] = 0; liq[i] = 0; liqT[i] = 0;
         }
         // Circle(5)+Blotches(2,0.3) 挖房（中心=(x-trunc(-dir*5), y-5)）
         {
             int cx = x - (int)Math.Truncate(-dir * 5), cy = y - 5;
+            if (mbTrace != 0) Console.Error.WriteLine($"MBCARVE c=({cx},{cy}) anchor=({x},{y})");
             const int cr = 5; int rr = (cr + 1) * (cr + 1);
             for (int dy = -cr; dy <= cr; dy++)
             {
@@ -15994,13 +16020,14 @@ Replay(); // ▶MicroBiomes cs:21785
                     }
                     else pts.Add((cx + dx, cy + dy));
                     foreach (var (qx, qy) in pts)
-                        if (QQInW(qx, qy)) act[qy * W + qx] = 0;      // ClearTile（幽灵保留）
+                        if (QQInW(qx, qy))                             // HHHH（CCCC 3）：ClearTile=ClearSlope+active(false)（致动位生成期恒 0）
+                        { act[qy * W + qx] = 0; slope[qy * W + qx] = 0; half[qy * W + qx] = 0; }
                 }
             }
         }
         int MbFindDown(int fx, int fy)
         {
-            for (int k = 0; k < 10; k++) if (MbSolidAt(fx, fy + k)) return fy + k;
+            for (int k = 0; k < 10; k++) if (MbCondIsSolid(fx, fy + k)) return fy + k;   // HHHH: IsSolid 谓词
             return -1;
         }
         int barX = x - (dir > 0 ? 3 : -3);
@@ -16011,15 +16038,41 @@ Replay(); // ▶MicroBiomes cs:21785
         if (barGround < 0 || detGround < 0) return false;
         barGround--;
         int detTop = detGround - 1;
+        // ★HHH（CCCC 6/7 镜像）：起爆器下方 3 列整平（ClearTile+非 SolidOrSloped 补石+
+        //   slope/half 双分支复位）+ PlaceTile(141) 真门（前奏 Clear+SolidTile2 地板+
+        //   非巨石族+锚格活性快照）——曾"空格即写"。
         for (int i = -1; i <= 1; i++)
         {
             int px = detX + i, py = detTop;
-            if (QQInW(px, py)) act[py * W + px] = 0;
+            if (QQInW(px, py)) { act[py * W + px] = 0; slope[py * W + px] = 0; half[py * W + px] = 0; }
             int below = detTop + 1;
-            if (QQInW(px, below) && !MbSolidAt(px, below)) { typ[below * W + px] = 1; act[below * W + px] = 1; }
+            if (QQInW(px, below))
+            {
+                int bi = below * W + px;
+                if (!MbSolidOrSloped(px, below)) { typ[bi] = 1; act[bi] = 1; }
+                slope[bi] = 0; half[bi] = 0;
+            }
         }
-        if (QQInW(barX, barGround) && act[barGround * W + barX] == 0)
-            MbSetTile(barX, barGround, 141, 0, 0);
+        {
+            if (QQInW(barX, barGround))
+            {
+                int ai = barGround * W + barX;
+                bool wasActive = act[ai] != 0;
+                typ[ai] = 0; act[ai] = 0; frX[ai] = 0; frY[ai] = 0; slope[ai] = 0; half[ai] = 0;
+                bool gOK = false;
+                if (QQInW(barX, barGround + 1))
+                {
+                    int gi = (barGround + 1) * W + barX;
+                    ushort gt = typ[gi];
+                    gOK = act[gi] != 0 && JVS(gt) && !FC_PLAT.Contains(gt)
+                        && slope[gi] == 0 && half[gi] == 0 && !MB_BOULDER_TILES.Contains(gt);
+                }
+                if (gOK && !wasActive)
+                {
+                    typ[ai] = 141; act[ai] = 1; frX[ai] = 0; frY[ai] = 0;
+                }
+            }
+        }
         for (int dx = 0; dx < 2; dx++)
             for (int dy = 0; dy < 2; dy++)
                 MbSetTile(detX + dx, detTop + dy, 411, dx * 18, dy * 18);
@@ -16041,6 +16094,7 @@ Replay(); // ▶MicroBiomes cs:21785
             if (++tries > 3000) break;
             int ox = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
             int oy = (int)r.Next(rockLayer, H - 200);
+            if (mbTrace != 0) Console.Error.WriteLine($"MBTRY ({ox},{oy})");
             if (MbPlaceMiningExplosives(ox, oy)) placed++;
         }
         if (mbTrace != 0) Console.WriteLine($"MB mines placed={placed}/{trapCount}");

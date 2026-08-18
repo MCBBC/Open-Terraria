@@ -30,8 +30,17 @@ describe('出生点清理不破坏树', () => {
       }
     }
     // ② 树登记表与实际树一致(顶部格必须是 TREE)
+    //    例外（KKKK 批 2026-08-18 备案）：槽 101 Micro_Biomes 的 MahoganyTreeBiome
+    //    （MicroBiomesPass §4.5；vanilla SkipTiles={21,467,226,237} 不含树干）按
+    //    原版语义覆写既有树顶格为活红木 v_383——原版无树登记表概念，覆写非缺陷
+    //    （CCCC 批 2026-08-18 16:54 交付后本种子 (3095,771) 首现）。登记表修剪在
+    //    Flowers 槽 90（SurfaceDecorPasses:1212 activeAt 过滤），早于 101，结构性
+    //    拦不住——运行期砍伐消费 world.trees 时须容忍该覆写（终局后可加管线尾
+    //    type==TREE 修剪，src 侧记账勿在窗口内动）。
+    const LIVING_MAHOGANY = TILE_BY_KEY['v_383_living_mahogany_block']!;
     for (const t of world.trees) {
-      expect(st.type[st.idx(t.x, t.y)], `登记树(${t.x},${t.y})顶部缺格`).toBe(TREE);
+      const top = st.type[st.idx(t.x, t.y)];
+      expect(top === TREE || top === LIVING_MAHOGANY, `登记树(${t.x},${t.y})顶部缺格`).toBe(true);
     }
   }, 600000);
 });

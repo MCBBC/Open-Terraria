@@ -372,8 +372,12 @@ export function currentTileFrameSeed(): bigint {
 }
 
 // ---- 颜色乘子预染缓存（multiply×fill 逐像素染 Flame 单元；静态色缓存命中、
-//      Disco 按 32 档量化限幅，超 512 条整体清空防无界增长）----
+//      Disco 按 32 档量化限幅，超 512 条逐条淘汰防无界增长）----
 const _tintCache = new Map<string, HTMLCanvasElement>();
+/** 贴图实例 id:★ImageBitmap 无 .src(旧键裸读恒 undefined → imgId 退化为宽度,
+ *  同宽 Flame_N 跨表串色;bitmap 迁移时代 WeakMap 方案同款) */
+const _flameImgIds = new WeakMap<object, number>();
+let _flameImgIdSeq = 0;
 function tintedFlameCell(
   img: CanvasImageSource & { width: number; height: number },
   sx: number, sy: number, sw: number, sh: number,
@@ -381,9 +385,13 @@ function tintedFlameCell(
 ): HTMLCanvasElement | null {
   // ★键必须含贴图身份(Flame_N)：各族源矩形同格同 tint 时会跨表命中——
   //   例如同为 (0,0,18,18)+(100,100,100) 的 default 族,后画的会拿到先画族的
-  //   颜色(水蜡烛拿到暖色焰=蓝+红叠加观感)。src 属性各 Flame_N 唯一。
-  const imgId = (img as { src?: string }).src ?? String((img as { width: number }).width);
-  const key = `${imgId},${sx},${sy},${sw},${sh},${r},${g},${b}`;
+  //   颜色(水蜡烛拿到暖色焰=蓝+红叠加观感)。
+  // ★tint 量化步进 8 进键(2026-08-18 canvas 哨兵实抓:火光 tint 随光照连续
+  //   漂移 → 每档新键 → 用户真机 37-63 张/秒 createElement 持续 30 窗;
+  //   量化后键只在跨桶时换。烘焙用桶内首个精确色,火焰本身闪烁,3% 内无感)
+  let imgId = _flameImgIds.get(img);
+  if (imgId === undefined) { imgId = ++_flameImgIdSeq; _flameImgIds.set(img, imgId); }
+  const key = `${imgId},${sx},${sy},${sw},${sh},${r & ~7},${g & ~7},${b & ~7}`;
   let c = _tintCache.get(key);
   if (c) return c;
   if (typeof document === 'undefined') return null;
@@ -399,7 +407,11 @@ function tintedFlameCell(
   // multiply 会把透明像素染成实色——按原 alpha 裁回
   cc.globalCompositeOperation = 'destination-in';
   cc.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-  if (_tintCache.size > 512) _tintCache.clear();
+  if (_tintCache.size > 512) {
+    // 逐条淘汰最旧(Map 插入序;旧版整表 clear() = 下帧全量重烘焙雪崩)
+    const first = _tintCache.keys().next().value;
+    if (first !== undefined) _tintCache.delete(first);
+  }
   _tintCache.set(key, c);
   return c;
 }
