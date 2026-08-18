@@ -8,7 +8,6 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { placeDoorClosed } from '../../Door';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { placeFurn } from './DungeonPass';
 import { flipGenSolid } from './GenSolid';
@@ -215,7 +214,10 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
     // 反向(行优先)
-    l = l0; rr = r0; t = t0; b = b0;
+    // ★cs:33800-33805 num34..num37(l/rr/t/b)在正向遍历前**只声明一次**——反向遍
+    //   (cs:33865 起)从正向的终态游走值续走,无任何重置。曾 `l=l0;rr=r0;t=t0;b=b0`
+    //   重置回初始边界 → 反向挖腔区域系统性偏移(挖宽/挖深几格)——神庙壳 226>0×803
+    //   结构债的根因(房间/连线/掷流全对但挖腔几何偏)。GGG 批 2026-08-18。
     for (let y = b0; y > t0; y--) {
       for (let x = r0; x > l0; x--) {
         if (rng.int(0, 19) === 0) t += rng.int(-1, 1);
@@ -403,10 +405,31 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
   // 原版 makeTemple 尾部（1456 WorldGen.cs:34176）：PlaceTile(i1, num81=jy, 10, style 11)。
-  // PlaceTile case 10（:59867）条件 B：j+1/j+2 空 + j+3 实心 → PlaceDoor(i, j+1)（:31938，
-  // 门占 j..j+2）。此处 jy=地板-4：门顶=jy、门底=jy+2，站地板 jy+3。
-  // 此前放 jy-2 = 整门悬空 2 格（标注实测）
-  placeDoorClosed(st, i1, jy, 11);
+  // PlaceTile case 10（cs:59867-59906）双支：上支 j-1/j-2 净空+j-3 实心 → PlaceDoor
+  // (i, j-1)；否则下支 j+1/j+2 净空+j+3 实心 → PlaceDoor(i, j+1)（门占 j'..j'+2 相对
+  // j±1）。此处 jy=地板-4：下支门顶=jy、门底=jy+2，站地板 jy+3。
+  // PlaceDoor（cs:31938-31960）：门框（i,j'-2）实心门 + SolidTile(i,j'+2)，过门后
+  // 三格逐格 frameX=54*(style/36)+Next(3)*18——**每格 1 掷共 3 掷**（门贴图三变体）。
+  // ★曾 placeDoorClosed 固定 variant=0 零掷 → 祭坛兜底流位 +3 偏（兜底锚 3505→3504
+  // 整列左移）+ 木刺段流错位——GGG 批 2026-08-18（226>0 结构债之外的掷流残差根因）。
+  {
+    const actI = (x: number, y: number): boolean => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
+    const solI = (x: number, y: number): boolean => {
+      if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) return false;
+      return !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;
+    };
+    let dj = -1;   // PlaceDoor 中行 j'
+    if (!actI(i1, jy - 1) && !actI(i1, jy - 2) && actI(i1, jy - 3) && solI(i1, jy - 3)) dj = jy - 1;
+    else if (!actI(i1, jy + 1) && !actI(i1, jy + 2) && actI(i1, jy + 3) && solI(i1, jy + 3)) dj = jy + 1;
+    if (dj >= 0 && actI(i1, dj - 2) && solI(i1, dj - 2) && solidTileST(st, i1, dj + 2)) {
+      const DOOR_TILE = TILE_BY_KEY['door_closed']!;
+      const fx0 = 54 * Math.floor(11 / 36);
+      const fy0 = 54 * (11 % 36);
+      for (let k = -1; k <= 1; k++) {
+        st.setTileSilent(i1, dj + k, DOOR_TILE, fx0 + rng.nextInt(3) * 18, fy0 + (k + 1) * 18);
+      }
+    }
+  }
   tmMark('door');
   // ---- templeCleaner 两遍(L17579-17588)----
   const cleaner = (x: number, y: number) => {
@@ -540,7 +563,11 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
         let placed = false;                                // flag6
         if (rng.int(0, 1) === 0) {
           // 竖直走线（cs:34335-34390）：排除框查门 10 **与** 祭坛 237（cs:34349-34358）
-          const d = rng.int(0, 1) === 0 ? 1 : -1;          // num118
+          // ★cs:34335 `int num118 = 1; if (genRand.Next(2) == 0) num118 = -1;`——
+          //   Next(2)==0 取 **-1**（与房间链方向三元同款，L 批已修那处）。曾
+          //   `===0 ? 1 : -1` 写反 → 走线向上找墙而非向下——木刺线整体贴错墙
+          //   （226>232/232>226 全量翻转对的根因）。GGG 批 2026-08-18。
+          const d = rng.int(0, 1) === 0 ? -1 : 1;          // num118
           while (st.inBounds(px, py) && !st.flags[st.idx(px, py)]) py += d;
           py -= d;
           let flip = rng.int(0, 1);                        // num119
@@ -575,7 +602,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
         } else {
           // 水平走线（cs:34393-34476）：排除框只查门 10,不查祭坛——原版不对称,
           // 勿"补全"（cs:34417-34423）
-          const d = rng.int(0, 1) === 0 ? 1 : -1;          // num125
+          const d = rng.int(0, 1) === 0 ? -1 : 1;          // num125（cs:34397 同上取反语义）
           while (st.inBounds(px, py) && !st.flags[st.idx(px, py)]) px += d;
           px -= d;
           let flip = rng.int(0, 1);                        // num126

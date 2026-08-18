@@ -419,6 +419,8 @@ export class LiquidSim {
     }
     this.checking[i] = 1;
     this.skip[i] = 0;
+    // AddWater L1182-1185：kill/delay 显式清零（1456 反编译实证——池对象复用但
+    // 三字段全写，勿改成残留语义）
     this.liquids[this.numLiquid] = { x, y, kill: 0, delay: 0 };
     this.numLiquid++;
     // 1456 AddWater 尾部（L1196-1211）：岩浆/水冲毁可死亡方块（火把/植物等 KillTile）。
@@ -1016,8 +1018,11 @@ export class LiquidSim {
             const nx = x + dx, ny = y + dy;
             if (nx < 1 || ny < 1 || nx >= st.w - 1 || ny >= st.h - 1) continue;
             const ni = this.idx(nx, ny);
+            // cs:1547 `if (!tile5.active()) continue`——只烧活性格。本仓非活性
+            // 幽灵格 type 残留（如被杀植物的 60 丛林草），若只挡 type===0 会把
+            // 幽灵格复活成活性泥并连坐液体路径（#49 T0>59×234/Y2>0×211 根因）
+            if (!(st.flags[ni] & 1) || st.type[ni] === 0) continue;
             const t = st.type[ni];
-            if (t === 0) continue;
             if (this.lavaBurnAirIds.has(t)) st.setTile(nx, ny, 0);
             else if (this.lavaBurnDirtIds.has(t)) st.setTile(nx, ny, this.mudId); // cs:1562 type=59（泥，非泥土0——曾误写 dirt）
           }

@@ -183,6 +183,11 @@ export function runCaveWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
  *  石 208-215 按深度），上格为空气则洪泛（≤1000，非实心），全腔不触碰无效集
  *  且 >50 格 → OuterOutline（含内腔+8 邻外环）铺墙（跳过墙 87/86/244） */
 export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：WallVariety 入口快照（债时间线用）
+  {
+    const g0 = globalThis as { __swCwvCap?: (gs: GenState, st: TileStore) => void };
+    try { g0.__swCwvCap?.(gs, st); } catch { /* probe */ }
+  }
   const num2 = Math.floor(300 * (st.w * st.h) / 5040000);
   let remaining = num2;
   let budget = 100000;
@@ -255,12 +260,13 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
         const qi = st.idx(qx, qy);
         if (cells.has(qi)) continue;
         // IsNotSolid：active 且 SolidOrSlopedTile → Fail（不入形、不计数）
-        // ★solid 走 GenSolid：本 pass 时点 226/162 已被 FragileIce（cs:16782-83）翻
-        //   非实心,原版 SolidOrSlopedTile 读可变 tileSolid 同样视其为非实心
+        // ★SolidOrSlopedTile（cs:70046）= active && tileSolid && !tileSolidTop &&
+        //   !inActive —— **不含 halfBrick/slope**（名字带 Sloped 但不查坡位）！曾加
+        //   `half||slope!==0` 门 → 斜面密集腔被误判实心截断洪泛 → 斑误放（9293480
+        //   债线 056 出口 wal=78678 的自因主源）。solid 走 GenSolid：本 pass 时点
+        //   226/162 已被 FragileIce（cs:16782-83）翻非实心,原版读可变 tileSolid 同值。
         const qd = TILE_DEFS[st.type[qi]];
-        const solidOrSloped = !!st.flags[qi] && qd
-          && (genSolidType(st.type[qi]) || !!st.half[qi] || st.slope[qi] !== 0);
-        if (st.flags[qi] && solidOrSloped) continue;
+        if (st.flags[qi] && qd && genSolidType(st.type[qi]) && !qd.platform) continue;
         cells.add(qi);
         quota--;
         // IsTouching(8 向，cs:16828-16833)：触碰无效集 → foundInvalidTile
@@ -276,6 +282,8 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
         if (qy - 1 >= 1) queue.push([qx, qy - 1]);
       }
       if (quota <= 0 && queue.length) complete = false; // Gen 返回 = 队列耗尽
+      const __cwvLog = (globalThis as { __swCwvLog?: (s: string) => void }).__swCwvLog;
+      if (__cwvLog) __cwvLog(`SPOT ${px},${py} cells=${cells.size} quota=${quota} qleft=${queue.length} complete=${complete} invalid=${invalid} wall=${wallType}`);
       if (cells.size > 50 && complete && !invalid) {
         // OuterOutline(useDiagonals+useInterior) 1:1：逐 datum 先 interior 后 8 邻环
         // （POINT_OFFSETS 顺序），环点在 shape 内则跳过（cs:ModShapes.OuterOutline:50-62）。

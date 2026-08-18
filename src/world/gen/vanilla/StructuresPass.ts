@@ -493,6 +493,11 @@ function cloudLake(st: TileStore, rng: RNG, ci: number, cj: number): void {
 /** 生命水晶(pass 57,cs:16863-16904):area×2e-5 次;每次拒绝采样上限 10000
  *  (skyblock=10,本仓库非 skyblock)。★掷序 Y 先 X 后(cs:16886/16891)。 */
 export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：LifeCrystals 入口快照（债时间线用）
+  {
+    const g0 = globalThis as { __swLcCap?: (gs: GenState, st: TileStore) => void };
+    try { g0.__swLcCap?.(gs, st); } catch { /* probe */ }
+  }
   const { w, h } = st;
   const yMin = Math.floor((gs.worldSurface * 2 + gs.rockLevel) / 3);
   const count = Math.floor(w * h * 0.00002);
@@ -905,6 +910,11 @@ function placePotRow(st: TileStore, rng: RNG, x: number, y: number, style: numbe
  *  worldSurface-1，首个活性格若是丛林草 60 → 其上两格灌满水（liquidType 0=水）。
  *  原版整 pass 零 RNG——旧实现误作"挖湿隧道"（digTunnel 消耗大量 RNG 且语义完全不符）。 */
 export function runWetJunglePass(st: TileStore, _rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：WetJungle 入口快照（债时间线用）
+  {
+    const g0 = globalThis as { __swWjCap?: (gs: GenState, st: TileStore) => void };
+    try { g0.__swWjCap?.(gs, st); } catch { /* probe */ }
+  }
   const h = st.h;
   for (let i = 0; i < st.w; i++) {
     for (let j = Math.floor(gs.worldSurfaceLow); j < gs.worldSurface - 1; j++) {

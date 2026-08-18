@@ -109,6 +109,9 @@ function tuneOceanDepth(rng: RNG, count: number, depth: number, floridaStyle: bo
  *  全部**与宽度无关**:220/260/275/50/30——曾按 w/4200 缩放(中/大世界水线/边缘
  *  带/深度曲线全偏) */
 export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：Beaches 入口快照（债时间线用）
+  const g0 = globalThis as { __swBchCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swBchCap?.(gs, st); } catch { /* probe */ }
   const w = st.w;
   const oceanWaterMin = 220, oceanWaterMax = 260, forcedJungleLen = 275, minSand = 50;
   const edgeWall = 30;

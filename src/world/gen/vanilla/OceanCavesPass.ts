@@ -172,6 +172,9 @@ function oceanCave(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
 
 /** OceanCaves pass(cs:15228):地牢侧海洋 1/3 概率一条;返回宝藏点集(UnderwaterChests 消费) */
 export function runOceanCavesPass(st: TileStore, rng: RNG, gs: GenState): Array<{ x: number; y: number }> {
+  // 一次性探针钩（同 WebsPass 模式）：OceanCaves 入口快照（债时间线用）
+  const g0 = globalThis as { __swOcCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swOcCap?.(gs, st); } catch { /* probe */ }
   const treasures: Array<{ x: number; y: number }> = [];
   const { w } = st;
   for (const side of [0, 1] as const) {

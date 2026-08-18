@@ -524,7 +524,11 @@ export function runDungeonPass(
     const hrn = (n: number): number => hr.nextInt(n);
     const hrd = (): number => hr.nextDouble();
     const num2 = Math.trunc(15.0) + hri(0, 14);                 // 15 + Next(15)
-    let vx = hri(-10, 10) * 0.1, vy = hri(-10, 10) * 0.1;
+    // ★III 终清（2026-08-18）：LegacyDungeonRoom.cs:135-137 原文是 float 算术
+    //   `(double)((float)Next(-10,11) * 0.1f)`——曾按 double 转录，速度累计 ~1e-8 漂移
+    //   在 (int)(px±…) 盒边上翻转 → R0 内 (445,567)/(425,586) 残砖（#32 布局债）。
+    //   Math.fround(k*fround(0.1)) = C# (float)(k*0.1f)（双精度积精确、单次舍入同 f32 乘）。
+    let vx = Math.fround(hri(-10, 10) * Math.fround(0.1)), vy = Math.fround(hri(-10, 10) * Math.fround(0.1));
     if (vx === 0 && vy === 0) {
       if (hrn(2) === 0) vx = hrn(2) !== 0 ? 1 : -1;
       else vy = hrn(2) !== 0 ? 1 : -1;
@@ -563,8 +567,9 @@ export function runDungeonPass(
         for (let y = iy0; y < iy1; y++) chWall(st.idx(x, y), wall, true);
       }
       px += vx; py += vy;
-      vx = Math.max(-1, Math.min(1, vx + hri(-10, 10) * 0.05));
-      vy = Math.max(-1, Math.min(1, vy + hri(-10, 10) * 0.05));
+      // ★III 终清：:152-155 原文 float——`(double)((float)Next(-10,11) * 0.05f)`
+      vx = Math.max(-1, Math.min(1, vx + Math.fround(hri(-10, 10) * Math.fround(0.05))));
+      vy = Math.max(-1, Math.min(1, vy + Math.fround(hri(-10, 10) * Math.fround(0.05))));
     }
     rm.ex = px; rm.ey = py; rm.strength = Math.trunc(num5);
     // ★2026-08-16 审计：LegacyDungeonRoom **不回写** generatingDungeonPositionX/Y
@@ -686,10 +691,12 @@ export function runDungeonPass(
         if (hrn(3) === 0) vy = hrn(2) === 0 ? -0.20000000298023224 : 0.20000000298023224;
       } else if (py >= num6) {
         num2 = -1; nnum++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
-        if (hrn(2) === 0) vx = hrn(2) === 0 ? hri(20, 49) * 0.01 : -hri(20, 49) * 0.01;
+        // ★III 终清：:574-578 原文 float——`(double)((float)Next(20,50) * 0.01f)`
+        if (hrn(2) === 0) vx = hrn(2) === 0 ? Math.fround(hri(20, 49) * Math.fround(0.01)) : -Math.fround(hri(20, 49) * Math.fround(0.01));
       } else if (py < 200.0) {
         num2 = 1; nnum++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
-        if (hrn(2) === 0) vx = hrn(2) === 0 ? hri(20, 49) * 0.01 : -hri(20, 49) * 0.01;
+        // ★III 终清：:594-598 原文 float（曾 double 转录致 H6 带边 -1 格→(417,748) 残砖）
+        if (hrn(2) === 0) vx = hrn(2) === 0 ? Math.fround(hri(20, 49) * Math.fround(0.01)) : -Math.fround(hri(20, 49) * Math.fround(0.01));
       } else if (f13) {
         num2 = 1; nnum++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
         if (hrd() <= 0.66) {
@@ -810,8 +817,10 @@ export function runDungeonPass(
     if (px > w - 400) dir = -1;
     else if (px < 400) dir = 1;
     let vx = dir + 0.0, vy = -1.0;
-    if (hrn(3) !== 0) vx *= 1 + hri(0, 199) * 0.01;
-    else if (hrn(3) === 0) vx *= hri(50, 75) * 0.01;
+    // ★III 终清：LegacyEntranceDungeonHall.cs:150/154 原文 float——
+    //   `val2.X *= 1f + (float)Next(0,200)*0.01f` / `*= (float)Next(50,76)*0.01f`
+    if (hrn(3) !== 0) vx *= Math.fround(1 + Math.fround(hri(0, 199) * Math.fround(0.01)));
+    else if (hrn(3) === 0) vx *= Math.fround(hri(50, 75) * Math.fround(0.01));
     else if (hrn(6) === 0) vy *= 2.0;
     if (skewed) {
       if (posX < w / 2 && vx < 0 && vx < -0.5) vx = 0.5;
@@ -2009,7 +2018,10 @@ export function runDungeonPass(
         const ti = st.idx(x, y);
         const f6 = st.type[ti] !== crack;
         if (!f6) continue;
-        if (flooded) { st.liquidType[ti] = 0; st.liquid[ti] = 255; }
+        // ★III 批 2026-08-18：flooded pit trap 是 lava(false)=**水**（DungeonPitTrap
+        //   cs:161 liquid=255 + lava(false)）——本仓 +1 编码水=1，曾写 0 → 032 Lt=946
+        //   格差（x86 lty 0=水 ↔ JS 0=无类型）。
+        if (flooded) { st.liquidType[ti] = 1; st.liquid[ti] = 255; }
         else { st.liquidType[ti] = 0; st.liquid[ti] = 0; }
         const a = x === ix - width && actAt(x - 1, y) !== 0;
         const b = x === ix + width && actAt(x + 1, y) !== 0;
@@ -2680,9 +2692,15 @@ export function runDungeonPass(
 
   // ============ DungeonGlobalBookshelves（:23-208）============
   function dgBookshelves(): void {
+    // __bsEv 探针（GGG 批 2026-08-18）：书架事件表 [k0,k1,x,y,n10,flag3,n7,dist]
+    // （k0=迭代起 dgMainRolls 内部计数——主流真位需 +TileRunner 侧滞后，见
+    // tools/_gggreplay.test.ts 对拍注记）——B 尾 -3 掷定位用，常态零开销。
+    const bsEvG = (globalThis as { __bsEv?: unknown[][] }).__bsEv;
     let ncount = 0, num3 = 0;
     while (num3 < Math.trunc(w / 20)) {
       ncount++;
+      let k0 = 0;
+      if (bsEvG) k0 = dgMainRolls;
       let x = ri(bounds.L, bounds.R - 1);
       let y = ri(bounds.T, bounds.B - 1);
       let flag = true;
@@ -2713,7 +2731,23 @@ export function runDungeonPass(
             k = Math.abs(x - k);
             const flag3 = rn(2) === 0;
             if (k > 5) {
-              let n10 = ri(1, 3);
+              // ★III 批 2026-08-18：styleForWall 四件套（DungeonGlobalBookshelves.cs:96-110）。
+              //   普通世界样式表=[Default]（SetupDungeonGenVarVariables 仅 dualDungeons
+              //   追加特殊样式；GetCurrentDungeonStyle 的 PlatformItemTypes=new int[0]
+              //   ——x86 IL 实证）⇒ GetStyleForWall(wall)=wall==brickWallType→Default：
+              //   flag2=true、GetPlatformStyle 恒 -1 **不掷**、minmax=(1,4)；其余墙→null：
+              //   四件套整体跳过。本种子锚墙 {96/0:null, 9:Default} 均零掷差——B 段 -3 掷
+              //   真根因=pre-pit 布局债（见 caves-oracle.cs 头注 III 批取证）。
+              let flag2 = true;
+              let num9 = -1, min = 1, max = 4;
+              if (wallAt(x, y) === wall) {
+                flag2 = true;                       // Default.Style == 0（!flag2 时 flag3 已在上文置 false——特殊房间才可能）
+                num9 = -1;                           // PlatformItemTypes 空 → -1，不掷
+                // GetBookshelfMinMaxSizes 基类实现 → (1, 4)（LivingWood 覆写 (3,7) 仅 dual/remix）
+              }
+              void num9;
+              let n10 = ri(min, max - 1);            // ri 闭区间 ↔ Next(min, max)
+              if (bsEvG) bsEvG.push([k0, dgMainRolls, num8, y, n10, flag3, n7, k]);
               while (n10 > 0) {
                 chTile(st.idx(x, y), PLATFORM, false);
                 // ★2026-08-16 审计：书架平台样式 = shelfStyles 按墙变体三档
@@ -2733,7 +2767,9 @@ export function runDungeonPass(
               ncount = 0; num3++;
               if (!flag3 && rn(2) === 0) {
                 x = num8; y--;
-                const n12v = rn(4) === 0 ? 49 : 13;
+                // flag2 门（cs:148-196）：true → Next(4) 选 13/49；false → 直放 13（少 1 掷）。
+                //   普通世界 flag2 恒 true；dual/remix 特殊房间（LivingWood 等）才有 false 支。
+                const n12v = flag2 ? (rn(4) === 0 ? 49 : 13) : 13;
                 // v_13_placed_bottles（sheet 13）——曾误写 'v_13_bottles'（不存在的键）：
                 // undefined 被 Uint16Array 吞成 type 0，且下行 frameX 掷骰恒不触发（流欠耗）。
                 placeSimple(x, y, n12v === 49 ? WATER_CANDLE : TILE_BY_KEY['v_13_placed_bottles']!);
@@ -3314,7 +3350,8 @@ export function runDungeonPass(
     for (let i = x - 1; i < x + 1; i++) for (let j = y - 1; j < y + 1; j++) dgWr(i, j, t);
     return true;
   }
-  // Place3x3（cs:53549 354/355 分支A）
+  // Place3x3（cs:53549 354/355 分支A；★53650 起 = PlaceSunflower，勿混——
+  // 53683 的 9 颗 Next(3) 掷属向日葵帧族，Place3x3 本体零掷，GGG 批 2026-08-18 勘误）
   function place3x3D(x: number, y: number, t: number): boolean {
     for (let i = x - 1; i < x + 2; i++) {
       for (let j = y - 2; j < y + 1; j++) if (!dgClr(i, j)) return false;

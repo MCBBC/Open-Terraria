@@ -56,6 +56,9 @@ export function runShiniesPass(st: TileStore, rng: RNG, gs: GenState): void {
 /** 宝石 pass 36（cs:6754-6814）：六宝石独立数量（w×[0.3,0.1,0.25,0.45,0.5,0.05]×0.2），
  *  拒绝采样到石头上再 TileRunner；type 63-68 = 紫晶/黄玉/蓝宝/绿宝/红宝/钻石。 */
 export function runGemsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：Gems 入口快照（债时间线用）
+  const g0 = globalThis as { __swGemsCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swGemsCap?.(gs, st); } catch { /* probe */ }
   // ★pass 头 tileSolid 翻转（cs:15114 `Main.tileSolid[484] = false`）——DesertBiome
   //   头（cs:12537）已翻过,此处为原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
   flipGenSolid([484], false);

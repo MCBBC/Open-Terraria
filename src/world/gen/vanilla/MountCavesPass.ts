@@ -178,7 +178,10 @@ function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       }
       if (num4 <= 0) break;
     }
-    if (num4 <= 0) break; // 终止后不再消耗速度/半径骰（原版 while 条件）
+    // ★1456 cs:80775-80790：for 循环后**无条件** val+=val2 + 速度 2 骰 + clamp,
+    //   再由 while(num4>0) 判定退出——终止步（自然减尽或地牢命中）的速度 2 骰
+    //   照消费。曾加 while 尾 `if(num4<=0) break` 跳过 → 每层递归少 2 骰，
+    //   MCOpenings 后续洞掷骰流错位（9293480 债线 033 出口 typ=18641 的主根因）。
     px += vx; py += vy;
     vx += rng.int(-10, 10) * 0.05;
     vy += rng.int(-10, 10) * 0.05;
@@ -193,6 +196,9 @@ function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
 
 /** pass 34 Mountain Caves（L6628-6639）：每座山丘 开口+蜿蜒 */
 export function runMountainCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：MCOpenings 入口快照（债时间线用）
+  const g0 = globalThis as { __swMcCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swMcCap?.(gs, st); } catch { /* probe */ }
   for (let n = 0; n < gs.numMCaves; n++) {
     const x = gs.mCaveX[n], y = gs.mCaveY[n];
     caveOpenater(st, rng, x, y);

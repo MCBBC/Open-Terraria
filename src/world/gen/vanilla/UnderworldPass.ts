@@ -22,6 +22,9 @@ const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;
 const ASH_GRASS = TILE_BY_KEY['v_633_ash_grass_block']!;
 
 export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：Underworld 入口快照（债时间线用）
+  const g0 = globalThis as { __swUwCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swUwCap?.(gs, st); } catch { /* probe */ }
   const { w, h } = st;
   // ① 边界 + 灰烬带 + 界下清空
   let boundary = h - rng.int(150, 189);               // Next(150,190)

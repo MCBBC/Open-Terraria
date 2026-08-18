@@ -60,6 +60,7 @@ import { runBeehivePass } from '../src/world/gen/vanilla/HiveSpiderPass';
 import { runPilesPass } from '../src/world/gen/vanilla/PilesPass';
 import { runTreePass } from '../src/world/gen/vanilla/TreePass';
 import { runCactusPalmTreesAndCoralPass } from '../src/world/gen/vanilla/StructuresPass';
+import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
 import { LiquidSim } from '../src/world/liquid/LiquidSim';
 import { snapshotGenSolid, flipGenSolid } from '../src/world/gen/vanilla/GenSolid';
 import type { World } from '../src/world/World';
@@ -280,6 +281,8 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   settlePart2ChainSync(world, st, gs, rng); snap('settle2');
   replay(); // ▶CactusPalmTreesAndCoral cs:21115
   runCactusPalmTreesAndCoralPass(st, rng, gs); snap('cactus');
+  replay(); // ▶MicroBiomes cs:21785（QQ #101，oracle 末尾追加区同序）
+  runMicroBiomesPass(st, rng, gs, world.chests); snap('microbiomes');
   return { grids: out, walls: outWall };
 }
 
@@ -371,7 +374,7 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         // 金标中不存在=预期红，见 chainCheckpoints 尾注）
         'statues', 'cavewalls', 'undergroundjungletrees', 'quickcleanup',
         // QQ 批追加（2026-08-18，oracle 末尾追加区同序——预期红同上）
-        'beehives', 'piles', 'trees', 'settle2', 'cactus'];
+        'beehives', 'piles', 'trees', 'settle2', 'cactus', 'microbiomes'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

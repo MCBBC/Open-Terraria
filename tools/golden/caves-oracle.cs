@@ -3541,7 +3541,12 @@ Replay(); // ▶pass 头重播：Underworld cs:13697
 //   genRand（KillTile 尘掷族走 LiquidSim 私有 mulberry32/生成期零掷，接线零流影响）。
 //   SettleWaterAt 落水越 waterLine → 岩浆（Liquid.cs:177-190）；地牢墙豁免本时点可证
 //   无操作（地牢墙族 dump027=0，Dungeon pass 32 在其后）——不接线（与 JS 同口径）。
-//   AddHellHouses 两侧均为独立槽（本链外）——检查点链一致。
+//   ★III 批 2026-08-18 修正：AddHellHouses 并非独立槽——已在 pass 尾补录（本段
+//     UwAddHellHouses，按 x86 已验证的 JS HellFortPass.ts 转录）→ underworld 检查点
+//     四哈希恢复与 x86 dump028 全等（c951b5ed/de058e3c/344470c1/927df5f5），
+//     corruption/lakes/slush 顺带全等（#28-31 裁决力恢复）。金标再生窗口须同步：
+//     caves-checkpoint.test.ts 的 underworld snap 前补 runHellFortPass（JS 链侧）。
+
 {
     int uwNum = H - (int)r.Next(150, 190);
     int uwNum2 = H - (int)r.Next(40, 70);
@@ -3839,6 +3844,752 @@ Replay(); // ▶pass 头重播：Underworld cs:13697
         }
     }
 }
+
+// ================= AddHellHouses（cs:13893 → 32299-32843）+ HellFort（cs:32850-33331）=================
+// ★III 批 2026-08-18 补录：旧注「两侧均为独立槽（本链外）」与 x86 事实不符——passchain_x86
+//   P|28 Underworld 的掷流哈希 8f1bfb12 含 AddHellHouses 全部掷骰（JS 侧 HellFortPass.ts
+//   已 1:1 且 dump028 八通道全绿）。本段按 JS HellFortPass.ts（x86 已验证终态）转录：
+//   塔环(成功才跳格)/恶魔火把环/家具环(13 选 1)/挂画环(四型墙挂分派)/旗灯环。
+//   掷形：int(a,b)闭区间↔Next(a,b+1)；nextInt(n)↔Next(n)；nextIntRange(16,22)↔Next(16,22)。
+void UwPlaceDoorHF(int x, int j, int style)
+{
+    if (x < 5 || j - 2 < 5 || j + 2 >= H - 5) return;                      // 近似 inBounds(j±2)
+    int iUp = (j - 2) * W + x;
+    if (act[iUp] == 0 || !SOLID.Contains(typ[iUp])) return;
+    int iDn = (j + 2) * W + x;
+    if (act[iDn] == 0 || !SOLID.Contains(typ[iDn])) return;                // SolidTile(x,j+2)（HellFort 期无半砖/坡）
+    int num3 = 54 * (style / 36), num4 = 54 * (style % 36);
+    for (int k = -1; k <= 1; k++)
+    {
+        int ti = (j + k) * W + x;
+        act[ti] = 1; typ[ti] = 10;
+        frX[ti] = (ushort)(num3 + r.Next(3) * 18);                          // ★每格 1 掷（PlaceDoor cs:31938）
+        frY[ti] = (ushort)(num4 + (k + 1) * 18);
+    }
+}
+bool UwPlaceTileDoorHF(int x, int j, int style)
+{
+    bool inact(int a, int b) => a >= 0 && b >= 0 && a < W && b < H && act[b * W + a] == 0;
+    bool actSolid(int a, int b) => a >= 0 && b >= 0 && a < W && b < H && act[b * W + a] != 0 && SOLID.Contains(typ[b * W + a]);
+    if (inact(x, j - 1) && inact(x, j - 2) && actSolid(x, j - 3)) { UwPlaceDoorHF(x, j - 1, style); return true; }
+    if (x < 0 || j + 1 >= H || j + 2 >= H || j + 3 >= H) return false;
+    if (act[(j + 1) * W + x] != 0 || act[(j + 2) * W + x] != 0 || !actSolid(x, j + 3)) return false;
+    UwPlaceDoorHF(x, j + 1, style);
+    return true;
+}
+bool UwSolidTileHF(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    ushort t = typ[i];
+    return SOLID.Contains(t) && !(t == 19 || (t >= 427 && t <= 439)) && half[i] == 0 && slope[i] == 0;
+}
+bool UwSolidTile2HF(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    ushort t = typ[i];
+    return SOLID.Contains(t) && !(t == 19 || (t >= 427 && t <= 439));
+}
+void UwSet(int x, int y, int t, int fx, int fy)
+{
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    int i = y * W + x;
+    act[i] = 1; typ[i] = (ushort)t; frX[i] = (ushort)fx; frY[i] = (ushort)fy;
+}
+bool UwPlace3x2HF(int x, int y, int t, int style)
+{
+    if (x < 5 || y < 5 || x > W - 5 || y > H - 5) return false;
+    bool ok = true;
+    for (int i = x - 1; i < x + 2; i++)
+    {
+        for (int j = y - 1; j < y + 1; j++) if (act[j * W + i] != 0) ok = false;
+        if (!UwSolidTile2HF(i, y + 1)) ok = false;
+    }
+    if (!ok) return false;
+    int fx = 54 * style;
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 2; j++) UwSet(x - 1 + i, y - 1 + j, t, fx + i * 18, j * 18);
+    return true;
+}
+bool UwPlace2x1HF(int x, int y, int t, int style)
+{
+    if (act[y * W + x] != 0 || act[y * W + x + 1] != 0) return false;
+    if (!UwSolidTile2HF(x, y + 1) || !UwSolidTile2HF(x + 1, y + 1)) return false;
+    int fx = 36 * style;
+    UwSet(x, y, t, fx, 0); UwSet(x + 1, y, t, fx + 18, 0);
+    return true;
+}
+bool UwPlace1x2HF(int x, int y, int t, int style)
+{
+    if (!UwSolidTile2HF(x, y + 1) || act[(y - 1) * W + x] != 0) return false;
+    int fy = style * 40;
+    UwSet(x, y - 1, t, 0, fy); UwSet(x, y, t, 0, fy + 18);
+    return true;
+}
+bool UwPlace1x2TopHF(int x, int y, int t, int style)
+{
+    int up = (y - 1) * W + x;
+    if (act[up] == 0 || !SOLID.Contains(typ[up]) || typ[up] == 19 || (typ[up] >= 427 && typ[up] <= 439)) return false;
+    if (act[(y + 1) * W + x] != 0) return false;
+    int fy = style * 36;
+    UwSet(x, y, t, 0, fy); UwSet(x, y + 1, t, 0, fy + 18);
+    return true;
+}
+bool UwPlace1xXHF(int x, int y, int t, int style)
+{
+    int hgt = 3; bool ok = true;
+    for (int j = y - hgt + 1; j <= y; j++) { int i = j * W + x; if (act[i] != 0 || liq[i] > 0) ok = false; }
+    if (!ok || !UwSolidTile2HF(x, y + 1)) return false;
+    for (int j = 0; j < hgt; j++) UwSet(x, y - hgt + 1 + j, t, 0, j * 18 + hgt * (style * 18));
+    return true;
+}
+bool UwPlace2x2HF(int x, int y, int t, int style)
+{
+    if (x < 5 || y < 5 || x > W - 5 || y > H - 5) return false;
+    for (int i = x - 1; i < x + 1; i++)
+    {
+        for (int j = y - 1; j < y + 1; j++) if (act[j * W + i] != 0) return false;
+        int bi = (y + 1) * W + i;
+        if (act[bi] == 0) return false;
+        ushort bt = typ[bi];
+        bool tableFam = bt == 14 || bt == 555 || bt == 18 || bt == 87 || bt == 88 || bt == 89 || bt == 101 || bt == 577;
+        if (!UwSolidTile2HF(i, y + 1) && !tableFam) return false;
+    }
+    for (int k = 0; k < 2; k++) for (int l = 0; l < 2; l++) UwSet(x - 1 + k, y - 1 + l, t, k * 18, style * 36 + l * 18);
+    return true;
+}
+bool UwPlace2xXHF(int x, int y, int t, int style, int hgt)
+{
+    int fx = style * 36, fy0 = 0;
+    if (t == 105) { int wrap = style / 55; fx -= 1980 * wrap; fy0 += 54 * wrap; }
+    bool ok = true;
+    for (int j = y - hgt + 1; j <= y; j++) { if (act[j * W + x] != 0 || act[j * W + x + 1] != 0) ok = false; }
+    if (!ok || !UwSolidTile2HF(x, y + 1) || !UwSolidTile2HF(x + 1, y + 1)) return false;
+    for (int j = 0; j < hgt; j++) { UwSet(x, y - hgt + 1 + j, t, fx, fy0 + j * 18); UwSet(x + 1, y - hgt + 1 + j, t, fx + 18, fy0 + j * 18); }
+    return true;
+}
+bool UwPlace3x4HF(int x, int y, int t, int style)
+{
+    if (x < 5 || y < 5 || x > W - 5 || y > H - 5) return false;
+    bool ok = true;
+    for (int i = x - 1; i < x + 2; i++)
+    {
+        for (int j = y - 3; j < y + 1; j++) if (act[j * W + i] != 0) ok = false;
+        if (!UwSolidTile2HF(i, y + 1)) ok = false;
+    }
+    if (!ok) return false;
+    int fx = style * 54;
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 4; j++) UwSet(x - 1 + i, y - 3 + j, t, fx + i * 18, j * 18);
+    return true;
+}
+bool UwPlaceChandHF(int x, int y, int t, int style)
+{
+    bool ok = true;
+    for (int i = x - 1; i < x + 2; i++) for (int j = y; j < y + 3; j++) if (act[j * W + i] != 0) ok = false;
+    int up = (y - 1) * W + x;
+    if (act[up] == 0 || !SOLID.Contains(typ[up]) || typ[up] == 19 || (typ[up] >= 427 && typ[up] <= 439)) ok = false;
+    if (!ok) return false;
+    int fx0 = (style / 36) * 108; int fy0 = style * 54;
+    if (fx0 >= 108) fy0 -= 54 * (fx0 / 108) * 37;
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) UwSet(x - 1 + i, y + j, t, fx0 + i * 18, fy0 + j * 18);
+    return true;
+}
+bool UwPlaceBannerHF(int x, int y, int t, int style)
+{
+    int fx = style * 18, fy0 = 0, s3 = style;
+    while (s3 >= 111) { s3 -= 111; fx -= 1998; fy0 += 54; }
+    int up = (y - 1) * W + x;
+    if (act[up] == 0 || !SOLID.Contains(typ[up]) || typ[up] == 19 || (typ[up] >= 427 && typ[up] <= 439)) return false;
+    if (act[y * W + x] != 0 || act[(y + 1) * W + x] != 0 || act[(y + 2) * W + x] != 0) return false;
+    for (int j = 0; j < 3; j++) UwSet(x, y + j, t, fx, fy0 + j * 18);
+    return true;
+}
+bool UwPlace4x2HF(int x, int y, int t, int dir, int style)
+{
+    if (x < 5 || y < 5 || x > W - 5 || y > H - 5) return false;
+    for (int a = x - 1; a < x + 3; a++)
+    {
+        for (int b = y - 1; b < y + 1; b++) if (act[b * W + a] != 0) return false;
+        if (!UwSolidTile2HF(a, y + 1)) return false;
+    }
+    int fx0 = dir == 1 ? 72 : 0, fy0 = 36 * style;
+    for (int a = 0; a < 4; a++) for (int b = 0; b < 2; b++) UwSet(x - 1 + a, y - 1 + b, t, fx0 + a * 18, fy0 + b * 18);
+    return true;
+}
+bool UwPlaceOnTableHF(int t, int x, int y, int style)
+{
+    if (x < 0 || y < 0 || x >= W || y + 1 >= H) return false;
+    int i = y * W + x, bi = (y + 1) * W + x;
+    if (act[i] != 0 || act[bi] == 0) return false;
+    ushort bt = typ[bi];
+    if (!(bt == 14 || bt == 555 || bt == 18 || bt == 87 || bt == 88 || bt == 89 || bt == 101 || bt == 577)) return false;
+    UwSet(x, y, t, 0, style * 22);
+    return true;
+}
+bool UwPlace3x3WallHF(int x, int y, int t, int style)
+{
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 2; j++)
+        if (act[j * W + i] != 0 || wal[j * W + i] == 0) return false;
+    int s = ((style % 36) + 36) % 36;
+    int fx0 = s * 54, fy0 = (style / 36) * 54;
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) UwSet(x - 1 + i, y - 1 + j, t, fx0 + i * 18, fy0 + j * 18);
+    return true;
+}
+bool UwPlace6x4WallHF(int x, int y, int t, int style)
+{
+    for (int i = x - 2; i < x + 4; i++) for (int j = y - 2; j < y + 2; j++)
+        if (act[j * W + i] != 0 || wal[j * W + i] == 0) return false;
+    int fx0 = (style / 27) * 108, fy0 = (style % 27) * 72;
+    for (int i = 0; i < 6; i++) for (int j = 0; j < 4; j++) UwSet(x - 2 + i, y - 2 + j, t, fx0 + i * 18, fy0 + j * 18);
+    return true;
+}
+bool UwPlace2x3WallHF(int x, int y, int t, int style)
+{
+    for (int i = x; i < x + 2; i++) for (int j = y - 1; j < y + 2; j++)
+        if (act[j * W + i] != 0 || wal[j * W + i] == 0) return false;
+    int fx0 = style * 36;
+    for (int i = 0; i < 2; i++) for (int j = 0; j < 3; j++) UwSet(x + i, y - 1 + j, t, fx0 + i * 18, j * 18);
+    return true;
+}
+bool UwPlace3x2WallHF(int x, int y, int t, int style)
+{
+    for (int i = x - 1; i < x + 2; i++) for (int j = y; j < y + 2; j++)
+        if (act[j * W + i] != 0 || wal[j * W + i] == 0) return false;
+    int fy0 = style * 36;
+    for (int i = 0; i < 3; i++) for (int j = 0; j < 2; j++) UwSet(x - 1 + i, y + j, t, i * 18, fy0 + j * 18);
+    return true;
+}
+bool UwNearPictureHF(int x, int y)
+{
+    for (int i = x - 4; i <= x + 3; i++) for (int j = y - 3; j <= y + 2; j++)
+    { if (i >= 0 && j >= 0 && i < W && j < H && act[j * W + i] != 0) return true; }
+    return false;
+}
+bool UwNearPicture2HF(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= W || y >= H) return false;
+    int wi = y * W + x;
+    if (wal[wi] == 7 || wal[wi] == 8 || wal[wi] == 9) return true;
+    for (int i = x - 8; i <= x + 8; i++) for (int j = y - 5; j <= y + 5; j++)
+    {
+        if (i < 0 || j < 0 || i >= W || j >= H) continue;
+        int ii = j * W + i;
+        if (act[ii] != 0 && (typ[ii] == 240 || typ[ii] == 241 || typ[ii] == 242)) return true;
+    }
+    return false;
+}
+void UwRandHellPicture(out int tileT, out int style)
+{
+    int num = r.Next(4);
+    if (num == 1) num = r.Next(4);
+    switch (num)
+    {
+        case 0: tileT = 240; style = (new[] { 27, 29, 30, 31, 32 })[r.Next(5)]; return;
+        case 1: tileT = 242; style = 14; return;
+        case 2: tileT = 245; style = (new[] { 1, 2, 4 })[r.Next(3)]; return;
+        default: tileT = 246; style = (new[] { 0, 16, 17 })[r.Next(3)]; return;
+    }
+}
+void UwHellFort(int i, int j, int tileType, int wallType)
+{
+    int hellTop = H - 200;
+    var colL = new int[5]; var colR = new int[5];
+    colL[2] = i - r.Next(4, 10); colR[2] = i + r.Next(4, 10);
+    colL[3] = colR[2]; colR[3] = colL[3] + r.Next(8, 20);
+    colL[4] = colR[3]; colR[4] = colL[4] + r.Next(8, 20);
+    colR[1] = colL[2]; colL[1] = colR[1] - r.Next(8, 20);
+    colR[0] = colL[1]; colL[0] = colR[0] - r.Next(8, 20);
+    var rowT = new int[10]; var rowB = new int[10];
+    rowT[3] = j - r.Next(6, 12); rowB[3] = j;
+    for (int rr = 4; rr < 10; rr++) { rowT[rr] = rowB[rr - 1]; rowB[rr] = rowT[rr] + r.Next(6, 12); }
+    for (int rr = 2; rr >= 0; rr--) { rowB[rr] = rowT[rr + 1]; rowT[rr] = rowB[rr] - r.Next(6, 12); }
+    var occ = new bool[5, 10];
+    bool hasLWing = false, hasRWing = false; int spanLo = 3, spanHi = 3;
+    for (int round = 0; round < 2; round++)
+    {
+        if (r.Next(3) == 0)
+        {
+            hasLWing = true;
+            int rr = r.Next(10);
+            if (rr < spanLo) spanLo = rr;
+            if (rr > spanHi) spanHi = rr;
+            int wingCol = 1;
+            if (r.Next(2) == 0) { occ[0, rr] = true; occ[1, rr] = true; wingCol = 0; }
+            else occ[1, rr] = true;
+            int dir = r.Next(2); if (dir == 0) dir = -1;
+            for (int steps = r.Next(10); steps > 0 && rr >= 0 && rr < 10; rr += dir) occ[wingCol, rr] = true;
+        }
+        if (r.Next(3) == 0)
+        {
+            hasRWing = true;
+            int rr = r.Next(10);
+            if (rr < spanLo) spanLo = rr;
+            if (rr > spanHi) spanHi = rr;
+            int wingCol = 3;
+            if (r.Next(2) == 0) { occ[3, rr] = true; occ[4, rr] = true; wingCol = 4; }
+            else occ[3, rr] = true;
+            int dir = r.Next(2); if (dir == 0) dir = -1;
+            for (int steps = r.Next(10); steps > 0 && rr >= 0 && rr < 10; rr += dir) occ[wingCol, rr] = true;
+        }
+    }
+    for (int c = 0; c < 5; c++)
+    {
+        bool bad = false;
+        if (colL[c] < 10 || colL[c] > W - 10) bad = true;
+        else
+        {
+            for (int y = hellTop; y < H; y++)
+            {
+                if (colL[c] >= 0 && y >= 0 && colL[c] < W && y < H && wal[y * W + colL[c]] > 0) { bad = true; break; }
+            }
+        }
+        if (bad) for (int rr = 0; rr < 10; rr++) occ[c, rr] = false;
+    }
+    int n4 = r.Next(10); if (n4 < spanLo) spanLo = n4;
+    int n5 = r.Next(10); if (n5 > spanHi) spanHi = n5;
+    if (!hasLWing && !hasRWing)
+    {
+        int guard = 0;
+        while (spanHi - spanLo < 5 && guard++ < 1000)
+        {
+            int a = r.Next(10); if (a < spanLo) spanLo = a;
+            int b = r.Next(10); if (b > spanHi) spanHi = b;
+        }
+    }
+    for (int rr = spanLo; rr <= spanHi; rr++) occ[2, rr] = true;
+    for (int c = 0; c < 5; c++) for (int rr = 0; rr < 10; rr++)
+        if (occ[c, rr] && (rowT[rr] < hellTop || rowB[rr] > H - 20)) occ[c, rr] = false;
+    for (int c = 0; c < 5; c++) for (int rr = 0; rr < 10; rr++)
+    {
+        if (!occ[c, rr]) continue;
+        for (int x = colL[c]; x <= colR[c]; x++)
+        {
+            if (x < 10 || x > W - 10) continue;
+            for (int y = rowT[rr]; y <= rowB[rr]; y++)
+            {
+                if (x < 0 || y < 0 || x >= W || y >= H) continue;
+                int ti = y * W + x;
+                liq[ti] = 0;
+                if (x == colL[c] || x == colR[c] || y == rowT[rr] || y == rowB[rr])
+                { typ[ti] = (ushort)tileType; act[ti] = 1; half[ti] = 0; slope[ti] = 0; }
+                else { wal[ti] = (ushort)wallType; act[ti] = 0; }   // 室内 type 保留幽灵
+            }
+        }
+    }
+    for (int c = 0; c < 4; c++)
+    {
+        var rows = new bool[10]; bool any = false;
+        for (int rr = 0; rr < 10; rr++) if (occ[c, rr] && occ[c + 1, rr]) { rows[rr] = true; any = true; }
+        while (any)
+        {
+            int rr = r.Next(10);
+            if (rows[rr])
+            {
+                any = false;
+                for (int k = 1; k <= 3; k++)
+                {
+                    int y = rowB[rr] - k;
+                    if (colR[c] < 0 || y < 0 || colR[c] >= W || y >= H) continue;
+                    int ti = y * W + colR[c];
+                    act[ti] = 0; wal[ti] = (ushort)wallType;
+                }
+                UwPlaceTileDoorHF(colR[c], rowB[rr] - 1, 19);
+            }
+        }
+    }
+    for (int c = 0; c < 5; c++) for (int rr = 0; rr < 10; rr++)
+    {
+        if (!occ[c, rr]) continue;
+        if (rr > 0 && occ[c, rr - 1])
+        {
+            int x1 = r.Next(colL[c] + 2, colR[c] - 1);                     // int(a,b)闭↔Next(a,b+1)
+            int x2 = r.Next(colL[c] + 2, colR[c] - 1);
+            int tries = 0;
+            while ((x2 - x1 < 2 || x2 - x1 > 5) && tries <= 10000)
+            { x1 = r.Next(colL[c] + 2, colR[c] - 1); x2 = r.Next(colL[c] + 2, colR[c] - 1); tries++; }
+            if (tries <= 10000)
+            {
+                for (int x = x1; x <= x2; x++)
+                {
+                    if (x < 20 || x > W - 20 || rowT[rr] < 0 || rowT[rr] >= H) continue;
+                    int ti = rowT[rr] * W + x;
+                    act[ti] = 0;
+                    UwSet(x, rowT[rr], 19, 0, 13 * 18);
+                    wal[ti] = (ushort)wallType;
+                }
+            }
+            else break;
+        }
+        if (c < 4 && occ[c + 1, rr] && r.Next(3) == 0)
+        {
+            for (int k = 1; k <= 3; k++)
+            {
+                int y = rowB[rr] - k;
+                if (colR[c] < 0 || y < 0 || colR[c] >= W || y >= H) continue;
+                int ti = y * W + colR[c];
+                act[ti] = 0; wal[ti] = (ushort)wallType;
+            }
+            UwPlaceTileDoorHF(colR[c], rowB[rr] - 1, 19);
+        }
+    }
+    for (int c = 0; c < 5; c++)
+    {
+        var rows = new bool[10]; bool any = false;
+        for (int rr = 0; rr < 10; rr++) if (occ[c, rr]) { rows[rr] = true; any = true; }
+        if (any)
+        {
+            bool ok = false;
+            for (int rr = 0; rr < 10; rr++)
+            {
+                if (!rows[rr]) continue;
+                int x = colL[c] - 1;
+                if (x < 1) { rows[rr] = false; continue; }
+                if (act[(rowB[rr] - 1) * W + x] == 0 && act[(rowB[rr] - 2) * W + x] == 0 && act[(rowB[rr] - 3) * W + x] == 0
+                    && liq[(rowB[rr] - 1) * W + x] == 0 && liq[(rowB[rr] - 2) * W + x] == 0 && liq[(rowB[rr] - 3) * W + x] == 0) ok = true;
+                else rows[rr] = false;
+            }
+            while (ok)
+            {
+                int rr = r.Next(10);
+                if (rows[rr])
+                {
+                    ok = false;
+                    for (int k = 1; k <= 3; k++)
+                    {
+                        int y = rowB[rr] - k;
+                        if (colL[c] < 0 || y < 0 || colL[c] >= W || y >= H) continue;
+                        act[y * W + colL[c]] = 0;
+                    }
+                    UwPlaceTileDoorHF(colL[c], rowB[rr] - 1, 19);
+                }
+            }
+            break;
+        }
+    }
+    for (int c = 4; c >= 0; c--)
+    {
+        var rows = new bool[10]; bool any = false;
+        for (int rr = 0; rr < 10; rr++) if (occ[c, rr]) { rows[rr] = true; any = true; }
+        if (any)
+        {
+            bool ok = false;
+            for (int rr = 0; rr < 10; rr++)
+            {
+                if (!rows[rr]) continue;
+                if (c < 20 || c > W - 20) break;                            // ★原版 cs:33218 列号判据恒真→右外门从不触发
+                int x = colR[c] + 1;
+                if (x > W - 2) { rows[rr] = false; continue; }
+                if (act[(rowB[rr] - 1) * W + x] == 0 && act[(rowB[rr] - 2) * W + x] == 0 && act[(rowB[rr] - 3) * W + x] == 0
+                    && liq[(rowB[rr] - 1) * W + x] == 0 && liq[(rowB[rr] - 2) * W + x] == 0 && liq[(rowB[rr] - 3) * W + x] == 0) ok = true;
+                else rows[rr] = false;
+            }
+            while (ok)
+            {
+                int rr = r.Next(10);
+                if (rows[rr])
+                {
+                    ok = false;
+                    for (int k = 1; k <= 3; k++)
+                    {
+                        int y = rowB[rr] - k;
+                        if (colR[c] < 0 || y < 0 || colR[c] >= W || y >= H) continue;
+                        act[y * W + colR[c]] = 0;
+                    }
+                    UwPlaceTileDoorHF(colR[c], rowB[rr] - 1, 19);
+                }
+            }
+            break;
+        }
+    }
+    for (int rr = 0; rr < 10; rr++)
+    {
+        var cols = new bool[5]; bool any = false;
+        for (int c = 0; c < 5; c++) if (occ[c, rr]) { cols[c] = true; any = true; }
+        if (any)
+        {
+            bool searching = true;
+            while (searching)
+            {
+                int c = r.Next(5);
+                if (cols[c])
+                {
+                    int x1 = r.Next(colL[c] + 2, colR[c] - 1);
+                    int x2 = r.Next(colL[c] + 2, colR[c] - 1);
+                    int tries = 0;
+                    while ((x2 - x1 < 2 || x2 - x1 > 5) && tries <= 10000)
+                    { x1 = r.Next(colL[c] + 2, colR[c] - 1); x2 = r.Next(colL[c] + 2, colR[c] - 1); tries++; }
+                    if (tries > 10000) break;
+                    bool clear = true;
+                    for (int x = x1; x <= x2; x++)
+                    {
+                        if (x < 10 || x > W - 10 || rowT[rr] - 1 < 0 || rowT[rr] - 1 >= H) continue;
+                        int ti = (rowT[rr] - 1) * W + x;
+                        if (act[ti] != 0 || liq[ti] > 0) { clear = false; break; }
+                    }
+                    if (clear)
+                    {
+                        for (int x = x1; x <= x2; x++)
+                        {
+                            if (x < 10 || x > W - 10 || rowT[rr] < 0 || rowT[rr] >= H) continue;
+                            act[rowT[rr] * W + x] = 0;
+                            UwSet(x, rowT[rr], 19, 0, 13 * 18);
+                        }
+                    }
+                    searching = false;
+                }
+            }
+            break;
+        }
+    }
+}
+void UwAddHellHouses()
+{
+    int num = (int)(W * 0.25);
+    // ① 塔环（cs:32299-32332）：正常世界只处理中部 50%；成功建成才跳格
+    for (int i = 100; i < W - 100; i++)
+    {
+        if (i < num || i > W - num) continue;
+        int j = H - 40;
+        while (act[j * W + i] != 0 || liq[j * W + i] > 0) j--;
+        if (act[(j + 1) * W + i] != 0)
+        {
+            int tileType = r.Next(75, 77) == 75 ? 75 : 76;
+            if (r.Next(5) > 0) tileType = 75;
+            int wallType = tileType == 75 ? 14 : 13;
+            UwHellFort(i, j, tileType, wallType);
+            i += r.Next(30, 130);
+            if (r.Next(10) == 0) i += r.Next(0, 200);
+        }
+    }
+    // ② 恶魔火把环（cs:32334-32379）：200×(W/4200) 个
+    int torchCount = (int)(200 * (int)(W / 4200));
+    for (int n = 0; n < torchCount; n++)
+    {
+        int tries = 0; bool placed = false;
+        while (!placed)
+        {
+            tries++;
+            int x = r.Next((int)(W * 0.2), (int)(W * 0.8));
+            int y = r.Next(H - 300, H - 20);
+            int ti = y * W + x;
+            if (act[ti] == 0 || (typ[ti] != 75 && typ[ti] != 76)) { if (tries > 1000) break; continue; }
+            int side = 0;
+            if (x - 1 >= 0 && wal[y * W + x - 1] > 0) side = -1;
+            else if (x + 1 < W && wal[y * W + x + 1] > 0) side = 1;
+            if (side == 0) { if (tries > 1000) break; continue; }
+            if (act[y * W + x + side] != 0 || act[(y + 1) * W + x + side] != 0) { if (tries > 1000) break; continue; }
+            bool near = false;
+            for (int ix = x - 8; ix < x + 8 && !near; ix++) for (int iy = y - 8; iy < y + 8; iy++)
+            {
+                if (ix < 0 || iy < 0 || ix >= W || iy >= H) continue;
+                int ii = iy * W + ix;
+                if (act[ii] != 0 && typ[ii] == 4) { near = true; break; }
+            }
+            if (near) { if (tries > 1000) break; continue; }
+            UwSet(x + side, y, 4, 0, 22 * 7);
+            placed = true;
+        }
+    }
+    // ③ 家具环（cs:32386-32643）：m < 4200000/W 次
+    double num9 = 4200000.0 / W;
+    for (int m = 0; m < num9; m++)
+    {
+        int tries = 0;
+        int fx = r.Next(num, W - num), fy = r.Next(H - 250, H - 20);
+        bool bad()
+        {
+            if (fx < 0 || fy < 0 || fx >= W || fy >= H) return true;
+            int i2 = fy * W + fx;
+            return (wal[i2] != 13 && wal[i2] != 14) || act[i2] != 0;
+        }
+        while (bad()) { fx = r.Next(num, W - num); fy = r.Next(H - 250, H - 20); tries++; if (tries > 100000) break; }
+        if (tries > 100000 || bad()) continue;
+        for (; !UwSolidTileHF(fx, fy) && fy < H - 20; fy++) { }
+        fy--;
+        int lo = fx, hi = fx;
+        while (act[fy * W + lo] == 0 && UwSolidTileHF(lo, fy + 1)) lo--;
+        lo++;
+        for (; act[fy * W + hi] == 0 && UwSolidTileHF(hi, fy + 1); hi++) { }
+        hi--;
+        int width = hi - lo;
+        int cx = (hi + lo) >> 1;
+        {
+            int i2 = fy * W + cx;
+            if (act[i2] != 0 || (wal[i2] != 13 && wal[i2] != 14) || !UwSolidTileHF(cx, fy + 1)) continue;
+        }
+        int pick = r.Next(13);
+        int[,] szMap = { { 5, 4 }, { 4, 3 }, { 3, 5 }, { 4, 6 }, { 3, 3 }, { 5, 3 }, { 5, 4 }, { 5, 4 }, { 5, 4 }, { 3, 5 }, { 5, 3 }, { 2, 4 }, { 3, 3 } };
+        int hw = szMap[pick, 0], hh = szMap[pick, 1];
+        int kind = pick;
+        for (int a = cx - hw; a <= cx + hw; a++) for (int b = fy - hh; b <= fy; b++)
+        {
+            if (a >= 0 && b >= 0 && a < W && b < H && act[b * W + a] != 0) { kind = -1; break; }
+        }
+        if (width < hw * 1.75) kind = -1;
+        void chairMirror(int xx, int yy)
+        {
+            int i0 = yy * W + xx, i1 = (yy - 1) * W + xx;
+            if (act[i0] != 0) frX[i0] += 18;
+            if (act[i1] != 0) frX[i1] += 18;
+        }
+        switch (kind)
+        {
+            case 0:
+            {
+                UwPlace3x2HF(cx, fy, 14, 13);
+                int n22 = r.Next(6);
+                if (n22 < 3) UwPlaceOnTableHF(33, cx + n22, fy - 2, 25);
+                if (act[fy * W + cx] == 0) break;
+                if (act[fy * W + cx - 2] == 0) { if (UwPlace1x2HF(cx - 2, fy, 15, 16)) chairMirror(cx - 2, fy); }
+                if (act[fy * W + cx + 2] == 0) UwPlace1x2HF(cx + 2, fy, 15, 16);
+                break;
+            }
+            case 1:
+            {
+                UwPlace2x1HF(cx, fy, 18, 14);
+                int n21 = r.Next(4);
+                if (n21 < 2) UwPlaceOnTableHF(33, cx + n21, fy - 1, 25);
+                if (act[fy * W + cx] == 0) break;
+                if (r.Next(2) == 0)
+                {
+                    if (act[fy * W + cx - 1] == 0) { if (UwPlace1x2HF(cx - 1, fy, 15, 16)) chairMirror(cx - 1, fy); }
+                }
+                else if (act[fy * W + cx + 2] == 0) UwPlace1x2HF(cx + 2, fy, 15, 16);
+                break;
+            }
+            case 2: UwPlace2xXHF(cx, fy, 105, 49, 3); break;
+            case 3: UwPlace3x4HF(cx, fy, 101, 4); break;
+            case 4:
+                if (r.Next(2) == 0) { if (UwPlace1x2HF(cx, fy, 15, 16)) chairMirror(cx, fy); }
+                else UwPlace1x2HF(cx, fy, 15, 16);
+                break;
+            case 5:
+                if (r.Next(2) == 0) UwPlace4x2HF(cx, fy, 79, 1, 8);
+                else UwPlace4x2HF(cx, fy, 79, -1, 8);
+                break;
+            case 6: UwPlace3x2HF(cx, fy, 87, 15); break;
+            case 7: UwPlace3x2HF(cx, fy, 88, 9); break;
+            case 8: UwPlace3x2HF(cx, fy, 89, 10); break;
+            case 9: UwPlace2xXHF(cx, fy, 104, 17, 5); break;
+            case 10:
+                if (r.Next(2) == 0) UwPlace4x2HF(cx, fy, 90, 1, 25);
+                else UwPlace4x2HF(cx, fy, 90, -1, 25);
+                break;
+            case 11: UwPlace1xXHF(cx, fy, 93, 23); break;
+            case 12: UwPlace2x2HF(cx, fy, 100, 25); break;
+        }
+    }
+    // ④ 挂画环（cs:32645-32744）：num23 < 420000/W 次
+    double num9b = 420000.0 / W;
+    for (int n23 = 0; n23 < num9b; n23++)
+    {
+        int tries = 0;
+        int px = r.Next(num, W - num), py = r.Next(H - 250, H - 20);
+        bool bad2()
+        {
+            if (px < 0 || py < 0 || px >= W || py >= H) return true;
+            int i2 = py * W + px;
+            return (wal[i2] != 13 && wal[i2] != 14) || act[i2] != 0;
+        }
+        while (bad2()) { px = r.Next(num, W - num); py = r.Next(H - 250, H - 20); tries++; if (tries > 100000) break; }
+        if (tries > 100000) continue;
+        int x0 = px, x1 = px, y0 = py, y1 = py;
+        for (int it = 0; it < 2; it++)
+        {
+            x0 = px; x1 = px;
+            bool wallOK(int xx, int yy) => xx >= 0 && yy >= 0 && xx < W && yy < H && (wal[yy * W + xx] == 13 || wal[yy * W + xx] == 14);
+            while (act[py * W + x0] == 0 && wallOK(x0, py) && x0 > 10) x0--;
+            x0++;
+            for (; act[py * W + x1] == 0 && wallOK(x1, py) && x1 < W - 10; x1++) { }
+            x1--;
+            px = (x0 + x1) >> 1;
+            y0 = py; y1 = py;
+            while (px >= 0 && y0 >= 0 && px < W && y0 < H && act[y0 * W + px] == 0 && wallOK(px, y0)) y0--;
+            y0++;
+            for (; px >= 0 && y1 >= 0 && px < W && y1 < H && act[y1 * W + px] == 0 && wallOK(px, y1); y1++) { }
+            y1--;
+            py = (y0 + y1) >> 1;
+        }
+        x0 = px; x1 = px;
+        bool row3Clear(int xx, int yy) => xx >= 0 && yy >= 0 && xx < W && yy < H && act[yy * W + xx] == 0
+            && (xx < 0 || yy - 1 < 0 || xx >= W || yy - 1 >= H || act[(yy - 1) * W + xx] == 0)
+            && (xx < 0 || yy + 1 < 0 || xx >= W || yy + 1 >= H || act[(yy + 1) * W + xx] == 0);
+        while (row3Clear(x0, py) && x0 > 10) x0--;
+        x0++;
+        for (; row3Clear(x1, py) && x1 < W - 10; x1++) { }
+        x1--;
+        y0 = py; y1 = py;
+        bool col3Clear(int xx, int yy) => xx >= 0 && yy >= 0 && xx < W && yy < H && act[yy * W + xx] == 0
+            && (xx - 1 < 0 || yy < 0 || xx - 1 >= W || yy >= H || act[yy * W + xx - 1] == 0)
+            && (xx + 1 < 0 || yy < 0 || xx + 1 >= W || yy >= H || act[yy * W + xx + 1] == 0);
+        while (col3Clear(px, y0)) y0--;
+        y0++;
+        for (; col3Clear(px, y1); y1++) { }
+        y1--;
+        px = (x0 + x1) >> 1;
+        py = (y0 + y1) >> 1;
+        if (x1 - x0 <= 7 || y1 - y0 <= 5) continue;
+        int okP = 0;
+        if (UwNearPicture2HF(px, py)) okP = -1;
+        if (okP == 0)
+        {
+            UwRandHellPicture(out int tileT, out int style);
+            if (!UwNearPictureHF(px, py))
+            {
+                if (tileT == 240) UwPlace3x3WallHF(px, py, tileT, style);
+                else if (tileT == 242) UwPlace6x4WallHF(px, py, tileT, style);
+                else if (tileT == 245) UwPlace2x3WallHF(px, py, tileT, style);
+                else UwPlace3x2WallHF(px, py, tileT, style);
+            }
+        }
+    }
+    // ⑤ 旗灯环（cs:32746-32843）：styles 三掷互异 + num35 < 420000/W 次
+    var styles = new int[3] { r.Next(16, 22), r.Next(16, 22), r.Next(16, 22) };
+    while (styles[1] == styles[0]) styles[1] = r.Next(16, 22);
+    while (styles[2] == styles[0] || styles[2] == styles[1]) styles[2] = r.Next(16, 22);
+    for (int n35 = 0; n35 < num9b; n35++)
+    {
+        int tries = 0;
+        int bx = num, by = H - 250;
+        bool bad3()
+        {
+            if (bx < 0 || by < 0 || bx >= W || by >= H) return true;
+            int i2 = by * W + bx;
+            return (wal[i2] != 13 && wal[i2] != 14) || act[i2] != 0;
+        }
+        do { bx = r.Next(num, W - num); by = r.Next(H - 250, H - 20); tries++; } while (tries <= 100000 && bad3());
+        if (tries > 100000) continue;
+        while (!UwSolidTileHF(bx, by) && by > 10) by--;
+        by++;
+        {
+            int i2 = by * W + bx;
+            if (wal[i2] != 13 && wal[i2] != 14) continue;
+        }
+        int pick2 = r.Next(3);
+        int sw = pick2 == 1 ? 3 : pick2 == 2 ? 1 : 1;
+        int sh = pick2 == 1 ? 3 : pick2 == 2 ? 2 : 3;
+        {
+            int i2 = by * W + bx;
+            bool anchorActive = act[i2] != 0;
+            ushort anchorType = typ[i2];
+            bool hangSet = anchorType == 10 || anchorType == 10 || anchorType == 11 || anchorType == 34 || anchorType == 42 || anchorType == 91;
+            for (int a = bx - 1; a <= bx + sw; a++) for (int b = by; b <= by + sh; b++)
+            {
+                if (a < bx || a == bx + sw) { if (anchorActive && hangSet) pick2 = -1; }
+                else if (anchorActive) pick2 = -1;
+            }
+        }
+        switch (pick2)
+        {
+            case 0: UwPlaceBannerHF(bx, by, 91, styles[r.Next(3)]); break;
+            case 1: UwPlaceChandHF(bx, by, 34, 32); break;
+            case 2: UwPlace1x2TopHF(bx, by, 42, 32); break;
+        }
+    }
+}
+UwAddHellHouses();   // cs:13893（AddHellHouses——Underworld pass 尾段）
 Checkpoint("underworld");
 
 Replay(); // ▶pass 头重播：CorruptionAndCrimson cs:13919
@@ -4975,8 +5726,21 @@ if (dgIsoBase != null)
     Console.Error.WriteLine($"DG_ISO loaded {dgIsoBase} (typ/act/wal/liq; liqT zeroed)");
 }
 // 段级 genRand 掷数对账（DGFLOW）：r 包一层计数器，逐检查点打点（stderr）
+bool dgBItLog = Environment.GetEnvironmentVariable("DG_B_ITLOG") != null;   // III 批取证：B 段逐迭代 n/n3/路径
 r = new DgCR { inner = r };
 int DgRolls() => ((object)r) is DgCR dc ? dc.n : -1;
+// 主流态 FNV（SeedArray[56]+inext——与 vanilla PassChainProbe.StreamHash 同构；III 批取证）
+uint DgStreamFNV()
+{
+    var urtF = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+    var innerRF = ((object)r) is DgCR dcF ? dcF.inner : r;
+    var usaF = (int[])urtF.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerRF)!;
+    uint uixF = (uint)urtF.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(innerRF)!;
+    uint fhF = 2166136261u;
+    for (int qF = 0; qF < 56; qF++) { uint vF = (uint)usaF[qF]; for (int sF = 0; sF < 32; sF += 8) fhF = (fhF ^ ((vF >> sF) & 0xffu)) * 16777619u; }
+    for (int sF = 0; sF < 32; sF += 8) fhF = (fhF ^ ((uixF >> sF) & 0xffu)) * 16777619u;
+    return fhF;
+}
 // DG_SEG_HASH=1：DgFlow 追打主流态 FNV（与 vanilla DgSegProbe/PassChainProbe.StreamHash
 // 逐字节同构——SeedArray[56]+inext 的 FNV-1a）→ 段级掷数真值对拍（U 批 2026-08-17）
 void DgFlow(string tag)
@@ -4995,11 +5759,23 @@ void DgFlow(string tag)
     }
 }
 // —— DG_WATCH=x,y：单格写点观察哨（ChTile/ChWall 全钩）——
+//   ★III 批终清（2026-08-18）：支持分号分隔多格（DG_WATCH=415,748;416,748;417,748），
+//   且 dgWriter 由各结构入口赋结构号（R#/H#/EH#/ENT/PIT…）——定位 pre-pit 布局债写点。
 int dgWatchIdx = -1;
+var dgWatchSet = new HashSet<int>();
 string dgWriter = "?";
 {
     var wEnv = Environment.GetEnvironmentVariable("DG_WATCH");
-    if (wEnv != null) { var wx = int.Parse(wEnv.Split(',')[0]); var wy = int.Parse(wEnv.Split(',')[1]); dgWatchIdx = wy * W + wx; }
+    if (wEnv != null)
+    {
+        foreach (var one in wEnv.Split(';'))
+        {
+            var wx = int.Parse(one.Split(',')[0]); var wy = int.Parse(one.Split(',')[1]);
+            dgWatchSet.Add(wy * W + wx);
+        }
+        var f0 = wEnv.Split(';')[0];
+        dgWatchIdx = int.Parse(f0.Split(',')[1]) * W + int.Parse(f0.Split(',')[0]);
+    }
 }
 bool dgCTrace = Environment.GetEnvironmentVariable("DG_C_TRACE") != null;   // C/G 箱落位逐 attempt 观测（DG_C_TRACE）
 DgCR.LogRolls = Environment.GetEnvironmentVariable("DG_ROLL_LOG") != null;        // 逐掷值日志（DG_ROLL_LOG）
@@ -5094,6 +5870,46 @@ bool DgChestLegOK(int lx, int ly)
 //     E 段 pre-pit +313（oracle 6664 vs vanilla 6977）维持 DG_SET_ROLLS 拨针备案。
 //   下一步：① B 段 TileFrame(19) 平台帧副作用建模（DgTileFrameProbe 已采证）；
 //   ② B 收口后 G/F 对拍；③ E 段 +313 根因（pre-pit 上游）。
+//   ★★★ III 批 2026-08-18 终审取证（B 段 -3 掷真因定界，方法=Rosetta vanilla 注入
+//     PassChainProbe.Mark/StreamHash 逐掷位 IT/R0-R8/SWA/GPA 标记 + oracle DG_ROLL_MARK
+//   流哈希子序列对拍；注入器 /tmp/sw-dgs/patchdgs，exe=TerrariaServer.passchain.exe 副本）：
+//   · III 交接单的「styleForWall 四件套 3 锚各 +1 掷」假说被**二元证伪**：x86 IL 实证
+//     GetCurrentDungeonStyle.PlatformItemTypes=new int[0]（GetPlatformStyle 恒 -1 不掷）；
+//     本种子 181 锚墙分布 {96×173, 9×7, 0×1}——96/0→GetStyleForWall=null（四件套整体
+//     跳过）、9→Default（零掷）；vanilla BSHF 段 SWA 标记哈希全程不变=GetStyleForWall
+//     从未耗掷。四件套已按 1456 忠实转录（双侧，dual/remix 才有行为差）但本种子零掷差。
+//   · **真根因**：B 段第 9024 迭代（锚 (417,748)，成功#83 之后、#108 之前）isDW 门
+//     分叉——vanilla PASS（掷 num7）、oracle FAIL（直接掷下一迭代 x 抽）。Next(2) 与
+//     Next(L,R) 同耗 1 样本→流哈希不变→掷流对拍全程「假绿」。oracle 在 (417,748) 有
+//     typ44/act=1/wal9 实心砖（roll 34-199 布局期写入后再未清除），vanilla 布局后该格
+//     为空气（x86 dump032 终态 act=1 typ=91 banner——放置前为空）＝ **pre-pit 布局债
+//     的网格症状**（DG_WATCH=417,748 实证写点序列）。门分叉→bailout 时刻表整体前移
+//     1 迭代（首 bailout 17681 vs vanilla 17682，success #108 14743 vs 14744）→oracle
+//     循环早 1 迭代触顶（66974 vs 66975）→ 段末 -3 掷（vanilla 尾迭代 [R0,R1,R2]）。
+//   · 账本：vanilla B 段 156,041 = oracle 156,038 + 3；双侧 Next(5) 书帧掷均 176、
+//     成功均 181、featOK-continue 均 0（DG_B_ITLOG/DGBCONT 钩）。
+//   · ⓷ E 段 pre-pit 布局债（+313 掷 & 网格写差）＝ #32 T=1501/A=1328/W=4 的总根因，
+//     B 段四件套非因。修复路径：对照 vanilla 布局段（L/E）逐写点对拍 (417,748) 一类
+//     「oracle 多砖/少空气」格（可用 DG_WATCH 批量定位）。
+//   ★★★ III 终清（2026-08-18 本批落地，#32 布局债核销）：
+//   · 真因=**float32 算术被转录成 double**。取证链：hs.exe 谱系本体挂 UpdateDungeonProgress
+//     0.65 网格落盘（/tmp/sw-dgs/patchdgl3，VANL3）↔ oracle DGL_DUMP 对拍 → L 段地牢区残差
+//     恰 3 格：(417,748)/(445,567)/(425,586)（oracle 多砖，DG_WATCH 写点=H6 外带/R0 内区）。
+//     修 4 处后 L 段 A/T/W 全 0：①Room 初速 `(double)((float)Next(-10,11)*0.1f)`（:135）②Room
+//     步进 `*0.05f`（:152-155）③Hall py>=num6（:574-578）与 py<200（:594-598）的
+//     `(float)Next(20,50)*0.01f` ④EntHall `1f+(float)Next(0,200)*0.01f`（LEH:150/154）。
+//     f32 与 double 积差 ~1e-8，速度累计后在 (int)(px±K) 盒边掷上翻 1 格——纯网格差、
+//     零掷差（L 段流哈希 13ff3190 修前修后不变）。JS 侧 Math.fround(k*fround(c)) 同修
+//     （双精度积精确+单次舍入=f32 乘法）。
+//   · 连锁核销：B 段 -3 掷归位（156,041 掷 + B 段末流哈希 8d169afd = vanilla 0.92 mark
+//     逐位全等；66975 迭代对齐）、#32 W=4→0（wall 通道自 L 段起全绿）、A 1328→1319/T 1501→1496。
+//   · 残余（#33 首战目标，非布局债）：①入口体（Tower 楼梯/堡周 ~3300 格 typ 差——
+//     A=0 纯 typ 差，act 全同，(726-742,240-248) 一带阶梯/25 族错型）②G 段（BasicChests）
+//     流分叉 -3 掷（oracle G-exit c62decac vs vanilla 0.935 a8c34b94）——B 段末流已全等，
+//     分叉源=G 门读入口体网格差。修复=入口体（Dome/Tower WorldUtils 形状族+阶梯）移植。
+//   · III 批已落地：JS+oracle 四件套转录（零掷差留档）、JS flooded-pit liquidType
+//     0→1（本仓水=+1 编码；032 Lt 946→0 实证）、oracle AddHellHouses 补录（#28-31
+//     四哈希恢复 x86 全等）。遗留 #32 T/A/W=pre-pit 布局债（另案）。
 // 普通世界 = Legacy 路径：LegacyDungeonLayoutProvider(LegacyDungeonLayout) +
 // LegacyDungeonHall / LegacyEntranceDungeonHall / LegacyDungeonRoom / LegacyDungeonEntrance
 // + DungeonGlobal{Early/Spikes/Doors/WallVariants/Platforms/BiomeChests/Bookshelves/
@@ -5511,7 +6327,15 @@ if (Environment.GetEnvironmentVariable("DGC_DUMP") != null) {
     File.WriteAllText(Environment.GetEnvironmentVariable("DGC_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
     return;
 }
-DgBookshelves(); Checkpoint("dungeonB"); DgFlow("B");  // DungeonGlobalBookshelves
+// —— III 批取证（DG_ROLL_MARK=1）：DgBookshelves 内逐掷后主流态 FNV（与 vanilla
+//    PassChainProbe.StreamHash 同构），对拍 /tmp/sw-num4/home/passchain_err.txt 的
+//    R0_../R9_/SWA_/GPA_ 标记序列——B 段 -3 掷定位（2026-08-18）。
+bool dgRollMark = Environment.GetEnvironmentVariable("DG_ROLL_MARK") != null;
+if (dgRollMark) { DgCR.MarkCb = nn => Console.Error.WriteLine($"ROL {nn} {DgStreamFNV():x8}"); DgCR.MarkGate = true; }
+DgBookshelves();
+DgCR.MarkGate = false;
+if (dgRollMark) foreach (var lnVan in System.IO.File.ReadAllLines("/tmp/sw-num4/home/passchain_err.txt")) Console.Error.WriteLine("VAN " + lnVan);
+Checkpoint("dungeonB"); DgFlow("B");  // DungeonGlobalBookshelves
 if (Environment.GetEnvironmentVariable("DGB_DUMP") != null) {
     var dbbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dbbuf, 0, dbbuf.Length);
     File.WriteAllBytes(Environment.GetEnvironmentVariable("DGB_DUMP"), dbbuf);
@@ -5601,7 +6425,7 @@ List<DRoom> DgRoomsInSpots(double sx, double sy, double ex, double ey, int fluff
 }
 void DgChTile(int i, ushort t, bool reset)
 {
-    if (dgWatchIdx >= 0 && i == dgWatchIdx) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} ChTile t={t} reset={reset} (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
+    if (dgWatchSet.Count > 0 && dgWatchSet.Contains(i)) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} ChTile t={t} reset={reset} (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
     if (reset) { typ[i] = 0; wal[i] = 0; liq[i] = 0; liqT[i] = 0; act[i] = 0; }
     act[i] = 1; typ[i] = t;
     half[i] = 0; slope[i] = 0;   // ChangeTileType 无条件 Clear(Slope)（DungeonUtils.cs:1611-1612——
@@ -5611,7 +6435,7 @@ void DgChTile(int i, ushort t, bool reset)
 }
 void DgChWall(int i, ushort w, bool reset)
 {
-    if (dgWatchIdx >= 0 && i == dgWatchIdx) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} ChWall w={w} reset={reset} (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
+    if (dgWatchSet.Count > 0 && dgWatchSet.Contains(i)) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} ChWall w={w} reset={reset} (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
     if (reset) { typ[i] = 0; wal[i] = 0; liq[i] = 0; liqT[i] = 0; act[i] = 0; }
     wal[i] = w;
 }
@@ -5677,11 +6501,16 @@ void DgLayout(int steps)
 // LegacyDungeonRoom.LegacyRoom（Rooms/LegacyDungeonRoom.cs:104-304）
 void DgRoom(DRoom s)
 {
+    dgWriter = $"R{dgRooms.Count}";
     dynamic rr = Activator.CreateInstance(dgUR, s.Seed)!;
     double num = 1.0 * 1.0;                                   // roomStrengthScalar（StartingRoom→1）
     double num2 = (int)(15.0 * num) + (int)rr.Next(15);
-    double vx = (int)rr.Next(-10, 11) * 0.1 * 1.0;            // roomSlantVariantScalar=1
-    double vy = (int)rr.Next(-10, 11) * 0.1 * 1.0;
+    // ★III 终清（2026-08-18）：LegacyDungeonRoom.cs:135-137 原文是 **float 算术**
+    //   `val.X = (double)((float)Next(-10,11) * 0.1f) * roomSlantVariantScalar`——
+    //   曾按 double 转录（k*0.1 与 fround(k*0.1f) 差 ~1e-8），速度逐 step 累加后在
+    //   (int)(px±…) 边界掷上翻转 → R0 内 (445,567)/(425,586) 残砖（#32 布局债 1/3）。
+    double vx = (double)((int)rr.Next(-10, 11) * 0.1f) * 1.0;   // roomSlantVariantScalar=1
+    double vy = (double)((int)rr.Next(-10, 11) * 0.1f) * 1.0;
     if (vx == 0.0 && vy == 0.0)
     {
         if ((int)rr.Next(2) == 0) vx = ((int)rr.Next(2) != 0) ? 1 : -1;
@@ -5723,8 +6552,9 @@ void DgRoom(DRoom s)
             for (int y = iy0; y < iy1; y++)
                 DgChWall(y * W + x, (ushort)dgWall, true);
         px += vx; py += vy;
-        vx = Math.Max(-1.0, Math.Min(1.0, vx + (int)rr.Next(-10, 11) * 0.05 * 1.0));
-        vy = Math.Max(-1.0, Math.Min(1.0, vy + (int)rr.Next(-10, 11) * 0.05 * 1.0));
+        // ★III 终清：:152-155 原文 float——`(double)((float)Next(-10,11) * 0.05f) * scalar`
+        vx = Math.Max(-1.0, Math.Min(1.0, vx + (double)((int)rr.Next(-10, 11) * 0.05f) * 1.0));
+        vy = Math.Max(-1.0, Math.Min(1.0, vy + (double)((int)rr.Next(-10, 11) * 0.05f) * 1.0));
     }
     rm.SX = s.X; rm.SY = s.Y - num2 / 2.0; rm.EX = px; rm.EY = py; rm.Strength = (int)num5;
     // ★2026-08-16 审计 A1：LegacyDungeonRoom **不回写** generatingDungeonPositionX/Y
@@ -5735,6 +6565,7 @@ void DgRoom(DRoom s)
 // LegacyDungeonHall.LegacyHall（Halls/LegacyDungeonHall.cs:65-876）
 void DgHall(DHall s)
 {
+    dgWriter = $"H{dgHalls.Count}";
     dynamic rr = Activator.CreateInstance(dgUR, s.Seed)!;
     double vx = 0, vy = 0;
     int num = (int)(4.0 * 1.0) + (int)rr.Next(2);             // hallStrengthScalar=1
@@ -5881,8 +6712,9 @@ void DgHall(DHall s)
             num2 = -1; num++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
             if ((int)rr.Next(2) == 0)
             {
-                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 50) * 0.01;
-                else vx = (-(int)rr.Next(20, 50)) * 0.01;
+                // ★III 终清：:574-578 原文 float——`(double)((float)Next(20,50) * 0.01f) * scalar`
+                if ((int)rr.Next(2) == 0) vx = (double)((int)rr.Next(20, 50) * 0.01f) * 1.0;
+                else vx = (double)((-(int)rr.Next(20, 50)) * 0.01f) * 1.0;
             }
         }
         else if (py < 200.0)
@@ -5890,8 +6722,10 @@ void DgHall(DHall s)
             num2 = 1; num++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
             if ((int)rr.Next(2) == 0)
             {
-                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 50) * 0.01;
-                else vx = (-(int)rr.Next(20, 50)) * 0.01;
+                // ★III 终清：:594-598 原文 float——同上（曾 double 转录致 H6 带边 -1 格，
+                //   (417,748) 残砖 = #32 布局债 1/3；JS 侧同修）
+                if ((int)rr.Next(2) == 0) vx = (double)((int)rr.Next(20, 50) * 0.01f) * 1.0;
+                else vx = (double)((-(int)rr.Next(20, 50)) * 0.01f) * 1.0;
             }
         }
         else if (f13)
@@ -5995,11 +6829,12 @@ void DgHall(DHall s)
                 {
                     if ((act[i] != 0 || !DgIsDW(wal[i])) && y < H - 200)
                     {
+                        if (dgWatchSet.Count > 0 && dgWatchSet.Contains(i)) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} CLRcrack (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}");
                         act[i] = 0;                            // ClearTile（不清水不清墙——外圈已清）
                         if (f18) DgChTile(i, (ushort)dgCrack, false);
                     }
                 }
-                else act[i] = 0;
+                else { if (dgWatchSet.Count > 0 && dgWatchSet.Contains(i)) Console.Error.WriteLine($"WATCH {i%W},{i/W} {dgWriter} CLR (prev typ={typ[i]} act={act[i]} wal={wal[i]}) rolls={DgRolls()}"); act[i] = 0; }
                 if (f19 && y < H - 200) DgChWall(i, (ushort)dgWall, false);
             }
         px += vx; py += vy;
@@ -6013,6 +6848,7 @@ void DgHall(DHall s)
 // LegacyEntranceDungeonHall.LegacyHall（Halls/LegacyEntranceDungeonHall.cs:23-380，UsePrecalculatedEntrance=false）
 void DgEntHall(int seed)
 {
+    dgWriter = "EH";
     dynamic rr = Activator.CreateInstance(dgUR, seed)!;
     double px = dgPosX, py = dgPosY;
     double sx = px, sy = py;
@@ -6025,8 +6861,10 @@ void DgEntHall(int seed)
     if (px > W - 400) dir = -1;
     else if (px < 400) dir = 1;
     double vx = dir, vy = -1.0;
-    if ((int)rr.Next(3) != 0) vx *= 1 + (int)rr.Next(0, 200) * 0.01;
-    else if ((int)rr.Next(3) == 0) vx *= (int)rr.Next(50, 76) * 0.01;
+    // ★III 终清：LegacyEntranceDungeonHall.cs:150/154 原文 float——
+    //   `val2.X *= 1f + (float)Next(0,200) * 0.01f` / `*= (float)Next(50,76) * 0.01f`
+    if ((int)rr.Next(3) != 0) vx *= 1f + (int)rr.Next(0, 200) * 0.01f;
+    else if ((int)rr.Next(3) == 0) vx *= (int)rr.Next(50, 76) * 0.01f;
     else if ((int)rr.Next(6) == 0) vy *= 2.0;
     if (dgSkewed)
     {
@@ -6129,6 +6967,7 @@ void DgEntHall(int seed)
 // 每 10 步记平台候选（InAHallway → Hf=5，PlacePotsChance=0.25）。
 void DgEntHallPrecalc(int seed, double sx0, double sy0, double tgx, double tgy)
 {
+    dgWriter = "EHP";
     dynamic rr = Activator.CreateInstance(dgUR, seed)!;
     int num = (int)rr.Next(5, 9);                 // strength（存活）
     int stepsRolled = (int)rr.Next(10, 30);       // 覆写弃值保位
@@ -6547,6 +7386,7 @@ void DgClrAll(int i)
 }
 void DgTowerEntrance(int i, int j, int preSeed)
 {
+    dgWriter = "TWR";
     dynamic rr = Activator.CreateInstance(dgUR, preSeed)!;
     int windowType = (int)rr.Next(3);
     bool leftSide = !dungeonRight;                  // flag = dungeonSide==Left
@@ -6760,6 +7600,7 @@ void DgTowerEntrance(int i, int j, int preSeed)
 }
 void DgEntrance(int seed, int preSeed)
 {
+    dgWriter = "ENT";
     dynamic rr = Activator.CreateInstance(dgUR, preSeed)!;
     int i = dgPosX, j = dgPosY;
     for (int x = i - 60; x < i + 60; x++)
@@ -7147,6 +7988,7 @@ void DgHallPlatformsDoors(DHall h)
 // —— DungeonGlobalEarlyDualDungeonFeatures（Default：仅尾部 pit 陷阱循环，cs:662-700）——
 void DgEarly()
 {
+    dgWriter = "PIT";
     bool pitTr = Environment.GetEnvironmentVariable("DG_PIT_TRACE") != null;
     // —— DG_PIT44_FAIL：a44 强制拒绝（n==88）——判"-10,901 掷差是否全部来自 a44 翻转"——
     int pitFailAt = -1;
@@ -8065,6 +8907,7 @@ void DgBookshelves()
         num++;
         int x = (int)r.Next(dgBounds.L, dgBounds.R);
         int y = (int)r.Next(dgBounds.T, dgBounds.B);
+        if (dgBItLog) Console.Error.WriteLine($"DGBIT i={num} n3={num3} try=({x},{y})");
         if (dgCTrace) Console.Error.WriteLine($"DGB iter n3={num3} n={num} roll={DgRolls()} try=({x},{y}) dw={DgIsDW(wal[y * W + x])} act={act[y * W + x]}");
         bool flag = true;
         if (DgIsDW(wal[y * W + x]) && act[y * W + x] == 0)
@@ -8089,14 +8932,28 @@ void DgBookshelves()
                     && DgInWorld(x, y - 2, 0) && act[(y - 2) * W + x] == 0
                     && DgInWorld(x, y - 3, 0) && act[(y - 3) * W + x] == 0)
                 {
-                    if (!DgFeatureOK(x, y, 0)) { flag = false; continue; }
+                    if (!DgFeatureOK(x, y, 0)) { flag = false; if (dgBItLog) Console.Error.WriteLine($"DGBCONT i={num} n3={num3} at=({x},{y})"); continue; }
                     int k = x, num8 = x;
                     while (k > dgBounds.L && k < dgBounds.R && act[y * W + k] == 0 && act[(y - 1) * W + k] == 0 && act[(y + 1) * W + k] == 0) k += n7;
                     k = Math.Abs(x - k);
                     bool flag3 = (int)r.Next(2) == 0;
                     if (k > 5)
                     {
-                        int n10 = (int)r.Next(1, 4);
+                        // ★III 批 2026-08-18：styleForWall 四件套（cs:96-110）。普通世界
+                        //   样式表=[Default]（dualDungeons 才加特殊样式；GetCurrentDungeonStyle
+                        //   PlatformItemTypes=new int[0]——x86 IL 实证）⇒ wall==brickWallType
+                        //   →Default：flag2=true、GetPlatformStyle 恒 -1 不掷、(1,4)；
+                        //   其余墙→null：整体跳过。本种子锚墙 {96/0:null, 9:Default} 零掷差
+                        //   ——B 段 -3 真根因=pre-pit 布局债（头注 III 批取证）。
+                        bool flag2 = true;
+                        int num9 = -1, min = 1, max = 4;
+                        if (wal[y * W + x] == dgWall)   // brickWallType（Default 样式判定）
+                        {
+                            flag2 = true;          // Default.Style == 0
+                            num9 = -1;             // PlatformItemTypes 空 → -1，不掷
+                                                     // GetBookshelfMinMaxSizes 基类 → (1,4)
+                        }
+                        int n10 = (int)r.Next(min, max);
                         if (dgCTrace) Console.Error.WriteLine($"DGB shelf start=({x},{y}) n10={n10} flag3={flag3} roll={DgRolls()}");
                         while (n10 > 0)
                         {
@@ -8115,10 +8972,13 @@ void DgBookshelves()
                             n10--;
                         }
                         num = 0; num3++;
+                        if (dgBItLog) Console.Error.WriteLine($"DGBSUCC n3={num3} at=({num8},{y})");
                         if (!flag3 && (int)r.Next(2) == 0)
                         {
                             x = num8; y--;
-                            int n12 = (int)r.Next(4) == 0 ? 1 : 0;
+                            // flag2 门（cs:148-196）：true→Next(4) 选 13/49；false→直放 13。
+                            //   普通世界恒 true；dual/remix 特殊房间才有 false 支。
+                            int n12 = flag2 ? ((int)r.Next(4) == 0 ? 1 : 0) : 0;
                             n12 = n12 == 0 ? 13 : 49;
                             DgPOnTable(x, y, n12);                 // ★13/49 同为 PlaceOnTable1x1
                             if (DgInWorld(x, y, 0) && typ[y * W + x] == 13) r.Next(2);
@@ -8127,7 +8987,7 @@ void DgBookshelves()
                 }
             }
         }
-        if (num > 1000) { num = 0; num3++; }
+        if (num > 1000) { num = 0; num3++; if (dgBItLog) Console.Error.WriteLine($"DGBBAILOUT -> n3={num3}"); }
     }
 }
 // —— DungeonGlobalLights（:24-141）+ Lights_GenerateSwitch ——
@@ -14145,6 +15005,1563 @@ Replay(); // ▶pass 头重播：Cactus cs:21115
 }
 Checkpoint("cactus");
 StreamPt("cactus");
+
+// ═══════════════════ Pass #101 MicroBiomes（cs:21785-22127 + MicroBiomesPass.ts/TrackPass.ts 镜像，QQ 批 2026-08-18）═════════
+// JS 侧已验证 1:1（src/world/gen/vanilla/MicroBiomesPass.ts 1772 行 + TrackPass.ts 395 行）——
+// 本段按 JS 实现镜像转录（oracle 权威=JS 行为，含其全部已知备案近似）。
+// 前置侦查（tests/_mbprobe.test.ts，双链种子 9293480/SandboxWorld）关键实证：
+//   ① DeadMans 候选恒空——chest sink 全员 style≠1（地牢金箱 style2/23-27、世界树 0/12），
+//     且与 wire 无关（candNoWire 亦空）→ GetPossibleChests 零掷、place 零调用；
+//   ② lavaTrap ±20 wire 门安全——全图 9885/7469 个过前四门锚点 0 个盒内含既有 wire
+//     （既有 wire y≤875/892，地狱锚点盒够不到）→ 既有 wire 通道可整体省略，
+//     段内自建 mbWire 只承载本 pass 写入（岩浆陷阱列线/致动栅）；
+//   ③ 双种子 track314=0（矿轨零落块——place 全败，placePath 零掷）。
+// 谓词口径（与 JS 三套实心语义对齐，genSolid 覆写快照已核：
+//   live delta vs 静态 = {659,484,481,482,483,162,232,229}=false，其余同静态）：
+//   MbStaticSolid = JS TILE_DEFS.solid（solidAt 用）= SOLID 去掉 8 个 vanGen 附加
+//     {239,380,427,435-439} 后再并回被移除的 {659,484,481,482,483,162,232,229}；
+//   MbGenSolidFull = JS vanGenSolidType（桃花心木 condSolid 用）= SOLID ∪ {19}；
+//   MbGenSolidCore = JS genSolidType（solidTileHB/chestLegOK 用）= SOLID ∖ 8 附加。
+Replay(); // ▶MicroBiomes cs:21785
+{
+    // ---- 谓词/常量表 ----
+    var MB_VAN_EXTRA = new HashSet<ushort> { 239, 380, 427, 435, 436, 437, 438, 439 };   // vanGenSolidType 附加（19 不在 SOLID 内单独补）
+    var MB_STATIC_RESTORE = new HashSet<ushort> { 659, 484, 481, 482, 483, 162, 232, 229 }; // SOLID 已移除但静态为 solid
+    bool MbStaticSolid(ushort t) => (SOLID.Contains(t) && !MB_VAN_EXTRA.Contains(t)) || MB_STATIC_RESTORE.Contains(t);
+    bool MbGenSolidFull(ushort t) => t == 19 || SOLID.Contains(t);
+    bool MbGenSolidCore(ushort t) => SOLID.Contains(t) && !MB_VAN_EXTRA.Contains(t);
+    // defs.platform 全表（84 sheet——JS TILE_DEFS.platform；QQ_PLATFORMS 只有 7 项不够用）
+    var MB_PLATFORM = new HashSet<ushort> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,
+        285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,
+        405,413,414,427,435,436,437,438,439,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,
+        601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
+    // IsAContainer（JS key 近似 chest/dresser → sheet 空间 = {21,88,467}，探针实证）
+    var MB_CONTAINER = new HashSet<ushort> { 21, 88, 467 };
+    bool MbSolidAt(int x, int y) => QQInW(x, y) && act[y * W + x] != 0 && MbStaticSolid(typ[y * W + x]);   // JS solidAt（无 half/slope 门）
+    bool MbSolidTopAt(int x, int y) => QQInW(x, y) && MB_PLATFORM.Contains(typ[y * W + x]);                // JS solidTopAt（不看 act）
+    bool MbActiveAt(int x, int y) => QQInW(x, y) && act[y * W + x] != 0;
+    var mbWire = new byte[W * H];   // 本 pass 自有 wire 通道（红=bit0 致动=bit4；既有 wire 省略——备案②）
+    const byte MB_RED = 1, MB_ACTUATOR = 16;
+    // WorldGenRange：scW(v)=(int)trunc(w/4200*v)；areaScale=w*h/5040000
+    double mbAreaScale = (double)W * H / 5040000.0;
+    int MbScW(int v) => (int)Math.Truncate((double)W / 4200.0 * v);
+    void MbSetTile(int x, int y, ushort t, int fx, int fy)   // setTileSilent
+    {
+        if (!QQInW(x, y)) return;
+        int i = y * W + x;
+        typ[i] = t; act[i] = (byte)(t != 0 ? 1 : 0);
+        frX[i] = (ushort)fx; frY[i] = (ushort)fy;
+        if (t == 0) { half[i] = 0; slope[i] = 0; }
+    }
+    int mbTrace = Environment.GetEnvironmentVariable("MB_TRACE") != null ? 1 : 0;
+    // 隔离对拍辅助（本段私有，env 门控）：入口态 liqT/protRects 落盘（JS 探针回灌对拍用）
+    {
+        var p1 = Environment.GetEnvironmentVariable("MB_LIQT_DUMP");
+        if (p1 != null) File.WriteAllBytes(p1, liqT);
+        var p2 = Environment.GetEnvironmentVariable("MB_PROT_DUMP");
+        if (p2 != null) File.WriteAllText(p2, string.Join("\n", protRects.Select(pr => $"{pr.x0} {pr.y0} {pr.x1} {pr.y1}")));
+        if (mbTrace != 0) Console.WriteLine($"MB entry protRects={protRects.Count}");
+    }
+
+    // ═══ 1. Dead Man's Chests（cs:21801-21819）——备案简化 ═══
+    // 完整候选机（chest sink 创建序 + style1 帧门 + GetPossibleChests 每候选 4 掷 +
+    // place 五件套）依赖 sink/帧通道，oracle 无从重构；双链种子实证候选恒空
+    // （style 全非 1，含/不含 wire 同空）→ 本段唯一掷骰 = deadCount 计数掷。
+    { int mbDeadCount = (int)r.Next(MbScW(10), MbScW(20) + 1); if (mbTrace != 0) Console.WriteLine($"MB deadCount={mbDeadCount} candidates=0"); }
+
+    // ═══ 2. Thin Ice（cs:21825-21854；notTheBees 门=真——特殊种子分支不建模，备案）═══
+    var MB_ICE_SRC = new HashSet<ushort> { 147, 161, 224, 0, 1 };   // OnlyTiles
+    var MB_ICE_SKIP = new HashSet<ushort> { 21, 467, 226, 237 };    // SkipTiles
+    void MbSetThinIce(int x, int y)
+    {
+        int i = y * W + x;
+        typ[i] = 162; act[i] = 1; frX[i] = 0; frY[i] = 0;
+        wal[i] = 0; liq[i] = 0; liqT[i] = 0; half[i] = 0; slope[i] = 0;
+    }
+    bool MbPlaceThinIcePatch(int ox, int oy)
+    {
+        int dirtStone = 0, mud = 0, snow = 0, hive = 0;
+        for (int dx = 0; dx < 50; dx++)
+            for (int dy = 0; dy < 50; dy++)
+            {
+                int x = ox - 25 + dx, y = oy - 25 + dy;
+                if (!QQInW(x, y)) continue;
+                int i = y * W + x;
+                if (act[i] == 0) continue;
+                ushort t = typ[i];
+                if (t == 0 || t == 1) dirtStone++;
+                else if (t == 59) mud++;
+                else if (t == 147) snow++;
+                else if (t == 225) hive++;
+            }
+        if (hive > 0) return false;
+        if (snow <= mud || snow <= dirtStone) return false;
+        int num4 = 0;
+        for (int num5 = (int)r.Next(10, 15); num5 > 5; num5--)     // rng.int(10,14)=Next(10,15)
+        {
+            int num6 = (int)r.Next(-5, 5);                          // rng.int(-5,4)
+            int cx = ox + num6, cy = oy + num4;
+            int rr = (num5 + 1) * (num5 + 1);
+            for (int dy = -num5; dy <= num5; dy++)
+            {
+                int half2 = Math.Min(num5, (int)Math.Truncate(Math.Sqrt(rr - (double)dy * dy)));
+                for (int dx = -half2; dx <= half2; dx++)
+                {
+                    r.NextDouble();                                  // Blotches.Apply 丢弃掷
+                    if (r.NextDouble() < 0.3)
+                    {
+                        int bx0 = (int)r.Next(-3, 1), bx1 = (int)r.Next(0, 4), by0 = (int)r.Next(-3, 1), by1 = (int)r.Next(0, 4);
+                        for (int bi = bx0; bi <= bx1; bi++)
+                            for (int bj = by0; bj <= by1; bj++)
+                            {
+                                int x = cx + dx + bi, y = cy + dy + bj;
+                                if (!QQInW(x, y)) continue;
+                                int i = y * W + x;
+                                if (act[i] != 0 && MB_ICE_SRC.Contains(typ[i])) MbSetThinIce(x, y);
+                            }
+                    }
+                    else
+                    {
+                        int x = cx + dx, y = cy + dy;
+                        if (!QQInW(x, y)) continue;
+                        int i = y * W + x;
+                        if (act[i] != 0 && MB_ICE_SRC.Contains(typ[i])) MbSetThinIce(x, y);
+                    }
+                }
+            }
+            // Gen 2：HasLiquid + SkipTiles(21,467,226,237) → 162 + SetLiquid(0,0)
+            for (int dy = -num5; dy <= num5; dy++)
+            {
+                int half2 = Math.Min(num5, (int)Math.Truncate(Math.Sqrt(rr - (double)dy * dy)));
+                for (int dx = -half2; dx <= half2; dx++)
+                {
+                    r.NextDouble();
+                    void MbGen2(int x, int y)
+                    {
+                        int i = y * W + x;
+                        if (liq[i] == 0) return;                                 // HasLiquid
+                        if (act[i] != 0 && MB_ICE_SKIP.Contains(typ[i])) return; // SkipTiles
+                        MbSetThinIce(x, y);
+                    }
+                    if (r.NextDouble() < 0.3)
+                    {
+                        int bx0 = (int)r.Next(-3, 1), bx1 = (int)r.Next(0, 4), by0 = (int)r.Next(-3, 1), by1 = (int)r.Next(0, 4);
+                        for (int bi = bx0; bi <= bx1; bi++)
+                            for (int bj = by0; bj <= by1; bj++)
+                            { int x = cx + dx + bi, y = cy + dy + bj; if (QQInW(x, y)) MbGen2(x, y); }
+                    }
+                    else
+                    { int x = cx + dx, y = cy + dy; if (QQInW(x, y)) MbGen2(x, y); }
+                }
+            }
+            num4 += num5 - 2;
+        }
+        QQAddProt(ox - 25, oy - 25, ox + 25, oy + 25, 0);   // AddStructure 近似入保护图（JS 备案同款）
+        return true;
+    }
+    {
+        int iceCount = (int)r.Next(MbScW(3), MbScW(5) + 1);
+        int iceDone = 0, iceFail = 0;
+        while (iceDone < iceCount)
+        {
+            int ox = (int)r.Next(50, W - 50);
+            int oy = (int)r.Next(worldSurface + 20, H - 200);
+            if (MbPlaceThinIcePatch(ox, oy)) { iceDone++; iceFail = 0; }
+            else { iceFail++; if (iceFail > 1000) { iceDone++; iceFail = 0; } }
+        }
+        if (mbTrace != 0) Console.WriteLine($"MB thinIce done={iceDone}");
+    }
+
+    // ═══ 2.5 Enchanted Sword Shrines（cs:21858-21908）═══
+    bool MbPlaceSwordShrine(int ox, int oy)
+    {
+        // ① 50×50 泥+石计数门
+        int dirtStone = 0;
+        for (int dx = 0; dx < 50; dx++)
+            for (int dy = 0; dy < 50; dy++)
+            {
+                int x = ox - 25 + dx, y = oy - 25 + dy;
+                if (!QQInW(x, y)) continue;
+                int i = y * W + x;
+                if (act[i] == 0) continue;
+                if (typ[i] == 0 || typ[i] == 1) dirtStone++;
+            }
+        if (dirtStone < 1250) return false;
+        // ② origin.Y > 55
+        if (oy <= 55) return false;
+        // ③ Up 搜索：首个 1×num4 竖条内无实心的行
+        int num3 = oy - 55, num4 = Math.Min(50, num3), resultY = -1;
+        for (int i = 0; i < num3; i++)
+        {
+            bool solid = false;
+            for (int j = 0; j < num4; j++) { if (MbSolidAt(ox, oy - i + j)) { solid = true; break; } }
+            if (!solid) { resultY = oy - i; break; }
+        }
+        if (resultY < 0 || resultY <= 55) return false;
+        // ④ 沙列检查
+        for (int i = 0; i < oy - resultY; i++)
+        {
+            int y = oy - i;
+            if (!QQInW(ox, y)) continue;
+            int ii = y * W + ox;
+            if (act[ii] != 0 && typ[ii] == 53) return false;
+        }
+        resultY += 50;
+        int pointX = ox, pointY = oy + 20, point2X = ox, point2Y = oy + 30;
+        double num5 = 0.8 + r.NextDouble() * 0.5;
+        // ⑦ CanPlace ×2（洞穴盒 pad0 + 竖井盒 pad2）
+        int rx0 = pointX - (int)Math.Truncate(20 * num5);
+        if (!QQCanPlace(rx0, pointY - 20, rx0 + (int)Math.Truncate(40 * num5), pointY + 20, 0)) return false;
+        if (!QQCanPlace(ox, resultY + 10, ox + 1, resultY + 10 + (oy - resultY - 9), 2)) return false;
+        // ⑧ Slime(20,num5) 洞穴（ShrineShape=JS Set 插入序）
+        var caveKeys = new List<long>(); var caveSet = new HashSet<long>();
+        var moundKeys = new List<long>(); var moundSet = new HashSet<long>();
+        void MbCaveAdd(long k) { if (caveSet.Add(k)) caveKeys.Add(k); }
+        void MbMoundAdd(long k) { if (moundSet.Add(k)) moundKeys.Add(k); }
+        long MbKey(int dx, int dy) => (long)(dy + 256) * 1024 + (dx + 256);
+        var blot = new List<(int x, int y)>();
+        void MbBlot(int x, int y, int minX, int maxX, int minY, int maxY, double chance)
+        {
+            r.NextDouble(); blot.Clear();
+            if (r.NextDouble() < chance)
+            {
+                int x0 = (int)r.Next(1 - minX, 1), x1 = (int)r.Next(0, maxX);
+                int y0 = (int)r.Next(1 - minY, 1), y1 = (int)r.Next(0, maxY);
+                for (int i = x0; i <= x1; i++) for (int j = y0; j <= y1; j++) blot.Add((x + i, y + j));
+            }
+            else blot.Add((x, y));
+        }
+        for (int dy = -20; dy <= 0; dy++)
+        {
+            int half2 = (int)Math.Truncate(Math.Min(20 * num5, num5 * Math.Sqrt(441 - (double)dy * dy)));
+            for (int dx = -half2; dx <= half2; dx++)
+            {
+                MbBlot(pointX + dx, pointY + dy, 2, 2, 2, 2, 0.4);
+                foreach (var (px, py) in blot)
+                {
+                    if (!QQInW(px, py)) continue;
+                    int i = py * W + px;
+                    act[i] = 0; slope[i] = 0; half[i] = 0;                       // ClearTile（不清液体与墙）
+                    MbCaveAdd(MbKey(px - pointX, py - pointY));
+                }
+            }
+        }
+        for (int k = 1; k <= (int)Math.Truncate(20 * 0.5) - 1; k++)
+        {
+            int d2 = k * 2;
+            int half2 = (int)Math.Truncate(Math.Min(20 * num5, num5 * Math.Sqrt(441 - (double)d2 * d2)));
+            for (int dx = -half2; dx <= half2; dx++)
+            {
+                MbBlot(pointX + dx, pointY + d2 / 2, 2, 2, 2, 2, 0.4);
+                foreach (var (px, py) in blot)
+                {
+                    if (!QQInW(px, py)) continue;
+                    int i = py * W + px;
+                    act[i] = 0; slope[i] = 0; half[i] = 0;
+                    MbCaveAdd(MbKey(px - pointX, py - pointY));
+                }
+            }
+        }
+        // ⑨ Mound(14,14)（SetTile(0)=连墙带液全清）
+        for (int i = -14; i <= 14; i++)
+        {
+            int col = Math.Min(14, (int)Math.Truncate((0 - 15.0 / 196.0) * (i + 14) * (i - 14)));
+            for (int j = 0; j < col; j++)
+            {
+                MbBlot(point2X + i, point2Y - j, 2, 2, 1, 1, 0.8);
+                foreach (var (px, py) in blot)
+                {
+                    if (!QQInW(px, py)) continue;
+                    int i2 = py * W + px;
+                    typ[i2] = 0; act[i2] = 1;                                    // dirt
+                    wal[i2] = 0; liq[i2] = 0; liqT[i2] = 0;
+                    frX[i2] = 0; frY[i2] = 0; slope[i2] = 0; half[i2] = 0;
+                    MbMoundAdd(MbKey(px - point2X, py - point2Y));
+                }
+            }
+        }
+        // ⑩ Subtract
+        foreach (var k in moundKeys) caveSet.Remove(MbKey((int)(k % 1024) - 256 + (point2X - pointX), (int)(k / 1024) - 256 + (point2Y - pointY)));
+        // ⑪ InnerOutline 铺草（8 邻域任一不在形状内）
+        var outline = new List<long>();
+        foreach (var k in caveKeys)
+        {
+            if (!caveSet.Contains(k)) continue;
+            int dx = (int)(k % 1024) - 256, dy = (int)(k / 1024) - 256;
+            int[,] OFF = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { 1, -1 }, { -1, 1 }, { -1, -1 } };
+            for (int o = 0; o < 8; o++)
+                if (!caveSet.Contains(MbKey(dx + OFF[o, 0], dy + OFF[o, 1]))) { outline.Add(k); break; }
+        }
+        foreach (var k in outline)
+        {
+            int px = pointX + (int)(k % 1024) - 256, py = pointY + (int)(k / 1024) - 256;
+            if (!QQInW(px, py)) continue;
+            int i = py * W + px;
+            typ[i] = 2; act[i] = 1; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
+        }
+        // ⑫ 灌水（RectangleMask(-40,40,0,40) + IsEmpty → 水 255）
+        foreach (var k in caveKeys)
+        {
+            if (!caveSet.Contains(k)) continue;
+            int dx = (int)(k % 1024) - 256, dy = (int)(k / 1024) - 256;
+            if (dx < -40 || dx > 40 || dy < 0 || dy > 40) continue;
+            int px = pointX + dx, py = pointY + dy;
+            if (!QQInW(px, py)) continue;
+            int i = py * W + px;
+            if (act[i] != 0) continue;
+            liq[i] = 255; liqT[i] = 0;                                           // 水（oracle 编码 0）
+        }
+        // ⑬ 花墙 68 + 藤蔓（OnlyTiles(2)→Offset(0,1)→382）
+        foreach (var k in caveKeys)
+        {
+            if (!caveSet.Contains(k)) continue;
+            int px = pointX + (int)(k % 1024) - 256, py = pointY + (int)(k / 1024) - 256;
+            if (QQInW(px, py)) wal[py * W + px] = 68;
+        }
+        foreach (var k in caveKeys)
+        {
+            if (!caveSet.Contains(k)) continue;
+            int px = pointX + (int)(k % 1024) - 256, py = pointY + (int)(k / 1024) - 256;
+            if (!QQInW(px, py)) continue;
+            int i = py * W + px;
+            if (act[i] == 0 || typ[i] != 2) continue;
+            int vx = px, vy = py + 1;
+            if (!QQInW(vx, vy)) continue;
+            int len = (int)r.Next(3, 6);
+            for (int k2 = 0; k2 < len; k2++)
+            {
+                if (!QQInW(vx, vy + k2) || act[(vy + k2) * W + vx] != 0) break;
+                int vi = (vy + k2) * W + vx;
+                typ[vi] = 382; act[vi] = 1;
+            }
+        }
+        // ⑭ 入口竖井（1/3；Rectangle(1,h)+Blotches(2,0.2)+SkipTiles(191,192)）
+        var shaftKeys = new List<long>(); var shaftSet = new HashSet<long>();
+        if (r.NextDouble() <= 0.3333333)
+        {
+            int sy0 = resultY + 10, syH = oy - resultY - 9;
+            for (int j = 0; j < syH; j++)
+            {
+                MbBlot(ox, sy0 + j, 2, 2, 2, 2, 0.2);
+                foreach (var (px, py) in blot)
+                {
+                    if (!QQInW(px, py)) continue;
+                    int i = py * W + px;
+                    if (act[i] != 0 && (typ[i] == 191 || typ[i] == 192)) continue;
+                    act[i] = 0; slope[i] = 0; half[i] = 0;
+                    long k = MbKey(px - ox, py - sy0);
+                    if (shaftSet.Add(k)) shaftKeys.Add(k);
+                }
+            }
+            foreach (var k in shaftKeys)
+            {
+                int dx = (int)(k % 1024) - 256, dy = (int)(k / 1024) - 256;
+                for (int i = -1; i <= 1; i++)
+                    for (int j = -1; j <= 1; j++)
+                    {
+                        int px = ox + dx + i, py = sy0 + dy + j;
+                        if (!QQInW(px, py)) continue;
+                        int i2 = py * W + px;
+                        if (act[i2] == 0 || typ[i2] != 53) continue;
+                        typ[i2] = 397; frX[i2] = 0; frY[i2] = 0;
+                    }
+            }
+        }
+        // ⑮ 土丘剑（ChanceOfRealSword=1.0 恒真——掷保留）
+        bool realSword = r.NextDouble() <= 1.0;
+        {
+            ushort swordTile = realSword ? (ushort)187 : (ushort)186;
+            int swordStyle = realSword ? 17 : 15;
+            int sx = point2X, sy = point2Y - 15;
+            for (int dx = 0; dx < 3; dx++)
+                for (int dy = 0; dy < 2; dy++)
+                    MbSetTile(sx + dx, sy - 1 + dy, swordTile, swordStyle * 54 + dx * 18, dy * 18);
+        }
+        // ⑯ 土丘表面草（ActionGrass：目标格与上格皆空 → Next(2) 选 3/73）
+        foreach (var k in moundKeys)
+        {
+            int dx = (int)(k % 1024) - 256, dy = (int)(k / 1024) - 256;
+            int gx = point2X + dx, gy = point2Y + dy - 1;
+            if (!QQInW(gx, gy)) continue;
+            int gi = gy * W + gx;
+            if (act[gi] == 0 || typ[gi] != 2) continue;
+            int px = gx, py = gy - 1;
+            if (!QQInW(px, py) || !QQInW(px, py - 1)) continue;
+            if (act[py * W + px] != 0 || act[(py - 1) * W + px] != 0) continue;
+            MbSetTile(px, py, (int)r.Next(2) == 0 ? (ushort)3 : (ushort)73, 0, 0);
+        }
+        // ⑰ AddProtectedStructure(rect1, 10)
+        QQAddProt(rx0, pointY - 20, rx0 + (int)Math.Truncate(40 * num5), pointY + 20, 10);
+        return true;
+    }
+    {
+        int swordAttempts = (int)r.Next(MbScW(1), MbScW(2) + 1);
+        for (int i = 0; i < swordAttempts; i++)
+        {
+            if (!(r.NextDouble() < 0.5))
+            {
+                for (int t = 0; t <= W; t++)
+                {
+                    int oy = worldSurface + (int)r.Next(50, 100);
+                    int ox = (int)r.Next(2) == 0
+                        ? (int)r.Next(50, (int)Math.Floor(W * 0.3))
+                        : (int)r.Next((int)Math.Floor(W * 0.7), W - 50);
+                    if (MbPlaceSwordShrine(ox, oy)) break;
+                }
+            }
+        }
+        if (mbTrace != 0) Console.WriteLine($"MB sword attempts={swordAttempts}");
+    }
+
+    // ═══ 3. Campsites（cs:21915-21936）═══
+    bool MbPlaceLargePile(int x, int y)
+    {
+        for (int dx = 0; dx < 3; dx++)
+        {
+            if (!QQInW(x + dx, y)) return false;
+            int gi = y * W + x + dx;
+            if (!MbSolidAt(x + dx, y) || half[gi] == 1 || (slope[gi] >= 1 && slope[gi] <= 2)) return false;
+        }
+        for (int dx = 0; dx < 3; dx++)
+            for (int dy = 0; dy < 2; dy++)
+            {
+                if (!QQInW(x + dx, y - 1 + dy)) continue;
+                if (act[(y - 1 + dy) * W + x + dx] != 0) continue;   // 仅落空格
+                MbSetTile(x + dx, y - 1 + dy, 186, dx * 18, dy * 18);
+            }
+        return true;
+    }
+    bool MbPlaceCampsite(int ox, int oy)
+    {
+        {
+            int total = 0, solid = 0;
+            const int cr = 10; int rr = (cr + 1) * (cr + 1);
+            for (int dy = -cr; dy <= cr; dy++)
+            {
+                int half2 = Math.Min(cr, (int)Math.Truncate(Math.Sqrt(rr - (double)dy * dy)));
+                for (int dx = -half2; dx <= half2; dx++)
+                {
+                    total++;
+                    if (MbSolidAt(ox + dx, oy + dy)) solid++;
+                }
+            }
+            if (solid < total - 5) return false;
+        }
+        int num = (int)r.Next(6, 10), num2 = (int)r.Next(1, 5);
+        if (!QQCanPlace(ox - num, oy - num, ox + num + 1, oy + num + 1, 0)) return false;
+        {
+            int n3 = num + 3;
+            for (int dx = -n3; dx <= n3; dx++)
+                for (int dy = -n3; dy <= n3; dy++)
+                {
+                    if (!QQInW(ox + dx, oy + dy)) continue;
+                    int i = (oy + dy) * W + ox + dx;
+                    if (act[i] == 0) continue;
+                    ushort t = typ[i];
+                    if (t == 226 || t == 237) return false;
+                    if (t == 41 || t == 43 || t == 44) return false;
+                    if (MB_CONTAINER.Contains(t)) return false;
+                }
+        }
+        int wallType = 196 + (int)r.Next(0, 4);
+        for (int dx = -num; dx <= num; dx++)
+            for (int dy = -num; dy <= num; dy++)
+            {
+                if (!QQInW(ox + dx, oy + dy)) continue;
+                int i = (oy + dy) * W + ox + dx;
+                if (act[i] == 0) continue;
+                ushort t = typ[i];
+                if (t == 53 || t == 396 || t == 397 || t == 404) wallType = 171;    // 沙/沙岩/硬化沙/化石
+                else if (t == 147 || t == 161) wallType = 40;
+                else if (t == 60) wallType = 204 + (int)r.Next(0, 4);
+                else if (t == 367) wallType = 178;
+                else if (t == 368) wallType = 180;
+            }
+        // Slime(num) + Blotches(num2,num2,num2,1,1.0)
+        var dataKeys = new List<long>(); var dataSet = new HashSet<long>();
+        int r2c = (num + 1) * (num + 1);
+        var slimeRows = new List<(int dy, int half)>();
+        for (int dy = -num; dy <= 0; dy++)
+            slimeRows.Add((dy, Math.Min(num, (int)Math.Truncate(Math.Sqrt(r2c - (double)dy * dy)))));
+        for (int k = 1; k <= (int)Math.Truncate(num * 0.5) - 1; k++)
+        {
+            int d2 = k * 2;
+            slimeRows.Add((k, Math.Min(num, (int)Math.Truncate(Math.Sqrt(r2c - (double)d2 * d2)))));
+        }
+        foreach (var (dy, half2) in slimeRows)
+        {
+            for (int dx = -half2; dx <= half2; dx++)
+            {
+                r.NextDouble();                                   // Blotches 丢弃掷
+                r.NextDouble();                                   // chance=1.0 比较掷
+                int bx0 = (int)r.Next(1 - num2, 1), bx1 = (int)r.Next(0, num2);
+                int by0 = (int)r.Next(1 - num2, 1), by1 = (int)r.Next(0, 1);
+                for (int bi = bx0; bi <= bx1; bi++)
+                    for (int bj = by0; bj <= by1; bj++)
+                    {
+                        int px = ox + dx + bi, py = oy + dy + bj;
+                        long key = (long)py * W + px;
+                        if (dataSet.Add(key)) dataKeys.Add(key);
+                        if (QQInW(px, py - 2))
+                        {
+                            int ui = (py - 2) * W + px;
+                            if (act[ui] != 0 && typ[ui] == 53) typ[ui] = 397;
+                        }
+                        if (QQInW(px, py) && wal[py * W + px] == 0) wal[py * W + px] = (ushort)wallType;
+                    }
+            }
+        }
+        foreach (var key in dataKeys)
+        {
+            int px = (int)(key % W), py = (int)(key / W);
+            if (!QQInW(px, py)) continue;
+            int i = py * W + px;
+            act[i] = 0; liq[i] = 0; liqT[i] = 0;
+            if (wal[i] == 0) wal[i] = (ushort)wallType;
+        }
+        int groundY = oy;
+        {
+            bool found = false;
+            for (int k = 0; k < 10 && !found; k++)
+                if (MbSolidAt(ox, oy + k)) { groundY = oy + k; found = true; }
+            if (!found) return false;
+        }
+        int num4 = groundY - 1;
+        bool flag = r.Next() % 2 == 0;
+        if (r.Next() % 10 != 0)
+        {
+            int num5 = (int)r.Next(1, 4);
+            int num6 = flag ? 4 : -(int)Math.Truncate(num / 2.0);
+            for (int m = 0; m < num5; m++)
+            {
+                int num7 = (int)r.Next(1, 3);
+                for (int n = 0; n < num7; n++)
+                {
+                    int px = ox + num6 - m, py = num4 - n;
+                    if (QQInW(px, py) && act[py * W + px] == 0 && MbSolidAt(px, py + 1))
+                        MbSetTile(px, py, 332, 0, 0);
+                }
+            }
+        }
+        int num8 = (num - 3) * (flag ? -1 : 1);
+        if (r.Next() % 10 != 0) MbPlaceLargePile(ox + num8, num4);
+        if (r.Next() % 10 != 0)
+        {
+            bool ok = true;
+            for (int dx = 0; dx < 3 && ok; dx++)
+                for (int dy = -1; dy <= 0; dy++)
+                    if (!QQInW(ox + dx, num4 + dy) || act[(num4 + dy) * W + ox + dx] != 0) { ok = false; break; }
+            if (ok)
+                for (int dx = 0; dx < 3; dx++)
+                    for (int dy = -1; dy <= 0; dy++)
+                        MbSetTile(ox + dx, num4 + dy, 215, dx * 18, (dy + 1) * 18);
+        }
+        QQAddProt(ox - num, oy - num, ox + num + 1, oy + num + 1, 4);
+        return true;
+    }
+    {
+        int campCount = (int)r.Next(Math.Max(1, (int)Math.Truncate(mbAreaScale * 6)), Math.Max(1, (int)Math.Truncate(mbAreaScale * 11)) + 1);
+        int placed = 0, tries = 0;
+        while (placed < campCount)
+        {
+            if (++tries > 1000) break;
+            int ox = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
+            int oy = (int)r.Next(worldSurface, H - 200);
+            if (MbPlaceCampsite(ox, oy)) placed++;
+        }
+        if (mbTrace != 0) Console.WriteLine($"MB campsites placed={placed}/{campCount}");
+    }
+
+    // ═══ 4. Mining Explosives（cs:21951-21975）═══
+    bool MbPlaceMiningExplosives(int ox, int oy)
+    {
+        if (MbSolidAt(ox, oy)) return false;
+        if (QQInW(ox, oy))
+        {
+            ushort wl = wal[oy * W + ox];
+            if (wl == 216 || wl == 187) return false;
+        }
+        int[] barTypes = { oreAu, oreAg, oreFe, oreCu };
+        ushort barType = (ushort)barTypes[(int)r.Next(0, 4)];
+        double dir = r.NextDouble() * 2 - 1;
+        int x = ox, y = oy;
+        {
+            int step = dir > 0 ? 1 : -1;
+            bool found = false;
+            for (int k = 0; k < 40 && !found; k++) { x += step; if (MbSolidAt(x, y)) found = true; }
+            if (!found) return false;
+        }
+        {
+            bool found = false;
+            for (int k = 0; k < 80 && !found; k++) { y++; if (MbSolidAt(x, y)) found = true; }
+            if (!found) return false;
+        }
+        // ShapeRunner(10,20,(dir,1)) + Blotches(2,0.3) 矿石地板
+        var dataKeys = new List<long>(); var dataSet = new HashSet<long>();
+        int total = 0, solid = 0;
+        {
+            double steps = 20.0, strength = 10.0;
+            double px = x, py = y;
+            double vx = dir, vy = 1.0;
+            while (steps > 0 && strength > 0)
+            {
+                strength = 10 * (steps / 20);
+                steps -= 1;
+                int bx0 = Math.Max(1, (int)Math.Truncate(px - strength * 0.5)), by0 = Math.Max(1, (int)Math.Truncate(py - strength * 0.5));
+                int bx1 = Math.Min(W, (int)Math.Truncate(px + strength * 0.5)), by1 = Math.Min(H, (int)Math.Truncate(py + strength * 0.5));
+                for (int i = bx0; i < bx1; i++)
+                    for (int j = by0; j < by1; j++)
+                    {
+                        if (Math.Abs(i - px) + Math.Abs(j - py) >= strength * 0.5 * (1 + (int)r.Next(-10, 11) * 0.015)) continue;
+                        r.NextDouble();
+                        var pts = new List<(int qx, int qy)>();
+                        if (r.NextDouble() < 0.3)
+                        {
+                            int ox0 = (int)r.Next(-1, 1), ox1 = (int)r.Next(0, 2), oy0 = (int)r.Next(-1, 1), oy1 = (int)r.Next(0, 2);
+                            for (int bi = ox0; bi <= ox1; bi++) for (int bj = oy0; bj <= oy1; bj++) pts.Add((i + bi, j + bj));
+                        }
+                        else pts.Add((i, j));
+                        foreach (var (qx, qy) in pts)
+                        {
+                            long key = (long)qy * W + qx;
+                            if (dataSet.Add(key)) dataKeys.Add(key);
+                            total++;
+                            if (MbSolidAt(qx, qy)) solid++;
+                        }
+                    }
+                int n8 = (int)Math.Truncate(strength / 50) + 1;
+                steps -= n8;
+                px += vx; py += vy;
+                for (int k = 0; k < n8; k++) { px += vx; py += vy; vx += r.NextDouble() - 0.5; vy += r.NextDouble() - 0.5; }
+                vx += r.NextDouble() - 0.5; vy += r.NextDouble() - 0.5;
+                vx = Math.Max(-1, Math.Min(1, vx));
+                vy = Math.Max(-1, Math.Min(1, vy));
+            }
+        }
+        if (solid < (int)Math.Truncate(total / 2.0)) return false;
+        if (!QQCanPlace(x - 15, y - 10, x + 15, y + 10, 0)) return false;
+        foreach (var key in dataKeys)
+        {
+            int qx = (int)(key % W), qy = (int)(key / W);
+            if (!QQInW(qx, qy)) continue;
+            int i = qy * W + qx;
+            typ[i] = barType; act[i] = 1;
+        }
+        // Circle(5)+Blotches(2,0.3) 挖房（中心=(x-trunc(-dir*5), y-5)）
+        {
+            int cx = x - (int)Math.Truncate(-dir * 5), cy = y - 5;
+            const int cr = 5; int rr = (cr + 1) * (cr + 1);
+            for (int dy = -cr; dy <= cr; dy++)
+            {
+                int half2 = Math.Min(cr, (int)Math.Truncate(Math.Sqrt(rr - (double)dy * dy)));
+                for (int dx = -half2; dx <= half2; dx++)
+                {
+                    r.NextDouble();
+                    var pts = new List<(int qx, int qy)>();
+                    if (r.NextDouble() < 0.3)
+                    {
+                        int ox0 = (int)r.Next(-1, 1), ox1 = (int)r.Next(0, 2), oy0 = (int)r.Next(-1, 1), oy1 = (int)r.Next(0, 2);
+                        for (int bi = ox0; bi <= ox1; bi++) for (int bj = oy0; bj <= oy1; bj++) pts.Add((cx + dx + bi, cy + dy + bj));
+                    }
+                    else pts.Add((cx + dx, cy + dy));
+                    foreach (var (qx, qy) in pts)
+                        if (QQInW(qx, qy)) act[qy * W + qx] = 0;      // ClearTile（幽灵保留）
+                }
+            }
+        }
+        int MbFindDown(int fx, int fy)
+        {
+            for (int k = 0; k < 10; k++) if (MbSolidAt(fx, fy + k)) return fy + k;
+            return -1;
+        }
+        int barX = x - (dir > 0 ? 3 : -3);
+        int num3 = (int)r.Next(0, 4) == 0 ? 3 : 7;
+        int detX = x - (dir > 0 ? -num3 : num3);
+        int barGround = MbFindDown(barX, y - 3);
+        int detGround = MbFindDown(detX, y - 3);
+        if (barGround < 0 || detGround < 0) return false;
+        barGround--;
+        int detTop = detGround - 1;
+        for (int i = -1; i <= 1; i++)
+        {
+            int px = detX + i, py = detTop;
+            if (QQInW(px, py)) act[py * W + px] = 0;
+            int below = detTop + 1;
+            if (QQInW(px, below) && !MbSolidAt(px, below)) { typ[below * W + px] = 1; act[below * W + px] = 1; }
+        }
+        if (QQInW(barX, barGround) && act[barGround * W + barX] == 0)
+            MbSetTile(barX, barGround, 141, 0, 0);
+        for (int dx = 0; dx < 2; dx++)
+            for (int dy = 0; dy < 2; dy++)
+                MbSetTile(detX + dx, detTop + dy, 411, dx * 18, dy * 18);
+        {
+            int sx = Math.Min(barX, detX), ex = Math.Max(barX, detX);
+            int sy = Math.Min(barGround, detTop), ey = Math.Max(barGround, detTop);
+            for (int i = sx; i <= ex; i++) if (QQInW(i, barGround)) mbWire[barGround * W + i] |= MB_RED;
+            for (int j = sy; j <= ey; j++) if (QQInW(detX, j)) mbWire[j * W + detX] |= MB_RED;
+        }
+        QQAddProt(x - 15, y - 10, x + 15, y + 10, 5);
+        return true;
+    }
+    {
+        int trapCount = (int)r.Next(Math.Max(1, (int)Math.Truncate(mbAreaScale * 14)), Math.Max(1, (int)Math.Truncate(mbAreaScale * 29)) + 1);
+        // getGoodWorld/noTraps ×1.5 分支不建模（特殊种子，备案）
+        int placed = 0, tries = 0;
+        while (placed < trapCount)
+        {
+            if (++tries > 3000) break;
+            int ox = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
+            int oy = (int)r.Next(rockLayer, H - 200);
+            if (MbPlaceMiningExplosives(ox, oy)) placed++;
+        }
+        if (mbTrace != 0) Console.WriteLine($"MB mines placed={placed}/{trapCount}");
+    }
+
+    // ═══ 4.5 Mahogany Trees（cs:22052-22077 + MahoganyTreeBiome.cs）═══
+    const double MB_PI_F = 3.1415927410125732;
+    var MB_MAHOGANY_SKIP = new HashSet<ushort> { 21, 467, 226, 237 };
+    var MB_LEAF_SKIP = new HashSet<ushort> { 383, 21, 467, 226, 237 };
+    // Prefix(-1) 耗掷模型（BuriedChestsPass 常春藤箱路径所需）
+    int[] MB_PRE_ACC = { 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80 };
+    int[] MB_PRE_SWORDS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 81 };
+    int[] MB_PRE_GUNS = { 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 58, 36, 37, 38, 53, 54, 55, 39, 40, 56, 41, 57, 42, 44, 45, 46, 47, 48, 49, 50, 51, 59, 60, 61, 82 };
+    var MB_PRE_REDUCED = new HashSet<int> { 7, 8, 9, 10, 11, 22, 23, 24, 29, 30, 31, 39, 40, 56, 41, 47, 48, 49 };
+    // 乘子表 [dmg,kb,spd,mcst]（float32 域；0=无条目恒通过——62-80 配饰池全无）
+    var MB_PRE_MULT = new Dictionary<int, (float dmg, float kb, float spd, float mcst)> {
+        [3]=(1.05f,1,1,1), [4]=(1.1f,1.1f,1,1), [5]=(1.15f,1,1,1), [6]=(1.1f,1,1,1),
+        [8]=(0.85f,0.85f,1,1), [10]=(0.85f,1,1,1), [11]=(1,0.9f,1.1f,1), [12]=(1.05f,1.1f,1.15f,1),
+        [13]=(0.9f,0.8f,1,1), [14]=(1,1.15f,1.1f,1), [15]=(1,0.9f,0.85f,1), [16]=(1.1f,1,1,1),
+        [17]=(1,1,0.85f,1), [18]=(1,1,0.9f,1), [19]=(1,1.15f,1,1), [20]=(1.1f,1.05f,0.95f,1),
+        [21]=(1.1f,1.15f,1,1), [22]=(0.85f,0.9f,1,1), [23]=(1,1,1.15f,1), [24]=(1,0.8f,1.1f,1),
+        [25]=(1.15f,1,1.1f,1), [58]=(0.85f,1,0.85f,1), [26]=(1.1f,1,1,0.85f), [27]=(1,1,1,0.85f),
+        [28]=(1.15f,1.05f,1,0.85f), [29]=(1,1,1,1.1f), [30]=(0.9f,1,1,1.2f), [31]=(0.9f,0.9f,1,1),
+        [32]=(1.1f,1,1,1.15f), [33]=(1,1.1f,0.9f,1.1f), [34]=(1.1f,1.1f,1.1f,0.9f), [35]=(1.15f,1.15f,1,1.2f),
+        [52]=(0.9f,1,0.9f,0.9f), [81]=(1.15f,1.15f,0.9f,1), [82]=(1.15f,1.15f,0.9f,1), [83]=(1.15f,1.15f,0.9f,0.9f),
+        [37]=(1.1f,1.1f,1,1), [38]=(1,1.15f,1,1), [53]=(1.1f,1,1,1), [54]=(1,1.15f,1,1), [55]=(1.05f,1.15f,1,1),
+        [56]=(1,0.8f,1,1), [57]=(1.18f,0.9f,1,1), [59]=(1.15f,1.15f,1,1), [60]=(1.15f,1,1,1),
+        [39]=(0.7f,0.8f,1,1), [40]=(0.85f,1,1,1), [41]=(0.9f,0.85f,1,1), [42]=(1,1,0.9f,1),
+        [43]=(1.1f,1,0.9f,1), [44]=(1,1,0.9f,1), [45]=(1,1,0.95f,1), [46]=(1.07f,1,0.94f,1),
+        [47]=(1,1,1.15f,1), [48]=(1,1,1.2f,1), [49]=(1,1,1.08f,1), [50]=(0.8f,1,1.15f,1), [51]=(1.05f,0.9f,0.9f,1),
+    };
+    // 常春藤主件 per-item 基础属性（213/964 有四失败门；211/212/3017=acc 无）
+    var MB_PRE_STATS = new Dictionary<int, (int d, int ua, int mana, bool kb0)> {
+        [213] = (7, 25, 0, false), [964] = (14, 40, 0, false),
+    };
+    bool MbNetRoundEq(int b, float mult) => Math.Round((double)((float)b * mult), MidpointRounding.ToEven) == b;
+    bool MbPrefixFails(int rolled, int item)
+    {
+        if (!MB_PRE_STATS.TryGetValue(item, out var s)) return false;
+        if (!MB_PRE_MULT.TryGetValue(rolled, out var m)) return false;
+        if (m.dmg != 1f && MbNetRoundEq(s.d, m.dmg)) return true;
+        if (m.spd != 1f && MbNetRoundEq(s.ua, m.spd)) return true;
+        if (m.mcst != 1f && MbNetRoundEq(s.mana, m.mcst)) return true;
+        if (m.kb != 1f && s.kb0) return true;
+        return false;
+    }
+    void MbPrefixRolls(int item)
+    {
+        int cls = item switch { 211 or 212 or 3017 => 1, 213 => 2, 964 => 3, _ => 0 };   // acc/swords/guns；其余零掷
+        if (cls == 0) return;
+        int[] arr = cls == 1 ? MB_PRE_ACC : cls == 2 ? MB_PRE_SWORDS : MB_PRE_GUNS;
+        int rolled = -1;
+        for (bool loop = true; loop; )
+        {
+            loop = false;
+            if (rolled == -1 && (int)r.Next(4) == 0) rolled = 0;
+            if (rolled == -1) rolled = arr[(int)r.Next(0, arr.Length)];
+            if (MB_PRE_REDUCED.Contains(rolled) && (int)r.Next(3) != 0) rolled = 0;
+            if (MbPrefixFails(rolled, item)) { loop = true; rolled = -1; }
+        }
+    }
+    int mbJungleItemIdx = 0;    // gs.jungleItemIdx（探针实证链内先序消费=0）
+    int MbNextJungleItem()
+    {
+        int[] seq = { 211, 212, 213, 964 };
+        int result = seq[mbJungleItemIdx % 4];
+        if ((int)r.Next(50) == 0) result = 753;
+        else if ((int)r.Next(15) == 0) result = 2292;
+        else if ((int)r.Next(20) == 0) result = 3017;
+        mbJungleItemIdx++;
+        return result;
+    }
+    // placeBuriedChest 常春藤路径（style10 显式、mainId>0、trySlope=false）
+    var MB_PC_BOULDERS = new HashSet<ushort> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
+    var MB_PC_TILE_CUT = new HashSet<ushort> { 3, 24, 28, 32, 51, 52, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 201, 205, 231, 236, 254, 352, 382, 444, 454, 484, 485, 518, 519, 528, 529, 549, 636, 637, 638, 654, 655, 711 };
+    var MB_PC_BREAK = new HashSet<ushort> { 324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624 };
+    var MB_PC_SOLID_TOP = new HashSet<ushort> { 14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+        285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+        405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+        601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710 };
+    var MB_PC_NO_ATTACH = new HashSet<ushort> { 3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 507, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707 };
+    var MB_PC_ANCH_INVALID = new HashSet<ushort> { 127, 138, 664, 665, 484, 711, 712, 713, 714, 715, 716 };
+    var MB_PC_PLATFORMS = new HashSet<ushort> { 19, 427, 435, 436, 437, 438, 439 };
+    var MB_PC_TABLE = new HashSet<ushort> { 14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 281, 285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 435, 436, 437, 438, 439, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710 };
+    bool MbIvySolidTile(int x, int y)   // HalfBrickPass.solidTile（genSolidType 口径）
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        if (act[i] == 0) return false;
+        return MbGenSolidCore(typ[i]) && !MB_PLATFORM.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+    }
+    bool MbChestLegOK(int lx, int ly)
+    {
+        if (!QQInW(lx, ly)) return false;
+        int i = ly * W + lx;
+        if (act[i] == 0) return false;
+        ushort sheet = typ[i];
+        bool blockType0 = half[i] == 0 && slope[i] == 0;
+        if (blockType0 && MbGenSolidCore(sheet) && !MB_PC_SOLID_TOP.Contains(sheet) && !MB_PC_NO_ATTACH.Contains(sheet) && !MB_PC_ANCH_INVALID.Contains(sheet)) return true;
+        if (MB_PC_PLATFORMS.Contains(sheet)) return !MB_PC_ANCH_INVALID.Contains(sheet) && half[i] == 0;
+        if (MbGenSolidCore(sheet) && MB_PC_SOLID_TOP.Contains(sheet)) return true;
+        if (MB_PC_TABLE.Contains(sheet)) return blockType0;
+        return false;
+    }
+    // 战利品掷骰（rollChestLoot 常春藤路径：ivy flag、mainId>0——物品不入哈希只保流；
+    //   surface 分支不可达（wooden/sky/pyramid 均否），gold/cave/hell 三分支+尾段按
+    //   cs:36283-37560 原序）
+    void MbRollIvyLoot(int gy, int mainId, bool flagDungeon)
+    {
+        void MbDungeonGates()
+        {
+            // flag9 门（首暗影钥匙必给后 1/3；Ram Rune 1/8 带 Prefix）
+            if (!genShadowKey || (int)r.Next(3) == 0) genShadowKey = true;
+            if (!genRamRune || (int)r.Next(8) == 0) { genRamRune = true; MbPrefixRolls(5465); }
+        }
+        MbPrefixRolls(mainId);
+        bool isGold = gy < rockLayer;
+        if (isGold)
+        {
+            // gold：mainId 段后 water/flag12/mushroom 全否 → 直入 dungeon 门
+            if (flagDungeon) MbDungeonGates();
+            if ((int)r.Next(3) == 0) r.Next(10, 20);                                    // 炸弹 166 [10,19]
+            if ((int)r.Next(5) == 0) { }                                                // 天使雕像（无掷）
+            if ((int)r.Next(3) == 0) r.Next(50, 101);                                   // 绳 [50,100]
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(3, 11); }                      // 锭 [3,10]
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(25, 50); }                     // 箭 [25,49]
+            if ((int)r.Next(2) == 0) r.Next(3, 6);                                      // 药水
+            if ((int)r.Next(3) > 0) { r.Next(9); r.Next(2, 3); }
+            if ((int)r.Next(3) != 0) r.Next(3, 5);                                      // 回城
+            if ((int)r.Next(2) == 0) r.Next(11, 21);                                    // 火把 [10,20]
+            if ((int)r.Next(2) == 0) r.Next(51, 90);                                    // 银币 [50,89]
+        }
+        else if (gy <= H - 250)
+        {
+            // cave：ivy 段在前，dungeon 门在后（cs:433-461 原序）
+            if (!genMahogany || (int)r.Next(5) == 0) genMahogany = true;                 // ivy wands 门
+            if ((int)r.Next(10) == 0) { }                                                // 4426 1/10
+            if ((int)r.Next(10) == 0) { }                                                // 5525 1/10
+            if (flagDungeon) MbDungeonGates();
+            if ((int)r.Next(5) == 0) { }                                                 // 43 1/5
+            if ((int)r.Next(3) == 0) { }                                                 // 167 1/3
+            if ((int)r.Next(5) == 0) r.Next(25, 51);                                     // 51 [25,50]
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(3, 11); }                       // 锭
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(25, 51); }                      // 烈焰箭
+            if ((int)r.Next(2) == 0) r.Next(3, 6);                                       // 188
+            if ((int)r.Next(3) > 0) { r.Next(6); r.Next(2, 3); }
+            if ((int)r.Next(3) > 1) { r.Next(6); r.Next(2, 3); }
+            if ((int)r.Next(2) == 0) r.Next(3, 5);                                       // 回城
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(16, 31); }                      // 火把/荧光棒 [15,30]
+            if ((int)r.Next(2) == 0) r.Next(2, 3);                                       // 金币 [1,2]
+        }
+        else
+        {
+            // hell（gy>h-250）：mainId 段（5010/4443/4737/4551）+ 尾
+            if ((int)r.Next(5) == 0) MbPrefixRolls(5010);                                // 5010 带 Prefix
+            if ((int)r.Next(10) == 0) { }                                                // 4443
+            if ((int)r.Next(10) == 0) { }                                                // 4737
+            if ((int)r.Next(10) == 0) { }                                                // 4551
+            if ((int)r.Next(3) == 0) { }                                                 // 167
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }                      // 陨铁/金锭 [15,29]
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(50, 75); }                      // 箭矢 [50,74]
+            if ((int)r.Next(2) == 0) r.Next(15, 21);                                     // 227 [15,20]
+            if ((int)r.Next(3) > 0) { r.Next(8); r.Next(2, 3); }
+            if ((int)r.Next(3) > 0) { r.Next(8); r.Next(2, 3); }
+            if ((int)r.Next(3) == 0) { r.Next(2, 3); r.Next(2); }                        // 回城/回归
+            if ((int)r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }                      // 火把/荧光棒
+            if ((int)r.Next(2) == 0) r.Next(2, 5);                                       // 金币 [2,4]
+        }
+        // 尾段
+        if ((int)r.Next(4) == 0) { }                                                     // ivy 2204 1/4
+        if (flagDungeon && (int)r.Next(8) == 0) { }                                      // 2192 1/8
+        if ((int)r.Next(12) == 0) r.Next(14);                                            // voice
+    }
+    bool MbPlaceBuriedChestIvy(int i, int j)
+    {
+        int gy = j;
+        for (; gy < H - 10; gy++)
+        {
+            int k = gy * W + i;
+            if (liq[k] > 0 && liqT[k] == 3) return false;                // shimmer（oracle 编码 3）
+            if (act[k] != 0 && typ[k] == 231) return false;              // 幼虫
+            bool bad = false;
+            for (int dx = -2; dx <= 2 && !bad; dx++)
+                for (int dy = -2; dy <= 2; dy++)
+                {
+                    int xx = i + dx, yy = gy + dy;
+                    if (xx < 100 || yy < 100 || xx >= W - 100 || yy >= H - 100) continue;
+                    int kk = yy * W + xx;
+                    if (act[kk] != 0 && (MB_PC_BOULDERS.Contains(typ[kk]) || typ[kk] == 26 || typ[kk] == 237)) { bad = true; break; }
+                }
+            if (bad) return false;
+            if (MbIvySolidTile(i, gy)) break;
+        }
+        if (gy >= H - 10) return false;
+        if (!MbIvySolidTile(i, gy)) return false;
+        int mainId = MbNextJungleItem();
+        bool flagDungeon = gy >= worldSurface && WALL_DUNGEON.Contains(wal[gy * W + i]);   // style=10≠0、tile21
+        int topY = gy - 2;
+        if (topY < 1) return false;
+        {
+            bool ok = !(MB_PC_BOULDERS.Contains(typ[gy * W + i - 1]) || MB_PC_BOULDERS.Contains(typ[gy * W + i]));
+            if (ok) ok = i - 1 >= 5 && i + 1 <= W - 5 && topY >= 5 && topY + 2 <= H - 5;
+            for (int dx = -1; ok && dx <= 0; dx++)
+                for (int dy = 0; dy < 2; dy++)
+                {
+                    int x = i + dx, y = topY + dy;
+                    if (!QQInW(x, y)) { ok = false; break; }
+                    int k = y * W + x;
+                    if (liq[k] > 0 && liqT[k] == 1) { ok = false; break; }                // LavaPlacement
+                    if (act[k] == 0) continue;
+                    ushort sh = typ[k];
+                    if (!((MB_PC_TILE_CUT.Contains(sh) && sh != 484 && sh != 654) || MB_PC_BREAK.Contains(sh))) { ok = false; break; }
+                }
+            if (ok && !(MbChestLegOK(i - 1, gy) && MbChestLegOK(i, gy))) ok = false;
+            if (!ok) return false;
+            for (int dx = -1; dx <= 0; dx++)
+                for (int dy = 0; dy < 2; dy++)
+                {
+                    int x = i + dx, y = topY + dy;
+                    if (!QQInW(x, y)) continue;
+                    int k = y * W + x;
+                    typ[k] = 21; act[k] = 1;
+                    frX[k] = (ushort)(10 * 2 * 18 + (dx + 1) * 18); frY[k] = (ushort)(dy * 18);
+                }
+        }
+        MbRollIvyLoot(gy, mainId, flagDungeon);
+        return true;   // chest sink（world.chests）oracle 无消费者——不入册，备案
+    }
+    bool MbPlotLine(int x0, int y0, int x1, int y1, Action<int, int> plot, bool jump)
+    {
+        if (x0 == x1 && y0 == y1) { plot(x0, y0); return true; }
+        int sx0 = x0, sy0 = y0, sx1 = x1, sy1 = y1;
+        bool flag = Math.Abs(sy1 - sy0) > Math.Abs(sx1 - sx0);
+        if (flag)
+        {
+            int tx = sx0; sx0 = sy0; sy0 = tx;
+            int tx1 = sx1; sx1 = sy1; sy1 = tx1;
+        }
+        int num = Math.Abs(sx1 - sx0), num2 = Math.Abs(sy1 - sy0);
+        int num3 = (int)Math.Truncate(num / 2.0), num4 = sy0;
+        int num5 = sx0 < sx1 ? 1 : -1, num6 = sy0 < sy1 ? 1 : -1;
+        for (int i = sx0; i != sx1; i += num5)
+        {
+            plot(flag ? num4 : i, flag ? i : num4);
+            num3 -= num2;
+            if (num3 >= 0) continue;
+            num4 += num6;
+            if (!jump) plot(flag ? num4 : i, flag ? i : num4);   // JS plot 恒 true（quitOnFail=false）
+            num3 += num;
+        }
+        return true;
+    }
+    bool MbPlaceMahogany(int ox, int oy)
+    {
+        bool MbCondSolid(int x, int y)
+        {
+            if (x < 10 || y < 10 || x >= W - 10 || y >= H - 10) return false;
+            int i = y * W + x;
+            return act[i] != 0 && MbGenSolidFull(typ[i]);
+        }
+        int rx = -1, ry = -1;
+        {
+            int px = ox - 3;
+            bool found = false;
+            for (int i = 0; i < 200 && oy + i < H; i++)
+            {
+                int y = oy + i;
+                bool allSolid = true;
+                for (int k = px; k < px + 6 && allSolid; k++)
+                    if (!MbCondSolid(k, y)) allSolid = false;
+                if (allSolid) { rx = px; ry = y; found = true; break; }
+            }
+            if (!found) return false;
+        }
+        int r2y = -1;
+        {
+            int y0 = ry - 5;
+            bool found = false;
+            for (int i = 0; i < 120; i++)
+            {
+                int y = y0 - i;
+                bool anySolid = false;
+                for (int k = rx; k < rx + 6 && !anySolid; k++)
+                    if (MbCondSolid(k, y)) anySolid = true;
+                if (anySolid) { r2y = y; found = true; break; }
+            }
+            if (!found || ry - 5 - r2y > 60 || ry - r2y < 30) return false;
+        }
+        if (!QQCanPlace(rx - 30, ry - 60, rx + 30, ry + 30, 0)) return false;
+        // ④ 50×50 材质门（countIds=12 sheet 集；JS 按 idOf(sheet) 首内部 id 精确比对——
+        //   oracle sheet 直比等价，多内部 id sheet（0/3）网格只写规范 id，备案）
+        {
+            var countIds = new HashSet<ushort> { 0, 59, 60, 147, 161, 163, 200, 164, 1, 25, 203, 117 };
+            var counts = new Dictionary<ushort, int>();
+            for (int dx = 0; dx < 50; dx++)
+                for (int dy = 0; dy < 50; dy++)
+                {
+                    int x = rx - 25 + dx, y = ry - 25 + dy;
+                    if (!QQInW(x, y)) continue;
+                    int i = y * W + x;
+                    if (act[i] == 0 || !countIds.Contains(typ[i])) continue;
+                    counts[typ[i]] = counts.GetValueOrDefault(typ[i]) + 1;
+                }
+            int C(ushort t) => counts.GetValueOrDefault(t);
+            int numStone = C(1) + C(25) + C(203) + C(117);
+            int num2 = C(0) + numStone;
+            int num3 = C(59) + C(60);
+            int num4 = C(161) + C(163) + C(200) + C(164);
+            if (C(147) + num4 > num3 || num2 > num3 || num3 < 50) return false;
+        }
+        int num5 = (int)Math.Truncate((double)(ry - r2y - 9) / 5);
+        int num6 = num5 * 5;
+        int num7 = 0;
+        double num8 = r.NextDouble() + 1.0;
+        double num9 = r.NextDouble() + 2.0;
+        if ((int)r.Next(2) == 0) num9 = -num9;
+        void MbSetMahog(int x, int y)
+        {
+            if (!QQInW(x, y)) return;
+            int i = y * W + x;
+            if (act[i] != 0 && MB_MAHOGANY_SKIP.Contains(typ[i])) return;
+            if (wal[i] == 87) return;
+            wal[i] = 0; liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
+            typ[i] = 383; act[i] = 1;
+        }
+        void MbShaftCell(int x, int y)
+        {
+            if (!QQInW(x, y)) return;
+            int i = y * W + x;
+            if (act[i] != 0 && MB_MAHOGANY_SKIP.Contains(typ[i])) return;
+            if (wal[i] == 87) return;
+            act[i] = 0; slope[i] = 0; half[i] = 0;
+            wal[i] = 78;
+        }
+        void MbGenRect(int x, int y, int width, int height, Action<int, int> a)
+        {
+            for (int i = x; i < x + width; i++)
+                for (int j = y; j < y + height; j++) a(i, j);
+        }
+        for (int i = 0; i < num5; i++)
+        {
+            int num10 = (int)Math.Truncate(Math.Sin((i + 1) / 12.0 * num8 * MB_PI_F) * num9);
+            int num11 = num10 < num7 ? num10 - num7 : 0;
+            int span = Math.Abs(num10 - num7);
+            MbGenRect(rx + num7 + num11, ry - (i + 1) * 5, 6 + span, 7, MbSetMahog);
+            MbGenRect(rx + num7 + num11 + 2, ry - (i + 1) * 5, 2 + span, 5, MbShaftCell);
+            MbGenRect(rx + num7 + 2, ry - i * 5, 2, 2, MbShaftCell);
+            num7 = num10;
+        }
+        // ⑦⑧ 分枝 + 叶球
+        var endpoints = new List<(int x, int y)>();
+        void MbBranchCell(int x, int y)
+        {
+            if (!QQInW(x, y)) return;
+            int i = y * W + x;
+            if (act[i] != 0 && MB_MAHOGANY_SKIP.Contains(typ[i])) return;
+            if (wal[i] == 87) return;
+            liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
+            typ[i] = 383; act[i] = 1;
+        }
+        void MbShapeBranch(double angle, int distance, int bx, int by)
+        {
+            int offX = (int)Math.Truncate(Math.Cos(angle) * distance);
+            int offY = (int)Math.Truncate(Math.Sin(angle) * distance);
+            double len = Math.Sqrt((double)offX * offX + (double)offY * offY);
+            int size = (int)Math.Truncate(len / 6);
+            void PerformSegment(int sx, int sy, int ex, int ey, int seg)
+            {
+                int sz = Math.Max(1, seg);
+                for (int i = -(sz >> 1); i < sz - (sz >> 1); i++)
+                    for (int j = -(sz >> 1); j < sz - (sz >> 1); j++)
+                        MbPlotLine(sx + i, sy + j, ex, ey, MbBranchCell, false);
+            }
+            endpoints.Add((bx + offX, by + offY));
+            PerformSegment(bx, by, bx + offX, by + offY, size);
+            int segs = (int)Math.Truncate(len / 8);
+            for (int i = 0; i < segs; i++)
+            {
+                double num4 = (i + 1) / (double)(segs + 1);
+                int pX = (int)Math.Truncate(num4 * offX), pY = (int)Math.Truncate(num4 * offY);
+                int dx = offX - pX, dy = offY - pY;
+                double rot = (r.NextDouble() * 0.5 + 1.0) * ((int)r.Next(2) != 0 ? 1 : -1);
+                double vx = (dx * Math.Cos(rot) - dy * Math.Sin(rot)) * 0.75;
+                double vy = (dx * Math.Sin(rot) + dy * Math.Cos(rot)) * 0.75;
+                int p2x = (int)Math.Truncate(vx) + pX, p2y = (int)Math.Truncate(vy) + pY;
+                endpoints.Add((p2x + bx, p2y + by));
+                PerformSegment(pX + bx, pY + by, p2x + bx, p2y + by, size - 1);
+            }
+        }
+        int num12 = 6;
+        if (num9 < 0) num12 = 0;
+        for (int j = 0; j < 2; j++)
+        {
+            double num13 = (j + 1) / 3.0;
+            int num14 = num12 + (int)Math.Truncate(Math.Sin(num5 * num13 / 12.0 * num8 * MB_PI_F) * num9);
+            double num15 = r.NextDouble() * 0.7853981852531433 - 0.7853981852531433 - 0.2;
+            if (num12 == 0) num15 -= 1.5707963705062866;
+            MbShapeBranch(num15, (int)r.Next(12, 16), rx + num14, ry - (int)Math.Truncate(num5 * 5 * num13));
+            num12 = 6 - num12;
+        }
+        int num16 = (int)Math.Truncate(Math.Sin(num5 / 12.0 * num8 * MB_PI_F) * num9);
+        MbShapeBranch(-0.6853981852531433, (int)r.Next(16, 22), rx + 6 + num16, ry - num6);
+        MbShapeBranch(-2.45619455575943, (int)r.Next(16, 22), rx + num16, ry - num6);
+        foreach (var (cx, cy) in endpoints)
+        {
+            const int lr = 4; int lrr = (lr + 1) * (lr + 1);
+            for (int dy = -lr; dy <= lr; dy++)
+            {
+                int half2 = Math.Min(lr, (int)Math.Truncate(Math.Sqrt(lrr - (double)dy * dy)));
+                for (int dx = -half2; dx <= half2; dx++)
+                {
+                    r.NextDouble();
+                    var pts = new List<(int x, int y)>();
+                    if (r.NextDouble() < 0.3)
+                    {
+                        int bx0 = (int)r.Next(-3, 1), bx1 = (int)r.Next(0, 4), by0 = (int)r.Next(-1, 1), by1 = (int)r.Next(0, 2);
+                        for (int bi = bx0; bi <= bx1; bi++) for (int bj = by0; bj <= by1; bj++) pts.Add((cx + dx + bi, cy + dy + bj));
+                    }
+                    else pts.Add((cx + dx, cy + dy));
+                    foreach (var (lx, ly) in pts)
+                    {
+                        if (!QQInW(lx, ly)) continue;
+                        int i = ly * W + lx;
+                        if (act[i] != 0 && MB_LEAF_SKIP.Contains(typ[i])) continue;
+                        if (wal[i] == 78 || wal[i] == 87) continue;
+                        liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
+                        typ[i] = 384; act[i] = 1;
+                    }
+                }
+            }
+        }
+        // ⑨ 四条根
+        void MbRootCell(int x, int y)
+        {
+            if (!QQInW(x, y)) return;
+            int i = y * W + x;
+            if (act[i] != 0 && MB_MAHOGANY_SKIP.Contains(typ[i])) return;
+            if (wal[i] == 87) return;
+            liq[i] = 0; liqT[i] = 0; frX[i] = 0; frY[i] = 0; slope[i] = 0; half[i] = 0;
+            typ[i] = 383; act[i] = 1;
+        }
+        for (int k = 0; k < 4; k++)
+        {
+            double angle0 = k / 3.0 * 2 + 0.57075;
+            int distance = (int)r.Next(40, 60);
+            double num = rx, num2c = ry;
+            double angle = angle0;
+            for (int step = 0; step < distance * 0.85; step++)
+            {
+                double num4 = step / (double)distance;
+                double num5r = 4 + (1 - 4) * num4;
+                num += Math.Cos(angle);
+                num2c += Math.Sin(angle);
+                float f1 = (float)r.NextDouble(), f2 = (float)r.NextDouble();
+                angle += f1 - 0.5 + f2 * (angle0 - 1.5707963705062866) * 0.1 * (1 - num4);
+                double lim = 2 * (1 - 0.5 * num4);
+                double clamped = Math.Min(Math.Max(angle, angle0 - lim), angle0 + lim);
+                angle = angle * 0.4 + 0.45 * clamped + (angle0 + (1.5707963705062866 - angle0) * num4) * 0.15;
+                int n = (int)Math.Truncate(num5r);
+                for (int i = 0; i < n; i++)
+                    for (int j = 0; j < n; j++)
+                        MbRootCell((int)Math.Truncate(num) + i, (int)Math.Truncate(num2c) + j);
+            }
+        }
+        // ⑩ 常春藤箱（返回值原版丢弃）
+        MbPlaceBuriedChestIvy(rx + 3, ry - 1);
+        QQAddProt(rx - 30, ry - 30, rx + 30, ry + 30, 0);
+        return true;
+    }
+    {
+        int treeCount = (int)r.Next(MbScW(6), MbScW(11) + 1);
+        int mDone = 0, mTries = 0;
+        while (mDone < treeCount && mTries < 20000)
+        {
+            int ox = (int)r.Next(50, W - 50);
+            int oy = (int)r.Next(worldSurface + 50, H - 500);
+            if (MbPlaceMahogany(ox, oy)) mDone++;
+            mTries++;
+        }
+        if (mbTrace != 0) Console.WriteLine($"MB mahogany done={mDone}/{treeCount} tries={mTries}");
+    }
+
+    // ═══ 5. TrackGenerator（cs:22014-22091 + TrackPass.ts 全文镜像）═══
+    const int MB_TRACK_TILE = 314;
+    var MB_INVALID_WALLS = new HashSet<ushort> { 7, 94, 95, 8, 98, 99, 9, 96, 97, 3, 83, 68, 62, 78, 87, 86, 42, 74, 27, 149 };
+    var MB_INVALID_TILES = new HashSet<ushort> { 383, 384, 15, 304, 30, 321, 245, 246, 240, 241, 242, 16, 34, 158, 377, 94, 10, 19, 86, 219,
+        484, 190, 664, 665, 41, 43, 44, 226, 237, 711, 712, 713, 714, 715, 716, 379, 314 };
+    var MB_PLACE_BLOCKED = new HashSet<ushort> { 225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70, 151, 21, 31, 696, 467, 12, 665, 639,
+        138, 664, 711, 712, 713, 714, 715, 716 };
+    bool MbTrackSolidTile(int x, int y)   // TrackPass.solidTile（静态 solid 口径）
+    {
+        if (!QQInW(x, y)) return false;
+        int i = y * W + x;
+        return act[i] != 0 && MbStaticSolid(typ[i]) && !MB_PLATFORM.Contains(typ[i]) && half[i] == 0 && slope[i] == 0;
+    }
+    // TrackPlacementState / TrackSlope / TrackMode
+    const int MB_AVAILABLE = 0, MB_OBSTRUCTED = 1, MB_INVALID = 2;
+    const int MB_UP = -1, MB_STRAIGHT = 0, MB_DOWN = 1;
+    const int MB_MODE_NORMAL = 0, MB_MODE_TUNNEL = 1;
+    var mbTrackCells = new List<(int x, int y)>();    // 全图轨道格索引（IsTileNearby 全扫替代——布尔结果恒等）
+    var mbTrackSet = new HashSet<long>();
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+        {
+            int i = y * W + x;
+            if (act[i] != 0 && typ[i] == MB_TRACK_TILE) { mbTrackCells.Add((x, y)); mbTrackSet.Add((long)y * W + x); }
+        }
+    var mbStateCache = new Dictionary<long, int>();
+    bool MbIsTrackNearby(int x, int y, int distance)
+    {
+        if (mbTrackCells.Count == 0) return false;
+        foreach (var (cx, cy) in mbTrackCells)
+            if (cx >= x - distance && cx <= x + distance && cy >= y - distance && cy <= y + distance) return true;
+        return false;
+    }
+    bool MbLocationInvalid(int x, int y)
+    {
+        if (y > H - 200 || x < 5 || y < worldSurface || x > W - 5) return true;
+        if (shimmerXOut >= 0 && Math.Abs(x - shimmerXOut) < 150 / 2 && Math.Abs(y - shimmerYOut) < 150 / 2) return true;
+        double oceanLevel = ((double)worldSurface + rockLayer) / 2.0 + 40.0;
+        if (y <= oceanLevel && (x < BEACH_DISTANCE || x > W - BEACH_DISTANCE)) return true;
+        if (QQInW(x, y))
+        {
+            int idx = y * W + x;
+            if (MB_INVALID_WALLS.Contains(wal[idx])) return true;
+            if (act[idx] != 0 && MB_INVALID_TILES.Contains(typ[idx])) return true;
+        }
+        for (int k = -1; k <= 1; k++)
+        {
+            if (!QQInW(x + k, y)) return true;
+            int nidx = y * W + x + k;
+            if (act[nidx] != 0 && typ[nidx] != MB_TRACK_TILE && MB_PLACE_BLOCKED.Contains(typ[nidx])) return true;
+        }
+        return false;
+    }
+    int MbCalcState(int x, int y)
+    {
+        for (int i = 0; i < 6; i++) if (MbLocationInvalid(x, y - i)) return MB_INVALID;
+        for (int j = 0; j < 6; j++)
+        {
+            if (!QQInW(x, y + j)) return MB_INVALID;
+            int i = (y + j) * W + x;
+            if (act[i] != 0 && typ[i] == MB_TRACK_TILE) return MB_INVALID;
+        }
+        for (int k = 0; k < 6; k++) if (MbTrackSolidTile(x, y - k)) return MB_OBSTRUCTED;
+        if (MbIsTrackNearby(x, y, 30)) return MB_INVALID;
+        return MB_AVAILABLE;
+    }
+    int MbStateAt(int x, int y)
+    {
+        long key = (long)y * W + x;
+        if (mbStateCache.TryGetValue(key, out int st)) return st;
+        st = MbCalcState(x, y);
+        mbStateCache[key] = st;
+        return st;
+    }
+    bool MbCanSlopesTouch(int left, int right) => left != right && left != MB_STRAIGHT ? right == MB_STRAIGHT : true;
+    // TrackHistory（struct 值语义——rewrite 快照天然深拷贝）
+    var mbHist = new (int x, int y, int slope, int mode)[4096];
+    var mbRewrite = new (int x, int y, int slope, int mode)[25];
+    int mbXDir = 0, mbLen = 0, mbPlayerHeight = 6;   // playerHeight 实例字段跨 Place 残留（1:1）
+    void MbAppendToHistory(int slope, int mode = MB_MODE_NORMAL)
+    {
+        mbHist[mbLen] = (mbHist[mbLen - 1].x + mbXDir, mbHist[mbLen - 1].y + slope, slope, mode);
+        mbLen++;
+    }
+    void MbRewriteSlope(int index, int slope)
+    {
+        int delta = slope - mbHist[index].slope;
+        mbHist[index].slope = slope;
+        for (int i = index; i < mbLen; i++) mbHist[i].y += delta;
+    }
+    int MbSegmentState(int startIndex, int length)
+    {
+        int result = MB_AVAILABLE;
+        for (int i = startIndex; i < startIndex + length; i++)
+        {
+            int state = MbStateAt(mbHist[i].x, mbHist[i].y);
+            if (state == MB_INVALID) return MB_INVALID;
+            if (state == MB_OBSTRUCTED && mbHist[i].mode != MB_MODE_TUNNEL) result = MB_OBSTRUCTED;
+        }
+        return result;
+    }
+    int MbCreateTunnel()
+    {
+        int slope = MB_STRAIGHT, num = 10, result = MB_INVALID;
+        int x = mbHist[mbLen - 1].x, y = mbHist[mbLen - 1].y;
+        for (int s2 = MB_UP; s2 <= MB_DOWN; s2++)
+        {
+            int last = MB_INVALID;
+            for (int i = 1; i < num; i++)
+            {
+                last = MbStateAt(x + i * mbXDir, y + i * s2);
+                if (last == MB_OBSTRUCTED) continue;
+                if (last == MB_AVAILABLE) { slope = s2; num = i; result = last; }
+                break;
+            }
+            if (result != MB_AVAILABLE && last == MB_OBSTRUCTED && (result != MB_OBSTRUCTED || slope != MB_STRAIGHT))
+            { slope = s2; num = 10; result = last; }
+        }
+        if (mbLen == 0 || !MbCanSlopesTouch(mbHist[mbLen - 1].slope, slope)) MbRewriteSlope(mbLen - 1, MB_STRAIGHT);
+        mbHist[mbLen - 1].mode = MB_MODE_TUNNEL;
+        for (int j = 1; j < num; j++) MbAppendToHistory(slope, MB_MODE_TUNNEL);
+        return result;
+    }
+    int MbTryRewriteHistory()
+    {
+        int start = mbLen - 1;
+        int size = Math.Min(mbLen, 25);
+        for (int i = 0; i < size; i++) mbRewrite[i] = mbHist[start - i];
+        int num = start;
+        while (num >= mbLen - size)
+        {
+            if (mbHist[num].slope == MB_DOWN)
+            {
+                int state = MbSegmentState(num, mbLen - num);
+                if (state == MB_AVAILABLE) return state;
+                MbRewriteSlope(num, MB_STRAIGHT);
+            }
+            num--;
+        }
+        if (MbSegmentState(num + 1, mbLen - (num + 1)) == MB_AVAILABLE) return MB_AVAILABLE;
+        for (int m = mbLen - 1; m >= mbLen - size + 1; m--)
+        {
+            if (mbHist[m].slope == MB_STRAIGHT)
+            {
+                int state = MbSegmentState(mbLen - size, size);
+                if (state == MB_AVAILABLE) return state;
+                MbRewriteSlope(m, MB_UP);
+            }
+        }
+        for (int j = 0; j < size; j++) mbHist[mbLen - 1 - j] = mbRewrite[j];
+        MbRewriteSlope(mbLen - 1, MB_STRAIGHT);
+        return MbSegmentState(num + 1, mbLen - (num + 1));
+    }
+    void MbSmoothTrack()
+    {
+        int anchor = mbLen - 1;
+        bool flag = false;
+        for (int i = mbLen - 1; i >= 0; i--)
+        {
+            if (flag)
+            {
+                anchor = Math.Min(i + 15, anchor);
+                if (mbHist[i].y >= mbHist[anchor].y)
+                {
+                    for (int k = i + 1; mbHist[k].y > mbHist[i].y; k++)
+                    {
+                        mbHist[k].y = mbHist[i].y;
+                        mbHist[k].slope = MB_STRAIGHT;
+                    }
+                    if (mbHist[i].y == mbHist[anchor].y) flag = false;
+                }
+            }
+            else if (mbHist[i].y > mbHist[anchor].y) flag = true;
+            else anchor = i;
+        }
+    }
+    void MbPlacePath()
+    {
+        var pressure = new byte[mbLen];
+        for (int i = 0; i < mbLen; i++)
+        {
+            if ((int)r.Next(7) == 0) mbPlayerHeight = (int)r.Next(5, 9);
+            var th = mbHist[i];
+            for (int j = 0; j < mbPlayerHeight; j++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    int yy = th.y - j + dy;
+                    if (QQInW(th.x, yy) && wal[yy * W + th.x] == 244) wal[yy * W + th.x] = 0;
+                }
+                if (!QQInW(th.x, th.y - j)) continue;
+                int idx = (th.y - j) * W + th.x;
+                if (act[idx] != 0 && typ[idx] == 135) pressure[i] = 1;
+                if (typ[idx] != 379) MbSetTile(th.x, th.y - j, 0, 0, 0);    // KillTile（379 泡泡豁免；保留液体）
+            }
+        }
+        for (int k = 0; k < mbLen; k++)
+        {
+            if ((int)r.Next(7) == 0) mbPlayerHeight = (int)r.Next(5, 9);
+            var th = mbHist[k];
+            if (!QQInW(th.x, th.y)) continue;
+            if (pressure[k] != 0 && k > 0 && mbHist[k - 1].y == th.y && mbHist[k + 1].y == th.y)
+                MbSetTile(th.x, th.y, MB_TRACK_TILE, 20, 0xFFFF);           // 压板轨（帧 20/65535）
+            else
+                MbSetTile(th.x, th.y, MB_TRACK_TILE, 0, 0);
+        }
+        // FrameTrack 帧写省略（四通道无帧；JS 侧写入不影响 typ/act/wal/liq——两侧同备案）
+        for (int k = 0; k < mbLen; k++)
+        {
+            var th = mbHist[k];
+            if (QQInW(th.x, th.y) && mbTrackSet.Add((long)th.y * W + th.x)) mbTrackCells.Add((th.x, th.y));
+        }
+    }
+    var mbTrackFail = new int[6];   // [originInvalid, originEdge, originNotAvail, shortLen, segInvalid, placed]
+    bool MbTrackPlace(int originX, int originY, int minLength, int maxLength)
+    {
+        mbStateCache.Clear();
+        int mbDbg = Environment.GetEnvironmentVariable("MB_TTRACE") != null ? 1 : 0;
+        // FindSuitableOrigin
+        int x = originX, y = originY;
+        int state = MbStateAt(x, y);
+        while (state != MB_OBSTRUCTED)
+        {
+            y++;
+            if (state == MB_INVALID) { if (mbDbg != 0) mbTrackFail[0]++; return false; }
+            if (y >= H - 1) { if (mbDbg != 0) mbTrackFail[1]++; return false; }
+            state = MbStateAt(x, y);
+        }
+        y--;
+        if (MbStateAt(x, y) != MB_AVAILABLE) { if (mbDbg != 0) mbTrackFail[2]++; return false; }
+        // CreateTrackStart
+        mbXDir = x <= W / 2 ? 1 : -1;
+        mbLen = 1;
+        for (int i = 0; i < 4096; i++) mbHist[i] = (x + i * mbXDir, y + i, MB_DOWN, MB_MODE_NORMAL);
+        // FindPath
+        {
+            int length = mbLen;
+            while (mbLen < 4096 - 100)
+            {
+                int slope = mbHist[mbLen - 1].slope != MB_UP ? MB_DOWN : MB_STRAIGHT;
+                MbAppendToHistory(slope);
+                int st = MbTryRewriteHistory();
+                if (st == MB_INVALID) break;
+                length = mbLen;
+                int state2 = st;
+                while (state2 != MB_AVAILABLE)
+                {
+                    state2 = MbCreateTunnel();
+                    if (state2 == MB_INVALID) break;
+                    length = mbLen;
+                }
+                if (mbLen >= maxLength) break;
+            }
+            mbLen = Math.Min(maxLength, length);
+            if (mbLen < minLength) { if (mbDbg != 0) { mbTrackFail[3]++; if (mbTrackFail[3] <= 5) Console.WriteLine($"MBTT shortLen origin=({originX},{originY}) len={mbLen} min={minLength}"); } return false; }
+            MbSmoothTrack();
+            if (MbSegmentState(0, mbLen) == MB_INVALID) { if (mbDbg != 0) mbTrackFail[4]++; return false; }
+        }
+        MbPlacePath();
+        if (mbDbg != 0) { mbTrackFail[5]++; if (mbTrackFail[5] <= 5) Console.WriteLine($"MBTT PLACED origin=({originX},{originY}) len={mbLen}"); }
+        return true;
+    }
+    {
+        int trackFailLimit = (int)Math.Truncate(W / 2.0);
+        int trackCount = (int)r.Next(MbScW(1), MbScW(2) + 1);
+        int tDone = 0, tFail = 0;
+        while (tDone < trackCount)
+        {
+            int ox = (int)r.Next(10, W - 10);
+            int oy = (int)r.Next(worldSurface, H - 200);
+            if (MbTrackPlace(ox, oy, MbScW(400), MbScW(1000))) { tDone++; tFail = 0; }
+            else { tFail++; if (tFail > trackFailLimit) { tDone++; tFail = 0; } }
+        }
+        trackCount = (int)r.Next(Math.Max(1, (int)Math.Truncate(mbAreaScale * 4)), Math.Max(1, (int)Math.Truncate(mbAreaScale * 7)) + 1);
+        tDone = 0; tFail = 0;
+        while (tDone < trackCount)
+        {
+            int ox = (int)r.Next(10, W - 10);
+            int oy = (int)r.Next(worldSurface, H - 200);
+            if (MbTrackPlace(ox, oy, MbScW(150), MbScW(300))) { tDone++; tFail = 0; }
+            else { tFail++; if (tFail > trackFailLimit) { tDone++; tFail = 0; } }
+        }
+        int trackCells = 0;
+        for (int i = 0; i < W * H; i++) if (act[i] != 0 && typ[i] == MB_TRACK_TILE) trackCells++;
+        if (mbTrace != 0) Console.WriteLine($"MB tracks long+standard placed, cells={trackCells}");
+    }
+
+    // ═══ 6. placeLavaTrap（cs:22093-22127 调用 + :8648-8732 实现）═══
+    bool MbPlaceLavaTrap(int x, int y)
+    {
+        if (!QQInW(x, y)) return false;
+        int i0 = y * W + x;
+        if (act[i0] != 0 || liq[i0] != 255 || liqT[i0] != 1) return false;   // 满格岩浆（oracle lava=1）
+        int lavaCells = 0;
+        for (int dx = -5; dx <= 5; dx++)
+            for (int dy = -5; dy <= 5; dy++)
+            {
+                if (!QQInW(x + dx, y + dy)) continue;
+                int idx = (y + dy) * W + x + dx;
+                if (act[idx] == 0 && liq[idx] == 255 && liqT[idx] == 1) lavaCells++;
+            }
+        if (lavaCells < 50) return false;
+        int num7 = y;
+        for (;;)
+        {
+            if (MbActiveAt(x, num7)) break;
+            num7++;
+            if (num7 > H - 200 || num7 >= H) return false;
+        }
+        if (!MbSolidAt(x, num7) || MbSolidTopAt(x, num7)) return false;
+        int num8 = num7;
+        for (int k = x - 20; k <= x + 20; k++)
+            for (int l = num7 - 20; l <= num7 + 20; l++)
+                if (QQInW(k, l) && (mbWire[l * W + k] & 15) != 0) return false;
+        while (MbActiveAt(x, num7) && MbSolidAt(x, num7) && !MbSolidTopAt(x, num7))
+        {
+            num7++;
+            if (num7 > H - 200 || num7 >= H) return false;
+        }
+        int belowIdx = num7 == 0 ? 0 : (num7 - 1) * W + x;
+        if ((typ[belowIdx] == 41 || typ[belowIdx] == 43 || typ[belowIdx] == 44 || typ[belowIdx] == 677)
+            || typ[belowIdx] == 225 || typ[belowIdx] == 226) return false;
+        int num9 = num7;
+        for (;;)
+        {
+            if (MbActiveAt(x, num7)) break;
+            num7++;
+            if (num7 > H - 200 || num7 >= H) return false;
+            if (liq[num7 * W + x] > 0) return false;
+        }
+        int floorIdx = num7 * W + x;
+        if (!MbSolidAt(x, num7) || MbSolidTopAt(x, num7) || typ[floorIdx] == 162) return false;
+        int num10 = num7 - 1;
+        if (num10 - num8 > 40) return false;
+        if (num10 - num9 < 4) return false;
+        slope[floorIdx] = 0;
+        half[floorIdx] = 0;
+        MbSetTile(x, num10, 135, 0, 126);                                   // 压板 style7（frameY=126）
+        for (int m = num8; m <= num10; m++)
+        {
+            if (!QQInW(x, m)) continue;
+            int idx = m * W + x;
+            mbWire[idx] |= MB_RED;
+            if (m < num9)
+            {
+                slope[idx] = 0;
+                half[idx] = 0;
+                mbWire[idx] |= MB_ACTUATOR;
+            }
+        }
+        return true;
+    }
+    {
+        double lavaTries = W * 0.02;   // 裸 double 上限（JS 同款不取整）
+        for (int j = 0; j < lavaTries; j++)
+            for (int k = 0; k < 10150; k++)
+            {
+                int x = (int)r.Next(200, W - 200);
+                int y = (int)r.Next(lavaLine - 100, H - 210);
+                if (MbPlaceLavaTrap(x, y)) break;
+            }
+        int plates = 0;
+        for (int i = 0; i < W * H; i++) if (act[i] != 0 && typ[i] == 135 && frY[i] == 126) plates++;
+        if (mbTrace != 0) Console.WriteLine($"MB lavaTraps plates={plates}");
+    }
+}
+Checkpoint("microbiomes");
+StreamPt("microbiomes");
 // ==QQ-APPEND-TAIL==
 
 double TuneOceanDepth(int count, double depth, bool florida)
@@ -14543,11 +16960,14 @@ sealed class DgCR
     public dynamic inner = null!;
     public int n;
     public static bool LogRolls;                                  // DG_ROLL_LOG=1：逐掷值日志（stderr）
+    public static bool MarkGate;                                  // III 批取证：DG_ROLL_MARK 逐掷主流态 FNV
+    public static Action<int>? MarkCb;
     void Log(string op, object ret) { if (LogRolls) Console.Error.WriteLine($"DGROLL {n} {op} -> {ret}"); }
-    public int Next() { n++; var v = inner.Next(); Log("Next()", v); return v; }
-    public int Next(int maxValue) { n++; var v = inner.Next(maxValue); Log($"Next({maxValue})", v); return v; }
-    public int Next(int minValue, int maxValue) { n++; var v = inner.Next(minValue, maxValue); Log($"Next({minValue},{maxValue})", v); return v; }
-    public double NextDouble() { n++; var v = inner.NextDouble(); Log("NextDouble()", v); return v; }
+    void MR() { if (MarkGate && MarkCb != null) MarkCb(n); }
+    public int Next() { n++; var v = inner.Next(); Log("Next()", v); MR(); return v; }
+    public int Next(int maxValue) { n++; var v = inner.Next(maxValue); Log($"Next({maxValue})", v); MR(); return v; }
+    public int Next(int minValue, int maxValue) { n++; var v = inner.Next(minValue, maxValue); Log($"Next({minValue},{maxValue})", v); MR(); return v; }
+    public double NextDouble() { n++; var v = inner.NextDouble(); Log("NextDouble()", v); MR(); return v; }
 }
 
 // PrefixLegacy.Prefixes 前缀池（PrefixLegacy.cs:9-64）+ PrefixID.Sets.ReducedNaturalChance（:9）

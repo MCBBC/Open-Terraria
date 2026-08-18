@@ -12,6 +12,24 @@
 // 189/196/460/717-719 一票否决、与 mCaveX ±50 拒绝（cs:15653-15663）。
 // 秘密种子分支（extraLivingTrees/skyblock/errorWorld/dualDungeons/shimmer 等）
 // 不在常规生成路径,按约定不移植,行号保留在注释中。
+//
+// ★2026-08-18 s111/s777 对真服务器（x86 /tmp/vserver86）审计结论（438 残差清剿会话）：
+//   ①本 pass JS≡oracle（LT_TRACE 流哈希逐段全等+链检查点绿）,但两者都偏离真服：
+//     圆冠最外沿多放 ~87(s111)/38(s777) 格 192（纯超集方向 192>-1）——同锚点同 d²
+//     的格"一半有一半无"（如 (1068,219) 缺 /(1072,215) 在,d²=170 同）,排除流漂移/
+//     n44±1/0.9 精度(float/double)/墙门(全 0)/菱圆分派/FP 求值序——只能由**进入本
+//     pass 时的输入态差**触发 canPlaceLeaves 门差。已实证输入态差：树1区域 x1066-
+//     1078,y288-290 原版 grass 链 stone/air（早期 pass 地表差）。
+//   ②s111 整棵 patch 树缺失（x1348-1406 ~1830 格,sky 192>-1 主力）：patch 锚
+//     (1348,293) 的 r1 solid-foot 落在 185 小石堆上（链）,原版主树冠沿多 1 格使
+//     num10 下扫落在叶上（pass 期 tileSolid[192]=true,cs:15789 才翻 false）→原版
+//     长成。属①的连锁,非本文件可修。
+//   ③下游症状：Vines(#89) 638 灰烬藤 ~6.6k 双向纯漂移（锚 633 全同位,总量
+//     5735v/5729j）、Trees(#82) 5 树干 ~1.9k 位移、Pots 28、苔/石笋 51/165/62 等
+//     全部是 42 号 pass 起流移位的级联——修各自 pass 无效。
+//   ④前沿已推进到 ≤FloatingIslands(#23)：islands 检查点云族(189/196)已差 31 格
+//     （x2480-2521 雨云帽 ±1 行等）。下一个收敛里程碑=逐早检查点对真服定位首分歧
+//     pass（现链检查点仅证 JS≡oracle,均未对真服验证）。探针：tools/_p638*.test.ts。
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -765,7 +783,13 @@ export function growLivingTree(
   const worldSurface = gs.worldSurface;
   if (LT_TRACE) ltRngCache = rng;
   // 前置门禁（cs:28158-28180）：脚下实心、锚点空、地面类型 dirt/grass/stone/clay/ore
-  if (!solidAt(st, i, j + 1)) { if (LT_TRACE) console.log(`GLT r1 x=${i} j=${j} !solid-foot`); return false; }
+  if (!solidAt(st, i, j + 1)) {
+    if (LT_TRACE) {
+      const gi = st.idx(i, j + 1);
+      console.log(`GLT r1 x=${i} j=${j} !solid-foot act=${st.flags[gi]} sheet=${TILE_DEFS[st.type[gi]]?.vanilla?.sheet} key=${TILE_DEFS[st.type[gi]]?.key}`);
+    }
+    return false;
+  }
   if (activeAt(st, i, j)) { if (LT_TRACE) console.log(`GLT r2 x=${i} j=${j} anchor-active`); return false; }
   const gSheet = sheetAt(st, i, j + 1);
   if (gSheet !== 0 && gSheet !== 2 && gSheet !== 1 && gSheet !== 40 && !ORE_SHEETS.has(gSheet)) { if (LT_TRACE) console.log(`GLT r3 x=${i} j=${j} ground=${gSheet}`); return false; }
@@ -978,6 +1002,7 @@ export function growLivingTree(
     let n44 = rng.int(5, 7);
     n44 = Math.trunc(n44 * (1 + num5 * 0.05));
     if (ax7[n43]) n44 = rng.int(6, 11) + num5;
+    if (LT_TRACE) console.log(`ANCH n43=${n43} x=${ax5[n43]} y=${ax6[n43]} round=${ax7[n43] ? 1 : 0} n44=${n44}`);
     const n45 = ax5[n43] - n44 * 2;
     const n46 = ax5[n43] + n44 * 2;
     const n47 = ax6[n43] - n44 * 2;
@@ -1050,6 +1075,9 @@ export function growLivingTree(
 export function runLivingTreesPass(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
 ): void {
+  // 一次性探针钩（同 WebsPass 模式）：LivingTrees 入口快照（债时间线用）
+  const g0 = globalThis as { __swLtCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swLtCap?.(gs, st); } catch { /* probe */ }
   const { w } = st;
   const num = 200;                        // cs:15560 与世界中心 ±200 排除带
   const num2 = 0;                         // cs:15561（extraFloatingIslands 才 >0）

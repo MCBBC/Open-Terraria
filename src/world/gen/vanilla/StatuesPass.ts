@@ -63,6 +63,11 @@ export function placeStatueTrap(st: TileStore, x: number, y: number): void {
 
 /** Statues pass 主体。须在洞穴/生物群系成形后调用(原版序:SettleLiquids 后、地下屋前) */
 export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass 模式）：Statues 入口快照（债时间线用）
+  {
+    const g0 = globalThis as { __swStatCap?: (gs: GenState, st: TileStore) => void };
+    try { g0.__swStatCap?.(gs, st); } catch { /* probe */ }
+  }
   if (!STATUE_105) return;
   const { w, h } = st;
   const count = Math.floor(STATUE.length * 2 * (w / 4200));

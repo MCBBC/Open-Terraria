@@ -201,6 +201,9 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
  *  原版 pass 头部 Main.tileSolid[484]=false(:15830) 对本 pass 无影响：place3x2 的
  *  BOULDERS 门（含 484 滚仙人掌）已等价拒绝该类底座。 */
 export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // 一次性探针钩（同 WebsPass/GemPasses 模式）：Altars 入口 gs+store 快照（隔离重放用）
+  const g0 = globalThis as { __swAltarsCap?: (gs: GenState, st: TileStore) => void };
+  try { g0.__swAltarsCap?.(gs, st); } catch { /* probe */ }
   // ★pass 头 tileSolid 翻转（cs:15831 `Main.tileSolid[484] = false`）——DesertBiome
   //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
   flipGenSolid([484], false);
