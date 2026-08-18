@@ -13,9 +13,11 @@ describe('GLSpriteLayer 回归守卫(源码级锁定)', () => {
     expect(SRC).toContain('1.0 - screen.y / uCanvas.y * 2.0');
   });
 
-  it('LINEAR/REPEAT 采样器带 mipmap(对齐 Skia 盒式降采样;直双线性偏锐)', () => {
-    expect(SRC).toContain('mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.CLAMP_TO_EDGE)');
-    expect(SRC).toContain('mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.REPEAT)');
+  it('LINEAR/REPEAT 采样器 MIN 带 mipmap,MAG 恒 LINEAR(MAG 只收 NEAREST|LINEAR)', () => {
+    expect(SRC).toContain('mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE)');
+    expect(SRC).toContain('mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.REPEAT)');
+    // MAG_FILTER 不得收到 mip 档参数(INVALID_ENUM)
+    expect(SRC).not.toMatch(/TEXTURE_MAG_FILTER,\s*\w*MIPMAP/);
   });
 
   it('纹理上传后生成 mip 链(无链时 MIPMAP_LINEAR 采样器采样不完整 mip = 花屏)', () => {

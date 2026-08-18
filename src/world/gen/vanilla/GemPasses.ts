@@ -383,7 +383,11 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
 }
 
 // ============ ExposedGems 暴露晶簇（:20842-20913） ============
-export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void {
+// ★原版是【两个独立 GenPass】：ExposedGemsInIceBiome(:20842-20852+) 与
+//   ExposedGemsUnderground(:20874-20913)——RunPass 每 pass 前重播种子
+//   （WorldGenerator.cs:497），地下/琥珀段从【新流】起掷。曾合并为一函数一气流
+//   → #93 掷流错位（WWW 批 2026-08-18 拆分；WorldGen.vanillaGems 槽内两调重播）。
+export function runExposedGemsIcePass(st: TileStore, rng: RNG, gs: GenState): void {
   // 冰系（:20842-20872）：y∈[(ws+rl)/2, lavaLine)、x=逐行雪界 snowMinX/MaxX[y]；
   // 目标格自身为冰块（147/161/162/224）→ 先掷 4 个 Next(1,4) 窗口再掷 Next(12) style
   // （cs:20855-20859 掷序），周边不对称窗口的空气格放晶簇
@@ -410,8 +414,13 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
       }
     }
   }
+}
+
+/** ExposedGemsUnderground（cs:20874-20913）独立 pass：地下单格 + 琥珀簇两段 */
+export function runExposedGemsUndergroundPass(st: TileStore, rng: RNG, gs: GenState): void {
   // 地下（:20874-20890）：w 次，x∈[20,w-20)、y∈[rockLevel, h-300)，空气+无岩浆+
-  // 非地牢墙且墙≠27 → 单格（style=Next(12) 权重）
+  // 非地牢墙且墙≠27 → 单格（style=Next(12) 权重）——ExposedGemsUnderground 独立 pass
+  // （新流起掷，与冰系段无关）
   for (let i = 0; i < st.w; i++) {
     const x = rng.nextIntRange(20, st.w - 20);
     const y = rng.nextIntRange(gs.rockLevel, st.h - 300);
@@ -446,6 +455,12 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
       }
     }
   }
+}
+
+/** 旧整段入口（冰+地下+琥珀一气流）——保留仅为兼容探针引用；管线走拆分两段+槽内重播 */
+export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  runExposedGemsIcePass(st, rng, gs);
+  runExposedGemsUndergroundPass(st, rng, gs);
 }
 
 // ============ SpeleothemsAndGemTrees 钟乳石+宝石树（:22196-22282） ============

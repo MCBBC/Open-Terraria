@@ -26,7 +26,7 @@ import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, run
 import { runJungleChestsPass, runJungleShrinePass } from '../src/world/gen/vanilla/JungleShrinePass';
 import { runOceanCavesPass, runUnderwaterChestsPass } from '../src/world/gen/vanilla/OceanCavesPass';
 import { runSpiderNestPass } from '../src/world/gen/vanilla/HiveSpiderPass';
-import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from '../src/world/gen/vanilla/GemPasses';
+import { runGemCavesPass, runExposedGemsIcePass, runExposedGemsUndergroundPass, runGemTreesPass } from '../src/world/gen/vanilla/GemPasses';
 import { runMossAndMossCavesPass } from '../src/world/gen/vanilla/MossPass';
 import { runTemplePart2Pass, runLihzahrdAltarPass } from '../src/world/gen/vanilla/TemplePass';
 import { runIslandHousePass } from '../src/world/gen/vanilla/IslandHousePass';
@@ -291,8 +291,8 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
   P.set(45, {
     entry: 's44',
     steps: [
-      { dump: 92, base: 91, run: (st, gs, rng) => runExposedGemsPass(st, rng, gs) },        // JS 现状=冰/地下/琥珀三段一气流（92 对拍=段间态）
-      { dump: 93, base: 91, run: (st, gs, rng) => runExposedGemsPass(st, rng, gs) },        // 93 对拍（同输入重跑，终点态）
+      { dump: 92, base: 91, run: (st, gs, rng) => runExposedGemsIcePass(st, rng, gs) },           // ▶ExposedGemsInIceBiome
+      { dump: 93, base: 91, run: (st, gs, rng) => runExposedGemsUndergroundPass(st, rng, gs) },   // ▶ExposedGemsUnderground（独立新流）
     ],
   });
   P.set(46, { entry: 's45', steps: [{ dump: 94, base: 93, run: (st, gs, rng) => runLongMossPass(st, rng, gs) }] });

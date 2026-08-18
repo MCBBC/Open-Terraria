@@ -352,7 +352,7 @@ import { runCleanupPass } from './vanilla/CleanupPass';
 import { runDirtRockWallRunnerPass } from './vanilla/DirtRockWallRunnerPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
-import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from './vanilla/GemPasses';
+import { runGemCavesPass, runExposedGemsIcePass, runExposedGemsUndergroundPass, runGemTreesPass } from './vanilla/GemPasses';
 import { runCaveWallsPass, runCaveWallVarietyPass, runJungleMudWallsPass } from './vanilla/CaveWallsPass';
 import { runOasisPass } from './vanilla/OasisPass';
 import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
@@ -1012,7 +1012,12 @@ function gemCavesPass({ store, rng }: GenCtx) {
 function vanillaGems({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runExposedGemsPass(store, rng, gs);
+  // ★原版 1456 是两个独立 GenPass：ExposedGemsInIceBiome(20842) / ExposedGemsUnderground
+  //   (20874)——每 pass 前重播种子。曾一函数一气流 → #93 掷流错位（WWW 批拆分）。
+  rng.reseed(gs.seed); // ▶ExposedGemsInIceBiome cs:20842
+  runExposedGemsIcePass(store, rng, gs);
+  rng.reseed(gs.seed); // ▶ExposedGemsUnderground cs:20874
+  runExposedGemsUndergroundPass(store, rng, gs);
 }
 
 /** SpeleothemsAndGemTrees（cs:22196-22282）——独立槽（清零批 2026-08-13
@@ -1670,28 +1675,10 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
   // Game.ts Player 用 (spawnY-3)*TILE（玩家 3 格高）。此前这里也 -3 → 双重偏移,
   // 玩家浮空 6 格后坠落
   world.spawnY = Math.max(4, sy);
-  // 出生点上空净空保留（防卡块；不整平地形）。
-  // ★必须豁免树干:树干非实心不会卡人,整格清空会把清理盒内的树干中段删掉
-  // (基座行 dy=0 与上部 dy>5 保留)→ 浮空断干"贴图透明"。
-  const clearSpawnCell = (x: number, y: number, keepGrass: boolean) => {
-    if (!store.inBounds(x, y)) return;
-    const i = store.idx(x, y);
-    const t = store.type[i];
-    if (!store.flags[i] || t === T.TREE) return;
-    if (keepGrass && t === T.GRASS) return;
-    store.setTileSilent(x, y, 0);
-  };
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = 1; dy <= 3; dy++) {
-      clearSpawnCell(sx + dx, sy - dy, false);
-    }
-  }
-  // 出生点上空净空（宽区:5×5,豁免草面/树干——草面保持地表,树干保持完整见上注）
-  for (let dx = -2; dx <= 2; dx++) {
-    for (let dy = 1; dy <= 5; dy++) {
-      clearSpawnCell(sx + dx, sy - dy, true);
-    }
-  }
+  // ★原版 SpawnPoint（cs:19605-19731）不做任何地形清理——只写 spawnTileX/Y +
+  //   tileSolid[379] 还原。此前自造"上空净空清理盒"（豁免树干/草面的 3×3+5×5 清空）
+  //   = 8 通道外的自创写入：#78 干净基座下 4 格硬化沙被误清（T187>0×4）。
+  //   为逐位一致已整段移除（WWW 批 2026-08-18）——玩家卡块由消费端抬高处理。
   // ★pass 尾还原（cs:19731 `Main.tileSolid[379] = true`）
   flipGenSolid([379], true);
 }

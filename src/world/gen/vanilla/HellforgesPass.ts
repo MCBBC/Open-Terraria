@@ -7,6 +7,32 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 
 const HELLFORGE = TILE_BY_KEY['v_77_hellforge']!;
 
+/** AnchorValid（WorldGen.cs:51851+）Hellforge 锚类型 = SolidTile|SolidWithTop|SolidSide
+ *  （TileObjectData.Style3x2 基类 AnchorBottom，cs:3165——3 列底锚全列须过）。
+ *  blockType: 0 整砖 / 1 半砖 / 2-5 坡面（half?1:slope，slope 通道即原版 slope()）。
+ *  tileNoAttach 生成态恒 false（该集=藤蔓/蛛网类装饰，地狱地板不涉及）。 */
+function anchorValid(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || ((st.wire[i] >>> 5) & 1) === 1) return false;   // nactive()
+  const t = st.type[i];
+  const d = TILE_DEFS[t];
+  if (!d) return false;
+  const solid = !!d.solid && !d.platform;
+  const solidTop = !!d.platform;   // tileSolidTop 家族=平台（19/239/380/427）
+  const bt = st.half[i] ? 1 : st.slope[i];
+  // SolidTile（cs:51857）：tileSolid && !solidTop && blockType==0
+  if (solid && !solidTop && bt === 0) return true;
+  // SolidWithTop（cs:51870）：平台帧合法 或 tileSolid&&tileSolidTop
+  if (d.platform) {
+    const num = st.frameX[i] / 36 | 0;
+    if ((!st.half[i] && num >= 0 && num <= 7) || (num >= 12 && num <= 16) || (num >= 25 && num <= 26)) return true;
+  } else if (solid && solidTop) return true;
+  // SolidSide（cs:51889）：tileSolid && !solidTop && blockType∈{4,5}
+  if (solid && !solidTop && (bt === 4 || bt === 5)) return true;
+  return false;
+}
+
 export function runHellforgesPass(st: TileStore, rng: RNG): void {
   const { w, h } = st;
   const count = Math.floor(w / 200);
@@ -23,23 +49,26 @@ export function runHellforgesPass(st: TileStore, rng: RNG): void {
       if (st.inBounds(x, y) && (st.wall[st.idx(x, y)] === 13 || st.wall[st.idx(x, y)] === 14)) {
         while (y < h - 20 && !st.flags[st.idx(x, y)]) y++;
         y--;
-        // 3×2 净空(PlaceTile forced 语义;锚点 = 底行右列? 以左上角放置)
-        if (y < 2 || !st.inBounds(x + 2, y - 1)) { fail++; }
+        // ★PlaceTile(77)（cs:18324）几何 = Style3x2 **中心底锚**：物体占 (x-1..x+1,
+        //   j-1..j)（golden 实证：drawn x=1982 → 77 落 1981-1983 两行）。曾按
+        //   左对齐 x..x+2 放置 → 全部熔炉右移一列（#72 干净基座 86+86 格自因，
+        //   WWW 批 2026-08-18 修）。净空门 + 3 列底锚 AnchorValid（半砖/坡面地板
+        //   会被原版拒收——SmoothWorld 后地狱满坡面，曾漏检 8 座熔炉错位）。
+        if (y < 2 || !st.inBounds(x + 1, y - 1) || !st.inBounds(x - 1, y)) { fail++; }
         else {
           let ok = true;
-          for (let dx = 0; dx < 3 && ok; dx++) {
+          for (let dx = -1; dx <= 1 && ok; dx++) {
             for (let dy = -1; dy <= 0 && ok; dy++) {
               if (st.flags[st.idx(x + dx, y + dy)]) ok = false;
             }
+            if (ok && !anchorValid(st, x + dx, y + 1)) ok = false;
           }
           if (ok) {
-            const fw = TILE_DEFS[HELLFORGE].vanilla?.fw ?? 3;
-            for (let dx = 0; dx < 3; dx++) {
+            for (let dx = -1; dx <= 1; dx++) {
               for (let dy = 0; dy < 2; dy++) {
-                st.setTileSilent(x + dx, y - 1 + dy, HELLFORGE, dx * 18, dy * 18);
+                st.setTileSilent(x + dx, y - 1 + dy, HELLFORGE, (dx + 1) * 18, dy * 18);
               }
             }
-            void fw;
             done = true;
           } else fail++;
         }

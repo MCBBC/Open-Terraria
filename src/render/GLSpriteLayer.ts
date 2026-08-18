@@ -128,18 +128,21 @@ export class GLSpriteLayer {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
     this.vao = vao;
-    const mkSampler = (filter: number, wrapS: number): WebGLSampler => {
+    // ★MIN/MAG 分参:MAG_FILTER 只接受 NEAREST|LINEAR(mip 档仅 MIN 合法——
+    // 曾把 LINEAR_MIPMAP_LINEAR 也传给 MAG = INVALID_ENUM 警告+MAG 落回
+    // sampler 默认 NEAREST,放大采样(地图 zoom>1)错过滤)
+    const mkSampler = (minFilter: number, magFilter: number, wrapS: number): WebGLSampler => {
       const s = gl.createSampler()!;
-      gl.samplerParameteri(s, gl.TEXTURE_MIN_FILTER, filter);
-      gl.samplerParameteri(s, gl.TEXTURE_MAG_FILTER, filter);
+      gl.samplerParameteri(s, gl.TEXTURE_MIN_FILTER, minFilter);
+      gl.samplerParameteri(s, gl.TEXTURE_MAG_FILTER, magFilter);
       gl.samplerParameteri(s, gl.TEXTURE_WRAP_S, wrapS);
       gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       return s;
     };
-    this.samp.nearest = mkSampler(gl.NEAREST, gl.CLAMP_TO_EDGE);
-    // LINEAR 档带 mipmap:缩放 quad 对齐 Skia 的盒式降采样(对拍最优)
-    this.samp.linear = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.CLAMP_TO_EDGE);
-    this.samp.repeat = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.REPEAT);
+    this.samp.nearest = mkSampler(gl.NEAREST, gl.NEAREST, gl.CLAMP_TO_EDGE);
+    // LINEAR 档 MIN 带 mipmap(缩放对齐 Skia 盒式降采样),MAG 恒 LINEAR
+    this.samp.linear = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE);
+    this.samp.repeat = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.REPEAT);
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
