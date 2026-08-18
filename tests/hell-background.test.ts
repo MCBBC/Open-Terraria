@@ -15,6 +15,10 @@ function recorder() {
     fillStyle: '',
     globalAlpha: 1,
     imageSmoothingEnabled: true,
+    // BGBlit 接口（drawUnderground 直调时绕过 draw 的 CanvasBgBlit 包装）：
+    // img ≙ drawImage、fill ≙ fillRect（recorder 口径不变）
+    img: (im: unknown, ...a: unknown[]) => calls.push({ op: 'img', tex: (im as { tex?: number }).tex, args: a }),
+    fill: (x: number, y: number, w: number, h: number, ...a: unknown[]) => calls.push({ op: 'rect', args: [x, y, w, h, ...a] }),
   } as unknown as CanvasRenderingContext2D;
   return { ctx, calls };
 }

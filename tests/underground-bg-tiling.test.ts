@@ -17,6 +17,8 @@ function recorder() {
     drawImage: (im: unknown, ...a: unknown[]) => calls.push({ op: 'img', tex: (im as { tex?: number }).tex, args: a }),
     fillRect: (...a: unknown[]) => calls.push({ op: 'rect', args: a }),
     fillStyle: '', globalAlpha: 1, imageSmoothingEnabled: true,
+      img: (im: unknown, ...a: unknown[]) => calls.push({ op: 'img', tex: (im as { tex?: number }).tex, args: a }),
+    fill: (x: number, y: number, w: number, h: number, ...a: unknown[]) => calls.push({ op: 'rect', args: [x, y, w, h, ...a] }),
   } as unknown as CanvasRenderingContext2D;
   return { ctx, calls };
 }

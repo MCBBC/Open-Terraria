@@ -87,15 +87,15 @@ describe('WellFed 三档数值（Player.cs:11523-11570）', () => {
     expect(p.buffs.moveSpeedMult).toBeCloseTo(1.4, 5);
     expect(p.buffs.wellFedPickMult).toBeCloseTo(0.85, 5);
   });
-  it('多档并存取最高档；到期回落', () => {
+  it('饱腹互斥(IsFedState :5080-5089)：高档顶掉低档，remove 后直接归零', () => {
     const p = mk();
     p.buffs.apply(BuffType.WellFed, 300);
-    p.buffs.apply(BuffType.WellFed3, 600);
-    expect(p.defense).toBe(4);
-    p.buffs.remove(BuffType.WellFed3);
     expect(p.defense).toBe(2);
-    p.buffs.remove(BuffType.WellFed);
-    expect(p.defense).toBe(0);
+    p.buffs.apply(BuffType.WellFed3, 600);
+    expect(p.defense).toBe(4);              // WF3 生效
+    expect(p.buffs.has(BuffType.WellFed)).toBe(false);  // 高档已顶掉低档（互斥）
+    p.buffs.remove(BuffType.WellFed3);
+    expect(p.defense).toBe(0);              // 无回落（低档已被删，原版同语义）
     expect(p.buffs.wellFedTier).toBe(0);
   });
   it('BUFF_DEFS 反查：原版 id 26/206/207 → WellFed 三档（Game.ts BUFF_BY_VANILLA 链）', () => {

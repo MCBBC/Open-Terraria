@@ -7,12 +7,15 @@
 //  - CanPoundTile 的 CanKillTile 结构检查（cs:62249）近似为 !framed
 //    （黑名单/Boulders/生成期 190,30/ForbidsSloping 上方表均已 1:1，见 canPoundTile）
 //  - SolidTile 的 tileSolidTop 近似为 !platform；PlaceTile 的 495 特判未移植
+//  - KillTile 尾 SquareTileFrame 级联已移植（UUU 批,见 killTile 注）：非活性清
+//    half/slope 残基 + 巨石族 Check2x2 整组杀;其余 TileFrameImportant 族生成期
+//    本 pass 零足迹（draws 精确相等实证）未移植
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
-import { flipGenSolid, genSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 
 /** 各排除表按原版 vanilla tile id 构建（经 idsByVanillaSheet 转内部 id） */
 const T = { // 排除表用的原版 id 集
@@ -104,6 +107,112 @@ function killDustRollsPer(sheet: number, frameX: number): number {
   }
 }
 
+/* ── KillTile 尾 SquareTileFrame 级联（UUU 批 2026-08-18 R0 根因修复）──────
+ * 原版 KillTile 尾无条件 SquareTileFrame(i,j)（cs:63947）→ 3×3 逐格 TileFrame：
+ *  ① 非活性格 → halfBrick=false + slope(0)（cs:82078-83）——击杀的 3×3 邻域内
+ *     ghost slope/half 残基当场清除。R0 案 (2428,664)：K(2427,665) 的 3×3 把
+ *     非活性残坡 s2 清 0（此前 JS killTile 无此尾 → slope 残差 1 格）。
+ *  ② 活性巨石族（Boulders，TileID.cs:195）→ TileFrameImportant 派发 Check2x2
+ *     （cs:86688 case 132/138/142/143/288-295/484/664/665/711/712）：按 frame
+ *     反解 2×2 锚点，四格 type+frame 全等 + 上方无箱族 + 底部两格至少一格
+ *     SolidTileAllowBottomSlope → 存活;任一破 → destroyObject=true 期间
+ *     KillTile 整组 2×2 内同型格（巨石族尘掷全 0,流位不动），尾 4×4 TileFrame
+ *     （cs:48799-48805）。R0 案 (2679,714)：484 伙伴被大理岩 166 顶替 →
+ *     K(2680,713) 的 3×3 触发整组杀 → (2680,714) 转孤立凸起被砸半砖。
+ *  其余 TileFrameImportant 族（容器/画框/49 桌上物/80 仙人掌/藤蔓）生成期在
+ *  本 pass 足迹零触发——clean 重放 draws 与 vanilla 精确相等（5,097,254）实证
+ *  无 RNG 消耗型级联,不移植（若未来 pass 出现尘掷级联需扩表）。 */
+const CHEST_PROTECT_2X2 = idsByVanillaSheet(21, 467, 441, 468, 88, 470, 475);
+/** WorldGen.destroyObject（Check2x2 再入闸,cs:48408/48564/48799）：
+ *  级联击杀期间嵌套 TileFrame 不再发起新 Check2x2（非活性清残基不受闸限）。 */
+let destroyObject = false;
+
+/** TileFrame 生成期路径子集（cs:82067）：边界闸 + 非活性清 half/slope +
+ *  巨石族 Check2x2。PaintClear 生成期无漆可清;液体/AddWater 段被
+ *  !generatingWorld 门挡;基础块 TileFrameCosmetic 同门不跑。 */
+function tileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return; // cs:82069
+  const i = st.idx(x, y);
+  if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }  // cs:82078-83
+  if (BOULDERS.has(st.type[i])) check2x2(st, rng, x, y);
+}
+
+/** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame,列主序与原版逐条一致。 */
+function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+  tileFrame(st, rng, x - 1, y - 1); tileFrame(st, rng, x - 1, y); tileFrame(st, rng, x - 1, y + 1);
+  tileFrame(st, rng, x, y - 1); tileFrame(st, rng, x, y); tileFrame(st, rng, x, y + 1);
+  tileFrame(st, rng, x + 1, y - 1); tileFrame(st, rng, x + 1, y); tileFrame(st, rng, x + 1, y + 1);
+}
+
+/** SolidTileAllowBottomSlope（cs:70211-70233）：!InWorld→true;active &&
+ *  (tileSolid||tileSolidTop) && !topSlope(平台合法顶帧除外) && !halfBrick。
+ *  tileSolidTop≈d.platform（本文件既有近似口径）;PlatformProperTopFrame
+ *  （cs:70198,帧宽 18）合法段 [0,7]∪[12,16]∪[25,26]。 */
+function solidTileAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i];
+  const d = TILE_DEFS[t];
+  const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
+  if (topSlope && !(d?.platform && platformProperTopFrame(st.frameX[i]))) return false;
+  return (vanGenSolidType(t) || !!d?.platform) && !st.half[i];
+}
+function platformProperTopFrame(frameX: number): boolean {
+  const n = Math.floor(frameX / 18);
+  if ((n < 0 || n > 7) && (n < 12 || n > 16)) return n >= 25 && n <= 26;
+  return true;
+}
+
+/** Check2x2 巨石族子集（cs:48405-48805）：2×2 锚定校验 + 整组杀 + 尾 4×4 帧。
+ *  锚点 num2/num6 = 本格减 frame 偏移（cs:48408-48422,frameX≥36 修样式列 +36）。 */
+function check2x2(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (destroyObject) return; // cs:48408
+  const i0 = st.idx(x, y);
+  const type = st.type[i0];
+  let num2 = -Math.floor(st.frameX[i0] / 18);
+  let num = 0;
+  if (num2 < -1) { num2 += 2; num = 36; }
+  num2 += x;
+  let num4 = st.frameY[i0];
+  let num5 = 0;
+  while (num4 >= 36) { num4 -= 36; num5++; } // num3=36（type 172 除外,巨石族恒 36）
+  const num6 = y - Math.floor(num4 / 18);
+  const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
+  let flag = false;
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      // 越界 = GetTileSafely 新 Tile（非活性）→ 失配（cs:48443-48451）
+      if (!inW(k, l)) { flag = true; break; }
+      const q = st.idx(k, l);
+      if (!st.flags[q] || st.type[q] !== type
+        || st.frameX[q] !== (k - num2) * 18 + num
+        || st.frameY[q] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
+    }
+  }
+  // 巨石族专属：上方箱族豁免 + 底部支撑（cs:48473-48490）。type 读取不查
+  // active（ghost type 保真,同原版裸读）
+  const chestAbove = (cx: number, cy: number): boolean =>
+    inW(cx, cy) && CHEST_PROTECT_2X2.has(st.type[st.idx(cx, cy)]);
+  if (!chestAbove(num2, num6 - 1) && !chestAbove(num2 + 1, num6 - 1)
+    && !solidTileAllowBottomSlope(st, num2, num6 + 2)
+    && !solidTileAllowBottomSlope(st, num2 + 1, num6 + 2)) flag = true;
+  if (!flag) return;
+  // 整组杀（cs:48562-48574;巨石族尘掷 0 → 流位不动）+ 尾 4×4 TileFrame（cs:48799）
+  destroyObject = true;
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      if (!inW(k, l)) continue;
+      const q = st.idx(k, l);
+      if (st.type[q] === type && st.flags[q]) killTile(st, rng, k, l);
+    }
+  }
+  destroyObject = false;
+  for (let k = num2 - 1; k < num2 + 3; k++) {
+    for (let l = num6 - 1; l < num6 + 3; l++) tileFrame(st, rng, k, l);
+  }
+}
+
 /** 原版 KillTile(i,j) 生成期路径的完整掷骰模型 + 击杀（type=0 清型）。
  *  生成期 noItem=true 无掉落掷;isGeneratingOrLoadingWorld=true 时尘段恒跑
  *  （cs:63747 dust 段在 effectOnly 早退之前,无 netMode 门）。 */
@@ -120,6 +229,8 @@ function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   // cs:63941：地狱石(58) 击杀于 UnderworldLayer(=h-200) 之下 → 灌岩浆 128
   if (sheet === 58 && y > st.h - 200) { st.liquid[i] = 128; st.liquidType[i] = 2; }
   st.setTileSilent(x, y, 0);
+  // cs:63947 尾 SquareTileFrame(i,j)：3×3 TileFrame 级联（见上 UUU 批注）
+  squareTileFrame(st, rng, x, y);
 }
 
 /** WorldGen.SolidTile(i, j, false) 等价（WorldGen.cs:42370）：
@@ -149,7 +260,13 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
  *    441 假箱/467 箱2/468/470 模型/475 帽架/488 倒木/597 传送塔
  *  ⑤ CanKillTile 结构检查（cs:62249）——仍为近似（生成期主要拦截宝箱/巨石邻接，
  *    ①②④已覆盖生成期实际命中面）
- *  另要求 active 且 tileSolid 非 tileSolidTop（原版隐含：非实心块砸不出半砖） */
+ *  ★UUU 批源码考古定论：原版 CanPoundTile 对本格 type 裸读（switch/Boulders/
+ *    生成期 190,30 均不查 active,ghost type 参与判定）,但兜底 `return CanKillTile`
+ *    ——CanKillTile 首门 `!tile.active() → false`（cs:62265）⇒ 非活性格两种走法
+ *    同为 false,本函数的 flags 早退与原版**结果等价**（QQQ 头号嫌疑排除）。
+ *    真正的近似残差是尾部 genSolidType/!platform/!framed 三门——CanKillTile 不查
+ *    实心/平台/框架,活性非实心非框架格（草木/根须族）原版可砸而本仓拒——pass 53
+ *    足迹零命中（clean 重放 0 差实证）,保留备案 */
 const POUND_BLACKLIST = idsByVanillaSheet(10, 48, 137, 232, 380, 387, 388, 476, 484);
 const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
 const POUND_GEN_SKIP = idsByVanillaSheet(190, 30);

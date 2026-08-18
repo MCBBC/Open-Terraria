@@ -96,9 +96,16 @@ export async function settleWorldLiquids(
   }
   sim.quickSettle = false;
   // 原版 pass 尾恢复（cs:21110/16293：worldGenTilesIgnoreWater(false)——在 ClearPendingLiquid
-  // 之后）；尾部 WaterCheck/finalGenMergeCheck（本仓 #102 补挂段）按原版时点在恢复之后跑
+  // 之后）；finalGenMergeCheck（本仓 #102 补挂段）按原版 Finish 时点在恢复之后跑。
   sim.worldGenTilesIgnoreWater(false);
-  sim.waterCheck(); // 残留活水交给运行时收敛（原版 WorldFile.cs:769 同款）
+  // ★尾部 WaterCheck 仅读档路径有（WorldFile.cs:765-769：quickSettle=false → WaterCheck →
+  //   isGeneratingOrLoadingWorld=false；该路径全程未开 worldGenTilesIgnoreWater 窗口）。
+  //   生成期两 pass（cs:16286-16293 / 21109-21113）在 worldGenTilesIgnoreWater(false)
+  //   恢复后【无任何 WaterCheck】直接结束——若恢复后补跑一次，10/190/191/192（关门门/
+  //   蘑菇块/活木/活叶）已翻回实心，轮内合法驻留其间的水/岩浆会被 clear 分支整片抹零
+  //   （#49 残差 L=47 根因：丛林活木 191 河床水池被尾部 WC 清空，vanilla 末态保留
+  //   238/255——x86 对拍实证）
+  if (mode === 'load') sim.waterCheck();
   // 生成收尾：全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-22650）
   // ——生成/读档期常规交互只做类型 strip 不落块，唯独这一次允许残余接触结块
   if (mode === 'gen') sim.finalGenMergeCheck();

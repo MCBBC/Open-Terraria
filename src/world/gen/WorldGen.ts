@@ -1193,6 +1193,8 @@ const ctxOceanTreasures: [Array<{ x: number; y: number }>] = [[]];
 const ctxShrineSpots: [Array<{ x: number; y: number }>] = [[]];
 /** 探针/测试用：最近一次生成的 GenState（山丘坐标等） */
 export function lastGenState(): GenState | null { return ctxGs[0]; }
+/** 探针用（WWW 批 golden 基座重放 rig）：注入 GenState 到生成期槽位——生产路径勿用。 */
+export function __setGenStateForProbe(gs: GenState | null): void { ctxGs[0] = gs; }
 
 function nextFrame(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
@@ -1409,8 +1411,8 @@ function surfacePass({ store, surface, world }: GenCtx) {
   void surface; void world;
 }
 
-/** SpreadingGrass 段①②（cs:18354-18460）1:1 */
-function spreadingGrassPass(store: World['store'], gs: GenState) {
+/** SpreadingGrass 段①②（cs:18354-18460）1:1（导出供 WWW 基座重放 rig 复用） */
+export function spreadingGrassPass(store: World['store'], gs: GenState) {
   const w = store.w;
   const sheetAt = (x: number, y: number): number => {
     if (!store.inBounds(x, y)) return -1;
@@ -1611,7 +1613,7 @@ function finalize({ store, world }: GenCtx) {
 // 旧实现为"找最平坦窗口+人工整平平台"——出生点是一块突兀平台，与原版自然地表不符。
 // 2026-08-13 前内嵌 finalize 尾（全部 pass 之后执行）——现按注册序归位为独立槽
 // （「地表装饰」之后、「草墙」之前）。
-function spawnPointPass({ store, rng, world }: GenCtx) {
+export function spawnPointPass({ store, rng, world }: GenCtx) {
   // ★pass 头 tileSolid 翻转（cs:19628 `Main.tileSolid[379] = false`）：出生点采样
   //   期间泡泡块(379)视为非实心——非 skyblock 分支。尾 cs:19731 还原 true（见函数尾）。
   //   本仓生成期从不放置 379，翻转仅存档时间线。

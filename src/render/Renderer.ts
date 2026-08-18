@@ -138,15 +138,21 @@ import { GLSpriteLayer } from './GLSpriteLayer';
 /** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制。
  *  ★smooth 恒 false:主循环 :1623 等处关闭的 imageSmoothingEnabled 跨帧残留,
  *  2D 背景层实际一直按最近邻缩放渲染(对拍实测)——GL 与既有视觉 1:1 */
+// ★纹理键用 WeakMap 实例自增 id:ImageBitmap 无 .src,曾退化为"宽x高"——
+// 森林 t0/t2 同为 1024×699 两层共用一张纹理 = 满屏 Background_50 平面色
+// (对拍实锤;同款旧坑见 PaperDoll/UISpriteBatch 的 .src 键改造)
+const BG_TEX_ID = new WeakMap<object, number>();
+let bgTexIdNext = 0;
 class GLBgBlit implements BGBlit {
   constructor(private gl: GLSpriteLayer) {}
   img(im: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
     dx: number, dy: number, dw: number, dh: number,
     opts?: { alpha?: number; tint?: readonly [number, number, number] | null }): void {
-    const tag = (im as HTMLImageElement).src ?? `cv${im.width}x${im.height}`;
-    const e = this.gl.texFromImage(`bg:${tag}`, im as TexImageSource);
+    let id = BG_TEX_ID.get(im);
+    if (id === undefined) { id = ++bgTexIdNext; BG_TEX_ID.set(im, id); }
+    const e = this.gl.texFromImage(`bg:${id}`, im as TexImageSource);
     if (!e) return;
-    this.gl.quad(e, sx, sy, sw, sh, dx, dy, dw, dh, { alpha: opts?.alpha, tint: opts?.tint, smooth: false });
+    this.gl.quad(e, sx, sy, sw, sh, dx, dy, dw, dh, opts);
   }
   fill(x: number, y: number, w: number, h: number, r: number, g: number, b: number, a = 1): void {
     this.gl.fillQuad(x, y, w, h, r, g, b, a);

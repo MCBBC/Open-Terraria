@@ -18,7 +18,7 @@ for (let i = 0; i < 150; i++) { await new Promise(r => setTimeout(r, 2000)); if 
 await new Promise(r => setTimeout(r, 5000));
 await p.evaluate(() => {
   const g = window.__swGame;
-  g.world.clock.timeOfDay = 0.75;
+  // 正常白天态(不动时钟,dayFactor 一致)
   g.player.x = (g.world.spawnX - 2) * 16; g.player.y = (g.world.spawnY - 3) * 16;
   g.player.vx = 0; g.player.vy = 0;
   g.paused = true;
