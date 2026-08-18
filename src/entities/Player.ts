@@ -167,6 +167,9 @@ export class Player extends Entity {
    *  本仓渲染未消费——状态位保留） */
   swimTime = 0;
   inWater = false;
+  /** 出入水 10t 去抖（Player.wetCount，Player.cs:27464/27558 置 10、:27651 每tick 递减、
+   *  :37203 重生清零）——水波涟漪尺寸因子（WaterShaderData.cs:263 h·wetCount/9） */
+  wetCount = 0;
   headUnderwater = false;
   /** 税务员累积税款（Player.cs:792 taxMoney，铜币；对话「收集」领取） */
   taxMoney = 0;
@@ -1482,6 +1485,10 @@ export class Player extends Entity {
         world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] === 3);
     // 入水瞬间：水花声（出水不响）
     if (this.inWater && !wasInWater) game.playSfx('splash');
+    // wetCount 去抖（Player.cs:27464-27466 入水置 10 / :27558-27560 出水置 10 /
+    // :27649-27651 每 tick 递减）——水波系统涟漪尺寸因子消费
+    if (this.inWater && !wasInWater && this.wetCount === 0) this.wetCount = 10;
+    else if (!this.inWater && wasInWater && this.wetCount === 0) this.wetCount = 10;
     const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE));
     // waterWalk 时缩高 6px 判定(原版 num80,Player.cs:27349/27352:水面行走不因脚尖触浆受伤)
     // 水上行走（装备 waterWalk 族 ∪ 水上行走药水 buff 15,:9706）
@@ -1545,6 +1552,7 @@ export class Player extends Entity {
     } else {
       this.shimmering = false; // 帧首复位（:18168 shimmering=false 语义）
     }
+    if (this.wetCount > 0) this.wetCount--;   // Player.cs:27649-27651
     // shimmerTransparency（Player.cs:18147-18162）：shimmering +0.015/t 钳 0.8；
     // 解除后 -0.015/t 回 0，衰减起始帧（恰 0.8）播 Sound 19 style 3
     // （本作 sfx 库无独立 style 3 样本，shimmerSplash 近似）

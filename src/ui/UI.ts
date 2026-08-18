@@ -1343,17 +1343,28 @@ export class UI {
       player?: {
         damageMult(k: 'melee' | 'ranged' | 'magic' | 'summon'): number;
         critChance(k: 'melee' | 'ranged' | 'magic'): number;
-        equipStats?: { manaCostMul?: number; kbGlove?: boolean };
+        equipStats?: { manaCostMul?: number; kbGlove?: boolean; setBonus?: { name?: string } | null };
         buffs?: { has?: (b: number) => boolean };
       };
+      anglerQuestItemId?: () => number;
     };
     const gp = g.player;
+    // 套装奖励文本（player.setBonus ← ArmorSetBonus.name → l10n ArmorSetBonus.*）
+    let setBonusText: string | null = null;
+    {
+      const sbName = gp?.equipStats?.setBonus?.name;
+      if (sbName) {
+        const path = `ArmorSetBonus.${sbName}`;
+        if (Lang.has(path)) setBonusText = Lang.text(path) || null;
+      }
+    }
     const tps = gp ? {
       dmgMult: { melee: gp.damageMult('melee'), ranged: gp.damageMult('ranged'), magic: gp.damageMult('magic'), summon: gp.damageMult('summon') },
       crit: { melee: gp.critChance('melee'), ranged: gp.critChance('ranged'), magic: gp.critChance('magic') },
       manaCostMul: gp.equipStats?.manaCostMul ?? 1,
       kbGlove: !!gp.equipStats?.kbGlove,
       kbBuff: !!gp.buffs?.has?.(BuffType.Titan),      // 泰坦 108 → kbBuff（:20812 近战击退×1.5）
+      setBonusText,
     } : null;
 
     // 物品自带说明（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*）。
@@ -1392,6 +1403,9 @@ export class UI {
       shop: this.shopTooltipContext(def, vid, s.stack),
       expert: rare === -12,
       master: rare === -13,
+      anglerQuestItemId: g.anglerQuestItemId?.() ?? 0,
+      // 社交槽语义（dye 槽 / armor 社交位——本仓 dye 槽 = 原版 social dye 位）
+      socialSlot: where === 'dye' || where === 'miscDye',
     };
     for (const ln of assembleTooltipLines(def, s, tps, staticTip, ctx)) {
       const color = ln.journeyColor ? '#B46BD8' : ln.color;   // Colors.JourneyMode 紫

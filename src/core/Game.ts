@@ -7,6 +7,7 @@ import { Research } from '../stats/Research';
 import { PetFollower } from '../entities/PetFollower';
 import { alignmentPcts, dryadWorldStatus } from '../world/WorldAlignment';
 import { petInfoOfVid } from '../data/vanillaPets';
+import { petSlimeHitVoice } from '../data/vanillaNpcAmbience';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { computeSellValue, canSellFromShopUi, expectedPrices, itemValueWithPrefix, buybackShelfStack } from '../stats/SellChain';
@@ -2245,7 +2246,20 @@ export class Game implements GameHooks {
       this.renderer.installGpuPressureGuard();      // 新画布挂回单点监听(window 哨兵常在)
     };
     let gpuTripToasted = false;
-    this.renderer.cbOnGpuRecover = () => { this.chunks?.dispose(); };
+    this.renderer.cbOnGpuRecover = () => {
+      this.chunks?.dispose();
+      // 小地图画布死亡 → 重建 + 拆带重建(异步,不阻塞)
+      const mm = this.renderer.minimap;
+      if (mm && (mm.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.()) {
+        mm.dispose();
+        const w = this.world;
+        if (w) {
+          this.renderer.minimap = new Minimap(w, true);
+          void this.renderer.minimap.buildStriped();
+        }
+      }
+    };
+    this.renderer.installGpuHealthWatchdog();
     this.renderer.cbOnGpuPressure = () => {
       this.shrinkChunks();
       if (this.renderer.gpuDegraded && !gpuTripToasted) {
@@ -4064,7 +4078,7 @@ export class Game implements GameHooks {
         if (e.dead) continue;
         const id = e.vanillaId ?? -1;
         const pair = BLOOD_MOON_EVIL.get(id);
-        if (pair) e.transformTo(w.crimson ? pair[1] : pair[0], w.store);
+        if (pair) e.transformTo(w.crimson ? pair[1] : pair[0], w.store, false, this);
       }
       for (const c of this.entities.critters) {
         const cr = c as Enemy;
@@ -4488,7 +4502,13 @@ export class Game implements GameHooks {
             // 王已败 → 老人绝不在场（原版老人 AI 每帧 downedBoss3 → ai[3]=1 自灭，
             // NPC.cs:53754-53760；含"非诅咒途径召唤（裁缝巫毒娃娃）杀王"的在场老人）
             for (const n of this.entities.npcs) {
-              if (n instanceof TownNPC && n.npcKey === 'old_man' && !n.dead) n.dead = true;
+              if (n instanceof TownNPC && n.npcKey === 'old_man' && !n.dead) {
+                n.dead = true;
+                // 自灭咆哮（NPC.cs:53742-53750 ai[3]==1 消散块：PlaySound(15,x,y,0)
+                // = Roar_0 定 style 0；判定含 type 54 裁缝,但单机侧 ai[3]=1 置位点
+                // 仅 :53759 老人 downedBoss3 一处——本门同款只打老人）
+                this.playSfxWav('Roar_0', 1, n.cx, n.cy);
+              }
             }
           } else {
             // 离场/未被击败 → 老人重新出现（原版语义）。★此前本门只查
@@ -14063,8 +14083,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.swingHitSet.has(e.id)) continue;
       if (!hitRect(e.x, e.y, e.w, e.h)) continue;
       this.swingHitSet.add(e.id);
-      // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
-      if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
+      // 怪物专属受击声（各家族不同）；播放失败回退通用 hit。
+      // 宠物史莱姆语音表优先（StrikeNPC :82255-82302）：type==1 且 ai[1]=语音
+      // 饰品物品 id → player_hit_* 直播替换（鸡 1/5 稀有变体在 petSlimeHitVoice 掷）
+      {
+        const pv = e.vanillaId === 1 ? petSlimeHitVoice(e.ai1) : null;
+        if (pv) this.sfx.playWavFile(pv.file, pv.vol, e.cx, e.cy);
+        else if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
+      }
       const crit = Math.random() < 0.04 + this.player.critChance('melee') / 100
         // ★武器 item.crit(GetWeaponCrit:4 基础+武器+装备)——vi_ 数据驱动近战武器 crit
         // 字段此前未入链(挥砍侧全族只有装备 crit)

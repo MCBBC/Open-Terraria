@@ -359,7 +359,7 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
   if (!mountOk) {
     // 主体消亡分支（:36288-36299）
     if (id === 390 || id === 416) {
-      e.transformTo(id === 390 ? 382 : 518, game.world.store);   // Transform → 下车变步兵
+      e.transformTo(id === 390 ? 382 : 518, game.world.store, false, game);   // Transform → 下车变步兵
     } else {
       e.dead = true;   // 部件随主体消散（life=0 + active=false,无掉落）
     }

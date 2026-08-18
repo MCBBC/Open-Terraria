@@ -10,6 +10,7 @@
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
+import { waterWaves } from './WaterWaves';
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 兜底——原版微光无瀑布拖尾分支，DrawShimmer 单独绘制）
 const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
@@ -469,6 +470,12 @@ export function drawVanillaLiquids(
   ctx.imageSmoothingEnabled = false;
 
   // 主循环（双 pass 共用：背景 pass 画在方块层前、透明度 1.0；前景 pass 画在方块后、乘 DEFAULT_OPACITY）
+  // 水波位移（WaterWaves，q>0 生效）：表层格（hasTE=水线）水线随 dy 升降——底边锚定、
+  // 上沿移动（dstY+dy / 高 sh−dy），源矩形同步裁剪保持 1:1 像素；同一帧双 pass 采样
+  // 确定性一致 → 背景/前景水线恒对齐。波光 tint 仅前景 pass（避免双 pass 重复提亮）。
+  const waveOn = waterWaves.quality > 0;
+  const waveInvZ = waveOn ? 1 / Math.max(1e-6, waterWaves.viewZoom()) : 0;
+  const _wdisp: [number, number] = [0, 0];
   for (let lx = PAD; lx < pw - PAD; lx++) {
     const x = px0 + lx;
     for (let ly = PAD; ly < ph - PAD; ly++) {
@@ -492,6 +499,18 @@ export function drawVanillaLiquids(
       // 帧选择 1:1（DrawNormalLiquids :636-644）：中列（sx==16,下落柱/池体）走慢速瀑布帧
       const srcY = isSurface ? 1280 : sy + (sx === 16 ? waterfallFrame : animFrame) * 80;
       if (sw <= 0 || sh <= 0 || sx + sw > tex.width || srcY + sh > tex.height) continue;
+      // ---- 水波位移（表层水线 bob；WaterWaves.ts 头部 Canvas2D 取舍登记）----
+      let dstY = y * 16 + Math.floor(n4 * 16);
+      let drawSh = sh;
+      if (waveOn && hasTE[i]) {
+        waterWaves.sampleDisplace(x * 16 + 8, y * 16 + 8, _wdisp);
+        // ±16 世界 px 钳（原版 ±9.6 屏幕px 量级；防极端值撕裂水线）
+        const dWy = Math.min(16, Math.max(-16, _wdisp[1] * waveInvZ));
+        const newSh = sh - dWy;
+        if (newSh < 1) { continue; }
+        dstY += dWy;
+        drawSh = newSh;
+      }
       // ---- 微光（shimmer, vt=3）：DrawShimmer（LiquidRenderer.cs:682-730）----
       // 原版三步：①基底层 water_14 直画 + 逐顶点 GetShimmerBaseColor 波动蓝移（:745-759）
       // ②sparkle 层：源矩形 X+48（water_14 的第 4 列 16px 闪纹带）、Y+80×GetShimmerFrame
@@ -502,10 +521,10 @@ export function drawVanillaLiquids(
       // alpha 取四角均值
       if (vt === 3) {
         const tVis = (nowMs / 1000) * 60;                      // ≈ Main.timeForVisualEffects（帧计数）
-        const dstX = x * 16 + Math.floor(n2 * 16), dstY = y * 16 + Math.floor(n4 * 16);
+        const dstX = x * 16 + Math.floor(n2 * 16);
         ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
-        ctx.drawImage(tex, sx, srcY, sw, sh, dstX, dstY, sw, sh);
-        if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, sh, tVis);
+        ctx.drawImage(tex, sx, srcY, sw, drawSh, dstX, dstY, sw, drawSh);
+        if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
         const flag = !(sx === 16 || sy % 80 === 48);           // :719
         if (flag || (x + y) % 2 === 0) {
           // alpha = 像素亮度（tintSparkleBand 已把灰度写进 alpha）× 四角
@@ -553,8 +572,19 @@ export function drawVanillaLiquids(
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
       // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感
       ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
-      ctx.drawImage(tex, sx, srcY, sw, sh,
-        x * 16 + Math.floor(n2 * 16), y * 16 + Math.floor(n4 * 16), sw, sh);
+      ctx.drawImage(tex, sx, srcY, sw, drawSh,
+        x * 16 + Math.floor(n2 * 16), dstY, sw, drawSh);
+      // 波光 tint（FilterWaterDistortion :106-111；仅表层 + 前景 pass，阈值 0.03 跳弱波）
+      if (waveOn && !isBackground && hasTE[i]) {
+        const gl = waterWaves.sampleGlint(x * 16 + 8, y * 16 + 8);
+        if (gl > 0.03) {
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = Math.min(1, gl * opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(x * 16 + Math.floor(n2 * 16), dstY, sw, drawSh);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+      }
     }
   }
 

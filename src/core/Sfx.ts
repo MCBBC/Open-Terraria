@@ -176,6 +176,7 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   // case 29 Zombie 怪物声（:1007-1049）：24-87 ×0.5、88-91 ×0.7、92 ×0.5、93-99 ×0.4、
   //   100/101 ×0.25、102/103 ×0.4、104 ×0.55
   for (let s = 24; s <= 87; s++) m[`Zombie_${s}`] = 0.5;
+  m.Roar_1 = 0.25;   // case15 style4(:829-833 沙鲨游弋 Roar_1 ×0.25)
   for (let s = 88; s <= 91; s++) m[`Zombie_${s}`] = 0.7;
   m.Zombie_92 = 0.5;
   for (let s = 93; s <= 99; s++) m[`Zombie_${s}`] = 0.4;

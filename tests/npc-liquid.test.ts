@@ -425,13 +425,14 @@ describe('水母 lurk（aiStyle 18 cs:24215-24269，专家 63/64/103/242）', ()
   });
 });
 
-describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 门 → Sfx.atten 2500px）', () => {
-  it('入水 splash 传实体中心坐标且 vol=0.9（非 boss）；玩家再远也无 0.12 下限残留', () => {
+describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 门 → Sfx.atten 2500px；'
+  + '2026-08-18 批：分液体 wav——PlaySound(19,style) 水 0/蜜与岩浆 1/微光入 4 出 5）', () => {
+  it('入水 Splash_0 传实体中心坐标且 vol=0.9（非 boss）；玩家再远也无 0.12 下限残留', () => {
     const w = liquidWorld();
     const rec: Array<{ n: string; v?: number; x?: number; y?: number }> = [];
     const fake = {
       player: { cx: 45 * TILE, cy: 30 * TILE, dead: false },   // 远离水池（>720px 旧音量门）
-      playSfx: (n: string, v?: number, x?: number, y?: number) => { rec.push({ n, v, x, y }); },
+      playSfxWav: (n: string, v?: number, x?: number, y?: number) => { rec.push({ n, v, x, y }); },
       spawnParticles: () => {},
     } as unknown as GameHooks;
     const b = host({
@@ -444,7 +445,7 @@ describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 �
     updateNpcLiquid(b, fake, w.store);
     expect(b.wet).toBe(true);
     expect(rec).toHaveLength(1);
-    expect(rec[0].n).toBe('splash');
+    expect(rec[0].n).toBe('Splash_0');              // 水入水 style 0（:94306）
     expect(rec[0].v).toBe(0.9);                     // 旧实现远距会塌到 0.9×0.12≈0.108
     expect(rec[0].x).toBe(b.cx);                    // 坐标交 Sfx.atten 统一 2500px 衰减
     expect(rec[0].y).toBe(b.cy);
@@ -456,7 +457,7 @@ describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 �
     const rec: Array<{ n: string; v?: number; x?: number; y?: number }> = [];
     const fake = {
       player: { cx: 12 * TILE, cy: 36 * TILE, dead: false },
-      playSfx: (n: string, v?: number, x?: number, y?: number) => { rec.push({ n, v, x, y }); },
+      playSfxWav: (n: string, v?: number, x?: number, y?: number) => { rec.push({ n, v, x, y }); },
       spawnParticles: () => {},
     } as unknown as GameHooks;
     const b = host({
@@ -468,9 +469,47 @@ describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 �
     });
     updateNpcLiquid(b, fake, w.store);
     expect(rec).toHaveLength(1);
+    expect(rec[0].n).toBe('Splash_0');
     expect(rec[0].v).toBe(1.2);
     expect(rec[0].x).toBe(b.cx);
     expect(rec[0].y).toBe(b.cy);
+  });
+  it('分液体档：微光入水 Splash_4 / 出水 Splash_5；蜂蜜 Splash_1（:94296-94428）', () => {
+    // 微光池（本仓 liquidType 4 = 原版 Shimmer）→ 入水 style 4、出水 style 5
+    const ws = liquidWorld(4);
+    const recS: string[] = [];
+    const fakeS = {
+      player: { cx: 20 * TILE, cy: 34 * TILE, dead: false },
+      playSfxWav: (n: string) => { recS.push(n); },
+      spawnParticles: () => {},
+    } as unknown as GameHooks;
+    const bs = host({
+      x: 20 * TILE, y: 34 * TILE, w: 18, h: 40, cx: 20 * TILE + 9, cy: 34 * TILE + 20,
+      vanillaId: 3, vanilla: { aiStyle: 3 }, wet: false, wetCount: 0,
+      lavaCd: 0, onFireT: 0, onFire3T: 0, inWater: false, liqFactor: 1,
+      def: { boss: false }, hurt: () => {},
+    });
+    updateNpcLiquid(bs, fakeS, ws.store);           // 入水
+    bs.wetCount = 0;                                // 越过去抖直接验出水分支
+    bs.x = 45 * TILE; bs.cx = 45 * TILE + 9;        // 移出液面（陆地 x∈[30,46)）
+    updateNpcLiquid(bs, fakeS, ws.store);           // 出水
+    expect(recS).toEqual(['Splash_4', 'Splash_5']);
+    // 蜂蜜池（liquidType 3）→ 入水 style 1（PlaySound 第 4 参缺省）
+    const wh = liquidWorld(3);
+    const recH: string[] = [];
+    const fakeH = {
+      player: { cx: 20 * TILE, cy: 34 * TILE, dead: false },
+      playSfxWav: (n: string) => { recH.push(n); },
+      spawnParticles: () => {},
+    } as unknown as GameHooks;
+    const bh = host({
+      x: 20 * TILE, y: 36 * TILE, w: 18, h: 40, cx: 20 * TILE + 9, cy: 36 * TILE + 20,
+      vanillaId: 3, vanilla: { aiStyle: 3 }, wet: false, wetCount: 0,
+      lavaCd: 0, onFireT: 0, onFire3T: 0, inWater: false, liqFactor: 1,
+      def: { boss: false }, hurt: () => {},
+    });
+    updateNpcLiquid(bh, fakeH, wh.store);
+    expect(recH).toEqual(['Splash_1']);
   });
 });
 

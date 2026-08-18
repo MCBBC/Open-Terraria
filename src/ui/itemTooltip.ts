@@ -39,6 +39,9 @@ export interface TooltipPlayerStats {
    *  击退档读的是含玩家加成后的 kb） */
   kbGlove: boolean;
   kbBuff: boolean;
+  /** 当前生效套装奖励文本（player.setBonus，:21138-21143——悬停护甲时追加
+   *  "套装奖励: X" 行；null 无套装） */
+  setBonusText: string | null;
 }
 /** 悬停上下文（低频行族的门数据——UI 侧现取注入，缺省全关） */
 export interface TooltipContext {
@@ -48,11 +51,13 @@ export interface TooltipContext {
   /** 商店上下文（npcShop>0，:20309-20402）：买入价（buy=true）/卖出价（铜计）。
    *  null=非商店。价格行按最高币种着色（:20380-20397 四档） */
   shop?: { buy: boolean; priceCopper: number } | null;
-  /** 社交栏槽（dye/armor vanity 位——tip[0]/[61]，:20499-20502 social 位） */
-  socialSlot?: boolean;
   /** 专家/大师物品旗（item.expert / rare==-13，:21146-21157 GameUI.Expert/Master） */
   expert?: boolean;
   master?: boolean;
+  /** 今日任务鱼 id（Game.anglerQuestItemId——任务品行 Lang.inter[65]，:20663-20666） */
+  anglerQuestItemId?: number;
+  /** 社交槽（dye/armor vanity 位，:20508-20513——item.social 语义 → tip0+tip1 双行） */
+  socialSlot?: boolean;
 }
 export type TooltipSlot = { id: number; stack: number; prefix?: number; favorited?: boolean };
 
@@ -84,6 +89,12 @@ const TILE_WAND_CONSUME: Record<number, number> = {
 };
 
 /** 击退档（:20602-20632） */
+/** tileBoost 表（Item.cs 各 case：扳手 509/510/511=20、多彩扳手 851=20、
+ *  工具腰带 852=1、矿车轨 2340=5/2341=2、The Axe 1305=1——itemfunc 无该字段） */
+const TILE_BOOST: Record<number, number> = {
+  509: 20, 510: 20, 511: 20, 851: 20, 852: 1, 2340: 5, 2341: 2, 1305: 1,
+};
+
 /** Tooltip 伤害显示倍率表（ItemID.ToolTipDamageMultiplier，ItemID.cs:246：
  *  均为 ×2 的回响/双生武器显示档） */
 const TOOLTIP_DMG_MUL: Record<number, number> = {
@@ -115,6 +126,10 @@ export interface TooltipBody {
   durationLine: TooltipLine | null;
   prefixDiff: TooltipLine[];
   yoyoLogoLine: TooltipLine | null;
+  /** 套装奖励行（:21138-21143） */
+  setBonusLine: TooltipLine | null;
+  /** 专家/大师物品行（:21146-21157——原版行序在 prefix 差分之后） */
+  expertMasterLines: TooltipLine[];
   researchLine: TooltipLine | null;
 }
 
@@ -140,13 +155,20 @@ export function buildTooltipBody(
     const d0 = def.armor?.defense ?? st0?.def;
     if (d0) lines.push({ text: d0 + T('LegacyTooltip.25'), tag: 'defense' });
     if (def.heal) lines.push({ text: T('CommonItemTooltip.RestoresLife', def.heal), tag: 'heallife' });
-    return { lines, durationLine: null, yoyoLogoLine: null, researchLine: null, prefixDiff: ps ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' })) : [] };
+    return { lines, durationLine: null, yoyoLogoLine: null, setBonusLine: null, expertMasterLines: [], researchLine: null, prefixDiff: ps ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' })) : [] };
   }
 
   const f = itemFuncOfVid(vid);
   const c = itemCombat(vid);
   const st = statOfInternal(slot.id);
   const equipKind = equipKindOfInternal(slot.id);
+
+  // ── 社交栏双行（:20508-20513：social && !vanity && !hasVanityEffects——
+  //    社交槽里带功能属性的物品提示"不会获得任何属性"）
+  if (ctx?.socialSlot) {
+    lines.push({ text: T('LegacyTooltip.0'), tag: 'social' });
+    lines.push({ text: T('LegacyTooltip.1'), tag: 'social' });
+  }
 
   // ── 伤害族四行（damage>0 门，:20511-20632；鞭族 damage 在 vanilla-whips 表，
   //    combat json 缺——按鞭档合成 c 等价物）──
@@ -251,9 +273,16 @@ export function buildTooltipBody(
     lines.push({ text: T('LegacyTooltip.52') + T(`ItemName.${vanillaItemNameKey(wandConsume)}`), tag: 'tilewand' });
   }
 
-  // ── 专家/大师物品行（:21146-21157 GameUI.Expert / GameUI.Master）──
-  if (ctx?.expert) lines.push({ text: T('GameUI.Expert'), tag: 'expert' });
-  if (ctx?.master) lines.push({ text: T('GameUI.Master'), tag: 'master' });
+  // ── 任务品行（:20663-20666 Lang.inter[65] "任务物品"）──
+  if (ctx?.anglerQuestItemId && ctx.anglerQuestItemId === vid) {
+    lines.push({ text: T('LegacyInterface.65'), tag: 'quest' });
+  }
+
+  // ── tileBoost 范围行（:20703-20715 "+"+boost+tip54；0 不显）──
+  const tb = TILE_BOOST[vid];
+  if (tb !== undefined && tb !== 0) {
+    lines.push({ text: `${tb >= 0 ? '+' : ''}${tb}${T('LegacyTooltip.54')}`, tag: 'range' });
+  }
 
   // ── 悠悠球商标位（:20845-20853——文本 " " 占位 + yoyoLogo 标记，UI 画
   //    OneDropLogo 五层影；原版行序在 buffTime 之后）──
@@ -285,7 +314,16 @@ export function buildTooltipBody(
     ? prefixLines(slot.prefix!).map((ln) => ({ text: ln.text, color: ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)', tag: 'prefix' }))
     : [];
 
-  return { lines, durationLine, prefixDiff, yoyoLogoLine, researchLine };
+  // ── 套装奖励行（:21138-21143：悬停护甲 + player.setBonus 非空 → tip48）──
+  const setBonusLine: TooltipLine | null = (isArmor && player?.setBonusText)
+    ? { text: `${T('LegacyTooltip.48')} ${player.setBonusText}`, tag: 'setbonus' } : null;
+
+  // ── 专家/大师物品行（:21146-21157——原版行序在 prefix 差分之后）──
+  const expertMasterLines: TooltipLine[] = [];
+  if (ctx?.expert) expertMasterLines.push({ text: T('GameUI.Expert'), tag: 'expert' });
+  if (ctx?.master) expertMasterLines.push({ text: T('GameUI.Master'), tag: 'master' });
+
+  return { lines, durationLine, prefixDiff, yoyoLogoLine, setBonusLine, expertMasterLines, researchLine };
 }
 
 /** 完整装配（静态说明 + 持续行按原版序并入 + 研究行/悠悠球位 + 商店价格行 +
@@ -301,6 +339,8 @@ export function assembleTooltipLines(
   if (body.durationLine) out.push(body.durationLine);
   if (body.yoyoLogoLine) out.push(body.yoyoLogoLine);
   out.push(...body.prefixDiff);
+  if (body.setBonusLine) out.push(body.setBonusLine);
+  out.push(...body.expertMasterLines);
   if (body.researchLine) out.push(body.researchLine);
   // 商店价格行（:20309-20402）：买入 tip[50]/卖出 tip[49]，币种四档着色
   // （:20380-20397 铂 220,220,198 / 金 224,201,92 / 银 181,192,193 / 铜 246,138,96；

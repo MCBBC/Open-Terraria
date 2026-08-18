@@ -8,7 +8,8 @@
 //  2. 永不沾水族（:94252）：(690 且 ai[0]==0) | 72 | aiStyle21 | aiStyle67 | 376 | 579 | 541
 //     | (aiStyle7 且 ai[0]==25) → wet 恒 false、wetCount=0；且随后 `if(!wet)` 会把本 tick
 //     岩浆判定留下的 lavaWet 一并清掉 → 这族在岩浆里照常受伤但移动不受任何液体减速。
-//  3. 出入水 transition（wetCount 10t 去抖，:94280/:94386）：入水/出水瞬间各播一次溅落；
+//  3. 出入水 transition（wetCount 10t 去抖，:94280/:94386）：入水/出水瞬间各播一次溅落
+//     （PlaySound(19,style) 分液体：水 0/蜜与岩浆 1/微光入 4 出 5，见 splashWavFile）；
 //     出水瞬间 velocity.X *= 0.5（:94381）；620 火把僵尸出水朝上玩家补 vy-=8（:94384）。
 //  4. 移动积分（Collision_MoveWhileWet :93986）：wet 时位移 ×factor —— **velocity 本身不变**，
 //     只缩位移（TileCollision.moveAndCollide 入口按 liqFactor 缩 dx/dy 同语义）。
@@ -156,6 +157,18 @@ function splashSoundAllowed(b: NpcLiquidHost, entry: boolean): boolean {
   return !quiet || id === 615;
 }
 
+/** 溅落 wav 分液体档（Collision_WaterCollision :94296-94310 入水 / :94424-94428 出水）：
+ *  PlaySound(19, style)——水 0 / 蜂蜜与岩浆走第 4 参缺省 = 1（SoundEngine.cs:103，
+ *  Splash_1）/ 微光入水 style 4、出水 style 5（唯一不对称档，LegacySoundPlayer
+ *  case 19 的 4/5 对 ×0.75+低音高由 FILE_CASE_VOL/playWavFile 统一处理）。
+ *  入水判本 tick 岩浆结果（lava 局部量）、出水判 lavaWet 残留旗——原版同款双源 */
+function splashWavFile(b: NpcLiquidHost, entry: boolean, lava: boolean): string {
+  if (entry ? lava : b.lavaWet) return 'Splash_1';
+  if (b.shimmerWet) return entry ? 'Splash_4' : 'Splash_5';
+  if (b.honeyWet) return 'Splash_1';
+  return 'Splash_0';
+}
+
 /** NPC.UpdateCollision 液体段 1:1（:93712-93805 + :94513-94560）。
  *  顺序照原版：岩浆判定（受伤）→ 水湿判定（wet/蜂蜜/微光/去抖溅落）→ !wet 清岩浆态 →
  *  熄火 → wetCount 递减 → liqFactor 供本帧之后的移动积分消费 */
@@ -186,14 +199,17 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
   } else {
     const r = wetCollision(st, b.x, b.y, b.w, b.h);
     flag = r.wet;
-    b.honeyWet = r.honey;
-    b.shimmerWet = r.shimmer;
+    // 原版只置 true 不清零（:94265-94272），清位统一在 !wet 段（:93729-93732，
+    // 在本函数步骤 3）——出水 tick 的湿型残留旗（Splash_5 出水微光档）依赖此序
+    if (r.honey) b.honeyWet = true;
+    if (r.shimmer) b.shimmerWet = true;
   }
   const wasWet = b.wet;
   if (flag && !wasWet && b.wetCount === 0) {
     b.wetCount = 10;                                      // 入水去抖（:94290）
     if (player && !player.dead && splashSoundAllowed(b, true)) {
-      game.playSfx('splash', b.def.boss ? 1.2 : 0.9, b.cx, b.cy);   // Sfx.atten 统一 2500px 衰减
+      // 按液体选 wav（:94296-94310 水 0/蜜 1/微光 4/岩浆 1）；Sfx.atten 统一 2500px 衰减
+      game.playSfxWav?.(splashWavFile(b, true, lava), b.def.boss ? 1.2 : 0.9, b.cx, b.cy);
     }
   } else if (!flag && wasWet) {
     b.vx *= 0.5;                                          // 出水横向衰减（:94381）
@@ -201,7 +217,8 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
     if (b.wetCount === 0) {
       b.wetCount = 10;                                    // 出水去抖（:94388）
       if (player && !player.dead && splashSoundAllowed(b, false)) {
-        game.playSfx('splash', b.def.boss ? 1.2 : 0.9, b.cx, b.cy); // 出水同款统一衰减
+        // 出水档微光 = style 5（:94429）——与入水 4 不对称,原版如此
+        game.playSfxWav?.(splashWavFile(b, false, lava), b.def.boss ? 1.2 : 0.9, b.cx, b.cy);
       }
     }
   }

@@ -54,6 +54,11 @@ export interface OptionsData {
    *  连跳≤1,原版 successiveSkippedDraws<=0 语义 Main.cs:16968);
    *  渲染超预算时本帧只跑逻辑不画,保逻辑恒 60Hz */
   frameSkipMode: 'off' | 'on' | 'subtle';
+  /** 水波质量四档（Main.WaveQuality，Main.cs:405 默认 3）：0=关 1=低 2=中 3=高。
+   *  档位门见 WaterShaderData.cs:114-118（>=3 弹幕波/黏度补偿、>=2 玩家+涟漪、
+   *  NPC 恒开；0 = WaterDistortion 滤镜整体关闭 SceneState.cs:129）；
+   *  config.json 键 "WaveQuality"（Main.cs:4215/4465），读档钳 [0,3]（:4466-4473） */
+  waveQuality: number;
 }
 
 const KEY = 'sandboxworld.options';
@@ -68,6 +73,7 @@ export class OptionsStore {
     pvpEnabled: false,
     frameCap: 60,
     frameSkipMode: 'subtle',
+    waveQuality: 3,   // Main.cs:405 WaveQuality = 3（默认高）
     pvpTeam: 0,
     lang: DEFAULT_LANG,
     smartCursorMode: 'toggle',
@@ -103,6 +109,10 @@ export class OptionsStore {
       }
       // 语言归一化:旧数字 legacyId → culture 名;非法值落 en-US(对齐原版 LoadSettings)
       this.data.lang = normalizeLang(this.data.lang);
+      // 水波质量钳 [0,3]（Main.cs:4466-4473 LoadSettings 同款卫门）
+      if (typeof this.data.waveQuality !== 'number'
+        || !Number.isFinite(this.data.waveQuality)) this.data.waveQuality = 3;
+      this.data.waveQuality = Math.min(3, Math.max(0, Math.round(this.data.waveQuality)));
       // 小地图皮肤归一化:存档里的未知/旧键 → Default
       // (SelectionHolder.SetActiveFrame(string) 未命中 → Options.Values.First() = Default)
       if (!(MINIMAP_FRAME_SKINS as readonly string[]).includes(this.data.minimapFrame)) {

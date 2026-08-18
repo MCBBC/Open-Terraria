@@ -773,7 +773,10 @@ export class TownNPC extends Entity {
       this.dead = true;
       game.spawnParticles(this.cx, this.cy, '#C03030', 8, 2);
       game.spawnParticles(this.cx, this.cy, '#8A1818', 4, 1.2);
-      game.playSfxFiles(['NPC_Killed_1'], 0.8);
+      // checkDead 死亡音（NPC.cs:78978-78982）：type 229 海盗且微光变体
+      // （IsShimmerVariant = townNpcVariationIndex==1 = 本仓 shimmered）→
+      // NPCDeath6 替代默认 DeathSound
+      game.playSfxFiles([this.vanillaId === 229 && this.shimmered ? 'NPC_Killed_6' : 'NPC_Killed_1'], 0.8);
       this.voodooSkeletronOnDeath(game);
     } else {
       game.playSfxFiles(['NPC_Hit_1'], 0.6);

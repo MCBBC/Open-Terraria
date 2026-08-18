@@ -989,7 +989,7 @@ export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) 
   }
   e.ai0 += 1;
   if (e.ai0 >= hatchT) {
-    e.transformTo(479, game.world.store);                 // :40428 Transform(479)
+    e.transformTo(479, game.world.store, false, game);   // :40428 Transform(479)
     return;
   }
   if (e.vy === 0 && Math.abs(e.vx) < 0.2 && e.ai0 >= hatchT * 0.75) {
@@ -1404,7 +1404,7 @@ export function smallStarCellAI(e: Enemy, game: GameHooks, _player: Player | nul
   e.vanillaScale = 1 + 0.3 * clamp(e.ai0 / MAX, 0, 1);   // :41455 scale
   if (e.ai0 >= MAX) {
     // Transform(405)(:41457-41461)——transformTo 埋块时会失败,下 tick 原地重试
-    e.transformTo(405, game.world.store);
+    e.transformTo(405, game.world.store, false, game);
     return;
   }
   e.visAngle += e.vx * 0.1;

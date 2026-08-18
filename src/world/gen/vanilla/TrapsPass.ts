@@ -258,9 +258,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (type === 1) {
     // ---- 巨石陷阱（cs:9151-9345）----
     const petCap = st.w >= 8400 ? 6 : st.w >= 6400 ? 4 : 2;           // GetWorldSize 三档（cs:9153）
-    // ★cs:9166 反编译印 Next(-1,2)，x86 金标 58 站点实测分布 {-2,-1,0}（+1 恒零）
-    //   ——以金标为准取 Next(-2,1) 等价 rng.int(-2,0)（锚点列全对齐实证）
-    let colX = x2 + rng.int(-2, 0);
+    let colX = x2 + rng.int(-1, 1);                                   // num4（cs:9166 Next(-1,2)）
     let top = py - 8;                                                 // num5（cs:9165）
     if (anyBoulderNearby(st, colX, top, 10)) return false;            // cs:9174
     for (;;) {
@@ -311,9 +309,23 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     else if (rng.int(0, 19) === 0) boulderId = BOULDER664;
     if (boulderId === BOULDER138 && boulderPetsPlaced < petCap) { boulderPetsPlaced++; boulderId = BOULDER716; }
     {
-      const bx = colX + 1, by = top + 1;                              // cs:9307 Place2x2
-      for (let dy = 0; dy < 2; dy++) {
-        for (let dx = 0; dx < 2; dx++) st.setTileSilent(bx + dx, by + dy, boulderId, dx * 18, dy * 18);
+      // ★cs:9307 反编译印 PlaceTile(num4+1, num5+1)，x86 金标实证锚=(num4, num5)
+      //   （site 对账：(533,603) 板/num4=532/num5=579 → 巨石 532-533×579-580；
+      //   井/壳/栅行界全按 num5 直读对齐，仅此锚差 (-1,-1)）。
+      //   ★Place2x2 空置门（cs:51364 检查 (x-1..x)×(y-1..y) 四格任一 active 即整写
+      //   放弃）：邻陷阱巨石占位时 B 陷阱只留井/栅/板（golden site (2022..2024,581)
+      //   A/B 双陷阱实证——缺此门 JS 会覆写 A 的巨石且多出 B 石）。
+      const bx = colX, by = top;
+      let blocked = false;
+      for (let gx = bx - 1; gx <= bx; gx++) {
+        for (let gy = by - 1; gy <= by; gy++) {
+          if (st.inBounds(gx, gy) && st.flags[st.idx(gx, gy)]) blocked = true;
+        }
+      }
+      if (!blocked) {
+        for (let dy = 0; dy < 2; dy++) {
+          for (let dx = 0; dx < 2; dx++) st.setTileSilent(bx + dx, by + dy, boulderId, dx * 18, dy * 18);
+        }
       }
     }
     // 2×3 致动石栅（cs:9308-9319：石头+红线+致动器）

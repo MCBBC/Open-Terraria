@@ -156,15 +156,19 @@ describe('FinalCleanup(1456 cs:22304-22670)', () => {
     };
     putBoulder(100, 120, sid(138));               // 无祭坛 → 保留
     putBoulder(110, 120, sid(484));
-    st.setTileSilent(110, 119, sid(26));          // 祭坛在上 → 484 → 397
+    st.setTileSilent(110, 119, sid(26));          // 祭坛在上（单格残片）
     putBoulder(120, 120, sid(138));
-    st.setTileSilent(120, 119, sid(26));          // 138 → 0
+    st.setTileSilent(120, 119, sid(26));
     runFinalCleanupPass(st, GS_FC);
     for (const [x, y] of [[100, 120], [101, 120], [100, 121], [101, 121]]) {
       expect(at(st, x, y)).toBe(sid(138));
     }
-    for (const [x, y] of [[110, 120], [111, 121]]) expect(at(st, x, y)).toBe(sid(397));
-    for (const [x, y] of [[120, 120], [121, 121]]) expect(at(st, x, y)).toBe(0);
+    // ZZZ 批（2026-08-18）：cs:22544 TileFrame 全图扫落地后,单格祭坛残片先在
+    // j=119 被 Check3x2 完整性门杀（cs:49190——vanilla 同序),⑥ 在 j=120 到达时
+    // 祭坛已不在 → 巨石保留。真实世界中祭坛是完整 3×2 且立于实心地,⑥ 分支
+    // 由金标转移表（T484>-1×2）另行实证。
+    for (const [x, y] of [[110, 120], [111, 121]]) expect(at(st, x, y)).toBe(sid(484));
+    for (const [x, y] of [[120, 120], [121, 121]]) expect(at(st, x, y)).toBe(sid(138));
   });
 
   it('⑦ 液体中棕榈 323 杀;⑧ 地牢墙液体转水/374→373/刺 56 杀+灌满水', () => {
@@ -177,7 +181,9 @@ describe('FinalCleanup(1456 cs:22304-22670)', () => {
     expect(at(st, 30, 140)).toBe(0);
     expect(st.liquid[st.idx(30, 150)]).toBe(50);
     expect(st.liquidType[st.idx(30, 150)]).toBe(LIQUID_TYPE.WATER);
-    expect(at(st, 31, 150)).toBe(sid(373));
+    // ZZZ 批：374→373 转换后,本格无实心支撑 → 同迭代末尾 TileFrame(373) 走
+    // IsADripTile 门杀（cs:85750,TileID.cs:157 {373,374,375,461,709}）——vanilla 同序
+    expect(at(st, 31, 150)).toBe(0);
     expect(at(st, 32, 150)).toBe(0);
     expect(st.liquid[st.idx(32, 150)]).toBe(255);
     expect(st.liquidType[st.idx(32, 150)]).toBe(LIQUID_TYPE.WATER);

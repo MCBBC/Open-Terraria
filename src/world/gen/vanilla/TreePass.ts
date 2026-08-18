@@ -139,8 +139,11 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
 }
 
 /** GrowTree（1456 cs:29924-30395）：常规树。height=Next(5,17)；丛林草基座净空 +5。
- *  运行期树苗成长（AttemptToGrowTreeFromSapling 默认档 :72876-72883）复用本函数 */
-export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
+ *  运行期树苗成长（AttemptToGrowTreeFromSapling 默认档 :72876-72883）复用本函数。
+ *  ignoreWalls（cs:29936 flag=ignoreWalls||DefaultTreeWallTest——Dome 地牢入口柱顶
+ *  树 DomeEntrance_TreeOnPillar→TryGrowingTreeByType(5,ignoreWalls:true) 消费，
+ *  FFFF 批 2026-08-18）：true 时跳过墙门（wall==0||flag 恒真）。 */
+export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number, ignoreWalls = false): boolean {
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
@@ -151,7 +154,7 @@ export function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: nu
   //  旧实现照搬基座整砖检查到侧格→坡地邻列全拒（数量差主根因之一）
   if (st.liquid[st.idx(i - 1, index1 - 1)] > 0 || st.liquid[st.idx(i, index1 - 1)] > 0 || st.liquid[st.idx(i + 1, index1 - 1)] > 0) return false;
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !FIT.has(st.type[gi])) return false;
-  if (!TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
+  if (!ignoreWalls && !TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
   const fitSide = (dx: number) => {
     if (!st.inBounds(i + dx, index1)) return false;
     const si = st.idx(i + dx, index1);

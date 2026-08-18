@@ -7,6 +7,9 @@
 //   style 为 [lo,hi) 左闭右开区间（原版 Next(lo,hi)）。
 // 【表二 CHATTER】AI_003 尾段 :57735-57764（战士族闲话,TargetClosest 前）。
 // 【表三 CRITTER】UpdateNPC_CritterSounds :93420-93517（鸭/蛙/鸟/鼠/鸥/枭）。
+// 【表四 PET_SLIME_HIT_VOICES】StrikeNPC 受击段 :82255-82302——type==1（史莱姆）
+//   且 ai[1]=语音饰品物品 id 时受击音按表替换（语音史莱姆 = 派对/天空盒特殊
+//   生成的蓝史莱姆,ai[1] 赋值点 :60828-60852）。
 export interface IdleSoundSpec {
   /** 掷骰分母（每帧 1/denom） */
   denom: number;
@@ -131,3 +134,34 @@ export const CRITTER_SOUNDS: Record<number, CritterSoundSpec> = {
   447: { denom: 1800, file: 'Zombie_33' },
   610: { denom: 1800, file: 'Zombie_33' },
 };
+
+/** :82255-82302 宠物史莱姆受击语音——SoundID.cs CreateTrackable().WithVolume 档
+ *  （鸡 0.8、其余全 0.5，:1115-1147）。5484 铃铛 = BellHurt = LegacySoundStyle(2,35)
+ *  = Player_Hit_35.wav——素材提取管线两处（game/public/sounds 与 terraria-assets/
+ *  Sounds）均无该文件，跳过该 id（落回默认 HitSound），素材入库后补一行即可。 */
+export interface PetHitVoice { file: string; vol: number; }
+export const PET_SLIME_HIT_VOICES: Record<number, PetHitVoice> = {
+  5507: { file: 'player_hit_balloon', vol: 0.5 },
+  5502: { file: 'player_hit_cat', vol: 0.5 },
+  5485: { file: 'player_hit_chicken', vol: 0.8 },
+  // 5484: 铃铛——Player_Hit_35 素材缺（见上注）
+  5506: { file: 'player_hit_crow', vol: 0.5 },
+  5503: { file: 'player_hit_dog', vol: 0.5 },
+  5534: { file: 'player_hit_fairy', vol: 0.5 },
+  5499: { file: 'player_hit_frog', vol: 0.5 },
+  5500: { file: 'player_hit_goat', vol: 0.5 },
+  5505: { file: 'player_hit_goblin', vol: 0.5 },
+  5501: { file: 'player_hit_retro', vol: 0.5 },
+  5504: { file: 'player_hit_turkey', vol: 0.5 },
+  5508: { file: 'player_hit_undead', vol: 0.5 },
+  5509: { file: 'player_hit_vampire', vol: 0.5 },
+};
+
+/** 受击语音掷骰（含鸡 5485 的 1/5 稀有变体 :82264-82271）；
+ *  未命中表 → null（调用方落回默认 HitSound，:82295-82305 default 分支） */
+export function petSlimeHitVoice(ai1: number): PetHitVoice | null {
+  if (ai1 === 5485 && Math.floor(Math.random() * 5) === 0) {
+    return { file: 'player_hit_chicken_rare', vol: 0.5 };   // ChickenHurtRare 0.5（:1119）
+  }
+  return PET_SLIME_HIT_VOICES[ai1] ?? null;
+}

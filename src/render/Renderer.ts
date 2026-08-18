@@ -127,6 +127,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly } from './VanillaLiquidRenderer';
+import { waterWaves, ensureWaveTextures, injectEntity, type WaveEntitySample } from './WaterWaves';
 import { renderEnv } from './VanillaTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
@@ -1469,6 +1470,39 @@ export class Renderer {
     // capture 阶段 window 级监听捕获全部画布的 contextlost,统一计入熔断
     window.addEventListener('contextlost', onLost, true);
   }
+  /** 辅画布健康重建(2026-08-18):光照/迷雾画布的 2D 上下文在风暴中
+   * 丢弃后备后多数自愈,但极端态会滞死——重建为同尺寸新画布(内容由
+   * 各自的每帧写入自然重填;迷雾走 null→懒重建) */
+  recreateAuxCanvases(): void {
+    if ((this.lightCtx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.()) {
+      const w = this.lightCanvas.width, h = this.lightCanvas.height;
+      this.lightCanvas.width = 0; this.lightCanvas.height = 0;   // 先释放旧后备
+      const nu = document.createElement('canvas');
+      nu.width = w; nu.height = h;
+      this.lightCanvas = nu;
+      this.lightCtx = nu.getContext('2d')!;
+      console.warn('[Renderer] 光照画布已死,已重建');
+    }
+    if (this.fogCanvas) { this.fogCanvas.width = 0; this.fogCanvas.height = 0; this.fogCanvas = null; this._mapFogRowSeen = -1; }
+  }
+
+  /** GPU 看门狗(2026-08-18 用户实报"关掉另一窗口也不恢复"):熔断链终止后
+   *  没有任何机制再触发恢复——低频巡检(20s),非熔断期发现死上下文即静默重建 */
+  installGpuHealthWatchdog(): void {
+    setInterval(() => {
+      if (this.gpuDegraded || !this.canvas.isConnected) return;
+      const mainLost = (this.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.() ?? false;
+      if (mainLost) {
+        this.recreateMainCanvas();
+        this.recreateAuxCanvases();
+        this.cbOnGpuRecover?.();
+        console.warn('[Renderer] 看门狗:主画布死亡,已重建渲染面');
+      } else {
+        this.recreateAuxCanvases();
+      }
+    }, 20_000);
+  }
+
   /** 重建主画布元素(上下文死亡的最后手段):同尺寸新元素替换 DOM 节点,
    *  重取 ctx;输入监听绑定在旧元素上的由 Game 经 onCanvasRecreated 重绑 */
   recreateMainCanvas(): void {
@@ -1670,6 +1704,8 @@ export class Renderer {
     cam.viewW = viewW; cam.viewH = viewH;
     cam.tickPunch();   // PunchCameraModifier 冲击位移衰减（鹿角怪等震屏源）
     const z = cam.zoom;
+    // 水面波动系统帧驱动（WaterShaderData Update+PreDraw+DrawWaves；详见 WaterWaves.ts）
+    this.updateWaterWaves(cam, world, player, entities, remotePlayers, viewW, viewH, z);
 
     // 0. 天塔柱族：视区扫描（Main.cs:61983-61990 GetAreaToLight+Inflate(28) →
     //    SceneMetrics.ScanOnScreenTiles :524-583）+ 滤镜状态机（SceneState.cs:105-128）
@@ -1745,6 +1781,15 @@ export class Renderer {
       // 2D 回退路径保留(?bggl=0 / GL 不可用)
       let bgDone = false;
       if (this.bgGlEnabled) {
+        // 死实例丢弃(双开风暴中 GL 反复死亡;5s 退避防重建风暴)
+        if (this.glfx?.unavailable) {
+          if (performance.now() - this.glfx.diedAt > 5000) {
+            this.glfx.dispose();
+            this.glfx = null;
+          } else {
+            this.glfx = null;             // 退避期内走 2D,实例下轮再建
+          }
+        }
         if (!this.glfx) this.glfx = new GLSpriteLayer();
         if (!this.glfx.unavailable) {
           this.glfx.resize(this.canvas.width, this.canvas.height);
@@ -2303,6 +2348,106 @@ export class Renderer {
   }
   /** Game 每帧注入：本次死亡掉落钱数（LocalPlayer.lostCoins） */
   deathLostCoins = 0;
+
+  /** 水面波动系统每帧驱动（render() 顶部调用；WaterWaves.ts 内有完整原版行号）：
+   *  贴图懒提取 → 档位同步(options.waveQuality) → 相机态 → 实体注入采集
+   *  (DrawWaves :181-334) → Update/PreDraw(progress/步进) */
+  private _waveLastMs = 0;
+  private _waveQ = -1;
+  private updateWaterWaves(
+    cam: Camera, world: World, player: Player, entities: Entity[],
+    remotePlayers: Player[], viewW: number, viewH: number, z: number,
+  ): void {
+    ensureWaveTextures(this.atlas);
+    const q = options.data.waveQuality;
+    if (q !== this._waveQ) { this._waveQ = q; waterWaves.setQuality(q); }
+    if (waterWaves.quality === 0) return;
+
+    // 模拟系用 CSS 像素（与原版"backbuffer/4"的设备无关语义对齐——DPR 高时波速
+    // 不变）；绘制侧换算 world = cssPx/cssZoom
+    const cssScale = viewW / Math.max(1, this.canvas.clientWidth || viewW);
+    const cssZoom = z / cssScale;
+    const cssW = Math.round(viewW / cssScale), cssH = Math.round(viewH / cssScale);
+    const camL = cam.x - viewW / (2 * z), camT = cam.y - viewH / (2 * z);
+    waterWaves.setCamera(camL, camT, cssZoom);
+
+    // 帧间隔（progress/步进节奏用真实流逝；PreDraw min(2 步)在 frame 内把守）
+    const now = performance.now();
+    const dt = this._waveLastMs ? Math.min(0.25, (now - this._waveLastMs) / 1000) : 1 / 60;
+    this._waveLastMs = now;
+
+    // ---- 实体注入采集（DrawWaves :181-334）----
+    const st = world.store;
+    const inLiquidAt = (wx: number, wy: number): boolean => {
+      const tx = (wx / TILE) | 0, ty = (wy / TILE) | 0;
+      return st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0;
+    };
+    // 弹幕两表（ProjectileID.cs:195 CanDistortWater 默认 true 的例外 / :333 NoLiquidDistortion）
+    const NO_WATER_DISTORT = new Set([7, 8, 150, 151, 152, 493, 494]);
+    const NO_LIQUID_DISTORT = new Set([511, 512, 513]);
+    const push = (s: WaveEntitySample) => injectEntity(s, camL, camT, cssW, cssH, cssZoom);
+    // 玩家（本地 + 联机镜像；q>=2）
+    const pushPlayer = (p: Player) => {
+      if (p.dead) return;
+      push({
+        kind: 'player', x: p.x, y: p.y, w: p.w, h: p.h, vx: p.vx, vy: p.vy,
+        wet: p.inWater, wetCount: p.wetCount, honeyWet: p.inHoney, lavaWet: p.inLava,
+      });
+    };
+    pushPlayer(player);
+    for (const rp of remotePlayers) if (!rp.dead) pushPlayer(rp);
+    // NPC（Enemy+TownNPC，恒开——WaterShaderData.cs:79 _useNPCWaves 无档位门）
+    for (const e of entities) {
+      if (e.dead) continue;
+      if (e instanceof Enemy) {
+        push({
+          kind: 'npc', x: e.x, y: e.y, w: e.w, h: e.h, vx: e.vx, vy: e.vy,
+          wet: e.wet, wetCount: e.wetCount, honeyWet: e.honeyWet, lavaWet: e.lavaWet,
+        });
+      } else if (e instanceof TownNPC) {
+        push({
+          kind: 'townnpc', x: e.x, y: e.y, w: e.w, h: e.h, vx: e.vx, vy: e.vy,
+          wet: e.wet, wetCount: e.wetCount, honeyWet: e.honeyWet, lavaWet: e.lavaWet,
+        });
+      } else {
+        // 弹幕族（q>=3）：projId 鸭子类型（各 Proj 类无公共基类）；wet 以中心格
+        // 液体探针近似（原版 projectile.wet 由每 tick 碰撞维护——弹幕小盒等价）
+        const pid = (e as { projId?: number }).projId;
+        if (typeof pid === 'number'
+          && !NO_WATER_DISTORT.has(pid) && !NO_LIQUID_DISTORT.has(pid)
+          && inLiquidAt(e.x + e.w / 2, e.y + e.h / 2)) {
+          push({
+            kind: 'projectile', x: e.x, y: e.y, w: e.w, h: e.h, vx: e.vx, vy: e.vy,
+            wet: true, wetCount: 0, honeyWet: false, lavaWet: false,
+            projDistort: true,
+          });
+        }
+      }
+    }
+    // 血块落水涟漪（Gore.cs:986 frame<10→10 沿；落水沿由本侧 wet 进入沿把守）
+    for (const g of liveGorePieces()) {
+      if (g.dead) continue;
+      const wet = inLiquidAt(g.x + 8, g.y + 14);
+      const key = g as unknown as { __waveWasWet?: boolean };
+      if (wet && !key.__waveWasWet && waterWaves.gates.ripple) {
+        push({ kind: 'gore', x: g.x, y: g.y, w: 16, h: 16, vx: 0, vy: 0, wet: true, wetCount: 0, honeyWet: false, lavaWet: false });
+      }
+      key.__waveWasWet = wet;
+    }
+
+    // ---- Update + PreDraw（progress/强度/步进/滚动）----
+    waterWaves.frame({
+      camX: camL, camY: camT, zoom: cssZoom,
+      viewW: cssW, viewH: cssH,
+      tileX: Math.floor((player.x + player.w / 2) / TILE),
+      tileY: Math.floor((player.y + player.h / 2) / TILE),
+      maxTilesX: world.w, maxTilesY: world.h,
+      worldSurface: world.groundLevel, rockLayer: world.rockLevel,
+      windAbs: Math.abs(world.weather?.windSpeedCurrent ?? 0),
+      rain: world.weather?.maxRaining ?? 0,
+      dt,
+    });
+  }
 
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
     // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）。

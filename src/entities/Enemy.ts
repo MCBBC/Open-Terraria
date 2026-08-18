@@ -86,7 +86,7 @@ import {
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 import { rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
-import { spawnNpcDeathGore } from './GorePiece';
+import { spawnNpcDeathGore, GorePiece } from './GorePiece';
 import { hslToRgb } from '../player/Appearance';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
@@ -497,12 +497,12 @@ export class Enemy extends Entity {
         // HP 按比例结转；三段 lifeMax 同为 150 → 原值保留）
         if (this.wormFollow) this.wormFollow.wormNext = null;
         this.wormFollow = null;
-        this.transformTo(13, st, true);
+        this.transformTo(13, st, true, game);
       } else if (!nextOk) {
         // :51910-51913 Transform(15, 0, ai[1])：收成新尾
         if (this.wormNext) this.wormNext.wormFollow = null;
         this.wormNext = null;
-        this.transformTo(15, st, true);
+        this.transformTo(15, st, true, game);
       }
     }
     // ---- 专家毒唾 666（:51468-51504）----
@@ -1266,7 +1266,7 @@ export class Enemy extends Entity {
         case 23: this.flyingWeaponAI(game, p); break;                     // AI_023 飞行武器（cs:25316 冲/漂100/转120 循环，受击回蓄转）
         case 25: this.mimicAI(game, p); break;                            // AI_025 宝箱怪（cs:25621 伪装200px盒→小小大跳循环）
         case 39: this.tortoiseAI(game, p); break;                         // AI_039 陆龟族（cs:29257 待机蓄力→蓄势→旋冲→恢复）
-        case 41: this.herplingAI(game, p); break;                         // AI_041 赫柏林/德普林（cs:30017 低跳连扑；378 炸弹自爆略）
+        case 41: this.herplingAI(game, p); break;                         // AI_041 赫柏林/德普林/378 咬齿炸弹（cs:30017 低跳连扑+自爆链）
         case 44: this.flyingSwarmerAI(game, p); break;                    // AI_044 飞鱼/蚁狮蜂（cs:30999 分轴限速追+失视逃逸）
         case 56: this.dungeonSpiritAI(game, p); break;                    // AI_056 地牢之魂（cs:32915 穿墙0.99惯性追踪）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
@@ -2552,18 +2552,18 @@ export class Enemy extends Entity {
     if (this.vy === 0 && this.vanillaId != null) {
       const wallForm = Enemy.SPIDER_WALL_FORM[this.vanillaId];
       if (wallForm !== undefined && this.npcCanStickToWalls(st)) {
-        this.tryTransformTo(wallForm, st);
+        this.tryTransformTo(wallForm, st, false, game);
       }
     }
     // ---- 吸血鬼离远 → 化回蝙蝠（cs:59236-59244：type 159 距玩家 >300 → Transform(158)）
     if (this.vanillaId === 159 && player
       && Math.hypot(player.cx - this.cx, player.cy - this.cy) > 300) {
-      this.tryTransformTo(158, st);
+      this.tryTransformTo(158, st, false, game);
     }
     // ---- 蜥蜴人激怒（cs:57422-57425：type 198 HP≤55% → Transform(199 LihzahrdCrawler)，
     //  爬行姿态更快更狠；同段的 Nutcracker 348→349 霜月未引入不移植）
     if (this.vanillaId === 198 && this.hp <= this.maxHp * 0.55) {
-      this.tryTransformTo(199, st);
+      this.tryTransformTo(199, st, false, game);
     }
     // 地面摩擦：原版 walker 摩擦链已在 fighterMoveStep（fighterFamilies.ts）1:1
     // （AI_003_Fighters :60115-60175——num3 档 velocity×damp【双轴】、vy==0 落地门、
@@ -2834,10 +2834,13 @@ export class Enemy extends Entity {
 
   /** Transform 1:1（NPC.cs:81861-81919）：换类型 + 按比例结转 HP + ai[0..3] 清零；
    *  位置按 TryChangingSizeFromBottomCenter（:81836）底边中心锚定改尺寸，
-   *  新碰撞盒与实心块重叠则放弃（原版换尺寸失败语义） */
-  private tryTransformTo(id: number, st: GameHooks['world']['store'], allowEmbedded = false): boolean {
+   *  新碰撞盒与实心块重叠则放弃（原版换尺寸失败语义）。
+   *  game 可选 = TransformVisuals（:81902 Transform 尾对所有转化统一调用）播
+   *  音效用——见 transformVisuals */
+  private tryTransformTo(id: number, st: GameHooks['world']['store'], allowEmbedded = false, game?: GameHooks): boolean {
     const v = vanillaNpc(id);
     if (!v) return false;
+    const oldType = this.vanillaId;
     const s = v.scale ?? 1;
     const nw = Math.round(v.width * s), nh = Math.round(v.height * s);
     const nx = this.cx - nw / 2, ny = this.y + this.h - nh; // 底边中心锚定
@@ -2870,14 +2873,29 @@ export class Enemy extends Entity {
       drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
     };
     this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
+    this.transformVisuals(game, oldType, id);
     return true;
+  }
+
+  /** TransformVisuals（NPC.cs:81739-81771——Transform 尾部 :81902 对所有转化统一
+   *  调用,按 (oldType,newType) 对分发）。当前移植对仅 158⇄159（吸血蝙蝠⇄吸血鬼,
+   *  :81742-81749）：Item_8 + 3 个 gore 99（三锚点 y−10 / y+h/2−10 / y+h−10、
+   *  初速 ×0.3——GorePiece 血块收缩族含 99）。478→479（dust 238+gore 684-686）/
+   *  406→405 等其余对无音效号,粒子侧未移植维持现状。 */
+  private transformVisuals(game: GameHooks | undefined, oldType: number | null, newType: number): void {
+    if (!game) return;
+    if (!((oldType === 158 && newType === 159) || (oldType === 159 && newType === 158))) return;
+    game.playSfxWav?.('Item_8', 1, this.cx, this.cy);
+    for (const gy of [this.y - 10, this.y + this.h / 2 - 10, this.y + this.h - 10]) {
+      GorePiece.newGore(99, this.x, gy, this.vx * 0.3, this.vy * 0.3, this.vanillaScale ?? 1);
+    }
   }
 
   /** 外部 AI 文件的 Transform 入口（骑手 390 失坐骑 → 382,cs:36291）。
    *  allowEmbedded：noTileCollide 族（EoW 断链晋升 13/15 常处实心块内）跳过
    *  实心重叠自检——原版 Transform 无此回退（SetDefaults 后仅底边锚定改尺寸） */
-  transformTo(id: number, st: GameHooks['world']['store'], allowEmbedded = false): boolean {
-    return this.tryTransformTo(id, st, allowEmbedded);
+  transformTo(id: number, st: GameHooks['world']['store'], allowEmbedded = false, game?: GameHooks): boolean {
+    return this.tryTransformTo(id, st, allowEmbedded, game);
   }
 
   /** NPC.GetShimmered（NPC.cs:92502-92584）子集：雕像产怪直接消散（:92504-92519）→
@@ -2899,7 +2917,7 @@ export class Enemy extends Entity {
       return;
     }
     if (toNpc >= 0 && toNpc !== this.vanillaId) {
-      this.transformTo(toNpc, game.world.store);
+      this.transformTo(toNpc, game.world.store, false, game);
       return;
     }
     if (toItem >= 0) {
@@ -2995,7 +3013,7 @@ export class Enemy extends Entity {
     // 脱墙 → Transform 回地面形态（:29991-30010）
     const groundForm = Enemy.SPIDER_GROUND_FORM[this.vanillaId ?? -1];
     if (groundForm !== undefined && !this.npcCanStickToWalls(st)) {
-      this.tryTransformTo(groundForm, st);
+      this.tryTransformTo(groundForm, st, false, game);
     }
   }
 
@@ -3021,7 +3039,7 @@ export class Enemy extends Entity {
       this.ai0 += 1;
       if (this.ai0 >= 21) {
         this.ai0 = 21;
-        if (this.tryTransformTo(196, st)) return;
+        if (this.tryTransformTo(196, st, false, game)) return;
       }
     }
     // 静止站立 + 重力（原版 AI_042 无任何速度代码）
@@ -3113,19 +3131,8 @@ export class Enemy extends Entity {
       this.vy -= 0.05;
       if (this.vy > 0) this.vy -= 0.01;
     }
-    // 沙球攻击（AI_017 共用段 :24475-24506）：与蚁狮同构——玩家上方+LOS →
-    // ai[0]=200 冷却,投掷弹 31(速 12 伤 10);==200 时播 Item5（:24485/:24503 同帧）
-    if (player && !player.dead) {
-      if (this.ai0 > 0) {
-        if (this.ai0 === 200) game.playSfxFiles(['Item_5'], 1, this.cx, this.cy);
-        this.ai0 -= 1;
-      } else if (player.cy < this.cy && this.canSeePlayer(game.world.store, player)) {
-        this.ai0 = 200;
-        const dx = player.cx - this.cx, dy = player.cy - this.cy;
-        const d = Math.hypot(dx, dy) || 1;
-        this.shootDart(game, this.cx, this.cy, (dx / d) * 12, (dy / d) * 12, 10, 31);
-      }
-    }
+    // （秃鹫无沙球攻击——:24475 沙球块属 aiStyle 19 蚁狮,曾误植于此并错用
+    //  ai0 状态机字段自减,已撤;蚁狮侧 antlionAI 已含 Item_5 音,2026-08-18 复核）
     this.vy = Math.max(-3, Math.min(3, this.vy));
     const oldVx = this.vx, oldVy = this.vy;
     moveAndCollide(this, game.world, this.vx, this.vy);
@@ -3385,13 +3392,50 @@ export class Enemy extends Entity {
    *  ≥0 触发跳：小跳 vy=-5/vx+5dir（177 -7.5/+4dir），第 3/2 跳大跳 vy=-9/vx+3dir
    *  （177 -11.5/+2dir）清零并记 ai[3]=X；原地卡墙（ai[3]==X）→ 转向+ai[2]=300 惩罚；
    *  空中朝 dir 补 |vx| 到 3（177 4）（±0.2/帧）；wet 浮力段略；
-   *  378 格格牙炸弹自爆序列（cs:30044）DD2 未引入不移植 */
+   *  378 格格牙炸弹自爆序列（cs:30030-30107 + 跳跃尖叫 :30204）——起爆门（湿/
+   *  距玩家<64 → ai[1]=5）→ 引爆态（冻结+扩 160×160 判定盒接触伤害、ai[2]==9 首
+   *  tick Item_14 自爆音、ai[2]==1 消散无掉落）+ 每次起跳 Zombie_124 咬齿尖叫 */
   private herplingAI(game: GameHooks, player: Player | null) {
     if (this.ai2 === 0) { this.ai0 = -100; this.ai2 = 1; }
     else if (this.ai2 > 1) this.ai2 -= 1;
     const derpling = this.vanillaId === 177;
+    const bomb = this.vanillaId === 378;
     if (player && !player.dead) this.facing = this.seekDirX(player);
     const dist = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
+    // ---- 378 引爆态（cs:30044-30082）----
+    if (bomb && this.ai1 === 5) {
+      this.vx = 0; this.vy = 0;
+      // 判定盒扩 160×160（:30050-30053,接触伤害 200 = def.damage 数据自带）
+      this.x = this.cx - 80; this.y = this.cy - 80;
+      this.w = 160; this.h = 160;
+      this.dontTakeDamage = true;
+      if (this.ai2 > 7) {
+        // 8× dust 31（:30056-30060）+ 32×2 dust 6（:30062-30073,×3/×2 速档近似）
+        for (let i = 0; i < 8; i++) game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 100, null, 1.5);
+        for (let i = 0; i < 32; i++) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 3, 3, 100, null, 2.5);
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 6, 2, 2, 100, null, 1.5);
+        }
+        for (let i = 0; i < 2; i++) {   // 2× gore 61-63（:30075-30083）
+          GorePiece.newGore(61 + Math.floor(Math.random() * 3),
+            this.x + this.w * Math.random() - 10, this.y + this.h * Math.random() - 10,
+            0, 0, 1);
+        }
+        if (this.ai2 === 9) game.playSfxWav?.('Item_14', 1, this.cx, this.cy);  // :30082 自爆音
+      }
+      if (this.ai2 === 1) this.dead = true;   // life=-1+active=false（:30087-30090,不走掉落/死亡管线）
+      return;
+    }
+    // ---- 378 起爆门（cs:30098-30107）：湿 / 距玩家 <64 → 引爆态 ----
+    if (bomb && (this.wet || (player != null && !player.dead && dist < 64))) {
+      this.ai1 = 5;
+      this.ai2 = 10;
+      return;
+    }
+    // ---- 378 引信火花（cs:30034-30043,1/3）：dust 6 上飘 ----
+    if (bomb && Math.floor(Math.random() * 3) === 0) {
+      game.spawnDust?.(this.cx - 6 * this.facing - 5, this.cy - 15, 4, 4, 6, 0, -1, 0, null, 1.5);
+    }
     // ---- wet 段（cs:30105-30120，177 Derpling 除外）：撞墙翻向；纵向碰撞 → 重新索敌 +
     // 上撞 vy=5 / 落水 vy-=2；随后 vy>0 ×0.95、恒 -0.3 上浮钳 -4——赫柏林入水上浮。
     // collideX/Y 读上一 tick 碰撞（原版 AI 先于 UpdateCollision）
@@ -3421,6 +3465,8 @@ export class Enemy extends Entity {
       }
       if (this.ai0 > 30) this.ai0 = 30;
       if (this.ai0 >= 0) {
+        // 378 起跳咬齿尖叫（cs:30204 PlaySound(29,x,y,124) = Zombie_124,音量无修正）
+        if (bomb) game.playSfxWav?.('Zombie_124', 1, this.cx, this.cy);
         if (player && dist > 200 && dist < 350) this.vx += this.facing;
         const bigAt = derpling ? 2 : 3;
         if (this.ai1 === bigAt) {
@@ -4345,7 +4391,7 @@ export class Enemy extends Entity {
     if (vampireBat && player && !player.dead) {
       const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
       if (d < 200 && this.y + this.h < player.y + player.h && this.canSeePlayer(game.world.store, player)) {
-        this.tryTransformTo(159, game.world.store);
+        this.tryTransformTo(159, game.world.store, false, game);
       }
     }
     // ---- 飞行射击族（cs:23463-23543，逐发要求视线；轮空后 ai[0] 达随机阈值归零——
@@ -4721,7 +4767,7 @@ export class Enemy extends Entity {
     if (id === 689 && !day && player && !player.dead
       && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 80
       && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)) {
-      this.tryTransformTo(317, st);
+      this.tryTransformTo(317, st, false, game);
       return;
     }
     // 出生即飞行（localAI[0]==0 → TargetClosest+ai[0]=1,:25410-25416）
@@ -5018,7 +5064,7 @@ export class Enemy extends Entity {
     const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
     // 形态链：行走鸭族遇水/坠落 → 飞形（cs:53585-53589）
     if ((vid === 362 || vid === 364 || vid === 602 || vid === 608) && (inWater || Math.abs(this.vy) > 4)) {
-      this.tryTransformTo(vid + 1, st);
+      this.tryTransformTo(vid + 1, st, false, game);
       return;
     }
     // 速度表
@@ -5202,7 +5248,7 @@ export class Enemy extends Entity {
           this.ai2 = 0;
           this.y += TILE;
           // 375 钻地形态本就要嵌进地里（穿墙蠕虫），跳过实心适配检查
-          this.tryTransformTo(375, st, true);
+          this.tryTransformTo(375, st, true, game);
           return;
         }
       } else this.ai2 = 0;
@@ -5344,7 +5390,7 @@ export class Enemy extends Entity {
       this.ai0 = 0;
       this.ai1 = 200 + Math.random() * 200;
       // 回行走形（cs:35000 Transform(type-1)，363→362/365→364/603→602/609→608）
-      this.tryTransformTo((this.vanillaId ?? 363) - 1, st);
+      this.tryTransformTo((this.vanillaId ?? 363) - 1, st, false, game);
     }
   }
 

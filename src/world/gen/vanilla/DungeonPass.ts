@@ -13,6 +13,7 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { tileRunner } from './TileRunner';
+import { growTree } from './TreePass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { flipGenSolid, genSolidType } from './GenSolid';
 // node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
@@ -237,9 +238,13 @@ interface DDoor { x: number; y: number; dir: number; hall: boolean; skipOther: b
 /** hf = OverrideHeightFluff（DungeonPlatformData.cs:14）：房间候选=3、走廊/入口候选缺省=5。
  *  XX 批（2026-08-18）扩：Tower/Dome 入口候选带 ForcePlacement + 置物概率
  *  （pots/bottles/books/candles——IsAShelf=任一>0（DungeonPlatformData.cs:34-43
- *  计算属性），书架链每列 1-3 道门掷 + 命中放置掷）。 */
+ *  计算属性），书架链每列 1-3 道门掷 + 命中放置掷）。
+ *  FFFF 批（2026-08-18）扩 nowb=NoWaterbolt（DungeonPlatformData.cs）：Dome 入口
+ *  上对平台（num7-25）true / 下对（num7-20）false——false 时 books 命中先掷
+ *  Next(50)（DU:432-435 默认支 waterbolt 门）。 */
 interface DPlat { x: number; y: number; hall: boolean; hf: number;
-  force?: boolean; pots?: number; bottles?: number; books?: number; candles?: number; }
+  force?: boolean; pots?: number; bottles?: number; books?: number; candles?: number;
+  nowb?: boolean; }
 
 /** #32 Dungeon pass（1456 1:1，与 caves-oracle.cs 同构）。snap 回调用于逐段检查点。 */
 export function runDungeonPass(
@@ -1852,6 +1857,273 @@ export function runDungeonPass(
     // 阶梯双侧（:437-443，depth=num5=100）
     dgStairs(i + n4, n7, 1, n5);
     dgStairs(i - n4, n7, -1, n5);
+    if (dgTW) dgTW.tower1 = dgMainRolls;
+  }
+  // ============ DomeDungeonEntrance.DomeEntrance（DomeDungeonEntrance.cs:40-441）============
+  // ★FFFF 批（2026-08-18）1:1 转录，替换 XX 批备案的 Legacy 近似体（s12345 地牢盒
+  //   typ 残差 13,433/墙 16,400 的根因）。正常种子路径：buried/underground/dual/
+  //   desert 特典支不接线（同 Tower 备案；DungeonEntranceHasATree=drunk 专属跳过，
+  //   DungeonEntranceHasStairs 正常种子=真→单侧阶梯 cs:435-439）。
+  //   掷流：入口私有流 hr=UnifiedRandom(entSeed)——①flag2=Next(4)!=0（cs:52 树饰
+  //   3/4）②windowType=Next(3)（cs:54-59）③TreeOnPillar 柱顶补土 Next(2/3/4)
+  //   （cs:501 短路逐掷）；主流掷：门 PlaceTile×2+每窗 Next(1)+GrowTree 链。
+  function dgDomeEntrance(i: number, j: number, preSeed: number): void {
+    if (dgTW) { dgTW.tower0 = dgMainRolls; dgTW.i = i; dgTW.j = j; dgTW.pw = 0; dgTW.win = 0; dgTW.door = 0; dgTW.fence = 0; dgTW.opw = 0; dgTW.wt = 'na'; }
+    const hr = dgUR(preSeed);
+    const hrn = (n: number): number => hr.nextInt(n);
+    const flag2 = hrn(4) !== 0;                    // 树饰开关（cs:52）
+    const windowType = hrn(3);                     // 0=Regular 1=Skeletron 2=MoonLord
+    if (dgTW) dgTW.wt = ['reg', 'skel', 'moon'][windowType] as string;
+    const leftSide = gs.dungeonSide < 0;           // flag = dungeonSide==Left（drunkWorld 翻转=特典）
+    // 120×120 清液+清坡（cs:63-76：liquid=0/lava(false)/Clear(Slope)）
+    for (let x = i - 60; x < i + 60; x++) {
+      for (let y = j - 60; y < j + 60; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const ti = st.idx(x, y);
+        st.liquid[ti] = 0; st.liquidType[ti] = 0;
+        st.slope[ti] = 0; st.half[ti] = 0;
+      }
+    }
+    const n2 = 5, n3 = 35, n4 = 40, n5 = 100;
+    const n7 = j - 30;                             // 基线（num6=30，cs:81）
+    const num18 = n7 + 1;                          // cs:239
+    // 地表侧圆清 Circle(20)（cs:93-102——Tower 是 Circle(15)@±num3，Dome 半径 20@±num4）
+    {
+      const cx = leftSide ? i + n4 - 1 : i - n4 + 1;
+      const cy = n7 - 20, rad = 20, sq = (rad + 1) * (rad + 1);
+      for (let yy = cy - rad; yy <= cy + rad; yy++) {
+        const num2 = yy - cy;
+        const num3 = Math.min(rad, Math.trunc(Math.sqrt(sq - num2 * num2)));
+        for (let xx = cx - num3; xx <= cx + num3; xx++) {
+          if (!st.inBounds(xx, yy)) continue;
+          const ti = st.idx(xx, yy);
+          st.type[ti] = 0; st.wall[ti] = 0; st.liquid[ti] = 0; st.liquidType[ti] = 0;
+          st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;
+        }
+      }
+    }
+    // Bounds.SetBounds(i,j,i,j)+UpdateBounds(i-n4, n7-n4, i+n4+1, n7+10)（cs:60/:103）
+    entBounds.set(i, j, i, j);
+    entBounds.upd(i - n4, n7 - n4, i + n4 + 1, n7 + 10);
+    entExists = true;
+    // 基座箱（cs:104-237）——n 外 m 内（列优先，同 Tower）。Dome 窗带以 num3=35 为基：
+    //   m∈[0,5) 带 [-30,-25]∪[25,30]、m∈[5,10) 内芯 [-30,30]、m≥10 表层换装；
+    //   平台角点 (i-30,m=1)/(i+25,m=1)（Tower 是 ∓[31,35] 族）+(i,m=10)。
+    const tileInStyle = (t: number): boolean => t === brick || t === crack;
+    const wallInStyle = (v: number): boolean => v === wall;
+    const clrAll = (ti: number): void => {
+      st.type[ti] = 0; st.wall[ti] = 0; st.liquid[ti] = 0; st.liquidType[ti] = 0;
+      st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;
+    };
+    for (let n = -n4; n <= n4; n++) {
+      for (let m = -5; m < n5; m++) {
+        const x = i + n, y = n7 + m;
+        if (!st.inBounds(x, y)) continue;
+        const ti = st.idx(x, y);
+        const f2 = st.flags[ti] !== 0 && !tileInStyle(st.type[ti]);
+        const f3 = !wallInStyle(st.wall[ti]);
+        const f4 = isDW(st.wall[ti]);
+        if (m < 0) clrAll(ti);
+        else if (m < 5) {
+          if ((n >= -n3 + n2 && n <= -n3 + n2 * 2) || (n >= n3 - n2 * 2 && n <= n3 - n2)) {
+            clrAll(ti);
+            if (!f4) st.wall[ti] = wall;
+          } else if (!f4) {
+            st.liquid[ti] = 0; st.liquidType[ti] = 0;
+            chTile(ti, brick, false);
+            if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+          }
+        } else if (m < 10) {
+          if (n >= -n3 + n2 && n <= n3 - n2) {
+            clrAll(ti);
+            st.wall[ti] = wall;                   // Clear 后 IsConsideredDungeonWall 恒假——无条件补墙
+          } else if (!f4) {
+            st.liquid[ti] = 0; st.liquidType[ti] = 0;
+            chTile(ti, brick, false);
+            if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+          }
+        } else if ((st.flags[ti] !== 0 && f2) || !f4) {
+          st.liquid[ti] = 0; st.liquidType[ti] = 0;
+          chTile(ti, brick, false);
+          if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+        } else if (f3) {
+          st.liquid[ti] = 0; st.liquidType[ti] = 0;
+          if (n !== -n4 && n !== n4) st.wall[ti] = wall;
+        }
+        if (m === 1 && (n === -n3 + n2 || n === n3 - n2 * 2)) platData.push({ x, y, hall: false, hf: 0, force: true, pots: 0.33000001311302185 });
+        if (m === 10 && n === 0) platData.push({ x, y, hall: false, hf: 0, force: true, pots: 0.33000001311302185 });
+      }
+    }
+    // 下行收敛通道（cs:207-237）：中列首 inactive 起 15 递减、尾 5 步收窄（同 Tower :214-244）
+    {
+      let n15 = -1, n16 = 6;
+      for (let m = 10; m < 50; m++) {
+        if (n15 === -1 && actAt(i, n7 + m) === 0) n15 = 15;
+        if (n15 > 0) {
+          n15--;
+          if (n15 <= 0) break;
+          if (n15 <= 5) n16--;
+        }
+        for (let k = -n16; k <= n16; k++) {
+          const x = i + k, y = n7 + m;
+          if (!st.inBounds(x, y)) continue;
+          const ti = st.idx(x, y);
+          clrAll(ti);
+          st.wall[ti] = wall;                     // Clear 后 IsConsideredDungeonWall 恒假
+        }
+      }
+    }
+    // —— Slime 形状族（cs:242-263）——Shapes.Slime.Perform（Shapes.cs:114-143）：上半球
+    //   oy-(int)(r*ys)..oy 全圆截面 + 下半球 oy+1..oy+(int)(r*ys*0.5)-1 的 (2/ys) 纵压
+    //   截面；链 Fail=该格中断（_quitOnFail=false 形状续走），IsAboveHeight 严格小于。
+    const slime = (ox: number, oy: number, radius: number, xs: number, ys: number,
+      fn: (x: number, y: number) => void): void => {
+      const sq = (radius + 1) * (radius + 1);
+      for (let yy = oy - Math.trunc(radius * ys); yy <= oy; yy++) {
+        const dy = (yy - oy) / ys;
+        const hw = Math.trunc(Math.min(radius * xs, xs * Math.sqrt(sq - dy * dy)));
+        for (let xx = ox - hw; xx <= ox + hw; xx++) fn(xx, yy);
+      }
+      for (let yy = oy + 1; yy <= oy + Math.trunc(radius * ys * 0.5) - 1; yy++) {
+        const dy = (yy - oy) * (2.0 / ys);
+        const hw = Math.trunc(Math.min(radius * xs, xs * Math.sqrt(sq - dy * dy)));
+        for (let xx = ox - hw; xx <= ox + hw; xx++) fn(xx, yy);
+      }
+    };
+    const DIRT = TILE_INTERNAL_BY_SHEET.get(0) ?? -1;    // num19（desert 特典=53 不接线）
+    const GRASS = TILE_INTERNAL_BY_SHEET.get(2) ?? -1;   // num20（desert 特典=-1 不接线）
+    // ①穹壳（cs:242）：Slime(40,1,1)@(i,n7) y<n7+1 且 wall≠主墙 → UpdateBounds
+    //   (data.dungeonBounds)+Clear+SetTile(brick)——入口体是 dungeonBounds 的扩界源
+    const DOME_SOLID = (x: number, y: number): boolean => {
+      const d = TILE_DEFS[st.type[st.idx(x, y)]];
+      return !!d?.solid && !d.platform;
+    };
+    const exposedToAir = (x: number, y: number): boolean => {   // TileIsExposedToAir（cs:54810）
+      if (!inW(x, y, 2)) return false;
+      for (let a = x - 1; a <= x + 1; a++) {
+        for (let b = y - 1; b <= y + 1; b++) {
+          const ti = st.idx(a, b);
+          if (st.flags[ti] === 0 || !DOME_SOLID(a, b)) return true;
+        }
+      }
+      return false;
+    };
+    slime(i, n7, n4, 1.0, 1.0, (x, y) => {
+      if (y >= num18 || !st.inBounds(x, y)) return;
+      const ti = st.idx(x, y);
+      if (st.wall[ti] === wall) return;           // SkipWalls(brickWallType)
+      bounds.upd(x, y);                           // Actions.UpdateBounds(data.dungeonBounds)
+      clrAll(ti);                                 // Actions.Clear
+      st.flags[ti] = 1; st.type[ti] = brick;      // SetTile(clearTile:false)——不清坡（Clear 已先行）
+    });
+    // ②穹内墙（cs:243）：Slime(38,1,1) y<n7+2 且 wall≠主墙 → SetWall（clearTile:false）
+    slime(i, n7, n4 - 2, 1.0, 1.0, (x, y) => {
+      if (y >= num18 + 1 || !st.inBounds(x, y)) return;
+      const ti = st.idx(x, y);
+      if (st.wall[ti] === wall) return;
+      st.wall[ti] = wall;
+    });
+    // ③表土穹丘（cs:254）：Slime(40,0.9,1.1)@(i,n7-4) y<n7-1 且非砖/非主墙 → 清+置土(0)
+    slime(i, n7 - n2 + 1, n4, 0.9, 1.1, (x, y) => {
+      if (y >= num18 - 2 || !st.inBounds(x, y)) return;
+      const ti = st.idx(x, y);
+      if (st.flags[ti] !== 0 && st.type[ti] === brick) return;   // SkipTiles(brickTileType)
+      if (st.wall[ti] === wall) return;                          // SkipWalls(brickWallType)
+      clrAll(ti);
+      st.flags[ti] = 1; st.type[ti] = DIRT;
+    });
+    // ④草皮（cs:255-258）：同形状 OnlyTiles(0)+IsTouchingAir(对角) → SetTile(2)
+    slime(i, n7 - n2 + 1, n4, 0.9, 1.1, (x, y) => {
+      if (y >= num18 - 2 || !st.inBounds(x, y)) return;
+      const ti = st.idx(x, y);
+      if (st.flags[ti] === 0 || st.type[ti] !== DIRT) return;    // OnlyTiles(num19)
+      if (!exposedToAir(x, y)) return;                           // IsTouchingAir(useDiagonals:true)
+      st.flags[ti] = 1; st.type[ti] = GRASS;
+    });
+    // ⑤内腔清块（cs:262）：Slime(35,1,1)@(i,n7) y<n7+1 → ClearTile（保墙）
+    slime(i, n7, n3, 1.0, 1.0, (x, y) => {
+      if (y >= num18 || !st.inBounds(x, y)) return;
+      const ti = st.idx(x, y);
+      st.flags[ti] = 0; st.slope[ti] = 0; st.half[ti] = 0;       // ClearTile（inActive 位不建模，同 Tower 备案）
+    });
+    // 门（cs:264-271）：DomeEntrance_Door 与 TowerEntrance_Door 逐行同源——正常种子
+    //   仅 dungeon 侧单门（buried/underground 特典才补镜像门）
+    dgTowerDoor(i, n7, n4, n3, leftSide);
+    // 窗族（cs:272-343）——Dome 点位（Basic 宽恒 5；OverrideGlassPaint=26 墙漆不入
+    //   四通道不建模，同 Tower 备案）
+    {
+      if (windowType === 0) {
+        dgWindowBasic(i - 8, n7 - 16, 5, 24, -1);
+        dgWindowBasic(i + 8, n7 - 16, 5, 24, -1);
+        dgWindowBasic(i, n7 - 17, 5, 28, -1);
+        dgWindowBasic(i - n3 + 6, n7 - 8, 5, 10, -1);
+        dgWindowBasic(i + n3 - 6, n7 - 8, 5, 10, -1);
+        dgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, -1);
+        dgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, -1);
+      } else if (windowType === 1) {
+        dgWindowMosaicSkel(i, n7 - 19, 89);      // OverrideGlassType=89（非 underground）
+        dgWindowBasic(i - n3 + 6, n7 - 8, 5, 10, -1);
+        dgWindowBasic(i + n3 - 6, n7 - 8, 5, 10, -1);
+        dgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, -1);
+        dgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, -1);
+      } else {
+        dgWindowMosaicMoon(i, n7 - 17, 91);      // OverrideGlassType=91
+        dgWindowBasic(i - n3 + 6, n7 - 8, 5, 10, 241);
+        dgWindowBasic(i + n3 - 6, n7 - 8, 5, 10, 91);
+        dgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, 90);
+        dgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, 88);
+      }
+    }
+    // 柱族①（cs:344-358）：两根 3 宽 BlockActuated 全高柱@i±(num3-21)（actuated 位
+    //   不入四通道，同 Tower 备案；Height=0=上行自动扫描至穹顶）
+    dgPillar(i - n3 + 21, n7, 3, true, true, 0, true);
+    dgPillar(i + n3 - 21, n7, 3, true, true, 0, true);
+    // 四平台候选（cs:359-400）：上对 NoWaterbolt=true / 下对无（books 链 Next(50) 分野）
+    platData.push({ x: i - n3 + 15, y: n7 - 25, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });
+    platData.push({ x: i + n3 - 15, y: n7 - 25, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612, nowb: true });
+    platData.push({ x: i - n3 + 15, y: n7 - 20, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    platData.push({ x: i + n3 - 15, y: n7 - 20, hall: false, hf: 0, force: true, pots: 0.33000001311302185, books: 0.75, bottles: 0.10000000149011612 });
+    // 柱族②（cs:402-419）：Block 楔柱 5×16@i±(num4-2),n7-10 / 4×14@i±(num3-8),n7-28 /
+    //   3×13@i±(num3-21),n7-37（无冠、AlwaysPlaceEntirePillar）
+    dgPillar(i - n4 + 2, n7 - 10, 5, false, false, 16, true);
+    dgPillar(i + n4 - 2, n7 - 10, 5, false, false, 16, true);
+    dgPillar(i - n3 + 8, n7 - 28, 4, false, false, 14, true);
+    dgPillar(i + n3 - 8, n7 - 28, 4, false, false, 14, true);
+    dgPillar(i - n3 + 21, n7 - 37, 3, false, false, 13, true);
+    dgPillar(i + n3 - 21, n7 - 37, 3, false, false, 13, true);
+    // 柱顶树（cs:420-428，flag2=3/4）：补土掷走 hr 流、GrowTree 走主流（ignoreWalls）
+    if (flag2) {
+      const treeOnPillar = (pillarX: number, pillarY: number): void => {
+        // DomeEntrance_TreeOnPillar（cs:475-522）
+        if (!inW(pillarX, pillarY, 5) || actAt(pillarX, pillarY - 1) !== 0) return;
+        for (let a = 0; a < 5; a++) {
+          const x = pillarX + a - 2;
+          for (let b = 0; b <= 3; b++) {
+            const y = pillarY + b;
+            if (!st.inBounds(x, y)) continue;
+            const ti = st.idx(x, y);
+            if (st.wall[ti] !== wall) st.wall[ti] = 0;            // 非主墙清墙（cs:497-500）
+            // j==0 恒置；j==1 Next(2)!=0；j==2 Next(3)==0；j==3 Next(4)==0（短路逐掷）
+            if ((b !== 1 || hrn(2) !== 0) && (b !== 2 || hrn(3) === 0) && (b !== 3 || hrn(4) === 0)) {
+              st.type[ti] = exposedToAir(x, y) ? GRASS : DIRT;    // TileIsExposedToAir→草否则土
+            }
+          }
+        }
+        // TryGrowingTreeByType(5,…,ignoreWalls:true)（cs:516-521）→ TreePass.growTree 桥接
+        growTree(st, rng, gs, pillarX, pillarY, true);
+      };
+      treeOnPillar(i - n4 + 2, n7 - 10 - 16 + 1);
+      treeOnPillar(i - n3 + 8, n7 - 28 - 16 + 2 + 1);
+      treeOnPillar(i - n3 + 21, n7 - 37 - 16 + 3 + 1);
+      treeOnPillar(i + n4 - 2, n7 - 10 - 16 + 1);
+      treeOnPillar(i + n3 - 8, n7 - 28 - 16 + 2 + 1);
+      treeOnPillar(i + n3 - 21, n7 - 37 - 16 + 3 + 1);
+    }
+    // 老头锚（cs:430 SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——
+    //   CurrentDungeon==0 时 Main.dungeonX/Y=(i,num7)。AAAA 批 :3864 的锚语义在此本体化）
+    dungeonX = i; dungeonY = n7;
+    // 阶梯（cs:435-439，HasStairs 正常种子=真）：dungeon 侧单侧，depth=num5=100
+    dgStairs(leftSide ? i + n4 : i - n4, n7, leftSide ? 1 : -1, n5);
     if (dgTW) dgTW.tower1 = dgMainRolls;
   }
   // shelf 段定标（dgPlatforms 尾）——dormant 计数

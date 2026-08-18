@@ -44,6 +44,7 @@
     <div class="row" id="zooms"></div>
     <div class="row"><label><input type="checkbox" id="viaChunk" checked> 经 chunk 烘焙（与游戏完全同构）</label></div>
     <div class="row"><label><input type="checkbox" id="showGrid"> 显示 16px 网格与边界线</label></div>
+    <div class="row"><label><input type="checkbox" id="autoPaint"> 自动透明行高亮（默认关——会遮住证据）</label></div>
     <h3>导入你的世界（F5 报告）</h3>
     <div class="row legend">把 F5 调试报告 JSON 全文粘贴进来，点还原——会在下方画布 1:1 重建你身边的整片林区（含所有树/地形），再配合风况/缩放/标注定位。</div>
     <textarea id="importBox" placeholder='{"meta":...,"tiles":{"areaPlayer":...}}' style="height:70px"></textarea>
@@ -347,14 +348,18 @@ function render() {
     }
   }
   // 标注（红=人工，黄=自动）
-  for (const a of S.auto) {
-    ctx.fillStyle = 'rgba(255,220,0,0.85)';
-    ctx.fillRect(0, Math.round((a.wy - camRY) * z + ch / 2), cw, Math.max(1, z / 2));
+  if (document.getElementById('autoPaint')?.checked) {
+    for (const a of S.auto) {
+      ctx.fillStyle = 'rgba(255,220,0,0.85)';
+      ctx.fillRect(0, Math.round((a.wy - camRY) * z + ch / 2), cw, Math.max(1, z / 2));
+    }
   }
-  for (const m of S.pin) {
-    const [sx, sy] = w2s(m.wx, m.wy);
-    ctx.fillStyle = 'rgba(80,180,255,0.75)';
-    ctx.fillRect(sx - z / 8, sy, Math.max(2, z / 2), Math.max(2, z / 2));
+  if (document.getElementById('autoPaint')?.checked) {
+    for (const m of S.pin) {
+      const [sx, sy] = w2s(m.wx, m.wy);
+      ctx.fillStyle = 'rgba(80,180,255,0.75)';
+      ctx.fillRect(sx - z / 8, sy, Math.max(2, z / 2), Math.max(2, z / 2));
+    }
   }
   for (const m of S.marks) {
     const [sx, sy] = w2s(m.wx, m.wy);

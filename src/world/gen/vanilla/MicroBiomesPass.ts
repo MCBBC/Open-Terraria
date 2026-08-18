@@ -110,13 +110,28 @@ const solidTopAt = (st: TileStore, x: number, y: number) =>
   st.inBounds(x, y) && !!TILE_DEFS[st.type[st.idx(x, y)]]?.platform;
 const activeAt = (st: TileStore, x: number, y: number) =>
   st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
-/** TileID.Sets.IsAContainer(21,467,88)——chest/dresser 族 key 近似(沿用本文件既有约定) */
-const isContainer = (t: number): boolean => {
-  const key = TILE_DEFS[t]?.key ?? '';
-  return key.includes('chest') || key.includes('dresser');
+/** TileID.Sets.IsAContainer(TileID.cs:405)={21,467,88}——精确 sheet 集
+ *  (曾用 key 含 'chest'/'dresser' 子串近似,异 key 边界不可证) */
+const CONTAINER_TILES = idsByVanillaSheet(21, 467, 88);
+const isContainer = (t: number): boolean => CONTAINER_TILES.has(t);
+/** Conditions.IsSolid(Conditions.cs:85-97):InWorld(x,y,10) && active && 生成期 tileSolid
+ *  ——无 solidTop/half/slope/inActive 排除(与 SolidTile/SolidOrSlopedTile 三者互异) */
+const condIsSolid = (st: TileStore, x: number, y: number): boolean => {
+  if (x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) return false;
+  const i = st.idx(x, y);
+  return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!);
+};
+/** WorldGen.SolidOrSlopedTile(cs:70046):active && 生成期 tileSolid && !tileSolidTop
+ *  && !inActive(half/slope 不排除)。Modifiers.IsSolid(Modifiers.cs:551)消费 */
+const solidOrSlopedAt = (st: TileStore, x: number, y: number): boolean => {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform
+    && !(st.wire[i]! & WIRE_ACTUATOR);
 };
 /** 原版 SolidTile(i,j)(WorldGen.cs:70155-70172):active && 生成期 tileSolid && !tileSolidTop
- *  && !halfBrick && slope==0 && !inActive。countTiles(nextCount cs:9559)消费。
+ *  && !halfBrick && slope==0 && !inActive。countTiles(nextCount cs:9559)/MiningExplosives
+ *  首门(cs:13)消费。
  *  ★曾误用静态 TILE_DEFS.solid 且漏 !inActive——致动格/生成期翻转格(484 等)被误判
  *  实心挡洪水,countTiles<40 拒掉原版收的死箱候选(#101 首差根因,同 WWW 修复①类) */
 function solidTileStrict(st: TileStore, x: number, y: number): boolean {
@@ -323,6 +338,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
 /** CampsiteBiome.Place(CampsiteBiome.cs:9-116) */
 function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number): boolean {
   // Circle(10):实心占比门禁(solid ≥ total-5,cs:12-17)
+  //   Scanner→Modifiers.IsSolid = active && SolidOrSlopedTile(半砖/坡面算实心)
   {
     let total = 0, solid = 0;
     const r = 10, rr = (r + 1) * (r + 1);
@@ -330,7 +346,7 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
       const half = Math.min(r, Math.trunc(Math.sqrt(rr - dy * dy)));
       for (let dx = -half; dx <= half; dx++) {
         total++;
-        if (solidAt(st, ox + dx, oy + dy)) solid++;
+        if (solidOrSlopedAt(st, ox + dx, oy + dy)) solid++;
       }
     }
     if (solid < total - 5) return false;
@@ -431,12 +447,12 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
     st.liquid[i] = 0; st.liquidType[i] = 0;
     if (st.wall[i] === 0) st.wall[i] = wallType;
   }
-  // 向下 10 格找地面(cs:70-74)
+  // 向下 10 格找地面(cs:70-74):Find(origin, Down(10), IsSolid) 含起点 + Conditions.IsSolid
   let groundY = oy;
   {
     let found = false;
     for (let k = 0; k < 10 && !found; k++) {
-      if (solidAt(st, ox, oy + k)) { groundY = oy + k; found = true; }
+      if (condIsSolid(st, ox, oy + k)) { groundY = oy + k; found = true; }
     }
     if (!found) return false;
   }
@@ -510,34 +526,37 @@ function placeLargePile(st: TileStore, x: number, y: number): void {
 
 /** MiningExplosivesBiome.Place(MiningExplosivesBiome.cs:10-76) */
 function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: number): boolean {
-  if (solidAt(st, ox, oy)) return false;
+  if (solidTileStrict(st, ox, oy)) return false;   // WorldGen.SolidTile(cs:13)
   {
     const wl = st.inBounds(ox, oy) ? st.wall[st.idx(ox, oy)] : -1;
     if (wl === 216 || wl === 187) return false; // 地下沙漠墙门禁(cs:17-20)
   }
   const barType = [gs.oreTiers.gold, gs.oreTiers.silver, gs.oreTiers.iron, gs.oreTiers.copper][rng.int(0, 3)];
   const dir = rng.next() * 2 - 1; // cs:22
-  // Find(origin, Right(40)|Left(40) 直到实心) → origin(MiningExplosivesBiome.cs:23-26)
+  // Find(origin, Right(40)|Left(40) + Conditions.IsSolid) → origin(cs:23-26)
+  //   ★Searches.Left/Right/Down 的 i 从 0 起(Searches.cs:15/35/55)——**包含起点格**;
+  //   IsSolid 条件=InWorld(10)+active+生成期 tileSolid(Conditions.cs:85)。
+  //   曾从 ±1 起步且用静态 solidAt——锚点整体偏一格/漏半砖实心
   let x = ox, y = oy;
   {
     const step = dir > 0 ? 1 : -1;
     let found = false;
     for (let k = 0; k < 40 && !found; k++) {
-      x += step;
-      if (solidAt(st, x, y)) found = true;
+      if (condIsSolid(st, ox + k * step, oy)) { x = ox + k * step; found = true; }
     }
     if (!found) return false;
   }
-  // Find(origin, Down(80) 直到实心)(cs:27-30)
+  // Find(origin, Down(80) + IsSolid)(cs:27-30)——起点即 Right 结果(实心),原版恒原格
   {
     let found = false;
     for (let k = 0; k < 80 && !found; k++) {
-      y++;
-      if (solidAt(st, x, y)) found = true;
+      if (condIsSolid(st, x, y + k)) { y = y + k; found = true; }
     }
     if (!found) return false;
   }
-  // ShapeRunner(10, 20, (dir,1)) + Blotches(2, 0.3):矿石地板形状(cs:31-38)
+  // ShapeRunner(10, 20, (dir,1)).Output(shapeData) + Blotches() + Scanner + IsSolid +
+  //   Scanner(cs:31-38)。★Output 挂在形状上=raw 格(Blotches 扩张前)——曾把 blotch
+  //   扩张格塞进 shapeData,矿石地板(All(shapeData))覆盖范围整体走样
   const data = new Set<number>();
   let total = 0, solid = 0;
   {
@@ -552,7 +571,8 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       for (let i = bx0; i < bx1; i++) {
         for (let j = by0; j < by1; j++) {
           if (Math.abs(i - px) + Math.abs(j - py) >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
-          // Blotches(2, 0.3)(Modifiers.cs:92-157)
+          data.add(j * st.w + i);                     // UnitApply:OutputData.Add(raw 格)
+          // Blotches()(默认 scale 2, 0.3):丢弃掷+chance 掷;命中四连掷 blotch 矩形
           rng.next();
           const pts: Array<[number, number]> = [];
           if (rng.next() < 0.3) {
@@ -561,10 +581,10 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
           } else {
             pts.push([i, j]);
           }
+          // Scanner(obj)→Modifiers.IsSolid(SolidOrSlopedTile)→Scanner(obj2)
           for (const [qx, qy] of pts) {
-            data.add(qy * st.w + qx);
             total++;
-            if (solidAt(st, qx, qy)) solid++;
+            if (solidOrSlopedAt(st, qx, qy)) solid++;
           }
         }
       }
@@ -585,12 +605,16 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   // structures.CanPlace(area, pad 0)（MiningExplosivesBiome.cs:40）——全局保护图互斥
   //   + GeneralPlacementTiles 默认内容扫描（单参重载）
   if (!canPlaceStructure(gs, area, 0, st)) return false;
-  // 矿石地板(cs:44)
+  // 矿石地板(cs:44):All(shapeData)+SetTile(type, setSelfFrames)
+  //   SetTile=Clear(~(Wiring|Actuator)) 连墙带液带帧带坡全清后写 type
   for (const key of data) {
     const qx = key % st.w, qy = Math.trunc(key / st.w);
     if (!st.inBounds(qx, qy)) continue;
     const i = st.idx(qx, qy);
     st.type[i] = barType; st.flags[i] = 1;
+    st.frameX[i] = 0; st.frameY[i] = 0;
+    st.slope[i] = 0; st.half[i] = 0;
+    st.wall[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0;
   }
   // Circle(5) + Blotches 挖房(cs:45):中心 = (origin.X - dir*-5, origin.Y - 5)
   {
@@ -617,10 +641,10 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       }
     }
   }
-  // 两侧落点向下 10 格找地面(cs:47-52)
+  // 两侧落点向下 10 格找地面(cs:47-52):Down(10) 含起点 + Conditions.IsSolid
   const findDown = (fx: number, fy: number): number => {
     for (let k = 0; k < 10; k++) {
-      if (solidAt(st, fx, fy + k)) return fy + k;
+      if (condIsSolid(st, fx, fy + k)) return fy + k;
     }
     return -1;
   };
@@ -632,18 +656,50 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   if (barGround < 0 || detGround < 0) return false;
   barGround--; // result.Y--
   const detTop = detGround - 1; // result2.Y--
-  // 起爆器下方 3 列整平(cs:55-70)
+  // 炸药桶地面 slope/half 复位(cs:55-57)
+  {
+    const gi = st.idx(barX, barGround + 1);
+    st.slope[gi] = 0; st.half[gi] = 0;
+  }
+  // 起爆器下方 3 列整平(cs:58-70):ClearTile + 非实心补石 + slope/half 复位
   for (let i = -1; i <= 1; i++) {
     const px = detX + i, py = detTop;
-    if (st.inBounds(px, py)) st.flags[st.idx(px, py)] = 0;
+    if (st.inBounds(px, py)) {
+      const ci = st.idx(px, py);
+      st.flags[ci] = 0; st.slope[ci] = 0; st.half[ci] = 0;
+      st.wire[ci] &= ~WIRE_ACTUATOR;
+    }
     const below = detTop + 1;
-    if (st.inBounds(px, below) && !solidAt(st, px, below)) {
-      st.type[st.idx(px, below)] = STONE; st.flags[st.idx(px, below)] = 1;
+    if (st.inBounds(px, below)) {
+      const bi = st.idx(px, below);
+      if (!solidOrSlopedAt(st, px, below)) {
+        st.type[bi] = STONE; st.flags[bi] = 1;   // ResetToType(1)+active
+      }
+      st.slope[bi] = 0; st.half[bi] = 0;         // cs:67-68(两分支都复位)
     }
   }
-  // 炸药桶 141 + 起爆器 411(2×2)+ 红线直连(cs:71-73)
-  if (st.inBounds(barX, barGround) && !st.flags[st.idx(barX, barGround)]) {
-    st.setTileSilent(barX, barGround, EXPLOSIVES, 0, 0);
+  // PlaceTile(result, 141)(cs:71)——前奏 Clear(锚格 Tile|TilePaint|Slope,cs:59501)+
+  //   Place1x1 门(Wiring.IsAMechanism[141]→下方非巨石族 && SolidTile2(地) && 锚格非活性)
+  {
+    if (st.inBounds(barX, barGround)) {
+      const ai = st.idx(barX, barGround);
+      const wasActive = st.flags[ai] !== 0;
+      st.type[ai] = 0; st.flags[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
+      st.slope[ai] = 0; st.half[ai] = 0;
+      const gOK = (() => {
+        if (!st.inBounds(barX, barGround + 1)) return false;
+        const gi = st.idx(barX, barGround + 1);
+        if (st.flags[gi] === 0) return false;
+        const gt = st.type[gi]!;
+        return vanGenSolidType(gt) && !TILE_DEFS[gt]?.platform
+          && st.slope[gi] === 0 && st.half[gi] === 0 && !(st.wire[gi]! & WIRE_ACTUATOR)  // SolidTile2
+          && !BOULDER_TILES.has(gt);                                                   // 非巨石族地板
+      })();
+      if (gOK && !wasActive) {
+        st.type[ai] = EXPLOSIVES; st.flags[ai] = 1;
+        st.frameX[ai] = 0; st.frameY[ai] = 0;
+      }
+    }
   }
   // 起爆器 411:PlaceTile(..., forced: true)(cs:72)——无视支撑/占位检查强制 2×2 落块
   for (let dx = 0; dx < 2; dx++) {
@@ -809,6 +865,7 @@ function placeMahoganyTree(
     if (st.flags[i] && MAHOGANY_SKIP.has(st.type[i])) return;
     if (st.wall[i] === 87) return;
     st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;    // ClearTile(frameNeighbors)
+    st.wire[i] &= ~WIRE_ACTUATOR;                        // +inActive(false)(Tile.cs:153)
     st.wall[i] = 78;                                     // PlaceWall(78)(SquareWallFrame 帧备案)
   };
   const genRect = (x: number, y: number, width: number, height: number,
@@ -1552,13 +1609,14 @@ function placeEnchantedSwordShrine(
   if (oy <= num2) return false;
   // ③ Up(num3) 搜索(cs:38-49):IsSolid().AreaOr(1,num4).Not() = 首个
   //   "1×num4 竖条内无实心"的行(向上数);未命中或 result.Y <= 55 → 拒
+  //   IsSolid 条件=Conditions.IsSolid(InWorld(10)+active+生成期 tileSolid)
   const num3 = oy - num2;
   const num4 = Math.min(50, num3);
   let resultY = -1;
   for (let i = 0; i < num3; i++) {
     let solid = false;
     for (let j = 0; j < num4; j++) {
-      if (solidAt(st, ox, oy - i + j)) { solid = true; break; }
+      if (condIsSolid(st, ox, oy - i + j)) { solid = true; break; }
     }
     if (!solid) { resultY = oy - i; break; }
   }
@@ -1604,6 +1662,7 @@ function placeEnchantedSwordShrine(
         if (!st.inBounds(px, py)) continue;
         const i = st.idx(px, py);
         st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;   // ClearTile
+        st.wire[i] &= ~WIRE_ACTUATOR;                       // +inActive(false)(Tile.cs:153)
         cave.add(px - pointX, py - pointY);                 // Output(shapeData)
       }
     }
@@ -1688,6 +1747,7 @@ function placeEnchantedSwordShrine(
         const i = st.idx(px, py);
         if (st.flags[i] && SHAFT_SKIP.has(st.type[i])) continue;   // SkipTiles(191,192)
         st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;          // ClearTile
+        st.wire[i] &= ~WIRE_ACTUATOR;                              // +inActive(false)(Tile.cs:153)
         shaft.add(px - ox, py - sy0);
       }
     }
@@ -1741,8 +1801,16 @@ function placeEnchantedSwordShrine(
 // 3. placeLavaTrap(WorldGen.cs:8648-8732;调用点 cs:22093-22127)
 // ============================================================
 
+/** placeLavaTrap 湖底/腔底实心门(cs:8677/8690/8715):active 且 type 过
+ *  生成期 tileSolid 且非 tileSolidTop——无 half/slope/inActive 排除 */
+function vanGenSolidSolidTopGate(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const t = st.type[st.idx(x, y)]!;
+  return vanGenSolidType(t) && !TILE_DEFS[t]?.platform;
+}
+
 /** 地狱熔岩陷阱:岩浆湖底掏腔,湖底层致动石栅 + 压板 135 style7 + 红线。
- *  门禁:锚点须满格岩浆;11×11 内 ≥50 满岩浆格;±20 无线;腔高 ≤40 且 ≥4 */
+ *  门禁:锚点须满格岩浆;11×11 内 ≥50 满岩浆格;±20 无红线;腔高 ≤40 且 ≥4 */
 export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number): boolean {
   void gs;
   if (!st.inBounds(x, y)) return false;
@@ -1765,16 +1833,17 @@ export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number)
     num7++;
     if (num7 > st.h - 200 || num7 >= st.h) return false;
   }
-  if (!solidAt(st, x, num7) || solidTopAt(st, x, num7)) return false;
+  // cs:8677:!tileSolid || tileSolidTop → 拒(生成期表;无 half/slope/inActive 排除)
+  if (!vanGenSolidSolidTopGate(st, x, num7)) return false;
   const num8 = num7;
-  // ±20 × ±20 无任何线(cs:8681-8689)
+  // ±20 × ±20 无红线(cs:8681-8689)——原版只查 wire() 红线位,非四色
   for (let k = x - scanR; k <= x + scanR; k++) {
     for (let l = num7 - scanR; l <= num7 + scanR; l++) {
-      if (st.inBounds(k, l) && (st.wire[st.idx(k, l)] & 15) !== 0) return false;
+      if (st.inBounds(k, l) && (st.wire[st.idx(k, l)] & WIRE_RED) !== 0) return false;
     }
   }
   // 穿透湖底实心层(cs:8690-8696)
-  while (activeAt(st, x, num7) && solidAt(st, x, num7) && !solidTopAt(st, x, num7)) {
+  while (activeAt(st, x, num7) && vanGenSolidSolidTopGate(st, x, num7)) {
     num7++;
     if (num7 > st.h - 200 || num7 >= st.h) return false;
   }
@@ -1791,7 +1860,7 @@ export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number)
     if (st.liquid[st.idx(x, num7)] > 0) return false;
   }
   const floorIdx = st.idx(x, num7);
-  if (!solidAt(st, x, num7) || solidTopAt(st, x, num7) || st.type[floorIdx] === THIN_ICE) return false;
+  if (!vanGenSolidSolidTopGate(st, x, num7) || st.type[floorIdx] === THIN_ICE) return false;
   const num10 = num7 - 1;
   if (num10 - num8 > maxDrop) return false;
   if (num10 - num9 < minGap) return false;

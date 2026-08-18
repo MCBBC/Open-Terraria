@@ -154,3 +154,39 @@ describe('低频行族（2026-08-18 二批）', () => {
     expect(lines.some((l) => l.tag === 'master')).toBe(true);
   });
 });
+
+describe('终清零三批（tileBoost/任务鱼/套装/社交/tip54）', () => {
+  it('扳手 509：+20 范围行（tip54）；The Axe 1305：+1', () => {
+    const r = tags(509);
+    const line = r.lines.find((l) => l.tag === 'range')!;
+    expect(line.text).toContain('20');
+    expect(tags(1305).lines.find((l) => l.tag === 'range')!.text).toContain('1');
+  });
+
+  it('任务鱼（ctx.anglerQuestItemId 命中）：任务物品行（inter65）', () => {
+    const def = defOfVid(2266);   // Aenean Betta? 任取任务鱼候选——用固定 id 测注入链
+    if (!def) return;             // 数据缺则跳过（链路已由 ctx 契约覆盖）
+    const body = buildTooltipBody(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null, { anglerQuestItemId: 2266 });
+    expect(body.lines.some((l) => l.tag === 'quest')).toBe(true);
+  });
+
+  it('悬停护甲 + 套装生效：套装奖励行（tip48）在词缀差分后', () => {
+    const helm = defOfVid(37);   // 帽子 s=h
+    if (!helm) return;
+    const lines = assembleTooltipLines(helm, { id: ITEM_BY_KEY[helm.key], stack: 1 }, {
+      dmgMult: { melee: 1, ranged: 1, magic: 1, summon: 1 },
+      crit: { melee: 0, ranged: 0, magic: 0 }, manaCostMul: 1,
+      kbGlove: false, kbBuff: false, setBonusText: '测试套装',
+    }, null);
+    const sbIdx = lines.findIndex((l) => l.tag === 'setbonus');
+    expect(sbIdx).toBeGreaterThan(-1);
+    expect(lines[sbIdx].text).toContain('LegacyTooltip.48');
+  });
+
+  it('社交槽（ctx.socialSlot）：tip0+tip1 双行在最前', () => {
+    const def = defOfVid(4)!;
+    const lines = assembleTooltipLines(def, { id: ITEM_BY_KEY[def.key], stack: 1 }, null, null, { socialSlot: true });
+    expect(lines[0].tag).toBe('social');
+    expect(lines[1].tag).toBe('social');
+  });
+});

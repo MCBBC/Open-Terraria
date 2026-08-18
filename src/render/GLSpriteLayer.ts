@@ -148,7 +148,24 @@ export class GLSpriteLayer {
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    // ★自愈钩子(2026-08-18 双开"关掉另一窗口也恢复不了"根因):GL 上下文
+    // 丢失后【不会自恢复】(2D 会),曾无人监听=永远持有死上下文,背景层
+    // 全空且不再重试。死亡即标 unavailable,消费方丢弃实例走 2D 兜底,
+    // 退避期后重建新实例
+    this.canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();               // 保留恢复资格(部分驱动可自动恢复)
+      this.unavailable = true;
+      this.diedAt = performance.now();
+      console.warn('[GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建');
+    });
+    this.canvas.addEventListener('webglcontextrestored', () => {
+      // 内容(纹理/程序)已全部蒸发:仍按死亡处理,由消费方整体重建更干净
+      this.unavailable = true;
+      this.diedAt = performance.now();
+    });
   }
+  /** 上下文死亡时刻(重建退避用;0=未死) */
+  diedAt = 0;
 
   /** 画布尺寸(与主画布同尺寸;DPR 内部像素) */
   resize(w: number, h: number): void {
@@ -239,6 +256,32 @@ export class GLSpriteLayer {
     if (e.mipped) gl.generateMipmap(gl.TEXTURE_2D);   // 子区更新后 mip 链重建
     gl.bindTexture(gl.TEXTURE_2D, null);
     e.stamp = ++this.stamp;
+  }
+
+  /** ImageData 源直接子区上传(2026-08-18 小地图 CPU 化:主数据已不在画布上,
+   *  ImageData 不能 drawImage 进 scratch——走 8 参 DOM 源重载直传) */
+  texSubUpdateData(key: string, src: ImageData, x: number, y: number): void {
+    if (this.unavailable || !this.gl) return;
+    const e = this.texs.get(key);
+    if (!e) return;
+    const gl = this.gl;
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    if (e.mipped) gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    e.stamp = ++this.stamp;
+  }
+
+  /** 按键主动释放(全屏地图关闭时丢弃整幅纹理——地图只在打开期占 GPU) */
+  dropTexture(key: string): void {
+    if (!this.gl) return;
+    const e = this.texs.get(key);
+    if (!e) return;
+    this.texs.delete(key);
+    this.bytes -= e.bytes;
+    this.gl.deleteTexture(e.tex);
   }
 
   /** SpriteAtlas DrawRect 便捷入口 */

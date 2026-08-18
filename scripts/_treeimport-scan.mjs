@@ -2,7 +2,7 @@
 // × zoom 1.27（报告值）→ 全透明行/半透明线双检测。
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
-const full = JSON.parse(readFileSync('/Users/vinlic/Downloads/debug-report-模型根基-2026-08-17T10-48-36-594Z.json', 'utf8'));
+const full = JSON.parse(readFileSync(process.env.REPORT ?? '/Users/vinlic/Downloads/debug-report-模型根基-2026-08-17T10-48-36-594Z.json', 'utf8'));
 const report = JSON.stringify({ tiles: { areaPlayer: full.tiles.areaPlayer } });
 const browser = await puppeteer.launch({ protocolTimeout: 600000, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, args: ['--no-sandbox'], defaultViewport: { width: 1512, height: 862, deviceScaleFactor: 2 } });
 const page = await browser.newPage();
@@ -59,12 +59,45 @@ const res = await page.evaluate(async () => {
     return { bad, worst };
   };
   const out = [];
-  for (const m of markers) {
-    const idle = await scanTree(m, '无风微摆', 16);
-    const gale = await scanTree(m, '强风', 16);
-    out.push({ x: m.x, y: m.y, idleBad: idle.bad, idleWorst: idle.worst, galeBad: gale.bad, galeWorst: gale.worst });
+  // 报告指定树（环境变量 TREES="4590,572;4585,573;4609,574"）优先
+  const want = (process.env ? null : null), TREES = window.__TREES;
+  void want;
+  const targets = TREES ? TREES.split(';').map((s2) => s2.split(',').map(Number).map((v, k) => k ? v + 2 - 0 : v + 2))
+    .map(([x, y]) => markers.find((m) => Math.abs(m.x - x) <= 2 && Math.abs(m.y - y) <= 2)) .filter(Boolean)
+    : markers.slice(0, 6);
+  // 1:1 像素剖面：静止 + 微摆（干带 ±10 世界px，行 B−3..B+3）
+  const profile = async (m, mode) => {
+    setWind(mode);
+    S.tree = { x: m.x, markerY: m.y, grassY: m.y + 8, h: 6, pieces: [] };
+    S.zoom = 1.25;
+    for (let k = 0; k < 6; k++) await raf();
+    const B = (m.y - 2 + 1) * 16;   // 导入区 markerY 含 +2 偏移 → 世界边界 = (markerY-2+1)*16
+    const rows = [];
+    const st2 = S.store;
+    const camX = st2.w * 16 / 2;
+    void camX;
+    for (let dy = -3; dy <= 3; dy++) {
+      let line = '';
+      const wy = B + dy;
+      const camY = (m.y - 2 + 1) * 16;
+      const camRX = Math.round((S.store.w * 16 / 2) * 1.25) / 1.25;
+      const camRY = Math.round(camY * 1.25) / 1.25;
+      for (let wx = m.x * 16 - 12 + 0; wx < m.x * 16 + 12; wx += 1) {
+        const sx = Math.round((wx - camRX) * 1.25 + cv.width / 2);
+        const sy = Math.round((wy - camRY) * 1.25 + cv.height / 2);
+        if (sx < 0 || sy < 0 || sx >= cv.width || sy >= cv.height) { line += '?'; continue; }
+        const d = ctx.getImageData(sx, sy, 1, 1).data;
+        line += d[3] < 60 ? '·' : (d[0] + d[1] + d[2]) / 3 > 175 ? '.' : (d[0] + d[1] + d[2]) / 3 > 110 ? '-' : (d[0] + d[1] + d[2]) / 3 > 50 ? '=' : '#';
+      }
+      rows.push(String(dy).padStart(3) + '|' + line);
+    }
+    return rows;
+  };
+  const profiles = [];
+  for (const m of targets) {
+    profiles.push({ x: m.x, y: m.y, still: await profile(m, '静止'), idle: await profile(m, '无风微摆') });
   }
-  return { n: markers.length, out };
+  return { n: markers.length, out, profiles, targets: targets.map((m) => [m.x, m.y]) };
 });
 console.log('冠标记数:', res.n);
 let anyBad = false;
