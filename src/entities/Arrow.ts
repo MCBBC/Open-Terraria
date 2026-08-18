@@ -743,6 +743,12 @@ export class Arrow extends Entity {
     // 敌对弹命中城镇 NPC(原版 flag2 分支:hostile && victim.friendly,Projectile.cs:11975-11976);
     // 不消耗弹体(原版该分支不动 keepIterating)
     if (this.hostile) hitTownNpcs(this, game, this.damage, 0, 'hostile');
+    // 友方弹 → 城镇 NPC 窄门（Damage_PVE_Inner flag :11970-11972：臭鸡蛋 318
+    // 无条件 / 向导 22·裁缝 54 巫毒装备——任意玩家弹（弓/投掷蛋等）可走此门，
+    // 2026-08-18 补；命中不消耗穿透语义（TownNPC.hurt 8t iframes 自去重））
+    else if (!this.reflected && hitTownNpcs(this, game, this.damage, 0, 'playerProj', this.projId)) {
+      if (this.projId === 318) { this.killNow(game); return; }   // 臭蛋砸 NPC 即碎（penetrate 1）
+    }
     // 反射后的弹体 friendly 已翻（原版 Damage NPC 需 friendly 门禁，小动物也是 NPC）
     // ——不再伤小动物/敌怪，只走上方 hitPlayer 回打发射者
     if (this.reflected) return;

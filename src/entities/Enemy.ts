@@ -846,6 +846,9 @@ export class Enemy extends Entity {
   spikeT = 0;      spikeDoT = 0;
   butcherT = 0;    butcherDoT = 0;
   soulDrainT = 0;  soulDrainDoT = 0;
+  /** 本体 soulDrain（SoulDrainDebuff debuff 位 :91951）——Game 侧邻域扫描
+   *  3006 挥击中玩家供给计数用（:91966 soulDrain++），非 DoT 计时 */
+  soulDrainActive = false;
   stardustT = 0;   stardustDoT = 0;
   /** 贴附族层数池（每元素=一层的剩余秒数；addStickerStack 入池、buff tick 衰减，
    *  ≤0 剪除）。上限=KillOldestJavelin（Projectile.cs:13019-13030/:13995-14020
@@ -1413,6 +1416,7 @@ export class Enemy extends Entity {
     else this.spikeStacks.length = 0;
     if (this.butcherT > 0) { this.butcherT -= dt; this.butcherDoT += 4 * decay(this.butcherStacks) * dt; }   // :92786-92804
     else this.butcherStacks.length = 0;
+    this.soulDrainActive = this.soulDrainT > 0;   // :91951 debuff 位镜像
     if (this.soulDrainT > 0) { this.soulDrainT -= dt; this.soulDrainDoT += 25 * dt; } // :92927-92935
     if (this.stardustT > 0) { this.stardustT -= dt; this.stardustDoT += 20 * decay(this.stardustStacks) * dt; } // :92846-92863 num10×20
     else this.stardustStacks.length = 0;

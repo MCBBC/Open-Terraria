@@ -3264,15 +3264,13 @@ export function runDungeonPass(
             if (!featOK(a, b, 0)) { flag3 = true; break; }
             if (actAt(a, b) !== 0) { num18 = -1; break; }
           }
-          if (stricter && (alch > 0 || bew > 0) && actAt(a, b) !== 0 && (typAt(a, b) === ALCHEMY || typAt(a, b) === BEWITCH)) { flag4 = true; if (process.env.SW_DG_FURN_TRACE) console.log(`DG FU4 hit @${a},${b} t=${typAt(a, b)}`); }
+          if (stricter && (alch > 0 || bew > 0) && actAt(a, b) !== 0 && (typAt(a, b) === ALCHEMY || typAt(a, b) === BEWITCH)) flag4 = true;
         }
       }
       if (flag3) return;
       if (num2 < num19 * 1.75) num18 = -1;
       const fTr = typeof process !== 'undefined' && !!process.env.SW_DG_FURN_TRACE;
-      if (fTr) {
-        console.log(`DG FU i=${i} j=${j} num3=${num3} span=${num2} flag4=${flag4 ? 1 : 0} alch=${alch} bew=${bew} n18=${num18} n19=${num19} n20=${num20} box=[${num3 - num19 - num21},${j - num20 - num21}]-[${num3 + num19 + num21},${j + num21}] c501_768=${actAt(501, 768)}/${TILE_DEFS[typAt(501, 768)]?.vanilla?.sheet ?? -1}`);
-      }
+      if (fTr) console.log(`DG FU i=${i} j=${j} num3=${num3} span=${num2} flag4=${flag4 ? 1 : 0} alch=${alch} bew=${bew} n18=${num18} n19=${num19} n20=${num20}`);
       if (!flag4 && (alch > 0 || bew > 0)) {
         if (alch > 0) {
           if (place3x3D(num3, j, ALCHEMY)) { if (fTr) console.log(`DG FU ALCH ok @${num3},${j}`); dgFurnResult = 'alch'; return; }
@@ -3542,9 +3540,12 @@ export function runDungeonPass(
 
   // ============ DungeonGlobalPaintings（:28-321）============
   function dgPaintings(): void {
-    // lihzahrdPaintingsMax（DungeonGlobalPaintings.cs:36-42）：Large(4200) → case 2 →
-    // 2 + Next(2)。默认地牢无风格表/wall87 → 计数器永不消费，但此掷骰必须耗流。
-    rn(2);
+    if (typeof process !== 'undefined' && process.env.SW_DGPA_TRACE) console.log(`P0 rolls=${dgMainRolls}`);
+    // lihzahrdPaintingsMax（DungeonGlobalPaintings.cs:36-42）：GetWorldSize()（WG:6518）
+    // 4200 宽 → **0**（≤4200 case）→ switch default → max=1——**零掷**（仅 >6400 的
+    // case 2 才掷 Next(2)）。★#32 终清批 III：此前误按"Large=4200"恒掷 → Pa 段全程
+    // 流错位 +1（x86 逐事件反解：vanilla 首 PE@+5 而旧 JS@+6 起）。
+    void 0;
     const num2v = wallVariants[0];
     const num4 = Math.trunc(100 * (w / 4200) * Math.max(1, 0.75));
     let num5 = num4 * 3;
@@ -3697,7 +3698,7 @@ export function runDungeonPass(
   /** Paintings_GetPaintingEntry（DungeonGlobalPaintings.cs:327-360）：只取 tile 型
    * （style 走帧不入哈希，placeSimple 不落帧）——但选型掷骰必须照原版序全部消耗。 */
   function paintingEntry(x: number, y: number): number {
-    if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`E ${x} ${y}`);
+    if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`E ${x} ${y} wall=${wallAt(x, y)} rolls=${dgMainRolls}`);
     let tile = HANGING;
     if (wallAt(x, y) === wall) {
       // RandomDungeonPainting（:364-385）：Next(3)≤1→240 Next(7)(==6 重掷)style{12,13,14,15,18,19,23}；
@@ -3973,8 +3974,11 @@ function nearPicture(st: TileStore, x: number, y: number): boolean {
 /** nearPicture2(cs L17979):±15/±10(主墙)或 ±8/±5(变体墙)内已有墙饰 */
 function nearPicture2(st: TileStore, x: number, y: number, mainWall: number): boolean {
   const wall = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0;
-  const rx = wall === mainWall ? 15 : 8;
-  const ry = wall === mainWall ? 10 : 5;
+  // ★#32 终清批 III：±15 大盒判据=wall∈{7,8,9} 三主墙**集合**（cs:34719-34725），
+  //   非"等于本局主墙"——wall 7/8 样本盒被缩到 ±8 → 漏检邻画 → 多耗选型掷（Pa +15）。
+  const big = wall === 7 || wall === 8 || wall === 9;
+  const rx = big ? 15 : 8;
+  const ry = big ? 10 : 5;
   for (let dx = -rx; dx <= rx; dx++) {
     for (let dy = -ry; dy <= ry; dy++) {
       if (!st.inBounds(x + dx, y + dy) || !st.flags[st.idx(x + dx, y + dy)]) continue;

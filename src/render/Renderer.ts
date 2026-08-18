@@ -135,7 +135,9 @@ import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 
-/** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制 */
+/** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制。
+ *  ★smooth 恒 false:主循环 :1623 等处关闭的 imageSmoothingEnabled 跨帧残留,
+ *  2D 背景层实际一直按最近邻缩放渲染(对拍实测)——GL 与既有视觉 1:1 */
 class GLBgBlit implements BGBlit {
   constructor(private gl: GLSpriteLayer) {}
   img(im: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
@@ -144,7 +146,7 @@ class GLBgBlit implements BGBlit {
     const tag = (im as HTMLImageElement).src ?? `cv${im.width}x${im.height}`;
     const e = this.gl.texFromImage(`bg:${tag}`, im as TexImageSource);
     if (!e) return;
-    this.gl.quad(e, sx, sy, sw, sh, dx, dy, dw, dh, opts);
+    this.gl.quad(e, sx, sy, sw, sh, dx, dy, dw, dh, { alpha: opts?.alpha, tint: opts?.tint, smooth: false });
   }
   fill(x: number, y: number, w: number, h: number, r: number, g: number, b: number, a = 1): void {
     this.gl.fillQuad(x, y, w, h, r, g, b, a);
@@ -1256,8 +1258,8 @@ export function sleepingTransformOps(
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
-  /** ?mapgl=0 逃生门(#2);GL 初始化失败自动回退 */
-  private readonly mapGlEnabled = (() => {
+  /** ?mapgl=0 逃生门(#2);GL 初始化失败自动回退;可运行时切换(对拍探针用) */
+  mapGlEnabled = (() => {
     try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('mapgl') !== '0'; }
     catch { return false; }
   })();
@@ -1299,8 +1301,9 @@ export class Renderer {
   } = { heldVid: 0, uiHeld: false, cacheTime: 0, cacheVid: 0, npcHover: false, biomeTorch: null, biomeCampfire: null, paintAmmoVid: 0, housingHead: null };
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
-  /** #1 背景层 GL 逃生门 ?bggl=0(实例共用 this.glfx;初始化失败自动回退) */
-  private readonly bgGlEnabled = (() => {
+  /** #1 背景层 GL 逃生门 ?bggl=0(实例共用 this.glfx;初始化失败自动回退;
+   *  可运行时切换——像素对拍探针同会话 A/B 用) */
+  bgGlEnabled = (() => {
     try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('bggl') !== '0'; }
     catch { return false; }
   })();

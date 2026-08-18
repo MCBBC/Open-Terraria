@@ -459,6 +459,16 @@ const TILE_CUT = new Set<number>(
   }, []),
 );
 const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
+/** IsVine（TileID.cs:237）：八种垂藤（CheckVines 全族同构，见 Game.checkVineAt）；
+ *  sheet → 内部 id 映射（变型用，首个命中者） */
+const VINE_SHEETS = new Set([52, 382, 62, 115, 205, 528, 636, 638]);
+const VINE_INTERNAL_BY_SHEET = new Map<number, number>();
+TILE_DEFS.forEach((d, id) => {
+  const vs = d?.vanilla?.sheet;
+  if (vs !== undefined && VINE_SHEETS.has(vs) && !VINE_INTERNAL_BY_SHEET.has(vs)) {
+    VINE_INTERNAL_BY_SHEET.set(vs, id);
+  }
+});
 /** NPC.MechSpawn 等价组（NPC.cs:7415-7453）：组内任一 type 互计配额 */
 const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
   [74, 297, 298],      // 蛇
@@ -2813,6 +2823,10 @@ export class Game implements GameHooks {
         this.sandQueue.push([x, y - 1]);
       }
     });
+    // 藤蔓支撑（CheckVines，TileFrame :82114 对 IsVine 全族）：格变化 → 检查其
+    // 下方一格的藤（支撑/同型续接/亲代变型）；打掉中间一节 → 下方整段级联消失
+    // （breakTile→setTile(0) 再触发本监听逐节向下，下落沙同款）
+    w.store.onTileChanged((x, y) => this.checkVineAt(x, y + 1));
     this.entities.clear();
     resetGorePool();                // Gore 池计数同步归零（clear 丢弃引用不置 dead，防 600 槽假满）
     clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
@@ -3573,6 +3587,28 @@ export class Game implements GameHooks {
     // itemAnimation 等效注入（CheckDrowning 芦苇管门禁用；swing 在 postUpdate 递减，
     // 此处读到上一帧尾值，≤1 tick 偏差）
     player.itemAnimTicks = this.swing?.t ?? 0;
+    // ---- 魂镰 3006 吸魂供给（NPC.cs:91957-91979 UpdateNPC_SoulDrainDebuff）：
+    //      玩家手持 3006 且挥击中(itemAnimTicks>0) → 1100px 邻域内每个带
+    //      SoulDrain debuff 的敌怪：player.soulDrain++（单帧计数，:9555 自持
+    //      buff151；:18939/:18979 回复加成在 Player 侧）。计数每帧先清零
+    //      （原版灵魂收割是"本帧供给了几只"瞬时量）+ 2/3 概率吸魂尘 235 ----
+    player.soulDrain = 0;
+    {
+      const heldId = player.inv.heldItem()?.id;
+      const hVid0 = heldId != null ? (ITEM_DEFS[heldId]?.vid ?? viIdFromKey(ITEM_DEFS[heldId]?.key ?? '') ?? -1) : -1;
+      if (hVid0 === 3006 && player.itemAnimTicks > 0 && !player.dead) {
+        for (const ent of this.entities.enemies) {
+          const en = ent as Enemy & { soulDrainActive?: boolean };
+          if (en.dead || !(en as unknown as { soulDrainActive?: boolean }).soulDrainActive) continue;
+          if (Math.hypot(en.cx - player.cx, en.cy - player.cy) >= 1100) continue;
+          player.soulDrain++;
+          if (Math.random() < 2 / 3) {   // Next(3)!=0（:91968）
+            this.spawnParticles(en.cx + (Math.random() * 2 - 1) * 5, en.cy + (Math.random() * 2 - 1) * 5,
+              '#B46BFF', 1, 0, { life: 36, size: 2, grav: 0 });
+          }
+        }
+      }
+    }
     // 手持物品 useTurn 注入（Player :19546 移动改向门的豁免旗——工具/食物 true，
     // 武器 false）。combat 表无 useTurn 列（提取器回填登记遗留）——按 itemfunc
     // 归档：食物 useStyle 2/9（DefaultToFood :48166 useTurn=true）/可放置族
@@ -12781,6 +12817,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         en.hurt(damage, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen); // ⑥
       }
     }
+    // 城镇 NPC 爆炸窄门（Damage_PVE_Inner :11970-11972 同门：臭鸡蛋 318 非爆炸物
+    // 不达此路径，实际生效的是巫毒——炸弹+向导巫毒娃娃炸死向导=经典肉山预备链）：
+    // 向导 22 需装备向导巫毒娃娃 267（killGuide）、裁缝师 54 需裁缝娃 1307
+    // （killClothier）；其余城镇 NPC 对玩家爆炸免疫（victim-settles 同盒判定）
+    {
+      const hb2 = hurtBox ?? R * TILE;
+      const eq = this.player.equipStats;
+      for (const nent of this.entities.npcs) {
+        const tn = nent as TownNPC;
+        if (!(tn instanceof TownNPC) || tn.dead || tn.bound) continue;
+        const doll = tn.vanillaId === 22 ? eq.killGuide : tn.vanillaId === 54 ? eq.killClothier : false;
+        if (!doll || projId === 318) continue;
+        if (Math.abs(tn.cx - cx) < hb2 + tn.w / 2 && Math.abs(tn.cy - cy) < hb2 + tn.h / 2) {
+          tn.hurt(damage, Math.sign(tn.cx - cx) * 2 || 1, 0, this);
+        }
+      }
+    }
     const p = this.player;
     const hb = hurtBox ?? R * TILE;
     // 爆炸炸死玩家的死亡归因 = ByProjectile（BombsHurtPlayers :13974）：投射物名
@@ -18209,6 +18262,52 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.spawnDrop(tx * TILE + 8, ty * TILE, VI_KEY.TORCH, 1);
       this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
     }
+  }
+
+  /** CheckVines（WorldGen.cs:85599-85700，TileFrame 入口 :82114 对 IsVine 全族
+   *  {52 藤/62 丛林/115 神圣/205 猩红/382 神圣花藤/528 蘑菇/636 腐化/638 1.4.5 新藤}
+   *  逐格执行）：上方非同型藤且非亲代面 → KillTile（支撑消失——打掉中间一节
+   *  时下方整段级联消失）；上方是异族亲代面 → 变型成对应藤。
+   *  级联：onTileChanged(x,y) 检查 (x,y+1) 触发；本方法 KillTile → breakTile →
+   *  setTile(0) 再触发监听 → 逐节向下（下落沙同款自然级联）。 */
+  private checkVineAt(i: number, j: number): void {
+    const st = this.world.store;
+    if (!st.inBounds(i, j) || j <= 0) return;
+    const si = st.idx(i, j);
+    if (!st.flags[si]) return;
+    const selfSheet = TILE_DEFS[st.type[si]]?.vanilla?.sheet ?? -1;
+    if (!VINE_SHEETS.has(selfSheet)) return;
+    // 上方格：nactive() && !bottomSlope() → 其 sheet（否则 -1；slope 3/4 = 下坡面）
+    const ai = st.idx(i, j - 1);
+    const aboveOk = st.flags[ai] !== 0 && !(st.wire[ai] & TileStore.WIRE_ACTUATED)
+      && st.slope[ai] !== 3 && st.slope[ai] !== 4;
+    const num = aboveOk ? (TILE_DEFS[st.type[ai]]?.vanilla?.sheet ?? -1) : -1;
+    if (num === selfSheet) return;                    // 同型续接（藤挂藤）
+    // 亲代面 → 藤型映射（:85630-85655，八集互斥）
+    let num6 = 0;
+    if (num === 60 || num === 226 || num === 62) num6 = 62;
+    else if (num === 109 || num === 115 || num === 492) num6 = 115;
+    else if (num === 23 || num === 636 || num === 661) num6 = 636;
+    else if (num === 199 || num === 205 || num === 662) num6 = 205;
+    else if ((num === 2 || num === 52 || num === 477) && selfSheet !== 382) num6 = 52;
+    else if (num === 382) num6 = 382;
+    else if (num === 70 || num === 528) num6 = 528;
+    else if (num === 633 || num === 638) num6 = 638;
+    if (num6 !== 0 && num6 !== selfSheet) {
+      // 变型（:85657-85659 type=num6 + SquareTileFrame 重帧）——如普通藤 52 挂
+      // 上丛林草 60 → 变 62。setTile 触发监听 → 下方藤按新上方型再查（原版 3×3 帧化等价）
+      const nid = VINE_INTERNAL_BY_SHEET.get(num6);
+      if (nid !== undefined) st.setTile(i, j, nid);
+      return;
+    }
+    // 支撑检查（:85661-85693）——不满足 → KillTile（整段级联的发动机）
+    const anchor: Record<number, number[]> = {
+      52: [2, 477, 192], 382: [2, 477, 192],
+      62: [60, 384, 226],        // 384 = 活红木叶（丛林树冠内垂藤）
+      115: [109, 492], 528: [70], 636: [23, 661], 205: [199, 662], 638: [633],
+    };
+    const ok = num !== -1 && (anchor[selfSheet]?.includes(num) ?? false);
+    if (!ok) this.breakTile(i, j, false);
   }
 
   /** GameHooks.addLightAt：世界坐标光源（翅膀 28 微光等实体侧 AddLight） */

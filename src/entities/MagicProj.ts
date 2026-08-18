@@ -135,7 +135,8 @@ export class MagicProj extends Entity {
         return;
       }
     }
-    // 城镇 NPC 受击(原版 friendly 弹对 NPC 同效;一碰即碎同敌怪)
-    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)) { this.dead = true; return; }
+    // 城镇 NPC 受击(原版 friendly 弹对 NPC 同效;一碰即碎同敌怪)——窄门 =
+    // 巫毒(22/54) ∪ 臭鸡蛋 318（Damage_PVE_Inner :11970-11972，projId 传入）
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', this.projId)) { this.dead = true; return; }
   }
 }

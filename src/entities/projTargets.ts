@@ -32,6 +32,7 @@ export function hitTownNpcs(
   dmg: number,
   kbx = 0,
   source: 'playerProj' | 'hostile' = 'playerProj',
+  projId = 0,
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
   // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
@@ -48,10 +49,12 @@ export function hitTownNpcs(
     if (n.bound) continue; // 被缚待救不可打(近似;原版 bound 型有独立受击语义)
     if (!projOverlap(self.x, self.y, self.w, self.h, n)) continue;
     if (source === 'playerProj') {
-      // 巫毒窄门(:11970-11972):22→killGuide / 54→killClothier,其余 false
+      // 巫毒窄门(:11970-11972):22→killGuide / 54→killClothier,其余 false;
+      // ★臭鸡蛋 318 无条件例外（:11971 `flag |= type == 318`——整蛊蛋专属,
+      //  全游戏唯一可无条件砸 friendly NPC 的玩家弹）
       const vid = n.vanillaId ?? -1;
       const doll = vid === 22 ? eq?.killGuide : vid === 54 ? eq?.killClothier : false;
-      if (!doll) continue;
+      if (!doll && projId !== 318) continue;
     }
     const kb = kbx !== 0 ? kbx : Math.sign(n.x + n.w / 2 - (self.x + self.w / 2)) * 2 || 1;
     if (n.hurt(dmg, kb, 0, game)) any = true;

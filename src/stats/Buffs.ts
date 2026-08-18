@@ -49,6 +49,7 @@ export enum BuffType {
   Bewitched = 26,    // 附魔台(150,右键)：maxMinions+1（:9857→Player.maxMinions:972）
   WarTable = 27,     // 战争桌(348,右键)：maxTurrets+1（:9863→Player.maxSentries:979）
   SugarRush = 28,    // 糖分冲刺(192,蛋糕右键,120s)：moveSpeed+0.2+镐速（:9634）
+  SoulDrain = 107,  // 吸魂(vanilla 151,魂镰3006联动自持2s)：lifeRegenTime+2+回复(5+n)/2(:18939/:18977)
   // ---- R1 数值批（Player.cs UpdateBuffs 逐条对 1456）----
   Battle = 29,        // 战斗(13,420s)：spawnRate×0.5/max×2（NPC.cs:632）
   Calming = 30,       // 镇静(106,240s)：spawnRate×1.65/max×0.6（NPC.cs:617）
@@ -249,6 +250,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.AmmoBox]: { vanillaBuff: 93, descKey: 'Mods.SandboxWorld.Buff.AmmoBox.Desc', fallbackName: '弹药箱' },
   [BuffType.Bewitched]: { vanillaBuff: 150, descKey: 'Mods.SandboxWorld.Buff.Bewitched.Desc', fallbackName: '魅惑' },
   [BuffType.WarTable]: { vanillaBuff: 348, descKey: 'Mods.SandboxWorld.Buff.WarTable.Desc', fallbackName: '战争桌' },
+  [BuffType.SoulDrain]: { vanillaBuff: 151, descKey: 'Mods.SandboxWorld.Buff.SoulDrain.Desc', fallbackName: '吸魂' },
   [BuffType.SugarRush]: { vanillaBuff: 192, descKey: 'Mods.SandboxWorld.Buff.SugarRush.Desc', fallbackName: '糖分冲刺' },
   [BuffType.Battle]: { vanillaBuff: 13, descKey: 'Mods.SandboxWorld.Buff.Battle.Desc', fallbackName: '战斗' },
   [BuffType.Calming]: { vanillaBuff: 106, descKey: 'Mods.SandboxWorld.Buff.Calming.Desc', fallbackName: '镇静' },

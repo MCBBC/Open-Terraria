@@ -205,6 +205,12 @@ export class Player extends Entity {
    *  用。Game.fixedUpdate 每帧注入（swing 在 postUpdate 递减，读到的是上一帧尾值，
    *  ≤1 tick 偏差，注释存档） */
   itemAnimTicks = 0;
+  /** 魂镰 3006 吸魂计数（Player.cs:784 字段；NPC.cs:91952-91979 每帧邻域敌
+   *  SoulDrain+3006 挥击中 → ++；Player.cs:9555 UpdateBuffs >0 → AddBuff(151,2)
+   *  自持；:18939 lifeRegenTime+2；:18979 回复加成 (5+n)/2——每 tick 0 归零） */
+  soulDrain = 0;
+  /** 本帧吸魂回复加成缓存（(5+soulDrain)/2 截断，:18980） */
+  soulDrainBonus = 0;
   /** SuperCart 矿车坐骑防御加成（Mount.cs:4797-4798 UpdateEffects 每帧写入：
    *  statDefense += (int)(2×(1+|vx|/RunSpeed×2.5))；下车清零）——Minecart 持有 */
   cartDefenseBonus = 0;
@@ -1295,6 +1301,9 @@ export class Player extends Entity {
     // 感电移动惩罚开关先行写入（Player.cs:18900 controlLeft||controlRight）——inputX
     // 已由 Game.fixedUpdate 注入（Game.ts:2890 → :2931），此处读到的即本帧输入
     this.buffs.electrifiedMoving = this.inputX !== 0;
+    // 魂镰吸魂自持（Player.cs:9555-9558：soulDrain>0 → AddBuff(151, 2)——
+    // Game 侧扫描每帧清零再 ++，无 3006 邻域供给即熄）
+    if (this.soulDrain > 0) this.buffs.apply(BuffType.SoulDrain, 2);
     const buffHeal = this.buffs.tick(dt);
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
     else if (buffHeal < 0 && this.hp > 0) {
@@ -1374,6 +1383,14 @@ export class Player extends Entity {
       * (this.usedAegisCrystal ? 1.2 : 1);   // 蜂蜜×3 速(:18954)/神盾水晶 +0.2(:18931)
     // 坐/睡加成（:19053-19056）：lifeRegenTime +3/tick + 自然回血 ×1.3
     if (this.sitting || this.sleeping) this.lifeRegenTime += 3;
+    // 魂镰吸魂（:18939 lifeRegenTime += 2；:18977-18983 回复加成 (5+n)/2 截断
+    //  ——soulDrain 由 Game 侧敌怪 SoulDrain 邻域扫描逐帧 ++/清零）
+    if (this.soulDrain > 0) {
+      this.lifeRegenTime += 2;                       // :18939
+      this.soulDrainBonus = Math.floor((5 + this.soulDrain) / 2);  // :18979-18983
+    } else {
+      this.soulDrainBonus = 0;
+    }
     if (buffHeal < 0 || this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed) this.lifeRegenTime = 0;
     if (this.hp > 0 && this.hp < this.maxHp
       && !this.buffs.has(BuffType.Bleeding) && !this.buffs.obstructed) {
@@ -1391,6 +1408,7 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.Campfire)) num5 *= 1.1;
       // 坐/睡回血 ×1.3（:19053-19056 下半——睡中恒静止吃 1.25 静止档，坐椅同）
       if (this.sitting || this.sleeping) num5 *= 1.3;
+      num5 += this.soulDrainBonus;   // 魂镰吸魂回复加成（:18977-18983 加算非乘区）
       // 专家且未进食 /2（:19060;闪亮石 0.75 档 skip;坐/睡 ×1.3 未实装）
       const diff = scaleStatsWorld().difficulty;
       const fed = this.buffs.has(BuffType.WellFed) || this.buffs.has(BuffType.WellFed2) || this.buffs.has(BuffType.WellFed3);

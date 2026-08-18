@@ -140,7 +140,7 @@ type ReflectableWeaponProj = {
 };
 
 function hitEnemies(
-  self: { x: number; y: number; w: number; h: number; vx: number; damage: number; knockback: number },
+  self: { x: number; y: number; w: number; h: number; vx: number; damage: number; knockback: number; projId?: number },
   game: GameHooks,
   hitCd: HitCooldown,
   cooldown: number,
@@ -154,7 +154,7 @@ function hitEnemies(
   hitCritters(self, game);
   // 城镇 NPC 受击(原版 Projectile.Damage 对 friendly NPC 同样生效,杀裁缝师即此链);
   // 穿透型不消耗穿透语义(NPC.hurt 8t iframes 自去重)
-  hitTownNpcs(self, game, self.damage, Math.sign(self.vx) * 2);
+  hitTownNpcs(self, game, self.damage, Math.sign(self.vx) * 2, 'playerProj', self.projId ?? 0);
   const me = self as ReflectableWeaponProj;
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
