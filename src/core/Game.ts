@@ -2570,6 +2570,12 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // chunk 上限回满档(2026-08-18 泄漏 review):contextlost 自适应曾把
+    // MAX_CHUNKS 一路砍到 64 且【无恢复点】——之后所有世界永远 64(视野烘焙
+    // 跟不上)。进世界重置回 384;真撑不住的机器熔断器会再自适应(冷却已
+    // 逐次升级,不会振荡)。★直引类静态(曾写 this.chunks?.constructor——
+    // afterWorldLoad 头部 this.chunks 尚未构造,undefined 上赋值即崩)
+    ChunkCache.MAX_CHUNKS = 384;
     // 全局替换表 NPC 名解析注入（Lang.cs:102-110 GetFirstNPCNameOrNull：{Nurse}
     // 等 token → 场上第一名该类型城镇 NPC 的随机名；缺位保留 token——null 语义）
     // 全局替换表动态值（Lang.cs:126-144：WorldName/PlayerName/InventoryKey/
@@ -3785,9 +3791,9 @@ export class Game implements GameHooks {
         const hd = held ? ITEM_DEFS[held.id] : undefined;
         const vid = hd ? hd.vid ?? viIdFromKey(hd.key) : -1;
         if (vid >= 0) {
-          const is = statOfInternal(vid);
+          // ★damage/noMelee 在 itemfunc 表（stats 只有装备/配饰属性——曾查错表恒 false）
           const fc = itemFuncOfVid(vid);
-          itemWake = ((is?.damage ?? 0) > 0 && !(is?.noMelee ?? 0)) || (fc?.fishingPole ?? 0) > 0
+          itemWake = ((fc?.damage ?? 0) > 0 && !(fc?.noMelee ?? 0)) || (fc?.fishingPole ?? 0) > 0
             || vid === 1991 || vid === 4821 || vid === 3183;
         }
       }

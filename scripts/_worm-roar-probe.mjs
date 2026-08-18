@@ -34,6 +34,9 @@ const out = await page.evaluate((pos) => {
   g.sfx.play = (name, vol, x, y) => { rec.push({ name, via: 'sfx', t: performance.now() }); return sfxPlay(name, vol, x, y); };
   // 直接生成骨蛇头(F6 面板同源 debugSpawnNpc)
   g.debugSpawnNpc(39, 1, false);
+  // 把头段塞进实心岩里(强制 buried=走掘地分支发声)
+  const head = g.entities.enemies.find((e) => !e.dead && e.vanillaId === 39);
+  if (head) { head.x += 200; head.y -= 120; }
   return new Promise((resolve) => {
     const t0 = performance.now();
     const iv = setInterval(() => {
@@ -41,7 +44,9 @@ const out = await page.evaluate((pos) => {
         clearInterval(iv);
         g.playSfx = orig; g.sfx.play = sfxPlay;
         const serpents = g.entities.enemies.filter((e) => !e.dead && (e.vanillaId === 39 || e.vanillaId === 40 || e.vanillaId === 41));
-        resolve({  n39: serpents.length, sounds: rec.slice(0, 12), serp: serpents.slice(0, 2).map((e) => ({ id: e.vanillaId, x: Math.round(e.x), d: Math.round(e.digSndDelay ?? -1) })) });
+        const counts = {};
+        for (const r of rec) counts[r.name] = (counts[r.name] || 0) + 1;
+        resolve({ n39: serpents.length, counts, roarTs: rec.filter((r) => r.name === 'roar' || r.name === 'eowDig').map((r) => Math.round(r.t - t0)) });
       }
     }, 200);
   });

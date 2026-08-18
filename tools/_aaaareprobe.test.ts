@@ -61,9 +61,13 @@ function clusterAnchors(
 
 async function analyzeWorld(file: string): Promise<void> {
   const anchors = loadAnchors();
-  const row = anchors.get(file);
-  if (!row) throw new Error(`${file} 不在 matrix-anchors86.tsv`);
   const wld: WldWorld = parseWld(new Uint8Array(readFileSync(`${VSRV}/${file}`)));
+  // 行缺省从 wld 自推（s12345 晚于 anchors86.tsv 生成；seed=文件名数字，evil=isCrimson）
+  const row = anchors.get(file) ?? {
+    size: wld.tilesWide <= 4200 ? 's' : wld.tilesWide <= 6400 ? 'm' : 'l',
+    seed: /^s(\d+)\.wld$/.exec(file)?.[1] ?? file.replace(/\.wld$/, ''),
+    evil: (wld.isCrimson ? 1 : 0) as 0 | 1,
+  };
   const t0 = Date.now();
   const dims = SIZE_DIMS[SIZE_ID[row.size]];
   const world: World = await generateWorld({

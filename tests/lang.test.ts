@@ -210,3 +210,14 @@ describe('全局替换表补全批（61 注册全量,2026-08-18）', () => {
     expect(languageManager.getTextValue('UI.W')).toBe('世界:{WorldName}');
   });
 });
+
+describe('旗帜 tooltip NPC 名注入（{$NPCName.None} → 裸键名后由 UI 层换名）', () => {
+  it('bannerNpcOfItem:旗帜物品 → NPC id（共享旗取家族最小 id;非旗帜 -1）', async () => {
+    const { bannerNpcOfItem, bannerItemId } = await import('../src/world/Banners');
+    // 蓝邪教徒战士旗:banner 216 → item 3667 → npc 402 族最小
+    const item = bannerItemId(216);
+    expect(item).toBeGreaterThan(0);
+    expect(bannerNpcOfItem(item)).toBeGreaterThan(0);
+    expect(bannerNpcOfItem(1)).toBe(-1);   // 非旗帜物品
+  });
+});

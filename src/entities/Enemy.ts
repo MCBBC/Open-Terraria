@@ -220,6 +220,8 @@ const PLACEHOLDER_DEF: EnemyDef = {
 export class Enemy extends Entity {
   /** 原版 NPC id（数据驱动路径启用时非空） */
   vanillaId: number | null = null;
+  /** 穿墙旗（原版 noTileCollide；fairyAI 状态 2-7 宝箱引导态置真） */
+  noTileCollide = false;
   vanilla: VanillaNpc | null = null;
   /** npc.difficulty（ScaleStats 写入，NPC.cs:18086 = strengthOverride ?? Main.Difficulty）：
    *  原版档位浮点（Classic 1/Expert 2/Master 3，getGoodWorld +1）——AI 段
@@ -543,9 +545,8 @@ export class Enemy extends Entity {
       // EoW 三段(13-15) = eow_dig 专属轨；【其余蠕虫族 = SoundID 15 Roar】——
       // 骨蛇 39-41/食世者等接近时的周期咆哮(用户报"骨龙接近有音效",2026-08-18)；
       // 排除表 621/87/117/454/412 不发声；EoW 另有 skyblock lowTiles 门(不涉)
-      const isEow = this.vanillaId >= 13 && this.vanillaId <= 15;
-      const digSndType = this.vanillaId === 621 || this.vanillaId === 87
-        || this.vanillaId === 117 || this.vanillaId === 454 || this.vanillaId === 412;
+      const isEow = (this.vanillaId ?? 0) >= 13 && (this.vanillaId ?? 0) <= 15;
+      const digSndType = [621, 87, 117, 454, 412].includes(this.vanillaId ?? -1);
       if (!digSndType && this.digSndDelay <= 0) {
         this.digSndDelay = Math.round(Math.min(20, Math.max(10, dist / 40)));
         game.playSfx(isEow ? 'eowDig' : 'roar', 1, this.cx, this.cy);
@@ -5078,8 +5079,11 @@ export class Enemy extends Entity {
       else { this.vx += (Math.random() - 0.5) * 0.04; this.vy += (Math.random() - 0.5) * 0.04; }
       this.vy = Math.max(-2, Math.min(2, this.vy));
       if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 250) this.ai2 = 1;
-    } else {
-      // 追随飞（cs:48453 状态 1）
+    } else if (this.ai2 === 1) {
+      // 追随飞（cs:48453 状态 1）；接触玩家锚盒 → 状态 2 引导（:48505-48516）
+      if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 40) {
+        this.ai2 = 2; this.ai3 = 0;
+      }
       if (player && !player.dead) this.facing = this.seekDirX(player);
       const target = this.facing * 4.5;
       this.vx += Math.sign(target - this.vx) * 0.1;
@@ -5093,6 +5097,128 @@ export class Enemy extends Entity {
       else if (obstruction > 0) this.vy -= 0.2;
       else this.vy += 0.05;
       this.vy = Math.max(-5, Math.min(3, this.vy));
+    } else if (this.ai2 === 2) {
+      // ---- 状态 2 玩家引导（:48602-48684）：飞向玩家锚盒；接触 → 宝箱搜索 →
+      //      命中 → 状态 3 绕目标，未命中 → 状态 6 找不到宝箱态 ----
+      this.noTileCollide = true;
+      if (player && player.dead) { this.ai2 = 1; this.ai3 = 0; }
+      else if (player) {
+        const rCx = player.cx, rCy = player.cy - player.h / 4;
+        const rw = player.w + 60, rh = player.h / 2;
+        if (this.x < rCx + rw / 2 && this.x + this.w > rCx - rw / 2
+          && this.y < rCy + rh / 2 && this.y + this.h > rCy - rh / 2) {
+          const treasure = fairyTreasureCoords(st, this.cx, this.cy);
+          if (treasure) { this.ai0 = treasure[0]; this.ai1 = treasure[1]; this.ai2 = 3; this.ai3 = 0; }
+          else { this.ai2 = 6; this.ai3 = 0; }
+        } else {
+          const dx = rCx - this.cx, dy = rCy - this.cy;
+          const d = Math.hypot(dx, dy) || 1;
+          let spd = 2;
+          if (d > 150) spd = 4; else if (d > 80) spd = 3;
+          const tvx = dx / d * spd, tvy = dy / d * spd;
+          this.vx += (tvx - this.vx) * 0.07;
+          this.vy += (tvy - this.vy) * 0.07;
+        }
+      }
+    } else if (this.ai2 === 3) {
+      // ---- 状态 3 绕目标宝箱圆舞（:48688-48742）：210t（音 27@15t 起）；
+      //      毕 → 状态 4 带路；目标失效 → 状态 1 ----
+      this.noTileCollide = true;
+      if (this.ai3 === 15) game.playSfx('roar', 0.5, this.cx, this.cy); // 近似音 27
+      if (this.ai3 <= 15) { this.vx *= 0.9; this.vy *= 0.9; }
+      else {
+        // 简化圆舞：绕目标顺时针环绕（原版 GetFairyCircleOffset 三段摆）
+        const tx = this.ai0 * TILE + 8, ty = this.ai1 * TILE + 8;
+        const ang = (this.ai3 - 15) / 65 * Math.PI;
+        const r2 = 18;
+        const nx = tx + Math.cos(ang) * r2, ny = ty + Math.sin(ang) * r2 - 14;
+        this.vx = nx - this.cx; this.vy = ny - this.cy;
+        if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+      }
+      this.ai3 += 1;
+      if (this.ai3 >= 210) { this.ai2 = 4; this.ai3 = 0; }
+    } else if (this.ai2 === 4) {
+      // ---- 状态 4 带路（:48779-48925）：飞向宝箱；距玩家 >300 → 召唤脉冲等玩家；
+      //      到宝箱 5×5 盒 → 状态 5 终演；玩家死 → 状态 1 ----
+      this.noTileCollide = true;
+      if (player && player.dead) { this.ai2 = 1; this.ai3 = 0; }
+      else {
+        const tx = this.ai0 * TILE + 8, ty = this.ai1 * TILE + 8;
+        // 到达宝箱 5×5 盒 → 终演
+        if (Math.abs(this.cx - tx) < 40 && Math.abs(this.cy - ty) < 40) {
+          this.ai2 = 5; this.ai3 = 0;
+        } else if (player) {
+          const dp = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+          if (dp > 300) {
+            // 等玩家（环形徘徊 + 召唤音 1/30）
+            if (Math.random() < 1 / 30) game.playSfx('roar', 0.4, this.cx, this.cy);
+            const d2 = Math.hypot(this.cx - tx, this.cy - ty) || 1;
+            this.vx += (this.cx - tx) / d2 * 0.1;
+            this.vy += (this.cy - ty) / d2 * 0.1;
+          } else {
+            const d2 = Math.hypot(tx - this.cx, ty - this.cy) || 1;
+            this.vx += (tx - this.cx) / d2 * 0.1;
+            this.vy += (ty - this.cy) / d2 * 0.1;
+          }
+          const spd = Math.hypot(this.vx, this.vy);
+          if (spd > 6) { this.vx *= 6 / spd; this.vy *= 6 / spd; }
+        }
+      }
+    } else if (this.ai2 === 5) {
+      // ---- 状态 5 终演（:48897-48955）：目标格失效 → 提前毕；>200t →
+      //      消失 + FairyEffects（尘 278×40 爆散 + 音 Item4）----
+      this.noTileCollide = true;
+      const valid = fairyTreasureValidAt(st, this.ai0, this.ai1);
+      if (this.ai3 === 15) game.playSfx('roar', 0.5, this.cx, this.cy);
+      if (this.ai3 <= 15) { this.vx *= 0.9; this.vy *= 0.9; }
+      else {
+        // 绕目标小圆舞（同状态 3 简化）
+        const tx = this.ai0 * TILE + 8, ty = this.ai1 * TILE + 8;
+        const ang = (this.ai3 - 15) / 65 * Math.PI;
+        const nx = tx + Math.cos(ang) * 18, ny = ty + Math.sin(ang) * 18 - 14;
+        this.vx = nx - this.cx; this.vy = ny - this.cy;
+      }
+      this.ai3 += 1;
+      if (!valid) this.ai3 = Math.max(this.ai3, 201);   // 目标没了提前毕
+      if (this.ai3 > 200) {
+        // FairyEffects（:49021-49052）：尘 278×40 Lerp 主色/副色 0.65 scale 爆散
+        const fairyCols: Record<number, [string, string]> = {
+          583: ['#FF69B4', '#FFB6C1'], 584: ['#32CD32', '#20B2AA'], 585: ['#4169E1', '#ADD8E6'],
+        };
+        const [c1, c2] = fairyCols[this.vanillaId ?? 583] ?? fairyCols[583];
+        for (let k = 0; k < 40; k++) {
+          const col = k % 2 === 0 ? c1 : c2;
+          game.spawnParticles(this.cx, this.cy, col, 1, 2.2, { life: 32, grav: 0, size: 2 });
+        }
+        game.playSfxFiles(['Item_4'], 1, this.cx, this.cy);
+        this.dead = true; return;
+      }
+    } else if (this.ai2 === 6) {
+      // ---- 状态 6 找不到宝箱（:48746-48790）：跟玩家 >100px → 回状态 2 重试 ----
+      this.noTileCollide = true;
+      if (player) {
+        const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+        if (d > 100) { this.ai2 = 2; this.ai3 = 0; }
+        else if (d > 20) {
+          const d2 = d || 1;
+          this.vx += Math.sign(player.cx - this.cx) * 0.04;
+          this.vy += Math.sign(player.cy - this.cy) * 0.04;
+          this.vy = Math.max(-2, Math.min(2, this.vy));
+        }
+        // 每 150t 重搜宝箱（原版 :48769）
+        if (this.ai3 % 150 === 0 && this.ai3 > 0) {
+          const treasure = fairyTreasureCoords(st, this.cx, this.cy);
+          if (treasure) { this.ai0 = treasure[0]; this.ai1 = treasure[1]; this.ai2 = 3; this.ai3 = 0; }
+        }
+        this.ai3 += 1;
+      }
+    } else if (this.ai2 === 7) {
+      // ---- 状态 7 离场（:48950-48958）：加速飞离 + 提前消亡 ----
+      this.noTileCollide = true;
+      this.vx += 0.05 * this.facing;
+      this.vx = Math.max(-10, Math.min(10, this.vx));
+      this.vy -= 0.025;
+      this.vy = Math.max(-5, Math.min(5, this.vy));
     }
     this.facing = this.vx > 0 ? 1 : -1;
     moveAndCollide(this, game.world, this.vx, this.vy);
@@ -7373,3 +7499,63 @@ export class Enemy extends Entity {
   draw() { /* Renderer 统一绘制 */ }
 }
 bindEnemyCtor(Enemy);
+
+// ===================== 仙灵宝箱搜索（GetFairyTreasureCoords NPC.cs:48794-48852 1:1）=====================
+
+/** FriendlyFairyCanLureTo（TileID.cs:409）：仙灵可引导到的宝箱/家具 tile 表 */
+const FAIRY_LURE_SHEETS = new Set([8, 169, 21, 467, 107, 108, 111, 221, 222, 223, 211, 12, 665, 639, 236, 702, 227]);
+
+/** tileOreFinderPriority（Main.cs:6356-6391）：引导优先级——同优先级取最近，
+ *  矿石族 3×3 计数 ≥40 才有效（大矿脉才算"宝藏"） */
+const FAIRY_LURE_PRIORITY: Record<number, number> = {
+  28: 100, 407: 150, 404: 150, 7: 200, 166: 210, 6: 220, 167: 230, 9: 240,
+  168: 250, 8: 260, 169: 270, 22: 300, 204: 310, 37: 400, 21: 500, 467: 500,
+  441: 500, 468: 500, 12: 550, 665: 550, 639: 550, 107: 600, 221: 610,
+  108: 620, 222: 630, 111: 640, 223: 650, 129: 675, 211: 700, 227: 750,
+};
+
+/** IsValidForOreFinder（SceneMetrics.cs:904-919）：227 生命果仅 272≤frameX≤374、
+ *  129 宝箱仅 frameX≥324 才算 */
+function fairyOreFinderValid(sheet: number, frameX: number): boolean {
+  if (sheet === 227) return frameX >= 272 && frameX <= 374;
+  if (sheet === 129) return frameX >= 324;
+  return true;
+}
+
+/** 宝箱/引导目标搜索（GetFairyTreasureCoords :48794-48852）：中心 ±75×±50 窗
+ *  （钳世界缘 40），按优先级取最高（同优先取最近）；矿石族 3×3 同类计数 ≥40 */
+export function fairyTreasureCoords(
+  st: import('../world/TileStore').TileStore, cx: number, cy: number,
+): [number, number] | null {
+  const px = Math.floor(cx / 16), py = Math.floor(cy / 16);
+  const x0 = Math.max(40, px - 75), x1 = Math.min(st.w - 41, px + 75);
+  const y0 = Math.max(40, py - 50), y1 = Math.min(st.h - 41, py + 50);
+  let bestPrio = -1, bestD = -1, bx = -1, by = -1;
+  for (let i = x0; i <= x1; i++) {
+    for (let j = y0; j <= y1; j++) {
+      const idx = st.idx(i, j);
+      const sheet = st.flags[idx] ? (TILE_DEFS[st.type[idx]]?.vanilla?.sheet ?? 0) : 0;
+      if (!sheet || !FAIRY_LURE_SHEETS.has(sheet)) continue;
+      if (!fairyOreFinderValid(sheet, st.frameX[idx])) continue;
+      let prio = FAIRY_LURE_PRIORITY[sheet] ?? -1;
+      if (prio < 0) continue;
+      if (bestPrio <= prio) {
+        const d = Math.hypot(i * 16 + 8 - cx, j * 16 + 8 - cy);
+        if (bestPrio !== prio || d < bestD) {
+          bestPrio = prio; bestD = d; bx = i; by = j;
+        }
+      }
+    }
+  }
+  return bx >= 0 ? [bx, by] : null;
+}
+
+/** 宝箱格当前是否仍有效（状态 5 的 :48905 失效门） */
+export function fairyTreasureValidAt(
+  st: import('../world/TileStore').TileStore, x: number, y: number,
+): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const idx = st.idx(x, y);
+  const sheet = st.flags[idx] ? (TILE_DEFS[st.type[idx]]?.vanilla?.sheet ?? 0) : 0;
+  return !!sheet && FAIRY_LURE_SHEETS.has(sheet) && fairyOreFinderValid(sheet, st.frameX[idx]);
+}

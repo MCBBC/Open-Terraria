@@ -106,7 +106,10 @@ export const Lang = {
       const fb = isZh ? ITEM_NAME_ZH_BY_ID[id] : ITEM_NAME_EN_BY_ID[id];
       // 提取器对官方未翻译物品写 'none' 占位（zh 表 15 件：FirstFractal 4722/
       // 3847-3862 未实装族等）——按缺失处理，回退英文名而非显示 'none'
-      if (fb && fb !== 'none') return fb;
+      // 'none'=提取器未译占位;'{\$'=官方 id-maps 携带的跨键复制原文(如 6135/6136
+      // 图标祭坛 '{$ItemName.DemonAltar}'——主路径 ItemName.*Icon 已覆盖,此兜底
+      // 不可达;防御性按缺失处理走英文名,不裸显复制语法)
+      if (fb && fb !== 'none' && !fb.startsWith('{$')) return fb;
       if (isZh) {
         const en = ITEM_NAME_EN_BY_ID[id];
         if (en && en !== 'none') return en;

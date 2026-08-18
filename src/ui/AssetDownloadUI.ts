@@ -5,7 +5,7 @@
 // 规格=UIGenProgressBar.ts 常量);面板底=Inventory_Back13 九宫格乘色
 // ((33,15,91)×0.685,与 UI.ts 原版像素面板同源);全程方角/硬边框/像素字体,
 // 无圆角无渐变。
-import { assetCacheState, assetsComplete, onAssetProgress, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
+import { assetCacheState, assetsComplete, assetsCompleteFast, onAssetProgress, warmAllAssets, PHASE_LABEL, type AssetCacheState } from '../net/AssetCache';
 import { Lang } from '../i18n/Lang';
 
 /** 原版 packed 色(UIGenProgressBar.ts 同源):corrupt 长条填充 4283888223 */
@@ -206,7 +206,9 @@ let gateUnsub: (() => void) | null = null;
 
 /** 资产未就绪时弹窗等待(实时进度);就绪/完成后执行 action。已就绪直接 action。 */
 export function gateAssetsOrRun(action: () => void): void {
-  if (assetsComplete()) { action(); return; }
+  // ★快速路径:上轮完成记录在(门槛真正等的是 SW status 回包的 1-2s keys()
+  // 枚举,期间误显示下载中;trace 实证该窗口零实际下载)
+  if (assetsCompleteFast()) { action(); return; }
   const s = assetCacheState();
   if (!s.enabled) { action(); return; } // SW 未启用(降级环境)不拦
   if (gateEl) return; // 已在等待

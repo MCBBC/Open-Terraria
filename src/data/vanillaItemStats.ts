@@ -17,8 +17,7 @@ export interface VanillaItemStat {
   hs?: number; bs?: number; ls?: number; // 盔甲绘制槽序号（套装匹配键，Player.cs UpdateArmorSets）
 
   str?: number;    // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
-  damage?: number; // Item.damage（床睡眠使用唤醒门 Game 消费）
-  noMelee?: number;   // Item.noMelee（同上:!noMelee 才算武器使用）
+
 }
 
 const STATS = statsJson as Record<string, VanillaItemStat>;

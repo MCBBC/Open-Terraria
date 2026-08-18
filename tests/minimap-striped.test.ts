@@ -4,6 +4,7 @@
 // ③ 重复调用幂等(_stripedDone 守卫)
 // node 环境:document 桩(参照 pixel-art.test.ts 的 ctx2d 桩);MessageChannel 用原生。
 import { describe, expect, it } from 'vitest';
+// 大世界夹具+逐像素比对本就 ~4.5s(贴默认 5s 超时线,并行会话负载下翻车);放宽
 
 function stubDoc() {
   const state = { w: 0, h: 0, data: new Uint8ClampedArray(0) };   // 模拟画布后备缓冲
@@ -42,7 +43,7 @@ function stubDoc() {
 }
 
 describe('小地图拆带构建（buildStriped）', () => {
-  it('拆带结果与同步全量逐像素一致（130 行 → 尾带 2 行收缩路径）', async () => {
+  it('拆带结果与同步全量逐像素一致（130 行 → 尾带 2 行收缩路径）', { timeout: 30_000 }, async () => {
     const A = stubDoc(), B = stubDoc();
     try {
       const { Minimap } = await import('../src/render/Renderer');
@@ -75,7 +76,7 @@ describe('小地图拆带构建（buildStriped）', () => {
     }
   });
 
-  it('重复调用幂等(不再产带) + 构建期间格变化入 dirty、完成后由 flushDirty 对账', async () => {
+  it('重复调用幂等(不再产带) + 构建期间格变化入 dirty、完成后由 flushDirty 对账', { timeout: 30_000 }, async () => {
     const A = stubDoc();
     try {
       const { Minimap } = await import('../src/render/Renderer');

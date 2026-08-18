@@ -104,7 +104,7 @@ export function buildTooltipBody(
     // 暴击（近/远/魔，:20518-20544）：视觉暴击 = 4 基础 + 装备/buff + 词条
     // （原版 playerClassCrit−选中武器+悬停武器；本仓 equipStats 不含武器 → 同式）
     if (kind === 'melee' || kind === 'ranged' || kind === 'magic') {
-      const crit = 4 + (player ? player.crit[kind] : 0) + ps!.crt * 2;
+      const crit = 4 + (player ? player.crit[kind] : 0) + (ps ? ps.crt * 2 : 0);
       lines.push({ text: crit + T('LegacyTooltip.5'), tag: 'crit' });
     }
     // 速度档（useStyle!=0 且非召唤——鞭例外未辨；useAnimation/词条 spd）
@@ -155,10 +155,11 @@ export function buildTooltipBody(
   }
 
   // ── 可放置/弹药/消耗品（:20752-20781，else-if 链）──
+  // item.ammo（=是弹药，值为弹药族 id）提取器落在 combat json（func 缺箭族）
   const placeable = f?.createWall != null || f?.createTile != null;
   if (placeable) {
     if (f?.consumable) lines.push({ text: T('LegacyTooltip.33'), tag: 'placeable' });
-  } else if ((f?.ammo ?? 0) > 0 && !f?.notAmmo) {
+  } else if ((c?.ammo ?? 0) > 0 && !f?.notAmmo) {
     lines.push({ text: T('LegacyTooltip.34'), tag: 'ammo' });
   } else if (f?.consumable) {
     lines.push({ text: T('LegacyTooltip.35'), tag: 'consumable' });

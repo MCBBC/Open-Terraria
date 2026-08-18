@@ -182,14 +182,15 @@ const extra = await page.evaluate(async () => {
     for (const en of g.entities.enemies) if (en && !en.dead) en.dead = true;
   } else out.bossActUpReset = 'no-sleep';
   // 物品使用唤醒:持剑使用 → 应唤醒(手动推 useTime 近似 itemAnimTicks)
-  p.sleeping = true; p.timeSleeping = 200;
-  p.itemAnimTicks = 5; p.useTime = 5;
   // 手持放一把剑:直接借 inventory? 简化:仅推 itemAnimTicks + 手持木剑
-  // 手持铜短剑(v4,damage>0 且无 noMelee) → itemAnimTicks>0 应唤醒
+  // 手持铜短剑(damage>0 且无 noMelee) → 挥砍中(swing)应唤醒
   const items = window.__swItems;
   const swordKey = Object.keys(items).find((k) => /shortsword/.test(k));
   if (swordKey) {
     p.inv.slots[0] = { id: items[swordKey], stack: 1 };
+    p.sleeping = true; p.timeSleeping = 200;
+    // ★itemAnimTicks 每帧由 swing.t 注入（Game.ts:3627）——须造 swing 而非直写字段
+    g.swing = { t: 5, dur: 20, item: items[swordKey] };
     g.fixedUpdate(1 / 60);
     out.itemWake = p.sleeping === false;
     out.swordKey = swordKey;

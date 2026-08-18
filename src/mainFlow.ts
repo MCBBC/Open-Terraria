@@ -113,6 +113,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   // ---- 游戏进入/退出（沿用 main.ts 既有逻辑） ----
 
   function enterGame(g: Game) {
+    // 防御性拆旧(2026-08-18 泄漏 review):旧 Game 的 rAF 循环靠每帧自注册
+    // 存续,running 唯一被关的入口是 destroy()——若上一局未走 quitToMenu 就
+    // 直接再进(任何新增直达路径),旧实例连同世界数组/画布/GL 纹理永生叠加。
+    // 这里兜底:进入新局前拆掉仍存活的旧实例
+    if (game && game !== g && game.running) {
+      try { game.destroy(); } catch (e) { console.warn('[mainFlow] 旧实例清理异常(忽略):', e); }
+    }
     game = g;
     // 指针图标门桥(DrawInterface_40 :44476 MouseDisplayItem 非空 → 图层隐藏;
     // DrawInterface_38 :44628 拖拽物出现 → 住房光标取消)

@@ -168,6 +168,26 @@ export function assetsComplete(): boolean {
   return state.enabled && state.total > 0 && state.done >= state.total && state.failed === 0;
 }
 
+/** 完成态本地标志(★2026-08-18 用户报"每次 build 后进单人游戏卡下载门槛"):
+ *  门槛真正在等的是 SW status 回包——SW 冷启动 + cache.keys() 枚举万条缓存
+ *  要 1-2s,期间 done=0 → 门槛误显示"正在下载 0%"(实际零下载,trace 实证
+ *  仅 133 条正常懒载)。完成态落 localStorage:门槛先查标志秒开;SW 回包
+ *  到达后若实测缓存被清,撤销标志回到真实门槛。版本随 key 走,新资产自然失效 */
+const COMPLETE_FLAG = 'swAssetsComplete:';
+function writeCompleteFlag(v: boolean): void {
+  try {
+    if (v) localStorage.setItem(COMPLETE_FLAG + state.version, '1');
+    else localStorage.removeItem(COMPLETE_FLAG + state.version);
+  } catch { /* 隐私模式等 */
+  }
+}
+/** 快速判定:SW 回包未达前也能凭上轮完成记录放行(代价:缓存被系统清理的
+ *  罕见窗口里,懒载会走网络并由 SW 边下边补——自愈,可接受) */
+export function assetsCompleteFast(): boolean {
+  if (assetsComplete()) return true;
+  try { return !!localStorage.getItem(COMPLETE_FLAG + state.version); } catch { return false; }
+}
+
 function postToSw(msg: Record<string, unknown>): void {
   const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker?.controller : undefined;
   // version 随消息走:SW 被浏览器击杀重启后内存版本丢失,靠消息里的 version 选对缓存
@@ -218,6 +238,7 @@ function onSwMessage(e: MessageEvent): void {
         state.warming = false;
         state.phase = 'done';
       }
+      writeCompleteFlag(state.done >= state.total);   // 实测校准:满=落标志,被清理=撤销
       lastProgressAt = Date.now();
       emit();
     }
