@@ -10,6 +10,8 @@ const AMB_TINT_CACHE = new Map<string, HTMLCanvasElement>();
 import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
 import { UnifiedRandom } from '../core/rng';
+import { CloudGL } from './CloudGL';
+import { texId } from './texId';
 
 // 天空关键色 [时刻, 顶色, 底色]（时刻 0-1）
 const SKY_KEYS: Array<[number, string, string]> = [
@@ -765,7 +767,7 @@ const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
 const flareTintCache = new Map<string, HTMLCanvasElement>();
 function tintedFlareSprite(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement | null {
   if (typeof document === 'undefined') return null;
-  const key = `${(tex as HTMLImageElement).src}|${r},${g},${b}`;
+  const key = `${texId(tex)}|${r},${g},${b}`;
   const hit = flareTintCache.get(key);
   if (hit) return hit;
   const c = document.createElement('canvas');
@@ -1378,8 +1380,12 @@ export class SkyRenderer {
     void this.weatherRef;
     const sky = hexRGB(this.lastSkyTop, atmo);
     const sorted = [...clouds].sort((a, b) => b.scale - a.scale);   // scale 交换序等价
+    // GL 主路径(2026-08-18):逐精灵顶点色 = 原版 Draw(Color) 语义,精确色零副本;
+    // 不可用(WebGL2 缺失/上下文死亡退避/cpuRender/?cloudgl=0)→ 2D cloudTint 兜底
+    const gl = this.ensureCloudGL();
+    if (gl) { gl.resize(ctx.canvas.width, ctx.canvas.height); gl.beginPass(); }
     ctx.save();
-    ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放
+    ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放(2D 兜底路径)
     for (const c of sorted) {
       const tex = this.cloudTex(c.type);
       if (!tex || !(tex.width > 0) || tex.width === 0) continue;
@@ -1391,8 +1397,19 @@ export class SkyRenderer {
         g *= ((c.scale + 1) / 2) * 0.9;
       }
       r *= atmo; g *= atmo; b *= atmo;                       // DrawCloud :252-255
+      const alpha = Math.min(1, Math.min(1, c.alpha * this.towerCloudMul) * globalCloudAlpha);
+      if (gl) {
+        const gtex = gl.texFor(`cloud:${c.type}`, tex);
+        if (gtex) {
+          gl.quad(gtex, c.x + w / 2, yOf(c) + h / 2, w / 2, h / 2,
+            c.rot, !!c.flip, r / 255, g / 255, b / 255, alpha);
+          continue;
+        }
+        // 纹理上传失败(极端):跳过本朵,不落 2D(避免同帧混路径叠画)
+        continue;
+      }
       ctx.save();
-      ctx.globalAlpha = Math.min(1, Math.min(1, c.alpha * this.towerCloudMul) * globalCloudAlpha);
+      ctx.globalAlpha = alpha;
       ctx.translate(c.x + w / 2, yOf(c) + h / 2);
       ctx.rotate(c.rot);
       if (c.flip) ctx.scale(-1, 1);
@@ -1402,6 +1419,33 @@ export class SkyRenderer {
     }
     ctx.restore();
     ctx.globalAlpha = 1;
+    if (gl) gl.endPass(ctx);   // 本 pass 合成进主画布(远/近云两 pass 间 clear 复用)
+  }
+
+  // ---- 云 GL 实例管理(上下文死亡 5s 退避重建;2D cloudTint 为永久兜底) ----
+  private cloudGL: CloudGL | null = null;
+  private cloudGLInitFailed = false;
+  /** GL 云总门(Renderer.setRenderMode 写:cpuRender=true 关;?cloudgl=0 逃生门) */
+  useGLClouds = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('cloudgl') !== '0' : true;
+  private ensureCloudGL(): CloudGL | null {
+    if (!this.useGLClouds || this.cloudGLInitFailed) return null;
+    if (this.cloudGL) {
+      if (!this.cloudGL.unavailable) return this.cloudGL;
+      // 上下文死亡:5s 退避(期满丢弃旧实例重建;★restore 也按死亡处理——
+      // 纹理/程序已蒸发,整体重建比复用干净)
+      if (performance.now() - this.cloudGL.diedAt < 5000) return null;
+      this.cloudGL.dispose();
+      this.cloudGL = null;
+    }
+    const inst = new CloudGL();
+    if (inst.unavailable) { inst.dispose(); this.cloudGLInitFailed = true; return null; }
+    this.cloudGL = inst;
+    return inst;
+  }
+  disposeCloudGL(): void {
+    this.cloudGL?.dispose();
+    this.cloudGL = null;
   }
 
   private cloudTintCache = new Map<string, HTMLCanvasElement>();

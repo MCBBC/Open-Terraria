@@ -50,6 +50,11 @@ var half = new byte[W * H];
 var slope = new byte[W * H];
 var frX = new ushort[W * H];
 var frY = new ushort[W * H];
+// ★NNNN 批（2026-08-18）：inActive 通道（=JS st.wire bit5）。Tower/Dome 入口的
+//   BlockActuated 致动柱（DungeonPillar.GenerateTileStrip :151-154/:200-203）是链内
+//   唯一写点——statues 段头注「生成期恒 0」自此作废（对 Dome/Tower 种子）。不入
+//   检查点四通道，只参与 nactive()/SolidTile 族门判定（MMMM 批 JS 终态同源）。
+var inAct = new byte[W * H];
 var checkpoints = new List<string>();
 var jsegPts = new List<string>();   // jungle 段级流指纹（对拍原版 JungleProbe）
 
@@ -6070,6 +6075,424 @@ int dgLootStyle = 0;                // genVars.dungeonLootStyle
 int dgPosX, dgPosY, dgTopX;         // generatingDungeonPositionX/Y + generatingDungeonTopX
 int dgDungeonX = 0, dgDungeonY = 0; // Main.dungeonX/Y（老头锚；Early pit 陷阱 num44 下限用）
 
+var TREE_FIT = new HashSet<ushort> { 2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662 };
+
+var FC_SOLID = new HashSet<int> {
+   0,1,2,6,7,8,9,10,22,23,25,30,37,38,39,40,41,43,44,45,
+   46,47,48,53,54,56,57,58,59,60,63,64,65,66,67,68,70,75,76,107,
+   108,109,111,112,115,116,117,118,119,120,121,122,123,127,130,137,138,140,145,146,
+   147,148,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,166,167,168,
+   169,170,175,176,177,179,180,181,182,183,188,189,190,191,192,193,194,195,196,197,
+   198,199,200,202,203,204,206,208,211,221,222,223,224,225,226,229,230,232,234,235,
+   248,249,250,251,252,253,255,256,257,258,259,260,261,262,263,264,265,266,267,268,
+   272,273,274,284,311,312,313,315,321,322,325,326,327,328,329,336,341,342,343,344,
+   345,346,347,348,350,351,357,365,366,367,368,369,370,371,381,383,384,385,387,388,
+   396,397,398,399,400,401,402,403,404,407,408,409,415,416,417,418,421,422,426,430,
+   431,432,433,434,446,447,448,449,450,451,458,459,460,472,473,474,476,477,478,479,
+   481,482,483,484,492,495,496,498,500,501,502,503,507,508,512,513,514,515,516,517,
+   534,535,536,537,539,540,541,546,557,562,563,566,618,625,626,627,628,633,635,641,
+   659,661,662,664,666,667,668,669,670,671,672,673,674,675,676,677,678,679,680,681,
+   682,683,684,685,686,687,688,689,690,691,692,708,711,712,713,714,715,716,717,718,
+   719,722,726,727,728,729,730,731,732,734,735,736,737,738,739,740,741,742,743,744,
+   745,746,747,748,749,750,
+};
+var FC_PLAT = new HashSet<int> {
+   14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,
+   297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,
+   414,427,435,436,437,438,439,469,532,533,538,542,544,550,551,553,554,555,556,558,
+   559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,
+   643,644,645,710,
+};
+
+// —— ★NNNN 批：树族四件自 Trees pass 块上移至顶层（Dome 柱顶树在 Dungeon pass #
+//    36 消费 GrowTreeT——块内局部函数对块外不可见；`r` 捕获的是顶层 pass 活动流，
+//    上移前后语义同构：Trees 段调用时 r=树流、Dome 段调用时 r=地牢主流）。 ——
+var COMMON_SAPLING_T = new HashSet<ushort> { 20, 590, 595, 615 };
+void SetTSG(int ax, int ay, ushort t, int fx, int fy2)   // setTileSilent（type!=0 不清 half/slope）
+{
+    if (!QQInW(ax, ay)) return;
+    int i = ay * W + ax;
+    typ[i] = t; act[i] = (byte)(t != 0 ? 1 : 0);
+    if (t == 0) { half[i] = 0; slope[i] = 0; }
+    frX[i] = (ushort)fx; frY[i] = (ushort)fy2;
+}
+// EmptyTileCheck（cs:31611-31683）：ignoreID=-1 任何活性格 false；20 族=sapling∪装饰容忍
+bool EmptyTileCheckT(int x0, int x1, int y0, int y1, int ignoreVan)
+{
+    if (x0 < 0 || x1 >= W || y0 < 0 || y1 >= H) return false;
+    bool saplingMode = ignoreVan != -1 && COMMON_SAPLING_T.Contains((ushort)ignoreVan);
+    for (int x = x0; x <= x1; x++)
+        for (int y = y0; y <= y1; y++)
+        {
+            int i = y * W + x;
+            if (act[i] == 0) continue;
+            ushort t = typ[i];
+            if (ignoreVan == -1) return false;
+            if (ignoreVan == 11 || ignoreVan == 71) { if (t != 11 && t != 71) return false; continue; }
+            if (saplingMode)
+            {
+                if (COMMON_SAPLING_T.Contains(t)) continue;
+                if (EMPTY_ALLOW.Contains(t)) continue;
+                return false;
+            }
+        }
+    return true;
+}
+// 干身帧表（TRUNK，L14213-14425）——帧不入哈希（棕榈域 529/530 帧另有消费，干身帧无消费方）
+void GrowTrunkT(int i, int index1, int height, ushort treeTile)
+{
+    bool flagL = false, flagR = false;
+    for (int y = index1 - height; y < index1; y++)
+    {
+        int num4 = (int)r.Next(3);                     // 干身变体（先掷）
+        int num5 = (int)r.Next(10);                    // 枝型（后掷）
+        if (y == index1 - 1 || y == index1 - height) num5 = 0;
+        while (((num5 == 5 || num5 == 7) && flagL) || ((num5 == 6 || num5 == 7) && flagR)) num5 = (int)r.Next(10);
+        flagL = false; flagR = false;
+        if (num5 == 5 || num5 == 7) flagL = true;
+        if (num5 == 6 || num5 == 7) flagR = true;
+        SetTSG(i, y, treeTile, 0, 0);                   // 帧值不消费（见上注）
+        if (num5 == 5 || num5 == 7)
+        {
+            int k = (int)r.Next(3);
+            int f2 = (int)r.Next(3);                   // <2 判定（帧不入哈希，骰照掷）
+            SetTSG(i - 1, y, treeTile, 0, 0);
+        }
+        if (num5 == 6 || num5 == 7)
+        {
+            int k = (int)r.Next(3);
+            int f2 = (int)r.Next(3);
+            SetTSG(i + 1, y, treeTile, 0, 0);
+        }
+    }
+    // 基座方向 num6：两侧整砖+适树适配翻转
+    bool FitSide(int dx) => QQInW(i + dx, index1) && act[index1 * W + i + dx] != 0
+        && half[index1 * W + i + dx] == 0 && slope[index1 * W + i + dx] == 0
+        && TREE_FIT.Contains(typ[index1 * W + i + dx]);
+    int num7 = (int)r.Next(3);
+    bool sideL = FitSide(-1), sideR = FitSide(1);
+    if (!sideL) { if (num7 == 0) num7 = 2; else if (num7 == 1) num7 = 3; }
+    if (!sideR) { if (num7 == 0) num7 = 1; else if (num7 == 2) num7 = 3; }
+    if (sideL && !sideR) num7 = 2;
+    if (sideR && !sideL) num7 = 1;
+    if (num7 == 0 || num7 == 1) { int k2 = (int)r.Next(3); SetTSG(i + 1, index1 - 1, treeTile, 22, 132 + k2 * 22); }
+    if (num7 == 0 || num7 == 2) { int k2 = (int)r.Next(3); SetTSG(i - 1, index1 - 1, treeTile, 44, 132 + k2 * 22); }
+    int baseFx = num7 == 0 ? 88 : num7 == 1 ? 0 : num7 == 2 ? 66 : -1;
+    int k8 = (int)r.Next(3);                           // 基座骰无条件掷（num7==3 无帧写）
+    if (baseFx >= 0) SetTSG(i, index1 - 1, treeTile, baseFx, 132 + k8 * 22);
+    int crownFx = (int)r.Next(13) != 0 ? 22 : 0;
+    int crownK = (int)r.Next(3);
+    SetTSG(i, index1 - height, treeTile, crownFx, 198 + crownK * 22);
+}
+// GrowTree（cs:29924-30395）常规树：height=Next(5,17)，丛林草净空 +5
+// ★NNNN 批：ignoreWalls 参（cs:29936 flag=ignoreWalls||DefaultTreeWallTest——Dome
+//   柱顶树 DomeEntrance_TreeOnPillar→TryGrowingTreeByType(5,ignoreWalls:true) 消费，
+//   JS TreePass.growTree :146 同源）；true 时跳过墙门
+bool GrowTreeT(int i, int y, bool ignoreWalls)
+{
+    int index1 = y;
+    while (QQInW(i, index1) && act[index1 * W + i] != 0 && typ[index1 * W + i] == 20) index1++;
+    if (!QQInW(i, index1) || index1 < 1) return false;
+    int gi = index1 * W + i;
+    if (liq[(index1 - 1) * W + i - 1] > 0 || liq[(index1 - 1) * W + i] > 0 || liq[(index1 - 1) * W + i + 1] > 0) return false;
+    if (act[gi] == 0 || half[gi] != 0 || slope[gi] != 0 || !TREE_FIT.Contains(typ[gi])) return false;
+    if (!ignoreWalls && !TREE_WALLS.Contains(wal[(index1 - 1) * W + i])) return false;
+    bool FitSide(int dx) => QQInW(i + dx, index1) && act[index1 * W + i + dx] != 0 && TREE_FIT.Contains(typ[index1 * W + i + dx]);
+    if (!FitSide(-1) && !FitSide(1)) return false;
+    int height = (int)r.Next(5, 17);
+    int clear = height + 4;
+    if (typ[gi] == 60) clear += 5;
+    bool flag2 = false;
+    if (typ[gi] == 70 && EmptyTileCheckT(i - 2, i + 2, index1 - clear, index1 - 3, 20) && EmptyTileCheckT(i - 1, i + 1, index1 - 2, index1 - 1, 20)) flag2 = true;
+    if (EmptyTileCheckT(i - 2, i + 2, index1 - clear, index1 - 1, 20)) flag2 = true;
+    if (!flag2) return false;
+    GrowTrunkT(i, index1, height, 5);
+    return true;
+}
+
+// ================= DomeDungeonEntrance.DomeEntrance（Entrances/DomeDungeonEntrance.cs:40-441）=================
+// ★NNNN 批（2026-08-18）1:1 镜像：JS dgDomeEntrance（DungeonPass.ts，FFFF 批转录 +
+//   MMMM 批四修）终态同源；vanilla 反编译已逐行核对（band/形状族/柱族/树/窗/门点位）。
+//   掷流：入口私有流 hr=UnifiedRandom(entSeed)——①flag2=Next(4)!=0（cs:52 树饰 3/4）
+//   ②windowType=Next(3)（cs:54-59）③TreeOnPillar 柱顶补土 Next(2/3/4)（cs:501 短路
+//   逐掷）；主流掷：门 PlaceTile×2+每窗 Next(1)+GrowTree 链。正常种子路径：buried/
+//   underground/dual/desert 特典支不接线（同 Tower 备案；HasATree=drunk 专属跳过，
+//   HasStairs 正常种子=真→单侧阶梯 cs:435-439）。
+void DgDomeEntrance(int i, int j, int preSeed)
+{
+    dgWriter = "DOME";
+    dynamic hr = Activator.CreateInstance(dgUR, preSeed)!;
+    bool flag2 = (int)hr.Next(4) != 0;                 // 树饰开关（cs:52）
+    int windowType = (int)hr.Next(3);                  // 0=Regular 1=Skeletron 2=MoonLord
+    bool leftSide = !dungeonRight;                     // flag = dungeonSide==Left（drunk 翻转=特典）
+    for (int x = i - 60; x < i + 60; x++)
+        for (int y = j - 60; y < j + 60; y++)
+            if (DgInWorld(x, y, 0)) { int ti = y * W + x; liq[ti] = 0; liqT[ti] = 0; DgClearSlope(ti); }
+    int n2 = 5, n3 = 35, n4 = 40, n5 = 100;
+    int n7 = j - 30;                                   // 基线（num6=30，cs:81）
+    int num18 = n7 + 1;                                // cs:239
+    // 地表侧圆清 Circle(20)（cs:93-102——Tower 是 Circle(15)@±num3，Dome 半径 20@±num4）
+    {
+        int cx = leftSide ? i + n4 - 1 : i - n4 + 1;
+        int cy = n7 - 20, rad = 20, sq = (rad + 1) * (rad + 1);
+        for (int yy = cy - rad; yy <= cy + rad; yy++)
+        {
+            int d2 = yy - cy;
+            int num3c = Math.Min(rad, (int)Math.Sqrt(sq - d2 * d2));
+            for (int xx = cx - num3c; xx <= cx + num3c; xx++)
+                if (DgInWorld(xx, yy, 0)) DgClrAll(yy * W + xx);
+        }
+    }
+    // Bounds.SetBounds(i,j,i,j)+UpdateBounds(i-n4, n7-n4, i+n4+1, n7+10)（cs:60/:103）
+    dgEntBounds.Set(i, j, i, j);
+    dgEntBounds.Upd(i - n4, n7 - n4, i + n4 + 1, n7 + 10);
+    dgEntExists = true;
+    // 基座箱（cs:104-237）——n 外 m 内（列优先，同 Tower）。Dome 窗带以 num3=35 为基：
+    //   m∈[0,5) 带 [-30,-25]∪[25,30]、m∈[5,10) 内芯 [-30,30]、m≥10 表层换装；
+    //   平台角点 (i-30,m=1)/(i+25,m=1)（Tower 是 ∓[31,35] 族）+(i,m=10)。
+    for (int n = -n4; n <= n4; n++)
+    {
+        for (int m = -5; m < n5; m++)
+        {
+            int x = i + n, y = n7 + m;
+            if (!DgInWorld(x, y, 0)) continue;
+            int ti = y * W + x;
+            bool f2 = act[ti] != 0 && !(typ[ti] == dgBrick || typ[ti] == dgCrack);
+            bool f3 = wal[ti] != dgWall;
+            bool f4 = DgIsDW(wal[ti]);
+            if (m < 0) DgClrAll(ti);
+            else if (m < 5)
+            {
+                if ((n >= -n3 + n2 && n <= -n3 + n2 * 2) || (n >= n3 - n2 * 2 && n <= n3 - n2))
+                {
+                    DgClrAll(ti);
+                    if (!f4) wal[ti] = (ushort)dgWall;
+                }
+                else if (!f4)
+                {
+                    liq[ti] = 0; liqT[ti] = 0;
+                    DgChTile(ti, (ushort)dgBrick, false);
+                    if (n != -n4 && n != n4) wal[ti] = (ushort)dgWall;
+                }
+            }
+            else if (m < 10)
+            {
+                if (n >= -n3 + n2 && n <= n3 - n2)
+                {
+                    DgClrAll(ti);
+                    wal[ti] = (ushort)dgWall;          // Clear 后 IsConsideredDungeonWall 恒假——无条件补墙
+                }
+                else if (!f4)
+                {
+                    liq[ti] = 0; liqT[ti] = 0;
+                    DgChTile(ti, (ushort)dgBrick, false);
+                    if (n != -n4 && n != n4) wal[ti] = (ushort)dgWall;
+                }
+            }
+            else if ((act[ti] != 0 && f2) || !f4)
+            {
+                liq[ti] = 0; liqT[ti] = 0;
+                DgChTile(ti, (ushort)dgBrick, false);
+                if (n != -n4 && n != n4) wal[ti] = (ushort)dgWall;
+            }
+            else if (f3)
+            {
+                liq[ti] = 0; liqT[ti] = 0;
+                if (n != -n4 && n != n4) wal[ti] = (ushort)dgWall;
+            }
+            if (m == 1 && (n == -n3 + n2 || n == n3 - n2 * 2)) dgPlats.Add(new DPlat { X = x, Y = y, Hf = 0, Force = true, Pots = 0.33000001311302185 });
+            if (m == 10 && n == 0) dgPlats.Add(new DPlat { X = x, Y = y, Hf = 0, Force = true, Pots = 0.33000001311302185 });
+        }
+    }
+    // 下行收敛通道（cs:207-237）：中列首 inactive 起 15 递减、尾 5 步收窄（同 Tower :214-244）
+    {
+        int n15 = -1, n16 = 6;
+        for (int m = 10; m < 50; m++)
+        {
+            if (n15 == -1 && act[(n7 + m) * W + i] == 0) n15 = 15;
+            if (n15 > 0)
+            {
+                n15--;
+                if (n15 <= 0) break;
+                if (n15 <= 5) n16--;
+            }
+            for (int k = -n16; k <= n16; k++)
+            {
+                int x = i + k, y = n7 + m;
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                DgClrAll(ti);
+                wal[ti] = (ushort)dgWall;              // Clear 后 IsConsideredDungeonWall 恒假
+            }
+        }
+    }
+    // —— Slime 形状族（cs:242-263）——Shapes.Slime.Perform（Shapes.cs:114-143）：上半球
+    //   oy-(int)(r*ys)..oy 全圆截面 + 下半球 oy+1..oy+(int)(r*ys*0.5)-1 的 (2/ys) 纵压
+    //   截面；IsAboveHeight 严格小于（y>=num18+K 即跳）。
+    void DomeSlime(int ox, int oy, int radius, double xs, double ys, Action<int, int> fn)
+    {
+        int sq = (radius + 1) * (radius + 1);
+        for (int yy = oy - (int)(radius * ys); yy <= oy; yy++)
+        {
+            double dy = (yy - oy) / ys;
+            int hw = (int)Math.Min(radius * xs, xs * Math.Sqrt(sq - dy * dy));
+            for (int xx = ox - hw; xx <= ox + hw; xx++) fn(xx, yy);
+        }
+        for (int yy = oy + 1; yy <= oy + (int)(radius * ys * 0.5) - 1; yy++)
+        {
+            double dy = (yy - oy) * (2.0 / ys);
+            int hw = (int)Math.Min(radius * xs, xs * Math.Sqrt(sq - dy * dy));
+            for (int xx = ox - hw; xx <= ox + hw; xx++) fn(xx, yy);
+        }
+    }
+    // TileIsExposedToAir（cs:54810）：3×3 邻域含 inactive 或非实心（pristine 口径——
+    //   JS DOME_SOLID=d.solid&&!d.platform，FC_SOLID∧¬FC_PLAT 同源）
+    bool DomeSolid(int x, int y) { int i2 = y * W + x; return FC_SOLID.Contains(typ[i2]) && !FC_PLAT.Contains(typ[i2]); }
+    bool DomeExposedToAir(int x, int y)
+    {
+        if (!DgInWorld(x, y, 2)) return false;
+        for (int a = x - 1; a <= x + 1; a++)
+            for (int b = y - 1; b <= y + 1; b++)
+            {
+                int i2 = b * W + a;
+                if (act[i2] == 0 || !DomeSolid(a, b)) return true;
+            }
+        return false;
+    }
+    // ①穹壳（cs:242）：Slime(40,1,1)@(i,n7) y<n7+1 且 wall≠主墙 → UpdateBounds
+    //   (data.dungeonBounds)+Clear+SetTile(brick)——入口体是 dungeonBounds 的扩界源
+    DomeSlime(i, n7, n4, 1.0, 1.0, (x, y) =>
+    {
+        if (y >= num18 || !DgInWorld(x, y, 0)) return;
+        int ti = y * W + x;
+        if (wal[ti] == dgWall) return;                 // SkipWalls(brickWallType)
+        dgBounds.Upd(x, y);                            // Actions.UpdateBounds(data.dungeonBounds)
+        DgClrAll(ti);                                  // Actions.Clear
+        act[ti] = 1; typ[ti] = (ushort)dgBrick;        // SetTile(clearTile:false)——不清坡（Clear 已先行）
+    });
+    // ②穹内墙（cs:243）：Slime(38,1,1) y<n7+2 且 wall≠主墙 → SetWall（clearTile:false）
+    DomeSlime(i, n7, n4 - 2, 1.0, 1.0, (x, y) =>
+    {
+        if (y >= num18 + 1 || !DgInWorld(x, y, 0)) return;
+        int ti = y * W + x;
+        if (wal[ti] == dgWall) return;
+        wal[ti] = (ushort)dgWall;
+    });
+    // ③表土穹丘（cs:254）：Slime(40,0.9,1.1)@(i,n7-4) y<n7-1 且非砖/非主墙 → 清+置土(0)
+    DomeSlime(i, n7 - n2 + 1, n4, 0.8999999761581421, 1.100000023841858, (x, y) =>
+    {
+        if (y >= num18 - 2 || !DgInWorld(x, y, 0)) return;
+        int ti = y * W + x;
+        if (act[ti] != 0 && typ[ti] == dgBrick) return;   // SkipTiles(brickTileType)
+        if (wal[ti] == dgWall) return;                    // SkipWalls(brickWallType)
+        DgClrAll(ti);
+        act[ti] = 1; typ[ti] = 0;                          // num19=0（dirt；desert 特典=53 不接线）
+    });
+    // ④草皮（cs:255-258）：同形状 OnlyTiles(0)+IsTouchingAir(对角) → SetTile(2)
+    DomeSlime(i, n7 - n2 + 1, n4, 0.8999999761581421, 1.100000023841858, (x, y) =>
+    {
+        if (y >= num18 - 2 || !DgInWorld(x, y, 0)) return;
+        int ti = y * W + x;
+        if (act[ti] == 0 || typ[ti] != 0) return;          // OnlyTiles(num19)
+        if (!DomeExposedToAir(x, y)) return;               // IsTouchingAir(useDiagonals:true)
+        act[ti] = 1; typ[ti] = 2;                          // num20=2（grass）
+    });
+    // ⑤内腔清块（cs:262）：Slime(35,1,1)@(i,n7) y<n7+1 → ClearTile（保墙；inActive 清位
+    //   在柱族①之前无交叉——本段先于柱族执行，JS 同口径不实装）
+    DomeSlime(i, n7, n3, 1.0, 1.0, (x, y) =>
+    {
+        if (y >= num18 || !DgInWorld(x, y, 0)) return;
+        int ti = y * W + x;
+        act[ti] = 0; DgClearSlope(ti);
+    });
+    // 门（cs:264-271）：DomeEntrance_Door 与 TowerEntrance_Door 逐行同源——正常种子
+    //   仅 dungeon 侧单门（buried/underground 特典才补镜像门）
+    DgTowerDoor(i, n7, n4, n3, leftSide);
+    // 窗族（cs:272-343）——Dome 点位（Basic 宽恒 5；OverrideGlassPaint=26 墙漆不入
+    //   四通道不建模，同 Tower 备案）
+    if (windowType == 0)
+    {
+        DgWindowBasic(i - 8, n7 - 16, 5, 24, -1);
+        DgWindowBasic(i + 8, n7 - 16, 5, 24, -1);
+        DgWindowBasic(i, n7 - 17, 5, 28, -1);
+        DgWindowBasic(i - n3 + 6, n7 - 8, 5, 10, -1);
+        DgWindowBasic(i + n3 - 6, n7 - 8, 5, 10, -1);
+        DgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, -1);
+        DgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, -1);
+    }
+    else if (windowType == 1)
+    {
+        DgWindowMosaicSkel(i, n7 - 19, 89);           // OverrideGlassType=89（非 underground）
+        DgWindowBasic(i - n3 + 6, n7 - 8, 5, 10, -1);
+        DgWindowBasic(i + n3 - 6, n7 - 8, 5, 10, -1);
+        DgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, -1);
+        DgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, -1);
+    }
+    else
+    {
+        DgWindowMosaicMoon(i, n7 - 17, 91);           // OverrideGlassType=91
+        DgWindowBasic(i - n3 + 6, n7 - 8, 5, 10, 241);
+        DgWindowBasic(i + n3 - 6, n7 - 8, 5, 10, 91);
+        DgWindowBasic(i - n3 + 15, n7 - 11, 5, 11, 90);
+        DgWindowBasic(i + n3 - 15, n7 - 11, 5, 11, 88);
+    }
+    // 柱族①（cs:344-358）：两根 3 宽 BlockActuated 全高柱@i±(num3-21)——MMMM 批 inActive
+    //   整链（Height=0=上行自动扫描至穹顶）
+    DgPillar(i - n3 + 21, n7, 3, true, true, 0, true, true);
+    DgPillar(i + n3 - 21, n7, 3, true, true, 0, true, true);
+    // 四平台候选（cs:359-400）：上对 NoWaterbolt=true / 下对无（books 链 Next(50) 分野）
+    dgPlats.Add(new DPlat { X = i - n3 + 15, Y = n7 - 25, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612, Nowb = true });
+    dgPlats.Add(new DPlat { X = i + n3 - 15, Y = n7 - 25, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612, Nowb = true });
+    dgPlats.Add(new DPlat { X = i - n3 + 15, Y = n7 - 20, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
+    dgPlats.Add(new DPlat { X = i + n3 - 15, Y = n7 - 20, Hf = 0, Force = true, Pots = 0.33000001311302185, Books = 0.75, Bottles = 0.10000000149011612 });
+    // 柱族②（cs:402-419）：Block 楔柱 5×16@i±(num4-2),n7-10 / 4×14@i±(num3-8),n7-28 /
+    //   3×13@i±(num3-21),n7-37（无冠、AlwaysPlaceEntirePillar）
+    DgPillar(i - n4 + 2, n7 - 10, 5, false, false, 16, true, false);
+    DgPillar(i + n4 - 2, n7 - 10, 5, false, false, 16, true, false);
+    DgPillar(i - n3 + 8, n7 - 28, 4, false, false, 14, true, false);
+    DgPillar(i + n3 - 8, n7 - 28, 4, false, false, 14, true, false);
+    DgPillar(i - n3 + 21, n7 - 37, 3, false, false, 13, true, false);
+    DgPillar(i + n3 + 21, n7 - 37, 3, false, false, 13, true, false);
+    // 柱顶树（cs:420-428，flag2=3/4）：补土掷走 hr 流、GrowTree 走主流（ignoreWalls）
+    if (flag2)
+    {
+        // DomeEntrance_TreeOnPillar（cs:475-522）
+        void DomeTreeOnPillar(int pillarX, int pillarY)
+        {
+            if (!DgInWorld(pillarX, pillarY, 5) || act[(pillarY - 1) * W + pillarX] != 0) return;
+            for (int a = 0; a < 5; a++)
+            {
+                int x = pillarX + a - 2;
+                for (int b = 0; b <= 3; b++)
+                {
+                    int y = pillarY + b;
+                    if (!DgInWorld(x, y, 0)) continue;
+                    int ti = y * W + x;
+                    if (wal[ti] != dgWall) wal[ti] = 0;                    // 非主墙清墙（cs:497-500）
+                    // j==0 恒置；j==1 Next(2)!=0；j==2 Next(3)==0；j==3 Next(4)==0（短路逐掷）
+                    if ((b != 1 || (int)hr.Next(2) != 0) && (b != 2 || (int)hr.Next(3) == 0) && (b != 3 || (int)hr.Next(4) == 0))
+                        typ[ti] = (ushort)(DomeExposedToAir(x, y) ? 2 : 0);   // TileIsExposedToAir→草否则土
+                }
+            }
+            GrowTreeT(pillarX, pillarY, true);                             // TryGrowingTreeByType(5,ignoreWalls:true)（cs:516-521）
+        }
+        DomeTreeOnPillar(i - n4 + 2, n7 - 10 - 16 + 1);
+        DomeTreeOnPillar(i - n3 + 8, n7 - 28 - 16 + 2 + 1);
+        DomeTreeOnPillar(i - n3 + 21, n7 - 37 - 16 + 3 + 1);
+        DomeTreeOnPillar(i + n4 - 2, n7 - 10 - 16 + 1);
+        DomeTreeOnPillar(i + n3 - 8, n7 - 28 - 16 + 2 + 1);
+        DomeTreeOnPillar(i + n3 + 21, n7 - 37 - 16 + 3 + 1);
+    }
+    // 老头锚（cs:430 SetOldManSpawnAndSpawnOldManIfDefaultDungeon :1659——
+    //   CurrentDungeon==0 时 Main.dungeonX/Y=(i,num7)）
+    dgDungeonX = i; dgDungeonY = n7;
+    // 阶梯（cs:435-439，HasStairs 正常种子=真）：dungeon 侧单侧，depth=num5=100
+    if (leftSide) DgStairs(i + n4, n7, 1, n5);
+    else DgStairs(i - n4, n7, -1, n5);
+}
+
+
+
 // —— ★2026-08-17 终清批：Place* 家族（帧不入 dump 四通道，只保成功判定+写集
 //    footprint——对拍口径 act/typ/wal；Main.cs tileTable/tileLighted 全表提取）——
 var TILE_TABLE = new HashSet<ushort> { 14,18,19,87,88,101,114,275,276,277,278,279,280,281,285,286,296,297,298,
@@ -6121,11 +6544,13 @@ bool DgP1x2(int x, int y, int t)
 // PlaceOnTable1x1（cs:45346 蜡烛33/水瓶49/书50/瓶13）：净空 + 下方 nactive 且 tileTable
 // ★type 50 书：命中放置即 frameX = 18*Next(5)（cs:45377）——每次成功的书放置耗 1 骰
 //   （DgPlaceTileProbe 实证 B 段 177 本书全带此掷；曾漏掷 → B 段流偏）
+// ★MMMM 批（NNNN 镜像）：锚=**nactive()**（active&&!inActive，cs:45360）——致动柱格
+//   不可承桌面（JS placeOnTableD :3725 同源）
 bool DgPOnTable(int x, int y, int t)
 {
     if (!DgClr(x, y) || !DgInWorld(x, y + 1, 0)) return false;
     int bi = (y + 1) * W + x;
-    if (act[bi] == 0 || !TILE_TABLE.Contains(typ[bi])) return false;
+    if (act[bi] == 0 || inAct[bi] != 0 || !TILE_TABLE.Contains(typ[bi])) return false;
     DgWr(x, y, t);
     if (t == 50) r.Next(5);                          // cs:45377 frameX=18*Next(5)
     return true;
@@ -6320,9 +6745,12 @@ dgEntOnSurface = false;
         if (clTr) Console.Error.WriteLine($"CLB-ENT done pos={dgPosX},{dgPosY} rolls={DgRolls()}");
     }
 }
-// MakeDungeon_GetEntrance（:450）——Tower=TowerDungeonEntrance（XX 批 1:1）；Dome 体未
-// 转录（WorldUtils 形状族另案）——precalc 链照走、入口体以 Legacy 城堡近似（与 JS 同口径）。
+// MakeDungeon_GetEntrance（:450）——Tower=TowerDungeonEntrance（XX 批 1:1）；
+// Dome=DomeDungeonEntrance（NNNN 批 2026-08-18 镜像——JS dgDomeEntrance FFFF+MMMM
+// 终态同源转录；XX 批备案的"Legacy 近似体"退役）。GetEntranceSettings 的 1 颗废弃掷
+// 三支同位（tower/dome 支先 r.Next() 再传 entSeed）。
 if (dgEntKind == 2) { r.Next(); DgTowerEntrance(dgPosX, dgPosY, dgEntSeed); }
+else if (dgEntKind == 1) { r.Next(); DgDomeEntrance(dgPosX, dgPosY, dgEntSeed); }
 else DgEntrance((int)r.Next(), dgEntSeed);   // MakeDungeon_GetEntrance（含 GetEntranceSettings 的 1 颗废弃掷）
 Checkpoint("dungeonE"); DgFlow("E");
 // —— 门/平台候选收集（cs:456-471：仅 Processed 即 generated 的房/廊）——
@@ -6420,13 +6848,17 @@ Checkpoint("dungeon"); DgFlow("END");   // #32 转录落地（原 slush 同态�
 // ---- Dungeon 局部函数（均在隐式 Main 作用域内，可前向引用）----
 // InAnyPotentialDungeonBounds（outer，fluff=0 → Rectangle.Contains 半开区间）
 bool DgPotContains(int x, int y) => x >= dgPotL && x < dgPotR && y >= dgPotT && y < dgPotB;
+// ★MMMM 批（NNNN 镜像）：SolidTile(i,j)（WG:70155）补 !inActive() 致动腿（致动格由
+//   「实心不传播」变「非实心可传播」——SpreadWallDungeon W 776→0 根因）+ 实心集切 JS
+//   genSolidType 口径（JGS——JS dgSolid :399 同源）
 bool DgSolid(int x, int y)
 {
     if (x < 0 || x >= W || y < 0 || y >= H) return false;
     int i = y * W + x;
     if (act[i] == 0) return false;
+    if (inAct[i] != 0) return false;
     ushort t = typ[i];
-    if (!SOLID.Contains(t) || dgSolidTop.Contains(t)) return false;
+    if (!JGS(t) || dgSolidTop.Contains(t)) return false;
     if (t == 481 || t == 482 || t == 483) return false;   // SetCrackedBrickSolidity(false)（cs:344，pass 内恒非实心）
     return true;
 }
@@ -7086,14 +7518,18 @@ void DgEntHallPrecalc(int seed, double sx0, double sy0, double tgx, double tgy)
 //   glass/closed/edge + 窗台平台（WindowPlatformItemTypes 蓝主题 1386→8/绿 1385→7/粉 1384→6，
 //   与主平台 6/8/7 倒置——原版如此）。
 void DgClearSlope(int i) { half[i] = 0; slope[i] = 0; }   // Tile.Clear(Slope)
-bool DgSolidOrSloped(int x, int y) => x >= 0 && x < W && y >= 0 && y < H && act[y * W + x] != 0 && SOLID.Contains(typ[y * W + x]);
+// ★MMMM 批（NNNN 镜像）：SolidOrSlopedTile（WG:70046）的 !inActive() 致动腿 + JS
+//   genSolidType 口径（solidOrSlopedD :1317——致动柱邻格平滑语义，#32 Sl 8 格差根因）
+bool DgSolidOrSloped(int x, int y) => x >= 0 && x < W && y >= 0 && y < H && act[y * W + x] != 0 && JGS(typ[y * W + x]) && inAct[y * W + x] == 0;
 void DgSmoothSlope(int x, int y)
 {
     if (!DgSolidOrSloped(x, y) || FRAMED_ALL.Contains(typ[y * W + x])) return;   // CanPound 近似（简表，同 JS）
     SmoothSlopeCore(x, y);
 }
 // DungeonPillar.GenerateTileStrip（Pillar 版 :88-190）——height 0=自动扫描；返回 (topY,bottomY)
-(int, int) DgPillarStrip(int px, int py, int height, bool up, bool smoothTop, bool smoothBottom, bool always)
+// ★MMMM 批（NNNN 镜像）：BlockActuated 族 inact=true——ClearTile 语义先清 bit5（JS
+//   dgPillarStrip `wire &= ~32`）、平滑后置 inActive(true)（:151-154/:200-203）
+(int, int) DgPillarStrip(int px, int py, int height, bool up, bool smoothTop, bool smoothBottom, bool always, bool inact)
 {
     int placeY = py;
     int num3 = height;
@@ -7119,29 +7555,31 @@ void DgSmoothSlope(int x, int y)
         int ti = cy * W + px;
         if (!always && act[ti] != 0) break;
         act[ti] = 1; typ[ti] = (ushort)dgBrick; DgClearSlope(ti);
+        inAct[ti] = 0;                                       // ClearTile() 清 inActive（Tile.cs:153-158）
         if ((j == lo && smoothTop) || (j == hi && smoothBottom)) DgSmoothSlope(px, cy);
+        if (inact) inAct[ti] = 1;                            // ★平滑后置（MMMM：#32 Ia 234→0）
         if (cy < topY) topY = cy;
         if (cy > bottomY) bottomY = cy;
     }
     return (topY, bottomY);
 }
 // DungeonPillar.Pillar（:28-84）
-void DgPillar(int px, int py, int width, bool crownTop, bool crownBottom, int height, bool always)
+void DgPillar(int px, int py, int width, bool crownTop, bool crownBottom, int height, bool always, bool inact)
 {
     int num = 3;
     for (int k = 0; k < width; k++)
     {
         int cx = px + k - width / 2;
-        var (topY2, bottomY) = DgPillarStrip(cx, py, height, true, false, false, always);
+        var (topY2, bottomY) = DgPillarStrip(cx, py, height, true, false, false, always, inact);
         if (crownTop)
         {
-            if (k == 0) DgPillarStrip(cx - 1, topY2 + num, 0, true, false, true, always);
-            else if (k == width - 1) DgPillarStrip(cx + 1, topY2 + num, 0, true, false, true, always);
+            if (k == 0) DgPillarStrip(cx - 1, topY2 + num, 0, true, false, true, always, inact);
+            else if (k == width - 1) DgPillarStrip(cx + 1, topY2 + num, 0, true, false, true, always, inact);
         }
         if (crownBottom)
         {
-            if (k == 0) DgPillarStrip(cx - 1, bottomY - num, 0, false, true, false, always);
-            else if (k == width - 1) DgPillarStrip(cx + 1, bottomY - num, 0, false, true, false, always);
+            if (k == 0) DgPillarStrip(cx - 1, bottomY - num, 0, false, true, false, always, inact);
+            else if (k == width - 1) DgPillarStrip(cx + 1, bottomY - num, 0, false, true, false, always, inact);
         }
     }
 }
@@ -7180,8 +7618,8 @@ void DgLineOfFence(int lx, int rx, int y)
 // + 9 格 245 栅栏墙
 void DgOuterPillar(int px, int py)
 {
-    DgPillar(px, py - 1, 7, false, false, 3, false);
-    DgPillar(px, py - 4, 5, false, false, 7, false);
+    DgPillar(px, py - 1, 7, false, false, 3, false, false);
+    DgPillar(px, py - 4, 5, false, false, 7, false, false);
     if (py - 11 >= 10) DgPCampfire(px, py - 11);
     for (int k = 0; k < 5; k++) PlaceWall(px - 2 + k, py - 11, 245);
     if (py - 12 >= 10) { PlaceWall(px - 2, py - 12, 245); PlaceWall(px + 2, py - 12, 245); }
@@ -7566,11 +8004,13 @@ void DgTowerEntrance(int i, int j, int preSeed)
             }
         }
     }
-    // 四根 3 宽 BlockActuated 立柱（actuated 位不入 dump 通道，跳过）
-    DgPillar(i - n9 - 3, n7, 3, true, true, 0, true);
-    DgPillar(i + n9 + 3, n7, 3, true, true, 0, true);
-    DgPillar(i - n13 - 3, n7, 3, true, true, 0, true);
-    DgPillar(i + n13 + 3, n7, 3, true, true, 0, true);
+    // 四根 3 宽 BlockActuated 立柱（:303-313）——★MMMM 批（NNNN 镜像）：inActive 位
+    //   （wire bit5）落地（曾"actuated 位不入 dump 通道跳过"——8 通道链与下游 nactive()
+    //   门（灯/吊灯/桌面锚、SpreadWallDungeon、SolidTile 族）均消费）
+    DgPillar(i - n9 - 3, n7, 3, true, true, 0, true, true);
+    DgPillar(i + n9 + 3, n7, 3, true, true, 0, true, true);
+    DgPillar(i - n13 - 3, n7, 3, true, true, 0, true, true);
+    DgPillar(i + n13 + 3, n7, 3, true, true, 0, true, true);
     // 六组楔底+外柱（:315-331）
     DgBottomWedge(i - n4 - 4, n7 - n8, 5, true);
     DgOuterPillar(i - n4 - 4, n7 - n8);
@@ -7585,18 +8025,18 @@ void DgTowerEntrance(int i, int j, int preSeed)
     DgBottomWedge(i + n14 + 3, n7 - n16, 5, false);
     DgOuterPillar(i + n14 + 4, n7 - n16);
     // 檐口 5 宽方柱 + 栅栏线 + 双顶楔（:333-360）
-    DgPillar(i - n4 + 5, n7 - n8 - 1, 5, false, false, 2, false);
+    DgPillar(i - n4 + 5, n7 - n8 - 1, 5, false, false, 2, false, false);
     DgLineOfFence(i - n4 - 2, i - n10 + 1, n7 - n8 - 1);
-    DgPillar(i - n10 + 5, n7 - n12 - 1, 5, false, false, 2, false);
+    DgPillar(i - n10 + 5, n7 - n12 - 1, 5, false, false, 2, false, false);
     DgLineOfFence(i - n10 - 2, i - n14 + 1, n7 - n12 - 1);
-    DgPillar(i - n14 + 5, n7 - n16 - 1, 5, false, false, 2, false);
-    DgPillar(i - n14 + 13, n7 - n16 - 1, 5, false, false, 2, false);
-    DgPillar(i + n4 - 5, n7 - n8 - 1, 5, false, false, 2, false);
+    DgPillar(i - n14 + 5, n7 - n16 - 1, 5, false, false, 2, false, false);
+    DgPillar(i - n14 + 13, n7 - n16 - 1, 5, false, false, 2, false, false);
+    DgPillar(i + n4 - 5, n7 - n8 - 1, 5, false, false, 2, false, false);
     DgLineOfFence(i + n10 - 1, i + n4 + 2, n7 - n8 - 1);
-    DgPillar(i + n10 - 5, n7 - n12 - 1, 5, false, false, 2, false);
+    DgPillar(i + n10 - 5, n7 - n12 - 1, 5, false, false, 2, false, false);
     DgLineOfFence(i + n14 - 1, i + n10 + 2, n7 - n12 - 1);
-    DgPillar(i + n14 - 5, n7 - n16 - 1, 5, false, false, 2, false);
-    DgPillar(i + n14 - 13, n7 - n16 - 1, 5, false, false, 2, false);
+    DgPillar(i + n14 - 5, n7 - n16 - 1, 5, false, false, 2, false, false);
+    DgPillar(i + n14 - 13, n7 - n16 - 1, 5, false, false, 2, false, false);
     DgLineOfFence(i - n14 - 2, i + n14 + 2, n7 - n16 - 1);
     DgBottomWedge(i - n13, n7 - n16 + n2, 3, false);
     DgBottomWedge(i + n13 - 1, n7 - n16 + n2, 3, true);
@@ -8242,7 +8682,9 @@ void DgSpikeRun(int round, ref int cx, ref int cy, int wx, int wy, int d, ref in
         }
         if (!cond) break;
         int fx = round == 0 ? cx : wx, fy = round == 0 ? wy : cy;
-        if (!DgFeatureOK(fx, fy, 0) || !DgFeatureOK(fx, round == 0 ? wy - d : cy - d, 0))
+        // ★MMMM 批（NNNN 镜像）：Dome/Tower 入口盒双坐标拒（DGS cs:75/:101/:172/:198
+        //   同位；JS :2367 同源——掷序无扰，检查位前后均无掷）
+        if (!DgFeatureOK(fx, fy, 0) || DgEntNoFeat(fx, fy) || !DgFeatureOK(fx, round == 0 ? wy - d : cy - d, 0) || DgEntNoFeat(fx, round == 0 ? wy - d : cy - d))
         {
             if (round == 0) cx += step; else cy += step;
             n11 = 0;
@@ -8285,6 +8727,11 @@ bool DgFeatureOK(int x, int y, int feat)
     return true;
 }
 bool DgFeatureAt(int x, int y, bool allowPW) => DgFeatureOK(x, y, allowPW ? 2 : 0);
+// ★MMMM 批（NNNN 镜像）：Dome/Tower 入口盒内拒 Spikes/Bookshelves/Paintings——
+//   DomeDungeonEntrance.cs:31-38 ≡ TowerDungeonEntrance.cs:31-38 的 CanGenerateFeatureAt
+//   覆写（Legacy 只拒 BiomeChests=feat1，上表已覆）。入口 hitbox=Bounds（CalculateHitbox
+//   后）=dgEntBounds。JS entNoFeat :2235 同源。
+bool DgEntNoFeat(int x, int y) => dgEntKind != 0 && dgEntExists && dgEntBounds.Contains(x, y);
 // —— DungeonGlobalDoors（:24-294）——
 bool DgCanKill(int x, int y)
 {
@@ -8577,7 +9024,12 @@ void DgDungeonPot(int x, int y)
             if (!DgInWorld(x + dx, y + dy, 0) || act[(y + dy) * W + x + dx] != 0) { ok = false; break; }
         if (!DgInWorld(x + dx, y + 1, 0)) { ok = false; break; }
         int gi = (y + 1) * W + x + dx;
-        if (act[gi] == 0 || half[gi] != 0 || slope[gi] != 0 || !SOLID.Contains(typ[gi])) { ok = false; break; }
+        // ★MMMM 批（NNNN 镜像）：WorldGen.PlacePot（cs:54082，门 :54099-54102）支撑门=
+        //   **nactive()（含 !inActive）+ 生成期 tileSolid（JVS——平台 19 生成期 solid，
+        //   GenSolid van 口径差集）**。曾用碰撞语义（genSolid）→ Dome 平台罐全失败 →
+        //   每罐漏掷 1 颗 Next(3) → Platforms 起全链掷位漂移（#32 主根因；Legacy 种子
+        //   平台候选无 pots 故 9293480 不可见——双种子绿掩盖）
+        if (act[gi] == 0 || inAct[gi] != 0 || half[gi] != 0 || slope[gi] != 0 || !JVS(typ[gi])) { ok = false; break; }
     }
     if (!ok) return;
     r.Next(3);                                          // PlacePot 变体掷（成功才掷）
@@ -8674,7 +9126,15 @@ void DgPlatforms()
                 }
                 else if (d.Books > 0 && r.NextDouble() < d.Books)
                 {
-                    DgPOnTable(m, py - 1, 50);          // NoWaterbolt=true → 无 Next(50)；内含 Next(5)
+                    // ★MMMM 批（NNNN 镜像）：GenerateDungeonBook（DU:426-435）——NoWaterbolt
+                    //   =false（Tower 九候选/Dome 下对候选，缺省字段）走默认重载，Next(50)
+                    //   掷在参数位（PlaceTile(50) 内 Next(5) 之前）；waterbolt 帧门 :441
+                    //   原版手滑读 Main.tile[placeY,placeY]（非 placeX,placeY）——1:1 照抄。
+                    //   曾 `NoWaterbolt=true → 无掷`（XX 批旧 JS 态）→ 每书位漏掷 Next(50)
+                    bool wb = !d.Nowb && (int)r.Next(50) == 0;
+                    DgPOnTable(m, py - 1, 50);          // 内含 Next(5)（cs:45377）
+                    if (wb && (double)(py - 1) > (worldSurface + rockLayer) / 2.0 && typ[(py - 1) * W + (py - 1)] == 50)
+                        frX[(py - 1) * W + m] = 90;     // frameX=90 水书帧（DU:439-444；帧不入四通道）
                 }
             }
         }
@@ -8977,7 +9437,8 @@ void DgBookshelves()
                     && DgInWorld(x, y - 2, 0) && act[(y - 2) * W + x] == 0
                     && DgInWorld(x, y - 3, 0) && act[(y - 3) * W + x] == 0)
                 {
-                    if (!DgFeatureOK(x, y, 0)) { flag = false; if (dgBItLog) Console.Error.WriteLine($"DGBCONT i={num} n3={num3} at=({x},{y})"); continue; }
+                    // ★MMMM 批（NNNN 镜像）：入口盒拒（DGB cs:81 flag=false continue 同位；JS :3060）
+                    if (!DgFeatureOK(x, y, 0) || DgEntNoFeat(x, y)) { flag = false; if (dgBItLog) Console.Error.WriteLine($"DGBCONT i={num} n3={num3} at=({x},{y})"); continue; }
                     int k = x, num8 = x;
                     while (k > dgBounds.L && k < dgBounds.R && act[y * W + k] == 0 && act[(y - 1) * W + k] == 0 && act[(y + 1) * W + k] == 0) k += n7;
                     k = Math.Abs(x - k);
@@ -9092,9 +9553,11 @@ void DgLights()
                 if (placed) break;
                 // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）——实心=genSolidType
                 // 语义（裂纹砖 481-483 非实心，DC:344；JS :253 消费端同源）
+                // ★MMMM 批（NNNN 镜像）：nactive()（active&&!inActive，:46705）——致动柱
+                //   格不可挂灯笼 + 实心集 JGS（genSolidType，JS :3229-3231 同源）
                 if (DgInWorld(x, cy - 1, 0) && act[(cy - 1) * W + x] != 0
                     && typ[(cy - 1) * W + x] != 481 && typ[(cy - 1) * W + x] != 482 && typ[(cy - 1) * W + x] != 483
-                    && SOLID.Contains(typ[(cy - 1) * W + x]) && !dgSolidTop.Contains(typ[(cy - 1) * W + x])
+                    && JGS(typ[(cy - 1) * W + x]) && inAct[(cy - 1) * W + x] == 0 && !dgSolidTop.Contains(typ[(cy - 1) * W + x])
                     && DgInWorld(x, cy + 1, 0) && act[(cy + 1) * W + x] == 0)
                 {
                     if (lgTr) Console.WriteLine($"DG LP x={x} cy={cy} typAbv={typ[(cy - 1) * W + x]}");
@@ -9110,6 +9573,7 @@ void DgLights()
     }
 }
 // PlaceChand（WorldGen.cs:52753）：3×3 净空 + 上方实心 → type 34
+// ★MMMM 批（NNNN 镜像）：nactive()（:52769）——致动柱格不可挂吊灯 + JGS 口径（JS :3263 同源）
 bool DgPlaceChand(int x, int y)
 {
     for (int a = x - 1; a < x + 2; a++)
@@ -9117,7 +9581,7 @@ bool DgPlaceChand(int x, int y)
             if (!DgInWorld(a, b, 0) || act[b * W + a] != 0) return false;
     if (!(DgInWorld(x, y - 1, 0) && act[(y - 1) * W + x] != 0
         && typ[(y - 1) * W + x] != 481 && typ[(y - 1) * W + x] != 482 && typ[(y - 1) * W + x] != 483      // 裂纹砖非实心（DC:344）
-        && SOLID.Contains(typ[(y - 1) * W + x]) && !dgSolidTop.Contains(typ[(y - 1) * W + x]))) return false;
+        && JGS(typ[(y - 1) * W + x]) && inAct[(y - 1) * W + x] == 0 && !dgSolidTop.Contains(typ[(y - 1) * W + x]))) return false;
     for (int a = x - 1; a < x + 2; a++)
         for (int b = y; b < y + 3; b++)
         { int ti = b * W + a; act[ti] = 1; typ[ti] = 34; }
@@ -9674,7 +10138,7 @@ bool DgFeatArea3(int x, int y, int fluff)
 {
     for (int a = x - fluff; a <= x + fluff; a++)
         for (int b = y - fluff; b <= y + fluff; b++)
-            if (!DgFeatureOK(a, b, 2)) return false;
+            if (!DgFeatureOK(a, b, 2) || DgEntNoFeat(a, b)) return false;   // ★MMMM（NNNN 镜像）：Paintings 入口盒拒（JS featArea3 :4018）
     return true;
 }
 // nearPicture/nearPicture2（WorldGen.cs:34704/34719）
@@ -10267,7 +10731,6 @@ var GEM_GROUND = new HashSet<ushort> { 1, 25, 117, 203, 182, 180, 179, 381, 183,
 var GEM_WALLS = new HashSet<ushort> { 0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80,
     2, 54, 55, 56, 57, 58, 59, 61, 185, 196, 197, 198, 199, 208, 209, 210, 211, 212, 213, 214, 215 };
 // IsTileTypeFitForTree（cs:29852）：基座 tuft 判定用草族全集
-var TREE_FIT = new HashSet<ushort> { 2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662 };
 void GrowGemTreeFn(int tx, int ty, int treeTile)
 {
     // GrowTreeWithSettings（cs:30546-31004）宝石树分支：帧值不入哈希，只保掷骰序
@@ -12204,32 +12667,6 @@ StreamPt("surfacewaterinjungle");
 //   #82 Trees / #97 SettleLiquidsPart2 / #98 Cactus / #101 MicroBiomes——各自
 //     0.6k-1.8k 行转录量 + #97 需液体模拟引擎（另批）。
 
-var FC_SOLID = new HashSet<int> {
-   0,1,2,6,7,8,9,10,22,23,25,30,37,38,39,40,41,43,44,45,
-   46,47,48,53,54,56,57,58,59,60,63,64,65,66,67,68,70,75,76,107,
-   108,109,111,112,115,116,117,118,119,120,121,122,123,127,130,137,138,140,145,146,
-   147,148,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,166,167,168,
-   169,170,175,176,177,179,180,181,182,183,188,189,190,191,192,193,194,195,196,197,
-   198,199,200,202,203,204,206,208,211,221,222,223,224,225,226,229,230,232,234,235,
-   248,249,250,251,252,253,255,256,257,258,259,260,261,262,263,264,265,266,267,268,
-   272,273,274,284,311,312,313,315,321,322,325,326,327,328,329,336,341,342,343,344,
-   345,346,347,348,350,351,357,365,366,367,368,369,370,371,381,383,384,385,387,388,
-   396,397,398,399,400,401,402,403,404,407,408,409,415,416,417,418,421,422,426,430,
-   431,432,433,434,446,447,448,449,450,451,458,459,460,472,473,474,476,477,478,479,
-   481,482,483,484,492,495,496,498,500,501,502,503,507,508,512,513,514,515,516,517,
-   534,535,536,537,539,540,541,546,557,562,563,566,618,625,626,627,628,633,635,641,
-   659,661,662,664,666,667,668,669,670,671,672,673,674,675,676,677,678,679,680,681,
-   682,683,684,685,686,687,688,689,690,691,692,708,711,712,713,714,715,716,717,718,
-   719,722,726,727,728,729,730,731,732,734,735,736,737,738,739,740,741,742,743,744,
-   745,746,747,748,749,750,
-};
-var FC_PLAT = new HashSet<int> {
-   14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,
-   297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,
-   414,427,435,436,437,438,439,469,532,533,538,542,544,550,551,553,554,555,556,558,
-   559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,
-   643,644,645,710,
-};
 
 // ★HHHH：JS gen-solid 双谓词。JS GenSolid.ts 两口径（GenSolid.ts:104-125）：
 //   genSolidType   = TILE_DEFS.solid + 翻转史 —— 对本表 SOLID（vanilla tileSolid+同
@@ -12267,8 +12704,9 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
                 if (act[ty * W + tx] != 0) continue;                                   // 上格须空
                 int bi2 = (ty + 1) * W + tx;
                 // SolidTile2（cs:70178）：active && 生成期 tileSolid && slope==0 && !halfBrick
-                //   && !inActive（inActive=wire bit5，生成期恒 0—— statues 前链内无写点）
-                if (act[bi2] == 0 || half[bi2] != 0 || slope[bi2] != 0 || !JVS(typ[bi2])) continue;
+                //   && !inActive——★NNNN 批：Tower/Dome 致动柱入链后 inAct 通道实装
+                //   （旧注「生成期恒 0」对 Dome/Tower 种子作废；JS StatuesPass :55 同源）
+                if (act[bi2] == 0 || inAct[bi2] != 0 || half[bi2] != 0 || slope[bi2] != 0 || !JVS(typ[bi2])) continue;
                 if (typ[bi2] == 162) continue;                                         // 冰特判
                 int ti = ty * W + tx;
                 // ★HHHH：超级飞镖陷阱=135（cs:4451 PlaceTile(135)——ZZZ 批 JS 修正，曾误 137）
@@ -12313,10 +12751,11 @@ Replay(); // ▶pass 头重播：Statues cs:16947（island：#46-#57 跳段）
                 if (act[(y + dy) * W + x + dx] != 0) ok = false;
             // ★HHHH（WWW 批 JS 镜像）：Place2xX 底座门（cs:39762）——SolidTile2(x,y+1)
             //   && SolidTile2(x+1,y+1)（无 solidTop 条件）；曾缺门 → 半砖/坡面/非实心底座误收
+            //   ★NNNN 批：补 !inActive 致动腿（JS StatuesPass :129 同源）
             if (ok) for (int bx = x; bx <= x + 1 && ok; bx++)
             {
                 int bi = (y + 1) * W + bx;
-                if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0 || !JVS(typ[bi])) ok = false;
+                if (act[bi] == 0 || half[bi] != 0 || slope[bi] != 0 || inAct[bi] != 0 || !JVS(typ[bi])) ok = false;
             }
             if (!ok) { if (statTrace) Console.Error.WriteLine($"STT i={i2} num={num} st={style} GATE ({x},{y})"); fail++; if (fail >= 10000) done = true; continue; }
             int row = style / 55;                         // 雕像帧换行（Tiles_105 宽 55 列）
@@ -13517,106 +13956,15 @@ Replay(); // ▶pass 头重播：Trees cs:20085
 {
     // IsTileTypeFitForTree（cs:29852 草族 12 种）——= 头部 TREE_FIT 表
     var PALM_GROUND_T = new HashSet<ushort> { 53, 234, 116, 112 };
-    var COMMON_SAPLING_T = new HashSet<ushort> { 20, 590, 595, 615 };
     var VANITY_GROUND_T = new HashSet<ushort> { 2, 109, 477, 492 };
     var EPIC_FAMILY_T = new HashSet<ushort> { 2, 23, 60, 109 };
-    void SetTS(int ax, int ay, ushort t, int fx, int fy2)   // setTileSilent（type!=0 不清 half/slope）
+    void SetTS(int ax, int ay, ushort t, int fx, int fy2)   // setTileSilent（type!=0 不清 half/slope）——棕榈/观赏树族本地版（GrowTree 族已上移顶层 SetTSG，NNNN 批）
     {
         if (!QQInW(ax, ay)) return;
         int i = ay * W + ax;
         typ[i] = t; act[i] = (byte)(t != 0 ? 1 : 0);
         if (t == 0) { half[i] = 0; slope[i] = 0; }
         frX[i] = (ushort)fx; frY[i] = (ushort)fy2;
-    }
-    // EmptyTileCheck（cs:31611-31683）：ignoreID=-1 任何活性格 false；20 族=sapling∪装饰容忍
-    bool EmptyTileCheckT(int x0, int x1, int y0, int y1, int ignoreVan)
-    {
-        if (x0 < 0 || x1 >= W || y0 < 0 || y1 >= H) return false;
-        bool saplingMode = ignoreVan != -1 && COMMON_SAPLING_T.Contains((ushort)ignoreVan);
-        for (int x = x0; x <= x1; x++)
-            for (int y = y0; y <= y1; y++)
-            {
-                int i = y * W + x;
-                if (act[i] == 0) continue;
-                ushort t = typ[i];
-                if (ignoreVan == -1) return false;
-                if (ignoreVan == 11 || ignoreVan == 71) { if (t != 11 && t != 71) return false; continue; }
-                if (saplingMode)
-                {
-                    if (COMMON_SAPLING_T.Contains(t)) continue;
-                    if (EMPTY_ALLOW.Contains(t)) continue;
-                    return false;
-                }
-            }
-        return true;
-    }
-    // 干身帧表（TRUNK，L14213-14425）——帧不入哈希（棕榈域 529/530 帧另有消费，干身帧无消费方）
-    void GrowTrunkT(int i, int index1, int height, ushort treeTile)
-    {
-        bool flagL = false, flagR = false;
-        for (int y = index1 - height; y < index1; y++)
-        {
-            int num4 = (int)r.Next(3);                     // 干身变体（先掷）
-            int num5 = (int)r.Next(10);                    // 枝型（后掷）
-            if (y == index1 - 1 || y == index1 - height) num5 = 0;
-            while (((num5 == 5 || num5 == 7) && flagL) || ((num5 == 6 || num5 == 7) && flagR)) num5 = (int)r.Next(10);
-            flagL = false; flagR = false;
-            if (num5 == 5 || num5 == 7) flagL = true;
-            if (num5 == 6 || num5 == 7) flagR = true;
-            SetTS(i, y, treeTile, 0, 0);                   // 帧值不消费（见上注）
-            if (num5 == 5 || num5 == 7)
-            {
-                int k = (int)r.Next(3);
-                int f2 = (int)r.Next(3);                   // <2 判定（帧不入哈希，骰照掷）
-                SetTS(i - 1, y, treeTile, 0, 0);
-            }
-            if (num5 == 6 || num5 == 7)
-            {
-                int k = (int)r.Next(3);
-                int f2 = (int)r.Next(3);
-                SetTS(i + 1, y, treeTile, 0, 0);
-            }
-        }
-        // 基座方向 num6：两侧整砖+适树适配翻转
-        bool FitSide(int dx) => QQInW(i + dx, index1) && act[index1 * W + i + dx] != 0
-            && half[index1 * W + i + dx] == 0 && slope[index1 * W + i + dx] == 0
-            && TREE_FIT.Contains(typ[index1 * W + i + dx]);
-        int num7 = (int)r.Next(3);
-        bool sideL = FitSide(-1), sideR = FitSide(1);
-        if (!sideL) { if (num7 == 0) num7 = 2; else if (num7 == 1) num7 = 3; }
-        if (!sideR) { if (num7 == 0) num7 = 1; else if (num7 == 2) num7 = 3; }
-        if (sideL && !sideR) num7 = 2;
-        if (sideR && !sideL) num7 = 1;
-        if (num7 == 0 || num7 == 1) { int k2 = (int)r.Next(3); SetTS(i + 1, index1 - 1, treeTile, 22, 132 + k2 * 22); }
-        if (num7 == 0 || num7 == 2) { int k2 = (int)r.Next(3); SetTS(i - 1, index1 - 1, treeTile, 44, 132 + k2 * 22); }
-        int baseFx = num7 == 0 ? 88 : num7 == 1 ? 0 : num7 == 2 ? 66 : -1;
-        int k8 = (int)r.Next(3);                           // 基座骰无条件掷（num7==3 无帧写）
-        if (baseFx >= 0) SetTS(i, index1 - 1, treeTile, baseFx, 132 + k8 * 22);
-        int crownFx = (int)r.Next(13) != 0 ? 22 : 0;
-        int crownK = (int)r.Next(3);
-        SetTS(i, index1 - height, treeTile, crownFx, 198 + crownK * 22);
-    }
-    // GrowTree（cs:29924-30395）常规树：height=Next(5,17)，丛林草净空 +5
-    bool GrowTreeT(int i, int y)
-    {
-        int index1 = y;
-        while (QQInW(i, index1) && act[index1 * W + i] != 0 && typ[index1 * W + i] == 20) index1++;
-        if (!QQInW(i, index1) || index1 < 1) return false;
-        int gi = index1 * W + i;
-        if (liq[(index1 - 1) * W + i - 1] > 0 || liq[(index1 - 1) * W + i] > 0 || liq[(index1 - 1) * W + i + 1] > 0) return false;
-        if (act[gi] == 0 || half[gi] != 0 || slope[gi] != 0 || !TREE_FIT.Contains(typ[gi])) return false;
-        if (!TREE_WALLS.Contains(wal[(index1 - 1) * W + i])) return false;
-        bool FitSide(int dx) => QQInW(i + dx, index1) && act[index1 * W + i + dx] != 0 && TREE_FIT.Contains(typ[index1 * W + i + dx]);
-        if (!FitSide(-1) && !FitSide(1)) return false;
-        int height = (int)r.Next(5, 17);
-        int clear = height + 4;
-        if (typ[gi] == 60) clear += 5;
-        bool flag2 = false;
-        if (typ[gi] == 70 && EmptyTileCheckT(i - 2, i + 2, index1 - clear, index1 - 3, 20) && EmptyTileCheckT(i - 1, i + 1, index1 - 2, index1 - 1, 20)) flag2 = true;
-        if (EmptyTileCheckT(i - 2, i + 2, index1 - clear, index1 - 1, 20)) flag2 = true;
-        if (!flag2) return false;
-        GrowTrunkT(i, index1, height, 5);
-        return true;
     }
     // GrowEpicTree（cs:27361-27760）：基座严格草 2、净空 55、height=Next(20,30)
     bool GrowEpicTreeT(int i, int y)
@@ -13823,7 +14171,7 @@ Replay(); // ▶pass 头重播：Trees cs:20085
                 GrowVanityTreeT(x, y, (int)r.Next(2) == 0);
                 continue;
             }
-            GrowTreeT(x, y);
+            GrowTreeT(x, y, false);
         }
         if ((int)r.Next(3) == 0) x++;
         if ((int)r.Next(4) == 0) x++;
@@ -18539,6 +18887,7 @@ sealed class DPlat
     public bool Hall;
     public int Hf = 5;             // OverrideHeightFluff（B2：房间 3 / 走廊·入口缺省 5）
     public bool Force;             // ForcePlacement（XX 批：Tower/Dome 入口候选）
+    public bool Nowb;              // NoWaterbolt（FFFF/MMMM 批：Dome 上对候选=true——GenerateDungeonBook 跳 Next(50)）
     public double Pots, Bottles, Books, Candles;   // 置物概率（IsAShelf=任一>0，DungeonPlatformData.cs:34-43）
 }
 // Dungeon pass 段 genRand 计数包装（流对账用：passchain 指纹只计 Main.rand 掷数，

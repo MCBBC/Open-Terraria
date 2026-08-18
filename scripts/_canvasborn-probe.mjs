@@ -36,6 +36,15 @@ await sleep(1500);
 await page.waitForFunction(() => !!window.__swFlow, { timeout: 60000 });
 await page.evaluate(() => window.__swFlow.newWorld('', 4200, 1200));
 await page.waitForFunction(() => !!window.__swGame, { timeout: 120000 });
+// 强制黄昏:昼夜色调 tint≠(1,1,1) 才走 BiomeBackground 烘焙路径(2026-08-18
+// 用户真机 61/s churn 的触发条件——晨昏色调连续漂移)
+if (process.env.CB_DUSK === '1') {
+  await page.evaluate(() => {
+    const c = window.__swGame?.world?.clock;
+    if (c && 'timeOfDay' in c) c.timeOfDay = 0.78;
+  }).catch(() => {});
+  console.log('已强制黄昏(timeOfDay=0.78)');
+}
 console.log('世界就绪,渲染 5s…');
 await sleep(5000);
 await page.evaluate(() => { window.__bornOn = true; });

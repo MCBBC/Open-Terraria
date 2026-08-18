@@ -20,6 +20,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { TILE } from '../core/constants';
 import { portalColor } from './Portal';
+import { texId } from '../render/texId';
 
 /** 601 SetDefaults（:6225-6226）碰撞盒 */
 const BOLT_W = 10;
@@ -146,7 +147,7 @@ export class PortalGunBolt extends Entity {
 
   /** 帧染门色缓存（20×19 帧 × 2 帧 × 2 色；手法同 Portal.tintedFrame） */
   private static tintedFrame(tex: ImageBitmap | HTMLImageElement, frame: number, r: number, g: number, b: number): HTMLCanvasElement {
-    const key = `${(tex as HTMLImageElement).src}|${frame}|${r},${g},${b}`;
+    const key = `${texId(tex)}|${frame}|${r},${g},${b}`;
     const hit = PortalGunBolt.frameCache.get(key);
     if (hit) return hit;
     const c = document.createElement('canvas');

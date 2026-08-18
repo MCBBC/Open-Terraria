@@ -56,36 +56,52 @@ const audit = await page.evaluate(() => {
     vclouds: sky.vclouds.length, onScreen,
     numCloudsTarget: wr?.numClouds ?? '无weatherRef',
     cloudAlpha: wr?.cloudAlpha, cloudBGActive: wr?.cloudBGActive,
-    graveyardVisual: wr?.graveyardVisual, atmo, basis, globalCloudAlpha,
+    graveyardVisual: wr?.graveyardVisual, atmo, globalCloudAlpha,
     towerCloudMul: sky.towerCloudMul, lastSkyTop: sky.lastSkyTop,
+    cloudGL: sky.cloudGL ? (sky.cloudGL.unavailable ? '死' : '活') : '未建',
+    cloudGLQuads: sky.cloudGL?.quadsLastPass ?? -1,
+    cloudGLSize: sky.cloudGL ? `${sky.cloudGL.canvas.width}x${sky.cloudGL.canvas.height}` : '-',
+    cloudGLInitFailed: sky.cloudGLInitFailed, useGLClouds: sky.useGLClouds,
     surfaceGate: g.player.y - 400 < sky.fx.surfaceY + 16,
     isDay: g.world.clock?.isDay ?? '未知' };
 }).catch((e) => ({ err: String(e).slice(0, 200) }));
 console.log('[审计]', JSON.stringify(audit));
 
-// ② 主画布(取最大)天空区域覆盖度
+// ② 主画布(取最大)分带覆盖度 + GL 画布内容自检
 const shot = await page.screenshot({ type: 'png' }).catch(() => null);
 if (shot) {
   fs.writeFileSync(`${TMP}/cloudaudit-sky.png`, shot);
   const cover = await page.evaluate(() => {
-    const cv = [...document.querySelectorAll('canvas')]
-      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    const g = window.__swGame;
+    const cv = g.renderer.canvas;   // ★直取主画布(面积排序平局曾抓错成光照画布!)
     if (!cv) return { err: '无画布' };
     const ctx = cv.getContext('2d');
-    const w = cv.width, h = Math.floor(cv.height * 0.25);
-    const d = ctx.getImageData(0, 0, w, h).data;
-    let deviant = 0;
-    for (let y = 2; y < h - 2; y++) {
-      for (let x = 2; x < w - 2; x += 2) {
-        const i = (y * w + x) * 4;
-        const r2 = (y * w + x + 2) * 4, d2 = ((y + 2) * w + x) * 4;
+    const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    const bands = new Array(8).fill(0);
+    for (let y = 2; y < cv.height - 2; y += 2) {
+      const band = Math.min(7, Math.floor(y / cv.height * 8));
+      for (let x = 2; x < cv.width - 2; x += 4) {
+        const i = (y * cv.width + x) * 4;
+        const r2 = (y * cv.width + x + 2) * 4;
         const dr = Math.abs(d[i] - d[r2]) + Math.abs(d[i + 1] - d[r2 + 1]) + Math.abs(d[i + 2] - d[r2 + 2]);
-        const dv = Math.abs(d[i] - d[d2]) + Math.abs(d[i + 1] - d[d2 + 1]) + Math.abs(d[i + 2] - d[d2 + 2]);
-        if (dr > 30 || dv > 30) deviant++;
+        if (dr > 30) bands[band]++;
       }
     }
-    return { w, h, deviant, deviantPct: +(deviant / ((w / 2) * (h - 4)) * 100).toFixed(2) };
+    // GL 画布自检(preserveDrawingBuffer 留有上一帧;★GL y 原点在底,顶行 = height-1)
+    let glPix = '无实例';
+    const glc = g.renderer.sky.cloudGL?.canvas;
+    if (glc && glc.width > 0) {
+      try {
+        const gctx = glc.getContext('webgl2');
+        const px = new Uint8Array(4 * 256);
+        gctx.readPixels(0, glc.height - 1, 256, 1, gctx.RGBA, gctx.UNSIGNED_BYTE, px);
+        let nz = 0;
+        for (let i = 3; i < px.length; i += 4) if (px[i] > 0) nz++;
+        glPix = `顶行256px非零alpha=${nz}`;
+      } catch (e) { glPix = '读回失败:' + String(e).slice(0, 60); }
+    }
+    return { main: `${cv.width}x${cv.height}`, bands, glPix };
   }).catch((e) => ({ err: String(e).slice(0, 160) }));
-  console.log('[天空覆盖度]', JSON.stringify(cover), '(纯渐变 ≈ 0-0.5%,有云通常 >2%)');
+  console.log('[覆盖度/带+GL自检]', JSON.stringify(cover));
 }
 await browser.close();

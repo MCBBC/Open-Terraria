@@ -27,6 +27,7 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { matureHerbPlants } from './StructuresPass';
+import { growTree } from './TreePass';
 
 // ---------- 内部 tile id → 原版 sheet id 查找表（模块级一次构建，热循环零分配） ----------
 const SHEET = new Int16Array(TILE_DEFS.length).fill(-1);
@@ -1751,6 +1752,7 @@ export function runLilypadsPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (inWorld(st, px, py)) {
             const grows = rng.int(0, 13);                               // Next(14)
             for (let n = 0; n < grows; n++) growCatTail(st, rng, px, py);
+            squareTileFrame(st, rng, px, py);                           // cs:22164（checkCatTail 零掷，帧对齐用）
           }
         }
       }
@@ -1915,9 +1917,29 @@ export function runGrassPlantsPass(st: TileStore, rng: RNG): void {
   }
 }
 
+/** PlaceTile case 71（cs:59675-59703）1:1：蘑菇草上的小型发光蘑菇。放置门 =
+ *  正下方活跃整砖蘑菇草 70；j>worldSurface 先 PlaceCatTail（蘑菇草水上锚点，
+ *  style=90 变体）——成功则 Next(14) 段 GrowCatTail + SquareTileFrame，**不放 71**；
+ *  失败才落 71（frameX=Next(5)*18）。OOOO 批前整个 case 71 只移植了末段 else
+ *  的 Next(5) 帧，香蒲支缺失 = 槽 87 的 T519 族差 + 流分位级联主根因之一。 */
+function placeTile71(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): void {
+  if (j + 1 >= st.h) return;
+  const bi = st.idx(i, j + 1);
+  if (!st.flags[bi] || st.slope[bi] !== 0 || st.half[bi] || SHEET[st.type[bi]] !== 70) return;
+  let px = -1, py = -1;
+  if (j > gs.worldSurface) [px, py] = placeCatTail(st, rng, gs, i, j);
+  if (inWorld(st, px, py)) {
+    const grows = rng.int(0, 13);                                       // Next(14)（cs:59688）
+    for (let k = 0; k < grows; k++) growCatTail(st, rng, px, py);
+    squareTileFrame(st, rng, px, py);                                   // cs:59693（checkCatTail 零掷）
+  } else {
+    st.setTileSilent(i, j, GLOW_SHROOM, rng.int(0, 4) * 18, 0);         // Next(5) 帧
+  }
+}
+
 /** GlowingMushroomPlantsUndergroundAndJunglePlants pass（cs:20278-20303）1:1。
- *  蘑菇草 70（地下）：先 3 次 TryGrowingTreeByType(5) 巨型蘑菇树，全败才 PlaceTile(71)
- *  （巨型蘑菇树未移植——见 C 组备案，此处尝试恒败零掷骰）；丛林草 60 → 61；
+ *  蘑菇草 70（地下）：先 3 次 TryGrowingTreeByType(5) 巨型蘑菇树（成树则后续
+ *  尝试全跳过），全败才 PlaceTile(71)（内含香蒲支）；丛林草 60 → 61；
  *  蜥蜴砖 226 → 1/5 且非过密 → 61。 */
 export function runGlowingMushroomPlantsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const ws = Math.floor(gs.worldSurface);
@@ -1927,10 +1949,18 @@ export function runGlowingMushroomPlantsPass(st: TileStore, rng: RNG, gs: GenSta
       if (!st.flags[i0]) continue;
       const s = SHEET[st.type[i0]];
       if (j >= ws && s === 70 && !st.flags[st.idx(i, j - 1)]) {
-        // TryGrowingTreeByType(5)×3（cs:20280-20286）——巨型蘑菇树（GrowTreeWithSettings
-        // Tree_Mushroom）未移植，恒败不消耗 RNG；备案见报告
+        // TryGrowingTreeByType(5)×3（cs:20280-20286）→ GrowTree（树苗门 20 恒不中，
+        // 基座即蘑菇草）；失败仍耗 Next(5,17)（门通过即掷，cs:29946）。成树则 (i,j-1)
+        // 为树干基格活跃，后续尝试与 71/61 分支全跳过
+        growTree(st, rng, gs, i, j);
         if (!st.flags[st.idx(i, j - 1)]) {
-          st.setTileSilent(i, j - 1, GLOW_SHROOM, rng.int(0, 4) * 18, 0); // PlaceTile(71)：Next(5) 帧
+          growTree(st, rng, gs, i, j);
+          if (!st.flags[st.idx(i, j - 1)]) {
+            growTree(st, rng, gs, i, j);
+            if (!st.flags[st.idx(i, j - 1)]) {
+              placeTile71(st, rng, gs, i, j - 1);                          // PlaceTile(i, j-1, 71, mute)
+            }
+          }
         }
       }
       if (!st.flags[st.idx(i, j - 1)]) {

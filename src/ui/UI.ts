@@ -57,6 +57,11 @@ function tooltipBgDataUrl(w: number, h: number): string | null {
   c.width = Number(key.split('x')[0]); c.height = Number(key.split('x')[1]);
   const x = c.getContext('2d')!;
   x.imageSmoothingEnabled = false;
+  // 先铺不透明底（(23,25,81)×0.925 ≈ rgb(21,23,75)）再叠贴图——canvas 自动
+  // alpha 合成后终态全不透明：保留 Inventory_Back13 边框细节但零透 world
+  // （原版 0.925 透 7.5% 世界，实测在本渲染器上观感过虚，2026-08-18 用户定案）
+  x.fillStyle = 'rgb(21,23,75)';
+  x.fillRect(0, 0, c.width, c.height);
   x.drawImage(t, 0, 0, 10, 10, 0, 0, 10, 10);
   x.drawImage(t, W - 10, 0, 10, 10, c.width - 10, 0, 10, 10);
   x.drawImage(t, 0, H - 10, 10, 10, 0, c.height - 10, 10, 10);
@@ -326,7 +331,7 @@ const CSS = `
 .sw-ach .icn .bdr { position:absolute; width:24px; height:24px; image-rendering:pixelated;
   left:-1.5px; top:-1.5px; }
 @keyframes sw-ach-in { from { opacity:0; transform:translateY(12px) scale(0.9); } }
-.sw-tooltip { position:fixed; background:rgba(21,23,75,0.93);
+.sw-tooltip { position:fixed; background:rgb(21,23,75);
   padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:280px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   text-shadow: 1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }   /* 原版 MouseText 字体+字影（:20256 DrawColorCodedStringWithShadow） */
@@ -1491,7 +1496,7 @@ export class UI {
       this.tooltip.style.border = 'none';
       this.tooltip.style.borderRadius = '0';
     } else {
-      this.tooltip.style.background = 'rgba(21,23,75,0.93)';   // 兜底色
+      this.tooltip.style.background = 'rgb(21,23,75)';   // 兜底色（不透明，与九宫底同档）
       const img = invBgEnsure();
       if (img instanceof HTMLImageElement && !(img.width > 0)) {
         img.addEventListener('load', () => this.applyTooltipBg(), { once: true });

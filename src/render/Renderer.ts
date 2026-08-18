@@ -616,7 +616,76 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     // counter ≡ walkCycleT + t（每 tick += |vx| + 1）；越过 7 即进帧
     return Math.floor((e.walkCycleT + t) / 7) % frames;
   }
-  // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 cs:70159-70240）：腾空=1；
+  // ---- 其余 aiStyle=7 小动物专属 case（此前全被下方城镇 NPC 档截胡：
+  //      帧 2 起/阈值 6/|vx|*2+1 = 行走小动物 2-3 倍速闪帧"鬼畜"，2026-08-18
+  //      用户报"走路的金鱼"。下列 case 逐族对齐 FindFrame type switch）----
+  // 行走金鱼 230/593（case 230/593，cs:76584-76649）：站定=帧0；行走
+  // counter += |vx|*2+1、>10 进帧全帧循环；腾空=帧0（vy>4 的 rotation
+  // 倾斜在 AI 侧未驱动，差异登记）。counter ≡ walkCycleT*2 + t
+  if (id === 230 || id === 593) {
+    if (!e.onGround || !walking) return 0;
+    return Math.floor((e.walkCycleT * 2 + t) / 11) % frames;
+  }
+  // 企鹅 148/149/168/470（case 148，cs:77094-77152）：counter += |vx|（无 +1！）
+  // 相位制 <6=0 / <12=1 / <15=2 回卷 15；腾空=帧2；localAI[0] 肚皮滑行带
+  // （2/3/4 → +3/+6/+9）我们的滑行 AI 未驱动 localAI → 恒带 0（差异登记）
+  if (id === 148 || id === 149 || id === 168 || id === 470) {
+    if (!e.onGround) return Math.min(2, frames - 1);
+    if (!walking) return 0;
+    const ph = e.walkCycleT % 15;
+    return ph < 6 ? 0 : ph < 12 ? 1 : 2;
+  }
+  // 松鼠 299/538/539/639-645（case 299，cs:77160-77214）：行走
+  // counter += |vx|*0.5+1、>6 进帧；回卷到帧 1（0..frames-1 循环跳过 0）；
+  // 腾空 vy<0=帧2 / vy>0=帧4
+  if (id === 299 || id === 538 || id === 539 || (id >= 639 && id <= 645)) {
+    if (!e.onGround) return e.vy < 0 ? Math.min(2, frames - 1) : Math.min(4, frames - 1);
+    if (!walking) return 0;
+    return 1 + (Math.floor((e.walkCycleT * 0.5 + t) / 7) % Math.max(1, frames - 1));
+  }
+  // 鼠族 300/447/610（case 300/610，cs:77215-77316）：站定=嗅探帧 0/1
+  // （counter+1、>8 进帧）；行走与腾空同式 counter += |vx|*0.5+1、>6 进帧，
+  // 回卷到帧 2（2..frames-1 循环）
+  if (id === 300 || id === 447 || id === 610) {
+    if (e.onGround && !walking) return Math.floor(t / 9) % 2;
+    return 2 + (Math.floor((e.walkCycleT * 0.5 + t) / 7) % Math.max(1, frames - 2));
+  }
+  // 蛙族 361/445/687（case 361，cs:77320-77378）：wet=游帧 10/11/12 按 |vx|
+  // 分档；陆上待机 0..5（7t/帧）；行走相位 [0,6,8,9]（6t/段）；腾空
+  // vy>0=帧9 / vy<0=帧8
+  if (id === 361 || id === 445 || id === 687) {
+    if (e.wet) {
+      const a = Math.abs(e.vx);
+      return Math.min(frames - 1, a > 0.25 ? 10 : a > 0.15 ? 11 : 12);
+    }
+    if (!e.onGround) return Math.min(frames - 1, e.vy > 0 ? 9 : 8);
+    if (!walking) return Math.floor(t / 7) % Math.min(6, frames);
+    return Math.min(frames - 1, [0, 6, 8, 9][Math.floor(t / 6) % 4]);
+  }
+  // 行走鸟 362/364/602/608（case 362/602，cs:74445-74546）：站定=帧0；
+  // 行走 counter+1、≥4 进帧，循环带 3..9（<3 抬 3、≥10 回 3）
+  if (id === 362 || id === 364 || id === 602 || id === 608) {
+    if (!walking) return 0;
+    return Math.min(frames - 1, 3 + (Math.floor(t / 4) % 7));
+  }
+  // 龟 616/617（case 616，cs:77379-77432）：wet=游带 8..13（走 6t/停 11t 一帧）；
+  // 陆上 0..7（9t/帧）；站定=帧0；腾空=帧8
+  if (id === 616 || id === 617) {
+    if (e.wet) return Math.min(frames - 1, 8 + (Math.floor(t / (walking ? 6 : 11)) % 6));
+    if (!e.onGround) return Math.min(8, frames - 1);
+    if (!walking) return 0;
+    return Math.floor(t / 9) % Math.min(8, frames);
+  }
+  // 龟 625（case 625，cs:77434-77473）：wet=游带 6..11（走 5t/停 9t 一帧）；
+  // 陆上 0..5（8t/帧）；站定=帧0
+  if (id === 625) {
+    if (e.wet) return Math.min(frames - 1, 6 + (Math.floor(t / (walking ? 5 : 9)) % 6));
+    if (!walking) return 0;
+    return Math.floor(t / 8) % Math.min(6, frames);
+  }
+  // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 cs:70159-70240）——仅城镇/绑缚族：
+  // 小动物专属 case（46 族/230/299/300/361/362/616/625 等已在上方各自分支截胡，
+  // 勿再落到本档（帧 2 起/|vx|*2+1 对小动物是 3 倍速鬼畜））：腾空=1；
   // 站定帧（cs:70163-70181）：638 是 0-7 待机循环（4t 推进）、140/489=帧1、其余=帧0；
   // 行走帧 2..frames-extra-1 循环（frameCounter += |vx|*2+1，阈值 num109：
   // 632/534/638/656=12（489=8 且 counter 加 |vx|*1+0.5）、其余 6）
@@ -652,8 +721,40 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     }
     return Math.min(frames - 1, anim);
   }
-  // 游泳族（case 65 鲨鱼 L75386+）：frame = (counter/4) % 4
-  if (ai === 16) return frames > 3 ? Math.floor(t / 4) % Math.min(4, frames) : Math.floor(t / 6) % frames;
+  // 海豚 615（case 615，cs:74925-74938，aiStyle 16 但有专属 case）：搁浅
+  // （!wet && ai[2]==1）=帧4；否则 counter 每 tick +1（!wet +2），7t 一帧全帧循环
+  if (id === 615) {
+    if (!e.wet && e.ai2 === 1) return Math.min(4, frames - 1);
+    return Math.floor((e.wet ? t : t * 2) / 7) % frames;
+  }
+  // ---- 游泳族（aiStyle 16）逐 case（此前一支通用 t/4 档通吃 = 全员 1.5 倍速;
+  //      离水金鱼 4t 连闪 0..3 是用户报"金鱼鬼畜"的另一半）----
+  // 鱼族 case 55（cs:74879-74924：55 金鱼/57 腐化金鱼/58 食人鱼/102 琵琶鱼/
+  // 241 血浆渗透者/465 邪恶金鱼/592/607 鳉）：counter+1、6t 一档;
+  // wet 帧 0..3 游姿 / !wet 帧 4/5 离水折腾
+  if (id === 55 || id === 57 || id === 58 || id === 102 || id === 241
+    || id === 465 || id === 592 || id === 607) {
+    if (!e.wet) return Math.min(frames - 1, 4 + (Math.floor(t / 6) % 2));
+    return Math.floor(t / 6) % Math.min(4, frames);
+  }
+  // 河鲀 688（case 688，cs:74944-74984）：鼓起 ai[2]==1 =帧4/5@6t；离水=4/5@12t；
+  // 常态 wet=0..3@8t
+  if (id === 688) {
+    if (e.ai2 === 1 || !e.wet) return Math.min(frames - 1, 4 + (Math.floor(t / (e.ai2 === 1 ? 6 : 12)) % 2));
+    return Math.floor(t / 8) % Math.min(4, frames);
+  }
+  // 虎鲸 692（case 692，cs:75392-75440）：wet 半表轮换（ai0==0 → 5t 否则 7t 一帧）；
+  // 离水定帧 vy>0=7 / vy<0=3 / 静=1
+  if (id === 692) {
+    if (e.wet) return Math.floor(t / (e.ai0 === 0 ? 5 : 7)) % Math.max(1, Math.floor(frames / 2));
+    return Math.min(frames - 1, e.vy > 0 ? 7 : e.vy < 0 ? 3 : 1);
+  }
+  // 鲨鱼 65（case 65，cs:75352-75377）：wet 帧 0..3@6t；离水冻结末态
+  if (id === 65) return e.wet ? Math.floor(t / 6) % Math.min(4, frames) : Math.min(3, frames - 1);
+  // 沙鲨 542-545（case 542，cs:75380-75388）：counter+1、4t 一帧 16t 循环 4 帧
+  if (id >= 542 && id <= 545) return Math.floor(t / 4) % 4;
+  // 其余游泳族兜底：6t 一帧全帧循环（保守档）
+  if (ai === 16) return Math.floor(t / 6) % frames;
   // 水母（case 63 L74621+）：追击脉冲循环 [4..6]，漂移循环 [0..]
   if (ai === 18) {
     const active = t % 90 < 30; // 脉冲周期近似
@@ -1583,6 +1684,9 @@ export class Renderer {
     } else {
       GLSpriteLayer.MAX_BYTES = 192 * 1024 * 1024;   // 恢复默认(不继承熔断减半)
     }
+    // 云 GL:cpuRender 禁用并释放;切回 GPU 重新启用(2D cloudTint 兜底常在)
+    this.sky.useGLClouds = !cpu;
+    if (cpu) this.sky.disposeCloudGL();
     // chunk 池:烘焙侧按新模式创建(静态标志)
     ChunkCache.CPU_RENDER = cpu;
     this.cbOnGpuRecover?.();
@@ -1704,6 +1808,7 @@ export class Renderer {
     // 风暴;背景纹理懒加载重传成本低,不值得跨世界持有)
     this.glfx?.dispose();
     this.glfx = null;
+    this.sky.disposeCloudGL();
   }
 
   /** 物品图标：优先 Maples 素材，缺省回退程序化 */

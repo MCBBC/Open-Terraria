@@ -15,6 +15,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
+import { texId } from '../render/texId';
 
 /** 原版 EDGES（PortalHelper.cs:31-37）：下/上/右/左 四向单位法线 */
 const EDGES: ReadonlyArray<readonly [number, number]> = [[0, 1], [0, -1], [1, 0], [-1, 0]];
@@ -189,7 +190,7 @@ export class Portal extends Entity {
 
   /** 帧着色缓存（multiply + destination-in 保形；10 帧 × 2 色） */
   private static tintedFrame(tex: ImageBitmap | HTMLImageElement, frame: number, r: number, g: number, b: number): HTMLCanvasElement {
-    const key = `${(tex as HTMLImageElement).src}|${frame}|${r},${g},${b}`;
+    const key = `${texId(tex)}|${frame}|${r},${g},${b}`;
     const hit = Portal.frameCache.get(key);
     if (hit) return hit;
     const c = document.createElement('canvas');

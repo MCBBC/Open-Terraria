@@ -65,6 +65,11 @@ const WOODEN_SPIKE = sheetId(232);
 const LIHZARD_BRICK = sheetId(226);
 const BEE_WALL = 86;                    // 蜂巢墙 → 强制蜂蜜滴头(cs:21404)
 
+const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let q = 0; q < TILE_DEFS.length; q++) {
+  const s = TILE_DEFS[q]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF[q] = s;
+}
 /** SaveSlopes[t] = tileSolid[t] ∪ NonSolidSaveSlopes（TileID.cs:425-429 静态构造）。
  *  ★IIII 批勘误（2026-08-18）：SaveSlopes 数组在 TileID 静态构造时**一次性**从
  *  Main.tileSolid 拷贝——之后生成期的一切 tileSolid 翻转（含本 pass 头的 379=false）
@@ -72,7 +77,18 @@ const BEE_WALL = 86;                    // 蜂巢墙 → 强制蜂蜜滴头(cs:2
  *  solidTile 门连锁放行 → #99 T0>373 滴水石笋族 + S1/S2 残坡双症状）。
  *  379 静态初值即 false（数据表同），静态读法对本种子零差——但语义必须静态。 */
 function isSaveSlope(t: number): boolean {
-  return !!TILE_DEFS[t]?.solid || NON_SOLID_SAVE_SLOPES.has(t);
+  // ★IIII 补：仓库 TILE_DEFS.solid 与原版 pristine Main.tileSolid 有三族差——
+  // ⑴ 平台族 sheet{19,239,380,427,435-439}（原版 tileSolid=true、仓库碰撞语义
+  //    solid=false；残坡 S1/S2×154 全是 t19 平台带坡被误清,实测定型）；
+  // ⑵ 192 活树叶（Main.cs:10167 初值 true,仓库预翻 false）；
+  // ⑶ 481-483 裂砖（Main.cs:7865 初值 true,仓库预翻 false）。
+  // TileID 静态构造远早于生成期翻转 → SaveSlopes 读 pristine 初值。
+  const sh = SHEET_OF[t] ?? -1;
+  const pristineSolid = !!TILE_DEFS[t]?.solid
+    || sh === 19 || sh === 239 || sh === 380 || sh === 427
+    || (sh >= 435 && sh <= 439)
+    || sh === 192 || sh === 481 || sh === 482 || sh === 483;
+  return pristineSolid || NON_SOLID_SAVE_SLOPES.has(t);
 }
 
 /** WorldGen.SolidTile(cs:42370):active && tileSolid && !tileSolidTop && !halfBrick && slope==0。
@@ -103,6 +119,29 @@ function dripFor(liquidType: number): number {
   if (liquidType === LIQUID_TYPE.HONEY) return DRIP_HONEY;
   if (liquidType === LIQUID_TYPE.SHIMMER) return DRIP_SHIMMER;
   return DRIP_WATER;
+}
+
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 的树干保护门 */
+const IS_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+/** WorldGen.CanKillTile(i,j)（cs:62260+,162 薄冰语境可达子集）：
+ *  上邻树干族（IsATreeTrunk/323,带帧位例外）→ false;wall350 → false;
+ *  Boulders+CheckBoulderChest / 门/祭坛等族在 162 语境不可达,略。 */
+function canKillTile(st: TileStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  if (st.wall[i] === 350) return false;
+  const up = st.idx(x, y - 1);
+  if (st.flags[up]) {
+    const sh = SHEET_OF[st.type[up]] ?? -1;
+    if (IS_TREE_TRUNK.has(sh) || sh === 323) {
+      // 帧位例外（cs:62282-84：fx∈{66,88} 的侧枝列与 fy≥198 干身放行）
+      const fx = st.frameX[up]!, fy = st.frameY[up]!;
+      const sideBranch = (fx === 66 && fy >= 0 && fy <= 44) || (fx === 44 && fy >= 198 && fy <= 242)
+        || (fx === 88 && fy >= 66 && fy <= 110) || (fx === 66 && fy >= 198 && fy <= 242);
+      if (!sideBranch && fy < 198) return false;
+      if (sh === 323 && (fx === 66 || fx === 220)) return false;
+    }
+  }
+  return true;
 }
 
 export function runTileCleanupPass(st: TileStore, rng: RNG, _gs: GenState): void {

@@ -356,7 +356,7 @@ import { runGemCavesPass, runExposedGemsIcePass, runExposedGemsUndergroundPass, 
 import { runCaveWallsPass, runCaveWallVarietyPass, runJungleMudWallsPass } from './vanilla/CaveWallsPass';
 import { runOasisPass } from './vanilla/OasisPass';
 import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
-import { runTileCleanupPass } from './vanilla/TileCleanupPass';
+import { runTileCleanupPass, sheetId } from './vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from './vanilla/BrokenTrapCleanupPass';
 import { runFinalCleanupPass } from './vanilla/FinalCleanupPass';
 import { runMultitileFragmentSweepPass } from './vanilla/MultitileFragmentSweep';
@@ -1092,8 +1092,25 @@ function brokenTrapCleanupPass({ store, world }: GenCtx) {
   runBrokenTrapCleanupPass(store);
 }
 
-function finalCleanupPass({ store, rng }: GenCtx) {
+function finalCleanupPass({ store, rng, world }: GenCtx) {
   runFinalCleanupPass(store, ctxGs[0]!, rng);
+  // KKKK 移交（2026-08-18，IIII 批落地）：槽 101 v_383 活红木等后至写入可覆写已
+  // 登记树的冠格（vanilla SkipTiles={21,467,226,237} 不含树干=原版语义覆写，tile
+  // 侧无债）——管线尾修剪幽灵登记（冠格失活/非树族即出表），防运行期砍伐判定/
+  // 树冠摆动误读残条目。GGGG 的 Flowers 尾修剪只覆盖槽 90 时点，本修剪收全尾段。
+  {
+    // sheetOfInternal：内部 id → 原版 sheet（TILE_DEFS.vanilla.sheet）。
+    // ★须修剪 gs.genTrees（finalize `world.trees = gs.genTrees` 会整表覆写）
+    const sh2 = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+    const alive = (tr: { x: number; y: number; h: number }) => {
+      const i = store.idx(tr.x, tr.y);
+      if (!store.flags[i]) return false;
+      const s = sh2(store.type[i]!);
+      return s === 5 || s === 23 || s === 323;
+    };
+    ctxGs[0]!.genTrees = ctxGs[0]!.genTrees.filter(alive);
+    world.trees = ctxGs[0]!.genTrees;
+  }
 }
 
 function multitileSweepPass({ store }: GenCtx) {

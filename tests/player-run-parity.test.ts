@@ -239,3 +239,60 @@ describe('冰刀族（Ice Skates 950：冰面 acc×0.7×3.5 + maxRun×1.25;slipp
     expect(v).toBeLessThanOrEqual(3.75 + 0.6);   // maxRun 3×1.25=3.75(过冲一档)
   });
 });
+
+describe('折叠凳（Step Stool 4341:站定+按上 → 命中盒 +26/jump +5/起跳离凳上步）', () => {
+  it('装凳站定按上:h 42→68、y 上移 26(脚锚);跳后回 42 且净上步 26', async () => {
+    const w = new World(200, 80, 30, 'stool');
+    for (let x = 0; x < 200; x++) { w.store.setTileSilent(x, 70, 1, 0, 0); w.store.setTileSilent(x, 71, 1, 0, 0); }
+    const game = makeGame(w);
+    const inv = new (await import('../src/items/Inventory')).Inventory();
+    const { ITEM_BY_KEY } = await import('../src/data/items');
+    const { vanillaItemKey } = await import('../src/data/vanillaRecipes');
+    const p = new Player(60 * TILE, 66 * TILE, inv);
+    p.inv.armor[3] = { id: ITEM_BY_KEY[vanillaItemKey(4341)!], stack: 1 };
+    for (let i = 0; i < 30; i++) step(p, game);
+    expect(p.onGround).toBe(true);
+    const y0 = p.y, h0 = p.h;
+    expect(h0).toBe(42);
+    // 站定+按上 20t:命中盒 68、y = y0-26、脚底不变
+    p.inputUp = true;
+    for (let t = 0; t < 20; t++) step(p, game);
+    expect(p.h).toBe(68);
+    expect(p.y).toBeCloseTo(y0 - 26, 5);
+    expect(p.y + p.h).toBeCloseTo(y0 + h0, 5);
+    expect(p.stoolInUse).toBe(true);
+    // 松开↑:立即回 42(原版每 tick Reset+条件重建)
+    p.inputUp = false;
+    step(p, game);
+    expect(p.h).toBe(42);
+    expect(p.stoolInUse).toBe(false);
+    // 再按↑+跳:起跳帧离凳 y 额外 -26(净上步)
+    p.inputUp = true;
+    for (let t = 0; t < 10; t++) step(p, game);
+    const yPre = p.y;
+    p.inputJump = true;
+    step(p, game);
+    p.inputJump = false; p.inputUp = false;
+    expect(p.h).toBe(42);
+    expect(p.y).toBeLessThan(yPre - 20);   // 离凳上步 26 + 起跳 vy
+    expect(p.vy).toBeLessThan(-4);   // -5.01 起跳+当拍重力 0.4 → ≈-4.61
+  });
+
+  it('头顶有顶棚时 CanFitSpace 拦截(不生长)', async () => {
+    const w = new World(200, 80, 30, 'stool-roof');
+    for (let x = 0; x < 200; x++) { w.store.setTileSilent(x, 70, 1, 0, 0); w.store.setTileSilent(x, 71, 1, 0, 0); }
+    // 玩家头顶 1 格封死(x=58..62, y=64)
+    for (let x = 58; x <= 62; x++) w.store.setTileSilent(x, 66, 1, 0, 0);   // 头顶带行 65-67
+    const game = makeGame(w);
+    const inv = new (await import('../src/items/Inventory')).Inventory();
+    const { ITEM_BY_KEY } = await import('../src/data/items');
+    const { vanillaItemKey } = await import('../src/data/vanillaRecipes');
+    const p = new Player(60 * TILE, 66 * TILE, inv);
+    p.inv.armor[3] = { id: ITEM_BY_KEY[vanillaItemKey(4341)!], stack: 1 };
+    for (let i = 0; i < 30; i++) step(p, game);
+    p.inputUp = true;
+    for (let t = 0; t < 20; t++) step(p, game);
+    expect(p.h).toBe(42);   // 头顶实心 → CanFitSpace(26) false
+    expect(p.stoolInUse).toBe(false);
+  });
+});

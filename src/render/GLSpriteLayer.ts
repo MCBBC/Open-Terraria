@@ -15,6 +15,7 @@
 //  · tint 为 uniform 乘法(canvas multiply+destination-in 的等价,零离屏)
 //  · WebGL2 NPOT 纹理可 REPEAT(地下带横向平铺)
 import type { DrawRect } from '../assets/SpriteAtlas';
+import { texId } from './texId';
 
 export interface QuadOpts {
   alpha?: number;                                    // 整体透明度(默认 1)
@@ -287,7 +288,8 @@ export class GLSpriteLayer {
   /** SpriteAtlas DrawRect 便捷入口 */
   drawRect(rect: DrawRect, dx: number, dy: number, dw: number, dh: number, opts?: QuadOpts): void {
     if (this.unavailable) return;
-    const tag = (rect.img as HTMLImageElement).src ?? (rect.img as HTMLCanvasElement).toDataURL?.().length ?? 'cv';
+    // ★bitmap 无 .src(旧键退化为 'cv' → 同尺寸跨表碰撞隐患);texId 实例自增
+    const tag = String(texId(rect.img));
     const e = this.texFromImage(`r:${rect.img.width}x${rect.img.height}:${tag}:${rect.sx},${rect.sy}`, rect.img as TexImageSource);
     if (!e) return;
     this.quad(e, rect.sx, rect.sy, rect.sw, rect.sh, dx, dy, dw, dh, opts);

@@ -564,6 +564,7 @@ export class Player extends Entity {
     chiselSpeed: boolean;  // 古凿 4056/5126：pickSpeed-0.25（:12610-12612/:13981）
     toolbelt: boolean;     // 工具腰带 407：装备生效 blockRange+1（:14873-14876）
     flowerBoots: boolean;   // 花靴 3017/仙灵靴 3993（Player.cs:12688 行走生花）
+    stepStool: boolean;     // 折叠凳 4341/造物之手 5126（:14077-14080 HasAStool,HeightBoost 26）
     counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
     manaRegenBonus: number; manaRegenDelayBonus: number;
     setBonus: ReturnType<typeof activeArmorSetBonus> | null;
@@ -638,6 +639,7 @@ export class Player extends Entity {
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
     let autoPaint = false, chiselSpeed = false, toolbelt = false;
     let flowerBoots = false;
+    let stepStool = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
     let divingHelm = false, merman = false;
@@ -650,6 +652,7 @@ export class Player extends Entity {
       // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
       const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       if (accVid === 4404) canFloat = true;   // 水上漂靴（ApplyEquipFunctional :12842-12846）
+      if (accVid === 4341 || accVid === 5126) stepStool = true;   // 折叠凳/造物之手（:14077-14080，Player 侧 SetStats 非物品字段）
       if (accVid === 267) killGuide = true;
       else if (accVid === 1307) killClothier = true;
       // 浮漂饰品 5139-5146（Player.cs:14121-14124 accFishingBobber → fishingSkill+10
@@ -959,7 +962,7 @@ export class Player extends Entity {
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
       beetleDef,
       wolfAcc, boc,
-      tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, flowerBoots,
+      tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, flowerBoots, stepStool,
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
@@ -1737,6 +1740,17 @@ export class Player extends Entity {
 
     // 水平（敏捷 Buff 提速 + 装备移速（赫尔墨斯靴族 runSpeed/词缀 73-76）；蜂蜜比水更黏滞）
     const eqEarly = this.equipStats;
+    // ---- 折叠凳（UpdatePortableStoolUsage :28727-28739 1:1；原版每 tick
+    //      ResetEffects 清 IsInUse+ResizeHitbox 回 42 后按条件重长）----
+    if (this.stoolInUse) { this.y += Player.STOOL_BOOST; this.h -= Player.STOOL_BOOST; this.stoolInUse = false; }
+    if (eqEarly.stepStool && this.inputUp && !this.ridingMount
+      && this.vx === 0 && this.vy === 0
+      && !this.grappleProjs.some((g) => g.latched)
+      && this.canFitSpaceUp(Player.STOOL_BOOST, world.store)) {
+      this.y -= Player.STOOL_BOOST;
+      this.h += Player.STOOL_BOOST;
+      this.stoolInUse = true;
+    }
     // 沙丘行者靴地板旗标（FloorVisuals :23434-23471 + GetFloorTile :23481-23509）：
     // vy==0 时取脚下一行的 x/x−1/x+1 首个 active+solid 格，属沙族地格即 runningOnSand
     // （TileID.Sets.Conversion Sand{53,112,116,234}/HardenedSand{397-399,402}/
@@ -2041,12 +2055,19 @@ export class Player extends Entity {
         baseJumpSpd = Math.max(baseJumpSpd, 6.51);
       }
       if (this.buffs.has(BuffType.Werewolf)) baseJumpTicks += 2;   // :19334 jumpHeight += 2（速度 +0.2 已在 jumpSpd）
+      if (this.stoolInUse) baseJumpTicks += 5;   // :19341-19344 折叠凳 +5（非坐骑支——凳/坐骑互斥）
       baseJumpSpd += eqJ.jumpSpd;
-      // 蜂蜜块【地面】sticky 跳削弱（Player.cs:19343-19346：jumpHeight/=10、
-      // jumpSpeed/=5——与泡块阻尼（StickyTiles :22650+）不同链，站蜂蜜上跳不高）
-      if (this.floorTileT === HONEY_FLOOR_ID) { baseJumpTicks = Math.max(1, Math.floor(baseJumpTicks / 10)); baseJumpSpd /= 5; }
-      const mJumpSpd = mnt2 ? mnt2.jumpSpeed(this.vx) : baseJumpSpd;
-      const mJumpTicks = mnt2 ? mnt2.jumpHeight(this.vx) : baseJumpTicks;
+      const mJumpSpd0 = mnt2 ? mnt2.jumpSpeed(this.vx) : baseJumpSpd;
+      const mJumpTicks0 = mnt2 ? mnt2.jumpHeight(this.vx) : baseJumpTicks;
+      // 蜂蜜块【地面】sticky 跳削弱（Player.cs:19343-19346：jumpHeight/=10（整数除）、
+      // jumpSpeed/=5——在坐骑赋值【之后】=坐骑跳同样被削；与泡块阻尼
+      // （StickyTiles :22650+）不同链；dazed 同位点（/5,/2）在 1456 零施加源
+      // =死字段不移植）。折叠凳 IsInUse +5（:19337-19340）已在 baseJumpTicks 前段
+      let mJumpSpd = mJumpSpd0, mJumpTicks = mJumpTicks0;
+      if (this.floorTileT === HONEY_FLOOR_ID) {
+        mJumpTicks = Math.floor(mJumpTicks / 10);
+        mJumpSpd /= 5;
+      }
       // 本帧生效跳跃速度（湿态液体档覆写；长跳 sustain 钉速用它——原版钉的是当帧
       // jumpSpeed，出水瞬间自动切回干燥档）
       let effJumpSpd = mJumpSpd;
@@ -2107,6 +2128,11 @@ export class Player extends Entity {
         this.vy = -lJSpd * gd;
         this.jumpHold = lJT;
         jumpStartedThisTick = true;
+        if (this.stoolInUse) {   // 湿跳同离凳（:20504 无分支门）
+          this.stoolInUse = false;
+          this.y -= Player.STOOL_BOOST;
+          this.h -= Player.STOOL_BOOST;
+        }
       }
       this.vy += lGrav;
       this.vy = Math.max(-lJSpd, Math.min(lMaxFall, this.vy));
@@ -2122,6 +2148,13 @@ export class Player extends Entity {
         this.vy = -mJumpSpd * gd;
         this.jumpHold = mJumpTicks;
         jumpStartedThisTick = true;
+        // 折叠凳起跳离凳（Player.cs:20504-20512：IsInUse=false + position.Y −= 26
+        // ——从凳上一步起跳=净多 26px 高度；相机 bump 无对应载体略）
+        if (this.stoolInUse) {
+          this.stoolInUse = false;
+          this.y -= Player.STOOL_BOOST;
+          this.h -= Player.STOOL_BOOST;
+        }
       }
       // ---- 坐骑特殊跳（hasJumpOption_*：UpdateEffects :4933/:4877/:4956/:4963 授予；
       //      JumpMovement :20435-20688 链——优先于装备多段跳） ----
@@ -3873,6 +3906,21 @@ export class Player extends Entity {
   /** 脚下地板 tile type（FloorCheck num3 :23450-23471，含坡面门；-1=无/坡面/空中）——
    *  slippy 冰面滑移消费（:26234-26255） */
   floorTileT = -1;
+  /** 折叠凳使用中（PortableStoolUsage.IsInUse）：命中盒 +26px（脚锚定向上长，
+   *  :28745-28747 ResizeHitbox）；起跳离凳 y-=26（:20504-20512）；渲染下移 26 */
+  stoolInUse = false;
+  /** 折叠凳常量（:14077 SetStats(26,26,26)：HeightBoost/VisualYOffset/MapYOffset） */
+  static readonly STOOL_BOOST = 26;
+
+  /** CanFitSpace（Collision.cs：命中盒向上抬 extra 像素后的新增带无实心格；
+   *  fixedUpdate 传入当帧 store） */
+  private canFitSpaceUp(extra: number, st: { isSolid(x: number, y: number): boolean } | null): boolean {
+    if (!st) return true;   // 无 store 引用时保守放行（原版恒有 Main.tile）
+    const x0 = Math.floor(this.x / 16), x1 = Math.floor((this.x + this.w - 0.01) / 16);
+    const y0 = Math.floor((this.y - extra) / 16), y1 = Math.floor((this.y - 0.01) / 16);
+    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) if (st.isSolid(x, y)) return false;
+    return true;
+  }
   /** 上一 tick 的世界 store 引用（fixedUpdate 缓存；dashWallAhead 探测用） */
   private lastStore: import('../world/TileStore').TileStore | null = null;
   /** 坐骑探测用世界（MountedPlayerView.store：fixedUpdate 帧首刷新） */

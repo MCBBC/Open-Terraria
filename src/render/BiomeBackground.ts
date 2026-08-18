@@ -474,13 +474,22 @@ export class BiomeBackground {
     void s; void viewH;
   }
 
-  /** 带色调平铺绘制（tint 缓存按 (tex,tint) 键，避免每帧逐像素） */
+  /** 带色调平铺绘制（tint 缓存按 (tex,量化tint) 键，避免每帧逐像素）。
+   *  ★2026-08-18 canvas 哨兵实抓(用户真机 61/s 持续,晨昏色调漂移期):旧键 =
+   *  im.src(bitmap 恒 undefined,跨层串键)+ tint.toFixed(2)(昼夜色调连续漂移
+   *  → 每帧新键)+ 超 64 整表 clear()(清光全重烘 = 永远 miss 的雪崩)。
+   *  修:WeakMap 纹理 id(bitmap 安全)+ tint 步进 8 量化(背景层 3% 无感)
+   *  + 逐条淘汰(工作集 = 层数×色桶 ~10-20 张) */
   private tintCache = new Map<string, HTMLCanvasElement>();
+  private tintTexIds = new WeakMap<object, number>();
+  private tintTexIdSeq = 0;
   drawTiledTinted(
     ctx: CanvasRenderingContext2D, im: ImageBitmap | HTMLImageElement,
     tr: number, tg: number, tb: number, dx: number, dy: number, dw: number, dh: number,
   ) {
-    const key = `${(im as HTMLImageElement).src}|${tr.toFixed(2)},${tg.toFixed(2)},${tb.toFixed(2)}`;
+    let tid = this.tintTexIds.get(im);
+    if (tid === undefined) { tid = ++this.tintTexIdSeq; this.tintTexIds.set(im, tid); }
+    const key = `${tid}|${Math.round(tr * 255) & ~7},${Math.round(tg * 255) & ~7},${Math.round(tb * 255) & ~7}`;
     let c = this.tintCache.get(key);
     if (!c) {
       c = document.createElement('canvas');
@@ -493,7 +502,11 @@ export class BiomeBackground {
       cx.globalCompositeOperation = 'destination-in';
       cx.drawImage(im, 0, 0);
       this.tintCache.set(key, c);
-      if (this.tintCache.size > 64) this.tintCache.clear(); // 简单防膨胀
+      if (this.tintCache.size > 64) {
+        // 逐条淘汰最旧(整表 clear = 下帧全量重烘雪崩)
+        const first = this.tintCache.keys().next().value;
+        if (first !== undefined) this.tintCache.delete(first);
+      }
     }
     ctx.drawImage(c, dx, dy, dw, dh);
   }
