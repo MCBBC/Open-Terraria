@@ -296,6 +296,13 @@ export class Inventory {
    *  ③ 合并 0-49 已有堆（先于空槽）；④ 空槽【降序】从背包末尾填（原版非收藏物降序）
    *  ⑤ 钱币满 100 自动合大（DoCoins :38573-38589） */
   add(id: number, count: number, prefix?: number, placeStyle?: number): number { // prefix/placeStyle 随新放置槽写入（合并已有堆保留现有）
+    // 未知 id 守卫(2026-08-18):裸 .maxStack 曾让一个不在定义表的掉落物在拾取瞬间
+    // TypeError 炸掉整个帧循环(用户实报:砍树掉落自动收集时崩溃)——拒绝入包并
+    // 留栈取证,定位是谁产出了这个 id
+    if (!(id >= 0) || !ITEM_DEFS[id]) {
+      console.warn(`[inv.add] 未知物品 id=${id} count=${count} — 已拒绝入包`, new Error('来源栈').stack);
+      return count;
+    }
     const max = ITEM_DEFS[id].maxStack;
     // ① 钱币：钱币格循环（填→转）到无进展（GetItem 每次合并后即 DoCoins :38840）,
     //    溢出再走背包合并/空格（:38701+ 通用路径——原版溢出币进 0-49,非丢弃）

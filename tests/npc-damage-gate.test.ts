@@ -3,6 +3,8 @@
 //    （:11971 `flag |= type == 318`——全游戏唯一可无条件砸 friendly NPC 的玩家弹）
 //   ②explodeAt 爆炸同门（炸弹+向导巫毒娃娃=经典杀向导链）
 //   ③敌对弹 hostile && friendly && !dontTakeDamageFromHostiles 恒命中（既有链复核）
+// ★TownNPC 构造器 (key,x,y) 的 y 锚**脚底**（盒顶 = y−h+2）——弹/爆心必须按
+//   NPC 实际盒（n.x/n.y）算重叠，按传入 y 算 = 恒不重叠假阴性
 import { describe, it, expect } from 'vitest';
 import { hitTownNpcs } from '../src/entities/projTargets';
 import { TownNPC } from '../src/entities/TownNPC';
@@ -31,55 +33,60 @@ function npcAt(key: string, tx = 10, ty = 10): TownNPC {
   return new TownNPC(key, tx * TILE, ty * TILE, new Inventory());
 }
 
-const PROJ = { x: 10 * TILE + 2, y: 10 * TILE + 2, w: 12, h: 12 };   // 与 NPC 重叠
+/** 与 NPC 实际盒重叠的弹（勿按构造传入 y 定位） */
+const projOn = (n: TownNPC) => ({ x: n.x + 4, y: n.y + 4, w: 12, h: 12 });
 
 describe('hitTownNpcs 玩家弹窄门（:11970-11972 + 318 例外）', () => {
   it('普通箭（projId 42）→ 任何城镇 NPC 免疫（含装备巫毒时打非 22/54）', () => {
     const n = npcAt('guide');
     const h0 = n.hp;
-    expect(hitTownNpcs(PROJ, hooks([n], false, false), 30, 0, 'playerProj', 42)).toBe(false);
+    expect(hitTownNpcs(projOn(n), hooks([n], false, false), 30, 0, 'playerProj', 42)).toBe(false);
     expect(n.hp).toBe(h0);
     const other = npcAt('merchant');
-    expect(hitTownNpcs(PROJ, hooks([other], true, true), 30, 0, 'playerProj', 42)).toBe(false);
+    expect(hitTownNpcs(projOn(other), hooks([other], true, true), 30, 0, 'playerProj', 42)).toBe(false);
     expect(other.hp).toBe(other.maxHp);
   });
 
   it('巫毒门：killGuide → 箭可伤向导 22；killClothier → 可伤裁缝 54', () => {
     const g = npcAt('guide');
-    console.log('DBG', g.vanillaId, g.x, g.y, g.w, g.h, g.bound, g.dead, g.iframes, typeof g.hurt);
     const h0 = g.hp;
-    expect(hitTownNpcs(PROJ, hooks([g], true, false), 30, 0, 'playerProj', 42)).toBe(true);
+    expect(hitTownNpcs(projOn(g), hooks([g], true, false), 30, 0, 'playerProj', 42)).toBe(true);
     expect(g.hp).toBeLessThan(h0);
     const c = npcAt('clothier');
     const c0 = c.hp;
-    expect(hitTownNpcs(PROJ, hooks([c], false, true), 30, 0, 'playerProj', 42)).toBe(true);
+    expect(hitTownNpcs(projOn(c), hooks([c], false, true), 30, 0, 'playerProj', 42)).toBe(true);
     expect(c.hp).toBeLessThan(c0);
   });
 
   it('臭鸡蛋 318：无条件伤任意城镇 NPC（无需巫毒）', () => {
     const m = npcAt('merchant');
     const h0 = m.hp;
-    expect(hitTownNpcs(PROJ, hooks([m], false, false), 13, 0, 'playerProj', 318)).toBe(true);
+    expect(hitTownNpcs(projOn(m), hooks([m], false, false), 13, 0, 'playerProj', 318)).toBe(true);
     expect(m.hp).toBeLessThan(h0);
   });
 
   it('敌对弹（hostile）→ 恒命中（flag2 分支既有链复核）', () => {
     const m = npcAt('merchant');
     const h0 = m.hp;
-    expect(hitTownNpcs(PROJ, hooks([m], false, false), 25, 0, 'hostile')).toBe(true);
+    expect(hitTownNpcs(projOn(m), hooks([m], false, false), 25, 0, 'hostile')).toBe(true);
     expect(m.hp).toBeLessThan(h0);
   });
 });
 
 describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
+  const tileOf = (n: TownNPC): [number, number] => [Math.floor(n.cx / TILE), Math.floor(n.cy / TILE)];
+
   function shell(npcs: TownNPC[], killGuide: boolean) {
     const g = Object.create(Game.prototype) as unknown as {
       world: World; entities: { enemies: unknown[]; npcs: TownNPC[] };
-      player: unknown; spawnParticles: () => void; net?: unknown; remotePlayerProxies?: unknown[];
+      player: unknown; spawnParticles: () => void; addDamageNumber: () => void;
+      playSfxFiles: () => void; net?: unknown; remotePlayerProxies?: unknown[];
     };
     g.world = new World(40, 40, 20, 'boom');
     g.entities = { enemies: [], npcs };
     g.spawnParticles = () => {};
+    g.addDamageNumber = () => {};   // 真方法碰未初始化 dmgNumbers → 'push' of undefined
+    g.playSfxFiles = () => {};
     g.net = undefined;
     g.remotePlayerProxies = [];
     g.player = {
@@ -93,14 +100,16 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
   it('无巫毒：炸弹在向导脚边炸 → 向导不掉血', () => {
     const guide = npcAt('guide', 10, 10);
     const g = shell([guide], false);
-    g['explodeAt'](10, 10, 100, 0, false, 64, 0, 28);
+    const [ex, ey] = tileOf(guide);
+    g['explodeAt'](ex, ey, 100, 0, false, 64, 0, 28);
     expect(guide.hp).toBe(guide.maxHp);
   });
 
   it('装备向导巫毒娃娃（killGuide）：同位置炸弹 → 向导受爆炸伤害（经典杀向导链）', () => {
     const guide = npcAt('guide', 10, 10);
     const g = shell([guide], true);
-    g['explodeAt'](10, 10, 1000, 0, false, 64, 0, 28);
+    const [ex, ey] = tileOf(guide);
+    g['explodeAt'](ex, ey, 1000, 0, false, 64, 0, 28);
     expect(guide.hp).toBeLessThan(guide.maxHp);
   });
 
@@ -108,7 +117,8 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
     const guide = npcAt('guide', 10, 10);
     const merch = npcAt('merchant', 11, 10);
     const g = shell([guide, merch], true);
-    g['explodeAt'](10, 10, 5000, 0, false, 96, 0, 28);
+    const [ex, ey] = tileOf(guide);
+    g['explodeAt'](ex, ey, 5000, 0, false, 96, 0, 28);
     expect(merch.hp).toBe(merch.maxHp);
   });
 });

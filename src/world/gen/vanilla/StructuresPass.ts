@@ -31,7 +31,7 @@ function pyrStream(rng?: { ur: { seedArray: Int32Array; inext: number } }): stri
 }
 let pyrRngCache: unknown = null;
 import { solidTile as _solidTileHB } from './HalfBrickPass';
-import { flipGenSolid } from './GenSolid';
+import { flipGenSolid, vanGenSolidType } from './GenSolid';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
 /** ★SquareWallFrame 掷骰还原（2026-08-16 #23 云层债根因，同 DesertPass 机制）：
@@ -520,13 +520,16 @@ export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void
 /** AddLifeCrystal(cs:32077-32144)1:1:自 j 向下扫列 i 首个实心活性格,
  *  锚行 num = k-1。anyLava/anyShimmer/EmptyTileCheck/wallDungeon 四门 →
  *  锚列 i-1..i 的 num+1 底座须 nactive(active 且非半砖)+tileSolid,
- *  底座坡面/半砖复位(cs:32114-32123);心占 (i-1..i, num-1..num)。 */
+ *  底座坡面/半砖复位(cs:32114-32123);心占 (i-1..i, num-1..num)。
+ *  ★tileSolid 语义 = 生成期 Main.tileSolid（vanGenSolidType）——曾读静态
+ *   TILE_DEFS.solid：#57 干净基座下 26 心全错位（锚定/底座踩在 484 滚地仙人掌
+ *   上，原版 484 自 DesertBiome 头 cs:12537 起恒非实心）。WWW 批 2026-08-18 修。 */
 function addLifeCrystal(st: TileStore, i: number, j: number): boolean {
   const { h } = st;
   if (!st.inBounds(i, j)) return false;
   for (let k = j; k < h; k++) {
     const ki = st.idx(i, k);
-    if (!st.flags[ki] || !TILE_DEFS[st.type[ki]]?.solid) continue;
+    if (!st.flags[ki] || !vanGenSolidType(st.type[ki])) continue;
     const num = k - 1;
     const at = (xx: number, yy: number) => st.idx(xx, yy);
     if (!st.inBounds(i, num - 1) || !st.inBounds(i - 1, num - 1)
@@ -543,10 +546,14 @@ function addLifeCrystal(st: TileStore, i: number, j: number): boolean {
     }
     // cs:32096:锚行墙为地牢墙 → false
     if (DUNGEON_WALLS.has(st.wall[at(i, num)])) return false;
-    // cs:32104-32113:底座(i-1, num+1)/(i, num+1) 须 nactive(active 且非半砖)+tileSolid
+    // cs:32104-32113:底座(i-1, num+1)/(i, num+1) 须 nactive+tileSolid。
+    // ★nactive()（Tile.cs:270）= (sTileHeader & 0x60) == 32 = active(0x20) 且
+    //   !inActive(0x40,致动位)——**与 halfBrick(0x400) 无关**！曾按老版语义译成
+    //   "active 且非半砖"：#57 干净基座下 24 心错位（半砖底座被误拒，如
+    //   (1313,430) 半砖雪块上 golden 有心）。WWW 批 2026-08-18 修。
     for (const bx of [i - 1, i]) {
       const bi = at(bx, num + 1);
-      if (!st.flags[bi] || st.half[bi] || !TILE_DEFS[st.type[bi]]?.solid) return false;
+      if (!st.flags[bi] || ((st.wire[bi] >>> 5) & 1) === 1 || !vanGenSolidType(st.type[bi])) return false;
       if (st.half[bi] !== 0 || st.slope[bi] !== 0) { st.half[bi] = 0; st.slope[bi] = 0; }  // 坡面复位
     }
     // cs:32124-32139:四格心,frameX 0/18、frameY 0/18

@@ -22,7 +22,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { hitTownNpcs, playEnemyHitSound } from './projTargets';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import type { VDust } from '../fx/VanillaDust';
@@ -213,6 +213,14 @@ export class SkyDragonSpin extends Entity {
   }
 
   private applyHits(game: GameHooks, x0: number, y0: number, x1: number, y1: number): void {
+    // 城镇 NPC 巫毒窄门（Damage_PVE_Inner :11970-11972——玩家弹族同门；线段
+    // 判定近似为线段中点外扩 23px 盒，与敌判定同盒）
+    {
+      const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+      const bw = Math.max(46, Math.abs(x1 - x0)), bh = Math.max(46, Math.abs(y1 - y0));
+      hitTownNpcs({ x: mx - bw / 2, y: my - bh / 2, w: bw, h: bh }, game,
+        this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);
+    }
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
       if (e.dead || !this.hitCd.ready(e.id, 6)) continue;
@@ -348,6 +356,7 @@ export class SkyDragonSwing extends Entity {
     }
     // ---- 命中（默认 24×24 AABB、6t 冷却、penetrate −1）----
     this.hitCd.tick();
+    hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);   // 巫毒窄门（无娃娃 no-op）
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
       if (e.dead || !this.hitCd.ready(e.id, 6)) continue;
@@ -431,6 +440,7 @@ export class SkyDragonShot extends Entity {
     const st = game.world.store;
     const tx = Math.floor(this.cx / 16), ty = Math.floor(this.cy / 16);
     if (!st.inBounds(tx, ty) || st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.explode(game); return; }
+    hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);   // 巫毒窄门
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
       if (e.dead) continue;
@@ -563,6 +573,7 @@ export class SkyDragonCircle extends Entity {
     // ---- 判定（friendly 门 + 8t 免疫 + penetrate −1 :13052-13054）----
     if (!this.friendlyT) return;
     this.hitCd.tick();
+    hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);   // 巫毒窄门（无娃娃 no-op）
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
       if (e.dead || !this.hitCd.ready(e.id, 8)) continue;

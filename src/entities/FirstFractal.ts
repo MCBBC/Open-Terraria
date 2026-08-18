@@ -9,7 +9,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { hitTownNpcs, playEnemyHitSound } from './projTargets';
 
 export class FirstFractalSlash extends Entity {
   w = 32; h = 32;
@@ -57,6 +57,8 @@ export class FirstFractalSlash extends Entity {
       game.spawnParticles(this.cx, this.cy, Math.random() < 0.7 ? '#7CB8FF' : '#FFFFFF', 1, 1.2, { life: 20 });
     }
     // 命中（穿透 -1；localNPCHitCooldown=10）
+    // 城镇 NPC 巫毒窄门（Damage_PVE_Inner :11970-11972——玩家弹族同门；无娃娃 no-op）
+    hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 6.5, 'playerProj', 0);
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitSet.has(e.id)) continue;

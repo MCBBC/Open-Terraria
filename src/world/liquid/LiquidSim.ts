@@ -122,6 +122,41 @@ for (let q = 0; q < TILE_DEFS.length; q++) {
   if (typeof s === 'number') SHEET_OF[q] = s;
 }
 
+/* ── gen 期 KillTile 尾 SquareTileFrame 锚点级联（YYY 批 2026-08-18）──────────
+ * 原版 KillTile 尾无条件 SquareTileFrame(i,j)（cs:63947）→ 3×3 逐格 TileFrame
+ * （cs:82067）→ 帧重要物走 TileFrameImportant（cs:85703）。生成期该链的实效应：
+ *  ① 液体唤醒段被 !generatingWorld 门挡（cs:82083-82086，VVV 批已另有唤醒门）；
+ *  ② TileFrameCosmetic 同门不跑（cs:82111 `!generatingWorld &&` 短路，且中心格
+ *     已清活性早退——resetFrame Next(0,3) 不掷，JunglePass 先例同源）；
+ *  ③ 帧重要族的锚点拆除级联照跑——#49 残差 10 格的债主：
+ *     · 巨石族 → Check2x2（cs:86688 case 132/138/142/143/288-295/484/664/665/
+ *       711/712；沉降期在场成员仅 484——138 巨石/664/665/711/712 来自更晚的
+ *       Traps 族 pass，132 拉杆/142/143 泵属非巨石支撑分支且同晚，零存在）：
+ *       2×2 块帧校验 + 上方箱族豁免 + 底部 SolidTileAllowBottomSlope 双列支撑，
+ *       任一破 → destroyObject 闸内 KillTile 整组（cs:48562-48574）+ 尾 4×4
+ *       TileFrame（cs:48799-48805）。
+ *     · 485 蚁狮幼虫 → CheckSuper（cs:86443 case 376/443/444/485 → cs:48117；
+ *       TileObjectData[485]=Style2x2+StyleHorizontal+WrapLimit4，:3511）：块帧
+ *       校验（样式列 frameX/36）+ 双底列 AnchorValid(SolidTile)（cs:48252-48262）
+ *       → 整组杀 + 尾 4×4 TileFrame（cs:48266-48270）。485 的 NPC 生成分支被
+ *       isGeneratingOrLoadingWorld 挡（cs:48371）、376/443/444 生成期不存在
+ *       （钓鱼箱/训练假人族=玩家放置物），未移植的分支在此注记。
+ * 掷骰：巨石族尘量 0（cs:66654）、485 尘量 10×每尘 0 掷（cs:66744 型选无
+ * 484/485 case），51+墙62 Next(4) 与 58 灌浆走 killTileGen 既有口径 → 级联
+ * 零掷、RNG 流位不动（#49-#52 已绿通道不受扰）。 */
+/** Check2x2 派发集（巨石族成员，原版 sheet id；TileID.cs:195 Boulders 去掉
+ *  派发不达的 713-716——cs:86398 空 break 列表成员，不走 Check2x2） */
+const CHECK2X2_SHEETS = new Set([138, 484, 664, 665, 711, 712]);
+/** Check2x2 巨石分支的上方箱族豁免（cs:48473-48490：BasicChest{21,467}+88+
+ *  BasicChestFake{441,468}+470+475，原版 sheet id） */
+const CHEST_PROTECT_SHEETS = new Set([21, 467, 441, 468, 88, 470, 475]);
+/** PlatformProperTopFrame（cs:70198，帧宽 18）：平台合法顶帧段 [0,7]∪[12,16]∪[25,26] */
+function platformProperTopFrameGen(frameX: number): boolean {
+  const n = Math.trunc(frameX / 18);
+  if ((n < 0 || n > 7) && (n < 12 || n > 16)) return n >= 25 && n <= 26;
+  return true;
+}
+
 export class LiquidSim {
   world: World;
   /** 活动液体条目（原版 Main.liquid[]，dense 数组 + swap-remove） */
@@ -235,6 +270,9 @@ export class LiquidSim {
     // cs:63941：地狱石(58) 击杀于 UnderworldLayer(=h-200) 之下 → 灌岩浆 128
     if (sheet === 58 && y > st.h - 200) { st.liquid[i] = 128; st.liquidType[i] = 2; }
     st.setTileSilent(x, y, 0);
+    // cs:63947 尾 SquareTileFrame(i,j)：3×3 TileFrame 锚点级联（YYY 批，见
+    // CHECK2X2_SHEETS 总注）——巨石族 Check2x2 / 485 CheckSuper 整组拆除
+    this.squareTileFrameGen(x, y);
   }
 
   /** KillTile 分发：运行期走 Game 注入钩子（掉落+帧刷新）；生成/读档沉降期
@@ -244,6 +282,159 @@ export class LiquidSim {
   private killTileAt(x: number, y: number): void {
     if (this.killTile) { this.killTile(x, y); return; }
     if (this.isGeneratingOrLoadingWorld) this.killTileGen(x, y);
+  }
+
+  /* ── KillTile 尾 SquareTileFrame 锚点级联（YYY 批；模块头注见 CHECK2X2_SHEETS
+   *    处总注）。与 HalfBrickPass.ts 的 UUU 批副本同源（#53 SmoothWorld 作用域），
+   *    两副本并存系本仓"同源副本禁 import"惯例，勿互相 import 收编留终局。 */
+
+  /** WorldGen.destroyObject 再入闸（cs:48408/48266/48799）：级联组杀期间嵌套
+   *  TileFrame 不再发起新 Check2x2/CheckSuper（非活性清残基不受闸限） */
+  private destroyObj = false;
+
+  /** TileFrame 生成期子集（cs:82067）：边界闸 + 非活性清 half/slope 残基 +
+   *  帧重要族派发（巨石族 Check2x2 / 485 CheckSuper）。液体唤醒段（cs:82083-86）
+   *  生成期被 !generatingWorld 门挡（本级联不唤醒——与 VVV 批唤醒门同口径；
+   *  读档沉降 generatingWorld=false 原版 TileFrame 会 AddWater 唤醒，本仓
+   *  setTileSilent 历来不唤醒、此处维持不接，读档口径备案）。 */
+  private tileFrameGen(x: number, y: number): void {
+    const st = this.world.store;
+    if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;   // cs:82069
+    const i = this.idx(x, y);
+    if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; return; }    // cs:82078-83
+    const t = st.type[i];
+    const sh = SHEET_OF[t] ?? -1;
+    if (CHECK2X2_SHEETS.has(sh)) this.check2x2Gen(x, y, t);           // cs:86688→Check2x2
+    else if (sh === 485) this.checkSuperGen(x, y, t);                 // cs:86443→CheckSuper
+  }
+
+  /** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame，列主序与原版逐条一致 */
+  private squareTileFrameGen(x: number, y: number): void {
+    this.tileFrameGen(x - 1, y - 1); this.tileFrameGen(x - 1, y); this.tileFrameGen(x - 1, y + 1);
+    this.tileFrameGen(x, y - 1); this.tileFrameGen(x, y); this.tileFrameGen(x, y + 1);
+    this.tileFrameGen(x + 1, y - 1); this.tileFrameGen(x + 1, y); this.tileFrameGen(x + 1, y + 1);
+  }
+
+  /** SolidTileAllowBottomSlope（cs:70211-70233）：!InWorld→true；active &&
+   *  (tileSolid||tileSolidTop) && (!topSlope || (Platforms&&合法顶帧)) && !halfBrick。
+   *  tileSolid/tileSolidTop 读 solidNP（=TILE_DEFS.solid&&!platform 叠 gen 期
+   *  GenSolid 覆写与沉降窗口巨石族翻转——恰为沉降期 Main.tileSolid 镜像）；
+   *  tileSolidTop/TileID.Sets.Platforms ≈ d.platform（HalfBrickPass UUU 批同近似，
+   *  本仓把桌面/工作台等 tileSolidTop 家族统一标 platform）。inActive 生成期无位。 */
+  private solidTileAllowBottomSlopeGen(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
+    const i = this.idx(x, y);
+    if (!st.flags[i]) return false;
+    const t = st.type[i];
+    const d = TILE_DEFS[t];
+    const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
+    if (topSlope && !(d?.platform && platformProperTopFrameGen(st.frameX[i]!))) return false;
+    return (this.solidNP[t] === 1 || !!d?.platform) && !st.half[i];
+  }
+
+  /** AnchorValid(SolidTile)（cs:51866-51873）：nactive && tileSolid && !tileSolidTop
+   *  && !tileNoAttach && blockType()==0。tileSolid&&!tileSolidTop ≈ solidNP==1；
+   *  blockType()==0 ⇔ !halfBrick && slope==0（Tile.blockType）；tileNoAttach 无
+   *  本仓镜像——实心且 noAttach 的类型实践中不存在（485 底座为沙/沙岩族恒
+   *  false），备案。越界 = GetTileSafely 新 Tile（非活性）→ 无效锚。 */
+  private anchorValidSolidTileGen(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+    const i = this.idx(x, y);
+    if (!st.flags[i]) return false;
+    return this.solidNP[st.type[i]] === 1 && !st.half[i] && st.slope[i] === 0;
+  }
+
+  /** Check2x2 巨石族子集（cs:48405-48805）：2×2 锚定校验 + 整组杀 + 尾 4×4 帧。
+   *  锚点反解 = 本格减帧偏移（cs:48408-48422；frameX≥36 修样式列 +36）。块帧
+   *  失配只 break 内层（cs:48443-48451）——巨石族的支撑门在双列循环后的单一
+   *  组合条件（cs:48473-48490），逐列支撑检查是 95/126/非巨石分支（不在派发集）。
+   *  上方箱族 type 裸读不查 active（ghost type 保真，同原版）。 */
+  private check2x2Gen(x: number, y: number, type: number): void {
+    if (this.destroyObj) return;                                      // cs:48408
+    const st = this.world.store;
+    const i0 = this.idx(x, y);
+    let ax = -Math.trunc(st.frameX[i0]! / 18);
+    let styleX = 0;
+    if (ax < -1) { ax += 2; styleX = 36; }
+    ax += x;
+    let fy = st.frameY[i0]!;
+    let row = 0;
+    while (fy >= 36) { fy -= 36; row++; }                             // num3=36（type172 除外）
+    const ay = y - Math.trunc(fy / 18);
+    const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
+    let bad = false;
+    for (let k = ax; k < ax + 2; k++) {
+      for (let l = ay; l < ay + 2; l++) {
+        if (!inW(k, l)) { bad = true; break; }                        // 越界=新 Tile→失配
+        const q = st.idx(k, l);
+        if (!st.flags[q] || st.type[q] !== type
+          || st.frameX[q] !== (k - ax) * 18 + styleX
+          || st.frameY[q] !== (l - ay) * 18 + row * 36) { bad = true; break; }
+      }
+    }
+    const chestAbove = (cx: number, cy: number): boolean =>
+      inW(cx, cy) && CHEST_PROTECT_SHEETS.has(SHEET_OF[st.type[st.idx(cx, cy)]] ?? -1);
+    if (!chestAbove(ax, ay - 1) && !chestAbove(ax + 1, ay - 1)
+      && !this.solidTileAllowBottomSlopeGen(ax, ay + 2)
+      && !this.solidTileAllowBottomSlopeGen(ax + 1, ay + 2)) bad = true;
+    if (!bad) return;
+    this.destroyObj = true;                                           // cs:48562
+    for (let k = ax; k < ax + 2; k++) {
+      for (let l = ay; l < ay + 2; l++) {
+        if (!inW(k, l)) continue;
+        const q = st.idx(k, l);
+        if (st.type[q] === type && st.flags[q]) this.killTileGen(k, l);
+      }
+    }
+    this.destroyObj = false;
+    for (let k = ax - 1; k < ax + 3; k++) {
+      for (let l = ay - 1; l < ay + 3; l++) this.tileFrameGen(k, l);  // cs:48799-48805
+    }
+  }
+
+  /** CheckSuper 的 485 分支（cs:48117-48270）：TileObjectData[485]=Style2x2 +
+   *  StyleHorizontal（cs:3511 条目）→ 2×2、样式列 frameX/36、Full 宽高 36、
+   *  格步 18（16+2 padding）。块帧校验无 break（cs:48146-48151 与 Check2x2 不同）；
+   *  flag4 支撑门 = 双底列 AnchorValid(SolidTile)（cs:48252-48262，无 break）。 */
+  private checkSuperGen(x: number, y: number, type: number): void {
+    if (this.destroyObj) return;                                      // cs:48120
+    const st = this.world.store;
+    const i0 = this.idx(x, y);
+    const fx = st.frameX[i0]!, fyv = st.frameY[i0]!;
+    const ax = x - Math.trunc(fx / 18) % 2;                           // cs:48133-48137（width=2）
+    const ay = y - Math.trunc(fyv / 18) % 2;                          // height=2
+    const styleX = Math.trunc(fx / 36);                               // StyleHorizontal → num4=frameX/36
+    const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
+    let bad = false;
+    for (let k = 0; k < 2; k++) {
+      for (let l = 0; l < 2; l++) {
+        if (!inW(ax + k, ay + l)) { bad = true; continue; }           // 越界=新 Tile→失配
+        const q = st.idx(ax + k, ay + l);
+        if (!st.flags[q] || st.type[q] !== type
+          || st.frameX[q] !== styleX * 36 + k * 18                    // cs:48147-48150
+          || st.frameY[q] !== l * 18) bad = true;
+      }
+    }
+    let supported = true;                                             // flag4（cs:48252-48262）
+    for (let k = 0; k < 2; k++) {
+      if (!this.anchorValidSolidTileGen(ax + k, ay + 2)) supported = false;
+    }
+    if (!supported) bad = true;
+    if (!bad) return;
+    this.destroyObj = true;                                           // cs:48266
+    for (let k = 0; k < 2; k++) {
+      for (let l = 0; l < 2; l++) {
+        if (!inW(ax + k, ay + l)) continue;
+        const q = st.idx(ax + k, ay + l);
+        if (st.type[q] === type && st.flags[q]) this.killTileGen(ax + k, ay + l);
+      }
+    }
+    this.destroyObj = false;
+    for (let k = -1; k < 3; k++) {
+      for (let l = -1; l < 3; l++) this.tileFrameGen(ax + k, ay + l); // cs:48266-48270
+    }
   }
   // ---- panic 模式（Liquid.cs:975-1070）：缓冲长期超限 → 逐行 QuickWater 强制收敛 ----
   private panicMode = false;

@@ -1085,8 +1085,8 @@ function brokenTrapCleanupPass({ store, world }: GenCtx) {
   runBrokenTrapCleanupPass(store);
 }
 
-function finalCleanupPass({ store }: GenCtx) {
-  runFinalCleanupPass(store, ctxGs[0]!);
+function finalCleanupPass({ store, rng }: GenCtx) {
+  runFinalCleanupPass(store, ctxGs[0]!, rng);
 }
 
 function multitileSweepPass({ store }: GenCtx) {

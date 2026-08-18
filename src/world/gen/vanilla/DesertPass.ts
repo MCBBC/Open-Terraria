@@ -893,7 +893,15 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     if (!solidGenAt(ax, ay + 1) || !solidGenAt(ax + 1, ay + 1)) return;
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) {
-        st.setTileSilent(ax + k, ay - 1 + l, T485, k * 18, style * 36 + l * 18);
+        // ★YYY 批帧轴修正：485 TileObjectData StyleHorizontal=true（TileObjectData.cs
+        //   :3511 条目）→ TileObject.Place 的样式偏移落 **frameX**（TileObject.cs
+        //   Place：num2=FullWidth*style（StyleHorizontal 分支）、frameY=l*(16+2)）。
+        //   曾按竖排样式轴写 frameY=style*36+l*18——8 通道对拍不比帧所以隐身，但
+        //   LiquidSim 锚点级联的 CheckSuper（cs:48117）按 frameX/36 解样式列、按
+        //   frameY==j*18 校验块帧，样式轴错位会把完好的 485 组误判残片整组误杀。
+        //   （样式数值本身两侧仍不同：vanilla=(outer+inner)%4 经 StyleWrapLimit=4
+        //   回卷，本仓只写 outer——帧非比对通道，对拍无影响。）
+        st.setTileSilent(ax + k, ay - 1 + l, T485, style * 36 + k * 18, l * 18);
       }
     }
   };

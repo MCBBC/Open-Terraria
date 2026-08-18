@@ -39,7 +39,11 @@ void main() {
   vec2 p = c + vec2(d.x * co - d.y * s, d.x * s + d.y * co);
   vUv = vec2(uSrc.x + p.x * uSrc.z, uSrc.y + p.y * uSrc.w);
   vec2 screen = vec2(uDst.x + p.x * uDst.z, uDst.y + p.y * uDst.w);
-  gl_Position = vec4(screen / uCanvas * 2.0 - 1.0, 0.0, 1.0);
+  // ★y 翻转:canvas 2D 的 y 向下,clip space 的 y 向上——不翻则整画布垂直颠倒
+  //   (两次实测翻车:2026-08-18 用户两报背景/地图倒置;texImage2D 未开 FLIP_Y,
+  //   纹理行 0=图像顶行,配此翻转后 dst 顶=图像顶 ✓。tests/gl-layer-regression 锁定)
+  gl_Position = vec4(screen.x / uCanvas.x * 2.0 - 1.0,
+                     1.0 - screen.y / uCanvas.y * 2.0, 0.0, 1.0);
 }`;
 
 const FRAG_SRC = `#version 300 es
@@ -133,8 +137,9 @@ export class GLSpriteLayer {
       return s;
     };
     this.samp.nearest = mkSampler(gl.NEAREST, gl.CLAMP_TO_EDGE);
-    this.samp.linear = mkSampler(gl.LINEAR, gl.CLAMP_TO_EDGE);
-    this.samp.repeat = mkSampler(gl.LINEAR, gl.REPEAT);
+    // LINEAR 档带 mipmap:缩放 quad 对齐 Skia 的盒式降采样(对拍最优)
+    this.samp.linear = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.CLAMP_TO_EDGE);
+    this.samp.repeat = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.REPEAT);
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -180,13 +185,17 @@ export class GLSpriteLayer {
     if (!w || !h) return null;
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    // ★预乘上传:mip 层平均的是预乘像素(能量正确)——直 Alpha 会让 mip 把
+    // 透明像素的 RGB(黑)混进边缘 = 软边缘发暗(对拍实锤树冠边缘差异)。
+    // shader 侧公式无需变:out.rgb = premul×tint×uAlpha 恰等于 straight×tint×a
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, repeatX ? gl.REPEAT : gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.generateMipmap(gl.TEXTURE_2D);   // LINEAR 档三线采样(LINEAR_MIPMAP_LINEAR)
     gl.bindTexture(gl.TEXTURE_2D, null);
     const entry: TexEntry = { tex, w, h, stamp: ++this.stamp };
     this.texs.set(key, entry);
@@ -213,7 +222,7 @@ export class GLSpriteLayer {
     sc.clearRect(0, 0, w, h);
     sc.drawImage(src as CanvasImageSource, x, y, w, h, 0, 0, w, h);
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);   // 同 texFromImage:预乘+mip 能量正确
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, this.scratch);
     gl.generateMipmap(gl.TEXTURE_2D);   // 子区更新后 mip 链重建(全链重建,量大时改逐级)

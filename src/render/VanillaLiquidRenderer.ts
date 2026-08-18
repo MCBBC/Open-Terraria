@@ -655,14 +655,23 @@ export function drawLiquidBehindTilesOnly(
       const def = TILE_DEFS[st.type[i]];
       if (!def || !def.solid || def.platform) continue; // 仅实心方块(:4075 tileSolid 排除)
 
-      // 四邻液体(TileDrawing.cs:3861-3900;379=conveyor 按 vanilla 视为无液体)
-      const lq = (dx: number, dy: number) => {
+      // 四邻液体(TileDrawing.cs:3861-3900;379=conveyor 按 vanilla 视为无液体)。
+      // ★零分配版(2026-08-18):旧 lq() 每调用 new {lq,lt} ×4/格——水邻屏每帧
+      // 8k-33k 对象 = GC 0.94s/次 = 行走 70-135ms 掉帧主源(trace ProfileChunk+GC 相关性)
+      let nLq = 0, nLt = 0;
+      const nb = (dx: number, dy: number): boolean => {
         const nx = x + dx, ny = y + dy;
-        if (!st.inBounds(nx, ny)) return { lq: 0, lt: 0 };
+        if (!st.inBounds(nx, ny)) return false;
         const ni = st.idx(nx, ny);
-        return { lq: st.liquid[ni], lt: st.liquidType[ni] || 1 };
+        nLq = st.liquid[ni];
+        nLt = st.liquidType[ni] || 1;
+        return true;
       };
-      const L = lq(-1, 0), R = lq(1, 0), U = lq(0, -1), D = lq(0, 1);
+      let Lq = 0, Lqt = 0, Rq = 0, Rqt = 0, Uq = 0, Uqt = 0, Dq = 0, Dqt = 0;
+      if (nb(-1, 0)) { Lq = nLq; Lqt = nLt; }
+      if (nb(1, 0)) { Rq = nLq; Rqt = nLt; }
+      if (nb(0, -1)) { Uq = nLq; Uqt = nLt; }
+      if (nb(0, 1)) { Dq = nLq; Dqt = nLt; }
       // 坡面格的"实心侧"邻格不计入（:3967/:3989/:4011/:4028 的 slope 门）：
       // slope 1/3 忽略左、2/4 忽略右、3/4 忽略上、1/2 忽略下——液体只从坡面开放侧来
       const slope = st.slope[i];
@@ -671,18 +680,18 @@ export function drawLiquidBehindTilesOnly(
       const slopeBlocksUp = slope === 3 || slope === 4;
       const slopeBlocksDown = slope === 1 || slope === 2;
       // flag 语义(:3967-4053):flag=左 / flag2=右 / flag3=上 / flag4=下(>240)
-      let fL = L.lq > 0 && !slopeBlocksLeft;
-      let fR = R.lq > 0 && !slopeBlocksRight;
-      const fU = U.lq > 0 && !slopeBlocksUp;
-      const fD = D.lq > 240 && !slopeBlocksDown;
+      let fL = Lq > 0 && !slopeBlocksLeft;
+      let fR = Rq > 0 && !slopeBlocksRight;
+      const fU = Uq > 0 && !slopeBlocksUp;
+      const fD = Dq > 240 && !slopeBlocksDown;
       if (!fL && !fR && !fU && !fD) continue; // :4055-4057 四邻无液体跳过
 
-      // 液体类型与最大液位(:3940-3965 取最高液位邻居)
+      // 液体类型与最大液位(:3940-3965 取最高液位邻居;顺序 L→R→U→D 严格大于才覆盖)
       let maxLq = 0, lt = 0;
-      const consider = (n: { lq: number; lt: number }) => {
-        if (n.lq > maxLq) { maxLq = n.lq; lt = toVanillaType(n.lt); }
-      };
-      if (fL) consider(L); if (fR) consider(R); if (fU) consider(U); if (fD) consider(D);
+      if (fL && Lq > maxLq) { maxLq = Lq; lt = toVanillaType(Lqt); }
+      if (fR && Rq > maxLq) { maxLq = Rq; lt = toVanillaType(Rqt); }
+      if (fU && Uq > maxLq) { maxLq = Uq; lt = toVanillaType(Uqt); }
+      if (fD && Dq > maxLq) { maxLq = Dq; lt = toVanillaType(Dqt); }
       const tex = texFor(lt); // lt=3 微光走 Liquid_14
       if (!tex) continue;
 

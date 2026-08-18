@@ -18,8 +18,8 @@ import { settleWorldLiquids } from '../src/world/liquid/settle';
 // ---- pass 实现 ----
 import { runWaterfallLipPass } from '../src/world/gen/vanilla/HalfBrickPass';
 import { runFragileIcePass } from '../src/world/gen/vanilla/WaterIcePasses';
-import { runCaveWallVarietyPass, runCaveWallsPass } from '../src/world/gen/vanilla/CaveWallsPass';
-import { runLifeCrystalsPass } from '../src/world/gen/vanilla/StructuresPass';
+import { runCaveWallVarietyPass, runCaveWallsPass, runJungleMudWallsPass } from '../src/world/gen/vanilla/CaveWallsPass';
+import { runLifeCrystalsPass, runSurfaceDecorPass, runCactusPalmTreesAndCoralPass, runAlchemyHerbsPass } from '../src/world/gen/vanilla/StructuresPass';
 import { runStatuesPass } from '../src/world/gen/vanilla/StatuesPass';
 import { rollHouseChestCounts, runCaveHousesPass } from '../src/world/gen/vanilla/CaveHousePass';
 import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from '../src/world/gen/vanilla/BuriedChestsPass';
@@ -38,15 +38,15 @@ import { runTrapsPass } from '../src/world/gen/vanilla/TrapsPass';
 import { runPilesPass } from '../src/world/gen/vanilla/PilesPass';
 import { runGrassWallPass } from '../src/world/gen/vanilla/GrassWallPass';
 import {
-  runSunflowersPart2Pass, runAlchemyHerbsPass, runDyePlantsPass, runVinesPass,
+  runSunflowersPart2Pass, runDyePlantsPass, runVinesPass,
   runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
   runGrassPlantsPass, runGlowingMushroomPlantsPass, runJunglePlantsPart2Pass,
   runSurfaceOreAndStonePass, runFallenLogsPass,
 } from '../src/world/gen/vanilla/SurfaceDecorPasses';
 import { runWebsInSpiderCavesPass, runBeeLarvaPass } from '../src/world/gen/vanilla/HiveSpiderPass';
-import { runCactusPalmTreesAndCoralPass } from '../src/world/gen/vanilla/StructuresPass';
 import { runTileCleanupPass } from '../src/world/gen/vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from '../src/world/gen/vanilla/BrokenTrapCleanupPass';
+import { runFinalCleanupPass } from '../src/world/gen/vanilla/FinalCleanupPass';
 import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
 import { runTreePass } from '../src/world/gen/vanilla/TreePass';
 

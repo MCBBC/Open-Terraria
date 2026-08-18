@@ -1938,8 +1938,7 @@ export class Renderer {
 
     // 7b'. 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房光标
     //      携带头像（:44622-44688 DrawInterface_38）——屏幕空间最后层
-    this.drawCursorItemIcon(ctx, player, cam,
-      lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    this.drawCursorItemIcon(ctx, player, cam);
 
     // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
     this.drawMoonLordShake(ctx, cam, viewW, viewH);
@@ -8546,8 +8545,8 @@ export class Renderer {
   }
 
   /** 指针物品/交互图标（Main.cs:44474-44562 DrawInterface_40）+ 住房携带头像
-   *  （:44622-44688 DrawInterface_38）。屏幕空间;图标乘光标格光照
-   *  （ItemSlot.GetItemLight :44517）;pos=(mouse+10+push) 半 hitbox 居中。 */
+   *  （:44622-44688 DrawInterface_38）。屏幕空间;图标恒全亮（GetItemLight
+   *  outInTheWorld=false 不采光照,ItemSlot.cs:3458）;pos=(mouse+10+push)。 */
   /** 原版物品 vid → 内部 item id（atlasIcon 键）;未注册返回 -1 */
   private itemInternalOfVid(vid: number): number {
     const key = VANILLA_ITEM_KEY_BY_ID[vid];
@@ -8556,8 +8555,6 @@ export class Renderer {
 
   private drawCursorItemIcon(
     ctx: CanvasRenderingContext2D, player: Player, cam: Camera,
-    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
-    rx: number, ry: number, rw: number, rh: number,
   ): void {
     void player;
     const c = this.cursorIconCtx;
@@ -8592,27 +8589,15 @@ export class Renderer {
         const push = 10 + p.cursorItemIconPush;
         const icon = this.atlasIcon(this.itemInternalOfVid(t));
         if (icon) {
-          // 光标格光照（ItemSlot.GetItemLight :44517:GetColor(cursor tile)）
-          let lr = 255, lg = 255, lb = 255;
-          const [wtx, wty] = cam.screenToWorld(this._mouseX, this._mouseY);
-          const tx = Math.floor(wtx / TILE), ty = Math.floor(wty / TILE);
-          if (tx >= rx && ty >= ry && tx < rx + rw && ty < ry + rh) {
-            const li = (ty - ry) * rw + (tx - rx);
-            lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
-          }
           ctx.save();
           if (p.cursorItemIconReversed) { ctx.translate(this._mouseX + push + icon.sw / 2, 0); ctx.scale(-1, 1); ctx.translate(-(this._mouseX + push + icon.sw / 2), 0); }
           ctx.globalAlpha = 1;
-          // tint:原版 GetColor 乘光——用 globalCompositeOperation 近似困难,直接
-          // 以 globalAlpha=1 画原图+光强 alpha 叠黑(视觉等价:暗处图标变暗)
+          // 恒全亮:原版 GetItemLight(:44519)以 outInTheWorld=false 默认参调用,
+          // 不采样世界光照(ItemSlot.cs:3458 只处理迪斯科/脉冲/精华特殊物品),
+          // currentColor 恒 White → 图标不乘暗。曾误读为"乘光标格光照"并
+          // source-atop 叠黑——该合成作用于整张画布,暗处变纯黑方块(2026-08-18 报)
           ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
             this._mouseX + push, this._mouseY + push, icon.sw, icon.sh);
-          const lum = (lr + lg + lb) / 765;
-          if (lum < 0.98) {
-            ctx.globalCompositeOperation = 'source-atop';
-            ctx.fillStyle = `rgba(0,0,0,${1 - lum})`;
-            ctx.fillRect(this._mouseX + push, this._mouseY + push, icon.sw, icon.sh);
-          }
           ctx.restore();
           // 油漆工具子图标（:44531-44538 + TryGetAmmo :44570-44576）
           if (flag && c.paintAmmoVid > 0 && PAINT_TOOLS.has(num)) {

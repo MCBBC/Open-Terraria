@@ -22,15 +22,20 @@
 //   ⑩ 金币堆 332 下方补 332(cs:22493-22498,先 ClearEverything)
 //   ⑪ 地表散水清除(cs:22500-22510:非满液且左右下邻皆非满液、邻格非云族)
 //   ⑫ 无墙画作继承邻墙(cs:22512-22543,继承序:左→右→上→下)
-//   ⑭ DirtiestBlock 彩蛋(cs:22546+)——备案跳过(审计裁决)
+//   ⑭ DirtiestBlock 彩蛋(cs:22546-22587,XXX 批 2026-08-18 补)——数量 GetWorldSize
+//      档 3/6/9(尺寸敏感!曾备案跳过=中/大世界各缺 6/9 格 668),每迭代 2 掷
+//      [50,w-50)×[50,h-200) 拒绝采样,命中 TileID.Sets.Dirt={0,668} 活性格即替换
+//      (ClearTile=ClearSlope+active(false)+inActive(false) → active(true)+type=668,
+//      帧/墙/液体不动)。
 //   循环末尾的 TileFrame(i,j)(cs:22544)——跳过:帧管线统一负责,此处不重复
 //
 // ① Main.tileSolid[484]=false(cs:22305)——本 pass 全程生效;原版不在此还原
 //   (Main.tileSolid 随读档重置),故 ③ 的 SolidTile 与 ⑥ 后的类型判断都要用覆写表。
 //
-// 零掷骰(③-⑫ 全部确定性写格)→ 不收 rng。
+// ③-⑫ 零掷骰(确定性写格);⑭ 每 `3000-剩余` 迭代 2 掷(rng 缺省跳过=旧行为)。
 import type { TileStore } from '../../TileStore';
 import { LIQUID_TYPE } from '../../TileStore';
+import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
@@ -118,7 +123,7 @@ function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean
   return x < gs.beachDistance || x > st.w - gs.beachDistance;
 }
 
-export function runFinalCleanupPass(st: TileStore, gs: GenState): void {
+export function runFinalCleanupPass(st: TileStore, gs: GenState, rng?: RNG): void {
   // ★pass 头 tileSolid 翻转（cs:22306 `Main.tileSolid[484] = false`）：滚动仙人掌
   //   非实心——DesertBiome 头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档
   //   （484 生成期恒非实心,生成结束亦不还原）。写在 denySomeGeneration 门之外,
@@ -264,6 +269,39 @@ export function runFinalCleanupPass(st: TileStore, gs: GenState): void {
       }
 
       // TileFrame(i,j)(cs:22544)——跳过:帧管线统一负责
+    }
+  }
+
+  // ⑭ Dirtiest Block（cs:22546-22587）：num17 = GetWorldSize() switch
+  //    （1=>6, 2=>9, _=>3；tenthAnniversary ×5 种子门不适用）；num19=3000 次预算。
+  //    每迭代 Next(50,w-50)+Next(50,h-200)（上界独占）；active 且 type∈Dirt 集
+  //    （TileID.Sets.Dirt=CreateBoolSet(0,668)，TileID.cs:285）→ ClearTile()+
+  //    active(true)+type=668（帧/墙/液体/inActive 以外全部不动）。
+  //    ★FinalCleanup 是 105 pass 末位且其后 genRand 仅 secret-seed 分支消费
+  //    （FinishDrunkGen 等 cs:22596+）——本环掷数不影响普通世界终态流。
+  if (rng) {
+    const DIRT = TILE_BY_KEY['dirt']!;
+    const DIRTIEST = TILE_BY_KEY['v_668_the_dirtiest_block']!;
+    const sizeId = st.w <= 4200 ? 0 : st.w <= 6400 ? 1 : 2;      // GetWorldSize（cs:6518）
+    const target = sizeId === 1 ? 6 : sizeId === 2 ? 9 : 3;
+    let placed = 0;
+    let budget = 3000;
+    while (placed < target) {
+      budget--;
+      if (budget <= 0) break;
+      const x = rng.int(50, st.w - 51);   // Next(50, w-50)
+      const y = rng.int(50, st.h - 201);  // Next(50, h-200)
+      if (!st.inBounds(x, y)) continue;
+      const t = st.idx(x, y);
+      if (st.flags[t] && (st.type[t] === DIRT || st.type[t] === DIRTIEST)) {
+        placed++;
+        // ClearTile()：ClearSlope(slope=0,half=false)+active(false)+inActive(false)
+        st.slope[t] = 0;
+        st.half[t] = 0;
+        st.wire[t] &= ~32;      // inActive 位复位（Tile.cs:153-158）
+        st.flags[t] = 1;        // active(active:true)
+        st.type[t] = DIRTIEST;
+      }
     }
   }
 }

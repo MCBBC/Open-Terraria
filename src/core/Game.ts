@@ -3228,8 +3228,17 @@ export class Game implements GameHooks {
     this.lastTime = performance.now();
     const loop = (now: number) => {
       if (!this.running) return;
-      this.frame(now);
-      requestAnimationFrame(loop);
+      try {
+        this.frame(now);
+        requestAnimationFrame(loop);
+      } catch (err) {
+        // 帧循环异常熔断(2026-08-18):未捕获异常曾把 rAF 链静默炸断 = 整页 JS
+        // 冻结无现场(用户实报砍树拾取崩溃,trace 证 JS 整体死亡)。完整栈入
+        // console.error(→__swErrors 环,F5 报告可取)后停机——不再带病空转
+        this.running = false;
+        console.error('[Game] 帧循环异常,已停机(F5 报告/控制台可取完整栈):', err);
+        this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.FrameError'));
+      }
     };
     requestAnimationFrame(loop);
   }
@@ -12828,7 +12837,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         const tn = nent as TownNPC;
         if (!(tn instanceof TownNPC) || tn.dead || tn.bound) continue;
         const doll = tn.vanillaId === 22 ? eq.killGuide : tn.vanillaId === 54 ? eq.killClothier : false;
-        if (!doll || projId === 318) continue;
+        if (!doll && projId !== 318) continue;   // 与 hitTownNpcs 同式（318 非爆炸物实际不达）
         if (Math.abs(tn.cx - cx) < hb2 + tn.w / 2 && Math.abs(tn.cy - cy) < hb2 + tn.h / 2) {
           tn.hurt(damage, Math.sign(tn.cx - cx) * 2 || 1, 0, this);
         }
