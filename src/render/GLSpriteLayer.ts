@@ -23,7 +23,7 @@ export interface QuadOpts {
   smooth?: boolean;                                  // 采样过滤(默认 true=2D 默认平滑开)
 }
 
-interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number }
+interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number; bytes: number; mipped: boolean }
 
 const VERT_SRC = `#version 300 es
 uniform vec2 uCanvas;
@@ -68,8 +68,10 @@ export class GLSpriteLayer {
   private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null };
   private texs = new Map<string, TexEntry>();
   private stamp = 0;
-  /** 纹理缓存上限(LRU;超限驱逐最久未用) */
-  static MAX_TEXTURES = 96;
+  /** 字节预算(★2026-08-18:曾按条数 96 限额——96 张多 MB 纹理+mip 链可达 GB 级,
+   *  叠在画布预算之上 = GPU 打爆→contextlost 风暴 26 万次;改按字节) */
+  static MAX_BYTES = 192 * 1024 * 1024;
+  private bytes = 0;
   /** GL 不可用(WebGL2 缺失/初始化失败)时置 true,调用方回退 2D 路径 */
   unavailable = false;
   /** 设备最大纹理边长(大世界整幅 8400 超限的 GPU 走 2D 回退,防静默花屏) */
@@ -177,8 +179,11 @@ export class GLSpriteLayer {
     this.gl.bindVertexArray(null);
   }
 
-  /** 图片源(ImageBitmap/Image/canvas)入纹理;repeatX=true 时横向 REPEAT */
-  texFromImage(key: string, img: TexImageSource, repeatX = false): TexEntry | null {
+  /** 图片源(ImageBitmap/Image/canvas)入纹理;repeatX 横向 REPEAT;
+   *  noMip=跳过 mip 链(超大纹理/恒放大或 NEAREST 采样的贴图:小地图/迷雾——
+   *  8400×2400 的 mip 重生成是巨量 GPU churn,且它只在 zoom≥1 放大或 NEAREST
+   *  下采样时被采样,MIN/mip 永不生效) */
+  texFromImage(key: string, img: TexImageSource, repeatX = false, noMip = false): TexEntry | null {
     if (this.unavailable || !this.gl) return null;
     const hit = this.texs.get(key);
     if (hit) { hit.stamp = ++this.stamp; return hit; }
@@ -198,10 +203,13 @@ export class GLSpriteLayer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-    gl.generateMipmap(gl.TEXTURE_2D);   // LINEAR 档三线采样(LINEAR_MIPMAP_LINEAR)
+    const mipped = !noMip;
+    if (mipped) gl.generateMipmap(gl.TEXTURE_2D);   // LINEAR 档三线采样(LINEAR_MIPMAP_LINEAR)
     gl.bindTexture(gl.TEXTURE_2D, null);
-    const entry: TexEntry = { tex, w, h, stamp: ++this.stamp };
+    const base = w * h * 4;
+    const entry: TexEntry = { tex, w, h, stamp: ++this.stamp, bytes: mipped ? base * 4 / 3 : base, mipped };
     this.texs.set(key, entry);
+    this.bytes += entry.bytes;
     this.evictLRU(key);
     return entry;
   }
@@ -228,7 +236,7 @@ export class GLSpriteLayer {
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);   // 同 texFromImage:预乘+mip 能量正确
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, this.scratch);
-    gl.generateMipmap(gl.TEXTURE_2D);   // 子区更新后 mip 链重建(全链重建,量大时改逐级)
+    if (e.mipped) gl.generateMipmap(gl.TEXTURE_2D);   // 子区更新后 mip 链重建
     gl.bindTexture(gl.TEXTURE_2D, null);
     e.stamp = ++this.stamp;
   }
@@ -301,22 +309,25 @@ export class GLSpriteLayer {
 
   private evictLRU(keepKey: string): void {
     if (!this.gl) return;
-    while (this.texs.size > GLSpriteLayer.MAX_TEXTURES) {
+    while (this.bytes > GLSpriteLayer.MAX_BYTES) {
       let oldest: string | null = null;
       let min = Infinity;
       for (const [k, e] of this.texs) if (e.stamp < min && k !== keepKey && k !== '__white') { min = e.stamp; oldest = k; }
       if (!oldest) break;
       const dead = this.texs.get(oldest)!;
       this.texs.delete(oldest);
+      this.bytes -= dead.bytes;
       this.gl.deleteTexture(dead.tex);
     }
   }
 
-  /** 全量释放(切世界/长期不用) */
+  /** 全量释放(切世界/读档——★曾漏挂此链:连续读档逐次叠满 LRU=GB 级显存
+   *  打爆 → contextlost 风暴 26 万次,tab 3.4GB 用户实报 2026-08-18) */
   dispose(): void {
     if (!this.gl) return;
     for (const [, e] of this.texs) this.gl.deleteTexture(e.tex);
     this.texs.clear();
+    this.bytes = 0;
     this.canvas.width = 0;
     this.canvas.height = 0;
   }

@@ -167,3 +167,46 @@ describe('全局替换表（Lang.cs:102-110/:146-160 RegisterGlobalSubstitution�
     expect(languageManager.getTextValue('UI.Weird')).toBe('造成{PowerUnit}点伤害');
   });
 });
+
+describe('全局替换表补全批（61 注册全量,2026-08-18）', () => {
+  beforeEach(() => {
+    languageManager.resetForTest();
+  });
+  it('23 NPC 名全覆盖:{Mechanic}/{Bartender}/{TaxCollector} 等经 resolver', async () => {
+    const { setNpcNameResolver } = await import('../src/i18n/LanguageManager');
+    languageManager.loadPackJson({ LegacyDialog: { X: '找{Mechanic}和{Bartender}和{TaxCollector}' } });
+    setNpcNameResolver((t) => ({ 124: '米卡', 550: '麦斯威尔', 441: '税务官' }[t] ?? null));
+    expect(languageManager.getTextValue('LegacyDialog.X')).toBe('找米卡和麦斯威尔和税务官');
+  });
+
+  it('动态值:WorldName/PlayerName/计数器/WorldEvilStone/ToggleArmorSetBonusKey', async () => {
+    const { setGlobalSubstitutionContext } = await import('../src/i18n/LanguageManager');
+    languageManager.loadPackJson({
+      Misc: { Ebonstone: '黑檀石', Crimstone: '猩红石' },
+      Key: { DOWN: '向下键', UP: '向上键' },
+      UI: {
+        W: '欢迎来到{WorldName},{PlayerName}!',
+        Q: '已完成{AnglerCompletedQuestsCount}次渔夫任务',
+        D: '死亡{TotalDeathsCount}次',
+        E: '挖{WorldEvilStone}',
+        K: '按{ToggleArmorSetBonusKey}切换套装奖励',
+      },
+    });
+    setGlobalSubstitutionContext({
+      worldName: () => '泰拉世界', playerName: () => '史蒂夫', inventoryKey: () => 'Escape',
+      anglerQuests: () => 42, totalDeaths: () => 7, crimson: () => false,
+      reversedArmorBonusKey: () => false,
+    });
+    expect(languageManager.getTextValue('UI.W')).toBe('欢迎来到泰拉世界,史蒂夫!');
+    expect(languageManager.getTextValue('UI.Q')).toBe('已完成42次渔夫任务');
+    expect(languageManager.getTextValue('UI.D')).toBe('死亡7次');
+    expect(languageManager.getTextValue('UI.E')).toBe('挖黑檀石');
+    expect(languageManager.getTextValue('UI.K')).toBe('按向下键切换套装奖励');
+  });
+
+  it('注入器缺位保留 token（null 语义,与 NPC 名一致）', async () => {
+    const { setGlobalSubstitutionContext } = await import('../src/i18n/LanguageManager');
+    languageManager.loadPackJson({ UI: { W: '世界:{WorldName}' } });
+    expect(languageManager.getTextValue('UI.W')).toBe('世界:{WorldName}');
+  });
+});

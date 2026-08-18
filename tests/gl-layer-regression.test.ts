@@ -29,6 +29,15 @@ describe('GLSpriteLayer 回归守卫(源码级锁定)', () => {
     expect(SRC).not.toContain('UNPACK_PREMULTIPLY_ALPHA_WEBGL, false');
   });
 
+  it('纹理缓存按字节预算(曾按条数 96:多 MB 纹理×96=GB 级打爆 GPU)', () => {
+    expect(SRC).toContain('MAX_BYTES = 192 * 1024 * 1024');
+    expect(SRC).not.toContain('MAX_TEXTURES');
+  });
+
+  it('dispose 字节归零(防跨世界累积)', () => {
+    expect(SRC).toMatch(/dispose[\s\S]{0,300}bytes = 0/);
+  });
+
   it('WebGL2 DOM 源子区上传走 8 参重载(9 参曾把画布左上角贴进目标区 = #362CFF 退化块)', () => {
     // texSubUpdate 内不得出现带 w/h 的 9 参形式
     const sub = SRC.split('texSubUpdate(')[1] ?? '';

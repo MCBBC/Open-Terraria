@@ -257,13 +257,16 @@ class LanguageManager {
     }
   }
 
-  /** 重置为测试初始态(含 pack 缓存) */
+  /** 重置为测试初始态(含 pack 缓存;全局替换表注入器/缓存一并清) */
   resetForTest() {
     this.pack = { texts: new Map(), groupedKeys: new Map(), variations: new Map() };
     this.activeCulture = null;
     this.loaded = false;
     this.warned.clear();
     this.packCache.clear();
+    npcNameResolver = null;
+    subCtx = null;
+    substitutionTable = null;
   }
 
   exists(key: string): boolean {

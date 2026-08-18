@@ -776,6 +776,53 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     }
     return 8 + Math.floor(t / 5) % Math.max(1, frames - 8);
   }
+  // 萤火虫族 355/358/654（case 355,cs:73369-73390）：counter<4→帧0/否则帧1（≥7 回卷
+  // = 4t 亮 3t 闪）；非发光期(lai1≤0)整带 +2（暗带,localAI[2] 门——lai1=本仓发光剩余）
+  if (id === 355 || id === 358 || id === 654) {
+    const blink = (t % 7) < 4 ? 0 : 1;
+    return Math.min(frames - 1, blink + (e.lai1 <= 0 ? 2 : 0));
+  }
+  // 精灵萤 677（case 677,cs:73391-73402）：counter 每 tick +2、≥6 回卷 → 每 3t 推进
+  if (id === 677) return Math.floor(t / 3) % Math.max(1, Math.min(4, frames));
+  // 蜻蜓族 595-601（case 595,cs:73403-73419）：每 3t 一帧全帧循环
+  if (id >= 595 && id <= 601) return Math.floor(t / 3) % Math.max(1, frames);
+  // 蚯蚓族 357/448/484/606（case 357,cs:73455-73509）：腾空=帧1（+direction*0.1/t
+  // 累积自旋,渲染 spin 未接备案）;地面静止=帧1;爬行 0↔1 每 12t 摆动
+  if (id === 357 || id === 448 || id === 484 || id === 606) {
+    if (e.vy !== 0 || e.vx === 0) return Math.min(1, frames - 1);
+    return Math.floor(t / 12) % Math.min(2, frames);
+  }
+  // 蛆虫族 485/486/487（case 485,cs:73511-73565）：地面静止=帧1;爬行 counter
+  // +=|vx|*5 >10 推进、0..3 循环（walkCycleT 按 |vx| 累加等价折算）;腾空=帧1
+  if (id === 485 || id === 486 || id === 487) {
+    if (e.vy !== 0 || e.vx === 0) return Math.min(1, frames - 1);
+    return Math.min(frames - 1, Math.floor((e.walkCycleT * 5) / 10) % 4);
+  }
+  // 瓢虫 604/605 + 椿象 669（case 604,cs:67616-67652）：移动时每 2t 一帧;地面
+  // 循环 0-3、腾空循环 4-7（表 8 帧）;静止 counter 冻结（近似取 0 差异登记）
+  if (id === 604 || id === 605 || id === 669) {
+    const k = Math.floor(t / 2) % 4;
+    return Math.min(frames - 1, e.vy === 0 ? k : 4 + k);
+  }
+  // 水鸟族 363/365/603/609（case 363,cs:74470-74545）：湿态=帧 1↔2 每 8t（划水）;
+  // 站定(vx==0&&vy==0)=帧1;飞行/移动=帧 11..frames-1 每 4t（回卷 frameCount→11）
+  if (id === 363 || id === 365 || id === 603 || id === 609) {
+    if (e.wet) return 1 + (Math.floor(t / 8) % Math.min(2, Math.max(1, frames - 1)));
+    if (e.vx === 0 && e.vy === 0) return Math.min(1, frames - 1);
+    return Math.min(frames - 1, 11 + (Math.floor(t / 4) % Math.max(1, frames - 11)));
+  }
+  // 珍稀宝箱怪 473-476（case 473,cs:71831-72000）：ai0 0/7=伪装帧0（曾落通用档
+  // 14 帧连播 = 伪装态狂闪）;ai0 1=警戒帧1-5 按 ai1/6 分段(+6 兜底);ai0 8=3+(t/6)
+  // 钳 3-6;ai0 4/5=帧13;ai0 2/6 地面走=8/9 每 8t + 周期眨眼 10-12（状态机序列
+  // 近似为 24t 走/24t 眨穿插,ai0 3 回落帧 7 近似——差异登记）
+  if (id >= 473 && id <= 476) {
+    if (e.ai0 === 0 || e.ai0 === 7) return 0;
+    if (e.ai0 === 1) return Math.min(6, 1 + Math.floor(e.ai1 / 6));
+    if (e.ai0 === 8) return Math.min(6, Math.max(3, 3 + Math.floor(t / 6)));
+    if (e.ai0 === 4 || e.ai0 === 5) return Math.min(13, frames - 1);
+    const blink = [12, 11, 10, 11][Math.floor(t / 6) % 4];
+    return (t % 48) < 24 ? 8 + (Math.floor(t / 8) % 2) : Math.min(frames - 1, blink);
+  }
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -1361,6 +1408,8 @@ export class Renderer {
     // 8s 冷却让系统释放,期满以最小足迹重试;再抖再熔断。
     let losses: number[] = [];
     let tripped = false;
+    let cooldown = 8_000;                 // ★逐次翻倍(8→16→32→60s 封顶):曾固定 8s,
+    let trips = 0;                        //   冷却期满重新放行→再抖→再熔 = 永久 8s 振荡
     this.canvas.addEventListener('contextlost', (e) => {
       const now = performance.now();
       losses = losses.filter((t) => now - t < 10_000);
@@ -1370,14 +1419,17 @@ export class Renderer {
       this.cbOnGpuPressure?.();
       if (!tripped && losses.length >= 3) {
         tripped = true;
+        trips++;
         this.gpuDegraded = true;
-        console.warn(`[Renderer] GPU 压力熔断:10s 内 ${losses.length} 次 contextlost(预算被根本性打超,常见:双开窗口/超大世界)——暂停渲染 8s 冷却,期间不再请求上下文恢复`);
+        console.warn(`[Renderer] GPU 压力熔断(第 ${trips} 次):10s 内 ${losses.length} 次 contextlost——暂停渲染冷却 ${cooldown / 1000}s,期间不再请求上下文恢复`);
         setTimeout(() => {
           tripped = false;
           losses = [];
           this.gpuDegraded = false;
-          console.warn(`[Renderer] GPU 冷却结束,恢复渲染(chunk 上限 ${ChunkCache.MAX_CHUNKS} 最小档;再抖动将再次熔断)`);
-        }, 8_000);
+          cooldown = Math.min(60_000, cooldown * 2);   // 连续熔断逐次升级
+          console.warn(`[Renderer] GPU 冷却结束,恢复渲染(chunk 上限 ${ChunkCache.MAX_CHUNKS};若稳定运行 60s 将回落冷却档)`);
+          setTimeout(() => { if (trips > 0 && !tripped) { trips = Math.max(0, trips - 1); cooldown = Math.max(8_000, cooldown / 2); } }, 60_000);
+        }, cooldown);
         return;                 // ★不 preventDefault:打破 恢复→重分配→再丢 循环
       }
       if (!tripped) {
@@ -1488,9 +1540,13 @@ export class Renderer {
     window.removeEventListener('resize', this.onResize);
     this.canvas.width = 0; this.canvas.height = 0;
     this.lightCanvas.width = 0; this.lightCanvas.height = 0;
-    if (this.fogCanvas) { this.fogCanvas.width = 0; this.fogCanvas.height = 0; this.fogCanvas = null; }
+    if (this.fogCanvas) { this.fogCanvas.width = 0; this.fogCanvas.height = 0; this.fogCanvas = null; this._mapFogRowSeen = -1; }
     this.minimap?.dispose();
     this.minimap = null;
+    // GL 纹理池同链清空(★曾漏:连续读档逐次叠满 LRU=GB 级显存打爆→contextlost
+    // 风暴;背景纹理懒加载重传成本低,不值得跨世界持有)
+    this.glfx?.dispose();
+    this.glfx = null;
   }
 
   /** 物品图标：优先 Maples 素材，缺省回退程序化 */
@@ -3601,6 +3657,8 @@ export class Renderer {
         else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
         else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection 仍镜像
         else if (stR === 24) ctx.rotate(e.vx * 0.1);   // AI_024 鸟族:仅倾斜 vx*0.1(cs:74332/:74359/:74382);spriteDirection 仍镜像(611/689 取反见下)
+        else if (stR === 68) ctx.rotate(e.vx * 0.1);   // AI_068 水鸟族:同款倾斜 vx*0.1(cs:74487,湿态归零近似省略)
+        else if (stR === 65) ctx.rotate(e.vx * 0.3);   // AI_065 蝶族:倾斜 vx*0.3(cs:73426)
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
@@ -9154,6 +9212,8 @@ export class Renderer {
   // 672ms 长任务），首次导入大世界时每秒 4 次 × 20MB 垃圾 → GC 风暴 → 白屏闪烁 + OOM
   private fogCanvas: HTMLCanvasElement | null = null;
   private fogVersion = -1;
+  /** GL 迷雾纹理已上传到的行带游标(稳定键增量上传) */
+  private _mapFogRowSeen = -1;
   /** 整幅重建的分帧行游标(0=未在重建) */
   private fogRebuildRow = 0;
   private fogWorld: World | null = null;
@@ -9460,7 +9520,7 @@ export class Renderer {
         // 地图内容:世界画布 → 纹理(整幅一次 + 脏区增量),单 quad 缩放
         // (smoothing 与 2D 同款:zoom≥1 线性、<1 最近邻)
         const mmKey = `mm:${this.minimap.uid}`;
-        const mmTex = gl.texFromImage(mmKey, this.minimap.canvas);
+        const mmTex = gl.texFromImage(mmKey, this.minimap.canvas, false, true);  // noMip:mip 永不生效,却要全链重生成
         if (mmTex) {
           for (const [px, py, pw, ph] of this.minimap.flushedPixelRects) {
             gl.texSubUpdate(mmKey, this.minimap.canvas, px, py, pw, ph);
@@ -9471,9 +9531,19 @@ export class Renderer {
         // 迷雾:getFogCanvas 每帧推进分带重建(2D/GL 共用),纹理按版本+行号重传
         const fc = this.getFogCanvas(world);
         if (fc && fc.width > 0) {
-          const fogKey = `fog:${world.seed}:${this.fogVersion}:${this.fogRebuildRow}`;
-          const fogTex = gl.texFromImage(fogKey, fc);
+          // ★稳定键+行带增量(曾 version:row 换键:重建一步=一张新 20MB 纹理,
+          // 探索期持续换血把字节预算烧穿)。首载整幅,之后只补重建过的行带
+          const fogKey = `fog:${world.seed}`;
+          const rowBefore = this._mapFogRowSeen;
+          const fogTex = gl.texFromImage(fogKey, fc, false, true);
           if (fogTex) {
+            if (this._mapFogRowSeen >= 0 && this.fogRebuildRow > rowBefore) {
+              const rows = Math.min(this.fogRebuildRow - rowBefore, fc.height);
+              gl.texSubUpdate(fogKey, fc, 0, rowBefore, fc.width, rows);
+            } else if (this.fogRebuildRow > 0 && rowBefore < 0) {
+              gl.texSubUpdate(fogKey, fc, 0, 0, fc.width, Math.min(this.fogRebuildRow, fc.height));
+            }
+            this._mapFogRowSeen = this.fogRebuildRow;
             gl.quad(fogTex, 0, 0, fogTex.w, fogTex.h,
               cx0, cy0, fogTex.w * 2 * fm.zoom, fogTex.h * 2 * fm.zoom, { smooth: false });
           }

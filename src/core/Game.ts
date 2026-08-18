@@ -2576,10 +2576,10 @@ export class Game implements GameHooks {
     // AnglerCompletedQuestsCount/TotalDeathsCount/WorldEvilStone/ToggleArmorSetBonusKey）
     setGlobalSubstitutionContext({
       worldName: () => w.name,
-      playerName: () => this.player.name,
+      playerName: () => this.player.appearance?.name ?? '',
       inventoryKey: () => 'Escape',          // Main.cInv（默认绑定,无重绑系统）
       anglerQuests: () => this.player.anglerQuestsFinished,
-      totalDeaths: () => this.player.numberOfDeathsPVE,
+      totalDeaths: () => this.player.deathsPve,
       crimson: () => !!w.crimson,
       reversedArmorBonusKey: () => false,    // Main.ReversedUpDownArmorSetBonuses 默认 false
     });

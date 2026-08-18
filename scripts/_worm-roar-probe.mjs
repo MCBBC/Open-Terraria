@@ -11,14 +11,13 @@ await new Promise((r) => setTimeout(r, 2000));
 const setup = await page.evaluate(() => {
   const g = window.__swGame;
   const st = g.world.store;
-  // 传送地狱
+  // 传送地狱:只挖 2x3 小洞(玩家容身),周围保持实心=骨蛇必须掘地接近
   const hx = Math.floor(g.player.cx / 16);
   for (let y = st.h - 60; y > 10; y--) if (st.flags[st.idx(hx, y)]) {
-    // 清 5x5 空腔
-    for (let dx = -2; dx <= 2; dx++) for (let dy = -4; dy <= 0; dy++) st.setTile(hx + dx, y + dy, 0, 0, 0);
-    g.player.x = hx * 16 + 8; g.player.y = (y - 3) * 16;
+    for (let dx = 0; dx <= 1; dx++) for (let dy = -2; dy <= 0; dy++) st.setTile(hx + dx, y + dy, 0, 0, 0);
+    g.player.x = hx * 16 + 16; g.player.y = (y - 2) * 16;
     g.camera.x = g.player.cx; g.camera.y = g.player.cy;
-    return { x: hx, y: y - 3 };
+    return { x: hx, y: y - 2 };
   }
   return null;
 });
@@ -28,12 +27,11 @@ const out = await page.evaluate((pos) => {
   // 包装 sfx 记录
   const audio = g.audio ?? g.sfx;
   const rec = [];
+  // 挂 SFX 播放层(Enemy 走 GameHooks.playSfx → Game.playSfx → sfx.play,双层都包)
   const orig = g.playSfx.bind(g);
-  let patched = false;
-  if (typeof orig === 'function') {
-    g.playSfx = (name, vol, x, y) => { rec.push({ name, t: performance.now() }); return orig(name, vol, x, y); };
-    patched = true;
-  }
+  g.playSfx = (name, vol, x, y) => { rec.push({ name, via: 'game', t: performance.now() }); return orig(name, vol, x, y); };
+  const sfxPlay = g.sfx.play.bind(g.sfx);
+  g.sfx.play = (name, vol, x, y) => { rec.push({ name, via: 'sfx', t: performance.now() }); return sfxPlay(name, vol, x, y); };
   // 直接生成骨蛇头(F6 面板同源 debugSpawnNpc)
   g.debugSpawnNpc(39, 1, false);
   return new Promise((resolve) => {
@@ -41,9 +39,9 @@ const out = await page.evaluate((pos) => {
     const iv = setInterval(() => {
       if (performance.now() - t0 > 4000) {
         clearInterval(iv);
-        g.playSfx = orig;
+        g.playSfx = orig; g.sfx.play = sfxPlay;
         const serpents = g.entities.enemies.filter((e) => !e.dead && (e.vanillaId === 39 || e.vanillaId === 40 || e.vanillaId === 41));
-        resolve({ patched, n39: serpents.length, sounds: rec.slice(0, 12), serp: serpents.slice(0, 2).map((e) => ({ id: e.vanillaId, x: Math.round(e.x), d: Math.round(e.digSndDelay ?? -1) })) });
+        resolve({  n39: serpents.length, sounds: rec.slice(0, 12), serp: serpents.slice(0, 2).map((e) => ({ id: e.vanillaId, x: Math.round(e.x), d: Math.round(e.digSndDelay ?? -1) })) });
       }
     }, 200);
   });

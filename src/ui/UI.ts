@@ -70,6 +70,7 @@ import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/v
 import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
+import { assembleTooltipLines } from './itemTooltip';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ITEM_NAME_BY_ID, ITEM_NAME_EN_BY_ID } from '../i18n/idNames.generated';
@@ -1282,22 +1283,26 @@ export class UI {
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
     let html = `<b style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
     if (s.favorited) html += ` <span style="color:#ffb347">★</span>`;
-    if (s.prefix) {
-      for (const ln of prefixLines(s.prefix)) {
-        html += `<br><span style="color:${ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)'}">${ln.text}</span>`;
-      }
-    }
-    if (def.tool?.damage) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Damage', prefixedDamage(def, s.prefix))}`;
-    if (def.tool?.power && def.tool.type !== 'sword') html += `<br>${Lang.text(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power)}`;
-    // 盔甲防御行（vi_ 物品查 vanilla-itemstats.json；原版经 item.defense 的 tooltip 行）
-    const vsDef = def.armor?.defense ?? statOfInternal(s.id)?.def;
-    if (vsDef) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Defense', vsDef)}`;
-    if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
-    // 物品自带说明行（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*，
-    // 2664 键 zh 包内嵌；此前未消费——悬停只见数值不见"做什么用"）。vi_ 物品按原版名查键。
-    // ★Lang.cs:536-549 语义:tooltip 缓存全量置 None 后按键填充,FromLanguageKey 对
-    //  缺失键**静默返回空**(铜剑/药水/钱币等老物品本无静态 tooltip)——故先 has() 再取,
-    //  勿直接 Lang.text(未命中会刷"缺失 key"警告)
+    // ---- 统计行（MouseText_DrawItemTooltip_GetLinesInfo，Main.cs:20488-20920 1:1，
+    //      构建器在 ui/itemTooltip.ts）：vi_ 全量——伤害[+类型后缀]/暴击/速度档/击退档/
+    //      渔力鱼饵/可装备/时装/防御/镐斧锤力/恢复/耗魔/可放置·弹药·消耗品/材料/
+    //      容器/Buff 持续/词缀差分；legacy 物品维持原近似 ----
+    const g = this.game as unknown as {
+      player?: {
+        damageMult(k: 'melee' | 'ranged' | 'magic' | 'summon'): number;
+        critChance(k: 'melee' | 'ranged' | 'magic'): number;
+        equipStats?: { manaCostMul?: number };
+      };
+    };
+    const gp = g.player;
+    const tps = gp ? {
+      dmgMult: { melee: gp.damageMult('melee'), ranged: gp.damageMult('ranged'), magic: gp.damageMult('magic'), summon: gp.damageMult('summon') },
+      crit: { melee: gp.critChance('melee'), ranged: gp.critChance('ranged'), magic: gp.critChance('magic') },
+      manaCostMul: gp.equipStats?.manaCostMul ?? 1,
+    } : null;
+    // 物品自带说明（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*）。
+    // ★先 has() 再取（缺失键静默空，铜剑/药水/钱币等老物品本无静态 tooltip）
+    let staticTip: string | null = null;
     if (def.key.startsWith('vi_')) {
       const vid = parseInt(def.key.slice(3), 10);
       const nameKey = ITEM_NAME_BY_ID[vid];
@@ -1307,15 +1312,18 @@ export class UI {
           let tip = Lang.text(path);
           // 旗帜族 tooltip（{$NPCName.None} 构建期已落为裸键名,原版 L171 语义）:
           // NPCName.None → 该旗对应 NPC 的显示名（原版由旗帜 tooltip 代码动态注入）
-          if (tip.includes('NPCName.None')) {
+          if (tip && tip.includes('NPCName.None')) {
             const bn = bannerNpcOfItem(vid);
             if (bn > 0) tip = tip.split('NPCName.None').join(Lang.npcName(bn) ?? '');
           }
-          if (tip) html += tip.split('\n').map((ln) => `<br>${ln}`).join('');
+          staticTip = tip || null;
         }
       }
     }
-    if (def.desc) html += `<br><span style="color:#9a8ab8">${def.desc}</span>`;
+    if (def.desc) staticTip = staticTip ? `${staticTip}\n${def.desc}` : def.desc;
+    for (const ln of assembleTooltipLines(def, s, tps, staticTip)) {
+      html += `<br>${ln.color ? `<span style="color:${ln.color}">${ln.text}</span>` : ln.text}`;
+    }
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';
     // 背景：原版不透明面板色 (23,25,81)×0.925（:20242-20245）

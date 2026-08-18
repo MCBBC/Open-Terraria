@@ -129,4 +129,72 @@ for (const name of ['A-pillow-right', 'B-pillow-left']) {
   await page.screenshot({ path: `/tmp/sleepbed-${name}.png`, clip: { x: 640 - 200, y: 400 - 130, width: 400, height: 260 } });
   console.log(`${name}: slept=${st.slept} facing=${st.facing} pos=(${st.px},${st.py}) brightness=${st.brightness} PNG: /tmp/sleepbed-${name}.png`);
 }
+
+// ---- 补充断言:CheckSpawn 门禁 / RemoveSpawn 回退 / boss actUp ----
+const extra = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const store = g.world.store;
+  const T = window.__swTiles;
+  const w = g.world;
+  const out = {};
+  const px0 = Math.floor(store.w / 2);
+  let gy = Math.floor(w.groundLevel) + 30;
+  while (gy < store.h - 10 && !store.isSolid(px0, gy)) gy++;
+  const floorY = gy;
+  const bx = px0 - 10;
+  for (let x = bx; x < bx + 20; x++) {
+    for (let y = floorY - 8; y < floorY; y++) store.setTileSilent(x, y, 0);
+    store.setTileSilent(x, floorY, T['stone_rock'] ?? 1);
+    store.setTileSilent(x, floorY + 1, T['stone_rock'] ?? 1);
+  }
+  // 变体A床(枕右):脚端 = 左半两列 → 设点侧
+  for (let col = 0; col < 4; col++) for (let row = 0; row < 2; row++)
+    store.setTileSilent(bx + 2 + col, floorY - 2 + row, T['bed'], col * 18, row * 18);
+  const p = g.player;
+  p.x = (bx + 2) * 16 - 24; p.y = (floorY - 1) * 16 - p.h;
+  p.vx = 0; p.vy = 0; p.sleeping = false;
+  const spawnBefore = [w.spawnX, w.spawnY];
+  const spawn0Before = [w.spawnX0, w.spawnY0];
+  // 脚端(变体A左半)点击 → 设点侧:开阔地无房间 → CheckSpawn 拒绝,spawn 不变
+  g.interactAt(bx + 2, floorY - 1);
+  out.spawnRefused = (w.spawnX === spawnBefore[0] && w.spawnY === spawnBefore[1]);
+  // 强制"已设点"态 → 再点 → RemoveSpawn 回退 spawnX0
+  const sx = (bx + 2) + 2, sy = floorY;   // bedLeft+2 / bedTop+2 = (bx+4, floorY-2+2)
+  w.spawnX = sx; w.spawnY = sy;
+  g.interactAt(bx + 3, floorY - 1);
+  out.removeSpawnRestored = (w.spawnX === spawn0Before[0] && w.spawnY === spawn0Before[1]);
+  out.spawn0Snapshot = spawn0Before;
+  // boss actUp:入睡 + timeSleeping=50 → 召 boss → 计时应归零(不唤醒)
+  for (let col = 0; col < 4 && !p.sleeping; col++)
+    for (let row = 0; row < 2 && !p.sleeping; row++)
+      g.interactAt(bx + 2 + col, floorY - 2 + row);
+  if (p.sleeping) {
+    p.timeSleeping = 50;
+    const e = g.entities.enemies.find?.call ?? null; void e;
+    const boss = (g.entities).enemies;
+    // 召 EoC(vid 4,boss)
+    const { Enemy } = await import('/src/entities/Enemy.ts');
+    const be = Enemy.fromVanilla(4, p.cx + 100, p.y - 60);   // EoC(boss)
+    if (be) { be.id = g.entities.nextId++; g.entities.enemies.push(be); }
+    g.fixedUpdate(1 / 60);
+    out.bossActUpReset = p.sleeping && p.timeSleeping === 0;
+    // 清 boss
+    for (const en of g.entities.enemies) if (en && !en.dead) en.dead = true;
+  } else out.bossActUpReset = 'no-sleep';
+  // 物品使用唤醒:持剑使用 → 应唤醒(手动推 useTime 近似 itemAnimTicks)
+  p.sleeping = true; p.timeSleeping = 200;
+  p.itemAnimTicks = 5; p.useTime = 5;
+  // 手持放一把剑:直接借 inventory? 简化:仅推 itemAnimTicks + 手持木剑
+  // 手持铜短剑(v4,damage>0 且无 noMelee) → itemAnimTicks>0 应唤醒
+  const items = window.__swItems;
+  const swordKey = Object.keys(items).find((k) => /shortsword/.test(k));
+  if (swordKey) {
+    p.inv.slots[0] = { id: items[swordKey], stack: 1 };
+    g.fixedUpdate(1 / 60);
+    out.itemWake = p.sleeping === false;
+    out.swordKey = swordKey;
+  } else out.itemWake = 'no-sword-key';
+  return out;
+});
+console.log('EXTRA', JSON.stringify(extra));
 await browser.close();

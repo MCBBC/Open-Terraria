@@ -44,15 +44,15 @@ describe('mergePacks(键级 merge,后者覆盖)', () => {
 });
 
 describe('expandCopyCommands({$Key} 跨键复制,LanguageManager.cs:158)', () => {
-  it('展开已有键;引用不存在的键保留原样', () => {
+  it('展开已有键;引用不存在的键替换为裸键名(原版 L171 `: text2` 语义——曾误读为保留原样,2026-08-18 纠正)', () => {
     const table = {
       ItemTooltip: { A: '效果:{$Common.Bonus}', Bad: '{$Common.NotExist}' },
       Common: { Bonus: '+1 速度' },
     };
     const { unresolved } = expandCopyCommands(table);
     expect(table.ItemTooltip.A).toBe('效果:+1 速度');
-    expect(table.ItemTooltip.Bad).toBe('{$Common.NotExist}');
-    expect(unresolved).toEqual(['Common.NotExist']);
+    expect(table.ItemTooltip.Bad).toBe('Common.NotExist');   // 裸键名(L171)
+    expect(unresolved).toEqual([]);   // 裸键替换后无残留(循环引用才落 unresolved)
   });
   it('链式引用迭代到不动点(≤100 次)', () => {
     const table = {
