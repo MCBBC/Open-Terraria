@@ -3495,13 +3495,23 @@ export function runDungeonPass(
     return true;
   }
   // PlaceBanner（cs:46270 旗91：竖 3 格，上挂实心非 solidTop）
-  function placeBannerD(x: number, y: number, t: number): boolean {
+  // ★NNN 批 ②（2026-08-18）：补 style 帧链——DungeonGlobalBanners.cs:95 走
+  //   `num7 = data.bannerStyles[num8]` → PlaceTile(91,style) → PlaceBanner 写
+  //   frameX=style*18（s>=111 时 fx-=1998/fy+=54，dungeon styles 10-15 不触发）、
+  //   frameY=0/18/36。旧版裸 dgWr 不落帧 → 378 格 banner frameX 恒 0 全第一帧
+  function placeBannerD(x: number, y: number, t: number, style = 0): boolean {
     const ui = st.idx(x, y - 1);
     if (!inW(x, y - 1, 0) || st.flags[ui] === 0) return false;
     const dUp = TILE_DEFS[st.type[ui]];
     if (!dUp || !dUp.solid || dUp.platform) return false;
     if (!dgClr(x, y) || !dgClr(x, y + 1) || !dgClr(x, y + 2)) return false;
     dgWr(x, y, t); dgWr(x, y + 1, t); dgWr(x, y + 2, t);
+    // PlaceBanner 帧写（cs:46293-46313；PlaceBanner 零掷，不扰流）
+    let fx = style * 18, fy = 0, s3 = style;
+    while (s3 >= 111) { s3 -= 111; fx -= 1998; fy += 54; }
+    st.frameX[st.idx(x, y)] = fx; st.frameY[st.idx(x, y)] = fy;
+    st.frameX[st.idx(x, y + 1)] = fx; st.frameY[st.idx(x, y + 1)] = fy + 18;
+    st.frameX[st.idx(x, y + 2)] = fx; st.frameY[st.idx(x, y + 2)] = fy + 36;
     return true;
   }
   // 画作分发（cs:59962-59985）：240→3x3Wall / 241→4x3Wall / 242→6x4Wall
@@ -3761,7 +3771,9 @@ export function runDungeonPass(
       //  =undefined:近旁横幅排除恒假（横幅贴横幅照放）+ placeSimple 写 type=undefined
       //  （tile<0 拦下=横幅全部静默丢弃，JS 轨迹 134 vs oracle 129 的根因）。
       //  双侧逐样本轨迹对账实锤（N 426,570 typ=91，2026-08-15）
-      placeBannerD(x, y, BANNER);   // ★PlaceBanner（cs:46270 竖 3 格）
+      // ★NNN 批 ②（2026-08-18）：style 经 bannerStyles[num8] 入帧（DungeonGlobal-
+      //  Banners.cs:95 `num7 = data.bannerStyles[num8]`；查表零掷不扰流）
+      placeBannerD(x, y, BANNER, bannerStyles[num8]);   // ★PlaceBanner（cs:46270 竖 3 格）
     }
   }
   posX = x0; posY = y0;

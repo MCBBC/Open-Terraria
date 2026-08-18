@@ -7,7 +7,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { rollChestLoot } from './BuriedChestsPass';
-import { placeFurn, flipFurn } from './DungeonPass';
+import { placeFurn } from './DungeonPass';
 
 const SUNPLATE = TILE_BY_KEY['v_202_sunplate_block']!;
 const CHEST = TILE_BY_KEY['chest']!;
@@ -183,13 +183,23 @@ function islandHouse(
       }
     }
   }
-  // 桌+两椅(cs:80111-80120):桌 style7(步长 54),椅 style10(左椅翻转 +18)。
+  // 桌+两椅(cs:80064-80070):桌 style7(步长 54),椅 style10(左椅翻转 +18)。
   // 原版锚行 = num8-1 = val.Y = j2-1(室内地面行)——I2 修掉多挖的一行后
   // 桌椅必须随之上移一行,否则嵌进日光板壳(I1/I2 连锁)
+  // ★NNN 批 ①（2026-08-18）：对齐原版放置语义——三件 PlaceTile 互不 gate
+  //  （1456 :80064-80068 桌/左椅/右椅无条件连放， Chairs 不以桌成败为前提），
+  //  椅走 Place1x2（cs:46680-46691）语义：只查【上格 !active】+【下方
+  //  SolidTile2】——锚格(椅底格)不查净空，放置时直接覆写（旧实现走 placeFurn
+  //  全格净空=比原版严，桌失败时还会连带跳过两椅）。
   const tableX = i + (Math.floor(halfW / 2) + 1) * -dir;
-  if (placeFurn(st, tableX, j2 - 1, TABLE, 7)) {
-    if (placeFurn(st, tableX - 2, j2 - 1, CHAIR, 10)) flipFurn(st, tableX - 2, j2 - 1, CHAIR);
-    placeFurn(st, tableX + 2, j2 - 1, CHAIR, 10);
+  placeFurn(st, tableX, j2 - 1, TABLE, 7);
+  placeChairD(st, tableX - 2, j2 - 1, CHAIR);
+  placeChairD(st, tableX + 2, j2 - 1, CHAIR);
+  // 左椅翻转（cs:80069-80070 对 (num28-2, num8-1/-2) frameX+=18——原版无脑加，
+  // 椅未放置时两格 inactive 帧不值钱；此处只对真放置的椅格加，可见行为等价）
+  for (const dy of [-1, 0]) {
+    const ci = st.idx(tableX - 2, j2 - 1 + dy);
+    if (st.flags[ci] && st.type[ci] === CHAIR) st.frameX[ci] += 18;
   }
   // 横幅(cs L48334-48348):1×3 顶锚,style 7-9(步长 18)
   for (const bx2 of [i - halfW + 1, i + halfW - 1]) {
@@ -198,6 +208,22 @@ function islandHouse(
   const bannerX = dir > 0 ? i - halfW : i + halfW;
   placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false);
   return true; // 建成,消耗一个 skyIslandHouseCount 槽位(I4)
+}
+
+/** Place1x2（cs:46665-46691）椅子语义：SolidTile2(x,y+1) && !active(x,y-1)
+ *  才放；锚格(底格)不查净空（原版直接覆写）。帧 = style10 → fy 400/418
+ *  （furnitureStyleBase sheet15 竖排 40 步；朝向翻转 +18 由调用方追加）。 */
+function placeChairD(st: TileStore, x: number, anchorY: number, chair: number): boolean {
+  // SolidTile2（cs:70497）：active && tileSolid && slope==0 && !halfBrick
+  if (!st.inBounds(x, anchorY + 1)) return false;
+  const bi = st.idx(x, anchorY + 1);
+  if (st.flags[bi] === 0 || !TILE_DEFS[st.type[bi]]?.solid
+    || st.slope[bi] !== 0 || st.half[bi]) return false;
+  // 上格须净空（Place1x2 只查这一格）
+  if (!st.inBounds(x, anchorY - 1) || st.flags[st.idx(x, anchorY - 1)]) return false;
+  st.setTileSilent(x, anchorY - 1, chair, 0, 400);
+  st.setTileSilent(x, anchorY, chair, 0, 418);
+  return true;
 }
 
 void T;

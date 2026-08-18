@@ -194,16 +194,29 @@ export class GLSpriteLayer {
     return entry;
   }
 
-  /** 子区增量上传(小地图 dirtyChunks;画布/位图源,纹理须已存在) */
+  /** 子区增量上传(小地图 dirtyChunks;画布/位图源,纹理须已存在)。
+   *  ★WebGL2 的 DOM 源重载只有 8 参(无宽高)——曾传 9 参,Chrome 把画布
+   *  【左上角 w×h】贴进目标区 = 脏块全被天空色污染(地图逐渐出现 #362CFF
+   *  退化块的根因,2026-08-18 用户实报+探针定罪)。DOM 源取子区必须先抠到
+   *  scratch 画布再整幅上传 */
+  private scratch: HTMLCanvasElement | null = null;
   texSubUpdate(key: string, src: TexImageSource, x: number, y: number, w: number, h: number): void {
     if (this.unavailable || !this.gl) return;
     const e = this.texs.get(key);
     if (!e) return;
     const gl = this.gl;
+    if (!this.scratch) this.scratch = document.createElement('canvas');
+    if (this.scratch.width !== w || this.scratch.height !== h) {
+      this.scratch.width = w; this.scratch.height = h;
+    }
+    const sc = this.scratch.getContext('2d')!;
+    sc.clearRect(0, 0, w, h);
+    sc.drawImage(src as CanvasImageSource, x, y, w, h, 0, 0, w, h);
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, w, h, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, x, y, gl.RGBA, gl.UNSIGNED_BYTE, this.scratch);
+    gl.generateMipmap(gl.TEXTURE_2D);   // 子区更新后 mip 链重建(全链重建,量大时改逐级)
     gl.bindTexture(gl.TEXTURE_2D, null);
     e.stamp = ++this.stamp;
   }
