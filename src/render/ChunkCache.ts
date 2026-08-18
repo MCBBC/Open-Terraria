@@ -22,8 +22,13 @@ const TILE_RULES: Record<number, string> = {
 };
 
 export interface ChunkPair {
-  wall: HTMLCanvasElement;   // 背景墙层（水画在它之上）
-  tile: HTMLCanvasElement;   // 前景 tile/物体层（画在水之上）
+  wall: HTMLCanvasElement;   // atlas 页·墙层（水画在它之上）——用 sx/sy 源矩形取 cell
+  tile: HTMLCanvasElement;   // atlas 页·tile 层（画在水之上）
+  /** cell 页内左上(两页同位;Renderer drawImage 9 参源矩形用) */
+  sx: number;
+  sy: number;
+  /** cell 归还凭据 page*CELLS_PER_PAGE+slot;-1 = 外部 stub(测试)/独立目标(无页) */
+  cell: number;
 }
 
 // ---- 油漆乘色着色画布（ChunkCache 静态烘焙消费，world/Paint.applyPaintTint） ----
@@ -75,29 +80,68 @@ export class ChunkCache {
   /** 含动画墙的 chunk，按 wallId 分组（墙无 sheet 概念；DoUpdate_AnimateWalls 的
    *  11 类换带墙 + 242/243 星彩玻璃逐格错相——换带时只重建对应 chunk） */
   private animChunksByWall = new Map<number, Set<number>>();
-  /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
-   *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
+  /** LRU 上限(.chunk 计;atlas 化后上限页数 = ceil(N/16)×2 张画布)。
+   *  此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
   static MAX_CHUNKS = 384;
   /** CPU 软渲染门(Renderer.setRenderMode 写入):烘焙画布走 willReadFrequently */
-  static CPU_RENDER = false;  // 起高(2026-08-14 复原 224:contextlost 自适应兜底已就位,压力真来自动减半 384→192→96;配合 npm run play 的 --force-gpu-mem-available-mb=16384,64GB 机器常驻集不再是瓶颈)
+  static CPU_RENDER = false;  // 起高(2026-08-14 复原 224:contextlost 自适应兜底已就位,压力真来自动减半 384→192→96;★--force-gpu-mem-available-mb 已证为安慰剂(只管 cc tile 预算,见 2026-08-18 IOSurface 审计),双开靠本类 atlas 页化+云染池化+renderMode=cpu)
   /** 最近一次 flushDirty 实测耗时 ms（F5 调试报告：烘焙尖峰证据面） */
   lastFlushMs = 0;
   lastFlushCount = 0;
 
-  /** 释放全部 chunk 画布 GPU 背板并清表(退出世界必须调用)。
-   *  detached canvas 的回收依赖 GC 且明显滞后——连续多次读档累积数百 MB
-   *  显存,最终 contextlost/contextrestored 风暴卡死(2026-08-10 trace 实证) */
-  /** 释放一对 chunk 画布的 GPU 背板(width=0 即刻归还,detached canvas 等 GC 则明显滞后)。
-   *  所有丢弃旧画布的路径(标脏重建/LRU 淘汰/全量标脏/退出)都必须先过这里——
-   *  漏掉任一处 = 慢性显存劣化,与 2026-08-10 contextlost 风暴同机制 */
-  private releasePair(pair: ChunkPair | undefined): void {
-    if (!pair) return;
-    pair.wall.width = 0; pair.wall.height = 0;
-    pair.tile.width = 0; pair.tile.height = 0;
+  // ---- chunk atlas 页池(2026-08-18 IOSurface 张数优化) ----
+  // 旧结构:每 chunk 2 张 256² canvas(稳态 35 chunk=70 张、满额 768 张),且
+  // renderChunkInner 每次重烘焙【新建】画布——移动期 flushDirty 4 chunk/帧 =
+  // 每帧 8 张新画布,GPU 进程 ~480 次/秒 IOSurface 分配/释放(双窗翻倍)。
+  // 双开 GPU 爆的根因即此:macOS IOSurface 按【张】计费(mach port 级内核资源),
+  // 字节无关(16×16 的分配也失败)——`--force-gpu-mem-available-mb` 只管 cc tile
+  // 预算救不了(blink/common/switches.cc 注释实证)。
+  // 页化:墙/tile 各一摞 1024² 页(4×4 cell/页),活张数 ≤ 2×ceil(N/16)
+  // (稳态 ~6 张、满额 50 张),重烘焙 = clip+translate 原位重画 cell,
+  // 运行期画布创建/销毁 = 0(页只在 dispose/退出世界时销毁)。
+  private static readonly CELLS_PER_PAGE = 16;
+  private static readonly PAGE_COLS = 4;
+  private wallPages: HTMLCanvasElement[] = [];
+  private tilePages: HTMLCanvasElement[] = [];
+  /** 空闲 cell 栈(page*16+slot;栈顶复用 = 热页优先) */
+  private cellFree: number[] = [];
+  /** 调试/F5:当前 atlas 页数(墙+tile 双层各一摞,画布张数 = 2×页数) */
+  get pageCount(): number { return this.wallPages.length; }
+
+  /** 归还 chunk cell(★页不销毁——重烘焙/换 chunk 复用同一批页,零画布churn)。
+   *  所有丢弃旧 pair 的路径(标脏重建/LRU 淘汰/全量标脏)都必须先过这里;
+   *  外部 stub(测试)/独立目标(cell=-1)无页可还 = no-op */
+  releasePair(pair: ChunkPair | undefined): void {
+    const c = pair?.cell;
+    if (typeof c === 'number' && c >= 0) this.cellFree.push(c);
+  }
+
+  private allocCell(): number {
+    if (!this.cellFree.length) {
+      const pageIdx = this.wallPages.length;
+      const S = CHUNK * TILE * ChunkCache.PAGE_COLS;
+      const mkPage = (): HTMLCanvasElement => {
+        const c = document.createElement('canvas');
+        if (ChunkCache.CPU_RENDER) { c.getContext('2d', { willReadFrequently: true }); }
+        c.width = S; c.height = S;
+        return c;
+      };
+      this.wallPages.push(mkPage());
+      this.tilePages.push(mkPage());
+      for (let s = ChunkCache.CELLS_PER_PAGE - 1; s >= 0; s--) {
+        this.cellFree.push(pageIdx * ChunkCache.CELLS_PER_PAGE + s);
+      }
+    }
+    return this.cellFree.pop()!;
   }
 
   dispose(): void {
-    for (const pair of this.chunks.values()) this.releasePair(pair);
+    // 页级释放(width=0 即刻归还 GPU 背板);cell/chunk 表随页一起清
+    for (const p of this.wallPages) { p.width = 0; p.height = 0; }
+    for (const p of this.tilePages) { p.width = 0; p.height = 0; }
+    this.wallPages.length = 0;
+    this.tilePages.length = 0;
+    this.cellFree.length = 0;
     this.chunks.clear();
     this.dirtyQueue.length = 0;
     this.dirtySet.clear();
@@ -324,27 +368,42 @@ export class ChunkCache {
     if (tracker) tracker._baking = true;
     this._bakingKey = ChunkCache.key(cx, cy);
     this.chunkSheets.delete(this._bakingKey); // 重烘焙 = 重新登记
+    const cell = this.allocCell();
     try {
-      return this.renderChunkInner(cx, cy);
+      const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);
+      return this.bakeChunkInto(cx, cy, this.wallPages[page], this.tilePages[page], cell);
+    } catch (e) {
+      this.cellFree.push(cell); // 烘焙异常:cell 归还,防页池泄漏
+      throw e;
     } finally {
       if (tracker) tracker._baking = false;
       this._bakingKey = null;
     }
   }
 
-  private renderChunkInner(cx: number, cy: number): ChunkPair {
-    // 双层画布：墙层 / tile 层分离 —— 水渲染在两层之间（墙之上、图块之下）
-    // CPU 软渲染门:willReadFrequently 让画布后备走 CPU 内存(零 GPU 预算;
-    // 多开/弱 GPU 场景 160 张 × 1MB = 160MB 从 GPU 池移出)
-    const wall = document.createElement('canvas');
-    if (ChunkCache.CPU_RENDER) { wall.getContext('2d', { willReadFrequently: true }); }
-    wall.width = CHUNK * TILE; wall.height = CHUNK * TILE;
-    const tile = document.createElement('canvas');
-    if (ChunkCache.CPU_RENDER) { tile.getContext('2d', { willReadFrequently: true }); }
-    tile.width = CHUNK * TILE; tile.height = CHUNK * TILE;
-    let ctx = wall.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    const wctx = ctx; // 墙层上下文（tile 层重赋 ctx 后油漆 pass 仍需引用）
+  /** 把 chunk 烘焙进目标页的 cell。cell ≥ 0 = atlas 页内槽位(ox/oy 由 cell 推出);
+   *  cell < 0 = 外部传入的独立 256² 目标(E2E 像素对拍用,ox=oy=0)。atlas 页与
+   *  独立画布走同一函数、同一 clip 语义 → 像素一致由构造保证,无第二份烘焙代码 */
+  bakeChunkInto(cx: number, cy: number, wallPage: HTMLCanvasElement, tilePage: HTMLCanvasElement, cell: number): ChunkPair {
+    // 双层：墙层 / tile 层分离 —— 水渲染在两层之间（墙之上、图块之下）
+    // ★cell 裁剪+平移:与旧"独立 256² 画布"完全同语义——墙 EXT=1/树 EXT=6 的
+    //   负坐标/越界外溢绘制被 clip 挡在 cell 内,绝不漏进相邻 cell;
+    //   重烘焙前 clearRect 洗掉旧内容(旧版靠新画布天然透明)
+    const S = CHUNK * TILE;
+    const slot = cell >= 0 ? cell % ChunkCache.CELLS_PER_PAGE : 0;
+    const ox = (slot % ChunkCache.PAGE_COLS) * S;
+    const oy = Math.floor(slot / ChunkCache.PAGE_COLS) * S;
+    const wctx = wallPage.getContext('2d')!;
+    const tctx = tilePage.getContext('2d')!;
+    for (const c of [wctx, tctx]) {
+      c.save();
+      c.beginPath(); c.rect(ox, oy, S, S); c.clip();
+      c.translate(ox, oy);
+      c.clearRect(0, 0, S, S);
+      c.imageSmoothingEnabled = false;
+    }
+    let ctx = tctx; // 前景层(下文 tile pass);墙层=wctx
+    const wall = wallPage, tile = tilePage;
     const st = this.world.store;
     const x0 = cx * CHUNK, y0 = cy * CHUNK;
 
@@ -362,7 +421,7 @@ export class ChunkCache {
           if (wallId === 0) continue;
           const px = lx * TILE, py = ly * TILE;
           if (this.wallTiler.hasTexture(wallId)) {
-            this.wallTiler.draw(ctx, st, x, y, wallId, this.truncatesWalls, px, py);
+            this.wallTiler.draw(wctx, st, x, y, wallId, this.truncatesWalls, px, py);
             // 动画墙（DoUpdate_AnimateWalls 换带 + 星彩玻璃逐格错相）：登记进换带
             // 重烘焙行列——墙无 sheet 概念，按 wallId 另建 map（tiles 侧同款机制）
             if (wallAnimRate(wallId) !== 0) {
@@ -373,11 +432,11 @@ export class ChunkCache {
           } else {
             const wd = WALL_DEFS[wallId];
             if (wd) {
-              ctx.fillStyle = wd.mapColor;
-              ctx.fillRect(px, py, TILE, TILE);
-              ctx.fillStyle = shade(wd.mapColor, 0.8);
-              ctx.fillRect(px, py + TILE - 1, TILE, 1);
-              ctx.fillRect(px + TILE - 1, py, 1, TILE);
+              wctx.fillStyle = wd.mapColor;
+              wctx.fillRect(px, py, TILE, TILE);
+              wctx.fillStyle = shade(wd.mapColor, 0.8);
+              wctx.fillRect(px, py + TILE - 1, TILE, 1);
+              wctx.fillRect(px + TILE - 1, py, 1, TILE);
             }
           }
         }
@@ -385,8 +444,6 @@ export class ChunkCache {
     }
 
     // ---- 第二遍：前景 tile / 物体（绘制到 tile 层画布；水渲染在墙层与 tile 层之间）----
-    ctx = tile.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
     for (let ly = 0; ly < CHUNK; ly++) {
       for (let lx = 0; lx < CHUNK; lx++) {
         const x = x0 + lx, y = y0 + ly;
@@ -516,15 +573,16 @@ export class ChunkCache {
     // Canvas 等价实现见 tintRegion（乘色模型见 world/Paint.applyPaintTint 注释）。
     // ★ 等价边界：原版按"绘制调用"着色（多格物件整张贴图随锚格上色）；
     //   本实现按 16×16 格区域着色——涂多格家具/树只有被涂格区域显色（登记）
+    //   (atlas 化:src=页画布,区域坐标须用页内绝对 ox+lx*TILE)
     for (let ly = 0; ly < CHUNK; ly++) {
       for (let lx = 0; lx < CHUNK; lx++) {
         const x = x0 + lx, y = y0 + ly;
         if (!st.inBounds(x, y)) continue;
         const i = st.idx(x, y);
         const pw = st.paintWall[i];
-        if (pw > 0 && st.wall[i] !== 0) tintRegion(wctx, wall, lx * TILE, ly * TILE, pw);
+        if (pw > 0 && st.wall[i] !== 0) tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw);
         const pt = st.paint[i];
-        if (pt > 0 && st.flags[i] && st.type[i] !== 0) tintRegion(ctx, tile, lx * TILE, ly * TILE, pt);
+        if (pt > 0 && st.flags[i] && st.type[i] !== 0) tintRegion(ctx, tile, ox + lx * TILE, oy + ly * TILE, pt);
       }
     }
 
@@ -572,6 +630,8 @@ export class ChunkCache {
       }
     }
 
-    return { wall, tile };
+    wctx.restore();
+    ctx.restore();
+    return { wall, tile, sx: ox, sy: oy, cell };
   }
 }

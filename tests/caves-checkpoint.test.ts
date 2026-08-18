@@ -147,6 +147,7 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
       for (let i = 0; i < n; i++) { typ.writeUInt16LE(st.type[i] & 0xffff, i * 2); act[i] = st.flags[i] ? 1 : 0; wal.writeUInt16LE(st.wall[i] & 0xffff, i * 2); }
       const { writeFileSync } = require('node:fs') as typeof import('node:fs');
       writeFileSync(`${ex.dir}.typ`, typ); writeFileSync(`${ex.dir}.act`, act); writeFileSync(`${ex.dir}.wal`, wal);
+      writeFileSync(`${ex.dir}.liq`, st.liquid);   // HHHH 批诊断追加：液体通道导出（settle2 liq 对拍）
       // granite 首红猎杀（2026-08-17）：坡位/半砖通道一并导出（BuildMagmaMap 的
       // SolidTile 谓词 slope 敏感——granite 红裁决需六通道）
       writeFileSync(`${ex.dir}.slope`, st.slope); writeFileSync(`${ex.dir}.half`, st.half);

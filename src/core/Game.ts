@@ -2596,6 +2596,7 @@ export class Game implements GameHooks {
         vimages: this.atlas?.vimages.size ?? -1,
         uiimages: this.atlas?.uiimages.size ?? -1,
         chunkCached: this.chunks.chunks.size,
+        chunkPages: this.chunks.pageCount, // atlas 页数(画布张数=2×页数;IOSurface 张数观测量)
         chunkMax: (this.chunks.constructor as { MAX_CHUNKS?: number }).MAX_CHUNKS,
         dirty: this.chunks.dirtyQueue.length,
         lastFlushMs: +this.chunks.lastFlushMs.toFixed(2),
@@ -3267,7 +3268,7 @@ export class Game implements GameHooks {
       const oldest = cc.chunks.keys().next().value as number | undefined;
       if (oldest === undefined) break;
       const pair = cc.chunks.get(oldest);
-      if (pair) { pair.wall.width = 0; pair.wall.height = 0; pair.tile.width = 0; pair.tile.height = 0; }
+      cc.releasePair(pair); // atlas 化:归还 cell(页共享,不能 width=0 毁页)
       cc.chunks.delete(oldest);
     }
   }

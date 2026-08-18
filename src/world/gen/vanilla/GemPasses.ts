@@ -15,6 +15,7 @@ import { LIQUID_TYPE } from '../../TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
+import { vanGenSolidType } from './GenSolid';
 import { growGemTree } from './TreePass';
 import { checkStalactite } from './ShimmerPass';
 
@@ -244,21 +245,31 @@ function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: numb
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============
-/** WorldGen.SolidTile（cs:70155-70172）1:1：active && tileSolid && !tileSolidTop &&
- *  !halfBrick && slope==0 && !inActive（生成期 inActive 恒 false，wire bit32 免检）。
- *  写法同源 CaveWallsPass.solidAt（去其 pass 头 tileSolid 覆写表——本文件无覆写）。
- *  ★G4：旧 SOLID_LUT 只查 def.solid，丢 half/slope/solidTop——且 half/slope 是逐格
- *  状态、本就不可按 id 预计算；Spread.Gem(:3597)/countTiles(:9584) 均回归逐格判定 */
+/** Main.tileSolidTop（Main.cs:6764+ 全 86 项，U/EEEE 批同表副本——不 import 防耦合） */
+const SOLID_TOP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** WorldGen.SolidTile（cs:70155-70172）1:1：active && 生成期 tileSolid && !tileSolidTop &&
+ *  !halfBrick && slope==0 && !inActive；越界走 catch → false。
+ *  ★G8（2026-08-18 IIII 批）：实心源必须用生成期 Main.tileSolid（vanGenSolidType）——
+ *  静态 TILE_DEFS.solid 在本槽位与生成期表有 190 荧光蘑菇块/225 蜂巢块/226 蜥蜴砖/
+ *  481-483 裂砖/659 以太块/484 仙人掌 六族差（UndergroundHouses 尾 cs:17220-23 等翻
+ *  false），countTiles/Spread.Gem 曾以静态表把"原版可穿"的薄墙当实心 → 洪泛连通域
+ *  破碎：JS 拒 vanilla 收（腔被割裂）或 JS 收 vanilla 拒（腔局部被困）。#64 首差即
+ *  site#1 (1765,823) 荧光蘑菇块墙误挡——site#0 八通道逐位全对（流同源）而 site#1
+ *  起整片错位实证。
+ *  ★G4（旧案）：SOLID_LUT 只查 def.solid 丢 half/slope/solidTop 的历史教训保持。 */
 function solidTileAt(st: TileStore, x: number, y: number): boolean {
-  if (!st.inBounds(x, y)) return true;       // Main.tile 索引器 null → true（SolidTile catch 语义）
+  if (!st.inBounds(x, y)) return false;      // 索引越界 → catch → false（cs:70177）
   const i = st.idx(x, y);
-  if (!st.flags[i]) return false;
-  const d = TILE_DEFS[st.type[i]];
-  if (!d) return false;
-  return !!d.solid && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
+  const t = st.type[i]!;
+  return st.flags[i] !== 0 && vanGenSolidType(t) && !SOLID_TOP.has(SHEET[t] ?? -1)
+    && st.half[i] === 0 && st.slope[i] === 0 && ((st.wire[i]! >>> 5) & 1) === 0;
 }
 
 export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const g0 = globalThis as { __swGcCap?: (site: number, sx: number, sy: number, tries: number, x: number, y: number, air: number, lava: number, ice: number, rock: number) => void };
   // 裸 double 比较（cs:17534：`for i < w*0.003`）——不取整，12.6 也进 13 次
   const num = st.w * 0.003;
   // nextCount（WorldGen.cs:9506-9581）：洪泛连通空气腔；wall!=0 即封顶；lavaOk=false
@@ -334,6 +345,7 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
       const x = rng.nextIntRange(200, st.w - 200);
       const y = rng.nextIntRange(gs.rockLevel + 30, st.h - 230);
       const c = countTiles(x, y);
+      g0.__swGcCap?.(i, x, y, tries, x, y, c.air, c.lava, c.ice, c.rock);
       if (c.air >= 50 && c.air < 300 && c.lava === 0 && c.ice === 0 && c.rock > 0) { sx = x; sy = y; break; }
     }
     if (sx < 0) continue;
@@ -352,9 +364,15 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
     while (frontier.length) {
       const next: Array<[number, number]> = [];
       for (const [x, y] of frontier) {
-        if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) continue;
+        // InWorld(x,y,1)（cs:3572：x<1||x>=w-1||y<1||y>=h-1 才出界——x==1 合法；
+        //  countTiles 的 nextCount 边界是 x<=1（cs:9513），两处口径不同勿混）
+        if (x < 1 || x >= st.w - 1 || y < 1 || y >= st.h - 1) continue;
         const ii = st.idx(x, y);
-        if (seen.has(ii)) continue;
+        // ★原版无处理时去重（cs:3605 hashSet.Add 幂等，无 Contains 短路）：同波双亲
+        // 推入的重复点会被二次处理——纯空气格二访因首访已写 wall≠0 落入实心支
+        // !active 早退（零掷 no-op）；但 active 格二访（含实心 Gemmable 与有墙非实心
+        // 植物）会再次消费 randGemTile/四邻转换掷——曾 `if (seen.has(ii)) continue`
+        // 吞掉这些掷，RNG 流分叉（#64 首差 W(3805,614) 族 2026-08-18）。
         seen.add(ii);
         if (solidTileAt(st, x, y) || st.wall[ii] !== 0) { // cs:3597 SolidTile||wall!=0
           if (!st.flags[ii]) continue;                    // 空气+有墙：零操作零掷

@@ -1942,7 +1942,10 @@ export class Renderer {
           const yd0 = oy + Math.round((cy * CHUNK * ts - camRY) * z);
           const xd1 = ox + Math.round(((cx + 1) * CHUNK * ts - camRX) * z);
           const yd1 = oy + Math.round(((cy + 1) * CHUNK * ts - camRY) * z);
-          ctx.drawImage(chunks.get(cx, cy)[layer], xd0, yd0, xd1 - xd0 + 1, yd1 - yd0 + 1);
+          // chunk atlas 化(2026-08-18):pair.wall/tile 是 1024² atlas 页,
+          // cell 用 sx/sy/256 源矩形取(9 参形式;曾 4 参整页误绘)
+          const p = chunks.get(cx, cy);
+          ctx.drawImage(p[layer], p.sx, p.sy, CHUNK * ts, CHUNK * ts, xd0, yd0, xd1 - xd0 + 1, yd1 - yd0 + 1);
         }
       }
       ctx.restore();

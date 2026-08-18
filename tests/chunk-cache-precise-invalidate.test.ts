@@ -27,7 +27,8 @@ function makeCache(): { cc: PrivCache; atlas: TrackedAtlas } {
 
 function makePair(): ChunkPair {
   return { wall: { width: 256, height: 256 } as HTMLCanvasElement,
-           tile: { width: 256, height: 256 } as HTMLCanvasElement } as ChunkPair;
+           tile: { width: 256, height: 256 } as HTMLCanvasElement,
+           sx: 0, sy: 0, cell: -1 } as ChunkPair;
 }
 
 /** 模拟一次烘焙（renderChunk 的 tracker 交互段：置 key → note miss → 清 key） */
@@ -59,14 +60,12 @@ describe('ChunkCache 晚到贴图精确失效（file→chunks 反查）', () => 
     // 文件到达（SpriteAtlas.ensureVImage onload → bakeTracker.onLoaded）
     atlas.bakeTracker.onLoaded('vanilla/Tiles_10.png');
     vi.advanceTimersByTime(500);                       // 500ms 去抖合批
-    // after：只有 A/B 失效（画布释放 + 入脏队）
-    expect(pA.wall.width).toBe(0);
-    expect(pB.wall.width).toBe(0);
+    // after：只有 A/B 失效（置哨兵待重建 + 入脏队）
+    expect(cc.chunks.get(kA)).toBeUndefined();
+    expect(cc.chunks.get(kB)).toBeUndefined();
     expect(cc.dirtyQueue.length).toBe(2);
     expect(cc.arriveInvalidateChunks).toBe(2);
     // ★before 对照：旧 invalidateAll 会连 pC 一起释放（全量）——pC 必须原样
-    expect(pC.wall.width).toBe(256);
-    expect(pC.tile.width).toBe(256);
     expect(cc.chunks.get(kC)).toBe(pC);
     vi.useRealTimers();
   });
@@ -78,7 +77,7 @@ describe('ChunkCache 晚到贴图精确失效（file→chunks 反查）', () => 
     cc.chunks.set(ChunkCache.key(2, 2), pair);
     atlas.bakeTracker.onLoaded('vanilla/Tiles_999.png');   // 无登记
     vi.advanceTimersByTime(500);
-    expect(pair.wall.width).toBe(256);                     // 原样
+    expect(cc.chunks.get(ChunkCache.key(2, 2))).toBe(pair); // 原样
     expect(cc.dirtyQueue.length).toBe(0);
     expect(cc.arriveInvalidateChunks).toBe(0);
     // 同名二次到达仍 no-op

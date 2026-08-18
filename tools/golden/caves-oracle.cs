@@ -13112,6 +13112,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
     var WALL_DUNGEON_P = new HashSet<ushort> { 7, 8, 9, 94, 95, 96, 97, 98, 99 };
     var TILE_DUNGEON_P = new HashSet<ushort> { 41, 43, 44, 677, 678, 679 };
     var BOULDERS_P = new HashSet<ushort> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
+    bool pileTrace = Environment.GetEnvironmentVariable("PILE_TRACE") != null;
     bool ActAt(int ax, int ay) => QQInW(ax, ay) && act[ay * W + ax] != 0;
     int SheetAt(int ax, int ay) => QQInW(ax, ay) && act[ay * W + ax] != 0 ? typ[ay * W + ax] : -1;
     // SolidTile2（cs:46862）：active && tileSolid && slope==0 && !half（GenSolid 覆写生效=SOLID 现值）
@@ -13127,7 +13128,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
         if (act[i] == 0) return false;
-        return (SOLID.Contains(typ[i]) || QQ_PLATFORMS.Contains(typ[i])) && half[i] == 0 && slope[i] != 1 && slope[i] != 2;
+        return (JGS(typ[i]) || FC_PLAT.Contains(typ[i])) && half[i] == 0 && slope[i] != 1 && slope[i] != 2;   // HHHH: JS solidTileAllowBottomSlope（genSolid||d.platform 86 集——书架 101 案）
     }
     void SetTS(int ax, int ay, ushort t, int fx, int fy2)
     {
@@ -13137,6 +13138,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
     }
     bool PlaceSmallPile(int ax, int ay, int pileStyle, int pileSize)
     {
+        if (pileTrace) Console.Error.WriteLine($"PLT small ({ax},{ay}) st={pileStyle} sz={pileSize} below1={(QQInW(ax, ay + 1) ? typ[(ay + 1) * W + ax] : -1)}");
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
         if (liq[i] > 0 && liqT[i] == 1) return false;      // anyLava 拒绝
@@ -13154,6 +13156,12 @@ Replay(); // ▶pass 头重播：Piles cs:18900
         return true;
     }
     bool PlacePile3x2(int ax, int ay, ushort type, int style)
+    {
+        bool pr3 = PlacePile3x2Core(ax, ay, type, style);
+        if (pileTrace) Console.Error.WriteLine($"PLT 3x2 ({ax},{ay}) t={type} st={style} ok={pr3}");
+        return pr3;
+    }
+    bool PlacePile3x2Core(int ax, int ay, ushort type, int style)
     {
         for (int k = 0; k < 3; k++)
         {
@@ -14090,7 +14098,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
         int i = ay * W + ax;
         if (checking[i] != 0 || liq[i] == 0) return;
         ushort t = typ[i];
-        if (t != 0 && act[i] != 0 && SolidNP(t) && t != 546) return;
+        if (act[i] != 0 && SolidNP(t) && t != 546) return;   // HHHH: JS t!==0=内部空格门（活性格恒过）；vanilla 0=泥土——曾把活性泥土格漏拒入列/漏清液
         if (numLiquid >= curMaxLiquid - 1)
         {
             if (bufTail - bufHead < BUF_CAP)
@@ -14298,7 +14306,10 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                         if (nx < 1 || ny < 1 || nx >= W - 1 || ny >= H - 1) continue;
                         int ni = ny * W + nx;
                         ushort t = typ[ni];
-                        if (t == 0) continue;
+                        // ★HHHH：cs:1547 `if (!tile5.active()) continue`——只烧活性格（JS LiquidSim
+                        //   同款门）。曾漏 active 门：非活性幽灵格（被杀植物的 60 丛林草残留）
+                        //   被复活成活性泥 59 并连坐液体路径（settle2 act×153 根因）。
+                        if (act[ni] == 0 || t == 0) continue;
                         if (LS_BURN_AIR.Contains(t)) { typ[ni] = 0; act[ni] = 0; half[ni] = 0; slope[ni] = 0; }
                         else if (LS_BURN_DIRT.Contains(t)) { typ[ni] = 59; act[ni] = 1; }
                     }
@@ -14779,7 +14790,7 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                 int i = y * W + x;
                 if (liq[i] == 0) continue;
                 ushort t = typ[i];
-                if (t != 0 && act[i] != 0)
+                if (act[i] != 0)   // HHHH: JS t!==0=内部空格门（活性格恒过）——活性泥土(typ=0)内液体照清
                 {
                     if (SolidNP(t))
                     {

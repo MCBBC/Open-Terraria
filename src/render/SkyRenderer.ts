@@ -1400,13 +1400,27 @@ export class SkyRenderer {
   }
 
   private cloudTintCache = new Map<string, HTMLCanvasElement>();
-  /** 云朵着色缓存（multiply + destination-in 保形） */
+  /** 纹理实例 id(ImageBitmap 无 .src,裸读恒 undefined → 跨云纹理键碰撞;
+   *  bitmap 迁移时代 WeakMap 方案同款) */
+  private cloudTexIds = new WeakMap<object, number>();
+  private cloudTexIdSeq = 0;
+  /** 云朵着色缓存（multiply + destination-in 保形）。
+   *  ★色键量化步进 8(2026-08-18 canvas 出生栈普查:旧键含逐帧漂移的
+   *  Math.round(r,g,b) → 每帧每云 miss → ~340 张/秒 createElement('canvas'),
+   *  是移动期 IOSurface churn 主源;量化后键只在天色跨桶时换,churn 趋零。
+   *  步进 8 = 通道 3% 内误差,软边低对比云上不可感知) */
   private cloudTint(tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement {
-    const key = `${(tex as HTMLImageElement).src}|${r},${g},${b}`;
+    let tid = this.cloudTexIds.get(tex);
+    if (tid === undefined) { tid = ++this.cloudTexIdSeq; this.cloudTexIds.set(tex, tid); }
+    const key = `${tid}|${r & ~7},${g & ~7},${b & ~7}`;
     const hit = this.cloudTintCache.get(key);
     if (hit) return hit;
-    const c = document.createElement('canvas');
-    c.width = tex.width; c.height = tex.height;
+    // ★画布池复用(2026-08-18):同屏多云色桶并存,纯量化仍 ~55 张/秒;
+    // 逐桶弃旧新建 = createElement churn(曾 340 张/秒)。改为 LRU 淘汰的画布
+    // 进 free 池,miss 时原位重画——零画布出生,活集恒 ≤64(与 chunk atlas 同哲学)
+    let c = this.cloudTintFree.pop();
+    if (!c) c = document.createElement('canvas');
+    if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
     const cx = c.getContext('2d')!;
     cx.imageSmoothingEnabled = true;
     cx.drawImage(tex, 0, 0);
@@ -1418,10 +1432,16 @@ export class SkyRenderer {
     this.cloudTintCache.set(key, c);
     if (this.cloudTintCache.size > 64) {
       const first = this.cloudTintCache.keys().next().value;
-      if (first !== undefined) this.cloudTintCache.delete(first);
+      if (first !== undefined) {
+        const evicted = this.cloudTintCache.get(first);
+        this.cloudTintCache.delete(first);
+        if (evicted) this.cloudTintFree.push(evicted);   // 归池复用,不弃
+      }
     }
     return c;
   }
+  /** cloudTint 淘汰画布的复用池(容量隐性 = 缓存上限 64) */
+  private cloudTintFree: HTMLCanvasElement[] = [];
 
   // ================= AmbientSky 天空实体（渲染层：群系背景之上、实体之下） =================
 
