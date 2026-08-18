@@ -534,22 +534,29 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   }
   // flag12 天空主题（cs:37424-37474）：1/3 天空磨坊；Next(6) 五选一装饰画；
   // 751 云 [50,100]（cs:37469）
+  // ★此段在 items 快照之后——曾用 push() 落回 out（快照外,全部静默丢失）:
+  // 12345 金标岛屋箱必有装饰画+云(f5255+751×88),JS 箱缺 2 件实锤。改 pushItem
+  // 直接入 items;掷骰序与命中判定不变(零流影响)。
+  const pushItem = (v: number, stack = 1) => {
+    const id = vid(v);
+    if (id >= 0 && items.length < 40) items.push({ id, stack });
+  };
   {
     const f12 = !!flags.skyTheme || mainVanillaId === 159 || mainVanillaId === 65
       || mainVanillaId === 158 || mainVanillaId === 2219;
-    if (f12 && rng.int(0, 2) === 0) push(2197);
-    if (flags.temple) push(2195); // flag13（cs:37428）：蜥蜴炉恒给
-    if (flags.dungeon && rng.int(0, 7) === 0) push(2192); // flag9（cs:37432）1/8 血腥砍刀
+    if (f12 && rng.int(0, 2) === 0) pushItem(2197);
+    if (flags.temple) pushItem(2195); // flag13（cs:37428）：蜥蜴炉恒给
+    if (flags.dungeon && rng.int(0, 7) === 0) pushItem(2192); // flag9（cs:37432）1/8 血腥砍刀
     if (f12) {
       const n38 = rng.int(0, 5);
-      push([5258, 5226, 5254, 5238, 5255, 5388][n38]); // cs:37440-37468
-      push(751, rng.int(50, 100));
+      pushItem([5258, 5226, 5254, 5238, 5255, 5388][n38]); // cs:37440-37468
+      pushItem(751, rng.int(50, 100));
     }
     // 上锁生物群系箱 1/2 → 5234 虔诚残片（cs:37494-37498）
-    if (flags.lockedBiome && rng.int(0, 1) === 0) push(5234);
+    if (flags.lockedBiome && rng.int(0, 1) === 0) pushItem(5234);
     if (flags.temple) { // flag13 尾（cs:37479-37491）：1/5 日耀碑 否则碎片 [3,7]
-      if (rng.int(0, 4) === 0) push(2767);
-      else push(2766, rng.int(3, 7));
+      if (rng.int(0, 4) === 0) pushItem(2767);
+      else pushItem(2766, rng.int(3, 7));
     }
     // voice 门（cs:37557）：恒掷 Next(12)；命中 1/12 时 AddVoiceChangeItemToChest
     // 内 Item.GetRandomVoiceItem 还要掷 Next(14)——曾漏（命中即短一掷，流漂移）

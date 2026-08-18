@@ -312,9 +312,9 @@ export class UI {
   toastEl: HTMLElement | null = null;
   achWrapEl: HTMLElement | null = null;
   heldStack: { id: number; stack: number; prefix?: number; placeStyle?: number } | null = null; // prefix/placeStyle 随实例流转
-  /** 光标持有物来源区（露西存取台词的 CountsAsStorage 判定，ItemSlot 上下文） */
-  private heldFrom: SlotWhere | null = null;
-  heldFrom: SlotWhere = 'inv';
+  /** 光标持有物来源区（露西存取台词的 CountsAsStorage 判定，ItemSlot 上下文；
+   *  两会话撞字段合并：null=未持取（CountsAsStorage 判定的"非箱取"缺省档） */
+  heldFrom: SlotWhere | null = null;
   openChest: ChestData | null = null;
   private toastTimer: number | null = null;
   /** 图鉴面板入口（背包按钮/暂停菜单注入；见 BestiaryPanel） */

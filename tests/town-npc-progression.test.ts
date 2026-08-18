@@ -21,7 +21,7 @@ const withP = (over: Partial<TownNpcProgression>): TownNpcProgression => ({ ...B
 
 describe('num2/num3 进度强化链纯函数（NPC.cs:53400-53557）', () => {
   it('无进度基线：damageMul 1 / chanceMul 2（:53400/:53413）', () => {
-    expect(townNpcProgressionBoost(BASE)).toEqual({ damageMul: 1, chanceMul: 2 });
+    expect(townNpcProgressionBoost(BASE)).toEqual({ damageMul: 1, chanceMul: 2, defenseBonus: 0 });
     // fromWorld 空旗标：skyblockLowTiles/tipsy 恒 false（登记位,见 TownNPC 注释）
     expect(BASE.skyblockLowTiles).toBe(false);
     expect(BASE.tipsy).toBe(false);
@@ -29,7 +29,7 @@ describe('num2/num3 进度强化链纯函数（NPC.cs:53400-53557）', () => {
 
   it('战斗书两卷：+0.25/卷 damage、×0.8/卷 chance（:53419-53432）', () => {
     expect(townNpcProgressionBoost(withP({ combatBookWasUsed: true })))
-      .toEqual({ damageMul: 1.25, chanceMul: 1.6 });
+      .toEqual({ damageMul: 1.25, chanceMul: 1.6, defenseBonus: 8 });
     const two = townNpcProgressionBoost(withP({ combatBookWasUsed: true, combatBookVolumeTwoWasUsed: true }));
     expect(two.damageMul).toBe(1.5);                       // 1+0.25+0.25 二进制精确
     expect(two.chanceMul).toBeCloseTo(1.28, 9);            // 2×0.8×0.8 浮点尾差
@@ -86,7 +86,7 @@ describe('num2/num3 进度强化链纯函数（NPC.cs:53400-53557）', () => {
 
   it('tipsy 链尾乘算（:53552-53557）：damage×1.1 / chance×0.9', () => {
     expect(townNpcProgressionBoost(withP({ tipsy: true })))
-      .toEqual({ damageMul: 1.1, chanceMul: 1.8 });
+      .toEqual({ damageMul: 1.1, chanceMul: 1.8, defenseBonus: 0 });
     // 与硬模式叠加：(1+0.4)×1.1 = 1.54（乘算在加法之后——链尾语义）
     expect(townNpcProgressionBoost(withP({ hardMode: true, tipsy: true })).damageMul)
       .toBeCloseTo(1.54, 9);
@@ -126,7 +126,7 @@ describe('world.flags → 链入参映射（townNpcProgressionFromWorld）', () 
     expect(townNpcProgressionFromWorld({ flags: { downedSlimeKing: true } }).downedSlimeKing).toBe(true);
     // 非链内 Boss（如月总 398/哀木 89 等）不误触
     const none = townNpcProgressionFromWorld({ flags: { downed_398: true, downed_89: true } });
-    expect(townNpcProgressionBoost(none)).toEqual({ damageMul: 1, chanceMul: 2 });
+    expect(townNpcProgressionBoost(none)).toEqual({ damageMul: 1, chanceMul: 2, defenseBonus: 0 });
   });
 });
 

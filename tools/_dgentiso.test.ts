@@ -209,6 +209,30 @@ if (process.env.SW_DGREP === '1') {
         };
         wr('bEnd.wal', st.wall); wr('bEnd.flags', st.flags); wr('bEnd.type', st.type);
       }
+      if (process.env.SW_DGREP_CELL) {
+        const [cxs, cys] = process.env.SW_DGREP_CELL.split(':').map(Number);
+        const ci = cys * W + cxs;
+        console.log(`CELL ${name} (${cxs},${cys}) act=${st.flags[ci]! & 1} typ=${SHEET[st.type[ci]!] ?? -1} wall=${st.wall[ci]!} wire=${st.wire[ci]!}`);
+      }
+      if (process.env.SW_DGREP_DUMP && (name === 'dungeonPD' || name === 'dungeonE' || name === 'dungeonG' || name === 'dungeonI')) {
+        const wr = (nm: string, a2: Uint8Array | Uint16Array) => {
+          const b2 = Buffer.from(a2.buffer, a2.byteOffset, a2.byteLength);
+          writeFileSync(`/tmp/dgcap/${name}.${nm}`, b2.slice());
+        };
+        const vtyp2 = new Uint16Array(N), vact2 = new Uint8Array(N);
+        for (let i = 0; i < N; i++) { vact2[i] = st.flags[i]! & 1; vtyp2[i] = vact2[i] ? (SHEET[st.type[i]!] ?? 9999) : 0; }
+        wr('typ', vtyp2); wr('act', vact2); wr('wal', st.wall);
+      }
+      if (process.env.SW_DGREP_GHASH) {
+        // G|0.935 四通道 FNV（与 DgSegProbe G| 行同口径）对拍 vanilla 10bef0a9 d96a6f75 b07b0c78 6762b5fa
+        const vtyp = new Uint16Array(N), vact = new Uint8Array(N);
+        for (let i = 0; i < N; i++) { vact[i] = st.flags[i]! & 1; vtyp[i] = vact[i] ? (SHEET[st.type[i]!] ?? 9999) : 0; }
+        const GF16 = (a: Uint16Array): string => { let h = 0x811c9dc5; for (let k = 0; k < N; k++) { const v = a[k]!; h = Math.imul(h ^ (v & 0xff), 16777619) >>> 0; h = Math.imul(h ^ (v >>> 8), 16777619) >>> 0; } return (h >>> 0).toString(16).padStart(8, '0'); };
+        const GF8 = (a: Uint8Array): string => { let h = 0x811c9dc5; for (let k = 0; k < N; k++) { const v = a[k]!; h = Math.imul(h ^ v, 16777619) >>> 0; h = Math.imul(h, 16777619) >>> 0; } return (h >>> 0).toString(16).padStart(8, '0'); };
+        const vliq = new Uint8Array(N);
+        for (let i = 0; i < N; i++) vliq[i] = st.liquid[i]!;
+        console.log(`GHASH ${name} typ=${GF16(vtyp)} act=${GF8(vact)} wal=${GF16(st.wall)} liq=${GF8(vliq)} (van 10bef0a9 d96a6f75 b07b0c78 6762b5fa)`);
+      }
       if (name === 'dungeonG' && process.env.SW_DGREP_PEEK) {
         const ur0g = (rng2 as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
         const saG = Buffer.alloc(56 * 4 + 4);
@@ -217,6 +241,25 @@ if (process.env.SW_DGREP === '1') {
         writeFileSync('/tmp/dgcap/gEnd.state', saG);
       }
       if (process.env.SW_DGREP_PEEK_DONE) { /* noop */ }
+      if (process.env.SW_DGREP_DUMP && (name === 'dungeonPD' || name === 'dungeonE' || name === 'dungeonG' || name === 'dungeonI')) {
+        const wr = (nm: string, a2: Uint8Array | Uint16Array) => {
+          const b2 = Buffer.from(a2.buffer, a2.byteOffset, a2.byteLength);
+          writeFileSync(`/tmp/dgcap/${name}.${nm}`, b2.slice());
+        };
+        const vtyp2 = new Uint16Array(N), vact2 = new Uint8Array(N);
+        for (let i = 0; i < N; i++) { vact2[i] = st.flags[i]! & 1; vtyp2[i] = vact2[i] ? (SHEET[st.type[i]!] ?? 9999) : 0; }
+        wr('typ', vtyp2); wr('act', vact2); wr('wal', st.wall);
+      }
+      if (process.env.SW_DGREP_GHASH) {
+        // G|0.935 四通道 FNV（与 DgSegProbe G| 行同口径）对拍 vanilla 10bef0a9 d96a6f75 b07b0c78 6762b5fa
+        const vtyp = new Uint16Array(N), vact = new Uint8Array(N);
+        for (let i = 0; i < N; i++) { vact[i] = st.flags[i]! & 1; vtyp[i] = vact[i] ? (SHEET[st.type[i]!] ?? 9999) : 0; }
+        const GF16 = (a: Uint16Array): string => { let h = 0x811c9dc5; for (let k = 0; k < N; k++) { const v = a[k]!; h = Math.imul(h ^ (v & 0xff), 16777619) >>> 0; h = Math.imul(h ^ (v >>> 8), 16777619) >>> 0; } return (h >>> 0).toString(16).padStart(8, '0'); };
+        const GF8 = (a: Uint8Array): string => { let h = 0x811c9dc5; for (let k = 0; k < N; k++) { const v = a[k]!; h = Math.imul(h ^ v, 16777619) >>> 0; h = Math.imul(h, 16777619) >>> 0; } return (h >>> 0).toString(16).padStart(8, '0'); };
+        const vliq = new Uint8Array(N);
+        for (let i = 0; i < N; i++) vliq[i] = st.liquid[i]!;
+        console.log(`GHASH ${name} typ=${GF16(vtyp)} act=${GF8(vact)} wal=${GF16(st.wall)} liq=${GF8(vliq)} (van 10bef0a9 d96a6f75 b07b0c78 6762b5fa)`);
+      }
       if (name === 'dungeonG' && process.env.SW_DGREP_PEEK) {
         // 对齐态后前 N 采样模拟（候选 T/L 推演 vanilla 首锚 (347,774)）
         const ur0 = (rng2 as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;

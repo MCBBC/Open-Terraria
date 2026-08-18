@@ -522,9 +522,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         closePanel();
         ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.Connecting'), 0.1);
         const g = makeGame();
-        // 连接前应用选中角色：Hello 的玩家名（加入公告"X已加入。"）与首包
-        // SyncPlayer 外观都取自 player.appearance——等 applyAppearance 就太晚了
-        if (selectedAppearance) g.player.appearance = selectedAppearance;
+        // 连接前应用选中角色：Hello 的玩家名（加入公告"X已加入。"）需要早于世界数据。
+        // ★g.player 要到 loadWorld（世界数据到达）才创建——曾在此直接 g.player.appearance=
+        // 踩 undefined 崩溃（生产构建加入房间即卡死）。预置联机名供 Hello 兜底,
+        // 外观本体由 onWorldReady 的 applyAppearance 落位（含 resendAppearance 补发）
+        if (selectedAppearance) {
+          (g as unknown as { pendingJoinName?: string }).pendingJoinName
+            = (selectedAppearance as { name?: string }).name;
+        }
         g.joinNetGame(url, (label, p) => {
           ui.showProgress(label, 0.1 + p * 0.8);
         }, hostToken).then(() => {

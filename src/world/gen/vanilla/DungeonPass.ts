@@ -15,6 +15,18 @@ import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/it
 import { tileRunner } from './TileRunner';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { flipGenSolid, genSolidType } from './GenSolid';
+// node:fs 动态导入（探针落盘 SW_DG_LIGHTS_GRID 才用）——顶层静态导入会进
+// worker bundle 被 vite 外部化炸构建（2026-08-18 实锤：writeFileSync is not
+// exported by "__vite-browser-external"）。改运行时 require，浏览器恒 false 门
+type NodeFs = typeof import('node:fs');
+let fsMod: NodeFs | null = null;
+function nodeFs(): NodeFs | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    fsMod ??= (typeof require === 'function' ? require('node:fs') : null) as NodeFs | null;
+  } catch { fsMod = null; }
+  return fsMod;
+}
 
 const BLUE = TILE_BY_KEY['v_41_blue_brick']!;
 const GREEN = TILE_BY_KEY['v_43_green_brick']!;
@@ -2210,6 +2222,7 @@ export function runDungeonPass(
         for (const off of [-1, -2, 1, 2]) {
           if (inW(n16 + off, y, 0) && actAt(n16 + off, y) !== 0 && canKill(n16 + off, y)) {
             const k = st.idx(n16 + off, y);
+            st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
             st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
           }
         }
@@ -2225,7 +2238,8 @@ export function runDungeonPass(
           for (const off of [-1, -2]) {
             if (d.clear || typAt(n16 + off, y) === brick) {
               const k = st.idx(n16 + off, y);
-              st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
+              st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
             }
           }
         }
@@ -2240,7 +2254,8 @@ export function runDungeonPass(
           for (const off of [1, 2]) {
             if (d.clear || typAt(n16 + off, y) === brick) {
               const k = st.idx(n16 + off, y);
-              st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
+              st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
+            st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
             }
           }
         }
@@ -2251,6 +2266,7 @@ export function runDungeonPass(
         for (const off of [2, 3, -2, -3]) {
           if (d.clear || typAt(n16 + off, y) === brick) {
             const k = st.idx(n16 + off, y);
+            st.type[k] = 0; st.liquid[k] = 0; st.liquidType[k] = 0;   // ClearEverything 本体（Tile.cs:140 type=0!）
             st.flags[k] = 0; st.slope[k] = 0; st.half[k] = 0; st.wall[k] = wall;   // ClearEverything+wall（DGD:173-190）
           }
         }
@@ -2818,6 +2834,28 @@ export function runDungeonPass(
     if (lgTr) {
       console.log(`DG LG n5=${Math.trunc(28 * (w / 4200) * 1.0)} bnd=${bounds.L},${bounds.T},${bounds.R},${bounds.B} ent=${entExists ? 1 : 0} eb=${entBounds.L},${entBounds.T},${entBounds.R},${entBounds.B}`);
       console.log(`DG PITS${pits.map((p: DBnd) => ` ${p.L},${p.T},${p.R},${p.B}`).join('')}`);
+    }
+    // #32 终清批 III：Lights 入口全网格落盘（SW_DG_LIGHTS_GRID=<path 前缀>）——与
+    //   vanilla 探针 SW_DGLIGHTS_GRID 同口径对拍（typ/act/wal/half/slope 五通道）。
+    if (typeof process !== 'undefined' && process.env.SW_DG_LIGHTS_GRID) {
+      const pfx = process.env.SW_DG_LIGHTS_GRID as string;
+      const vtyp = new Uint16Array(w * h), vact = new Uint8Array(w * h);
+      const vhalf = new Uint8Array(w * h), vslope = new Uint8Array(w * h);
+      for (let i = 0; i < w * h; i++) {
+        vact[i] = st.flags[i]! & 1;
+        vtyp[i] = st.type[i] === 0 ? 0 : (TILE_DEFS[st.type[i]!]?.vanilla?.sheet ?? 9999);   // ★原始 type（inactive 保留 stale）
+        vhalf[i] = st.half[i]! ? 1 : 0;
+        vslope[i] = st.slope[i]!;
+      }
+      const wrGrid = (nm: string, a: Uint8Array | Uint16Array): void => {
+        const fsw = nodeFs();
+        if (!fsw) return;                                  // 浏览器 worker 无 node:fs
+        const b = Buffer.from(a.buffer, a.byteOffset, a.byteLength);
+        fsw.writeFileSync(`${pfx}.${nm}`, b.slice());
+      };
+      wrGrid('typ', vtyp); wrGrid('act', vact); wrGrid('wal', st.wall);
+      wrGrid('half', vhalf); wrGrid('slope', vslope);
+      console.log(`DG GRID dumped -> ${pfx}.*`);
     }
     const num5 = Math.trunc(28 * (w / 4200) * 1.0);
     let ncount = 0, num4 = 0;

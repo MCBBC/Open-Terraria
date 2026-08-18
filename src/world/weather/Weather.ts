@@ -408,11 +408,14 @@ export class WeatherState {
     ctx?.onSlimeRainToggle?.(false);
   }
 
-  /** 史莱姆雨击杀推进（NPC.cs:79880-79897 DoDeathEvents_AdvanceSlimeRain：
-   *  slimeRainNPC 表仅 [1]；阈值 150，杀过王减半 75；≥阈值 → 出王并置 -阈值/2）。
-   *  场上无王门（AnyNPCs(50)）由调用方（Game）判 boss 槽近似 */
-  advanceSlimeRainKill(vanillaNpcId: number, downedSlimeKing = false): boolean {
-    if (!this.slimeRain || vanillaNpcId !== 1) return false;
+  /** 史莱姆雨击杀推进（NPC.cs:79880-79897 DoDeathEvents_AdvanceSlimeRain）：
+   *  三重门 slimeRain && slimeRainNPC[type]（表仅 [1]）&& !AnyNPCs(50)——★王在场
+   *  时击杀完全不计数（不递增/不触阈值/不进冷却重置；此前恒计数=偏离）。
+   *  阈值 150，杀过王减半 75；≥阈值 → 出王（调用方 SpawnOnPlayer(50)）并置
+   *  -阈值/2。kingSlimeOnField = AnyNPCs(50) 等价（调用方扫 enemies vanillaId 50
+   *  传入；接线前缺省 false 保持旧调用兼容） */
+  advanceSlimeRainKill(vanillaNpcId: number, downedSlimeKing = false, kingSlimeOnField = false): boolean {
+    if (!this.slimeRain || vanillaNpcId !== 1 || kingSlimeOnField) return false;
     let num = 150;
     if (downedSlimeKing) num = Math.floor(num / 2);        // :79886 downed → 75
     this.slimeRainKillCount++;

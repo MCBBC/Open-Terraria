@@ -119,7 +119,7 @@ import { FOOD_PARTICLE_COLORS, DRINK_PARTICLE_COLORS } from '../data/vanillaFood
 import {
   setLucySinks, tickLucyCooldowns, lucyEnterWorld, lucyTryIdle, lucyTryWithCooldown, create as lucyCreate,
 } from '../items/LucyAxe';
-import { spawnEmote } from '../render/EmoteBubble';
+// spawnEmote 统一从 :163 的合并导入（spawnEmote, tickEmotes）取——重复导入已清
 import { itemUseSoundWav } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing } from '../entities/projStatus';
@@ -2206,9 +2206,17 @@ export class Game implements GameHooks {
       this.autotiler = new AutoTiler(atlas);
     }
     this.renderer = new Renderer(this.assets, atlas);
-    // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限
+    // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限;
+    // 熔断态(2026-08-18 双开崩溃:抖动环 1.7 万次/3s)加一次 toast 提示
     this.renderer.installGpuPressureGuard();
-    this.renderer.cbOnGpuPressure = () => this.shrinkChunks();
+    let gpuTripToasted = false;
+    this.renderer.cbOnGpuPressure = () => {
+      this.shrinkChunks();
+      if (this.renderer.gpuDegraded && !gpuTripToasted) {
+        gpuTripToasted = true;
+        this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.GpuDegraded'));
+      }
+    };
     this.renderer.vanillaDust = this.vanillaDust;   // DrawDust 双 pass 消费（lit/全亮）
     this.renderer.attach(root);
     // 音效按需加载（2026-08-10）：不在此预读——播放未命中时后台 fetch+decode、
@@ -4780,19 +4788,35 @@ export class Game implements GameHooks {
     const specCam = this.spectateCamPos();
     this.camera.follow(specCam ? specCam.x : player.cx, specCam ? specCam.y : player.cy);
     this.camera.easeZoom();
-    // 望远镜手持镜头平移（Main.cs:62195-62253 GetPlayerControlledCameraPan）：手持
-    // 1299 狙击枪 → num=2/3 且 flag=false（无需右键按住）——镜头向鼠标方向平移
-    // 至多 2/3 屏（targetPan = vector×ScaledSize/2×num，:62252）。scope/1254 档
-    // （需右键+狙击镜配饰门）未接（登记）；lastMouseInterface 门以 uiBlocking 近似。
+    // 望远镜/狙击镜手持镜头平移（Main.cs:62195-62253 GetPlayerControlledCameraPan
+    // 全档 1:1）：num 档位——scope 配饰(1300 步枪镜/1858 狙击镜/4005 侦察镜)且手持
+    // 子弹/糖玉米/木桩/飞镖/溶液武器 → 0.5（:62216，须右键按住）；1254 狙击步枪 →
+    // 2/3，带镜 → 0.8（:62219-62226，须右键）；1299 望远镜 → 2/3 无右键门
+    // （flag=false :62229-62231）。targetPan = vector×ScaledSize/2×num（:62252）。
+    // lastMouseInterface 门以 uiBlocking 近似（原版 noThrow||lastMouseInterface
+    // 且无进行中平移才拦，:62201-62204）；选中槽 58（光标持物）同拦。
     // 仅手持期间叠加（follow 每帧重锚玩家——卸枪即复位，无残留状态）
     if (!this.input.uiBlocking) {
       const hDef = ITEM_DEFS[player.inv.heldItem()?.id ?? -1];
-      if (hDef && (hDef.vid ?? viIdFromKey(hDef.key)) === 1299) {
+      const hVid = hDef ? (hDef.vid ?? viIdFromKey(hDef.key)) : -1;
+      // scope 配饰佩戴判定（Player.cs:14356-14360：饰品在身 + 手持武器 useAmmo
+      // ∈ {97 子弹,1783 糖玉米,1836 木桩,283 飞镖,780 溶液}）
+      const SCOPE_ACC = new Set([1300, 1858, 4005]);
+      const AMMO_SCOPE = new Set([97, 1783, 1836, 283, 780]);
+      const hasScopeAcc = player.inv.armor.some((s, i) =>
+        i >= 3 && s && SCOPE_ACC.has(ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]!.key) ?? -1));
+      const heldAmmo = itemCombat(hVid)?.useAmmo ?? -1;
+      const scoped = hasScopeAcc && AMMO_SCOPE.has(heldAmmo);
+      let panNum = -1, needRightClick = true;
+      if (scoped) panNum = 0.5;                                     // :62216
+      if (hVid === 1254) panNum = scoped ? 0.8 : 2 / 3;             // :62219-62226
+      if (hVid === 1299) { panNum = 2 / 3; needRightClick = false; } // :62229-62231
+      if (panNum > 0 && (!needRightClick || this.input.rightDown)) { // :62245 (flag&&!mouseRight)→拦
         const cam = this.camera;
         const vx = Math.min(Math.max(this.input.mouseX / cam.viewW, 0), 1) * 2 - 1;
         const vy = Math.min(Math.max(this.input.mouseY / cam.viewH, 0), 1) * 2 - 1;
-        cam.x += vx * (cam.viewW / cam.zoom) / 2 * (2 / 3);
-        cam.y += vy * (cam.viewH / cam.zoom) / 2 * (2 / 3);
+        cam.x += vx * (cam.viewW / cam.zoom) / 2 * panNum;
+        cam.y += vy * (cam.viewH / cam.zoom) / 2 * panNum;
       }
     }
     this.camera.clamp();
@@ -5225,7 +5249,7 @@ export class Game implements GameHooks {
         for (const eent of this.entities.enemies) {
           const e = eent as Enemy;
           if (c.x < e.x + e.w && c.x + c.w > e.x && c.y < e.y + e.h && c.y + c.h > e.y) {
-            c.hurt(this);
+            (c as unknown as import('../entities/projTargets').CritterLike).hurt(this);
             break;
           }
         }
@@ -5556,7 +5580,7 @@ export class Game implements GameHooks {
     // ---- QuickBuff_PickBestFoodItem（:5474-5646）：26/206/207 优先级 1/2/3 ----
     let curPrio = 0;
     for (const bt of [BuffType.WellFed, BuffType.WellFed2, BuffType.WellFed3]) {
-      if (p.buffs.has(bt)) { curPrio = Math.max(curPrio, QUICK_BUFF_FOOD_PRIO[BUFF_DEFS[bt].vanillaBuff]); }
+      if (p.buffs.has(bt)) { curPrio = Math.max(curPrio, Game.QUICK_BUFF_FOOD_PRIO[BUFF_DEFS[bt].vanillaBuff]); }
     }
     let foodSlot = -1, foodPrio = curPrio, foodTime = -1;
     for (let i = 0; i < 58; i++) {
@@ -5564,7 +5588,7 @@ export class Game implements GameHooks {
       if (!s || s.stack <= 0) continue;
       const vid = ITEM_DEFS[s.id]?.vid ?? viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
       const f = vid >= 0 ? itemFuncOfVid(vid) : null;
-      const prio = f?.buffType ? QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;
+      const prio = f?.buffType ? Game.QUICK_BUFF_FOOD_PRIO[f.buffType] ?? 0 : 0;
       if (prio > 0 && prio >= foodPrio && (foodSlot < 0 || (f!.buffTime ?? 0) > foodTime || prio > foodPrio)) {
         foodSlot = i; foodPrio = prio; foodTime = f!.buffTime ?? 0;       // :5618-5624
       }
@@ -5580,14 +5604,14 @@ export class Game implements GameHooks {
       let btype = f.buffType!;
       // QuickBuff_ShouldBotherUsingThisBuff（:5660-5697）
       let bother = true;
-      const isFed = QUICK_BUFF_FOOD_PRIO[btype] !== undefined;
+      const isFed = Game.QUICK_BUFF_FOOD_PRIO[btype] !== undefined;
       for (const [bt] of p.buffs.active) {
         const vb = BUFF_DEFS[bt]?.vanillaBuff;
         if (vb === undefined) continue;
         if (btype === 27 && (vb === 27 || vb === 101 || vb === 102)) { bother = false; break; }
-        if (isFed && QUICK_BUFF_FOOD_PRIO[vb] !== undefined) { bother = false; break; }
+        if (isFed && Game.QUICK_BUFF_FOOD_PRIO[vb] !== undefined) { bother = false; break; }
         if (vb === btype) { bother = false; break; }
-        if (QUICK_MELEE_BUFF_VANILLA.has(btype) && QUICK_MELEE_BUFF_VANILLA.has(vb)) { bother = false; break; }
+        if (Game.QUICK_MELEE_BUFF_VANILLA.has(btype) && Game.QUICK_MELEE_BUFF_VANILLA.has(vb)) { bother = false; break; }
       }
       // mana>0 且值得用 → 扣魔（:5557-5561）；魔不够则跳过本件
       if (bother && (f.mana ?? 0) > 0) {
@@ -5619,7 +5643,7 @@ export class Game implements GameHooks {
     const f = vid >= 0 ? itemFuncOfVid(vid) : null;
     if (!s || !f) return -1;
     if (f.buffType! > 0) {
-      const bt = BUFF_BY_VANILLA.get(f.buffType);
+      const bt = f.buffType !== undefined ? BUFF_BY_VANILLA.get(f.buffType) : undefined;
       if (bt !== undefined && bt !== BuffType.Resistance) {   // 21 是副作用不主动施加
         p.buffs.apply(bt, Math.max(1, Math.round((f.buffTime || 3600) / 60)));
       }
@@ -8472,7 +8496,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       case 'shot': {
         // 兜底直射（附魔剑光束等 melee/ranged+shoot 未归族项）：重力按 aiStyle
         const pd = projectileData(cw.shoot);
-        // ★食人鱼枪 1156 → 弹 190（aiStyle 39，GAP G3 行为层）：直飞 Arrow 表达不了
+        // ★食人鱼枪 1156 → 弹 190（aiStyle 39，行为层已全接——Arrow.piranhaStep
+        //  三态机 :26060-26310 + 本分支补满 3 条）：直飞 Arrow 表达不了
         //  咬住/返回状态机，独占分流。出生数 = 3 − 同主在场数（ItemCheck_Shoot 专支
         //  Player.cs:47768-47786 每次补满 3 条，速度分量各 +Next(−40,41)×0.05 扰动）；
         //  channel=按住电平（mouseHeld，同 PrismProj/FlailProj 先例）——松手由实体
@@ -13477,7 +13502,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (hitRect(c.x, c.y, c.w, c.h)) {
         this.swingHitSet.add(c.id);
         if (isNet) this.netCatchCritter(c);
-        else c.hurt(this);
+        else (c as unknown as import('../entities/projTargets').CritterLike).hurt(this);
       }
     }
     if (isNet) return;   // 网不砍草不打怪（金/防火网的 cutExtraTiles 登记近似省略）
@@ -14143,7 +14168,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       ['princess', !has('princess') && allow('princess')],
       // ---- 城镇史莱姆族第二轮（Main.cs:65391-65422 + :65557-65574 原序：
       //  铜侍从 684 → 蓝 670 → 酷 678 → 老 679 → 紫 680 → 红 682 → 黄 683 → 彩虹 681；
-      //  兔 656/猫 637/狗 638 的 bought* 旗依赖许可证商店未实装，登记缺失）----
+      //  兔 656/猫 637/狗 638 的 bought* 旗已全链：商店上架 :15429-15431 +
+      //  使用链 :7029-7052 + 入驻门 :14185-14187（变体重掷系统仍未建，:7047 备案））----
       ['town_slime_squire', !has('town_slime_squire') && !!this.world.flags.unlockedSlimeCopperSpawn],
       ['town_slime_blue', !has('town_slime_blue') && !!this.world.flags.unlockedSlimeBlueSpawn],
       ['town_slime_cool', !has('town_slime_cool')
@@ -16183,6 +16209,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     else if (f['downed_13'] || f['downed_14'] || f['downed_15']) num *= 10;  // EoW/BoC
     else if (f['downed_4']) num *= 3;       // EoC
     if (this.world.isExpert) num *= 2;
+    // :39506-39509 折扣卡 ×0.8（(int) 先截后乘）；:39511 ×currentShoppingSettings
+    // PriceAdjustment（快乐度购物价乘区——护士是服务非商品，原版仍乘，本仓
+    // shopHappinessMul 开店时快照，此处同链取当前值）
+    if (this.player.equipStats.discount) num = Math.floor(num * 0.8);
+    num *= this.shopHappinessMul || 1;
     return Math.floor(num);
   }
 

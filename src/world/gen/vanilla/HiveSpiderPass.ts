@@ -74,15 +74,27 @@ function hiveTunnel(st: TileStore, rng: RNG, gs: GenState, sx: number, sy: numbe
         const i = st.idx(x, y);
         const d = Math.hypot(x - px, y - py);
         if (d < baseR * 0.4 * (1 + rng.int(-10, 10) * 0.005)) {
-          // cs:270-274:honey(true) 恒置（液量仅 1/3 掷 255）；active(false) 保留幽灵 type
+          // cs:251-263:honey(true) 恒置（液量仅 1/3 掷 255）；active(false) 保留幽灵 type；
+          //   cs:262-263 active(false) 后仍 halfBrick(false)+slope(0)——失活格的 slope 位
+          //   原版一并复位（斜面泥/苔核转蜜腔不留残坡，dump slope 通道按位裁决）
           if (rng.int(0, 2) === 0) st.liquid[i] = 255;
           st.liquidType[i] = 3;
           st.wall[i] = 86;
           st.flags[i] = 0;
+          st.half[i] = 0;
+          st.slope[i] = 0;
         } else if (d < baseR * 0.75 * (1 + rng.int(-10, 10) * 0.005)) {
           st.liquid[i] = 0;
-          // cs:277 原文双门：wall∉{86,244} 才铺 225（活木墙 244 上不铺）
-          if (st.wall[i] !== 86 && st.wall[i] !== 244) { st.type[i] = HIVE; st.flags[i] = 1; }
+          // cs:267-274 原文双门：wall∉{86,244} 才铺 225（活木墙 244 上不铺）；
+          //   ★cs:271-272 铺蜂壳时 active(true)+halfBrick(false)+slope(0)+type=225
+          //   四连写——曾只写 type+active → 斜面泥/苔(60/368)上铺蜂壳残留旧坡
+          //   (#47 起 3 格 slope 债 → #53 SmoothWorld 雪崩独立点火源)
+          if (st.wall[i] !== 86 && st.wall[i] !== 244) {
+            st.flags[i] = 1;
+            st.half[i] = 0;
+            st.slope[i] = 0;
+            st.type[i] = HIVE;
+          }
         }
         if (d < baseR * 0.6 * (1 + rng.int(-10, 10) * 0.005)) st.wall[i] = 86;
       }

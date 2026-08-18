@@ -44,10 +44,10 @@ export enum BuffType {
   StarInBottle = 21, // 瓶中星(158,光环)：manaRegenDelayBonus+0.5 + manaRegenBonus+10（:9629-9632）
   PeaceCandle = 22,  // 和平蜡烛(157,光环)：刷怪 spawnRate×1.3/max×0.7（NPC.cs:645）
   Clairvoyance = 23, // 预见(29,水晶球右键,1800s)：manaMax+20/magicDmg+5%/crit+2/manaCost-2%（:11481）
-  Sharpened = 24,    // 磨刀石(159,右键)：近战穿甲 +12（:9625，穿甲系统未接先登记）
+  Sharpened = 24,    // 磨刀石(159,右键)：近战穿甲 +12（:9625→Player.armorPenBase:1090）
   AmmoBox = 25,      // 弹药箱(93,右键)：20% 不耗弹（PickAmmo :52746）
-  Bewitched = 26,    // 附魔台(150,右键)：maxMinions+1（:9857，召唤位未接先登记）
-  WarTable = 27,     // 战争桌(348,右键)：maxTurrets+1（:9863，哨兵位未接先登记）
+  Bewitched = 26,    // 附魔台(150,右键)：maxMinions+1（:9857→Player.maxMinions:972）
+  WarTable = 27,     // 战争桌(348,右键)：maxTurrets+1（:9863→Player.maxSentries:979）
   SugarRush = 28,    // 糖分冲刺(192,蛋糕右键,120s)：moveSpeed+0.2+镐速（:9634）
   // ---- R1 数值批（Player.cs UpdateBuffs 逐条对 1456）----
   Battle = 29,        // 战斗(13,420s)：spawnRate×0.5/max×2（NPC.cs:632）

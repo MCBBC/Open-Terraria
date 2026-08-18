@@ -103,16 +103,41 @@ function islandHouse(
     }
   }
   // 门洞 5×3(cs:79940-79947 清 num12±2 × num13..num13-2)。
-  // ★原版紧随其后的 PlaceTile(num12, num13=val.Y, 10, forced:false) 命中 case10
-  //  死几何(分支 A 需 j-3=室内格 active+solid ✗;分支 B 需 j+1=日光板地板行空 ✗)
-  //  → cs:59900 return false——原版岛屋只留门洞从不出门(2026-08-13 审计附带发现;
-  //  曾 placeDoorClosed 硬放 Skyware style9 门)
+  // 紧随其后的 PlaceTile(num12, num13=val.Y, 10, -1, 9)(cs:79949)命中 case10
+  // 分支 A:门列 num12=i±(halfW+1) 是外壳边列(不在 i±halfW 室内挖空范围),
+  // 壳填后 floorY-3 仍是日光板实心、门洞只清 floorY-2..floorY → 三条件全真
+  // → PlaceDoor(i, floorY-1, 10, 9) 每行独立掷 Next(3) 变体(共 3 掷)并放门。
+  // 2026-08-13 审计曾判"死几何从不出门"并移除放置——误把门列当室内列;12345
+  // 金标 3 岛 3 门实锤(f18/36/36 等,frameY 486=54*9 Skyware)。缺这 3 掷会使
+  // 同 pass 后续掷骰流整体前移:12345 第二屋后横幅错档、第三屋(中间岛)dir
+  // 翻转/halfW 错(2026-08-18 用户报"门朝向相反"根因)。
   const doorX = i + (halfW + 1) * dir;
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = -2; dy <= 0; dy++) {
       if (!st.inBounds(doorX + dx, floorY + dy)) continue;
       const idx = st.idx(doorX + dx, floorY + dy);
       st.type[idx] = 0; st.flags[idx] = 0;
+    }
+  }
+  // PlaceTile case10(cs:59882-59900)分支 A:!active(j-1)&&!active(j-2)
+  // &&active(j-3)&&tileSolid(j-3);分支 B(向下)在本几何恒假(地板行实心),
+  // 零掷直接 return false——不移植。PlaceDoor(cs:31938-31949)护栏:nactive+
+  // tileSolid(j'-2=floorY-3) && SolidTile(j'+2=floorY+1);过护栏才逐行
+  // 掷变体放门(顶行在下:floorY-2/−1/0,frameY 486/504/522)。
+  const dGate = (dy: number) => st.inBounds(doorX, floorY + dy) && st.flags[st.idx(doorX, floorY + dy)] === 0;
+  const solidTileAt = (dy: number): boolean => {
+    if (!st.inBounds(doorX, floorY + dy)) return false;
+    const ti = st.idx(doorX, floorY + dy);
+    return st.flags[ti] === 1 && !!TILE_DEFS[st.type[ti]]?.solid;
+  };
+  if (dGate(-1) && dGate(-2) && solidTileAt(-3)) {
+    const ti3 = st.idx(doorX, floorY - 3);
+    const guard3 = st.flags[ti3] === 1 && st.half[ti3] === 0 && !!TILE_DEFS[st.type[ti3]]?.solid;
+    if (guard3 && solidTile(st, doorX, floorY + 1)) {
+      for (let dy = 0; dy < 3; dy++) {
+        const variant = rng.int(0, 2); // PlaceDoor 每行独立 genRand.Next(3)
+        st.setTileSilent(doorX, floorY - 2 + dy, T.DOOR_CLOSED, variant * 18, 486 + dy * 18);
+      }
     }
   }
   // 对侧补柱(cs L48264-48273)
@@ -128,7 +153,9 @@ function islandHouse(
   if (loot > 3) loot = rng.int(0, 3);
   const lootKeys = ['vi_159_shiny_red_balloon', 'vi_65_starfury', 'vi_158_lucky_horseshoe', 'vi_2219_celestial_magnet'];
   const lootId = ITEM_BY_KEY[lootKeys[loot]] ?? ITEM_BY_KEY[lootKeys[0]];
-  const bx = i, by = floorY - 1;
+  // 箱锚=PlaceChest(i-1, num7-1)(cs:36251)——2×2 左列 i-1、行 floorY-1..floorY
+  // (12345 金标三岛箱 tile 全在 (i-1,i) 列,曾错在 i 列右偏一格)
+  const bx = i - 1, by = floorY - 1;
   // PlaceChestDirect 语义:frameX = 36*style + dx*18,顶行 frameY=0
   st.setTileSilent(bx, by, CHEST, 13 * 36, 0);
   st.setTileSilent(bx + 1, by, CHEST, 13 * 36 + 18, 0);
@@ -166,10 +193,10 @@ function islandHouse(
   }
   // 横幅(cs L48334-48348):1×3 顶锚,style 7-9(步长 18)
   for (const bx2 of [i - halfW + 1, i + halfW - 1]) {
-    placeFurn(st, bx2, j1, BANNER, rng.int(7, 9), 'top', 1, false, undefined, 54); // 旗帜列步54
+    placeFurn(st, bx2, j1, BANNER, rng.int(7, 9), 'top', 1, false);
   }
   const bannerX = dir > 0 ? i - halfW : i + halfW;
-  placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false, undefined, 54);
+  placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false);
   return true; // 建成,消耗一个 skyIslandHouseCount 槽位(I4)
 }
 

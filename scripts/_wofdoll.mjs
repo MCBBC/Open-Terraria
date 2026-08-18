@@ -41,7 +41,11 @@ const out = await page.evaluate(async () => {
   const pwnId = window.__swItems[pwnKey];
   const deathX = Math.floor(wof.cx / 16), deathY = Math.floor(wof.cy / 16);
   wof.hurt(9999999, 10, 0, g);
-  await new Promise(r => setTimeout(r, 1200));
+  const dumpDrops = () => (g.entities.drops || []).filter(d => !d.dead).map(d => ({ id: d.itemId, x: Math.round(d.x), y: Math.round(d.y) }));
+  const early = dumpDrops();
+  await new Promise(r => setTimeout(r, 150));
+  const mid = dumpDrops();
+  await new Promise(r => setTimeout(r, 1100));
   // 砖盒检查：死亡点 ±4 壳上魔金砖/猩红砖（sheet 140/347）
   const st2 = st;
   const brickAt = [];
@@ -71,7 +75,7 @@ const out = await page.evaluate(async () => {
     hardMode: !!w.flags.hardMode,
     downed113: !!w.flags['downed_113'],
     brickBoxTiles: bricks, deathX, deathY,
-    pwnDropped,
+    pwnDropped, early, mid, final: (g.entities.drops || []).filter(d => !d.dead).map(d => d.itemId),
   };
 });
 console.log(JSON.stringify(out, null, 1));

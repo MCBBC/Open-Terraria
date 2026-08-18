@@ -37,6 +37,7 @@ import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMu
 import { runShiniesPass, runGemsPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
 import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
+import { runHellFortPass } from '../src/world/gen/vanilla/HellFortPass';
 import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
@@ -153,7 +154,9 @@ function shimmerChain(seedText: string, evil: 0 | 1) {
   replay(); // ▶Webs cs:13659
   runWebsPass(st, rng, gs); snap('webs');
   replay(); // ▶Underworld cs:13697
-  runUnderworldPass(st, rng, gs); snap('underworld');
+  runUnderworldPass(st, rng, gs);
+  runHellFortPass(st, rng, gs); // Ⅲ 批：原版 AddHellHouses 在 Underworld pass 尾（cs:13893）——金标再生窗口接线（RRR 演练发现）
+  snap('underworld');
   replay(); // ▶CorruptionAndCrimson cs:13919
   runCorruptionPass(st, rng, gs); snap('corruption');
   replay(); // ▶Lakes cs:14613

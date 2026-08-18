@@ -38,6 +38,7 @@ import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMu
 import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
 import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
+import { runHellFortPass } from '../src/world/gen/vanilla/HellFortPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
 import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
@@ -210,7 +211,9 @@ export function chainCheckpoints(seedText: string, evil: 0 | 1) {
   replay(); // ▶Webs cs:13659
   runWebsPass(st, rng, gs); snap('webs');
   replay(); // ▶Underworld cs:13697（AddHellHouses cs:13893 是其尾段，不另重播）
-  runUnderworldPass(st, rng, gs); snap('underworld');
+  runUnderworldPass(st, rng, gs);
+  runHellFortPass(st, rng, gs); // Ⅲ 批：原版 AddHellHouses 在 Underworld pass 尾（cs:13893）——金标再生窗口接线（RRR 演练发现）
+  snap('underworld');
   // #29 Corruption（cs:13919，oracle 已转录）
   replay(); // ▶CorruptionAndCrimson cs:13919
   runCorruptionPass(st, rng, gs);

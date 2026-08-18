@@ -6,7 +6,10 @@
 //  34 吊灯:样式 Y 行54、wrap37 换列 X+108;亮灭块内 X +54(214×2000 实测)
 //  100 烛台:样式竖排 Y 步72(skip2;142×2016 实测);亮灭 X(Wiring :1381)
 //  93 路灯:样式竖排 Y 步110(70×2048 行带实测);亮灭 X 0/18
-//  91 旗帜:样式横排 X 步54、wrap37 换行 Y+54(1998×162 实测)
+//  91 旗帜:样式横排 X 步18、wrap111 换行 Y+54(WorldGen.cs:46176 `frameX/18 + 行*111`
+//  与 cs:46273-46278 PlaceBanner `fx=style*18, s>=111 → fx-=1998/fy+=54`;12345 金标
+//  岛屋 banner style7/9 = f126/f162 实锤。曾误写步54/wrap37(1998/54=37 误读),style7
+//  →f378 贴错旗帜)
 //  240 墙饰 3×3:横排 X 步54、wrap36 换行(1944×162)
 //  241 骨饰 4×3:竖排 Y 步54
 //  242 画 6×4:竖排 Y 行72、wrap27 换列 X+108(324×1944)
@@ -25,7 +28,7 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     case 34: return [Math.floor(style / 37) * 108, (style % 37) * 54];
     case 100: return [0, style * 72];
     case 93: return [0, style * 110];
-    case 91: return [(style % 37) * 54, Math.floor(style / 37) * 54];
+    case 91: return [(style % 111) * 18, Math.floor(style / 111) * 54];
     case 240: return [(style % 36) * 54, Math.floor(style / 36) * 54];
     case 241: return [0, style * 54];
     case 242: return [Math.floor(style / 27) * 108, (style % 27) * 72];

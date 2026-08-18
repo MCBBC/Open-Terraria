@@ -192,9 +192,11 @@ export class ClientNet {
     }
     ws.onopen = () => {
       // Hello（对齐原版 msg1：版本校验）。连接时 Game.player 可能尚未创建（joinNetGame
-      // 先连后 loadWorld）——外观名走可选链兜底
+      // 先连后 loadWorld）——外观名走可选链兜底;再退 UI 预置的选中角色名（pendingJoinName,
+      // mainFlow onJoinRoom 注入——加入公告显示真名而非"玩家"）
       const p = this.game.player as { appearance?: { name?: string } } | undefined | null;
-      const name = p?.appearance?.name ?? '玩家';
+      const pending = (this.game as unknown as { pendingJoinName?: string }).pendingJoinName;
+      const name = p?.appearance?.name ?? pending ?? '玩家';
       // 房主令牌：URL 已带 ?token=（路由层 newClient 注入）——消息内再传一份兜底
       // （非房主/旧路径传空串，服务器 try/catch 读不到即跳过）
       const hello = new NetWriter(Msg.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str(name).str(this.hostToken);

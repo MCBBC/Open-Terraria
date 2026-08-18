@@ -1272,15 +1272,41 @@ export class Renderer {
    *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
    *  释放最旧一半,恢复后续跑;连续丢失连续收缩(下限 64) */
   installGpuPressureGuard(): void {
+    // 熔断器(2026-08-18 联机双开崩溃):旧守卫每次 contextlost 都 preventDefault
+    // 请求自动恢复——GPU 预算被根本性打超时(双开窗口各渲染大世界),恢复即重分配
+    // →再丢→再恢复,实测抖到 1.7 万次/3s,主线程被事件风暴淹没=崩溃。
+    // 熔断:10s 内 ≥3 次丢失 → 不再请求恢复(上下文保持丢失,canvas 绘制跳过),
+    // 8s 冷却让系统释放,期满以最小足迹重试;再抖再熔断。
+    let losses: number[] = [];
+    let tripped = false;
     this.canvas.addEventListener('contextlost', (e) => {
-      e.preventDefault();
+      const now = performance.now();
+      losses = losses.filter((t) => now - t < 10_000);
+      losses.push(now);
       const cur = ChunkCache.MAX_CHUNKS;
-      const next = Math.max(64, Math.floor(cur / 2));
-      ChunkCache.MAX_CHUNKS = next;
-      console.warn(`[Renderer] contextlost:GPU 压力自适应 chunk 上限 ${cur}→${next}`);
+      ChunkCache.MAX_CHUNKS = Math.max(64, Math.floor(cur / 2));
       this.cbOnGpuPressure?.();
+      if (!tripped && losses.length >= 3) {
+        tripped = true;
+        this.gpuDegraded = true;
+        console.warn(`[Renderer] GPU 压力熔断:10s 内 ${losses.length} 次 contextlost(预算被根本性打超,常见:双开窗口/超大世界)——暂停渲染 8s 冷却,期间不再请求上下文恢复`);
+        setTimeout(() => {
+          tripped = false;
+          losses = [];
+          this.gpuDegraded = false;
+          console.warn(`[Renderer] GPU 冷却结束,恢复渲染(chunk 上限 ${ChunkCache.MAX_CHUNKS} 最小档;再抖动将再次熔断)`);
+        }, 8_000);
+        return;                 // ★不 preventDefault:打破 恢复→重分配→再丢 循环
+      }
+      if (!tripped) {
+        e.preventDefault();     // 单次偶发丢失:照旧请求自动恢复
+        console.warn(`[Renderer] contextlost:GPU 压力自适应 chunk 上限 ${cur}→${ChunkCache.MAX_CHUNKS}`);
+      }
     });
   }
+  /** GPU 熔断态(contextlost 抖动期):render() 跳过全部画布工作,
+   *  世界模拟照跑,画面冻结避免向已死上下文刷绘制任务 */
+  gpuDegraded = false;
   /** GPU 压力回调(释放远 chunk;Game 接线) */
   cbOnGpuPressure: (() => void) | null = null;
 
@@ -1436,6 +1462,9 @@ export class Renderer {
     invasion: { name: string; pct: number; label?: string } | null = null,
     leashed: import('../entities/LeashedCritter').LeashedEntityManager | null = null,
   ) {
+    // GPU 熔断期跳过全部画布工作(contextlost 抖动环,见 installGpuPressureGuard):
+    // 世界模拟照跑(fixedUpdate 独立),画面冻结——向已死上下文刷绘制只会喂大事件风暴
+    if (this.gpuDegraded) return;
     this.animTick++;
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this._mouseX = mouseX;

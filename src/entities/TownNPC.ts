@@ -26,7 +26,9 @@ import {
   type TownShotParams,
 } from '../data/vanillaTownAttack';
 import { TownShot } from './TownShot';
-import { visEffectFrames, mouseTextColorApprox } from './Enemy';
+import { visEffectFrames, mouseTextColorApprox, type Enemy } from './Enemy';
+import { spawnVanillaEnemy } from './bossAI';
+import { Lang } from '../i18n/Lang';
 import { BuffType } from '../stats/Buffs';
 
 export interface NpcHome { x: number; y: number; }
@@ -772,10 +774,34 @@ export class TownNPC extends Entity {
       game.spawnParticles(this.cx, this.cy, '#C03030', 8, 2);
       game.spawnParticles(this.cx, this.cy, '#8A1818', 4, 1.2);
       game.playSfxFiles(['NPC_Killed_1'], 0.8);
+      this.voodooSkeletronOnDeath(game);
     } else {
       game.playSfxFiles(['NPC_Hit_1'], 0.6);
     }
     return true;
+  }
+
+  /** 裁缝巫毒娃娃 1307 死亡召唤（NPC.cs:78958-78967）：!day && type==54 &&
+   *  !AnyNPCs(35) 且存在 active 未死 killClothier 玩家 → SpawnSkeletron。
+   *  落位（SpawnSkeletron :81220-81270）：扫场上 37/54 取 position+size/2 传
+   *  NewNPC——本钩子必由 54 自身触发，锚点=自身；NewNPC 的 Bottom 语义
+   *  （:81547 nPC.Bottom=(X,Y)）把"裁缝中心Y"当底 Y → 头部上提半个裁缝身位，
+   *  1:1 保留。redHatMode（37 夜间对话召唤，ai[3]=1 令老人消失）不涉本路径。
+   *  公告 Announcement.HasAwoken + ChatColors.BossOrEvent(175,75,255)，无 Roar
+   *  （SpawnSkeletron 不发声，区别于 SpawnOnPlayer 各 case）。boss 槽 =
+   *  spawnWOF 先例（bossAI_wof）：击败链 bossBlock/downed_35 公告消费。 */
+  private voodooSkeletronOnDeath(game: GameHooks): void {
+    if (game.world.clock.isDay || this.vanillaId !== 54) return;
+    if ((game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 35)) return;
+    const p = game.player;
+    if (!p || p.dead || !p.equipStats.killClothier) return;   // :78963 active && !dead && killClothier
+    const head = spawnVanillaEnemy(game, 35, this.cx, this.cy);
+    if (!head) return;
+    head.x = this.cx - head.w / 2;   // NewNPC(Bottom=X,Y) ← 中心X/中心Y
+    head.y = this.cy - head.h;
+    (game as unknown as { boss?: Enemy | null }).boss = head;
+    (game as unknown as { announce?: (k: string, w: string, r: number, g: number, b: number) => void })
+      .announce?.('Announcement.HasAwoken', Lang.npcName(35) ?? 'Skeletron', 175, 75, 255);
   }
 
   /** 战斗书增益（NPC.cs:53419-53430：每本 lifeMax+250 / 伤害出力×0.8 / 移速+0.25 /
