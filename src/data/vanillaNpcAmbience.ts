@@ -18,8 +18,8 @@ export interface IdleSoundSpec {
 
 /** :91119-91246 IdleSounds 32 类（全部 PlaySound(29, variants)） */
 export const IDLE_SOUNDS: Record<number, IdleSoundSpec> = {
-  239: { denom: 900, range: [24, 26] },    // 爬行者(此为 White/Orange Cavebat 族; :91119)
-  240: { denom: 900, range: [24, 25] },    // Giant Bat(同段 239/240 共享 Next(24,26))
+  239: { denom: 900, range: [24, 26] },    // Cavebat 族(:91119 共享 Next(24,26))
+  240: { denom: 900, range: [24, 26] },    // Giant Bat(同段共享;★曾误写 [24,25] 少一变体)
   62: { denom: 700, range: [26, 30] },     // Demon
   156: { denom: 700, range: [26, 30] },    // Arch Demon
   177: { denom: 600, range: [30, 32] },    // Derpling

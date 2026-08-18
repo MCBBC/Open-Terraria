@@ -301,13 +301,17 @@ function solidAllowSide(st: TileStore, x: number, y: number, side: 'L' | 'R'): b
   const sl = st.slope[i];
   return side === 'L' ? sl !== 2 : sl !== 1;
 }
-/** SolidTile2（cs:70178）：active && solid && slope==0 && !half && !inActive */
+/** SolidTile2（cs:70178）：active && tileSolid && slope==0 && !half && !inActive。
+ *  ★原版 Main.tileSolid 对平台族{19,427,435-439}=true（tileSolidTop 同时真）——
+ *  本仓 TILE_DEFS.platform 格 solid=false,须按 sheet 集补真（陶罐 CheckPot 实证:
+ *  平台上的陶罐 vanilla 存活）。 */
 function solid2(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return true;
   const i = st.idx(x, y);
   if (!st.flags[i] || (st.wire[i] & 32)) return false;
   const d = TILE_DEFS[st.type[i]];
-  return !!d && !!d.solid && st.slope[i] === 0 && !st.half[i];
+  const tileSolidV = !!d?.solid || PLATFORMS.has(SWEEP_SHEET[st.type[i]]);
+  return tileSolidV && st.slope[i] === 0 && !st.half[i];
 }
 /** InvalidTileForPilesOrSpeleothems（cs:39005）＝Boulders 族 */
 const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
@@ -617,7 +621,7 @@ function checkPileSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): voi
   if (fx18 >= 36 && fx18 <= 47) {
     if (belowSh !== 147 && belowSh !== 161 && belowSh !== 163 && belowSh !== 164
       && belowSh !== 200 && belowSh !== 162 && belowSh !== 224) killTileGen(st, ctx, x, y);
-  } else if (fx18 >= 54 && fx18 <= 76) {
+  } else if ((fx18 >= 54 && fx18 <= 59) || fx18 >= 73) {   // 54-59 ∪ 73-76（60-72 无查）
     if (!(belowSh === 53 || belowSh === 112 || belowSh === 116 || belowSh === 234
       || belowSh === 397 || belowSh === 398 || belowSh === 399 || belowSh === 402
       || belowSh === 396 || belowSh === 400 || belowSh === 401 || belowSh === 403)) {
@@ -737,7 +741,7 @@ function checkSuper485Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number):
       if (!st.inBounds(x0 + xx, y0 + yy)) { bad = true; continue; }
       const ki = st.idx(x0 + xx, y0 + yy);
       if (!st.flags[ki] || SWEEP_SHEET[st.type[ki]] !== sheet
-        || st.frameX[ki] !== style * 72 + xx * 20 || st.frameY[ki] !== yy * 20) bad = true;
+        || st.frameX[ki] !== style * 36 + xx * 18 || st.frameY[ki] !== yy * 18) bad = true;
     }
   }
   for (let xx = 0; xx < 2; xx++) {

@@ -330,7 +330,9 @@ function settlePart2ChainSync(world: World, st: TileStore, gs: GenState, rng: RN
   }
   sim.quickSettle = false;
   sim.worldGenTilesIgnoreWater(false);
-  sim.waterCheck();
+  // ★VVV 门镜像（2026-08-18 BBBB）：gen 尾恢复后【无】waterCheck（settle.ts :100-108——
+  //   尾部 WaterCheck 仅读档路径；借读档尾会把 10/190/191/192 翻实心后轮内合法驻留
+  //   液体整片清零，#49 活木水池 L=47 根因）。曾无条件跑 → settle2 链值偏离 oracle。
   sim.finalGenMergeCheck();
   sim.dispose();
   // pass 尾 tileSolid[484]=false（cs:21111，liquidSettlePass 同款——desert 头已翻，幂等）

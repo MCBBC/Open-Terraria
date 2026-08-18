@@ -1343,7 +1343,8 @@ export class UI {
       player?: {
         damageMult(k: 'melee' | 'ranged' | 'magic' | 'summon'): number;
         critChance(k: 'melee' | 'ranged' | 'magic'): number;
-        equipStats?: { manaCostMul?: number };
+        equipStats?: { manaCostMul?: number; kbGlove?: boolean };
+        buffs?: { has?: (b: number) => boolean };
       };
     };
     const gp = g.player;
@@ -1351,7 +1352,10 @@ export class UI {
       dmgMult: { melee: gp.damageMult('melee'), ranged: gp.damageMult('ranged'), magic: gp.damageMult('magic'), summon: gp.damageMult('summon') },
       crit: { melee: gp.critChance('melee'), ranged: gp.critChance('ranged'), magic: gp.critChance('magic') },
       manaCostMul: gp.equipStats?.manaCostMul ?? 1,
+      kbGlove: !!gp.equipStats?.kbGlove,
+      kbBuff: !!gp.buffs?.has?.(BuffType.Titan),      // 泰坦 108 → kbBuff（:20812 近战击退×1.5）
     } : null;
+
     // 物品自带说明（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*）。
     // ★先 has() 再取（缺失键静默空，铜剑/药水/钱币等老物品本无静态 tooltip）
     let staticTip: string | null = null;
@@ -1385,7 +1389,7 @@ export class UI {
         ? research.research.tryGetSacrificeNumbers(vid) : undefined,
       // 商店（:20310-20402 npcShop>0——NpcShop 面板开着时以买入价显示）：
       // 价格 = item.value×5 买入 / ÷5 卖出（GetItemExpectedPrice 近似走 def.value）
-      shop: this.shopTooltipContext(def, vid),
+      shop: this.shopTooltipContext(def, vid, s.stack),
       expert: rare === -12,
       master: rare === -13,
     };
@@ -1412,13 +1416,24 @@ export class UI {
     }
   }
 
-  /** 商店悬停上下文（:20310-20402）：NpcShop 开着 → 买入价（value×5）；
-   *  非商店 null（背包内不显价格——原版同门 npcShop<=0 早退） */
-  private shopTooltipContext(def: (typeof ITEM_DEFS)[number], vid: number): { buy: boolean; priceCopper: number } | null {
+  /** 商店悬停上下文（:20309-20402，Main.npcShop<=0 早退——背包内不显价格）：
+   *  买入价走 openNpcShop 同源 expectedPrices（快乐度 PriceAdjustment×/折扣 0.8×/
+   *  银行家舍入——ShopEntry.price 已算好，这里反查货架条目即可；显示侧 min-1
+   *  门 Main.cs:20341-20343 在此同款）。非货架物品（玩家自带物悬停）→ 原版
+   *  hoverItem 是商店快照同款也显示买入价，此处按 expectedPrices(货架价×pa) 近似 */
+  private shopTooltipContext(def: (typeof ITEM_DEFS)[number], vid: number, stack: number): { buy: boolean; priceCopper: number } | null {
     if (!this.game.npcShopOpen) return null;   // Main.npcShop<=0 早退（:20310-20312）
+    // 货架条目（isAShopItem）→ 买入价（expectedPrices 同链 :20312 calcForBuying）
+    const g = this.game as unknown as {
+      shopEntryPriceOf?: (vid: number) => number | null;
+    };
+    const listed = g.shopEntryPriceOf?.(vid);
+    if (listed != null) return { buy: true, priceCopper: Math.max(1, listed) };
+    // 玩家自带物在商店内 → 卖出价（:20312 calcForSelling → :20324-20326 ÷5 min1 ×stack）
     const v = def.value ?? 0;
-    if (v <= 0) return { buy: true, priceCopper: 0 };   // 无价值行
-    return { buy: true, priceCopper: v * 5 };           // 买入 = value×5（GetItemExpectedPrice）
+    if (v <= 0) return { buy: false, priceCopper: 0 };  // 无价值行（tip51）
+    const unit = Math.max(1, Math.floor(v / 5));
+    return { buy: false, priceCopper: Math.max(1, unit * Math.max(1, stack)) };
   }
 
   /** mouseTextColor 亮度脉冲（DoUpdate_AnimateCursorColors :18064-18075：+1/tick

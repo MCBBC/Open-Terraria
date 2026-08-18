@@ -111,20 +111,23 @@ function histTop(counts: Map<number, number>, n: number): Array<[number, number]
     .slice(0, n);
 }
 
-function cellToken(st: { type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array; wall: Uint16Array; liquid: Uint8Array }, i: number): string {
+function cellToken(st: { type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array; wall: Uint16Array; liquid: Uint8Array; half?: Uint8Array; slope?: Uint8Array }, i: number): string {
   const t = st.type[i];
+  // ★half/slope 追加位（2026-08-18 树冠缝取证：半砖 clearRect 会清 tile 顶 8px——
+  //   树干格带 half 旗 = 交界行露出墙 = 用户截图实抓的亮缝；空格/常规格半位恒 0
+  const hs = `${st.half?.[i] ? 1 : 0}:${st.slope?.[i] ?? 0}`;
   if (t === 0) {
     // 空格但带墙/液体：保留证据（sheet=-1 前缀，帧位恒 0）；纯空格压缩为 '0'
     return st.wall[i] !== 0 || st.liquid[i] !== 0
-      ? `-1:0:0:${st.wall[i]}:${st.liquid[i]}`
+      ? `-1:0:0:${st.wall[i]}:${st.liquid[i]}:${hs}`
       : '0';
   }
-  return `${sheetOf(t)}:${st.frameX[i]}:${st.frameY[i]}:${st.wall[i]}:${st.liquid[i]}`;
+  return `${sheetOf(t)}:${st.frameX[i]}:${st.frameY[i]}:${st.wall[i]}:${st.liquid[i]}:${hs}`;
 }
 
 /** 区域转储：矩形逐行 RLE（出界裁剪到世界内） */
 export function dumpArea(
-  st: { w: number; h: number; idx(x: number, y: number): number; type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array; wall: Uint16Array; liquid: Uint8Array },
+  st: { w: number; h: number; idx(x: number, y: number): number; type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array; wall: Uint16Array; liquid: Uint8Array; half?: Uint8Array; slope?: Uint8Array },
   x0: number, y0: number, x1: number, y1: number,
 ): RleAreaDump {
   const bx0 = Math.max(0, Math.min(x0, st.w - 1));
@@ -137,7 +140,7 @@ export function dumpArea(
     for (let x = bx0; x <= bx1; x++) toks.push(cellToken(st, st.idx(x, y)));
     rows.push(encodeRle(toks));
   }
-  return { x0: bx0, y0: by0, w: bx1 - bx0 + 1, h: by1 - by0 + 1, rows, enc: 'sheet:fx:fy:wall:liquid' };
+  return { x0: bx0, y0: by0, w: bx1 - bx0 + 1, h: by1 - by0 + 1, rows, enc: 'sheet:fx:fy:wall:liquid:half:slope' };
 }
 
 function canvasShot(c: { toDataURL?: (t: string) => string } | null | undefined): { url: string | null; omitted: boolean } {

@@ -81,7 +81,7 @@ const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
 let boulderPetsPlaced = 0;
 
 /** EEEE 探针钩子（SW_EEEE_DBG=1 时登记每次接受的陷阱） */
-export const EEEE_DBG = process.env.SW_EEEE_DBG === '1';
+export const EEEE_DBG = typeof process !== 'undefined' && process.env.SW_EEEE_DBG === '1';   // 浏览器侧 typeof 守卫(同族 LT_TRACE/PYR_TRACE 模式;裸 process 炸 boot)
 export const eeeeLog: Array<Record<string, number>> = [];
 
 // ---- 原版实心谓词族（cs:70155/70178/70211；生成期 Main.tileSolid = vanGenSolidType） ----
@@ -258,7 +258,9 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (type === 1) {
     // ---- 巨石陷阱（cs:9151-9345）----
     const petCap = st.w >= 8400 ? 6 : st.w >= 6400 ? 4 : 2;           // GetWorldSize 三档（cs:9153）
-    let colX = x2 + rng.int(-1, 1);                                   // num4（cs:9166）
+    // ★cs:9166 反编译印 Next(-1,2)，x86 金标 58 站点实测分布 {-2,-1,0}（+1 恒零）
+    //   ——以金标为准取 Next(-2,1) 等价 rng.int(-2,0)（锚点列全对齐实证）
+    let colX = x2 + rng.int(-2, 0);
     let top = py - 8;                                                 // num5（cs:9165）
     if (anyBoulderNearby(st, colX, top, 10)) return false;            // cs:9174
     for (;;) {
@@ -297,8 +299,9 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       }
     }
     placePlate(st, x2, py, 7);                                        // cs:9252 style7
-    st.setTileSilent(colX, top + 2, STONE1);                          // cs:9253-9254 两块石头
-    st.setTileSilent(colX + 1, top + 2, STONE1);
+    // cs:9253-9254 两块石头（PlaceTile forced=false：EmptyTile 门，非空格不写）
+    if (!st.flags[st.idx(colX, top + 2)]) st.setTileSilent(colX, top + 2, STONE1);
+    if (!st.flags[st.idx(colX + 1, top + 2)]) st.setTileSilent(colX + 1, top + 2, STONE1);
     // 巨石变体掷（cs:9255-9306；普通种子分支——notTheBees/tenth/registry 段恒假跳过）
     let boulderId = BOULDER138;
     if (rng.int(0, 1) === 0 && closeSpiders(st, colX, top)) boulderId = BOULDER714;
@@ -318,7 +321,8 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 3; dy++) {
         const gx = colX + dx, gy = top + dy;
-        st.setTileSilent(gx, gy, STONE1);
+        // PlaceTile(1, forced=false) EmptyTile 门：巨石占格不覆盖石头（线/致动仍写）
+        if (!st.flags[st.idx(gx, gy)]) st.setTileSilent(gx, gy, STONE1);
         st.wire[st.idx(gx, gy)] |= WIRE_RED | WIRE_ACTUATOR;
       }
     }

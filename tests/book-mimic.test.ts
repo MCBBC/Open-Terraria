@@ -18,6 +18,7 @@ import { TILE_BY_KEY, TILE_TABLE_SHEETS } from '../src/data/tiles';
 import { attemptToFindTeleportSpotNearBooks } from '../src/entities/fighterFamilies';
 import { VanillaSpawner } from '../src/world/spawn/VanillaSpawner';
 import { VI } from '../src/data/itemKeys';
+import { CultistRitualCircle } from '../src/entities/bossAI_lategame';
 
 const BOOKS = TILE_BY_KEY['v_50_books']!;
 
@@ -203,7 +204,7 @@ describe('spawner 书掷（地牢分支 NPC.cs:2655-2677）', () => {
     if (e && e.vanillaId === 694) {
       expect(e.ai3).toBe(3);
       expect(Math.abs(e.cx - (150 * TILE + 8))).toBeLessThan(1);
-      expect(e.customSpawnPos).toBe(true);
+      expect((e as unknown as { customSpawnPos?: boolean }).customSpawnPos).toBe(true);
     } else {
       expect(e === null || typeof e.vanillaId === 'number').toBe(true);
     }
@@ -219,13 +220,12 @@ describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
       player: { cx: 80 * TILE, cy: 60 * TILE, x: 80 * TILE, y: 60 * TILE, w: 16, h: 28, hp: 400, maxHp: 400, dead: false },
       playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {}, damagePlayer: () => {},
       spawnParticles: () => {}, addDamageNumber: () => {},
-      enemies: () => [cultist],
+      enemies: () => [cultist, ...spawned],
       critters: () => [],
       entities: { nextId: 2, add: (e: unknown) => { spawned.push(e as Enemy); } },
     } as never;
     const cultist = Enemy.fromVanilla(439, 80 * TILE, 60 * TILE)!;
     cultist.id = 1;
-    const { CultistRitualCircle } = await_import_bossAI_lategame();
     const circle = new CultistRitualCircle(cultist);
     for (let i = 0; i < 300; i++) circle.fixedUpdate(1 / 60, game);
     const dragon = spawned.filter((s) => s.vanillaId === 454);
@@ -238,12 +238,13 @@ describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
     expect(body.realLifeHost).toBe(dragon[0]);
     body.hurt(500, 0, 0, game as never);
     expect(dragon[0].hp).toBe(dragon[0].maxHp - Math.max(1, Math.round(500 - 30 * 0.5)));
-    // 已有龙在场 → 第二个圈召 521 远古幻象
-    spawned.length = 0;
+    // 已有龙在场 → 第二个圈召 521 远古幻象（不清 spawned——enemies() 闭包视其为在场）
+    const cut = spawned.length;
     const circle2 = new CultistRitualCircle(cultist);
     for (let i = 0; i < 301; i++) circle2.fixedUpdate(1 / 60, game);
-    expect(spawned.some((s) => s.vanillaId === 521)).toBe(true);
-    expect(spawned.some((s) => s.vanillaId === 454)).toBe(false);
+    const added = spawned.slice(cut);
+    expect(added.some((s) => s.vanillaId === 521)).toBe(true);
+    expect(added.some((s) => s.vanillaId === 454)).toBe(false);
   });
 
   it('幻影龙渐显：头 7t 现身（-42/t）、段沿链 <85 门逐级跟上、渐隐期不可击', () => {
@@ -269,6 +270,7 @@ describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
     expect(segs[0].def.defense).toBe(30);
   });
 });
+describe('书掉落链（KillTile_DropItems case 50 :65709-65716）', () => {
   it('帧表：普通书帧 ∈ {0,18,36,54,72}，水书伪装帧 90', () => {
     // 放置链 frameX=18*Next(5)（PlaceOnTable1x1 :45379）——书物放置帧只落 0..72；
     // 90 只来自世界 GenerateDungeonBook waterbolt 支（本仓 DungeonPass 侧）

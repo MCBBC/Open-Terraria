@@ -9090,8 +9090,11 @@ void DgLights()
                     }
                 }
                 if (placed) break;
-                // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）
-                if (DgInWorld(x, cy - 1, 0) && act[(cy - 1) * W + x] != 0 && SOLID.Contains(typ[(cy - 1) * W + x]) && !dgSolidTop.Contains(typ[(cy - 1) * W + x])
+                // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）——实心=genSolidType
+                // 语义（裂纹砖 481-483 非实心，DC:344；JS :253 消费端同源）
+                if (DgInWorld(x, cy - 1, 0) && act[(cy - 1) * W + x] != 0
+                    && typ[(cy - 1) * W + x] != 481 && typ[(cy - 1) * W + x] != 482 && typ[(cy - 1) * W + x] != 483
+                    && SOLID.Contains(typ[(cy - 1) * W + x]) && !dgSolidTop.Contains(typ[(cy - 1) * W + x])
                     && DgInWorld(x, cy + 1, 0) && act[(cy + 1) * W + x] == 0)
                 {
                     if (lgTr) Console.WriteLine($"DG LP x={x} cy={cy} typAbv={typ[(cy - 1) * W + x]}");
@@ -9112,7 +9115,9 @@ bool DgPlaceChand(int x, int y)
     for (int a = x - 1; a < x + 2; a++)
         for (int b = y; b < y + 3; b++)
             if (!DgInWorld(a, b, 0) || act[b * W + a] != 0) return false;
-    if (!(DgInWorld(x, y - 1, 0) && act[(y - 1) * W + x] != 0 && SOLID.Contains(typ[(y - 1) * W + x]) && !dgSolidTop.Contains(typ[(y - 1) * W + x]))) return false;
+    if (!(DgInWorld(x, y - 1, 0) && act[(y - 1) * W + x] != 0
+        && typ[(y - 1) * W + x] != 481 && typ[(y - 1) * W + x] != 482 && typ[(y - 1) * W + x] != 483      // 裂纹砖非实心（DC:344）
+        && SOLID.Contains(typ[(y - 1) * W + x]) && !dgSolidTop.Contains(typ[(y - 1) * W + x]))) return false;
     for (int a = x - 1; a < x + 2; a++)
         for (int b = y; b < y + 3; b++)
         { int ti = b * W + a; act[ti] = 1; typ[ti] = 34; }
@@ -9159,18 +9164,22 @@ bool DgCanHit(int x1, int y1, int x2, int y2)
 {
     int cx = Math.Clamp(x1, 1, W - 1), cy = Math.Clamp(y1, 1, H - 40);
     int tx = Math.Clamp(x2, 1, W - 1), ty = Math.Clamp(y2, 1, H - 40);
-    // ②邻对门槛：slope==0 且非半砖（Collision.cs:437-450）
+    // ②邻对门槛：slope==0 且非半砖（Collision.cs:437-450）；裂纹砖 481-483 走
+    //   SetCrackedBrickSolidity(false)（DC:344，pass 内恒非实心——JS genSolidType 同源）
     bool DgPairBlk(int x, int y)
     {
         if (!DgInWorld(x, y, 0) || act[y * W + x] == 0) return false;
         ushort t = typ[y * W + x];
+        if (t == 481 || t == 482 || t == 483) return false;
         return SOLID.Contains(t) && !dgSolidTop.Contains(t) && slope[y * W + x] == 0 && half[y * W + x] == 0;
     }
     // ③踩格门槛：不看坡/半砖（do-while 条件 :470-472）
     bool DgStepBlk(int x, int y)
     {
         if (!DgInWorld(x, y, 0) || act[y * W + x] == 0) return false;
-        return SOLID.Contains(typ[y * W + x]) && !dgSolidTop.Contains(typ[y * W + x]);
+        ushort t = typ[y * W + x];
+        if (t == 481 || t == 482 || t == 483) return false;
+        return SOLID.Contains(t) && !dgSolidTop.Contains(t);
     }
     while (true)
     {
@@ -9852,7 +9861,10 @@ void Cavinator2(int i, int j, int steps)
             }
             if (num4 <= 0) break;
         }
-        if (num4 <= 0) break;
+        // ★镜像（2026-08-18，JS MountCavesPass :181-191）：cs:80775-80790 for 循环后
+        //   **无条件** 位移+速度 2 骰+clamp，再由 while(num4>0) 判定退出——终止步
+        //   （自然减尽或地牢命中）的速度 2 骰照消费。曾在此处 `if(num4<=0) break`
+        //   跳过 → 每层递归少 2 骰 → mcopenings 流错位（9293480 #33 typ 债主根因）。
         px += vx; py += vy;
         vx += (int)r.Next(-10, 11) * 0.05;
         vy += (int)r.Next(-10, 11) * 0.05;

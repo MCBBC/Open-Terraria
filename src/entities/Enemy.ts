@@ -1593,6 +1593,7 @@ export class Enemy extends Entity {
   private ambientSoundTick(game: GameHooks): void {
     const id = this.vanillaId;
     if (id == null || this.dead) return;
+    if (this.shimmerT > 0) return;   // IdleSounds :91117 微光浸入态不发声(闲话 :57734 同门)
     const world = game.world;
     const clock = world.clock;
     const st = world.store;
@@ -1611,8 +1612,10 @@ export class Enemy extends Entity {
       }
       return;   // 原版 critter 段互斥(else-if 链)
     }
-    // AI_003 闲话（:57735-57764）——仅战士族 aiStyle 3
-    if (this.vanilla?.aiStyle === 3) {
+    // AI_003 闲话（:57735-57764）——仅战士族 aiStyle 3 且未被鼓励消散
+    // （:57732 DespawnEncouragement_NotDiscouraged 主语义=白天驱散态不呻吟;
+    //   完整表含雕像/墓地/事件豁免,此处取 despawnEncouraged 旗主门,近似备案）
+    if (this.vanilla?.aiStyle === 3 && !this.despawnEncouraged) {
       const ch = CHATTER_SOUNDS[id];
       if (ch && Math.floor(Math.random() * ch.denom) === 0) {
         game.playSfxWav?.(ch.file, 1, this.cx, this.cy);

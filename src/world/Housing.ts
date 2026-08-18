@@ -274,15 +274,18 @@ export function scoreRoom(
  *  只查边界/漏墙/墙型/尺寸,无家具(RoomNeeds)/站位要求）。extraSolid = 视为
  *  实心的 sheet 集（CheckSpawn 期 tileSolid[379] 泡沫块翻转同构） */
 export function checkRoomEnclosure(st: TileStore, x: number, y: number, extraSolid?: Set<number>): Room | null {
-  for (const side of [-1, 1]) {
-    for (let dy = 0; dy <= 2; dy++) {
-      const sx = x + side, sy = y + dy;
-      if (!st.inBounds(sx, sy) || st.isSolid(sx, sy)) continue;
-      const room = floodRoom(st, sx, sy, undefined, { requireFurniture: false, requireStand: false, extraSolid });
-      if (room) return room;
-    }
+  // ★原版 StartRoomCheck(x,y) 单点直锚入栈（:6031-6034 roomCheckStack.Push）——
+  //   无 checkRoom 的 ±1/dy 探测（那是房门锚定用的;床锚=床底格,天然可泛洪）。
+  //   锚格实心 → RoomCheckStartedInASolidTile（:6020-6024,床 CheckSpawn 文案走
+  //   default 档 → notValid）
+  if (!st.inBounds(x, y)) return null;
+  if (st.isSolid(x, y)
+    || (extraSolid !== undefined && st.flags[st.idx(x, y)] !== 0
+      && extraSolid.has(sheetOf(st.type[st.idx(x, y)])))) {
+    lastRoomCheckFail = 'notValid';
+    return null;
   }
-  return null;
+  return floodRoom(st, x, y, undefined, { requireFurniture: false, requireStand: false, extraSolid });
 }
 
 export function checkRoom(st: TileStore, doorX: number, doorY: number): Room | null {

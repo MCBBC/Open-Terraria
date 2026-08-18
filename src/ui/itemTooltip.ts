@@ -35,6 +35,10 @@ export interface TooltipPlayerStats {
   crit: { melee: number; ranged: number; magic: number };
   /** 耗魔乘区（equipStats.manaCostMul） */
   manaCostMul: number;
+  /** 击退加成（Player.cs:20195-20210：melee+kbGlove ×2 / kbBuff +0.5——
+   *  击退档读的是含玩家加成后的 kb） */
+  kbGlove: boolean;
+  kbBuff: boolean;
 }
 /** 悬停上下文（低频行族的门数据——UI 侧现取注入，缺省全关） */
 export interface TooltipContext {
@@ -77,6 +81,13 @@ const YOYO_ITEMS = new Set([3262, 3282, 3283, 3284, 3285, 3286, 3316, 3315, 3317
  *  3360+3361 红木魔杖→红木 620——泥土魔杖 114 无 tileWand（它发射移土弹非消耗） */
 const TILE_WAND_CONSUME: Record<number, number> = {
   832: 9, 933: 9, 932: 154, 1129: 1124, 3360: 620, 3361: 620,
+};
+
+/** 击退档（:20602-20632） */
+/** Tooltip 伤害显示倍率表（ItemID.ToolTipDamageMultiplier，ItemID.cs:246：
+ *  均为 ×2 的回响/双生武器显示档） */
+const TOOLTIP_DMG_MUL: Record<number, number> = {
+  162: 2, 801: 2, 163: 2, 220: 2, 389: 2, 1259: 2, 4272: 2, 5011: 2, 5012: 2, 5526: 2,
 };
 
 /** 击退档（:20602-20632） */
@@ -150,14 +161,18 @@ export function buildTooltipBody(
   const f2 = f ?? (whipData ? { summon: 1, useStyle: 5, shoot: whipData.proj } as NonNullable<typeof f> : null);
   if ((cd?.damage ?? 0) > 0) {
     const kind = f2?.melee ? 'melee' : f2?.ranged ? 'ranged' : f2?.magic ? 'magic' : f2?.summon ? 'summon' : null;
-    const mult = player ? player.dmgMult[kind ?? 'melee'] : 1;
-    const dmg = Math.round(cd!.damage! * pm('dmg') * mult + 5e-6);
+    // :20516-20523：×ToolTipDamageMultiplier（回响族 ×2 显示）→ ×玩家乘区（+5e-6 舍入偏置）
+    const mult = (player ? player.dmgMult[kind ?? 'melee'] : 1);
+    const dmg = Math.round(cd!.damage! * (TOOLTIP_DMG_MUL[vid] ?? 1) * pm('dmg') * mult + 5e-6);
     const tipSuffix = kind === 'melee' ? 2 : kind === 'ranged' ? 3 : kind === 'magic' ? 4 : kind === 'summon' ? 53 : 55;
     lines.push({ text: dmg + T(`LegacyTooltip.${tipSuffix}`), tag: 'damage' });
     // 暴击（近/远/魔，:20518-20544）：视觉暴击 = 4 基础 + 装备/buff + 词条
     // （原版 playerClassCrit−选中武器+悬停武器；本仓 equipStats 不含武器 → 同式）
     if (kind === 'melee' || kind === 'ranged' || kind === 'magic') {
-      const crit = 4 + (player ? player.crit[kind] : 0) + (ps ? ps.crt * 2 : 0);
+      // 原版 num2 = playerClassCrit(4 基+装备+持握武器crit) − 选中武器crit + 悬停
+      // 武器 crit → 化简 = 武器 crit（combat json 缺省 4）+ 装备 + 词条×2。
+      // 曾恒用 4——火枪 95（crit 6）等高暴武器显示偏低
+      const crit = (cd!.crit ?? 4) + (player ? player.crit[kind] : 0) + (ps ? ps.crt * 2 : 0);
       lines.push({ text: crit + T('LegacyTooltip.5'), tag: 'crit' });
     }
     // 速度档（useStyle!=0 且（非召唤 || 鞭），:20545；useAnimation/词条 spd）
@@ -166,8 +181,11 @@ export function buildTooltipBody(
       const anim = Math.max(1, Math.round((cd!.useAnimation ?? cd!.useTime ?? 20) / pm('spd')));
       lines.push({ text: T(`LegacyTooltip.${speedTierIndex(anim)}`), tag: 'speed' });
     }
-    // 击退档（kb×词条 kb；召唤 +minionKB 修正略）
-    const kb = (cd!.knockBack ?? 0) * pm('kb');
+    // 击退档（:20195-20210 玩家加成先入：melee+kbGlove ×2、kbBuff +0.5；
+    // ranged 蘑菇矿潜行 +（1-stealth)×0.5 略；再 ×词条 kb）
+    let kb = (cd!.knockBack ?? 0) * pm('kb');
+    if (kind === 'melee' && player?.kbGlove) kb *= 2;
+    if (player?.kbBuff) kb += kb * 0.5;
     lines.push({ text: T(`LegacyTooltip.${kbTierIndex(kb)}`), tag: 'knockback' });
   }
 

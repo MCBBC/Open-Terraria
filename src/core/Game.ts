@@ -2238,7 +2238,14 @@ export class Game implements GameHooks {
       }
     };
     this.presence.start();
+    // 主画布重建(熔断后上下文死亡的最后手段)→ 重绑输入与 resize
+    this.renderer.onCanvasRecreated = (canvas) => {
+      this.input.destroy();
+      this.input = new Input(canvas);
+      this.renderer.installGpuPressureGuard();      // 新画布挂回单点监听(window 哨兵常在)
+    };
     let gpuTripToasted = false;
+    this.renderer.cbOnGpuRecover = () => { this.chunks?.dispose(); };
     this.renderer.cbOnGpuPressure = () => {
       this.shrinkChunks();
       if (this.renderer.gpuDegraded && !gpuTripToasted) {
@@ -11501,7 +11508,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         onGround: false, hitWall: false, hitHead: false, dropThrough: true,
       };
       moveAndCollide(body, this.world, num * p.w, 0);
-      if (body.x === p.x + num * p.w) {
+      // ★epsilon 判全位移:moveAndCollide 按 ≤8px 分步累加,任意起点处 dx/steps×steps
+      //   有 ~1e-14 浮点尾(曾用 === 严格等值 → 横移试探几乎恒 false)
+      if (Math.abs(body.x - (p.x + num * p.w)) < 0.01) {
         return allowAt(body.x);
       }
     }
@@ -16163,6 +16172,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.entities.add(e, 'critters');   // 仙女族（583-585）= 小动物桶，不计怪上限；add 内自派 id
       },
     };
+  }
+
+  /** 悬停气泡商店价格反查（UI.shopTooltipContext 消费）：当前货架该物品的
+   *  显示买入价（expectedPrices 同链已含快乐度/折扣/银行家舍入 + min-1）；
+   *  不在货架（玩家自带物悬停）返回 null。tooltip 行 = Main.cs:20307-20309
+   *  context15 → HoverItem.buy → calcForBuying */
+  shopEntryPriceOf(vid: number): number | null {
+    const npc = this.dialogNpc;
+    if (!npc || !this.npcShopOpen) return null;
+    const stock = this.shopStockFor(npc);
+    const hit = stock.find(([v]) => v === vid);
+    if (!hit) return null;
+    return Math.max(1, expectedPrices(hit[1], {
+      priceAdjustment: this.shopHappinessMul,
+      discountAvailable: this.player.equipStats.discount,
+    }).buying);
   }
 
   private openNpcShop() {

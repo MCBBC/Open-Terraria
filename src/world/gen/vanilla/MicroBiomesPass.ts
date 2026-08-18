@@ -115,12 +115,16 @@ const isContainer = (t: number): boolean => {
   const key = TILE_DEFS[t]?.key ?? '';
   return key.includes('chest') || key.includes('dresser');
 };
-/** 原版 SolidTile(i,j)(WorldGen.cs:70155):active && tileSolid && !solidTop && !half && slope==0 */
+/** 原版 SolidTile(i,j)(WorldGen.cs:70155-70172):active && 生成期 tileSolid && !tileSolidTop
+ *  && !halfBrick && slope==0 && !inActive。countTiles(nextCount cs:9559)消费。
+ *  ★曾误用静态 TILE_DEFS.solid 且漏 !inActive——致动格/生成期翻转格(484 等)被误判
+ *  实心挡洪水,countTiles<40 拒掉原版收的死箱候选(#101 首差根因,同 WWW 修复①类) */
 function solidTileStrict(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  const d = TILE_DEFS[st.type[i]];
-  return st.flags[i] !== 0 && !!d?.solid && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
+  const t = st.type[i]!;
+  return st.flags[i] !== 0 && vanGenSolidType(t) && !TILE_DEFS[t]?.platform
+    && st.half[i] === 0 && st.slope[i] === 0 && !(st.wire[i]! & WIRE_ACTUATOR);
 }
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
@@ -394,25 +398,36 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
       for (let bi = bx0; bi <= bx1; bi++) {
         for (let bj = by0; bj <= by1; bj++) {
           const px = ox + dx + bi, py = oy + dy + bj;
-          data.add(py * st.w + px);
+          data.add(py * st.w + px);                   // Output(data)挂在 Blotches 上(位移前坐标)
           if (!st.inBounds(px, py)) continue;
-          const up = py - 2; // Modifiers.Offset(0,-2)
-          if (st.inBounds(px, up)) {
-            const ui = st.idx(px, up);
-            if (st.flags[ui] && st.type[ui] === SAND) st.type[ui] = HARDSAND_TILE;
-          }
-          const pi = st.idx(px, py);
-          if (st.wall[pi] === 0) st.wall[pi] = wallType;
+          // ★链序(CampsiteBiome.cs:68):Blotches→Offset(0,-2)→OnlyTiles(53)→SetTile(397)
+          //   →OnlyWalls(0)→PlaceWall(type)——Offset 对**其后所有动作**生效,OnlyTiles(53)
+          //   是整链门(非沙→SetTile/PlaceWall 全跳)。曾把墙写在未位移 (px,py) 且无沙门
+          const ux = px, uy = py - 2;                 // Modifiers.Offset(0, -2)
+          if (!st.inBounds(ux, uy)) continue;
+          const ui = st.idx(ux, uy);
+          if (!st.flags[ui] || st.type[ui] !== SAND) continue;   // OnlyTiles(53) 链门
+          // SetTile(397, setSelfFrames):Clear(~(Wiring|Actuator)) 连墙带液全清
+          st.type[ui] = HARDSAND_TILE; st.flags[ui] = 1;
+          st.frameX[ui] = 0; st.frameY[ui] = 0;
+          st.slope[ui] = 0; st.half[ui] = 0;
+          st.wall[ui] = 0; st.liquid[ui] = 0; st.liquidType[ui] = 0;
+          // OnlyWalls(0)→PlaceWall(type):SetTile 已清墙 → 恒过门,写 wallType
+          st.wall[ui] = wallType;
         }
       }
     }
   }
   // All(data):ClearTile + SetLiquid(0,0) + 空墙刷墙(cs:69)
+  //   ClearTile(Tile.cs:153)=ClearSlope(slope=0+half=0)+active(false)+inActive(false)
+  //   ——曾漏 slope/half/致动位复位(斜坡/半砖格残留 → Sl/Hf/Ia 通道差)
   for (const key of data) {
     const px = key % st.w, py = Math.trunc(key / st.w);
     if (!st.inBounds(px, py)) continue;
     const i = st.idx(px, py);
     st.flags[i] = 0;
+    st.slope[i] = 0; st.half[i] = 0;
+    st.wire[i] &= ~WIRE_ACTUATOR;                     // ClearTile 的 inActive(false)
     st.liquid[i] = 0; st.liquidType[i] = 0;
     if (st.wall[i] === 0) st.wall[i] = wallType;
   }
@@ -595,7 +610,9 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
         for (const [qx, qy] of pts) {
           if (!st.inBounds(qx, qy)) continue;
           const i = st.idx(qx, qy);
-          st.flags[i] = 0; // ClearTile(frameNeighbors)
+          st.flags[i] = 0;                              // ClearTile(frameNeighbors):
+          st.slope[i] = 0; st.half[i] = 0;              // ClearSlope+active(false)
+          st.wire[i] &= ~WIRE_ACTUATOR;                 // +inActive(false)(Tile.cs:153)
         }
       }
     }

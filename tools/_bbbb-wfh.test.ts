@@ -1,0 +1,47 @@
+// 终态四数组哈希金标门(2026-08-12 世界生成全量审计 Phase 3):
+// generateWorld 终态 type/flags/wall/liquid 的 FNV-1a 硬断言——从此任何
+// 管线 pass 的无意改动(漏掷骰/改常量/换顺序)都会被确定性抓住,而非等用户
+// 肉眼发现「悬空宝石」式的生成期 bug。
+//
+// 基线再生(有意改动 worldgen 后):
+//   UPDATE_GOLDEN=1 npx vitest run tests/world-final-hash.test.ts
+// 提交前必须人工确认改动本身是原版 1:1(金标只锁"没变",不锁"对不对")。
+// 注意:与 caves-checkpoint 的 C# 位级金标互补——那套锁到 underworld 且逐段,
+// 本门锁全管线终态(含 corruption 之后的全部 pass)。
+import { describe, it, expect } from 'vitest';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { join } from 'path';
+import { generateWorld } from '../../src/world/gen/WorldGen';
+import { fnv1a } from '../tests/pass-hash.test';
+
+const GOLDEN_DIR = '/tmp/golden-bbbb';
+const CASES = [
+  { seed: '9293480', evil: 0, file: 'world-final-9293480.json' },
+  { seed: '1511931452', evil: 1, file: 'world-final-1511931452.json' },
+];
+
+describe('终态哈希金标门(全管线)', () => {
+  for (const c of CASES) {
+    it(`种子 ${c.seed}:generateWorld 终态四数组哈希恒定`, async () => {
+      const world = await generateWorld({ width: 4200, height: 1200, seedText: c.seed, evil: c.evil as 0 | 1 });
+      const st = world.store;
+      const hashes = {
+        type: fnv1a(st.type), flags: fnv1a(st.flags),
+        wall: fnv1a(st.wall), liquid: fnv1a(st.liquid),
+      };
+      const path = join(GOLDEN_DIR, c.file);
+      if (process.env.UPDATE_GOLDEN === '1') {
+        if (!existsSync(GOLDEN_DIR)) mkdirSync(GOLDEN_DIR);
+        writeFileSync(path, JSON.stringify({ seed: c.seed, ...hashes }, null, 2));
+        console.log(`[world-final-hash] 再生 ${path}`, hashes);
+        return;
+      }
+      expect(existsSync(path), `金标缺失 ${c.file}(先 UPDATE_GOLDEN=1 再生)`).toBe(true);
+      const golden = JSON.parse(readFileSync(path, 'utf8')) as Record<string, string>;
+      expect(hashes.type).toBe(golden.type);
+      expect(hashes.flags).toBe(golden.flags);
+      expect(hashes.wall).toBe(golden.wall);
+      expect(hashes.liquid).toBe(golden.liquid);
+    }, 300000);
+  }
+});

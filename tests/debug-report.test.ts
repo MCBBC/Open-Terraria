@@ -120,12 +120,12 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect(row0).toHaveLength(3);
     expect(row0[0]).toBe(row0[1]);
     expect(row0[0]).not.toBe(row0[2]);
-    for (const tok of row0) expect(tok.split(':')).toHaveLength(5);
+    for (const tok of row0) expect(tok.split(':')).toHaveLength(7);   // sheet:fx:fy:wall:liquid:half:slope
     // cell 字段逐一对上 store：sheet:fx:fy:wall:liquid
     const cellAt = (x: number, y: number) => {
       const i = st.idx(x, y);
       const d = st.type[i] > 0
-        ? `${sheetOfType(st.type[i])}:${st.frameX[i]}:${st.frameY[i]}:${st.wall[i]}:${st.liquid[i]}`
+        ? `${sheetOfType(st.type[i])}:${st.frameX[i]}:${st.frameY[i]}:${st.wall[i]}:${st.liquid[i]}:${st.half?.[i] ? 1 : 0}:${st.slope?.[i] ?? 0}`
         : '0';
       return d;
     };
@@ -347,9 +347,9 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     // 行 y=30：x=10,11 泥土(type1) x=12 石头(type2)——同 type 且帧/墙相同才合并
     const row = decodeRle(area.rows[2]);
     expect(row).toHaveLength(6);
-    expect(row[2].split(':')).toHaveLength(5); // (10,30) 泥土
-    expect(row[3].split(':')).toHaveLength(5); // (11,30) 泥土
-    expect(row[4].split(':')).toHaveLength(5); // (12,30) 石头
+    expect(row[2].split(':')).toHaveLength(7); // (10,30) 泥土（含 half:slope 位）
+    expect(row[3].split(':')).toHaveLength(7); // (11,30) 泥土（含 half:slope 位）
+    expect(row[4].split(':')).toHaveLength(7); // (12,30) 石头（含 half:slope 位）
     expect(row[5]).toBe('0');                  // (13,30) 空格
     expect(row[0]).toBe('0');
     expect(row[0]).not.toBe(row[2]);

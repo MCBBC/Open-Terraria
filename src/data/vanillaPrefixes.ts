@@ -83,13 +83,15 @@ export function prefixLines(prefix: number): Array<{ text: string; good: boolean
   const add = (mul: number, goodLabel: string, badLabel: string) => {
     if (mul !== 1) out.push({ text: `${mul > 1 ? goodLabel : badLabel} ${pct(mul - 1)}`, good: mul > 1 });
   };
+  // 行序 = 原版差分行链（Main.cs:20856-21010）：伤害39 → 速度40 → 暴击41 →
+  // 魔力42 → 大小43 → 弹速44 → 击退45（曾把击退排第 3，视觉序偏离）
   add(s.dmg, '伤害', '伤害');
   add(2 - s.spd, '速度', '速度'); // spd<1 = 更快 = 好
-  add(s.kb, '击退', '击退');
+  if (s.crt !== 0) out.push({ text: `${s.crt > 0 ? '+' : ''}${s.crt}% 暴击率`, good: s.crt > 0 });
+  add(2 - s.mcst, '魔力消耗', '魔力消耗'); // mcst<1 = 减耗 = 好
   add(s.size, '大小', '大小');
   add(s.shtspd, '弹速', '弹速');
-  add(2 - s.mcst, '魔力消耗', '魔力消耗'); // mcst<1 = 减耗 = 好
-  if (s.crt !== 0) out.push({ text: `${s.crt > 0 ? '+' : ''}${s.crt}% 暴击率`, good: s.crt > 0 });
+  add(s.kb, '击退', '击退');
   if (s.arpen !== 0) out.push({ text: `护甲穿透 +${s.arpen}`, good: true });
   if (s.tagdmg !== 0) out.push({ text: `召唤伤害 +${s.tagdmg}`, good: true });
   return out;

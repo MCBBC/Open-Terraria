@@ -1439,10 +1439,23 @@ export class Renderer {
           losses = [];
           this.gpuDegraded = false;
           cooldown = Math.min(60_000, cooldown * 2);   // 连续熔断逐次升级
+          // 恢复前健康检查(2026-08-18 白屏案):主画布上下文若仍处丢失态
+          // (防御路径),重建画布元素;chunk 池可能含死画布 → 全量重烘
+          const ctxAny = this.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean };
+          if (ctxAny.isContextLost?.()) {
+            this.recreateMainCanvas();
+            console.warn('[Renderer] 主画布上下文已死,已重建画布元素');
+          }
+          this.cbOnGpuRecover?.();          // 清 chunk 池(死画布)→ 自然全量重烘(Game 接线)
           console.warn(`[Renderer] GPU 冷却结束,恢复渲染(chunk 上限 ${ChunkCache.MAX_CHUNKS};若稳定运行 60s 将回落冷却档)`);
           setTimeout(() => { if (trips > 0 && !tripped) { trips = Math.max(0, trips - 1); cooldown = Math.max(8_000, cooldown / 2); } }, 60_000);
         }, cooldown);
-        // 已丢上下文不请求恢复(打破 恢复→重分配→再丢);其他画布各自的处理保持
+        // ★主画布例外(2026-08-18 用户实报"第二个 tab 永久白屏"):熔断期对
+        // 主画布的丢失仍要 preventDefault 保持可恢复——渲染虽暂停(gpuDegraded
+        // 跳 render,恢复后的空闲上下文无绘制无重分配压力),但上下文活着,
+        // 冷却期满才能真正恢复画面。其他画布(chunk/GL 等)放死,由冷却期满
+        // 的重建链兜底(chunk 全量重烘/GL 懒重建)
+        if (e.target === this.canvas) e.preventDefault();
         return;
       }
       if (!tripped) {
@@ -1456,11 +1469,31 @@ export class Renderer {
     // capture 阶段 window 级监听捕获全部画布的 contextlost,统一计入熔断
     window.addEventListener('contextlost', onLost, true);
   }
+  /** 重建主画布元素(上下文死亡的最后手段):同尺寸新元素替换 DOM 节点,
+   *  重取 ctx;输入监听绑定在旧元素上的由 Game 经 onCanvasRecreated 重绑 */
+  recreateMainCanvas(): void {
+    const nu = document.createElement('canvas');
+    nu.width = this.canvas.width;
+    nu.height = this.canvas.height;
+    nu.className = this.canvas.className;
+    nu.id = this.canvas.id;
+    const css = this.canvas.getAttribute('style');
+    if (css) nu.setAttribute('style', css);
+    this.canvas.replaceWith(nu);
+    this.canvas = nu;
+    this.ctx = nu.getContext('2d')!;
+    this.onCanvasRecreated?.(nu);
+  }
+  /** 主画布重建回调(Game 重绑输入/ resize 监听) */
+  onCanvasRecreated: ((canvas: HTMLCanvasElement) => void) | null = null;
+
   /** GPU 熔断态(contextlost 抖动期):render() 跳过全部画布工作,
    *  世界模拟照跑,画面冻结避免向已死上下文刷绘制任务 */
   gpuDegraded = false;
   /** GPU 压力回调(释放远 chunk;Game 接线) */
   cbOnGpuPressure: (() => void) | null = null;
+  /** GPU 冷却期满回调(重建 chunk 池;Game 接线) */
+  cbOnGpuRecover: (() => void) | null = null;
 
   /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植）——按当前样式
    *  懒构造二选一(此前两个实例同时构造 = 15 张 UI 贴图急载,另一套样式永远不用) */
