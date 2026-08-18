@@ -9149,37 +9149,47 @@ void DgSwitch(int x, int y)
     }
 }
 // Collision.CanHit（Collision.cs:388-460）——两点视线（仅实心非 solidTop 拦截）
+// ★OOO 续（2026-08-18 镜像，JS :3018-3060 同源）：原版 do-while【三重】终止——
+//   ①到点 true；②步进后邻对（横步上下格/纵步左右格）双双 !inActive+active+solid+
+//   !solidTop+slope0+!halfBrick → false；③while 条件=当前格 !inActive+active+solid+
+//   !solidTop（不看坡/半砖）→ **步进踩上实心格即退出 return false**。曾缺 ③、②缺
+//   坡/半砖门 → 视线恒偏松 → dgSwitch 提前命中（Lights 段多掷千级）。y 钳位 H-40
+//   （Collision.cs:406-409，曾 H-41）。
 bool DgCanHit(int x1, int y1, int x2, int y2)
 {
-    int cx = Math.Clamp(x1, 1, W - 1), cy = Math.Clamp(y1, 1, H - 41);
-    int tx = Math.Clamp(x2, 1, W - 1), ty = Math.Clamp(y2, 1, H - 41);
+    int cx = Math.Clamp(x1, 1, W - 1), cy = Math.Clamp(y1, 1, H - 40);
+    int tx = Math.Clamp(x2, 1, W - 1), ty = Math.Clamp(y2, 1, H - 40);
+    // ②邻对门槛：slope==0 且非半砖（Collision.cs:437-450）
+    bool DgPairBlk(int x, int y)
+    {
+        if (!DgInWorld(x, y, 0) || act[y * W + x] == 0) return false;
+        ushort t = typ[y * W + x];
+        return SOLID.Contains(t) && !dgSolidTop.Contains(t) && slope[y * W + x] == 0 && half[y * W + x] == 0;
+    }
+    // ③踩格门槛：不看坡/半砖（do-while 条件 :470-472）
+    bool DgStepBlk(int x, int y)
+    {
+        if (!DgInWorld(x, y, 0) || act[y * W + x] == 0) return false;
+        return SOLID.Contains(typ[y * W + x]) && !dgSolidTop.Contains(typ[y * W + x]);
+    }
     while (true)
     {
         int dx = Math.Abs(cx - tx), dy = Math.Abs(cy - ty);
-        if (cx == tx && cy == ty) return true;
+        if (cx == tx && cy == ty) return true;                    // ①
         if (dx > dy)
         {
             cx += cx >= tx ? -1 : 1;
             if (!DgInWorld(cx, cy - 1, 0) || !DgInWorld(cx, cy + 1, 0)) return false;
-            if (DgBlockPair(cx, cy - 1, cx, cy + 1)) return false;
+            if (DgPairBlk(cx, cy - 1) && DgPairBlk(cx, cy + 1)) return false;
         }
         else
         {
             cy += cy >= ty ? -1 : 1;
             if (!DgInWorld(cx - 1, cy, 0) || !DgInWorld(cx + 1, cy, 0)) return false;
-            if (DgBlockPair(cx - 1, cy, cx + 1, cy)) return false;
+            if (DgPairBlk(cx - 1, cy) && DgPairBlk(cx + 1, cy)) return false;
         }
+        if (DgStepBlk(cx, cy)) return false;                      // ③踩上实心格
     }
-}
-bool DgBlockPair(int ax, int ay, int bx, int by)
-{
-    bool f(int x, int y)
-    {
-        if (!DgInWorld(x, y, 0) || act[y * W + x] == 0) return false;
-        ushort t = typ[y * W + x];
-        return SOLID.Contains(t) && !dgSolidTop.Contains(t);
-    }
-    return f(ax, ay) && f(bx, by);
 }
 // —— DungeonGlobalTraps（:23-152，Default：placeTrap(x,y,0) 飞镖）——
 void DgTraps()

@@ -1077,16 +1077,17 @@ function checkBambooSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): v
   }
 }
 
-export function runFinalCleanupPass(
-  st: TileStore, gs: GenState, rng?: RNG,
-  opts?: { frameSparse?: boolean; stats?: ZzzStats },
-): void {
 /** 最近一次 pass 的扫统计（探针读取;生产不依赖） */
 export const __zzzLastStats: ZzzStats = {
   roll184: 0, mossKilled: 0, mossVisited: 0, kills184Other: 0, kills165: 0, killsPlant: 0,
   killsVine: 0, killsC3x2: 0, killsPot: 0, killsPaint: 0, kills485: 0, killsOther: 0,
   rolls165: 0, rollsOther: 0,
 };
+
+export function runFinalCleanupPass(
+  st: TileStore, gs: GenState, rng?: RNG,
+  opts?: { frameSparse?: boolean; stats?: ZzzStats },
+): void {
   const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: !!opts?.frameSparse, stats: opts?.stats ?? __zzzLastStats };
   // ★pass 头 tileSolid 翻转（cs:22306 `Main.tileSolid[484] = false`）：滚动仙人掌
   //   非实心——DesertBiome 头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档

@@ -210,7 +210,65 @@ describe('spawner 书掷（地牢分支 NPC.cs:2655-2677）', () => {
   });
 });
 
-describe('书掉落链（KillTile_DropItems case 50 :65709-65716）', () => {
+describe('教徒仪式圈召唤链（Projectile 490 :31282-31292）', () => {
+  it('age==300 首召幻影龙 454 头 + 455-458 身 + 459 尾（共享头血池）；已有龙 → 召 521', () => {
+    const w = makeWorld();
+    const spawned: Enemy[] = [];
+    const game = {
+      world: w,
+      player: { cx: 80 * TILE, cy: 60 * TILE, x: 80 * TILE, y: 60 * TILE, w: 16, h: 28, hp: 400, maxHp: 400, dead: false },
+      playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {}, damagePlayer: () => {},
+      spawnParticles: () => {}, addDamageNumber: () => {},
+      enemies: () => [cultist],
+      critters: () => [],
+      entities: { nextId: 2, add: (e: unknown) => { spawned.push(e as Enemy); } },
+    } as never;
+    const cultist = Enemy.fromVanilla(439, 80 * TILE, 60 * TILE)!;
+    cultist.id = 1;
+    const { CultistRitualCircle } = await_import_bossAI_lategame();
+    const circle = new CultistRitualCircle(cultist);
+    for (let i = 0; i < 300; i++) circle.fixedUpdate(1 / 60, game);
+    const dragon = spawned.filter((s) => s.vanillaId === 454);
+    expect(dragon.length).toBe(1);
+    const segIds = spawned.filter((s) => s.vanillaId !== 454 && s.vanillaId !== 439)
+      .map((s) => s.vanillaId).sort((a, b) => a! - b!);
+    expect(segIds).toEqual([455, 456, 457, 458, 459]);
+    // realLife 共享：打任意段扣头 10000 血池（StrikeNPC :82132-82137）
+    const body = spawned.find((s) => s.vanillaId === 456)!;
+    expect(body.realLifeHost).toBe(dragon[0]);
+    body.hurt(500, 0, 0, game as never);
+    expect(dragon[0].hp).toBe(dragon[0].maxHp - Math.max(1, Math.round(500 - 30 * 0.5)));
+    // 已有龙在场 → 第二个圈召 521 远古幻象
+    spawned.length = 0;
+    const circle2 = new CultistRitualCircle(cultist);
+    for (let i = 0; i < 301; i++) circle2.fixedUpdate(1 / 60, game);
+    expect(spawned.some((s) => s.vanillaId === 521)).toBe(true);
+    expect(spawned.some((s) => s.vanillaId === 454)).toBe(false);
+  });
+
+  it('幻影龙渐显：头 7t 现身（-42/t）、段沿链 <85 门逐级跟上、渐隐期不可击', () => {
+    const w = makeWorld();
+    const game = stubGame(w) as never;
+    const head = Enemy.fromVanilla(454, 60 * TILE, 60 * TILE)!;
+    const segs = Enemy.spawnWormChain(head, 5, [455, 456, 457, 458, 459], true);
+    // 头 6 tick：spawnAlpha 255→0（-42/t）、期间 dontTakeDamage
+    head.fixedUpdate(1 / 60, game);
+    expect(head.spawnAlpha).toBeLessThan(255);
+    expect(head.dontTakeDamage).toBe(true);
+    for (let i = 0; i < 6; i++) head.fixedUpdate(1 / 60, game);
+    expect(head.spawnAlpha).toBe(0);
+    expect(head.dontTakeDamage).toBe(false);
+    // 首段：头已 <85 → 跟着渐显；段链 wormFollow 接好
+    const s1 = segs[0];
+    expect(s1.wormFollow).toBe(head);
+    s1.fixedUpdate(1 / 60, game);
+    expect(s1.spawnAlpha).toBeLessThan(255);
+    // 1456 数值对齐：头 10000HP/100 伤/15 防；身 10000/50/30
+    expect(head.maxHp).toBe(10000);
+    expect(head.def.damage).toBe(100);
+    expect(segs[0].def.defense).toBe(30);
+  });
+});
   it('帧表：普通书帧 ∈ {0,18,36,54,72}，水书伪装帧 90', () => {
     // 放置链 frameX=18*Next(5)（PlaceOnTable1x1 :45379）——书物放置帧只落 0..72；
     // 90 只来自世界 GenerateDungeonBook waterbolt 支（本仓 DungeonPass 侧）

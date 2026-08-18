@@ -658,8 +658,10 @@ export class Enemy extends Entity {
     addEnemy(game, spit);
   }
 
-  /** 由头生成段链（原版各 worm 的 NewNPC 链，NPC.cs:18174+）：body×n + tail */
-  static spawnWormChain(head: Enemy, segCount: number): Enemy[] {
+  /** 由头生成段链（原版各 worm 的 NewNPC 链，NPC.cs:18174+）：body×n + tail。
+   *  segIds 显式段表（454 幻影龙 = 455-458 身 ×4 + 459 尾——非 head+1/head+2 连号族）；
+   *  sharedLife = realLife 共享头血池（StrikeNPC :82132-82137——毁灭者/幻影龙段不可单独打死） */
+  static spawnWormChain(head: Enemy, segCount: number, segIds?: number[], sharedLife = false): Enemy[] {
     const segs: Enemy[] = [];
     const bodyId = head.vanillaId! + 1, tailId = head.vanillaId! + 2;
     // EoW 族记链总段数（血条恒定分母,EaterOfWorldsProgressBar :30-33;
@@ -668,13 +670,14 @@ export class Enemy extends Entity {
     head.eowChainMax = chainTotal;
     let prev = head;
     for (let k = 0; k < segCount; k++) {
-      const id = k === segCount - 1 ? tailId : bodyId;
+      const id = segIds ? segIds[k] : (k === segCount - 1 ? tailId : bodyId);
       const s = Enemy.fromVanilla(id, head.cx, head.cy);
       if (!s) continue;
       s.wormFollow = prev;
       prev.wormNext = s;
       prev = s;
       s.eowChainMax = chainTotal;
+      if (sharedLife) s.realLifeHost = head;
       segs.push(s);
     }
     return segs;
@@ -1355,6 +1358,22 @@ export class Enemy extends Entity {
     // alpha>0 且存活（:52656-52664）：每 tick 2 颗 14 号腐化尘（noGravity/noLight、
     //   scale 2、尘 alpha 100——spawnParticles 紫尘近似，DustID.Corruption）。
     // 位移 >2px（:52666-52670）：spawnAlpha -42 钳 0——255→0 共 7 tick 现身。
+    // ---- 幻影龙 454-459 出生渐显（AI_006 头段 :51379-51400 1:1）：头无条件 -42/t、
+    //      身/尾须前段 spawnAlpha<85 沿链传播（无位移门——龙自传送圈直接成型）；
+    //      渐隐期 dontTakeDamage + 每 tick 2 颗 228 紫尘（noGravity/noLight/scale 2）----
+    if (this.vanillaId !== null && this.vanillaId >= 454 && this.vanillaId <= 459) {
+      const prev = this.wormFollow;
+      if (this.vanillaId === 454 || !prev || prev.spawnAlpha < 85) {
+        this.dontTakeDamage = this.spawnAlpha > 0;    // :51381-51382
+        if (this.spawnAlpha > 0 && this.hp > 0) {
+          game.spawnParticles(this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+            '#A060E0', 2, 0, { life: 40, size: 2 });
+        }
+        this.spawnAlpha = Math.max(0, this.spawnAlpha - 42);
+        if (this.spawnAlpha === 0) this.alphaFade = false;
+      }
+    }
+
     if (this.vanillaId !== null && this.vanillaId >= 13 && this.vanillaId <= 15 && this.alphaFade) {
       const prev = this.wormFollow;
       if (this.vanillaId === 13 || !prev || prev.spawnAlpha < 85) {

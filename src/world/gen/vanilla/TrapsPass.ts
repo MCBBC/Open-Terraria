@@ -80,6 +80,10 @@ const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
 /** GenVars.boulderPetsPlaced（cs:9302 宠物巨石计数，每局生成清零） */
 let boulderPetsPlaced = 0;
 
+/** EEEE 探针钩子（SW_EEEE_DBG=1 时登记每次接受的陷阱） */
+export const EEEE_DBG = process.env.SW_EEEE_DBG === '1';
+export const eeeeLog: Array<Record<string, number>> = [];
+
 // ---- 原版实心谓词族（cs:70155/70178/70211；生成期 Main.tileSolid = vanGenSolidType） ----
 /** SolidTile（cs:70155）：active && tileSolid && !tileSolidTop && !half && slope==0 && !inActive */
 function solidTileV(st: TileStore, x: number, y: number): boolean {
@@ -319,6 +323,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       }
     }
     lWire(st, x2, py, colX, top);                                     // cs:9320-9343
+    if (EEEE_DBG) eeeeLog.push({ k: 1, x2, py, ax: colX, ay: top, b: boulderId });
     return true;
   }
 
@@ -345,6 +350,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     st.setTileSilent(bx, by, EXPLOSIVES, 0, rng.int(0, 1) * 18);      // cs:9383-9386
     placePlate(st, x2, py, rng.int(2, 3));                            // cs:9387
     lWire(st, x2, py, bx, by);
+    if (EEEE_DBG) eeeeLog.push({ k: 2, x2, py, ax: bx, ay: by });
     return false;                                                     // cs:9413 break → 9459 return false
   }
 
@@ -359,6 +365,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     for (let k = 0; k < 2; k++) {
       st.setTileSilent(x2 + k, py, GEYSER, 18 * k + 36 * fx, 0);
     }
+    if (EEEE_DBG) eeeeLog.push({ k: 3, x2, py, ax: x2, ay: py });
     return true;
   }
 
@@ -392,6 +399,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   st.setTileSilent(i5, j2, 0);                                        // KillTile（cs:9105）
   st.setTileSilent(i5, j2, TRAP137, dir === 1 ? 18 : 0, 0);           // cs:9115（style0）
   lWire(st, x2, py, i5, j2);
+  if (EEEE_DBG) eeeeLog.push({ k: 0, x2, py, ax: i5, ay: j2, dir });
   return true;
 }
 
@@ -541,6 +549,7 @@ function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
       }
     }
   }
+  if (EEEE_DBG) eeeeLog.push({ k: 4, x2: i, py: k, ax: pocketW, ay: pocketH });
   return true;
 }
 
@@ -551,6 +560,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState): void {
   //   本仓生成期不放置 379,行为无差,存档时间线。pass 尾 cs:18897 还原 true。
   flipGenSolid([379], false);
   boulderPetsPlaced = 0;   // GenVars.boulderPetsPlaced 每局清零
+  eeeeLog.length = 0;
   const trapTries = st.w * 0.05;
   for (let n = 0; n < trapTries; n++) {
     for (let k = 0; k < 1150; k++) {

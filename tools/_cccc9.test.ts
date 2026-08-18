@@ -108,6 +108,7 @@ const itIs = process.env.SW_CCCC === '9';
     if (e.name === 'deadCands') console.log(`[${e.d}] deadCands(${(e.detail as number[][]).length}): ${JSON.stringify(e.detail)}`);
     if (e.name === 'deadCount') console.log(`[${e.d}] deadCount=${e.detail}`);
     if (e.name === 'iceCount') console.log(`[${e.d}] iceCount=${e.detail}`);
+    if (e.name === 'deadPlace') console.log(`[${e.d}] deadPlace ${JSON.stringify(e.detail)}`);
     if (e.name === 'iceTry') { iceTries++; if (iceTries <= 12) console.log(`[${e.d}] iceTry ${JSON.stringify(e.detail)}`); }
     if (e.name === 'swordAttempts') console.log(`[${e.d}] swordAttempts=${e.detail}`);
     if (e.name === 'campCount') console.log(`[${e.d}] campCount=${e.detail}`);

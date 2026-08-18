@@ -164,8 +164,8 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       if (--guard <= 0) break;
       const pick = rng.int(0, possible.length - 1);
       const c = possible[pick];
-      deadMans.place(c.x, c.y);                    // 返回值原版丢弃(cs:21814)
-      segProbe('deadPlace', [c.x, c.y]);
+      const ok = deadMans.place(c.x, c.y);          // 返回值原版丢弃(cs:21814)
+      segProbe('deadPlace', [c.x, c.y, ok]);
       done++;
       possible.splice(pick, 1);
     }

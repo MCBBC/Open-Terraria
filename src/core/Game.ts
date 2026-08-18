@@ -221,6 +221,8 @@ import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
+import { GamePresence } from './GamePresence';
+import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
 import { SITTABLE_SHEETS, getSittingTargetInfo } from '../player/PlayerSitting';
 import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
@@ -718,6 +720,8 @@ export class Game implements GameHooks {
   /** 小地图拆带构建的完成 Promise（afterWorldLoad 内启动；三条进世界路径
    *  await 后才 onWorldReady——见 Minimap.buildStriped 大世界巨帧注释） */
   minimapReady: Promise<void> | null = null;
+  /** 同源实例互认(双开协同降耗,src/core/GamePresence) */
+  presence = new GamePresence();
   chunks!: ChunkCache;
   lighting!: LightingEngine;
   liquid!: LiquidSim;
@@ -2221,6 +2225,19 @@ export class Game implements GameHooks {
     // GPU 压力自适应(2026-08-14 trace⑦):contextlost → chunk 上限减半 + 立即释放超限;
     // 熔断态(2026-08-18 双开崩溃:抖动环 1.7 万次/3s)加一次 toast 提示
     this.renderer.installGpuPressureGuard();
+    // 同源实例互认(2026-08-18 双开崩溃协同降耗):另一窗口同游戏在场时,
+    // 双方各降一半 GPU 常驻预算(chunk 上限/GL 纹理池),把共享配额分着用
+    this.presence.onChange = (n) => {
+      if (n > 1) {
+        ChunkCache.MAX_CHUNKS = Math.min(ChunkCache.MAX_CHUNKS, 160);
+        GLSpriteLayer.MAX_BYTES = Math.min(GLSpriteLayer.MAX_BYTES, 96 * 1024 * 1024);
+        this.renderer.glfx?.dispose();          // 池按新预算重建
+        this.renderer.glfx = null;
+        this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.MultiInstance'));
+        console.warn(`[Game] 检测到 ${n} 个同源游戏实例——已进入双开经济档(chunk≤160/GL≤96MB)`);
+      }
+    };
+    this.presence.start();
     let gpuTripToasted = false;
     this.renderer.cbOnGpuPressure = () => {
       this.shrinkChunks();
@@ -5439,17 +5456,8 @@ export class Game implements GameHooks {
         }
       }
     }
-    // 僵尸环境呻吟：附近有僵尸时偶发（每 ~4-8 秒）
-    if (this.tickCount % 300 === 0) {
-      for (const ent of this.entities.enemies) {
-        const e = ent as Enemy;
-        if (e.key !== 'zombie' && e.key !== 'magma_zombie') continue;
-        if (Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) < TILE * 30) {
-          this.sfx.playWav('zombie', 1, e.cx, e.cy);
-          break;
-        }
-      }
-    }
+    // （僵尸环境呻吟已退役 2026-08-18:自制版只认 legacy key 全不命中原版路径怪;
+    //  1:1 版 = Enemy.ambientSoundTick 的 CHATTER_SOUNDS 表,1/1000 帧逐怪掷骰）
     // 火把火苗：视内点燃火把随机飘出火星（火点在格顶上方 20px 精灵的火焰处）
     this.emitTorchSparks();
     this.emitTileParticles();

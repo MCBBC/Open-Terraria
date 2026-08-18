@@ -111,6 +111,11 @@ function countedRng(seed: number) {
   (globalThis as Record<string, unknown>).__swHouseStage = (tag: string, _a: number, _b: number, d: number, k: number) => {
     stageEv.push([tag, k, d]);
   };
+  // genRect 事件（ageRoom ① 蛛网锚点 + ②③ 房间矩形）
+  const genEv: Array<[number, number, number, number, number]> = [];
+  (globalThis as Record<string, unknown>).__swAgeGen = (k: number, ox: number, oy: number, w: number, h: number) => {
+    genEv.push([ox, oy, w, h, k]);
+  };
 
   flipGenSolid([226, 162, 225, 190], true);
   rollHouseChestCounts(st, rng, gs);
@@ -122,6 +127,7 @@ function countedRng(seed: number) {
   delete (globalThis as Record<string, unknown>).__swChestEv;
   delete (globalThis as Record<string, unknown>).__swHouseEv;
   delete (globalThis as Record<string, unknown>).__swHouseStage;
+  delete (globalThis as Record<string, unknown>).__swAgeGen;
 
   // ---- 定位 (1867,543) 这座屋的阶段 k 对拍 ----
   const van17 = { k0: 34574, stages: [['ER', 34574], ['ST', 35529], ['DO', 35549], ['PL', 35552], ['SB', 35552], ['BP', 35552], ['FR', 35552], ['CH', 36763], ['BT', 36788]] };
@@ -133,6 +139,16 @@ function countedRng(seed: number) {
     console.log(`JS HTRY(1867,543) k=${hk}`);
     const tail = stageEv.filter(s => s[1] >= hk && s[1] <= hk + 2300);
     for (const s of tail) console.log(`  stage ${s[0]} k=${s[1]} d=${s[2]}`);
+    // 该屋 aging 的 genRect 锚点（fr 之后到 ch 之前）——成对(头/尾)去重
+    const frK = stageEv.find(s => s[0] === 'fr' && s[1] >= hk)?.[1];
+    const chK = stageEv.find(s => s[0] === 'ch' && s[1] >= hk)?.[1];
+    console.log(`  fr=${frK} ch=${chK} —— aging genRect 锚点:`);
+    const pairs: Array<{ ox: number; oy: number; w: number; h: number; k0: number; k1: number }> = [];
+    const raw = genEv.filter(g => g[4] >= (frK ?? 0) && g[4] <= (chK ?? 1e9));
+    for (let q = 0; q + 1 < raw.length; q += 2) {
+      pairs.push({ ox: raw[q]![0], oy: raw[q]![1], w: raw[q]![2], h: raw[q]![3], k0: raw[q]![4], k1: raw[q + 1]![4] });
+    }
+    for (const p of pairs) console.log(`    GE (${p.ox},${p.oy}) ${p.w}x${p.h} k=${p.k0}→${p.k1} (${p.k1 - p.k0} rolls)`);
   } else console.log('JS HTRY(1867,543) not found!');
 
   // ---- vanilla 参照：seg59k 的 AB 段 + houseprobe4 的 HB 段（按文件序拼接）----

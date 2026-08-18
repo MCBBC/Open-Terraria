@@ -1417,7 +1417,7 @@ export class Renderer {
     let tripped = false;
     let cooldown = 8_000;                 // ★逐次翻倍(8→16→32→60s 封顶):曾固定 8s,
     let trips = 0;                        //   冷却期满重新放行→再抖→再熔 = 永久 8s 振荡
-    this.canvas.addEventListener('contextlost', (e) => {
+    const onLost = (e: Event) => {
       const now = performance.now();
       losses = losses.filter((t) => now - t < 10_000);
       losses.push(now);
@@ -1428,7 +1428,12 @@ export class Renderer {
         tripped = true;
         trips++;
         this.gpuDegraded = true;
-        console.warn(`[Renderer] GPU 压力熔断(第 ${trips} 次):10s 内 ${losses.length} 次 contextlost——暂停渲染冷却 ${cooldown / 1000}s,期间不再请求上下文恢复`);
+        // ★熔断即硬释放(2026-08-18 双开 trace:16 万次风暴下 JS 堆 35MB 稳定,
+        // 纯显存预算问题):GL 纹理池整体丢弃 + 预算腰斩,给 GPU 立刻让出空间
+        GLSpriteLayer.MAX_BYTES = Math.max(48 * 1024 * 1024, Math.floor(GLSpriteLayer.MAX_BYTES / 2));
+        this.glfx?.dispose();
+        this.glfx = null;
+        console.warn(`[Renderer] GPU 压力熔断(第 ${trips} 次):10s 内 ${losses.length} 次画布丢失——暂停渲染冷却 ${cooldown / 1000}s + 已释放 GL 纹理池(${GLSpriteLayer.MAX_BYTES >> 20}MB 档)`);
         setTimeout(() => {
           tripped = false;
           losses = [];
@@ -1437,13 +1442,19 @@ export class Renderer {
           console.warn(`[Renderer] GPU 冷却结束,恢复渲染(chunk 上限 ${ChunkCache.MAX_CHUNKS};若稳定运行 60s 将回落冷却档)`);
           setTimeout(() => { if (trips > 0 && !tripped) { trips = Math.max(0, trips - 1); cooldown = Math.max(8_000, cooldown / 2); } }, 60_000);
         }, cooldown);
-        return;                 // ★不 preventDefault:打破 恢复→重分配→再丢 循环
+        // 已丢上下文不请求恢复(打破 恢复→重分配→再丢);其他画布各自的处理保持
+        return;
       }
       if (!tripped) {
         e.preventDefault();     // 单次偶发丢失:照旧请求自动恢复
         console.warn(`[Renderer] contextlost:GPU 压力自适应 chunk 上限 ${cur}→${ChunkCache.MAX_CHUNKS}`);
       }
-    });
+    };
+    this.canvas.addEventListener('contextlost', onLost);
+    // ★全局画布哨兵(2026-08-18 双开 trace 实锤:16k 次/秒的风暴打在几百个
+    // 无守卫画布上——chunk 烘焙/GL/光照/VUI 等,主画布单点监听是聋的)。
+    // capture 阶段 window 级监听捕获全部画布的 contextlost,统一计入熔断
+    window.addEventListener('contextlost', onLost, true);
   }
   /** GPU 熔断态(contextlost 抖动期):render() 跳过全部画布工作,
    *  世界模拟照跑,画面冻结避免向已死上下文刷绘制任务 */

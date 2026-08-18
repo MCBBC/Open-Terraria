@@ -6,13 +6,13 @@
 // 弹幕统一走 bossAI.shoot(Arrow 直飞桶);原版「定点预告→延时冲刺」类投射物(465/919/923)
 // 收敛为带初速直飞(见各处注释)。getGoodWorld 分支已实装(女皇招式间隔折半/史后空中
 // 横移+砸地蓄力+凝胶环抬档);expert/大师分支只注释不实现;netcode 跳过。
-import type { Enemy } from './Enemy';
+import { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { TILE } from '../core/constants';
-import { spawnPart, shoot, losClear } from './bossAI';
+import { spawnPart, shoot, losClear, addEnemy } from './bossAI';
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
 
@@ -187,7 +187,23 @@ export class CultistRitualCircle extends Entity {
       }
     }
     this.age++;
-    // :31282-31292 age==300 召 454/521——两 AI 族未移植（登记），跳过
+    // ---- :31282-31292 age==300 召唤：场上无 454 幻影龙 → NewNPC(454)（头 +
+    //      455-458 身 ×4 + 459 尾共享头血池，AI_006 wormAI + 渐显段）；否则 → 521
+    //      远古幻象（AI_086 phantomAI big 档）----
+    if (this.age === 300) {
+      const hasDragon = (game.enemies() as Enemy[])
+        .some((n) => !n.dead && n.vanillaId === 454);
+      const id = hasDragon ? 521 : 454;
+      const head = Enemy.fromVanilla(id, this.cx, this.cy);
+      if (head) {
+        addEnemy(game, head);
+        if (id === 454) {
+          // 链段（NewNPC 段链展开）：455-458 + 尾 459，realLife 共享头 10000 血
+          const segs = Enemy.spawnWormChain(head, 5, [455, 456, 457, 458, 459], true);
+          for (const sg of segs) addEnemy(game, sg);
+        }
+      }
+    }
     if (this.age >= 320) this.dead = true;              // :31294-31298
   }
 
