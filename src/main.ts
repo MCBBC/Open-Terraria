@@ -41,7 +41,7 @@ if (new URLSearchParams(location.search).get('imglog') === '1') {
       stats.set(k, (stats.get(k) ?? 0) + 1);
       if (stats.size > 600) stats.clear();
     }
-    return orig.call(this, img as CanvasImageSource, ...(rest as Parameters<typeof orig>));
+    return (orig as (...a: unknown[]) => ReturnType<typeof orig>).call(this, img, ...rest);
   };
   (window as unknown as { __swImgDraw?: Map<string, number> }).__swImgDraw = stats;
   setInterval(() => {

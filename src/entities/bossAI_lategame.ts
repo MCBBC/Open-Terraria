@@ -629,6 +629,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   // :47296-47301 二阶段防御 ×1.2;白天暴怒（flag4,:47296 段 damage=9999——wiki"白天必秒杀"）
   // ——2026-08-13 接通:白天召唤女皇不再无风险
   const dayEnrage = game.world.clock.isDay;
+  // :46319-46323 满血+白天且未暴怒 → ai3 += 2（白天召出即 Enraged 档 2;
+  // 受过伤再转白天不补——原版"只在白天受过伤"语义）。NpcDrops 的
+  // EmpressOfLightIsGenuinelyEnraged(:46169)读 ai3∈{2,3} → 夜光 5005 掉落门
+  if (e.hp === e.maxHp && dayEnrage && e.ai3 !== 2 && e.ai3 !== 3) e.ai3 += 2;
   e.def.damage = dayEnrage ? 9999 : b.dmg;
   e.def.defense = Math.floor(phase2 ? b.def * 1.2 : b.def);
 
@@ -649,8 +653,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   }
 
   // 冲刺窗口伤害倍率(num16,:46352/:47006):8/9 态 40-90t 时 ×1.5
+  // （白天 9999 基伤同样参与 ×1.5——原版 flag4 先把 num 全置 9999 再乘 num16;
+  //  曾按 b.dmg 重算把 9999 整档覆盖掉,白天暴怒伤害从未生效）
   const dashBoost = (e.ai0 === 8 || e.ai0 === 9) && e.ai1 > 40 && e.ai1 <= 90;
-  e.def.damage = Math.round(b.dmg * (dashBoost ? 1.5 : 1));
+  e.def.damage = Math.round((dayEnrage ? 9999 : b.dmg) * (dashBoost ? 1.5 : 1));
 
   switch (e.ai0) {
     // ---- 0 出生(:46370-46422):velocity=(0,5) 后 0.95 阻尼,180t 渐显;全程无敌(flag6=false) ----
@@ -814,7 +820,8 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       if (e.ai1 === 0) game.playSfxFiles?.(['Item_161'], 1, e.cx, e.cy); // :47036 状态开始音（仅此一次）
       e.vx *= 0.95; e.vy *= 0.95;
       if (e.ai1 === 90) {
-        if (e.ai3 === 0) e.ai3 = 1; // ai3==2(白天暴怒)分支不实现
+        if (e.ai3 === 0) e.ai3 = 1; // :47040-47043
+        if (e.ai3 === 2) e.ai3 = 3; // :47044-47047 白天暴怒档同步进二阶段(3=暴怒+二阶段)
         e.x = player.cx - e.w / 2;
         e.y = player.cy - 250 - e.h / 2;
         // 原版此传送为纯 position 改写（:47039-47052）：无 dust 无传送音——

@@ -132,7 +132,24 @@ import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, r
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
-import { BiomeBackground } from './BiomeBackground';
+import { BiomeBackground, type BGBlit } from './BiomeBackground';
+import { GLSpriteLayer } from './GLSpriteLayer';
+
+/** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制 */
+class GLBgBlit implements BGBlit {
+  constructor(private gl: GLSpriteLayer) {}
+  img(im: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    opts?: { alpha?: number; tint?: readonly [number, number, number] | null }): void {
+    const tag = (im as HTMLImageElement).src ?? `cv${im.width}x${im.height}`;
+    const e = this.gl.texFromImage(`bg:${tag}`, im as TexImageSource);
+    if (!e) return;
+    this.gl.quad(e, sx, sy, sw, sh, dx, dy, dw, dh, opts);
+  }
+  fill(x: number, y: number, w: number, h: number, r: number, g: number, b: number, a = 1): void {
+    this.gl.fillQuad(x, y, w, h, r, g, b, a);
+  }
+}
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { TOWN_HOLDOUT } from '../data/vanillaTownAttack';
@@ -939,9 +956,15 @@ const TILE_SHEET_OF: Readonly<Int16Array> = (() => {
 })();
 
 export class Minimap {
+  /** 实例序号(GL 全屏地图纹理键;切世界换实例即换键自动重传) */
+  private static uidGen = 0;
+  readonly uid = ++Minimap.uidGen;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   dirtyChunks = new Set<number>();
+  /** 本帧 flushDirty 实际重画的像素区 [px,py,w,h](GL 地图纹理 texSubImage2D
+   *  增量上传消费,消费方清空;上限=flushDirty 每帧 24 chunk) */
+  flushedPixelRects: Array<[number, number, number, number]> = [];
   /** deferBuild：跳过构造期同步全量重建（大世界 80MB 级，见 buildStriped），
    *  由调用方跑分行构建；测试/小世界默认同步行为不变 */
   constructor(public world: World, deferBuild = false) {
@@ -1191,6 +1214,7 @@ export class Minimap {
       this.dirtyChunks.delete(k);
       const cx = (k & 0xffff) << 16 >> 16, cy = (k >> 16) << 16 >> 16;
       const x0 = cx * CHUNK, y0 = cy * CHUNK;
+      this.flushedPixelRects.push([x0, y0, CHUNK, CHUNK]);   // GL 地图纹理增量上传
       for (let y = y0; y < y0 + CHUNK; y++) {
         for (let x = x0; x < x0 + CHUNK; x++) {
           if (!st.inBounds(x, y)) continue;
@@ -1200,6 +1224,7 @@ export class Minimap {
         }
       }
     }
+    if (this.flushedPixelRects.length > 128) this.flushedPixelRects.splice(0, this.flushedPixelRects.length - 128);
   }
 }
 
@@ -1229,7 +1254,13 @@ export function sleepingTransformOps(
 }
 
 export class Renderer {
-  /** 调试面板开关（F3 切换）：碰撞盒高亮等 */
+  /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
+  glfx: GLSpriteLayer | null = null;
+  /** ?mapgl=0 逃生门(#2);GL 初始化失败自动回退 */
+  private readonly mapGlEnabled = (() => {
+    try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('mapgl') !== '0'; }
+    catch { return false; }
+  })();
   debugMode = false;
   /** 方块标注（F5 标注模式）：标记的问题方块，非空时叠加绘制 */
   annotateMarks: Array<{ x: number; y: number }> | null = null;
@@ -1268,6 +1299,11 @@ export class Renderer {
   } = { heldVid: 0, uiHeld: false, cacheTime: 0, cacheVid: 0, npcHover: false, biomeTorch: null, biomeCampfire: null, paintAmmoVid: 0, housingHead: null };
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
+  /** #1 背景层 GL 逃生门 ?bggl=0(实例共用 this.glfx;初始化失败自动回退) */
+  private readonly bgGlEnabled = (() => {
+    try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('bggl') !== '0'; }
+    catch { return false; }
+  })();
   /** GPU 压力自适应(2026-08-14 trace⑦:主线程空闲仍崩=GPU 进程内存天花板):
    *  浏览器在 GPU 内存吃紧时先发 contextlost——捕获即减半 chunk 画布常驻并
    *  释放最旧一半,恢复后续跑;连续丢失连续收缩(下限 64) */
@@ -1552,7 +1588,21 @@ export class Renderer {
         tg = 1 - 0.66 * night - 0.22 * dusk;
         tb = 1 - 0.50 * night - 0.40 * dusk;
       }
-      this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
+      // GL 路径:离屏画布整段画完单次合成(层序/透明度与 2D 完全一致);
+      // 2D 回退路径保留(?bggl=0 / GL 不可用)
+      let bgDone = false;
+      if (this.bgGlEnabled) {
+        if (!this.glfx) this.glfx = new GLSpriteLayer();
+        if (!this.glfx.unavailable) {
+          this.glfx.resize(this.canvas.width, this.canvas.height);
+          this.glfx.begin();
+          this.biomeBg.draw(new GLBgBlit(this.glfx), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
+          this.glfx.end();
+          ctx.drawImage(this.glfx.canvas, 0, 0);
+          bgDone = true;
+        }
+      }
+      if (!bgDone) this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
       // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后、实体前）
       this.sky.drawCloudsNear(ctx, viewW, viewH, cam.y);
     }
@@ -9347,32 +9397,82 @@ export class Renderer {
     }
     const cx0 = viewW / 2 - mapW / 2 + fm.panX;
     const cy0 = viewH / 2 - mapH / 2 + fm.panY;
-    // 背景：原版 DrawMapFullscreenBackground（Main.cs:55804）——全屏群系 MapBG 贴图
-    // （TextureAssets.MapBGs[i] = MapBG{i+1}.png，AssetInitializer :641），按视区深度
-    // 与玩家 zone 选表。★vui 键必须带 .png 后缀(2026-08-13 枚举 review 实锤:
-    // 此前裸 'MapBG{n}'/'Map' 恒 null——键失配不是懒加载瞬态,背景/卷轴从未画过)
-    const bgTex = this.atlas ? this.atlas.vui(`MapBG${this.fullMapBgIndex(world) + 1}.png`) : null;
-    if (bgTex) {
-      ctx.drawImage(bgTex.img, bgTex.sx, bgTex.sy, bgTex.sw, bgTex.sh, 0, 0, viewW, viewH);
-    } else {
-      ctx.fillStyle = 'rgba(8,6,16,0.92)';
-      ctx.fillRect(0, 0, viewW, viewH);
+    // ---- 底四段(MapBG/卷轴/地图内容/迷雾)的 GL 路径(docs #2):残项#3 归零——
+    // 旧路每帧对 8400×2400 世界画布整幅缩放采样(~33M 采样/帧)+迷雾同款;
+    // GL 化后=纹理 quad,小地图按 flushDirty 的脏区 texSubImage2D 增量上传。
+    // 头像/标记/文字仍走 2D(在合成之后画,层序不变)。逃生门 ?mapgl=0。
+    let glMap = false;
+    if (this.mapGlEnabled && this.minimap) {
+      if (!this.glfx) this.glfx = new GLSpriteLayer();
+      if (!this.glfx.unavailable) {
+        const gl = this.glfx;
+        glMap = true;
+        gl.resize(viewW, viewH);
+        gl.begin();
+        // 背景:原版 DrawMapFullscreenBackground(Main.cs:55804)——全屏群系 MapBG
+        // ★vui 键必须带 .png 后缀(2026-08-13 实锤:裸键恒 null,背景从未画过)
+        const bgTex = this.atlas ? this.atlas.vui(`MapBG${this.fullMapBgIndex(world) + 1}.png`) : null;
+        if (bgTex && bgTex.img.width > 0) {
+          gl.drawRect(bgTex, 0, 0, viewW, viewH);
+        } else {
+          gl.fillQuad(0, 0, viewW, viewH, 8 / 255, 6 / 255, 16 / 255, 0.92);
+        }
+        // 卷轴底图(原版 Images/Map.png 928×248 羊皮纸,内容【之下】;美术图平滑缩放)
+        const scroll = this.atlas ? this.atlas.vui('Map.png') : null;
+        if (scroll && scroll.img.width > 0) {
+          const sr = Renderer.fullMapScrollRect(world.w, fm.zoom, cx0, cy0, scroll.sw, scroll.sh);
+          gl.drawRect(scroll, sr.x, sr.y, sr.w, sr.h, { smooth: true });
+        }
+        // 地图内容:世界画布 → 纹理(整幅一次 + 脏区增量),单 quad 缩放
+        // (smoothing 与 2D 同款:zoom≥1 线性、<1 最近邻)
+        const mmKey = `mm:${this.minimap.uid}`;
+        const mmTex = gl.texFromImage(mmKey, this.minimap.canvas);
+        if (mmTex) {
+          for (const [px, py, pw, ph] of this.minimap.flushedPixelRects) {
+            gl.texSubUpdate(mmKey, this.minimap.canvas, px, py, pw, ph);
+          }
+          gl.quad(mmTex, 0, 0, mmTex.w, mmTex.h, cx0, cy0, mapW, mapH, { smooth: fm.zoom >= 1 });
+        }
+        this.minimap.flushedPixelRects.length = 0;
+        // 迷雾:getFogCanvas 每帧推进分带重建(2D/GL 共用),纹理按版本+行号重传
+        const fc = this.getFogCanvas(world);
+        if (fc && fc.width > 0) {
+          const fogKey = `fog:${world.seed}:${this.fogVersion}:${this.fogRebuildRow}`;
+          const fogTex = gl.texFromImage(fogKey, fc);
+          if (fogTex) {
+            gl.quad(fogTex, 0, 0, fogTex.w, fogTex.h,
+              cx0, cy0, fogTex.w * 2 * fm.zoom, fogTex.h * 2 * fm.zoom, { smooth: false });
+          }
+        }
+        gl.end();
+        ctx.drawImage(gl.canvas, 0, 0);
+      }
     }
-    // 卷轴底图（原版 Images/Map.png 928×248 羊皮纸，Main.cs:54923：地图内容【之下】
-    // 绘制——目标矩形走 fullMapScrollRect 四档修正偏移（:54860-54918 按世界宽
-    // 8400/6400/6300/4200 手调的外扩魔数），羊皮纸边缘饰纹在地图缩放留边处露出；
-    // 地图探索未达区域在卷轴上呈现纸张色而非纯蓝）
-    const scroll = this.atlas ? this.atlas.vui('Map.png') : null;
-    if (scroll && (scroll.img.width > 0) && scroll.img.width > 0) {
-      const sr = Renderer.fullMapScrollRect(world.w, fm.zoom, cx0, cy0, scroll.sw, scroll.sh);
-      ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
-      ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, sr.x, sr.y, sr.w, sr.h);
+    if (!glMap) {
+      // ---- 2D 回退路径(原实现原样保留) ----
+      const bgTex = this.atlas ? this.atlas.vui(`MapBG${this.fullMapBgIndex(world) + 1}.png`) : null;
+      if (bgTex) {
+        ctx.drawImage(bgTex.img, bgTex.sx, bgTex.sy, bgTex.sw, bgTex.sh, 0, 0, viewW, viewH);
+      } else {
+        ctx.fillStyle = 'rgba(8,6,16,0.92)';
+        ctx.fillRect(0, 0, viewW, viewH);
+      }
+      // 卷轴底图（原版 Images/Map.png 928×248 羊皮纸，Main.cs:54923：地图内容【之下】
+      // 绘制——目标矩形走 fullMapScrollRect 四档修正偏移（:54860-54918 按世界宽
+      // 8400/6400/6300/4200 手调的外扩魔数），羊皮纸边缘饰纹在地图缩放留边处露出；
+      // 地图探索未达区域在卷轴上呈现纸张色而非纯蓝）
+      const scroll = this.atlas ? this.atlas.vui('Map.png') : null;
+      if (scroll && (scroll.img.width > 0) && scroll.img.width > 0) {
+        const sr = Renderer.fullMapScrollRect(world.w, fm.zoom, cx0, cy0, scroll.sw, scroll.sh);
+        ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
+        ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, sr.x, sr.y, sr.w, sr.h);
+      }
+      ctx.imageSmoothingEnabled = fm.zoom >= 1;
+      ctx.drawImage(this.minimap!.canvas, cx0, cy0, mapW, mapH);
+      ctx.imageSmoothingEnabled = false;
+      // 迷雾
+      this.drawFog(ctx, world, cx0, cy0, fm.zoom, 2 * fm.zoom);
     }
-    ctx.imageSmoothingEnabled = fm.zoom >= 1;
-    ctx.drawImage(this.minimap!.canvas, cx0, cy0, mapW, mapH);
-    ctx.imageSmoothingEnabled = false;
-    // 迷雾
-    this.drawFog(ctx, world, cx0, cy0, fm.zoom, 2 * fm.zoom);
     // 头像层(原版 DrawNPCMapIcons2 :55602 + MapPlayerRenderer:玩家头/城镇 NPC 头/
     // Boss 头;headScale=min(1,(zoom×0.5+1)/3)——Main.cs:55140)
     const p = this._lastPlayer;

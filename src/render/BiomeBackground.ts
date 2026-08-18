@@ -113,6 +113,45 @@ function seedPick(seed: number, salt: number, n: number): number {
 
 interface Cam { x: number; y: number }
 
+/** 绘制后端抽象(docs/webgl2-migration-plan.md #1):2D/GL 双实现共用
+ *  同一份几何/视差/带序数学。img = 9 参 drawImage 等价;tint 语义 =
+ *  canvas multiply+destination-in(2D 侧走既有 tintCache 烘焙,GL 侧 uniform) */
+export interface BGBlit {
+  img(im: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    opts?: { alpha?: number; tint?: readonly [number, number, number] | null }): void;
+  fill(x: number, y: number, w: number, h: number, r: number, g: number, b: number, a?: number): void;
+}
+
+/** 2D 后端:包装既有 ctx 行为(globalAlpha / tint 走 drawTiledTinted 烘焙缓存) */
+class CanvasBgBlit implements BGBlit {
+  constructor(private bg: BiomeBackground, private ctx: CanvasRenderingContext2D) {}
+  img(im: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    opts?: { alpha?: number; tint?: readonly [number, number, number] | null }): void {
+    const ctx = this.ctx;
+    const alpha = opts?.alpha ?? 1;
+    const tint = opts?.tint ?? null;
+    ctx.save();
+    if (alpha !== 1) ctx.globalAlpha = alpha;
+    if (tint && !(tint[0] >= 0.999 && tint[1] >= 0.999 && tint[2] >= 0.999)) {
+      // 与旧路径同款:tint 时整图烘焙(忽略 src 子区——消费方恒全图)
+      this.bg.drawTiledTinted(ctx, im, tint[0], tint[1], tint[2], dx, dy, dw, dh);
+    } else {
+      ctx.drawImage(im, sx, sy, sw, sh, dx, dy, dw, dh);
+    }
+    ctx.restore();
+  }
+  fill(x: number, y: number, w: number, h: number, r: number, g: number, b: number, a = 1): void {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+}
+
 export class BiomeBackground {
   /** 贴图懒加载缓存（n → img；-1 = 加载失败） */
   private imgs = new Map<number, ImageBitmap | HTMLImageElement | null>();
@@ -340,28 +379,34 @@ export class BiomeBackground {
     return style;
   }
 
-  /** 主绘制：插在 sky.draw 之后、世界变换之前（屏幕空间） */
+  /** 主绘制：插在 sky.draw 之后、世界变换之前（屏幕空间）。
+   *  target = 2D ctx(旧路径)或 BGBlit(GL 路径,docs/webgl2-migration-plan.md #1) */
   draw(
-    ctx: CanvasRenderingContext2D, world: World, scene: SceneFlags,
+    target: CanvasRenderingContext2D | BGBlit, world: World, scene: SceneFlags,
     cam: Cam, viewW: number, viewH: number, tint: [number, number, number], dtMs: number,
   ) {
     this.update(world, scene, dtMs);
+    const b: BGBlit = typeof (target as BGBlit).img === 'function'
+      ? (target as BGBlit) : new CanvasBgBlit(this, target as CanvasRenderingContext2D);
     const camTopY = cam.y - viewH / 2 / 1; // 相机中心 → 屏幕顶（屏幕空间绘制用）
     // 地表背景（ShouldDrawSurfaceBackground :59131：相机在地表之上才画）
     if (cam.y < world.groundLevel * 16 + 16) {
-      this.drawSurface(ctx, world, cam, camTopY, viewW, viewH, tint);
+      this.drawSurface(b, world, cam, camTopY, viewW, viewH, tint);
     }
-    this.drawUnderground(ctx, world, cam, camTopY, viewW, viewH, dtMs);
+    this.drawUnderground(b, world, cam, camTopY, viewW, viewH, dtMs);
   }
 
   // ---- 地表层 ----
   private drawSurface(
-    ctx: CanvasRenderingContext2D, world: World, cam: Cam,
+    b: BGBlit, world: World, cam: Cam,
     camTopY: number, viewW: number, viewH: number, tint: [number, number, number],
   ) {
     this.seedFor(world); // 兜底：即便 update 未先行播种也不崩（HMR/首帧边界）
     // 垂直视差系数（DrawSurfaceBG :58749：num3 = -(screenPosition.Y-300)/(worldSurface*16)）
     const num3 = -(camTopY - 300) / (world.groundLevel * 16);
+    const [tr0, tg0, tb0] = tint;
+    const tintOn: readonly [number, number, number] | null
+      = tr0 >= 0.999 && tg0 >= 0.999 && tb0 >= 0.999 ? null : [tr0, tg0, tb0];
     const drawLayer = (l: LayerDef, alpha: number) => {
       if (alpha <= 0.01 || l.tex < 0) return;
       const im = this.img(l.tex);
@@ -370,22 +415,14 @@ export class BiomeBackground {
       const startX = -(((cam.x * l.parallax) % wScaled) + wScaled) % wScaled - wScaled / 2;
       const loops = Math.ceil(viewW / wScaled) + 2;
       const topY = num3 * l.topA + l.topB; // 屏幕空间 y（vanilla bgTopY 语义）
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      const [tr, tg, tb] = tint;
       // ★+1px 保险重叠:浮点视差位置(startX 取模 cam.x*parallax)+非整数缩放
       // (naturalWidth×1.25)下,相邻背景图独立光栅化在接缝处留 1px 缺口(发丝缝),
       // 双线性平滑还会把边缘混透明放大缝。外扩 1px 让邻图覆盖接缝
       const dw = wScaled + 1;
       for (let i = 0; i < loops; i++) {
-        if (tr >= 0.999 && tg >= 0.999 && tb >= 0.999) {
-          ctx.drawImage(im, startX + i * wScaled, topY, dw, im.height * l.scale);
-        } else {
-          // 先画原图再叠 tint（保持边缘 alpha）：用 offscreen 缓存避免每帧 getImageData
-          this.drawTiledTinted(ctx, im, tr, tg, tb, startX + i * wScaled, topY, dw, im.height * l.scale);
-        }
+        b.img(im, 0, 0, im.width, im.height, startX + i * wScaled, topY, dw, im.height * l.scale,
+          { alpha, tint: tintOn });
       }
-      ctx.restore();
     };
     // 远山层（bgAlphaFarBackLayer；parallax 0.15/scale 1，:59240）
     const farTex = FAR_TEX[this.bgStyle];
@@ -439,7 +476,7 @@ export class BiomeBackground {
 
   /** 带色调平铺绘制（tint 缓存按 (tex,tint) 键，避免每帧逐像素） */
   private tintCache = new Map<string, HTMLCanvasElement>();
-  private drawTiledTinted(
+  drawTiledTinted(
     ctx: CanvasRenderingContext2D, im: ImageBitmap | HTMLImageElement,
     tr: number, tg: number, tb: number, dx: number, dy: number, dw: number, dh: number,
   ) {
@@ -477,7 +514,7 @@ export class BiomeBackground {
   //    行边界 → slot5 岩浆体（3帧×96,底=UnderworldLayer）→ slot6 波纹条@岩浆带底行边界。
   //  · 逐 16px 切片光照（暗洞挖空/贴墙裁剪）未实装——整行绘制近似,几何与原版一致。
   private drawUnderground(
-    ctx: CanvasRenderingContext2D, world: World, cam: Cam,
+    b: BGBlit, world: World, cam: Cam,
     camTopY: number, viewW: number, viewH: number, dtMs: number,
   ) {
     const worldID = world.seed >>> 0;
@@ -506,13 +543,12 @@ export class BiomeBackground {
     // 黑盒 gate = magmaLayer*16 ≤ 屏底（:52815）——带层随后重画覆盖;深处(UnderworldLayer
     // 之下)即原版纯黑地狱背景（本仓清屏非黑,靠这层兜底,曾露天空渐变）
     if (magmaPx <= screenY + viewH) {
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, 0, viewW, viewH);
+      b.fill(0, 0, viewW, viewH, 0, 0, 0, 1);
     }
     // 地狱多层远景背景(DrawUnderworldBackground :52082-52228,画在带层之下):
     // gate = 屏底 ≥ (h-220)*16(:52086);深层带层退化后整屏由本层接管——
     // 层0 底部黑补 (11,3,7) 兜底(:52219-52223)
-    this.drawHellLayers(ctx, world, cam, viewW, viewH, dtMs);
+    this.drawHellLayers(b, world, cam, viewW, viewH, dtMs);
     /** C# Math.IEEERemainder（IEEE round-half-even） */
     const ieeeRem = (a: number, b: number): number => {
       const r = a / b;
@@ -523,8 +559,6 @@ export class BiomeBackground {
     };
     const drawSlots = (slots: number[], a: number) => {
       if (a <= 0.01) return;
-      ctx.save();
-      ctx.globalAlpha = a;
       /** 横向滚动参数（:52277/:52836 bgStartX/num2 公式;drawOffset=0 屏幕空间） */
       const scroll = (P: number): { startX: number; diff: number; loops: number } => {
         const startX = Math.trunc(-ieeeRem(P + screenX * CAVE_PARALLAX, P) - P / 2);
@@ -544,7 +578,7 @@ export class BiomeBackground {
         const sh = Math.min(srcH, im.height - srcY);
         if (sh <= 0) return;
         for (let i = 0; i < loops; i++) {
-          ctx.drawImage(im, sx, srcY, w, sh, startX + P * i + diff, destY, w, sh);
+          b.img(im, sx, srcY, w, sh, startX + P * i + diff, destY, w, sh, { alpha: a });
         }
       };
       const im0 = slots[0] > 0 ? this.img(slots[0]) : null;
@@ -628,7 +662,6 @@ export class BiomeBackground {
           bandRow(im6, 128, s.startX, s.diff, s.loops, startY + loopsY * 96, magmaFrame * 16, 16);
         }
       }
-      ctx.restore();
     };
     drawSlots(oldSlots, 1 - alpha);
     drawSlots(newSlots, alpha);
@@ -639,7 +672,7 @@ export class BiomeBackground {
    *  1/3..1/11),风格集 0:[0-4] 1:[5-9] 2:[10,11,12,13,9](WorldGen.cs:7578-7597);
    *  2×2 四帧行动画(帧 8fps,贴图 1/6/7/8/13,:52117-52206 各自 Y 偏移) */
   private drawHellLayers(
-    ctx: CanvasRenderingContext2D, world: World, cam: Cam,
+    b: BGBlit, world: World, cam: Cam,
     viewW: number, viewH: number, dtMs: number,
   ): void {
     const h = world.store.h;
@@ -693,12 +726,11 @@ export class BiomeBackground {
       const loops = Math.ceil(viewW / num10);
       const dh = sh * scale;
       for (let i = num11 - 2; i <= num11 + 4 + loops; i++) {
-        ctx.drawImage(im, sx, sy, sw, sh, x0, y0, num10, dh);
+        b.img(im, sx, sy, sw, sh, x0, y0, num10, dh);
         if (idx === 0) {                             // 层0 底部黑补 rgb(11,3,7)(:52219-52223)
           const bot = y0 + dh;
           if (bot < viewH) {
-            ctx.fillStyle = 'rgb(11,3,7)';
-            ctx.fillRect(x0, bot, num10, viewH - bot);
+            b.fill(x0, bot, num10, viewH - bot, 11 / 255, 3 / 255, 7 / 255);
           }
         }
         x0 += num10;

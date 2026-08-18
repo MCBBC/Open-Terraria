@@ -324,9 +324,16 @@ export class LiquidSim {
     this.id379 = bySheet(new Set([379])).values().next().value ?? -1;
     // genRand 初态：world.seed 派生（避免与生成管线的 genRand 状态纠缠，仅求双路径一致）
     this.genState = (world.seed ^ 0x9e3779b9) | 0;
-    // 挖掘/放置唤醒：原版 SquareTileFrame 会对 3×3 内每格 TileFrame→AddWater（WorldGen.cs:49664）
+    // 挖掘/放置唤醒：原版 SquareTileFrame 会对 3×3 内每格 TileFrame→AddWater
+    // （TileFrame cs:82083-82086）。★该 AddWater 带 !generatingWorld 门——
+    //  生成期两次沉降（#49/#97）里烧除/落块/睡莲的 setTile 一律不唤醒液体；
+    //  缺此门 = 每次岩浆烧除 3×3 唤醒把已沉降岩浆重新入列 → kill 累计 8 →
+    //  再烧除级联（#49 T60>59×264 根因：vanilla 77 次合法烧 ⊂ JS 341 次）。
+    //  读档沉降（WorldFile.cs:738 只置 isGeneratingOrLoadingWorld，generatingWorld
+    //  恒 false）与运行期挖掘放置仍走唤醒——门必须是 generatingWorld 而非
+    //  isGeneratingOrLoadingWorld
     st.onTileChanged((x, y) => {
-      if (this.disposed) return;
+      if (this.disposed || this.generatingWorld) return;
       for (let dy = -1; dy <= 1; dy++)
         for (let dx = -1; dx <= 1; dx++) this.addWater(x + dx, y + dy);
     });

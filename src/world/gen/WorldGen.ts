@@ -311,8 +311,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     } catch (err) {
       // pass 级错误包一层名字——worker 端最小化栈只有 "Maximum call stack size
       // exceeded" 时无从定位（2026-08-18 用户报 21% 栈溢出）；重抛保原栈
-      throw new Error(`[pass ${i + 1}/${passes.length} ${passes[i].name}] ${(err as Error)?.message ?? err}`,
-        { cause: err });
+      const wrapped = new Error(`[pass ${i + 1}/${passes.length} ${passes[i].name}] ${(err as Error)?.message ?? err}`);
+      (wrapped as Error & { cause?: unknown }).cause = err;
+      throw wrapped;
     }
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
@@ -407,7 +408,7 @@ async function liquidSettlePass({ world, rng }: GenCtx) {
     //   worldSurface+10 .. UnderworldLayer-10）——落点在盒内且水源墙∈wallDungeon
     //   才豁免。world 字段化后续尾沉降（worker 'gen'）同享
     world.genWaterLine = gs.waterLine;
-    if (gs.dungeonSide === 0) {
+    if ((gs.dungeonSide as number) === 0) {
       world.genDungeonExempt = null;
     } else {
       const edge = Math.floor(world.w * 0.05);
@@ -1561,8 +1562,9 @@ function finalize({ store, world }: GenCtx) {
       if (fxv < 32768 && fyv < 32768 && (fxv >= w || fyv >= h2)) {
         let legal = false;
         if (fxv >= 0 && fxv >= w) {
-          const objW = (d.vanilla.fw ?? 1) * 18;
-          const bandH = (d.vanilla.fh ?? 1) * 18;
+          const dvan = d.vanilla!;
+          const objW = (dvan.fw ?? 1) * 18;
+          const bandH = (dvan.fh ?? 1) * 18;
           const colsPerBand = objW > 0 ? Math.floor(w / objW) : 0;
           if (colsPerBand > 0) {
             const styleIdx = Math.floor(fxv / objW);

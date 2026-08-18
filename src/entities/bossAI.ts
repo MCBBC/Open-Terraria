@@ -43,7 +43,11 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   //  TargetClosest 的**持久**朝向字段(目标侧),非每帧 sign(vx)——曾用 facing
   //  (每帧 vx 符号)致旋冲过头贴脸时 spin 反复换号 = "只会两边摇动不旋转"
   if (game.world.clock.isDay && !isGuardian && e.ai1 !== 3) {
-    if (e.ai1 !== 2) e.ai3 = player && player.cx > e.cx ? 1 : -1;
+    if (e.ai1 !== 2) {
+      e.ai3 = player && player.cx > e.cx ? 1 : -1;
+      // :21943-21947 转换瞬间 Roar 一声（SoundID 15=Roar→'roar' 轨 Roar_0/1 随机）
+      game.playSfx('roar', 1, e.cx, e.cy);
+    }
     e.ai1 = 2;
   }
   if (!player || Math.abs(e.cx - player.cx) > 2000 || Math.abs(e.cy - player.cy) > 2000) {

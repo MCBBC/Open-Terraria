@@ -214,7 +214,15 @@ if (process.env.SW_DGREP === '1') {
         const ci = cys * W + cxs;
         console.log(`CELL ${name} (${cxs},${cys}) act=${st.flags[ci]! & 1} typ=${SHEET[st.type[ci]!] ?? -1} wall=${st.wall[ci]!} wire=${st.wire[ci]!}`);
       }
-      if (process.env.SW_DGREP_DUMP && (name === 'dungeonPD' || name === 'dungeonE' || name === 'dungeonG' || name === 'dungeonI')) {
+      if (name === 'dungeonF' && process.env.SW_DGREP_STATE) {
+        const urF = (rng2 as unknown as { vanilla: { seedArray: Int32Array; inext: number } }).vanilla;
+        const buf = Buffer.alloc(56 * 4 + 4);
+        for (let q = 0; q < 56; q++) buf.writeInt32LE(urF.seedArray[q]!, q * 4);
+        buf.writeInt32LE(urF.inext, 56 * 4);
+        writeFileSync('/tmp/dgcap/fEnd.state', buf);
+        console.log('F-end state saved');
+      }
+      if (process.env.SW_DGREP_DUMP && (name === 'dungeonPD' || name === 'dungeonE' || name === 'dungeonG' || name === 'dungeonI' || name === 'dungeonF' || name === 'dungeonPa')) {
         const wr = (nm: string, a2: Uint8Array | Uint16Array) => {
           const b2 = Buffer.from(a2.buffer, a2.byteOffset, a2.byteLength);
           writeFileSync(`/tmp/dgcap/${name}.${nm}`, b2.slice());
@@ -241,7 +249,7 @@ if (process.env.SW_DGREP === '1') {
         writeFileSync('/tmp/dgcap/gEnd.state', saG);
       }
       if (process.env.SW_DGREP_PEEK_DONE) { /* noop */ }
-      if (process.env.SW_DGREP_DUMP && (name === 'dungeonPD' || name === 'dungeonE' || name === 'dungeonG' || name === 'dungeonI')) {
+      if (process.env.SW_DGREP_DUMP && (name === 'dungeonPD' || name === 'dungeonE' || name === 'dungeonG' || name === 'dungeonI' || name === 'dungeonF' || name === 'dungeonPa')) {
         const wr = (nm: string, a2: Uint8Array | Uint16Array) => {
           const b2 = Buffer.from(a2.buffer, a2.byteOffset, a2.byteLength);
           writeFileSync(`/tmp/dgcap/${name}.${nm}`, b2.slice());

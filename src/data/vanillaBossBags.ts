@@ -56,11 +56,24 @@ const rn = (a: number, b: number) => a + Math.floor(Math.random() * (b - a));
 export function openBossBag(
   vid: number,
   give: (id: number, stack?: number) => void,
-  world: { masterMode: boolean; crimson: boolean; extraAccessory: boolean; hasItem: (id: number) => boolean },
+  world: { masterMode: boolean; crimson: boolean; extraAccessory: boolean; hasItem: (id: number) => boolean; remixWorld?: boolean; tenthAnniversary?: boolean },
 ): void {
   const bag = DATA.bags[String(vid)];
   if (!bag) return;
-  // bag.devArmor: TryGettingDevArmor 开发者套装小概率——未实装登记
+  // TryGettingDevArmor（:7048 等 10 袋调用,json devArmor 登记）:1/16 门
+  // （十周年世界 1/8,:7526）→ Next(21) 全局套装表,整组下发
+  if (bag.devArmor && Math.random() < 1 / (world.tenthAnniversary ? 8 : 16)) {
+    const set = DEV_ARMOR_SETS[Math.floor(Math.random() * DEV_ARMOR_SETS.length)] ?? [];
+    for (const it of set) give(it[0], it[1] ?? 1);
+  }
+  // switch 掷面数 = 该 k 族 branch 最大值+1（=原版 Next(N) 的 N,switch 臂数;
+  // 曾硬编码 *8 → 3/4/6/7 臂袋各武器 12.5%/37.5% 共现或 25% 空手,2026-08-18 修）
+  const swFaces = new Map<number, number>();
+  for (const sp of bag.spawns) {
+    for (const c of sp.conds) {
+      if (c.t === 'sw') swFaces.set(c.k ?? 0, Math.max(swFaces.get(c.k ?? 0) ?? 0, (c.branch ?? 0) + 1));
+    }
+  }
   // switch 掷一次（同袋内所有 sw cond 共享各自 switch 的结果）
   const swPick = new Map<number, number>();
   // else 补集:同一 chanceId 的 else 与 if 共享掷骰结果
@@ -83,11 +96,14 @@ export function openBossBag(
           break;
         }
         case 'master': ok &&= world.masterMode; break;
+        case 'noMaster': ok &&= !world.masterMode; break; // if(master){}else{} 的 else 臂（3320/3321 矿）
+        case 'remix': ok &&= world.remixWorld === true; break; // Main.remixWorld（3330 case5 猪鲨宝饰）
+        case 'noRemix': ok &&= world.remixWorld !== true; break;
         case 'noExtra': ok &&= !world.extraAccessory; break;
         case 'noItem': ok &&= !world.hasItem(c.id ?? 0); break;
         case 'sw': {
           const k = c.k ?? 0;
-          if (!swPick.has(k)) swPick.set(k, Math.floor(Math.random() * 8));
+          if (!swPick.has(k)) swPick.set(k, Math.floor(Math.random() * (swFaces.get(k) ?? 8)));
           ok &&= (c.branch ?? -1) === swPick.get(k);
           break;
         }
@@ -113,8 +129,8 @@ export function openBossBag(
     }
     const stackOf = (): number | undefined => {
       if (sp.stackExpr) return sp.stackExpr.reduce((acc, [roll, base]) => acc + base + Math.floor(Math.random() * roll), 0);
-      if (sp.stackVar) return sp.stack;
       if (sp.lo !== undefined && sp.hi !== undefined) return rn(sp.lo, sp.hi);
+      if (sp.stackVar) return sp.stack;
       return sp.stack ?? 1;
     };
     if (sp.crim) {

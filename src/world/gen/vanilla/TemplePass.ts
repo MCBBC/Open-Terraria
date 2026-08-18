@@ -126,7 +126,7 @@ export function runTemplePass(st: TileStore, rng: RNG, gs: GenState): void {
         // 换向下沉
         ry = baseY + rng.int(rh + 1, rh + 2) + overlap;
         rx = cx + rng.int(-5, 5);
-        newDir = -dir;
+        newDir = (-dir) as 1 | -1;
       } else {
         rx = cx + (rng.int(rw + 1, rw + 2) + overlap) * dir;
         ry = baseY + rng.int(-5, 5);

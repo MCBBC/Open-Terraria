@@ -55,7 +55,7 @@ import {
 import {
   TOWER_KEY, TOWER_ZONE_RADIUS, isTowerId, isTowerMinion,
   triggerLunarApocalypse, onTowerKilled, updateLunarApocalypse,
-  towerBoltTarget, onTowerBoltHit, tickMoonLordCountdown, type LunarHost,
+  towerBoltTarget, onTowerBoltHit, tickMoonLordCountdown, startImpendingDoom, type LunarHost,
 } from '../world/LunarEvent';
 import {
   dawnEclipseRoll, useSolarTablet, endEclipseAtDusk, type EclipseHost,
@@ -4158,6 +4158,7 @@ export class Game implements GameHooks {
 
     // ---- Boss 逻辑 ----
     bossBlock: if (this.boss) {
+        let boss2Already = false;   // EoW/BoC 陨石首杀快照（写键前赋值 :80254）
       // 原版无通用"日出剔除 Boss"机制：EoC 白天走 AI_004 自漂离、骷髅王族白天狂暴、
       // 其余 Boss（史莱姆王/世吞/克脑/蜂后/机械三王…）白天照常战斗——
       // 此前的通用 dayKill 会把白天召唤的史莱姆王秒删（史莱姆王冠原版任意时间可用）
@@ -4218,7 +4219,18 @@ export class Game implements GameHooks {
           // SetEventFlagCleared(NPC.cs:79557) 首次语义:downed 旗标翻转(false→true)
           // 才触发灯笼夜——此前每次击杀都预约(2026-08-13 对齐;肉山 19 在下方链内单独投递)
           const wasDowned = !!w.flags[downedKey];
+          // EoW/BoC 陨石首杀快照（NPC.cs:80254-80258：陨石 roll 在
+          // SetEventFlagCleared 之前读【旧】downedBoss2——须在写键前捕获；
+          // 腐化/猩红共享 downedBoss2，对侧旗一并并入）
+          boss2Already = wasDowned
+            || !!(this.boss.vanillaId === 266 ? w.flags['downed_13'] : w.flags['downed_266']);
           w.flags[downedKey] = true;
+          // 世花首杀公告（NPC.cs:80229-80237 case 262：置旗前捕获旧
+          // downedPlantBoss，首杀翻转 → BroadcastChatMessage(Lang.misc[33],
+          // ChatColors.World)"地牢中回荡着尖叫声……"——此前缺）
+          if (this.boss.vanillaId === 262 && !wasDowned) {
+            this.newText(Lang.misc(33), 50, 255, 130);
+          }
           // NPC.downedPlantBoss → Wiring 死门接活（Wiring.cs:3216 蜥蜴砖致动 / :1554
           // 神庙传送器捕获：世纪之花前两处 return 拒绝）
           if (this.boss.vanillaId === 262 && this.wiring) this.wiring.planteraDowned = true;
@@ -4241,11 +4253,18 @@ export class Game implements GameHooks {
             const ev = BOSS_GAME_EVENT_BY_NPC[this.boss.vanillaId];
             if (ev !== undefined && !wasDowned) LanternNight.onGameEventCleared(ev);
             // 三王全灭 → 保底世花球茎（NPC.cs:79578-79585 case 16/17/18 →
+            // OnGameEventClearedForTheFirstTime 首杀翻转门内 →
             // WorldGen.GeneratePlanteraBulbOnAllMechsDefeated：netMode!=1 &&
-            // hardMode && 三旗齐 → 丛林侧搜索框生成恰好一个灯泡）
-            if ((ev === 16 || ev === 17 || ev === 18) && w.flags.hardMode
+            // hardMode && 三旗齐——★补 !wasDowned：原版只在旗标首次翻转那杀
+            // 生成（重复杀不超发灯泡，此前每杀都 burst，2026-08-18 修）
+            if ((ev === 16 || ev === 17 || ev === 18) && !wasDowned && w.flags.hardMode
               && w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127']) {
               this.evolution.planteraBulbBurst();
+              // 三旗首齐公告（NPC.cs:79670-79673 SetEventFlagCleared 尾段：!flag &&
+              // downedMechBoss1&&2&&3 && hardMode → Lang.misc[32] 广播
+              // "丛林变得焦躁不安……"——!wasDowned=本次击杀才翻转该旗；三旗各只
+              // 翻一次 → 恰广播一次（旧档已齐三旗时 wasDowned 恒 true 不补发）
+              this.newText(Lang.misc(32), 50, 255, 130);
             }
           }
           // 星璇塔触发（NPC.cs:80194-80197：教徒 439 死 → TriggerLunarApocalypse——
@@ -4266,6 +4285,14 @@ export class Game implements GameHooks {
               this.newText(Lang.itemName(5004) ?? 'Badger’s Hat', 255, 220, 120);
             }
           }
+          // EoW/BoC 击杀 → 陨石坠落置位（NPC.cs:80241-80259 NPCLoot 击杀链内：
+          // 首杀（!downedBoss2）必掉，之后 50%——boss2Already 为写键前快照，
+          // 此前在写键后读恒 true，首杀 100% 也被掷成 50%；且块原在 fled 支外
+          // 离场逃走也会 roll，一并归位击杀分支，2026-08-18 修）
+          if (this.boss.vanillaId === 13 || this.boss.vanillaId === 266
+            || this.boss.vanillaId === 14 || this.boss.vanillaId === 15) {
+            if (!boss2Already || Math.random() < 0.5) this.meteorPending = true;
+          }
         }
         // 骷髅王战斗结束（无论胜负）且未击败 → 守卫老人次日重新出现在地牢门口
         // （原版：老人在诅咒时消失，骷髅王离场/未被击败后重新生成；击败后转为裁缝）
@@ -4281,13 +4308,6 @@ export class Game implements GameHooks {
             // downedSkeletron 恒 undefined——杀王同帧即复活老人（用户报根因）
             this.maybeRespawnOldMan();
           }
-        }
-        // EoW/BoC 击杀 → 陨石坠落置位（NPC.cs:80241-80259：
-        // 首杀（!downedBoss2）必掉，之后 50%）
-        if (this.boss.vanillaId === 13 || this.boss.vanillaId === 266
-          || this.boss.vanillaId === 14 || this.boss.vanillaId === 15) {
-          const boss2 = !!(w.flags['downed_13'] || w.flags['downed_266']);
-          if (!boss2 || Math.random() < 0.5) this.meteorPending = true;
         }
         this.boss = null;
       }
@@ -4518,10 +4538,11 @@ export class Game implements GameHooks {
           this.spawnEyePending = true;
           this.newText(Lang.misc(9), 50, 255, 130);
         } else if (!this.spawnEyePending && w.flags.hardMode && w.altarCount > 0
-          && w.moonEvent.kind === 0 && !this.boss
+          && w.moonEvent.kind === 0 && !w.oldOnesArmy.ongoing && !this.boss
           && !(w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127'])
           && Math.random() < 1 / 10) {
           // 机械 Boss 自然召唤 roll（:64765-64811）：1/10、无月事件、场上无 Boss、
+          //  !DD2Event.Ongoing（:64755-64756——旧日军团进行中不 roll，2026-08-18 补）
           // 三机械未全灭 → 三选一（只选未击败；1000 次重抽语义）+ misc[28/29/30]
           // 家族键（vanilla downedMechBoss1/2/3）：n=1 毁灭者 134 / n=2 双子 125 / n=3
           // Prime 127——消费端 :4288 同映射（曾 n=1 键 125=双子 id 错位、门漏 134）
@@ -7013,19 +7034,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           p.useTime = 20;
           break;
         }
-        case 1133: // 蜜蜂分泌物(:43181-43191):召唤蜂王(无门)
-          this.summonBoss('queen_bee');
-          consume(); p.useTime = 30;
+        case 1133: // 蜜蜂分泌物(:43181-43191):召唤蜂王(无门;SummonItemCheck 1133↔222 同型拦)
+          // 成功才扣（Player.cs:43073 ItemCheck_UseBossSpawners 头门 SummonItemCheck
+          // false → 整支 return，无 ApplyItemTime 无消耗）+ useTime 45（Item.cs:13919）
+          if (this.summonBoss('queen_bee')) { consume(); p.useTime = 45; }
           break;
-        case 4988: // 史莱姆皇后水晶(:43210-43224):神圣区+夜晚
-          if (!this.world.flags.hardMode || this.world.clock.isDay
-            || !(this.scene?.zoneHallow)) {
+        case 4988: // 史莱姆皇后水晶(:43210-43224):门仅 ZoneHallow（无昼夜/hardMode 合取项）
+          // 成功才扣（同 :43073 SummonItemCheck 4988↔657 同型拦）+ useTime 45（Item.cs:40165）
+          if (!(this.scene?.zoneHallow)) {
             this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightHallowOnly'));
-          } else {
-            this.summonBoss('queen_slime');
+          } else if (this.summonBoss('queen_slime')) {
             consume();
+            p.useTime = 45;
           }
-          p.useTime = 30;
           break;
         case 4829:
         case 4830:
@@ -7059,13 +7080,18 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.playSfxFiles(['Item_92'], 1, p.cx, p.cy);   // UseSound=Item92（:39520）
           break;
         }
-        case 3601: { // 天界印记(:43348-43360)→WorldGen.StartImpendingDoom(720):月总倒计时
-          const s = this.world.lunarEvent;
-          s.moonLordCountdownMax = 720;
-          s.moonLordCountdown = 720;
-          this.sfx.playWav('roar');                    // SoundID 15（:43350，先于 StartImpendingDoom）
-          this.newText(Lang.misc(52), 50, 255, 130);   // BroadcastText ChatColors.World
-          consume(); p.useTime = 30;
+        case 3601: { // 天界印记(:43348-43359)→WorldGen.StartImpendingDoom(720):月总倒计时
+          // 四重门（:43348）：downedGolemBoss && hardMode && !NPC.AnyDanger() &&
+          // !NPC.AnyoneNearCultists()——门未过整支不生效（无 ApplyItemTime 无消耗，
+          // 此前无门恒可用）；过门 → Roar(15) → ApplyItemTime(45) → StartImpendingDoom
+          //（关天界事件 + 倒计时 720t + misc[52] 广播 + 清教徒 437/438/379——
+          // WorldGen.cs:87495-87506，副作用收口 world/LunarEvent.startImpendingDoom）
+          if (!!this.world.flags['downed_245'] && !!this.world.flags.hardMode
+            && !this.cultistCtx().anyDanger() && !this.anyoneNearCultists()) {
+            this.sfx.playWav('roar');                  // SoundID 15（:43350，先于 StartImpendingDoom）
+            startImpendingDoom(this.world, 720, this.lunarHost());
+            consume(); p.useTime = 45;                 // useTime 45（Item.cs:32423；旧 30）
+          }
           break;
         }
         default:
@@ -7463,9 +7489,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 本仓以"召唤成功才扣"为准（审计 2026-08-13）
         if (summoned) {
           this.player.inv.removeAt(this.player.inv.selected, 1);
-          // useStyle 4 举持（70/1331/560 均 Item.cs SetDefaults；useTime 表值 45）
+          // useStyle 4 举持（70/1331/560 均 Item.cs SetDefaults；useTime 表值 45，
+          // Item.cs:2196/:16466/:8019——兜底旧 60 改 45，2026-08-18）
           this.useSwing(heldDef);
-          this.player.useTime = itemCombat(svid)?.useTime ?? 60;
+          this.player.useTime = itemCombat(svid)?.useTime ?? 45;
           this.cb.onInventoryChanged();
         }
       }
@@ -7480,26 +7507,32 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else {
         const mvid = viIdFromKey(heldDef.key);
-        if (mvid === 556) this.summonBoss('destroyer');
-        else if (mvid === 544) this.summonBoss('twins');
-        else this.summonBoss('skeletron_prime');
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.useSwing(heldDef);   // useStyle 4 举持（556/544/557，Item.cs 机械召唤物）
-        this.player.useTime = itemCombat(mvid)?.useTime ?? 60;
-        this.cb.onInventoryChanged();
+        // 成功才扣（Player.cs:43073 头门 SummonItemCheck 同型拦 544↔125/126、
+        // 556↔134、557↔127——false 无 ApplyItemTime 无消耗，2026-08-18 统一）
+        const summoned = mvid === 556 ? this.summonBoss('destroyer')
+          : mvid === 544 ? this.summonBoss('twins')
+            : this.summonBoss('skeletron_prime');
+        if (summoned) {
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.useSwing(heldDef);   // useStyle 4 举持（556/544/557，Item.cs 机械召唤物）
+          this.player.useTime = itemCombat(mvid)?.useTime ?? 45;  // useTime 45（Item.cs:7988/:7856/:8001；表缺 544/556/557 条目兜 45）
+          this.cb.onInventoryChanged();
+        }
       }
       this.input.mouseDown = false;
     } else if (heldDef && viIdFromKey(heldDef.key) === 5120
       && inp.mouseDown && this.player.useTime === 0) {
       // 鹿角怪召唤物 Deer Thing（Player.cs:43225-43237：门仅 ZoneSnow——无昼夜门；
       //  成功 → ApplyItemTime(45) + Roar(:43229) + SpawnOnPlayer(668) → 公告走表）。
-      //  非雪原【静默】不可用（原版 ZoneSnow 合取外整支不生效，不消耗无提示）
+      //  非雪原【静默】不可用（原版 ZoneSnow 合取外整支不生效，不消耗无提示）；
+      //  SummonItemCheck :43073 头门 5120↔668 同型拦 → 成功才扣（2026-08-18 统一）
       if (this.scene?.zoneSnow) {
-        this.summonBoss('deerclops');
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.useSwing(heldDef);   // useStyle 4 举持（5120 useTime 45，Item.cs:43225 族）
-        this.player.useTime = 45;
-        this.cb.onInventoryChanged();
+        if (this.summonBoss('deerclops')) {
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.useSwing(heldDef);   // useStyle 4 举持（5120 useTime 45，Item.cs:41028）
+          this.player.useTime = 45;
+          this.cb.onInventoryChanged();
+        }
       }
       this.input.mouseDown = false;
     } else if (heldDef && BOSS_BAG_IDS.has(viIdFromKey(heldDef.key))
@@ -7635,13 +7668,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       && inp.mouseDown && this.player.useTime === 0) {
       // 南瓜月/霜月召唤物（1844 PumpkinMoonMedallion / 1958 NaughtyPresent，
       //  Player.cs:43294/43361 ItemCheck + Main.startPumpkinMoon/startSnowMoon :10903-10940）：
-      //  门 = !dayTime && !pumpkinMoon && !snowMoon；成功 → 置位 + 清血月 + 广播 wave 1 文案。
-      //  useTime 45（Item.cs:20377-20385 / 21121-21128）。军队入侵进行中不开
-      //  （invaders 与月事件刷怪段互斥，避免两事件打架——原版 DD2 同门）
+      //  门 = !dayTime && !pumpkinMoon && !snowMoon && !DD2Event.Ongoing（:43363-43365
+      //  霜月；南瓜 :43296 同构）——**不含 invasionType**（哥布林/海盗等常规入侵
+      //  不阻月事件，原版语义如此；此前误挂 invasionType===0，2026-08-18 修）。
+      //  成功 → 置位 + 清血月 + 广播 wave 1 文案。
+      //  useTime 45（Item.cs:20377-20385 / 21121-21128）
       const kind = heldDef.key === 'vi_1844_PumpkinMoonMedallion' ? MOON_KIND_PUMPKIN : MOON_KIND_FROST;
       if (this.world.clock.isDay) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
-      } else if (this.world.moonEvent.kind === 0 && this.world.invasionType === 0) {
+      } else if (this.world.moonEvent.kind === 0 && !this.world.oldOnesArmy.ongoing) {
         const ann = startMoonEvent(this.world, kind);
         this.sfx.playWav('roar');   // SoundID 15（:43297 南瓜 / :43364 霜月，成功即 Roar）
         if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
@@ -9635,6 +9670,35 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 破坏仙人掌脚下的沙 → 整株倒下（CheckCactus :54132-54143 支撑仅沙族
     // 53/112/116/234 整砖——沙被挖后 TileFrame 级联逐格上行）
     if (st.get(x, y - 1) === TILE_BY_KEY['v_80_cactus']) this.fellCactus(x, y - 1);
+    // 世花灯泡 238 支撑破坏（CheckJunglePlant WorldGen.cs:47952-48060 + SquareTileFrame
+    //  :86219-86223 派发）：破坏丛林草 60 → 支撑行不满足（!SolidTile || type!=60）→
+    // 2×2 整件 KillTile 清除；238 的 KillTile 段（:48017-48030）50 格曼哈顿门 →
+    // SpawnOnPlayer(262)。灯泡底行贴草上：两对齐候选 (x-1,y-1)/(x,y-1) 任中即回推
+    // 锚点整清+召唤（清格+门+召唤语义同上方直接破坏分支）——此前只支持直接砸泡
+    if (type === TILE_BY_KEY['v_60_jungle_grass_block']) {
+      const bulb = TILE_BY_KEY['v_238_plantera_s_bulb'];
+      const anchors = new Set<number>();
+      for (const bx of [x - 1, x]) {
+        if (bx < 0 || !st.inBounds(bx, y - 1) || st.get(bx, y - 1) !== bulb) continue;
+        const bi = st.idx(bx, y - 1);
+        anchors.add((bx - Math.floor(st.frameX[bi] / 18)) * 4096
+          + (y - 1 - Math.floor(st.frameY[bi] / 18)));
+      }
+      for (const a of anchors) {
+        const ax = Math.floor(a / 4096), ay = a % 4096;
+        for (let dx = 0; dx < 2; dx++) {
+          for (let dy = 0; dy < 2; dy++) {
+            if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === bulb) {
+              st.setTile(ax + dx, ay + dy, 0);
+            }
+          }
+        }
+        this.chunks.markDirtyArea(ax - 1, ay - 1, ax + 2, ay + 2);
+        if (Math.abs(this.player.cx - (ax * 16 + 16)) + Math.abs(this.player.cy - (ay * 16 + 16)) < 50 * 16) {
+          this.spawnBossOnPlayer(262);
+        }
+      }
+    }
     if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
     else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     this.killTileBreakSound(type, x, y);
@@ -9894,7 +9958,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (gelKey) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, gelKey, 100, (Math.random() - 0.5) * 3, -3);
     }
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
-    this.sfx.play('tink', 1, ax * TILE + 16, ay * TILE + 16);
+    // 破碎音分档（WorldGen.cs:54361-54368：flag=frameX>=36 心 → PlaySound(4)=
+    // NPCKilled 银行 style 1（PlaySound 默认 Style=1 → NPC_Killed_1）；珠 →
+    // PlaySound(13)=Shatter——此前恒 tink，2026-08-18 修）
+    if (isDemonHeart) this.sfx.playWavFile('NPC_Killed_1', 1, ax * TILE + 16, ay * TILE + 16);
+    else this.sfx.play('shatter', 1, ax * TILE + 16, ay * TILE + 16);
     this.cb.onToast(isDemonHeart ? Lang.text('Mods.SandboxWorld.Toast.DemonHeartSmashed') : Lang.text('Mods.SandboxWorld.Toast.ShadowOrbSmashed'));
     // 成就：SMASHING_POPPET（:54359 event 7——每次砸珠/心都触发）
     this.achievements.notifyProgressionEvent(7);
@@ -14356,7 +14424,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 哥布林工匠：重铸（NPCChatText_TinkererReforge Main.cs:39431）
     if (npc.npcKey === 'goblin_tinkerer') buttons.push({ id: 'reforge', label: Lang.inter(19) });
     // 守卫老人:夜晚出现「诅咒」(白天只闲聊,原版 GetChat 语义)
-    if (npc.npcKey === 'old_man' && !this.world.clock.isDay && !this.world.flags.hardMode) {
+    // OldManCurse.Condition（NPCInteractions.cs:173-180）仅 TalkNPCType==37 && !IsItDay()
+    // ——无 hardMode 门（困难模式老人已转裁缝不在场；此前多挂的 !hardMode
+    // 合取已删，2026-08-18 对齐）
+    if (npc.npcKey === 'old_man' && !this.world.clock.isDay) {
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
     }
     // 渔夫：任务交付（NPCInteractions.AnglerQuest.GetText = Lang.inter[64]）
@@ -15540,6 +15611,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
 
   /** 灯笼夜概率/状态入口（供调试与对话/天气消费方读） */
   get lanternsUp(): boolean { return LanternNight.lanternsUp; }
+
+  /** NPC.AnyoneNearCultists（NPC.cs:81087-81110）：首个 437 石碑的 2500×1500
+   *  居中矩形与任一活跃玩家同尺寸矩形相交——天界印记 3601 门（:43348）消费；
+   *  无 437 恒 false。两矩形同尺寸 → 相交 ⇔中心距 <(2500,1500) */
+  private anyoneNearCultists(): boolean {
+    const tablet = (this.entities.enemies as Enemy[]).find(
+      (n) => !n.dead && n.vanillaId === 437);
+    if (!tablet) return false;
+    return Math.abs(this.player.cx - tablet.cx) < 2500
+      && Math.abs(this.player.cy - tablet.cy) < 1500;
+  }
 
   /** CultistRitual 宿主上下文（RuntimeEvents.CultistHost）——437 自然重生链 */
   private cultistCtx(): CultistHost {
@@ -16748,6 +16830,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       const clumsy = new TownNPC('town_slime_clumsy', enemy.cx, enemy.y + enemy.h + 32);
       this.entities.add(clumsy, 'npcs');
     }
+    // 史王死停史莱姆雨（NPC.cs:80206-80209 case 50：Main.slimeRain → StopSlimeRain
+    //  + 成就 event 16 STICKY_SITUATIONS；冷却负值由 stopSlimeRain 内部置
+    //  Main.cs:64248-64273）——此前杀王雨照下
+    if (enemy && enemy.vanillaId === 50 && this.world.weather.slimeRain) {
+      this.world.weather.stopSlimeRain();
+      this.achievements.notifyProgressionEvent(16);
+    }
     // 史莱姆王死亡砸出书呆子史莱姆 670（NPC.cs:80206-80222 case 50 + ViolentlySpawnNerdySlime
     //  :80317-80330）：!unlockedSlimeBlueSpawn → 置旗 + 原地上抛生成
     if (enemy && enemy.vanillaId === 50 && !this.world.flags.unlockedSlimeBlueSpawn) {
@@ -16759,10 +16848,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // 史莱姆雨击杀推进（NPC.cs:79880-79897：阈值 150、杀过王减半 75；场上无王 → 召王）。
     // 自然召王无公告无咆哮（SpawnOnPlayer(50) → SpawnBoss case 50 静默 :81504；
-    // Roar 只随史莱姆王冠物品 :43080）
+    // Roar 只随史莱姆王冠物品 :43080）。计数重置随 spawn 无条件（:79893-79894）；
+    // 原版召王无"其他 Boss 在场"门——2026-08-18 收窄为同型门（king_slime:[50]
+    // 家族，BOSS_FAMILY 表；advance 三重门已含 !AnyNPCs(50)，防双刷足够）
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
       const downedSK = !!(this.world.flags as Record<string, boolean>).downedSlimeKing;
-      if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId, downedSK) && !this.boss) {
+      if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId, downedSK)) {
         this.summonBoss('king_slime', { roar: false });
       }
     }
@@ -18602,6 +18693,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private static readonly BOSS_FAMILY: Record<string, number[]> = {
     eater_of_worlds_head: [13, 14, 15],
     brain_of_cthulhu: [266, 267],
+    // SummonItemCheck 逐物品↔NPC 对照表（Player.cs:41514-41527 只拦同型）增补：
+    // 43↔4 / 560↔50 / 1133↔222 / 5120↔668——史王/蜂王/鹿角怪召唤与自然 EoC
+    // 消费点（spawnBossAtTx('eye_of_cthulhu')）同型门，其余 Boss 在场不再拦
+    // （2026-08-18；机械三王/史后暂维持任意门，配对表条目另案收口）
+    eye_of_cthulhu: [4],
+    king_slime: [50],
+    queen_bee: [222],
+    deerclops: [668],
   };
 
   /** 同型家族在场判定（NPC.AnyNPCs 族扫描） */
@@ -18826,6 +18925,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.boss = e;
     // 物品召唤（可疑眼球 43）：公告 + Roar（Player.cs:43095 PlaySound(15)）
     this.announceBossSummon(4, true);
+    // WorldGen.spawnEye = false（Player.cs:43103）——手动召 EoC 即消费掉当夜
+    // 自然 EoC 机会（此前漏，物品与自然召唤可能同夜双出）
+    this.spawnEyePending = false;
     return true;
   }
 

@@ -30,21 +30,7 @@
       256,
       259
      ],
-     "conds": []
-    },
-    {
-     "idFrom": [
-      256,
-      259
-     ],
      "dedup2": true,
-     "conds": []
-    },
-    {
-     "idFrom": [
-      256,
-      259
-     ],
      "conds": []
     },
     {
@@ -118,19 +104,8 @@
      "crim": true,
      "evil": 880,
      "good": 56,
-     "conds": []
-    },
-    {
-     "crim": true,
-     "evil": 2171,
-     "good": 59,
      "conds": [],
-     "stackVar": true
-    },
-    {
-     "id": 47,
      "stackVar": true,
-     "conds": [],
      "stackExpr": [
       [
        21,
@@ -143,11 +118,27 @@
       [
        21,
        10
-      ],
+      ]
+     ]
+    },
+    {
+     "crim": true,
+     "evil": 2171,
+     "good": 59,
+     "conds": [],
+     "stackVar": true,
+     "stackExpr": [
       [
        3,
        1
-      ],
+      ]
+     ]
+    },
+    {
+     "id": 47,
+     "stackVar": true,
+     "conds": [],
+     "stackExpr": [
       [
        31,
        20
@@ -166,6 +157,8 @@
     {
      "id": 56,
      "stackVar": true,
+     "lo": 110,
+     "hi": 136,
      "conds": [
       {
        "t": "master",
@@ -176,10 +169,11 @@
     {
      "id": 56,
      "stackVar": true,
+     "lo": 80,
+     "hi": 111,
      "conds": [
       {
-       "t": "chanceElse",
-       "pair": 0,
+       "t": "noMaster",
        "depth": 2
       }
      ]
@@ -187,6 +181,8 @@
     {
      "id": 86,
      "stackVar": true,
+     "lo": 30,
+     "hi": 51,
      "conds": [
       {
        "t": "master",
@@ -197,10 +193,11 @@
     {
      "id": 86,
      "stackVar": true,
+     "lo": 20,
+     "hi": 41,
      "conds": [
       {
-       "t": "chanceElse",
-       "pair": 0,
+       "t": "noMaster",
        "depth": 2
       }
      ]
@@ -239,6 +236,8 @@
     {
      "id": 880,
      "stackVar": true,
+     "lo": 110,
+     "hi": 136,
      "conds": [
       {
        "t": "master",
@@ -249,10 +248,11 @@
     {
      "id": 880,
      "stackVar": true,
+     "lo": 80,
+     "hi": 111,
      "conds": [
       {
-       "t": "chanceElse",
-       "pair": 0,
+       "t": "noMaster",
        "depth": 2
       }
      ]
@@ -260,6 +260,8 @@
     {
      "id": 1329,
      "stackVar": true,
+     "lo": 30,
+     "hi": 51,
      "conds": [
       {
        "t": "master",
@@ -270,10 +272,11 @@
     {
      "id": 1329,
      "stackVar": true,
+     "lo": 20,
+     "hi": 41,
      "conds": [
       {
-       "t": "chanceElse",
-       "pair": 0,
+       "t": "noMaster",
        "depth": 2
       }
      ]
@@ -437,7 +440,7 @@
       {
        "t": "sw",
        "k": 0,
-       "branch": 1,
+       "branch": 2,
        "depth": 2
       }
      ]
@@ -906,7 +909,7 @@
       {
        "t": "sw",
        "k": 0,
-       "branch": 5,
+       "branch": 6,
        "depth": 2
       }
      ]
@@ -1011,6 +1014,10 @@
        "k": 0,
        "branch": 5,
        "depth": 2
+      },
+      {
+       "t": "remix",
+       "depth": 2
       }
      ]
     },
@@ -1018,8 +1025,13 @@
      "id": 2623,
      "conds": [
       {
-       "t": "chanceElse",
-       "pair": 2,
+       "t": "sw",
+       "k": 0,
+       "branch": 5,
+       "depth": 2
+      },
+      {
+       "t": "noRemix",
        "depth": 2
       }
      ]
@@ -1165,7 +1177,7 @@
       {
        "t": "sw",
        "k": 0,
-       "branch": 2,
+       "branch": 3,
        "depth": 2
       }
      ]
@@ -1360,21 +1372,7 @@
       4982,
       4985
      ],
-     "conds": []
-    },
-    {
-     "idFrom": [
-      4982,
-      4985
-     ],
      "dedup2": true,
-     "conds": []
-    },
-    {
-     "idFrom": [
-      4982,
-      4985
-     ],
      "conds": []
     }
    ]

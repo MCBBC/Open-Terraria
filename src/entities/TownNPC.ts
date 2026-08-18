@@ -1760,9 +1760,9 @@ export class TownNPC extends Entity {
           //  :70149-70150）；第二参是时长 tick 非表情 id，表情 = PickNPCEmote(other)
           //  随机（90/70/100 此前误当表情 id）。第三锚=对方（气泡指向），本仓
           //  facing 已朝对方=尾巴方向等效
-          if (t === 216) spawnEmote(this, this.npcEmotePick(this.rng, s.other), 70);
-          if (t === 320) spawnEmote(this, this.npcEmotePick(this.rng, s.other), 100);
-          if (t === 70 && s.other) spawnEmote(s.other, this.npcEmotePick(this.rng, this), 90);
+          if (t === 216) spawnEmote(this, 70);      // num92=70（:69901 表情 id）
+          if (t === 320) spawnEmote(this, 100);     // num92=100（:69917）
+          if (t === 70 && s.other) spawnEmote(s.other, 90);  // num93=90（:69929，锚在对方）
         }
         if (t >= 420) s.frameT = 0;
         break;

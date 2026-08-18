@@ -3257,17 +3257,25 @@ export function runDungeonPass(
         for (let b = j - num20 - num21; b <= j + num21; b++) {
           if (!inW(a, b, 0)) continue;
           if (a >= num3 - num19 && a <= num3 + num19 && b >= j - num20 && b <= j) {
-            if (!featOK(a, b, 0)) { flag3 = true; break outer6; }
-            if (actAt(a, b) !== 0) { num18 = -1; break outer6; }
+            // ★#32 终清批 III：原版两处 break **只跳内层 m 循环**（DGGF:525-537）——
+            //   外层 l 扫描继续，后续列仍参与 flag4（±15 邻域已有 354/355 表）检测。
+            //   此前 break outer6 整体跳出 → (481,769) 锚没扫到 (501,768) 的巫惑台 →
+            //   flag4 漏置 → bew 计数在错位消耗（vanilla bew@401,735 vs JS@481,769）。
+            if (!featOK(a, b, 0)) { flag3 = true; break; }
+            if (actAt(a, b) !== 0) { num18 = -1; break; }
           }
-          if (stricter && (alch > 0 || bew > 0) && actAt(a, b) !== 0 && (typAt(a, b) === ALCHEMY || typAt(a, b) === BEWITCH)) flag4 = true;
+          if (stricter && (alch > 0 || bew > 0) && actAt(a, b) !== 0 && (typAt(a, b) === ALCHEMY || typAt(a, b) === BEWITCH)) { flag4 = true; if (process.env.SW_DG_FURN_TRACE) console.log(`DG FU4 hit @${a},${b} t=${typAt(a, b)}`); }
         }
       }
       if (flag3) return;
       if (num2 < num19 * 1.75) num18 = -1;
+      const fTr = typeof process !== 'undefined' && !!process.env.SW_DG_FURN_TRACE;
+      if (fTr) {
+        console.log(`DG FU i=${i} j=${j} num3=${num3} span=${num2} flag4=${flag4 ? 1 : 0} alch=${alch} bew=${bew} n18=${num18} n19=${num19} n20=${num20} box=[${num3 - num19 - num21},${j - num20 - num21}]-[${num3 + num19 + num21},${j + num21}] c501_768=${actAt(501, 768)}/${TILE_DEFS[typAt(501, 768)]?.vanilla?.sheet ?? -1}`);
+      }
       if (!flag4 && (alch > 0 || bew > 0)) {
         if (alch > 0) {
-          if (place3x3D(num3, j, ALCHEMY)) { dgFurnResult = 'alch'; return; }
+          if (place3x3D(num3, j, ALCHEMY)) { if (fTr) console.log(`DG FU ALCH ok @${num3},${j}`); dgFurnResult = 'alch'; return; }
         } else if (place3x3D(num3, j, BEWITCH)) { dgFurnResult = 'bew'; return; }
       } else if (num18 === 0) {
         if (place3x2D(num3, j, DG_ITEM_TILE[iTable])) {
@@ -3601,29 +3609,36 @@ export function runDungeonPass(
         if (!featArea3(x, y, 3)) continue;
         if (actAt(x, y) === 0) placePaintingD(x, y, e);
         if (actAt(x, y) !== 0) continue;
+        // ★#32 终清批 III：攀爬起点**链式**（vanilla num21 :198/:221——第 m 轮从上轮
+        //   中心起爬，非每轮从 baseY 起）；num21 在两轮间无条件更新、向后循环前重置
+        //   num7（:221）。此前恒 baseY → 第 2 轮中心错 → featArea3/paintingEntry 掷差。
         const baseY = y;
+        let nyPrev = baseY;
         for (let m = 0; m < 2; m++) {
           x += 7;
-          let a1 = baseY, a2 = baseY;
+          let a1 = nyPrev, a2 = nyPrev;
           while (a1 > 0 && actAt(x, a1) === 0 && actAt(x - 1, a1) === 0 && actAt(x + 1, a1) === 0) a1--;
           a1++;
           while (a2 < h - 1 && actAt(x, a2) === 0 && actAt(x - 1, a2) === 0 && actAt(x + 1, a2) === 0) a2++;
           a2--;
           const ny = Math.trunc((a1 + a2) / 2);
+          nyPrev = ny;
           if (featArea3(x, ny, 3)) {
             e = paintingEntry(x, ny);
             if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
             placePaintingD(x, ny, e);
           }
         }
+        nyPrev = baseY;
         for (let m = 0; m < 2; m++) {
           x -= 7;
-          let a1 = baseY, a2 = baseY;
+          let a1 = nyPrev, a2 = nyPrev;
           while (a1 > 0 && actAt(x, a1) === 0 && actAt(x - 1, a1) === 0 && actAt(x + 1, a1) === 0) a1--;
           a1++;
           while (a2 < h - 1 && actAt(x, a2) === 0 && actAt(x - 1, a2) === 0 && actAt(x + 1, a2) === 0) a2++;
           a2--;
           const ny = Math.trunc((a1 + a2) / 2);
+          nyPrev = ny;
           if (featArea3(x, ny, 3)) {
             e = paintingEntry(x, ny);
             if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
@@ -3636,28 +3651,32 @@ export function runDungeonPass(
         if (actAt(x, y) === 0) placePaintingD(x, y, e);
         if (actAt(x, y) !== 0) continue;
         const baseX = x;
+        let nxPrev = baseX;                              // num16 链式（:265-291 同款）
         for (let m = 0; m < 3; m++) {
           y += 7;
-          let a1 = baseX, a2 = baseX;
+          let a1 = nxPrev, a2 = nxPrev;
           while (a1 > 0 && actAt(a1, y) === 0 && actAt(a1, y - 1) === 0 && actAt(a1, y + 1) === 0) a1--;
           a1++;
           while (a2 < w - 1 && actAt(a2, y) === 0 && actAt(a2, y - 1) === 0 && actAt(a2, y + 1) === 0) a2++;
           a2--;
           const nx = Math.trunc((a1 + a2) / 2);
+          nxPrev = nx;
           if (featArea3(nx, y, 3)) {
             e = paintingEntry(nx, y);
             if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
             placePaintingD(nx, y, e);
           }
         }
+        nxPrev = baseX;
         for (let m = 0; m < 3; m++) {
           y -= 7;
-          let a1 = baseX, a2 = baseX;
+          let a1 = nxPrev, a2 = nxPrev;
           while (a1 > 0 && actAt(a1, y) === 0 && actAt(a1, y - 1) === 0 && actAt(a1, y + 1) === 0) a1--;
           a1++;
           while (a2 < w - 1 && actAt(a2, y) === 0 && actAt(a2, y - 1) === 0 && actAt(a2, y + 1) === 0) a2++;
           a2--;
           const nx = Math.trunc((a1 + a2) / 2);
+          nxPrev = nx;
           if (featArea3(nx, y, 3)) {
             e = paintingEntry(nx, y);
             if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
