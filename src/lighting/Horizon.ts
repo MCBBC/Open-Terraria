@@ -69,14 +69,6 @@ export function horizonPhaseOf(moonPhase: number, isDay: boolean, dayTicks: numb
   return n % 4;   // 调色板索引(HorizonRenderer 用 %4 选表)
 }
 
-/** GetCelestialEffectPower(:260-268) */
-function getCelestialEffectPower(dayTicks: number, isDay: boolean): number {
-  if (isDay) {
-    return remap(dayTicks, 0, 3600, 0, 1) * remap(dayTicks, 54000 - 1800, 54000, 1, 0);
-  }
-  return remap(dayTicks, 0, 3600, 0, 1) * remap(dayTicks, 32400 - 1800, 32400, 1, 0);
-}
-
 /** BlendColor(ModifyHorizonLight :185-196):逐通道 max 后按可见度向 color lerp */
 function blendMaxLerp(color: [number, number, number], c: readonly [number, number, number], opacity: number): void {
   if (opacity <= 0) return;

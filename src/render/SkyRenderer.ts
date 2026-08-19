@@ -929,8 +929,7 @@ export class SkyRenderer {
     if (this.fx.surfaceY <= 0) return;
     const num = 400;
     // Main.screenPosition.Y/16(屏顶世界 Y÷16——须除 zoom 得真实屏顶;旧漏 /zoom)
-    const zQ = this.frameCtx?.z ?? 1;
-    const camTopTiles = (camY - viewH / 2 / zQ) / 16;
+    const camTopTiles = (camY - viewH / 2 / (this.frameCtx?.z ?? 1)) / 16;
     // GetLerpValue(40, worldSurface, camTopTiles):0(地表)→1(高空)
     const lerpV = Math.max(0, Math.min(1, (camTopTiles - 40) / Math.max(1, this.fx.surfaceY / 16 - 40)));
     const val = (1 - lerpV) * num;
@@ -2666,6 +2665,10 @@ export class SkyRenderer {
     this.horizonVisCache = this.sunVisibilities(dayTimeTicks, isDay, !!clock.eclipse,
       this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0);
     this.horizonPhase = horizonPhaseOf(Math.max(0, Math.min(7, clock.moonPhase ?? 0)), isDay, dayTimeTicks);
+    // Main.screenPosition.Y(屏顶世界 Y)与 zoom——天空贴图 bgTopY/日月轨迹/
+    // 镜头光斑轴角微扰共用
+    const zQ = this.frameCtx?.z ?? 1;
+    const screenTopWorld = camY - viewH / 2 / zQ;
     // 镜头光斑可见性复用（drawWorldFx）
     this.lastDayTimeTicks = isDay ? dayTimeTicks : 0;
     this.lastEclipse = !!clock.eclipse;
@@ -2681,15 +2684,20 @@ export class SkyRenderer {
     // 天空实体 GetColor 的 bgColor（Main.ColorOfTheSkies）近似源——本帧色缓存
     this.lastSkyTop = top;
     this.lastSkyBottom = bottom;
-    // ★天空底色 = Background_0 × ColorOfTheSkies(Main.cs:61516 唯一绘制式,
+    // ★天空底色 = Background_0 × ColorOfTheSkies(Main.cs:61508-61516 唯一绘制式,
     //  2026-08-20 原版化):昼夜/月相地板/血月/日食/晨昏渗入全由 cots 乘法驱动,
     //  天空贴图恒同一张(原版不换昼夜贴图)。夜 = 亮贴图×~0.075 ≈ 暗蓝。
+    //  几何 1:1(:61506-61512):dest = (bgStartX, bgTopY, 贴图宽, max(屏高,贴图高))
+    //  ——横向逐 48px 平铺(实测横向完全均匀,整幅拉伸等价);竖向 1:1 顶锚
+    //  bgTopY(曾整幅拉伸满屏 = 渐变竖向位置漂移,校勘 2026-08-20 末轮)。
     //  贴图未就绪/cots 缺(首帧/测试环境)回落旧渐变
     const skyTex = this.skyTexImg();
     if (skyTex && skyTex.width > 0 && this.cots) {
       const tinted = this.tintSkyTex(skyTex);
-      ctx.imageSmoothingEnabled = true;   // 48×1400 竖条拉满屏,平滑与原版过滤一致
-      ctx.drawImage(tinted, 0, 0, skyTex.width, skyTex.height, 0, 0, viewW, viewH);
+      ctx.imageSmoothingEnabled = true;
+      const bgTopY0 = -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200;
+      const dh0 = Math.max(viewH, skyTex.height);
+      ctx.drawImage(tinted, 0, 0, skyTex.width, skyTex.height, 0, bgTopY0, viewW, dh0);
     } else {
       const grad = ctx.createLinearGradient(0, 0, 0, viewH);
       grad.addColorStop(0, top);
@@ -2815,10 +2823,8 @@ export class SkyRenderer {
     const sunDim = Math.max(0, 1 - cloudAlpha * 1.5 * atmoD);
     // bgTopY(Main.cs:61483:−screenPosition.Y/(worldSurface·16−600)·200)——
     // 日/月轨迹 y = bgTopY + dip·250 + 180(:62290/:62301);★旧移植漏此项,
-    // 日月整体偏低 ~200px(校勘 2026-08-20)
-    const zQ = this.frameCtx?.z ?? 1;
-    const screenTopY = camY - viewH / 2 / zQ;
-    const bgTopY = -screenTopY / Math.max(1, this.fx.surfaceY - 600) * 200;
+    // 日月整体偏低 ~200px(校勘 2026-08-20)。screenTopWorld 在 draw() 头部算好
+    const bgTopY = -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     if (isDay) {
@@ -2875,7 +2881,7 @@ export class SkyRenderer {
         // 全通道乘:贡献 = tex.rgb·mr·num13²(rgb 与 α 都乘)——染色值也乘 sunDim
         const [mr, mg, mb] = moonDrawColor(nightTime, !!(clock as { bloodMoon?: boolean }).bloodMoon);
         const moonA = sunDim;
-        const moonTint = sunDim >= 0.999 && mr > 250 && mg > 250 && mb > 250;
+        const moonPlain = sunDim >= 0.999 && mr > 250 && mg > 250 && mb > 250;
         // ★夜月屏位登记(2026-08-20):compositeLight 在光照图注入月盘满光
         //   ——原版月亮直绘 backbuffer 不吃乘光,全屏乘光链曾把月亮压到
         //   月光地板(~0.075,"夜里的月亮不亮");月盘区乘法≈恒等即恢复原色
@@ -2886,7 +2892,7 @@ export class SkyRenderer {
         ctx.rotate(ft * 2 - 7.3);
         // 原版:竖条第 moonPhase 帧(0,MW*moonPhase,MW,MW),原点为中心;
         // 染色 = 月色×sunDim(全通道乘语义),晴夜白月直绘快速路径
-        const mIm = moonTint ? tex
+        const mIm = moonPlain ? tex
           : this.tintTex(tex, mr * sunDim, mg * sunDim, mb * sunDim, `moon${this.fx.moonEventKind}`);
         ctx.drawImage(mIm, 0, mw * phase, mw, mw,
           -mw / 2 * scale, -mw / 2 * scale, mw * scale, mw * scale);

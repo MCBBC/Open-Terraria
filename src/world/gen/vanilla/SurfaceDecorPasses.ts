@@ -734,29 +734,11 @@ function placeTileHead(st: TileStore, x: number, y: number, num: number): boolea
   return true;
 }
 
-/** PlaceTile 尾奏 SquareTileFrame(i,j)（cs:60283 目标格活性即调；case 227 另有
- *  case 内调用 cs:60068——并集=恒调）→ TileFrame 头（cs:82078-82082）：3×3 内
- *  非活性格 halfBrick/slope/漆清零（**幽灵 type 保留**——#84 S(3195,605) 真身）。
- *  活性格生成期 TileFrameCosmetic 跳过（cs:82116 !generatingWorld 门）、
- *  frameImportant Check* 族支撑已由放置门保证 no-op（文件头备案）、非 solid
- *  49/80/藤链同备案——故仅镜像非活性清位。 */
-function squareTileFrameGenFx(st: TileStore, x: number, y: number): void {
-  for (let dy = -1; dy <= 1; dy++) {
-    const yy = y + dy;
-    if (yy <= 5 || yy >= st.h - 5) continue;                          // TileFrame 边界门 cs:82069
-    for (let dx = -1; dx <= 1; dx++) {
-      const xx = x + dx;
-      if (xx <= 5 || xx >= st.w - 5) continue;
-      const k = st.idx(xx, yy);
-      if (!(st.flags[k] & 1)) { st.half[k] = 0; st.slope[k] = 0; st.paint[k] = 0; }
-    }
-  }
-}
-
 /** PlaceDye（cs:54004）1:1：style 门（上方豁免族/下方支撑/液体/墙）。
- *  调用点=plantDye 的 PlaceTile(227)（cs:71336 等）——头段前奏+尾奏 SquareTileFrame
- *  一并镜像（RRRRR 2026-08-20：#84 Hf13/Sl1 根因=两段全缺——失败尝试同样清场） */
-function placeDye(st: TileStore, x: number, y: number, style: number): boolean {
+ *  调用点=plantDye 的 PlaceTile(227)（cs:71336 等）——头段前奏+case 帧链
+ *  （cs:60068 恒调）+尾奏帧链（cs:60283 目标格活性即调）一并镜像
+ *  （RRRRR 2026-08-20：#84 Hf13/Sl1 根因=头尾两段全缺——失败尝试同样清场） */
+function placeDye(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   if (!st.inBounds(x, y + 1) || !st.inBounds(x, y - 1)) return false;
   const i0 = st.idx(x, y);
   if (!placeTileHead(st, x, y, 227)) return false;
@@ -764,13 +746,13 @@ function placeDye(st: TileStore, x: number, y: number, style: number): boolean {
   if (style === 7) {
     // 垂吊株：钉在天花板下
     if (activeAt(st, x, y + 1) && !DYE_PLANT_SIDE.has(sheetAt(st, x, y + 1))) {
-      squareTileFrameGenFx(st, x, y);
+      squareTileFrame(st, rng, x, y);                                   // case 帧（cs:60068）
       return false;
     }
     if (solidTile(st, x, y - 1) && !activeAt(st, x, y + 1)) ok = true;
   } else {
     if (activeAt(st, x, y - 1) && !DYE_PLANT_SIDE.has(sheetAt(st, x, y - 1))) {
-      squareTileFrameGenFx(st, x, y);
+      squareTileFrame(st, rng, x, y);                                   // case 帧（cs:60068）
       return false;
     }
     if (style === 6) {
@@ -798,7 +780,8 @@ function placeDye(st: TileStore, x: number, y: number, style: number): boolean {
     st.half[i0] = 0;
     st.slope[i0] = 0;
   }
-  squareTileFrameGenFx(st, x, y);                                      // cs:60068+60283
+  squareTileFrame(st, rng, x, y);                                      // case 帧恒调（cs:60068）
+  if (st.flags[i0] & 1) squareTileFrame(st, rng, x, y);                // 尾奏（cs:60283：目标格活性）
   return ok;
 }
 
@@ -813,12 +796,12 @@ function plantDye(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): 
     if (dyeNearby(st, i, j, rad)) return;
     const t = sheetAt(st, i, j);
     if (t === 2 || t === 109) {
-      placeDye(st, i, j - 1, rng.int(0, 3) === 0 ? 4 : 3);              // Next(4)==0 → 4
+      placeDye(st, rng, i, j - 1, rng.int(0, 3) === 0 ? 4 : 3);              // Next(4)==0 → 4
     } else if (t === 60) {
-      placeDye(st, i, j - 1, rng.int(0, 1) === 0 ? 2 : 4);              // Next(2)
+      placeDye(st, rng, i, j - 1, rng.int(0, 1) === 0 ? 2 : 4);              // Next(2)
     } else if (t === 53 && st.inBounds(i, j - 2)
       && st.liquid[st.idx(i, j - 1)] === 255 && st.liquid[st.idx(i, j - 2)] === 255) {
-      placeDye(st, i, j - 1, 2);                                        // 水下沙滩株
+      placeDye(st, rng, i, j - 1, 2);                                        // 水下沙滩株
     } else if (t === 80 && !activeAt(st, i - 1, j - 1) && !activeAt(st, i + 1, j - 1)) {
       // 仙人掌顶（cs:71365-71388）：±5×(j-5..j+15) 内无黑檀/猩红沙 112/234
       let clear = true;
@@ -829,7 +812,7 @@ function plantDye(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): 
           if (st.flags[st.idx(m, n)] && (s === 112 || s === 234)) clear = false;
         }
       }
-      if (clear) placeDye(st, i, j - 1, 6);
+      if (clear) placeDye(st, rng, i, j - 1, 6);
     }
   }
   // ---- 段位门（cs:71390）：表层或地狱层直接返回 ----
@@ -839,15 +822,15 @@ function plantDye(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): 
     if (dyeNearby(st, i, j, rad)) return;
     const t = sheetAt(st, i, j);
     if (t === 60) {
-      if (rng.int(0, 1) === 0) placeDye(st, i, j - 1, 2);
-      else if (rng.int(0, 1) === 0) placeDye(st, i, j - 1, 0);
-      else placeDye(st, i, j - 1, 1);
+      if (rng.int(0, 1) === 0) placeDye(st, rng, i, j - 1, 2);
+      else if (rng.int(0, 1) === 0) placeDye(st, rng, i, j - 1, 0);
+      else placeDye(st, rng, i, j - 1, 1);
     } else if (t === 0 || t === 1 || t === 59) {
-      if (rng.int(0, 1) === 0) placeDye(st, i, j - 1, 0);
-      else placeDye(st, i, j - 1, 1);
+      if (rng.int(0, 1) === 0) placeDye(st, rng, i, j - 1, 0);
+      else placeDye(st, rng, i, j - 1, 1);
     } else if (st.inBounds(i, j - 2)
       && st.liquid[st.idx(i, j - 1)] === 255 && st.liquid[st.idx(i, j - 2)] === 255) {
-      placeDye(st, i, j - 1, 5);
+      placeDye(st, rng, i, j - 1, 5);
     }
   }
   // ---- 垂吊段（cs:71449-71466）：天花板上垂下的 style 7 ----
@@ -861,7 +844,7 @@ function plantDye(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): 
       }
     }
     if (found) return;
-    if (sheetAt(st, i, j) === 0) placeDye(st, i, j + 1, 7);
+    if (sheetAt(st, i, j) === 0) placeDye(st, rng, i, j + 1, 7);
   }
 }
 
@@ -924,10 +907,10 @@ function tryGrowGlowTulip(st: TileStore, rng: RNG, i: number, j: number): boolea
       st.setTileSilent(x, y, GLOW_TULIP, 0, 0);
       st.half[k0] = 0;
       st.slope[k0] = 0;
-      squareTileFrameGenFx(st, x, y);                                   // 尾奏（已放置→活性）
+      squareTileFrame(st, rng, x, y);                                     // 尾奏（已放置→活性）
       return true;
     }
-    if (st.flags[k0] & 1) squareTileFrameGenFx(st, x, y);               // 尾奏（未放置但目标活性）
+    if (st.flags[k0] & 1) squareTileFrame(st, rng, x, y);               // 尾奏（未放置但目标活性）
   }
   return false;
 }
@@ -983,7 +966,7 @@ function tryPlaceChilletEgg(st: TileStore, rng: RNG, i: number, j: number): bool
       if (!solidTile2(st, a, y + 1)) ok = false;
     }
     if (!ok) {
-      if (st.flags[k0] & 1) squareTileFrameGenFx(st, x, y);             // 尾奏（未放置但目标活性）
+      if (st.flags[k0] & 1) squareTileFrame(st, rng, x, y);             // 尾奏（未放置但目标活性）
       continue;
     }
     for (let a = 0; a < 2; a++) {
@@ -991,7 +974,7 @@ function tryPlaceChilletEgg(st: TileStore, rng: RNG, i: number, j: number): bool
         st.setTileSilent(x - 1 + a, y - 1 + b, CHILLET_EGG, a * 18, b * 18); // frameY = style*36 + b*18
       }
     }
-    squareTileFrameGenFx(st, x, y);                                     // 尾奏（已放置→活性）
+    squareTileFrame(st, rng, x, y);                                     // 尾奏（已放置→活性）
     return true;
   }
   return false;
