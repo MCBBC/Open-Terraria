@@ -979,6 +979,10 @@ function plantAlch(st: TileStore, rng: RNG, gs: GenState): void {
   }
   if (near < 5) {
     for (const [set, style] of HERB_STYLE_GROUND) {
+      // vanilla PlaceSuitableHerbHere style-4 沙族支海滩门（cs:45971）：
+      // `x >= beachDistance && x <= maxTilesX - beachDistance`——海滩沙上不放
+      // 沙拉末株（PPPPP 定罪：9293480 (69/327/345,·)/(3920,·) 四株 JS 多放）
+      if (style === 4 && (num < gs.beachDistance || num > st.w - gs.beachDistance)) continue;
       if (set.has(st.type[k])) placeAlch(st, num, y - 1, style);
     }
   }
