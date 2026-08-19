@@ -55,7 +55,7 @@ function labelOf(file: string, line: number): string {
       if (m && !m[1].includes('/core/rng') && !m[1].includes('_jjspan')) {
         const lab = labelOf(m[1], Number(m[2]));
         if (lab === 'UndergroundHousesAndBuriedChests') { inWindow.on = true; lines.push('PASS 58 UndergroundHousesAndBuriedChests'); }
-        else if (lab === 'SurfaceChests' && inWindow.on) { stop = true; }
+        else if (lab === 'SurfaceChests' && inWindow.on) { stop = true; inWindow.on = false; }
         break;
       }
     }

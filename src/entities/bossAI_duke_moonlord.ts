@@ -1383,6 +1383,7 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
           h.x = e.cx + i * 800 - 400 - h.w / 2;
           h.y = e.cy - 100 - h.h / 2;
           h.ai0 = 0; h.ai1 = 0; h.ai2 = i; h.ai3 = e.id; h.bInit = true;
+          h.master = e;   // 层序:部件画本体前(原版槽序 398→397×2→396)
         }
       }
       const hd = spawnPart(game, e, 396);
@@ -1390,6 +1391,7 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
         hd.x = e.cx - hd.w / 2;
         hd.y = e.cy - 400 - hd.h / 2;
         hd.ai0 = 0; hd.ai1 = 0; hd.ai2 = 0; hd.ai3 = e.id; hd.bInit = true;
+        hd.master = e;   // 头最后生成=槽序最前(与手同锚核心,插入序保证头居末=最前)
       }
     }
   } else if (e.ai0 === 0 || e.ai0 === 1) {

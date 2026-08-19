@@ -7,6 +7,7 @@ import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaT
 import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { petInfoOfVid } from '../data/vanillaPets';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
+import { VANILLA_ITEM_COLOR, blendItemColorTint } from '../data/vanillaItemColor';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
 
 /** 原版像素面板底(IngameOptions.Draw + Utils.DrawInvBG 1:1):
@@ -200,6 +201,16 @@ function iconUrl(game: Game, id: number): string {
         const s = Math.min(1, 32 / ar.sw, 32 / ar.sh);
         const w = ar.sw * s, h = ar.sh * s;
         cx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, (32 - w) / 2, (32 - h) / 2, w, h);
+        // 原版 Item.color 静态表着色（Main.cs:39211 第二遍 alpha 混合的等价单遍
+        // 合成）：凝胶 23 灰图染蓝 (0,80,255,100) 等 10 件——此前背包图标无着色，
+        // 凝胶显示灰块（2026-08-19 用户报告）
+        const tvid = vidOf(id);
+        const tint = tvid > 0 ? VANILLA_ITEM_COLOR[tvid] : undefined;
+        if (tint && tint[3] > 0) {
+          const id32 = cx.getImageData(0, 0, 32, 32);
+          blendItemColorTint(id32.data, tint);
+          cx.putImageData(id32, 0, 0);
+        }
         url = c.toDataURL();
         iconCache.set(id, url);
         return url;

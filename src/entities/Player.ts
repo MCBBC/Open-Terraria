@@ -7,6 +7,7 @@ import {
   PLAYER_IFRAME_TICKS, TILE, RUN_ACCELERATION, RUN_SLOWDOWN,
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { playerCanHitEnemy } from './projTargets';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
@@ -2486,6 +2487,8 @@ export class Player extends Entity {
           const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
             dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown) => boolean };
           if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
+          // friendly 门（原版 :20793 !nPC.friendly continue——冲撞对睡渔夫 376 等友好 NPC 无效）
+          if (!playerCanHitEnemy(e, game)) continue;
           const ex = en.x ?? en.cx - 8, ey = en.y ?? en.cy - 8, ew = en.w ?? 16, eh = en.h ?? 16;
           if (!(bhx < ex + ew && bhx + bhw > ex && bhy < ey + eh && bhy + bhh > ey)) continue;
           const dir = this.vx < 0 ? -1 : this.vx > 0 ? 1 : this.facing; // :20809-20815
@@ -2553,6 +2556,8 @@ export class Player extends Entity {
           const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
             dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown) => boolean };
           if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
+          // friendly 门（原版 :20853 !nPC2.friendly continue——同克盾冲撞）
+          if (!playerCanHitEnemy(e, game)) continue;
           const ex3 = en.x ?? en.cx - 8, ey3 = en.y ?? en.cy - 8, ew3 = en.w ?? 16, eh3 = en.h ?? 16;
           if (!(bhx3 < ex3 + ew3 && bhx3 + bhw3 > ex3 && bhy3 < ey3 + eh3 && bhy3 + bhh3 > ey3)) continue;
           if (this.solarShields > 0 && !this.solarDashConsumed) {

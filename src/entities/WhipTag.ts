@@ -6,6 +6,7 @@
 //  原版 tag 状态挂在玩家（TagEffectState 每玩家一份 int[maxNPCs]）；本作单机语义
 //  下等价挂在敌实体（WhipTagged 字段，Enemy.tick 内衰减 :TagEffectState.Update 155-168）。
 import { Arrow } from './Arrow';
+import { playerCanHitEnemy } from './projTargets';
 import type { GameHooks } from './types';
 
 /** ItemID.Sets.UniqueTagEffects（ItemID.cs:1303-1414 全表核对）：鞭 → TagDamage。
@@ -142,7 +143,10 @@ export function resolveWhipTagHit(
       for (const ent2 of game.enemies()) {
         const en2 = ent2 as { dead: boolean; cx: number; cy: number; w: number; h: number;
           hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
-        if (en2.dead || Math.abs(en2.cx - hx) > 48 + en2.w / 2 || Math.abs(en2.cy - hy) > 48 + en2.h / 2) continue;
+        // friendly 门：爆炸体（弹 918）走 Damage_PVE_Inner :11892——玩家爆炸对
+        // 睡渔夫 376 等友好 NPC 无效（同 Game.explodeAt :13648 门）
+        if (en2.dead || !playerCanHitEnemy(ent2, game, 918)) continue;
+        if (Math.abs(en2.cx - hx) > 48 + en2.w / 2 || Math.abs(en2.cy - hy) > 48 + en2.h / 2) continue;
         en2.hurt(ex, Math.sign(en2.cx - hx) * 2, -2, game);
       }
       game.spawnParticles(hx, hy, '#FF7A28', 16, 4, { life: 26 });

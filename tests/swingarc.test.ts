@@ -4,7 +4,7 @@
 //   · NightsEdgeFly（273 飞斩）：10t 起前漂 + ai1=30 消亡 + 旋进
 import { describe, it, expect } from 'vitest';
 import { Game } from '../src/core/Game';
-import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS, LightsBaneSlash, GrassSlash } from '../src/entities/SwingArc';
+import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS, LightsBaneSlash, GrassSlash, fractalProfile, fractalStripFade, fractalGhostAlpha } from '../src/entities/SwingArc';
 import { SolarEruptionWhip, SolarFlare } from '../src/entities/SolarEruption';
 import { TideSlash } from '../src/entities/TideSlash';
 import { FirstFractalSlash } from '../src/entities/FirstFractal';
@@ -349,5 +349,98 @@ describe('屠夫链锯 509（AI_020 channel 持械）', () => {
     ch = false;
     saw.fixedUpdate(1, game);
     expect(saw.dead).toBe(true);                           // 断链即亡
+  });
+});
+
+describe('Zenith 视觉层 1:1（FinalFractalHelper/DrawProjDirect 视觉链）', () => {
+  it('拖尾颜色公式（StripColors :54-59）：progress 0→1 因子 1→0、0.98 归零、沿程单调递减', () => {
+    expect(fractalStripFade(0)).toBeCloseTo(1, 5);
+    expect(fractalStripFade(0.49)).toBeCloseTo(0.5, 5);   // 线性段中点
+    expect(fractalStripFade(0.98)).toBe(0);               // GetLerpValue(0,0.98,0.98)=1
+    expect(fractalStripFade(1)).toBe(0);
+    let prev = 1;
+    for (let p = 0; p <= 1.001; p += 0.02) {
+      expect(fractalStripFade(p)).toBeLessThanOrEqual(prev + 1e-9);
+      prev = fractalStripFade(p);
+    }
+  });
+
+  it('彩带=每剑固定档案色（无 hue 渐变）：档案色互异、Zenith 本体=OurFavoriteColor(255,231,69)', () => {
+    const z = fractalProfile(1123);
+    expect(z.color).toEqual([255, 231, 69]);              // Main.cs:868
+    expect(z.len).toBe(48);                               // 全刃长 48 → trailWidth 24
+    // 宽度恒定（StripWidth :61-64 返回常 trailWidth）——不同剑不同宽、同剑沿程不变
+    expect(fractalProfile(3018).len / 2).toBe(40);
+    expect(fractalProfile(121).len / 2).toBe(38);
+    // 彩虹来自档案色差异（齐射随机档案——每剑一色）
+    const colors = new Set(FRACTAL_KEYS.map((k) => fractalProfile(k).color.join(',')));
+    expect(colors.size).toBeGreaterThan(10);
+  });
+
+  it('白残影 ×3（:30381/:30174-30181）：num159∈{45,30,15}（60 越界跳过）、近影亮于远影', () => {
+    const opacity = 1, counter = 40;
+    const a15 = fractalGhostAlpha(counter, 15, opacity);
+    const a30 = fractalGhostAlpha(counter, 30, opacity);
+    const a45 = fractalGhostAlpha(counter, 45, opacity);
+    expect(a15).toBeGreaterThan(a30);
+    expect(a30).toBeGreaterThan(a45);                     // GetLerpValue(0,60,60−num159)
+    // t=counter−num159 在 20-60 窗内时包络=1（:30609）
+    expect(fractalGhostAlpha(40, 15, 1)).toBeCloseTo(45 / 60, 5);
+    expect(fractalGhostAlpha(10, 45, 1)).toBe(0);         // t=−35 < 20 淡入为 0
+    expect(fractalGhostAlpha(85, 15, 1)).toBe(0);         // t=70 > 68 淡出归零
+  });
+
+  it('本体淡入淡出包络（:30799-30801 num182）：0-20 淡入、60-68 淡出（counter 45 全亮、70 归零）', () => {
+    const num182 = (c: number) => ZenithSword.lerpV(0, 20, c) * ZenithSword.lerpV(68, 60, c);
+    expect(num182(45)).toBeCloseTo(1, 5);
+    expect(num182(10)).toBeCloseTo(0.5, 5);
+    expect(num182(68)).toBe(0);
+    expect(num182(70)).toBe(0);
+  });
+
+  it('光照门（:40478 num2<1）：counter<60 两点光、≥60 熄灭 + MountedCenter 补光走 addLightAt', () => {
+    const game = makeGame(new World(200, 200, 30, 'open')) as GameHooks & { addLightAt?: unknown };
+    const lights: number[][] = [];
+    game.addLightAt = (x: number, y: number, r: number, g: number, b: number) => { lights.push([x, y, r, g, b]); };
+    const z = new ZenithSword(owner, owner.cx + 400, owner.cy, 190, 757);   // 泰拉刃 (80,222,122)
+    z.fixedUpdate(1, game);
+    expect(z.lightRGB).toBeTruthy();                      // Center 点光 trailColor×0.5×Opacity
+    const op = z['opacity'] as number;
+    expect(z.lightRGB![0]).toBeCloseTo(80 / 255 * 0.5 * op, 3);
+    expect(lights.length).toBeGreaterThanOrEqual(1);      // MountedCenter 补光
+    const l = lights[lights.length - 1];
+    expect(l[0]).toBeCloseTo(owner.cx, 0);
+    expect(l[2]).toBeCloseTo((1 + (80 / 255 - 1) * 0.7) * op * 0.15, 3);
+    // 推到 counter ≥ 60：两路光全熄
+    let guard = 0;
+    while (z['counter'] < 60 && guard++ < 400) z.fixedUpdate(1, game);
+    const nLights = lights.length;
+    z.fixedUpdate(1, game); z.fixedUpdate(1, game);
+    expect(z.lightRGB).toBeNull();
+    expect(lights.length).toBe(nLights);
+  });
+
+  it('拖尾尘走原版 278 池（StripDust :38-52）：num11 次独立 1/9 掷、色=Lerp(trailColor,White,≤0.3)', () => {
+    const game = makeGame(new World(200, 200, 30, 'open'));
+    const spawned: { scale: number; fadeIn: number; alpha: number; type: number; noGravity: boolean; color: { r: number; g: number; b: number } }[] = [];
+    (game as { spawnDust?: unknown }).spawnDust = (_x: number, _y: number, _w: number, _h: number, type: number,
+      _sx: number, _sy: number, alpha: number, color: { r: number; g: number; b: number }, scale: number, noGravity: boolean) => {
+      const d = { scale, fadeIn: 0, alpha, type, noGravity, color, vx: 0, vy: 0 };
+      spawned.push(d);
+      return d;
+    };
+    const z = new ZenithSword(owner, owner.cx + 400, owner.cy, 190, 795);   // (237,28,36)
+    for (let t = 0; t < 40; t++) z.fixedUpdate(1, game);   // phase 峰值区（尘最密）
+    expect(spawned.length).toBeGreaterThan(0);
+    for (const d of spawned) {
+      expect(d.type).toBe(278);
+      expect(d.alpha).toBe(100);
+      expect(d.noGravity).toBe(true);
+      expect(d.fadeIn).toBeGreaterThanOrEqual(0.4);        // 后置覆写 fadeIn=0.4+rand×0.3
+      expect(d.fadeIn).toBeLessThanOrEqual(0.7);
+      expect(d.color.r).toBeGreaterThanOrEqual(237);       // Lerp 向 White：只增不减
+      expect(d.color.r).toBeLessThanOrEqual(255);
+      expect(d.color.b).toBeGreaterThanOrEqual(36);
+    }
   });
 });

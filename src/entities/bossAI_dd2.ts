@@ -1428,7 +1428,7 @@ export class BetsyBreath extends Entity {
   private t = 0;
   /** frameCounter（绘制推进分母 :65898） */
   private frameT = 0;
-  private dmg: number;
+  dmg: number;   // public:测试/联机快照断言喷焰伤害档
   /** 焰心指向角（主→焰心向量角） */
   private ang = 0;
   /** 主死亡后的冻结锚（原版 npc 槽位数据残留——焰心停驻直到 78t 走完） */

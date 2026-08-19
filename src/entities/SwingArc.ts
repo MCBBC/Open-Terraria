@@ -459,6 +459,7 @@ export class NightsEdgeFly extends Entity {
     }
     // 命中（穿透 2；同敌单跳）
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -728,6 +729,7 @@ export class ZenithSword extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!this.bladeHits(e.x, e.y, e.w, e.h)) continue;
@@ -941,6 +943,7 @@ export class LightsBaneSlash extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -1040,6 +1043,7 @@ export class GrassSlash extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;

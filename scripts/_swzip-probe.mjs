@@ -37,9 +37,9 @@ await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 });
 
 // ---- B:等 warm 完成,中途断网 3s(断点续传) ----
 await sleep(6000);   // 让 warm 起步(进第一片)
-await cdp.send('Network.emulateNetworkConditions', { offline: true });
+await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
 await sleep(3000);
-await cdp.send('Network.emulateNetworkConditions', { offline: false });
+await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
 
 let st = null, manifest = null;
 for (let i = 0; i < 120; i++) {
@@ -65,7 +65,7 @@ const cached = await page.evaluate(async (ver) => {
 check('③ caches 条数 ≥ totalFiles', manifest && cached >= manifest.totalFiles, `cached=${cached} totalFiles=${manifest?.totalFiles}`);
 
 // ---- D:断网 reload 菜单可用 + 完成标志 ----
-await cdp.send('Network.emulateNetworkConditions', { offline: true });
+await cdp.send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
 await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 }).catch(() => {});
 await sleep(5000);
 const offlineOk = await page.evaluate(() => {
@@ -73,7 +73,7 @@ const offlineOk = await page.evaluate(() => {
   const menuVisible = !!document.querySelector('[data-act=sp], .sw-menu, canvas');
   return { flag, menuVisible };
 }).catch(() => null);
-await cdp.send('Network.emulateNetworkConditions', { offline: false });
+await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
 check('④ 断网 reload:菜单渲染 + 完成标志在位', !!offlineOk && offlineOk.menuVisible && offlineOk.flag, JSON.stringify(offlineOk));
 
 console.log(`\n${pass} pass, ${fail} fail`);

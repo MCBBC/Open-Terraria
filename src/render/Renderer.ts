@@ -132,11 +132,7 @@ import { drawVanillaLiquids, drawLiquidBehindTilesOnly } from './VanillaLiquidRe
 import { waterWaves, ensureWaveTextures, injectEntity, type WaveEntitySample } from './WaterWaves';
 import { renderEnv } from './VanillaTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
-import { drawWindSwayTiles, litNatureVisibility, treeSwayFrame } from './WindSway';
-
-/** 临时树木探针出口（Game 注入 recorder；验证后随探针整体撤除） */
-export let treeProbeSink: ((cells: number[][], probes: number[][]) => void) | null = null;
-export function setTreeProbeSink(f: ((cells: number[][], probes: number[][]) => void) | null): void { treeProbeSink = f; }
+import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
@@ -981,12 +977,6 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     const base = e.lai0 === 1 ? 0 : 4;
     const span = e.lai0 === 1 ? 4 : Math.min(8, frames - 4);
     return base + (Math.floor(t / 5) % span);
-  }
-  // 肉墙 113/114（case 113/114 type 表，cs:74214-74229）：ai[2]==0 → 12t/帧
-  // 两帧循环;ai[2]≠0（Leech 放虫轮）→ 冻结帧 0（counter=-60；曾通用 6t 连播）
-  if (id === 113 || id === 114) {
-    if (e.ai2 !== 0) return 0;
-    return Math.floor(t / 12) % Math.min(2, frames);
   }
   // 世纪之花本体（case 262，cs:73239-73258）：血量分带——>50% 帧 0-3、
   // ≤50% 钳 4-7（二阶段），每 7t 推进带内回卷（曾通用 6t 全 8 帧混播）
@@ -2405,11 +2395,24 @@ export class Renderer {
     //   (Main.DrawNPCs 槽序遍历,NewNPC 先本体后部件)。排序键:挂件取
     //   master.y+ε → 紧随本体之后(在前);挂件间保插入序(=出生序,头/拳原生
     //   顺序)。2026-08-19 修"石巨人一阶段头跑到背后"
+    // 键 = 链式锚(递归+帧内 memo):master(部件→本体)与 wormFollow(蠕虫段→前段)
+    // 都沿链 +0.01 —— 蠕虫段序=生成序(原版槽序)而非物理 y 序(起伏段否则会乱序);
+    // 骑手族(390/416 drawBehindMaster)例外:坐骑由骑手生成=原版槽序画骑手前,
+    // 回落自然 y(骑手 y<坐骑 → 先画在后)
+    const keyMemo = new Map<Entity, number>();
     const sortY = (e: Entity): number => {
+      const hit = keyMemo.get(e);
+      if (hit !== undefined) return hit;
+      keyMemo.set(e, NaN);                            // 环保护(自引用链)
       const en = e as Enemy;
-      if (en.drawBehindMaster) return en.y;          // 骑手族(390/416):坐骑画骑手前(槽序),回落自然 y
-      const m = en.master ?? en.wormFollow;          // wormFollow=链前段:逐段锚前段=链序即槽序
-      return m && !m.dead ? m.y + 0.01 : en.y;
+      let k: number;
+      if (en.drawBehindMaster) k = en.y;
+      else {
+        const m = en.master ?? en.wormFollow;
+        k = m && !m.dead ? sortY(m) + 0.01 : en.y;
+      }
+      keyMemo.set(e, k);
+      return k;
     };
     const sorted = [...entities].sort((a, b) => sortY(a) - sortY(b));
     for (const e of sorted) {
@@ -2474,39 +2477,7 @@ export class Renderer {
         crimson: !!this.scene?.zoneCrimson,
         hallow: !!this.scene?.zoneHallow,
       });
-      // ══ 临时树木录制探针（2026-08-19；验证后撤）══
-      // 摆动层刚画完（冠+烘焙干已合成、光照/水未叠）：对前 3 个冠格取交界带
-      // 亮度矩阵（干心±10 世界px × 行 B−2..B+1），逐帧喂 recorder。
-      if (treeProbeSink && treeSwayFrame.on && treeSwayFrame.cells.length) {
-        const zq = z;
-        const cells = treeSwayFrame.cells.slice(0, 12).map((c) => [c.x, c.y, c.fx, Math.round(c.sway * 1000) / 1000]);
-        // 探针只做前 3 个【顶冠】（fx 22/0 派干列；枝不做）
-        const probes: number[][] = [];
-        ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.imageSmoothingEnabled = false;
-        for (const c of treeSwayFrame.cells) {
-          if (probes.length >= 3) break;
-          if (c.fx !== 22 && c.fx !== 0) continue;
-          const B = (c.y + 1) * TILE;
-          const sx = Math.round((c.x * TILE - camRX) * zq + viewW / 2);
-          const lums: number[] = [];
-          for (let dy = -2; dy <= 1; dy++) {
-            const sy = Math.round((B + dy - camRY) * zq + viewH / 2);
-            if (sx < 0 || sy < 0 || sx + Math.round(20 * zq) >= viewW || sy >= viewH) { lums.push(-1); continue; }
-            const d = ctx.getImageData(sx, sy, Math.round(20 * zq), 1).data;
-            // 20 世界px 均匀采样 10 点亮度
-            for (let k = 0; k < 10; k++) {
-              const px = Math.min(d.length / 4 - 1, Math.round(k * (d.length / 4 - 1) / 9)) * 4;
-              lums.push(Math.round((d[px] + d[px + 1] + d[px + 2]) / 3));
-            }
-          }
-          probes.push([c.x, c.y, ...lums]);
-        }
-        ctx.restore();
-        treeProbeSink(cells, probes);
-      }
-      // ══ 临时探针结束 ══
+
       // 自然层粒子（原版 Gore：落叶/滴水——DrawGores 在 tile 层后实体前）
       natureParticles.draw(ctx, this.atlas);
     }
@@ -7230,6 +7201,8 @@ export class Renderer {
     town_slime_old: 685, town_slime_clumsy: 686,   // 抖动的旧宝箱 / 笨笨气球史莱姆（绑缚态单帧）
     angler: 376,   // 睡渔夫（旧档兜底：新档睡渔夫已是真 Enemy 376，历史存档的
                    // bound TownNPC 'angler' 用 NPC_376 睡姿表——缺此条目会整只不渲染）
+    tavernkeep: 579,   // 醉酒酒保 BartenderUnconscious（SpawnAnNPC :1565 链；bound 态
+                       // 34×8 单帧躺姿表——缺此条目 fallback NPC_550 站姿，2026-08-19 补）
   };
 
   /** bound NPC 姿态帧（各表帧 0）。589 在 vanilla-npcs.json 缺登记（json 缺口族，同 588/633/663）

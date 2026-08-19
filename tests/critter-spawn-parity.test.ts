@@ -272,7 +272,7 @@ describe('多部件 Boss 层序（master 锚:挂件画本体前,2026-08-19 石�
     const body = Enemy.fromVanilla(245, 60 * 16, 88 * 16)!;
     const head = Enemy.fromVanilla(246, 60 * 16, 84 * 16)!;
     const fist = Enemy.fromVanilla(247, 55 * 16, 88 * 16)!;
-    (game.entities as unknown as { enemies: unknown[] }).enemies.push(body, head, fist);
+    (game as unknown as { entities: { enemies: unknown[] } }).entities.enemies.push(body, head, fist);
     (game as unknown as { enemies: () => unknown[] }).enemies = () => [body, head, fist];
     // 头 AI 首帧:锚本体(bInit 后 master=245)
     golemHeadAI(head, game, null);
@@ -283,5 +283,57 @@ describe('多部件 Boss 层序（master 锚:挂件画本体前,2026-08-19 石�
     expect(sortY(head)).toBeLessThan(body.y + 1);
     // 牳对照:无 master 实体按自身 y
     expect(sortY(fist ?? body)).toBeGreaterThan(0);
+  });
+});
+
+describe('多部件层序同族审计（2026-08-19:骑手反转/蠕虫链/月总三件）', () => {
+  it('骑手族 drawBehindMaster:回落自然 y(坐骑画骑手前,原版槽序)', async () => {
+    const rider = Enemy.fromVanilla(390, 100, 100)!;
+    const mount = Enemy.fromVanilla(391, 100, 120)!;
+    rider.master = mount;
+    rider.drawBehindMaster = true;
+    // 骑手实际重心偏上(fromVanilla 中心锚重定位)——读构造后 y 断言键序
+    expect(rider.y).toBeLessThan(mount.y);       // 骑手物理在上(脚底同层时身体高)
+    const sortY = (e: Enemy): number => e.drawBehindMaster ? e.y : (e.master && !e.master.dead ? e.master.y + 0.01 : e.y);
+    expect(sortY(rider)).toBeLessThan(sortY(mount));   // 骑手先画(在后),坐骑在前=原版槽序
+  });
+
+  it('蠕虫链 wormFollow 锚前段:段序=生成序,不受物理 y 起伏打乱', () => {
+    const head = Enemy.fromVanilla(13, 100, 200)!;      // 头
+    const s1 = Enemy.fromVanilla(14, 100, 150)!;        // 段1 物理在头上方!
+    const s2 = Enemy.fromVanilla(15, 100, 160)!;
+    s1.wormFollow = head; s2.wormFollow = s1;
+    // 递归链键(渲染同款)
+    const memo = new Map<object, number>();
+    const sortY = (e: Enemy): number => {
+      const m = memo.get(e); if (m !== undefined) return m;
+      memo.set(e, NaN);
+      const v = e.master ?? e.wormFollow;
+      const k = v && !v.dead ? sortY(v) + 0.01 : e.y;
+      memo.set(e, k); return k;
+    };
+    const kh = sortY(head), k1 = sortY(s1), k2 = sortY(s2);
+    expect(kh).toBeLessThan(k1);
+    expect(k1).toBeLessThan(k2);   // 段2 最前——旧 y 排序会得 s1(150)<s2(160)<head(200)=头垫底
+  });
+
+  it('月总族:双手+头锚核心(插入序手→手→头=头最前,原版槽序)', async () => {
+    const core = Enemy.fromVanilla(398, 300, 300)!;
+    const h0 = Enemy.fromVanilla(397, 200, 250)!;   // 物理在核心左上
+    const hd = Enemy.fromVanilla(396, 300, 100)!;   // 头最高(旧 y 排序恒最垫底)
+    h0.master = core; hd.master = core;
+    const memo = new Map<object, number>();
+    const sortY = (e: Enemy): number => {
+      const m = memo.get(e); if (m !== undefined) return m;
+      memo.set(e, NaN);
+      const k = e.master && !e.master.dead ? sortY(e.master) + 0.01 : e.y;
+      memo.set(e, k); return k;
+    };
+    expect(sortY(hd)).toBeGreaterThan(sortY(core));  // 头画核心前
+    // 头/手同键(均 core.y+0.01)——稳定排序保插入序:手先头后=头最前(V8 sort 稳定)
+    expect(sortY(hd)).toBe(sortY(h0));
+    const order = [h0, hd, core].sort((a, b) => sortY(a) - sortY(b));
+    expect(order[2]).toBe(hd);                       // 头居末=最前
+    expect(order[0]).toBe(core);
   });
 });

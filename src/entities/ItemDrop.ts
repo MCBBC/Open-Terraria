@@ -13,6 +13,7 @@ import {
   makeNpcOfItem, npcShimmerTransformTo,
 } from '../stats/Shimmer';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { VANILLA_ITEM_COLOR } from '../data/vanillaItemColor';
 import { liquidCollision } from '../stats/TouchDamage';
 import itemRareJson from '../data/vanilla-itemrare.json';
 import { spawnWOF } from './bossAI_wof';
@@ -33,7 +34,8 @@ export class ItemDrop extends Entity {
   stack: number;
   age = 0;
   bobPhase: number;
-  /** 原版 Item.color（凝胶等掉落继承怪物色，逐像素乘法贴轮廓渲染） */
+  /** 原版 Item.color（Item.cs SetDefaults 静态表——凝胶 23 蓝/316-319 青；
+   *  构造期按 vid 自 VANILLA_ITEM_COLOR 注入，Renderer 两遍着色消费） */
   color?: number[]; // [r, g, b, a]
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
@@ -61,6 +63,12 @@ export class ItemDrop extends Entity {
     this.vx = vx;
     this.vy = vy;
     this.bobPhase = Math.random() * Math.PI * 2;
+    // 原版 Item.color 静态表（Item.cs SetDefaults，凝胶 23 染蓝等）——SetDefaults
+    // 语义随实例走：掉落物一落地就带着色，渲染端 tintedSprite 消费（此前无人赋值
+    // = 死代码，凝胶掉地上也是灰的）。存档/重建走构造自愈，无需序列化。
+    const vid = vanillaIdOfItem(itemId);
+    const ic = vid > 0 ? VANILLA_ITEM_COLOR[vid] : undefined;
+    if (ic && ic[3] > 0) this.color = [...ic];
   }
 
   fixedUpdate(dt: number, game: GameHooks) {

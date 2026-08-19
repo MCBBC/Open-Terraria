@@ -193,8 +193,10 @@ export class TownShot extends Entity {
     }
     for (const ent of game.enemies()) {                          // Damage() :68736
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
-        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
-      if (e.dead || !projOverlap(ex, ey, ER, ER, e)) continue;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[]; friendly?: boolean } };
+      // friendly 弹 × friendly 目标 → Damage_PVE_Inner :11898 return（城镇自卫弹
+      // 穿越睡渔夫 376 等友好 NPC 不误伤；城镇弹 type 恒非 318，无臭鸡蛋例外）
+      if (e.dead || e.def?.friendly || !projOverlap(ex, ey, ER, ER, e)) continue;
       if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false)) {
         playEnemyHitSound(game, e);
         game.addDamageNumber(e.x, e.y, this.damage, false, '#FFD060');
@@ -260,8 +262,9 @@ export class TownShot extends Entity {
     }
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
-        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
-      if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[]; friendly?: boolean } };
+      // friendly 弹 × friendly 目标 → Damage_PVE_Inner :11898 return（同 kill669 段）
+      if (e.dead || e.def?.friendly || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
       if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, false)) {
         playEnemyHitSound(game, e);
         game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');

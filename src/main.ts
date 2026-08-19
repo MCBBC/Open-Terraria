@@ -319,7 +319,6 @@ window.addEventListener('keyup', (e) => {
   if (held < F5_LONGPRESS_MS) {
     // 短按：一键调试报告（机器优先 JSON）——尾部带 behaviorTail（常开环形最近
     // 2000 条：出问题后再按 F5 也能拿到事发前的输入/方块/生死序列）
-    game.refreshTreeProbe();   // 临时树木探针随录制窗开关（验证后撤）
     const r = downloadDebugReport(game, {
       playTimeMs: (flow as FlowHandle & { playStartNow: number }).playStartNow,
       behaviorTail: game.recorder.snapshotTail(2000),
@@ -330,7 +329,6 @@ window.addEventListener('keyup', (e) => {
   // 长按：录制窗开关。关窗 = 导出开窗以来全部事件并下载（复用 debug-report 下载机制）
   const rec = game.recorder;
   const recording = rec.toggle();
-  game.refreshTreeProbe();   // 临时树木探针随录制窗开关（验证后撤）
   if (recording) {
     ui.toast('行为录制中…再长按 F5 结束并保存');
     return;

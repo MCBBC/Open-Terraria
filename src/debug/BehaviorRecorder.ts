@@ -77,9 +77,6 @@ export class BehaviorRecorder {
     this.total++;
   }
 
-  /** 只读：录制窗是否开启（临时树木探针等渲染侧钩子用） */
-  isRecording(): boolean { return this.startTotal !== null; }
-
   /** 录制窗开/关（方向切换）。返回切换后状态（true=录制中）。关窗把起点
    *  移入 lastStart——紧随其后的 export() 取该窗全量（见 lastStart 注释） */
   toggle(): boolean {

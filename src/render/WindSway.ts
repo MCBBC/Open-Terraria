@@ -821,12 +821,6 @@ interface SwayCam { x: number; y: number; zoom: number; viewW: number; viewH: nu
  *  分发顺序对齐原版 PostDrawTiles :428-436：MultiTileVines → MultiTileGrass →
  *  Grass → AnyDirectionalGrass → Trees → Vines → ReverseVines（家族间有层级：
  *  树冠盖在草之上）。家族内序 = 行扫描（原版特殊点即主循环行扫描收集，等价）。 */
-// ════ 临时树木录制探针（2026-08-19 冠-干缝取证用；验证后整体撤除）═════
-// 每帧收集树族冠/枝格的 sway 值（原值 + devSnap 后落点），Renderer 在摆动层
-// 画完后据此对交界带做画布像素探针。非录制态零成本（数组仅本帧活）。
-export interface TreeSwayCell { x: number; y: number; fx: number; sway: number }
-export const treeSwayFrame: { on: boolean; cells: TreeSwayCell[] } = { on: false, cells: [] };
-
 export function drawWindSwayTiles(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, world: World,
   cam: SwayCam, z: number,
@@ -854,7 +848,6 @@ export function drawWindSwayTiles(
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
     worldSurface: world.groundLevel, worldW: world.w,
   };
-  if (treeSwayFrame.on) treeSwayFrame.cells.length = 0;   // 临时探针：帧首清
   const M = 8; // 边距：树冠 80px/藤链下行/多格物体越界绘制
   const tx0 = Math.max(0, Math.floor((cam.x - cam.viewW / 2 / z) / TILE) - M);
   const tx1 = Math.min(st.w - 1, Math.floor((cam.x + cam.viewW / 2 / z) / TILE) + M);
@@ -919,19 +912,6 @@ export function drawWindSwayTiles(
         if (group === 3) {
           const v = TILE_DEFS[type]?.vanilla;
           if (v && TREE_SWAY_SHEETS.has(v.sheet) && v.sheet !== 72) {
-            // 临时探针：记录 sway 原值（drawTreeSway 内部算得，此处用同式重取——
-            // 冠/枝判定与液体/墙门复制自 drawTreeSway 头部，保证口径一致）
-            if (treeSwayFrame.on && st.frameY[i] >= 198) {
-              const isPalm = v.sheet === 323;
-              const crownCell = isPalm ? (st.frameX[i] >= 88 && st.frameX[i] <= 132) : st.frameY[i] >= 198;
-              const variantTop = !isPalm && st.frameX[i] < 22;
-              if (crownCell && !variantTop && st.wall[i] === 0 && st.liquid[i] === 0) {
-                treeSwayFrame.cells.push({
-                  x, y, fx: st.frameX[i],
-                  sway: getWindCycle(x, y, counters.tree, ENV.worldSurface, ENV.remix),
-                });
-              }
-            }
             drawTreeSway(ctx, atlas, st, v.sheet, x, y, st.frameX[i], st.frameY[i], trees);
           }
         }

@@ -2327,8 +2327,12 @@ export class TownNPC extends Entity {
     const num2 = townNpcProgressionBoost(progSwing).damageMul;
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+        damage?: number; def?: { damage?: number; friendly?: boolean };
         hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
       if (e.dead) continue;
+      // 扫描门（:55487 逐字 !nPC2.friendly && nPC2.damage > 0——friendly 残留（睡渔夫
+      // 376 等）与零伤体不吃城镇卫兵挥击；damage=0 对 friendly 已天然成立，双条件保语义）
+      if (e.def?.friendly || (e.damage ?? e.def?.damage ?? 0) <= 0) continue;
       if (!(rx < e.x + e.w && rx + rect > e.x && ry < e.y + e.h && ry + rect > e.y)) continue;
       // 伤害结算(:55466):GetAttackDamage_ForTownNPC(num82*num2)——(int) 截断
       if (e.hurt(getAttackDamageForTownNPC(dmg * num2, mainDifficulty(world)), this.facing * kb, 0, game)) {

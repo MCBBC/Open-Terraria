@@ -226,24 +226,20 @@ function checkMultiDirAnchor(st: TileStore, i: number, j: number): number {
   return -1;
 }
 
-/** 方向基带（TileFrame case 178 :85844-85882 的 num22 switch） */
-const GEM_DIR_BASE: Record<number, number> = { 0: 0, 1: 54, 2: 108, 3: 162 };
-
-/** 放 1 格暴露晶簇（= PlaceTile 178 分支 + SquareTileFrame→TileFrameImportant case 178
- *  合并，掷骰序 1:1）：
+/** 放 1 格暴露晶簇（= PlaceTile 178 分支 + 两连 SquareTileFrame，掷骰序 1:1）：
  *  ① PlaceTile（cs:59717-59725）：CheckAndAdjust 通过才放置（失败不放置不掷骰），
  *     frameX=style*18、frameY=Next(3)*18（roll1）；
- *  ② SquareTileFrame(cs:80924)→TileFrame(i,j,resetFrame=true)：178 是 tileFrameImportant
- *     （Main.cs:7362）→ TileFrameImportant case 178（cs:85843-85882）**无条件**再掷
- *     num21=Next(3)*18（roll2；resetFrame=true 恒走 genRand 分支）。roll1∈{0,18,36}
- *     恒落在 dir0 带宽 [0,36] → num22=-1 保留 roll1；dir1/2/3 基带错位 → 覆写为
- *     基带+roll2。★G3：此前只掷 1 骰，每颗宝石少掷 1 骰，全链 RNG 流分叉。
- *  ③ PlaceTile 成功尾部（cs:60275-60281 `if (tile.active()) SquareTileFrame(i,j)`，
- *  resetFrame 默认 true）→ 第三次 Next(3)（roll3）。此时帧已在基带内 → num22=-1
- *  恒 no-write——纯幽灵掷，只移流。★OOOO：此前缺此掷，每颗宝石少 1 掷 ×13 ≈
- *  IIII 实测 site#0 d=+23 的 +13 半边（另 +10=Next(20) 转换计数差）。
- *  邻域 8 格 TileFrame(resetFrame=false)：num21=frameY%54 无掷骰，且 178 非实心、
- *  不改变邻格锚定 → 不存在"邻域触发的第四掷"（cs:85844-85880 判定结论，免补）。 */
+ *  ②③ cs:59724 显式 + cs:60275-60281 成功尾 `if (tile.active())` 两连 SquareTileFrame
+ *     （cs:80924 列主序、中心第 5 位 resetFrame=true）：中心 178 是 tileFrameImportant
+ *     （Main.cs:7362）→ TileFrameImportant case 178（cs:85843-85882）——CheckAndAdjust
+ *     失败 KillTile；成功掷 num21=Next(3)*18（roll2/roll3）+ 带外基带覆写（roll3 时
+ *     帧已在带内 → no-write 纯幽灵掷，OOOO 定谳）。八邻（resetFrame=false）走帧杀
+ *     引擎级联（165/485 等锚定装饰——SSSS/RRRR 接入）。
+ *  ★LLLLL（2026-08-19）：roll2/roll3 与方向基带覆写改由引擎 frame178Sweep（UUUU
+ *    落地）产出——手写镜像系引擎 case 178 上线前的补偿，其保留=每颗宝石 +2 幽灵掷
+ *    （UUUU 引擎上线后 #64 Gem_Caves 金标基座重放 A=317/T=953/W=2763 全站漂移、
+ *    首差 (1969,592)，曾被误记"并行在途漂移带"）。尾帧以中心仍 active 为门（首帧
+ *    帧杀成功则 vanilla 跳过尾帧，cs:60275）。 */
 export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
   // PlaceTile 通用前置清（cs:59500 !active→Clear(Tile|TilePaint|Slope)，178 非液体
   // 拒绝表族故必达）：type/帧/半砖/坡/油漆归零——放置失败也清（OOOO #77 'i0' 同源）。
@@ -254,20 +250,16 @@ export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, styl
     st.type[pi] = 0; st.frameX[pi] = 0; st.frameY[pi] = 0;
     st.half[pi] = 0; st.slope[pi] = 0; st.paint[pi] = 0;
   }
-  const dir = checkMultiDirAnchor(st, x, y);
-  if (dir < 0) return;                       // CheckAndAdjust 失败：不放置、不掷骰
-  const roll1 = rng.nextInt(3) * 18;         // ① cs:59724
+  if (checkMultiDirAnchor(st, x, y) < 0) return;   // CheckAndAdjust 失败：不放置、不掷骰
+  const roll1 = rng.nextInt(3) * 18;               // ① cs:59724
   st.setTile(x, y, EXPOSED, style * 18, roll1);
-  const roll2 = rng.nextInt(3) * 18;         // ② cs:85855（resetFrame=true 无条件掷）
-  if (dir !== 0) st.frameY[st.idx(x, y)] = GEM_DIR_BASE[dir] + roll2; // num22 基带覆写
-  // ② cs:59724 SquareTileFrame：八邻全分派（含非活跃清 half/slope/块漆 + 165/485
-  // 等锚定装饰帧杀级联——★SSSS：RRRR 帧杀引擎接入，#93 残 10/11 的主根因）。中心
-  // 178 引擎无分派 case（非实心非仙人掌/藤）= no-op，roll2/roll3 由上方手写保持。
+  // ② cs:59724 显式 SquareTileFrame：列主序八邻（帧杀级联）+ 中心（引擎 roll2 +
+  //    CheckAndAdjust 方向基带覆写——frame178Sweep）。
   genSquareTileFrame(st, rng, x, y);
-  rng.nextInt(3);                            // ③ cs:60281 尾部帧（band 内 no-write 幽灵掷）
-  // ③ cs:60281 尾部 SquareTileFrame：八邻再访（首访击杀后二访级联复核——邻堆连杀/
-  // 苔藓芽重掷语义，同 PilesPass 双尾帧口径）。
-  genSquareTileFrame(st, rng, x, y);
+  // ③ cs:60281 成功尾 SquareTileFrame（`if (tile.active())` 门——首帧中心被杀则
+  //    跳过）：八邻再访（首访击杀后二访级联复核——邻堆连杀/苔藓芽重掷语义，同
+  //    PilesPass 双尾帧口径）+ 中心 roll3（带内 no-write 幽灵掷）。
+  if (st.flags[pi]) genSquareTileFrame(st, rng, x, y);
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============

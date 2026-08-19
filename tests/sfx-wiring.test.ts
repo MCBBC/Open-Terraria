@@ -6,6 +6,7 @@
 //  C. MinionProj.ts：族召唤音（首帧）+ 阿比盖尔挥击 + 射弹出膛（376 小鬼火球 Item_20）+
 //     OOA 哨兵放置/开火音
 // 全部断言走 mock 的 game.playSfxFiles 录音（不触真实音频）。
+import { BetsyBreath } from '../src/entities/bossAI_dd2';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { MinionProj } from '../src/entities/MinionProj';
@@ -134,7 +135,11 @@ describe('B. bossAI_dd2.ts 状态机音', () => {
     e.ai0 = 3; e.ai1 = 0; e.ai2 = 0;
     tickEnemy(e, h, 41);
     expect(played(h.sfx, 'dd2_betsy_flame_breath')).toHaveLength(1);
-    expect(h.projectiles.some((p) => p.damage === 35)).toBe(true);
+    // 687 = 锚定 Betsy 嘴部的持续喷焰实体(AI_136 :65843,78t 寿命——曾坍缩为
+    // 30×30 自由飞弹,2026-08-19 大件批 D 已按原版锚定化,断言同步更新)
+    const breath = h.projectiles.find((p) => p instanceof BetsyBreath);
+    expect(breath).toBeTruthy();
+    expect((breath as BetsyBreath).dmg).toBe(35);
   });
   it('Betsy：空袭掠射投 686 火球 → 出膛音 dd2_betsy_fireball_shot', () => {
     const h = makeHooks(makeWorld(), { x: 130, y: 100 });

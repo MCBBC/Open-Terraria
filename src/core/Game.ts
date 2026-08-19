@@ -196,9 +196,7 @@ import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bes
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
-import { Renderer, Particle, DamageNumber, Minimap, setTreeProbeSink } from '../render/Renderer';
-// 临时树木录制探针（2026-08-19 冠-干缝取证；验证后随探针整体撤除）
-import { treeSwayFrame } from '../render/WindSway';
+import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
@@ -814,6 +812,7 @@ export class Game implements GameHooks {
   recLog(k: string, d: unknown): void { this.recorder?.log(k, d); }
   /** 行为录制：雨态沿基准（updateWeather 里与 weather.raining 比对） */
   private _recLastRaining = false;
+
 
   // 挖掘状态
   private mining: { x: number; y: number; progress: number } | null = null;
