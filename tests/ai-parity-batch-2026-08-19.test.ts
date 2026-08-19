@@ -26,7 +26,10 @@ describe('AI 全量审计严重项回归(2026-08-19)', () => {
     if (!f) throw new Error('fairy 构造失败');
     const player = { cx: f.cx - 200, cy: f.cy, x: f.x - 200, y: f.y, w: 20, h: 42,
       dead: false, itemAnimTicks: 0, useTime: 0, aggro: 0 };
-    // 状态0:玩家 250px 内 → 转 1 且背向(玩家在左 → facing=1 向右逃)
+    // 状态0:玩家 250px 内 → 转 1 且背向(玩家在左 → facing=1 向右逃)。
+    // ★预置 vx=0.1：fairyAI 尾部 facing=sign(vx) 会以锚点漂移的随机 ±0.02 定向
+    //（50% 翻成 −1）——组合运行时 RNG 状态不同 = 偶发假红（2026-08-19 硬化）
+    f.vx = 0.1;
     drive(f, 'fairyAI').call(f, game, player);
     expect(f.ai2).toBe(1);
     expect(f.facing).toBe(1);
@@ -43,9 +46,11 @@ describe('AI 全量审计严重项回归(2026-08-19)', () => {
     if (!lb) throw new Error('ladybug 构造失败');
     // 钉陆行态（ai[2]=1,cs:48036-48075）：首帧初始化恒置 ai[2]=0（飞行态,
     // Lerp 0.0125 慢飞）,直接驱动只会测到飞行动量;2026-08-19 ladybug 风漂
-    // 重构后飞行 |Δ|≤0.0125 恒不达 0.02 阈 → 预置 aiInit/ai2 走陆行分支
+    // 重构后飞行 |Δ|≤0.0125 恒不达 0.02 阈 → 预置 aiInit/ai2 走陆行分支。
+    // ★ai1 预置 100：重选掷 1/5 会把 ai2 翻回 0（飞行态）= 组合运行偶发假红
     lb.aiInit = true;
     lb.ai2 = 1;
+    lb.ai1 = 100;
     const v0 = lb.vx;
     drive(lb, 'ladybugAI').call(lb, game, null);
     // Lerp(0.05) 步进:|Δ| ≈ facing×0.05(若目标 1);旧实现目标 0.05 → Δ≈0.005

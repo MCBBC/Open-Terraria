@@ -692,12 +692,14 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   }
   if (player) e.facing = e.seekDirX(player);
   if (!player) {
-    // 目标彻底失效:上方已强制 ai0=13,此处推进淡出自毁(:47236/:47264-47271)
+    // 目标彻底失效:上方已强制 ai0=13,此处推进淡出自毁(:47236/:47264-47271)。
+    // ★bossFled 同置——原版是静默 active=false,曾只写 dead 被 Game 记为"击败":
+    // 假公告+误写 downed_636+误触 LanternNight 且零掉落(2026-08-19 终审修)
     e.spawnAlpha = Math.min(254, e.spawnAlpha + 5);
     e.vx *= 0.95; e.vy *= 0.95;
     e.ai1 += 1;
     flyIntegrate(e);
-    if (e.ai1 >= 20 && e.spawnAlpha >= 254) e.dead = true;
+    if (e.ai1 >= 20 && e.spawnAlpha >= 254) { e.bossFled = true; e.dead = true; }
     return;
   }
 
@@ -828,6 +830,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           // 原版 923 零速绕体公转(收敛:8 速放射)
           shoot(game, e.cx, e.cy - 100, Math.cos(a) * 8, Math.sin(a) * 8,
             dayEnrage ? 9999 : phase2 ? 60 : 50, 923, 240);   // num10 :46335
+            game.playSfxWav?.('Item_159', 1, e.cx, e.cy);   // 弹 923 首帧音(pcs:42324)
         }
       }
       e.ai1 += 1;
@@ -896,8 +899,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         simpleFly(e, (dx / d) * 12, (dy / d) * 12, 1.0);
         if (e.ai1 === 40) { e.vx *= 0.3; e.vy *= 0.3; }
       } else if (e.ai1 <= 90) {
-        e.vx = vLerp(side * 50, e.vx, 0.05);
-        e.vy = vLerp(0, e.vy, 0.05);
+        // :46959-46962 Lerp(velocity, (±50,0)) 5%/t——从当前速向 ±50/0 渐进
+        // (40t 爬坡;曾实参颠倒=一帧跳到 95% 目标速,终审修)
+        e.vx = vLerp(e.vx, side * 50, 0.05);
+        e.vy = vLerp(e.vy, 0, 0.05);
         if (e.ai1 === 90) { e.vx *= 0.7; e.vy *= 0.7; }
       } else {
         e.vx *= 0.92; e.vy *= 0.92;
@@ -960,7 +965,8 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       e.spawnAlpha = clamp(e.spawnAlpha + (flag7 ? 5 : -5), 0, 254);
       e.ai1 += 1;
       if (e.ai1 >= 20 && (e.spawnAlpha <= 0 || e.spawnAlpha >= 254)) {
-        if (e.spawnAlpha >= 254) { e.dead = true; return; }   // :47264-47271 全隐 → active=false
+        // :47264-47271 全隐 → active=false(静默,非击杀——bossFled 同置,终审修)
+        if (e.spawnAlpha >= 254) { e.bossFled = true; e.dead = true; return; }
         e.ai0 = 1; e.ai1 = 0;                            // :47273-47275 全显 → 回战斗
       }
       break;
@@ -1326,6 +1332,7 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
           for (let i = 0; i < count; i++) {
             const a = (-i * Math.PI * 2) / num6;
             shoot(game, e.cx, e.cy, Math.cos(a) * 9, Math.sin(a) * 9, 30, 926);
+            game.playSfxWav?.('Item_155', 1, e.cx, e.cy);   // 弹 926 首帧音(pcs:52218)
           }
           // 原版凝胶环发射零吼(:46105 的 65 号声是 QueenSlime 1/360 环境声,
           // 与发射时机无关)——曾借 roar 0.5,2026-08-18 对账删

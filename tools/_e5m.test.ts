@@ -210,6 +210,11 @@ function e5Settle(world: World, st: TileStore, gs: GenState, rng: RNG): void {
 }
 
 describeOrSkip('EEEEE 中世界链探针 20260811 6400x1800', () => {
+  it('segProbe 记录（轨道/矿爆计数）', () => {
+    (globalThis as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg = (n, d) => {
+      if (/Track|mines|deadCount/.test(n)) console.log(`SEG ${n} ${JSON.stringify(d)}`);
+    };
+  });
   it('JS 链 4 通道 + STREAM vs caves-oracle 中世界', async () => {
     const ora = JSON.parse(readFileSync(ORA, 'utf8')) as { checkpoints: string[] };
     const og = new Map<string, string[]>();

@@ -418,7 +418,7 @@ async function liquidSettlePass({ world, rng }: GenCtx) {
         : { x0: mid, x1: world.w - edge, y0: Math.floor(gs.worldSurface) + 10, y1: (world.h - 200) - 10 };
     }
   }
-  await settleWorldLiquids(world, 'gen', undefined, rng);
+  await settleWorldLiquids(world, 'gen', undefined, rng, true);
   // ★pass 尾 tileSolid 翻转（cs:16292 `Main.tileSolid[484] = false`）——DesertBiome
   //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
   flipGenSolid([484], false);

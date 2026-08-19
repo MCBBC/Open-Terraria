@@ -1661,7 +1661,11 @@ export class Game implements GameHooks {
 
   /** v6 msg201：SSC 服务器角色档应用（--ssc 房）——覆盖本地角色后重 dump 对齐服务器快照。
    *  语义=原版 ServerSideCharacter：角色进度存服务器、跨设备恢复；信任模型同原版（非反作弊） */
+  /** 本局是否消费过服务器侧角色(SSC)记录——访客本地随身态的优先级判据:
+   *  SSC 已应用则本地 charState 不再覆盖(服务器权威优先) */
+  netSSCApplied = false;
   private netApplySSC(recordJson: string) {
+    this.netSSCApplied = true;
     try {
       const rec = JSON.parse(recordJson) as {
         hp: number; maxHp: number; x: number; y: number;
@@ -2248,8 +2252,16 @@ export class Game implements GameHooks {
     // 2270 自会用【重建后的】renderer.canvas 绑定,单实例不变
     this.renderer.onCanvasRecreated = (canvas) => {
       if (this.input) {
+        // ★迁移 Game 注册的回调再重建(2026-08-19 用户实报:自愈后数字键/Enter
+        // 失效)——keydownHandlers(快捷栏 Digit0-9/聊天)与 onKeyEvent(行为录制)
+        // 只在 Game 启动时注册一次;旧写法 destroy+new 后新实例两张表全空,
+        // 鼠标/移动(window 级+轮询)活着而数字键死 = 恰好用户症状
+        const handlers = this.input.keydownHandlers.slice();
+        const onKey = this.input.onKeyEvent;
         this.input.destroy();
         this.input = new Input(canvas);
+        this.input.keydownHandlers.push(...handlers);
+        this.input.onKeyEvent = onKey;
       }
       this.renderer.installGpuPressureGuard();      // 新画布挂回单点监听(window 哨兵常在)
     };
@@ -6666,8 +6678,20 @@ export class Game implements GameHooks {
               // 5669 档案恒 3507、Zenith 首 4956 后续表随机）
               const isZenith = cwMelee.shoot === 933;
               const [zwx, zwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-              const cycle = Math.floor((this.swing?.t ?? 0) / (cwMelee.useTime ?? 10));
+              // 原版 num164=(itemAnimationMax−itemAnimation)/itemTime（动画进度递增）——
+              // 我们 swing.t 递减，须换算 (dur−t)/useTime（曾 t/useTime=方向反：首剑
+              // 吃散射档/末剑才 4956 档案，2026-08-19 天顶剑审查）
+              const sw = this.swing;
+              const cycle = Math.floor(((sw?.dur ?? 0) - (sw?.t ?? 0)) / (cwMelee.useTime ?? 10));
               let tzx = zwx, tzy = zwy;
+              // LimitPointToPlayerReachableArea（Player.cs:44828）：钳到玩家中心
+              // MaxWorldViewSize(1920×1200) 矩形内（鼠标超界时收边）
+              {
+                const hw = 960, hh = 600;
+                const pcx = this.player.cx, pcy = this.player.cy;
+                tzx = Math.max(pcx - hw, Math.min(pcx + hw, tzx));
+                tzy = Math.max(pcy - hh, Math.min(pcy + hh, tzy));
+              }
               if (cycle >= 1) {
                 let best: { cx: number; cy: number } | null = null, bd = 400;
                 for (const ent of this.entities.enemies) {
@@ -14743,8 +14767,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     // 普通怪：落脚位（原版 HasTileSpawnSpace：上方两格净空）
+    // ★扫描序自地面起向上（0,-1,-2,…再 +1..+8 兜底）——曾自 pty-4 向下扫，
+    //  ground 门又允许脚下空一格（yy+2 实心即匹配）→ 平地首选 pty-2 → 底边
+    //  悬空 16px → 落体 vy>0.3 触发 AI_017 速度唤醒门（cs:24091）→ 秃鹫出生
+    //  即飞（用户报"画面外直接飞进来"，2026-08-19）。自地起扫首选 pty-1 →
+    //  底边贴地无落体，栖息态保持（原版落位=spawnTileY*16 底贴地面同语义）
     let spawnY = -1;
-    for (let dy = -4; dy <= 8; dy++) {
+    for (const dy of [0, -1, -2, -3, -4, 1, 2, 3, 4, 5, 6, 7, 8]) {
       const yy = pty + dy;
       if (yy < 2 || yy > st.h - 3) continue;
       const dry = st.liquid[st.idx(ptx, yy)] <= 40 && st.liquid[st.idx(ptx, yy - 1)] <= 40;
@@ -19761,7 +19790,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *    664 火把神（小游戏结束演出 NewNPC）。
    *    398 经 SpawnBoss 同静默，但唯一生成路径 SpawnOnPlayer(:81358-81360)
    *    专项播 Enemies.MoonLord，单列。 */
-  private static readonly BOSS_SPAWN_SILENT = new Set([50, 82, 126, 316, 551, 662, 68, 395, 439, 396, 397, 664]);
+  private static readonly BOSS_SPAWN_SILENT = new Set([82, 126, 316, 551, 662, 68, 395, 439, 396, 397, 664]);
+  // ★50 史王已移出:SpawnBoss 内 NewNPC Type==50 恒播 HasAwoken(:81564-81567)=
+  // 1456 实际非静默(物品王冠路径同样公告,2026-08-19 终审收口)
 
   /** 物品召唤咆哮集（ItemCheck_UseBossSpawners Player.cs:43080-43232 +
    *  石巨人能量电池祭坛 :32322——全表 SoundID 15 Roar，唯一例外 222 蜂后

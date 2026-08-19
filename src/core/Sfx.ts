@@ -162,7 +162,8 @@ export const FILE_CASE_VOL: Record<string, number> = (() => {
   // case 3 NPCHit（:645-671）：style 20-54 ×0.5（:648）、55/56 ×0.5（:660）、57 ×0.6（:656）；1-19 无修正
   for (let s = 20; s <= 54; s++) m[`NPC_Hit_${s}`] = 0.5;
   m.NPC_Hit_55 = 0.5; m.NPC_Hit_56 = 0.5; m.NPC_Hit_57 = 0.6;
-  // case 4 NPCKilled（:672-694）：style 23-57 ×0.5（:675）、61/62 ×0.6（:679/:683）
+  // case 4 NPCKilled（:672-694）：style 23-57 ×0.5（:675）、61/62 ×0.6（:679/:683）、
+  //   10 已在播则跳过（:688——肉山尖啸去重,NPC_Killed_10 入 SINGLE_INSTANCE）
   for (let s = 23; s <= 57; s++) m[`NPC_Killed_${s}`] = 0.5;
   m.NPC_Killed_61 = 0.6; m.NPC_Killed_62 = 0.6;
   // case 2 Item（:519-643）：styles 53 ×0.75/55 ×0.75×0.75（:555-561）、37 ×0.5（:567）、
@@ -271,7 +272,7 @@ export class Sfx {
    *  时 return null 不重触发)——仅 Roar:多段蠕虫(毁灭者 80 段各自掷 soundDelay)靠
    *  同槽互斥收敛为单声,否则每 10-20t 满响吼叫叠成音墙。NPC_Hit(case3)是 Stop-重播、
    *  NPC_Killed(case4)/僵尸族(case14/26/29)每次都播,均不在此列 */
-  private static readonly SINGLE_INSTANCE = new Set(['Roar_0', 'Roar_1']);
+  private static readonly SINGLE_INSTANCE = new Set(['Roar_0', 'Roar_1', 'NPC_Killed_10']);
   /** 单实例槽:file → 正在播的 source(onended 清) */
   private singlePlaying = new Map<string, AudioBufferSourceNode>();
 

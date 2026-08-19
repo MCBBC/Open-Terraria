@@ -318,6 +318,8 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
           bub.x = e.cx + (ddx / dd) * ((e.w + 20) / 2) - bub.w / 2;
           bub.y = e.cy + (ddy / dd) * ((e.w + 20) / 2) + 45 - bub.h / 2;
         }
+        // :49612 每吐一颗播 PlaySound(4,…,19)=NPC_Killed_19(case4=死音库)
+        game.playSfxWav?.('NPC_Killed_19', 1, e.cx, e.cy);
       }
       const s = Math.sign(player.cx - e.cx) || st.dir;
       st.dir = s; st.spr = -s;
@@ -369,6 +371,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
       if (e.ai2 % DUKE.spinEvery === 0) { // 每 4t 沿垂直方向甩一颗泡泡
         const vlen = Math.hypot(e.vx, e.vy) || 1;
         const bub = spawnPart(game, e, 371);
+        game.playSfxWav?.('NPC_Killed_19', 1, e.cx, e.cy);   // :49843 每颗吐音(case4,19)
         if (bub) {
           bub.bInit = true; bub.ai0 = 0; bub.ai1 = 0;          // 预置初速,跳过自初始化
           bub.ai3 = (80 + Math.random() * 41) / 100;            // :49751 随机 scale
@@ -582,6 +585,8 @@ export class DukeSharknadoBolt extends Entity {
   private kill(game: GameHooks): void {
     this.dead = true;
     game.spawnParticles(this.cx, this.cy, '#7FB8E8', 10, 2.4, { life: 24, damp: 0.94 });
+    // :70716 弹 385 落地 = PlaySound(4,…,19) = NPC_Killed_19(case4=死音库,2026-08-19 终审补)
+    game.playSfxWav?.('NPC_Killed_19', 1, this.cx, this.cy);
     if (this.netPuppet) return;
     if (this.big) {
       // :70752-70770 自弹体 tile 向下扫 100 格,落点 = 首个实心/液体格上沿 -24px
@@ -790,10 +795,11 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
     e.ai1 += 1;
     if (e.ai1 >= RISE_T) {
       // :35242-35261 蓄力期满:16 速扑咬(撞块内则 ai1=0 延后起扑);
-      // :35250 PlaySound(4,…,19)=NPCHit style19 起扑音(2026-08-19 台账 E 补)
+      // :35250 PlaySound(4,…,19)=**NPCKilled** style19(case4=死音库!曾误用
+      // NPC_Hit_19 错库,2026-08-19 终审修)
       e.ai0 = 1;
       e.ai1 = inSolid(game, e) ? 0 : 1;
-      game.playSfxFiles(['NPC_Hit_19'], 1, e.cx, e.cy);
+      game.playSfxFiles?.(['NPC_Killed_19'], 1, e.cx, e.cy);
       if (player) {
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;

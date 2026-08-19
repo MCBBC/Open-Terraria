@@ -480,6 +480,11 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       //  独有掷在 TrackPass 语境中的精确落点)
       const trackLog: string[] = [];
       let spanRoll = 0;
+      // FFFFF:JS 侧掷栈迹（SW_WWW_SPAN_JSTACK=from:to,配 SW_WWW_SPAN_TRACK 用）
+      const jstk = (process.env.SW_WWW_SPAN_JSTACK ?? '').split(':').map(Number);
+      const jstackLo = jstk.length === 2 && jstk.every(Number.isFinite) ? jstk[0]! : -1;
+      const jstackHi = jstk.length === 2 && jstk.every(Number.isFinite) ? jstk[1]! : -1;
+      const jstackLog: string[] = [];
       if (spanOut && process.env.SW_WWW_SPAN_TRACK === '1') {
         let lastStep = '';
         __setTrackStepProbe((loop, k, x, y, ph) => {
@@ -508,7 +513,13 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
             // AAAAA：全样本流 d/n 通道（对齐 XXXX 织入的 vanilla span 格式——
             //   NextDouble()→'d'、裸 Next()→'n'；SW_WWW_SPAN_DN=0 可关）
             else if (process.env.SW_WWW_SPAN_DN !== '0' && (fname === 'next' || fname === 'chance' || fname === 'range')) line = 'd';
-            if (line) { spanLines.push(line); spanRoll++; }
+            if (line) {
+              spanLines.push(line); spanRoll++;
+              // FFFFF:SW_WWW_SPAN_JSTACK=from:to → 掷区间栈迹(<out>.jstack.txt)
+              if (jstackLo >= 0 && spanRoll >= jstackLo && spanRoll <= jstackHi) {
+                jstackLog.push(`roll ${spanRoll} ${line}\n${new Error().stack}\n====`);
+              }
+            }
             return r;
           };
         },

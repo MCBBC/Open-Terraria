@@ -228,9 +228,11 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
   L.roarT += 1;
   if (L.roarT >= 600 + Math.random() * 1000) {
     L.roarT = -Math.random() * 200;
-    // :25803 PlaySound(4, x, y, 10) = Sounds/Zombie_10（LegacySoundPlayer.cs:221
+    // :25803 PlaySound(4, x, y, 10) = **NPC_Killed_10**（LegacySoundPlayer :251 type4=NPCKilled
+    // 死音库——曾误播 Zombie_10 且引错 Load 行;style10 另有"已在播跳过"去重
+    // （:688,已入 Sfx.SINGLE_INSTANCE）,2026-08-19 终审修
     // "Zombie_"+k）——WoF 专属尖啸，非 Boss Roar
-    game.playSfxFiles(['Zombie_10'], 0.8, e.cx, e.cy);
+    game.playSfxWav?.('NPC_Killed_10', 1, e.cx, e.cy);
   }
 
   // ---- 地狱空腔上下沿扫描(:25837-25965) ----
@@ -318,8 +320,8 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (!player || player.dead) {
     L.despawnT += 1 / 180;
     if (L.despawnT >= 1) {
-      // :26027 PlaySound(4, x, y, 10) = Zombie_10 尖啸（同周期吼）
-      game.playSfxFiles(['Zombie_10'], 0.8, e.cx, e.cy);
+      // :26027 同款 NPC_Killed_10 尖啸(玩家死自毁瞬间)
+      game.playSfxWav?.('NPC_Killed_10', 1, e.cx, e.cy);
       e.hp = 0;
       e.bossFled = true;   // 玩家死 3s 自毁（:26040-26048 life=0 静默,非击杀）
       e.dead = true;

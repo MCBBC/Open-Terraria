@@ -99,7 +99,9 @@ describe('台账 B：小动物族 1:1 修复批（2026-08-19）', () => {
       peak = Math.max(peak, Math.abs(e.vx));
     }
     expect(peak).toBeGreaterThan(0.15);     // 确实走到帽
-    expect(peak).toBeLessThanOrEqual(0.2 + 1e-9);
+    // 帽 0.2 + 原版西向钳位不对称（:54360-54366 只钳 +maxX）越帽一个 acc 步的
+    // 瞬态（超帽分支腾空不衰减 → 峰值 ~0.2+0.07；旧实现帽 0.5 巡航 → 峰 0.5+）
+    expect(peak).toBeLessThanOrEqual(0.28);
   });
 
   // ---- 1.6 wet 语义：碰撞盒 WetCollision（cs:53585 等），非中心格 liquid>80 ----
@@ -140,6 +142,7 @@ describe('台账 B：小动物族 1:1 修复批（2026-08-19）', () => {
     e.fixedUpdate(1 / 60, hooks);                 // 锚 home = 出生列 60
     e.x = 5 * 16;                                 // 挪到 home−55 格，背向家
     e.ai0 = 0; e.ai1 = 50; e.facing = -1; e.vx = 0; e.vy = 0;
+    e.lai3 = 0;   // 锚 tick 的 1/80 随机翻向若掷中会锁 200t（localAI[3] 门，原版语义）
     e.fixedUpdate(1 / 60, hooks);
     expect(e.facing).toBe(1);                     // 掉头朝家
   });

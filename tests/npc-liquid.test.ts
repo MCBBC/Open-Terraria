@@ -522,7 +522,10 @@ describe('龟/蛙/游鸭鸥钉水面（AI_007 cs:55586 flag12 / AI_068 cs:34934�
     const e = Enemy.fromVanilla(616, 20 * TILE, 34 * TILE)!;  // 中心行 34（液面下一行）
     const h = hooks(w, p);
     let minCy = Infinity, maxCy = -Infinity;
-    for (let i = 0; i < 200; i++) {
+    // ★窗口 40t（曾 200t）：2026-08-19 wet 语义 1:1 修正（碰撞盒 WetCollision，
+    // cs:54293）后钉面龟真"湿"→ 水中 2px/t 巡游，~80t 走出 20 格池上岸干涸——
+    // 原版行为；中心格 liquid>80 旧近似把钉面龟判"干"0.5px/t 才赖在池里 200t
+    for (let i = 0; i < 40; i++) {
       e.fixedUpdate(1 / 60, h as never);
       minCy = Math.min(minCy, e.cy); maxCy = Math.max(maxCy, e.cy);
     }
@@ -536,7 +539,8 @@ describe('龟/蛙/游鸭鸥钉水面（AI_007 cs:55586 flag12 / AI_068 cs:34934�
     const e = Enemy.fromVanilla(361, 20 * TILE, 34 * TILE)!;
     const h = hooks(w, p);
     let saw50 = false, maxCy = -Infinity;
-    for (let i = 0; i < 200; i++) {
+    // ★窗口 40t（同上）：湿蛙水中窜游（maxX×10 一窜 ~100px）会真离池（原版行为）
+    for (let i = 0; i < 40; i++) {
       e.fixedUpdate(1 / 60, h as never);
       if (e.ai1 <= 50) saw50 = true;
       maxCy = Math.max(maxCy, e.cy);

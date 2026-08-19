@@ -536,6 +536,18 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   /** 加入房间（探针桥 + UI 共用语义）：url = ws://host:port/<房间码>[?token=] */
   async function joinRoom(url: string, hostToken = ''): Promise<void> {
     await makeGame().joinNetGame(url, () => {}, hostToken);
+    // 访客随身态(.plr 语义接入,2026-08-19):SSC 未随世界下发时以本地角色态起步
+    // ——服务器若已在 onWorldReady 链内应用 SSC(netSSCApplied)则跳过,优先级
+    // 服务器权威 > 本地角色态 > 默认新角色。物品消费在非 SSC 房为本地权威语义
+    const g = game;
+    if (g && !g.netSSCApplied) {
+      const cid = charContextId();
+      const cs = cid != null ? await charStore.getState(cid) : null;
+      if (cs) {
+        applyPlayer(g, { ...playerFromDiskForm(cs), x: g.player.x, y: g.player.y });
+        applyCharJourney(g, cs);
+      }
+    }
   }
 
   /** 探针桥：当前世界序列化后向中央服务器建房（返回 {code, hostToken}）。

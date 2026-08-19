@@ -75,6 +75,16 @@ const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly
   397: () => [-2, -2, -1],   // num145−1（cs:29821-29823）
 };
 
+/** num143/num144(含 397 的 num145−1)偏移求值——静态+动态两表共用,
+ *  供 MinionProj 等非 drawProj 消费端接入。返回 null = 两表均未登记。
+ *  dirX = spriteDirection 语义(+1 右/−1 左);boxH = 碰撞盒高(313 高度门用)。 */
+export function projDrawOffsetFor(projId: number, dirX: number, boxH: number): readonly [number, number, number] | null {
+  const dyn = PROJ_DRAW_OFFSET_DYN[projId];
+  if (dyn) return dyn(dirX, boxH);
+  const st = PROJ_DRAW_OFFSET[projId];
+  return st ? [st[0], st[1], 0] : null;
+}
+
 /** 共用绘制：投射物贴图按角度旋转。
  *  锚点 1:1 原版通用绘制公式（Main.cs:34040）:
  *    anchor = (盒左 + num145 + num144, 盒上 + 盒高/2),origin = (num145, 盒高/2 + num143)
@@ -98,13 +108,10 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const W = hasImg ? img!.width : dw;
   const num145 = (W + e.w) / 2;                       // (贴图宽−盒宽)/2 + 盒宽/2
   // 偏移取值：方向/高度依赖项优先（弹体朝向取实体 facing——spriteDirection 语义），
-  // 其余走静态表
-  const dyn = PROJ_DRAW_OFFSET_DYN[projId];
-  const dirX = (e as { facing?: number }).facing ?? 0;
-  const [off143, off144, num145Adj] = dyn
-    ? dyn(dirX, e.h)
-    : [...(PROJ_DRAW_OFFSET[projId] ?? [0, 0]), 0];
-  const num145f = num145 + (num145Adj ?? 0);
+  // 其余走静态表（共享求值——MinionProj 等消费端同源）
+  const off3 = projDrawOffsetFor(projId, (e as { facing?: number }).facing ?? 0, e.h);
+  const [off143, off144, num145Adj] = off3 ?? [0, 0, 0];
+  const num145f = num145 + num145Adj;
   const s = dw / W;                                   // 绘制缩放(原生尺寸=1)
   ctx.save();
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)

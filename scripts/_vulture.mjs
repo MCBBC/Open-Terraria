@@ -13,34 +13,41 @@ await page.evaluate(() => window.__swFlow.newWorld('', 4200, 1200));
 await page.waitForFunction(() => !!window.__swGame, { timeout: 120000 });
 const r = await page.evaluate(() => {
   const g = window.__swGame, st = g.world.store;
-  // 找一处地表沙列
   let col = -1, gy = -1;
-  outer: for (let x = 100; x < 4200; x++) {
-    for (let y = 10; y < 400; y++) {
+  for (let x = 300; x < 3900 && col < 0; x++) {
+    for (let y = 60; y < 400; y++) {
       if (st.isSolid(x, y)) {
-        // 上两格空 + 是沙
-        const i1 = st.idx(x, y - 1), i2 = st.idx(x, y - 2);
-        if (!st.flags[i1] && !st.flags[i2]) { col = x; gy = y; break outer; }   // 任一地表即可
+        if (st.isSolid(x - 1, y) && st.isSolid(x + 1, y)
+          && !st.isSolid(x, y - 1) && !st.isSolid(x, y - 2)) { col = x; gy = y; }
+        break;
       }
     }
   }
-  if (col < 0) return { why: 'no sand col' };
-  // 走 Enemy.fromVanilla + entities.add（模拟 spawner 产出链）
+  if (col < 0) return { why: 'no flat' };
   return import('/src/entities/Enemy.ts').then((m) => {
     const v = m.Enemy.fromVanilla(61, col * 16 + 8, gy * 16);
-    if (!v) return { why: 'fromVanilla null' };
-    v.y = gy * 16 - v.h;           // spawnNPC 同锚（底贴格顶）
+    if (!v) return { why: 'null' };
+    // 修复后 Game 落位（新扫描序平地 → 底贴地）
+    v.y = (gy - 1) * 16 + 16 - v.h;
     v.id = g.entities.nextId++;
     g.entities.add(v, 'enemies');
-    // 玩家放远（400px 外）
-    g.player.x = (col - 25) * 16; g.player.y = (gy - 3) * 16;
+    // 玩家 500px 外
+    g.player.x = (col - 31) * 16; g.player.y = (gy - 3) * 16;
     g.player.vx = 0; g.player.vy = 0;
-    const seq = [];
+    // 300t 静置 → 应保持 ai0=0
+    const idle = [];
+    for (let t = 0; t < 300; t++) {
+      g.fixedUpdate(1 / 60);
+      if (t % 100 === 0) idle.push([t, v.ai0, Math.round(v.y)]);
+    }
+    // 玩家走近（150px 内）→ 应唤醒 ai0=1 且升空
+    g.player.x = (col - 7) * 16;   // 112px < 124px 唤醒盒
+    let woke = -1;
     for (let t = 0; t < 120; t++) {
       g.fixedUpdate(1 / 60);
-      if (t % 20 === 0) seq.push([t, v.ai0, Math.round(v.vy * 100) / 100, Math.round(v.y)]);
+      if (woke < 0 && v.ai0 === 1) woke = t;
     }
-    return { col, gy, aiStyle: v.vanilla?.aiStyle, seq, dead: v.dead, finalY: Math.round(v.y) };
+    return { idle, wokeAt: woke, finalAi0: v.ai0, vyAfter: Math.round(v.vy * 10) / 10 };
   });
 });
 console.log(JSON.stringify(r, null, 1));

@@ -46,7 +46,7 @@ const step2 = (v: number, target: number, a: number): number => {
 // ============================================================================
 export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 首帧复位(ai0 默认 -1120 是史莱姆族约定,原版 ai[0] 从 0 起步)
-  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; la(e)[0] = 0; }
+  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; la(e)[0] = 0; e.lai0 = 0; }   // 渲染帧带同步(FindFrame case 222)
   // 玩家失效 = 原版 TargetClosest 落空后的 dead4(:30316-30319)
   const dead4 = !player || player.dead;
   // 专家分支一(:30313-30318):defense = defDefense + (int)(20×(1-血比))——
@@ -73,10 +73,10 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.facing = direction;
     const halfW = game.world.store.w * TILE / 2;   // Main.maxTilesX * 8 = 世界中线
     if (e.x < halfW) {
-      if (e.vx > 0) e.vx *= 0.98; else la(e)[0] = 1;
+      if (e.vx > 0) e.vx *= 0.98; else la(e)[0] = 1; e.lai0 = 1;   // 帧带同步 case 222
       e.vx -= 0.08;
     } else {
-      if (e.vx < 0) e.vx *= 0.98; else la(e)[0] = 1;
+      if (e.vx < 0) e.vx *= 0.98; else la(e)[0] = 1; e.lai0 = 1;   // 帧带同步 case 222
       e.vx += 0.08;
     }
     e.encourageDespawn(10); // :30390 离场态每 tick EncourageDespawn(10)——离屏 ~10t 消散
@@ -113,7 +113,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (Math.abs(e.cy - player!.cy) < num663) {
         // 俯冲(:30451-30499):localAI[0]=1(冲刺动画);num664 速直冲玩家——
         // 经典 12,专家 16 起 +2/档(<75/<50/<25/<10%,满档 24,:30458-30478)+ 7×暴怒
-        la(e)[0] = 1;
+        la(e)[0] = 1; e.lai0 = 1;   // 帧带同步 case 222
         e.ai1 += 1;
         e.ai2 = 0;
         let num664 = 12;
@@ -135,7 +135,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
         // 悬浮(:30485-30565):Y 朝玩家步进 num669 钳 ±num668;X 三段 >600 加速 /
         // <300 反向 / 中带阻尼 0.8,钳 ±16——经典 12/0.15,专家 +1/+0.05、+1/+0.05、
         // +2/+0.05、+2/+0.1(<75/<50/<25/<10%,:30492-30516)+ 3×/0.5×暴怒(:30517-30518)
-        la(e)[0] = 0;
+        la(e)[0] = 0; e.lai0 = 0;   // 帧带同步 case 222
         let num668 = 12;
         let num669 = 0.15;
         if (expert) {
@@ -177,7 +177,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (e.ai2 === 1) {
         // 减速(:30608-30643):0.9/tick;专家 <1/2、<1/3、<1/5 各再 0.9 + 阈值 +0.05
         // (num672 经典 0.1 → 满档 0.25);暴怒再 0.7;速降 < num672 → 回悬浮(ai1+1)
-        la(e)[0] = 0;
+        la(e)[0] = 0; e.lai0 = 0;   // 帧带同步 case 222
         e.vx *= 0.9;
         e.vy *= 0.9;
         let num672 = 0.1;
@@ -192,7 +192,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
           e.ai1 += 1;
         }
       } else {
-        la(e)[0] = 1;   // 仍朝目标飞行,维持冲刺动画
+        la(e)[0] = 1; e.lai0 = 1;   // 仍朝目标飞行,维持冲刺动画(帧带同步 case 222)
       }
     }
   } else if (e.ai0 === 2) {
@@ -214,7 +214,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   } else if (e.ai0 === 1) {
     // 机枪蜜蜂(:30691-30830)
-    la(e)[0] = 0;
+    la(e)[0] = 0; e.lai0 = 0;   // 帧带同步 case 222
     direction = player!.cx < e.cx ? -1 : 1;
     // 毒刺口 vector78(:30697):x 偏 rand(20)*direction,y 取 0.8h
     const vx78 = e.x + e.w / 2 + rnd(20) * direction;
@@ -333,7 +333,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   } else if (e.ai0 === 4) {
     // 远距追赶(:30982-30998):14 速混合逼近,进入 2000px → 换招
-    la(e)[0] = 1;
+    la(e)[0] = 1; e.lai0 = 1;   // 帧带同步 case 222
     let tx = player!.cx - e.cx, ty = player!.cy - e.cy;
     const d = Math.hypot(tx, ty) || 1;
     tx = (tx / d) * 14;
@@ -344,7 +344,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.facing = direction;
     if (num659 < 2000) {
       e.ai0 = -1;
-      la(e)[0] = 0;
+      la(e)[0] = 0; e.lai0 = 0;   // 帧带同步 case 222
     }
   }
   e.x += e.vx;

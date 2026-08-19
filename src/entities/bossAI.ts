@@ -616,7 +616,9 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
           (Math.floor(Math.random() * 61) - 30) * 0.2);
       }
       game.spawnParticles(e.cx, e.cy, '#A03050', 20, 2);
-      game.playSfxFiles(['Zombie_2'], 0.8, e.cx, e.cy);
+      // :32582 二阶段入场第二声 = PlaySound(15,x,y,0) = Roar_0 满响(曾误播
+      // Zombie_2@0.8——把 15 号当 ZombieMoan 的误判,2026-08-19 终审修)
+      game.playSfx('roar', 1, e.cx, e.cy);
     }
     // :32589 爬行者全灭后解除一阶段无敌（SetDefaults :12372 置位）
     e.dontTakeDamage = false;
@@ -1165,9 +1167,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.ai0 += 1; e.ai1 = 0;
       if (e.ai0 === 3) e.ai2 = 0;
       else {
-        // :26844 雷眼变身完成双声=NPCHit1(style 缺省 1)+Roar;魔眼(:27478)只吼无
-        // 前置受击声——双门按 spaz 分流(2026-08-18 对账补)
-        if (!spaz) game.playSfxFiles?.(['NPC_Hit_1'], 1, e.cx, e.cy);
+        // 变身完成双声=NPCHit1(style 缺省 1)+Roar——雷眼 :26843-26844 / 魔眼
+        // :27466-27467 **两眼同播**(曾按 spaz 分流漏魔眼前置声,终审纠)
+        game.playSfxFiles?.(['NPC_Hit_1'], 1, e.cx, e.cy);
         game.playSfx('roar', 1, e.cx, e.cy);   // :26855/:27478 PlaySound(15,style0) 满响
         game.spawnParticles(e.cx, e.cy, '#FF6040', 20, 2);
       }
@@ -1179,10 +1181,12 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
     return;
   }
 
-  // ---- 三阶段(ai0=3):伤害×1.5,防御 +(雷眼10/魔眼18) ----
+  // ---- 三阶段(ai0=3):伤害×1.5,防御 +(雷眼10/魔眼18);HitSound 换 NPCHit4
+  //      (:26873/:27494 战斗二段每帧覆写)——曾恒 NPCHit1(终审补) ----
   const b = baseOf(e);
   e.def.damage = Math.round(b.dmg * 1.5);
   e.def.defense = b.def + (spaz ? 18 : 10);
+  e.def.hitSound = ['NPC_Hit_4'];
   if (e.ai1 === 0) {
     // 上方悬浮:雷眼 玩家正上 300——经典 8/0.15,专家 9.5/0.175(:26876-26882),
     // FTW ×1.15(:26883-26887);魔眼 侧 180 同高——经典 4/0.1,专家按距悬浮点
@@ -1574,7 +1578,7 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
   }
 
   if (style === 33) {
-    // ---- 锯(NPC 129,:28134-28358) ----
+    // ---- 锯(NPC 129,aiStyle 33,:28134-28358) ----
     if (e.ai2 === 0 || e.ai2 === 3) {
       if (head.ai1 !== 0) {
         // 头冲撞中:7 速逼近玩家(0.05 步进/0.97 阻尼)
@@ -1583,7 +1587,9 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
         if (e.ai3 >= 600) { e.ai2 = 0; e.ai3 = 0; }
       } else {
         e.ai3 += 1;
-        if (e.ai3 >= 300) { e.ai2 = 1; e.ai3 = 0; }
+        // :28203-28209 悬浮 300t → ai[2]+1(0→1 举起 / 3→4 追玩家——曾恒 →1
+        // 使 4 追玩家态不可达=死码,2026-08-19 终审修)
+        if (e.ai3 >= 300) { e.ai2 += 1; e.ai3 = 0; }
         hoverBand(320, 260, 0.04, 3);
         if (e.cx > head.cx) { if (e.vx > 0) e.vx *= 0.96; e.vx -= 0.3; if (e.vx > 12) e.vx = 12; }
         if (e.cx < head.cx - 250) { if (e.vx < 0) e.vx *= 0.96; e.vx += 0.3; if (e.vx < -12) e.vx = -12; }
@@ -1604,11 +1610,19 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
     } else if (e.ai2 === 2) {
       // 俯冲到玩家下方/开始上移 → 回环绕(3)
       if (!player || e.y > player.y || e.vy < 0) e.ai2 = 3;
+    } else if (e.ai2 === 4 && player) {
+      // :28300-28354 追玩家态:7 速 0.05 舵 600t → 回 0(曾缺=砸后直接回待机,
+      // 追击压制段丢失,2026-08-19 终审补)
+      seekSteer(e, player, 7, 0.05);
+      e.ai3 += 1;
+      if (e.ai3 >= 600) { e.ai2 = 0; e.ai3 = 0; }
+      e.spin = Math.atan2(ay - e.cy, ax - e.cx) + Math.PI / 2;
     } else if (e.ai2 === 5 && player) {
       if ((e.vx > 0 && e.cx > player.cx) || (e.vx < 0 && e.cx < player.cx)) e.ai2 = 0;
     }
   } else if (style === 34) {
-    // ---- 激光(NPC 130,:28439-28638) ----
+    // ---- 钳(NPC 130,aiStyle 34,:28360-28638;曾误标"激光"——128=炮/131=激光,
+    //      NPCID.cs:11321-11327 权威:128 Cannon/129 Saw/130 Vice/131 Laser) ----
     if (e.ai2 === 0 || e.ai2 === 3) {
       if (head.ai1 !== 0) {
         // 头冲撞中:12 速突进(慢于 2 直接定速,否则阻尼)
@@ -1622,7 +1636,9 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
         if (e.ai3 >= 600) { e.ai2 = 0; e.ai3 = 0; }
       } else {
         e.ai3 += 1;
-        if (e.ai3 >= 600) { e.ai2 = 1; e.ai3 = 0; }
+        // :28488-28494 悬浮 600t → ai[2]+1(0→1 / 3→4 横扫——曾恒 →1 使
+        // 4↔5 横扫不可达,2026-08-19 终审修)
+        if (e.ai3 >= 600) { e.ai2 += 1; e.ai3 = 0; }
         hoverBand(300, 230, 0.1, 3);
         if (e.cx > head.cx + 250) { if (e.vx > 0) e.vx *= 0.94; e.vx -= 0.3; if (e.vx > 9) e.vx = 9; }
         if (e.cx < head.cx) { if (e.vx < 0) e.vx *= 0.94; e.vx += 0.2; if (e.vx < -8) e.vx = -8; }
@@ -1665,7 +1681,7 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       else { e.ai2 = 4; e.ai3 += 1; }
     }
   } else if (style === 35) {
-    // ---- 钳(NPC 128,:28653-28874) ----
+    // ---- 炮(NPC 128,aiStyle 35,:28640-28875;弹 102 伤 0 威慑;曾误标"钳") ----
     if (e.ai2 === 0) {
       if (head.ai1 !== 0) {
         hoverBand(-100, -100, 0.07, 6);
@@ -1678,7 +1694,8 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
       e.spin = Math.atan2(ay - e.cy, ax - e.cx) + Math.PI / 2;
       // 反向激光 102(原版伤害 0 = 纯视觉威慑)每 140t
-      if (e.aiT % 140 === 0) {
+      // 头旋冲时 localAI[0]+2 = 射速×3(:28661)——周期 ÷3
+      if (e.aiT % Math.round(140 / (head.ai1 !== 0 ? 3 : 1)) === 0) {
         const dx = -(ax - e.cx), dy = -(ay - e.cy);
         const d = Math.hypot(dx, dy) || 1;
         shoot(game, e.cx + dx / d * 4, e.cy + dy / d * 4,
@@ -1690,7 +1707,7 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 悬停:头 X / 玩家上方 80(6 速,0.04 X/0.08 Y,0.9 阻尼)
       seekSteer2(e, head.cx, player.cy - 80, 6, 0.04, 0.08);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-      if (e.aiT % 40 === 0) {
+      if (e.aiT % Math.round(40 / (head.ai1 !== 0 ? 3 : 1)) === 0) {
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
         shoot(game, e.cx + dx / d * 4, e.cy + dy / d * 4,
@@ -1698,7 +1715,7 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
     }
   } else if (style === 36) {
-    // ---- 炮(NPC 131,:28889-29109;初 ai3=150 计入 800 门) ----
+    // ---- 激光(NPC 131,aiStyle 36,:28876-29110;初 ai3=150 计入 800 门;曾误标"炮") ----
     if (e.ai2 === 0 || e.ai2 === 3) {
       if (head.ai1 !== 0) {
         hoverBand(-100, -100, 0.07, 6);
@@ -1711,7 +1728,8 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
       if (player) {
         e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-        if (e.aiT % 200 === 0) {
+        // 头旋冲时 localAI[0]+3 = 射速×4(:28897)
+        if (e.aiT % Math.round(200 / (head.ai1 !== 0 ? 4 : 1)) === 0) {
           const dx = player.cx - e.cx, dy = player.cy - e.cy;
           const d = Math.hypot(dx, dy) || 1;
           shoot(game, e.cx + dx / d * 8, e.cy + dy / d * 8,
@@ -1724,7 +1742,7 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 悬停玩家左侧 350/上方 20(7 速,0.1/0.03,0.9 阻尼)
       seekSteer2(e, player.cx - 350, player.cy - 20, 7, 0.1, 0.03);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-      if (e.aiT % 80 === 0) {
+      if (e.aiT % Math.round(80 / (head.ai1 !== 0 ? 4 : 1)) === 0) {
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
         shoot(game, e.cx + dx / d * 8, e.cy + dy / d * 8,
@@ -1839,6 +1857,13 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
         if (e.x + e.w > x * TILE && e.x < x * TILE + 16 && e.y + e.h > y * TILE && e.y < y * TILE + 16) { buried = true; break; }
       }
     }
+  }
+
+  // 头追近门(:50306-50330):头在玩家【下方】且 1000px 内 → flag2=true 强制钻地
+  // 分支朝玩家逼近(空中暴露的头主动扎地追击——曾缺=悬空头只走空中钳速)
+  if (player && !player.dead && !buried
+    && e.cy > player.cy && Math.hypot(player.cx - e.cx, player.cy - e.cy) < 1000) {
+    buried = true;
   }
 
   // 白天/玩家死(:50337-50356):vy+1,地表下再+1 且空中钳提到 32(num18);过岩石层

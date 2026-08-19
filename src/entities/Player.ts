@@ -3242,7 +3242,8 @@ export class Player extends Entity {
     if (!gross && this.y > (world.h - 250) * TILE
       && this.x > mouth - 1920 && this.x < mouth + 1920) {
       this.buffs.apply(BuffType.Horrified, 10 / 60);
-      game.playSfxFiles(['Zombie_10'], 1, wall.cx, wall.cy);
+      // PlaySound(4,…,10)=NPC_Killed_10(case4 死音库;曾误 Zombie_10,终审修)
+      game.playSfxWav?.('NPC_Killed_10', 1, wall.cx, wall.cy);
     }
     // :22014-22027 gross 且 高于地狱层 / 绕到墙背后（越过墙中心 40px）→ 上 38
     if (gross) {

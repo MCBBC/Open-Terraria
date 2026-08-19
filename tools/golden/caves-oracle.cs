@@ -16,6 +16,8 @@ string outPath = args[2];
 int worldSize = args.Length > 3 ? int.Parse(args[3]) : 0;
 int W = worldSize == 1 ? 6400 : worldSize == 2 ? 8400 : 4200;
 int H = worldSize == 1 ? 1800 : worldSize == 2 ? 2400 : 1200;
+// ★EEEEE：DBnd 钳位域随尺寸（vanilla DungeonBounds 世界相对钳位）——见 class DBnd 注
+DBnd.WMax = W; DBnd.HMax = H;
 const int BEACH_DISTANCE = 380; // WorldGen.beachDistance（cs:4102）
 
 var asm = Assembly.LoadFrom("/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe");
@@ -11525,7 +11527,12 @@ bool PyramidGen(int i, int j, int pyramidMinDepth, int pyramidMaxDepth, bool noT
             for (int a = m - 1; a <= m + 1; a++)
                 for (int b = n - 1; b <= n + 1; b++)
                     if (!InB(a, b) || act[b * W + a] == 0 || typ[b * W + a] != num) all = false;
-            if (all && InB(m, n)) wal[n * W + m] = 34;
+            // ★EEEEE 镜像（ZZZZ 定谳）：cs:27886 每写一墙 SquareWallFrame(m,n,true) →
+            //   Framing.WallFrame(resetFrame:true)：墙 34 非 wallLargeFrames（==0）→
+            //   1×Next(0,3)（wall!=21 无第二掷）。s22222 此段 11025 掷——漏掷曾致
+            //   num8 后全骰序位移（num12 23→25）/走廊 24→26 带/出口隧道错路级联
+            //   （JS StructuresPass.pyramidGen 同修，DesertPass.wallFrameDraw 同语义）。
+            if (all && InB(m, n)) { wal[n * W + m] = 34; r.Next(0, 3); }
         }
     }
     int num8 = 1;
@@ -18913,10 +18920,15 @@ static class GW
 // CalculateHitbox 保证 R>L、B>T；Contains=Rectangle.Contains 半开区间）
 sealed class DBnd
 {
+    // ★EEEEE（2026-08-19 中世界支修复）：vanilla DungeonBounds 钳位是**世界相对**
+    //   （Left/Right=Clamp(…,10,maxTilesX-10)、Top/Bottom=Clamp(…,10,maxTilesY-10)，
+    //   DungeonBounds.cs:35-70）。旧硬编码 4200/1200 仅小世界正确——中世界
+    //   B 被 1190 截断 → pit 循环 y2 掷域错（Pi 起全段分叉）。程序头按尺寸赋值。
+    public static int WMax = 4200, HMax = 1200;
     public int L = 10, R = 10, T = 10, B = 10;
     public bool Has;
-    static int Cx(int v) => Math.Clamp(v, 10, 4200 - 10);
-    static int Cy(int v) => Math.Clamp(v, 10, 1200 - 10);
+    static int Cx(int v) => Math.Clamp(v, 10, WMax - 10);
+    static int Cy(int v) => Math.Clamp(v, 10, HMax - 10);
     public void Set(int l, int t, int rr, int b) { L = Cx(l); R = Cx(rr); T = Cy(t); B = Cy(b); Calc(); }
     public void Calc() { if (R <= L) R = L + 1; if (B <= T) B = T + 1; Has = true; }
     public void Upd(int x, int y) { if (x < L) L = Cx(x); if (x > R) R = Cx(x); if (y < T) T = Cy(y); if (y > B) B = Cy(y); Has = true; }

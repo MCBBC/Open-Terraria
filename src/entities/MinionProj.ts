@@ -16,6 +16,7 @@ import { canHit } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
+import { projDrawOffsetFor } from './WeaponProj';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 
@@ -61,7 +62,8 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
  *  - MINION_ROT_ONLY：旋转制不与翻转叠用（原版 dir 恒 None）——双子387/388
  *    （vel+π）、致命球533、雪花917、龙链625-628、同伴方块653 */
 const AI62_LEFT_ART = new Set([373, 375, 407, 423, 613]);
-const MINION_NO_FLIP = new Set([191, 192, 193, 194, 266, 313, 379, 390, 391, 392, 831, 970, 1094]);
+const MINION_NO_FLIP = new Set([191, 192, 193, 194, 266, 313, 379, 390, 391, 392, 831, 970, 1094,
+  112, 959, 1003, 1004, 1095, 1096]);   // AI_026 全族零 spriteDirection 赋值(2026-08-19 补漏)
 const MINION_ROT_ONLY = new Set([387, 388, 533, 917, 625, 626, 627, 628, 653]);
 
 /** 远程射击随从表（Projectile.cs AI_062/AI_026/aiStyle66 射击分支提取）：
@@ -1476,7 +1478,15 @@ export class MinionProj extends Entity {
     }
     const img = projFrameImg(this.projId, frame);
     ctx.save();
-    ctx.translate(this.cx, this.cy);
+    // ---- 原版偏移表消费（Main.cs:29375-29826 num143/144 + 通用绘制 :34040）----
+    // 有表项的型号（该表主体即本随从族，此前从未消费——曾一律盒心居中，2026-08-19
+    // 接入）：贴图左上角 = (盒左+num144, 盒上−num143)，翻转/旋转绕 anchor。AI_026
+    // 族 spriteDirection 恒 −1（零赋值）→ 动态项 dirX=−1。未登记型号维持既有
+    // 盒心居中近似（差异登记：原版未登记=盒左上对齐）
+    const off3 = img ? projDrawOffsetFor(this.projId, -1, this.h) : null;
+    const num145 = off3 && img ? (img.width + this.w) / 2 : 0;
+    if (off3) ctx.translate(this.cx - this.w / 2 + num145 + off3[1], this.cy);
+    else ctx.translate(this.cx, this.cy);
     ctx.imageSmoothingEnabled = false;
     // 旋转制族（双子/致命球/雪花/龙链/方块，MINION_ROT_ONLY）：rotation 绘制、
     // 恒不水平翻转（原版 dir=SpriteEffects.None）；翻转制族 spriteDirection=-1
@@ -1490,7 +1500,8 @@ export class MinionProj extends Entity {
       ctx.scale(0.8, 0.8);
     }
     if (img) {
-      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      if (off3) ctx.drawImage(img, -num145, -(this.h / 2 + off3[0]), img.width, img.height);
+      else ctx.drawImage(img, -img.width / 2, -img.height / 2);
     } else {
       // 兜底：召唤符记色块（哨兵紫 / 随从金）——贴图缺失或懒加载未就绪
       ctx.fillStyle = this.sentry ? '#B080FF' : '#FFD060';

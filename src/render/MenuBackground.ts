@@ -144,6 +144,7 @@ export class MenuBackground {
   destroy() {
     window.removeEventListener('resize', this.resize);
     this.canvas.remove();
+    this.canvas.width = 0; this.canvas.height = 0;   // 立刻还回后备(不等 GC;双开预算紧)
   }
 
   /** 调试探针 */

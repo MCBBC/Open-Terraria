@@ -671,9 +671,9 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   }
   // 史莱姆（case 1, L71506）：每 8 tick 推进，全循环
   if (ai === 1) return Math.floor(t / 8) % frames;
-  // 骷髅王头/手（case 35/36, L67378+）：仅 RedHatSkeletron（ai[3]==1 红帽变种）才切帧；
-  // 常规骷髅王恒帧 0——此前走通用全循环会闪到表内"红帽骷髅"帧
-  if (ai === 11 || ai === 12) return 0;
+  // 骷髅王头/手（case 35/36, L67378-67388）：常规恒帧 0；RedHatSkeletron 变体
+  // （35/36 的 ai[3]==1）帧 1——曾恒 0 = 红帽头/手渲染成普通版(终审修)
+  if (ai === 11 || ai === 12) return e.vanillaId !== 68 && e.ai3 === 1 ? 1 : 0;
   // 兔/地面小动物族（FindFrame case 46，cs:77553-77600：46/47 兔·病害兔、303/337/
   // 443/464/540/614、646-652）：站定=帧0 清计数；腾空 vy<0=帧4 / vy>0=帧6；
   // 行走 counter += |vx|+1，**>6 才进一帧**、0..frames-1 全帧含帧 0 循环回 0。
@@ -836,9 +836,26 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 克苏鲁之眼(FindFrame case 4, cs:77607-77631):0/1/2 三帧眨眼各 7 tick,
   // ai[0]>1 帧偏移 +3(张嘴形态)——门取真 ai[0](Enemy.ai0):变身段一(ai0==1)仍闭嘴帧,
   // 段二(ai0==2)起张嘴(此前挂 phase>1,变身一起手就张嘴,早了 100t)
-  if (id === 4) {
+  // EoC/双子共组（FindFrame case 4/125/126，cs:77607-77631）：7t 三帧眨眼循环
+  // + ai[0]>1（变身/战斗二段）帧带 +3——双子曾落通用 6t 全帧连播（两带混闪）
+  if (id === 4 || id === 125 || id === 126) {
     const blink = Math.floor(t / 7) % 3;
     return Math.min(frames - 1, blink + (e.ai0 > 1 ? 3 : 0));
+  }
+  // 蜂后（type 表 case 222，cs:73737-73760）：localAI[0]==1（冲刺，AI 同步 lai0）
+  // → 帧 0-3 带 / 悬停 → 帧 4-11 带，每 5t 推进带内回卷（曾通用 6t 全 12 帧混播）
+  if (id === 222) {
+    const base = e.lai0 === 1 ? 0 : 4;
+    const span = e.lai0 === 1 ? 4 : Math.min(8, frames - 4);
+    return base + (Math.floor(t / 5) % span);
+  }
+  // 世纪之花本体（case 262，cs:73239-73258）：血量分带——>50% 帧 0-3、
+  // ≤50% 钳 4-7（二阶段），每 7t 推进带内回卷（曾通用 6t 全 8 帧混播）
+  if (id === 262) {
+    const phase2 = e.hp <= e.maxHp / 2;
+    const base = phase2 ? 4 : 0;
+    const span = Math.min(4, frames - base);
+    return base + (Math.floor(t / 7) % span);
   }
   // 克苏鲁之脑（FindFrame case 266，cs:73215-73237）：frameCounter>6 推进
   // （7t/帧，cs:73216-73221）；一相（ai[0]>=0 且 localAI[2]==0）循环 0..3，

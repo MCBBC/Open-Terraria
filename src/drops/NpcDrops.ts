@@ -108,6 +108,8 @@ export interface NpcDropOutcome {
   zeroValue: boolean;
 }
 
+/** NPCID.Sets.SlimeCanContainItems（NPCID.cs:4791）：可携带体内物品的史莱姆族 */
+const SLIME_CAN_CONTAIN = new Set([1, 59, 147, 184, 537]);
 type State = 'success' | 'failedRoll' | 'failedCond';
 
 const warned = new Set<string>();
@@ -200,9 +202,9 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     }
     case 'EmpressOfLightIsGenuinelyEnraged':
       // Conditions.cs:525 → NPC.cs AI_120_HallowBoss_IsGenuinelyEnraged(:46169)：
-      // ai[3]∈{2,3}（白天暴怒/二阶段白天）。本作 ai3 与原版 ai[3] 同义
-      // （bossAI_lategame.ts:370 IsInPhase2=ai3∈{1,3}），但白天暴怒分支未实现
-      // （:554 仅置 1）→ 运行时恒 false，语义已 1:1 接通
+      // ai[3]∈{2,3}（白天暴怒/二阶段白天）。白天 ai3=2 已实装（bossAI_lategame
+      // 白天满血 ai3+=2 段）——运行时真通,Terraprisma(5005) 白天击杀链生效
+      // （曾注"恒 false"为陈旧描述,2026-08-19 终审更正）
       return ctx.type === 636 && (ctx.ai3 === 2 || ctx.ai3 === 3);
     case 'MissingTwin':
       // Conditions.cs:502：另一只眼（125↔126）不在场才放行——先死者不掉（NPC.AnyNPCs）
@@ -448,9 +450,12 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
     case 'slimeBody': {
       // SlimeBodyItemDropRule.cs:14-18 CanDrop = SlimeCanContainItems[type] && ai[1]>0
       //   && ai[1]<ItemID.Count(=6147)；TryDroppingItem(:26-30) = GetDropInfo 档位掷
-      //   Next(min, max+1)。规则注册为 global（ItemDropDatabase.cs:684），类型门由
-      //   数据侧 ai1 语义承担（Enemy.slimeRollContainedItem 只给 {1,59,147,184,537} 掷骰）
-      // （曾恒 failedCond——当时 ai[1] 掷骰未实装；史莱姆雕像产怪 value=0 同样不掷）
+      //   Next(min, max+1)。规则注册为 global（ItemDropDatabase.cs:684）。
+      // ★类型门必须在此本判（NPCID.cs:4791 SlimeCanContainItems = {1,59,147,184,537}）：
+      //   曾把类型门外包给"只有史莱姆掷 ai1"——但 ai[1] 是全族共享计时器（兔子行走
+      //   计时 120-898/战士计数/蝙蝠计时都用它），任何怪死时 ai1 恰落 1..6146 都会被
+      //   当成"体内物品 id"掉出来 = 兔子掉珍珠石砖(ai1=412)根因（2026-08-19 用户实报）
+      if (!SLIME_CAN_CONTAIN.has(ctx.type)) { state = 'failedCond'; break; }
       const itemId = Math.floor(ctx.ai1 ?? 0);
       if (itemId <= 0 || itemId >= 6147) { state = 'failedCond'; break; }
       const [mn, mx] = SLIME_BODY[String(itemId)] ?? [1, 1];

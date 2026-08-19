@@ -24,7 +24,7 @@ const VANILLA_TABLE: Record<number, {
   4:   { name: 'EoC',            announce: 'awoken',   itemRoar: true,  music: 5 },    // 眼球 43 :43095；boss 兜底 Boss1
   13:  { name: 'EoW head',       announce: 'awoken',   itemRoar: true,  music: 99 },   // 蠕虫食物 70 :43112
   35:  { name: 'Skeletron',      announce: 'awoken',   itemRoar: false, music: 104 },  // 老人诅咒 :81269，无咆哮
-  50:  { name: 'King Slime',     announce: null,       itemRoar: true,  music: 93 },   // 王冠 560 :43080；case 50 静默
+  50:  { name: 'King Slime',     announce: 'awoken',  itemRoar: true,  music: 93 },   // 王冠 560 :43080;SpawnBoss 内 NewNPC Type==50 恒播 HasAwoken(:81564-81567)=非静默,2026-08-19 终审收口
   68:  { name: 'Dungeon Guard',  announce: null,       itemRoar: false, music: null }, // 无 boss 位 :9584；生成咆哮 :21931
   113: { name: 'Wall of Flesh',  announce: 'awoken',   itemRoar: false, music: 12 },   // SpawnWOF :81190 无咆哮
   125: { name: 'Retinazer',      announce: 'misc48',   itemRoar: true,  music: 97 },   // 机械魔眼 544 :43128；misc[48] :81500
@@ -59,7 +59,7 @@ describe('Boss 唤起三件套冻结对账（NPC.cs/Player.cs/Main.cs 1456）', 
   it('公告静默集 = SpawnBoss case-break 组 ∪ 非 SpawnBoss 生成路径', () => {
     // ① case-break 组（NPC.cs:81505-81512）+ ② 永不经 SpawnBoss 的生成路径
     //   （68 地牢守卫 / 395 飞碟 / 439 石碑仪式 / 396/397 月总头手 / 664 火把神）
-    for (const silent of [50, 82, 126, 316, 551, 662, 68, 395, 439, 396, 397, 664]) {
+    for (const silent of [82, 126, 316, 551, 662, 68, 395, 439, 396, 397, 664]) {
       expect(Game.bossSummonAnnounceKind(silent), `id ${silent}`).toBeNull();
     }
     for (const loud of [4, 13, 35, 113, 222, 245, 262, 266, 370, 636, 657, 668]) {

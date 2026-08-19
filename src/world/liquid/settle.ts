@@ -32,11 +32,12 @@ export async function settleWorldLiquids(
     // oceanLevel=(worldSurface+rockLayer)/2+40 且 x < 380 || x > w-380）内
     // 液体>0 且类型≠水 → 归水。liquidType(0) 只写类型位不动量
     const st = world.store;
-    const oceanLevel = (world.groundLevel + world.rockLevel) / 2 + 40;
+    const oceanLevel = (world.groundLevel + world.rockLevel) / 2 + 40; // cs:4393
     for (let x = 0; x < st.w; x++) {
-      const inBand = x < 380 || x > st.w - 380;
+      const inBand = x < 380 || x > st.w - 380;    // beachDistance=380（cs:4102）
       if (!inBand) continue;
-      for (let y = 0; y <= Math.min(st.h - 1, Math.trunc(oceanLevel)); y++) {
+      for (let y = 0; y < st.h; y++) {
+        if (y > oceanLevel) break;                 // cs:10980 double 比较（整数 y 等价）
         const i = y * st.w + x;
         if (st.liquid[i] > 0 && st.liquidType[i] !== 1) st.liquidType[i] = 1;
       }

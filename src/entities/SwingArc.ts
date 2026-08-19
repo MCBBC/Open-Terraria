@@ -572,6 +572,13 @@ export class ZenithSword extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // vanilla-projectiles 933 extraUpdates=1——AI 每 tick 跑两遍（整程 120 计数
+    // 60 游戏秒帧耗尽；曾单跑=轨道慢一倍且滞空过久，2026-08-19 审查）
+    this.step(game);
+    this.step(game);
+  }
+
+  private step(game: GameHooks): void {
     if (this.counter === 0) game.playSfxFiles(['Item_169'], 1, this.cx, this.cy);   // :40439
     const spd = Math.hypot(this.vx, this.vy);
     const lv = ZenithSword.lerpV(900, 0, spd * 2);      // GetLerpValue(900,0,|vel|×2)
