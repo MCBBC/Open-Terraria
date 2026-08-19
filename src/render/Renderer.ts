@@ -10328,21 +10328,26 @@ export class Renderer {
     const p = this._lastPlayer;
     const sc = this.scene;
     if (!p || !sc) return 0;
-    // 视区竖直中心（tile）——用 pan 后地图的屏幕中心近似（原版 screenPosition.Y）
+    // 原版 DrawMapFullscreenBackground（Main.cs:55804-55820）：深度档看
+    // 【地图视口顶部的世界 Y】（screenPosition.Y），其余档全部看玩家墙/群系。
+    // ★旧式 (cy0+mapH/2)/zoom 是"地图底边屏幕坐标÷zoom"——纯错位量，随缩放
+    // 剧烈漂移 = 用户实报"背景图随缩放自己变动"根因；正确映射 = 视口顶(屏幕 y=0)
+    // 的世界 tile = -cy0/zoom（cy0 为地图顶的屏幕 y）
     const fm = this.fullMap;
     const viewW = this.canvas.width, viewH = this.canvas.height;
     const mapH = world.h * fm.zoom;
     const cy0 = viewH / 2 - mapH / 2 + fm.panY;
-    const vy = Math.floor((cy0 + mapH / 2) / fm.zoom);
+    const vy = Math.max(0, Math.floor(-cy0 / fm.zoom));
     const px = Math.floor(p.cx / TILE), py = Math.floor(p.cy / TILE);
     const st = world.store;
     const inB = st.inBounds(px, py);
     const wall = inB ? st.wall[st.idx(px, py)] : 0;
-    // 地狱（视区深度）
+    // 地狱（视口顶世界 tile 深过 h-232——原版 screenPosition.Y > (maxTilesY-232)*16）
     if (vy > world.store.h - 232) return 2;
     if (sc.zoneDungeon) return 4;
     if (wall === 87) return 13;
-    if (py > world.groundLevel) {
+    // 原版第二档：screenPosition.Y > worldSurface*16（视口顶在地表之下）
+    if (vy > world.groundLevel) {
       switch (wall) {
         case 86: case 108: return 15;
         case 180: case 184: return 16;

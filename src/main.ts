@@ -223,12 +223,12 @@ window.addEventListener('keydown', (e) => {
       ui.toast('已消除全图迷雾');
       break;
     case 'F5': {
-      // 一键调试报告（机器优先 JSON）：标注系统实现保留，仅解绑 F5（可另配键）
+      // 长按 F5 = 行为录制窗开关（按下计时，keyup 判时长——见文件尾 keyup 监听）；
+      // 短按仍是一键调试报告（报告尾部带 behaviorTail 最近 2000 条事件）。
+      // e.repeat 过滤：长按系统重发 keydown 不重置计时锚
       e.preventDefault();
-      const r = downloadDebugReport(game, {
-        playTimeMs: (flow as FlowHandle & { playStartNow: number }).playStartNow,
-      });
-      ui.toast(r.triggered ? `调试报告已生成：${r.filename}` : '调试报告已生成（浏览器拦截下载，可从 __swDebugReport 取）');
+      if (e.repeat) break;
+      f5DownAt = performance.now();
       break;
     }
     case 'F6':
@@ -263,6 +263,46 @@ window.addEventListener('keydown', (e) => {
       }
       break;
   }
+});
+
+// ---- F5 长按判时长（keydown 只记锚，keyup 结算）----
+let f5DownAt = 0;
+/** 长按阈值 ms：≥ 此值视为长按（行为录制窗开关），否则短按（调试报告） */
+const F5_LONGPRESS_MS = 500;
+window.addEventListener('keyup', (e) => {
+  const game = flow.game;
+  if (!inGame || !game || e.code !== 'F5' || !f5DownAt) return;
+  const held = performance.now() - f5DownAt;
+  f5DownAt = 0;
+  if (held < F5_LONGPRESS_MS) {
+    // 短按：一键调试报告（机器优先 JSON）——尾部带 behaviorTail（常开环形最近
+    // 2000 条：出问题后再按 F5 也能拿到事发前的输入/方块/生死序列）
+    const r = downloadDebugReport(game, {
+      playTimeMs: (flow as FlowHandle & { playStartNow: number }).playStartNow,
+      behaviorTail: game.recorder.snapshotTail(2000),
+    });
+    ui.toast(r.triggered ? `调试报告已生成：${r.filename}` : '调试报告已生成（浏览器拦截下载，可从 __swDebugReport 取）');
+    return;
+  }
+  // 长按：录制窗开关。关窗 = 导出开窗以来全部事件并下载（复用 debug-report 下载机制）
+  const rec = game.recorder;
+  const recording = rec.toggle();
+  if (recording) {
+    ui.toast('行为录制中…再长按 F5 结束并保存');
+    return;
+  }
+  const dump = rec.export();
+  const worldName = dump.meta.worldName.replace(/\s+/g, '_') || 'world';
+  const filename = `behavior-log-${worldName}-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+  let triggered = false;
+  try {
+    downloadText(filename, JSON.stringify(dump));
+    triggered = true;
+  } catch { triggered = false; }
+  const tr = dump.meta.truncated ? `（风暴淘汰截断，起点已不可达）` : '';
+  ui.toast(triggered
+    ? `行为录制已保存：${filename}（${dump.meta.eventCount} 事件）${tr}`
+    : `行为录制 ${dump.meta.eventCount} 事件${tr}（下载被拦截，可从 __swRec.export() 取）`);
 });
 
 function downloadText(filename: string, text: string) {

@@ -126,6 +126,7 @@ export class ItemDrop extends Entity {
             game.addDamageNumber(player.cx, player.y, 100, false, '#4080FF');
           }
           this.dead = true;
+          game.recLog?.('pickup', { key: this.pickup, n: 1 });   // 行为录制：心/星碰触即取
           game.playSfx('pickup', 1); // 原版 SoundID 7 Grab
           return;
         }
@@ -139,6 +140,7 @@ export class ItemDrop extends Entity {
         }
         if (left === 0) {
           this.dead = true;
+          game.recLog?.('pickup', { key: ITEM_DEFS[this.itemId]?.key ?? this.itemId, n: before, vid: vanillaIdOfItem(this.itemId) });   // 行为录制：整堆拾取
           game.notifyInventoryChanged();
           // 钱币拾取用专属音效，其余走通用拾取（vi_71-74 单轨）
           // 音量略低（0.75）：拾取与挖掘声同时触发时两者都可闻，不被 Grab 盖住
@@ -463,7 +465,10 @@ export class ItemDrop extends Entity {
     }
     if (LAVA_IMMUNE_ITEMS.has(vid)) return;
     const rare = ITEM_RARE[String(vid)] ?? 0;
-    if (rare === 0 || rare === -1) this.dead = true;
+    if (rare === 0 || rare === -1) {
+      this.dead = true;
+      game.recLog?.('burn', { vid, n: this.stack });   // 行为录制：掉落物岩浆烧毁
+    }
   }
 
   draw() { /* Renderer 统一绘制 */ }

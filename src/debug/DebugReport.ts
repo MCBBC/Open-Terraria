@@ -41,6 +41,9 @@ export interface DebugReportOptions {
   warnings?: SwWarnRecord[];
   /** __swGame 挂载计数注入（单测用；缺省读 globalThis.__swInstanceCount） */
   instanceCount?: number;
+  /** 行为录制尾段（F5 短按注入 recorder.snapshotTail(2000)）：时序因果事件日志
+   *  最近 2000 条——出问题后再按 F5 也能拿到事发前的输入/方块/生死序列 */
+  behaviorTail?: Array<{ t: number; k: string; d: unknown }>;
 }
 
 /** 区域转储。rows 每行 RLE,token = `sheet:fx:fy:wall:liquid`(空格带墙/液体时 sheet=-1,
@@ -661,6 +664,8 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     },
     errors: errs.slice(-50).map((e) => ({ t: e.t, kind: e.kind, msg: e.msg, stack: e.stack })),
     warnings: warns.slice(-50).map((w) => ({ t: w.t, msg: w.msg })),
+    // 行为录制尾段（F5 短按注入；时序因果日志 = 输入/方块/生死/掉落/伤害/公告）
+    behaviorTail: opts.behaviorTail ?? null,
     instance: {
       gameMounts: opts.instanceCount ?? (globalThis as unknown as { __swInstanceCount?: number }).__swInstanceCount ?? 0,
       compatReport: !!(globalThis as unknown as { __lastCompatReport?: unknown }).__lastCompatReport,

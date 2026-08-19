@@ -748,6 +748,7 @@ export class TownNPC extends Entity {
     dmg = Math.max(1, Math.round(dmg - def * 0.5));
     this.hp -= dmg;
     this.iframes = 10;
+    game.recLog?.('hurt', { id: this.id, vid: this.vanillaId ?? null, dmg, hp: this.hp });   // 行为录制：城镇 NPC 受击
     game.addDamageNumber(this.cx, this.y, dmg, false, '#FFD060');
     // 受击血粒子(原版 StrikeNPC 尘近似,与 Enemy.hurt 同规)
     game.spawnParticles(this.cx, this.cy, '#B01818', 5, 1.4, { life: 22, grav: 0.06 });
@@ -774,6 +775,7 @@ export class TownNPC extends Entity {
     }
     if (this.hp <= 0) {
       this.dead = true;
+      game.recLog?.('death', { id: this.id, vid: this.vanillaId ?? null });   // 行为录制：城镇 NPC 死亡
       game.spawnParticles(this.cx, this.cy, '#C03030', 8, 2);
       game.spawnParticles(this.cx, this.cy, '#8A1818', 4, 1.2);
       // checkDead 死亡音（NPC.cs:78978-78982）：PlaySound(DeathSound, position)

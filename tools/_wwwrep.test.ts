@@ -172,7 +172,7 @@ function diffStore(tag: string, idx: number, st: TileStore): Row {
     if (via !== jia) { r.dIa++; mark(i); if (r.samples.length < 10) r.samples.push(`I(${i % W},${(i / W) | 0}) v${via} j${jia}`); }
   }
   if (firstI >= 0) r.first = `(${firstI % W},${Math.floor(firstI / W)})`;
-  r.pairs = [...pair.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, n]) => [k, n] as [string, number]);
+  r.pairs = [...pair.entries()].sort((a, b) => b[1] - a[1]).slice(0, Number(process.env.SW_WWW_PAIRS ?? 8)).map(([k, n]) => [k, n] as [string, number]);
   return r;
 }
 const isClean = (r: Row) => !(r.dA || r.dT || r.dW || r.dL || r.dHf || r.dSl || r.dLt || r.dIa);
@@ -237,8 +237,19 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
     steps: [
       { dump: 58, base: 57, run: (st, gs, rng) => runStatuesPass(st, rng, gs) },
       {
+        // WWWW：SW_WWW_59G=all|fr,wire,chest —— #59 入口金标反事实注入
+        // （TTTT 织入产物 059_Buried_Chests.{fr,wire,chest.tsv} = pass 头快照）。
+        // 用于隔离 house#111 接受分歧的输入态（帧/线/箱注册表）债。
         dump: 59, base: 58,
         run: (st, gs, rng, chests) => {
+          const g59 = (process.env.SW_WWW_59G ?? '').split(',').filter(Boolean);
+          const on = (k: string) => g59.includes('all') || g59.includes(k);
+          if (on('fr')) { injectGoldenFrames(st, '/tmp/tttt-fr/059_Buried_Chests.fr'); console.log('  [59G] golden frames injected'); }
+          if (on('wire')) { injectGoldenWires(st, '/tmp/tttt-fr/059_Buried_Chests.wire'); console.log('  [59G] golden wires injected'); }
+          if (on('chest')) {
+            const gold = loadGoldenChests('/tmp/tttt-fr/059_Buried_Chests.chest.tsv');
+            if (gold) { (chests as Chests).length = 0; (chests as Chests).push(...gold); console.log(`  [59G] golden chest registry injected (${gold.length})`); }
+          }
           flipGenSolid([226, 162, 225, 190], true);
           rollHouseChestCounts(st, rng, gs);
           runBuriedChestsPass(st, rng, gs, chests);
@@ -348,28 +359,48 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
   // 稀疏 {u32 idx,u16 fx,u16 fy}，pass 头快照 = 上一 pass 末态）。嵌合帧（金标 tile+
   // JS 捕获期帧）曾致 #99 ⑦ 137 方向读错（(605,782) 金标 (18,0) JS 无帧→dir 反）与
   // #101 金箱 style 过滤错位。env SW_WWW_GF=0 可关（默认开）。
+  // WWWW：金标帧/线/注册表注入帮助函数提升为闭包级（s51/s53 + WWWW #59 反事实共用）
+  const injectGoldenFrames = (st: InstanceType<typeof TileStore>, frPath: string) => {
+    if (!existsSync(frPath)) return;
+    const b = readFileSync(frPath);
+    const cnt = new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
+    for (let q = 0; q < cnt; q++) {
+      const off = 4 + q * 8;
+      const idx = new DataView(b.buffer, b.byteOffset).getUint32(off, true);
+      st.frameX[idx] = new DataView(b.buffer, b.byteOffset).getUint16(off + 4, true);
+      st.frameY[idx] = new DataView(b.buffer, b.byteOffset).getUint16(off + 6, true);
+    }
+  };
+  // 金标 wire 直注（TTTT：#101 DeadMans isAGoodSpot 27=27 实证——JS 逻辑 1:1，
+  // 重放差纯 wire 输入债；.wire 通道 = 织入探针全网格快照）
+  const injectGoldenWires = (st: InstanceType<typeof TileStore>, wirePath: string) => {
+    if (!existsSync(wirePath)) return;
+    const gw = new Uint8Array(readFileSync(wirePath).buffer.slice(0));
+    for (let i = 0; i < N; i++) {
+      const g = gw[i]! & 0x1f;
+      st.wire[i] = (st.wire[i]! & ~0x1f) | g;
+    }
+  };
+  // 金标宝箱注册表（.chest.tsv → Chests；vi→JS id 转换）
+  const loadGoldenChests = (path: string): Chests | null => {
+    if (!existsSync(path)) return null;
+    const vanKey = (vid: number) => VANILLA_ITEM_KEY_BY_ID[vid];
+    const gold: Chests = [];
+    for (const ln of readFileSync(path, 'utf8').trim().split('\n')) {
+      const f = ln.split('\t');
+      const items: Chests[number]['items'] = [];
+      for (let q = 3; q < f.length; q++) {
+        if (f[q] === '-') { items.push(null); continue; }
+        const [tid, stack] = f[q]!.split(',').map(Number);
+        const key = vanKey(tid!);
+        const jsId = key ? ITEM_BY_KEY[key] : undefined;
+        items.push(jsId !== undefined ? { id: jsId, stack: stack! } : null);
+      }
+      gold.push({ x: Number(f[1]), y: Number(f[2]), items });
+    }
+    return gold;
+  };
   if (process.env.SW_WWW_GF !== '0') {
-    const injectGoldenFrames = (st: InstanceType<typeof TileStore>, frPath: string) => {
-      if (!existsSync(frPath)) return;
-      const b = readFileSync(frPath);
-      const cnt = new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
-      for (let q = 0; q < cnt; q++) {
-        const off = 4 + q * 8;
-        const idx = new DataView(b.buffer, b.byteOffset).getUint32(off, true);
-        st.frameX[idx] = new DataView(b.buffer, b.byteOffset).getUint16(off + 4, true);
-        st.frameY[idx] = new DataView(b.buffer, b.byteOffset).getUint16(off + 6, true);
-      }
-    };
-    // 金标 wire 直注（TTTT：#101 DeadMans isAGoodSpot 27=27 实证——JS 逻辑 1:1，
-    // 重放差纯 wire 输入债；.wire 通道 = 织入探针全网格快照）
-    const injectGoldenWires = (st: InstanceType<typeof TileStore>, wirePath: string) => {
-      if (!existsSync(wirePath)) return;
-      const gw = new Uint8Array(readFileSync(wirePath).buffer.slice(0));
-      for (let i = 0; i < N; i++) {
-        const g = gw[i]! & 0x1f;
-        st.wire[i] = (st.wire[i]! & ~0x1f) | g;
-      }
-    };
     const s51 = P.get(51)!;
     s51.steps[0]!.run = (st, gs, rng, chests) => {
       injectGoldenFrames(st, '/tmp/tttt-fr/099_Tile_Cleanup.fr');
@@ -490,6 +521,9 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
           writeFileSync(out, Buffer.from(new Uint32Array(parts).buffer, 0, parts.length * 4));
           writeFileSync(out.replace(/\.fr$/, '.frtyp'), Buffer.from(new Uint32Array(tparts).buffer, 0, tparts.length * 4));
           console.log(`  [frdump] dump=${step.dump} cells=${parts[0]} → ${out}`);
+          // WWWW：全网格 wire 通道快照（对拍金标 NNN_Surface.wire = 上一 pass 末态）
+          writeFileSync(out.replace(/\.fr$/, '.wire'), Buffer.from(built.st.wire.buffer.slice(0)));
+          console.log(`  [frdump] dump=${step.dump} wire → ${out.replace(/\.fr$/, '.wire')}`);
           if (process.env.SW_WWW_CHDUMP && String(step.dump) === process.env.SW_WWW_CHDUMP) {
             const sink = (chests as unknown as Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>)
               .map((c, q) => ({ slot: q, x: c.x, y: c.y, item0: c.items?.[0] ?? null }));

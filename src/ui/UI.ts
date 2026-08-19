@@ -42,12 +42,12 @@ function tooltipBgDataUrl(w: number, h: number): string | null {
     tc.imageSmoothingEnabled = false;
     tc.drawImage(img, 0, 0);
     const d = tc.getImageData(0, 0, t.width, t.height);
-    const tmul = [23 / 255, 25 / 255, 81 / 255, 0.96];   // 原版 0.925；0.96=两轮报障折中档（2026-08-18）
+    const tmul = [23 / 255, 25 / 255, 81 / 255, 0.925];   // 原版真值（:20252-20255）
     for (let i = 0; i < d.data.length; i += 4) {
       d.data[i] = Math.round(d.data[i] * tmul[0]);
       d.data[i + 1] = Math.round(d.data[i + 1] * tmul[1]);
       d.data[i + 2] = Math.round(d.data[i + 2] * tmul[2]);
-      d.data[i + 3] = Math.round(d.data[i] * tmul[3]);
+      d.data[i + 3] = Math.round(d.data[i + 3] * tmul[3]);   // ★曾误乘红通道 d.data[i]——深蓝底红≈23→alpha≈22（两轮透明报障真根因）
     }
     tc.putImageData(d, 0, 0);
     tooltipBgTinted = t;
@@ -326,7 +326,7 @@ const CSS = `
 .sw-ach .icn .bdr { position:absolute; width:24px; height:24px; image-rendering:pixelated;
   left:-1.5px; top:-1.5px; }
 @keyframes sw-ach-in { from { opacity:0; transform:translateY(12px) scale(0.9); } }
-.sw-tooltip { position:fixed; background:rgba(21,23,75,0.96);
+.sw-tooltip { position:fixed; background:rgba(21,23,75,0.93);
   padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:280px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   text-shadow: 1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }   /* 原版 MouseText 字体+字影（:20256 DrawColorCodedStringWithShadow） */
@@ -1491,7 +1491,7 @@ export class UI {
       this.tooltip.style.border = 'none';
       this.tooltip.style.borderRadius = '0';
     } else {
-      this.tooltip.style.background = 'rgba(21,23,75,0.96)';   // 兜底色（0.96 折中档，与九宫底同）
+      this.tooltip.style.background = 'rgba(21,23,75,0.93)';   // 兜底色（≈原版 0.925）
       const img = invBgEnsure();
       if (img instanceof HTMLImageElement && !(img.width > 0)) {
         img.addEventListener('load', () => this.applyTooltipBg(), { once: true });

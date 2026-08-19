@@ -101,7 +101,7 @@ import {
   CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_TABLE_SHEETS } from '../data/tiles';
+import { TILE_DEFS, T, TILE_BY_KEY, TILE_INTERNAL_BY_SHEET, TILE_TABLE_SHEETS, WALL_DEFS } from '../data/tiles';
 import { flexibleWandOf, tryGetPlacementOption } from '../world/FlexibleTileWands';
 import { framedCellFrame } from '../world/FurnitureStyle';
 import {
@@ -802,6 +802,8 @@ export class Game implements GameHooks {
   recorder = new BehaviorRecorder();
   /** GameHooks.recLog：实体侧一行式接入（game.recLog?.('hurt', {...})） */
   recLog(k: string, d: unknown): void { this.recorder.log(k, d); }
+  /** 行为录制：雨态沿基准（updateWeather 里与 weather.raining 比对） */
+  private _recLastRaining = false;
 
   // 挖掘状态
   private mining: { x: number; y: number; progress: number } | null = null;
@@ -3435,6 +3437,15 @@ export class Game implements GameHooks {
 
   private fixedUpdate(dt: number) {
     this.tickCount++;
+    // 行为录制：玩家运动轨迹骨干（每 60t ≈ 1s 一采样；vx/vy 一位小数防噪）
+    if (this.tickCount % 60 === 0) {
+      const p = this.player;
+      this.recLog('sample', {
+        x: Math.round(p.x), y: Math.round(p.y),
+        vx: +p.vx.toFixed(1), vy: +p.vy.toFixed(1),
+        hp: p.hp, ground: p.onGround ? 1 : 0,
+      });
+    }
     // 对话距离保持:离开 NPC 超过 6 格自动关闭(原版 SetTalkNPC(-1) 语义)
     if (this.dialogNpc) {
       const dn = this.dialogNpc;
@@ -4523,6 +4534,7 @@ export class Game implements GameHooks {
             const wof = this.boss;
             createBrickBoxForWallOfFlesh(w.store, Math.trunc(wof.cx / 16), Math.trunc(wof.cy / 16), wof.w, w.crimson);
             const { wasHard } = startHardmode(w);
+            this.recLog('world', { ev: 'hardmode', on: w.flags.hardMode });   // 行为录制：困难模式置位（肉山首杀）
             if (!wasHard) LanternNight.onGameEventCleared(19);
             this.newText(Lang.misc(15), 50, 255, 130);
             this.achievements.notifyProgressionEvent(9);
@@ -5780,6 +5792,8 @@ export class Game implements GameHooks {
     };
     this.swingHitSet.clear();
     this.swingTileCutSet.clear();
+    // 行为录制：物品使用动画（=使用成功开始——放置/饮用族 useStyle 分族可辨）
+    this.recLog('use', { key: def.key, useStyle: us });
   }
 
   /** 药水病分档（Player.cs:51085-51120 ApplyPotionDelay + Item.cs:70-76 常量）：
@@ -11044,6 +11058,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && (st.isSolid(tx, ty + 1) || TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(tx, ty + 1)]?.vanilla?.sheet ?? -1));
       if (!belowOk) return;
       st.setTile(tx, ty, wandTile, 18 * opt.style, 0);
+      this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[wandTile]?.key ?? wandTile, cause: 'wand' });   // 行为录制：魔杖族放置
       this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
       if (wand.consumesAmmo && opt.ammoVid > 0) {
         const idx = slots.findIndex((s) => {
@@ -11173,6 +11188,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.player.useTime = 14;
         this.sfx.play('place');
         this.cb.onInventoryChanged();
+        this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[ropeTile]?.key ?? ropeTile, cause: 'rope', n: placed });   // 行为录制：绳索下延汇总
       }
       return;
     }
@@ -11189,6 +11205,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 液体门（WaterPlacement）：普通火把 NotAllowed、水炬三色 Allowed
       if (st.liquid[st.idx(tx, ty)] > 0 && !isWaterTorchStyle(style * 22)) return;
       st.setTile(tx, ty, tileId, frame, style * 22);
+      this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[tileId]?.key ?? tileId, cause: 'torch' });   // 行为录制：火把放置
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = 14;
       this.sfx.play('place');
@@ -11228,6 +11245,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (isTrack) {
       const style = Math.max(0, Math.min(3, itemDef.placeStyle ?? 0));
       placeTrack(st, tx, ty, style);
+      this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[tileId]?.key ?? tileId, cause: 'track' });   // 行为录制：轨道铺设
       frameTrackArea(st, tx, ty);
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = 14;
@@ -11237,6 +11255,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
 
     // 放置
+    // 行为录制：主通用放置路径（所有门已过、即将写格）——火把/绳索/轨道/wand
+    // 等早 return 分支各自在写点录；from=放置目标恒空格（空间检查已保证）
+    this.recLog('tile', { x: tx, y: ty, from: 0, to: TILE_DEFS[tileId]?.key ?? tileId, cause: 'place' });
     const isVanillaStyle = !!def.vanilla && def.vanilla.frame === 'style';
     for (let dx2 = 0; dx2 < ow; dx2++) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
@@ -12842,6 +12863,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.graveyardIntensity += Math.max(-gyStep, Math.min(gyStep, gyTarget - this.graveyardIntensity));
     // 白天 tick 进度（原版 time 0-54000 ↔ 我们 timeOfDay 白天前半段 0.25-0.75 线性）
     const dayTimeTicks = w.clock.isDay ? ((w.clock.timeOfDay - 0.25) / 0.5) * 54000 : 0;
+    // 行为录制：雨切换沿（原版 StartRain/StopRain 无公告——沿检测是唯一锚点）
+    if (weather.raining !== this._recLastRaining) {
+      this._recLastRaining = weather.raining;
+      this.recLog('world', { ev: 'rain', on: weather.raining });
+    }
     weather.setWorldSize(w.w, w.h);
     weather.update({
       dayRate: w.dayRate(), // Main.cs:64320-64409 天气全链吃 dayRate（旅程倍率/冻结/全员睡×5/晷快进，曾写死 1）
@@ -13401,6 +13427,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  原版与地形破坏半径【无关】:炸弹/手雷族(:74885)Resize(22,22)=11px;
    *  炸药棍 29(:74951)200×200=100px;缺省按地形半径兜底(放置炸药 108/器件爆) */
   private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0) {
+    // 行为录制：爆炸汇总一条（盘内逐格破坏走 breakTile 各自记录，此处锚定
+    // 风暴起点/半径——DebugReport 侧按 t 邻近聚合即可还原爆炸半径）
+    this.recLog('bomb', { x: tx, y: ty, r: radius, dmg: damage, destroyTiles, projId });
     const st = this.world.store;
     const R = radius;
     const hardMode = !!this.world.flags.hardMode;
@@ -13886,6 +13915,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 直接逐格清除（不再回调 breakTile——那会落入 object 锚点分支清错位置；
     // 瓦罐 frameY=0 在底行，与家具顶行相反）。瓦罐不掉自身（原版 SpawnThingsFromPot 只掉内容物）
     for (const [cx, cy] of cells) st.setTile(cx, cy, 0);
+    this.recLog('tile', { x, y, from: TILE_DEFS[POT_TILE]?.key ?? POT_TILE, to: 0, cause: 'pot', n: cells.length });   // 行为录制：瓦罐整罐破碎汇总
     // CheckPot 音效（普通瓦罐 SoundID 13 = Shatter.wav）+ 陶瓷碎片粒子
     this.sfx.play('shatter', 1, ax * TILE + 16, ay * TILE + 16);
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#9A6A5A', 10, 2.6, { life: 200, damp: 0.985, grav: 0.09 });
@@ -16931,6 +16961,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const misc = startInvasion(w, type);
     if (misc == null || misc < 0) return false;
     this.invasionWarn = 3600;
+    this.recLog('world', { ev: 'invasion', type });   // 行为录制：入侵开启（公告本身另有 chat 事件）
     this.newText(Lang.misc(misc), 175, 75, 255);
     return true;
   }
@@ -17119,6 +17150,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2, placeStyle?: number): ItemDrop | null {
     const id = ITEM_BY_KEY[itemKey];
     if (id === undefined) return null;
+    this.recLog('drop', { key: itemKey, n: count, x: Math.round(x), y: Math.round(y) });   // 行为录制：掉落物生成（唯一入口）
     const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
     if (placeStyle !== undefined) drop.placeStyle = placeStyle;
     this.entities.add(drop, 'drops');
@@ -17225,6 +17257,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.playSfxFiles(['Item_14'], 1, p.cx, p.cy);   // SoundID.Item14
     }
     if (ok) {
+      this.recLog('hurt', { hp: p.hp, dmg: ok });   // 行为录制：玩家受击（实扣值 + 剩余 hp；Player.damage 无 game 参故挂此）
       // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）
       if (attacker?.vanillaId === 155) p.buffs.apply(BuffType.Weak, 30);
       // 爆裂泡泡 371 接触施加潮湿 103（StatusFromNPC Player.cs:22239-22242：
@@ -19579,12 +19612,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (onPlayerTy !== undefined) {
           // SpawnOnPlayer 寻点落点直传（物品路径）
           this.net.sendSummonIntent(key, tx2 * TILE + 8, Math.max(4, onPlayerTy) * TILE + 8);
+          this.recLog('world', { ev: 'bossIntent', key });   // 行为录制：v8 房召唤意图受理
           return true;
         }
         for (; ty2 < this.world.h; ty2++) {
           if (st0.type[st0.idx(tx2, ty2)] !== 0) break;
         }
         this.net.sendSummonIntent(key, tx2 * TILE + 8, Math.max(4, ty2 - 12) * TILE);
+        this.recLog('world', { ev: 'bossIntent', key });   // 行为录制：v8 房召唤意图受理
         return true; // 意图已受理——召唤物照常消耗；服务器拒绝时另有 serverNotice
       }
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
@@ -19616,7 +19651,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (vanillaId === 113) {
       const dollY = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
       const wof = spawnWOF(this as unknown as GameHooks, tx * TILE + 8, dollY);
-      if (wof) { this.boss = wof; return true; }
+      if (wof) { this.boss = wof; this.recLog('world', { ev: 'boss', key }); return true; }   // 行为录制：血肉墙召唤成功
       return false;
     }
     if (vanillaId >= 0 && Enemy.fromVanilla) {
@@ -19661,12 +19696,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
         // 召唤公告+（物品路径）咆哮（见 announceBossSummon 注释：roar 只在物品使用时播）
         this.announceBossSummon(vanillaId, roar);
+        this.recLog('world', { ev: 'boss', key, vid: vanillaId });   // 行为录制：Boss 召唤成功
         return true;
       }
     }
     this.spawnEnemy(key, tx * TILE + 8, spawnY);
     this.sfx.playWav('roar');
     this.cb.onToast(Lang.misc(9));
+    this.recLog('world', { ev: 'boss', key });   // 行为录制：兜底路径召唤成功
     return true;
   }
 
@@ -19861,6 +19898,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  width = NewTextMultiline 的 WidthLimit（Main.cs:64101，广播盒 460px 折行），
    *  缺省 -1 = 不限（ChatMonitor 默认宽度） */
   newText(text: string, r = 255, g = 255, b = 255, width = -1): void {
+    this.recLog('chat', { text: text.slice(0, 80) });   // 行为录制：公告/消息列（截 80 字）
     this.cb.onChat?.(text, r, g, b, width);
   }
 

@@ -1725,6 +1725,7 @@ export class Player extends Entity {
       if (!this.dead) {
         game.playSfx('pkilled');
         this.dead = true;
+        game.recLog?.('death', { hp: 0 });   // 行为录制：玩家死亡（任何死法统一在此结算）
       }
       // 初速掷骰用独立标记：Game.damagePlayer 接触死路径会先直置 dead（Game.ts:15360）
       // ——不能拿 !dead 当 init 门；首 tick 只掷不推进（原版 KillMe 在 Hurt 中段置 dead，

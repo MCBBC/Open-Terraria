@@ -1049,7 +1049,8 @@ export class Enemy extends Entity {
   ai1 = 0;
   /** 原版 ai[3]（地牢 AI 族用：诅咒头骨状态/火轮速度档/刺球相位） */
   ai3 = 0;
-  /** 原版 directionY（火轮/刺球对角弹跳的纵向方向） */
+  /** 原版 directionY（火轮/刺球对角弹跳的纵向方向；AI_002 飘浮眼亦在此持久化——
+   *  玩家死亡后 TargetClosest 无操作,沿用最后垂直方向滑行而非恒上飞） */
   dirY = 1;
   /** AI 首帧初始化标记（原版 ai[0]==0 门在 ai0 初值 -1120 的史莱姆语义下不可用） */
   aiInit = false;
@@ -3612,15 +3613,23 @@ export class Enemy extends Entity {
       this.encourageDespawn(10);
       dirX = oldVx > 0 ? 1 : -1;   // 原版保持水平方向（direction=-1，vx>0 时翻 1）
       dirY = -1;
+      this.dirY = -1;              // 原版 directionY=-1 随 discouragement 持续
       cx = 4; cy = 2.5;
     } else if (!player) {
-      dirX = -Math.sign(oldVx || 1);
-      dirY = -1;
+      // 玩家死亡/无目标（原版语义：TargetClosest 落空是【无操作】——
+      // TargetClosestUpgraded :78421 无有效玩家时 num4 哨兵未动直接 return，
+      // direction/directionY 全部保持原值）→ 保持当前朝向 + 沿用上次垂直方向
+      // 滑行，由 despawn 系统（CheckActive 死亡玩家不重置屏内）750t 倒数消散。
+      // 曾写 dirX=-sign(vx)（朝自己速度的反方向看 → X 反复减速过零 = 左右朝向
+      // 抽搐）+ 恒 dirY=-1（无条件上飞——上飞是白天驱散分支专属），2026-08-19 修正
+      dirX = this.facing;
+      dirY = this.dirY;
       cx = 4; cy = 2.5;
     } else {
       // TargetClosest（confused 反转 X；directionY 原版不反转）
       dirX = this.seekDirX(player);
       dirY = player.cy > this.cy ? 1 : -1;
+      this.dirY = dirY;   // 持久化（玩家死亡后沿用最后垂直方向,≈原版 directionY 保留）
       const rage = this.vanillaId === 133 && this.hp < this.maxHp * 0.5;
       cx = rage ? 6 : 4;
       cy = rage ? 4 : 2.5;
@@ -4342,13 +4351,18 @@ export class Enemy extends Entity {
     else if (this.vanillaId === 660) { ax = 0.35; ay = 0.3; cx = 6; cy = 5; }
     const vampireBat = this.vanillaId === 158;
     let dirX: number, dirY: number;
-    if (player) { dirX = player.cx > this.cx ? 1 : -1; dirY = player.cy > this.cy ? 1 : -1; }
-    else { dirX = this.facing; dirY = -1; }
+    if (player) {
+      dirX = player.cx > this.cx ? 1 : -1;
+      dirY = player.cy > this.cy ? 1 : -1;
+      this.dirY = dirY;   // 持久化:玩家死亡后 TargetClosest 无操作(AI_014 :22943
+      // 同款语义)→ 沿用最后垂直方向滑行,而非恒上飞(2026-08-19 修正)
+    } else { dirX = this.facing; dirY = this.dirY; }
     // 吸血蝙蝠白天离场（cs:22944-22949）：158 且在地表之上 && 白天 && 非日食 →
     // directionY=-1 上飞、direction 翻转水平远离（曾缺——白天吸血蝙蝠赖场不退）
     if (vampireBat && this.y < game.world.groundLevel * TILE
       && game.world.clock.isDay && !game.world.clock.eclipse) {
       dirY = -1;
+      this.dirY = -1;
       dirX = -dirX;
     }
     this.facing = dirX;
@@ -7603,6 +7617,8 @@ export class Enemy extends Entity {
     }
     // 联机傀儡受击：上报房主权威结算（本地视觉反馈已生效：扣血/飘字/击退）
     if (this.netPuppet) entityNet.reportStrike?.(this.netId, rawDmg, kbx, kby);
+    // 行为录制：受击（防后结算值 + 剩余 hp；受击本身低频——无敌帧天然节流）
+    game.recLog?.('hurt', { id: this.id, vid: this.vanillaId ?? null, dmg, hp: this.hp });
     if (this.hp <= 0) {
       // 月总族(396/397/398)血尽不直死:原版 checkDead(:78841-78867)转为闭眼残肢/死亡演出,
       // 转换逻辑在各自 AI 首行(hp<=0 → ai0 置态+满血续命),此处放行让 AI 下一 tick 接管
@@ -7616,6 +7632,7 @@ export class Enemy extends Entity {
         return false;
       }
       this.dead = true;
+      game.recLog?.('death', { id: this.id, vid: this.vanillaId ?? null });   // 行为录制：敌怪死亡
       // 瓢虫被杀 → 坏运（NPC.checkDead cs:78838-78840 → LadyBugKilled :82332）：
       // 604 普通 / 605 金瓢虫（距离衰减公式见 LuckState.ladyBugKilled）；
       // 副产物 ladyBugRainBoost +1800 钳 18000（cs:82334-82338，雨调度提前开雨）

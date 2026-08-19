@@ -157,6 +157,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     playStart = Date.now();
     // 物品图标后台预取(主菜单不载图标=省 6059 请求;进世界补齐,游戏内显示不变)
     atlas?.prefetchIcons();
+    // 全屏地图背景族预取(MapBG* 43 张+卷轴 Map.png——vui 懒加载首次请求要几百 ms,
+    // 开图头几帧背景未就绪 → 近黑底色一闪;进世界后台补齐后开图即得羊皮纸)
+    atlas?.preloadUiPrefix(['MapBG', 'Map.png']).catch(() => {});
     stopMenu();
     titleMenu?.destroy();
     titleMenu = null;

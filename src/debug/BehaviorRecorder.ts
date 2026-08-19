@@ -63,6 +63,9 @@ export class BehaviorRecorder {
   /** 最近一次【关闭】的窗起点：关窗 → export 仍取该窗全量（F5 长按关窗的
    *  保存链就发生在 toggle 之后）；开新窗时重置 */
   private lastStart: number | null = null;
+  /** 最近一次【关闭】的窗终点（关窗时刻 total）：窗口在关窗瞬间冻结——
+   *  关窗后的新事件不混入已关窗口的导出 */
+  private lastEnd = 0;
   /** tick 源（Game 构造注入 () => this.tickCount；缺省 0 供单测/降级） */
   tickSource: () => number = () => 0;
   /** 世界元信息源（Game 构造注入；export 头用。缺省占位） */
@@ -83,6 +86,7 @@ export class BehaviorRecorder {
       return true;
     }
     this.lastStart = this.startTotal;
+    this.lastEnd = this.total;
     this.startTotal = null;
     return false;
   }
@@ -95,14 +99,17 @@ export class BehaviorRecorder {
     return this.startTotal === null ? 0 : this.total - this.startTotal;
   }
 
-  /** 导出：开窗以来的全部事件（无窗 = 最近一次已关的窗；从未开过窗 =
-   *  全环快照）。截断判定：窗口起点 < total - capacity 时起点事件已被
-   *  淘汰 → truncated:true（爆炸风暴淘汰旧事件是环形天性，非数据损坏） */
+  /** 导出：开窗以来的全部事件。录制中 = 活窗（起点→当前）；关窗后 =
+   *  冻结窗（起点→关窗时刻）；从未开窗 = 全环快照。截断判定：窗口起点
+   *  < 写入总数 - capacity 时起点事件已被淘汰 → truncated:true（爆炸风暴
+   *  淘汰旧事件是环形天性，非数据损坏） */
   export(): RecExport {
+    const active = this.startTotal !== null;
     const from = this.startTotal ?? this.lastStart ?? Math.max(0, this.total - REC_RING_CAPACITY);
+    const to = active ? this.total : (this.lastStart !== null ? this.lastEnd : this.total);
     const truncated = from < this.total - REC_RING_CAPACITY;
     const events: RecEvent[] = [];
-    for (let i = Math.max(from, this.total - REC_RING_CAPACITY); i < this.total; i++) {
+    for (let i = Math.max(from, this.total - REC_RING_CAPACITY); i < to; i++) {
       events.push(this.buf[i % REC_RING_CAPACITY]);
     }
     const wi = this.worldInfo();

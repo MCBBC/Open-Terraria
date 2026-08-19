@@ -41,9 +41,9 @@ const r2 = await page.evaluate(async () => {
   });
 });
 console.log(JSON.stringify(r2));
-const ok = r2.center === 245 && r2.midTop === 245 && r2.corner00 === 0;
+const ok = r2.center === 236 && r2.midTop === 236 && r2.corner00 === 0;   // 0.925×255=236 原版真值
 console.log(ok
-  ? 'PASS: 主体 alpha 245（0.96 折中）+ 圆角保留透明'
+  ? 'PASS: 主体 alpha 236（原版 0.925 真值）+ 圆角保留透明'
   : `FAIL: ${JSON.stringify(r2)}`);
 await browser.close();
 process.exit(ok ? 0 : 1);
