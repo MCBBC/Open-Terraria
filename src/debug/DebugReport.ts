@@ -756,6 +756,22 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
           cpuPixelAtCenter: mmpx,
           exploredAtCenter: w.explored ? (w.explored[wty * w.w + wtx] ? 1 : 0) : -1,
           centerTile: [wtx, wty],
+          // 探索覆盖率抽样（步 997 全图扫）+ 远角合成像素——"迷雾消失"一报告
+          // 分辨数据(全探索)还是渲染(雾 quad 丢失)：远角取视口左上角世界 tile
+          exploredCoverage: w.explored ? (() => {
+            let n = 0, hit = 0;
+            for (let i = 0; i < w.explored.length; i += 997) { n++; if (w.explored[i]) hit++; }
+            return +(hit / Math.max(1, n)).toFixed(4);
+          })() : -1,
+          cornerTileExplored: w.explored ? (() => {
+            const cty = Math.max(0, Math.min(w.h - 1, Math.floor((0 - cy0) / fm.zoom)));
+            const ctx = Math.max(0, Math.min(w.w - 1, Math.floor((0 - cx0) / fm.zoom)));
+            // 该未探索角的【合成后画布像素】——雾渲染正常应=(5,5,8)；
+            // 若为内容色=真机渲染丢雾；coverage≈1 则是数据全亮（F4/开发者模式残留）
+            const c2 = r.canvas.getContext('2d');
+            const cpx = c2 ? Array.from(c2.getImageData(8, 8, 1, 1).data) : null;
+            return { tile: [ctx, cty], explored: w.explored[cty * w.w + ctx] ? 1 : 0, canvasPx: cpx };
+          })() : null,
         };
       })() : null,
       debugMode: g.renderer?.debugMode ? 1 : 0,

@@ -127,6 +127,17 @@ export interface ArrowOpts {
    *  piranhaStep 独占状态机（直飞咬敌 → 咬住周期撕咬 → 松手返回回收），
    *  通用 subStep 的重力/撞块消亡/穿透递减语义不适用 */
   piranha?: PiranhaCtl;
+  /** 原版 Projectile.tileCollide=false（SetDefaults 逐型；月事件 325/329/348/350/351
+   *  等）：跳过撞块消亡/反弹与 CutTiles——HandleMovement 整段不跑（Projectile.cs:15331
+   *  位移段门）。缺省按 projectileData(projId).tileCollide === false 自动置位。 */
+  noTileCollide?: boolean;
+  /** 329 焰镰（aiStyle 56，Projectile.cs:27666-27687）：出生继承发射者 rotation（ai[0]）
+   *  与 spriteDirection（-ai[1]）；|vx|+|vy|<16 时速度 ×1.05/t 自加速（曾丢 = 低速
+   *  慢速弹报废），rotation += (|vx|+|vy|)*0.025*direction 恒旋。 */
+  scythe?: { rot0: number; flipDir: number };
+  /** 351 礼盒（aiStyle 58，Projectile.cs:27727-27757）：两段重力——前 30t 平飞，
+   *  之后 vy+0.1；一旦 vy>=0 转二段（恒 +0.1 钳 3、vx×0.99）；帧 0/1 随段切换。 */
+  present?: boolean;
 }
 
 /** 食人鱼控制面（Game 注入，同 PrismProj channelCb/aimCb 模式） */
@@ -344,6 +355,19 @@ export class Arrow extends Entity {
   pFlip = false;
   /** 出生弹速（ItemCheck_Shoot num4/num5 模长 = item.shootSpeed 14）——补弹复用 */
   pShootSpeed = 0;
+  // ---- 329 焰镰（aiStyle 56）/ 351 礼盒（aiStyle 58）专属态 ----
+  /** tileCollide=false（跳过撞块/CutTiles） */
+  noTileCollide = false;
+  /** 焰镰恒旋累积角（出生 = 发射者 rotation） */
+  scytheRot: number | null = null;
+  /** 焰镰 spriteDirection（<0 时贴图水平镜像） */
+  scytheFlip = 1;
+  private scytheInit = false;
+  /** 礼盒两段重力状态机（0=前段平飞/1=下落段）+ ai[1] 计时 + 淡入 alpha */
+  present = false;
+  presentStage = 0;
+  private presentT = 0;
+  private presentAlpha = 255;
   dead = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
@@ -392,6 +416,11 @@ export class Arrow extends Entity {
       this.terraAi2 = opts.terra.ai2;
     }
     if (opts?.star) this.starY = opts.star.targetY;
+    // tileCollide=false：显式优先，缺省按 SetDefaults 数据表（325/329/348/350/351…）
+    if (opts?.noTileCollide !== undefined) this.noTileCollide = opts.noTileCollide;
+    else if (pd0?.tileCollide === false) this.noTileCollide = true;
+    if (opts?.scythe) { this.scytheRot = opts.scythe.rot0; this.scytheFlip = opts.scythe.flipDir; }
+    this.present = !!opts?.present;
     if (opts?.piranha) {
       this.piranha = opts.piranha;
       this.pShootSpeed = Math.hypot(vx, vy);   // Game 侧可覆写为精确 shootSpeed
@@ -499,6 +528,22 @@ export class Arrow extends Entity {
     }
     ctx.save();
     ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+    // 329 焰镰（aiStyle 56）：rotation 恒自旋（不对齐速度）；spriteDirection<0 水平镜像
+    if (this.scytheRot !== null) {
+      ctx.rotate(this.spinRot);
+      if (this.scytheFlip < 0) ctx.scale(-1, 1);
+      const scyImg = projSprite(this.projId);
+      ctx.imageSmoothingEnabled = false;
+      if (scyImg && (scyImg as HTMLImageElement).complete !== false && scyImg.width > 0) {
+        ctx.drawImage(scyImg, -scyImg.width / 2, -scyImg.height / 2, scyImg.width, scyImg.height);
+      }
+      ctx.restore();
+      return;
+    }
+    // 351 礼盒（aiStyle 58）：帧 0/1 随两段重力态；淡入 alpha
+    if (this.present) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.presentAlpha / 255));
+    }
     // 朝右贴图族（PROJ_ROT_RIGHT）：rotation=atan2(vy,vx)（vanilla :26122-26140 模式），
     // 向左运动水平镜像（spriteDirection 语义）；其余默认朝上 atan2+π/2（AI_001 L54877）
     const rightArt = PROJ_ROT_RIGHT.has(this.projId);
@@ -526,7 +571,9 @@ export class Arrow extends Entity {
     // 食人鱼帧号由 AI 推进（:26301-26310 frameCounter≥4 推帧 4 帧循环），
     // 其余型号沿用 age/5 档
     const frames = projFrameCount(this.projId);
-    const fIdx = this.piranha ? this.pFrame : Math.floor(this.age / 5) % frames;
+    const fIdx = this.piranha ? this.pFrame
+      : this.present ? this.presentStage    // 351 礼盒帧 0/1 随两段重力态（:27736/:27749）
+        : Math.floor(this.age / 5) % frames;
     const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     const drawImg = frameImg ?? img;
     if (drawImg && (drawImg as HTMLImageElement).complete !== false
@@ -589,6 +636,29 @@ export class Arrow extends Entity {
       this.vy = Math.min(this.vy + this.grav2, this.maxFall);
     }
     if (this.dragAlways !== 0) this.vx *= this.dragAlways;
+    // 329 焰镰（aiStyle 56，:27666-27687）：首步继承发射者 rotation；此后
+    // |vx|+|vy|<16 → 速度 ×1.05 自加速（子步粒度——原版 AI 每 update 一跑）；恒旋
+    if (this.scytheRot !== null) {
+      if (!this.scytheInit) {
+        this.scytheInit = true;
+        this.spinRot = this.scytheRot;      // localAI[0]==0 → rotation = ai[0]（:27668-27672）
+      }
+      const mag = Math.abs(this.vx) + Math.abs(this.vy);
+      if (mag < 16) { this.vx *= 1.05; this.vy *= 1.05; }
+      this.spinRot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.025 * (this.vx < 0 ? -1 : 1);   // :27686
+    }
+    // 351 礼盒（aiStyle 58，:27727-27757）：两段重力 + 淡入 + 帧 0/1
+    if (this.present) {
+      this.presentT += 1;
+      this.presentAlpha = Math.max(0, this.presentAlpha - 50);   // :27729-27733
+      if (this.presentStage === 0) {
+        if (this.presentT > 30) this.vy += 0.1;                  // :27737-27741
+        if (this.vy >= 0) this.presentStage = 1;                 // :27742-27745
+      } else {
+        this.vy = Math.min(this.vy + 0.1, 3);                    // :27750-27754
+        this.vx *= 0.99;
+      }
+    }
     // 翻滚（aiStyle 2 刀族 :21508，自出生每 tick 累加）；48/54/93/520/599 在
     // 平飞期由 draw 侧姿态锁定覆盖（:21971-21972）
     if (this.tumble) {
@@ -715,8 +785,10 @@ export class Arrow extends Entity {
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (!world.store.inBounds(tx, ty)) { this.killNow(game); return; }
     const tileType = world.store.get(tx, ty);
-    // 星怒剑线上方穿墙（:22139-22143 越线前 tileCollide=false）——整段跳过
-    if (tileType !== 0 && !(this.starY !== null && !this.starCollide)) {
+    // 星怒剑线上方穿墙（:22139-22143 越线前 tileCollide=false）与
+    // noTileCollide 族（SetDefaults 逐型 325/329/348/350/351…，HandleMovement
+    // 整段不跑）——撞块/砍草整段跳过（曾漏 = 月事件弹幕扎进地里被地形吞噬）
+    if (tileType !== 0 && !this.noTileCollide && !(this.starY !== null && !this.starCollide)) {
       // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——弹幕扫过即砍
       game.cutTile(tx, ty);
       // 阻挡判定只看【实心】(Main.tileSolid 语义):树干/火把/平台等非实心格

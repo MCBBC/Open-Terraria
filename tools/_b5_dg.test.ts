@@ -152,8 +152,25 @@ function diffAll(idx: number, st: {
   // 地牢 pass + 17 段
   const TT: Record<string, number | string> = {};
   (globalThis as { __dgTowerTrace?: Record<string, number | string> }).__dgTowerTrace = TT;
+  // 目标格段级观察（SW_B5_CELLS="x0,y0,x1,y1"——每 snap 打墙/活性值）
+  const cellsEnv = process.env.SW_B5_CELLS;
+  const cellRange = cellsEnv ? (cellsEnv.split(',').map(Number) as [number, number, number, number]) : null;
+  const cellState = (tag: string): string => {
+    if (!cellRange) return '';
+    const [x0, y0, x1, y1] = cellRange;
+    let s = '';
+    for (let y = y0!; y <= y1!; y++) {
+      for (let x = x0!; x <= x1!; x++) {
+        const i = y * W + x;
+        s += `(${x},${y})w${st.wall[i]}a${st.flags[i]! & 1} `;
+      }
+      s += '| ';
+    }
+    return ` CELLS[${tag}] ${s}`;
+  };
+  console.log(`cells-init${cellState('init')}`);
   replay();
-  runDungeonPass(st, rng, gs, world.chests, (name) => snap(name));
+  runDungeonPass(st, rng, gs, world.chests, (name) => { snap(name); if (cellRange) console.log(`cells-${name}${cellState(name)}`); });
   (globalThis as { __dgTowerTrace?: Record<string, number | string> }).__dgTowerTrace = undefined;
   console.log(`__dgTowerTrace: ${JSON.stringify(TT)}`);
   // vs oracle checkpoints

@@ -7,6 +7,7 @@ import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { mainExpertMode, getAttackDamageForProjectiles } from '../stats/ScaleStats';
 import { canHit } from '../physics/LineOfSight';
+import { moveAndCollide } from '../physics/TileCollision';
 import { MagicProj } from './MagicProj';
 import { Arrow } from './Arrow';
 import { markMechQueen, registerMechQueen, mechQueenUp, getMechQueen, getMechQueenCenter } from './mechQueen';
@@ -24,8 +25,11 @@ export const addEnemy = (game: GameHooks, e: Enemy) => {
 
 /** AI_011 骷髅王战斗状态机(NPC.cs:21904-22288 完整核;守卫分支已在 skeletronHeadAI)。
  *  ai0=初始化(双手 36 生成);ai1: 0=悬浮(800t)→1=旋冲(400t)循环;2=守卫/白天;3=离场。
- *  悬浮: Y 拉向玩家上方 250(0.02/±2),X 朝玩家 0.05/±8;旋冲: rotation+=0.3*dir、
- *  朝玩家 1.5 倍速、伤害 ×1.3、防御 -10(:22026-22179)。 */
+ *  悬浮: Y 拉向玩家上方 250(0.02/±2),X 朝玩家 0.05/±8(:22030-22055);
+ *  旋冲: rotation+=0.3*dir、每 tick 直设 dir×num200(经典 1.5/专家 3.5+距离阶梯,
+ *  :22166-22242)、伤害 Remap(def,def×1.3)、防御 -10(:22153)。
+ *  专家额外(:21948-22004):防御 += 存活手×25;(手<2||血<75%)且悬浮 →
+ *  ai[2] 每 80/40t 发 270 追踪髅骨弹(3/5 速,LOS 门,:21959-22003)。 */
 export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null) {
   const isGuardian = e.vanillaId === 68;
   // 初始化:生成双手 36(:21914-21931)
@@ -82,9 +86,42 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   }
   if (!player) return;
 
+  // ---- 专家分支一揽子(NPC.cs:21948-22004)----
+  // num173 = 存活手数(type+1=36);defense += num173*25(:21958);
+  // (num173<2 || 血<75%) 且悬浮态 → ai[2] 每 num175 tick 朝玩家发 270 追踪髅骨弹
+  const expert = mainExpertMode(game.world);
+  const num173 = (game.enemies() as Enemy[]).filter(
+    (n) => !n.dead && n.vanillaId === (e.vanillaId ?? 0) + 1).length;
+  const b = baseOf(e);
+  const defBase = b.def + (expert ? num173 * 25 : 0);   // :21958 专家按存活手数加防
+  if (expert && (num173 < 2 || e.hp < e.maxHp * 0.75) && e.ai1 === 0) {
+    // :21961-21969 num175=80(无手 40;FTW ×0.8);ai[2] 为悬浮计时(:22012)
+    let num175 = 80;
+    if (num173 === 0) num175 /= 2;
+    if (game.world.seedFlags?.getGoodWorld) num175 *= 0.8;
+    if (e.ai2 % num175 === 0
+      && canHit(game.world.store, e.cx, e.cy, 1, 1, player.x, player.y, player.w, player.h)) {
+      // :21975-21999 num176=3(无手 +2);先 ±20px 抖动归一到 num176,再 ±0.5 速抖动
+      // 归一 ×num176,最后 += 自身速度(骷髅王头本体常为零速,专家旋冲前近似为零)
+      const num176 = 3 + (num173 === 0 ? 2 : 0);
+      let sx = player.cx - e.cx + (Math.floor(Math.random() * 41) - 20);
+      let sy = player.cy - e.cy + (Math.floor(Math.random() * 41) - 20);
+      let sl = Math.hypot(sx, sy) || 1;
+      sx = sx / sl * num176; sy = sy / sl * num176;
+      let jx = sx + (Math.floor(Math.random() * 101) - 50) * 0.01;
+      let jy = sy + (Math.floor(Math.random() * 101) - 50) * 0.01;
+      sl = Math.hypot(jx, jy) || 1;
+      jx = jx / sl * num176 + e.vx; jy = jy / sl * num176 + e.vy;
+      shoot(game, e.cx + jx * 5, e.cy + jy * 5, jx, jy,
+        getAttackDamageForProjectiles(17, 17, e.difficulty), 270);   // :21996-22000 timeLeft 300
+    }
+  }
+
   e.ai2 += 1;
   if (e.ai1 === 0) {
-    // 悬浮段(:22046-22091):rotation = velocity.X/15(倾转)
+    // 悬浮段(:22046-22091):rotation = velocity.X/15(倾转);
+    // 位移档 :22030-22055——经典 0.02/±2(Y) 0.05/±8(X),专家 0.03/±4 0.07/±9.5(:22034-22040),
+    // FTW 追加 +0.01/+1/+0.05/+2(:22049-22055;RedHat 变体档不适用本核)
     e.spin = e.vx / 15;
     if (e.ai2 >= 800) {
       e.ai2 = 0;
@@ -92,42 +129,55 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
       // 旋冲方向冻结 = 目标侧(TargetClosest direction 语义,见上 ai1=2 注)——独立字段勿占 ai3
       (e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir = player.cx > e.cx ? 1 : -1;
     }
-    // 回悬浮:恢复冲撞前的伤害/防御基值
-    const base = baseStats.get(e);
-    if (base) { e.def.damage = base.dmg; e.def.defense = base.def; }
+    e.def.damage = b.dmg;               // :22007 悬浮段伤害基值复位
+    e.def.defense = defBase;            // :21908/:21958(含专家手数加成)
+    let nY = 0.02, cY = 2, nX = 0.05, cX = 8;
+    if (expert) { nY = 0.03; cY = 4; nX = 0.07; cX = 9.5; }
+    if (game.world.seedFlags?.getGoodWorld) { nY += 0.01; cY += 1; nX += 0.05; cX += 2; }
     if (e.y > player.y - 250) {
       if (e.vy > 0) e.vy *= 0.98;
-      e.vy -= 0.02;
-      if (e.vy > 2) e.vy = 2;
+      e.vy -= nY;
+      if (e.vy > cY) e.vy = cY;
     } else {
       if (e.vy < 0) e.vy *= 0.98;
-      e.vy += 0.02;
-      if (e.vy < -2) e.vy = -2;
+      e.vy += nY;
+      if (e.vy < -cY) e.vy = -cY;
     }
     if (e.cx > player.cx) {
       if (e.vx > 0) e.vx *= 0.98;
-      e.vx -= 0.05;
-      if (e.vx > 8) e.vx = 8;
+      e.vx -= nX;
+      if (e.vx > cX) e.vx = cX;
     } else {
       if (e.vx < 0) e.vx *= 0.98;
-      e.vx += 0.05;
-      if (e.vx < -8) e.vx = -8;
+      e.vx += nX;
+      if (e.vx < -cX) e.vx = -cX;
     }
   } else if (e.ai1 === 1) {
-    // 旋冲段(:22115-22179):rot+=0.3*dir,1.5 倍速直冲,伤害 ×1.3,防御 -10。
-    // 原版在进入冲撞时一次性应用——每 tick 重乘会把伤害放大 1.3^400,故缓存基值按基值设置
+    // 旋冲段(:22105-22243):rot+=0.3*dir;速度 = 朝玩家单位向量 × num200 **每 tick 直设**
+    // (:22240-22242,曾用 0.1 lerp 逼近 12 速=自造);num200 经典 1.5,专家 3.5 起步
+    // + 距离阶梯(>150 ×1.05;>200..>600 每 100px ×1.1 共 10 级,:22179-22231)
+    // + 按存活手数(0→×1.1 / 1→×1.05);FTW ×1.3(:22236-22239)。
+    // 伤害 = GetAttackDamage_LerpBetweenFinalValues(defDamage, defDamage*1.3)
+    // (:22174,与 ForProjectiles 同式 Remap——经典基值/专家 1.3×);
+    // 防御 -10(:22153,在专家手数加成之后再减)
     if (e.ai2 === 2) game.playSfx('roar', 1, e.cx, e.cy);   // :22155-22157 ai[2]==2 入场吼(style0 满响,2026-08-18 对账补)
     if (e.ai2 >= 400) { e.ai2 = 0; e.ai1 = 0; }
-    let base = baseStats.get(e);
-    if (!base) { base = baseOf(e); }
-    e.def.defense = Math.max(0, base.def - 10);
-    e.def.damage = Math.round(base.dmg * 1.3);
+    e.def.defense = Math.max(0, defBase - 10);
+    e.def.damage = getAttackDamageForProjectiles(b.dmg, b.dmg * 1.3, e.difficulty);
     e.spin += ((e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir || 1) * 0.3;
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
-    const d = Math.hypot(dx, dy) || 1;
-    const spd = 12; // (1.5x 追击速)
-    e.vx += ((dx / d) * spd - e.vx) * 0.1;
-    e.vy += ((dy / d) * spd - e.vy) * 0.1;
+    const dist = Math.hypot(dx, dy) || 1;
+    let num200 = 1.5;
+    if (expert) {
+      num200 = 3.5;
+      if (dist > 150) num200 *= 1.05;
+      for (const d2 of [200, 250, 300, 350, 400, 450, 500, 550, 600]) if (dist > d2) num200 *= 1.1;
+      if (num173 === 0) num200 *= 1.1;
+      else if (num173 === 1) num200 *= 1.05;
+    }
+    if (game.world.seedFlags?.getGoodWorld) num200 *= 1.3;
+    e.vx = dx / dist * num200;
+    e.vy = dy / dist * num200;
   }
   e.facing = e.vx > 0 ? 1 : -1;
   e.x += e.vx; e.y += e.vy;
@@ -210,8 +260,11 @@ export function skeletronHandAI(e: Enemy, game: GameHooks, player: Player | null
   e.x += e.vx; e.y += e.vy;
 }
 
-/** AI_015 史莱姆王(NPC.cs SetDefaults case 50 / AI_015):大跳朝玩家 + 受击攒怒 +
- *  落地砸出小史莱姆(30% 概率)。经典模式无传送(专家专属),暂不移植传送。 */
+/** AI_015 史莱姆王(NPC.cs:43436-43735 全核 1:1,2026-08-19 台账 E 重写):
+ *  落地充能起跳循环(ai0 从负回充,+2/t+血量分档;跳序 -8/-8/-6/-13、vx+4/4/4.5/3.5×dir)
+ *  + 周期传送(ai2 无视线/高差>160 累计 300 → 缩身 60t → 落位淡入 30t;
+ *  antiCheese(localAI[0]≥360 或距>2000)直落玩家脚底) + 掉血 5% 出 1-3 只
+ *  小史莱姆(经典 1 号/专家 1/4 出 535,:43708-43734)。 */
 /** 史莱姆王传送目的地（Bottom 锚像素，= vanilla localAI[1]/[2]；despawn 支=世界角 :43485） */
 const kingTpDest = new WeakMap<Enemy, { x: number; y: number }>();
 /** localAI[0] anti-cheese 计数（:43504-43510 ≥360 或距玩家 >2000px → 落玩家脚底） */
@@ -244,90 +297,139 @@ function kingFindTeleportSpot(e: Enemy, game: GameHooks, player: Player): { x: n
 }
 
 export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
-  // Enemy.ai0 默认 -1120(史莱姆族约定);原版 AI_015 的 ai[0] 从 0 起步 → 首帧复位
-  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; }
-  // 玩家死/远距 3000px(:43466-43485)：TargetClosest 二次判定后仍失败 →
-  // EncourageDespawn(10) + 背对 + ai[1]=5 缩身离场（anti-cheese 传送回归）
+  // AI_015_KingSlime(NPC.cs:43436-43735)1:1 状态机:
+  //  ai0 = 落地充能计数(负值回充,≥0 起跳;5/6 态复用为缩放计时)
+  //  ai1 = 跳序 0→1→2→3→0(三小跳 + 一大跳)/5 缩身传送/6 淡入回归
+  //  ai2 = 周期传送计数(无视线||高差>160 时累计)
+  //  ai3 = 小史莱姆掉血水位(初值 lifeMax)
+  if (!e.bInit) { e.bInit = true; e.ai0 = -100; e.ai1 = 0; e.ai2 = 0; }  // :43454-43464
+  if (e.ai3 === 0 && e.hp > 0) e.ai3 = e.maxHp;                          // :43450-43453
+  let num = 1;          // 体型倍率(5/6 态缩放 1↔0.5)
+  let flag2 = false;    // 传送态(5/6)=落地不充能
+  let flag3 = false;    // 完全缩没(60t 起,dontTakeDamage)
+  // 玩家死/远距 3000px(:43466-43490):TargetClosest 二次判定后仍失败 →
+  // EncourageDespawn(10) + 背对 + ai[2]=0/ai[0]=0/ai[1]=5 缩身传送世界角
   const ksd = player ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : Infinity;
-  if (!player || ksd > 3000) {
+  if (!player || player.dead || ksd > 3000) {
     e.encourageDespawn(10);
-    if (player) e.facing = player.cx < e.cx ? 1 : -1; // 转身背对(:43479-43485)
+    if (player) e.facing = player.cx < e.cx ? 1 : -1;   // :43472-43479 转身背对
     if (e.ai1 !== 5 && e.ai1 !== 6) {
-      e.ai1 = 5; e.ai3 = 0;
-      kingTpDest.set(e, { x: game.world.w * TILE, y: game.world.h * TILE }); // :43485-43488 世界角
+      e.ai2 = 0; e.ai0 = 0; e.ai1 = 5;
+      kingTpDest.set(e, { x: game.world.w * TILE, y: game.world.h * TILE });  // :43486-43487
+    }
+  }
+  // ---- 常规周期传送(:43491-43513):玩家活/timeLeft>10/计数≥300/非传送态/落地 →
+  //  计数清零进 5;antiCheese(localAI[0]≥360 或距>2000px)直落玩家脚底,否则 FindTeleportSpot
+  if (player && !player.dead && e.despawnTimer > 10 && e.ai2 >= 300 && e.ai1 < 5 && e.onGround) {
+    e.ai2 = 0; e.ai0 = 0; e.ai1 = 5;
+    let ac = kingAntiCheese.get(e) ?? 0;
+    const vec = Math.hypot(player.cx - e.cx, player.cy - e.cy);
+    let antiCheese = false;
+    if (ac >= 360 || vec > 2000) {
+      if (ac >= 360) { ac = 360; kingAntiCheese.set(e, ac); }   // :43505-43508 钳 360
+      antiCheese = true;
+    }
+    kingTpDest.set(e, antiCheese
+      ? { x: player.cx, y: player.y + player.h }   // :43404-43409 FindTeleportSpot(antiCheese)
+      : kingFindTeleportSpot(e, game, player));
+  }
+  // ---- 反挂机计数(:43514-43529,每 tick 无地面门):无视线||高差>160 →
+  //  ai[2]+1 且 localAI[0]+1;否则 localAI[0]−1 钳 0(曾写成恒 +1=语义反,2026-08-19)。
+  //  视线 = Center↔Center 连线(CanHitLine 0×0);高差 = Top.Y↔player.Bottom.Y ----
+  if (player) {
+    const los = canHit(game.world.store, e.cx, e.cy, 0, 0, player.cx, player.cy, 0, 0);
+    const gap = Math.abs(e.y - (player.y + player.h));
+    if (!los || gap > 160) {
+      e.ai2 += 1;
+      kingAntiCheese.set(e, (kingAntiCheese.get(e) ?? 0) + 1);
+    } else {
+      kingAntiCheese.set(e, Math.max(0, (kingAntiCheese.get(e) ?? 0) - 1));
     }
   }
   if (e.ai1 === 5) {
-    // 离场/传送缩身态（:43537-43575）：60 tick 缩身 → Gore734 → Bottom 锚落位 → 6 号淡入
-    e.ai3++;
-    e.squash = Math.max(0, 1 - e.ai3 / 60) * 0.6; // 缩身近似（scale 收缩）
-    game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 1.2, { life: 30 }); // 每帧 10 尘 4 蓝 ×0.5（:43564-43570）
-    e.vy += 0.3;
-    e.x += e.vx; e.y += e.vy;
-    if (e.ai3 === 60) {
-      game.spawnParticles(e.cx, e.cy - e.h / 2, '#FFD060', 6, 2, { life: 40 }); // Gore 734 王冠（:43552）
+    // 缩身传送态(:43537-43573):num = clamp((60-ai0)/60)×0.5+0.5;60t 起 flag3
+    // (隐没无敌);==60 Gore734 王冠;≥60 Bottom 锚落位 → 6 号;未隐没时每帧 10 蓝尘
+    flag2 = true;
+    e.ai0 += 1;
+    num = Math.max(0, Math.min(1, (60 - e.ai0) / 60)) * 0.5 + 0.5;
+    if (e.ai0 >= 60) flag3 = true;
+    if (e.ai0 === 60) {
+      game.spawnParticles(e.cx, e.cy - e.h / 2, '#FFD060', 6, 2, { life: 40 }); // Gore 734 王冠(:43550)
     }
-    if (e.ai3 >= 60) {
+    if (e.ai0 >= 60) {
       const dest = kingTpDest.get(e) ?? { x: game.world.w * TILE, y: game.world.h * TILE };
       e.x = dest.x - e.w / 2;
-      e.y = dest.y - e.h;                          // base.Bottom = (localAI[1], localAI[2])（:43554）
-      e.ai1 = 6; e.ai3 = 0;
-      e.squash = 0;
-      e.spawnAlpha = 255; e.alphaFade = true; // 淡入（6 号态）
+      e.y = dest.y - e.h;                          // base.Bottom = (localAI[1], localAI[2])(:43554)
+      e.ai1 = 6; e.ai0 = 0;
     }
-    return;
+    if (!flag3) game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 1.2, { life: 30 });  // :43564-43571
+  } else if (e.ai1 === 6) {
+    // 淡入回归态(:43574-43600):num = clamp(ai0/30)×0.5+0.5;30t 回战斗;到达尘 ×2 速
+    flag2 = true;
+    e.ai0 += 1;
+    num = Math.max(0, Math.min(1, e.ai0 / 30)) * 0.5 + 0.5;
+    if (e.ai0 >= 30) { e.ai1 = 0; e.ai0 = 0; }
+    game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 2.4, { life: 30 });  // :43594-43599
   }
-  if (e.ai1 === 6) {
-    // 淡入回归（约 30 tick spawnAlpha 归零后回战斗）
-    e.ai3++;
-    game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 2.4, { life: 30 }); // 到达尘 ×2（:43584-43590）
-    e.ai0 = 0;
-    if (e.ai3 >= 30) { e.ai1 = 0; e.ai3 = 0; }
-    return;
-  }
-  if (!player) return;
-  // ---- 常规周期传送（:43507-43530）：ai2 在 无视线||高差>160 时累计，≥300 且落地 →
-  //  传送循环；antiCheese（localAI[0]≥360 或距玩家>2000px）直接落玩家脚底（:43504-43510）----
-  if (e.ai1 < 5 && e.onGround) {
-    const los = canHit(game.world.store, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h);
-    const heightGap = Math.abs(e.y - (player.y + player.h));
-    if (!los || heightGap > 160) e.ai2 += 1;
-    else if (e.ai2 > 0) e.ai2 -= 1;
-    const ac = (kingAntiCheese.get(e) ?? 0) + 1;
-    kingAntiCheese.set(e, ac);
-    const kdist = Math.hypot(player.cx - e.cx, player.cy - e.cy);
-    if (e.ai2 >= 300) {
-      e.ai2 = 0; e.ai0 = 0;
-      kingTpDest.set(e, ac >= 360 || kdist > 2000
-        ? { x: player.cx, y: player.y + player.h }   // antiCheese 玩家脚底
-        : kingFindTeleportSpot(e, game, player));
-      e.ai1 = 5; e.ai3 = 0;
-    }
-  }
-  e.ai0 += 1;
-  if (!e.onGround) {
-    e.vy += 0.35; // 重力(原版大跳重力)
-    // 空中水平减速朝玩家
-    if (e.vx > 0) e.vx -= 0.02; else if (e.vx < 0) e.vx += 0.02;
-  } else {
-    // 落地:砸压判定 + 30% 出小史莱姆(原版 SpawnNPC(16) 语义)
-    if (e.ai0 > 10) {
-      const dx = player.cx - e.cx;
-      e.vy = -8 - Math.random() * 3; // 大跳(原版 -8~-11)
-      e.vx = Math.max(-7, Math.min(7, dx * 0.06));
-      if (Math.random() < 0.3) {
-        for (let k = 0; k < 2; k++) {
-          const s = spawnPart(game, e, 16);
-          if (s) { s.x += (Math.random() - 0.5) * 60; s.vy = -4; }
-        }
+  e.dontTakeDamage = flag3;      // :43601 dontTakeDamage = (hide = flag3)
+  e.squash = (1 - num) * 1.2;    // 体型倍率近似(缩放 0.5..1 ↔ squash 0.6..0)
+  if (e.onGround) {
+    // 落地(:43602-43663):vx 阻尼 0.8(<0.1 归零);非传送态充能起跳
+    e.vx *= 0.8;
+    if (e.vx > -0.1 && e.vx < 0.1) e.vx = 0;
+    if (!flag2) {
+      // :43611-43631 充能 +2/t + 血量分档(<80 +1/<60 +1/<40 +2/<20 +3/<10 +4 = +2..+13)
+      e.ai0 += 2;
+      if (e.hp < e.maxHp * 0.8) e.ai0 += 1;
+      if (e.hp < e.maxHp * 0.6) e.ai0 += 1;
+      if (e.hp < e.maxHp * 0.4) e.ai0 += 2;
+      if (e.hp < e.maxHp * 0.2) e.ai0 += 3;
+      if (e.hp < e.maxHp * 0.1) e.ai0 += 4;
+      if (e.ai0 >= 0) {
+        // 跳序(:43632-43656):ai1==3 → vy-13/vx+3.5dir/回充-200/回 0;
+        // ai1==2 → vy-6/vx+4.5dir/回充-120/ai1+1;其余 → vy-8/vx+4dir/回充-120/ai1+1
+        // (方向 = TargetClosest 的 direction,即玩家侧)
+        const dir = player ? (player.cx > e.cx ? 1 : -1) : (e.facing || 1);
+        e.facing = dir;
+        if (e.ai1 === 3) { e.vy = -13; e.vx += 3.5 * dir; e.ai0 = -200; e.ai1 = 0; }
+        else if (e.ai1 === 2) { e.vy = -6; e.vx += 4.5 * dir; e.ai0 = -120; e.ai1 += 1; }
+        else { e.vy = -8; e.vx += 4 * dir; e.ai0 = -120; e.ai1 += 1; }
       }
-      game.spawnParticles(e.cx, e.y + e.h, '#3080FF', 8, 2.2);
+      // :43658-43661 ai0 ≥ -30 = 起跳前蹲伏动画段(aiAction=1,squash 视觉)
+    }
+  } else if (player) {
+    // 空中(:43664-43682):朝 direction 0.2/t 加速,限 |vx|<3(FTW 6);已反向时先 0.93 阻尼
+    const num7 = game.world.seedFlags?.getGoodWorld ? 6 : 3;
+    const dir = e.facing || 1;
+    if ((dir === 1 && e.vx < num7) || (dir === -1 && e.vx > -num7)) {
+      if ((dir === -1 && e.vx < 0.1) || (dir === 1 && e.vx > -0.1)) e.vx += 0.2 * dir;
+      else e.vx *= 0.93;
     }
   }
-  e.x += e.vx;
-  e.y += e.vy;
-  // 地形碰撞(实心块)
-  collideGround(e, game);
+  // 重力+地形 = 共享段(UpdateNPC_UpdateGravity + MoveWhileDry):0.3 重力/高空衰减/落速钳
+  e.applyGravity(game);
+  moveAndCollide(e, game.world, e.vx, e.vy);
+  if (e.hp <= 0) return;
+  // ---- 掉血 5% 出小史莱姆(:43708-43734):水位 ai3 每越线补记;1-3 只;
+  //  经典 1 号蓝史莱姆,专家 1/4 概率换 535(:43720-43723);体内随机点出、
+  //  初速 Next(-15,16)*0.1 / Next(-30,1)*0.1、ai[0]=-1000*Next(3) ----
+  const num10 = e.maxHp * 0.05;
+  if (e.hp + num10 < e.ai3) {
+    e.ai3 = e.hp;
+    const expert = mainExpertMode(game.world);
+    const n = 1 + Math.floor(Math.random() * 3);   // Next(1,4) = 1..3
+    for (let k = 0; k < n; k++) {
+      const s = spawnPart(game, e, expert && Math.floor(Math.random() * 4) === 0 ? 535 : 1);
+      if (s) {
+        s.x = e.x + Math.random() * Math.max(1, e.w - 32);
+        s.y = e.y + Math.random() * Math.max(1, e.h - 32);
+        s.vx = (Math.floor(Math.random() * 31) - 15) * 0.1;
+        s.vy = (Math.floor(Math.random() * 31) - 30) * 0.1;
+        s.ai0 = -1000 * Math.floor(Math.random() * 3);
+        s.ai1 = 0;
+      }
+    }
+  }
 }
 
 /** AI_054 克苏鲁之脑 266（NPC.cs:32537-32827 全核 1:1）：
@@ -749,7 +851,14 @@ export function mechQueenAnchor(queen: Enemy, spaz: boolean): { x: number; y: nu
 /** AI_030/031 双子(NPC.cs:26497-27735):雷神之眼 125 / 魔神之眼 126。
  *  旋转持续瞄准玩家(0.1/0.15 步进+绕圈处理);白天/玩家死 → 上飞离场;
  *  一阶段(血>40%):侧向悬浮(300/400)→4-10 连冲(12/13 速);二阶段变身自旋;
- *  三阶段:雷眼 激光 83→100(伤害×1.5 防+10),魔眼 火焰喷射 101(伤害×1.5 防+18)。
+ *  三阶段:雷眼 = 悬浮(300t) ↔ 侧移 ±340 边移边射(180t,无冲刺段,:27008-27114),
+ *  魔眼 = 悬浮(400t) → 冲刺-减速循环;伤害×1.5,防 +10/+18。
+ *  expert 档全量实装(2026-08-19):雷眼一阶悬浮 8.25/0.115(:26594-26597)、
+ *  激光 10.5 速+四档计数(:26693-26727)、冲刺 15(:26746-26748)、三阶悬浮
+ *  9.5/0.175(:26878-26881)与激光 10(:26994-26996)、侧移 9.5/0.25+计数+1.5
+ *  (:27015-27018/:27087-27089);魔眼冲刺 13→15.8 血量阶梯(:27349-27372)、
+ *  诅焰 14 速+计数+0.6(:27309-27311/:27329-27331)、三阶悬浮距离六档
+ *  (:27512-27537)。
  *  getGoodWorld(FTW)分支全量实装:悬浮/冲刺/弹幕计数抬档(:26599/26709/26745/
  *  26883/27020 雷眼,:27218/27313/27373/27539 魔眼)。
  *  Mechdusa 联动(IsMechQueenUp,2026-08-14 全分支实装):锚位悬浮(:26571-26579/
@@ -761,6 +870,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
   // Main.getGoodWorld(for the worthy)
   const ftw = !!game.world.seedFlags?.getGoodWorld;
+  // Main.expertMode——双子专家档(2026-08-19 对齐):雷眼悬浮/激光提速、魔眼
+  // 冲刺血量阶梯、诅焰提速计数、二阶段悬浮/激光、侧移逼近与连射 +1.5 全在此门
+  const expert = mainExpertMode(game.world);
   // Mechdusa 合体态(NPC.IsMechQueenUp)——queen 失效(死亡/消散)自动回落 false
   const mq = mechQueenUp();
   const queen = mq ? getMechQueen() : null;
@@ -800,9 +912,11 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   // ---- 一阶段(ai0=0) ----
   if (e.ai0 === 0) {
     if (e.ai1 === 0) {
-      // 侧向悬浮:雷眼 玩家侧 300/上方 300 速 7/0.1;魔眼 侧 400 速 12/0.4;
-      // FTW ×1.15(:26599-26603 雷眼 / :27218-27222 魔眼)
+      // 侧向悬浮:雷眼 玩家侧 300/上方 300——经典 7/0.1,专家 8.25/0.115(:26592-26597),
+      // FTW ×1.15(:26599-26603);魔眼 侧 400——经典 12/0.4(无专家档,:27216-27222),
+      // FTW ×1.15
       let spd = spaz ? 12 : 7, acc = spaz ? 0.4 : 0.1;
+      if (!spaz && expert) { spd = 8.25; acc = 0.115; }
       if (ftw) { spd *= 1.15; acc *= 1.15; }
       const side = e.cx < player.x + player.w ? -1 : 1;
       const offX = spaz ? 400 : 300, offY = spaz ? 0 : 300;
@@ -825,18 +939,33 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.ai2 += 1;
       // mech 悬浮计时 600→1200(:26685-26690 雷眼 num440 / :27291-27296 魔眼 num483)
       if (e.ai2 >= (mq ? 1200 : 600)) { e.ai1 = 1; e.ai2 = 0; e.ai3 = 0; }
-      // 悬浮期弹幕:魔眼 每 60t 诅咒焰 96(25 伤 12 速);雷眼 位于玩家上方且距悬浮点<400 时绿激光 83(20 伤 9 速)
+      // 悬浮期弹幕:魔眼 每 60t 诅咒焰 96;雷眼 位于玩家上方且距悬浮点<400 时绿激光 83
       if (spaz) {
-        e.ai3 += 1 + (ftw ? 0.4 : 0);   // :27313-27316 FTW 诅咒焰计数 +0.4/t
+        // :27306-27316 计数 +1/t;专家血<80% +0.6(:27309-27311);FTW +0.4
+        e.ai3 += 1;
+        if (expert && e.hp < e.maxHp * 0.8) e.ai3 += 0.6;
+        if (ftw) e.ai3 += 0.4;
         if (e.ai3 >= 60) {
           e.ai3 = 0;
-          const dx = player.cx - e.cx, dy = player.cy - e.cy;
-          const d = Math.hypot(dx, dy) || 1;
-          shoot(game, e.cx + dx / d * 4, e.cy + dy / d * 4,
-            dx / d * 12 + (Math.random() - 0.5) * 4, dy / d * 12 + (Math.random() - 0.5) * 4, 25, 96);
+          // :27326-27341 速 12(专家 14,:27329-27331),伤 Remap(25,22),弹 96,
+          // 速度 ±40×0.05 抖动,出膛点 = 中心 + v×4
+          const spdF = expert ? 14 : 12;
+          let fx = player.cx - e.cx, fy = player.cy - e.cy;
+          const fl = Math.hypot(fx, fy) || 1;
+          fx = fx / fl * spdF + (Math.floor(Math.random() * 81) - 40) * 0.05;
+          fy = fy / fl * spdF + (Math.floor(Math.random() * 81) - 40) * 0.05;
+          shoot(game, e.cx + fx * 4, e.cy + fy * 4, fx, fy,
+            getAttackDamageForProjectiles(25, 22, e.difficulty), 96);
         }
       } else if (e.y + e.h < player.y && hoverDist < 400) {
-        e.ai3 += 1 + (ftw ? 0.5 : 0);   // :26709-26711 FTW 激光计数 +0.5/t
+        // :26690-26712 计数 +1/t;专家血 <90%/<80%/<70%/<60% 各 +0.3(:26693-26708);
+        // FTW +0.5(:26709-26711)
+        e.ai3 += 1;
+        if (expert && e.hp < e.maxHp * 0.9) e.ai3 += 0.3;
+        if (expert && e.hp < e.maxHp * 0.8) e.ai3 += 0.3;
+        if (expert && e.hp < e.maxHp * 0.7) e.ai3 += 0.3;
+        if (expert && e.hp < e.maxHp * 0.6) e.ai3 += 0.3;
+        if (ftw) e.ai3 += 0.5;
         // mech 激光门 60→90/120(:26673-26679 num441 = !npcsFoundForCheckActive[135]
         //   ? 90 : 120——毁灭者身段在场=更慢)
         const laserGate = mq
@@ -844,20 +973,38 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
           : 60;
         if (e.ai3 >= laserGate) {
           e.ai3 = 0;
-          const dx = player.cx - e.cx, dy = player.cy - e.cy;
-          const d = Math.hypot(dx, dy) || 1;
-          shoot(game, e.cx + dx / d * 15, e.cy + dy / d * 15,
-            dx / d * 9 + (Math.random() - 0.5) * 6.4, dy / d * 9 + (Math.random() - 0.5) * 6.4, 20, 83);
+          // :26722-26737 速 9(专家 10.5,:26725-26727),伤 Remap(20,19),弹 83,
+          // 速度 ±40×0.08 抖动,出膛点 = 中心 + v×15
+          const spdL = expert ? 10.5 : 9;
+          let lx = player.cx - e.cx, ly = player.cy - e.cy;
+          const ll = Math.hypot(lx, ly) || 1;
+          lx = lx / ll * spdL + (Math.floor(Math.random() * 81) - 40) * 0.08;
+          ly = ly / ll * spdL + (Math.floor(Math.random() * 81) - 40) * 0.08;
+          shoot(game, e.cx + lx * 15, e.cy + ly * 15, lx, ly,
+            getAttackDamageForProjectiles(20, 19, e.difficulty), 83);
         }
       }
     } else if (e.ai1 === 1) {
-      // 冲撞:一次性朝玩家定速(雷眼 12/魔眼 13;FTW 雷眼 +2(:26750-26752)、
-      // 魔眼 ×1.2(:27373-27376))
+      // 冲撞:一次性朝玩家定速——雷眼 12(专家 15,:26745-26749;FTW +2 :26750-26752);
+      // 魔眼 13 + 专家血量阶梯 +0.5/+0.5/+0.55/+0.6/+0.65(<90/80/70/60/50%,
+      // :27349-27372,满档 15.8;FTW ×1.2 :27373-27376)
       e.spin = target;
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
       let spd = spaz ? 13 : 12;
-      if (ftw) spd = spaz ? spd * 1.2 : spd + 2;
+      if (spaz) {
+        if (expert) {
+          if (e.hp < e.maxHp * 0.9) spd += 0.5;
+          if (e.hp < e.maxHp * 0.8) spd += 0.5;
+          if (e.hp < e.maxHp * 0.7) spd += 0.55;
+          if (e.hp < e.maxHp * 0.6) spd += 0.6;
+          if (e.hp < e.maxHp * 0.5) spd += 0.65;
+        }
+        if (ftw) spd *= 1.2;
+      } else {
+        if (expert) spd = 15;
+        if (ftw) spd += 2;
+      }
       e.vx = dx / d * spd; e.vy = dy / d * spd;
       e.ai1 = 2;
     } else if (e.ai1 === 2) {
@@ -913,12 +1060,26 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   e.def.damage = Math.round(b.dmg * 1.5);
   e.def.defense = b.def + (spaz ? 18 : 10);
   if (e.ai1 === 0) {
-    // 上方悬浮:雷眼 玩家正上 300(8/0.15,300t→冲);魔眼 侧 180 同高(4/0.1,400t→冲)
-    // + 火焰喷射 101;FTW ×1.15(:26883-26887 雷眼 / :27539-27544 魔眼)
+    // 上方悬浮:雷眼 玩家正上 300——经典 8/0.15,专家 9.5/0.175(:26876-26882),
+    // FTW ×1.15(:26883-26887);魔眼 侧 180 同高——经典 4/0.1,专家按距悬浮点
+    // 距离六档 +0.5/+0.5/+0.55/+0.55/+0.6/+0.6(>300..>800,:27512-27537,mech 态跳过),
+    // FTW ×1.15(速/步进同乘,:27539-27543);雷眼 300t/魔眼 400t → 换态
     let spd = spaz ? 4 : 8, acc = spaz ? 0.1 : 0.15;
-    if (ftw) { spd *= 1.15; acc *= 1.15; }
     const offX = spaz ? 180 : 0, offY = spaz ? 0 : 300;
     const side = e.cx < player.x + player.w ? -1 : 1;
+    const htx = player.cx + side * offX, hty = player.cy - offY;
+    if (!spaz && expert) { spd = 9.5; acc = 0.175; }
+    if (spaz && expert && !mq) {
+      // :27512-27537 专家魔眼距悬浮点阶梯(>300→+0.5 … >800→+0.6)
+      const dh = Math.hypot(htx - e.cx, hty - e.cy);
+      if (dh > 300) spd += 0.5;
+      if (dh > 400) spd += 0.5;
+      if (dh > 500) spd += 0.55;
+      if (dh > 600) spd += 0.55;
+      if (dh > 700) spd += 0.6;
+      if (dh > 800) spd += 0.6;
+    }
+    if (ftw) { spd *= 1.15; acc *= 1.15; }
     if (!spaz && mq && queen) {
       // mech 雷眼三阶段锚位悬浮(:26891-26906):速 14、queen 锚点、距离钳 14、
       // 速度指数逼近 (v*4+t)/5;悬浮计时 300→1200(:26950-26953 num456)
@@ -929,44 +1090,67 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.vx = (e.vx * 4 + dx) / 5;
       e.vy = (e.vy * 4 + dy) / 5;
     } else {
-      seek(e, player.cx + side * offX, player.cy - offY, spd, acc);
+      seek(e, htx, hty, spd, acc);
     }
     e.ai2 += 1;
     // mech 悬浮计时:雷眼 300→1200 / 魔眼 400→1200(:26950/:27581)
     if (e.ai2 >= (mq ? 1200 : (spaz ? 400 : 300))) { e.ai1 = 1; e.ai2 = 0; e.ai3 = 0; }
     e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-    // 弹幕节奏 = 血量阶梯累积器（雷眼 :26971-26990 / 魔眼 :27598-27612 同表）：
-    // 每 tick +1，<75%/<50%/<25% 各再 +1、<10% 再 +2（满血 1×、濒死 6×），
-    // 蓄满（雷眼 180 / 魔眼 8）且视线可达 → 清零发射——曾写死固定节拍无低血加速
-    e.ai3 += 1;
-    if (e.hp < e.maxHp * 0.75) e.ai3 += 1;
-    if (e.hp < e.maxHp * 0.5) e.ai3 += 1;
-    if (e.hp < e.maxHp * 0.25) e.ai3 += 1;
-    if (e.hp < e.maxHp * 0.1) e.ai3 += 2;
-    if (e.ai3 > (spaz ? 8 : 180) && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
-      e.ai3 = 0;
-      const dx = player.cx - e.cx, dy = player.cy - e.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      const spdP = spaz ? 6 : 8.5;
-      const dmgP = spaz ? 30 : 25;
-      const pid = spaz ? 101 : 100;
-      const lead = spaz ? 4 : 15;
-      let vx = dx / d * spdP + (Math.random() - 0.5) * 0.8;
-      let vy = dy / d * spdP + (Math.random() - 0.5) * 0.8;
-      let ox = e.cx + dx / d * lead, oy = e.cy + dy / d * lead;
-      if (spaz && mq) {
-        // mech 魔眼火焰沿自身朝向喷(:27640-27647):速度 = (rotation+π/2) 单位向量
-        // ×6 + 自身速度×0.5,出膛点 = 中心 - 速度×3(反向出膛,火焰从"眼后"甩出)
-        const fx = Math.cos(e.spin + Math.PI / 2) * spdP + e.vx * 0.5;
-        const fy = Math.sin(e.spin + Math.PI / 2) * spdP + e.vy * 0.5;
-        vx = fx; vy = fy;
-        ox = e.cx - fx * 3; oy = e.cy - fy * 3;
+    // 弹幕节奏 = localAI[1] 血量阶梯累积器（雷眼 :26971-26987 / 魔眼 :27604-27620，
+    // 本仓 e.lai1——与雷眼侧移态共用同一计数，状态切换不重置）：
+    // 魔眼累积在视线可达门内（:27594 CanHit 本盒↔玩家盒），另由 localAI[2]
+    // （本仓 e.lai2）每 23t 播 Item34 火焰音（:27596-27600）
+    if (spaz) {
+      if (canHit(game.world.store, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
+        e.lai2 += 1;
+        if (e.lai2 > 22) { e.lai2 = 0; game.playSfxFiles(['Item_34'], 1, e.cx, e.cy); }
+        e.lai1 += 1;
+        if (e.hp < e.maxHp * 0.75) e.lai1 += 1;
+        if (e.hp < e.maxHp * 0.5) e.lai1 += 1;
+        if (e.hp < e.maxHp * 0.25) e.lai1 += 1;
+        if (e.hp < e.maxHp * 0.1) e.lai1 += 2;
+        if (e.lai1 > 8) {
+          e.lai1 = 0;
+          // :27623-27647 火焰 101:速 6,伤 Remap(30,27),±0.4 抖动 + 自身速度×0.5,
+          // 出膛点 = 中心 − 速度×1(反向出膛);mech 态沿自身朝向喷(下方分支)
+          const num500 = 6;
+          let fx = player.cx - e.cx, fy = player.cy - e.cy;
+          const fl = Math.hypot(fx, fy) || 1;
+          fx = fx / fl * num500; fy = fy / fl * num500;
+          fy += (Math.floor(Math.random() * 81) - 40) * 0.01;
+          fx += (Math.floor(Math.random() * 81) - 40) * 0.01;
+          fy += e.vy * 0.5; fx += e.vx * 0.5;
+          let ox = e.cx - fx, oy = e.cy - fy;
+          if (mq) {
+            // mech 魔眼火焰沿自身朝向喷(:27640-27647):速度 = (rotation+π/2) 单位向量
+            // ×6 + 自身速度×0.5,出膛点 = 中心 - 速度×3
+            const ux = Math.cos(e.spin + Math.PI / 2) * num500 + e.vx * 0.5;
+            const uy = Math.sin(e.spin + Math.PI / 2) * num500 + e.vy * 0.5;
+            fx = ux; fy = uy;
+            ox = e.cx - ux * 3; oy = e.cy - uy * 3;
+          }
+          shoot(game, ox, oy, fx, fy, getAttackDamageForProjectiles(30, 27, e.difficulty), 101);
+        }
       }
-      shoot(game, ox, oy, vx, vy, dmgP, pid);
+    } else {
+      // 雷眼 :26971-27005:计数无条件累积,>180 且视线可达才发射
+      e.lai1 += 1;
+      if (e.hp < e.maxHp * 0.75) e.lai1 += 1;
+      if (e.hp < e.maxHp * 0.5) e.lai1 += 1;
+      if (e.hp < e.maxHp * 0.25) e.lai1 += 1;
+      if (e.hp < e.maxHp * 0.1) e.lai1 += 2;
+      if (e.lai1 > 180 && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
+        e.lai1 = 0;
+        // :26991-27004 激光 100:速 8.5(专家 10,:26994-26996),伤 Remap(25,23),
+        // 无抖动,出膛点 = 中心 + v×15
+        const spdP = expert ? 10 : 8.5;
+        const dx = player.cx - e.cx, dy = player.cy - e.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        const vx = dx / d * spdP, vy = dy / d * spdP;
+        shoot(game, e.cx + vx * 15, e.cy + vy * 15, vx, vy,
+          getAttackDamageForProjectiles(25, 23, e.difficulty), 100);
+      }
     }
-    // 魔眼火焰音（:27593-27603 localAI[2]：视线可达时每 22t Item34——视线在
-    // 下方发射门里判过，此处同帧条件内不重复掷）
-    if (spaz && e.ai3 === 0) game.playSfxFiles(['Item_34'], 0.6, e.cx, e.cy);
     if (spaz && mq && queen) {
       // mech 魔眼三阶段尾段锚位悬浮(:27651-27671):玩家侧移动代码照跑后,
       // 目标速度改 queen 锚点(速 14 距离钳)、速度指数逼近 (v*59+t)/60——慢漂
@@ -977,33 +1161,21 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.vx = (e.vx * 59 + dx) / 60;
       e.vy = (e.vy * 59 + dy) / 60;
     }
-  } else if (e.ai1 === 1) {
-    // 冲撞(直冲启动帧):雷眼 :26746-26763 直冲 12(expert 15/getGood +2)/
-    // 魔眼 :27674-27690 直冲 14(expert +2.5=16.5,无 FTW 档)——原版两侧同构,
-    // 曾以"雷眼=侧移 seek 8 速+每 60t 射弹"近似(自造),2026-08-18 对齐替换
-    if (spaz) {
-      // :27674 二阶段冲刺启动帧吼(style0 满响;雷眼无此吼——全树 case15 仅此一处
-      // 二阶段专属,2026-08-18 对账补)
-      game.playSfx('roar', 1, e.cx, e.cy);
-      e.spin = target;
-      const dx = player.cx - e.cx, dy = player.cy - e.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      const spd = mainExpertMode(game.world) ? 16.5 : 14;
-      e.vx = dx / d * spd; e.vy = dy / d * spd;
-      e.ai1 = 2;
-    } else {
-      e.spin = target;
-      const dx = player.cx - e.cx, dy = player.cy - e.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      let spd2 = mainExpertMode(game.world) ? 15 : 12;
-      if (game.world.seedFlags?.getGoodWorld) spd2 += 2;
-      e.vx = dx / d * spd2; e.vy = dy / d * spd2;
-      e.ai1 = 2;
-    }
-  } else if (e.ai1 === 2 && spaz) {
+  } else if (e.ai1 === 1 && spaz) {
+    // 魔眼冲撞启动帧(:27672-27688):吼(style0 满响)后 14 速直冲(expert +2.5
+    // =16.5,无 FTW 档),ai1=2 进减速段——全树 case15 仅此一处二阶段专属吼,
+    // 2026-08-18 对账补
+    game.playSfx('roar', 1, e.cx, e.cy);
+    e.spin = target;
+    const dx = player.cx - e.cx, dy = player.cy - e.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    const spd = expert ? 16.5 : 14;
+    e.vx = dx / d * spd; e.vy = dy / d * spd;
+    e.ai1 = 2;
+  } else if (spaz) {
     // 魔眼冲撞减速段(50t 起阻尼,80t 一循环,6 循环回悬浮;expert 计时 ×1.5
     // —— :27696-27700 ai[2]+=1 且 expert 再 +0.5,2026-08-18 补)
-    e.ai2 += mainExpertMode(game.world) ? 1.5 : 1;
+    e.ai2 += expert ? 1.5 : 1;
     if (e.ai2 >= 50) {
       e.vx *= 0.93; e.vy *= 0.93;
       if (Math.abs(e.vx) < 0.1) e.vx = 0;
@@ -1016,21 +1188,37 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.spin = target;
       if (e.ai3 >= 6) { e.ai1 = 0; e.ai3 = 0; } else e.ai1 = 1;
     }
-  } else if (e.ai1 === 2) {
-    // 雷眼冲撞减速段(25t 起阻尼,70t 一循环,4 循环回悬浮)
+  } else {
+    // ---- 雷眼二阶段侧移态(:27008-27114,原版 else=任意 ai1!=0;无 ai1==2)----
+    // 贴玩家侧 ±340(num460=玩家在哪侧)同高水平位移逼近:经典 8/0.2,专家
+    // 9.5/0.25(:27013-27019),FTW ×1.15(:27020-27024);持续 180t 回悬浮
+    // (:27106-27114)。曾误写成"直冲 12/专家 15 + 减速循环"(抄了魔眼拓扑+一阶段
+    // 冲刺数,2026-08-19 台账 E 重写)
+    const num460 = e.cx < player.x + player.w ? -1 : 1;
+    let spd2 = 8, acc2 = 0.2;
+    if (expert) { spd2 = 9.5; acc2 = 0.25; }
+    if (ftw) { spd2 *= 1.15; acc2 *= 1.15; }
+    seek(e, player.cx + num460 * 340, player.cy, spd2, acc2);
+    e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
+    // :27070-27090 连射计数(localAI[1],与悬浮态共用):+1/t,<75% +0.5,<50% +0.75,
+    // <25% +1,<10% +1.5,专家恒 +1.5;>60 且视线可达 → 清零发射
+    e.lai1 += 1;
+    if (e.hp < e.maxHp * 0.75) e.lai1 += 0.5;
+    if (e.hp < e.maxHp * 0.5) e.lai1 += 0.75;
+    if (e.hp < e.maxHp * 0.25) e.lai1 += 1;
+    if (e.hp < e.maxHp * 0.1) e.lai1 += 1.5;
+    if (expert) e.lai1 += 1.5;
+    if (e.lai1 > 60 && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
+      e.lai1 = 0;
+      // :27094-27103 激光 100:速 9,伤 Remap(18,17),无抖动,出膛点 = 中心 + v×15
+      const dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const vx = dx / d * 9, vy = dy / d * 9;
+      shoot(game, e.cx + vx * 15, e.cy + vy * 15, vx, vy,
+        getAttackDamageForProjectiles(18, 17, e.difficulty), 100);
+    }
     e.ai2 += 1;
-    if (e.ai2 >= 25) {
-      e.vx *= 0.96; e.vy *= 0.96;
-      if (Math.abs(e.vx) < 0.1) e.vx = 0;
-      if (Math.abs(e.vy) < 0.1) e.vy = 0;
-    } else {
-      e.spin = Math.atan2(e.vy, e.vx) - Math.PI / 2;
-    }
-    if (e.ai2 >= 70) {
-      e.ai3 += 1; e.ai2 = 0;
-      e.spin = target;
-      if (e.ai3 >= 4) { e.ai1 = 0; e.ai3 = 0; } else e.ai1 = 1;
-    }
+    if (e.ai2 >= 180) { e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
   }
   e.x += e.vx; e.y += e.vy;
 }
@@ -1090,7 +1278,8 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
   }
   if (e.ai1 === 0) {
     // 悬浮段(:27787-27874):Y 带 [玩家-200, 玩家-500] 0.1/±2;X 窗 ±100 0.1/±8;
-    // mech:Y 带 [玩家-300, 玩家-350]、X 窗平移 -450×侧(:27813-27819)
+    // 专家档 :27819-27824——0.03/±4(Y)、0.07/±9.5(X)(FTW 无档);
+    // mech:Y 带 [玩家-300, 玩家-350]、X 窗平移 -450×侧(:27813-27818)
     e.ai2 += 1;
     if (e.ai2 >= 600) {
       e.ai2 = 0;
@@ -1108,29 +1297,33 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
     // mech 悬浮带参数(:27813-27819):num516=玩家在头哪侧,num515=-450×侧
     const yLow = mq ? 300 : 200, yHigh = mq ? 350 : 500;
     const xShift = mq ? -450 * (player.cx < e.cx ? -1 : 1) : 0;
+    let nY = 0.1, cY = 2, nX = 0.1, cX = 8;
+    if (mainExpertMode(game.world)) { nY = 0.03; cY = 4; nX = 0.07; cX = 9.5; }
     if (e.y > player.y - yLow) {
       if (e.vy > 0) e.vy *= 0.98;
-      e.vy -= 0.1;
-      if (e.vy > 2) e.vy = 2;
+      e.vy -= nY;
+      if (e.vy > cY) e.vy = cY;
     } else if (e.y < player.y - yHigh) {
       if (e.vy < 0) e.vy *= 0.98;
-      e.vy += 0.1;
-      if (e.vy < -2) e.vy = -2;
+      e.vy += nY;
+      if (e.vy < -cY) e.vy = -cY;
     }
     if (e.cx > player.cx + 100 + xShift) {
       if (e.vx > 0) e.vx *= 0.98;
-      e.vx -= 0.1;
-      if (e.vx > 8) e.vx = 8;
+      e.vx -= nX;
+      if (e.vx > cX) e.vx = cX;
     }
     if (e.cx < player.cx - 100 + xShift) {
       if (e.vx < 0) e.vx *= 0.98;
-      e.vx += 0.1;
-      if (e.vx < -8) e.vx = -8;
+      e.vx += nX;
+      if (e.vx < -cX) e.vx = -cX;
     }
   } else if (e.ai1 === 1) {
-    // 旋冲段(:27875-27970):防伤×2,经典 2 速直冲,400t 回悬浮;
+    // 旋冲段(:27875-27970):防伤×2,速度 = 朝玩家单位向量 × num200 每 tick 直设
+    // (:27955-27957)——经典 2;专家 6 + 距离阶梯(>150 ×1.05;>200..>600 每
+    // 100px ×1.1 共 10 级,:27906-27948);400t 回悬浮;
     // mech:旋转改 AngleLerp 倾转(:27887-27892)、冲速 ×0.75(无 135)/0.6
-    // (有 135)(:27951-27955)、距玩家 < 冲速时速度钳到距离防过冲抖动(:27958-27966)
+    // (有 135)(:27950-27954)、距玩家 < 冲速时速度钳到距离防过冲抖动(:27958-27966)
     e.def.defense = b.def * 2;
     e.def.damage = b.dmg * 2;
     e.ai2 += 1;
@@ -1145,6 +1338,11 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const dist = Math.hypot(dx, dy) || 1;
     let spd = 2;
+    if (mainExpertMode(game.world)) {
+      spd = 6;
+      if (dist > 150) spd *= 1.05;
+      for (const d2 of [200, 250, 300, 350, 400, 450, 500, 550, 600]) if (dist > d2) spd *= 1.1;
+    }
     if (mq) {
       spd *= (game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 135) ? 0.6 : 0.75;
     }
@@ -1175,12 +1373,13 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
     spd = Math.max(8, Math.min(32, spd));
     e.vx = dx / d * spd; e.vy = dy / d * spd;
   } else {
-    // 离场(:28043-28052):下坠离场
+    // 离场(:28043-28052):下坠离场;非 mech EncourageDespawn(500)(:28045,
+    // 曾误 10——500=远离玩家 500t 才允许消散)
     e.vy += 0.1;
     if (e.vy < 0) e.vy *= 0.95;
     e.vx *= 0.95;
     if (e.vy > 13) e.vy = 13;
-    e.encourageDespawn(10); // 离屏即消(bossFled,不播击败)
+    e.encourageDespawn(500); // 离屏即消(bossFled,不播击败)
   }
   e.facing = e.vx > 0 ? 1 : -1;
   e.x += e.vx;
@@ -1703,28 +1902,3 @@ function driveMechChain(head: Enemy): void {
 
 // ---- 工具 ----
 
-function collideGround(e: Enemy, game: GameHooks) {
-  const st = game.world.store;
-  const tx = Math.floor(e.cx / TILE);
-  const ty = Math.floor((e.y + e.h) / TILE);
-  if (st.inBounds(tx, ty) && st.isSolid(tx, ty) && e.vy >= 0) {
-    e.y = ty * TILE - e.h;
-    e.vy = 0;
-    e.onGround = true;
-  } else {
-    e.onGround = false;
-  }
-  const ty2 = Math.floor(e.y / TILE);
-  if (st.inBounds(tx, ty2) && st.isSolid(tx, ty2) && e.vy < 0) {
-    e.y = (ty2 + 1) * TILE;
-    e.vy = 0;
-  }
-  const tx2 = Math.floor((e.x + e.w) / TILE);
-  if (st.inBounds(tx2, Math.floor(e.cy / TILE)) && st.isSolid(tx2, Math.floor(e.cy / TILE)) && e.vx > 0) {
-    e.x = tx2 * TILE - e.w; e.vx = 0;
-  }
-  const tx3 = Math.floor(e.x / TILE);
-  if (st.inBounds(tx3, Math.floor(e.cy / TILE)) && st.isSolid(tx3, Math.floor(e.cy / TILE)) && e.vx < 0) {
-    e.x = (tx3 + 1) * TILE; e.vx = 0;
-  }
-}

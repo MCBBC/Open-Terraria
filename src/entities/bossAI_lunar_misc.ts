@@ -618,6 +618,8 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 4.1 仅"未过玩家 Y 且 ai[2]==0 的真俯冲段"(:39724-39730)，过顶回落段 false）。
   // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
   e.noGravity = false;
+  // knockBackResist 运行时位：4/4.1/5 三态恒 0（:39662/:39710/:39756），其余态回落数据档
+  e.kbResistOverride = (e.ai0 === 4 || e.ai0 === 4.1 || e.ai0 === 5) ? 0 : null;
   const p = player && !player.dead ? player : null;
   const los = !!p && losClear(game, e.cx, e.cy, p.cx, p.cy);
   // ---- 玩家全灭 → 7 隐身僵坐(:39526-39534) ----
@@ -683,9 +685,12 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
     const dx = p ? p.cx - e.cx : e.facing * 100;
     const dy = (p ? p.cy : e.cy) - 350 - e.cy;
     if (e.ai2 === 1) {
+      // :39676-39690 短瞄段【重算】目标 = 玩家中心（不带 -350 抬升——曾复用上方
+      // 偏移向量，短瞄/俯冲全打向玩家头顶 350px 处）
       e.ai1 += 1;
-      const d = Math.hypot(dx, dy) || 1;
-      const tx = (dx / d) * 8, ty = (dy / d) * 8;
+      const adx = p ? p.cx - e.cx : dx, ady = p ? p.cy - e.cy : dy;
+      const d = Math.hypot(adx, ady) || 1;
+      const tx = (adx / d) * 8, ty = (ady / d) * 8;
       e.vx = (e.vx * 4 + tx) / 5; e.vy = (e.vy * 4 + ty) / 5;
       if (e.ai1 > 6) { e.ai0 = 4.1; e.ai1 = 0; e.ai2 = 0; e.vx = tx; e.vy = ty; }
     } else if (p && Math.abs(e.cx - p.cx) < 40 && e.cy < p.cy - 300) {
@@ -699,18 +704,20 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   } else if (e.ai0 === 4.1) {
     // ---- 俯冲下坠(:39679-39709):过玩家 Y 或弹起 → 10t 后回 2(埋块则 5) ----
     if (e.ai2 === 0 && p && losClear(game, e.cx, e.cy, p.cx, p.cy) && !inSolidBody(game, e)) e.ai2 = 1;
-    e.vy = Math.min(e.vy + 0.2, 16);
     if (!p || e.y + e.h >= p.y || e.vy <= 0) {
       e.ai1 += 1;
       if (e.ai1 > 10) {
         e.ai0 = inSolidBody(game, e) ? 5 : 2;
         e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
       }
-      moveAndCollide(e, game.world, e.vx, e.vy);          // 碰撞下坠
     } else if (e.ai2 === 0) {
-      e.noGravity = true;                                 // :39724-39730 真俯冲段
-      fly(e);                                             // 未对齐前穿墙
+      e.noGravity = true;                                 // :39731-39735 真俯冲段（穿墙）
     }
+    e.vy = Math.min(e.vy + 0.2, 16);                      // :39737-39741 重力在分支后恒施
+    // 位移：真俯冲段（noGravity）穿墙直积分；其余（含 ai2==1 下落段）走碰撞——
+    // 曾漏 ai2==1 且未过玩家 Y 的分支积分，该态整帧冻结 = 空中僵死
+    if (e.noGravity) fly(e);
+    else moveAndCollide(e, game.world, e.vx, e.vy);
   } else if (e.ai0 === 5) {
     // ---- 穿墙归位(:39711-39734):追玩家,近 200px 且不埋块 → 回 2 ----
     e.noGravity = true;                                    // :39743 整态置位
@@ -785,7 +792,9 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!game.world.clock.eclipse) {
     if (e.ai0 !== -1) e.ai0 = -1;
   } else if (!p) {
-    e.ai0 = -1;
+    e.ai0 = -1;                                           // :39895 目标死亡 → 爬升脱战
+  } else if (Math.hypot(p.cx - e.cx, p.cy - e.cy) > 3000) {
+    e.ai0 = -1;                                           // :39895 vector247.Length() > 3000 → 爬升脱战
   } else if (e.ai0 > 1 && Math.hypot(p.cx - e.cx, p.cy - e.cy) > 1000) {
     e.ai0 = 1;                                            // :39906-39913 远距穿墙贴近
   }
@@ -977,7 +986,10 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
 // ---------------------------------------------------------------------------
 export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) {
   const hatchT = EXPERT ? 600 : 900;                      // num1440
-  if (e.ai0 < 0) e.ai0 = 0;                              // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一
+  // 仅归一哨兵 -1120（原版 ai[0] 出生 0）——受击扣减（:40426-40429，普通双扣
+  // 10..20×2）可把进度推入负值推迟孵化，负值必须跨帧保留；
+  // 曾用 `ai0<0 → 0` 把负进度每帧清零 = 受击扣减永不生效
+  if (e.ai0 === -1120) e.ai0 = 0;
   if (e.vy === 0) {
     e.vx *= 0.9;
     e.spin += e.vx * 0.02;
@@ -1035,8 +1047,9 @@ export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) 
       n.vx -= dx; n.vy -= dy;
     }
   }
-  // ---- 目标门(:40493-40509) ----
-  if (!p) e.ai0 = -1;
+  // ---- 目标门(:40485-40501) ----
+  if (!p) e.ai0 = -1;                                     // :40489 目标死亡 → 爬升
+  else if (Math.hypot(p.cx - e.cx, p.cy - e.cy) > 3000) e.ai0 = -1;   // :40489 >3000px → 爬升脱战
   else if (e.ai0 > 1 && Math.hypot(p.cx - e.cx, p.cy - e.cy) > 1000) e.ai0 = 1;
 
   if (e.ai0 === -1) {
@@ -1571,13 +1584,19 @@ export function nebulaFloaterAI(e: Enemy, game: GameHooks, player: Player | null
     if (spot) {
       e.ai1 = 20;                                     // :41670(除 ==1 外无读者,照抄)
       e.ai2 = spot.x; e.ai3 = spot.y;
-      // 全场自有 574 球计时 -30(原文 flag105 门 ai[0]<0 恒假 → 恒全量,:41673-41691)
+      // :41655-41674 flag105 门：若已有任一自有 574 球计时为负（上一轮 -30 未走完）
+      // → 跳过本轮 -30（曾误读成"门恒假恒全量"——!(ai[0]>=0) 即 ai[0]<0，常态为假
+      // 仅在已加速球上为真，门=防叠加）
       const orbs = (game as unknown as { entities: { projectiles?: LunarOrb[] } })
         .entities.projectiles;
       if (Array.isArray(orbs)) {
-        for (const o of orbs) {
-          if (!o.dead && o instanceof LunarOrb && o.kind === 574 && o.parentId === e.id) {
-            o.delay(ORB_DELAY);
+        const anyNeg = orbs.some((o) => !o.dead && o instanceof LunarOrb
+          && o.kind === 574 && o.parentId === e.id && o.timer() < 0);
+        if (!anyNeg) {
+          for (const o of orbs) {
+            if (!o.dead && o instanceof LunarOrb && o.kind === 574 && o.parentId === e.id) {
+              o.delay(ORB_DELAY);
+            }
           }
         }
       }
@@ -1838,6 +1857,9 @@ export class LunarOrb extends Entity {
   /** 悬浮脑瞬移同步:全场计时 -30(:41682-41691) */
   delay(t: number): void { this.ai0 -= t; }
 
+  /** 当前 ai[0] 计时（悬浮脑瞬移的负计时球门读,:41659） */
+  timer(): number { return this.ai0; }
+
   fixedUpdate(_dt: number, game: GameHooks): void {
     // v6 联机：傀儡端按 netId 找父（msg23 傀儡）；本端真身按本地 id
     const parent = this.parentNetId
@@ -1847,17 +1869,25 @@ export class LunarOrb extends Entity {
     const alive = !!parent && !parent.dead;
     if (this.kind === 574 && !alive) { this.dead = true; return; }   // :32083-32092
     this.ai0 += 1;
+    // 574 随父存续（:32092 每 tick timeLeft=2 刷新,自身永不过期——父亡已在上行 Kill）
+    if (this.kind === 574) this.life = 2;
     if (this.life-- <= 0) { this.explode(game); return; }
-    if (this.ai0 < orbitT && alive) {
-      // 盘旋:随父位移 + 符号步进逼近父心(钳 6)(:32100-32118)
-      this.x += parent!.x - parent!.prevX;
-      this.y += parent!.y - parent!.prevY;
-      this.vx += Math.sign(parent!.cx - this.cx) * 0.15;
-      this.vy += Math.sign(parent!.cy - this.cy) * 0.075;
-      const v = Math.hypot(this.vx, this.vy);
-      if (v > 6) { this.vx = (this.vx / v) * 6; this.vy = (this.vy / v) * 6; }
-      if (this.kind === 539 && ++this.frameT >= 4) { this.frameT = 0; this.frame++; }
-    } else if (this.ai0 === orbitT) {
+    if (this.ai0 < orbitT) {
+      if (alive) {
+        // 盘旋:随父位移 + 符号步进逼近父心(钳 6)(:32100-32118)
+        this.x += parent!.x - parent!.prevX;
+        this.y += parent!.y - parent!.prevY;
+        this.vx += Math.sign(parent!.cx - this.cx) * 0.15;
+        this.vy += Math.sign(parent!.cy - this.cy) * 0.075;
+        const v = Math.hypot(this.vx, this.vy);
+        if (v > 6) { this.vx = (this.vx / v) * 6; this.vy = (this.vy / v) * 6; }
+        if (this.kind === 539 && ++this.frameT >= 4) { this.frameT = 0; this.frame++; }
+      } else {
+        // :32106-32110 父亡（仅 539）→ 计时直接置满 → 同 tick 落入下方冲刺分支立即开冲
+        this.ai0 = orbitT;
+      }
+    }
+    if (this.ai0 === orbitT) {
       const p = game.player;
       if (this.kind === 539) {
         // 直冲最近玩家(:32185-32212):方向 ±50px 抖动 ×0.8-1.2,16 速

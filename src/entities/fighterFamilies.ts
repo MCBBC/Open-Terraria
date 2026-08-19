@@ -13,9 +13,8 @@
 //   4. 稻草人 305-314（南瓜月高频，num86 档 1.0-2.25）
 //   5. 混沌元素 120（神圣地表夜高频，3 档 + 传送）+ 3 档组 166/213/258/528/529
 //
-// 其余未逐行移植的 AI_002/AI_003 type 分支精确清单已登记 memory（待移植，不做近似）：
-// 原版在移动链上有专属分支、本文件暂走 legacy 通用档的型 = 430-436/494/495/591
-// （扑咬突进 :58669-58718）。
+// 2026-08-19 C 批补齐：430-436/494/495/591 扑咬突进（:58658-58718，fighterMoveStep
+// 内 lungeFamilyStep）与 427/426 外星蜂伺服飞行段（:59015-59212，alienFlightStep）。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -54,8 +53,7 @@ export interface FighterMove {
   reverseDamp?: number;
 }
 
-/** 一期通用档（原固定 加速 0.1 / 限速 ±1）——仅用于原版有专属分支但该分支待移植的型 */
-const LEGACY: FighterMove = { max: 1, accel: 0.1, damp: 1 };
+/** 一期通用档已随 C 批（2026-08-19）扑咬突进族移植退役——链上所有已知型均有专属分支 */
 
 const inRange = (v: number, lo: number, hi: number): boolean => v >= lo && v <= hi;
 
@@ -202,9 +200,9 @@ export function fighterMoveSpec(e: Enemy): FighterMove | null {
     if (id === 532) return { max: 5, accel: 0.15, damp: 0.98 };       // :58640-58643
     return { max: 5, accel: 0.25, damp: 0.7 };                        // :58622-58623
   }
-  // :58669-58718 扑咬突进族（哥布林苦力 430-436/龙虾 494/495/火把僵尸 591）——专属
-  // 突进分支待移植（见 memory），暂走一期通用档
-  if (inRange(id, 430, 436) || id === 494 || id === 495 || id === 591) return LEGACY;
+  // :58658-58718 扑咬突进族（哥布林苦力 430-436/龙虾 494/495/火把僵尸 591）——
+  // 两态结构（逼近 / 定身增伤咬合）由 fighterMoveStep 的 lungeFamilyStep 整段接管
+  if (inRange(id, 430, 436) || id === 494 || id === 495 || id === 591) return null;
   // :58719-58800 default 档 num108（僵尸变体/雨衣僵尸/血僵尸/沼泽怪等其余战士族）
   let num108 = 1;                                                     // :58722
   if (id === 624) num108 = 2.5;                                       // 地精
@@ -226,12 +224,17 @@ export function fighterMoveSpec(e: Enemy): FighterMove | null {
 }
 
 /** 横向移动执行（各分支共形段 1:1）。dir = direction（朝目标）。
- *  508/580/582（蚁狮冲锋兽族）走专属平滑逼近式（:58526-58612）。 */
-export function fighterMoveStep(e: Enemy, dir: number, player: Player | null): void {
+ *  508/580/582（蚁狮冲锋兽族）走专属平滑逼近式（:58526-58612）；
+ *  430-436/494/495/591 走扑咬突进两态（:58658-58718，lungeFamilyStep）。 */
+export function fighterMoveStep(e: Enemy, game: GameHooks, dir: number, player: Player | null): void {
   const id = e.vanillaId ?? -1;
   if (id === 508 || id === 580 || id === 582) { chargerApproach(e, dir, player); return; }
+  if (inRange(id, 430, 436) || id === 494 || id === 495 || id === 591) {
+    lungeFamilyStep(e, game, dir, player);
+    return;
+  }
   const spec = fighterMoveSpec(e);
-  if (!spec) return;                        // 原版该型链上无分支（射击族排除表）
+  if (!spec) return;                        // 原版该型链上无分支（射击族排除表/突进族）
   let max = spec.max;
   if (id === 489 && player) {               // :58770-58783 血僵尸按距离减速
     let num109 = Math.hypot(player.cx - e.cx, player.cy - e.cy) * 0.0025;
@@ -284,6 +287,141 @@ function chargerApproach(e: Enemy, dir: number, player: Player | null): void {
   else if (player && Math.abs(e.cx - player.cx) > 20 && Math.abs(e.vy) <= 0.3) {
     e.vx *= 0.99;                                     // :58575-58578
     e.vx += dir * 0.025;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 扑咬突进族（NPC.cs:58658-58718）：哥布林苦力 430-436 / 龙虾 494/495 / 火把僵尸 591。
+// ai[2] 两态：0 = 常规逼近（damage=defDamage，限速 1×(1+(1−scale)) 档）；逼近到
+// num107（50px，494/495 为 42px）且中心 1×1 视线通 → vx×0.7、ai[2]=1 起咬。
+// 咬合态：damage=(int)(defDamage×1.5)、ai[3]=1、vx×0.9 定身，ai[2]+1/t 至 20 或
+// 离地或白天地表即回 0。起咬门有"夜晚或地下"前置（白天地表不咬）。
+// ---------------------------------------------------------------------------
+/** defDamage 基线快照（原版 defDamage 字段只读；本仓 def.damage 为可变位） */
+const lungeDefDamage = new WeakMap<Enemy, number>();
+
+function lungeFamilyStep(e: Enemy, game: GameHooks, dir: number, player: Player | null): void {
+  const id = e.vanillaId ?? -1;
+  if (lungeDefDamage.has(e) === false) lungeDefDamage.set(e, e.def.damage);
+  const defDamage = lungeDefDamage.get(e)!;
+  if (e.ai2 === 0) {
+    e.def.damage = defDamage;                                    // :58662
+    const num106 = 1 * (1 + (1 - (e.vanillaScale ?? 1)));        // :58663-58664
+    if (e.vx < -num106 || e.vx > num106) {
+      if (e.vy === 0) e.vx *= 0.8;                               // :58665-58670
+    } else if (e.vx < num106 && dir === 1) {
+      e.vx += 0.07;
+      if (e.vx > num106) e.vx = num106;
+    } else if (e.vx > -num106 && dir === -1) {
+      e.vx -= 0.07;
+      if (e.vx < -num106) e.vx = -num106;
+    }
+    // :58688-58701 起咬门：落地 +（夜晚或地下）+ 目标存活 + 中心距 < num107 + CanHit(1×1)
+    const nightOrUnder = !game.world.clock.isDay
+      || e.cy > game.world.groundLevel * TILE;
+    if (e.vy === 0 && nightOrUnder && player && !player.dead) {
+      const num107 = (id >= 494 && id <= 495) ? 42 : 50;         // :58691-58695
+      const dx = e.cx - player.cx, dy = e.cy - player.cy;
+      if (Math.hypot(dx, dy) < num107
+        && canHit(game.world.store, e.cx, e.cy - 0.5, 1, 1, player.cx, player.cy - 0.5, 1, 1)) {
+        e.vx *= 0.7;                                             // :58698
+        e.ai2 = 1;                                               // :58699
+      }
+    }
+  } else {
+    e.def.damage = Math.trunc(defDamage * 1.5);                  // :58705 (int)(defDamage*1.5)
+    e.ai3 = 1;                                                   // :58706（原版咬合态旗）
+    e.vx *= 0.9;                                                 // :58707
+    if (Math.abs(e.vx) < 0.1) e.vx = 0;                          // :58708-58711
+    e.ai2 += 1;                                                  // :58712
+    const daySurface = game.world.clock.isDay && e.cy < game.world.groundLevel * TILE;
+    if (e.ai2 >= 20 || e.vy !== 0 || daySurface) e.ai2 = 0;      // :58713-58716
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 427 外星蜂 / 426 蜂后伺服飞行段（NPC.cs:59015-59212，第二段 if/else-if 阶梯——
+// 与横向移动链（fighterMoveStep）相互独立，两段都跑；426/427 在移动链 :58719 排除表内
+// （链上无分支），横向机动全部由本段承担）。起飞门 = 目标头顶 100px 以上 + 盒级视线。
+// ---------------------------------------------------------------------------
+export function alienFlightStep(e: Enemy, game: GameHooks, player: Player | null): void {
+  const id = e.vanillaId ?? -1;
+  if (id !== 427 && id !== 426) return;
+  const st = game.world.store;
+  if (id === 427) {
+    // :59015-59104 外星蜂：4 档旋翼 + 空中双轴伺服（±6 钳、Y 步进 0.15）+ 同族挤开
+    if (e.vy === 0) { e.ai2 = 0; e.visAngle = 0; }               // :59017-59021
+    else e.visAngle = e.vx * 0.1;                                // :59024 rotation
+    if (e.vy !== 0 && e.ai2 === 1) {
+      if (player) e.facing = e.seekDirX(player);                 // :59028 TargetClosest
+      // :59029 spriteDirection = -direction（FindFrame case 427 同式恒反 → 绘制层语义，略）
+      if (canHit(st, e.cx, e.cy - 0.5, 1, 1, player?.cx ?? e.cx, player?.cy ?? e.cy - 1, 1, 1)) {
+        const num124 = (player?.cx ?? e.cx) - e.cx;
+        const num125 = (player?.cy ?? e.cy) - e.cy;
+        if (num124 < 0 && e.vx > 0) e.vx *= 0.98;                // :59034-59041
+        else if (num124 > 0 && e.vx < 0) e.vx *= 0.98;
+        if (num124 < -20 && e.vx > -6) e.vx -= 0.015;            // :59042-59049
+        else if (num124 > 20 && e.vx < 6) e.vx += 0.015;
+        e.vx = Math.max(-6, Math.min(6, e.vx));                  // :59050-59057
+        if (num125 < -20 && e.vy > 0) e.vy *= 0.98;              // :59058-59065
+        else if (num125 > 20 && e.vy < 0) e.vy *= 0.98;
+        if (num125 < -20 && e.vy > -6) e.vy -= 0.15;             // :59066-59073
+        else if (num125 > 20 && e.vy < 6) e.vy += 0.15;
+      }
+      // :59075-59096 同族挤开（Manhattan < width → ±0.05）
+      for (const o of game.enemies() as Enemy[]) {
+        if (o === e || o.dead || o.vanillaId !== id) continue;
+        if (Math.abs(e.x - o.x) + Math.abs(e.y - o.y) < e.w) {
+          e.vx += e.x < o.x ? -0.05 : 0.05;
+          e.vy += e.y < o.y ? -0.05 : 0.05;
+        }
+      }
+    } else if (player && player.cy + 100 < e.y
+      && canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
+      e.vy = -5;                                                 // :59098-59103 起飞
+      e.ai2 = 1;
+    }
+    return;
+  }
+  // ---- 426 蜂后（:59105-59212）----
+  if (e.ai1 > 0 && e.vy > 0) {                                   // :59110-59117 射击期缓降
+    e.vy *= 0.85;
+    if (e.vy === 0) e.vy = -0.4;
+  }
+  if (e.vy !== 0) {
+    if (player) e.facing = e.seekDirX(player);                   // :59120 TargetClosest
+    if (canHit(st, e.cx, e.cy - 0.5, 1, 1, player?.cx ?? e.cx, player?.cy ?? e.cy - 1, 1, 1)) {
+      const num130 = (player?.cx ?? e.cx) - e.facing * 300 - e.cx;   // :59124 保持 300px
+      if (num130 < 40 && e.vx > 0) e.vx *= 0.98;                 // :59125-59132
+      else if (num130 > 40 && e.vx < 0) e.vx *= 0.98;
+      if (num130 < 40 && e.vx > -6) e.vx -= 0.2;                 // :59133-59140
+      else if (num130 > 40 && e.vx < 6) e.vx += 0.2;
+      e.vx = Math.max(-6, Math.min(6, e.vx));                    // :59141-59148
+    }
+  } else if (player && player.cy + 100 < e.y
+    && canHit(st, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h)) {
+    e.vy = -6;                                                   // :59151-59155 起飞（num129=6）
+  }
+  // :59156-59177 同族挤开（±0.1）
+  for (const o of game.enemies() as Enemy[]) {
+    if (o === e || o.dead || o.vanillaId !== id) continue;
+    if (Math.abs(e.x - o.x) + Math.abs(e.y - o.y) < e.w) {
+      e.vx += e.x < o.x ? -0.1 : 0.1;
+      e.vy += e.y < o.y ? -0.1 : 0.1;
+    }
+  }
+  // :59178-59186 喷口尘（1/6 且 ai1≤20）；:59187-59196 高热尘（ai1≥57 朝目标头顶）
+  const ox = e.cx + (e.facing > 0 ? 8 : -20), oy = e.cy - 20;
+  if (Math.floor(Math.random() * 6) === 0 && e.ai1 <= 20) {
+    game.spawnParticles(ox, oy, '#B0B0C0', 1, 0.6, { life: 26, damp: 0.94 });
+  }
+  if (e.ai1 >= 57) {
+    game.spawnParticles(ox, oy, Math.random() < 0.5 ? '#A0A0B4' : '#B0B0C0', 1, 1.2,
+      { life: 30 });
+  }
+  if (Math.floor(Math.random() * 6) === 0) {                     // :59197-59211 尾尘
+    game.spawnParticles(e.cx + (e.facing > 0 ? 26 : -26), e.cy + 24, '#B0B0C0', 1, 0.8,
+      { life: 26, damp: 0.94 });
   }
 }
 
@@ -727,12 +865,13 @@ export function stormDiverAimStep(ai3: number, aim: boolean): { ai3: number; fir
 /** Utils.GetChaseResults（Utils.cs:619-661）1:1。runnerVelocity 为零 → 直飞用时
  *  距离/速度；否则二次方程 a=s²−v² / b=2·dot(Δ, v) / c=−|Δ|²（Δ=追者−逃者），
  *  无实根/双负根 → 拦截失败返回 null，双正根取小、一正一负取大。返回拦截速度
- *  （模长 = chaserSpeed）。 */
-function getChaseResults(
+ *  （模长 = chaserSpeed）与拦截用时 t（Utils.FactorAcceleration 消费）。
+ *  原版 t=0 时（同点）ChaserVelocity 为 NaN——此处退化 (0,0)。 */
+export function getChaseResults(
   chaserX: number, chaserY: number, chaserSpeed: number,
   runnerX: number, runnerY: number, runnerVx: number, runnerVy: number,
-): { x: number; y: number } | null {
-  if (chaserX === runnerX && chaserY === runnerY) return { x: 0, y: 0 };
+): { x: number; y: number; t: number } | null {
+  if (chaserX === runnerX && chaserY === runnerY) return { x: 0, y: 0, t: 0 };
   if (chaserSpeed <= 0) return null;
   const dx = chaserX - runnerX, dy = chaserY - runnerY;               // value（:638）
   const dist = Math.hypot(dx, dy);                                    // num
@@ -758,7 +897,17 @@ function getChaseResults(
     t = r1 > 0 && r2 > 0 ? Math.min(r1, r2) : Math.max(r1, r2);       // :656-661
   }
   const ix = runnerX + runnerVx * t, iy = runnerY + runnerVy * t;     // InterceptionPosition
-  return { x: (ix - chaserX) / t, y: (iy - chaserY) / t };            // ChaserVelocity
+  return { x: (ix - chaserX) / t, y: (iy - chaserY) / t, t };         // ChaserVelocity
+}
+
+/** Utils.FactorAcceleration（Utils.cs:682-690）1:1：把投射物下坠（descend）在拦截
+ *  用时内的累计位移折进初速——v − descend×max(0,t−lenience)²/2/t。 */
+export function factorAcceleration(
+  vx: number, vy: number, t: number, descendY: number, lenience: number,
+): { x: number; y: number } {
+  const num = Math.max(0, t - lenience);
+  const f = (descendY * num * num) / 2 / t;
+  return { x: vx, y: vy - f };
 }
 
 /** 425 专属段（NPC.cs:58865-59015）。调用点 = Enemy.fighterAI 内 fighterMoveStep 之后

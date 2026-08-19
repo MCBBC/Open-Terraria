@@ -151,6 +151,8 @@ export class CultistRitualCircle extends Entity {
   private alpha = 255;
   private rot = 0;
   private soundPlayed = false;  // localAI[1]
+  /** ai[1] == -1（仪式被打破,Projectile.cs:31195 +12/t 快速淡出,不召龙） */
+  private interrupted = false;
   dead = false;
 
   constructor(src: Enemy) {
@@ -160,23 +162,23 @@ export class CultistRitualCircle extends Entity {
     this.y = src.cy - this.h / 2;
   }
 
+  /** 仪式窗口内真身被击中 → Main.projectile[ai[2]].ai[1] = -1（NPC.cs:65054） */
+  interrupt(): void { this.interrupted = true; }
+
   /** (1-alpha/255)×0.6（:31208-31210） */
   private get scale(): number { return (1 - this.alpha / 255) * 0.6; }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
-    // 锚消亡即 Kill（:31305-31320 flag44：ai[1] NPC 非活跃/非 439 族）
-    if (!src || src.dead || src.vanillaId !== 439) { this.dead = true; return; }
-    // 淡入/淡出（:31195-31210）：age<300 alpha-5/t，之后 +12/t
-    this.alpha += this.age < 300 ? -5 : 12;
+    // 淡入/淡出（:31195-31214）：中断（ai[1]=-1）或 age≥300 → +12/t；否则 -5/t
+    this.alpha += (this.interrupted || this.age >= 300) ? 12 : -5;
     this.alpha = Math.max(0, Math.min(255, this.alpha));
-    this.rot += Math.PI / 210;                          // :31211
+    this.rot += Math.PI / 210;                          // :31217
     if (!this.soundPlayed) {
       this.soundPlayed = true;
       // SoundID.Item123（Projectile.cs:31221，无坐标 = 全量不衰减）——原 roar 近似已销核
       game.playSfxFile?.('Item_123', 1);
     }
-    // 完全显现期的收拢紫尘（:31218-31250，尘 228 / 半径 204×scale / 内圈 ×0.42）
+    // 完全显现期的收拢紫尘（:31223-31251，尘 228 / 半径 204×scale / 内圈 ×0.42）
     if (this.alpha === 0) {
       for (let k = 0; k < 2; k++) {
         const inner = k === 1;
@@ -187,24 +189,32 @@ export class CultistRitualCircle extends Entity {
       }
     }
     this.age++;
-    // ---- :31282-31292 age==300 召唤：场上无 454 幻影龙 → NewNPC(454)（头 +
-    //      455-458 身 ×4 + 459 尾共享头血池，AI_006 wormAI + 渐显段）；否则 → 521
-    //      远古幻象（AI_086 phantomAI big 档）----
-    if (this.age === 300) {
+    // ---- :31279-31292 age==300 且未中断 → 召唤：场上无 454 幻影龙 → NewNPC(454)
+    //      （头 + 455-458 身 ×4 + 459 尾共享头血池）；否则 → 521 远古幻象。
+    //      召出后 ai[1] 复用为该 NPC 索引 = 圈锚从邪教徒切到龙（龙亡圈灭）----
+    if (this.age === 300 && !this.interrupted) {
       const hasDragon = (game.enemies() as Enemy[])
         .some((n) => !n.dead && n.vanillaId === 454);
       const id = hasDragon ? 521 : 454;
       const head = Enemy.fromVanilla(id, this.cx, this.cy);
       if (head) {
         addEnemy(game, head);
+        this.srcId = head.id;              // ai[1] = NewNPC 返回索引（:31283/:31287）
         if (id === 454) {
           // 链段（NewNPC 段链展开）：455-458 + 尾 459，realLife 共享头 10000 血
           const segs = Enemy.spawnWormChain(head, 5, [455, 456, 457, 458, 459], true);
           for (const sg of segs) addEnemy(game, sg);
         }
       }
+    } else if (this.age === 320) {
+      this.dead = true;                                 // :31290-31294
+      return;
     }
-    if (this.age >= 320) this.dead = true;              // :31294-31298
+    // ---- flag44（:31295-31314）：中断且全隐 → Kill；或锚 NPC 失效/非 439/454/521 → Kill ----
+    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    const anchorOk = !!src && !src.dead
+      && (src.vanillaId === 439 || src.vanillaId === 454 || src.vanillaId === 521);
+    if ((this.interrupted && this.alpha >= 255) || !anchorOk) { this.dead = true; }
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -314,17 +324,20 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     return;
   }
 
-  // ---- 仪式窗口(120-420t)真身被击中(:65016-65060):推进选招 + 清同代克隆体(≤10) ----
+  // ---- 仪式窗口(120-420t)真身被击中(:65012-65056):推进选招 + 清同代克隆体(≤10)
+  //      + 仪式圈 ai[1]=-1 快速淡出且不召龙（:65054 Main.projectile[ai[2]].ai[1] = -1）----
   if (isReal && e.ai0 === 5 && e.ai1 >= 120 && e.ai1 < 420 && e.justHit) {
-    e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; // :65021-65025
+    e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; // :65014-65016
     e.vx = 0; e.vy = 0;
-    let budget = 10; // num9 经典 10(expert 3,:65041-65044);两分支同为清场,差异仅联网消息
+    let budget = 10; // num9 经典 10(expert 3,:65027-65031);两分支同为清场,差异仅联网消息
     for (const c of cultistClones(game, e)) {
       if (budget <= 0) break;
       budget--;
       game.spawnParticles(c.cx, c.cy, '#8060D0', 12, 2.4);
       c.dead = true;
     }
+    const circle = la.la3;
+    if (circle instanceof CultistRitualCircle) circle.interrupt();
   }
 
   // 朝向(:65117-65120 sign(player.X - center.X);仪式态内被 :65676 系圈心朝向覆盖)
@@ -352,10 +365,13 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       if (pick === 0) {
         // 飞掠占位(:65277-65336):真身 + 全部克隆体一起入环——环位角
         // num16 = ((序号+flag5+1)/2)·2π·0.4/总数,奇数序取负(flag5=总数偶数),
-        // 半径椭圆 (300,200),自转轴 (0,-1);num14 = ceil(距离/50) 至少 1,
-        // velocity = 位移/num14,ai1 = num14*2(隔拍移动;克隆体 ai1 会被镜像覆写为真身值)
+        // 半径椭圆 (300,200),自转轴 (0,-1)。
+        // num14 = ceil(真身到 (玩家中心+(0,-100)) 距离/50)（:65271 真身口径,全员共用
+        // ——曾按各成员自身落点分别计算),velocity = 位移/num14,ai1 = num14*2
+        const num14 = Math.max(1, Math.ceil(
+          Math.hypot(player.cx - e.cx, player.cy - 100 - e.cy) / 50));
         const group = [e, ...cultistClones(game, e)];
-        const flag5 = group.length % 2 === 0 ? 1 : 0; // :65287
+        const flag5 = group.length % 2 === 0 ? 1 : 0; // :65286
         let idx = 0;
         for (const m of group) {
           let num16 = Math.floor((idx + flag5 + 1) / 2) * Math.PI * 2 * 0.4 / group.length; // :65291-65296
@@ -364,12 +380,11 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
           const [ux, uy] = rot(0, -1, num16);
           const destX = player.cx + ux * 300;
           const destY = player.cy + uy * 200;
-          const num14 = Math.max(1, Math.ceil(Math.hypot(destX - m.cx, destY - m.cy) / 50)); // :65279-65283
           m.vx = (destX - m.cx) / num14;
           m.vy = (destY - m.cy) / num14;
           m.ai0 = 1;
           m.ai1 = num14 * 2;
-          // :65318-65321 whoAmI >= 自身 → 选招当帧回退(净位移 0);克隆体按 id 序决定
+          // :65305-65308 whoAmI >= 自身 → 选招当帧回退(净位移 0);克隆体按 id 序决定
           if (m === e || e.id >= m.id) { m.x -= m.vx; m.y -= m.vy; }
           idx++;
         }
@@ -467,8 +482,11 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
         //   la2 供本态朝向用,并于此原位发 490 仪式圈弹（:65643，ai[1]=真身索引）
         la.la1 += 1; // localAI[1] 仪式代数(:65637)
         la.la2 = { x: e.cx, y: e.cy };
+        // ai[2] = 490 仪式圈弹索引（:65652）——真身 la3 反存圈引用供中断链（:65054）
+        const circle = new CultistRitualCircle(e);
+        la.la3 = circle;
         (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
-          .add(new CultistRitualCircle(e), 'projectiles');
+          .add(circle, 'projectiles');
         const clones = cultistClones(game, e);
         let num28 = 6 - clones.length; // :65643-65647
         if (num28 > 2) num28 = 2;
@@ -601,10 +619,12 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
 //   8,9 刀阵冲刺(±50 速,6-40t 无敌蓄力,40-90t 伤害 ×1.5)/ 10 半血变身传送 /
 //   13 淡出退场(目标失效/超 6400px)。3(874 天降极光)与 11/12 为 expert 专属拍,跳过。
 // 经典弹幕伤害(:46326-46345): 919 墙 50 / 919 回环 70 / 873 45 / 872 45 / 923 50 / 874 40。
-// 选招表(:46400-46490): 一阶段 10 拍 [2,8,6,8,5,2,8,4,8,5] 循环,血 ≤50% 强制 10(变身);
-//   二阶段 9 拍 [7,2,8,5,2,6,6,4,8] 循环(expert 追加 11/12 拍已剔除)。
+// 选招表(:46460-46580 残差映射): 一阶段 10 拍 [2,8,6,8,5,2,8,4,8,5] 循环,血 ≤50% 强制 10(变身);
+//   二阶段 9 拍 [7,2,8,5,2,6,4,8,12] 循环——num37 槽位推进（flag2 时第 3 槽插 11=expert
+//   专属拍），表尾 num57=12（873 螺旋）;反编译的 num54 双写 [..,6,6,..] 是同一 if 重复,
+//   真表第 6 槽是 4、第 8 槽是 12。
 const EMPRESS_CYCLE_P1 = [2, 8, 6, 8, 5, 2, 8, 4, 8, 5];
-const EMPRESS_CYCLE_P2 = [7, 2, 8, 5, 2, 6, 6, 4, 8];
+const EMPRESS_CYCLE_P2 = [7, 2, 8, 5, 2, 6, 4, 8, 12];
 
 /** 原版 AI_120_HallowBoss_DashTo(:47304-47317):目标上移 300,>200 再回退 100,
  *  速度 = lerp(单位向量*min(len,18), vector/6, lerpValue(100,600,len)) */
@@ -641,10 +661,16 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     game.spawnParticles(e.cx, e.cy - 80, '#FFE080', 20, 2.5);
   }
   const phase2 = e.ai3 === 1 || e.ai3 === 3; // AI_120_HallowBoss_IsInPhase2 :46179
+  const dayEnrage = game.world.clock.isDay;  // flag4 = ShouldEmpressBeEnraged() = Main.dayTime（:46296）
+  // flag2 = Main.expertMode（:46317）；白天暴怒 flag4 时强制置真（:46355）——
+  // 全六处行为：num17+5（:46364）/选招起手环移（:46603）/case2 射速 2（:46632）/
+  // case4 五枪+450 环（:46711-46731）/case6 八辐（:46859）/case7 六线 18 枪（:46888）
+  const flag2 = game.world.isExpert || dayEnrage;
+  // num17：二阶段 +15，flag2 再 +5（:46360-46367）——各态时长均减 num17
+  const num17 = (phase2 ? 15 : 0) + (flag2 ? 5 : 0);
   const b = baseOf(e);
   // :47296-47301 二阶段防御 ×1.2;白天暴怒（flag4,:47296 段 damage=9999——wiki"白天必秒杀"）
   // ——2026-08-13 接通:白天召唤女皇不再无风险
-  const dayEnrage = game.world.clock.isDay;
   // :46319-46323 满血+白天且未暴怒 → ai3 += 2（白天召出即 Enraged 档 2;
   // 受过伤再转白天不补——原版"只在白天受过伤"语义）。NpcDrops 的
   // EmpressOfLightIsGenuinelyEnraged(:46169)读 ai3∈{2,3} → 夜光 5005 掉落门
@@ -653,10 +679,13 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   e.def.defense = Math.floor(phase2 ? b.def * 1.2 : b.def);
 
   // 目标失效/超 6400px → 淡出退场(:46437-46444/:46595 num36=13;此后只有 13 态不触 player)
-  // 真狂暴入夜强制离场（:46580-46595：IsGenuinelyEnraged(ai3∈{2,3}) 且 !dayTime →
-  // 选招强制 13 态淡出——白天召出的女皇入夜即飞走,2026-08-18 审查补）
-  const nightLeave = (e.ai3 === 2 || e.ai3 === 3) && !dayEnrage;
-  if ((!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 6400 || nightLeave) && e.ai0 !== 13) {
+  // flag12（:46584-46594）：真狂暴（ai3∈{2,3}）且（入夜 或 白天 Main.time≥53400——
+  // 昼 54000t 的末 600t ≈ 19:20PM 后）→ 强制 13 态离场。Main.time 换算：
+  // (timeOfDay − DAWN) × 86400（昼 0.625 天 ↔ 54000t）
+  const genuinelyEnraged = e.ai3 === 2 || e.ai3 === 3;
+  const mainTime = (game.world.clock.timeOfDay - 4.5 / 24) * 86400;
+  const enragedLeave = genuinelyEnraged && (!dayEnrage || mainTime >= 53400);
+  if ((!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 6400 || enragedLeave) && e.ai0 !== 13) {
     e.ai0 = 13; e.ai1 = 0; e.ai2 += 1;
     e.vx /= 4; e.vy /= 4;
   }
@@ -682,7 +711,12 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   switch (e.ai0) {
     // ---- 0 出生(:46370-46422):velocity=(0,5) 后 0.95 阻尼,180t 渐显;全程无敌(flag6=false) ----
     case 0: {
-      if (e.ai1 === 0) { e.vx = 0; e.vy = 5; }
+      if (e.ai1 === 0) {
+        e.vx = 0; e.vy = 5;
+        // :46376 出生头顶 874 极光演出弹（0 速 0 伤）
+        shoot(game, e.cx, e.cy - 80, 0, 0, 0, 874);
+      }
+      if (e.ai1 === 10) game.playSfxWav?.('Item_161', 1, e.cx, e.cy);   // :46381
       e.iframes = 2; // :46408-46409 flag6=false → dontTakeDamage
       e.vx *= 0.95; e.vy *= 0.95;
       e.spawnAlpha = Math.max(0, 254 - Math.floor(clamp(e.ai1 / 180, 0, 1) * 254));
@@ -692,7 +726,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     }
     // ---- 1 悬浮蓄力枢纽(:46418-46511):前 10t DashTo 冲近,之后阻尼;到时按表选招 ----
     case 1: {
-      // num34 :46422(flag=二阶段 20/一阶段 45);getGoodWorld 折半(:46425-46428)
+      // num34 :46422(flag=二阶段 20/一阶段 45);getGoodWorld 折半(:46425-4628)
       let dur = phase2 ? 20 : 45;
       if (game.world.seedFlags?.getGoodWorld) dur /= 2;
       if (e.ai1 <= 10) empressDashTo(e, player.cx, player.cy);
@@ -704,121 +738,154 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       let next = table[Math.floor(e.ai2) % table.length];
       if (!phase2 && e.hp / e.maxHp <= 0.5) next = 10; // :46463 半血强制变身
       if (next === 8 && player.cx > e.cx) next = 9;     // :46493 冲刺方向
+      // :46603-46606 flag2（expert/暴怒）且选招非 5/12：起手朝玩家向量旋 ±90° × 20 速
+      if (flag2 && next !== 5 && next !== 12) {
+        const side = (player.cx > e.cx ? 1 : -1);       // ToDirectionInt(目标在右)
+        const [svx, svy] = rot(side, 0, (Math.PI / 2) * side);
+        e.vx = svx * 20; e.vy = svy * 20;
+      }
       e.ai0 = next; e.ai1 = 0; e.ai2 += 1;
       break;
     }
-    // ---- 2 彩虹射线 873(:46512-46649):悬玩家左上(-150,-250),每 3t 一发直飞,60t 止 ----
+    // ---- 2 彩虹射线 873(:46613-46667):悬玩家左上(-150,-250),每 num91t 一发直飞,60t 止 ----
     case 2: {
+      if (e.ai1 === 0) game.playSfxWav?.('Item_164', 1, e.cx, e.cy);   // :46617
       empressHover(e, player, -150, -250);
-      const dur = 60 + (90 - (phase2 ? 15 : 0)); // num90 - num17 :46517/:46356
-      if (Math.floor(e.ai1) % 3 === 0 && e.ai1 < 60) {
+      const dur = 60 + (90 - num17);       // num90 = 90 - num17（:46619）
+      const num91 = flag2 ? 2 : 3;          // :46631-46635 flag2 射速加密
+      if (Math.floor(e.ai1) % num91 === 0 && e.ai1 < 60) {
         const [dvx, dvy] = rot(0, -6, (Math.PI / 2) * (Math.random() * 2 - 1));
-        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, dayEnrage ? 9999 : 45, 873);
+        shoot(game, e.cx - 55, e.cy - 30, dvx, dvy, dayEnrage ? 9999 : phase2 ? 50 : 45, 873);  // num8 :46333
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
       break;
     }
-    // ---- 4 光枪墙 919(:46695-46779):悬玩家上 (0,-350),每 4t 在玩家周围 300px 环上布枪 ----
+    // ---- 4 光枪墙 919(:46691-46799):悬玩家上 (0,-350),每 4t 在玩家周围环上布枪 ----
     case 4: {
+      if (e.ai1 === 0) game.playSfxWav?.('Item_162', 1, e.cx, e.cy);   // :46697
       empressHover(e, player, 0, -350);
-      const dur = 100 + (20 - (phase2 ? 15 : 0));
+      const dur = 100 + (20 - num17);
       // :46715 每 4t 布一杆;:46734 距玩家 >2400 跳过当拍(原版 continue,计时不断)
       if (Math.floor(e.ai1) % 4 === 0 && e.ai1 < 100 && Math.hypot(player.cx - e.cx, player.cy - e.cy) <= 2400) {
-        const num82 = 4; // 经典枪数(expert 5)
+        const num82 = flag2 ? 5 : 4;       // :46710-46714 flag2 五枪
+        const ringR = flag2 ? 450 : 300;   // :46728-46732 flag2 环径 450
         const num85 = Math.floor(e.ai1) / 4;
         let ux = Math.cos(Math.PI / (num82 * 2) + num85 * (Math.PI / num82));
         let uy = Math.sin(Math.PI / (num82 * 2) + num85 * (Math.PI / num82));
-        ux += ux > 0 ? 0.5 : -0.5; // 经典横向外扩(:46725-46727)
+        if (!flag2) ux += ux > 0 ? 0.5 : -0.5; // 经典横向外扩(:46723-46726,flag2 关)
         const ul = Math.hypot(ux, uy) || 1; ux /= ul; uy /= ul;
         if (player.vx * ux + player.vy * uy > 0) { ux = -ux; uy = -uy; } // 逆着玩家速度布枪(:46738)
         const leadX = player.cx + player.vx * 90, leadY = player.cy + player.vy * 90;
-        let px = player.cx + ux * 300 - player.vx * 30;
-        let py = player.cy + uy * 300 - player.vy * 30;
+        let px = player.cx + ux * ringR - player.vx * 30;
+        let py = player.cy + uy * ringR - player.vy * 30;
         const pd = Math.hypot(px - player.cx, py - player.cy);
-        if (pd < 300) { // 环距不足外推(:46724-46731)
+        if (pd < ringR) { // 环距不足外推(:46745-46753)
           const ex = player.cx - px, ey = player.cy - py;
           const el = Math.hypot(ex, ey) || 1;
-          px = player.cx - (ex / el) * 300; py = player.cy - (ey / el) * 300;
+          px = player.cx - (ex / el) * ringR; py = player.cy - (ey / el) * ringR;
         }
         const ax = leadX - px, ay = leadY - py;
         const al = Math.hypot(ax, ay) || 1;
         // 原版 919 零速预告后沿 v4 方向冲刺(Projectile.AI 收敛:12 速直飞)
-        shoot(game, px, py, (ax / al) * 12, (ay / al) * 12, dayEnrage ? 9999 : 50, 919, 240);
+        shoot(game, px, py, (ax / al) * 12, (ay / al) * 12, dayEnrage ? 9999 : phase2 ? 60 : 50, 919, 240);  // num6 :46332
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
       break;
     }
-    // ---- 5 永恒彩虹 872(:46780-46870):悬玩家上,开场 13 发环形彩弹(8 速) ----
+    // ---- 5 永恒彩虹 872(:46801-46841):悬玩家上,开场 13 发环形彩弹(8 速) ----
     case 5: {
+      if (e.ai1 === 0) game.playSfxWav?.('Item_163', 1, e.cx, e.cy);   // :46805
       empressHover(e, player, 0, -350);
-      const dur = 42 + (30 - (phase2 ? 15 : 0));
+      const dur = 42 + (30 - num17);
       if (Math.floor(e.ai1) % 42 === 0 && e.ai1 < 42) {
         const base = Math.random() * Math.PI * 2;
         for (let k = 0; k < 13; k++) {
           const t = k / 13;
           const [ux, uy] = rot(0, 1, Math.PI / 2 + Math.PI * 2 * t + base);
           const [ox, oy] = rot(ux, uy, -Math.PI / 2);
-          shoot(game, e.cx + 55 + ox * 30, e.cy - 30 + oy * 30, ux * 8, uy * 8, dayEnrage ? 9999 : 45, 872);
+          shoot(game, e.cx + 55 + ox * 30, e.cy - 30 + oy * 30, ux * 8, uy * 8,
+            dayEnrage ? 9999 : phase2 ? 50 : 45, 872);   // num9 :46334
         }
-        game.playSfxWav?.('Item_163', 1, e.cx, e.cy);   // :46805 彩虹发射(曾借 roar 0.4)
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
       break;
     }
-    // ---- 6 太阳舞 923(:46871-46935):悬玩家上 (-80,-500) 低速,每 60t 一环 6 发,3 环 ----
+    // ---- 6 太阳舞 923(:46843-46881):悬玩家上 (-80,-500) 低速,每 60t 一环,3 环 ----
     case 6: {
       empressHover(e, player, -80, -500, 0.3, 0.7);
-      const dur = 180 + (120 - (phase2 ? 15 : 0));
+      const dur = 180 + (120 - num17);
+      const spokes = flag2 ? 8 : 6;        // num28（:46858-46862 flag2 八辐）
       if (Math.floor(e.ai1) % 60 === 0 && e.ai1 < 180) {
         const volley = Math.floor(e.ai1) / 60;
         const flip = player.cx > e.cx ? 1 : 0;
-        for (let t = 0; t < 1; t += 1 / 6) {
-          const slot = (t + (1 / 6) * 0.5 + volley * (1 / 6) * 0.5) % 1;
+        for (let t = 0; t < 1; t += 1 / spokes) {
+          const slot = (t + (1 / spokes) * 0.5 + volley * (1 / spokes) * 0.5) % 1;
           const a = Math.PI * 2 * (slot + flip);
           // 原版 923 零速绕体公转(收敛:8 速放射)
-          shoot(game, e.cx, e.cy - 100, Math.cos(a) * 8, Math.sin(a) * 8, dayEnrage ? 9999 : 50, 923, 240);
+          shoot(game, e.cx, e.cy - 100, Math.cos(a) * 8, Math.sin(a) * 8,
+            dayEnrage ? 9999 : phase2 ? 60 : 50, 923, 240);   // num10 :46335
         }
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
       break;
     }
-    // ---- 7 光枪回环 919(二阶段,:46936-47049):每 60t 以玩家为中心布 13 连枪线,4 线 ----
+    // ---- 7 光枪回环 919(二阶段,:46883-46982):每 num71t 以玩家为中心布 num74 连枪线 ----
     case 7: {
       empressHover(e, player, 0, -350, 0.4, 1);
-      const dur = 240 + (20 - (phase2 ? 15 : 0));
-      if (Math.floor(e.ai1) % 60 === 0 && e.ai1 < 240) {
-        const line = Math.floor(e.ai1) / 60;
+      // :46885-46894 flag2：间隔 40t、6 线、18 枪/线、跨距 ×0.5；经典：60t、4 线、13 枪
+      const num71 = flag2 ? 40 : 60;
+      const num72 = num71 * (flag2 ? 6 : 4);
+      const num70 = (flag2 ? 40 : 20) - num17;
+      const dur = num72 + num70;
+      if (Math.floor(e.ai1) % num71 === 0 && e.ai1 < num72) {
+        game.playSfxWav?.('Item_162', 1, e.cx, e.cy);   // :46903 每线发射（曾误 Item_160）
+        const line = Math.floor(e.ai1) / num71;
         let cx0 = player.cx, cy0 = player.cy;
-        let dirX = 0, dirY = 0, axX = 0, axY = 0;
-        const span = 1950; // num76 = 13*150 :46961
-        switch (line) { // :46976-47011 四线几何
+        let dirX = 0, dirY = 0, axX = 0, axY = 0, toPlayer = false;
+        const num74 = flag2 ? 18 : 13;   // 枪数/线
+        const num75 = flag2 ? 200 : 150; // 枪距
+        const span = num74 * num75 * (flag2 ? 0.5 : 1);   // num76 :46908/:46922
+        switch (line) { // :46924-46956 线几何（4/5 线仅 flag2 可达,朝玩家会聚）
           case 0: cx0 += -span / 2; dirX = 0; dirY = span; axX = 1; axY = 0; break;
-          case 1: cx0 += span / 2; cy0 += 75; dirX = 0; dirY = span; axX = -1; axY = 0; break;
+          case 1: cx0 += span / 2; cy0 += num75 / 2; dirX = 0; dirY = span; axX = -1; axY = 0; break;
           case 2: cx0 += -span * 0.4; cy0 += -span * 0.4; dirX = span * 1.4; dirY = 0; axX = 1; axY = 1; break;
-          default: cx0 += span * 0.4 + 75; cy0 += -span * 0.4; dirX = -span * 1.4; dirY = 0; axX = -1; axY = 1; break;
+          case 3: cx0 += span * 0.4 + num75 / 2; cy0 += -span * 0.4; dirX = -span * 1.4; dirY = 0; axX = -1; axY = 1; break;
+          default: toPlayer = true;
+            cx0 += (line === 4 ? -span : span) * 0.4;
+            cy0 += (line === 4 ? -span : span) * 0.4;
+            dirX = (line === 4 ? 1 : -1) * span * 1.4; dirY = 0; break;
         }
         const al = Math.hypot(axX, axY) || 1;
-        for (let t = 0; t <= 1.0001; t += 1 / 13) {
+        for (let t = 0; t <= 1.0001; t += 1 / num74) {
           const ox = cx0 + dirX * (t - 0.5), oy = cy0 + dirY * (t - 0.5);
-          shoot(game, ox, oy, (axX / al) * 12, (axY / al) * 12, dayEnrage ? 9999 : 70, 919, 240);
+          let vx = (axX / al) * 12, vy = (axY / al) * 12;
+          if (flag2 && toPlayer) {
+            // :46961-46966 flag2 第 4/5 线：枪向 = 基向向"玩家预测位"Lerp 0.75
+            const tx = player.cx + player.vx * 20 * t - ox, ty = player.cy - oy;
+            const tl = Math.hypot(tx, ty) || 1;
+            const lx = vLerp(1, tx / tl, 0.75), ly = vLerp(0, ty / tl, 0.75);
+            const ll = Math.hypot(lx, ly) || 1;
+            vx = (lx / ll) * 12; vy = (ly / ll) * 12;
+          }
+          shoot(game, ox, oy, vx, vy, dayEnrage ? 9999 : phase2 ? 65 : 70, 919, 240);  // num7 :46336
         }
-        game.playSfxWav?.('Item_160', 1, e.cx, e.cy);   // :46997 四线发射(曾借 roar 0.45)
       }
       e.ai1 += 1;
       if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
       break;
     }
-    // ---- 8/9 刀阵冲刺(:47053-47089):0-40t 冲到玩家侧后 550px(6-40t 无敌),
+    // ---- 8/9 刀阵冲刺(:46984-47027):0-40t 冲到玩家侧后 550px(6-40t 无敌),
     //      40-90t 以 ±50 横速突进(伤害 ×1.5),其后 0.92 阻尼 ----
     case 8:
     case 9: {
-      const side = e.ai0 === 8 ? -1 : 1; // num33 :47056
+      const side = e.ai0 === 8 ? -1 : 1; // num33 :46991
+      if (e.ai1 === 20) game.playSfxWav?.('Item_160', 1, e.cx, e.cy);   // :46997
       if (e.ai1 <= 40) {
-        if (e.ai1 >= 6) e.iframes = 2; // flag6 → dontTakeDamage(:47058)
+        if (e.ai1 >= 6) e.iframes = 2; // flag6 → dontTakeDamage(:46990)
         const destX = player.cx + side * -550, destY = player.cy;
         const dx = destX - e.cx, dy = destY - e.cy;
         const d = Math.hypot(dx, dy) || 1;
@@ -832,7 +899,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         e.vx *= 0.92; e.vy *= 0.92;
       }
       e.ai1 += 1;
-      if (e.ai1 >= 90 + (20 - (phase2 ? 15 : 0))) { e.ai0 = 1; e.ai1 = 0; }
+      if (e.ai1 >= 90 + (20 - num17)) { e.ai0 = 1; e.ai1 = 0; }
       break;
     }
     // ---- 10 半血变身(:47106-47135):90t 时传送玩家上 250 处并 ai3 0→1(进入二阶段) ----
@@ -849,14 +916,49 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
         // 曾错加 roar+黄尘（已移除对齐）
       }
       e.ai1 += 1;
-      if (e.ai1 >= 180 + (20 - (phase2 ? 15 : 0))) { e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; }
+      if (e.ai1 >= 180 + (20 - num17)) { e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; }
       break;
     }
-    // ---- 13 淡出退场(:47226-47281):alpha 渐隐,全隐后移除 ----
-    case 13: {
-      e.spawnAlpha = Math.min(254, e.spawnAlpha + 5);
+    // ---- 12 螺旋射线 873(:47152-47200,二阶段表尾拍,经典可达——num57→12 无专家门,
+    //      11 才是 expert 专属):起手 (0,-12) 上冲 + 0.95 阻尼;[10,60) 窗口内每 num22t
+    //      一发 873（速向 = (0,-20) 旋 2π·进度,弹 ai[1]=num23 螺旋相位） ----
+    case 12: {
+      if (e.ai1 === 0) {
+        game.playSfxWav?.('Item_165', 1, e.cx, e.cy);   // :47158
+        e.vx = 0; e.vy = -12;                            // :47159
+      }
+      e.vx *= 0.95; e.vy *= 0.95;                        // :47161
+      const dur = 60 + (90 - num17);                     // num21 = 90 - num17
+      const num22 = flag2 ? 4 : 6;                       // :47167-47171 flag2 射速加密
+      const flag11 = e.ai1 < 60 && e.ai1 >= 10;          // :47162
+      const num23 = (e.ai1 - 10) / 50;                   // 螺旋相位
+      if (Math.floor(e.ai1) % num22 === 0 && flag11) {
+        const [svx, svy] = rot(0, -20, Math.PI * 2 * num23);   // :47176
+        shoot(game, e.cx - 55, e.cy - 30, svx, svy,
+          dayEnrage ? 9999 : phase2 ? 50 : 45, 873);     // num8（:47179）
+      }
       e.ai1 += 1;
-      if (e.ai1 >= 20 && e.spawnAlpha >= 254) e.dead = true;
+      if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
+      break;
+    }
+    // ---- 13 淡出退场(:47202-47276):alpha ±5 双向——flag7（狂暴末班/目标失效/超距）
+    //      为真 +5 渐隐,回假 -5 复显;ai1≥20 且到达端点才结算:全隐 → 移除,
+    //      全显 → 回 1 态续战（可回归,曾单向只出不回） ----
+    case 13: {
+      if (e.ai1 === 0) {
+        game.playSfxWav?.('Item_165', 1, e.cx, e.cy);   // :47207
+        e.vx = 0; e.vy = -7;                            // :47208
+      }
+      e.vx *= 0.95; e.vy *= 0.95;                        // :47210
+      // flag7（:47216-47235）：真狂暴末班（入夜或白天 time≥53400）或目标失效/超 6400
+      const flag7 = enragedLeave
+        || !player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 6400;
+      e.spawnAlpha = clamp(e.spawnAlpha + (flag7 ? 5 : -5), 0, 254);
+      e.ai1 += 1;
+      if (e.ai1 >= 20 && (e.spawnAlpha <= 0 || e.spawnAlpha >= 254)) {
+        if (e.spawnAlpha >= 254) { e.dead = true; return; }   // :47264-47271 全隐 → active=false
+        e.ai0 = 1; e.ai1 = 0;                            // :47273-47275 全显 → 回战斗
+      }
       break;
     }
     default:
@@ -888,28 +990,60 @@ const QUEEN_MINION_VANILLA = [658, 659, 660]; // vanilla :46134-46146 蓝/粉/�
 // FALLBACK 仅作数据文件缺失时的防御(535 刺史莱姆/537 沙史莱姆/16 蓝史莱姆)。
 const QUEEN_MINION_FALLBACK = [535, 537, 16];
 
-/** AI_015_KingSlime_FindTeleportSpot(NPC.cs:43402-43434)收敛:anti → 玩家脚下;
- *  否则玩家 10 格半径内找"脚下实心 + 头顶 7 格开阔"的随机格,Bottom 落点返回(:43417-43418) */
-function queenTeleportSpot(game: GameHooks, player: Player, anti: boolean): { x: number; y: number; found: boolean } {
-  if (anti) return { x: player.x + player.w / 2, y: player.y + player.h, found: false }; // :43406-43409
+/** AddKingSlimeTeleportCacheTiles（NPC.cs:43371-43389）逐格验证：
+ *  nactive 且（实心非顶面 或 平台族）且上一格非实心（1 格净空），落位
+ *  (x*16+8, y*16−height/2) 无岩浆且到玩家 CanHitLine。 */
+function kingSlimeCacheTileOk(
+  game: GameHooks, player: Player, e: Enemy, x: number, y: number,
+): boolean {
   const st = game.world.store;
-  const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
-  const cands: Array<[number, number]> = [];
-  for (let x = ptx - 10; x <= ptx + 10; x++) {
-    for (let y = pty - 10; y <= pty + 10; y++) {
-      if (!st.inBounds(x, y) || !st.isSolid(x, y)) continue;
-      let clear = true;
-      for (let k = 1; k <= 7; k++) {                       // 头顶 7 格(BuildCache 10/7 参数)
-        if (st.inBounds(x, y - k) && st.isSolid(x, y - k)) { clear = false; break; }
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const ground = (st.isSolid(x, y) && !st.isPlatform(x, y)) || st.isPlatform(x, y);
+  if (!ground) return false;
+  if (!st.inBounds(x, y - 1) || st.isSolid(x, y - 1)) return false;   // 1 格净空（:43378）
+  const li = st.idx(x, y);
+  if (st.liquid[li] > 0 && st.liquidType[li] === 2) return false;     // tile.lava()
+  const landX = x * TILE + 8, landY = y * TILE - e.h / 2;             // :43380 落位中心
+  return losClear(game, landX, landY, player.cx, player.cy);          // :43381
+}
+
+/** BuildKingSlimeTeleportCache（:43392-43400）：外环四条带扫描（外距 outer,
+ *  内距 inner 的环带）。返回全部合格格。 */
+function buildKingSlimeCache(
+  game: GameHooks, player: Player, e: Enemy, tx: number, ty: number, outer: number, inner: number,
+): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const bands: Array<[number, number, number, number]> = [
+    [tx - outer, tx - inner, ty - outer, ty + outer],
+    [tx + inner, tx + outer, ty - outer, ty + outer],
+    [tx - inner, tx + inner, ty - outer, ty - inner],
+    [tx - inner, tx + inner, ty + inner, ty + outer],
+  ];
+  for (const [x0, x1, y0, y1] of bands) {
+    for (let x = x0; x <= x1; x++) {
+      for (let y = y0; y <= y1; y++) {
+        if (kingSlimeCacheTileOk(game, player, e, x, y)) out.push([x, y]);
       }
-      if (clear) cands.push([x, y]);
     }
   }
-  if (cands.length > 0) {
-    const [x, y] = cands[Math.floor(Math.random() * cands.length)];
-    return { x: x * TILE + TILE / 2, y: y * TILE, found: true };
+  return out;
+}
+
+/** AI_015_KingSlime_FindTeleportSpot（NPC.cs:43402-43434）1:1：
+ *  anti → 玩家脚下（返回 false——调用方仍进传送态但蓄能清零,落点已写入）;
+ *  环带 (10,7) 找随机格 → (x*16+8, y*16) Bottom 锚;
+ *  空则缩环 (6,2) 重试;再空 → 最近玩家脚下兜底（返回 false）。 */
+function queenTeleportSpot(game: GameHooks, player: Player, e: Enemy, anti: boolean): { x: number; y: number; found: boolean } {
+  if (anti) return { x: player.x + player.w / 2, y: player.y + player.h, found: false }; // :43404-43409
+  const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
+  for (const [outer, inner] of [[10, 7], [6, 2]] as const) {   // :43412/:43421 双档环带
+    const cands = buildKingSlimeCache(game, player, e, ptx, pty, outer, inner);
+    if (cands.length > 0) {
+      const [x, y] = cands[Math.floor(Math.random() * cands.length)];
+      return { x: x * TILE + TILE / 2, y: y * TILE, found: true };   // :43417-43418
+    }
   }
-  return { x: player.x + player.w / 2, y: player.y + player.h, found: false }; // :43430-43433 兜底
+  return { x: player.x + player.w / 2, y: player.y + player.h, found: false }; // :43430-43433
 }
 
 /** AI_121_QueenSlime_FlyMovement(:45467-45542):12 速/0.085 加速度趋近玩家上方 250,
@@ -980,20 +1114,20 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
   e.facing = dirToPlayer;
 
   // 传送蓄能(ai3,一阶段专属 :45576-45618):无视线或高差 >320 时 +1.5/t,否则 -1/t;
-  // 满 300 且落地待机 → 进传送(2)。落点 = AI_015_KingSlime_FindTeleportSpot(NPC.cs:43402)
-  // 收敛:玩家 10 格半径内"脚下实心+头顶 7 格开阔"的随机格(:43412 BuildCache 10/7 参数);
-  // 反挂机(蓄满 360 或距玩家 >2000)→ 直接落到玩家脚下(:43404-43410)。
+  // 满 300 且落地待机 → **无条件**先置 ai0=2（:45578——搜索失败也照传送,
+  // 落点兜底=最近玩家脚下）;FindTeleportSpot 失败仅清 ai3 重攒（:45596-45599）。
+  // 反挂机(蓄满 360 或距玩家 >2000)→ anti 直落玩家脚下(:45587-45595)。
   if (!phase2) {
     const blocked = !losClear(game, e.cx, e.cy, player.cx, player.cy) || Math.abs(e.y - (player.y + player.h)) > 320;
     if (blocked) e.ai3 += 1.5;
     else e.ai3 = Math.max(0, e.ai3 - 1);
-    if (e.ai3 >= 300 && e.ai0 === 0 && e.vy === 0 && e.onGround) {
-      const anti = e.ai3 >= 360 || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 2000; // :45588-45595
-      if (e.ai3 >= 360) e.ai3 = 360;      // :45591-45593
-      const spot = queenTeleportSpot(game, player, anti);
+    if (e.ai3 >= 300 && e.ai0 === 0 && e.vy === 0) {
+      e.ai0 = 2; e.ai1 = 0;                            // :45578 先进传送态（无门）
+      const anti = e.ai3 >= 360 || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 2000; // :45588
+      if (e.ai3 >= 360) e.ai3 = 360;                   // :45590-45593
+      const spot = queenTeleportSpot(game, player, e, anti);
       la.la1 = spot.x; la.la2 = spot.y;
-      if (anti || spot.found) { e.ai0 = 2; e.ai1 = 0; }
-      else e.ai3 = 0;                     // :45596-45599 找不到落点 → 重攒
+      if (!spot.found) e.ai3 = 0;                      // :45596-45599 失败 → 蓄能清零（传送照走）
     }
   }
 
@@ -1160,8 +1294,7 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
           }
           if (e.ai1 >= 60) {
             e.ai1 = 0; e.ai2 = 1;
-            e.vy = -3; // :45982-45985
-            e.vx *= 0.5;
+            e.vy = -3; // :45982-45985（仅 vy=-3,无 vx 衰减——曾多乘 ×0.5）
           }
         }
       }
@@ -1276,15 +1409,19 @@ export function ancientLightAI(e: Enemy, game: GameHooks, player: Player | null)
 export function ancientDoomAI(e: Enemy, game: GameHooks, player: Player | null) {
   const CHARGE_MAX = 420;
   const boss = (game.enemies() as Enemy[]).find((n) => !n.dead && n.id === e.ai0 && n.vanillaId === 439);
+  // flag108 累加前快照（:42151）：只看锚失效（boss 亡/不在）——满 420 在累加后
+  // 自置（:42206-42216），曾把 `>= 420` 提前并入快照 → 蓄满当拍不死、下一拍
+  // 双份 593 齐射
+  let gone = !boss || e.ai1 < 0;
   let rate = 1;
   if (boss && boss.hp < boss.maxHp / 2) rate = 2;
   if (boss && boss.hp < boss.maxHp / 4) rate = 3;
-  const gone = !boss || e.ai1 >= CHARGE_MAX;
   e.ai1 += rate;
   const prog = Math.max(0, Math.min(1, e.ai1 / 120)); // :42168 显形进度(前 120t)
   e.vanillaScale = prog;                 // 原版 scale 0→1 显形
   e.spawnAlpha = Math.round(255 - prog * 255); // 原版 alpha 255→0
   if (e.ai1 >= CHARGE_MAX) {
+    gone = true;                          // :42208 满能同拍置位 → 齐射一次即灭
     for (let k = 0; k < 4; k++) {
       const ang = -Math.PI / 2 + (Math.PI / 2) * k;
       shoot(game, e.cx, e.cy, Math.cos(ang) * 4, Math.sin(ang) * 4, e.def.damage, 593);

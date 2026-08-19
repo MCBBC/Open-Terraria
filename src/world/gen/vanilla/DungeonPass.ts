@@ -130,10 +130,20 @@ const DG_PRE: Record<string, number[]> = {
   acc: [62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80],
 };
 const DG_PRE_REDUCED = new Set([7, 8, 9, 10, 11, 22, 23, 24, 29, 30, 31, 39, 40, 56, 41, 47, 48, 49]);
+// ★BBBBB（2026-08-19）：Item.cs TryGetPrefixStatMultipliersForItem（:691-1080）对
+//   Legendary 族 81-89 直接 return false → Prefix(-1) 的 while(flag) 重掷链（:546）。
+//   值依赖四门（Round(damage*dmg)==damage 等）对地牢箱族 item 常量恒不触发
+//   （damage≥24/useAnimation≥15/mana∈{7,14}/knockBack 全非 0——四门全空转，备案），
+//   唯此结构集生效。
+const DG_PRE_NOSTAT = new Set([81, 82, 83, 84, 85, 86, 87, 88, 89]);
 const DG_PRE_CLASS: Record<number, string> = {
   155: 'swords', 156: 'acc', 157: 'magic', 163: 'spears', 113: 'magic', 3317: 'boom',
   164: 'guns', 1156: 'guns', 1571: 'boom', 1569: 'boom', 1260: 'magic', 1572: 'summon',
   4607: 'summon', 5465: 'acc',
+  // ★BBBBB：327 水靴（地牢"水覆写箱" num2<ws+50 → itemType=327）——accessory=true
+  //   且 CanGetPrefixes 默认 true（ItemID.cs:175 CreateBoolSet(true,…) 列外）→ 可前缀，
+  //   Next(4)+Next(19) 两掷。曾漏登 → 该箱掷流 -2 连坐 G/F/Pa/Ba 全段。
+  327: 'acc',
 };
 // 家具 item → 原版 tile id（Item.cs createTile；sheet 空间）
 // ★2026-08-13 id 空间碰撞修复：曾直存 sheet id 给 placeSimple 裸写 st.type——
@@ -948,6 +958,23 @@ export function runDungeonPass(
     const num2 = i > w / 2 ? -1 : 1;
     entBounds.set(Math.trunc(cx), Math.trunc(cy), Math.trunc(cx), Math.trunc(cy));
     entExists = true;
+    // 对账插桩(dormant)：SW_DG_ENT_CELLS="x0,y0,x1,y1" 时逐子段打目标格墙值（E 段猎杀用）
+    const entCellsEnv = typeof process !== 'undefined' ? process.env.SW_DG_ENT_CELLS : undefined;
+    const entCells = entCellsEnv ? (entCellsEnv.split(',').map(Number) as [number, number, number, number]) : null;
+    const entSnap = (tag: string): void => {
+      if (!entCells) return;
+      const [x0, y0, x1, y1] = entCells;
+      let s = '';
+      for (let y = y0!; y <= y1!; y++) {
+        for (let x = x0!; x <= x1!; x++) {
+          const ti = st.idx(x, y);
+          s += `(${x},${y})w${st.wall[ti]}a${st.flags[ti] & 1} `;
+        }
+        s += '| ';
+      }
+      console.log(`ENT[${tag}] rolls=${dgMainRolls} ${s}`);
+    };
+    entSnap('head');
     const solidBox = (x0: number, y0: number, x1: number, y1: number, inner: boolean): void => {
       for (let x = x0; x < x1; x++) {
         for (let y = y0; y < y1; y++) {
@@ -981,6 +1008,7 @@ export function runDungeonPass(
     if (dgEntProbe) console.log(`DGE i=${i} j=${j} cx=${cx.toFixed(1)} cy=${cy.toFixed(1)} s1x=${s1x} s1y=${s1y} s2x=${s2x} s2y=${s2y} n3=${n3} n4=${n4} n5=${n5} n6=${n6}`);
     entBounds.upd(n3, n5, n4, n6);
     solidBox(n3, n5, n4, n6, true);
+    entSnap('fort1');
     // 垛口（左/右）
     {
       const a0 = clampX(n3);
@@ -1070,6 +1098,7 @@ export function runDungeonPass(
     cx += sx2 * 0.550000011920929 * num2;
     cy -= sy2 * 0.5;
     n3 = clampX(Math.trunc(cx - sx2 * 0.6000000238418579 - hri(1, 2)));
+    entSnap('teeth1');
     n4 = clampX(Math.trunc(cx + sx2 * 0.6000000238418579 + hri(1, 2)));
     n5 = clampY(Math.trunc(cy - sy2 * 0.6000000238418579 - hri(1, 2)));
     n6 = clampY(Math.trunc(cy + sy2 * 0.6000000238418579 + hri(6, 15)));
@@ -1146,6 +1175,7 @@ export function runDungeonPass(
         }
       }
     }
+    entSnap('walls2');
     // 0.5 框开放门厅 + 老头锚
     {
       const a0 = clampX(Math.trunc(cx - sx2 * 0.5));
@@ -1162,6 +1192,7 @@ export function runDungeonPass(
       }
       dungeonX = Math.trunc(cx); dungeonY = b1;
     }
+    entSnap('open');
     // ★2026-08-17 移植：GenerateDungeonStairs（DungeonUtils.cs:1222-1310，调用点
     //   LegacyDungeonEntrance.cs:511-516——HasStairs 普通世界=TRUE）。曾整段缺失 →
     //   堡右 45° 阶梯丢失 + 后续段起墙判定/变体锚/掷流全错位（oracle Q 批同补并
@@ -1173,6 +1204,7 @@ export function runDungeonPass(
       const stdep = (potT - 10) - stj + 5;
       dgStairs(sti, stj, num2, stdep);
     }
+    entSnap('stairs');
     // 条纹窗墙（PlaceWall：墙==0 才写）
     {
       const n16c = 1 + hrn(2);
@@ -1194,6 +1226,7 @@ export function runDungeonPass(
         if (n17 >= n15c) { x += n15c * 2; n17 = 0; }
       }
     }
+    entSnap('stripes');
     // 门洞 15×3 清空 + PlaceTile(10, style13)
     cx -= sx2 * 0.6000000238418579 * num2;
     cy += sy2 * 0.5;
@@ -1219,6 +1252,7 @@ export function runDungeonPass(
       // 勿在此掷 rn(3)——1/3 主题门掷骰属 dungeonD 门特征段（DungeonGlobalDoors.cs:47-50，见下方 doorData 落放处）。
       dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, 13);
     }
+    entSnap('door');
   }
 
   // ============ LegacyEntranceDungeonHall precalc 支（:23-380，UsePrecalculatedEntrance=true）============
@@ -2781,10 +2815,15 @@ export function runDungeonPass(
   function prefixRolls(item: number): void {
     const cls = DG_PRE_CLASS[item];
     if (!cls) return;
-    if (rn(4) !== 0) {
-      const arr = DG_PRE[cls];
+    const arr = DG_PRE[cls];
+    // Prefix(-1)（Item.cs:486-560）逐轮：Next(4)==0→rolledPrefix=0（乘子恒 1→真，止）；
+    // 否则 RollAPrefix=Next(len)；Reduced 且 Next(3)!=0 → 降 0 止；
+    // TryGetPrefixStatMultipliersForItem 假（81-89）→ rolledPrefix=-1 重掷。
+    for (;;) {
+      if (rn(4) === 0) return;
       const rolled = arr[rn(arr.length)];
-      if (DG_PRE_REDUCED.has(rolled)) rn(3);
+      if (DG_PRE_REDUCED.has(rolled) && rn(3) !== 0) return;
+      if (!DG_PRE_NOSTAT.has(rolled)) return;
     }
   }
   function dgAddBuriedChest(ix: number, jy: number, mainItem: number, style: number, chestTile: number): boolean {
@@ -2814,6 +2853,13 @@ export function runDungeonPass(
       const num7 = k;
       const num9 = style, num10 = mainItem;
       let flag9 = false, flag10 = false;
+      // ★BBBBB（2026-08-19）：vanilla flag（WG.cs:36062）——21 号箱 chestStyle==0
+      //   （含 dgBasicChests 的水覆写箱：num2<ws+50 → itemType=327/chestStyle=0）
+      //   即"地表箱"标记；loot 的 surface 支门 = (flag23 && (flag || flag6)) || flag11
+      //   （:36280）。曾 surf 恒 false → 水箱误走金箱支 → 掷流错位连坐全段
+      //   （s22222 room0 首箱 C|502|283|327|0 实证）。flag6（style12 丛林）/flag11
+      //   （848/857/934）地牢调用点恒 false，不建模。
+      const flag0 = chestTile === TILE_BY_KEY['chest'] && (style === 0 || (style === -1 && num9 === 0));
       if (chestTile === TILE_BY_KEY['chest'] && num9 !== 0 && num7 >= ws && isDW(wallAt(ix, num7))) flag9 = true;
       if ((chestTile === TILE_BY_KEY['chest'] && num9 >= 23 && num9 <= 27) || (chestTile === CHEST2 && num9 === 13)) {
         flag9 = true; flag10 = true;
@@ -2857,17 +2903,19 @@ export function runDungeonPass(
           st.frameY[ti] = b === -1 ? 0 : 18;
         }
       }
-      dgChestLoot(num7, num10, flag9, flag10, num9, chestTile);
+      dgChestLoot(num7, num10, flag9, flag10, num9, chestTile, flag0);
       chests.push({ x: px, y: py - 1, locked: flag10, items: dgLootItems(num10) });
       return true;
     }
     return false;
   }
   // 战利品掷骰流（AddBuriedChest 深三分支 + 尾段；与 oracle DgAddBuriedChest 同构）
-  function dgChestLoot(num7: number, num10: number, flag9: boolean, flag10: boolean, num9: number, chestTile: number): void {
+  function dgChestLoot(num7: number, num10: number, flag9: boolean, flag10: boolean, num9: number, chestTile: number, flag0 = false): void {
     dgLoot.length = 0;
     if (num10 > 0) dgLoot.push(num10);
-    const surf = num7 < ws + 25 && false;
+    // ★BBBBB：surface 支门 = flag23 && (flag0 || flag6)（WG.cs:36280）——flag0=地表箱
+    //   标记（chestStyle==0）。曾 && false 恒假。
+    const surf = num7 < ws + 25 && flag0;
     const gold = num7 < rock;
     if (surf) {
       if (num10 > 0) prefixRolls(num10);

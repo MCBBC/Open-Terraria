@@ -646,14 +646,17 @@ export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): voi
     }
   }
   // —— 第二遍（L7725-7741）：唇缘向相邻实心格扩展半砖 ——
+  // ★cs:16733-16740 半砖邻格判 = active() && halfBrick() 双门（幽灵半砖不触发），
+  //   曾只查 half → 失活残留半砖误触发扩展砸击
   for (let i = 20; i < w - 20; i++) {
     for (let j = 20; j < h - 20; j++) {
       const ti = st.idx(i, j);
       if (!solidWF(i, j) || !solidWF(i, j + 1)) continue;
-      if (!solidWF(i + 1, j) && st.half[st.idx(i - 1, j)] && st.liquid[st.idx(i - 2, j)] > 0) {
+      const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
+      if (!solidWF(i + 1, j) && st.flags[li] !== 0 && st.half[li] && st.liquid[st.idx(i - 2, j)] > 0) {
         poundTile(st, i, j);
       }
-      if (!solidWF(i - 1, j) && st.half[st.idx(i + 1, j)] && st.liquid[st.idx(i + 2, j)] > 0) {
+      if (!solidWF(i - 1, j) && st.flags[ri] !== 0 && st.half[ri] && st.liquid[st.idx(i + 2, j)] > 0) {
         poundTile(st, i, j);
       }
     }

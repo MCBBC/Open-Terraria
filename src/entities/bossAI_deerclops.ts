@@ -28,8 +28,11 @@ function walkableAt(game: GameHooks, x: number, y: number): boolean {
   return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0 && !st.isPlatform(x, y);
 }
 
-/** Collision.SolidCollision（px 盒内有实心块；acceptTopSurfaces=false 时半砖/上坡不算） */
-function solidCollisionPx(game: GameHooks, x: number, y: number, w: number, h: number): boolean {
+/** Collision.SolidCollision(px 盒与实心块相交；Collision.cs:2748-2791)：
+ *  flag = tileSolid && !tileSolidTop；acceptTopSurfaces=true 时并入"可站顶面"
+ *  （平台族 + 家具底行，本仓 isPlatform 语义）与半砖（y+8 高 8 的 AABB） */
+function solidCollisionPx(game: GameHooks, x: number, y: number, w: number, h: number,
+  acceptTopSurfaces = false): boolean {
   const st = game.world.store;
   const i0 = Math.floor(x / TILE), j0 = Math.floor(y / TILE);
   const i1 = Math.floor((x + w - 0.01) / TILE), j1 = Math.floor((y + h - 0.01) / TILE);
@@ -37,7 +40,13 @@ function solidCollisionPx(game: GameHooks, x: number, y: number, w: number, h: n
     for (let j = j0; j <= j1; j++) {
       if (!st.inBounds(i, j)) continue;
       const idx = st.idx(i, j);
-      if (st.flags[idx] !== 0 && st.isSolid(i, j)) return true;
+      if (st.flags[idx] === 0) continue;               // !active
+      let solid = st.isSolid(i, j) && !st.isPlatform(i, j);
+      if (acceptTopSurfaces && st.isPlatform(i, j)) solid = true;
+      if (!solid) continue;
+      let ty = j * TILE, th = TILE;
+      if (st.half[idx]) { ty += 8; th -= 8; }          // 半砖（:2778-2782）
+      if (x + w > i * TILE && x < i * TILE + TILE && y + h > ty && y < ty + th) return true;
     }
   }
   return false;
@@ -76,16 +85,17 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
   }
   if (e.despawnTimer > 0) e.despawnTimer--;
   const homeX = e.ai2, homeY = e.ai3;
-  // :44378-44382 专家被动影手（SpawnPassiveShadowHands :44723-44752：
-  //   间隔随血量 80→40t,连发 3 只后重置;单人近似 Boss_CanShootExtraAt=1200px 门）
+  // :44378-44382 专家被动影手（SpawnPassiveShadowHands :44730-44752：
+  //   间隔随血量 80→40t；计数对 interval 取模触发，num3=计数/间隔 → 每 1×/2×/3×
+  //   拍各出 1 只（hint=num3%3 = 1,2,0），第 3 只同拍把 localAI[2] 清零重开。
+  //   曾加 idx<3 门 → 每轮只出 2 只（第 3 只被吞）。单人近似 Boss_CanShootExtraAt=1200px 门）
   if (game.world.isExpert && p && !p.dead) {
     const lifePct = e.hp / e.maxHp;
-    const interval = Math.round(80 + (0 - (1 - lifePct)) * 40 || 40);
+    const interval = Math.trunc(80 + (0 - (1 - lifePct)) * 40);   // (int)Remap(:44732)
     e.lai2 += 1;
-    const idx = e.lai2 / interval;
-    if (e.lai2 % interval === 0 && idx < 3
-      && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 1200) {
-      addProj(game, new InsanityShadowProj(p, 10, Math.floor(idx) % 3));
+    const idx = Math.floor(e.lai2 / interval);
+    if (e.lai2 % interval === 0 && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 1200) {
+      addProj(game, new InsanityShadowProj(p, 10, idx % 3));
     }
     if (idx >= 3) e.lai2 = 0;
   } else {
@@ -320,10 +330,10 @@ function shootRubbleUp(
     if (!solidAt(game, x, y)) continue;
     const ang = -Math.PI / 2 + whichOne * e.facing * 0.7 * (Math.PI / 4 / howMany);
     const spd = 8 + Math.random() * 8;
-    // ai[1] = rand(projFrames[962] × 4) = rand(12)——3×4 网格全 12 格随机(NPC.cs:44768-44770;
-    // 此前误写 6..11 只取下两行)
+    // ai[1]：原文两行连写(:44768-44769)，第二行覆盖第一行 → frame = 6 + rand(6)
+    //（rand(12) 首行是死码；3×4 网格只取下两行 6..11）
     addProj(game, new DeerclopsRubbleProj(x * TILE + 8, y * TILE - 8,
-      Math.cos(ang) * spd, Math.sin(ang) * spd, DMG, Math.floor(Math.random() * 12)));
+      Math.cos(ang) * spd, Math.sin(ang) * spd, DMG, 6 + Math.floor(Math.random() * 6)));
     break;
   }
 }
@@ -358,14 +368,17 @@ function deerclopsMovement(
   } else {
     e.vx += (Math.sign(dir) * spd - e.vx) / 4;                // Lerp(v, target, 1/4)
   }
-  // :44998-45018 底部碰撞探针（40×20）+ 前方净空（16×80）
+  // :44998-45018 底部碰撞探针（40×20）+ 前方净空（16×80）。
+  // acceptTopSurfaces = Bottom.Y >= 目标 Top 且非传送态（:45009）——为真时平台/
+  // 上坡面也算"地面"（曾在冰原木平台上悬空踩空、贴地判定失效）
   const bx = e.cx - 20, by = e.y + e.h - 20;
   const straddle = bx < tx && bx + e.w > tx + tw;             // num13：横跨目标
   const targetAbove = by + 20 < ty + th - 16;                 // flag3
   const teleporting = e.ai0 === 7;
-  const ground = solidCollisionPx(game, bx, by, 40, 20);
-  const groundHigh = solidCollisionPx(game, bx, by, 40, 16);
-  const openAhead = !solidCollisionPx(game, bx + 40 * e.facing, by, 16, 80);
+  const acceptTop = e.y + e.h >= ty && !teleporting;
+  const ground = solidCollisionPx(game, bx, by, 40, 20, acceptTop);
+  const groundHigh = solidCollisionPx(game, bx, by, 40, 16, acceptTop);
+  const openAhead = !solidCollisionPx(game, bx + 40 * e.facing, by, 16, 80, acceptTop);
   if (ground || groundHigh) e.lai0 = 0;
   if (teleporting) e.vy = -0.1;
   if ((straddle || nearX) && targetAbove) {

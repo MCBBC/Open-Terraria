@@ -257,8 +257,9 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (rot > target - step && rot < target + step) rot = target;
   e.spin = rot;
 
-  // ---- 透明度(:49346-49364 + 各状态内分支;近似为 spawnAlpha 渐变) ----
-  if (e.ai0 !== -1 && e.ai0 < 9) e.spawnAlpha = inSolid(game, e) ? Math.min(255, e.spawnAlpha + 15) : Math.max(0, e.spawnAlpha - 15);
+  // ---- 透明度(:49346-49363;近似为 spawnAlpha 渐变)----
+  // 入实心块 +15/出块 −15,钳 [0,150](★上限 150 非 255——入块半隐,2026-08-19 台账 E 修)
+  if (e.ai0 !== -1 && e.ai0 < 9) e.spawnAlpha = inSolid(game, e) ? Math.min(150, e.spawnAlpha + 15) : Math.max(0, e.spawnAlpha - 15);
 
   let invuln = false; // flag7(dontTakeDamage = !flag7,:50126)
   switch (e.ai0) {
@@ -431,8 +432,16 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
         if (e.ai1 === 0) e.ai1 = 300 * Math.sign(e.cx - player.cx || 1);
         e.x = player.cx - e.ai1 - e.w / 2;
         e.y = player.cy - 200 - e.h / 2;
-        const s = Math.sign(player.cx - e.cx) || st.dir;
-        st.dir = s; st.spr = -s;
+        // :50075-50091 侧翻补偿:瞬移后 num41=玩家在新身哪侧,direction 重定;
+        // spriteDirection != -direction 时 rotation += π(朝向翻转 180°,
+        // 2026-08-19 台账 E 补——曾漏 = 瞬移后鱼头朝向不变);(原版 :50078 的
+        // ai[2]==0 门在 ai[2]==num15/2 内恒假=死代码,略)
+        const s = Math.sign(player.cx - e.cx);
+        if (s !== 0) {
+          st.dir = s;
+          if (st.spr !== -s) e.spin += Math.PI;
+          st.spr = -s;
+        }
         game.spawnParticles(e.cx, e.cy, '#8FD8FF', 14, 2.4, { life: 30 });
         game.playSfxWav?.('Zombie_20', 1, e.cx, e.cy);   // :50064 PlaySound(29,…,20)(曾借 roar 0.6)
       }
@@ -761,7 +770,13 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
     e.ai0 = 0; e.ai1 = 0;
     e.spawnAlpha = 255; e.alphaFade = false; // 渐显由本 AI 按 :35228/:35267 驱动
   }
-  if (!player || player.dead) { e.dead = true; return; } // TargetClosest 落空即消散
+  // :35200-35205 玩家失效 → TargetClosest(faceTarget:false)+direction=1 重瞄,
+  // AI 照常运转(原版对尸位坐标继续扑,不消散——曾 dead=true 即散 = 存续断裂,
+  // 2026-08-19 台账 E 修;本仓单玩家无处重瞄 → 置 direction=1、维持现速滑行)
+  if (!player || player.dead) {
+    e.facing = 1;
+    player = null;
+  }
   const RISE_T = 90; // num1077
   if (e.ai0 === 0) {
     e.iframes = 2;              // dontTakeDamage(:35211)
@@ -774,26 +789,36 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
     }
     e.ai1 += 1;
     if (e.ai1 >= RISE_T) {
-      // :35232-35252 蓄力期满:16 速扑咬(撞块内则 ai1=0 延后起扑)
+      // :35242-35261 蓄力期满:16 速扑咬(撞块内则 ai1=0 延后起扑);
+      // :35250 PlaySound(4,…,19)=NPCHit style19 起扑音(2026-08-19 台账 E 补)
       e.ai0 = 1;
       e.ai1 = inSolid(game, e) ? 0 : 1;
-      const dx = player.cx - e.cx, dy = player.cy - e.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      e.vx = (dx / d) * 16;
-      e.vy = (dy / d) * 16;
-      e.facing = dx < 0 ? -1 : 1;
-      e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0);
+      game.playSfxFiles(['NPC_Hit_19'], 1, e.cx, e.cy);
+      if (player) {
+        const dx = player.cx - e.cx, dy = player.cy - e.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        e.vx = (dx / d) * 16;
+        e.vy = (dy / d) * 16;
+        e.facing = dx < 0 ? -1 : 1;
+        e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0);
+      }
     }
   } else {
-    // ai0 === 1(:35254-35310)
+    // ai0 === 1(:35264-35316)
     if (e.ai1 < 1 && !inSolid(game, e)) e.ai1 = 1;
-    if (inSolid(game, e)) e.spawnAlpha = Math.min(150, e.spawnAlpha + 15); // :35260
+    if (inSolid(game, e)) e.spawnAlpha = Math.min(150, e.spawnAlpha + 15); // :35280-35284
     if (e.ai1 >= 1) {
-      e.spawnAlpha = Math.max(0, e.spawnAlpha - 60); // :35267 渐显
+      e.spawnAlpha = Math.max(0, e.spawnAlpha - 60); // :35288 渐显
       e.ai1 += 1;
-      if (inSolid(game, e)) { e.dead = true; return; } // :35282-35297 撞墙即死
+      if (inSolid(game, e)) {
+        // :35295-35303 撞墙即死:PlaySound(DeathSound)——372/373 SetDefaults
+        // (:13666-13688)DeathSound=NPCDeath1 → NPC_Killed_1
+        game.playSfxFiles(['NPC_Killed_1'], 1, e.cx, e.cy);
+        e.dead = true;
+        return;
+      }
     }
-    if (e.ai1 >= 60) e.vy = Math.min(e.vy + 0.3, 16); // :35305-35309 恢复重力
+    if (e.ai1 >= 60) e.applyGravity(game); // :35307-35309 恢复重力(共享 UpdateNPC_UpdateGravity)
     e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0); // :35311-35315
   }
   // 373 蓄力段横游(:35213-35221):x += (cos(π/30·l1) − 0.5)·ai2·(−direction) 位移差
@@ -1165,7 +1190,29 @@ function mlCoreHover(e: Enemy, player: Player) {
   }
 }
 
+/** :36934-36952(死亡演出 ai1==60)/:37074-37099(玩家全灭离场 ai1==40)清弹段:
+ *  全部 456/462/455/452/454 弹 + NPC 400(原版前者 Kill()/后者 active=false——
+ *  本仓统一 dead=true 出桶) */
+function mlClearDeathrayProjectiles(game: GameHooks): void {
+  const ents = (game as unknown as {
+    entities?: { projectiles?: Array<{ dead?: boolean; projId?: number }> };
+  }).entities;
+  for (const p of ents?.projectiles ?? []) {
+    if (p.dead) continue;
+    const id = p.projId;
+    if (id === 456 || id === 462 || id === 455 || id === 452 || id === 454) p.dead = true;
+  }
+  for (const n of game.enemies() as Enemy[]) {
+    if (!n.dead && n.vanillaId === 400) n.dead = true;
+  }
+}
+
 export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null) {
+  // :36776-36778 1/200 环境吼(PlaySound 29 style Next(93,100) = Zombie_93..99,
+  // case29 93-99 文件级 ×0.4 自动档);出生(-1)与死亡演出(2)两态不吼
+  if (e.ai0 !== -1 && e.ai0 !== 2 && Math.floor(Math.random() * 200) === 0) {
+    game.playSfxWav?.(`Zombie_${93 + Math.floor(Math.random() * 7)}`, 1, e.cx, e.cy);
+  }
   if (!e.bInit) { e.bInit = true; e.ai0 = -1; e.ai1 = 0; e.ai2 = 0; } // :36780-36785
   // 原版 checkDead(:78859-78867):血尽 → ai0=2 死亡演出,满血续命 600t 后真死
   if (e.hp <= 0 && e.ai0 !== 2) { e.ai0 = 2; e.ai1 = 0; e.hp = e.maxHp; e.iframes = 2; }
@@ -1207,7 +1254,11 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
       // 三部件全部闭眼残肢(ai0=-2)→ 解除无敌进二阶段(:36891-36909 flag85)
       if (parts.every((p) => p.ai0 === -2)) { e.ai0 = 1; e.ai1 = 0; }
     }
-    if (player) mlCoreHover(e, player);
+    if (player) {
+      mlCoreHover(e, player);
+      // TargetClosest(faceTarget:false) 的 direction 语义(离场态 vx 目标用)
+      e.facing = player.cx > e.cx ? 1 : -1;
+    }
     if (e.ai0 === 1 && player) {
       // 原版二阶段核心只悬停(:36912-36923),攻击全部由真眼 400(aiStyle 81)执行;
       // 真眼已由部件 checkDead 召出 → 不再走折叠弹幕(否则双倍)。真眼 spawn 失败
@@ -1221,10 +1272,16 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
     }
   } else if (e.ai0 === 2) { // 死亡演出(:36925-37064)
     e.iframes = 2;
-    e.vx = lerp(e.vx, 0, 0.02);
-    e.vy = lerp(e.vy, -0.5, 0.02);
+    // :36928 命名参数陷阱——Lerp(value1: velocity, value2: (0,-0.5), amount: 0.98):
+    // 反编译显示参数序颠倒,实语义 = velocity = Lerp(velocity, (0,-0.5), 0.98),
+    // 即每 tick 98% 逼近 (0,-0.5)(曾误读 0.02 = 缓飘 50t 才到位)
+    e.vx = lerp(e.vx, 0, 0.98);
+    e.vy = lerp(e.vy, -0.5, 0.98);
     e.ai1 += 1;
-    // :36954-37022 每 3t 一簇爆炎(60t<ai1<580);:37049 起声效/光效略
+    // :36934-36952 ai1==60 清全部 456/462/455/452/454 弹 + NPC 400(HitEffect 9999)
+    if (e.ai1 === 60) mlClearDeathrayProjectiles(game);
+    // :36954-37022 每 3t 一簇爆炎(60t<ai1<580);:37049-37051 ai1==1 NPCDeath61
+    if (e.ai1 === 1) game.playSfxFiles?.(['NPC_Killed_61'], 1, e.cx, e.cy);
     if (e.ai1 % 3 === 0 && e.ai1 > 60 && e.ai1 < 580) {
       game.spawnParticles(
         e.cx + (Math.random() - 0.5) * 400, e.cy + (Math.random() - 0.5) * 400,
@@ -1236,9 +1293,13 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
     }
   } else if (e.ai0 === 3) { // 玩家全灭离场(:37065-37135)
     e.iframes = 2;
-    e.vx = lerp(e.vx, e.facing, 0.02);
-    e.vy = lerp(e.vy, -0.5, 0.02);
+    // :37068 同款命名参数陷阱:Lerp(velocity, (direction,-0.5), 0.98)——
+    // vx 目标 = direction(TargetClosest 持久朝向,由上方 0/1 态持续写入 facing)
+    e.vx = lerp(e.vx, e.facing, 0.98);
+    e.vy = lerp(e.vy, -0.5, 0.98);
     e.ai1 += 1;
+    // :37074-37107 ai1==40 清全部 456/462/455/452/454 弹 + NPC 400(+gore 619-622)
+    if (e.ai1 === 40) mlClearDeathrayProjectiles(game);
     if (e.ai1 >= 60) { // :37109-37127 清除全部部件与自身
       for (const n of game.enemies() as Enemy[]) {
         if (!n.dead && (n.vanillaId === 396 || n.vanillaId === 397 || n.vanillaId === 400) && n.ai3 === e.id) n.dead = true;
@@ -1266,22 +1327,35 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
   e.y += e.vy;
 }
 
-/** 核心二阶段弹幕(原版 NPC 400 真眼攻击链,aiStyle 81 :38347-38600;
- *  投射物/伤害取原版调用点:462 PhantasmalBolt 35(:38382)、454 PhantasmalSphere 40(:38455)、
- *  455 PhantasmalDeathray 75(:37913)、452 PhantasmalEye 30(:37333)) */
+/** 核心兜底弹幕的螺旋眼角态(原版真眼 localAI[0]=眼角/ai[2]=角速度;核心折叠用) */
+interface MlBarrageX { ang: number; rate: number }
+const mlBarrageX = new WeakMap<Enemy, MlBarrageX>();
+const mlBarrageOf = (e: Enemy): MlBarrageX => {
+  let x = mlBarrageX.get(e);
+  if (!x) { x = { ang: 0, rate: 0 }; mlBarrageX.set(e, x); }
+  return x;
+};
+
+/** 核心二阶段弹幕(原版 NPC 400 真眼攻击链,aiStyle 81 :38243-38600;
+ *  攻击号语义按 MoonLordAttacksArray2 槽位(2026-08-19 台账 E 1↔3 归位):
+ *  1 = 三连幻影矢 462 35 伤(:38347-38384)——曾误接 452 环射;
+ *  3 = 幻影之眼 452 螺旋 35 伤(:38508-38572)——曾误接三连矢;
+ *  2 = 幻影能量球 454 40 伤(:38385-38506,近似);
+ *  4 = 死亡之光 455(:38580-38637) */
 function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
   const { atk, inSlot, dur } = attackSlot(e, ML_CORE_P2);
   switch (atk) {
-    case 1: // 幻影之眼 452×4 扇形(:37326-37334)
-      if (inSlot === 0) {
-        for (let k = -1.5; k <= 1.5; k++) {
-          const dx = player.cx - e.cx, dy = player.cy - e.cy;
-          const d = Math.hypot(dx, dy) || 1;
-          const ang = Math.atan2(dy, dx) + k * 0.35;
-          shoot(game, e.cx, e.cy, Math.cos(ang) * 8, Math.sin(ang) * 8, 30, 452, 600);
-        }
+    case 1: { // 三连幻影矢 462(:38347-38384):dur-35 音,dur-14/-7/末 三发 8 速 35 伤
+      const pvx = (player as unknown as { vx: number }).vx ?? 0;
+      const pvy = (player as unknown as { vy: number }).vy ?? 0;
+      const dx = player.cx + pvx * 20 - e.cx, dy = player.cy + pvy * 20 - e.cy;   // :38359 预判 20t
+      const d = Math.hypot(dx, dy) || 1;
+      if (inSlot === dur - 35) game.playSfxFiles?.(['NPC_Hit_6'], 1, e.cx, e.cy); // :38374-38377
+      if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
+        shoot(game, e.cx, e.cy, dx / d * 8, dy / d * 8, 35, 462, 600);            // :38378-38382
       }
       break;
+    }
     case 2: // 幻影能量球 454:先慢速散出,后段朝玩家加速(原版 30t 后转向寻的,:38447-38456/:38475)
       if (inSlot === 0) {
         for (let k = 0; k < 3; k++) {
@@ -1292,11 +1366,20 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
         for (let k = -1; k <= 1; k++) mlShoot(e, game, player, 0, 0, 12, 40, 454);
       }
       break;
-    case 3: // 三连幻影矢 462(:38378-38383,slot 末 14/7/0 三发)
-      if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
-        mlShoot(e, game, player, 0, 0, 8, 35, 462);
+    case 3: { // 幻影之眼 452 螺旋(:38508-38572):45..185 眼角自旋(±2π/40,每 40t ×0.95),
+      // 每 10t 沿眼角 8 速射一发 452(35 伤,出膛 = 中心 + 眼角方向 ×(30,30)长×0.4≈17px)
+      const bx = mlBarrageOf(e);
+      if (inSlot >= 45 && inSlot < 185) {
+        if (inSlot === 45) bx.rate = (Math.floor(Math.random() * 2) === 0 ? 1 : -1) * (TAU / 40);
+        if ((inSlot - 45) % 40 === 0) bx.rate *= 0.95;   // :38540-38543
+        bx.ang += bx.rate;
+        if ((inSlot - 45) % 10 === 0) {                  // :38554-38559
+          const ux = Math.cos(bx.ang), uy = Math.sin(bx.ang);
+          shoot(game, e.cx + ux * 17, e.cy + uy * 17, ux * 8, uy * 8, 35, 452, 600);
+        }
       }
       break;
+    }
     case 4: // 死亡之光 455(:38625-38647):inSlot==180 一发定轴扫射激光(50 伤→命中×2=100)
       // 原版此槽 375t:0-179 蓄能尘,180 发束,束体自转 180t 至槽末;真眼瞳角动画随束同步
       // (localAI[0],:38642-38652)——真眼不在本仓范围,锚点用核心中心 (30,30) 椭圆近似
@@ -1532,7 +1615,7 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
     return;
   }
   if (e.ai0 === -2) { // 闭眼残肢(:37782-37844)
-    if (core.ai0 === 2) { e.ai0 = -3; return; } // :37784-37788
+    if (core.ai0 === 2) { e.ai0 = -3; return; } // :37784-37788 转入永闭(仅此 tick 跳帧推进)
     e.def.damage = 80;
     e.iframes = 2;
     if (e.ai1 >= 32) e.ai1 = 0;
@@ -1546,7 +1629,8 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
       // :37828-37842 lt=120/180/240 于玩家处召 401 月噬怪(门禁说明见 spawnMoonLeech)
       if ((lt === 120 || lt === 180 || lt === 240)) spawnMoonLeech(game, e, player);
     }
-    return;
+    // ★原版本分支无 return(:37782-37844 后直落帧推进)——曾提前 return 令
+    // f2/f3 帧目标(0)永不收敛 = 残肢冻帧(2026-08-19 台账 E 修)
   }
 
   if (e.ai0 === 0 && player) { // 睁眼瞄准(:37845-37864)

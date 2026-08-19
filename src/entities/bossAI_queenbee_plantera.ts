@@ -3,13 +3,16 @@
 //   aiStyle 51(NPC.cs:31873-32237)= NPC 262 世纪之花本体(钩蔓均值牵引 + 二阶段触须)
 //   aiStyle 52(NPC.cs:32238-32405)= NPC 263 世纪之花钩蔓(抓墙锚定,牵引本体)
 // 经典模式参数 1:1;getGoodWorld 分支已实装(蜂后暴怒 +0.5/世纪之花本体 ×1.15/二阶段
-// 触须 14 只/触手加速度 +4);expert 分支只注释保留;netcode(netUpdate/Main.netMode)跳过。
+// 触须 14 只/触手加速度 +4);expert 分支全量实装(2026-08-19 台账 E):蜂后防御
+// +20×(1-血比)/攻式 +1..3/俯冲 16-24/悬浮 12-18·0.15-0.4/冲过头窗 600→300/
+// 减速阈值 0.1→0.25/上飞步进 0.07→0.1/出蜂节奏 +1/毒刺间隔 40→15-35 与速 +2/+5;
+// netcode(netUpdate/Main.netMode)跳过。
 // 本体/部件均 noTileCollide(原版 SetDefaults),故位移由各核自行积分(e.x+=vx)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
-import { getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
+import { getAttackDamageScaledByDifficulty, getAttackDamageForProjectiles } from '../stats/ScaleStats';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 import { mainExpertMode } from '../stats/ScaleStats';
@@ -46,6 +49,11 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; la(e)[0] = 0; }
   // 玩家失效 = 原版 TargetClosest 落空后的 dead4(:30316-30319)
   const dead4 = !player || player.dead;
+  // 专家分支一(:30313-30318):defense = defDefense + (int)(20×(1-血比))——
+  // 基值缓存 la[3](蜂后 localAI[3] 原版未用)
+  const expert = mainExpertMode(game.world);
+  if (la(e)[3] === 0) la(e)[3] = e.def.defense ?? 0;
+  if (expert) e.def.defense = la(e)[3] + Math.trunc(20 * (1 - e.hp / e.maxHp));
   // 暴怒度 num658(:30321-30333):地表 +1 / 非丛林 +1 / getGoodWorld +0.5(:30331-30334)。
   // ZoneJungle = Game.scene 窗口计数(丛林砖 60/61/62/74/226/225 ≥140 且非地狱层)
   let num658 = 0;
@@ -84,7 +92,15 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.ai2 = 0;
   } else if (e.ai0 === 0) {
     // 悬浮-俯冲循环(:30409-30605)
-    const num662 = 2;   // :30409-30417(经典 2;expert 随血量 +1/3/5 档)
+    // num662 = 循环半程对数(:30422-30438):经典 2;专家 <1/2 +1、<1/3 +1、<1/5 +1;
+    // 再 + 暴怒度(int)
+    let num662 = 2;
+    if (expert) {
+      if (e.hp < e.maxHp / 2) num662 += 1;
+      if (e.hp < e.maxHp / 3) num662 += 1;
+      if (e.hp < e.maxHp / 5) num662 += 1;
+    }
+    num662 += Math.trunc(1 * num658);
     if (e.ai1 > 2 * num662 && e.ai1 % 2 === 0) {
       // 循环数满 → 换招(:30419-30427);ai1 归 0 = 上一状态是 0
       e.ai0 = -1;
@@ -95,11 +111,20 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       direction = player!.cx < e.cx ? -1 : 1;
       const num663 = 20 + 20 * num658;
       if (Math.abs(e.cy - player!.cy) < num663) {
-        // 俯冲(:30451-30499):localAI[0]=1(冲刺动画),12(+7*num658) 速直冲玩家
+        // 俯冲(:30451-30499):localAI[0]=1(冲刺动画);num664 速直冲玩家——
+        // 经典 12,专家 16 起 +2/档(<75/<50/<25/<10%,满档 24,:30458-30478)+ 7×暴怒
         la(e)[0] = 1;
         e.ai1 += 1;
         e.ai2 = 0;
-        const num664 = 12 + 7 * num658;   // expert 随血量 16→24 省略
+        let num664 = 12;
+        if (expert) {
+          num664 = 16;
+          if (e.hp < e.maxHp * 0.75) num664 += 2;
+          if (e.hp < e.maxHp * 0.5) num664 += 2;
+          if (e.hp < e.maxHp * 0.25) num664 += 2;
+          if (e.hp < e.maxHp * 0.1) num664 += 2;
+        }
+        num664 += 7 * num658;
         const dx = player!.cx - e.cx, dy = player!.cy - e.cy;
         const d = Math.hypot(dx, dy) || 1;
         e.vx = (dx / d) * num664;
@@ -107,11 +132,20 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
         e.facing = direction;
         game.playSfxFile?.('Zombie_125', 1, e.cx, e.cy); // :30488 PlaySound(29,…,125) 蜂后冲刺吼真轨（"Zombie"族=逐 NPC 语音槽位；原 roar 近似销核）
       } else {
-        // 悬浮(:30500-30565):Y 朝玩家 0.15(+0.5*num658) 钳 ±12(+3*num658);
-        // X 三段 >600 加速 / <300 反向 / 中带阻尼 0.8,钳 ±16
+        // 悬浮(:30485-30565):Y 朝玩家步进 num669 钳 ±num668;X 三段 >600 加速 /
+        // <300 反向 / 中带阻尼 0.8,钳 ±16——经典 12/0.15,专家 +1/+0.05、+1/+0.05、
+        // +2/+0.05、+2/+0.1(<75/<50/<25/<10%,:30492-30516)+ 3×/0.5×暴怒(:30517-30518)
         la(e)[0] = 0;
-        const num668 = 12 + 3 * num658;
-        const num669 = 0.15 + 0.5 * num658;
+        let num668 = 12;
+        let num669 = 0.15;
+        if (expert) {
+          if (e.hp < e.maxHp * 0.75) { num668 += 1; num669 += 0.05; }
+          if (e.hp < e.maxHp * 0.5) { num668 += 1; num669 += 0.05; }
+          if (e.hp < e.maxHp * 0.25) { num668 += 2; num669 += 0.05; }
+          if (e.hp < e.maxHp * 0.1) { num668 += 2; num669 += 0.1; }
+        }
+        num668 += 3 * num658;
+        num669 += 0.5 * num658;
         e.vy += e.cy < player!.cy ? num669 : -num669;
         e.vy = clamp(e.vy, -num668, num668);
         const dxAbs = Math.abs(e.cx - player!.cx);
@@ -122,10 +156,18 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
         e.facing = direction;
       }
     } else {
-      // 俯冲后(:30566-30605)
+      // 俯冲后(:30558-30605):冲过头判定窗 num670——经典 600,专家随血量收窄
+      // 550/500/450/300(<75/<50/<25/<10%,:30567-30586);再 −(int)(100×暴怒)
       direction = e.vx < 0 ? -1 : 1;
       e.facing = direction;
-      const num670 = 600 - Math.floor(100 * num658);
+      let num670 = 600;
+      if (expert) {
+        if (e.hp < e.maxHp * 0.1) num670 = 300;
+        else if (e.hp < e.maxHp * 0.25) num670 = 450;
+        else if (e.hp < e.maxHp * 0.5) num670 = 500;
+        else if (e.hp < e.maxHp * 0.75) num670 = 550;
+      }
+      num670 -= Math.trunc(100 * num658);
       const num671 = e.cx < player!.cx ? -1 : 1;
       let flag45 = false;
       // 冲过头/垂直脱靶 → 进入减速门 ai2=1
@@ -133,12 +175,19 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (Math.abs(e.cy - player!.cy) > num670 * 1.5) { e.ai2 = 1; flag45 = true; }
       if (num658 > 0 && flag45) { e.vx *= 0.5; e.vy *= 0.5; }
       if (e.ai2 === 1) {
-        // 减速(:30600-30613 主体):0.9/tick(num658>0 再 0.7),速降 <0.1 → 回悬浮(ai1+1)
+        // 减速(:30608-30643):0.9/tick;专家 <1/2、<1/3、<1/5 各再 0.9 + 阈值 +0.05
+        // (num672 经典 0.1 → 满档 0.25);暴怒再 0.7;速降 < num672 → 回悬浮(ai1+1)
         la(e)[0] = 0;
         e.vx *= 0.9;
         e.vy *= 0.9;
+        let num672 = 0.1;
+        if (expert) {
+          if (e.hp < e.maxHp / 2) { e.vx *= 0.9; e.vy *= 0.9; num672 += 0.05; }
+          if (e.hp < e.maxHp / 3) { e.vx *= 0.9; e.vy *= 0.9; num672 += 0.05; }
+          if (e.hp < e.maxHp / 5) { e.vx *= 0.9; e.vy *= 0.9; num672 += 0.05; }
+        }
         if (num658 > 0) { e.vx *= 0.7; e.vy *= 0.7; }
-        if (Math.abs(e.vx) + Math.abs(e.vy) < 0.1) {
+        if (Math.abs(e.vx) + Math.abs(e.vy) < num672) {
           e.ai2 = 0;
           e.ai1 += 1;
         }
@@ -147,7 +196,8 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
     }
   } else if (e.ai0 === 2) {
-    // 飞至玩家上方 200(:30606-30690):12 速 / 0.07 步进;距目标 <200 → 机枪蜜蜂
+    // 飞至玩家上方 200(:30649-30703):12 速 / 步进 num674(经典 0.07,专家 0.1,
+    // :30653-30658);距目标 <200 → 机枪蜜蜂
     direction = player!.cx < e.cx ? -1 : 1;
     e.facing = direction;
     const num675 = player!.cx - e.cx;
@@ -157,9 +207,10 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai0 = 1;
       e.ai1 = 0;
     } else {
+      const num674 = expert ? 0.1 : 0.07;
       const t = 12 / num677;
-      e.vx = accelTo(e.vx, num675 * t, 0.07);
-      e.vy = accelTo(e.vy, num676 * t, 0.07);
+      e.vx = accelTo(e.vx, num675 * t, num674);
+      e.vy = accelTo(e.vy, num676 * t, num674);
     }
   } else if (e.ai0 === 1) {
     // 机枪蜜蜂(:30691-30830)
@@ -169,7 +220,18 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     const vx78 = e.x + e.w / 2 + rnd(20) * direction;
     const vy78 = e.y + e.h * 0.8;
     const distToPlayer = Math.hypot(player!.cx - e.cx, player!.cy - e.cy);
-    e.ai1 += 1;   // expert:邻域玩家数/血量档加成省略(:30713-30736)
+    // 出蜂节奏(:30713-30741):ai[1] +1/t;专家 + 1000px 内玩家数/2(int 除,单玩家 0)
+    // + <75/<50/<25/<10% 各 +0.25(满档 +1)
+    e.ai1 += 1;
+    if (expert) {
+      const num681 = player && !player.dead
+        && Math.hypot(player.cx - e.cx, player.cy - e.cy) < 1000 ? 1 : 0;
+      e.ai1 += Math.trunc(num681 / 2);
+      if (e.hp < e.maxHp * 0.75) e.ai1 += 0.25;
+      if (e.hp < e.maxHp * 0.5) e.ai1 += 0.25;
+      if (e.hp < e.maxHp * 0.25) e.ai1 += 0.25;
+      if (e.hp < e.maxHp * 0.1) e.ai1 += 0.25;
+    }
     const num683 = Math.floor(40 - 18 * num658);
     let flag46 = false;
     if (e.ai1 > num683) {
@@ -206,9 +268,13 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai1 = 1;
     }
   } else if (e.ai0 === 3) {
-    // 毒刺弹幕(:30831-30981)
-    const num688 = 4 + 6 * num658;
-    const num689 = 0.05 + 0.2 * num658;
+    // 毒刺弹幕(:30820-30981)
+    // 悬浮逼近档(:30822-30830):经典 4/0.05,专家 6/0.075;再 + 6×/0.2×暴怒
+    let num688 = 4;
+    let num689 = 0.05;
+    if (expert) { num688 = 6; num689 = 0.075; }
+    num688 += 6 * num658;
+    num689 += 0.2 * num658;
     direction = player!.cx < e.cx ? -1 : 1;
     const vx80 = e.x + e.w / 2 + rnd(20) * direction;
     const vy80 = e.y + e.h * 0.8;
@@ -216,11 +282,23 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     const num691 = player!.cy - 300 - e.cy;
     const num692 = Math.hypot(num690, num691);
     e.ai1 += 1;
-    const num693 = 40 - Math.floor(5 * num658);   // expert 血量档 15/25/30/35 省略
+    // 发射间隔 num693(:30838-30843):经典 40;专家 <10% 血 15 / <1/3 25 / ≥1/2 35 /
+    // 其余 30;再 −(int)(5×暴怒)
+    let num693 = 40;
+    if (expert) {
+      num693 = e.hp < e.maxHp * 0.1 ? 15
+        : (e.hp < e.maxHp / 3 ? 25
+          : (e.hp >= e.maxHp / 2 ? 35 : 30));
+    }
+    num693 -= Math.trunc(5 * num658);
     // 每隔 num693 tick 且位于玩家上方且视线通 → 毒刺 719
     if (e.ai1 % num693 === num693 - 1 && e.y + e.h < player!.y
       && losClear(game, vx80, vy80, player!.cx, player!.cy)) {
-      const num694 = 8 + 7 * num658;               // expert +2/+5 省略
+      // 速 num694(:30849-30857):经典 8;专家 +2,专家 <10% 血再 +3;+ 7×暴怒
+      let num694 = 8;
+      if (expert) num694 += 2;
+      if (expert && e.hp < e.maxHp * 0.1) num694 += 3;
+      num694 += 7 * num658;
       const num695 = Math.max(1, Math.floor(80 - 39 * num658));
       const num696 = Math.max(1, Math.floor(40 - 19 * num658));
       let dx = player!.cx - vx80 + rndRange(-num695, num695 + 1);
@@ -228,15 +306,16 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       const t = num694 / (Math.hypot(dx, dy) || 1);
       dx *= t;
       dy *= t;
-      shoot(game, vx80, vy80, dx, dy, 11, 719, 300);   // 伤害 11 / timeLeft 300(:30875-30889)
+      shoot(game, vx80, vy80, dx, dy, 11, 719, 300);   // 伤害 11 / timeLeft 300(:30875-30878)
       game.playSfxFiles(['Item_17'], 1, e.cx, e.cy);   // SoundID.Item17 真轨（WAV_MAP 命中 Item_17.wav，近似销核）
     }
     if (!losClear(game, vx80, vy80 - 30, player!.cx, player!.cy)) {
-      // 隔墙:直接朝玩家 14 速 / 0.1 步进(:30890-30934)
+      // 隔墙:直接朝玩家 14 速 / 0.1 步进(暴怒 0.5,:30881-30925)
+      const step = num658 > 0 ? 0.5 : 0.1;
       const dx = player!.cx - vx80, dy = player!.cy - vy80;
       const t = 14 / (Math.hypot(dx, dy) || 1);
-      e.vx = accelTo(e.vx, dx * t, 0.1);
-      e.vy = accelTo(e.vy, dy * t, 0.1);
+      e.vx = accelTo(e.vx, dx * t, step);
+      e.vy = accelTo(e.vy, dy * t, step);
     } else if (num692 > 100) {
       // 朝悬浮点(玩家上方 300)逼近 4 速 / 0.05 步进(:30935-30978);
       // 原版此分支符号翻转时步进 ×2(num689 * 2f),与 accelTo 单补步不同 → 专用步进
@@ -463,6 +542,11 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
           if (expert) arrowOpts = { ...arrowOpts, homing: { speed: 12, weight: 200, cap: 16 } };
         }
         if (flag50) num806 *= 2;              // :32120-32122 暴怒弹伤 ×2
+        // :32123 弹伤 Remap:num806 = GetAttackDamage_ForProjectiles(num806, num806*0.9)
+        // ——经典 22/27/31,专家 ×0.9 截断(19/24/27)。证据链:原版弹体 damage 存该值,
+        // 命中端另乘 hostile 弹难度缩放+×2(本仓 projTargets.hitPlayer:136 同构),
+        // 两级相乘=原版口径;此前直传 22/27/31 会漏掉专家端 0.9 系数(2026-08-19 结案)
+        num806 = getAttackDamageForProjectiles(num806, num806 * 0.9, e.difficulty);
         shoot(game, e.cx + num803 * 3, e.cy + num804 * 3, num803, num804, num806, num807, life, arrowOpts);
       }
     }

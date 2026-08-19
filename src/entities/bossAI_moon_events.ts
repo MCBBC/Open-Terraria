@@ -70,20 +70,42 @@ function anyNpcs(game: GameHooks, id: number): boolean {
 // 180 BulletDeadeye / 109 SnowBallHostile / 110 BulletSnowman。
 // ---------------------------------------------------------------------------
 /** 弹体行为登记（Projectile.cs SetDefaults 逐条）：
- *  重力：349 FrostShard 原版 vy+=0.2/t 下坠（:53360）；aiStyle 14 弹跳族
- *  （希腊火 326-328 / 装饰球 346，aiStyle 赋值 :3937/:4092）重力 0.2（AI_014 :23494）。
+ *  重力：349 FrostShard 原版 vy+=0.2/t 即坠（:53360）；aiStyle 14 弹跳族
+ *  （希腊火 326-328 :3937 / 装饰球 346 :4092 / 尖刺 352 :4152）重力 0.2 且
+ *  **延迟 5 子步**（AI_014 默认档 :23482-23498：ai[0]>5 才 vy+=0.2）；345 针叶
+ *  50t 后 +0.5（AI_001 type 段 :54237-54249）；351 礼盒走 Arrow 两段重力档。
  *  弹跳：aiStyle 14 族撞块法向反弹 ×-0.5（碰撞反弹表 :18314-18327 默认档），
- *  此前近似直飞/直坠消亡 */
-const PROJ_GRAV: Record<number, number> = { 349: 0.2, 326: 0.2, 327: 0.2, 328: 0.2, 346: 0.2 };
-const PROJ_BOUNCE = new Set([326, 327, 328, 346]);
+ *  此前近似直飞/直坠消亡；352 尖刺同族补齐（曾漏 = 恒速直飞）。
+ *  tileCollide=false 族（325 :3917 / 329 :3950 / 348 :4112 / 350 :4135 / 351 :4146）
+ *  由 Arrow 按 projectileData 自动置 noTileCollide（曾漏 = 扎进地里被地形吞噬）。
+ *  寿命表（SetDefaults，缺省 3600 :526）：325=420 / 326-328=360（:3940）/
+ *  329=420 / 345=3600（默认）/ 346=300（:4095）/ 348=900（:4115）/
+ *  349=900（:4125）/ 350=1800（:4136 timeLeft/=2）/ 351=3600（默认）/
+ *  352=1200（:4155 timeLeft/=3）/ 180=600（:2393 段）/ 109=3600（默认）/
+ *  110=600 */
+const PROJ_GRAV: Record<number, number> = { 349: 0.2, 326: 0.2, 327: 0.2, 328: 0.2, 346: 0.2, 352: 0.2, 345: 0.5 };
+/** AI_014 重力延迟 5 子步（:23484-23498）；345 针叶 50t（:54244） */
+const PROJ_GRAV_DELAY: Record<number, number> = { 326: 5, 327: 5, 328: 5, 346: 5, 352: 5, 345: 50 };
+const PROJ_BOUNCE = new Set([326, 327, 328, 346, 352]);
+const PROJ_LIFE: Record<number, number> = {
+  325: 420, 326: 360, 327: 360, 328: 360, 329: 420,
+  345: 3600, 346: 300, 348: 900, 349: 900, 350: 1800,
+  351: 3600, 352: 1200, 180: 600, 109: 3600, 110: 600,
+};
 
 function shootE(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
-  dmg: number, projId: number, life = 300,
+  dmg: number, projId: number, life?: number,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null,
-      { grav: PROJ_GRAV[projId] ?? 0, life, pierce: 1, hostile: true, bounce: PROJ_BOUNCE.has(projId) }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, {
+      grav: PROJ_GRAV[projId] ?? 0,
+      gravDelay: PROJ_GRAV_DELAY[projId] ?? -1,
+      life: life ?? PROJ_LIFE[projId] ?? 3600,
+      pierce: 1, hostile: true,
+      bounce: PROJ_BOUNCE.has(projId),
+      present: projId === 351,               // aiStyle 58 两段重力（Arrow 内实现）
+    }),
     'projectiles');
 }
 
@@ -394,7 +416,9 @@ export function pumpkingBladeAI(e: Enemy, game: GameHooks, player: Player | null
     return;
   }
   e.master = master;
-  // 主选焰镰招(:33429-33447)：90t 一发焰镰 329（伤 60，0.01/距离 的低速追踪弹）
+  // 主选焰镰招(:33429-33447)：90t 一发焰镰 329（伤 60，0.01/距离 的极慢初速——
+  // 弹体 aiStyle 56 自加速 ×1.05/t 至 |v|=16，Projectile.cs:27666-27687；
+  // NewProjectile 传 ai[0]=刃当前 rotation / ai[1]=spriteDirection，首步继承）
   if (master.ai3 === 2 && player) {
     L[1]++;
     if (L[1] > 90) {
@@ -403,7 +427,11 @@ export function pumpkingBladeAI(e: Enemy, game: GameHooks, player: Player | null
       const dx = player.cx - ox, dy = player.y - oy;
       const d = Math.max(1, Math.hypot(dx, dy));
       const k = 0.01 / d;
-      shootE(game, e.cx, e.cy, dx * k, dy * k, 60, 329);
+      (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+        new Arrow(e.cx, e.cy, dx * k, dy * k, 60, 0, 329, null, {
+          grav: 0, life: 420, pierce: 1, hostile: true,
+          scythe: { rot0: e.visAngle, flipDir: -e.facing },   // :33440 ai0=rotation/ai1=spriteDirection
+        }), 'projectiles');
     }
   }
 

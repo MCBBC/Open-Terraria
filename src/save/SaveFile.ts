@@ -191,12 +191,10 @@ export function buildSaveParts(world: World): {
 
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
  *  2026-08 审计 #3:该往返单次 20~50MB×2) */
-export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => void): { world: World; player: SaveData['player']; data: SaveData } {
-  // 物品 id 还原(箱子/背包/储物就地重写):v3+ 走稳定 id;v2 旧档直读(接受破损政策)。
-  // v4 起 armor/dye/trash/misc/loadouts 也是稳定 id;v3 恰为裸内部下标——用迁移锚
-  // 快照(LEGACY_KEY_OF_INTERNAL_V3)反查 key 再转 vi_/原定义(本地物品退役兼容层)
-  const v3 = (data.version ?? 1) >= 3;
-  const v4 = (data.version ?? 1) >= 4;
+/** player 段槽位 id 还原(磁盘稳定 id → 内部 id;v3 裸下标/v2 直读兼容)。
+ *  loadSaveData 主路径与角色随身态(CharacterStore.getState → playerFromDiskForm)
+ *  共用同一映射——保证两条读入路径物品 id 语义一致。 */
+function remapPlayerSlots(p: SaveData['player'], v3: boolean, v4: boolean): SaveData['player'] {
   const mapItem = (it: SavedItemT | null): SavedItemT | null =>
     it && v3 ? { ...it, id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
   const mapLegacySlot = (it: SavedItemT | null): SavedItemT | null => {
@@ -216,26 +214,43 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
     const viId = viIdOfRetired(key);
     return { ...it, id: viId > 0 ? viId : 0 };
   };
+  return {
+    ...p,
+    inventory: p.inventory.map(mapItem),
+    banks: p.banks?.map((b) => b.map(mapItem)),
+    armor: p.armor?.map(mapLegacySlot),
+    dye: p.dye?.map(mapLegacySlot),
+    trash: mapLegacySlot(p.trash ?? null),
+    miscEquips: p.miscEquips?.map(mapLegacySlot),
+    miscDyes: p.miscDyes?.map(mapLegacySlot),
+    loadouts: p.loadouts?.map((l) => ({
+      armor: l.armor.map(mapLegacySlot),
+      dye: l.dye.map(mapLegacySlot),
+    })),
+  };
+}
+
+/** 角色随身态(磁盘稳定 id 形)→ 内部 id 形。CharacterStore 存的态由当前版本
+ *  序列化链产出(v4+ 稳定 id),恒走 v3/v4 映射。 */
+export function playerFromDiskForm(p: SaveData['player']): SaveData['player'] {
+  return remapPlayerSlots(p, true, true);
+}
+
+export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => void): { world: World; player: SaveData['player']; data: SaveData } {
+  // 物品 id 还原(箱子/背包/储物就地重写):v3+ 走稳定 id;v2 旧档直读(接受破损政策)。
+  // v4 起 armor/dye/trash/misc/loadouts 也是稳定 id;v3 恰为裸内部下标——用迁移锚
+  // 快照(LEGACY_KEY_OF_INTERNAL_V3)反查 key 再转 vi_/原定义(本地物品退役兼容层)
+  const v3 = (data.version ?? 1) >= 3;
+  const v4 = (data.version ?? 1) >= 4;
+  const mapItem = (it: SavedItemT | null): SavedItemT | null =>
+    it && v3 ? { ...it, id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
   // v3 稳定 id → 内部 id(含 locked 透传);★曾未接线直接用 data.chests——
   // 现有物品 stable≡internal 掩盖,自定义物品进箱即错
   const v3Chests = v3
     ? data.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked, items: c.items.map(mapItem) }))
     : data.chests;
   if (v3 && data.player) {
-    data.player = {
-      ...data.player,
-      inventory: data.player.inventory.map(mapItem),
-      banks: data.player.banks?.map((b) => b.map(mapItem)),
-      armor: data.player.armor?.map(mapLegacySlot),
-      dye: data.player.dye?.map(mapLegacySlot),
-      trash: mapLegacySlot(data.player.trash ?? null),
-      miscEquips: data.player.miscEquips?.map(mapLegacySlot),
-      miscDyes: data.player.miscDyes?.map(mapLegacySlot),
-      loadouts: data.player.loadouts?.map((l) => ({
-        armor: l.armor.map(mapLegacySlot),
-        dye: l.dye.map(mapLegacySlot),
-      })),
-    };
+    data.player = remapPlayerSlots(data.player, v3, v4);
   }
   const world = new WorldClass(data.header.width, data.header.height, data.header.seed, data.header.name);
   world.spawnX = data.header.spawn[0];

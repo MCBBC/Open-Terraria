@@ -5,7 +5,7 @@ import { UI } from './ui/UI';
 import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
-import { loadSave, loadSaveData } from './save/SaveFile';
+import { loadSave, loadSaveData, playerFromDiskForm } from './save/SaveFile';
 import { saveClient } from './workers/SaveClient';
 import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
@@ -316,6 +316,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     g.cb.onInventoryChanged();
   }
 
+  /** 角色随身态应用(原版 .plr 语义:背包/装备/储物/buff 等便携字段随角色跨世界;
+   *  位置不随身——保留世界档位置,新世界=出生点)。
+   *  无角色态(新角色/旧角色未玩过/直载存档无 charId)→ 回退世界档内嵌 player,
+   *  行为与本特性前完全一致。
+   *  备案:联机房间路径只带外观不带随身态(服务器权威库存是独立系统)。 */
+  async function applyPlayerWithCharacter(g: Game, worldPlayer: ReturnType<typeof loadSaveData>['player'] | null) {
+    const cs = selectedCharId != null ? await charStore.getState(selectedCharId) : null;
+    const px = g.player.x, py = g.player.y;   // 世界档位置(loadWorld 已摆)或新世界出生点
+    if (cs) {
+      applyPlayer(g, { ...playerFromDiskForm(cs), x: px, y: py });
+    } else if (worldPlayer) {
+      applyPlayer(g, worldPlayer);
+    }
+  }
+
   /** 旧档无 header.difficulty（本次修复前创建的专家/大师世界）→ 以槽位
    *  WorldMeta.difficulty 回填 world.difficulty；新档以 header 为权威跳过 */
   let difficultyFallback: number | null = null;
@@ -357,7 +372,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: (player as { x?: number }).x ?? world.spawnX * 16, y: (player as { y?: number }).y ?? world.spawnY * 16 } });
-          applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
+          await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
         } catch (e) {
@@ -391,7 +406,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true, playerAt: { x: (player as { x?: number }).x ?? world.spawnX * 16, y: (player as { y?: number }).y ?? world.spawnY * 16 } });
-          applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
+          await applyPlayerWithCharacter(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
         } catch (e) {
@@ -406,7 +421,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       VUI.setState(loadState);
       loadState.setProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
       await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.3 + p * 0.6));
-      applyPlayer(g, player);
+      await applyPlayerWithCharacter(g, player);
       g.eventsApplySave(data.events);
     } catch (e) {
       console.error(e);
@@ -652,6 +667,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       difficulty: cfg.difficulty, evil: cfg.evil,
     });
     currentWorld = meta;
+    // 新世界角色携带（原版 .plr）：已有角色随身态 → 背包/装备/储物/buff 随角色
+    // 进入新世界（位置钉回出生点）。无角色态 = 新角色，保持原生初始装备
+    {
+      const cs = selectedCharId != null ? await charStore.getState(selectedCharId) : null;
+      if (cs) {
+        const sx = g.player.x, sy = g.player.y;
+        applyPlayer(g, { ...playerFromDiskForm(cs), x: sx, y: sy });
+      }
+    }
     doSave();
   }
 
@@ -800,6 +824,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (currentWorld) {
         void worldStore.save(currentWorld, json, Date.now() - playStart).catch((e) => console.error('worldStore.save failed', e));
       }
+      // 角色随身态同步（原版 .plr 语义）：存档 JSON 的 player 段即磁盘稳定 id 形,
+      // 原样入 CharacterStore——与读侧 playerFromDiskForm 对称。同步失败不阻断存档
+      if (selectedCharId != null) {
+        try { void charStore.setState(selectedCharId, JSON.parse(json).player); }
+        catch (e) { console.warn('charState sync failed', e); }
+      }
     }).catch((e) => {
       // 回退同步 saveGame 也失败(异常世界状态)——如实报告,不留 unhandled rejection
       console.error('save failed', e);
@@ -848,6 +878,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     doSave,
     doExportSave,
     backToTitle: showTitle,
+    showCharSelect: () => showCharacterSelect(),   // 探针桥:直达角色选择页
     devMode: () => devMode,
     joinGame: (ip: string) => joinRoom(ip.includes(':') ? `ws://${ip}` : `ws://${ip}:7777`), // 旧桥（直连 URL）
     joinRoom: (url: string, token: string) => joinRoom(url, token), // 探针桥：房间制加入
