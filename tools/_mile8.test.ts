@@ -16,7 +16,9 @@ const G2 = process.env.SW_M8_G2 ?? '/tmp/sw-slp/g';            // 8 通道真值
 // JJJJ 批旁路参：第二种子对拍（默认 9293480/0 保持原行为不变）
 const SEED = process.env.SW_M8_SEED ?? '9293480';
 const EVIL = process.env.SW_M8_EVIL !== undefined ? Number(process.env.SW_M8_EVIL) : 0;
-const W = 4200, H = 1200, N = W * H;
+// YYYY 批旁路参：中世界链（6400×1800）+大 N 禁缓存（每槽 ~115MB×106 槽会爆 RSS）
+const W = Number(process.env.SW_M8_W ?? 4200), H = Number(process.env.SW_M8_H ?? 1200), N = W * H;
+const NOCACHE = process.env.SW_M8_NOCACHE === '1';
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
   const s = TILE_DEFS[i]?.vanilla?.sheet;
@@ -27,6 +29,17 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 const SLOT_END = new Map<number, number>([
   [0, 0], [1, 1], [2, 13], [3, 35], [5, 37], [6, 38], [7, 39], [8, 48],
   [9, 49], [10, 50], [11, 51], [12, 52], [13, 53],
+  // YYYY 批尾段扩展（JS 槽 14..57 ↔ dump 54..105；语义=槽内最后一个原版 pass）：
+  // 18 雕像宝箱止于 SpiderCaves(63)；35 向日葵→81（Guide(80)=NPC pass 不动格，
+  // 与 79 末态逐格同——JS 无槽）；40 地表植物=Weeds(86)+GlowingMushroomPlants(87)；
+  // 45 宝石系统止于 Random_Gems(93)；58 多格残片清扫=JS 补丁无 dump。
+  [14, 54], [15, 55], [16, 56], [17, 57], [18, 63], [19, 64], [20, 65],
+  [21, 66], [22, 67], [23, 68], [24, 69], [25, 70], [26, 71], [27, 72],
+  [28, 73], [29, 74], [30, 75], [31, 76], [32, 77], [33, 78], [34, 79],
+  [35, 81], [36, 82], [37, 83], [38, 84], [39, 85], [40, 87], [41, 88],
+  [42, 89], [43, 90], [44, 91], [45, 93], [46, 94], [47, 95], [48, 96],
+  [49, 97], [50, 98], [51, 99], [52, 100], [53, 101], [54, 102], [55, 103],
+  [56, 104], [57, 105],
 ]);
 /** reseed ▶label → dump idx（state=上一原版 pass 末态；_slotdif2/_c33replay 表+IceBiome→14） */
 const LABEL2DUMP = new Map<string, number>([
@@ -43,6 +56,16 @@ const LABEL2DUMP = new Map<string, number>([
   ['DirtRockWallRunner', 40], ['LivingTrees', 41], ['LivingTreeWalls', 42],
   ['DemonAndCrimsonAltars', 43], ['SurfaceWaterInJungle', 44], ['LihzahrdTemple', 45],
   ['Beehives', 46], ['JungleShrines', 47],
+  // YYYY 批尾段扩展（58..69/85..92 段的 pass 头时点；语义=上一原版 pass 末态）：
+  // Statues:16947→57 / BuriedChests:17066→58 / SurfaceChests:17226→59 /
+  // JungleChestsPlacement:17308→60 / WaterChests:17343→61 / SpiderCaves:17455→62 /
+  // UndergroundJungleTrees:17952→67 / QuickCleanup:17987→69 / GrassPlants:20232→85 /
+  // GlowingMushroomPlants:20278→86 / ExposedGemsInIceBiome:20842→91 /
+  // ExposedGemsUnderground:20874→92
+  ['Statues', 57], ['UndergroundHousesAndBuriedChests', 58], ['SurfaceChests', 59],
+  ['ChestsInJungleShrines', 60], ['UnderwaterChests', 61], ['SpiderCaves', 62],
+  ['UndergroundJungleTrees', 67], ['QuickCleanup', 69], ['GrassPlants', 85],
+  ['GlowingMushroomPlants', 86], ['ExposedGemsInIceBiome', 91], ['ExposedGemsUnderground', 92],
 ]);
 const DUMPNAME = new Map<number, string>();
 const le16 = (p: string): Uint16Array => {
@@ -62,7 +85,7 @@ function chans(idx: number): Ch | null {
     t: le16(`${pre}.typ`), a: readFileSync(`${pre}.act`), w: le16(`${pre}.wal`), l: readFileSync(`${pre}.liq`),
     hf: readFileSync(`${pre}.half`), sl: readFileSync(`${pre}.slope`), lt: readFileSync(`${pre}.lty`), ia: readFileSync(`${pre}.inact`),
   };
-  cache.set(idx, c);
+  if (!NOCACHE) cache.set(idx, c);
   return c;
 }
 
@@ -189,5 +212,5 @@ function labelOf(file: string, line: number): string {
   console.log(`\n★ 8通道首差边界: ${firstBad ? `#${String(firstBad.idx).padStart(3)} ${DUMPNAME.get(firstBad.idx)} @${firstBad.tag} ${firstBad.first} ${firstBad.pairs.slice(0, 4).map(([k, n]) => `${k}×${n}`).join(' ')}` : '无（0..31 全绿）'}`);
   console.log(`★ ghost 首差边界(信息位): ${firstGh ? `#${firstGh.idx} ${DUMPNAME.get(firstGh.idx)} gh=${firstGh.dGh}` : '无'}`);
   console.log(`done ${((Date.now() - t0) / 1000).toFixed(0)}s`);
-  writeFileSync('/tmp/mile8.json', JSON.stringify(rows));
+  writeFileSync(`/tmp/mile8_${SEED}.json`, JSON.stringify(rows));
 }, 900_000);

@@ -89,7 +89,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const d = TILE_DEFS[i]!;
   if (d.framed && ((d.w ?? 1) > 1 || (d.h ?? 1) > 1)) MULTI_DEFS.set(i, { w: d.w!, h: d.h! });
 }
-function killTileWhole(st: TileStore, x: number, y: number, rng?: RNG): void {
+export function killTileWhole(st: TileStore, x: number, y: number, rng?: RNG): void {
   // ★KillTile 级联（cs:63983 尾部 SquareTileFrame(i,j) → 3×3 TileFrame 重帧）：
   //   邻接多格物体经锚校验失败整块碎裂。golden 四站点实证：
   //   ①镖锚(3788,414)杀木块→上方陶罐右支撑列悬空→整塌；

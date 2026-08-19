@@ -766,7 +766,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   // AddHellHouses（cs:13893，Underworld pass **尾**段调用，Corruption(13919) 之前）：
   // 地狱要塞 HellFort 原版属地狱 pass 尾——2026-08-16 前独立占「地狱屋」槽
   // （LifeCrystals 之后，晚原版位约 3000 行）= 顺序偏差，R 批归位到 Underworld 尾。
-  runHellFortPass(store, rng, gs);
+  runHellFortPass(store, rng, gs, undefined, world.chests); // TTTT:梳妆台 88 烧 chest 注册槽(cs:52169)
   rng.reseed(gs.seed); // ▶CorruptionAndCrimson cs:13919
   runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
   rng.reseed(gs.seed); // ▶Lakes cs:14613
@@ -1079,10 +1079,10 @@ function cactusCoralPass({ store, rng }: GenCtx) {
   runCactusPalmTreesAndCoralPass(store, rng, gs);
 }
 
-function tileCleanupPass({ store, rng }: GenCtx) {
+function tileCleanupPass({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runTileCleanupPass(store, rng, gs);
+  runTileCleanupPass(store, rng, gs, world.chests);
 }
 
 function brokenTrapCleanupPass({ store, world }: GenCtx) {

@@ -13,6 +13,7 @@ import { genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';
 import { solidTile as solidTileHB, poundTile as poundTileHB } from './HalfBrickPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType } from './GenSolid';
+import { checkStalactite } from './ShimmerPass';   // SSSS：PlaceTight 尾部 CheckStalactite
 
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
 const HONEY = TILE_BY_KEY['v_229_honey_block']!;   // 蜂蜜斑 SetTile(229)（HoneyPatchBiome.cs:37/44）
@@ -579,16 +580,28 @@ function placePot(st: TileStore, rng: RNG, x: number, y: number, style: number):
   for (let k = 0; k < 2; k++) {
     for (let l = -1; l < 1; l++) {
       st.setTileSilent(x + k, y + l, POT, k * 18 + variant, (l + 1) * 18 + style * 36);
+      st.half[st.idx(x + k, y + l)] = 0;  // cs:54124 halfBrick(false)（setTileSilent 不清）
     }
   }
   return true;
 }
 
-/** PlaceTight(spiders:true)（cs:38329/38368）1:1：垂挂蛛网 165（1×2，fx=108+variation*18）；
- *  消耗 Next(2)+Next(3)（PlaceTight 在 SolidTile 检查**前**掷,cs:38346）；成功后
- *  CheckStalactite（cs:39022）无掷（放置前置 SolidTile(x,y-1) 保证不触发 KillTile） */
+/** PlaceTight(spiders:true)（cs:38329/38368）1:1：垂挂蛛网 165（1×2，fx=108+variation*18）。
+ *  ★SSSS 三补（#63 残 T0>165×527 主根因）：
+ *  ① 头门 anyShimmer/幼虫 231（cs:38345）：微光格或 231 占位 → 拒（掷骰前）；
+ *  ② 放置写 ClearSlope（cs:38382-38386 两格 slope0+half0）；
+ *  ③ 尾部 CheckStalactite(x,y)（cs:38353-38356）：GetDesiredStalagtiteStyle
+ *     （cs:38746）对泥土支撑（type 0 不在风格表）fail → 整对 KillTile；特殊支撑
+ *     （367/368/396/397/147/161/25/203/...）→ style≠11 → 1×Next(3) 重定型掷
+ *     （帧改写八通道不可见，掷移流可见）；石/苔藓支撑且 wall==62 → desired=11
+ *     无掷存活。杀链级联经 killStalactiteTile 九邻 frame165 重查（邻网连环杀）。 */
 function placeTightWebs(st: TileStore, rng: RNG, x: number, y: number): boolean {
-  rng.int(0, 1); // preferSmall
+  const gi = st.idx(x, y);
+  if (st.liquid[gi] > 0 && st.liquidType[gi] === 4) return false;   // anyShimmer（+1 编码 4）
+  if (st.flags[gi] && st.type[gi] === LARVA) return false;          // cs:38345 type==231
+  rng.int(0, 1); // preferSmall（PlaceUncheckedStalactite 小型分支 IL +0063-00A5：
+  //   单格 (x,y) frameY=54——★UUUU 试接后 #63 残差 2→1130 实证本语境小型分支另有
+  //   前置门/写位（未及定谳），回退两格垂网形；2 格残量备案见 UUUU 批报告）
   const variation = rng.int(0, 2);
   if (!solidTile(st, x, y - 1)) return false;
   if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;
@@ -596,15 +609,29 @@ function placeTightWebs(st: TileStore, rng: RNG, x: number, y: number): boolean 
   const fx = 108 + variation * 18;
   st.setTileSilent(x, y, DECO165, fx, 0);
   st.setTileSilent(x, y + 1, DECO165, fx, 18);
+  st.slope[st.idx(x, y)] = 0; st.half[st.idx(x, y)] = 0;            // ClearSlope（cs:38382）
+  st.slope[st.idx(x, y + 1)] = 0; st.half[st.idx(x, y + 1)] = 0;
+  checkStalactite(st, rng, x, y);                                   // cs:38353 尾部复核
   return true;
 }
 
 /** Place3x2（cs:52097，经 PlaceTile case 187 派发）1:1：3×2 覆饰锚 x-1..x+1 ×
  *  y-1..y（★曾偏 +1 列锚 x..x+2）；三列底座 SolidTile2(y+1)；186/187 的
  *  InvalidTileForPilesOrSpeleothems 底座巨石门在蜘蛛 pass 时点恒空集（巨石陷阱
- *  pass 更晚），备案不查。fx=style*54+col*18，fy=0/18。 */
-function placeDeco187(st: TileStore, x: number, y: number, style: number): boolean {
+ *  pass 更晚），备案不查。fx=style*54+col*18，fy=0/18。
+ *  ★SSSS：PlaceTile 全门补——前置清（cs:59500 !active→Clear(Tile|Paint|Slope)，
+ *  放置失败也清）+ case 187 分支尾 SquareTileFrame（cs:60019，成败皆跑）+
+ *  成功尾 SquareTileFrame（cs:60281，tile.active() 才跑）→ 帧杀引擎级联
+ *  （邻格 165/28/185/187 Check* 复核，#63 残 T0>28×41/T187>28×38 主根因）。
+ *  中心 (x,y) 引擎分派走 C3X2 族 check3x2（含 186 金币堆三档掷——187 不触发）。 */
+function placeDeco187(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
+  // PlaceTile 前置清（cs:59500）——锚格 inactive 清残坡/半砖（#93 placeExposed 同源）
+  const pi = st.idx(x, y);
+  if (!st.flags[pi]) {
+    st.type[pi] = 0; st.frameX[pi] = 0; st.frameY[pi] = 0;
+    st.half[pi] = 0; st.slope[pi] = 0; st.paint[pi] = 0;
+  }
   let ok = true;
   for (let k = x - 1; k <= x + 1 && ok; k++) {
     for (let l = y - 1; l <= y && ok; l++) {
@@ -612,18 +639,28 @@ function placeDeco187(st: TileStore, x: number, y: number, style: number): boole
     }
     if (ok && !solidTile2(st, k, y + 1)) ok = false;
   }
-  if (!ok) return false;
+  if (!ok) {
+    genSquareTileFrame(st, rng, x, y);   // ② cs:60019 分支尾——Place3x2 失败也跑
+    return false;
+  }
   for (let k = x - 1; k <= x + 1; k++) {
     for (let l = y - 1; l <= y; l++) {
       st.setTileSilent(k, l, DECO187, style * 54 + (k - (x - 1)) * 18, l === y - 1 ? 0 : 18);
     }
   }
+  genSquareTileFrame(st, rng, x, y);     // ② cs:60019 分支尾
+  genSquareTileFrame(st, rng, x, y);     // ③ cs:60281 成功尾
   return true;
 }
 
 /** PlaceSmallPile（cs:46831）1:1：size0=1×1（fx=style*18）；size1=2×1（fx=style*36，
- *  fy=18）。地面 = SolidTile2（cs:46856/46880，无 tileSolidTop 门） */
+ *  fy=18）。地面 = SolidTile2（cs:46856/46880，无 tileSolidTop 门）。
+ *  ★SSSS：anyLava 头门补（cs:46846 —— 岩浆格拒置，地狱边缘巢腔可命中）；
+ *  size1 的 InvalidTileForPilesOrSpeleothems 双底座门（cs:46860）维持备案不查
+ *  （生成期此阶段无巨石族）。PlaceSmallPile 无 SquareTileFrame 尾（原版直写）。 */
 function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, pileSize: number): boolean {
+  const gi = st.idx(x, y);
+  if (st.liquid[gi] > 0 && st.liquidType[gi] === 2) return false;   // anyLava（+1 编码 2）
   if (pileSize === 1) {
     if (!solidTile2(st, x, y + 1) || !solidTile2(st, x + 1, y + 1)) return false;
     if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;
@@ -649,21 +686,28 @@ function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, 
  *  否则地面放覆饰 187 style9-13 + 1/3 小堆 185×2）。
  *  ★重复入队格无 hashSet 去重（cs:3672 直处理）→ 门掷/掷骰按重复次数重复消费，原样保留 */
 function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, x: number, y: number): void {
+  const __v = (globalThis as { __swSpiderVisit?: (cx: number, cy: number, kind: string, before: number, after: number, wave: number) => void }).__swSpiderVisit;
   const seen = new Set<number>();
   const key = (px: number, py: number) => px * 100000 + py;
   let frontier: Array<[number, number]> = [[x, y]];
   const DIRS: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  let waveN = 0;
   while (frontier.length) {
     const layer = frontier;
     frontier = [];
     for (const [cx, cy] of layer) {
-      if (cx < 1 || cx >= st.w - 1 || cy < 1 || cy >= st.h - 1) continue;
-      if (cy >= st.h - 200 - rng.int(0, 4)) continue; // Main.UnderworldLayer(h-200) - Next(5)
-      if (cy < gs.worldSurface + rng.int(0, 4)) continue;
+      if (cx < 1 || cx >= st.w - 1 || cy < 1 || cy >= st.h - 1) { __v?.(cx, cy, 'R0:-:-', 0, 0, waveN); continue; }
+      const g1 = rng.int(0, 4);
+      if (cy >= st.h - 200 - g1) { __v?.(cx, cy, `R1:${g1}`, 0, 0, waveN); continue; } // Main.UnderworldLayer(h-200) - Next(5)
+      const g2 = rng.int(0, 4);
+      if (cy < gs.worldSurface + g2) { __v?.(cx, cy, `R2:${g1}:${g2}`, 0, 0, waveN); continue; }
+      __v?.(cx, cy, `G:${g1}:${g2}`, 0, 0, waveN);
       seen.add(key(cx, cy));
       const i = st.idx(cx, cy);
+      const before = (st.flags[i] ? 1 : 0) | (st.wall[i] ? 2 : 0) | (st.liquid[i] ? 4 : 0);
       if (solidTile(st, cx, cy) || wallSealed(st.wall[i])) {
         if (st.flags[i] && !wallSealed(st.wall[i])) st.wall[i] = 62;
+        __v?.(cx, cy, 'S', before, before | 2, waveN);
         continue;
       }
       st.wall[i] = 62;
@@ -682,7 +726,7 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
           if (solidTile(st, cx, cy - 1) && rng.int(0, 2) === 0) {
             placeTightWebs(st, rng, cx, cy);
           } else if (solidTile(st, cx, cy + 1)) {
-            placeDeco187(st, cx, cy, 9 + rng.int(0, 4));
+            placeDeco187(st, rng, cx, cy, 9 + rng.int(0, 4));
             if (rng.int(0, 2) === 0) {
               if (!st.flags[i]) placeSmallPile(st, cx, cy, 34 + rng.int(0, 3), 1);
               if (!st.flags[i]) placeSmallPile(st, cx, cy, 48 + rng.int(0, 5), 0);
@@ -690,10 +734,13 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
           }
         }
       }
+      const after = (st.flags[i] ? 1 : 0) | (st.wall[i] ? 2 : 0) | (st.liquid[i] ? 4 : 0);
+      __v?.(cx, cy, 'A', before, after, waveN);
       for (const [dx, dy] of DIRS) {
         if (!seen.has(key(cx + dx, cy + dy))) frontier.push([cx + dx, cy + dy]);
       }
     }
+    waveN++;
   }
 }
 

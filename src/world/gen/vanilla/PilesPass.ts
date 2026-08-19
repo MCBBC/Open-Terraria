@@ -14,6 +14,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { flipGenSolid, genSolidType } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';
 
 const PILE185 = TILE_BY_KEY['v_185_small_decos']!;
 const PILE186 = TILE_BY_KEY['v_186_decos_3x2']!;
@@ -50,6 +51,11 @@ const sheetAt = (st: TileStore, x: number, y: number): number => {
   return st.flags[i] ? SHEET[st.type[i]] : -1;
 };
 
+/** Main.tileSolid 平台族补真表（平台 tileSolid=true 且 tileSolidTop=true——
+ *  本仓 TILE_DEFS.platform 格 solid=false，须按 sheet 集补；RRRR 实证：
+ *  P3(1930,1090) 锚行 1931 列为平台 19，vanilla 放置成功、JS 曾拒） */
+const PLATFORM_SOLID = new Set([19, 427, 435, 436, 437, 438, 439]);
+
 /** SolidTile2（cs:46862）：active && tileSolid && slope==0 && !halfBrick && !inActive。
  *  ★tileSolid 走 GenSolid：pass 头覆写（cs:18906-18916,runPilesPass 接线）把
  *  379/229/190/196/189/717-719/202/460/484 置非实心——原 PASS_NON_SOLID 局部表
@@ -60,26 +66,24 @@ const solidTile2 = (st: TileStore, x: number, y: number): boolean => {
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   const d = TILE_DEFS[st.type[i]];
-  // cs:70186：active && tileSolid && slope==0 && !halfBrick && !inActive
-  // （★IIII 批补 !inActive——SolidTile2 含致动位；Dome 致动柱在表面段可达）
-  return !!d && genSolidType(st.type[i]) && st.slope[i] === 0 && !st.half[i]
+  // ★SSSS 仲裁（织入探针 (212,923)/(3384,855) 实证 ST2=True 且 slope()==1）：
+  //   坐标重载 SolidTile2(int,int)（cs:70497）带平台坡面豁免——
+  //   `((Platforms[t] && (halfBrick || topSlope)) || slope()==0) && !halfBrick && !inActive`
+  //   ——平台族 topSlope(1/2) 算实心（Tile 重载 cs:70178 无此支，两重载语义不同！）。
+  //   #77 残 2 格 = 顶坡平台 19 上的 1x1 小堆被误拒（RRRR 备案疑金标编码差——实为
+  //   本豁免缺失；2519-vs-2520 同案仲裁：GPA 实测 3669 = 252+42+126+15+2520+84+630
+  //   → ⑤ 段迭代数确为 2520，IL 读数正确，RRRR 谷值 2519 系本 bug 的补偿假象）。
+  const sh = SHEET[st.type[i]] ?? -1;
+  const isPlatform = PLATFORM_SOLID.has(sh);
+  const slopeOk = (isPlatform && (st.slope[i] === 1 || st.slope[i] === 2)) || st.slope[i] === 0;
+  return !!d && (genSolidType(st.type[i]) || isPlatform)
+    && slopeOk && !st.half[i]
     && ((st.wire[i]! >>> 5) & 1) === 0;
 };
 
-/** SolidTileAllowBottomSlope（cs:70211-70235）：active && (tileSolid||tileSolidTop)
- *  && !halfBrick && !顶坡（slope1/2 拒、底坡 3/4 放行）。tileSolid 走 GenSolid
- *  （同上,pass 头覆写生效）。
- *  PlaceTile 的 186/187 锚定门（cs:49284/49300）——placePile3x2 的地面判定 */
-const solidTileAllowBottomSlope = (st: TileStore, x: number, y: number): boolean => {
-  if (!st.inBounds(x, y)) return false;
-  const i = st.idx(x, y);
-  if (!st.flags[i]) return false;
-  const d = TILE_DEFS[st.type[i]];
-  if (!d || !(genSolidType(st.type[i]) || d.platform)) return false;
-  if (st.half[i]) return false;
-  const sl = st.slope[i];
-  return !(sl >= 1 && sl <= 2);
-};
+/** SolidTileAllowBottomSlope（cs:70211-70235）与 Check3x2 样式族表（SET_SNOW 等）
+ *  已随 OOOO 本地窄链退役——RRRR 批起统一由 FinalCleanupPass 引擎的
+ *  solidAllowBottom/check3x2Sweep 承担（GenSolid 实心+平台正帧全语义）。 */
 
 /** PlaceSmallPile（cs:46831）1:1：size0=1×1（fx=style*18, fy=0）；size1=2×1（fx=style*36, fy=18）。
  *  anyLava 拒绝；type==185 时下方 Boulders 拒绝（InvalidTileForPilesOrSpeleothems）。 */
@@ -109,16 +113,15 @@ const invalidPiles = (st: TileStore, x: number, y: number): boolean => {
   return st.flags[i] !== 0 && BOULDERS.has(SHEET[st.type[i]] ?? -1);
 };
 
-/** TileID.Sets 家族（Check3x2 186/187 样式门用；TileID.cs:24-34/287） */
-const SET_SNOW = new Set([147]);
-const SET_ICE = new Set([161, 163, 164, 200]);
-const SET_MUD = new Set([59]);
-const SET_SAND = new Set([53, 112, 116, 234]);
-const SET_HARDENED_SAND = new Set([397, 398, 402, 399]);
-const SET_SANDSTONE = new Set([396, 400, 403, 401]);
+/** TileID.Sets 家族表（SET_SNOW/ICE/MUD/SAND/...）已随本地窄链退役（见上注） */
+
+/** ★RRRR 勘误备案：段迭代上界的 float32 语义（(float)w * 0.6f）与 JS double 在
+ *  w=4200 全部同值（fround(2520.0001)按 float32 间距 2^-12 归 2520.0）——曾疑
+ *  迭代数差，实测证伪；两语义对其他宽度亦需逐值核对后再动。 */
 
 /** PlaceTile(186/187) → Place3x2(i,j,type,style)（cs:60018 case 路由 + cs:52097-52235）
- *  + 尾随 SquareTileFrame(i,j)→TileFrame→Check3x2（cs:49199-49869）整链。
+ *  + 尾随 SquareTileFrame(i,j)（cs:60026 case 分支尾 + cs:60285 成功尾，成功时两次）
+ *  → TileFrame 全分派 → 各 Check* 帧杀链。
  *  ★IIII 批（2026-08-18）修正三件：
  *  ① 几何 = **中心锚**（列 x-1..x+1 × 行 y-1..y，frameX 基 54*style 按列 +0/+18/+36，
  *    顶行 frameY=0 底行 18）——曾左对齐 x..x+2 整体右移一列（#77 首差 (2761,95)
@@ -127,81 +130,26 @@ const SET_SANDSTONE = new Set([396, 400, 403, 401]);
  *    && !inActive）+ InvalidTileForPilesOrSpeleothems（cs:52149：186/187 底座
  *    Boulders 拒）——曾用 SolidTileAllowBottomSlope（那是 Check3x2 的复核谓词，
  *    放宽了底坡/平台，错源=把 cs:49284/49300 误当放置门）；
- *  ③ Check3x2 样式族门复核。OOOO 批重写击杀链（探针实证 5339/5339 击杀格 type=0）：
- *    - 门谓词曾 `type===186/187` 比内部 id 恒假 → 整链死代码（残 1227 主根因）；
- *    - KillTile **清 type**（cs:63965——IIII"不清 type"系误读 cs:63935 为 type 行；
- *      击杀后 `rawSheetAt==186||187` 命中判定失败 → 该 attempt 不算命中 → 预算
- *      续耗重试——掷流结构随之对齐）；
- *    - KillTile 尾 SquareTileFrame（cs:63967）= 3×3 非活跃格清 half/slope/paint
- *      （TileFrame 头 cs:82077；活格 186/187 邻 → Check3x2 因 destroyObject 早退）；
- *    - Check3x2 尾 destroyObject=false + **5×5 TileFrame 扫**（cs:49856-49862）：
- *      非活跃清坡；活格 186/187 → 递归复核可**连杀相邻堆**（35 例实测）。
- *    样式族门：186 styles 26-31 须 Snow∪Ice∪{162,224}、32-34 须 Mud∪{70}；
- *    187 styles 0-5 须 Mud∪{60,226}、6-8 须 {57,58,75,76}、29-34 须
- *    Sand∪HardenedSand∪Sandstone（cs:49317-49365——**404 沙漠化石不在族内**，
- *    vanilla 对 404 地基 187 自放置自击杀，首例 (2701,413)）。
- *    KillTile 尘掷/物品：生成期 noItem 全跳（零掷）。 */
-let __destroyObj = false;
-/** TileFrame 头（cs:82077-82082）非活跃清 + case 186/187 → Check3x2 递归（OOOO） */
-function __pileFrameCell(st: TileStore, cx: number, cy: number): void {
-  if (cx <= 5 || cy <= 5 || cx >= st.w - 5 || cy >= st.h - 5) return;   // TileFrame 边界早退（cs:82069）
-  const i = st.idx(cx, cy);
-  if (!st.flags[i]) { st.half[i] = 0; st.slope[i] = 0; st.paint[i] = 0; return; }
-  const s = SHEET[st.type[i]];
-  if (s === 186 || s === 187) __pileCheck3x2(st, cx, cy, s);
-  // 其他 frameImportant 族的重帧不在 Piles 语境仿真（备案）
-}
-/** Check3x2（cs:49190-49868）：样式族门 → destroyObject 击杀链 → 5×5 扫 */
-function __pileCheck3x2(st: TileStore, cx: number, cy: number, sheet: number): void {
-  if (__destroyObj) return;                                             // cs:49193 早退
-  const i = st.idx(cx, cy);
-  const style = Math.floor(st.frameX[i]! / 54);                         // cs:49208-49215 num6
-  const y0 = cy - ((st.frameY[i]! % 36) / 18 | 0);                      // num（布局恒新写对齐）
-  let bad = false;
-  for (let c = cx - 1; c <= cx + 1; c++) {
-    if (!solidTileAllowBottomSlope(st, c, y0 + 2) || invalidPiles(st, c, y0 + 2)) { bad = true; continue; }
-    const b = sheetAt(st, c, y0 + 2);
-    if (b < 0) continue;
-    if (sheet === 186) {
-      if (style >= 26 && style <= 31 && !SET_SNOW.has(b) && !SET_ICE.has(b) && b !== 162 && b !== 224) bad = true;
-      else if (style >= 32 && style <= 34 && !SET_MUD.has(b) && b !== 70) bad = true;
-    } else if (sheet === 187) {
-      if (style <= 5 && !SET_MUD.has(b) && b !== 60 && b !== 226) bad = true;
-      else if (style >= 6 && style <= 8 && b !== 57 && b !== 58 && b !== 75 && b !== 76) bad = true;
-      else if (style >= 29 && style <= 34
-        && !SET_SAND.has(b) && !SET_HARDENED_SAND.has(b) && !SET_SANDSTONE.has(b)) bad = true;
-    }
-  }
-  if (!bad) return;
-  __destroyObj = true;                                                  // cs:49421
-  for (let c = cx - 1; c <= cx + 1; c++) {
-    for (let r = y0; r <= y0 + 1; r++) {
-      const k = st.idx(c, r);
-      if (st.flags[k] && SHEET[st.type[k]] === sheet) {
-        // KillTile（cs:63933-63967）：失活+清半砖/帧/油漆/**type=0**（cs:63965）+
-        // 尾 SquareTileFrame = 3×3 非活跃格清 half/slope/paint（活格 186/187 邻的
-        // Check3x2 因 destroyObj 早退=无连杀）
-        st.flags[k] = 0; st.half[k] = 0; st.slope[k] = 0;
-        st.frameX[k] = 0; st.frameY[k] = 0; st.paint[k] = 0; st.type[k] = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const nxc = c + dx, nyc = r + dy;
-            if (nxc <= 5 || nyc <= 5 || nxc >= st.w - 5 || nyc >= st.h - 5) continue;
-            const ni = st.idx(nxc, nyc);
-            if (!st.flags[ni]) { st.half[ni] = 0; st.slope[ni] = 0; st.paint[ni] = 0; }
-          }
-        }
-      }
-    }
-  }
-  __destroyObj = false;                                                 // cs:49856
-  for (let c = cx - 2; c <= cx + 2; c++) {
-    for (let r = y0 - 1; r <= y0 + 3; r++) __pileFrameCell(st, c, r);   // cs:49857-49862 5×5 扫
-  }
-}
-
-function placePile3x2(st: TileStore, x: number, y: number, type: number, style: number): boolean {
+ *  ③ Check3x2 样式族门复核（OOOO 批重写击杀链，探针实证 5339/5339 击杀格 type=0）。
+ *  ★RRRR 批（2026-08-19）：本域窄分派（仅 186/187 Check3x2）退役，统一走
+ *  FinalCleanupPass 的 genSquareTileFrame 全分派引擎（TileFrameImportant 全族 +
+ *  KillTile 尘掷表 + Check3x2 掉落掷/5×5 扫 + GenSolid 实心）——杀 187 邻堆链与
+ *  邻近装饰帧杀（罐 28/钟乳 165/倒木 485/门 10/祭坛 26/135，OOOO 探针普查）同源。
+ *  放置成败皆跑 case 分支尾帧（cs:60026 无条件）；成功尾帧（cs:60279 `tile.active()`
+ *  → cs:60285）以锚格 active 判（dropTo 落点恒非活，即放置成功）。 */
+function placePile3x2(st: TileStore, rng: RNG, x: number, y: number, type: number, style: number): boolean {
   (globalThis as { __swPilesCap?: (x: number, y: number, t: number, s: number, z: number, k: number) => void }).__swPilesCap?.(x, y, SHEET[type] ?? -1, style, 0, 0);
+  // PlaceTile 前置清（cs:59497-59500：目标 inactive → Clear(Tile|Paint|Slope)——type/帧
+  // 归零、半砖/坡/油漆清）——在 case 门**之前**，放置失败也清（锚格残值 type 被抹，
+  // 上游 rawSheetAt 命中判定随之失败 → 该 attempt 不算命中）。★OOOO 实证：首差
+  // eff (3007,646) i0 vs i1 = 此清缺失
+  if (st.inBounds(x, y)) {
+    const ti = st.idx(x, y);
+    if (!st.flags[ti]) {
+      st.type[ti] = 0; st.frameX[ti] = 0; st.frameY[ti] = 0;
+      st.half[ti] = 0; st.slope[ti] = 0; st.paint[ti] = 0;
+    }
+  }
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;   // cs:52102 边距门
   // ★OOOO：vanilla 的 type 比较全在 sheet 空间（186/187），本函数形参 type 是内部 id
   //  （PILE186=150/PILE187=145）——曾直接 `type === 186/187` 恒假，InvalidTile 门与
@@ -213,34 +161,29 @@ function placePile3x2(st: TileStore, x: number, y: number, type: number, style: 
   for (let c = x - 1; c <= x + 1; c++) {
     for (let r = y - 1; r <= y; r++) {
       const i = st.idx(c, r);
-      if (st.flags[i]) ok = false;                                     // 占用净空（cs:52117）
+      if (st.flags[i]) ok = false;                        // 占用净空（cs:52117）
     }
-    if (isPile && invalidPiles(st, c, y + 1)) ok = false;              // cs:52141+52149
-    if (!solidTile2(st, c, y + 1)) ok = false;                         // cs:52156
+    if (isPile && invalidPiles(st, c, y + 1)) ok = false; // cs:52141+52149
+    if (!solidTile2(st, c, y + 1)) ok = false;            // cs:52156
   }
-  if (!ok) return false;
   const base = style * 54;
-  for (let c = x - 1; c <= x + 1; c++) {
-    for (let r = y - 1; r <= y; r++) {
-      const i = st.idx(c, r);
-      st.type[i] = type; st.flags[i] = 1;
-      st.frameX[i] = base + (c - (x - 1)) * 18;
-      st.frameY[i] = r === y - 1 ? 0 : 18;
-      // 原版 Place3x2 只写 active/frameX/frameY/type（cs:52200-52234）——不清坡/半砖/液体
+  if (ok) {
+    for (let c = x - 1; c <= x + 1; c++) {
+      for (let r = y - 1; r <= y; r++) {
+        const i = st.idx(c, r);
+        st.type[i] = type; st.flags[i] = 1;
+        st.frameX[i] = base + (c - (x - 1)) * 18;
+        st.frameY[i] = r === y - 1 ? 0 : 18;
+        // 原版 Place3x2 只写 active/frameX/frameY/type（cs:52200-52234）——不清坡/半砖/液体
+      }
     }
   }
-  // 尾随 SquareTileFrame(i,j)（cs:60026+cs:60281 两次，效果合并）：中心 → Check3x2
-  __pileCheck3x2(st, x, y, sheet);
-  // 3×3 非活跃格清（两帧调用的 TileFrame 头并集；活格侧 Check3x2 已覆盖）
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      const nxc = x + dx, nyc = y + dy;
-      if (nxc <= 5 || nyc <= 5 || nxc >= st.w - 5 || nyc >= st.h - 5) continue;
-      const ni = st.idx(nxc, nyc);
-      if (!st.flags[ni]) { st.half[ni] = 0; st.slope[ni] = 0; st.paint[ni] = 0; }
-    }
-  }
-  return true;
+  // case 分支尾帧（cs:60026）：Place3x2 void——放置失败也跑；3×3 TileFrame 头清 +
+  // 中心 Check3x2（自击杀/邻堆连杀）+ 邻域各族帧杀
+  genSquareTileFrame(st, rng, x, y);
+  // 成功尾帧（cs:60279-60285）：锚格 active（=放置成功）再跑一次
+  if (st.flags[st.idx(x, y)]) genSquareTileFrame(st, rng, x, y);
+  return ok;
 }
 
 /** Piles pass 主体（cs:18900-19599） */
@@ -321,7 +264,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (WALL_DUNGEON.has(wall) && rng.int(0, 2) !== 0) {
               flag = true;                    // 地牢墙 2/3 直接视为命中
             } else {
-              if (!shimmerAt(x, y)) placePile3x2(st, x, y, pick(type), style);
+              if (!shimmerAt(x, y)) placePile3x2(st, rng, x, y, pick(type), style);
               // cs:18989：残值 type==186||187 即命中（shimmer 拒置后残值同样可命中）
               if (rawSheetAt(st, x, y) === 186 || rawSheetAt(st, x, y) === 187) flag = true;
               if (flag && type === 186 && style <= 7) scatter(x, y);
@@ -353,7 +296,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (y > h - 300 || WALL_DUNGEON.has(wall) || below === 30 || below === 19) style = rng.int(0, 6);
             if ((below === 57 || below === 58) && rng.int(0, 2) < 2) { type = 187; style = rng.int(6, 8); }
             if (below === 147 || below === 161 || below === 162) style = rng.int(26, 31);
-            placePile3x2(st, x, y, pick(type), style);
+            placePile3x2(st, rng, x, y, pick(type), style);
             if (rawSheetAt(st, x, y) === 186 || rawSheetAt(st, x, y) === 187) flag = true;  // cs:19103
             if (flag && type === 186 && style <= 7) scatter(x, y);
           }
@@ -388,7 +331,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (below === 2 || (activeAt(st, x - 1, y + 1) && sheetAt(st, x - 1, y + 1) === 2)
               || (activeAt(st, x + 1, y + 1) && sheetAt(st, x + 1, y + 1) === 2)) { type = 187; style = rng.int(14, 16); }
             if (below === 151 || below === 274) { type = 186; style = rng.int(0, 6); }
-            if (style >= 0) placePile3x2(st, x, y, pick(type), style);
+            if (style >= 0) placePile3x2(st, rng, x, y, pick(type), style);
             if (rawSheetAt(st, x, y) === type) flag = true;   // cs:19177：残值 type == num23
           }
         }
@@ -420,7 +363,7 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (below === 2 || (activeAt(st, x - 1, y + 1) && sheetAt(st, x - 1, y + 1) === 2)
               || (activeAt(st, x + 1, y + 1) && sheetAt(st, x + 1, y + 1) === 2)) { type = 187; style = rng.int(14, 16); }
             if (below === 151 || below === 274) { type = 186; style = rng.int(0, 6); }
-            if (style >= 0) placePile3x2(st, x, y, pick(type), style);
+            if (style >= 0) placePile3x2(st, rng, x, y, pick(type), style);
             if (rawSheetAt(st, x, y) === type) flag = true;   // cs:19254
             if (flag && style <= 7) scatter(x, y);
           }
@@ -431,7 +374,12 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
 
   // ===== ⑤ 全洞穴 185 小堆（cs:19261-19409）：w*0.6 =====
   {
-    const total = w * 0.6;
+    // ★SSSS 仲裁终案（2026-08-19）：⑤ 段迭代数 = **2520**。织入 GPA 头计数实测
+    // Piles 全程 3669 次 = 252(×0.06f)+42(×0.01f)+126(×0.03f)+15(×0.0035f)+
+    // **2520(×0.6f)**+84(×0.02f)+630(×0.15f)——七段算术和与实测精确相等，IL 读数
+    // 正确。RRRR 谷值 2519 系 SolidTile2 平台坡面豁免缺失（见 solidTile2 注）的
+    // 补偿假象——残 2 格正是 (3384,854)/(212,922) 两顶坡平台锚。
+    const total = Math.ceil(w * 0.6);
     for (let i = 0; i < total; i++) {
       let budget = attempts();
       let flag = false;

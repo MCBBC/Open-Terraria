@@ -78,7 +78,7 @@ import {
 import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
-import { dryadMoonPhaseStock, skeletonMerchantMoonPriceMul } from '../data/townNpcProfiles';
+import { dryadMoonPhaseStock, skeletonMerchantMoonPriceMul, rollTownPetVariant } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { paintTile, paintWall, paintDustColor, type PaintDustHook } from '../world/Paint';
@@ -164,7 +164,7 @@ import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from
 import type { GenState } from '../world/gen/vanilla/GenState';
 import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
-import { createDeathText } from '../i18n/RandomText';
+import { createDeathText, newNpcName } from '../i18n/RandomText';
 import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } from '../stats/Pvp';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
@@ -7396,9 +7396,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               this.world.flags[flagKey] = true;   // 入驻链门（Main.cs:65383-65391）
               this.newText(Lang.text(textKey) ?? '', 50, 125, 255);
             } else {
-              // RerollVariationForNPCType → 本仓无 townNpcVariationIndex 变体系统，
-              // 公告"换装失败"语义近似（原版换皮成功/失败二掷——备案）
-              this.newText(Lang.text('Misc.PetExchangeFail') ?? '', 50, 125, 255);
+              // RerollVariationForNPCType（NPC.cs:81695-81706 找在场宠物 →
+              // RerollVariation :81707-81733）：≤100 掷直到变体 ≠ 当前；成功 →
+              // 名字池重掷 + 满血 + PetExchange 粒子 + 「成功」公告；不变 → 「失败」
+              const pet = this.entities.npcs.find(
+                (n) => n instanceof TownNPC && !n.dead && n.vanillaId === petId) as TownNPC | undefined;
+              let rerolled = false;
+              if (pet) {
+                const oldVar = pet.variationIndex;
+                let tries = 0;
+                while (tries++ < 100 && pet.variationIndex === oldVar) {
+                  pet.variationIndex = rollTownPetVariant(petId);
+                }
+                rerolled = pet.variationIndex !== oldVar;
+                if (rerolled) {
+                  pet.givenName = newNpcName(petId);
+                  pet.hp = pet.maxHp;
+                  this.spawnParticles(pet.cx, pet.cy, '#60E0A0', 20, 2, { life: 40 });
+                }
+              }
+              this.newText(Lang.text(rerolled ? 'Misc.PetExchangeSuccess' : 'Misc.PetExchangeFail') ?? '',
+                50, 125, 255);
             }
             consume();
           }

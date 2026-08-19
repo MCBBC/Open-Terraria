@@ -18,6 +18,7 @@ import { idsByVanillaSheet } from './TileRunner';
 import { vanGenSolidType } from './GenSolid';
 import { growGemTree } from './TreePass';
 import { checkStalactite } from './ShimmerPass';
+import { genSquareTileFrame } from './FinalCleanupPass';   // SSSS：placeExposed 邻帧杀引擎
 
 const STALACTITE_TILE = TILE_BY_KEY['v_165_cave_decos']!;
 const LARVA_TILE = TILE_BY_KEY['v_231_larva'] ?? 0;
@@ -244,26 +245,29 @@ const GEM_DIR_BASE: Record<number, number> = { 0: 0, 1: 54, 2: 108, 3: 162 };
  *  邻域 8 格 TileFrame(resetFrame=false)：num21=frameY%54 无掷骰，且 178 非实心、
  *  不改变邻格锚定 → 不存在"邻域触发的第四掷"（cs:85844-85880 判定结论，免补）。 */
 export function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
+  // PlaceTile 通用前置清（cs:59500 !active→Clear(Tile|TilePaint|Slope)，178 非液体
+  // 拒绝表族故必达）：type/帧/半砖/坡/油漆归零——放置失败也清（OOOO #77 'i0' 同源）。
+  // ★SSSS：#93 残 4 格 S0>1/S0>4 = 宝石落在带坡位的非活跃格，vanilla 清坡 JS 曾
+  // 保留（(2516,480)/(3230,579)/(2648,699)/(4149,857) 实证）。
+  const pi = st.idx(x, y);
+  if (!st.flags[pi]) {
+    st.type[pi] = 0; st.frameX[pi] = 0; st.frameY[pi] = 0;
+    st.half[pi] = 0; st.slope[pi] = 0; st.paint[pi] = 0;
+  }
   const dir = checkMultiDirAnchor(st, x, y);
   if (dir < 0) return;                       // CheckAndAdjust 失败：不放置、不掷骰
   const roll1 = rng.nextInt(3) * 18;         // ① cs:59724
   st.setTile(x, y, EXPOSED, style * 18, roll1);
   const roll2 = rng.nextInt(3) * 18;         // ② cs:85855（resetFrame=true 无条件掷）
   if (dir !== 0) st.frameY[st.idx(x, y)] = GEM_DIR_BASE[dir] + roll2; // num22 基带覆写
+  // ② cs:59724 SquareTileFrame：八邻全分派（含非活跃清 half/slope/块漆 + 165/485
+  // 等锚定装饰帧杀级联——★SSSS：RRRR 帧杀引擎接入，#93 残 10/11 的主根因）。中心
+  // 178 引擎无分派 case（非实心非仙人掌/藤）= no-op，roll2/roll3 由上方手写保持。
+  genSquareTileFrame(st, rng, x, y);
   rng.nextInt(3);                            // ③ cs:60281 尾部帧（band 内 no-write 幽灵掷）
-  // ②③ 两次 SquareTileFrame 的 3×3 TileFrame 头语义（cs:82077-82082，幂等清一次即可）：
-  // 非活跃邻格清 half/slope/blockPaint（type 保留）；TileFrame 边界早退（cs:82069，
-  // i/j ≤5 或 ≥max-5 不帧）。★OOOO：#93 残 6 格 S0>n 主根因。锚定装饰邻格（165/485
-  // 等帧杀）不在此仿真——深层帧引擎债，留档。
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
-      if (!dx && !dy) continue;
-      const nx = x + dx, ny = y + dy;
-      if (nx <= 5 || ny <= 5 || nx >= st.w - 5 || ny >= st.h - 5) continue;
-      const k = st.idx(nx, ny);
-      if (!st.flags[k]) { st.half[k] = 0; st.slope[k] = 0; st.paint[k] = 0; }
-    }
-  }
+  // ③ cs:60281 尾部 SquareTileFrame：八邻再访（首访击杀后二访级联复核——邻堆连杀/
+  // 苔藓芽重掷语义，同 PilesPass 双尾帧口径）。
+  genSquareTileFrame(st, rng, x, y);
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============

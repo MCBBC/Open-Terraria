@@ -5,8 +5,10 @@
 // → 与 golden(N) 八通道对拍。任何差 = pass N 自身移植自因（上游 #32/#49 等债被基座隔离）。
 // 用法：cd game && SW_WWW=rep SW_WWW_FROM=54 SW_WWW_TO=70 npx vitest run tools/_wwwrep.test.ts
 import { it } from 'vitest';
+import { writeFileSync } from 'node:fs';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { TILE_DEFS } from '../src/data/tiles';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../src/data/items';
 import { RNG } from '../src/core/rng';
 import { TileStore } from '../src/world/TileStore';
 import { World } from '../src/world/World';
@@ -49,6 +51,7 @@ import { runBrokenTrapCleanupPass } from '../src/world/gen/vanilla/BrokenTrapCle
 import { runFinalCleanupPass } from '../src/world/gen/vanilla/FinalCleanupPass';
 import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
 import { runTreePass } from '../src/world/gen/vanilla/TreePass';
+import { backfillHybridFrames } from './www-framebackfill';
 
 const RUN = process.env.SW_WWW === 'rep';
 const FROM = Number(process.env.SW_WWW_FROM ?? 54);
@@ -247,7 +250,19 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       { dump: 60, base: 59, run: (st, gs, rng, chests) => runSurfaceChestsPass(st, rng, gs, chests) },
       { dump: 61, base: 60, run: (st, gs, rng, chests) => runJungleChestsPass(st, rng, gs, chests, producersBox.shrineSpots!) },
       { dump: 62, base: 61, run: (st, gs, rng, chests) => { runUnderwaterChestsPass(st, rng, gs, chests, producersBox.oceanTreasures!); runWaterChestsPass(st, rng, gs, chests); } },
-      { dump: 63, base: 62, run: (st, gs, rng, chests) => runSpiderNestPass(st, rng, gs, chests) },
+      {
+        // SSSS：placeTightWebs/placeDeco187 接入 CheckStalactite/帧杀引擎后读
+        // 165/185/187/28 帧位——混合基座帧（金标 tile+s17 捕获期 JS 帧）局部错位
+        // → 伪杀/伪活。与槽 32/45 同款入口覆盖回填。
+        dump: 63, base: 62,
+        run: (st, gs, rng, chests) => {
+          const covm = new Uint8Array(N);
+          const fwb = new Uint32Array(readFileSync('/tmp/www-b/s17/frames.bin').buffer.slice(0));
+          for (let q = 0; q < fwb.length; q += 4) covm[fwb[q]] = 1;
+          backfillHybridFrames(st, covm);
+          runSpiderNestPass(st, rng, gs, chests);
+        },
+      },
     ],
   });
   P.set(19, { entry: 's18', steps: [{ dump: 64, base: 63, run: (st, gs, rng) => runGemCavesPass(st, rng, gs) }] });
@@ -269,7 +284,20 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       { dump: 76, base: 75, run: (st, gs, rng) => runTrapsPass(st, rng, gs) },
     ],
   });
-  P.set(32, { entry: 's31', steps: [{ dump: 77, base: 76, run: (st, gs, rng) => runPilesPass(st, rng, gs) }] });
+  P.set(32, {
+    entry: 's31',
+    steps: [{
+      dump: 77, base: 76,
+      run: (st, gs, rng) => {
+        // RRRR：金标侧 frameImportant 装饰缺帧/失真 → 几何回填（tools/www-framebackfill.ts）
+        const covm = new Uint8Array(N);
+        const fwb = new Uint32Array(readFileSync('/tmp/www-b/s31/frames.bin').buffer.slice(0));
+        for (let q = 0; q < fwb.length; q += 4) covm[fwb[q]] = 1;
+        backfillHybridFrames(st, covm);
+        runPilesPass(st, rng, gs);
+      },
+    }],
+  });
   P.set(33, { entry: 's32', steps: [{ dump: 78, base: 77, run: (st, gs, rng, _c, world) => spawnPointPass({ store: st, rng, world, surface: new Float32Array(W), cfg: {} as never }) }] });
   P.set(34, { entry: 's33', steps: [{ dump: 79, base: 78, run: (st, gs, rng) => runGrassWallPass(st, rng, gs) }] });
   P.set(35, { entry: 's34', steps: [{ dump: 81, base: 80, run: (st, gs, rng) => runSunflowersPart2Pass(st, rng, gs) }] });
@@ -291,7 +319,20 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
   P.set(45, {
     entry: 's44',
     steps: [
-      { dump: 92, base: 91, run: (st, gs, rng) => runExposedGemsIcePass(st, rng, gs) },           // ▶ExposedGemsInIceBiome
+      {
+        // SSSS：placeExposed 接入帧杀引擎后读邻格帧（CheckPot/Check3x2/165 族）——
+        // 混合基座帧（金标 tile+捕获期 JS 帧）自相矛盾 → 伪杀（#93 探针 (212,707)
+        // 陶罐 2x2 错位实证）。与槽 32 同款：入口 s44 覆盖图 + 几何/相位回填，
+        // 经 prev 链传播进步 2。
+        dump: 92, base: 91,
+        run: (st, gs, rng) => {
+          const covm = new Uint8Array(N);
+          const fwb = new Uint32Array(readFileSync('/tmp/www-b/s44/frames.bin').buffer.slice(0));
+          for (let q = 0; q < fwb.length; q += 4) covm[fwb[q]] = 1;
+          backfillHybridFrames(st, covm);
+          runExposedGemsIcePass(st, rng, gs);
+        },
+      },                                                                                          // ▶ExposedGemsInIceBiome
       { dump: 93, base: 92, run: (st, gs, rng) => runExposedGemsUndergroundPass(st, rng, gs) },   // ▶ExposedGemsUnderground（新流；世界基座=post-ice 92——OOOO 修：曾误用 91，金标 93 含冰段 178 → 281 假差）
     ],
   });
@@ -303,6 +344,66 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
   P.set(51, { entry: 's50', steps: [{ dump: 99, base: 98, run: (st, gs, rng) => runTileCleanupPass(st, rng, gs) }] });
   P.set(52, { entry: 's51', steps: [{ dump: 100, base: 99, run: (st, gs) => runLihzahrdAltarPass(st, gs) }] });
   P.set(53, { entry: 's52', steps: [{ dump: 101, base: 100, run: (st, gs, rng, chests) => runMicroBiomesPass(st, rng, gs, chests) }] });
+  // TTTT 2026-08-19：金标帧直注（x86 织入探针 /tmp/tttt-app 落 /tmp/tttt-fr/*.fr——
+  // 稀疏 {u32 idx,u16 fx,u16 fy}，pass 头快照 = 上一 pass 末态）。嵌合帧（金标 tile+
+  // JS 捕获期帧）曾致 #99 ⑦ 137 方向读错（(605,782) 金标 (18,0) JS 无帧→dir 反）与
+  // #101 金箱 style 过滤错位。env SW_WWW_GF=0 可关（默认开）。
+  if (process.env.SW_WWW_GF !== '0') {
+    const injectGoldenFrames = (st: InstanceType<typeof TileStore>, frPath: string) => {
+      if (!existsSync(frPath)) return;
+      const b = readFileSync(frPath);
+      const cnt = new DataView(b.buffer, b.byteOffset, b.byteLength).getUint32(0, true);
+      for (let q = 0; q < cnt; q++) {
+        const off = 4 + q * 8;
+        const idx = new DataView(b.buffer, b.byteOffset).getUint32(off, true);
+        st.frameX[idx] = new DataView(b.buffer, b.byteOffset).getUint16(off + 4, true);
+        st.frameY[idx] = new DataView(b.buffer, b.byteOffset).getUint16(off + 6, true);
+      }
+    };
+    // 金标 wire 直注（TTTT：#101 DeadMans isAGoodSpot 27=27 实证——JS 逻辑 1:1，
+    // 重放差纯 wire 输入债；.wire 通道 = 织入探针全网格快照）
+    const injectGoldenWires = (st: InstanceType<typeof TileStore>, wirePath: string) => {
+      if (!existsSync(wirePath)) return;
+      const gw = new Uint8Array(readFileSync(wirePath).buffer.slice(0));
+      for (let i = 0; i < N; i++) {
+        const g = gw[i]! & 0x1f;
+        st.wire[i] = (st.wire[i]! & ~0x1f) | g;
+      }
+    };
+    const s51 = P.get(51)!;
+    s51.steps[0]!.run = (st, gs, rng, chests) => {
+      injectGoldenFrames(st, '/tmp/tttt-fr/099_Tile_Cleanup.fr');
+      injectGoldenWires(st, '/tmp/tttt-frw/099_Tile_Cleanup.wire');
+      // UUUU ⑦：金标宝箱注册表注入（slot98 物品位真值——箱 style 反查 Chest.item[0]；
+      // vi 键空间经 VANILLA_ITEM_KEY_BY_ID→ITEM_BY_KEY 转 JS id）
+      try {
+        const vanKey = (vid: number) => VANILLA_ITEM_KEY_BY_ID[vid];
+        const lines = readFileSync('/tmp/tttt-fr/099_Tile_Cleanup.chest.tsv', 'utf8').trim().split('\n');
+        const gold: Chests = [];
+        for (const ln of lines) {
+          const f = ln.split('\t');
+          const items: Chests[number]['items'] = [];
+          for (let q = 3; q < f.length; q++) {
+            if (f[q] === '-') { items.push(null); continue; }
+            const [tid, stack] = f[q]!.split(',').map(Number);
+            const key = vanKey(tid!);
+            const jsId = key ? ITEM_BY_KEY[key] : undefined;
+            items.push(jsId !== undefined ? { id: jsId, stack: stack! } : null);
+          }
+          gold.push({ x: Number(f[1]), y: Number(f[2]), items });
+        }
+        (chests as Chests).length = 0;
+        (chests as Chests).push(...gold);
+      } catch { /* 文件缺失自动跳过 */ }
+      runTileCleanupPass(st, rng, gs, chests as Chests);
+    };
+    const s53 = P.get(53)!;
+    s53.steps[0]!.run = (st, gs, rng, chests) => {
+      injectGoldenFrames(st, '/tmp/tttt-fr/101_Micro_Biomes.fr');
+      injectGoldenWires(st, '/tmp/tttt-frw/101_Micro_Biomes.wire');
+      runMicroBiomesPass(st, rng, gs, chests);
+    };
+  }
   P.set(54, { entry: 's53', steps: [{ dump: 102, base: 101, run: (st, gs, rng) => runLilypadsPass(st, rng, gs) }] });
   P.set(55, { entry: 's54', steps: [{ dump: 103, base: 102, run: (st, gs, rng) => runGemTreesPass(st, rng, gs) }] });
   P.set(56, { entry: 's55', steps: [{ dump: 104, base: 103, run: (st) => runBrokenTrapCleanupPass(st) }] });
@@ -338,9 +439,64 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       const built = prev ? buildHybrid(step.base, prev) : buildHybrid(step.base, entry);
       if (built.revMiss) console.log(`  [revMiss] base=${step.base} cells=${built.revMiss}`);
       const rng = new RNG(SEED);
-      await step.run(built.st, gs, rng, chests, world);
+      // UUUU：掷骰 span 记录（对拍 vanilla SW_TT_SPAN_PASSES 织入流）。包装对象
+      // 与 RNG 鸭子类型兼容（run 步内一切嵌套调用同流记录）。
+      const spanOut = process.env.SW_WWW_SPAN_OUT && process.env.SW_WWW_SPAN_DUMP === String(step.dump)
+        ? process.env.SW_WWW_SPAN_OUT : undefined;
+      const spiderLog: string[] = [];
+      if (process.env.SW_WWW_SPIDER) (globalThis as { __swSpiderVisit?: (cx: number, cy: number, k: string, b: number, a2: number, w: number) => void }).__swSpiderVisit = (cx, cy, k, b, a2, w) => spiderLog.push(`${w} ${k} ${cx},${cy} ${b}:${a2}`);
+      const rngW = spanOut ? new Proxy(rng, {
+        get(target, prop, recv) {
+          const v = Reflect.get(target, prop, target);
+          if (typeof v !== 'function') return v;
+          const fname = String(prop);
+          return (...args: number[]) => {
+            const r = (v as (...a: number[]) => number).apply(target, args);
+            let line = '';
+            if (fname === 'nextInt') line = `a ${args[0]}`;
+            else if (fname === 'int') line = `b ${args[0]} ${args[1]! + 1}`;
+            else if (fname === 'nextIntRange') line = `b ${args[0]} ${args[1]}`;
+            if (line) spanLines.push(line);
+            return r;
+          };
+        },
+      }) as RNG : rng;
+      const spanLines: string[] = [];
+      const segLog: string[] = [];
+      if (spanOut) (globalThis as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg = (n, d) => segLog.push(n + ' ' + JSON.stringify(d));
+      await step.run(built.st, gs, spanOut ? rngW : rng, chests, world);
+      (globalThis as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg = undefined;
+      if (spanOut && segLog.length) writeFileSync(spanOut.replace(/\.txt$/, '.seg.txt'), segLog.join('\n') + '\n');
+      if (spanOut) { writeFileSync(spanOut, spanLines.join('\n') + '\n'); console.log(`  [spandump] dump=${step.dump} rolls=${spanLines.length} → ${spanOut}`); }
+      (globalThis as { __swSpiderVisit?: (cx: number, cy: number, k: string, b: number, a2: number, w: number) => void }).__swSpiderVisit = undefined;
+      if (process.env.SW_WWW_SPIDER) writeFileSync(process.env.SW_WWW_SPIDER, spiderLog.join('\n') + '\n');
       if (step.dump !== undefined && step.dump >= FROM && step.dump <= TO) {
         rows.push(diffStore(`jsSlot${s}`, step.dump, built.st));
+      }
+      // UUUU：帧/线通道对拍（金标 .fr/.wire = pass 头快照）。SW_WWW_FRDUMP=99:/path
+      // → 跑完 dump=99 的步后，把 JS 帧稀疏快照写到 /path（对照 099_Tile_Cleanup.fr）。
+      if (process.env.SW_WWW_FRDUMP) {
+        const [ds, out] = process.env.SW_WWW_FRDUMP.split(':');
+        if (String(step.dump) === ds) {
+          const parts: number[] = [0];
+          const tparts: number[] = [];
+          for (let i = 0; i < N; i++) {
+            if (built.st.flags[i]) {
+              parts.push(i, built.st.frameX[i]!, built.st.frameY[i]!);
+              tparts.push(i, SHEET[built.st.type[i]!]! >= 0 ? SHEET[built.st.type[i]!]! : 9999);
+            }
+          }
+          parts[0] = (parts.length - 1) / 3;
+          writeFileSync(out, Buffer.from(new Uint32Array(parts).buffer, 0, parts.length * 4));
+          writeFileSync(out.replace(/\.fr$/, '.frtyp'), Buffer.from(new Uint32Array(tparts).buffer, 0, tparts.length * 4));
+          console.log(`  [frdump] dump=${step.dump} cells=${parts[0]} → ${out}`);
+          if (process.env.SW_WWW_CHDUMP && String(step.dump) === process.env.SW_WWW_CHDUMP) {
+            const sink = (chests as unknown as Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>)
+              .map((c, q) => ({ slot: q, x: c.x, y: c.y, item0: c.items?.[0] ?? null }));
+            writeFileSync(out.replace(/\.fr$/, '.chest.json'), JSON.stringify(sink));
+            console.log(`  [chdump] dump=${step.dump} chests=${sink.length}`);
+          }
+        }
       }
       prev = prevOf(built.st);
     }

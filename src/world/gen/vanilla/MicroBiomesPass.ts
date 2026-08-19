@@ -46,6 +46,29 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
 import { vanGenSolidType } from './GenSolid';
+import { genTileFrame, genFrameNeighbors } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
+
+/** Main.wallLargeFrames 非零墙（Main.cs:9653-9787；余皆 0）——Framing.WallFrame
+ *  resetFrame=true 掷门用（UUUU：Mahogany PlaceWall(78) 的 SquareWallFrame×5 每格
+ *  1×Next(0,3)，wall==21 再 1×Next(2)——掷侧镜像，帧写（wallFrameNumber）备案） */
+const WALL_LARGE_FRAMES_MB = new Set([224, 323, 324, 325, 326, 327, 328, 329, 330, 185,
+  274, 355, 358, 359, 362, 363, 366, 179, 146, 147, 167, 354]);
+function wallFrameRollMB(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (x <= 0 || y <= 0 || x >= st.w - 1 || y >= st.h - 1) return;
+  const wl = st.wall[st.idx(x, y)]!;
+  if (wl === 0 || WALL_LARGE_FRAMES_MB.has(wl)) return;
+  rng.nextInt(3);
+  if (wl === 21) rng.nextInt(2);
+}
+/** WorldGen.SquareWallFrame 掷侧（九宫仅中心 resetFrame=true → 至多 1 掷）；
+ *  PlaceWall.Apply = 中心 + 四邻五连 SquareWallFrame（cs:516-531） */
+function placeWallFrameRollsMB(st: TileStore, rng: RNG, x: number, y: number): void {
+  wallFrameRollMB(st, rng, x, y);
+  wallFrameRollMB(st, rng, x + 1, y);
+  wallFrameRollMB(st, rng, x - 1, y);
+  wallFrameRollMB(st, rng, x, y - 1);
+  wallFrameRollMB(st, rng, x, y + 1);
+}
 import { placeBuriedChest, nextJungleItem, type ChestSink } from './BuriedChestsPass';
 import { GENERAL_PLACEMENT_FORBID } from './GenState';
 
@@ -130,16 +153,19 @@ const solidOrSlopedAt = (st: TileStore, x: number, y: number): boolean => {
     && !(st.wire[i]! & WIRE_ACTUATOR);
 };
 /** 原版 SolidTile(i,j)(WorldGen.cs:70155-70172):active && 生成期 tileSolid && !tileSolidTop
- *  && !halfBrick && slope==0 && !inActive。countTiles(nextCount cs:9559)/MiningExplosives
+ *  && !halfBrick && slope==0 && !inActive()。countTiles(nextCount cs:9559)/MiningExplosives
  *  首门(cs:13)消费。
- *  ★曾误用静态 TILE_DEFS.solid 且漏 !inActive——致动格/生成期翻转格(484 等)被误判
- *  实心挡洪水,countTiles<40 拒掉原版收的死箱候选(#101 首差根因,同 WWW 修复①类) */
+ *  ★XXXX 定谳：Tile.inActive()（bit 0x40）与 Tile.actuator()（bit 0x800）是**两个
+ *  独立旗标**（Tile.cs:636/721）——巨石/岩浆陷阱写的是 actuator()，inActive() 在
+ *  生成期无任何置位点（WorldGen.cs 全量 grep 零 inActive(true)）⇒ SolidTile 的
+ *  !inActive() 生成期恒真。曾把致动位当 inActive 排除 → 致动石格被误判非实心
+ *  （MiningExplosives 首门错收 (2430,920) 案，ST 探针 inact=False 实证）。 */
 function solidTileStrict(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   const t = st.type[i]!;
   return st.flags[i] !== 0 && vanGenSolidType(t) && !TILE_DEFS[t]?.platform
-    && st.half[i] === 0 && st.slope[i] === 0 && !(st.wire[i]! & WIRE_ACTUATOR);
+    && st.half[i] === 0 && st.slope[i] === 0;
 }
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
@@ -264,7 +290,11 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   while (placed < trapCount) {
     if (++tries > 3000) break;
     const ox = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
-    const oy = rng.int(Math.floor(gs.rockLevel), h - 201);
+    // XXXX：cs:21964 top2=(int)GenVars.rockLayer —— GenVars.rockLayer 是独立字段
+    //   （TerrainPass.cs:232 = 游走值 num4，≠ Main.rockLayer :211-213 的 571）。
+    //   曾误用 gs.rockLevel（=Main.rockLayer）→ 矿爆点 Y 域整体偏移 48 格（span
+    //   对拍 van Next(523,1000) vs js Next(571,1000) 定罪）
+    const oy = rng.int(Math.floor(gs.genRockLayer), h - 201);
     segProbe('trapTry', [ox, oy]);
     if (placeMiningExplosives(st, rng, gs, ox, oy)) placed++;
   }
@@ -428,15 +458,26 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
           st.frameX[ui] = 0; st.frameY[ui] = 0;
           st.slope[ui] = 0; st.half[ui] = 0;
           st.wall[ui] = 0; st.liquid[ui] = 0; st.liquidType[ui] = 0;
+          // XXXX：SetTile setSelfFrames+setNeighborFrames（默认真）→ 中心+四邻五连
+          //   TileFrame(resetFrame:true)（Actions.cs:226/WorldUtils.cs:79-92——邻格
+          //   184 苔藓等 roll 族掷 Next(3)，UUUU 定谳机制循线补）
+          genFrameNeighbors(st, rng, ux, uy, 'setTile');
           // OnlyWalls(0)→PlaceWall(type):SetTile 已清墙 → 恒过门,写 wallType
           st.wall[ui] = wallType;
+          // XXXX：PlaceWall.Apply（Actions.cs:516-531）= 本格+四邻五连 SquareWallFrame
+          //   ——各仅中心 resetFrame=true 掷 Next(0,3)（墙≠0 且非 wallLargeFrames）
+          placeWallFrameRollsMB(st, rng, ux, uy);
         }
       }
     }
   }
-  // All(data):ClearTile + SetLiquid(0,0) + 空墙刷墙(cs:69)
+  // All(data):ClearTile + SetLiquid(0,0) + SetFrames(frameNeighbors:true) + 空墙刷墙(cs:69)
   //   ClearTile(Tile.cs:153)=ClearSlope(slope=0+half=0)+active(false)+inActive(false)
   //   ——曾漏 slope/half/致动位复位(斜坡/半砖格残留 → Sl/Hf/Ia 通道差)
+  //   ★data 枚举序：ShapeData 只经 Blotches Output 的 Add（无 Remove/重插）→
+  //     .NET HashSet 枚举序=槽分配序=插入序（XXXX 批裁决，见文件头），JS Set 同序。
+  //     SetFrames 在 OnlyWalls(0) 门之前（链位）——逐点恒执行；PlaceWall 掷仅
+  //     空墙点（XXXX 补）
   for (const key of data) {
     const px = key % st.w, py = Math.trunc(key / st.w);
     if (!st.inBounds(px, py)) continue;
@@ -445,7 +486,11 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
     st.slope[i] = 0; st.half[i] = 0;
     st.wire[i] &= ~WIRE_ACTUATOR;                     // ClearTile 的 inActive(false)
     st.liquid[i] = 0; st.liquidType[i] = 0;
-    if (st.wall[i] === 0) st.wall[i] = wallType;
+    genFrameNeighbors(st, rng, px, py, 'setTile');    // SetFrames(frameNeighbors:true)（cs:69）
+    if (st.wall[i] === 0) {
+      st.wall[i] = wallType;
+      placeWallFrameRollsMB(st, rng, px, py);         // PlaceWall(type) 五连 SquareWallFrame
+    }
   }
   // 向下 10 格找地面(cs:70-74):Find(origin, Down(10), IsSolid) 含起点 + Conditions.IsSolid
   let groundY = oy;
@@ -607,6 +652,8 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   if (!canPlaceStructure(gs, area, 0, st)) return false;
   // 矿石地板(cs:44):All(shapeData)+SetTile(type, setSelfFrames)
   //   SetTile=Clear(~(Wiring|Actuator)) 连墙带液带帧带坡全清后写 type
+  //   ★setSelfFrames+setNeighborFrames(默认真)→ 中心+四邻五连 TileFrame(resetFrame:
+  //   true)（XXXX 补——shapeData 只经 ShapeRunner Output 的 Add,枚举序=插入序）
   for (const key of data) {
     const qx = key % st.w, qy = Math.trunc(key / st.w);
     if (!st.inBounds(qx, qy)) continue;
@@ -615,6 +662,7 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
     st.frameX[i] = 0; st.frameY[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;
     st.wall[i] = 0; st.liquid[i] = 0; st.liquidType[i] = 0;
+    genFrameNeighbors(st, rng, qx, qy, 'setTile');
   }
   // Circle(5) + Blotches 挖房(cs:45):中心 = (origin.X - dir*-5, origin.Y - 5)
   {
@@ -637,6 +685,8 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
           st.flags[i] = 0;                              // ClearTile(frameNeighbors):
           st.slope[i] = 0; st.half[i] = 0;              // ClearSlope+active(false)
           st.wire[i] &= ~WIRE_ACTUATOR;                 // +inActive(false)(Tile.cs:153)
+          // XXXX：WorldUtils.ClearTile(frameNeighbors:true)=四邻 TileFrame(reset=false)
+          genFrameNeighbors(st, rng, qx, qy, 'clearTile');
         }
       }
     }
@@ -676,6 +726,9 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
         st.type[bi] = STONE; st.flags[bi] = 1;   // ResetToType(1)+active
       }
       st.slope[bi] = 0; st.half[bi] = 0;         // cs:67-68(两分支都复位)
+      // XXXX：WorldUtils.TileFrame(result2.X+i, result2.Y+1, frameNeighbors:true)
+      //   （cs:70）= 中心+四邻五连 TileFrame(resetFrame:true)
+      genFrameNeighbors(st, rng, px, below, 'setTile');
     }
   }
   // PlaceTile(result, 141)(cs:71)——前奏 Clear(锚格 Tile|TilePaint|Slope,cs:59501)+
@@ -691,8 +744,9 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
         const gi = st.idx(barX, barGround + 1);
         if (st.flags[gi] === 0) return false;
         const gt = st.type[gi]!;
+        // SolidTile2（cs:70178）—— !inActive() 生成期恒真（XXXX，见 solidTileStrict 注）
         return vanGenSolidType(gt) && !TILE_DEFS[gt]?.platform
-          && st.slope[gi] === 0 && st.half[gi] === 0 && !(st.wire[gi]! & WIRE_ACTUATOR)  // SolidTile2
+          && st.slope[gi] === 0 && st.half[gi] === 0
           && !BOULDER_TILES.has(gt);                                                   // 非巨石族地板
       })();
       if (gOK && !wasActive) {
@@ -857,7 +911,8 @@ function placeMahoganyTree(
     st.liquid[i] = 0; st.liquidType[i] = 0;
     st.frameX[i] = 0; st.frameY[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;
-    st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;       // SetFrames 帧写入备案:帧 0
+    st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;
+    genTileFrame(st, rng, x, y);   // 尾随 SetFrames()（cs:55）——中心 resetFrame=true（UUUU 补掷）
   };
   const shaftCell = (x: number, y: number): void => {
     if (!st.inBounds(x, y)) return;
@@ -866,7 +921,9 @@ function placeMahoganyTree(
     if (st.wall[i] === 87) return;
     st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;    // ClearTile(frameNeighbors)
     st.wire[i] &= ~WIRE_ACTUATOR;                        // +inActive(false)(Tile.cs:153)
-    st.wall[i] = 78;                                     // PlaceWall(78)(SquareWallFrame 帧备案)
+    genFrameNeighbors(st, rng, x, y, 'clearTile');       // 四邻 TileFrame(reset=false)（UUUU 补掷）
+    st.wall[i] = 78;                                     // PlaceWall(78)
+    placeWallFrameRollsMB(st, rng, x, y);                // 五连 SquareWallFrame 掷侧（UUUU 补掷）
   };
   const genRect = (x: number, y: number, width: number, height: number,
     act: (x: number, y: number) => void): void => {
@@ -895,6 +952,7 @@ function placeMahoganyTree(
     st.frameX[i] = 0; st.frameY[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;
     st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;
+    genFrameNeighbors(st, rng, x, y, 'setTile');   // SetFrames(frameNeighbors:true)（cs:75/79/80，UUUU 补掷）
   };
   /** ShapeBranch.Perform(ShapeBranch.cs:44-77)1:1(含掷序) */
   const shapeBranch = (angle: number, distance: number, bx: number, by: number): void => {
@@ -971,6 +1029,7 @@ function placeMahoganyTree(
           st.frameX[i] = 0; st.frameY[i] = 0;
           st.slope[i] = 0; st.half[i] = 0;
           st.type[i] = LIVING_M_LEAVES; st.flags[i] = 1;
+          genFrameNeighbors(st, rng, lx, ly, 'setTile');   // SetFrames(frameNeighbors:true)（cs:83，UUUU 补掷）
         }
       }
     }
@@ -985,6 +1044,7 @@ function placeMahoganyTree(
     st.frameX[i] = 0; st.frameY[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;
     st.type[i] = LIVING_MAHOGANY; st.flags[i] = 1;
+    genFrameNeighbors(st, rng, x, y, 'setTile');   // SetTile(383,setSelfFrames)+setNeighborFrames 默认真（cs:88，UUUU 补掷）
   };
   for (let k = 0; k < 4; k++) {
     const angle0 = k / 3 * 2 + 0.57075;
@@ -1351,6 +1411,9 @@ export class DeadMansChestBiome {
     st.frameY[idx] = 0;
     st.slope[idx] = 0;
     st.half[idx] = 0;
+    // cs:532 WorldGen.TileFrame(x, y, resetFrame:true)——137 无 frame 分派（零掷），
+    // 但经 tileFrameGen 全分派以对齐未来 Check* 级联语义（UUUU）
+    genTileFrame(st, this.rng, d.trapX, d.trapY);
     this.placeWireLine({ x: d.x, y: d.y, dirX: d.directionX, dirY: 0, steps: d.xPush });
   }
 
@@ -1374,29 +1437,41 @@ export class DeadMansChestBiome {
         if (j < b.y - requiredHeight + 2) {
           st.setTileSilent(i, j, 0);                       // ClearTile
         } else if (j <= b.y) {
-          if (!st.flags[idx]) {
-            st.type[idx] = b.bestType;
-            st.flags[idx] = 1;
-          }
-          st.slope[idx] = 0;
-          st.half[idx] = 0;
+          // ★cs:549-566 do-while：TileFrame(resetFrame:true) 至少一跑，格被帧杀
+          //   （如 184 苔藓无邻 → 杀）则补 bestType 复位再跑一次后 break。UUUU：
+          //   曾单趟无 TileFrame——每苔藓格漏 1×Next(3)（cs:85916 无条件掷）→
+          //   DeadMans 第 5 轮 Place 后 4 掷差（TTTT 记账的"resetFrame 债"真源）
+          let flag = false;
+          do {
+            if (!st.flags[idx]) {
+              st.type[idx] = b.bestType;
+              st.flags[idx] = 1;
+            }
+            st.slope[idx] = 0;
+            st.half[idx] = 0;
+            genTileFrame(st, this.rng, i, j);
+            if (flag) break;
+            flag = true;
+          } while (!st.flags[idx]);
           st.wire[idx] |= WIRE_RED;
-          if (TILE_DEFS[st.type[idx]]?.solid) st.wire[idx] |= WIRE_ACTUATOR;
+          if (vanGenSolidType(st.type[idx]!)) st.wire[idx] |= WIRE_ACTUATOR;
         } else {
           st.setTileSilent(i, j, 0);                       // ClearTile
         }
       }
     }
-    // 6×6 石壳(cs:585-606):非巨石格 → 石头;带线格补致动器
+    // 6×6 石壳(cs:585-606):非巨石格 → 石头;带**红线**格补致动器
+    //   ★XXXX：原版 tile2.wire() 只读 wire1(红)——曾 `& 15` 任何线都致动(蓝/绿/黄
+    //   线格被误致动 → 下游 SolidTile 门翻转,span 对拍 @33751 (2430,920) 定罪);
+    //   惰性格也参与转化(原版无 active 门,曾 `continue` 跳过)
     const cx = b.x + 1, cy = b.y - requiredHeight + 1;
     for (let k = cx - 3; k <= cx + 2; k++) {
       for (let l = cy - 3; l <= cy + 2; l++) {
         if (!st.inBounds(k, l)) continue;
         const idx = st.idx(k, l);
-        if (!st.flags[idx]) continue;   // 近似:仅活性格参与(原版对惰性格也写 type)
-        if (!BOULDER_TILES.has(st.type[idx])) {
+        if (!BOULDER_TILES.has(st.type[idx]!)) {
           st.type[idx] = STONE;
-          if (st.wire[idx] & 15) st.wire[idx] |= WIRE_ACTUATOR;
+          if (st.wire[idx]! & WIRE_RED) st.wire[idx] |= WIRE_ACTUATOR;
         }
       }
     }
@@ -1424,6 +1499,7 @@ export class DeadMansChestBiome {
     st.frameY[idx] = 0;
     st.slope[idx] = 0;
     st.half[idx] = 0;
+    genTileFrame(st, this.rng, e.x, e.y);   // cs:617 TileFrame(resetFrame:true)
   }
 }
 
@@ -1461,7 +1537,7 @@ export function placeThinIcePatch(
     forEachCircleCell(st, cx, cy, num5, rng, 4, (x, y) => {
       const idx = st.idx(x, y);
       if (!st.flags[idx] || !ICE_SRC.has(st.type[idx])) return;
-      setThinIce(st, idx);
+      setThinIce(st, rng, x, y);
     });
     // Gen 2:Circle(num5) + Blotches(4) + HasLiquid + SkipTiles(21,467,226,237)
     //        → SetTile(162) + SetLiquid(0,0)
@@ -1469,9 +1545,7 @@ export function placeThinIcePatch(
       const idx = st.idx(x, y);
       if (st.liquid[idx] === 0) return;          // HasLiquid
       if (st.flags[idx] && ICE_SKIP.has(st.type[idx])) return;   // SkipTiles
-      setThinIce(st, idx);
-      st.liquid[idx] = 0;                        // SetLiquid(0, 0)
-      st.liquidType[idx] = 0;
+      setThinIce(st, rng, x, y);                 // SetTile 内含 SetLiquid 前的 Clear
     });
     num4 += num5 - 2;
   }
@@ -1517,7 +1591,11 @@ function forEachCircleCell(
 /** Actions.SetTile(162, setSelfFrames)(Actions.cs:203-227):
  *  Clear(~(Wiring|Actuator)) = 清 tile/wall/liquid/帧/坡/半砖,保留线与致动位;
  *  生成期 TileFrame 对非 frameImportant 格无操作 → 帧落 0 */
-function setThinIce(st: TileStore, idx: number): void {
+/** Actions.SetTile(162, setSelfFrames:true)（Actions.cs:203）：Clear(~(Wiring|Actuator))
+ *  + type/active + WorldUtils.TileFrame(x,y,true)（cs:79-92 = 中心+四邻五连
+ *  TileFrame(resetFrame:true)——邻格 184 苔藓等 roll 族在此掷 Next(3)，UUUU 补） */
+function setThinIce(st: TileStore, rng: RNG, x: number, y: number): void {
+  const idx = st.idx(x, y);
   st.type[idx] = THIN_ICE;
   st.flags[idx] = 1;
   st.frameX[idx] = 0;
@@ -1527,6 +1605,7 @@ function setThinIce(st: TileStore, idx: number): void {
   st.liquidType[idx] = 0;
   st.half[idx] = 0;
   st.slope[idx] = 0;
+  genFrameNeighbors(st, rng, x, y, 'setTile');
 }
 
 // ============================================================

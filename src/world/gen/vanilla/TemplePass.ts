@@ -9,12 +9,127 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
-import { placeFurn } from './DungeonPass';
-import { flipGenSolid } from './GenSolid';
+
+import { flipGenSolid, vanGenSolidType } from './GenSolid';
+import { killTileWhole } from './TrapsPass';
+import { genSquareTileFrame } from './FinalCleanupPass';
 
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
 const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
+
+// ---- mayanTrap（cs:8314-8644）实心谓词族（生成期 tileSolid = vanGenSolidType） ----
+const SHEET_OF_TP = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let q = 0; q < TILE_DEFS.length; q++) {
+  const s = TILE_DEFS[q]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF_TP[q] = s;
+}
+const sheetOfTP = (t: number): number => (t >= 0 && t < SHEET_OF_TP.length ? SHEET_OF_TP[t] : -1);
+/** Main.tileSolidTop（Main.cs:6764+ 全 86 项，TrapsPass 同表副本——不 import 防耦合） */
+const SOLID_TOP_TP = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** TileID.Sets.Platforms（TileID.cs:243） */
+const PLATFORMS_TP = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** TileID.Sets.Boulders（TileID.cs:195） */
+const BOULDERS_TP = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** ForbidsSloping（cs:81437）：21/26/77/88/235/237/441/467/468/470/475/488/597 */
+const FORBIDS_SLOPING = new Set([21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597]);
+/** CanPoundTile 直拒族（cs:81434 switch） */
+const CANT_POUND = new Set([10, 48, 137, 232, 380, 387, 388, 476, 484]);
+/** IsATreeTrunk（TileID.cs:161）——CanKillTile 树干保护门（本语境可达子集） */
+const TREE_TRUNKS_TP = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+
+/** SolidOrSlopedTile（cs:70046）：active && tileSolid && !tileSolidTop && !inActive
+ *  ——名字带 Sloped 但**不含坡条件**（实心且无论坡向） */
+function solidOrSlopedTP(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i]!;
+  return vanGenSolidType(t) && !SOLID_TOP_TP.has(sheetOfTP(t))
+    && ((st.wire[i] >>> 5) & 1) === 0;
+}
+/** SolidTile（cs:70155）：active && tileSolid && !tileSolidTop && !half && slope==0 && !inActive */
+function solidTileTP(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i]!;
+  return vanGenSolidType(t) && !SOLID_TOP_TP.has(sheetOfTP(t)) && !st.half[i]
+    && st.slope[i] === 0 && ((st.wire[i] >>> 5) & 1) === 0;
+}
+/** SolidTile2（cs:70178）：active && tileSolid && slope==0 && !half && !inActive（无 solidTop 位） */
+function solidTile2TP(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i]!;
+  return vanGenSolidType(t) && !st.half[i] && st.slope[i] === 0
+    && ((st.wire[i] >>> 5) & 1) === 0;
+}
+/** PlatformProperTopFrame（cs:70197）：帧列号 ∈[0,7]∪[12,16]∪[25,26] */
+function platformProperTP(fx: number): boolean {
+  const num = Math.floor(fx / 18);
+  if ((num < 0 || num > 7) && (num < 12 || num > 16)) {
+    if (num >= 25) return num <= 26;
+    return false;
+  }
+  return true;
+}
+/** SolidTileAllowBottomSlope（cs:70211） */
+function solidAllowBottomTP(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i]!;
+  const sheet = sheetOfTP(t);
+  const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
+  return (vanGenSolidType(t) || SOLID_TOP_TP.has(sheet))
+    && (!topSlope || (PLATFORMS_TP.has(sheet) && platformProperTP(st.frameX[i]!)))
+    && !st.half[i] && ((st.wire[i] >>> 5) & 1) === 0;
+}
+/** CanKillTile（cs:62249，本语境可达子集：wall350 + 上邻树干保护） */
+function canKillTileTP(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || st.wall[i] === 350) return false;
+  if (y >= 1) {
+    const u = st.idx(x, y - 1);
+    if (st.flags[u]) {
+      const sh = sheetOfTP(st.type[u]!);
+      if (TREE_TRUNKS_TP.has(sh) || sh === 323) return false;
+    }
+  }
+  return true;
+}
+/** CanPoundTile（cs:81434）+ SlopeTile(i,j,0)（cs:81507，生成期只做 half/slope 双清） */
+function slopeTileTP(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  const sh = sheetOfTP(st.type[i]!);
+  if (CANT_POUND.has(sh) || BOULDERS_TP.has(sh)) return;
+  if (sh === 190 || sh === 30) return;                       // isGeneratingOrLoadingWorld 分支
+  if (y >= 1) {
+    const u = st.idx(x, y - 1);
+    if (st.flags[u] && FORBIDS_SLOPING.has(sheetOfTP(st.type[u]!))) return;
+  }
+  if (!canKillTileTP(st, x, y)) return;
+  st.half[i] = 0;
+  st.slope[i] = 0;
+}
+/** CanGeneratePressurePlateAt（cs:11044） */
+function canGenPlateTP(st: TileStore, x: number, y: number): boolean {
+  if (x < 3 || y < 3 || x > st.w - 4 || y > st.h - 4) return false;   // InWorld(i,j,3)
+  if (!solidAllowBottomTP(st, x, y + 1)) return false;
+  const g = st.idx(x, y + 1);
+  if (BOULDERS_TP.has(sheetOfTP(st.type[g]!))) return false;
+  if (st.wall[g] === 350) return false;
+  return true;
+}
+const inWorld5TP = (st: TileStore, x: number, y: number): boolean =>
+  x >= 5 && x < st.w - 5 && y >= 5 && y < st.h - 5;
 
 interface Room { x: number; y: number; w: number; h: number }
 
@@ -766,7 +881,8 @@ function templePart2(
         fy--;
         if (fy <= by) {
           const style = rng.int(43, 45);              // Next(43,46)
-          if (placeStatueTemple(st, x2, fy, style)) budget -= 1;
+          placeStatueTemple(st, rng, x2, fy, style);
+          if (sheetOfTP(st.type[st.idx(x2, fy)]!) === 105) budget -= 1;   // cs:34574 锚格 type 门
         }
       }
       if (fails > 10000) break;
@@ -774,8 +890,9 @@ function templePart2(
   }
 
   // ---- 4. 蜥蜴家具（cs:34585-34632）：预算 = 房数×1.35×(1+Next(-15,26)%) ----
-  //  Next(3)（cs:34608-34630 原文配对，勿旋转）：0→工作台 18 style10 /
-  //  1→桌 14 style9 / 2→椅 15 style12（曾把三对整体错抄一位→神庙出木椅）
+  //  Next(3)（cs:34608-34630 原文配对，勿旋转）：0→工作台 18 style10（Place2x1
+  //  **左锚**——曾 placeFurn 居中 fw=2 整体偏 1 格）/ 1→桌 14 style9（Place3x2 中锚）/
+  //  2→椅 15 style12（Place1x2）。预算扣减门 = 放置后锚格 type==18/14/15（cs:34619+）
   {
     let budget = tRooms * 1.35 * (1 + rng.int(-15, 25) * 0.01);
     let fails = 0;
@@ -793,11 +910,12 @@ function templePart2(
         if (fy <= by) {
           const kind = rng.int(0, 2);                 // Next(3)
           const spec = kind === 0
-            ? { tile: TILE_BY_KEY['workbench']!, style: 10 }
+            ? { sheet: 18, style: 10 }
             : kind === 1
-              ? { tile: TILE_BY_KEY['table']!, style: 9 }
-              : { tile: TILE_BY_KEY['chair']!, style: 12 };
-          if (placeFurn(st, x2, fy, spec.tile, spec.style)) budget -= 1;
+              ? { sheet: 14, style: 9 }
+              : { sheet: 15, style: 12 };
+          placeFurnTemple(st, rng, x2, fy, spec.sheet, spec.style);
+          if (sheetOfTP(st.type[st.idx(x2, fy)]!) === spec.sheet) budget -= 1;
         }
       }
       if (fails > 10000) break;
@@ -805,6 +923,9 @@ function templePart2(
   }
 
   // ---- 5. 墙挂饰 240 style88（cs:34634-34682）：数量 = 1 + (w>4200) + (w>6400?Next(2):0) ----
+  //  InWorld(±70,5) 门 + PlaceTile(240,88)→Place3x3Wall（**3×3 以采样点为中心**
+  //  (x-1..x+1)×(y-1..y+1)，全空+wall≠0 才放——曾写成 (x..x+2,y..y+2) 左上角整体
+  //  偏 (1,1) 且漏 wall≠0 门）；扣减门 = PlaceTile 返回值（锚格 active）
   {
     let count = 1;
     if (st.w > 4200) count++;
@@ -820,15 +941,14 @@ function templePart2(
         for (let dx = -70; dx <= 70 && !flag; dx++) {
           for (let dy = -70; dy <= 70; dy++) {
             const xx = x2 + dx, yy = y2 + dy;
-            if (!st.inBounds(xx, yy)) continue;
+            if (!inWorld5TP(st, xx, yy)) continue;    // InWorld(num21,num22,5)
             const k = st.idx(xx, yy);
             if (!st.flags[k]) continue;
-            const sh = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
-            if (sh === 240) { flag = true; break; }
-            if (dx >= -4 && dx <= 4 && dy >= -4 && dy <= 4 && sh === 226) { flag = true; break; }
+            if (sheetOfTP(st.type[k]!) === 240) { flag = true; break; }
+            if (dx >= -4 && dx <= 4 && dy >= -4 && dy <= 4 && sheetOfTP(st.type[k]!) === 226) { flag = true; break; }
           }
         }
-        if (!flag && placeWallHangingTemple(st, x2, y2, 88)) count--;
+        if (!flag && placeWallHangingTemple(st, rng, x2, y2, 88)) count--;
       }
       if (fails > 10000) break;
     }
@@ -837,156 +957,326 @@ function templePart2(
   flipGenSolid([232], true);
 }
 
-/** PlaceTile(105, style)（神庙雕像）：2×3，锚点=底行左列的下一格语义（与 StatuesPass 一致） */
-function placeStatueTemple(st: TileStore, x: number, y: number, style: number): boolean {
+/** PlaceTile(105, style)（神庙雕像，cs:60090）→ Place2xX（cs:39705）+ SquareTileFrame×2。
+ *  锚 = 底行左列 (x, y)；2×3 占位 (x..x+1)×(y-2..y)；门 = 六格全 inactive +
+ *  SolidTile2(x,y+1) && SolidTile2(x+1,y+1)（★曾缺地面门——斜坡/半砖砖上 JS 放
+ *  vanilla 拒）；帧 55 列换行（cs:39716-39720）。前奏 Clear 只清锚格（其余五格
+ *  ghost slope 按 vanilla **不清**——Place2xX 只写 active/frameY/frameX/type）。 */
+function placeStatueTemple(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   const STATUE = TILE_BY_KEY['v_105_statue'];
   if (STATUE === undefined) return false;
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = -2; dy <= 0; dy++) {
-      if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)]) return false;
+  let type = STATUE;
+  let sty = style;
+  let num = sty * 36;
+  let num2 = 0;
+  if (sty === 34) { type = TILE_BY_KEY['v_349_statue2'] ?? type; sty = 0; num = 0; }   // cs:39710
+  const row = Math.floor(sty / 55);
+  num -= 1980 * row;         // 55*36 列换行
+  num2 += 54 * row;
+  for (let i = y - 2; i <= y; i++) {
+    for (const xx of [x, x + 1]) {
+      if (st.inBounds(xx, i) && st.flags[st.idx(xx, i)]) return false;   // 六格须全空
     }
   }
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = 0; dy < 3; dy++) {
-      // 雕像帧 55 列换行（cs:39716-39720；神庙 style 43-45 <55 本可不过防御性同款）
-      const row = Math.floor(style / 55);
-      st.setTileSilent(x + dx, y - 2 + dy, STATUE, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
-    }
+  if (!solidTile2TP(st, x, y + 1) || !solidTile2TP(st, x + 1, y + 1)) return false;
+  // PlaceTile 前奏 Clear（锚格 inactive）：type/帧/坡/半砖全清（cs:59499-59501）
+  const ai = st.idx(x, y);
+  if (st.inBounds(x, y) && !st.flags[ai]) {
+    st.type[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0; st.slope[ai] = 0; st.half[ai] = 0;
   }
+  for (let j = 0; j < 3; j++) {
+    const fy = num2 + j * 18;
+    st.setTileSilent(x, y - 2 + j, type, num, fy);
+    st.setTileSilent(x + 1, y - 2 + j, type, num + 18, fy);
+  }
+  genSquareTileFrame(st, rng, x, y);   // case 105 体尾
+  if (st.flags[st.idx(x, y)]) genSquareTileFrame(st, rng, x, y);   // PlaceTile 尾二连
   return true;
 }
 
-/** PlaceTile(240, style)（神庙墙挂饰）：3×3，帧基 = (style%36)*54 / floor(style/36)*54 */
-function placeWallHangingTemple(st: TileStore, x: number, y: number, style: number): boolean {
+/** 家具三族（cs:34608-34630）：18→Place2x1（cs:47371，**左锚**）/ 14→Place3x2
+ *  （cs:52097，中锚 (x-1..x+1)×(y-1..y)）/ 15→Place1x2（cs:46665，(x,y-1..y)，
+ *  帧行 stride=40）。门/帧全按原版；PlaceTile 前奏 Clear 锚格 + 尾 SquareTileFrame×2 */
+function placeFurnTemple(st: TileStore, rng: RNG, x: number, y: number, sheet: number, style: number): boolean {
+  const tileId = sheetToIdTP(sheet);
+  if (tileId < 0) return false;
+  const clearAnchor = (cx: number, cy: number) => {
+    if (!st.inBounds(cx, cy)) return;
+    const i = st.idx(cx, cy);
+    if (!st.flags[i]) { st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0; }
+  };
+  if (sheet === 18) {
+    // Place2x1：门 = 两下格 SolidTile2 + 两本格空（cs:47388）
+    if (!st.inBounds(x + 1, y)) return false;
+    if (!solidTile2TP(st, x, y + 1) || !solidTile2TP(st, x + 1, y + 1)) return false;
+    if (st.flags[st.idx(x, y)] || st.flags[st.idx(x + 1, y)]) return false;
+    clearAnchor(x, y);
+    const fx = 36 * style;
+    st.setTileSilent(x, y, tileId, fx, 0);
+    st.setTileSilent(x + 1, y, tileId, fx + 18, 0);
+  } else if (sheet === 14) {
+    // Place3x2：3×2 全空 + 三列 SolidTile2（cs:52115-52151）
+    if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;
+    for (let i = x - 1; i <= x + 1; i++) {
+      for (let j = y - 1; j <= y; j++) {
+        if (st.flags[st.idx(i, j)]) return false;
+      }
+      if (!solidTile2TP(st, i, y + 1)) return false;
+    }
+    clearAnchor(x, y);
+    const bx = 54 * style;
+    for (let i = 0; i < 3; i++) {
+      st.setTileSilent(x - 1 + i, y - 1, tileId, bx + i * 18, 0);
+      st.setTileSilent(x - 1 + i, y, tileId, bx + i * 18, 18);
+    }
+  } else {
+    // Place1x2（15）：门 = SolidTile2(x,y+1) && (x,y-1) 空（cs:46685）
+    if (!st.inBounds(x, y - 1)) return false;
+    if (!solidTile2TP(st, x, y + 1) || st.flags[st.idx(x, y - 1)]) return false;
+    clearAnchor(x, y);
+    const by = style * 40;
+    st.setTileSilent(x, y - 1, tileId, 0, by);
+    st.setTileSilent(x, y, tileId, 0, by + 18);
+  }
+  genSquareTileFrame(st, rng, x, y);
+  if (st.flags[st.idx(x, y)]) genSquareTileFrame(st, rng, x, y);
+  return true;
+}
+
+function sheetToIdTP(sheet: number): number {
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (SHEET_OF_TP[i] === sheet) return i;
+  }
+  return -1;
+}
+
+/** PlaceTile(240, style)（神庙墙挂饰，cs:59962）→ Place3x3Wall（cs:44281）：
+ *  3×3 以采样点为中心 (x-1..x+1)×(y-1..y+1)；门 = 九格全 inactive 且 wall≠0；
+ *  帧 = (style%36)*54 + 18*col / floor(style/36)*54 + 18*row；体尾无 SquareTileFrame
+ *  （PlaceTile 尾一次）。返回 = PlaceTile 结果（锚格 active）。 */
+function placeWallHangingTemple(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   const HANGING = TILE_BY_KEY['v_240_wall_hangings_3x3'];
   if (HANGING === undefined) return false;
-  for (let dx = 0; dx < 3; dx++) {
-    for (let dy = 0; dy < 3; dy++) {
-      if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)]) return false;
+  const bx0 = x - 1, by0 = y - 1;
+  for (let i = bx0; i < bx0 + 3; i++) {
+    for (let j = by0; j < by0 + 3; j++) {
+      if (!st.inBounds(i, j)) return false;
+      const k = st.idx(i, j);
+      if (st.flags[k] || st.wall[k] === 0) return false;
     }
   }
-  const bx = (style % 36) * 54;
-  const bys = Math.floor(style / 36) * 54;
-  for (let dx = 0; dx < 3; dx++) {
-    for (let dy = 0; dy < 3; dy++) {
-      st.setTileSilent(x + dx, y + dy, HANGING, bx + dx * 18, bys + dy * 18);
+  // PlaceTile 前奏 Clear 锚格（cs:59499-59501）
+  clearAnchorTP(st, x, y);
+  let sty = style;
+  let num3 = 0;
+  while (sty > 35) { num3++; sty -= 36; }
+  const bx = sty * 54;
+  const by = num3 * 54;
+  for (let i = bx0; i < bx0 + 3; i++) {
+    for (let j = by0; j < by0 + 3; j++) {
+      const k = st.idx(i, j);
+      st.type[k] = HANGING; st.flags[k] = 1;
+      st.frameX[k] = bx + 18 * (i - bx0);
+      st.frameY[k] = by + 18 * (j - by0);
     }
   }
+  if (st.flags[st.idx(x, y)]) genSquareTileFrame(st, rng, x, y);
+  return st.flags[st.idx(x, y)] === 1;
+}
+
+function clearAnchorTP(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) { st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0; }
+}
+
+/** PlaceTile(135, style)（mayanTrap 压板，cs:60154）→ Place1x1（cs:45194）+
+ *  SquareTileFrame×2。门 = InWorld(x,y,2) && !active && SolidTile2(x,y+1) &&
+ *  !Boulders[type(y+1)]；写 active/type/frameY=style*18（frameX 前奏 Clear 归 0）。 */
+function placePlateTP(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
+  const PLATE = TILE_BY_KEY['v_135_pressure_plates']!;
+  if (x < 2 || y < 2 || x > st.w - 3 || y > st.h - 3) return;
+  if (st.flags[st.idx(x, y)]) return;
+  if (!solidTile2TP(st, x, y + 1)) return;
+  if (BOULDERS_TP.has(sheetOfTP(st.type[st.idx(x, y + 1)]!))) return;
+  clearAnchorTP(st, x, y);
+  st.setTileSilent(x, y, PLATE, 0, style * 18);
+  genSquareTileFrame(st, rng, x, y);
+  if (st.flags[st.idx(x, y)]) genSquareTileFrame(st, rng, x, y);
+}
+
+/** PlaceTile(137, style)（cs:59774 else-if）：active+type+frameY=18*style。
+ *  ★forced 前奏：目标格 active 则**无 Clear**——frameX/slope/half 保留旧值
+ *  （纵向天花板/横向上延陷阱正是踩在活砖上）；inactive 则 Clear 后 frameX=0。 */
+function placeTrap137TP(st: TileStore, x: number, y: number, style: number): void {
+  if (!st.inBounds(x, y)) return;
+  const TRAP = TILE_BY_KEY['v_137_traps']!;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) {
+    st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0; st.paint[i] = 0;
+  }
+  st.type[i] = TRAP; st.flags[i] = 1;
+  st.frameY[i] = style * 18;
+}
+
+/** 玛雅陷阱（cs:8314-8644）1:1：落点下扫实心（SolidOrSlopedTile）→ 九格净空门 →
+ *  横向（压板居中+两端墙飞镖+上延叠陷+KillTile 锚）或纵向（天花板火焰陷+两侧
+ *  追加+无 KillTile）→ AddWireFromPointToPoint 三色导线。 */
+function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number): boolean {
+  const wireBit = (n: number) => n === 0 ? TileStore.WIRE_RED : n === 1 ? TileStore.WIRE_BLUE : TileStore.WIRE_GREEN;
+  const nactive = (x: number, y: number) => {
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    return st.flags[i] !== 0 && ((st.wire[i] >>> 5) & 1) === 0;
+  };
+  const sheetAt = (x: number, y: number) => (st.inBounds(x, y) ? sheetOfTP(st.type[st.idx(x, y)]!) : -1);
+
+  // cs:8318：num2 = 1；Next(3)==0 → 0（横向）
+  let num2 = 1;
+  if (rng.nextInt(3) === 0) num2 = 0;
+  // cs:8325-8333：下扫 SolidOrSlopedTile，地狱界 num3 >= maxTilesY-300 拒
+  let num3 = y2;
+  while (!solidOrSlopedTP(st, x2, num3)) {
+    num3++;
+    if (num3 >= st.h - 300) return false;
+  }
+  // cs:8335：落点是 232 木刺 / 10 门 → 拒（★曾误查 226 蜥蜴砖——落点砖是合法地面）
+  const landSheet = sheetAt(x2, num3);
+  if (landSheet === 232 || landSheet === 10) return false;
+  num3--;
+  // cs:8342：落点上一格岩浆拒
+  {
+    const i = st.idx(x2, num3);
+    if (st.liquid[i] > 0 && st.liquidType[i] === 2) return false;
+  }
+  // cs:8346-8347：num2==-1 分支死代码（num2∈{0,1}），两掷不可达——不镜像
+  // cs:8348-8350：九格 nactive 净空门
+  if (nactive(x2, num3) || nactive(x2 - 1, num3) || nactive(x2 + 1, num3) || nactive(x2, num3 - 1)
+    || nactive(x2 - 1, num3 - 1) || nactive(x2 + 1, num3 - 1) || nactive(x2, num3 - 2)
+    || nactive(x2 - 1, num3 - 2) || nactive(x2 + 1, num3 - 2)) return false;
+  // cs:8352-8360：落点下一格 10/48/232 拒（原版三条独立 if）
+  const belowSheet = sheetAt(x2, num3 + 1);
+  if (belowSheet === 10) return false;
+  if (belowSheet === 48) return false;
+  if (belowSheet === 232) return false;
+
+  if (num2 === 0) {
+    // ---- 横向（cs:8363-8558）----
+    let num11 = x2;
+    let num12 = num3 - rng.nextInt(3);                     // cs:8367
+    while (inWorld5TP(st, num11, num12) && !solidOrSlopedTP(st, num11, num12)) num11--;
+    const num13 = num11;
+    for (num11 = x2; inWorld5TP(st, num11, num12) && !solidOrSlopedTP(st, num11, num12); num11++) { /* walk */ }
+    const num14 = num11;
+    const num15 = x2 - num13;
+    const num16 = num14 - x2;
+    let flag = num15 > 5 && num15 < 50;                    // cs:8383
+    let flag2 = num16 > 5 && num16 < 50;
+    if (flag && !solidOrSlopedTP(st, num13, num12 + 1)) flag = false;
+    if (flag2 && !solidOrSlopedTP(st, num14, num12 + 1)) flag2 = false;
+    // cs:8397-8412：锚侧 10/48 拒（本体格与下一格）
+    if (flag && (sheetAt(num13, num12) === 10 || sheetAt(num13, num12) === 48
+      || sheetAt(num13, num12 + 1) === 10 || sheetAt(num13, num12 + 1) === 48)) flag = false;
+    if (flag2 && (sheetAt(num14, num12) === 10 || sheetAt(num14, num12) === 48
+      || sheetAt(num14, num12 + 1) === 10 || sheetAt(num14, num12 + 1) === 48)) flag2 = false;
+    let num18 = 0;
+    if (flag && flag2) {
+      num18 = 1; num11 = num13;
+      if (rng.nextInt(2) === 0) { num11 = num14; num18 = -1; }
+    } else if (flag2) {
+      num11 = num14; num18 = -1;
+    } else {
+      if (!flag) return false;
+      num11 = num13; num18 = 1;
+    }
+    // cs:8433-8454：锚格墙/类型门（190/135/137/232/237/10）
+    if (st.wall[st.idx(num11, num12)] !== 87) return false;
+    const aSheet = sheetAt(num11, num12);
+    if (aSheet === 190 || aSheet === 135 || aSheet === 137 || aSheet === 232 || aSheet === 237 || aSheet === 10) return false;
+    // cs:8456-8459：地面非 AllowBottomSlope → SlopeTile 压平（cs:81507）
+    if (!solidAllowBottomTP(st, x2, num3 + 1)) slopeTileTP(st, x2, num3 + 1);
+    if (!canGenPlateTP(st, x2, num3)) return false;        // cs:8460
+    placePlateTP(st, rng, x2, num3, 6);                    // cs:8462 PlaceTile(135,style6)
+    killTileWhole(st, num11, num12, rng);                  // cs:8463 KillTile(锚)
+    // cs:8464-8474：num19 = Next(3) 恒掷，再被既有线色覆写（★曾"无线才掷"漏掷）
+    let num19 = rng.nextInt(3);
+    {
+      const i = st.idx(x2, num3);
+      if (st.wire[i] & TileStore.WIRE_RED) num19 = 0;
+      if (st.wire[i] & TileStore.WIRE_BLUE) num19 = 1;
+      if (st.wire[i] & TileStore.WIRE_GREEN) num19 = 2;
+    }
+    const num20 = Math.abs(num11 - x2);
+    let style2 = 1;                                        // cs:8475
+    if (num20 < 10 && rng.nextInt(3) !== 0) style2 = 2;
+    placeTrap137TP(st, num11, num12, style2);              // cs:8481
+    if (num18 === 1) st.frameX[st.idx(num11, num12)] += 18;
+    // cs:8487-8510：向上叠陷（Next(5) 步数；三重门 SolidTile×2+SolidOrSloped）
+    let num21 = rng.nextInt(5);
+    let num22 = num12;
+    while (num21 > 0) {
+      num21--; num22--;
+      if (!solidTileTP(st, num11, num22) || !solidTileTP(st, num11 - num18, num22)
+        || solidOrSlopedTP(st, num11 + num18, num22)) break;
+      placeTrap137TP(st, num11, num22, style2);
+      if (num18 === 1) st.frameX[st.idx(num11, num22)] += 18;
+      st.wire[st.idx(num11, num22)] |= wireBit(num19);
+    }
+    addWireTP(st, x2, num3, num11, num12, num19);          // cs:8536
+    return true;
+  }
+  // ---- 纵向（cs:8559-8641）----
+  let num4 = x2;
+  let num5 = num3;
+  while (!solidOrSlopedTP(st, num4, num5)) {
+    num5--;
+    if (num5 < gs.worldSurface) return false;              // cs:8564（★曾误用 rockLevel）
+  }
+  const num6 = Math.abs(num5 - num3);
+  if (num6 < 3) return false;                              // cs:8570
+  let num7 = rng.nextInt(3);                               // cs:8572 恒掷
+  {
+    const i = st.idx(x2, num3);
+    if (st.wire[i] & TileStore.WIRE_RED) num7 = 0;
+    if (st.wire[i] & TileStore.WIRE_BLUE) num7 = 1;
+    if (st.wire[i] & TileStore.WIRE_GREEN) num7 = 2;
+  }
+  let style = 3;                                           // cs:8581
+  if (num6 < 16 && rng.nextInt(3) !== 0) style = 4;
+  // cs:8585-8603：天花板格类型门（135/137/232/237/10）+ 墙 87
+  const cSheet = sheetAt(num4, num5);
+  if (cSheet === 135 || cSheet === 137 || cSheet === 232 || cSheet === 237 || cSheet === 10) return false;
+  if (st.wall[st.idx(num4, num5)] !== 87) return false;
+  if (!solidAllowBottomTP(st, x2, num3 + 1)) slopeTileTP(st, x2, num3 + 1);
+  if (!canGenPlateTP(st, x2, num3)) return false;
+  placePlateTP(st, rng, x2, num3, 6);
+  placeTrap137TP(st, num4, num5, style);                   // cs:8619（无 KillTile——活砖直替）
+  for (let i = 0; i < 2; i++) {                            // cs:8621-8633 两侧追加
+    let num9 = num4;
+    const num10 = i === 1 ? 1 : -1;
+    let steps = rng.int(1, 4);                             // Next(1,5)
+    while (steps > 0) {
+      steps--; num9 += num10;
+      if (!solidTileTP(st, num9, num5 - 1) || solidOrSlopedTP(st, num9, num5 + 1)) break;
+      placeTrap137TP(st, num9, num5, style);
+      st.wire[st.idx(num9, num5)] |= wireBit(num7);
+    }
+  }
+  addWireTP(st, x2, num3, num4, num5, num7);               // cs:8640
   return true;
 }
 
-/** 玛雅陷阱(WorldGen.cs:2945-3235):压板 135(style6)→ 陷阱 137,路径铺三色随机导线 */
-function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number): boolean {
-  const PLATE = TILE_BY_KEY['v_135_pressure_plates']!;
-  const TRAP = TILE_BY_KEY['v_137_traps']!;
-  const solid = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
-  const wireBit = (n: number) => n === 0 ? TileStore.WIRE_RED : n === 1 ? TileStore.WIRE_BLUE : TileStore.WIRE_GREEN;
-  const setW = (x: number, y: number, n: number) => { st.wire[st.idx(x, y)] |= wireBit(n); };
-  const getW = (x: number, y: number) => {
-    const b = st.wire[st.idx(x, y)];
-    if (b & TileStore.WIRE_RED) return 0;
-    if (b & TileStore.WIRE_BLUE) return 1;
-    if (b & TileStore.WIRE_GREEN) return 2;
-    return -1;
-  };
-  const pickColor = (x: number, y: number) => {
-    const ex = getW(x, y);
-    return ex >= 0 ? ex : rng.int(0, 2);
-  };
-  // num1:1/3 概率横向(L2947-2949)
-  const kind = rng.int(0, 2) === 0 ? 0 : 1;
-  // 落点向下找实心(L2950-2962)
-  const px = x2;
-  let fy = y2;
-  while (!solid(px, fy)) {
-    fy++;
-    if (fy >= st.h - 300) return false;
+/** AddWireFromPointToPoint（cs:58081）：从 (x2,y2)=陷阱端走向 (x,y)=压板端，
+ *  每迭代三布（起点/移 x 后/移 y 后），含两端点全覆盖 */
+function addWireTP(st: TileStore, x: number, y: number, x2: number, y2: number, color: number): void {
+  const bit = color === 0 ? TileStore.WIRE_RED : color === 1 ? TileStore.WIRE_BLUE : TileStore.WIRE_GREEN;
+  while (x2 !== x || y2 !== y) {
+    st.wire[st.idx(x2, y2)] |= bit;
+    if (x2 > x) x2--;
+    else if (x2 < x) x2++;
+    st.wire[st.idx(x2, y2)] |= bit;
+    if (y2 > y) y2--;
+    else if (y2 < y) y2++;
+    st.wire[st.idx(x2, y2)] |= bit;
   }
-  const sh = TILE_BY_KEY['v_226_lihzahrd_brick']!;
-  if (st.type[st.idx(px, fy)] === sh || TILE_DEFS[st.type[st.idx(px, fy)]]?.vanilla?.sheet === 10) return false;
-  const j = fy - 1;
-  if (st.liquid[st.idx(px, j)] > 0 && st.liquidType[st.idx(px, j)] === 2) return false;
-  // 周围须净空(L2967)
-  const nactive = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
-  if (nactive(px, j) || nactive(px - 1, j) || nactive(px + 1, j) || nactive(px, j - 1)
-    || nactive(px - 1, j - 1) || nactive(px + 1, j - 1) || nactive(px, j - 2)
-    || nactive(px - 1, j - 2) || nactive(px + 1, j - 2)) return false;
-
-  if (kind === 0) {
-    // 横向:同高走廊两端墙装飞镖陷阱,压板居中(L2971-3119)
-    const ty = j - rng.int(0, 2);
-    let lx = px;
-    while (!solid(lx, ty)) lx--;
-    let rx = px;
-    while (!solid(rx, ty)) rx++;
-    let flagL = (px - lx) > 5 && (px - lx) < 50 && solid(lx, ty + 1);
-    let flagR = (rx - px) > 5 && (rx - px) < 50 && solid(rx, ty + 1);
-    if (!flagL && !flagR) return false;
-    let dir: number, tx: number;
-    if (flagL && flagR) {
-      dir = 1; tx = lx;
-      if (rng.int(0, 1) === 0) { tx = rx; dir = -1; }
-    } else if (flagR) { tx = rx; dir = -1; }
-    else { tx = lx; dir = 1; }
-    if (st.type[st.idx(tx, ty)] === PLATE || st.type[st.idx(tx, ty)] === TRAP) return false;
-    if (st.wall[st.idx(tx, ty)] !== 87) return false;
-    // 压板 + 陷阱(L3013-3051)。style:近距(<10)2/3 概率超级飞镖,否则飞镖
-    const style1 = Math.abs(tx - px) < 10 && rng.int(0, 2) !== 0 ? 2 : 1;
-    st.setTileSilent(px, j, PLATE, 0, 6 * 18);
-    st.setTileSilent(tx, ty, TRAP, dir === 1 ? 18 : 0, style1 * 18);
-    // L 形铺线:压板 → 陷阱(L3068-3118,含两端点)
-    const num5 = pickColor(px, j);
-    let wx = px, wy = j;
-    while (wx !== tx || wy !== ty) {
-      setW(wx, wy, num5);
-      if (wx > tx) wx--;
-      else if (wx < tx) wx++;
-      setW(wx, wy, num5);
-      if (wy > ty) wy--;
-      else if (wy < ty) wy++;
-      setW(wx, wy, num5);
-    }
-    setW(tx, ty, num5);
-    return true;
-  }
-  // 纵向:头顶找天花板,天花板装下向火焰陷阱,两侧墙追加同排陷阱(L3120-3235)
-  let uy = j;
-  while (!solid(px, uy)) {
-    uy--;
-    if (uy < gs.rockLevel) return false;
-  }
-  const dist = Math.abs(uy - j);
-  if (dist < 3) return false;
-  if (st.type[st.idx(px, uy)] === PLATE || st.type[st.idx(px, uy)] === TRAP
-    || TILE_DEFS[st.type[st.idx(px, uy)]]?.vanilla?.sheet === 10 || st.wall[st.idx(px, uy)] !== 87) return false;
-  const num9 = pickColor(px, j);
-  const style2 = dist < 16 && rng.int(0, 2) !== 0 ? 4 : 3;
-  st.setTileSilent(px, j, PLATE, 0, 6 * 18);
-  st.setTileSilent(px, uy, TRAP, 0, style2 * 18);
-  // 两侧墙追加陷阱(L3146-3178)
-  for (let side = 0; side < 2; side++) {
-    let steps = rng.int(1, 4);
-    let ix = px;
-    const d = side === 1 ? 1 : -1;
-    while (steps > 0) {
-      steps--;
-      ix += d;
-      if (solid(ix, uy - 1) && !solid(ix, uy + 1)) {
-        st.setTileSilent(ix, uy, TRAP, d === 1 ? 18 : 0, style2 * 18);
-        st.wire[st.idx(ix, uy)] |= wireBit(num9);
-      } else break;
-    }
-  }
-  // 竖向铺线:压板 → 天花板陷阱(L3179-3235)
-  {
-    let wx = px, wy = j;
-    while (wx !== px || wy !== uy) {
-      setW(wx, wy, num9);
-      if (wy > uy) wy--;
-      else if (wy < uy) wy++;
-      setW(wx, wy, num9);
-    }
-    setW(px, uy, num9);
-  }
-  return true;
 }

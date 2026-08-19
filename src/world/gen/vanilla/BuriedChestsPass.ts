@@ -321,6 +321,11 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   //   掷骰序列整体偏移，金字塔出口隧道相位漂移，dump 对拍实锤）
   const isPyrMain = mainVanillaId === 848 || mainVanillaId === 857 || mainVanillaId === 934;
   const isSurface = isPyrMain || (gy < gs.worldSurface + 25 && !!(flags.wooden || flags.sky));
+  // ★cs:36839 第二档门 = num7 < maxTilesY-250（地狱档为 else）——曾用 rockLevel
+  //   判金档：蜘蛛巢深带 y∈[h-250,h-205) 误走地狱档（#63 波前分叉根因之一）
+  // ★四档链（IL 实证 +0x1419/+0x1DFB：反编译把第二档门折进 flag23 remix 段致漏读）：
+  //   地表(flag23&&wooden/sky) → 金档(y<rockLayer,非 remix) → 洞穴档(y<h-250,
+  //   cs:36839) → 地狱档。UUUU 批经 /tmp/uuuu-app 织入探针逐掷对拍定谳。
   const isGold = gy < gs.rockLevel;
 
   if (isSurface) {
@@ -355,13 +360,13 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       push(4345, n);
     }
     if (rng.int(0, 2) === 0) push(168, rng.int(3, 5));     // 1/3 手雷
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.copper : bars.iron, rng.int(3, 10));
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.copper : bars.iron, rng.nextInt(8) + 3);   // cs:36439 Next(8)+3
     if (rng.int(0, 1) === 0) push(965, rng.int(50, 100));  // 绳
-    if (rng.int(0, 2) !== 0) push(rng.int(0, 1) === 0 ? 40 : 42, rng.int(25, 50)); // 木箭/手里剑
-    if (rng.int(0, 1) === 0) push(28, rng.int(3, 5));      // 弱效治疗药水
+    if (rng.int(0, 2) !== 0) push(rng.int(0, 1) === 0 ? 40 : 42, rng.nextInt(26) + 25); // 木箭/手里剑 cs:36461 Next(26)+25
+    if (rng.int(0, 1) === 0) push(28, rng.nextInt(3) + 3);      // 弱效治疗药水 cs:36475 Next(3)+3
     if (rng.int(0, 2) !== 0) push(2350, rng.int(3, 5));    // 回城药水
     if (rng.int(0, 2) > 0) push(pick([292, 298, 299, 290, 2322, 2325]), rng.int(1, 2));
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 31, rng.int(10, 20));  // 火把/瓶子
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 31, rng.nextInt(11) + 10);  // 火把/瓶子 cs:36520 Next(11)+10
     if (rng.int(0, 1) === 0) push(72, rng.int(10, 29));    // 银币
     if (rng.int(0, 1) === 0) push(9, rng.int(50, 99));     // 木材
   } else if (isGold) {
@@ -403,18 +408,18 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       push(m);
       prefixRolls(rng, m);   // cs:36563+：金箱主件 SetDefaults+Prefix(-1)（50 魔镜 0 掷）
       if (rng.int(0, 19) === 0) push(997);                    // 1/20 提炼机
-      else if (rng.int(0, 19) === 0) { push(930); push(931, rng.int(25, 50)); } // 1/20 信号枪+闪光弹
+      else if (rng.int(0, 19) === 0) { push(930); push(931, rng.nextInt(26) + 25); } // 1/20 信号枪+闪光弹 cs:36685 Next(26)+25
     }
     if (flags.desert) { if (rng.int(0, 2) === 0) push(4423, rng.int(10, 19)); }
     else if (rng.int(0, 2) === 0) push(166, rng.int(10, 19)); // 炸弹
     if (rng.int(0, 4) === 0) push(52);                        // 1/5 天使雕像
     if (rng.int(0, 2) === 0) push(965, rng.int(50, 100));
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.iron : bars.silver, rng.int(5, 14));
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 40 : 42, rng.int(25, 49));
-    if (rng.int(0, 1) === 0) push(28, rng.int(3, 5));
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.iron : bars.silver, rng.nextInt(10) + 5);   // cs:36734 Next(10)+5
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 40 : 42, rng.nextInt(25) + 25);   // cs:36749 Next(25)+25
+    if (rng.int(0, 1) === 0) push(28, rng.nextInt(3) + 3);   // cs:36763 Next(3)+3
     if (rng.int(0, 2) > 0) push(pick([289, 298, 299, 290, 303, 291, 304, 2322, 2329]), rng.int(1, 2));
     if (rng.int(0, 2) !== 0) push(2350, rng.int(2, 4));
-    if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.int(10, 20)); // 冰火把/火把 cs:36820 Next(11)+10=[10,20]（曾 10,19 漏 20）
+    if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.nextInt(11) + 10); // 冰火把/火把 cs:36820 Next(11)+10（曾 10,19 漏 20;UUUU 改单参+偏移真形）
     if (rng.int(0, 1) === 0) push(72, rng.int(50, 89));
   } else if (gy <= ctx.worldH - 250) {
     // ===== 洞穴箱(rockLevel ≤ gy ≤ h-250,cs:36789-37163)=====
@@ -464,16 +469,16 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       if (rng.int(0, 19) === 0 && gy > gs.lavaLine) { push(906); prefixRolls(rng, 906); }
       else if (rng.int(0, 14) === 0) push(997);
       else {
-        if (num25 === 6) { push(930); push(931, rng.int(25, 50)); }
+        if (num25 === 6) { push(930); push(931, rng.nextInt(26) + 25); }   // cs:36977 Next(26)+25
         else { const m = [49, 50, 53, 54, 5011, 975][num25]!; push(m); prefixRolls(rng, m); }
       }
     }
     if (rng.int(0, 4) === 0) push(flags.ice ? 5120 : 43);     // 1/5(冰箱特殊项/可疑眼球)
     if (rng.int(0, 2) === 0) push(167);                       // 1/3 炸药
-    if (rng.int(0, 3) === 0) push(51, rng.int(25, 50));       // 1/4 小丑箭
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.gold : bars.silver, rng.int(3, 10));
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 41 : 279, rng.int(25, 50)); // 烈焰箭/飞刀
-    if (rng.int(0, 1) === 0) push(188, rng.int(3, 5));        // 治疗药水
+    if (rng.int(0, 3) === 0) push(51, rng.nextInt(26) + 25);       // 1/4 小丑箭 cs:37045 Next(26)+25
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.gold : bars.silver, rng.nextInt(8) + 3);   // cs:37051 Next(8)+3
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 41 : 279, rng.nextInt(26) + 25); // 烈焰箭/飞刀 cs:37066 Next(26)+25
+    if (rng.int(0, 1) === 0) push(188, rng.nextInt(3) + 3);        // 治疗药水 cs:37080 Next(3)+3
     if (rng.int(0, 2) > 0) push(pick([296, 295, 299, 302, 303, 305]), rng.int(1, 2));
     if (rng.int(0, 2) > 1) push(pick([301, 297, 304, 2329, 2351, 2326]), rng.int(1, 2));
     if (rng.int(0, 1) === 0) push(2350, rng.int(2, 4));
@@ -484,12 +489,15 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (mainVanillaId > 0) {
       push(mainVanillaId);
       prefixRolls(rng, mainVanillaId);   // cs:37167 SetDefaults+Prefix(-1)
-      // cs:37173-37177：5010 宝藏磁铁命中也 Prefix(-1)（acc 可前缀化耗掷——
-      //   x86 PFX 探针实证 #458 (1318,1003) 双 PFX；4443/4737/4551 无 Prefix）
-      if (rng.int(0, 4) === 0) { push(5010); prefixRolls(rng, 5010); }
-      if (rng.int(0, 9) === 0) push(4443);
-      if (rng.int(0, 9) === 0) push(4737);
-      if (rng.int(0, 9) === 0) push(4551);
+      // ★cs:37199-37217 四门全带 `flag8 &&`（真·地狱箱旗）——深层非地狱箱
+      //   （y≥h-250 地狱档但未过 cs:36158 hell 门,如 y∈[h-250,h-205) 的蜘蛛巢
+      //   蜘蛛箱）四掷全短路。曾漏旗 → 每箱多掷 4（a5/a10×3）→ #63 波前分叉
+      //   @span 138846 定罪。5010 命中也 Prefix(-1)（x86 PFX 探针实证）；
+      //   4443/4737/4551 无 Prefix。
+      if (flags.hell && rng.int(0, 4) === 0) { push(5010); prefixRolls(rng, 5010); }
+      if (flags.hell && rng.int(0, 9) === 0) push(4443);
+      if (flags.hell && rng.int(0, 9) === 0) push(4737);
+      if (flags.hell && rng.int(0, 9) === 0) push(4551);
     } else {
       // cs:37220-37242：四选一各配 Prefix(-1)（49/53/54 acc 耗掷；50 魔镜 0 掷）
       // ——★曾缺（尾批 2-C：(179,950) 实证 vanilla +2 掷 + 门级联 9）
@@ -498,13 +506,13 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       prefixRolls(rng, m);
     }
     if (rng.int(0, 2) === 0) push(167);                       // 1/3 炸药
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 117 : bars.gold, rng.int(15, 29)); // 陨铁锭/金锭
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 117 : bars.gold, rng.nextInt(15) + 15); // 陨铁锭/金锭 cs:37254 Next(15)+15
     if (rng.int(0, 1) === 0) {
       // 地狱火箭矢 或 银弹(银矿为钨时换钨弹 4915,cs:37242)
       const silverIsTungsten = (TILE_DEFS[gs.oreTiers.silver]?.key ?? '').includes('tungsten');
-      push(rng.int(0, 1) === 0 ? 265 : (silverIsTungsten ? 4915 : 278), rng.int(50, 74));
+      push(rng.int(0, 1) === 0 ? 265 : (silverIsTungsten ? 4915 : 278), rng.nextInt(25) + 50);   // cs:37269 Next(25)+50
     }
-    if (rng.int(0, 1) === 0) push(227, rng.int(15, 20));      // 再生药水 cs:37290 Next(6)+15=[15,20]（曾 15,29）
+    if (rng.int(0, 1) === 0) push(227, rng.nextInt(6) + 15);      // 再生药水 cs:37290 Next(6)+15（曾 15,29;UUUU 改单参+偏移真形）
     if (rng.int(0, 3) > 0) push(pick([296, 295, 293, 288, 294, 297, 304, 2323]), rng.int(1, 2));
     // ★cs:37334 门是 Next(3)>0（非洞穴分支的 >1——曾误抄 >1 致 2/3 概率漏整组掷，
     //   地狱尾 3-4 掷残余族：(1318,1003) vanilla ABX k=2094 vs JS 2091 实锤）
@@ -516,7 +524,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         push(rng.int(0, 1) === 0 ? 2350 : 4870, stack27); // 回城/回归药水
       }
     }
-    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 282, rng.int(15, 29));    // 火把/荧光棒
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 282, rng.nextInt(15) + 15);    // 火把/荧光棒 cs:37390 Next(15)+15
     if (rng.int(0, 1) === 0) push(73, rng.int(2, 4));         // 金币
   }
 
@@ -686,23 +694,33 @@ function placeBuriedChestInner(
   } else if (opts.loot !== undefined) {
     mainId = opts.loot;
   }
-  if (style === undefined) {
-    if (gy > st.h - 205) {
-      // 地狱箱:style 4 + 地狱武器序(cs:36158-36171)。★同门置 flag13（cs:36167 反编译
-      //   命名——消费点 = 尾段 2195 蜥蜴炉恒给 + 日耀碑 1/5 门，cs:37428/37479）
-      style = 4;
-      flags.hell = true;
-      if (!mainId) mainId = nextHellItem(gs);
-    } else {
-      style = gy >= gs.worldSurface + 25 ? 1 : 0;
-      if (style === 0) flags.wooden = true;
-    }
+  // ★num9 初始化（cs:36021-36027）：0 → flag15(y≥ws+25)→1 → chestStyle≥0 覆写。
+  //   ★反编译陷阱（UUUU 实证）：紧随其后的 num11 style 变体门（反编译平铺成
+  //   无条件块，cs:36028-36056）在**真二进制里位于 errorWorld 分支内**——IL
+  //   +0349 `brfalse.s ->3CA` 直跳 num11 块之后，普通种子恒跳过（织入探针实测
+  //   蜘蛛箱 AddBuriedChest 首掷 = loot a5 非 num11 的 a3）。勿按反编译源移植！
+  const argStyle = opts.style;
+  {
+    let num9 = 0;
+    if (gy >= gs.worldSurface + 25) num9 = 1;
+    if (argStyle !== undefined) num9 = argStyle;
+    style = num9;
+    // wooden flag（cs:36060-36064：tile21 && (chestStyle==0 || (chestStyle==-1 && num9==0))）
+    if (tile === CHEST && (argStyle === 0 || (argStyle === undefined && num9 === 0))) flags.wooden = true;
+  }
+  // 地狱门（cs:36158-36171）：tile21 && (style4 显式 || 深层无主件) → num9=4 +
+  //   地狱武器序。★同门置 flag13（cs:36167 反编译命名——消费点 = 尾段 2195
+  //   蜥蜴炉恒给 + 日耀碑 1/5 门，cs:37428/37479）
+  if (tile === CHEST && (argStyle === 4 || (gy > st.h - 205 && mainId === 0))) {
+    style = 4;
+    flags.hell = true;
+    if (!mainId) mainId = nextHellItem(gs);
   }
   // ---- 冰箱门（cs:36107-36130 1:1）：三析取——(tile21&&style11) ||
   // (tile467&&style24) || (无主件 && 位置 && 脚下冰系)。★原版显式传 style 11
   // 也进本池（HouseBuilder 冰屋正是此路径）——旧实现 style===undefined 单门漏此
   const tBelow = st.type[st.idx(i, gy)];
-  if ((tile === CHEST && style === 11) || (tile === CHEST2 && style === 24)
+  if ((tile === CHEST && argStyle === 11) || (tile === CHEST2 && argStyle === 24)
     || (!mainId && gy >= gs.worldSurface + 25 && gy <= st.h - 205
       && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE))) {
     flags.ice = true;
@@ -732,7 +750,7 @@ function placeBuriedChestInner(
       }
       return false;
     })();
-  if ((tile === CHEST2 && style === 10) || inUd) {
+  if ((tile === CHEST2 && argStyle === 10) || inUd) {
     tile = CHEST2;
     style = 10;
     flags.desert = true;
@@ -964,21 +982,25 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
         default: main = 187; num4 = 0; break;
       }
     }
-    // 第一趟（cs:17424-17431）：y 首掷 [1, h-200)，重掷 [50, h-200)
+    // 两趟（cs:17424-17453）：趟1 y 首掷 [1, h-200)、重掷 [50, h-200)；
+    // 趟2 首掷与重掷同域 [⌊worldSurface⌋, h-200)（cs:17440-17445 两处表达式相同——
+    // TTTT 修：重掷域曾两趟都写 [50, h-200)，趟2 与原版差 287 起点掷域错位 →
+    // 18 箱中 13 箱落点漂移 + 掷流滚雪球，#62 T 对拍 104 格主根因）
     for (let loop = 0; loop < 2; loop++) {
       const yLo = loop === 0 ? 1 : Math.floor(gs.worldSurface);
+      const yReLo = loop === 0 ? 50 : Math.floor(gs.worldSurface);
       let ok = false;
       for (let tries = 0; tries < 10000 && !ok; tries++) {
         let x = rng.int(50, w - 51);                                    // Next(50, w-50)
         let y = rng.int(yLo, st.h - 201);                               // Next(?, h-200)
-        // cs:17425-17428：液体不足或非水 → 重掷（重掷 y 域换 [50, h-200)）。
+        // cs:17425-17428/17441-17444：液体不足或非水 → 重掷。
         // liquidType 修 2026-08-12：本仓库 +1 编码(水=LIQUID_TYPE.WATER=1)——照抄原版
         // !==0(原版 Water=0) 会让水格恒不命中,拒绝采样死循环(世界生成卡"生物群系"根因)。
         // 守卫:100 万掷未命中 → 大声报错降级继续(防同类移植错位再变静默死循环)
         let __guard = 0;
         while (st.liquid[st.idx(x, y)] < 250 || st.liquidType[st.idx(x, y)] !== LIQUID_TYPE.WATER) {
           x = rng.int(50, w - 51);
-          y = rng.int(50, st.h - 201);
+          y = rng.int(yReLo, st.h - 201);
           if (++__guard >= 1_000_000) {
             console.error('[worldgen] runWaterChestsPass 拒绝采样 100 万掷未命中水中格——疑似 liquidType/liquid 编码错位或本世界无合格水体,降级跳过本箱');
             break;

@@ -35,8 +35,10 @@ import { LIQUID_TYPE } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { flipGenSolid, genSolidType } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';   // SSSS：④ KillTile 尾部级联
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -70,6 +72,25 @@ for (let q = 0; q < TILE_DEFS.length; q++) {
   const s = TILE_DEFS[q]?.vanilla?.sheet;
   if (typeof s === 'number') SHEET_OF[q] = s;
 }
+/** WallID.Sets.WallTypeToTerrainTileType（WallID.cs，CreateUshortSet(0, 成对索引值)）：
+ *  40→147 雪 / 71→161 冰 / 15→59 泥 / 86→225 蜂巢 / 3→25 黑檀 / 83→203 猩红 /
+ *  178→367 / 180→368，缺省 0（泥土） */
+const WALL2TERRAIN: Record<number, number> = {
+  40: 147, 71: 161, 15: 59, 86: 225, 3: 25, 83: 203, 178: 367, 180: 368,
+};
+/** JS 物品 id → 原版物品 id（⑦ 箱 style 反查 Chest.item[0] 用） */
+const VAN_ID_OF_JS = new Map<number, number>();
+for (const [vidStr, key] of Object.entries(VANILLA_ITEM_KEY_BY_ID)) {
+  const jsId = ITEM_BY_KEY[key];
+  if (jsId !== undefined && !VAN_ID_OF_JS.has(jsId)) VAN_ID_OF_JS.set(jsId, Number(vidStr));
+}
+/** Main.tileSolidTop（⑦ 26 祭坛下方补型门） */
+const SOLID_TOP_99 = new Set([14, 16, 18, 19, 87, 88, 101, 114, 134, 239, 275, 276, 277, 278, 279, 280, 281,
+  285, 286, 296, 297, 298, 299, 309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394,
+  405, 413, 414, 427, 469, 532, 533, 538, 542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600,
+  601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** TileID.Sets.Platforms（TileID.cs:243） */
+const PLATFORM_99 = new Set([19, 427, 435, 436, 437, 438, 439]);
 /** SaveSlopes[t] = tileSolid[t] ∪ NonSolidSaveSlopes（TileID.cs:425-429 静态构造）。
  *  ★IIII 批勘误（2026-08-18）：SaveSlopes 数组在 TileID 静态构造时**一次性**从
  *  Main.tileSolid 拷贝——之后生成期的一切 tileSolid 翻转（含本 pass 头的 379=false）
@@ -104,13 +125,28 @@ function solidTile(st: TileStore, x: number, y: number): boolean {
 }
 
 /** 生成期 KillTile(cs:63559,isGeneratingOrLoadingWorld → noItem=true):
- *  仅清活性/类型,保留液体(与 SurfaceDecorPasses.killTile 同口径;TileStore 无法表达
- *  原版 active(false) 留 type 的幽灵态,沿用全仓约定 type 一并清零) */
-function killTile(st: TileStore, x: number, y: number): void {
+ *  active(false)+half(false)+帧-1+漆清+type=0+inActive(false) → 尾部 SquareTileFrame(i,j)
+ *  （cs:63967）级联（cs:63953）。★SSSS：④ 水死族击杀曾只静默清格——缺级联导致
+ *  邻格装饰（仙人掌整列/藤/植物族 Check* 链）不被连带击杀 → 后续 ⑤ 滴头门的
+ *  SolidTile 锚判定错位（首分叉掷位 251397：(606,683) 门 vanilla 进块 JS 跳过）。
+ *  ★UUUU 尘掷勘误（span 流对拍首分叉 @343170 = kill(805,291)sh24 定罪）：
+ *  SSSS"水死族零掷"结论有漏——**24（草族，cs:67016 Next(2)!=0?17:14）与 27
+ *  （cs:67040 Next(2)!=0?19:3）每杀 10×Next(2)**（KillTile_GetTileDustAmount
+ *  默认 10 × MakeTileDust 每调 1 掷）。曾零掷 → 每杀漏 10 掷 → 掷流位移 →
+ *  ⑤ 滴头门全线错位（#99 滴头族 79 格残量的根因）。修后全 pass 掷流与 vanilla
+ *  2,059,985 掷逐条全同。水死族其余成员（3/20/73/201/80/110/529/530/590/595/
+ *  615/637）掷表确为零掷。58 地狱岩浆支（cs:63943）与 TruncatesWalls 族
+ *  （{54,328,459,748}∩水死族=∅）不可达，不移植。 */
+function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (!st.flags[i]) return;
+  const sh = SHEET_OF[st.type[i]!]!;
+  if (sh === 24 || sh === 27) {
+    for (let k = 0; k < 10; k++) rng.nextInt(2);   // 尘掷：24（草族）/27 → 10×Next(2)
+  }
   st.setTileSilent(x, y, 0);
+  genSquareTileFrame(st, rng, x, y);   // cs:63967 尾部级联（RRRR 帧杀引擎）
 }
 
 /** 按液体类型选滴头(cs:21370-21378/21386-21394:先 lava 再 honey;shimmer 被 !shimmer() 门排除) */
@@ -144,7 +180,10 @@ function canKillTile(st: TileStore, x: number, y: number): boolean {
   return true;
 }
 
-export function runTileCleanupPass(st: TileStore, rng: RNG, _gs: GenState): void {
+export function runTileCleanupPass(
+  st: TileStore, rng: RNG, gs: GenState,
+  chests?: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
+): void {
   // ★① pass 头 tileSolid 翻转（cs:21331 `Main.tileSolid[379] = false`）：泡泡块非实心
   //   ——原 solidTile/isSaveSlope 内的 BUBBLE 特判已并入 GenSolid（genSolidType）。
   //   pass 尾 ⑫ 还原 true（cs:21750,见函数尾）。
@@ -182,7 +221,7 @@ export function runTileCleanupPass(st: TileStore, rng: RNG, _gs: GenState): void
 
       // ④ 液体中的 SlowlyDiesInWater 方块清除(cs:21354-21357)
       if (st.flags[i] && st.liquid[i] > 0 && SLOWLY_DIES_IN_WATER.has(st.type[i])) {
-        killTile(st, k, l);
+        killTile(st, rng, k, l);
       }
 
       // ⑤ 滴水石笋(cs:21358-21435):空格+无液+上方实心才进
@@ -249,8 +288,171 @@ export function runTileCleanupPass(st: TileStore, rng: RNG, _gs: GenState): void
       } else if (st.flags[i] && st.type[i] === sheetId(162) && st.liquid[st.idx(k, l + 1)] === 0 && canKillTile(st, k, l)) {
         st.flags[i] = 0;
       }
-      // ⑦ 31/12/639/箱/28/祭坛帧规范化（cs:21484-21741）——纯帧/自放置端已保证,
-      //    除 12 的下行补格（罕见,墙→地形 tile 映射）外无八通道可见写,维持跳过
+      // ⑦ 31/12/639/箱 21·467/28/26 帧规范化重建段（cs:21484-21741，UUUU 批落地：
+      //    曾裁"纯帧跳过"有漏——①箱 style 需注册表 item0 反查（Chest.FindChest，
+      //    地狱/地牢上锁箱 style23-27 覆写）；②12/639/箱/28/26 底行 WallTypeToTerrain
+      //    补格（T0>1/T0>625 残量）；③26 祭坛 3×2 重写+邻列 28/12/639 清理
+      //    （T26>25 祭坛重写/T26>0 邻清）；④31 魔珠/猩红心 2×2 重写）
+      if (st.flags[i]) {
+        const t = st.type[i]!;
+        const fx = st.frameX[i]!, fy = st.frameY[i]!;
+        // ---- 31 魔珠/猩红心（cs:21484-21512）----
+        if (t === sheetId(31)) {
+          let num8 = Math.floor(fx / 18);
+          let num9 = Math.floor(num8 / 2);
+          num9 = gs.crimson ? 1 : 0;              // 非 drunk 分支覆写（cs:21494）
+          num8 %= 2;
+          const num10 = k - num8;
+          let num11 = Math.floor(fy / 18);
+          const num12 = Math.floor(num11 / 2);
+          num11 %= 2;
+          const num13 = l - num11;
+          for (let n = 0; n < 2; n++) {
+            for (let num14 = 0; num14 < 2; num14++) {
+              const ni = st.idx(num10 + n, num13 + num14);
+              st.flags[ni] = 1; st.slope[ni] = 0; st.half[ni] = 0;
+              st.type[ni] = sheetId(31);
+              st.frameX[ni] = n * 18 + 36 * num9;
+              st.frameY[ni] = num14 * 18 + 36 * num12;
+            }
+          }
+        }
+        // ---- 12 水晶之心 / 639 魔力水晶（cs:21513-21570）----
+        if (t === sheetId(12) || t === sheetId(639)) {
+          let num17 = Math.floor(fx / 18);
+          let num18 = Math.floor(num17 / 2);
+          num17 %= 2;
+          const num19 = k - num17;
+          let num20 = Math.floor(fy / 18);
+          let num21 = Math.floor(num20 / 2);
+          num20 %= 2;
+          const num22 = l - num20;
+          for (let n = 0; n < 2; n++) {
+            for (let num24 = 0; num24 < 2; num24++) {
+              const ni = st.idx(num19 + n, num22 + num24);
+              st.flags[ni] = 1; st.slope[ni] = 0; st.half[ni] = 0;
+              st.type[ni] = t;
+              st.frameX[ni] = n * 18 + 36 * num18;
+              st.frameY[ni] = num24 * 18 + 36 * num21;
+            }
+            const bi = st.idx(num19 + n, num22 + 2);
+            if (!st.flags[bi]) {
+              st.flags[bi] = 1;
+              st.type[bi] = sheetId(WALL2TERRAIN[st.wall[bi]] ?? 0);
+            }
+            st.slope[bi] = 0; st.half[bi] = 0;
+          }
+        }
+        // ---- 箱 21/467（cs:21571-21646）----
+        if (t === sheetId(21) || t === sheetId(467)) {
+          const ctype = t === sheetId(467) ? sheetId(467) : sheetId(21);
+          let num37 = Math.floor(fx / 18);
+          let num38 = 0;
+          while (num37 >= 2) { num38++; num37 -= 2; }
+          const num39 = k - num37;
+          const num40 = l - Math.floor(fy / 18);
+          if (chests) {
+            const fc = chests.find((c) => c && c.x === num39 && c.y === num40);
+            const it0 = fc?.items?.[0];
+            const van = it0 ? VAN_ID_OF_JS.get(it0.id) : undefined;
+            if (van === 1156) num38 = 23;
+            else if (van === 1571) num38 = 24;
+            else if (van === 1569) num38 = 25;
+            else if (van === 1260) num38 = 26;
+            else if (van === 1572) num38 = 27;
+          }
+          for (let n = 0; n < 2; n++) {
+            for (let num43 = 0; num43 < 2; num43++) {
+              const ni = st.idx(num39 + n, num40 + num43);
+              st.flags[ni] = 1; st.slope[ni] = 0; st.half[ni] = 0;
+              st.type[ni] = ctype;
+              st.frameX[ni] = n * 18 + 36 * num38;
+              st.frameY[ni] = num43 * 18;
+            }
+            const bi = st.idx(num39 + n, num40 + 2);
+            if (!st.flags[bi]) {
+              st.flags[bi] = 1;
+              st.type[bi] = sheetId(WALL2TERRAIN[st.wall[bi]] ?? 0);
+            }
+            st.slope[bi] = 0; st.half[bi] = 0;
+          }
+        }
+        // ---- 28 瓦罐（cs:21647-21690）----
+        if (t === sheetId(28)) {
+          let num46 = Math.floor(fx / 18);
+          let num47 = 0;
+          while (num46 >= 2) { num47++; num46 -= 2; }
+          const num48 = k - num46;
+          let num49 = Math.floor(fy / 18);
+          let num50 = 0;
+          while (num49 >= 2) { num50++; num49 -= 2; }
+          const num51 = l - num49;
+          for (let n = 0; n < 2; n++) {
+            for (let num53 = 0; num53 < 2; num53++) {
+              const ni = st.idx(num48 + n, num51 + num53);
+              st.flags[ni] = 1; st.slope[ni] = 0; st.half[ni] = 0;
+              st.type[ni] = sheetId(28);
+              st.frameX[ni] = n * 18 + 36 * num47;
+              st.frameY[ni] = num53 * 18 + 36 * num50;
+            }
+            const bi = st.idx(num48 + n, num51 + 2);
+            if (!st.flags[bi]) {
+              st.flags[bi] = 1;
+              st.type[bi] = sheetId(WALL2TERRAIN[st.wall[bi]] ?? 0);
+            }
+            st.slope[bi] = 0; st.half[bi] = 0;
+          }
+        }
+        // ---- 26 祭坛（cs:21691-21741）----
+        if (t === sheetId(26)) {
+          let num56 = Math.floor(fx / 18);
+          const num58 = k - (num56 % 3);
+          const num59 = l - Math.floor(fy / 18);
+          const num57 = gs.crimson ? 1 : 0;       // 非 drunk 分支（cs:21713）
+          for (let num60 = 0; num60 < 3; num60++) {
+            for (let num61 = 0; num61 < 2; num61++) {
+              const ni = st.idx(num58 + num60, num59 + num61);
+              st.flags[ni] = 1; st.slope[ni] = 0; st.half[ni] = 0;
+              st.type[ni] = sheetId(26);
+              st.frameX[ni] = num60 * 18 + 54 * num57;
+              st.frameY[ni] = num61 * 18;
+            }
+            const bi = st.idx(num58 + num60, num59 + 2);
+            if (!st.flags[bi]) {
+              st.flags[bi] = 1;
+              st.type[bi] = sheetId(WALL2TERRAIN[st.wall[bi]] ?? 0);
+            }
+            // cs:21724-21727：(!tileSolid[t] || tileSolidTop[t]) && !Platforms[t]
+            //   → 墙映射补型（tileSolid 生成期=genSolidType，含 379=false 翻转）
+            {
+              const bs = SHEET_OF[st.type[bi]!] ?? -1;
+              if ((!genSolidType(st.type[bi]!) || SOLID_TOP_99.has(bs)) && !PLATFORM_99.has(bs)) {
+                st.type[bi] = sheetId(WALL2TERRAIN[st.wall[bi]] ?? 0);
+              }
+            }
+            st.slope[bi] = 0; st.half[bi] = 0;
+            // cs:21733-21736：正下 2 行的 28 罐底半 → 清
+            const ui = st.idx(num58 + num60, num59 + 3);
+            if (st.type[ui] === sheetId(28) && st.frameY[ui]! % 36 >= 18) {
+              st.type[ui] = 0; st.flags[ui] = 0;
+            }
+          }
+          // cs:21737-21741：左右邻列 28/12/639 半边清（★右列 639 读的是**左列**
+          //   ——原版 num58-1 笔误，bug-for-bug 保留）
+          for (let num64 = 0; num64 < 3; num64++) {
+            const li = st.idx(num58 - 1, num59 + num64);
+            const lSheet = SHEET_OF[st.type[li]!] ?? -1;
+            if ((lSheet === 28 || lSheet === 12 || lSheet === 639) && st.frameX[li]! % 36 < 18) {
+              st.type[li] = 0; st.flags[li] = 0;
+            }
+            const ri = st.idx(num58 + 3, num59 + num64);
+            const rSheet = SHEET_OF[st.type[ri]!] ?? -1;
+            if ((rSheet === 28 || rSheet === 12 || lSheet === 639) && st.frameX[ri]! % 36 >= 18) {
+              st.type[ri] = 0; st.flags[ri] = 0;
+            }
+          }
+        }
+      }
 
       // ⑪ 祭坛 237 正下方 232 木刺 → 226 蜥蜴砖(cs:21743-21746)
       if (st.flags[i] && st.type[i] === LIHZARD_ALTAR && st.type[st.idx(k, l + 1)] === WOODEN_SPIKE) {

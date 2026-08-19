@@ -89,7 +89,18 @@ export const TOWN_NPC_PROFILE: Record<number, TownNpcProfile> = {
  * @returns sprites 相对路径（如 'vanilla/Shimmered_Guide_Default.png'）；
  *   无档案的类型（宠物 637/638/656 等未收录）返回 null——渲染端回落 NPC_{id} 竖条
  */
-export function townNpcProfileSheet(id: number, variant: number, alt: number): string | null {
+export function townNpcProfileSheet(id: number, variant: number, alt: number, variationIdx = -1): string | null {
+  // 宠物三族（未入 TOWN_NPC_PROFILE——VariantNPCProfile 无 Legacy 档名表）：
+  // root = 变体表键名（Cat/Dog/Bunny），变体档贴图 {root}_{Variant}.png
+  const petVariants = TOWN_PET_VARIANTS[id];
+  if (petVariants && !petVariants.includes('__')) {
+    const root = `vanilla/${id === 637 ? 'Cat' : id === 638 ? 'Dog' : 'Bunny'}`;
+    if (variationIdx >= 0 && variationIdx < petVariants.length) {
+      const vn = petVariants[variationIdx];
+      return alt === 1 ? `${root}_${vn}_Party.png` : `${root}_${vn}.png`;
+    }
+    return alt === 1 ? `${root}_Default_Party.png` : `${root}_Default.png`;
+  }
   const p = TOWN_NPC_PROFILE[id];
   if (!p) return null;
   // 微光档仅对有 StackedNPCProfile 的 29 只生效；裸 LegacyNPCProfile（slime 族）
@@ -100,6 +111,25 @@ export function townNpcProfileSheet(id: number, variant: number, alt: number): s
   if (alt === 1) return `${root}_Default${uniqueParty ? '_Party' : ''}.png`;
   if (alt === 2 && p.transform) return `${root}_Default_Transformed.png`;
   return `${root}_Default.png`;
+}
+
+/** 宠物变体名表（TownNPCProfiles.cs:131-139 VariantNPCProfile：三族各 6 变体，
+ *  RollVariation = rand(6)（Profiles.cs:215-218）；贴图 = {root}_{variant}.png
+ *  （GetTextureNPCShouldUse :229-238）；名字池 = {base}Names_{variant}（:220-223）） */
+export const TOWN_PET_VARIANTS: Record<number, string[]> = {
+  637: ['Siamese', 'Black', 'OrangeTabby', 'RussianBlue', 'Silver', 'White'],
+  638: ['Labrador', 'PitBull', 'Beagle', 'Corgi', 'Dalmation', 'Husky'],
+  656: ['White', 'Angora', 'Dutch', 'Flemish', 'Lop', 'Silver'],
+};
+/** RollVariation（Profiles.cs:215-218）：rand(n) */
+export function rollTownPetVariant(npcId: number): number {
+  const v = TOWN_PET_VARIANTS[npcId];
+  return v ? Math.floor(Math.random() * v.length) : 0;
+}
+/** 变体名（供名字池/调试显示） */
+export function townPetVariantName(npcId: number, idx: number): string | null {
+  const v = TOWN_PET_VARIANTS[npcId];
+  return v ? v[idx] ?? null : null;
 }
 
 /** ShouldBestiaryGirlBeLycantrope（NPC.cs:94961-94972，1405/1456 两版一致）：

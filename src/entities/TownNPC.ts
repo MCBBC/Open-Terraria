@@ -524,6 +524,9 @@ export class TownNPC extends Entity {
   facing = 1;
   /** 随机名字（NPC.getNewNPCNameInner 名字池；无池类型如守卫老人为空串） */
   givenName = '';
+  /** NPC.townNpcVariationIndex（宠物三族 637/638/656 六变体；-1 = 未掷走 Default 图）。
+   *  RerollVariation（NPC.cs:81707-81733）换外观+名字池重掷；许可证二用触发 */
+  variationIndex = -1;
   animT = 0;
   frame = 0;       // 当前贴图帧（原版 frame.Y/帧高）
   frameT = 0;      // 行走帧累加器（≈原版 frameCounter）
@@ -2623,7 +2626,8 @@ export class TownNPC extends Entity {
    *  _Party / _Transformed 变体。无档案类型（637/638/656 宠物等）返回 null，
    *  渲染端回落 NPC_{id} 竖条。Renderer.drawTownNPC 消费 */
   get townSheet(): string | null {
-    return townNpcProfileSheet(this.vanillaId, this.shimmered ? 1 : 0, this.altTexture);
+    return townNpcProfileSheet(this.vanillaId, this.shimmered ? 1 : 0, this.altTexture,
+      this.variationIndex);
   }
 
   draw() { /* Renderer 统一绘制 */ }

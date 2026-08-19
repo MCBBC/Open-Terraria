@@ -123,9 +123,12 @@ const inB5 = (st: TileStore, x: number, y: number): boolean =>
 
 /** Place3x2（cs:52097）：桌14/钢琴87/梳妆台88/长凳89。x-1..x+1 × y-1..y 净空
  *  + 逐列 SolidTile2(y+1)；frameX=54*style+col*18,frameY=row*18。
- *  梳妆台 88 的 Chest.CreateChest 门（:52169）按恒成功处理（生成期箱位充裕；
- *  箱登记不在 dump 四通道,备案）。 */
-function place3x2HF(st: TileStore, x: number, y: number, tile: number, style: number): boolean {
+ *  梳妆台 88 的 Chest.CreateChest(x-1,y-1)（:52169-52177）：**在 flag2 终判之前**
+ *  无条件调用——失败尝试也烧一个注册表槽（孤儿条目,终态 .wld chests 段保留）；
+ *  同位已有条目（FindEmptyChest -1）→ 放置失败。TTTT 2026-08-19 接线
+ *  （此前"恒成功不登记"=纯登记债:sink 缺 2 条地狱梳妆台,DeadMans 候选不受影响
+ *  ——type 88 过不了 IsAGoodSpot 的 21 门,零掷）。 */
+function place3x2HF(st: TileStore, x: number, y: number, tile: number, style: number, chests?: import('./BuriedChestsPass').ChestSink): boolean {
   if (!inB5(st, x, y)) return false;
   let ok = true;
   for (let i = x - 1; i < x + 2; i++) {
@@ -133,6 +136,11 @@ function place3x2HF(st: TileStore, x: number, y: number, tile: number, style: nu
       if (st.flags[st.idx(i, j)]) ok = false;
     }
     if (!solidTile2HF(st, i, y + 1)) ok = false;
+  }
+  if (tile === T_DRESSER && chests) {
+    // CreateChest(x-1,y-1)：同位重条目 → flag2=false（放置失败,条目不建）
+    if (chests.some(c => c.x === x - 1 && c.y === y - 1)) return false;
+    chests.push({ x: x - 1, y: y - 1, items: [], locked: false });
   }
   if (!ok) return false;
   const fx = 54 * style;
@@ -407,8 +415,11 @@ let hfTrace: ((s: string) => void) | null = null;
 export function setHfTrace(f: ((s: string) => void) | null): void { hfTrace = f; }
 const tr = (s: string): void => { hfTrace?.(s); };
 
+/** TTTT：地狱梳妆台 88 的 chest 注册表入口（WorldGen 传 world.chests；探针/单跑可空） */
+let hfChests: import('./BuriedChestsPass').ChestSink | undefined;
 export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
-  phaseMark?: (name: string) => void): void {
+  phaseMark?: (name: string) => void, chests?: import('./BuriedChestsPass').ChestSink): void {
+  hfChests = chests;
   const { w, h } = st;
   const hellTop = h - 200;
   if (hellTop >= h - 60) return;
@@ -558,7 +569,7 @@ export function runHellFortPass(st: TileStore, rng: RNG, gs: GenState,
         else place4x2HF(st, cx, fy, T_BED, -1, 8);
         break;
       case 6: place3x2HF(st, cx, fy, T_PIANO, 15); break;
-      case 7: place3x2HF(st, cx, fy, T_DRESSER, 9); break;
+      case 7: place3x2HF(st, cx, fy, T_DRESSER, 9, hfChests); break;
       case 8: place3x2HF(st, cx, fy, T_BENCH, 10); break;
       case 9: place2xXHF(st, cx, fy, T_CLOCK, 17, 5); break;
       case 10:
