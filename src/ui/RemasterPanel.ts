@@ -147,8 +147,9 @@ export class RemasterPanel {
       try {
         const r = await this.manager.importZip(f);
         this.busy('');
-        const n = Object.keys(r.apply.applied).length;
+        const n = r.apply.applied.length;
         this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Remaster.Imported', r.meta.name, n));
+        if (r.versionMismatch) this.cb.onToast?.(Lang.text('Mods.SandboxWorld.Remaster.VersionMismatch'));
         await this.refresh();
       } catch (err) {
         this.busy('');

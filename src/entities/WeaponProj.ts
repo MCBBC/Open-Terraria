@@ -2341,6 +2341,7 @@ export class PowderProj extends Entity {
 /** 直线飞行火把：射程(rangePx)耗尽前穿墙，之后撞块即毁；命中玩家 20 伤。
  *  ai0=尘色/ai1=射程——尘迹省略（粒子钩子未接），伤害/碰撞 1:1 */
 export class TorchGodProj extends Entity {
+  private sndT = 0;   // localAI[0] 首帧音哨兵
   w = 4; h = 4;
   vx: number; vy: number;
   damage = 20;
@@ -2362,6 +2363,8 @@ export class TorchGodProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     const st = game.world.store;
+    // 首帧 Item8 音（AI_184 :40109-40111 localAI[0]==0——事件全程连射的本族主声,终审补）
+    if (!this.sndT) { this.sndT = 1; game.playSfxWav?.('Item_8', 1, this.cx, this.cy); }
     // ai[1] -= velocity.Length()（:40112-40119）：射程内 tileCollide=false
     this.rangeLeft -= Math.hypot(this.vx, this.vy);
     if (this.rangeLeft <= 0) this.tileCollide = true;

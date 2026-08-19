@@ -402,6 +402,9 @@ describe('NPC 免微光名单（NPCID.Sets.ShimmerImmunity, NPCID.cs:4837 → NP
 
   it('免表敌怪浸微光不转化（入口门 buffImmune[353] → shimmering 恒 false）', () => {
     const w = shimmerWorld();
+    // 夜间（仆从 5 = aiStyle 5:白天走 AI_005 驱散段 vy−2/t+Despawn(10),cs:51302
+    // ——豁免表无 5,白天泡 400t 必然上飞出界消散属 1:1 行为,测免疫须钉夜间）
+    w.clock.timeOfDay = 0.9;
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
     const h = hooks(w, p);
     // 5 = 克苏鲁仆从（ShimmerImmunity 成员，且不在任何转化表——转化与否可判）

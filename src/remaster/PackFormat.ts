@@ -171,7 +171,8 @@ export function makePack(manifest: PackManifest, sheets: Array<{ file: string; p
 }
 
 /** 读整包:zip → {manifest, sheets}。manifest 损坏抛错;sheets 键转 SpriteAtlas 键
- *  (去 SHEETS_PREFIX)。Blob 类型由调用方按需包。 */
+ *  (去 SHEETS_PREFIX;非 vanilla|vanilla-ui 镜像路径丢弃——zip 内 `sheets/../..`
+ *  逃逸条目只配静默丢,不值得拒装整包)。 */
 export async function readPack(zipBytes: Uint8Array): Promise<LoadedPack> {
   const files = await unzip(zipBytes);
   const mfRaw = files.get(MANIFEST_PATH);
@@ -182,6 +183,7 @@ export async function readPack(zipBytes: Uint8Array): Promise<LoadedPack> {
   for (const [name, data] of files) {
     if (!name.startsWith(SHEETS_PREFIX)) continue;
     const file = name.slice(SHEETS_PREFIX.length);
+    if (!/^(vanilla|vanilla-ui)\//.test(file)) continue;   // 路径白名单(与 manifest 键同规)
     sheets.set(file, new Blob([data as unknown as BlobPart], { type: 'image/png' }));
   }
   // manifest 声明的 sheet 缺文件 → 只警告不拒装(局部覆盖语义)

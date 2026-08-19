@@ -72,7 +72,6 @@ export class RemasterRuntime {
   onApplied: ((info: AppliedInfo) => void) | null = null;
 
   private buffIcons = new Map<number, string>();
-  private objectUrls: string[] = [];
 
   constructor(
     private atlas: SpriteAtlas,
@@ -119,10 +118,8 @@ export class RemasterRuntime {
 
   private setBuffIcon(buffId: number, blob: Blob): void {
     const old = this.buffIcons.get(buffId);
-    if (old) URL.revokeObjectURL(old);
-    const url = URL.createObjectURL(blob);
-    this.buffIcons.set(buffId, url);
-    this.objectUrls.push(url);
+    if (old) URL.revokeObjectURL(old);   // 重复应用同 buff:旧 objectURL 即时回收
+    this.buffIcons.set(buffId, URL.createObjectURL(blob));
   }
 
   /** UI.ts buff 栏钩子查询(override 源;null=用原版直链)。 */
@@ -162,10 +159,8 @@ export class RemasterRuntime {
     }
   }
 
-  /** 释放全部 objectURL(进程退出前;日常 apply/restore 自管理)。 */
+  /** 释放全部 buff objectURL(进程退出前;日常 apply/restore 经 buffIcons 自管理)。 */
   dispose(): void {
-    for (const u of this.objectUrls) URL.revokeObjectURL(u);
-    this.objectUrls = [];
     for (const u of this.buffIcons.values()) URL.revokeObjectURL(u);
     this.buffIcons.clear();
   }

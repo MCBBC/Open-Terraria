@@ -11,6 +11,9 @@ function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 2);
+    // ★blocked = 他标签页持旧版本连接不让路(旧 bundle 无 onversionchange 处理,
+    // 生产首次 v1→v2 部署必踩)——只告警不重试;调用方(main 装配)有超时兜底
+    req.onblocked = () => console.warn('[kv] IndexedDB 升级被其他标签页阻塞(关闭旧标签页即恢复)');
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
       if (!req.result.objectStoreNames.contains(REMASTER_STORE)) req.result.createObjectStore(REMASTER_STORE);

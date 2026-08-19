@@ -252,6 +252,18 @@ function shootD(
     new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav, life, pierce, hostile: true }),
     'projectiles');
 }
+/** shootD 的 opts 直通变体（686 等需完整重力链的弹型;保留出膛音链） */
+function shootD2(
+  game: GameHooks, x: number, y: number, vx: number, vy: number,
+  dmg: number, projId: number, life: number,
+  opts: Partial<import('./Arrow').ArrowOpts>,
+): void {
+  const shot = PROJ_SHOT_SFX[projId];
+  if (shot) game.playSfxFiles(soundTrackFiles(shot), 0.8, x, y);
+  (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { life, hostile: true, ...opts }),
+    'projectiles');
+}
 
 /** DD2 弹幕 → 声轨名（Projectile.cs 首帧 PlaySound 站点） */
 const PROJ_SHOT_SFX: Record<number, string> = {
@@ -1528,7 +1540,10 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
       const ry = e.cy + ox * Math.sin(e.visAngle) + oy * Math.cos(e.visAngle);
       const n = Math.floor(e.ai1 - BOMB_APR_T + 1);
       if (n <= FIREBALL_N && n % FIREBALL_EVERY === 0) {
-        shootD(game, rx, ry, e.vx, e.vy, DMG_FIREBALL, 686, 300, 0.08, 3);
+        // 686 重力=两段式(:54640-54659)——Arrow 单 grav2 档近似(第三段 @20 登记);
+        // life 3600/穿透族原版 -1(仓内 pierce 口径 1,登记)
+        shootD2(game, rx, ry, e.vx, e.vy, DMG_FIREBALL, 686, 3600,
+          { grav: 0.1, grav2: 0.1, grav2At: 10, dragAlways: 0.99, pierce: 3 });
       }
     }
     if (e.ai1 > BOMB_TOTAL - TAIL_T) e.vy -= 0.1;   // 尾段拉起（:62545-62547）

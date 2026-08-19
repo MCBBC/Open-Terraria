@@ -2,6 +2,7 @@
 // 40×(20×56) 的完整帧表，缓存复用。通道映射实测自 PlayerDrawLayers.cs：
 //   0 头/3,5,7,9 身体/10 腿 = skinColor；4,8 = undershirt；6,13,14 = shirt；
 //   11 = pants；12 = shoes；1 = 眼白(白)；2 = 瞳孔(eyeColor)；发型表 14 帧对齐身体帧 6-19。
+import { bitmapize, freeBaked, type Baked } from '../render/bitmapize';
 import { type Appearance, backHairDraw, MALE_VARIANTS } from './Appearance';
 import { UITextures } from '../vui/assets/UITextures';
 import { noteVuiConsumer } from '../assets/SpriteAtlas';
@@ -68,7 +69,7 @@ export function dollHairLayer(a: Appearance, headIdx: number): DollHairLayer | n
 
 /** 发色剂逐帧着色头发帧（40×56，动态染料每帧变色——不进 tintCache 防爆缓存）。
  *  复用 tint() 的 multiply+destination-in 模式，输出为共享 scratch（当帧即用勿存） */
-export function hairFrameTinted(layer: DollHairLayer, row: number, color: { r: number; g: number; b: number }): HTMLCanvasElement | null {
+export function hairFrameTinted(layer: DollHairLayer, row: number, color: { r: number; g: number; b: number }): Baked | null {
   const rect = UITextures.get(layer.src);
   if (!rect) return null;
   const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
@@ -98,22 +99,22 @@ export function headArmorImage(headIdx: number): ImageBitmap | HTMLImageElement 
   return r ? (r.img as HTMLImageElement) : null;
 }
 
-const cache = new Map<string, HTMLCanvasElement>();
+const cache = new Map<string, Baked>();   // 写一次合成 → 异步升格 ImageBitmap(bitmapize)
 /** 调色缓存上限(2026-08-13 泄露 review):键=贴图×外观色(用户可控,键空间近无限),
  *  值=整图尺寸 canvas——无闸时长会话/选人界面拖色条无界增长(同文件 cache 有
  *  LRU 64 而此表漏配)。超限整体清空(值小,重建廉价) */
 const TINT_CACHE_MAX = 256;
-const tintCache = new Map<string, HTMLCanvasElement>();
+const tintCache = new Map<string, Baked>();
 /** WeakMap(2026-08-13):外层原为强引用 Map——会把已被 cache LRU 淘汰的合成
  *  canvas 钉住永不释放;改弱引用后源 canvas 回收时条目随之消失 */
-const stealthTintCache = new WeakMap<HTMLCanvasElement, Map<string, HTMLCanvasElement>>();
+const stealthTintCache = new WeakMap<Baked, Map<string, Baked>>();
 
 /** 清空全部合成/调色缓存。
  *  缓存 canvas 在 GPU contextlost 后内容归零且不会自动重画——不失效就
  *  "角色/装备/时装全部隐形"(选人界面与游戏内 alike)。退出世界与进世界时调用。 */
 export function clearPaperDollCache(): void {
-  for (const c of cache.values()) { c.width = 0; c.height = 0; }
-  for (const c of tintCache.values()) { c.width = 0; c.height = 0; }
+  for (const c of cache.values()) freeBaked(c);
+  for (const c of tintCache.values()) freeBaked(c);
   cache.clear();
   tintCache.clear();
 }
@@ -126,19 +127,20 @@ function colorKey(color: { r: number; g: number; b: number }): string {
 /** 贴图实例稳定 id(ImageBitmap 化后无 .src 可拼键——用 WeakMap 自增 id 防跨表碰撞) */
 const tintImgId = new WeakMap<object, number>();
 let tintImgSeq = 0;
-function tint(img: CanvasImageSource & { width: number; height: number }, color: { r: number; g: number; b: number }): HTMLCanvasElement {
+function tint(img: CanvasImageSource & { width: number; height: number }, color: { r: number; g: number; b: number }): Baked {
   let id = tintImgId.get(img as object);
   if (id === undefined) { id = ++tintImgSeq; tintImgId.set(img as object, id); }
   const key = `t${id}|` + colorKey(color);
-  let c = tintCache.get(key);
+  let c: Baked | undefined = tintCache.get(key);
   if (c) return c;
   if (tintCache.size >= TINT_CACHE_MAX) {  // 满即清(防无界)
-    for (const old of tintCache.values()) { old.width = 0; old.height = 0; }
+    for (const old of tintCache.values()) freeBaked(old);
     tintCache.clear();
   }
-  c = document.createElement('canvas');
-  c.width = img.width; c.height = img.height;
-  const ctx = c.getContext('2d')!;
+  const cv = document.createElement('canvas');
+  c = cv;
+  cv.width = img.width; cv.height = img.height;
+  const ctx = cv.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(img, 0, 0);
   ctx.globalCompositeOperation = 'multiply';
@@ -147,6 +149,7 @@ function tint(img: CanvasImageSource & { width: number; height: number }, color:
   ctx.globalCompositeOperation = 'destination-in';
   ctx.drawImage(img, 0, 0);
   tintCache.set(key, c);
+  bitmapize(tintCache, key);
   return c;
 }
 
@@ -254,7 +257,7 @@ export function compositePaperDoll(
   a: Appearance,
   equip?: { head?: number | null; body?: number | null; legs?: number | null },
   opts?: { skipHair?: boolean; layer?: DollLayer; part?: DollPart; rows?: DollRows; sitting?: DollSitting },
-): HTMLCanvasElement | null {
+): Baked | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
     + (opts?.skipHair ? '|nohair' : '') + (opts?.layer ? `|L${opts.layer}` : '')
     + (opts?.part ? `|P${opts.part}` : '')
@@ -445,6 +448,7 @@ export function compositePaperDoll(
   }
 
   cache.set(key, c);
+  bitmapize(cache, key);
   if (cache.size > 64) {
     // 简单淘汰：清一半最旧条目
     let i = 0;
@@ -460,7 +464,7 @@ export function compositePaperDoll(
  *  TextureAssets.Players[skinVar,15] = Player_0_15.png 40×168 三帧竖排（全变体共用
  *  此一张——terraria-assets 解包实证无 Player_1_15），色通道 = colorHead → skinColor
  *  调色（tint 缓存）。帧序 0 睁(空) 1 半闭 2 全闭（EyeFrameToShow） */
-export function eyelidFrame(a: Appearance): HTMLCanvasElement | null {
+export function eyelidFrame(a: Appearance): Baked | null {
   const r = UITextures.get('Player_0_15.png');
   if (!r) return null;
   noteVuiConsumer('PaperDoll.eyelidFrame');
@@ -468,14 +472,14 @@ export function eyelidFrame(a: Appearance): HTMLCanvasElement | null {
 }
 
 /** 取某一帧的绘制参数（供 UISpriteBatch.draw 直接使用） */
-export function dollFrame(doll: HTMLCanvasElement, frame: number): { img: HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number } {
+export function dollFrame(doll: Baked, frame: number): { img: Baked; sx: number; sy: number; sw: number; sh: number } {
   const idx = Math.max(0, Math.min(BODY_FRAMES - 1, frame));
   return { img: doll, sx: 0, sy: idx * FRAME_H, sw: FRAME_W, sh: FRAME_H };
 }
 
 /** 双行帧取帧：rows 模式产物是单帧（sy=0，坐姿可高至 64px），整表产物按 body 行取。
  *  rows.body===rows.legs 时调用方应优先走整表缓存路径（本函数也兼容） */
-export function dollFrameRows(doll: HTMLCanvasElement, rows: DollRows): { img: HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number } {
+export function dollFrameRows(doll: Baked, rows: DollRows): { img: Baked; sx: number; sy: number; sw: number; sh: number } {
   if (doll.height < BODY_FRAMES * FRAME_H) {
     return { img: doll, sx: 0, sy: 0, sw: FRAME_W, sh: doll.height };
   }
@@ -492,7 +496,7 @@ export const IDLE_FRAME = 0;
 
 /** 逐通道 RGB 缩调（stealth 分层消费：armor ×s'/B×settled、星璇 Lerp 通道）。
  *  multiply 铺 rgb(255·m) 逐通道乘 + destination-in 保原 alpha；mul 量化 1/128 防缓存爆 */
-export function tintRGBA(src: HTMLCanvasElement, mul: [number, number, number]): HTMLCanvasElement {
+export function tintRGBA(src: Baked, mul: [number, number, number]): Baked {
   const q = mul.map((m) => Math.round(m * 128) / 128);
   const key = `${q[0]},${q[1]},${q[2]}`;
   let inner = stealthTintCache.get(src);
@@ -511,6 +515,7 @@ export function tintRGBA(src: HTMLCanvasElement, mul: [number, number, number]):
   ctx.drawImage(src, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
   inner.set(key, c);
+  bitmapize(inner, key);
   if (inner.size > 48) {   // 量化档 ≤129；stealth 连续变化时留中段档位
     let i = 0;
     for (const k of inner.keys()) { if (i++ > 24) break; inner.delete(k); }

@@ -598,6 +598,23 @@ function mimicFrame(e: Enemy, frames: number): number {
     return s.frame;
   }
   if (ai0 === 4 || ai0 === 5) { s.counter = 0; s.frame = 13; return Math.min(13, frames - 1); }
+  if (ai0 === 4.1) {
+    // :71960-71999 三段跳劈帧序（num26=4/档）：入段时 frame>6 → counter 清零;
+    // 帧带 6,5,4,3,4,5(各 4t,末档 23 回卷)——2026-08-19 补(曾误判"本仓 ai0
+    // 为整数不产生 4.1"而未接,bigMimicAI :696/:938 实际产生)
+    if (s.frame > 6) s.counter = 0;
+    s.counter += 1;
+    if (s.counter < 4) s.frame = 6;
+    else if (s.counter < 8) s.frame = 5;
+    else if (s.counter < 12) s.frame = 4;
+    else if (s.counter < 16) s.frame = 3;
+    else if (s.counter < 20) s.frame = 4;
+    else {
+      s.frame = 5;
+      if (s.counter >= 23) s.counter = 0;
+    }
+    return Math.min(frames - 1, s.frame);
+  }
   // ai0 2/6
   if (e.vy === 0) {
     s.counter += 1;
@@ -1213,7 +1230,7 @@ const DEERCLOPS_ATK1_FRAMES = [12, 13, 14, 13, 14, 13, 14, 13, 14, 15, 16, 17];
 const DEERCLOPS_ATK2_FRAMES = [12, 15, 16, 17, 17, 17, 17, 13, 18, 18, 18, 18, 12];
 const DEERCLOPS_ATK3_FRAMES = [19, 20, 21, 22, 21, 22, 21, 22, 23, 24, 23, 24, 23, 24, 20, 19];
 export function deerclopsNextFrame(
-  s: NpcGridFrameState, o: { ai0: number; vx: number; vy: number },
+  s: NpcGridFrameState, o: { ai0: number; vx: number; vy: number; lai0?: number },
 ): number {
   let idx = s.idx;
   // 各攻击段入段越界范围（原版 num194/num195 等显式常量，非表尾值——攻击 2 表
@@ -1226,7 +1243,7 @@ export function deerclopsNextFrame(
     if (idx < atk.lo || idx > atk.hi) { idx = atk.lo; s.counter = 0; }
     s.counter++;
     idx = atk.seq[Math.min(atk.seq.length - 1, Math.floor(s.counter / 4))];
-  } else if (o.vy > 0) {
+  } else if (o.vy > 0 || o.lai0 === 1) {   // 跳跃帧(含上升段 lai0=1,曾只判下落)
     s.counter = 0;
     idx = 1;
   } else if (o.vx === 0) {
@@ -2363,6 +2380,8 @@ export class Renderer {
     for (const e of sorted) {
       if (e instanceof Enemy) {
         if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
+        // NPC.hide（Main.cs:22172 常规绘制跳过;月总水蛭块 401=纯紫尘拖尾体,终审补）
+        if (e.vanilla?.hide) { this.drawHealthBar(e, world.isExpert); continue; }
         this.drawEnemy(e, world, entities); this.drawHealthBar(e, world.isExpert);
       }
       else if (e instanceof ItemDrop) this.drawDrop(e);
@@ -5591,7 +5610,7 @@ export class Renderer {
   private drawDeerclopsGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
-    const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, vx: e.vx, vy: e.vy });
+    const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, vx: e.vx, vy: e.vy, lai0: e.lai0 });
     // 几何查 NPC_GRIDS[668](5×5×218×240+pad2,重制管线同源)
     const g = NPC_GRIDS[668]!;
     const col = Math.floor(idx / (g.perRow ?? g.rows)), row = idx % (g.perRow ?? g.rows);

@@ -101,6 +101,12 @@ const CRITTER_TURN_ON_PLAYERS = new Set([299, 538, 539, 639, 640, 641, 642, 643,
  *  （鸟 NPC.cs:25398-25407 / 飞行鸭 :34863-34873，弹 1080） */
 const BIRD_THAT_CAN_POOP = new Set([74, 297, 298, 442, 363, 365, 603, 609, 671, 672, 673, 674, 675]);
 
+/** IsThisCenx（Player.cs:18032-18038）：四位开发者名（小写比较）恒被鸟粪命中 */
+function isThisCenx(name: string | undefined): boolean {
+  const n = (name ?? '').toLowerCase();
+  return n === 'cenx' || n === 'cblox' || n === 'jade lightning' || n === 'cenigit';
+}
+
 // ================= NPC 侧点光的共享近似源（GameHooks 取不到 FlickerClock/Main 计数器） =========
 /** 近似 Main.timeForVisualEffects（Main.cs:17110-17113：每帧 +1、216000 回卷）。
  *  以 performance.now() 折帧数（16.6667ms/帧）——光色波（hsl 时间色/WrappedLerp）
@@ -864,6 +870,13 @@ export class Enemy extends Entity {
     // 690 雕像宝箱怪 SetDefaults :17615-17627 immortal+dontTakeDamage=true——伪装态
     // 不可击；AI_126 唤醒段 :43873 解除（ai[0] 0→1）
     if (id === 690) e.dontTakeDamage = true;
+    // 392 火星飞碟核心 SetDefaults :13925-13942 dontTakeDamage=true——永不掉血的
+    // 纯平台部件（曾缺=可磨死 100HP 核心 → slots 失效 → 全灭判定真 → 母碟直接
+    // 自毁/死光=整场战斗被短路,2026-08-19 终审修）
+    if (id === 392) e.dontTakeDamage = true;
+    // 328 南瓜王之刃 SetDefaults :13092 dontTakeDamage=true——恒不可击的表情节拍体
+    // （曾缺=可被玩家打死,2026-08-19 终审修）
+    if (id === 328) e.dontTakeDamage = true;
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
     return e;
@@ -6809,7 +6822,7 @@ export class Enemy extends Entity {
    *  鸟粪彩蛋（:25398-25407，BirdThatCanPoop 表 NPCID.cs:4777 = 74/297/298/442/
    *  363/365/603/609/671-675）：飞行态 + localAI[3]==0 + 鸟 Center.X 落在玩家
    *  水平带内 + 玩家在鸟下方 + CanHit + 玩家 RollOnlyBadLuckExtreme(50)==0
-   *  （1/50 极端霉运；IsThisCenx 彩蛋分支不移植）→ localAI[3]=1 + 弹 1080
+   *  （1/50 极端霉运或 IsThisCenx 四名,2026-08-19 补）→ localAI[3]=1 + 弹 1080
    *  落在 (玩家.Center.X, 鸟.Center.Y)。★:34863 aiStyle 68 飞行鸭同款 10 行
    *  在 duckFlyAI（非本函数域，未移植——登记） */
   private birdAI(game: GameHooks, player: Player | null) {
@@ -6826,7 +6839,8 @@ export class Enemy extends Entity {
       if (this.cx >= player.x && this.cx <= player.x + player.w
         && player.y > this.y + this.h
         && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)
-        && rollOnlyBadLuckExtreme((player as unknown as { luck: number }).luck, 50) === 0) {
+        && (rollOnlyBadLuckExtreme((player as unknown as { luck: number }).luck, 50) === 0
+          || isThisCenx((player as unknown as { name?: string }).name))) {
         this.lai3 = 1;
         game.spawnCritterProj?.(new PoopProj(player.cx, this.cy));
       }
@@ -7968,7 +7982,8 @@ export class Enemy extends Entity {
       if (this.cx >= player.x && this.cx <= player.x + player.w
         && player.y > this.y + this.h
         && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)
-        && rollOnlyBadLuckExtreme((player as unknown as { luck: number }).luck, 50) === 0) {
+        && (rollOnlyBadLuckExtreme((player as unknown as { luck: number }).luck, 50) === 0
+          || isThisCenx((player as unknown as { name?: string }).name))) {
         this.lai3 = 1;
         game.spawnCritterProj?.(new PoopProj(player.cx, this.cy));
       }
@@ -10105,10 +10120,12 @@ export class Enemy extends Entity {
         game.spawnParticles(this.cx, this.y - 20, dustCol, 6, 2.4, { life: 40, grav: -0.05 });
         game.spawnParticles(this.cx, this.cy, '#F0F0F0', 1, 0.8, { life: 30, grav: 0.02 });
       }
-      // 每 60t 音效（:41118-41121 SoundID 4/22 双音——NPC_Killed_1 + Unlock，roar 近似销核）
-      if (this.ai1 % 60 === 1) {
-        game.playSfxFiles?.(['NPC_Killed_1'], 1, this.cx, this.cy);
-        game.playSfxFile?.('Unlock', 1, this.cx, this.cy);
+      // 每 60t 音效（:41118-41121）= PlaySound(4,…,22) = **NPC_Killed_22**(case4 死音
+      // 库)——曾误配 Killed_1+Unlock 双音(旧批查的是 aiStyle 92 木桩段,终审修)
+      if (this.ai1 % 60 === 1) game.playSfxWav?.('NPC_Killed_22', 1, this.cx, this.cy);
+      // 1/5 随机爆散声（:41108）= PlaySound(3, SelectRandom(1,18)) → NPC_Hit_1/18 池
+      if (this.ai1 < 120 && Math.floor(Math.random() * 5) === 0) {
+        game.playSfxWav?.(Math.random() < 0.5 ? 'NPC_Hit_1' : 'NPC_Hit_18', 1, this.cx, this.cy);
       }
       this.x += this.vx;
       this.y += this.vy;
@@ -10450,7 +10467,11 @@ export class Enemy extends Entity {
     if (this.hp <= 0) {
       // 月总族(396/397/398)血尽不直死:原版 checkDead(:78841-78867)转为闭眼残肢/死亡演出,
       // 转换逻辑在各自 AI 首行(hp<=0 → ai0 置态+满血续命),此处放行让 AI 下一 tick 接管
-      if (this.vanillaId === 396 || this.vanillaId === 397 || this.vanillaId === 398) return false;
+      // 月总族:血尽转 -2/-3/演出在各 AI 首行,放行。★398 死亡演出态(ai0==2)
+      // 豁免——演出 600t 满时 AI 调 die() 走标准死亡管线(掉落/旗标),若仍放行
+      // = 零掉落(boss 袋/夜明矿/武器池全不出,2026-08-19 终审修)
+      if (this.vanillaId === 396 || this.vanillaId === 397
+        || (this.vanillaId === 398 && this.ai0 !== 2)) return false;
       // 石巨人族:仅挂载头 246 放行且须【本体活】(血尽转自由态在 golemHeadAI
       // 首行——一阶段本体无敌,玩家先打头的场景本体必活;本体死后原版头是
       // StrikeNPCNoInteraction 标准死 :31287-31290,落回通用管线)。

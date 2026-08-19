@@ -51,6 +51,15 @@ if (SOFT) FLAGS.push('--disable-gpu');
 // GPU 崩溃取证档(npm run playtrace):stderr 日志抓 io_surface 分配失败/上下文死亡
 const TRACE = process.argv.includes('--trace') || process.env.SW_PLAY_TRACE === '1';
 if (TRACE) FLAGS.push('--enable-logging=stderr', `--log-level=${process.env.SW_PLAY_TRACE_LEVEL ?? '1'}`);
+// 隔离实例档(npm run play2 / play.mjs --isolate):独立 user-data-dir 起第二个
+// Chrome 实例。★双开防崩正解(2026-08-19 双实例实验:两实例各跑一个完整世界
+// 100s 零 IOSurface 失败 vs 单实例双窗 27 次失败)——IOSurface 预算按【浏览器
+// 实例】(=每实例一个 GPU 进程,全 tab 共享)计,与全机显存/内存无关;
+// 隔离实例 = 各自一整份预算。存档独立(世界列表可导入导出搬)。
+const isoArg = process.argv.find((a) => a.startsWith('--isolate'));
+const ISO = !!isoArg || process.env.SW_PLAY_ISOLATE === '1';
+const ISO_NAME = isoArg?.split('=')[1] || process.env.SW_PLAY_ISOLATE_NAME || 'second';
+const ISO_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'chrome-profiles', ISO_NAME);
 // 位置参数只认不以 - 开头的(URL);--soft 等旗标不得落入 url(曾把 '--soft'
 // 当 URL 解析直接报"无效 URL"退出)
 const positional = process.argv.slice(2).filter((a) => !a.startsWith('-'));
@@ -84,6 +93,20 @@ if (DRY) {
   process.exit(0);
 }
 
+if (ISO) {
+  // 隔离实例:主 Chrome 在跑也无需退出(独立 user-data-dir = 独立进程树,
+  // 旗标对它天然冷启动生效)
+  fs.mkdirSync(ISO_DIR, { recursive: true });
+  const BIN2 = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const fd2 = fs.openSync(path.join(ISO_DIR, 'launch.log'), 'a');
+  const child2 = spawn(BIN2, [...FLAGS, `--user-data-dir=${ISO_DIR}`, url], { detached: true, stdio: ['ignore', fd2, fd2] });
+  child2.unref();
+  fs.closeSync(fd2);
+  console.log(`已启动隔离 Chrome 实例(profile=${ISO_NAME})→ ${url}`);
+  console.log(`该实例存档独立:用主实例"导出存档"→本实例"导入"即可搬世界。`);
+  console.log('双开防崩原理:IOSurface 预算按浏览器实例(GPU 进程)计,第二世界放独立实例 = 独立预算。');
+  process.exit(0);
+}
 if (chromeRunning()) {
   const quit = AUTO_QUIT || (process.stdin.isTTY && await ask());
   if (!quit) {

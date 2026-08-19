@@ -11,6 +11,7 @@
 //   归零即逃脱（渔获作废，:50949-50960 / :19348/:19362）；
 //   窗口内收竿 → 消耗鱼饵（消耗率 1/(1+bait/6)，钓具箱 +1 分母）。
 import { Entity } from './Entity';
+import { projFrameImg } from './Arrow';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, TILE } from '../core/constants';
@@ -98,6 +99,11 @@ export class Bobber extends Entity {
   private baitPower: number;
   private ownerRef: () => Player | null;
   private bobPhase = Math.random() * Math.PI * 2;
+  /** 绘制旋转缓存（AI_61 收线段 rotation=atan2(v)+π/2,:50833;静浮时保持末值） */
+  private drawRot = 0;
+  /** localAI[0]（AI_61 :50809-50811）：出竿后 0→100 渐增——钓线摆垂权重
+   *  1−lai0/100（DrawProj_FishingLine :35173-35174）随时间收敛 */
+  lai0 = 0;
   private airT = 0;
   /** ai[1]（AI_061）：0 = 等待累积中；<0 = 咬钩窗口（负值幅度 = rand(-240,-90) - 钓鱼力） */
   private ai1 = 0;
@@ -154,6 +160,7 @@ export class Bobber extends Entity {
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
+    if (this.lai0 < 100) this.lai0 += 1;   // 钓线张力渐稳（:50809-50811）
     void dt;
     const p = this.ownerRef();
     if (!p || p.dead) { this.dead = true; return; }
@@ -433,17 +440,32 @@ export class Bobber extends Entity {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
     ctx.save();
-    ctx.translate(this.cx, this.cy);
-    ctx.fillStyle = this.biteT > 0 ? '#FF6060' : '#E04838';
-    const dip = this.biteT > 0 ? 2 : Math.sin(this.bobPhase) * 1.5;
-    ctx.beginPath();
-    ctx.arc(0, dip, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(-1, dip - 6, 2, 4); // 竿线连杆近似
+    ctx.imageSmoothingEnabled = false;
+    const owner = this.ownerRef();
+    // ---- 钓线（DrawProj_FishingLine,Main.cs:34967-35201 1:1;2026-08-19 清零近似,
+    //      曾画 2×4 白杆"连杆"）----
+    if (owner) drawFishingLine(ctx, r, this, owner);
+    // ---- 浮标本体（通用绘制 :34040 + bobber→num143=8,Main.cs:29411）----
+    // 贴图左上 = (盒左, 盒上−8);rotation = 收线段 atan2(v)+π/2(AI_61 :50833)
+    const img = projFrameImg(this.projId, 0);
+    if (img) {
+      const num145 = (img.width + this.w) / 2;
+      ctx.translate(this.cx - this.w / 2 + num145, this.cy);
+      if (Math.abs(this.vx) + Math.abs(this.vy) > 0.01) {
+        this.drawRot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+      }
+      if (this.drawRot !== 0) ctx.rotate(this.drawRot);
+      ctx.drawImage(img, -num145, -(this.h / 2 + 8), img.width, img.height);
+    } else {
+      // 兜底（贴图懒加载未就绪）：近似色块
+      ctx.translate(this.cx, this.cy);
+      ctx.fillStyle = this.biteT > 0 ? '#FF6060' : '#E04838';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
     // 声呐药水（buff 122,Projectile.cs:19340-19346）：咬钩时浮标上方弹渔获名——
     // 此前 sonarLabel 数据在而零消费（音效域 #19/钓鱼域 B19,2026-08-13 接）
-    const owner = this.ownerRef();
     if (this.biteT > 0 && owner?.buffs.has(BuffType.Sonar)) {
       const label = this.sonarLabel();
       if (label) {
@@ -458,4 +480,93 @@ export class Bobber extends Entity {
     }
     ctx.restore();
   }
+}
+
+// ================= 钓线（DrawProj_FishingLine,Main.cs:34967-35201 1:1）=================
+
+/** 竿尖偏移表（:35017-35106 逐 case;dir<0 再 −13;gravDir 恒 1 本仓无倒置） */
+const POLE_TIP: Record<number, [number, number]> = {
+  2289: [43, -36], 2291: [43, -34], 2292: [46, -34], 2293: [43, -34],
+  2294: [43, -30], 2295: [43, -30], 2296: [43, -30],
+  2421: [47, -36], 2422: [47, -32], 4325: [44, -32], 4442: [44, -32],
+};
+/** 线色（:34988-35010;基色 (200,200,200,100) + 逐竿覆写;α=100 半透） */
+const POLE_STRING_COLOR: Record<number, [number, number, number]> = {
+  2294: [100, 180, 230], 2295: [250, 90, 70], 2293: [203, 190, 210],
+  2421: [183, 77, 112], 2422: [255, 226, 116], 4325: [200, 100, 100],
+  4442: [100, 100, 200],
+};
+
+/** 钓线段链绘制（:35112-35201）：竿尖→浮标中心,12px 段;速度/张力摆垂;
+ *  FishingLine.png(12×12,取 (0,0,W,num5) 竖条) 逐段旋贴。线色随段格取光
+ *  (本仓实体层画在光照合成前=整链乘光等价;α=100/255)。
+ *  备案:RotatedRelativePoint(甩竿姿态旋转,:35115)与 mount 52 竿尖修正未建模
+ *  (玩家无甩竿旋转渲染/坐骑钓竿位);线染料 stringColor 本仓无该字段恒 0 */
+function drawFishingLine(
+  ctx: CanvasRenderingContext2D, r: import('../render/Renderer').Renderer,
+  b: Bobber, owner: import('./Player').Player,
+): void {
+  const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
+  if (!tex) return;
+  // 竿尖 = 玩家中心 + 逐竿偏移（:34970-35106;dir<0 再 −13）
+  const dir = owner.facing || 1;
+  const [ox, oy] = POLE_TIP[b.poleVid] ?? [0, 0];
+  let px = owner.cx + ox * dir - (dir < 0 ? 13 : 0);
+  let py = owner.cy + oy;
+  // 目标 = 浮标中心（:35112-35114）
+  let num = b.cx - px;
+  let num2 = b.cy - py;
+  if (num === 0 && num2 === 0) return;
+  {   // :35120-35132 竿尖回退 12px 再重算方向
+    const d = Math.hypot(num, num2);
+    const k = 12 / d;
+    px -= num * k; py -= num2 * k;
+    num = b.cx - px; num2 = b.cy - py;
+  }
+  const base = POLE_STRING_COLOR[b.poleVid] ?? [200, 200, 200];
+  ctx.globalAlpha = 100 / 255;
+  ctx.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`;
+  let guard = 256;
+  while (guard-- > 0) {
+    let segLen = 12;
+    const dist = Math.hypot(num, num2);
+    const dist0 = dist;
+    if (dist < 20) { segLen = dist - 8; if (segLen <= 0) break; }
+    const k = 12 / dist;
+    px += num * k; py += num2 * k;
+    num = b.cx - px;
+    num2 = b.y + b.h * 0.1 - py;      // :35147 段目标 = 盒顶 10% 高处（线接浮标顶）
+    // 摆垂（:35150-35190,仅段长>12 时）
+    if (dist0 > 12) {
+      let sway = 0.3;
+      let spd = Math.abs(b.vx) + Math.abs(b.vy);
+      if (spd > 16) spd = 16;
+      sway *= 1 - spd / 16;
+      let f = dist0 / 80;
+      if (f > 1) f = 1;
+      sway *= f;
+      sway *= 1 - b.lai0 / 100;
+      if (num2 > 0) {
+        num2 *= 1 + sway;
+        num *= 1 - sway;
+      } else {
+        f = Math.abs(b.vx) / 3;
+        if (f > 1) f = 1;
+        f -= 0.5;
+        sway *= f;
+        if (sway > 0) sway *= 2;
+        num2 *= 1 + sway;
+        num *= 1 - sway;
+      }
+    }
+    const ang = Math.atan2(num2, num) - Math.PI / 2;
+    // 贴竖条（:35194-35199）：origin=(W/2,0),从段起点沿方向延伸 segLen
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(ang);
+    ctx.drawImage(tex, 0, 0, tex.width, Math.round(segLen), -tex.width / 2, 0, tex.width, Math.round(segLen));
+    ctx.restore();
+    if (dist < 20) break;
+  }
+  ctx.globalAlpha = 1;
 }

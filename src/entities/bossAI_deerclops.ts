@@ -154,10 +154,14 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
     case 1:                                          // 前向尖刺 :44528-44538
       e.ai1 += 1; halt = true;
       makeSpikesForward(game, e, p, 1);
+      // FindFrame :67394-67400 尖刺态入攻击帧带时 Scream(原版在帧机,此处
+      // AI 侧入态首拍等价——曾整态无声,2026-08-19 终审补)
+      if (e.ai1 === 30) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
       if (e.ai1 >= 80) { e.ai0 = 0; e.ai1 = 0; }
       break;
     case 4:                                          // 双侧尖刺 :44530-44543
       e.ai1 += 1; halt = true;
+      if (e.ai1 === 30) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);   // :67452-67460 入带 Scream(终审补)
       makeSpikesBothSides(game, e, p, 1);
       if (e.ai1 >= 90) { e.ai0 = 0; e.ai1 = 0; }
       break;
@@ -521,7 +525,7 @@ export class DeerclopsRubbleProj extends Entity {
 export class InsanityShadowProj extends Entity {
   w = 40; h = 40;
   dead = false;
-  life = 480;
+  life = 300;   // Projectile.cs:8833 timeLeft=300(曾 480,终审修)
   alpha = 255;              // 255=全透明（SetDefaults）→ 淡入至 50
   private ai0: number;
   private readonly ai1: number;

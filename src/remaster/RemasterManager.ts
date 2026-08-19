@@ -17,15 +17,25 @@ export interface ImportReport {
 }
 
 export class RemasterManager {
-  constructor(private runtime: RemasterRuntime) {}
+  constructor(
+    private runtime: RemasterRuntime,
+    /** 当前素材基线版本(assetVersion();main.ts 装配注入——Manager 不直接依赖
+     *  AssetCache 以免拖 sw/json 进包)。缺省跳过版本对拍。 */
+    private getBaseVersion?: () => string,
+  ) {}
 
-  /** 导入 zip(File 或字节数组)→ 持久化 → 立即应用。 */
+  /** 导入 zip(File 或字节数组)→ 持久化 → 立即应用。
+   *  baseVersion 不符只警告不拒装:帧定位由 manifest 自带 rect,不依赖当前 vanilla.json。 */
   async importZip(source: File | Uint8Array): Promise<ImportReport> {
     const bytes = source instanceof File ? new Uint8Array(await source.arrayBuffer()) : source;
     const pack = await readPack(bytes);
+    const versionMismatch = this.getBaseVersion ? pack.manifest.baseVersion !== this.getBaseVersion() : false;
+    if (versionMismatch) {
+      console.warn(`[remaster] 素材包基线版本不符:包 ${pack.manifest.baseVersion} vs 当前 ${this.getBaseVersion?.()}(rect 自带,仍可应用)`);
+    }
     const meta = await savePack(pack);
     const apply = await this.runtime.apply(pack);
-    return { meta, versionMismatch: false, apply };
+    return { meta, versionMismatch, apply };
   }
 
   /** 启动应用(main.ts:loadAssets 后、菜单前——此刻无 chunk 烘焙零竞争,

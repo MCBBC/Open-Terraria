@@ -39,9 +39,24 @@ export class PoopProj extends Entity {
     if (this.vy > 16) this.vy = 16;
     this.x += this.vx;
     this.y += this.vy;
-    // 尘 329 尾迹 ×2/tick（:37636-37653;色近白,半数无重力随速度）
-    game.spawnParticles(this.cx, this.cy, '#E4DECC', 1, 0.6, { life: 26, damp: 0.9 });
-    game.spawnParticles(this.cx, this.cy, '#D8D0B8', 1, 0.4, { life: 20, damp: 0.9 });
+    // 尘 329 尾迹 ×2/tick（:37636-37653 1:1,走 VanillaDust 引擎——曾用色块粒子近似）
+    const vd = (game as unknown as { vanillaDust?: import('../fx/VanillaDust').VanillaDust }).vanillaDust;
+    if (vd) {
+      for (let i = 0; i < 2; i++) {
+        const d = vd.spawn(this.cx, this.cy, 1, 1, 329);
+        if (!d) break;
+        d.vx *= 0.1; d.vy *= 0.1;
+        if (Math.random() < 0.5) {
+          d.scale = Math.random() * 0.5 + 0.5;
+          d.vx += this.vx; d.vy += this.vy;
+          d.noGravity = true;
+        } else {
+          d.scale = Math.random() * 0.4 + 0.4;
+          d.vx *= 0.5; d.vy *= 0.5;
+          d.vx += this.vx / 2; d.vy += this.vy / 2;
+        }
+      }
+    }
     // 命中玩家（:37654-37670,无伤害只上 buff）→ Kill
     const p = game.player;
     if (p && !p.dead && this.x < p.x + p.w && this.x + this.w > p.x
@@ -61,8 +76,22 @@ export class PoopProj extends Entity {
   private killFx(game: GameHooks): void {
     this.dead = true;
     game.playSfxFile?.('Item_177', 1, this.cx, this.cy);
-    game.spawnParticles(this.cx, this.cy, '#E4DECC', 15, 2.2, { life: 40, damp: 0.92 });
-    game.spawnParticles(this.cx, this.cy, '#D8D0B8', 15, 1.6, { life: 34, damp: 0.92 });
+    // 30×尘 329（:67589-67604 1:1）：vel×0.8 + vy×0.2 − rand×3;半数 noGravity
+    const vd = (game as unknown as { vanillaDust?: import('../fx/VanillaDust').VanillaDust }).vanillaDust;
+    if (vd) {
+      for (let i = 0; i < 30; i++) {
+        const d = vd.spawn(this.cx, this.cy, 1, 1, 329);
+        if (!d) break;
+        d.vx *= 0.8;
+        d.vy = d.vy * 0.2 - Math.random() * 3;
+        if (Math.random() < 0.5) {
+          d.noGravity = true;
+          d.scale = Math.random() * 0.6 + 0.6;
+        } else {
+          d.scale = Math.random() * 0.5 + 0.5;
+        }
+      }
+    }
     const p = game.player;
     if (p && !p.dead && this.x < p.x + p.w && this.x + this.w > p.x
       && this.y < p.y + p.h && this.y + this.h > p.y) {

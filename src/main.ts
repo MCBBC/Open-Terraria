@@ -26,6 +26,7 @@ import type { FlowHandle } from './mainFlow';
 import { downloadDebugReport } from './debug/DebugReport';
 import { installCanvasWatch } from './render/CanvasWatch';
 import { RemasterRuntime } from './remaster/RemasterRuntime';
+import { assetVersion } from './net/AssetCache';
 import { RemasterManager } from './remaster/RemasterManager';
 import { setRemasterBuffIcon, clearIconCache } from './ui/UI';
 
@@ -146,7 +147,7 @@ async function loadAssets() {
   // 失败静默(坏包不阻断启动;面板导入路径有显式报错)
   if (atlas) {
     remasterRuntime = new RemasterRuntime(atlas);
-    remasterManager = new RemasterManager(remasterRuntime);
+    remasterManager = new RemasterManager(remasterRuntime, () => assetVersion());
     const rt = remasterRuntime;
     remasterRuntime.onApplied = (info) => {
       // UI 派生缓存:物品图标 dataURL 缓存按物品 id 键不自动失效(Atlas 替换须清);
@@ -155,7 +156,13 @@ async function loadAssets() {
       setRemasterBuffIcon((id) => rt.buffIconUrl(id));
     };
     try {
-      await remasterManager.applyInstalled();
+      // ★超时保护:IDB v2 升级遇旧标签页持有 v1 连接不让路时 openDb 永久 pending
+      // (onversionchange 只对同代码版本生效;生产首次部署旧页在跑旧 bundle)——
+      // 素材包是增强不是必需,8s 不到就放弃,绝不阻断启动
+      await Promise.race([
+        remasterManager.applyInstalled(),
+        new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+      ]);
     } catch (err) {
       console.warn('[remaster] 启动应用素材包失败(已跳过):', err);
     }

@@ -1072,6 +1072,9 @@ export class MLDeathray extends Entity {
   private get maxScale(): number { return this.kind === 'head' ? 1 : 0.4; }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // 死光出生音：aiStyle84 首帧 PlaySound(29,…,104)=Zombie_104(pcs:30405-30408,
+    // ×0.55 档自动;曾整段无声,2026-08-19 终审补)
+    if (this.age === 0) game.playSfxWav?.('Zombie_104', 1, this.cx, this.cy);
     // v6 近似收紧①：束角回写——快照把房主实时角度放在 vx/vy 通道（exVx/exVy），
     // 傀儡消费式同步（读后清零防下一 tick 重复回拉振荡）；快照间隙内本地按扫速
     // 自推插值。后台页暂停恢复后由下一快照纠偏（此前只按首帧角自推会永久漂移）
@@ -1293,8 +1296,10 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
         e.cx + (Math.random() - 0.5) * 400, e.cy + (Math.random() - 0.5) * 400,
         '#C04030', 6, 3, { life: 30 });
     }
-    if (e.ai1 >= 600) { // :37053-37063 真死 → 全族由各部件 AI 检测 core.dead 自毁
-      e.dead = true;
+    if (e.ai1 >= 600) { // :37053-37063 真死 → life=0+checkDead 走完整 NPCLoot
+      // ★须 die() 而非直写 dead——hurt 对 398 放行(血尽转演出),直写=标准
+      // 死亡管线永不触发:boss 袋/夜明矿/武器池/白金全部不出(零掉落,终审修)
+      e.die(game);
       return;
     }
   } else if (e.ai0 === 3) { // 玩家全灭离场(:37065-37135)
@@ -1356,7 +1361,8 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
       const pvy = (player as unknown as { vy: number }).vy ?? 0;
       const dx = player.cx + pvx * 20 - e.cx, dy = player.cy + pvy * 20 - e.cy;   // :38359 预判 20t
       const d = Math.hypot(dx, dy) || 1;
-      if (inSlot === dur - 35) game.playSfxFiles?.(['NPC_Hit_6'], 1, e.cx, e.cy); // :38374-38377
+      // :38374-38377 PlaySound(4,…,6)=死音库 → NPC_Killed_6(终审修)
+      if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);
       if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
         shoot(game, e.cx, e.cy, dx / d * 8, dy / d * 8, 35, 462, 600);            // :38378-38382
       }
@@ -1509,7 +1515,7 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
     const dx = player.cx + pvx * 20 - e.cx, dy = player.cy + pvy * 20 - e.cy; // :37455 预判 20t
     x.l0 = angleLerp(x.l0, Math.atan2(dy, dx), 0.5);
     x.l1 = Math.min(1, x.l1 + 0.05);
-    if (inSlot === dur - 35) game.playSfxWav?.('NPC_Hit_6', 1, e.cx, e.cy);   // :37464 PlaySound(4,…,6)=NPCHit style6(曾借 roar 0.5)
+    if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);   // :37464(组4 死音库,终审修)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
       // :37466-37471 从眼球位置射 462(30 伤,8 速)
       const exx = Math.cos(x.l0) * 30 * x.l1, eyy = Math.sin(x.l0) * 66 * x.l1;
@@ -1704,7 +1710,7 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
     const dx = player.cx + pvx * 20 - e.cx, dy = player.cy + pvy * 20 - e.cy;
     x.l0 = angleLerp(x.l0, Math.atan2(dy, dx), 0.5);
     x.l1 = Math.min(1, x.l1 + 0.05);
-    if (inSlot === dur - 35) game.playSfxWav?.('NPC_Hit_6', 1, e.cx, e.cy);   // :38007 PlaySound(4,…,6)(曾借 roar 0.5)
+    if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);   // :38007(组4 死音库,终审修)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
       // 眼球椭圆 (27,59)(:37727 vector200),8 速 30 伤
       const exx = Math.cos(x.l0) * 27 * x.l1, eyy = Math.sin(x.l0) * 59 * x.l1;

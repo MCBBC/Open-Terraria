@@ -193,7 +193,8 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
     x[0] = angleLerp(x[0], Math.atan2(dy, dx), 0.5);
     x[1] = Math.min(1, x[1] + 0.05);
     x[2] = lerp(x[2], t < 20 ? 1.1 : 0.4, 0.2);
-    if (t === dur - 35) game.playSfxWav?.('NPC_Hit_6', 1, e.cx, e.cy);   // :38389 PlaySound(4,…,6)=NPCHit style6(曾借 roar 0.3)
+    // :38389 PlaySound(4,…,6)=case4 死音库 → NPC_Killed_6(曾错 NPC_Hit_6,终审修)
+    if (t === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);
     if (t === dur - 14 || t === dur - 7 || t === dur) {          // :38392-38398
       const ox = Math.cos(x[0]) * 30 * x[1], oy = Math.sin(x[0]) * 30 * x[1];
       const d = Math.hypot(dx, dy) || 1;
@@ -451,7 +452,11 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
         cultist.x = tx * TILE + 10 - cultist.w / 2;
         cultist.y = ty * TILE - cultist.h;              // 原版顶锚 y=tileY*16-2,本仓落底对齐
         cultist.facing = Math.sign(e.cx - (tx * TILE + 10)) || 1;
-        cultist.bInit = true;
+        // ★自然石碑链 439 占 boss 槽(F6/召唤链同款)——曾缺:杀教徒后 downed_439/
+        // 击败公告/TriggerLunarApocalypse 四塔/月总整链不发=主进度断链(终审 P0 修)。
+        // bInit 留 false:localAI[0]==0 出生 420t 渐显+无敌窗+Zombie_89(:65091-65131,
+        // 曾 bInit=true 跳过=无入场演出,终审修)
+        (game as unknown as { boss?: unknown }).boss = cultist;
         e.ai2 = cultist.id;                             // :38875 ai[2]=邪教徒 id
       }
       e.ai0 = -1; e.ai1 = 0; e.ai3 = 0;

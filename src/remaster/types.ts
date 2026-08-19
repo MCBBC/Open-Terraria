@@ -71,7 +71,9 @@ export interface PackManifest {
 export interface PackEntryMeta {
   category: RemasterCategory;
   complete: boolean;
-  /** frameIdx → 验收记录(rect 供不依赖当前 vanilla.json 的定位) */
+  /** 帧验收记录。★键 = `${AssetEntry.key}#${frameIdx}`——共享 sheet(Item_Atlas
+   *  被全部 item 条目共用)下纯 frameIdx 会互相覆盖(每个 item 的帧 0 都叫 "0")。
+   *  rect 自带像素定位,键只作记录寻址(应用侧整图注入不依赖此键)。 */
   frames: Record<string, PackFrameMeta>;
 }
 

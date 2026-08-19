@@ -148,7 +148,7 @@
   <div class="frow"><label>代理地址</label><input id="set-proxy" placeholder="http://127.0.0.1:5210"></div>
   <div class="frow"><label>OpenAI Key</label><input id="set-key" type="password" placeholder="sk-…(仅存本机 localStorage)"></div>
   <div class="frow"><label>质量档</label><select id="set-quality"><option>low</option><option selected>medium</option><option>high</option></select></div>
-  <div class="frow"><label>缩回算法</label><select id="set-algo"><option selected>box(块平均)</option><option value="nearest">nearest(块中心)</option></select></div>
+  <div class="frow"><label>缩回算法</label><select id="set-algo"><option value="box" selected>box(块平均)</option><option value="nearest">nearest(块中心)</option></select></div>
   <div class="frow" style="align-items:flex-start"><label>全局前缀</label>
     <textarea id="set-prefix"></textarea></div>
   <div class="row" style="justify-content:flex-end">
@@ -393,10 +393,30 @@ async function renderFrame() {
   updateButtons();
 }
 function applyOverlay(px) {
-  // 叠加模式:重制帧以 50% alpha 盖在原帧上(纹理差异即风格差异)
-  const orig = $('origcv'), nw = $('newcv');
-  nw.style.opacity = '';
-  if ($('overlay').checked && px) nw.style.opacity = '.5';
+  // 叠加对比:重制帧画布先铺原帧,再以 50% alpha 盖重制帧——像素错位即姿态/轮廓
+  // 漂移(此前只给 newcv 设 CSS opacity,露出的是背景格子而非原帧,对比语义不成立)
+  const nw = $('newcv');
+  const cx = nw.getContext('2d');
+  const f = curRect();
+  if (!f || !sheetImg) return;
+  cx.clearRect(0, 0, nw.width, nw.height);
+  cx.imageSmoothingEnabled = false;
+  if (px) {
+    if ($('overlay').checked) {
+      cx.drawImage(sheetImg, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);   // 原帧打底
+      // putImageData 不吃 globalAlpha——重制帧经临时 canvas 以 50% alpha 叠上
+      const t = document.createElement('canvas');
+      t.width = f.w; t.height = f.h;
+      const tc = t.getContext('2d');
+      if (!tc) return;
+      tc.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), 0, 0);
+      cx.globalAlpha = 0.5;
+      cx.drawImage(t, 0, 0);
+      cx.globalAlpha = 1;
+    } else {
+      cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), 0, 0);
+    }
+  }
 }
 $('overlay').onchange = () => renderFrame();
 function zhStatus(s) {
@@ -545,9 +565,9 @@ async function exportPack() {
             const px = framePixelsMem.get(`${e.key}|${f.frameIdx}`) ?? (await getFramePixels(e.key, f.frameIdx));
             if (!px) { meta.complete = false; continue; }
             cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), f.x, f.y);
-            meta.frames[f.frameIdx] = { status: 'accepted', rect: [f.x, f.y, f.w, f.h], hash: origHash, prompt: rec.prompt, gen: rec.gen };
+            meta.frames[`${e.key}#${f.frameIdx}`] = { status: 'accepted', rect: [f.x, f.y, f.w, f.h], hash: origHash, prompt: rec.prompt, gen: rec.gen };
           } else if (rec.status === 'skipped') {
-            meta.frames[f.frameIdx] = { status: 'skipped', rect: [f.x, f.y, f.w, f.h], hash: origHash };
+            meta.frames[`${e.key}#${f.frameIdx}`] = { status: 'skipped', rect: [f.x, f.y, f.w, f.h], hash: origHash };
           } else {
             meta.complete = false;  // pending 不导出
           }

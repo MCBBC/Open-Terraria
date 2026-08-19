@@ -34,18 +34,21 @@ function methodBodyOf(src, name) {
 /** case 段 → itemId: segmentSource 映射。
  *  关键：case 标签归属【最近一层 switch(type)】——SetDefaults1-5 内有嵌套
  *  switch(type)（如矿车 2343 块），内层标签才是物品 id；switch(其他变量) 的
- *  标签一律不归属（否则会冒充物品 id，见 extract-itemcombat 坑 2）。 */
+ *  标签一律不归属（否则会冒充物品 id，见 extract-itemcombat 坑 2）。
+ *  ★落空标签组（2026-08-19 线饰品批）：`case A: case B: 共享体`（C# fall-through）
+ *  组内【全部】标签映射同一共享体——旧版只记末标签（3293-3308 十二件整体失踪、
+ *  3308 独占共享体被嵌套 switch 首个字面污染成 str=27 的根因）。 */
 function outerCaseSegments(src) {
   const out = new Map();
   const collect = (body) => {
     const tokRe = /switch\s*\(([^)]*)\)|case (\d+):|default:|[{}]/g;
-    const stack = []; // { isType, opened, bodyDepth, cur, segStart }
+    const stack = []; // { isType, opened, bodyDepth, labels, segStart }
     let depth = 0;
     let m;
     while ((m = tokRe.exec(body))) {
       const t = m[0];
       if (t.startsWith('switch')) {
-        stack.push({ isType: /switch\s*\(\s*type\b/.test(t), opened: false, bodyDepth: -1, cur: null, segStart: 0 });
+        stack.push({ isType: /switch\s*\(\s*type\b/.test(t), opened: false, bodyDepth: -1, labels: [], segStart: 0 });
       } else if (t === '{') {
         depth++;
         const top = stack[stack.length - 1];
@@ -53,16 +56,20 @@ function outerCaseSegments(src) {
       } else if (t === '}') {
         const top = stack[stack.length - 1];
         if (top && top.opened && depth === top.bodyDepth) {
-          if (top.isType && top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+          const seg = body.slice(top.segStart, m.index);
+          if (seg.trim() !== '') for (const id of top.labels) out.set(id, seg);
           stack.pop();
         }
         depth--;
       } else {
-        // case / default
+        // case / default：到标签时已累积的段非空 = 上一组的真体（写给整组）；
+        // 为空 = fall-through 续标（并入当前组等共享体）。default 体不归属任何 id
+        //（与旧版一致——default 段的字段是公共兜底，不落在末 case 头上）。
         const top = stack[stack.length - 1];
         if (top && top.opened && top.isType) {
-          if (top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
-          top.cur = t === 'default:' ? null : +m[2];
+          const seg = body.slice(top.segStart, m.index);
+          if (seg.trim() !== '') { for (const id of top.labels) out.set(id, seg); top.labels = []; }
+          if (t !== 'default:') top.labels.push(+m[2]);
           top.segStart = m.index + t.length;
         }
       }
@@ -77,6 +84,85 @@ function outerCaseSegments(src) {
   return out;
 }
 const CASE_SEGMENTS = outerCaseSegments(itemSrc);
+/** 段内全部 `switch (type) {...}` 块的花括号匹配跨度（嵌套更深 switch 也按整段跨） */
+function typeSwitchSpans(seg) {
+  const spans = [];
+  const re = /switch\s*\(\s*type\s*\)/g;
+  let m;
+  while ((m = re.exec(seg))) {
+    const brace = seg.indexOf('{', m.index + m[0].length);
+    if (brace < 0) break;
+    let d = 0, end = -1;
+    for (let i = brace; i < seg.length; i++) {
+      if (seg[i] === '{') d++;
+      else if (seg[i] === '}') { d--; if (d === 0) { end = i; break; } }
+    }
+    if (end < 0) break;
+    spans.push([m.index, end + 1]);
+    re.lastIndex = end + 1;
+  }
+  return spans;
+}
+
+/** switch 体 → { cases: Map<label, body>, def }（case 标签按体深度 0 归属；
+ *  组内 fall-through 空体标签并入下一组——与 outerCaseSegments 同法） */
+function parseSwitchCases(swBody) {
+  const cases = new Map();
+  let def = null;
+  const tokRe = /case (\d+):|default:|[{}]/g;
+  let depth = 0, segStart = 0, m;
+  let pending = [];
+  const flush = (endIdx) => {
+    const body = swBody.slice(segStart, endIdx);
+    if (body.trim() === '') return;   // fall-through 续标：pending 保留并入下一组
+    for (const L of pending) {
+      if (L === 'def') def = body; else cases.set(L, body);
+    }
+    pending = [];
+  };
+  while ((m = tokRe.exec(swBody))) {
+    const t = m[0];
+    if (t.startsWith('case') || t === 'default:') {
+      if (depth === 0) {
+        flush(m.index);
+        pending.push(t === 'default:' ? 'def' : +m[1]);
+        segStart = m.index + t.length;
+      }
+    } else if (t === '{') depth++;
+    else if (t === '}') depth--;
+  }
+  flush(swBody.length);
+  return { cases, def };
+}
+
+/** 字段按 id 求值（C# 顺序执行语义）：
+ *  外层语句恒执行；嵌套 switch(type) 仅执行命中分支（有本 id 的 case 走 case，
+ *  否则 default，二者皆无 = 什么都不执行）；【后执行的段覆盖先执行的段】。
+ *  段内取首匹配——`defense=2; if(Variant==Weaker){defense=1}` 这类条件重赋值
+ *  只在改写语境生效，取首值才是常观数值（与旧版扫描口径一致）。
+ *  ★必要性（2026-08-19 线饰品批）：落空标签组共享体+嵌套 switch 是 SetDefaults
+ *  对成组物品逐 id 差异化的标准写法（如 3293-3308 线色 / 3863-3865 头槽 /
+ *  3855-3857 宠物 buffType）——首字面匹配会把全组误判第一个值。 */
+function resolveCaseField(seg, pattern, id) {
+  const spans = typeSwitchSpans(seg);
+  const parts = [];
+  let last = 0;
+  for (const [s, e] of spans) {
+    parts.push(seg.slice(last, s));
+    const brace = seg.indexOf('{', s);
+    const { cases, def } = parseSwitchCases(seg.slice(brace + 1, e - 1));
+    parts.push(cases.has(id) ? cases.get(id) : (def ?? ''));
+    last = e;
+  }
+  parts.push(seg.slice(last));
+  let val;
+  for (const p of parts) {
+    const m = p.match(new RegExp(pattern));
+    if (m) val = m[1] !== undefined ? +m[1] : 1;
+  }
+  return val;
+}
+
 /** 扫描字段赋值（field = N;）与辅助方法调用（DefaultToMinecart(N)）。
  *  存在性模式（无捕获组，如 DefaultToInfoAccessory() 辅助族）→ 恒记 1：
  *  1456 的信息饰品 22 件走 DefaultToInfoAccessory(24,18|28)(Item.cs:1561+，内部
@@ -86,8 +172,8 @@ function scanCaseFields(src, patterns) {
   const out = new Map(); // itemId -> 值
   for (const [id, seg] of CASE_SEGMENTS) {
     for (const p of patterns) {
-      const f = seg.match(new RegExp(p));
-      if (f) { out.set(id, f[1] !== undefined ? +f[1] : 1); break; }
+      const v = resolveCaseField(seg, p, id);
+      if (v !== undefined) { out.set(id, v); break; }
     }
   }
   return out;
@@ -139,6 +225,33 @@ const WING_SLOT = scanCaseFields(itemSrc, ['\\bwingSlot\\s*=\\s*(\\d+);']);
 for (const [vid, wing] of WING_SLOT) setStat(vid, { wing });
 // 悠悠球线（Item.stringColor>0 → yoyoString=true，Player.cs:14170）
 const STRING_COLOR = scanCaseFields(itemSrc, ['\\bstringColor\\s*=\\s*(\\d+);']);
+// 范围块求值覆写：case 3293-3308 共享体内是【嵌套 switch(type)】（Item.cs:30191-30229：
+//   case 3307→27 / 3306→14 / 3308→13 / 3305→28 / default→1+type-3293）——
+// 共享体首字面匹配会把全组误判 27，须按嵌套 switch 语义逐 id 求值（case 命中
+// 用 case 字面，否则 default 公式代入 type）。
+for (const [id, seg] of CASE_SEGMENTS) {
+  const swIdx = seg.indexOf('switch (type)');
+  if (swIdx < 0) continue;
+  const brace = seg.indexOf('{', swIdx);
+  let d = 0, end = -1;
+  for (let i = brace; i < seg.length; i++) {
+    if (seg[i] === '{') d++;
+    else if (seg[i] === '}') { d--; if (d === 0) { end = i; break; } }
+  }
+  if (end < 0) continue;
+  const cases = new Map();
+  let defaultExpr = null;
+  for (const part of seg.slice(brace + 1, end).split(/(?=case \d+:|default:)/)) {
+    const lbl = part.match(/^(case (\d+)|default):/);
+    const val = part.match(/stringColor = ([^;]+);/);
+    if (!lbl || !val) continue;
+    if (lbl[2]) cases.set(+lbl[2], val[1].trim());
+    else defaultExpr = val[1].trim();
+  }
+  if (!cases.size && defaultExpr === null) continue;   // 非线饰品族嵌套 switch 不动
+  const expr = cases.get(id) ?? defaultExpr;
+  if (expr !== null && expr !== undefined) STRING_COLOR.set(id, +new Function('type', `return ${expr};`)(id));
+}
 for (const [vid, sc] of STRING_COLOR) setStat(vid, { str: sc });
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
 console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size} wing ${WING_SLOT.size}）`);

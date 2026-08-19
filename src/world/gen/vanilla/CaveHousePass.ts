@@ -367,8 +367,11 @@ function placeFurniture(st: TileStore, key: string, x: number, y: number, style 
  *  ±25 红线扫描翻转 #59 全部 193 格残差（9293480 (3201,366) golden 实锤：
  *  雕像 (3200,364) 被 62 挡、vanilla 仍落陷阱 (3192,366)+线 3192..3201）。
  *  注意与 Statues pass 相区分：那边 cs:17045 是 `tile.active()&&type==x`
- *  成功门内才调（JS StatuesPass 同构，勿互搬）。 */
-function placeStatue(st: TileStore, x: number, y: number, idx: number): boolean {
+ *  成功门内才调（JS StatuesPass 同构，勿互搬）。
+ *  GGGGG：placeStatueTrap 共享版带 PlaceTile(135) 尾 SquareTileFrame 内联级联
+ *  （与 vanilla HouseBuilder→PlaceStatueTrap→PlaceTile 同构；WWWW kstage 快照
+ *  扫描对零掷击杀幂等，掷型检查(184/165 重帧)以内联为准=vanilla 流位）。 */
+function placeStatue(st: TileStore, rng: RNG, x: number, y: number, idx: number): boolean {
   const [sheet, style] = STATUE_LIST[idx];
   const tile = sheet === 349 ? STATUE_349 : STATUE_105;
   let ok = true;
@@ -393,7 +396,7 @@ function placeStatue(st: TileStore, x: number, y: number, idx: number): boolean 
       regHouseObj(st, x, y - 2, 2, 3, 'floor');
     }
   }
-  if (STATUES_WITH_TRAPS.has(idx)) placeStatueTrap(st, x, y);
+  if (STATUES_WITH_TRAPS.has(idx)) placeStatueTrap(st, rng, x, y);
   return ok;
 }
 
@@ -1066,7 +1069,7 @@ function fillRooms(st: TileStore, rng: RNG, r: Rect, def: ThemeDef, theme: Theme
         placeFurniture(st, 'v_186_decos_3x2', x, y, rng.int(22, 25));
         break;
       case 2: // 雕像(statueList[Next(2, len)],陷阱雕像照接)
-        placeStatue(st, x, y, rng.int(2, STATUE_LIST.length - 1));
+        placeStatue(st, rng, x, y, rng.int(2, STATUE_LIST.length - 1));
         break;
       case 3: {
         const [key, style] = choices[rng.int(0, choices.length - 1)];

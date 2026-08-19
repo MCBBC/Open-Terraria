@@ -57,9 +57,10 @@ const sign = (v: number): number => (v > 0 ? 1 : v < 0 ? -1 : 0);
 function shootM(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300, pierce = 1,
+  arrowOpts?: Partial<import('./Arrow').ArrowOpts>,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce, hostile: true }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce, hostile: true, ...arrowOpts }),
     'projectiles');
 }
 
@@ -307,6 +308,8 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     if (inWin !== wasWin) {
       if (inWin === 1) {
         e.ai2 = player && player.cx > center.x ? 1 : -1;
+        // :36210 死光生成音 Item12
+        game.playSfxWav?.('Item_12', 1, e.cx, e.cy);
         const ray = new MartianDeathray(e, 80);   // 447 死光电报（AI_079 实体）
         (game as unknown as { entities: { add(el: unknown, b: string): void } }).entities.add(ray, 'projectiles');
       }
@@ -402,7 +405,8 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
           if (d > 0.001) { sx = (sx / d) * 7; sy = (sy / d) * 7; }
           else { sx = 0; sy = -7; }
           shootM(game, oxp, oyp, sx, sy, 30, 438);
-          game.playSfxFiles?.(['Item_39'], 1, e.cx, e.cy);   // :36272 骑手(Scutlix 390)射弹音
+          // 原版骑手 390 射弹无声(:35921-35996)——曾误挂 :36272 导弹段的
+          // Item39(该音属空巢导弹,2026-08-19 终审删)
         }
       }
     }
@@ -422,6 +426,7 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
         const delta = (Math.random() - 0.5) * 0.7853982;   // ±22.5° 散布（:36133-36136）
         shootM(game, e.cx + dirx * 36, e.cy + 8,
           Math.cos(delta) * 8 * dirx, Math.sin(delta) * 8 * dirx, 50, 448);
+        game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36098 火炮每发(终审补)
       }
     }
     return;
@@ -464,6 +469,8 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
   if (e.ai3 >= 20 && e.ai3 < 260 && saucer.ai0 === 0) {
     if (e.ai3 - 20 === 0) {
       // 447 死光电报实体（AI_079）——束体独立类（锚定电报塔/母舰，束高逐tick重算）
+      // :36701 专家死光生成音 Item12(终审补)
+      game.playSfxWav?.('Item_12', 1, e.cx, e.cy);
       const ray = new MartianDeathray(e, 50);
       (game as unknown as { entities: { add(el: unknown, b: string): void } }).entities.add(ray, 'projectiles');
     }
@@ -483,25 +490,33 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
     if (flag76) {
       // 炮塔空巢（:36243-36258）:下方侧向抛射
       if (t0Dead && rnd(mv4) === 0) {
-        const ang = Math.atan2(1, -Math.random() * 3) + (Math.random() - 0.5) * 0.7853982;
-        shootM(game, e.cx - rndRange(50, 70), e.cy + rndRange(30, 45),
-          Math.cos(ang) * 3, Math.sin(ang) * 3, 30, 450);
+        // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
+        const mvx = -Math.random() * 3 * 3, mvy = 1 * 3;
+        shootM(game, e.cx + rndRange(50, 70), e.cy + rndRange(30, 45), mvx, mvy, 30, 450, 300, 1,
+          { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
+        game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
       if (t1Dead && rnd(mv4) === 0) {
-        const ang = Math.atan2(1, Math.random() * 3) + (Math.random() - 0.5) * 0.7853982;
-        shootM(game, e.cx + rndRange(50, 70), e.cy + rndRange(30, 45),
-          Math.cos(ang) * 3, Math.sin(ang) * 3, 30, 450);
+        // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
+        const mvx = Math.random() * 3 * 3, mvy = 1 * 3;
+        shootM(game, e.cx + rndRange(50, 70), e.cy + rndRange(30, 45), mvx, mvy, 30, 450, 300, 1,
+          { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
+        game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
       // 火炮空巢（:36261-36276）:上方侧向抛射
       if (c0Dead && rnd(mv5) === 0) {
-        const ang = Math.atan2(-1, -Math.random() * 2) + (Math.random() - 0.5) * 0.7853982;
-        shootM(game, e.cx - rndRange(30, 60), e.cy + rndRange(-30, -10),
-          Math.cos(ang) * 3, Math.sin(ang) * 3, 30, 450);
+        // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
+        const mvx = -Math.random() * 3 * 3, mvy = -1 * 3;
+        shootM(game, e.cx + rndRange(30, 60), e.cy + rndRange(-30, -10), mvx, mvy, 30, 450, 300, 1,
+          { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
+        game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
       if (c1Dead && rnd(mv5) === 0) {
-        const ang = Math.atan2(-1, Math.random() * 2) + (Math.random() - 0.5) * 0.7853982;
-        shootM(game, e.cx + rndRange(30, 60), e.cy + rndRange(-30, -10),
-          Math.cos(ang) * 3, Math.sin(ang) * 3, 30, 450);
+        // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
+        const mvx = Math.random() * 3 * 3, mvy = -1 * 3;
+        shootM(game, e.cx + rndRange(30, 60), e.cy + rndRange(-30, -10), mvx, mvy, 30, 450, 300, 1,
+          { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
+        game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
     }
   }

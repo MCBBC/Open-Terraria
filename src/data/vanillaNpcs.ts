@@ -62,6 +62,7 @@ export interface VanillaNpc {
   noTileCollide: boolean;
   friendly: boolean;
   townNPC: boolean;
+  hide?: boolean;   // NPC.hide(Main.cs:22172 常规绘制跳过;401 水蛭块=纯拖尾体)
   HitSound: string;   // SoundID 名（NPCHitN / NPCDeathN）
   DeathSound: string | null;   // null=原版显式无声(246 头:血尽转 249,标准死零死音);缺省(无键)=提取漏,fallback 通用档
   scale: number;

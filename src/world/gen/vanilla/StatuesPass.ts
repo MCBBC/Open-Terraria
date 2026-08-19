@@ -9,6 +9,7 @@ import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 import { vanGenSolidType } from './GenSolid';
 import { genSquareTileFrame } from './FinalCleanupPass';
+import { genSolidType } from './GenSolid';
 
 /** statueList(cs:4395-4433):73 项 (tile, style) 对,原序 */
 export const STATUE_LIST: Array<[number, number]> = (() => {
@@ -59,6 +60,151 @@ const FR_IMPORTANT_NOCUT = new Set([
  *  Place1x1 cs:45213：IsAMechanism[135] && Boulders[底.type] → 拒放陷阱） */
 const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
 
+/** Check2x2 上方箱族豁免（cs:48483-85：BasicChest{21,467}+BasicChestFake{441,468}
+ *  +88 梳妆台+470 人偶架+475 帽架；裸读 type 不查 active——ghost type 保真）。
+ *  与 FinalCleanupPass/HalfBrickPass 同源表副本（"同源副本禁 import"惯例）。 */
+const CHEST_PROTECT_2X2 = new Set([21, 467, 441, 468, 88, 470, 475]);
+const PLATFORMS_TOP = new Set([19, 427, 435, 436, 437, 438, 439]);
+const platformProperTop = (fx: number): boolean => {
+  const n = Math.floor(fx / 18);
+  return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
+};
+/** SolidTileAllowBottomSlope（cs:70211，引擎同源副本）：!InWorld→true；
+ *  active&&(genSolid||platform)&&(!顶坡||平台正帧)&&!half&&!inActive */
+function solidAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i] || (st.wire[i] & 32)) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !(genSolidType(st.type[i]) || d.platform)) return false;
+  const sl = st.slope[i];
+  if ((sl === 1 || sl === 2) && !(PLATFORMS_TOP.has(SHEET[st.type[i]]) && platformProperTop(st.frameX[i]!))) return false;
+  return !st.half[i];
+}
+
+/** ★GGGGG 本地补件：Check2x2 巨石支 484（cs:48405-48807 boulder 分支）。
+ *  FinalCleanupPass 引擎只派发 138/411（CCCCC 定向批；484 维持"未派发备案"），
+ *  本批冻结禁区只 import——s22222 #58 在场成员 (2407,807) 孤立 484 半组
+ *  （伙伴格被矿覆写的巨石残件，惰性帧校验击杀）按 HalfBrickPass 同源副本
+ *  惯例本地补齐。零掷族（484 尘掷=0，RRRR 表）；杀尾 KillTile 尾九宫走引擎
+ *  genSquareTileFrame（其余 Check* 分派），嵌套 484 由 4×4 尾窗再扫一轮。 */
+function check2x2Boulder484(st: TileStore, rng: RNG, x: number, y: number): void {
+  const i0 = st.idx(x, y);
+  if (!st.flags[i0] || SHEET[st.type[i0]] !== 484) return;
+  let num2 = -Math.trunc(st.frameX[i0]! / 18);      // cs:48418
+  let num = 0;
+  if (num2 < -1) { num2 += 2; num = 36; }
+  num2 += x;
+  let num4 = st.frameY[i0]!;
+  let num5 = 0;
+  while (num4 >= 36) { num4 -= 36; num5++; }
+  const num6 = y - Math.trunc(num4 / 18);
+  const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
+  let bad = false;
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      if (!inW(k, l)) { bad = true; break; }        // GetTileSafely 新格→失配
+      const q = st.idx(k, l);
+      if (!st.flags[q] || SHEET[st.type[q]!] !== 484
+        || st.frameX[q] !== (k - num2) * 18 + num
+        || st.frameY[q] !== (l - num6) * 18 + num5 * 36) { bad = true; break; }
+    }
+  }
+  // cs:48473-90 Boulders 支：上方箱族豁免 + 底两格 SolidTileAllowBottomSlope 联合门
+  const chestAbove = (cx: number, cy: number): boolean =>
+    inW(cx, cy) && CHEST_PROTECT_2X2.has(SHEET[st.type[st.idx(cx, cy)]] ?? -1);
+  if (!chestAbove(num2, num6 - 1) && !chestAbove(num2 + 1, num6 - 1)
+    && !solidAllowBottomSlope(st, num2, num6 + 2)
+    && !solidAllowBottomSlope(st, num2 + 1, num6 + 2)) bad = true;
+  if (!bad) return;
+  // cs:48567 击杀环（destroyObject 闸内同型格 KillTile；484 尘掷=0）+ 尾 4×4
+  const kills: Array<[number, number]> = [];
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      if (inW(k, l) && st.flags[st.idx(k, l)] && SHEET[st.type[st.idx(k, l)]] === 484) {
+        kills.push([k, l]);
+      }
+    }
+  }
+  for (const [kx, ky] of kills) st.setTileSilent(kx, ky, 0);
+  for (const [kx, ky] of kills) genSquareTileFrame(st, rng, kx, ky);   // KillTile 尾九宫
+  for (let k = num2 - 1; k < num2 + 3; k++) {                          // cs:48801-07 4×4 尾
+    for (let l = num6 - 1; l < num6 + 3; l++) {
+      if (inW(k, l) && st.flags[st.idx(k, l)] && SHEET[st.type[st.idx(k, l)]] === 484) {
+        check2x2Boulder484(st, rng, k, l);                             // 嵌套 484（罕见，收敛杀）
+      }
+    }
+  }
+}
+
+/** ★GGGGG 帧债垫片（惰性）：JS DungeonPass 陈设 chTile/dgWr 只写 type 不落帧
+ *  （NNN 批仅补 banner 91）。放置期 SquareTileFrame 的 Check* 完整性校验读帧——
+ *  零帧组必假杀（m 链 #58 实锤：(1578,911) 画 240×9 + (1172,923) 柜 88×6；
+ *  vanilla 有效帧 → 校验通过保留——金标 058 两物俱在）。DungeonPass 为并行冻结
+ *  域，本垫片在扫窗命中「同类连通**满矩形**组、全零帧」时就地写自洽 style-0
+ *  帧型（帧通道 8 通道对拍不可见；渲染帧型自洽，真实 style 债在案移交
+ *  DungeonPass 帧链批——其落帧后本垫片恒不触发，可整段删除）。
+ *  组残缺（矩形不满）不垫：彼时 type/active 失配本就两版同杀，帧无关。 */
+function backfillZeroFrames(st: TileStore, x: number, y: number): void {
+  const i0 = st.idx(x, y);
+  const t = st.type[i0];
+  if (!st.flags[i0] || !TILE_DEFS[t]?.framed) return;
+  if (st.frameX[i0] !== 0 || st.frameY[i0] !== 0) return;
+  // 组 bbox：同类活性连通扫描（多格陈设最大 6×4 → ±5 窗足够）
+  let x0 = x, y0 = y, x1 = x, y1 = y;
+  const cells: number[] = [i0];
+  const grow = (cx: number, cy: number): void => {
+    for (let dx = -5; dx <= 5; dx++) {
+      for (let dy = -5; dy <= 5; dy++) {
+        const nx = cx + dx, ny = cy + dy;
+        if (!st.inBounds(nx, ny)) continue;
+        const ni = st.idx(nx, ny);
+        if (!st.flags[ni] || st.type[ni] !== t) continue;
+        if (st.frameX[ni] !== 0 || st.frameY[ni] !== 0) return;   // 混帧组不垫
+        if (nx < x0) x0 = nx; if (nx > x1) x1 = nx;
+        if (ny < y0) y0 = ny; if (ny > y1) y1 = ny;
+        cells.push(ni);
+      }
+    }
+  };
+  grow(x, y);
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) < 2) return;                   // 单格（style0 合法）
+  // 满矩形校验：bbox 内每格皆同类活性且零帧（两相邻同型物并组 → 非满矩形 → 跳过）
+  for (let xx = x0; xx <= x1; xx++) {
+    for (let yy = y0; yy <= y1; yy++) {
+      const qi = st.idx(xx, yy);
+      if (!st.flags[qi] || st.type[qi] !== t || st.frameX[qi] !== 0 || st.frameY[qi] !== 0) return;
+    }
+  }
+  for (const qi of cells) {
+    const qx = qi % st.w, qy = Math.floor(qi / st.w);
+    st.frameX[qi] = (qx - x0) * 18;
+    st.frameY[qi] = (qy - y0) * 18;
+  }
+}
+
+/** 放置期 SquareTileFrame 九宫（cs:80924 列主序）+ 引擎未派发成员 484 本地补。
+ *  484 补件在引擎扫之后跑（后置序：引擎级联杀已生效，484 判据读终态——与
+ *  vanilla 逐格交错序在"同窗多杀"边角才可能分叉，四链复核裁决）。 */
+function statueFrameSweep(st: TileStore, rng: RNG, x: number, y: number): void {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const cx = x + dx, cy = y + dy;
+      if (!st.inBounds(cx, cy)) continue;
+      backfillZeroFrames(st, cx, cy);
+    }
+  }
+  genSquareTileFrame(st, rng, x, y);
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const cx = x + dx, cy = y + dy;
+      if (!st.inBounds(cx, cy)) continue;
+      const ci = st.idx(cx, cy);
+      if (st.flags[ci] && SHEET[st.type[ci]] === 484) check2x2Boulder484(st, rng, cx, cy);
+    }
+  }
+}
+
 function statueTileKey(sheet: number): number | null {
   for (let id = 0; id < TILE_DEFS.length; id++) {
     const d = TILE_DEFS[id];
@@ -103,7 +249,7 @@ export function placeStatueTrap(st: TileStore, rng: RNG, x: number, y: number): 
       // Place1x1 cs:45213 机关门：底座是 Boulders 族 → 不落陷阱（续扫）
       if (BOULDERS.has(SHEET[st.type[bi]])) continue;
       st.setTileSilent(tx, ty, TRAP, 0, 0);
-      genSquareTileFrame(st, rng, tx, ty);                          // PlaceTile(135) 尾九宫
+      statueFrameSweep(st, rng, tx, ty);                            // PlaceTile(135) 尾九宫
       // cs:4453：放置成功（tile2 活性且 type==135）才拉线返回，否则续扫
       if (!(st.flags[ci] && st.type[ci] === TRAP)) continue;
       // WireLine(new Point(x,y), new Point(tx,ty))：横段沿雕像 y、竖段沿陷阱 x
@@ -205,7 +351,7 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
         //   惰性帧校验（m/s 链 #58 首差根源：165 钟乳石悬挂失守/187 沙堆/484 巨石
         //   半组被首次帧校验整组击杀——放置前从未被任何 pass 帧到）。引擎复用
         //   FinalCleanupPass.genSquareTileFrame（与 DDDDD settle 侧 165/91 派发同源）。
-        genSquareTileFrame(st, rng, x, y);
+        statueFrameSweep(st, rng, x, y);
       }
       // cs:17029 成功判定=PlaceTile 后回读锚格（引用语义）：tile.active()&&type==x。
       //   含"幻影成功"——随机 y 落在既有同型雕像体内（flag2 拒）也计成功推进 num

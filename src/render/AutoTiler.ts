@@ -3,6 +3,7 @@
 //   0=Any(忽略) 1=This 2=NotThis 3=Any(specified∪this，按 This 处理)
 //   4=Specified(按 This 处理) 5=NotSpecified(按 NotThis 处理) 6=Air(仅空气)
 // m_RuleTransform: 0=Fixed 1=Rotated —— 边缘规则旋转匹配四方向（位置与精灵同转）
+import { bitmapize, type Baked } from './bitmapize';
 import type { SpriteAtlas, RuleTileDef } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { hash2 } from '../core/rng';
@@ -18,7 +19,7 @@ export class AutoTiler {
   constructor(public atlas: SpriteAtlas) {}
 
   // 旋转后的精灵画布缓存：key "file|sprite|rot"
-  private rotCache = new Map<string, HTMLCanvasElement>();
+  private rotCache = new Map<string, Baked>();   // 写一次 → 异步升格 ImageBitmap
 
   private rotatedRect(sp: { file: string; sprite: string }, base: DrawRect, rot: number): DrawRect {
     if (rot === 0) return base;
@@ -35,8 +36,9 @@ export class AutoTiler {
       ctx.rotate((-rot * Math.PI) / 2);
       ctx.drawImage(base.img, base.sx, base.sy, base.sw, base.sh, -base.sw / 2, -base.sh / 2, base.sw, base.sh);
       this.rotCache.set(key, c);
+      bitmapize(this.rotCache, key);
     }
-    return { img: c, sx: 0, sy: 0, sw: c.width, sh: c.height };
+    return { img: this.rotCache.get(key) ?? c, sx: 0, sy: 0, sw: c.width, sh: c.height };
   }
 
   /** 对 (x,y) 求贴合贴图。layer='tile' 比较 tile 类型；'wall' 比较墙类型 */
@@ -246,7 +248,7 @@ export class AutoTiler {
   private annGroups: Record<string, Record<string, DrawRect[]>> = {};
   // 镂空补齐缓存：sprite 名 → 合成画布（透明像素用件自身泥土色填补，
   // 相邻草块连续无缝，边缘又是覆盖件自身质感，不露程序化泥土底）
-  private filledCache = new Map<string, HTMLCanvasElement>();
+  private filledCache = new Map<string, Baked>();
 
   private filledRect(r: DrawRect, key: string): DrawRect {
     let c = this.filledCache.get(key);
@@ -298,8 +300,9 @@ export class AutoTiler {
       }
       ctx.putImageData(img, 0, 0);
       this.filledCache.set(key, c);
+      bitmapize(this.filledCache, key);
     }
-    return { img: c, sx: 0, sy: 0, sw: c.width, sh: c.height };
+    return { img: this.filledCache.get(key) ?? c, sx: 0, sy: 0, sw: c.width, sh: c.height };
   }
 
   private annotatedTile(annKey: string, store: TileStore, x: number, y: number, tileType: number): DrawRect | null {

@@ -17538,6 +17538,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  → 命中盒外扩 150px 与玩家矩形相交 → brokenMirrorBadLuckTime = 25200
    *  （luck −0.25 档，UpdateBrokenMirrorLuck :28700-28711 衰减） */
   onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0, oldVx = 0, oldVy = 0) {
+    // 月总幻影矢/球 452/454 消亡爆(Projectile.cs:69827-69897):音+尘+范围伤二次
+    // 结算(判定盒外扩 144/208×2;gore 61-63 略)——2026-08-19 终审补
+    if (projId === 452 || projId === 454) {
+      const cx = x + w / 2, cy = y + h / 2;
+      const R = projId === 452 ? 144 / 2 : 208 / 2;   // 判定盒半宽
+      this.playSfxWav(projId === 452 ? 'Zombie_103' : 'NPC_Killed_6', 1, cx, cy);
+      const n = projId === 452 ? 44 : 67;             // 31×4+229×40 / 31×7+229×60
+      this.spawnParticles(cx, cy, '#B040D0', n, 3, { life: 30, damp: 0.94 });
+      const p = this.player;
+      if (p && !p.dead && p.x < cx + R && p.x + p.w > cx - R
+        && p.y < cy + R && p.y + p.h > cy - R) {
+        // Damage() 二次结算:原版沿用弹 damage(命中已 ×2,此处近似同值直伤)
+        this.damagePlayer(20, cx, cy, undefined);
+      }
+      return;
+    }
     if (projId !== 1085) return;
     this.playSfxFiles(['Item_106'], 1, x + w / 2, y + h / 2);
     const dvx = oldVx * 0.2, dvy = oldVy * 0.2;             // oldVelocity *= 0.2
@@ -18327,8 +18343,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.entities.add(new TowerBolt(enemy.cx, enemy.cy, findTower, (t) => {
       const res = onTowerBoltHit(this.world, towerId);
       if (res.flash) t.ai3 = 1;  // 盾非 0 时塔 ai[3]=1（闪光 120t）
-      // 塔盾归零原版零吼（aiStyle 92 段 :40871-42500 无 PlaySound；全树 case15
-      // 普查亦无塔调用）——曾自加 roar 0.8，2026-08-18 对账删
+      // 塔盾归零 = PlaySound(4,…,58) NPCDeath58（塔 aiStyle **94** 段 :41148-41151
+      // flag99 翻转支——曾误删:旧对账批查的是 92 木桩段无此音,终审恢复）
+      if (res.shieldZero) this.playSfxWav('NPC_Killed_58', 1, t.cx, t.cy);
     }), 'projectiles');
   }
 

@@ -16,7 +16,8 @@
     "play": "node scripts/play.mjs",
     "playsoft": "node scripts/play.mjs --soft",
     "playtrace": "node scripts/play.mjs --trace",
-    "remaster-proxy": "node tools/remaster-proxy.mjs"
+    "remaster-proxy": "node tools/remaster-proxy.mjs",
+    "play2": "node scripts/play.mjs --isolate"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3"

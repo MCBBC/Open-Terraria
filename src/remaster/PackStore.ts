@@ -2,13 +2,11 @@
 //   已安装 pack(manifest+混合 sheet png)与工作台按帧进度(EntryProgress JSON
 //   + 帧级 RGBA blob)两类数据。进度帧像素量大(60×44×4≈10KB/帧)不能走
 //   kv 字符串通道,与 pack 同住 remaster store。
-import { kvGet, kvSet, kvDelete, remasterPut, remasterAll, remasterDelete, type RemasterPackRow } from '../save/KvStore';
+import { kvGet, kvSet, kvDelete, remasterPut, remasterGet, remasterAll, remasterDelete, type RemasterPackRow } from '../save/KvStore';
 import type { LoadedPack, EntryProgress, PackManifest } from './types';
 
 /** 进度 JSON 的 kv 键(小,字符串通道) */
 const PROGRESS_KEY = 'sw.remaster.progress';
-/** 帧像素 blob 行 id(remaster store 单行) */
-const FRAME_PIXELS_ID = '__workbench_frames';
 /** 已安装包注册表 kv 键(轻元数据;blob 在 remaster store) */
 const INSTALLED_KEY = 'sw.remaster.installed';
 
@@ -80,37 +78,40 @@ export async function saveProgress(p: Record<string, EntryProgress>): Promise<vo
   await kvSet(PROGRESS_KEY, JSON.stringify(p));
 }
 
-/** 帧像素键:`{entryKey}|{frameIdx}`。 */
+/** 帧像素键:`{entryKey}|{frameIdx}`(进度 JSON 里的寻址键同式)。 */
 export function frameKey(entryKey: string, frameIdx: number): string {
   return `${entryKey}|${frameIdx}`;
 }
 
-async function frameRow(): Promise<Record<string, Blob>> {
-  const rows = await remasterAll();
-  return rows.find((r) => r.id === FRAME_PIXELS_ID)?.sheets ?? {};
-}
+/** 帧像素存储:★单帧单行(id = `frame:{entryKey}|{idx}`)——早期实现整行聚合,
+ *  每帧验收全量重读重写全部帧 blob(O(n²) I/O,百帧条目放大百倍);
+ *  单行后 loadInstalledPacks 的 byId 过滤天然跳过 frame 行。 */
+const FRAME_ROW_PREFIX = 'frame:';
 
 export async function putFramePixels(entryKey: string, frameIdx: number, pixels: Uint8ClampedArray): Promise<void> {
-  const sheets = await frameRow();
-  sheets[frameKey(entryKey, frameIdx)] = new Blob([pixels as unknown as BlobPart], { type: 'application/octet-stream' });
-  await remasterPut({ id: FRAME_PIXELS_ID, name: '__workbench_frames', enabled: false, manifestJson: '{}', sheets, addedAt: 0 });
+  await remasterPut({
+    id: FRAME_ROW_PREFIX + frameKey(entryKey, frameIdx),
+    name: '', enabled: false, manifestJson: '{}',
+    sheets: { f: new Blob([pixels as unknown as BlobPart], { type: 'application/octet-stream' }) },
+    addedAt: 0,
+  });
 }
 
 export async function getFramePixels(entryKey: string, frameIdx: number): Promise<Uint8ClampedArray | null> {
-  const sheets = await frameRow();
-  const blob = sheets[frameKey(entryKey, frameIdx)];
+  const row = await remasterGet(FRAME_ROW_PREFIX + frameKey(entryKey, frameIdx));
+  const blob = row?.sheets.f;
   if (!blob) return null;
   return new Uint8ClampedArray(await blob.arrayBuffer());
 }
 
 export async function deleteFramePixels(entryKey: string, frameIdx: number): Promise<void> {
-  const sheets = await frameRow();
-  delete sheets[frameKey(entryKey, frameIdx)];
-  await remasterPut({ id: FRAME_PIXELS_ID, name: '__workbench_frames', enabled: false, manifestJson: '{}', sheets, addedAt: 0 });
+  await remasterDelete(FRAME_ROW_PREFIX + frameKey(entryKey, frameIdx));
 }
 
 /** 清全部工作进度(导出后重置;不动已安装 pack)。 */
 export async function clearProgress(): Promise<void> {
   await kvDelete(PROGRESS_KEY);
-  await remasterDelete(FRAME_PIXELS_ID);
+  for (const row of await remasterAll()) {
+    if (row.id.startsWith(FRAME_ROW_PREFIX)) await remasterDelete(row.id);
+  }
 }

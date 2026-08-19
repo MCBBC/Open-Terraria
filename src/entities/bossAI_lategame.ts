@@ -308,6 +308,10 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     e.spawnAlpha = 254;
     game.playSfxWav?.('Zombie_89', 1, e.cx, e.cy);   // :65093 PlaySound(29,…,89)——case29 style89 ×0.7 自动档(曾借 roar 0.6)
   }
+  // 环境声（:64923-64926）：ai0≠-1 时 1/1000 播 Next(88,92)=Zombie_88-91 变体池
+  if (e.ai0 !== -1 && Math.floor(Math.random() * 1000) === 0) {
+    game.playSfxWav?.(`Zombie_${88 + Math.floor(Math.random() * 4)}`, 1, e.cx, e.cy);
+  }
   const b = baseOf(e);
   const phase2 = e.hp <= e.maxHp / 2;                       // flag :64928
   e.def.defense = Math.floor(phase2 ? b.def * 0.65 : b.def); // :64982-64985 半血防御 ×0.65
@@ -352,6 +356,8 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     e.ai1 += 1;
     if (e.ai1 > 360) { e.vx *= 0.95; e.vy *= 0.95; }      // :65109-65111 收势阻尼
     else if (e.ai1 > 300) { e.vx = 0; e.vy = -1; }        // :65113-65115 velocity=-UnitY
+    // :65117-65124 显形末段(>360)播 (29,…,105)=Zombie_105(case29 ×0.25 档,终审补)
+    if (e.ai1 === 361) game.playSfxWav?.('Zombie_105', 1, e.cx, e.cy);
     flyIntegrate(e);
     if (e.ai1 >= 420) { e.ai0 = 0; e.ai1 = 0; e.spawnAlpha = 0; }
     return;
@@ -418,6 +424,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65375-65397
       const aim = aimLead(e, player, e.facing);
       shoot(game, e.cx + e.facing * 30, e.cy + 12, aim.x * 4, aim.y * 4, 35, 464); // :65411-65421
+      game.playSfxWav?.('Item_120', 1, e.cx, e.cy - 100);   // 弹 464 首帧音(:30749-30752,终审补)
       // 原版冰雾发射零吼(:65040-65900 全段仅 65093/65122 两声)——曾借 roar 0.35,2026-08-18 对账删
     }
     e.ai1 += 1;
@@ -460,6 +467,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       const dx = player.cx - e.cx, dy = player.cy - (e.cy - 100);
       const d = Math.hypot(dx, dy) || 1;
       shoot(game, e.cx, e.cy - 100, dx / d * 6, dy / d * 6, 45, 465); // :65563-65566
+      game.playSfxWav?.('Item_121', 1, e.cx, e.cy - 100);   // 弹 465 首帧音(:30864-30867,终审补)
     }
     e.ai1 += 1;
     if (e.ai1 >= 20 + numBolt) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }

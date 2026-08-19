@@ -179,6 +179,16 @@ export class VanillaDust {
       if (d.scale > 10) { d.active = false; continue; }
       // :469 position += velocity
       d.x += d.vx; d.y += d.vy;
+      // :598-602 鸟粪尘（329,独立 if 段,在 883 链之前）：Collision.SolidCollision
+      // (position,4,4) 命中实心 → scale ×0.8（4×4 盒跨至多 2×2 格,四角判定）
+      if (d.type === 329 && solidTileAt) {
+        const bx0 = Math.floor(d.x / 16), by0 = Math.floor(d.y / 16);
+        const bx1 = Math.floor((d.x + 3) / 16), by1 = Math.floor((d.y + 3) / 16);
+        if (solidTileAt(bx0, by0) || solidTileAt(bx1, by0)
+          || solidTileAt(bx0, by1) || solidTileAt(bx1, by1)) {
+          d.scale *= 0.8;
+        }
+      }
       // ---- 链 A 独占段（:883-1894 独占链：命中者跳过其余链接与 :1884 重力）----
       //  230/217/240 是独立段/无档型（非 883 链链接）：chainLink 不置位，重力门
       //  照常评估，:2136 vx×0.99 显式乘（链 A 命中型的 0.99 沿用既有近似不乘，
