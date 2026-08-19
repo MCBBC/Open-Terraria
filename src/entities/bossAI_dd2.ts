@@ -88,7 +88,7 @@ import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
 import { TILE_DEFS } from '../data/tiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
-import { GDL } from '../stats/ScaleStats';
+import { GDL, getKnockbackMultiplierScaledByDifficulty } from '../stats/ScaleStats';
 
 // 弹幕贴图:Projectile_{240,675,682,686,687}.png 已自 terraria-assets/Images 入
 // sprites/vanilla 管线(scripts/vanilla-atlas.mjs MISC 表),Arrow 按 projId 懒加载真图——
@@ -113,6 +113,8 @@ export const dd2LocalAI = (e: Enemy): number[] => {
 };
 /** 原版 oldVelocity（碰撞前一帧速度,cs:93795 collideX/collideY 判定源）→ WeakMap */
 const oldVel = new WeakMap<Enemy, { x: number; y: number }>();
+/** 黑魔法师施法期瞄准快照（AI_109 头部 GetTargetData 一次取值,施法全程不重定向） */
+const mageCastAim = new WeakMap<Enemy, { x: number; y: number }>();
 
 const TAU = Math.PI * 2;
 const rnd = (n: number): number => Math.floor(Math.random() * n);
@@ -375,11 +377,25 @@ function findCrystal(game: GameHooks): Enemy | null {
   return null;
 }
 function dd2Target(
-  game: GameHooks, e: Enemy, player: Player | null,
+  game: GameHooks, e: Enemy, player: Player | null, noDistanceGate = false,
 ): { x: number; y: number } | null {
+  // NPCUtils.SearchForTarget（NPCUtils.cs:196-259）+ TargetSearchResults 构造（:151-160）：
+  // 候选 = 水晶 548（OnlyCrystal :16-21）与玩家（玩家距离按 aggro 折扣 num5 = dist − aggro，
+  // :229-231）；**近者胜**（nearestNPCDistance < adjustedTankDistance → NPC，否则玩家）。
+  // TargetClosestOldOnesInvasion（:261-273）玩家滤 200px 内；TargetClosestBetsy（:308-318）
+  // 无距离门（noDistanceGate）。
   const crystal = findCrystal(game);
-  if (crystal) return { x: crystal.cx, y: crystal.cy };
-  if (player && !player.dead) return { x: player.cx, y: player.cy };
+  const pd = player && !player.dead ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : Infinity;
+  const aggro = player && !player.dead
+    ? ((player as unknown as { aggro?: number }).aggro ?? 0) : 0;
+  if (crystal) {
+    const cd = Math.hypot(crystal.cx - e.cx, crystal.cy - e.cy);
+    if ((noDistanceGate || pd <= 200) && pd - aggro < cd) {
+      return { x: player!.cx, y: player!.cy };
+    }
+    return { x: crystal.cx, y: crystal.cy };
+  }
+  if (pd !== Infinity) return { x: player!.cx, y: player!.cy };
   void e;
   return null;
 }
@@ -390,6 +406,13 @@ const fly = (e: Enemy): void => { e.x += e.vx; e.y += e.vy; };
 function dirTo(e: Enemy, tx: number, ty: number): { x: number; y: number } {
   const dx = tx - e.cx, dy = ty - e.cy;
   const d = Math.hypot(dx, dy) || 1;
+  return { x: dx / d, y: dy / d };
+}
+/** 定点方向单位向量（Vector2 方向语义,NaN 兜底 UnitY） */
+function dirTo2(fx: number, fy: number, tx: number, ty: number): { x: number; y: number } {
+  const dx = tx - fx, dy = ty - fy;
+  const d = Math.hypot(dx, dy);
+  if (d === 0 || !Number.isFinite(d)) return { x: 0, y: 1 };
   return { x: dx / d, y: dy / d };
 }
 /** SimpleFlyMovement（NPC.cs:78100 原版逐轴步进,反向时双倍） */
@@ -447,10 +470,19 @@ export function flyingDutchmanAI(e: Enemy, game: GameHooks, player: Player | nul
     return;
   }
   e.iframes = 2;   // SetDefaults dontTakeDamage=true（:14581）：炮在世恒无敌
-  // ---- 海盗跳舱（:40959-40970）：1/300t 从船口弹射 212-215 ----
+  // ---- 海盗跳舱（:40951-40958）：1/300t 从船口弹射 212-215。
+  //      出生位 = Center + ((rand−0.5)×(w−70), (rand−0.5)×20 − h/2 − 20) 随船 rotation 旋转
+  //      （曾直接落船心 = 视觉瞬移）;速度 = ((rand−0.5)×5, −8.01) + 船速 ----
   if (rnd(300) === 0) {
     const p = spawnPart(game, e, [213, 215, 214, 212][rnd(4)]);
     if (p) {
+      const r = e.visAngle;
+      const offX = (Math.random() - 0.5) * (e.w - 70);
+      const offY = (Math.random() - 0.5) * 20 - e.h / 2 - 20;
+      const px = e.cx + offX * Math.cos(r) - offY * Math.sin(r);
+      const py = e.cy + offX * Math.sin(r) + offY * Math.cos(r);
+      p.x = px - p.w / 2;
+      p.y = py - p.h / 2;
       p.vx = (Math.random() - 0.5) * 5 + e.vx;
       p.vy = -8.01 + e.vy;
       p.despawnTimer = 600;
@@ -530,12 +562,11 @@ export function dutchmanCannonAI(e: Enemy, game: GameHooks, player: Player | nul
   if (player && !player.dead && losClear(game, e.x, e.y, player.x, player.y)) {
     if (e.ai3 >= 240) {
       e.ai3 = 0;
+      // :36027-36039 单趟归一：normalize(玩家中心−炮心) ×14,再整体 +(0,−5) 上抛
+      // （NaN → UnitY 兜底）——曾二次归一（×14 → 重归一 → 再 −5,弹速与抛物线双失真）
       const d = dirTo(e, player.cx, player.cy);
-      let vx = d.x * 14, vy = d.y * 14 - 5;
-      const v = Math.hypot(vx, vy);
-      if (v > 0.001) { vx = (vx / v) * 14; vy = (vy / v) * 14; }
-      else { vx = 0; vy = 14; }
-      vy -= 5;
+      const vx = d.x * 14;
+      const vy = d.y * 14 - 5;
       shootD(game, e.cx, e.cy, vx, vy, 30, 240, 300, 0.25);
     } else {
       // 瞄准帧（8 向索引,:36054-36070 的 ai[2] 语义;渲染未接,仅保状态）
@@ -596,10 +627,12 @@ function walkerKernel(
     } else {
       x[0] = e.x; x[1] = e.y; x[2] = 0;
     }
-    if (player && !player.dead) e.facing = e.seekDirX(player);  // TargetClosest
+    // 施法期索敌冻结（AI_109 flag7 = !(ai[0]>0)，:66440 → :66614-66617 的
+    // TargetClosestOldOnesInvasion 门）——casting 时保持既有朝向
+    if (castDamp <= 0 && player && !player.dead) e.facing = e.seekDirX(player);
   } else {
     x[2] += 1;
-    if (player && !player.dead) e.facing = e.seekDirX(player);
+    if (castDamp <= 0 && player && !player.dead) e.facing = e.seekDirX(player);
   }
   // ---- 施法僵直（cs:42387-42389 / :66554-66555）：AI 早退但碰撞步照跑 ----
   if (castDamp > 0) {
@@ -942,6 +975,8 @@ export function eterniaCrystalAI(e: Enemy, game: GameHooks, player: Player | nul
     e.iframes = 2;                                 // dontTakeDamageFromHostiles + 满血
     e.hp = e.maxHp;
     if (e.ai0 === 3) {
+      // :42851 胜利演出音（DD2_WinScene）——曾缺
+      game.playSfxFiles(soundTrackFiles('dd2_win_scene'), 1, e.cx, e.cy);
       for (const n of game.enemies() as Enemy[]) {
         if (!n.dead && n.vanillaId === 549) { n.ai1 = 1; n.ai0 = 0; }
       }
@@ -1010,7 +1045,10 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.spawnAlpha === 0) e.lightRGB = [0.5, 0.1, 0.3];   // :43066-43068
   void player;
   const crystal = findCrystal(game);
-  if (crystal) e.iframes = 2;   // SetDefaults dontTakeDamage=true（:15987）
+  // SetDefaults dontTakeDamage=true（:15987）：开门期水晶在世恒无敌（:43119）;
+  // 水晶亡转消散态时**继续无敌**（:43124 dontTakeDamage=true 进 ai[1]=1）直至
+  // 550t 才解除（:43145）——消散全程可被玩家打的窗口不存在
+  e.iframes = 2;
   if (e.ai1 === 0) {
     // ---- 开门出怪（:43071-43116） ----
     if (x[0] === 0) {
@@ -1115,9 +1153,10 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
   if (!tgt) { fly(e); return; }
   const txc = tgt.x, tyc = tgt.y;
   const LOS = losClear(game, e.cx, e.cy, txc, tyc);
-  const speedAdd = p.speedAdd * p.steerLerp;   // num12 *= num11（:66132）
+  const speedAdd = p.speedAdd * p.steerLerp;   // num12 *= num11（:66136）
   if (e.ai0 === 0) {
-    // ---- 悬空逼近（:66134-66190） ----
+    // ---- 悬空逼近（:66138-66186）;悬空态击退 = 族档（:66140） ----
+    e.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(p.kbMult, e.difficulty);
     // 原版：vector = normalize(Δ)*num（逼近速:飞龙 3/小妖魔 4）;vector2 = normalize(vector-(0,num2))*num
     const num = e.vanillaId === 574 || e.vanillaId === 575 ? 4 : 3;
     const dx = txc - e.cx, dy = tyc - e.cy;
@@ -1150,7 +1189,8 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
       e.ai3 = vy1;
     }
   } else if (e.ai0 === 1) {
-    // ---- 瞄准（:66192-66232） ----
+    // ---- 瞄准（:66188-66225）;瞄准/俯冲两态击退门 = 0（:66190/:66243） ----
+    e.kbResistOverride = 0;
     e.vx *= p.damp;
     e.vy *= p.damp;
     e.vy += p.grav;                                 // 小妖魔下沉点火（num16）
@@ -1177,7 +1217,8 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
       e.vx = jx; e.vy = jy;
     }
   } else if (e.ai0 === 2) {
-    // ---- 俯冲追踪（:66234-66296） ----
+    // ---- 俯冲追踪（:66227-66295）;俯冲态击退门 = 0（:66243） ----
+    e.kbResistOverride = 0;
     e.ai1 += 1;
     const dist = Math.hypot(txc - e.cx, tyc - e.cy);
     let past = dist > p.diveDist && e.cy > tyc;     // 冲过目标下方（flag7）
@@ -1283,12 +1324,17 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 本仓 673 降级为粒子 → 等效落在阵眼生成帧
       game.playSfxFiles(['dd2_skeleton_summoned'], 0.7, e.cx, e.cy);
     }
-    // 暗影矢（:66437-66446）：ai[1]==0 且 ai[0]==32 → 675（14 速 40 伤）
+    // 暗影矢（:66453-66460）：ai[1]==0 且 ai[0]==32 → 675（14 速 40 伤）。
+    // 弹道按【出手前】缓存的 targetData（施法期不重定向,:66416 GetTargetData 一次取值）;
+    // 炮口 = Center+(direction*10,-16),direction 先按弹向翻转、**再**以新向取炮口
+    // （:66455-66459 原序：vector 先算,facing 后翻,NewProjectile 用翻后 direction）
     if (e.ai1 === 0 && e.ai0 === 32) {
-      const ox = e.cx + e.facing * 10, oy = e.cy - 16;
-      const d = dirTo(e, txc, tyc);
+      const aim = mageCastAim.get(e) ?? { x: txc, y: tyc };
+      const ox0 = e.cx + e.facing * 10, oy0 = e.cy - 16;
+      const d = dirTo2(ox0, oy0, aim.x, aim.y);
       e.facing = d.x > 0 ? 1 : -1;
-      shootD(game, ox, oy, d.x * 14, d.y * 14, 40, 675, 300);
+      const ox = e.cx + e.facing * 10;
+      shootD(game, ox, oy0, d.x * 14, d.y * 14, 40, 675, 300);
     }
     // 治疗施法音（:66461）：ai[0]==126 且 ai[1]==1 → DD2_DarkMageCastHeal（起手一拍）
     if (e.ai1 === 1 && e.ai0 === 126) {
@@ -1336,6 +1382,8 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
     if (ok) {
       e.ai1 = next;
       e.ai0 = next === 0 ? 97 : next === 1 ? 127 : 183;   // :66500-66510
+      // 施法锁向（:66416 targetData 起手快照,全程不重定向——水晶↔玩家不换靶）
+      mageCastAim.set(e, { x: txc, y: tyc });
     }
   }
   walkerKernel(e, game, tgt ? { cx: txc, cy: tyc, dead: false } as unknown as Player : null, x, p, castDamp);
@@ -1358,8 +1406,8 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
   const BOMB_TOTAL = BOMB_APR_T + FIREBALL_N + TAIL_T;
   const SPIN_T = 60, SPIN_RATE = TAU / SPIN_T, SPIN_RISE = 0.1, SKYDIVE_SPD = 32;
   const SUMMON_T = 90, SUMMON_AT = 20;
-  // ---- 索敌（:62276 NPCUtils.TargetClosestBetsy）：水晶优先,否则玩家 ----
-  const tgt = dd2Target(game, e, player);
+  // ---- 索敌（:62276 NPCUtils.TargetClosestBetsy）：水晶/玩家近者胜,无 200px 门 ----
+  const tgt = dd2Target(game, e, player, true);
   if (!tgt) {
     e.vy -= 0.05;
     fly(e);
@@ -1748,7 +1796,10 @@ function walker107Params(e: Enemy, x: number[]): Walker107P {
   const p: Walker107P = {
     scream: null, screamOneIn: 0,
     melee: false, triggerRange: 40, windup: 30, cooldown: 0,
-    windupDampOn: false, windupDamp: 0.9,
+    // flag7 默认【真】+ num7=0.9（:63423-63424）——近战前摇刹车族全适用（哥布林/
+    // 枯萎兽/小妖精/食人魔）；食人魔覆写 0.7（:63523）。刹车附带：跳过走路加速
+    // （flag24,:64374）+ 跳过重定向嘶叫块（flag20,:64375）+ ai[3] 清零（:64376）
+    windupDampOn: true, windupDamp: 0.9,
     shooter: false, timer: 70, fireAt: 35, proj: 81, projDmg: 1,
     muzzleDx: 0, muzzleDy: 0, muzzleAtBottom: false, spawnOffset: 1,
     arc: 0.1, jitter: 0.5, shots: 1, speed: 11, startRange: 700,
@@ -1845,6 +1896,7 @@ function walker107Params(e: Enemy, x: number[]): Walker107P {
         p.muzzleDx = -20; p.muzzleAtBottom = true;   // vector=(-direction*20,height/2-1)
       } else if (e.ai1 === 1) {            // 吐息（:63587-63600）
         p.windup = 90; p.triggerRange = 1000;
+        p.cooldown = 240;                  // num6=240（:63591——曾沿用默认 60）
         p.fireOnWindup = true;
         p.fireAt = 35; p.proj = 676;       // DD2OgreSpit（num9=默认 num8/2=35）
         p.projDmg = projDmgOf(e, 40, 30);
@@ -1895,15 +1947,19 @@ function fireWalkerProj(
 interface W107Target { x: number; y: number; w: number; h: number; cx: number; cy: number; }
 
 function w107Target(game: GameHooks, e: Enemy, player: Player | null): W107Target | null {
+  // TargetClosestOldOnesInvasion（NPCUtils.cs:261-273）：水晶候选 + 200px 内玩家，
+  // 近者胜（玩家距离按 aggro 折扣，SearchForTarget :229-231 num5 = dist − aggro）
   let crystal: Enemy | null = null;
   for (const n of game.enemies() as Enemy[]) {
     if (!n.dead && n.vanillaId === 548 && !n.dontTakeDamage) { crystal = n; break; }
   }
   const pd = player && !player.dead
     ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : Infinity;
+  const aggro = player && !player.dead
+    ? ((player as unknown as { aggro?: number }).aggro ?? 0) : 0;
   if (crystal) {
     const cd = Math.hypot(crystal.cx - e.cx, crystal.cy - e.cy);
-    if (pd <= 200 && pd < cd) {
+    if (pd <= 200 && pd - aggro < cd) {
       return { x: player!.x, y: player!.y, w: player!.w, h: player!.h, cx: player!.cx, cy: player!.cy };
     }
     return { x: crystal.x, y: crystal.y, w: crystal.w, h: crystal.h, cx: crystal.cx, cy: crystal.cy };
@@ -2107,8 +2163,40 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     }
     if (phase) w107Phasing.add(e); else w107Phasing.delete(e);
   }
-  const attacking = (p.melee || p.shooter) && e.ai0 > 0;    // (flag12||flag5)&&ai[0]>0 → flag18=false
+  const attacking = (p.melee || p.shooter) && e.ai0 > 0;    // (flag12||flag5)&&ai[0]>0 → flag18=false（:64344）
   const busy = attacking || (p.shooter && e.ai1 > 0) || (p.melee && e.ai0 > 0);   // flag22
+  // ---- 近战/喷吐前摇（flag5,cs:64356-64386）——先于卡位/重定向/走加速跑（原序）,
+  //      刹车三连：vx×num7 + 跳走加速（flag24）+ 跳重定向（flag20）+ ai[3] 清零 ----
+  let windupBraking = false;
+  if (p.melee) {
+    if (e.ai0 < 0) e.ai0 += 1;             // 冷却回摆（:64358-64362）
+    if (e.ai0 === 0 && e.vy === 0 && tgt
+      && losClear(game, e.cx, e.cy, tgt.cx, tgt.cy)
+      && Math.hypot(tgt.cx - e.cx, tgt.cy - e.cy) < p.triggerRange) {
+      e.ai0 = p.windup;                    // 起手（:64363-64367）
+    }
+    if (e.ai0 > 0) {
+      if (p.windupDampOn) {                // flag7（:64371-64378,默认 0.9/食人魔 0.7）
+        e.vx *= p.windupDamp;
+        windupBraking = true;              // flag24+flag20
+        e.ai3 = 0;
+      }
+      e.ai0 -= 1;
+      if (e.ai0 === 0) e.ai0 = -p.cooldown;
+    }
+    if (id === 576 || id === 577) {
+      if (e.ai0 < -p.cooldown) e.ai0 = -p.cooldown;   // 钳界（:63602-63605）
+    }
+  }
+  // ---- 前摇倒数中出弹（flag3,cs:64387-64419:食人魔吐息/跺地） ----
+  if (p.fireOnWindup && e.ai0 > 0) {
+    if (tgt && e.ai0 === p.fireAt) fireWalkerProj(game, e, p, tgt.cx, tgt.cy);
+  }
+  // ---- 前摇倒数中起跳（flag4,cs:64420-64430:跺地 ai[0]==56 → vy=-13） ----
+  if (p.jump && e.ai0 > 0) {
+    if (e.vy !== 0 && e.ai0 < p.jumpMinT) e.ai0 = p.jumpMinT;
+    if (e.ai0 === p.jumpT) e.vy = -p.jumpVy;
+  }
   // ---- 卡位/转向计数（cs:64431-64456,flag18=true 时推进;DD2 族 flag30=false 只计数） ----
   if (!attacking) {
     // position.X == oldPosition.X（:64437）= 上一拍水平位移为零 → w107NoMove 落盘
@@ -2120,30 +2208,32 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
     if (tgt && e.x < tgt.x + tgt.w && e.x + e.w > tgt.x
       && e.y < tgt.y + tgt.h && e.y + e.h > tgt.y) e.ai3 = 0;
   }
-  // ---- 嘶叫 + 重定向 / 静止折返（cs:64490-64536） ----
-  if (e.ai3 < 30) {
-    // flag21 = DD2Event.EnemiesShouldChasePlayers（DD2Event.cs:115-123 恒真）
-    if (p.scream && p.screamOneIn > 0 && rnd(p.screamOneIn) === 0) {
-      game.playSfxFiles(soundTrackFiles(p.scream), 0.6, e.cx, e.cy);
-    }
-    tgt = w107Target(game, e, player);     // TargetClosestOldOnesInvasion
-    if (tgt) e.facing = tgt.cx > e.cx ? 1 : -1;
-  } else if (!busy) {
-    if (e.vx === 0) {
-      if (e.vy === 0) {
-        e.ai2 += 1;
-        if (e.ai2 >= 2) {                  // 静止 2t 折返（:64516-64523）
-          e.facing *= -1;
-          e.ai2 = 0;
-        }
+  // ---- 嘶叫 + 重定向 / 静止折返（cs:64490-64536;flag20 刹车期整块跳过） ----
+  if (!windupBraking) {
+    if (e.ai3 < 30) {
+      // flag21 = DD2Event.EnemiesShouldChasePlayers（DD2Event.cs:115-123 恒真）
+      if (p.scream && p.screamOneIn > 0 && rnd(p.screamOneIn) === 0) {
+        game.playSfxFiles(soundTrackFiles(p.scream), 0.6, e.cx, e.cy);
       }
-    } else if (e.ai2 !== 0) {
-      e.ai2 = 0;
+      tgt = w107Target(game, e, player);   // TargetClosestOldOnesInvasion
+      if (tgt) e.facing = tgt.cx > e.cx ? 1 : -1;
+    } else if (!busy) {
+      if (e.vx === 0) {
+        if (e.vy === 0) {
+          e.ai2 += 1;
+          if (e.ai2 >= 2) {                // 静止 2t 折返（:64516-64523）
+            e.facing *= -1;
+            e.ai2 = 0;
+          }
+        }
+      } else if (e.ai2 !== 0) {
+        e.ai2 = 0;
+      }
+      if (e.facing === 0) e.facing = 1;
     }
-    if (e.facing === 0) e.facing = 1;
   }
-  // ---- 走路加速（flag24=false 族;cs:64537-64550） ----
-  if (!p.noWalkAccel) w107WalkAccel(e, p);
+  // ---- 走路加速（flag24=false 族;刹车期跳过,cs:64537-64550） ----
+  if (!p.noWalkAccel && !windupBraking) w107WalkAccel(e, p);
   // ---- 远程循环（flag12,cs:64551-64679） ----
   if (p.shooter) {
     if (e.ai1 > 0) e.ai1 -= 1;             // 先减后比（德拉肯多连拍依赖此序）
@@ -2180,34 +2270,6 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
       }
     }
     if (e.ai0 <= 0) w107WalkAccel(e, p);   // 收招后走路加速（:64660-64678）
-  }
-  // ---- 近战/喷吐前摇（flag5,cs:64356-64386） ----
-  if (p.melee) {
-    if (e.ai0 < 0) e.ai0 += 1;             // 冷却回摆（:64358-64362）
-    if (e.ai0 === 0 && e.vy === 0 && tgt
-      && losClear(game, e.cx, e.cy, tgt.cx, tgt.cy)
-      && Math.hypot(tgt.cx - e.cx, tgt.cy - e.cy) < p.triggerRange) {
-      e.ai0 = p.windup;                    // 起手（:64363-64367）
-    }
-    if (e.ai0 > 0) {
-      if (p.windupDampOn) {                // flag7（食人魔 0.7,:64371-64378）
-        e.vx *= p.windupDamp;
-      }
-      e.ai0 -= 1;
-      if (e.ai0 === 0) e.ai0 = -p.cooldown;
-    }
-    if (id === 576 || id === 577) {
-      if (e.ai0 < -p.cooldown) e.ai0 = -p.cooldown;   // 钳界（:63602-63605）
-    }
-  }
-  // ---- 前摇倒数中出弹（flag3,cs:64387-64419:食人魔吐息/跺地） ----
-  if (p.fireOnWindup && e.ai0 > 0) {
-    if (tgt && e.ai0 === p.fireAt) fireWalkerProj(game, e, p, tgt.cx, tgt.cy);
-  }
-  // ---- 前摇倒数中起跳（flag4,cs:64420-64430:跺地 ai[0]==56 → vy=-13） ----
-  if (p.jump && e.ai0 > 0) {
-    if (e.vy !== 0 && e.ai0 < p.jumpMinT) e.ai0 = p.jumpMinT;
-    if (e.ai0 === p.jumpT) e.vy = -p.jumpVy;
   }
   // ---- 位移（原版由公共碰撞步承载;此处按引擎惯例自理） ----
   if (phase) {

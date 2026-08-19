@@ -4053,10 +4053,12 @@ export class Renderer {
         // （噬魂怪 aiStyle5 实踩）。新增旋转族 AI 时必须登记在此，旋转与镜像共用本判定。
         // 例外：AI_005 内的"仅倾斜"成员（黄蜂 42/231-235、孢子蝠 176/205、蜜蜂 210/211）
         // 贴图横画、只 tilt 不转头——它们仍需镜像翻转朝向（原版同款 spriteDirection 翻转）。
+        // 23 陨石头/139 探针为"转头+镜像"复合成员（AI 侧 visAngle=atan2(sy,sx)+π、
+        // facing=sx 符号,cs:50962-51026）——留在 tiltOnly5 借用镜像通道,旋转走 visAngle。
         const idR = e.vanillaId ?? -1;
         const stR = e.vanilla?.aiStyle ?? 0;
-        const tiltOnly5 = stR === 5 && (idR === 42 || idR === 139 || idR === 176 || idR === 205 || idR === 210
-          || idR === 211 || (idR >= 231 && idR <= 235));
+        const tiltOnly5 = stR === 5 && (idR === 23 || idR === 42 || idR === 139 || idR === 176 || idR === 205
+          || idR === 210 || idR === 211 || (idR >= 231 && idR <= 235));
         const rotationDriven = !tiltOnly5
           && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 23 || stR === 40 || stR === 56);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
@@ -4072,7 +4074,8 @@ export class Renderer {
           // 蜜蜂 210/211 倾斜 vx*0.2；其余（噬魂怪族等）朝目标/速度方向转头。
           // 全族统一转头会让黄蜂蜜蜂飞行中整只倒转=贴图翻转观感
           const id5 = e.vanillaId;
-          if (id5 === 42 || id5 === 139 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235) || id5 === 61) ctx.rotate(e.vx * 0.1);  // 139 探针 AI_005 rotation=vx*0.1(:51041)/61 秃鹫 FindFrame(:74240)
+          if (id5 === 42 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235) || id5 === 61) ctx.rotate(e.vx * 0.1);  // 61 秃鹫 FindFrame(:74240)
+          else if (id5 === 23 || id5 === 139) ctx.rotate(e.visAngle);   // 探针/陨石头转头（cs:50962-51026,曾误并 139 入 tilt 档）
           else if (id5 === 210 || id5 === 211) ctx.rotate(e.vx * 0.2);
           else ctx.rotate(e.visAngle);
         }

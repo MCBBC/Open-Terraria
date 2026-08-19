@@ -1103,6 +1103,7 @@ export function runDungeonPass(
     n5 = clampY(Math.trunc(cy - sy2 * 0.6000000238418579 - hri(1, 2)));
     n6 = clampY(Math.trunc(cy + sy2 * 0.6000000238418579 + hri(6, 15)));
     entBounds.upd(n3, n5, n4, n6);
+    if (entCells) console.log(`ENT-BOX2 cx=${cx.toFixed(3)} cy=${cy.toFixed(3)} sx2=${sx2} sy2=${sy2} n3=${n3} n4=${n4} n5=${n5} n6=${n6} f4edge=${(cx + sx2 * 0.5 - 1.0).toFixed(3)}`);
     for (let x = n3; x < n4; x++) {
       for (let y = n5; y < n6; y++) {
         if (!st.inBounds(x, y)) continue;
@@ -1167,6 +1168,7 @@ export function runDungeonPass(
       const b0 = clampY(Math.trunc(cy - sy2 * 0.6000000238418579));
       const b1 = clampY(Math.trunc(cy + sy2 * 0.6000000238418579));
       entBounds.upd(a0, b0, a1, b1);
+      if (entCells) console.log(`ENT-BOX06 a0=${a0} a1=${a1} b0=${b0} b1=${b1}`);
       for (let x = a0; x < a1; x++) {
         for (let y = b0; y < b1; y++) {
           if (!st.inBounds(x, y)) continue;
@@ -2491,7 +2493,10 @@ export function runDungeonPass(
     return true;
   };
   function dgDoorsF(): void {
+    // 对账插桩(dormant)：SW_DG_DOOR_TRACE=1 时逐 doorData 记选列/开区/清墙段（D 段猎杀用）
+    const drT = typeof process !== 'undefined' && process.env.SW_DG_DOOR_TRACE === '1';
     for (const d of doorData) {
+      if (drT) console.log(`DGD-IN x=${d.x} y=${d.y} dir=${d.dir} clear=${d.clear ? 1 : 0} hall=${d.hall ? 1 : 0}`);
       if (!inW(d.x, d.y, 30)) continue;
       const style = rn(3) === 0 ? doorStyle : 13;
       const num4 = d.fluff;
@@ -2533,6 +2538,7 @@ export function runDungeonPass(
         }
       }
       if (n7 >= 20) continue;
+      if (drT) console.log(`DGD-PICK x=${d.x} y=${d.y} n8=${n8} n7=${n7}`);
       let n16 = n8;
       let n17 = d.y, n18 = d.y;
       while (inW(n16, n17, 0) && actAt(n16, n17) === 0) n17++;

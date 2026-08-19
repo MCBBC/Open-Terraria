@@ -15,8 +15,8 @@
 //   aiStyle  3  火星军官 383 / 工程师 386 尾段  NPC.cs:56614-56645 / 59384-59428（军官带盾
 //                                              无敌+180t 补盾;工程师 ±5t 扫地放 387,上限 4×自身）
 //   aiStyle 49  愤怒云 250(同批普查顺带)        NPC.cs:31742-31810（悬顶 200px,正下方淋雨 264）
-// expert 分支(飞碟 ai0=1 旋转过渡/ai0=2 死光弹幕 3600t)本工程 expertMode 恒 false(Main.ts
-// 4272),按原版结构保留代码、入口 EXPERT 门关闭;netcode 跳过。
+// expert 分支(飞碟 ai0=1 旋转过渡/ai0=2 死光弹幕 3600t)按 world.isExpert 真难度开闭
+// （World.get isExpert = difficulty >= EXPERT;曾硬编码 EXPERT=false 恒关）;netcode 跳过。
 // 弹幕贴图 Projectile_{264,435,438,447-450}.png 已入 sprites/vanilla(见 shootM 注释)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
@@ -45,8 +45,6 @@ const rndRange = (a: number, b: number): number => a + Math.floor(Math.random() 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
 const lerp = (a: number, b: number, t: number): number => a + (b - a) * t;
 const sign = (v: number): number => (v > 0 ? 1 : v < 0 ? -1 : 0);
-/** expert 模式门（本工程恒 false,Game.ts:4272 expertMode:false） */
-const EXPERT = false;
 
 // ---------------------------------------------------------------------------
 // 弹幕:火星族弹体贴图 Projectile_{264,435,438,447,448,449,450}.png 已按 601/602
@@ -208,10 +206,15 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     e.vy -= 0.4;
     e.encourageDespawn(10);
     if (player && !player.dead) {
-      e.despawnTimer = 300;                       // timeLeft = 300（:36377）
+      e.despawnTimer = 300;                       // timeLeft = 300（:36387）
+      // ★-1 态恢复语义（证据链）：1456 反编译 NPC.cs:36392-36395 为
+      //   `if (this.ai[0] == 0f) { this.ai[0] = 0f; }`——此处置身 -1/-2 分支内
+      //   恒为 no-op;1405 反编译（NPC.145.cs:36392-36395）逐字相同 → 两代独立
+      //   反编译一致,IL 即如此。结论：-1（巡航转场）飞碟玩家回场**不回巡航**,
+      //   持续 vy−0.4/t 爬升到出界钳制消散（:36751-36772）;仅 -2（expert 死光
+      //   转场）按 :36388-36391 回 2 态。曾误按对称性把 -1 也回 0 态。
       if (e.ai0 === -2) e.ai0 = 2;
-      else e.ai0 = 0;                             // 反编译此处为 if(ai0==0)ai0=0 无操作,
-      e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;            // 按 -2→2 对称语义恢复巡航
+      e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     }
     fly(e);
     return;
@@ -287,16 +290,16 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
         break;
       }
     }
-  } else if (e.ai0 === 1 && EXPERT) {
-    // ---- expert 部件全灭旋转过渡（:36636-36668,150t）:本工程不可达 ----
+  } else if (e.ai0 === 1 && game.world.isExpert) {
+    // ---- expert 部件全灭旋转过渡（:36634-36663,150t）:dontTakeDamage 解除(:36636) ----
     e.vx *= 0.96; e.vy *= 0.96;
     e.ai1 += 1;
     if (e.ai1 >= 150) { e.ai0 = 2; e.ai1 = 0; e.visAngle = 0; }
-    else if (e.ai1 < 40) e.visAngle = Math.cos((e.ai1 / 40) * Math.PI * 2) * 0.2;
-    else if (e.ai1 < 80) e.visAngle = Math.cos((e.ai1 / 20) * Math.PI * 2) * 0.3;
-    else if (e.ai1 < 120) e.visAngle = Math.cos((e.ai1 / 10) * Math.PI * 2) * 0.4;
+    else if (e.ai1 < 40) e.visAngle = Math.sin((e.ai1 / 40) * Math.PI * 2) * 0.2;   // UnitY.RotatedBy(t).Y = sin
+    else if (e.ai1 < 80) e.visAngle = Math.sin((e.ai1 / 20) * Math.PI * 2) * 0.3;
+    else if (e.ai1 < 120) e.visAngle = Math.sin((e.ai1 / 10) * Math.PI * 2) * 0.4;
     else e.visAngle = ((e.ai1 - 120) / 30) * Math.PI * 2;
-  } else if (e.ai0 === 2 && EXPERT) {
+  } else if (e.ai0 === 2 && game.world.isExpert) {
     // ---- expert 死光弹幕（:36670-36749,3600t 循环;每 120t 后 60t 为射线窗）----
     const wasWin = e.ai3 % 120 >= 60 ? 1 : 0;
     e.ai3 += 1;
@@ -452,8 +455,9 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
     let allDead = saucer.ai0 >= 1 || saucer.ai0 < 0 ? false : true;
     if (allDead && (turrets.length > 0 || cannons.length > 0)) allDead = false;
     if (allDead && saucer.ai0 === 0) {
-      if (!EXPERT) { saucer.ai0 = 3; saucer.ai1 = 0; saucer.ai2 = 0; saucer.ai3 = 0; }
-      else { saucer.ai0 = 1; saucer.ai1 = 0; saucer.ai2 = 0; saucer.ai3 = 0; }
+      // :36322 后部件全灭分支：expert → ai0=1 旋转过渡进死光;否则 ai0=3 自毁
+      if (game.world.isExpert) { saucer.ai0 = 1; saucer.ai1 = 0; saucer.ai2 = 0; saucer.ai3 = 0; }
+      else { saucer.ai0 = 3; saucer.ai1 = 0; saucer.ai2 = 0; saucer.ai3 = 0; }
     }
   }
   // 死光电报（:36201-36219）：巡航态 ai[3]∈[20,260) 首帧（n==0）→ Projectile 447

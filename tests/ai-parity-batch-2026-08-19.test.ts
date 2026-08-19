@@ -41,6 +41,11 @@ describe('AI 全量审计严重项回归(2026-08-19)', () => {
     const game = makeGame();
     const lb = Enemy.fromVanilla(604, 40 * 16, 20 * 16);
     if (!lb) throw new Error('ladybug 构造失败');
+    // 钉陆行态（ai[2]=1,cs:48036-48075）：首帧初始化恒置 ai[2]=0（飞行态,
+    // Lerp 0.0125 慢飞）,直接驱动只会测到飞行动量;2026-08-19 ladybug 风漂
+    // 重构后飞行 |Δ|≤0.0125 恒不达 0.02 阈 → 预置 aiInit/ai2 走陆行分支
+    lb.aiInit = true;
+    lb.ai2 = 1;
     const v0 = lb.vx;
     drive(lb, 'ladybugAI').call(lb, game, null);
     // Lerp(0.05) 步进:|Δ| ≈ facing×0.05(若目标 1);旧实现目标 0.05 → Δ≈0.005

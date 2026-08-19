@@ -131,6 +131,7 @@ export interface NpcLiquidHost {
   vanillaId: number | null;
   vanilla: { aiStyle: number; noGravity?: boolean } | null;
   ai0: number;
+  ai1?: number;
   wet: boolean;
   wetCount: number;
   honeyWet: boolean;
@@ -182,7 +183,12 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
     // lavaImmune 只免伤不免 lavaWet（:94524 置位在 !lavaImmune 门之外）——
     // 免疫族入浆同样走岩浆减速档且不熄火
     b.lavaWet = true;
-    const lavaImmune = b.vanillaId !== null && NPC_LAVA_IMMUNE.has(b.vanillaId);
+    // 金属矿史莱姆状态位（NPC.cs:61109：type 1 携 364/1104/365/1105/366/1106 矿 →
+    // lavaImmune=true，非 SetDefaults 表内——按 ai[1] 状态求值）
+    const metalOre = b.vanillaId === 1
+      && (b.ai1 === 364 || b.ai1 === 1104 || b.ai1 === 365
+        || b.ai1 === 1105 || b.ai1 === 366 || b.ai1 === 1106);
+    const lavaImmune = metalOre || (b.vanillaId !== null && NPC_LAVA_IMMUNE.has(b.vanillaId));
     if (!lavaImmune && b.lavaCd <= 0) {
       b.lavaCd = 30;                                      // immune[255] = 30（:94527）
       b.onFireT = Math.max(b.onFireT, 7);                 // AddBuff(24, 420)

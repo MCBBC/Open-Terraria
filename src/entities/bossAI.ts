@@ -221,41 +221,165 @@ export function spawnWormChainFor(game: GameHooks, head: Enemy, segCount: number
   return segs;
 }
 
-/** AI_012 骷髅王手(NPC.cs:22289-22400):锚定头(ai1=头 id),头离场 → 自毁;
- *  头非悬浮态 → 漂在头两侧(±120×ai0, 头上方 100);悬浮态 → 缓慢环绕(±200, +230)。
- *  每 300t(ai3 计)朝玩家挥击冲刺。 */
+/** AI_012 骷髅王手五态机（NPC.cs:22289-22604 全量重写,台账 D 2026-08-19）：
+ *  ai[2] 状态：0/3 = 悬停（环绕位 = 头心 ±200×ai0、头下 230;ai[3] 300t 计满
+ *  → +1 进蓄升——红帽 +1/t、专家再 +0.5/t;头旋冲中(非红帽)改回侧位 ±120/
+ *  头上 100）→ 1 = 蓄升（vx×0.95、vy−0.1,帽 −8/专家 −13(extra −0.06)/红帽 −15;
+ *  升到头上方 200 → 直冲初速 = 朝玩家单位向量 × 18/专家 21/红帽 24）→ 2 = 直冲
+ *  （纯弹道;越过玩家 Y / 点积 ≤0 / 距离 >2000 / vy<0 任一 → 3）→ 4 = 侧浮
+ *  （vy×0.95、vx += 0.1×(−ai0),帽 ±8/专家 ±12(+0.07)/红帽 ±15;离心 500px →
+ *  回冲初速 ×17/专家 22/红帽 25）→ 5 = 回冲（越过玩家 X / 点积 ≤0 / >2000 → 0）。
+ *  rotation = atan2(环绕锚点向量)+1.57（悬停/蓄升/侧浮三态）;头离场 → ai[2]+10,
+ *  >50 或非服务器（本仓恒单机 netMode!=2）→ 即灭;头 ai[1]==3 离场 → EncourageDespawn(10)
+ *  而非自灭。localAI[3] = 头 ai[3]（红帽标记,RedHatSkeletronAdjustmentsEnabled
+ *  :67282 type36 取 localAI[3]==1 → flag21 档:伤害 ×1.3）。 */
 export function skeletronHandAI(e: Enemy, game: GameHooks, player: Player | null) {
   const headId = e.ai1;
   const enemies = game.enemies() as unknown[];
   const head = enemies.find((n) => (n as Enemy).id === headId) as Enemy | undefined;
-  if (!head || head.vanilla?.aiStyle !== 11 || head.dead) { e.dead = true; return; }
+  e.facing = -(e.ai0 || 1);                        // spriteDirection = -(int)ai[0]（:22292）
+  if (!head || head.vanilla?.aiStyle !== 11 || head.dead) {
+    // :22294-22303 头失效 → ai[2] += 10,>50 或非服务器 → life=-1 即灭
+    // （本仓恒单机 netMode!=2 → 首帧即死;>50 门仅专用服务器等待同步用）
+    e.ai2 += 10;
+    e.dead = true;
+    return;
+  }
   e.master = head; // 臂骨 IK 渲染用（Renderer.drawSkeletronArm）
-  if (head.ai1 === 3) { e.dead = true; return; }
-  e.facing = -(e.ai0 || 1);
+  e.lai3 = head.ai3;                               // :22308 localAI[3] = 头 ai[3]
+  const flag21 = e.lai3 === 1;                     // RedHatSkeletronAdjustmentsEnabled（type 36）
+  const expert = mainExpertMode(game.world);
+  if (flag21) {
+    const b = baseOf(e);
+    e.def.damage = Math.round(b.dmg * 1.3);        // :22310-22312 红帽伤害 ×1.3
+  }
   if (!player) { e.x += e.vx; e.y += e.vy; return; }
-  // 缓慢环绕(头悬浮态);头冲撞态则回到侧位
-  const ty = head.y - 100;
-  const tx = head.x + head.w / 2 - e.w / 2 - 120 * (e.ai0 || 1);
-  if (head.ai1 === 0) {
-    e.ai3 += 1;
-    if (e.ai3 >= 300) { e.ai3 = -120; } // 负值=挥击中
-    if (e.ai3 < 0) {
-      // 挥击:朝玩家冲刺 8 速
-      const dx = player.cx - e.cx, dy = player.cy - e.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      e.vx += ((dx / d) * 8 - e.vx) * 0.15;
-      e.vy += ((dy / d) * 8 - e.vy) * 0.15;
+  const headCx = head.x + head.w / 2;
+  // 环绕锚点（rotation 基向,cs:22395-22404/22414-22423/22479-22488）
+  const anchorRot = () => {
+    const ax = headCx - 200 * e.ai0 - e.cx;
+    const ay = head.y + 230 - e.cy;
+    e.visAngle = Math.atan2(ay, ax) + 1.57;
+  };
+  if (e.ai2 === 0 || e.ai2 === 3) {
+    // ---- 悬停态（cs:22313-22411）----
+    if (head.ai1 === 3) e.encourageDespawn(10);    // :22314-22316 头离场 → 手劝退（非自灭!）
+    if (head.ai1 !== 0 && !flag21) {
+      // 头旋冲中：回侧位 ±120 / 头上 100（cs:22317-22358;Y 步 0.07 帽 ±6、X 步 0.1 帽 ±8,逆向 ×0.96）
+      if (e.y > head.y - 100) {
+        if (e.vy > 0) e.vy *= 0.96;
+        e.vy -= 0.07;
+        if (e.vy > 6) e.vy = 6;
+      } else if (e.y < head.y - 100) {
+        if (e.vy < 0) e.vy *= 0.96;
+        e.vy += 0.07;
+        if (e.vy < -6) e.vy = -6;
+      }
+      if (e.cx > headCx - 120 * e.ai0) {
+        if (e.vx > 0) e.vx *= 0.96;
+        e.vx -= 0.1;
+        if (e.vx > 8) e.vx = 8;
+      }
+      if (e.cx < headCx - 120 * e.ai0) {
+        if (e.vx < 0) e.vx *= 0.96;
+        e.vx += 0.1;
+        if (e.vx < -8) e.vx = -8;
+      }
     } else {
-      // 环绕位:头右/左 200px、下方 230(原版 num200 系)
-      const ox = head.x + head.w / 2 - e.w / 2 - 200 * (e.ai0 || 1);
-      const oy = head.y + 230;
-      e.vx += ((ox - e.x) * 0.02 - e.vx) * 0.1;
-      e.vy += ((oy - e.y) * 0.02 - e.vy) * 0.1;
+      // 头悬浮：环绕位 ±200/+230 + ai[3] 计时（cs:22359-22407;红帽 +1/t、专家 +0.5/t
+      // → 计满 300 提前;专家先跑一遍同参段再跑普通段 = 双倍步长）
+      e.ai3 += 1;
+      if (flag21) e.ai3 += 1;
+      if (expert) e.ai3 += 0.5;
+      if (e.ai3 >= 300) { e.ai2 += 1; e.ai3 = 0; }
+      const passes = expert ? 2 : 1;
+      for (let pass = 0; pass < passes; pass++) {
+        if (e.y > head.y + 230) {
+          if (e.vy > 0) e.vy *= 0.96;
+          e.vy -= 0.04;
+          if (e.vy > 3) e.vy = 3;
+        } else if (e.y < head.y + 230) {
+          if (e.vy < 0) e.vy *= 0.96;
+          e.vy += 0.04;
+          if (e.vy < -3) e.vy = -3;
+        }
+        if (e.cx > headCx - 200 * e.ai0) {
+          if (e.vx > 0) e.vx *= 0.96;
+          e.vx -= 0.07;
+          if (e.vx > 8) e.vx = 8;
+        }
+        if (e.cx < headCx - 200 * e.ai0) {
+          if (e.vx < 0) e.vx *= 0.96;
+          e.vx += 0.07;
+          if (e.vx < -8) e.vx = -8;
+        }
+      }
     }
-  } else {
-    // 头冲撞中:快速回侧位
-    e.vx += ((tx - e.x) * 0.05 - e.vx) * 0.2;
-    e.vy += ((ty - e.y) * 0.05 - e.vy) * 0.2;
+    anchorRot();
+  } else if (e.ai2 === 1) {
+    // ---- 蓄升态（cs:22412-22466）----
+    anchorRot();
+    e.vx *= 0.95;
+    e.vy -= 0.1;
+    if (flag21) {
+      e.vy -= 0.09;
+      if (e.vy < -15) e.vy = -15;
+    } else if (expert) {
+      e.vy -= 0.06;
+      if (e.vy < -13) e.vy = -13;
+    } else if (e.vy < -8) {
+      e.vy = -8;
+    }
+    if (e.y < head.y - 200) {
+      // 升到头上方 200 → 直冲（TargetClosest + 朝玩家 ×18/专家 21/红帽 24,cs:22448-22466）
+      e.ai2 = 2;
+      const dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const d = Math.max(0.01, Math.hypot(dx, dy));
+      const spd = flag21 ? 24 : expert ? 21 : 18;
+      e.vx = dx / d * spd;
+      e.vy = dy / d * spd;
+    }
+  } else if (e.ai2 === 2) {
+    // ---- 直冲态（cs:22468-22476,纯弹道只查收尾门）----
+    const dot = e.vx * (player.cx - e.cx) + e.vy * (player.cy - e.cy);
+    if (e.y > player.y || dot <= 0
+      || Math.hypot(player.x - e.x, player.y - e.y) > 2000 || e.vy < 0) {
+      e.ai2 = 3;
+    }
+  } else if (e.ai2 === 4) {
+    // ---- 侧浮态（cs:22478-22535）----
+    anchorRot();
+    e.vy *= 0.95;
+    e.vx += 0.1 * -e.ai0;
+    if (flag21) {
+      e.vx += 0.1 * -e.ai0;
+      if (e.vx < -15) e.vx = -15;
+      else if (e.vx > 15) e.vx = 15;
+    } else if (expert) {
+      e.vx += 0.07 * -e.ai0;
+      if (e.vx < -12) e.vx = -12;
+      else if (e.vx > 12) e.vx = 12;
+    } else if (e.vx < -8) {
+      e.vx = -8;
+    } else if (e.vx > 8) {
+      e.vx = 8;
+    }
+    if (e.cx < headCx - 500 || e.cx > headCx + 500) {
+      // 离心 500px → 回冲（×17/专家 22/红帽 25,cs:22514-22535）
+      e.ai2 = 5;
+      const dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const d = Math.max(0.01, Math.hypot(dx, dy));
+      const spd = flag21 ? 25 : expert ? 22 : 17;
+      e.vx = dx / d * spd;
+      e.vy = dy / d * spd;
+    }
+  } else if (e.ai2 === 5) {
+    // ---- 回冲态（cs:22537-22552）----
+    const dot = e.vx * (player.cx - e.cx) + e.vy * (player.cy - e.cy);
+    if ((e.vx > 0 && e.cx > player.cx) || (e.vx < 0 && e.cx < player.cx)
+      || dot <= 0 || Math.hypot(player.x - e.x, player.y - e.y) > 2000) {
+      e.ai2 = 0;
+    }
   }
   e.x += e.vx; e.y += e.vy;
 }

@@ -14,8 +14,18 @@
 // 用法:node scripts/play.mjs [url]        缺省 http://localhost:4173
 //   SW_PLAY_QUIT=1  跳过询问直接优雅退出重启(CI/脚本用)
 //   SW_PLAY_DRY=1   只打印将执行的 open 命令(测试用,不启动不退出)
-import { spawnSync, execSync } from 'node:child_process';
+//   --trace / npm run playtrace:GPU 崩溃取证档——不经 open 而是直接 spawn
+//     Chrome 二进制,stderr 落 game/logs/gpu-stderr-<时间戳>.log。
+//     --enable-logging=stderr 后 Chrome 自带 [pid:tid:MMDD/HHMMSS:severity:file(line)]
+//     前缀:IOSurface 分配失败(io_surface.cc)、上下文死亡、swapchain 报错全部
+//     带时间戳落盘——DevTools Performance 录不到的正是这些(2026-08-19 双开
+//     trace 两份皆"健康侧",真铁证一直在 stderr)。缺省 --log-level=1(WARNING+,
+//     覆盖全部 ERROR 级失败行);SW_PLAY_TRACE_LEVEL=0 可放开到 INFO(量大)。
+import { spawnSync, execSync, spawn } from 'node:child_process';
 import net from 'node:net';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import readline from 'node:readline/promises';
 
 const CHROME = 'Google Chrome';
@@ -38,6 +48,9 @@ const FLAGS = [
 // 渲染,M 系列仍可玩);单窗高质量游玩不要开。
 const SOFT = process.argv.includes('--soft') || process.env.SW_PLAY_SOFT === '1';
 if (SOFT) FLAGS.push('--disable-gpu');
+// GPU 崩溃取证档(npm run playtrace):stderr 日志抓 io_surface 分配失败/上下文死亡
+const TRACE = process.argv.includes('--trace') || process.env.SW_PLAY_TRACE === '1';
+if (TRACE) FLAGS.push('--enable-logging=stderr', `--log-level=${process.env.SW_PLAY_TRACE_LEVEL ?? '1'}`);
 // 位置参数只认不以 - 开头的(URL);--soft 等旗标不得落入 url(曾把 '--soft'
 // 当 URL 解析直接报"无效 URL"退出)
 const positional = process.argv.slice(2).filter((a) => !a.startsWith('-'));
@@ -65,7 +78,8 @@ if (!alive) {
 }
 
 if (DRY) {
-  console.log('[dry] open', JSON.stringify(['-na', CHROME, '--args', ...FLAGS, url].join(' ')));
+  if (TRACE) console.log('[dry] spawn Chrome 二进制', JSON.stringify(FLAGS.concat(url)), 'stderr → logs/gpu-stderr-*.log');
+  else console.log('[dry] open', JSON.stringify(['-na', CHROME, '--args', ...FLAGS, url].join(' ')));
   console.log(`[dry] Chrome running=${chromeRunning()} autoQuit=${AUTO_QUIT} tty=${process.stdin.isTTY}`);
   process.exit(0);
 }
@@ -85,9 +99,28 @@ if (chromeRunning()) {
   await new Promise((r) => setTimeout(r, 500)); // 进程表清空后再留半秒,防单例竞态
 }
 
-spawnSync('open', ['-na', CHROME, '--args', ...FLAGS, url], { stdio: 'inherit' });
-console.log(`已冷启动 ${CHROME}(JS 堆 8GB;GPU 侧无旗标可救,双开请用游戏内 renderMode=cpu)→ ${url}`);
-console.log('若 Chrome 设置了"继续浏览上次打开的页面",之前的标签会一并恢复。');
+if (TRACE) {
+  // 直接 spawn 二进制(open 转发不了子进程 stderr)——detached+unref,脚本退出后
+  // Chrome 继续跑,stderr 持续落盘;崩溃瞬间 io_surface.cc/上下文死亡行全带时间戳
+  const logDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'logs');
+  fs.mkdirSync(logDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const logPath = path.join(logDir, `gpu-stderr-${stamp}.log`);
+  const BIN = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  if (!fs.existsSync(BIN)) { console.error(`找不到 Chrome 二进制:${BIN}`); process.exit(1); }
+  const fd = fs.openSync(logPath, 'a');
+  const child = spawn(BIN, [...FLAGS, url], { detached: true, stdio: ['ignore', fd, fd] });
+  child.unref();
+  fs.closeSync(fd);
+  console.log(`已冷启动 Chrome(取证档,WARNING+ 日志)→ ${url}`);
+  console.log(`stderr 落盘:${logPath}`);
+  console.log('复现崩溃后把这个文件发我——IOSurface 分配失败/上下文死亡行带时间戳,可精确到崩溃点。');
+  console.log('第二个窗口用普通方式开即可(同一 GPU 进程,失败行不分窗口;要分清就两个都用 playtrace 起,日志文件分开)。');
+} else {
+  spawnSync('open', ['-na', CHROME, '--args', ...FLAGS, url], { stdio: 'inherit' });
+  console.log(`已冷启动 ${CHROME}(JS 堆 8GB;GPU 侧无旗标可救,双开请用游戏内 renderMode=cpu)→ ${url}`);
+  console.log('若 Chrome 设置了"继续浏览上次打开的页面",之前的标签会一并恢复。');
+}
 
 async function ask() {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });

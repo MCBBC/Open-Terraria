@@ -14,7 +14,8 @@
     "test:audit": "vitest run tests/atlas-lint.test.ts tests/extract-audit.test.ts",
     "prebuild": "npm run test:audit",
     "play": "node scripts/play.mjs",
-    "playsoft": "node scripts/play.mjs --soft"
+    "playsoft": "node scripts/play.mjs --soft",
+    "playtrace": "node scripts/play.mjs --trace"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3"
