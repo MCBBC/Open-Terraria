@@ -18,8 +18,8 @@ const npcData = vanillaNpcsJson as Record<string, { frames?: number; name?: stri
 const uiFiles = (vanillaUiJson as { files: Record<string, string> }).files;
 const projFrames = projFramesJson as Record<string, number>;
 const sizes = {
-  ...(remasterIndex as { vanilla: Record<string, [number, number]> }).vanilla,
-  ...(remasterIndex as { 'vanilla-ui': Record<string, [number, number]> })['vanilla-ui'],
+  ...(remasterIndex as unknown as { vanilla: Record<string, [number, number]> }).vanilla,
+  ...(remasterIndex as unknown as { 'vanilla-ui': Record<string, [number, number]> })['vanilla-ui'],
 };
 
 const catalog = buildCatalog({

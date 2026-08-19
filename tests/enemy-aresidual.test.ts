@@ -229,7 +229,8 @@ describe('项4 地面摩擦：仅 num184 单链（无 0.85 叠乘）', () => {
     const h = makeHooks(makeWorld());
     const e = makeEnemy(h);
     e.vx = 2; e.vy = 0;
-    fighterMoveStep(e, 1, null);
+    // 2026-08-19 C 批：fighterMoveStep 增 game 参（扑咬突进族的昼夜/地下门需要）
+    fighterMoveStep(e, h.hooks, 1, null);
     expect(e.vx).toBeCloseTo(1.6, 6);
   });
   it('整 tick 单链：vx2 → 1.6（0.85 叠乘旧值 1.36），30t 收敛回 max≈1 而非 ~0.47', () => {

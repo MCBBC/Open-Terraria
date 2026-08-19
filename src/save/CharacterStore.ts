@@ -93,6 +93,12 @@ export class CharacterStore {
     await kvSet(stateKey(id), JSON.stringify(state));
   }
 
+  /** 硬核消亡清随身态（原版 KillMeForGood 直接删 .plr 档；本仓留墓碑外观但
+   *  物品已全数掉落在死亡世界——残留态会在下一世界"复活"全套装备=复制窗） */
+  async clearState(id: number): Promise<void> {
+    await kvDelete(stateKey(id));
+  }
+
   async copy(id: number): Promise<CharacterMeta | null> {
     const a = await this.get(id);
     if (!a) return null;

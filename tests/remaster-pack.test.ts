@@ -8,6 +8,8 @@ import {
 import {
   boxDownscale, nearestUpscale, applyAlphaMask, frameHash, computeGenLayout, mapBackRect,
 } from '../src/remaster/FrameOps';
+import { composePrompt, DEFAULT_GLOBAL_PREFIX, refFrameSentence } from '../src/remaster/PromptTemplates';
+import { parseImageResponse, nearestCenterSample } from '../src/remaster/ImageRemaster';
 import type { PackEntryMeta } from '../src/remaster/types';
 
 const enc = new TextEncoder();
@@ -129,6 +131,53 @@ describe('FrameOps 像素数学', () => {
     expect(frameHash(a)).toBe(frameHash(new Uint8ClampedArray([1, 2, 3, 4])));
     expect(frameHash(a)).not.toBe(frameHash(new Uint8ClampedArray([1, 2, 3, 5])));
     expect(frameHash(a)).toMatch(/^[0-9a-f]{8}$/);
+  });
+});
+
+describe('prompt 组装(微调控制)', () => {
+  it('默认组装 = 前缀 + 类别模板插值', () => {
+    const p = composePrompt({ category: 'npc', name: 'Blue Slime', frameIdx: 1, frameCount: 4 });
+    expect(p.startsWith(DEFAULT_GLOBAL_PREFIX)).toBe(true);
+    expect(p).toContain('NPC "Blue Slime"');
+    expect(p).toContain('frame 1 of 4');
+  });
+  it('userPrompt 整体覆盖(人工微调语义)', () => {
+    const p = composePrompt({ category: 'tile', name: 'Dirt', frameIdx: 0, frameCount: 1, userPrompt: '  更鲜艳的泥土  ' });
+    expect(p).toBe('更鲜艳的泥土');
+  });
+  it('风格锚参考帧附加句', () => {
+    const p = composePrompt({ category: 'npc', name: 'X', frameIdx: 2, frameCount: 3, refFrameIdx: 1 });
+    expect(p).toContain(refFrameSentence(1));
+    expect(p).toContain('match its exact art style');
+  });
+  it('全局前缀可覆盖(工作台设置)', () => {
+    const p = composePrompt({ category: 'misc', name: 'X', frameIdx: 0, frameCount: 1, globalPrefix: 'PREFIX.' });
+    expect(p.startsWith('PREFIX.')).toBe(true);
+    expect(p).not.toContain(DEFAULT_GLOBAL_PREFIX.slice(0, 20));
+  });
+});
+
+describe('images API 响应解析', () => {
+  it('取首个 b64_json', () => {
+    expect(parseImageResponse({ data: [{ b64_json: 'QUJD' }] })).toBe('QUJD');
+  });
+  it('error.message 透传', () => {
+    expect(() => parseImageResponse({ error: { message: 'bad key' } })).toThrow(/bad key/);
+  });
+  it('无 data 抛错', () => {
+    expect(() => parseImageResponse({})).toThrow(/b64_json/);
+  });
+});
+
+describe('nearest 缩回(源块中心)', () => {
+  it('2× 缩:目标像素取源 2×2 块中心附近', () => {
+    // 4×1 [红,红,蓝,蓝] → 2×1:目标 0 取源 x∈[0,2) 中心 ~0/1(红),目标 1 取 x∈[2,4)(蓝)
+    const src = new Uint8ClampedArray([
+      255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255,
+    ]);
+    const out = nearestCenterSample(src, 4, 1, 2, 1);
+    expect([...out.slice(0, 4)]).toEqual([255, 0, 0, 255]);
+    expect([...out.slice(4, 8)]).toEqual([0, 0, 255, 255]);
   });
 });
 

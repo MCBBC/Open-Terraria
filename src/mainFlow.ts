@@ -225,7 +225,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 重进角色列表即灰显禁入（原版 KillMeForGood :38173+ 直接删 .plr 档）
       onHardcoreDeath: async (appearance) => {
         selectedAppearance = appearance;
-        if (selectedCharId != null) await charStore.update(selectedCharId, appearance);
+        // 清随身态（物品已全数掉落;残留=下一世界复活全套装备的复制窗,2026-08-19
+        // 补齐)+ 清 lastCharId（quickLoad 回退不再命中亡者态）
+        if (selectedCharId != null) {
+          await charStore.update(selectedCharId, appearance);
+          await charStore.clearState(selectedCharId);
+        }
+        try { localStorage.removeItem('sbw.lastCharId'); } catch { /* 隐私模式 */ }
       },
       // 梳妆台更衣窗（Main.OpenClothesWindow Main.cs:43568）：确认后回写角色档 +
       // 在线外观（原版外观随 .plr 档，CancelClothesWindow 取消则回退六色快照）
@@ -348,9 +354,22 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const py = worldPlayer ? worldPlayer.y : g.player.y;
     if (cs) {
       applyPlayer(g, { ...playerFromDiskForm(cs), x: px, y: py });
+      applyCharJourney(g, cs);
     } else if (worldPlayer) {
       applyPlayer(g, worldPlayer);
     }
+  }
+
+  /** 角色随身态·玩家侧旅程力量（IPersistentPerPlayerContent 语义补齐）：
+   *  上帝模式/扩大放置/刷怪率滑杆随角色走——运行时同存 World.journeyPowers
+   *  （JourneyPowers.ts 头注设计位）,存档侧已落 player 段,读侧在此回填 */
+  function applyCharJourney(g: Game, cs: ReturnType<typeof loadSaveData>['player']): void {
+    const jp = cs.journeyPowers;
+    if (!jp) return;
+    const w = g.world.journeyPowers;
+    if (jp.godmode !== undefined) w.godmode = jp.godmode;
+    if (jp.farPlacementRange !== undefined) w.farPlacementRange = jp.farPlacementRange;
+    if (jp.spawnRateSlider !== undefined) w.spawnRateSlider = jp.spawnRateSlider;
   }
 
   /** 旧档无 header.difficulty（本次修复前创建的专家/大师世界）→ 以槽位
@@ -698,6 +717,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (cs) {
         const sx = g.player.x, sy = g.player.y;
         applyPlayer(g, { ...playerFromDiskForm(cs), x: sx, y: sy });
+        applyCharJourney(g, cs);   // 旅程力量玩家侧随身（IPersistentPerPlayerContent）
       }
     }
     doSave();

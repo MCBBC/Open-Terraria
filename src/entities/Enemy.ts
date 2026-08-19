@@ -28,6 +28,7 @@ const DUNGEON_WALL_IDS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 import { spawnStardustMarks } from './StardustMarkProj';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
+import { PoopProj } from './PoopProj';
 import { BookProj } from './BookProj';
 import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
@@ -740,7 +741,8 @@ export class Enemy extends Entity {
     e.vanillaId = id;
     e.vanilla = v;
     const hit = vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'];
-    const kill = vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'];
+    // DeathSound 显式 null(246 头)=原版无声,不给 fallback(缺键=提取漏→通用档)
+    const kill = v.DeathSound === null ? [] : vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'];
     // 飞行档（StrikeNPC :82217/-0.5 受击档用）：数据 noGravity 族 + aiStyle 2/5/14
     // （原版各 AI 开头 noGravity=true）+ aiStyle 23/44（飞行武器 83/84/179 kb0.4
     // :25318、飞鱼/蚁狮蜂族 224/509/581/587 :31001——JSON noGravity=false 但原版
@@ -3082,13 +3084,14 @@ export class Enemy extends Entity {
         || (R.aimDecelOffEclipse && !game.world.clock.eclipse);
       // flag17 = 426（瞄准不因空中解除，cs:59467/:60015/:60020/:60030）
       const flag17 = vidR === 426;
-      // F3 justHit 重瞄（cs:59486-59492）：ai[1]=30、ai[2]=0；216 瞄准中受击 → lai3+1
+      if (this.ai1 > 0) this.ai1 -= 1;                         // :59481-59484 先倒数
+      // F3 justHit 重瞄（cs:59486-59492，后于倒数）：ai[1]=30、ai[2]=0；
+      // 216 瞄准中受击 → lai3+1
       if (this.justHit) {
         if (vidR === 216 && this.ai2 > 0) this.lai3 += 1;      // :59568-59571 flag19
         this.ai1 = 30;                                         // :59489
         this.ai2 = 0;                                          // :59490
       }
-      if (this.ai1 > 0) this.ai1 -= 1;                         // :59481-59484
       // 枪口（chaserPosition2，cs:59674-59703）
       const mx = this.cx, my = this.cy + (R.oy ?? 0);
       if (this.ai2 > 0) {           // 瞄准中
@@ -3837,7 +3840,7 @@ export class Enemy extends Entity {
       flying,
       boss: VANILLA_BOSS_IDS.has(id),
       hitSound: vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'],
-      killedSound: vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'],
+      killedSound: v.DeathSound === null ? [] : vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'],
       drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
     };
     this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
@@ -3864,6 +3867,39 @@ export class Enemy extends Entity {
    *  实心重叠自检——原版 Transform 无此回退（SetDefaults 后仅底边锚定改尺寸） */
   transformTo(id: number, st: GameHooks['world']['store'], allowEmbedded = false, game?: GameHooks): boolean {
     return this.tryTransformTo(id, st, allowEmbedded, game);
+  }
+
+  /** NPC.FishTransformationDuringRain（NPC.cs:94084-94115，UpdateCollision :93742
+   *  每 tick 调——wet 计算后、位移积分前）：雨天金鱼链。
+   *  230 行走金鱼 wet → 55 游形（vy<0 归 0）；55 非湿且 raining → 230 + homeTileX
+   *  挪 position.X/16+10×direction（下风重建家）；593/592 镜像同链。
+   *  放置：Game 敌怪轮（entities.update 后逐敌调用——wet 已是本 tick 新值）。 */
+  fishTransformationDuringRain(game: GameHooks): void {
+    if (this.dead || this.netPuppet) return;
+    const vid = this.vanillaId;
+    if (vid === null) return;
+    const st = game.world.store;
+    const raining = game.world.weather.raining;
+    // Transform 内 TargetClosest（:81875）→ direction 朝玩家；离场玩家保旧向
+    const retarget = (): void => {
+      const p = game.player;
+      if (p && !p.dead) this.facing = p.cx >= this.cx ? 1 : -1;
+    };
+    if (vid === 230 && this.wet) {
+      if (this.transformTo(55, st, false, game)) { retarget(); if (this.vy < 0) this.vy = 0; }
+    } else if (vid === 55 && !this.wet && raining) {
+      if (this.transformTo(230, st, false, game)) {
+        retarget();
+        this.critterHomeX = Math.floor(this.x / TILE) + 10 * this.facing;   // :94101
+      }
+    } else if (vid === 593 && this.wet) {
+      if (this.transformTo(592, st, false, game)) { retarget(); if (this.vy < 0) this.vy = 0; }
+    } else if (vid === 592 && !this.wet && raining) {
+      if (this.transformTo(593, st, false, game)) {
+        retarget();
+        this.critterHomeX = Math.floor(this.x / TILE) + 10 * this.facing;   // :94114
+      }
+    }
   }
 
   /** NPC.GetShimmered（NPC.cs:92502-92584）子集：雕像产怪直接消散（:92504-92519）→
@@ -3917,6 +3953,8 @@ export class Enemy extends Entity {
     if (alive) {
       tx = Math.floor(player!.cx / 8) * 8 - Math.floor(this.cx / 8) * 8;
       ty = Math.floor(player!.cy / 8) * 8 - Math.floor(this.cy / 8) * 8;
+      // K1（cs:29811-29815）：confused → 目标向量反向且加倍（归一化前）
+      if (this.confused) { tx *= -2; ty *= -2; }
     } else {
       tx = this.facing * maxSpd / 2;
       ty = -maxSpd / 2;
@@ -3978,10 +4016,12 @@ export class Enemy extends Entity {
     // frameCounter += (|vx|+|vy|)×0.5（531 ×0.4），24 一循环）
     this.crawlT = (this.crawlT + (Math.abs(this.vx) + Math.abs(this.vy))
       * (this.vanillaId === 531 ? 0.4 : 0.5)) % 24;
-    // 脱墙 → Transform 回地面形态（:29991-30010）
+    // 脱墙 → TryMoveToTransformableSpaceInto 挪位后 Transform 回地面形态
+    // （:29990-30014；K2 批 2026-08-19：挪不进目标盒空间则不转化）
     const groundForm = Enemy.SPIDER_GROUND_FORM[this.vanillaId ?? -1];
-    if (groundForm !== undefined && !this.npcCanStickToWalls(st)) {
-      this.tryTransformTo(groundForm, st, false, game);
+    if (groundForm !== undefined && !this.npcCanStickToWalls(st)
+      && this.tryMoveToTransformableSpaceInto(groundForm, st)) {
+      this.tryTransformTo(groundForm, st, true, game);
     }
   }
 
@@ -6754,8 +6794,7 @@ export class Enemy extends Entity {
         && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)
         && rollOnlyBadLuckExtreme((player as unknown as { luck: number }).luck, 50) === 0) {
         this.lai3 = 1;
-        const poop = new Dart(player.cx, this.cy, 0, 0, 0, 1080);
-        (game as unknown as { entities: { add(e: unknown, b: string): void } }).entities.add(poop, 'projectiles');
+        game.spawnCritterProj?.(new PoopProj(player.cx, this.cy));
       }
     }
     // ---- 鸮族专属段（:25408-25451）----
@@ -7010,7 +7049,7 @@ export class Enemy extends Entity {
       };
       for (const o of game.enemies()) {
         const e = o as Enemy;
-        if (e === this || e.dead || e.def.damage <= 0 || e.def.friendly) continue;
+        if (e === this || e.dead || e.def.damage <= 0 || !!e.vanilla?.friendly) continue;
         if (boxDist(e) <= 100) {
           const d = Math.hypot(this.cx - e.cx, this.cy - e.cy) || 1;
           count++; ux += (this.cx - e.cx) / d; uy += (this.cy - e.cy) / d;
@@ -7156,7 +7195,7 @@ export class Enemy extends Entity {
         if (e === this || e.dead) continue;
         const et = e.vanillaId ?? -1;
         if (CRITTER_TURN_ON_PLAYERS.has(et) || et === 690) continue;   // :53888 豁免源
-        if (e.def.damage <= 0 || e.def.friendly) continue;             // (friendly||damage<=0)&&!stinky
+        if (e.def.damage <= 0 || !!e.vanilla?.friendly) continue;             // (friendly||damage<=0)&&!stinky
         if (Math.hypot(e.cx - this.cx, e.cy - this.cy) >= 200) continue;   // num11/num12 均 200
         if (!e.noTileCollide
           && !canHit(st, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
@@ -7505,7 +7544,7 @@ export class Enemy extends Entity {
         };
         for (const o of game.enemies()) {
           const e = o as Enemy;
-          if (e === this || e.dead || e.def.damage <= 0 || e.def.friendly) continue;
+          if (e === this || e.dead || e.def.damage <= 0 || !!e.vanilla?.friendly) continue;
           if (boxDist(e) <= 100) {
             const d = Math.hypot(this.cx - e.cx, this.cy - e.cy) || 1;
             count++; ux += (this.cx - e.cx) / d; uy += (this.cy - e.cy) / d;
@@ -7640,6 +7679,21 @@ export class Enemy extends Entity {
     this.applyGravity(game);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.ai0 === 1 && this.hitWall) this.facing *= -1;  // 仅 collideX（:34506-34509）
+    // ---- FindFrame case 357/485-487 的旋转（cs:73460-73508/:73516-73563,补齐）：
+    //      腾空自旋 direction×0.1/tick 累积;贴地(vy==0)归零;坡面钉 ±0.785
+    //      （检头顶格,平坡再检其下格;slope1=+0.785/slope2=−0.785,覆写自旋）----
+    this.spin = this.vy !== 0 ? this.spin + this.facing * 0.1 : 0;
+    {
+      const sx2 = Math.floor(this.cx / TILE);
+      let sy2 = Math.floor(this.y / TILE);
+      let sl = st.inBounds(sx2, sy2) ? st.slope[st.idx(sx2, sy2)] : 0;
+      if (sl === 0) {
+        sy2 += 1;
+        sl = st.inBounds(sx2, sy2) ? st.slope[st.idx(sx2, sy2)] : 0;
+      }
+      if (sl === 1) this.spin = 0.785;
+      else if (sl === 2) this.spin = -0.785;
+    }
   }
 
   /** AI_067 蜗牛族（cs:34586-34860）1:1 结构重做（2026-08-19，曾对角爬+自创 dirY 翻
@@ -8901,7 +8955,7 @@ export class Enemy extends Entity {
       let count = 0, ux = 0, uy = 0;
       for (const o of game.enemies()) {
         const e = o as Enemy;
-        if (e.dead || e.def.damage <= 0 || e.def.friendly) continue;
+        if (e.dead || e.def.damage <= 0 || !!e.vanilla?.friendly) continue;
         if (boxDist(e) <= 100) {
           const d = Math.hypot(this.cx - e.cx, this.cy - e.cy) || 1;
           count++; ux += (this.cx - e.cx) / d; uy += (this.cy - e.cy) / d;
@@ -10348,18 +10402,16 @@ export class Enemy extends Entity {
       // 月总族(396/397/398)血尽不直死:原版 checkDead(:78841-78867)转为闭眼残肢/死亡演出,
       // 转换逻辑在各自 AI 首行(hp<=0 → ai0 置态+满血续命),此处放行让 AI 下一 tick 接管
       if (this.vanillaId === 396 || this.vanillaId === 397 || this.vanillaId === 398) return false;
-      // 石巨人族:仅挂载头 246 放行(血尽转自由态在 golemHeadAI 首行)。
-      // 本体 245 = 标准死亡 + 部件(246-249)随终战消亡(boss#19 定案,原 DoDeathEvents
-      // :80146-80148);拳 247/248 = 普通死亡(原版无转换)。★曾全族放行→转换只在
-      // AI 首行而拳/本体无处理 = 负血条不死(用户报 2026-08-19,放行在 dead=true
-      // 之前,hurt 不会置 dead——"AI 首行接管"的契约对本/拳不成立)
-      if (this.vanillaId === 246) return false;
-      if (this.vanillaId === 245) {
-        for (const n of game.enemies() as Enemy[]) {
-          if (!n.dead && n !== this && n.vanillaId !== null
-            && n.vanillaId >= 246 && n.vanillaId <= 249) n.dead = true;
-        }
-      }
+      // 石巨人族:仅挂载头 246 放行且须【本体活】(血尽转自由态在 golemHeadAI
+      // 首行——一阶段本体无敌,玩家先打头的场景本体必活;本体死后原版头是
+      // StrikeNPCNoInteraction 标准死 :31287-31290,落回通用管线)。
+      // 本体 245 = 标准死亡(部件随终战消亡=各 AI 锚主检测后自杀,boss#19 定案,
+      // 原 DoDeathEvents :80146-80148——原版部件也是下一 tick 自杀,时序同构);
+      // 拳 247/248 = 普通死亡(原版无转换)。★曾全族放行→转换只在 AI 首行而拳/
+      // 本体无处理 = 负血条不死(用户报 2026-08-19,放行在 dead=true 之前,hurt
+      // 不会置 dead——"AI 首行接管"的契约对本/拳不成立)
+      if (this.vanillaId === 246
+        && (game.enemies() as Enemy[]).some((n) => !n.dead && n.vanillaId === 245)) return false;
       // 星璇四塔(517/422/507/493)：checkDead（NPC.cs:78867-78875）血尽转 ai2=1 死亡演出
       // （ai1=0、满血续命 + dontTakeDamage），180t 上升渐隐后由 towerAI 走标准死亡管线（掉碎片）
       if (this.vanillaId != null && this.vanillaId in TOWER_KEY && this.ai2 !== 1) {
@@ -10572,7 +10624,8 @@ export class Enemy extends Entity {
       }
       if (this.vanillaId !== 398) {
         if (this.def.killedSound.length) game.playSfxFiles?.(this.def.killedSound, 1, this.cx, this.cy);
-        else game.playSfx('killed', 1, this.cx, this.cy);
+        // 空 = 显式无声(原版 DeathSound=null,246 头:血尽本应转 249,标准死零死音)——
+        // 旧 'killed' 合成 fallback 无可达场景(fromVanilla 恒非空除 null 路径),撤
       }
       // 原版死亡 gore 碎块（NPC.HitEffect life<=0 段全表，NPC.cs:82421-:90873 →
       // tools/extract-gore.mjs → src/data/vanilla-gore.json）：查表炸 GorePiece

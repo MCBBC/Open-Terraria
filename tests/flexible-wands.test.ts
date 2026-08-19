@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { flexibleWandOf, tryGetPlacementOption } from '../src/world/FlexibleTileWands';
 import tables from '../src/data/flexible-wands.json';
 
-const T = tables as Record<string, Array<[number, number, number[]]>>;
+const T = tables as unknown as Record<string, Array<[number, Array<[number, number]>]>>;
 
 describe('FlexibleTileWand 物品映射（Item.cs:49103）', () => {
   it('30 件全命中 + 非魔杖恒 null', () => {
@@ -43,14 +43,14 @@ describe('表提取正确性（vs FlexibleTileWand.cs 逐条）', () => {
 
   it('关键条目抽验（变量/字面 tile + default(int) + ByRow + 跨 tile 合桶）', () => {
     const find = (t: string, ammo: number) => T[t].find((b) => b[0] === ammo);
-    expect(find('small', 3)?.[1].slice(0, 6)).toEqual([[650, 0], [650, 1], [650, 2], [650, 3], [650, 4], [650, 5]]);
+    expect(find('small', 3)?.[1].slice(0, 6)).toEqual([[650, 0], [650, 1], [650, 2], [650, 3], [650, 4], [650, 5]] as Array<[number, number]>);
     expect(find('small', 5114)?.[1]).toEqual([[700, 0]]);                 // 字面单条
     expect(find('small', 5333)?.[1]).toEqual([[701, 0]]);
     expect(find('medium', 5667)?.[1]).toEqual([[751, 0]]);                // default(int)
     expect(find('large', 4144)?.[1]).toEqual([[706, 0]]);
     expect(find('medium', 1291)?.[1]).toEqual([[702, 0], [702, 1], [702, 2]]);  // :269 属 Medium 方法
-    expect(find('small', 169)?.[1].map((o) => o[1])).toEqual([73, 74, 76, 78, 79, 80, 81]); // 跳号样式
-    expect(find('kiln', 133)?.[1].map((o) => o[1])).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]); // ByRow 4 行摊平
+    expect(find('small', 169)?.[1].map((o: [number, number]) => o[1])).toEqual([73, 74, 76, 78, 79, 80, 81]); // 跳号样式
+    expect(find('kiln', 133)?.[1].map((o: [number, number]) => o[1])).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]); // ByRow 4 行摊平
     expect(find('large', 154)?.[1]).toEqual([[647, 0], [647, 1], [647, 2], [647, 3], [647, 4], [647, 5], [647, 6], [648, 52], [648, 53], [648, 54]]); // 同弹药跨 tile
   });
 });
@@ -76,7 +76,7 @@ describe('选样式（TryGetPlacementOption :176-197 + GetOptionWithCycling :25-
   it('cycleOffset 模容量 + 负偏移同余', () => {
     const wand = flexibleWandOf(5329)!;
     const inv = [{ vid: 3, favorited: false }];
-    const styles = T.medium.find((b) => b[0] === 3)![1].map((o) => o[1]);   // 合桶后 9 样式
+    const styles = T.medium.find((b) => b[0] === 3)![1].map((o: [number, number]) => o[1]);   // 合桶后 9 样式
     const n = styles.length;
     for (let c = 0; c < n; c++) {
       expect(tryGetPlacementOption(wand, inv, c)!.style).toBe(styles[c]);

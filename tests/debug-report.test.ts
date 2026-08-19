@@ -227,10 +227,11 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect(cc.chunks).toBe(1);
     expect(cc.dirtyQueue).toBe(1);
     expect(cc.staleSentinels).toBe(1);
-    // MAX_CHUNKS 复原 384（src/render/ChunkCache.ts:80，6db8ae90 2026-08-14：
-    // contextlost 自适应兜底就位后压力真来自动减半 384→192→96；测试环境无
-    // contextlost → 恒 384）
-    expect(cc.maxChunks).toBe(384);
+    // MAX_CHUNKS 满档 = BASE_MAX_CHUNKS（src/render/ChunkCache.ts；
+    // 2026-08-14 曾复原 384,2026-08-19 双开 IOSurface 压基数 384→192——
+    // contextlost 自适应兜底仍在:真撑不住自动减半 192→96→64；测试环境无
+    // contextlost → 恒满档）
+    expect(cc.maxChunks).toBe(192);
     expect(cc.lastFlushMs).toBe(6.5);
 
     // render.subsystems（渲染器 debugState() 钩子收集；未绘制时 count/lastDraw 保守值）

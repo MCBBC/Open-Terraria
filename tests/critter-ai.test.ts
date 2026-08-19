@@ -28,19 +28,40 @@ function critterWorld(playerAt: { x: number; y: number } | null, opts: { water?:
 }
 
 describe('小动物 AI 家族', () => {
-  it('兔 46（aiStyle 7）：站/走循环 + 1 格台阶自动跳', () => {
+  // 2026-08-19 1:1 修正（cs:54471-54626 台阶跳档重做）：探测行 = 脚上一行 num27
+  // 语义 + 沉入 >20 门——1 格台阶【不触发跳档】（t4=num27−1 才是 1 格墙；t3 档被
+  // 沉入门拦下），由 Collision.StepUp 无声踏上。旧断言"1 格台阶自动跳"已按新语义
+  // 改为"踏上不跳"。
+  it('兔 46（aiStyle 7）：站/走循环 + 1 格台阶 StepUp 踏上（跳档三档只对 1/2 格墙）', () => {
     const { w, hooks } = critterWorld(null);
     w.store.setTileSilent(45, 59, 2); // 两侧各放台阶，任意方向踱步都会撞上
     w.store.setTileSilent(35, 59, 2);
     const e = Enemy.fromVanilla(46, 40 * 16, 59 * 16)!;
-    let walked = false, jumped = false;
+    let walked = false, jumped = false, steppedUp = false;
     for (let t = 0; t < 3000; t++) {
       e.fixedUpdate(1 / 60, hooks);
       if (Math.abs(e.vx) > 0.2) walked = true;
       if (e.vy < -1) jumped = true;
+      if (e.y + e.h <= 59 * 16 + 0.01) steppedUp = true;   // 双脚站上台阶顶（59 行）
     }
     expect(walked).toBe(true);
-    expect(jumped).toBe(true);
+    expect(steppedUp).toBe(true);   // StepUp（NPC.cs:54382）无声踏上
+    expect(jumped).toBe(false);     // 1 格台阶不进跳档（沉入门 16>20 不过）
+  });
+
+  it('兔 46（aiStyle 7）：2 格墙 → 跳档 vy=−5×1.2²（cs:54545-54561/:54619-54626）', () => {
+    const { w, hooks } = critterWorld(null);
+    // 前方 2 格高墙（行 58-59 两块叠起）——num27=59 行上一行语义下 t4(58) 实心 → 1 格墙档
+    for (let y = 58; y <= 59; y++) w.store.setTileSilent(45, y, 2);
+    const e = Enemy.fromVanilla(46, 40 * 16, 59 * 16)!;
+    let jumpVy = 0;
+    for (let t = 0; t < 2000; t++) {
+      e.fixedUpdate(1 / 60, hooks);
+      if (e.vy < jumpVy) jumpVy = e.vy;
+    }
+    // −5（1 格墙档）× 1.2（wet 无）× 1.2（TownCritter 补偿）= −7.2
+    expect(jumpVy).toBeLessThanOrEqual(-7.1);
+    expect(jumpVy).toBeGreaterThan(-7.3);
   });
 
   it('蚱蜢 377（aiStyle 1）：玩家 200px 外不蹦；靠近才激愤跳', () => {
@@ -117,11 +138,23 @@ describe('小动物 AI 家族', () => {
     expect(transformed).toBe(true);
   });
 
-  it('蜗牛 359（aiStyle 67）：贴墙爬不坠落（noGravity 爬行态）', () => {
+  // 2026-08-19 1:1 修正（AI_067 cs:34586-34860 结构重做）：脱墙（无 collideX/Y）超 5t
+  // → ai[2]=2 惊扰下落态（重力落地）——空中出生的蜗牛【会】下落（原版语义），
+  // 落地后回贴墙爬（不再沉地）。旧断言"空中出生不落"按新语义改为"落地停在地面上"。
+  it('蜗牛 359（aiStyle 67）：脱墙惊扰下落 → 落地贴地爬行不沉地（cs:34646-34666）', () => {
     const { hooks } = critterWorld(null);
-    const e = Enemy.fromVanilla(359, 40 * 16, 50 * 16)!;
-    for (let t = 0; t < 100; t++) e.fixedUpdate(1 / 60, hooks);
-    expect(e.cy).toBeLessThan(55 * 16); // 爬行态不自由落体
+    const e = Enemy.fromVanilla(359, 40 * 16, 57 * 16)!;
+    let minX = e.x, maxX = e.x;
+    for (let t = 0; t < 200; t++) {
+      e.fixedUpdate(1 / 60, hooks);
+      minX = Math.min(minX, e.x);
+      maxX = Math.max(maxX, e.x);
+    }
+    // 落地（脚贴 60 行地面顶面）且不穿透：底边 = 60×16
+    expect(e.y + e.h).toBeCloseTo(60 * 16, 0);
+    expect(e.y + e.h).toBeLessThan(60 * 16 + 1);   // 未沉入地面
+    // 落地后回贴墙态沿地爬行（0.3/t，200t 内有横向位移）
+    expect(maxX - minX).toBeGreaterThan(4);
   });
 
   it('鸭飞形 363（aiStyle 68）：飞行 300t 落地 → 变回行走形 362', () => {
@@ -161,11 +194,22 @@ describe('小动物 AI 家族', () => {
     expect(e.cy).toBeLessThan(59 * 16); // 没有沉到水底
   });
 
-  it('海马 626（aiStyle 118）：水中游动不坠底、离水瘫软', () => {
-    const { hooks } = critterWorld(null, { water: true });
+  // 2026-08-19 1:1 修正（AI_118 cs:47432-47486）：出生 ai[0]=0（角 0 朝东）——首个
+  // 推进脉冲【确定性向东】直到 |v|>3 才掷随机角。无边界水池会把海马直送出池搁浅
+  // （原版同语义），故本测给池加左右墙验"角反射 + 悬浮"。
+  it('海马 626（aiStyle 118）：水中悬浮 + 撞墙角反射（cs:47470-47485）', () => {
+    const { w, hooks } = critterWorld(null, { water: true });
+    for (let y = 45; y <= 60; y++) { w.store.setTileSilent(19, y, 2); w.store.setTileSilent(61, y, 2); }
     const e = Enemy.fromVanilla(626, 40 * 16, 50 * 16)!;
-    for (let t = 0; t < 300; t++) e.fixedUpdate(1 / 60, hooks);
-    expect(e.cy).toBeLessThan(59 * 16); // 悬浮水中
+    let reflected = false;
+    const x0 = e.x;
+    for (let t = 0; t < 300; t++) {
+      e.fixedUpdate(1 / 60, hooks);
+      if (e.x < x0 - 8) reflected = true;   // 东墙角反射（X 取反）后西行
+    }
+    expect(reflected).toBe(true);            // 撞 x=61 墙 → 角向量 X 翻转
+    expect(e.cy).toBeLessThan(56 * 16);      // 首脉冲纯水平（角 0）→ 悬浮不坠
+    expect(e.wet).toBe(true);                // 仍在池内
   });
 
   it('金鱼 55（aiStyle 16）：路由到 AI_016 游泳（水中活动）', () => {

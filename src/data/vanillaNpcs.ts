@@ -63,7 +63,7 @@ export interface VanillaNpc {
   friendly: boolean;
   townNPC: boolean;
   HitSound: string;   // SoundID 名（NPCHitN / NPCDeathN）
-  DeathSound: string;
+  DeathSound: string | null;   // null=原版显式无声(246 头:血尽转 249,标准死零死音);缺省(无键)=提取漏,fallback 通用档
   scale: number;
   /** SetDefaults alpha：每类型静态不透明度基线（渲染 1-alpha/255，NPC.Opacity；无通用渐隐） */
   alpha?: number;

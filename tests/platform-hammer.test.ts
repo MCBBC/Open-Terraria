@@ -111,13 +111,15 @@ describe('坡面平台楼梯碰撞（Collision.cs:1851-1866 单向门）', () =>
   it('按住下（dropThrough）→ 穿透楼梯落下', () => {
     const w = stairWorld();
     const b = { x: 20 * TILE, y: 9 * TILE + 2, w: 12, h: 28, vx: 0, vy: 2,
-      onGround: false, hitWall: false, hitHead: false, dropThrough: true } as never;
+      onGround: false, hitWall: false, hitHead: false, dropThrough: true };
+    const body = b as { x: number; y: number; w: number; h: number; vx: number; vy: number;
+      onGround: boolean; hitWall: boolean; hitHead: boolean; dropThrough?: boolean };
     for (let f = 0; f < 12; f++) {
-      b.vy = Math.min(8, b.vy + 0.4);
-      moveAndCollide(b, w, 0, b.vy);
+      body.vy = Math.min(8, body.vy + 0.4);
+      moveAndCollide(body, w, 0, body.vy);
     }
-    expect(b.y).toBeGreaterThan(10 * TILE);   // 穿过平台
-    expect(b.onGround).toBe(false);
+    expect(body.y).toBeGreaterThan(10 * TILE);   // 穿过平台
+    expect(body.onGround).toBe(false);
   });
 
   it('楼梯竖柱里侧（低端侧外，num4<0）走过不抬升', () => {

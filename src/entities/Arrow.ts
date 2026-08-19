@@ -51,6 +51,13 @@ export function projFrameCount(projId: number): number {
 
 /** 单帧裁切缓存（id+帧号 → canvas），多帧行按帧高切片 */
 const frameCache = new Map<string, HTMLCanvasElement>();
+/** 热补丁替换弹幕贴图(2026-08-19 素材重制):写 spriteCache + 清该 id 的
+ *  frameCache 条目(键 `id|idx` 不含 texId,不自动失效)。RemasterRuntime 调用。 */
+export function setProjSpriteOverride(projId: number, img: ImageBitmap | HTMLImageElement): void {
+  spriteCache.set(projId, img);
+  const prefix = `${projId}|`;
+  for (const k of frameCache.keys()) if (k.startsWith(prefix)) frameCache.delete(k);
+}
 export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElement | null {
   const img = projSprite(projId);
   if (!img || !(img.width > 0) || img.width === 0) return null;

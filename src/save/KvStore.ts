@@ -1,17 +1,28 @@
 // 键值存储：优先 IndexedDB（容量数百 MB+，大地图存档不受 localStorage ~5MB 限制），
 // localStorage 作为小存档缓存与回退。async API，调用方 await。
+// v2(2026-08-19 素材重制管线):新增 remaster blob store(素材包 png 持久化,
+// kv 字符串通道放不下);他标签页升级时让路(关闭+清缓存,下次调用重连)。
 const DB_NAME = 'sandboxworld';
 const STORE = 'kv';
+const REMASTER_STORE = 'remaster';
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
+      if (!req.result.objectStoreNames.contains(REMASTER_STORE)) req.result.createObjectStore(REMASTER_STORE);
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => {   // 他页要升级 → 让路,本页缓存失效(下次调用重开)
+        db.close();
+        dbPromise = null;
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
@@ -91,4 +102,59 @@ export async function kvDelete(key: string): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
   } catch { /* IDB 不可用则忽略 */ }
+}
+
+// ---- remaster blob store(v2;素材包混合 sheet png 持久化) ----
+
+export interface RemasterPackRow {
+  id: string;
+  name: string;
+  enabled: boolean;
+  /** PackManifest 序列化(rect/hash/prompt 等元数据) */
+  manifestJson: string;
+  /** 'vanilla/NPC_1.png' → png Blob */
+  sheets: Record<string, Blob>;
+  addedAt: number;
+}
+
+/** 写入/覆盖一个素材包行。 */
+export async function remasterPut(row: RemasterPackRow): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(REMASTER_STORE, 'readwrite');
+    tx.objectStore(REMASTER_STORE).put(row, row.id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** 全部已存素材包(按 addedAt 升序 = 安装序)。 */
+export async function remasterAll(): Promise<RemasterPackRow[]> {
+  const db = await openDb();
+  return await new Promise<RemasterPackRow[]>((resolve, reject) => {
+    const tx = db.transaction(REMASTER_STORE, 'readonly');
+    const req = tx.objectStore(REMASTER_STORE).getAll();
+    req.onsuccess = () => resolve(((req.result ?? []) as RemasterPackRow[]).sort((a, b) => a.addedAt - b.addedAt));
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function remasterGet(id: string): Promise<RemasterPackRow | null> {
+  const db = await openDb();
+  return await new Promise<RemasterPackRow | null>((resolve, reject) => {
+    const tx = db.transaction(REMASTER_STORE, 'readonly');
+    const req = tx.objectStore(REMASTER_STORE).get(id);
+    req.onsuccess = () => resolve((req.result as RemasterPackRow) ?? null);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function remasterDelete(id: string): Promise<void> {
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(REMASTER_STORE, 'readwrite');
+    tx.objectStore(REMASTER_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }

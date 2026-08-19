@@ -130,12 +130,12 @@ const DG_PRE: Record<string, number[]> = {
   acc: [62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80],
 };
 const DG_PRE_REDUCED = new Set([7, 8, 9, 10, 11, 22, 23, 24, 29, 30, 31, 39, 40, 56, 41, 47, 48, 49]);
-// ★BBBBB（2026-08-19）：Item.cs TryGetPrefixStatMultipliersForItem（:691-1080）对
-//   Legendary 族 81-89 直接 return false → Prefix(-1) 的 while(flag) 重掷链（:546）。
-//   值依赖四门（Round(damage*dmg)==damage 等）对地牢箱族 item 常量恒不触发
-//   （damage≥24/useAnimation≥15/mana∈{7,14}/knockBack 全非 0——四门全空转，备案），
-//   唯此结构集生效。
-const DG_PRE_NOSTAT = new Set([81, 82, 83, 84, 85, 86, 87, 88, 89]);
+// ★BBBBB 勘误（2026-08-19）：TryGetPrefixStatMultipliersForItem 的 switch（Item.cs:704-1031）
+//   内【零】return false——81-89（Legendary 族）均有乘子（case 81: kb/dmg/crt/spd/size）。
+//   唯四条后置门（Round(damage*dmg)==damage 等，:1039-1060）可 false→Prefix 重掷，但对
+//   地牢箱族 item 常量（damage≥24/useAnimation≥15/mana∈{7,14}/knockBack>0）恒不触发——
+//   Prefix(-1) 单轮即止，无重掷链。曾误建 {81-89} 结构集 → 12345 #32 爆 1688 格
+//   （其箱掷中 81 被多耗 2 骰）——已回退。
 const DG_PRE_CLASS: Record<number, string> = {
   155: 'swords', 156: 'acc', 157: 'magic', 163: 'spears', 113: 'magic', 3317: 'boom',
   164: 'guns', 1156: 'guns', 1571: 'boom', 1569: 'boom', 1260: 'magic', 1572: 'summon',
@@ -957,25 +957,7 @@ export function runDungeonPass(
     bounds.topSet(Math.trunc(cy));
     const num2 = i > w / 2 ? -1 : 1;
     entBounds.set(Math.trunc(cx), Math.trunc(cy), Math.trunc(cx), Math.trunc(cy));
-    entExists = true;
-    // 对账插桩(dormant)：SW_DG_ENT_CELLS="x0,y0,x1,y1" 时逐子段打目标格墙值（E 段猎杀用）
-    const entCellsEnv = typeof process !== 'undefined' ? process.env.SW_DG_ENT_CELLS : undefined;
-    const entCells = entCellsEnv ? (entCellsEnv.split(',').map(Number) as [number, number, number, number]) : null;
-    const entSnap = (tag: string): void => {
-      if (!entCells) return;
-      const [x0, y0, x1, y1] = entCells;
-      let s = '';
-      for (let y = y0!; y <= y1!; y++) {
-        for (let x = x0!; x <= x1!; x++) {
-          const ti = st.idx(x, y);
-          s += `(${x},${y})w${st.wall[ti]}a${st.flags[ti] & 1} `;
-        }
-        s += '| ';
-      }
-      console.log(`ENT[${tag}] rolls=${dgMainRolls} ${s}`);
-    };
-    entSnap('head');
-    const solidBox = (x0: number, y0: number, x1: number, y1: number, inner: boolean): void => {
+    entExists = true;    const solidBox = (x0: number, y0: number, x1: number, y1: number, inner: boolean): void => {
       for (let x = x0; x < x1; x++) {
         for (let y = y0; y < y1; y++) {
           if (!st.inBounds(x, y)) continue;
@@ -1008,7 +990,6 @@ export function runDungeonPass(
     if (dgEntProbe) console.log(`DGE i=${i} j=${j} cx=${cx.toFixed(1)} cy=${cy.toFixed(1)} s1x=${s1x} s1y=${s1y} s2x=${s2x} s2y=${s2y} n3=${n3} n4=${n4} n5=${n5} n6=${n6}`);
     entBounds.upd(n3, n5, n4, n6);
     solidBox(n3, n5, n4, n6, true);
-    entSnap('fort1');
     // 垛口（左/右）
     {
       const a0 = clampX(n3);
@@ -1097,13 +1078,10 @@ export function runDungeonPass(
     const sx2 = s2x, sy2 = s2y;
     cx += sx2 * 0.550000011920929 * num2;
     cy -= sy2 * 0.5;
-    n3 = clampX(Math.trunc(cx - sx2 * 0.6000000238418579 - hri(1, 2)));
-    entSnap('teeth1');
-    n4 = clampX(Math.trunc(cx + sx2 * 0.6000000238418579 + hri(1, 2)));
+    n3 = clampX(Math.trunc(cx - sx2 * 0.6000000238418579 - hri(1, 2)));    n4 = clampX(Math.trunc(cx + sx2 * 0.6000000238418579 + hri(1, 2)));
     n5 = clampY(Math.trunc(cy - sy2 * 0.6000000238418579 - hri(1, 2)));
     n6 = clampY(Math.trunc(cy + sy2 * 0.6000000238418579 + hri(6, 15)));
     entBounds.upd(n3, n5, n4, n6);
-    if (entCells) console.log(`ENT-BOX2 cx=${cx.toFixed(3)} cy=${cy.toFixed(3)} sx2=${sx2} sy2=${sy2} n3=${n3} n4=${n4} n5=${n5} n6=${n6} f4edge=${(cx + sx2 * 0.5 - 1.0).toFixed(3)}`);
     for (let x = n3; x < n4; x++) {
       for (let y = n5; y < n6; y++) {
         if (!st.inBounds(x, y)) continue;
@@ -1176,7 +1154,6 @@ export function runDungeonPass(
       const b0 = clampY(Math.trunc(cy - Math.fround(sy2 * f06)));
       const b1 = clampY(Math.trunc(cy + Math.fround(sy2 * f06)));
       entBounds.upd(a0, b0, a1, b1);
-      if (entCells) console.log(`ENT-BOX06 a0=${a0} a1=${a1} b0=${b0} b1=${b1}`);
       for (let x = a0; x < a1; x++) {
         for (let y = b0; y < b1; y++) {
           if (!st.inBounds(x, y)) continue;
@@ -1184,9 +1161,7 @@ export function runDungeonPass(
           st.liquid[ti] = 0; st.wall[ti] = 0;
         }
       }
-    }
-    entSnap('walls2');
-    // 0.5 框开放门厅 + 老头锚
+    }    // 0.5 框开放门厅 + 老头锚
     {
       const a0 = clampX(Math.trunc(cx - sx2 * 0.5));
       const a1 = clampX(Math.trunc(cx + sx2 * 0.5));
@@ -1201,9 +1176,7 @@ export function runDungeonPass(
         }
       }
       dungeonX = Math.trunc(cx); dungeonY = b1;
-    }
-    entSnap('open');
-    // ★2026-08-17 移植：GenerateDungeonStairs（DungeonUtils.cs:1222-1310，调用点
+    }    // ★2026-08-17 移植：GenerateDungeonStairs（DungeonUtils.cs:1222-1310，调用点
     //   LegacyDungeonEntrance.cs:511-516——HasStairs 普通世界=TRUE）。曾整段缺失 →
     //   堡右 45° 阶梯丢失 + 后续段起墙判定/变体锚/掷流全错位（oracle Q 批同补并
     //   真值对拍）。i2=num2==1?0.5盒右缘:左缘（:512 时 num3/num4 已被 0.5 框重算）、
@@ -1213,9 +1186,7 @@ export function runDungeonPass(
       const stj = clampY(Math.trunc(cy + sy2 * 0.5));
       const stdep = (potT - 10) - stj + 5;
       dgStairs(sti, stj, num2, stdep);
-    }
-    entSnap('stairs');
-    // 条纹窗墙（PlaceWall：墙==0 才写）
+    }    // 条纹窗墙（PlaceWall：墙==0 才写）
     {
       const n16c = 1 + hrn(2);
       const n15c = 2 + hrn(4);
@@ -1235,9 +1206,7 @@ export function runDungeonPass(
         n17++;
         if (n17 >= n15c) { x += n15c * 2; n17 = 0; }
       }
-    }
-    entSnap('stripes');
-    // 门洞 15×3 清空 + PlaceTile(10, style13)
+    }    // 门洞 15×3 清空 + PlaceTile(10, style13)
     cx -= sx2 * 0.6000000238418579 * num2;
     cy += sy2 * 0.5;
     cy -= 1.5;
@@ -1262,7 +1231,6 @@ export function runDungeonPass(
       // 勿在此掷 rn(3)——1/3 主题门掷骰属 dungeonD 门特征段（DungeonGlobalDoors.cs:47-50，见下方 doorData 落放处）。
       dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, 13);
     }
-    entSnap('door');
   }
 
   // ============ LegacyEntranceDungeonHall precalc 支（:23-380，UsePrecalculatedEntrance=true）============
@@ -2829,15 +2797,13 @@ export function runDungeonPass(
   function prefixRolls(item: number): void {
     const cls = DG_PRE_CLASS[item];
     if (!cls) return;
-    const arr = DG_PRE[cls];
-    // Prefix(-1)（Item.cs:486-560）逐轮：Next(4)==0→rolledPrefix=0（乘子恒 1→真，止）；
-    // 否则 RollAPrefix=Next(len)；Reduced 且 Next(3)!=0 → 降 0 止；
-    // TryGetPrefixStatMultipliersForItem 假（81-89）→ rolledPrefix=-1 重掷。
-    for (;;) {
-      if (rn(4) === 0) return;
+    // Prefix(-1)（Item.cs:486-560）单轮：Next(4)==0→rolledPrefix=0（乘子恒 1→真，止）；
+    // 否则 RollAPrefix=Next(len)；Reduced 且 Next(3)!=0 → 降 0 止。（无重掷链——见
+    // DG_PRE_REDUCED 上方 BBBBB 勘误注：switch 内零 false，后置四门对本族恒真。）
+    if (rn(4) !== 0) {
+      const arr = DG_PRE[cls];
       const rolled = arr[rn(arr.length)];
-      if (DG_PRE_REDUCED.has(rolled) && rn(3) !== 0) return;
-      if (!DG_PRE_NOSTAT.has(rolled)) return;
+      if (DG_PRE_REDUCED.has(rolled)) rn(3);
     }
   }
   function dgAddBuriedChest(ix: number, jy: number, mainItem: number, style: number, chestTile: number): boolean {

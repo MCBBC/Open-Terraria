@@ -111,7 +111,7 @@ function seedPick(seed: number, salt: number, n: number): number {
   return ((h ^ (h >>> 16)) >>> 0) % n;
 }
 
-interface Cam { x: number; y: number }
+interface Cam { x: number; y: number; zoom: number }
 
 /** 绘制后端抽象(docs/webgl2-migration-plan.md #1):2D/GL 双实现共用
  *  同一份几何/视差/带序数学。img = 9 参 drawImage 等价;tint 语义 =
@@ -388,10 +388,15 @@ export class BiomeBackground {
     this.update(world, scene, dtMs);
     const b: BGBlit = typeof (target as BGBlit).img === 'function'
       ? (target as BGBlit) : new CanvasBgBlit(this, target as CanvasRenderingContext2D);
-    const camTopY = cam.y - viewH / 2 / 1; // 相机中心 → 屏幕顶（屏幕空间绘制用）
-    // 地表背景（ShouldDrawSurfaceBackground :59131：相机在地表之上才画）
-    if (cam.y < world.groundLevel * 16 + 16) {
-      this.drawSurface(b, world, cam, camTopY, viewW, viewH, tint);
+    // Main.screenPosition 语义 = 屏幕【左上角】的世界坐标 = 中心 - 半屏/zoom。
+    // ★曾写 `cam.y - viewH/2/1`——/1 是缩放占位符：zoom 1.25 下屏顶世界 Y 差
+    // viewH/2×(1-1/zoom) ≈ 86px，num3 偏大 → bgTopY = num3×topA+topB 整体
+    // 下移 ~40px = 用户实报"远景背景图 Y 轴偏下"根因（2026-08-19）
+    const camTopY = cam.y - viewH / 2 / cam.zoom;
+    const camLeftX = cam.x - viewW / 2 / cam.zoom;
+    // 深度门（DrawClouds_Closest :59073 系各层共门 screenPosition.Y < ws×16+16）
+    if (camTopY < world.groundLevel * 16 + 16) {
+      this.drawSurface(b, world, cam, camTopY, camLeftX, viewW, viewH, tint);
     }
     this.drawUnderground(b, world, cam, camTopY, viewW, viewH, dtMs);
   }
@@ -399,7 +404,7 @@ export class BiomeBackground {
   // ---- 地表层 ----
   private drawSurface(
     b: BGBlit, world: World, cam: Cam,
-    camTopY: number, viewW: number, viewH: number, tint: [number, number, number],
+    camTopY: number, camLeftX: number, viewW: number, viewH: number, tint: [number, number, number],
   ) {
     this.seedFor(world); // 兜底：即便 update 未先行播种也不崩（HMR/首帧边界）
     // 垂直视差系数（DrawSurfaceBG :58749：num3 = -(screenPosition.Y-300)/(worldSurface*16)）
@@ -412,8 +417,11 @@ export class BiomeBackground {
       const im = this.img(l.tex);
       if (!im || !(im.width > 0) || im.width === 0) return;
       const wScaled = im.width * l.scale;
-      const startX = -(((cam.x * l.parallax) % wScaled) + wScaled) % wScaled - wScaled / 2;
-      const loops = Math.ceil(viewW / wScaled) + 2;
+      // 横向视差锚 = 屏幕左缘（Main.cs :58860 bgStartX = -IEEERemainder(
+      // screenPosition.X×bgParallax, w) - w/2 - w——比正模多退一整块,配 +4 档
+      // loops 保屏）。曾用 cam.x(中心)——差 viewW/2/zoom×parallax 常量相位偏移
+      const startX = -BiomeBackground.ieeeRemOf(camLeftX * l.parallax, wScaled) - wScaled / 2 - wScaled;
+      const loops = Math.ceil(viewW / wScaled) + 3;
       const topY = num3 * l.topA + l.topB; // 屏幕空间 y（vanilla bgTopY 语义）
       // ★+1px 保险重叠:浮点视差位置(startX 取模 cam.x*parallax)+非整数缩放
       // (naturalWidth×1.25)下,相邻背景图独立光栅化在接缝处留 1px 缺口(发丝缝),
@@ -569,14 +577,8 @@ export class BiomeBackground {
     // gate = 屏底 ≥ (h-220)*16(:52086);深层带层退化后整屏由本层接管——
     // 层0 底部黑补 (11,3,7) 兜底(:52219-52223)
     this.drawHellLayers(b, world, cam, viewW, viewH, dtMs);
-    /** C# Math.IEEERemainder（IEEE round-half-even） */
-    const ieeeRem = (a: number, b: number): number => {
-      const r = a / b;
-      const f = Math.floor(r);
-      const d = r - f;
-      const n = d < 0.5 ? f : d > 0.5 ? f + 1 : f % 2 === 0 ? f : f + 1;
-      return a - b * n;
-    };
+    /** C# Math.IEEERemainder（IEEE round-half-even；实现提为 ieeeRemOf 类级共用） */
+    const ieeeRem = (a: number, b: number): number => BiomeBackground.ieeeRemOf(a, b);
     const drawSlots = (slots: number[], a: number) => {
       if (a <= 0.01) return;
       /** 横向滚动参数（:52277/:52836 bgStartX/num2 公式;drawOffset=0 屏幕空间） */
@@ -685,6 +687,13 @@ export class BiomeBackground {
     };
     drawSlots(oldSlots, 1 - alpha);
     drawSlots(newSlots, alpha);
+  }
+
+  /** C# Math.IEEERemainder（IEEE round-half-even）——地表视差/地下带相位共用 */
+  static ieeeRemOf(a: number, b: number): number {
+    const r = a / b, f = Math.floor(r), d = r - f;
+    const n = d < 0.5 ? f : d > 0.5 ? f + 1 : f % 2 === 0 ? f : f + 1;
+    return a - b * n;
   }
 
   /** 地狱多层远景背景 1:1(Main.cs DrawUnderworldBackground :52082-52228):

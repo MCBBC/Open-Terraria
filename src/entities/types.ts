@@ -9,6 +9,8 @@ export interface GameHooks {
   enemies(): unknown[];
   /** 城镇 NPC 自卫弹入投射物桶(attackUpdate 消费) */
   spawnTownShot?(shot: import('./TownShot').TownShot): void;
+  /** 小动物产生的弹幕入投射物桶（AI_024 鸟粪 1080 等；仅本地——MP 门禁在产生端） */
+  spawnCritterProj?(e: import('./Entity').Entity): void;
   /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
   critters(): unknown[];
   /** 城镇 NPC 列表(受击判定用;Game 实现 = entities.npcs 桶) */

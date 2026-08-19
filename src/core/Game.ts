@@ -2660,10 +2660,11 @@ export class Game implements GameHooks {
     const w = this.world;
     // chunk 上限回满档(2026-08-18 泄漏 review):contextlost 自适应曾把
     // MAX_CHUNKS 一路砍到 64 且【无恢复点】——之后所有世界永远 64(视野烘焙
-    // 跟不上)。进世界重置回 384;真撑不住的机器熔断器会再自适应(冷却已
-    // 逐次升级,不会振荡)。★直引类静态(曾写 this.chunks?.constructor——
+    // 跟不上)。进世界重置回满档;真撑不住的机器熔断器会再自适应(冷却已
+    // 逐次升级,不会振荡)。★回满取 BASE_MAX_CHUNKS 单一事实源(曾硬编码 384,
+    // 与静态常量脱节 = 静默覆盖)。直引类静态(曾写 this.chunks?.constructor——
     // afterWorldLoad 头部 this.chunks 尚未构造,undefined 上赋值即崩)
-    ChunkCache.MAX_CHUNKS = 384;
+    ChunkCache.MAX_CHUNKS = ChunkCache.BASE_MAX_CHUNKS;
     // 全局替换表 NPC 名解析注入（Lang.cs:102-110 GetFirstNPCNameOrNull：{Nurse}
     // 等 token → 场上第一名该类型城镇 NPC 的随机名；缺位保留 token——null 语义）
     // 全局替换表动态值（Lang.cs:126-144：WorldName/PlayerName/InventoryKey/
@@ -4228,6 +4229,13 @@ export class Game implements GameHooks {
 
     // ---- 实体 ----
     this.entities.update(dt, this);
+    // ---- 雨天金鱼形态链（NPC.FishTransformationDuringRain，NPC.cs:94084-94115：
+    //      原版在 UpdateCollision :93742 逐 NPC 每 tick 调，wet 计算后位移积分前；
+    //      本仓在敌怪轮后逐敌调——wet 为本 tick 新值等价）。230湿→55/55非湿雨→230/
+    //      593湿→592/592非湿雨→593 + homeTileX 下风 +10 格重建 ----
+    for (const e of this.entities.enemies) {
+      (e as Enemy).fishTransformationDuringRain(this);
+    }
     // 弹幕扫掠碎裂砖（Projectile.HandleMovement :16630-16655 等价）：移动扫掠盒内
     // 裂砖 KillTile（CanCutTile AttackProjectile 上下文对普通格恒 true——:87573，
     // 墙 350/下方 78·380·579 豁免面窄不构成主门）。DebrisProj 自身豁免（弹片不碎砖，
@@ -17131,6 +17139,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 城镇 NPC 自卫弹入投射物桶(GameHooks.spawnTownShot) */
   spawnTownShot(shot: import('../entities/TownShot').TownShot) {
     this.entities.add(shot, 'projectiles');
+  }
+
+  /** 小动物弹幕入投射物桶(GameHooks.spawnCritterProj——鸟粪 1080 等) */
+  spawnCritterProj(e: import('../entities/Entity').Entity) {
+    this.entities.add(e, 'projectiles');
   }
 
   /** 小动物列表:弹幕命中用(GameHooks.critters) */

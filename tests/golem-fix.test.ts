@@ -31,31 +31,37 @@ function makeWorld(): World {
 describe('石巨人负血不死修复(hurt 契约)', () => {
   it('拳 247 血尽 → 标准死亡(dead=true,不再放行)', () => {
     const g = makeGame(makeWorld());
-    const fist = Enemy.fromVanilla(247, 30 * 16, 30 * 16, g)!;
+    const fist = Enemy.fromVanilla(247, 30 * 16, 30 * 16)!;
     fist.hurt(99999, 0, 0, g);
     expect(fist.dead).toBe(true);          // ★曾放行 return false → 负血挂着不死
   });
 
-  it('本体 245 血尽 → 标准死亡 + 部件(246-249)随终战消亡', () => {
+  it('本体 245 血尽 → 标准死亡;部件下一拍自灭(锚主检测,原版时序)', () => {
     const w = makeWorld();
     const head = Enemy.fromVanilla(246, 30 * 16, 30 * 16)!;
     const fist = Enemy.fromVanilla(247, 30 * 16, 30 * 16)!;
-    const body = Enemy.fromVanilla(245, 30 * 16, 30 * 16, makeGame(w, [head, fist]))!;
+    const body = Enemy.fromVanilla(245, 30 * 16, 30 * 16)!;
     const g = makeGame(w, [body, head, fist]);
     body.hurt(99999, 0, 0, g);
     expect(body.dead).toBe(true);          // ★曾 AI 首行接管但 hurt 不置 dead → 永不死
-    expect(head.dead).toBe(true);
+    expect(head.dead).toBe(false);         // 原版部件下一 tick 自杀(StrikeNPCNoInteraction)
+    head.fixedUpdate(1 / 60, g);
+    fist.fixedUpdate(1 / 60, g);
+    expect(head.dead).toBe(true);          // 锚主死 → 标准死(碎块/音效管线)
     expect(fist.dead).toBe(true);
   });
 
-  it('挂载头 246 血尽 → 放行(转自由态在 golemHeadAI 首行)', () => {
-    const g = makeGame(makeWorld());
-    const head = Enemy.fromVanilla(246, 30 * 16, 30 * 16, g)!;
+  it('挂载头 246 血尽(本体活) → 放行(转自由态在 golemHeadAI 首行)', () => {
+    const w = makeWorld();
+    const body = Enemy.fromVanilla(245, 30 * 16, 30 * 16)!;
+    const head = Enemy.fromVanilla(246, 30 * 16, 30 * 16)!;
+    const g = makeGame(w, [body, head]);
     head.hurt(99999, 0, 0, g);
-    expect(head.dead).toBe(false);         // 放行,AI 首行转 249 自由态
+    expect(head.dead).toBe(false);         // 本体活 → 放行,AI 首行转 249 自由态
+    expect(head.def.killedSound).toEqual([]);   // 原版 246 DeathSound=null:标准死零死音
   });
 
-  it('存量负血自愈:直写负 hp 后 AI 首帧收口(本体/拳)', () => {
+  it('存量负血自愈:直写负 hp 后 AI 首帧收口(本体/拳;头随锚主自灭)', () => {
     const w = makeWorld();
     const head = Enemy.fromVanilla(246, 30 * 16, 30 * 16)!;
     const fist = Enemy.fromVanilla(247, 30 * 16, 30 * 16)!;
@@ -65,16 +71,17 @@ describe('石巨人负血不死修复(hurt 契约)', () => {
     body.hp = -50; fist.hp = -30;
     body.fixedUpdate(1 / 60, g);
     fist.fixedUpdate(1 / 60, g);
+    head.fixedUpdate(1 / 60, g);
     expect(body.dead).toBe(true);
     expect(fist.dead).toBe(true);
-    expect(head.dead).toBe(true);          // 存量终战同样灭部件
+    expect(head.dead).toBe(true);          // 本体死透 → 锚主段标准死
   });
 });
 
 describe('石巨人帧(FindFrame :73581-73651 状态帧)', () => {
   it('本体待机按 ai1 蹲伏档选帧,跳跃态恒帧0', () => {
     const g = makeGame(makeWorld());
-    const e = Enemy.fromVanilla(245, 30 * 16, 30 * 16, g)!;
+    const e = Enemy.fromVanilla(245, 30 * 16, 30 * 16)!;
     e.ai0 = 0; e.ai1 = -15; e.fixedUpdate(1 / 60, g);
     expect(e.customFrameIdx).toBe(1);      // -16 ≤ -15 < -12 → 帧1
     e.ai1 = -5; e.fixedUpdate(1 / 60, g);

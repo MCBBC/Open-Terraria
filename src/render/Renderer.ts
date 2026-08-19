@@ -552,6 +552,76 @@ const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 116, 125, 126, 127, 128, 12
 // 18 步循环、/6 换帧 = 3 帧各 6 步；gamePaused 冻结语义本仓无暂停态，恒推进（差异登记）
 let wofDrawFrameIndex = 0;
 
+// ---- 状态化 FindFrame case（WeakMap 持 counter/frame,每调用推进一次 ≈ 每 tick）----
+/** 鸮族 611/689 站定转头待机（NPC.cs:74383-74429 1:1,替代顺序轮播近似）:
+ *  counter 每 tick +1（band 边界 1/80 掷停顿）；(counter+1)%40==39 → 重掷 band
+ *  = 40×rand(3)。band0=[0,1,2,1] band1=[0,3,4,3] band2=[0,5,6,7]（各帧 10t） */
+const owlIdleStates = new WeakMap<Enemy, { counter: number }>();
+function owlIdleFrame(e: Enemy): number {
+  const s = owlIdleStates.get(e) ?? { counter: 0 };
+  owlIdleStates.set(e, s);
+  if (Math.trunc(s.counter) % 40 !== 0 || Math.random() * 80 < 1) s.counter += 1;
+  if ((s.counter + 1) % 40 === 39) s.counter = 40 * Math.floor(Math.random() * 3);
+  const num113 = Math.trunc(s.counter % 40) / 10;
+  const num114 = Math.trunc(s.counter / 40);
+  if (num114 === 0) return num113 === 3 ? 1 : num113;
+  if (num114 === 1) return num113 === 0 ? 0 : 2 + (num113 === 3 ? 1 : num113);
+  return num113 === 0 ? 0 : 4 + num113;
+}
+
+/** 珍稀宝箱怪 473-476 状态机（NPC.cs:71831-72000 1:1,替代周期穿插近似）:
+ *  ai0 0/7 伪装帧0；1 警戒按 ai1/6 分段 1-6；8 悬浮 3+(counter/6) 钳 3-6
+ *  （counter 24 回卷）；2/6 地面 = 低帧抬 12→<10 每 8t +1 至 10（counter=12）、
+ *  ≥10 后 6t 眨 12/11/10/11（23 回卷），腾空=13；3 每 6t 从 >7 递减回落；
+ *  4/5=13。原版 ai[0]==4.1 特殊段（三段跳劈帧序）本仓 ai0 为整数不产生,备案 */
+const mimicStates = new WeakMap<Enemy, { counter: number; frame: number }>();
+function mimicFrame(e: Enemy, frames: number): number {
+  const s = mimicStates.get(e) ?? { counter: 0, frame: 0 };
+  mimicStates.set(e, s);
+  const ai0 = e.ai0;
+  if (ai0 === 0 || ai0 === 7) { s.counter = 0; s.frame = 0; return 0; }
+  if (ai0 === 1) {
+    s.counter = 0;
+    s.frame = e.ai1 < 6 ? 1 : e.ai1 < 12 ? 2 : e.ai1 < 18 ? 3 : e.ai1 < 24 ? 4 : e.ai1 < 30 ? 5 : 6;
+    return s.frame;
+  }
+  if (ai0 === 8) {
+    s.counter += 1;
+    if (s.counter >= 24) s.counter = 0;
+    s.frame = Math.min(6, Math.max(3, 3 + Math.trunc(s.counter / 6)));
+    return s.frame;
+  }
+  if (ai0 === 3) {
+    s.counter += 1;
+    if (s.counter > 6) s.counter = 0;
+    if (s.frame > 7) s.frame -= 1;
+    return s.frame;
+  }
+  if (ai0 === 4 || ai0 === 5) { s.counter = 0; s.frame = 13; return Math.min(13, frames - 1); }
+  // ai0 2/6
+  if (e.vy === 0) {
+    s.counter += 1;
+    if (s.frame < 7) s.frame = 12;
+    if (s.frame < 10) {
+      if (s.counter > 8) {
+        s.frame += 1;
+        s.counter = 0;
+        if (s.frame === 10) s.counter = 12;
+      }
+    } else if (s.counter < 6) s.frame = 12;
+    else if (s.counter < 12) s.frame = 11;
+    else if (s.counter < 18) s.frame = 10;
+    else {
+      s.frame = 11;
+      if (s.counter >= 23) s.counter = 0;
+    }
+  } else {
+    s.counter = 0;
+    s.frame = 13;
+  }
+  return Math.min(frames - 1, s.frame);
+}
+
 /** 按原版 FindFrame 分族规则算当前帧 index（导出供 DebugReport tiles.focus.frameEngine 复算） */
 export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // AI 侧算定的帧号直读（694 水书宝箱怪态机帧——态切换清零的 frameCounter
@@ -879,10 +949,7 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // {0,1,2,1}/{0,3,4,3}/{0,5,6,7} 各帧 10t;原版随机换段/1-80 跳帧近似为顺序轮播,
   // 差异登记);移动/飞行=帧 8..frames-1 每 5t(<8 抬回 8)。表 13 帧=待机 8+飞行 5
   if (id === 611 || id === 689) {
-    if (e.vx === 0 && e.vy === 0) {
-      const seq = [0, 1, 2, 1, 0, 3, 4, 3, 0, 5, 6, 7];
-      return seq[Math.floor(t / 10) % seq.length];
-    }
+    if (e.vx === 0 && e.vy === 0) return owlIdleFrame(e);
     return 8 + Math.floor(t / 5) % Math.max(1, frames - 8);
   }
   // 萤火虫族 355/358/654（case 355,cs:73369-73390）：counter<4→帧0/否则帧1（≥7 回卷
@@ -924,16 +991,45 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 14 帧连播 = 伪装态狂闪）;ai0 1=警戒帧1-5 按 ai1/6 分段(+6 兜底);ai0 8=3+(t/6)
   // 钳 3-6;ai0 4/5=帧13;ai0 2/6 地面走=8/9 每 8t + 周期眨眼 10-12（状态机序列
   // 近似为 24t 走/24t 眨穿插,ai0 3 回落帧 7 近似——差异登记）
-  if (id >= 473 && id <= 476) {
-    if (e.ai0 === 0 || e.ai0 === 7) return 0;
-    if (e.ai0 === 1) return Math.min(6, 1 + Math.floor(e.ai1 / 6));
-    if (e.ai0 === 8) return Math.min(6, Math.max(3, 3 + Math.floor(t / 6)));
-    if (e.ai0 === 4 || e.ai0 === 5) return Math.min(13, frames - 1);
-    const blink = [12, 11, 10, 11][Math.floor(t / 6) % 4];
-    return (t % 48) < 24 ? 8 + (Math.floor(t / 8) % 2) : Math.min(frames - 1, blink);
-  }
+  if (id >= 473 && id <= 476) return mimicFrame(e, frames);
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
+}
+
+// ---- 光标图标 GetItemLight 特殊物品（ItemSlot.cs:3475-3507）----
+/** 迪斯科族（:3475-3490）:662/663 彩虹砖块系 + 5444/5450/5643 + 5128 → Main.Disco */
+const CURSOR_DISCO_ITEMS = new Set([662, 663, 5444, 5450, 5643, 5128]);
+/** ItemIconPulse 族（:3491-3496,ItemID.cs:1100）:微光脉冲 × Main.essScale */
+const CURSOR_PULSE_ITEMS = new Set([520, 521, 575, 549, 548, 547, 3456, 3457, 3458, 3459, 3580, 3581]);
+/** 精华族（:3497-3507）:58/184/4143 → essScale×0.25+0.75 */
+const CURSOR_ESS_ITEMS = new Set([58, 184, 4143]);
+
+/** 图标矩形乘色（离屏三步:draw → multiply → destination-in 恢复 alpha）。
+ *  ★禁止在主画布直接 source-atop——作用于整张已渲染画布=黑方块（2026-08-18 事故） */
+const tintScratch = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+function tintIconRect(
+  ctx: CanvasRenderingContext2D,
+  icon: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+  dst: { x: number; y: number; w: number; h: number },
+  tint: readonly [number, number, number],
+): void {
+  if (!tintScratch) return;
+  if (tintScratch.width !== dst.w || tintScratch.height !== dst.h) {
+    tintScratch.width = dst.w;
+    tintScratch.height = dst.h;
+  }
+  const octx = tintScratch.getContext('2d');
+  if (!octx) return;
+  octx.clearRect(0, 0, dst.w, dst.h);
+  octx.imageSmoothingEnabled = false;
+  octx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh, 0, 0, dst.w, dst.h);
+  octx.globalCompositeOperation = 'multiply';
+  octx.fillStyle = `rgb(${tint[0] | 0},${tint[1] | 0},${tint[2] | 0})`;
+  octx.fillRect(0, 0, dst.w, dst.h);
+  octx.globalCompositeOperation = 'destination-in';
+  octx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh, 0, 0, dst.w, dst.h);
+  octx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(tintScratch, dst.x, dst.y);
 }
 
 // ============ 2D 网格贴图 NPC 帧引擎（FindFrame 大 switch 专属 case，NPC.cs:67295+） ============
@@ -4073,8 +4169,13 @@ export class Renderer {
         const tiltOnly5 = stR === 5 && (idR === 23 || idR === 42 || idR === 139 || idR === 176 || idR === 205
           || idR === 210 || idR === 211 || (idR >= 231 && idR <= 235));
         const rotationDriven = !tiltOnly5
-          && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 23 || stR === 40 || stR === 56);
-        if (e.vanillaId === 4) ctx.rotate(e.visAngle);
+          && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 21 || stR === 23
+            || stR === 40 || stR === 56);
+        if (e.vanilla?.aiStyle === 21) {
+          // AI_021 刺球（type 72，cs:24685/:24704）：rotation ±direction×directionY×0.13/t
+          // 随 ai[1] 相位交替——visAngle 承载累计角（Enemy.spikeBallAI W2 批 2026-08-19）
+          ctx.rotate(e.visAngle);
+        } else if (e.vanillaId === 4) ctx.rotate(e.visAngle);
         else if (e.vanillaId === 116) {
           // 饥饿者 II（FindFrame case 116，cs:74789-74808）：rotation=atan2(vy,vx)，
           // vx<0 再 +π；spriteDirection=sign(vx)（vx>0 镜像——在下方通用镜像位补，
@@ -4107,13 +4208,17 @@ export class Renderer {
         else if (stR === 10) ctx.rotate(e.visAngle);   // AI_010 诅咒头骨族:rotation=atan2(v)(vx<0 再+π,cs:21713-21721;694 伪装/觉醒态钉 0);spriteDirection 仍镜像→不进 rotationDriven
         else if (stR === 68) ctx.rotate(e.vx * 0.1);   // AI_068 水鸟族:同款倾斜 vx*0.1(cs:74487,湿态归零近似省略)
         else if (stR === 65) ctx.rotate(e.vx * 0.3);   // AI_065 蝶族:倾斜 vx*0.3(cs:73426)
+        else if (stR === 66) ctx.rotate(e.spin);      // AI_066 蠕虫族:FindFrame case 357/485(:73460/:73541)——腾空自旋方向×0.1/t 累积、贴地归零、坡面 ±0.785(wormCritterAI 维护)
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         // 原版默认朝左(flip 当 spriteDirection==1);旋转族(rotationDriven)禁镜像;
         // 鸮族 611/689 spriteDirection=-direction(:74381)→仅 facing<0 时翻,
-        // ★须从通用行排除,否则两条叠加成"恒翻转"(2026-08-18 终审抓出)
+        // ★须从通用行排除,否则两条叠加成"恒翻转"(2026-08-18 终审抓出);
+        // 蚯蚓族 357/374/448/484/606 case 从不设 spriteDirection(:73455)→恒不镜像
+        // (蛆虫族 485-487 :73515 设 direction→正常镜像)
         const owlMirror = e.vanillaId === 611 || e.vanillaId === 689;
-        if (!rotationDriven && !owlMirror && e.facing > 0) ctx.scale(-1, 1);
+        const wormMirror = stR === 66 && !(e.vanillaId >= 485 && e.vanillaId <= 487);
+        if (!rotationDriven && !owlMirror && !wormMirror && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && owlMirror && e.facing < 0) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
@@ -9280,6 +9385,24 @@ export class Renderer {
           // source-atop 叠黑——该合成作用于整张画布,暗处变纯黑方块(2026-08-18 报)
           ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
             this._mouseX + push, this._mouseY + push, icon.sw, icon.sh);
+          // GetItemLight 特殊物品改色（ItemSlot.cs:3475-3507,2026-08-19 补齐）:
+          // 迪斯科族 → Main.Disco 色循环;ItemIconPulse 族 → essScale 脉冲;
+          // 精华 58/184/4143 → essScale×0.25+0.75。essScale∈0.7-1.0 恒≤1 →
+          // 全部为"乘暗/乘色",三步离屏 tint(multiply+destination-in 恢复 alpha)
+          const clk = this.lighting?.clock;
+          const iconDst = { x: this._mouseX + push, y: this._mouseY + push, w: icon.sw, h: icon.sh };
+          if (clk) {
+            let tint: readonly [number, number, number] | null = null;
+            if (CURSOR_DISCO_ITEMS.has(t)) tint = [clk.discoR, clk.discoG, clk.discoB];
+            else if (CURSOR_PULSE_ITEMS.has(t)) tint = [255 * clk.essScale, 255 * clk.essScale, 255 * clk.essScale];
+            else if (CURSOR_ESS_ITEMS.has(t)) {
+              const b = 255 * (clk.essScale * 0.25 + 0.75);
+              tint = [b, b, b];
+            }
+            if (tint && (tint[0] < 254 || tint[1] < 254 || tint[2] < 254)) {
+              tintIconRect(ctx, icon, iconDst, tint);
+            }
+          }
           ctx.restore();
           // 油漆工具子图标（:44531-44538 + TryGetAmmo :44570-44576）
           if (flag && c.paintAmmoVid > 0 && PAINT_TOOLS.has(num)) {

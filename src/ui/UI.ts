@@ -135,6 +135,18 @@ import type { ChestData } from '../world/World';
 type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye' | 'misc' | 'miscDye';
 
 const iconCache = new Map<number, string>();
+// 防御盾 img dataURL 烘焙(2026-08-19 压 IOSurface 基数:盾图从独立 canvas 改 img;
+// 模块级 scratch 只此一张 52×48,产物按 (难度列,辉光) 缓存 ≤6 条)
+const DEF_SHIELD_SCRATCH = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+const DEF_SHIELD_URLS = new Map<string, string>();
+/** 热补丁 buff 图标覆盖(vanillaBuffId → objectURL;RemasterRuntime 注册)。
+ *  buff 栏是直链 <img src>,不经 atlas——重制 Buff_N.png 后需此钩子换图。 */
+let remasterBuffIcon: ((vanillaBuffId: number) => string | null) | null = null;
+export function setRemasterBuffIcon(fn: ((vanillaBuffId: number) => string | null) | null): void {
+  remasterBuffIcon = fn;
+}
+/** 清物品图标 dataURL 缓存(热补丁替换 Item_Atlas 后旧图标钉死,须清后重合成)。 */
+export function clearIconCache(): void { iconCache.clear(); }
 
 /** 组假 id → 组号 */
 function reqIdShift(reqId: number): number { return reqId - 1000000; }
@@ -2209,8 +2221,11 @@ export class UI {
     defRow.dataset.role = 'defense';
     const defWrap = el('div');
     defWrap.style.cssText = 'position:relative; width:40px; height:36px;';
-    const defShield = el('canvas');
-    defShield.width = 52; defShield.height = 48;
+    // 防御盾图用 <img>+dataURL 而非独立 canvas(2026-08-19 双开 IOSurface 压基数:
+    // 每张 DOM canvas = 一张专属后备 surface;img 进共享合成层零专属面。
+    // 帧内容按难度列静态,经模块级 52×48 scratch 烘一次 toDataURL 缓存,见下方刷新处)
+    const defShield = el('img');
+    defShield.alt = '';
     defShield.style.cssText = 'position:absolute; inset:0; margin:auto; width:39px; height:36px; image-rendering:pixelated;';
     defWrap.appendChild(defShield);
     const defNum = el('span', '', '0');
@@ -2362,7 +2377,8 @@ export class UI {
       ui.block.title = `${buffName(t)}：${buffDesc(t)}`;
       // 原版 DrawBuffIcon（Main.cs:42736）：TextureAssets.Buff[type] 原大绘制——
       // 用原版 Buff_{vanillaBuff} 贴图（2026-08-13 前：误用对应药水物品图标）
-      const want = `/sprites/vanilla/Buff_${BUFF_DEFS[t].vanillaBuff}.png`;
+      const want = remasterBuffIcon?.(BUFF_DEFS[t].vanillaBuff)
+        ?? `/sprites/vanilla/Buff_${BUFF_DEFS[t].vanillaBuff}.png`;
       if (!(ui.icon as HTMLImageElement).src.endsWith(want)) {
         (ui.icon as HTMLImageElement).onerror = () => {
           // 素材缺失兜底：退回药水物品图标（缺表时仍可见）
@@ -2406,7 +2422,7 @@ export class UI {
       u.block.title = nm ? `${nm}：${Lang.buffDesc(pb.buff) ?? ''}` : '';
       // buffNoTimeDisplay：宠物 buff 不显示剩余时长（原版 TryGetBuffTime 不出文字）
       u.time.textContent = '';
-      const want = `/sprites/vanilla/Buff_${pb.buff}.png`;
+      const want = remasterBuffIcon?.(pb.buff) ?? `/sprites/vanilla/Buff_${pb.buff}.png`;
       if (!(u.icon as HTMLImageElement).src.endsWith(want)) {
         (u.icon as HTMLImageElement).onerror = () => {
           // 素材缺失兜底：退回宠物投射物贴图 Projectile_<proj>.png
@@ -2808,21 +2824,32 @@ export class UI {
     const defEl = this.invPanel.querySelector('[data-role="defense"]') as HTMLElement | null; // left 仍在 invPanel 内
     if (defEl) {
       // 防御计数器刷新（DrawDefenseCounter :41557）：盾帧 = 难度列(0/1/2),
-      // 专家/大师叠辉光行(静态 α0.45 近似原版脉动;大师红绿脉冲未做,偏差记录)
+      // 专家/大师叠辉光行(静态 α0.45 近似原版脉动;大师红绿脉冲未做,偏差记录)。
+      // 盾图 = img dataURL 按 (难度列,是否带辉光) 缓存——不再持独立 canvas 后备
       const p = this.game.player;
       const w = this.game.world;
       const col = w.isMaster ? 2 : w.isExpert ? 1 : 0;
-      const cv = defEl.querySelector('canvas') as HTMLCanvasElement;
-      const dctx = cv.getContext('2d')!;
-      dctx.clearRect(0, 0, cv.width, cv.height);
+      const imgEl = defEl.querySelector('img');
       const shield = this.game.atlas?.vmisc('vanilla/Extra_58.png');
-      if (shield) {
-        dctx.drawImage(shield.img, shield.sx + col * 52, shield.sy, 52, 48, 0, 0, 52, 48);
-        if (col > 0 && p.defense > 0) {
-          dctx.globalAlpha = 0.45;
-          dctx.drawImage(shield.img, shield.sx + col * 52, shield.sy + 48, 52, 48, 0, 0, 52, 48);
-          dctx.globalAlpha = 1;
+      if (imgEl && shield) {
+        const glow = col > 0 && p.defense > 0;
+        const key = `${col}|${glow ? 1 : 0}`;
+        let url = DEF_SHIELD_URLS.get(key);
+        const sc = DEF_SHIELD_SCRATCH;
+        if (!url && sc) {
+          const sx2 = sc.getContext('2d')!;
+          sc.width = 52; sc.height = 48;
+          sx2.clearRect(0, 0, 52, 48);
+          sx2.drawImage(shield.img, shield.sx + col * 52, shield.sy, 52, 48, 0, 0, 52, 48);
+          if (glow) {
+            sx2.globalAlpha = 0.45;
+            sx2.drawImage(shield.img, shield.sx + col * 52, shield.sy + 48, 52, 48, 0, 0, 52, 48);
+            sx2.globalAlpha = 1;
+          }
+          url = sc.toDataURL('image/png');
+          DEF_SHIELD_URLS.set(key, url);
         }
+        if (url && imgEl.getAttribute('src') !== url) imgEl.src = url;
       }
       defEl.querySelector('span')!.textContent = String(p.defense);
     }

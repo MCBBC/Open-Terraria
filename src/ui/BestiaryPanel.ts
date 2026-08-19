@@ -44,6 +44,11 @@ const BST_DRAW_OFFSET: Record<string, {
 
 /** 图鉴 NPC 染色帧缓存（key = sheet|npcId|帧高——负 id 变体各自成键） */
 const bstTintCache = new Map<string, HTMLCanvasElement>();
+// 热补丁重烘(2026-08-19 素材重制):染色缓存键 `sheetId|…` 不含贴图身份,
+// 替换 NPC sheet 后旧染色帧钉死 → 监听应用事件全清(面板重开即新,量小无压力)
+if (typeof document !== 'undefined') {
+  document.addEventListener('sw:remaster-applied', () => bstTintCache.clear());
+}
 /** base 帧 + color 二次绘制（Main.cs:24527 + NPC.GetColor 逐像素乘；XNA AlphaBlend
  *  预乘语义 = destination-out 按 colorA 削弱 base + lighter 全量加染色帧——
  *  在离屏合成完再贴回，destination-out 不挖主画布的 MapBG 底图） */

@@ -247,18 +247,11 @@ function golemHeadGoFree(e: Enemy, game: GameHooks): void {
 export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   const x = bodyXOf(e);
 
-  // ---- 血尽:主路径在 Enemy.hurt 的 245 分支(标准死亡管线+灭部件,boss#19
-  //      定案"部件随本体消亡",原 DoDeathEvents :80146-80148)。此处仅存量自愈
-  //      兜底:旧版 hurt 放行年代留下的负血实体(不再受击则 hurt 不触发)——
-  //      AI 分发只跳 dead 不跳 hp≤0,须在此收口,否则负血条永挂(2026-08-19) ----
-  if (e.hp <= 0) {
-    for (const n of game.enemies() as Enemy[]) {
-      if (!n.dead && n !== e && n.vanillaId !== null
-        && n.vanillaId >= 246 && n.vanillaId <= 249) n.dead = true;
-    }
-    e.dead = true;
-    return;
-  }
+  // ---- 血尽:主路径在 Enemy.hurt(标准死亡管线;部件随终战消亡由各 AI 锚主
+  //      检测自杀——原版同构的下一 tick 时序)。此处仅存量自愈兜底:旧版 hurt
+  //      放行年代留下的负血实体(不再受击则 hurt 不触发)——AI 分发只跳 dead
+  //      不跳 hp≤0,须在此收口,否则负血条永挂(2026-08-19) ----
+  if (e.hp <= 0) { e.die(game); return; }
 
   // ---- FindFrame case 245(:73581-73609)状态帧(非循环动画):待机按 ai1 蓄力
   //      倒计分 5 档(-20 蹲伏起步);跳跃 ai0==1 → 原版 frame.Y=1(1 像素笔误值
@@ -425,15 +418,20 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
     x.alpha = x.free ? 0 : 255;             // 249 SetDefaults 无 alpha(:12139-12149)
   }
 
-  // ---- 血尽(首行):挂载头死=转自由态;自由头恒无敌（249 SetDefaults
-  //      NPC.cs:12151 dontTakeDamage=true——原版自由头不可击杀,胜利条件只有
-  //      杀本体。曾"杀自由头=全族自毁终战"= 倒置,审计 boss#19,2026-08-19）----
-  if (e.hp <= 0) {
-    if (x.free) {
-      e.hp = e.maxHp;   // 防御性复原（dontTakeDamage 已挡伤害路径）
-    } else {
-      golemHeadGoFree(e, game);
+  // ---- 血尽(首行):挂载头死且【本体活】→ 转自由态(hurt 246 放行同门——
+  //      玩家先打头场景本体必活);本体已死 → 不转,落到下方锚主段标准死
+  //      (:31287-31290)。自由头恒无敌（249 SetDefaults NPC.cs:12151
+  //      dontTakeDamage=true——原版自由头不可击杀,胜利条件只有杀本体。
+  //      曾"杀自由头=全族自毁终战"= 倒置,审计 boss#19,2026-08-19）----
+  if (e.hp <= 0 && !x.free) {
+    const bodyNow = findBody(game);
+    if (!bodyNow || bodyNow.dead || bodyNow.hp <= 0) {
+      e.die(game);
+      return;
     }
+    golemHeadGoFree(e, game);
+  } else if (e.hp <= 0 && x.free) {
+    e.hp = e.maxHp;   // 防御性复原（dontTakeDamage 已挡伤害路径）
   }
 
   // ---- 属性:自由头按 249 SetDefaults(NPC.cs:12139-12151:damage 80/defense 32/
@@ -450,9 +448,13 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.def.defense = b.def;
   }
 
-  // 本体死亡/缺失 → 挂载头转自由态(本体死透后头继续)
+  // 本体死亡/缺失 → 头标准死(golemBoss<0 → StrikeNPCNoInteraction(9999) 即
+  // NPC.cs:31287-31290,走碎块/音效死亡管线;终战=部件随本体消亡 boss#19 定案。
+  // 曾写"转自由态继续战"——偏离原版且与定案矛盾,2026-08-19 对齐;
+  // 血尽转自由态只在【本体活】时发生(hurt 246 放行有本体活门)——玩家先打头
+  // 转自由,本体死后头自灭,两条路径与原版全场景吻合)
   const body = findBody(game);
-  if (!x.free && (!body || body.ai3 === 1 || body.hp <= 0)) golemHeadGoFree(e, game);
+  if (!x.free && (!body || body.ai3 === 1 || body.hp <= 0)) { e.die(game); return; }
 
   const num = balanceNum(game, player, 3);   // 挂载/自由头 getGoodWorld +3(:31277-31280/:31505-31508)
 
@@ -572,7 +574,7 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
 export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
   const x = fistXOf(e);
   // 存量负血自愈兜底(主路径=hurt 标准死;旧放行年代留下的负血拳在此收口)
-  if (e.hp <= 0) { e.dead = true; return; }
+  if (e.hp <= 0) { e.die(game); return; }
   if (!e.bInit) {
     e.bInit = true;
     e.ai0 = e.vanillaId === 247 ? -1 : 1;   // ai0=侧别(-1 左拳/1 右拳;由本体生成时预置)
@@ -587,7 +589,9 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
   const body = findBody(game);
   const head = findHead(game);
   const anchor = body && !body.dead ? body : head;
-  if (!anchor) { e.dead = true; return; }
+  // 锚主全无 → 标准死(:19182-19186 原版 StrikeNPCNoInteraction 自杀——碎块/
+  // 音效管线;曾直写 dead 静默,2026-08-19 对齐)
+  if (!anchor) { e.die(game); return; }
   e.master = anchor; // 拳链渲染用（Renderer.drawGolemFistChain，Main.cs:22593-22632）
 
   const num = balanceNum(game, player, 3);   // 拳 getGoodWorld +3(:19173-19176)

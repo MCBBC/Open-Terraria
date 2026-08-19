@@ -512,9 +512,15 @@ function tileFrameGen(st: TileStore, ctx: SweepCtx, x: number, y: number, reset:
 /** TileFrameImportant 分派（cs:85703+）——返回 true=已处理（含 no-op 族） */
 function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number, reset = false): boolean {
   // frameSparse 模式跳过的读帧族（165/185/28/240族/485/72/C3X2 族——见 SweepCtx 注释）
+  //   ★CCCCC：+138/411——Check2x2 完整性门读 2×2 四格帧；探针基座（金标 typ×陈旧
+  //   JS 帧嵌合）上巨石/起爆器帧不可信 → 锚反解到互指的死区 → 尾 4×4 帧与 184 杀
+  //   级联互喂成无限递归（#105 实爆）。生产（frameSparse=false，帧由本管线同源写
+  //   入）恒自洽不受影响；#101 的 genTileFrame 直调 ctx 同为 false（TrackPass 巷杀
+  //   级联实证无爆）。
   if (ctx.frameSparse && (
     sheet === 165 || sheet === 185 || sheet === 28 || sheet === 653 || sheet === 240
-    || sheet === 440 || sheet === 485 || sheet === 72 || sheet === 178 || C3X2_TYPES.has(sheet))) {
+    || sheet === 440 || sheet === 485 || sheet === 72 || sheet === 178 || sheet === 138
+    || sheet === 411 || C3X2_TYPES.has(sheet))) {
     return true;   // UUUU：178 同列读帧族（sparse 模式下嵌合帧会伪杀 CheckAndAdjust）
   }
   switch (sheet) {

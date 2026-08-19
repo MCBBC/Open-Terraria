@@ -84,9 +84,16 @@ export class ChunkCache {
   /** 含动画墙的 chunk，按 wallId 分组（墙无 sheet 概念；DoUpdate_AnimateWalls 的
    *  11 类换带墙 + 242/243 星彩玻璃逐格错相——换带时只重建对应 chunk） */
   private animChunksByWall = new Map<number, Set<number>>();
+  /** 满档基数(唯一事实源):进世界回满(Game.afterWorldLoad)与熔断减半
+   *  (Renderer onLost)都从这里取值——★曾两处各自硬编码,静态改 192 后
+   *  afterWorldLoad 仍写回 384 = 改动静默失效(2026-08-19 实证)。
+   *  384→192(双开 IOSurface 实测:满额 = 2×24=48 张/窗,是单窗张数大头;
+   *  192 = 2×12=24 张,仍为视野 ~48 chunk 的 4 倍余量,跑图重烘焙由
+   *  flushDirty 4 chunk/帧限速兜底) */
+  static readonly BASE_MAX_CHUNKS = 192;
   /** LRU 上限(.chunk 计;atlas 化后上限页数 = ceil(N/16)×2 张画布)。
    *  此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
-  static MAX_CHUNKS = 384;
+  static MAX_CHUNKS = ChunkCache.BASE_MAX_CHUNKS;
   /** CPU 软渲染门(Renderer.setRenderMode 写入):烘焙画布走 willReadFrequently */
   static CPU_RENDER = false;  // 起高(2026-08-14 复原 224:contextlost 自适应兜底已就位,压力真来自动减半 384→192→96;★--force-gpu-mem-available-mb 已证为安慰剂(只管 cc tile 预算,见 2026-08-18 IOSurface 审计),双开靠本类 atlas 页化+云染池化+renderMode=cpu)
   /** 最近一次 flushDirty 实测耗时 ms（F5 调试报告：烘焙尖峰证据面） */
@@ -176,8 +183,11 @@ export class ChunkCache {
     this.animChunksBySheet.clear();
     this.animChunksByWall.clear();
     if (this.bakeArriveTimer) { clearTimeout(this.bakeArriveTimer); this.bakeArriveTimer = 0; }
+    if (this.sheetReplacedTimer) { clearTimeout(this.sheetReplacedTimer); this.sheetReplacedTimer = 0; }
     this.chunkSheets.clear();
     this.arriveFiles.clear();
+    this.chunkConsumed.clear();
+    this.replacedFiles.clear();
     if (this.atlasRef?.bakeTracker) this.atlasRef.bakeTracker = null; // 解绑,防跨世界回调
   }
 
@@ -205,15 +215,32 @@ export class ChunkCache {
           let s = this.chunkSheets.get(this._bakingKey);
           if (!s) { s = new Set(); this.chunkSheets.set(this._bakingKey, s); }
           s.add(file);
+          this.noteConsumedInto(this._bakingKey, file);
+        },
+        // 消费登记(2026-08-19 素材重制热补丁):烘焙期 ensureVImage 命中(hit)的表
+        // 也登记——onBakeAssetArrived 只覆盖 miss 晚到,替换已就位表必须走
+        // onSheetReplaced(否则热补丁替换 tile/wall sheet 后已烘 chunk 不重烘)
+        noteConsumed: (file: string) => {
+          if (this._bakingKey === null) return;
+          this.noteConsumedInto(this._bakingKey, file);
         },
         onLoaded: (file: string) => this.onBakeAssetArrived(file),
       };
     }
   }
 
+  private noteConsumedInto(k: number, file: string): void {
+    let s = this.chunkConsumed.get(k);
+    if (!s) { s = new Set(); this.chunkConsumed.set(k, s); }
+    s.add(file);
+  }
+
   private atlasRef: import('../assets/SpriteAtlas').SpriteAtlas | null = null;
   /** 每 chunk 烘焙时缺失的贴图文件(晚到精确重烘依据;markDirty/淘汰时删) */
   private chunkSheets = new Map<number, Set<string>>();
+  /** 每 chunk 烘焙时消费过的贴图文件(miss+hit 全量;运行期替换 sheet 的精确
+   *  重烘依据——素材重制热补丁用;markDirty/淘汰时删) */
+  private chunkConsumed = new Map<number, Set<string>>();
   /** 当前正在烘焙的 chunk key(note 写入用) */
   private _bakingKey: number | null = null;
 
@@ -245,6 +272,32 @@ export class ChunkCache {
     }, 500) as unknown as ReturnType<typeof setTimeout>;
   }
 
+  /** 运行期替换已就位的 sheet(素材重制热补丁)→ 去抖合批 → 只重烘【消费过】
+   *  该文件的 chunk。与 onBakeAssetArrived 同构但查 chunkConsumed(hit 也有登记);
+   *  统计并入 arriveInvalidateChunks(F5 观测同源)。★禁 invalidateAll(解码风暴前科) */
+  private sheetReplacedTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  private replacedFiles = new Set<string>();
+  onSheetReplaced(file: string): void {
+    this.replacedFiles.add(file);
+    if (this.sheetReplacedTimer) return;
+    this.sheetReplacedTimer = setTimeout(() => {
+      this.sheetReplacedTimer = 0;
+      const files = this.replacedFiles;
+      this.replacedFiles = new Set();
+      let hit = 0;
+      for (const [k, consumed] of this.chunkConsumed) {
+        for (const f of files) {
+          if (consumed.has(f)) {
+            this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+            hit++;
+            break;
+          }
+        }
+      }
+      if (hit) this.arriveInvalidateChunks = hit;
+    }, 500) as unknown as ReturnType<typeof setTimeout>;
+  }
+
   static key(cx: number, cy: number): number {
     return (cx & 0xffff) | ((cy & 0xffff) << 16);
   }
@@ -255,6 +308,7 @@ export class ChunkCache {
     this.releasePair(this.chunks.get(k)); // 旧画布丢弃前先释放,防 detached canvas 积压
     this.chunks.set(k, undefined as unknown as ChunkPair); // 标记删除，重绘时重建
     this.chunkSheets.delete(k);  // 重建时会重新登记缺表
+    this.chunkConsumed.delete(k);
     this.enqueueDirty(k);
   }
 
@@ -367,6 +421,7 @@ export class ChunkCache {
       if (oldest === undefined) break;
       this.releasePair(this.chunks.get(oldest)); // 淘汰画布同样释放,防 detached 积压
       this.chunkSheets.delete(oldest);
+      this.chunkConsumed.delete(oldest);
       this.chunks.delete(oldest);
     }
     return c;
@@ -396,6 +451,7 @@ export class ChunkCache {
     if (tracker) tracker._baking = true;
     this._bakingKey = ChunkCache.key(cx, cy);
     this.chunkSheets.delete(this._bakingKey); // 重烘焙 = 重新登记
+    this.chunkConsumed.delete(this._bakingKey);
     const cell = this.allocCell();
     try {
       const page = Math.floor(cell / ChunkCache.CELLS_PER_PAGE);

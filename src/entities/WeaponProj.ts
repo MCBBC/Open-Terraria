@@ -22,11 +22,11 @@ import { canHit } from '../physics/LineOfSight';
  *  语义:贴图左上角落于 (盒左 + num144, 盒上 − num143)——num143 为"上移"量。
  *  典型:炸弹 28=上移 8(22×30 贴图,引线 y=0-7 全在盒外,弹体 y=8-29 恰填 22×22 盒,
  *  Main.cs:29560);雷管 29=上移 11(10×32)。
- *  未收录(方向依赖项,待消费端接入后补):959/1095/1096(spriteDirection)、1003/1004、
- *  191-194/390-392(direction)、112、313(height 门);浮标 proj.bobber=8(动态 flag);
- *  397 的 num145-=1 忽略。 */
+ *  方向/高度依赖项已入 PROJ_DRAW_OFFSET_DYN(959/1095/1096/1003/1004/112/
+ *  191-194/390-392/313/397——待对应弹型接入时传 dirX 生效);
+ *  浮标 proj.bobber=8 不适用(本仓 Bobber 自绘近似)。 */
 const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
-  1022: [1, 0], 175: [10, 0], 392: [-2, 0], 1036: [-4, 0], 1025: [22, 0],
+  1022: [1, 0], 175: [10, 0], 1036: [-4, 0], 1025: [22, 0],   // 392 移 DYN 表
   499: [12, 0], 765: [22, -16], 966: [-26, -6], 519: [6, -6], 520: [12, 0],
   492: [5, -4], 498: [6, 0], 489: [-2, 0], 486: [-6, 0], 525: [5, 0],
   488: [0, -8], 373: [6, -10], 375: [12, -11], 423: [0, -5], 346: [4, 0],
@@ -49,7 +49,30 @@ const PROJ_DRAW_OFFSET: Record<number, readonly [number, number]> = {
   858: [16, -8], 859: [8, -8], 860: [34, -8], 958: [48, -20], 960: [24, -14],
   956: [16, -12], 994: [18, -10], 998: [14, -10], 1027: [4, -6],
   200: [12, -12], 211: [14, 0], 236: [30, -14],
-  517: [6, 0], 681: [6, 0], 516: [6, 0], 127: [8, 0], 155: [3, 3], 397: [-2, -2],
+  517: [6, 0], 681: [6, 0], 516: [6, 0], 127: [8, 0], 155: [3, 3],   // 397 移 DYN 表(num145−1)
+};
+
+/** 方向/高度依赖偏移项（Main.cs:29375-29826 表内 spriteDirection/direction/height
+ *  条目,2026-08-19 补齐机制）。dirX = 弹体朝向（spriteDirection 语义:+1 右/-1 左,
+ *  调用方传实体 facing）。397 的 num145-=1 以第三元素表达（0/−1）。
+ *  ★当前消费端（本仓 aiStyle 族的 drawProj 调用方）尚未覆盖这些型号——表先行就位,
+ *  对应弹型接入时传 dirX 即生效;浮标 bobber=8 项本仓 Bobber 为自绘近似不适用 */
+const PROJ_DRAW_OFFSET_DYN: Record<number, (dirX: number, h: number) => readonly [number, number, number]> = {
+  959: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
+  1095: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
+  1096: (d) => [40, -14 + (d === -1 ? -8 : 0), 0],
+  1003: (d) => [22, -18 + (d === 1 ? 8 : 0), 0],
+  1004: (d) => [26, -18 + (d === 1 ? 6 : 0), 0],
+  112: (d) => [14, -8 + 4 * d, 0],
+  191: (d) => [26, d !== 1 ? -22 : -10, 0],
+  192: (d) => [26, d !== 1 ? -22 : -10, 0],
+  193: (d) => [26, d !== 1 ? -22 : -10, 0],
+  194: (d) => [26, d !== 1 ? -22 : -10, 0],
+  390: (d) => [0, 4 * d, 0],
+  391: (d) => [0, 4 * d, 0],
+  392: (d) => [-2, 4 * d, 0],
+  313: (_d, h) => (h !== 54 ? [20, -12, 0] : [0, 0, 0]),
+  397: () => [-2, -2, -1],   // num145−1（cs:29821-29823）
 };
 
 /** 共用绘制：投射物贴图按角度旋转。
@@ -74,7 +97,14 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const hasImg = !!(img && (img.width > 0) && img.width > 0);
   const W = hasImg ? img!.width : dw;
   const num145 = (W + e.w) / 2;                       // (贴图宽−盒宽)/2 + 盒宽/2
-  const [off143, off144] = PROJ_DRAW_OFFSET[projId] ?? [0, 0];
+  // 偏移取值：方向/高度依赖项优先（弹体朝向取实体 facing——spriteDirection 语义），
+  // 其余走静态表
+  const dyn = PROJ_DRAW_OFFSET_DYN[projId];
+  const dirX = (e as { facing?: number }).facing ?? 0;
+  const [off143, off144, num145Adj] = dyn
+    ? dyn(dirX, e.h)
+    : [...(PROJ_DRAW_OFFSET[projId] ?? [0, 0]), 0];
+  const num145f = num145 + (num145Adj ?? 0);
   const s = dw / W;                                   // 绘制缩放(原生尺寸=1)
   ctx.save();
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
@@ -93,12 +123,12 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
     ctx.restore();
     return;
   }
-  ctx.translate(e.x + num145 + off144, e.y + e.h / 2);
+  ctx.translate(e.x + num145f + off144, e.y + e.h / 2);
   ctx.rotate(ang);
   if (mirror) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = false;
   if (hasImg) {
-    ctx.drawImage(img!, -num145 * s, -(e.h / 2 + off143) * s, dw, dw * (img!.height / img!.width));
+    ctx.drawImage(img!, -num145f * s, -(e.h / 2 + off143) * s, dw, dw * (img!.height / img!.width));
   } else {
     ctx.fillStyle = fallbackColor;
     ctx.fillRect(-dw / 2, -dw / 2, dw, dw);

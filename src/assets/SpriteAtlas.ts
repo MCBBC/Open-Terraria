@@ -428,10 +428,16 @@ export class SpriteAtlas {
    *  烘焙追踪(bakeTracker,2026-08-13):ChunkCache 烘焙期间置 _baking,此处
    *  miss 发起加载时 note、onload 到达时 onLoaded——烘焙消费的任何懒取贴图
    *  晚到自动触发重烘焙,不再依赖 Game.ts 的前缀白名单(白名单保留作纵深) */
-  bakeTracker: { _baking?: boolean; note(file: string): void; onLoaded(file: string): void } | null = null;
+  bakeTracker: { _baking?: boolean; note(file: string): void; noteConsumed?: (file: string) => void; onLoaded(file: string): void } | null = null;
   ensureVImage(file: string): ImageBitmap | ImageBitmap | HTMLImageElement | null {
     const hit = this.vimages.get(file);
-    if (hit) return hit;
+    if (hit) {
+      // 消费登记(2026-08-19 素材重制热补丁):烘焙期命中(hit)的表也要登记到
+      // ChunkCache.chunkConsumed——替换已就位 sheet 的精确重烘依据(onBakeAssetArrived
+      // 只覆盖 miss 晚到链,对已就位表是 no-op)。可选方法:无 ChunkCache 的环境安全
+      if (this.bakeTracker?._baking) this.bakeTracker.noteConsumed?.(file);
+      return hit;
+    }
     // ★note 先于 pending/failed 早退(2026-08-19 用户实报"生命树贴图不及时,
     // 手动破坏才渲染"):加载已在飞行中(预载/他人发起)时烘焙期 ensure 会早退,
     // 曾把 note 一起吞掉 → 表晚到无人重烘 = 缺表 fallback 钉死。failed 同 note:

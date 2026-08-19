@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>素材重制工作台 · Remaster Studio</title>
+<style>
+  :root {
+    --bg: #14101f; --panel: #1c1730; --panel2: #241e3c; --line: #3a2f5e;
+    --txt: #e8e4f0; --dim: #9a8ec0; --acc: #7d92d6; --gold: #ffd76e;
+    --st-untouched: #55506a; --st-pending: #5a9cf0; --st-accepted: #4ad07a; --st-skipped: #e0c050;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--txt);
+    font: 13px/1.5 "Fusion Pixel 12px", "Microsoft YaHei", monospace; overflow: hidden; }
+  button { padding: 5px 12px; border-radius: 4px; border: 1px solid var(--line);
+    background: var(--panel2); color: var(--txt); cursor: pointer; font: inherit; }
+  button:hover { border-color: var(--acc); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: #3a2f6e; border-color: var(--acc); }
+  button.good { border-color: var(--st-accepted); color: var(--st-accepted); }
+  input, select, textarea { background: #100c1c; color: var(--txt); border: 1px solid var(--line);
+    border-radius: 4px; padding: 4px 8px; font: inherit; }
+  canvas { image-rendering: pixelated; }
+  #topbar { height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    background: var(--panel); border-bottom: 2px solid var(--line); }
+  #topbar b { color: var(--gold); letter-spacing: 2px; }
+  #topbar .spacer { flex: 1; }
+  #status { color: var(--dim); font-size: 12px; }
+  #main { display: flex; height: calc(100% - 46px); }
+  /* 左栏 */
+  #left { width: 264px; flex: none; display: flex; flex-direction: column;
+    background: var(--panel); border-right: 2px solid var(--line); }
+  #cats { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px; border-bottom: 1px solid var(--line); }
+  #cats button { padding: 3px 8px; font-size: 12px; }
+  #cats button.on { background: #3a2f6e; border-color: var(--acc); color: var(--gold); }
+  #left .search { padding: 8px; display: flex; gap: 6px; }
+  #left .search input { flex: 1; }
+  #list { flex: 1; overflow-y: auto; }
+  .item { padding: 5px 10px; cursor: pointer; border-bottom: 1px solid #241e3c; display: flex;
+    align-items: center; gap: 6px; }
+  .item:hover { background: var(--panel2); }
+  .item.sel { background: #322a56; border-left: 3px solid var(--acc); }
+  .item.excl { opacity: .38; }
+  .item .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .pg { font-size: 11px; color: var(--dim); }
+  .item .pg.done { color: var(--st-accepted); }
+  #left .foot { padding: 8px; border-top: 1px solid var(--line); font-size: 12px; color: var(--dim); }
+  /* 中栏 */
+  #center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #sheetwrap { flex: 1; overflow: auto; background:
+      repeating-conic-gradient(#181228 0% 25%, #131020 0% 50%) 0 0 / 24px 24px; position: relative; }
+  #sheetwrap .inner { position: relative; display: inline-block; margin: 12px; }
+  #sheetcv { display: block; background:
+      repeating-conic-gradient(#221a38 0% 25%, #1a1428 0% 50%) 0 0 / 16px 16px; }
+  #gridov { position: absolute; inset: 0; pointer-events: none; }
+  #filmstrip { height: 86px; flex: none; display: flex; gap: 6px; overflow-x: auto; padding: 8px;
+    background: var(--panel); border-top: 2px solid var(--line); align-items: center; }
+  .film { flex: none; width: 62px; cursor: pointer; text-align: center; }
+  .film canvas { width: 48px; height: 48px; background:
+    repeating-conic-gradient(#221a38 0% 25%, #1a1428 0% 50%) 0 0 / 12px 12px; border: 2px solid var(--st-untouched); }
+  .film.sel canvas { border-color: var(--gold); }
+  .film[data-st="pending"] canvas { border-color: var(--st-pending); }
+  .film[data-st="accepted"] canvas { border-color: var(--st-accepted); }
+  .film[data-st="skipped"] canvas { border-color: var(--st-skipped); }
+  .film .idx { font-size: 10px; color: var(--dim); }
+  /* 右栏 */
+  #right { width: 392px; flex: none; overflow-y: auto; padding: 12px;
+    background: var(--panel); border-left: 2px solid var(--line); }
+  #right h3 { margin: 2px 0 8px; color: var(--gold); font-size: 14px; }
+  #right .meta { color: var(--dim); font-size: 11px; margin-bottom: 10px; word-break: break-all; }
+  #compare { display: flex; gap: 10px; margin-bottom: 8px; }
+  #compare .cell { flex: 1; text-align: center; }
+  #compare .cell canvas { width: 100%; background:
+    repeating-conic-gradient(#221a38 0% 25%, #1a1428 0% 50%) 0 0 / 16px 16px; border: 1px solid var(--line); }
+  #compare .cell .lb { font-size: 11px; color: var(--dim); }
+  #genpreview { width: 100%; margin: 6px 0; border: 1px dashed var(--line); display: none; }
+  #prompt { width: 100%; height: 110px; resize: vertical; margin: 6px 0; font-size: 12px; }
+  #right .row { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+  #right .row label { display: flex; align-items: center; gap: 4px; color: var(--dim); font-size: 12px; }
+  #framenav { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
+  #framenav .info { flex: 1; text-align: center; color: var(--gold); }
+  .hint { color: var(--dim); font-size: 11px; }
+  /* 设置弹层 */
+  #settings { position: fixed; inset: 0; background: rgba(6,4,14,.7); display: none;
+    align-items: center; justify-content: center; z-index: 50; }
+  #settings .box { width: 520px; background: var(--panel); border: 2px solid var(--line);
+    padding: 18px; border-radius: 6px; }
+  #settings .box h3 { margin: 0 0 12px; color: var(--gold); }
+  #settings .frow { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  #settings .frow label { width: 96px; flex: none; color: var(--dim); }
+  #settings .frow input, #settings .frow select { flex: 1; }
+  #settings textarea { width: 100%; height: 84px; margin-top: 4px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="topbar">
+  <b>素材重制工作台</b>
+  <button id="btn-export" class="primary">导出素材包</button>
+  <button id="btn-import">导入预览</button>
+  <button id="btn-apply">应用到本页运行时</button>
+  <button id="btn-settings">设置</button>
+  <span class="spacer"></span>
+  <span id="status">初始化…</span>
+</div>
+<div id="main">
+  <div id="left">
+    <div id="cats"></div>
+    <div class="search"><input id="search" placeholder="搜索名称/key…"><label class="hint"><input type="checkbox" id="only-todo">只看未完成</label></div>
+    <div id="list"></div>
+    <div class="foot" id="list-foot"></div>
+  </div>
+  <div id="center">
+    <div id="sheetwrap"><div class="inner">
+      <canvas id="sheetcv"></canvas><canvas id="gridov"></canvas>
+    </div></div>
+    <div id="filmstrip"></div>
+  </div>
+  <div id="right">
+    <h3 id="frame-title">选择素材</h3>
+    <div class="meta" id="frame-meta"></div>
+    <div id="compare">
+      <div class="cell"><canvas id="origcv"></canvas><div class="lb">原帧</div></div>
+      <div class="cell"><canvas id="newcv"></canvas><div class="lb">重制帧</div></div>
+    </div>
+    <img id="genpreview" alt="生成原图">
+    <div class="row"><label><input type="checkbox" id="overlay" checked> 50% 叠加对比</label>
+      <label><input type="checkbox" id="use-ref" checked> 相邻已验收帧作风格锚</label></div>
+    <textarea id="prompt" placeholder="prompt(切帧自动预填,可编辑微调)"></textarea>
+    <div class="row">
+      <button id="btn-remaster" class="primary">重制此帧 (R)</button>
+      <button id="btn-accept" class="good">验收 ✓ (A)</button>
+      <button id="btn-reject">拒绝</button>
+      <button id="btn-skip">跳过 (S)</button>
+    </div>
+    <div id="framenav">
+      <button id="btn-prev">← 上一帧</button>
+      <span class="info" id="frame-info"></span>
+      <button id="btn-next">下一帧 →</button>
+    </div>
+    <div class="hint">
+      快捷键:←/→ 切帧 · R 重制 · A 验收 · S 跳过。全部帧 验收/跳过 后贴图完成(列表打勾)。
+      导出 = 已验收帧像素 + 其余原版像素(混合 sheet);跳过 = 保留原版像素的合法终态。
+    </div>
+  </div>
+</div>
+<div id="settings"><div class="box">
+  <h3>设置</h3>
+  <div class="frow"><label>代理地址</label><input id="set-proxy" placeholder="http://127.0.0.1:5210"></div>
+  <div class="frow"><label>OpenAI Key</label><input id="set-key" type="password" placeholder="sk-…(仅存本机 localStorage)"></div>
+  <div class="frow"><label>质量档</label><select id="set-quality"><option>low</option><option selected>medium</option><option>high</option></select></div>
+  <div class="frow"><label>缩回算法</label><select id="set-algo"><option selected>box(块平均)</option><option value="nearest">nearest(块中心)</option></select></div>
+  <div class="frow" style="align-items:flex-start"><label>全局前缀</label>
+    <textarea id="set-prefix"></textarea></div>
+  <div class="row" style="justify-content:flex-end">
+    <span class="hint" id="proxy-health" style="flex:1"></span>
+    <button id="set-close" class="primary">关闭</button>
+  </div>
+</div></div>
+<script type="module">
+// 三栏工作台:左=素材目录(AssetCatalog 六类聚合)/ 中=sheet 切帧网格 / 右=单帧重制面板。
+// dev-only 工具页(tree-inspect.html 同模式):直接 import 游戏 TS 模块,切帧逻辑与
+// 渲染侧单一真源(SpriteAtlas 元数据 / NpcGridLayouts / ITEM_ANIMATION)。
+import { SpriteAtlas, ITEM_ANIMATION } from '/src/assets/SpriteAtlas.ts';
+import { buildCatalog } from '/src/remaster/AssetCatalog.ts';
+import { NPC_GRIDS } from '/src/remaster/NpcGridLayouts.ts';
+import { extractFramePixels, frameHash, boxDownscale, computeGenLayout } from '/src/remaster/FrameOps.ts';
+import { remasterFrame, pingProxy } from '/src/remaster/ImageRemaster.ts';
+import { composePrompt, DEFAULT_GLOBAL_PREFIX } from '/src/remaster/PromptTemplates.ts';
+import { WorkbenchState } from '/src/remaster/WorkbenchState.ts';
+import { getFramePixels, putFramePixels } from '/src/remaster/PackStore.ts';
+import { buildManifest, makePack, readPack } from '/src/remaster/PackFormat.ts';
+import { RemasterRuntime } from '/src/remaster/RemasterRuntime.ts';
+import { assetVersion } from '/src/net/AssetCache.ts';
+
+const $ = (id) => document.getElementById(id);
+const setStatus = (s) => { $('status').textContent = s; };
+const fetchJson = (p) => fetch(p).then((r) => r.json());
+
+// ---- 目录(json 运行时 fetch:public html 的裸 URL import 不进 vite 模块图,
+//      .json 会被当静态资源返回 JSON MIME → 模块加载失败;fetch 通道无此限制) ----
+const [vanillaJson, vanillaNpcsJson, vanillaUiJson, index, projFramesJson] = await Promise.all([
+  fetchJson('sprites/vanilla.json'),
+  fetchJson('sprites/vanilla-npcs.json'),
+  fetchJson('sprites/vanilla-ui.json'),
+  fetchJson('sprites/remaster-index.json'),
+  fetchJson('src/data/vanilla-projframes.json'),
+]);
+const sizes = { ...index.vanilla, ...index['vanilla-ui'] };
+const catalog = buildCatalog({
+  vanilla: vanillaJson,
+  npcData: vanillaNpcsJson,
+  projFrames: projFramesJson,
+  uiFiles: vanillaUiJson.files,
+  sizes,
+  itemAnim: ITEM_ANIMATION,
+  npcGrid: NPC_GRIDS,
+});
+
+// ---- 运行时(应用到本页预览/探针用;游戏页走 main.ts 装配的同一 Runtime) ----
+const atlas = new SpriteAtlas();
+const runtime = new RemasterRuntime(atlas);
+const state = new WorkbenchState();
+
+// ---- 设置(localStorage) ----
+const SETTINGS_KEY = 'sw.remaster.settings';
+const settings = Object.assign(
+  { proxy: 'http://127.0.0.1:5210', key: '', quality: 'medium', algo: 'box', prefix: DEFAULT_GLOBAL_PREFIX },
+  JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
+function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+
+// ---- 状态 ----
+let curCat = 'npc';
+let curEntry = null;      // AssetEntry
+let curFrame = 0;
+let sheetImg = null;      // HTMLImageElement(当前条目 sheet)
+const promptEdits = new Map();   // 'entryKey|idx' → 用户编辑的 prompt(未保存的)
+const framePixelsMem = new Map(); // 'entryKey|idx' → Uint8ClampedArray(重制帧,内存优先)
+const remastering = new Set();    // 防重入
+let lastGen = null;       // {b64, layout}
+let onlyTodo = false;
+
+// ---- 左栏:类别 + 列表 ----
+const CATS = [['npc', 'NPC'], ['tile', '物块'], ['wall', '墙'], ['item', '物品'], ['projectile', '弹幕'],
+  ['ui', 'UI'], ['gore', '碎块'], ['glow', '辉光'], ['buff', 'Buff'], ['misc', '杂项']];
+for (const [id, label] of CATS) {
+  const b = document.createElement('button');
+  b.textContent = label; b.dataset.cat = id;
+  b.onclick = () => { curCat = id; renderCats(); renderList(); };
+  $('cats').appendChild(b);
+}
+function renderCats() {
+  for (const b of $('cats').children) b.classList.toggle('on', b.dataset.cat === curCat);
+}
+function renderList() {
+  const q = $('search').value.trim().toLowerCase();
+  const all = catalog.byCategory.get(curCat) ?? [];
+  const list = all.filter((e) => {
+    if (onlyTodo && state.progress[e.key]?.complete) return false;
+    if (q && !e.name.toLowerCase().includes(q) && !e.key.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const PAGE = 400;
+  const frag = document.createDocumentFragment();
+  for (const e of list.slice(0, PAGE)) {
+    const div = document.createElement('div');
+    div.className = 'item' + (e === curEntry ? ' sel' : '') + (e.meta?.excluded ? ' excl' : '');
+    const p = state.progressText(e);
+    const done = state.progress[e.key]?.complete;
+    div.innerHTML = `<span class="nm" title="${e.key} · ${e.sheet}${e.meta?.excluded ? ' · ' + e.meta.excluded : ''}">${e.name}</span><span class="pg${done ? ' done' : ''}">${e.meta?.excluded ? '二期' : p}</span>`;
+    div.onclick = () => selectEntry(e);
+    frag.appendChild(div);
+  }
+  const el = $('list');
+  el.replaceChildren(frag);
+  $('list-foot').textContent = `${list.length} 条${list.length > PAGE ? `(仅显示前 ${PAGE},请搜索)` : ''} · 完成 ${all.filter((e) => state.progress[e.key]?.complete).length}/${all.length}`;
+}
+$('search').oninput = () => renderList();
+$('only-todo').onchange = (e) => { onlyTodo = e.target.checked; renderList(); };
+state.onChange = () => renderList();
+
+// ---- 中栏:sheet 网格 + 帧胶片 ----
+function loadSheet(file) {
+  return new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () => resolve(null);
+    im.src = 'sprites/' + encodeURI(file);
+  });
+}
+function selectEntry(e) {
+  curEntry = e;
+  curFrame = 0;
+  lastGen = null;
+  renderList();
+  void (async () => {
+    sheetImg = await loadSheet(e.sheet);
+    drawSheet();
+    renderFilm();
+    renderFrame();
+  })();
+}
+function frameStatus(idx) {
+  if (!curEntry) return 'untouched';
+  return state.frame(curEntry, idx).status;
+}
+function frameColor(st) {
+  return { untouched: '#55506a', pending: '#5a9cf0', accepted: '#4ad07a', skipped: '#e0c050', failed: '#e07070' }[st] ?? '#55506a';
+}
+function drawSheet() {
+  const cv = $('sheetcv'), ov = $('gridov');
+  if (!sheetImg || !curEntry) { cv.width = cv.height = 10; return; }
+  const z = sheetImg.width > 1400 ? 1 : sheetImg.width > 700 ? 2 : 4;
+  cv.width = sheetImg.width; cv.height = sheetImg.height;
+  cv.style.width = (sheetImg.width * z) + 'px'; cv.style.height = (sheetImg.height * z) + 'px';
+  const cx = cv.getContext('2d');
+  cx.imageSmoothingEnabled = false;
+  cx.clearRect(0, 0, cv.width, cv.height);
+  cx.drawImage(sheetImg, 0, 0);
+  // 帧高亮与状态着色(覆盖层,同尺度绘制)
+  ov.width = sheetImg.width; ov.height = sheetImg.height;
+  ov.style.width = cv.style.width; ov.style.height = cv.style.height;
+  const ox = ov.getContext('2d');
+  ox.clearRect(0, 0, ov.width, ov.height);
+  for (const f of curEntry.frames) {
+    const st = frameStatus(f.frameIdx);
+    ox.strokeStyle = frameColor(st);
+    ox.globalAlpha = f.frameIdx === curFrame ? 1 : 0.55;
+    ox.lineWidth = f.frameIdx === curFrame ? 2 : 1;
+    ox.strokeRect(f.x + .5, f.y + .5, f.w - 1, f.h - 1);
+    if (f.frameIdx === curFrame) {
+      ox.globalAlpha = .18; ox.fillStyle = '#ffd76e';
+      ox.fillRect(f.x, f.y, f.w, f.h);
+    }
+  }
+  ox.globalAlpha = 1;
+  // 点击选帧
+  ov.style.pointerEvents = 'none';
+  cv.style.cursor = 'pointer';
+  cv.onclick = (ev) => {
+    if (!curEntry) return;
+    const r = cv.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / z, py = (ev.clientY - r.top) / z;
+    let best = null, bd = 1e9;
+    for (const f of curEntry.frames) {
+      if (px >= f.x && px < f.x + f.w && py >= f.y && py < f.y + f.h) { best = f; break; }
+      const d = Math.hypot(px - (f.x + f.w / 2), py - (f.y + f.h / 2));
+      if (d < bd) { bd = d; best = f; }
+    }
+    if (best) { curFrame = best.frameIdx; drawSheet(); renderFilm(); renderFrame(); }
+  };
+}
+function renderFilm() {
+  const strip = $('filmstrip');
+  strip.replaceChildren();
+  if (!curEntry) return;
+  for (const f of curEntry.frames) {
+    const d = document.createElement('div');
+    d.className = 'film' + (f.frameIdx === curFrame ? ' sel' : '');
+    d.dataset.st = frameStatus(f.frameIdx);
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, f.w); c.height = Math.max(1, f.h);
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = false;
+    if (sheetImg) cx.drawImage(sheetImg, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+    d.appendChild(c);
+    const idx = document.createElement('div');
+    idx.className = 'idx'; idx.textContent = f.frameIdx;
+    d.appendChild(idx);
+    d.onclick = () => { curFrame = f.frameIdx; drawSheet(); renderFilm(); renderFrame(); };
+    strip.appendChild(d);
+  }
+}
+
+// ---- 右栏:单帧面板 ----
+function drawCellPixels(cv, pixels, w, h) {
+  cv.width = w; cv.height = h;
+  const cx = cv.getContext('2d');
+  cx.clearRect(0, 0, w, h);
+  if (pixels) cx.putImageData(new ImageData(new Uint8ClampedArray(pixels), w, h), 0, 0);
+}
+function curRect() { return curEntry?.frames[curFrame] ?? null; }
+async function renderFrame() {
+  if (!curEntry || !curRect()) {
+    $('frame-title').textContent = '选择素材';
+    $('frame-meta').textContent = '';
+    return;
+  }
+  const f = curRect();
+  const rec = state.frame(curEntry, curFrame);
+  $('frame-title').textContent = `${curEntry.name} · 帧 ${curFrame + 1}/${curEntry.frames.length}`;
+  $('frame-meta').textContent = `${curEntry.key} · ${curEntry.sheet} @ (${f.x},${f.y}) ${f.w}×${f.h}`
+    + (curEntry.meta?.excluded ? `\n⚠ 一期排除:${curEntry.meta.excluded}` : '');
+  // 原帧
+  if (sheetImg) drawCellPixels($('origcv'), extractFramePixels(sheetImg, f).data, f.w, f.h);
+  // 重制帧(内存 → IDB)
+  let px = framePixelsMem.get(memKey());
+  if (!px && (rec.status === 'pending' || rec.status === 'accepted')) {
+    px = (await getFramePixels(curEntry.key, curFrame)) ?? undefined;
+    if (px) framePixelsMem.set(memKey(), px);
+  }
+  drawCellPixels($('newcv'), px, f.w, f.h);
+  // 叠加对比
+  applyOverlay(px);
+  // prompt 预填(未编辑过 → 跟随默认组装)
+  const edit = promptEdits.get(memKey());
+  $('prompt').value = edit ?? composePrompt({
+    category: curEntry.category, name: curEntry.name,
+    frameIdx: curFrame, frameCount: curEntry.frames.length,
+    globalPrefix: settings.prefix,
+    refFrameIdx: findRefFrame(),
+  });
+  $('frame-info').textContent = `状态:${zhStatus(rec.status)}${rec.attempts.length ? ` · 尝试 ${rec.attempts.length} 次` : ''}`;
+  updateButtons();
+}
+function applyOverlay(px) {
+  // 叠加模式:重制帧以 50% alpha 盖在原帧上(纹理差异即风格差异)
+  const orig = $('origcv'), nw = $('newcv');
+  nw.style.opacity = '';
+  if ($('overlay').checked && px) nw.style.opacity = '.5';
+}
+$('overlay').onchange = () => renderFrame();
+function zhStatus(s) {
+  return { untouched: '未处理', pending: '待验收', accepted: '已验收', skipped: '已跳过', failed: '失败' }[s] ?? s;
+}
+function updateButtons() {
+  const st = curEntry ? frameStatus(curFrame) : 'untouched';
+  $('btn-remaster').disabled = !curEntry || !curRect() || !!curEntry.meta?.excluded || remastering.size > 0;
+  $('btn-accept').disabled = st !== 'pending';
+  $('btn-reject').disabled = st === 'untouched';
+  $('btn-skip').disabled = st === 'accepted' || st === 'skipped' || !curEntry;
+}
+function memKey() { return `${curEntry.key}|${curFrame}`; }
+$('prompt').addEventListener('input', () => {
+  if (curEntry) promptEdits.set(memKey(), $('prompt').value);
+});
+function findRefFrame() {
+  if (!curEntry || !$('use-ref').checked) return undefined;
+  for (const d of [1, 2, 3]) {
+    for (const i of [curFrame - d, curFrame + d]) {
+      if (i >= 0 && i < curEntry.frames.length && frameStatus(i) === 'accepted') return i;
+    }
+  }
+  return undefined;
+}
+$('use-ref').onchange = () => renderFrame();
+
+// ---- 重制 ----
+async function doRemaster() {
+  if (!curEntry || !curRect() || !sheetImg || remastering.size) return;
+  const key = memKey();
+  if (remastering.has(key)) return;
+  remastering.add(key);
+  updateButtons();
+  setStatus('重制中(gpt-image-2,约 10-60s)…');
+  try {
+    const f = curRect();
+    const orig = extractFramePixels(sheetImg, f);
+    const refIdx = findRefFrame();
+    let refFrame;
+    if (refIdx !== undefined) {
+      const refPx = await pixelsOf(refIdx);
+      if (refPx) {
+        const rf = curEntry.frames[refIdx];
+        refFrame = { pixels: refPx, w: rf.w, h: rf.h, frameIdx: refIdx };
+      }
+    }
+    const t0 = performance.now();
+    const result = await remasterFrame({
+      frame: orig.data, w: f.w, h: f.h,
+      prompt: $('prompt').value.trim() || undefined,
+      quality: settings.quality,
+      refFrame,
+      proxyUrl: settings.proxy,
+      apiKey: settings.key || undefined,
+      algo: settings.algo,
+    });
+    lastGen = result;
+    framePixelsMem.set(key, result.pixels);
+    await state.remastered(curEntry, curFrame, $('prompt').value.trim(), settings.quality,
+      { size: [result.layout.W, result.layout.H], algo: settings.algo, refFrame: refIdx }, result.pixels);
+    // 展示生成原图(可折叠)
+    const gp = $('genpreview');
+    gp.src = 'data:image/png;base64,' + result.genPng;
+    gp.style.display = 'block';
+    setStatus(`重制完成 ${((performance.now() - t0) / 1000).toFixed(1)}s · ${(result.elapsedMs / 1000).toFixed(1)}s(API)`);
+  } catch (err) {
+    setStatus(`重制失败:${err.message}`);
+    console.error('[remaster]', err);
+  } finally {
+    remastering.delete(key);
+    drawSheet(); renderFilm(); renderFrame();
+  }
+}
+async function pixelsOf(idx) {
+  const k = `${curEntry.key}|${idx}`;
+  return framePixelsMem.get(k) ?? (await getFramePixels(curEntry.key, idx)) ?? null;
+}
+$('btn-remaster').onclick = () => void doRemaster();
+
+// ---- 验收 / 拒绝 / 跳过 ----
+async function doAccept() {
+  if (!curEntry) return;
+  await state.accept(curEntry, curFrame);
+  promptEdits.delete(memKey());
+  advance();
+}
+async function doReject() {
+  if (!curEntry) return;
+  await state.reject(curEntry, curFrame);
+  framePixelsMem.delete(memKey());
+  $('genpreview').style.display = 'none';
+  drawSheet(); renderFilm(); renderFrame();
+}
+async function doSkip() {
+  if (!curEntry) return;
+  await state.skip(curEntry, curFrame);
+  framePixelsMem.delete(memKey());
+  advance();
+}
+function advance() {
+  if (!curEntry) return;
+  const nxt = state.nextPendingFrame(curEntry, curFrame + 1);
+  if (nxt >= 0) { curFrame = nxt; }
+  drawSheet(); renderFilm(); renderFrame();
+  const done = state.progress[curEntry.key]?.complete;
+  if (done) setStatus(`✔ ${curEntry.name} 全部帧完成!左栏选下一个素材`);
+}
+$('btn-accept').onclick = () => void doAccept();
+$('btn-reject').onclick = () => void doReject();
+$('btn-skip').onclick = () => void doSkip();
+$('btn-prev').onclick = () => { if (curFrame > 0) { curFrame--; drawSheet(); renderFilm(); renderFrame(); } };
+$('btn-next').onclick = () => { if (curEntry && curFrame < curEntry.frames.length - 1) { curFrame++; drawSheet(); renderFilm(); renderFrame(); } };
+
+// ---- 导出素材包 ----
+async function exportPack() {
+  setStatus('导出中(合成混合 sheet)…');
+  try {
+    const sheets = [];
+    const entriesMeta = {};
+    const bySheet = new Map();
+    for (const [key, p] of Object.entries(state.progress)) {
+      const e = catalog.byKey.get(key);
+      if (!e || !e.frames.length) continue;
+      let arr = bySheet.get(e.sheet);
+      if (!arr) { arr = []; bySheet.set(e.sheet, arr); }
+      arr.push(e);
+    }
+    for (const [sheet, ents] of bySheet) {
+      const img = await loadSheet(sheet);
+      if (!img) { console.warn(`[export] 缺原版 sheet ${sheet},跳过其条目`); continue; }
+      const c = document.createElement('canvas');
+      c.width = img.width; c.height = img.height;
+      const cx = c.getContext('2d', { willReadFrequently: true });
+      cx.imageSmoothingEnabled = false;
+      cx.drawImage(img, 0, 0);
+      const meta = { category: ents[0].category, complete: true, frames: {} };
+      for (const e of ents) {
+        const p = state.progress[e.key];
+        if (!p) continue;
+        for (const f of e.frames) {
+          const rec = p.frames[f.frameIdx];
+          if (!rec || rec.status === 'untouched') { meta.complete = false; continue; }
+          const origHash = frameHash(extractFramePixels(img, f).data);
+          if (rec.status === 'accepted') {
+            const px = framePixelsMem.get(`${e.key}|${f.frameIdx}`) ?? (await getFramePixels(e.key, f.frameIdx));
+            if (!px) { meta.complete = false; continue; }
+            cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), f.x, f.y);
+            meta.frames[f.frameIdx] = { status: 'accepted', rect: [f.x, f.y, f.w, f.h], hash: origHash, prompt: rec.prompt, gen: rec.gen };
+          } else if (rec.status === 'skipped') {
+            meta.frames[f.frameIdx] = { status: 'skipped', rect: [f.x, f.y, f.w, f.h], hash: origHash };
+          } else {
+            meta.complete = false;  // pending 不导出
+          }
+        }
+      }
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      sheets.push({ file: sheet, png: new Uint8Array(await blob.arrayBuffer()) });
+      entriesMeta[sheet] = meta;
+    }
+    if (!sheets.length) { setStatus('没有可导出的内容(先验收/跳过一些帧)'); return; }
+    const manifest = buildManifest('Terraria Assets Remastered', assetVersion(), entriesMeta);
+    const zip = makePack(manifest, sheets);
+    const url = URL.createObjectURL(new Blob([zip], { type: 'application/zip' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'terraria-remaster-pack.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    const n = Object.values(entriesMeta).reduce((s, m) => s + Object.keys(m.frames).length, 0);
+    setStatus(`已导出:${sheets.length} 张 sheet / ${n} 帧 → ${a.download}`);
+  } catch (err) {
+    setStatus(`导出失败:${err.message}`);
+    console.error('[export]', err);
+  }
+}
+$('btn-export').onclick = () => void exportPack();
+
+// ---- 导入预览(peek,不安装;游戏内安装走 RemasterPanel) ----
+$('btn-import').onclick = () => {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.zip';
+  inp.onchange = async () => {
+    if (!inp.files?.length) return;
+    try {
+      const pack = await readPack(new Uint8Array(await inp.files[0].arrayBuffer()));
+      const n = Object.keys(pack.manifest.entries).length;
+      const frames = Object.values(pack.manifest.entries)
+        .reduce((s, e) => s + Object.keys(e.frames).length, 0);
+      const apply = confirm(`素材包「${pack.manifest.name}」\n${n} 张 sheet / ${frames} 帧\n应用到本页运行时?`);
+      if (apply) {
+        const r = await runtime.apply(pack);
+        setStatus(`已应用:${r.applied.length} 张(失败 ${r.failed.length})`);
+      }
+    } catch (err) {
+      alert(`导入失败:${err.message}`);
+    }
+  };
+  inp.click();
+};
+
+// ---- 应用到本页运行时(当前进度即改即看;探针/下游断言 vimages) ----
+$('btn-apply').onclick = async () => {
+  if (!curEntry) return;
+  setStatus('合成并应用当前条目…');
+  // 快速路径:把当前条目的 accepted/pending 帧合成单 sheet pack 应用
+  const img = sheetImg;
+  if (!img) return;
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const cx = c.getContext('2d', { willReadFrequently: true });
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(img, 0, 0);
+  const framesMeta = {};
+  let any = false;
+  for (const f of curEntry.frames) {
+    const px = framePixelsMem.get(`${curEntry.key}|${f.frameIdx}`);
+    if (!px) continue;
+    cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), f.x, f.y);
+    framesMeta[f.frameIdx] = { status: 'accepted', rect: [f.x, f.y, f.w, f.h], hash: '' };
+    any = true;
+  }
+  if (!any) { setStatus('当前条目无重制帧'); return; }
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  const manifest = buildManifest('工作台预览', assetVersion(),
+    { [curEntry.sheet]: { category: curEntry.category, complete: false, frames: framesMeta } });
+  const zip = makePack(manifest, [{ file: curEntry.sheet, png: new Uint8Array(await blob.arrayBuffer()) }]);
+  const pack = await readPack(zip);
+  const r = await runtime.apply(pack);
+  setStatus(`本页运行时已应用:${r.applied.join(', ')}`);
+};
+
+// ---- 设置 ----
+$('btn-settings').onclick = async () => {
+  $('set-proxy').value = settings.proxy;
+  $('set-key').value = settings.key;
+  $('set-quality').value = settings.quality;
+  $('set-algo').value = settings.algo;
+  $('set-prefix').value = settings.prefix;
+  $('settings').style.display = 'flex';
+  const ok = await pingProxy(settings.proxy);
+  $('proxy-health').textContent = ok
+    ? `代理在线(${settings.proxy})`
+    : `代理未响应 —— 启动:cd game && npm run remaster-proxy`;
+  $('proxy-health').style.color = ok ? 'var(--st-accepted)' : 'var(--st-skipped)';
+};
+$('set-close').onclick = () => {
+  settings.proxy = $('set-proxy').value.trim() || 'http://127.0.0.1:5210';
+  settings.key = $('set-key').value.trim();
+  settings.quality = $('set-quality').value;
+  settings.algo = $('set-algo').value;
+  settings.prefix = $('set-prefix').value;
+  saveSettings();
+  $('settings').style.display = 'none';
+  renderFrame();
+};
+
+// ---- 快捷键 ----
+window.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft') $('btn-prev').click();
+  else if (e.key === 'ArrowRight') $('btn-next').click();
+  else if (e.key === 'r' || e.key === 'R') $('btn-remaster').click();
+  else if (e.key === 'a' || e.key === 'A') $('btn-accept').click();
+  else if (e.key === 's' || e.key === 'S') $('btn-skip').click();
+});
+
+// ---- 探针桥 ----
+window.__remasterBridge = {
+  catalog, state, runtime, atlas, settings,
+  exportPack, selectEntry, curEntry: () => curEntry, curFrame: () => curFrame,
+  remaster: doRemaster, accept: doAccept, skip: doSkip,
+  framePixelsMem, promptEdits,
+};
+
+// ---- 启动 ----
+void (async () => {
+  await state.load();
+  renderCats();
+  renderList();
+  // 默认选第一个 NPC(蓝史莱姆,小而全流程)
+  const first = catalog.byKey.get('npc:1');
+  if (first) selectEntry(first);
+  setStatus(`就绪:${catalog.entries.length} 条素材(vanilla ${Object.keys(index.vanilla).length} + ui ${Object.keys(index['vanilla-ui']).length} 张图)`);
+})();
+</script>
+</body>
+</html>
