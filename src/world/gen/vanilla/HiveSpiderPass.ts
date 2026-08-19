@@ -688,6 +688,8 @@ function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, 
  *  ★重复入队格无 hashSet 去重（cs:3672 直处理）→ 门掷/掷骰按重复次数重复消费，原样保留 */
 function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, x: number, y: number): void {
   const __v = (globalThis as { __swSpiderVisit?: (cx: number, cy: number, kind: string, before: number, after: number, wave: number) => void }).__swSpiderVisit;
+  // IIIII：分支级陈设日志（与 vanilla SpiderProbe 分支级织入逐行对拍；无钩零开销）
+  const __d = (globalThis as { __swSpiderDeco?: (s: string) => void }).__swSpiderDeco;
   const seen = new Set<number>();
   const key = (px: number, py: number) => px * 100000 + py;
   let frontier: Array<[number, number]> = [[x, y]];
@@ -706,31 +708,62 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
       seen.add(key(cx, cy));
       const i = st.idx(cx, cy);
       const before = (st.flags[i] ? 1 : 0) | (st.wall[i] ? 2 : 0) | (st.liquid[i] ? 4 : 0);
+      __d?.(`${waveN} H ${cx},${cy} a=${st.flags[i] ? 1 : 0} w=${st.wall[i]} t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1} l=${st.liquid[i]}`);
       if (solidTile(st, cx, cy) || wallSealed(st.wall[i])) {
-        if (st.flags[i] && !wallSealed(st.wall[i])) st.wall[i] = 62;
+        let paint = 0;
+        if (st.flags[i] && !wallSealed(st.wall[i])) { st.wall[i] = 62; paint = 1; }
+        __d?.(`${waveN} SW ${cx},${cy} p=${paint}`);
         __v?.(cx, cy, 'S', before, before | 2, waveN);
         continue;
       }
+      __d?.(`${waveN} AIR ${cx},${cy}`);
       st.wall[i] = 62;
       rng.nextInt(3);   // SquareWallFrame(cx,cy) 中心格 WallFrame(resetFrame:true)（cs:3682）
       if (!st.flags[i]) {
         st.liquid[i] = 0; st.liquidType[i] = 0;
-        if (solidTile(st, cx, cy + 1) && rng.int(0, 2) === 0) {
+        const bs = solidTile(st, cx, cy + 1);
+        const r3 = bs ? rng.int(0, 2) : -1;
+        __d?.(`${waveN} FLR ${cx},${cy} bs=${bs ? 1 : 0} r3=${r3}`);
+        if (bs && r3 === 0) {
           if (rng.int(0, 14) === 0) {
             // notNearOtherChests:true(cs:3708 原版实参)——±25×±8 已有 BasicChest 则拒
-            placeBuriedChest(st, rng, gs, chests, cx, cy, { style: 15, loot: 'vi_939_web_slinger', notNearOtherChests: true });
+            const chok = placeBuriedChest(st, rng, gs, chests, cx, cy, { style: 15, loot: 'vi_939_web_slinger', notNearOtherChests: true });
+            __d?.(`${waveN} CH ${cx},${cy} ok=${chok ? 1 : 0} a=${st.flags[i] ? 1 : 0} t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}`);
           } else {
-            placePot(st, rng, cx, cy, rng.int(19, 20));
+            const psty = rng.int(19, 20);
+            const pok = placePot(st, rng, cx, cy, psty);
+            __d?.(`${waveN} POT ${cx},${cy} sty=${psty} ok=${pok ? 1 : 0} a=${st.flags[i] ? 1 : 0} t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}`);
           }
         }
         if (!st.flags[i]) {
-          if (solidTile(st, cx, cy - 1) && rng.int(0, 2) === 0) {
+          const us = solidTile(st, cx, cy - 1);
+          const r3b = us ? rng.int(0, 2) : -1;
+          __d?.(`${waveN} CEIL ${cx},${cy} g=${us ? 1 : 0} r3=${r3b} a=${st.flags[i] ? 1 : 0}`);
+          if (us && r3b === 0) {
+            const i0 = st.idx(cx, cy), i1 = st.idx(cx, cy + 1);
+            const sheetOf0 = TILE_DEFS[st.type[i0]]?.vanilla?.sheet ?? -1, sheetOf1 = TILE_DEFS[st.type[i1]]?.vanilla?.sheet ?? -1;
+            const pre = `s${solidTile(st, cx, cy - 1) ? 1 : 0},a${st.flags[i0] ? 1 : 0},t${sheetOf0}`
+              + `,a1_${st.flags[i1] ? 1 : 0},t1_${sheetOf1},sh${st.liquid[i0] > 0 && st.liquidType[i0] === 4 ? 1 : 0}`;
             placeTightWebs(st, rng, cx, cy);
+            __d?.(`${waveN} TIGHT ${cx},${cy} pre=${pre} post=a${st.flags[i0] ? 1 : 0},t${TILE_DEFS[st.type[i0]]?.vanilla?.sheet ?? -1}`
+              + `,a1_${st.flags[i1] ? 1 : 0},t1_${TILE_DEFS[st.type[i1]]?.vanilla?.sheet ?? -1}`);
           } else if (solidTile(st, cx, cy + 1)) {
-            placeDeco187(st, rng, cx, cy, 9 + rng.int(0, 4));
-            if (rng.int(0, 2) === 0) {
-              if (!st.flags[i]) placeSmallPile(st, cx, cy, 34 + rng.int(0, 3), 1);
-              if (!st.flags[i]) placeSmallPile(st, cx, cy, 48 + rng.int(0, 5), 0);
+            const dsty = 9 + rng.int(0, 4);
+            const dok = placeDeco187(st, rng, cx, cy, dsty);
+            __d?.(`${waveN} D187 ${cx},${cy} sty=${dsty} ok=${dok ? 1 : 0} a=${st.flags[i] ? 1 : 0} t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}`);
+            const r3c = rng.int(0, 2);
+            __d?.(`${waveN} PR3 ${cx},${cy} r=${r3c}`);
+            if (r3c === 0) {
+              if (!st.flags[i]) {
+                const p1s = 34 + rng.int(0, 3);
+                const p1ok = placeSmallPile(st, cx, cy, p1s, 1);
+                __d?.(`${waveN} P1 ${cx},${cy} sty=${p1s} ok=${p1ok ? 1 : 0} a=${st.flags[i] ? 1 : 0}`);
+              }
+              if (!st.flags[i]) {
+                const p0s = 48 + rng.int(0, 5);
+                const p0ok = placeSmallPile(st, cx, cy, p0s, 0);
+                __d?.(`${waveN} P0 ${cx},${cy} sty=${p0s} ok=${p0ok ? 1 : 0} a=${st.flags[i] ? 1 : 0}`);
+              }
             }
           }
         }

@@ -434,7 +434,7 @@ export function crownStyleFor(x: number, treeType: number, floorY: number, trees
       if (floorY > (trees.worldSurface ?? 0)) st = 13;
       return st;
     }
-    case 2: {           // 109/492 神圣草：hallowBG 未解析 → 固定 3
+    case 2: {           // 109/492 神圣草：GetHollowTreeFoliageStyle :63026-63036——hallowBG 是建世界背景样式菜单（WorldGen.cs:7391 case 4），本仓无该菜单=默认 0 → 恒 3 与原版默认世界一致（非近似）
       return 3;
     }
     case 3: {           // 147 雪原：完整 case-147 逻辑
@@ -530,7 +530,31 @@ export function drawTreeCell(
           : tk === 'v_112_ebonsand_block' ? 3 : 0;
         break;
       }
-      const v323 = Math.floor((fx - 88) / 22); // 0/1/2 变体
+      const v323 = Math.floor((fx - 88) / 22); // 0/1/2 变体（:8407-8419 case 110→1/132→2）
+      // 绿洲棕榈（GetPalmTreeVariant :3519-3543：IsPalmOasisTree（:27352 = 海滩带
+      // 【外】的棕榈，beachDistance=380 常量）→ biome+4）：Tree_Tops_21（348×392，
+      // 帧 114×98、X 步长 116、Y 步长 98、X 偏移 48、Y 偏移 +2，:8421-8434）
+      const oasis = x >= 380 && x <= st.w - 380;
+      if (oasis) {
+        const img21 = atlas.ensureVImage('vanilla/Tree_Tops_21.png');
+        if (!img21) return;
+        const sx21 = v323 * 116, sy21 = palmType * 98;
+        if (sx21 + 114 > img21.width || sy21 + 98 > img21.height) return;
+        const lean21 = fy >= 32768 ? fy - 65536 : fy;
+        if (sway !== 0) {
+          const dx21 = devSnap(px - 48 + lean21 + sway * 2);
+          const dy21 = devSnap(py + TILE + 2 - 98 + Math.abs(sway) * 2);
+          ctx.save();
+          ctx.translate(dx21 + 57, dy21 + 98);
+          ctx.rotate(sway * 0.08);
+          ctx.translate(-dx21 - 57, -dy21 - 98);
+          ctx.drawImage(img21, sx21, sy21, 114, 98, dx21, dy21, 114, 98);
+          ctx.restore();
+        } else {
+          ctx.drawImage(img21, sx21, sy21, 114, 98, px - 48 + lean21, py + TILE + 2 - 98, 114, 98);
+        }
+        return;
+      }
       const sx15 = v323 * 82, sy15 = palmType * 82;
       if (sx15 + 80 > img15.width || sy15 + 80 > img15.height) return;
       // 底部锚定居中 + X 偏移 = frameY【像素·有符号】（原版 dest.X += V*zoom/16，
@@ -582,8 +606,12 @@ export function drawTreeCell(
     }
     return;
   }
-  if (fy >= 198) {   // 冠/枝标记帧（原版只看 frameY；fx 0/22=顶 44/66=枝）
-    // 树冠/树枝标记帧（仅由 ChunkCache 的外扩遍绘制，防跨 chunk 裁剪）
+  if (fy >= 198 && fx >= 22) {   // 冠/枝标记帧（原版只看 frameY；fx 22=顶 44/66=枝）
+    // ★fx=0 稀有顶变体（1/13，TreePass crownFx :135）不进本块：原版 DrawTrees 门
+    // frameX>=22（:8236）——fx=0 走 DrawSingleTile 普通 20×20 帧（:4691-4697
+    // tileWidth/Height=20、X 居中 −2）= Tiles_5 (0,fy) 静态灌木小顶。烘焙路径
+    // （foliageOnly=false）落入下方干身绘制；摆动层在干身段头部 foliageOnly 早退
+    // = 不画不摆（2026-08-19 收齐：曾画静态大冠/误入枝分支）
     if (foliageOnly === false) return;
     // 变体来源 = 标记帧自身 frameY（原版 WorldGen.GetTreeFrame：198→0/220→1/242→2）
     const frame = fy >= 242 ? 2 : fy >= 220 ? 1 : 0;
@@ -597,7 +625,7 @@ export function drawTreeCell(
         : style;
     let img: ImageBitmap | HTMLImageElement | null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
-    if (fx === 22 || fx === 0) {   // fx=0：1/13 概率的顶冠变体（TreePass 与原版一致）
+    if (fx === 22) {   // 顶冠（fx=0 已改道干身路径，见块头注释）
       img = atlas.ensureVImage(`vanilla/Tree_Tops_${crown}.png`)
         ?? atlas.ensureVImage(`vanilla/Tree_Tops_${style}.png`) ?? null;
       if (!img) return;

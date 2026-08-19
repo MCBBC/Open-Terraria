@@ -734,8 +734,9 @@ function emitTreeLeaves(x: number, y: number, fx: number, fy: number, grassX: nu
     vx += -16; vy += -16;
     if (flag) vy -= Math.floor(Math.random() * 28) * 4;
   }
-  // 起点须非实心（:8008）
-  const tx = Math.floor((vx + 6) / TILE), ty = Math.floor((vy + 6) / TILE);
+  // 起点须非实心（:8008：SolidTile(vector.ToTileCoordinates()) = floor(像素/16)
+  // 直取格，无中心偏移——曾 +6 近似，2026-08-19 收齐）
+  const tx = Math.floor(vx / TILE), ty = Math.floor(vy / TILE);
   if (ST.inBounds(tx, ty) && ST.isSolid(tx, ty)) return;
   natureParticles.spawnLeaf(vx, vy, gore);
 }

@@ -169,7 +169,7 @@ import { extractFramePixels, frameHash, boxDownscale, computeGenLayout } from '/
 import { remasterFrame, pingProxy } from '/src/remaster/ImageRemaster.ts';
 import { composePrompt, DEFAULT_GLOBAL_PREFIX } from '/src/remaster/PromptTemplates.ts';
 import { WorkbenchState } from '/src/remaster/WorkbenchState.ts';
-import { getFramePixels, putFramePixels } from '/src/remaster/PackStore.ts';
+import { getFramePixels, putFramePixels, loadPromptEdits, savePromptEdits } from '/src/remaster/PackStore.ts';
 import { buildManifest, makePack, readPack } from '/src/remaster/PackFormat.ts';
 import { RemasterRuntime } from '/src/remaster/RemasterRuntime.ts';
 import { assetVersion } from '/src/net/AssetCache.ts';
@@ -215,21 +215,44 @@ let curCat = 'npc';
 let curEntry = null;      // AssetEntry
 let curFrame = 0;
 let sheetImg = null;      // HTMLImageElement(当前条目 sheet)
-const promptEdits = new Map();   // 'entryKey|idx' → 用户编辑的 prompt(未保存的)
+// prompt 微调:IndexedDB 通道(★不走 localStorage——微调随条目无界增长,
+// 5MB 全局上限迟早撑爆;PackStore.loadPromptEdits/savePromptEdits 异步读写)
+const promptEdits = new Map();   // 'entryKey|idx' → 用户微调(增量);启动块异步填充
+let promptEditsSaveTimer = 0;
+function schedulePromptEditsSave() {
+  clearTimeout(promptEditsSaveTimer);
+  promptEditsSaveTimer = setTimeout(() => {
+    void savePromptEdits([...promptEdits]);
+  }, 500);
+}
 const framePixelsMem = new Map(); // 'entryKey|idx' → Uint8ClampedArray(重制帧,内存优先)
 const remastering = new Set();    // 防重入
 let lastGen = null;       // {b64, layout}
 let onlyTodo = false;
 /** 整图重制模式(true=整张 sheet 一个重制单元;excluded 条目强制开)。 */
 let wholeMode = false;
-/** 当前生效帧(whole 模式=整图帧哨兵 -1;逐帧=frames[curFrame]) */
+/** 单帧整图条目(ui/gore/glow/buff/misc 普通条目):frames[0] 即整图——
+ *  whole 模式与逐帧模式重制单元【相同】,共享记录键 0(否则同图两键重复重制、
+ *  进度分母虚增 1/2、导出两份像素并存)。 */
+function isSingleWholeFrameEntry() {
+  if (!curEntry || !sheetImg || curEntry.frames.length !== 1) return false;
+  const f = curEntry.frames[0];
+  return f.x === 0 && f.y === 0 && f.w === sheetImg.width && f.h === sheetImg.height;
+}
+/** 当前生效帧(whole 模式=整图帧;单帧整图条目直用 frames[0]) */
 function effectiveFrame() {
   if (!curEntry || !sheetImg) return null;
-  if (wholeMode) return { x: 0, y: 0, w: sheetImg.width, h: sheetImg.height, frameIdx: -1 };
+  if (wholeMode) {
+    if (isSingleWholeFrameEntry()) return { ...curEntry.frames[0] };
+    return { x: 0, y: 0, w: sheetImg.width, h: sheetImg.height, frameIdx: -1 };
+  }
   return curEntry.frames[curFrame] ?? null;
 }
-/** 当前记录帧号(whole=-1 哨兵,与逐帧 0 区分) */
-function curFrameIdx() { return wholeMode ? -1 : curFrame; }
+/** 当前记录帧号(whole=-1 哨兵与逐帧区分;单帧整图条目=0) */
+function curFrameIdx() {
+  if (!wholeMode) return curFrame;
+  return isSingleWholeFrameEntry() ? 0 : -1;
+}
 
 // ---- 左栏:类别 + 列表 ----
 const CATS = [['npc', 'NPC'], ['tile', '物块'], ['wall', '墙'], ['item', '物品'], ['projectile', '弹幕'],
@@ -318,7 +341,7 @@ function drawSheet() {
   ox.clearRect(0, 0, ov.width, ov.height);
   const drawFrames = wholeMode ? [effectiveFrame()].filter(Boolean) : curEntry.frames;
   for (const f of drawFrames) {
-    const st = frameStatus(wholeMode ? -1 : f.frameIdx);
+    const st = frameStatus(f.frameIdx);
     ox.strokeStyle = frameColor(st);
     ox.globalAlpha = 1;
     ox.lineWidth = 2;
@@ -353,7 +376,7 @@ function renderFilm() {
   for (const f of filmFrames) {
     const d = document.createElement('div');
     d.className = 'film' + ((wholeMode || f.frameIdx === curFrame) ? ' sel' : '');
-    d.dataset.st = frameStatus(wholeMode ? -1 : f.frameIdx);
+    d.dataset.st = frameStatus(f.frameIdx);
     const c = document.createElement('canvas');
     c.width = Math.max(1, f.w); c.height = Math.max(1, f.h);
     const cx = c.getContext('2d');
@@ -446,7 +469,7 @@ function updateButtons() {
 }
 function memKey() { return `${curEntry.key}|${curFrameIdx()}`; }
 $('prompt').addEventListener('input', () => {
-  if (curEntry) promptEdits.set(memKey(), $('prompt').value);
+  if (curEntry) { promptEdits.set(memKey(), $('prompt').value); schedulePromptEditsSave(); }
   renderPromptPreview();
 });
 /** 完整 prompt 实时预览(默认组装 + 微调追加) */
@@ -466,7 +489,8 @@ function fullPrompt() {
 }
 $('whole-mode').addEventListener('change', () => {
   wholeMode = $('whole-mode').checked;
-  promptEdits.delete(memKey());   // 模式切换=重置微调(逐帧/整图模板语境不同)
+  promptEdits.delete(memKey());   // 模式切换=重置目标模式微调(逐帧/整图模板语境不同)
+  schedulePromptEditsSave();
   drawSheet(); renderFilm(); renderFrame();
 });
 function findRefFrame() {
@@ -540,6 +564,7 @@ async function doAccept() {
   if (!curEntry) return;
   await state.accept(curEntry, curFrameIdx());
   promptEdits.delete(memKey());
+  schedulePromptEditsSave();
   advance();
 }
 async function doReject() {
@@ -748,6 +773,7 @@ window.__remasterBridge = {
 // ---- 启动 ----
 void (async () => {
   await state.load();
+  for (const [k, v] of await loadPromptEdits()) promptEdits.set(k, v);
   renderCats();
   renderList();
   // 默认选第一个 NPC(蓝史莱姆,小而全流程)

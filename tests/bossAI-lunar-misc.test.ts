@@ -309,7 +309,7 @@ import type { Entity } from '../src/entities/Entity';
 /** 逐 tick 驱动投射物桶（塔/门/标记链全在 projectiles 桶） */
 function tickProjs(h: ReturnType<typeof makeHooks>, n: number) {
   for (let i = 0; i < n; i++) {
-    for (const p of [...h.projectiles] as Entity[]) {
+    for (const p of [...h.projectiles] as unknown as Entity[]) {
       if (!p.dead) p.fixedUpdate(1 / 60, h.hooks);
     }
   }

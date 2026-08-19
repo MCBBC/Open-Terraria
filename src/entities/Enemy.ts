@@ -1160,6 +1160,11 @@ export class Enemy extends Entity {
   bossFled = false;
   /** 原版 despawnEncouraged（EncourageDespawn 置位，屏内重置清除） */
   despawnEncouraged = false;
+  /** 蜗牛象限 spriteDirection（NPC.cs:34763-34795 表锁存值，±1；渲染层
+   *  aiStyle67 专用局部翻面通道——XNA 的 translate→rotate→scale(flip) 组合里
+   *  翻面沿【已旋转的局部 X 轴】施加，与通用 facing 镜像（未旋转轴）不同源）。
+   *  默认 -1 = 不翻（与原版 spriteDirection 缺省一致） */
+  snailSdir = -1;
   inWater = false;       // 入水检测（溅落声用）
   /** Boss 专属初始化标记(部件生成等一次性动作;aiN 默认值有歧义故独立字段) */
   bInit = false;
@@ -4238,7 +4243,15 @@ export class Enemy extends Entity {
     //      几乎永不射沙球,审计 4.1,2026-08-19）----
     if (player && !player.dead) {
       this.ai0 += 1;
-      if (this.ai0 >= 200 && player.cy < this.cy && this.canSeePlayer(st, player)) {
+      // 仰角锥门（:24477-24479）：rotation = atan2(dy,dx)+π/2（自正上方起算的
+      // 瞄准角），flag25 = rotation∈[-1.2,1.2]（±68.75°）才允许直射。原文字面
+      // `!(!(rot<-1.2)&&!(rot>1.2))` 是标准反编译形态非伪迹——else 分支
+      // （:24526-24533）是传送带特例（tile 421/422，沿钳制角 ±0.8 盲射），本仓
+      // 传送带机制未移植故不接（G6 定谳 2026-08-19：1405 的 NPC.AI 主体反编译
+      // 缺失无法对读，1456 单版语义自洽按字面接）
+      const aimRot = Math.atan2(player.cy - this.cy, player.cx - this.cx) + Math.PI / 2;
+      const inCone = aimRot >= -1.2 && aimRot <= 1.2;
+      if (this.ai0 >= 200 && player.cy < this.cy && inCone && this.canSeePlayer(st, player)) {
         this.ai0 = 0;
         game.playSfxFiles?.(['Item_5'], 1, this.cx, this.cy);   // :24503 开火音（bowShoot 同轨）
         this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10, 31);
@@ -7867,23 +7880,25 @@ export class Enemy extends Entity {
         if (!collideX && this.ai0 === 2) { this.dirY = -this.dirY; this.ai1 = 0; this.ai0 = 1; }
         if (collideY) { this.facing = -this.facing; this.ai1 = 0; } // 撞 Y 墙 → 转横向（:34757-34761）
       }
-      // rotation 四象限目标 + 0.1/t 缓转（:34763-34857——目标按 collideX/collideY
-      // 上一 tick 旗标取象限：dirY<0·dir<0：X 墙 1.57 / Y 墙 3.14；dirY<0·dir>0：
-      // Y 墙 3.14 / X 墙 4.71；dirY>0·dir<0：Y 墙 0 / X 墙 1.57；dirY>0·dir>0：
-      // X 墙 4.71 / Y 墙 0；无命中目标保持现值。spriteDirection 渲染翻面未接）
+      // rotation 四象限目标 + 0.1/t 缓转 + spriteDirection 象限锁存（:34763-34857
+      // ——目标按 collideX/collideY 上一 tick 旗标取象限：dirY<0·dir<0：X 墙 1.57 /
+      // Y 墙 3.14；dirY<0·dir>0：Y 墙 3.14 / X 墙 4.71；dirY>0·dir<0：Y 墙 0 /
+      // X 墙 1.57；dirY>0·dir>0：X 墙 4.71 / Y 墙 0；无命中目标保持现值。
+      // spriteDirection 随象限独立锁存（±1 与 direction 无关——天花板档取反等，
+      // 渲染层 aiStyle67 旋转后局部翻面消费，G4 批 2026-08-19 接通）
       if (!flag64) {
         let target = this.visAngle;
         if (this.dirY < 0) {
           if (this.facing < 0) {
-            if (collideX) target = 1.57;
-            else if (collideY) target = 3.14;
-          } else if (collideY) target = 3.14;
-          else if (collideX) target = 4.71;
+            if (collideX) { target = 1.57; this.snailSdir = -1; }
+            else if (collideY) { target = 3.14; this.snailSdir = 1; }
+          } else if (collideY) { target = 3.14; this.snailSdir = -1; }
+          else if (collideX) { target = 4.71; this.snailSdir = 1; }
         } else if (this.facing < 0) {
-          if (collideY) target = 0;
-          else if (collideX) target = 1.57;
-        } else if (collideX) target = 4.71;
-        else if (collideY) target = 0;
+          if (collideY) { target = 0; this.snailSdir = -1; }
+          else if (collideX) { target = 1.57; this.snailSdir = 1; }
+        } else if (collideX) { target = 4.71; this.snailSdir = -1; }
+        else if (collideY) { target = 0; this.snailSdir = 1; }
         let rot = this.visAngle % (Math.PI * 2);
         if (rot < 0) rot += Math.PI * 2;
         const diff = Math.abs(rot - target);

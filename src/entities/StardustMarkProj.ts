@@ -2,7 +2,7 @@
 // :32272-32299 AI + Main.cs:32360/:32589-32616 绘制）。调用方：NPC 402 星尘织带蠕虫
 // 570t 冲刺点（SpawnStardustMark_StardustWorm，NPC.cs:44230-44314）；星尘塔 493 侧
 // （SpawnStardustMark_StardustTower :44142-44228，差异仅根锚点=塔 Top-120 与 402 池
-// <2）走 towerAI 既有"折叠直生"实现，未迁移本链（登记于 towerAI 注释）。
+// <2）——2026-08-19 塔侧已从 towerAI 旧「折叠直生」迁到本链（Enemy.towerAI 493 段）。
 //
 // 规格（SetDefaults :5873-5879）：20×20 / aiStyle 103 / hostile=true 但 NewProjectile
 //   damage=0（:44297）——原版伤害结算门 damage>0 不满足，标记弹不伤玩家（本仓同理

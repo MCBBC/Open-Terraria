@@ -506,6 +506,10 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       }
       const spiderLog: string[] = [];
       if (process.env.SW_WWW_SPIDER) (globalThis as { __swSpiderVisit?: (cx: number, cy: number, k: string, b: number, a2: number, w: number) => void }).__swSpiderVisit = (cx, cy, k, b, a2, w) => spiderLog.push(`${w} ${k} ${cx},${cy} ${b}:${a2}`);
+      // IIIII：SW_WWW_SPIDER2=/path → 蜘蛛分支级陈设日志（H/SW/AIR/FLR/CH/POT/CEIL/
+      // TIGHT/D187/PR3/P1/P0 行，与 vanilla SpiderProbe 分支级织入逐行对拍）
+      const spiderDeco: string[] = [];
+      if (process.env.SW_WWW_SPIDER2) (globalThis as { __swSpiderDeco?: (s: string) => void }).__swSpiderDeco = (s) => spiderDeco.push(s);
       const rngW = spanOut ? new Proxy(rng, {
         get(target, prop, recv) {
           const v = Reflect.get(target, prop, target);
@@ -584,6 +588,8 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       if (spanOut) { writeFileSync(spanOut, spanLines.join('\n') + '\n'); console.log(`  [spandump] dump=${step.dump} rolls=${spanLines.length} → ${spanOut}`); }
       (globalThis as { __swSpiderVisit?: (cx: number, cy: number, k: string, b: number, a2: number, w: number) => void }).__swSpiderVisit = undefined;
       if (process.env.SW_WWW_SPIDER) writeFileSync(process.env.SW_WWW_SPIDER, spiderLog.join('\n') + '\n');
+      (globalThis as { __swSpiderDeco?: (s: string) => void }).__swSpiderDeco = undefined;
+      if (process.env.SW_WWW_SPIDER2) { writeFileSync(process.env.SW_WWW_SPIDER2, spiderDeco.join('\n') + '\n'); console.log(`  [spiderdeco] dump=${step.dump} lines=${spiderDeco.length} → ${process.env.SW_WWW_SPIDER2}`); }
       if (step.dump !== undefined && step.dump >= FROM && step.dump <= TO) {
         rows.push(diffStore(`jsSlot${s}`, step.dump, built.st));
       }

@@ -3,6 +3,7 @@
 //   · TrueNightsEdgeSlash 973：锚定伸长 76px / 旋进 / 寿命 ai1+65=97 / t≥80 清伤
 //   · NightsEdgeFly（273 飞斩）：10t 起前漂 + ai1=30 消亡 + 旋进
 import { describe, it, expect } from 'vitest';
+import { Game } from '../src/core/Game';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS, LightsBaneSlash, GrassSlash } from '../src/entities/SwingArc';
 import { SolarEruptionWhip, SolarFlare } from '../src/entities/SolarEruption';
 import { TideSlash } from '../src/entities/TideSlash';
@@ -114,6 +115,100 @@ describe('Zenith 933（AI_182 FinalFractal）', () => {
       const id = randomFractalProfile();
       expect(FRACTAL_KEYS).toContain(id);
     }
+  });
+
+  it('拖尾环 60 条（TrailCacheLength）+ TrailingMode4 随玩家平移', () => {
+    const game = makeGame(new World(200, 200, 30, 'open'));
+    const z = new ZenithSword(owner, owner.cx + 400, owner.cy, 190, 4956);
+    for (let i = 0; i < 60; i++) z.fixedUpdate(1, game);   // 120 update → 满 60 条
+    expect(z['trail'].length).toBe(60 * 3);
+    const t0 = z['trail'].slice() as number[];
+    const dx = 64;
+    owner.x += dx; owner.cx += dx;
+    z.fixedUpdate(1, game);
+    // 旧条目整体 +64（首条是最旧的）
+    expect(z['trail'][0] - t0[0]).toBeCloseTo(dx, 0);
+  });
+
+  it('lance 线形判定（:14333-14363）：刃向 35px 处（32×32 盒外）命中、120px 不命中', () => {
+    const game = makeGame(new World(200, 200, 30, 'open'));
+    const z = new ZenithSword(owner, owner.cx + 400, owner.cy, 190, 4956);
+    z.fixedUpdate(1, game);
+    const rot = z['rot'] as number;
+    const dx = Math.cos(rot + Math.PI / 2), dy = Math.sin(rot + Math.PI / 2);
+    expect(z['bladeHits'](z.cx + dx * 35 - 10, z.cy + dy * 35 - 10, 20, 20)).toBe(true);
+    expect(z['bladeHits'](z.cx + dx * 120 - 10, z.cy + dy * 120 - 10, 20, 20)).toBe(false);
+  });
+
+  it('伤害归属 = 面板 ±15%（DamageVar）+ 7update 免疫窗不重复', () => {
+    // 轨道环上布 16 敌（vel=(200,0) → 锚点=玩家+(200,0)、半径≈200+40）：剑扫整圈
+    // 必命中若干；免疫窗 7 update ≪ 扫圈周期 → 同敌不连击
+    const hits: number[] = [];
+    const perEnemy = new Map<number, number>();
+    const list: unknown[] = [];
+    const ax = owner.cx + 200, ay = owner.cy;
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      const ex = ax + Math.cos(a) * 200 - 10, ey = ay + Math.sin(a) * 200 - 10;
+      list.push({
+        id: i + 1, x: ex, y: ey, w: 20, h: 20, cx: ex + 10, cy: ey + 10,
+        vx: 0, vy: 0, dead: false, hp: 5000,
+        hurt: (d: number) => { hits.push(d); perEnemy.set(i + 1, (perEnemy.get(i + 1) ?? 0) + 1); return true; },
+        def: { hitSound: ['NPC_Hit_1'] },
+      });
+    }
+    const game = makeGame(new World(400, 400, 30, 'open'), list);
+    const z = new ZenithSword(owner, owner.cx + 400, owner.cy, 190, 4956);
+    z.critChance = 0;
+    for (let t = 0; t < 20 && !z.dead; t++) z.fixedUpdate(1, game);   // ~40 update ≈ 扫近一圈
+    expect(hits.length).toBeGreaterThanOrEqual(2);
+    for (const d of hits) {
+      expect(d).toBeGreaterThanOrEqual(190 * 0.85 - 0.5);
+      expect(d).toBeLessThanOrEqual(190 * 1.15 + 0.5);
+    }
+    // 7 update 免疫窗 + 拖尾命中盒（原版语义：路径沿途持续可命中——当前刃线 +
+    // 4 个拖尾采样线 = 单敌一扫圈至多 5 中），杜绝每 update 连击
+    for (const n of perEnemy.values()) expect(n).toBeLessThanOrEqual(5);
+  });
+});
+
+describe('Zenith 发射节奏（Player.cs flag4 :42880 + 3*useTime 门 :42818）', () => {
+  it('节奏探针：30 帧挥击每 10 帧一发共 3 发（num164=0/1/2），无第 4 发', () => {
+    const dur = 30, useTime = 10;
+    let fired = 1;                       // 首发 num164=0 已于挥击开始射出
+    const cycles: number[] = [0];
+    for (let t = dur - 1; t >= 1; t--) {
+      const c = Game.zenithFireCycle(dur, t, useTime, fired);
+      if (c != null) { cycles.push(c); fired = c + 1; }
+    }
+    expect(cycles).toEqual([0, 1, 2]);
+  });
+
+  it('攻速缩动画：dur=21 仍 3 发、dur=15 只 2 发（原版 num164 语义）', () => {
+    for (const [dur, want] of [[21, [0, 1, 2]], [15, [0, 1]]] as const) {
+      let fired = 1;
+      const cycles: number[] = [0];
+      for (let t = dur - 1; t >= 1; t--) {
+        const c = Game.zenithFireCycle(dur, t, 10, fired);
+        if (c != null) { cycles.push(c); fired = c + 1; }
+      }
+      expect(cycles).toEqual([...want]);
+    }
+  });
+
+  it('轨迹采样：出生贴玩家、绕锚点（玩家+vel）转、半径≈|vel|+40', () => {
+    const game = makeGame(new World(200, 200, 30, 'open'));
+    const z = new ZenithSword(owner, owner.cx + 400, owner.cy, 190, 4956);
+    z.fixedUpdate(1, game);   // vel=(200,0) → 锚点=玩家+(200,0)
+    const ax = owner.cx + 200, ay = owner.cy;
+    const d = Math.hypot(z.cx - ax, z.cy - ay);
+    expect(d).toBeGreaterThan(150);
+    expect(d).toBeLessThan(250);
+    // 起步阶段剑在玩家近旁（轨道起点=玩家位 + 起始回拉）
+    expect(Math.hypot(z.cx - owner.cx, z.cy - owner.cy)).toBeLessThan(80);
+    let guard = 0;
+    while (z['counter'] < 30 && guard++ < 100) z.fixedUpdate(1, game);   // phase≥0.5
+    expect(Math.hypot(z.cx - ax, z.cy - ay)).toBeGreaterThan(150);      // 仍在轨道上
   });
 });
 

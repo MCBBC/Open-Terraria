@@ -132,6 +132,34 @@ try {
   });
   chk('整图验收 → 条目 complete(frames 空使完成度只取决于整图记录)', wholeAcc.complete === true && wholeAcc.text === '1/1', wholeAcc.text);
 
+  // ---- ③c 单帧整图条目(gore):whole 模式与逐帧共享记录键 0(不分裂重复重制) ----
+  const singleWhole = await page.evaluate(async () => {
+    const b = window.__remasterBridge;
+    const e = b.catalog.byKey.get('gore:910');
+    if (!e) return { skip: true };
+    b.selectEntry(e);
+    await new Promise((r) => setTimeout(r, 900));
+    // 逐帧模式(默认)重制 → 键 0
+    await b.remaster();
+    await new Promise((r) => setTimeout(r, 2500));
+    const stFrames = b.state.frame(e, 0).status;
+    // 切 whole 模式:记录应仍是键 0(-1 无记录 = 共享不分裂)
+    const chk = document.getElementById('whole-mode');
+    chk.checked = true; chk.dispatchEvent(new Event('change'));
+    await new Promise((r) => setTimeout(r, 200));
+    const stWholeView = b.state.frame(e, 0).status;
+    const negOne = b.state.frame(e, -1).status;
+    return { skip: false, stFrames, stWholeView, negOne, framesLen: e.frames.length };
+  });
+  if (singleWhole.skip) {
+    console.log('SKIP gore:910 不在目录');
+    ok.push(true);
+  } else {
+    chk('单帧整图条目:whole 视图与逐帧共享键 0(状态一致)',
+      singleWhole.framesLen === 1 && singleWhole.stFrames === 'pending' && singleWhole.stWholeView === singleWhole.stFrames && singleWhole.negOne === 'untouched',
+      JSON.stringify(singleWhole));
+  }
+
   // ---- ④ 导出链路 zip round-trip(PK 头+manifest+sheet 字节) ----
   const zipBytes = await page.evaluate(async () => {
     const { makePack, buildManifest, readPack } = await import('/src/remaster/PackFormat.ts');

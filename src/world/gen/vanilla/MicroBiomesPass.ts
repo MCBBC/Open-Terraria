@@ -50,7 +50,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE, idsByVanillaSheet } from './TileRunner';
 import { TrackGenerator } from './TrackPass';
 import { vanGenSolidType } from './GenSolid';
-import { genTileFrame, genFrameNeighbors } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
+import { genTileFrame, genFrameNeighbors, genSquareTileFrame } from './FinalCleanupPass';   // UUUU：ActuallyPlace*/SetTile(setSelfFrames) 的 TileFrame(resetFrame:true) 镜像
 
 /** Main.wallLargeFrames 非零墙（Main.cs:9653-9787；余皆 0）——Framing.WallFrame
  *  resetFrame=true 掷门用（UUUU：Mahogany PlaceWall(78) 的 SquareWallFrame×5 每格
@@ -396,7 +396,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
       for (let k = 0; k < 10150; k++) {
         const x = rng.int(200, w - 201);
         const y = rng.int(gs.lavaLine - 100, h - 211);   // Next(lavaLine-100, h-210)
-        if (placeLavaTrap(st, gs, x, y)) { segProbe('lavaOk', [x, y]); break; }
+        if (placeLavaTrap(st, gs, x, y, rng)) { segProbe('lavaOk', [x, y]); break; }
       }
     }
   }
@@ -1928,7 +1928,7 @@ function vanGenSolidSolidTopGate(st: TileStore, x: number, y: number): boolean {
 
 /** 地狱熔岩陷阱:岩浆湖底掏腔,湖底层致动石栅 + 压板 135 style7 + 红线。
  *  门禁:锚点须满格岩浆;11×11 内 ≥50 满岩浆格;±20 无红线;腔高 ≤40 且 ≥4 */
-export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number): boolean {
+export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number, rng0?: RNG): boolean {
   void gs;
   if (!st.inBounds(x, y)) return false;
   const num = 5, minLava = 50, maxDrop = 40, scanR = 20, minGap = 4;
@@ -1983,8 +1983,11 @@ export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number)
   if (num10 - num9 < minGap) return false;
   st.slope[floorIdx] = 0;
   st.half[floorIdx] = 0;
-  // PlaceTile(x, num10, 135, style 7)(cs:8720)——style 在 frameY(126)
+  // PlaceTile(x, num10, 135, style 7)(cs:8720)——style 在 frameY(126)。
+  // FFFFF 补 PlaceTile 尾 SquareTileFrame(i,j)(cs:60282):九宫邻格 184 苔藓
+  // 'a 3' 掷(#101 尾段掷流 4 掷差定罪;174 竖井石门板邻域实际掷点)
   st.setTileSilent(x, num10, PLATE, 0, 126);
+  genSquareTileFrame(st, rng0!, x, num10);
   // 线 + 致动石栅(cs:8721-8730):num8..num9-1 致动,num8..num10 红线
   for (let m = num8; m <= num10; m++) {
     if (!st.inBounds(x, m)) continue;

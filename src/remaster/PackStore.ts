@@ -2,12 +2,15 @@
 //   已安装 pack(manifest+混合 sheet png)与工作台按帧进度(EntryProgress JSON
 //   + 帧级 RGBA blob)两类数据。进度帧像素量大(60×44×4≈10KB/帧)不能走
 //   kv 字符串通道,与 pack 同住 remaster store。
-import { kvGet, kvSet, kvDelete, remasterPut, remasterGet, remasterAll, remasterDelete, type RemasterPackRow } from '../save/KvStore';
+import { kvGet, kvSet, kvGetIdb, kvSetIdb, kvDelete, remasterPut, remasterGet, remasterAll, remasterDelete, type RemasterPackRow } from '../save/KvStore';
 import type { LoadedPack, EntryProgress, PackManifest } from './types';
 
-/** 进度 JSON 的 kv 键(小,字符串通道) */
+/** 进度 JSON 的 kv 键(★kvSetIdb 只进 IndexedDB——含 prompt 全文历史随验收
+ *  无界增长,localStorage 5MB 全局上限会被撑爆) */
 const PROGRESS_KEY = 'sw.remaster.progress';
-/** 已安装包注册表 kv 键(轻元数据;blob 在 remaster store) */
+/** prompt 微调(增量)的 kv 键(同上,只进 IndexedDB) */
+const PROMPT_EDITS_KEY = 'sw.remaster.promptEdits';
+/** 已安装包注册表 kv 键(轻元数据,几十字节/包;blob 在 remaster store) */
 const INSTALLED_KEY = 'sw.remaster.installed';
 
 // ---- 已安装 pack ----
@@ -69,13 +72,26 @@ export async function deletePack(id: string): Promise<void> {
 
 export async function loadProgress(): Promise<Record<string, EntryProgress>> {
   try {
-    const raw = await kvGet(PROGRESS_KEY);
+    const raw = await kvGetIdb(PROGRESS_KEY);
     return raw ? (JSON.parse(raw) as Record<string, EntryProgress>) : {};
   } catch { return {}; }
 }
 
 export async function saveProgress(p: Record<string, EntryProgress>): Promise<void> {
-  await kvSet(PROGRESS_KEY, JSON.stringify(p));
+  await kvSetIdb(PROGRESS_KEY, JSON.stringify(p));
+}
+
+/** prompt 微调('entryKey|idx' → 增量文本;IndexedDB 通道,刷新/重开不丢)。 */
+export async function loadPromptEdits(): Promise<Array<[string, string]>> {
+  try {
+    const raw = await kvGetIdb(PROMPT_EDITS_KEY);
+    const v = raw ? JSON.parse(raw) : [];
+    return Array.isArray(v) ? (v as Array<[string, string]>) : [];
+  } catch { return []; }
+}
+
+export async function savePromptEdits(edits: Array<[string, string]>): Promise<void> {
+  await kvSetIdb(PROMPT_EDITS_KEY, JSON.stringify(edits));
 }
 
 /** 帧像素键:`{entryKey}|{frameIdx}`(进度 JSON 里的寻址键同式)。 */

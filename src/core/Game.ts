@@ -5626,44 +5626,19 @@ export class Game implements GameHooks {
     // 火把火苗：视内点燃火把随机飘出火星（火点在格顶上方 20px 精灵的火焰处）
     this.emitTorchSparks();
     this.emitTileParticles();
-    // 地形碰撞：目标位置实心则反弹（冲击大）或停驻地表（冲击小，重力归零缓慢淡出）
-    // st/solidAt 提循环外(此前每粒子重建闭包,数百粒子/帧的分配税)。
-    // ★完全内联版(2026-08-19 trace 16:12:本循环及其 solidAt = 主线程 42.7% 自
-    //   耗时冠军——每粒子每帧 2 次调用,每次 Math.floor×2+inBounds+isSolid(内含
-    //   双重 idx 乘法+TILE_DEFS 对象查)。热循环内:数组局部化+单次 idx+SOLID_LUT,
-    //   零函数调用;世界外视为空(不碰撞)语义与 TileStore.isSolid 一致
-    const st = this.world.store;
-    const pType = st.type, pWire = st.wire, pW = st.w, pH = st.h;
-    const SOLID = TileStore.SOLID_LUT, WIRE_ACT = TileStore.WIRE_ACTUATED;
+    // 粒子运动律 = 原版 Dust.UpdateDust(Dust.cs:423+):position += velocity,
+    // 重力/阻尼由发射参数(≈原版的按尘型设 noGravity/velocity 衰减)决定,
+    // 【零地形碰撞】——全文件 Collision.* 仅十余个特定尘型的分支条件,不进
+    // 物理步进。旧自制 bounce/settle 反弹停驻物理 2026-08-19 用户裁定退役
+    // ("直接对齐原版,不要自制");它曾是主线程 42.7% 自耗时冠军(trace 16:12,
+    // 逐粒子 isSolid)。下落碎屑穿地与原版一致(寿命 ~0.7s×重力 0.05 级只落
+    // 2-3 格,视觉与"落地"无差)
     for (const p of this.particles) {
       p.life--;
-      p.vy += p.grav ?? 0.12;
-      if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; } // 空气阻力：喷溅后缓慢减速飘散
-      let nx = p.x + p.vx;
-      {
-        const tx = (nx / TILE) | 0, ty = (p.y / TILE) | 0;
-        if (tx >= 0 && ty >= 0 && tx < pW && ty < pH) {
-          const i = ty * pW + tx;
-          if (SOLID[pType[i]] === 1 && !(pWire[i] & WIRE_ACT)) { p.vx *= -0.4; nx = p.x; }
-        }
-      }
-      let ny = p.y + p.vy;
-      {
-        const tx = (nx / TILE) | 0, ty = (ny / TILE) | 0;
-        if (tx >= 0 && ty >= 0 && tx < pW && ty < pH) {
-          const i = ty * pW + tx;
-          if (SOLID[pType[i]] === 1 && !(pWire[i] & WIRE_ACT)) {
-        if (p.vy > 1.6) {
-          p.vy = -p.vy * 0.35; // 溅落反弹
-          p.vx *= 0.6;
-        } else {
-          p.vy = 0; p.vx *= 0.5; p.grav = 0; // 停驻地表
-        }
-        ny = p.y;
-        }
-        }
-      }
-      p.x = nx; p.y = ny;
+      p.vy += p.grav ?? 0.05;   // 原版重力尘 +0.05(Dust.cs:894 族),无参默认对齐
+      if (p.damp) { p.vx *= p.damp; p.vy *= p.damp; } // 原版阻尼 0.93/0.97 族,发射端按型给
+      p.x += p.vx;
+      p.y += p.vy;
     }
     // 就地压缩(2026-08 审计 G9:此前每 tick 两个 filter 新数组)
     compactByLife(this.particles);
@@ -6675,17 +6650,18 @@ export class Game implements GameHooks {
           + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
         // GetWeaponDamage：物品伤害×词缀×近战全系乘区（NewProjectile Damage 实参）
         const zDmg = Math.max(1, Math.round(cwMelee!.damage * (ps?.dmg ?? 1) * this.player.damageMult('melee')));
+        const zPayload = { useTime: reuseSpd, fired: 1, vid: heldVid, dmg: zDmg, crit: arcCritZ,
+          pen: this.player.equipStats.armorPen + this.player.meleeArmorPen };
         this.swing = {
           t: animSpd, dur: animSpd, item: held!.id,
           dmg: Math.max(1, Math.round(cwMelee!.damage * (ps?.dmg ?? 1))),
           kb: cwMelee!.knockback * (ps?.kb ?? 1),
-          zenith: { useTime: reuseSpd, fired: 1, vid: heldVid, dmg: zDmg, crit: arcCritZ,
-            pen: this.player.equipStats.armorPen + this.player.meleeArmorPen },
+          zenith: zPayload,
         };
         this.player.useTime = reuseSpd;   // ApplyItemTime（useTime 裸值）
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
-        this.fireZenithSword(0, this.swing.zenith);
+        this.fireZenithSword(0, zPayload);
         // UseSound=null（Item.cs:39978）——原版无使用音，声源全在剑弹 Item169（:40439）
         return;
       }
@@ -6704,7 +6680,7 @@ export class Game implements GameHooks {
         const arcVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');
         const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
           + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
-        if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 933, 974, 976, 1100].includes(cwMelee.shoot)) {
+        if (cwMelee?.shoot != null && [972, 973, 982, 983, 997, 974, 976].includes(cwMelee.shoot)) {
           const angT = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           this.player.facing = Math.cos(angT) > 0 ? 1 : -1;   // 发射型面向鼠标（:46578）
           const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 100;  // ResetStats 缺省（Item.cs:48626-48627）
@@ -6736,47 +6712,8 @@ export class Game implements GameHooks {
               this.entities.add(slash, 'projectiles');
               break;
             }
-            case 933:
-            case 1100: {  // Zenith 4956 / 真铜短剑 5669（Player.cs:48078-48121 同链：
-              // 5669 档案恒 3507、Zenith 首 4956 后续表随机）
-              const isZenith = cwMelee.shoot === 933;
-              const [zwx, zwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
-              // 原版 num164=(itemAnimationMax−itemAnimation)/itemTime（动画进度递增）——
-              // 我们 swing.t 递减，须换算 (dur−t)/useTime（曾 t/useTime=方向反：首剑
-              // 吃散射档/末剑才 4956 档案，2026-08-19 天顶剑审查）
-              const sw = this.swing;
-              const cycle = Math.floor(((sw?.dur ?? 0) - (sw?.t ?? 0)) / (cwMelee.useTime ?? 10));
-              let tzx = zwx, tzy = zwy;
-              // LimitPointToPlayerReachableArea（Player.cs:44828）：钳到玩家中心
-              // MaxWorldViewSize(1920×1200) 矩形内（鼠标超界时收边）
-              {
-                const hw = 960, hh = 600;
-                const pcx = this.player.cx, pcy = this.player.cy;
-                tzx = Math.max(pcx - hw, Math.min(pcx + hw, tzx));
-                tzy = Math.max(pcy - hh, Math.min(pcy + hh, tzy));
-              }
-              if (cycle >= 1) {
-                let best: { cx: number; cy: number } | null = null, bd = 400;
-                for (const ent of this.entities.enemies) {
-                  const e = ent as unknown as { cx: number; cy: number; dead: boolean; vanillaId?: number | null; hp: number };
-                  if (e.dead) continue;
-                  const d = Math.hypot(e.cx - zwx, e.cy - zwy);
-                  if (d < bd) { bd = d; best = { cx: e.cx, cy: e.cy }; }
-                }
-                if (best) { tzx = best.cx; tzy = best.cy; }
-                if (cycle >= 2 || !best) {
-                  const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 150;
-                  tzx += Math.cos(a) * r; tzy += Math.sin(a) * r;
-                }
-              }
-              const zsword = new ZenithSword(this.player, tzx, tzy,
-                this.swing.dmg ?? cwMelee.damage,
-                !isZenith ? 3507 : (cycle === 0 ? 4956 : randomFractalProfile()));
-              zsword.critChance = arcCrit;
-              zsword.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
-              this.entities.add(zsword, 'projectiles');
-              break;
-            }
+            // 933/1100（Zenith 4956/真铜短剑 5669）不在此——专属分支见上方：
+            // 挥击动画独立走完 + 每 useTime 边界续发（fireZenithSword/updateSwingHits）
             case 974: {   // 魔光剑 46（Player.cs:48242-48264）：生成在瞄准搜索点
               // （MountedCenter+(70,−40)×Directions ±20 散布或 50px 内敌人身上）；
               // ai0=1（暴击掷中→2 且伤害×2 折进斩痕）；伤害×0.5；方向载波不位移
@@ -14278,13 +14215,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** 天顶剑族动画内续发边界（Player.cs:42880 flag4 = itemAnimation>0 &&
+   *  ItemTimeIsZero + :42818 的 3*useTime flag 门）：返回本 tick 应发的 num164
+   *  （null=不发）。dur−t 每越过 useTime 整数倍发一发；fired 防重复；cycle>2 停
+   *  （每挥最多 3 发）。dur=anim（攻速缩放）、useTime 裸值（ApplyItemTime 不缩放）。 */
+  static zenithFireCycle(dur: number, t: number, useTime: number, fired: number): number | null {
+    const cycle = Math.floor((dur - t) / useTime);
+    return cycle > fired - 1 && cycle <= 2 ? cycle : null;
+  }
+
   /** 天顶剑族剑弹发射（Player.cs:48078-48121 专属链 1:1）：cycle=num164
    *  （0 首发瞄准钳后鼠标点 / 1,2 走 GetZenithTarget——钳后鼠标点 400px 内最近敌
    *  优先，num164==2 恒散布、num164==1 无敌也散布）；档案：Zenith 首发恒 4956、
    *  后续 GetRandomProfileIndex（重掷 4956），5669 恒 3507；出生速度 =
    *  (目标−MountedCenter)/2（非归一——即轨道半径），ai[0]=rand(−100,101)。 */
-  private fireZenithSword(cycle: number, z: NonNullable<Game['swing']>['zenith'] & object): void {
-    if (!z) return;
+  private fireZenithSword(cycle: number, z: { useTime: number; fired: number; vid: number; dmg: number; crit: number; pen: number }): void {
     const inp = this.input;
     const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
     // LimitPointToPlayerReachableArea（Player.cs:44828-44851）：钳入玩家中心
@@ -14332,8 +14277,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 原版点击起手后 itemAnimation 独立走完，松手不影响余下两发
     if (this.swing.zenith) {
       const zsw = this.swing.zenith;
-      const cycle = Math.floor((this.swing.dur - this.swing.t) / zsw.useTime);
-      if (cycle > zsw.fired - 1 && cycle <= 2) {
+      const cycle = Game.zenithFireCycle(this.swing.dur, this.swing.t, zsw.useTime, zsw.fired);
+      if (cycle != null) {
         zsw.fired = cycle + 1;
         this.player.useTime = zsw.useTime;   // ApplyItemTime（ItemCheck_Shoot :46561）
         this.fireZenithSword(cycle, zsw);

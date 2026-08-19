@@ -28,11 +28,14 @@ const CATEGORY_TEMPLATES: Record<RemasterCategory, string> = {
 
 /** 整图重制模板:整张 sheet 一个重制单元(无法按帧切分的素材)。
  *  关键约束 = 逐元素原位(布局/网格结构不许动)——整图混排表(NPC 横条/
- *  纸娃娃通道表)任何位移都会破坏下游切帧。 */
+ *  纸娃娃通道表)任何位移都会破坏下游切帧。窄长条(比例>3:1)在画布中
+ *  居中两侧留白,prompt 注明主体位置防模型重构图。 */
 const WHOLE_TEMPLATE =
   'This is a complete sprite sheet "{name}". Remaster the entire image while keeping ' +
   'the exact same layout and grid structure: every element must stay in its exact ' +
-  'position and size — do not move, resize, crop, mirror or rearrange anything.';
+  'position and size — do not move, resize, crop, mirror or rearrange anything. ' +
+  'If the sprite content is a narrow strip centered in the canvas with empty padding ' +
+  'on the sides, keep that strip centered at the same width — do not stretch or fill the padding.';
 
 /** 动画多帧条目的附加句(风格锚提示,配合 edits 多输入图) */
 export function refFrameSentence(refFrameIdx: number): string {

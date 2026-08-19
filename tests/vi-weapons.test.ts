@@ -62,6 +62,14 @@ describe('vi_* 武器分类（combatWeapon）', () => {
   it('弓（useAmmo 体系）不被 combatWeapon 分流', () => {
     expect(combatWeapon({ key: VANILLA_ITEM_KEY_BY_ID[39] })).toBeNull();
   });
+
+  it('天顶剑族 4956/5669 → melee + useTime=useAnimation/3（Item.cs:39984 算式）', () => {
+    // melee+noMelee+aiStyle182 曾落 'shot' 兜底 = 直线箭弹（无剑阵无挥击）
+    expect(combatWeapon({ key: 'vi_4956_zenith' })).toMatchObject(
+      { kind: 'melee', damage: 190, knockback: 6.5, useTime: 10, useAnimation: 30, autoReuse: true, shoot: 933, shootSpeed: 16 });
+    expect(combatWeapon({ key: 'vi_5669_true_copper_shortsword' })).toMatchObject(
+      { kind: 'melee', damage: 190, useTime: 10, useAnimation: 30, autoReuse: true, shoot: 1100, shootSpeed: 16 });
+  });
 });
 
 describe('辅助数据', () => {

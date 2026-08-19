@@ -63,6 +63,24 @@ export async function kvGetIdb(key: string): Promise<string | null> {
   }
 }
 
+/** 写入只进 IndexedDB(不占 localStorage)——大 JSON 专用:重制进度(含 prompt
+ *  全文历史)/prompt 微调等随验收无界增长,kvSet 的 ≤2MB localStorage 快路径
+ *  会把 5MB 全局上限撑爆(kvSet 超限兜底也进 IDB,但小数据仍占 localStorage)。 */
+export async function kvSetIdb(key: string, value: string): Promise<'idb' | 'fail'> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    return 'idb';
+  } catch {
+    return 'fail';
+  }
+}
+
 /** 读取（IndexedDB 优先——大存档只进 IDB，localStorage 可能留着旧的小存档；
    读取顺序必须与写入优先级一致，否则会读到过期档） */
 export async function kvGet(key: string): Promise<string | null> {
