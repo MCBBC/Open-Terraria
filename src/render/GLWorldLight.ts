@@ -1,0 +1,158 @@
+// 世界层×光照 精确乘法合成器(2026-08-20 夜景对齐原版重写)。
+//
+// 为什么需要 GL:Canvas2D 的 'multiply' 走 PDF 混合语义——半透明目标上
+// blend 结果带 (1-αd)·Cs 项(色洗)且 αo = αs+αd(1-αs)(α 膨胀):史莱姆
+// α0.7 → 0.91 且偏白(2026-08-19 worldLayer mask-multiply 实测病根)。
+// 原版语义是【顶点色乘法】:out.rgb = texel.rgb × light.rgb,α 原样保留
+// (Lighting.GetColor 的 A 恒 255,XNA 预乘管线)。2D 无法精确表达,这里用
+// 一条双纹理 quad 精确实现:
+//   gl_FragColor = vec4(world.rgb × light.rgb × world.a, world.a)  // 预乘输出
+//
+// 合成形态同 GLSpriteLayer:GL 画布离屏,调用方在原 2D 链同一时序
+// `ctx.drawImage(layer.canvas, 0, 0)` 单次合成。GL 不可用/上下文丢失时
+// unavailable=true,调用方回退 2D 三步近似(见 Renderer.compositeLight)。
+
+export class GLWorldLight {
+  readonly canvas: HTMLCanvasElement;
+  private gl: WebGLRenderingContext | null = null;
+  private prog: WebGLProgram | null = null;
+  private uni: Record<string, WebGLUniformLocation | null> = {};
+  private texWorld: WebGLTexture | null = null;
+  private texLight: WebGLTexture | null = null;
+  /** 上下文丢失/初始化失败时间戳(0=健在);调用方 5s 退避后可重建 */
+  diedAt = 0;
+  /** GL 永不可用(WebGL 缺失/shader 失败)——调用方直接走 2D 回退不再重建 */
+  unavailable = false;
+
+  // GLSL 100(WebGL1/2 皆可编)——attribute/varying 形式
+  private static VERT = `
+attribute vec2 aPos;              // 单位 quad (0..1)^2
+uniform vec2 uCanvas;             // (仅 FRAG 采样用;此处 aPos 已是归一化)
+varying vec2 vUv;
+void main() {
+  vUv = aPos;
+  // ★y 翻转同 GLSpriteLayer(两次倒置翻车教训):canvas 2D y 向下;
+  //   aPos 已 0..1,直接映 clip(曾误除 uCanvas → quad 缩成 1px 碎片)
+  gl_Position = vec4(aPos.x * 2.0 - 1.0, 1.0 - aPos.y * 2.0, 0.0, 1.0);
+}`;
+  private static FRAG = `
+precision highp float;   // uCanvas 与 VS 共享,精度必须一致(链接器要求)
+uniform sampler2D uWorld;
+uniform sampler2D uLight;
+uniform vec2 uCanvas;
+uniform vec4 uLightRect;          // 光照栅格在画布像素空间的 (x,y,w,h)
+varying vec2 vUv;
+void main() {
+  vec4 w = texture2D(uWorld, vUv);
+  // vUv 是画布归一化坐标;光照纹理按其覆盖矩形线性映射,
+  // 矩形外取边缘色(CLAMP,= 2D drawImage 边缘复制同款)
+  vec2 px = vUv * uCanvas;
+  vec2 lu = (px - uLightRect.xy) / uLightRect.zw;
+  lu = clamp(lu, vec2(0.0), vec2(1.0));
+  vec3 l = texture2D(uLight, lu).rgb;
+  gl_FragColor = vec4(w.rgb * l * w.a, w.a);   // 预乘输出(canvas premultipliedAlpha)
+}`;
+
+  constructor() {
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = 0;
+    this.canvas.height = 0;
+    this.init();
+  }
+
+  /** 释放(丢上下文即可,canvas 随 GC) */
+  dispose(): void {
+    const gl = this.gl;
+    if (gl && !gl.isContextLost()) {
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+    this.gl = null;
+    this.prog = null;
+  }
+
+  private init(): void {
+    const gl = (this.canvas.getContext('webgl2', {
+      alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
+      preserveDrawingBuffer: true,
+    }) || this.canvas.getContext('webgl', {
+      alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
+      preserveDrawingBuffer: true,
+    })) as WebGLRenderingContext | null;
+    if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
+    this.gl = gl;
+    const compile = (type: number, src: string): WebGLShader | null => {
+      const sh = gl.createShader(type)!;
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.warn('[GLWorldLight] shader 编译失败:', gl.getShaderInfoLog(sh));
+        return null;
+      }
+      return sh;
+    };
+    const vs = compile(gl.VERTEX_SHADER, GLWorldLight.VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, GLWorldLight.FRAG);
+    if (!vs || !fs) { this.unavailable = true; this.diedAt = performance.now(); return; }
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.warn('[GLWorldLight] program 链接失败:', gl.getProgramInfoLog(prog));
+      this.unavailable = true; this.diedAt = performance.now(); return;
+    }
+    this.prog = prog;
+    for (const n of ['uCanvas', 'uWorld', 'uLight', 'uLightRect']) {
+      this.uni[n] = gl.getUniformLocation(prog, n);
+    }
+    // 单位 quad(三角带 4 顶点)
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    this.texWorld = gl.createTexture();
+    this.texLight = gl.createTexture();
+    for (const t of [this.texWorld, this.texLight]) {
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+    gl.disable(gl.BLEND);   // 单 quad 直写,无需混合
+  }
+
+  /** 每帧合成:world(worldCanvas) × light(lightCanvas @ lightRect 像素矩形) → this.canvas */
+  composite(world: HTMLCanvasElement, light: HTMLCanvasElement, lightRect: readonly [number, number, number, number]): boolean {
+    const gl = this.gl;
+    if (!gl || !this.prog || this.diedAt) return false;
+    const w = world.width, h = world.height;
+    if (w === 0 || h === 0) return false;
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w;
+      this.canvas.height = h;
+    }
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(this.prog);
+    // 纹理上传(canvas 源;光照小图 LINEAR 上采样 = 原 2D 双线性同款)
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.texWorld);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.texLight);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, light);
+    gl.uniform1i(this.uni.uWorld, 0);
+    gl.uniform1i(this.uni.uLight, 1);
+    gl.uniform2f(this.uni.uCanvas, w, h);
+    gl.uniform4f(this.uni.uLightRect, lightRect[0], lightRect[1],
+      Math.max(1, lightRect[2]), Math.max(1, lightRect[3]));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    // WebGL 错误哨兵:上下文丢失即判死,调用方回退 2D
+    if (gl.isContextLost()) { this.diedAt = performance.now(); return false; }
+    return true;
+  }
+}

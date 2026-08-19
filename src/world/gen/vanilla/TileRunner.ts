@@ -47,7 +47,16 @@ const SAVE_SLOPES = new Uint8Array(TILE_DEFS.length);
 {
   for (let i = 0; i < TILE_DEFS.length; i++) {
     const s = TILE_DEFS[i]?.vanilla?.sheet;
-    SAVE_SLOPES[i] = ((TILE_DEFS[i]?.solid ?? false)
+    // ★PPPPP 批（2026-08-20）：pristine 三族差修正（同 TileCleanupPass/QuickCleanupPass
+    //   isSaveSlope 勘误口径）——平台族 sheet{19,239,380,427,435-439}/192 活树叶/
+    //   481-483 裂砖原版静态 tileSolid=true（SaveSlopes 启动期快照含之），仓库
+    //   TILE_DEFS.solid=false → TileRunner 铺设覆写带坡的上述格时曾误走 ClearSlope
+    //   支（vanilla 保坡）。NNNNN 备案"本种子零触发"口径债，此清。
+    const pristineSolid = (TILE_DEFS[i]?.solid ?? false)
+      || s === 19 || s === 239 || s === 380 || s === 427
+      || (s !== undefined && s >= 435 && s <= 439)
+      || s === 192 || s === 481 || s === 482 || s === 483;
+    SAVE_SLOPES[i] = (pristineSolid
       || (s !== undefined && [131, 351, 336, 340, 341, 342, 343, 344].includes(s))) ? 1 : 0;
   }
 }

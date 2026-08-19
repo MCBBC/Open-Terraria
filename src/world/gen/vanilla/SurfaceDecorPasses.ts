@@ -2157,7 +2157,10 @@ export function runSunflowersPart2Pass(st: TileStore, rng: RNG, gs: GenState): v
     const lo = Math.max(0, c - rng.nextInt(10) - 7);   // Next(10)
     const hi = Math.min(st.w - 1, c + rng.nextInt(10) + 7);
     if (trace) console.log(`[sunfl] band ${i} c=${c} lo=${lo} hi=${hi}`);
-    for (let j = lo; j <= hi; j++) {
+    // ★列扫上界**独占**（cs:20069 `for (j = num2; j < num3; j++)`）——曾 j<=hi 含
+    // 末列，band 末列恰逢草上空气时多放整株（本种子 band6 末列 2375 多放一株 →
+    // 流错位 → 2957/2965 两株全丢；金标 079 基座模拟定谳：独占界+9 掷复现六株全等）
+    for (let j = lo; j < hi; j++) {
       for (let k = 1; k < ws - 1; k++) {
         const ji = st.idx(j, k);
         if (st.flags[ji] && SHEET[st.type[ji]] === 2 && !st.flags[st.idx(j, k - 1)]) {

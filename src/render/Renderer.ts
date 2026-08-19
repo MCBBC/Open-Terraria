@@ -137,6 +137,7 @@ import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
+import { GLWorldLight } from './GLWorldLight';
 import { mapUpdateMinIntervalMs, gfxQuality } from '../core/GfxQuality';
 
 /** 背景层 GL 后端(docs/webgl2-migration-plan.md #1):图片→纹理缓存,quad 绘制。
@@ -1843,6 +1844,8 @@ export class Renderer {
         GLSpriteLayer.MAX_BYTES = Math.max(48 * 1024 * 1024, Math.floor(GLSpriteLayer.MAX_BYTES / 2));
         this.glfx?.dispose();
         this.glfx = null;
+        this.worldLight?.dispose();
+        this.worldLight = null;
         console.warn(`[Renderer] GPU 压力熔断(第 ${trips} 次):10s 内 ${losses.length} 次画布丢失——暂停渲染冷却 ${cooldown / 1000}s + 已释放 GL 纹理池(${GLSpriteLayer.MAX_BYTES >> 20}MB 档)`);
         setTimeout(() => {
           tripped = false;
@@ -1991,6 +1994,8 @@ export class Renderer {
     if (cpu) {
       this.glfx?.dispose();
       this.glfx = null;
+      this.worldLight?.dispose();
+      this.worldLight = null;
     } else {
       GLSpriteLayer.MAX_BYTES = 192 * 1024 * 1024;   // 恢复默认(不继承熔断减半)
       this.glInitRetryAt = 0;                         // 模式回切:重置初始化失败闩
@@ -2119,6 +2124,8 @@ export class Renderer {
     // 风暴;背景纹理懒加载重传成本低,不值得跨世界持有)
     this.glfx?.dispose();
     this.glfx = null;
+    this.worldLight?.dispose();
+    this.worldLight = null;
     this.sky.disposeCloudGL();
   }
 
@@ -2272,7 +2279,9 @@ export class Renderer {
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
     if (this.scene) {
-      // 昼夜色调（≈ColorOfTheSkies：白天白、夜晚压暗偏蓝、晨昏暖色）
+      // 昼夜色调（≈ColorOfTheSkies：白天白、夜晚压暗偏蓝、晨昏暖色）——
+      // ★2026-08-20 定案保留本手搓档:与全屏乘光链配套校准过的稳定观感
+      // (用户定案"下午版本非常稳定非常好";cots 全链替换方案已回滚)
       const df = clock.dayFactor;
       const t = clock.timeOfDay;
       let tr = 1, tg = 1, tb = 1;
@@ -2374,7 +2383,14 @@ export class Renderer {
           // chunk atlas 化(2026-08-18):pair.wall/tile 是 1024² atlas 页,
           // cell 用 sx/sy/256 源矩形取(9 参形式;曾 4 参整页误绘)
           const p = chunks.get(cx, cy);
-          ctx.drawImage(p[layer], p.sx, p.sy, CHUNK * ts, CHUNK * ts, xd0, yd0, xd1 - xd0 + 1, yd1 - yd0 + 1);
+          // ★无 +1（2026-08-19 归位缝终根因）：旧 `尺寸+1` 在整数矩形下不是重叠
+          //   而是【拉伸】（256 源→321 目标，有效缩放 1.2539≠1.25）——块内内容逐行
+          //   漂移，树干首行漂 0.6px 落设备行中间 → 最近邻采到上一行（marker 空行）
+          //   = 交界天空缝，随块内位置/缩放/相机相位变化（"某些树/某些缩放/归位时
+          //   出现"全解释，用户报告树 (2164,219) 实抓复现：chunk 烘焙件首行完好、
+          //   屏幕被天空盖）。整数矩形下相邻块共享同一 round 值 = 精确边缘对接，
+          //   零缝零叠，+1 既无必要且有害——撤
+          ctx.drawImage(p[layer], p.sx, p.sy, CHUNK * ts, CHUNK * ts, xd0, yd0, xd1 - xd0, yd1 - yd0);
         }
       }
       ctx.restore();
@@ -9894,8 +9910,40 @@ export class Renderer {
   private lightMaskCanvas: HTMLCanvasElement | null = null;
   private lightMaskCtxLayer: CanvasRenderingContext2D | null = null;
   private worldLayerActive = false;
+  /** ★2026-08-20 定案:worldLayer 默认【关】——月光会话(1b369fe2)把光照分层
+   *  设为默认后夜景全面回归(半透明实体 α 膨胀/远景云观感漂移,用户实报"一改
+   *  全部炸掉");稳定基线 = 下午版全屏乘光。分层路径保留为 ?worldlayer=1
+   *  选择加入(合成已改 GL 精确乘,旧 mask-multiply 的 α 膨胀已修) */
   worldLayerEnabled = typeof location !== 'undefined'
-    ? new URLSearchParams(location.search).get('worldlayer') !== '0' : true;
+    ? new URLSearchParams(location.search).get('worldlayer') === '1' : false;
+  /** 世界层×光照 GL 精确乘(?wgl=0 逃生门;GL 不可用自动回退 2D 三步)。
+   *  Canvas2D 'multiply' 无法表达"乘色保 α"(blend 的 (1-αd)Cs 项 + α 膨胀),
+   *  原版顶点色语义只能双纹理 shader——见 GLWorldLight 头注 */
+  private worldLight: GLWorldLight | null = null;
+  private worldLightRetryAt = 0;
+  private worldLightEnabled = (() => {
+    try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('wgl') !== '0'; }
+    catch { return false; }
+  })();
+  /** GL 精确乘实例(活实例直取;死亡 5s 退避;初始化失败 30s 闩——同 acquireGL 哨兵) */
+  private worldLightLayer(): GLWorldLight | null {
+    if (!this.worldLightEnabled) return null;
+    if (this.worldLight) {
+      if (!this.worldLight.unavailable && !this.worldLight.diedAt) return this.worldLight;
+      if (performance.now() - this.worldLight.diedAt < 5000) { this.worldLight = null; return null; }
+      this.worldLight.dispose();
+      this.worldLight = null;
+    }
+    if (performance.now() < this.worldLightRetryAt) return null;
+    const inst = new GLWorldLight();
+    if (inst.unavailable) {
+      inst.dispose();
+      this.worldLightRetryAt = performance.now() + 30_000;
+      return null;
+    }
+    this.worldLight = inst;
+    return inst;
+  }
 
   /** render() 世界段入口调用：切换 this.ctx → 世界层（返回 null = 逃生门关闭，
    *  调用方继续用主画布 ctx）。每帧清屏；尺寸跟随主画布。 */
@@ -9995,32 +10043,55 @@ export class Renderer {
     }
     lc.putImageData(img, 0, 0);
     const [sx, sy] = cam.worldToScreen(tx0 * ts, ty0 * ts);
-    // ==== 世界层路径（光照分层）：光照栅格先按世界层 alpha 成形，再 multiply 进
-    //      世界层（multiply 直画会把透明天空糊成光色——必须先掩膜）；最后把世界层
-    //      叠回主画布（天空之上）。天空/日月星辰不进光照 = 原版分层语义 ====
+    // ==== 世界层路径（2026-08-20 重写,对齐原版顶点色语义）：
+    //      out.rgb = 世界.rgb × 光.rgb,α 原样保留（Lighting.GetColor 的 A 恒 255）。
+    //      天空/日月星辰不进光照 = 原版 backbuffer 直绘分层语义。
+    //      ★Canvas2D 'multiply' 走 PDF 混合:半透明像素 α 膨胀(0.7→0.91)+
+    //      (1-αd)·Cs 洗色——2026-08-19 版 mask-multiply 即此处翻车(史莱姆
+    //      "染色/透明不对")。精确乘只能双纹理 shader:
+    //      ① GL 路径(GLWorldLight,?wgl=0 关闭)
+    //      ② 2D 三步回退:copy→multiply(全 α 光照)→destination-in 恢复 α
+    //        ——不透明像素精确;半透明像素留 (1-α)·光 洗色(GL 路径无此项) ====
     if (this.worldLayerActive && this.worldCtxLayer && this.lightMaskCtxLayer) {
+      const lw = tilesX * ts * z, lh = tilesY * ts * z;
+      const gl = this.worldLightLayer();
+      if (gl && gl.composite(this.worldCanvas!, this.lightCanvas, [sx, sy, lw, lh])) {
+        this.ctx.drawImage(gl.canvas, 0, 0);
+        return;
+      }
       const mctx = this.lightMaskCtxLayer;
       mctx.setTransform(1, 0, 0, 1, 0, 0);
       mctx.globalCompositeOperation = 'source-over';
       mctx.clearRect(0, 0, viewW, viewH);
       mctx.imageSmoothingEnabled = true;
-      mctx.drawImage(this.lightCanvas, sx, sy, tilesX * ts * z, tilesY * ts * z);
+      mctx.drawImage(this.worldCanvas!, 0, 0);              // ① 世界层副本(含 α)
+      mctx.globalCompositeOperation = 'multiply';
+      mctx.drawImage(this.lightCanvas, sx, sy, lw, lh);     // ② 全 α 光照乘色
       mctx.globalCompositeOperation = 'destination-in';
-      mctx.drawImage(this.worldCanvas!, 0, 0);
+      mctx.drawImage(this.worldCanvas!, 0, 0);              // ③ 精确恢复 α
       mctx.globalCompositeOperation = 'source-over';
-      const wctx = this.worldCtxLayer;
-      wctx.setTransform(1, 0, 0, 1, 0, 0);
-      wctx.save();
-      wctx.imageSmoothingEnabled = true;
-      wctx.globalCompositeOperation = 'multiply';
-      wctx.drawImage(this.lightMaskCanvas!, 0, 0);
-      wctx.restore();
-      wctx.globalCompositeOperation = 'source-over';
-      const ctx = this.ctx;   // = 主画布（endWorldLayer 已恢复）
-      ctx.drawImage(this.worldCanvas!, 0, 0);
+      this.ctx.drawImage(this.lightMaskCanvas!, 0, 0);
       return;
     }
-    // ==== 旧路径（?worldlayer=0 逃生门）：全屏乘光（天空同被压暗） ====
+    // ==== 默认路径（★2026-08-20 定案回归的稳定基线）：全屏乘光 ====
+    // 夜月亮注入（唯一新增,修"夜里的月亮不亮"）:原版月亮直绘 backbuffer
+    // 不吃乘光(Main.cs:61516 日月画在天空层);全屏乘光把月亮压到月光地板
+    // (~0.075)。在光照图上以月盘屏位注入满月光斑——月盘区乘法≈恒等=恢复
+    // 原色,外圈 2.2×半径自然月光晕;天空其余/地面/实体路径零改动
+    const mg = this.sky.moonScreen;
+    if (mg) {
+      const lwDev = tilesX * ts * z, lhDev = tilesY * ts * z;
+      const gx = (mg.x - sx) / lwDev * w2;
+      const gy = (mg.y - sy) / lhDev * h2;
+      const gr = Math.max(4, mg.r / lwDev * w2);
+      if (gx > -gr * 2.2 && gy > -gr * 2.2 && gx < w2 + gr * 2.2 && gy < h2 + gr * 2.2) {
+        const halo = lc.createRadialGradient(gx, gy, gr, gx, gy, gr * 2.2);
+        halo.addColorStop(0, 'rgba(255,255,255,1)');
+        halo.addColorStop(1, 'rgba(255,255,255,0)');
+        lc.fillStyle = halo;
+        lc.fillRect(gx - gr * 2.2, gy - gr * 2.2, gr * 4.4, gr * 4.4);
+      }
+    }
     const ctx = this.ctx;
     ctx.save();
     ctx.imageSmoothingEnabled = true;

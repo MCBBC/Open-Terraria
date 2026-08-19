@@ -836,6 +836,8 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
   //   存档时间线——原版由 UndergroundJungleTrees 头（cs:17956,本仓缺该 pass,备案）还原。
   flipGenSolid([379], false);
   const __m = (globalThis as { __swSpiderNest?: (s: string) => void }).__swSpiderNest;
+  // QQQQQ：候选级采样日志（countTiles 门对拍用；无钩零开销）
+  const __c = (globalThis as { __swSpiderCand?: (n: number, t: number, x: number, y: number, count: number, shroom: number) => void }).__swSpiderCand;
   const count = Math.floor(st.w * 0.005);
   const retryCap = Math.floor(st.w / 2);
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
@@ -843,6 +845,7 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
     let x = rng.int(200, st.w - 201);
     let y = rng.int(yMin, st.h - 231);
     let c = countTiles(st, x, y);
+    __c?.(n, 0, x, y, c.count, c.shroom);
     let tries = 0;
     while ((c.count >= MAX_TILE_COUNT || c.count < 500) && tries < retryCap) {
       tries++;
@@ -850,6 +853,7 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
       x = rng.int(200, st.w - 201);
       y = rng.int(gs.rockLevel + 30, st.h - 231);
       c = countTiles(st, x, y);
+      __c?.(n, tries, x, y, c.count, c.shroom);
       if (c.shroom > 1) c.count = 0;
     }
     __m?.(`NEST#${n} x=${x} y=${y} count=${c.count} shroom=${c.shroom} tries=${tries}`);

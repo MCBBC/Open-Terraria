@@ -2259,6 +2259,9 @@ export class SkyRenderer {
 
   /** 本帧太阳屏幕位（sky.draw 写入；镜头光斑轴用） */
   private sunScreen: { x: number; y: number } | null = null;
+  /** 夜月屏位(月亮分支每帧写入,r=月盘半径;Renderer.compositeLight 消费——
+   *  光照图注入月盘满光,月区乘法≈恒等=原版"月亮不吃乘光"语义) */
+  moonScreen: { x: number; y: number; r: number } | null = null;
   private sunflareTex: Partial<Record<SunflareTex, HTMLImageElement>> = {};
 
   /** GetVisibilities（NextHorizonRenderer.cs:199-239 一比一）：
@@ -2655,6 +2658,7 @@ export class SkyRenderer {
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     if (isDay) {
+      this.moonScreen = null;
       const tex = this.sunTex;
       if ((tex.width > 0) && tex.width > 0) {
         // 原版:x = time/54000*(屏宽+图宽*2)-图宽(横穿);y = bgTopY + |t*2-1|²*250+180(正午最高);
@@ -2684,6 +2688,10 @@ export class SkyRenderer {
         const y = dip * 250 + 180;
         const scale = 1.2 - dip * 0.4;
         const phase = Math.max(0, Math.min(7, clock.moonPhase)); // MoonPhase.cs:3-13(0=满…4=空;旧 dayCount%8 致首夜亏凸月+导入脱钩)
+        // ★夜月屏位登记(2026-08-20):compositeLight 在光照图注入月盘满光
+        //   ——原版月亮直绘 backbuffer 不吃乘光,全屏乘光链曾把月亮压到
+        //   月光地板(~0.075,"夜里的月亮不亮");月盘区乘法≈恒等即恢复原色
+        this.moonScreen = { x, y, r: (mw / 2) * scale };
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(ft * 2 - 7.3);
@@ -2691,6 +2699,8 @@ export class SkyRenderer {
         ctx.drawImage(tex, 0, mw * phase, mw, mw,
           -mw / 2 * scale, -mw / 2 * scale, mw * scale, mw * scale);
         ctx.restore();
+      } else {
+        this.moonScreen = null;
       }
     }
     ctx.restore();
