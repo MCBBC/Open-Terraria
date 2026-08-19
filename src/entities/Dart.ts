@@ -13,6 +13,7 @@ import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖
 import { projFrameImg, projSprite } from './Arrow';
 import { segHitsRect } from './bossAI_duke_moonlord';   // 线段命中（bossAI_duke_moonlord 导出共用）
 import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
+import { applyProjStatus } from './projStatus';
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -424,6 +425,10 @@ export class TrapShot extends Entity {
         if (e.dead || !overlaps(e)) continue;
         // 反射源命中（Projectile.cs:12050-12060）：友方炮弹/雪球可反射（aiStyle2）
         if (trapProjId !== undefined && tryReflectProjectile(this, trapProjId, e, game)) return;
+        // StatusNPC 命中 debuff（Projectile.cs:10555 表驱动——毒飞镖 98 掷中必染
+        // Poison 600t / 超级镖 184 900t :11041/:11045;矛/尖球/巨石/喷泉等表内无条目
+        // 天然空掷）。曾整类漏接 = 飞镖陷阱永不上毒（2026-08-19 补）
+        if (trapProjId !== undefined) applyProjStatus(trapProjId, e as unknown as Record<string, number>);
         if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game, 0, false, 0, true)) {
           playEnemyHitSound(game, e);
           game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');

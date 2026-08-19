@@ -914,12 +914,23 @@ export class MolotovProj extends Entity {
 //   （:64718-64726）。撞墙全轴反转 + 朝玩家 0.25 合成 + 钳 6（:17005-17028）。
 /** 配重球运行上下文（Game 注入闭包——实体不持 EntityManager 引用） */
 export interface CounterweightCtx {
-  /** 拥有者（玩家中心/装备；null 或 dead → Kill,:64490-64493） */
-  owner: () => { cx: number; cy: number; dead?: boolean; equipStats?: { stringColor?: number; yoyoString?: boolean; magicString?: boolean } } | null;
+  /** 拥有者（玩家中心/装备/绳锚链；null 或 dead → Kill,:64490-64493）。
+   *  yoyoStringAnchor = Main.cs:27794-27803 悠悠球/配重球线起点全链
+   *  （mountedCenter → mount52 → +gfxOffY → ApplyItemPositionOffsetFromMount），
+   *  Player 实装——Game 闭包返回完整 Player 实例，结构满足 */
+  owner: () => {
+    cx: number; cy: number; dead?: boolean;
+    equipStats?: { stringColor?: number; yoyoString?: boolean; magicString?: boolean };
+    yoyoStringAnchor(target?: { x: number; y: number }, channelActive?: boolean): { x: number; y: number };
+  } | null;
   /** Main.player[owner].channel 语义（按住使用中）——false → 回收（:64643-64646） */
   channel: () => boolean;
   /** 场上还有悠悠球（AI_099_1 :64488-64500 扫描门:aiStyle99 非配重球且 ai0>=-1） */
   yoyoInPlay: () => boolean;
+  /** 光标世界坐标（线起点 mount54 行档 aim 用——原版读 player.itemRotation，
+   *  其原料 = 鼠标世界位对 RotatedRelativePoint(MountedCenter) 参照点，Player 侧
+   *  itemAimRotDir 复算；缺省 = 无 aim 走行 3 中档带） */
+  aimTarget?: () => { x: number; y: number };
   /** 本帧鼠标屏幕位移（Main.mouseX-lastMouseX,:64614） */
   mouseDelta: () => { dx: number; dy: number };
   /** 魔法线克隆回调（:64727-64733:-1 回收 + magicString → 掷 75% 伤/击退脱离克隆） */
@@ -974,7 +985,13 @@ export class CounterweightProj extends Entity {
   private aiStep(game: GameHooks) {
     const p = this.ctx.owner();
     if (!p || p.dead) { this.dead = true; return; }   // player.dead → Kill（:64490-64493）
-    this.handX = p.cx; this.handY = p.cy;
+    // 线起点（Main.cs:27794-27803 悠悠球/配重球共用段）：mountedCenter → mount52
+    // 修正 → +gfxOffY → ApplyItemPositionOffsetFromMount（Player.yoyoStringAnchor
+    // 全链；aimTarget = 光标世界坐标，channel = itemAnimation>0 代理——原版
+    // 悠悠球 channel 期 itemAnimation 持续刷新）
+    const t = this.ctx.aimTarget?.();
+    const hand = p.yoyoStringAnchor(t, this.ctx.channel());
+    this.handX = hand.x; this.handY = hand.y;
     const eq = p.equipStats;   // 装备快照（accessor 每次全量重算,单次捕获）
     this.stringColor = eq?.stringColor ?? 0;
     // num=250×0.5=125 轨道半径（:64477/:64482）;num3=15×0.8=12 速度上限;
@@ -1360,8 +1377,15 @@ export class YoyoProj extends Entity {
     if (--this.life <= 0) { this.dead = true; return; }
     const p = game.player;
     const eq = p.equipStats;
-    this.handX = p.cx;
-    this.handY = p.cy;
+    // 线起点（Main.cs:27794-27803）：mountedCenter → mount52 修正 → +gfxOffY →
+    // ApplyItemPositionOffsetFromMount（Player.yoyoStringAnchor 全链；target =
+    // 光标世界坐标（mount54 行档 aim），channel = itemAnimation>0 代理——原版
+    // 悠悠球 channel 期 itemAnimation 持续刷新恒>0）
+    {
+      const h = p.yoyoStringAnchor(this.target(), this.channel());
+      this.handX = h.x;
+      this.handY = h.y;
+    }
     this.stringColor = eq.stringColor;
     // flag：同型前球在场（:64827-64835——手套二号球标记）
     const flag = !!this.secondInPlay?.();

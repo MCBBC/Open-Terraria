@@ -69,3 +69,23 @@ describe('applyProjStatus(StatusNPC 表驱动)', () => {
     expect(pick(0.7)).toBe(0);               // 落空
   });
 });
+
+describe('弹药命中 debuff 覆盖审计(2026-08-19:飞镖陷阱毒补齐)', () => {
+  it('毒飞镖 98/超级镖 184 在 StatusNPC 表(掷中必染 Poison 600/900t)', async () => {
+    const { TABLE } = await import('../src/entities/projStatus');
+    const t98 = TABLE['98'] as Array<{ buff: number; durMin: number }>;
+    const t184 = TABLE['184'] as Array<{ buff: number; durMin: number }>;
+    expect(t98?.[0]?.buff).toBe(20);   // Poison
+    expect(t184?.[0]?.buff).toBe(20);
+    expect(t98?.[0]?.durMin).toBe(600);
+    expect(t184?.[0]?.durMin).toBe(900);
+  });
+
+  it('火矢 2:33% OnFire 180t(表值)——Arrow 主命中链已接(源锚 :10896)', async () => {
+    const { TABLE } = await import('../src/entities/projStatus');
+    const t2 = TABLE['2'] as Array<{ buff: number; chance: number; durMin: number }>;
+    expect(t2?.[0]?.buff).toBe(24);            // OnFire
+    expect(Math.abs((t2?.[0]?.chance ?? 0) - 1 / 3)).toBeLessThan(1e-9);
+    expect(t2?.[0]?.durMin).toBe(180);
+  });
+});

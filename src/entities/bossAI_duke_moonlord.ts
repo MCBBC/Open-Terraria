@@ -59,6 +59,23 @@ const angleLerp = (cur: number, target: number, t: number) => {
   return cur + d * t;
 };
 
+/** Utils.Vector2FromElipse(Utils.cs:948-965) 1:1——月总瞳孔/束锚椭圆。
+ *  ★非 naive (cosθ·sx, sinθ·sy):角度向量先乘 One/Normalize(sizes)=(|s|/sx,|s|/sy)
+ *  再归一化(重参数化到椭圆真参数化角),最后乘 sizes/**2**——幅度只有 naive 的一半
+ *  且方向被拉偏。曾按 naive 实现令瞳孔行程 ×2:头瞳孔(+58)甩出眼洞(cy+32)外
+ *  = 眼窝恒空、手瞳孔甩出掌洞 = 双手无瞳(2026-08-19 修)。sizes 已含 localAI[1]
+ *  开度(原版调用形态 Vector2FromElipse(rot, (w,h)×localAI[1])) */
+export function mlElipseVec(angle: number, sx: number, sy: number): [number, number] {
+  if (sx === 0 && sy === 0) return [0, 0];      // elipseSizes == Zero 首卫兵
+  const c = Math.cos(angle), s = Math.sin(angle);
+  if (c === 0 && s === 0) return [0, 0];        // angleVector == Zero 首卫兵
+  const len = Math.hypot(sx, sy);
+  let ax = c * (len / sx), ay = s * (len / sy); // *(One/Normalize(sizes))
+  const l2 = Math.hypot(ax, ay) || 1;
+  ax /= l2; ay /= l2;                            // 归一化(重参数化)
+  return [ax * sx / 2, ay * sy / 2];            // * sizes/2
+}
+
 /** 原版 SimpleFlyMovement(:78100)+ 速度折半混合(月总 8/0.5+Lerp0.5 的组合写法):
  *  先单轴步进逼近目标速度,再与步进前速度做 0.5 Lerp(等效步长减半) */
 const flyLerp = (e: Enemy, tx: number, ty: number, acc: number) => {
@@ -1162,8 +1179,10 @@ export class MLDeathray extends Entity {
     const hx = headOf(src);
     const open = this.kind === 'head' ? hx.l1 : src.lai1;
     const eyeA = this.kind === 'head' ? hx.l0 : src.lai0;
-    const ex = this.kind === 'head' ? Math.cos(eyeA) * 27 * open : Math.cos(eyeA) * 30 * open;
-    const ey = this.kind === 'head' ? Math.sin(eyeA) * 59 * open : Math.sin(eyeA) * 30 * open;
+    // Projectile.cs:30296-30307:源 396 = Vector2FromElipse(l0,(27,59)×l1)、源 400 = (30,30)×l1
+    const [ex, ey] = this.kind === 'head'
+      ? mlElipseVec(eyeA, 27 * open, 59 * open)
+      : mlElipseVec(eyeA, 30 * open, 30 * open);
     this.x = src.cx + ex - this.w / 2;
     this.y = src.cy + ey - this.h / 2;
 
@@ -1705,8 +1724,8 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
     x.l1 = Math.min(1, x.l1 + 0.05);
     if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);   // :37464(组4 死音库,终审修)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
-      // :37466-37471 从眼球位置射 462(30 伤,8 速)
-      const exx = Math.cos(x.l0) * 30 * x.l1, eyy = Math.sin(x.l0) * 66 * x.l1;
+      // :37466-37471 从眼球位置射 462(30 伤,8 速)——出生点 = Vector2FromElipse(l0,(30,66)×l1)
+      const [exx, eyy] = mlElipseVec(x.l0, 30 * x.l1, 66 * x.l1);
       const d = Math.hypot(dx, dy) || 1;
       shoot(game, e.cx + exx, e.cy + eyy, (dx / d) * 8, (dy / d) * 8, 30, 462, 600);
     }
@@ -1768,10 +1787,12 @@ function handSeek(e: Enemy, tx: number, ty: number, spd: number, k: number) {
 /** 眼球环射一发 452(:37326-37334):从眼球椭圆外沿射出,沿眼球朝向 8 速,30 伤;
  *  ai[1] 弧线弯转角 = (2π·rand−π)/30 + π/180·num1231(:37332,side) */
 function handFireEye(e: Enemy, game: GameHooks, x: HandX, side: number) {
-  const exx = Math.cos(x.l0) * 30 * x.l1, eyy = Math.sin(x.l0) * 66 * x.l1;
+  // :37329-37332 vector165 = Vector2FromElipse(l0,(30,66)×l1);枪口 = Center +
+  // Normalize(vector165)×|(30,66)|×0.4 + (−side,3);弹速 = Normalize(vector165)×8
+  const [exx, eyy] = mlElipseVec(x.l0, 30 * x.l1, 66 * x.l1);
   const d = Math.hypot(exx, eyy) || 1;
-  const px = e.cx + (exx / d) * 72.46 * 0.4 - side; // |vector159|=√(30²+66²)≈72.46(:37330)
-  const py = e.cy + (eyy / d) * 72.46 * 0.4 + 3;
+  const px = e.cx + (exx / d) * 72.51 * 0.4 - side; // |vector159|=√(30²+66²)≈72.51(:37330)
+  const py = e.cy + (eyy / d) * 72.51 * 0.4 + 3;
   shoot(game, px, py, (exx / d) * 8, (eyy / d) * 8, 30, 452, 600,
     { phantasm: { spin: (TAU * Math.random() - Math.PI) / 30 + (Math.PI / 180) * side } });
 }
@@ -1916,8 +1937,8 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
     x.l1 = Math.min(1, x.l1 + 0.05);
     if (inSlot === dur - 35) game.playSfxWav?.('NPC_Killed_6', 1, e.cx, e.cy);   // :38007(组4 死音库,终审修)
     if (inSlot === dur - 14 || inSlot === dur - 7 || inSlot === dur) {
-      // 眼球椭圆 (27,59)(:37727 vector200),8 速 30 伤
-      const exx = Math.cos(x.l0) * 27 * x.l1, eyy = Math.sin(x.l0) * 59 * x.l1;
+      // 眼球椭圆 (27,59)(:37727 vector200)——Vector2FromElipse(:38001),8 速 30 伤
+      const [exx, eyy] = mlElipseVec(x.l0, 27 * x.l1, 59 * x.l1);
       const d = Math.hypot(dx, dy) || 1;
       shoot(game, e.cx + exx, e.cy + eyy, (dx / d) * 8, (dy / d) * 8, 30, 462, 600);
     }

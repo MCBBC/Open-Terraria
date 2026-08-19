@@ -17,6 +17,8 @@ import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass'
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { placeTight, checkStalactite } from './ShimmerPass';
+import { genFrameNeighbors } from './FinalCleanupPass';
+import { killTileChest } from './BuriedChestsPass';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -292,7 +294,10 @@ function killUnsupportedFurniture(st: TileStore, rng: RNG, cx: number, cy: numbe
   const anchorI = st.inBounds(obj.x0, obj.y0) ? st.idx(obj.x0, obj.y0) : -1;
   const killSheet = anchorI >= 0 ? (TILE_DEFS[st.type[anchorI]!]?.vanilla?.sheet ?? -1) : -1;
   if (killSheet === 34) {                       // 吊灯族：每击杀格 10 掷
-    for (let c = 0; c < obj.w * obj.h * 10; c++) rng.int(0, 2);
+    // ★JJJJ 勘误：掷型 = Next(2)（cs:69069 `(type==34||type==42)&&Next(2)==0`——
+    //   每 MakeTileDust 调 1×Next(2)，默认 10 调/格）——曾 int(0,2)=Next(3)（DDDD
+    //   批只实测了掷数未校界；m 链 vanilla span 'a 2'×90 vs JS 'b 0 3' 实锤）。
+    for (let c = 0; c < obj.w * obj.h * 10; c++) rng.nextInt(2);
   }
   for (let dx = 0; dx < obj.w; dx++) {
     for (let dy = 0; dy < obj.h; dy++) {
@@ -423,6 +428,27 @@ function randHousePictureDesert(rng: RNG): [string, number] {
   return ['v_242_paintings_6x4', 37 + rng.int(0, 5)];
 }
 
+/** JJJJ：邻帧 TileFrame 分派（WorldUtils.TileFrame/ClearTile(frameNeighbors:true) 镜像）——
+ *  引擎 genFrameNeighbors + 屋域补件 105/349/12（引擎未派发族，零掷杀）。er 段与
+ *  aging 链（木①蛛网 SetTile(51,setSelfFrames:true)/木③ ClearTile(frameNeighbors:true)）
+ *  共用；杀的尘掷走引擎表（m 链首分叉②③：vanilla 在这些内联帧里杀邻域残件带尘掷，
+ *  JS 曾零掷/不杀 → span 段内多掷实锤）。 */
+function houseFrameDispatch(st: TileStore, rng: RNG, x: number, y: number, mode: 'setTile' | 'clearTile'): void {
+  genFrameNeighbors(st, rng, x, y, mode);
+  const cells: Array<[number, number]> = mode === 'setTile'
+    ? [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  for (const [dx, dy] of cells) {
+    if (!st.inBounds(x + dx, y + dy)) continue;
+    const i = st.idx(x + dx, y + dy);
+    if (!st.flags[i]) continue;
+    const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+    // 补件集 = 引擎未派发族：105/349 雕像、12 心、巨石族（含 484——引擎 Check2x2
+    // 只派 138/411；曾漏 → s 链 'er' 内联化后 (2410,483) 484 对漏杀 2 格）
+    if (sh === 105 || sh === 349 || sh === 12 || BOULDERS.has(sh)) kfCheckObject(st, rng, i, new Set(), []);
+    else if (KF_C3X3.has(sh)) check3x3KF(st, rng, [], x + dx, y + dy, sh);
+  }
+}
+
 // ---------- 原版 GenAction 链 1:1 解释器(Modifiers.cs / Actions.cs 逐条核实) ----------
 // 三条权威语义(旧实现全部踩错,修复根因):
 //  · Dither(p)(Modifiers.cs:621-635):p 是【失败率】——NextDouble() >= p 才放行,
@@ -445,8 +471,8 @@ type ChainStep =
   | { k: 'isEmpty' }                                                      // Modifiers.IsEmpty(Modifiers.cs:539)
   | { k: 'offset'; dx: number; dy: number }                               // Modifiers.Offset(Modifiers.cs:603)
   | { k: 'setTileKeepWall'; tile: number }                                // Actions.SetTileKeepWall(Actions.cs:272)
-  | { k: 'setTile'; tile: number }                                        // Actions.SetTile(Actions.cs:203)
-  | { k: 'clearTile' }                                                    // Actions.ClearTile(Actions.cs:155)
+  | { k: 'setTile'; tile: number; frame?: boolean }                       // Actions.SetTile(Actions.cs:203；setSelfFrames:true → frame)
+  | { k: 'clearTile'; frame?: boolean }                                   // Actions.ClearTile(Actions.cs:155；frameNeighbors:true → frame)
   | { k: 'clearWall'; frame?: boolean }                                   // Actions.ClearWall(Actions.cs:171；frame=true → 四邻 SquareWallFrame 掷)
   | { k: 'placeWall'; wall: number }                                      // Actions.PlaceWall(Actions.cs:516)
   | { k: 'stalagtite' }                                                   // ActionStalagtite → WorldGen.PlaceTight
@@ -552,6 +578,9 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
         st.half[ci] = 0;
       }
       st.setTileSilent(x, y, s.tile);
+      // JJJJ：SetTile(51, setSelfFrames:true)（木①蛛网）——WorldUtils.TileFrame(x,y,true)
+      //   自+四邻 TileFrame 分派（Check* 击杀链+尘掷）。缺省（蘑菇② SetTile(71) 等）不帧。
+      if (s.frame) houseFrameDispatch(st, rng, x, y, 'setTile');
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'clearTile':
       st.setTileSilent(x, y, 0);
@@ -565,6 +594,8 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
       killUnsupportedFurniture(st, rng, x - 1, y);
       killUnsupportedFurniture(st, rng, x, y + 1);
       killUnsupportedFurniture(st, rng, x, y - 1);
+      // JJJJ：木③ ClearTile(frameNeighbors:true)——四邻 TileFrame 分派（reset=false）
+      if (s.frame) houseFrameDispatch(st, rng, x, y, 'clearTile');
       return applyChain(st, rng, steps, i + 1, x, y);
     case 'clearWall':
       // WorldUtils.ClearWall(x,y,frame)：清墙后 frame=true 时四邻 SquareWallFrame
@@ -666,6 +697,51 @@ function anchorSolidTileKF(st: TileStore, x: number, y: number): boolean {
   const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
   if (sh < 0 || !vanGenSolidType(st.type[i]) || HOUSE_SOLID_TOP.has(sh) || KF_NO_ATTACH.has(sh)) return false;
   return st.slope[i] === 0 && st.half[i] === 0;
+}
+/** Check3x3 派发族（cs:86744 case 219/220/228/231/243/247/283/300-308）——引擎缺。
+ *  m 链首分叉③：木③ ClearTile(frameNeighbors) 帧到邻域 243 灌注台（3×3 地锚族）→
+ *  Check3x3 杀 9 格带尘掷 90（Next(2)×10/格）——JS 曾不派发不掷。231 幼虫窗口特例
+ *  （cs:53158：generatingWorld && !tileSolid[225] → 不杀）。 */
+const KF_C3X3 = new Set([219, 220, 228, 231, 243, 247, 283, 300, 301, 302, 303, 304, 305, 306, 307, 308]);
+const HIVE225 = sheetTile(225);
+function check3x3KF(st: TileStore, rng: RNG, queue: number[], x: number, y: number, sheet: number): void {
+  const i0 = st.idx(x, y);
+  let col = Math.floor(st.frameX[i0]! / 18);
+  let styleBlk = 0;
+  while (col >= 3) { styleBlk++; col -= 3; }
+  const ax = x - col;
+  const fxBase = 54 * styleBlk;
+  const rowBlk = Math.floor(st.frameY[i0]! / 54);
+  const rowIn = Math.floor((st.frameY[i0]! % 54) / 18);
+  const ay = y - rowIn;
+  let bad = false;
+  for (let k = ax; k < ax + 3; k++) {
+    for (let l = ay; l < ay + 3; l++) {
+      if (!st.inBounds(k, l)) { bad = true; continue; }
+      const q = st.idx(k, l);
+      if (!st.flags[q] || (TILE_DEFS[st.type[q]]?.vanilla?.sheet ?? -1) !== sheet
+        || st.frameX[q] !== (k - ax) * 18 + fxBase
+        || st.frameY[q] !== (l - ay) * 18 + rowBlk * 54) bad = true;
+    }
+  }
+  let supOk3 = true;
+  for (let m = ax; m < ax + 3; m++) {
+    if (!supportOk(st, m, ay + 3)) { supOk3 = false; break; }    // SolidTileAllowBottomSlope
+  }
+  if (!supOk3) bad = true;
+  if (sheet === 231 && HIVE225 >= 0 && !genSolidType(HIVE225)) bad = false;   // cs:53158
+  (globalThis as { __jjC3x?: (x: number, y: number, sh: number, bad: boolean, sup: boolean) => void }).__jjC3x?.(x, y, sheet, bad, supOk3);
+  if (!bad) return;
+  for (let k = ax; k < ax + 3; k++) {
+    for (let l = ay; l < ay + 3; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const q = st.idx(k, l);
+      if (st.flags[q] && (TILE_DEFS[st.type[q]]?.vanilla?.sheet ?? -1) === sheet) {
+        killTileChest(st, rng, k, l);                            // 尘掷走表 + 引擎级联
+        queue.push(q);
+      }
+    }
+  }
 }
 /** CheckDoorClosed（cs:87176）：num=j-frameY%54/18；上/下 SolidTile 锚 + 三格
  *  active&&type10 完整性任一失守 → KillTile（裸读 type==10 的格；DropDoorItem
@@ -789,9 +865,11 @@ function kfCheckObject(st: TileStore, rng: RNG, ni: number, checked: Set<number>
   const x = ni % st.w, y = Math.floor(ni / st.w);
   const sh = TILE_DEFS[st.type[ni]]?.vanilla?.sheet ?? -1;
   const fx = st.frameX[ni]!, fy = st.frameY[ni]!;
-  // ---- JJJJ：门（cs:86021→CheckDoorClosed）/ 485 蚁狮（cs:86438→CheckSuper）----
+  // ---- JJJJ：门（cs:86021→CheckDoorClosed）/ 485 蚁狮（cs:86438→CheckSuper）/
+  //      Check3x3 族（cs:86744）----
   if (sh === 10) { checked.add(ni); checkDoorClosedKF(st, queue, x, y); return; }
   if (sh === 485) { checked.add(ni); checkSuper485KF(st, queue, x, y); return; }
+  if (KF_C3X3.has(sh)) { checked.add(ni); check3x3KF(st, rng, queue, x, y, sh); return; }
   const markBox = (bx: number, by: number, bw: number, bh: number) => {
     for (let dx = 0; dx < bw; dx++) for (let dy = 0; dy < bh; dy++) {
       if (st.inBounds(bx + dx, by + dy)) checked.add(st.idx(bx + dx, by + dy));
@@ -963,7 +1041,7 @@ function ageRoom(st: TileStore, rng: RNG, gs: GenState, r: Rect, theme: Theme, d
     for (let c = 0; c < count; c++) {
       const x = rng.int(1, r.w - 2) + r.x;
       const y = rng.int(1, r.h - 2) + r.y;
-      genRect(st, rng, [{ k: 'dither', p: 0.5 }, B2(0.3), { k: 'isEmpty' }, { k: 'setTile', tile: COBWEB }], x, y, 2, 2);
+      genRect(st, rng, [{ k: 'dither', p: 0.5 }, B2(0.3), { k: 'isEmpty' }, { k: 'setTile', tile: COBWEB, frame: true }], x, y, 2, 2);
     }
     // ② 墙侵蚀(WoodHouseBuilder.cs:36):Dither(0.85)+Blotches()+OnlyWalls(27)+
     //   SkipTiles(画族)+清墙/铺土墙 2
@@ -975,7 +1053,7 @@ function ageRoom(st: TileStore, rng: RNG, gs: GenState, r: Rect, theme: Theme, d
     genRect(st, rng, [
       { k: 'dither', p: 0.95 },
       { k: 'onlyTiles', types: [T.WOOD, TILE_BY_KEY['v_321_boreal_wood']!, TILE_BY_KEY['v_158_rich_mahogany']!] },
-      { k: 'clearTile' },
+      { k: 'clearTile', frame: true },
     ], r.x, r.y, r.w, r.h);
     return;
   }
@@ -1568,6 +1646,25 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     let ksnap = killSnap(st, rooms);
     const kstage = () => { frameKillSweep(st, rng, rooms, ksnap); ksnap = killSnap(st, rooms); };
     // 1) PlaceEmptyRooms:外壳 + 内腔墙
+    // ★JJJJ：vanilla 本段两条链均带【邻帧 TileFrame 分派】——壳 SetTileKeepWall+
+    //   SetFrames(frameNeighbors:true)（WorldUtils.TileFrame 自+四邻 reset=true）、
+    //   腔 ClearTile(frameNeighbors:true)（四邻 reset=false）→ 分派 frameImportant
+    //   Check* 击杀链（尘掷走引擎 killTileDustAmount 表——m 链首分叉②：'er' 腔清的
+    //   邻域击杀 JS 曾零掷（kstage 近似杀不带尘掷）→ vanilla span 段内多 50 掷实锤）。
+    //   补件 105/349/12（引擎未派发族，零掷杀）。er 的 kstage 扫撤（内联已覆盖，防
+    //   165 族双派发双掷）；快照刷新以隔离本阶段变更。
+    const erFrameDispatch = (x: number, y: number, mode: 'setTile' | 'clearTile'): void => {
+      genFrameNeighbors(st, rng, x, y, mode);
+      const cells: Array<[number, number]> = mode === 'setTile'
+        ? [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]] : [[1, 0], [-1, 0], [0, 1], [0, -1]];
+      for (const [dx, dy] of cells) {
+        if (!st.inBounds(x + dx, y + dy)) continue;
+        const i = st.idx(x + dx, y + dy);
+        if (!st.flags[i]) continue;
+        const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+        if (sh === 105 || sh === 349 || sh === 12) kfCheckObject(st, rng, i, new Set(), []);
+      }
+    };
     for (const r of rooms) {
       for (let x = r.x; x < r.x + r.w; x++) {
         for (let y = r.y; y < r.y + r.h; y++) {
@@ -1579,11 +1676,13 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
           st.setTileSilent(x, y, def.tile);
           st.liquid[ci0] = 0;
           st.liquidType[ci0] = 0;
+          erFrameDispatch(x, y, 'setTile');       // SetFrames(frameNeighbors:true)
         }
       }
       for (let x = r.x + 1; x < r.x + r.w - 1; x++) {
         for (let y = r.y + 1; y < r.y + r.h - 1; y++) {
           st.setTileSilent(x, y, 0);
+          erFrameDispatch(x, y, 'clearTile');     // ClearTile(frameNeighbors:true)
           // Gen(Chain(ClearTile(true), PlaceWall(WallType)))——PlaceWall 逐格墙重帧掷
           // （尾批 2-C：PlaceEmptyRooms 每房 ~3 掷/内腔格，房屋链欠掷主根因）
           placeWallRolled(st, rng, x, y, def.wall);
@@ -1596,7 +1695,10 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     for (const r of rooms) {
       addProtectedStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 8);
     }
-    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
+    // JJJJ：内联分派 + kstage 扫【并存】——内联承担 vanilla 的杀+尘掷（m 链 span
+    //   对齐）；kstage 扫兜变更格 3×3 的近似触达面（s 链 (2410,483) 484 对实证：
+    //   仅内联时漏杀）。杀幂等零重掷（165 内联查后或死或已定型，复查不再掷）。
+    kstage();
     __st?.('er', ox, oy, 0, __rn());
     // 2-4) 楼梯 / 门 / 平台
     placeStairs(st, rng, rooms, def);

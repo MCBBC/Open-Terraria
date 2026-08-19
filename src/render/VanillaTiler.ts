@@ -488,13 +488,14 @@ export interface TreeStyleData {
  *  与主贴图同矩形同变换白色彩——须在调用方的 save/restore 内执行） */
 function drawTreeGlow(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
-  sheet: number, anchor: number, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number,
+  sheet: number, anchor: number, sx: number, sy: number, sw: number, sh: number,
+  dx: number, dy: number, dw = sw, dh = sh,
 ): void {
   if (sheet !== 634) return;
   const glow = atlas.ensureVImage(anchor === 0 ? 'vanilla/Glow_316.png' : 'vanilla/Glow_317.png');
   if (!glow || !(glow.width > 0) || glow.width === 0) return;
   if (sx + sw > glow.width || sy + sh > glow.height) return;
-  ctx.drawImage(glow, sx, sy, sw, sh, dx, dy, sw, sh);
+  ctx.drawImage(glow, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
 export function drawTreeCell(
@@ -542,13 +543,12 @@ export function drawTreeCell(
         if (sx21 + 114 > img21.width || sy21 + 98 > img21.height) return;
         const lean21 = fy >= 32768 ? fy - 65536 : fy;
         if (sway !== 0) {
-          const dx21 = devSnap(px - 48 + lean21 + sway * 2);
-          const dy21 = devSnap(py + TILE + 2 - 98 + Math.abs(sway) * 2);
+          const [dx21, dy21, w21, h21] = rectSnap(px - 48 + lean21 + sway * 2, py + TILE + 2 - 98 + Math.abs(sway) * 2, 114, 98);
           ctx.save();
-          ctx.translate(dx21 + 57, dy21 + 98);
+          ctx.translate(dx21 + w21 / 2, dy21 + h21);
           ctx.rotate(sway * 0.08);
-          ctx.translate(-dx21 - 57, -dy21 - 98);
-          ctx.drawImage(img21, sx21, sy21, 114, 98, dx21, dy21, 114, 98);
+          ctx.translate(-(dx21 + w21 / 2), -(dy21 + h21));
+          ctx.drawImage(img21, sx21, sy21, 114, 98, dx21, dy21, w21, h21);
           ctx.restore();
         } else {
           ctx.drawImage(img21, sx21, sy21, 114, 98, px - 48 + lean21, py + TILE + 2 - 98, 114, 98);
@@ -562,13 +562,12 @@ export function drawTreeCell(
       const leanCrown = fy >= 32768 ? fy - 65536 : fy;
       // 风摆（原版 :8423-8457 case 323：off ×2/|×2|、rot 0.08、绕底部中心）
       if (sway !== 0) {
-        const dx15 = devSnap(px + (TILE - 80) / 2 + leanCrown + sway * 2);
-        const dy15 = devSnap(py + TILE - 80 + Math.abs(sway) * 2);
+        const [dx15, dy15, w15, h15] = rectSnap(px + (TILE - 80) / 2 + leanCrown + sway * 2, py + TILE - 80 + Math.abs(sway) * 2, 80, 80);
         ctx.save();
-        ctx.translate(dx15 + 40, dy15 + 80);
+        ctx.translate(dx15 + w15 / 2, dy15 + h15);
         ctx.rotate(sway * 0.08);
-        ctx.translate(-dx15 - 40, -dy15 - 80);
-        ctx.drawImage(img15, sx15, sy15, 80, 80, dx15, dy15, 80, 80);
+        ctx.translate(-(dx15 + w15 / 2), -(dy15 + h15));
+        ctx.drawImage(img15, sx15, sy15, 80, 80, dx15, dy15, w15, h15);
         ctx.restore();
       } else {
         ctx.drawImage(img15, sx15, sy15, 80, 80,
@@ -665,14 +664,13 @@ export function drawTreeCell(
       else { offX = (sway < 0 ? sway : 0) - Math.abs(sway) * 2; rot = sway * 0.06; pivOX = 0; pivOY = 30; }
       // ★设备像素吸附（2026-08-18 夜间横缝收官）：offX/offY 带小数 → 冠底边缘
       //   行逐帧落在不同设备像素行（最近邻），夜间剪影下 = 闪烁横缝
-      const dsx = devSnap(dx + offX), dsy = devSnap(dy + offY);
-      dx = dsx; dy = dsy; offX = 0; offY = 0;
+      const [rdx, rdy, rw2, rh2] = rectSnap(dx + offX, dy + offY, sw, sh);
       ctx.save();
-      ctx.translate(dx + pivOX, dy + pivOY);
+      ctx.translate(rdx + rw2 / 2, rdy + rh2);
       ctx.rotate(rot);
-      ctx.translate(-(dx + pivOX), -(dy + pivOY));
-      ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
-      drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, dx, dy);
+      ctx.translate(-(rdx + rw2 / 2), -(rdy + rh2));
+      ctx.drawImage(img, sx, sy, sw, sh, rdx, rdy, rw2, rh2);
+      drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, rdx, rdy, rw2, rh2);
       ctx.restore();
     } else {
       ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
@@ -1431,6 +1429,17 @@ export const renderEnv = {
 const devSnap = (v: number): number => {
   const gz = renderEnv.zoom || 1;
   return Math.round(v * gz) / gz;
+};
+/** ★矩形双边缘吸附（2026-08-19 归位缝收官）：只吸附左上角不够——80px 冠在
+ *  1.27× 下高 101.6 设备px，底边仍落小数像素，canvas 对几何边缘 AA → 冠底
+ *  最后一整行半透明（摆动下压时混入干色不可见，归位 offY=0 时暴露=横贯全冠
+ *  宽亮缝，用户截图 y≈190 实抓）。双边缘独立取整、宽高取差后底边恒整数像素，
+ *  半覆盖行消失；1.25× 整数倍缩放下取整为无操作 */
+const rectSnap = (x: number, y: number, w: number, h: number): [number, number, number, number] => {
+  const gz = renderEnv.zoom || 1;
+  const x0 = Math.round(x * gz) / gz, y0 = Math.round(y * gz) / gz;
+  const x1 = Math.round((x + w) * gz) / gz, y1 = Math.round((y + h) * gz) / gz;
+  return [x0, y0, x1 - x0, y1 - y0];
 };
 /** 428 测重板被踩状态(Game.triggerTiles428 镜像;原版 PressurePlateHelper.PressurePlatesPressed) */
 export const plates428Pressed = new Set<number>();

@@ -12,6 +12,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
 import { spreadGrass } from './Spread';
+import { vanGenSolidType } from './GenSolid';
 
 const STONE = TILE_BY_KEY['stone']!;   // tile 1
 /** 苔藓块 179-183（mossTile = 179+mossType，setMoss cs:9842） */
@@ -32,17 +33,20 @@ const MOSS_SHEETS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 6
 const SHIMMER_SAFETY = 150;            // shimmerSafetyDistance（WorldGen.cs:4104）
 
 /** WorldGen.SolidTile（cs:70155-70172）1:1：active && tileSolid && !tileSolidTop &&
- *  !halfBrick && slope==0（生成期无 inActive）。写法同源 CaveWallsPass.solidAt。
+ *  !halfBrick && slope==0（生成期无 inActive）。
  *  ★M1/M2：旧版只查 flags+def.solid，丢 half/slope/solidTop——Spread.Moss(:3516) 与
  *  countTiles(:9584) 的"实心"判定与原版 SolidTile 分叉（half/slope 是逐格状态，
- *  不可按 id 预计算，必须逐格全谓词判定） */
+ *  不可按 id 预计算，必须逐格全谓词判定）。
+ *  ★MMMMM-④：tileSolid 读**生成期可变表**（vanGenSolidType）——Moss pass 窗口期
+ *  225 蜂巢块=非实心（LifeCrystals 尾翻 false、Piles 尾才还原）等翻转族；
+ *  静态 TILE_DEFS.solid 同刻把 225 当实心 → spreadMoss 固体支/countTiles 与原版分叉 */
 const isSolidTile = (st: TileStore, x: number, y: number): boolean => {
   if (!st.inBounds(x, y)) return true;   // Main.tile 索引器 null → true（SolidTile catch 语义）
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   const d = TILE_DEFS[st.type[i]];
   if (!d) return false;
-  return !!d.solid && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
+  return vanGenSolidType(st.type[i]) && !d.platform && st.half[i] === 0 && st.slope[i] === 0;
 };
 
 /** setMoss（cs:9838-9844）：按 x 三分世界选 mossType 槽 → 全局 mossWall/mossTile。
@@ -54,17 +58,23 @@ function setMoss(st: TileStore, x: number, mossType: number[]): { wall: number; 
 
 /** Spread.Moss（cs:3497-3549）1:1 BFS：起点洞腔涂苔藓墙。
  *  实心格或已有墙 → 不扩散；active 且无墙 → 补墙；石头(1) → 换苔藓块；
- *  无墙空气 → 涂墙并向四邻扩散（有墙/实心天然阻断） */
+ *  无墙空气 → 涂墙并向四邻扩散（有墙/实心天然阻断）。
+ *  ★MMMMM-①：边界门=InWorld(x,y,1)（cs:3517）= x>=1 && x<w-1——曾写 cx<=1
+ *  误排除 x==1/y==1 边线（偏一格，纯口径修正）。
+ *  ★MMMMM-②：去重位置=原版在**入队门**查 hashSet（=已出列格集合，cs:3542-3558），
+ *  出列端无去重——同一波内被两个父格重复入队的格会**处理两次**：首访空气支写墙
+ *  并四邻扩散，次访走 wall!=0 支把非实心（坡/半砖）石头换苔藓（cs:3525-3538）。
+ *  曾在出列端 seen 跳过 → 坡/半砖石永不被换型（残差 T179/183>1 ow=54 iw=0 族）
+ *  且这些苔藓格缺失使尾段 SweepGrass 洪水的种子集缩水 → 下游连锁（ow=62/64 族） */
 function spreadMoss(st: TileStore, x: number, y: number, wall: number, tile: number): void {
   if (!st.inBounds(x, y)) return;
-  const seen = new Set<number>();
+  const seen = new Set<number>();   // hashSet：已出列格（入队门用，cs:3542）
   let frontier: Array<[number, number]> = [[x, y]];
   while (frontier.length) {
     const next: Array<[number, number]> = [];
     for (const [cx, cy] of frontier) {
-      if (cx <= 1 || cx >= st.w - 1 || cy <= 1 || cy >= st.h - 1) continue;
+      if (cx < 1 || cx >= st.w - 1 || cy < 1 || cy >= st.h - 1) continue;
       const ii = st.idx(cx, cy);
-      if (seen.has(ii)) continue;
       seen.add(ii);
       if (isSolidTile(st, cx, cy) || st.wall[ii] !== 0) {
         if (st.flags[ii]) {
@@ -74,7 +84,11 @@ function spreadMoss(st: TileStore, x: number, y: number, wall: number, tile: num
         continue;
       }
       st.wall[ii] = wall;
-      next.push([cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]);
+      // 入队门：仅排除已出列格；同波重复入队保留（重复出列语义见头注）
+      if (!seen.has(st.idx(cx - 1, cy))) next.push([cx - 1, cy]);
+      if (!seen.has(st.idx(cx + 1, cy))) next.push([cx + 1, cy]);
+      if (!seen.has(st.idx(cx, cy - 1))) next.push([cx, cy - 1]);
+      if (!seen.has(st.idx(cx, cy + 1))) next.push([cx, cy + 1]);
     }
     frontier = next;
   }
@@ -113,7 +127,10 @@ function neonMossBiome(st: TileStore, rng: RNG, gs: GenState, i: number, j: numb
         if (d < rr * 0.8 && st.type[ii] === STONE && st.flags[ii]
           && (!st.flags[st.idx(x - 1, y)] || !st.flags[st.idx(x + 1, y)]
             || !st.flags[st.idx(x, y - 1)] || !st.flags[st.idx(x, y + 1)])) {
-          spreadGrass(st, x - 1, y, STONE, neon, false);
+          // ★MMMMM：vanilla SpreadGrass(k-1,l,1,neonMossType)（cs:9800）repeat 缺省=true
+          // ——苔藓沿洞壁石头递归洪水（grassSpread<1000 全局闸）；曾写 false 只转单格，
+          // 洞壁苔藓覆盖暴跌 + countTiles rockCount 分歧滚成全 pass 掷流错位（首差@604）
+          spreadGrass(st, x - 1, y, STONE, neon, true);
         }
       }
     }
@@ -232,10 +249,13 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   }
 
   // ---- 暴露石头苔藓（cs:17725-17739）：0.05×w 个，四邻任一暴露的石头 ----
-  //  ★ 迭代上限（原版 while 无上限）：人工构造的"无洞穴"世界（单测/迷你图）会
-  //   永不命中暴露石头 → 死循环。真世界命中率 ≈1-5%，上限 500×budget 远超所需
+  //  ★MMMMM-③：原版 while(num13>0) 无迭代上限（miss 不扣预算）；曾加
+  //   `iter < budget*500` 动态上限——budget 随命中递减使上限收缩（197 命中时
+  //   13×500=6500 < 已跑 6942），真世界也会被截断（本种子 197/211 命中即出，
+  //   掷流滚进地狱段 → T381 族全错位）。改为定值保险丝：真世界 ~7500 迭代
+  //   封顶，1e7 仅防人工"无洞穴"世界死循环（原版该世界同样挂死）
   let budget = st.w * 0.05;
-  for (let iter = 0; budget > 0 && iter < budget * 500; iter++) {
+  for (let iter = 0; budget > 0 && iter < 1e7; iter++) {
     const x = rng.nextIntRange(50, st.w - 50);
     const y = rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
     if (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY) continue;

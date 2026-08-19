@@ -4,6 +4,7 @@
 import type { TileStore } from '../../TileStore';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE } from './TileRunner';
+import { vanGenSolidType } from './GenSolid';
 // 与 MushroomPass.spreadGrassOnce 共用同一洪水计数器（原版 grassSpread 是单一静态字段，
 // cs:75305-75316——限的是整场洪水总量，非单链深度）
 import { grassSpreadState } from './MushroomPass';
@@ -34,7 +35,12 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
   for (let k = x0; k < x1; k++) {
     for (let l = y0; l < y1; l++) {
       const wi = st.idx(k, l);
-      if (!st.flags[wi] || !TILE_DEFS[st.type[wi]]?.solid) enclosed = false;
+      // ★MMMMM：cs:75251 `!Main.tileSolid[type]` 读的是**生成期可变表**（LifeCrystals
+      // 尾 cs:16944 翻 225=false、Piles 尾 cs:19591 才还原——Moss pass 窗口期蜂巢块/
+      // 发光蘑菇块等按非实心算）；静态 TILE_DEFS.solid 曾把 225 当实心 → 尾段洪水
+      // enclosed 误判 → 蜂巢贴面石头漏转（#65 残差 T179>1×4 ow=64 族）。走 vanGenSolidType
+      // （含 19/239/380/427/435-439 原版 tileSolid=true 的碰撞 false 差集，尾部清剿批同源）
+      if (!st.flags[wi] || !vanGenSolidType(st.type[wi])) enclosed = false;
       // ★岩浆只 break 内层（cs:75260-75264）——后续列可再把 enclosed 拉回 false
       if (st.liquidType[wi] === 2 && st.liquid[wi] > 0) { enclosed = true; break; }
     }

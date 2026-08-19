@@ -17,6 +17,7 @@ import vanillaJson from '../../public/sprites/vanilla.json';
 import vanillaUiJson from '../../public/sprites/vanilla-ui.json';
 import assetsIndexJson from '../../public/assets-index.json';
 import { MUSIC } from '../data/Music';
+import { unzipSync } from 'fflate';   // zip 快路径页面直给解压(SW 不参与 warming)
 import { VANILLA_MISC } from '../assets/SpriteAtlas';
 
 /** 手动版本闸:仅 sounds/audios/fonts/l10n 内容变更时 +1(贴图走 JSON 内容 hash 自动) */
@@ -181,10 +182,15 @@ let plan = priorityPlan();
 state.total = plan.urls.length;
 /** zip 分片计划(InitAssetCache 拉到 manifest 才置;null=legacy 逐文件模式) */
 let zipPlan: ZipManifest | null = null;
-let partCursor = 0;             // 下一片下标(zip 模式;对应 legacy 的 chunkCursor)
+let zipRun = 0;                 // 直给循环代次号(force 重启 → 旧循环在下个检查点自行退出)
+let zipFailedAcc = 0;           // 失败总数(终态>0 → 停机等"重新下载";不自动回卷)
 const progressCbs = new Set<(s: AssetCacheState) => void>();
 
-export function assetCacheState(): AssetCacheState { return { ...state }; }
+export function assetCacheState(): AssetCacheState {
+  // done 钳制:files 批与 done 消息异步交错时内部计数可能超 total(straggler 批),
+  // 对外(UI 百分比/门槛)恒 ≤ total
+  return { ...state, done: Math.min(state.done, state.total) };
+}
 
 export function onAssetProgress(cb: (s: AssetCacheState) => void): () => void {
   progressCbs.add(cb);
@@ -281,6 +287,9 @@ export async function initAssetCache(): Promise<void> {
       state.warming = false;
     });
     startWatchdog();
+    // ★showTitle 的 warmAllAssets 可能抢在 manifest 拉取前到达(enabled=false
+    //   被 return 吞掉,之后再无人补调 → 永久 idle;此处自补一脚,幂等)
+    warmAllAssets();
   } catch { /* 注册失败(老浏览器/隐私模式)→ 降级现状,零影响 */ }
 }
 
@@ -291,9 +300,8 @@ function onSwMessage(e: MessageEvent): void {
     if (typeof d.cached === 'number' && d.version === state.version) {
       state.done = Math.min(d.cached, state.total);
       // 满缓存直接判定完成——免得每次进菜单空跑 23 个块(SW keys() 扫一遍×23)
-      if (state.done >= state.total && (zipPlan ? partCursor === 0 : chunkCursor === 0)) {
+      if (state.done >= state.total && !state.warming) {
         chunkCursor = plan.urls.length;
-        partCursor = zipPlan ? zipPlan.parts.length : 0;
         state.warming = false;
         state.phase = 'done';
       }
@@ -304,39 +312,18 @@ function onSwMessage(e: MessageEvent): void {
   } else if (d.type === 'warm-progress') {
     // done 为绝对值(SW 侧 base 偏移);failed 为当前块/片计数,跨批累计
     state.done = Math.min(d.done ?? 0, state.total);
-    state.failed = chunkFailedAcc + (d.failed ?? 0);
+    state.failed = (zipPlan ? zipFailedAcc : chunkFailedAcc) + (d.failed ?? 0);
     state.warming = true;
     state.phase = state.done >= state.total ? 'done'
       : (d.tag === 'zip' && zipPlan ? zipPhaseAt(zipPlan.parts, state.done) : phaseAt(state.done));
     lastProgressAt = Date.now();
     emit();
   } else if (d.type === 'warm-done') {
+    // legacy 逐文件分块通道(zip 模式页面直给,不经本消息)
     chunkFailedAcc += d.failed ?? 0;
     state.failed = chunkFailedAcc;
-    if (d.tag === 'zip' && zipPlan) {
-      // 片完成→按绝对 done 推进片游标(乱序/重复回包幂等)
-      let acc = 0;
-      partCursor = 0;
-      for (const p of zipPlan.parts) {
-        acc += p.files;
-        if ((d.done ?? 0) >= acc) partCursor++;
-        else break;
-      }
-    } else if ((d.done ?? 0) > chunkCursor) chunkCursor = d.done;  // 块完成→接力下一块
-    sendChunk();
-  } else if (d.type === 'warm-zip-unavailable') {
-    // SW 侧无 fflate(旧部署 vendor 缺失)→ 整会话回退逐文件;版本退回基础版
-    // (缓存名随之换——zip 版缓存里已有条目作废重下,罕见路径可接受)
-    zipPlan = null;
-    partCursor = 0;
-    chunkCursor = 0;
-    chunkFailedAcc = 0;
-    autoRetries = 0;
-    state.version = assetVersion();
-    state.total = plan.urls.length;
-    state.done = 0;
-    state.warming = true;
-    sendChunk();
+    if ((d.done ?? 0) > chunkCursor) chunkCursor = d.done;  // 块完成→接力下一块
+    sendChunkLegacy();
   }
 }
 
@@ -351,42 +338,91 @@ let chunkCursor = 0;      // 下一块在 plan.urls 的起始下标
 let chunkFailedAcc = 0;   // 跨块累计失败
 let autoRetries = 0;      // 全量跑完仍有失败时的自动补拉轮数(限速期偶发失败自愈)
 
-/** 分批发送 dispatcher:zip 模式走分片,legacy 走分块 */
+/** 分批发送 dispatcher:zip 模式起 worker 直给,legacy 走分块 */
 function sendChunk(): void {
-  if (zipPlan) { sendPart(); return; }
+  if (zipPlan) { void startZipWarm(); return; }
   sendChunkLegacy();
 }
 
-/** zip 模式:单片下发(SW 下载+解压+逐条落缓存;片内 have-set 断点续传) */
-function sendPart(): void {
-  const parts = zipPlan!.parts;
-  if (partCursor >= parts.length) {
-    // 全片完成仍有失败 → 自动补拉轮(同 legacy:重扫只补失败)
-    if (chunkFailedAcc > 0 && autoRetries < 3) {
-      autoRetries++;
-      chunkFailedAcc = 0;
-      state.failed = 0;
-      partCursor = 0;
-      sendPart();
+/** zip 直给驱动(2026-08-19 定稿,用户口径"循环下载+更新进度"):
+ *  页面预计算每片缺失清单(cache.keys 一次)→ worker 循环 fetch+unzipSync
+ *  (重活全在 worker 线程)→ 分批 postMessage 转移回页面 → 页面 cache.put
+ *  (★Cache API 仅 Window/SW 可用)+进度 emit。终态:failed>0 停机等门槛
+ *  "重新下载"(重建 worker 重扫,have-set 只补缺)——无轮次回卷/看门狗/消息重发。 */
+let zipWorker: Worker | null = null;
+
+async function startZipWarm(): Promise<void> {
+  if (!zipPlan || state.warming) return;
+  state.warming = true;
+  state.phase = zipPhaseAt(zipPlan.parts, state.done);
+  emit();
+  try {
+    // have-set:与 SW fetch 拦截/legacy warm 同款归一化(相对路径)
+    const cache = await caches.open('sw-assets-v' + state.version);
+    const have = new Set((await cache.keys()).map((r) => new URL(r.url).pathname.replace(/^\//, '')));
+    let base = 0;
+    const jobs = zipPlan.parts.map((p) => {
+      const missing = p.entries.filter((n) => !have.has(n));
+      base += p.entries.length - missing.length;
+      return { file: p.file, zipBytes: p.zipBytes, missing };
+    });
+    state.done = Math.min(base, state.total);
+    if (state.done >= state.total) {   // 已全就位(被清后自愈完成/重复调用)
+      state.warming = false;
+      state.phase = 'done';
+      writeCompleteFlag(true);
+      emit();
       return;
     }
-    state.warming = false;
-    state.phase = 'done';
-    state.done = state.total;
     emit();
-    return;
+    zipWorker?.terminate();
+    zipWorker = new Worker(new URL('./asset-warm.worker.ts', import.meta.url), { type: 'module' });
+    const myRun = ++zipRun;
+    zipWorker.onmessage = async (ev: MessageEvent) => {
+      if (myRun !== zipRun) return;   // 已被 force 重启取代,丢弃旧 worker 消息
+      const d = ev.data as {
+        type: string; names?: string[]; bufs?: ArrayBuffer[];
+        mime?: string[]; failed?: number; done?: number;
+      };
+      if (d.type === 'files' && d.names && d.bufs) {
+        if (!state.warming) return;   // 终态后残留批次('done' 与 files 处理异步交错)不回计
+        for (let i = 0; i < d.names.length; i++) {
+          try {
+            await cache.put(d.names[i], new Response(d.bufs[i], { headers: { 'Content-Type': d.mime?.[i] ?? 'application/octet-stream' } }));
+            state.done++;
+          } catch { zipFailedAcc++; }
+        }
+        state.phase = state.done >= state.total ? 'done' : zipPhaseAt(zipPlan!.parts, state.done);
+        emit();
+      } else if (d.type === 'partDone') {
+        zipFailedAcc += d.failed ?? 0;
+        state.failed = zipFailedAcc;
+        emit();
+      } else if (d.type === 'done') {
+        zipFailedAcc += 0;   // 条目级已实时累计
+        state.failed = zipFailedAcc;
+        state.warming = false;
+        state.phase = 'done';
+        if (zipFailedAcc === 0) state.done = state.total;
+        writeCompleteFlag(zipFailedAcc === 0);
+        emit();
+        zipWorker?.terminate();
+        zipWorker = null;
+      }
+    };
+    zipWorker.onerror = () => {   // worker 崩溃:按当前失败态停机(重新下载可重启)
+      if (myRun !== zipRun) return;
+      state.warming = false;
+      state.failed = Math.max(1, zipFailedAcc);
+      emit();
+      zipWorker?.terminate();
+      zipWorker = null;
+    };
+    zipWorker.postMessage({ type: 'run', jobs });
+  } catch {
+    state.warming = false;
+    emit();
   }
-  const part = parts[partCursor];
-  const base = parts.slice(0, partCursor).reduce((a, p) => a + p.files, 0);
-  state.warming = true;
-  state.phase = zipPhaseAt(parts, state.done);
-  lastProgressAt = Date.now();
-  postToSw({
-    type: 'warm-zip',
-    part: { file: part.file, files: part.files, entries: part.entries },
-    base,
-    total: state.total,
-  });
 }
 
 function sendChunkLegacy(): void {
@@ -418,6 +454,7 @@ function startWatchdog(): void {
   if (watchdogTimer || typeof setInterval === 'undefined') return;
   watchdogTimer = setInterval(() => {
     if (!state.enabled || state.phase === 'done') return;
+    if (zipPlan) return;   // zip 直给:无 SW 死亡问题,失败终态等"重新下载"
     // 停滞补发(SW 死亡/切后台 throttling):重发当前块,keys() 过滤只补缺
     if (!state.warming || Date.now() - lastProgressAt > 15_000) sendChunk();
   }, 5_000) as unknown as ReturnType<typeof setInterval>;
@@ -429,12 +466,16 @@ function startWatchdog(): void {
 export function warmAllAssets(force = false): void {
   if (!state.enabled) return;
   if (state.warming) return;
-  const finished = zipPlan ? partCursor >= zipPlan.parts.length : chunkCursor >= plan.urls.length;
+  const finished = zipPlan ? state.phase === 'done' : chunkCursor >= plan.urls.length;
   if (!force && state.done >= state.total && finished) return; // 已完成(幂等)
   if (force) {
+    zipRun++;                  // 旧 worker 消息作废
+    zipWorker?.terminate();
+    zipWorker = null;
+    zipFailedAcc = 0;
     chunkCursor = 0;
-    partCursor = 0;
     state.done = 0;
+    state.failed = 0;
     state.phase = zipPlan ? zipPhaseAt(zipPlan.parts, 0) : phaseAt(0);
   }
   chunkFailedAcc = 0;
@@ -451,9 +492,11 @@ export function __setPlanForTest(urls: string[], phases: Array<{ phase: AssetPha
 /** 测试注入 zip 分片计划(null = 回 legacy) */
 export function __setZipPlanForTest(m: ZipManifest | null): void {
   zipPlan = m;
-  partCursor = 0;
+  zipRun++;
+  zipFailedAcc = 0;
   chunkCursor = 0;
   state.total = m ? m.totalFiles : plan.urls.length;
   state.done = 0;
   state.failed = 0;
+  state.warming = false;
 }

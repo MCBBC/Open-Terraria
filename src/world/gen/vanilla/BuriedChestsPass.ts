@@ -384,11 +384,6 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 1) === 0) push(4460);
       }
       if (flag12 && rng.int(0, 39) === 0) { push(4978); prefixRolls(rng, 4978); } // cs:36568 1/40 幼翼（Prefix 调用点）
-      // 蘑菇箱 flag7（cs:36689-36702）：1/2 蘑菇矿车；1/3 三件套
-      if (flags.mushroom) {
-        if (rng.int(0, 1) === 0) push(4450);
-        if (rng.int(0, 2) === 0) { push(4779); push(4780); push(4781); }
-      }
       // 地牢箱 flag9 门（cs:36597-36611，flag10 上锁箱不给钥匙）：
       // 首只暗影钥匙必给（无则 1/3）、Ram Rune 1/8
       if (flags.dungeon && !flags.lockedBiome) {
@@ -410,6 +405,14 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       prefixRolls(rng, m);   // cs:36563+：金箱主件 SetDefaults+Prefix(-1)（50 魔镜 0 掷）
       if (rng.int(0, 19) === 0) push(997);                    // 1/20 提炼机
       else if (rng.int(0, 19) === 0) { push(930); push(931, rng.nextInt(26) + 25); } // 1/20 信号枪+闪光弹 cs:36685 Next(26)+25
+    }
+    // ★JJJJ：蘑菇箱 flag7（cs:36689-36702）——位于主件 if/else 【之外】（双路径共享），
+    //   且是两道独立 && 门（flag7 短路不掷）：1/2 矿车 + 1/3 三件套（可同中）。
+    //   曾错置 mainId 分支内且 if/else 单掷 → 无主件蘑菇箱漏掷 1（m 链 #59 21.8k
+    //   首分叉 @house3(3279,1382) 蘑菇屋宝箱 loot，vanilla span 1000 vs JS 999 实锤）。
+    if (flags.mushroom) {
+      if (rng.int(0, 1) === 0) push(4450);
+      if (rng.int(0, 2) === 0) { push(4779); push(4780); push(4781); }
     }
     if (flags.desert) { if (rng.int(0, 2) === 0) push(4423, rng.int(10, 19)); }
     else if (rng.int(0, 2) === 0) push(166, rng.int(10, 19)); // 炸弹
@@ -447,11 +450,6 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 1) === 0) push(4425);
         if (rng.int(0, 1) === 0) push(4460);
       }
-      // 蘑菇箱 flag7（cs:37007-37021：1/2 矿车 否则三件套）
-      if (flags.mushroom) {
-        if (rng.int(0, 1) === 0) push(4450);
-        else { push(4779); push(4780); push(4781); }
-      }
       // 地牢箱 flag9 门（cs:36892-36906，flag10 上锁箱不给钥匙）
       if (flags.dungeon && !flags.lockedBiome) {
         if (!gs.generatedShadowKey || rng.int(0, 2) === 0) {
@@ -473,6 +471,13 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (num25 === 6) { push(930); push(931, rng.nextInt(26) + 25); }   // cs:36977 Next(26)+25
         else { const m = [49, 50, 53, 54, 5011, 975][num25]!; push(m); prefixRolls(rng, m); }
       }
+    }
+    // ★JJJJ：蘑菇箱 flag7（cs:37007-37022）——主件 if/else 【之外】（双路径共享，
+    //   itemIndex++ 后）；if/else 单掷（与金箱分支的两道独立门不同形勿互搬）。
+    //   曾置于 mainId 分支内 → 无主件蘑菇箱漏掷 1（m 链首分叉根因）。
+    if (flags.mushroom) {
+      if (rng.int(0, 1) === 0) push(4450);
+      else { push(4779); push(4780); push(4781); }
     }
     if (rng.int(0, 4) === 0) push(flags.ice ? 5120 : 43);     // 1/5(冰箱特殊项/可疑眼球)
     if (rng.int(0, 2) === 0) push(167);                       // 1/3 炸药
@@ -652,7 +657,7 @@ function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
       if (CHEST_FURNITURE_DUST.has(sheet)) rng.nextInt(3);
   }
 }
-function killTileChest(st: TileStore, rng: RNG, x: number, y: number): void {
+export function killTileChest(st: TileStore, rng: RNG, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
   const k = st.idx(x, y);
   if (!st.flags[k]) return;

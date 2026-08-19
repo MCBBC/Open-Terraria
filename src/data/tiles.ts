@@ -364,7 +364,9 @@ def({ key: 'v_332_gold_coin_pile', name: '', decor: true, opacity: 0, pick: 0, m
 def({ key: 'v_577_sandstone_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#B2683A', drop: null, vanilla: { sheet: 577, frame: 'auto' } });
 def({ key: 'v_561_marble_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#949EB8', drop: null, vanilla: { sheet: 561, frame: 'auto' } });
 def({ key: 'v_576_granite_column', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#1E1A54', drop: null, vanilla: { sheet: 576, frame: 'auto' } });
-def({ key: 'v_214_chain', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#676767', drop: null, vanilla: { sheet: 214, frame: 'auto' } });
+// rope 旗 = Main.tileRope（Main.cs:9223-9227：213 绳/214 链/353 藤蔓绳/365 丝绳/366 蛛网绳）——
+// 五族全部可攀爬且非实心（tileSolid 无一登记）；漏旗 = 链/丝/蛛网绳不可攀（2026-08-19 绳锚批补）
+def({ key: 'v_214_chain', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#676767', drop: null, rope: true, vanilla: { sheet: 214, frame: 'auto' } });
 def({ key: 'v_578_mushroom_beam', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#AC9B6E', drop: null, light: [0, 51, 255], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 578, frame: 'auto' } });
 
 // cleared 组补全（藤蔓/荆棘，原版 51/52/62/69）
@@ -618,8 +620,10 @@ def({ platform: true, key: 'v_361_gold_frog_cage', name: '', solid: false, frame
 def({ platform: true, key: 'v_362_gold_grasshopper_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 362, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_363_gold_mouse_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 363, frame: 'style', fw: 3, fh: 2 } });
 def({ platform: true, key: 'v_364_gold_worm_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 364, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_365_silk_rope', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#9288CD', blend: true, drop: null, vanilla: { sheet: 365, frame: 'auto' } });
-def({ key: 'v_366_web_rope', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DFE8E9', blend: true, drop: null, vanilla: { sheet: 366, frame: 'auto' } });
+// 丝绳/蛛网绳：原版同绳族（tileRope[365]/[366]，非实心不挡光——Main.cs tileSolid
+// 无 365/366 登记）——曾误标 solid: true（实心墙不可攀），2026-08-19 绳锚批对齐
+def({ key: 'v_365_silk_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#9288CD', blend: true, drop: null, rope: true, vanilla: { sheet: 365, frame: 'auto' } });
+def({ key: 'v_366_web_rope', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#DFE8E9', blend: true, drop: null, rope: true, vanilla: { sheet: 366, frame: 'auto' } });
 def({ key: 'v_370_meteorite_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#7F74C2', blend: true, drop: null, light: [82, 41, 31], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 370, frame: 'auto' } });
 def({ key: 'v_385_crystal_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#571590', blend: true, drop: null, vanilla: { sheet: 385, frame: 'auto' } });
 def({ key: 'v_390_lava_lamp', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#FD2003', drop: null, light: [102, 51, 26], /* 原版 tileLighted 静态光（ApplyTileLight） */ vanilla: { sheet: 390, frame: 'style', fw: 1, fh: 2 } });

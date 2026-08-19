@@ -482,7 +482,8 @@ export class Bobber extends Entity {
 
 // ================= 钓线（DrawProj_FishingLine,Main.cs:34967-35201 1:1）=================
 
-/** 竿尖偏移表（:35017-35106 逐 case;dir<0 再 −13;gravDir 恒 1 本仓无倒置） */
+/** 竿尖偏移表（:35017-35106 逐 case;dir<0 再 −13;Y 项 ×gravDir（:35023 等
+ *  −M·gravDir——gravDir=-1 重力药水倒置时取反）） */
 const POLE_TIP: Record<number, [number, number]> = {
   2289: [43, -36], 2291: [43, -34], 2292: [46, -34], 2293: [43, -34],
   2294: [43, -30], 2295: [43, -30], 2296: [43, -30],
@@ -495,23 +496,43 @@ const POLE_STRING_COLOR: Record<number, [number, number, number]> = {
   4442: [100, 100, 200],
 };
 
+/** 钓线竿尖起点（Main.cs:34969-35111 全链，纯函数——tests/string-anchor 直测）：
+ *  mountedCenter → [mount52 死支] → ApplyItemPositionOffsetFromMount → +gfxOffY
+ *  → 逐竿竿尖偏移（dir<0 再 −13；−M·gravDir）→ 倒置抬 12 →
+ *  RotatedRelativePoint(+（8,8)−(8,8)（addGfxOffY 默认开——与 :34982 的 +gfxOffY
+ *  合计双计，原版同款行为照抄）。 */
+export function fishingPoleTipStart(
+  owner: import('./Player').Player, poleVid: number,
+): { x: number; y: number } {
+  // :34969-34982 mountedCenter → mount52 死支（:34973-34976 写 polePos 后被
+  // :34979-34980 覆写丢弃——原版同款死代码）→ mount 持物偏移 → +gfxOffY
+  const a = owner.fishingPoleAnchorBase();
+  let poleX = a.x, poleY = a.y;
+  // 逐竿竿尖偏移（:35017-35104）：+N·direction（dir<0 再 −13）、−M·gravDir
+  const dir = owner.facing || 1;
+  const [ox, oy] = POLE_TIP[poleVid] ?? [0, 0];
+  poleX += ox * dir - (dir < 0 ? 13 : 0);
+  poleY += oy * owner.gravDir;
+  // :35106-35109 倒置再抬 12（gravDir=-1——重力药水）
+  if (owner.gravDir === -1) poleY -= 12;
+  // :35110-35111 甩竿姿态旋转变换（矿车 TrackRotation/坐骑 Hover 机身角经
+  // anchorFullRotation 生效）
+  const v = owner.rotatedRelativePoint(poleX + 8, poleY + 8);
+  return { x: v.x - 8, y: v.y - 8 };
+}
+
 /** 钓线段链绘制（:35112-35201）：竿尖→浮标中心,12px 段;速度/张力摆垂;
  *  FishingLine.png(12×12,取 (0,0,W,(int)num5) 竖条) 逐段旋贴。线色 =
  *  竿基色 → TryApplyingPlayerStringColor(线饰品染料,Main.cs:35013) → GetColor
  *  alpha 重置 255（StringLine 共享模块——预乘混合精确等价;实体层画在光照合成前
- *  =整链自动乘光）。备案:RotatedRelativePoint(甩竿姿态旋转,:35115)与 mount 52
- *  竿尖修正未建模(玩家无甩竿旋转渲染/坐骑钓竿位)。 */
+ *  =整链自动乘光）。 */
 function drawFishingLine(
   ctx: CanvasRenderingContext2D, r: import('../render/Renderer').Renderer,
   b: Bobber, owner: import('./Player').Player,
 ): void {
   const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
   if (!tex) return;
-  // 竿尖 = 玩家中心 + 逐竿偏移（:34970-35106;dir<0 再 −13）
-  const dir = owner.facing || 1;
-  const [ox, oy] = POLE_TIP[b.poleVid] ?? [0, 0];
-  const px = owner.cx + ox * dir - (dir < 0 ? 13 : 0);
-  const py = owner.cy + oy;
+  const { x: px, y: py } = fishingPoleTipStart(owner, b.poleVid);
   const base = POLE_STRING_COLOR[b.poleVid] ?? [200, 200, 200];
   drawFishingStringLine(ctx, tex, px, py,
     { x: b.x, y: b.y, w: b.w, h: b.h, vx: b.vx, vy: b.vy, lai0: b.lai0 },

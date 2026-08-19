@@ -79,4 +79,24 @@ describe('迷雾入场序列（真 ensureFogData 帧推进）', () => {
     expect(p32[(150 >> 1) * fogW + (150 >> 1)]).toBe(0);          // 新世界出生点清雾
     expect(p32[(10 >> 1) * fogW + (10 >> 1)]).toBe(FOG);          // 旧世界探索点在新世界=雾
   });
+
+  // ★入场回归（用户实报"刚进世界视野未开，要走动才更新"）：多带整幅重建跨帧,
+  // 带间 markExplored（进图 tick0）点亮了【已扫过的行带】——完成时盲盖当前版本
+  // → 陈旧雾永久驻留（fv===v 早退拦住一切修复），直到移动 bump 版本走增量才修。
+  // 复现条件：fogH > 120（两带以上）+ 标记落在第一带。
+  it('多带重建跨帧 + 带间标记：完成时早扫带不丢（入场视野立即开）', () => {
+    const world = new World(800, 300, 42, 'fog-multiband');   // fogH=150 → 两带
+    for (let x = 0; x < 800; x++) for (let y = 155; y < 300; y++) world.store.setTile(x, y, 1);
+    // 帧1：loading 屏渲染推进第一带（此时尚无任何探索——版本 0）
+    ensure(world);
+    // 帧间：进图 tick0 的 markExplored（版本 0→1，出生点亮）
+    world.markExplored(400, 150, 28);
+    // 帧2..n：余带推进至完成（完成时盲盖版本 1）
+    const bands = Math.ceil(Math.ceil(300 / 2) / 120);
+    for (let f = 1; f < bands; f++) ensure(world);
+    const p32 = p32of(), fogW = fogWof();
+    expect(p32[(150 >> 1) * fogW + (400 >> 1)]).toBe(0);       // 出生点必须清雾
+    // 且版本同步后静止不再需要任何标记（fv===v 早退即正确态）
+    expect((r as unknown as { fogVersion: number }).fogVersion).toBe(world.exploredVersion);
+  });
 });

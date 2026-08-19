@@ -73,6 +73,18 @@ describe('equipStats 记忆化(内容键六路锁)', () => {
     expect(p.equipStats.fishingSkill).toBe(base);
   });
 
+  it('prefix(重铸词缀)变更 → 数值跟随(第七路;2026-08-19 review 实证曾漏)', async () => {
+    const p = mk();
+    const { vanillaItemKey } = await import('../src/data/vanillaRecipes');
+    const { ITEM_BY_KEY: IBK } = await import('../src/data/items');
+    const acc = IBK[vanillaItemKey(49)!]!;   // 词缀测试基准件(同 tests/equip-stats)
+    p.inv.armor[ACC_ARMOR_START] = { id: acc, stack: 1, prefix: 65 };   // Warding
+    expect(p.equipStats.def).toBe(4);
+    p.inv.armor[ACC_ARMOR_START] = { id: acc, stack: 1, prefix: 66 };   // Arcane(同 id 换词缀)
+    expect(p.equipStats.def).toBe(0);                                   // 防御加成消失
+    expect(p.equipStats.mana).toBe(20);                                 // 魔力加成出现
+  });
+
   it('counterWeight 掷骰已迁消费端:getter 恒 0 + yoyoBag 旗;决策端可掷', async () => {
     const p = mk();
     p.inv.armor[ACC_ARMOR_START] = { id: ITEM_BY_KEY['vi_3366_YoyoBag']!, stack: 1 };

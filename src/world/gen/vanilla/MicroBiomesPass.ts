@@ -88,6 +88,8 @@ const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
 const HARDSAND_TILE = TILE_BY_KEY['hardened_sand']!; // 原版 SetTile(397)
 const COIN_PILE = TILE_BY_KEY['v_332_gold_coin_pile']!;
 const LARGE_PILES = TILE_BY_KEY['v_186_decos_3x2']!;
+/** tile 488 倒木——PlaceTile 头生成期早退门（cs:59369，KKKKK 帐篷镜像） */
+const FALLEN_LOG_TILE = TILE_BY_KEY['v_488_fallen_log']!;
 /** tile 187(Decos 3x2 Group 2)——剑冢真剑 style17(EnchantedSwordBiome.cs:92) */
 const DECOS_GROUP2 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
 const CAMPFIRE = TILE_BY_KEY['v_215_campfires']!;
@@ -545,6 +547,10 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   //   高位)判定面同概率但逐种子结果不同,帐篷朝向/倒木/篝火三处连锁错位
   const flag = rng.vanilla.next() % 2 === 0;
   // 金币堆帐篷(cs:76-88,1/10 跳过)——`Next() % 10 != 0` 位谓词(cs:76)
+  // ★KKKKK：PlaceTile(332) 走 default 支（cs:60258-60272）——头门 !tileSolid[332]
+  //   恒过（非实心）＝**无任何空格/地基门**（覆盖写,帧/墙/液保留——cs:60259 只写
+  //   active+type）；尾 SquareTileFrame(i,j)（cs:60285）。曾自造 !active+下方实心
+  //   门 = #101 T332 残 7 格根因。生成期 488 活性格早退（cs:59369）一并镜像。
   if (rng.vanilla.next() % 10 !== 0) {
     const num5 = rng.int(1, 3); // Next(1,4)
     const num6 = flag ? 4 : -Math.trunc(num / 2);
@@ -554,30 +560,34 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
         const px = ox + num6 - m, py = num4 - n;
         if (!st.inBounds(px, py)) continue;
         const i = st.idx(px, py);
-        if (!st.flags[i] && solidAt(st, px, py + 1)) st.setTileSilent(px, py, COIN_PILE, 0, 0);
+        if (st.flags[i] && st.type[i] === FALLEN_LOG_TILE) continue;  // 488 早退（cs:59369）
+        st.type[i] = COIN_PILE; st.flags[i] = 1;                      // 只写 active+type（帧/墙/液保留）
+        genSquareTileFrame(st, rng, px, py);                          // PlaceTile 尾（cs:60285）
       }
     }
   }
   // 倒木 186(cs:89-93,1/10 跳过)——`Next() % 10 != 0` 位谓词(cs:90)
+  // ★KKKKK：PlaceTile(186)→Place3x2(i,j)+SquareTileFrame(i,j)（cs:60018-60026）——
+  //   中心锚 [i-1..i+1]×[j-1..j]（曾 [i..i+2] 整体 +1）；门=区全失活+逐列地面
+  //   SolidTile2(x±,j+1)+Boulders 排除（186/187）
   const num8 = (num - 3) * (flag ? -1 : 1);
   if (rng.vanilla.next() % 10 !== 0) {
-    const px = ox + num8;
-    placeLargePile(st, px, num4);
+    place3x2MB(st, rng, ox + num8, num4, LARGE_PILES);
   }
-  // 篝火 215(cs:94-113,1/10 跳过;frameY+36 = 未点燃行)——`Next() % 10 != 0`(cs:94)
+  // 篝火 215(cs:94-113,1/10 跳过)——`Next() % 10 != 0`(cs:94)
+  // ★KKKKK：PlaceTile(215)→Place3x2+SquareTileFrame，成功后六格 frameY+=36
+  //   （cs:97-105 未点燃行：Place3x2 写 0/18，+36 → 顶 36/底 54——金标帧实证
+  //   (2065,352)=36/(2065,353)=54）；锚判定=锚格(ox,num4) active&&type==215。
+  //   曾左锚 [ox..ox+2] 且漏 +36（#101 T215 残 12 格根因）。
   if (rng.vanilla.next() % 10 !== 0) {
-    let ok = true;
-    for (let dx = 0; dx < 3 && ok; dx++) {
-      for (let dy = -1; dy <= 0; dy++) {
-        if (!st.inBounds(ox + dx, num4 + dy) || st.flags[st.idx(ox + dx, num4 + dy)]) ok = false;
-      }
-    }
-    if (ok) {
-      for (let dx = 0; dx < 3; dx++) {
+    place3x2MB(st, rng, ox, num4, CAMPFIRE, true);
+    const ai = st.idx(ox, num4);
+    if (st.flags[ai] && st.type[ai] === CAMPFIRE) {
+      for (let dx = -1; dx <= 1; dx++) {
         for (let dy = -1; dy <= 0; dy++) {
-          // frameY = (dy+1)*18：dy=-1(顶行)→0(火焰区)、dy=0(底行)→18(柴火区)。
-          // ★曾 dy*18+36 → 顶=18(读柴火)、底=36(读第二帧火焰) = 行反+帧偏一根因
-          st.setTileSilent(ox + dx, num4 + dy, CAMPFIRE, dx * 18, (dy + 1) * 18);
+          if (!st.inBounds(ox + dx, num4 + dy)) continue;
+          const i = st.idx(ox + dx, num4 + dy);
+          if (st.type[i] === CAMPFIRE && st.flags[i]) st.frameY[i] = (st.frameY[i] ?? 0) + 36;
         }
       }
     }
@@ -587,24 +597,39 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   return true;
 }
 
-/** tile 186 LargePiles 3×2(style 0 帧,PlaceTile 默认 style)。
- *  原版经 PlaceTile → case 186 的 SolidTileAllowBottomSlope 门（WorldGen.cs:49284）：
- *  地面须实心且非半砖非顶坡——斜坡格上不生成（与 pilesPass 同门） */
-function placeLargePile(st: TileStore, x: number, y: number): void {
-  for (let dx = 0; dx < 3; dx++) {
-    if (!st.inBounds(x + dx, y)) return;
-    const gi = st.idx(x + dx, y);
-    if (!solidAt(st, x + dx, y)
-      || st.half[gi] === 1 || (st.slope[gi] >= 1 && st.slope[gi] <= 2)) return;
+/** WorldGen.Place3x2（cs:52097-52227）1:1——PlaceTile case 186/187/215 通道
+ *  （cs:60011-60026：Place3x2(i,j,type,style)+SquareTileFrame(i,j)，style=0）。
+ *  ★KKKKK 批重写：中心锚 (x-1..x+1)×(y-1..y)（Place3x2 字面）；门=3×2 区全
+ *  失活（campfire 加液体排除,cs:52127-30）+ 逐列 i∈{x-1,x,x+1} 地面
+ *  SolidTile2(i,y+1)（cs:52149）+ 186/187 的 InvalidTileForPilesOrSpeleothems
+ *  排除（cs:52141）；帧 fx=col*18（style 0 → 54*style=0）、fy=0(顶)/18(底)。
+ *  SolidTile2（cs:70178）＝active∧tileSolid∧slope0∧!half——平台族 vanilla
+ *  tileSolid 真，走 vanGenSolidType（HHHH 口径 SOLID∪{19,239,380,427,435-439}）。 */
+function place3x2MB(st: TileStore, rng: RNG, x: number, y: number, typeJs: number, campfire = false): void {
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return;        // cs:52099
+  let ok = true;
+  for (let i = x - 1; i <= x + 1; i++) {
+    for (let j = y - 1; j <= y; j++) {
+      if (!st.inBounds(i, j)) { ok = false; continue; }              // OoB＝GetTileSafely 新空格
+      const k = st.idx(i, j);
+      if (st.flags[k]) ok = false;                                   // 区内任何活性格 → 拒（cs:52123）
+      if (campfire && st.liquid[k]! > 0) ok = false;                 // Campfires 族液体排除（cs:52127）
+    }
+    if (st.inBounds(i, y + 1)) {
+      const g = st.idx(i, y + 1);
+      if (st.flags[g] && BOULDER_TILES.has(st.type[g]!)) ok = false; // InvalidTileForPiles（186/187，cs:52141）
+      if (!(st.flags[g] !== 0 && vanGenSolidType(st.type[g]!)
+        && st.slope[g] === 0 && st.half[g] === 0)) ok = false;       // SolidTile2(i,y+1)（cs:52149）
+    } else ok = false;                                               // OoB 地面列 → 拒
   }
-  for (let dx = 0; dx < 3; dx++) {
-    for (let dy = 0; dy < 2; dy++) {
-      if (!st.inBounds(x + dx, y - 1 + dy)) continue;
-      const i = st.idx(x + dx, y - 1 + dy);
-      if (st.flags[i]) continue;
-      st.setTileSilent(x + dx, y - 1 + dy, LARGE_PILES, dx * 18, dy * 18);
+  if (!ok) return;
+  for (let i = x - 1; i <= x + 1; i++) {
+    for (let j = y - 1; j <= y; j++) {
+      if (!st.inBounds(i, j)) continue;
+      st.setTileSilent(i, j, typeJs, (i - x + 1) * 18, (j - y + 1) * 18);   // cs:52202-225
     }
   }
+  genSquareTileFrame(st, rng, x, y);                                 // PlaceTile 尾（cs:60026）
 }
 
 /** MiningExplosivesBiome.Place(MiningExplosivesBiome.cs:10-76) */
@@ -987,6 +1012,10 @@ function placeMahoganyTree(
     const i = st.idx(x, y);
     if (st.flags[i] && MAHOGANY_SKIP.has(st.type[i])) return;
     if (st.wall[i] === 87) return;
+    // ★KKKKK：Actions.SetTile 默认 clearTile=true → tile.Clear(~(Wiring|Actuator))
+    //   连墙带液带帧全清（Actions.cs:203-231）——曾漏 wall 清（#101 W2178 主根因：
+    //   分枝穿花岗岩洞/预置结构带时 vanilla 清 180/64 墙、JS 残留）
+    st.wall[i] = 0;
     st.liquid[i] = 0; st.liquidType[i] = 0;
     st.frameX[i] = 0; st.frameY[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;
@@ -1064,6 +1093,7 @@ function placeMahoganyTree(
           const i = st.idx(lx, ly);
           if (st.flags[i] && LEAF_SKIP.has(st.type[i])) continue;   // SkipTiles(383,21,...)
           if (st.wall[i] === 78 || st.wall[i] === 87) continue;     // SkipWalls(78,87)
+          st.wall[i] = 0;                                           // SetTile(384) Clear 连墙清（KKKKK，同 branchCell 注）
           st.liquid[i] = 0; st.liquidType[i] = 0;
           st.frameX[i] = 0; st.frameY[i] = 0;
           st.slope[i] = 0; st.half[i] = 0;
@@ -1079,6 +1109,7 @@ function placeMahoganyTree(
     const i = st.idx(x, y);
     if (st.flags[i] && MAHOGANY_SKIP.has(st.type[i])) return;
     if (st.wall[i] === 87) return;
+    st.wall[i] = 0;   // SetTile(383,setSelfFrames) Clear 连墙清（KKKKK，同 branchCell 注）
     st.liquid[i] = 0; st.liquidType[i] = 0;
     st.frameX[i] = 0; st.frameY[i] = 0;
     st.slope[i] = 0; st.half[i] = 0;

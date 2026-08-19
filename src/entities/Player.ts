@@ -13,6 +13,8 @@ import { BuffState, BuffType } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
+import { itemFuncOfVid } from '../data/vanillaItemFunc';
+import type { TileStore } from '../world/TileStore';
 import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } from '../stats/InfoAccs';
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
@@ -60,6 +62,23 @@ export const ICE_SLIP_IDS = new Set<number>([
 ].map((k) => TILE_BY_KEY[k] ?? 0).filter((id) => id > 0));   // IceSkateSlippery(TileID.cs:149)
 export const FROZEN_SLIME_ID = TILE_BY_KEY['v_197_frozen_slime_block'] ?? 0;   // slippy2
 export const ASPHALT_ID = TILE_BY_KEY['v_198_asphalt_block'] ?? 0;             // powerrun
+
+// ---- 绳锚几何系统常量（绳锚批 2026-08-19：pulley 悬挂 + 线起点链）----
+/** ItemID.Sets.Yoyo（ItemID.cs:1166）——悠悠球物品 vid 集
+ *  （ApplyItemPositionOffsetFromMount flag9 :50660） */
+const YOYO_ITEM_VIDS = new Set([3262, 3278, 3279, 3280, 3281, 3282, 3283, 3284,
+  3285, 3286, 3287, 3288, 3289, 3290, 3291, 3292, 3315, 3316, 3317, 3389, 5294]);
+/** ItemID.Sets.IsAKite（ItemID.cs:153）——风筝物品 vid 集（flag12 :50663） */
+const KITE_ITEM_VIDS = new Set([4367, 4368, 4369, 4370, 4371, 4379, 4610, 4611,
+  4612, 4613, 4648, 4649, 4650, 4651, 4669, 4670, 4671, 4674, 4675, 4676, 4677,
+  4681, 4683, 4684]);
+/** TileID.Sets.Platforms（TileID.cs:243，sheet id）——WorldGen.IsRope 的
+ *  "绳穿平台/花盆箱/矿轨"支（WorldGen.cs:70140-70146：314 矿轨 / 380 花盆箱 /
+ *  平台族格，上下 5 格内皆有绳时该格视作绳，可攀穿） */
+const VANILLA_PLATFORM_SHEETS = new Set([19, 427, 435, 436, 437, 438, 439]);
+/** 绳索攀爬速度链（Player.cs:26016-26125）：上爬 -0.2/-0.02 下限 -8；
+ *  下滑 +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7（|vy|<0.1 归 0 :26120-26124） */
+const ROPE_IDLE_ZERO = 0.1;
 export const HONEY_FLOOR_ID = TILE_BY_KEY['v_229_honey_block'] ?? 0;           // sticky(地面材质档,与 StickyTiles 泡块阻尼不同链)
 
 const SAND_FLOOR_IDS = new Set<number>([
@@ -321,6 +340,25 @@ export class Player extends Entity {
   private lavaAccum = 0;
   animTime = 0;          // 走路动画计时
   useTime = 0;           // 通用动作冷却
+  // ---- pulley 绳索悬挂态（Player.cs:1028/1026/994/1506/1504；FindPulley :19355-19460）----
+  /** 绳上悬挂（原版 pulley）：按上/下键抓绳吸附进态；HorizontalMovement 整段不跑
+   *  （Player.cs:26366 在 pulley else 分支内）、X 钉绳列、gfxOffY 视觉偏移 */
+  pulley = false;
+  /** 悬挂侧向档（原版 pulleyDir，Player.cs:1026）：0=未定（状态机首帧归 1）、
+   *  1=绳列中心、2=中心±6px（贴绳侧挂） */
+  pulleyDir = 0;
+  /** 视觉纵向偏移（Player.cs:1504 gfxOffY）：挂绳/上绳瞬间 position.Y 跳变时
+   *  记录差值（=position.Y−新Y），渲染锚点（钓线/悠悠球线/持物）消费；
+   *  每 tick 衰减回 0（:27695-27719），钳 ±32。矿车态另有 Minecart.gfxOffY
+   *  （贴轨补偿，Renderer:8590）——两源互斥（pulley 门含 !mount.Active） */
+  gfxOffY = 0;
+  /** 台阶/挂绳视觉缓动速度（Player.cs:1506 默认 1f；FindPulley 置 2.5——
+   *  gfxOffY 衰减步长乘子。原版 Collision.StepUp/Down 会按台阶改写 1/1.5/2/2.5，
+   *  本仓台阶走 stepRenderY 独立系统不写此值） */
+  stepSpeed = 1;
+  /** 绳端下穿冷却（Player.cs:994 ropeCount）：孤立绳格按下键穿落时置 10，
+   *  归零前 FindPulley 不再抓绳（:25801-25805 门 / :26129 置位） */
+  ropeCount = 0;
   /** 手持物品 useTurn（Item.cs SetDefaults；Game 每帧注入）——itemAnimation 窗内
    *  允许移动改朝向的唯一豁免（:19546-19556） */
   itemUseTurn = false;
@@ -630,15 +668,25 @@ export class Player extends Entity {
   private _equipStatsKey = '';
 
   /** equipStats 内容键(输入清单 = computeEquipStats 读到的全部可变状态):
-   *  甲/饰品/社交 20 槽 + 染料 10 槽物品 id + extraAccessory(恶魔心→第 6 饰品位)
-   *  + usedGummyWorm + panicTime>0(受击加速 300t 窗口,布尔) + buffs.active 键集合
-   *  (getter 对 buffs 的用法全是存在性判定 has()——时长到期=键集合变化自然失效)。
-   *  内容键对一切写入方(测试直写槽位/控制台/未来新代码)天然免疫,无事件式失效可漏。 */
+   *  甲/饰品/社交 20 槽 + 染料 10 槽的【id+prefix】(★prefix 是槽条目字段——
+   *  2026-08-19 review 实证漏过:重铸换词缀不换 id = 键不变 = Warding→Arcane
+   *  数值陈旧,tests/equip-stats 的词缀用例当场红)+ extraAccessory(恶魔心→
+   *  第 6 饰品位)+ usedGummyWorm + panicTime>0(受击加速 300t 窗口,布尔)
+   *  + buffs.active 键集合(getter 对 buffs 的用法全是存在性判定 has()——
+   *  时长到期=键集合变化自然失效)。内容键对一切写入方(测试直写槽位/控制台/
+   *  未来新代码)天然免疫,无事件式失效可漏。★审计输入时勿只 grep this.*——
+   *  槽条目对象字段(s.prefix)也是输入! */
   private equipStatsKey(): string {
     const inv = this.inv;
     let k = '';
-    for (let i = 0; i < inv.armor.length; i++) k += (inv.armor[i]?.id ?? 0) + '.';
-    for (let i = 0; i < inv.dye.length; i++) k += (inv.dye[i]?.id ?? 0) + '.';
+    for (let i = 0; i < inv.armor.length; i++) {
+      const s = inv.armor[i];
+      k += (s?.id ?? 0) + 'p' + (s?.prefix ?? 0) + '.';
+    }
+    for (let i = 0; i < inv.dye.length; i++) {
+      const s = inv.dye[i];
+      k += (s?.id ?? 0) + 'p' + (s?.prefix ?? 0) + '.';
+    }
     k += inv.extraAccessory ? 'E' : 'e';
     k += this.usedGummyWorm ? 'G' : 'g';
     k += this.panicTime > 0 ? 'P' : 'p';
@@ -1948,6 +1996,8 @@ export class Player extends Entity {
       this.vx = 0; this.vy = 0;
       this.onGround = true;
       this.fallStartY = null;
+      this.pulley = false;   // mount.Active → pulley=false（:25815-25818——早退路径
+                             // 跳过下方维护段，此处直清防下车残留悬挂态）
       return;
     }
     // ---- 非矿车坐骑每 tick 维护（Mount.cs 1:1）----
@@ -1964,12 +2014,56 @@ export class Player extends Entity {
       }
     }
     const ix = this.inputX;
+    // ---- pulley 绳索悬挂（Player.cs:25801-25808 ropeCount/FindPulley 调用点 +
+    //      :25813-25976 状态机的可达子集）。门 1:1 除 controlJump（本仓 inputJump
+    //      并含 W/↑ 攀爬键，照抄会连坐拦截进态——Space-only 不触发，等价原版
+    //      controlUp≠controlJump 分离）；tongued = 狂卷之舌 buff 38 ----
+    if (this.ropeCount > 0) this.ropeCount--;                            // :25801-25804
+    const ccPulley = this.buffs.has(BuffType.Frozen) || this.buffs.has(BuffType.Stoned)
+      || this.buffs.has(BuffType.Webbed);
+    if (!this.pulley && !ccPulley && this.gravDir === 1 && this.ropeCount === 0
+      && !this.grappling[0] && !this.buffs.has(BuffType.TheTongue) && !this.mount.active) {
+      this.findPulley(world.store);                                      // :25805-25808
+    }
+    if (this.pulley) {
+      if (this.mount.active) this.pulley = false;                        // :25815-25818 上坐骑即离绳
+      if (this.vx !== 0) this.pulley = false;                            // :25942-25945 击退/横移即离
+      const num29 = Math.floor((this.x + this.w / 2) / TILE);            // :25821 头心列
+      const num30 = Math.floor((this.y - 8) / TILE);                     // :25822 头格行
+      if (!this.isRopeAt(world.store, num29, num30)) this.pulley = false; // :25946-25953 头格脱绳
+      if (this.gravDir !== 1) this.pulley = false;                       // :25954-25957
+      if (ccPulley) this.pulley = false;                                 // :25958-25961
+      if (this.grappling[0]) this.pulley = false;                        // :25973-25976 抓钩优先
+      // 左右离绳（:25930-25941）：非上爬中 + 按左右 → pulley=false + vx=±1。
+      // 原版门要求按键边沿（releaseLeft/Right——本仓玩家无左右键边沿追踪，持键
+      // 即离；按住上爬期间不触发与原版一致）
+      if (this.pulley && !this.inputUp && this.inputX !== 0) {
+        this.pulley = false;
+        if (this.vx === 0) this.vx = Math.sign(this.inputX);
+      }
+      if (this.pulley) {
+        // X 钉绳列（:26138-26152）：pulleyDir 0/1=列中心、2=中心+6·direction
+        //（:25824-25827 首帧归一 0→1）
+        if (this.pulleyDir === 0) this.pulleyDir = 1;
+        let num37 = num29 * TILE + 8 - this.w / 2;
+        if (this.pulleyDir === 2) num37 = num29 * TILE + 8 - this.w / 2 + 6 * this.facing;
+        this.x = num37;
+      }
+    }
     // :19546-19556 门：itemAnimation 窗内仅 useTurn 物品允许移动改朝向
     // （动画窗代理 = itemAnimTicks>0 || useTime>0——非挥砍武器以 useTime 计窗）
     const animBusy = this.itemAnimTicks > 0 || this.useTime > 0;
     // Scutlix/Santank 瞄准中锁朝向（Player.cs:19549 flag3 的 AllowDirectionChange 门；
     // 声明在冲刺分支外——滑行段的改向门同样消费）
     const mountAllowDir = !this.ridingMount || this.mount.allowDirectionChange;
+    // pulley 悬挂期 HorizontalMovement 整段不跑（Player.cs:26366 在 pulley else
+    // 分支内）——只保留朝向翻转（:25842-25851，pulleyDir 1 居中档按反方向键翻面）
+    if (this.pulley) {
+      if (this.pulleyDir === 1) {
+        if (this.facing === 1 && this.inputX < 0) this.facing = -1;
+        if (this.facing === -1 && this.inputX > 0) this.facing = 1;
+      }
+    } else
     // 冲刺滑行期（dashDelay<0）常规加速/摩擦/限速整体跳过——Run 各分支 dashDelay>=0 门
     // （Player.cs:19559/:19575/:19675/:19705），速度由 DashMovement 阻尼段独占
     if (this.dashDelay >= 0) {
@@ -2095,7 +2189,9 @@ export class Player extends Entity {
       if ((!animBusy || this.itemUseTurn) && mountAllowDir) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）
     }
 
-    // 绳索攀爬(原版:身体中心格为绳(213/353/950-9)时无重力,上/下键攀爬,左右离绳)
+    // 绳索攀爬 + pulley 悬挂（原版 Player.cs:25985-26177 pulley 段的本仓合流：
+    // 身体中心格为绳（Space/W/↑ 攀爬键位模型）走既有速度链；中心格脱绳但
+    // pulley 未离（绳端/孤立绳格——头格仍绳）走 :26118-26137 的绳端支）
     // 坐骑飞行 vy 独占标记（本 tick 悬停/飞行接管时置 true）——下方"松键截断上升"
     // 手感段须让位：原版 Player 无此截断，且 Hover 接受 controlUp 单独爬升
     //（Mount.cs:3396-3424），截断会把不按跳的爬升当场掐死
@@ -2107,20 +2203,29 @@ export class Player extends Entity {
       && TILE_DEFS[st.type[st.idx(ropeTx, ropeTy)]]?.rope);
     this.onRope = ropeHere;
     if (ropeHere && !this.inWater) {
-      // 原版攀爬(Player.cs:17169-17212):上爬 vy>0 先阻尼×0.7,-3 以上每 tick -0.2
-      // (之下 -0.02,下限 -8);下滑镜像(+0.2/+0.1,上限 maxFallSpeed);静止 vy*=0.7
-      if (this.inputJump) {
-        if (this.vy > 0) this.vy *= 0.7;
-        this.vy -= this.vy > -3 ? 0.2 : 0.02;
-        if (this.vy < -8) this.vy = -8;
-      } else if (this.inputDown) {
-        if (this.vy < 0) this.vy *= 0.7;
-        this.vy += this.vy < 3 ? 0.2 : 0.1;
-        if (this.vy > MAX_FALL_SPEED) this.vy = MAX_FALL_SPEED;
-      } else {
-        this.vy *= 0.7;
-      }
+      // 攀爬速度链（Player.cs:26016-26125——见 ropeClimbVy 注）
+      this.ropeClimbVy();
       this.fallStartY = null; // 绳上不计摔伤
+    } else if (this.pulley) {
+      // 绳端悬挂支（:25985-26137）：头格列/行 num34/num36，上下邻格（:25998 flag17）
+      const num34 = Math.floor((this.x + this.w / 2) / TILE);
+      const num35 = Math.floor((this.y - 16) / TILE);        // :25994 上身格行
+      const num36 = Math.floor((this.y - 8) / TILE);         // :25995 头格行
+      const midRope = this.isRopeAt(st, num34, num36 - 1) || this.isRopeAt(st, num34, num36 + 1);
+      if (midRope) {
+        // 中段绳但身体中心已顶出（攀到绳上端）：速度链照走（:26016-26125）
+        this.ropeClimbVy();
+      } else if (this.inputDown) {
+        // 孤立绳格按下 → 穿落（:26127-26132）：ropeCount=10 拦 FindPulley 十 tick
+        this.ropeCount = 10;
+        this.pulley = false;
+        this.vy = 1;
+      } else {
+        // 挂在绳端（:26133-26137）：vy 钉 0、y 钉上身格顶+22
+        this.vy = 0;
+        this.y = num35 * TILE + 22;
+      }
+      this.fallStartY = null; // 绳上不计摔伤（:25987 fallStart）
     } else
     // 微光物理（Player.cs:24115-24127 else if (shimmerWet || shimmering) 分支）
     if (this.inShimmer && !this.shimmering) {
@@ -2759,6 +2864,9 @@ export class Player extends Entity {
     this.checkCrackedBrickBreak(game);
     // 钩爪牵引（GrappleMovement 1:1，Player.cs:22338-22483）——moveAndCollide 前覆写速度
     this.grappleMovement(game);
+    // ---- gfxOffY 衰减（Player.cs:27695-27719，TileCollision 前位）。FindPulley
+    //      落位同 tick 即衰减一次（原版 FindPulley :25805 早于本段）----
+    this.decayGfxOffY();
     // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；
     // 碰撞前捕获——碰撞会清零 vy。Game 侧消费：落在起爆器 411 上触发电路）
     const impactVy = this.vy;
@@ -4043,6 +4151,399 @@ export class Player extends Entity {
     const y0 = Math.floor((this.y - extra) / 16), y1 = Math.floor((this.y - 0.01) / 16);
     for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) if (st.isSolid(x, y)) return false;
     return true;
+  }
+
+  // ===================== pulley 绳索悬挂（Player.cs:19355-19460 / :25801-26177） =====================
+
+  /** 原版 Main.tileRope[type] 直判（不含 IsRope 的"绳穿平台"支——FindPulley 的
+   *  孤立绳格检查 :19376 用的是裸 tileRope，非 IsRope；出界=非绳） */
+  private rawRopeAt(st: TileStore, x: number, y: number): boolean {
+    if (!st.inBounds(x, y)) return false;
+    const k = st.idx(x, y);
+    return (st.flags[k] & 1) !== 0 && !!TILE_DEFS[st.type[k]]?.rope;
+  }
+
+  /** WorldGen.IsRope(x,y)（WorldGen.cs:70118-70152，rangeToCheck=5）：
+   *  tileRope 族直判；314 矿轨/380 花盆箱/平台族格 → GetRopeEnds 上下 5 格内
+   *  均有绳才算（绳穿平台可攀）。pulley 抓绳门（FindPulley :19363）与
+   *  维持退出门（:25950）的判定源 */
+  isRopeAt(st: TileStore, x: number, y: number): boolean {
+    if (!st.inBounds(x, y)) return false;
+    const k = st.idx(x, y);
+    if (!(st.flags[k] & 1)) return false;              // !active
+    const def = TILE_DEFS[st.type[k]];
+    if (!def) return false;
+    if (def.rope) return true;                         // Main.tileRope
+    const sheet = def.vanilla?.sheet ?? -1;
+    if (sheet !== 314 && sheet !== 380 && !VANILLA_PLATFORM_SHEETS.has(sheet)) return false;
+    // GetRopeEnds（WorldGen.cs:70069-70105，treatEmptyAsTheRopeEnd=false，range 5）
+    let topRopeY = -1;
+    for (let i = 1; i <= 5; i++) {
+      const ty = y - i;
+      if (!st.inBounds(x, ty)) break;                  // InWorld 出界即止
+      if (!this.rawRopeAt(st, x, ty)) break;           // !active→break；绳→置位 break
+      topRopeY = ty;
+      break;
+    }
+    let bottomRopeY = -1;
+    for (let j = 1 + (y - topRopeY); j <= 6; j++) {
+      const ty = topRopeY + j;
+      if (!st.inBounds(x, ty)) break;
+      if (!this.rawRopeAt(st, x, ty)) break;
+      bottomRopeY = ty;
+      break;
+    }
+    return topRopeY !== -1 && bottomRopeY !== -1;
+  }
+
+  /** Collision.SolidCollision（Collision.cs:2713-2746）：盒与实心非平台格相交
+   *  判定（扫描域 x∈[⌊px/16⌋−1, ⌊(px+w)/16⌋+2]、y 同构；halfBrick 只算下半
+   *  8px；已致动格不计）。FindPulley 吸附位碰撞预检（:19413/:19430/:19447） */
+  private solidCollision(st: TileStore, px: number, py: number): boolean {
+    const x0 = Math.floor(px / TILE) - 1;
+    const x1 = Math.floor((px + this.w) / TILE) + 2;
+    const y0 = Math.floor(py / TILE) - 1;
+    const y1 = Math.floor((py + this.h) / TILE) + 2;
+    for (let i = x0; i <= x1; i++) {
+      for (let j = y0; j <= y1; j++) {
+        if (!st.inBounds(i, j)) continue;              // 原版钳世界边（近缘差异登记）
+        const k = st.idx(i, j);
+        const def = TILE_DEFS[st.type[k]];
+        if (!def?.solid || def.platform) continue;     // tileSolid && !tileSolidTop（:2728）
+        if (st.wire[k] & 32) continue;                 // !inActive()（致动缩入）
+        let ty = j * TILE, th = TILE;
+        if (st.half[k]) { ty += 8; th -= 8; }          // halfBrick：下半实心（:2734-2737）
+        if (px + this.w > i * TILE && px < i * TILE + TILE
+          && py + this.h > ty && py < ty + th) return true;
+      }
+    }
+    return false;
+  }
+
+  /** FindPulley（Player.cs:19355-19460）：按上/下键且头顶格（(y−8)/16 行）为绳
+   *  时抓绳——X 吸附绳列三档（中心/±6px 取最近），y 落 num3（孤立绳格=格顶+22，
+   *  连续绳=原位），gfxOffY 记录 y 跳变的视觉补偿，stepSpeed=2.5、vx=0。
+   *  调用门（:25805）：!pulley && !frozen && !webbed && !stoned && gravDir==1 &&
+   *  ropeCount==0 && 无钩爪 && !tongued && !mount.Active（!controlJump 门因本仓
+   *  inputJump 并含 W/↑（攀爬键）会连坐拦截，省略——Space-only 照旧不触发，
+   *  与原版 controlUp≠controlJump 等价）。原版另调 Main.cameraX 平滑
+   *  （:19417/:19433/:19450）——本仓相机无对应载体，略 */
+  findPulley(st: TileStore): void {
+    if (this.stoolInUse || (!this.inputUp && !this.inputDown)) return;   // :19357
+    const num = Math.floor((this.x + this.w / 2) / TILE);                // :19361 头心列
+    const num2 = Math.floor((this.y - 8) / TILE);                        // :19362 头格行
+    if (!this.isRopeAt(st, num, num2)) return;                           // :19363
+    let num3 = this.y;                                                   // :19367 目标 y
+    // :19368-19379 孤立绳格（上、下邻格均非 tileRope）→ 挂到格顶+22（挂绳下沿）
+    if (!this.rawRopeAt(st, num, num2 - 1) && !this.rawRopeAt(st, num, num2 + 1)) {
+      num3 = num2 * TILE + 22;
+    }
+    const num5 = num * TILE + 8 - this.w / 2 + 6;    // :19381 右贴档
+    const num6 = num * TILE + 8 - this.w / 2;        // :19382 居中档
+    const num7 = num * TILE + 8 - this.w / 2 - 6;    // :19383 左贴档
+    let num8 = 1;                                    // :19384 最近档号
+    let num9 = Math.abs(this.x - num5);              // :19385
+    if (Math.abs(this.x - num6) < num9) { num8 = 2; num9 = Math.abs(this.x - num6); }
+    if (Math.abs(this.x - num7) < num9) { num8 = 3; }
+    let num4 = num5;                                 // :19380 初值（下三支覆写）
+    if (num8 === 1) { num4 = num5; this.pulleyDir = 2; this.facing = 1; }   // :19396-19401
+    if (num8 === 2) { num4 = num6; this.pulleyDir = 1; }                    // :19402-19406
+    if (num8 === 3) { num4 = num7; this.pulleyDir = 2; this.facing = -1; }  // :19407-19412
+    // 三连试位（:19413-19459）：选定档 → 右贴档 → 左贴档，首个无实心碰撞的落位
+    if (!this.solidCollision(st, num4, this.y)) { this.pulleySnap(num4, num3); return; }
+    num4 = num5; this.pulleyDir = 2; this.facing = 1;                       // :19427-19429
+    if (!this.solidCollision(st, num4, this.y)) { this.pulleySnap(num4, num3); return; }
+    num4 = num7; this.pulleyDir = 2; this.facing = -1;                      // :19444-19446
+    if (!this.solidCollision(st, num4, this.y)) { this.pulleySnap(num4, num3); }
+  }
+
+  /** FindPulley 落位三连写（:19419-19425/:19436-19442/:19453-19459 同构段）：
+   *  pulley 置位 + X 吸附 + gfxOffY 视觉补偿 + stepSpeed=2.5 + Y 落位 + vx 清零 */
+  private pulleySnap(x: number, y: number): void {
+    this.pulley = true;
+    this.x = x;
+    this.gfxOffY = this.y - y;     // 跳变差（渲染锚消费，每 tick 衰减回 0）
+    this.stepSpeed = 2.5;
+    this.y = y;
+    this.vx = 0;
+  }
+
+  /** gfxOffY 衰减（Player.cs:27695-27719）：每 tick 向 0 收敛 num106×stepSpeed
+   *  （num106=1+|vx|/3——跑动加速收敛），过零截断，钳 ±32 */
+  decayGfxOffY(): void {
+    const num106 = 1 + Math.abs(this.vx) / 3;
+    if (this.gfxOffY > 0) {
+      this.gfxOffY -= num106 * this.stepSpeed;
+      if (this.gfxOffY < 0) this.gfxOffY = 0;
+    } else if (this.gfxOffY < 0) {
+      this.gfxOffY += num106 * this.stepSpeed;
+      if (this.gfxOffY > 0) this.gfxOffY = 0;
+    }
+    if (this.gfxOffY > 32) this.gfxOffY = 32;
+    if (this.gfxOffY < -32) this.gfxOffY = -32;
+  }
+
+  /** 绳上攀爬速度链（Player.cs:26016-26125）：上爬（W/Space 皆入攀爬键位模型）
+   *  vy>0 阻尼×0.7 后 −0.2（>−3 档）/−0.02（≤−3 档），下限 −8；下滑镜像
+   *  +0.2/+0.1 上限 maxFallSpeed；静止 ×0.7 且 |vy|<0.1 归 0（:26120-26124） */
+  ropeClimbVy(): void {
+    if (this.inputJump) {
+      if (this.vy > 0) this.vy *= 0.7;
+      this.vy -= this.vy > -3 ? 0.2 : 0.02;
+      if (this.vy < -8) this.vy = -8;
+    } else if (this.inputDown) {
+      if (this.vy < 0) this.vy *= 0.7;
+      this.vy += this.vy < 3 ? 0.2 : 0.1;
+      if (this.vy > MAX_FALL_SPEED) this.vy = MAX_FALL_SPEED;
+    } else {
+      this.vy *= 0.7;
+      if (Math.abs(this.vy) < ROPE_IDLE_ZERO) this.vy = 0;
+    }
+  }
+
+  // ===================== 绳锚几何（RotatedRelativePoint / 坐骑持物偏移 / 线起点） =====================
+
+  /** 原版 Player.fullRotation 的本仓聚合源：矿车 TrackRotation（:27805-27806）
+   *  → Minecart.rotation；坐骑 Hover 机身倾斜（Mount.cs:3468-3521）→
+   *  MountInstance.fullRotation；无骑乘 = 0（本仓玩家侧无独立 fullRotation 字段，
+   *  睡床躺平角只在渲染层 sleepingTransformOps） */
+  get anchorFullRotation(): number {
+    if (this.ridingCart && this.cart) return this.cart.rotation;
+    if (this.ridingMount) return this.mount.fullRotation;
+    return 0;
+  }
+
+  /** 锚链用的 Mount.PlayerOffset（Mount.cs:409-423 = playerYOffsets[frame]）：
+   *  矿车族数组由 SetAsMinecart 填 8×3（:2720-2726；51/53 屁股车档 -10/-8 → 10）
+   *  ——vanilla-mounts.json 提取器未跑该帮助函数致缺数组，此处硬补
+   *  （Minecart.ts:763 num2=8 同源）；非矿车坐骑走 MOUNT_DATA 原值 */
+  private get anchorPlayerOffset(): number {
+    if (!this.mount.active) return 0;
+    if (this.mount.isCart) return this.mount.type === 51 || this.mount.type === 53 ? 10 : 8;
+    return this.mount.playerOffset;
+  }
+
+  /** MountedCenter（Player.cs:3189-3199：(x+w/2, y+BaseHeight/2+HeightOffsetHitboxCenter)）。
+   *  坐骑态经 Bottom−21−PlayerOffset 等价形（原版 h=42+heightBoost、BaseHeight=42
+   *  → boost 项经 Bottom 自消；本仓坐骑不改玩家盒，Bottom 同锚一致）。折叠凳
+   *  （SetStats(26,26,26) :14077 → HeightOffsetHitboxCenter=26−26=0）= 基础 42
+   *  盒中心（本仓 h 已含 +26）。常规 = 盒中心 */
+  get mountedCenter(): { x: number; y: number } {
+    if (this.mount.active) {
+      return { x: this.x + this.w / 2, y: this.y + this.h - 21 - this.anchorPlayerOffset };
+    }
+    const baseH = this.h - (this.stoolInUse ? Player.STOOL_BOOST : 0);
+    return { x: this.x + this.w / 2, y: this.y + baseH / 2 };
+  }
+
+  /** RotatedRelativePoint（Player.cs:4063-4089）：pos 先 +gfxOffY（addGfxOffY），
+   *  绕 pivot=Bottom+(0,gfxOffY) 旋 rot，再 + (0,−num2)+(0,num2).RotatedBy(rot)
+   *  （num2=PlayerOffset/2+4，未骑乘 PlayerOffset=0→num2=4）。fullRotation=0 时
+   *  mount 项自消 → 输出 = pos+(0,gfxOffY)。sleeping/sitting 偏移支未移植
+   *  （两态 gfxOffY 恒 0 且与线锚消费互斥，登记） */
+  rotatedRelativePoint(px: number, py: number,
+    opts: { reverseRotation?: boolean; addGfxOffY?: boolean; rotation?: number } = {},
+  ): { x: number; y: number } {
+    const rotation = opts.rotation ?? this.anchorFullRotation;
+    const rot = opts.reverseRotation ? -rotation : rotation;             // :4065
+    const cos = Math.cos(rot), sin = Math.sin(rot);
+    const pivX = this.x + this.w / 2;                                    // Bottom.X
+    const pivY = this.y + this.h + this.gfxOffY;                         // :4070
+    const num2 = Math.floor(this.anchorPlayerOffset / 2) + 4;            // :4071
+    let y = py;
+    if (opts.addGfxOffY !== false) y += this.gfxOffY;                    // :4073-4076
+    const dx = px - pivX, dy = y - pivY;
+    return {
+      // :4072 vector2 = (0,−num2)+(0,num2).RotatedBy(rot) = (−num2·sin, −num2+num2·cos)
+      x: pivX + dx * cos - dy * sin - num2 * sin,
+      y: pivY + dx * sin + dy * cos - num2 + num2 * cos,
+    };
+  }
+
+  /** 手持物 vid（heldItem→ITEM_DEFS→vid；空手 −1） */
+  heldVid(): number {
+    const held = this.inv.heldItem();
+    if (!held) return -1;
+    const def = ITEM_DEFS[held.id];
+    return def ? (def.vid ?? viIdFromKey(def.key)) : -1;
+  }
+
+  /** 手持物 useStyle：itemfunc.useStyle + 提取缺口补（悠悠球族 Item.cs:30018-30033
+   *  goto case 链丢 useStyle → 全族 5；钓竿族 case 链同理 → 1；其余缺 → 1） */
+  private heldUseStyleOf(vid: number): number {
+    const us = vid >= 0 ? itemFuncOfVid(vid)?.useStyle : undefined;
+    if (us) return us;
+    if (YOYO_ITEM_VIDS.has(vid)) return 5;
+    return 1;
+  }
+
+  /** ApplyItemPositionOffsetFromMount 的 bodyFrame 行（:50644 bodyFrame.Y/Height）。
+   *  原版行由 Player.UpdateFrames 维护；本仓帧行渲染侧（Renderer.playerFrameRows），
+   *  此处按原版链序重算可达分支。消费分支中只有"动画中"useStyle 5（悠悠球 flag9）
+   *  需要行——aim 给全（n21=itemRotation·direction :35994，<−0.75→行2 / >0.6→行4，
+   *  gravDir=−1 互换 :35996-36010；缺省 0=行 3 中档带）。相位族（1/6/7/11/13）
+   *  本仓单计时器模型无 itemAnimationMax，取动画中点行（该族无钓竿/悠悠球消费，
+   *  登记）；坐骑分支以下（抓钩/游泳/行走行）骑乘态不可达（:36056 先拦） */
+  private mountOffsetBodyRow(itemAnimating: boolean, aim?: number): number {
+    const vid = this.heldVid();
+    const tf = vid >= 0 ? itemFuncOfVid(vid) : null;
+    const useStyle = this.heldUseStyleOf(vid);
+    const holdStyle = tf?.holdStyle ?? 0;
+    const styleNotExcluded = useStyle !== 10 && useStyle !== 14 && useStyle !== 15;  // :35716 flag6
+    if (itemAnimating && styleNotExcluded) {
+      switch (useStyle) {
+        case 1:
+        case 13: return 2;          // 三相 3/2/1（:35882-35895/:35971-35985）→ 中点近似
+        case 7: return 2;           // 两相 3/2（:35897-35907）→ 中点近似
+        case 2:
+        case 3:
+        case 12: return 3;          // :35908/:35948/:35967
+        case 11: return 3;          // 三相 4/3/2（:35912-35925）→ 中点近似
+        case 9: return 0;           // :35927-35929
+        case 6: return 3;           // 两相 3/2（:35931-35947）→ 后段近似
+        case 4: return 2;           // :35959-35961
+        case 8: return 0;           // :35963-35965
+        case 5: {
+          if (vid === 281 || vid === 986) return 2;                      // :35988-35991
+          const n21 = aim ?? 0;                                          // :35994
+          if (n21 < -0.75) return this.gravDir === -1 ? 4 : 2;           // :35996-36002
+          if (n21 > 0.6) return this.gravDir === -1 ? 2 : 4;             // :36004-36010
+          return 3;                                                      // :35995
+        }
+        default: break;               // 其余 style 无行写入（链下落）
+      }
+    }
+    // pulley 行（:36015-36023）骑乘互斥不可达，省略
+    if (holdStyle === 1 || holdStyle === 3 || holdStyle === 5) return 3; // :36026-36041
+    if (holdStyle === 2) return 2;                                       // :36030-36033
+    if (holdStyle === 7) return 11;                                      // :36042-36045
+    if (holdStyle === 4 && this.vy === 0 && this.gravDir === 1) return 0; // :36046-36051
+    if (this.shieldRaised) return 10;                                    // :36052-36055
+    return this.mount.active ? this.mount.bodyFrame : 0;                 // :36056-36060
+  }
+
+  /** ApplyItemPositionOffsetFromMount（Player.cs:50638-50795）：坐骑上持物位置
+   *  偏移。1456 唯一有表坐骑 = 54 迅猛龙（MountID.cs:142，IsTransformationMount/
+   *  PlayerIsHidden——变身坐骑；其余 63 坐骑 zero 恒 0 直接返回加零）。opts：
+   *  - itemAnimating：itemAnimation>0 代理（缺省 itemAnimTicks>0||useTime>0；
+   *    悠悠球 channel 期原版 itemAnimation 持续刷新恒>0，本仓 useTime 单发模型
+   *    由消费端传 channel 态补）
+   *  - aim：mountOffsetBodyRow 的瞄准角原料 */
+  applyItemPositionOffsetFromMount(px: number, py: number,
+    opts: { itemAnimating?: boolean; aim?: number } = {},
+  ): { x: number; y: number } {
+    if (!this.mount.active) return { x: px, y: py };                     // :50640-50643
+    const dir = this.facing, gd = this.gravDir;                          // Directions :3687
+    const vid = this.heldVid();
+    const tf = vid >= 0 ? itemFuncOfVid(vid) : null;
+    const useStyle = this.heldUseStyleOf(vid);
+    const holdStyle = tf?.holdStyle ?? 0;
+    const flag = (opts.itemAnimating ?? false) || this.itemAnimTicks > 0 || this.useTime > 0;
+    const num = this.mountOffsetBodyRow(flag, opts.aim);                 // :50644
+    const flag2 = !flag && holdStyle > 0;                                // :50648
+    if (!flag && !flag2) return { x: px, y: py };                        // :50649-50652
+    const flag3 = useStyle === 5;                                        // :50653
+    const flag4 = useStyle === 2;                                        // :50655
+    const flag5 = useStyle === 9;                                        // :50656
+    const flag6 = !!tf?.fishingPole;                                     // :50657
+    const flag7 = useStyle === 14;                                       // :50658
+    const flag8 = useStyle === 8;                                        // :50659
+    const flag9 = vid > 0 && YOYO_ITEM_VIDS.has(vid);                    // :50660
+    const flag10 = useStyle === 11;                                      // :50661
+    const flag11 = vid === 3542;                                         // :50662 星云怒涛
+    const flag12 = vid > 0 && KITE_ITEM_VIDS.has(vid);                   // :50663
+    const flag13 = holdStyle === 1;                                      // :50664
+    const flag14 = holdStyle === 2;                                      // :50665
+    const flag15 = holdStyle === 5;                                      // :50666
+    let zx = 0, zy = 0;
+    const mul = (ox: number, oy: number) => { zx += ox * dir; zy += oy * gd; };
+    if (this.mount.type === 54) {                                        // :50667
+      if (flag4) {
+        if (flag) mul(7, -4); else mul(3, 2);                            // :50669-50678
+      } else if (flag6) {
+        mul(-2, 0);                                                      // :50680-50683 钓竿
+      } else if (flag5) {
+        if (flag) mul(14, -10); else mul(3, 2);                          // :50684-50693
+      } else if (flag10) {
+        if (flag) mul(4, 0); else mul(1, 0);                             // :50695-50704
+      } else if (flag8) {
+        mul(6, 0);                                                       // :50706-50709
+      } else if (flag7) {
+        if (flag) mul(-6, 6); else mul(-10, 10);                         // :50710-50719
+      } else if (flag12) {
+        mul(4, -4);                                                      // :50721-50723 风筝
+      } else if (flag15) {
+        mul(6, 0);                                                       // :50725-50728
+      } else if (flag13 && !flag) {
+        mul(1, 4);                                                       // :50729-50732
+      } else if (flag14) {
+        if (flag && vid === 186) {
+          // :50735-50737 芦苇管：(−4,0).RotatedBy((pos−Center).ToRotation())
+          const a = Math.atan2(py - this.cy, px - this.cx);
+          zx += -4 * Math.cos(a);
+          zy += -4 * Math.sin(a);
+        } else {
+          mul(6, 0);                                                     // :50739-50742
+        }
+      } else if (flag9) {
+        if (num === 2) mul(10, -10);                                     // :50746-50757 悠悠球
+        else if (num === 3) mul(8, 0);
+        else if (num === 4) mul(2, 2);
+      } else if (flag11) {
+        if (num === 2) mul(-10, 0);                                      // :50759-50772 星云怒涛
+        else if (num === 3) mul(10, 0);
+        else if (num === 4) mul(10, 0);
+      } else if (flag3) {
+        mul(4, 0);                                                       // :50774-50777
+      } else {
+        if (num === 1) mul(1, -1);                                       // :50778-50792
+        else if (num === 2) mul(4, 2);
+        else if (num === 3) mul(2, 0);
+      }
+    }
+    return { x: px + zx, y: py + zy };                                   // :50794
+  }
+
+  /** 手持瞄准角 n21（=itemRotation·direction，行档阈值原料）：参照点 =
+   *  RotatedRelativePoint(MountedCenter) − (0, 2·gravDir)（:46560 + :46640）；
+   *  itemRotation = atan2(dy·dir, dx·dir) − fullRotation（:46730）；n21 = ×direction（:35994） */
+  private itemAimRotDir(tx: number, ty: number): number {
+    const mc = this.mountedCenter;
+    const rp = this.rotatedRelativePoint(mc.x, mc.y);
+    const dx = tx - rp.x;
+    const dy = ty - (rp.y - 2 * this.gravDir);
+    return (Math.atan2(dy * this.facing, dx * this.facing) - this.anchorFullRotation) * this.facing;
+  }
+
+  /** 悠悠球/配重球线起点（Main.cs:27794-27803 DrawProjDirect aiStyle99 段）：
+   *  MountedCenter → mount52（狼人）修正 → +gfxOffY → ApplyItemPositionOffsetFromMount。
+   *  target = 光标世界坐标（mount54 行档 aim）；channelActive = 悠悠球滞留态
+   *  （itemAnimation>0 代理——原版 channel 期持续刷新） */
+  yoyoStringAnchor(target?: { x: number; y: number }, channelActive?: boolean): { x: number; y: number } {
+    const mc = this.mountedCenter;
+    let x = mc.x, y = mc.y;
+    if (this.mount.active && this.mount.type === 52) {                   // :27795-27798
+      x += this.facing * 14;
+      y += -10;
+    }
+    y += this.gfxOffY;                                                   // :27802
+    const aim = target ? this.itemAimRotDir(target.x, target.y) : undefined;
+    return this.applyItemPositionOffsetFromMount(x, y, { itemAnimating: channelActive, aim });
+  }
+
+  /** 钓线竿尖起点链前段（DrawProj_FishingLine Main.cs:34967-34982）：
+   *  mountedCenter → [mount52 死支] → ApplyItemPositionOffsetFromMount → +gfxOffY。
+   *  ★mount52 支（:34973-34976）写的是 polePos，紧接 :34979-34980 用偏移后的
+   *  mountedCenter 覆写 polePos——该修正被丢弃（原版同款死代码，照抄保留） */
+  fishingPoleAnchorBase(): { x: number; y: number } {
+    const mc = this.mountedCenter;
+    let x = mc.x, y = mc.y;
+    if (this.mount.active) {
+      if (this.mount.type === 52) { /* :34973-34976 死支（:34979 覆写） */ }
+      ({ x, y } = this.applyItemPositionOffsetFromMount(x, y));          // :34978-34980
+    }
+    y += this.gfxOffY;                                                   // :34982
+    return { x, y };
   }
   /** 上一 tick 的世界 store 引用（fixedUpdate 缓存；dashWallAhead 探测用） */
   private lastStore: import('../world/TileStore').TileStore | null = null;

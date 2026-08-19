@@ -26,10 +26,10 @@ describe('Item.color 静态表（Item.cs SetDefaults 全 10 件）', () => {
     // 源贴图灰 (106,106,108)（实测 terraria-assets Item_23 平均色），tint (0,80,255,100)
     const data = new Uint8ClampedArray([106, 106, 108, 255, 0, 0, 0, 0]);
     blendItemColorTint(data, VANILLA_ITEM_COLOR[23]);
-    // a=100/255≈0.392：out = 0.392*(0,80,255) + 0.608*(106,106,108) ≈ (64,110,198)
-    expect(data[0]).toBeGreaterThanOrEqual(60); expect(data[0]).toBeLessThanOrEqual(68);
-    expect(data[1]).toBeGreaterThanOrEqual(104); expect(data[1]).toBeLessThanOrEqual(116);
-    expect(data[2]).toBeGreaterThanOrEqual(190); expect(data[2]).toBeLessThanOrEqual(205);
+    // a=100/255≈0.392：out = 0.392*(0,80,255) + 0.608*(106,106,108) ≈ (64,96,166)
+    expect(data[0]).toBeGreaterThanOrEqual(58); expect(data[0]).toBeLessThanOrEqual(70);
+    expect(data[1]).toBeGreaterThanOrEqual(90); expect(data[1]).toBeLessThanOrEqual(102);
+    expect(data[2]).toBeGreaterThanOrEqual(158); expect(data[2]).toBeLessThanOrEqual(175);
     expect(data[2]).toBeGreaterThan(data[1]);      // 蓝 > 绿 = 蓝色调
     expect(data[3]).toBe(255);                      // 透明像素（后 4 位）不动
     expect(data[4]).toBe(0);

@@ -557,7 +557,7 @@ describe('悠悠球 ai0 状态机/魔法线', () => {
     const y2 = new YoyoProj(50 * 16 + 30, 89 * 16, 20, 4, 547, 0, () => true,
       () => ({ x: 50 * 16 + 40, y: 89 * 16 }));
     y2.ai0 = -2;
-    y2.pierceLeft = 5;
+    (y2 as unknown as { pierceLeft: number }).pierceLeft = 5;
     let cw2 = 0;
     y2.counterweight = () => { cw2++; };
     y2.fixedUpdate(1 / 60, hooks);

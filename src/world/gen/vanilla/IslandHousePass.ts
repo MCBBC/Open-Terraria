@@ -84,6 +84,10 @@ function islandHouse(
       const idx = st.idx(x, y);
       st.type[idx] = SUNPLATE; st.flags[idx] = 1; st.liquid[idx] = 0; st.liquidType[idx] = 0;
       st.wall[idx] = 0;
+      // cs:79907-79908 halfBrick(false)/slope(0)——壳填先清半砖/坡位再由挖空支
+      // 重置 active，室内格(挖空只 active(false) 不动 half/slope)由此继承 0。
+      // 不清则浮空岛地形的旧坡/半砖位残留(9293480 #69 Hf=4/Sl=2 根因)
+      st.half[idx] = 0; st.slope[idx] = 0;
     }
   }
   // 内部挖空 + Disc Wall 82(cs:79903-79914):仅原墙为 0 处,跳过顶行两角。
@@ -140,12 +144,14 @@ function islandHouse(
       }
     }
   }
-  // 对侧补柱(cs L48264-48273)
+  // 对侧补柱(cs L48264-48273)：与壳填同款五连——active/liquid=0/type/wall=0/
+  // halfBrick false/slope 0(cs:79969-79974)
   const pillarX = i + (halfW + 1) * -dir - dir;
   for (let y = j1; y <= j2 + 1; y++) {
     if (!st.inBounds(pillarX, y)) continue;
     const idx = st.idx(pillarX, y);
-    st.type[idx] = SUNPLATE; st.flags[idx] = 1; st.wall[idx] = 0;
+    st.type[idx] = SUNPLATE; st.flags[idx] = 1; st.liquid[idx] = 0; st.liquidType[idx] = 0;
+    st.wall[idx] = 0; st.half[idx] = 0; st.slope[idx] = 0;
   }
   // 天空宝箱主件（cs:79983-79996）：序 0-3 = 159 气球/65 星怒/158 马蹄铁/2219 星磁铁；
   // 第 4 间起 Next(4) 全四随机——★旧实现只有三件且 >2 时 Next(3)，2219 永不出现

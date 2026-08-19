@@ -17,7 +17,7 @@ import { BuffType } from '../stats/Buffs';
  *  组内按累积 chance 扫描——两条独立掷骰会让双落空/双中,2026-08-13 修正)
  *  src=StatusNPC 源码行号(提取器锚);gate=原版条件门档记(见文件头) */
 interface StatusEntry { buff: number; chance: number; durMin: number; durMax: number; mut?: number; src?: number; gate?: string }
-const TABLE = tableJson as unknown as Record<string, StatusEntry[]>;
+export const TABLE = tableJson as unknown as Record<string, StatusEntry[]>;
 
 /** Enemy 侧已实装的 buff 字段(秒)。效果对照(全部回源 NPC.cs UpdateNPC_BuffApplyDOTs
  *  :92577 起,lifeRegen 单位=2×HP/s;受击穿甲在 checkArmorPenetration :81912) */

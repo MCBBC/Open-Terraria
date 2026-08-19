@@ -363,6 +363,7 @@ import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
+import { mlElipseVec } from '../entities/bossAI_duke_moonlord';
 import { wingDrawOf, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS, stealthFactors } from '../data/vanillaWingVisuals';
 import { dyeApplyOf, applyDyePass, type DyeApply } from '../data/vanillaDyes';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Uniforms } from '../fx/SM2Effect';
@@ -5988,7 +5989,9 @@ export class Renderer {
     if (e.ai0 === -2 && ex26) {
       const fh = Math.floor(ex26.sh / 4);
       const row = Math.min(3, Math.floor(Math.max(0, e.ai1) / 8));
-      let ox = 26; if (side !== 0) ox = ex26.sw - 26;
+      // 镜像基 = Extra_17 宽(54)−26=28(:24420-24422 vector42 的翻转基是 value45.Width,
+      // 即便本分支画的是 Extra_26)——曾误用 Extra_26 宽(46)−26=20,偏 8px(2026-08-19 修)
+      let ox = 26; if (side !== 0) ox = 54 - 26;
       ctx.save();
       ctx.translate(e.cx, e.cy);
       if (side !== 0) ctx.scale(-1, 1);
@@ -6006,9 +6009,11 @@ export class Renderer {
       if (ex19) {
         // 椭圆轨道瞳孔：Vector2FromElipse(rot(localAI[0]), (30,66)×localAI[1]) + (−signX,3)。
         // 轨道角/开度由 moonLordHandAI 每帧镜像写入 lai0/lai1（原版 localAI[0]/[1]，
-        // 曾存 handOf WeakMap 渲染层不可达 = 瞳孔恒居中隐没，2026-08-19 渲染断链修）
+        // 曾存 handOf WeakMap 渲染层不可达 = 瞳孔恒居中隐没，2026-08-19 渲染断链修）。
+        // ★椭圆 = Utils.Vector2FromElipse（Utils.cs:948：重参数化 + sizes/2，行程
+        // 只有 naive cos/sin 的一半）——曾 naive 令瞳孔甩出掌洞外=双手无瞳(2026-08-19 修)
         const th = e.lai0, k = e.lai1;
-        const ex = Math.cos(th) * 30 * k, ey = Math.sin(th) * 66 * k;
+        const [ex, ey] = mlElipseVec(th, 30 * k, 66 * k);
         ctx.save();
         ctx.translate(e.cx - sx + ex, e.cy + 3 + ey);
         ctx.drawImage(ex19.img, ex19.sx, ex19.sy, ex19.sw, ex19.sh, -ex19.sw / 2, -ex19.sh / 2, ex19.sw, ex19.sh);
@@ -6127,9 +6132,13 @@ export class Renderer {
         ctx.restore();
       }
       if (ex19) {
+        // 瞳孔椭圆 = Vector2FromElipse((27,59)×localAI[1])（Main.cs:24464 + Utils.cs:948
+        // 重参数化 + sizes/2）——naive 实现行程 ×2 令头瞳孔(cy+58)整个甩进脸后
+        // = 眼窝恒空(2026-08-19 修;真值行程 max(13.5,29.5),俯视时半露于洞底 cy+32)
         const th = e.lai0, k = e.lai1;
+        const [ex, ey] = mlElipseVec(th, 27 * k, 59 * k);
         ctx.save();
-        ctx.translate(e.cx + Math.cos(th) * 27 * k, e.cy + Math.sin(th) * 59 * k);
+        ctx.translate(e.cx + ex, e.cy + ey);
         ctx.rotate(rot);
         ctx.drawImage(ex19.img, ex19.sx, ex19.sy, ex19.sw, ex19.sh, -ex19.sw / 2, -ex19.sh / 2, ex19.sw, ex19.sh);
         ctx.restore();
@@ -6201,10 +6210,10 @@ export class Renderer {
       ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -40, -40, r.sw, r.sh);
       ctx.restore();
     }
-    // 瞳孔（:24498-24503）
+    // 瞳孔（:24498-24503）——Vector2FromElipse((30,30)×localAI[1])：圆情形 = 半径/2×单位向量
     if (ex19) {
       const th = e.lai0, k = e.lai1, sc = e.lai2;   // scale = localAI[2]（出生 0 渐入 1）
-      const ex = Math.cos(th) * 30 * k, ey = Math.sin(th) * 30 * k;
+      const [ex, ey] = mlElipseVec(th, 30 * k, 30 * k);
       ctx.save();
       ctx.globalAlpha = alpha;
       ctx.translate(e.cx + ex, e.cy + ey);
@@ -10465,27 +10474,35 @@ export class Renderer {
     }
     const buf = this.fogP32!;
     const FOG = 0xff080505;
+    // 脏盒双向重扫（幂等：纯 ex 现值的函数）。增量路径与整幅完成兜底共用。
+    // ★双向写:未探索=FOG,已探索=0(清雾)。旧 canvas 版用全新 ImageData
+    // (全零)+putImageData 隐式清了探索区;CPU 直写共享缓冲后漏了 else
+    // 分支 → 新探索格保持旧 FOG 值 = 迷雾不清(用户实报 10 秒延迟)
+    const applyDirty = (): boolean => {
+      const d = world.exploredDirty;
+      if (!d) return false;
+      const bx0 = Math.max(0, d.x0 >> 1), by0 = Math.max(0, d.y0 >> 1);
+      const bx1 = Math.min(w - 1, d.x1 >> 1), by1 = Math.min(h - 1, d.y1 >> 1);
+      const dw = bx1 - bx0 + 1, dh = by1 - by0 + 1;
+      if (dw <= 0 || dh <= 0) return false;
+      for (let by = 0; by < dh; by++) {
+        for (let bx = 0; bx < dw; bx++) {
+          const x0 = (bx0 + bx) * 2, y0 = (by0 + by) * 2;
+          let seen = false;
+          for (let dy = 0; dy < 2 && !seen; dy++) for (let dx = 0; dx < 2; dx++) {
+            const xx = x0 + dx, yy = y0 + dy;
+            if (xx < st.w && yy < st.h && ex[yy * st.w + xx]) { seen = true; break; }
+          }
+          buf[(by0 + by) * w + (bx0 + bx)] = seen ? 0 : FOG;
+        }
+      }
+      return true;
+    };
     // 脏矩形增量(有缓冲 + 有脏包围盒 → 只更新受影响块;全图点亮/首帧 → 整幅重建)
     const dirty = world.exploredDirty;
     if (this.fogVersion !== -1 && dirty) {
-      const bx0 = Math.max(0, dirty.x0 >> 1), by0 = Math.max(0, dirty.y0 >> 1);
-      const bx1 = Math.min(w - 1, dirty.x1 >> 1), by1 = Math.min(h - 1, dirty.y1 >> 1);
-      const dw = bx1 - bx0 + 1, dh = by1 - by0 + 1;
-      if (dw > 0 && dh > 0) {
-        for (let by = 0; by < dh; by++) {
-          for (let bx = 0; bx < dw; bx++) {
-            const x0 = (bx0 + bx) * 2, y0 = (by0 + by) * 2;
-            let seen = false;
-            for (let dy = 0; dy < 2 && !seen; dy++) for (let dx = 0; dx < 2; dx++) {
-              const xx = x0 + dx, yy = y0 + dy;
-              if (xx < st.w && yy < st.h && ex[yy * st.w + xx]) { seen = true; break; }
-            }
-            // ★双向写:未探索=FOG,已探索=0(清雾)。旧 canvas 版用全新 ImageData
-            // (全零)+putImageData 隐式清了探索区;CPU 直写共享缓冲后漏了 else
-            // 分支 → 新探索格保持旧 FOG 值 = 迷雾不清(用户实报 10 秒延迟)
-            buf[(by0 + by) * w + (bx0 + bx)] = seen ? 0 : FOG;
-          }
-        }
+      if (applyDirty()) {
+        world.exploredDirty = null;   // 吃掉脏盒：只留未消费的新标记（防盒随探索无限增长）
         this.fogVersion = world.exploredVersion;
         this.fogIncrUpdates++;
         return this.fogImage;
@@ -10517,7 +10534,15 @@ export class Renderer {
       }
     }
     this.fogRebuildRow = yEnd;
-    if (yEnd >= h) this.fogVersion = world.exploredVersion;   // 完成才落版本(带重建期半新半旧可先用)
+    if (yEnd >= h) {
+      // ★完成兜底重扫（2026-08-19 用户实报"刚进世界视野未开，要走动才更新"根因）：
+      //   整幅重建跨多帧（fogH/120 带），期间 markExplored（进图 tick0 标记出生点）
+      //   可能点亮【已扫过的早行带】——早带按旧数据写完不再回头，完成却盲盖当前
+      //   版本 → fv===v 早退把陈旧雾焊死，直到玩家移动 bump 版本走增量才修。
+      //   dirty 盒 = 历次未消费标记的并集，完成时补扫一次即全修正（幂等）。
+      if (applyDirty()) world.exploredDirty = null;
+      this.fogVersion = world.exploredVersion;   // 完成才落版本(带重建期半新半旧可先用)
+    }
     return this.fogImage;
   }
 

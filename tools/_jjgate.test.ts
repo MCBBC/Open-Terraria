@@ -3,7 +3,7 @@
 //   SW_JJG_XY=1178,1120 npx vitest run tools/_jjgate.test.ts
 import { it } from 'vitest';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { generateWorld } from '../src/world/gen/WorldGen';
+import { generateWorld, __setGenStateForProbe } from '../src/world/gen/WorldGen';
 import { RNG } from '../src/core/rng';
 
 const RUN = process.env.SW_JJG === '1';
@@ -54,6 +54,14 @@ function labelOf(file: string, line: number): string {
     };
   }
   const roomsAt: string[] = [];
+  // 捕获 #59 入口 gs 的保护矩形（看 JS 是否在 (1200-1270,530-580) 有矩形）
+  (globalThis as { __swStatCap?: (gs: unknown, st: unknown) => void }).__swStatCap = (gs) => {
+    const g = gs as { protectedRects?: Array<{ x0: number; y0: number; x1: number; y1: number }> };
+    if (!g?.protectedRects) return;
+    const near = g.protectedRects.filter((r) => r.x0 < 1300 && r.x1 > 1150 && r.y0 < 620 && r.y1 > 480);
+    console.log(`#入口保护矩形(近 1150-1300×480-620): ${near.length} 个`);
+    for (const r of near) console.log(`  rect (${r.x0}-${r.x1},${r.y0}-${r.y1})`);
+  };
   (globalThis as { __swHouseRooms?: (ox: number, oy: number, rooms: string) => void }).__swHouseRooms
     = (ox, oy, rooms) => { roomsAt.push(`${ox},${oy}: ${rooms}`); };
   const RNGp = RNG.prototype as unknown as Record<string, unknown>;

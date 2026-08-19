@@ -29,20 +29,32 @@ function labelOf(file: string, line: number): string {
   const oInt = RNG.prototype.int;
   const oNextInt = RNG.prototype.nextInt;
   const oNIR = RNG.prototype.nextIntRange;
+  const ctxLo = Number(process.env.SW_JJS_CTX_LO ?? -1), ctxHi = Number(process.env.SW_JJS_CTX_HI ?? -1);
+  let rollIdx = 0;
+  const ctxLog: string[] = [];
+  const noteCtx = (): void => {
+    if (ctxLo < 0 || rollIdx < ctxLo || rollIdx > ctxHi) return;
+    const st = (new Error().stack ?? '').split('\n').filter((q) => q.includes('/src/'));
+    const frames = st.slice(0, 6).map((q) => {
+      const m = q.match(/([^/]+\.ts):(\d+):\d+/);
+      return m ? `${m[1]}:${m[2]}` : q.slice(0, 40);
+    }).join(' < ');
+    ctxLog.push(`#${rollIdx} ${frames}`);
+  };
   RNG.prototype.next = function (...a: unknown[]) {
-    if (inWindow.on) lines.push('d');
+    if (inWindow.on) { noteCtx(); rollIdx++; lines.push('d'); }
     return (oNext as (...x: unknown[]) => number).apply(this, a);
   };
   RNG.prototype.int = function (...a: unknown[]) {
-    if (inWindow.on) lines.push(`b ${(a[0] as number)} ${(a[1] as number) + 1}`);
+    if (inWindow.on) { noteCtx(); rollIdx++; lines.push(`b ${(a[0] as number)} ${(a[1] as number) + 1}`); }
     return (oInt as (...x: unknown[]) => number).apply(this, a);
   };
   RNG.prototype.nextInt = function (...a: unknown[]) {
-    if (inWindow.on) lines.push(`a ${(a[0] as number)}`);
+    if (inWindow.on) { noteCtx(); rollIdx++; lines.push(`a ${(a[0] as number)}`); }
     return (oNextInt as (...x: unknown[]) => number).apply(this, a);
   };
   RNG.prototype.nextIntRange = function (...a: unknown[]) {
-    if (inWindow.on) lines.push(`b ${(a[0] as number)} ${(a[1] as number)}`);
+    if (inWindow.on) { noteCtx(); rollIdx++; lines.push(`b ${(a[0] as number)} ${(a[1] as number)}`); }
     return (oNIR as (...x: unknown[]) => number).apply(this, a);
   };
   const RNGp = RNG.prototype as unknown as Record<string, unknown>;
@@ -72,5 +84,6 @@ function labelOf(file: string, line: number): string {
     RNG.prototype.nextIntRange = oNIR;
   }
   writeFileSync(OUT, lines.join('\n') + '\n');
-  console.log(`span lines=${lines.length} → ${OUT}`);
+  if (ctxLog.length) writeFileSync(OUT.replace(/\.txt$/, '.ctx.txt'), ctxLog.join('\n') + '\n');
+  console.log(`span lines=${lines.length} ctx=${ctxLog.length} → ${OUT}`);
 }, 900_000);

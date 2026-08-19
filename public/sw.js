@@ -2,22 +2,15 @@
  * 职责:①拦截 /sprites|fonts|l10n|sounds|audios 的 GET 走 Cache API 磁盘缓存
  * (cache-first,未命中网络回填;l10n 例外=网络优先+离线回退,见 fetch 段注)——
  * 对 new Image()/fetch/@font-face 全透明;
- * ②接收页面 AssetCache 驱动器的 {init/warm/warm-zip/warm-cancel} 消息做后台下载:
- *   warm = 逐文件(legacy 回退);warm-zip = 分片 zip 下载+SW 内解压直写缓存
- *   (12003 请求 → ~10 请求;fflate unzipSync 单文件 filter——★异步 API 内部
- *   new Worker,ServiceWorkerGlobalScope 无 Worker 构造器只能 Sync 族);
- *   两者片前/块前 cache.keys() 建已缓存集只补缺失(断点续传+被系统清理后自愈)。
+ * ②接收页面 AssetCache 驱动器的 {init/warm/warm-cancel} 消息做后台下载
+ *   (warm=逐文件,legacy 回退)。2026-08-19 起 zip 快路径改【页面直给】:
+ *   AssetCache 在页面侧 fetch 分片 zip → fflate 解压 → 直接 cache.put(页面
+ *   与 SW 共用同一 CacheStorage,key 同构)——SW 零参与,无消息协议/看门狗。
  * 版本:缓存名 sw-assets-v{version},version 由页面运行时计算(vanilla.json+
  * vanilla-ui.json 内容 hash [+ zip manifest contentHash] + CACHE_BUSTER)——
  * activate/init 清除非当前版本。
  * 不缓存:HTML/JS/API(vite hash 自足;碰它会有更新卡壳风险)。 */
 'use strict';
-
-/* fflate UMD(pack-assets.mjs 拷自 node_modules/fflate/umd)——★try/catch 必备:
- * importScripts 抛错会炸整个 SW 安装(旧部署无 vendor 文件时靠这层兜底,
- * 页面收 warm-zip-unavailable 后整会话回退逐文件 warm) */
-let HAS_FFLATE = false;
-try { importScripts('vendor/fflate.js'); HAS_FFLATE = typeof self.fflate === 'object'; } catch (err) { /* zip 模式不可用 */ }
 
 const ASSET_RE = /\/(sprites|fonts|l10n|sounds|audios)\//;
 const CACHE_PREFIX = 'sw-assets-v';
@@ -191,54 +184,6 @@ async function warm(tag, urls, base) {
  * put"粒度(每步 <100ms),事件循环每文件回泵——watchdog/cancel/进度不饿死,
  * 无整片解压内存尖刺;每 200 文件 60ms 喘息(Cache API 落盘排空)。
  * 中途被杀:watchdog 重发本片,have-set 跳过已落条目=片内断点续传。 */
-const ZIP_MIME = { png: 'image/png', wav: 'audio/wav', mp3: 'audio/mpeg', woff2: 'font/woff2', json: 'application/json' };
-const zipMimeOf = (n) => ZIP_MIME[n.slice(n.lastIndexOf('.') + 1)] ?? 'application/octet-stream';
-
-async function warmZip(part, base, totalAll) {
-  if (lastWarm.running) return;   // 与 legacy warm 共用重入守卫(看门狗补发不叠跑)
-  warmAbort = false;
-  const done0 = base + 0;
-  lastWarm = { done: done0, total: totalAll, failed: 0, running: true };
-  const cache = await getCache();
-  // ① 片下载:单文件语义重试 ×3(300/600ms 退避)
-  let buf = null;
-  for (let a = 0; a < 3 && !buf && !warmAbort; a++) {
-    try {
-      const res = await fetch('assets-zip/' + part.file);   // 名带内容 hash → HTTP 缓存安全
-      if (res && res.ok) buf = await res.arrayBuffer();
-    } catch (err) { /* 重试 */ }
-    if (!buf && a < 2) await new Promise((r) => setTimeout(r, 300 * (a + 1)));
-  }
-  if (!buf) {
-    lastWarm = { done: done0, total: totalAll, failed: part.files, running: false };
-    postMessageToPages({ type: 'warm-done', tag: 'zip', done: done0, total: totalAll, failed: part.files, aborted: warmAbort, conc: 1, emaMs: 0 });
-    return;
-  }
-  // ② 片内断点续传:have-set 归一化与 legacy warm 逐字同构(三方 key 同构根基)
-  const have = new Set((await cache.keys()).map((r) => new URL(r.url).pathname.replace(/^\//, '')));
-  const todo = part.entries.filter((n) => !have.has(n));
-  let done = done0 + (part.entries.length - todo.length);
-  let failed = 0;
-  lastWarm.done = done;
-  // ③ 逐文件解压落缓存(合成 Response 必带 Content-Type——<img>/decode 依赖)
-  let putCount = 0;
-  for (const name of todo) {
-    if (warmAbort) break;
-    let data = null;
-    try { data = self.fflate.unzipSync(buf, { filter: (f) => f.name === name })[name]; } catch (err) { /* 单文件坏不炸片 */ }
-    if (data) {
-      try { await cache.put(name, new Response(data, { headers: { 'Content-Type': zipMimeOf(name) } })); done++; }
-      catch (err) { failed++; }
-    } else failed++;
-    lastWarm.done = done; lastWarm.failed = failed;
-    if ((done & 63) === 0) postProgress('zip', done, totalAll, failed);
-    if (++putCount % 200 === 0) await new Promise((r) => setTimeout(r, 60));   // 落盘喘息
-  }
-  lastWarm = { done, total: totalAll, failed, running: false };
-  postProgress('zip', done, totalAll, failed);
-  postMessageToPages({ type: 'warm-done', tag: 'zip', done, total: totalAll, failed, aborted: warmAbort, conc: 1, emaMs: 0 });
-}
-
 /** 旧版本缓存 GC(2026-08-19):版本随消息变但 sw.js 字节没变时 activate 不触发,
  * 旧缓存成孤儿——init 时顺带清(legacy 模式同款问题一并修) */
 function gcOldCaches() {
@@ -283,13 +228,6 @@ self.addEventListener('message', (e) => {
     if (!currentVersion) return; // 无版本(未 init 且消息未带)拒绝,防写错缓存
     // ★必须 waitUntil:否则 message 事件结束后 Chrome 随时终止 SW
     e.waitUntil(warm(d.tag || '', d.urls || [], d.base || 0).catch(() => {}));
-  } else if (d.type === 'warm-zip') {
-    if (!currentVersion) return;
-    if (!HAS_FFLATE) {   // 旧部署无 vendor/fflate → 页面整会话回退逐文件
-      postMessageToPages({ type: 'warm-zip-unavailable' });
-      return;
-    }
-    e.waitUntil(warmZip(d.part, d.base || 0, d.total || 0).catch(() => {}));
   } else if (d.type === 'warm-cancel') {
     warmAbort = true;
   } else if (d.type === 'ping') {

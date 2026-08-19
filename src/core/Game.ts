@@ -9156,6 +9156,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         && (itemId === undefined || this.player.inv.heldItem()?.id === itemId),
       yoyoInPlay: () => this.entities.projectiles.some((q) =>
         q instanceof YoyoProj && !q.dead && q.ai0 >= -1),
+      // 光标世界坐标（线起点 mount54 行档 aim——Main.cs:27794-27803 消费链的
+      // player.itemRotation 原料，Player.itemAimRotDir 复算；同悠悠球 target 闭包）
+      aimTarget: () => {
+        const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+        return { x: wx, y: wy };
+      },
       // Main.mouseX - Main.lastMouseX（:64614）——fixedUpdate 快照
       mouseDelta: () => ({ dx: this._mouseDX, dy: this._mouseDY }),
       spawnClone: (x, y, vx, vy, dmg, kb, projId, crit, apen) => {
@@ -13264,16 +13270,21 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         if (e) {
           // Wiring.cs:2479-2483：雕像产怪 value=0（不掉钱）+ SpawnedFromStatue
           e.spawnedFromStatue = true;
-          this.entities.add(e, 'enemies');
+          // 雕像小动物（兔/松鼠/蝴蝶等 critter 表）进 critters 桶（原版 Main.npc
+          // 一体表：可被虫网捕捉 + 挥击一击死——此前恒投 enemies 桶致雕像产
+          // 松鼠/兔子无法捕捉，2026-08-19 修）
+          if (e.vanilla?.critter) this.entities.add(e, 'critters');
+          else this.entities.add(e, 'enemies');
           return true;
         }
         return false;
       },
       mechSpawnOk: (px: number, py: number, type: number) => {
-        // NPC.MechSpawn（NPC.cs:7399-7483）：同 type（等价组互计）三阈值拒绝
+        // NPC.MechSpawn（NPC.cs:7399-7483）：同 type（等价组互计）三阈值拒绝。
+        // 遍历 Main.npc 全表语义 = enemies + critters 两桶（雕像产 critter 也在计数）
         const grp = NPC_MECH_GROUPS.find((g) => g.includes(type));
         let total = 0, near = 0, mid = 0;
-        for (const o of this.entities.enemies) {
+        for (const o of [...this.entities.enemies, ...this.entities.critters]) {
           const en = o as Enemy;
           const t = en.vanillaId;
           if (t == null) continue;

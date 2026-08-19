@@ -8,15 +8,13 @@
 // 产物 public/assets-zip/manifest.json + p*.zip；状态 game/.pack-assets-state.json
 // （★不放 public/——vite 全量拷 dist 会泄漏）。
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, copyFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { zipSync } from 'fflate';
 
 const PUB = join(import.meta.dirname, '..', 'public');
 const OUT_DIR = join(PUB, 'assets-zip');
 const STATE_PATH = join(import.meta.dirname, '..', '.pack-assets-state.json');
-const FFLATE_SRC = join(import.meta.dirname, '..', 'node_modules', 'fflate', 'umd', 'index.js');
-const VENDOR_PATH = join(PUB, 'vendor', 'fflate.js');
 
 /** 输入目录（web 相对路径 = zip 条目名 = SW cache key），顺序 = 打包优先级（确定性） */
 export const INPUT_DIRS = ['fonts', 'sprites/vanilla-ui', 'sprites/vanilla', 'sounds', 'audios/music'];
@@ -132,10 +130,8 @@ for (const k of Object.keys(state.files)) if (!(k in hashes)) delete state.files
 const contentHash = sha1(Object.entries(hashes).map(([p, h]) => `${p}:${h}\n`).join(''));
 
 // 2) 快路径：内容未变 + 产物齐全 + vendor 就位 → 秒退
-const vendorSha = sha1(readFileSync(FFLATE_SRC));
-const vendorOk = existsSync(VENDOR_PATH) && (() => { try { return sha1(readFileSync(VENDOR_PATH)) === vendorSha; } catch { return false; } })();
 const allPartsExist = prevManifest?.parts?.every((p) => existsSync(join(OUT_DIR, p.file)));
-if (prevManifest && prevManifest.contentHash === contentHash && allPartsExist && vendorOk && prevManifest.algoVersion === ALGO_VERSION) {
+if (prevManifest && prevManifest.contentHash === contentHash && allPartsExist && prevManifest.algoVersion === ALGO_VERSION) {
   // 同步 manifest 的 generatedAt 不动（内容寻址，无意义）；state 落盘保 mtime 漂移稳定
   writeFileSync(STATE_PATH, JSON.stringify(state));
   console.log(`[pack-assets] 无变化，跳过（${files.length} 文件 / ${reusedHashes} hash 复用 / 重哈希 ${(hashedBytes / 1048576).toFixed(1)}MB / ${Date.now() - t0}ms）`);
@@ -193,12 +189,8 @@ if (existsSync(OUT_DIR)) {
   }
 }
 
-// 5) vendor fflate（SW importScripts；sha256 记账，变化才拷）
-if (!vendorOk) {
-  mkdirSync(join(PUB, 'vendor'), { recursive: true });
-  copyFileSync(FFLATE_SRC, VENDOR_PATH);
-  state.vendorSha = vendorSha;
-}
+// 5) fflate 经 bundler 进 worker(src/net/asset-warm.worker.ts import)——
+//    无需 vendor 拷贝(旧 SW importScripts 方案已废弃)
 
 // 6) manifest + state 落盘
 const manifest = makeManifest(partsMeta, contentHash);
