@@ -23,8 +23,20 @@ export const addEnemy = (game: GameHooks, e: Enemy) => {
   return e;
 };
 
-/** AI_011 骷髅王战斗状态机(NPC.cs:21904-22288 完整核;守卫分支已在 skeletronHeadAI)。
- *  ai0=初始化(双手 36 生成);ai1: 0=悬浮(800t)→1=旋冲(400t)循环;2=守卫/白天;3=离场。
+/** AI_011 骷髅王战斗状态机(NPC.cs:21904-22288 完整核;守卫分支在 Enemy.dungeonGuardianAI)。
+ *  ai0=初始化(双手 36 生成;左手 ai[3]=0 / 右手 ai[3]=150,:21914-21926——
+ *  曾双手同 150,2026-08-19 对账修正);ai1: 0=悬浮(800t)→1=旋冲(400t)循环;
+ *  2=守卫/白天;3=离场。
+ *  红帽档 flag20 = RedHatSkeletronAdjustmentsEnabled()(:67282-67292,
+ *  type 35 且 ai[3]==1,Chippy 彩蛋):悬浮伤 ×1.3(:22010)/计时 +0.5t
+ *  (:22013-22015,800 计满 ≈533t)/悬浮加速度 ×1.35(:22041-22047,else-if
+ *  压过 FTW 加档);旋冲伤 Lerp 后再 ×1.3(:22175-22177)+num200 ×1.4
+ *  (:22234,FTW 档是 ×1.3);悬浮→旋冲切换时广播 SkeletronText.Taunt2-5
+ *  红字(:22020-22027);旋冲中每 200t 召黑暗法师 32(上限 4,:22113-22151)。
+ *  FTW(getGoodWorld):旋冲中 (手>0 → reflectsProjectiles 反弹弹幕 :22107-22112);
+ *  手全灭 → 每 200t 召 32(上限 6);num200 ×1.3(:22236-22238)。
+ *  每 tick 顶行复位 reflectsProjectiles/defense(:21906-21908)——离场态不再
+ *  残留白天狂暴的 9999 防御。
  *  悬浮: Y 拉向玩家上方 250(0.02/±2),X 朝玩家 0.05/±8(:22030-22055);
  *  旋冲: rotation+=0.3*dir、每 tick 直设 dir×num200(经典 1.5/专家 3.5+距离阶梯,
  *  :22166-22242)、伤害 Remap(def,def×1.3)、防御 -10(:22153)。
@@ -32,13 +44,19 @@ export const addEnemy = (game: GameHooks, e: Enemy) => {
  *  ai[2] 每 80/40t 发 270 追踪髅骨弹(3/5 速,LOS 门,:21959-22003)。 */
 export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null) {
   const isGuardian = e.vanillaId === 68;
-  // 初始化:生成双手 36(:21914-21931)
+  // :21906-21908 顶行三连:红帽位 / 弹幕反射复位 / 防御复位 defDefense
+  // (红帽 = type 35 且 ai[3]==1;本核只收非 68 头,ai3 即变体位)
+  const flag20 = e.ai3 === 1;
+  e.reflectsProjectiles = false;
+  const b = baseOf(e);
+  e.def.defense = b.def;               // :21908 每 tick 复位——狂暴→离场不再残留 9999
+  // 初始化:生成双手 36(:21914-21926):左手(ai0=-1)ai3=0、右手(ai0=1)ai3=150
   if (!e.bInit) {
     e.bInit = true;
     if (!isGuardian) {
       for (const side of [-1, 1]) {
         const h = spawnPart(game, e, 36);
-        if (h) { h.ai0 = side; h.ai1 = e.id; h.ai3 = 150; h.bInit = true; }
+        if (h) { h.ai0 = side; h.ai1 = e.id; h.ai3 = side === 1 ? 150 : 0; h.bInit = true; }
       }
     }
   }
@@ -61,8 +79,9 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     if (!player || Math.abs(e.cx - player.cx) > 2000 || Math.abs(e.cy - player.cy) > 2000) e.ai1 = 3;
   }
   if (e.ai1 === 2) {
-    // 白天狂暴（:22247-22261）：damage/defense 均 9999、rotation+=0.3*direction、
-    // 8 速恒直追——此前只改了伤害没改防御，且玩家死后 null 解引用
+    // 白天狂暴（:22244-22261）：damage/defense 均 9999（:22246-22248,防御经顶行
+    // 复位后每 tick 重写）、rotation+=0.3*direction、8 速恒直追
+    // ——此前只改了伤害没改防御，且玩家死后 null 解引用
     e.def.damage = 9999;
     e.def.defense = 9999;
     e.spin += ((e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir || 1) * 0.3;
@@ -92,8 +111,8 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   const expert = mainExpertMode(game.world);
   const num173 = (game.enemies() as Enemy[]).filter(
     (n) => !n.dead && n.vanillaId === (e.vanillaId ?? 0) + 1).length;
-  const b = baseOf(e);
-  const defBase = b.def + (expert ? num173 * 25 : 0);   // :21958 专家按存活手数加防
+  // :21956-21958 专家无条件按存活手数加防（含旋冲 -10 前与离场态）
+  if (expert) e.def.defense += num173 * 25;
   if (expert && (num173 < 2 || e.hp < e.maxHp * 0.75) && e.ai1 === 0) {
     // :21961-21969 num175=80(无手 40;FTW ×0.8);ai[2] 为悬浮计时(:22012)
     let num175 = 80;
@@ -120,23 +139,36 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     }
   }
 
-  e.ai2 += 1;
   if (e.ai1 === 0) {
-    // 悬浮段(:22046-22091):rotation = velocity.X/15(倾转);
-    // 位移档 :22030-22055——经典 0.02/±2(Y) 0.05/±8(X),专家 0.03/±4 0.07/±9.5(:22034-22040),
-    // FTW 追加 +0.01/+1/+0.05/+2(:22049-22055;RedHat 变体档不适用本核)
-    e.spin = e.vx / 15;
+    // 悬浮段(:22006-22091):rotation = velocity.X/15(倾转);
+    // 位移档 :22029-22055——经典 0.02/±2(Y) 0.05/±8(X),专家 0.03/±4 0.07/±9.5
+    // (:22034-22040);红帽全参 ×1.35(:22041-22047),**else-if** FTW 追加
+    // +0.01/+1/+0.05/+2(:22048-22055)——红帽命中时 FTW 加档不叠
+    e.def.damage = b.dmg;                             // :22007 悬浮段伤害基值复位
+    if (flag20) e.def.damage = Math.trunc(e.def.damage * 1.3);   // :22009-22010 红帽 ×1.3
+    e.ai2 += 1;                                       // :22011
+    if (flag20) e.ai2 += 0.5;                         // :22013-22015 红帽悬浮计时 +50% → 800 计满 ≈533t
     if (e.ai2 >= 800) {
       e.ai2 = 0;
       e.ai1 = 1;
       // 旋冲方向冻结 = 目标侧(TargetClosest direction 语义,见上 ai1=2 注)——独立字段勿占 ai3
       (e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir = player.cx > e.cx ? 1 : -1;
+      if (flag20) {
+        // :22020-22027 红帽进旋冲广播 Taunt2-5(Next(2,6)=2..5),红字(255,0,0)——
+        // Game.announce = Lang.text+newText(bossAI_wof 召唤公告同链;mock 缺省静默)
+        const num182 = 2 + Math.floor(Math.random() * 4);
+        (game as unknown as { announce?: (k: string, w: string, r: number, g: number, b: number) => void })
+          .announce?.(`SkeletronText.Taunt${num182}`, '', 255, 0, 0);
+      }
     }
-    e.def.damage = b.dmg;               // :22007 悬浮段伤害基值复位
-    e.def.defense = defBase;            // :21908/:21958(含专家手数加成)
+    e.spin = e.vx / 15;
     let nY = 0.02, cY = 2, nX = 0.05, cX = 8;
     if (expert) { nY = 0.03; cY = 4; nX = 0.07; cX = 9.5; }
-    if (game.world.seedFlags?.getGoodWorld) { nY += 0.01; cY += 1; nX += 0.05; cX += 2; }
+    if (flag20) {                                      // :22041-22047 红帽 num187=1.35 全参乘
+      nY *= 1.35; cY *= 1.35; nX *= 1.35; cX *= 1.35;
+    } else if (game.world.seedFlags?.getGoodWorld) {   // :22048-22055 FTW 加档(仅非红帽)
+      nY += 0.01; cY += 1; nX += 0.05; cX += 2;
+    }
     if (e.y > player.y - 250) {
       if (e.vy > 0) e.vy *= 0.98;
       e.vy -= nY;
@@ -159,18 +191,30 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     // 旋冲段(:22105-22243):rot+=0.3*dir;速度 = 朝玩家单位向量 × num200 **每 tick 直设**
     // (:22240-22242,曾用 0.1 lerp 逼近 12 速=自造);num200 经典 1.5,专家 3.5 起步
     // + 距离阶梯(>150 ×1.05;>200..>600 每 100px ×1.1 共 10 级,:22179-22231)
-    // + 按存活手数(0→×1.1 / 1→×1.05);FTW ×1.3(:22236-22239)。
+    // + 按存活手数(0→×1.1 / 1→×1.05);红帽 ×1.4 / FTW ×1.3(:22234-22238,else-if)。
     // 伤害 = GetAttackDamage_LerpBetweenFinalValues(defDamage, defDamage*1.3)
-    // (:22174,与 ForProjectiles 同式 Remap——经典基值/专家 1.3×);
-    // 防御 -10(:22153,在专家手数加成之后再减)
+    // (:22172)再红帽 ×1.3(:22175-22177);防御 -10(:22153,在专家手数加成之后再减)
+    if (game.world.seedFlags?.getGoodWorld || flag20) {
+      if (num173 > 0) e.reflectsProjectiles = true;   // :22107-22112 (FTW||红帽)且手>0 → 反弹玩家弹幕
+      if (num173 === 0 || flag20) {
+        // :22113-22151 每 200t 召 1×32 号黑暗法师(计数自增前判,ai[2]%200==0;
+        // CountNPCS(32) < 上限——红帽 4/FTW 6,手全灭(0)或红帽恒真才走此段)
+        const num189 = flag20 ? 4 : 6;
+        if (e.ai2 % 200 === 0 && countNpcs(game, 32) < num189) {
+          spawnSkeletronCaster(game, e.cx, e.cy, game.world.store.h - 10);   // 扫描下界 maxTilesY-10(:22135)
+        }
+      }
+    }
+    e.def.defense = (e.def.defense ?? 0) - 10;        // :22153 旋冲防御 -10
+    e.ai2 += 1;                                       // :22154(旋冲计时无红帽加成——+0.5 档只在悬浮段)
     if (e.ai2 === 2) game.playSfx('roar', 1, e.cx, e.cy);   // :22155-22157 ai[2]==2 入场吼(style0 满响,2026-08-18 对账补)
     if (e.ai2 >= 400) { e.ai2 = 0; e.ai1 = 0; }
-    e.def.defense = Math.max(0, defBase - 10);
-    e.def.damage = getAttackDamageForProjectiles(b.dmg, b.dmg * 1.3, e.difficulty);
     e.spin += ((e as unknown as { skeletronSpinDir?: number }).skeletronSpinDir || 1) * 0.3;
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const dist = Math.hypot(dx, dy) || 1;
     let num200 = 1.5;
+    e.def.damage = getAttackDamageForProjectiles(b.dmg, b.dmg * 1.3, e.difficulty);
+    if (flag20) e.def.damage = Math.trunc(e.def.damage * 1.3);   // :22175-22177 红帽旋冲伤 ×1.3
     if (expert) {
       num200 = 3.5;
       if (dist > 150) num200 *= 1.05;
@@ -178,7 +222,8 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
       if (num173 === 0) num200 *= 1.1;
       else if (num173 === 1) num200 *= 1.05;
     }
-    if (game.world.seedFlags?.getGoodWorld) num200 *= 1.3;
+    if (flag20) num200 *= 1.4;                        // :22234 红帽 ×1.4
+    else if (game.world.seedFlags?.getGoodWorld) num200 *= 1.3;   // :22236-22238 FTW ×1.3
     e.vx = dx / dist * num200;
     e.vy = dy / dist * num200;
   }
@@ -222,6 +267,30 @@ export function spawnWormChainFor(game: GameHooks, head: Enemy, segCount: number
   const em = (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } }).entities;
   for (const s of segs) em?.add?.(s, 'enemies');
   return segs;
+}
+
+/** CountNPCS(NPC.cs:51306-51317 语义):场上指定 type 的活跃 NPC 数 */
+export const countNpcs = (game: GameHooks, id: number): number =>
+  (game.enemies() as Enemy[]).filter((n) => !n.dead && n.vanillaId === id).length;
+
+/** 骷髅王旋冲/FTW 手死召唤 32 号黑暗法师(NPC.cs:22123-22151 / :78900-78919):
+ *  1000 次尝试:锚点 ±50 格随机列(Next(-50,51)),自起点向下扫至首个实心格
+ *  (扫描下界 maxY 格,旋冲段 = maxTilesY-10 / 手死段 = maxTilesY-200),
+ *  退一格取空中格 → NewNPC(tx*16+8, ty*16, 32),Bottom 锚(:81547)换算左上角 */
+export function spawnSkeletronCaster(game: GameHooks, cx: number, cy: number, maxY: number): void {
+  const st = game.world.store;
+  for (let t = 0; t < 1000; t++) {
+    const tx = Math.floor(cx / TILE) + Math.floor(Math.random() * 101) - 50;
+    let ty = Math.floor(cy / TILE) + Math.floor(Math.random() * 101) - 50;
+    if (!st.inBounds(tx, ty)) continue;               // :22131 WorldGen.InWorld
+    while (ty < maxY && !st.isSolid(tx, ty)) ty++;    // :22135-22137 向下扫至实心
+    ty--;                                             // :22138 退一格(实心上方的空中格)
+    if (!st.isSolid(tx, ty)) {
+      const c = spawnVanillaEnemy(game, 32, tx * TILE + 8, ty * TILE);   // :22141
+      if (c) { c.x -= c.w / 2; c.y -= c.h; }          // NewNPC Bottom 锚 → fromVanilla 中心锚修正
+      break;
+    }
+  }
 }
 
 /** AI_012 骷髅王手五态机（NPC.cs:22289-22604 全量重写,台账 D 2026-08-19）：
@@ -432,6 +501,8 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.ai0 = -100; e.ai1 = 0; e.ai2 = 0; }  // :43454-43464
   if (e.ai3 === 0 && e.hp > 0) e.ai3 = e.maxHp;                          // :43450-43453
   let num = 1;          // 体型倍率(5/6 态缩放 1↔0.5)
+  let num2 = 1;         // :43442-43448 FTW 体型倍率:num3 = 2-(1-lifeRatio) = 1+lifeRatio
+  if (game.world.seedFlags?.getGoodWorld) num2 *= 2 - (1 - e.hp / e.maxHp);
   let flag2 = false;    // 传送态(5/6)=落地不充能
   let flag3 = false;    // 完全缩没(60t 起,dontTakeDamage)
   // 玩家死/远距 3000px(:43466-43490):TargetClosest 二次判定后仍失败 →
@@ -499,7 +570,8 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
     game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 2.4, { life: 30 });  // :43594-43599
   }
   e.dontTakeDamage = flag3;      // :43601 dontTakeDamage = (hide = flag3)
-  e.squash = (1 - num) * 1.2;    // 体型倍率近似(缩放 0.5..1 ↔ squash 0.6..0)
+  // (旧 e.squash=(1-num)*1.2 体型近似已退役:只喂 legacy slime* 程序化兜底渲染,
+  //  v_50 走原版贴图路径读 vanillaScale——曾致传送缩身无视觉。真 scale 见下段)
   if (e.onGround) {
     // 落地(:43602-43663):vx 阻尼 0.8(<0.1 归零);非传送态充能起跳
     e.vx *= 0.8;
@@ -533,6 +605,24 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
       else e.vx *= 0.93;
     }
   }
+  // ---- 动态体型(:43687-43700):num9 = (life/max×0.5+0.75) × num(5/6 态传送
+  //  缩身 1↔0.5) × num2(FTW = 1+lifeRatio,满血 2×/濒死 1×)——每 tick 重算并
+  //  **重算碰撞盒** width=(int)(98f×scale)/height=(int)(92f×scale)(:43699-43700,
+  //  (int) 截断;基值 98×92 = SetDefaults 数据),bottom-center 锚定
+  //  (:43695-43698 旧盒半宽/高进出对消)。受伤/传送即时生效;存档载入按 hp
+  //  重算自愈。渲染乘区 = vanilla.scale(json 1.25)×vanillaScale → 令乘积 = num9
+  //  (= 原版 npc.scale 直写 :43694),vanillaScale = num9/1.25(Enemy.ts:848 同式)。
+  //  放在共享移动段之前 = 本 tick 碰撞即用新盒(原版 AI 内缩放先于 UpdateNPC) ----
+  let num9 = e.hp / e.maxHp;
+  num9 = num9 * 0.5 + 0.75;
+  num9 *= num;
+  num9 *= num2;
+  const oldHalfW = Math.trunc(e.w / 2), oldH = e.h;   // :43695-43696 旧盒进出对消
+  e.w = Math.trunc(98 * num9);
+  e.h = Math.trunc(92 * num9);
+  e.x += oldHalfW - Math.trunc(e.w / 2);
+  e.y += oldH - e.h;
+  e.vanillaScale = num9 / (e.vanilla?.scale ?? 1);
   // 重力+地形 = 共享段(UpdateNPC_UpdateGravity + MoveWhileDry):0.3 重力/高空衰减/落速钳
   e.applyGravity(game);
   moveAndCollide(e, game.world, e.vx, e.vy);

@@ -53,7 +53,7 @@ function labelOf(file: string, line: number): string {
   return `${file.split('/').pop()}:${line}`;
 }
 
-const SENTINEL = Symbol('jj59-done');
+const SENTINEL_MSG = 'jj59-done-sentinel';
 
 (RUN ? it : it.skip)(`#59 quantify ${TAG}`, async () => {
   const houseEv: string[] = [];
@@ -76,7 +76,7 @@ const SENTINEL = Symbol('jj59-done');
         const lab = labelOf(m[1], Number(m[2]));
         if (curStore) {
           if (lab === 'UndergroundHousesAndBuriedChests' && !jsIn) jsIn = snapOf(curStore);
-          else if (lab === 'SurfaceChests' && !jsOut) { jsOut = snapOf(curStore); throw SENTINEL; }
+          else if (lab === 'SurfaceChests' && !jsOut) { jsOut = snapOf(curStore); throw new Error(SENTINEL_MSG); }
         }
         break;
       }
@@ -89,7 +89,11 @@ const SENTINEL = Symbol('jj59-done');
       width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1,
       onWorldPartial: (w) => { if (!curStore) curStore = w as never; },
     });
-  } catch (e) { if (e !== SENTINEL) throw e; }
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    const cause = (e as { cause?: unknown })?.cause;
+    if (!msg.includes(SENTINEL_MSG) && !(cause instanceof Error && cause.message === SENTINEL_MSG)) throw e;
+  }
   finally { RNGp.reseed = oReseed; }
 
   if (!jsIn || !jsOut) throw new Error('未捕获 #59 边界（jsIn/jsOut null）');
@@ -166,4 +170,23 @@ const SENTINEL = Symbol('jj59-done');
     inDiff, cells, clusters,
   }));
   console.log(`→ /tmp/jj59-${TAG}-diff.json (cells=${cells.length}) done ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  // 区域网格 dump（SW_JJ_REGION=x0,y0,x1,y1 多组分号分隔）：jsOut / jsIn / golden059 三方
+  const REGIONS = (process.env.SW_JJ_REGION ?? '').split(';').filter(Boolean).map((r) => r.split(',').map(Number));
+  for (const [rx0, ry0, rx1, ry1] of REGIONS) {
+    const lines: string[] = [`== region (${rx0}-${rx1},${ry0}-${ry1}) 格式 type(active)|wall  [jsOut / jsIn / g59]`];
+    for (let y = ry0; y <= ry1; y++) {
+      const rowO: string[] = [], rowI: string[] = [], rowG: string[] = [];
+      for (let x = rx0; x <= rx1; x++) {
+        const i = y * W + x;
+        rowO.push(`${SHEET[jsOut.type[i]!] ?? -1}${jsOut.flags[i]! & 1 ? '' : 'x'}|${jsOut.wall[i]}`);
+        rowI.push(`${SHEET[jsIn.type[i]!] ?? -1}${jsIn.flags[i]! & 1 ? '' : 'x'}|${jsIn.wall[i]}`);
+        rowG.push(`${g59.a[i]! ? g59.t[i]! : 'x'}|${g59.w[i]}`);
+      }
+      lines.push(`${y} OUT ${rowO.join(' ')}`);
+      lines.push(`${y} IN  ${rowI.join(' ')}`);
+      lines.push(`${y} G59 ${rowG.join(' ')}`);
+    }
+    writeFileSync(`/tmp/jj59-${TAG}-region-${rx0}-${ry0}.txt`, lines.join('\n') + '\n');
+    console.log(`region (${rx0}-${rx1},${ry0}-${ry1}) → /tmp/jj59-${TAG}-region-${rx0}-${ry0}.txt`);
+  }
 }, 900_000);

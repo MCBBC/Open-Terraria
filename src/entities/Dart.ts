@@ -11,6 +11,8 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖本文件，避免环）
 import { projFrameImg, projSprite } from './Arrow';
+import { segHitsRect } from './bossAI_duke_moonlord';   // 线段命中（bossAI_duke_moonlord 导出共用）
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -660,6 +662,14 @@ export class Dart extends Entity {
    *  显式置位——Enemy.shootDart 咽喉与各直构处=true，玩家武器弹默认 false 不误伤）。
    *  联机 v5：随 msg27 bit7 下发，访客傀儡据此本地结算 */
   hostile: boolean;
+  /** 弹-NPC 绑定通道（G3 批 2026-08-19）：原版 NPC 发射弹时把自身 whoAmI 作
+   *  NewProjectile 末参传入 ai[1] 槽（NPC.cs :59970-59979 等），弹体 AI 按宿主
+   *  id+type 回查。当前消费族：411 观星者→537 激光（Projectile.cs:30308 束原点
+   *  位锁）/ 424 预言者→573 蓄能弹（:32087 蓄能期宿主死→立即对最近玩家齐射 +
+   *  目标继承）。0 = 无绑定（默认，其余发射点原版就不传） */
+  ownerNpcId = 0;
+  /** 537 激光束长 Lerp 值（原版 localAI[1]，LaserScan→0.5/t Lerp） */
+  private beamLen = 0;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, projId = 0) {
     super();
@@ -685,6 +695,8 @@ export class Dart extends Entity {
     // 世界坐标绘制(同 TrapShot)
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
+    // 537 观星者激光：三段束体独占绘制（Main.cs:32124-32156）
+    if (this.projId === 537) { this.drawStargazerBeam(ctx); return; }
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     if (!st) {
       // 无表项回退:旧色块(0 = 通用 Dart,历史遗留调用)
@@ -730,9 +742,60 @@ export class Dart extends Entity {
     ctx.stroke();
   }
 
+  /** 537 束体三段绘制（Main.cs:32124-32156）：炮口行(0,0,w,22) origin=行中心 →
+   *  束身行(0,25,w,28) 沿束向 28px 段平铺（尾段截余量）→ 端帽行(0,56,w,22)
+   *  origin=(0,0)。宽乘 num293 = Remap(bright,0,1,0.25,1.5)，bright =
+   *  Remap(age,20,30,0,1)×Remap(age,60,90,1,0)（20t 起亮/30t 满宽/60t 收/90t 灭，
+   *  AI 侧 90t Kill 兜底）；颜色 Color(255,255,255,0)×0.9 = XNA 预乘加性白 →
+   *  canvas lighter 近似（MLDeathray 455 同款）。束长预算 = len−33·scale */
+  private drawStargazerBeam(ctx: CanvasRenderingContext2D): void {
+    const remap = (v: number, a: number, b: number, c: number, d: number) =>
+      c + (d - c) * Math.min(1, Math.max(0, (v - a) / (b - a)));
+    const bright = remap(this.age, 20, 30, 0, 1) * remap(this.age, 60, 90, 1, 0);
+    const wid = remap(bright, 0, 1, 0.25, 1.5);
+    if (bright <= 0.001 || this.beamLen <= 1) return;
+    const img = projSprite(537);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.9;
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);
+    if (!img || img.width === 0) {
+      // 贴图未就绪兜底（懒加载首帧）：自绘白束，加载完成后自愈
+      ctx.globalAlpha = Math.min(1, bright) * 0.9;
+      const thick = Math.max(2, 22 * this.scale);
+      ctx.fillStyle = '#C8F4FF';
+      ctx.fillRect(-thick / 2, 0, thick, this.beamLen);
+      ctx.restore();
+      return;
+    }
+    const tw = img.width;
+    // 炮口（:32140 origin = 行中心 (w/2,11)）
+    ctx.drawImage(img, 0, 0, tw, 22, (-tw / 2) * wid, -11 * wid, tw * wid, 22 * wid);
+    // 束身（:32143-32155）：起点 Center+dir·wid·10.5，预算 len−33·scale，逐段 28·wid
+    let budget = this.beamLen - 33 * this.scale;
+    let y = 10.5 * wid;
+    let adv = 0;
+    while (adv + 1 < budget) {
+      let hh = 28;
+      if (budget - adv < hh) hh = budget - adv;
+      ctx.drawImage(img, 0, 25, tw, hh, (-tw / 2) * wid, y, tw * wid, hh * wid);
+      adv += hh * wid;
+      y += hh * wid;
+    }
+    // 端帽（:32156 origin=(0,0)）
+    ctx.drawImage(img, 0, 56, tw, 22, 0, y, tw * wid, 22 * wid);
+    ctx.restore();
+  }
+
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // G3 宿主绑定弹：537 观星者激光（aiStyle84）/ 573 预言者蓄能弹（aiStyle102）
+    // ——专用步进（AI/寿命/命中面全独立：束线段判定 / 蓄能-齐射态机），不走通用 dartStep
+    if (this.projId === 537) { this.stargazerBeamStep(game); return; }
+    if (this.projId === 573) { this.oracleOrbStep(game); return; }
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     if (--this.life <= 0) {
       if (st?.rocket) this.rocketKill(game); else this.dead = true;
@@ -888,6 +951,145 @@ export class Dart extends Entity {
     }
   }
 
+  // ===========================================================================
+  // G3 宿主绑定弹（2026-08-19）：411→537 激光 / 424→573 蓄能弹。
+  // 原版 NPC 发射把 whoAmI 传 NewProjectile 末参（落 ai[1]），弹体按 id+type 回查
+  // 宿主（Main.npc[i].active && type==N 的双门）——单人真实行为（非 netcode）：
+  //  · 537（aiStyle84，Projectile.cs:30286-30549）：束原点逐 t 锁回活宿主眼部
+  //    :30308；宿主死→解除锁定原地照完剩余寿命（不 Kill——同族 455 头死即灭是
+  //    :30296-30297 专属分支，537 无）。UpdatePosition 跳过表含 aiStyle84（:19028）
+  //    → 永不积分位移，velocity 只当束向单位向量。
+  //  · 573（aiStyle102 case573，:32040-32280）：蓄能 90t（悬停漂移+隐形 alpha255+
+  //    尘 242）；宿主死中途 → ai[0]=90 当 t 齐射（目标 Player.FindClosest 兜底）；
+  //    宿主活 → 继承其目标。齐射 = ±50 抖动 ×0.8-1.2 距离档、速 20；此后 alpha0
+  //    显形、rotation 随弹向 0.4 lerp。UpdatePosition 不跳过 → 每 t position+=velocity。
+  // ===========================================================================
+
+  /** 537 观星者激光单步（aiStyle84）：见上注。命中 = 玩家矩形 vs 束线段宽
+   *  22·scale（Colliding :14703 CheckAABBvLineCollision）；伤害走敌弹标准乘区
+   *  （难度×2，:13770-13781——hitPlayer 同式，此处在束判定内联） */
+  private stargazerBeamStep(game: GameHooks): void {
+    this.age++;
+    if (this.age >= 90) { this.dead = true; return; }          // :30444-30447 localAI[0]>=90 Kill
+    const vl = Math.hypot(this.vx, this.vy) || 1;
+    const dirX = this.vx / vl, dirY = this.vy / vl;
+    this.vx = dirX; this.vy = dirY;                            // :30477-30479 归一（束向）
+    this.rot = Math.atan2(dirY, dirX) - Math.PI / 2;           // rotation = num731 − π/2
+    // 宿主位锁（:30308）：active 且 type==411 才每 t 锁回 Center+(direction*6,−4)
+    // ——gfxOffY 本仓敌怪恒 0；宿主死/换型 → 不锁，束钉在最后位置照完寿命
+    const host = this.hostOf(game, 411);
+    if (host) {
+      this.x = host.cx + host.facing * 6 - this.w / 2;
+      this.y = host.cy - 4 - this.h / 2;
+    }
+    this.scale = Math.min(0.8, Math.sin((this.age * Math.PI) / 90) * 10 * 0.8);  // :30448-30450
+    // 束长：LaserScan 2 采样（宽 0 → 双线同点）取均值，0.5/t Lerp（:30483-30510）
+    this.beamLen += (this.laserScanLen(game, dirX, dirY) - this.beamLen) * 0.5;
+    // 光照 PlotTileLine (0.4,0.85,0.9)（:30612-30613）：沿束向逐格三线带（中±半宽）
+    const half = (22 * this.scale) / 2;
+    for (let d = 0; d <= this.beamLen; d += TILE) {
+      game.addLightAt?.(this.cx + dirX * d, this.cy + dirY * d, 0.4, 0.85, 0.9);
+      game.addLightAt?.(this.cx + dirX * d - dirY * half, this.cy + dirY * d + dirX * half, 0.4, 0.85, 0.9);
+      game.addLightAt?.(this.cx + dirX * d + dirY * half, this.cy + dirY * d - dirX * half, 0.4, 0.85, 0.9);
+    }
+    // 束端尘 226（:30593-30616）：数量 = 2×clamp(age/30)，束端 Center+dir·(len−8) 侧抛
+    const prog = Math.min(1, Math.max(0, this.age / 30));
+    const tipX = this.cx + dirX * (this.beamLen - 8), tipY = this.cy + dirY * (this.beamLen - 8);
+    for (let k = 0; k < 2 * prog; k++) {
+      const da = Math.atan2(dirY, dirX) + (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 2);
+      game.spawnBurst?.(tipX, tipY, '#8FE8FF', 1, Math.random() * 0.8 + 1, da, 0,
+        { life: 24, damp: 0.95 });
+    }
+    // 命中（:14703）：线段 Center→Center+dir·len，宽 22·scale；iframes 由
+    // damagePlayer→Player.damage 内建去重（对应原版 player.immune 门）
+    const p = game.player;
+    if (p && !p.dead && p.iframes <= 0
+      && segHitsRect(this.cx, this.cy, dirX * this.beamLen, dirY * this.beamLen,
+        22 * this.scale, p)) {
+      game.damagePlayer(
+        hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
+        this.cx, this.cy);
+    }
+  }
+
+  /** 573 预言者蓄能弹单步（aiStyle102 case573：num850=424/num851=90/num854=20/
+   *  flag47=false/flag48=true/flag49=false，:32064-32068）。蓄能期隐形（alpha255）
+   *  纯尘视觉；弹体永不积分旋转（aim lerp 是 574 专属分支，:32160-32173） */
+  private oracleOrbStep(game: GameHooks): void {
+    if (--this.life <= 0) { this.dead = true; return; }        // timeLeft 600（SetDefaults）
+    this.age++;                                                // ai[0] 计数
+    const host = this.hostOf(game, 424);
+    if (this.age < 90) {
+      // 蓄能期（:32086-32128）：宿主活 → 原地微漂（flag48=true 不跟随宿主位移）；
+      // 宿主死 → ai[0]=90 当 t 转入齐射分支（:32092-32094 else）
+      if (!host) this.age = 90;
+      else {
+        this.alpha = 255;                                      // :32112 隐形
+        if (Math.random() < 0.5) {                             // :32104-32110 尘 242 ×1/2
+          const c = { x: this.cx - 4, y: this.cy - 4, w: 8, h: 8 };
+          game.spawnParticles(c.x, c.y, '#9FD8FF', 1, 1.5, { life: 26, damp: 0.93, grav: 0 });
+        }
+      }
+    }
+    if (this.age === 90) {
+      // 齐射（:32172-32210）：目标 = 宿主活→宿主目标（单玩家）/ 死→FindClosest
+      //（同为玩家实体）；±50 双轴抖动 ×(0.8..1.2) 距离档，归一 ×20
+      const p = game.player;
+      if (p) {
+        let ax = p.cx - this.cx + (Math.floor(Math.random() * 101) - 50);
+        let ay = p.cy - this.cy + (Math.floor(Math.random() * 101) - 50);
+        ax *= (80 + Math.floor(Math.random() * 41)) * 0.01;
+        ay *= (80 + Math.floor(Math.random() * 41)) * 0.01;
+        const al = Math.hypot(ax, ay);
+        if (al > 0.001) { this.vx = (ax / al) * 20; this.vy = (ay / al) * 20; }
+        else { this.vx = 0; this.vy = -20; }                    // NaN 退化（原版 UnitY）
+      }
+    }
+    if (this.age < 90) { this.x += this.vx; this.y += this.vy; return; }
+    // 齐射后（:32218-32232）：显形 alpha0、rotation 随弹向 0.4 lerp、尘 242 ×1/4
+    this.alpha = 0;
+    this.rot += (Math.atan2(this.vy, this.vx) + Math.PI / 2 - this.rot) * 0.4;
+    if (Math.random() < 0.25) {
+      game.spawnParticles(this.cx - 4, this.cy - 4, '#9FD8FF', 1, 0.5,
+        { life: 26, damp: 0.93, grav: 0 });
+    }
+    this.x += this.vx; this.y += this.vy;
+    // 撞实心（tileCollide 默认 true）：TileCollision 语义 = 速度截停（粘墙不灭）
+    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+    if (game.world.store.isSolid(tx, ty)) { this.vx = 0; this.vy = 0; }
+    // 命中（penetrate −1 穿透不消耗）：iframes 去重后每 40t 一跳
+    const p = game.player;
+    if (this.hostile && p && !p.dead && p.iframes <= 0
+      && projOverlap(this.x, this.y, this.w, this.h, p)) {
+      game.damagePlayer(
+        hostileProjectileDamage(this.damage, mainDifficulty(game.world)) * 2,
+        this.cx, this.cy);
+    }
+  }
+
+  /** 宿主回查（原版 Main.npc[ai[1]].active && type==N 双门）：id + 未死 + 型号 */
+  private hostOf(game: GameHooks, type: number):
+    { cx: number; cy: number; facing: number } | undefined {
+    if (!this.ownerNpcId) return undefined;
+    const list = game.enemies() as Array<{ id: number; dead: boolean; vanillaId?: number | null;
+      cx: number; cy: number; facing: number }>;
+    const n = list.find((e) => e.id === this.ownerNpcId);
+    return n && !n.dead && n.vanillaId === type ? n : undefined;
+  }
+
+  /** Collision.LaserScan 近似（537 档：2 采样宽 0 → 单线，最大 2400，8px 步进） */
+  private laserScanLen(game: GameHooks, dirX: number, dirY: number): number {
+    const st = game.world.store;
+    const steps = Math.ceil(2400 / 8);
+    for (let i = 1; i <= steps; i++) {
+      const t = i * 8;
+      const tx = Math.floor((this.cx + dirX * t) / TILE);
+      const ty = Math.floor((this.cy + dirY * t) / TILE);
+      if (!st.inBounds(tx, ty) || st.isSolid(tx, ty)) return t - 8;
+    }
+    return 2400;
+  }
+
   // ---- 原版 Projectile 字段映射 ----
   private age = 0;          // ai[0]/localAI 计数
   private tick = 0;         // 拖尾节拍
@@ -974,6 +1176,10 @@ const DART_STYLE: Record<number, DartStyle> = {
     sfx: ['Item_17'], fallback: '#7AC868' },   // :52241-52245
   605: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5,
     sfx: ['Item_154'], fallback: '#D8D0C0' },  // 605 族 Item154(:52213-52223)
+  // 1073 史莱姆凝胶弹（携 539 史莱姆法杖物史莱姆 AI_001 :61099-61103：direction×12
+  //   直飞伤 20 kb2；SetDefaults Projectile.cs:9754-9761：10×10 aiStyle1 hostile
+  //   penetrate-1 trap——无重力直飞；命中 Poisoned(20) 600t 由 projTargets :11660 接）
+  1073: { w: 10, h: 10, rot: 'align90', life: 600, fallback: '#7AB8E8' },
   // 177 冰水吐涎(冰鱼人 206 :59859):10×10 旋转恒 0,alpha255;尘 137 ×3
   177: { w: 10, h: 10, rot: 'none', alpha0: 255, fade: 50,
     trail: { color: '#BFE8F0', count: 2 }, fallback: '#A8D8E8' },
@@ -1052,6 +1258,13 @@ const DART_STYLE: Record<number, DartStyle> = {
   814: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, noTile: true, life: 180,
     trail: { color: '#C83848', count: 1 },
     sfx: ['Item_171'], fallback: '#B03040' },
+  // ---- G3 宿主绑定弹（2026-08-19；AI/绘制全走专用分支，表项只供尺寸/贴图装载）----
+  // 537 观星者激光(SetDefaults :5842-5851):22×22 aiStyle84,alpha255(绘制独占不读 α),
+  //    tileCollide=false,timeLeft240(AI 侧 localAI[0]>=90 先杀);发射点 NPC.cs:59972
+  537: { w: 22, h: 22, rot: 'none', alpha0: 255, noTile: true, life: 240 },
+  // 573 预言者蓄能弹(SetDefaults :5950-5957):18×30 aiStyle102,timeLeft600,单帧 14×26;
+  //    蓄能 90t 隐形(alpha255)→齐射显形;发射点 NPC.cs:59978(四发扇)
+  573: { w: 18, h: 30, rot: 'none', life: 600, fallback: '#9FD8FF' },
 };
 
 /**

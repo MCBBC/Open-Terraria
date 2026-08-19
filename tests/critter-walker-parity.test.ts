@@ -15,7 +15,9 @@ function flatWorld(playerAt: { x: number; y: number } | null = null) {
   const w = new World(80, 80, 42, 'open');
   w.groundLevel = 42;
   const st = w.store;
-  for (let x = 10; x <= 70; x++) st.setTileSilent(x, 60, 2); // 平地板 y=60，无障碍
+  for (let x = 0; x < 80; x++) st.setTileSilent(x, 60, 2); // 平地板 y=60，无障碍
+  // （2026-08-19 G1 批起全宽板：蚱蜢跳冲量+空中转向满速 3 → 两跳即脱离玩家
+  //  200px 激愤圈转被动行走——窄板会坠缘产生假 hop 计数）
   const hooks = {
     world: w,
     player: playerAt ? {
@@ -65,13 +67,21 @@ describe('小动物行走族 vs 弹跳族（aiStyle 7 vs 1）', () => {
     const e = Enemy.fromVanilla(377, 40 * 16, 59 * 16)!;
     let hops = 0;
     let prevAir = false;
+    let farWalk = 0;
     for (let t = 0; t < 2000; t++) {
       e.fixedUpdate(1 / 60, hooks);
       const air = e.vy < -1;
       if (air && !prevAir) hops++;
       prevAir = air;
+      // 激愤逃跳两跳脱离 200px 圈后：转被动慢爬（vx 恒 ≤0.2，仓内走路档）
+      if (t > 400 && Math.abs(e.vx) > 0 && Math.abs(e.vx) <= 0.21 && e.onGround) farWalk++;
     }
-    expect(hops).toBeGreaterThan(2);                 // 弹跳族：多次自发跳
+    // 2026-08-19 G1 批（groundPhysics 废除 ±1 硬钳与 ×0.98 尾段摩擦）后按 1:1
+    // 新语义更新：跳冲量完整 + 滞空转向步进至满速 3（:62130-62133）→ 蚱蜢两跳
+    // 即脱离玩家 200px 激愤圈（cs:61479 flag3 门）转被动行走——旧断言 >2 依赖被
+    // 废除的钳（跳距被砍 → 滞留圈内反复跳），非原版行为
+    expect(hops).toBeGreaterThanOrEqual(2);          // 弹跳族：周期抛物线逃跳已发生
+    expect(farWalk).toBeGreaterThan(100);            // 脱离后被动慢爬（原版激愤门语义）
   });
 
   it('神秘青蛙 687 可 Enemy 出生且走 aiStyle 7 行走族（侧信道退役前提）', () => {

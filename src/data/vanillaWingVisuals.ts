@@ -9,6 +9,8 @@
 //   Y 偏移 = (num12+2)，故锚点局部坐标 = (num13−9, num12−19)。
 // 逐款特殊分支：22(:671)/28(:705)/45(:726)/34(:752)/51(:779)/47(:802)/49(:826)/
 //   48(:841)/40(:854)/39(:898)/50(:923) 各自锚点与帧数。
+// generic 尾段色改族（2026-08-19 booster 批）：9/29 主色 Color(250³,100)×s²(:964-969)、
+//   31/32 color9.A 直改 220/127×s(:980-986)——锚点/帧数仍 generic（4 帧/默认锚点）。
 // ShouldDrawWingsThatAreAlwaysAnimated 门（Player.cs:30271：vy≠0 && 未钩爪 &&
 //   非水中漂浮 && mount.CanUseWings）——22/28/34/39/44/45/48 绘制受此门
 //   （仅空中出现）；generic 与 4/12/24/30/51/47/49/50/40/43/44 无门（地面也画收拢帧）。
@@ -53,8 +55,13 @@ export interface WingDraw {
   /** 主纹理全亮族（硬编码绘制色，光照合成后绘制）：
    *  - 'white'      28(:714 Lerp t=1)/44(:1032)/45(:729) Color(255³,255)
    *  - 'c250a100'   34(:766)/40(:859) Color(250³,100)
+   *  - 'c250a100sq' 9/29（:964-969 generic 尾段分支：stealth 先自乘再 ×(1−shadow) →
+   *                 Color(250³,100)×s²——RGB/A 均随 s²，与 34/40 的 s¹ 实现不同族勿混）
    *  - 'luna'       51(:781) GetLunaGlowColor=(255³,100)×脉冲(:185-190)×免疫 */
-  mainGlow?: 'white' | 'c250a100' | 'luna';
+  mainGlow?: 'white' | 'c250a100' | 'c250a100sq' | 'luna';
+  /** lit 主纹理 alpha 直改（generic 尾段 color9.A 覆写族——基色仍 colorArmorBody
+   *  走 lit 路径，仅 alpha 换 220/127×settled）：31(:980-982)/32(:984-986) */
+  litAlpha?: number;
   /** 44：主纹理取 Extra_171 着色器层（PlayerRainbowWings RT + HallowBoss 着色器；
    *  HLSL 不在反编译源 → 直画层贴图，与女皇 Extra_157 先例同法） */
   rainbowLayer?: boolean;
@@ -67,13 +74,21 @@ export interface WingDraw {
       | 'immune'       // 50：免疫色双画（:930-940）
       | 'betsy'        // 40：8 片程序化摆动（:854-896，(250³,100)）
       | 'trail45'      // 45：Projectile_250 彩虹拖尾（:2901-2961，White A=64 族）
-      | 'arkhalis';    // 38：GlowMask[251]×underShirtColor（:1044-1048）；影子环 A=0 死画
-    /** 叠画贴图（vanilla/ 前缀文件名；plain/jitter2/immune/arkhalis 用） */
+      | 'arkhalis'     // 38：GlowMask[251]×underShirtColor（:1044-1048）；影子环 A=0 死画
+      | 'selfAdd'      // 29：自身切片纯加色重画 ×scale（:1069-1074，Color(255³,0)×s²×(1−shadow)×0.5）
+      | 'glowAdd'      // 32：GlowMask 纯加色 ×scale（:1099-1104，Glow_183×Color(255³,0)×s×(1−shadow)）
+      | 'nebula';      // 31：HotPink↔Crimson 脉冲色 4 轨道(×0.5)+全幅(×1)（:1083-1097）
+    /** 叠画贴图（vanilla/ 前缀文件名；plain/jitter2/immune/arkhalis/glowAdd 用） */
     file?: string;
     /** RGB 均一色调 0-255（plain/jitter2） */
     tint?: number;
-    /** alpha 0-255（plain） */
+    /** alpha 0-255（plain；selfAdd/glowAdd 的纯加色乘子同刻度——255=×1，如 29 的
+     *  ×0.5f(:1071) = 127.5） */
     alpha?: number;
+    /** 放大系数（selfAdd/glowAdd：29/32 的 1.06） */
+    scale?: number;
+    /** stealth 已被 9/29 分支(:965-966)平方累乘——叠画因子用 s² 而非 s（selfAdd） */
+    stealthSq?: boolean;
   };
 }
 
@@ -91,6 +106,17 @@ const DRAW_TABLE: Record<number, WingDraw> = {
   43: { frames: 7, anchor: [-14, -26], overlay: { kind: 'jitter2', file: 'Glow_272.png', tint: 230, alpha: 60 } }, // :1004-1015
   // 特殊绘制分支
   22: { frames: 7, anchor: [-9, 5],   alwaysAir: true, overlay: { kind: 'flames7' } },        // :674 + :676-699
+  // 9/29 烈焰之翼/日耀之翼（generic 尾段 :964-969 分支：主纹理 Color(250³,100)×s²——
+  // 全亮族；29 另有 :1069-1074 自身切片 ×1.06 纯加色叠画（s² 再 ×(1−shadow)×0.5）
+  9:  { frames: 4, anchor: GENERIC_ANCHOR, mainGlow: 'c250a100sq' },
+  29: { frames: 4, anchor: GENERIC_ANCHOR, mainGlow: 'c250a100sq',
+        overlay: { kind: 'selfAdd', scale: 1.06, stealthSq: true, alpha: 127.5 } },  // :1069-1074（×0.5f）
+  // 31 星云斗篷：lit 主纹理 alpha 直改 220·s（:980-982）+ HotPink↔Crimson 脉冲
+  //   4 轨道(×0.5)+全幅(×1) 纯加色叠画（:1083-1097）
+  31: { frames: 4, anchor: GENERIC_ANCHOR, litAlpha: 220, overlay: { kind: 'nebula' } },
+  // 32 星尘之翼：lit 主纹理 alpha 直改 127·s（:984-986）+ Glow_183 ×1.06 纯加色（:1099-1104）
+  32: { frames: 4, anchor: GENERIC_ANCHOR, litAlpha: 127,
+        overlay: { kind: 'glowAdd', file: 'Glow_183.png', scale: 1.06 } },
   23: { frames: 4, anchor: GENERIC_ANCHOR, overlay: { kind: 'plain', file: 'Flame_8.png', tint: 200, alpha: 200 } }, // :1016-1023
   28: { frames: 4, anchor: [0, -2],   alwaysAir: true, drawFrameFrom: 'miscCounter', mainGlow: 'white', overlay: { kind: 'extra38' } }, // :705-722
   34: { frames: 6, anchor: [-4, -21], alwaysAir: true, mainGlow: 'c250a100' },  // :752-768

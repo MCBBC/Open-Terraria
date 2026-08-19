@@ -18,6 +18,7 @@ import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj }
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
+import { BuffType } from '../stats/Buffs';
 
 /** 原版投射物绘制偏移表（Main.cs:29375-29826 num143/num144 表,96 条静态项）。
  *  语义:贴图左上角落于 (盒左 + num144, 盒上 − num143)——num143 为"上移"量。
@@ -184,8 +185,12 @@ function hitEnemies(
   cooldown: number,
   dirX: number,
   pen = 0,
-  /** 每次命中敌结算后的回调（Boomerang 的 Projectile.Damage 回收门 :12278-12291 用） */
-  onHit?: () => void,
+  /** 每次命中敌结算后的回调（Boomerang 的 Projectile.Damage 回收门 :12278-12291 用；
+   *  悠悠球/配重球的 :12467-12508 命中链也在此语义点触发——入参=命中敌） */
+  onHit?: (e: unknown) => void,
+  /** 命中伤害乘区（求值于 hurt 前、按敌逐个）：悠悠球对玩家无视线时 ×0.75
+   *  （Projectile.cs:12503-12505 num12×0.75） */
+  dmgScale?: (e: unknown) => number,
 ): void {
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
@@ -208,11 +213,12 @@ function hitEnemies(
     // 暴击 = GetWeaponCrit 语义:4 基础 + 武器 item.crit + 装备/buff（Game 侧合并传入；
     // 此前全族写死 4%——Sunfury 原版 crit=7 应为 11%）
     const crit = Math.random() < (me.critChance ?? 0.04);
-    const dmg = crit ? self.damage * 2 : self.damage;
+    // (int) 截断 + 命中乘区（悠悠球无视线 ×0.75，:12504）
+    const dmg = Math.trunc((crit ? self.damage * 2 : self.damage) * (dmgScale?.(e) ?? 1));
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
     playEnemyHitSound(game, e);
     e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线
-    onHit?.(); // Damage 内回收门/穿透自减在此语义点求值（Projectile.cs:12278-12291）
+    onHit?.(e); // Damage 内回收门/穿透自减/悠悠球命中链在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     applyProjStatus(me.projId, e as unknown as Record<string, number>);
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
@@ -228,10 +234,6 @@ function hitEnemies(
       applyMagmaStoneProj(pl.equipStats.magmaStone, e as unknown as Record<string, number>);
     }
     game.addDamageNumber(self.x + self.w / 2, self.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
-    // 配重球（counterWeight 装备时悠悠球命中落配重：YoyoBag 语义近似——
-    // spawnWeight 回调由 Game 注入（无实体循环依赖）；伤害 = 武器 100%（原版））
-    const wSpawn = (self as { spawnWeight?: (x: number, y: number, dmg: number) => void }).spawnWeight;
-    if (wSpawn) wSpawn(e.x + e.w / 2, e.y, Math.round(self.damage));
   }
 }
 
@@ -897,88 +899,326 @@ export class MolotovProj extends Entity {
   }
 }
 
-// ================= 配重球（aiStyle 99 type 556-561/1079，AI_099_1 :64472-64610） =================
-// 环绕玩家：半径 num=250×0.5=125（yoyoString +25%+10，:64487）；rotation+0.5/t；
-// 超径钳回轨道（:64544-64550）+ 切向增速 vector2=(vy,vx) 翻转带象限符号（:64552-64610）；
-// 生存绑 yoyo 存活（timeLeft=6 刷新语义：alive() false 即消亡）
+// ================= 配重球（aiStyle 99 type 556-561/1079，AI_099_1 :64472-64824） =================
+// SetDefaults（:5805-5813）：10×10 命中盒、extraUpdates=1（AI/移动/命中每 tick 跑 2 次）、
+// DefaultToYoyo、counterweight=true、drawLayer=0。
+// ai[0] 状态机：0 主球 / 1 副球（Counterweight() 已有在场时掷,轨道半径 ×0.75,:64532）/
+//   -1 回收（松手 :64643-64646 或场上无悠悠球 :64491-64506）→ 飞回玩家 40px 内消亡
+//   （:64777-64824:num13=num3×1.5=18 速/惯性 12/>2000 亦亡;tileCollide=false 穿墙）/
+//   -3 魔法线幽灵（-1+magicString → 隐身零伤,:64727-64737）/ -2 脱离坠落（克隆,
+//   penetrate=1、撞墙即亡、重力 0.3 缓落漂移,:64738-64776 + :16988-17006）。
+// 环绕段：半径 num=250×0.5=125（yoyoString +25%+10,:64486-64488）；超径钳回轨道 +
+//   切向增速 vector2=(vy,vx) 翻转带象限符号（:64540-64608,仅超径时运行）；鼠标位移
+//   反推（vector5×-1×0.1,:64614-64642）；800px 内最近敌追踪 v3×6 lerp 1/8
+//   （:64643-64717,敌须距玩家 <num×0.9 且有视线）；速度钳 [num4=9,num3=12]
+//   （:64718-64726）。撞墙全轴反转 + 朝玩家 0.25 合成 + 钳 6（:17005-17028）。
+/** 配重球运行上下文（Game 注入闭包——实体不持 EntityManager 引用） */
+export interface CounterweightCtx {
+  /** 拥有者（玩家中心/装备；null 或 dead → Kill,:64490-64493） */
+  owner: () => { cx: number; cy: number; dead?: boolean; equipStats?: { stringColor?: number; yoyoString?: boolean; magicString?: boolean } } | null;
+  /** Main.player[owner].channel 语义（按住使用中）——false → 回收（:64643-64646） */
+  channel: () => boolean;
+  /** 场上还有悠悠球（AI_099_1 :64488-64500 扫描门:aiStyle99 非配重球且 ai0>=-1） */
+  yoyoInPlay: () => boolean;
+  /** 本帧鼠标屏幕位移（Main.mouseX-lastMouseX,:64614） */
+  mouseDelta: () => { dx: number; dy: number };
+  /** 魔法线克隆回调（:64727-64733:-1 回收 + magicString → 掷 75% 伤/击退脱离克隆） */
+  spawnClone?: (x: number, y: number, vx: number, vy: number, dmg: number, kb: number, projId: number, crit?: number, armorPen?: number) => void;
+  /** 悠悠球命中链回调（Projectile.cs:12482 Player.Counterweight）——配重球命中同样触发 */
+  counterweight?: (hitX: number, hitY: number, dmg: number, kb: number) => void;
+}
+
 export class CounterweightProj extends Entity {
-  w = 18; h = 18;
+  /** SetDefaults :5808-5809 */
+  w = 10; h = 10;
   damage: number;
   knockback: number;
   projId: number;
   critChance = 0.04;
   armorPen = 0;
   meleeProj = true;
-  private orbitR: number;
+  /** ai[0] 状态（0/1 环绕、-1 回收、-3 幽灵、-2 脱离） */
+  ai0: number;
   private rot = 0;
-  private alive: () => boolean;
-  private ownerRef: () => { cx: number; cy: number; equipStats?: { stringColor?: number } } | null;
+  private ctx: CounterweightCtx;
   private hitCd = new HitCooldown();
+  /** 方向（-2 漂移/rotation 定号） */
+  private dir = 1;
   dead = false;
-  /** 手部坐标 + 线色快照（线段链起点/染色，fixedUpdate 每帧刷新） */
+  /** 手部坐标 + 线色快照（线段链起点/染色，每 AI 次刷新） */
   handX = 0;
   handY = 0;
   stringColor = 0;
+  /** -3 幽灵隐身（alpha=255,:64734-64736）——绘制侧消费 */
+  ghost = false;
 
   constructor(x: number, y: number, damage: number, knockback: number, projId: number,
-    owner: () => { cx: number; cy: number; equipStats?: { stringColor?: number } } | null,
-    alive: () => boolean, yoyoString: boolean) {
+    ai0: number, ctx: CounterweightCtx) {
     super();
     this.x = x; this.y = y;
     this.damage = damage; this.knockback = knockback; this.projId = projId;
-    this.ownerRef = owner; this.alive = alive;
+    this.ai0 = ai0;
+    this.ctx = ctx;
     this.handX = x; this.handY = y;
-    this.orbitR = 125; // 250×0.5（:64477/:64482）
-    if (yoyoString) this.orbitR += this.orbitR * 0.25 + 10; // :64487
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    const p = this.ownerRef();
-    if (!p || !this.alive()) { this.dead = true; return; } // timeLeft=6/宿主消亡
+    // 联机傀儡：纯位移外推
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    // extraUpdates=1（SetDefaults :5807）:AI/移动/命中每 tick 跑 2 次;-2 脱离态
+    // extraUpdates=0（:64739,克隆出生即脱离 → 单跑）
+    const iters = this.ai0 === -2 ? 1 : 2;
+    for (let i = 0; i < iters && !this.dead; i++) this.aiStep(game);
+  }
+
+  private aiStep(game: GameHooks) {
+    const p = this.ctx.owner();
+    if (!p || p.dead) { this.dead = true; return; }   // player.dead → Kill（:64490-64493）
     this.handX = p.cx; this.handY = p.cy;
     this.stringColor = p.equipStats?.stringColor ?? 0;
-    this.rot += 0.5; // :64489
-    // 超径钳回（:64540-64550）：钳到轨道 + 速度径向衰减（去超出的 num6）
-    let dx = p.cx - this.cx, dy = p.cy - this.cy;
-    const d = Math.hypot(dx, dy) || 1;
-    if (d > this.orbitR) {
-      const over = d - this.orbitR;
-      dx /= d; dy /= d;
-      this.x = p.cx - dx * this.orbitR - this.w / 2;
-      this.y = p.cy - dy * this.orbitR - this.h / 2;
-      const sp = Math.hypot(this.vx, this.vy);
-      const cut = Math.min(over, Math.max(0, sp - 1)); // num6 钳（:64556）
-      if (sp > 0) { this.vx *= (sp - cut) / sp; this.vy *= (sp - cut) / sp; }
-    }
-    // 切向增速（:64552-64610）：vector2=(vy,vx) 按象限定号后并入速度方向
-    {
-      const sp0 = Math.hypot(this.vx, this.vy);
-      if (sp0 > 0.5) {
-        let tx = this.vy, ty = this.vx; // vector2 翻转
-        if (this.cy < p.cy) ty = Math.abs(ty); else if (this.cy > p.cy) ty = -Math.abs(ty);
-        if (this.cx < p.cx) tx = Math.abs(tx); else if (this.cx > p.cx) tx = -Math.abs(tx);
-        let nvx = this.vx + tx, nvy = this.vy + ty;
-        const nl = Math.hypot(nvx, nvy) || 1;
-        nvx = nvx / nl * sp0; nvy = nvy / nl * sp0; // 保速转朝
-        if (Math.abs(tx) < 0.1 || Math.abs(ty) < 0.1) { this.vx = nvx; this.vy = nvy; }
-        else { this.vx = (nvx + this.vx * 2) / 3; this.vy = (nvy + this.vy * 2) / 3; } // :64588
+    // num=250×0.5=125 轨道半径（:64477/:64482）;num3=15×0.8=12 速度上限;
+    // num4=12×1.5×0.5=9 速度下限（:64478-64483/:64531）;num5=num3=12 漂移钳
+    let num = 125;
+    const num3 = 12, num4 = 9, num5 = 12;
+    // 场上无悠悠球 → 回收（:64491-64506,owner 本机 && ai0>=0 门）
+    if (this.ai0 >= 0 && !this.ctx.yoyoInPlay()) this.ai0 = -1;
+    if (p.equipStats?.yoyoString) num += num * 0.25 + 10;   // :64486-64488
+    this.rot += 0.5;   // :64489
+    if (Number.isNaN(this.vx) || Number.isNaN(this.vy)) { this.dead = true; return; }
+    if (this.ai0 === 0 || this.ai0 === 1) {
+      if (this.ai0 === 1) num *= 0.75;   // 副球收紧轨道（:64532-64535）
+      let flag3 = false;
+      let dx = p.cx - this.cx, dy = p.cy - this.cy;
+      const d = Math.hypot(dx, dy);
+      // :64536-64540 flag3 = 距玩家超 0.9×轨道（原版同位还有 ai[0] != -2f 恒真死检查,
+      // 本分支已在 ai0∈{0,1} 内,省略不改变语义）
+      if (d > num * 0.9) flag3 = true;
+      if (d > num) {
+        // 超径钳回（:64541-64550）：钳到轨道 + 速度径向衰减（去超出的 num6,至少留 1）
+        const over = d - num;
+        dx /= d || 1; dy /= d || 1;
+        this.x = p.cx - dx * num - this.w / 2;
+        this.y = p.cy - dy * num - this.h / 2;
+        const sp = Math.hypot(this.vx, this.vy);
+        const cut = Math.min(over, Math.max(0, sp - 1));   // num6 钳（:64556）
+        if (sp > 0) { this.vx *= (sp - cut) / sp; this.vy *= (sp - cut) / sp; }
+        // 切向增速（:64552-64608）：vector2=(vy,vx) 按象限定号后并入速度方向
+        const sp0 = Math.hypot(this.vx, this.vy);
+        if (sp0 > 0) {
+          let tx = this.vy, ty = this.vx;   // vector2 翻转
+          if (this.cy < p.cy) ty = Math.abs(ty); else if (this.cy > p.cy) ty = -Math.abs(ty);
+          if (this.cx < p.cx) tx = Math.abs(tx); else if (this.cx > p.cx) tx = -Math.abs(tx);
+          const tl = Math.hypot(tx, ty) || 1;
+          tx = tx / tl * sp0; ty = ty / tl * sp0;   // vector2 *= velocity.Length()
+          if (Math.abs(this.vx) > Math.abs(this.vy)) {
+            let nvx = this.vx, nvy = this.vy + ty;
+            const nl = Math.hypot(nvx, nvy) || 1;
+            nvx = nvx / nl * sp0; nvy = nvy / nl * sp0;
+            if (Math.abs(tx) < 0.1 || Math.abs(ty) < 0.1) { this.vx = nvx; this.vy = nvy; }
+            else { this.vx = (nvx + this.vx * 2) / 3; this.vy = (nvy + this.vy * 2) / 3; }
+          } else {
+            let nvx = this.vx + tx, nvy = this.vy;
+            const nl = Math.hypot(nvx, nvy) || 1;
+            nvx = nvx / nl * sp0; nvy = nvy / nl * sp0;
+            if (Math.abs(tx) < 0.2 || Math.abs(ty) < 0.2) { this.vx = nvx; this.vy = nvy; }
+            else { this.vx = (nvx + this.vx * 2) / 3; this.vy = (nvy + this.vy * 2) / 3; }
+          }
+        }
       }
+      // 鼠标位移反推（:64614-64642）：vector5=-(mouseDelta)×num2(0.1);velocity 非零才
+      // 生效;flag3 时清掉继续远离玩家的分量
+      if (this.ctx.channel()) {
+        const md = this.ctx.mouseDelta();
+        if (this.vx !== 0 || this.vy !== 0) {
+          let mx = -md.dx, my = -md.dy;   // flag 恒 true → ×-1（:64623-64626）
+          if (flag3) {
+            if (this.cx < p.cx && mx < 0) mx = 0;
+            if (this.cx > p.cx && mx > 0) mx = 0;
+            if (this.cy < p.cy && my < 0) my = 0;
+            if (this.cy > p.cy && my > 0) my = 0;
+          }
+          this.vx += mx * 0.1;
+          this.vy += my * 0.1;
+        }
+      } else {
+        this.ai0 = -1;   // 松手回收（:64643-64646）
+      }
+      // 800px 内最近敌追踪（:64643-64717;flag 恒真——配重球全走 num8=800 档;
+      // num11=|dx|+|dy| 曼哈顿距;敌距玩家 <num×0.9 且对球有视线）
+      {
+        let best = 800, tx = 0, ty = 0, found = false;
+        for (const ent of game.enemies()) {
+          if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070
+          const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+          if (e.dead) continue;
+          const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
+          const dist = Math.abs(this.cx - ecx) + Math.abs(this.cy - ecy);
+          if (dist >= best) continue;
+          if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+          if (Math.hypot(ecx - p.cx, ecy - p.cy) >= num * 0.9) continue;
+          best = dist; tx = ecx; ty = ecy; found = true;
+        }
+        if (found) {
+          let cdx = tx - this.cx, cdy = ty - this.cy;
+          const cd = Math.hypot(cdx, cdy) || 1;
+          cdx = cdx / cd * 6; cdy = cdy / cd * 6;   // v3 *= 6（:64710-64712）
+          this.vx = (this.vx * 7 + cdx) / 8;
+          this.vy = (this.vy * 7 + cdy) / 8;
+        }
+      }
+      // 速度钳 [num4=9, num3=12]（:64718-64726;零速保持零——SafeNormalize(Zero) 语义）
+      const sp = Math.hypot(this.vx, this.vy);
+      if (sp > num3) { this.vx = this.vx / sp * num3; this.vy = this.vy / sp * num3; }
+      else if (sp > 0 && sp < num4) { this.vx = this.vx / sp * num4; this.vy = this.vy / sp * num4; }
     }
-    this.x += this.vx;
-    this.y += this.vy;
-    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen);
+    // 魔法线（:64727-64733）：-1 回收态 + magicString → -3 幽灵 + 掷 75% 伤/击退脱离克隆
+    if (this.ai0 === -1 && p.equipStats?.magicString) {
+      this.ai0 = -3;
+      this.ctx.spawnClone?.(this.cx, this.cy, this.vx, this.vy,
+        Math.trunc(this.damage * 0.75), Math.trunc(this.knockback * 0.75), this.projId,
+        this.critChance, this.armorPen);
+    }
+    if (this.ai0 === -3) { this.ghost = true; this.damage = 0; }   // alpha=255 + damage=0（:64734-64737）
+    if (this.ai0 === -2) {
+      // 脱离坠落（:64738-64776）：penetrate=1（克隆一次命中即亡）;重力 0.3、速度上限
+      // 16、vy≤3 缓落水平漂移 ±0.1（num5 钳）
+      this.vy += 0.3;
+      const sp = Math.hypot(this.vx, this.vy);
+      if (sp > 16) { this.vx = this.vx / sp * 16; this.vy = this.vy / sp * 16; }
+      else if (this.vy <= 3) {
+        if (Math.abs(this.vx) < 0.1) {
+          if (this.cx < p.cx) { this.vx -= 0.1; this.dir = -1; }
+          else { this.vx += 0.1; this.dir = 1; }
+        } else if (this.vx > 0 && this.vx < num5) this.vx += 0.1;
+        else if (this.vx < 0 && this.vx > -num5) this.vx -= 0.1;
+      }
+    } else if (this.ai0 < 0) {
+      // 回收（:64777-64824）：num13=num3×1.5=18 速、惯性 num14=12;
+      // 距玩家 <40 / NaN / >2000 → Kill;tileCollide=false 穿墙直积分
+      const dx = p.cx - this.cx, dy = p.cy - this.cy;
+      const d = Math.hypot(dx, dy);
+      if (d < 40 || Number.isNaN(d) || d > 2000) { this.dead = true; return; }
+      this.vx = (this.vx * 11 + (dx / (d || 1)) * 18) / 12;
+      this.vy = (this.vy * 11 + (dy / (d || 1)) * 18) / 12;
+      this.x += this.vx;
+      this.y += this.vy;
+      hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen,
+        (e) => this.onHit(e));
+      return;
+    }
+    // 移动/碰撞（环绕与脱离态;回收态上方已直积分返回）
+    const lvx = this.vx, lvy = this.vy;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.ai0 === -2) {
+      // 脱离态撞块（:16988-17006）：竖撞 lastVy>4 → 弹起 ×-0.6;横撞 → HitTiles 尘 +
+      // SoundID 0 + Kill
+      if ((this.onGround || this.hitHead) && lvy > 4) this.vy = -lvy * 0.6;
+      if (this.hitWall) {
+        game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });   // HitTiles 尘
+        game.playSfx('dig', 1, this.cx, this.cy);   // SoundID 0
+        this.dead = true;
+        return;
+      }
+    } else if (this.hitWall || this.onGround || this.hitHead) {
+      // 环绕态撞块（:17005-17028）：逐轴反转 + 朝玩家合成 0.25 + 速度钳 6
+      if (this.hitWall) this.vx = -lvx;
+      if (this.onGround || this.hitHead) this.vy = -lvy;
+      let hx = p.cx - this.cx, hy = p.cy - this.cy;
+      const hd = Math.hypot(hx, hy) || 1;
+      const spd = Math.hypot(this.vx, this.vy);
+      hx = hx / hd * spd * 0.25;   // v *= velocity.Length() × 0.25
+      hy = hy / hd * spd * 0.25;
+      this.vx = this.vx * 0.75 + hx;
+      this.vy = this.vy * 0.75 + hy;
+      const ns = Math.hypot(this.vx, this.vy);
+      if (ns > 6) { this.vx *= 0.5; this.vy *= 0.5; }
+    }
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen,
+      (e) => this.onHit(e));
+  }
+
+  /** 命中链（Projectile.cs:12467-12508 aiStyle 99 段;-2 只被弹开,其余走
+   *  Counterweight 调用 + 方向定号 + ai0>=0 活跃反弹（localAI[0] += 20 段对配重球
+   *  无寿命语义,天然无效）） */
+  private onHit(e: unknown) {
+    const ecx = (e as { x: number; w: number }).x + (e as { x: number; w: number }).w / 2;
+    const ecy = (e as { y: number; h: number }).y + (e as { y: number; h: number }).h / 2;
+    if (this.ai0 === -2) {
+      // 脱离态被弹开（:12469-12477）：速度 ÷5 + 上抛 Next(50,81)×0.1 钳 -16
+      this.vx /= 5; this.vy /= 5;
+      this.vy -= (50 + Math.floor(Math.random() * 31)) * 0.1;
+      if (this.vy < -16) this.vy = -16;
+      this.dead = true;   // penetrate=1（:64741-64744）一次命中即亡
+      return;
+    }
+    const p = this.ctx.owner();
+    if (!p) return;
+    this.ctx.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :12482
+    this.dir = ecx < p.cx ? -1 : 1;   // :12484-12489
+    if (this.ai0 >= 0) {
+      // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×16
+      let bx = this.cx - ecx, by = this.cy - ecy;
+      const bd = Math.hypot(bx, by) || 1;
+      this.vx = this.vx * -0.5 + (bx / bd) * 16;
+      this.vy = this.vy * -0.5 + (by / bd) * 16;
+    }
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // 线（配重球同走 aiStyle 99 段链，Main.cs:27799-27908——ai[0]>=0 != -2 命中）
-    const c = r.canvas.getContext('2d');
-    const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
-    if (c && tex) {
-      drawYoyoStringLine(c, tex, this.handX, this.handY, this,
-        this.stringColor, stringColorOpts(r.lighting?.clock));
+    // 线（配重球同走 aiStyle 99 段链,Main.cs:27799-27908——ai[0] != -2 命中;-3 幽灵仍画线）
+    if (this.ai0 !== -2) {
+      const c = r.canvas.getContext('2d');
+      const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
+      if (c && tex) {
+        drawYoyoStringLine(c, tex, this.handX, this.handY, this,
+          this.stringColor, stringColorOpts(r.lighting?.clock));
+      }
     }
-    drawProj(r, cam, this, this.projId, this.rot + Math.PI / 2, '#B09060');
+    // -3 幽灵 alpha=255（全透明,:64734-64736）;贴图原生尺寸（SetDefaults 盒 10×10 而贴
+    // 图 16×16,drawSize=-1 防缩）
+    drawProj(r, cam, this, this.projId, this.rot + Math.PI / 2, '#B09060', this.ghost ? 0 : 1, -1);
   }
+}
+
+/** Player.Counterweight 决策核（Player.cs:11946-12004 纯逻辑,Game 侧执行掷出）：
+ *  数场上悠悠球（非配重球旗标、ai0 != -2）与配重球（旗标、ai0 != -2）→
+ *  ① yoyoGlove 且悠悠球数 <2 且 ≥1 → 掷同型二号悠悠球（ai0=1）
+ *  ② else if counterWeight >0 且配重球数 <悠悠球数 → 掷配重球（vanity 优先;
+ *     kb=(kb+6)/2;已有在场 ai0=1 否则 0——两支速度同为朝命中点 16）
+ *  入参 play = 该玩家全部 aiStyle 99 投射物视图（含本球）,按数组序（num=最后一个悠悠球） */
+export interface CounterweightPlayView { isWeight: boolean; ai0: number; }
+export type CounterweightSpawn =
+  | { kind: 'none' }
+  | { kind: 'second-yoyo' }
+  | { kind: 'counterweight'; type: number; kb: number; secondary: boolean };
+
+export function counterweightDecision(
+  eq: { yoyoGlove: boolean; counterWeight: number; vanityCounterWeight: number },
+  play: readonly CounterweightPlayView[],
+  kb: number,
+): CounterweightSpawn {
+  if (!eq.yoyoGlove && eq.counterWeight <= 0) return { kind: 'none' };   // :11947-11950
+  let yoyos = 0, weights = 0;
+  for (const p of play) {
+    if (p.isWeight) {
+      if (p.ai0 !== -2) weights++;   // num3
+    } else if (p.ai0 !== -2) {
+      yoyos++;   // num2（num=最后一个悠悠球索引——计数即 ≥1 判据）
+    }
+  }
+  if (eq.yoyoGlove && yoyos < 2) {
+    if (yoyos >= 1) return { kind: 'second-yoyo' };   // num >= 0（:11973-11985）
+    return { kind: 'none' };   // 手套分支已占用 else-if（:11986）——无球在场不掷配重
+  }
+  if (eq.counterWeight > 0 && weights < yoyos) {
+    return {
+      kind: 'counterweight',
+      type: eq.vanityCounterWeight !== 0 ? eq.vanityCounterWeight : eq.counterWeight,   // :11990-11994
+      kb: (kb + 6) / 2,   // :11987
+      secondary: weights > 0,   // :11995-12003 已有在场 → ai0=1
+    };
+  }
+  return { kind: 'none' };
 }
 
 // ================= 悠悠球 / 连枷（aiStyle 99 / 15，channel 语义） =================
@@ -1026,23 +1266,47 @@ export class YoyoProj extends Entity {
   /** 线饰品线色快照（Player.stringColor，fixedUpdate 每帧从 equipStats 刷新；
    *  绘制侧消费——线段链染色/29 号闪烁免取光，Main.cs:27901） */
   stringColor = 0;
-  /** 存活秒数（AI_099 localAI[0]/60 ÷(1+ms)/2,超 YOYO_LIFE 回收） */
+  /** localAI[0] 累积寿命（秒，÷(1+meleeSpeed)/2 折算；超 YOYO_LIFE → 回收态） */
   private lifeT = 0;
-  /** 回收锁（ai[0]=-1 终态:松手/超寿命/1.3×超程后不可复活,需重新使用掷出） */
-  private recalled = false;
-  /** 钳制后的目标点（原版 ai[0]/ai[1] 存量,:65049-65051——目标变化才重写并触发
-   *  range-1 二次钳制;逼近段用的是这份存量而非实时光标） */
-  private ai0 = 0;
+  /** ai[0] 状态机（AI_099_2_Yoyos 全量）：
+   *  >=0 = 目标 X 缓存（活跃追标，ai[1]=目标 Y）；
+   *  -1  = 回收（松手/石化冰冻/超寿命/1.3×超程 → 飞回玩家 <top+10 消亡）；
+   *  -2  = 脱离坠落（魔法线克隆专属出生态：重力 0.3、penetrate=Next(3,7)、撞墙即亡、
+   *        免画线 Main.cs:27799；:65118-65151）；
+   *  -3  = 魔法线幽灵（-1+magicString → 隐身零伤飞回，:65110-65120）。 */
+  ai0 = 0;
+  /** ai[1] 目标 Y 缓存（回收转移时清 0，:65005） */
   private ai1 = 0;
+  /** 旧"回收锁"语义兼容读口（= ai0 ∈ {-1,-3}） */
+  get recalled(): boolean { return this.ai0 === -1 || this.ai0 === -3; }
   /** projectile.direction（AI_099 ChangeDir 段 :64925-64935：球在玩家右侧 >2px → 1、
-   *  左侧 → -1,±2 死区内保持原值）——击退方向以此为准（曾误用 sign(vx)） */
+   *  左侧 → -1,±2 死区内保持原值；flag/脱离态不更新——:64907-64934 门）——
+   *  击退方向以此为准（曾误用 sign(vx)） */
   private dir = 1;
+  /** -2 脱离态穿透计数（penetrate 懒置 Next(3,7)=3-6，:65122-65125；-1=未置） */
+  private pierceLeft = -1;
+  /** -3 幽灵隐身（alpha=255，:65117-65119）——绘制侧消费 */
+  ghost = false;
   /** 存活 tick 上限:有限寿命型号 7200 防泄漏;无限寿命（YOYO_LIFE 缺省 -1）无上限——
-   *  原版 timeLeft=6 每帧刷新（:64942）,无限寿命悠悠球可永久滞留直至松手回收 */
+   *  原版 timeLeft=6 每帧刷新（:64942）,无限寿命悠悠球可永久滞留直至松手回收。
+   *  脱离态（-2）寿命无限（:64850-64852 num2=-1）——撞墙/穿透尽才亡 */
   life = 7200;
   /** 型号顶速（YOYO_TOP 注入，缺省 10——ProjectileID.cs:189） */
   topSpeed = 10;
   dead = false;
+  /** 同型前球在场（AI_099_2 flag :64827-64835：手套二号球寿命加速烧 rand(10,31)×0.1、
+   *  死区 +20（:64976-64978）、免持械转向（:64907-64934）——Game 注入闭包扫描） */
+  secondInPlay?: () => boolean;
+  /** 寿命尽全量回收广播（:64852-64866：该玩家所有 aiStyle99 且 ai0>=0 → -1——含
+   *  配重球；Game 注入闭包扫描） */
+  recallFamily?: () => void;
+  /** 魔法线克隆回调（:65110-65116：-1+magicString → 掷 75% 伤/击退的 -2 脱离克隆） */
+  spawnClone?: (x: number, y: number, vx: number, vy: number, dmg: number, kb: number) => void;
+  /** 悠悠球命中链回调（Projectile.cs:12482 Player.Counterweight；-2 免调） */
+  counterweight?: (hitX: number, hitY: number, dmg: number, kb: number) => void;
+  /** 出生物品内部 id（Game 注入——channel 闭包的手持核对/族成员遗传：手套二号球、
+   *  魔法线克隆、配重球 ctx 共用同物品 channel 判定） */
+  itemId?: number;
 
   constructor(x: number, y: number, damage: number, knockback: number, projId: number,
     stringLen: number, channel: () => boolean, target: () => { x: number; y: number }) {
@@ -1061,15 +1325,20 @@ export class YoyoProj extends Entity {
 
   draw(r: Renderer, cam: Camera): void {
     // 线（Main.cs:27799-27908 DrawProjDirect aiStyle99 段 1:1）：手部→球体 12px 段链，
-    // FishingLine.png 竖条逐段旋贴、摆垂、线饰品染色（StringLine 共享模块——曾灰直线近似）
-    const c = r.canvas.getContext('2d');
-    const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
-    if (c && tex) {
-      drawYoyoStringLine(c, tex, this.handX, this.handY, this,
-        this.stringColor, stringColorOpts(r.lighting?.clock));
+    // FishingLine.png 竖条逐段旋贴、摆垂、线饰品染色（StringLine 共享模块——曾灰直线近似）。
+    // ★ai[0] != -2 免画线门（Main.cs:27799——脱离态无线；-3 幽灵仍画线）
+    if (this.ai0 !== -2) {
+      const c = r.canvas.getContext('2d');
+      const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
+      if (c && tex) {
+        drawYoyoStringLine(c, tex, this.handX, this.handY, this,
+          this.stringColor, stringColorOpts(r.lighting?.clock));
+      }
     }
-    this.rot += 0.45; // :65203-65209 rotation += 0.45/tick(每 AI 次;0.25 系自造,2026-08-13 终审修)
-    drawProj(r, cam, this, this.projId, this.rot, '#E04040');
+    // :65180-65186 rotation：-2 档 += 0.45×direction（漂移向），其余 +0.45
+    this.rot += this.ai0 === -2 ? 0.45 * this.dir : 0.45;
+    // -3 幽灵 alpha=255 全透明（:65117-65119）
+    drawProj(r, cam, this, this.projId, this.rot, '#E04040', this.ghost ? 0 : 1);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -1077,87 +1346,201 @@ export class YoyoProj extends Entity {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const p = game.player;
+    const eq = p.equipStats;
     this.handX = p.cx;
     this.handY = p.cy;
-    this.stringColor = p.equipStats.stringColor;
-    // ChangeDir 段（:64925-64935,活跃/回收态公共段）:球相对玩家 X 定 direction,
-    // ±2px 死区内保持原值——击退方向用 this.dir（非 sign(vx)）
-    if (this.cx > p.cx + 2) this.dir = 1;
-    else if (this.cx < p.cx - 2) this.dir = -1;
+    this.stringColor = eq.stringColor;
+    // flag：同型前球在场（:64827-64835——手套二号球标记）
+    const flag = !!this.secondInPlay?.();
+    // ChangeDir 段（:64907-64934）：!flag && ai0 != -2 才持械转向（±2px 死区保原值）
+    if (!flag && this.ai0 !== -2) {
+      if (this.cx > p.cx + 2) this.dir = 1;
+      else if (this.cx < p.cx - 2) this.dir = -1;
+    }
     this.hitCd.tick();
     // ---- AI_099_2_Yoyos 参数链（:64945-64977）----
-    const ms = p.attackSpeedMult || 1;
-    const msRange = (1 + ms * 3) / 4;          // 射程/顶速缩放(:64974-64975)
+    // ★原版 meleeSpeed 基 1（Player.cs:2328 =1f,装备加法 +0.12 档）——本仓
+    //   attackSpeedMult = 1/meleeSpeed(CapAttackSpeeds :28566-28573),取倒数还原;
+    //   曾直接拿 attackSpeedMult 当 meleeSpeed 用,加成方向反（越快射程越长）
+    const vms = 1 / (p.attackSpeedMult || 1);
+    const msRange = (1 + vms * 3) / 4;          // 射程/顶速缩放(:64974-64975)
     let range = YOYO_RANGE[this.projId] ?? 200;
-    if (p.equipStats.yoyoString) range = range * 1.25 + 30;  // 线圈 yoyoString(:64971)
+    if (eq.yoyoString) range = range * 1.25 + 30;  // 线圈 yoyoString(:64971)
     range /= msRange;
     let top = (YOYO_TOP[this.projId] ?? 10) / msRange;
     let inertia = Math.max(1, 14 - top / 2);   // num7(:64968-64971)
-    const deadZone = 5 + top / 2;              // num9 光标死区半径(:64972)
-    // 寿命（:64840-64854）：秒数 ÷(1+ms)/2,超 YoyosLifeTimeMultiplier → 回收态
-    this.lifeT += 1 / 60 / ((1 + ms) / 2);
+    const deadZone = 5 + top / 2 + (flag ? 20 : 0);  // num9 光标死区半径(:64972 + flag:64976-64978)
+    // 寿命（:64827-64854）：localAI[0] += 1（flag 另加 rand(10,31)×0.1）→ 秒数
+    // ÷(1+meleeSpeed)/2,超 YoyosLifeTimeMultiplier → 回收（并广播全量回收）
+    this.lifeT += (1 + (flag ? (10 + Math.floor(Math.random() * 21)) * 0.1 : 0)) / 60 / ((1 + vms) / 2);
     let lifeMul = YOYO_LIFE[this.projId] ?? -1;
-    if (p.equipStats.yoyoString && lifeMul > 0) lifeMul *= 1.5;
-    const expired = lifeMul !== -1 && this.lifeT > lifeMul;
-    if (this.recalled || !this.channel() || expired) {
-      this.recalled = true;
-      // 回收态（ai[0]=-1,:65152-65172）：惯性 ×0.8 取整、顶速 ×1.5、穿墙,
+    if (eq.yoyoString && lifeMul > 0) lifeMul *= 1.5;
+    if (this.ai0 <= -2) lifeMul = -1;   // 脱离/幽灵态寿命无限（:64850-64852）
+    if (lifeMul !== -1 && this.lifeT > lifeMul) {
+      this.recallFamily?.();   // :64853-64865 该玩家所有 aiStyle99 ai0>=0 → -1（含配重球）
+      this.ai0 = -1;
+    }
+    // ---- 活跃态（ai0 >= 0,:64983-65148）----
+    if (this.ai0 >= 0) {
+      if (Math.hypot(this.vx, this.vy) > top) { this.vx *= 0.98; this.vy *= 0.98; }
+      const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+      const dPlayer = Math.hypot(p.cx - cx, p.cy - cy);
+      const overRange = dPlayer > range;          // flag3:超程减速
+      const wayOut = dPlayer > range * 1.3;       // flag4:1.3×超程强制回收
+      // channel 门（:65001-65035）：松手/石化/冰冻 → ai0=-1, ai1=0
+      const pb = (p as unknown as { buffs?: { has: (b: number) => boolean } }).buffs;
+      if (!this.channel() || pb?.has(BuffType.Stoned) || pb?.has(BuffType.Frozen)) {
+        this.ai0 = -1;
+        this.ai1 = 0;
+      } else {
+        // 光标目标钳在射程内（:65010-65034）
+        const t = this.target();
+        let tx = t.x, ty = t.y;
+        let tdx = tx - p.cx, tdy = ty - p.cy;
+        const td = Math.hypot(tdx, tdy);
+        if (td > range) { tdx = (tdx / td) * range; tdy = (tdy / td) * range; tx = p.cx + tdx; ty = p.cy + tdy; }
+        // :65038-65050:目标点变化时（ai[0]/ai[1] 存量比对）再钳 range-1——防球贴射程边缘抖动
+        if (this.ai0 !== tx || this.ai1 !== ty) {
+          let vx2 = tx - p.cx, vy2 = ty - p.cy;
+          const vd = Math.hypot(vx2, vy2);
+          if (vd > range - 1) { vx2 = (vx2 / vd) * (range - 1); vy2 = (vy2 / vd) * (range - 1); tx = p.cx + vx2; ty = p.cy + vy2; }
+          this.ai0 = tx; this.ai1 = ty;
+        }
+      }
+      if (wayOut) this.ai0 = -1;   // flag4（:65059-65063）
+      if (this.ai0 >= 0) {
+        // 逼近段（:65066-65148）——用 ai0/ai1 存量目标（非实时光标）
+        if (overRange) {
+          inertia /= 2; top *= 2;
+          if (cx > p.cx && this.vx > 0) this.vx *= 0.5;
+          if (cy > p.cy && this.vy > 0) this.vy *= 0.5;
+          if (cx < p.cx && this.vx < 0) this.vx *= 0.5;
+          if (cy < p.cy && this.vy < 0) this.vy *= 0.5;
+        }
+        if (overRange) inertia = 1;   // flag3 时 num7=1（:65066-65067——velocity 直接取目标向）
+        const dx2 = this.ai0 - this.cx, dy2 = this.ai1 - this.cy;
+        const d2 = Math.hypot(dx2, dy2);
+        if (d2 > deadZone) {
+          // lerp 逼近（:65071-65083）：velocity=(v×(num7-1)+dir×min(d/2,top))/num7
+          const step = overRange ? Math.min(d2 / 2, top / 2) : Math.min(d2 / 2, top);
+          this.vx = (this.vx * (inertia - 1) + (dx2 / d2) * step) / inertia;
+          this.vy = (this.vy * (inertia - 1) + (dy2 / d2) * step) / inertia;
+        } else if (flag) {
+          // 同型前球在场（:65108-65127）：死区内维持 num8×0.6 巡航速（lerp 惯性）
+          const sp = Math.hypot(this.vx, this.vy);
+          if (sp < top * 0.6) {
+            const nvx = sp > 0 ? this.vx / sp * top * 0.6 : 0;
+            const nvy = sp > 0 ? this.vy / sp * top * 0.6 : 0;
+            this.vx = (this.vx * (inertia - 1) + nvx) / inertia;
+            this.vy = (this.vy * (inertia - 1) + nvy) / inertia;
+          }
+        } else {
+          this.vx *= 0.8; this.vy *= 0.8;  // 死区内衰减(:65144)
+        }
+        if (flag && !overRange && Math.hypot(this.vx, this.vy) < top * 0.6) {
+          // :65129-65137 尾段：直接归一到 num8×0.6（零速保持零——SafeNormalize(Zero)）
+          const sp = Math.hypot(this.vx, this.vy);
+          if (sp > 0) { this.vx = this.vx / sp * top * 0.6; this.vy = this.vy / sp * top * 0.6; }
+        }
+      }
+    }
+    // ---- 魔法线（:65110-65116）：-1 回收态 + magicString → -3 幽灵 + 掷 75% 伤/击退
+    //      脱离克隆（本球速度/中心,ai0=-2 出生;伤害 (int) 截断）----
+    if (this.ai0 === -1 && eq.magicString) {
+      this.ai0 = -3;
+      this.spawnClone?.(this.cx, this.cy, this.vx, this.vy,
+        Math.trunc(this.damage * 0.75), Math.trunc(this.knockback * 0.75));
+    }
+    if (this.ai0 === -3) { this.ghost = true; this.damage = 0; }   // :65117-65119
+    // ---- 状态尾段（:65118-65177）----
+    if (this.ai0 === -2) {
+      // 脱离坠落（:65118-65151）：penetrate 懒置 Next(3,7)、重力 0.3、速度上限 16、
+      // vy≤3 缓落水平漂移 ±0.1（num8 钳 16）
+      if (this.pierceLeft < 0) this.pierceLeft = 3 + Math.floor(Math.random() * 4);
+      this.vy += 0.3;
+      const sp = Math.hypot(this.vx, this.vy);
+      if (sp > 16) { this.vx = this.vx / sp * 16; this.vy = this.vy / sp * 16; }
+      else if (this.vy <= 3) {
+        const cap = Math.min(top, 16);
+        if (Math.abs(this.vx) < 0.1) {
+          if (this.cx < p.cx) { this.vx -= 0.1; this.dir = -1; }
+          else { this.vx += 0.1; this.dir = 1; }
+        } else if (this.vx > 0 && this.vx < cap) this.vx += 0.1;
+        else if (this.vx < 0 && this.vx > -cap) this.vx -= 0.1;
+      }
+    } else if (this.ai0 < 0) {
+      // 回收态（ai0=-1/-3,:65152-65177）：惯性 ×0.8 取整、顶速 ×1.5、穿墙,
       // lerp 朝玩家;距手 <num8+10 或 >2000 → Kill
       inertia = Math.floor(inertia * 0.8);
       top *= 1.5;
-      const dx = p.cx - (this.x + this.w / 2);
-      const dy = p.cy - (this.y + this.h / 2);
+      const dx = p.cx - this.cx;
+      const dy = p.cy - this.cy;
       const d = Math.hypot(dx, dy);
       if (d < top + 10 || d === 0 || d > 2000) { this.dead = true; return; }
       this.vx = (this.vx * (inertia - 1) + (dx / d) * top) / inertia;
       this.vy = (this.vy * (inertia - 1) + (dy / d) * top) / inertia;
       this.x += this.vx;
       this.y += this.vy;
-      hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen);
+      hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
+        (e) => this.onYoyoHit(e, game));
       return;
     }
-    // ---- 活跃态（:64983-65148）----
-    if (Math.hypot(this.vx, this.vy) > top) { this.vx *= 0.98; this.vy *= 0.98; }
-    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
-    const dPlayer = Math.hypot(p.cx - cx, p.cy - cy);
-    const overRange = dPlayer > range;          // flag3:超程减速
-    if (dPlayer > range * 1.3) { this.recalled = true; return; } // flag4:1.3×超程强制回收(下帧走回收态)
-    // 光标目标钳在射程内（:65002-65034）
-    const t = this.target();
-    let tx = t.x, ty = t.y;
-    let tdx = tx - p.cx, tdy = ty - p.cy;
-    const td = Math.hypot(tdx, tdy);
-    if (td > range) { tdx = (tdx / td) * range; tdy = (tdy / td) * range; tx = p.cx + tdx; ty = p.cy + tdy; }
-    // :65038-65050:目标点变化时（ai[0]/ai[1] 存量比对）再钳 range-1——防球贴射程边缘抖动
-    if (this.ai0 !== tx || this.ai1 !== ty) {
-      let vx2 = tx - p.cx, vy2 = ty - p.cy;
-      const vd = Math.hypot(vx2, vy2);
-      if (vd > range - 1) { vx2 = (vx2 / vd) * (range - 1); vy2 = (vy2 / vd) * (range - 1); tx = p.cx + vx2; ty = p.cy + vy2; }
-      this.ai0 = tx; this.ai1 = ty;
+    // ---- 活跃/脱离态移动+碰撞（原版 yoyo tileCollide=true 撞墙滑动;
+    //      回收态上方已穿墙直积分返回）----
+    const lvy = this.vy;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.ai0 === -2) {
+      // 脱离态撞块（:16988-17006）：竖撞 lastVy>4 → 弹起 ×-0.6;横撞 → HitTiles 尘 +
+      // SoundID 0 + Kill
+      if ((this.onGround || this.hitHead) && lvy > 4) this.vy = -lvy * 0.6;
+      if (this.hitWall) {
+        game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });   // HitTiles 尘
+        game.playSfx('dig', 1, this.cx, this.cy);   // SoundID 0
+        this.dead = true;
+        return;
+      }
     }
-    if (overRange) {
-      inertia /= 2; top *= 2;
-      if (cx > p.cx && this.vx > 0) this.vx *= 0.5;
-      if (cy > p.cy && this.vy > 0) this.vy *= 0.5;
-      if (cx < p.cx && this.vx < 0) this.vx *= 0.5;
-      if (cy < p.cy && this.vy < 0) this.vy *= 0.5;
+    // 命中冷却 10t（NPC immune[owner] 缺省——yoyo SetDefaults 未设
+    // usesLocalNPCImmunity/Cooldown,走全局 10t）;命中链回调见 onYoyoHit
+    hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen,
+      (e) => this.onYoyoHit(e, game),
+      () => {
+        // 活跃态对玩家无视线 → 该击伤害 ×0.75（:12503-12505 num12）
+        if (this.ai0 >= 0
+          && !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h)) return 0.75;
+        return 1;
+      });
+  }
+
+  /** 命中链（Projectile.cs:12467-12508 aiStyle 99 段）:-2 只被弹开（不触发
+   *  Counterweight）;其余调 Counterweight + 方向定号;ai0>=0 活跃反弹 +
+   *  localAI[0] += 20（无视线 +40,寿命快捷烧） */
+  private onYoyoHit(e: unknown, game: GameHooks) {
+    const p = game.player;
+    const ecx = (e as { x: number; w: number }).x + (e as { x: number; w: number }).w / 2;
+    const ecy = (e as { y: number; h: number }).y + (e as { y: number; h: number }).h / 2;
+    if (this.ai0 === -2) {
+      // 脱离态被弹开（:12469-12477）：速度 ÷5 + 上抛 Next(50,81)×0.1 钳 -16;
+      // 穿透自减（penetrate 3-6 尽 → Kill）
+      this.vx /= 5; this.vy /= 5;
+      this.vy -= (50 + Math.floor(Math.random() * 31)) * 0.1;
+      if (this.vy < -16) this.vy = -16;
+      if (--this.pierceLeft <= 0) this.dead = true;
+      return;
     }
-    // lerp 逼近目标（:65071-65083）：死区外 velocity=(v×(num7-1)+dir×min(d/2,top))/num7
-    const dx2 = tx - cx, dy2 = ty - cy;
-    const d2 = Math.hypot(dx2, dy2);
-    if (d2 > deadZone) {
-      const step = overRange ? Math.min(d2 / 2, top / 2) : Math.min(d2 / 2, top);
-      const k = overRange ? 1 : inertia; // flag3 时 num7=1（:65066-65067）
-      this.vx = (this.vx * (k - 1) + (dx2 / d2) * step) / k;
-      this.vy = (this.vy * (k - 1) + (dy2 / d2) * step) / k;
-    } else {
-      this.vx *= 0.8; this.vy *= 0.8;  // 死区内衰减(:65127)
+    this.counterweight?.(ecx, ecy, this.damage, this.knockback);   // :12482
+    this.dir = ecx < p.cx ? -1 : 1;   // :12484-12489
+    if (this.ai0 >= 0) {
+      // 活跃态命中反弹（:12490-12500）：v×-0.5 + 离敌向 ×16
+      let bx = this.cx - ecx, by = this.cy - ecy;
+      const bd = Math.hypot(bx, by) || 1;
+      this.vx = this.vx * -0.5 + (bx / bd) * 16;
+      this.vy = this.vy * -0.5 + (by / bd) * 16;
+      // 寿命快捷烧（:12501-12505）：localAI[0] += 20;对玩家无视线再 +40
+      const noLos = !canHit(game.world.store, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h);
+      const vms = 1 / (p.attackSpeedMult || 1);
+      this.lifeT += (noLos ? 60 : 20) / 60 / ((1 + vms) / 2);
     }
-    this.x += this.vx;
-    this.y += this.vy;
-    // yoyo tileCollide=false 穿墙;命中冷却 10t(NPC immune[owner] 缺省——yoko SetDefaults
-    // 未设 usesLocalNPCImmunity/Cooldown,走全局 10t)
-    hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen);
   }
 }
 

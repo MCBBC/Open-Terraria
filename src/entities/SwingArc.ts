@@ -524,11 +524,15 @@ const FRACTAL_PROFILES: Record<number, { len: number; color: [number, number, nu
 /** 档案键集（测试用） */
 export const FRACTAL_KEYS = Object.keys(FRACTAL_PROFILES).map(Number);
 
-/** GetRandomProfileIndex（:170-180）：档案表随机，命中 4956 重掷一次 */
+/** GetRandomProfileIndex（:170-180）：档案表随机，命中 4956 移除后重掷一次
+ *  （重掷池不含 4956——曾从全表重掷仍有 1/21 概率回到 Zenith） */
 export function randomFractalProfile(excludeZenith = true): number {
   const keys = Object.keys(FRACTAL_PROFILES).map(Number);
   let id = keys[Math.floor(Math.random() * keys.length)];
-  if (excludeZenith && id === 4956) id = keys[Math.floor(Math.random() * keys.length)];
+  if (excludeZenith && id === 4956) {
+    const rest = keys.filter((k) => k !== 4956);
+    id = rest[Math.floor(Math.random() * rest.length)];
+  }
   return id;
 }
 

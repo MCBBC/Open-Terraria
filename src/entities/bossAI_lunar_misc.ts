@@ -1194,8 +1194,11 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
     // 锚 1:玩家正上/正下列 (px, selfY)(:40722-40732)
     if (Math.abs(p.cx - e.cx) > 8 && losClear(game, e.cx, e.cy, p.cx, e.cy)) {
       e.ai0 = 3; e.ai1 = p.cx; e.ai2 = e.cy;
-      // 命中再升级为 (selfX, playerY) 双段锚(:40734-40742)
-      if (Math.abs(p.cy - e.cy) > 8 && losClear(game, e.cx, e.cy, e.cx, p.cy)
+      // 命中再升级为 (selfX, playerY) 双段锚(:40734-40742)。★门用 vector264.Length()
+      // 即列锚距 |ΔX|（原版字面复检 vector264 而非 center48−Center=|ΔY|——"行锚
+      // 距离门拿列锚距"的层级笔误 1:1 保留，先例：石巨人砸火把 Y 上界用 width；
+      // G11 定谳 2026-08-19：1405 无 aiStyle91（1.4.4+ 新增）无对读，按 1456 字面）
+      if (Math.abs(p.cx - e.cx) > 8 && losClear(game, e.cx, e.cy, e.cx, p.cy)
         && losClear(game, e.cx, p.cy, p.x, p.y)) {
         e.ai1 = e.cx; e.ai2 = p.cy;
       }

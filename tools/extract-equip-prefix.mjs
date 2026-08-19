@@ -15,6 +15,12 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
 const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
+// --audit（tests/extract-audit 同法）：全量计算但不落盘，stdout 末行输出
+// pinned（表达式槽位钉死件）+ 基数供测试与已提交 JSON 比对——双向抓
+// "提取器坏"与"数据被重生成坏"。幂等链（extract→patch 两次 md5 一致）另经
+// 手工全链验证（2026-08-19：三连跑五产物 md5 全等）。
+const AUDIT = process.argv.includes('--audit');
+const writeOut = (p, data) => { if (!AUDIT) writeFileSync(p, data); };
 const itemSrc = read('Terarria1456/Terraria/Item.cs');
 
 // ---- Item.cs case 块逐 id 字段扫描（SetDefaults1-5 段）----
@@ -135,15 +141,9 @@ function parseSwitchCases(swBody) {
   return { cases, def };
 }
 
-/** 字段按 id 求值（C# 顺序执行语义）：
- *  外层语句恒执行；嵌套 switch(type) 仅执行命中分支（有本 id 的 case 走 case，
- *  否则 default，二者皆无 = 什么都不执行）；【后执行的段覆盖先执行的段】。
- *  段内取首匹配——`defense=2; if(Variant==Weaker){defense=1}` 这类条件重赋值
- *  只在改写语境生效，取首值才是常观数值（与旧版扫描口径一致）。
- *  ★必要性（2026-08-19 线饰品批）：落空标签组共享体+嵌套 switch 是 SetDefaults
- *  对成组物品逐 id 差异化的标准写法（如 3293-3308 线色 / 3863-3865 头槽 /
- *  3855-3857 宠物 buffType）——首字面匹配会把全组误判第一个值。 */
-function resolveCaseField(seg, pattern, id) {
+/** 段 → 外层余体 + 嵌套 switch(type) 命中分支拼接（C# 顺序执行语义，
+ *  后执行的段覆盖先执行的段；嵌套 switch 无本 id case 且无 default = 空段） */
+function caseParts(seg, id) {
   const spans = typeSwitchSpans(seg);
   const parts = [];
   let last = 0;
@@ -155,12 +155,73 @@ function resolveCaseField(seg, pattern, id) {
     last = e;
   }
   parts.push(seg.slice(last));
+  return parts;
+}
+
+/** 字段按 id 求值（C# 顺序执行语义）：
+ *  外层语句恒执行；嵌套 switch(type) 仅执行命中分支（有本 id 的 case 走 case，
+ *  否则 default，二者皆无 = 什么都不执行）；【后执行的段覆盖先执行的段】。
+ *  段内取首匹配——`defense=2; if(Variant==Weaker){defense=1}` 这类条件重赋值
+ *  只在改写语境生效，取首值才是常观数值（与旧版扫描口径一致）。
+ *  ★必要性（2026-08-19 线饰品批）：落空标签组共享体+嵌套 switch 是 SetDefaults
+ *  对成组物品逐 id 差异化的标准写法（如 3293-3308 线色 / 3863-3865 头槽 /
+ *  3855-3857 宠物 buffType）——首字面匹配会把全组误判第一个值。 */
+function resolveCaseField(seg, pattern, id) {
   let val;
-  for (const p of parts) {
+  for (const p of caseParts(seg, id)) {
     const m = p.match(new RegExp(pattern));
     if (m) val = m[1] !== undefined ? +m[1] : 1;
   }
   return val;
+}
+
+/** 捕获组【原文】按 id 求值（同 resolveCaseField 的段拼接/覆盖语义，但不做
+ *  `+m[1]` 数值强转——算式槽位求值需要保留 RHS 表达式原文） */
+function resolveCaseRaw(seg, pattern, id) {
+  let val;
+  for (const p of caseParts(seg, id)) {
+    const m = p.match(new RegExp(pattern));
+    if (m && m[1] !== undefined) val = m[1];
+  }
+  return val;
+}
+
+/** `type` 算式安全求值：剥离整型强转前缀（`(sbyte)(29 + type - 3468)`）后仅允许
+ *  数字字面量、type、四则运算符、括号与空白——含其他标识符（局部变量/字段名，
+ *  如 DefaultToHeadgear 辅助体内的 helmetArtID）一律拒绝（undefined，保持漏提），
+ *  同时防 new Function 注入。求值失败/非有限值同样拒绝。 */
+function evalTypeExpr(expr, id) {
+  const cleaned = expr.replace(/\(\s*(?:sbyte|byte|short|ushort|int|uint|long|ulong)\s*\)\s*/g, '').trim();
+  if (!/^[\d\s+\-*/().]*\btype\b[\d\s+\-*/().]*$/.test(cleaned)) return undefined;
+  try {
+    const v = new Function('type', `"use strict";return (${cleaned});`)(id);
+    return Number.isFinite(v) ? v : undefined;
+  } catch { return undefined; }
+}
+
+/** 槽位字段扫描（字面量 + type 算式双模式——wingSlot/headSlot/bodySlot/legSlot 等
+ *  槽位字段通用入口，非逐件 hardcode）：
+ *  ① `slot = N;` 字面量直取（旧口径原样保留）；
+ *  ② `slot = <expr>;` 算式（仅含 type/数字/四则/括号/整型强转）→ 代入当前 id 求值。
+ *  两类现存实例（Item.cs SetDefaults case 块）：
+ *    :30802 `headSlot = type + 186 - 3372;`（3372/3373 Boss 面具 → 186/187，
+ *      ItemID.cs:8283 BossMaskCultist/:8285 BossMaskMoonlord）
+ *    :31081 `wingSlot = (sbyte)(29 + type - 3468);`（3468-3471 四件月总前翅膀 →
+ *      槽 29-32，ItemID.cs:8475-8481 WingsSolar/Vortex/Nebula/Stardust——
+ *      此前槽 29-32 被误判"原版死槽"，实为算式解析缺口）
+ *  范围块算式（:21852 Boss 面具 2104-2113 `headSlot = type + 146 - 2104`）不在
+ *  case 段内，仍由 tools/patch-vanity-stats.mjs ③ 补。 */
+function scanSlotFields(src, field) {
+  const out = scanCaseFields(src, [`\\b${field}\\s*=\\s*(\\d+);`]);
+  for (const [id, seg] of CASE_SEGMENTS) {
+    if (out.has(id)) continue;
+    const raw = resolveCaseRaw(seg, `\\b${field}\\s*=\\s*([^;]+);`, id);
+    if (raw !== undefined) {
+      const v = evalTypeExpr(raw, id);
+      if (v !== undefined) out.set(id, v);
+    }
+  }
+  return out;
 }
 
 /** 扫描字段赋值（field = N;）与辅助方法调用（DefaultToMinecart(N)）。
@@ -187,11 +248,12 @@ const MOUNT_TYPE = scanCaseFields(itemSrc, ['\\bmountType\\s*=\\s*(-?\\d+);', 'D
 
 // ---- 盔甲/配饰基础数据（装备槽归属 + 防御值）→ vanilla-itemstats.json ----
 // 槽位归属：headSlot/bodySlot/legSlot 赋值即对应部位（值是绘制槽序号非部位，仅判有无）。
+//   字面量 + type 算式双模式（scanSlotFields——:30802 `type + 186 - 3372` 表达式族）。
 // 防御值：`defense = N;` 字面量（269 处全字面量，无表达式/辅助方法）。
 // 配饰：`accessory = true;`；vanity=true 的社交配饰 acc:0（可入时装配饰槽、无功能效果）。
-const HEAD_SLOT = scanCaseFields(itemSrc, ['\\bheadSlot\\s*=\\s*(\\d+);']);
-const BODY_SLOT = scanCaseFields(itemSrc, ['\\bbodySlot\\s*=\\s*(\\d+);']);
-const LEGS_SLOT = scanCaseFields(itemSrc, ['\\blegSlot\\s*=\\s*(\\d+);']);
+const HEAD_SLOT = scanSlotFields(itemSrc, 'headSlot');
+const BODY_SLOT = scanSlotFields(itemSrc, 'bodySlot');
+const LEGS_SLOT = scanSlotFields(itemSrc, 'legSlot');
 const HEAD = new Set(HEAD_SLOT.keys());
 const BODY = new Set(BODY_SLOT.keys());
 const LEGS = new Set(LEGS_SLOT.keys());
@@ -220,8 +282,10 @@ for (const [vid, slot] of LEGS_SLOT) setStat(vid, { s: 'l', ls: slot });
 for (const [vid, def] of DEFENSE) setStat(vid, { def });
 for (const [vid, reg] of LIFEREGEN) setStat(vid, { life: reg });
 for (const vid of ACCESSORY) setStat(vid, { acc: VANITY.has(vid) ? 0 : 1 });
-// 翅膀槽（Item.wingSlot——翅膀是配饰，wingSlot>0 即翅膀；飞行时长/速度查 vanilla-wingstats.json）
-const WING_SLOT = scanCaseFields(itemSrc, ['\\bwingSlot\\s*=\\s*(\\d+);']);
+// 翅膀槽（Item.wingSlot——翅膀是配饰，wingSlot>0 即翅膀；飞行时长/速度查 vanilla-wingstats.json）。
+// :31081 `wingSlot = (sbyte)(29 + type - 3468);` 算式族（3468-3471 月总前四翅膀 → 槽 29-32）
+// 由 scanSlotFields 算式通道补齐——此前只认字面量时四件仅 acc=1 无 wing（不可飞不可渲染）。
+const WING_SLOT = scanSlotFields(itemSrc, 'wingSlot');
 for (const [vid, wing] of WING_SLOT) setStat(vid, { wing });
 // 悠悠球线（Item.stringColor>0 → yoyoString=true，Player.cs:14170）
 const STRING_COLOR = scanCaseFields(itemSrc, ['\\bstringColor\\s*=\\s*(\\d+);']);
@@ -253,7 +317,7 @@ for (const [id, seg] of CASE_SEGMENTS) {
   if (expr !== null && expr !== undefined) STRING_COLOR.set(id, +new Function('type', `return ${expr};`)(id));
 }
 for (const [vid, sc] of STRING_COLOR) setStat(vid, { str: sc });
-writeFileSync(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
+writeOut(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
 console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size} wing ${WING_SLOT.size}）`);
 
 // ---- 翅膀飞行属性（WingStatsInitializer.cs：array[N] = new WingStats(flyTimeVar, flySpeedVar)）----
@@ -268,7 +332,7 @@ console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} b
     const t = locals[mm[2]], s = locals[mm[3]];
     if (t !== undefined && s !== undefined) WING_STATS[mm[1]] = { time: t, speed: s };
   }
-  writeFileSync(`${ROOT}/game/src/data/vanilla-wingstats.json`, JSON.stringify(WING_STATS));
+  writeOut(`${ROOT}/game/src/data/vanilla-wingstats.json`, JSON.stringify(WING_STATS));
   console.error(`wingstats: ${Object.keys(WING_STATS).length} 组（angel=1: ${JSON.stringify(WING_STATS['1'])}）`);
 }
 
@@ -422,7 +486,7 @@ const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;
       }
     }
   }
-  writeFileSync(`${ROOT}/game/src/data/vanilla-accfx.json`, JSON.stringify(ACCFX));
+  writeOut(`${ROOT}/game/src/data/vanilla-accfx.json`, JSON.stringify(ACCFX));
   console.error(`accfx: ${Object.keys(ACCFX).length} 件配饰数值效果`);
 }
 
@@ -476,7 +540,7 @@ for (const [itemIdStr, c] of Object.entries(combat)) {
   if (c.shoot !== undefined && hookProjs.has(c.shoot)) equip.hook.push(itemId);
 }
 for (const k of Object.keys(equip)) equip[k].sort((a, b) => a - b);
-writeFileSync(`${ROOT}/game/src/data/vanilla-equip.json`, JSON.stringify(equip));
+writeOut(`${ROOT}/game/src/data/vanilla-equip.json`, JSON.stringify(equip));
 console.error(`equip: dye ${equip.dye.length} pet ${equip.pet.length} light ${equip.light.length} ` +
   `mount ${equip.mount.length} cart ${equip.cart.length} hook ${equip.hook.length}`);
 
@@ -570,5 +634,18 @@ const doc = {
   canGetPrefixesDefault: cgpTrue,
   canGetPrefixesExcluded: cgpExcluded,
 };
-writeFileSync(`${ROOT}/game/src/data/vanilla-prefix.json`, JSON.stringify(doc));
+writeOut(`${ROOT}/game/src/data/vanilla-prefix.json`, JSON.stringify(doc));
 console.error(`prefix: ${Object.keys(PREFIX_STATS).length} 条属性 / ${Object.keys(PREFIX_NAMES).length} 名 / 池 ${Object.keys(POOLS).length} / 集合 ${Object.keys(SETS).length}`);
+
+// ---- 审计出口（--audit）：pinned 钉死件（表达式槽位）+ 基数（stdout 单行 JSON）----
+if (AUDIT) {
+  console.log(JSON.stringify({
+    counts: {
+      itemstats: Object.keys(STATS).length,   // patch-vanity 之前（无 van/范围块插入）
+      head: HEAD.size, body: BODY.size, legs: LEGS.size,
+      acc: ACCESSORY.size, wing: WING_SLOT.size,
+    },
+    pinned: Object.fromEntries([3372, 3373, 3468, 3469, 3470, 3471]
+      .map((id) => [String(id), STATS[id] ?? null])),
+  }));
+}

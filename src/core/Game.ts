@@ -143,7 +143,7 @@ const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
 import { Enemy, visEffectFrames, bindEnemySoundPrewarm } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
-import { spawnMechQueenEnsemble } from '../entities/bossAI';
+import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
@@ -248,7 +248,7 @@ import { hitPlayer, playerCanHitEnemy, statusPlayer } from '../entities/projTarg
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
-import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, type CounterweightCtx, type CounterweightPlayView } from '../entities/WeaponProj';
 import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj, ChargedBlaster } from '../entities/PrismProj';
 import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../entities/MissileProj';
@@ -790,6 +790,12 @@ export class Game implements GameHooks {
     return false;
   }
   private _prevMouseDown = false;
+  /** 鼠标屏幕位移快照（Main.mouseX-lastMouseX 语义，AI_099_1 配重球鼠标反推 :64614
+   *  消费——fixedUpdate 每帧在实体更新前刷新） */
+  private _mouseDX = 0;
+  private _mouseDY = 0;
+  private _prevMouseX = 0;
+  private _prevMouseY = 0;
   /** 入侵周期公告倒计时（原版 Main.invasionWarn，3600 帧一轮；不存档） */
   private invasionWarn = 0;
   /** 月事件 wave≥15 胜利后的当日强制季节（原版 Main.forceHalloweenForToday /
@@ -4261,6 +4267,12 @@ export class Game implements GameHooks {
     // ⑩ 边沿门的上一帧快照（须在 updateUse 后记录,见上方注记）
     this._prevRightDown = !!inp?.rightDown;
     this._prevMouseDown = !!inp?.mouseDown;
+    // 鼠标屏幕位移（Main.mouseX-lastMouseX）：实体更新前刷新——AI_099_1 配重球
+    // 鼠标反推（:64614）消费本帧位移
+    this._mouseDX = (inp?.mouseX ?? 0) - this._prevMouseX;
+    this._mouseDY = (inp?.mouseY ?? 0) - this._prevMouseY;
+    this._prevMouseX = inp?.mouseX ?? 0;
+    this._prevMouseY = inp?.mouseY ?? 0;
 
     // ---- 实体 ----
     this.entities.update(dt, this);
@@ -4573,13 +4585,22 @@ export class Game implements GameHooks {
           // 神庙传送器捕获：世纪之花前两处 return 拒绝）
           if (this.boss.vanillaId === 262 && this.wiring) this.wiring.planteraDowned = true;
           // 肉山：困难模式世界变换全链（NPC.cs:80281-80292 原序：砖盒 → 捕获旧
-          // hardMode → StartHardmode(置位+V 带转化+洞穴墙回填) → 灯笼夜 19(仅首次)
-          // → misc[15] 公告 + 成就 9(随本链迁移,2026-08-13 之前击杀即发的旧点已删))
+          // hardMode → StartHardmode(置位+V 带转化+洞穴墙回填) → 三机械齐 misc[32]
+          // (仅 !wasHard 时) → 灯笼夜 19(仅首次) → misc[15] 公告 + 成就 9(随本链迁移,
+          // 2026-08-13 之前击杀即发的旧点已删))
           if (this.boss.vanillaId === 113) {
             const wof = this.boss;
             createBrickBoxForWallOfFlesh(w.store, Math.trunc(wof.cx / 16), Math.trunc(wof.cy / 16), wof.w, w.crimson);
             const { wasHard } = startHardmode(w);
             this.recLog('world', { ev: 'hardmode', on: w.flags.hardMode });   // 行为录制：困难模式置位（肉山首杀）
+            // drunk/FTW 边缘（NPC.cs:80287-80290）：三机械旗全齐（机械 Boss 先于
+            // 肉山被杀,本仓键 downed_134/125/127 = downedMechBoss1/2/3）且杀前
+            // 非困难模式（!eventFlag,wasHard 为 StartHardmode 前快照）→ 三旗齐
+            // misc[32] "丛林变得焦躁不安"公告（与 :79670-79673 机械链同一文案）;
+            // 原版序在本条 SetEventFlagCleared(19) 之前 → 置于灯笼夜/misc[15] 前
+            if (!wasHard && w.flags['downed_134'] && w.flags['downed_125'] && w.flags['downed_127']) {
+              this.newText(Lang.misc(32), 50, 255, 130);
+            }
             if (!wasHard) LanternNight.onGameEventCleared(19);
             this.newText(Lang.misc(15), 50, 255, 130);
             this.achievements.notifyProgressionEvent(9);
@@ -6656,6 +6677,7 @@ export class Game implements GameHooks {
           t: animSpd, dur: animSpd, item: held!.id,
           dmg: Math.max(1, Math.round(cwMelee!.damage * (ps?.dmg ?? 1))),
           kb: cwMelee!.knockback * (ps?.kb ?? 1),
+          noGraphic: true,   // noUseGraphic（Item.cs:39991）——投射物即本体，不再画持物
           zenith: zPayload,
         };
         this.player.useTime = reuseSpd;   // ApplyItemTime（useTime 裸值）
@@ -8679,20 +8701,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
         yoyo.critChance = critTotal;
         yoyo.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥
-        // 配重球（counterWeight：悠悠球命中时落配重投射物，原版环绕弹的直线坠落近似）
-        if (this.player.equipStats.counterWeight) {
-          (yoyo as unknown as { spawnWeight?: (x: number, y: number, dmg: number) => void }).spawnWeight =
-            (wx, wy, wdmg) => {
-              // 配重球 = 环绕实体（AI_099_1 :64472-64610 1:1——曾直线坠落 Arrow 近似）
-              const cwOwn = () => (this.player.dead ? null : this.player);
-              const cwAlive = () => !yoyo.dead && (yoyo as unknown as { dead: boolean }).dead === false;
-              const cwE = new CounterweightProj(wx, wy, wdmg, this.player.equipStats.kbGlove ? 4 : 2,
-                556 + Math.floor(Math.random() * 6), cwOwn, cwAlive, this.player.equipStats.yoyoString);
-              cwE.critChance = critTotal;
-              cwE.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
-              this.entities.add(cwE, 'projectiles');
-            };
-        }
+        // 悠悠球袋族回调接线（Player.Counterweight 命中链/手套二号球/魔法线克隆/寿命广播）
+        this.wireYoyoCallbacks(yoyo, cw.shoot, itemId);
         this.entities.add(yoyo, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
@@ -9096,6 +9106,107 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         return;
     }
     void def;
+  }
+
+  /** 悠悠球族 Game 侧回调接线（初掷/手套二号球/魔法线克隆三处共用）：
+   *  secondInPlay（AI_099_2 flag :64827-64835——同型前球在场,出生序比对）/
+   *  recallFamily（寿命尽广播 :64852-64866——该玩家所有 aiStyle99 且 ai0>=0 → -1,含配重球）/
+   *  spawnClone（魔法线 :65110-65116——75% 伤/击退的 -2 脱离克隆）/
+   *  counterweight（命中链 :12482）。 */
+  private wireYoyoCallbacks(yoyo: YoyoProj, projId: number, itemId?: number): void {
+    yoyo.itemId = itemId;
+    // flag：同型（projId）更早出生（实体 id 序 ≈ vanilla whoAmI 槽序）且未脱离的悠悠球在场
+    yoyo.secondInPlay = () => this.entities.projectiles.some((q) =>
+      q !== yoyo && !q.dead && q instanceof YoyoProj && q.projId === projId
+      && q.ai0 >= -1 && q.id < yoyo.id);
+    yoyo.recallFamily = () => {
+      for (const q of this.entities.projectiles) {
+        if (q.dead) continue;
+        if (q instanceof YoyoProj && q.ai0 >= 0) q.ai0 = -1;
+        else if (q instanceof CounterweightProj && q.ai0 >= 0) q.ai0 = -1;
+      }
+    };
+    yoyo.spawnClone = (x, y, vx, vy, dmg, kb) => {
+      const clone = new YoyoProj(x, y, dmg, kb, projId, 0,
+        () => this.input.mouseHeld && !this.input.uiBlocking
+          && (itemId === undefined || this.player.inv.heldItem()?.id === itemId),
+        () => { const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY); return { x: wx, y: wy }; });
+      clone.ai0 = -2;   // NewProjectile …, -2f 脱离态出生（:65115）
+      clone.critChance = yoyo.critChance;
+      clone.armorPen = yoyo.armorPen;
+      // 原版 timeLeft=6 每帧刷新=脱离态无限滞留（撞墙/穿透尽才亡）;7200 防泄漏上限
+      // 是本仓恒定安全网（同有限寿命型号口径）
+      clone.life = 7200;
+      this.wireYoyoCallbacks(clone, projId, itemId);
+      this.entities.add(clone, 'projectiles');
+    };
+    yoyo.counterweight = (hx, hy, d, k) => this.playerCounterweight(hx, hy, d, k, yoyo);
+  }
+
+  /** 配重球运行上下文（CounterweightProj ctx——Game 闭包;魔法线克隆复用同物品 channel） */
+  private mkCounterweightCtx(itemId?: number): CounterweightCtx {
+    const ctx: CounterweightCtx = {
+      owner: () => (this.player.dead ? null : this.player),
+      channel: () => this.input.mouseHeld && !this.input.uiBlocking
+        && (itemId === undefined || this.player.inv.heldItem()?.id === itemId),
+      yoyoInPlay: () => this.entities.projectiles.some((q) =>
+        q instanceof YoyoProj && !q.dead && q.ai0 >= -1),
+      // Main.mouseX - Main.lastMouseX（:64614）——fixedUpdate 快照
+      mouseDelta: () => ({ dx: this._mouseDX, dy: this._mouseDY }),
+      spawnClone: (x, y, vx, vy, dmg, kb, projId, crit, apen) => {
+        // AI_099_1 :64727-64733 配重球魔法线克隆（-2 脱离坠落,penetrate=1;
+        // 伤/击退 (int)×0.75,crit/穿甲承源）
+        const clone = new CounterweightProj(x, y, dmg, kb, projId, -2, ctx);
+        if (crit !== undefined) clone.critChance = crit;
+        if (apen !== undefined) clone.armorPen = apen;
+        this.entities.add(clone, 'projectiles');
+      },
+      counterweight: (hx, hy, d, k) => this.playerCounterweight(hx, hy, d, k),
+    };
+    return ctx;
+  }
+
+  /** Player.Counterweight（Player.cs:11946-12004 1:1,悠悠球/配重球命中链调用）：
+   *  ① yoyoGlove 且悠悠球数 <2 → 从玩家中心朝命中点方向 16 速掷【同型二号悠悠球】
+   *    （伤害/击退取扫描序最后一个悠悠球,ai0=1 瞬态种子,:11973-11985）
+   *  ② else if counterWeight >0 且配重球数 <悠悠球数 → 掷配重球（vanityCounterWeight
+   *    优先;kb=(kb+6)/2;已有在场 ai0=1 否则 0——两支速度同为朝命中点 16,:11986-12004）
+   *  决策核 = counterweightDecision（WeaponProj 纯函数,tests/yoyo-bag 直测）。 */
+  private playerCounterweight(hitX: number, hitY: number, dmg: number, kb: number, src?: YoyoProj): void {
+    const eq = this.player.equipStats;
+    const play: CounterweightPlayView[] = [];
+    let lastYoyo: YoyoProj | null = null;   // vanilla num（数组序最后一个悠悠球）
+    for (const q of this.entities.projectiles) {
+      if (q.dead) continue;
+      if (q instanceof CounterweightProj) play.push({ isWeight: true, ai0: q.ai0 });
+      else if (q instanceof YoyoProj) { play.push({ isWeight: false, ai0: q.ai0 }); lastYoyo = q; }
+    }
+    const decision = counterweightDecision(eq, play, kb);
+    // 朝命中点方向 16 速（:11977-11979/:11989-11992 vector/vector2——两支同式）
+    const dx = hitX - this.player.cx, dy = hitY - this.player.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    const svx = (dx / d) * 16, svy = (dy / d) * 16;
+    if (decision.kind === 'second-yoyo' && lastYoyo) {
+      const famItem = lastYoyo.itemId;
+      const second = new YoyoProj(this.player.cx, this.player.cy,
+        lastYoyo.damage, lastYoyo.knockback, lastYoyo.projId, 0,
+        () => this.input.mouseHeld && !this.input.uiBlocking
+          && (famItem === undefined || this.player.inv.heldItem()?.id === famItem),
+        () => { const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY); return { x: wx, y: wy }; });
+      second.vx = svx; second.vy = svy;
+      second.ai0 = 1;   // NewProjectile …, 1f（瞬态,活跃态首帧被光标目标覆写）
+      second.critChance = lastYoyo.critChance;
+      second.armorPen = lastYoyo.armorPen;
+      this.wireYoyoCallbacks(second, lastYoyo.projId, famItem);
+      this.entities.add(second, 'projectiles');
+    } else if (decision.kind === 'counterweight') {
+      const cwE = new CounterweightProj(this.player.cx, this.player.cy, dmg, decision.kb,
+        decision.type, decision.secondary ? 1 : 0, this.mkCounterweightCtx(src?.itemId));
+      cwE.vx = svx; cwE.vy = svy;
+      cwE.critChance = src?.critChance ?? 0.04;
+      cwE.armorPen = src?.armorPen ?? 0;
+      this.entities.add(cwE, 'projectiles');
+    }
   }
 
   /** 工具类型与 tile 族匹配门（原版 Player.cs:45039-45045 三元组：镐分支
@@ -17738,6 +17849,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   onEnemyKilled(key: string, enemy?: Enemy) {
+    // 骷髅王红帽变体死亡调侃（NPC.checkDead :78835-78837：type 35 且 ai[3]==1 →
+    // SkeletronText.Taunt1 红字广播，Chippy 彩蛋"<骷髅王>今天就到此为止…"）
+    if (enemy?.vanillaId === 35 && enemy.ai3 === 1) {
+      this.newText(Lang.text('SkeletronText.Taunt1'), 255, 0, 0);
+    }
+    // FTW（getGoodWorld）骷髅王手死 → 3×32 号黑暗法师（checkDead :78889-78920：
+    // 手 ±50 格随机列向下扫首个实心（下界 maxTilesY-200）退一格 Bottom 锚。
+    // 本处=伤害致死 checkDead 路径；头离场自灭在原版是 active=false 不经 checkDead）
+    if (enemy?.vanillaId === 36 && this.world.seedFlags?.getGoodWorld) {
+      for (let i = 0; i < 3; i++) {
+        spawnSkeletronCaster(this, enemy.cx, enemy.cy, this.world.store.h - 200);
+      }
+    }
     // 成就：NPC 击杀通知（NotifyNPCKilledDirect）+ MechaMayhem 推进。
     // 双子语义（CountKillForAchievements NPC.cs:80631-80640）：125/126 需另一只
     // 也已死（!AnyNPCs(另一只)）才通知/计杀——单眼死亡不计
@@ -20153,7 +20277,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const deathText = createDeathText(this.playerName(), cause, this.world?.name ?? '');
     // 原版 Player.cs:38312-38313:死亡消息走消息列,色 (225,25,25)
     this.newText(deathText, 225, 25, 25);
-    // 红色粉碎粒子：身体范围多层爆散，喷溅落地反弹/停驻后缓慢淡出（约 5 秒）
+    // 红色粉碎粒子：身体范围多层爆散,下落渐隐(原版尘语义,无碰撞;~5s 淡出
+    // —— 旧"落地反弹/停驻"自制物理 2026-08-19 随粒子碰撞整体退役)
     this.spawnParticles(p.cx, p.y + 8, '#C02020', 22, 3.2, { life: 300, damp: 0.988, grav: 0.09 });
     this.spawnParticles(p.cx, p.cy, '#8A1010', 16, 2.4, { life: 280, damp: 0.985, grav: 0.09 });
     this.spawnParticles(p.cx, p.cy - 6, '#E85050', 10, 2.8, { life: 260, damp: 0.988, grav: 0.09 });

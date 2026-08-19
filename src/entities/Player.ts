@@ -568,7 +568,19 @@ export class Player extends Entity {
     toolbelt: boolean;     // 工具腰带 407：装备生效 blockRange+1（:14873-14876）
     flowerBoots: boolean;   // 花靴 3017/仙灵靴 3993（Player.cs:12688 行走生花）
     stepStool: boolean;     // 折叠凳 4341/造物之手 5126（:14077-14080 HasAStool,HeightBoost 26）
-    counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
+    /** 配重球物品 id（Player.counterWeight，int——0=无；556-561 彩色/1079 黑）：
+     *  悠悠球袋族装备映射（UpdateEquips :14174-14226），Counterweight() 消费 */
+    counterWeight: number;
+    /** 虚荣配重球 id（Player.vanityCounterWeight，ApplyEquipVanity :13800-13803：
+     *  社交槽 13-19 彩色配重球 3309-3314 → 556+vid-3309；黑球 5547 无虚荣档） */
+    vanityCounterWeight: number;
+    /** 悠悠球手套（3334/3366/5541 → Player.yoyoGlove，:14187/:14211/:14225）：
+     *  悠悠球命中时掷同型二号球（Counterweight() :11973 手套分支） */
+    yoyoGlove: boolean;
+    /** 魔法线（5540/5541 → Player.magicString，:14196/:14213）：松手回收时
+     *  原球转 -3 隐身幽灵 + 掷 75% 伤/击退的脱离态克隆（AI_099 :65110-65116） */
+    magicString: boolean;
+    manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
     manaRegenBonus: number; manaRegenDelayBonus: number;
     setBonus: ReturnType<typeof activeArmorSetBonus> | null;
     manaCostMul: number;
@@ -642,7 +654,9 @@ export class Player extends Entity {
     let stringColor = 0;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
-    let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
+    let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false;
+    let counterWeight = 0, vanityCounterWeight = 0;   // int 物品 id（0=无）
+    let yoyoGlove = false, magicString = false;
     let autoPaint = false, chiselSpeed = false, toolbelt = false;
     let flowerBoots = false;
     let stepStool = false;
@@ -685,6 +699,25 @@ export class Player extends Entity {
       if (accVid === 5540 || accVid === 5541) stringColor = 29;
       const funcStr = statOfInternal(s.id)?.str;
       if ((funcStr ?? 0) > 0) stringColor = funcStr!;
+      // ---- 悠悠球袋族（Player.cs:14174-14226 ApplyEquipFunctional if-chain；提取器
+      //      default 区间段抓不到，此处 vid 直表）。counterWeight=0 才掷骰
+      //（:14176/:14200）：原版 ResetEffects(:18288) 每帧清零后 UpdateEquips 重掷，
+      //      本 getter 每访问重算 = 每访问一次新掷，命中消费点采样分布等价 ----
+      if (accVid === 3366) {   // 悠悠球袋（:14174-14189）
+        if (counterWeight === 0) counterWeight = Math.floor(Math.random() * 7) === 0 ? 1079 : 556 + Math.floor(Math.random() * 6);
+        yoyoGlove = true;
+        yoyoString = true;
+      }
+      if (accVid === 5540) magicString = true;   // 魔法线（:14195-14197）
+      if (accVid === 5541) {   // 魔法悠悠球袋（:14199-14114 段：1/7 掷同 3366 + 全套旗）
+        if (counterWeight === 0) counterWeight = Math.floor(Math.random() * 7) === 0 ? 1079 : 556 + Math.floor(Math.random() * 6);
+        yoyoGlove = true;
+        yoyoString = true;
+        magicString = true;
+      }
+      if (accVid === 5547) counterWeight = 1079;              // 黑配重球（:14215-14218）
+      if (accVid >= 3309 && accVid <= 3314) counterWeight = 556 + accVid - 3309;  // 彩色配重球（:14219-14222）
+      if (accVid === 3334) yoyoGlove = true;                  // 悠悠球手套（:14223-14226）
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;
@@ -771,7 +804,8 @@ export class Player extends Entity {
         if (fx.manaFlower) manaFlower = true;
         if (fx.manaRegenBonus) manaRegenBonus += fx.manaRegenBonus;           // 魔力斗篷 982（:14383）
         if (fx.manaRegenDelayBonus) manaRegenDelayBonus += fx.manaRegenDelayBonus; // 982（:14382）
-        if (fx.counterWeight) counterWeight = true;
+        // （fx.counterWeight 已并入上方悠悠球袋族 vid 直表——5547 是唯一 accfx 条目，
+        //  原版语义是 int 1079 非 bool，此处不再消费表字段）
         if (fx.divingHelm) divingHelm = true;   // 394/1860/1861 潜水装备族
         if (fx.merman) merman = true;           // 497/861/3110 贝壳族
         if (fx.arcticDivingGear) arcticDivingGear = true; // 1861
@@ -802,6 +836,9 @@ export class Player extends Entity {
       if (vid === 5540 || vid === 5541) stringColor = 29;
       const sc = statOfInternal(s.id)?.str;
       if ((sc ?? 0) > 0) stringColor = sc!;
+      // 虚荣配重球（ApplyEquipVanity :13800-13803，社交槽 13-19 彩色配重球 →
+      // vanityCounterWeight；Counterweight() 消费端优先于功能槽 counterWeight :11991-11994）
+      if (vid >= 3309 && vid <= 3314) vanityCounterWeight = 556 + vid - 3309;
     }
     // 恐慌项链受击加速窗口（PanicSpeedBoost :25034：panicTime 300 tick 内 moveSpeed +0.5）
     if (this.panicTime > 0) move += 1.0;   // PanicSpeedBoost（:25034 满档 +1.0=+100%;旧 +0.5 是 1.4.0 旧值,2026-08-13 修）
@@ -987,7 +1024,9 @@ export class Player extends Entity {
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
       beetleDef,
       wolfAcc, boc,
-      tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, flowerBoots, stepStool,
+      tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, vanityCounterWeight,
+      yoyoGlove, magicString,   // 悠悠球袋族（UpdateEquips :14174-14226）
+      flowerBoots, stepStool,
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
       fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)

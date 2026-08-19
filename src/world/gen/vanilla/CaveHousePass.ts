@@ -1401,7 +1401,10 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
   // 阶段探针（对拍 vanilla stage hook；tag 对应 HouseBuilder 私有方法边界）
   const __st = (globalThis as { __swHouseStage?: (tag: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage;
   const __rn = () => (globalThis as { __swRollN?: number }).__swRollN ?? -1;
+  // JJJJ：门级探针（dormant——拒绝路径归因；零钩零开销）
+  const __gate = (globalThis as { __swHouseGate?: (gate: string, x: number, y: number) => void }).__swHouseGate;
   const placeHouse = (ox: number, oy: number, oceanGate: boolean): boolean => {
+    const __fail = (g: string): boolean => { __gate?.(g, ox, oy); return false; };
     // oceanDepths 1:1(cs:10978-10988):【先 y 门】y > oceanLevel((Main.worldSurface
     //   + Main.rockLayer)/2+40,双 double)即非海洋直接 false——地下小屋 oy 取自
     //   worldSurfaceHigh+20 起的深域,恒 > oceanLevel,原版此门从不触发;曾只抄
@@ -1409,21 +1412,21 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     //   → 流漂(house5 前尝试 (3901,718) vanilla 2 掷 vs JS 0 掷,AB#565 (579,445)
     //   vs (885,736) 首异实锤)
     if (oceanGate && !(oy > (gs.worldSurface + gs.rockLevel) / 2 + 40)
-      && (ox < gs.beachDistance || ox > w - gs.beachDistance)) return false;
+      && (ox < gs.beachDistance || ox > w - gs.beachDistance)) return __fail('ocean');
     // CaveHouseBiome.Place 前置拒绝(CaveHouseBiome.cs:36-54,C9 曾整体缺失):
     //   InWorld(origin,30) + 原点 ±25 内有红线或 BasicChest(21/467,TileID.cs:315)
     //   → 整屋放弃。须在 createRooms 之前(不耗 RNG)。
-    if (ox < 30 || oy < 30 || ox >= w - 30 || oy >= h - 30) return false;
+    if (ox < 30 || oy < 30 || ox >= w - 30 || oy >= h - 30) return __fail('inworld');
     for (let i = ox - 25; i <= ox + 25; i++) {
       for (let j = oy - 25; j <= oy + 25; j++) {
         const k = st.idx(i, j);
-        if ((st.wire[k] & TileStore.WIRE_RED) !== 0) return false; // tile.wire()(红线位)
+        if ((st.wire[k] & TileStore.WIRE_RED) !== 0) return __fail('wire'); // tile.wire()(红线位)
         const t = st.type[k];
-        if (t === CHEST21 || t === CHEST2) return false;           // TileID.Sets.BasicChest
+        if (t === CHEST21 || t === CHEST2) return __fail('chest');  // TileID.Sets.BasicChest
       }
     }
     const rooms = createRooms(st, rng, ox, oy);
-    if (!rooms.length) return false;
+    if (!rooms.length) return __fail('rooms');
     // 位置合法(InWorld 10 边距 / 底部 < h-220)。★无房间互斥检查——原版 above/below
     //   房与主房天然重叠（HouseUtils.AreRoomLocationsValid 只查 InWorld+底界；x86
     //   house0 实测 (753,865,15×8)+(749,872,17×8) 重叠共存）。曾加互斥门 → 42/42
@@ -1432,10 +1435,10 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     for (const r of rooms) {
       if (r.x < 10 || r.y < 10 || r.x + r.w > w - 10 || r.y + r.h > h - 220) ok = false;
     }
-    if (!ok) return false;
+    if (!ok) return __fail('bounds');
     const theme = getHouseType(st, rooms);
     const def = THEMES[theme];
-    if (def.tile < 0 || def.beam < 0) return false;
+    if (def.tile < 0 || def.beam < 0) return __fail('theme');
     // 岩浆回避(granite 主题豁免,HouseUtils.AreRoomsValid)
     if (theme !== 'granite') {
       for (const r of rooms) {
@@ -1445,7 +1448,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
           }
         }
       }
-      if (!ok) return false;
+      if (!ok) return __fail('lava');
     }
     // ★HouseUtils.AreRoomsValid 的结构图半边（HouseUtils.cs:280/285
     //   `structures.CanPlace(room, BlacklistedTiles, 5)`——notTheBees 用 BeelistedTiles）：
@@ -1461,7 +1464,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       if (sh !== undefined && houseSheets.has(sh)) houseForbid.add(id);
     }
     for (const r of rooms) {
-      if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 5, st, houseForbid)) return false;
+      if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 5, st, houseForbid)) return __fail('structures');
     }
 
     houseObjCells.clear();   // 家具登记表生命周期=本屋

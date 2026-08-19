@@ -10,6 +10,12 @@ export interface Body {
   onGround: boolean;
   hitWall: boolean;
   hitHead: boolean;
+  /** 原版 collideY（NPC.cs:93804，Collision_MoveWhileDry `oldVelocity.Y != velocity.Y`）：
+   *  本轴 tile 碰撞改写了 vy（落地/顶头清零）。★取值时点 = 分轴碰撞循环后、
+   *  slopeCollide 之前——与原版 collideY 在 ApplyTileCollision 后、SlopeCollision 前
+   *  写出的时序一致（坡面贴合清零 vy 不置位）。消费点：AI_001 携物梯
+   *  :61309 气球弹跳 / :61932/:62124 落地嵌固回退（preCollideVy 配对读）。 */
+  collideY?: boolean;
   /** 平台单向碰撞：仅当开启且下落时与平台碰撞 */
   dropThrough?: boolean;
   /** 启用原版自动上台阶（Collision.StepUp）：行走实体（玩家/敌人/小动物/城镇NPC）置 true；
@@ -378,6 +384,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   b.onGround = false;
   b.hitWall = false;
   b.hitHead = false;
+  b.collideY = false;            // 原版 collideY 逐 tick 复位（NPC.cs:93741）
   // 原版 StepUp/StepDown 在 TileCollision 之前用未受阻的意图速度探测
   // （Player.cs:23252-23263 / NPC.cs:54377-54382）。StepDown 门：玩家 vy===GRAVITY
   // （原版字面 :23252）、NPC 族 onGround（原版 :54374 vy==0 在该时点=贴地语义；
@@ -416,7 +423,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
     const sx = dx / steps, sy = dy / steps;
     const { hitX, hitY } = moveAxis(b, world, sx, sy);
     if (hitX) { b.hitWall = true; dx = 0; }
-    if (hitY) dy = 0;
+    if (hitY) { b.collideY = true; dy = 0; }
     if (dx === 0 && dy === 0) break;
   }
   slopeCollide(b, world);

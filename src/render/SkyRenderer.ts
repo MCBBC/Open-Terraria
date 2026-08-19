@@ -825,9 +825,12 @@ export interface SkyFrameCtx {
     zoneDesert: boolean; zoneBeach: boolean; zoneJungle: boolean;
     zoneCorrupt: boolean; zoneCrimson: boolean; zoneHallow: boolean;
   } | null;
-  player: { cx: number; cy: number } | null;
+  player: { cx: number; cy: number; vx?: number } | null;
   clock: { dayCount: number; timeOfDay: number; isDay: boolean } | null;
   camX: number; camY: number; z: number; viewW: number; viewH: number;
+  /** Main.bgAlphaFrontLayer[4]（海洋群系前景层渐变，BiomeBackground.frontLayer()[4]
+   *  注入）——Cloud.Update :401 海滩杀云门（==1 且 y>200 → 低云 5× 快速淡出） */
+  oceanFrontAlpha?: number;
 }
 
 export class SkyRenderer {
@@ -971,9 +974,11 @@ export class SkyRenderer {
     if (c.scale > 1.2) c.y += 100;
     if (c.scale > 1.3) c.scale = 1.3;
     if (c.scale < 0.7) c.scale = 0.7;
-    // X：顺风侧留屏外缓冲（:96-107：风>0 → 左界 -500；风<0 → 右界 +500）
-    const num3 = this.wind > 0 ? -200 : 0;
-    const num4 = this.wind < 0 ? 200 : 0;
+    // X：顺风侧留屏外缓冲（:96-107）。num2 = wind − player.vx*0.1（:96-100，
+    //  !gameMenu 才修正——frameCtx.player 在场 = 游戏内，菜单态缺省不修正）
+    const num2 = this.wind - (this.frameCtx?.player?.vx ?? 0) * 0.1;
+    const num3 = num2 > 0 ? -200 : 0;
+    const num4 = num2 < 0 ? 200 : 0;
     const lo = num3 - 300, hi = viewW + num4 + 300;
     c.x = lo + r() * (hi - lo);      // :107 Next(num3-300, screenWidth+num4+300)
     // 远端屏外直接全显（:161-168：x>屏+400 或 x+宽<-400 → Alpha=1）
@@ -1037,8 +1042,19 @@ export class SkyRenderer {
     }
     this.lastCloudCamX = camX;
     const wr = this.weatherRef;
+    // 海洋群系前景层满档（Cloud.cs:401 bgAlphaFrontLayer[4]==1）
+    const oceanFull = (this.frameCtx?.oceanFrontAlpha ?? 0) >= 1;
     for (const c of this.vclouds) {
+      // 恰界 scale 微移（Cloud.cs:373-378：1.0→0.9999 / 1.15→1.1499）——防跨
+      // pass 边界（1.0 应属远空 pass1、1.15 应属近距 pass2；每帧判、自限一次）
+      if (c.scale === 1) c.scale -= 0.0001;
+      if (c.scale === 1.15) c.scale -= 0.0001;
       c.x += this.wind * 9 * this.cloudParallax(c.scale) * frames;
+      // 海滩低云快速淡出（:399-402：kill + 0.005/帧，与下方通用 0.001 叠加 = 0.006）
+      if (oceanFull && c.y > 200) {
+        c.kill = true;
+        c.alpha -= 0.005 * frames;
+      }
       // 远空灰云（9-13）在下雨/阴天转为 kill 淡出（Cloud.cs:449-452）——
       // 它们是晴天专属；雨天出场的深色云是新刷出的 18-21 风暴云
       if (c.type >= 9 && c.type <= 13 && wr && (wr.cloudAlpha > 0 || wr.cloudBGActive >= 1)) {
@@ -1063,8 +1079,11 @@ export class SkyRenderer {
 
   /** 维持云量（Cloud.cs UpdateClouds :230-296 1:1）：目标 = Main.numClouds【直连】
    *  （0-200 朵——★曾视口公式映射 8-21 朵=云量严重偏少）。缺 → 每帧 addCloud 一朵；
-   *  超 → 每帧随机 kill 一朵。首次进场按 resetClouds(:39-59) 铺满且 Alpha=1。
-   *  下雨加密由 Weather.updateCloudCounts（numClouds 强制爬升 200×cloudAlpha）自动传导 */
+   *  超 → 每帧随机 kill 一朵。首次进场按 resetClouds(:39-59)：恰 numClouds 次
+   *  addCloud 尝试——AABB 重叠拒绝即少一朵（★曾用 while 重试凑满 guard400：
+   *  离线模拟 1920×1080/目标100 档 77 朵 vs 原版 46 朵，云量约 1.7 倍——
+   *  "云太多"实报根因）。下雨加密由 Weather.updateCloudCounts（numClouds 强制
+   *  爬升 200×cloudAlpha）自动传导 */
   private targetCloudCount(): number {
     return this.weatherRef ? Math.max(0, Math.round(this.weatherRef.numClouds)) : 200;
   }
@@ -1073,8 +1092,7 @@ export class SkyRenderer {
     const target = this.targetCloudCount();
     if (!this.cloudsInitialized) {
       this.cloudsInitialized = true;                       // resetClouds 铺满段
-      let guard = 0;
-      while (this.vclouds.length < target && guard++ < 400) {
+      for (let j = 0; j < target; j++) {                   // :47-50 恰 numClouds 次
         const c = this.spawnCloud(viewW, viewH, true);
         if (c) this.vclouds.push(c);
       }

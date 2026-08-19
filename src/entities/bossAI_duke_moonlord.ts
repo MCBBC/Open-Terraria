@@ -23,6 +23,7 @@ import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 import { projSprite, projFrameCount, volleyPhantomOrbs } from './Arrow';
 import { GorePiece } from './GorePiece';
@@ -216,6 +217,47 @@ function dukeHover(e: Enemy, player: Player, acc: number, spd: number, sideOff: 
   st.spr = -st.dir;
 }
 
+/** 猪鲨 FindFrame(NPC.cs FindFrame case 370 :72824-72917)——AI 侧每 tick 维护,
+ *  帧号直写 customFrameIdx 供渲染端直读(694 先例;npcFrameT = frameCounter)。
+ *  帧 0-5 = 游动帶(6t/帧,二阶段悬浮 5t/帧)、6/7 = 张口帶;8 帧贴图:
+ *  - ai0 0/5 悬浮:游动循环,ai0==5 步进加速(num51 5→4,:72828-72832);
+ *  - ai0 1/6 冲撞与 2/7 旋转冲刺:ai2<10 帧 6,≥10 帧 7(:72844-72865);
+ *  - ai0 3/8 龙卷蓄力与 -1 出生(num52=90):ai2<60 或 >80 游动,否则帧 6
+ *    (ai2∈(70,75) 帧 7)(:72866-72889);
+ *  - ai0 4/9 变身(num53=180):ai2<120 或 >160 游动,否则帧 6(ai2∈(130,155) 帧 7)
+ *    (:72891-72916);
+ *  - ai0 10-13(expert 狂暴段)原版无分支 → 帧保持不变。
+ *  游动帶回卷门 `frame.Y >= 6 → 0` 每 tick 生效(:72839-72842)——张口帧 6/7 收
+ *  尾回到悬浮帶时首 tick 即回卷到帧 0,与原版一致。 */
+function dukeFindFrame(e: Enemy): void {
+  const a0 = Math.floor(e.ai0);
+  let f = e.customFrameIdx ?? 0;
+  /** 游动帶步进(threshold=num51:counter 先 +1 再比 >num51 → 5=6t/帧、4=5t/帧) */
+  const swim = (threshold: number): void => {
+    e.npcFrameT += 1;
+    if (e.npcFrameT > threshold) { e.npcFrameT = 0; f += 1; }
+    if (f >= 6) f = 0;                                     // :72839-72842 回卷
+  };
+  if (a0 === 0 || a0 === 5) {
+    swim(a0 === 5 ? 4 : 5);                                // :72826-72843
+  } else if (a0 === 1 || a0 === 6 || a0 === 2 || a0 === 7) {
+    f = e.ai2 < 10 ? 6 : 7;                                // :72844-72865
+  } else if (a0 === 3 || a0 === 8 || a0 === -1) {
+    if (e.ai2 < 60 || e.ai2 > 80) swim(5);                 // num52=90-30/90-10 :72868-72881
+    else {                                                  // :72882-72889 计时窗张口
+      f = 6;
+      if (e.ai2 > 70 && e.ai2 < 75) f = 7;
+    }
+  } else if (a0 === 4 || a0 === 9) {
+    if (e.ai2 < 120 || e.ai2 > 160) swim(5);               // num53=180-60/180-20 :72895-72908
+    else {                                                  // :72909-72916 变身窗张口
+      f = 6;
+      if (e.ai2 > 130 && e.ai2 < 155) f = 7;
+    }
+  }
+  e.customFrameIdx = f;
+}
+
 /** AI_069 主入口(经典模式) */
 export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) {
   const st = dukeOf(e);
@@ -250,6 +292,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
     e.ai0 = e.ai0 > 4 ? 5 : 0;
     e.ai2 = 0;
     e.x += e.vx; e.y += e.vy;
+    dukeFindFrame(e); // FindFrame 在 AI 之后仍逐 tick 执行(原版 UpdateNPC 时序)
     return;
   }
 
@@ -486,6 +529,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
   e.facing = st.spr;
   e.x += e.vx;
   e.y += e.vy;
+  dukeFindFrame(e); // FindFrame case 370(:72824-72917)——AI 后逐 tick,customFrameIdx 直读
 }
 
 /** 鲨鱼龙卷(状态 3 :49638-49660 / 状态 8 :49865-49885 共用):
@@ -1040,7 +1084,11 @@ function spawnMoonLeech(game: GameHooks, head: Enemy, player: Player): void {
 // 每 tick 转 ai0(=±2π/540),寿命 180t,scale = sin(age·π/180)·10·maxScale 脉冲张合;
 // 束长 LaserScan(3 采样,最大 2400)以 0.5/t Lerp 逼近;命中判定 = 玩家矩形 vs
 // 「源心 → 源心+dir·束长」线段,线宽 36·scale(Colliding :14673-14682);
-// 伤害 = NewProjectile 值 ×2(hostile 弹规则 :13781:头 75→150 / 真眼 50→100)。
+// 伤害 = NewProjectile 原值(头 75 / 真眼 50) × 敌弹标准乘区(难度缩放 ×2,
+// :13770-13781 Damage_EVP——projTargets.hitPlayer 同式,经典 ×2=150/100、专家 ×4=300/200;
+// G8 定谳 2026-08-19:×2 是通用敌弹规则非 iframes 补偿,漏乘难度缩放已修;原版
+// 455 走 BossNoCheese 独立 40t 无敌槽(:13710-13728),束自身节拍与本仓通用 40t
+// iframes 等价,跨源穿透差异=单槽引擎差异备案)。
 export class MLDeathray extends Entity {
   w = 36; h = 36; // SetDefaults 455
   private srcId: number;
@@ -1159,8 +1207,17 @@ export class MLDeathray extends Entity {
     // 命中:玩家矩形 vs 束线段(线宽 36·scale),伤害走 damagePlayer(iframes 节流)。
     // 弹幕命中：attacker 仅做死亡归因，contactOnly 缺省 false → 荆棘不反伤
     // （反伤只在 NPC 接触分支 Player.cs:30910-30944）
+    // 伤害 = NewProjectile 原值 75/50 × 敌弹标准乘区（hostileDamageScaling ×2，
+    // Projectile.cs:13770-13781 Damage_EVP——projTargets.hitPlayer 同式内联；
+    // ★G8 定谳 2026-08-19：×2 是 :13781 通用敌弹规则【非】iframes 补偿——455 走
+    // ImmunityCooldownID.BossNoCheese 独立 40t 槽（:13710-13728 + Player.Hurt
+    // :37600/:37777-37783），对束自身节拍与本仓通用 iframes（40t）等价；原实现
+    // 只手乘 ×2 漏了难度乘区（专家 300 打成 150），且跨源无敌帧互斥差异（原版
+    // 死光可穿透 General 免疫帧命中）= 单槽 iframes 引擎差异，备案偏差不硬改）
     if (p && !p.dead && segHitsRect(this.cx, this.cy, dirX * this.len, dirY * this.len, wSq, p)) {
-      game.damagePlayer(this.dmg, this.cx, this.cy, src);
+      game.damagePlayer(
+        hostileProjectileDamage(this.dmg, mainDifficulty(game.world)) * 2,
+        this.cx, this.cy, src);
     }
   }
 
@@ -1521,10 +1578,11 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
       }
       break;
     }
-    case 4: // 死亡之光 455(:38625-38647):inSlot==180 一发定轴扫射激光(50 伤→命中×2=100)
+    case 4: // 死亡之光 455(:38625-38647):inSlot==180 一发定轴扫射激光(NewProjectile 原值 50)
       // 原版此槽 375t:0-179 蓄能尘,180 发束,束体自转 180t 至槽末;真眼瞳角动画随束同步
       // (localAI[0],:38642-38652)——真眼不在本仓范围,锚点用核心中心 (30,30) 椭圆近似
-      if (inSlot === 180) { e.ai2 = mlDeathray(game, e, 'core', player, 50 * 2); }
+      // 伤害乘区（难度×2）在 MLDeathray 命中时结算（G8 批 2026-08-19 改）
+      if (inSlot === 180) { e.ai2 = mlDeathray(game, e, 'core', player, 50); }
       break;
     default: break; // 0 = 闭眼冷却 90t
   }
@@ -1798,10 +1856,11 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
           e.cx + (Math.random() - 0.5) * 27, e.cy + (Math.random() - 0.5) * 59, '#B040C0', 2, 1.2, { life: 24 });
       }
     } else if (inSlot < dur - 15) {
-      // :37902-37916 发射 455 死亡之光(75 伤→命中×2=150):起角 ∓60° 预偏,
-      // 束体以 ±2π/540 每 t 扫射 180t(束体自转见 MLDeathray)
+      // :37902-37916 发射 455 死亡之光(NewProjectile 原值 75):起角 ∓60° 预偏,
+      // 束体以 ±2π/540 每 t 扫射 180t(束体自转见 MLDeathray);伤害乘区(难度×2)
+      // 在 MLDeathray 命中时结算(G8 批 2026-08-19 改)
       if (inSlot === 180) {
-        e.ai2 = mlDeathray(game, e, 'head', player, 75 * 2); // :37913 扫射编码角初值
+        e.ai2 = mlDeathray(game, e, 'head', player, 75); // :37913 扫射编码角初值
         // 原版 NPC 侧死光发射零吼(:37700-37970 无 PlaySound)——曾借 roar 0.8,2026-08-18 对账删
       }
       // :37917-37947 头部瞳角与束体同角速度扫射(ai2 存编码角,逐 t 解码步进)

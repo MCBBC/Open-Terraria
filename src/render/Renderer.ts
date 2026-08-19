@@ -950,11 +950,17 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   if (id >= 542 && id <= 545) return Math.floor(t / 4) % 4;
   // 其余游泳族兜底：6t 一帧全帧循环（保守档）
   if (ai === 16) return Math.floor(t / 6) % frames;
-  // 水母（case 63 L74621+）：追击脉冲循环 [4..6]，漂移循环 [0..]
+  // 水母族（FindFrame case 63/64/103/242/256，cs:74614-74650）：ai[1]==1（潜伏态，
+  // 专家档 Enemy.lurking 同步 ai1）→ 帧带 [4..6] 每 5t 推进（>6 回 4、<4 抬 4 的
+  // 钳带回卷）；否则 0/1/2/3 四帧 23t 循环（6/6/6/5 各档，frameCounter 23 重置）。
+  // 221 鱿鱼独占档（:74652-74662，hunt 8t/帧正向钳末帧 + 慢速触发帧 0）由 Enemy
+  // 侧 squidFindFrame 维护 customFrameIdx 直读（本函数顶部优先消费），不落此分支。
+  // ★攻击形驱动是 ai[1] 非 localAI[2]（G7 定谳 2026-08-19：localAI[2] 在原版对
+  //   水母只写不读，:24347/:24390 写入无读者）
   if (ai === 18) {
-    const active = t % 90 < 30; // 脉冲周期近似
-    if (active && frames > 6) return 4 + (Math.floor(t / 5) % 3);
-    return Math.floor(t / 8) % Math.min(4, frames);
+    if (e.ai1 === 1 && frames > 6) return Math.min(frames - 1, 4 + (Math.floor(t / 5) % 3));
+    const ph = t % 23;
+    return Math.min(frames - 1, ph < 6 ? 0 : ph < 12 ? 1 : ph < 18 ? 2 : 3);
   }
   // 克苏鲁之眼(FindFrame case 4, cs:77607-77631):0/1/2 三帧眨眼各 7 tick,
   // ai[0]>1 帧偏移 +3(张嘴形态)——门取真 ai[0](Enemy.ai0):变身段一(ai0==1)仍闭嘴帧,
@@ -2258,8 +2264,10 @@ export class Renderer {
       playerX: player.cx,
       playerY: player.cy,
     };
-    // 天空深化批帧数据挂点（月塔近距门/月总死亡戏剧/稀有云旗标/环境族 zone 门/涟漪采样）
-    this.sky.frameCtx = { entities, world, scene: this.scene, player, clock, camX: cam.x, camY: cam.y, z, viewW, viewH };
+    // 天空深化批帧数据挂点（月塔近距门/月总死亡戏剧/稀有云旗标/环境族 zone 门/涟漪采样；
+    // oceanFrontAlpha = bgAlphaFrontLayer[4] 海滩杀云门，Cloud.cs:401）
+    this.sky.frameCtx = { entities, world, scene: this.scene, player, clock, camX: cam.x, camY: cam.y, z, viewW, viewH,
+      oceanFrontAlpha: this.biomeBg.frontLayer()[4] };
     // #A 云 GL 共享层注入:云与背景层共用 glfx 一个 WebGL 上下文(每帧注入,
     // 退避/死亡期 acquireGL 返回 null → 当帧云走 2D cloudTint 兜底,自然恢复)
     this.sky.cloudGlLayer = !this.cpuRender && (this.bgGlEnabled || this.sky.useGLClouds)
@@ -4391,6 +4399,15 @@ export class Renderer {
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
         else if (stR === 103) ctx.rotate(e.visAngle);  // AI_103 沙鲨族:rotation=vy*dir*0.1 钳±0.2(cs:42765)
         else if (stR === 18) ctx.rotate(e.visAngle);   // AI_018 水母族:漂移形 rotation=vx*0.4 / 攻击形 atan2(v)+π/2 / 离水 vx*0.1(cs:24371/24422/24459)
+        else if (stR === 67) {
+          // AI_067 蜗牛(G4 批 2026-08-19):rotation 四象限 0.1/t 缓转(snailAI 维护
+          // visAngle,:34763-34857)+ 象限 spriteDirection 局部翻面(Enemy.snailSdir,
+          // :34766-34794 表锁存)——XNA translate→rotate→scale(flip) 组合里翻面沿
+          // 【已旋转的局部 X 轴】施加(天花板/侧墙档由此得垂直翻面观感);spriteDirection
+          // 与 direction 不同源(表驱动,天花板档与移动方向相反)→通用 facing 镜像禁用
+          ctx.rotate(e.visAngle);
+          if (e.snailSdir === 1) ctx.scale(-1, 1);
+        }
         else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
         else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection 仍镜像
         else if (stR === 24) ctx.rotate(e.vx * 0.1);   // AI_024 鸟族:仅倾斜 vx*0.1(cs:74332/:74359/:74382);spriteDirection 仍镜像(611/689 取反见下)
@@ -4407,7 +4424,10 @@ export class Renderer {
         // (蛆虫族 485-487 :73515 设 direction→正常镜像)
         const owlMirror = e.vanillaId === 611 || e.vanillaId === 689;
         const wormMirror = stR === 66 && !(e.vanillaId >= 485 && e.vanillaId <= 487);
-        if (!rotationDriven && !owlMirror && !wormMirror && e.facing > 0) ctx.scale(-1, 1);
+        // 蜗牛 aiStyle67 spriteDirection 走象限表(上方旋转分支自带局部翻面)——
+        // 通用 facing 镜像禁用,否则与象限翻面叠加成恒翻
+        const snailMirror = stR === 67;
+        if (!rotationDriven && !owlMirror && !wormMirror && !snailMirror && e.facing > 0) ctx.scale(-1, 1);
         if (!rotationDriven && owlMirror && e.facing < 0) ctx.scale(-1, 1);
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
@@ -7578,8 +7598,10 @@ export class Renderer {
 
   /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z)。
    *  stealth 逐层公式（drawinfo.stealth = settled）：34/40×s、51 luna×s、44×s、
-   *  28/45 White 无 s；叠画 23/27/30×s、43×s²、50×s²、38×s、47 A180 iff s==1、
-   *  22 火焰逐次平方（:681 累乘）、extra38=Lerp(colorArmorBody,White,0.5) 光采样 */
+   *  28/45 White 无 s、9/29 主纹理×s²（:964-969 平方分支）；叠画 23/27/30×s、
+   *  43×s²、50×s²、38×s、47 A180 iff s==1、29 selfAdd×s²·0.5（:1071）、
+   *  31 nebula×s（:1091/:1096）、32 glowAdd×s（:1100）、22 火焰逐次平方（:681 累乘）、
+   *  extra38=Lerp(colorArmorBody,White,0.5) 光采样 */
   private flushWingGlow(cam: Camera, z: number): void {
     if (!this.wingGlowQueue.length) return;
     const atlas = this.atlas;
@@ -7607,6 +7629,12 @@ export class Renderer {
         const fh = Math.floor((mainTex instanceof HTMLImageElement ? mainTex.height : mainTex.height) / d.frames);
         let a = 1, tint = 1;
         if (d.mainGlow === 'c250a100') { tint = 250 / 255; a = (100 / 255) * e.settled; }  // :858 ×stealth
+        else if (d.mainGlow === 'c250a100sq') {
+          // :964-969（9/29 generic 尾段分支）：drawinfo.stealth 先自乘平方再 ×(1−shadow)
+          // 后才取 Color(250³,100) → RGB/A 均随 s²（shadow 常态 0）——与 34/40 的 s¹ 族不同
+          const s2 = e.settled * e.settled;
+          tint = (250 / 255) * s2; a = (100 / 255) * s2;
+        }
         else if (d.mainGlow === 'luna') {
           // GetLunaGlowColor :185-190：(255³,100)×Remap(WrappedLerp(miscCounter%100/100))×免疫
           const lerp = (e.p.miscCounter % 100) / 100;
@@ -7922,7 +7950,72 @@ export class Renderer {
       }
       return sc;
     };
+    /** 纯加色 scratch（Color(255³,0)·f 族——A=0 预乘 = 纯加色，StringLine.ts 同法）：
+     *  摊平 alpha=255 + RGB×tint，'lighter' 单笔（透明像素成不透明黑，加 0 无害） */
+    const addScratch = (img: ImageBitmap | HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+      rgb: [number, number, number]): HTMLCanvasElement | null => {
+      const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+      if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+      const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+      sctx.clearRect(0, 0, sw, sh);
+      sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      const id = sctx.getImageData(0, 0, sw, sh);
+      for (let i = 0; i < id.data.length; i += 4) {
+        id.data[i] *= rgb[0]; id.data[i + 1] *= rgb[1]; id.data[i + 2] *= rgb[2];
+        id.data[i + 3] = 255;
+      }
+      if (dye) this.applyDyeToImageData(id.data, sw, sh, dye,
+        { sx, sy, sheetW: img.width, sheetH: img.height });
+      sctx.putImageData(id, 0, 0);
+      return sc;
+    };
     switch (ov.kind) {
+      case 'selfAdd':
+      case 'glowAdd': {  // 29 自身切片 / 32 Glow_183：A=0 预乘 = 纯加色 'lighter' ×1.06
+        //  29（:1069-1074）：Color(255³,0)×s²×(1−shadow)²×0.5——stealth 已被 9/29
+        //  主色分支(:965-966)平方累乘，(1−shadow) 在两处各乘一次；
+        //  32（:1099-1104）：GlowMask[183]×Color(255³,0)×s×(1−shadow)（未突变）
+        const s = slice(ov.kind === 'selfAdd' ? `Wings_${slot}.png` : (ov.file ?? ''));
+        if (!s) return;
+        const sc = addScratch(s.img, 0, s.sy, s.sw, s.sh, [1, 1, 1]);
+        if (!sc) return;
+        const f = (ov.stealthSq ? settled * settled : settled) * (1 - 0);   // ×(1−shadow)
+        const k = ov.scale ?? 1;             // 1.06 放大（origin=Size/2 随 scale）
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = f * ((ov.alpha ?? 255) / 255);
+        ctx.drawImage(sc, -s.sw * k / 2, -s.sh * k / 2, s.sw * k, s.sh * k);
+        ctx.restore();
+        break;
+      }
+      case 'nebula': {   // 31：HotPink↔Crimson 脉冲色 4 轨道(×0.5)+全幅(×1)（:1083-1097）
+        const s = slice(`Wings_${slot}.png`);
+        if (!s) return;
+        // color12 = Lerp(HotPink, Crimson, cos(2π·mc/100)·0.4+0.5)，A=0（纯加色）
+        const t = Math.cos(Math.PI * 2 * (p.miscCounter / 100)) * 0.4 + 0.5;
+        const sc = addScratch(s.img, 0, s.sy, s.sw, s.sh, [
+          (255 + (220 - 255) * t) / 255,
+          (105 + (20 - 105) * t) / 255,
+          (180 + (60 - 180) * t) / 255,
+        ]);
+        if (!sc) return;
+        const f = settled * (1 - 0);         // ×stealth×(1−shadow)（:1091/:1096）
+        // 轨道半径 r = cos(2π·mc/60)·0.5+0.5 ∈ [0,1]；vector22 = (r,0).RotatedBy(n·π/2)
+        // ——世界空间偏移（原版未 ×direction）→ 镜像空间局部 X 反补偿 facing
+        const r = Math.cos(Math.PI * 2 * (p.miscCounter / 60)) * 0.5 + 0.5;
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        for (let n = 0; n < 4; n++) {
+          const ang = n * Math.PI / 2;
+          const dx = r * Math.cos(ang) * p.facing, dy = r * Math.sin(ang);
+          ctx.globalAlpha = f * 0.5;
+          ctx.drawImage(sc, dx - s.sw / 2, dy - s.sh / 2);
+        }
+        ctx.globalAlpha = f;
+        ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
+        ctx.restore();
+        break;
+      }
       case 'plain': {   // 23/27/30/47：单帧同切片（硬编码 tint/alpha ×stealth）
         const s = slice(ov.file ?? '');
         if (!s) return;
@@ -8561,8 +8654,8 @@ export class Renderer {
           const anchor = d.headgearRow
             ? wingAnchorForRow(d, this.playerBodyRow(p, swing, staticHoldStyle, mnt))
             : d.anchor;
-          // lit 主纹理（合成前）：generic/22/23/27/30/38/39/43/47/48/49/50
-          //（44 彩虹翼是 mainGlow 族，只走烘焙图链，不入此分支）
+          // lit 主纹理（合成前）：generic/22/23/27/30/31/32/38/39/43/47/48/49/50
+          //（44 彩虹翼是 mainGlow 族，只走烘焙图链，不入此分支；31/32 带 litAlpha）
           // stealth：armor 主纹理 RGBA×s'（3106/蘑菇矿 :1539-1541/星璇 secondColor
           // A=s'）→ alpha ×s'；星璇另带 RGB 暗青 tint（secondColor）；
           // cWings 染料（Player.cs:9417 → SM2 字节码执行，全技术可用）
@@ -8573,7 +8666,11 @@ export class Renderer {
               const sc = this.wingTexSource(tex, 0, fr * fh, tex.width, fh, dyeEmu, vortexTint);
               ctx.save();
               ctx.translate(anchor[0], anchor[1]);
-              if (stealthClamp < 1) ctx.globalAlpha = stealthClamp;
+              if (d.litAlpha !== undefined) {
+                // 31/32（generic 尾段 :980-986）：color9.A 直改 220/127×settled——
+                // alpha 覆写【替换】s' 档（C# 赋值非乘法），基色仍 colorArmorBody（lit 族）
+                ctx.globalAlpha *= (d.litAlpha / 255) * stealthSettled;
+              } else if (stealthClamp < 1) ctx.globalAlpha = stealthClamp;
               if (sc) ctx.drawImage(sc, -tex.width / 2, -fh / 2);
               else ctx.drawImage(tex, 0, fr * fh, tex.width, fh,
                 -tex.width / 2, -fh / 2, tex.width, fh);

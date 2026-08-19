@@ -154,20 +154,23 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     expect(e.ai0).toBe(-1393);         // :61964-61992（+1+1+5）
   });
 
-  it('S5 num54 表：659 粉仆从阶段基线 −500（窗 [−500,−250] 为小跳）+ 跳乘区 ×1.6', () => {
+  it('S5 num54 表：659 粉仆从阶段基线 −500（窗 [−500,−250] 为小跳）+ 跳乘区 ×1.6/×1.2', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
+    const h = makeHooks(w, { x: 120, y: FLOOR - 3 });   // >500px（仆从弹幕段 vx×0.9 隔离）
     const e = spawn(h, 659, 40, FLOOR - 2);
     settle(h, e);
     e.ai0 = -300;                      // ∈ [−500,−250]（默认表 −1000 时 −300 不在窗内）
     e.vx = 0;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    // vy=−6 → ×1.6 = −9.6（尾段重力折算 ≈−9.5）。vx 断言略——本仓 groundPhysics
-    // ±1 档位钳（既有约定）会截掉 ×1.2 后的横向冲量，纵向不受影响
+    // vy=−6 → ×1.6 = −9.6（尾段重力折算 ≈−9.5）
     expect(e.vy).toBeLessThan(-9);
+    // vx = 0 + 2×dir → ×1.2 = 2.4 完整存活（G1 批 2026-08-19 废除 groundPhysics
+    // ±1 硬钳后补全——原版无此钳，:62062/:62079-62083）
+    expect(e.facing).toBe(1);
+    expect(e.vx).toBeCloseTo(2.4, 5);
   });
 
-  it('S4 59 岩浆史莱姆大跳加成：vy=−8−2（:62048-62057）', () => {
+  it('S4 59 岩浆史莱姆大跳加成：vy=−8−2、vx=3+0.5（:62048-62057）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 59, 40, FLOOR - 2);
@@ -177,6 +180,8 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     e.facing = 1;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
     expect(e.vy).toBeLessThan(-9.8);   // −10 + 重力折算
+    // vx = 0 + 3×1 + 0.5×1 = 3.5 完整存活（G1 批废除 ±1 硬钳后补全，:62055-62057）
+    expect(e.vx).toBeCloseTo(3.5, 5);
   });
 
   it('S3 空中转向：滞空且目标在侧 → ±0.2/t 步进 / 逆向 ×0.93（:62120-62137）', () => {
@@ -188,11 +193,13 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     e.facing = 1;
     e.vx = 0;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    expect(e.vx).toBeGreaterThan(0.15);   // dir=1 且 vx<3 → +0.2（尾段空中摩擦 ×0.98）
-    // 逆向（vx≤−0.01）→ ×0.93（取钳内值 −0.5 观察；groundPhysics ±1 钳不干扰）
+    // dir=1 且 vx<3 → +0.2（原版无空中摩擦——G1 批 2026-08-19 废除 ×0.98 尾段后
+    // 精确 0.2；旧断言 ×0.98 为被废除的仓内自创摩擦）
+    expect(e.vx).toBeCloseTo(0.2, 5);
+    // 逆向（vx≤−0.01）→ ×0.93（精确值，无尾段摩擦叠加）
     e.vx = -0.5;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    expect(e.vx).toBeCloseTo(-0.5 * 0.93 * 0.98, 2);
+    expect(e.vx).toBeCloseTo(-0.5 * 0.93, 5);
   });
 
   it('S7 204 丛林刺：正常档 <400px、冷却 65、压跳 ai0=−80、速 7 伤 13（:61832-61850）', () => {

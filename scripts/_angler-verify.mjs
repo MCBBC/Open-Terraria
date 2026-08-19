@@ -12,14 +12,10 @@ const p = await b.newPage();
 p.on('pageerror', e => console.log('ERR:', String(e).slice(0, 300)));
 await p.goto(`${ORIGIN}/?play=small`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 await p.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.world.store, { timeout: 600000 });
-p.on('console', async (msg) => { if (msg.type() === 'error') { console.log('CONSOLE[error]:', (await msg.text()).slice(0, 2000)); } });
 await new Promise(r => setTimeout(r, 2500));
 
 const out = await p.evaluate(async () => {
   const g = window.__swGame;
-  window.__ftErrors = [];
-  window.addEventListener('error', (e) => window.__ftErrors.push(String(e.message).slice(0, 200)));
-  window.addEventListener('unhandledrejection', (e) => window.__ftErrors.push('REJ: ' + String(e.reason).slice(0, 200)));
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
   const TILE = 16;
   const st = g.world.store;
@@ -80,9 +76,6 @@ const out = await p.evaluate(async () => {
   arrow.dead = true;
 
   // ---- 4. 右键唤醒链 ----
-  // 帧异常栈捕获（熔断只存消息——包一层拿完整栈）
-  const origFrame = g.frame.bind(g);
-  g.frame = (now) => { try { origFrame(now); } catch (e) { res.frameCrash = String(e.stack || e).slice(0, 1400); throw e; } };
   let dialogTexts = [];
   const od = g.cb.onNpcDialog;
   g.cb.onNpcDialog = (...a) => { dialogTexts.push(a[1]); return od?.(...a); };
@@ -107,10 +100,7 @@ const out = await p.evaluate(async () => {
 
   // ---- 5. 解救后再对话：真台词（非 '……'）----
   if (freedAngler) {
-    await sleep(400);   // 对话 UI 关闭余波（freedbg 实证：关面板后等 400ms 鼠标路径即通）
-    const errs = (window.__swErrors ?? []);
-    res.freedTalkGates = { uiBlocking: g.input.uiBlocking, running: g.running, crashKeys: errs.length ? Object.keys(errs[errs.length-1]) : [] };
-    res.crashDump = JSON.stringify(errs[errs.length-1] ?? null).slice(0, 1600);
+    await sleep(400);   // 对话 UI 关闭余波（探针曾因 2 参包装器吞 buttons 崩掉帧循环——已修）
     dialogTexts = [];
     g.player.x = freedAngler.x - g.player.w - 20;
     g.player.y = freedAngler.y + freedAngler.h - g.player.h;
@@ -138,15 +128,6 @@ const out = await p.evaluate(async () => {
     g.talkToNearbyNpc = (tx, ty) => { const r = otn(tx, ty); res.ftDispatch.push(`talk(${tx},${ty})=${r}`); return r; };
     const oia = g.interactAt.bind(g);
     g.interactAt = (tx, ty) => { res.ftDispatch.push(`interact(${tx},${ty})`); return oia(tx, ty); };
-    // 诊断：游戏循环是否还在跑
-    const tc0 = g.tickCount;
-    await sleep(300);
-    res.ftTickAdvanced = g.tickCount - tc0;
-    // 诊断：updateUse 是否还活着（左键挥剑应产生 this.swing）
-    g.input.mouseDown = true; g.input.mouseHeld = true;
-    await sleep(200);
-    g.input.mouseDown = false; g.input.mouseHeld = false;
-    res.ftSwingAlive = !!g.swing;
     // ★先瞄再按右键（rightDown 是边沿语义：按下帧即分派，若先按后瞄会被旧鼠标
     //   位置的分派分支消费掉——真实用户先移动鼠标再点击，同序）
     for (let i = 0; i < 10; i++) { aim(); await sleep(16); }
@@ -174,6 +155,5 @@ const out = await p.evaluate(async () => {
   e2.dead = true;
   return res;
 });
-out.ftErrors = await p.evaluate(() => (window.__ftErrors ?? []));
 console.log(JSON.stringify(out, null, 1));
 await b.close();

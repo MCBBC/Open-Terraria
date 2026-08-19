@@ -80,14 +80,17 @@ describe('wingDrawOf 绘制表（DrawPlayer_09_Wings）', () => {
       expect(wingDrawOf(s).overlay, `slot ${s}`).toBeUndefined();
     }
   });
-  it('全亮主纹理族 mainGlow：28/44/45=white、34=c250a100、51=luna；其余 lit（合成前）', () => {
+  it('全亮主纹理族 mainGlow：28/44/45=white、34=c250a100、9/29=c250a100sq、51=luna；其余 lit（合成前）', () => {
     expect(wingDrawOf(28).mainGlow).toBe('white');   // :714 Lerp t=1
     expect(wingDrawOf(44).mainGlow).toBe('white');   // :1032 RT 层
     expect(wingDrawOf(45).mainGlow).toBe('white');   // :729
     expect(wingDrawOf(34).mainGlow).toBe('c250a100'); // :766
     expect(wingDrawOf(51).mainGlow).toBe('luna');     // :781 GetLunaGlowColor
+    // 9/29（:964-969）：Color(250³,100)×s²（stealth 先平方再取色）——2026-08-19 booster 批
+    expect(wingDrawOf(9).mainGlow).toBe('c250a100sq');
+    expect(wingDrawOf(29).mainGlow).toBe('c250a100sq');
     expect(wingDrawOf(44).rainbowLayer).toBe(true);
-    for (const s of [1, 2, 3, 22, 23, 27, 30, 38, 39, 40, 43, 47, 48, 49, 50]) {
+    for (const s of [1, 2, 3, 22, 23, 27, 30, 31, 32, 38, 39, 40, 43, 47, 48, 49, 50]) {
       if (s === 40) continue;   // 40 走 betsy 叠画
       expect(wingDrawOf(s).mainGlow, `slot ${s}`).toBeUndefined();
     }

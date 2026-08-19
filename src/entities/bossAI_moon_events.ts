@@ -1032,10 +1032,16 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
     if (invisibleSpriteBall(e)) { e.alphaFade = false; e.spawnAlpha = 0; }
   }
   const vid = e.vanillaId ?? 25;
-  // 日耀耀斑(:21354-21378)：alpha 0→220 渐隐成光团；出膛方向 = 朝玩家 ±90° 随机
-  // （再固定回转 -45°），Y 分量钳 0.2，速 6+rand*4
+  // 日耀耀斑(:21354-21378 + GetAlpha :94729-94733)：alpha 字段被 GetAlpha 特判
+  // 反用——tint = Color(α,α,α,α)（α 兼亮度与不透明度，两版反编译同文），故
+  // SetDefaults α=0 出生 + AI +40/t 钳 220 = 【渐显】到 86% 亮度/不透明度
+  // （非默认 α 语义的渐隐——G10 定谳 2026-08-19：曾按默认语义反写=出生全显后
+  // 渐隐，方向反了）。本仓 spawnAlpha 反向（0=全显/255=全隐）→ 镜像实现：
+  // 出生 255，-40/t 落到 35（=255−220，即 86% 不透明度驻留）。
+  // 出膛方向 = 朝玩家 ±90° 随机（再固定回转 -45°），Y 分量钳 0.2，速 6+rand*4
   if (vid === 516) {
-    if (e.spawnAlpha < 220) e.spawnAlpha = Math.min(220, e.spawnAlpha + 40);
+    if (e.spawnAlpha === 0) e.spawnAlpha = 255;      // 出生隐形（GetAlpha (0,0,0,0)）
+    if (e.spawnAlpha > 35) e.spawnAlpha = Math.max(35, e.spawnAlpha - 40);
     if (e.ai0 === 0) {
       e.ai0 = 1;
       if (player) {

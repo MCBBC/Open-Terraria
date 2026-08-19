@@ -9,6 +9,7 @@ import { Arrow } from '../src/entities/Arrow';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { twinsAI, skeletronBossAI, skeletronPrimeAI, kingSlimeAI } from '../src/entities/bossAI';
+import { getAttackDamageForProjectiles } from '../src/stats/ScaleStats';
 import { queenBeeAI, planteraAI } from '../src/entities/bossAI_queenbee_plantera';
 import {
   moonLordCoreAI, moonLordHeadAI, sharkronAI, dukeFishronAI,
@@ -332,6 +333,160 @@ describe('史莱姆王跳跃循环/反挂机计数/小史莱姆(2026-08-19 台�
       }
       expect(e.ai3).toBe(e.hp);               // 水位补记
     }
+  });
+});
+
+// ===========================================================================
+// 骷髅王红帽/FTW 档(NPC.cs:21906-22151/:78835-78920) + 史王动态体型(:43436-43700)
+// ===========================================================================
+describe('骷髅王红帽/FTW 档 + 防御复位(2026-08-19)', () => {
+  it('初始化双手 ai[3]:右手 150/左手 0(:21914-21926)', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const head = Enemy.fromVanilla(35, 100 * TILE, 100 * TILE)!;
+    head.id = nextId++;
+    h.enemies.push(head);                     // bInit 未置 → 首帧走初始化
+    skeletronBossAI(head, h.hooks, h.player as never);
+    const hands = h.enemies.filter((n) => n.vanillaId === 36);
+    expect(hands.length).toBe(2);
+    expect(hands.find((x) => x.ai0 === 1)!.ai3).toBe(150);   // 右手 :21923
+    expect(hands.find((x) => x.ai0 === -1)!.ai3).toBe(0);    // 左手 :21916(不写=0)
+  });
+
+  it('红帽悬浮:计时 +1.5/t、伤 ×1.3、加速度 ×1.35(:22009-22047)', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const head = spawn(h, 35, 100, 100);
+    const baseDmg = head.def.damage!;
+    head.ai1 = 0; head.ai2 = 100; head.ai3 = 1; head.vx = 0; head.vy = 0;
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(head.ai2).toBeCloseTo(101.5, 5);                 // :22011-22015 1+0.5
+    expect(head.def.damage).toBe(Math.trunc(baseDmg * 1.3));   // :22010
+    expect(head.vy).toBeCloseTo(-0.02 * 1.35, 5);           // :22041-22047 同高 → Y 上抬支
+  });
+
+  it('红帽悬浮→旋冲切换广播 Taunt2-5 红字(:22020-22027)', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const chats: Array<[string, number, number, number]> = [];
+    (h.hooks as unknown as { announce?: (k: string, w: string, r: number, g: number, b: number) => void })
+      .announce = (k, _w, r, g, b) => chats.push([k, r, g, b]);
+    const head = spawn(h, 35, 100, 100);
+    head.ai1 = 0; head.ai2 = 799; head.ai3 = 1;
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(head.ai1).toBe(1);                               // 799+1.5 ≥ 800 → 进旋冲
+    expect(chats.length).toBe(1);
+    expect(chats[0][0]).toMatch(/^SkeletronText\.Taunt[2-5]$/);   // Next(2,6)
+    expect(chats[0][1]).toBe(255);                          // 红字 (255,0,0)
+    // 非红帽不广播
+    const h2 = makeHooks(makeWorld(false), P);
+    const head2 = spawn(h2, 35, 100, 100);
+    head2.ai1 = 0; head2.ai2 = 798;
+    skeletronBossAI(head2, h2.hooks, h2.player as never);
+    expect(head2.ai1).toBe(0);                              // 798+1=799 <800(仅 +1/t)
+  });
+
+  it('红帽旋冲:num200 ×1.4(:22234)、Lerp 伤再 ×1.3(:22175-22177)', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const head = spawn(h, 35, 60, 100);       // 距玩家 640px(经典无阶梯)
+    const baseDmg = head.def.damage!;
+    head.ai1 = 1; head.ai2 = 5; head.ai3 = 1; head.vx = 0; head.vy = 0;
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(Math.hypot(head.vx, head.vy)).toBeCloseTo(1.5 * 1.4, 3);
+    const lerp = getAttackDamageForProjectiles(baseDmg, baseDmg * 1.3, head.difficulty);
+    expect(head.def.damage).toBe(Math.trunc(lerp * 1.3));
+  });
+
+  it('红帽旋冲每 200t 召黑暗法师 32,上限 4(:22113-22151)', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const head = spawn(h, 35, 100, 100);
+    head.ai1 = 1; head.ai2 = 0; head.ai3 = 1;
+    skeletronBossAI(head, h.hooks, h.player as never);      // 0%200==0(计数自增前判)
+    expect(h.enemies.filter((n) => n.vanillaId === 32).length).toBe(1);
+    for (let k = 0; k < 4; k++) spawn(h, 32, 100, 100);     // 场上补足 5 ≥ 上限 4
+    head.ai1 = 1; head.ai2 = 200;
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(h.enemies.filter((n) => n.vanillaId === 32).length).toBe(5);   // 不再召
+  });
+
+  it('FTW 旋冲:手全灭召 32(上限 6)/有手反弹弹幕不召/num200 ×1.3(:22105-22138)', () => {
+    const w = makeWorld(false);
+    w.seedFlags = { getGoodWorld: true };
+    const h = makeHooks(w, P);
+    const head = spawn(h, 35, 100, 100);
+    head.ai1 = 1; head.ai2 = 0;
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(h.enemies.filter((n) => n.vanillaId === 32).length).toBe(1);   // num173=0 → 召
+    expect(head.reflectsProjectiles).toBe(false);            // 无手不反弹(:22109 门)
+    spawn(h, 36, 99, 100);                                   // 补一手 → num173=1
+    head.ai1 = 1; head.ai2 = 199;                            // 199%200≠0
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(head.reflectsProjectiles).toBe(true);             // 有手 → 反弹(:22111)
+    expect(h.enemies.filter((n) => n.vanillaId === 32).length).toBe(1);   // (有手且非红帽)不召
+    // num200 ×1.3(:22236-22238)——FTW 经 mainDifficulty 抬档即专家
+    // (ScaleStats:171-182 getGoodWorld +1),专家阶梯全开 + num173=1(×1.05)
+    const head2 = spawn(h, 35, 60, 100);
+    head2.ai1 = 1; head2.ai2 = 5; head2.vx = 0; head2.vy = 0;
+    skeletronBossAI(head2, h.hooks, h.player as never);
+    expect(Math.hypot(head2.vx, head2.vy))
+      .toBeCloseTo(3.5 * 1.05 * Math.pow(1.1, 9) * 1.05 * 1.3, 3);
+  });
+
+  it('顶行防御复位:狂暴 9999 → 离场回基值(:21908/:22244-22271)', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const head = spawn(h, 35, 100, 100);
+    const base = head.def.defense!;
+    head.ai1 = 2;                             // 白天狂暴(直给态)
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(head.def.damage).toBe(9999);
+    expect(head.def.defense).toBe(9999);      // :22247-22248
+    head.ai1 = 3;                             // 离场
+    skeletronBossAI(head, h.hooks, h.player as never);
+    expect(head.def.defense).toBe(base);      // :21908 每 tick 复位,不再残留 9999
+    expect(head.def.damage).toBe(9999);       // 原版离场段不改写 damage(仅悬浮/旋冲段)
+  });
+});
+
+describe('史莱姆王动态 scale+碰撞盒(NPC.cs:43436-43700)', () => {
+  it('scale=(hp%×0.5+0.75):满血 1.25/半血 1.0,盒 trunc(98/92×scale),底锚不变(:43687-43700)', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const e = spawn(h, 50, 100, FLOOR - 6);
+    e.ai0 = -200; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; e.vx = 0; e.vy = 0;
+    e.y = FLOOR * TILE - e.h; e.onGround = true;          // 贴地静止(隔离下落位移)
+    kingSlimeAI(e, h.hooks, h.player as never);           // 满血:num9=1.25
+    expect(e.vanillaScale).toBeCloseTo(1, 5);             // 1.25/1.25(渲染=1.25×1)
+    expect(e.w).toBe(Math.trunc(98 * 1.25));              // 122((int) 截断)
+    expect(e.h).toBe(Math.trunc(92 * 1.25));              // 115
+    expect(e.y + e.h).toBeCloseTo(FLOOR * TILE, 3);       // 底=地面顶
+    e.hp = e.maxHp / 2; e.ai3 = e.hp;                     // 水位同步 → 不出小史莱姆
+    e.vy = 0; e.onGround = true;
+    kingSlimeAI(e, h.hooks, h.player as never);           // 半血:num9=1.0
+    expect(e.vanillaScale).toBeCloseTo(0.8, 5);           // 1.0/1.25
+    expect(e.w).toBe(98); expect(e.h).toBe(92);
+    expect(e.y + e.h).toBeCloseTo(FLOOR * TILE, 3);       // bottom-center 锚定不变
+  });
+
+  it('FTW num2=1+hp%(:43442-43448):满血 2.5×/半血 1.5×', () => {
+    const w = makeWorld(false);
+    w.seedFlags = { getGoodWorld: true };
+    const h = makeHooks(w, P);
+    const e = spawn(h, 50, 100, FLOOR - 6);
+    e.ai0 = -200; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; e.onGround = true;
+    kingSlimeAI(e, h.hooks, h.player as never);
+    expect(e.vanillaScale).toBeCloseTo(2, 5);             // (1.25×2)/1.25
+    expect(e.w).toBe(Math.trunc(98 * 2.5));               // 245
+    expect(e.h).toBe(Math.trunc(92 * 2.5));               // 230
+    e.hp = e.maxHp / 2; e.ai3 = e.hp; e.onGround = true;
+    kingSlimeAI(e, h.hooks, h.player as never);
+    expect(e.vanillaScale).toBeCloseTo(1.2, 5);           // (1.0×1.5)/1.25
+  });
+
+  it('传送缩身 num 驱动 scale(:43540-43541/:43578-43580):ai0 自增到 30 → num=0.75', () => {
+    const h = makeHooks(makeWorld(false), P);
+    const e = spawn(h, 50, 100, FLOOR - 6);
+    e.ai1 = 5; e.ai0 = 29; e.ai2 = 0; e.ai3 = 0;          // 先 +1 再算 num → 30
+    kingSlimeAI(e, h.hooks, h.player as never);
+    // num = clamp((60-30)/60)×0.5+0.5 = 0.75 → num9 = 1.25×0.75 = 0.9375
+    expect(e.vanillaScale).toBeCloseTo(0.75, 5);          // 0.9375/1.25
+    expect(e.w).toBe(Math.trunc(98 * 0.9375));            // 91
+    expect(e.h).toBe(Math.trunc(92 * 0.9375));            // 86
   });
 });
 

@@ -605,6 +605,8 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
 
 /** 原版 pass "Waterfalls"（WorldGen.cs:7697-7743）：水边唇缘砸半砖（瀑布触发的来源） */
 export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): void {
+  // IIIII：#54 单格定罪探针（与 vanilla WFProbe 织入逐行对拍；无钩零开销）
+  const __wf = (globalThis as { __swWfLog?: (s: string) => void }).__swWfLog;
   // ★pass 头 tileSolid 翻转（cs:16702 `Main.tileSolid[191] = false`）——活木非实心,
   //   pass 尾 cs:16753 还原 true（见函数尾）。
   flipGenSolid([191], false);
@@ -641,8 +643,10 @@ export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): voi
       // ★cs:16723-16726 `(type==75||type==76) && Next(10)!=0` → flag=false：
       //   黑曜石/狱石砖旁的唇缘只有 1/10 概率被砸半砖。&& 左短路——仅 75/76 格
       //   才掷 Next(10)；原版此处不查 flag 状态，即使 flag 已 false 也掷（保流位）
-      if (OBSIDIAN_HELL.has(st.type[ti]) && rng.nextInt(10) !== 0) flag = false;
-      if (flag) poundTile(st, i, j);
+      const obRoll = OBSIDIAN_HELL.has(st.type[ti]) ? rng.nextInt(10) : -1;
+      if (obRoll >= 0 && obRoll !== 0) flag = false;
+      if (flag) { const pok = poundTile(st, i, j); __wf?.(`P1 ${i},${j} ok=${pok ? 1 : 0} n3=${num3} n4=${num4} ob=${obRoll}`); }
+      else __wf?.(`C ${i},${j} f=0 n3=${num3} n4=${num4} ob=${obRoll}`);
     }
   }
   // —— 第二遍（L7725-7741）：唇缘向相邻实心格扩展半砖 ——
@@ -654,10 +658,10 @@ export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): voi
       if (!solidWF(i, j) || !solidWF(i, j + 1)) continue;
       const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
       if (!solidWF(i + 1, j) && st.flags[li] !== 0 && st.half[li] && st.liquid[st.idx(i - 2, j)] > 0) {
-        poundTile(st, i, j);
+        const pok = poundTile(st, i, j); __wf?.(`P2 ${i},${j} ok=${pok ? 1 : 0}`);
       }
       if (!solidWF(i - 1, j) && st.flags[ri] !== 0 && st.half[ri] && st.liquid[st.idx(i + 2, j)] > 0) {
-        poundTile(st, i, j);
+        const pok = poundTile(st, i, j); __wf?.(`P2 ${i},${j} ok=${pok ? 1 : 0}`);
       }
     }
   }

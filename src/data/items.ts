@@ -600,6 +600,13 @@ item({ key: 'vi_5627_花栗鼠斗篷', name: '', value: 1 });
 item({ key: 'vi_5659_英雄翅膀', name: '', value: 1 });
 item({ key: 'vi_5686_卡兹默德斯之翼', name: '', value: 1 });
 item({ key: 'vi_6140_露娜的符文妖精翅膀', name: '', value: 1 });
+// ---- 月总前四翅膀（3468-3471，Item.cs:31072-31082 `wingSlot = (sbyte)(29 + type
+// - 3468)` 算式族——提取器表达式槽位补齐后入表 wing 29-32；配方@远古操纵机
+// vanilla-recipes 已备；2026-08-19）----
+item({ key: 'vi_3468_solar_wings', name: '', value: 1 });
+item({ key: 'vi_3469_vortex_booster', name: '', value: 1 });
+item({ key: 'vi_3470_nebula_mantle', name: '', value: 1 });
+item({ key: 'vi_3471_stardust_wings', name: '', value: 1 });
 item({ key: 'vi_5669_true_copper_shortsword', name: '', value: 1 });
 item({ key: 'vi_1296_earth_staff', name: '', value: 1 });
 item({ key: 'vi_3473_solar_eruption', name: '', value: 1 });
@@ -747,6 +754,9 @@ item({ key: 'vi_4741_butcher_s_bloodstained_apron', name: '', value: 1 });
 item({ key: 'vi_3065_star_wrath', name: '', value: 1 });
 item({ key: 'vi_3063_meowmere', name: '', value: 1 });
 item({ key: 'vi_3372_lunatic_cultist_mask', name: '', value: 1 });
+// 3373 月亮领主面具：与 3372 同一 case 共享体（Item.cs:30798-30808
+// `headSlot = type + 186 - 3372` 算式 → 186/187），2026-08-19 表达式槽位补齐
+item({ key: 'vi_3373_moon_lord_mask', name: '', value: 1 });
 item({ key: 'vi_1504_spectre_robe', name: '', value: 1 });
 item({ key: 'vi_2769_cosmic_car_key', name: '', value: 1 });
 item({ key: 'vi_216_shackle', name: '', value: 1 });

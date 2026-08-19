@@ -226,6 +226,25 @@ function schedulePromptEditsSave() {
   }, 500);
 }
 const framePixelsMem = new Map(); // 'entryKey|idx' → Uint8ClampedArray(重制帧,内存优先)
+/** 内存预算(LRU 驱逐最早;whole 大图 16.8MB/张、逐帧小图 10KB/帧,64MB 兼容
+ *  两形态;被驱逐帧有 IDB 回退,只损速度不损数据) */
+const FRAME_MEM_BUDGET = 64 * 1024 * 1024;
+let frameMemBytes = 0;
+function memTrackPut(key, px) {
+  const prev = framePixelsMem.get(key);
+  if (prev) frameMemBytes -= prev.length;
+  framePixelsMem.set(key, px);
+  frameMemBytes += px.length;
+  while (frameMemBytes > FRAME_MEM_BUDGET && framePixelsMem.size > 1) {
+    const oldest = framePixelsMem.keys().next().value;
+    frameMemBytes -= framePixelsMem.get(oldest).length;
+    framePixelsMem.delete(oldest);
+  }
+}
+function memTrackDelete(key) {
+  const v = framePixelsMem.get(key);
+  if (v) { frameMemBytes -= v.length; framePixelsMem.delete(key); }
+}
 const remastering = new Set();    // 防重入
 let lastGen = null;       // {b64, layout}
 let onlyTodo = false;
@@ -418,7 +437,7 @@ async function renderFrame() {
   let px = framePixelsMem.get(memKey());
   if (!px && (rec.status === 'pending' || rec.status === 'accepted')) {
     px = (await getFramePixels(curEntry.key, curFrameIdx())) ?? undefined;
-    if (px) framePixelsMem.set(memKey(), px);
+    if (px) memTrackPut(memKey(), px);
   }
   drawCellPixels($('newcv'), px, f.w, f.h);
   // 叠加对比
@@ -537,7 +556,7 @@ async function doRemaster() {
       whole: wholeMode,
     });
     lastGen = result;
-    framePixelsMem.set(key, result.pixels);
+    memTrackPut(key, result.pixels);
     await state.remastered(curEntry, curFrameIdx(), full, settings.quality,
       { size: [result.layout.W, result.layout.H], algo: settings.algo, refFrame: wholeMode ? undefined : refIdx }, result.pixels);
     // 展示生成原图(可折叠)
@@ -570,14 +589,14 @@ async function doAccept() {
 async function doReject() {
   if (!curEntry) return;
   await state.reject(curEntry, curFrameIdx());
-  framePixelsMem.delete(memKey());
+  memTrackDelete(memKey());
   $('genpreview').style.display = 'none';
   drawSheet(); renderFilm(); renderFrame();
 }
 async function doSkip() {
   if (!curEntry) return;
   await state.skip(curEntry, curFrameIdx());
-  framePixelsMem.delete(memKey());
+  memTrackDelete(memKey());
   advance();
 }
 function advance() {
@@ -610,7 +629,9 @@ async function exportPack() {
       if (!arr) { arr = []; bySheet.set(e.sheet, arr); }
       arr.push(e);
     }
+    let sheetNo = 0;
     for (const [sheet, ents] of bySheet) {
+      setStatus(`导出中(合成混合 sheet)… ${++sheetNo}/${bySheet.size}`);
       const img = await loadSheet(sheet);
       if (!img) { console.warn(`[export] 缺原版 sheet ${sheet},跳过其条目`); continue; }
       const c = document.createElement('canvas');

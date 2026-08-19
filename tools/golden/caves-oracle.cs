@@ -10927,6 +10927,10 @@ bool ShimmerMakeBiomeFn(int X, int Y)
                 : (int)Math.Sqrt(Math.Pow((double)Math.Abs(l - X) * (1.0 + r.NextDouble() * 0.02), 2.0) + Math.Pow((double)Math.Abs(k - Y) * 1.2 * (1.0 + r.NextDouble() * 0.02), 2.0));
             if (num15 < num5)
             {
+                // HHHHH 反事实：cs:34945-34948 color/wallColor/slope(0)/halfBrick(false)
+                // ——slope/half 清坡位漏转录（color 通道 oracle 不建模）。大理石坡
+                // 残留→QuickCleanup (e) SaveSlopes 杀门误杀 8 格（m20260811 案）。
+                slope[ti] = 0; half[ti] = 0;
                 typ[ti] = 1;
                 if (l > num9 + 5 + (int)r.Next(2) && l < num10 - 5 - (int)r.Next(2)) act[ti] = 1;
                 if ((double)num15 < (double)num5 * 0.9) wal[ti] = 0;

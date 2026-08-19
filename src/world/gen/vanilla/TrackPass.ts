@@ -70,6 +70,14 @@ const TREE_TRUNK_SS = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 61
 const PREVENTS_REMOVAL_SS = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
 /** TileID.Sets.IsAContainer(TileID.cs:405) */
 const CONTAINER_SS = new Set([21, 467, 88]);
+/** Main.tileMoss(Main.cs:6956-6996)——KillTile fail 支苔藓→石转换族 */
+const TILE_MOSS_SS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+/** sheet → 内部 id(单射假设下取首个;fail 支类型回退写用) */
+const ID_OF_SHEET = new Map<number, number>();
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof s === 'number' && !ID_OF_SHEET.has(s)) ID_OF_SHEET.set(s, i);
+}
 /** CheckPile 地基族带(TileID.cs:24-34):Snow/Ice/Sand/HardenedSand/Sandstone */
 const SNOW_SS = new Set([147]);
 const ICE_SS = new Set([161, 163, 164, 200]);
@@ -368,7 +376,10 @@ export class TrackGenerator {
     }
     for (let j = 0; j < size; j++) this.hist[this.len - 1 - j] = { ...this.rewrite[j] };
     this.rewriteSlope(this.len - 1, STRAIGHT);
-    return this.segmentState(num + 1, this.len - (num + 1));
+    // ★FFFFF:C# 第二个 for 复用 num 作循环变量(cs:289),退栈值 = _length - num2
+    //   ——终评段 [_length-num2+1, _length-1];曾误用第一 while 的残留值(len-size-1
+    //   → 多评一格首格)。金标种子未触发值分叉,属潜伏逐位债
+    return this.segmentState(this.len - size + 1, size - 1);
   }
 
   /** RewriteSlopeDirection(cs:309-317) */
@@ -487,12 +498,83 @@ export class TrackGenerator {
     if (!st.flags[i]) return;
     const sheet = SHEET_OF[st.type[i]!];
     if (sheet < 0) return;
+    // CheckTileBreakability(cs:63591→62403):2=整跳(实心格上有树干/箱/锁门等
+    // PreventsTileRemovalIfOnTopOfIt 族);1=fail 支(锁门/巨石压箱——类型转换+帧,不杀)
+    const brk = this.checkTileBreakability(x, y);
+    if (brk === 2) return;
+    if (brk === 1) {
+      // fail 支(cs:63757-63773):草/苔类型回退 + SquareTileFrame 后 return。
+      // ShakeTree 门(netMode!=1&&IsShakeable)——fail 触发族{10锁门,138巨石}非
+      // shakeable,巷内不可达不移植
+      const sh = SHEET_OF[st.type[i]!] ?? -1;
+      if (sh === 2 || sh === 23 || sh === 109 || sh === 199 || sh === 477 || sh === 492) st.type[i] = ID_OF_SHEET.get(0)!;
+      else if (sh === 633) st.type[i] = ID_OF_SHEET.get(57)!;
+      else if (sh === 60 || sh === 661 || sh === 662 || sh === 70) st.type[i] = ID_OF_SHEET.get(59)!;
+      if (TILE_MOSS_SS.has(SHEET_OF[st.type[i]!] ?? -1)) st.type[i] = ID_OF_SHEET.get(1)!;
+      this.squareFrameTrack(rng, x, y);
+      return;
+    }
     const fx = st.frameX[i]!;
     const dust = killTileDustAmount(sheet, fx);
     for (let k = 0; k < dust; k++) makeTileDustRoll(rng, sheet, fx);
     this.attemptFossilShatter(rng, x, y, sheet);   // cs:63756(FFFFF 补:#101 巷内 404 可达——曾误判不可达)
     st.setTileSilent(x, y, 0);
     this.squareFrameTrack(rng, x, y);
+  }
+
+  /** WorldGen.CheckTileBreakability(cs:62403-62490)——0 可杀/1 fail/2 整跳 */
+  private checkTileBreakability(x: number, y: number): number {
+    const st = this.st;
+    const i = st.idx(x, y);
+    const sh = SHEET_OF[st.type[i]!] ?? -1;
+    if (y >= 1 && y <= st.h - 1) {
+      const below = st.inBounds(x, y + 1) ? st.idx(x, y + 1) : -1;
+      if (below >= 0 && st.flags[below] && this.isLockedDoor(x, y + 1)) return 2;
+      // 非实心非 solidTop(树干/装饰族)恒可杀(cs:62432)
+      if (!(vanGenSolidType(st.type[i]!) || TILE_DEFS[st.type[i]!]?.platform === true)) return 0;
+      const up = st.inBounds(x, y - 1) ? st.idx(x, y - 1) : -1;
+      if (up >= 0 && st.flags[up]) {
+        const shUp = SHEET_OF[st.type[up]!] ?? -1;
+        const fxu = st.frameX[up]!, fyu = st.frameY[up]!;
+        // flag=IsAContainer(本格);HasReason(scanForContainer=!flag)
+        const flag = CONTAINER_SS.has(sh);
+        if (this.hasReasonToReturnEarlyAt(st.type[i]!, x, y - 1, !flag)) {
+          if (TREE_TRUNK_SS.has(shUp)) {
+            if ((fxu === 66 && fyu >= 0 && fyu <= 44) || (fxu === 88 && fyu >= 66 && fyu <= 110) || fyu >= 198) return 0;
+            return 2;
+          }
+          if (shUp === S_PALM_SAP) {
+            if (fxu === 66 || fxu === 220) return 2;
+            return 0;
+          }
+          return 2;
+        }
+        if (shUp === S_CACTUS && st.type[up] !== st.type[i]) {
+          const num = Math.trunc(fxu / 18);
+          if (num === 0 || num === 1 || num === 4 || num === 5) return 2;
+        }
+        if (sh === S_DOOR && this.isLockedDoor(x, y)) return 1;
+        if (BOULDER_SS.has(sh)) {
+          if (this.checkBoulderChest(x, y, st.frameX[i]!, st.frameY[i]!, st.type[i]!)) return 1;
+          return 0;
+        }
+      }
+      if (sh === S_MUSICBOX) {
+        const num2 = x - Math.trunc(st.frameX[i]! % 54 / 18);
+        for (let k = 0; k < 3; k++) {
+          if (this.hasReasonToReturnEarlyAt(st.type[i]!, num2 + k, y - 1)) return 2;
+        }
+      }
+    }
+    return 0;
+  }
+
+  /** IsAContainer 型判定(单格) */
+  private containerAt(x: number, y: number): boolean {
+    const st = this.st;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    return st.flags[i] !== 0 && CONTAINER_SS.has(SHEET_OF[st.type[i]!] ?? -1);
   }
 
   /** AttemptFossilShattering(cs:63526-63554)——404 化石 3×3 邻格掷(Next(15)/
@@ -625,14 +707,15 @@ export class TrackGenerator {
   }
 
   /** CheckTileBreakability_HasReasonToReturnEarly(cs:62491-62509;hardMode 生成期假) */
-  private hasReasonToReturnEarlyAt(ignoreTypeId: number, x: number, y: number): boolean {
+  private hasReasonToReturnEarlyAt(ignoreTypeId: number, x: number, y: number, scanForContainer = true): boolean {
     const st = this.st;
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
     if (!st.flags[i]) return false;
     const sh = SHEET_OF[st.type[i]!] ?? -1;
     if (st.type[i] !== ignoreTypeId && (sh === S_TABLE || PREVENTS_REMOVAL_SS.has(sh))) return true;
-    return this.isLockedDoor(x, y) || CONTAINER_SS.has(sh);
+    if (this.isLockedDoor(x, y)) return true;
+    return scanForContainer && CONTAINER_SS.has(sh);
   }
 
   /** Chest.CanDestroyChest(cs:590-607):无箱或有空箱才可毁 */

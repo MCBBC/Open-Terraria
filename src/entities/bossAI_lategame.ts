@@ -978,14 +978,17 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
 // 状态机(ai0): 0 出生(180t) / 1 悬浮蓄力枢纽(DashTo 靠近 10t + 减速,45t(二阶段 20t)选招)/
 //   2 彩虹射线 873 / 4 光枪墙 919 / 5 永恒彩虹 872 / 6 太阳舞 923 / 7 光枪回环 919(二阶段)/
 //   8,9 刀阵冲刺(±50 速,6-40t 无敌蓄力,40-90t 伤害 ×1.5)/ 10 半血变身传送 /
-//   13 淡出退场(目标失效/超 6400px)。3(874 天降极光)与 11/12 为 expert 专属拍,跳过。
+//   11 预测光枪墙 919(expert 表专属拍) / 12 螺旋射线 873 / 13 淡出退场(目标失效/超 6400px)。
+//   3(874 天降极光)为 expert 专属拍,跳过。
 // 经典弹幕伤害(:46326-46345): 919 墙 50 / 919 回环 70 / 873 45 / 872 45 / 923 50 / 874 40。
 // 选招表(:46460-46580 残差映射): 一阶段 10 拍 [2,8,6,8,5,2,8,4,8,5] 循环,血 ≤50% 强制 10(变身);
-//   二阶段 9 拍 [7,2,8,5,2,6,4,8,12] 循环——num37 槽位推进（flag2 时第 3 槽插 11=expert
-//   专属拍），表尾 num57=12（873 螺旋）;反编译的 num54 双写 [..,6,6,..] 是同一 if 重复,
+//   二阶段经典 9 拍 [7,2,8,5,2,6,4,8,12]——num37 槽位推进,flag2(expert/白天暴怒)时第 3 槽
+//   (num51,:46528)插 11 → 10 拍 expert 表 [7,2,8,11,5,2,6,4,8,12](含 case 11 预测光枪墙);
+//   表尾 num57=12(873 螺旋);反编译的 num54 双写 [..,6,6,..] 是同一 if 重复,
 //   真表第 6 槽是 4、第 8 槽是 12。
 const EMPRESS_CYCLE_P1 = [2, 8, 6, 8, 5, 2, 8, 4, 8, 5];
 const EMPRESS_CYCLE_P2 = [7, 2, 8, 5, 2, 6, 4, 8, 12];
+const EMPRESS_CYCLE_P2_EXPERT = [7, 2, 8, 11, 5, 2, 6, 4, 8, 12];
 
 /** 原版 AI_120_HallowBoss_DashTo(:47304-47317):目标上移 300,>200 再回退 100,
  *  速度 = lerp(单位向量*min(len,18), vector/6, lerpValue(100,600,len)) */
@@ -1097,7 +1100,10 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       e.vx *= 0.92; e.vy *= 0.92;
       e.ai1 += 1;
       if (e.ai1 < dur) break;
-      const table = phase2 ? EMPRESS_CYCLE_P2 : EMPRESS_CYCLE_P1;
+      // :46520-46579 二阶段表:flag2(expert/白天暴怒)时 num51 第 3 槽插 11 → 10 拍 expert 表
+      const table = phase2
+        ? (flag2 ? EMPRESS_CYCLE_P2_EXPERT : EMPRESS_CYCLE_P2)
+        : EMPRESS_CYCLE_P1;
       let next = table[Math.floor(e.ai2) % table.length];
       if (!phase2 && e.hp / e.maxHp <= 0.5) next = 10; // :46463 半血强制变身
       if (next === 8 && player.cx > e.cx) next = 9;     // :46493 冲刺方向
@@ -1286,6 +1292,42 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
       }
       e.ai1 += 1;
       if (e.ai1 >= 180 + (20 - num17)) { e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; }
+      break;
+    }
+    // ---- 11 预测光枪墙 919(:47061-47151,expert 二阶段表第 3 槽专属拍):悬玩家上
+    //      (0,-350),每 3t 在玩家速度反向 100px 处布一杆 919,瞄玩家 90t 预测位 ----
+    case 11: {
+      if (e.ai1 === 0) game.playSfxWav?.('Item_162', 1, e.cx, e.cy);   // :47065
+      const dur = 100 + (20 - num17);                                  // num58 = 20 - num17（:47067/:47144）
+      empressHover(e, player, 0, -350);                                // :47074-47079（vector3=(0,-350)/num3=40/num2=12/num=0.5）
+      // :47080 每 3t 一杆(num59=1)、<100t;:47089 NPC 距玩家 >2400 跳过当拍(continue,计时不断)
+      if (Math.floor(e.ai1) % 3 === 0 && e.ai1 < 100
+        && Math.hypot(player.cx - e.cx, player.cy - e.cy) <= 2400) {
+        // v = -玩家速度单位向量,零速兜底 (0,-1)（:47085-47086 SafeNormalize(-UnitY)）
+        let ux = -player.vx, uy = -player.vy;
+        const ul = Math.hypot(ux, uy);
+        if (ul > 0) { ux /= ul; uy /= ul; } else { ux = 0; uy = -1; }
+        // vector13 = 玩家 90t 预测位(num61=90,:47093-47094);vector14 = 玩家速度反向
+        // 100px 布枪点(num60=100,:47095)
+        const leadX = player.cx + player.vx * 90, leadY = player.cy + player.vy * 90;
+        let px = player.cx + ux * 100, py = player.cy + uy * 100;
+        // :47096-47104 布枪点距玩家 <100 时外推(v 已单位,防御性死代码 1:1)
+        if (Math.hypot(px - player.cx, py - player.cy) < 100) {
+          let ex = player.cx - px, ey = player.cy - py;
+          const el = Math.hypot(ex, ey);
+          if (el === 0) { ex = ux; ey = uy; } else { ex /= el; ey /= el; }
+          px = player.cx - ex * 100; py = player.cy - ey * 100;
+        }
+        // v2 = 预测位 − 布枪点 → 弹向（:47105-47108;919 收敛实现:12 速直飞,弹 ai1=
+        // ai1/100 延时参随收敛省略）;Boss_CanShootExtraAt 多人补射(:47114-47140)恒跳
+        // 主目标(:47324),单人无效,略
+        const ax = leadX - px, ay = leadY - py;
+        const al = Math.hypot(ax, ay) || 1;
+        shoot(game, px, py, (ax / al) * 12, (ay / al) * 12,
+          dayEnrage ? 9999 : phase2 ? 60 : 50, 919, 240);  // num6 :46332
+      }
+      e.ai1 += 1;
+      if (e.ai1 >= dur) { e.ai0 = 1; e.ai1 = 0; }
       break;
     }
     // ---- 12 螺旋射线 873(:47152-47200,二阶段表尾拍,经典可达——num57→12 无专家门,

@@ -262,6 +262,34 @@ const SLIME_FORCE_AGGRO = new Set([81, 183, 304, 667, 244, 184, 535, 658, 659, 2
  *  恶魔 62/巫毒恶魔 66/地狱蝠 49?（表见下实现）——11 类双步进 */
 const AI014_DOUBLE_STEP = new Set([49, 51, 60, 62, 66, 93, 137, 150, 151, 152, 634]);
 
+/** Collision.SolidCollision（Collision.cs:2713-2743）1:1：盒与全实心砖重叠判定
+ *  （tileSolid && !tileSolidTop；半砖顶面 +8、厚度 8）。G5 落地嵌固回退
+ *  （AI_001 :61932/:62124）消费——落地后位置仍嵌进实心（坡角/台阶楔入）时的
+ *  脱困门。原版扫描盒外扩 ±1/+2 列行但重叠判定过滤，等价于只扫盒内格 */
+function solidBoxOverlap(
+  st: GameHooks['world']['store'], x: number, y: number, w: number, h: number,
+): boolean {
+  const x0 = Math.floor(x / TILE), x1 = Math.floor((x + w) / TILE);
+  const y0 = Math.floor(y / TILE), y1 = Math.floor((y + h) / TILE);
+  for (let tx = x0; tx <= x1; tx++) {
+    for (let ty = y0; ty <= y1; ty++) {
+      if (!st.inBounds(tx, ty)) continue;
+      const j = st.idx(tx, ty);
+      if (!st.flags[j]) continue;                     // active()
+      if (st.wire[j] & 32) continue;                  // inActive（致动缩入）
+      const d = TILE_DEFS[st.type[j]];
+      if (!d?.solid || d.platform) continue;          // tileSolid && !tileSolidTop
+      const half = !!st.half[j];
+      const top = ty * TILE + (half ? 8 : 0);
+      const th = half ? 8 : TILE;
+      if (x + w > tx * TILE && x < tx * TILE + TILE && y + h > top && y < top + th) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
 const PLACEHOLDER_DEF: EnemyDef = {
   key: 'v_placeholder', name: '?', hp: 1, damage: 0, knockbackResist: 0.5,
@@ -1104,9 +1132,15 @@ export class Enemy extends Entity {
   get justHit(): boolean { return this.justHitT > 0; }
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
   vanillaScale = 1;
-  /** 金属矿史莱姆（type 1 携矿 ai[1]）的 defDamage/defDefense 基线快照
-   *  （NPC.cs:61107-61178 强化段：防 +30 / 伤 ×3，原版 defDamage/defDefense 只读） */
-  metalSlimeBase?: { dmg: number; def: number };
+  /** 携物史莱姆（SlimeCanContainItems 且 ai[1]>0，NPC.cs:61088-61089 门）逐档梯
+   *  的 defDamage/defDefense/knockBackResist/defLifeMax 基线快照——原版四字段只读，
+   *  本仓 def.* 为可变位，梯段每 tick 以基线重算（:61107-61433 全梯消费） */
+  slimeItemBase?: { dmg: number; def: number; kb: number; hp: number };
+  /** 上一 tick 位移段的碰撞前 vy（原版 oldVelocity.Y，NPC.cs:93739 AI 后、
+   *  TileCollision 前快照；groundPhysics 每次调用后写入）。消费点：AI_001
+   *  携物梯 :61309 气球史莱姆落地弹跳 / :61932/:62124 落地嵌固回退（配对
+   *  collideY=TileCollision 层 Y 碰撞位） */
+  preCollideVy = 0;
   /** 471 哥布林术士 defDefense 基线快照（NPC.cs:56891/:56920 飞行态 ×1.1 / 地面复原） */
   warlockDefBase?: number;
   /** NPC.canDisplayBuffs（NPC.cs:6124 默认 true / :8423 SetDefaults 复位）。
@@ -1327,7 +1361,10 @@ export class Enemy extends Entity {
         case 21: this.spikeBallAI(game); break;                          // AI_021 刺球（type 72，:24674）
         case 14: this.batAI(game, p); break;                            // AI_014 蝙蝠/飞行族（1.4.5.6 原版核）
         case 16: this.swimAI(game, p); break;                           // AI_016 游泳族（鲨鱼/食人鱼）
-        case 18: this.jellyfishAI(game, p); break;                      // AI_018 水母族（脉冲游动）
+        case 18:
+          this.jellyfishAI(game, p);                       // AI_018 水母族（脉冲游动）
+          if (this.vanillaId === 221) this.squidFindFrame(); // 鱿鱼帧机（:74652-74662，AI 后同序）
+          break;
         // 玩家死亡传原对象（A 批）：幽灵对尸体坐标继续追击（cs:24726 无 dead 早退）
         case 22: this.ghostAI(game, (game as unknown as { player: Player }).player ?? null); break; // AI_022 幽灵族（穿墙缓速）
         case 13: this.plantAI(game, p); break;                          // AI_013 植物/攀爬者族（锚点伸展）
@@ -1783,22 +1820,34 @@ export class Enemy extends Entity {
 
   /** 敌怪弹幕发射辅助（原始速度向量版）：Nailhead 463 散射（NPC.cs:57611）等
    *  "速度向量已定"的发射点——shootDart 会把 (tx,ty) 归一到 speed，不适用此处。
-   *  projId = 原版弹型（Dart.ts DART_STYLE 表） */
-  spawnHostileProj(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId = 0): void {
+   *  projId = 原版弹型（Dart.ts DART_STYLE 表）。
+   *  ownerId = 弹-NPC 绑定通道（原版 NewProjectile 末参 whoAmI 落 ai[1] 槽）：
+   *  仅 411→537 / 424→573 消费（Projectile.cs :30308/:32087 起），其余发射点不传 */
+  spawnHostileProj(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId = 0, ownerId = 0): void {
     const dart = new Dart(x, y, vx, vy, dmg, projId);
     dart.hostile = true;
+    dart.ownerNpcId = ownerId;
     (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
       .add(dart, 'projectiles');
   }
 
-  private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1) {
-    // 注：水中行为不在本方法——wet 减速由 npcLiquid→liqFactor 统一承担（原版
-    // Collision_MoveWhileWet），浮力族（史莱姆）的弹跳漂浮在各自 AI 的 wet 段（cs:61877）
+  /** 原版共享位移段 1:1（NPC.cs:91533-91547 + UpdateCollision :93723-93810）：
+   *  AI 写速度 → 重力（:91533 velocity.Y += gravity + 落速帽）→ TileCollision
+   *  + position += velocity（:93808）。**无速度钳、无尾段摩擦**——一切摩擦/加速/
+   *  帽均属各 AI 自管（AI_001 :61948 地面 ×0.8 / :61930-62137 滞空转向；AI_003
+   *  num 段逐族自带）。原 ±maxSpd 逐 tick 硬钳 + onGround×0.8 / 空中×0.98 尾段
+   *  摩擦（仓内早期 walker 地基约定）2026-08-19 G1 批废除——硬钳曾把史莱姆跳冲量
+   *  （±2/±3/659×1.2）逐 tick 砍到 ±1（原版无此钳，跳冲量完整保留到摩擦段），
+   *  尾段摩擦亦为本仓自创（原版空中无摩擦）。
+   *  注：水中位移减速由 npcLiquid→liqFactor 在 moveAndCollide 内统一承担（原版
+   *  Collision_MoveWhileWet），浮力族（史莱姆）的弹跳漂浮在 slimeAI 的 wet 段（cs:61877）。
+   *  ★preCollideVy/collideY 快照（原版 oldVelocity/collideY :93739/:93804——下一 tick
+   *  AI 直读）：AI_001 携物梯 :61309 气球弹跳 / :61932/:62124 落地嵌固回退消费。 */
+  private groundPhysics(game: GameHooks) {
     this.applyGravity(game);
-    this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx + accel * Math.sign(this.vx || 1) * 0));
-    if (jumpV && this.onGround) this.vy = -jumpV;
+    const preVy = this.vy;      // oldVelocity（:93739 AI 后、碰撞前快照）
     moveAndCollide(this, game.world, this.vx, this.vy);
-    this.vx *= this.onGround ? 0.8 : 0.98;
+    this.preCollideVy = preVy;
   }
 
   /** NPCID.Sets.SlimeCanContainItems（NPCID.cs:4791）：可携带体内物品的史莱姆族 */
@@ -1934,6 +1983,48 @@ export class Enemy extends Entity {
     }
   }
 
+  /** WorldGen.PlaceSuitableHerbHere + PlaceAlch（WorldGen.cs:45948-45976 / :45386-
+   *  45484）运行期版——药草史莱姆洒籽（NPC.cs:61296）消费。基座格 (x,y) 按类型
+   *  分派 style（顺序覆盖式 if 链，PlaceAlch 落在 y-1）；PlaceAlch 门 = 目标格净空
+   *  + 基座 nactive/整砖/无坡 + style 白名单（78/380 草变体各族通用）+ 液体门
+   *  （style≤3 拒一切液体 / 4·6 拒岩浆 / 5 仅容岩浆）；放 82 号芽 frameX=style*18，
+   *  油漆继承基座（CopyPaintAndCoating）。sheet 比对走 TILE_DEFS[].vanilla.sheet。 */
+  private placeSuitableHerbHere(st: import('../world/TileStore').TileStore, x: number, y: number): void {
+    if (!st.inBounds(x, y) || !st.inBounds(x, y - 1)) return;
+    const sheet = TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet ?? -1;
+    let style = -1;
+    if (sheet === 2 || sheet === 109) style = 0;               // :45950-45953 草
+    else if (sheet === 60) style = 1;                          // :45955-45958 丛林草
+    else if (sheet === 0 || sheet === 59) style = 2;           // :45960-45963 土/泥
+    else if (sheet === 23 || sheet === 661 || sheet === 25 || sheet === 203
+      || sheet === 199 || sheet === 662) style = 3;            // :45965-45968 邪恶草
+    else if ((sheet === 53 || sheet === 116)
+      && x >= 380 && x <= st.w - 380) style = 4;               // :45970-45973 沙（beachDistance=380，WorldGen.cs:4102）
+    else if (sheet === 57 || sheet === 633) style = 5;         // :45975-45978 灰烬
+    else if (sheet === 147 || sheet === 163 || sheet === 164 || sheet === 161
+      || sheet === 200) style = 6;                             // :45980-45983 冰雪族
+    if (style === -1) return;
+    // PlaceAlch（:45386-45484）：目标格 (x, y-1) 净空、基座 nactive 整砖无坡
+    const k = st.idx(x, y - 1), g = st.idx(x, y);
+    if (st.flags[k]) return;                                   // 目标格已活
+    if (!st.flags[g] || st.half[g] || st.slope[g] !== 0) return;
+    const ground = TILE_DEFS[st.type[g]]?.vanilla?.sheet ?? -1;
+    const liq = st.liquid[k];
+    const liqType = st.liquidType[k];
+    const lava = liq > 0 && liqType === 2;
+    let ok = false;
+    if (style === 0) ok = [2, 477, 492, 78, 380, 109].includes(ground) && liq === 0;
+    else if (style === 1) ok = [60, 78, 380].includes(ground) && liq === 0;
+    else if (style === 2) ok = [0, 59, 78, 380].includes(ground) && liq === 0;
+    else if (style === 3) ok = [661, 662, 203, 199, 23, 25, 78, 380].includes(ground) && liq === 0;
+    else if (style === 4) ok = [53, 78, 380, 116].includes(ground) && !(liq > 0 && lava);
+    else if (style === 5) ok = [57, 633, 78, 380].includes(ground) && !(liq > 0 && !lava);
+    else if (style === 6) ok = [78, 380, 147, 161, 163, 164, 200].includes(ground) && !(liq > 0 && lava);
+    if (!ok) return;
+    st.setTile(x, y - 1, TILE_BY_KEY['v_82_herbs_sprout'] ?? 0, 18 * style, 0);
+    st.paint[k] = st.paint[g];                                 // CopyPaintAndCoating（:45479）
+  }
+
   /** AI_001_Slimes 原版核（1.4.5.6 NPC.cs:60735+）：
    *  站定 vx*=0.8；ai[0] 每 tick +1（激愤 +1 额外）；
    *  阶段判定（num54=-1000）：ai0>=0 → 小跳（vy=-6, vx+=2*dir, ai0=-1120）；
@@ -1954,52 +2045,246 @@ export class Enemy extends Entity {
   }
 
   private slimeAI(game: GameHooks, player: Player | null) {
-    // ai[0]==-999：风气球挂载冻结（NPC.cs:61441 帧0不行动，位置由气球驱动）
-    if (this.ai0 === -999) return;
-    // ---- 体内物品掷骰（NPC.cs:60750 主掷段，只掷一次）----
-    // 置于光位前：首帧即得 ai[1]（原版此段在 :60737 星史莱姆光之后，晚一帧显色）
+    // ---- 体内物品掷骰（NPC.cs:60750 主掷段，只掷一次）。原版位于 ai[0]==-999 早退
+    //      【之前】（:61436 才 return）——风气球挂载史莱姆（出生即 ai0=-999）由此
+    //      掷出 isBallooned 风筝/纸飞机桶；曾置于早退后 = 挂载体永不掷物（2026-08-19
+    //      G2 批按 :61436 时序归位）----
     this.slimeRollContainedItem(game);
-    // ---- 金属矿史莱姆强化段（S9，NPC.cs:61107-61178 全段，2026-08-19）：
-    //  ai[1]∈{364 钴,1104 钯金,365 秘银,1105 山铜,366 精金,1106 钛金}：
-    //  lavaImmune / 防御 +30 / 伤害 ×3 / kbResist=0（buffImmune[70]/[20] 复位——type1
-    //  本就无此免疫，无操作）；一次性（lifeMax==defLifeMax 门）scale ×1.2 + 盒随
-    //  bottom-center 重扩 + HP ×3；悬停重力：玩家在正上方（X 重叠 + Bottom<Top +
-    //  CanHit 非实心/平台）→ direction=0、vx×0.5、vy 钳 ≥0 后 +gravity（沉降贴人）；
-    //  否则 vy>0 +gravity / vy<0 −gravity×0.75（升沉阻尼）。光 (color/500) 已在下方
-    //  光段实现（:61152）。
-    if (this.vanillaId === 1
-      && (this.ai1 === 364 || this.ai1 === 1104 || this.ai1 === 365
-        || this.ai1 === 1105 || this.ai1 === 366 || this.ai1 === 1106)) {
-      if (this.metalSlimeBase === undefined) {
-        // defDamage/defDefense 基线快照（原版两字段只读；本仓 def.* 为可变位）
-        this.metalSlimeBase = { dmg: this.def.damage, def: this.def.defense ?? 0 };
-      }
-      const mBase = this.metalSlimeBase;
-      if (this.maxHp === this.def.hp) {                         // :61115 lifeMax==defLifeMax 一次性门
-        this.vanillaScale = (this.vanillaScale ?? 1) * 1.2;     // :61119 scale ×1.2
-        const cx0 = this.cx, bot0 = this.y + this.h;
-        this.w = Math.trunc(this.w * this.vanillaScale);        // :61120-61121 width/height ×scale
-        this.h = Math.trunc(this.h * this.vanillaScale);
-        this.x = cx0 - this.w / 2;                              // bottom-center 重锚
-        this.y = bot0 - this.h;
-        if (this.hp === this.maxHp) this.hp = this.def.hp * 3;  // :61124-61126 life ×3
-        this.maxHp = this.def.hp * 3;                           // :61128 lifeMax ×3
-      }
-      this.def.defense = mBase.def + 30;                        // :61110 defDefense+30
-      this.def.damage = Math.trunc(mBase.dmg * 3);              // :61111 (int)(defDamage×3)
-      this.def.knockbackResist = 0;                             // :61114
-      if (player && this.y + this.h < player.y && this.x + this.w >= player.x
-        && this.x <= player.x + player.w
-        && canHit(game.world.store, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)) {
-        this.facing = 0;                                        // :61133 direction = 0
-        this.vx *= 0.5;                                         // :61134
-        if (this.vy < 0) this.vy = 0;                           // :61135-61138
-        this.vy += GRAVITY;                                     // :61139 gravity（叠加共享重力）
-      } else {
-        if (this.vy > 0) this.vy += GRAVITY;                    // :61143-61146
-        if (this.vy < 0) this.vy -= GRAVITY * 0.75;             // :61147-61150
+    // ---- 携物变体梯（S10/G2，NPC.cs:61088-61433 全梯 1:1，2026-08-19）：
+    //  门 = NPCID.Sets.SlimeCanContainItems[type] && ai[1]>0（:61088-61089——可携物
+    //  族 {1,59,147,184,537} 全体，非仅 type1）。逐档 else-if 与原版同序：
+    //  539 史莱姆法杖物 / 364 族 金属矿（S9 原段并入）/ 2 泥 / 9 木 / 3 石（滞空）/
+    //  751 云（滞空）/ 150 蛛网 / 3086 花岗岩 / 3081 大理岩 / 147 棘刺 / 8 火把
+    //  （ftw）/ 5395 屎 / 1124 蜂巢 / 1125 蜂蜜 / 314 药草 / 3736-3738 气球 /
+    //  1345 彩纸 / 1103 淤泥 / 593 雪 / 3347 化石 / 29 生命水晶 / 3609 传送带 /
+    //  174 地狱石。
+    //  各档 _givenName 特殊名（Language/SpecialNPCName.*）本仓无敌怪名显示通道，
+    //  整体跳过（备案）。尾档 ai[1]>0 && ItemID.Sets.IsAVoiceChangeItem（:61426-
+    //  61433 lifeMax×3）：变声物品集 {215,5484,5485,5499-5509,5534}（ItemID.cs:1084）
+    //  仅经 WorldGen.Skyblock 的 GetRandomVoiceItem 出生（:60827-60830）——天空盒
+    //  世界未实装（slimeRollContainedItem 同判），完全不可达，跳过（备案）----
+    let flag2 = false;                    // :61088 金属矿悬停位（:61434 direction 复位门消费）
+    const vidC = this.vanillaId;
+    if (vidC !== null && Enemy.SLIME_CAN_CONTAIN_ITEMS.has(vidC) && this.ai1 > 0) {
+      const base = this.slimeItemBase ?? (this.slimeItemBase = {
+        dmg: this.def.damage, def: this.def.defense ?? 0,
+        kb: this.def.knockbackResist, hp: this.def.hp,
+      });
+      const roll = (n: number) => Math.floor(Math.random() * n);   // Main.rand.Next(n)
+      const stL = game.world.store;
+      const sf = game.world.seedFlags;
+      const a1 = this.ai1;
+      if (a1 === 539) {
+        // :61090-61105 史莱姆法杖物：noTraps/getGood 分母 300−120−120；1/num11 且
+        //  目标存活视线可达 → 弹 1073（direction×12, 0）伤 20。kb=2 出参本仓敌弹
+        //  出口（spawnHostileProj）无 knockback 通道，登记；npcTypeNoAggo（镇静）
+        //  门与相邻 S7 仆从段同口径省略（仓内镇静等效=索敌距离罚项）
+        let num11 = 300;
+        if (sf.noTraps) num11 -= 120;
+        if (sf.getGoodWorld) num11 -= 120;
+        if (roll(num11) === 0 && player && !player.dead && this.canSeePlayer(stL, player)) {
+          this.spawnHostileProj(game, this.cx, this.cy, this.facing * 12, 0, 20, 1073);
+        }
+      } else if (a1 === 364 || a1 === 1104 || a1 === 365 || a1 === 1105 || a1 === 366 || a1 === 1106) {
+        // ---- 金属矿史莱姆强化段（S9，NPC.cs:61107-61178 全段，2026-08-19）：
+        //  lavaImmune（:61108）由 npcLiquid.ts 状态位按 ai[1] 求值（非 SetDefaults
+        //  表内，本 AI 不重复置位）/ 防御 +30 / 伤害 ×3 / kbResist=0（buffImmune[70]/
+        //  [20] 复位——可携物五族原版本就无此免疫位，无操作）；一次性（lifeMax==
+        //  defLifeMax 门）scale ×1.2 + 盒随 bottom-center 重扩（w/h ×1.2 增量——原版
+        //  num22 字面，勿乘总 scale 复合）+ HP ×3；悬停重力：玩家在正上方（X 重叠 +
+        //  Bottom<Top + CanHit）→ flag2、direction=0、vx×0.5、vy 钳 ≥0 后 +gravity
+        //  （沉降贴人）；否则 vy>0 +gravity / vy<0 −gravity×0.75（升沉阻尼）。
+        //  光 (color/500) 在 slimeAI 尾段（:61152）。
+        if (this.maxHp === this.def.hp) {                         // :61115 lifeMax==defLifeMax 一次性门
+          const num22 = 1.2;
+          this.vanillaScale = (this.vanillaScale ?? 1) * num22;   // :61119 scale ×1.2
+          const cx0 = this.cx, bot0 = this.y + this.h;
+          this.w = Math.trunc(this.w * num22);                    // :61120-61121 width/height ×1.2
+          this.h = Math.trunc(this.h * num22);
+          this.x = cx0 - this.w / 2;                              // bottom-center 重锚
+          this.y = bot0 - this.h;
+          if (this.hp === this.maxHp) this.hp = base.hp * 3;      // :61124-61126 life ×3
+          this.maxHp = base.hp * 3;                               // :61128 lifeMax ×3
+        }
+        this.def.defense = base.def + 30;                         // :61110 defDefense+30
+        this.def.damage = Math.trunc(base.dmg * 3);               // :61111 (int)(defDamage×3)
+        this.def.knockbackResist = 0;                             // :61114
+        if (player && this.y + this.h < player.y && this.x + this.w >= player.x
+          && this.x <= player.x + player.w
+          && canHit(game.world.store, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)) {
+          flag2 = true;                                           // :61132 悬停位
+          this.facing = 0;                                        // :61133 direction = 0
+          this.vx *= 0.5;                                         // :61134
+          if (this.vy < 0) this.vy = 0;                           // :61135-61138
+          this.vy += GRAVITY;                                     // :61139 gravity（叠加共享重力）
+        } else {
+          if (this.vy > 0) this.vy += GRAVITY;                    // :61143-61146
+          if (this.vy < 0) this.vy -= GRAVITY * 0.75;             // :61147-61150
+        }
+      } else if (a1 === 2) {
+        // :61179-61186 泥史莱姆：贴地（vy==0）跳跳计数 +9/t——全梯最快档
+        if (this.vy === 0) this.ai0 += 9;
+      } else if (a1 === 9) {
+        this.def.defense = base.def + 16;                         // :61187-61188 木史莱姆 防御+16
+      } else if (a1 === 3 && this.vy !== 0) {
+        // :61192-61199 石史莱姆（整档门=滞空）：下坠期 +2g（叠加共享段 +g → 3g 沉坠）
+        if (this.vy > 0) this.vy += GRAVITY * 2;
+      } else if (a1 === 751 && this.vy !== 0) {
+        // :61200-61204 云史莱姆（整档门=滞空）：恒 −0.6g（净 +0.4g 缓落缓升）
+        this.vy -= GRAVITY * 0.6;
+      } else if (a1 === 150) {
+        // :61205-61221 蛛网史莱姆：1/120 在自身包围盒随机格放蛛网。WorldGen.
+        //  PlaceTile(51)（:59393）：非实心族免 EmptyTile 门 + 液体格拒绝（:59477-
+        //  59495 的 num==51 名单）+ default 分支裸放（:60258）无锚定——即"格净空
+        //  且无液体即放"。checkingLiquid（液体处理中标记）单人不可观测，液体>0 等价
+        if (roll(120) === 0) {
+          const wx0 = Math.floor(this.x / TILE), wx1 = Math.floor((this.x + this.w) / TILE);
+          const wy0 = Math.floor(this.y / TILE), wy1 = Math.floor((this.y + this.h) / TILE);
+          const wx = wx0 + roll(wx1 - wx0 + 1);                   // Next(left, right+1)
+          const wy = wy0 + roll(wy1 - wy0 + 1);
+          if (stL.inBounds(wx, wy) && !stL.flags[stL.idx(wx, wy)]
+            && stL.liquid[stL.idx(wx, wy)] === 0) {
+            stL.setTile(wx, wy, TILE_BY_KEY['v_51_cobweb'] ?? 0);
+          }
+        }
+      } else if (a1 === 3086) {                                   // :61222-61226 花岗岩 防御+16 kb0
+        this.def.defense = base.def + 16;
+        this.def.knockbackResist = 0;
+      } else if (a1 === 3081) {                                   // :61228-61232 大理岩 同款
+        this.def.defense = base.def + 16;
+        this.def.knockbackResist = 0;
+      } else if (a1 === 147) {
+        this.def.damage = base.dmg * 2;                           // :61234-61237 棘刺史莱姆 伤害×2
+      } else if (a1 === 8 && sf.getGoodWorld) {
+        // :61239-61247 火把史莱姆（ftw 专属）：AddBuff(24, 216000) 永燃（火尘/光
+        //  (1,0.3,0.1) 均已由 onFireT 管线承担）+ buffImmune[323/44/324/39]（OnFire3/
+        //  Frostburn/Frostburn2/CursedInferno）。本仓无实例级 buff 免疫表——梯段每
+        //  tick 清四计时位等效免疫（梯先于 debuff tick 跑，零漏帧）
+        this.onFireT = 3600;
+        this.onFire3T = 0; this.frostburnT = 0; this.frostburn2T = 0; this.cursedT = 0;
+      } else if (a1 === 5395) {
+        // :61248-61259 屎史莱姆：1/30 PooFly 粒子编排（ParticleOrchestrator，
+        //  clientOnly）——本仓无 ParticleOrchestrator 管线，纯视觉跳过（备案）
+      } else if (a1 === 1124) {
+        // :61260-61277 蜂巢史莱姆：Next(60)==7 且目标存活视线可达 → NewNPC 蜂
+        //  210/211 @Center；初速 = (Next(−20,21)×0.1, −1) 归一 ×3；localAI[0]=60 /
+        //  ai[1]=60 蜂状态位随实体带入。CanBeReplacedByOtherNPCs（出怪池替换标记）
+        //  本仓 spawner 无对应位，登记
+        if (roll(60) === 7 && player && !player.dead && this.canSeePlayer(stL, player)) {
+          const bee = Enemy.fromVanilla(210 + roll(2), this.cx, this.cy);
+          if (bee) {
+            const bx = (Math.floor(Math.random() * 41) - 20) * 0.1, by = -1;
+            const bl = Math.hypot(bx, by);
+            bee.vx = (bx / bl) * 3;
+            bee.vy = (by / bl) * 3;
+            bee.lai0 = 60;
+            bee.ai1 = 60;
+            (game as unknown as { entities?: { add?: (e: unknown, b: string) => void } })
+              .entities?.add?.(bee, 'enemies');
+          }
+        }
+      } else if (a1 === 1125) {
+        // :61278-61281 蜂蜜史莱姆：仅特殊名，无行为段
+      } else if (a1 === 314) {
+        // :61282-61307 药草史莱姆：尘 41 1/60（alpha250 scale0.8）+ 中心格光
+        //  (0.4,0.9,1)（光位在 slimeAI 尾段）+ 贴地且 localAI[3]<5 时 1/180 于
+        //  脚下 (Bottom−8) 格洒药草芽（PlaceSuitableHerbHere），放成即计数
+        if (roll(60) === 0) {
+          game.spawnDust?.(this.x, this.y, this.w, this.h, 41, 0, 0, 250, null, 0.8);
+        }
+        if (this.vy === 0 && this.lai3 < 5 && roll(180) === 0) {
+          const hx = Math.floor(this.cx / TILE);
+          const hy = Math.floor((this.y + this.h - 8) / TILE);
+          if (stL.inBounds(hx, hy) && !stL.flags[stL.idx(hx, hy)]) {
+            this.placeSuitableHerbHere(stL, hx, hy + 1);          // :61296 WorldGen.PlaceSuitableHerbHere(x, y+1)
+            if (stL.flags[stL.idx(hx, hy)]) this.lai3 += 1;       // :61298-61304 放成即 localAI[3]+1
+          }
+        }
+      } else if (a1 === 3736 || a1 === 3737 || a1 === 3738) {
+        // :61308-61315 气球史莱姆：collideY 且碰撞前下坠 >4 → 落地反弹 −vy×0.7
+        //  （collideY=TileCollision 层 Y 碰撞位；preCollideVy=oldVelocity.Y）
+        if (this.collideY && this.preCollideVy > 4) this.vy = -this.preCollideVy * 0.7;
+      } else if (a1 === 1345) {
+        // :61316-61333 彩纸史莱姆：尘 139-142 1/30（speedY −10、scale 1.2 ±30%、
+        //  X 向 ±0.05 抖动）+ gore 276-282 1/60（scale ±20%、同抖动）
+        if (roll(30) === 0) {
+          const d = game.spawnDust?.(this.x, this.y, this.w, this.h,
+            139 + roll(4), 0, -10, 0, null, 1.2);
+          if (d) {
+            d.scale *= 1 + (roll(61) - 30) * 0.01;
+            d.vx += (Math.floor(Math.random() * 101) - 50) * 0.05;
+          }
+        }
+        if (roll(60) === 0) {
+          const g = GorePiece.newGore(276 + roll(7), this.x, this.y, 0, -10,
+            1 + (roll(41) - 20) * 0.01);
+          if (g) g.vx += (Math.floor(Math.random() * 101) - 50) * 0.05;
+        }
+      } else if (a1 === 1103 || a1 === 593) {
+        // :61334-61369 淤泥/雪史莱姆（两档逐字相同）：尘 135 1/3（speed=速度×0.4、
+        //  alpha100 scale2.5、noGravity、速度×1.8、Y−0.75；1/4 转 noGravity=false
+        //  且 scale×0.5）
+        if (roll(3) === 0) {
+          const d = game.spawnDust?.(this.x - 2, this.y - 2, this.w + 4, this.h + 4, 135,
+            this.vx * 0.4, this.vy * 0.4, 100, null, 2.5, true);
+          if (d) {
+            d.vx *= 1.8;
+            d.vy = d.vy * 1.8 - 0.75;
+            if (roll(4) === 0) { d.noGravity = false; d.scale *= 0.5; }
+          }
+        }
+      } else if (a1 === 3347) {
+        // :61370-61376 化石史莱姆：alpha 125 半透明 + 跳跳计数每 tick +1（梯段
+        //  先于 grounded 段——空中也加）+ 伤害 +10
+        this.spawnAlpha = 125;
+        this.ai0 += 1;
+        this.def.damage = base.dmg + 10;
+      } else if (a1 === 29) {
+        // :61377-61389 生命水晶史莱姆：防御 +4；一次性 lifeMax ×2（满血则 life 同步）
+        this.def.defense = base.def + 4;
+        if (this.maxHp === this.def.hp) {
+          if (this.hp === this.maxHp) this.hp = base.hp * 2;
+          this.maxHp = base.hp * 2;
+        }
+      } else if (a1 === 3609) {
+        // :61390-61395 传送带史莱姆：防御 +8 伤害 +6（地面摩擦替换段见 grounded
+        //  分支 :61938-61948——不减速、恒向 direction 加速 ±0.1 钳 ±2.5）
+        this.def.defense = base.def + 8;
+        this.def.damage = base.dmg + 6;
+      } else if (a1 === 174) {
+        // :61396-61425 地狱石史莱姆：防 +14 伤 +20；一次性 kbResist÷3 + life/lifeMax
+        //  ×2 + scale×1.2（num22 增量）盒随底心重扩；每 tick 火尘 6（速度×0.2、
+        //  alpha100 scale1.7→×0.6、速度×2、Y−2）+ 尘 31（scale 0.1-0.5、fadeIn
+        //  1.5-1.9、Y−5、noGravity）
+        this.def.defense = base.def + 14;
+        this.def.damage = base.dmg + 20;
+        if (this.maxHp === this.def.hp) {
+          this.def.knockbackResist = base.kb / 3;                 // :61404 knockBackResist /= 3
+          this.hp *= 2;                                           // :61405 life *= 2
+          this.maxHp = base.hp * 2;                               // :61406 lifeMax *= 2
+          const num22b = 1.2;                                     // :61409-61418 scale ×1.2 + 盒重扩
+          this.vanillaScale = (this.vanillaScale ?? 1) * num22b;
+          const cx0 = this.cx, bot0 = this.y + this.h;
+          this.w = Math.trunc(this.w * num22b);
+          this.h = Math.trunc(this.h * num22b);
+          this.x = cx0 - this.w / 2;
+          this.y = bot0 - this.h;
+        }
+        const d6 = game.spawnDust?.(this.x, this.y, this.w, this.h, 6,
+          this.vx * 0.2, this.vy * 0.2, 100, null, 1.7);
+        if (d6) { d6.scale *= 0.6; d6.vx *= 2; d6.vy = d6.vy * 2 - 2; }
+        const d31 = game.spawnDust?.(this.x, this.y, this.w, this.h, 31, 0, 0, 50,
+          null, 0.1 + roll(5) * 0.1, true);
+        if (d31) { d31.fadeIn = 1.5 + roll(5) * 0.1; d31.vy -= 5; }
       }
     }
+    // :61434-61435 type1 且 direction==0（金属矿悬停置 0）非悬停时复位为 1——曾缺
+    //  = 悬停过一次的金属矿史莱姆永久 facing 0（跳冲量全无横向分量）
+    if (this.vanillaId === 1 && this.facing === 0 && !flag2) this.facing = 1;
+    // :61436-61441 ai[0]==-999 风气球挂载冻结（帧 0 不行动，位置由气球驱动）——
+    //  原版时序在掷骰+携物梯之后：挂载体照掷物/照跑梯（风筝桶 isBallooned 链即
+    //  依赖此序）。尾段点光（原版 :61442-61531）本就在早退后，无分歧
+    if (this.ai0 === -999) return;
     // ---- 史莱姆族点光（cs:61445-61456 / :61508-61515 / :61527-61531 / :61866-61870）----
     if (this.vanillaId === 244) {
       // :61444-61456 彩虹史莱姆 = Main.Disco 三色（6 相状态机 ≈ hsl 时间色，s=1 l=0.5）
@@ -2045,24 +2330,44 @@ export class Enemy extends Entity {
       this.ai2 = 1;                                         // :61929
       if (player) this.facing = this.seekDirX(player);      // :61930 TargetClosest
     }
-    // 蚱蜢被动档（cs:61479）：无激愤时走"走路档"——0.2 慢爬不进跳循环
+    // 蚱蜢被动档（cs:61479）：无激愤时走"走路档"——0.2 慢爬不进跳循环（仓内
+    //  旧档位；±0.2 帽在调用方自带，groundPhysics G1 批起零钳零摩擦）
     if (grasshopper && !flag3) {
       this.vx += this.facing * 0.02;
       this.vx = Math.max(-0.2, Math.min(0.2, this.vx));
-      this.groundPhysics(game, 0, 0.12, 1);
+      this.groundPhysics(game);
       return;
     }
     const dir = this.facing;
-    const grounded = this.onGround || (inWater && Math.abs(this.vy) < 0.8);
+    // 贴地门 = 原版字面 velocity.Y==0（:61917）——碰撞后 vy（AI 时点重力未加，
+    // 落地/贴地恒 0；顶头清零同取此门）。曾用 onGround：携物梯空中改 vy 的档
+    // （:61309 气球弹跳 / :61139 金属悬停 / 云·石重力改写）会被误判贴地，跳段
+    // 反冲掉梯段 vy；wet 慢浮近似 |vy|<0.8 保留（仓内旧约定）
+    const grounded = this.vy === 0 || (inWater && Math.abs(this.vy) < 0.8);
     if (grounded) {
+      // 落地嵌固回退（G5，:61932-61935）：上一 tick Y 碰撞（collideY）且碰撞前在
+      // 动（oldVelocity.Y!=0，本仓 preCollideVy）而当前位置嵌进实心 → 后退
+      // vx+direction 脱困（vx 通常已被碰撞清零 → 净退 1px/t 持续推出）
+      if (this.collideY && this.preCollideVy !== 0
+        && solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
+        this.x -= this.vx + dir;
+      }
       // 落地卡墙检测（L61937-61939）：起跳位置没变 = 白跳 → 反转
       if (this.jumpStartX !== 0 && Math.abs(this.cx - this.jumpStartX) < 1) {
         this.facing *= -1;
         this.ai2 = 200;
       }
       this.jumpStartX = 0;
-      this.vx *= 0.8;
-      if (Math.abs(this.vx) < 0.1) this.vx = 0;
+      if (this.ai1 === 3609) {
+        // 传送带史莱姆摩擦替换（:61938-61948）：不减速——恒向 direction 加速
+        // ±0.1/t 钳 ±2.5（direction==0 走 else +0.1，原版字面）
+        if (this.facing < 0) this.vx -= 0.1;
+        else this.vx += 0.1;
+        this.vx = Math.max(-2.5, Math.min(2.5, this.vx));
+      } else {
+        this.vx *= 0.8;                                              // :61948-61952 地面摩擦
+        if (Math.abs(this.vx) < 0.1) this.vx = 0;
+      }
       // ---- ai[0] 递增阶梯（S1，cs:61964-62016 全表 1:1，2026-08-19）----
       if (flag3) this.ai0 += 1;                                  // :61964-61967
       this.ai0 += 1;                                             // :61968
@@ -2125,10 +2430,25 @@ export class Enemy extends Entity {
         this.jumpStartX = this.cx;  // ai[3] = position.X（L62059）
       }
     } else if (player && ((dir === 1 && this.vx < 3) || (dir === -1 && this.vx > -3))) {
-      // ---- 滞空转向（S3，cs:62120-62137，2026-08-19 补）：目标存活（target<255）且
-      //  未达方向满速 3 → 朝 direction ±0.2/t 步进；逆向（含微同向）×0.93 衰减。
-      //  原版另有 collideX|vx|==0.2 / collideY 落地的 1.4px 反卡位挪移（贴角脱困），
-      //  本仓碰撞轴粒度不同，语义由 slopeCollide 承担，登记 ----
+      // ---- 滞空转向（S3，cs:62120-62137）：目标存活（target<255）且未达方向满速 3
+      //  → 朝 direction ±0.2/t 步进；逆向（含微同向）×0.93 衰减 ----
+      // G5 贴角 1.4px 挪移（:62121-62123）：collideX（本仓 hitWall，上一 tick 位移段
+      //  产物——与原版 AI 先于 UpdateCollision 的时序一致）且 |vx|==0.2（float 精确）
+      //  → 后退 1.4px 卡角脱困。★触发窗说明：原版 |vx|==0.2 由共享碰撞段的
+      //  clip-to-gap 语义产生（TileCollision :2454/:2472 result.X=墙距——贴墙爬行时
+      //  钳到残余 0.2）；本仓 moveAxis 撞墙为贴齐+清零（TileCollision.ts:197-199，
+      //  终位置与原版一致、仅存活 vx 值不同）→ 该精确值在本仓仅当碰撞后有他者把
+      //  vx 写回 ±0.2 时可达，按原文字面 1:1 保留（G1 批同时废除的空中×0.98 尾段
+      //  摩擦曾把存活值进一步抹掉）。1.4px 自我维持节奏（后退 1.4 → 0.2+0.4+0.6
+      //  步进三 tick 后又钳 0.2）在 clip 语义缺失下不构成，登记。
+      if (this.hitWall && Math.abs(this.vx) === 0.2) {
+        this.x -= 1.4 * dir;
+      }
+      // 落地嵌固回退（G5，:62124-62127）——grounded 分支 :61932 同款（空中态版）
+      if (this.collideY && this.preCollideVy !== 0
+        && solidBoxOverlap(st, this.x, this.y, this.w, this.h)) {
+        this.x -= this.vx + dir;
+      }
       if ((dir === -1 && this.vx < 0.01) || (dir === 1 && this.vx > -0.01)) {
         this.vx += 0.2 * dir;                                     // :62130-62133
       } else {
@@ -2257,8 +2577,8 @@ export class Enemy extends Entity {
       }
       if (this.ai2 === 1 && flag3 && player) this.facing = this.seekDirX(player);
     }
-    // 重力+碰撞（原版经由 NPC 碰撞；水中位移减速由 wet→liqFactor 统一承担）
-    this.groundPhysics(game, 0, 0.12, 1);
+    // 重力+碰撞（原版共享位移段 :91533-91547；水中位移减速由 wet→liqFactor 统一承担）
+    this.groundPhysics(game);
     // AI_001 尾部颜色渐变（NPC.cs:60971 起为 slime(type 1) 专属段；
     // 此前误挂在 zombieAI——守卫 vanillaId!==1 使其全程空转，移回 slimeAI）
     this.slimeColorTick(game);
@@ -2333,7 +2653,9 @@ export class Enemy extends Entity {
     this.facing = dir;
     this.vx += dir * 0.08;
     this.vx = Math.max(-0.9, Math.min(0.9, this.vx));
-    this.groundPhysics(game, 0);
+    // ±0.9 帽在调用方自带（legacy 兜底 AI 的自有档；groundPhysics G1 批起零钳
+    // 零摩擦——空中 vx 保持原样，同原版 AI_003 空中无摩擦语义）
+    this.groundPhysics(game);
     this.slimeColorTick(game); // 守卫 vanillaId!==1：僵尸走此路径为 no-op（1:1）
   }
 
@@ -3217,11 +3539,13 @@ export class Enemy extends Entity {
               this.spawnHostileProj(game, mx, my, (fx2 / fd) * 12, (fy2 / fd) * 12, dmgF, proj);
             }
           } else if (vidR === 424) {
-            // 预言者四发扇（:59974-59979）：枪口 Center+(−spriteDir*4, +6)
+            // 预言者四发扇（:59974-59979）：枪口 Center+(−spriteDir*4, +6)；
+            // 末参 whoAmI（G3 通道）——573 蓄能弹的宿主绑定（Projectile.cs:32087
+            // 起消费：宿主死 → 立即对最近玩家齐射；宿主活 → 继承其目标）
             const sx = this.cx - this.facing * 4, sy = this.cy + 6;
             for (let k = 0; k < 4; k++) {
               this.spawnHostileProj(game, sx, sy,
-                (-3 + 2 * k) * 0.15, -Math.floor(Math.random() * 3) * 0.2 - 0.1, dmgF, proj);
+                (-3 + 2 * k) * 0.15, -Math.floor(Math.random() * 3) * 0.2 - 0.1, dmgF, proj, this.id);
             }
           } else if (vidR === 409) {
             // 闪爆虫（:59981-59985）：发射 = 生 NPC 410 子弹星，速度 (vx, −6+vy)
@@ -3242,7 +3566,9 @@ export class Enemy extends Entity {
             }
             this.spawnHostileProj(game, mx + vx, my + vy, vx, vy, dmgF, proj);
           } else if (vidR === 411) {
-            this.spawnHostileProj(game, mx + vx, my + vy, vx, vy, dmgF, proj);   // :59970-59973
+            // 末参 whoAmI（G3 通道）：537 激光弹的宿主绑定（Projectile.cs:30308
+            // ——宿主存活期间束原点逐 t 锁回宿主眼部 Center+(dir*6,−4)）
+            this.spawnHostileProj(game, mx + vx, my + vy, vx, vy, dmgF, proj, this.id);   // :59970-59973
           } else {
             // 通用：出生点 = 枪口 + 弹速（:59938-59939；214 再 +1.5 倍弹速）
             const ox2 = mx + vx * (vidR === 214 ? 2.5 : 1);
@@ -5519,7 +5845,10 @@ export class Enemy extends Entity {
       this.ai1 = 2;
     }
     if (this.ai1 === 2) {
+      // :22246-22248 白天狂暴 damage/defense 均 9999（守卫恒处本态；json
+      // defDefense 本就 9999，显式对齐防难度缩放口径漂移）
       this.def.damage = 9999;
+      this.def.defense = 9999;
       const dx = player!.cx - this.cx, dy = player!.cy - this.cy;
       const d = Math.hypot(dx, dy) || 1;
       this.vx = (dx / d) * 8;
@@ -6439,6 +6768,7 @@ export class Enemy extends Entity {
       else if (this.hitHead) { if (this.vy < 0) { this.vy = Math.abs(this.vy); this.ai0 = 1; } }
       // 玩家湿身 + 视线 → 攻击形（cs:24366-24420 flag24）
       if (playerWet && player && this.canSeePlayer(st, player)) {
+        this.lai2 = 1;                                     // :24347 狩猎旗（221 FindFrame 消费）
         let damp = 0.98;
         let still = 0.2;                                   // num277：静止阈值
         if (vid === 103) { damp *= 0.98; still = 0.6; }
@@ -6447,6 +6777,7 @@ export class Enemy extends Entity {
         this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI / 2;
         this.vx *= damp; this.vy *= damp;
         if (Math.abs(this.vx) < still && Math.abs(this.vy) < still) {
+          if (vid === 221) this.lai0 = 1;                  // :24361 鱿鱼慢速触发（FindFrame 帧 0 复位）
           if (player) {
             this.facing = this.seekDirX(player);          // TargetClosest
             const spd = vid === 103 ? 9 : 7;              // num278
@@ -6460,6 +6791,7 @@ export class Enemy extends Entity {
         return;
       }
       // 漂移形（cs:24421-24457）
+      this.lai2 = 0;                                       // :24390 狩猎旗清除
       this.vx += this.facing * 0.02;
       this.visAngle = this.vx * 0.4;
       if (this.vx < -1 || this.vx > 1) this.vx *= 0.95;
@@ -6491,6 +6823,27 @@ export class Enemy extends Entity {
     this.vy = Math.min(this.vy + 0.2, 10);
     this.ai0 = 1;
     moveAndCollide(this, game.world, this.vx, this.vy);
+  }
+
+  /** 鱿鱼 221 FindFrame（NPC.cs:74652-74662，dispatch 在 jellyfishAI 之后调用
+   *  ——原版 AI 先跑、FindFrame 后跑的同序）：狩猎态（localAI[2]==1，AI 侧 lai2）
+   *  8t/帧【正向推进钳末帧不回卷】；慢速触发（localAI[0]==1，扑咬前瞬时近静止，
+   *  AI 侧 lai0）一次性复位帧 0（扑咬帧）并清标志；非狩猎 13t/帧全帧循环。
+   *  ★63/64/103/242 的 localAI[2] 是原版只写不读的死槽（G7 定谳 2026-08-19：
+   *  水母攻击形帧走 ai[1]==1 潜伏门 :74615-74631，非 localAI[2]）——照写不读 */
+  private squidFindFrame(): void {
+    const frames = Math.max(1, this.vanilla?.frames ?? 1);
+    this.npcFrameT += 1;
+    if (this.lai2 === 1) {
+      if (this.lai0 === 1) { this.customFrameIdx = 0; this.lai0 = 0; }
+      if (this.npcFrameT >= 8) {
+        this.npcFrameT = 0;
+        this.customFrameIdx = Math.min(frames - 1, (this.customFrameIdx ?? 0) + 1);
+      }
+    } else if (this.npcFrameT >= 13) {
+      this.npcFrameT = 0;
+      this.customFrameIdx = ((this.customFrameIdx ?? 0) + 1) % frames;
+    }
   }
 
   /** AI_022 幽灵族（NPC.cs:24726-25315 全量,2026-08-19 移动核重写）：

@@ -22,6 +22,13 @@ export interface VanillaItemStat {
 
 const STATS = statsJson as Record<string, VanillaItemStat>;
 
+// 提取器缺口手补（生成数据勿手改 JSON，代码层并表——vanillaAccFx BEHAVIOR_FX 同法）：
+// 3309-3314 彩色配重球（黑/蓝/绿/紫/红/黄）在 Item.cs SetDefaults 的 switch return
+// 之后独立 if 块（:30233-30240）——与 2214-17 同类漏提段：width/height 24、rare 2、
+// buyPrice 5 银、accessory = true（无 stringColor——非线饰品，Player 侧走
+// UpdateEquips :14219-14222 counterWeight 直置 + ApplyEquipVanity :13800-13803 虚荣档）
+for (let _v = 3309; _v <= 3314; _v++) STATS[String(_v)] ??= { acc: 1 };
+
 /** 原版 item id → 盔甲/配饰属性 */
 export function vanillaStatOfVid(vid: number): VanillaItemStat | null {
   return STATS[String(vid)] ?? null;

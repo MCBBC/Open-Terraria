@@ -727,7 +727,55 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
         if (bs && r3 === 0) {
           if (rng.int(0, 14) === 0) {
             // notNearOtherChests:true(cs:3708 原版实参)——±25×±8 已有 BasicChest 则拒
+            // ★IIIII：TileObject.Place 预清场镜像（TileObject.cs:79-90）——原版
+            // AddBuriedChest → PlaceChest(i-1, num7-1) → TileObject.Place 在写箱前先
+            // 对箱体覆盖格（cut/BreakableWhenPlacing 活性格，CanPlace 门放行族）逐格
+            // KillTile：蛛网 51 头掷 Next(4)（cs:63904，wall==62 时）+ 尾 SquareTileFrame
+            // 九宫级联——级联里的 CheckStalactite/CheckPile 把**失去伙伴的 165 垂网/
+            // 185 小堆孤儿格**连带杀掉（9293480 #63 残 2 格实证：金标箱 (495..496,
+            // 749..750) 覆写垂网底格→级联杀顶格 (495,748)；(416..417,921..922) 覆写
+            // 小堆右格→级联杀左格 (415,922)。JS 写侧（BuriedChestsPass，GGGGG 域）
+            // 无此清场→孤儿存活）。
+            // 箱体=(cx-1..cx)×(cy-1..cy)：坠落扫描 gy=cy+1 由外门 bs（solidTile(cx,
+            // cy+1)，本 pass 无致动格故与 SolidTile 全同义）唯一推定；sink 尾校验兜底
+            // （不吻合=推定失效，跳过清场保安全）。
+            // 掷流：vanilla 先清场后 loot；本镜像事后补杀——蜘蛛巢内级联**恒零掷**
+            // （巢内 165 全为 fx=108+ 族：GetStalagtiteStyle frameX/54==2→style11==
+            // desired(墙62)，永不进 UpdateStalagtiteStyle 重定型掷；孤儿杀/CheckPile/
+            // CheckChest 全零掷），故与 vanilla 掷流逐位等价（UUUU 160,186 掷全等在案）。
+            // 尘掷：覆盖格 ∈{28,165,185,187,444,51} 全为 killDustRollsPer=0 族。
+            const boxCells: Array<[number, number]> = [[cx - 1, cy - 1], [cx - 1, cy], [cx, cy - 1], [cx, cy]];   // 原版列主序
+            const snapCell = (bx: number, by: number) => {
+              if (!st.inBounds(bx, by)) return null;
+              const k = st.idx(bx, by);
+              return [st.flags[k], st.type[k], st.frameX[k], st.frameY[k], st.half[k],
+                st.slope[k], st.wall[k], st.wire[k], st.paint[k], st.liquid[k], st.liquidType[k]] as const;
+            };
+            const applyCell = (bx: number, by: number, s: readonly number[] | null) => {
+              if (!s || !st.inBounds(bx, by)) return;
+              const k = st.idx(bx, by);
+              st.flags[k] = s[0]!; st.type[k] = s[1]!; st.frameX[k] = s[2]!; st.frameY[k] = s[3]!;
+              st.half[k] = s[4]!; st.slope[k] = s[5]!; st.wall[k] = s[6]!; st.wire[k] = s[7]!;
+              st.paint[k] = s[8]!; st.liquid[k] = s[9]!; st.liquidType[k] = s[10]!;
+            };
+            const pre = boxCells.map(([bx, by]) => snapCell(bx, by));
             const chok = placeBuriedChest(st, rng, gs, chests, cx, cy, { style: 15, loot: 'vi_939_web_slinger', notNearOtherChests: true });
+            const sink = chests as unknown as Array<{ x: number; y: number }>;
+            if (chok && sink.length > 0 && sink[sink.length - 1]!.x === cx - 1 && sink[sink.length - 1]!.y === cy - 1) {
+              const post = boxCells.map(([bx, by]) => snapCell(bx, by));
+              // 回滚箱体到 pre 态 → 按原版序补杀（级联读到的时间线与 vanilla 一致）
+              // → 箱体四格重写（= vanilla sweep2 产物；成功门下覆盖格全为空或可杀族）
+              boxCells.forEach(([bx, by], q) => applyCell(bx, by, pre[q]));
+              for (const [bx, by] of boxCells) {
+                const k = st.idx(bx, by);
+                if (!st.flags[k]) continue;                            // 原版逐格现查 active
+                if ((TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1) === 484) continue;   // ∉484（成功门下不可达，防御）
+                if ((TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1) === 51 && st.wall[k] === 62) rng.nextInt(4);   // cs:63904
+                st.setTileSilent(bx, by, 0);                          // KillTile 写侧（液体/墙保留）
+                genSquareTileFrame(st, rng, bx, by);                  // 尾九宫级联（孤儿杀在此）
+              }
+              boxCells.forEach(([bx, by], q) => applyCell(bx, by, post[q]));
+            }
             __d?.(`${waveN} CH ${cx},${cy} ok=${chok ? 1 : 0} a=${st.flags[i] ? 1 : 0} t=${TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1}`);
           } else {
             const psty = rng.int(19, 20);

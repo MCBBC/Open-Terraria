@@ -24,6 +24,7 @@ import type { Player } from './Player';
 import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
+import { getAttackDamageForProjectiles } from '../stats/ScaleStats';
 import { Arrow } from './Arrow';
 import { canStartInvasion, startInvasion, INVASION_MARTIAN } from '../world/Invasion';
 import { dutchmanCannonAI } from './bossAI_dd2';
@@ -442,8 +443,10 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
       if (n % 20 === 0) {
         const dirx = spriteDir;
         const delta = (Math.random() - 0.5) * 0.7853982;   // ±22.5° 散布（:36133-36136）
+        // :36081 伤 = GetAttackDamage_ForProjectiles(50, 37)——expert 插值档
         shootM(game, e.cx + dirx * 36, e.cy + 8,
-          Math.cos(delta) * 8 * dirx, Math.sin(delta) * 8 * dirx, 50, 448, 3600, 1,
+          Math.cos(delta) * 8 * dirx, Math.sin(delta) * 8 * dirx,
+          getAttackDamageForProjectiles(50, 37, e.difficulty), 448, 3600, 1,
           { martianRocket: true });
         game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36098 火炮每发(终审补)
       }
@@ -464,7 +467,9 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
       const n = e.ai3 - 280;
       if (n % 6 === 0) {
         const ang = e.ai2 + (Math.random() - 0.5) * (0.7853982 / 3);
-        shootM(game, e.cx, e.cy, Math.cos(ang) * 16, Math.sin(ang) * 16, 35, 449);
+        // :36105 伤 = GetAttackDamage_ForProjectiles(35, 30)——expert 插值档
+        shootM(game, e.cx, e.cy, Math.cos(ang) * 16, Math.sin(ang) * 16,
+          getAttackDamageForProjectiles(35, 30, e.difficulty), 449);
         game.playSfxFiles?.(['Item_12'], 1, e.cx, e.cy);     // :36140 部件激光(392 段 Item12)
       }
     }
@@ -506,19 +511,22 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
     if (saucer.ai0 === 2) { flag76 = true; mv4 = 120; mv5 = 120; }
     if (!flag76 && e.ai3 >= 280 && e.ai3 < 400) { flag76 = true; mv5 = 90; mv4 = 60; }
     if (!flag76 && e.ai3 >= 440 && e.ai3 < 580) { flag76 = true; mv5 = 60; mv4 = 90; }
+    // :36168-36169 空巢导弹 450 伤 = GetAttackDamage_ForProjectiles(30, 25)——
+    // expert 插值档,窗检前一次算定(四处发射共用)
+    const dmg450 = getAttackDamageForProjectiles(30, 25, e.difficulty);
     if (flag76) {
       // 炮塔空巢（:36243-36258）:下方侧向抛射
       if (t0Dead && rnd(mv4) === 0) {
         // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
         const mvx = -Math.random() * 3 * 3, mvy = 1 * 3;
-        shootM(game, e.cx + rndRange(50, 70), e.cy + rndRange(30, 45), mvx, mvy, 30, 450, 300, 1,
+        shootM(game, e.cx + rndRange(50, 70), e.cy + rndRange(30, 45), mvx, mvy, dmg450, 450, 300, 1,
           { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
         game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
       if (t1Dead && rnd(mv4) === 0) {
         // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
         const mvx = Math.random() * 3 * 3, mvy = 1 * 3;
-        shootM(game, e.cx + rndRange(50, 70), e.cy + rndRange(30, 45), mvx, mvy, 30, 450, 300, 1,
+        shootM(game, e.cx + rndRange(50, 70), e.cy + rndRange(30, 45), mvx, mvy, dmg450, 450, 300, 1,
           { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
         game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
@@ -526,14 +534,14 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
       if (c0Dead && rnd(mv5) === 0) {
         // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
         const mvx = -Math.random() * 3 * 3, mvy = -1 * 3;
-        shootM(game, e.cx + rndRange(30, 60), e.cy + rndRange(-30, -10), mvx, mvy, 30, 450, 300, 1,
+        shootM(game, e.cx + rndRange(30, 60), e.cy + rndRange(-30, -10), mvx, mvy, dmg450, 450, 300, 1,
           { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
         game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
       if (c1Dead && rnd(mv5) === 0) {
         // :36246-36250 速度 = (±rand3, ±1)×3 未归一(3~9.5 随机,曾归一恒 3)
         const mvx = Math.random() * 3 * 3, mvy = -1 * 3;
-        shootM(game, e.cx + rndRange(30, 60), e.cy + rndRange(-30, -10), mvx, mvy, 30, 450, 300, 1,
+        shootM(game, e.cx + rndRange(30, 60), e.cy + rndRange(-30, -10), mvx, mvy, dmg450, 450, 300, 1,
           { bounce: true });  // aiStyle14 X 反跳(原版 ×-0.1,默认档 -0.5 近似)
         game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36254 空巢导弹每发(终审补)
       }
@@ -731,7 +739,9 @@ export function teslaTurretAI(e: Enemy, game: GameHooks, player: Player | null) 
     const d = Math.hypot(dx, dy);
     if (d > 0.001) { dx = (dx / d) * 14; dy = (dy / d) * 14; }
     else { dx = 0; dy = -14; }
-    shootM(game, ox, oy, dx, dy, 35, 435);
+    // :35442-35448 伤 = GetAttackDamage_ForProjectiles(35, 35×0.8)——type 387 ∈
+    // [381,392] → num1090=0.8 → expert 档 28
+    shootM(game, ox, oy, dx, dy, getAttackDamageForProjectiles(35, 28, e.difficulty), 435);
   }
   e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);

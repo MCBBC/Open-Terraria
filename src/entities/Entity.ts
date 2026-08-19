@@ -12,6 +12,10 @@ export abstract class Entity {
   onGround = false;
   hitWall = false;
   hitHead = false;
+  /** 原版 collideY（NPC.cs:93804）：本轴 tile 碰撞改写 vy（TileCollision 层、
+   *  slopeCollide 之前——坡面贴合清零不置位）。moveAndCollide 逐 tick 写/复位；
+   *  消费点 Enemy.slimeAI 携物梯（:61309 气球弹跳 / :61932/:62124 落地嵌固回退） */
+  collideY = false;
   dropThrough = false;
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946 默认 水/岩浆 .5、
    *  蜂蜜 .25、微光 .375）。1=dry 不减速；Enemy 侧 npcLiquid.updateNpcLiquid 每 tick 写，
