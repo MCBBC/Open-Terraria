@@ -473,6 +473,10 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 本体亡 → 全头自灭(:31521-31525 自由头同样查 golemBoss——曾 !x.free 豁免
   // 自由头 = 先破头再杀本体留下无敌自由头永不退场=战斗软锁,2026-08-19 终审修)
   if (!body || body.ai3 === 1 || body.hp <= 0) { e.die(game); return; }
+  // 挂载头锚本体（渲染层序用:实体 y 排序下头 y<本体 → 头先画=垫到身后,
+  // 原版 NPC 按 whoAmI 槽序=部件恒在本体【前】——用户报"头跑到背后"根因,
+  // 2026-08-19 修;与拳 e.master 同款链路）
+  if (!x.free) e.master = body;
 
   const num = balanceNum(game, player, 3);   // 挂载/自由头 getGoodWorld +3(:31277-31280/:31505-31508)
 

@@ -975,14 +975,15 @@ export class CounterweightProj extends Entity {
     const p = this.ctx.owner();
     if (!p || p.dead) { this.dead = true; return; }   // player.dead → Kill（:64490-64493）
     this.handX = p.cx; this.handY = p.cy;
-    this.stringColor = p.equipStats?.stringColor ?? 0;
+    const eq = p.equipStats;   // 装备快照（accessor 每次全量重算,单次捕获）
+    this.stringColor = eq?.stringColor ?? 0;
     // num=250×0.5=125 轨道半径（:64477/:64482）;num3=15×0.8=12 速度上限;
     // num4=12×1.5×0.5=9 速度下限（:64478-64483/:64531）;num5=num3=12 漂移钳
     let num = 125;
     const num3 = 12, num4 = 9, num5 = 12;
     // 场上无悠悠球 → 回收（:64491-64506,owner 本机 && ai0>=0 门）
     if (this.ai0 >= 0 && !this.ctx.yoyoInPlay()) this.ai0 = -1;
-    if (p.equipStats?.yoyoString) num += num * 0.25 + 10;   // :64486-64488
+    if (eq?.yoyoString) num += num * 0.25 + 10;   // :64486-64488
     this.rot += 0.5;   // :64489
     if (Number.isNaN(this.vx) || Number.isNaN(this.vy)) { this.dead = true; return; }
     if (this.ai0 === 0 || this.ai0 === 1) {
@@ -1072,7 +1073,7 @@ export class CounterweightProj extends Entity {
       else if (sp > 0 && sp < num4) { this.vx = this.vx / sp * num4; this.vy = this.vy / sp * num4; }
     }
     // 魔法线（:64727-64733）：-1 回收态 + magicString → -3 幽灵 + 掷 75% 伤/击退脱离克隆
-    if (this.ai0 === -1 && p.equipStats?.magicString) {
+    if (this.ai0 === -1 && eq?.magicString) {
       this.ai0 = -3;
       this.ctx.spawnClone?.(this.cx, this.cy, this.vx, this.vy,
         Math.trunc(this.damage * 0.75), Math.trunc(this.knockback * 0.75), this.projId,

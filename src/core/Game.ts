@@ -9127,10 +9127,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     };
     yoyo.spawnClone = (x, y, vx, vy, dmg, kb) => {
+      // NewProjectile 居中语义（:10238-10239 position=(X-w/2,Y-h/2)）——回调入参
+      // 是源球中心,构造按盒左上角换算
       const clone = new YoyoProj(x, y, dmg, kb, projId, 0,
         () => this.input.mouseHeld && !this.input.uiBlocking
           && (itemId === undefined || this.player.inv.heldItem()?.id === itemId),
         () => { const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY); return { x: wx, y: wy }; });
+      clone.x -= clone.w / 2;
+      clone.y -= clone.h / 2;
       clone.ai0 = -2;   // NewProjectile …, -2f 脱离态出生（:65115）
       clone.critChance = yoyo.critChance;
       clone.armorPen = yoyo.armorPen;
@@ -9155,8 +9159,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       mouseDelta: () => ({ dx: this._mouseDX, dy: this._mouseDY }),
       spawnClone: (x, y, vx, vy, dmg, kb, projId, crit, apen) => {
         // AI_099_1 :64727-64733 配重球魔法线克隆（-2 脱离坠落,penetrate=1;
-        // 伤/击退 (int)×0.75,crit/穿甲承源）
+        // 伤/击退 (int)×0.75,crit/穿甲承源;NewProjectile 居中语义 :10238-10239）
         const clone = new CounterweightProj(x, y, dmg, kb, projId, -2, ctx);
+        clone.x -= clone.w / 2;
+        clone.y -= clone.h / 2;
         if (crit !== undefined) clone.critChance = crit;
         if (apen !== undefined) clone.armorPen = apen;
         this.entities.add(clone, 'projectiles');
@@ -9188,11 +9194,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const svx = (dx / d) * 16, svy = (dy / d) * 16;
     if (decision.kind === 'second-yoyo' && lastYoyo) {
       const famItem = lastYoyo.itemId;
+      // NewProjectile 居中语义（:10238-10239 position=(X-w/2,Y-h/2)）——玩家中心为盒中心
       const second = new YoyoProj(this.player.cx, this.player.cy,
         lastYoyo.damage, lastYoyo.knockback, lastYoyo.projId, 0,
         () => this.input.mouseHeld && !this.input.uiBlocking
           && (famItem === undefined || this.player.inv.heldItem()?.id === famItem),
         () => { const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY); return { x: wx, y: wy }; });
+      second.x -= second.w / 2;
+      second.y -= second.h / 2;
       second.vx = svx; second.vy = svy;
       second.ai0 = 1;   // NewProjectile …, 1f（瞬态,活跃态首帧被光标目标覆写）
       second.critChance = lastYoyo.critChance;
@@ -9202,6 +9211,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (decision.kind === 'counterweight') {
       const cwE = new CounterweightProj(this.player.cx, this.player.cy, dmg, decision.kb,
         decision.type, decision.secondary ? 1 : 0, this.mkCounterweightCtx(src?.itemId));
+      cwE.x -= cwE.w / 2;
+      cwE.y -= cwE.h / 2;
       cwE.vx = svx; cwE.vy = svy;
       cwE.critChance = src?.critChance ?? 0.04;
       cwE.armorPen = src?.armorPen ?? 0;

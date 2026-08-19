@@ -100,6 +100,10 @@
   <button id="btn-apply">应用到本页运行时</button>
   <button id="btn-settings">设置</button>
   <span class="spacer"></span>
+  <button id="btn-queue-entry">整条目入队</button>
+  <button id="btn-next-todo">下一未完成 (N)</button>
+  <span id="queue-status" class="hint">队列空闲</span>
+  <span id="global-stats" class="hint"></span>
   <span id="status">初始化…</span>
 </div>
 <div id="main">
@@ -114,6 +118,11 @@
       <canvas id="sheetcv"></canvas><canvas id="gridov"></canvas>
     </div></div>
     <div id="filmstrip"></div>
+    <div id="animbar" style="display:none;flex:none;align-items:center;gap:8px;padding:4px 8px;background:var(--panel);border-top:1px solid var(--line)">
+      <button id="btn-anim" style="padding:3px 10px">▶ 动画预览</button>
+      <canvas id="animcv" width="64" height="64" style="width:64px;height:64px;image-rendering:pixelated;border:1px solid var(--line);background:repeating-conic-gradient(#221a38 0% 25%,#1a1428 0% 50%) 0 0/16px 16px"></canvas>
+      <span class="hint">重制帧优先 · 每 120ms/帧</span>
+    </div>
   </div>
   <div id="right">
     <h3 id="frame-title">选择素材</h3>
@@ -123,13 +132,16 @@
       <div class="cell"><canvas id="newcv"></canvas><div class="lb">重制帧</div></div>
     </div>
     <img id="genpreview" alt="生成原图">
+    <div id="candidates" class="row" style="display:none"></div>
     <div class="row"><label><input type="checkbox" id="whole-mode"> 整图重制(整张表一个单元,逐元素原位)</label></div>
     <div class="row"><label><input type="checkbox" id="overlay" checked> 50% 叠加对比</label>
       <label><input type="checkbox" id="use-ref" checked> 相邻已验收帧作风格锚</label></div>
     <textarea id="prompt" placeholder="微调指令(可留空=纯默认模板;输入即追加在默认模板之后,如:更鲜艳、金属质感、暗黑风)"></textarea>
+    <div class="row" style="justify-content:flex-end"><button id="btn-apply-prompt" style="font-size:11px;padding:3px 8px">微调→整条目</button></div>
     <div class="hint" id="prompt-preview" style="margin:-2px 0 6px;max-height:52px;overflow-y:auto;white-space:normal"></div>
     <div class="row">
-      <button id="btn-remaster" class="primary">重制此帧 (R)</button>
+      <button id="btn-remaster" class="primary">入队此帧 (R)</button>
+      <button id="btn-remaster-hi">高质重出 (H)</button>
       <button id="btn-accept" class="good">验收 ✓ (A)</button>
       <button id="btn-reject">拒绝</button>
       <button id="btn-skip">跳过 (S)</button>
@@ -206,7 +218,7 @@ const state = new WorkbenchState();
 // ---- 设置(localStorage) ----
 const SETTINGS_KEY = 'sw.remaster.settings';
 const settings = Object.assign(
-  { proxy: 'http://127.0.0.1:5210', key: '', quality: 'medium', algo: 'box', prefix: DEFAULT_GLOBAL_PREFIX },
+  { proxy: 'http://127.0.0.1:5210', key: '', quality: 'medium', finalizeQuality: 'high', concurrency: 4, algo: 'box', prefix: DEFAULT_GLOBAL_PREFIX },
   JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
 function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
 
@@ -225,25 +237,33 @@ function schedulePromptEditsSave() {
     void savePromptEdits([...promptEdits]);
   }, 500);
 }
-const framePixelsMem = new Map(); // 'entryKey|idx' → Uint8ClampedArray(重制帧,内存优先)
-/** 内存预算(LRU 驱逐最早;whole 大图 16.8MB/张、逐帧小图 10KB/帧,64MB 兼容
- *  两形态;被驱逐帧有 IDB 回退,只损速度不损数据) */
-const FRAME_MEM_BUDGET = 64 * 1024 * 1024;
+/** 候选存储:key → { list: Uint8ClampedArray[](≤4), sel }。重试不覆盖旧候选
+ *  (N 选 1);IDB 只持久化选中候选。bridge.framePixelsMem 兼容别名。 */
+const framePixelsMem = new Map();   // 候选存储(见 candPut)
+const FRAME_MEM_BUDGET = 64 * 1024 * 1024;   // LRU 预算(whole 16.8MB/张兼容小帧)
 let frameMemBytes = 0;
-function memTrackPut(key, px) {
-  const prev = framePixelsMem.get(key);
-  if (prev) frameMemBytes -= prev.length;
-  framePixelsMem.set(key, px);
+function candBytesOf(c) { return c.list.reduce((n, px) => n + px.length, 0); }
+function candPut(key, px) {
+  let c = framePixelsMem.get(key);
+  if (!c) { c = { list: [], sel: 0 }; framePixelsMem.set(key, c); }
+  c.list.push(px);
+  if (c.list.length > 4) { frameMemBytes -= c.list[0].length; c.list.shift(); }
+  c.sel = c.list.length - 1;   // 新候选默认选中
   frameMemBytes += px.length;
   while (frameMemBytes > FRAME_MEM_BUDGET && framePixelsMem.size > 1) {
     const oldest = framePixelsMem.keys().next().value;
-    frameMemBytes -= framePixelsMem.get(oldest).length;
+    frameMemBytes -= candBytesOf(framePixelsMem.get(oldest));
     framePixelsMem.delete(oldest);
   }
 }
+function candSel(key) { return framePixelsMem.get(key)?.list[framePixelsMem.get(key).sel] ?? null; }
+function candSelectIdx(key, i) {
+  const c = framePixelsMem.get(key);
+  if (c && i >= 0 && i < c.list.length) c.sel = i;
+}
 function memTrackDelete(key) {
   const v = framePixelsMem.get(key);
-  if (v) { frameMemBytes -= v.length; framePixelsMem.delete(key); }
+  if (v) { frameMemBytes -= candBytesOf(v); framePixelsMem.delete(key); }
 }
 const remastering = new Set();    // 防重入
 let lastGen = null;       // {b64, layout}
@@ -310,13 +330,21 @@ function renderList() {
 }
 $('search').oninput = () => renderList();
 $('only-todo').onchange = (e) => { onlyTodo = e.target.checked; renderList(); };
-state.onChange = () => renderList();
+state.onChange = () => { renderList(); renderGlobalStats(); };
 
 // ---- 中栏:sheet 网格 + 帧胶片 ----
+/** sheet 加载缓存(LRU ~12 张:大 atlas 解码位图 ~16MB/张,防队列跨条目反复重解码) */
+const sheetCache = new Map();
 function loadSheet(file) {
+  const hit = sheetCache.get(file);
+  if (hit) { sheetCache.delete(file); sheetCache.set(file, hit); return Promise.resolve(hit); }   // LRU 触顶
   return new Promise((resolve) => {
     const im = new Image();
-    im.onload = () => resolve(im);
+    im.onload = () => {
+      sheetCache.set(file, im);
+      while (sheetCache.size > 12) sheetCache.delete(sheetCache.keys().next().value);
+      resolve(im);
+    };
     im.onerror = () => resolve(null);
     im.src = 'sprites/' + encodeURI(file);
   });
@@ -324,7 +352,7 @@ function loadSheet(file) {
 function selectEntry(e) {
   curEntry = e;
   curFrame = 0;
-  wholeMode = !!e.meta?.excluded || e.frames.length === 0;   // 无法逐帧 → 整图
+  wholeMode = wholeModeFor(e);   // tile/wall 类默认整图(B:单元 ×7 缩减);excluded/无帧同
   $('whole-mode').checked = wholeMode;
   $('whole-mode').disabled = e.frames.length === 0;          // 无帧可逐:只能整图
   lastGen = null;
@@ -433,13 +461,14 @@ async function renderFrame() {
     + (curEntry.meta?.excluded ? `\n⚠ 无法逐帧切分:${curEntry.meta.excluded}\n(已切整图重制模式)` : '');
   // 原帧
   if (sheetImg) drawCellPixels($('origcv'), extractFramePixels(sheetImg, f).data, f.w, f.h);
-  // 重制帧(内存 → IDB)
-  let px = framePixelsMem.get(memKey());
+  // 重制帧(候选选中项 → IDB 回退;回退包装成单候选)
+  let px = candSel(memKey());
   if (!px && (rec.status === 'pending' || rec.status === 'accepted')) {
     px = (await getFramePixels(curEntry.key, curFrameIdx())) ?? undefined;
-    if (px) memTrackPut(memKey(), px);
+    if (px) candPut(memKey(), px);
   }
   drawCellPixels($('newcv'), px, f.w, f.h);
+  renderCandidates(px);
   // 叠加对比
   applyOverlay(px);
   // ★prompt 输入框只放【用户微调增量】(留空=纯默认);完整组装在预览行实时显示
@@ -447,6 +476,8 @@ async function renderFrame() {
   renderPromptPreview();
   $('frame-info').textContent = `状态:${zhStatus(rec.status)}${rec.attempts.length ? ` · 尝试 ${rec.attempts.length} 次` : ''}`;
   updateButtons();
+  updateAnimbar();
+  renderGlobalStats();
 }
 function applyOverlay(px) {
   // 叠加对比:重制帧画布先铺原帧,再以 50% alpha 盖重制帧——像素错位即姿态/轮廓
@@ -475,6 +506,32 @@ function applyOverlay(px) {
   }
 }
 $('overlay').onchange = () => renderFrame();
+/** 候选条:N 选 1(重试各生成一候选,≤4;点击切换,持久化跟随选中项)。 */
+function renderCandidates(currentPx) {
+  const box = $('candidates');
+  const c = framePixelsMem.get(memKey());
+  if (!c || c.list.length <= 1) { box.style.display = 'none'; return; }
+  box.style.display = 'flex';
+  box.replaceChildren();
+  const f = curRect();
+  c.list.forEach((px, i) => {
+    const cell = document.createElement('canvas');
+    cell.width = f.w; cell.height = f.h;
+    cell.style.width = '72px'; cell.style.height = 'auto';
+    cell.style.border = i === c.sel ? '2px solid var(--gold)' : '2px solid var(--line)';
+    cell.style.cursor = 'pointer';
+    cell.title = `候选 ${i + 1}`;
+    const cx = cell.getContext('2d');
+    cx.imageSmoothingEnabled = false;
+    cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), 0, 0);
+    cell.onclick = () => {
+      candSelectIdx(memKey(), i);
+      // 持久化跟随选中候选(IDB 单份)+ 状态刷新
+      void putFramePixels(curEntry.key, curFrameIdx(), c.list[i]).then(() => renderFrame());
+    };
+    box.appendChild(cell);
+  });
+}
 function zhStatus(s) {
   return { untouched: '未处理', pending: '待验收', accepted: '已验收', skipped: '已跳过', failed: '失败' }[s] ?? s;
 }
@@ -524,59 +581,173 @@ function findRefFrame() {
 $('use-ref').onchange = () => renderFrame();
 
 // ---- 重制 ----
-async function doRemaster() {
-  if (!curEntry || !curRect() || !sheetImg || remastering.size) return;
-  const key = memKey();
+/** 单元寻址辅助(脱离 curEntry 语境:队列可对任意条目执行)。 */
+function unitRectOf(entry, frameIdx, img) {
+  if (frameIdx === -1) return { x: 0, y: 0, w: img.width, h: img.height };
+  return entry.frames[frameIdx] ?? null;
+}
+function unitIsWhole(entry, frameIdx) {
+  if (frameIdx !== -1) return false;
+  // 单帧整图条目在入队时已解析为 0;到这里的 -1 必是显式 whole 单元
+  return true;
+}
+/** 单元微调键(promptEdits 寻址,与交互路径 memKey 同构)。 */
+function unitKeyOf(entry, frameIdx) { return `${entry.key}|${frameIdx}`; }
+
+/** 执行核:重制任意条目的任意单元(队列 worker 与交互路径共用)。
+ *  qualityOverride = 定稿档(C 两阶段);prompt 组装用当前微调(等待中改词即生效)。 */
+async function runUnit(entry, frameIdx, qualityOverride) {
+  const key = unitKeyOf(entry, frameIdx);
   if (remastering.has(key)) return;
   remastering.add(key);
-  updateButtons();
-  setStatus('重制中(gpt-image-2,约 10-60s)…');
+  const quality = qualityOverride ?? settings.quality;
   try {
-    const f = curRect();
-    const orig = extractFramePixels(sheetImg, f);
-    const refIdx = findRefFrame();
+    const img = await loadSheet(entry.sheet);
+    if (!img) throw new Error(`sheet 加载失败:${entry.sheet}`);
+    const f = unitRectOf(entry, frameIdx, img);
+    if (!f) throw new Error(`帧 ${frameIdx} 越界`);
+    const isWhole = unitIsWhole(entry, frameIdx);
+    const orig = extractFramePixels(img, f);
+    // 风格锚:仅逐帧模式(整图单元无"相邻帧"语义;锚=当前条目最近已验收帧)
     let refFrame;
-    if (refIdx !== undefined) {
-      const refPx = await pixelsOf(refIdx);
-      if (refPx) {
-        const rf = curEntry.frames[refIdx];
-        refFrame = { pixels: refPx, w: rf.w, h: rf.h, frameIdx: refIdx };
+    let refIdx;
+    if (!isWhole) {
+      refIdx = findRefFrameFor(entry, frameIdx);
+      if (refIdx !== undefined) {
+        const refPx = await pixelsOfKey(entry, refIdx);
+        if (refPx) {
+          const rf = entry.frames[refIdx];
+          refFrame = { pixels: refPx, w: rf.w, h: rf.h, frameIdx: refIdx };
+        }
       }
     }
+    const full = composePrompt({
+      category: entry.category, name: entry.name,
+      frameIdx: Math.max(0, frameIdx), frameCount: entry.frames.length,
+      globalPrefix: settings.prefix,
+      refFrameIdx: refIdx,
+      userPrompt: promptEdits.get(key),
+      whole: isWhole,
+    });
     const t0 = performance.now();
-    const full = fullPrompt();
     const result = await remasterFrame({
       frame: orig.data, w: f.w, h: f.h,
       prompt: full,
-      quality: settings.quality,
-      refFrame: wholeMode ? undefined : refFrame,
+      quality,
+      refFrame,
       proxyUrl: settings.proxy,
       apiKey: settings.key || undefined,
       algo: settings.algo,
-      whole: wholeMode,
+      whole: isWhole,
     });
-    lastGen = result;
-    memTrackPut(key, result.pixels);
-    await state.remastered(curEntry, curFrameIdx(), full, settings.quality,
-      { size: [result.layout.W, result.layout.H], algo: settings.algo, refFrame: wholeMode ? undefined : refIdx }, result.pixels);
-    // 展示生成原图(可折叠)
-    const gp = $('genpreview');
-    gp.src = 'data:image/png;base64,' + result.genPng;
-    gp.style.display = 'block';
-    setStatus(`重制完成 ${((performance.now() - t0) / 1000).toFixed(1)}s · ${(result.elapsedMs / 1000).toFixed(1)}s(API)`);
+    apiCalls++; apiCostEst += QUALITY_COST[quality] ?? 0.04;
+    candPut(key, result.pixels);
+    await state.remastered(entry, frameIdx, full, quality,
+      { size: [result.layout.W, result.layout.H], algo: settings.algo, refFrame: refIdx }, result.pixels);
+    // 当前正在看的单元:展示生成原图与耗时
+    if (curEntry === entry && curFrameIdx() === frameIdx) {
+      lastGen = result;
+      const gp = $('genpreview');
+      gp.src = 'data:image/png;base64,' + result.genPng;
+      gp.style.display = 'block';
+      setStatus(`重制完成 ${((performance.now() - t0) / 1000).toFixed(1)}s · ${(result.elapsedMs / 1000).toFixed(1)}s(API ${quality})`);
+    }
   } catch (err) {
-    setStatus(`重制失败:${err.message}`);
-    console.error('[remaster]', err);
+    console.error('[remaster]', entry.key, frameIdx, err);
+    if (curEntry === entry) setStatus(`重制失败(${entry.name} #${frameIdx}):${err.message}`);
   } finally {
     remastering.delete(key);
-    drawSheet(); renderFilm(); renderFrame();
+    drawSheet(); renderFilm(); renderFrame(); queueUI();
   }
 }
-async function pixelsOf(idx) {
-  const k = `${curEntry.key}|${idx}`;
-  return framePixelsMem.get(k) ?? (await getFramePixels(curEntry.key, idx)) ?? null;
+
+/** 风格锚查找(条目参数化:curEntry 语境之外可用)。 */
+function findRefFrameFor(entry, frameIdx) {
+  if (!$('use-ref').checked) return undefined;
+  for (const d of [1, 2, 3]) {
+    for (const i of [frameIdx - d, frameIdx + d]) {
+      if (i >= 0 && i < entry.frames.length && state.frame(entry, i).status === 'accepted') return i;
+    }
+  }
+  return undefined;
 }
+async function pixelsOfKey(entry, idx) {
+  const k = unitKeyOf(entry, idx);
+  return candSel(k) ?? (await getFramePixels(entry.key, idx)) ?? null;
+}
+
+// ── 队列+并发预取(人工只验收不等待;验收闸门保留——生成完只置 pending) ──
+const remasterQueue = [];    // Array<{entry, frameIdx, quality?}>
+let activeJobs = 0;
+/** API 计量(成本估算,medium≈$0.04/low≈$0.01/high≈$0.08 量级) */
+let apiCalls = 0, apiCostEst = 0;
+const QUALITY_COST = { low: 0.01, medium: 0.04, high: 0.08 };
+function enqueue(entry, frameIdx, quality) {
+  remasterQueue.push({ entry, frameIdx, quality });
+  pump();
+}
+/** 条目全部非终态单元入队(whole 模式=整图单元;否则逐帧)。 */
+function enqueueEntry(entry) {
+  const p = state.progress[entry.key];
+  const done = (i) => { const st = p?.frames[i]?.status; return st === 'accepted' || st === 'skipped'; };
+  const useWhole = entry === curEntry ? wholeMode : wholeModeFor(entry);
+  if (useWhole) {
+    if (!done(-1) && !remastering.has(unitKeyOf(entry, -1))) enqueue(entry, -1);
+  } else {
+    for (let i = 0; i < entry.frames.length; i++) {
+      if (!done(i) && !remastering.has(unitKeyOf(entry, i))) enqueue(entry, i);
+    }
+  }
+  pump();
+}
+function pump() {
+  while (activeJobs < Math.max(1, settings.concurrency | 0) && remasterQueue.length) {
+    const job = remasterQueue.shift();
+    activeJobs++;
+    void runUnit(job.entry, job.frameIdx, job.quality).finally(() => { activeJobs--; pump(); });
+  }
+  queueUI();
+}
+function queueUI() {
+  const el = $('queue-status');
+  if (el) el.textContent = remasterQueue.length || activeJobs
+    ? `队列:${activeJobs} 生成中 / ${remasterQueue.length} 排队` : '队列空闲';
+}
+/** 交互入口:入队当前单元(quality=定稿档时走 C 两阶段)。★队列语义:
+ *  入队即返回不阻塞——并发槽后台生成,人工继续切帧/验收;生成完只置
+ *  pending,验收闸门仍是人工 A/S。 */
+async function doRemaster(quality) {
+  if (!curEntry || !curRect()) return;
+  if (remastering.has(memKey())) return;
+  enqueue(curEntry, curFrameIdx(), quality);
+  setStatus(quality ? `已入队(${quality} 档)` : '已入队,后台生成中…');
+  queueUI();
+}
+/** 条目的默认重制模式(B:tile/wall 类默认整图)。 */
+function wholeModeFor(entry) {
+  return entry.category === 'tile' || entry.category === 'wall'
+    || !!entry.meta?.excluded || entry.frames.length === 0;
+}
+async function pixelsOf(idx) { return pixelsOfKey(curEntry, idx); }
 $('btn-remaster').onclick = () => void doRemaster();
+$('btn-remaster-hi').onclick = () => void doRemaster(settings.finalizeQuality);
+$('btn-queue-entry').onclick = () => { if (curEntry) { enqueueEntry(curEntry); setStatus(`已入队:${curEntry.name} 全部未完成单元`); } };
+/** F:跳到下一个有非终态单元的素材(catalog 序循环)。 */
+function gotoNextTodo() {
+  const list = catalog.entries;
+  const start = curEntry ? list.indexOf(curEntry) + 1 : 0;
+  for (let n = 0; n < list.length; n++) {
+    const e = list[(start + n) % list.length];
+    const p = state.progress[e.key];
+    const hasTodo = (p?.frames[-1] !== undefined && p.frames[-1].status !== 'accepted' && p.frames[-1].status !== 'skipped')
+      || e.frames.some((f) => { const st = p?.frames[f.frameIdx]?.status; return st !== 'accepted' && st !== 'skipped'; });
+    if (hasTodo) { selectEntry(e); setStatus(`→ ${e.name}`); return e; }
+  }
+  setStatus('全部素材已完成!');
+  return null;
+}
+$('btn-next-todo').onclick = () => gotoNextTodo();
+$('btn-apply-prompt').onclick = () => applyPromptToEntry();
 
 // ---- 验收 / 拒绝 / 跳过 ----
 async function doAccept() {
@@ -753,6 +924,8 @@ $('btn-settings').onclick = async () => {
   $('set-proxy').value = settings.proxy;
   $('set-key').value = settings.key;
   $('set-quality').value = settings.quality;
+  $('set-fq').value = settings.finalizeQuality;
+  $('set-conc').value = String(settings.concurrency);
   $('set-algo').value = settings.algo;
   $('set-prefix').value = settings.prefix;
   $('settings').style.display = 'flex';
@@ -766,6 +939,8 @@ $('set-close').onclick = () => {
   settings.proxy = $('set-proxy').value.trim() || 'http://127.0.0.1:5210';
   settings.key = $('set-key').value.trim();
   settings.quality = $('set-quality').value;
+  settings.finalizeQuality = $('set-fq').value;
+  settings.concurrency = Number($('set-conc').value) || 4;
   settings.algo = $('set-algo').value;
   settings.prefix = $('set-prefix').value;
   saveSettings();
@@ -773,22 +948,82 @@ $('set-close').onclick = () => {
   renderFrame();
 };
 
+// ---- E:动画预览(重制帧优先轮播;多帧条目显示) ----
+let animTimer = 0, animIdx = 0;
+function updateAnimbar() {
+  $('animbar').style.display = (!wholeMode && curEntry && curEntry.frames.length > 1 && sheetImg) ? 'flex' : 'none';
+}
+function animTick() {
+  if (!curEntry || !sheetImg) return;
+  const f = curEntry.frames[animIdx % curEntry.frames.length];
+  const px = candSel(`${curEntry.key}|${f.frameIdx}`);
+  const cv = $('animcv');
+  cv.width = f.w; cv.height = f.h;
+  const cx = cv.getContext('2d');
+  cx.imageSmoothingEnabled = false;
+  if (px) cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), 0, 0);
+  else cx.drawImage(sheetImg, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
+  animIdx++;
+}
+$('btn-anim').onclick = () => {
+  if (animTimer) { clearInterval(animTimer); animTimer = 0; $('btn-anim').textContent = '▶ 动画预览'; }
+  else { animIdx = 0; animTick(); animTimer = setInterval(animTick, 120); $('btn-anim').textContent = '⏸ 停止'; }
+};
+
+// ---- F:全局统计(单元完成/累计调用/成本估算;onChange 刷新) ----
+const TOTAL_UNITS = catalog.entries.reduce((n, e) => n + e.frames.length, 0);
+function renderGlobalStats() {
+  let done = 0;
+  for (const e of catalog.entries) {
+    const p = state.progress[e.key];
+    if (!p) continue;
+    for (const f of e.frames) {
+      const st = p.frames[f.frameIdx]?.status;
+      if (st === 'accepted' || st === 'skipped') done++;
+    }
+    const w = p.frames[-1];
+    if (w && (w.status === 'accepted' || w.status === 'skipped')) done++;
+  }
+  $('global-stats').textContent = `进度 ${done}/${TOTAL_UNITS} 单元 · API ${apiCalls} 次 ≈$${apiCostEst.toFixed(2)}`;
+}
+// 微调条目级继承:当前微调应用到该条目全部单元
+function applyPromptToEntry() {
+  if (!curEntry) return;
+  const val = $('prompt').value;
+  const idxs = wholeMode ? [-1] : curEntry.frames.map((f) => f.frameIdx);
+  for (const i of idxs) promptEdits.set(unitKeyOf(curEntry, i), val);
+  schedulePromptEditsSave();
+  setStatus(`微调已应用到 ${curEntry.name} 全部 ${idxs.length} 个单元`);
+}
+
 // ---- 快捷键 ----
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
   if (e.key === 'ArrowLeft') $('btn-prev').click();
   else if (e.key === 'ArrowRight') $('btn-next').click();
   else if (e.key === 'r' || e.key === 'R') $('btn-remaster').click();
+  else if (e.key === 'h' || e.key === 'H') $('btn-remaster-hi').click();
   else if (e.key === 'a' || e.key === 'A') $('btn-accept').click();
   else if (e.key === 's' || e.key === 'S') $('btn-skip').click();
+  else if (e.key === 'n' || e.key === 'N') $('btn-next-todo').click();
 });
 
 // ---- 探针桥 ----
 window.__remasterBridge = {
   catalog, state, runtime, atlas, settings,
   exportPack, selectEntry, curEntry: () => curEntry, curFrame: () => curFrame,
-  remaster: doRemaster, accept: doAccept, skip: doSkip,
-  framePixelsMem, promptEdits,
+  curFrameIdx: () => curFrameIdx(), wholeMode: () => wholeMode, wholeModeFor,
+  enqueue, enqueueEntry, gotoNextTodo, queue: remasterQueue,
+  remaster: async (quality) => {   // 入队 + 等完成(探针同步语义)
+    const key = memKey();
+    await doRemaster(quality);
+    const t0 = Date.now();
+    while (remastering.has(key) && Date.now() - t0 < 30_000) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  },
+  accept: doAccept, skip: doSkip,
+  framePixelsMem, promptEdits, apiStats: () => ({ calls: apiCalls, cost: apiCostEst }),
 };
 
 // ---- 启动 ----

@@ -160,6 +160,37 @@ try {
       JSON.stringify(singleWhole));
   }
 
+  // ---- ③d 效率件:B tile 默认整图 / A 队列并发 / D 候选 / F 导航 ----
+  const eff = await page.evaluate(async () => {
+    const b = window.__remasterBridge;
+    // B:tile 条目默认整图模式
+    const dirt = b.catalog.byKey.get('tile:0');
+    b.selectEntry(dirt);
+    await new Promise((r) => setTimeout(r, 600));
+    const tileWhole = b.wholeMode();
+    const tileWholeModeFor = b.wholeModeFor(dirt);
+    // F:下一未完成导航(npc:1/npc:594 已完成 → 跳到别的)
+    const nxt = b.gotoNextTodo();
+    // D:候选——同帧两次生成 → 2 候选
+    b.selectEntry(nxt || dirt);
+    await new Promise((r) => setTimeout(r, 800));
+    const k = `${b.curEntry().key}|${b.curFrameIdx()}`;
+    await b.remaster();
+    await b.remaster();
+    await new Promise((r) => setTimeout(r, 2500));
+    const cands = b.framePixelsMem.get(k);
+    return {
+      tileWhole, tileWholeModeFor,
+      navKey: nxt?.key ?? null,
+      candList: cands?.list?.length ?? 0, candSel: cands?.sel,
+      stats: b.apiStats(),
+    };
+  });
+  chk('B:tile 条目默认整图模式(单元 ×7 缩减)', eff.tileWhole === true && eff.tileWholeModeFor === true, JSON.stringify({ tileWhole: eff.tileWhole }));
+  chk('F:gotoNextTodo 跳过已完成条目', eff.navKey !== null && eff.navKey !== 'npc:1' && eff.navKey !== 'npc:594', eff.navKey);
+  chk('D:同帧两次生成 → 候选 2 个(不覆盖)', eff.candList === 2 && eff.candSel === 1, JSON.stringify({ candList: eff.candList, candSel: eff.candSel }));
+  chk('A/F:API 计量在工作', eff.stats.calls >= 4, JSON.stringify(eff.stats));
+
   // ---- ④ 导出链路 zip round-trip(PK 头+manifest+sheet 字节) ----
   const zipBytes = await page.evaluate(async () => {
     const { makePack, buildManifest, readPack } = await import('/src/remaster/PackFormat.ts');

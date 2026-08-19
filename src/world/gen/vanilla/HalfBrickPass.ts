@@ -360,6 +360,9 @@ const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 
 const POUND_GEN_SKIP = idsByVanillaSheet(190, 30);
 const FORBIDS_SLOPING = idsByVanillaSheet(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);
 
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）：树干族——CanKillTile 上格早退门 */
+const TREE_TRUNK = idsByVanillaSheet(5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634);
+
 export function canPoundTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
@@ -373,6 +376,17 @@ export function canPoundTile(st: TileStore, x: number, y: number): boolean {
   if (st.inBounds(x, y - 1)) {
     const up = st.idx(x, y - 1);
     if (st.flags[up] && FORBIDS_SLOPING.has(st.type[up])) return false;
+    // ⑤' cs:62270-62281 CanKillTile 树干族早退：上格 active 且 IsATreeTrunk
+    //    {5,72,583-589,596,616,634} 且与本格异型 且帧门全过（非(66,0..44) 非
+    //    (88,66..110) 且 frameY<198——frameY<0 于 u16 不可能）→ false。
+    //    ★IIIII 定罪（12345 #54 单差）：(3845,1045) AshGrass(633) 顶 TreeAsh(634)
+    //    ——vanilla CanKillTile false → PoundTile 返 false 不砸（WFProbe PH 3610
+    //    PR=0 织入实证；JS 近似漏此腿砸出 half=1）。9293480 #53/#54 全绿 ⇒ 该腿
+    //    在彼链零命中（回归护栏）。
+    if (st.flags[up] && TREE_TRUNK.has(st.type[up]) && st.type[up] !== t
+      && (st.frameX[up] !== 66 || st.frameY[up]! > 44)
+      && (st.frameX[up] !== 88 || st.frameY[up]! < 66 || st.frameY[up]! > 110)
+      && st.frameY[up]! < 198) return false;
   }
   const d = TILE_DEFS[t];
   // !framed ≈ CanKillTile 的框架物拦截（箱/罐/雕像等不可砸半砖）——CanKillTile 整体仍近似

@@ -709,7 +709,7 @@ export class Player extends Entity {
         yoyoString = true;
       }
       if (accVid === 5540) magicString = true;   // 魔法线（:14195-14197）
-      if (accVid === 5541) {   // 魔法悠悠球袋（:14199-14114 段：1/7 掷同 3366 + 全套旗）
+      if (accVid === 5541) {   // 魔法悠悠球袋（:14199-14214 段：1/7 掷同 3366 + 全套旗）
         if (counterWeight === 0) counterWeight = Math.floor(Math.random() * 7) === 0 ? 1079 : 556 + Math.floor(Math.random() * 6);
         yoyoGlove = true;
         yoyoString = true;

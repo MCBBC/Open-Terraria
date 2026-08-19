@@ -15,6 +15,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSolidType } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
@@ -588,6 +589,82 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   return items;
 }
 
+// ---- KillTile 生成期镜像（JJJJ 预清场用；FinalCleanupPass killTileGen 同源副本——
+//      引擎未导出，同源副本惯例）。尘埃掷表 = RRRR 实测定谳（28 罐/165/485/10 门/
+//      135 族零掷；51 蛛网默认 10 掷；51&墙62 再补 1×Next(4)（cs:63904，noItem 路
+//      同掷——生成期 noItem=true 只免掉落不免掷））。杀 = 失活+type0+清 half/slope；
+//      尾 SquareTileFrame 九宫走引擎 genSquareTileFrame（165/185/485/10 门等分派）。 */
+function chestKillDustAmount(sheet: number, fx: number): number {
+  if (sheet === 654 || sheet === 630 || sheet === 631) return 0;
+  if (sheet === 125 || sheet === 138 || sheet === 172 || sheet === 287
+    || (sheet >= 300 && sheet <= 308) || sheet === 354 || sheet === 355
+    || (sheet >= 373 && sheet <= 376) || sheet === 461 || sheet === 484 || sheet === 499
+    || sheet === 564 || sheet === 565 || sheet === 593 || sheet === 594 || sheet === 617
+    || sheet === 664 || sheet === 665 || sheet === 699 || sheet === 709
+    || (sheet >= 711 && sheet <= 716)) return 0;
+  if (sheet === 231) return 6;
+  if (sheet >= 481 && sheet <= 483) return 3;
+  if (sheet === 541) return 1;
+  if (sheet === 549) return 2;
+  if (sheet === 534 || sheet === 536 || sheet === 539 || sheet === 625 || sheet === 627) return 5;
+  if (sheet === 184) return Math.floor(fx / 22) >= 5 ? 5 : 10;
+  return 10;
+}
+const CHEST_FURNITURE_DUST = new Set([
+  358, 359, 360, 361, 362, 363, 364, 275, 276, 277, 278, 279, 280, 281, 282, 285, 286,
+  288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 316, 317, 318, 298, 299, 309, 310,
+  339, 538, 413, 414, 505, 521, 522, 523, 524, 525, 526, 527, 532, 543, 544, 550, 551,
+  533, 553, 554, 555, 556, 558, 559, 542, 391, 392, 393, 394, 568, 569, 570, 582, 580,
+  598, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 619, 620,
+  629, 632, 640, 643, 644, 645, 710,
+]);
+function chestDustRoll(rng: RNG, sheet: number, fx: number): void {
+  switch (sheet) {
+    case 2: case 477: case 27: case 243: case 244: case 204: case 478:
+    case 641: case 370: case 171:
+      rng.nextInt(2);
+      return;
+    case 26: case 695:
+      if (fx < 54) rng.nextInt(2);
+      return;
+    case 583: case 584: case 585: case 586: case 587: case 588: case 589:
+      rng.nextInt(10);
+      return;
+    case 633:
+      rng.nextInt(6);
+      return;
+    case 634:
+      rng.nextInt(10);
+      rng.nextInt(12);
+      return;
+    case 238:
+      rng.nextInt(3);
+      return;
+    case 385:
+      rng.nextIntRange(68, 71);
+      return;
+    case 254:
+      if (fx < 72) rng.nextInt(3);
+      else if (fx < 108) rng.nextInt(2);
+      else rng.nextInt(4);
+      return;
+    default:
+      if (CHEST_FURNITURE_DUST.has(sheet)) rng.nextInt(3);
+  }
+}
+function killTileChest(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const k = st.idx(x, y);
+  if (!st.flags[k]) return;
+  const sheet = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+  const fx = st.frameX[k]!;
+  const dust = chestKillDustAmount(sheet, fx);
+  for (let q = 0; q < dust; q++) chestDustRoll(rng, sheet, fx);
+  if (sheet === 51 && st.wall[k] === 62) rng.nextInt(4);   // cs:63904（生成期同掷）
+  st.setTileSilent(x, y, 0);                                // active=false+type=0+清 half/slope
+  genSquareTileFrame(st, rng, x, y);                        // KillTile 尾九宫（引擎分派级联）
+}
+
 /** AddBuriedChest（1456 cs:35920）下落/门禁段 1:1：
  *  自 j 向下扫至 k < maxTilesY-10，逐行检查 anyShimmer / 幼虫 231 → 整体失败；
  *  首个 SolidTile（半砖/坡面不算，WorldGen.SolidTile）落定。
@@ -832,6 +909,23 @@ function placeBuriedChestInner(
         __dbg(i, gy, why);
       }
       restoreSlopes(); return false;
+    }
+    // ---- ★JJJJ：TileObject.Place 预清场（TileObject.cs:79-90）——箱体覆盖格上的
+    //   cut/Breakable 装饰（51 蛛网/165 垂网/185 小堆等）先 KillTile（尘埃掷走表 +
+    //   51&墙62 补 Next(4) cs:63904 + 尾 SquareTileFrame 九宫级联——级联可连带杀
+    //   邻域孤儿残件）。IIIII 批 HiveSpiderPass CH 支同族（同源副本惯例）；曾整段
+    //   缺失 → 箱旁孤儿装饰存活（m 链 #59 21.8k 屋域放大器的上游输入之一）。
+    //   杀序 = vanilla 宽度外层/高度内层（(i-1,topY)→(i-1,topY+1)→(i,topY)→(i,topY+1)）。
+    for (let dx = -1; dx <= 0; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        const bx = i + dx, by = topY + dy;
+        const k = st.idx(bx, by);
+        if (!st.flags[k]) continue;
+        const sh = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+        const clearable = (PC_TILE_CUT.has(sh) && sh !== 484 && sh !== 654) || PC_BREAK_PLACE.has(sh);
+        if (!clearable || sh === 484) continue;
+        killTileChest(st, rng, bx, by);
+      }
     }
   }
   // 样式派生 flag 族（cs:36201-36229）：32 蘑菇 / 16 神庙 / 13 天空主题

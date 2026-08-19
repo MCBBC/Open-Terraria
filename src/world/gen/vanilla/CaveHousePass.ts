@@ -641,6 +641,84 @@ function kfKillCell(st: TileStore, x: number, y: number): void {
   st.setTileSilent(x, y, 0);
 }
 
+// ---------- JJJJ 批：门（CheckDoorClosed cs:87176）与 485 蚁狮（CheckSuper cs:48117
+// flag4 支）派发——WWWW frameKillSweep 两大缺口（s22222 #59 = 4 座门 12 格 +
+// 485×7 + 165 覆写级联 1 格的全部构成；m 链经箱级联/宝箱落位放大到 21.8k）。
+// 同源副本惯例（FinalCleanupPass checkDoorClosedSweep/checkSuper485Sweep 同源，
+// 引擎未导出且本域须带 frameKillSweep 的杀格再入队语义）。两族击杀均零掷
+// （RRRR 表：10 门/485 蚁狮 = 帧映射分支无掷）。
+/** TileID.Sets.TileNoAttach（TileID.cs:219；BuriedChestsPass.PC_NO_ATTACH 同表副本） */
+const KF_NO_ATTACH = new Set([3, 4, 10, 13, 14, 15, 16, 17, 18, 19, 20, 21, 27, 50, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 101, 102, 110, 114, 134, 387, 388, 390, 427, 435, 436, 437, 438, 439, 441, 467, 468, 469, 486, 487, 488, 489, 490, 497, 507, 564, 565, 568, 569, 570, 572, 580, 590, 593, 594, 595, 615, 620, 704, 707]);
+/** WorldGen.SolidTile(Tile)（cs:70018）：nactive && tileSolid && !tileSolidTop && !half && slope==0 */
+function solidTileDoor(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;              // tile==null → true（vanilla 重载语义）
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i];
+  if (!vanGenSolidType(t) || HOUSE_SOLID_TOP.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)) return false;
+  return st.half[i] === 0 && st.slope[i] === 0;
+}
+/** AnchorValid(tile, SolidTile)（cs:51871）：nactive && tileSolid && !solidTop && !noAttach && blockType==0 */
+function anchorSolidTileKF(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+  if (sh < 0 || !vanGenSolidType(st.type[i]) || HOUSE_SOLID_TOP.has(sh) || KF_NO_ATTACH.has(sh)) return false;
+  return st.slope[i] === 0 && st.half[i] === 0;
+}
+/** CheckDoorClosed（cs:87176）：num=j-frameY%54/18；上/下 SolidTile 锚 + 三格
+ *  active&&type10 完整性任一失守 → KillTile（裸读 type==10 的格；DropDoorItem
+ *  生成期 noItem 零掷零物）。 */
+function checkDoorClosedKF(st: TileStore, queue: number[], x: number, y: number): void {
+  const i0 = st.idx(x, y);
+  const num = y - Math.floor((st.frameY[i0]! % 54) / 18);
+  let bad = !solidTileDoor(st, x, num - 1) || !solidTileDoor(st, x, num + 3);
+  for (let k = 0; k <= 2; k++) {
+    const q = st.idx(x, num + k);
+    if (!st.flags[q] || (TILE_DEFS[st.type[q]]?.vanilla?.sheet ?? -1) !== 10) bad = true;
+  }
+  if (!bad) return;
+  for (let k = 0; k <= 2; k++) {
+    const q = st.idx(x, num + k);
+    if ((TILE_DEFS[st.type[q]]?.vanilla?.sheet ?? -1) === 10 && st.flags[q]) {
+      kfKillCell(st, x, num + k);
+      queue.push(q);                                  // KillTile 尾九宫级联再入队
+    }
+  }
+}
+/** CheckSuper 485（cs:48117 Style2x2 横样式）：2×2 完整性（type+帧 style*36+xx*18 /
+ *  yy*18）+ 整底行 AnchorValid(SolidTile)；败 → 活性 485 格 KillTile（零掷）。 */
+function checkSuper485KF(st: TileStore, queue: number[], x: number, y: number): void {
+  const i0 = st.idx(x, y);
+  const style = Math.floor(st.frameX[i0]! / 36);
+  const x0 = x - (Math.floor(st.frameX[i0]! / 18) % 2);
+  const y0 = y - (Math.floor(st.frameY[i0]! / 18) % 2);
+  let bad = false;
+  for (let xx = 0; xx < 2; xx++) {
+    for (let yy = 0; yy < 2; yy++) {
+      if (!st.inBounds(x0 + xx, y0 + yy)) { bad = true; continue; }
+      const q = st.idx(x0 + xx, y0 + yy);
+      if (!st.flags[q] || (TILE_DEFS[st.type[q]]?.vanilla?.sheet ?? -1) !== 485
+        || st.frameX[q] !== style * 36 + xx * 18 || st.frameY[q] !== yy * 18) bad = true;
+    }
+  }
+  for (let xx = 0; xx < 2; xx++) {
+    if (!anchorSolidTileKF(st, x0 + xx, y0 + 2)) bad = true;
+  }
+  if (!bad) return;
+  for (let xx = 0; xx < 2; xx++) {
+    for (let yy = 0; yy < 2; yy++) {
+      if (!st.inBounds(x0 + xx, y0 + yy)) continue;
+      const q = st.idx(x0 + xx, y0 + yy);
+      if (st.flags[q] && (TILE_DEFS[st.type[q]]?.vanilla?.sheet ?? -1) === 485) {
+        kfKillCell(st, x0 + xx, y0 + yy);
+        queue.push(q);
+      }
+    }
+  }
+}
+
 // ---------- 帧杀触发拓扑（WWWW）----------
 // vanilla 只对本 pass 里【带帧写入】的阶段触发 Check*：PlaceTile 尾 SquareTileFrame
 // 九宫（fr/ch/bp/bt/st/pl）+ SetFrames(frameNeighbors)/ClearTile(frameNeighbors)
@@ -711,6 +789,9 @@ function kfCheckObject(st: TileStore, rng: RNG, ni: number, checked: Set<number>
   const x = ni % st.w, y = Math.floor(ni / st.w);
   const sh = TILE_DEFS[st.type[ni]]?.vanilla?.sheet ?? -1;
   const fx = st.frameX[ni]!, fy = st.frameY[ni]!;
+  // ---- JJJJ：门（cs:86021→CheckDoorClosed）/ 485 蚁狮（cs:86438→CheckSuper）----
+  if (sh === 10) { checked.add(ni); checkDoorClosedKF(st, queue, x, y); return; }
+  if (sh === 485) { checked.add(ni); checkSuper485KF(st, queue, x, y); return; }
   const markBox = (bx: number, by: number, bw: number, bh: number) => {
     for (let dx = 0; dx < bw; dx++) for (let dy = 0; dy < bh; dy++) {
       if (st.inBounds(bx + dx, by + dy)) checked.add(st.idx(bx + dx, by + dy));

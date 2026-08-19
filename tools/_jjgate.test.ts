@@ -28,6 +28,31 @@ function labelOf(file: string, line: number): string {
   const hits: string[] = [];
   (globalThis as { __swHouseGate?: (g: string, x: number, y: number) => void }).__swHouseGate
     = (g, x, y) => { hits.push(`${g} ${x} ${y}`); };
+  // SW_JJG_DUMP=x0,y0,x1,y1 → try 事件时快照区域（type(active)/wall/liquid）
+  const DUMPR = (process.env.SW_JJG_DUMP ?? '').split(',').map(Number);
+  let dumped = false;
+  let curStore: { store: { flags: Uint8Array; type: Uint16Array; wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array } } | null = null;
+  if (DUMPR.length === 4) {
+    (globalThis as { __swHouseEv?: (p: string, x: number, y: number) => void }).__swHouseEv = (p, x, y) => {
+      if (p !== 'try' || dumped || !curStore) return;
+      if (Math.abs(x - XY[0]) > 45 || Math.abs(y - XY[1]) > 45) return;
+      dumped = true;
+      const s = curStore.store;
+      const lines: string[] = [];
+      for (let yy = DUMPR[1]!; yy <= DUMPR[3]!; yy++) {
+        const rowT: string[] = [], rowL: string[] = [];
+        for (let xx = DUMPR[0]!; xx <= DUMPR[2]!; xx++) {
+          const i = yy * W + xx;
+          rowT.push(`${s.flags[i] ? s.type[i] : 'x'}|${s.wall[i]}`);
+          rowL.push(s.liquid[i] ? `L${s.liquid[i]}.${s.liquidType[i]}` : '.');
+        }
+        lines.push(`${yy} T ${rowT.join(' ')}`);
+        lines.push(`${yy} L ${rowL.join(' ')}`);
+      }
+      writeFileSync(`/tmp/jjgate-${SEED}-region.txt`, lines.join('\n') + '\n');
+      console.log(`dumped region @try (${x},${y}) → /tmp/jjgate-${SEED}-region.txt`);
+    };
+  }
   const roomsAt: string[] = [];
   const RNGp = RNG.prototype as unknown as Record<string, unknown>;
   const oReseed = RNGp.reseed as (this: unknown, s: number) => void;
@@ -46,7 +71,10 @@ function labelOf(file: string, line: number): string {
   const oNext = RNG.prototype.next;
   RNG.prototype.next = function (...a: unknown[]) { if (stop) throw new Error('jj-gate-stop'); return (oNext as (...x: unknown[]) => number).apply(this, a); };
   try {
-    await generateWorld({ width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1 });
+    await generateWorld({
+      width: W, height: H, seedText: SEED, evil: EVIL as -1 | 0 | 1,
+      onWorldPartial: (w) => { if (!curStore) curStore = w as never; },
+    });
   } catch { /* stop */ }
   finally {
     RNGp.reseed = oReseed;

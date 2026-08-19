@@ -2385,7 +2385,17 @@ export class Renderer {
     //      见 4. 段实体层）。血肉墙嘴/眼/饥饿者（113/114/115）虽同为 behindTiles=true，
     //      但墙身(3.7 DrawWoF)本仓画在 tile 之上，若随族前移会被墙身盖掉
     //      （原版墙身在 tile 之下无此冲突）→ 留在实体层，见 isBehindTilesEnemy
-    const sorted = [...entities].sort((a, b) => a.y - b.y);
+    // ★部件层序:多部件 Boss 的挂件(骷髅王臂 36/南瓜王臂 328/石巨人拳 aiStyle47
+    //   +挂载头 246/机械臂 33-36/世花钩藤 263/264)带 master——y 排序会把头上
+    //   部件(头 y<本体)垫到本体身后;原版 NPC 按 whoAmI 槽序=挂件恒画本体【前】
+    //   (Main.DrawNPCs 槽序遍历,NewNPC 先本体后部件)。排序键:挂件取
+    //   master.y+ε → 紧随本体之后(在前);挂件间保插入序(=出生序,头/拳原生
+    //   顺序)。2026-08-19 修"石巨人一阶段头跑到背后"
+    const sortY = (e: Entity): number => {
+      const m = (e as Enemy).master;
+      return m && !m.dead ? m.y + 0.01 : e.y;
+    };
+    const sorted = [...entities].sort((a, b) => sortY(a) - sortY(b));
     for (const e of sorted) {
       if (e instanceof Enemy && this.isBehindTilesEnemy(e)) this.drawEnemy(e, world, entities);
     }
