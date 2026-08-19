@@ -3845,22 +3845,50 @@ export function runDungeonPass(
     return true;
   }
   // Place3x3Wall（cs:44281 画240）/ Place4x3Wall（cs:44874 画241）/ Place6x4Wall（cs:44959 画242）
-  function place3x3WallD(x: number, y: number, t: number): boolean {
+  // ★PPPPP 批（2026-08-20）：补 style 帧步进（三函数零掷不扰流）——旧版裸 dgWr
+  //   帧全 f0,0，下游 Piles/FinalCleanup 的 Check3x3Wall 一致性校验按帧反解原点
+  //   必得假原点 → 整幅误杀（#77 首差 9 格 (300-302,761-763) 根因；JS 杀除逻辑
+  //   本身忠实）。三族帧公式互异：3x3=style 分解双基（X=余*54/Y=商*54）、
+  //   4x3=style 只进 Y（X 纯列偏移）、6x4=27 进制（X=⌊s/27⌋*108/Y=s%27*72）
+  function place3x3WallD(x: number, y: number, t: number, style = 0): boolean {
     for (let i = x - 1; i < x + 2; i++) for (let j = y - 1; j < y + 2; j++)
       if (!dgClr(i, j) || st.wall[st.idx(i, j)] === 0) return false;
-    for (let i = x - 1; i < x + 2; i++) for (let j = y - 1; j < y + 2; j++) dgWr(i, j, t);
+    // cs:44304-44319：while(style>35){sy++;style-=36} → X基=style*54、Y基=sy*54
+    let s3 = style, sy = 0;
+    while (s3 > 35) { sy++; s3 -= 36; }
+    const bx3 = s3 * 54, by3 = sy * 54;
+    for (let i = x - 1; i < x + 2; i++) for (let j = y - 1; j < y + 2; j++) {
+      dgWr(i, j, t);
+      const fi = st.idx(i, j);
+      st.frameX[fi] = bx3 + (i - (x - 1)) * 18;
+      st.frameY[fi] = by3 + (j - (y - 1)) * 18;
+    }
     return true;
   }
-  function place4x3WallD(x: number, y: number, t: number): boolean {
+  function place4x3WallD(x: number, y: number, t: number, style = 0): boolean {
     for (let i = x - 1; i < x + 3; i++) for (let j = y - 1; j < y + 2; j++)
       if (!dgClr(i, j) || st.wall[st.idx(i, j)] === 0) return false;
-    for (let i = x - 1; i < x + 3; i++) for (let j = y - 1; j < y + 2; j++) dgWr(i, j, t);
+    // cs:44900-44914：num3=0 恒（frameX 纯列偏移 0/18/36/54）、Y基=style*54
+    const by4 = style * 54;
+    for (let i = x - 1; i < x + 3; i++) for (let j = y - 1; j < y + 2; j++) {
+      dgWr(i, j, t);
+      const fi = st.idx(i, j);
+      st.frameX[fi] = (i - (x - 1)) * 18;
+      st.frameY[fi] = by4 + (j - (y - 1)) * 18;
+    }
     return true;
   }
-  function place6x4WallD(x: number, y: number, t: number): boolean {
+  function place6x4WallD(x: number, y: number, t: number, style = 0): boolean {
     for (let i = x - 2; i < x + 4; i++) for (let j = y - 2; j < y + 2; j++)
       if (!dgClr(i, j) || st.wall[st.idx(i, j)] === 0) return false;
-    for (let i = x - 2; i < x + 4; i++) for (let j = y - 2; j < y + 2; j++) dgWr(i, j, t);
+    // cs:44984-44998：X基=⌊style/27⌋*108、Y基=style%27*72（6×4=108×72px 大画）
+    const bx6 = Math.floor(style / 27) * 108, by6 = (style % 27) * 72;
+    for (let i = x - 2; i < x + 4; i++) for (let j = y - 2; j < y + 2; j++) {
+      dgWr(i, j, t);
+      const fi = st.idx(i, j);
+      st.frameX[fi] = bx6 + (i - (x - 2)) * 18;
+      st.frameY[fi] = by6 + (j - (y - 2)) * 18;
+    }
     return true;
   }
   // PlaceBanner（cs:46270 旗91：竖 3 格，上挂实心非 solidTop）
@@ -3884,10 +3912,11 @@ export function runDungeonPass(
     return true;
   }
   // 画作分发（cs:59962-59985）：240→3x3Wall / 241→4x3Wall / 242→6x4Wall
-  function placePaintingD(x: number, y: number, t: number): boolean {
-    if (t === HANGING) return place3x3WallD(x, y, t);
-    if (t === CATACOMB) return place4x3WallD(x, y, t);
-    if (t === PAINTING) return place6x4WallD(x, y, t);
+  // ★PPPPP 批：style 透传入帧（Place3x3Wall 族逐格帧步进，见上）
+  function placePaintingD(x: number, y: number, t: number, style = 0): boolean {
+    if (t === HANGING) return place3x3WallD(x, y, t, style);
+    if (t === CATACOMB) return place4x3WallD(x, y, t, style);
+    if (t === PAINTING) return place6x4WallD(x, y, t, style);
     return placeSimple(x, y, t);
   }
   // SolidTile2（WorldGen.cs：active+tileSolid，无 solidTop 排除）
@@ -3983,11 +4012,11 @@ export function runDungeonPass(
       // CanGenerateFeatureInArea 的 fluff=3（cs:169/186/281/297 等，7×7 区）非 2。
       if (n15 === 0) {
         const e = paintingEntry(x, y);
-        if (featArea3(x, y, 3) && !nearPicture(st, x, y)) placePaintingD(x, y, e);
+        if (featArea3(x, y, 3) && !nearPicture(st, x, y)) placePaintingD(x, y, e.tile, e.style);
       } else if (n15 === 1) {
         let e = paintingEntry(x, y);
         if (!featArea3(x, y, 3)) continue;
-        if (actAt(x, y) === 0) placePaintingD(x, y, e);
+        if (actAt(x, y) === 0) placePaintingD(x, y, e.tile, e.style);
         if (actAt(x, y) !== 0) continue;
         // ★#32 终清批 III：攀爬起点**链式**（vanilla num21 :198/:221——第 m 轮从上轮
         //   中心起爬，非每轮从 baseY 起）；num21 在两轮间无条件更新、向后循环前重置
@@ -4006,7 +4035,7 @@ export function runDungeonPass(
           if (featArea3(x, ny, 3)) {
             e = paintingEntry(x, ny);
             if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
-            placePaintingD(x, ny, e);
+            placePaintingD(x, ny, e.tile, e.style);
           }
         }
         nyPrev = baseY;
@@ -4022,13 +4051,13 @@ export function runDungeonPass(
           if (featArea3(x, ny, 3)) {
             e = paintingEntry(x, ny);
             if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
-            placePaintingD(x, ny, e);
+            placePaintingD(x, ny, e.tile, e.style);
           }
         }
       } else if (n15 === 2) {
         let e = paintingEntry(x, y);
         if (!featArea3(x, y, 3)) continue;
-        if (actAt(x, y) === 0) placePaintingD(x, y, e);
+        if (actAt(x, y) === 0) placePaintingD(x, y, e.tile, e.style);
         if (actAt(x, y) !== 0) continue;
         const baseX = x;
         let nxPrev = baseX;                              // num16 链式（:265-291 同款）
@@ -4044,7 +4073,7 @@ export function runDungeonPass(
           if (featArea3(nx, y, 3)) {
             e = paintingEntry(nx, y);
             if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
-            placePaintingD(nx, y, e);
+            placePaintingD(nx, y, e.tile, e.style);
           }
         }
         nxPrev = baseX;
@@ -4060,7 +4089,7 @@ export function runDungeonPass(
           if (featArea3(nx, y, 3)) {
             e = paintingEntry(nx, y);
             if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
-            placePaintingD(nx, y, e);
+            placePaintingD(nx, y, e.tile, e.style);
           }
         }
       }
@@ -4075,10 +4104,12 @@ export function runDungeonPass(
     return true;
   };
   /** Paintings_GetPaintingEntry（DungeonGlobalPaintings.cs:327-360）：只取 tile 型
-   * （style 走帧不入哈希，placeSimple 不落帧）——但选型掷骰必须照原版序全部消耗。 */
-  function paintingEntry(x: number, y: number): number {
+   * （style 走帧不入哈希——但选型掷骰必须照原版序全部消耗）。★PPPPP 批起 style
+   * 随 tile 一并返回（Place*Wall 帧步进消费者；掷序不变零扰流）。 */
+  function paintingEntry(x: number, y: number): { tile: number; style: number } {
     if ((typeof process !== 'undefined' && process.env.SW_DGPA_TRACE)) console.log(`E ${x} ${y} wall=${wallAt(x, y)} rolls=${dgMainRolls}`);
     let tile = HANGING;
+    let style = 0;
     if (wallAt(x, y) === wall) {
       // RandomDungeonPainting（:364-385）：Next(3)≤1→240 Next(7)(==6 重掷)style{12,13,14,15,18,19,23}；
       // 否则 242 Next(17) style(14→15/15→16/16→30)
@@ -4086,17 +4117,19 @@ export function runDungeonPass(
       if (n <= 1) {
         let n2 = rn(7);
         if (n2 === 6) n2 = rn(7);
+        style = [12, 13, 14, 15, 18, 19, 23][n2]!;
       } else {
         tile = PAINTING;
-        rn(17);
+        const n2 = rn(17);
+        style = n2 === 14 ? 15 : n2 === 15 ? 16 : n2 === 16 ? 30 : n2;
       }
     } else {
       // RandomBonePainting（:387-410）：Next(2)→0:240 style Next(2)(16/17)；1:241 style Next(9)
       const n = rn(2);
-      if (n === 0) { tile = HANGING; rn(2); }
-      else { tile = CATACOMB; rn(9); }
+      if (n === 0) { tile = HANGING; style = 16 + rn(2); }
+      else { tile = CATACOMB; style = rn(9); }
     }
-    return tile;
+    return { tile, style };
   }
   // ============ DungeonGlobalBanners（:24-104）============
   function dgBanners(): void {

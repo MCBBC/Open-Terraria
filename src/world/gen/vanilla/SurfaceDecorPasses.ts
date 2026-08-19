@@ -2092,10 +2092,26 @@ const SUNFLOWER_T = TILE_BY_KEY['v_27_sunflower']!;
 
 /** WorldGen.PlaceSunflower（cs:53650-53686）1:1：2 列×4 行向日葵块。
  *  净空 = 2×4 区域非活跃且无墙；地面 = 下方两格 nactive 整砖且 ∈ {2, 109}。
- *  帧模式：上两行（l<=-2）共用一次 Next(3) 款式；下两行每格独立 Next(3)。
+ *  帧模式：cs:53677 先掷 1 颗 Next(3)（上两行共用款式），随后 2×4 每格**无条件**
+ *  掷 Next(3)（cs:53683 先算后覆盖——l<=-2 的掷被丢弃但掷骰照耗）→ 全块共 9 颗。
  *  frameY = (l+3)*18（0..54）。inheritPaint 不适用（生成期地面无漆，恒 no-op）。
- *  OOB ≙ 原版 null Tile（不活跃、无墙，净空通过）；写入时 OOB 跳过。 */
+ *  OOB ≙ 原版 null Tile（不活跃、无墙，净空通过）；写入时 OOB 跳过。
+ *  ★PPPPP 批（2026-08-20）两修（#81 首差根因）：
+ *  ① 掷数 5→9——旧版"上两行不掷"误读（vanilla num2 先掷后覆盖），首株起流错位
+ *    → 后续列选/放置全错位（T0>27×64/T27>0×16 双向差）；
+ *  ② 补 PlaceTile 前奏（cs:59491-59501）——num 27 ∈ 液体拒置表（锚格 liquid>0
+ *    即退，零掷）+ 锚格 inactive 时 Clear(Tile|TilePaint|Slope)（ghost type/帧/
+ *    漆/坡/半砖归零——下游 rawSheetAt 消费者可见）。 */
 function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number, y: number): void {
+  // PlaceTile 前奏（cs:59491-59501）：num=27 的液体门 + !active 清位。
+  // （checkingLiquid 位生成期未建模——本 pass 时点无液体仿真实例，恒 false）
+  if (!st.inBounds(x, y)) return;
+  const ai = st.idx(x, y);
+  if (st.liquid[ai] > 0) return;
+  if (!st.flags[ai]) {
+    st.type[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
+    st.paint[ai] = 0; st.slope[ai] = 0; st.half[ai] = 0;
+  }
   if (y > gs.worldSurface - 1) return;   // （remix 恒假，不入判定）
   const air = (cx: number, cy: number): boolean => {
     if (!st.inBounds(cx, cy)) return true;
@@ -2113,10 +2129,11 @@ function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number, y: num
       || (SHEET[st.type[gi]] !== 2 && SHEET[st.type[gi]] !== 109)) flag = false;
   }
   if (!flag) return;
-  const styleTop = rng.int(0, 2);        // Next(3)——上两行共用
+  const styleTop = rng.int(0, 2);        // num（cs:53677）——上两行共用
   for (let k = 0; k < 2; k++) {
     for (let l = -3; l < 1; l++) {
-      const fx = k * 18 + (l <= -2 ? styleTop : rng.int(0, 2)) * 36;
+      const r = rng.int(0, 2);           // cs:53683：每格无条件掷（l<=-2 被覆盖丢弃）
+      const fx = k * 18 + (l <= -2 ? styleTop : r) * 36;
       if (st.inBounds(x + k, y + l)) {
         st.setTileSilent(x + k, y + l, SUNFLOWER_T, fx, (l + 3) * 18);
       }
@@ -2127,18 +2144,24 @@ function placeSunflower(st: TileStore, rng: RNG, gs: GenState, x: number, y: num
 /** SunflowersPart2 主体：w*0.002 次带状扫描。每次：中心列 Next(w)，带宽
  *  [c-Next(10)-7, c+Next(10)+7] 钳界；列内自上而下扫到首格活跃止，草 2 上方
  *  空气 → PlaceTile(27)（→ case 27 → PlaceSunflower + SquareTileFrame；
- *  SquareTileFrame 对完整写入的 2×4 块为恒 no-op，未移植）。 */
+ *  SquareTileFrame 对完整写入的 2×4 块为恒 no-op，未移植）。
+ *  ★PPPPP 批（2026-08-20）：迭代门 `i < num` 是 **double 比较**（cs:20052
+ *  `(double)i < num`，4200×0.002=8.4 → i=0..8 共 9 趟）——曾 Math.floor 取 8 趟，
+ *  末趟带（本种子 2957/2965 两株）整段丢失。 */
 export function runSunflowersPart2Pass(st: TileStore, rng: RNG, gs: GenState): void {
-  const count = Math.floor(st.w * 0.002);
+  const count = st.w * 0.002;                           // double 上界（勿取整）
   const ws = Math.floor(gs.worldSurface);
+  const trace = typeof process !== 'undefined' && process.env.SW_SUNFL_TRACE === '1';
   for (let i = 0; i < count; i++) {
     const c = rng.nextInt(st.w);                       // Next(w)
     const lo = Math.max(0, c - rng.nextInt(10) - 7);   // Next(10)
     const hi = Math.min(st.w - 1, c + rng.nextInt(10) + 7);
+    if (trace) console.log(`[sunfl] band ${i} c=${c} lo=${lo} hi=${hi}`);
     for (let j = lo; j <= hi; j++) {
       for (let k = 1; k < ws - 1; k++) {
         const ji = st.idx(j, k);
         if (st.flags[ji] && SHEET[st.type[ji]] === 2 && !st.flags[st.idx(j, k - 1)]) {
+          if (trace) console.log(`[sunfl] attempt j=${j} k=${k} anchor=(${j},${k - 1})`);
           placeSunflower(st, rng, gs, j, k - 1);
         }
         if (st.flags[ji]) break;                       // 列内首格活跃即止
