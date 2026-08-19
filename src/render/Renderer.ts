@@ -1,6 +1,7 @@
 // 主渲染器：天空 → chunk → 液体 → 实体 → 粒子/飘字 → 光照合成 → 小地图
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
+import { TintAtlas, type TintRect } from './TintAtlas';
 import type { Camera } from './Camera';
 import { SkyRenderer } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
@@ -3236,14 +3237,17 @@ export class Renderer {
     ctx.globalAlpha = 0.95 * aQ;
     if (fill < 34) {
       // :21814-21828：背景两段（fill 处 2px 帽 + 余量）+ 填充两段（主体 + 末端 2px）
-      ctx.drawImage(tint(hb2, '2', 2, 2), x + fill * scale, y, 2 * scale, 12 * scale);
-      ctx.drawImage(tint(hb2, '2', fill + 2, 36 - fill - 2), x + (fill + 2) * scale, y, (36 - fill - 2) * scale, 12 * scale);
-      if (fill > 2) ctx.drawImage(tint(hb1, '1', 0, fill - 2), x, y, (fill - 2) * scale, 12 * scale);
-      ctx.drawImage(tint(hb1, '1', 32, 2), x + (fill - 2) * scale, y, 2 * scale, 12 * scale);
+      const a = tint(hb2, '2', 2, 2), b = tint(hb2, '2', fill + 2, 36 - fill - 2),
+        c1 = tint(hb1, '1', 0, fill - 2), d = tint(hb1, '1', 32, 2);
+      if (a) ctx.drawImage(a.c, a.x, a.y, a.w, a.h, x + fill * scale, y, 2 * scale, 12 * scale);
+      if (b) ctx.drawImage(b.c, b.x, b.y, b.w, b.h, x + (fill + 2) * scale, y, (36 - fill - 2) * scale, 12 * scale);
+      if (fill > 2 && c1) ctx.drawImage(c1.c, c1.x, c1.y, c1.w, c1.h, x, y, (fill - 2) * scale, 12 * scale);
+      if (d) ctx.drawImage(d.c, d.x, d.y, d.w, d.h, x + (fill - 2) * scale, y, 2 * scale, 12 * scale);
     } else {
       // :21830-21836：fill≥34 全长填充 + 尾部背景
-      if (fill < 36) ctx.drawImage(tint(hb2, '2', fill, 36 - fill), x + fill * scale, y, (36 - fill) * scale, 12 * scale);
-      ctx.drawImage(tint(hb1, '1', 0, fill), x, y, fill * scale, 12 * scale);
+      const e2 = tint(hb2, '2', fill, 36 - fill), f = tint(hb1, '1', 0, fill);
+      if (e2) ctx.drawImage(e2.c, e2.x, e2.y, e2.w, e2.h, x + fill * scale, y, (36 - fill) * scale, 12 * scale);
+      if (f) ctx.drawImage(f.c, f.x, f.y, f.w, f.h, x, y, fill * scale, 12 * scale);
     }
     ctx.globalAlpha = 1;
   }
@@ -3332,7 +3336,7 @@ export class Renderer {
     ctx.save();
     ctx.globalAlpha = 1;
     ctx.translate(e.cx + dx, e.cy + dy);
-    ctx.drawImage(tinted, -w / 2, -h / 2, w, h);
+    if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -w / 2, -h / 2, w, h);
     ctx.restore();
   }
 
@@ -3665,7 +3669,7 @@ export class Renderer {
         ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, ar.sw, ar.sh);
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 1;
-        ctx.drawImage(tinted, d.x, d.y + bob, ar.sw, ar.sh);
+        if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, d.x, d.y + bob, ar.sw, ar.sh);
         ctx.globalCompositeOperation = 'source-over';
       }
       return;
@@ -4156,7 +4160,7 @@ export class Renderer {
           ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
           ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = 1;
-          ctx.drawImage(tinted, -r.sw / 2, anchorY, r.sw, r.sh);
+          if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -r.sw / 2, anchorY, r.sw, r.sh);
           ctx.globalCompositeOperation = 'source-over';
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
@@ -4801,7 +4805,7 @@ export class Renderer {
           const cc = this.tintedSprite(`glow|${g.tex}|r${row}`,
             { img, sx: 0, sy, sw: img.width, sh: gh }, [ct[0], ct[1], ct[2]]);
           ctx.globalAlpha = Math.max(0, Math.min(1, base));
-          ctx.drawImage(cc, 0, 0, cc.width, cc.height, ox, oy, r.sw, r.sh);
+          if (cc) ctx.drawImage(cc.c, cc.x, cc.y, cc.w, cc.h, ox, oy, r.sw, r.sh);
         }
         for (let i = 0; i < prm.count; i++) {
           const ang = i / prm.count * Math.PI * 2 + prm.phase;
@@ -4815,7 +4819,7 @@ export class Renderer {
           const tc = this.tintedSprite(`glow|${g.tex}|r${row}`,
             { img, sx: 0, sy, sw: img.width, sh: gh }, [tt[0], tt[1], tt[2]]);
           ctx.globalAlpha = Math.max(0, Math.min(1, bright));
-          ctx.drawImage(tc, 0, 0, tc.width, tc.height, ox + dx, oy + dy, r.sw, r.sh);
+          if (tc) ctx.drawImage(tc.c, tc.x, tc.y, tc.w, tc.h, ox + dx, oy + dy, r.sw, r.sh);
         }
       }
     } else if (g.mode === 'frame') {
@@ -4850,13 +4854,13 @@ export class Renderer {
         const fl = Renderer.npcGlowCrawltipedeFlash(e.lai2);
         if (fl) { addA = 1; fadeA = fl.a / 255; tint = fl.rgb; }
       }
-      // 染色源（tintedSprite 缓存画布，整幅即帧）——无 tint 时直取 glow 帧行
+      // 染色源（TintAtlas 子矩形）——无 tint 时直取 glow 帧行
       let src: CanvasImageSource = img;
       let ssx = 0, ssy = sy, ssw = img.width, ssh = gh;
       if (tint) {
         const tc = this.tintedSprite(`glow|${g.tex}|r${row}`,
           { img, sx: 0, sy, sw: img.width, sh: gh }, [tint[0], tint[1], tint[2]]);
-        src = tc; ssx = 0; ssy = 0; ssw = tc.width; ssh = tc.height;
+        if (tc) { src = tc.c; ssx = tc.x; ssy = tc.y; ssw = tc.w; ssh = tc.h; }
       }
       if (fadeA > 0) {
         ctx.globalCompositeOperation = 'destination-out';
@@ -4895,18 +4899,23 @@ export class Renderer {
           // 绿对：shineColor=Green×opacity×0.5（tint 乘法）；白对：White×0.5
           const green = this.tintedSprite('sparkle|green',
             { img: ex, sx: 0, sy: 0, sw: ex.width, sh: ex.height }, [0, 128, 0]);
-          const pair = (image: CanvasImageSource, rot: number, sx: number, sy2: number, a: number) => {
+          const pair = (image: CanvasImageSource, rot: number, sx: number, sy2: number, a: number,
+            tr?: TintRect) => {
             ctx.save();
             ctx.translate(cx0, cy0);
             ctx.rotate(rot);
             ctx.globalAlpha = Math.max(0, Math.min(1, a));
-            ctx.drawImage(image, -ex.width / 2 * sx, -ex.height / 2 * sy2,
+            if (tr) ctx.drawImage(image, tr.x, tr.y, tr.w, tr.h, -ex.width / 2 * sx, -ex.height / 2 * sy2,
+              ex.width * sx, ex.height * sy2);
+            else ctx.drawImage(image, -ex.width / 2 * sx, -ex.height / 2 * sy2,
               ex.width * sx, ex.height * sy2);
             ctx.restore();
           };
           // vector =(fatness.X/2, scale.X)×num=(1,3)×n 旋 π/2；vector2=(fatness.Y/2, scale.Y)×n=(1,1.5)×n 旋 0
-          pair(green, Math.PI / 2, 1 * n, 3 * n, 0.5 * env.opacity * n);
-          pair(green, 0, 1 * n, 1.5 * n, 0.5 * env.opacity * n);
+          if (green) {
+            pair(green.c, Math.PI / 2, 1 * n, 3 * n, 0.5 * env.opacity * n, green);
+            pair(green.c, 0, 1 * n, 1.5 * n, 0.5 * env.opacity * n, green);
+          }
           pair(ex, Math.PI / 2, 0.6 * n, 1.8 * n, 0.5 * n);
           pair(ex, 0, 0.6 * n, 0.9 * n, 0.5 * n);
         }
@@ -5225,7 +5234,7 @@ export class Renderer {
       ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = 1;
-      ctx.drawImage(tinted, -fw / 2, 0, fw, fh);
+      if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -fw / 2, 0, fw, fh);
       ctx.globalCompositeOperation = 'source-over';
     }
     ctx.drawImage(img, variant * fw, 0, fw, fh, -fw / 2, 0, fw, fh);
@@ -5296,7 +5305,7 @@ export class Renderer {
       ctx.drawImage(img, sx, sy, sw, sh, -originX, -originY, sw, sh);
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = 1;
-      ctx.drawImage(tinted, -originX, -originY, sw, sh);
+      if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -originX, -originY, sw, sh);
       ctx.globalCompositeOperation = 'source-over';
     }
     // GlowMask 同布局网格叠画（原版以同一 source rect 二次 Draw，Glow 表与 NPC 表等大）
@@ -5433,9 +5442,10 @@ export class Renderer {
     ctx.save();
     ctx.translate(e.cx, e.y + e.h);
     ctx.scale(scale * (mirrored ? -1 : 1), scale);
-    const drawFrame = (c: HTMLCanvasElement, dx: number, dy: number, alpha: number) => {
+    const drawFrame = (c: TintRect | null, dx: number, dy: number, alpha: number) => {
+      if (!c) return;
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      ctx.drawImage(c, -originX + dx, -originY + dy, sw, sh);
+      ctx.drawImage(c.c, c.x, c.y, c.w, c.h, -originX + dx, -originY + dy, sw, sh);
     };
     // ① 出生红雾双环绕（:26245-26253）：num2=2 层,(0,1).Rot(i·π + GT·10) × r²·20
     //    → 偏移 = (-sinθ, cosθ)·R；色 value2=(80,0,0)×0.5,alpha×(1-r²/2)
@@ -5487,27 +5497,22 @@ export class Renderer {
   private lerpSprite(
     key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
     target: [number, number, number], t: number,
-  ): HTMLCanvasElement {
+  ): TintRect | null {
     const tq = Math.round(t * 64) / 64;
     const k = `lerp|${key}|${frame.sx},${frame.sy}|${target.join(',')}|${tq}`;
-    let c = this.tintCache.get(k);
-    if (c) return c;
-    c = document.createElement('canvas');
-    c.width = Math.max(1, frame.sw); c.height = Math.max(1, frame.sh);
-    const cx = c.getContext('2d')!;
-    cx.drawImage(frame.img as CanvasImageSource, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
-    const d = cx.getImageData(0, 0, c.width, c.height);
-    const px = d.data;
-    for (let i = 0; i < px.length; i += 4) {
-      if (px[i + 3] === 0) continue;
-      px[i] += (target[0] - px[i]) * tq;
-      px[i + 1] += (target[1] - px[i + 1]) * tq;
-      px[i + 2] += (target[2] - px[i + 2]) * tq;
-    }
-    cx.putImageData(d, 0, 0);
-    if (this.tintCache.size > 1024) this.tintCache.clear();
-    this.tintCache.set(k, c);
-    return c;
+    const w = Math.max(1, frame.sw), h = Math.max(1, frame.sh);
+    return this.tintAtlas.bake(k, w, h, (cx) => {
+      cx.drawImage(frame.img as CanvasImageSource, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
+      const d = cx.getImageData(0, 0, w, h);
+      const px = d.data;
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] === 0) continue;
+        px[i] += (target[0] - px[i]) * tq;
+        px[i + 1] += (target[1] - px[i + 1]) * tq;
+        px[i + 2] += (target[2] - px[i + 2]) * tq;
+      }
+      cx.putImageData(d, 0, 0);
+    });
   }
 
   private drawMoonLordCore(e: Enemy, entities: unknown[]) {
@@ -5861,7 +5866,7 @@ export class Renderer {
       if (flip) ctx.scale(-1, 1);
       ctx.scale(scale, scale);
       const twoPass = (src: CanvasImageSource, sx: number, sy: number, sw: number, sh: number,
-        dx: number, dy: number, dw: number, dh: number, tinted: HTMLCanvasElement | null) => {
+        dx: number, dy: number, dw: number, dh: number, tinted: TintRect | null) => {
         // A/=3 预乘语义：destination-out 削底（fadeA=A/255）→ lighter 加色（tint×addA）
         if (fadeA > 0.01) {
           ctx.globalCompositeOperation = 'destination-out';
@@ -5871,7 +5876,7 @@ export class Renderer {
         ctx.globalCompositeOperation = 'lighter';
         if (tinted) {
           ctx.globalAlpha = Math.max(0, Math.min(1, addA));
-          ctx.drawImage(tinted, 0, 0, tinted.width, tinted.height, dx, dy, dw, dh);
+          ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, dx, dy, dw, dh);
         }
       };
       const tq = `${tint[0]},${tint[1]},${tint[2]}`;
@@ -5994,7 +5999,7 @@ export class Renderer {
         const wt = this.tintedSprite(`empW|${key}`, src, [255, 255, 255]);
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = alpha * whiteA;
-        ctx.drawImage(wt, 0, 0, wt.width, wt.height, dx, dy, dw, dh);
+        if (wt) ctx.drawImage(wt.c, wt.x, wt.y, wt.w, wt.h, dx, dy, dw, dh);
         ctx.globalCompositeOperation = 'source-over';
       }
     };
@@ -6151,7 +6156,7 @@ export class Renderer {
       const dx = (Math.cos(ang) * prm.radius) / scale;
       const dy = (Math.sin(ang) * prm.radius) / scale;
       ctx.globalAlpha = Math.max(0, Math.min(1, prm.fade));
-      ctx.drawImage(mist, 0, 0, mist.width, mist.height,
+      if (mist) ctx.drawImage(mist.c, mist.x, mist.y, mist.w, mist.h,
         -r.sw / 2 + dx, cy - r.sh / 2 + dy, r.sw, r.sh);
     }
     ctx.globalCompositeOperation = prevOp;
@@ -6186,7 +6191,7 @@ export class Renderer {
       ctx.translate(px, py);
       ctx.rotate(ang + Math.PI);
       ctx.scale(prm.scale, prm.scale);
-      ctx.drawImage(soul, -soul.width / 2, -soul.height / 2);
+      if (soul) ctx.drawImage(soul.c, soul.x, soul.y, soul.w, soul.h, -img.width / 2, -img.height / 2, img.width, img.height);
       ctx.restore();
     }
     ctx.restore();
@@ -9084,37 +9089,33 @@ export class Renderer {
    *  ② destination-in 重画精灵本体 → alpha 恢复为精灵轮廓，裁掉①的方形
    *  alpha 保持精灵原样（XNA 预乘混合的 RGB 贡献不随 color.A 缩减，见 drawEnemy color pass）
    *  （GetColor 二次绘制语义，Main.cs:24986 / NPC.cs:94903） */
-  private tintCache = new Map<string, HTMLCanvasElement>();
+  /** 染色变体共享图集(2026-08-19 双开 IOSurface 张数根治):tintedSprite/
+   *  lerpSprite 两族的变体从"每条一张 canvas(上限 1024 张)"合并进 ≤4 张
+   *  512² 页;LRU+空位复用,bake 在私有 scratch 上进行 */
+  private tintAtlas = new TintAtlas();
   private tintedSprite(
     key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, color: number[],
-  ): HTMLCanvasElement {
+  ): TintRect | null {
     // ★色键量化步进 8(2026-08-19 canvas 哨兵三捕:drawEnemy/掉落物每帧调此,
     // color=光照染色连续漂移 → 每帧新键 → 用户真机 60/s 持续 9 分钟、暂停中
     // 照跑(渲染循环不停)。烘焙用桶内首个精确色,敌怪受击闪白等瞬态不受影响)
     const q = (v: number) => Math.round(v) & ~7;
     const k = `${key}|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${q(color[0])},${q(color[1])},${q(color[2])}`;
-    let c = this.tintCache.get(k);
-    if (c) return c;
-    c = document.createElement('canvas');
-    c.width = Math.max(1, frame.sw);
-    c.height = Math.max(1, frame.sh);
-    const cx = c.getContext('2d')!;
-    cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
-    // ① RGB 乘 color（multiply 的 alpha 取并集 → 透明区被铺色，下一步裁掉）
-    cx.globalCompositeOperation = 'multiply';
-    cx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
-    cx.fillRect(0, 0, c.width, c.height);
-    // ② 用精灵本体当 destination-in 的源：alpha 恢复为轮廓形状
-    cx.globalCompositeOperation = 'destination-in';
-    cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
-    cx.globalCompositeOperation = 'source-over';
-    if (this.tintCache.size > 1024) {
-      // 逐条淘汰最旧(★整表 clear = 下帧全量重染雪崩,与 BiomeBackground 同病)
-      const first = this.tintCache.keys().next().value;
-      if (first !== undefined) this.tintCache.delete(first);
-    }
-    this.tintCache.set(k, c);
-    return c;
+    const w = Math.max(1, frame.sw), h = Math.max(1, frame.sh);
+    // ★TintAtlas 子矩形图集(2026-08-19 双开 IOSurface 再爆):旧实现每变体
+    // 一张 canvas,上限 1024 条 = 战斗态上千张表面;合并进 ≤4 张 512² 共享页
+    return this.tintAtlas.bake(k, w, h, (cx) => {
+      cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
+      // ① RGB 乘 color（multiply 的 alpha 取并集 → 透明区被铺色，下一步裁掉）
+      cx.globalCompositeOperation = 'multiply';
+      cx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
+      cx.fillRect(0, 0, w, h);
+      // ② 用精灵本体当 destination-in 的源：alpha 恢复为轮廓形状(在 atlas 的
+      //   私有 scratch 上进行——destination-in 全画布语义,不能直接画共享页)
+      cx.globalCompositeOperation = 'destination-in';
+      cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
+      cx.globalCompositeOperation = 'source-over';
+    });
   }
 
   /** 全亮模式（F9）：跳过光照合成，画面无暗影 */
@@ -10020,6 +10021,26 @@ export class Renderer {
    *  −6.92..+0.12），此前按地图矩形整幅等比画 → 饰纹被地图压住、比例失衡。
    *  入参：worldW = maxTilesX；zoom = mapFullscreenScale；mapX/mapY = 地图内容绘制
    *  原点（vanilla num/num2）；texW/texH = Map.png 原始尺寸。 */
+  /** 大地图 quad 可见窗裁剪：世界×zoom 的 dst 可伸出画布数万 px——部分 GPU
+   *  驱动在 guard-band(±8192/16384) 外【整图元丢弃】而非裁剪 = "全屏地图放大
+   *  到一定程度整块变黑、缩小恢复"根因（2026-08-19 显微镜探针定罪：CPU 像素
+   *  健康+纹理存活+整幅重传依旧黑，仅大 dst 黑、小 dst 正常）。src/dst 同比
+   *  例回裁，全部坐标收进画布内。 */
+  static clipMapQuadToView(
+    cx0: number, cy0: number, mapW: number, mapH: number,
+    texW: number, texH: number, viewW: number, viewH: number,
+  ): { sx: number; sy: number; sw: number; sh: number; dx: number; dy: number; dw: number; dh: number } | null {
+    const vx0 = Math.max(cx0, 0), vy0 = Math.max(cy0, 0);
+    const vx1 = Math.min(cx0 + mapW, viewW), vy1 = Math.min(cy0 + mapH, viewH);
+    if (!(vx1 > vx0) || !(vy1 > vy0)) return null;
+    const kx = texW / mapW, ky = texH / mapH;
+    return {
+      sx: (vx0 - cx0) * kx, sy: (vy0 - cy0) * ky,
+      sw: (vx1 - vx0) * kx, sh: (vy1 - vy0) * ky,
+      dx: vx0, dy: vy0, dw: vx1 - vx0, dh: vy1 - vy0,
+    };
+  }
+
   static fullMapScrollRect(
     worldW: number, zoom: number, mapX: number, mapY: number, texW: number, texH: number,
   ): { x: number; y: number; w: number; h: number } {
@@ -10099,7 +10120,10 @@ export class Renderer {
     // GL 化后=纹理 quad,小地图按 flushDirty 的脏区 texSubImage2D 增量上传。
     // 头像/标记/文字仍走 2D(在合成之后画,层序不变)。逃生门 ?mapgl=0。
     let glMap = false;
-    if (this.mapGlEnabled && this.minimap && !this.isCpuRender()) {
+    // GL 地图判死窗口：判死后 60s 内(或到关图)走 2D 兜底——判死只影响全屏地图,
+    // 世界背景层 GL 不动(其哨兵自愈链独立)
+    if (this._glMapBrokenAt > 0 && performance.now() - this._glMapBrokenAt > 60_000) this._glMapBrokenAt = 0;
+    if (this.mapGlEnabled && this._glMapBrokenAt === 0 && this.minimap && !this.isCpuRender()) {
       const glAcq = this.acquireGL();   // 统一闩:失败 null → glMap=false 走 2D
       const maxTex = glAcq ? glAcq.maxTextureSize : 0;
       if (glAcq && this.minimap.image && this.minimap.w <= maxTex && this.minimap.h <= maxTex) {
@@ -10136,7 +10160,8 @@ export class Renderer {
             }
             gl.texSubUpdateData(mmKey, region, px, py);
           }
-          gl.quad(mmTex, 0, 0, mmTex.w, mmTex.h, cx0, cy0, mapW, mapH, { smooth: fm.zoom >= 1 });
+          const mmq = Renderer.clipMapQuadToView(cx0, cy0, mapW, mapH, mmTex.w, mmTex.h, viewW, viewH);
+          if (mmq) gl.quad(mmTex, mmq.sx, mmq.sy, mmq.sw, mmq.sh, mmq.dx, mmq.dy, mmq.dw, mmq.dh, { smooth: fm.zoom >= 1 });
         }
         this.minimap.flushedPixelRects.length = 0;
         // 迷雾:getFogCanvas 每帧推进分带重建(2D/GL 共用),纹理按版本+行号重传
@@ -10159,8 +10184,30 @@ export class Renderer {
               gl.texSubUpdateData(fogKey, region, 0, y0);
             }
             this._mapFogRowSeen = this.fogRebuildRow;
-            gl.quad(fogTex, 0, 0, fogTex.w, fogTex.h,
-              cx0, cy0, fogTex.w * 2 * fm.zoom, fogTex.h * 2 * fm.zoom, { smooth: false });
+            const fq = Renderer.clipMapQuadToView(cx0, cy0, fogTex.w * 2 * fm.zoom, fogTex.h * 2 * fm.zoom,
+              fogTex.w, fogTex.h, viewW, viewH);
+            if (fq) gl.quad(fogTex, fq.sx, fq.sy, fq.sw, fq.sh, fq.dx, fq.dy, fq.dw, fq.dh, { smooth: false });
+          }
+        }
+        // ---- GL 地图合成哨兵（2026-08-19 用户实报"放大后全黑只剩头像"六路复现
+        //      不中→实机黑盒）：end() 前读中心 1px；CPU 迷雾/像素同点不黑而合成黑
+        //      = GL 侧失效（纹理逐出/驱动 guard-band/上下文半死等）→ 连续 3 帧
+        //      本开图会话改走 2D 兜底（CPU 直画不受 GPU 状态影响，自愈）----
+        {
+          const probe = gl.readPixel((viewW / 2) | 0, (viewH / 2) | 0) ?? new Uint8Array([255, 255, 255, 255]);
+          const glBlack = probe[0] < 8 && probe[1] < 8 && probe[2] < 10;
+          // CPU 侧同点：视口中心世界 tile 的迷雾是否已探索（探索区发黑才可能是
+          // 正常内容；未探索区黑=迷雾,不触发）
+          const wtx = Math.max(0, Math.min(world.w - 1, Math.floor((viewW / 2 - cx0) / fm.zoom)));
+          const wty = Math.max(0, Math.min(world.h - 1, Math.floor((viewH / 2 - cy0) / fm.zoom)));
+          const explored = world.explored ? !!world.explored[wty * world.w + wtx] : true;
+          this._mapGlBlack = glBlack && explored ? (this._mapGlBlack + 1) : 0;
+          this._mapGlLastProbe = [probe[0], probe[1], probe[2], explored ? 1 : 0];
+          if (this._mapGlBlack >= 3) {
+            this._glMapBrokenAt = performance.now();
+            this._mapGlBlack = 0;
+            console.warn('[drawFullMap] GL 合成中心恒黑但该点已探索——切 2D 兜底(本次开图会话)',
+              { probe: this._mapGlLastProbe, zoom: fm.zoom, wtx, wty });
           }
         }
         gl.end();
@@ -10186,12 +10233,21 @@ export class Renderer {
         ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
         ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, sr.x, sr.y, sr.w, sr.h);
       }
-      // 2D 回退:CPU ImageData → 开图期临时整幅画布(关闭即弃,GPU 只在开图期占用)
-      if (!this._fm2dMap && this.minimap?.image) {
-        this._fm2dMap = document.createElement('canvas');
-        this._fm2dMap.width = this.minimap.w;
-        this._fm2dMap.height = this.minimap.h;
-        this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
+      // 2D 回退:CPU ImageData → 开图期临时整幅画布(关闭即弃,GPU 只在开图期占用)。
+      // ★dirty 版本门重灌:曾一次性建死——建画布时若小地图条带重建未完成(大世界
+      // buildStriped 分帧),后续重建内容永远进不了这张画布 = 2D 兜底也残留空图
+      if (this.minimap?.image) {
+        const dirtyNow = this.minimap.dirtyChunks.size;
+        if (!this._fm2dMap) {
+          this._fm2dMap = document.createElement('canvas');
+          this._fm2dMap.width = this.minimap.w;
+          this._fm2dMap.height = this.minimap.h;
+          this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
+          this._fm2dDirtyAt = dirtyNow;
+        } else if (dirtyNow !== this._fm2dDirtyAt) {
+          this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
+          this._fm2dDirtyAt = dirtyNow;
+        }
       }
       if (this._fm2dMap) {
         ctx.imageSmoothingEnabled = fm.zoom >= 1;
@@ -10256,6 +10312,13 @@ export class Renderer {
     ctx.fillText(Lang.text('Mods.SandboxWorld.Map.Hint'), viewW / 2, viewH - 16);
   }
   private _mapInit = false;
+  /** 2D 兜底地图画布最近重灌时的 minimap 脏块计数（变化才重灌） */
+  private _fm2dDirtyAt = -1;
+  /** GL 全屏地图合成判死时刻（0=健康；中心恒黑 3 帧置位 → 60s 内 2D 兜底） */
+  private _glMapBrokenAt = 0;
+  /** 连续黑帧计数 + 最近一次探针结果（F5 报告消费） */
+  private _mapGlBlack = 0;
+  _mapGlLastProbe: [number, number, number, number] = [0, 0, 0, 0];
 
   /** 全屏地图晶塔图标层（TeleportPylonsMapLayer.cs 1:1）：
    *   - 连线（:52-75）：当前塔（MapPylonTile）→ 其余每座晶塔的黑 6px/白 2px 双线

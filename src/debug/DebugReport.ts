@@ -732,6 +732,32 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         },
       } : null,
       fullMapOpen: g.renderer?.fullMap?.open ? 1 : 0,
+      // 全屏地图诊断（2026-08-19 "放大全黑只剩头像"黑盒）：路径/纹理解析/哨兵探针
+      fullMapDiag: g.renderer?.fullMap?.open ? (() => {
+        const r = g.renderer;
+        const fm = r.fullMap;
+        const mm = r.minimap;
+        const w = g.world;
+        const viewW = r.canvas.width, viewH = r.canvas.height;
+        const cx0 = viewW / 2 - (w.w * fm.zoom) / 2 + fm.panX;
+        const cy0 = viewH / 2 - (w.h * fm.zoom) / 2 + fm.panY;
+        const wtx = Math.max(0, Math.min(w.w - 1, Math.floor((viewW / 2 - cx0) / fm.zoom)));
+        const wty = Math.max(0, Math.min(w.h - 1, Math.floor((viewH / 2 - cy0) / fm.zoom)));
+        const mmpx = mm?.p32 ? Array.from(new Uint8Array(mm.p32.buffer, mm.p32.byteOffset, mm.p32.byteLength)
+          .subarray((wty * mm.w + wtx) * 4, (wty * mm.w + wtx) * 4 + 4)) : null;
+        return {
+          zoom: +fm.zoom.toFixed(3), pan: [Math.round(fm.panX), Math.round(fm.panY)],
+          mapGlEnabled: r.mapGlEnabled ? 1 : 0,
+          glMapBroken: (r as unknown as { _glMapBrokenAt?: number })._glMapBrokenAt ? 1 : 0,
+          lastProbe: (r as unknown as { _mapGlLastProbe?: number[] })._mapGlLastProbe ?? null,
+          bgResolved: r.atlas?.vui(`MapBG${r.fullMapBgIndex(w) + 1}.png`) ? 1 : 0,
+          scrollResolved: r.atlas?.vui('Map.png') ? 1 : 0,
+          minimap: mm ? { w: mm.w, h: mm.h, hasImage: mm.image ? 1 : 0, dirty: mm.dirtyChunks.size } : null,
+          cpuPixelAtCenter: mmpx,
+          exploredAtCenter: w.explored ? (w.explored[wty * w.w + wtx] ? 1 : 0) : -1,
+          centerTile: [wtx, wty],
+        };
+      })() : null,
       debugMode: g.renderer?.debugMode ? 1 : 0,
       chunkCache: g.chunks ? {
         chunks: g.chunks.chunks.size,

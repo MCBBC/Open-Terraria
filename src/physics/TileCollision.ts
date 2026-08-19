@@ -328,7 +328,10 @@ function slopeCollide(b: Body, world: World): void {
     if (!blocked) {
       b.y = ny;
       if (b.vy > 0) b.vy = 0;
-      b.onGround = true;
+      // ★onGround 仅下落/静止贴合置位（原版 velocity.Y==0 落地语义）：上升期（vy<0）
+      //   空中经过坡面格的贴合不置——否则裸装半空再按跳会走地面跳跃门=免费二段跳
+      //   （2026-08-19 用户报+行为录制定位；探针 _slopejump.mjs 复现 vy+2.31→-2.55）
+      if (b.vy >= 0) b.onGround = true;
     } else {
       // 抬升受阻回退（原版 :2004-2018 的速度清零语义）——墙角坡干净挡停而非楔进角落。
       // 原版另有按 shortfall 的 X 滑动补偿,但其"重跑校验"保证每帧只作用一次;

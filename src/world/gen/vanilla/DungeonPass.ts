@@ -2992,7 +2992,11 @@ export function runDungeonPass(
     }
   }
   function dgBasicChests(): void {
+    // 对账插桩(dormant)：SW_DG_GC=1 时逐房/逐尝试记 lo/hi/num/num2（G 段流对拍用）
+    const gcT = typeof process !== 'undefined' && process.env.SW_DG_GC === '1';
+    let gcRm = 0;
     for (const rm of rooms) {
+      if (gcT) console.log(`GC-RM ${gcRm++} exI=${Math.trunc(rm.ex)} eyI=${Math.trunc(rm.ey)} half=${Math.trunc(rm.strength * 0.4)} str=${rm.strength} exf=${rm.ex.toFixed(6)} eyf=${rm.ey.toFixed(6)}`);
       // ★#32 终清（2026-08-18）：LegacyDungeonRoom.cs:86-87 原文
       //   `(int)endPosition.X - num`——**先 (int) 截断再 ± half**。曾以 double 的
       //   rm.ex 直接 ±half 后 Lerp → 房尾坐标 369.9999 类小数尾巴把 (int)(Lerp)
@@ -3018,7 +3022,9 @@ export function runDungeonPass(
           default: itemType = 164; break;
         }
         if (num2 < ws + 50) { itemType = 327; chestStyle = 0; }
-        if (dgAddBuriedChest(num, num2, itemType, chestStyle, CHEST)) { lootStyle++; break; }
+        const gcOk = dgAddBuriedChest(num, num2, itemType, chestStyle, CHEST);
+        if (gcT) console.log(`GC-TRY rm=${gcRm - 1} num=${num} num2=${num2} ok=${gcOk ? 1 : 0}`);
+        if (gcOk) { lootStyle++; break; }
       }
     }
   }

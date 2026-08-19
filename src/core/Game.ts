@@ -800,8 +800,10 @@ export class Game implements GameHooks {
   /** 行为录制器（长按 F5 录制窗 / 短按 F5 报告尾）：常开环形 8192 条，
    *  log 恒安全（无窗也写——追溯能力）。GameHooks.recLog 的本体实现 */
   recorder = new BehaviorRecorder();
-  /** GameHooks.recLog：实体侧一行式接入（game.recLog?.('hurt', {...})） */
-  recLog(k: string, d: unknown): void { this.recorder.log(k, d); }
+  /** GameHooks.recLog：实体侧一行式接入（game.recLog?.('hurt', {...})）。
+   *  recorder?. 防御：Object.create(Game.prototype) 壳（单测惯例）不跑构造器，
+   *  实例字段 undefined——静默跳过（壳无录制语义） */
+  recLog(k: string, d: unknown): void { this.recorder?.log(k, d); }
   /** 行为录制：雨态沿基准（updateWeather 里与 weather.raining 比对） */
   private _recLastRaining = false;
 
@@ -7121,7 +7123,13 @@ export class Game implements GameHooks {
             // ReleaseNPC case 356 ai[2]=Style）
             const relStyle = relNpc === 356 && relItemId >= 1994 && relItemId <= 2001
               ? 1 + relItemId - 1994 : undefined;
-            this.spawnNpcByVanilla(relNpc, mtx * TILE + 8, mty * TILE + 8, relStyle, true);
+            const releasedNpc = this.spawnNpcByVanilla(relNpc, mtx * TILE + 8, mty * TILE + 8, relStyle, true);
+            // 仙灵释放即引导态（ReleaseNPC :80911-80920 ai[2]=2——野生仙灵只
+            // 逃逸,虫网释放的才带路;此前释放的也只会逃,2026-08-19 审计 10.1）
+            if (releasedNpc && (relNpc === 583 || relNpc === 584 || relNpc === 585)) {
+              releasedNpc.ai2 = 2;
+              releasedNpc.ai3 = 0;
+            }
             this.player.inv.removeAt(this.player.inv.selected, 1);
             this.cb.onInventoryChanged();
             this.player.useTime = 15;                 // useAnimation 15（:47616）

@@ -213,6 +213,12 @@ const EYE_DAY_DESPAWN = new Set([2, 133, 190, 191, 192, 193, 194, 317, 318]);
 // AI_014 wet 浮力表（cs:23232 蝙蝠/恶魔/巨狐蝠/孢子蝠 + cs:23380 哈比 48）：
 // 入水上浮弹出水面（vy>0 ×0.95、恒 -0.5、钳 -4 + TargetClosest）；表外 aiStyle14 无此段
 const AI014_SWIM_UP = new Set([48, 49, 51, 60, 62, 66, 93, 137, 150, 151, 152, 634]);
+/** AI_001 恒激愤族（NPC.cs:61468-61799 per-type flag3=true 覆盖）：81 腐化/183 猩红
+ *  Crimslime(:61483)/304 南瓜跳跳(:61489)/667 金/244 雨/184/535/658/659 仆从/204 丛林刺 */
+const SLIME_FORCE_AGGRO = new Set([81, 183, 304, 667, 244, 184, 535, 658, 659, 204]);
+/** AI_014 第二段移动族（NPC.cs:23227-23372 通用 else 后再跑一遍 X/Y 步进）：
+ *  恶魔 62/巫毒恶魔 66/地狱蝠 49?（表见下实现）——11 类双步进 */
+const AI014_DOUBLE_STEP = new Set([49, 51, 60, 62, 66, 93, 137, 150, 151, 152, 634]);
 
 /** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
 const PLACEHOLDER_DEF: EnemyDef = {
@@ -1056,6 +1062,13 @@ export class Enemy extends Entity {
   aiInit = false;
   /** AI_024 鸮族 localAI[0]（出生即飞行一次性门,NPC.cs:25410-25416） */
   owlAirborneInit = false;
+  /** AI_112 仙灵 localAI[1] 寿命计数（仅引导态 ai[2]>1 才累计,cs:48459-48473;
+   *  与各状态复用的 ai3 计时器分离——曾共用导致寿命被状态转换反复清零） */
+  fairyAge = 0;
+  /** AI_013 植物 stale target 偏移（玩家死亡时保持最后伸展目标——原版 :22655
+   *  直读 target 槽位坐标,无 dead 门;曾缩回锚点发呆） */
+  plantLastOx = 0;
+  plantLastOy = 0;
   /** 原版 timeLeft（CheckActive 屏内每 tick 重置；activeTime=750，非 7500） */
   despawnTimer = 750;
   /** Boss 离场逃走标记（EncourageDespawn/天亮撤离等非击杀消亡）：
@@ -1856,6 +1869,10 @@ export class Enemy extends Entity {
     //  （第四项曾缺——史莱姆雨白天满血地表史莱姆应主动追人 :61462）
     const hurt = this.hp < this.maxHp;
     let flag3 = !game.world.clock.isDay || hurt || underground || !!game.world.weather.slimeRain;
+    // per-type 恒激愤覆盖（cs:61468-61799）：81 腐化/183 猩红/304 南瓜跳跳/667 金/
+    // 244 雨/184/535/658/659 仆从/204 丛林刺——白天满血地表照追（曾全缺 =
+    // 白天只见游荡,审计 S2,2026-08-19）
+    if (this.vanillaId !== null && SLIME_FORCE_AGGRO.has(this.vanillaId)) flag3 = true;
     if (grasshopper) {
       // 蚱蜢（cs:61479-61483）：只有玩家 200px 内且非 wet 才激愤蹦跳，平时走路档
       flag3 = !!player && !player.dead && !inWater
@@ -3112,6 +3129,13 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       return;
     }
+    if (!player) {
+      // 玩家死亡（:24105 `else if (!dead)` 包住全部 steering）：原版速度冻结由
+      // 共享积分段滑行——本仓等价"只积分"。曾造 ty=cy-100 自引用悬停目标 =
+      // 永远够不到 → vy 收敛 -3 无限上飞出世界顶（审计 A2,2026-08-19）
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return;
+    }
     if (player && !player.dead) this.facing = this.seekDirX(player);
     const dir = this.facing;
     // (:24151-24170) else-if 链:基础 ∓0.1;>3(同向满速不可达档)/>0(逆行)追加 ∓0.05;
@@ -3174,14 +3198,9 @@ export class Enemy extends Entity {
     const bx = Math.floor(this.cx / TILE), by = Math.floor((this.y + this.h - 1) / TILE);
     let rooted = false;
     for (let i = -1; i <= 1; i++) if (st.isSolid(bx + i, by)) { rooted = true; break; }
-    if (rooted) {
-      this.vy = -0.2;
-      this.x += this.vx;
-      this.y += this.vy;
-      return;
-    }
-    this.applyGravity(game);
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ---- 开火（cs:24474-24541 在 rooted 判定【之前】——埋沙栖息中照常装填开火;
+    //      冷却每 tick 递减不受玩家存活门限。曾放在 rooted return 之后 = 蚁狮
+    //      几乎永不射沙球,审计 4.1,2026-08-19）----
     if (player && !player.dead) {
       this.ai0 += 1;
       if (this.ai0 >= 200 && player.cy < this.cy && this.canSeePlayer(st, player)) {
@@ -3190,6 +3209,14 @@ export class Enemy extends Entity {
         this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10, 31);
       }
     }
+    if (rooted) {
+      this.vy = -0.2;
+      this.x += this.vx;
+      this.y += this.vy;
+      return;
+    }
+    this.applyGravity(game);
+    moveAndCollide(this, game.world, this.vx, this.vy);
   }
 
   /** AI_023 飞行武器 83/84/179（NPC.cs:25316-25395）：块内强制 noGravity+noTileCollide 穿墙。
@@ -3718,13 +3745,17 @@ export class Enemy extends Entity {
       if (this.ai2 > 450) this.ai2 = 0;
     }
     const ax = this.ai0 * 16 + 8, ay = this.ai1 * 16 + 8;
-    // 目标点 = 锚点 + 朝玩家偏移(钳制在 range 内,:22655-22665)
+    // 目标点 = 锚点 + 朝玩家偏移(钳制在 range 内,:22655-22665)。玩家死亡时
+    // 原版无 dead 门(:22655 直读 target 槽位)——保持最后偏移,不缩回锚点
     let ox = 0, oy = 0;
     if (player) {
       ox = player.cx - this.w / 2 - ax;
       oy = player.cy - this.h / 2 - ay;
       const d = Math.hypot(ox, oy);
       if (d > range) { ox = ox / d * range; oy = oy / d * range; }
+      this.plantLastOx = ox; this.plantLastOy = oy;
+    } else if (this.plantLastOx !== 0 || this.plantLastOy !== 0) {
+      ox = this.plantLastOx; oy = this.plantLastOy;   // stale target（审计 A3）
     }
     // 各轴逼近,逆向 ×1.5(:22666-22699)
     const tx = ax + ox, ty = ay + oy;
@@ -3741,6 +3772,14 @@ export class Enemy extends Entity {
     } else if (this.y > ty) {
       this.vy -= accel;
       if (this.vy > 0 && oy < 0) this.vy -= accel * 1.5;
+    }
+    // 速度钳（cs:22725-22760,曾全缺 = 追击段越冲越快抖振,审计 P1,2026-08-19）：
+    //  43 食人怪 ±3（FTW 3.5）/ 175 怒牙 ±4 / 其余（101/259/260）±2
+    {
+      const cap43 = game.world.seedFlags?.getGoodWorld ? 3.5 : 3;
+      const cap = this.vanillaId === 43 ? cap43 : this.vanillaId === 175 ? 4 : 2;
+      this.vx = Math.max(-cap, Math.min(cap, this.vx));
+      this.vy = Math.max(-cap, Math.min(cap, this.vy));
     }
     this.facing = this.vx > 0 ? 1 : -1;
     // ---- 头部旋转（cs:22778-22794）：259/260 真菌球恒 +π/2；其余（43 食人怪/101 触手/175）
@@ -3784,10 +3823,25 @@ export class Enemy extends Entity {
     // 蜜蜂（210/211，L50768-50784）：ai[1] 计数爬坡 num3=(ai1-60)/60≤1；
     // 暖机期（num3<1）逐轴速度钳 ±6；速度档 5 / 加速 0.1×num3
     const isBee = this.vanillaId === 210 || this.vanillaId === 211;
-    let maxSpd = isEater ? 4 : this.vanillaId === 94 ? 4.2 : this.vanillaId === 5 ? 5 : 6;
+    // 速度表（cs:50720-50766 per-type;曾只 6/173/94/5/619 → 黄蜂族/陨石怪/蛾
+    // 全落默认 6/0.05 = 陨石怪 6 倍速失真,审计蜂群#1,2026-08-19）：
+    //  42 黄蜂 3.5×(1−scale)/0.021;231-235 黄蜂族 3/0.017;176 苔藓黄蜂 4/0.017;
+    //  23 陨石怪 1/0.03;205 飞蛾 3.25/0.018;6 专家噬魂怪 accel×1.75(0.035)
+    let maxSpdOverride: number | null = null;
+    let accelOverride: number | null = null;
+    {
+      const vid5 = this.vanillaId ?? 0;
+      if (vid5 === 42) { maxSpdOverride = 3.5 * (1 - (this.vanilla?.scale ?? 1)); accelOverride = 0.021; }
+      else if (vid5 >= 231 && vid5 <= 235) { maxSpdOverride = 3; accelOverride = 0.017; }
+      else if (vid5 === 176) { maxSpdOverride = 4; accelOverride = 0.017; }
+      else if (vid5 === 23) { maxSpdOverride = 1; accelOverride = 0.03; }
+      else if (vid5 === 205) { maxSpdOverride = 3.25; accelOverride = 0.018; }
+    }
+    let maxSpd = maxSpdOverride ?? (isEater ? 4 : this.vanillaId === 94 ? 4.2 : this.vanillaId === 5 ? 5 : 6);
     // 619 血鱿鱼（:50702-50705）：num=6 / num2=0.1（默认档 6/0.05 → 加速翻倍）
-    let accel = isEater ? 0.02 : this.vanillaId === 94 ? 0.022 : this.vanillaId === 5 ? 0.03
-      : this.vanillaId === 619 ? 0.1 : 0.05;
+    let accel = accelOverride ?? (isEater ? (this.vanillaId === 6 && mainExpertMode(game.world) ? 0.035 : 0.02)
+      : this.vanillaId === 94 ? 0.022 : this.vanillaId === 5 ? 0.03
+      : this.vanillaId === 619 ? 0.1 : 0.05);
     if (isBee) {
       this.ai1 += 1;
       let ramp = (this.ai1 - 60) / 60;
@@ -4057,7 +4111,10 @@ export class Enemy extends Entity {
         if (n156 >= 18) { this.vx = 0; this.vy = 0; }
       } else {
         let vx2 = this.vx, vy2 = this.vy;
-        if (Math.hypot(this.vx, this.vy) < 0.1) { vx2 = player!.cx - this.cx; vy2 = player!.cy - this.cy; }
+        // 玩家死于冲刺段（player=null）保持现速度方向（原版 Main.player[target]
+        // 槽位坐标恒可读不判 null——我们等价取"维持最后方向"；曾 player!.cx
+        // 对 null 解引用炸整帧敌怪更新,2026-08-19 审计 A-1）
+        if (player && Math.hypot(this.vx, this.vy) < 0.1) { vx2 = player.cx - this.cx; vy2 = player.cy - this.cy; }
         const vl = Math.hypot(vx2, vy2) || 1;
         this.vx = (vx2 / vl) * 14;
         this.vy = (vy2 / vl) * 14;
@@ -4386,6 +4443,34 @@ export class Enemy extends Entity {
       if (this.vy < -cy) this.vy += 0.05; else if (this.vy < 0) this.vy -= 0.03;
       if (this.vy > cy) this.vy = cy;
     }
+    // ---- 第二段移动（cs:23231-23378：{49,51,60,62,66,93,137,150,151,152,634}
+    //      11 类在通用段之后再跑一遍 X/Y 步进,固定帽 ±4/±1.5、二档更小步长
+    //      （60 地狱蝠 X 0.07/0.03、Y 0.03/0.02;其余 X 0.1/0.05、Y 0.05/0.03）——
+    //      曾整段缺失 = 恶魔/地狱蝠/冰蝠等水平响应减半,审计 batAI#1,2026-08-19）----
+    if (this.vanillaId !== null && AI014_DOUBLE_STEP.has(this.vanillaId)) {
+      const x2b = this.vanillaId === 60 ? 0.07 : 0.1;
+      const x2c = this.vanillaId === 60 ? 0.03 : 0.05;
+      const y2b = this.vanillaId === 60 ? 0.03 : 0.05;
+      const y2c = this.vanillaId === 60 ? 0.02 : 0.03;
+      if (dirX === -1 && this.vx > -4) {
+        this.vx -= 0.1;
+        if (this.vx > 4) this.vx -= x2b; else if (this.vx > 0) this.vx += x2c;
+        if (this.vx < -4) this.vx = -4;
+      } else if (dirX === 1 && this.vx < 4) {
+        this.vx += 0.1;
+        if (this.vx < -4) this.vx += x2b; else if (this.vx < 0) this.vx -= x2c;
+        if (this.vx > 4) this.vx = 4;
+      }
+      if (dirY === -1 && this.vy > -1.5) {
+        this.vy -= 0.04;
+        if (this.vy > 1.5) this.vy -= y2b; else if (this.vy > 0) this.vy += y2c;
+        if (this.vy < -1.5) this.vy = -1.5;
+      } else if (dirY === 1 && this.vy < 1.5) {
+        this.vy += 0.04;
+        if (this.vy < -1.5) this.vy += y2b; else if (this.vy < 0) this.vy -= y2c;
+        if (this.vy > 1.5) this.vy = 1.5;
+      }
+    }
     // ---- wet 浮力（cs:23232-23243 蝙蝠/恶魔/巨狐蝠/孢子蝠族 + cs:23380-23392 哈比 48）：
     // 入水 vy>0 ×0.95、恒 -0.5 上浮、钳 -4 并重新索敌——飞行族扎水后弹出水面而非
     // 照常追击。表外 aiStyle14（158 吸血蝙蝠等）原版无此段
@@ -4455,12 +4540,7 @@ export class Enemy extends Entity {
     // wet = 原版 Collision.WetCollision（npcLiquid 每 tick 写；中心小盒判水线，
     // 浅水/贴面与中心格 liquid>80 近似有别——水面行为以此为准）
     const inWater = this.wet;
-    if (player) this.facing = this.seekDirX(player);
-    const dirX = player ? this.facing : (this.vx >= 0 ? 1 : -1);
-    const dirY = player ? (player.cy > this.cy ? 1 : -1) : 0;
     const ara = this.vanillaId === 157;
-    const ax = ara ? 0.25 : 0.1, ay = ara ? 0.2 : 0.1;
-    const cx = ara ? 7 : 3, cy = ara ? 4 : 2;
     // ---- 河鲀 688 膨胀（cs:23555-23620）：受击进入膨胀 180t——缓速悬浮贴水面，
     // 期间不吃通用鱼逻辑（简化为阻尼漂浮，贴水线钉法省略）
     if (this.vanillaId === 688) {
@@ -4501,12 +4581,91 @@ export class Enemy extends Entity {
       }
     }
     if (inWater) {
-      this.vx += dirX * ax;
-      this.vy += dirY * ay;
-      this.vx = Math.max(-cx, Math.min(cx, this.vx));
-      this.vy = Math.max(-cy, Math.min(cy, this.vy));
+      // ---- flag22 攻击门（cs:23731-23740）：55 金鱼/592/607 鳉/615 海豚/688 河鲀
+      //    五族不索敌（连 TargetClosest 都不调）恒游荡；其余玩家【湿身】+视线
+      //    可及才追击。★此前无条件朝玩家全速追（±3/±2）——岸上玩家会把鱼
+      //    vy=-2 直拖出水面,出水落岸后无限拍打 = "鱼经常蹦出水面上岸"根因
+      //    （2026-08-19 用户报,食人鱼例）
+      const noChase = this.vanillaId === 55 || this.vanillaId === 592
+        || this.vanillaId === 607 || this.vanillaId === 615 || this.vanillaId === 688;
+      const chase = !noChase && !!player && !player.dead
+        && player.inWater && this.canSeePlayer(st, player);
+      if (chase && player) {
+        // 攻击形（cs:23822-23862）：TargetClosest + 分族推进档
+        this.facing = this.seekDirX(player);
+        const dy = player.cy > this.cy ? 1 : -1;
+        if (ara) {
+          // 157 巨骨舌鱼（cs:23829-23845）：逆向阻尼 + 0.25/0.2 推进,钳 ±7/±4
+          if ((this.vx > 0 && this.facing < 0) || (this.vx < 0 && this.facing > 0)) this.vx *= 0.95;
+          this.vx += this.facing * 0.25;
+          this.vy += dy * 0.2;
+          if (this.vx > 8) this.vx = 7;
+          if (this.vx < -8) this.vx = -7;
+          if (this.vy > 5) this.vy = 4;
+          if (this.vy < -5) this.vy = -4;
+        } else if (this.vanillaId === 65 || this.vanillaId === 102 || this.vanillaId === 692) {
+          // 鲨鱼/琵琶鱼/虎鲸（cs:23846-23862）：0.15/0.15,钳 ±5/±3
+          this.vx += this.facing * 0.15;
+          this.vy += dy * 0.15;
+          this.vx = Math.max(-5, Math.min(5, this.vx));
+          this.vy = Math.max(-3, Math.min(3, this.vy));
+        } else {
+          // 其余（食人鱼 58 等,cs:23856-23862）：0.1/0.1,钳 ±3/±2
+          this.vx += this.facing * 0.1;
+          this.vy += dy * 0.1;
+          this.vx = Math.max(-3, Math.min(3, this.vx));
+          this.vy = Math.max(-2, Math.min(2, this.vy));
+        }
+      } else {
+        // 游荡形（cs:23864-24004）：direction 恒存（撞墙翻,不追玩家）——
+        // 水平 vx += dir*0.1 钳 ±1（615 海豚 ±3,cs:23952 num269）；
+        // 垂直 ai[0] 慢振荡 ±0.3（cs:23968-23981,0.01 步进）贴水深游
+        this.vx += this.facing * 0.1;
+        const capX = this.vanillaId === 615 ? 3 : 1;
+        if (this.vx < -capX || this.vx > capX) this.vx *= 0.95;
+        if (ara) {
+          // 157 游荡档（cs:23898-23945）：directionY 取自玩家纵深;ai[0] 振荡阈值
+          // ±0.6 随 dirY 偏移（<0→-1/0.2,>0→-0.2/1）,0.02 步进
+          this.dirY = player ? (player.cy > this.cy ? 1 : -1) : this.dirY;
+          if (this.ai0 === -1) {
+            this.vy -= 0.02;
+            if (this.vy < (this.dirY < 0 ? -1 : this.dirY > 0 ? -0.2 : -0.6)) this.ai0 = 1;
+          } else {
+            this.vy += 0.02;
+            if (this.vy > (this.dirY < 0 ? 0.2 : this.dirY > 0 ? 1 : 0.6)) this.ai0 = -1;
+          }
+          this.vx += this.facing * 0.1;   // 157 共 0.2 推进（cs:23919）
+          this.vx = Math.max(-2, Math.min(2, this.vx));
+        } else {
+          if (this.ai0 === -1) {
+            this.vy -= 0.01;
+            if (this.vy < -0.3) this.ai0 = 1;
+          } else {
+            this.vy += 0.01;
+            if (this.vy > 0.3) this.ai0 = -1;
+          }
+          // 浅水上升检查（cs:23984-24000）：头顶格 liquid>128 且脚下 1-2 格
+          // 有实心 → ai[0]=-1 上浮（浅水贴面巡游,不触底）
+          const tx = Math.floor(this.cx / 16), ty = Math.floor((this.y + this.h / 2) / 16);
+          if (st.inBounds(tx, ty - 1) && st.liquid[st.idx(tx, ty - 1)] > 128
+            && ((st.inBounds(tx, ty + 1) && st.flags[st.idx(tx, ty + 1)])
+              || (st.inBounds(tx, ty + 2) && st.flags[st.idx(tx, ty + 2)]))) {
+            this.ai0 = -1;
+          }
+          // 垂直阻尼（cs:24001-24004,157 豁免）：|vy|>0.4 ×0.95
+          if (this.vy > 0.4 || this.vy < -0.4) this.vy *= 0.95;
+        }
+      }
       moveAndCollide(this, game.world, this.vx, this.vy);
-      if (this.hitWall) { this.facing *= -1; this.vx = -this.vx * 0.8; } // 撞墙掉头
+      // 撞轴反弹（仅 !chase,cs:23790-23807）：撞墙 vx/朝向双翻;撞顶/底
+      // vy 反弹并同步 ai[0] 方向（追击态不吃反弹）
+      if (!chase) {
+        if (this.hitWall) { this.vx *= -1; this.facing *= -1; }
+        if (this.hitHead || this.onGround) {
+          if (this.vy > 0) { this.vy = -Math.abs(this.vy); this.ai0 = -1; }
+          else if (this.vy < 0) { this.vy = Math.abs(this.vy); this.ai0 = 1; }
+        }
+      }
     } else {
       // 离水（cs:24019-24034）：vy==0 → 拍打挣扎 vy=rand(-5,-2)/vx=rand(-2,2)
       // （65 食人鱼/692 貌鱼例外：只 ×0.94 阻尼不蹦）；重力 0.3 钳 10
@@ -4517,6 +4676,7 @@ export class Enemy extends Entity {
         } else {
           this.vy = -5 + Math.random() * 3;   // rand(-50,-20) × 0.1
           this.vx = -2 + Math.random() * 4;   // rand(-20,20) × 0.1
+          this.facing = Math.random() < 0.5 ? 1 : -1;   // direction 随机（rotation 基向）
         }
       }
       this.vy = Math.min(this.vy + 0.3, 10);
@@ -4849,7 +5009,9 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       if (this.onGround) { this.ai0 = 0; this.vx = 0; }
     } else if (player && !player.dead) {
-      // 飞行态（:25495-25595;目标玩家死亡时整段跳过——鸟保持惯性）
+      // 飞行态（:25495-25595;目标玩家死亡时跳过 steering——但原版共享积分段
+      // （:93808）仍按冻结速度滑行,本仓无共享积分 → 死亡时补"只积分"分支,
+      // 否则鸟空中冻结成雕像,审计 A1,2026-08-19）
       const dir = this.facing;
       const cap = (id >= 671 && id <= 675) ? 4 : 3;   // num356:丛林鸟 4 其余 3
       if (dir === -1 && this.vx > -cap) {
@@ -4890,6 +5052,9 @@ export class Enemy extends Entity {
         if (this.vy > 0 && this.vy < 1) this.vy = 1;
         if (this.vy < 0 && this.vy > -1) this.vy = -1;
       }
+    } else {
+      // 玩家死亡（飞行态）：只积分不 steering（原版共享积分段 :93808 语义）
+      moveAndCollide(this, game.world, this.vx, this.vy);
     }
     // 湿态上浮（:25596-25610,三态通用）：ai[1]=0 + vy>0×0.95 + vy-=0.5 钳 -4
     //  + TargetClosest（朝玩家）
@@ -5068,13 +5233,16 @@ export class Enemy extends Entity {
       this.lightRGB = [0.25 * l, 0.25 * l, 0.1 * l];
     }
     if (this.ai0 < 0 || this.ai0 > 8) this.ai0 = 0;
-    if (this.ai1 < 0) this.ai1 = 100; // 初值：站立约 100t 后开始游走
-    // 危险扫描（每 15t）
-    if (this.aiT % 15 === 0) {
+    if (this.ai1 < 0) this.ai1 = 0;   // 初值 0（原版出生即走;曾 100 站立）
+    const turtle = vid === 616 || vid === 617 || vid === 625;   // 乌龟免危险扫描（:53857/:53881 flag8）
+    // 危险扫描（cs:53884-54028：原版【每 tick】+视线门 CanHit——noTileCollide 族
+    // 豁免;乌龟整段跳过。曾 %15 节流+无视线 = 隔墙也逃,审计 1.2/B-1,2026-08-19）
+    if (!turtle) {
       for (const o of game.enemies()) {
         const e = o as Enemy;
         if (e === this || e.dead || e.def.damage <= 0) continue;
-        if (Math.hypot(e.cx - this.cx, e.cy - this.cy) < 200) {
+        if (Math.hypot(e.cx - this.cx, e.cy - this.cy) < 200
+          && canHit(st, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) {
           this.ai0 = 1;
           this.ai1 = 120 + Math.random() * 120;
           this.facing = e.cx > this.cx ? -1 : 1;
@@ -5090,7 +5258,6 @@ export class Enemy extends Entity {
     }
     // 速度表
     const squirrel = vid === 299 || vid === 538 || vid === 539 || (vid >= 639 && vid <= 645);
-    const turtle = vid === 616 || vid === 617 || vid === 625;
     const rat = vid === 300 || vid === 447 || vid === 610;
     const frog = vid === 361 || vid === 445 || vid === 687;
     let maxX = 1, acc = 0.07;
@@ -5101,9 +5268,9 @@ export class Enemy extends Entity {
     this.ai1 -= 1;
     if (this.ai0 === 0) {
       this.vx *= 0.8;
-      if (this.ai1 <= 0) { // 站→走
+      if (this.ai1 <= 0) { // 站→走（走时长 = 200+rand300+rand(200,400) = 400-899,cs:54160-54166）
         this.ai0 = 1;
-        this.ai1 = 300 + Math.random() * 300 - Math.random() * 100;
+        this.ai1 = 200 + Math.random() * 300 + 200 + Math.random() * 200;
         if (Math.random() < 0.5) this.facing *= -1;
       }
     } else {
@@ -5114,9 +5281,9 @@ export class Enemy extends Entity {
         if (Math.abs(this.vx) < 0.05 && Math.abs(this.vy) < 0.05) this.vx += maxX * 10 * this.facing;
         else this.vx *= 0.9;
       }
-      if (this.ai1 <= 0) { // 走→站
+      if (this.ai1 <= 0) { // 走→站（站时长 = 300+rand300−rand100 = 201-599,cs:54232-54244）
         this.ai0 = 0;
-        this.ai1 = 200 + Math.random() * 300 + 200 + Math.random() * 200;
+        this.ai1 = 300 + Math.random() * 300 - Math.random() * 100;
         this.vx = 0;
       }
     }
@@ -5392,26 +5559,41 @@ export class Enemy extends Entity {
     }
     // 飞行
     this.ai1 += 1;
-    if (player && !player.dead) this.facing = player.cx > this.cx ? -1 : 1; // 远离玩家
-    if (this.facing === -1 && this.vx > -3) this.vx -= 0.1;
-    else if (this.facing === 1 && this.vx < 3) this.vx += 0.1;
-    const aheadX = Math.floor((this.cx + this.facing * 24) / TILE);
-    const footY = Math.floor(this.cy / TILE);
-    let obstruction = 0;
-    for (let k = 0; k < 15; k++) {
-      if (st.isSolid(aheadX, footY + k) || st.liquid[st.idx(aheadX, footY + k)] > 0) { obstruction = k + 1; break; }
+    // 原版飞行分支从不重定 direction（出生 TargetClosest 一次 + collideX 翻）——
+    // 曾逐帧"背向玩家"改向 = 持续远离转向（审计 9.1,2026-08-19）。
+    // 玩家死亡（:34980-34984 dead → return）：原版速度冻结由共享积分段
+    // （:93808）继续滑行——本仓无共享积分,等价取"只积分不 steering"（审计 A4）
+    if (!player) {
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return;
     }
-    if (obstruction > 0 && obstruction <= 5) this.vy -= 0.2;
-    else if (obstruction > 0) this.vy -= 0.1;
-    else this.vy += 0.1;
-    this.vy = Math.max(-4, Math.min(3, this.vy));
+    if (this.ai1 >= 300) {
+      // 300t 后强制降落段（cs:34986-35001）：vx×0.98 缓降、vy 逼近 2,触地/水收尾
+      this.vx *= 0.98;
+      if (this.vy < 2) this.vy = Math.min(2, this.vy + 0.1);
+    } else {
+      if (this.facing === -1 && this.vx > -3) this.vx -= 0.1;
+      else if (this.facing === 1 && this.vx < 3) this.vx += 0.1;
+      const aheadX = Math.floor((this.cx + this.facing * 24) / TILE);
+      const footY = Math.floor(this.cy / TILE);
+      let obstruction = 0;
+      for (let k = 0; k < 15; k++) {
+        if (st.isSolid(aheadX, footY + k) || st.liquid[st.idx(aheadX, footY + k)] > 0) { obstruction = k + 1; break; }
+      }
+      if (obstruction > 0 && obstruction <= 5) this.vy -= 0.2;
+      else if (obstruction > 0) this.vy -= 0.1;
+      else this.vy += 0.1;
+      this.vy = Math.max(-4, Math.min(3, this.vy));
+    }
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) { this.vx *= -0.5; this.facing *= -1; }
-    if ((this.hitHead || this.onGround || inWater) && this.ai1 >= 300) {
+    if (this.ai1 >= 300 && (this.hitHead || this.onGround || inWater)) {
       this.ai0 = 0;
       this.ai1 = 200 + Math.random() * 200;
       // 回行走形（cs:35000 Transform(type-1)，363→362/365→364/603→602/609→608）
-      this.tryTransformTo((this.vanillaId ?? 363) - 1, st, false, game);
+      // 仅 !wet 落地/撞顶才变形;落水只回 ai0=0 水面漂浮态（行走形遇水又变回
+      // → 曾水陆互变死循环抖动,审计 9.2,2026-08-19）
+      if (!this.wet) this.tryTransformTo((this.vanillaId ?? 363) - 1, st, false, game);
     }
   }
 
@@ -5428,23 +5610,34 @@ export class Enemy extends Entity {
     if (this.vanillaId === 583) this.lightRGB = [(255 / 255) * 0.7, (105 / 255) * 0.7, (180 / 255) * 0.7];
     else if (this.vanillaId === 584) this.lightRGB = [(50 / 255) * 0.7, (205 / 255) * 0.7, (50 / 255) * 0.7];
     else if (this.vanillaId === 585) this.lightRGB = [(65 / 255) * 0.7, (105 / 255) * 0.7, (225 / 255) * 0.7];
-    this.ai3 += 1;
-    if (this.ai3 >= 18000) { this.dead = true; return; } // 存在期满离场
+    // 寿命（cs:48457-48473）：仅引导态 ai[2]>1 才累计（曾全态累计且与 ai3 复用
+    // 被清零）;期满进状态 7 飞离而非原地消失
+    if (this.ai2 > 1) {
+      this.fairyAge += 1;
+      if (this.fairyAge >= 18000) { this.ai2 = 7; this.ai3 = 0; }
+    }
     if (this.ai2 === 0) {
+      this.noTileCollide = false;   // 引导态 2-6 置 true,回 0/1 显式清（cs:48480）
       // 绕锚点微漂
       const dx = this.ai0 - this.cx, dy = this.ai1 - this.cy;
       if (Math.hypot(dx, dy) > 20) { this.vx += Math.sign(dx) * 0.04; this.vy += Math.sign(dy) * 0.04; }
       else { this.vx += (Math.random() - 0.5) * 0.04; this.vy += (Math.random() - 0.5) * 0.04; }
       this.vy = Math.max(-2, Math.min(2, this.vy));
-      if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 250) this.ai2 = 1;
-    } else if (this.ai2 === 1) {
-      // 追随飞（cs:48453 状态 1）；接触玩家锚盒 → 状态 2 引导（:48505-48516）
-      if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 40) {
-        this.ai2 = 2; this.ai3 = 0;
+      // 玩家 250px 内 → 状态 1;direction 取【背向玩家】（cs:48499-48505
+      // `direction = !(player.X > X) ? 1 : -1`——野生仙灵是逃离不是追随,
+      // 曾逐帧 seekDirX 追人像宠物,审计 10.1,2026-08-19）
+      if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 250) {
+        this.facing = player.cx > this.cx ? -1 : 1;
+        this.ai2 = 1;
       }
-      if (player && !player.dead) this.facing = this.seekDirX(player);
-      const target = this.facing * 4.5;
-      this.vx += Math.sign(target - this.vx) * 0.1;
+    } else if (this.ai2 === 1) {
+      // 逃逸飞（cs:48530-48553）：direction 只在 0→1 转换时设（背向玩家）,
+      // 此后仅 collideX 翻向;X 步进 0.04/逆行补 0.2、帽 4.5。引导态只能经
+      // 虫网释放进入（ReleaseNPC :80911 预置 ai[2]=2）——曾 40px 自发进引导
+      this.noTileCollide = false;   // cs:48521
+      if (this.facing === 1) { this.vx += 0.04; if (this.vx < 0) this.vx += 0.2; }
+      else { this.vx -= 0.04; if (this.vx > 0) this.vx -= 0.2; }
+      this.vx = Math.max(-4.5, Math.min(4.5, this.vx));
       const aheadX = Math.floor((this.cx + this.facing * 24) / TILE);
       const cy = Math.floor(this.cy / TILE);
       let obstruction = 0;
@@ -6315,13 +6508,19 @@ export class Enemy extends Entity {
       const tx = Math.cos(this.ai0), ty = Math.sin(this.ai0);
       this.vx += (tx - this.vx) * 0.0125;
       this.vy += (ty - this.vy) * 0.0125;
+      // 风漂（cs:47995-47997）：飞行目标向量 + windSpeedTarget×0.8
+      this.vx += game.world.weather.windSpeedTarget * 0.8;
       const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
       let belowSolid = false;
       for (let k = 1; k <= 4; k++) if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) { belowSolid = true; break; }
       if (belowSolid) this.ai0 = -this.ai0;
-      let aboveClear = true;
-      for (let k = 1; k <= 30 && aboveClear; k++) if (st.isSolid(cx, cy - k)) aboveClear = false;
-      if (aboveClear) this.ai0 = Math.PI - this.ai0;
+      // 上升中且下方 30 格无地 → -ai0 垂直翻转转下降（cs:48021-48023;曾写
+      // π-ai0 水平镜像+探上方 = 开阔地上空持续爬升,审计 13.2,2026-08-19）
+      if (this.vy < 0) {
+        let groundBelow = false;
+        for (let k = 1; k <= 30 && !groundBelow; k++) if (st.isSolid(cx, cy + k)) groundBelow = true;
+        if (!groundBelow) this.ai0 = -this.ai0;
+      }
       this.facing = this.vx > 0 ? 1 : -1;
       const oldVx = this.vx;
       moveAndCollide(this, game.world, this.vx, this.vy);
@@ -6336,9 +6535,11 @@ export class Enemy extends Entity {
     if (waterAhead) { this.ai2 = 0; this.ai0 = Math.random() * Math.PI * 2; return; }
     if (this.vy !== 0) {
       this.vx *= 0.98;
-      this.vy += (2 - this.vy) * 0.05;
+      this.vy += (2 - this.vy) * 0.005;   // 腾空下落 Lerp 0.005（cs:48063）
     } else {
-      this.vx += (this.facing * 0.05 - this.vx) * 0.1;
+      // 陆行 Lerp 0.05 → 目标速度 1 px/t（cs:48036-48044;曾目标 0.05 =
+      // 爬行慢 20 倍近乎趴窝,审计 13.1,2026-08-19）
+      this.vx += (this.facing - this.vx) * 0.05;
       this.vy += 0.2; // 一跳一跳
     }
     this.vy = Math.min(this.vy, 10);
@@ -6399,11 +6600,13 @@ export class Enemy extends Entity {
           this.ai0 = Math.random() * Math.PI * 2;
           this.ai1 = 450 + Math.floor(Math.random() * 150);
         }
-        // 接近水面且新角朝下 → 折回
+        // 接近水面且当前朝上（θ∈(π,2π),:47457-47460 flag && ai[0]>π → ai[0]-=π）
+        // → 180° 掉头压回水下。曾写 sin>0(朝下才折返) = 把下潜个体翻上浮、
+        // 上浮不拦 → 海马集体被顶出水面落岸拍打（审计 15.1,2026-08-19）
         const ty = Math.floor(this.cy / TILE);
         const liq = st.liquid[st.idx(Math.floor(this.cx / TILE), ty)];
         const waterY = ty * TILE + (TILE - (liq / 255) * TILE);
-        if (this.y - waterY < 20 && Math.sin(this.ai0) > 0) this.ai0 -= Math.PI;
+        if (this.y - waterY < 20 && Math.sin(this.ai0) < 0) this.ai0 -= Math.PI;
       } else {
         this.vx *= 0.95;
         this.vy *= 0.95;

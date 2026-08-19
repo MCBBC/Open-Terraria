@@ -160,6 +160,70 @@ const killTile = (st: TileStore, x: number, y: number): void => {
 };
 
 // ============================================================
+// WWWW：CheckVines（cs:85599-85698）+ KillTile→SquareTileFrame 九宫级联。
+// 蜂巢凹龛 KillTile 击杀的格（含被 444 覆写的旧藤顶）→ 九宫重帧 → 藤格
+// CheckVines：上邻同种存活 / 异族锚换型 / 失锚（含上邻变 444 蜂巢）KillTile
+// → 再九宫 → 整列下杀（golden (3346,625-629) 实证：凹龛锚 i=3346 覆写藤顶
+// 623-624 后下列 5 格全灭；旧实现 killTile 无级联 → #89 残 5 格 T0>62）。
+// 零 genRand（CheckVines 纯格效应）。
+// ============================================================
+const VINE_ID_BY_SHEET = new Map<number, number>([
+  [52, VINE], [382, VINE_FLOWER], [62, VINE_JUNGLE], [528, VINE_MUSHROOM],
+  [115, TILE_BY_KEY['v_115_hallowed_vines']!], [636, TILE_BY_KEY['v_636_ash_grass_vines']!],
+  [205, TILE_BY_KEY['v_205_crimson_vines']!], [638, TILE_BY_KEY['v_638_ash_vines']!],
+]);
+function checkVinesAt(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y) || y <= 5) return;
+  const k = st.idx(x, y);
+  if (!st.flags[k]) return;
+  const ty = SHEET[st.type[k]];
+  if (ty === undefined || !IS_VINE.has(ty)) return;
+  let num = -1;
+  if (st.inBounds(x, y - 1)) {
+    const ak = st.idx(x, y - 1);
+    if (st.flags[ak] && ((st.wire[ak] >>> 5) & 1) === 0 && !bottomSlope(st, x, y - 1)) {
+      num = SHEET[st.type[ak]] ?? -1;
+    }
+  }
+  if (num === ty) return;
+  let conv = 0;
+  if (num === 633 || num === 638) conv = 638;
+  if (num === 70 || num === 528) conv = 528;
+  if (num === 109 || num === 115 || num === 492) conv = 115;
+  if (num === 60 || num === 226 || num === 62) conv = 62;
+  if (num === 23 || num === 636 || num === 661) conv = 636;
+  if (num === 199 || num === 205 || num === 662) conv = 205;
+  if ((num === 2 || num === 52 || num === 477) && ty !== 382) conv = 52;
+  if (num === 382) conv = 382;
+  if (conv !== 0 && conv !== ty) {
+    const id = VINE_ID_BY_SHEET.get(conv);
+    if (id !== undefined) st.type[k] = id;   // 换型（SquareTileFrame 对藤无杀）
+    return;
+  }
+  let dead = num === -1;
+  if ((ty === 52 || ty === 382) && num !== 2 && num !== 477 && num !== 192) dead = true;
+  if (ty === 62 && num !== 60 && num !== 384 && num !== 226) dead = true;
+  if (ty === 115 && num !== 109 && num !== 492) dead = true;
+  if (ty === 528 && num !== 70) dead = true;
+  if (ty === 636 && num !== 23 && num !== 661) dead = true;
+  if (ty === 205 && num !== 199 && num !== 662) dead = true;
+  if (ty === 638 && num !== 633) dead = true;
+  if (dead) {
+    killTile(st, x, y);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) checkVinesAt(st, x + dx, y + dy);
+    }
+  }
+}
+/** KillTile + 九宫 CheckVines 级联（蜂巢凹龛用） */
+function killTileVineCascade(st: TileStore, x: number, y: number): void {
+  killTile(st, x, y);
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) checkVinesAt(st, x + dx, y + dy);
+  }
+}
+
+// ============================================================
 // 0. 树坍塌级联（GGGG 2026-08-18）：
 //    KillTile(干基) → SquareTileFrame(cs:80924) → TileFrame(cs:82067) →
 //    TileFrameImportant case 5 → CheckTree(cs:54598)——下方支撑失效时
@@ -982,12 +1046,13 @@ function tooManyJungleVines(st: TileStore, i: number, j: number, maxCount = 6): 
   return false;
 }
 
-/** 单格藤蔓写入（cs:20357：active+type+ClearSlope） */
+/** 单格藤蔓写入（cs:20357：active+type+ClearSlope——Tile.cs:160 清 slope+halfBrick 双轴） */
 const putVine = (st: TileStore, x: number, y: number, id: number): void => {
   const k = st.idx(x, y);
   st.type[k] = id;
   st.flags[k] = 1;
   st.slope[k] = 0;
+  st.half[k] = 0;
 };
 
 /** Vines pass（cs:20338-20590）1:1：六类藤蔓逐列垂直生长 + 丛林蜂巢凹龛 444 */
@@ -1049,7 +1114,7 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (ok) {
             for (let a = i; a < i + 2; a++) {
               for (let b = k + 1; b < k + 3; b++) {
-                killTile(st, a, b);
+                killTileVineCascade(st, a, b);
                 st.setTileSilent(a, b, HIVE, (a - i) * 18, (b - k - 1) * 18);
               }
             }

@@ -652,7 +652,15 @@ function pyramid(
           if (!st.inBounds(a, b) || !st.flags[st.idx(a, b)] || st.type[st.idx(a, b)] !== num) { all = false; break; }
         }
       }
-      if (all && st.inBounds(m, n)) st.wall[st.idx(m, n)] = wall;
+      if (all && st.inBounds(m, n)) {
+        st.wall[st.idx(m, n)] = wall;
+        // cs:27886 SquareWallFrame(m,n) → Framing.WallFrame(resetFrame:true)：
+        // 墙 34 非大帧墙(wallLargeFrames[34]==0)→ 每写一墙 1×Next(0,3)
+        // (wall!=21 无第二掷)。ZZZZ 定谳:s22222 此处 11025 掷,漏掷曾致
+        // num8 后全部骰序位移(num12 23→25),走廊 24→26 带/出口隧道错路/
+        // 神庙锚 iter2 ~100k 级联全源于此。DesertPass.wallFrameDraw 同语义。
+        rng.int(0, 2);
+      }
     }
   }
   let num8 = 1;

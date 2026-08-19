@@ -66,7 +66,7 @@ export class GLSpriteLayer {
   private prog: WebGLProgram | null = null;
   private uni: Record<string, WebGLUniformLocation | null> = {};
   private vao: WebGLVertexArrayObject | null = null;
-  private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null };
+  private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null };
   private texs = new Map<string, TexEntry>();
   private stamp = 0;
   /** 字节预算(★2026-08-18:曾按条数 96 限额——96 张多 MB 纹理+mip 链可达 GB 级,
@@ -84,7 +84,7 @@ export class GLSpriteLayer {
     this.canvas = document.createElement('canvas');
     this.canvas.width = 0;
     this.canvas.height = 0;
-    this.samp = { nearest: null, linear: null, repeat: null };
+    this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null };
     this.init();
   }
 
@@ -192,6 +192,17 @@ export class GLSpriteLayer {
     gl.uniform1i(this.uni.uTex, 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindVertexArray(this.vao);
+  }
+
+  /** 读合成画布单像素（begin..end 之间调用；全屏地图黑屏哨兵探针用）。
+   *  返回 null = GL 不可用/读失败 */
+  readPixel(x: number, y: number): Uint8Array | null {
+    if (this.unavailable || !this.gl) return null;
+    const out = new Uint8Array(4);
+    try {
+      this.gl.readPixels(x, y, 1, 1, this.gl.RGBA, this.gl.UNSIGNED_BYTE, out);
+      return out;
+    } catch { return null; }
   }
 
   /** 帧结束(离屏画布交给调用方 drawImage) */
@@ -317,7 +328,12 @@ export class GLSpriteLayer {
     if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
-    gl.bindSampler(0, (opts?.smooth ?? true) ? this.samp.linear! : this.samp.nearest!);
+    // 采样器按【纹理是否带 mip】分流：mipped 用三线(linear)，noMip 用无 mip 线性
+    // (linearNoMip)——拿三线采样器采无 mip 纹理=不完整恒黑
+    const wantLinear = opts?.smooth ?? true;
+    gl.bindSampler(0, wantLinear
+      ? (e.mipped ? this.samp.linear! : this.samp.linearNoMip!)
+      : this.samp.nearest!);
     const px = 0.5 / e.w, py = 0.5 / e.h;
     const u0 = (sx + px) / e.w, v0 = (sy + py) / e.h;
     const u1 = (sx + sw - px) / e.w, v1 = (sy + sh - py) / e.h;
@@ -336,7 +352,9 @@ export class GLSpriteLayer {
     if (this.unavailable || !this.gl || sw <= 0 || sh <= 0 || totalW <= 0 || dh <= 0) return;
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
-    gl.bindSampler(0, this.samp.repeat!);
+    // repeat 档同理按 mipped 分流（现网调用方均为 mipped 世界背景；noMip+REPEAT
+    // 组合留 linearNoMipRepeat 防将来踩同坑）
+    gl.bindSampler(0, e.mipped ? this.samp.repeat! : this.samp.linearNoMip!);
     const px = 0.5 / e.w, py = 0.5 / e.h;
     const u0 = (sx + px) / e.w, v0 = (sy + py) / e.h;
     const span = ((sx + sw - px) - (sx + px)) / e.w * (totalW / dw);
@@ -373,7 +391,8 @@ export class GLSpriteLayer {
    *  打爆 → contextlost 风暴 26 万次,tab 3.4GB 用户实报 2026-08-18) */
   dispose(): void {
     if (!this.gl) return;
-    for (const [, e] of this.texs) this.gl.deleteTexture(e.tex);
+    // 上下文已丢失 → 驱动侧资源已蒸发,delete 只会打 INVALID_OPERATION 噪声
+    if (!this.gl.isContextLost()) for (const [, e] of this.texs) this.gl.deleteTexture(e.tex);
     this.texs.clear();
     this.bytes = 0;
     this.canvas.width = 0;

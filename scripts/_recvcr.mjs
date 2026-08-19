@@ -19,9 +19,10 @@ for (let att = 0; att < 10 && !ok2; att++) {
 if (!ok2) { console.log('GAVE UP: 页面加载失败'); await browser.close(); process.exit(1); }
 
 const result = await page.evaluate(async () => {
-  const g = window.__swGame;
   const t0 = Date.now();
-  while ((!g || !g.player || !window.__swRec) && Date.now() - t0 < 90000) {
+  let g = null;
+  while ((!g || !g.player || !window.__swRec) && Date.now() - t0 < 120000) {
+    g = window.__swGame;   // 世界生成 ~15s 后才挂——循环内重取
     await new Promise(r => setTimeout(r, 500));
   }
   if (!g?.player || !window.__swRec) return { fail: 'game/recorder 未就绪' };
@@ -44,26 +45,31 @@ const result = await page.evaluate(async () => {
   window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyQ', bubbles: true }));
   await new Promise(r => setTimeout(r, 150));
 
-  // 3) 挖一格：玩家脚下旁边一格非空格（byPlayer=true → cause 'mine'）
+  // 3) 挖一格：出生点可能在睡莲/水上——沿玩家列向下扫首个非空格（5.5 格射程内）
   let mined = null;
-  for (const [dx, dy] of [[1, -1], [-1, -1], [0, -1], [1, 0], [-1, 0], [0, 0]]) {
-    const x = ptx + dx, y = pty + dy;
-    if (!st.inBounds(x, y) || st.get(x, y) === 0) continue;
-    g.breakTile(x, y, true);
-    mined = [x, y, st.get(x, y)];
-    break;
+  for (let dy = 0; dy <= 5 && !mined; dy++) {
+    for (const dx of [1, -1, 0, 2, -2]) {
+      const x = ptx + dx, y = pty + dy;
+      if (!st.inBounds(x, y) || st.get(x, y) === 0) continue;
+      g.breakTile(x, y, true);
+      mined = [x, y];
+      break;
+    }
   }
   await new Promise(r => setTimeout(r, 120));
 
-  // 4) 放一格：玩家旁空格 + 下方实心（伪造最小 def：tile 键 'dirt'）
+  // 4) 放一格：玩家旁空格 + 下方实心（伪造最小 def：tile 键 'dirt'）。
+  //    用刚挖开的坑优先（坑壁邻接/下方都实心）
   let placed = null;
-  outer: for (const [dx, dy] of [[2, -1], [-2, -1], [2, 0], [-2, 0], [1, -1], [-1, -1]]) {
-    const x = ptx + dx, y = pty + dy;
+  const cand = [];
+  if (mined) cand.push([mined[0], mined[1]], [mined[0], mined[1] - 1]);
+  for (const dx of [2, -2, 1, -1, 3, -3]) cand.push([ptx + dx, pty], [ptx + dx, pty + 1]);
+  for (const [x, y] of cand) {
     if (!st.inBounds(x, y) || st.get(x, y) !== 0) continue;
     if (!st.inBounds(x, y + 1) || !st.isSolid(x, y + 1)) continue;
     g.tryPlace(x, y, { key: 'probe_item', tile: 'dirt' });
     placed = [x, y, st.get(x, y)];
-    break outer;
+    break;
   }
   await new Promise(r => setTimeout(r, 120));
 
@@ -80,6 +86,23 @@ const result = await page.evaluate(async () => {
   // 6) 关窗 + 导出
   const recordingOff = rec.toggle();
   const dump = rec.export();
+
+  // 7) F5 两档验证（合成事件非 trusted，不会真刷新）：
+  //    短按(<500ms) = 调试报告（behaviorTail 注入）；长按(≥500ms) = 录制窗 toggle
+  const f5 = (down) => window.dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup',
+    { code: 'F5', key: 'F5', bubbles: true, cancelable: true }));
+  window.__swDebugReport = undefined;
+  f5(true); await new Promise(r => setTimeout(r, 120)); f5(false);   // 短按
+  await new Promise(r => setTimeout(r, 400));
+  const shortReport = {
+    hasReport: !!window.__swDebugReport,
+    tailLen: Array.isArray(window.__swDebugReport?.behaviorTail) ? window.__swDebugReport.behaviorTail.length : -1,
+  };
+  const recBefore = rec.recording;
+  f5(true); await new Promise(r => setTimeout(r, 620)); f5(false);   // 长按 → 开窗
+  const longOn = rec.recording;
+  f5(true); await new Promise(r => setTimeout(r, 620)); f5(false);   // 长按 → 关窗
+  const longOff = rec.recording;
   const kinds = [...new Set(dump.events.map(e => e.k))];
   // 断言：事件类齐全 + t 单调不减
   const need = ['key', 'tile', 'spawn', 'death', 'drop'];
@@ -94,6 +117,7 @@ const result = await page.evaluate(async () => {
     fail: null,
     recordingOn, recordingOff,
     mined, placedTile: placed ? placed[2] : null, killed,
+    f5: { shortReport, recBefore, longOn, longOff },
     meta: dump.meta,
     kinds,
     missing, monotonic, qLeak,
@@ -111,7 +135,10 @@ if (result.fail) {
   console.log('meta:', JSON.stringify(result.meta));
   console.log('事件类:', result.kinds.join(','));
   console.log(`断言: 缺失=${JSON.stringify(result.missing)} t单调=${result.monotonic} 非关键键泄漏(KeyQ)=${result.qLeak}`);
-  const bad = result.missing.length || !result.monotonic || result.qLeak;
+  console.log(`F5: 短按报告=${result.f5.shortReport.hasReport} behaviorTail=${result.f5.shortReport.tailLen} 条; 长按开窗=${result.f5.longOn}(前置${result.f5.recBefore}) 长按关窗=${result.f5.longOff}`);
+  const f5bad = !result.f5.shortReport.hasReport || result.f5.shortReport.tailLen <= 0
+    || !result.f5.longOn || result.f5.longOff;
+  const bad = result.missing.length || !result.monotonic || result.qLeak || f5bad;
   console.log(bad ? 'PROBE: FAIL' : 'PROBE: PASS');
   if (bad) process.exitCode = 1;
   console.log('--- 前 20 条事件 ---');

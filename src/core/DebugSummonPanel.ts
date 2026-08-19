@@ -34,17 +34,28 @@ export const SUMMON_ENTRIES: SummonEntry[] = (() => {
   return out.sort((a, b) => a.id - b.id);
 })();
 
-/** 纯过滤（单测对象）：数字/名字子串，命中 id 优先排前 */
-export function filterSummonEntries(q: string, limit = 240): SummonEntry[] {
+/** 纯过滤（单测对象）：数字/英文名/本地化名（nameOf 可空——面板传 Lang.npcName，
+ *  单测省略）三路匹配；命中 id 优先排前。★Boss 行恒置顶（2026-08-19 修复：
+ *  693 条按 id 排序默认截 240——石巨人(排位 245)/世纪之花(262)/猪鲨/拜月教主/
+ *  光女/史莱姆皇后/鹿角怪全在截断线外，"面板里看不到 boss"根因；曾只匹配英文
+ *  数据名——中文搜索零命中第二根因） */
+export function filterSummonEntries(
+  q: string, limit = 240, nameOf?: (id: number) => string | null,
+): SummonEntry[] {
   const s = q.trim().toLowerCase();
-  if (!s) return SUMMON_ENTRIES.slice(0, limit);
+  const bossesFirst = (list: SummonEntry[]): SummonEntry[] =>
+    [...list.filter((e) => e.boss), ...list.filter((e) => !e.boss)];
+  if (!s) return bossesFirst(SUMMON_ENTRIES).slice(0, limit);
   const hit: SummonEntry[] = [];
   for (const e of SUMMON_ENTRIES) {
-    if (String(e.id) === s || e.name.toLowerCase().includes(s)) hit.push(e);
+    const local = nameOf ? (nameOf(e.id) ?? '') : '';
+    if (String(e.id) === s || e.name.toLowerCase().includes(s)
+      || local.toLowerCase().includes(s)) hit.push(e);
     if (hit.length >= limit * 2) break;
   }
-  // 完全等于 id 的排最前
-  hit.sort((a, b) => (String(a.id) === s ? -1 : 0) - (String(b.id) === s ? -1 : 0));
+  // 完全等于 id 的排最前；同级 Boss 置顶
+  hit.sort((a, b) => ((String(a.id) === s ? -1 : 0) - (String(b.id) === s ? -1 : 0))
+    || ((a.boss ? -1 : 0) - (b.boss ? -1 : 0)));
   return hit.slice(0, limit);
 }
 
@@ -95,7 +106,7 @@ export class DebugSummonPanel {
         <button data-act="close" style="background:none;color:#AAB;border:1px solid #556;border-radius:4px;cursor:pointer;">×</button>
       </div>
       <div style="display:flex;gap:6px;padding:6px 8px;border-bottom:1px solid #334;">
-        <input data-role="q" placeholder="搜索 id / 名字…"
+        <input data-role="q" placeholder="搜索 id / 名字(中英)…"
           style="flex:1;background:#181826;color:#FFF;border:1px solid #445;border-radius:4px;padding:3px 6px;font:inherit;outline:none;">
         <select data-role="count" style="background:#181826;color:#FFF;border:1px solid #445;border-radius:4px;font:inherit;">
           <option>1</option><option>5</option><option>10</option>
@@ -163,7 +174,7 @@ export class DebugSummonPanel {
 
   private render(): void {
     if (!this.listEl) return;
-    const rows = filterSummonEntries(this.query);
+    const rows = filterSummonEntries(this.query, 240, (id) => this.hooks.nameOf(id));
     this.listEl.innerHTML = '';
     for (const e of rows) {
       const row = document.createElement('div');

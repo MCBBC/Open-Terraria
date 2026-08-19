@@ -59,3 +59,21 @@ describe('F6 召唤面板列表', () => {
     expect(filterSummonEntries('zzz_no_such_npc').length).toBe(0);
   });
 });
+
+describe('F6 面板 boss 可见性（2026-08-19 修复回归）', () => {
+  it('默认视图 Boss 恒置顶:石巨人/世纪之花/光女/鹿角怪都在前 240 内(曾按 id 排位 245/262/636/668 全截断)', () => {
+    const rows = filterSummonEntries('', 240);
+    const ids = rows.map((e) => e.id);
+    for (const boss of [245, 262, 636, 657, 668, 370, 439]) expect(ids).toContain(boss);
+    // boss 全部在非 boss 之前
+    const firstNon = rows.findIndex((e) => !e.boss);
+    expect(rows.slice(0, firstNon).every((e) => e.boss)).toBe(true);
+  });
+
+  it('本地化名搜索:nameOf 命中(中文"世纪之花"→262;英文名仍可)', () => {
+    const zh = (id: number) => ({ 262: '世纪之花', 245: '石巨人' } as Record<number, string>)[id] ?? null;
+    const hits = filterSummonEntries('世纪之花', 240, zh);
+    expect(hits.some((e) => e.id === 262)).toBe(true);
+    expect(filterSummonEntries('plantera').some((e) => e.id === 262)).toBe(true);
+  });
+});

@@ -628,10 +628,15 @@ export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): voi
       if (st.liquid[li] === 0 && st.liquid[ri] === 0) continue;
       // 上方 8-20 格内已有半砖则跳过（原版防连续砸穿）；
       // 掷骰 = genRand.Next(8,20) ×2（8+trunc(Sample*12) 与 Next(8,20) 同分布同流位）
+      // ★cs:16719 判据 = active() && halfBrick() 双门——幽灵格（失活但 half 残留 1）
+      // 不算（曾只查 half → 12345 (3845,1045) 窗内幽灵半砖误拦砸击 = #54 Hf=1 单差）
       let flag = true;
       const num3 = 8 + Math.floor(rng.next() * 12), num4 = 8 + Math.floor(rng.next() * 12);
       for (let k = j - num3; k <= j + num4; k++) {
-        if (k >= 0 && k < h && st.half[st.idx(i, k)]) flag = false;
+        if (k >= 0 && k < h) {
+          const ki = st.idx(i, k);
+          if (st.flags[ki] !== 0 && st.half[ki]) flag = false;
+        }
       }
       // ★cs:16723-16726 `(type==75||type==76) && Next(10)!=0` → flag=false：
       //   黑曜石/狱石砖旁的唇缘只有 1/10 概率被砸半砖。&& 左短路——仅 75/76 格

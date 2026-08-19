@@ -16,6 +16,7 @@ import { doorClosedFrame } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
+import { placeTight, checkStalactite } from './ShimmerPass';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -359,30 +360,41 @@ function placeFurniture(st: TileStore, key: string, x: number, y: number, style 
   }
 }
 
-/** 雕像(2×3,style*36 步长);STATUES_WITH_TRAPS 命中 → 邻近飞镖陷阱+接线 */
+/** 雕像(2×3,style*36 步长);STATUES_WITH_TRAPS 命中 → 邻近飞镖陷阱+接线。
+ *  ★HouseBuilder.cs:483-491：FillRooms 的陷阱调用【无条件】——PlaceTile(105)
+ *  失败（目标格被占/腿不实）也照调 PlaceStatueTrap（陷阱+红线可独立落位）。
+ *  曾把 placeStatueTrap 关进放置成功分支 → 4 座小屋漏陷阱+45 格漏线 → 下游
+ *  ±25 红线扫描翻转 #59 全部 193 格残差（9293480 (3201,366) golden 实锤：
+ *  雕像 (3200,364) 被 62 挡、vanilla 仍落陷阱 (3192,366)+线 3192..3201）。
+ *  注意与 Statues pass 相区分：那边 cs:17045 是 `tile.active()&&type==x`
+ *  成功门内才调（JS StatuesPass 同构，勿互搬）。 */
 function placeStatue(st: TileStore, x: number, y: number, idx: number): boolean {
   const [sheet, style] = STATUE_LIST[idx];
   const tile = sheet === 349 ? STATUE_349 : STATUE_105;
-  if (!tile || !st.inBounds(x + 1, y - 2)) return false;
-  // Place2xX 前置(cs:39755)：下方双格 SolidTile2（旧缺此门）
-  if (!solid2(st, x, y + 1) || !solid2(st, x + 1, y + 1)) return false;
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = -2; dy <= 0; dy++) {
-      if (st.flags[st.idx(x + dx, y + dy)]) return false;
+  let ok = true;
+  if (!tile || !st.inBounds(x + 1, y - 2)) ok = false;
+  else if (!solid2(st, x, y + 1) || !solid2(st, x + 1, y + 1)) ok = false;
+  else {
+    for (let dx = 0; dx < 2 && ok; dx++) {
+      for (let dy = -2; dy <= 0; dy++) {
+        if (st.flags[st.idx(x + dx, y + dy)]) { ok = false; break; }
+      }
+    }
+    if (ok) {
+      // 雕像帧换行（Place2xX case 105，cs:39716-39720）：每行 55 列——
+      // frameX=(style%55)*36、frameY=floor(style/55)*54（与 StatuesPass 同实现；
+      // 此前单轴 style*36，style≥55 越界错位）
+      const row = Math.floor(style / 55);
+      for (let dx = 0; dx < 2; dx++) {
+        for (let dy = 0; dy < 3; dy++) {
+          st.setTileSilent(x + dx, y - 2 + dy, tile, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
+        }
+      }
+      regHouseObj(st, x, y - 2, 2, 3, 'floor');
     }
   }
-  // 雕像帧换行（Place2xX case 105，cs:39716-39720）：每行 55 列——
-  // frameX=(style%55)*36、frameY=floor(style/55)*54（与 StatuesPass 同实现；
-  // 此前单轴 style*36，style≥55 越界错位）
-  const row = Math.floor(style / 55);
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = 0; dy < 3; dy++) {
-      st.setTileSilent(x + dx, y - 2 + dy, tile, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
-    }
-  }
-  regHouseObj(st, x, y - 2, 2, 3, 'floor');
   if (STATUES_WITH_TRAPS.has(idx)) placeStatueTrap(st, x, y);
-  return true;
+  return ok;
 }
 
 // ---------- 画(RandHousePicture cs:35336 / Desert cs:35286) ----------
@@ -592,39 +604,261 @@ function genRect(st: TileStore, rng: RNG, steps: ChainStep[], ox: number, oy: nu
   __g?.(__rn(), ox, oy, w, h, -1);
 }
 
-// ---------- 钟乳石(WorldGen.PlaceTight 1:1) ----------
-/** PlaceUncheckedStalactite 的冰分支(cs:38377-38405):上方 ∈{147,161,163,164,200}
- *  才放置;其余名单(石/苔/沙等)在地下屋场景上方是主题块,恒静默返回 */
-function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
-  if (!solidAt(st, x, y - 1) || activeAt(st, x, y) || activeAt(st, x, y + 1)) return;
-  const above = st.type[st.idx(x, y - 1)];
-  if (above !== SNOW147 && above !== ICE161
-    && above !== TILE_BY_KEY['v_163_purple_ice_block']! && above !== sheetTile(164)
-    && above !== TILE_BY_KEY['v_200_red_ice_block']!) return;
-  // 冰族专属列（GetDesiredStalagtiteStyle :38800-38808 重定型）：147/161→0、
-  // 163→594、164→540、200→648——曾全写 fx0 冰柱列（163/164/200 错列）
-  const base = above === SNOW147 || above === ICE161 ? 0
-    : above === TILE_BY_KEY['v_163_purple_ice_block']! ? 594
-    : above === sheetTile(164) ? 540 : 648;
-  if (preferSmall) {
-    st.setTileSilent(x, y, STALACTITE, base + variation * 18, 72);
-  } else {
-    st.setTileSilent(x, y, STALACTITE, base + variation * 18, 0);
-    st.setTileSilent(x, y + 1, STALACTITE, base + variation * 18, 18);
+// ---------- 跨物件帧杀级联（WWWW 2026-08-19） ----------
+// vanilla 本 pass 的写（壳层/门/平台/梁/宝箱）经 SetFrames(frameNeighbors)/
+// ClearTile(frameNeighbors) → TileFrameImportant 分派 Check2xX(105/349 雕像)/
+// Check3x2(186/187 骨堆)/CheckPile+Check2x1(185 小堆)/Check2x2(巨石族 484 滚地
+// 仙人掌等)/CheckOrb(12 水晶心)/CheckStalactite(165)：**整盒完整性**（任一格被
+// 覆写/失活）或支撑失守 → KillTile 整件。旧实现仅登记本屋家具（killUnsupported
+// Furniture），pre-existing 物件（雕像 pass 的 105/地层 pass 的 187/484/12/165）
+// 与被宝箱半覆写的 186/185 全部漏杀 = #59 残 54 格的全部剩余。
+// ★KillTile 生成期语义（cs:63589 isGeneratingOrLoadingWorld → noItem；掷流对齐
+//   实证 #60-62 全绿）= 纯失活零掷；杀=失活+清 half/slope（TileFrame 失活分支），
+//   type/帧保留（stale type 下游按 vanilla 同读）。触发面=每阶段末扫房间 halo ±10
+//   （54 格残差全落房间 ±8 实证）；级联迭代至稳定。
+const KF_STATUE = new Set([105, 349]);          // Check2xX（2×3，104 五行/207 四行不在此域）
+const KF_PILE3x2 = new Set([186, 187]);         // Check3x2（3×2）
+const KF_HEART = 12;                             // CheckOrb（2×2；31/639/696 同族不在屋域）
+const KF_SMALLPILE = 185;                        // CheckPile → Check2x1（2×1）
+/** Check2x2 巨石族的"箱下有箱/桌豁免"（BasicChest+Fake+88 梳妆台+470/475） */
+const KF_CHEST_LIKE = new Set([21, 467, 88, 470, 475]);
+const KF_SNOW = new Set([147, 161, 162, 163, 164, 200, 224]);
+const KF_SANDFAM = new Set([53, 112, 116, 117, 234, 396, 397, 398, 399, 402, 403]);  // Sand/HardenedSand/Sandstone 转化集（sheet 空间）
+const KF_MUD = new Set([59, 60, 70, 199, 226]);   // Mud 集 + 70 丛林泥近似（v_59=泥岩? 取 Mud 转化族）
+
+function kfSheetAt(st: TileStore, x: number, y: number): number {
+  const i = st.idx(x, y);
+  return st.flags[i] ? (TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) : -1;
+}
+function kfKillCell(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  // KillTile（cs:63964-63966）：type=0 + 失活 + 尾 SquareTileFrame——stale type
+  // 下游可读（CanGeneratePressurePlateAt 按型拒等），故清 type（setTileSilent(0)）
+  const i = st.idx(x, y);
+  st.setTileSilent(x, y, 0);
+}
+
+// ---------- 帧杀触发拓扑（WWWW）----------
+// vanilla 只对本 pass 里【带帧写入】的阶段触发 Check*：PlaceTile 尾 SquareTileFrame
+// 九宫（fr/ch/bp/bt/st/pl）+ SetFrames(frameNeighbors)/ClearTile(frameNeighbors)
+// （er/do/sb）。**蚀变 ar 的裸 SetTile/SetTileKeepWall(setSelfFrames) 不触发**
+// ——g59 保留 (2634,479) 三格残破仙人掌（邻居是被裸 SetTile(51) 蛛网覆写）与
+// (2665,607) 先在残破仙人掌实证：不被帧触即不杀。→ 阶段快照 diff 出变更格，
+// 仅对其九宫内的家族物件跑 Check（级联=杀格再入队）。
+interface KillSnap { x0: number; y0: number; x1: number; y1: number; f: Uint8Array; t: Uint16Array }
+function killSnap(st: TileStore, rooms: Rect[]): KillSnap {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+  for (const r of rooms) {
+    x0 = Math.min(x0, r.x - 12); y0 = Math.min(y0, r.y - 12);
+    x1 = Math.max(x1, r.x + r.w + 12); y1 = Math.max(y1, r.y + r.h + 52);
+  }
+  x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(st.w - 1, x1); y1 = Math.min(st.h - 1, y1);
+  const w = x1 - x0 + 1;
+  const f = new Uint8Array(w * (y1 - y0 + 1));
+  const t = new Uint16Array(w * (y1 - y0 + 1));
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = st.idx(x, y), q = (y - y0) * w + (x - x0);
+      f[q] = st.flags[i]!; t[q] = st.type[i]!;
+    }
+  }
+  return { x0, y0, x1, y1, f, t };
+}
+
+/** 帧杀扫描：snap→现在 的变更格九宫内家族物件 → Check* 击杀（级联至稳定） */
+function frameKillSweep(st: TileStore, rng: RNG, rooms: Rect[], snap: KillSnap): void {
+  const w = snap.x1 - snap.x0 + 1;
+  const queue: number[] = [];
+  for (let y = snap.y0; y <= snap.y1; y++) {
+    for (let x = snap.x0; x <= snap.x1; x++) {
+      const q = (y - snap.y0) * w + (x - snap.x0);
+      const i = st.idx(x, y);
+      if (snap.f[q] !== st.flags[i]! || snap.t[q] !== st.type[i]!) queue.push(i);
+    }
+  }
+  const checked = new Set<number>();
+  let guard = 0;
+  while (queue.length && guard++ < 20000) {
+    const i = queue.shift()!;
+    const x = i % st.w, y = Math.floor(i / st.w);
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (!st.inBounds(nx, ny)) continue;
+        const ni = st.idx(nx, ny);
+        if (!st.flags[ni] || checked.has(ni)) continue;
+        const before = st.flags[ni]!;
+        kfCheckObject(st, rng, ni, checked, queue);
+        if (!st.flags[ni]!) {
+          // 击杀 → 九宫再入队（KillTile 尾 SquareTileFrame 级联）
+          for (let ddy = -1; ddy <= 1; ddy++) {
+            for (let ddx = -1; ddx <= 1; ddx++) {
+              const cx = nx + ddx, cy = ny + ddy;
+              if (st.inBounds(cx, cy)) queue.push(st.idx(cx, cy));
+            }
+          }
+        }
+      }
+    }
   }
 }
 
-/** WorldGen.PlaceTight(cs:38329-38351):231 幼虫(及 shimmer,生成期无来源)短路,
- *  其余【恒先掷 2 次】Next(2)/Next(3) 再走 PlaceUncheckedStalactite——名单外静默
- *  返回但掷骰照耗(沙漠/花岗岩/大理石的 ActionStalagtite 行因此也要走这里) */
-function placeTight(st: TileStore, rng: RNG, x: number, y: number): void {
-  if (!st.inBounds(x, y)) return;
-  const i = st.idx(x, y);
-  if (st.flags[i] !== 0 && st.type[i] === LARVA231) return;
-  const preferSmall = rng.int(0, 1) === 0;
-  const variation = rng.int(0, 2);
-  placeUncheckedStalactite(st, x, y, preferSmall, variation);
+/** 单物件家族校验（ni=任一成员格；checked 记盒内全部格防重查） */
+function kfCheckObject(st: TileStore, rng: RNG, ni: number, checked: Set<number>, queue: number[]): void {
+  const x = ni % st.w, y = Math.floor(ni / st.w);
+  const sh = TILE_DEFS[st.type[ni]]?.vanilla?.sheet ?? -1;
+  const fx = st.frameX[ni]!, fy = st.frameY[ni]!;
+  const markBox = (bx: number, by: number, bw: number, bh: number) => {
+    for (let dx = 0; dx < bw; dx++) for (let dy = 0; dy < bh; dy++) {
+      if (st.inBounds(bx + dx, by + dy)) checked.add(st.idx(bx + dx, by + dy));
+    }
+  };
+  const killBox = (bx: number, by: number, bw: number, bh: number, typeId: number) => {
+    for (let dx = 0; dx < bw; dx++) for (let dy = 0; dy < bh; dy++) {
+      const ci = st.idx(bx + dx, by + dy);
+      if (st.type[ci] === typeId) kfKillCell(st, bx + dx, by + dy);
+    }
+  };
+  // ---- Check2xX（雕像 2×3）----
+  if (KF_STATUE.has(sh)) {
+    const col = Math.floor((fx % 36) / 18);
+    let row = Math.floor(fy / 18);
+    let rowBase = 0;
+    while (row >= 3) { row -= 3; rowBase += 54; }
+    const bx = x - col, by = y - row;
+    markBox(bx, by, 2, 3);
+    let dead = false;
+    for (let dx = 0; dx < 2 && !dead; dx++) {
+      for (let dy = 0; dy < 3; dy++) {
+        const ci = st.idx(bx + dx, by + dy);
+        if (!st.flags[ci] || st.type[ci] !== st.type[ni]
+          || st.frameX[ci] !== fx - col * 18 + dx * 18
+          || st.frameY[ci] !== dy * 18 + rowBase) { dead = true; break; }
+      }
+    }
+    if (!dead && (!supportOk(st, bx, by + 3) || !supportOk(st, bx + 1, by + 3))) dead = true;
+    if (dead) killBox(bx, by, 2, 3, st.type[ni]!);
+    return;
+  }
+  // ---- Check3x2（186/187 骨堆）----
+  if (KF_PILE3x2.has(sh)) {
+    const rowIn = Math.floor((fy % 36) / 18);
+    const rowBase = Math.floor(fy / 36) * 36;
+    let colAcc = Math.floor(fx / 18);
+    let styleBlock = 0;
+    while (colAcc > 2) { colAcc -= 3; styleBlock++; }
+    const bx = x - colAcc, by = y - rowIn;
+    const colBase = styleBlock * 54;
+    markBox(bx, by, 3, 2);
+    let dead = false;
+    for (let k2 = 0; k2 < 3 && !dead; k2++) {
+      for (let l2 = 0; l2 < 2; l2++) {
+        const ci = st.idx(bx + k2, by + l2);
+        if (!st.flags[ci] || st.type[ci] !== st.type[ni]
+          || st.frameX[ci] !== k2 * 18 + colBase
+          || st.frameY[ci] !== l2 * 18 + rowBase) { dead = true; break; }
+      }
+    }
+    if (!dead) {
+      for (let k2 = 0; k2 < 3 && !dead; k2++) {
+        const sx = bx + k2, sy = by + 2;
+        if (!supportOk(st, sx, sy)) { dead = true; break; }
+        const bs = kfSheetAt(st, sx, sy);
+        if (BOULDERS.has(bs)) { dead = true; break; }
+        if (!st.inBounds(sx, sy) || !st.flags[st.idx(sx, sy)]) continue;
+        if (st.type[ni] === TILE_BY_KEY['v_186_decos_3x2']!) {
+          if (styleBlock >= 26 && styleBlock <= 31 && !KF_SNOW.has(bs)) dead = true;
+          else if (styleBlock >= 32 && styleBlock <= 34 && !KF_MUD.has(bs) && bs !== 70) dead = true;
+        } else {
+          if (styleBlock <= 5 && !KF_MUD.has(bs) && bs !== 60 && bs !== 226) dead = true;
+          else if (styleBlock >= 6 && styleBlock <= 8 && ![57, 58, 75, 76].includes(bs)) dead = true;
+          else if (styleBlock >= 29 && styleBlock <= 34 && !KF_SANDFAM.has(bs)) dead = true;
+        }
+      }
+    }
+    if (dead) killBox(bx, by, 3, 2, st.type[ni]!);
+    return;
+  }
+  // ---- Check2x1（185 小堆）----
+  if (sh === KF_SMALLPILE) {
+    const bx = fx % 36 === 18 ? x - 1 : x;
+    markBox(bx, y, 2, 1);
+    let dead = false;
+    const r0 = st.idx(bx, y), r1 = st.idx(bx + 1, y);
+    if (!st.flags[r1] || st.type[r1] !== st.type[ni] || st.frameX[r1] !== st.frameX[r0]! + 18) dead = true;
+    if (!dead && (!supportOk(st, bx, y + 1) || !supportOk(st, bx + 1, y + 1))) dead = true;
+    if (!dead && (BOULDERS.has(kfSheetAt(st, bx, y + 1)) || BOULDERS.has(kfSheetAt(st, bx + 1, y + 1)))) dead = true;
+    if (!dead) {
+      const num = Math.floor(fx / 18);
+      const bl = kfSheetAt(st, bx, y + 1), br = kfSheetAt(st, bx + 1, y + 1);
+      if (num >= 36 && num <= 47 && !KF_SNOW.has(bl) && !KF_SNOW.has(br)) dead = true;
+      else if ((num >= 54 && num <= 59) || (num >= 73 && num <= 76)) {
+        if (!KF_SANDFAM.has(bl) && !KF_SANDFAM.has(br)) dead = true;
+      }
+    }
+    if (dead) killBox(bx, y, 2, 1, st.type[ni]!);
+    return;
+  }
+  // ---- CheckOrb（12 水晶心 2×2）----
+  if (sh === KF_HEART) {
+    const bx = fx !== 0 && fx !== 36 ? x - 1 : x;
+    const by = fy !== 0 ? y - 1 : y;
+    markBox(bx, by, 2, 2);
+    let dead = false;
+    for (let k2 = 0; k2 < 2 && !dead; k2++) {
+      for (let l2 = 0; l2 < 2; l2++) {
+        const ci = st.idx(bx + k2, by + l2);
+        if (!st.flags[ci] || st.type[ci] !== st.type[ni]) { dead = true; break; }
+      }
+      if (!dead && !supportOk(st, bx + k2, by + 2)) dead = true;
+    }
+    if (dead) killBox(bx, by, 2, 2, st.type[ni]!);
+    return;
+  }
+  // ---- Check2x2（巨石族 484 等）----
+  if (BOULDERS.has(sh)) {
+    let colOff = -Math.floor(fx / 18);
+    let extra = 0;
+    if (colOff < -1) { colOff += 2; extra = 36; }
+    const bx = x + colOff;
+    let fyAcc = fy;
+    let rowBase = 0;
+    while (fyAcc >= 36) { fyAcc -= 36; rowBase++; }
+    const by = y - Math.floor(fyAcc / 18);
+    markBox(bx, by, 2, 2);
+    let dead = false;
+    for (let k2 = 0; k2 < 2 && !dead; k2++) {
+      for (let l2 = 0; l2 < 2; l2++) {
+        const ci = st.idx(bx + k2, by + l2);
+        if (!st.flags[ci] || st.type[ci] !== st.type[ni]
+          || st.frameX[ci] !== k2 * 18 + extra
+          || st.frameY[ci] !== l2 * 18 + rowBase * 36) { dead = true; break; }
+      }
+    }
+    if (!dead) {
+      const bl = kfSheetAt(st, bx, by + 2), br = kfSheetAt(st, bx + 1, by + 2);
+      const chestLike = KF_CHEST_LIKE.has(bl) || KF_CHEST_LIKE.has(br);
+      if (!chestLike && !supportOk(st, bx, by + 2) && !supportOk(st, bx + 1, by + 2)) dead = true;
+    }
+    if (dead) killBox(bx, by, 2, 2, st.type[ni]!);
+    return;
+  }
+  // ---- CheckStalactite（165）----
+  if (sh === 165) {
+    checked.add(ni);
+    checkStalactite(st, rng, x, y);
+    return;
+  }
+  checked.add(ni);
 }
+
+// ---------- 钟乳石(WorldGen.PlaceTight 1:1) ----------
+// ★WWWW 2026-08-19：本文件旧有「仅冰族」的 PlaceUncheckedStalactite 局部近似
+//   （注释断言"地下屋上方恒主题块→名单外静默返回"）——对沙漠屋（上方 396/397
+//   →378 列）/花岗岩（368→432）/大理石（367→486）全部漏放 → #59 残 135 格
+//   T165 差（9293480 house#35 顶/底行 golden 实锤）。改用 ShimmerPass 的全量
+//   1:1 实现（垂挂/地面双形族+CheckStalactite 尾+style 失配补掷——屋内材质族
+//   恒 match 零补掷，掷流不变）。
 
 /** AgeRoom 七主题蚀变:逐主题把原版 WorldUtils.Gen 链逐条转录(行号 = 各
  *  *HouseBuilder.cs AgeRoom)。Dither/Blotches 语义见 applyChain 头注(C1/C2/C3) */
@@ -1027,7 +1261,22 @@ function placeSupportBeams(st: TileStore, rooms: Rect[], def: ThemeDef): void {
       if (found < 0) continue;
       const height = found - bottom;
       if (height > 1 && st.type[st.idx(x, bottom - 1)] !== PLATFORM) {
-        for (let y = bottom; y < found; y++) st.setTileSilent(x, y, def.beam, 0, 0);
+        // SetTileKeepWall(BeamType)：Clear(~(Wiring|Actuator)) → 液体/坡度/半砖全清
+        // （WWWW：曾漏清液体 → 梁格带水 78 格 L/Y 差（house12 (3207..3221,361-366)
+        // golden 梁无水 JS 有水））；梁底下一格 slope(0)/half(false)（HouseBuilder.cs:604）
+        for (let y = bottom; y < found; y++) {
+          const ci = st.idx(x, y);
+          st.liquid[ci] = 0;
+          st.liquidType[ci] = 0;
+          st.slope[ci] = 0;
+          st.half[ci] = 0;
+          st.setTileSilent(x, y, def.beam, 0, 0);
+        }
+        if (st.inBounds(x, found)) {
+          const bi = st.idx(x, found);
+          st.slope[bi] = 0;
+          st.half[bi] = 0;
+        }
       }
     }
   }
@@ -1225,6 +1474,9 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     __st?.('bld', ox, oy, theme === 'wood' ? 1 : theme === 'ice' ? 2 : theme === 'jungle' ? 3 : theme === 'desert' ? 4 : theme === 'granite' ? 5 : theme === 'marble' ? 6 : 7, __rn());
 
     // ---- HouseBuilder.Place 原序 ----
+    // WWWW：帧杀快照基线（rooms 定形后、任何写之前）
+    let ksnap = killSnap(st, rooms);
+    const kstage = () => { frameKillSweep(st, rng, rooms, ksnap); ksnap = killSnap(st, rooms); };
     // 1) PlaceEmptyRooms:外壳 + 内腔墙
     for (const r of rooms) {
       for (let x = r.x; x < r.x + r.w; x++) {
@@ -1254,25 +1506,32 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     for (const r of rooms) {
       addProtectedStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 8);
     }
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('er', ox, oy, 0, __rn());
     // 2-4) 楼梯 / 门 / 平台
     placeStairs(st, rng, rooms, def);
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('st', ox, oy, 0, __rn());
     placeDoors(st, rng, rooms, def);
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('do', ox, oy, 0, __rn());
     placePlatforms(st, rooms, def);
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('pl', ox, oy, 0, __rn());
     // 5) 支撑梁
     placeSupportBeams(st, rooms, def);
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('sb', ox, oy, 0, __rn());
     // 6) 沙漠 Bast 石碑(HouseBuilder.cs:757-831):三级级联(底行→顶行兜底),
     //    上限 bastMax = 2+尺寸档——旧实现单发公式 + 硬编码 2(C7)
     if (theme === 'desert' && bastCount < bastMax) {
       if (cascadePlace(st, rng, rooms, 'v_506_bast_statue', true)) bastCount++;
     }
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('bp', ox, oy, 0, __rn());
     // 7) FillRooms:画/烛台 + 装饰(每房)
     for (const r of rooms) fillRooms(st, rng, r, def, theme);
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('fr', ox, oy, 0, __rn());
     // 8) AgeRoom:七主题蚀变(原版无噪声种子掷骰——旧实现自掷 1<<30 非原版消耗,已删)
     for (const r of rooms) {
@@ -1281,6 +1540,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     }
     // 9) 宝箱(ChestChance=1.0,四级联)
     placeChests(st, rng, gs, chests, rooms, def, theme);
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('ch', ox, oy, 0, __rn());
     // 10) 主题专属件(HouseBuilder.cs:833-913):丛林磨刀站/沙漠提炼机,均只有底行
     //     级联;上限 _random.Next(2,5) 是【每屋重掷】(:835/:871,条件短路保证仅
@@ -1291,6 +1551,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     if (theme === 'desert' && extractCount < rng.int(2, 4)) {
       if (cascadePlace(st, rng, rooms, 'v_219_extractinator', false)) extractCount++;
     }
+    kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('bt', ox, oy, 0, __rn());
     return true;
   };

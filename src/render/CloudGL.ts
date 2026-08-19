@@ -206,12 +206,17 @@ void main() {
   dispose(): void {
     const gl = this.gl;
     if (gl) {
-      for (const e of this.texs.values()) gl.deleteTexture(e.tex);
+      // 已丢失的上下文上 delete 会打 INVALID_OPERATION 噪声(对象可能已不属于
+      // 恢复后的上下文实例;2026-08-19 双开风暴 console 刷屏)——直接跳过,
+      // 上下文死亡时驱动侧资源已全部蒸发
+      if (!gl.isContextLost()) {
+        for (const e of this.texs.values()) gl.deleteTexture(e.tex);
+        if (this.vbo) gl.deleteBuffer(this.vbo);
+        if (this.vao) gl.deleteVertexArray(this.vao);
+        if (this.prog) gl.deleteProgram(this.prog);
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+      }
       this.texs.clear();
-      if (this.vbo) gl.deleteBuffer(this.vbo);
-      if (this.vao) gl.deleteVertexArray(this.vao);
-      if (this.prog) gl.deleteProgram(this.prog);
-      gl.getExtension('WEBGL_lose_context')?.loseContext();
     }
     this.canvas.width = 0; this.canvas.height = 0;
     this.gl = null; this.prog = null; this.vao = null; this.vbo = null;

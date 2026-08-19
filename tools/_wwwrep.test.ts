@@ -479,6 +479,11 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       const rngW = spanOut ? new Proxy(rng, {
         get(target, prop, recv) {
           const v = Reflect.get(target, prop, target);
+          // AAAAA：rng.vanilla（UnifiedRandom 直通）——next()=C# 裸 Next() 录 'n'
+          if (prop === 'vanilla') {
+            const ur = v as { next(): number };
+            return { next: () => { const r = ur.next(); if (process.env.SW_WWW_SPAN_DN !== '0') spanLines.push('n'); return r; } };
+          }
           if (typeof v !== 'function') return v;
           const fname = String(prop);
           return (...args: number[]) => {
@@ -487,6 +492,9 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
             if (fname === 'nextInt') line = `a ${args[0]}`;
             else if (fname === 'int') line = `b ${args[0]} ${args[1]! + 1}`;
             else if (fname === 'nextIntRange') line = `b ${args[0]} ${args[1]}`;
+            // AAAAA：全样本流 d/n 通道（对齐 XXXX 织入的 vanilla span 格式——
+            //   NextDouble()→'d'、裸 Next()→'n'；SW_WWW_SPAN_DN=0 可关）
+            else if (process.env.SW_WWW_SPAN_DN !== '0' && (fname === 'next' || fname === 'chance' || fname === 'range')) line = 'd';
             if (line) spanLines.push(line);
             return r;
           };
@@ -495,8 +503,42 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       const spanLines: string[] = [];
       const segLog: string[] = [];
       if (spanOut) (globalThis as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg = (n, d) => segLog.push(n + ' ' + JSON.stringify(d));
+      // WWWW：SW_WWW_HOUSE=/path + SW_WWW_HOUSE_DUMP=59 → 小屋序列日志
+      // （bld=锚点+主题码 / er..bt=阶段 / ar=aging 房 w*100+h）
+      const houseLog: string[] = [];
+      // WWWW：SW_WWW_WATCH=/path → 目标格（/tmp/wwww-targets.json 索引数组）随
+      // 小屋阶段事件（bld/er/st/do/pl/sb/bp/fr/ar/ch/bt）的首变时刻归因日志。
+      const watchIdx: number[] | null = process.env.SW_WWW_WATCH ? JSON.parse(readFileSync('/tmp/wwww-targets.json', 'utf8')) : null;
+      const watchState: Map<number, number> | null = watchIdx ? new Map() : null;
+      const watchLog: string[] = [];
+      if (process.env.SW_WWW_HOUSE && process.env.SW_WWW_HOUSE_DUMP === String(step.dump)) {
+        (globalThis as { __swHouseStage?: (t: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage
+          = (t, a, b, c, d) => {
+            houseLog.push(`${t} ${a} ${b} ${c} ${d}`);
+            if (watchState && watchIdx) {
+              for (const i of watchIdx) {
+                if (!watchState.has(i)) {
+                  // 惰性初始化：首事件前视为基线
+                }
+                const v = built.st.flags[i]! ? built.st.type[i]! : 0;
+                if (!watchState.has(i) || watchState.get(i) !== v) {
+                  if (watchState.has(i)) watchLog.push(`${t} h(${a},${b}) idx${i} (${i % W},${Math.floor(i / W)}) sheet=${SHEET[v] ?? -1}`);
+                  watchState.set(i, v);
+                }
+              }
+            }
+          };
+      }
+      if (watchLog) { (globalThis as { __wwWatchFlush?: () => void }).__wwWatchFlush = () => { writeFileSync(process.env.SW_WWW_WATCH!, watchLog.join('\n') + '\n'); }; }
       await step.run(built.st, gs, spanOut ? rngW : rng, chests, world);
       (globalThis as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg = undefined;
+      if (houseLog.length) {
+        (globalThis as { __swHouseStage?: (t: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage = undefined;
+        writeFileSync(process.env.SW_WWW_HOUSE!, houseLog.join('\n') + '\n');
+        console.log(`  [housedump] dump=${step.dump} events=${houseLog.length} → ${process.env.SW_WWW_HOUSE}`);
+        (globalThis as { __wwWatchFlush?: () => void }).__wwWatchFlush?.();
+        (globalThis as { __wwWatchFlush?: () => void }).__wwWatchFlush = undefined;
+      }
       if (spanOut && segLog.length) writeFileSync(spanOut.replace(/\.txt$/, '.seg.txt'), segLog.join('\n') + '\n');
       if (spanOut) { writeFileSync(spanOut, spanLines.join('\n') + '\n'); console.log(`  [spandump] dump=${step.dump} rolls=${spanLines.length} → ${spanOut}`); }
       (globalThis as { __swSpiderVisit?: (cx: number, cy: number, k: string, b: number, a2: number, w: number) => void }).__swSpiderVisit = undefined;
@@ -523,6 +565,9 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
           console.log(`  [frdump] dump=${step.dump} cells=${parts[0]} → ${out}`);
           // WWWW：全网格 wire 通道快照（对拍金标 NNN_Surface.wire = 上一 pass 末态）
           writeFileSync(out.replace(/\.fr$/, '.wire'), Buffer.from(built.st.wire.buffer.slice(0)));
+          // WWWW：liquid+lty 全网格快照（lty 本仓库 +1 编码，比较时 -1）
+          writeFileSync(out.replace(/\.fr$/, '.liq'), Buffer.from(built.st.liquid.buffer.slice(0)));
+          writeFileSync(out.replace(/\.fr$/, '.lty'), Buffer.from(built.st.liquidType.buffer.slice(0)));
           console.log(`  [frdump] dump=${step.dump} wire → ${out.replace(/\.fr$/, '.wire')}`);
           if (process.env.SW_WWW_CHDUMP && String(step.dump) === process.env.SW_WWW_CHDUMP) {
             const sink = (chests as unknown as Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>)

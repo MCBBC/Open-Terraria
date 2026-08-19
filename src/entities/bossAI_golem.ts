@@ -247,13 +247,16 @@ function golemHeadGoFree(e: Enemy, game: GameHooks): void {
 export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   const x = bodyXOf(e);
 
-  // ---- 血尽转换(首行):死亡演出 60t 后真死;头由自身 AI 转自由态续战 ----
-  if (e.hp <= 0 && !x.dying) {
-    x.dying = true; x.deadT = 0;
-    e.ai3 = 1;          // 死亡标记(头据此转自由态)
-    e.hp = e.maxHp;     // 满血续命防每 tick 重入
-    // 原版本体血尽零吼(aiStyle54 块仅头自由 :32587 一声 Item8/:32577)——
-    // 曾 0.9 吼与头自由吼构成同事件双吼,2026-08-18 对账删除
+  // ---- 血尽(首行):本体死亡 = 战斗结束（原版终战=本体 DoDeathEvents,
+  //      NPC.cs:80146-80148）。曾"满血续命 60t 演出"把胜利条件倒置——只有杀
+  //      自由头才终战,而自由头本应恒无敌 → 战斗无法以正确方式结束且可被
+  //      跳过终战,审计 boss#19,2026-08-19。部件(246-249)随本体消亡 ----
+  if (e.hp <= 0) {
+    for (const n of game.enemies() as Enemy[]) {
+      if (!n.dead && n !== e && n.vanillaId !== null
+        && n.vanillaId >= 246 && n.vanillaId <= 249) n.dead = true;
+    }
+    return;   // 本体交标准死亡管线(hurt 契约:hp≤0 已置 dead → 掉落/旗标链)
   }
 
   // ---- 首帧:localAI[0]==0 生成部件(NPC.cs:19458-19467) ----
@@ -413,26 +416,26 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
     x.alpha = x.free ? 0 : 255;             // 249 SetDefaults 无 alpha(:12139-12149)
   }
 
-  // ---- 血尽转换(首行):自由头死=战斗结束全族自毁;挂载头死=转自由态 ----
+  // ---- 血尽(首行):挂载头死=转自由态;自由头恒无敌（249 SetDefaults
+  //      NPC.cs:12151 dontTakeDamage=true——原版自由头不可击杀,胜利条件只有
+  //      杀本体。曾"杀自由头=全族自毁终战"= 倒置,审计 boss#19,2026-08-19）----
   if (e.hp <= 0) {
     if (x.free) {
-      e.dead = true;
-      for (const n of game.enemies() as Enemy[]) {
-        if (!n.dead && n !== e && n.vanillaId !== null && n.vanillaId >= 245 && n.vanillaId <= 249) n.dead = true;
-      }
-      game.spawnParticles(e.cx, e.cy, '#C04030', 20, 3, { life: 40 });
-      // 原版自由头消亡零吼(aiStyle54 块仅 32577/32587/Item8)——曾自加 roar,2026-08-18 对账删
-      return;
+      e.hp = e.maxHp;   // 防御性复原（dontTakeDamage 已挡伤害路径）
+    } else {
+      golemHeadGoFree(e, game);
     }
-    golemHeadGoFree(e, game);
   }
 
-  // ---- 属性:自由头按 249 SetDefaults(NPC.cs:12139-12149:damage 80/defense 32) ----
+  // ---- 属性:自由头按 249 SetDefaults(NPC.cs:12139-12151:damage 80/defense 32/
+  //      恒无敌) ----
   if (x.free) {
     const free = vanillaNpc(249);
     e.def.damage = free?.damage ?? 80;
     e.def.defense = free?.defense ?? 32;
+    e.dontTakeDamage = true;   // :12151 自由头无敌
   } else {
+    e.dontTakeDamage = false;
     const b = baseOf(e);
     e.def.damage = b.dmg;
     e.def.defense = b.def;

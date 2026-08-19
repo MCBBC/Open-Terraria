@@ -2541,12 +2541,18 @@ export class Player extends Entity {
     //   丢平台段（2026-08-16 水中跳对齐批修）。
     if (this.jumpHold > 0 && !jumpStartedThisTick) {
       if (this.vy === 0) this.jumpHold = 0;
-      else if (this.inputJump) {
-        this.vy = -effJumpSpd * gd;
-        if ((this.inWater || this.inLava) && !this.ridingMountSwimFree
-          && this.equipStats.merman && !this.ridingCart) {
-          if (this.swimTime <= 10) this.swimTime = 30;
-        } else this.jumpHold--;
+      else {
+        if (this.inputJump) {
+          this.vy = -effJumpSpd * gd;
+          if ((this.inWater || this.inLava) && !this.ridingMountSwimFree
+            && this.equipStats.merman && !this.ridingCart) {
+            if (this.swimTime <= 10) this.swimTime = 30;
+          }
+        }
+        // ★平台计时器无条件流逝（原版 jump-- 在 controlJump 门**外**——松键不清计数
+        //   :22446 但窗口照常耗尽；曾只在按住时递减 → 松键冻结预算，半空再按恢复
+        //   整段钉速 = 免费二段跳（2026-08-19 行为录制定位+坡面探针复现 vy+2.31→-2.55）
+        this.jumpHold--;
       }
     }
     if (this.swimTime > 0) this.swimTime--;   // PlayerFrame :35307-35312
