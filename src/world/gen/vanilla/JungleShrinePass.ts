@@ -8,7 +8,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { placeBuriedChest, nextJungleItem, killTileChest, type ChestSink } from './BuriedChestsPass';
+import { placeBuriedChest, nextJungleItem, killTileChest, PC_SOLID_TOP, type ChestSink } from './BuriedChestsPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
 import { flipGenSolid, genSolidType } from './GenSolid';
 
@@ -158,6 +158,68 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
   return spots;
 }
 
+/** ★OOOOO：CheckOrb 补件（cs:54187，引擎 genSquareTileFrame 未派发族 12/31/639/696）。
+ *  神龛失败回退的 KillTile 3×3 框扫到邻域 orb（s22222 (3335,754) 水晶心 2×2 被
+ *  vanilla 经 SquareTileFrame→TileFrameImportant case12→CheckOrb 整组击杀——
+ *  引擎缺该派发臂，旧 JS 静默零派发）。生成期（generatingWorld）掉落段不跑
+ *  （cs:54244 !generatingWorld 门）——仅 KillTile 2×2 + destroyObject 尾清；
+ *  支撑门仅 type 12/639（2×2 底两格 SolidTileAllowBottomSlope，cs:54218-30）。
+ *  锚点反解：frameX∉{0,36}→x-1；frameY≠0→y-1（cs:54205-06）。尘掷：orb 族全 0 掷。 */
+const ORB_TYPES = new Set([12, 31, 639, 696]);
+let orbGuard = false;   // destroyObject 重入闸（cs:54199 首查 / cs:54281 尾清）
+function solidAllowBottomKF(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;              // SolidTileAllowBottomSlope 界外恒 true
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i];
+  if (!genSolidType(t) && !PC_SOLID_TOP.has(TILE_DEFS[t]?.vanilla?.sheet ?? -1)) return false;
+  if (st.half[i] !== 0) return false;
+  if (st.slope[i] === 1 || st.slope[i] === 2) return false;   // 顶坡（平台正规顶帧例外略）
+  return true;
+}
+function checkOrbKF(st: TileStore, rng: RNG, x: number, y: number): void {
+  if (!st.inBounds(x, y) || orbGuard) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return;
+  const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+  if (!ORB_TYPES.has(sheet)) return;
+  const fx = st.frameX[i]!, fy = st.frameY[i]!;
+  const ax = fx !== 0 && fx !== 36 ? x - 1 : x;
+  const ay = fy !== 0 ? y - 1 : y;
+  let broken = false;
+  for (let k = 0; k < 2 && !broken; k++) {
+    for (let l = 0; l < 2; l++) {
+      if (!st.inBounds(ax + k, ay + l)) { broken = true; break; }
+      const ci = st.idx(ax + k, ay + l);
+      if (!st.flags[ci] || (TILE_DEFS[st.type[ci]]?.vanilla?.sheet ?? -1) !== sheet) { broken = true; break; }
+    }
+    if (broken) break;
+    if (sheet === 12 || sheet === 639) {
+      if (!solidAllowBottomKF(st, ax + k, ay + 2)) { broken = true; break; }
+    }
+  }
+  if (!broken) return;
+  orbGuard = true;
+  for (let m = ax; m < ax + 2; m++) {
+    for (let n = ay; n < ay + 2; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const ci = st.idx(m, n);
+      if (st.flags[ci] && (TILE_DEFS[st.type[ci]]?.vanilla?.sheet ?? -1) === sheet) {
+        killTileChest(st, rng, m, n);               // 尘掷走表 + 引擎九宫级联（雕像等）
+      }
+    }
+  }
+  orbGuard = false;
+}
+/** KillTile 尾 SquareTileFrame 九宫的 orb 派发补扫（引擎已分派族由 killTileChest 内
+ *  genSquareTileFrame 承担；此处只补 orb 族——序沿引擎九宫列主序）。 */
+function killTileChestKF(st: TileStore, rng: RNG, x: number, y: number): void {
+  killTileChest(st, rng, x, y);
+  for (const [dx, dy] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]] as const) {
+    checkOrbKF(st, rng, x + dx, y + dy);
+  }
+}
+
 /** ChestsInJungleShrines pass(cs:17308):神龛中心放常春藤箱;失败掏 3×3 后原地重试 */
 export function runJungleChestsPass(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, spots: Array<{ x: number; y: number }>,
@@ -165,9 +227,13 @@ export function runJungleChestsPass(
   for (const s of spots) {
     const main = nextJungleItem(gs, rng);
     if (!placeBuriedChest(st, rng, gs, chests, s.x + rng.int(0, 1), s.y, { style: 10, loot: main, flags: { ivy: true } })) {
+      // ★OOOOO：回退清场 = vanilla KillTile（cs:17320-23）——尘掷 + SquareTileFrame 级联
+      //   （多格件越框残部整组杀：s22222 (3214-3215,485-487) 雕像 2×3 六格全灭 / 心 2×2）。
+      //   曾 setTileSilent(0) 裸清 3×3：框外残格存活 → 二次放置箱体撞残件被拒
+      //   （s22222 #61 首 19 格残带主体：E 神龛 (3216,484) 双试全败 + 心/雕像孤儿格）。
       for (let dx = -1; dx <= 1; dx++) {
         for (let dy = 0; dy <= 2; dy++) {
-          if (st.inBounds(s.x + dx, s.y + dy)) st.setTileSilent(s.x + dx, s.y + dy, 0);
+          if (st.inBounds(s.x + dx, s.y + dy)) killTileChestKF(st, rng, s.x + dx, s.y + dy);
         }
       }
       // ★J3(cs:17324-17332):第二次放置前对 3×4(含地面行 y+3)统一 slope(0)/
