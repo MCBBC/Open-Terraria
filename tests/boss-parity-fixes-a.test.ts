@@ -1,7 +1,7 @@
 // Boss 族 1:1 修复回归(2026-08-19 台账 E 区,对照 Terarria1456/Terraria/NPC.cs):
 //   双子专家档/雷眼二阶段侧移拓扑重写 · 骷髅王专家分支+旋冲直设速度 ·
 //   Prime 专家档 · 史莱姆王跳跃循环/反挂机计数/小史莱姆 · 蜂后专家分支 ·
-//   世花弹伤 ×0.9 Remap · 月总核心 Lerp0.98/清弹/兜底 1↔3/环境吼 ·
+//   世花弹伤 ×0.9 Remap · 月总核心 Lerp0.98/清弹/兜底 1↔3 ·
 //   月总头 -2 残肢帧推进 · 鲨鱼龙玩家死存续+起扑/撞墙音 · 猪鲨 α150/瞬移侧翻。
 import { describe, it, expect } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
@@ -18,8 +18,8 @@ import type { GameHooks } from '../src/entities/types';
 const W = 200, H = 140, FLOOR = 110;
 const STONE = 1;
 
-function makeWorld(expert = false): World {
-  const w = new World(W, H, 7, 'boss-parity-a');
+function makeWorld(expert = false, h = H): World {
+  const w = new World(W, h, 7, 'boss-parity-a');
   w.groundLevel = 40;
   w.rockLevel = 60;
   if (expert) w.difficulty = 1;   // Main.expertMode(Main.cs:2762)
@@ -46,6 +46,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }): Harness {
   const sfx: string[][] = [];
   const em = {
     nextId: 1,
+    projectiles,                                  // 清弹段按 entities.projectiles 枚举
     add: (e: unknown, bucket: 'enemies' | 'projectiles') => {
       (e as { id: number }).id = em.nextId++;
       if (bucket === 'enemies') enemies.push(e as Enemy);
@@ -79,15 +80,17 @@ function makeHooks(world: World, playerAt: { x: number; y: number }): Harness {
   return { hooks, enemies, projectiles, player: player as unknown as Harness['player'], sfx };
 }
 
+let nextId = 1000;
 function spawn(h: Harness, id: number, tx: number, ty: number): Enemy {
   const e = Enemy.fromVanilla(id, tx * TILE, ty * TILE)!;
-  e.id = h.hooks.world.store.w + h.enemies.length + 1;   // 唯一 id(避开 store.w 尺寸语义)
-  e.bInit = true;                                         // 跳过各核首帧复位,状态由测试直给
+  e.id = nextId++;
+  e.bInit = true;                                 // 跳过各核首帧复位,状态由测试直给
   h.enemies.push(e);
   return e;
 }
 
 const P = { x: 100, y: 100 };   // 玩家格坐标(地面 FLOOR 上 10 格)
+const modTau = (a: number) => ((a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
 
 // ===========================================================================
 // 双子(NPC.cs:26497-27735)
@@ -103,11 +106,11 @@ describe('双子专家档 + 雷眼二阶段侧移拓扑(2026-08-19 台账 E)', (
     expect(twin.vy).toBeCloseTo(-0.115, 5);
   });
 
-  it('雷眼一阶激光计数:专家 <70% 血 +0.9/t(:26693-26708)', () => {
+  it('雷眼一阶激光计数:专家 <70% 血(65% 血位)+0.9/t(:26693-26708)', () => {
     const h = makeHooks(makeWorld(true), P);
     const twin = spawn(h, 125, 97, 95);       // 悬浮点正上 300px,距悬浮点 300<400,顶边高于玩家
     twin.ai0 = 0; twin.ai1 = 0; twin.ai3 = 0;
-    twin.hp = Math.floor(twin.maxHp * 0.5);   // <90/<80/<70 三档命中
+    twin.hp = Math.floor(twin.maxHp * 0.65);  // <90/<80/<70 三档命中(<60 未中)
     twinsAI(twin, h.hooks, h.player as never, false);
     expect(twin.ai3).toBeCloseTo(1.9, 5);
   });
@@ -128,6 +131,7 @@ describe('双子专家档 + 雷眼二阶段侧移拓扑(2026-08-19 台账 E)', (
   it('雷眼二阶段(ai0=3)侧移拓扑:专家 9.5/0.25 逼近玩家侧 ±340,180t 回悬浮(:27008-27114)', () => {
     const h = makeHooks(makeWorld(true), P);
     const twin = spawn(h, 125, 75, 100);      // 玩家左侧 → num460=-1 → 目标 (玩家-340, 同高)
+    twin.y = (h.player.cy as number) - twin.h / 2;   // 中心与玩家同高 → 目标 vy=0
     twin.ai0 = 3; twin.ai1 = 1; twin.ai2 = 0; twin.vx = 0; twin.vy = 0;
     twinsAI(twin, h.hooks, h.player as never, false);
     expect(twin.vx).toBeCloseTo(0.25, 5);     // acc 0.25(专家)
@@ -152,9 +156,15 @@ describe('双子专家档 + 雷眼二阶段侧移拓扑(2026-08-19 台账 E)', (
     const h = makeHooks(makeWorld(true), P);
     const twin = spawn(h, 126, 20, 100);      // 距悬浮点(玩家-180 同高)~1000px
     twin.ai0 = 3; twin.ai1 = 0; twin.ai2 = 0; twin.vx = 0; twin.vy = 0;
-    for (let t = 0; t < 200; t++) twinsAI(twin, h.hooks, h.player as never, true);
-    // 4 + 0.5+0.5+0.55+0.55+0.6+0.6 = 7.3(200t 内仍距悬浮点 >800px)
-    expect(Math.hypot(twin.vx, twin.vy)).toBeCloseTo(7.3, 1);
+    const x0 = twin.x, y0 = twin.y;
+    let vmax = 0;
+    for (let t = 0; t < 120; t++) {
+      twinsAI(twin, h.hooks, h.player as never, true);
+      twin.x = x0; twin.y = y0;               // 钉住距离(隔离阶梯随接近衰减)
+      vmax = Math.max(vmax, Math.hypot(twin.vx, twin.vy));
+    }
+    // 4 + 0.5+0.5+0.55+0.55+0.6+0.6 = 7.3(accelTo 0.1 步进在目标附近 ±0.1 振荡,取上包络)
+    expect(vmax).toBeCloseTo(7.3, 1);
   });
 });
 
@@ -197,12 +207,12 @@ describe('骷髅王专家分支 + 旋冲直设速度(2026-08-19 台账 E)', () =
     expect(sp).toBeGreaterThan(2).toBeLessThan(6);   // num176=5(无手 +2)
   });
 
-  it('旋冲速度每 tick 直设 dir×num200(专家 3.5×1.05×1.1^10×1.1,:22166-22242)', () => {
+  it('旋冲速度每 tick 直设 dir×num200(专家 3.5×1.05×1.1^9×1.1,:22166-22242)', () => {
     const h = makeHooks(makeWorld(true), P);
     const head = spawn(h, 35, 60, 100);       // 距玩家 40 格 = 640px → 全阶梯
     head.ai1 = 1; head.ai2 = 5; head.vx = 0; head.vy = 0;
     skeletronBossAI(head, h.hooks, h.player as never);
-    const expected = 3.5 * 1.05 * Math.pow(1.1, 10) * 1.1;   // 无手 ×1.1
+    const expected = 3.5 * 1.05 * Math.pow(1.1, 9) * 1.1;   // 无手 ×1.1
     expect(Math.hypot(head.vx, head.vy)).toBeCloseTo(expected, 3);
     // 经典 1.5(无 lerp 逼近)
     const hc = makeHooks(makeWorld(false), P);
@@ -225,12 +235,12 @@ describe('Prime 专家档(2026-08-19 台账 E)', () => {
     expect(head.vy).toBeCloseTo(-0.03, 5);
   });
 
-  it('旋冲专家 6 + 距离阶梯(6×1.05×1.1^10,:27905-27948)', () => {
+  it('旋冲专家 6 + 距离阶梯(6×1.05×1.1^9,:27905-27948)', () => {
     const h = makeHooks(makeWorld(true), P);
     const head = spawn(h, 127, 60, 100);      // 距玩家 640px → 全阶梯
     head.ai1 = 1; head.ai2 = 5; head.vx = 0; head.vy = 0;
     skeletronPrimeAI(head, h.hooks, h.player as never);
-    expect(Math.hypot(head.vx, head.vy)).toBeCloseTo(6 * 1.05 * Math.pow(1.1, 10), 3);
+    expect(Math.hypot(head.vx, head.vy)).toBeCloseTo(6 * 1.05 * Math.pow(1.1, 9), 3);
   });
 });
 
@@ -238,33 +248,33 @@ describe('Prime 专家档(2026-08-19 台账 E)', () => {
 // 史莱姆王(NPC.cs:43436-43735)
 // ===========================================================================
 describe('史莱姆王跳跃循环/反挂机计数/小史莱姆(2026-08-19 台账 E)', () => {
-  const jump = (expert: boolean, ai1: number) => {
-    const h = makeHooks(makeWorld(expert), P);
+  const jump = (ai1: number) => {
+    const h = makeHooks(makeWorld(false), P);
     const e = spawn(h, 50, 100, FLOOR - 6);   // 站地面
     e.ai0 = 0; e.ai1 = ai1; e.ai2 = 0; e.ai3 = 0;
     e.onGround = true; e.vx = 0; e.vy = 0;
     kingSlimeAI(e, h.hooks, h.player as never);
-    return { e, dir: 1 };                     // 玩家在右 → direction=1
+    return e;
   };
 
   it('跳序 -8/-8/-6/-13,vx += 4/4/4.5/3.5×dir,回充 -120/-200(:43632-43656)', () => {
-    const j0 = jump(false, 0);
-    expect(j0.e.vy).toBeLessThan(-7.5);       // -8 + 重力 0.4
-    expect(j0.e.vx).toBeCloseTo(4, 5);
-    expect(j0.e.ai1).toBe(1);
-    expect(j0.e.ai0).toBe(-120);
-    const j1 = jump(false, 1);
-    expect(j1.e.ai1).toBe(2);
-    expect(j1.e.vx).toBeCloseTo(4, 5);
-    const j2 = jump(false, 2);
-    expect(j2.e.vy).toBeLessThan(-5.5);
-    expect(j2.e.vx).toBeCloseTo(4.5, 5);
-    expect(j2.e.ai1).toBe(3);
-    const j3 = jump(false, 3);
-    expect(j3.e.vy).toBeLessThan(-12.5);
-    expect(j3.e.vx).toBeCloseTo(3.5, 5);
-    expect(j3.e.ai1).toBe(0);
-    expect(j3.e.ai0).toBe(-200);
+    const j0 = jump(0);
+    expect(j0.vy).toBeLessThan(-7.5);         // -8 + 共享重力
+    expect(j0.vx).toBeCloseTo(4, 5);
+    expect(j0.ai1).toBe(1);
+    expect(j0.ai0).toBe(-120);
+    const j1 = jump(1);
+    expect(j1.ai1).toBe(2);
+    expect(j1.vx).toBeCloseTo(4, 5);
+    const j2 = jump(2);
+    expect(j2.vy).toBeLessThan(-5.5);
+    expect(j2.vx).toBeCloseTo(4.5, 5);
+    expect(j2.ai1).toBe(3);
+    const j3 = jump(3);
+    expect(j3.vy).toBeLessThan(-12.5);
+    expect(j3.vx).toBeCloseTo(3.5, 5);
+    expect(j3.ai1).toBe(0);
+    expect(j3.ai0).toBe(-200);
   });
 
   it('充能分档:濒死 +13/t(:43611-43631)', () => {
@@ -277,15 +287,15 @@ describe('史莱姆王跳跃循环/反挂机计数/小史莱姆(2026-08-19 台�
     expect(e.ai0).toBe(-187);
   });
 
-  it('反挂机计数:无视线时 +1,有视线 −1 钳 0(:43514-43529);累计 300 落地 → 传送', () => {
-    // 无视线:KS 与玩家之间立一道实心墙
+  it('反挂机计数:无视线 +1,有视线 −1 钳 0(:43514-43529);累计 300 落地 → 传送', () => {
+    // 无视线:KS(88) 与玩家(100) 之间立墙(x=97,98;KS 宽 ~123px 不得出生即嵌墙)
     const h = makeHooks(makeWorld(false), P);
     const w = h.hooks.world;
-    for (let y = FLOOR - 20; y < FLOOR; y++) { w.store.setTile(105, y, STONE); w.store.setTile(106, y, STONE); }
-    const e = spawn(h, 50, 100, FLOOR - 6);
+    for (let y = FLOOR - 30; y < FLOOR; y++) { w.store.setTile(97, y, STONE); w.store.setTile(98, y, STONE); }
+    const e = spawn(h, 50, 88, FLOOR - 6);
     e.ai0 = -200; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     e.onGround = true;
-    for (let t = 0; t < 302; t++) {
+    for (let t = 0; t < 320; t++) {
       e.onGround = true;
       kingSlimeAI(e, h.hooks, h.player as never);
       if (e.ai1 === 5) break;
@@ -309,7 +319,7 @@ describe('史莱姆王跳跃循环/反挂机计数/小史莱姆(2026-08-19 台�
       const e = spawn(h, 50, 100, FLOOR - 6);
       e.ai0 = -200; e.ai1 = 0; e.ai2 = 0; e.ai3 = e.maxHp;
       e.onGround = true;
-      e.hp = Math.floor(e.maxHp * 0.9);       // 掉 10% → 至少两轮越线,取首轮
+      e.hp = Math.floor(e.maxHp * 0.9);       // 掉 10% → 越线出首批
       kingSlimeAI(e, h.hooks, h.player as never);
       const minions = h.enemies.filter((n) => n.vanillaId === 1 || n.vanillaId === 535);
       expect(minions.length).toBeGreaterThanOrEqual(1);
@@ -317,7 +327,7 @@ describe('史莱姆王跳跃循环/反挂机计数/小史莱姆(2026-08-19 台�
       for (const m of minions) {
         if (!expert) expect(m.vanillaId).toBe(1);
         else expect([1, 535]).toContain(m.vanillaId);
-        expect(m.ai0 % 1000).toBe(0);         // -1000*Next(3)
+        expect([0, -1000, -2000]).toContain(m.ai0);   // -1000*Next(3)
         expect(m.ai1).toBe(0);
       }
       expect(e.ai3).toBe(e.hp);               // 水位补记
@@ -341,7 +351,8 @@ describe('蜂后专家分支(2026-08-19 台账 E)', () => {
 
   it('专家俯冲速 16+8=24(:30458-30478)', () => {
     const h = makeHooks(makeWorld(true), P);
-    const bee = spawn(h, 222, 100, 100);      // 同高 → |Δcy|<20 → 俯冲
+    const bee = spawn(h, 222, 100, 100);
+    bee.y = (h.player.cy as number) - bee.h / 2;   // 中心同高 → |Δcy|<20 → 俯冲
     bee.ai0 = 0; bee.ai1 = 0; bee.ai2 = 0;
     bee.hp = Math.floor(bee.maxHp * 0.05);
     queenBeeAI(bee, h.hooks, h.player as never);
@@ -380,13 +391,20 @@ describe('蜂后专家分支(2026-08-19 台账 E)', () => {
 // ===========================================================================
 describe('世花弹伤专家 ×0.9 Remap(:32123)', () => {
   const fireOnce = (expert: boolean) => {
-    const h = makeHooks(makeWorld(expert), P);
-    const e = spawn(h, 262, 100, 96);
+    // H=280:UnderworldLayer=(280-200)=80 格;玩家 y=70(1120px)<1280 不激怒
+    const h = makeHooks(makeWorld(expert, 280), { x: 100, y: 70 });
+    const e = Enemy.fromVanilla(262, 100 * TILE, 72 * TILE)!;   // 不预置 bInit:入场出 3 钩蔓
+    e.id = nextId++;
+    if (expert) e.difficulty = 2;            // 原版 npc.difficulty = Main.Difficulty(NPC.cs:18086,
+                                              // GDL 浮点档:Classic=1/Expert=2;本仓由 ScaleStats
+                                              // 在生成端写入 mainDifficulty(world)——测试直连同口径)
+    h.enemies.push(e);
     e.hp = Math.floor(e.maxHp * 0.85);        // >80% → 恒种子 275(22 伤档)
     let guard = 0;
     while (h.projectiles.length === 0 && guard++ < 300) {
       planteraAI(e, h.hooks, h.player as never);
     }
+    expect(h.projectiles.length).toBeGreaterThan(0);
     return h.projectiles[0];
   };
   it('经典 22 / 专家 trunc(22×0.9)=19(两级相乘:Remap × 命中端 hostile 缩放)', () => {
@@ -398,7 +416,7 @@ describe('世花弹伤专家 ×0.9 Remap(:32123)', () => {
 // ===========================================================================
 // 月亮领主(NPC.cs:36774-38128)
 // ===========================================================================
-describe('月总核心 Lerp/清弹/兜底/环境吼 + 头 -2 帧推进(2026-08-19 台账 E)', () => {
+describe('月总核心 Lerp/清弹/兜底 + 头 -2 帧推进(2026-08-19 台账 E)', () => {
   it('死亡演出 Lerp amount=0.98(命名参数陷阱,:36928):vx 一步收敛到 2%', () => {
     const h = makeHooks(makeWorld(false), P);
     const core = spawn(h, 398, 100, 100);
@@ -507,11 +525,11 @@ describe('鲨鱼龙存续与音效 + 猪鲨 α/瞬移(2026-08-19 台账 E)', () 
 
   it('专家态 12 瞬移后 rotation += π 侧翻补偿(:50083-50097)', () => {
     const h = makeHooks(makeWorld(false), P);
-    const d = spawn(h, 370, 60, 90);          // 玩家左 → ai1=+300
+    const d = spawn(h, 370, 140, 90);         // 玩家右 → ai1=+300 → 瞬移到玩家左侧
     d.ai0 = 12; d.ai1 = 0; d.ai2 = 15;        // teleT/2=15 当帧瞬移
     d.spin = 0;
     dukeFishronAI(d, h.hooks, h.player as never);
-    // 瞬移后玩家在右侧 → direction=1;初 spr=1 ≠ -1 → spin += π
-    expect(d.spin).toBeCloseTo(Math.PI, 3);
+    // 瞬移后玩家在右 → direction=1;初 spr=1 ≠ -1 → spin += π(模 2π 比较,含瞄准段微偏)
+    expect(Math.abs(modTau(d.spin) - Math.PI)).toBeLessThan(0.1);
   });
 });

@@ -481,6 +481,13 @@ export class BiomeBackground {
    *  修:WeakMap 纹理 id(bitmap 安全)+ tint 步进 8 量化(背景层 3% 无感)
    *  + 逐条淘汰(工作集 = 层数×色桶 ~10-20 张) */
   private tintCache = new Map<string, HTMLCanvasElement>();
+
+  /** GPU contextlost 后染色缓存内容归零且不会自动重画——失效清理
+   *  (Renderer.onLost 统一扫;GL 主路径下通常为空表,零成本) */
+  clearTintCache(): void {
+    for (const c of this.tintCache.values()) { c.width = 0; c.height = 0; }
+    this.tintCache.clear();
+  }
   private tintTexIds = new WeakMap<object, number>();
   private tintTexIdSeq = 0;
   drawTiledTinted(

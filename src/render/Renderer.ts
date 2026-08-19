@@ -2,8 +2,9 @@
 import { upgradeToBitmap, loadBitmapOnly } from '../assets/SpriteAtlas';
 import { TILE, CHUNK } from '../core/constants';
 import { TintAtlas, type TintRect } from './TintAtlas';
+import { NPC_GRIDS } from '../remaster/NpcGridLayouts';
 import type { Camera } from './Camera';
-import { SkyRenderer } from './SkyRenderer';
+import { SkyRenderer, clearAmbientTintCache } from './SkyRenderer';
 import { ChunkCache } from './ChunkCache';
 import type { World, Clock } from '../world/World';
 import type { AssetBundle } from '../assets/AssetGen';
@@ -11,7 +12,7 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
-import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, dollFrameRows, dollHairLayer, hairFrameTinted, headArmorImage, eyelidFrame, tintRGBA, HIDES_HEAD, FRAME_W, FRAME_H, clearPaperDollCache } from '../player/PaperDoll';
 import { MALE_VARIANTS } from '../player/Appearance';
 import { hairDyeColor } from '../player/HairDyeColor';
 import type { Inventory } from '../items/Inventory';
@@ -130,7 +131,7 @@ import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids, drawLiquidBehindTilesOnly } from './VanillaLiquidRenderer';
 import { waterWaves, ensureWaveTextures, injectEntity, type WaveEntitySample } from './WaterWaves';
 import { renderEnv } from './VanillaTiler';
-import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt } from './TileFlames';
+import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -1553,6 +1554,18 @@ export class Renderer {
     let lastTripAt = 0;
     let gpuRetryAfter = 0;
     const onLost = (e: Event) => {
+      // ★写一次缓存失效扫(2026-08-19 playtrace 实证:GPU 进程死后恢复时"角色贴图
+      // 不恢复,其它正常"——写一次烘焙的缓存画布(PaperDoll 合成/TintAtlas 页/云染/
+      // 火焰预染/群系背景 2D 染色/墓碑)内容随后备 IOSurface 蒸发,且永不重画;
+      // 每帧重画的层天然自愈。首次丢失即清,画布 width=0 先还回表面再弃引用)
+      clearPaperDollCache();
+      this.tintAtlas.dispose();
+      this.sky.clearCloudTintCache();
+      clearAmbientTintCache();
+      this.biomeBg.clearTintCache();
+      clearTileFlamesCache();
+      for (const c of this.tombstoneCache.values()) { c.width = 0; c.height = 0; }
+      this.tombstoneCache.clear();
       const now = performance.now();
       losses = losses.filter((t) => now - t < 10_000);
       losses.push(now);
@@ -5354,8 +5367,10 @@ export class Renderer {
       flying: e.ai0 === 5 || (e.ai0 === 4 && e.ai2 === 0) || (half && e.ai0 === 0),
       vy: e.vy, ai0: e.ai0, ai1: e.ai1,
     });
-    this.drawNpcGrid(e, img, 2, 16, idx, 180, 122, {
-      perRow: 16, yOff: 2, inflateY: 2, mirrorTexFaces: 'right', rotate: e.spin,
+    // 几何(cols/rows/cell/inflateY)查 NPC_GRIDS 单一真源(重制管线共用)
+    const g = NPC_GRIDS[657]!;
+    this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
+      perRow: g.perRow, yOff: 2, inflateY: g.inflateY, mirrorTexFaces: 'right', rotate: e.spin,
     });
   }
 
@@ -5367,8 +5382,10 @@ export class Renderer {
     const img = this.atlas!.ensureVImage(`vanilla/NPC_${e.vanillaId}.png`);
     if (!img) return;
     const idx = dd2OgreNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy });
-    this.drawNpcGrid(e, img, 5, 10, idx, 232, 174, {
-      perRow: 10, anchorPx: 94, originYOff: 4, mirrorTexFaces: 'right',
+    const g = e.vanillaId != null ? NPC_GRIDS[e.vanillaId] : undefined;
+    if (!g) return;
+    this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
+      perRow: g.perRow, anchorPx: 94, originYOff: 4, mirrorTexFaces: 'right',
     });
   }
 
@@ -5381,8 +5398,9 @@ export class Renderer {
     const img = this.atlas!.ensureVImage('vanilla/NPC_696.png');
     if (!img) return;
     const idx = npc696NextFrame(this.npcGridFrame(e), { ai0: e.ai0 });
-    this.drawNpcGrid(e, img, 6, 27, idx, 64, 46, {
-      perRow: 9, originYOff: 4, mirrorTexFaces: 'left', echoRowShift: 18,
+    const g = NPC_GRIDS[696]!;
+    this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
+      perRow: g.perRow, originYOff: 4, mirrorTexFaces: 'left', echoRowShift: 18,
     });
   }
 
@@ -5398,8 +5416,10 @@ export class Renderer {
     const idx = darkMageNextFrame(this.npcGridFrame(e), {
       ai0: e.ai0, ai1: e.ai1, speed: Math.hypot(e.vx, e.vy),
     });
-    this.drawNpcGrid(e, img, 5, 9, idx, 120, 108, {
-      perRow: 9, anchorPx: 52, originYOff: 10, mirrorTexFaces: 'right',
+    const g = e.vanillaId != null ? NPC_GRIDS[e.vanillaId] : undefined;
+    if (!g) return;
+    this.drawNpcGrid(e, img, g.cols, g.rows, idx, g.cellW, g.cellH, {
+      perRow: g.perRow, anchorPx: 52, originYOff: 10, mirrorTexFaces: 'right',
       glowTex: 'vanilla/Glow_225.png',
     });
   }
@@ -5419,8 +5439,11 @@ export class Renderer {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
     const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, vx: e.vx, vy: e.vy });
-    const col = Math.floor(idx / 5), row = idx % 5;
-    const sx = col * 218 + 2, sy = row * 240 + 2, sw = 214, sh = 236;
+    // 几何查 NPC_GRIDS[668](5×5×218×240+pad2,重制管线同源)
+    const g = NPC_GRIDS[668]!;
+    const col = Math.floor(idx / (g.perRow ?? g.rows)), row = idx % (g.perRow ?? g.rows);
+    const sx = col * g.cellW + (g.padX ?? 0), sy = row * g.cellH + (g.padY ?? 0);
+    const sw = g.cellW - (g.padX ?? 0) * 2, sh = g.cellH - (g.padY ?? 0) * 2;
     const frame = { img, sx, sy, sw, sh };
     const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
     const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;   // NPC.Opacity

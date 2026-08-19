@@ -140,10 +140,10 @@ const DG_PRE_CLASS: Record<number, string> = {
   155: 'swords', 156: 'acc', 157: 'magic', 163: 'spears', 113: 'magic', 3317: 'boom',
   164: 'guns', 1156: 'guns', 1571: 'boom', 1569: 'boom', 1260: 'magic', 1572: 'summon',
   4607: 'summon', 5465: 'acc',
-  // ★BBBBB：327 水靴（地牢"水覆写箱" num2<ws+50 → itemType=327）——accessory=true
-  //   且 CanGetPrefixes 默认 true（ItemID.cs:175 CreateBoolSet(true,…) 列外）→ 可前缀，
-  //   Next(4)+Next(19) 两掷。曾漏登 → 该箱掷流 -2 连坐 G/F/Pa/Ba 全段。
-  327: 'acc',
+  // ★BBBBB 勘误：327=Golden Key（ItemID.cs:2193）——非 accessory/无任何前缀类
+  //   （Item.cs case 327 仅 width/height）→ GetRollablePrefixes=null → Prefix(-1) 零掷。
+  //   水覆写箱（num2<ws+50 → itemType=327）的 loot 修正点在 surf 支门（见 dgChestLoot），
+  //   非此处——曾误登 'acc' 反致 +2 掷流错位。
 };
 // 家具 item → 原版 tile id（Item.cs createTile；sheet 空间）
 // ★2026-08-13 id 空间碰撞修复：曾直存 sheet id 给 placeSimple 裸写 st.type——
@@ -1162,11 +1162,19 @@ export function runDungeonPass(
       }
     }
     // 0.6 框清墙（cs:465-483：normal 世界必跑）
+    // ★BBBBB（2026-08-19）：0.6f 乘积按 float 语义取整（Math.fround）——m20260811
+    //   入口 (cx=1054.45, cy=319, sx2=43, sy2=10)：double 直乘 10×0.6000000238418579
+    //   =6.000000238418579 → 319-x=312.99999976 → b0=312；而 golden 二进制 b0=313
+    //   （清墙上缘越过的 (1028-1031,312) 四格墙 7 残留实锤）。float 乘积
+    //   fl(10×0.6f)=6.0（中点 2^-22 恰在 [4,8) 段半 ulp——round-half-to-even 归 6.0）
+    //   → 313.0 → b0=313 ✓。9293480 侧（12×0.6f=7.200000286… 可精确表示）两模型
+    //   同值 235——零回退。金字塔案同族：二进制在刀口边界与反编译 double 算术分歧。
     {
-      const a0 = clampX(Math.trunc(cx - sx2 * 0.6000000238418579));
-      const a1 = clampX(Math.trunc(cx + sx2 * 0.6000000238418579));
-      const b0 = clampY(Math.trunc(cy - sy2 * 0.6000000238418579));
-      const b1 = clampY(Math.trunc(cy + sy2 * 0.6000000238418579));
+      const f06 = Math.fround(0.6);
+      const a0 = clampX(Math.trunc(cx - Math.fround(sx2 * f06)));
+      const a1 = clampX(Math.trunc(cx + Math.fround(sx2 * f06)));
+      const b0 = clampY(Math.trunc(cy - Math.fround(sy2 * f06)));
+      const b1 = clampY(Math.trunc(cy + Math.fround(sy2 * f06)));
       entBounds.upd(a0, b0, a1, b1);
       if (entCells) console.log(`ENT-BOX06 a0=${a0} a1=${a1} b0=${b0} b1=${b1}`);
       for (let x = a0; x < a1; x++) {

@@ -26,9 +26,11 @@ export interface Body {
    *  Player.cs:23252 velocity.Y==gravity）——语义 = 仅"贴地行走"吸附,空中实体不吸附。
    *  本仓 NPC 族重力在碰撞【前】累加（贴地时 vy=GRAVITY≠0）,故 NPC 门取语义等价的
    *  onGround；玩家取原版字面 vy===GRAVITY（'gravity'）。
+   *  'never' = 恒不吸附：AI_007 TownCritter（NPC.cs:54373 flag22 恒 true——homeTileY=-1
+   *  使 StepDown 分支永不可达）专用档,2026-08-19。
    *  ★曾用 vy>=0 宽门：低空飞行小动物（萤火虫/蝴蝶平飞 vy≥0）脚下 7~17px 有落面
    *  即被瞬移按压 → "怪力按地+闪现"周期循环（飞行 AI 抬升后再次触发） */
-  stepDownGate?: 'grounded' | 'gravity';
+  stepDownGate?: 'grounded' | 'gravity' | 'never';
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946：水/岩浆 .5、蜂蜜 .25、
    *  微光 .375；dry=1）。Entity 基类缺省 1，Enemy 侧由 npcLiquid.updateNpcLiquid 写入 */
   liqFactor?: number;
@@ -383,7 +385,9 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   // 瞬移按压到地面（萤火虫/蝴蝶"怪力按地+闪现"根因）
   if (b.stepUp) {
     const gate = b.stepDownGate ?? 'grounded';
-    if (gate === 'gravity' ? b.vy === GRAVITY : wasGround) applyStepDown(b, world);
+    // 'never'（AI_007 TownCritter flag22 恒 true 档）跳过 StepDown,StepUp 照常
+    if (gate === 'never') { /* no StepDown */ }
+    else if (gate === 'gravity' ? b.vy === GRAVITY : wasGround) applyStepDown(b, world);
     applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
   }
   // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)

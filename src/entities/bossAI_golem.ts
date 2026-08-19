@@ -247,17 +247,25 @@ function golemHeadGoFree(e: Enemy, game: GameHooks): void {
 export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   const x = bodyXOf(e);
 
-  // ---- 血尽(首行):本体死亡 = 战斗结束（原版终战=本体 DoDeathEvents,
-  //      NPC.cs:80146-80148）。曾"满血续命 60t 演出"把胜利条件倒置——只有杀
-  //      自由头才终战,而自由头本应恒无敌 → 战斗无法以正确方式结束且可被
-  //      跳过终战,审计 boss#19,2026-08-19。部件(246-249)随本体消亡 ----
+  // ---- 血尽:主路径在 Enemy.hurt 的 245 分支(标准死亡管线+灭部件,boss#19
+  //      定案"部件随本体消亡",原 DoDeathEvents :80146-80148)。此处仅存量自愈
+  //      兜底:旧版 hurt 放行年代留下的负血实体(不再受击则 hurt 不触发)——
+  //      AI 分发只跳 dead 不跳 hp≤0,须在此收口,否则负血条永挂(2026-08-19) ----
   if (e.hp <= 0) {
     for (const n of game.enemies() as Enemy[]) {
       if (!n.dead && n !== e && n.vanillaId !== null
         && n.vanillaId >= 246 && n.vanillaId <= 249) n.dead = true;
     }
-    return;   // 本体交标准死亡管线(hurt 契约:hp≤0 已置 dead → 掉落/旗标链)
+    e.dead = true;
+    return;
   }
+
+  // ---- FindFrame case 245(:73581-73609)状态帧(非循环动画):待机按 ai1 蓄力
+  //      倒计分 5 档(-20 蹲伏起步);跳跃 ai0==1 → 原版 frame.Y=1(1 像素笔误值
+  //      ≈帧0 微移,取 0)。customFrameIdx 渲染端直读(vanillaFrameIdx)——
+  //      曾无特例走通用循环 = 7 帧乱闪(用户报"动画贴图错误",2026-08-19) ----
+  e.customFrameIdx = e.ai0 === 1 ? 0
+    : e.ai1 < -16 ? 0 : e.ai1 < -12 ? 1 : e.ai1 < -8 ? 2 : e.ai1 < -4 ? 3 : e.ai1 < 0 ? 4 : 0;
 
   // ---- 首帧:localAI[0]==0 生成部件(NPC.cs:19458-19467) ----
   //  原版 NewNPC 传左上角坐标:拳 247=(Center-84,-9)、248=(+78,-9)、头 246=(-3,-57)
@@ -279,7 +287,8 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ---- 出生渐显(NPC.cs:19477-19485):期间 ai[1]=0,蓄力冻结 ----
   if (fadeAlpha(e, x) > 0) e.ai1 = 0;
 
-  // ---- 死亡演出:无敌+碎裂尘,60t 后真死(头/拳继续) ----
+  // ---- 死亡演出(★当前无置位点=不可达保留:boss#19 定案即时终战后 dying
+  //      置位已删;若恢复演出在 hurt 245 分支置 x.dying=true 并回退标准死) ----
   if (x.dying) {
     e.iframes = 2;
     e.vx *= 0.9;
@@ -492,6 +501,10 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
       // 阶段派生(:31487-31491):血 < 半 → 眼部阶段
       e.ai0 = e.hp < e.maxHp / 2 ? 1 : 0;
+      // FindFrame case 246(:73610-73633)状态帧:基础=l0(张嘴)1:0;眼部阶段(ai0==1)
+      // 按激光侧加帧——l1==-1(左)→+4 / l1==1(右)→+2 / 0(正上/下双眼)→基础帧
+      e.customFrameIdx = (x.l0 ? 1 : 0)
+        + (e.ai0 === 1 ? (x.l1 === -1 ? 4 : x.l1 === 1 ? 2 : 0) : 0);
     }
   } else {
     // ================= 自由态 aiStyle 48 GolemHeadFree(NPC.cs:31500-31741) =================
@@ -519,6 +532,9 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (r < 0.2) e.ai1 += num761;
       if (r < 0.1) e.ai1 += num761;
       x.l0 = e.ai1 < 20 || e.ai1 > 280 ? 1 : 0;   // 张嘴帧(:31584-31592)
+      // FindFrame case 249(:73635-73650):帧 = l0(张嘴)1:0(frameCounter 16 循环
+      // 无帧推进消费,不移植)
+      e.customFrameIdx = x.l0 ? 1 : 0;
       if (noLos) e.ai1 = 20;                       // :31593-31595 无视线时不蓄满
       if (e.ai1 >= 300) {                          // :31596-31617 嘴弹 proj 258(伤 20 速 8)
         e.ai1 = 0;
@@ -555,6 +571,8 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
 
 export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
   const x = fistXOf(e);
+  // 存量负血自愈兜底(主路径=hurt 标准死;旧放行年代留下的负血拳在此收口)
+  if (e.hp <= 0) { e.dead = true; return; }
   if (!e.bInit) {
     e.bInit = true;
     e.ai0 = e.vanillaId === 247 ? -1 : 1;   // ai0=侧别(-1 左拳/1 右拳;由本体生成时预置)

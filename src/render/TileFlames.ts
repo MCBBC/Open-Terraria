@@ -374,6 +374,13 @@ export function currentTileFrameSeed(): bigint {
 // ---- 颜色乘子预染缓存（multiply×fill 逐像素染 Flame 单元；静态色缓存命中、
 //      Disco 按 32 档量化限幅，超 512 条逐条淘汰防无界增长）----
 const _tintCache = new Map<string, HTMLCanvasElement>();
+
+/** GPU contextlost 后全部预染缓存内容归零且不会自动重画——失效清理
+ *  (Renderer.onLost 统一扫;画布 width=0 先还回表面) */
+export function clearTileFlamesCache(): void {
+  for (const c of _tintCache.values()) { c.width = 0; c.height = 0; }
+  _tintCache.clear();
+}
 /** 贴图实例 id:★ImageBitmap 无 .src(旧键裸读恒 undefined → imgId 退化为宽度,
  *  同宽 Flame_N 跨表串色;bitmap 迁移时代 WeakMap 方案同款) */
 const _flameImgIds = new WeakMap<object, number>();

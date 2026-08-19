@@ -92,6 +92,21 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   let selectedAppearance: Appearance | null = null;
   /** 当前角色槽位 id（硬核消亡时回写 CharacterStore 用；直载存档/无角色时为 null） */
   let selectedCharId: number | null = null;
+  /** 上次游玩角色 id（localStorage 持久;quickLoad/文件导入等无选角上下文的入口
+   *  以此续 .plr 语义——否则重载后 quickLoad 走世界内嵌玩家态,该会话存档不回写
+   *  随身态 → 箱子搬家+重进角色 = 物品双份(review 2026-08-18 抓出的复制窗) */
+  const LAST_CHAR_KEY = 'sbw.lastCharId';
+  function charContextId(): number | null {
+    if (selectedCharId != null) return selectedCharId;
+    try {
+      const v = localStorage.getItem(LAST_CHAR_KEY);
+      return v != null && Number.isFinite(+v) ? +v : null;
+    } catch { return null; }
+  }
+  function rememberCharId(id: number | null): void {
+    if (id == null) return;
+    try { localStorage.setItem(LAST_CHAR_KEY, String(id)); } catch { /* 隐私模式等 */ }
+  }
   let currentWorld: WorldMeta | null = null;
   const charStore = new CharacterStore();
   const worldStore = new WorldStore();
@@ -318,12 +333,19 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 角色随身态应用(原版 .plr 语义:背包/装备/储物/buff 等便携字段随角色跨世界;
    *  位置不随身——保留世界档位置,新世界=出生点)。
-   *  无角色态(新角色/旧角色未玩过/直载存档无 charId)→ 回退世界档内嵌 player,
-   *  行为与本特性前完全一致。
-   *  备案:联机房间路径只带外观不带随身态(服务器权威库存是独立系统)。 */
+   *  无角色态(新角色/旧角色未玩过/角色已删)→ 回退世界档内嵌 player。
+   *  备案:①联机房间路径只带外观不带随身态(服务器权威库存是独立系统);
+   *  ②journeyPowers 字段随态存储但 applyPlayer 不应用(本仓旅程力量落世界档,
+   *  与原版 IPersistentPerPlayerContent 逐角色有别);③硬核消亡走外观标记
+   *  (hardcoreDead 灰显禁入)而非删档,残留随身态不可达。 */
   async function applyPlayerWithCharacter(g: Game, worldPlayer: ReturnType<typeof loadSaveData>['player'] | null) {
-    const cs = selectedCharId != null ? await charStore.getState(selectedCharId) : null;
-    const px = g.player.x, py = g.player.y;   // 世界档位置(loadWorld 已摆)或新世界出生点
+    const cid = charContextId();
+    rememberCharId(cid);
+    const cs = cid != null ? await charStore.getState(cid) : null;
+    // 位置取世界档内嵌 player(worker 路径 loadWorld 的 playerAt 已同值;主线程
+    // 回退路径无 playerAt,取 g.player 会被钉在出生点——统一以 worldPlayer 为准)
+    const px = worldPlayer ? worldPlayer.x : g.player.x;
+    const py = worldPlayer ? worldPlayer.y : g.player.y;
     if (cs) {
       applyPlayer(g, { ...playerFromDiskForm(cs), x: px, y: py });
     } else if (worldPlayer) {
@@ -670,7 +692,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 新世界角色携带（原版 .plr）：已有角色随身态 → 背包/装备/储物/buff 随角色
     // 进入新世界（位置钉回出生点）。无角色态 = 新角色，保持原生初始装备
     {
-      const cs = selectedCharId != null ? await charStore.getState(selectedCharId) : null;
+      const cid = charContextId();
+      rememberCharId(cid);
+      const cs = cid != null ? await charStore.getState(cid) : null;
       if (cs) {
         const sx = g.player.x, sy = g.player.y;
         applyPlayer(g, { ...playerFromDiskForm(cs), x: sx, y: sy });
@@ -826,9 +850,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       }
       // 角色随身态同步（原版 .plr 语义）：存档 JSON 的 player 段即磁盘稳定 id 形,
       // 原样入 CharacterStore——与读侧 playerFromDiskForm 对称。同步失败不阻断存档
-      if (selectedCharId != null) {
-        try { void charStore.setState(selectedCharId, JSON.parse(json).player); }
-        catch (e) { console.warn('charState sync failed', e); }
+      {
+        const cid = charContextId();   // quickLoad 等无选角上下文会话也回写上次角色
+        if (cid != null) {
+          try { void charStore.setState(cid, JSON.parse(json).player); }
+          catch (e) { console.warn('charState sync failed', e); }
+        }
       }
     }).catch((e) => {
       // 回退同步 saveGame 也失败(异常世界状态)——如实报告,不留 unhandled rejection

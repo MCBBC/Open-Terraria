@@ -175,6 +175,39 @@ function solidTileStrict(st: TileStore, x: number, y: number): boolean {
 
 interface Rect { x0: number; y0: number; x1: number; y1: number }
 
+/** Main.tileTable（Main.cs:6828-6903 全量 76 id）——Place2x2 地面门右腿（cs:51396） */
+const PLACE2X2_TABLE = idsByVanillaSheet(
+  280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
+  608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
+  559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
+  298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87,
+  88, 405, 427,
+);
+/** WorldGen.Place2x2（cs:51352-51445；PlaceTile num∈2×2 族消费——DeadMansChest 巨石
+ *  138(cs:607)/矿爆起爆器 411(cs:59766-59769)）。**右下锚**：cs:51431 x--/y-- 后写
+ *  (x-1..x)×(y-1..y)，帧 (k*18, m*18)；前置双门（cs:51371-51405）逐列 i∈{x-1,x}：
+ *  ①2×2 区两格任一 active → 整写放弃；②地面 (i,y+1)：!nactive ||（!SolidTile2
+ *  （cs:70178）&& !Main.tileTable）→ 放弃。全程零掷（门的读与写都不耗 RNG）。 */
+function place2x2Direct(st: TileStore, x: number, y: number, type: number): boolean {
+  if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return false;            // cs:51358
+  for (let i = x - 1; i <= x; i++) {
+    for (let j = y - 1; j <= y; j++) {
+      if (st.flags[st.idx(i, j)]) return false;                                // cs:51376 空置门
+    }
+    const gi = st.idx(i, y + 1);
+    const gt = st.type[gi]!;
+    const solid2 = st.flags[gi] !== 0 && vanGenSolidType(gt)
+      && st.slope[gi] === 0 && st.half[gi] === 0;                              // SolidTile2（inActive 生成期恒真）
+    if (!st.flags[gi] || (!solid2 && !PLACE2X2_TABLE.has(gt))) return false;   // cs:51395-99 地面门
+  }
+  for (let k = x - 1; k <= x; k++) {
+    for (let l = y - 1; l <= y; l++) {
+      st.setTileSilent(k, l, type, (k - x + 1) * 18, (l - y + 1) * 18);        // cs:51434-43
+    }
+  }
+  return true;
+}
+
 /** 诊断段钩子(CCCC 批):SW_CCCC 探针消费,零开销可选调用 */
 const segProbe = (name: string, detail?: unknown): void => {
   const g = globalThis as { __swSeg?: (name: string, detail?: unknown) => void };
@@ -760,13 +793,14 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       }
     }
   }
-  // 起爆器 411:PlaceTile(..., forced: true)(cs:72)——无视支撑/占位检查强制 2×2 落块
-  for (let dx = 0; dx < 2; dx++) {
-    for (let dy = 0; dy < 2; dy++) {
-      if (!st.inBounds(detX + dx, detTop + dy)) continue;
-      st.setTileSilent(detX + dx, detTop + dy, DETONATOR, dx * 18, dy * 18);
-    }
-  }
+  // 起爆器 411:PlaceTile(..., forced: true)(cs:72)→case 411→Place2x2（cs:59766-59769）
+  //   ★CCCCC 修正：**右下锚** (detX-1..detX)×(detTop-1..detTop) + 空置/地面双门——
+  //   门败整写放弃且 WireLine/保护图照跑（cs:73-75 对 PlaceTile 返回值不接，函数仍
+  //   return true）。曾按左上锚无条件写 (detX..detX+1)×(detTop..detTop+1)：#101 段
+  //   (861-862,735-736) JS 多出一块 411 而 van Place2x2 空置门败未落（金标全图 411
+  //   位扫描 + 轨道行 735 直穿实证；AAAAA"findDown 首实心低一行"诊断更正——
+  //   findDown 两侧同果 detGround=736，差在落块锚 detTop-1 起）。
+  place2x2Direct(st, detX, detTop, DETONATOR);
   // WorldUtils.WireLine(WorldUtils.cs:111-131):L 形红线
   {
     const sx = Math.min(barX, detX), ex = Math.max(barX, detX);
@@ -1480,16 +1514,13 @@ export class DeadMansChestBiome {
         }
       }
     }
-    // PlaceTile(cx, cy, 138):巨石(cs:607)——TileObjectData Style2x2 四格分片帧
-    // (Tiles_138 36×38 单变体;此前只写锚定格 = 渲染只剩 18×18 小片,同 TrapsPass
-    // "贴图不全"根因,2026-08-13)
-    if (st.inBounds(cx, cy) && !st.flags[st.idx(cx, cy)]) {
-      for (let dy = 0; dy < 2; dy++) {
-        for (let dx = 0; dx < 2; dx++) {
-          if (st.inBounds(cx + dx, cy + dy)) st.setTileSilent(cx + dx, cy + dy, BOULDER, dx * 18, dy * 18);
-        }
-      }
-    }
+    // PlaceTile(cx, cy, 138)(cs:607)→Place2x2 右下锚+双门（cs:51352-51445）
+    //   ★CCCCC 修正：曾按左上锚写 (cx..cx+1)×(cy..cy+1)——整块 (+1,+1) 偏移：
+    //   #101 .fr (826,742)(832,743)(828,745) 三格 g=18,18 vs j=0,0 = 三块 DeadMans
+    //   巨石底右格错位实证（AAAAA 归因引擎 case 138 未派发 Check2x2——实为落块锚
+    //   差；138/411 的引擎派发已在本批 FinalCleanupPass 侧同补）。Tiles_138 36×38
+    //   单变体四格分片帧（2026-08-13 只写锚定格修复保持）。
+    place2x2Direct(st, cx, cy, BOULDER);
     this.placeWireLine({ x: b.x, y: b.y, dirX: 0, dirY: 1, steps: b.yPush });
   }
 

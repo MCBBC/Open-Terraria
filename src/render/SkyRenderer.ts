@@ -7,6 +7,12 @@ import { Clock as ClockVal } from '../world/World';
 
 /** 天空实体染色缓存（GetColor RGB × 贴图 multiply 预染；键含 1/16 量化色档） */
 const AMB_TINT_CACHE = new Map<string, HTMLCanvasElement>();
+/** GPU contextlost 后天空实体染色缓存内容归零且不会自动重画——失效清空
+ *  (Renderer.onLost 统一扫) */
+export function clearAmbientTintCache(): void {
+  for (const c of AMB_TINT_CACHE.values()) { c.width = 0; c.height = 0; }
+  AMB_TINT_CACHE.clear();
+}
 import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
 import { UnifiedRandom } from '../core/rng';
@@ -1449,6 +1455,14 @@ export class SkyRenderer {
   }
 
   private cloudTintCache = new Map<string, HTMLCanvasElement>();
+  /** GPU contextlost 后云染缓存内容归零且不会自动重画——失效清空
+   *  (Renderer.onLost 统一扫;GL 云路径下通常为空,零成本) */
+  clearCloudTintCache(): void {
+    for (const c of this.cloudTintCache.values()) { c.width = 0; c.height = 0; }
+    for (const c of this.cloudTintFree) { c.width = 0; c.height = 0; }
+    this.cloudTintCache.clear();
+    this.cloudTintFree.length = 0;
+  }
   /** 纹理实例 id(ImageBitmap 无 .src,裸读恒 undefined → 跨云纹理键碰撞;
    *  bitmap 迁移时代 WeakMap 方案同款) */
   private cloudTexIds = new WeakMap<object, number>();

@@ -148,7 +148,10 @@ function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean
 //   5/583-589/596/616/634 树族、323 棕榈（CheckPalmTree）、火把、门 10/11、
 //   矿轨 314、CheckDye 227、CheckOrb 12/31/639/696、CheckGnome 567、
 //   CheckRockGolemHead 579、693/694、235、442、128/269、91、35/139、386-389、
-//   92/93/453、Check2x2 族、172/360/505-527、27、171、376/443/444、630/631、723/724。
+//   92/93/453、Check2x2 族（★CCCCC 已派发 138/411——9293480 在场成员；余
+//   132/142/143/288-295/484/664/665/711/712/335/490/564/565/594/94-100/125/126/
+//   173/282/287/319/621/622 维持备案）、172/360/505-527、27、171、376/443/444、
+//   630/631、723/724。
 
 /** 内部 id → 原版 sheet（沿用 SurfaceDecorPasses 口径） */
 const SWEEP_SHEET = new Int16Array(TILE_DEFS.length).fill(-1);
@@ -558,6 +561,14 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     case 324:
       if (!solidAllowBottom(st, x, y + 1) || invalidForPiles(st, x, y + 1)) killTileGen(st, ctx, x, y);
       return true;
+    // CCCCC 批补：Check2x2 双支派发——cs:86396-86403（case 335/**411**/490/564/565/
+    //   594）与 cs:86672-86688（case 132/**138**/142/143/288-295/484/664/665/711/712）
+    //   同归 Check2x2。本批定向补 **138+411**（9293480 #101/#105 金标在场成员：
+    //   DeadMans 巨石 138 三块 + 矿爆起爆器 411 轨道巷杀级联）；其余成员维持未派发
+    //   备案（零掷不可见族，见文件头清单）。
+    case 138: case 411:
+      check2x2Sweep(st, ctx, x, y, sheet);
+      return true;
     case 373: case 374: case 375: case 461: case 709: {   // IsADripTile（cs:85750）
       const up = st.idx(x, y - 1);
       if (!st.flags[up] || slopeOf(st, x, y - 1) === 3 || slopeOf(st, x, y - 1) === 4
@@ -569,6 +580,72 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     default:
       if (C3X2_TYPES.has(sheet)) { check3x2Sweep(st, ctx, x, y, sheet); return true; }
       return false;   // 未移植族（见文件头清单）——非 frameImportant 路径由此回落
+  }
+}
+
+/** Check2x2 上方箱族豁免（cs:48483-85：BasicChest{21,467}+BasicChestFake{441,468}
+ *  +88 梳妆台+470 人偶架+475 帽架；type 裸读不查 active——ghost type 保真）。
+ *  （HalfBrickPass UUUU/LiquidSim 同源副本；本仓"同源副本禁 import"惯例） */
+const CHEST_PROTECT_2X2 = new Set([21, 467, 441, 468, 88, 470, 475]);
+/** Check2x2（cs:48405-48807）——CCCCC 批补派发（case 138 巨石/cs:86672 + case 411
+ *  起爆器/cs:86396）。锚点反解=本格减帧偏移（cs:48418-33；frameX≥36 修样式列 +36）；
+ *  2×2 四格 type+帧全等校验（仅内层 break，外层续跑逐列地面门——cs:48441-59）；
+ *  138 走 Boulders 支=上方箱族豁免+底两格 SolidTileAllowBottomSlope 联合门
+ *  （cs:48473-90）；411 走非巨石支=逐列 (k,num6+2) 地面门（cs:48460-71）。败 →
+ *  destroyObject 闸内整组 KillTile（尘掷走 killTileDustAmount 表：138→0、411→10/格）
+ *  + 尾 4×4 TileFrame(reset=false)（cs:48800-07）。 */
+function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                            // cs:48407
+  const i0 = st.idx(x, y);
+  let num2 = -Math.trunc(st.frameX[i0]! / 18);                              // cs:48418
+  let num = 0;
+  if (num2 < -1) { num2 += 2; num = 36; }
+  num2 += x;
+  let num4 = st.frameY[i0]!;
+  let num5 = 0;
+  while (num4 >= 36) { num4 -= 36; num5++; }                                // num3=36（type 172 除外）
+  const num6 = y - Math.trunc(num4 / 18);
+  const isBoulder = BOULDER_SHEETS.has(sheet);                              // 138=true / 411=false
+  const inW = (k: number, l: number): boolean => k >= 0 && l >= 0 && k < st.w && l < st.h;
+  let flag = false;
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      if (!inW(k, l)) { flag = true; break; }                               // GetTileSafely 新格→失配
+      const q = st.idx(k, l);
+      if (!st.flags[q] || SWEEP_SHEET[st.type[q]!] !== sheet
+        || st.frameX[q] !== (k - num2) * 18 + num
+        || st.frameY[q] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
+    }
+    // cs:48460-71（非巨石支：95/126 未派发、132 除外）——411 地面门
+    if (!isBoulder && sheet !== 132) {
+      if (!inW(k, num6 + 2)) flag = true;
+      else {
+        const gi = st.idx(k, num6 + 2);
+        if (!st.flags[gi]
+          || !(genSolidType(st.type[gi]!) || TILE_TABLE.has(SWEEP_SHEET[st.type[gi]!] ?? -1))) flag = true;
+        if (st.half[gi]) flag = true;
+      }
+    }
+  }
+  if (isBoulder) {                                                          // cs:48473-90（138 支）
+    const chestAbove = (cx: number, cy: number): boolean =>
+      inW(cx, cy) && CHEST_PROTECT_2X2.has(SWEEP_SHEET[st.type[st.idx(cx, cy)]] ?? -1);
+    if (!chestAbove(num2, num6 - 1) && !chestAbove(num2 + 1, num6 - 1)
+      && !solidAllowBottom(st, num2, num6 + 2)
+      && !solidAllowBottom(st, num2 + 1, num6 + 2)) flag = true;
+  }
+  if (!flag) return;
+  ctx.destroyObject = true;                                                 // cs:48567
+  for (let k = num2; k < num2 + 2; k++) {
+    for (let l = num6; l < num6 + 2; l++) {
+      if (!inW(k, l)) continue;
+      const q = st.idx(k, l);
+      if (st.flags[q] && SWEEP_SHEET[st.type[q]!] === sheet) killTileGen(st, ctx, k, l);
+    }
+  }
+  ctx.destroyObject = false;                                                // cs:48800
+  for (let k = num2 - 1; k < num2 + 3; k++) {
+    for (let l = num6 - 1; l < num6 + 3; l++) tileFrameGen(st, ctx, k, l, false);   // cs:48801-07
   }
 }
 

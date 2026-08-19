@@ -15,7 +15,8 @@
     "prebuild": "npm run test:audit",
     "play": "node scripts/play.mjs",
     "playsoft": "node scripts/play.mjs --soft",
-    "playtrace": "node scripts/play.mjs --trace"
+    "playtrace": "node scripts/play.mjs --trace",
+    "remaster-proxy": "node tools/remaster-proxy.mjs"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3"
