@@ -664,15 +664,18 @@ export class Arrow extends Entity {
     // 其余型号沿用 age/5 档
     const frames = projFrameCount(this.projId);
     const fIdx = this.piranha ? this.pFrame
-      : this.present ? this.presentStage    // 351 礼盒帧 0/1 随两段重力态（:27736/:27749）
-        : Math.floor(this.age / 5) % frames;
+      : this.phantomOrb ? this.orbFrame      // 454 帧：列队 6t 切 0/1 / 齐射恒 1（:30250/:30261-30266）
+        : this.martianRocket ? this.rkFrame   // 448 帧：3t/帧 3 帧循环（:29862-29868）
+          : this.present ? this.presentStage    // 351 礼盒帧 0/1 随两段重力态（:27736/:27749）
+            : Math.floor(this.age / 5) % frames;
     const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     const drawImg = frameImg ?? img;
     if (drawImg && (drawImg as HTMLImageElement).complete !== false
       && (drawImg.width > 0 || (drawImg as HTMLImageElement).width > 0)) {
       // 原生尺寸 × SetDefaults scale（与判定盒 w/h 解耦）：子弹 14 = 2×20×1.2
       // 曳光条；箭 1 = 14×32 贴图 × 1。曾统一拉成 w×w 宽 → 100px 巨型子弹/箭偏小
-      const s = this.drawScale;
+      // 454 随 alpha 伸展（:30244-30245 scale = 1−alpha/255）
+      const s = this.drawScale * (this.phantomOrb ? 1 - this.orbAlpha / 255 : 1);
       const iw = drawImg.width || (drawImg as HTMLImageElement).width;
       const ih = drawImg.height || (drawImg as HTMLImageElement).height;
       ctx.drawImage(drawImg as CanvasImageSource, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
@@ -691,8 +694,27 @@ export class Arrow extends Entity {
   /** 统一消亡出口（Projectile.Kill 语义钩子）：碎镜 1085 近身 150px 坏运等
    *  按弹型分发由 Game 侧 onProjectileDeath 消费 */
   private killNow(game: GameHooks): void {
+    // 448 火箭：Kill 全路径 = 爆炸（Projectile.Kill :70544-70580——Item14 音 +
+    // 判定盒外扩 112×112 重结算 Damage() + 尘 31×4/228×80；近身 42/撞块/180t
+    // 自毁全部走此口）
+    if (this.martianRocket) this.rocketExplode(game);
     this.dead = true;
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h, this.vx, this.vy);
+  }
+
+  /** 448 Kill 爆炸（:70544-70580）：position 归心后 width=height=112 重开判定盒
+   *  结算 Damage_EVP（爆炸即是本弹的伤害投递方式——接触路径在 42px 近爆门前
+   *  恒先消亡），尘近似 31×4 + 228×80（gore 61-63 略） */
+  private rocketExplode(game: GameHooks): void {
+    const cx = this.cx, cy = this.cy;
+    this.x = cx - 56;
+    this.y = cy - 56;
+    this.w = 112;
+    this.h = 112;
+    game.playSfxFiles?.(['Item_14'], 1, cx, cy);
+    game.spawnParticles(cx, cy, '#FFC860', 22, 4, { life: 26, damp: 0.93 });
+    game.spawnParticles(cx, cy, '#907858', 4, 2, { life: 24 });
+    hitPlayer(this, game, this.damage);   // :70580 Kill 内 Damage() 二次结算
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -849,6 +871,147 @@ export class Arrow extends Entity {
       }
       if (Math.hypot(this.vx, this.vy) < 18) { this.vx *= 1.02; this.vy *= 1.02; }
     }
+    // ---- 452 月总幻影矢（aiStyle 82，Projectile.cs:30119-30195）三段弹道 ----
+    if (this.phantasm) {
+      this.phAlpha = Math.max(0, this.phAlpha - 40);            // :30121-30125 渐显
+      const riseArc = () => {
+        // :30135-30144 / :30172-30181：vx = velocity.RotatedBy(ai1).X 钳 ±6；
+        // vy −0.08（vy>0 再 −0.2）、钳 −7
+        const c = Math.cos(this.phSpin), s = Math.sin(this.phSpin);
+        this.vx = Math.max(-6, Math.min(6, this.vx * c - this.vy * s));
+        this.vy -= 0.08;
+        if (this.vy > 0) this.vy -= 0.2;
+        if (this.vy < -7) this.vy = -7;
+      };
+      if (this.phStage === 0) {
+        this.phT++;
+        if (this.phT >= 45) { this.phT = 0; this.phStage = 1; this.phSpin = -this.phSpin; }  // :30128-30134
+        riseArc();
+      } else if (this.phStage === 1) {
+        this.phT++;
+        // :30163-30171：90t 末 ai[1] = FindClosest 索引（单人恒 0 = 旋转恒等）
+        if (this.phT >= 90) { this.phT = 0; this.phStage = 2; this.phSpin = 0; }
+        riseArc();
+      } else {
+        // :30176-30196 14 速追踪：距玩家 <30 消亡（触发 Game 452 爆炸钩）
+        const p = game.player;
+        if (p && !p.dead) {
+          let ddx = p.cx - this.cx, ddy = p.cy - this.cy;
+          const dist = Math.hypot(ddx, ddy);
+          if (dist < 30) { this.killNow(game); return; }
+          ddx = ddx / dist * 14;
+          ddy = ddy / dist * 14;
+          const tx2 = this.vx + (ddx - this.vx) * 0.6;          // Lerp(v, dir·14, 0.6)
+          let ty2 = this.vy + (ddy - this.vy) * 0.6;
+          if (ty2 < 6) ty2 = 6;                                 // :30186-30188 目标 vy 钳 ≥6
+          const st = 0.4;
+          if (this.vx < tx2) { this.vx += st; if (this.vx < 0 && tx2 > 0) this.vx += st; }
+          else if (this.vx > tx2) { this.vx -= st; if (this.vx > 0 && tx2 < 0) this.vx -= st; }
+          if (this.vy < ty2) { this.vy += st; if (this.vy < 0 && ty2 > 0) this.vy += st; }
+          else if (this.vy > ty2) { this.vy -= st; if (this.vy > 0 && ty2 < 0) this.vy -= st; }
+        }
+      }
+      // :30197-30199 alpha<40 尘 229（速度 −v/3）
+      if (this.phAlpha < 40) {
+        game.spawnParticles(this.cx, this.cy, '#C060E8', 1, 0.8, { life: 20 });
+      }
+    }
+    // ---- 454 月总幻影能量球（aiStyle 83，Projectile.cs:30236-30282）----
+    if (this.phantomOrb) {
+      // :30238-30245 alpha 255 → 钳 200 → −5/t（scale 随之伸展，draw 消费）
+      this.orbAlpha = Math.min(this.orbAlpha, 200);
+      this.orbAlpha = Math.max(0, this.orbAlpha - 5);
+      if (this.orbAi0 >= 0) this.orbAi0++;                      // :30246-30248
+      if (this.orbAi0 === -1) {
+        // :30249-30253 齐射态：帧 1 + extraUpdates=1（速度由发射点统一给定）
+        this.orbFrame = 1;
+        this.extraUpdates = 1;
+      } else {
+        const src = (game.enemies() as Array<{ id: number; dead: boolean; cx: number; cy: number }>)
+          .find((n) => n.id === this.orbOwnerId);
+        const ax = src && !src.dead ? src.cx : (this.orbAnchor?.x ?? this.cx);
+        const ay = src && !src.dead ? src.cy : (this.orbAnchor?.y ?? this.cy);
+        if (src && !src.dead) this.orbAnchor = { x: ax, y: ay };
+        if (this.orbAi0 < 30) {
+          // :30254-30257 附主随行：position = 主心 − 尺寸/2 − v（下方位移段 +v
+          // 落回主心——原版 AI 直写 + HandleMovement 加 v 的合成语义）
+          this.x = ax - this.w / 2 - this.vx;
+          this.y = ay - this.h / 2 - this.vy;
+        } else {
+          // :30258-30267 列队：×0.96 减速 + 帧 0/1 每 6t 切换
+          this.vx *= 0.96;
+          this.vy *= 0.96;
+          if (++this.orbFrameT >= 6) {
+            this.orbFrameT = 0;
+            this.orbFrame = this.orbFrame === 0 ? 1 : 0;
+          }
+        }
+      }
+      // :30280-30281 alpha<40 每步尘 229 ×2
+      if (this.orbAlpha < 40) {
+        game.spawnParticles(this.cx, this.cy, '#C060E8', 2, 0.5, { life: 18 });
+      }
+    }
+    // ---- 1021 月总巨砾（aiStyle 25，Projectile.cs:24666-24712 物理段）----
+    // 重力 0.06/终端 16 走 grav 链（spawn 侧传 grav 0.06）；此处滚动旋转 +
+    // 地面滚动加速
+    if (this.mlBoulder) {
+      this.spinRot += this.vx * 0.06;                           // :24666 rotation += vx·0.06
+      if (Math.abs(this.vy) <= 1) {                             // :24685-24693 |vy|≤1 滚动加速
+        if (this.vx > 0 && this.vx < 3.5) this.vx += 0.025;
+        else if (this.vx < 0 && this.vx > -3.5) this.vx -= 0.025;
+      }
+    }
+    // ---- 448 火箭（aiStyle 80，Projectile.cs:29801-29890）----
+    if (this.martianRocket) {
+      if (this.rkAi0 === 0 && this.rkFuse > 0) {
+        this.rkFuse--;                                          // :29804-29806 引信倒数（20t）
+      } else if (this.rkAi0 === 0) {
+        // :29807-29827 点火：+4 加速 + 8 尘爆 + 锁定 + tileCollide=true
+        this.rkAi0 = 1;
+        const spd = Math.hypot(this.vx, this.vy);
+        if (spd > 0) {
+          const k = (spd + 4) / spd;
+          this.vx *= k; this.vy *= k;
+        }
+        this.noTileCollide = false;                             // :29833 tileCollide = true
+        const rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+        const cr = Math.cos(rot - Math.PI / 2), sr = Math.sin(rot - Math.PI / 2);
+        for (let i = 0; i < 8; i++) {
+          const a = i * Math.PI / 4;
+          const ox = -8 - Math.cos(a) * 2, oy = -Math.sin(a) * 8;   // :29815-29817 UnitX·−8 + −UnitY.Rot(i·π/4)·(2,8)
+          game.spawnParticles(this.cx + ox * cr - oy * sr, this.cy + ox * sr + oy * cr,
+            '#FFD070', 1, 0, { life: 16 });
+        }
+      } else {
+        // :29832-29860 点火后：180t 自毁；[0,30) 逐 t 20% 角度转向玩家
+        this.rkT++;
+        if (this.rkT === 180) { this.killNow(game); return; }
+        const p = game.player;
+        if (this.rkT < 30 && p && !p.dead) {
+          const cur = Math.atan2(this.vy, this.vx);
+          let diff = Math.atan2(p.cy - this.cy, p.cx - this.cx) - cur;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          const ca = Math.cos(diff * 0.2), sa = Math.sin(diff * 0.2);
+          const nvx = this.vx * ca - this.vy * sa;
+          const nvy = this.vx * sa + this.vy * ca;
+          this.vx = nvx; this.vy = nvy;
+        }
+      }
+      // :29862-29868 帧 3t/帧 3 帧循环；:29869-29877 每 t 尾焰尘 1+ai0 枚
+      // （喷口 = Center + UnitY.RotatedBy(rotation)·8·(i+1)，rotation = 速度角+π/2）
+      if (++this.rkFrameT >= 3) { this.rkFrameT = 0; this.rkFrame = (this.rkFrame + 1) % 3; }
+      const rkRot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+      game.spawnParticles(this.cx + Math.cos(rkRot) * 8, this.cy + Math.sin(rkRot) * 8,
+        '#FFB040', 1 + this.rkAi0, 0, { life: 14 });
+      // :29878-29889 距玩家 ≤42 → Kill 爆炸（伤害由爆炸盒投递）
+      const pr = game.player;
+      if (pr && !pr.dead && Math.hypot(pr.cx - this.cx, pr.cy - this.cy) <= 42) {
+        this.killNow(game);
+        return;
+      }
+    }
     if (this.homing) {
       const p = game.player;
       if (p && !p.dead) {
@@ -911,6 +1074,9 @@ export class Arrow extends Entity {
       // 荆棘球 277 专属档（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
       // 仅入撞 |vy|>3 竖弹 ×0.9（贴地滚动）
       if (this.thornBounce && this.thornBounceOff(game)) return;
+      // 1021 月总巨砾弹地档（Projectile.cs:17578-17600）：Y 撞 Dig 音+×−0.9
+      // 反弹 / X 撞 ×−0.75 计 3 次超次消亡（false 交还下方消亡口）
+      if (this.mlBoulder && this.boulderBounceOff(game)) return;
       // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
       if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
       this.killNow(game);
@@ -935,6 +1101,11 @@ export class Arrow extends Entity {
     if (this.reflected) return;
     // 小动物:一击致死并消耗弹体(原版小动物是 NPC;近战挥砍同语义)
     if (hitCritters(this, game)) { this.killNow(game); return; }
+    // 敌对弹不入敌怪判定（原版 Damage_PVE_Inner :11902-11905 `hostile && flag2`
+    // 门：hostile 弹对非 friendly NPC 整段 return——Boss 自射弹幕不会误伤/消耗在
+    // 自家部件上（月总 454 附手随行 30t 若走此环会在手心爆掉）；城镇 NPC 侧已在
+    // 上方 hitTownNpcs('hostile') 走"敌方弹恒命中"档，反射弹也已在上方拦截）
+    if (this.hostile) return;
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     // 飞龙剑气 684 命中盒 = 垂直线 ±40px 厚 16（CanHitWithOwnBody :14693-14701，
     // 非通用 16×16 盒——巨剑气横扫判定）
@@ -1036,6 +1207,47 @@ export class Arrow extends Entity {
     // 召骷髅王即此链);穿透/销毁语义与敌怪一致
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)
       && --this.pierce <= 0) { this.killNow(game); return; }
+  }
+
+  /** 1021 巨砾弹地（Projectile.cs:17578-17600）：Y 被挡 lastVy>4 → HitTiles 尘 +
+   *  Dig 音（PlaySound 0）+ vy ×−0.9；缓落（0<lastVy≤4）置 rest 标（localAI[1]=999
+   *  → 后续 X 撞直接消亡）；X 被挡 ×−0.75 反弹计 3 次（:17592-17595），超次
+   *  Kill（false 交还调用方消亡）。顶棚（lastVy≤0）原版不显式反弹（碰撞解算
+   *  归零）——此处对齐 ×−0.9 近似。 */
+  private boulderBounceOff(game: GameHooks): boolean {
+    const st = game.world.store;
+    const solidAt = (px: number, py: number) => {
+      const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+      return st.inBounds(t0, t1) && st.isSolid(t0, t1);
+    };
+    // Y 轴被挡：回退一步（−vy）脱离实心即成立
+    if (this.vy !== 0 && !solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+      if (this.vy > 4) {
+        game.playSfx('dig', 1, this.cx, this.cy);            // :17583-17584
+        game.spawnParticles(this.cx, this.cy + this.h / 2, '#B8A890', 4, 2, { life: 20 });
+        this.y -= this.vy;
+        this.vy = -this.vy * 0.9;                            // :17585
+      } else if (this.vy > 0) {
+        this.y -= this.vy;
+        this.vy = 0;                                         // 贴地（后续 |vy|≤1 滚动加速段接管）
+        this.boulderBounces = 999;                           // :17586-17588 rest 标
+      } else {
+        this.y -= this.vy;
+        this.vy = -this.vy * 0.9;                            // 顶棚近似
+      }
+    }
+    // X 轴被挡：×−0.75 反弹计次，>3 消亡
+    if (this.vx !== 0 && !solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+      if (this.boulderBounces <= 3) {
+        this.x -= this.vx;
+        this.vx = -this.vx * 0.75;                           // :17592-17595
+        this.boulderBounces += 1;
+      } else {
+        return false;                                        // :17596-17599
+      }
+    }
+    // 回退后仍嵌实心（嵌入过深）→ false 消亡
+    return !solidAt(this.x + this.w / 2, this.y + this.h / 2);
   }
 
   /** 荆棘球 277 撞块反弹（Projectile.cs:18306-18314）：vx 恒反 ×0.9；
@@ -1318,5 +1530,37 @@ export class Arrow extends Entity {
       this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :13157 localNPCHitCooldown=14
       if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :12447-12450 首咬 latch
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 454 幻影能量球齐射指令（发射点侧遍历场上本波球——LunarOrb.parentId 圈定模式）
+// ---------------------------------------------------------------------------
+/** 把场上全部 ownerId 的 454（ai0≠−1）置齐射态并统一赋速（NPC.cs:37407-37427
+ *  手攻击 2 num1232==292 / :38487-38505 真眼攻击 2 t==105）：原版逐弹覆写同一个
+ *  vector175/vector224（手：normalize(玩家−(手心+(0,−350)))·12；真眼：瞄准向·12）
+ *  ——全部球以【同一速度矢量】平行齐射，非逐球独立寻的。 */
+export function volleyPhantomOrbs(game: GameHooks, ownerId: number, vx: number, vy: number): void {
+  const list = (game as unknown as { entities?: { projectiles?: unknown[] } }).entities?.projectiles ?? [];
+  for (const o of list) {
+    const p = o as Arrow;
+    if (p.dead || p.projId !== 454 || !p.phantomOrb) continue;
+    if (p.orbOwnerId !== ownerId || p.orbAi0 === -1) continue;
+    p.orbAi0 = -1;
+    p.vx = vx;
+    p.vy = vy;
+  }
+}
+
+/** 给场上全部 ownerId 的 454（ai0≠−1）叠加速度（NPC.cs:38471-38483 真眼攻击 2
+ *  t==75 升空：velocity += 眼速度 (0,−7)——列队球整体被带起）。 */
+export function nudgePhantomOrbs(game: GameHooks, ownerId: number, dvx: number, dvy: number): void {
+  const list = (game as unknown as { entities?: { projectiles?: unknown[] } }).entities?.projectiles ?? [];
+  for (const o of list) {
+    const p = o as Arrow;
+    if (p.dead || p.projId !== 454 || !p.phantomOrb) continue;
+    if (p.orbOwnerId !== ownerId || p.orbAi0 === -1) continue;
+    p.vx += dvx;
+    p.vy += dvy;
   }
 }

@@ -110,10 +110,21 @@ export class TileStore {
 
   isSolid(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false; // 世界外视为空（边缘自由）
-    if (this.wire[this.idx(x, y)] & TileStore.WIRE_ACTUATED) return false; // 已致动不碰撞
-    const d = TILE_DEFS[this.type[this.idx(x, y)]];
-    return !!d && d.solid;
+    // ★热路径双修(2026-08-19 trace 16:12 剖析:粒子碰撞逐帧调用占主线程 42.7%,
+    // 旧版 idx() 乘法×2 + TILE_DEFS 对象查):
+    //  ① idx 只算一次 ② 实心判定走 SOLID_LUT(类型 id → 1/0 的 Uint8Array,
+    //  免对象查找与属性访问;TILE_DEFS 构建后不变,LUT 同构)
+    const i = this.idx(x, y);
+    if (this.wire[i] & TileStore.WIRE_ACTUATED) return false; // 已致动不碰撞
+    return TileStore.SOLID_LUT[this.type[i]] === 1;
   }
+
+  /** 实心 LUT(内部类型 id → 1/0;与 TILE_DEFS 同长,模块加载时构建一次) */
+  static readonly SOLID_LUT = (() => {
+    const lut = new Uint8Array(TILE_DEFS.length);
+    for (let t = 0; t < TILE_DEFS.length; t++) lut[t] = TILE_DEFS[t]?.solid ? 1 : 0;
+    return lut;
+  })();
 
   /** 站顶单向面（原版 Collision.TileCollision :2330-2333 的 flag 门：
    *  `flag = tileSolid[type]; if (tileSolidTop[type] && frameY == 0) flag = true`

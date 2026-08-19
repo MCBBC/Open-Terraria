@@ -99,7 +99,6 @@ export class Bobber extends Entity {
   private baitSlot: number;
   private baitPower: number;
   private ownerRef: () => Player | null;
-  private bobPhase = Math.random() * Math.PI * 2;
   /** 绘制旋转缓存（AI_61 收线段 rotation=atan2(v)+π/2,:50833;静浮时保持末值） */
   private drawRot = 0;
   /** localAI[0]（AI_61 :50809-50811）：出竿后 0→100 渐增——钓线摆垂权重
@@ -195,8 +194,6 @@ export class Bobber extends Entity {
       }
       return;
     }
-    // 漂浮：水面起伏
-    this.bobPhase += 0.15;
     if (this.ai1 < 0) {
       // 咬钩窗口（AI_061 :50918-50934）：ai[1] 每 tick += rand(1,5)；
       // 归零 = 逃脱——localAI[1] 清零（渔获作废），回到等待累积

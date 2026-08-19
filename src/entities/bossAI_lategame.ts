@@ -3,9 +3,10 @@
 //   aiStyle 120 光之女皇     636  AI_120_HallowBoss()           NPC.cs:46299-47302(+DashTo :47304)
 //   aiStyle 121 史莱姆皇后   657  AI_121_QueenSlime()           NPC.cs:45543-46177(+FlyMovement :45467)
 // 由 Enemy.fixedUpdate 的 aiStyle 分发调用(接线见文件尾「接线清单」);本文件不改动任何已有文件。
-// 弹幕统一走 bossAI.shoot(Arrow 直飞桶);原版「定点预告→延时冲刺」类投射物(465/919/923)
-// 收敛为带初速直飞(见各处注释)。getGoodWorld 分支已实装(女皇招式间隔折半/史后空中
-// 横移+砸地蓄力+凝胶环抬档);expert/大师分支只注释不实现;netcode 跳过。
+// 弹幕统一走 bossAI.shoot(Arrow 直飞桶);原版「定点预告→延时冲刺」类投射物中
+// 465 闪电球/464 冰雾母云已实体化(IceMistCloud/LightningOrb,见各类头注),
+// 919/923 仍收敛为带初速直飞(见各处注释)。getGoodWorld 分支已实装(女皇招式间隔折半/
+// 史后空中横移+砸地蓄力+凝胶环抬档);expert/大师分支只注释不实现;netcode 跳过。
 import { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -15,7 +16,11 @@ import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { spawnPart, shoot, losClear, addEnemy } from './bossAI';
 import { Entity } from './Entity';
-import { projSprite } from './Arrow';
+import { projSprite, projFrameImg } from './Arrow';
+import { hitPlayer, hitTownNpcs, hitCritters } from './projTargets';
+import { canHit } from '../physics/LineOfSight';
+import { LightningBoltProj } from './LightningBoltProj';
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 
 // ===================== 共用工具(与 bossAI.ts 同语义,私有副本) =====================
 
@@ -235,6 +240,265 @@ export class CultistRitualCircle extends Entity {
   }
 }
 
+/** Extra_35（24×222 冰雾六角波纹，1×3 帧）懒加载（StardustMarkProj.beamSprite 同款） */
+let hexWaveImg: ImageBitmap | HTMLImageElement | null = null;
+let hexWaveTried = false;
+function extra35(): ImageBitmap | HTMLImageElement | null {
+  if (hexWaveTried) return hexWaveImg;
+  hexWaveTried = true;
+  if (typeof Image === 'undefined') return null;
+  const im = new Image();
+  im.onload = () => upgradeToBitmap(im, (b) => { hexWaveImg = b; });
+  im.src = 'sprites/vanilla/Extra_35.png';
+  hexWaveImg = im;
+  return im;
+}
+
+/** 冰雾母云/子体 464（Projectile.cs aiStyle 86 :30747-30821 + SetDefaults :5078-5087）：
+ *  邪教徒冰雾态(:65411-65421)发的是 ai[1]=1 的【母云】——60×60 / hostile /
+ *  tileCollide=false / penetrate=-1 / alpha 255；速度=瞄玩家预判 ×4（发射向量），
+ *  母云终身保持该速度漂移（UpdatePosition :19026 无早退）。
+ *  母云（ai[1]==1，:30763-30790）：ai0<130 淡入 alpha−10/t、≥130 淡出 +10/t（钳
+ *  0..255）；≥150 Kill；每 ai0%30==0 沿自转 rotation 派生一颗【子体 464】（同伤/
+ *  同击退，速度=rotation 单位向量）；rotation += π/30 自旋；AddLight(0.3,0.75,0.9)。
+ *  子体（ai[1]==0，:30792-30821）：AI 侧 position−=velocity + 引擎 UpdatePosition
+ *  +velocity → 净静止（速度只作尘环几何参数）；<40t 淡入 −40/t、≥40 淡出 +3/t、
+ *  ≥45 Kill；六角尘环——(0,−720).RotatedBy(速度角)×(ai0%45/45) 为半径向量，
+ *  六个 60° 角点各 AddLight + 2 颗 197 号尘（noGravity）。
+ *  绘制：母云走 Projectile_464.png 随 rotation 旋转（Main.cs:32360 大表分支默认画）；
+ *  子体【不画 464 贴图】——六角点各画一张 Extra_35（1×3 帧带按角点序循环、旋
+ *  角=角点角+速度角+π，Main.cs:32699-32721）。接触伤害=传入 damage（教徒冰雾 35）。
+ *  首帧 Item_120 音（:30749-30752，母云与每颗子体各自首帧播——原调用点单播已随
+ *  实体化迁入此处，避免双播）。 */
+export class IceMistCloud extends Entity {
+  readonly projId = 464;
+  damage: number;
+  w = 60; h = 60;                  // SetDefaults :5079-5080
+  /** ai[1]==1 = 母云档 */
+  private readonly mother: boolean;
+  private ai0 = 0;
+  private alpha = 255;
+  private rot = 0;                 // rotation（NewProjectile 缺省 0，仅母云自旋改写）
+  private sndPlayed = false;       // localAI[1]
+
+  /** x/y = NewProjectile 的 X/Y（中心锚）；vx/vy = 发射向量（母云=瞄速 4） */
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, mother: boolean) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.vx = vx; this.vy = vy;
+    this.damage = damage;
+    this.mother = mother;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (!this.sndPlayed) {         // :30749-30752（母云与子体各自首帧）
+      this.sndPlayed = true;
+      game.playSfxWav?.('Item_120', 1, this.x, this.y);
+    }
+    this.ai0++;
+    if (this.mother) {
+      // ---- 母云档（:30763-30790）----
+      this.alpha = Math.max(0, Math.min(255, this.alpha + (this.ai0 >= 130 ? 10 : -10)));
+      if (this.ai0 >= 150) { this.dead = true; return; }          // :30778-30781
+      if (this.ai0 % 30 === 0) {                                   // :30782-30787
+        const child = new IceMistCloud(this.cx, this.cy,
+          Math.cos(this.rot), Math.sin(this.rot), this.damage, false);
+        (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
+          .add(child, 'projectiles');
+      }
+      this.rot += Math.PI / 30;                                    // :30788
+      game.addLightAt?.(this.cx, this.cy, 0.3, 0.75, 0.9);         // :30789
+      this.x += this.vx;                                           // 引擎速度积分（漂移）
+      this.y += this.vy;
+    } else {
+      // ---- 子体档（:30792-30821）----
+      this.x -= this.vx;                                           // :30792（与引擎积分抵消→净静止）
+      this.y -= this.vy;
+      this.alpha = Math.max(0, Math.min(255, this.alpha + (this.ai0 >= 40 ? 3 : -40)));
+      if (this.ai0 >= 45) { this.dead = true; return; }            // :30805-30808
+      // 六角尘环（:30810-30821）
+      const hex = this.hexPoints();
+      for (let i = 0; i < 6; i++) {
+        game.addLightAt?.(hex[i][0], hex[i][1], 0.3, 0.75, 0.9);
+        for (let k = 0; k < 2; k++) {
+          game.spawnDust?.(hex[i][0] + (Math.random() * 8 - 4), hex[i][1] + (Math.random() * 8 - 4),
+            8, 8, 197, 0, 0, 100, null, 1, true);   // 尘 197 noGravity（:30817-30820）
+        }
+      }
+      this.x += this.vx;                                           // 引擎速度积分（:19026）
+      this.y += this.vy;
+    }
+    // 接触伤害（hostile penetrate=-1，命中不消耗；敌弹 ×2 缩放在 hitPlayer 内）
+    hitPlayer(this, game, this.damage);
+    hitTownNpcs(this, game, this.damage, 0, 'hostile');
+    hitCritters(this, game);
+  }
+
+  /** 六角波纹角点（中心+偏移）：(0,−720).RotatedBy(速度角)×(ai0%45/45) 再各旋 k·60° */
+  private hexPoints(): Array<[number, number]> {
+    const va = Math.atan2(this.vy, this.vx);
+    const [rx, ry] = rot(0, -720, va);
+    const k = (this.ai0 % 45) / 45;
+    const sx = rx * k, sy = ry * k;
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i < 6; i++) {
+      const [hx, hy] = rot(sx, sy, (i * Math.PI * 2) / 6);
+      pts.push([this.cx + hx, this.cy + hy]);
+    }
+    return pts;
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const bright = (255 - this.alpha) / 255;
+    if (bright <= 0) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = bright;
+    if (this.mother) {
+      // Projectile_464.png × rotation（Main.cs:32360 大表分支默认画法）
+      const img = projSprite(464);
+      if (img && img.width > 0) {
+        ctx.translate(this.cx, this.cy);
+        ctx.rotate(this.rot);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2, img.width, img.height);
+      } else {
+        ctx.fillStyle = '#9FD8E8';
+        ctx.beginPath(); ctx.arc(this.cx, this.cy, 24, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      // 六角波纹 Extra_35（Main.cs:32699-32721）：角点 i 用第 i%3 帧带、
+      // 旋角=角点角+速度角+π；不画 464 贴图
+      const img = extra35();
+      const va = Math.atan2(this.vy, this.vx);
+      const hex = this.hexPoints();
+      for (let i = 0; i < 6; i++) {
+        const ang = (i * Math.PI * 2) / 6;
+        ctx.save();
+        ctx.translate(hex[i][0], hex[i][1]);
+        ctx.rotate(ang + va + Math.PI);
+        if (img && img.width > 0) {
+          const band = img.height / 3;
+          ctx.drawImage(img, 0, (i % 3) * band, img.width, band,
+            -img.width / 2, -band / 2, img.width, band);
+        } else {
+          ctx.fillStyle = '#BFE8F0';
+          ctx.beginPath(); ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+}
+
+/** 闪电球 465（Projectile.cs aiStyle 88 type 段 :30860-30937 + SetDefaults :5109-5118）：
+ *  邪教徒闪电态(:65563-65566)在头顶 100px 零速定点生成（原版 NewProjectile 速度 0——
+ *  本仓旧实现曾坍缩为 6 速直飞 Arrow，实体化后还原定点）。
+ *  80×80 / hostile / alpha 255 / tileCollide=false（无 timeLeft 覆写，AI 自灭）。
+ *  生命周期：ai0<180 淡入 alpha−5/t（钳 0）；≥180 淡出 +5/t，≥255 Kill（:30870-30887）。
+ *  每逢 ai0%30==0 且 <180（:30889-30917）：对 ≤5 个 <2000px 且 Collision.CanHit
+ *  （1×1 点对）的玩家各掷一颗 466 闪电链（LightningBoltProj）——方向=弹心→玩家心
+ *  RotatedByRandom(0.785) 归一 ×7 速、ai0=该方向角、ai1=Next(100) 种子。
+ *  4 帧循环（frameCounter≥4 推帧，projFrames[465]=4，:30919-30925）；AddLight
+ *  (0.4,0.85,0.9)；alpha<150 且 ai0<180 时每子步 2 圈尘 226（半径 w×0.2/0.6，
+ *  速度=离心 2 / 0，:30929-30960）。首帧 Item_121 音（:30864-30867）保留在教徒
+ *  调用点（任务约定不双播）。接触伤害=传入 damage（教徒闪电 45）。 */
+export class LightningOrb extends Entity {
+  readonly projId = 465;
+  damage: number;
+  w = 80; h = 80;                  // SetDefaults :5110-5111
+  private ai0 = 0;
+  private alpha = 255;
+  private frameCounter = 0;
+  private frame = 0;               // projFrames[465]=4（vanilla-projframes.json）
+
+  /** x/y = NewProjectile 的 X/Y（中心锚 = 教徒 Center −(0,100)）；速度恒 0 */
+  constructor(x: number, y: number, damage: number) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.damage = damage;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    // 淡入/淡出（:30870-30887）
+    if (this.ai0 < 180) this.alpha = Math.max(0, this.alpha - 5);
+    else {
+      this.alpha = Math.min(255, this.alpha + 5);
+      if (this.alpha >= 255) { this.dead = true; return; }
+    }
+    this.ai0++;
+    // 每 30t 掷 466（:30889-30917；单人=1 目标，CanHit 1×1 点对视线门）
+    if (this.ai0 % 30 === 0 && this.ai0 < 180) {
+      const p = game.player;
+      if (p && !p.dead) {
+        const dist = Math.hypot(p.cx - this.cx, p.cy - this.cy);
+        if (dist < 2000
+          && canHit(game.world.store, this.cx, this.cy, 1, 1, p.cx, p.cy, 1, 1)) {
+          const v83x = p.cx - this.cx, v83y = p.cy - this.cy;
+          const seed = Math.floor(Math.random() * 100);      // Main.rand.Next(100)
+          // Normalize(v83.RotatedByRandom(0.785))×7（:30913-30914）
+          const [rvx, rvy] = rot(v83x, v83y, (Math.random() - 0.5) * 2 * 0.7853981852531433);
+          const d = Math.hypot(rvx, rvy) || 1;
+          const bolt = new LightningBoltProj(this.cx, this.cy,
+            (rvx / d) * 7, (rvy / d) * 7, 466, this.damage,
+            Math.atan2(v83y, v83x), seed);
+          (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
+            .add(bolt, 'projectiles');
+        }
+      }
+    }
+    game.addLightAt?.(this.cx, this.cy, 0.4, 0.85, 0.9);     // :30918
+    // 4 帧循环（:30919-30925）
+    if (++this.frameCounter >= 4) {
+      this.frameCounter = 0;
+      this.frame = (this.frame + 1) % 4;
+    }
+    // 尘 226 双圈（:30929-30960；速度 0 → RotatedBy(0) 不转；alpha≥150 或 ≥180t 停）
+    if (this.alpha < 150 && this.ai0 < 180) {
+      for (const [radius, centrifugal] of [[this.w * 0.2, true], [this.w * 0.6, false]] as const) {
+        const a = (Math.random() - 0.5) * Math.PI * 2;       // num781 ∈ ±0.5 ×2π
+        const ox = Math.cos(a) * radius, oy = Math.sin(a) * radius;
+        const d = game.spawnDust?.(this.cx + ox, this.cy + oy, 0, 0, 226,
+          0, 0, 150, null, 0.7, true);
+        if (d && centrifugal) {
+          // 内圈尘离心 2（:30946）；外圈速度 0（:30958）
+          const dl = Math.hypot(d.x - this.cx, d.y - this.cy) || 1;
+          d.vx = ((d.x - this.cx) / dl) * 2;
+          d.vy = ((d.y - this.cy) / dl) * 2;
+        }
+      }
+    }
+    // 接触伤害（hostile；敌弹 ×2 缩放在 hitPlayer 内）
+    hitPlayer(this, game, this.damage);
+    hitTownNpcs(this, game, this.damage, 0, 'hostile');
+    hitCritters(this, game);
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    // Main.cs:32812 帧切分支：Projectile_465.png 四帧行按 frame 切片居中、alpha 渐显
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const bright = (255 - this.alpha) / 255;
+    if (bright <= 0) return;
+    const img = projFrameImg(465, this.frame) ?? projSprite(465);
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = bright;
+    if (img && img.width > 0) {
+      ctx.drawImage(img, this.cx - img.width / 2, this.cy - img.height / 2,
+        img.width, img.height);
+    } else {
+      ctx.fillStyle = '#9FE8F0';
+      ctx.beginPath(); ctx.arc(this.cx, this.cy, 28, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
 /** 克隆体生成出口(:65646-65650 NewNPC 440:X,Y 是底部中心坐标且 Y 再 +真身 height/2;
  *  ai[3]=真身 whoAmI / localAI[1]=仪式代数)。本仓:la3=真身引用、la1=代数、跳过出生显影 */
 function spawnCultistClone(game: GameHooks, parent: Enemy, x: number, y: number, gen: number): Enemy | null {
@@ -270,6 +534,81 @@ function cloneSupplement(game: GameHooks, clones: Enemy[], player: Player, count
 function ritualCenterOf(isReal: boolean, la: { la2: unknown }, parent: Enemy | null): { x: number; y: number } | null {
   const raw = (isReal ? la.la2 : (parent ? laOf(parent).la2 : null)) as { x: number; y: number } | null;
   return raw ?? null;
+}
+
+/** 教徒 FindFrame 帧机状态（counter+帧行对；localAI 槽被仪式圈心/克隆引用
+ *  占用（la2/la3 勿动）→ 独立 WeakMap 落盘） */
+const cultistAnim = new WeakMap<Enemy, { fc: number; row: number }>();
+
+/** AI 态 → 原版 FindFrame localAI[2] 帧态六值（写点行号）：
+ *  出生显形分段 :65120-65136（>360→13 / >300→10 / >120→1 / 其余→0，先自增
+ *  后分段——本函数在 AI 自增前调用故 +1）/ 选招 :65148→10 / 飞掠 :65348→10 /
+ *  冰 :65365→11 / 火 :65436→11 / 雷 :65520-65524→真身 12·克隆 11（flag2 门）/
+ *  仪式 :65575 头部→10，[30,90) 与 [120,420) 两窗按到圈心向量覆写
+ *  （|uy|<0.77→11 / uy<0→12 / 其余→10，:65657-65702/:65730-65763 同构）/
+ *  硬直 :65786→13 / 光 :65811→11 / 末日 :65878→13 */
+function cultistFrameState(
+  e: Enemy, la: ReturnType<typeof laOf>, isReal: boolean, parent: Enemy | null,
+): number {
+  switch (e.ai0) {
+    case -1: {
+      const s = e.ai1 + 1;
+      return s > 360 ? 13 : s > 300 ? 10 : s > 120 ? 1 : 0;
+    }
+    case 5: {
+      const tt = e.ai1;
+      if ((tt >= 30 && tt < 90) || (tt >= 120 && tt < 420)) {
+        const cir = ritualCenterOf(isReal, la, parent);
+        if (cir) {
+          let dx = cir.x - e.cx, dy = cir.y - e.cy;
+          const d = Math.hypot(dx, dy);
+          if (d === 0) { dx = 0; dy = -1; } else { dx /= d; dy /= d; }
+          return Math.abs(dy) < 0.77 ? 11 : dy < 0 ? 12 : 10;
+        }
+      }
+      return 10;
+    }
+    case 4: return isReal ? 12 : 11;
+    case 6: return 13;
+    case 8: return 13;
+    case 2:
+    case 3:
+    case 7: return 11;
+    default: return 10;   // 选招 0 / 飞掠 1
+  }
+}
+
+/** 教徒 FindFrame 副本（NPC.cs:72698-72783）：帧态→帧行——
+ *  态0→行0 / 态1→行1 / 态2→行2 定格（先播一轮行带再落定格行）；
+ *  态10→行4-6 / 态11→行10-12 / 态12→行7-9 / 态13→行13-15 恒循环。
+ *  节拍 15t 一轮、行内 5t/帧（cs:72719 ≥15 回卷、cs:72726 /5），
+ *  counter 每 tick +1（cs:72781）；帧号直写 customFrameIdx（694 先例） */
+function cultistFrameTick(e: Enemy, st: number): void {
+  let a = cultistAnim.get(e);
+  if (!a) { a = { fc: 0, row: 0 }; cultistAnim.set(e, a); }
+  const wrap = a.fc >= 15;
+  if (wrap) a.fc = 0;
+  const seg = Math.floor(a.fc / 5);
+  switch (st) {
+    case 0:
+      if (wrap) a.row = 0;
+      else if (a.row !== 0) a.row = seg + 4;
+      break;
+    case 10: a.row = seg + 4; break;
+    case 1:
+      if (wrap) a.row = 1;
+      else if (a.row !== 1) a.row = seg + 10;
+      break;
+    case 11: a.row = seg + 10; break;
+    case 2:
+      if (wrap) a.row = 2;
+      else if (a.row !== 2) a.row = seg + 7;
+      break;
+    case 12: a.row = seg + 7; break;
+    case 13: a.row = seg + 13; break;
+  }
+  a.fc += 1;
+  e.customFrameIdx = a.row;
 }
 
 export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | null): void {
@@ -344,6 +683,13 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     const circle = la.la3;
     if (circle instanceof CultistRitualCircle) circle.interrupt();
   }
+
+  // ---- FindFrame 帧机（cs:72698-72783）：原版 localAI[2] 六态→帧行；本仓 la2
+  //      已挪用存仪式圈心（勿动）→ 帧态按各态语义重算（见 cultistFrameState），
+  //      帧号直写 customFrameIdx（Renderer 首行直读，694 先例）。状态机各块早退
+  //      前先走本段（与原版 AI 内写 localAI[2]、AI 后 FindFrame 的时序等价）；
+  //      netPuppet 无本地 AI → 帧冻结（登记）----
+  cultistFrameTick(e, cultistFrameState(e, la, isReal, parent));
 
   // 朝向(:65117-65120 sign(player.X - center.X);仪式态内被 :65676 系圈心朝向覆盖)
   const face = Math.sign(player.cx - e.cx);
@@ -422,9 +768,14 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     const numIce = ftw ? 90 : 120;
     if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % numIce === 0) {
       cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65375-65397
+      // :65411-65421 发的是 ai[1]=1 母云(IceMistCloud 实体,Projectile.cs:30763-30790)——
+      // 每 30t 沿自转派生子体,150t 寿终;曾坍缩为单发直飞 Arrow(旧注释「直飞桶」);
+      // Item_120 首帧音随实体化迁入 IceMistCloud 首帧(母云+每颗子体各播,:30749-30752)
       const aim = aimLead(e, player, e.facing);
-      shoot(game, e.cx + e.facing * 30, e.cy + 12, aim.x * 4, aim.y * 4, 35, 464); // :65411-65421
-      game.playSfxWav?.('Item_120', 1, e.cx, e.cy - 100);   // 弹 464 首帧音(:30749-30752,终审补)
+      const cloud = new IceMistCloud(e.cx + e.facing * 30, e.cy + 12,
+        aim.x * 4, aim.y * 4, 35, true);
+      (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
+        .add(cloud, 'projectiles');
       // 原版冰雾发射零吼(:65040-65900 全段仅 65093/65122 两声)——曾借 roar 0.35,2026-08-18 对账删
     }
     e.ai1 += 1;
@@ -463,11 +814,12 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
         cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622);
         // 原版闪电发射零吼(同上全段普查)——曾借 roar 0.5,2026-08-18 对账删
       }
-      // 原版 465 零速悬停后从天引雷(Projectile.AI 收敛:直飞 6 速朝玩家)
-      const dx = player.cx - e.cx, dy = player.cy - (e.cy - 100);
-      const d = Math.hypot(dx, dy) || 1;
-      shoot(game, e.cx, e.cy - 100, dx / d * 6, dy / d * 6, 45, 465); // :65563-65566
-      game.playSfxWav?.('Item_121', 1, e.cx, e.cy - 100);   // 弹 465 首帧音(:30864-30867,终审补)
+      // 原版 465 零速定点 180t(LightningOrb 实体,Projectile.cs:30860-30937),每 30t
+      // 朝 ≤5 玩家掷 466 闪电链——曾坍缩为 6 速直飞 Arrow,实体化还原定点悬停
+      const orb = new LightningOrb(e.cx, e.cy - 100, 45);   // :65563-65566(速度 0/45 伤)
+      (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
+        .add(orb, 'projectiles');
+      game.playSfxWav?.('Item_121', 1, e.cx, e.cy - 100);   // 弹 465 首帧音(:30864-30867,保留调用点播,防实体内双播)
     }
     e.ai1 += 1;
     if (e.ai1 >= 20 + numBolt) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }

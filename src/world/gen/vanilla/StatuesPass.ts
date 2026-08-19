@@ -137,27 +137,18 @@ function check2x2Boulder484(st: TileStore, rng: RNG, x: number, y: number): void
   }
 }
 
-/** ★GGGGG 帧债垫片（惰性）：JS 多 pass 陈设只写 type 不落帧（DungeonPass
- *  chTile/dgWr 全族、TemplePass 237 蜥蜴祭坛等——NNN 批仅补 banner 91）。放置期
- *  SquareTileFrame 的 Check* 完整性校验读帧——零帧组必假杀（m 链 #58 实锤：
- *  (1578,911) 画 240×9 + (1172,923) 柜 88×6；spawn-tree-regression 种子 237
- *  蜥蜴祭坛×6——vanilla 有效帧 → 校验通过保留）。冻结域（DungeonPass）在外，
- *  本垫片在扫窗命中「同类连通**满矩形**组、全零帧」时就地写自洽 style-0 帧型
- *  （帧通道 8 通道对拍不可见；渲染帧型自洽，真实 style 债在案移交各落帧批——
- *  其落帧后本垫片恒不触发，可整段删除）。
- *  族域 = 引擎读帧完整性校验且判据 **style 无关** 的成员（Check3x2 缺省支/
- *  Check3x3Wall）：C3X2 族扣除 186/187（其地基门读 styleCol——style-0 垫片会
- *  翻转判据）∪{240,440}。★勿泛化到 framed 全族：树干（type tree）亦全零帧，
- *  改写其帧型会炸 #82 栽树链（spawn-tree-clear 回归实锤）。 */
-const ZF_BACKFILL_SHEETS = new Set([
-  14, 17, 26, 77, 86, 87, 88, 89, 114, 133, 215, 217, 218, 237, 244, 285, 286, 298,
-  299, 310, 339, 361, 362, 363, 364, 377, 469, 532, 533, 538, 544, 555, 556, 582,
-  619, 629, 240, 440,
-]);
+/** ★GGGGG 帧债垫片（惰性）：JS DungeonPass 陈设 chTile/dgWr 只写 type 不落帧
+ *  （NNN 批仅补 banner 91）。放置期 SquareTileFrame 的 Check* 完整性校验读帧——
+ *  零帧组必假杀（m 链 #58 实锤：(1578,911) 画 240×9 + (1172,923) 柜 88×6；
+ *  vanilla 有效帧 → 校验通过保留——金标 058 两物俱在）。DungeonPass 为并行冻结
+ *  域，本垫片在扫窗命中「同类连通**满矩形**组、全零帧」时就地写自洽 style-0
+ *  帧型（帧通道 8 通道对拍不可见；渲染帧型自洽，真实 style 债在案移交
+ *  DungeonPass 帧链批——其落帧后本垫片恒不触发，可整段删除）。
+ *  组残缺（矩形不满）不垫：彼时 type/active 失配本就两版同杀，帧无关。 */
 function backfillZeroFrames(st: TileStore, x: number, y: number): void {
   const i0 = st.idx(x, y);
   const t = st.type[i0];
-  if (!st.flags[i0] || !ZF_BACKFILL_SHEETS.has(SHEET[t])) return;
+  if (!st.flags[i0] || !TILE_DEFS[t]?.framed) return;
   if (st.frameX[i0] !== 0 || st.frameY[i0] !== 0) return;
   // 组 bbox：同类活性连通扫描（多格陈设最大 6×4 → ±5 窗足够）
   let x0 = x, y0 = y, x1 = x, y1 = y;
@@ -196,9 +187,6 @@ function backfillZeroFrames(st: TileStore, x: number, y: number): void {
  *  484 补件在引擎扫之后跑（后置序：引擎级联杀已生效，484 判据读终态——与
  *  vanilla 逐格交错序在"同窗多杀"边角才可能分叉，四链复核裁决）。 */
 function statueFrameSweep(st: TileStore, rng: RNG, x: number, y: number): void {
-  const g5 = globalThis as Record<string, unknown>;
-  g5.__g5SweepXY = `${x},${y}`;
-  g5.__g5St = st;
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
       const cx = x + dx, cy = y + dy;
@@ -207,7 +195,6 @@ function statueFrameSweep(st: TileStore, rng: RNG, x: number, y: number): void {
     }
   }
   genSquareTileFrame(st, rng, x, y);
-  g5.__g5SweepXY = undefined;
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
       const cx = x + dx, cy = y + dy;
@@ -281,14 +268,7 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
   {
     const g0 = globalThis as { __swStatCap?: (gs: GenState, st: TileStore) => void };
     try { g0.__swStatCap?.(gs, st); } catch { /* probe */ }
-    (globalThis as Record<string, unknown>).__g5InStatues = true;
   }
-  try {
-    __g5Body(st, rng, gs);
-  } finally { (globalThis as Record<string, unknown>).__g5InStatues = false; }
-}
-
-function __g5Body(st: TileStore, rng: RNG, gs: GenState): void {
   if (!STATUE_105) return;
   const { w, h } = st;
   const count = Math.floor(STATUE.length * 2 * (w / 4200));

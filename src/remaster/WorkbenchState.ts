@@ -7,6 +7,9 @@ import type { AssetEntry, EntryProgress, FrameRecord, FrameStatus } from './type
 import { loadProgress, saveProgress, putFramePixels, deleteFramePixels } from './PackStore';
 
 const MAX_ATTEMPTS = 8;
+/** 整图重制记录的 frameIdx 哨兵:整张 sheet 一个重制单元(无法按帧切分的素材,
+ *  或普通条目主动切整图模式)。与逐帧 0 区分,导出/进度判定单独处理。 */
+export const WHOLE_FRAME_IDX = -1;
 
 export class WorkbenchState {
   progress: Record<string, EntryProgress> = {};
@@ -38,10 +41,14 @@ export class WorkbenchState {
     const cur = p.frames[frameIdx] ?? { status: 'untouched', attempts: [] } as FrameRecord;
     const next: FrameRecord = { ...cur, ...extra, status };
     p.frames[frameIdx] = next;
+    // complete = 逐帧全终态;整图记录(WHOLE_FRAME_IDX)存在时它也须终态
+    // (整图模式与逐帧模式进度独立,互不强制)
     p.complete = entry.frames.every((f) => {
       const st = p.frames[f.frameIdx]?.status;
       return st === 'accepted' || st === 'skipped';
-    });
+    }) && (p.frames[WHOLE_FRAME_IDX] === undefined
+      || p.frames[WHOLE_FRAME_IDX].status === 'accepted'
+      || p.frames[WHOLE_FRAME_IDX].status === 'skipped');
     this.scheduleSave();
     this.onChange?.();
     return next;
@@ -84,16 +91,19 @@ export class WorkbenchState {
     return -1;
   }
 
-  /** 条目进度文本 `12/240`。 */
+  /** 条目进度文本 `12/240`(整图记录存在时计入分母/分子)。 */
   progressText(entry: AssetEntry): string {
     const p = this.progress[entry.key];
-    if (!p) return `0/${entry.frames.length}`;
+    const whole = p?.frames[WHOLE_FRAME_IDX];
+    const total = entry.frames.length + (whole ? 1 : 0);
+    if (!p) return `0/${total}`;
     let done = 0;
     for (const f of entry.frames) {
       const st = p.frames[f.frameIdx]?.status;
       if (st === 'accepted' || st === 'skipped') done++;
     }
-    return `${done}/${entry.frames.length}`;
+    if (whole && (whole.status === 'accepted' || whole.status === 'skipped')) done++;
+    return `${done}/${total}`;
   }
 
   private scheduleSave(): void {

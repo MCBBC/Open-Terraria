@@ -5,7 +5,7 @@
 // (故必须蒙版);size 边长 16 倍数且总像素 ≥655,360(computeGenLayout 保证);
 // 输出 base64 png(b64_json)。
 import {
-  computeGenLayout, mapBackRect, boxDownscale, applyAlphaMask,
+  computeGenLayout, computeWholeLayout, mapBackRect, boxDownscale, applyAlphaMask,
   buildGenCanvas, type GenLayout,
 } from './FrameOps';
 import { composePrompt, type ComposePromptOpts } from './PromptTemplates';
@@ -25,6 +25,8 @@ export interface RemasterRequest {
   apiKey?: string;
   /** 缩回算法(默认 box) */
   algo?: 'box' | 'nearest';
+  /** 整图重制模式(默认 false=逐帧;整张 sheet 一个重制单元,pad 画布策略) */
+  whole?: boolean;
 }
 
 export interface RemasterResult {
@@ -63,9 +65,9 @@ async function canvasToBlob(c: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-/** 主入口:单帧重制。抛错即失败(工作台显示);无静默兜底。 */
+/** 主入口:单帧重制(whole=true 整图模式)。抛错即失败(工作台显示);无静默兜底。 */
 export async function remasterFrame(req: RemasterRequest): Promise<RemasterResult> {
-  const layout = computeGenLayout(req.w, req.h);
+  const layout = req.whole ? computeWholeLayout(req.w, req.h) : computeGenLayout(req.w, req.h);
   const t0 = performance.now();
   // ① 生成画布(帧最近邻放大居中)
   const genCanvas = buildGenCanvas(req.frame, req.w, req.h, layout);

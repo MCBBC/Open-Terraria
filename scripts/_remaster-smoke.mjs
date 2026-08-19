@@ -109,6 +109,29 @@ try {
   });
   chk('全帧 accepted/skipped → 条目 complete', comp.complete === true, comp.text);
 
+  // ---- ③b 整图重制模式(无法逐帧切分的素材:594 风气球横条) ----
+  const whole = await page.evaluate(async () => {
+    const b = window.__remasterBridge;
+    const e = b.catalog.byKey.get('npc:594');
+    b.selectEntry(e);
+    await new Promise((r) => setTimeout(r, 1200));   // 等 sheet 加载
+    const mode = { excluded: !!e.meta?.excluded, framesLen: e.frames.length };
+    await b.remaster();
+    await new Promise((r) => setTimeout(r, 3000));
+    const rec = b.state.frame(e, -1);   // WHOLE_FRAME_IDX 哨兵
+    return { mode, status: rec.status, prompt: rec.prompt };
+  });
+  chk('594(横条排除条目)默认整图模式(frames 空+excluded)', whole.mode.excluded === true && whole.mode.framesLen === 0, JSON.stringify(whole.mode));
+  chk('整图重制管线通(记录键 -1=pending)', whole.status === 'pending', whole.status);
+  chk('整图 prompt 用 whole 模板(逐元素原位)', /complete sprite sheet/.test(whole.prompt ?? ''), (whole.prompt ?? '').slice(0, 120));
+  const wholeAcc = await page.evaluate(async () => {
+    const b = window.__remasterBridge;
+    const e = b.catalog.byKey.get('npc:594');
+    await b.accept();
+    return { complete: b.state.progress['npc:594'].complete, text: b.state.progressText(e) };
+  });
+  chk('整图验收 → 条目 complete(frames 空使完成度只取决于整图记录)', wholeAcc.complete === true && wholeAcc.text === '1/1', wholeAcc.text);
+
   // ---- ④ 导出链路 zip round-trip(PK 头+manifest+sheet 字节) ----
   const zipBytes = await page.evaluate(async () => {
     const { makePack, buildManifest, readPack } = await import('/src/remaster/PackFormat.ts');

@@ -6,7 +6,7 @@ import {
   crc32, zipStore, unzip, parseManifest, buildManifest, makePack, readPack, PACK_FORMAT,
 } from '../src/remaster/PackFormat';
 import {
-  boxDownscale, nearestUpscale, applyAlphaMask, frameHash, computeGenLayout, mapBackRect,
+  boxDownscale, nearestUpscale, applyAlphaMask, frameHash, computeGenLayout, computeWholeLayout, mapBackRect,
 } from '../src/remaster/FrameOps';
 import { composePrompt, DEFAULT_GLOBAL_PREFIX, refFrameSentence } from '../src/remaster/PromptTemplates';
 import { parseImageResponse, nearestCenterSample } from '../src/remaster/ImageRemaster';
@@ -134,18 +134,26 @@ describe('FrameOps 像素数学', () => {
   });
 });
 
-describe('prompt 组装(微调控制)', () => {
-  it('默认组装 = 前缀 + 类别模板插值', () => {
+describe('prompt 组装(微调=追加)', () => {
+  it('默认组装 = 前缀 + 类别模板插值(无微调)', () => {
     const p = composePrompt({ category: 'npc', name: 'Blue Slime', frameIdx: 1, frameCount: 4 });
     expect(p.startsWith(DEFAULT_GLOBAL_PREFIX)).toBe(true);
     expect(p).toContain('NPC "Blue Slime"');
     expect(p).toContain('frame 1 of 4');
   });
-  it('userPrompt 整体覆盖(人工微调语义)', () => {
+  it('★userPrompt 是【增量追加】——默认组装保留,微调拼在末尾(输入框只放增量)', () => {
+    const base = composePrompt({ category: 'tile', name: 'Dirt', frameIdx: 0, frameCount: 1 });
     const p = composePrompt({ category: 'tile', name: 'Dirt', frameIdx: 0, frameCount: 1, userPrompt: '  更鲜艳的泥土  ' });
-    expect(p).toBe('更鲜艳的泥土');
+    expect(p.startsWith(base)).toBe(true);
+    expect(p.endsWith('更鲜艳的泥土')).toBe(true);
   });
-  it('风格锚参考帧附加句', () => {
+  it('整图模式:whole 模板(逐元素原位;不含帧序插值)', () => {
+    const p = composePrompt({ category: 'npc', name: 'Windy Balloon', frameIdx: 0, frameCount: 0, whole: true });
+    expect(p).toContain('complete sprite sheet "Windy Balloon"');
+    expect(p).toContain('do not move, resize, crop');
+    expect(p).not.toContain('frame 0 of');
+  });
+  it('风格锚参考帧附加句(逐帧模式)', () => {
     const p = composePrompt({ category: 'npc', name: 'X', frameIdx: 2, frameCount: 3, refFrameIdx: 1 });
     expect(p).toContain(refFrameSentence(1));
     expect(p).toContain('match its exact art style');
@@ -154,6 +162,46 @@ describe('prompt 组装(微调控制)', () => {
     const p = composePrompt({ category: 'misc', name: 'X', frameIdx: 0, frameCount: 1, globalPrefix: 'PREFIX.' });
     expect(p.startsWith('PREFIX.')).toBe(true);
     expect(p).not.toContain(DEFAULT_GLOBAL_PREFIX.slice(0, 20));
+  });
+});
+
+describe('整图重制布局(computeWholeLayout)', () => {
+  it('大图 1:1:k=1,画布=帧尺寸(Item_Atlas 2048²)', () => {
+    const g = computeWholeLayout(2048, 2048);
+    expect(g.k).toBe(1);
+    expect(g.W).toBe(2048); expect(g.H).toBe(2048);
+    expect(g.fw).toBe(2048); expect(g.ox).toBe(0); expect(g.oy).toBe(0);
+  });
+  it('小图放大到 ~1024(与逐帧同策略)', () => {
+    const g = computeWholeLayout(256, 76);
+    expect(g.k).toBe(4);           // 1024/256
+    expect(g.fw).toBe(1024); expect(g.fh).toBe(304);
+    expect(g.W).toBeGreaterThanOrEqual(1024);
+  });
+  it('★长条(比例>3:1)pad 短边进约束:40×1120(Acc_Back 族)', () => {
+    const g = computeWholeLayout(40, 1120);
+    expect(Math.max(g.W, g.H) / Math.min(g.W, g.H) <= 3).toBe(true);
+    expect(g.W * g.H).toBeGreaterThanOrEqual(655_360);
+    expect(g.W % 16).toBe(0); expect(g.H % 16).toBe(0);
+    expect(g.k).toBe(1);           // 不缩(缩回丢像素)
+    expect(g.fw).toBe(40); expect(g.fh).toBe(1120);
+    expect(g.ox).toBe((g.W - 40) >> 1);   // 帧居中
+  });
+  it('横向长条(Liquid 306×16)', () => {
+    const g = computeWholeLayout(306, 16);
+    expect(Math.max(g.W, g.H) / Math.min(g.W, g.H) <= 3).toBe(true);
+    expect(g.W * g.H).toBeGreaterThanOrEqual(655_360);
+    expect(g.W <= 3840 && g.H <= 3840).toBe(true);
+  });
+  it('典型 excluded 素材全过约束', () => {
+    for (const [w, h] of [[256, 76], [40, 1120], [48, 1400], [306, 16], [246, 82], [2048, 2048], [1408, 264], [620, 70]] as Array<[number, number]>) {
+      const g = computeWholeLayout(w, h);
+      expect(g.W % 16 === 0 && g.H % 16 === 0, `${w}x${h} 16对齐`).toBe(true);
+      expect(g.W * g.H >= 655_360 && g.W * g.H <= 8_294_400, `${w}x${h} 面积`).toBe(true);
+      expect(Math.max(g.W, g.H) <= 3840, `${w}x${h} 边长`).toBe(true);
+      expect(Math.max(g.W, g.H) / Math.min(g.W, g.H) <= 3, `${w}x${h} 比例`).toBe(true);
+      expect(g.fw === w * g.k && g.fh === h * g.k, `${w}x${h} 帧尺寸`).toBe(true);
+    }
   });
 });
 

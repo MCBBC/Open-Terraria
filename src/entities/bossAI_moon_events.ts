@@ -283,6 +283,18 @@ export function mourningWoodAI(e: Enemy, game: GameHooks, player: Player | null)
   // 玩家在正下方 50px 内 → 停步(:33180-33185)
   if (player && Math.abs(e.cx - player.cx) < 50) flag56 = true;
   hoverCruise(e, game, player, flag56, num891);
+  // ---- FindFrame case 344 副本（cs:73144-73170）：counter += max(1,|vx|*0.75)/t
+  //      （站定 vx==0 分支 +1/t）、>5 进帧（越限溢出随回卷丢弃 → 须步进副本）；
+  //      e.lai0=counter / e.lai1=帧行（全带 0-9 回卷）。325 同函数但两分支
+  //      counter 恒 +1/t ≡ animT，Renderer 用 t 直推无需副本 ----
+  if (ever) {
+    e.lai0 += e.vx === 0 ? 1 : Math.max(1, Math.abs(e.vx) * 0.75);
+    if (e.lai0 > 5) {
+      e.lai0 = 0;
+      e.lai1 += 1;
+      if (e.lai1 > 9) e.lai1 = 0;
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +408,26 @@ export function pumpkingAI(e: Enemy, game: GameHooks, player: Player | null) {
   e.visAngle = e.vx * -0.02;       // rotation(:33402)
   e.x += e.vx;                     // noTileCollide（SetDefaults 327）直积分
   e.y += e.vy;
+  // ---- FindFrame case 327 姿态机副本（cs:72977-73037，Renderer 直读 customFrameIdx）：
+  //      ai[3] 姿态 0→行0带 / 1→行4带 / 2→行8带；counter ±1/t（越 ±6 进一帧行，
+  //      7t/步）、12 帧双向回卷——表情滑变到位后定格（e.lai0=counter/e.lai1=行） ----
+  let step327 = 0;
+  if (e.ai3 === 0) {
+    if (e.lai1 > 5) step327 = 1;
+    else if (e.lai1 > 0) step327 = -1;
+  } else if (e.ai3 === 1) {
+    if (e.lai1 > 10) step327 = 1;
+    else if (e.lai1 > 4) step327 = -1;
+    else if (e.lai1 < 4) step327 = 1;
+  } else if (e.ai3 === 2) {
+    if (e.lai1 < 2) step327 = -1;
+    else if (e.lai1 > 8) step327 = -1;
+    else if (e.lai1 < 8) step327 = 1;
+  }
+  e.lai0 += step327;
+  if (e.lai0 > 6) { e.lai0 = 0; e.lai1 += 1; if (e.lai1 > 11) e.lai1 = 0; }
+  if (e.lai0 < 0) { e.lai0 = 6; e.lai1 -= 1; if (e.lai1 < 0) e.lai1 = 11; }
+  e.customFrameIdx = e.lai1;
 }
 
 // ---------------------------------------------------------------------------
@@ -772,6 +804,25 @@ export function santaNK1AI(e: Enemy, game: GameHooks, player: Player | null) {
   }
   if (player && Math.abs(e.cx - player.cx) < 50) flag58 = true;   // :34105-34107
   hoverCruise(e, game, player, flag58, num980);
+  // ---- FindFrame case 346 副本（cs:73050-73093，Renderer 直读 customFrameIdx）：
+  //      ai0==1 链炮开火带 6-8 每 3t 循环；vx==0 定格（帧不动、仅清计数——开火/
+  //      玩家头顶停步期不迈腿）；行走带 1-5 counter += 1+|vx|/2、>4 进帧
+  //      （L[0]=counter / L[3]=帧行，定格记忆无法无状态重建 → AI 侧副本）----
+  if (e.ai0 === 1) {
+    L[0] += 1;
+    if (L[0] > 2) { L[0] = 0; L[3] += 1; }
+    if (L[3] > 8) L[3] = 6;
+    if (L[3] < 6) L[3] = 6;
+  } else if (e.vx === 0) {
+    L[0] = 0;
+  } else {
+    L[0] += 1;
+    L[0] += Math.abs(e.vx) / 2;      // 原版两条自增语句分开写（浮点求和序 1:1）
+    if (L[0] > 4) { L[0] = 0; L[3] += 1; }
+    if (L[3] > 5) L[3] = 1;
+    if (L[3] < 1) L[3] = 1;
+  }
+  e.customFrameIdx = L[3];
 }
 
 // ---------------------------------------------------------------------------

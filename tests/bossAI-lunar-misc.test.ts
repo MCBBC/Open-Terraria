@@ -298,3 +298,100 @@ describe('AI_091 花岗岩元素 483', () => {
     expect([3, 4]).toContain(e2.ai0);
   });
 });
+
+// ===================== 星旋塔传送门 578/579 + 580 电击 + 星尘塔 540 标记接线 =====================
+// （Projectile.cs:32505-32805 aiStyle 108 / :32650-32676 开门 / NPC.cs:41310-41406 塔侧）
+import { VortexPortalProj } from '../src/entities/bossAI_lunar_misc';
+import { LightningBoltProj } from '../src/entities/LightningBoltProj';
+import { StardustMarkProj } from '../src/entities/StardustMarkProj';
+import type { Entity } from '../src/entities/Entity';
+
+/** 逐 tick 驱动投射物桶（塔/门/标记链全在 projectiles 桶） */
+function tickProjs(h: ReturnType<typeof makeHooks>, n: number) {
+  for (let i = 0; i < n; i++) {
+    for (const p of [...h.projectiles] as Entity[]) {
+      if (!p.dead) p.fixedUpdate(1 / 60, h.hooks);
+    }
+  }
+}
+
+describe('传送门弹 579（Projectile.cs:32505-32805）', () => {
+  it('90t 开门 → 2× Alien Hornet 427(门心 Bottom 锚、随机向上速)；180t 收场消亡', () => {
+    const h = makeHooks(makeWorld(), { x: 80, y: 96 });
+    const portal = new VortexPortalProj(80 * TILE + 8, 90 * TILE, 579);
+    h.em.add(portal, 'projectiles');
+    tickProjs(h, 89);
+    expect(h.enemies.filter((n) => n.vanillaId === 427).length).toBe(0);   // 门前无蜂
+    tickProjs(h, 1);                            // 第 90 次 update 开门(:32661-32676)
+    const hornets = h.enemies.filter((n) => n.vanillaId === 427);
+    expect(hornets.length).toBe(2);
+    for (const hornet of hornets) {
+      // 速度 = 随机向 4..9 −(0,2)（:32670-32673）
+      const s = Math.hypot(hornet.vx, hornet.vy + 2);
+      expect(s).toBeGreaterThanOrEqual(4);
+      expect(s).toBeLessThan(9);
+      // NewNPC Bottom 锚：蜂底 = 门心 Y
+      expect(hornet.y + hornet.h).toBeCloseTo(90 * TILE, 0);
+    }
+    tickProjs(h, 91);                           // 至 181t
+    expect(portal.dead).toBe(true);             // :32724-32726 alpha≥255 Kill
+  });
+});
+
+describe('传送门弹 578（Projectile.cs:32650-32660 开门放电）', () => {
+  it('首帧定门朝向(最近玩家),90t 放 580 电击弹(50 伤、朝向×8 速)', () => {
+    const h = makeHooks(makeWorld(), { x: 80, y: 96 });
+    const portal = new VortexPortalProj(80 * TILE + 8, 90 * TILE, 578);
+    h.em.add(portal, 'projectiles');
+    tickProjs(h, 90);                           // 首帧定 ai1 朝向 + 第 90t 开门
+    const bolts = h.projectiles.filter((p) => p instanceof LightningBoltProj) as LightningBoltProj[];
+    expect(bolts.length).toBe(1);
+    expect(bolts[0].projId).toBe(580);
+    expect(bolts[0].damage).toBe(50);           // :32658
+    expect(Math.hypot(bolts[0].vx, bolts[0].vy)).toBeCloseTo(8, 5);   // 朝向×8
+    // 玩家在门右下方 → 朝向 X 分量 > 0
+    expect(bolts[0].vx).toBeGreaterThan(0);
+  });
+});
+
+describe('星旋塔 AI 支线（Enemy.towerAI 422 段，NPC.cs:41310-41406）', () => {
+  it('视线被阻 → 玩家头顶 579 门（!CanHitLine 门 :41336）；视线通透 → 不开门', () => {
+    // ★墙须在 row<80（canHit Y 钳制 h−40）且玩家/塔须够高——塔身 h=270 且被
+    //   worldSurface 钳制段(:41247-41250)钉在 y≈430,玩家要飞到塔 400px 内
+    const walledWorld = makeWorld(false);
+    for (let y = 20; y < 60; y++) walledWorld.store.setTile(70, y, 1);   // x=70 隔墙
+    const walled = makeHooks(walledWorld, { x: 80, y: 48 });
+    const tower = spawn(walled, 422, 60, 90);
+    tower.bInit = true;
+    tick(walled, 1, [tower]);
+    const portals = walled.projectiles.filter((p) => p instanceof VortexPortalProj) as VortexPortalProj[];
+    expect(portals.length).toBe(1);             // 支线 a 数量门内（<14）→ 579
+    expect(portals[0].projId).toBe(579);
+    // 门位 = 玩家头顶上扫 10 格后的 (ptx×16+8, py×16+24)（:41341-41355）
+    expect(portals[0].cx).toBeCloseTo(80 * TILE + 8, 0);
+    expect(portals[0].cy).toBeCloseTo(38 * TILE + 24, 0);
+
+    const open = makeHooks(makeWorld(false), { x: 80, y: 48 });
+    const tower2 = spawn(open, 422, 60, 90);
+    tower2.bInit = true;
+    tick(open, 1, [tower2]);
+    expect(open.projectiles.filter((p) => p instanceof VortexPortalProj).length).toBe(0);
+  });
+});
+
+describe('星尘塔 AI → 540 标记链（Enemy.towerAI 493 段，NPC.cs:41257-41286/:44142-44228）', () => {
+  it('塔侧发 BFS 世代标记弹（根锚 = 塔 Top−120，:44154），替代旧「直生」', () => {
+    const h = makeHooks(makeWorld(), { x: 80, y: 48 });   // 玩家飞到被钳制塔(y≈430)400px 内
+    const tower = spawn(h, 493, 80, 80);
+    tower.bInit = true;
+    tick(h, 1, [tower]);
+    const marks = h.projectiles.filter((p) => p instanceof StardustMarkProj) as StardustMarkProj[];
+    expect(marks.length).toBeGreaterThan(0);    // BFS 链展开
+    // 根标记位置 = 根锚点（NewProjectile 位置直传；塔被 worldSurface 钳到 y≈430）
+    expect(marks[0].x).toBeCloseTo(tower.cx, 0);
+    expect(marks[0].y).toBeCloseTo(tower.y - 120, 0);
+    expect(h.enemies.filter((n) => n.vanillaId === 405 || n.vanillaId === 402
+      || n.vanillaId === 407).length).toBe(0);  // 不再直生——孵化走标记淡入(:32291-32297)
+    expect(tower.ai1).toBeGreaterThanOrEqual(30 * 5);   // 冷却 30×Next(5,16)
+  });
+});

@@ -82,6 +82,12 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   // 5334 奥库瑞姆剃刀（Item.cs:42276-42287）：consumable/useStyle4/useTime 45 在
   //   `Variant == EnabledVariant` 条件块内——提取器不解析条件块，整条缺失
   '5334': { consumable: true, useTime: 45, useAnimation: 45 },
+  // 天顶剑 4956 / 真铜短剑 5669（Item.cs:39974-39992 / 5669 同构 case）：
+  //   `useTime = useAnimation / 3f` 算式提取器不解析 → useTime 缺失（combatWeapon
+  //   缺省回退 useAnimation=30 = 挥一次只发一发剑弹；原版 30 帧动画内每 10 帧
+  //   一发共 3 发，num164=(animMax−anim)/itemTime=0/1/2）
+  '4956': { useTime: 10 },
+  '5669': { useTime: 10 },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };
@@ -197,6 +203,18 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
         ...base };
     }
     if (ai === AI_FLAIL) return { kind: 'flail', shoot, ...base };
+    // ★天顶剑族（4956 Zenith / 5669 真铜短剑：melee+noMelee+shoot、投射物
+    //   aiStyle 182 FinalFractal）：原版 useStyle 1 挥击动画 + noUseGraphic，
+    //   本体 noMelee——全部伤害在 933/1100 剑弹上（Item.cs:39974-39992）。
+    //   此前因 noMelee 落 'shot' 兜底 = 直线箭弹（无剑阵无挥击），归 melee
+    //   交 Game 挥击分支 case 933/1100（挥击命中盒走 updateSwingHits noMelee 门）
+    if (ai === 182 && c.melee) {
+      return {
+        kind: 'melee', damage: base.damage, knockback: base.knockback, useTime: base.useTime,
+        useAnimation: c.useAnimation ?? base.useTime, autoReuse: !!c.autoReuse,
+        shoot, shootSpeed: base.shootSpeed,
+      };
+    }
     // ★ melee+shoot（附魔剑 989/波刃 190 等 46 件）：原版语义 = 挥砍为主 +
     // 挥击中射弹（Player.cs:42880：flag4 = itemAnimation>0 && ItemTimeIsZero →
     // ItemCheck_Shoot，useTime 节奏发弹）。此前落入 shot 兜底 = 变成"光束枪"

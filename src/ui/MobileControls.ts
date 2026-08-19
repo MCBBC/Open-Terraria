@@ -13,9 +13,14 @@ import { Lang } from '../i18n/Lang';
 
 /** 触屏设备判定（粗指针 = 手机/平板；桌面触摸屏带鼠标时仍启用——可玩不碍事） */
 export function isTouchDevice(): boolean {
+  // ★一次判定终身缓存(2026-08-19 trace:matchMedia 逐帧调用 0.1%——VUI.drawCursor
+  //   每帧调此函数;指针类型会话内不变)
+  if (TOUCH_cached !== undefined) return TOUCH_cached;
   if (typeof window === 'undefined') return false;
-  return window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
+  TOUCH_cached = window.matchMedia?.('(pointer: coarse)').matches || 'ontouchstart' in window;
+  return TOUCH_cached;
 }
+let TOUCH_cached: boolean | undefined;
 
 /** 移动端画布 UI 缩放（小地图/资源条等按此缩小；桌面恒 1——渲染路径零变化） */
 export function mobileUiScale(): number {

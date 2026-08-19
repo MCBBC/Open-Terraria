@@ -233,6 +233,7 @@ describe('弹幕贴图管线(601/602 先例:PNG 落 sprites/vanilla,Arrow 按 pr
     435, 438, 447, 448, 449, 450,                          // 火星批 7 张
     452, 454, 462,                                         // 月系批 3 张
     464, 465, 467, 468, 872, 873, 874, 919, 922, 923, 926, // 本批 11 张
+    578, 579,                                              // 星旋传送门批 2 张(VortexPortalProj)
   ];
   it.each(IDS)('Projectile_%i.png 存在且为合法 PNG', (id) => {
     const buf = readFileSync(new URL(`../public/sprites/vanilla/Projectile_${id}.png`, import.meta.url));
@@ -243,8 +244,8 @@ describe('弹幕贴图管线(601/602 先例:PNG 落 sprites/vanilla,Arrow 按 pr
     expect(w).toBeGreaterThan(0);
     expect(h).toBeGreaterThan(0);
   });
-  it('全量清单无缺漏(26 新补 + 11 本批既有 = 37 张)', () => {
-    expect(IDS.length).toBe(37);
+  it('全量清单无缺漏(26 新补 + 11 本批既有 + 2 门批 = 39 张;466/580 原版即不用贴图——Extra_33 激光链绘制,Main.cs:33678-33760,不入本表)', () => {
+    expect(IDS.length).toBe(39);
   });
 });
 
@@ -282,5 +283,113 @@ describe('月总召怪段(bossAI_duke_moonlord.ts)', () => {
     expect(leech).toBeDefined();               // :37975-37989
     expect(leech!.ai0).toBe(head.id + 1);
     expect(Math.hypot(leech!.cx - h.player.cx, leech!.cy - h.player.cy)).toBeLessThan(32);
+  });
+});
+
+// ===================== 冰雾母云 464 / 闪电球 465+466 实体（Projectile.cs:30747-30937/:31017-31185） =====================
+import { IceMistCloud, LightningOrb } from '../src/entities/bossAI_lategame';
+import { LightningBoltProj } from '../src/entities/LightningBoltProj';
+import type { Entity } from '../src/entities/Entity';
+
+/** 逐 tick 驱动投射物桶（makeHooks 只 tick 敌人,弹幕实体须手动推进;快照防生成内嵌同拍） */
+function tickProjs(h: ReturnType<typeof makeHooks>, n: number) {
+  for (let i = 0; i < n; i++) {
+    for (const p of [...h.projectiles] as Entity[]) {
+      if (!p.dead) p.fixedUpdate(1 / 60, h.hooks);
+    }
+  }
+}
+
+describe('冰雾母云/子体 464（aiStyle 86，Projectile.cs:30747-30821）', () => {
+  it('母云每 30t 沿自转派生一颗子体(单位速度),150t 寿终(共 4 颗;:30763-30790)', () => {
+    const h = makeHooks(makeWorld(), { x: 80, y: 96 });
+    const cloud = new IceMistCloud(1000, 1000, 4, 0, 35, true);
+    h.em.add(cloud, 'projectiles');
+    tickProjs(h, 30);
+    const born = h.projectiles.filter((p) => p instanceof IceMistCloud && p !== cloud) as IceMistCloud[];
+    expect(born.length).toBe(1);                 // ai0==30 首颗
+    // 子体速度 = rotation 单位向量(派生前已 +π/30×29 → 角 29π/30,生成后当帧才再自旋,
+    // :30782-30788),同伤 35
+    expect(born[0].vx).toBeCloseTo(Math.cos((29 * Math.PI) / 30), 5);
+    expect(Math.hypot(born[0].vx, born[0].vy)).toBeCloseTo(1, 5);
+    expect(born[0].damage).toBe(35);
+    expect(cloud.dead).toBe(false);
+    tickProjs(h, 120);                           // 至 150t
+    expect(cloud.dead).toBe(true);               // :30778-30781 ai0≥150 Kill
+    expect(h.projectiles.filter((p) => p instanceof IceMistCloud && p !== cloud).length).toBe(4);
+  });
+
+  it('子体净静止(AI 反漂 × 引擎积分抵消,:30792)且 45t 自灭(:30805)', () => {
+    const h = makeHooks(makeWorld(), { x: 80, y: 96 });
+    const child = new IceMistCloud(1000, 1000, 0.6, 0.8, 35, false);
+    h.em.add(child, 'projectiles');
+    const x0 = child.x, y0 = child.y;
+    tickProjs(h, 44);
+    expect(child.dead).toBe(false);
+    expect(child.x).toBeCloseTo(x0, 6);          // 净静止
+    expect(child.y).toBeCloseTo(y0, 6);
+    tickProjs(h, 1);
+    expect(child.dead).toBe(true);               // ai0==45
+  });
+});
+
+describe('闪电球 465 + 闪电链 466（aiStyle 88，Projectile.cs:30860-30937/:31017-31185）', () => {
+  it('定点 180t:每 30t 掷一颗 466(7 速、同 45 伤);淡出后自灭', () => {
+    const h = makeHooks(makeWorld(), { x: 80, y: 96 });
+    const px = 80 * TILE, py = 96 * TILE;
+    const orb = new LightningOrb(px - 600, py - 200, 45);
+    h.em.add(orb, 'projectiles');
+    expect(orb.vx).toBe(0);                      // 定点(:65563-65566 速度 0)
+    tickProjs(h, 30);
+    const bolts = h.projectiles.filter((p) => p instanceof LightningBoltProj) as LightningBoltProj[];
+    expect(bolts.length).toBe(1);                // ai0==30 首颗(单人 1 目标)
+    expect(bolts[0].damage).toBe(45);
+    expect(Math.hypot(bolts[0].vx, bolts[0].vy)).toBeCloseTo(7, 5);   // ×7 速(:30914)
+    // 锯齿换向模长守恒:速恒 7 或停摆 0(:31024-31052 spd 缓存)
+    tickProjs(h, 50);
+    const s = Math.hypot(bolts[0].vx, bolts[0].vy);
+    expect(s === 0 || Math.abs(s - 7) < 1e-9).toBe(true);
+    tickProjs(h, 155);                           // ≥180t+51t 淡出(231t 死)
+    expect(orb.dead).toBe(true);                 // :30877-30887 alpha≥255 Kill
+  });
+
+  it('视线被阻的目标不吃 466(:30899-30902 CanHit 1×1 门)', () => {
+    // ★墙须在 row<80:canHit 起止 tile 的 Y 钳制在 h−40(Collision.cs :390-431,
+    //   地狱上界)——H=120 测试世界 row≥80 的墙对该检查不可见
+    const h = makeHooks(makeWorld(), { x: 80, y: 60 });
+    const st = h.hooks.world.store;
+    for (let y = 40; y < 70; y++) st.setTile(72, y, 1);   // 球与玩家间隔墙
+    const orb = new LightningOrb(64 * TILE, 60 * TILE, 45);
+    h.em.add(orb, 'projectiles');
+    tickProjs(h, 90);                            // 30/60/90 三拍全被视线门拦截
+    expect(h.projectiles.filter((p) => p instanceof LightningBoltProj).length).toBe(0);
+    const h2 = makeHooks(makeWorld(), { x: 80, y: 60 });  // 无墙对照:视线通 → 正常掷弹
+    h2.em.add(new LightningOrb(64 * TILE, 60 * TILE, 45), 'projectiles');
+    tickProjs(h2, 31);
+    expect(h2.projectiles.filter((p) => p instanceof LightningBoltProj).length).toBe(1);
+  });
+});
+
+describe('邪教徒弹幕实体化接线', () => {
+  it('ai0=2 冰雾 → IceMistCloud 母云(35 伤/4 速瞄向);ai0=4 闪电 → LightningOrb 定点(45 伤)', () => {
+    const h = makeHooks(makeWorld(), { x: 80, y: 96 });
+    const cult = spawn(h, 439, 80, 80);
+    cult.bInit = true;
+    cult.ai0 = 2; cult.ai1 = 4; cult.ai2 = 0; cult.ai3 = 0;
+    tick(h, 1, [cult]);
+    const cloud = h.projectiles.find((p) => p instanceof IceMistCloud) as IceMistCloud;
+    expect(cloud).toBeDefined();                 // 旧坍缩 = 直飞 Arrow,现为母云实体
+    expect(cloud.damage).toBe(35);
+    expect(Math.hypot(cloud.vx, cloud.vy)).toBeCloseTo(4, 5);   // :65419 aim×4
+    const p2 = makeHooks(makeWorld(), { x: 80, y: 96 });
+    const cult2 = spawn(p2, 439, 80, 80);
+    cult2.bInit = true;
+    cult2.ai0 = 4; cult2.ai1 = 20; cult2.ai2 = 0; cult2.ai3 = 0;
+    tick(p2, 1, [cult2]);
+    const orb = p2.projectiles.find((q) => q instanceof LightningOrb) as LightningOrb;
+    expect(orb).toBeDefined();                   // 头顶 100px 定点(:65563-65566)
+    expect(orb.damage).toBe(45);
+    expect(orb.cy).toBeCloseTo(cult2.cy - 100, 0);
+    expect(orb.vx).toBe(0);                      // 旧坍缩 = 6 速直飞,现零速悬停
   });
 });

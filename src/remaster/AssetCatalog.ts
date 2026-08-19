@@ -113,6 +113,8 @@ export function buildCatalog(inp: CatalogInput): Catalog {
     const name = nd.name ?? `NPC ${nid}`;
     const excl = EXCLUDED_NPC[nid];
     if (excl) {
+      // 排除=不能【按帧】切分(frames 空 → complete 只取决于整图记录);
+      // 整图重制经 WHOLE_FRAME_IDX 哨兵走工作台 whole 模式
       entries.push({ key: `npc:${id}`, category: 'npc', name, sheet, layout: 'whole', frames: [], meta: { excluded: excl } });
       continue;
     }
@@ -201,7 +203,8 @@ export function buildCatalog(inp: CatalogInput): Catalog {
     entries.push({
       key: `ui:${key}`, category: 'ui', name: key, sheet: file,
       layout: 'whole',
-      frames: sz ? [{ x: 0, y: 0, w: sz[0], h: sz[1], frameIdx: 0 }] : [],
+      // excluded(纸娃娃族)=不能逐帧;frames 清空,整图走 whole 模式
+      frames: excl ? [] : (sz ? [{ x: 0, y: 0, w: sz[0], h: sz[1], frameIdx: 0 }] : []),
       meta: { excluded: excl },
     });
   }
@@ -217,10 +220,13 @@ export function buildCatalog(inp: CatalogInput): Catalog {
     if (m) { category = 'gore'; id = m[1]; name = `Gore ${id}`; }
     else if ((m = /^vanilla\/Glow_(\d+)\.png$/.exec(file))) { category = 'glow'; id = m[1]; name = `Glow ${id}`; }
     else if ((m = /^vanilla\/Buff_(\d+)\.png$/.exec(file))) { category = 'buff'; id = m[1]; name = `Buff ${id}`; }
+    const mExcl = excludedFor(file);
     entries.push({
       key: `${category}:${id}`, category, name, sheet: file,
-      layout: 'whole', frames: [{ x: 0, y: 0, w: sizes[file][0], h: sizes[file][1], frameIdx: 0 }],
-      meta: { excluded: excludedFor(file) },
+      layout: 'whole',
+      // excluded(液体/树冠/背景等)=不能逐帧;整图走 whole 模式(frames 清空)
+      frames: mExcl ? [] : [{ x: 0, y: 0, w: sizes[file][0], h: sizes[file][1], frameIdx: 0 }],
+      meta: { excluded: mExcl },
     });
   }
 

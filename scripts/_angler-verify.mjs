@@ -34,6 +34,14 @@ const out = await p.evaluate(async () => {
   };
   if (!angler376) { res.error = 'no Enemy 376 placed'; return res; }
   res.state.pos = { x: Math.round(angler376.x), y: Math.round(angler376.y), w: angler376.w, h: angler376.h, hp: angler376.hp };
+  // 随机世界渔夫可能贴地图边缘（探针玩家停不进边框区）——搬到玩家旁平地再测
+  {
+    const ptx = Math.floor(g.player.cx / TILE);
+    let ty2 = Math.floor(g.player.cy / TILE);
+    while (ty2 < st.h - 4 && !st.isSolid(ptx, ty2)) ty2++;
+    angler376.x = ptx * TILE + 8 - angler376.w / 2;
+    angler376.y = ty2 * TILE - angler376.h;
+  }
 
   // ---- 2. 近战免伤（铜短剑）----
   const park = (e) => {
@@ -100,15 +108,19 @@ const out = await p.evaluate(async () => {
     g.player.x = freedAngler.x - g.player.w - 20;
     g.player.y = freedAngler.y + freedAngler.h - g.player.h;
     g.player.vx = 0; g.player.vy = 0;
+    // 解救后的渔夫会走动（homeless 游走）——锁定其位置+每帧重瞄（真实玩家用眼跟踪）
+    const lock = { x: freedAngler.x, y: freedAngler.y };
+    res.freedTalkGates = { uiBlocking: g.input.uiBlocking, dist: Math.round(Math.hypot(freedAngler.cx - g.player.cx, freedAngler.cy - g.player.cy)) };
     g.input.rightDown = true;
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 20; i++) {
+      freedAngler.x = lock.x; freedAngler.y = lock.y;
+      freedAngler.vx = 0; freedAngler.vy = 0;
       g.player.x = freedAngler.x - g.player.w - 20;
       g.player.y = freedAngler.y + freedAngler.h - g.player.h;
       g.player.vx = 0; g.player.vy = 0;
-      freedAngler.vx = 0;
       const [fsx2, fsy2] = g.camera.worldToScreen(freedAngler.cx, freedAngler.cy);
       g.input.mouseX = fsx2; g.input.mouseY = fsy2;
-      await sleep(60);
+      await sleep(16);
     }
     g.input.rightDown = false;
     res.freedTalk = { dialogOpened: dialogTexts.length > 0, chat: dialogTexts[0] ?? null, isEllipsis: dialogTexts[0] === '……' };

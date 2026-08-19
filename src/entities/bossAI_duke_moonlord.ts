@@ -24,7 +24,7 @@ import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
-import { projSprite, projFrameCount } from './Arrow';
+import { projSprite, projFrameCount, volleyPhantomOrbs } from './Arrow';
 import { GorePiece } from './GorePiece';
 import { BuffType } from '../stats/Buffs';
 
@@ -923,13 +923,16 @@ const ML_CORE_P2: ReadonlyArray<readonly [number, number]> = [
   [0, 90], [1, 90], [0, 90], [2, 135], [0, 90], [3, 200], [0, 90], [4, 375], [0, 90], [2, 135],
 ];
 
-/** 朝玩家发射一发弹幕的通用出口(伤害/弹 id 全部来自原版 NewProjectile 调用点) */
+/** 朝玩家发射一发弹幕的通用出口(伤害/弹 id 全部来自原版 NewProjectile 调用点;
+ *  2026-08-19 弹道批后无调用方——454 齐射改走 volleyPhantomOrbs,保留为
+ *  真眼数据缺失兜底的通用出口位) */
 function mlShoot(e: Enemy, game: GameHooks, player: Player, ox: number, oy: number,
   spd: number, dmg: number, projId: number) {
   const dx = player.cx - (e.cx + ox), dy = player.cy - (e.cy + oy);
   const d = Math.hypot(dx, dy) || 1;
   shoot(game, e.cx + ox, e.cy + oy, (dx / d) * spd, (dy / d) * spd, dmg, projId, 600);
 }
+void mlShoot;
 
 /** checkDead(:78845-78857):手 397 / 头 396 血尽 → ai0=-2 闭眼残肢的同时,于部件中心
  *  召 NPC 400 真眼,ai[3] = 部件的 ai[3](核心 id,游离眼 AI 据此锚定核心) */
@@ -1139,7 +1142,7 @@ export class MLDeathray extends Entity {
       game.spawnBurst?.(tipX, tipY, '#5FE8D0', 1, Math.random() * 2 + 2, da, 0, { life: 30, damp: 0.96 });
     }
     if (Math.random() < 0.2) {
-      const off = (Math.random() - 0.5) * wSq;
+      const off = (Math.random() - 0.5) * 36;          // :30535 偏移幅 = width(非 ×scale)
       game.spawnBurst?.(tipX - dirY * off, tipY + dirX * off, '#C8D0D8', 1, 1.5, -Math.PI / 2, 0.3, { life: 40, damp: 0.97 });
     }
     // ---- 束光 CastLight(:30541-30543):PlotTileLine(Center → Center+dir·len,
@@ -1238,8 +1241,9 @@ export class MLDeathray extends Entity {
   }
 }
 
-/** 线段 vs AABB(原版 Collision.CheckAABBvLineCollision 语义:线宽胶囊与矩形相交) */
-function segHitsRect(x0: number, y0: number, dx: number, dy: number, width: number,
+/** 线段 vs AABB(原版 Collision.CheckAABBvLineCollision 语义:线宽胶囊与矩形相交)。
+ *  bossAI_dd2 BetsyBreath 喷焰判定共用(2026-08-19 弹道批导出)。 */
+export function segHitsRect(x0: number, y0: number, dx: number, dy: number, width: number,
   t: { x: number; y: number; w: number; h: number }): boolean {
   // 最近点参数 t∈[0,1](钳到段内)
   const cx = t.x + t.w / 2, cy = t.y + t.h / 2;
@@ -1486,14 +1490,19 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
       }
       break;
     }
-    case 2: // 幻影能量球 454:先慢速散出,后段朝玩家加速(原版 30t 后转向寻的,:38447-38456/:38475)
+    case 2: // 幻影能量球 454(:38385-38506 真眼攻击 2 折叠):ai0=30 直接列队,
+      // t==105(:38487-38505)全数置 -1 以瞄准向 12 速齐射(核心折叠的齐射时刻=60)
       if (inSlot === 0) {
         for (let k = 0; k < 3; k++) {
           const ang = -Math.PI / 2 + (k - 1) * 0.6;
-          shoot(game, e.cx, e.cy, Math.cos(ang) * 4, Math.sin(ang) * 4, 40, 454, 600);
+          // 出生 ai0=30(真眼弹 NewProjectile 第 9 参,:38452-38457)——跳过随行段
+          shoot(game, e.cx, e.cy, Math.cos(ang) * 4, Math.sin(ang) * 4, 40, 454, 600,
+            { phantomOrb: { ownerId: e.id, ai0: 30 } });
         }
       } else if (inSlot === 60) {
-        for (let k = -1; k <= 1; k++) mlShoot(e, game, player, 0, 0, 12, 40, 454);
+        const dx = player.cx - e.cx, dy = player.cy - e.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        volleyPhantomOrbs(game, e.id, (dx / d) * 12, (dy / d) * 12);   // :38493-38505
       }
       break;
     case 3: { // 幻影之眼 452 螺旋(:38508-38572):45..185 眼角自旋(±2π/40,每 40t ×0.95),
@@ -1505,7 +1514,9 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
         bx.ang += bx.rate;
         if ((inSlot - 45) % 10 === 0) {                  // :38554-38559
           const ux = Math.cos(bx.ang), uy = Math.sin(bx.ang);
-          shoot(game, e.cx + ux * 17, e.cy + uy * 17, ux * 8, uy * 8, 35, 452, 600);
+          // ai[1] = (2π·rand−π)/30 + π/180·ai[2](:38558,ai[2]=螺旋角速度→bx.rate)
+          shoot(game, e.cx + ux * 17, e.cy + uy * 17, ux * 8, uy * 8, 35, 452, 600,
+            { phantasm: { spin: (TAU * Math.random() - Math.PI) / 30 + (Math.PI / 180) * bx.rate } });
         }
       }
       break;
@@ -1595,7 +1606,9 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
         let vx = 5 * side + (k - 3.5) * side * 3;
         let vy = -8 + (k - 4.5);
         vx *= 1.2; vy *= 1.2;
-        shoot(game, e.cx, e.cy, vx, vy, 40, 454, 600);
+        // 出生 ai0=0(随行 30t → 列队;ai[1]=whoAmI→ownerId,齐射指令圈定用)
+        shoot(game, e.cx, e.cy, vx, vy, 40, 454, 600,
+          { phantomOrb: { ownerId: e.id, ai0: 0 } });
       }
       const t = smoothAmt((inSlot - 30) / 180);
       handSeek(e, ax + swx * t, ay + swy * t, 20, 0.5); // :37381-37387
@@ -1610,15 +1623,12 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
       e.vx *= 0.9; e.vy *= 0.9;
     } else if (inSlot < 300) {
       frameT = 3;
-      // :37407-37427 原版在此把本手全部 454 弹转向玩家(12 速);本工程投射物无寻的,
-      // 近似为朝玩家补射 6 发 454(40 伤)
+      // :37407-37427 num1232==292:本手全部 454(ai0≠-1)置 -1 齐射——统一速度 =
+      // normalize(玩家 − (手心+(0,−350)))·12(vector175,全部球同矢量平行冲阵)
       if (inSlot === 292 && player) {
-        for (let k = 0; k < 6; k++) {
-          const dx = player.cx - e.cx, dy = player.cy - e.cy;
-          const d = Math.hypot(dx, dy) || 1;
-          const ang = Math.atan2(dy, dx) + (k - 2.5) * 0.18;
-          shoot(game, e.cx, e.cy, Math.cos(ang) * 12, Math.sin(ang) * 12, 40, 454, 600);
-        }
+        const dx = player.cx - e.cx, dy = player.cy - (e.cy - 350);
+        const d = Math.hypot(dx, dy) || 1;
+        volleyPhantomOrbs(game, e.id, (dx / d) * 12, (dy / d) * 12);
       }
       const t = 1 - (inSlot - 270) / 30;
       handSeek(e, ax + swx * smoothAmt(t), ay + swy * smoothAmt(t), 14, 0.1); // :37428-37434
@@ -1695,13 +1705,15 @@ function handSeek(e: Enemy, tx: number, ty: number, spd: number, k: number) {
   e.vx = lerp(e.vx, (dx / d) * Math.min(spd, d), k);
   e.vy = lerp(e.vy, (dy / d) * Math.min(spd, d), k);
 }
-/** 眼球环射一发 452(:37326-37334):从眼球椭圆外沿射出,沿眼球朝向 8 速,30 伤 */
+/** 眼球环射一发 452(:37326-37334):从眼球椭圆外沿射出,沿眼球朝向 8 速,30 伤;
+ *  ai[1] 弧线弯转角 = (2π·rand−π)/30 + π/180·num1231(:37332,side) */
 function handFireEye(e: Enemy, game: GameHooks, x: HandX, side: number) {
   const exx = Math.cos(x.l0) * 30 * x.l1, eyy = Math.sin(x.l0) * 66 * x.l1;
   const d = Math.hypot(exx, eyy) || 1;
   const px = e.cx + (exx / d) * 72.46 * 0.4 - side; // |vector159|=√(30²+66²)≈72.46(:37330)
   const py = e.cy + (eyy / d) * 72.46 * 0.4 + 3;
-  shoot(game, px, py, (exx / d) * 8, (eyy / d) * 8, 30, 452, 600);
+  shoot(game, px, py, (exx / d) * 8, (eyy / d) * 8, 30, 452, 600,
+    { phantasm: { spin: (TAU * Math.random() - Math.PI) / 30 + (Math.PI / 180) * side } });
 }
 
 // ---------------------------------------------------------------------------
@@ -1814,9 +1826,14 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
           const tx = Math.floor(e.cx / TILE), ty = Math.floor(e.cy / TILE);
           if (st.inBounds(tx, ty) && !st.isSolid(tx, ty)) {
             for (let num1281 = 0; num1281 < 30; num1281++) {
+              // 1021 aiStyle 25 巨砾物理(:24341-24725):grav 0.06/终端 16/滚动
+              // 加速/弹地 Dig 音 + X 反弹 ×−0.75×3 次(:17578-17600);
+              // extraUpdates=1 走数据表;life = 默认 300×3=900(原版基 3600×3=
+              // 10800,死亡实际由三次反弹限主导,取任务口径 900)
               shoot(game, e.cx, e.cy,
                 (Math.floor(Math.random() * 3199) - 1599) * 0.01,
-                (Math.floor(Math.random() * 1600) - 1599) * 0.01, 70, 1021);
+                (Math.floor(Math.random() * 1600) - 1599) * 0.01, 70, 1021, 900,
+                { grav: 0.06, mlBoulder: true });
             }
           }
         }

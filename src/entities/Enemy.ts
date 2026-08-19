@@ -60,7 +60,7 @@ import {
   cultistArcherStandbyAI, cultistArcherWake, phantomAI, bigMimicAI,
   mothronAI, mothronEggAI, babyMothronAI, graniteElementalAI,
   starCellAI, smallStarCellAI, flowInvaderAI, nebulaFloaterAI, solarSlimeAI,
-  crawltipedeAI, lunarLocalAI,
+  crawltipedeAI, lunarLocalAI, VortexPortalProj,
 } from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
@@ -10213,53 +10213,38 @@ export class Enemy extends Entity {
       if (this.ai1 > 0) this.ai1--;
       if (this.ai1 <= 0 && player && !player.dead
         && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 400) {
-        const pool: number[] = [];
-        if (count(405) + count(406) < 2) pool.push(405);
-        if (count(402) < 2) pool.push(402);
-        if (count(407) < 1) pool.push(407);
-        if (pool.length > 0) {
-          const pick = pool[(Math.random() * pool.length) | 0];
-          this.ai1 = 30 * (5 + ((Math.random() * 11) | 0));   // 30*Next(5,16)
-          // 投射物 540 星尘标记 → 末端生成该 NPC：折叠为塔顶随机点直接 spawn（无飞行演出）。
-          // （真 540 链已落地 StardustMarkProj.spawnStardustMarks——蠕虫 402 侧已接，
-          //  塔侧差异仅根锚点 Top−120 与 402 池 <2，二期迁移时可直换）
-          const mark = spawnPart(game, this, pick);
-          if (mark) {
-            mark.x = this.cx + (Math.random() - 0.5) * 160 - mark.w / 2;
-            mark.y = this.y - 120 - mark.h / 2;
-          }
-        } else {
-          this.ai1 = 30;   // :44225-44227
-        }
+        // 真 540 标记链（:44142-44228，StardustMarkProj.spawnStardustMarks 'tower' 档）：
+        // 孵化池 {405∪406<2→405, 402<2→402, 407<1→407} 随机选一 → BFS 世代展开一串
+        // 标记弹（根锚 = 塔 Top−UnitY×120 = (cx, y−120)，:44154），仅末位标记淡入破零
+        // 时孵化该 NPC——旧「折叠直生」已退役（行为对齐蠕虫 402 侧 :44230-44314）
+        const marks = spawnStardustMarks(game, this.cx, this.y - 120, 'tower');
+        this.ai1 = marks ? 30 * (5 + ((Math.random() * 11) | 0)) : 30;   // 30*Next(5,16) / :44225-44227
       }
     } else if (this.vanillaId === 422) {
-      // 星旋（:41310-41407）：玩家头顶传送门 + 空中随机点传送门
+      // 星旋（:41310-41406）：玩家头顶传送门 + 空中随机点传送门（均先 90t 门演出再开门）
       if (this.ai1 > 0) this.ai1--;
-      // 支线 a（:41336-41361）：3240px 内（原版还要求 !CanHitLine 视线阻隔——未接，省略）→
-      // 玩家头顶门；n428+n427+n426<14 → 579 门（90t 后生 2× Alien Hornet 427）否则 578 门（只放电）
-      if (this.ai1 <= 0 && player && !player.dead && distTo(player.cx, player.cy) < 3240) {
+      // 支线 a（:41336-41361）：3240px 内且【塔→玩家视线被阻】(!CanHitLine) → 玩家头顶门；
+      // n428+n427+n426<14 → 579 门（90t 后生 2× Alien Hornet 427，VortexPortalProj）否则
+      // 578 门（90t 放 580 电击弹）。!CanHitLine 门 2026-08-19 补（原省略——玩家躲在墙后
+      // 塔才开门，原版语义）
+      if (this.ai1 <= 0 && player && !player.dead && distTo(player.cx, player.cy) < 3240
+        && !losClear(game, this.cx, this.cy, player.cx, player.cy)) {   // :41336
         this.ai1 = 60 + ((Math.random() * 120) | 0);
-        if (count(428) + count(427) + count(426) < 14) {
-          const ptx = Math.floor(player.cx / TILE);
-          let py = Math.floor(player.y / TILE);
-          for (let i = 0; i < 10; i++) {
-            if (!st.inBounds(ptx, py) || st.isSolid(ptx, py) || py <= 10) break;
-            py--;
-          }
-          for (let i = 0; i < 2; i++) {
-            const hornet = spawnPart(game, this, 427);
-            if (!hornet) continue;
-            hornet.x = ptx * TILE + 8 - hornet.w / 2;
-            hornet.y = py * TILE + 24 - hornet.h;
-            const a = Math.random() * Math.PI * 2;
-            const sp = 4 + Math.random() * 5;               // Next(4,9)
-            hornet.vx = Math.cos(a) * sp;
-            hornet.vy = Math.sin(a) * sp - 2;               // - Vector2.UnitY*2
-          }
+        // 玩家头顶上扫 ≤10 格找空隙（:41341-41349：SolidTile 即停 / 越上界即停）
+        const ptx = Math.floor(player.cx / TILE);
+        let py = Math.floor(player.y / TILE);               // player.Top
+        for (let i = 0; i < 10; i++) {
+          if (!st.inBounds(ptx, py) || st.isSolid(ptx, py) || py <= 10) break;
+          py--;
         }
+        const portal = count(428) + count(427) + count(426) < 14   // flag100 :41345
+          ? new VortexPortalProj(ptx * TILE + 8, py * TILE + 24, 579)   // :41355
+          : new VortexPortalProj(ptx * TILE + 8, py * TILE + 17, 578);  // :41359（578 门低 7px）
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
+          .entities.add(portal, 'projectiles');
       }
       // 支线 b（:41362-41406）：1080px 内且低于塔顶 400px、n427+n426*3+n428<20 →
-      // 玩家 ±20 格随机空中点 579 门（2× 427）
+      // 玩家 ±20 格随机空中点 579 门（塔→玩家视线被阻时才有合格点，:41388-41392）
       if (this.ai1 <= 0 && player && !player.dead
         && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 400
         && count(427) + count(426) * 3 + count(428) < 20) {
@@ -10268,23 +10253,29 @@ export class Enemy extends Entity {
         const pty = Math.floor(player.cy / TILE);
         const ttx = Math.floor(this.cx / TILE);
         const tty = Math.floor(this.cy / TILE);
-        for (let attempt = 0; attempt < 100; attempt++) {
-          const mx = ptx - 20 + ((Math.random() * 41) | 0);
-          const my = pty - 20 + ((Math.random() * 41) | 0);
-          if (Math.abs(my - pty) <= 8 && Math.abs(mx - ptx) <= 8) continue;   // :41383 玩家 8 格禁圈
-          if (Math.abs(my - tty) <= 3 && Math.abs(mx - ttx) <= 3) continue;   // :41383 塔 3 格禁圈
-          if (!st.inBounds(mx, my) || st.isSolid(mx, my)) continue;
-          for (let i = 0; i < 2; i++) {
-            const hornet = spawnPart(game, this, 427);
-            if (!hornet) continue;
-            hornet.x = mx * TILE + 8 - hornet.w / 2;
-            hornet.y = my * TILE + 8 - hornet.h / 2;
-            const a = Math.random() * Math.PI * 2;
-            const sp = 4 + Math.random() * 5;
-            hornet.vx = Math.cos(a) * sp;
-            hornet.vy = Math.sin(a) * sp - 2;
+        // :41370-41373 塔心→玩家心 >2000px 跳过搜索（flag101 预门）
+        if (Math.hypot(player.cx - this.cx, player.cy - this.cy) <= 2000) {
+          for (let attempt = 0; attempt < 100; attempt++) {
+            const mx = ptx - 20 + ((Math.random() * 41) | 0);
+            const my = pty - 20 + ((Math.random() * 41) | 0);
+            if (Math.abs(my - pty) <= 8 && Math.abs(mx - ptx) <= 8) continue;   // :41381 玩家 8 格禁圈
+            if (Math.abs(my - tty) <= 3 && Math.abs(mx - ttx) <= 3) continue;   // :41381 塔 3 格禁圈
+            if (!st.inBounds(mx, my)) continue;
+            if (st.get(mx, my) !== 0) continue;               // :41384 !nactive()（须空格）
+            if (st.liquid[st.idx(mx, my)] > 0 && st.liquidType[st.idx(mx, my)] === 2) continue;   // :41386 lava
+            let solid5 = false;                               // :41387 SolidTiles 5×5（任一实心即弃）
+            for (let sx = mx - 2; sx <= mx + 2 && !solid5; sx++) {
+              for (let sy = my - 2; sy <= my + 2; sy++) {
+                if (st.inBounds(sx, sy) && st.isSolid(sx, sy)) { solid5 = true; break; }
+              }
+            }
+            if (solid5) continue;
+            if (losClear(game, this.cx, this.cy, player.cx, player.cy)) continue;   // :41388 须视线被阻
+            (game as unknown as { entities: { add: (e: unknown, b: string) => void } })
+              .entities.add(new VortexPortalProj(mx * TILE + 8, my * TILE + 8, 579),   // :41400
+                'projectiles');
+            break;
           }
-          break;
         }
       }
     } else if (this.vanillaId === 517) {

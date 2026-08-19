@@ -184,6 +184,19 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     }
     slots.set(e, parts);
   }
+  // ---- FindFrame case 395 counter 副本（cs:72520-72541，蜂后 222 先例：AI 写
+  //      e.lai0、Renderer vanillaFrameIdx 读）：每 tick +1、66 回卷；死光电报窗
+  //      ai[3]∈[20,260) 内再 +1 且钳 [36,53]（帧 6-8 蓄能辉光带）。只在两个
+  //      非死亡出口调用（-1/-2 爬升分支与函数尾）= AI 全部完成后同步，与原版
+  //      FindFrame 时序一致 ----
+  const frameTick395 = (): void => {
+    e.lai0 += 1;
+    if (e.lai0 >= 66) e.lai0 = 0;
+    if (e.ai3 >= 20 && e.ai3 < 260) {
+      e.lai0 += 1;
+      if (e.lai0 >= 54 || e.lai0 < 36) e.lai0 = 36;
+    }
+  };
   // ---- 自毁态（:36357-36360,普通模式由 392 置 ai0=3）----
   if (e.ai0 === 3) {
     e.iframes = 0;
@@ -217,6 +230,7 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
       if (e.ai0 === -2) e.ai0 = 2;
       e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
     }
+    frameTick395();
     fly(e);
     return;
   }
@@ -338,6 +352,7 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     e.dead = true;
     return;
   }
+  frameTick395();
   fly(e);
 }
 
@@ -418,14 +433,18 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
   const saucer = m;
   e.ai3 = saucer.ai3;
   if (id === 394) {
-    // 火炮窗 [440,580)（:36124-36150）：每 20t 一发 448,朝向 ±22.5° 散布,速 8
+    // 火炮窗 [440,580)（:36124-36150）：每 20t 一发 448,朝向 ±22.5° 散布,速 8;
+    // 出生 ai[1]=20 引信（:36099 NewProjectile 第 10 参）——20t 倒数后点火
+    // +4 加速(8→12)+8 尘爆+锁定,30t 内 20%/t 转向玩家,180t 自毁/近身 42px 爆炸
+    //（aiStyle 80 :29801-29890,Kill 爆炸 :70544-70580;life=原版默认 3600）
     if (e.ai3 >= 440 && e.ai3 < 580) {
       const n = e.ai3 - 440;
       if (n % 20 === 0) {
         const dirx = spriteDir;
         const delta = (Math.random() - 0.5) * 0.7853982;   // ±22.5° 散布（:36133-36136）
         shootM(game, e.cx + dirx * 36, e.cy + 8,
-          Math.cos(delta) * 8 * dirx, Math.sin(delta) * 8 * dirx, 50, 448);
+          Math.cos(delta) * 8 * dirx, Math.sin(delta) * 8 * dirx, 50, 448, 3600, 1,
+          { martianRocket: true });
         game.playSfxWav?.('Item_39', 1, e.cx, e.cy);   // :36098 火炮每发(终审补)
       }
     }
@@ -520,6 +539,11 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
       }
     }
   }
+  // ---- FindFrame case 392 counter 副本（cs:72543-72560，393/394 已在上方各自
+  //      return，函数尾仅 392 到达）：4 帧旋球 counter 每 tick +1、死光电报窗
+  //      ai[3]∈[20,260) 内 ×2、12 回卷（Renderer 读 e.lai0 → 帧 = counter/3）----
+  e.lai0 += e.ai3 >= 20 && e.ai3 < 260 ? 2 : 1;
+  if (e.lai0 >= 12) e.lai0 = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -797,6 +821,26 @@ export function martianFighterExtras(e: Enemy, game: GameHooks, player: Player |
     return;
   }
   if (id === 386) {
+    // ---- FindFrame case 386 副本（cs:72369-72402，Renderer 直读 customFrameIdx）：
+    //      ai[2]>0 放塔期 → 帧 9+(ai2/12)%2；地面行走带 2-8 counter += |vx|*2
+    //      （无 +1）、>6 进帧（增量 >1 越限溢出随回卷丢弃 → 须步进副本）；
+    //      站定=帧0（counter 保留）；腾空=帧1 且清 counter（e.lai0=counter/e.lai1=行）。
+    //      置于块首保证 confused/放塔 return 路径也逐 tick 推进；ai2 取自增前值
+    //      （9/10 带翻转边界差 1t，登记）----
+    if (e.ai2 > 0) {
+      e.customFrameIdx = 9 + (Math.floor(e.ai2 / 12) % 2);
+    } else if (e.vy !== 0) {
+      e.lai0 = 0;
+      e.lai1 = 1;
+      e.customFrameIdx = 1;
+    } else {
+      if (e.lai1 < 2) e.lai1 = 2;
+      e.lai0 += Math.abs(e.vx) * 2;
+      if (e.lai0 > 6) { e.lai0 = 0; e.lai1 += 1; }
+      if (e.lai1 >= 9) e.lai1 = 2;
+      if (e.vx === 0) e.lai1 = 0;
+      e.customFrameIdx = e.lai1;
+    }
     // ---- 工程师：放炮塔（:59384-59428）----
     if (e.confusedT > 0) { e.ai2 = -60; return; }
     if (e.ai2 < 60) e.ai2 += 1;

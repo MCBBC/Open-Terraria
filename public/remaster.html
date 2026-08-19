@@ -123,9 +123,11 @@
       <div class="cell"><canvas id="newcv"></canvas><div class="lb">重制帧</div></div>
     </div>
     <img id="genpreview" alt="生成原图">
+    <div class="row"><label><input type="checkbox" id="whole-mode"> 整图重制(整张表一个单元,逐元素原位)</label></div>
     <div class="row"><label><input type="checkbox" id="overlay" checked> 50% 叠加对比</label>
       <label><input type="checkbox" id="use-ref" checked> 相邻已验收帧作风格锚</label></div>
-    <textarea id="prompt" placeholder="prompt(切帧自动预填,可编辑微调)"></textarea>
+    <textarea id="prompt" placeholder="微调指令(可留空=纯默认模板;输入即追加在默认模板之后,如:更鲜艳、金属质感、暗黑风)"></textarea>
+    <div class="hint" id="prompt-preview" style="margin:-2px 0 6px;max-height:52px;overflow-y:auto;white-space:normal"></div>
     <div class="row">
       <button id="btn-remaster" class="primary">重制此帧 (R)</button>
       <button id="btn-accept" class="good">验收 ✓ (A)</button>
@@ -218,6 +220,16 @@ const framePixelsMem = new Map(); // 'entryKey|idx' → Uint8ClampedArray(重制
 const remastering = new Set();    // 防重入
 let lastGen = null;       // {b64, layout}
 let onlyTodo = false;
+/** 整图重制模式(true=整张 sheet 一个重制单元;excluded 条目强制开)。 */
+let wholeMode = false;
+/** 当前生效帧(whole 模式=整图帧哨兵 -1;逐帧=frames[curFrame]) */
+function effectiveFrame() {
+  if (!curEntry || !sheetImg) return null;
+  if (wholeMode) return { x: 0, y: 0, w: sheetImg.width, h: sheetImg.height, frameIdx: -1 };
+  return curEntry.frames[curFrame] ?? null;
+}
+/** 当前记录帧号(whole=-1 哨兵,与逐帧 0 区分) */
+function curFrameIdx() { return wholeMode ? -1 : curFrame; }
 
 // ---- 左栏:类别 + 列表 ----
 const CATS = [['npc', 'NPC'], ['tile', '物块'], ['wall', '墙'], ['item', '物品'], ['projectile', '弹幕'],
@@ -246,7 +258,7 @@ function renderList() {
     div.className = 'item' + (e === curEntry ? ' sel' : '') + (e.meta?.excluded ? ' excl' : '');
     const p = state.progressText(e);
     const done = state.progress[e.key]?.complete;
-    div.innerHTML = `<span class="nm" title="${e.key} · ${e.sheet}${e.meta?.excluded ? ' · ' + e.meta.excluded : ''}">${e.name}</span><span class="pg${done ? ' done' : ''}">${e.meta?.excluded ? '二期' : p}</span>`;
+    div.innerHTML = `<span class="nm" title="${e.key} · ${e.sheet}${e.meta?.excluded ? ' · 整图:' + e.meta.excluded : ''}">${e.name}</span><span class="pg${done ? ' done' : ''}">${e.meta?.excluded ? `整图 ${p}` : p}</span>`;
     div.onclick = () => selectEntry(e);
     frag.appendChild(div);
   }
@@ -270,6 +282,9 @@ function loadSheet(file) {
 function selectEntry(e) {
   curEntry = e;
   curFrame = 0;
+  wholeMode = !!e.meta?.excluded || e.frames.length === 0;   // 无法逐帧 → 整图
+  $('whole-mode').checked = wholeMode;
+  $('whole-mode').disabled = e.frames.length === 0;          // 无帧可逐:只能整图
   lastGen = null;
   renderList();
   void (async () => {
@@ -301,13 +316,14 @@ function drawSheet() {
   ov.style.width = cv.style.width; ov.style.height = cv.style.height;
   const ox = ov.getContext('2d');
   ox.clearRect(0, 0, ov.width, ov.height);
-  for (const f of curEntry.frames) {
-    const st = frameStatus(f.frameIdx);
+  const drawFrames = wholeMode ? [effectiveFrame()].filter(Boolean) : curEntry.frames;
+  for (const f of drawFrames) {
+    const st = frameStatus(wholeMode ? -1 : f.frameIdx);
     ox.strokeStyle = frameColor(st);
-    ox.globalAlpha = f.frameIdx === curFrame ? 1 : 0.55;
-    ox.lineWidth = f.frameIdx === curFrame ? 2 : 1;
+    ox.globalAlpha = 1;
+    ox.lineWidth = 2;
     ox.strokeRect(f.x + .5, f.y + .5, f.w - 1, f.h - 1);
-    if (f.frameIdx === curFrame) {
+    if (!wholeMode && f.frameIdx === curFrame) {
       ox.globalAlpha = .18; ox.fillStyle = '#ffd76e';
       ox.fillRect(f.x, f.y, f.w, f.h);
     }
@@ -333,10 +349,11 @@ function renderFilm() {
   const strip = $('filmstrip');
   strip.replaceChildren();
   if (!curEntry) return;
-  for (const f of curEntry.frames) {
+  const filmFrames = wholeMode ? [effectiveFrame()].filter(Boolean) : curEntry.frames;
+  for (const f of filmFrames) {
     const d = document.createElement('div');
-    d.className = 'film' + (f.frameIdx === curFrame ? ' sel' : '');
-    d.dataset.st = frameStatus(f.frameIdx);
+    d.className = 'film' + ((wholeMode || f.frameIdx === curFrame) ? ' sel' : '');
+    d.dataset.st = frameStatus(wholeMode ? -1 : f.frameIdx);
     const c = document.createElement('canvas');
     c.width = Math.max(1, f.w); c.height = Math.max(1, f.h);
     const cx = c.getContext('2d');
@@ -344,9 +361,9 @@ function renderFilm() {
     if (sheetImg) cx.drawImage(sheetImg, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
     d.appendChild(c);
     const idx = document.createElement('div');
-    idx.className = 'idx'; idx.textContent = f.frameIdx;
+    idx.className = 'idx'; idx.textContent = wholeMode ? '整图' : f.frameIdx;
     d.appendChild(idx);
-    d.onclick = () => { curFrame = f.frameIdx; drawSheet(); renderFilm(); renderFrame(); };
+    d.onclick = () => { if (!wholeMode) { curFrame = f.frameIdx; } drawSheet(); renderFilm(); renderFrame(); };
     strip.appendChild(d);
   }
 }
@@ -358,7 +375,7 @@ function drawCellPixels(cv, pixels, w, h) {
   cx.clearRect(0, 0, w, h);
   if (pixels) cx.putImageData(new ImageData(new Uint8ClampedArray(pixels), w, h), 0, 0);
 }
-function curRect() { return curEntry?.frames[curFrame] ?? null; }
+function curRect() { return effectiveFrame(); }
 async function renderFrame() {
   if (!curEntry || !curRect()) {
     $('frame-title').textContent = '选择素材';
@@ -366,29 +383,26 @@ async function renderFrame() {
     return;
   }
   const f = curRect();
-  const rec = state.frame(curEntry, curFrame);
-  $('frame-title').textContent = `${curEntry.name} · 帧 ${curFrame + 1}/${curEntry.frames.length}`;
+  const rec = state.frame(curEntry, curFrameIdx());
+  $('frame-title').textContent = wholeMode
+    ? `${curEntry.name} · 整图重制 ${f.w}×${f.h}`
+    : `${curEntry.name} · 帧 ${curFrame + 1}/${curEntry.frames.length}`;
   $('frame-meta').textContent = `${curEntry.key} · ${curEntry.sheet} @ (${f.x},${f.y}) ${f.w}×${f.h}`
-    + (curEntry.meta?.excluded ? `\n⚠ 一期排除:${curEntry.meta.excluded}` : '');
+    + (curEntry.meta?.excluded ? `\n⚠ 无法逐帧切分:${curEntry.meta.excluded}\n(已切整图重制模式)` : '');
   // 原帧
   if (sheetImg) drawCellPixels($('origcv'), extractFramePixels(sheetImg, f).data, f.w, f.h);
   // 重制帧(内存 → IDB)
   let px = framePixelsMem.get(memKey());
   if (!px && (rec.status === 'pending' || rec.status === 'accepted')) {
-    px = (await getFramePixels(curEntry.key, curFrame)) ?? undefined;
+    px = (await getFramePixels(curEntry.key, curFrameIdx())) ?? undefined;
     if (px) framePixelsMem.set(memKey(), px);
   }
   drawCellPixels($('newcv'), px, f.w, f.h);
   // 叠加对比
   applyOverlay(px);
-  // prompt 预填(未编辑过 → 跟随默认组装)
-  const edit = promptEdits.get(memKey());
-  $('prompt').value = edit ?? composePrompt({
-    category: curEntry.category, name: curEntry.name,
-    frameIdx: curFrame, frameCount: curEntry.frames.length,
-    globalPrefix: settings.prefix,
-    refFrameIdx: findRefFrame(),
-  });
+  // ★prompt 输入框只放【用户微调增量】(留空=纯默认);完整组装在预览行实时显示
+  $('prompt').value = promptEdits.get(memKey()) ?? '';
+  renderPromptPreview();
   $('frame-info').textContent = `状态:${zhStatus(rec.status)}${rec.attempts.length ? ` · 尝试 ${rec.attempts.length} 次` : ''}`;
   updateButtons();
 }
@@ -423,15 +437,37 @@ function zhStatus(s) {
   return { untouched: '未处理', pending: '待验收', accepted: '已验收', skipped: '已跳过', failed: '失败' }[s] ?? s;
 }
 function updateButtons() {
-  const st = curEntry ? frameStatus(curFrame) : 'untouched';
-  $('btn-remaster').disabled = !curEntry || !curRect() || !!curEntry.meta?.excluded || remastering.size > 0;
+  const st = curEntry ? frameStatus(curFrameIdx()) : 'untouched';
+  // excluded 条目在整图模式下同样可重制(只是不能逐帧)
+  $('btn-remaster').disabled = !curEntry || !curRect() || (!wholeMode && !!curEntry.meta?.excluded) || remastering.size > 0;
   $('btn-accept').disabled = st !== 'pending';
   $('btn-reject').disabled = st === 'untouched';
   $('btn-skip').disabled = st === 'accepted' || st === 'skipped' || !curEntry;
 }
-function memKey() { return `${curEntry.key}|${curFrame}`; }
+function memKey() { return `${curEntry.key}|${curFrameIdx()}`; }
 $('prompt').addEventListener('input', () => {
   if (curEntry) promptEdits.set(memKey(), $('prompt').value);
+  renderPromptPreview();
+});
+/** 完整 prompt 实时预览(默认组装 + 微调追加) */
+function renderPromptPreview() {
+  if (!curEntry) { $('prompt-preview').textContent = ''; return; }
+  $('prompt-preview').textContent = '▸ 完整 prompt:' + fullPrompt();
+}
+function fullPrompt() {
+  return composePrompt({
+    category: curEntry.category, name: curEntry.name,
+    frameIdx: curFrame, frameCount: curEntry.frames.length,
+    globalPrefix: settings.prefix,
+    refFrameIdx: wholeMode ? undefined : findRefFrame(),
+    userPrompt: promptEdits.get(memKey()),
+    whole: wholeMode,
+  });
+}
+$('whole-mode').addEventListener('change', () => {
+  wholeMode = $('whole-mode').checked;
+  promptEdits.delete(memKey());   // 模式切换=重置微调(逐帧/整图模板语境不同)
+  drawSheet(); renderFilm(); renderFrame();
 });
 function findRefFrame() {
   if (!curEntry || !$('use-ref').checked) return undefined;
@@ -465,19 +501,21 @@ async function doRemaster() {
       }
     }
     const t0 = performance.now();
+    const full = fullPrompt();
     const result = await remasterFrame({
       frame: orig.data, w: f.w, h: f.h,
-      prompt: $('prompt').value.trim() || undefined,
+      prompt: full,
       quality: settings.quality,
-      refFrame,
+      refFrame: wholeMode ? undefined : refFrame,
       proxyUrl: settings.proxy,
       apiKey: settings.key || undefined,
       algo: settings.algo,
+      whole: wholeMode,
     });
     lastGen = result;
     framePixelsMem.set(key, result.pixels);
-    await state.remastered(curEntry, curFrame, $('prompt').value.trim(), settings.quality,
-      { size: [result.layout.W, result.layout.H], algo: settings.algo, refFrame: refIdx }, result.pixels);
+    await state.remastered(curEntry, curFrameIdx(), full, settings.quality,
+      { size: [result.layout.W, result.layout.H], algo: settings.algo, refFrame: wholeMode ? undefined : refIdx }, result.pixels);
     // 展示生成原图(可折叠)
     const gp = $('genpreview');
     gp.src = 'data:image/png;base64,' + result.genPng;
@@ -500,36 +538,37 @@ $('btn-remaster').onclick = () => void doRemaster();
 // ---- 验收 / 拒绝 / 跳过 ----
 async function doAccept() {
   if (!curEntry) return;
-  await state.accept(curEntry, curFrame);
+  await state.accept(curEntry, curFrameIdx());
   promptEdits.delete(memKey());
   advance();
 }
 async function doReject() {
   if (!curEntry) return;
-  await state.reject(curEntry, curFrame);
+  await state.reject(curEntry, curFrameIdx());
   framePixelsMem.delete(memKey());
   $('genpreview').style.display = 'none';
   drawSheet(); renderFilm(); renderFrame();
 }
 async function doSkip() {
   if (!curEntry) return;
-  await state.skip(curEntry, curFrame);
+  await state.skip(curEntry, curFrameIdx());
   framePixelsMem.delete(memKey());
   advance();
 }
 function advance() {
   if (!curEntry) return;
-  const nxt = state.nextPendingFrame(curEntry, curFrame + 1);
+  // 整图模式:单单元,验收/跳过即本条目终态;逐帧模式:推进下一非终态帧
+  const nxt = wholeMode ? -1 : state.nextPendingFrame(curEntry, curFrame + 1);
   if (nxt >= 0) { curFrame = nxt; }
   drawSheet(); renderFilm(); renderFrame();
   const done = state.progress[curEntry.key]?.complete;
-  if (done) setStatus(`✔ ${curEntry.name} 全部帧完成!左栏选下一个素材`);
+  if (done) setStatus(`✔ ${curEntry.name} 完成!左栏选下一个素材`);
 }
 $('btn-accept').onclick = () => void doAccept();
 $('btn-reject').onclick = () => void doReject();
 $('btn-skip').onclick = () => void doSkip();
-$('btn-prev').onclick = () => { if (curFrame > 0) { curFrame--; drawSheet(); renderFilm(); renderFrame(); } };
-$('btn-next').onclick = () => { if (curEntry && curFrame < curEntry.frames.length - 1) { curFrame++; drawSheet(); renderFilm(); renderFrame(); } };
+$('btn-prev').onclick = () => { if (!wholeMode && curFrame > 0) { curFrame--; drawSheet(); renderFilm(); renderFrame(); } };
+$('btn-next').onclick = () => { if (!wholeMode && curEntry && curFrame < curEntry.frames.length - 1) { curFrame++; drawSheet(); renderFilm(); renderFrame(); } };
 
 // ---- 导出素材包 ----
 async function exportPack() {
@@ -540,7 +579,8 @@ async function exportPack() {
     const bySheet = new Map();
     for (const [key, p] of Object.entries(state.progress)) {
       const e = catalog.byKey.get(key);
-      if (!e || !e.frames.length) continue;
+      // frames 空(无法逐帧)但存在整图记录(-1)的条目也要导出
+      if (!e || (!e.frames.length && !p.frames[-1])) continue;
       let arr = bySheet.get(e.sheet);
       if (!arr) { arr = []; bySheet.set(e.sheet, arr); }
       arr.push(e);
@@ -557,6 +597,19 @@ async function exportPack() {
       for (const e of ents) {
         const p = state.progress[e.key];
         if (!p) continue;
+        // 整图重制记录(WHOLE_FRAME_IDX=-1):整图替换(整 sheet putImageData)
+        const wholeRec = p.frames[-1];
+        if (wholeRec && wholeRec.status !== 'untouched') {
+          if (wholeRec.status === 'accepted') {
+            const px = framePixelsMem.get(`${e.key}|-1`) ?? (await getFramePixels(e.key, -1));
+            if (px) {
+              cx.putImageData(new ImageData(new Uint8ClampedArray(px), img.width, img.height), 0, 0);
+              meta.frames[`${e.key}#-1`] = { status: 'accepted', rect: [0, 0, img.width, img.height], hash: frameHash(extractFramePixels(img, { x: 0, y: 0, w: img.width, h: img.height, frameIdx: 0 }).data), prompt: wholeRec.prompt, gen: wholeRec.gen };
+            } else meta.complete = false;
+          } else if (wholeRec.status === 'skipped') {
+            meta.frames[`${e.key}#-1`] = { status: 'skipped', rect: [0, 0, img.width, img.height], hash: '' };
+          } else meta.complete = false;   // pending 不导出
+        }
         for (const f of e.frames) {
           const rec = p.frames[f.frameIdx];
           if (!rec || rec.status === 'untouched') { meta.complete = false; continue; }

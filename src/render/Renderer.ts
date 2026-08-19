@@ -791,6 +791,112 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     const step = id === 632 || id === 534 || id === 638 || id === 656 ? 12 : 6;
     return 2 + (Math.floor((e.walkCycleT * 2 + t) / step) % len);
   }
+  // ============ 火星疯狂/月事件/Betsy FindFrame 批（2026-08-19，逐条 cs 行号）============
+  // （须在上方 ai===3 战士族档之前——386 工程师 aiStyle=3 会被截胡；
+  //   327 南瓜王/346 圣诞坦克/439·440 教徒的帧机有帧行记忆，由各自 AI 文件
+  //   每帧写 e.customFrameIdx 直读（694 先例），不经本函数）
+  // 393 飞碟炮塔（cs:72481-72494）：ai[2]=瞄准角→九向帧（ToRotationVector2 分带）；
+  //   激光窗 [280,420) 且 (int)ai[3]%6<=2 → +9 射击行（bossAI_martian 393 段
+  //   1:1 写 ai2=atan2 角/ai3=母碟共享计数）
+  if (id === 393) {
+    const ax = Math.cos(e.ai2), ay = Math.sin(e.ai2);
+    let f393 = ay > Math.abs(ax) * 2 ? 4
+      : ay > Math.abs(ax) * 1.5 ? (ax > 0 ? 5 : 3)
+      : Math.abs(ax) > ay * 2 ? (ax > 0 ? 8 : 0)
+      : Math.abs(ax) <= ay * 1.5 ? (ax > 0 ? 6 : 2)
+      : (ax > 0 ? 7 : 1);
+    if (e.ai3 >= 280 && e.ai3 < 420 && (e.ai3 | 0) % 6 <= 2) f393 += 9;
+    return Math.min(frames - 1, f393);
+  }
+  // 394 飞碟火炮（cs:72495-72518）：纯 ai[3] 相位帧——窗前(420-440) 4+n/5 递进、
+  //   火炮窗(440-580) (n/4)%4 四帧循环、窗尾(580-600) 7-n/5 回落、其余恒帧 4
+  if (id === 394) {
+    let n394 = (e.ai3 | 0) - 300;
+    let f394: number;
+    if (n394 >= 120) {
+      n394 -= 120;
+      if (n394 >= 160) f394 = 7 - Math.floor((n394 - 160) / 5);
+      else if (n394 >= 20) f394 = Math.floor(n394 / 4) % 4;
+      else f394 = 4 + Math.floor(n394 / 5);
+    } else f394 = 4;
+    return Math.min(frames - 1, f394);
+  }
+  // 395 飞碟母碟（cs:72520-72541）：counter 每 tick +1（66 回卷，帧=counter/6 → 0-10）；
+  //   死光电报窗 ai[3]∈[20,260) 内再 +1 且钳 [36,53] → 恒落帧 6-8 蓄能辉光带。
+  //   counter 副本由 bossAI_martian martianSaucerAI 累进到 e.lai0（蜂后 222 先例）
+  if (id === 395) return Math.min(frames - 1, Math.floor((e.lai0 % 66) / 6));
+  // 392 飞碟炮体（cs:72543-72560）：4 帧旋球 counter 每 tick +1（电报窗内 ×2）、
+  //   12 回卷，帧=counter/3；副本在 bossAI_martian martianSaucerPartAI 尾段
+  if (id === 392) return Math.min(frames - 1, Math.floor((e.lai0 % 12) / 3));
+  // 399 火星探测器（cs:72562-72565）：counter 每 tick +0.25 四帧扫描带（0.25t/帧）；
+  //   ai[0]≠0（受惊悬停/逃逸）→ +4 警戒带
+  if (id === 399) {
+    return Math.min(frames - 1, Math.floor((t * 0.25) % 4) + (e.ai0 !== 0 ? 4 : 0));
+  }
+  // 387 特斯拉炮塔（cs:72335-72368）：两帧电球——ai[0]>0 充电档 counter 每 tick
+  //   +1（≥20 再 +1、≥40 再 +1，10 单位/帧）；ai[0]≤0 待机 15 单位/帧。
+  //   相位取全局 t（2 帧闪切，相位任意视觉等价）
+  if (id === 387) {
+    const per387 = e.ai0 > 0 ? 10 / (1 + (e.ai0 >= 20 ? 1 : 0) + (e.ai0 >= 40 ? 1 : 0)) : 15;
+    return Math.min(frames - 1, Math.floor(t / per387) % 2);
+  }
+  // 386 火星工程师（cs:72369-72402）：帧机在 bossAI_martian martianFighterExtras
+  //   内逐 tick 副本（放塔期 ai2>0 帧 9/10 每 12t 交替 / 行走带 2-8 counter +=
+  //   |vx|*2（无 +1）、>6 进帧——增量 >1 时越限溢出丢弃,公式折算会快进 → 须
+  //   步进副本 / 站定=0 / 腾空=1）→ customFrameIdx 直读
+  // 325 哀木（cs:73172-73201）：站定带 0-4 / 移动带 5-9，counter 恒 +1/t、>4 进帧
+  //   （两分支同速 → counter ≡ animT，无 AI 侧状态；带切换瞬间带内相位任意，登记）
+  if (id === 325) {
+    return Math.min(frames - 1, e.vx === 0 ? Math.floor(t / 5) % 5 : 5 + (Math.floor(t / 5) % 5));
+  }
+  // 344 常世吼（cs:73144-73170）：全带 0-9，counter += max(1,|vx|*0.75)/t、>5 进帧
+  //   （速率随速度变化,且增量 >1 越限溢出丢弃 → 步进副本；mourningWoodAI 维护
+  //   e.lai0=counter / e.lai1=帧行）
+  if (id === 344) return Math.min(frames - 1, e.lai1);
+  // 345 冰雪女王（cs:73106-73143）：滑翔(ai0==0) 定帧 0 / ai3<0 半周期按 vx 向 1|2；
+  //   落冰压制(ai0==1) 带 3-4 每 6t；自旋环射(ai0==2) 恒帧 5
+  if (id === 345) {
+    if (e.ai0 === 0) {
+      if (e.ai3 >= 0) return 0;
+      return e.vx < 0 ? 1 : 2;
+    }
+    if (e.ai0 === 1) return Math.min(frames - 1, 3 + (Math.floor(t / 6) % 2));
+    if (e.ai0 === 2) return Math.min(5, frames - 1);
+    return 0;
+  }
+  // 551 Betsy（cs:67913-68107）：帧源 = ai[1]（状态计时，betsyAI 1:1 同步）——
+  //   ai0==4 空袭 / 3 吐息：起手 5(<5t)→6(<54/34t)→7/8 递进 → 喷射 9↔10 循环
+  //   （fc/3%2）→ 收势 8→7→0；ai0==5 恒帧 3；ai0==6 召唤拍翼序列
+  //   1,2,3,4,3,4,3,2,1,0 各 8t；其余态（悬停/风压/入场）恒帧 0
+  if (id === 551) {
+    const fc551 = Math.floor(e.ai1);
+    if (e.ai0 === 4) {
+      if (fc551 < 5) return Math.min(frames - 1, 5);
+      if (fc551 < 54) return Math.min(frames - 1, 6);
+      if (fc551 < 57) return Math.min(frames - 1, 7);
+      if (fc551 < 60) return Math.min(frames - 1, 8);
+      if (fc551 < 123) return Math.min(frames - 1, 9 + (Math.floor(fc551 / 3) % 2));
+      if (fc551 < 128) return Math.min(frames - 1, 8);
+      if (fc551 < 133) return Math.min(frames - 1, 7);
+      return 0;
+    }
+    if (e.ai0 === 3) {
+      if (fc551 < 5) return Math.min(frames - 1, 5);
+      if (fc551 < 34) return Math.min(frames - 1, 6);
+      if (fc551 < 37) return Math.min(frames - 1, 7);
+      if (fc551 < 40) return Math.min(frames - 1, 8);
+      if (fc551 < 98) return Math.min(frames - 1, 9 + (Math.floor(fc551 / 3) % 2));
+      if (fc551 < 103) return Math.min(frames - 1, 8);
+      if (fc551 < 108) return Math.min(frames - 1, 7);
+      return 0;
+    }
+    if (e.ai0 === 5) return Math.min(3, frames - 1);
+    if (e.ai0 === 6) {
+      const seq551 = [1, 2, 3, 4, 3, 4, 3, 2, 1, 0];
+      return Math.min(frames - 1, seq551[Math.min(9, Math.floor(fc551 / 8))]);
+    }
+    return 0;
+  }
   // 战士族/107（L70155-70252）：站定=0；行走从帧 2 起按 |vx|*2+1 累加、>6 推进、循环回 2
   if (ai === 3 || ai === 26 || ai === 107) {
     if (!e.onGround) return frames - 1; // 腾空取末帧（原版 ai[0]==2 在 0/末帧间交替）
@@ -2037,6 +2143,7 @@ export class Renderer {
   animTick = 0;
 
   resize() {
+    this._cssW = this.canvas.clientWidth || 0;
     this.canvas.width = window.innerWidth;
     this.canvas.height = window.innerHeight;
   }
@@ -2749,6 +2856,8 @@ export class Renderer {
    *  (DrawWaves :181-334) → Update/PreDraw(progress/步进) */
   private _waveLastMs = 0;
   private _waveQ = -1;
+  /** 主画布 CSS 宽缓存(resize 时刷新;热路径免逐帧 clientWidth 布局读取) */
+  private _cssW = 0;
   private updateWaterWaves(
     cam: Camera, world: World, player: Player, entities: Entity[],
     remotePlayers: Player[], viewW: number, viewH: number, z: number,
@@ -2760,7 +2869,9 @@ export class Renderer {
 
     // 模拟系用 CSS 像素（与原版"backbuffer/4"的设备无关语义对齐——DPR 高时波速
     // 不变）；绘制侧换算 world = cssPx/cssZoom
-    const cssScale = viewW / Math.max(1, this.canvas.clientWidth || viewW);
+    // ★clientWidth 不逐帧读(2026-08-19 trace:每帧强制样式/布局计算 0.8% 主线程
+    //   ——低配机布局更贵);canvas 铺满窗口,resize 时缓存即可
+    const cssScale = viewW / Math.max(1, this._cssW || viewW);
     const cssZoom = z / cssScale;
     const cssW = Math.round(viewW / cssScale), cssH = Math.round(viewH / cssScale);
     const camL = cam.x - viewW / (2 * z), camT = cam.y - viewH / (2 * z);
@@ -6038,7 +6149,7 @@ export class Renderer {
     }
     // 瞳孔（:24498-24503）
     if (ex19) {
-      const th = e.lai0, k = e.lai1, sc = e.lai2 || 1;
+      const th = e.lai0, k = e.lai1, sc = e.lai2;   // scale = localAI[2]（出生 0 渐入 1）
       const ex = Math.cos(th) * 30 * k, ey = Math.sin(th) * 30 * k;
       ctx.save();
       ctx.globalAlpha = alpha;

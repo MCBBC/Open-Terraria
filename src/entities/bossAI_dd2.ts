@@ -85,16 +85,20 @@ import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
-import { Arrow } from './Arrow';
+import { Arrow, projSprite } from './Arrow';
+import { segHitsRect } from './bossAI_duke_moonlord';
+import { statusPlayer } from './projTargets';
 import { TILE_DEFS } from '../data/tiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import { GDL, getKnockbackMultiplierScaledByDifficulty } from '../stats/ScaleStats';
+import type { Renderer } from '../render/Renderer';
+import type { Camera } from '../render/Camera';
 
 // 弹幕贴图:Projectile_{240,675,682,686,687}.png 已自 terraria-assets/Images 入
 // sprites/vanilla 管线(scripts/vanilla-atlas.mjs MISC 表),Arrow 按 projId 懒加载真图——
-// RENDER_PROXY 代渲登记退役。687 喷焰原版为 Main.cs:31282 自定义 15 层火舌程序化
-// 绘制,此处按整条贴图(98×686 单帧)近似;682 电弧 4 帧竖条(projFrames=4,Main.cs:8482)
-// 同按整条绘制。
+// RENDER_PROXY 代渲登记退役。687 喷焰为 Main.cs:31282 自定义 15 层火舌程序化
+// 绘制——2026-08-19 弹道批已按 BetsyBreath 类 1:1 落位(七帧行逐层取帧+定数 LCG);
+// 682 电弧 4 帧竖条(projFrames=4,Main.cs:8482)仍按整条绘制。
 /** 原版 localAI[0..3]（Enemy 只有 ai0-ai3 对应 ai[],localAI 独立 → WeakMap 落盘） */
 const localAI = new WeakMap<Enemy, number[]>();
 /** 491 渲染帧源（localAI[3] 0..63 循环，:40971-40974）——渲染侧只读访问 */
@@ -170,8 +174,9 @@ export const DD2_EVENT_HOOKS = {
 //（召骷髅阵眼,0 伤）/ 674 DD2DarkMageHeal（治疗脉动,落地 40t 后 1000px 内友军
 // +500,0 伤）/ 675 DD2DarkMageBolt（暗影矢 14 速 40 伤）/ 682 DD2LightningBugZap
 //（电弧 10 速 50 伤）/ 686 DD2BetsyFireball（空袭火球,继承机速）/ 687
-// DD2BetsyFlameBreath（喷焰,10 速横冲）。
-// 伤害弹（240/675/682/686/687）走 Arrow 真图（RENDER_PROXY 已退役）;三枚 0 伤
+// DD2BetsyFlameBreath（喷焰——锚定嘴部的 78t 持续火舌,BetsyBreath 类,
+// 2026-08-19 弹道批实装,不再走 Arrow 自由飞弹）。
+// 伤害弹（240/675/682/686）走 Arrow 真图（RENDER_PROXY 已退役）;三枚 0 伤
 // 效果弹（658/673）不生成弹体——Arrow 命中敌怪会 hurt(0)（假命中音+0 伤害数字）
 // 且瞬间耗尽 pierce,与原版"纯视觉"语义相反 → 降级为粒子。674 治疗脉动已实体化
 //（DD2HealPulse,独立于魔法师生死,40t 疗程节奏 1:1）。
@@ -1402,6 +1407,155 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
 }
 
 // ---------------------------------------------------------------------------
+// Projectile 687 DD2BetsyFlameBreath（SetDefaults :7036-7045：30×30 aiStyle 136 /
+// penetrate −1 / hostile / alpha 255；AI_136 :65843-65914）
+// ---------------------------------------------------------------------------
+/** Betsy 喷焰——锚定嘴部的持续 78t 火舌（原版非自由飞弹）：
+ *  - 焰心 = 主心 + (102·spriteDir, 30).RotatedBy(主 rotation)（:65848-65851，
+ *    num=−8 → 110−8=102）；指向 = 主→焰心向量角（DirectionTo）——每帧跟随嘴部。
+ *  - 寿命：ai[0] 逐 t +1，≥78 Kill（:65911-65914）。
+ *  - 判定（Colliding :14712-14733）：线段 焰心+dir·400·num3 → 焰心+dir·400·num2，
+ *    num2 = min(t/25,1)（焰头 25t 推满）、num3 = clamp((t−38)/40)（焰尾 38-78t
+ *    追上），线宽 40——命中走 Damage_EVP，OnFire 420-600t 由 statusPlayer 687 表授予。
+ *  - 绘制 = Main.cs:31287-31319 十五层火舌（98×686 七帧行 + seed=1 定数 LCG 抖动角，
+ *    alpha 渐层白→红(180,30,30,200)→暗(0,0,0,30)，色乘近似为 alpha 档）。 */
+export class BetsyBreath extends Entity {
+  w = 30;
+  h = 30;
+  /** 锚定 Betsy（ai[1]=whoAmI 语义 → 本地 id 引用） */
+  private srcId: number;
+  /** ai[0]（:65911 ≥78 Kill） */
+  private t = 0;
+  /** frameCounter（绘制推进分母 :65898） */
+  private frameT = 0;
+  private dmg: number;
+  /** 焰心指向角（主→焰心向量角） */
+  private ang = 0;
+  /** 主死亡后的冻结锚（原版 npc 槽位数据残留——焰心停驻直到 78t 走完） */
+  private anchor: { x: number; y: number } | null = null;
+  dead = false;
+
+  constructor(src: Enemy, dmg: number) {
+    super();
+    this.srcId = src.id;
+    this.dmg = dmg;
+    this.x = src.cx - this.w / 2;
+    this.y = src.cy - this.h / 2;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    // 锚点：嘴部 = 主心 + (102·spriteDir,30).RotatedBy(rotation)（visAngle≈npc.rotation）
+    let mx: number, my: number;
+    if (src && !src.dead) {
+      const spr = src.facing >= 0 ? 1 : -1;                  // spriteDirection
+      const rot = src.visAngle || 0;
+      const ox = 102 * spr, oy = 30;
+      const c = Math.cos(rot), s = Math.sin(rot);
+      mx = src.cx + ox * c - oy * s;
+      my = src.cy + ox * s + oy * c;
+      this.anchor = { x: mx, y: my };
+      // 指向 = 主→焰心向量（:65852 DirectionTo(base.Center)）
+      this.ang = Math.atan2(my - src.cy, mx - src.cx);
+    } else if (this.anchor) {
+      mx = this.anchor.x;
+      my = this.anchor.y;
+    } else {
+      this.dead = true;
+      return;
+    }
+    this.x = mx - this.w / 2;
+    this.y = my - this.h / 2;
+    this.t++;
+    if (this.t >= 78) { this.dead = true; return; }          // :65911-65914
+    this.frameT++;
+    // 判定线段（:14712-14733）：焰尾→焰头，宽 40（687 覆写 Colliding 为线段判定，
+    // 非 30×30 弹体盒——伤害走 MLDeathray 同款直连 damagePlayer，iframes 门手写）
+    const headF = Math.min(1, this.t / 25);
+    const tailF = Math.max(0, (this.t - 38) / 40);
+    const dx = Math.cos(this.ang), dy = Math.sin(this.ang);
+    const segLen = 400 * (headF - tailF);
+    const p = game.player as { x: number; y: number; w: number; h: number; dead: boolean; iframes?: number } | null;
+    if (segLen > 1 && p && !p.dead && (p.iframes ?? 0) <= 0
+      && segHitsRect(this.cx + dx * 400 * tailF, this.cy + dy * 400 * tailF,
+        dx * segLen, dy * segLen, 40, p)) {
+      // Damage_EVP：命中不消耗弹体；OnFire 420-600t（:11515-11517 statusPlayer 687 表）
+      game.damagePlayer(this.dmg, this.cx, this.cy);
+      statusPlayer(game, 687);
+    }
+    // 尘（:65874-65896）：渐显期焰头 3 尘 6 + 每 t 焰体 1 尘 31（沿焰体随机分布）
+    if (tailF === 0 && headF > 0.1) {
+      const hx = this.cx + dx * 400 * headF, hy = this.cy + dy * 400 * headF;
+      game.spawnBurst?.(hx, hy, '#FF9030', 3, 3, this.ang, Math.PI / 12, { life: 22 });
+    }
+    {
+      const f = Math.random();
+      const fx = this.cx + dx * 400 * (tailF + (headF - tailF) * f);
+      const fy = this.cy + dy * 400 * (tailF + (headF - tailF) * f);
+      game.spawnParticles(fx, fy, '#FFC060', 1, 0.6, { life: 18 });
+    }
+  }
+
+  /** Main.cs:31287-31319 十五层火舌（近似）：98×686 七帧行逐层取帧，
+   *  位置 = SmoothStep(焰心, 焰心+抖动向·400, v)、缩放 = (0.9+0.8v)²·0.8、
+   *  旋转 = ang + 2π(v+GlobalTime·1.2)·0.2 + seg·2π/5；可见窗/色层照抄
+   *  （色乘以 alpha 档近似——白层 A=0 原版即不可见）。 */
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const sheet = projSprite(687);
+    if (!sheet || !(sheet as HTMLImageElement).complete || sheet.width === 0) return;
+    const fw = sheet.width, fh = sheet.height / 7;
+    // seed=1 定数 LCG（Utils.RandomNext :2383-2396：s=(s·25214903917+11) mod 2^48，
+    // 取高 24 位）——每帧层布局稳定（原版火舌不闪烁换位）
+    let seed: number = 1;
+    const num229 = this.frameT / 40;                          // 焰面前沿（0..~1.95）
+    const frac = num229 % 1;
+    const gt = (typeof performance !== 'undefined' ? performance.now() : 0) / 1000;
+    for (let layer = 0; layer < 15; layer++) {
+      seed = (seed * 25214903917 + 11) % 281474976710656;
+      const rf = Math.floor(seed / 16777216) / 16777216;
+      const jitter = rf * 0.25 - 0.125;                       // ±0.125 rad
+      const la = this.ang + jitter;
+      const tipX = this.cx + Math.cos(la) * 400;
+      const tipY = this.cy + Math.sin(la) * 400;
+      let v = num229 + layer * (1 / 15);
+      const seg = Math.floor(v / (1 / 15));
+      v %= 1;
+      // 可见窗（:31308）
+      if (!((v > frac || this.frameT >= 40) && (v < frac || this.frameT < 40))) continue;
+      // 色层 alpha（:31310）：<0.35 白层 A=0（不可见）、0.35-0.7 → A200、
+      // 0.7-0.9 → A30、0.9-1 → 渐隐
+      let a = 0;
+      if (v < 0.1) a = 0;
+      else if (v < 0.35) a = 0;
+      else if (v < 0.7) a = Math.round(200 * clamp((v - 0.35) / 0.35, 0, 1));
+      else if (v < 0.9) a = Math.round(30 + (200 - 30) * (1 - clamp((v - 0.7) / 0.2, 0, 1)));
+      else a = Math.round(30 * (1 - clamp((v - 0.9) / 0.1, 0, 1)));
+      if (a <= 0) continue;
+      // 缩放（:31311-31313）：(0.9+0.8v)²·0.8
+      let sc = 0.9 + v * 0.8;
+      sc = sc * sc * 0.8;
+      // 位置 = SmoothStep(焰心, 焰尖, v)
+      const sm = v * v * (3 - 2 * v);
+      const px = this.cx + (tipX - this.cx) * sm;
+      const py = this.cy + (tipY - this.cy) * sm;
+      const frame = Math.min(6, Math.floor(v * 7));           // Frame(1,7,0,(int)(v·7))
+      const rot = this.ang + TAU * (v + gt * 1.2) * 0.2 + seg * TAU / 5;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+      ctx.globalAlpha = a / 255;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(sheet, 0, Math.round(frame * fh), fw, Math.round(fh),
+        -fw * sc / 2, -fh * sc / 2, fw * sc, fh * sc);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // AI_110 双足翼龙 Betsy 551（NPC.cs:43165 → AI_110_Betsy :62266）
 // ---------------------------------------------------------------------------
 export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
@@ -1492,12 +1646,14 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
       timeScale = 1.5;
     }
     if (e.ai1 === FLAME_T0) {
-      // 喷焰起手（:62449-62461）：10 速横冲 + 687 喷焰
+      // 喷焰起手（:62449-62461）：10 速横冲 + 687 喷焰——锚定嘴部的 78t 持续
+      // 火舌（AI_136 :65843-65914，实体每帧跟随嘴部；曾当 30×30 自由飞弹近似）
       const d3 = txc > e.cx ? 1 : -1;
       e.vx = d3 * 10;
       e.vy = 0;
       e.facing = d3;
-      shootD(game, e.cx, e.cy, e.vx, e.vy, DMG_BREATH, 687, 300, 0, 20);
+      (game as unknown as { entities: { add: (en: unknown, b: string) => void } }).entities.add(
+        new BetsyBreath(e, DMG_BREATH), 'projectiles');
       game.playSfxFiles(['dd2_betsy_flame_breath'], 0.7, e.cx, e.cy);   // DD2_BetsyFlameBreath（:62462）
     }
     if (e.ai1 >= FLAME_T0) {

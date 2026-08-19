@@ -120,6 +120,34 @@ export function mapBackRect(layout: GenLayout, actualW: number, actualH: number)
   };
 }
 
+/** 整图重制布局:整张 sheet 作为一个重制单元(无法按帧切分的素材——纸娃娃/
+ *  背景/液体/树冠/NPC 横条等)。
+ *  与逐帧布局的区别:①k 只能放大不能缩(缩回丢像素)——大图 k=1 原尺寸居中;
+ *  ②画布 pad 策略:比例 >3:1 的长条(全库 4577 张,Acc_Back 40×1120=28:1 类)
+ *  pad 短边到约束内;面积不足扩较小边(交替扩趋于方形,天然保比例)。
+ *  每步 +16 收敛(655k 面积方形 ~810 边,远够;帧本身 >3840 边才触发上限防御)。 */
+export function computeWholeLayout(w: number, h: number): GenLayout {
+  if (w <= 0 || h <= 0) throw new Error(`bad sheet ${w}x${h}`);
+  const k = Math.max(1, Math.floor(1024 / Math.max(w, h)));   // 小图放大到长边~1024;大图 k=1
+  const fw = w * k, fh = h * k;
+  let W = align16(fw), H = align16(fh);
+  for (let i = 0; i < 100_000; i++) {
+    if (W > MAX_EDGE || H > MAX_EDGE) throw new Error(`sheet ${w}x${h}(×${k})超 gpt-image-2 边长上限`);
+    if (W * H > 8_294_400) throw new Error(`sheet ${w}x${h}(×${k})超 gpt-image-2 面积上限`);
+    const ratioOk = Math.max(W, H) / Math.min(W, H) <= 3;
+    const areaOk = W * H >= MIN_PIXELS;
+    if (ratioOk && areaOk) break;
+    if (!ratioOk) {
+      // pad 短边(修比例;只会让比例变好)
+      if (W >= H) H += 16; else W += 16;
+    } else {
+      // 扩较小边(补面积;扩短边比例只会变好——两分支殊途同归,交替收敛近方形)
+      if (W <= H) W += 16; else H += 16;
+    }
+  }
+  return { W, H, k, ox: (W - fw) >> 1, oy: (H - fh) >> 1, fw, fh };
+}
+
 // ---- 浏览器 canvas 胶水(调用时才触碰 DOM;node 单测跳过) ----
 
 export function hasCanvas(): boolean { return typeof document !== 'undefined'; }

@@ -356,7 +356,7 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState, chests
   }
 
   // ---- 5. TrackGenerator(cs:22014-22091)----
-  const trackGen = new TrackGenerator(st, gs);
+  const trackGen = new TrackGenerator(st, gs, chests);
   const trackFailLimit = Math.floor(w / 2);        // num25
   // 长轨:LongTrackCount 1-2 ×WorldWidth,长 400-1000 ×WorldWidth
   let trackCount = rng.int(scW(1), scW(2));

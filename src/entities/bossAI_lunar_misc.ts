@@ -42,12 +42,14 @@ import type { Player } from './Player';
 import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { BuffType } from '../stats/Buffs';
 import { moveAndCollide } from '../physics/TileCollision';
-import { spawnPart, losClear, enemySpawnChain, addEnemy } from './bossAI';
+import { spawnPart, spawnVanillaEnemy, losClear, enemySpawnChain, addEnemy } from './bossAI';
 import { Arrow } from './Arrow';
-import { projFrameImg } from './Arrow';
+import { projFrameImg, projSprite, volleyPhantomOrbs, nudgePhantomOrbs } from './Arrow';
 import { Entity } from './Entity';
 import { canHitLine } from '../physics/LineOfSight';
 import { MLDeathray, type NetProjMeta } from './bossAI_duke_moonlord';
+import { LightningBoltProj } from './LightningBoltProj';
+import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
@@ -118,14 +120,17 @@ function solidTileAt(game: GameHooks, x: number, y: number): boolean {
 // 弹幕出口:452 PhantasmalEye / 454 PhantasmalSphere / 462 PhantasmalBolt 贴图
 // Projectile_{452,454,462}.png 已按 601/602 先例补入 sprites/vanilla(Arrow 按 projId
 // 懒加载真图),原 EnchantedBeam 173 代渲登记退役。454/452 的原版归巢弹道
-// (弹 ai[0] 标记 + ai[1]=源 NPC)Arrow 无 ai 槽,不实装(按发射初速直飞)。
+// 已实装(2026-08-19 弹道批):452 走 Arrow phantasm 三段弹道(aiStyle 82,
+// Projectile.cs:30119-30195)、454 走 phantomOrb 归巢(随行→列队→齐射,
+// aiStyle 83,齐射指令见 Arrow.volleyPhantomOrbs)。
 // ---------------------------------------------------------------------------
 function shootL(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300,
+  arrowOpts?: Partial<import('./Arrow').ArrowOpts>,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true, ...arrowOpts }),
     'projectiles');
 }
 
@@ -225,21 +230,32 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
       if ((t - 15) % 10 === 0) {
         const d = Math.hypot(px, py);
         const ux = d > 0.001 ? px / d : 0, uy = d > 0.001 ? py / d : -1;
-        shootL(game, e.cx + px, e.cy + py, ux * 4, uy * 4, 40, 454, 600);
+        // 出生 ai0=30(:38452-38457 NewProjectile 第 9 参)——跳过随行直接列队;
+        // ai[1]=whoAmI → ownerId(齐射指令圈定)
+        shootL(game, e.cx + px, e.cy + py, ux * 4, uy * 4, 40, 454, 600,
+          { phantomOrb: { ownerId: e.id, ai0: 30 } });
       }
     } else if (t < 105) {
-      // :38462-38485 瞄准升空(75t 起跳 vy=-7);原版同步给已发 454 叠加速度,Arrow 无弹 ai 槽,略
+      // :38462-38485 瞄准升空(75t 起跳 vy=-7 并给己方 454 叠加同一速度把它们带起)
       x[0] = angleLerp(x[0], e.ai2 - Math.PI / 2, 0.2);
       x[2] = lerp(x[2], 0.75, 0.2);
-      if (t === 75) { e.vx = 0; e.vy = -7; }
+      if (t === 75) {
+        e.vx = 0; e.vy = -7;
+        nudgePhantomOrbs(game, e.id, 0, -7);                 // :38475-38483
+      }
       e.vy *= 0.96;
       if (player) e.ai2 = Math.atan2(pcy - e.cy, pcx - e.cx) + Math.PI / 2;
       e.spin = angleTowards(e.spin, e.ai2, Math.PI / 30);
     } else if (t < 120) {
-      // :38487-38505 发射:沿瞄准向 24 速冲出;已发 454 改归巢(ai[0]=-1),略
+      // :38487-38505 发射:沿瞄准向 24 速冲出;己方全部 454 置 -1 以瞄准向
+      // (ai2−π/2)·12 同矢量齐射
       game.playSfxWav?.('Zombie_102', 1, e.cx, e.cy);        // :38487 PlaySound(29,…,102)——case29 style102 ×0.4 自动档(曾借 roar 0.4 恰同值)
       e.vx = Math.cos(e.ai2 - Math.PI / 2) * 24;
       e.vy = Math.sin(e.ai2 - Math.PI / 2) * 24;
+      if (t === 105) {
+        volleyPhantomOrbs(game, e.id,
+          Math.cos(e.ai2 - Math.PI / 2) * 12, Math.sin(e.ai2 - Math.PI / 2) * 12);   // :38494-38505
+      }
     } else {
       e.vx *= 0.92; e.vy *= 0.92;                            // :38507-38510
       e.spin = angleLerp(e.spin, 0, 0.2);
@@ -268,9 +284,11 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
       e.vx = (ox / d) * spd; e.vy = (oy / d) * spd;
       e.spin = angleLerp(e.spin, Math.atan2(e.vy, e.vx) + Math.PI / 2, 0.2);
       if ((t - 45) % 10 === 0) {
-        // :38557-38563 弹 ai[3]=随机弧线扰动,Arrow 无 ai 槽,略
+        // :38557-38563 ai[1] 弧线弯转角 = (2π·rand−π)/30 + π/180·ai[2]
+        // (ai[2]=螺旋角速度 e.ai2)——452 三段弹道(45/90t 弧线上升→14 速追踪)
         shootL(game, e.cx + (ox / d) * 12, e.cy + (oy / d) * 12,
-          (ox / d) * 8, (oy / d) * 8, 35, 452, 600);
+          (ox / d) * 8, (oy / d) * 8, 35, 452, 600,
+          { phantasm: { spin: (TAU * Math.random() - Math.PI) / 30 + (Math.PI / 180) * e.ai2 } });
       }
     } else {
       // :38570-38583 收势
@@ -1967,6 +1985,301 @@ export class LunarOrb extends Entity {
       ctx.fillStyle = this.kind === 539 ? '#8FE8FF' : '#C060FF';
       ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
     }
+    ctx.restore();
+  }
+}
+
+// ===================== 星旋塔传送门弹 578/579（aiStyle 108，Projectile.cs:32505-32805） =====================
+// 塔侧生成（Enemy.towerAI 422 段，NPC.cs:41336-41406）：支线 a = 玩家头顶门
+// （579 生 2× Alien Hornet 427 / 578 放 580 电击）；支线 b = 玩家 ±20 格随机
+// 空中点 579 门。SetDefaults（:6002-6012）：32×32 / tileCollide=false / alpha 255 /
+// ignoreWater（friendly+hostile 同置——damage=0 无结算面）。
+// 生命周期（ai0，1:1）：开门爆尘（ai1==1 → 25 颗 229/161 尘 ×3.5 速，:32508-32523，
+// 579 开门当帧置 ai1=1、次帧爆）→ 首帧 Item_117（:32524-32528）→ 578 首帧定朝向
+// （ai1 = 门→最近玩家角，:32529-32538）→ ≤50t 隐形聚尘（579 双环尘 229/240、578 沿
+// 朝向喷流，:32541-32599）→ 51-90t 显形（scale=(ai0−50)/40、alpha=255×(1−scale)、
+// rotation−π/20/t；恰 90t 播 Item_113（578/579）并【开门】：578 → 生成 580 电击弹
+// （50 伤，速度=朝向×8，出生点=门心−速度向量，ai0=朝向角、ai1=Next(80) 种子，
+// :32650-32660）；579 → 生 2× NPC427（门心 Bottom 锚，速度=−UnitY.RotatedByRandom
+// (2π)×Next(4,9)−UnitY×2，:32661-32676）→ 91-120t 满显（scale 1/alpha 0/
+// rotation−π/60，环尘 customData=门心，:32677-32712）→ 121-180t 收缩淡出
+// （scale=1−(ai0−120)/60、alpha 递增、rotation−π/30；alpha≥255 Kill，:32713-32755）。
+// 绘制（Main.cs:32622-32650）：Extra_50 涡旋三层（−rot+0.35 暗色 ×(0.6+scale×0.6×
+// num347) / −rot ×scale / rot×0.5 ×scale×0.9）+ Projectile_578/579.png（−rot×0.7，
+// α×0.4），num347=0.95+sin(rotation×0.75)×0.1。
+/** Extra_50（60×60 星旋涡旋）懒加载 */
+let portalSwirlImg: ImageBitmap | HTMLImageElement | null = null;
+let portalSwirlTried = false;
+function extra50(): ImageBitmap | HTMLImageElement | null {
+  if (portalSwirlTried) return portalSwirlImg;
+  portalSwirlTried = true;
+  if (typeof Image === 'undefined') return null;
+  const im = new Image();
+  im.onload = () => upgradeToBitmap(im, (b) => { portalSwirlImg = b; });
+  im.src = 'sprites/vanilla/Extra_50.png';
+  portalSwirlImg = im;
+  return im;
+}
+
+export class VortexPortalProj extends Entity {
+  readonly projId: number;         // 578 / 579
+  w = 32; h = 32;                  // SetDefaults :6003-6004
+  private ai0 = 0;
+  /** 578：门朝向角（首帧定）；579：开门爆尘标记（1=待爆） */
+  private ai1 = 0;
+  private lai0 = 0;                // localAI[0]：578 朝向初始化门
+  private alpha = 255;
+  private scale = 1;
+  private rot = 0;
+  private sndPlayed = false;       // localAI[1]
+
+  /** x/y = NewProjectile 的 X/Y（中心锚，:10258）；type ∈ {578, 579} */
+  constructor(x: number, y: number, projId: 578 | 579) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.projId = projId;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    // 开门爆尘（:32508-32523）：ai1==1 → 25 颗尘（229/229/161 掷、×3.5..4 速、scale
+    // 1.75+1.25r、fadeIn 0.25、noLight）
+    if (this.ai1 === 1) {
+      this.ai1 = 0;
+      for (let i = 0; i < 25; i++) {
+        const type = [229, 229, 161][(Math.random() * 3) | 0];   // SelectRandom
+        const d = game.spawnDust?.(this.x, this.y, this.w, this.h, type, 0, 0, 0, null,
+          1.75 + Math.random() * 1.25);
+        if (d) {
+          d.vx *= 3.5 + Math.random() * 0.5;
+          d.vy *= 3.5 + Math.random() * 0.5;
+          d.fadeIn = 0.25;
+          d.noLight = true;
+        }
+      }
+    }
+    if (!this.sndPlayed) {                                       // :32524-32528
+      this.sndPlayed = true;
+      game.playSfxWav?.('Item_117', 1, this.x, this.y);
+    }
+    // 578 首帧定朝向（:32529-32538）：门心→最近玩家角（零向量兜底 UnitY）
+    if (this.projId === 578 && this.lai0 === 0) {
+      this.lai0 = 1;
+      const p = game.player;
+      let dx = 0, dy = 1;
+      if (p) { dx = p.cx - this.cx; dy = p.cy - this.cy; }
+      if (dx === 0 && dy === 0) { dx = 0; dy = 1; }
+      this.ai1 = Math.atan2(dy, dx);
+    }
+    this.ai0++;
+    const em = (game as unknown as { entities: { add: (e: Entity, b: string) => void } }).entities;
+    if (this.ai0 <= 50) {
+      // ---- 聚尘段（:32541-32599；全隐形 alpha 255）----
+      if (this.projId === 579) {
+        for (let k = 0; k < 2; k++) {           // :32541-32562 双环尘（各 1/4 掷）
+          if (Math.floor(Math.random() * 4) === 0) {
+            const a = Math.random() * TAU;
+            const [ux, uy] = [Math.sin(a), Math.cos(a)];          // UnitY.RotatedByRandom(2π) 近似
+            const d = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30, 0, 0, 229, 0, 0, 0, null, 1, true);
+            if (d) {
+              d.x = this.cx - ux * (10 + Math.floor(Math.random() * 11));   // Next(10,21)
+              d.y = this.cy - uy * (10 + Math.floor(Math.random() * 11));
+              d.vx = -uy * 4; d.vy = ux * 4;      // RotatedBy(+π/2)×4
+              d.scale = 0.5 + Math.random();
+              d.fadeIn = 0.5;
+            }
+          }
+          if (Math.floor(Math.random() * 4) === 0) {
+            const a = Math.random() * TAU;
+            const [ux, uy] = [Math.sin(a), Math.cos(a)];
+            const d = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30, 0, 0, 240, 0, 0, 0, null, 1, true);
+            if (d) {
+              d.x = this.cx - ux * 30; d.y = this.cy - uy * 30;
+              d.vx = uy * 2; d.vy = -ux * 2;       // RotatedBy(−π/2)×2
+              d.scale = 0.5 + Math.random();
+              d.fadeIn = 0.5;
+            }
+          }
+        }
+      } else if (Math.floor(Math.random() * 2) === 0) {
+        // 578 沿朝向喷流（:32564-32594）
+        const ang = this.ai1;
+        const fx = Math.cos(ang), fy = Math.sin(ang);             // ai1.ToRotationVector2()
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const off = 10 + Math.floor(Math.random() * 11);          // Next(10,21)
+        const px = -fy * side * off, py = fx * side * off;        // 旋 π/2 ×±
+        const along1 = Math.floor(Math.random() * 161) - 80;      // Next(-80,81)
+        const d1 = game.spawnDust?.(this.cx + px, this.cy + py, 0, 0, 229, 0, 0, 0, null, 1, true);
+        if (d1) {
+          d1.x = this.cx + px; d1.y = this.cy + py;
+          d1.vx = (along1 * fx - px) / 10; d1.vy = (along1 * fy - py) / 10;
+          d1.scale = 0.5 + Math.random();
+          d1.fadeIn = 0.5;
+        }
+        const along2 = 40 + Math.floor(Math.random() * 81);       // Next(40,121)
+        const d2 = game.spawnDust?.(this.cx + px / 2, this.cy + py / 2, 0, 0, 229, 0, 0, 0, null, 1, true);
+        if (d2) {
+          d2.x = this.cx + px / 2; d2.y = this.cy + py / 2;
+          d2.vx = (along2 * fx - px / 2) / 10; d2.vy = (along2 * fy - py / 2) / 10;
+          d2.scale = 1 + Math.random();
+        }
+      }
+    } else if (this.ai0 <= 90) {
+      // ---- 显形段（:32600-32676）：50→90t 张开 ----
+      if (this.ai0 === 90) game.playSfxWav?.('Item_113', 1, this.x, this.y);   // :32604-32612
+      this.scale = (this.ai0 - 50) / 40;
+      this.alpha = 255 - Math.round(255 * this.scale);
+      this.rot -= Math.PI / 20;
+      if (this.projId === 579) {
+        // :32624-32649 开门段尘（1/2 掷、速度 ×6/×3、customData=门心）
+        if (Math.random() < 0.5) {
+          const a = Math.random() * TAU;
+          const [ux, uy] = [Math.sin(a), Math.cos(a)];
+          const d = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30, 0, 0, 229, 0, 0, 0, null, 1, true);
+          if (d) {
+            d.x = this.cx - ux * (10 + Math.floor(Math.random() * 11));
+            d.y = this.cy - uy * (10 + Math.floor(Math.random() * 11));
+            d.vx = -uy * 6; d.vy = ux * 6;        // RotatedBy(+π/2)×6
+            d.scale = 0.5 + Math.random();
+            d.fadeIn = 0.5;
+          }
+        }
+        if (Math.random() < 0.5) {
+          const a = Math.random() * TAU;
+          const [ux, uy] = [Math.sin(a), Math.cos(a)];
+          const d = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30, 0, 0, 240, 0, 0, 0, null, 1, true);
+          if (d) {
+            d.x = this.cx - ux * 30; d.y = this.cy - uy * 30;
+            d.vx = uy * 3; d.vy = -ux * 3;        // RotatedBy(−π/2)×3
+            d.scale = 0.5 + Math.random();
+            d.fadeIn = 0.5;
+          }
+        }
+      } else {
+        // 578 喷流尘（每 tick 恒 1 颗，:32652-32663）
+        const ang = this.ai1;
+        const fx = Math.cos(ang), fy = Math.sin(ang);
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const off = 10 + Math.floor(Math.random() * 11);
+        const px = -fy * side * off, py = fx * side * off;
+        const along = Math.floor(Math.random() * 161) - 80;
+        const d = game.spawnDust?.(this.cx + px, this.cy + py, 0, 0, 229, 0, 0, 0, null, 1, true);
+        if (d) {
+          d.x = this.cx + px; d.y = this.cy + py;
+          d.vx = (along * fx - px) / 10; d.vy = (along * fy - py) / 10;
+          d.scale = 0.5 + Math.random();
+          d.fadeIn = 0.5;
+        }
+      }
+      // ---- 恰 90t 开门（:32650-32676）----
+      if (this.ai0 === 90) {
+        if (this.projId === 578) {
+          // 580 电击弹（:32650-32660）：出生点=门心−朝向×8、速度=朝向×8、50 伤、
+          // ai0=朝向角、ai1=Next(80) 种子
+          const fx = Math.cos(this.ai1) * 8, fy = Math.sin(this.ai1) * 8;
+          em.add(new LightningBoltProj(this.cx - fx, this.cy - fy, fx, fy, 580, 50,
+            this.ai1, Math.floor(Math.random() * 80)), 'projectiles');
+        } else {
+          // 2× Alien Hornet 427（:32661-32676）：门心 Bottom 锚（NewNPC :81547），
+          // 速度=−UnitY.RotatedByRandom(2π)×Next(4,9)−UnitY×2
+          this.ai1 = 1;                       // 次帧开门爆尘
+          for (let i = 0; i < 2; i++) {
+            const hornet = spawnVanillaEnemy(game, 427, this.cx, this.cy);
+            if (!hornet) continue;
+            hornet.y -= hornet.h / 2;         // 中心锚 → Bottom 锚换算
+            const a = Math.random() * TAU;
+            const sp = 4 + Math.random() * 5;  // Next(4,9)
+            hornet.vx = Math.sin(a) * sp;      // −UnitY 旋转 a：(sin a, −cos a)
+            hornet.vy = -Math.cos(a) * sp - 2;
+          }
+        }
+      }
+    } else if (this.ai0 <= 120) {
+      // ---- 满显段（:32677-32712）----
+      this.scale = 1;
+      this.alpha = 0;
+      this.rot -= Math.PI / 60;
+      if (Math.random() < 0.5) {
+        const a = Math.random() * TAU;
+        const [ux, uy] = [Math.sin(a), Math.cos(a)];
+        const type = Math.random() < 0.5 ? 229 : 240;
+        const d = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30, 0, 0, type, 0, 0, 0, null, 1, true);
+        if (d) {
+          if (type === 229) {
+            d.x = this.cx - ux * (10 + Math.floor(Math.random() * 11));
+            d.y = this.cy - uy * (10 + Math.floor(Math.random() * 11));
+            d.vx = -uy * 6; d.vy = ux * 6;        // RotatedBy(+π/2)×6
+          } else {
+            d.x = this.cx - ux * 30; d.y = this.cy - uy * 30;
+            d.vx = uy * 3; d.vy = -ux * 3;        // RotatedBy(−π/2)×3
+          }
+          d.scale = 0.5 + Math.random();
+          d.fadeIn = 0.5;
+        }
+      }
+    } else {
+      // ---- 收缩淡出段（:32713-32755）----
+      this.scale = 1 - (this.ai0 - 120) / 60;
+      this.alpha = 255 - Math.round(255 * this.scale);
+      this.rot -= Math.PI / 30;
+      if (this.alpha >= 255) { this.dead = true; return; }
+      if (Math.random() < 0.5) {
+        const a = Math.random() * TAU;
+        const [ux, uy] = [Math.sin(a) * this.scale, Math.cos(a) * this.scale];
+        const type = Math.random() < 0.5 ? 229 : 240;
+        const d = game.spawnDust?.(this.cx - ux * 30, this.cy - uy * 30, 0, 0, type, 0, 0, 0, null, 1, true);
+        if (d) {
+          if (type === 229) {
+            d.x = this.cx - ux * (10 + Math.floor(Math.random() * 11));
+            d.y = this.cy - uy * (10 + Math.floor(Math.random() * 11));
+            d.vx = -uy * 6; d.vy = ux * 6;        // RotatedBy(+π/2)×6
+          } else {
+            d.x = this.cx - ux * 30; d.y = this.cy - uy * 30;
+            d.vx = uy * 3; d.vy = -ux * 3;        // RotatedBy(−π/2)×3
+          }
+          d.scale = 0.5 + Math.random();
+          d.fadeIn = 0.5;
+        }
+      }
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    // Main.cs:32622-32650：Extra_50 涡旋三层 + 本体贴图（−rot×0.7、α×0.4）
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const opacity = (255 - this.alpha) / 255;
+    if (opacity <= 0) return;
+    const swirl = extra50();
+    const img = projSprite(this.projId);
+    const num347 = 0.95 + Math.sin(this.rot * 0.75) * 0.1;   // (rot*0.75).ToRotationVector2().Y
+    const scale11 = 0.6 + this.scale * 0.6 * num347;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = opacity;
+    ctx.translate(this.cx, this.cy);
+    const drawSwirl = (rotA: number, s: number, dim: number) => {
+      if (!swirl || !(swirl.width > 0)) return;
+      if (dim < 1) ctx.globalAlpha = opacity * dim;
+      const sz = 60 * s;
+      ctx.save();
+      ctx.rotate(rotA);
+      ctx.drawImage(swirl, -sz / 2, -sz / 2, sz, sz);
+      ctx.restore();
+      ctx.globalAlpha = opacity;
+    };
+    drawSwirl(-this.rot + 0.35, scale11, 0.5);   // 暗层（Lerp(色,黑,0.5) 近似）
+    drawSwirl(-this.rot, this.scale, 1);
+    if (img && img.width > 0) {
+      ctx.save();
+      ctx.rotate(-this.rot * 0.7);
+      ctx.globalAlpha = opacity * 0.4;           // color90：×0.8 且 A/2
+      const sz = Math.max(img.width, img.height) * this.scale;
+      ctx.drawImage(img, -sz / 2, -sz / 2, sz, sz);
+      ctx.restore();
+      ctx.globalAlpha = opacity;
+    }
+    drawSwirl(this.rot * 0.5, this.scale * 0.9, 0.8);   // ×0.8 尾层
     ctx.restore();
   }
 }
