@@ -27,6 +27,7 @@ import { VI_ID } from '../data/itemKeys';
 import type { World } from '../world/World';
 import { BuffType } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
+import { drawFishingStringLine, stringColorOpts } from '../render/StringLine';
 
 type LiquidType = 'water' | 'lava' | 'honey';
 
@@ -498,10 +499,11 @@ const POLE_STRING_COLOR: Record<number, [number, number, number]> = {
 };
 
 /** 钓线段链绘制（:35112-35201）：竿尖→浮标中心,12px 段;速度/张力摆垂;
- *  FishingLine.png(12×12,取 (0,0,W,num5) 竖条) 逐段旋贴。线色随段格取光
- *  (本仓实体层画在光照合成前=整链乘光等价;α=100/255)。
- *  备案:RotatedRelativePoint(甩竿姿态旋转,:35115)与 mount 52 竿尖修正未建模
- *  (玩家无甩竿旋转渲染/坐骑钓竿位);线染料 stringColor 本仓无该字段恒 0 */
+ *  FishingLine.png(12×12,取 (0,0,W,(int)num5) 竖条) 逐段旋贴。线色 =
+ *  竿基色 → TryApplyingPlayerStringColor(线饰品染料,Main.cs:35013) → GetColor
+ *  alpha 重置 255（StringLine 共享模块——预乘混合精确等价;实体层画在光照合成前
+ *  =整链自动乘光）。备案:RotatedRelativePoint(甩竿姿态旋转,:35115)与 mount 52
+ *  竿尖修正未建模(玩家无甩竿旋转渲染/坐骑钓竿位)。 */
 function drawFishingLine(
   ctx: CanvasRenderingContext2D, r: import('../render/Renderer').Renderer,
   b: Bobber, owner: import('./Player').Player,
@@ -511,62 +513,10 @@ function drawFishingLine(
   // 竿尖 = 玩家中心 + 逐竿偏移（:34970-35106;dir<0 再 −13）
   const dir = owner.facing || 1;
   const [ox, oy] = POLE_TIP[b.poleVid] ?? [0, 0];
-  let px = owner.cx + ox * dir - (dir < 0 ? 13 : 0);
-  let py = owner.cy + oy;
-  // 目标 = 浮标中心（:35112-35114）
-  let num = b.cx - px;
-  let num2 = b.cy - py;
-  if (num === 0 && num2 === 0) return;
-  {   // :35120-35132 竿尖回退 12px 再重算方向
-    const d = Math.hypot(num, num2);
-    const k = 12 / d;
-    px -= num * k; py -= num2 * k;
-    num = b.cx - px; num2 = b.cy - py;
-  }
+  const px = owner.cx + ox * dir - (dir < 0 ? 13 : 0);
+  const py = owner.cy + oy;
   const base = POLE_STRING_COLOR[b.poleVid] ?? [200, 200, 200];
-  ctx.globalAlpha = 100 / 255;
-  ctx.fillStyle = `rgb(${base[0]},${base[1]},${base[2]})`;
-  let guard = 256;
-  while (guard-- > 0) {
-    let segLen = 12;
-    const dist = Math.hypot(num, num2);
-    const dist0 = dist;
-    if (dist < 20) { segLen = dist - 8; if (segLen <= 0) break; }
-    const k = 12 / dist;
-    px += num * k; py += num2 * k;
-    num = b.cx - px;
-    num2 = b.y + b.h * 0.1 - py;      // :35147 段目标 = 盒顶 10% 高处（线接浮标顶）
-    // 摆垂（:35150-35190,仅段长>12 时）
-    if (dist0 > 12) {
-      let sway = 0.3;
-      let spd = Math.abs(b.vx) + Math.abs(b.vy);
-      if (spd > 16) spd = 16;
-      sway *= 1 - spd / 16;
-      let f = dist0 / 80;
-      if (f > 1) f = 1;
-      sway *= f;
-      sway *= 1 - b.lai0 / 100;
-      if (num2 > 0) {
-        num2 *= 1 + sway;
-        num *= 1 - sway;
-      } else {
-        f = Math.abs(b.vx) / 3;
-        if (f > 1) f = 1;
-        f -= 0.5;
-        sway *= f;
-        if (sway > 0) sway *= 2;
-        num2 *= 1 + sway;
-        num *= 1 - sway;
-      }
-    }
-    const ang = Math.atan2(num2, num) - Math.PI / 2;
-    // 贴竖条（:35194-35199）：origin=(W/2,0),从段起点沿方向延伸 segLen
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(ang);
-    ctx.drawImage(tex, 0, 0, tex.width, Math.round(segLen), -tex.width / 2, 0, tex.width, Math.round(segLen));
-    ctx.restore();
-    if (dist < 20) break;
-  }
-  ctx.globalAlpha = 1;
+  drawFishingStringLine(ctx, tex, px, py,
+    { x: b.x, y: b.y, w: b.w, h: b.h, vx: b.vx, vy: b.vy, lai0: b.lai0 },
+    base, owner.equipStats.stringColor, stringColorOpts(r.lighting?.clock));
 }

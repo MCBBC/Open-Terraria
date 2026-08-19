@@ -13,10 +13,11 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitCritters, hitTownNpcs, playEnemyHitSound, tryReflectProjectile } from './projTargets';
+import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, tryReflectProjectile } from './projTargets';
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
+import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
 
 /** 原版投射物绘制偏移表（Main.cs:29375-29826 num143/num144 表,96 条静态项）。
  *  语义:贴图左上角落于 (盒左 + num144, 盒上 − num143)——num143 为"上移"量。
@@ -196,6 +197,7 @@ function hitEnemies(
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
   for (const ent of game.enemies()) {
+    if (!playerCanHitEnemy(ent, game, self.projId ?? 0)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
     const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
@@ -488,6 +490,7 @@ export class Boomerang extends Entity {
         let best = 800; // :36907 / FindTargetWithLineOfSight 缺省 800 :42972
         for (const ent of game.enemies()) {
           const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+          if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
           if (e.dead) continue;
           if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
           const d = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
@@ -909,16 +912,22 @@ export class CounterweightProj extends Entity {
   private orbitR: number;
   private rot = 0;
   private alive: () => boolean;
-  private ownerRef: () => { cx: number; cy: number } | null;
+  private ownerRef: () => { cx: number; cy: number; equipStats?: { stringColor?: number } } | null;
   private hitCd = new HitCooldown();
   dead = false;
+  /** 手部坐标 + 线色快照（线段链起点/染色，fixedUpdate 每帧刷新） */
+  handX = 0;
+  handY = 0;
+  stringColor = 0;
 
   constructor(x: number, y: number, damage: number, knockback: number, projId: number,
-    owner: () => { cx: number; cy: number } | null, alive: () => boolean, yoyoString: boolean) {
+    owner: () => { cx: number; cy: number; equipStats?: { stringColor?: number } } | null,
+    alive: () => boolean, yoyoString: boolean) {
     super();
     this.x = x; this.y = y;
     this.damage = damage; this.knockback = knockback; this.projId = projId;
     this.ownerRef = owner; this.alive = alive;
+    this.handX = x; this.handY = y;
     this.orbitR = 125; // 250×0.5（:64477/:64482）
     if (yoyoString) this.orbitR += this.orbitR * 0.25 + 10; // :64487
   }
@@ -926,6 +935,8 @@ export class CounterweightProj extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     const p = this.ownerRef();
     if (!p || !this.alive()) { this.dead = true; return; } // timeLeft=6/宿主消亡
+    this.handX = p.cx; this.handY = p.cy;
+    this.stringColor = p.equipStats?.stringColor ?? 0;
     this.rot += 0.5; // :64489
     // 超径钳回（:64540-64550）：钳到轨道 + 速度径向衰减（去超出的 num6）
     let dx = p.cx - this.cx, dy = p.cy - this.cy;
@@ -959,6 +970,13 @@ export class CounterweightProj extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
+    // 线（配重球同走 aiStyle 99 段链，Main.cs:27799-27908——ai[0]>=0 != -2 命中）
+    const c = r.canvas.getContext('2d');
+    const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
+    if (c && tex) {
+      drawYoyoStringLine(c, tex, this.handX, this.handY, this,
+        this.stringColor, stringColorOpts(r.lighting?.clock));
+    }
     drawProj(r, cam, this, this.projId, this.rot + Math.PI / 2, '#B09060');
   }
 }
@@ -1005,6 +1023,9 @@ export class YoyoProj extends Entity {
   /** 手部坐标（线起点，fixedUpdate 每帧刷新为主角中心） */
   handX = 0;
   handY = 0;
+  /** 线饰品线色快照（Player.stringColor，fixedUpdate 每帧从 equipStats 刷新；
+   *  绘制侧消费——线段链染色/29 号闪烁免取光，Main.cs:27901） */
+  stringColor = 0;
   /** 存活秒数（AI_099 localAI[0]/60 ÷(1+ms)/2,超 YOYO_LIFE 回收） */
   private lifeT = 0;
   /** 回收锁（ai[0]=-1 终态:松手/超寿命/1.3×超程后不可复活,需重新使用掷出） */
@@ -1039,15 +1060,13 @@ export class YoyoProj extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // 线（原版 yoyo string / 连枷链：手部 → 球体）。世界坐标(实体循环在世界变换内)
+    // 线（Main.cs:27799-27908 DrawProjDirect aiStyle99 段 1:1）：手部→球体 12px 段链，
+    // FishingLine.png 竖条逐段旋贴、摆垂、线饰品染色（StringLine 共享模块——曾灰直线近似）
     const c = r.canvas.getContext('2d');
-    if (c) {
-      c.strokeStyle = '#D0D0D8';
-      c.lineWidth = 1.5;
-      c.beginPath();
-      c.moveTo(this.handX, this.handY);
-      c.lineTo(this.x + this.w / 2, this.y + this.h / 2);
-      c.stroke();
+    const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
+    if (c && tex) {
+      drawYoyoStringLine(c, tex, this.handX, this.handY, this,
+        this.stringColor, stringColorOpts(r.lighting?.clock));
     }
     this.rot += 0.45; // :65203-65209 rotation += 0.45/tick(每 AI 次;0.25 系自造,2026-08-13 终审修)
     drawProj(r, cam, this, this.projId, this.rot, '#E04040');
@@ -1060,6 +1079,7 @@ export class YoyoProj extends Entity {
     const p = game.player;
     this.handX = p.cx;
     this.handY = p.cy;
+    this.stringColor = p.equipStats.stringColor;
     // ChangeDir 段（:64925-64935,活跃/回收态公共段）:球相对玩家 X 定 direction,
     // ±2px 死区内保持原值——击退方向用 this.dir（非 sign(vx)）
     if (this.cx > p.cx + 2) this.dir = 1;
@@ -1556,6 +1576,7 @@ export class FlailProj extends Entity {
           let best = 600, bx = 0, by = 0, found = false;
           for (const ent of game.enemies()) {
             const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+            if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
             if (e.dead) continue;
             if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
             const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
@@ -1714,6 +1735,7 @@ export class FlaironSpike extends Entity {
       let best = 650, bx = 0, by = 0, found = false;
       for (const ent of game.enemies()) {
         const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+        if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (e.dead) continue;
         if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
         const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
@@ -1733,6 +1755,7 @@ export class FlaironSpike extends Entity {
       let best = 650, bx = 0, by = 0, found = false;
       for (const ent of game.enemies()) {
         const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+        if (!playerCanHitEnemy(ent, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (e.dead) continue;
         const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
         if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }
@@ -2506,6 +2529,7 @@ export class DaybreakFlare extends Entity {
   /** 首击结算：伤害 + AddBuff(189,300) + 附着 + 上限 8 淘汰（单目标即止） */
   private hitStep(game: GameHooks): void {
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; cx?: number; cy?: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean };
       if (e.dead) continue;
       // :14520-14523 大型目标命中盒各边内缩 1/8（636 专属——大 Boss 须命中内圈才附着）

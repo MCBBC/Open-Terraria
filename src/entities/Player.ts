@@ -548,6 +548,9 @@ export class Player extends Entity {
     infoAccs: InfoAccGates;  // 信息饰品门禁(DrawInfoAccs)
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSaveDenom: number; kbGlove: boolean; yoyoString: boolean;
+    /** 线饰品线色（Player.stringColor，UpdateVisibleAccessory :36441-36449）：0=无；
+     *  1-12/13/14/27/28/30=油漆域线色，29=魔法线鼠标文字色闪烁。钓线/悠悠球线消费 */
+    stringColor: number;
     // ↑省弹掷骰分母（0=无；4=25% 星旋胸 2758 / 5=20% ammoCost80·chloro80·蘑菇矿胸
     //  1549·化石套·弹药储备药水 / 10=10% 女猎手 3804/4983——PickAmmo :52791-52804
     //  各档独立掷 Next(N)==0，消费侧按激活档逐档掷）
@@ -634,6 +637,9 @@ export class Player extends Entity {
   const infoAccs: InfoAccGates = emptyInfoAccGates(); // 信息饰品门禁(RefreshInfoAccs :12198)
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSaveDenom = 0, kbGlove = false, yoyoString = false, autoReuseGlove = false;
+    // 线饰品线色（Player.stringColor）：0=无——UpdateVisibleAccessory 逐槽后写覆盖前写
+    //（Player.cs:36441-36449：5540/5541→29 在前、item.stringColor>0 在后，槽序 3-9→13-19）
+    let stringColor = 0;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
@@ -674,6 +680,11 @@ export class Player extends Entity {
       }
       // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
       if (statOfInternal(s.id)?.str) yoyoString = true;
+      // 线色（Player.cs:36441-36449 UpdateVisibleAccessory）：魔法线 5540/5541 → 29
+      //（无 item.stringColor 字段），其余线饰品 → 其 str；同帧逐槽后写覆盖前写
+      if (accVid === 5540 || accVid === 5541) stringColor = 29;
+      const funcStr = statOfInternal(s.id)?.str;
+      if ((funcStr ?? 0) > 0) stringColor = funcStr!;
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;
@@ -778,6 +789,19 @@ export class Player extends Entity {
         else if (p <= 76) move += (p - 72) / 100; // 73-76：+1..4% 移速
         else meleeSpeed += (p - 76) / 100;        // 77-80：+1..4% 近战速度
       }
+    }
+    // 时装配饰槽 13-19 的线色（Player.cs:36361-36372 UpdateVisibleAccessories 第二轮：
+    // 社交槽无条件走 UpdateVisibleAccessory——时装线饰品同样染线；yoyoString 不在此轮，
+    // ApplyEquipFunctional 只扫功能槽）。备案：功能槽侧原版有 hideVisibleAccessory 门
+    //（:36362 !hide 才应用），本仓无 per-slot 隐藏字段未建模。
+    for (let i = 13; i < 20; i++) {
+      const s = this.inv.armor[i];
+      if (!s) continue;
+      const v = ITEM_DEFS[s.id];
+      const vid = v?.vid ?? (v?.key?.startsWith('vi_') ? parseInt(v.key.slice(3), 10) : -1);
+      if (vid === 5540 || vid === 5541) stringColor = 29;
+      const sc = statOfInternal(s.id)?.str;
+      if ((sc ?? 0) > 0) stringColor = sc!;
     }
     // 恐慌项链受击加速窗口（PanicSpeedBoost :25034：panicTime 300 tick 内 moveSpeed +0.5）
     if (this.panicTime > 0) move += 1.0;   // PanicSpeedBoost（:25034 满档 +1.0=+100%;旧 +0.5 是 1.4.0 旧值,2026-08-13 修）
@@ -956,6 +980,7 @@ export class Player extends Entity {
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
       arrowDmg, ammoSaveDenom, kbGlove, autoReuseGlove, yoyoString, magmaStone,
+      stringColor,   // 线饰品线色（UpdateVisibleAccessory :36441-36449）
       iceSkate,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）

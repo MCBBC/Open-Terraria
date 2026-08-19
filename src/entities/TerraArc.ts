@@ -8,7 +8,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
 
@@ -59,6 +59,7 @@ export class TerraArc extends Entity {
     this.lightRGB = [15 / 255, 84 / 255, 125 / 255];                             // :39533
     // 命中：穿透 3、同敌单跳（localNPCHitCooldown=-1 :9112-9113）
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitSet.has(e.id)) continue;
       // 弧判定：弹盒 16×16 太小，用 scale×85 半径的旋转盒近似（原版走 CanHitWithOwnBody

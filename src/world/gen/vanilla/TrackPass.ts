@@ -32,6 +32,7 @@ import { TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
+import { vanGenSolidType } from './GenSolid';
 
 /** FFFFF 探针:placePath 逐列步进钩(harness _wwwrep 经 __setTrackStepProbe 安装;
  *  缺省 undefined 零开销)。loop 1=清轨巷遍/2=铺轨遍。 */
@@ -45,6 +46,28 @@ let __tfCellProbe: ((sheet: number, x: number, y: number, fx: number, fy: number
 export function __setTfCellProbe(fn: ((sheet: number, x: number, y: number, fx: number, fy: number) => void) | undefined): void {
   __tfCellProbe = fn;
 }
+
+// ============================================================
+// Tile.SmoothSlope 链(cs:822-888 + CanPoundTile cs:81434-81479 +
+// CanKillTile cs:62249-62402)——FFFFF 批 1:1 补齐
+// ★AAAAA 批曾按"RNG 零掷,帧链无关"整体省略 cs:124/127 两调——错在它**写坡/半砖
+//   状态**:①本轨自己的列帧链(列 k-1 的 8 连 TileFrame)立刻读它(实测 #101 金标
+//   种子:ice (1215,741) 被邻 pass 写 sl3 → 下帧 gem 178 CheckAndAdjust 锚败击杀,
+//   掷侧零差——JS 因未写坡 gem 存活到 k=725 帧链 resetFrame=true → 多掷 5×Next(3)
+//   = 掷流 166921 首差的真根);②后续轨的 SolidTile 谓词读坡(slope!=0 非实心)。
+// ============================================================
+/** CanPoundTile 型门(cs:81445-81453):门/助推轨/巨石族等禁 pounded 坡面 */
+const POUND_BLOCK_TYPES = idsByVanillaSheet(10, 48, 137, 232, 380, 387, 388, 476, 484);
+/** ForbidsSloping(cs:81484-81504):上方挂靠这些型禁坡 */
+const FORBIDS_SLOPING = idsByVanillaSheet(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);
+/** TileID.Sets.Boulders(TileID.cs:195) */
+const BOULDER_SHEETS_SS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+/** TileID.Sets.IsATreeTrunk(CanKillTile cs:62276 消费) */
+const IS_TREE_TRUNK_SS = idsByVanillaSheet(5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634);
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt(TileID.cs:169;HasReasonToReturnEarly) */
+const PREVENTS_REMOVAL_ON_TOP = idsByVanillaSheet(5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634);
+/** TileID.Sets.IsAContainer(TileID.cs:405) */
+const IS_A_CONTAINER_SS = idsByVanillaSheet(21, 467, 88);
 
 /** type → vanilla sheet(FinalCleanupPass.SWEEP_SHEET 同构;私有不可导出) */
 const SHEET_OF = new Int16Array(TILE_DEFS.length).fill(-1);
@@ -172,10 +195,19 @@ export class TrackGenerator {
   private readonly trackBuckets = new Map<number, number[]>();
   /** CalculateStateForLocation 结果缓存(单次 Place 内有效——findPath 期地图只读) */
   private readonly stateCache = new Map<number, number>();
+  /** 有货箱锚位格(CanDestroyChest=false 集;smoothSlope→CanKillTile 消费) */
+  private readonly blockedChestAnchors = new Set<number>();
 
-  constructor(st: TileStore, gs: GenState) {
+  constructor(st: TileStore, gs: GenState, chests?: ReadonlyArray<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>) {
     this.st = st;
     this.gs = gs;
+    // CanDestroyChest(cs:590-607)镜像:锚位格 → 是否有货箱(CanKillTile 箱支消费;
+    // 生成期箱皆有货 → 恒"不可毁"——保守按有货判,箱族/音乐盒 235 帧锚位入表)
+    if (chests) {
+      for (const c of chests) {
+        if (c.items.some((it) => it && it.id > 0 && it.stack > 0)) this.blockedChestAnchors.add(c.x * 16384 + c.y);
+      }
+    }
     for (let y = 0; y < st.h; y++) {
       for (let x = 0; x < st.w; x++) {
         const i = st.idx(x, y);
@@ -386,10 +418,18 @@ export class TrackGenerator {
       if (rng.int(0, 6) === 0) this.playerHeight = rng.int(5, 8);
       __trackStepProbe?.(2, k, this.hist[k]!.x, this.hist[k]!.y, this.playerHeight);
       const th = this.hist[k];
+      // Tile.SmoothSlope(X, Y+1)(cs:124)与门控 (X, Y-playerHeight)(cs:125-128)
+      // ——FFFFF 补:写坡/半砖(见文件头 SmoothSlope 节;邻 pass 先行 cs:825-829)
+      this.smoothSlope(th.x, th.y + 1, true);
+      {
+        const ci = st.inBounds(th.x, th.y - this.playerHeight) ? st.idx(th.x, th.y - this.playerHeight) : -1;
+        if (ci < 0 || !st.flags[ci] || SHEET_OF[st.type[ci]!] !== 379) {
+          this.smoothSlope(th.x, th.y - this.playerHeight, true);
+        }
+      }
       if (!st.inBounds(th.x, th.y)) continue;
       const idx = st.idx(th.x, th.y);
       const wireBits = st.wire[idx] & 15;   // 四色线暂存(cs:129-132)
-      // Tile.SmoothSlope(x, y+1) / (x, y-playerHeight) 省略(RNG 零掷,见文件头注)
       if (pressure[k] && k > 0
         && this.hist[k - 1].y === th.y && this.hist[k + 1].y === th.y) {
         // ClearEverything(cs:135):type/wall/liquid/headers/帧全清(墙漆随墙清)
@@ -437,6 +477,151 @@ export class TrackGenerator {
     for (let k = 0; k < dust; k++) makeTileDustRoll(rng, sheet, fx);
     st.setTileSilent(x, y, 0);
     genSquareTileFrame(st, rng, x, y);
+  }
+
+  /** Tile.SmoothSlope(cs:822-888)。applyToNeighbors 四邻先行(递归 false 档);
+   *  中心:CanPoundTile && SolidOrSlopedTile 双门 → flag 族 → case 写。写侧零掷 */
+  private smoothSlope(x: number, y: number, applyToNeighbors: boolean): void {
+    if (applyToNeighbors) {
+      this.smoothSlope(x + 1, y, false);
+      this.smoothSlope(x - 1, y, false);
+      this.smoothSlope(x, y + 1, false);
+      this.smoothSlope(x, y - 1, false);
+    }
+    const st = this.st;
+    if (!st.inBounds(x, y)) return;   // 原版 TileMap 占位格:inactive→SolidOrSlopedTile 早退,等价
+    if (!this.canPoundTile(x, y) || !this.solidOrSlopedAt(x, y)) return;
+    const i = st.idx(x, y);
+    const flag = this.activeAt(x, y - 1);                      // !TileEmpty(cs:70037)
+    const flag2 = !this.solidOrSlopedAt(x, y - 1) && flag;
+    const flag3 = this.solidOrSlopedAt(x, y + 1);
+    const flag4 = this.solidOrSlopedAt(x - 1, y);
+    const flag5 = this.solidOrSlopedAt(x + 1, y);
+    const num = ((flag ? 1 : 0) << 3) | ((flag3 ? 1 : 0) << 2) | ((flag4 ? 1 : 0) << 1) | (flag5 ? 1 : 0);
+    switch (num) {
+      case 10: if (!flag2) { st.half[i] = 0; st.slope[i] = 3; } break;
+      case 9: if (!flag2) { st.half[i] = 0; st.slope[i] = 4; } break;
+      case 6: st.half[i] = 0; st.slope[i] = 1; break;
+      case 5: st.half[i] = 0; st.slope[i] = 2; break;
+      case 4: st.slope[i] = 0; st.half[i] = 1; break;
+      default: st.half[i] = 0; st.slope[i] = 0; break;
+    }
+  }
+
+  /** WorldGen.SolidOrSlopedTile(cs:70046/70064):active && 生成期 tileSolid &&
+   *  !tileSolidTop && !inActive(生成期恒真)——半砖/坡不排除 */
+  private solidOrSlopedAt(x: number, y: number): boolean {
+    const st = this.st;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform;
+  }
+
+  /** Tile.active() && !inActive()(生成期 inActive 恒假) */
+  private activeAt(x: number, y: number): boolean {
+    const st = this.st;
+    if (!st.inBounds(x, y)) return false;
+    return st.flags[st.idx(x, y)] !== 0;
+  }
+
+  /** WorldGen.CanPoundTile(cs:81434-81479) */
+  private canPoundTile(x: number, y: number): boolean {
+    const st = this.st;
+    const i = st.idx(x, y);
+    const t = st.type[i]!;
+    if (POUND_BLOCK_TYPES.has(t)) return false;
+    if (t >= 0 && BOULDER_SHEETS_SS.has(t)) return false;
+    // isGeneratingOrLoadingWorld 恒真(cs:81467-81474)
+    if (t === SHEET_190 || t === SHEET_30) return false;
+    if (this.activeAt(x, y - 1) && this.forbidsSloping(x, y - 1)) return false;
+    return this.canKillTile(x, y);
+  }
+
+  /** WorldGen.ForbidsSloping(cs:81484-81504)——按型(sheet)表 */
+  private forbidsSloping(x: number, y: number): boolean {
+    const st = this.st;
+    if (!st.inBounds(x, y)) return false;
+    return FORBIDS_SLOPING.has(st.type[st.idx(x, y)]!);
+  }
+
+  /** WorldGen.CanKillTile(i,j)(cs:62249-62402)——smoothSlope 语境镜像
+   *  (blockDamaged 出参无消费方,略)。生成期 KillTile 的 noItem 强制置真在
+   *  KillTile 体(掷/掉落链与本处无关)。 */
+  private canKillTile(x: number, y: number): boolean {
+    const st = this.st;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (!st.flags[i]) return false;                       // cs:62262 !active
+    if (st.wall[i] === 350) return false;                 // cs:62266
+    const up = st.inBounds(x, y - 1) ? st.idx(x, y - 1) : -1;
+    if (up >= 0 && st.flags[up]) {
+      const tUp = st.type[up]!;
+      const fx = st.frameX[up]!, fy = st.frameY[up]!;
+      const t = st.type[i]!;
+      if (IS_TREE_TRUNK_SS.has(tUp) && t !== tUp
+        && !(fx === 66 && fy >= 0 && fy <= 44) && !(fx === 88 && fy >= 66 && fy <= 110) && fy < 198) return false;
+      if (tUp === SHEET_323 && t !== tUp && (fx === 66 || fx === 220)) return false;
+      if ((tUp === SHEET_21 || tUp === SHEET_26 || tUp === SHEET_72 || tUp === SHEET_77
+        || tUp === SHEET_88 || tUp === SHEET_467 || tUp === SHEET_488) && t !== tUp) return false;
+      if (tUp === SHEET_80 && t !== tUp) {
+        const num = Math.trunc(fx / 18);
+        if (num === 0 || num === 1 || num === 4 || num === 5) return false;
+      }
+    }
+    const t = st.type[i]!;
+    const fx = st.frameX[i]!, fy = st.frameY[i]!;
+    if (BOULDER_SHEETS_SS.has(t) && this.checkBoulderChest(x, y, fx, fy, t)) return false;
+    if (t === SHEET_10 && this.isLockedDoor(x, y)) return false;
+    if (t === SHEET_235) {
+      const num2 = x - Math.trunc(fx % 54 / 18);          // cs:62328
+      for (let k = 0; k < 3; k++) {
+        if (this.hasReasonToReturnEarlyAt(t, num2 + k, y - 1)) return false;
+      }
+    }
+    if (t === SHEET_21 || t === SHEET_467) {
+      if (!this.canDestroyChest(x - (Math.trunc(fx / 18) % 2), y - Math.trunc(fy / 18))) return false;
+    } else if (t === SHEET_88) {
+      if (!this.canDestroyChest(x - (Math.trunc(fx / 18) % 3), y - Math.trunc(fy / 18))) return false;
+    }
+    return true;
+  }
+
+  /** CheckTileBreakability_HasReasonToReturnEarly(cs:62491-62509;hardMode 生成期假) */
+  private hasReasonToReturnEarlyAt(ignoreType: number, x: number, y: number): boolean {
+    const st = this.st;
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (!st.flags[i]) return false;
+    const t = st.type[i]!;
+    if (SHEET_OF[t] !== SHEET_OF[ignoreType] && (t === SHEET_77 || PREVENTS_REMOVAL_ON_TOP.has(t))) return true;
+    return this.isLockedDoor(x, y) || IS_A_CONTAINER_SS.has(t);
+  }
+
+  /** Chest.CanDestroyChest(cs:590-607):无箱或有空箱才可毁 */
+  private canDestroyChest(x: number, y: number): boolean {
+    return !this.blockedChestAnchors.has(x * 16384 + y);
+  }
+
+  /** WorldGen.IsLockedDoor(Tile)(cs:69248-69256) */
+  private isLockedDoor(x: number, y: number): boolean {
+    const st = this.st;
+    const i = st.idx(x, y);
+    if (st.type[i] !== SHEET_10) return false;
+    const fy = st.frameY[i]!;
+    return fy >= 594 && fy <= 646 && st.frameX[i]! < 54;
+  }
+
+  /** WorldGen.CheckBoulderChest(cs:48810-48833)——巨石帧锚反解+上两格门 */
+  private checkBoulderChest(i: number, j: number, fx: number, fy: number, type: number): boolean {
+    let num = Math.trunc(fx / 18) * -1;
+    if (num < -1) num += 2;
+    num += i;
+    let num2 = fy;
+    while (num2 >= 36) num2 -= 36;
+    num2 = j - Math.trunc(num2 / 18);
+    if (this.hasReasonToReturnEarlyAt(type, num, num2 - 1)) return true;
+    if (this.hasReasonToReturnEarlyAt(type, num + 1, num2 - 1)) return true;
+    return false;
   }
 
   /** WorldUtils.TileFrame(x, y, frameNeighbors:true)(WorldUtils.cs:79-89):

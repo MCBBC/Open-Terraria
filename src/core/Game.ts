@@ -244,7 +244,7 @@ import type { TrapShotKind } from '../entities/Dart';
 import { Arrow, prefetchProjectiles, PIRANHA_PROJ, PIRANHA_LIFE } from '../entities/Arrow';
 import { resetCageAnim } from '../render/CritterCage';
 import { prefetchTrapProjectiles } from '../entities/Dart';
-import { hitPlayer, statusPlayer } from '../entities/projTargets';
+import { hitPlayer, playerCanHitEnemy, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
@@ -3098,15 +3098,22 @@ export class Game implements GameHooks {
     this.cb.onInventoryChanged();
   }
 
-  /** 沙滩睡渔夫（NPC 376）放置。原版由 SpawnNPC 海洋段掷出（NPC.cs:1705-1728 海洋
-   *  水域 / :1835-1837 沙滩干沙分支——两分支同门：!savedAngler && !AnyNPCs(376) &&
-   *  横向边缘 380 格内 && 地表以上）。本仓在生成期与入驻轮确定性补放：就近取出生点
-   *  一侧的合格干沙格（空气×2 + 沙格 + 地表以上），差异仅"何时放"不含条件语义。
+  /** 沙滩睡渔夫（NPC 376）放置。原版由 SpawnNPC 掷出（NPC.cs:1705-1728 海洋水域 /
+   *  :1835-1837 沙滩干沙分支——两分支同门：!savedAngler && !AnyNPCs(376) && 横向
+   *  边缘 380 格内 && 地表以上；水域支的 spawnTileY<worldSurface-10 门在本世界几何
+   *  下不达，干沙支为主通路）。本仓在生成期与入驻轮确定性补放：就近取出生点一侧
+   *  的合格干沙格（空气×2 + 沙格 + 地表以上），差异仅"何时放"不含条件语义。
+   *  ★2026-08-19 前以 bound TownNPC 近似——渲染层 BOUND_NPC_SHEET 无 'angler' 条目
+   *  而完全不可见（用户"找不到睡渔夫/无法唤醒"根因），改放【真 Enemy 376】（与
+   *  VanillaSpawner 水支同型实体）：NPC_376 睡姿贴图/34×7 躺姿盒/水面漂浮 AI 齐备，
+   *  右键唤醒走 talkToNearbyNpc 的 AI_000 Transform 链（wakeBoundEnemyNpc）。
    *  解救后写 flags.savedAngler（NPC.savedAngler，WF:1334/2160 随存档）。 */
   private placeSleepingAngler(): boolean {
     const w = this.world;
     const st = w.store;
     if (w.flags.savedAngler) return false;   // NPC.savedAngler
+    // AnyNPCs(376) 同门：真睡渔夫（敌怪桶）或已解救渔夫（npcs 桶 369）任一在场即关
+    if (this.entities.enemies.some((n) => (n as Enemy).vanillaId === 376 && !(n as Enemy).dead)) return false;
     if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'angler')) return false;
     // Main.tileSand（NPC.cs:7177-7180）：黄沙/黑檀沙/珍珠沙/猩红沙
     const sands = new Set(['sand', 'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block']
@@ -3125,7 +3132,7 @@ export class Game implements GameHooks {
           if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;            // 空气×2
           // 轻量天顶门:y-3/y-5 各查一处,排除沙洞(两处全=深洞,一处=有草/树枝可过)
           if (st.isSolid(x, y - 3) && st.isSolid(x, y - 5)) continue;
-          if (this.placeBoundNpc('angler', 'savedAngler', x, y - 1)) return true;
+          if (this.placeSleepingAnglerAt(x, y)) return true;
           break;
         }
       }
@@ -3133,19 +3140,34 @@ export class Game implements GameHooks {
     return false;
   }
 
-  /** 深度带内找 bound 落脚点（空气×2 + 下方实心），返回 [x, 脚底上一格y] */
-  /** 放置一名 bound 救援 NPC（已解救/已在场/落点无效时跳过）。x,y = 脚底上一格 */
-  private placeBoundNpc(key: string, savedFlag: string, x: number, y: number): boolean {
+  /** 睡渔夫落位（原版 SpawnNPC(spawnTileX*16+8, spawnTileY*16, 376) :1837 + NewNPC
+   *  底边贴格顶锚 NPC.cs:46596-46597）：中心 X=x*16+8、脚底 = 沙格顶。 */
+  private placeSleepingAnglerAt(x: number, y: number): boolean {
     const st = this.world.store;
-    if (this.world.flags[savedFlag]) return false;
-    if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === key)) return false;
     if (x < 3 || y < 3 || x > st.w - 4 || y > st.h - 4) return false;
-    if (st.isSolid(x, y) || st.isSolid(x, y - 1)) return false;
-    const npc = new TownNPC(key, x * TILE + 8, (y + 1) * TILE);
-    npc.bound = true;
-    this.entities.add(npc, 'npcs');
+    if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) return false;   // 空气×2（沙格本体由扫描保证）
+    const e = Enemy.fromVanilla(376, x * TILE + 8, y * TILE);
+    if (!e) return false;
+    e.y = y * TILE - e.h;    // NewNPC 底锚（Enemy ctor 中心锚换算）
+    e.id = this.entities.nextId++;
+    this.entities.add(e, 'enemies');
     return true;
   }
+
+  /** 解救旗标表（AI_007_TownEntities_UpdateSavedStates NPC.cs:53336-53362 + 各
+   *  Transform 链的解锁旗）：freeBoundNpc（bound TownNPC 右键/触碰）与
+   *  wakeBoundEnemyNpc（敌怪桶 bound 形态右键 Transform）共用。 */
+  private static readonly SAVED_FLAG_BY_KEY: Record<string, string> = {
+    goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
+    stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
+    tavernkeep: 'savedBartender',   // 醉酒酒保 579 解救 → Transform 550（:19806）
+    angler: 'savedAngler',   // NPC.savedAngler（睡渔夫 376 解救 → 渔夫 369 入镇）
+    // 老城镇史莱姆（绑缚 685 → TransformElderSlime :19077-19091 → 679 +
+    // unlockedSlimeOldSpawn=true，WF:1410 随存档）——走 flags 即自动持久化，
+    // SpawnAnNPC 三人组链的 !unlockedSlimeOldSpawn 门随之关闭
+    town_slime_old: 'unlockedSlimeOldSpawn',
+    town_slime_clumsy: 'unlockedSlimePurpleSpawn',  // 686 气球绑缚解救（:1347 门旗）
+  };
 
   /** 右键解救 bound NPC（原版 bound 类型右键 → 转正 + AI_007_UpdateSavedStates 置 saved 旗标） */
   private freeBoundNpc(npc: TownNPC): void {
@@ -3157,18 +3179,7 @@ export class Game implements GameHooks {
       }
     }
     npc.bound = false;
-    const flagByKey: Record<string, string> = {
-      goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
-      stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
-      tavernkeep: 'savedBartender',   // 醉酒酒保 579 解救 → Transform 550（:19806）
-      angler: 'savedAngler',   // NPC.savedAngler（睡渔夫 376 解救 → 渔夫 369 入镇）
-      // 老城镇史莱姆（绑缚 685 → TransformElderSlime :19077-19091 → 679 +
-      // unlockedSlimeOldSpawn=true，WF:1410 随存档）——走 flags 即自动持久化，
-      // SpawnAnNPC 三人组链的 !unlockedSlimeOldSpawn 门随之关闭
-      town_slime_old: 'unlockedSlimeOldSpawn',
-      town_slime_clumsy: 'unlockedSlimePurpleSpawn',  // 686 气球绑缚解救（:1347 门旗）
-    };
-    const flag = flagByKey[npc.npcKey];
+    const flag = Game.SAVED_FLAG_BY_KEY[npc.npcKey];
     if (flag) this.world.flags[flag] = true;
     const name = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
@@ -12998,6 +13009,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (const eent of this.entities.enemies) {
         const en = eent as Enemy;
         if (en.dead) continue;
+        // 狱火光环是玩家伤害源（Player.cs:9896 走 DamageNPCLikeProjectiles 族）
+        // ——friendly NPC（睡渔夫 376 等）同受 :43605 门保护
+        if (!playerCanHitEnemy(en, this)) continue;
         if (Math.hypot(en.cx - this.player.cx, en.cy - this.player.cy) > 200) continue;
         en.cursedT = Math.max(en.cursedT, 2); // AddBuff(323,120) 灼烧 2s
         if (hitTick) en.hurt(Math.max(1, Math.round(20 * this.player.damageMult('melee'))), 0, 0, this);
@@ -13526,6 +13540,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // ★曾用 R*TILE+16 距离圆:炸弹 80px(原版 11px,近 4 格外的怪也被炸)——半径混用
       const hb = hurtBox ?? R * TILE;
       const en = e as Enemy;
+      // friendly NPC 门（爆炸伤害原版走 Damage_PVE_Inner :11892 flag 门——玩家
+      // 炸弹对睡渔夫 376 等同样无效；下方城镇 NPC 段同门）
+      if (!playerCanHitEnemy(en, this, projId)) continue;
       if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
         && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
         en.hurt(damage, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this, pen); // ⑥
@@ -14380,6 +14397,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
       if (this.swingHitSet.has(e.id)) continue;
+      // friendly NPC 玩家近战门（Player.ApplyItemToNPC :43605：friendly 且非
+      // voodoo → return——睡渔夫 376/被缚救援族残留不可被玩家挥击）
+      if (!playerCanHitEnemy(e, this)) continue;
       if (!hitRect(e.x, e.y, e.w, e.h)) continue;
       this.swingHitSet.add(e.id);
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit。
@@ -15154,20 +15174,71 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** 敌怪桶 bound 形态 NPC → 对应城镇 NPC key（原版 AI_000 talkNPC 触发的
+ *  Transform 表 NPC.cs:19782-19810：589→588/105→107/106→108/123→124/354→353/
+ *  376→369/579→550）。105/106/123/354/589/579 六型由 trySpawnBoundTownNpc 在
+ *  spawner 投放时上游转桶（bound TownNPC），本表覆盖剩余的 376 睡渔夫
+ *  （placeSleepingAngler 真实体）+ 579 兜底。 */
+  private static readonly ENEMY_BOUND_TOWN_KEY: Record<number, string> = {
+    376: 'angler',
+    579: 'tavernkeep',
+  };
+
   /** 右键与附近 NPC 交谈(Player.SetTalkNPC Player.cs:4180 语义:
  *  光标命中 NPC 命中盒(±8px)+ 距离 3.5 格内)→ 打开原版对话框 */
   private talkToNearbyNpc(ctX: number, ctY: number): boolean {
     const p = this.player;
+    const mx = (ctX + 0.5) * TILE, my = (ctY + 0.5) * TILE;
+    // 敌怪桶 bound 形态（睡渔夫 376 等）：原版同为右键 SetTalkNPC 触发（AI_000
+    // :19782-19810 player.talkNPC==whoAmI → Transform 城镇型 + 置 saved 旗 +
+    // 图鉴聊天登记 + 重挂 talkNPC）——wakeBoundEnemyNpc 一体实现
+    for (const ent of this.entities.enemies) {
+      const e = ent as Enemy;
+      if (!(e instanceof Enemy) || e.dead) continue;
+      const townKey = Game.ENEMY_BOUND_TOWN_KEY[e.vanillaId ?? -1];
+      if (!townKey) continue;
+      if (Math.hypot(e.cx - p.cx, e.cy - p.cy) > TILE * 3.5) continue;
+      if (mx < e.x - 8 || mx > e.x + e.w + 8 || my < e.y - 8 || my > e.y + e.h + 8) continue;
+      this.wakeBoundEnemyNpc(e, townKey);
+      return true;
+    }
     for (const n of this.entities.npcs) {
       const npc = n as TownNPC;
       if (Math.hypot(npc.cx - p.cx, npc.cy - p.cy) > TILE * 3.5) continue;
-      const mx = (ctX + 0.5) * TILE, my = (ctY + 0.5) * TILE;
       if (mx < npc.x - 8 || mx > npc.x + npc.w + 8 || my < npc.y - 8 || my > npc.y + npc.h + 8) continue;
       if (npc.bound) { this.freeBoundNpc(npc); return true; } // 救援 NPC：右键直接解救
       this.openNpcDialog(npc);
       return true;
     }
     return false;
+  }
+
+  /** 敌怪桶 bound 形态解救（原版 AI_000_TransformBoundNPC NPC.cs:45219-45232 1:1）：
+ *  Transform(townType)（换型 + 保血量比例 life*newMax/oldMax + 底边对齐 +
+ *  homeless 锚脚下）→ AI_007_UpdateSavedStates 置 saved 旗 → 图鉴聊天登记
+ *  （openNpcDialog 内）→ SetTalkNPC 开对话——台词取【换型前】类型的 GetChat
+ *  （376 睡渔夫 = dialog 353-355 唤醒语 / 579 = BartenderSpecialText.FirstMeeting，
+ *  NPC.cs:95962/:95976——原版 SetTalkNPC 时先取文本后 Transform，同序）。 */
+  private wakeBoundEnemyNpc(e: Enemy, key: string): void {
+    const wakeChat = e.vanillaId === 376
+      ? Lang.text(`LegacyDialog.${353 + Math.floor(Math.random() * 3)}`)
+      : e.vanillaId === 579 ? Lang.text('BartenderSpecialText.FirstMeeting') : null;
+    const ratio = e.maxHp > 0 ? e.hp / e.maxHp : 1;
+    const feetY = e.y + e.h;
+    e.dead = true;                      // 原版同槽 Transform → 本仓死 + 新生成等价（税务官链 :3236 同法）
+    const npc = new TownNPC(key, e.cx, feetY);
+    npc.id = this.entities.nextId++;
+    if (ratio > 0 && ratio < 1) npc.hp = Math.max(1, Math.round(ratio * npc.maxHp));
+    this.entities.add(npc, 'npcs');
+    const flag = Game.SAVED_FLAG_BY_KEY[key];
+    if (flag) this.world.flags[flag] = true;
+    const name = Lang.npcName(npc.vanillaId) ?? key;
+    this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
+    this.spawnParticles(npc.cx, npc.cy, '#9AE85A', 14, 2);
+    this.playSfxFiles(['NPC_Hit_1'], 0.6);
+    // SetTalkNPC（:45229）：对话面板打开（bestiary registerChat/快乐度快照在
+    // openNpcDialog 内，与 :45227 RegisterChatStartWith 同链）
+    this.openNpcDialog(npc, wakeChat ?? undefined);
   }
 
   // ================= NPC 对话系统(SetTalkNPC + NPC.GetChat NPC.cs:94974 1:1) =================
@@ -15186,7 +15257,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private sandQueue: Array<[number, number]> = [];
 
   /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
-  private openNpcDialog(npc: TownNPC) {
+  private openNpcDialog(npc: TownNPC, chatOverride?: string) {
     this.dialogNpc = npc;
     // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记）
     this.world.bestiary.registerChat(npc.vanillaId);
@@ -15206,7 +15277,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
-    this.cb.onNpcDialog?.(name, this.formatDialogTags(this.townNpcChat(npc)),
+    // chatOverride：唤醒链（AI_000_TransformBoundNPC）传换型前 GetChat 台词
+    this.cb.onNpcDialog?.(name, this.formatDialogTags(chatOverride ?? this.townNpcChat(npc)),
       this.npcDialogButtons(npc), portraitUrl(npc.vanillaId));
   }
 
@@ -15264,6 +15336,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     209: 'Cyborg', 227: 'Painter', 228: 'WitchDoctor', 229: 'Pirate', 353: 'Stylist',
     368: 'TravellingMerchant', 453: 'SkeletonMerchant', 441: 'TaxCollector',
     588: 'Golfer', 633: 'BestiaryGirl', 663: 'Princess',
+    369: 'Angler',   // GetChat(369) HasSpecialEventText("Angler")（cs:95967）
   };
 
   /** bound TownNPC npcKey → 绑缚态原版 NPC id（本仓 bound 近似的反查表）：
@@ -15275,6 +15348,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354,
     golfer: 589, tax_collector: 534, town_slime_old: 685, town_slime_clumsy: 686,
     tavernkeep: 579,   // BartenderUnconscious（SpawnAnNPC :1565 链；触碰 Transform 550）
+    angler: 376,       // 旧档兜底：睡渔夫已改放真 Enemy 376（placeSleepingAngler），
+                       // 历史存档可能带 bound TownNPC 'angler'——登记使 any(376) 场上唯一门仍闭合
   };
 
   /** NPC.HasSpecialEventText（NPC.cs:96081-96105 1:1）：五环境态按原版顺序各 1/3
@@ -15805,7 +15880,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (r >= 8) return Lang.chatter('SkeletonMerchantChatter') ?? dialog(356);
       return dialog(356 + r);
     }
-    // 其余类型(旅行商人368/骷髅商453/钓鱼娃369 等非房屋 NPC 未注册,不可达)
+    if (npc.vanillaId === 369) {
+      // 钓鱼娃(cs:95965-95968)：完成任务数>1 且 1/5 → AnglerQuestCountChat
+      //  (=AnglerQuestChatter 池)→ HasSpecialEventText("Angler")(上方通用链已接)
+      //  → 血月 1/3 BloodMoonFishing 池 / 已交任务 350-352 / 未交 348-349 →
+      //  今日未交过任务 334-337 → 树妖在场 1/5 → 347 / AnglerChatter 池
+      if (rN(5) === 0 && p.anglerQuestsFinished > 1) {
+        return Lang.chatter('AnglerQuestChatter') ?? dialog(334);
+      }
+      if (w.clock.bloodMoon) {
+        if (rN(3) === 0) return Lang.specialText('AnglerSpecialText.BloodMoonFishing') ?? dialog(350);
+        return w.anglerQuestFinished ? dialog(350 + r3()) : dialog(348 + r2());
+      }
+      if (!w.anglerQuestFinished) return dialog(334 + rN(4));
+      if (present(20) && rN(5) === 0) return dialog(347);
+      return Lang.chatter('AnglerChatter') ?? dialog(334);
+    }
+    // 其余类型(旅行商人368 已在上面处理;未注册类型落此兜底)
     return '……';
   }
 

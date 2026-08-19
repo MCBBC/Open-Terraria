@@ -18,7 +18,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, Arrow } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 
 /** hslToRgb（原版 Main.hslToRgb 近似——S=1 L=0.5 时的纯色环） */
 function hueToRgb(h: number): [number, number, number] {
@@ -119,6 +119,7 @@ export class PrismProng extends Entity {
       const thick = 22 * this.prongScale;
       const steps = Math.max(1, Math.floor(this.beamLen / 12));
       for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || this.hitCd.has(e.id)) continue;
         for (let s2 = 1; s2 <= steps; s2++) {
@@ -311,6 +312,7 @@ export class BlasterBeam extends Entity {
     const thick = 22;
     const steps = Math.max(1, Math.floor(this.beamLen / 12));
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       for (let s2 = 1; s2 <= steps; s2++) {

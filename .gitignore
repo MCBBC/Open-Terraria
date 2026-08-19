@@ -5,4 +5,5 @@
 /logs
 /tmp
 /shots
-.DS_Storechrome-profiles/
+.DS_Store
+/chrome-profiles

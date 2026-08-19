@@ -13,7 +13,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 
 /** Daybreak（BuffType 189）——611/612 命中授予 300t（:10703-10708）；无 Buff 表直写计时 */
 function applyDaybreak(e: Record<string, number>): void {
@@ -51,6 +51,7 @@ export class SolarFlare extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       const reach = 40 * this.sc;                      // 爆焰视觉半径命中盒近似
@@ -133,6 +134,7 @@ export class SolarEruptionWhip extends Entity {
       if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
     }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; cx: number; cy: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitCd.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;

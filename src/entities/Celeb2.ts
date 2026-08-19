@@ -18,7 +18,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 
 type EnemyLike = {
   x: number; y: number; w: number; h: number; id: number; dead: boolean;
@@ -229,6 +229,7 @@ export class Celeb2Rocket extends Entity {
             let bd = 800;
             for (const ent of game.enemies()) {
               const e = ent as unknown as EnemyLike & { cx: number; cy: number };
+              if (!playerCanHitEnemy(e, game, this.projId)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
               if (e.dead) continue;
               const d = Math.abs(e.cx - this.cx) + Math.abs(e.cy - this.cy);
               if (d < bd) { bd = d; tx = e.x + e.w / 2; ty = e.y + e.h / 2; found = true; this.ai1 = e.id + 1; }
@@ -282,6 +283,7 @@ export class Celeb2Rocket extends Entity {
     if (!st.inBounds(tx, ty)) { this.dead = true; return; }
     if (st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.explode(game); return; }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;

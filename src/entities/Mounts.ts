@@ -20,7 +20,7 @@ import { TILE_DEFS } from '../data/tiles';
 import { WALL_HOUSE } from '../world/Housing';
 import { TownShot } from './TownShot';
 import { TILE } from '../core/constants';
-import { projOverlap, playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy, projOverlap } from './projTargets';
 import { projectileData } from '../data/vanillaProjectiles';
 import type { GameHooks } from './types';
 
@@ -2029,6 +2029,7 @@ export class MountShot extends TownShot {
       const ty = Math.floor((this.y + this.h / 2) / TILE);
       if (game.world.store.isSolid(tx, ty)) { this.dead = true; this.bounced = true; return; }
       for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
           hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
             pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };

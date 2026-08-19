@@ -1032,6 +1032,13 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 钳 3-6;ai0 4/5=帧13;ai0 2/6 地面走=8/9 每 8t + 周期眨眼 10-12（状态机序列
   // 近似为 24t 走/24t 眨穿插,ai0 3 回落帧 7 近似——差异登记）
   if (id >= 473 && id <= 476) return mimicFrame(e, frames);
+  // 月总头 396（FindFrame case 396，cs:72628-72642）：counter 每 tick +1（另有 10%
+  // 概率再 +1 的抖动不可从全局 t 复现，差异登记）、≥32 回卷；帧 = counter/4 →
+  // 0-7 八帧循环（3×3 网格第 9 帧不参与——曾按 9 帧@6t 连播含空帧行且速度错 1.5×）
+  if (id === 396) return Math.floor(t / 4) % 8;
+  // 月总游离眼 400（FindFrame case 400，cs:72650-72664）：counter 每 tick +1，
+  // ai[0]∈{0,3}（悬停/洒射）再 +1 = 2t 一帧、否则 4t；≥16 回卷 → 帧 0-3
+  if (id === 400) return Math.floor(t / (e.ai0 === 0 || e.ai0 === 3 ? 2 : 4)) % 4;
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -4175,6 +4182,10 @@ export class Renderer {
       if (e.vanillaId === 398) { this.drawMoonLordCore(e, entities); return; }
       if (e.vanillaId === 397) { this.drawMoonLordHand(e, entities); return; }
       if (e.vanillaId === 396) { this.drawMoonLordHead(e); return; }
+      // 月总游离眼 400（Main.cs:24492-24504 case 400 独占）：本体帧随 rotation
+      // （origin (40,40)）+ Extra_19 瞳孔椭圆 (30,30)×lai1、整体 scale lai2
+      // （0.4-1.15 脉动，AI 镜像 localAI[0..2] → lai0-2）
+      if (e.vanillaId === 400) { this.drawMoonLordFreeEye(e); return; }
       // 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554）：翅膀/双臂/
       // 二阶段覆层独占——通用路径只画本体，缺背后大翼与攻击态手臂帧
       if (e.vanillaId === 636) { this.drawEmpress(e); return; }
@@ -5829,8 +5840,8 @@ export class Renderer {
       }
       if (ex19) {
         // 椭圆轨道瞳孔：Vector2FromElipse(rot(localAI[0]), (30,66)×localAI[1]) + (−signX,3)。
-        // AI 侧轨道角/开度存于 handOf 内部态（渲染层不可达）——lai0/lai1 为 0 时
-        // 瞳孔静态居中（登记），容器 Extra_17/19 位置与镜像仍 1:1
+        // 轨道角/开度由 moonLordHandAI 每帧镜像写入 lai0/lai1（原版 localAI[0]/[1]，
+        // 曾存 handOf WeakMap 渲染层不可达 = 瞳孔恒居中隐没，2026-08-19 渲染断链修）
         const th = e.lai0, k = e.lai1;
         const ex = Math.cos(th) * 30 * k, ey = Math.sin(th) * 66 * k;
         ctx.save();
@@ -5853,9 +5864,10 @@ export class Renderer {
   }
 
   /** 月总头 396（case 396 :24449-24503）：眼窝（ai0<0 闲置 Extra_26 行 / 否则 Extra_18
-   *  + 椭圆瞳孔 Extra_19）→ 头帧（NPC_396 为 3×3 网格、scale 2）→ 破体阶段覆层
-   *  Extra_29（+(0,4)）/Extra_25（+(0,214) 旋转）。帧索引以 animT 循环近似（AI 侧
-   *  未映射 frameCounter）；破体帧行缺 localAI[2]/[3]，取行 0（登记） */
+   *  + 椭圆瞳孔 Extra_19）→ 头帧（NPC_396 为 3×3 网格、scale 2，帧 0-7 循环）→ 破体
+   *  覆层 Extra_29（+(0,4) 旋转，行 = localAI[3]/5）/Extra_25（+(0,214) 旋转，行 =
+   *  localAI[2]/7）——localAI[0..3] 由 moonLordHeadAI 镜像 lai0-3；rotation 仅 -3
+   *  永闭态写（:37767 lerp π/12，e.spin 承载），活态恒 0（spin 另载瞳角 lai0） */
   /** 491 荷兰飞盗船（Main.cs:24263-24324 case 491 独占 1:1）：
    *  船体 590×534 锚 OriginFlip(208,460)（翻转取 590-208）；vector37.X 随
    *  spriteDirection（vx<0→facing=-1→Flip）；附加件全部随 rotation 旋转：
@@ -5927,6 +5939,8 @@ export class Renderer {
     const ctx = this.ctx;
     const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
     const flip = e.facing > 0;
+    // npc.rotation：仅 -3 永闭态由 AI 写（lerp π/12），活态恒 0（e.spin 另载瞳角）
+    const rot = e.ai0 === -3 ? e.spin : 0;
     ctx.save();
     ctx.globalAlpha = alpha;
     if (e.ai0 < 0 && ex26) {
@@ -5934,6 +5948,7 @@ export class Renderer {
       const row = Math.min(3, Math.floor(Math.max(0, e.ai1) / 8));
       ctx.save();
       ctx.translate(e.cx, e.cy);
+      ctx.rotate(rot);
       if (flip) ctx.scale(-1, 1);
       ctx.drawImage(ex26.img, ex26.sx, row * fh, ex26.sw, fh, -(19 + 4), -(34 + 4), ex26.sw, fh);
       ctx.restore();
@@ -5941,6 +5956,7 @@ export class Renderer {
       if (ex18) {
         ctx.save();
         ctx.translate(e.cx, e.cy);
+        ctx.rotate(rot);
         if (flip) ctx.scale(-1, 1);
         ctx.drawImage(ex18.img, ex18.sx, ex18.sy, ex18.sw, ex18.sh, -19, -34, ex18.sw, ex18.sh);
         ctx.restore();
@@ -5949,42 +5965,89 @@ export class Renderer {
         const th = e.lai0, k = e.lai1;
         ctx.save();
         ctx.translate(e.cx + Math.cos(th) * 27 * k, e.cy + Math.sin(th) * 59 * k);
+        ctx.rotate(rot);
         ctx.drawImage(ex19.img, ex19.sx, ex19.sy, ex19.sw, ex19.sh, -ex19.sw / 2, -ex19.sh / 2, ex19.sw, ex19.sh);
         ctx.restore();
       }
     }
-    // 头帧：NPC_396.png 573×804 = 3 列 × 3 行（Frame(3,3)），origin (95.5,65)、scale 2
+    // 头帧：NPC_396.png 573×804 = 3 列 × 3 行（Frame(3,3, frame.Y/3, frame.Y%3)），
+    // origin (95.5,65)、scale 2；帧 0-7（FindFrame case 396 = vanillaFrameIdx 396 档）
     const head = this.atlas.ensureVImage('vanilla/NPC_396.png');
     if (head) {
       const fw = Math.floor(head.width / 3), fh2 = Math.floor(head.height / 3);
-      const idx = Math.floor(e.animT / 6) % 9;
-      const col = idx % 3, row = Math.floor(idx / 3);
+      const idx = vanillaFrameIdx(e, 8);
+      const col = Math.floor(idx / 3), row = idx % 3;
       ctx.save();
       ctx.translate(e.cx, e.cy);
+      ctx.rotate(rot);
       if (flip) ctx.scale(-1, 1);
       ctx.drawImage(head, col * fw, row * fh2, fw, fh2, -95.5, -65, fw * 2, fh2 * 2);
       ctx.restore();
     }
-    // 破体覆层（:24499-24501；帧行 0 近似）
+    // 破体覆层（:24499-24501）：Extra_29 行 = localAI[3]/5（lai3）、Extra_25 行 =
+    // localAI[2]/7（lai2）；锚 (0,4)/(0,214).RotatedBy(rotation)，位置 .Floor()
     if (ex29) {
       const fh = Math.floor(ex29.sh / 4);
+      const row = Math.min(3, Math.max(0, Math.floor(e.lai3 / 5)));
+      const c = Math.cos(rot), s = Math.sin(rot);
+      const ox = 0 * c - 4 * s, oy = 0 * s + 4 * c;
       ctx.save();
-      ctx.translate(e.cx, e.cy + 4);
+      ctx.translate(Math.floor(e.cx + ox), Math.floor(e.cy + oy));
+      ctx.rotate(rot);
       if (flip) ctx.scale(-1, 1);
-      ctx.drawImage(ex29.img, ex29.sx, ex29.sy, ex29.sw, fh, -ex29.sw / 2, -fh / 2, ex29.sw, fh);
+      ctx.drawImage(ex29.img, ex29.sx, row * fh, ex29.sw, fh, -ex29.sw / 2, -fh / 2, ex29.sw, fh);
       ctx.restore();
     }
     if (ex25) {
       const fh = Math.floor(ex25.sh / 3);
-      const off = { x: 0, y: 214 };
-      const c = Math.cos(e.spin), s = Math.sin(e.spin);
+      const row = Math.min(2, Math.max(0, Math.floor(e.lai2 / 7)));
+      const c = Math.cos(rot), s = Math.sin(rot);
+      const ox = 0 * c - 214 * s, oy = 0 * s + 214 * c;
       ctx.save();
-      ctx.translate(e.cx + (off.x * c - off.y * s), e.cy + (off.x * s + off.y * c));
+      ctx.translate(Math.floor(e.cx + ox), Math.floor(e.cy + oy));
+      ctx.rotate(rot);
       if (flip) ctx.scale(-1, 1);
-      ctx.drawImage(ex25.img, ex25.sx, ex25.sy, ex25.sw, fh, -ex25.sw / 2, -fh / 2, ex25.sw, fh);
+      ctx.drawImage(ex25.img, ex25.sx, row * fh, ex25.sw, fh, -ex25.sw / 2, -fh / 2, ex25.sw, fh);
       ctx.restore();
     }
     ctx.restore();
+  }
+
+  /** 月总游离眼 400（Main.cs:24492-24504 case 400 独占，1:1）：本体 NPC_400 帧
+   *  （FindFrame case 400 = vanillaFrameIdx 400 档，0-3）随 rotation（origin
+   *  (40,40)）+ 镜像翻转；瞳孔 Extra_19 = Center + 椭圆((30,30)×localAI[1])
+   *  @localAI[0] 角、origin 尺寸/2、整体 scale = localAI[2]（0.4-1.15 脉动）、
+   *  随 rotation 旋转、不镜像（SpriteEffects.None） */
+  private drawMoonLordFreeEye(e: Enemy) {
+    if (!this.atlas) return;
+    const ex19 = this.atlas.vmisc('vanilla/Extra_19.png');
+    const ctx = this.ctx;
+    const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    const flip = e.facing > 0;
+    const rot = e.spin;                       // AI_081 攻击 2/3 写 npc.rotation（余态保值）
+    // 本体（:24497）
+    const r = this.atlas.vnpc(400, vanillaFrameIdx(e, Math.max(1, e.vanilla?.frames ?? 1)));
+    if (r) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(e.cx, e.cy);
+      ctx.rotate(rot);
+      if (flip) ctx.scale(-1, 1);
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -40, -40, r.sw, r.sh);
+      ctx.restore();
+    }
+    // 瞳孔（:24498-24503）
+    if (ex19) {
+      const th = e.lai0, k = e.lai1, sc = e.lai2 || 1;
+      const ex = Math.cos(th) * 30 * k, ey = Math.sin(th) * 30 * k;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(e.cx + ex, e.cy + ey);
+      ctx.rotate(rot);
+      ctx.drawImage(ex19.img, ex19.sx, ex19.sy, ex19.sw, ex19.sh,
+        (-ex19.sw / 2) * sc, (-ex19.sh / 2) * sc, ex19.sw * sc, ex19.sh * sc);
+      ctx.restore();
+    }
   }
 
   // ===================== 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554） =====================
@@ -6971,6 +7034,8 @@ export class Renderer {
   private static readonly BOUND_NPC_SHEET: Record<string, number> = {
     goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354, golfer: 589, tax_collector: 534,
     town_slime_old: 685, town_slime_clumsy: 686,   // 抖动的旧宝箱 / 笨笨气球史莱姆（绑缚态单帧）
+    angler: 376,   // 睡渔夫（旧档兜底：新档睡渔夫已是真 Enemy 376，历史存档的
+                   // bound TownNPC 'angler' 用 NPC_376 睡姿表——缺此条目会整只不渲染）
   };
 
   /** bound NPC 姿态帧（各表帧 0）。589 在 vanilla-npcs.json 缺登记（json 缺口族，同 588/633/663）
@@ -7115,7 +7180,7 @@ export class Renderer {
     if (!id || !this.atlas) return null;
     const img = this.atlas.ensureVImage(`vanilla/NPC_${id}.png`);
     if (!img) return null;
-    const frames = id === 589 ? 13 : id === 534 ? 8 : 1;
+    const frames = id === 589 ? 13 : id === 534 ? 8 : id === 376 ? 2 : 1;
     const fh = Math.max(1, Math.floor(img.height / frames));
     return { img, sx: 0, sy: 0, sw: img.width, sh: Math.min(fh, img.height) };
   }

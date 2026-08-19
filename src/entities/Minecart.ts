@@ -28,6 +28,7 @@ import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
+import { playerCanHitEnemy } from './projTargets';
 import {
   trackCollision, trackRotation, onTrack,
   FLAG_ON_TRACK, FLAG_BOUNCY_BUMPER, FLAG_USED_RAMP, FLAG_HIT_SWITCH,
@@ -530,7 +531,7 @@ export class Minecart extends Entity {
             iframes: number; dontTakeDamage?: boolean; vanillaId?: number; friendly?: boolean;
             hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, p: number) => boolean;
           };
-          if (e.dead || e.dontTakeDamage || e.friendly) continue;
+          if (e.dead || e.dontTakeDamage || !playerCanHitEnemy(e, game)) continue;   // friendly 门（e.friendly 是空字段 no-op——真旗在 def.friendly）
           if (!(rx < e.x + e.w && rx + rw > e.x && ry < e.y + e.h && ry + rh > e.y)) continue;
           // :27277-27281：0<knockBackResist<1 时预除抗性（StrikeNPC 内部再乘回 →
           //  矿车击退净效果不随抗性衰减）。hurt() 管线按 kbx×resist 结算，故先除抵消
@@ -719,7 +720,7 @@ export class Minecart extends Entity {
         hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, pi: number) => boolean;
       };
       // CanBeChasedBy 口径（城镇/友好排除，同撞怪段 :27253）+ 玩家免疫门（:5218）
-      if (e.dead || e.dontTakeDamage || e.friendly) continue;
+      if (e.dead || e.dontTakeDamage || !playerCanHitEnemy(e, game)) continue;   // friendly 门（同上，CanHit 门修空字段）
       if (e.iframes > 0) continue;
       const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
       if (Math.hypot(ecx - mech.x, ecy - mech.y) >= 300) continue;   // Distance < 300

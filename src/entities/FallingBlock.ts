@@ -8,7 +8,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { hitCritters, hitTownNpcs, playEnemyHitSound } from './projTargets';
+import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 
 export class FallingBlock extends Entity {
   w = 10; h = 10; // 原版 width/height = 10(vanilla-projectiles.json 全沙族一致)
@@ -55,6 +55,7 @@ export class FallingBlock extends Entity {
     // 敌人 + 小动物 + 城镇 NPC(friendly 方向;原版巨石碾压 NPC,hurt iframes 兜连击)
     hitTownNpcs(this, game, FallingBlock.DAMAGE, Math.sign(this.vx) * 2);
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;

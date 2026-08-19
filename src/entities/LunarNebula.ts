@@ -20,7 +20,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite, projFrameCount } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 
 type EnemyLike = {
@@ -97,6 +97,7 @@ export class NebulaBlazeBolt extends Entity {
       let bd = this.cfg.seek;
       for (const ent of game.enemies()) {
         const e = ent as unknown as EnemyLike;
+        if (!playerCanHitEnemy(e, game, this.projId)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (e.dead) continue;
         const d = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
         if (d < bd && canHit(game.world.store, this.cx, this.cy, 0, 0, e.x + e.w / 2, e.y + e.h / 2, 0, 0)) {
@@ -211,6 +212,7 @@ export class NebulaBlazeBolt extends Entity {
     if (!st.inBounds(tx, ty) || st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) { this.burst(game); return; }
     // ---- 命中（40×40 盒 penetrate 1 → Kill 爆）----
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -233,6 +235,7 @@ export class NebulaBlazeBolt extends Entity {
     const ex = this.cx, ey = this.cy;
     // Damage()：盒 50×50、penetrate −1——对全Overlap敌各结算一次
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;
       if (e.dead || e.id === skipId) continue;
       if (!(ex - 25 < e.x + e.w && ex + 25 > e.x && ey - 25 < e.y + e.h && ey + 25 > e.y)) continue;
@@ -356,6 +359,7 @@ export class LunarFlareStar extends Entity {
       this.alphaI = Math.max(0, this.alphaI - 10);
       if (++this.frameCtr >= 18) { this.frameCtr = 0; this.frame++; }
       for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as EnemyLike;
         if (e.dead || this.hitSet.has(e.id)) continue;
         if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -374,6 +378,7 @@ export class LunarFlareStar extends Entity {
     // 每 tick 首 update 搜敌 60px + 视线 → 爆炸（:54127-54136）
     if (this.updInTick === 0) {
       for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as EnemyLike;
         if (e.dead) continue;
         if (Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy) >= 60) continue;
@@ -393,6 +398,7 @@ export class LunarFlareStar extends Entity {
     if (!st.inBounds(tx, ty)) { this.killDust(game); return; }
     // 命中敌 → 转爆炸（:16706-16710，非 Kill）
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as EnemyLike;
       if (e.dead || this.hitSet.has(e.id)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;

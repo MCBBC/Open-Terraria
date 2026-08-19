@@ -25,6 +25,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 import { projSprite, projFrameCount } from './Arrow';
+import { GorePiece } from './GorePiece';
 import { BuffType } from '../stats/Buffs';
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,17 @@ const headX = new WeakMap<Enemy, HeadX>();
 const headOf = (e: Enemy): HeadX => {
   let x = headX.get(e);
   if (!x) { x = { f2: 0, f3: 0, l0: 0, l1: 0, l2: 0 }; headX.set(e, x); }
+  return x;
+};
+
+/** 核心帧引擎(FindFrame case 398,NPC.cs:72599-72626 的 frameCounter 侧写):
+ *  fc 每睁核 tick +1,≥30 回卷到 6(帧 0 仅首程出现,此后 1-4 循环);
+ *  burst = 睁核瞬间(frame.Y 自 0 离开)的一次性 gore 619-622 + 尘 209×50 哨兵 */
+interface CoreX { fc: number; burst: boolean }
+const coreX = new WeakMap<Enemy, CoreX>();
+const coreOf = (e: Enemy): CoreX => {
+  let x = coreX.get(e);
+  if (!x) { x = { fc: 0, burst: false }; coreX.set(e, x); }
   return x;
 };
 
@@ -1093,11 +1105,14 @@ export class MLDeathray extends Entity {
     this.angle += this.sweep;                                  // :30521 rotation += ai[0]
 
     // 锚点:束原点 = 源心 + 眼球椭圆偏移(:30293-30308)
+    // 头 396 = ellipse((27,59)×localAI[1]) @localAI[0](headX);真眼 400 = ellipse
+    // ((30,30)×localAI[1]) @localAI[0]——400 的瞳角/睁眼度已由 moonLordFreeEyeAI
+    // 镜像到 lai0/lai1,束角与瞳角逐 t 同步解码步进(:38656-38663)
     const hx = headOf(src);
-    const open = this.kind === 'head' ? hx.l1 : 1;
-    const eyeA = this.kind === 'head' ? hx.l0 : this.angle;    // 真眼无独立瞳角,随束角
-    const ex = this.kind === 'head' ? Math.cos(eyeA) * 27 * open : Math.cos(eyeA) * 30;
-    const ey = this.kind === 'head' ? Math.sin(eyeA) * 59 * open : Math.sin(eyeA) * 30;
+    const open = this.kind === 'head' ? hx.l1 : src.lai1;
+    const eyeA = this.kind === 'head' ? hx.l0 : src.lai0;
+    const ex = this.kind === 'head' ? Math.cos(eyeA) * 27 * open : Math.cos(eyeA) * 30 * open;
+    const ey = this.kind === 'head' ? Math.sin(eyeA) * 59 * open : Math.sin(eyeA) * 30 * open;
     this.x = src.cx + ex - this.w / 2;
     this.y = src.cy + ey - this.h / 2;
 
@@ -1114,6 +1129,29 @@ export class MLDeathray extends Entity {
       amt = 0.75;
     }
     this.len = lerp(this.len, dist, amt);
+
+    // ---- 双尘 229(Vortex 青焰,:30524-30532):束端 Center+dir·(len−14) 沿 ±π/2
+    // 侧抛 2-4 速、noGravity scale 1.7;1/5 概率尘 31 烟束(:30533-30540,垂直束向
+    // ±width/2 随机偏移、上飘 vy 取负)。粒子系统以定向 spawnBurst 近似色粒。
+    const tipX = this.cx + dirX * (this.len - 14), tipY = this.cy + dirY * (this.len - 14);
+    for (let k = 0; k < 2; k++) {
+      const da = this.angle + (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 2);
+      game.spawnBurst?.(tipX, tipY, '#5FE8D0', 1, Math.random() * 2 + 2, da, 0, { life: 30, damp: 0.96 });
+    }
+    if (Math.random() < 0.2) {
+      const off = (Math.random() - 0.5) * wSq;
+      game.spawnBurst?.(tipX - dirY * off, tipY + dirX * off, '#C8D0D8', 1, 1.5, -Math.PI / 2, 0.3, { life: 40, damp: 0.97 });
+    }
+    // ---- 束光 CastLight(:30541-30543):PlotTileLine(Center → Center+dir·len,
+    // width·scale) 三线带(中心 ±width/2 垂直偏移线,逐格)投 (0.3,0.65,0.7)
+    {
+      const half = wSq / 2;
+      for (let d = 0; d <= this.len; d += TILE) {
+        game.addLightAt?.(this.cx + dirX * d, this.cy + dirY * d, 0.3, 0.65, 0.7);
+        game.addLightAt?.(this.cx + dirX * d - dirY * half, this.cy + dirY * d + dirX * half, 0.3, 0.65, 0.7);
+        game.addLightAt?.(this.cx + dirX * d + dirY * half, this.cy + dirY * d - dirX * half, 0.3, 0.65, 0.7);
+      }
+    }
 
     // 命中:玩家矩形 vs 束线段(线宽 36·scale),伤害走 damagePlayer(iframes 节流)。
     // 弹幕命中：attacker 仅做死亡归因，contactOnly 缺省 false → 荆棘不反伤
@@ -1149,16 +1187,53 @@ export class MLDeathray extends Entity {
     if (!ctx) return;
     const scale = Math.min(this.maxScale, Math.sin((this.age * Math.PI) / 180) * 10 * this.maxScale);
     if (scale <= 0.01 || this.len <= 1) return;
-    const thick = Math.max(2, 36 * scale);
+    // 原版三件套(Main.cs:31951-31992):炮口 Projectile_455(origin 尺寸/2)→
+    // 束身 Extra_21 五帧行平铺(行 = timeLeft/3%5 起、16px 段沿束向逐段 +16 滚动、
+    // 越 96 回 0、尾段按余量截高,origin (w/2,0))→ 端帽 Extra_22(origin (0,0))。
+    // 颜色 (255,255,255,0)×0.9 = XNA 预乘混色下的加性白光 → canvas lighter 近似;
+    // 绘制角 = 束角 − π/2(Projectile.cs:30483 rotation = num731 − π/2,纹理竖排)。
+    const muzzle = projSprite(455);
+    const ex21 = r.atlas?.ensureVImage?.('vanilla/Extra_21.png') ?? null;
+    const ex22 = r.atlas?.ensureVImage?.('vanilla/Extra_22.png') ?? null;
+    if (!muzzle || muzzle.width === 0 || !ex21 || !ex22 || ex21.width === 0 || ex22.width === 0) {
+      // 贴图未就绪兜底(懒加载首帧):旧自绘紫矩形,加载完成后自愈
+      const thick = Math.max(2, 36 * scale);
+      ctx.save();
+      ctx.globalAlpha = clamp(scale * 1.6, 0.25, 1);
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(this.angle);
+      ctx.fillStyle = '#B040D0';
+      ctx.fillRect(0, -thick / 2, this.len, thick);
+      ctx.restore();
+      return;
+    }
     ctx.save();
-    ctx.globalAlpha = clamp(scale * 1.6, 0.25, 1);
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.9;
+    ctx.imageSmoothingEnabled = false;
     ctx.translate(this.cx, this.cy);
-    ctx.rotate(this.angle);
-    ctx.fillStyle = '#B040D0';
-    ctx.fillRect(0, -thick / 2, this.len, thick);
-    ctx.globalAlpha = clamp(scale * 0.9, 0.15, 0.6);
-    ctx.fillStyle = '#F0C8FF';
-    ctx.fillRect(0, -thick / 4, this.len, thick / 2);
+    ctx.rotate(this.angle - Math.PI / 2);
+    // 炮口(:31961)
+    ctx.drawImage(muzzle, -muzzle.width / 2, -muzzle.height / 2,
+      muzzle.width * scale, muzzle.height * scale);
+    // 束身(:31966-31986):有效长 = len −(炮口半高 + 端帽高)·scale,自炮口前沿
+    // (局部 +y = 束向)逐段 16px·scale 平铺
+    const remain = this.len - (muzzle.height / 2 + ex22.height) * scale;
+    let adv = 0;
+    let sy = 16 * (Math.floor((600 - this.age) / 3) % 5);   // 行 = timeLeft/3%5
+    const startY = (muzzle.height / 2) * scale;
+    while (adv + 1 < remain) {
+      let h = 16;
+      if (remain - adv < h) h = remain - adv;
+      ctx.drawImage(ex21, 0, sy, ex21.width, h, -ex21.width / 2, startY + adv,
+        ex21.width * scale, h * scale);
+      adv += h * scale;
+      sy += 16;
+      if (sy + 16 > ex21.height) sy = 0;                    // 段行滚动回卷
+    }
+    // 端帽(:31988,origin = (0,0))
+    ctx.drawImage(ex22, 0, 0, ex22.width, ex22.height, 0, startY + adv,
+      ex22.width * scale, ex22.height * scale);
     ctx.restore();
   }
 }
@@ -1229,10 +1304,15 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
   if (e.ai0 === -2) { // 远距传送归位(:36786-36809)
     e.iframes = 2;
     e.ai1 += 1;
+    // :36792-36795 ai1==30 PlaySound(29,…,92)=Zombie_92(case29 style92 ×0.5 自动档;
+    // 曾整段无声,2026-08-19 渲染断链批补)
+    if (e.ai1 === 30) game.playSfxWav?.('Zombie_92', 1, e.cx, e.cy);
     if (e.ai1 >= 60) { e.ai1 = 0; e.ai0 = 0; }
   } else if (e.ai0 === -1) { // 出生演出(:36810-36853)
     e.iframes = 2;
     e.ai1 += 1;
+    // :36816-36817 ai1==30 PlaySound(29,…,92)(曾误在 >=60 段尾播,2026-08-19 修)
+    if (e.ai1 === 30) game.playSfxWav?.('Zombie_92', 1, e.cx, e.cy);
     if (e.ai1 >= 60) {
       e.ai1 = 0; e.ai0 = 0; e.ai2 = 0;
       // 生成双手 397(核心两侧 ±400)与头 396(上方 400);ai3 = 核心 id(锚定)
@@ -1250,7 +1330,6 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
         hd.y = e.cy - 400 - hd.h / 2;
         hd.ai0 = 0; hd.ai1 = 0; hd.ai2 = 0; hd.ai3 = e.id; hd.bInit = true;
       }
-      game.playSfxWav?.('Zombie_92', 1, e.cx, e.cy);   // :36816 PlaySound(29,…,92)——case29 style92 ×0.5 自动档(曾借 roar 1.0)
     }
   } else if (e.ai0 === 0 || e.ai0 === 1) {
     // 三部件(锚定本核心)
@@ -1296,6 +1375,22 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
         e.cx + (Math.random() - 0.5) * 400, e.cy + (Math.random() - 0.5) * 400,
         '#C04030', 6, 3, { life: 30 });
     }
+    // :37022-37041 每 15t(90<=ai1<480)周身 20-420px 随机空位掷 proj 622 星屑
+    // (SetDefaults :6412-6418:10×10/aiStyle1/extraUpdates2 视觉弹,damage 0 不伤人;
+    //  速度 =(0,−rand·0.5−0.5).RotatedBy(±π/8..3π/8)×6——extraUpdates 2 = 每 tick
+    //  3 步,Arrow 直飞按 ×3 折算,寿命 23t 对齐 23×MaxUpdates Kill)
+    if (e.ai1 % 15 === 0 && e.ai1 >= 90 && e.ai1 < 480) {
+      const ang = Math.random() * TAU;
+      const dist = 20 + Math.random() * 400;
+      const px = e.cx + Math.cos(ang) * dist, py = e.cy + Math.sin(ang) * dist;
+      const st = game.world.store;
+      const tx6 = Math.floor(px / TILE), ty6 = Math.floor(py / TILE);
+      if (st.inBounds(tx6, ty6) && !st.isSolid(tx6, ty6)) {
+        const swing = (Math.random() < 0.5 ? -1 : 1) * (Math.PI / 8 + Math.PI / 4 * Math.random());
+        const h6 = 6 * (Math.random() * 0.5 + 0.5) * 3;
+        shoot(game, px, py, Math.sin(swing) * h6, -Math.cos(swing) * h6, 0, 622, 23, { hostile: false });
+      }
+    }
     if (e.ai1 >= 600) { // :37053-37063 真死 → life=0+checkDead 走完整 NPCLoot
       // ★须 die() 而非直写 dead——hurt 对 398 放行(血尽转演出),直写=标准
       // 死亡管线永不触发:boss 袋/夜明矿/武器池/白金全部不出(零掉落,终审修)
@@ -1333,6 +1428,29 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
       }
     }
     e.ai0 = -2; e.ai1 = 0;
+  }
+
+  // ---- 核心帧引擎(FindFrame case 398,NPC.cs:72599-72626)----
+  // ai0<=0 恒帧 0;ai0>0:frameCounter +1、≥30 回卷 6,帧 = fc%30/6(帧 0 仅首程
+  // 出现——睁核后 5t 即永久离开);frame.Y==0 的首 tick = gore 619-622 + 尘 209×50
+  // 爆开一次(哨兵标记 burst)。帧号写 customFrameIdx,Renderer.vanillaFrameIdx 直读。
+  const fx = coreOf(e);
+  if (e.ai0 > 0) {
+    if (!fx.burst) {
+      fx.burst = true;
+      // :72606-72611 Gore.NewGore(position+(∓10,∓15), velocity, 619..622)
+      GorePiece.newGore(619, e.x - 10, e.y - 15, e.vx, e.vy);
+      GorePiece.newGore(620, e.x + 10, e.y - 15, e.vx, e.vy);
+      GorePiece.newGore(621, e.x - 10, e.y + 15, e.vx, e.vy);
+      GorePiece.newGore(622, e.x + 10, e.y + 15, e.vx, e.vy);
+      // :72612-72616 Dust 209(月总星尘,品红)×50 盒内随机
+      game.spawnParticles(e.cx, e.cy, '#E060D0', 50, 2.5, { life: 34 });
+    }
+    fx.fc += 1;
+    if (fx.fc >= 30) fx.fc = 6;                         // :72618-72622
+    e.customFrameIdx = Math.floor((fx.fc % 30) / 6);    // :72623-72625
+  } else {
+    e.customFrameIdx = 0;                               // :72601-72605
   }
   e.x += e.vx;
   e.y += e.vy;
@@ -1530,6 +1648,14 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
   else if (frameTarget < x.frame) x.frame -= 1;
   x.frame = clamp(x.frame, 0, 21);
 
+  // ---- 渲染镜像(Renderer.drawMoonLordHand 直读;蜂后 222 写 lai0 同款先例)----
+  // 瞳孔轨道角/睁眼度 → lai0/lai1(原版 localAI[0]/[1],Main.cs:24437-24438 椭圆
+  // (30,66)×localAI[1]);手开合帧 frameCounter/7 → customFrameIdx(FindFrame case 397
+  // :72644-72648 frame.Y = num·(frameCounter/7),0/7/14/21 四档由攻击态推进)。
+  e.lai0 = x.l0;
+  e.lai1 = x.l1;
+  e.customFrameIdx = Math.floor(x.frame / 7);
+
   // 位置钳制(:37473-37492):下一位置锁在核心侧上方盒内
   let minX = core.cx + 220 * side + 110 * side, minY = core.cy - 60 - 150;
   let maxX = minX + 370 * side, maxY = minY + 150;
@@ -1726,5 +1852,14 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
   if (f3Target > x.f3) x.f3 += 1; else if (f3Target < x.f3) x.f3 -= 1;
   x.f3 = clamp(x.f3, 0, 15);
   if (x.f3 >= 15) e.iframes = 2; // dontTakeDamage = localAI[3]>=15(闭眼无敌)
+
+  // ---- 渲染镜像(Renderer.drawMoonLordHead 直读)----
+  // 瞳孔角/睁眼度 → lai0/lai1(原版 localAI[0]/[1],Main.cs:24464 椭圆 (27,59)×[1]);
+  // 破体覆层帧行底 f2/f3(=localAI[2]/[3])→ lai2/lai3(Main.cs:24468-24475:
+  // Extra_25 行 = localAI[2]/7、Extra_29 行 = localAI[3]/5)
+  e.lai0 = x.l0;
+  e.lai1 = x.l1;
+  e.lai2 = x.f2;
+  e.lai3 = x.f3;
   e.spin = x.l0;
 }

@@ -12,6 +12,14 @@ export interface EnemyDef {
   width: number; height: number; // px
   flying?: boolean;
   boss?: boolean;
+  /** 原版 NPC.friendly（SetDefaults 提取旗）：城镇系/被缚救援族/睡渔夫 376 等真值。
+   *  fromVanilla 写入；玩家伤害门（playerCanHitEnemy，原版 Damage_PVE_Inner :11892
+   *  flag 门 / ApplyItemToNPC :43605）与索敌 CanBeChasedBy 消费。此前 fromVanilla
+   *  的 def 展开漏写本字段（注释宣称有、实际恒 undefined——friendly 门全部穿透，
+   *  2026-08-19 渔夫可被打掉血根因） */
+  friendly?: boolean;
+  /** 原版 NPCID.Sets.CountsAsCritter（提取表 critter 旗）——同上由 fromVanilla 写入 */
+  critter?: boolean;
   nightOnly?: boolean;
   dayOnly?: boolean;
   underground?: boolean; // 倾向地下生成

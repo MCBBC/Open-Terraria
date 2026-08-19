@@ -19,6 +19,7 @@ import { applyProjStatus } from './projStatus';
 import { projDrawOffsetFor } from './WeaponProj';
 import { projectileData } from '../data/vanillaProjectiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
+import { playerCanHitEnemy } from './projTargets';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  帧 1-6 开火动画、第 12t 出火球 668 */
@@ -443,6 +444,7 @@ export class MinionProj extends Entity {
     const pool: (EnemyLike & { vx?: number; vy?: number })[] = [];
     for (const e of game.enemies()) {
       const en = e as EnemyLike & { vx?: number; vy?: number };
+      if (!playerCanHitEnemy(e, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
       if (!en.dead && Math.abs(en.cx - p.cx) <= 800 && Math.abs(en.cy - p.cy) <= 400) pool.push(en);
     }
     if (!pool.length) return false;
@@ -556,6 +558,7 @@ export class MinionProj extends Entity {
       let best = 900;
       for (const e of game.enemies()) {
         const en = e as EnemyLike;
+        if (!playerCanHitEnemy(e, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
         if (en.dead) continue;
         const d = Math.abs(this.cx - en.cx) + Math.abs(this.cy - en.cy);
         if (d < best && canHit(game.world.store, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) {
@@ -657,6 +660,7 @@ export class MinionProj extends Entity {
         if (++this.gFc >= rate) { this.gFc = 0; if (++this.gFrame >= 19) this.gFrame = 14; }
         // 拳盒命中（:14294-14300：状态 2 才有碰撞，80×40 @ Center+direction×40）
         for (const ent of game.enemies()) {
+          if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
           const en = ent as never as EnemyLike & import('./WhipTag').WhipTagged;
           if (en.dead) continue;
           const bx = this.cx + this.facing * 40 - 40, by = this.cy - 20;
@@ -707,6 +711,7 @@ export class MinionProj extends Entity {
       (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(e, b);
     let anyHit = false;
     for (const e of game.enemies()) {
+      if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const en = e as never as EnemyLike & import('./WhipTag').WhipTagged & {
         hurtFx?: (d: number) => void;
       };
@@ -790,6 +795,7 @@ export class MinionProj extends Entity {
     let taggedD = maxRange;
     for (const e of game.enemies()) {
       const en = e as never as EnemyLike & { dead: boolean; whipTagT?: number };
+      if (!playerCanHitEnemy(e, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
       if (!en || en.dead) continue;
       const d = Math.hypot(en.cx - this.cx, en.cy - this.cy);
       if (d < bestD) { bestD = d; best = en; }
@@ -919,6 +925,7 @@ export class MinionProj extends Entity {
         if (side > 0) {
           let zapped = false;   // 电弧音（:65947 场内有敌 DD2_LightningAuraZap）按伤害节拍播
           for (const ent of game.enemies()) {
+            if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
             const en = ent as EnemyLike & { dead: boolean } & import('./WhipTag').WhipTagged;
             if (en.dead) continue;
             const ax = this.cx - side / 2, ay = this.auraCy - side / 2;
@@ -964,6 +971,7 @@ export class MinionProj extends Entity {
               ?.equipStats?.huntressT2 ?? false;
             let boom = 0;
             for (const ent of game.enemies()) {
+              if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
               const en = ent as EnemyLike & { dead: boolean };
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
@@ -1049,6 +1057,7 @@ export class MinionProj extends Entity {
               const py = tgt.cy + (Math.random() - 0.5) * 2 * (20 + spread * 60);
               // 644 是原地爆裂弹（零速生成,短时引爆）→ 落点直接 AoE
               for (const ent of game.enemies()) {
+                if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
                 const en = ent as EnemyLike & { dead: boolean };
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
@@ -1614,6 +1623,7 @@ export class TigerPounce extends Entity {
     const add = (e: unknown) =>
       (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(e, 'projectiles');
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const en = ent as never as EnemyLike & import('./WhipTag').WhipTagged & { hurtFx?: (d: number) => void };
       if (en.dead || this.hitSet.has(en.id)) continue; // localNPCHitCooldown=-1 每敌一次
       if (this.x >= en.x + en.w || this.x + this.w <= en.x

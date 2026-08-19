@@ -5,7 +5,7 @@
 import { Entity } from './Entity';
 import { upgradeToBitmap } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
-import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
+import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { canHit } from '../physics/LineOfSight';
 import { TILE } from '../core/constants';
@@ -148,6 +148,28 @@ export interface ArrowOpts {
   /** 351 礼盒（aiStyle 58，Projectile.cs:27727-27757）：两段重力——前 30t 平飞，
    *  之后 vy+0.1；一旦 vy>=0 转二段（恒 +0.1 钳 3、vx×0.99）；帧 0/1 随段切换。 */
   present?: boolean;
+  /** 452 月总幻影矢（aiStyle 82，Projectile.cs:30119-30195）：三段弹道独占速度链——
+   *  0 段 45t 弧线上升 + 1 段 90t 反向弧线（vx = velocity.RotatedBy(ai1).X 钳 ±6、
+   *  vy−0.08/下坠再 −0.2、钳 −7）→ 2 段 14 速追踪玩家（Lerp(v,dir·14,0.6) 后目标
+   *  vy 钳 ≥6、逐轴 0.4 步进；距玩家 <30 消亡触发 Game 爆炸钩）；alpha 255−40/t
+   *  渐显、<40 出尘 229。spin = 出生 ai[1] 弧线弯转角（发射点 :37332/:38558 掷
+   *  随机 ±π/30 + π/180·side，1 段末取反）。grav 须传 0。 */
+  phantasm?: { spin: number };
+  /** 454 月总幻影能量球（aiStyle 83，Projectile.cs:30236-30282）：ai0<30 附
+   *  ownerId（手/真眼）随行（位置=主心−尺寸/2−v）→ ≥30 减速 ×0.96 列队（帧
+   *  0/1 每 6t 切）→ 外部齐射指令置 ai0=−1（帧 1+extraUpdates 1，velocity 由
+   *  发射点统一给定 12 速，见 volleyPhantomOrbs）。tileCollide=false（数据表）。 */
+  phantomOrb?: { ownerId: number; ai0?: number };
+  /** 1021 月总巨砾（aiStyle 25，Projectile.cs:24685-24712 物理段 + 弹地
+   *  :17578-17600）：重力 0.06/终端 16、|vy|≤1 地面滚动加速 vx ±0.025 至 ±3.5、
+   *  rotation += vx·0.06；Y 撞 vy>4 反弹 ×−0.9 + Dig 音/尘，轻落（0<vy≤4）置
+   *  rest 标；X 撞反弹 ×−0.75 计 3 次，超次消亡。grav 须传 0.06。 */
+  mlBoulder?: boolean;
+  /** 448 火星飞碟火炮弹（aiStyle 80，Projectile.cs:29801-29890）：ai1 引信 20t
+   *  倒数 → 点火加速 +4（8→12）+ 8 尘爆 + 锁定最近玩家 + tileCollide=true →
+   *  点火后 [0,30) 逐 t 20% 角度转向玩家 → 180t 自毁；距玩家 ≤42 或撞块 =
+   *  Kill 爆炸（判定盒外扩 112×112 重结算 + Item14，:70544-70580）。 */
+  martianRocket?: boolean;
 }
 
 /** 食人鱼控制面（Game 注入，同 PrismProj channelCb/aimCb 模式） */
@@ -379,6 +401,46 @@ export class Arrow extends Entity {
   presentStage = 0;
   private presentT = 0;
   private presentAlpha = 255;
+  // ---- 452 幻影矢（aiStyle 82）/ 454 幻影能量球（83）/ 1021 巨砾（25）/
+  //      448 火箭（80）专属态（2026-08-19 月总/火星/Betsy 弹道批）----
+  /** 452 弹道激活 */
+  phantasm = false;
+  /** 452 ai[1] 弧线弯转角（进 2 段 = FindClosest 玩家索引，单人恒 0 = 旋转恒等） */
+  private phSpin = 0;
+  /** 452 ai[0] 段号（0/1 上升弧线、2 追踪） */
+  private phStage = 0;
+  /** 452 localAI[0] 段内计数（0 段 45t / 1 段 90t） */
+  private phT = 0;
+  /** 452 alpha（255 起 −40/t 渐显；draw 消费） */
+  phAlpha = 255;
+  /** 454 归巢球激活 */
+  phantomOrb = false;
+  /** 454 ai[0]：≥0 计数（0..29 随行 / ≥30 列队）、−1 齐射态（帧 1+双步） */
+  orbAi0 = 0;
+  /** 454 归属 NPC id（ai[1]=whoAmI 语义——齐射指令按 ownerId 圈定己方球） */
+  orbOwnerId = 0;
+  /** 454 帧（0/1：列队每 6t 切换 / 齐射恒 1） */
+  orbFrame = 0;
+  private orbFrameT = 0;
+  /** 454 alpha（255 钳 200 −5/t；scale = 1−alpha/255 随之伸展） */
+  private orbAlpha = 255;
+  /** 454 父体消失后的冻结锚（原版 npc 槽位数据残留语义——不消亡只停驻） */
+  private orbAnchor: { x: number; y: number } | null = null;
+  /** 1021 月总巨砾激活 */
+  mlBoulder = false;
+  /** 1021 localAI[1]：X 反弹计数（>3 消亡；轻落置 999 = rest 标） */
+  private boulderBounces = 0;
+  /** 448 火箭激活 */
+  martianRocket = false;
+  /** 448 ai[0]（0 引信 / 1 点火追踪） */
+  private rkAi0 = 0;
+  /** 448 ai[1] 引信倒数（出生 20，:36099 NewProjectile 第 10 参） */
+  private rkFuse = 20;
+  /** 448 localAI[1] 点火后计时（==180 自毁） */
+  private rkT = 0;
+  /** 448 帧（3t/帧 3 帧循环）+ 帧计数 */
+  rkFrame = 0;
+  private rkFrameT = 0;
   dead = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
@@ -433,6 +495,15 @@ export class Arrow extends Entity {
     else if (pd0?.tileCollide === false) this.noTileCollide = true;
     if (opts?.scythe) { this.scytheRot = opts.scythe.rot0; this.scytheFlip = opts.scythe.flipDir; }
     this.present = !!opts?.present;
+    // 452/454/1021/448 per-proj 档（skullBone 同模式：opts 激活 + subStep 消费）
+    if (opts?.phantasm) { this.phantasm = true; this.phSpin = opts.phantasm.spin; }
+    if (opts?.phantomOrb) {
+      this.phantomOrb = true;
+      this.orbOwnerId = opts.phantomOrb.ownerId;
+      this.orbAi0 = opts.phantomOrb.ai0 ?? 0;
+    }
+    this.mlBoulder = !!opts?.mlBoulder;
+    this.martianRocket = !!opts?.martianRocket;
     if (opts?.piranha) {
       this.piranha = opts.piranha;
       this.pShootSpeed = Math.hypot(vx, vy);   // Game 侧可覆写为精确 shootSpeed
@@ -556,6 +627,13 @@ export class Arrow extends Entity {
     if (this.present) {
       ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.presentAlpha / 255));
     }
+    // 452 幻影矢（aiStyle 82 :30121-30125 alpha 255−40/t 渐显）/
+    // 454 幻影球（aiStyle 83 :30238-30245 alpha 钳 200 后 −5/t，GetAlpha 语义）
+    if (this.phantasm) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.phAlpha / 255));
+    } else if (this.phantomOrb) {
+      ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.orbAlpha / 255));
+    }
     // 朝右贴图族（PROJ_ROT_RIGHT）：rotation=atan2(vy,vx)（vanilla :26122-26140 模式），
     // 向左运动水平镜像（spriteDirection 语义）；其余默认朝上 atan2+π/2（AI_001 L54877）
     const rightArt = PROJ_ROT_RIGHT.has(this.projId);
@@ -565,6 +643,8 @@ export class Arrow extends Entity {
       ctx.rotate(Math.PI - ang);
     } else if (PROJ_SPIN[this.projId]) {
       ctx.rotate(this.spinRot);      // 恒旋族（:54741/:54824 累加不对齐速度）
+    } else if (this.mlBoulder) {
+      ctx.rotate(this.spinRot);      // 1021 巨砾滚动旋转（:24666 rotation += vx·0.06 累积）
     } else if (PROJ_NO_ROT.has(this.projId)) {
       /* 直立族（aiStyle 29 零 rotation）：恒不旋转 */
     } else {
@@ -865,6 +945,7 @@ export class Arrow extends Entity {
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
+      if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892/CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 玩家武器无效/不追踪）
       const hitBox = !dragonLine
         ? (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)
         : (() => {
@@ -971,13 +1052,14 @@ export class Arrow extends Entity {
       this.vx *= -0.9;
       bounced = true;
     }
-    // :23389-23399 Y 反弹门 vy>1（曾 >3）;落地滚动 = vy 归零 + 摩擦 ×0.97,
-    // |vx|≤0.01 静止自灭（重力 0.2 仅 15t 后由 gravDelay 承担,发射侧改档）
+    // :23389-23399 Y 反弹门 vy>1（曾 >3）;缓慢落地(vy≤1 的下落撞地)才滚动
+    // = vy 归零 + 摩擦 ×0.97 + |vx|≤0.01 静止自灭（空中侧撞勿砍 vy——曾
+    // `bounced||` 门误伤,review 修）
     if (this.vy > 1 && !solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
       this.y -= this.vy;
       this.vy *= -0.9;
       bounced = true;
-    } else if (bounced || this.vy > 0) {
+    } else if (this.vy > 0) {
       this.vy = 0;
       this.vx *= 0.97;
       if (Math.abs(this.vx) <= 0.01) { this.dead = true; }
@@ -1153,6 +1235,7 @@ export class Arrow extends Entity {
         for (const ent of game.enemies()) {
           const e = ent as unknown as PiranhaTarget;
           if (e.dead || e.hp <= 0 || e.dontTakeDamage) continue;
+          if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 不入索敌）
           const score = Math.abs(this.cx - e.cx) + Math.abs(this.cy - e.cy);
           if (score >= bestScore) continue;
           if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
@@ -1213,6 +1296,7 @@ export class Arrow extends Entity {
     for (const ent of game.enemies()) {
       const e = ent as unknown as PiranhaTarget;
       if (e.dead) continue;
+      if (!playerCanHitEnemy(e, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892/CanBeChasedBy :91070——睡渔夫 376 等友好 NPC 玩家武器无效/不追踪）
       if (!(this.x < e.x + e.w && this.x + this.w > e.x
         && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       if (this.pHitCd.has(e.id)) continue;                   // :11869 localNPCImmunity 门

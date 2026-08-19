@@ -96,6 +96,29 @@ export function playEnemyHitSound(
   if (files && files.length) game.playSfxFiles(files, 0.9);
 }
 
+/** 玩家攻击能否命中敌怪桶实体（原版 Projectile.Damage_PVE_Inner :11892-11896 的
+ *  flag 门 + Player.ApplyItemToNPC :43605 friendly 门同式）：敌怪桶里的 friendly NPC
+ *  （睡渔夫 376、被缚救援族残留）对玩家近战/弹幕/爆炸一律无效——命中循环须在
+ *  音效/伤害数字/穿透消耗/debuff 施加【之前】跳过（原版 return 在全部结算之前）。
+ *  例外：臭鸡蛋 318（:11971 全游戏唯一可无条件命中 friendly NPC 的玩家弹）；
+ *  voodoo（向导 22 装娃娃 killGuide / 裁缝师 54 killClothier——敌怪桶实际不含
+ *  这两型，门对称保留）。小动物不入 enemies 桶（critters 桶独立），无 critter 分支。 */
+export function playerCanHitEnemy(
+  e: unknown,
+  game: GameHooks,
+  projId = 0,
+): boolean {
+  const t = e as { vanillaId?: number | null; def?: { friendly?: boolean } } | null | undefined;
+  if (!t?.def?.friendly) return true;
+  if (projId === 318) return true;
+  const vid = t.vanillaId ?? -1;
+  const eq = (game.player as unknown as { equipStats?: { killGuide?: boolean; killClothier?: boolean } } | null)
+    ?.equipStats;
+  if (vid === 22 && eq?.killGuide) return true;
+  if (vid === 54 && eq?.killClothier) return true;
+  return false;
+}
+
 /** 敌对弹幕命中玩家(原版 Projectile.Damage_EVP,Projectile.cs:13706-13830):
  *  - 门禁 hostile + damage>0(:13708)——调用方用 hostile 标志控制,本函数只做判定;
  *  - 玩家 dead / 无敌即跳过(:13732 player.immune)——Player.damage 自带 iframes,

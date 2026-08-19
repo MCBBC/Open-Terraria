@@ -503,14 +503,29 @@ export function drawVanillaLiquids(
       // ---- 水波位移（表层水线 bob；WaterWaves.ts 头部 Canvas2D 取舍登记）----
       let dstY = y * 16 + Math.floor(n4 * 16);
       let drawSh = sh;
+      let waveSrcH = sh;   // 波动格的源窗高(钳带内容;目标高 drawSh 可拉伸)
       if (waveOn && hasTE[i]) {
         waterWaves.sampleDisplace(x * 16 + 8, y * 16 + 8, _wdisp);
         // ±16 世界 px 钳（原版 ±9.6 屏幕px 量级；防极端值撕裂水线）
         const dWy = Math.min(16, Math.max(-16, _wdisp[1] * waveInvZ));
-        const newSh = sh - dWy;
-        if (newSh < 1) { continue; }
-        dstY += dWy;
-        drawSh = newSh;
+        // ★位移矩形全整数化（2026-08-19 用户实报"波动时表层格与下层格之间一条
+        //   明显的缝"）：光栅器在 imageSmoothing=off 下对浮点 dst 矩形的
+        //   y 与 h 【分别取整】,round(y)+round(h) ≠ round(y+h)——表层格底边被
+        //   snap 得与下层格顶边差 1px = 波动中闪烁的背景缝(强制 ±4px 分数位移
+        //   复现实测 88 缝/125 列帧)。修:顶边取整(波 bob 量化到 1px)、底边
+        //   恒等于波前整数底边 → 矩形全整,光栅器零 snap,与下层格逐像素重合
+        const bottom = y * 16 + Math.floor(n4 * 16) + sh;   // 波前整数底边
+        const topI = Math.round(dstY + dWy);
+        dstY = topI;
+        drawSh = bottom - topI;
+        if (drawSh < 1) { continue; }
+        // ★源高钳带内容(≤sh):波把四边形拉高(dWy<0)时源窗不得越过带尾
+        //   透明 padding(表面静态带仅 16 行内容,1296 起全透明)——越界采样
+        //   = 交界处 1-3px 透明行,背景透出即"波动时表层与下层之间明显的缝"
+        //   (2026-08-19 强制 ±4px 分数位移复现 88 缝/125 列帧)。多出的目标
+        //   高度以 ≤25% 纵向拉伸吸收:带内仅顶部 4px 有结构(亮线+过渡),
+        //   4-15 为纯色体,拉伸不可感知
+        waveSrcH = Math.min(drawSh, sh);
       }
       // ---- 微光（shimmer, vt=3）：DrawShimmer（LiquidRenderer.cs:682-730）----
       // 原版三步：①基底层 water_14 直画 + 逐顶点 GetShimmerBaseColor 波动蓝移（:745-759）
@@ -524,7 +539,7 @@ export function drawVanillaLiquids(
         const tVis = (nowMs / 1000) * 60;                      // ≈ Main.timeForVisualEffects（帧计数）
         const dstX = x * 16 + Math.floor(n2 * 16);
         ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
-        ctx.drawImage(tex, sx, srcY, sw, drawSh, dstX, dstY, sw, drawSh);
+        ctx.drawImage(tex, sx, srcY, sw, waveSrcH, dstX, dstY, sw, drawSh);
         if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, drawSh, tVis);
         const flag = !(sx === 16 || sy % 80 === 48);           // :719
         if (flag || (x + y) % 2 === 0) {
@@ -573,7 +588,7 @@ export function drawVanillaLiquids(
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
       // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感
       ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
-      ctx.drawImage(tex, sx, srcY, sw, drawSh,
+      ctx.drawImage(tex, sx, srcY, sw, waveSrcH,
         x * 16 + Math.floor(n2 * 16), dstY, sw, drawSh);
       // 波光 tint（FilterWaterDistortion :106-111；仅表层 + 前景 pass，阈值 0.03 跳弱波）
       if (waveOn && !isBackground && hasTE[i]) {

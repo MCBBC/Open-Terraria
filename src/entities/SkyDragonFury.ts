@@ -22,7 +22,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitTownNpcs, playEnemyHitSound } from './projTargets';
+import { hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 import { applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { soundTrackFiles } from '../data/vanillaNpcs';
 import type { VDust } from '../fx/VanillaDust';
@@ -223,6 +223,7 @@ export class SkyDragonSpin extends Entity {
     }
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead || !this.hitCd.ready(e.id, 6)) continue;
       if (!segHitsRect(x0, y0, x1, y1, 23, e)) continue;
       const crit = Math.random() < this.critChance;
@@ -359,6 +360,7 @@ export class SkyDragonSwing extends Entity {
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);   // 巫毒窄门（无娃娃 no-op）
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead || !this.hitCd.ready(e.id, 6)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
@@ -443,6 +445,7 @@ export class SkyDragonShot extends Entity {
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);   // 巫毒窄门
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;
@@ -576,6 +579,7 @@ export class SkyDragonCircle extends Entity {
     hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2, 'playerProj', 0);   // 巫毒窄门（无娃娃 no-op）
     for (const ent of game.enemies()) {
       const e = ent as unknown as EnemyLike;
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       if (e.dead || !this.hitCd.ready(e.id, 8)) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
       const crit = Math.random() < this.critChance;

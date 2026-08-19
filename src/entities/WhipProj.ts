@@ -11,7 +11,7 @@
 //  TagEffectState.cs:178-186 + WhipTagEffect.cs:58-70）并启用 proc（:12936-12981）。
 import { Entity } from './Entity';
 import { applyProjStatus, applyMeleeImbue } from './projStatus';
-import { hitTownNpcs } from './projTargets';
+import { hitTownNpcs, playerCanHitEnemy } from './projTargets';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { projFrameImg, projFrameCount } from './Arrow';
@@ -251,6 +251,7 @@ export class WhipProj extends Entity {
       hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, this.dmgNow,
         Math.sign(p.x - this.x) * 2, 'playerProj');
       for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { id: number; dead: boolean; x: number; y: number; w: number; h: number;
           hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean } & import('./WhipTag').WhipTagged;
         if (e.dead || this.hitSet.has(e.id)) continue; // localNPCHitCooldown=-1 每敌一次

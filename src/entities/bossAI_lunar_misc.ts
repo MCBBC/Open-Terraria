@@ -312,6 +312,13 @@ export function moonLordFreeEyeAI(e: Enemy, game: GameHooks, player: Player | nu
       x[1] = Math.max(0, x[1] - 0.07);                        // :38664-38666
     }
   }
+  // ---- 渲染镜像(Main.cs case 400 :24492-24504,Renderer.drawMoonLordFreeEye 直读)----
+  // 瞳孔角/睁眼度/瞳孔缩放 → lai0/lai1/lai2(原版 localAI[0..2]:瞳孔椭圆
+  // (30,30)×localAI[1]、瞳孔整体 scale localAI[2](0.4-1.15 脉动));本体 rotation
+  // 由上方攻击态写 e.spin(原版仅攻击 2/3 写 npc.rotation,余态保值)。
+  e.lai0 = x[0];
+  e.lai1 = x[1];
+  e.lai2 = x[2];
   fly(e);
 }
 

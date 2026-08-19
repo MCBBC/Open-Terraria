@@ -1,7 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playEnemyHitSound, projOverlap, tryReflectProjectile } from './projTargets';
+import { hitPlayer, playEnemyHitSound, playerCanHitEnemy, projOverlap, tryReflectProjectile } from './projTargets';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';
@@ -417,6 +417,7 @@ export class TrapShot extends Entity {
     if (!this.reflected) {
       const trapProjId = TRAP_PROJ_ID[this.kind];
       for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
         if (e.dead || !overlaps(e)) continue;
         // 反射源命中（Projectile.cs:12050-12060）：友方炮弹/雪球可反射（aiStyle2）
@@ -477,6 +478,7 @@ export class TrapShot extends Entity {
   private blastDamage(game: GameHooks, cx: number, cy: number, r: number): void {
     const box = { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r };
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;

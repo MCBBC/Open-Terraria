@@ -8,7 +8,7 @@
 //   其 Main.cs:32420-32442 的 lerp 缩放/拖尾专属分支【不在此实现】——本类只做
 //   通用贴图绘制,勿把那族特例搬进来。
 import { Entity } from './Entity';
-import { hitCritters, hitTownNpcs, playEnemyHitSound } from './projTargets';
+import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 import { projSprite, projFrameImg, projFrameCount, PROJ_ROT_RIGHT } from './Arrow';
 import { projectileData } from '../data/vanillaProjectiles';
 import { TILE } from '../core/constants';
@@ -124,6 +124,7 @@ export class MagicProj extends Entity {
     // 小动物:一击致死并消耗弹体(近战挥砍同语义)
     if (hitCritters(this, game)) { this.dead = true; return; }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean) => boolean; dead: boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {

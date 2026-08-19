@@ -812,6 +812,10 @@ export class Enemy extends Entity {
     e.def = {
       ...e.def,
       // friendly（被缚 NPC 等城镇系）与 critter 一样零接触伤害——原版 friendly 旗
+      // ★此前漏写字段本体（仅注释），def.friendly 恒 undefined——玩家伤害门/索敌
+      // 全部穿透（2026-08-19 睡渔夫可被攻击掉血根因）
+      friendly: !!v.friendly,
+      critter: !!v.critter,
       name: v.name, hp: ss.lifeMax, damage: rawDamage !== 0 ? ss.damage : 0, defense: ss.defense,
       // 原版 knockBackResist="承受击退的比例"（0=免疫 Boss、0.5=吃一半、1=全额）
       knockbackResist: kbr,
@@ -1650,6 +1654,11 @@ export class Enemy extends Entity {
     if (this.vanillaId === 488
       || (this.vanillaId != null && this.vanillaId in TOWER_KEY)
       || (this.vanillaId != null && NO_DESPAWN_IDS.has(this.vanillaId))
+      // 376 睡渔夫/579 醉酒酒保：原版 CheckActive 可离屏消散，但由 spawner 海洋/沙滩
+      // 支每轮重掷即时补回（NPC.cs:1685-1837 各门 !savedAngler && !AnyNPCs(376) 恒开）；
+      // 本仓改为 placeSleepingAngler 确定性补放（2 分钟一轮），离屏 750t 自灭会让
+      // "未解救则持续在场"断供——豁免 despawn 为仓内等价（何时放差异登记在案）
+      || this.vanillaId === 376 || this.vanillaId === 579
       // 条件豁免（NPC.cs:78645-78679）：139 Betsy 需 134 在场；552-578 OOA 怪需 548
       // 永恒水晶在场（事件怪不应离屏自灭）
       || (this.vanillaId === 139 && this.anyNpcAlive(game, 134))

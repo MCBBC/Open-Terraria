@@ -15,7 +15,7 @@ import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 
 /** 251 静态免疫表（原版 usesIDStaticNPCImmunity：按弹型共享，非每段独立）。
  *  表项 = 敌 id → 到期时刻（共享钟，多段同 tick 不会重复衰减冷却——
@@ -72,6 +72,7 @@ export class RainbowSegment extends Entity {
       for (const [k, v] of segImmuneUntil) if (v <= t0) segImmuneUntil.delete(k);
     }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;

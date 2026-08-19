@@ -34,7 +34,7 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { projSprite, projFrameImg, projFrameCount } from './Arrow';
 import { applyProjStatus } from './projStatus';
-import { hitCritters, hitTownNpcs, playEnemyHitSound } from './projTargets';
+import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 import { canHit } from '../physics/LineOfSight';
 import { projectileData } from '../data/vanillaProjectiles';
 
@@ -437,6 +437,7 @@ export class MagicMissileProj extends Entity {
     }
     if (hitCritters(this, game)) { this.killNow(game); return; }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as MissileEnemyView;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -709,6 +710,7 @@ export class FlyingKnifeProj extends Entity {
     if (hitCritters(this, game)) return;
     if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)) return;
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game, this.projId)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as MissileEnemyView;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
@@ -817,6 +819,7 @@ export class StarfuryStar extends Entity {
     }
     if (hitCritters(this, game)) { this.killNow(game); return; }
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as MissileEnemyView;
       if (e.dead) continue;
       if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
