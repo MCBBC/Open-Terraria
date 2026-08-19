@@ -192,7 +192,17 @@ export class SpriteAtlas {
         img.onload = () => {
           // 根源处理：整图硬 alpha —— 抗锯齿半透明像素（提取 PNG 的灰/黑镶边来源）
           // 二值化为 0/255，所有消费方（tile/墙/图标/角色）统一获得干净像素
-          this.images.set(f, hardAlpha(img));
+          const hc = hardAlpha(img);
+          this.images.set(f, hc);
+          // ★异步升格 ImageBitmap(2026-08-19 双开 IOSurface 审计:hardAlpha 家族
+          // 18 张/窗持久 canvas 后备;bitmap = CPU 常驻+绘制同走硬件+GPU 拷贝
+          // 浏览器托管可驱逐 = 零持久面,与 vimages 350 张同形态)。烘焙源只在
+          // chunk 重烘时被 drawImage,转换无感;竞态守卫:仍是同一张才替换
+          if (typeof createImageBitmap === 'function') {
+            createImageBitmap(hc).then((b) => {
+              if (this.images.get(f) === hc) this.images.set(f, b);
+            }).catch(() => { /* 保持 canvas,形态等价 */ });
+          }
           done++;
           onProgress?.(done / total);
           resolve();

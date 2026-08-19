@@ -84,6 +84,33 @@ const PAINT_OR_COATING = new Set([
   1966, 1967, 1968, 4668, 5344,
 ]);
 
+/** CanFillEmptyAmmoSlot（Item.cs:1360-1369 1:1）：拾取时能否落进【空的】弹药格。
+ *  ```csharp
+ *  if (bait <= 0 && !PaintOrCoating && type != 353 && type != 849 && type != 169
+ *      && type != 75 && type != 23 && type != 408 && type != 370 && type != 1246)
+ *      return !notAmmo;
+ *  return false;
+ *  ```
+ *  即普通弹药（箭/子弹/火箭/飞镖）可自动填空格；凝胶(23 喷火器)/沙(169 沙
+ *  枪)/坠星(75 星炮)/黑檀沙(370)/珍珠沙(408)/猩红沙(1246)/麦酒(353)/致动器
+ *  (849) 这些"特殊弹药"不自动填——拾取落背包，仅手动拖入或合并弹药栏已有堆
+ *  （FillAmmo 第一趟合并全部弹药、第二趟空格只收本表，Player.cs:38591-38655）。
+ *  ★曾 fillRange 无差别合并+填空——凝胶从第一只史莱姆起就进弹药栏 = 用户
+ *  实报"没到获得枪的阶段凝胶就归弹药"根因（2026-08-19） */
+const NO_AUTO_FILL_AMMO = new Set([353, 849, 169, 75, 23, 408, 370, 1246]);
+
+export function canFillEmptyAmmoSlot(id: number): boolean {
+  const d = ITEM_DEFS[id];
+  if (!d) return false;
+  const vid = d.vid ?? viIdFromKey(d.key);
+  if (vid < 0) return false;
+  if (NO_AUTO_FILL_AMMO.has(vid)) return false;
+  const f = itemFuncOfVid(vid);
+  if (f?.notAmmo) return false;
+  if ((f?.bait ?? 0) > 0 || PAINT_OR_COATING.has(vid)) return true;
+  return (itemCombat(vid)?.ammo ?? 0) > 0;
+}
+
 export function ammoSlotAccepts(id: number): boolean {
   const d = ITEM_DEFS[id];
   if (!d) return false;
@@ -327,9 +354,22 @@ export class Inventory {
       }
       return count;
     }
-    // ② 弹药（FillAmmo :38591-38655：先合并 54-57 已有再空格）
+    // ② 弹药（FillAmmo :38591-38655 两趟 1:1）：第一趟合并 54-57 已有堆（全部
+    //    FitsAmmoSlot 物——凝胶并入弹药栏已有凝胶堆是原版行为）；第二趟填空格
+    //    仅 CanFillEmptyAmmoSlot 物（凝胶/沙/坠星等特殊弹药不自动入栏）
     if (ammoSlotAccepts(id)) {
-      count = this.fillRange(AMMO_START, AMMO_SLOTS, id, count, max);
+      // 第一趟只合并（FillAmmo :38594-38630——全部弹药并已有堆,凝胶亦然）
+      count = this.fillRange(AMMO_START, AMMO_SLOTS, id, count, max, placeStyle, true);
+      // 第二趟空格仅 CanFillEmptyAmmoSlot（:38632-38651）
+      if (count > 0 && canFillEmptyAmmoSlot(id)) {
+        for (let i = AMMO_START; i < AMMO_START + AMMO_SLOTS && count > 0; i++) {
+          if (!this.slots[i]) {
+            const put = Math.min(max, count);
+            this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}), ...(placeStyle !== undefined ? { placeStyle } : {}) };
+            count -= put;
+          }
+        }
+      }
     }
     // ③ 合并 0-49 已有堆
     count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle);
@@ -345,7 +385,8 @@ export class Inventory {
   }
 
   /** 范围内先合并后空格填充 */
-  private fillRange(start: number, len: number, id: number, count: number, max: number, placeStyle?: number): number {
+  private fillRange(start: number, len: number, id: number, count: number, max: number,
+    placeStyle?: number, mergeOnly = false): number {
     for (let i = start; i < start + len && count > 0; i++) {
       const s = this.slots[i];
       // placeStyle 匹配门(2026-08-13):不同敌旗(bannerId)不并入已有堆——
@@ -357,11 +398,13 @@ export class Inventory {
         count -= put;
       }
     }
-    for (let i = start; i < start + len && count > 0; i++) {
-      if (!this.slots[i]) {
-        const put = Math.min(max, count);
-        this.slots[i] = { id, stack: put };
-        count -= put;
+    if (!mergeOnly) {
+      for (let i = start; i < start + len && count > 0; i++) {
+        if (!this.slots[i]) {
+          const put = Math.min(max, count);
+          this.slots[i] = { id, stack: put };
+          count -= put;
+        }
       }
     }
     return count;

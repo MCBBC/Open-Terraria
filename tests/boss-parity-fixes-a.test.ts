@@ -493,13 +493,14 @@ describe('鲨鱼龙存续与音效 + 猪鲨 α/瞬移(2026-08-19 台账 E)', () 
     expect(s.vy).toBe(-1.5);                  // 蓄力上升照跑
   });
 
-  it('蓄力期满起扑音(NPC_Hit_19)+ 16 速扑咬(:35242-35261)', () => {
+  it('蓄力期满起扑音(NPC_Killed_19)+ 16 速扑咬(:35242-35261)', () => {
     const h = makeHooks(makeWorld(false), P);
     const s = spawn(h, 372, 90, 90);
     s.ai0 = 0; s.ai1 = 89; s.ai3 = 0;
     sharkronAI(s, h.hooks, h.player as never);
     expect(s.ai0).toBe(1);
-    expect(h.sfx.some((f) => f.includes('NPC_Hit_19'))).toBe(true);
+    // PlaySound(4,…,19)=case4 死音库 NPC_Killed_19(曾误 NPC_Hit_19,2026-08-19 终审修)
+    expect(h.sfx.some((f) => f.includes('NPC_Killed_19'))).toBe(true);
     expect(Math.hypot(s.vx, s.vy)).toBeCloseTo(16, 3);
   });
 

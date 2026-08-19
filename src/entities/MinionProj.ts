@@ -1479,11 +1479,11 @@ export class MinionProj extends Entity {
     const img = projFrameImg(this.projId, frame);
     ctx.save();
     // ---- 原版偏移表消费（Main.cs:29375-29826 num143/144 + 通用绘制 :34040）----
-    // 有表项的型号（该表主体即本随从族，此前从未消费——曾一律盒心居中，2026-08-19
-    // 接入）：贴图左上角 = (盒左+num144, 盒上−num143)，翻转/旋转绕 anchor。AI_026
-    // 族 spriteDirection 恒 −1（零赋值）→ 动态项 dirX=−1。未登记型号维持既有
-    // 盒心居中近似（差异登记：原版未登记=盒左上对齐）
-    const off3 = img ? projDrawOffsetFor(this.projId, -1, this.h) : null;
+    // 全型号统一走公式（2026-08-19 清零近似）：有表项用 num143/144,未登记 = 0/0
+    // → 贴图左上角 = (盒左+num144, 盒上−num143) = 盒左上对齐（曾一律盒心居中近似,
+    // 已废）。AI_026 族 spriteDirection 恒 −1（零赋值）→ 动态项 dirX=−1;
+    // 旋转族(rotation)绕 anchor 旋转 = 原版 spriteBatch(anchor,origin,rotation) 同构
+    const off3 = img ? (projDrawOffsetFor(this.projId, -1, this.h) ?? [0, 0, 0]) : null;
     const num145 = off3 && img ? (img.width + this.w) / 2 : 0;
     if (off3) ctx.translate(this.cx - this.w / 2 + num145 + off3[1], this.cy);
     else ctx.translate(this.cx, this.cy);
@@ -1501,7 +1501,7 @@ export class MinionProj extends Entity {
     }
     if (img) {
       if (off3) ctx.drawImage(img, -num145, -(this.h / 2 + off3[0]), img.width, img.height);
-      else ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      else ctx.drawImage(img, -img.width / 2, -img.height / 2);   // 贴图未就绪兜底(无偏移量可依)
     } else {
       // 兜底：召唤符记色块（哨兵紫 / 随从金）——贴图缺失或懒加载未就绪
       ctx.fillStyle = this.sentry ? '#B080FF' : '#FFD060';

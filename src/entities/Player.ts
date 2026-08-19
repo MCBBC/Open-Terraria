@@ -3246,8 +3246,10 @@ export class Player extends Entity {
       game.playSfxWav?.('NPC_Killed_10', 1, wall.cx, wall.cy);
     }
     // :22014-22027 gross 且 高于地狱层 / 绕到墙背后（越过墙中心 40px）→ 上 38
+    // ★地狱层 = UnderworldLayer(h-200)——曾用 world.lavaLine(生成参数岩浆线,
+    // 比 h-200 浅 ~170 格)致玩家爬到洞穴层就被上舌(bossAI_wof 头注同款坑,终审修)
     if (gross) {
-      if (this.y < (world.lavaLine || world.h - 200) * TILE) {
+      if (this.y < (world.h - 200) * TILE) {
         this.buffs.apply(BuffType.TheTongue, 10 / 60);
       }
       if (wall.facing < 0) {

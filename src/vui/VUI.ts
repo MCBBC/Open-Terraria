@@ -47,11 +47,11 @@ export class VUI {
 
     window.addEventListener('resize', VUI.resize);
     window.addEventListener('mousemove', (e) => {
-      // ★用 VUI.canvas 当前引用:healCanvas 换画布后,闭包里的旧 c 已脱离 DOM
-      // (rect 全 0 → 鼠标坐标恒 0),必须取活画布
-      const r = VUI.canvas!.getBoundingClientRect();
-      UIScale.mouseX = (e.clientX - r.left) / UIScale.scale;
-      UIScale.mouseY = (e.clientY - r.top) / UIScale.scale;
+      // ★视口原点直取(2026-08-19 光标独占模式:80×80 画布自身漂在鼠标下,
+      // 用画布 rect 当原点 = 坐标系跟着画布跑,越移越漂;全屏模式画布恒在
+      // (0,0),两种模式语义一致)
+      UIScale.mouseX = e.clientX / UIScale.scale;
+      UIScale.mouseY = e.clientY / UIScale.scale;
     });
     window.addEventListener('mousedown', (e) => {
       if (e.button === 0) VUI.presses++;
@@ -82,20 +82,24 @@ export class VUI {
     old.remove();
     VUI.canvas = c;
     VUI.batch = new UISpriteBatch(c.getContext('2d')!);
+    VUI.curMode = '';   // 模式样式作废,下帧 draw() 按当前模式重挂(含光标小型化)
     VUI.resize();
     console.warn('[VUI] ui-canvas 上下文死亡,已自愈重建(光标层)');
   }
 
   static resize() {
-    const c = VUI.canvas;
-    if (!c) return;
+    // 坐标系恒更新;画布尺寸只在全屏模式重设(光标独占模式 = 80×80 跟随
+    // 鼠标,与窗口尺寸无关,resize 不得把它吹回全屏)
     const cssW = window.innerWidth, cssH = window.innerHeight;
     const dpr = window.devicePixelRatio || 1;
+    UIScale.resize(cssW, cssH, dpr);
+    if (VUI.cursorOnly) return;
+    const c = VUI.canvas;
+    if (!c) return;
     c.width = Math.round(cssW * dpr);
     c.height = Math.round(cssH * dpr);
     c.style.width = `${cssW}px`;
     c.style.height = `${cssH}px`;
-    UIScale.resize(cssW, cssH, dpr);
   }
 
   // ================= 自愈帧循环 =================
@@ -141,7 +145,13 @@ export class VUI {
 
   static setState(state: UIState | null) {
     VUI.ui.setState(state);
+    VUI.cursorOnly = state === null;   // 游戏内=无状态 → 光标独占模式(画布小型化)
   }
+  /** 光标独占模式(游戏内):ui-canvas 从全屏缩成 80×80 跟随鼠标的小画布,
+   *  省一张全屏持久后备+合成层(2026-08-19 渲染侧审计 #2);菜单态恢复全屏 */
+  private static cursorOnly = false;
+  private static curMode: 'full' | 'cursor' | '' = '';
+  private static readonly CUR_CSS = 80;   // 光标画布 CSS 边长(容最大 UI 缩放下光标帧+边距)
   static goBack() { VUI.ui.goBack(); }
 
   /** 清空 UI 层画布（进游戏/退出菜单时调用，避免残留冻结帧叠加在游戏画面上） */
@@ -188,12 +198,47 @@ export class VUI {
   private static draw() {
     const ctx = VUI.batch!.ctx;
     const { cssW, cssH, dpr, scale } = UIScale;
+    if (VUI.cursorOnly) {
+      // ---- 光标独占模式:80×80 画布钉在鼠标位(transform 移动,合成器友好)。
+      // 光标本就是唯一内容,画布小不裁任何东西;命中/坐标逻辑不变(输入全部
+      // 在 window 层,画布 pointer-events:none)
+      if (VUI.curMode !== 'cursor') {
+        VUI.curMode = 'cursor';
+        const c = VUI.canvas!;
+        c.style.cssText = `position:absolute;left:0;top:0;pointer-events:none;z-index:300;cursor:none;`
+          + `width:${VUI.CUR_CSS}px;height:${VUI.CUR_CSS}px;`;
+        c.width = Math.round(VUI.CUR_CSS * dpr);
+        c.height = Math.round(VUI.CUR_CSS * dpr);
+      }
+      const mx = UIScale.mouseX * scale, my = UIScale.mouseY * scale;   // CSS px
+      const PAD = 8;   // 边距(CSS px):光标热点=帧左上,画布左上=鼠标位-PAD
+      VUI.canvas!.style.transform = `translate(${Math.round(mx - PAD)}px, ${Math.round(my - PAD)}px)`;
+      ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
+      ctx.clearRect(0, 0, VUI.CUR_CSS, VUI.CUR_CSS);
+      // drawCursor 画在 (mouseX,mouseY) 逻辑位 → 局部系平移回来(常量)
+      VUI.drawCursorLocal(PAD / scale, PAD / scale);
+      return;
+    }
+    if (VUI.curMode !== 'full') {
+      VUI.curMode = 'full';
+      VUI.canvas!.style.transform = '';
+      VUI.resize();   // 恢复全屏尺寸+定位样式
+    }
     ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
     ctx.clearRect(0, 0, UIScale.logicalW, UIScale.logicalH);
     VUI.ui.use();
     VUI.ui.isVisible = true;
     VUI.ui.draw(VUI.batch!);
     VUI.drawCursor();
+  }
+
+  /** 光标独占模式的局部系绘制(等价 drawCursor,坐标已平移到画布内) */
+  private static drawCursorLocal(lx: number, ly: number) {
+    if (!VUI.batch || !VUI.enabled) return;
+    if (isTouchDevice()) return;
+    const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
+    if (!tex) return;
+    VUI.batch.draw(tex, Math.round(lx), Math.round(ly), { color: rgb(255, 255, 255) });
   }
 
   /** 智能光标激活中（Game 每帧写入）：指针切换到 Cursors[12] 帧（Main.cs:47442-47513 num=11+smart） */

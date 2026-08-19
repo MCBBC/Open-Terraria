@@ -849,6 +849,12 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
     const span = e.lai0 === 1 ? 4 : Math.min(8, frames - 4);
     return base + (Math.floor(t / 5) % span);
   }
+  // 肉墙 113/114（case 113/114 type 表，cs:74214-74229）：ai[2]==0 → 12t/帧
+  // 两帧循环;ai[2]≠0（Leech 放虫轮）→ 冻结帧 0（counter=-60；曾通用 6t 连播）
+  if (id === 113 || id === 114) {
+    if (e.ai2 !== 0) return 0;
+    return Math.floor(t / 12) % Math.min(2, frames);
+  }
   // 世纪之花本体（case 262，cs:73239-73258）：血量分带——>50% 帧 0-3、
   // ≤50% 钳 4-7（二阶段），每 7t 推进带内回卷（曾通用 6t 全 8 帧混播）
   if (id === 262) {

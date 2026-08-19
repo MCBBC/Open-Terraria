@@ -141,7 +141,7 @@ import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixe
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
-import { Enemy, visEffectFrames } from '../entities/Enemy';
+import { Enemy, visEffectFrames, bindEnemySoundPrewarm } from '../entities/Enemy';
 import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -2722,6 +2722,9 @@ export class Game implements GameHooks {
     // active/netID/position），每次 fromVanilla 现场重算——绑对象引用即可读最新档
     bindScaleStatsWorld(scaleStatsWorldOf(w, (type) => this.entities.enemies.some(
       (en) => { const e2 = en as Enemy; return !e2.dead && e2.vanillaId === type; })));
+    // 敌怪受击/死亡 wav 随生成预热（Enemy.fromVanilla/Transform 构造点回调）——
+    // 原版 LoadAll 全量预载;懒加载在途首击会回退合成 hit 方波(音色不对)
+    bindEnemySoundPrewarm((files) => this.sfx.preloadFiles(files));
     // 旅程力量状态注入（CreativePowerManager.Instance 静态单例语义——
     // Player.damage 的 Godmode/isExpert 轴等经 journeyPowers() 读此处绑定的对象）
     bindJourneyPowers(w.journeyPowers);
@@ -2750,7 +2753,10 @@ export class Game implements GameHooks {
     // 敌怪专属受击/死亡音随世界怪池预热（vanillaSoundFiles → wav 组）：否则每只怪
     // 本局首次受击/死亡静音（按需加载首播 fetch 在途 playWavFile false——用户报
     // "杀死洞穴蝙蝠无死亡音"第二根因，第二只起命中缓存才响）；原版 LoadAll 全量
-    // 预载，此处按 VANILLA_SPAWN_POOLS 池定向预热（Boss/稀有怪仍走召唤时定向预热）
+    // 预载，此处按 VANILLA_SPAWN_POOLS 池定向预热（Boss/稀有怪仍走召唤时定向预热）。
+    // 兜底网 = bindEnemySoundPrewarm（Enemy.fromVanilla/Transform 生成点全量预热，
+    // 池表漏网的怪——如沙尘暴池的秃鹫 61——也只慢一个 spawn→fetch 窗口，不再
+    // 落到合成 hit 方波）
     {
       const poolSounds = new Set<string>();
       for (const pool of Object.values(VANILLA_SPAWN_POOLS)) {

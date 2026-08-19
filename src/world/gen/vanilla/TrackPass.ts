@@ -40,6 +40,12 @@ export function __setTrackStepProbe(fn: ((loop: number, k: number, x: number, y:
   __trackStepProbe = fn;
 }
 
+/** FFFFF 探针:tf314 分派前活性格快照钩(harness 装卸;undefined 零开销) */
+let __tfCellProbe: ((sheet: number, x: number, y: number, fx: number, fy: number) => void) | undefined;
+export function __setTfCellProbe(fn: ((sheet: number, x: number, y: number, fx: number, fy: number) => void) | undefined): void {
+  __tfCellProbe = fn;
+}
+
 /** type → vanilla sheet(FinalCleanupPass.SWEEP_SHEET 同构;私有不可导出) */
 const SHEET_OF = new Int16Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -467,6 +473,7 @@ export class TrackGenerator {
       frameTrack(st, x, y);            // case 314(cs:86033)——FrameTrack,RNG 零掷
       return;
     }
+    if (__tfCellProbe && st.flags[i]) __tfCellProbe(SHEET_OF[st.type[i]!] ?? -1, x, y, st.frameX[i] ?? 0, st.frameY[i] ?? 0);
     genTileFrame(st, rng, x, y);       // 其余全族(184 苔藓 Next(3) 掷等)
   }
 

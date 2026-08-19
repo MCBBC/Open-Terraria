@@ -112,8 +112,11 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
       let jy = sy + (Math.floor(Math.random() * 101) - 50) * 0.01;
       sl = Math.hypot(jx, jy) || 1;
       jx = jx / sl * num176 + e.vx; jy = jy / sl * num176 + e.vy;
+      // 270 髅骨（:21996-22000 timeLeft 300/penetrate 3）：ai1 30-110 转向窗口
+      // 在 Arrow(skullBone opts)+出生音 Item_8（:53211-53213 localAI[0]==0 首帧）
+      game.playSfxWav?.('Item_8', 1, e.cx + jx * 5, e.cy + jy * 5);
       shoot(game, e.cx + jx * 5, e.cy + jy * 5, jx, jy,
-        getAttackDamageForProjectiles(17, 17, e.difficulty), 270);   // :21996-22000 timeLeft 300
+        getAttackDamageForProjectiles(17, 17, e.difficulty), 270, 300, { pierce: 3, skullBone: true });
     }
   }
 

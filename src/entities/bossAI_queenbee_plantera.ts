@@ -306,7 +306,8 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       const t = num694 / (Math.hypot(dx, dy) || 1);
       dx *= t;
       dy *= t;
-      shoot(game, vx80, vy80, dx, dy, 11, 719, 300);   // 伤害 11 / timeLeft 300(:30875-30878)
+      // 毒刺 719 = aiStyle1 默认档 0.1@15t 缓坠(去显式 grav:0——曾恒直飞,终审修)
+      shoot(game, vx80, vy80, dx, dy, 11, 719, 300, { grav: 0.1, gravDelay: 15 });
       game.playSfxFiles(['Item_17'], 1, e.cx, e.cy);   // SoundID.Item17 真轨（WAV_MAP 命中 Item_17.wav，近似销核）
     }
     if (!losClear(game, vx80, vy80 - 30, player!.cx, player!.cy)) {
@@ -528,7 +529,11 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
         // expert 追踪 18/70/floor14,:54330-54345);277 = aiStyle 14(撞块 ×-0.9 反弹,
         // :18306-18314 + expert 追踪 12/200/cap16,:23307-23316)
         let arrowOpts: Partial<import('./Arrow').ArrowOpts> = { grav: 0.025, gravDelay: 35 };
-        if (expert) arrowOpts = { ...arrowOpts, homing: { speed: 18, weight: 70, floor: 14 } };
+        // :54338-54345 专家追踪档附带 tileCollide=false + timeLeft 钳 180
+        if (expert) {
+          arrowOpts = { ...arrowOpts, homing: { speed: 18, weight: 70, floor: 14 }, noTileCollide: true };
+          life = Math.min(life, 180);
+        }
         if (e.hp < e.maxHp * 0.8 && rnd(expert ? 2 : 4) === 0) {
           num806 = 27;                        // 毒种 276(命中上毒在 statusPlayer case 276)
           num807 = 276;
@@ -538,8 +543,10 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
           num807 = 277;
           l[1] = -120;                        // 下发弹延迟 120t
           life = 1200;                        // 原版不设 timeLeft(保持默认 1200)
-          arrowOpts = { grav: 0.3, thornBounce: true };
-          if (expert) arrowOpts = { ...arrowOpts, homing: { speed: 12, weight: 200, cap: 16 } };
+          // :23380-23399 重力 0.2 且仅 15t 后(曾 0.3 从 0t);专家追踪只混 X 轴
+          // (:23307-23316,速帽 16)——homing.axis='x'(终审修)
+          arrowOpts = { grav: 0.2, gravDelay: 15, thornBounce: true };
+          if (expert) arrowOpts = { ...arrowOpts, homing: { speed: 12, weight: 200, cap: 16, axis: 'x' } };
         }
         if (flag50) num806 *= 2;              // :32120-32122 暴怒弹伤 ×2
         // :32123 弹伤 Remap:num806 = GetAttackDamage_ForProjectiles(num806, num806*0.9)

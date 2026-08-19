@@ -263,6 +263,15 @@ const PLACEHOLDER_DEF: EnemyDef = {
   hitSound: ['NPC_Hit_1'], killedSound: ['NPC_Killed_1'], drops: [],
 };
 
+/** 生成期音效预热钩（Game.afterWorldLoad 注入 sfx.preloadFiles）——原版 LoadAll
+ *  全量预载的对齐：懒加载在途时 playSfxFiles 回退合成 hit 方波 ≠ 原版音色。
+ *  挂 fromVanilla/Transform 构造点 = 常规刷怪/雕像/Boss 召唤/分裂/变形零漂移覆盖
+ *  （VANILLA_SPAWN_POOLS 池预热只盖池内 id，2026-08-19 秃鹫 61 漏网实证） */
+let enemySoundPrewarm: ((files: string[]) => void) | null = null;
+export function bindEnemySoundPrewarm(fn: ((files: string[]) => void) | null): void {
+  enemySoundPrewarm = fn;
+}
+
 export class Enemy extends Entity {
   /** 原版 NPC id（数据驱动路径启用时非空） */
   vanillaId: number | null = null;
@@ -743,6 +752,11 @@ export class Enemy extends Entity {
     const hit = vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'];
     // DeathSound 显式 null(246 头)=原版无声,不给 fallback(缺键=提取漏→通用档)
     const kill = v.DeathSound === null ? [] : vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'];
+    // 受击/死亡 wav 随【生成】预热（Game 注入 sfx.preloadFiles）——原版 LoadAll
+    // 全量预载；不预热则本怪首击懒加载在途,playSfxFiles 回退合成 hit 方波
+    // （"第一击不像受击音、后续才对"根因;VANILLA_SPAWN_POOLS 池预热漏掉沙尘暴
+    // 池的秃鹫 61/怒滚虫 546/蚁狮 69 等）。挂构造 = 雕像/Boss 召唤/分裂全路径覆盖
+    enemySoundPrewarm?.([...hit, ...kill]);
     // 飞行档（StrikeNPC :82217/-0.5 受击档用）：数据 noGravity 族 + aiStyle 2/5/14
     // （原版各 AI 开头 noGravity=true）+ aiStyle 23/44（飞行武器 83/84/179 kb0.4
     // :25318、飞鱼/蚁狮蜂族 224/509/581/587 :31001——JSON noGravity=false 但原版
@@ -3856,6 +3870,9 @@ export class Enemy extends Entity {
       killedSound: v.DeathSound === null ? [] : vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'],
       drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
     };
+    // Transform 换音组（如蝙蝠 158→吸血鬼 159 换 NPCHit/Death）同样预热——
+    // 变形态首击的懒加载竞态与出生路径同构
+    enemySoundPrewarm?.([...this.def.hitSound, ...this.def.killedSound]);
     this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
     this.transformVisuals(game, oldType, id);
     return true;
@@ -7944,6 +7961,18 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       return;
     }
+    // ---- 鸟粪彩蛋（aiStyle 68 飞行鸭同款,:34863-34872;BIRD_THAT_CAN_POOP
+    //      表含 363/365/603/609——B 批代理在 birdAI(:25398) 实现了 PoopProj,
+    //      此处补齐本族 10 行,2026-08-19）----
+    if (this.lai3 === 0 && !player.dead) {
+      if (this.cx >= player.x && this.cx <= player.x + player.w
+        && player.y > this.y + this.h
+        && canHit(st, this.x, this.y, this.w, this.h, player.x, player.y, player.w, player.h)
+        && rollOnlyBadLuckExtreme((player as unknown as { luck: number }).luck, 50) === 0) {
+        this.lai3 = 1;
+        game.spawnCritterProj?.(new PoopProj(player.cx, this.cy));
+      }
+    }
     if (this.ai1 >= 300) {
       // 300t 后强制降落段（cs:34986-35001）：vx×0.98 缓降、vy 逼近 2,触地/水收尾
       this.vx *= 0.98;
@@ -10465,6 +10494,19 @@ export class Enemy extends Entity {
           h2.x = this.cx - h2.w / 2;   // NewNPC Bottom 锚点（NPC.cs:81547）
           (game as unknown as { entities?: { add?: (en: unknown, b: string) => void } })
             .entities?.add?.(h2, 'enemies');
+        }
+      }
+      // 史莱姆王死亡爆小史莱姆（HitEffect :86573-86607：4-7 只 NPC 1 体内随机
+      // 落点+随机初速——曾缺=死王不爆怪,2026-08-19 终审补;傀儡跳过同上）
+      if (this.vanillaId === 50 && !this.netPuppet) {
+        const add = (game as unknown as { entities?: { add: (en: unknown, b: string) => void; nextId?: number } }).entities;
+        const n = 4 + Math.floor(Math.random() * 4);   // Next(4,8) 含头不含尾 = 4-7
+        for (let k = 0; k < n; k++) {
+          const b = Enemy.fromVanilla(1, this.x + Math.random() * this.w, this.y + Math.random() * this.h);
+          if (!b) continue;
+          b.vx = (Math.random() - 0.5) * 6;
+          b.vy = -3 - Math.random() * 3;
+          add?.add(b, 'enemies');
         }
       }
       // 母史莱姆死亡分裂（Wiki 权威：1-3 只 Baby Slime，netID -5 = 半透明灰黑小史莱姆；

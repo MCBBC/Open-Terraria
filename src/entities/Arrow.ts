@@ -108,7 +108,7 @@ export interface ArrowOpts {
   /** 专家追踪（275/276/277 共用模式，Projectile.cs:54330-54345/:23307-23316）：
    *  每 tick v=(v*(weight-1)+dirToPlayer*speed)/weight，速度 <floor 归一到 floor
    *  （277 用 cap：>cap 归一到 cap）。spawn 侧仅在专家模式注入。 */
-  homing?: { speed: number; weight: number; floor?: number; cap?: number };
+  homing?: { speed: number; weight: number; floor?: number; cap?: number; axis?: 'x' | 'y' };
   /** 原版 Projectile.extraUpdates（Projectile.cs:15331-15336 numUpdates 循环）：
    *  每逻辑帧把整段 AI/位移/碰撞/命中多跑 N 次——弹速视觉上 ×(N+1)，timeLeft
    *  同步按子步消耗（:15861 在循环内）。83 眼激光 SetDefaults=2（:1369）。 */
@@ -142,6 +142,9 @@ export interface ArrowOpts {
    *  与 spriteDirection（-ai[1]）；|vx|+|vy|<16 时速度 ×1.05/t 自加速（曾丢 = 低速
    *  慢速弹报废），rotation += (|vx|+|vy|)*0.025*direction 恒旋。 */
   scythe?: { rot0: number; flipDir: number };
+  /** 270 骷髅王髅骨（Projectile.cs:53192-53213）：ai1 30-110 窗口向最近玩家
+   *  转向（(v*24+dir*spd)/25 保速）；速 <18 ×1.02/t 自加速；每帧 5 号尘尾迹。 */
+  skullBone?: boolean;
   /** 351 礼盒（aiStyle 58，Projectile.cs:27727-27757）：两段重力——前 30t 平飞，
    *  之后 vy+0.1；一旦 vy>=0 转二段（恒 +0.1 钳 3、vx×0.99）；帧 0/1 随段切换。 */
   present?: boolean;
@@ -263,6 +266,7 @@ export class Arrow extends Entity {
   frostEligible = false;
   /** aiStyle 14 荆棘球档（277）：撞块按 Projectile.cs:18306-18314 反弹 */
   thornBounce: boolean;
+  skullBoneT = 0;   // ai[1] 计数（270 转向窗口）
   /** 延迟重力（AI_001 链）：age（update 计）超过此值才施加 grav；-1=不延迟 */
   gravDelay: number;
   /** 二段重力（686/711）：age 超过 grav2At 再加 grav2；0=无 */
@@ -271,7 +275,7 @@ export class Arrow extends Entity {
   /** 恒定 vx 衰减/update（0=无；686/711 0.99——不挂重力门） */
   dragAlways: number;
   /** 专家追踪参数（null=无） */
-  homing: { speed: number; weight: number; floor?: number; cap?: number } | null;
+  homing: { speed: number; weight: number; floor?: number; cap?: number; axis?: 'x' | 'y' } | null;
   /** 原版 Projectile.extraUpdates：每帧额外子步数（0=普通 1 步） */
   extraUpdates: number;
   /** X 轴空气阻力/tick（1=无；投掷族 0.97） */
@@ -407,6 +411,7 @@ export class Arrow extends Entity {
     this.hostile = opts?.hostile ?? false;
     this.bounce = opts?.bounce ?? false;
     this.thornBounce = opts?.thornBounce ?? false;
+    this.skullBoneT = opts?.skullBone ? 1 : 0;
     this.homing = opts?.homing ?? null;
     this.extraUpdates = opts?.extraUpdates ?? pd0?.extraUpdates ?? 0;   // 子弹 14=1(2 步/tick)、高速弹 207=2
     this.drag = opts?.drag ?? 1;
@@ -748,6 +753,22 @@ export class Arrow extends Entity {
     }
     // 专家追踪（Projectile.cs:54330-54345 275/276 / :23307-23316 277：
     // v=(v*(weight-1)+dirToPlayer*speed)/weight；<floor 或 >cap 归一）
+    // 270 骷髅髅骨（:53192-53213）：ai1 30-110 窗口转向（保速混合）+ <18 速
+    // ×1.02/t 自加速
+    if (this.skullBoneT > 0) {
+      this.skullBoneT += 1;
+      const p = game.player;
+      if (p && !p.dead && this.skullBoneT > 30 && this.skullBoneT < 110) {
+        const spd = Math.hypot(this.vx, this.vy) || 0.001;
+        const ddx = p.cx - this.cx, ddy = p.cy - this.cy;
+        const dl = Math.hypot(ddx, ddy) || 1;
+        let nvx = (this.vx * 24 + (ddx / dl) * spd) / 25;
+        let nvy = (this.vy * 24 + (ddy / dl) * spd) / 25;
+        const nl = Math.hypot(nvx, nvy) || 1;
+        this.vx = nvx / nl * spd; this.vy = nvy / nl * spd;
+      }
+      if (Math.hypot(this.vx, this.vy) < 18) { this.vx *= 1.02; this.vy *= 1.02; }
+    }
     if (this.homing) {
       const p = game.player;
       if (p && !p.dead) {
@@ -755,8 +776,9 @@ export class Arrow extends Entity {
         const d = Math.hypot(dx, dy) || 1;
         dx = dx / d * this.homing.speed;
         dy = dy / d * this.homing.speed;
+        // axis：原版单轴混入档（刺球 277 专家只混 X,:23307-23316）
         this.vx = (this.vx * (this.homing.weight - 1) + dx) / this.homing.weight;
-        this.vy = (this.vy * (this.homing.weight - 1) + dy) / this.homing.weight;
+        if (this.homing.axis !== 'x') this.vy = (this.vy * (this.homing.weight - 1) + dy) / this.homing.weight;
         const sp = Math.hypot(this.vx, this.vy);
         if (this.homing.floor !== undefined && sp < this.homing.floor && sp > 0) {
           this.vx = this.vx / sp * this.homing.floor;
@@ -949,10 +971,16 @@ export class Arrow extends Entity {
       this.vx *= -0.9;
       bounced = true;
     }
-    if (this.vy > 3 && !solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+    // :23389-23399 Y 反弹门 vy>1（曾 >3）;落地滚动 = vy 归零 + 摩擦 ×0.97,
+    // |vx|≤0.01 静止自灭（重力 0.2 仅 15t 后由 gravDelay 承担,发射侧改档）
+    if (this.vy > 1 && !solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
       this.y -= this.vy;
       this.vy *= -0.9;
       bounced = true;
+    } else if (bounced || this.vy > 0) {
+      this.vy = 0;
+      this.vx *= 0.97;
+      if (Math.abs(this.vx) <= 0.01) { this.dead = true; }
     }
     return bounced;
   }

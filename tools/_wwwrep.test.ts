@@ -50,7 +50,7 @@ import { runTileCleanupPass } from '../src/world/gen/vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from '../src/world/gen/vanilla/BrokenTrapCleanupPass';
 import { runFinalCleanupPass } from '../src/world/gen/vanilla/FinalCleanupPass';
 import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
-import { __setTrackStepProbe } from '../src/world/gen/vanilla/TrackPass';
+import { __setTrackStepProbe, __setTfCellProbe } from '../src/world/gen/vanilla/TrackPass';
 import { runTreePass } from '../src/world/gen/vanilla/TreePass';
 import { backfillHybridFrames } from './www-framebackfill';
 
@@ -491,6 +491,18 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
           const cur = `${loop} k=${k} (${x},${y}) ph=${ph}`;
           if (cur !== lastStep) { trackLog.push(`roll ${spanRoll} → ${cur}`); lastStep = cur; }
         });
+        // FFFFF:SW_WWW_TF_SHEET=178,184 → 该 sheet 族 tf314 分派快照(掷位关联)
+        const tfSheets = new Set((process.env.SW_WWW_TF_SHEET ?? '').split(',').map(Number).filter(Boolean));
+        if (tfSheets.size) {
+          const SHEETC = SHEET;
+          (globalThis as { __tfSt?: InstanceType<typeof TileStore> }).__tfSt = built.st;
+          __setTfCellProbe((sheet, x, y, fx, fy) => {
+            if (tfSheets.has(sheet)) {
+              const nb = (dx: number, dy: number) => { const st = (globalThis as { __tfSt?: InstanceType<typeof TileStore> }).__tfSt!; if (!st) return '?'; if (!st.inBounds(x + dx, y + dy)) return 'OoB'; const i = st.idx(x + dx, y + dy); return st.flags[i] ? `s${SHEETC[st.type[i]!]}sl${st.slope[i]}h${st.half[i]}` : 'air'; };
+              trackLog.push(`roll ${spanRoll} TF sheet=${sheet} (${x},${y}) fx=${fx} fy=${fy} n(U,D,L,R)=${nb(0, -1)},${nb(0, 1)},${nb(-1, 0)},${nb(1, 0)}`);
+            }
+          });
+        }
       }
       const spiderLog: string[] = [];
       if (process.env.SW_WWW_SPIDER) (globalThis as { __swSpiderVisit?: (cx: number, cy: number, k: string, b: number, a2: number, w: number) => void }).__swSpiderVisit = (cx, cy, k, b, a2, w) => spiderLog.push(`${w} ${k} ${cx},${cy} ${b}:${a2}`);
@@ -557,7 +569,10 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       await step.run(built.st, gs, spanOut ? rngW : rng, chests, world);
       (globalThis as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg = undefined;
       __setTrackStepProbe(undefined);
+      __setTfCellProbe(undefined);
+      (globalThis as { __tfSt?: InstanceType<typeof TileStore> }).__tfSt = undefined;
       if (trackLog.length) writeFileSync(spanOut.replace(/\.txt$/, '.track.txt'), trackLog.join('\n') + '\n');
+      if (jstackLog.length) writeFileSync(spanOut.replace(/\.txt$/, '.jstack.txt'), jstackLog.join('\n') + '\n');
       if (houseLog.length) {
         (globalThis as { __swHouseStage?: (t: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage = undefined;
         writeFileSync(process.env.SW_WWW_HOUSE!, houseLog.join('\n') + '\n');
