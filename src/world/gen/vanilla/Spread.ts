@@ -9,6 +9,202 @@ import { vanGenSolidType } from './GenSolid';
 // cs:75305-75316——限的是整场洪水总量，非单链深度）
 import { grassSpreadState } from './MushroomPass';
 
+// ---------- ★NNNNN 批（2026-08-19）：SpreadGrass 转化后的 SquareTileFrame 级联 ----------
+// 原版 cs:75286-75288：type 写入后 SquareTileFrame(i,j) → 3×3 TileFrame。TileFrame
+// 头（cs:82077-82082）对非活跃格清 half/slope/块漆；frameImportant 类型走 Check*——
+// 其中 186/187 大石堆（Check3x2 cs:49190-49868）会校验 3×2 六格一致性与支撑行，
+// 失败 → KillTile 整组清除。9293480 #73 残差 5 格 = 活树房间石堆第 6 格被后写活木
+// (191,同帧)覆写 → 草皮转化 SquareTileFrame 触发 Check3x2 一致性失败 → vanilla 杀
+// 除残件（a:1→0 t:187→0），JS 缺级联 → 残件永生。TryConvertingOrKillingTrees
+// AboveIfTheyWouldBecomeInvalid（cs:75286 前置）与 SendTileSquare 在本管线所有调用
+// 时点（SpreadingGrass 73 / GrassWall 79 / Moss 65 / MudCaves 17）树(5/323) 尚未
+// 存在（Planting_Trees=82 之后）且 netMode=0——恒 no-op，不移植。
+
+const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF[i] = s;
+}
+/** sheet → 首个内部 id（187→186 转化写 type 用；186 若未实装则退化为不动 type） */
+const INTERNAL_OF_SHEET = new Map<number, number>();
+for (let i = 0; i < TILE_DEFS.length; i++) {
+  const s = TILE_DEFS[i]?.vanilla?.sheet;
+  if (typeof s === 'number' && !INTERNAL_OF_SHEET.has(s)) INTERNAL_OF_SHEET.set(s, i);
+}
+/** TileID.Sets.Boulders（TileID.cs:195）→ InvalidTileForPilesOrSpeleothems（cs:39005） */
+const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** Check3x2 style 组支撑类型表（cs:49344-49376 type=187 / cs:49301-49321 type=186）。
+ *  Mud={59}（TileID.cs:287）；Snow={147}/Ice={161,163,164,200}（cs:24/28）；
+ *  Sand={53,112,116,234}/HardenedSand={397,398,402,399}/Sandstone={396,400,403,401}。 */
+function pileAnchorOk(pileSheet: number, styleGroup: number, belowSheet: number): boolean {
+  if (pileSheet === 187) {
+    if (styleGroup <= 5) return belowSheet === 59 || belowSheet === 60 || belowSheet === 226;
+    if (styleGroup <= 8) return belowSheet === 57 || belowSheet === 58 || belowSheet === 75 || belowSheet === 76;
+    if (styleGroup >= 29 && styleGroup <= 34) {
+      return belowSheet === 53 || belowSheet === 112 || belowSheet === 116 || belowSheet === 234
+        || belowSheet === 397 || belowSheet === 398 || belowSheet === 402 || belowSheet === 399
+        || belowSheet === 396 || belowSheet === 400 || belowSheet === 403 || belowSheet === 401;
+    }
+    return true; // 其余样式组无支撑类型门（如本种子的组 12）
+  }
+  // 186
+  if (styleGroup >= 26 && styleGroup <= 31) {
+    return belowSheet === 147 || belowSheet === 161 || belowSheet === 163 || belowSheet === 164
+      || belowSheet === 200 || belowSheet === 162 || belowSheet === 224;
+  }
+  if (styleGroup >= 32 && styleGroup <= 34) return belowSheet === 59 || belowSheet === 70;
+  return true;
+}
+
+/** PlatformProperTopFrame（cs:70197）：frameX/18（PlatformFrameWidth=CoordinateFullWidth
+ *  =16+2 padding）∈{0..7,12..16,25..26}。 */
+function platformProperTopFrame(fx: number): boolean {
+  const num = Math.trunc(fx / 18);
+  if ((num < 0 || num > 7) && (num < 12 || num > 16)) {
+    if (num >= 25) return num <= 26;
+    return false;
+  }
+  return true;
+}
+
+/** SolidTileAllowBottomSlope（cs:70211）：越界=真（InWorld 无 padding，原版语义）；
+ *  active && (tileSolid||tileSolidTop) && (!topSlope || (平台&&正顶帧)) && !halfBrick。
+ *  tileSolidTop 以 platform 近似（QuickCleanup/TileCleanup 同口径）；tileSolid 走
+ *  vanGenSolidType（生成期可变表）。 */
+function solidTileAllowBottomSlope(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return true;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const t = st.type[i];
+  const platform = !!TILE_DEFS[t]?.platform;
+  const topSlope = st.slope[i] === 1 || st.slope[i] === 2;
+  if (topSlope && !(platform && platformProperTopFrame(st.frameX[i]))) return false;
+  if (st.half[i]) return false;
+  return vanGenSolidType(t) || platform;
+}
+
+/** 生成期 KillTile（cs:63933-63967）对 186/187 的语义：active(false)+halfBrick(false)
+ *  +frameX/Y=-1+清漆+type=0（★cs:63965 type 归零——9293480 dump73 金标 raw typ 187→0
+ *  实证；LivingTreePass.killTileGen 保留 type 是 ghost 通道近似，本处取精确语义）。
+ *  inActive/liquid 支（58/230/147/224）/TruncatesWalls（{54,328,459,748}）均不触及
+ *  186/187； 尘掷（默认 10×MakeTileDust）与 Check3x2 掉落表全走 Main.rand（非
+ *  genRand 流）——世界生成掷流零影响。KillTile 尾 SquareTileFrame 被 destroyObject
+ *  门挡（Check3x2 头 cs:49192）且 TileFrame 头清位对本类格已是 no-op——略。 */
+function killTileGenPile(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return;
+  st.flags[i] = 0;
+  st.half[i] = 0;
+  st.frameX[i] = -1;
+  st.frameY[i] = -1;
+  st.paint[i] = 0;
+  st.type[i] = 0;
+}
+
+/** Check3x2（cs:49190-49868）type∈{186,187} 全量。返回是否发生了整组杀除。 */
+function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number): boolean {
+  if (!st.inBounds(i, j)) return false;
+  const ii = st.idx(i, j);
+  if (!st.flags[ii] || SHEET_OF[st.type[ii]] !== pileSheet) return false;
+  const frameX = st.frameX[ii] | 0;
+  const frameY = st.frameY[ii] | 0;
+  const num3 = Math.trunc(frameY / 36);                    // cs:49204
+  const num4 = frameY % 36;
+  const num = j - Math.trunc(num4 / 18);                   // cs:49208
+  let n5 = Math.trunc(frameX / 18);
+  let n6 = 0;
+  while (n5 > 2) { n5 -= 3; n6++; }                        // cs:49209-49213
+  n5 = i - n5;
+  const num7 = n6 * 54;
+  const num8 = num + 2;                                    // flag2(type14 style25) 不触及 186/187
+  let flag = false;
+  for (let k = n5; k < n5 + 3; k++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }
+      const idx = st.idx(k, l);
+      if (!st.flags[idx] || SHEET_OF[st.type[idx]] !== pileSheet
+        || st.frameX[idx] !== (k - n5) * 18 + num7
+        || st.frameY[idx] !== (l - num) * 18 + num3 * 36) {
+        flag = true;                                       // cs:49233 六格一致
+      }
+    }
+    // 支撑行三连（186: cs:49286-49290 / 187: cs:49329-49333）
+    if (!solidTileAllowBottomSlope(st, k, num8)) { flag = true; continue; }
+    if (st.inBounds(k, num8)) {
+      const bi = st.idx(k, num8);
+      if (st.flags[bi] && BOULDER_SHEETS.has(SHEET_OF[st.type[bi]])) { flag = true; continue; }
+      if (st.flags[bi] && !pileAnchorOk(pileSheet, n6, SHEET_OF[st.type[bi]])) flag = true;
+    }
+  }
+  // 187→186 草地变体转化（cs:49383-49397）：首格 frameX∈[756,900] 且支撑行三格非
+  // 草族（2/477/492）→ 六格 frameX-=378、type=186（原版直写六格不查 active）——转化
+  // 后杀除循环按 type==187 匹配不到，等价"转组免死"。
+  if (pileSheet === 187 && st.inBounds(n5, num) && frameX >= 756 && frameX <= 900) {
+    let grassBelow = false;
+    for (let k = n5; k < n5 + 3; k++) {
+      if (!st.inBounds(k, num8)) continue;
+      const bs = SHEET_OF[st.type[st.idx(k, num8)]];
+      if (bs === 2 || bs === 477 || bs === 492) grassBelow = true;
+    }
+    if (!grassBelow) {
+      const t186 = INTERNAL_OF_SHEET.get(186) ?? st.type[ii];
+      for (let k = n5; k < n5 + 3; k++) {
+        for (let l = num; l < num8; l++) {
+          if (!st.inBounds(k, l)) continue;
+          const idx = st.idx(k, l);
+          st.frameX[idx] -= 378;
+          st.type[idx] = t186;
+        }
+      }
+    }
+  }
+  if (!flag) return false;                                 // cs:49416
+  // cs:49421-49435：destroyObject 门内整组 KillTile（仅仍为该 type 的 active 格）
+  for (let k = n5; k < n5 + 3; k++) {
+    for (let l = num; l < num8; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const idx = st.idx(k, l);
+      if (st.flags[idx] && SHEET_OF[st.type[idx]] === pileSheet) killTileGenPile(st, k, l);
+    }
+  }
+  // 掉落表（cs:49436-49855）全走 Main.rand/Item.NewItem——生成期世界物品不在 8 通道
+  // 金标域且本种子 frameX=648 不命中 187 遗物档（918-970），略。
+  // cs:49856-49862：destroyObject=false 后 5×5 TileFrame 复扫（可连锁杀邻组）
+  for (let x = n5 - 1; x < n5 + 4; x++) {
+    for (let y = num - 1; y < num + 4; y++) {
+      tileFrameScoped(st, x, y);
+    }
+  }
+  return true;
+}
+
+/** SquareTileFrame 语境的 TileFrame 子集（cs:82067+）：界内 5 格 padding（cs:82069）、
+ *  非活跃清 half/slope/块漆（cs:82077-82082）、frameImportant 中仅 186/187 大石堆有
+ *  清除语义（Check3x2）；其余 frameImportant/仙人掌/藤蔓分支在本管线触发时点（树
+ *  未生成/沙上无草/藤悬于草下）不产生 8 通道可观测写——LivingTreePass.squareTile
+ *  FrameGen 同款口径。 */
+function tileFrameScoped(st: TileStore, x: number, y: number): void {
+  if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) {
+    st.half[i] = 0;
+    st.slope[i] = 0;
+    st.paint[i] = 0;
+    return;
+  }
+  const sh = SHEET_OF[st.type[i]];
+  if (sh === 186 || sh === 187) check3x2PileFull(st, x, y, sh);
+}
+
+/** SquareTileFrame（cs:80924-80934）：列优先 3×3 调用序。 */
+function squareTileFrameGen(st: TileStore, x: number, y: number): void {
+  for (let d = 0; d < 9; d++) {
+    const dx = ((d / 3) | 0) - 1, dy = (d % 3) - 1;
+    tileFrameScoped(st, x + dx, y + dy);
+  }
+}
+
 /** 把 (x,y) 及相邻同源 tile 转 grass 类型；repeat=true 时 3×3 邻格递归扩散。
  *  ★M3（2026-08-13）：旧实现是陈旧分叉，对齐 MushroomPass.spreadGrassOnce 同款：
  *  ① 补 !active 门（cs:75218）——本仓 inactive 格保留残留 type（幽灵语义），
@@ -49,6 +245,10 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
   // CanBeClearedDuringGeneration=false 的泥（沙漠沙岩族等）不转（cs:75265）
   if (NOT_CLEARABLE.has(st.type[i])) return;
   st.type[i] = grass;
+  // ★NNNNN：cs:75288 SquareTileFrame(i,j)——TileFrame 头清位 + 186/187 大石堆
+  // Check3x2 一致性/支撑校验级联（#73 5 格残差根因；flag2 转化支/树杀手前置在本
+  // 管线所有调用时点恒 no-op，见文件头注）
+  squareTileFrameGen(st, x, y);
   if (!repeat) return;
   // cs:75305-75316：邻格 active && 同 dirt，grassSpread<1000 才递归
   for (let m = x0; m < x1; m++) {

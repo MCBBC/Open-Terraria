@@ -69,9 +69,9 @@ export class SquidCloud extends Entity {
     if (this.t > 150) this.dead = true;
   }
 
-  draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, ImageBitmap | HTMLImageElement>; ensureVImage?: (f: string) => ImageBitmap | HTMLImageElement | null } | null }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; atlas?: { vimages: Map<string, ImageBitmap | HTMLImageElement>; ensureVImage?: (f: string) => ImageBitmap | HTMLImageElement | null } | null }): void {
     if (this.t <= 50 || !r.atlas) return;   // 前 50t 隐形（alpha 255）
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     // ensureVImage 触发懒加载(此前直取且无人预载该表 = 永久隐形,2026-08-13 排雷)
     const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_813.png') : r.atlas.vimages.get('vanilla/Projectile_813.png');

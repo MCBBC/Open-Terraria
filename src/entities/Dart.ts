@@ -233,7 +233,7 @@ export class TrapShot extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标)
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const st = TRAP_SHOT_STYLE[this.kind];
     if (st.invisible) return; // 733 alpha=255：隐形纯发射器（SetDefaults :7440）
@@ -698,7 +698,7 @@ export class Dart extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制(同 TrapShot)
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     // 537 观星者激光：三段束体独占绘制（Main.cs:32124-32156）
     if (this.projId === 537) { this.drawStargazerBeam(ctx); return; }
@@ -1295,7 +1295,7 @@ export class TowerBolt extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     // 世界坐标绘制:原版贴图 Projectile_629(已解包入库);ensureVImage 触发懒加载
     // (2026-08-13 枚举 review:此前直取+无人预载=永久红点兜底)

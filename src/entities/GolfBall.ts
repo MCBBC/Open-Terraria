@@ -136,7 +136,7 @@ export class GolfBall extends Entity {
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     // GetGolfTrailColor（Projectile.cs:10533-10550）—— 球色按投射物 id
     const colors: Record<number, [number, number, number]> = {

@@ -164,7 +164,7 @@ export class Portal extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = r.atlas?.ensureVImage('vanilla/Projectile_602.png');
     const [cr, cg, cb] = portalColor(this.form);

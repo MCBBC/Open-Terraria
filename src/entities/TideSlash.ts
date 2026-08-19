@@ -128,9 +128,9 @@ export class TideSlash extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(451);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const op = Math.max(0, Math.min(1, 1 - this.alpha / 255));
     if (op <= 0.02) return;

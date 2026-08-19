@@ -435,7 +435,7 @@ export class Bobber extends Entity {
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;

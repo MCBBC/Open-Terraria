@@ -217,7 +217,7 @@ export class Minecart extends Entity {
     // RGB = 255-alpha、通道 α = 63-alpha/4（即随龄淡出）；束沿发射向量画到
     // 目标点（束长 = |v|，束端 = 目标盒内随机点）；每 tick 束源重锚车位
     if (this.laserBeams.length) {
-      const ctx = r.canvas.getContext('2d');
+      const ctx = r.ctx;
       if (ctx) {
         ctx.save();
         ctx.lineCap = 'round';
@@ -238,7 +238,7 @@ export class Minecart extends Entity {
     // 未骑乘的矿车原版不存在（坐骑 buff 结束即消失）——保留贴图绘制仅作调试残留态
     if (this.mounted) return;
     const img = r.atlas?.ensureVImage(this.texture);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx || !img) return;
     const fh = Math.floor(img.height / 3);
     ctx.drawImage(img, 0, 0, img.width, fh,

@@ -91,7 +91,7 @@ export class StardustMarkProj extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const bright = (255 - this.alpha) / 255;   // GetAlpha 白度（A=0 → lighter 纯加色）
     if (bright <= 0) return;

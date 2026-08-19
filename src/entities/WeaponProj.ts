@@ -103,7 +103,7 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const img0 = projSprite(projId);
   const natural = drawSize < 0 && img0 && (img0.width > 0) && img0.width > 0;
   const dw = natural ? img0!.width : drawSize > 0 ? drawSize : e.w;
-  const ctx = r.canvas.getContext('2d');
+  const ctx = r.ctx;
   if (!ctx) return;
   const img = img0;
   const hasImg = !!(img && (img.width > 0) && img.width > 0);
@@ -1185,7 +1185,7 @@ export class CounterweightProj extends Entity {
   draw(r: Renderer, cam: Camera): void {
     // 线（配重球同走 aiStyle 99 段链,Main.cs:27799-27908——ai[0] != -2 命中;-3 幽灵仍画线）
     if (this.ai0 !== -2) {
-      const c = r.canvas.getContext('2d');
+      const c = r.ctx;
       const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
       if (c && tex) {
         drawYoyoStringLine(c, tex, this.handX, this.handY, this,
@@ -1358,7 +1358,7 @@ export class YoyoProj extends Entity {
     // FishingLine.png 竖条逐段旋贴、摆垂、线饰品染色（StringLine 共享模块——曾灰直线近似）。
     // ★ai[0] != -2 免画线门（Main.cs:27799——脱离态无线；-3 幽灵仍画线）
     if (this.ai0 !== -2) {
-      const c = r.canvas.getContext('2d');
+      const c = r.ctx;
       const tex = r.atlas?.ensureVImage?.('vanilla/FishingLine.png');
       if (c && tex) {
         drawYoyoStringLine(c, tex, this.handX, this.handY, this,
@@ -1708,7 +1708,7 @@ export class FlailProj extends Entity {
   get aiState(): number { return this.st; }
 
   draw(r: Renderer, cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (ctx) this.drawChain(ctx, r);
     // alpha 原版语义(Main.cs:28965 color *= (255-alpha)/255——越大越透明)
     // 链球族（25/26/35/63/154/247/757）都在 :32360 中心锚组——球心=盒中心、
@@ -2637,7 +2637,7 @@ export class GlowstickProj extends Entity {
     // 原版投射物绘制尺寸 = 贴图原生尺寸 × scale（碰撞盒 6×6 与绘制解耦）——
     // 50/53/515/1089 贴图是 22×6 横条（此前按碰撞盒 6px 画成 1.6px 细丝）；
     // 870 妖精 = 18×96 纵条 6 帧（帧进 5t）；473 = 18×18 单帧
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(this.projId);
     ctx.save();

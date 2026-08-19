@@ -45,7 +45,7 @@ describe('PROJ_ROT_DIAG 剑气族(aiStyle 27,rotation=atan2+0.785 即 +45°,:248
       set strokeStyle(_: string) {}, set globalAlpha(_: number) {}, set lineWidth(_: number) {},
       beginPath() {}, moveTo() {}, lineTo() {}, stroke() {},
     } as unknown as CanvasRenderingContext2D;
-    a.draw({ canvas: { getContext: () => ctx } } as never, {} as never);
+    a.draw({ ctx } as never, {} as never);
     expect(rotate).toHaveLength(1);
     expect(rotate[0]).toBeCloseTo(Math.PI / 4, 5);
   });

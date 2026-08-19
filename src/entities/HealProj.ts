@@ -38,7 +38,7 @@ export class HealProj extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     // 305 尘 183 红雾 / 298 尘 175 青白雾配色近似（弹体本体 alpha 255）
     ctx.fillStyle = this.projType === 305 ? '#D04060' : '#70F0D0';

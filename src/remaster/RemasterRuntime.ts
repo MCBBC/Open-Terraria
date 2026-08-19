@@ -29,6 +29,24 @@ const PROJ_RE = /^vanilla\/Projectile_(\d+)\.png$/;
 const BUFF_RE = /^vanilla\/Buff_(\d+)\.png$/;
 const ITEM_ATLAS_RE = /^vanilla\/Item_Atlas_\d+\.png$/;
 
+/** 坏包防线:全透明 sheet 检测(2026-08-19 用户实报"武器/弹幕/投掷物全隐形")。
+ *  vanilla 镜像 sheet 永远有非透明像素——整图 alpha 全零 = 空导出/坏包,静默注入
+ *  会让该表全家贴图(弹幕/物品图标)隐形且 failedVImages 恒 0,无从归因。
+ *  每 4 像素抽 1(2048² 图集 4M px→1M 采样;apply 为启动/导入时一次性,可接受)。 */
+function canvasHasContent(img: ImageBitmap | HTMLImageElement): boolean {
+  if (typeof document === 'undefined') return true;   // node 测试环境:不拦截
+  try {
+    const c = document.createElement('canvas');
+    c.width = img.width; c.height = img.height;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    if (!ctx || c.width === 0 || c.height === 0) return true;   // 无法检测,保守放行
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    for (let i = 3; i < d.length; i += 16) if (d[i] > 16) return true;
+    return false;
+  } catch { return true; }
+}
+
 /** blob → ImageBitmap(失败回退 Image;tryBitmapUpgrade 同款桥,尊重 ?bitmap=0)。 */
 export async function decodeSheet(blob: Blob): Promise<ImageBitmap | HTMLImageElement> {
   const url = URL.createObjectURL(blob);
@@ -79,7 +97,14 @@ export class RemasterRuntime {
     private decode: (blob: Blob) => Promise<ImageBitmap | HTMLImageElement> = decodeSheet,
     /** 原版重拉注入点(同上) */
     private loadVanilla: (file: string) => Promise<ImageBitmap | HTMLImageElement | null> = loadVanillaSheet,
+    /** 透明度探测注入点(坏包防线,见 canvasHasContent;node 单测注入 stub) */
+    private probeContent: (img: ImageBitmap | HTMLImageElement) => boolean = canvasHasContent,
   ) {}
+
+  /** 启动/导入以来成功注入的文件(DebugReport 可见;restoreVanilla 时移除) */
+  appliedFiles: string[] = [];
+  /** 坏包防线拒绝的 sheet(全透明;DebugReport 可见) */
+  rejectedBlank: string[] = [];
 
   /** 应用一个 pack(混合 sheet 已是完整图,解码即注入)。 */
   async apply(pack: LoadedPack): Promise<ApplyResult> {
@@ -90,6 +115,13 @@ export class RemasterRuntime {
     for (const [file, blob] of pack.sheets) {
       try {
         const img = await this.decode(blob);
+        // ★坏包防线:全透明 sheet 拒绝注入(注入=该表全家贴图静默隐形)
+        if (!this.probeContent(img)) {
+          console.error(`[remaster] 拒绝注入全透明 sheet:${file}(空导出/坏包——注入后该表弹幕/图标将全部隐形)`);
+          this.rejectedBlank.push(file);
+          failed.push({ file, reason: '全透明 sheet(空导出/坏包),已拒绝注入' });
+          continue;
+        }
         if (file.startsWith('vanilla-ui/')) {
           this.atlas.uiimages.set(file, img);
         } else {
@@ -102,6 +134,7 @@ export class RemasterRuntime {
         if (buff) this.setBuffIcon(Number(buff[1]), blob);
         if (ITEM_ATLAS_RE.test(file)) hasItemAtlas = true;
         applied.push(file);
+        this.appliedFiles.push(file);
       } catch (e) {
         failed.push({ file, reason: (e as Error).message });
       }
@@ -140,6 +173,7 @@ export class RemasterRuntime {
       const proj = PROJ_RE.exec(file);
       if (proj) setProjSpriteOverride(Number(proj[1]), src);
       restored.push(file);
+      this.appliedFiles = this.appliedFiles.filter((f) => f !== file);
     }));
     // 清 buff 覆盖
     for (const url of this.buffIcons.values()) URL.revokeObjectURL(url);

@@ -276,7 +276,7 @@ export class NebulaBlazeBolt extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(this.projId);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;            // GetAlpha :76359（白 × Opacity）
     if (a <= 0.02) return;
@@ -439,7 +439,7 @@ export class LunarFlareStar extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     if (!this.exploded) return;                      // 飞行相 alpha=255 → GetAlpha≈0 不画
     const img = projSprite(645);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;

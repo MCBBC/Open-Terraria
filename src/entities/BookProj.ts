@@ -124,7 +124,7 @@ export class BookProj extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制（Renderer 实体循环运行在世界变换内）。rotation 直用 AI 维护的
     // rot（书页朝向语义：angleTo(player)+π/2 锚定，冲撞后滚转）
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const sliced = projFrameImg(1092, this.frame);
     const img = sliced ?? projSprite(1092);

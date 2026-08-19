@@ -48,6 +48,13 @@ export class RemasterManager {
       const r = await this.runtime.apply(pack);
       files += r.applied.length;
     }
+    // 启动可观测性(2026-08-19 武器/弹幕全隐形事件:包注入此前完全静默)
+    const enabled = installed.filter((p) => p.meta.enabled).length;
+    const rejected = this.runtime.rejectedBlank.length;
+    if (installed.length) {
+      console.log(`[remaster] 启动应用素材包:${enabled}/${installed.length} 个启用,注入 ${files} 张 sheet`
+        + (rejected ? `,拒绝 ${rejected} 张全透明坏 sheet(弹幕/图标将保持原版;F5 报告 remaster 段可见清单)` : ''));
+    }
     return { packs: installed.length, files };
   }
 

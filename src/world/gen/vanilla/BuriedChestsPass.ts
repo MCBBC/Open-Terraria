@@ -716,8 +716,39 @@ function placeBuriedChestInner(
   let slopeL = -1, slopeR = -1;   // trySlope 压平的坡度（失败时回填，cs:37567-37575）
   for (; gy < st.h - 10; gy++) {
     const k = st.idx(i, gy);
+    // ★OOOOO：num2/num3 是 vanilla 循环体【行内变量】（cs:35943-44）——每行重置；
+    //   非落定行（半砖行）压平的 (i-1,k) 坡 vanilla 不回填（下一轮 num2=-1）。
+    slopeL = -1; slopeR = -1;
     if (st.liquid[k] > 0 && st.liquidType[k] === 4) return false;              // anyShimmer → 整体失败
     if (st.flags[k] && st.type[k] === LARVA) return false;                      // 幼虫 231 → 整体失败
+    // ★OOOOO：trySlope 门（cs:35951-35968）在 SolidTile 判定【之前】逐行执行，门谓词 =
+    //   active && tileSolid && !tileSolidTop（不含 slope/half！）——压平 (i,k) 顶坡后
+    //   SolidTile 即真 → 箱【落在坡上】。曾把 ±30 盒+压平塞在 solidDrop 门内（要求
+    //   slope==0 才进门）→ (i,gy) 顶坡格直接穿落到下一行、箱体撞上坡格被拒：水箱/
+    //   海底箱的 (i,gy) 顶坡落位全数失败（12345 (3857,349)→(3856,352) sl1/m (329,498)
+    //   →(328,499) sl1 金标实锤——vanilla 落坡、JS 多耗 19 趟重掷后落别处，流级分叉）。
+    //   ±30 盒（style17）也随门提前：vanilla 在坠落途中的**任意实心行**（含半砖行）
+    //   都会查盒拒置，非仅落定行。
+    if (opts.trySlope && st.flags[k] && genSolidType(st.type[k]!)
+      && !PC_SOLID_TOP.has(TILE_DEFS[st.type[k]!]?.vanilla?.sheet ?? -1)) {
+      if (opts.style === 17) {
+        for (let l = i - 30; l <= i + 30; l++) {
+          for (let m = gy - 30; m <= gy + 30; m++) {
+            if (l < 5 || m < 5 || l >= st.w - 5 || m >= st.h - 5) return false;  // InWorld(l,m,5)
+            const nk = st.idx(l, m);
+            if (st.flags[nk] && (st.type[nk] === CHEST || st.type[nk] === CHEST2)) return false;
+          }
+        }
+      }
+      if (st.slope[st.idx(i - 1, gy)] >= 1 && st.slope[st.idx(i - 1, gy)] <= 2) {
+        slopeL = st.slope[st.idx(i - 1, gy)];
+        st.slope[st.idx(i - 1, gy)] = 0;
+      }
+      if (st.slope[k] >= 1 && st.slope[k] <= 2) {
+        slopeR = st.slope[k];
+        st.slope[k] = 0;
+      }
+    }
     // ★±2 巨石/祭坛拒绝在扫描循环内**逐行**执行（cs:35992-36002，锚=当前行 k：
     //   InWorld(n,num6,100) && Boulders{138,484,664,665,711-716} || 26 || 237）。
     //   曾在进循环前以起始行 j 只查一次——起始行下方 2 格内的滚石/祭坛全部漏检
@@ -731,30 +762,7 @@ function placeBuriedChestInner(
         if (BOULDER_TILES.has(tt) || tt === ALTAR || tt === TALTAR) return false;
       }
     }
-    if (solidDrop(i, gy)) {
-      // trySlope 门（cs:35951-35968）：style 17 时 ±30 盒内不得有箱/越界；
-      // 压平 (i-1,gy)/(i,gy) 的顶坡供放置（失败时回填）
-      if (opts.trySlope && opts.style === 17) {
-        for (let l = i - 30; l <= i + 30; l++) {
-          for (let m = gy - 30; m <= gy + 30; m++) {
-            if (l < 5 || m < 5 || l >= st.w - 5 || m >= st.h - 5) return false;  // InWorld(l,m,5)
-            const nk = st.idx(l, m);
-            if (st.flags[nk] && (st.type[nk] === CHEST || st.type[nk] === CHEST2)) return false;
-          }
-        }
-      }
-      if (opts.trySlope) {
-        if (st.slope[st.idx(i - 1, gy)] >= 1 && st.slope[st.idx(i - 1, gy)] <= 2) {
-          slopeL = st.slope[st.idx(i - 1, gy)];
-          st.slope[st.idx(i - 1, gy)] = 0;
-        }
-        if (st.slope[k] >= 1 && st.slope[k] <= 2) {
-          slopeR = st.slope[k];
-          st.slope[k] = 0;
-        }
-      }
-      break;
-    }
+    if (solidDrop(i, gy)) break;
   }
   if (gy >= st.h - 10) return false;
   if (!solidDrop(i, gy)) return false;

@@ -14,8 +14,23 @@ import { autoFrameAt } from '../render/VanillaTiler';
 import { TILE_ANIM_RATE, animFrameIdx, animYOffset, tileAnim } from '../render/TileAnim';
 import { vanillaFrameIdx } from '../render/Renderer';
 import { assetCacheState } from '../net/AssetCache';
+import { projSpriteHealth } from '../entities/Arrow';
 import type { Game } from '../core/Game';
 import type { Enemy } from '../entities/Enemy';
+
+/** 素材重制包注入状态(__swRemaster 只读;缺句柄/node 环境返回 null) */
+function remasterDebugState(): { appliedCount: number; appliedSample: string[]; rejectedBlank: string[] } | null {
+  const w = globalThis as unknown as {
+    __swRemaster?: { runtime?: { appliedFiles?: string[]; rejectedBlank?: string[] } };
+  };
+  const rt = w.__swRemaster?.runtime;
+  if (!rt) return null;
+  return {
+    appliedCount: rt.appliedFiles?.length ?? 0,
+    appliedSample: (rt.appliedFiles ?? []).slice(0, 10),
+    rejectedBlank: (rt.rejectedBlank ?? []).slice(0, 10),
+  };
+}
 
 export const DEBUG_REPORT_SCHEMA_VERSION = 3;
 
@@ -795,6 +810,14 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         vuiMissKeys: g.atlas.vuiMissKeys().slice(0, 10),
         vuiFallbackMisses: g.atlas.vuiFallbackMisses().length,
       } : null,
+      // 素材重制包注入状态(2026-08-19 武器/弹幕全隐形事件:坏包静默注入
+      // 此前无任何诊断面,failedVImages 恒 0 无从归因——现把注入清单/拒注
+      // 清单直接摆进报告)
+      remaster: remasterDebugState(),
+      // 在场弹幕的贴图健康(加载断链=弹幕活着但贴图未入缓存,一眼可见)
+      projSprites: projSpriteHealth(
+        (g.entities?.projectiles ?? []).map((q) => (q as { projId?: number }).projId ?? -1),
+      ),
       subsystems: {
         waterfall: optionalDebugState(g.renderer?.waterfalls ?? null),
         liquids: liquidDebugState(),

@@ -251,7 +251,7 @@ export class SkyDragonSpin extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(707);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;             // GetAlpha 707：white×(255−alpha)（:76224-76228）
     if (a <= 0.02) return;
@@ -374,7 +374,7 @@ export class SkyDragonSwing extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(708);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;
@@ -479,7 +479,7 @@ export class SkyDragonShot extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(709);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;
@@ -592,7 +592,7 @@ export class SkyDragonCircle extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(1110);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = (255 - this.alphaI) / 255;
     if (a <= 0.02) return;

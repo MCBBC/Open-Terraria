@@ -119,7 +119,7 @@ export class PortalGunBolt extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = r.atlas?.ensureVImage('vanilla/Projectile_601.png');
     const [pr, pg, pb] = portalColor(this.form);

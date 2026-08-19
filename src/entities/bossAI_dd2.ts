@@ -1501,7 +1501,7 @@ export class BetsyBreath extends Entity {
    *  旋转 = ang + 2π(v+GlobalTime·1.2)·0.2 + seg·2π/5；可见窗/色层照抄
    *  （色乘以 alpha 档近似——白层 A=0 原版即不可见）。 */
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const sheet = projSprite(687);
     if (!sheet || !(sheet as HTMLImageElement).complete || sheet.width === 0) return;
@@ -2599,7 +2599,7 @@ export class DD2GoblinBomb extends Entity {
     }
   }
   draw(r: import('../render/Renderer').Renderer, cam: import('../render/Camera').Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = r.atlas?.ensureVImage('vanilla/Projectile_681.png');
     ctx.save();

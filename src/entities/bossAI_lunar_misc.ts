@@ -1970,7 +1970,7 @@ export class LunarOrb extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projFrameImg(this.kind, this.kind === 574 ? 1 : this.frame);
     ctx.save();
@@ -2249,7 +2249,7 @@ export class VortexPortalProj extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     // Main.cs:32622-32650：Extra_50 涡旋三层 + 本体贴图（−rot×0.7、α×0.4）
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const opacity = (255 - this.alpha) / 255;
     if (opacity <= 0) return;

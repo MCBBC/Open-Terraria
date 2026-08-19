@@ -8,9 +8,9 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { placeBuriedChest, nextJungleItem, type ChestSink } from './BuriedChestsPass';
+import { placeBuriedChest, nextJungleItem, killTileChest, type ChestSink } from './BuriedChestsPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
-import { flipGenSolid } from './GenSolid';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 function sheetTile(sheet: number): number {
   for (let id = 0; id < TILE_DEFS.length; id++) {

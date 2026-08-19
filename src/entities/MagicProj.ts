@@ -65,7 +65,7 @@ export class MagicProj extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标)
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     if (this.projId > 0 && this.drawProjTexture(ctx)) return;
     // 兜底圆点(projId 未指定 或 贴图未就绪)

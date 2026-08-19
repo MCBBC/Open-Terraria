@@ -953,7 +953,7 @@ export class MartianDeathray extends Entity {
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     // 光柱近似（Projectile_447.png 30×4 帧条——竖束以原色半透明柱呈现）
     ctx.save();

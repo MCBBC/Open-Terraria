@@ -724,13 +724,10 @@ function check3x3KF(st: TileStore, rng: RNG, queue: number[], x: number, y: numb
         || st.frameY[q] !== (l - ay) * 18 + rowBlk * 54) bad = true;
     }
   }
-  let supOk3 = true;
   for (let m = ax; m < ax + 3; m++) {
-    if (!supportOk(st, m, ay + 3)) { supOk3 = false; break; }    // SolidTileAllowBottomSlope
+    if (!supportOk(st, m, ay + 3)) { bad = true; break; }        // SolidTileAllowBottomSlope
   }
-  if (!supOk3) bad = true;
   if (sheet === 231 && HIVE225 >= 0 && !genSolidType(HIVE225)) bad = false;   // cs:53158
-  (globalThis as { __jjC3x?: (x: number, y: number, sh: number, bad: boolean, sup: boolean) => void }).__jjC3x?.(x, y, sheet, bad, supOk3);
   if (!bad) return;
   for (let k = ax; k < ax + 3; k++) {
     for (let l = ay; l < ay + 3; l++) {

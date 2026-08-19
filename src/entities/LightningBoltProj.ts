@@ -216,7 +216,7 @@ export class LightningBoltProj extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     // Main.cs:33678-33760：沿 oldPos 逐段 DrawLaser(Extra_33)。466 三层 / 580 两层
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const tex = extra33();
     // 折线点列：oldPos（最老→最新，Zero 槽跳过）→ 本体中心（:33705 oldPos[0]→end 段）

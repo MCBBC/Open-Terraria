@@ -59,6 +59,22 @@ describe('RemasterRuntime 注入矩阵', () => {
     expect(atlas.vimages.has('vanilla/Projectile_98.png')).toBe(true);
     expect(projSprite(98)).toBeTruthy();  // override 已写进 Arrow.spriteCache
   });
+  it('坏包防线:全透明 sheet 拒绝注入(2026-08-19 武器/弹幕全隐形事件)', async () => {
+    const atlas = makeAtlas();
+    const decode = async (blob: Blob & { __file?: string }) =>
+      ({ __decoded: blob.__file ?? 'anon' } as unknown as ImageBitmap);
+    const loadVanilla = async () => null;
+    // 探测 stub:Projectile_777 判为全透明,其余有内容
+    const rt = new RemasterRuntime(atlas, decode, loadVanilla,
+      (img) => String((img as { __decoded?: string }).__decoded) !== 'vanilla/Projectile_777.png');
+    const r = await rt.apply(makePack(['vanilla/Projectile_777.png', 'vanilla/NPC_2.png']));
+    expect(r.applied).toEqual(['vanilla/NPC_2.png']);
+    expect(r.failed).toEqual([{ file: 'vanilla/Projectile_777.png', reason: expect.stringContaining('全透明') }]);
+    expect(atlas.vimages.has('vanilla/Projectile_777.png')).toBe(false);
+    expect(projSprite(777)).toBeFalsy();          // spriteCache 未被坏包污染
+    expect(rt.rejectedBlank).toEqual(['vanilla/Projectile_777.png']);
+    expect(rt.appliedFiles).toEqual(['vanilla/NPC_2.png']);
+  });
   it('Buff 图标:buffIconUrl 可查;restoreVanilla 后清空', async () => {
     const atlas = makeAtlas();
     const { rt } = makeStub(atlas);

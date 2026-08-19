@@ -40,6 +40,7 @@ function makeAtlasR(img: { naturalWidth: number } | null) {
   const { calls, ctx } = makeRecCtx();
   const r = {
     canvas: { getContext: () => ctx },
+    ctx,   // 2026-08-19 世界层重构后实体统一画 r.ctx(曾直取主画布=全弹幕隐形)
     atlas: img ? { ensureVImage: () => img, vimages: new Map() } : null,
   };
   return { calls, r: r as never };
@@ -51,7 +52,11 @@ beforeAll(() => {
   vi.stubGlobal('Image', class {
     naturalWidth = NEXT_IMG.w; naturalHeight = NEXT_IMG.h;
     width = NEXT_IMG.w; height = NEXT_IMG.h;
-    complete = true; src = '';
+    complete = true;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    // 同步装载(projSprite 2026-08-19 改 onload 才入缓存——坏 Image 不再永久驻缓存)
+    set src(_v: string) { this.onload?.(); }
   });
 });
 

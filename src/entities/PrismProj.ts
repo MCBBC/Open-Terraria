@@ -148,8 +148,8 @@ export class PrismProng extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
-    const ctx = r.canvas.getContext('2d');
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const ctx = r.ctx;
     if (!ctx || this.beamLen < 8) return;
     const [rr, gg, bb] = hueToRgb(this.idx / 6);
     const a = Math.max(0, Math.min(1, this.opacity * 0.75));
@@ -246,10 +246,10 @@ export class PrismProj extends Entity {
     for (const q of this.prongs) q.dead = true;
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     // 晶体本体（Projectile_633.png 26×120 = 5 帧；帧按充能推进≈3t/帧）
     const img = projSprite(633);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const fh = img.height / 5;
     const f = Math.floor(this.frame / 3) % 5;
@@ -331,8 +331,8 @@ export class BlasterBeam extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
-    const ctx = r.canvas.getContext('2d');
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const ctx = r.ctx;
     if (!ctx || this.beamLen < 8) return;
     const x2 = this.cx + this.vx * this.beamLen, y2 = this.cy + this.vy * this.beamLen;
     ctx.save();
@@ -433,9 +433,9 @@ export class ChargedBlaster extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(460);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     ctx.save();
     ctx.translate(this.cx, this.cy);

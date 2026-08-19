@@ -85,7 +85,7 @@ function recCtx() {
 
 function drawAndRecord(m: MinionProj): ReturnType<typeof recCtx>['rec'] {
   const { rec, ctx } = recCtx();
-  m.draw({ canvas: { getContext: () => ctx } } as never);
+  m.draw({ ctx } as never);
   return rec;
 }
 

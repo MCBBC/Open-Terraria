@@ -1461,7 +1461,7 @@ export class MinionProj extends Entity {
     // 原版投射物贴图是竖向多帧行（projFrames 表）：按帧高切片，1:1 像素尺寸。
     // 爆炸烈焰塔走 AI_130 帧状态机（待机帧 0 / 开火帧 1-6 每 4t），其余哨兵/随从
     // age/8 匀速循环；哨兵按 facing 翻转（原版 spriteDirection）
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const frames = projFrameCount(this.projId);
     let frame: number;
@@ -1638,7 +1638,7 @@ export class TigerPounce extends Entity {
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projFrameImg(818, 0);
     ctx.save();

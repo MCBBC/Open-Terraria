@@ -55,9 +55,29 @@ const WALL_HARDSAND = 216;      // WallID.HardenedSand（天然硬化沙墙）
 const NON_SOLID_SAVE_SLOPES = idsByVanillaSheet(131, 351, 336, 340, 341, 342, 343, 344);
 const PLATFORMS = idsByVanillaSheet(19, 427, 435, 436, 437, 438, 439);
 
-/** SaveSlopes[t] = tileSolid[t]（含 pass 头 137/130 翻转）∪ NonSolidSaveSlopes */
+const SHEET_OF = new Int32Array(TILE_DEFS.length).fill(-1);
+for (let q = 0; q < TILE_DEFS.length; q++) {
+  const s = TILE_DEFS[q]?.vanilla?.sheet;
+  if (typeof s === 'number') SHEET_OF[q] = s;
+}
+
+/** SaveSlopes[t] = tileSolid[t] ∪ NonSolidSaveSlopes（TileID.cs:425-429 PostSetupContent
+ *  静态构造——**一次性**从 pristine Main.tileSolid 拷贝,生成期一切翻转（含本 pass
+ *  头 137/130=false、窗口期 225/192/481-483=false）不回写）。
+ *  ★NNNNN 批勘误（2026-08-19，同 IIII 批 TileCleanupPass 勘误）：曾读 live
+ *  genSolidType → QuickCleanup 窗口 225 蜂巢/192 活树叶/137 机关陷阱（live 均 false）
+ *  误入 ClearSlope 支保活性,vanilla 走静态 true 进 else 支把 topSlope/半砖且下方
+ *  不实心的浮空格清除 → #70 T0>225×281+T0>192×139+T0>137×7+H1>0×148+S 族
+ *  （vanilla 清除后保留半砖/坡位,JS ClearSlope 清零=双症状）。
+ *  pristine 三族差与 TileCleanupPass.isSaveSlope 同款：平台族 sheet
+ *  {19,239,380,427,435-439}/192 活树叶/481-483 裂砖原版静态 true、仓库数据 false。 */
 function isSaveSlope(t: number): boolean {
-  return (genSolidType(t) && !!TILE_DEFS[t]?.solid) || NON_SOLID_SAVE_SLOPES.has(t);
+  const sh = SHEET_OF[t] ?? -1;
+  const pristineSolid = !!TILE_DEFS[t]?.solid
+    || sh === 19 || sh === 239 || sh === 380 || sh === 427
+    || (sh >= 435 && sh <= 439)
+    || sh === 192 || sh === 481 || sh === 482 || sh === 483;
+  return pristineSolid || NON_SOLID_SAVE_SLOPES.has(t);
 }
 
 /** WorldGen.SolidTile(cs:42370)：active && tileSolid && !tileSolidTop && !halfBrick
@@ -153,12 +173,15 @@ export function runQuickCleanupPass(st: TileStore, rng: RNG, gs: GenState): void
         const bottomSlope = st.slope[t] === 3 || st.slope[t] === 4;
         if (topSlope || st.half[t] === 1) {
           if (st.type[t] !== HIVE || st.half[t] === 0) {
-            if (!solidTile(st, i, j + 1)) st.setTileSilent(i, j, 0);
-            if (st.type[st.idx(i + 1, j)] === TRAP || st.type[st.idx(i - 1, j)] === TRAP) st.setTileSilent(i, j, 0);
+            // cs:18082/18086 tile.active(false) 只清活性位——type/half/slope/wall/
+            // liquid 全保留（dump70 实证 vanilla 清除格 half=1/slope=2 残留）。
+            // 曾用 setTileSilent(i,j,0) 连带清 type/half/slope → 三通道假差。
+            if (!solidTile(st, i, j + 1)) st.flags[t] = 0;
+            if (st.type[st.idx(i + 1, j)] === TRAP || st.type[st.idx(i - 1, j)] === TRAP) st.flags[t] = 0;
           }
         } else if (bottomSlope) {
-          if (!solidTile(st, i, j - 1)) st.setTileSilent(i, j, 0);
-          if (st.type[st.idx(i + 1, j)] === TRAP || st.type[st.idx(i - 1, j)] === TRAP) st.setTileSilent(i, j, 0);
+          if (!solidTile(st, i, j - 1)) st.flags[t] = 0;
+          if (st.type[st.idx(i + 1, j)] === TRAP || st.type[st.idx(i - 1, j)] === TRAP) st.flags[t] = 0;
         }
       }
     }

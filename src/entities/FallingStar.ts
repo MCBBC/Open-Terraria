@@ -88,7 +88,7 @@ export class FallingStar extends Entity {
 
   draw(r: import('../render/Renderer').Renderer): void {
     if (this.warmup > 0) return; // Spawner 隐形（alpha 255）
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     ctx.save();
     ctx.translate(this.cx, this.cy);

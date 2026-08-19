@@ -83,7 +83,7 @@ export class FallingBlock extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制(实体循环在世界变换内):取该 tile 的原版表首帧,随下落旋转
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx || !r.atlas) return;
     const tid = TILE_BY_KEY[this.tileKey];
     const sheet = tid !== undefined ? TILE_DEFS[tid]?.vanilla?.sheet : undefined;

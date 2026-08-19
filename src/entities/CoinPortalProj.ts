@@ -36,7 +36,7 @@ export class CoinPortalProj extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const a = Math.max(0, Math.min(1, (255 - this.alpha) / 255)); // GetAlpha ×(1-α/255)（:76261-76265）
     ctx.save();

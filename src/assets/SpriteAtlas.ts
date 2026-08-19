@@ -155,6 +155,23 @@ function hardAlpha(img: ImageBitmap | HTMLImageElement): HTMLCanvasElement {
   return c;
 }
 
+/** 驱逐 SW 资产缓存中该文件的条目(best-effort,失败静默——dev 无 SW 时
+ *  caches API 仍可写,但无人读它,无副作用)。贴图加载失败时调用,让 TTL
+ * 重试能拿到网络新字节而非同一份缓存毒。 */
+export function evictSwCacheEntry(file: string): void {
+  if (typeof caches === 'undefined') return;
+  const url = new URL('sprites/' + encodeURI(file), location.href).href;
+  void (async () => {
+    try {
+      for (const name of await caches.keys()) {
+        if (!name.startsWith('sw-assets-v')) continue;
+        const c = await caches.open(name);
+        await c.delete(url);
+      }
+    } catch { /* 隐私模式/权限异常忽略 */ }
+  })();
+}
+
 export class SpriteAtlas {
   data = atlasJson as unknown as AtlasData;
   resources = resourcesJson as unknown as ResourcesData;
@@ -453,7 +470,7 @@ export class SpriteAtlas {
     // 曾把 note 一起吞掉 → 表晚到无人重烘 = 缺表 fallback 钉死。failed 同 note:
     // 重试成功会二次 land → onLoaded → 重烘,链路反而闭环
     if (this.bakeTracker?._baking) this.bakeTracker.note(file);
-    if (this._iconPending.has(file) || this._vImageFailed.has(file)) return null;
+    if (this._iconPending.has(file) || this.vImageFailed(file)) return null;
     this._iconPending.add(file);
     const im = new Image();
     im.onload = () => {
@@ -471,17 +488,28 @@ export class SpriteAtlas {
     };
     im.onerror = () => {
       this._iconPending.delete(file);
-      this._vImageFailed.add(file);   // 永久失败:不再重复请求,供消费方分级告警
+      // ★TTL 失败负缓存(2026-08-19 用户实报"武器/弹幕/投掷物全隐形"):旧版
+      // 永久黑名单——一次瞬时失败(vite 重启窗口/SW 缓存投毒条目/断网半秒)
+      // = 该贴图【本页面生命周期内】永久消失,与"文件真不存在"不可区分。
+      // 改 10s 冷却后允许重试;失败瞬间顺带驱逐 SW 缓存里的同路径条目
+      // (cache-first 下不驱逐则重试永远再吃同一份坏字节)
+      this._vImageFailed.set(file, performance.now());
+      void evictSwCacheEntry(file);
     };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
   }
-  /** 表是否已确认加载失败(404 等)——与"加载中瞬态"区分 */
-  vImageFailed(file: string): boolean { return this._vImageFailed.has(file); }
-  private _vImageFailed = new Set<string>();
+  /** 表是否处于失败冷却(10s 内视为失败,供消费方分级告警;过期自动可重试) */
+  vImageFailed(file: string): boolean {
+    const at = this._vImageFailed.get(file);
+    if (at === undefined) return false;
+    if (performance.now() - at > 10_000) { this._vImageFailed.delete(file); return false; }
+    return true;
+  }
+  private _vImageFailed = new Map<string, number>();
 
   // ---- 资产健康只读视图(F5 调试报告 assetHealth 段;运行期防线,2026-08-13) ----
-  failedVImages(): string[] { return [...this._vImageFailed]; }
+  failedVImages(): string[] { return [...this._vImageFailed.keys()]; }
   failedUiImages(): string[] { return [...this._uiFailed]; }
   vuiMissKeys(): string[] { return [..._vuiKeyMisses]; }
   /** 设计内回退 miss(静默但可审计) */

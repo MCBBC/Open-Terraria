@@ -50,7 +50,7 @@ function makeCtx() {
 
 /** Renderer 桩：draw 只取 canvas.getContext('2d') */
 function makeRenderer(ctx: ReturnType<typeof makeCtx>) {
-  return { canvas: { getContext: () => ctx } } as unknown as Renderer;
+  return { ctx } as unknown as Renderer;
 }
 
 function makeGame(): GameHooks {

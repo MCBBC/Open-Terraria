@@ -224,7 +224,7 @@ export class CultistRitualCircle extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(490);
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -350,7 +350,7 @@ export class IceMistCloud extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const bright = (255 - this.alpha) / 255;
     if (bright <= 0) return;
@@ -480,7 +480,7 @@ export class LightningOrb extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     // Main.cs:32812 帧切分支：Projectile_465.png 四帧行按 frame 切片居中、alpha 渐显
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const bright = (255 - this.alpha) / 255;
     if (bright <= 0) return;

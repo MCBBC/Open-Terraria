@@ -81,9 +81,9 @@ export class ChainsawProj extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(509);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const frames = Math.max(1, Math.round(img.height / img.width));
     const fh = img.height / frames;

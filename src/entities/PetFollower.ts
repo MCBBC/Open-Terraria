@@ -527,7 +527,7 @@ export class PetFollower extends Entity {
   // ===================== 绘制 =====================
   draw(r: Renderer, _cam: Camera): void {
     const img = r.atlas?.ensureVImage(`vanilla/Projectile_${this.projId}.png`);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx || !img) return;
     if (!this.params) { this.legacyDraw(ctx, img); return; }
     const frames = Math.max(1, this.params.e.frames ?? 1);

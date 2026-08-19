@@ -87,9 +87,9 @@ export class RainbowSegment extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(251);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const a = Math.max(0, Math.min(1, (255 - this.alpha) / 255));   // GetAlpha 亮度=255−alpha
     if (a <= 0.01) return;

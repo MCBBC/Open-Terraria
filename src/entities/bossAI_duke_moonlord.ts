@@ -686,7 +686,7 @@ export class DukeSharknadoBolt extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     ctx.fillStyle = '#8FD8FF';
     ctx.beginPath();
@@ -820,7 +820,7 @@ export class DukeSharknadoTornado extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     ctx.save();
     ctx.globalAlpha = 1 - this.alpha / 255;
@@ -1056,7 +1056,7 @@ export class MoonLeechProj extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(456);
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -1262,7 +1262,7 @@ export class MLDeathray extends Entity {
   }
 
   draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const scale = Math.min(this.maxScale, Math.sin((this.age * Math.PI) / 180) * 10 * this.maxScale);
     if (scale <= 0.01 || this.len <= 1) return;

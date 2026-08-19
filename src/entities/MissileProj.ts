@@ -477,8 +477,8 @@ export class MagicMissileProj extends Entity {
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
-    const ctx = r.canvas.getContext('2d');
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const ctx = r.ctx;
     if (!ctx) return;
     const speed = Math.hypot(this.vx, this.vy);
     // ---- 79 彩虹拖尾（RainbowRodDrawer.cs:12-37 的 canvas 近似：沿 oldPos 逐段绘
@@ -731,8 +731,8 @@ export class FlyingKnifeProj extends Entity {
     game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
-    const ctx = r.canvas.getContext('2d');
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(this.projId);
     if (!img || !(img.width > 0) || img.width === 0) return;
@@ -839,8 +839,8 @@ export class StarfuryStar extends Entity {
     game.onProjectileDeath?.(9, this.x, this.y, this.w, this.h);
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
-    const ctx = r.canvas.getContext('2d');
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projSprite(9);
     if (!img || !(img.width > 0) || img.width === 0) return;

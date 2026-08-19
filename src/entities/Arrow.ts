@@ -3,7 +3,7 @@
 // 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
-import { upgradeToBitmap } from '../assets/SpriteAtlas';
+import { SpriteAtlas, upgradeToBitmap, evictSwCacheEntry } from '../assets/SpriteAtlas';
 import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
@@ -15,16 +15,58 @@ import type { Camera } from '../render/Camera';
 
 /** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
 const spriteCache = new Map<number, ImageBitmap | HTMLImageElement>();
+/** 在飞去重 + 失败 10s 冷却(2026-08-19 前把未加载完的 Image 先塞缓存:一次失败
+ *  = 坏 Image(width 0)永久驻缓存,该弹幕本会话隐形且无重试——与 ensureVImage
+ *  的 TTL 语义对齐;失败顺带驱逐 SW 缓存同路径条目防重吃坏字节) */
+const spritePending = new Set<number>();
+const spriteFailTtl = new Map<number, number>();
 export function projSprite(projId: number): ImageBitmap | HTMLImageElement | null {
-  let img = spriteCache.get(projId);
-  if (img !== undefined) return img ?? null;
+  const hit = spriteCache.get(projId);
+  if (hit !== undefined) return hit;
   if (typeof Image === 'undefined') return null;
+  const at = spriteFailTtl.get(projId);
+  if (at !== undefined) {
+    if (performance.now() - at > 10_000) spriteFailTtl.delete(projId);
+    else return null;
+  }
+  if (spritePending.has(projId)) return null;
+  spritePending.add(projId);
   const im = new Image();
-  im.onload = () => upgradeToBitmap(im, (b) => spriteCache.set(projId, b));
-  img = im;
-  img.src = `sprites/vanilla/Projectile_${projId}.png`;
-  spriteCache.set(projId, img);
-  return img;
+  im.onload = () => {
+    spritePending.delete(projId);
+    spriteFailTtl.delete(projId);
+    // has 门(双重):setProjSpriteOverride(素材包)可能已在飞行期间同步写入——
+    // 晚到的原版图/bitmap 不得覆盖包注入图。非 bitmap 环境(node 测试/逃生门)
+    // 直接落 Image——upgradeToBitmap 在 USE_BITMAP=false 时两个回调都不调
+    const land = (x: ImageBitmap | HTMLImageElement) => { if (!spriteCache.has(projId)) spriteCache.set(projId, x); };
+    if (!SpriteAtlas.USE_BITMAP) { land(im); return; }
+    upgradeToBitmap(im, land, () => land(im));   // bitmap 失败退 Image
+  };
+  im.onerror = () => {
+    spritePending.delete(projId);
+    spriteFailTtl.set(projId, performance.now());
+    void evictSwCacheEntry(`vanilla/Projectile_${projId}.png`);
+  };
+  im.src = `sprites/vanilla/Projectile_${projId}.png`;
+  // 同步装载替身(node 测试的 src setter 即触发 onload)当次调用即可用;
+  // 浏览器真实 onload 异步,这里仍 null,消费方下帧重查自愈
+  const synced = spriteCache.get(projId);
+  return synced ?? null;
+}
+
+/** 调试报告用:在场弹幕的贴图健康采样(id → 缓存命中/尺寸;cached=false 且
+ *  弹幕早已在场=加载链断了,F5 报告一眼定位) */
+export function projSpriteHealth(ids: Iterable<number>): Array<{ id: number; cached: boolean; w: number; h: number }> {
+  const out: Array<{ id: number; cached: boolean; w: number; h: number }> = [];
+  const seen = new Set<number>();
+  for (const id of ids) {
+    if (!Number.isInteger(id) || id <= 0 || seen.has(id)) continue;
+    seen.add(id);
+    const s = spriteCache.get(id);
+    out.push({ id, cached: !!s, w: s?.width ?? 0, h: s?.height ?? 0 });
+    if (out.length >= 12) break;
+  }
+  return out;
 }
 
 /** 预热弹幕贴图(2026-08-13,用户报"发射阶段回退兜底,过一会才正确"):
@@ -513,7 +555,7 @@ export class Arrow extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标——
     // 曾双变换把箭甩出屏幕,表现为"箭隐形但能命中")
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     // 泰拉刃光束 985 独占（DrawProj_TerraBlade2Shot Main.cs:27670-27712）：
     // Frame(1,4) 四帧 170×170（帧 0 主体/帧 3 白芯）；多层镜像叠画：

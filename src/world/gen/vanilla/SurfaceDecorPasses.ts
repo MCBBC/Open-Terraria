@@ -126,12 +126,15 @@ const inWorld = (st: TileStore, x: number, y: number, fluff = 0): boolean =>
   x >= fluff && y >= fluff && x < st.w - fluff && y < st.h - fluff;
 const activeAt = (st: TileStore, x: number, y: number): boolean =>
   st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
-/** WorldGen.SolidTile2（cs:70231 近似）：active && tileSolid（半砖/坡面放行） */
+/** WorldGen.SolidTile2（cs:70186）：active && tileSolid && slope==0 && !halfBrick
+ *  && !inActive。★NNNNN：曾"半砖/坡面放行"近似——倒木 Place3x2 在坡面草上被
+ *  vanilla 拒（9293480 (405,230) s2 草实锤：vanilla 拒放 → 无 logX/logY 掷，JS
+ *  误放 → 多掷 Next(2) → 掷流雪球 #75 16 格）。inActive 生成期恒 0 不查。 */
 const solidTile2 = (st: TileStore, x: number, y: number): boolean => {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
-  return !!TILE_DEFS[st.type[i]]?.solid;
+  return !!TILE_DEFS[st.type[i]]?.solid && st.slope[i] === 0 && st.half[i] === 0;
 };
 /** WorldGen.SolidTileAllowBottomSlope（cs:70211）：active && (solid||solidTop) && 非顶坡 && 非半砖 */
 const solidAllowBottomSlope = (st: TileStore, x: number, y: number): boolean => {
@@ -416,7 +419,7 @@ function orePatch(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number): 
     oreHelper(st, num, num2);
     if (rng.int(0, 3) === 0) {                                         // Next(4)
       const n4 = num + rng.int(-2, 2);                                 // Next(-2,3)
-      const n5 = num2 + rng.int(1, 1);                                 // Next(2)
+      const n5 = num2 + rng.int(0, 1);                                 // Next(2)∈{0,1}（★NNNNN：曾 int(1,1) 恒+1）
       setOre(n4, n5);
       oreHelper(st, n4, n5);
     }
@@ -427,8 +430,8 @@ function orePatch(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number): 
   let v2y = rng.next() * 0.5 + 0.5;
   let n6 = rng.int(5, 8);                                              // Next(5,9)
   let n7 = rng.int(9, 13);                                             // Next(9,14)
-  if (rng.int(0, 2) === 0) n6 += rng.int(1, 1);                        // Next(2)
-  if (rng.int(0, 2) === 0) n7 += rng.int(1, 1);
+  if (rng.int(0, 2) === 0) n6 += rng.int(0, 1);                        // +=Next(2)∈{0,1}（★NNNNN：曾 int(1,1) 恒+1）
+  if (rng.int(0, 2) === 0) n7 += rng.int(0, 1);                        // 同上
   while (n7 > 0) {
     n7--;
     const lo = (n6 * 4) | 0;
@@ -529,8 +532,8 @@ function stonePatch(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number)
   let v2y = rng.next() * 0.5 + 0.5;
   let n2 = rng.int(13, 17);                                            // Next(13,18)
   let n3 = rng.int(13, 18);                                            // Next(13,19)
-  if (rng.int(0, 2) === 0) n2 += rng.int(1, 2);                        // Next(3)==0 → +Next(3)
-  if (rng.int(0, 2) === 0) n3 += rng.int(1, 2);
+  if (rng.int(0, 2) === 0) n2 += rng.int(0, 2);                        // +=Next(3)∈{0,1,2}（★NNNNN：曾 int(1,2)∈{1,2}）
+  if (rng.int(0, 2) === 0) n3 += rng.int(0, 2);                        // 同上
   const stone = TILE_BY_KEY['stone']!;
   while (n3 > 0) {
     n3--;
@@ -577,7 +580,10 @@ export function runSurfaceOreAndStonePass(st: TileStore, rng: RNG, gs: GenState)
       tries--;
       let x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);     // Next(bd, w-bd)
       while (x >= w * 0.48 && x <= w * 0.52) x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
-      const y = rng.int(gs.worldSurfaceLow, gs.worldSurface - 1);      // Next((int)wsLow, (int)ws)
+      // ★NNNNN：上界是 GenVars.worldSurface（Terrain 游走终值 274，≠ Main.worldSurface
+      // 337）——span 对拍首差 b 194 274 vs b 194 337 实锤；orePatch 内部下落门的
+      // Main.worldSurface 仍走 gs.worldSurface（cs:10599）勿混
+      const y = rng.int(gs.worldSurfaceLow, Math.trunc(gs.genWorldSurface) - 1); // Next((int)wsLow,(int)gvWS)
       let near = false;
       for (let j = 0; j < gs.numOrePatch; j++) {
         if (Math.abs(x - gs.orePatchX[j]) < 200) near = true;
@@ -598,7 +604,7 @@ export function runSurfaceOreAndStonePass(st: TileStore, rng: RNG, gs: GenState)
       tries--;
       let x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
       while (x >= w * 0.47 && x <= w * 0.53) x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
-      const y = rng.int(gs.worldSurfaceLow, gs.worldSurface - 1);
+      const y = rng.int(gs.worldSurfaceLow, Math.trunc(gs.genWorldSurface) - 1); // cs:18608 同款 GenVars 上界
       let near = false;
       for (let l = 0; l < gs.numOrePatch; l++) {
         if (Math.abs(x - gs.orePatchX[l]) < 100) near = true;

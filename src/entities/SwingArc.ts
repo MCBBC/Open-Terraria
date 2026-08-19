@@ -116,9 +116,9 @@ export class SwingArc extends Entity {
     if (this.t >= this.ai1) this.dead = true;
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(this.projId);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const fw = img.width, fh = img.height / 4;
     const num = this.num;
@@ -345,9 +345,9 @@ export class TrueNightsEdgeSlash extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(973);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const fw = img.width, fh = img.height / 4;
     const sc = this.scaleCur * 1.1 * 0.975;
@@ -472,9 +472,9 @@ export class NightsEdgeFly extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(972);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const fw = img.width, fh = img.height / 4;
     const sc = this.scaleCur * 1.1;
@@ -780,8 +780,8 @@ export class ZenithSword extends Entity {
     return false;
   }
 
-  draw(r: { canvas: HTMLCanvasElement; atlas?: unknown }): void {
-    const ctx = r.canvas.getContext('2d');
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; atlas?: unknown }): void {
+    const ctx = r.ctx;
     if (!ctx) return;
     const prof = fractalProfile(this.ai1);
     const tw = prof.len / 2;   // trailWidth = 全刃长/2（StripWidth :61-64 恒宽——沿程无宽度变化）
@@ -956,9 +956,9 @@ export class LightsBaneSlash extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(974);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     const fw = img.width, fh = img.height / 13;
     const sc = 0.7 * this.ai0;
@@ -1056,9 +1056,9 @@ export class GrassSlash extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement }): void {
+  draw(r: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }): void {
     const img = projSprite(976);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || img.width === 0 || !ctx) return;
     ctx.save();
     ctx.translate(this.cx, this.cy);

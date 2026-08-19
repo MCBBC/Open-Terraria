@@ -447,7 +447,7 @@ export class DeerclopsSpikeProj extends Entity {
   }
   scale(): number { return this.opacity * this.ai1; }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = r.atlas?.ensureVImage('vanilla/Projectile_961.png');
     const s = this.scale();
@@ -498,7 +498,7 @@ export class DeerclopsRubbleProj extends Entity {
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = r.atlas?.ensureVImage('vanilla/Projectile_962.png');
     ctx.save();
@@ -595,7 +595,7 @@ export class InsanityShadowProj extends Entity {
     }
   }
   draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = r.atlas?.ensureVImage('vanilla/Projectile_965.png');
     ctx.save();

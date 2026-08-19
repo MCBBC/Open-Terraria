@@ -128,7 +128,7 @@ export class Celeb2Muzzle extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(this.projId);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || !ctx) return;
     const fh = img.height / 7;
     ctx.save();
@@ -325,7 +325,7 @@ export class Celeb2Rocket extends Entity {
 
   draw(r: Renderer, _cam: Camera): void {
     const img = projSprite(this.projId);
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!img || !(img.width > 0) || !ctx) return;
     ctx.save();
     ctx.translate(this.cx, this.cy);

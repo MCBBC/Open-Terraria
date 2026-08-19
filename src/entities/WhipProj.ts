@@ -332,7 +332,7 @@ export class WhipProj extends Entity {
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
-    const ctx = r.canvas.getContext('2d');
+    const ctx = r.ctx;
     if (!ctx) return;
     const img = projFrameImg(this.projId, 0);
     // 视觉曲线（带随机相位卷曲 :45653）
