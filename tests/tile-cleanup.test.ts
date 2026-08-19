@@ -153,6 +153,10 @@ describe('FinalCleanup(1456 cs:22304-22670)', () => {
     const putBoulder = (x: number, y: number, t: number) => {
       st.setTileSilent(x, y, t, 0, 0); st.setTileSilent(x + 1, y, t, 18, 0);
       st.setTileSilent(x, y + 1, t, 0, 18); st.setTileSilent(x + 1, y + 1, t, 18, 18);
+      // CCCCC（2026-08-19）：Check2x2 case 138 派发（cs:86672→48473-90 支撑门）后，
+      // 浮空巨石会被 vanilla 同序整组杀——原 fixture 无底必红非 ⑥ 回归。补石底
+      // 对齐真实构型（巨石立于实心地上），保 ⑥ 重帧/祭坛回滚测试意图。
+      st.setTileSilent(x, y + 2, sid(1)); st.setTileSilent(x + 1, y + 2, sid(1));
     };
     putBoulder(100, 120, sid(138));               // 无祭坛 → 保留
     putBoulder(110, 120, sid(484));

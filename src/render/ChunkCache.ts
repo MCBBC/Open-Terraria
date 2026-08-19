@@ -38,7 +38,7 @@ export interface ChunkPair {
 // 全局单例：每 chunk 烘焙是串行的，16×16 复用零分配
 const tintCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
 if (tintCanvas) { tintCanvas.width = TILE; tintCanvas.height = TILE; }
-const tintCtx = tintCanvas ? tintCanvas.getContext('2d') : null;
+const tintCtx = tintCanvas ? tintCanvas.getContext('2d', { willReadFrequently: true }) : null;  // 纯 CPU scratch:SHM 后备不占 IOSurface(第六场双开 16x16 失败的当事画布)
 
 /** 对 canvas 的 (readX,readY) 16×16 区域按 paint 着色,回写到 ctx 的 (writeX,writeY)。
  *  ★读/写坐标分离(2026-08-18 atlas 化 review 修):atlas 页路径读=页内绝对、写=cell 内

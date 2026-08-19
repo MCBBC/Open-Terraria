@@ -2785,7 +2785,16 @@ bool MarblePlace(int mox, int moy)
     return true;
 }
 {
-    int mbCount = (int)r.Next(4, 9);                 // WorldGenRange(4,8,WorldArea) scale=1
+    // ★EEEEE（2026-08-19 中世界支修复）：Marble Count=WorldGenRange(4,8,ScaleWith:
+    //   WorldArea)——ScaleValue=(W*H)/5040000（WorldGenRange.cs:44-52），GetRandom=
+    //   Next(ScaledMin, ScaledMax+1)。旧硬编码 Next(4,9) 仅小世界（scale=1）正确：
+    //   中世界 scale=11,520,000/5,040,000≈2.2857 → Next(9,19)；大 4.0 → Next(16,33)。
+    //   JS worldGenRangeCount（MarbleGranitePass.ts:38-43）同式（max 钳位在标准
+    //   尺寸恒惰性）。本根因为 oracle 中世界 marble 首差（BBBBB 误报 dungeonL 起
+    //   崩——实为 marble 起，dungeonL 只是其探针首个受信对拍段）。
+    double mbArScale = (double)W * H / 5040000.0;
+    int mbLo = Math.Max(1, (int)Math.Truncate(mbArScale * 4.0));
+    int mbCount = (int)r.Next(mbLo, Math.Max(mbLo, (int)Math.Truncate(mbArScale * 8.0)) + 1);
     int mbPlaced = 0, mbFails = 0;
     while (mbPlaced < mbCount)
     {
@@ -2958,7 +2967,11 @@ void GranitePlace(int gox0, int goy0)
         }
 }
 {
-    int gnCount = (int)r.Next(4, 9);                 // WorldGenRange(4,8,WorldWidth) scale=1
+    // ★EEEEE（2026-08-19 中世界支修复）：Granite Count=WorldGenRange(4,8,ScaleWith:
+    //   WorldWidth)——ScaleValue=W/4200（WorldGenRange.cs:50）。旧硬编码 Next(4,9)
+    //   仅小世界正确：中 6400/4200≈1.5238 → Next(6,13)；大 2.0 → Next(8,17)。JS 同式。
+    int gnLo = Math.Max(1, (int)Math.Truncate((double)W / 4200.0 * 4.0));
+    int gnCount = (int)r.Next(gnLo, Math.Max(gnLo, (int)Math.Truncate((double)W / 4200.0 * 8.0)) + 1);
     var gnPts = new List<(int x, int y)>();
     int gnPlaced = 0, gnFails = 0;
     while (gnPlaced < gnCount)
@@ -3377,7 +3390,11 @@ void CloudLake(int ci, int cj)
 {
     int isCount = (int)(W * 0.0008);              // 3（4200 宽）
     int isLakes = 0;
-    int isTotal = isCount + 1;                    // GenVars.skyLakes = 1（4200 宽）
+    // ★EEEEE（2026-08-19 中世界支修复）：GenVars.skyLakes = 1 + (X>8000) + (X>6000)
+    //   （cs:11197-11205，Reset 段）——小 1/中 2（6400>6000）/大 3。旧硬编码 +1
+    //   仅小世界正确：中世界少放一座天湖（num4 = isCount+skyLakes，cs:13004）。
+    int isSkyLakes = 1 + (W > 8000 ? 1 : 0) + (W > 6000 ? 1 : 0);
+    int isTotal = isCount + isSkyLakes;
     var isHousesX = new List<int>();
     var isHousesY = new List<int>();
     for (int ii = 0; (double)ii < (double)isTotal; ii++)
@@ -8282,11 +8299,21 @@ void DgEntrance(int seed, int preSeed)
         }
     }
     // 0.6 框清墙（cs:465-483：normal 世界必跑）
+    // ★EEEEE 镜像（BBBBB ②）：0.6f 乘积按 float 语义取整（二进制-反编译刀口）——
+    //   m20260811 入口 (cx=1054.45, cy=319, sX=43, sY=10)：反编译 double 直乘
+    //   10×0.6000000238418579=6.000000238418579 → 319-x=312.99999976 → b0=312；
+    //   x86 二进制实为 313（(1028-1031,312) 四格墙残留实锤）。float 乘积
+    //   fl(10×0.6f)=6.0（积 6+2^-22 恰在 [4,8) 段半 ulp——round-half-to-even 归
+    //   6.0）→ 313.0→b0=313 ✓。9293480 侧（12×0.6f=7.200000286… 可精确表示）
+    //   两模型同值 235——小世界零回退。JS 侧 Math.fround(s*0.6f) 同式（DungeonPass.ts
+    //   BBBBB 注）；C# (float)(s*0.6f) 与逐二元 fround 等价（sX/sY 恒整值，double
+    //   积精确、单次舍入同 float 乘）。仅此四界 float 化——fort2/条纹框/门洞等
+    //   其余 0.6f/0.55f 界按 double 转录（无实证刀口，BBBBB 备案维持）。
     {
-        int a0 = Math.Max(0, Math.Min(W - 1, (int)(cx - sX * 0.6000000238418579)));
-        int a1 = Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.6000000238418579)));
-        int b0 = Math.Max(0, Math.Min(H - 1, (int)(cy - sY * 0.6000000238418579)));
-        int b1 = Math.Max(0, Math.Min(H - 1, (int)(cy + sY * 0.6000000238418579)));
+        int a0 = Math.Max(0, Math.Min(W - 1, (int)(cx - (double)(float)(sX * 0.6f))));
+        int a1 = Math.Max(0, Math.Min(W - 1, (int)(cx + (double)(float)(sX * 0.6f))));
+        int b0 = Math.Max(0, Math.Min(H - 1, (int)(cy - (double)(float)(sY * 0.6f))));
+        int b1 = Math.Max(0, Math.Min(H - 1, (int)(cy + (double)(float)(sY * 0.6f))));
         eb.Upd(a0, b0, a1, b1);
         for (int x = a0; x < a1; x++)
             for (int y = b0; y < b1; y++)
@@ -9176,6 +9203,15 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
         int num7 = k;
         int num9 = style, num10 = mainItem;
         bool flag2 = false, flag3 = false, flag6 = false, flag7 = false, flag9 = false, flag10 = false, flag12 = false;
+        // ★EEEEE 镜像（BBBBB ①）：vanilla flag（WG.cs:36062）——21 号箱 chestStyle==0
+        //   （含 DgBasicChests 水覆写箱：num2<ws+50 → itemType=327/chestStyle=0）即
+        //   "地表箱"标记；loot surface 支门 = (flag23 && (flag || flag6)) || flag11
+        //   （:36280）。地牢调用点 chestStyle 恒 ≥0 → num9=chestStyle，第二析取支
+        //   恒死（style==-1 时 num9=深浅调整值：num7≥ws+25→1 否则 0——:35997-36008，
+        //   即 style==-1 且浅层才真）；flag6（style12 丛林）/flag11（848/857/934）
+        //   地牢调用点恒 false 不建模。曾 surf 恒 false → 水箱误走金箱支 → 掷流
+        //   错位连坐 G/I/T/F/Pa/Ba 全段（s22222 room0 首箱 C|502|283|327|0）。
+        bool flag0 = chestTile == 21 && (style == 0 || (style == -1 && num7 < worldSurface + 25));
         if (chestTile == 21 && num9 != 0 && num7 >= worldSurface && DgIsDW(wal[num7 * W + i])) flag9 = true;
         if ((chestTile == 21 && (uint)(num9 - 23) <= 4u) || (chestTile == 467 && num9 == 13)) { flag9 = true; flag10 = true; }
         // —— PlaceChest（:57828）→ TileObject.CanPlace chest21/467 全链（TileObject.cs:174-857）——
@@ -9214,7 +9250,9 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
                 }
         }
         // —— 战利品掷骰（深/金/表三分支 + 尾段；与 JS rollChestLoot 同构 + Prefix(-1) 补齐）——
-        bool surf = num7 < worldSurface + 25 && false;          // flag/flag6 恒 false
+        // ★EEEEE 镜像（BBBBB ①）：surface 支门接 flag0（:36280 (flag23 && (flag||flag6))||flag11
+        //   ——flag23=num7<ws+25；flag6/flag11 地牢调用点恒 false）。曾 && false 恒假。
+        bool surf = num7 < worldSurface + 25 && flag0;
         bool gold = num7 < rockLayer;
         if (surf)
         {
@@ -15741,6 +15779,36 @@ Replay(); // ▶MicroBiomes cs:21785
         frX[i] = (ushort)fx; frY[i] = (ushort)fy;
         if (t == 0) { half[i] = 0; slope[i] = 0; }
     }
+    // ★EEEEE 镜像（CCCCC Place2x2 右下锚，cs:51352-51445）：PlaceTile num∈2×2 族
+    //   （矿爆起爆器 411 cs:59766-69/DeadMans 巨石 138 cs:607）→ cs:51431 x--/y--
+    //   后写 (x-1..x)×(y-1..y)，帧 ((k-x+1)*18,(l-y+1)*18)；前置双门（cs:51371-51405）
+    //   逐列 i∈{x-1,x}：①2×2 区任一 active → 整写放弃；②地面 (i,y+1)：!active ||
+    //   （!SolidTile2 && !Main.tileTable）→ 放弃。全程零掷。门败调用点静默放弃、
+    //   WireLine/保护图照跑（cs:73-75 不接返回值）——JS place2x2Direct 同构
+    //   （MicroBiomesPass.ts:191；#101 幽灵 411 消失案实证）。Main.tileTable 76 id
+    //   （Main.cs:6828-6903，JS PLACE2X2_TABLE 同源）。
+    var MB_P2X2_TABLE = new HashSet<ushort> { 280, 275, 276, 277, 278, 279, 281, 605, 604, 603, 602, 601, 599, 600, 612, 611, 610, 609,
+        608, 606, 607, 558, 554, 553, 551, 550, 542, 413, 309, 297, 296, 645, 643, 644, 632, 640,
+        559, 414, 359, 358, 285, 286, 582, 555, 538, 533, 532, 394, 393, 392, 391, 339, 310, 299,
+        298, 629, 619, 556, 544, 364, 363, 362, 361, 710, 376, 380, 14, 469, 18, 19, 114, 101, 87, 88, 405, 427 };
+    void MbPlace2x2Direct(int x, int y, ushort t)
+    {
+        if (x < 5 || x > W - 5 || y < 5 || y > H - 5) return;                      // cs:51358
+        for (int i = x - 1; i <= x; i++)
+        {
+            for (int j = y - 1; j <= y; j++)
+                if (QQInW(i, j) && act[j * W + i] != 0) return;                    // cs:51376 空置门
+            if (!QQInW(i, y + 1)) return;
+            int gi = (y + 1) * W + i;
+            ushort gt = typ[gi];
+            bool solid2 = act[gi] != 0 && JVS(gt)
+                && slope[gi] == 0 && half[gi] == 0;                                 // SolidTile2（cs:70178；JS vanGenSolidType 同构无平台腿）
+            if (act[gi] == 0 || (!solid2 && !MB_P2X2_TABLE.Contains(gt))) return;   // cs:51395-99 地面门
+        }
+        for (int k = x - 1; k <= x; k++)
+            for (int l = y - 1; l <= y; l++)
+                MbSetTile(k, l, t, (k - x + 1) * 18, (l - y + 1) * 18);            // cs:51434-43
+    }
     int mbTrace = Environment.GetEnvironmentVariable("MB_TRACE") != null ? 1 : 0;
     // 隔离对拍辅助（本段私有，env 门控）：入口态 liqT/protRects 落盘（JS 探针回灌对拍用）
     {
@@ -16421,9 +16489,10 @@ Replay(); // ▶MicroBiomes cs:21785
                 }
             }
         }
-        for (int dx = 0; dx < 2; dx++)
-            for (int dy = 0; dy < 2; dy++)
-                MbSetTile(detX + dx, detTop + dy, 411, dx * 18, dy * 18);
+        // ★EEEEE 镜像（CCCCC）：右下锚 (detX-1..detX)×(detTop-1..detTop)+空置/地面
+        //   双门——门败静默放弃（WireLine/保护图照跑，函数仍 true）。曾左上锚
+        //   无条件写 (detX..detX+1)×(detTop..detTop+1)=#101 幽灵 411 根因。
+        MbPlace2x2Direct(detX, detTop, 411);
         {
             int sx = Math.Min(barX, detX), ex = Math.Max(barX, detX);
             int sy = Math.Min(barGround, detTop), ey = Math.Max(barGround, detTop);

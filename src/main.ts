@@ -25,6 +25,9 @@ import { createFlow } from './mainFlow';
 import type { FlowHandle } from './mainFlow';
 import { downloadDebugReport } from './debug/DebugReport';
 import { installCanvasWatch } from './render/CanvasWatch';
+import { RemasterRuntime } from './remaster/RemasterRuntime';
+import { RemasterManager } from './remaster/RemasterManager';
+import { setRemasterBuffIcon, clearIconCache } from './ui/UI';
 
 // canvas 分配哨兵(2026-08-18):出生率 >20/s 持续 10s → console.warn 带出生栈
 // (cloudTint 340 张/秒事故的常驻防线;?cwatch=0 静默)。须在 UI/游戏模块
@@ -138,7 +141,32 @@ async function loadAssets() {
     atlas = null; // 素材缺失时回退程序化生成
   }
   (window as unknown as { __swAtlas?: SpriteAtlas | null }).__swAtlas = atlas; // 调试/探针句柄
+  // 素材重制热补丁(2026-08-19):已装 pack 在菜单显示前应用——此刻无 chunk 烘焙、
+  // 无懒加载竞争,vimages.set 直接覆盖,后继 ensureVImage 的 has 检查命中早退。
+  // 失败静默(坏包不阻断启动;面板导入路径有显式报错)
+  if (atlas) {
+    remasterRuntime = new RemasterRuntime(atlas);
+    remasterManager = new RemasterManager(remasterRuntime);
+    const rt = remasterRuntime;
+    remasterRuntime.onApplied = (info) => {
+      // UI 派生缓存:物品图标 dataURL 缓存按物品 id 键不自动失效(Atlas 替换须清);
+      // buff 栏直链 <img src> 经钩子取 runtime 的 objectURL 覆盖
+      if (info.hasItemAtlas) clearIconCache();
+      setRemasterBuffIcon((id) => rt.buffIconUrl(id));
+    };
+    try {
+      await remasterManager.applyInstalled();
+    } catch (err) {
+      console.warn('[remaster] 启动应用素材包失败(已跳过):', err);
+    }
+    const w = window as unknown as { __swRemaster?: { runtime: RemasterRuntime; manager: RemasterManager } };
+    w.__swRemaster = { runtime: remasterRuntime, manager: remasterManager }; // 调试/探针/面板句柄
+  }
 }
+
+/** 素材重制热补丁运行时(main.ts 装配;__swRemaster 暴露) */
+let remasterRuntime: RemasterRuntime | null = null;
+let remasterManager: RemasterManager | null = null;
 
 function enterGameHooks() {
   const g = flow.game!;
@@ -148,6 +176,13 @@ function enterGameHooks() {
   (window as unknown as { __swSetPool?: (p: number[] | null) => void }).__swSetPool = setDebugPool;
   // gore 池只读视图（模块级 livePool 不经 Game 实例——探针断言气泡族/碎块推进用）
   (window as unknown as { __swGore?: typeof liveGorePieces }).__swGore = liveGorePieces;
+  // 素材重制热补丁:运行中替换 tile/wall sheet → ChunkCache 消费登记精确重烘
+  // (★禁 invalidateAll——21 万次重解码风暴前科);闭包每次现取 game,换世界安全
+  if (remasterRuntime) {
+    remasterRuntime.onSheetReplaced = (file) => {
+      flow.game?.chunks?.onSheetReplaced(file);
+    };
+  }
 }
 
 // ---- 键盘：背包/暂停/保存 ----

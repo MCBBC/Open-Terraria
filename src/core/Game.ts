@@ -2658,13 +2658,14 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
-    // chunk 上限回满档(2026-08-18 泄漏 review):contextlost 自适应曾把
-    // MAX_CHUNKS 一路砍到 64 且【无恢复点】——之后所有世界永远 64(视野烘焙
-    // 跟不上)。进世界重置回满档;真撑不住的机器熔断器会再自适应(冷却已
-    // 逐次升级,不会振荡)。★回满取 BASE_MAX_CHUNKS 单一事实源(曾硬编码 384,
-    // 与静态常量脱节 = 静默覆盖)。直引类静态(曾写 this.chunks?.constructor——
-    // afterWorldLoad 头部 this.chunks 尚未构造,undefined 上赋值即崩)
-    ChunkCache.MAX_CHUNKS = ChunkCache.BASE_MAX_CHUNKS;
+    // chunk 上限恢复(2026-08-18 泄漏 review:曾砍到 64 无恢复点=永远 64;
+    // ★2026-08-19 三场双开崩溃日志:直回满档是恢复期 herd 共犯——第二窗加载/
+    // 崩溃重进恰是内核预算最紧时刻,回满 192 = 立刻重堆 12 张页挤爆边际分配。
+    // 改【爬档】:当前档×2 封顶满档——64→128→192 逐世界爬升,既有恢复点
+    // 又不瞬时吃满)。单一事实源 BASE_MAX_CHUNKS(曾硬编码 384 与静态脱节)。
+    // 直引类静态(曾写 this.chunks?.constructor——afterWorldLoad 头部
+    // this.chunks 尚未构造,undefined 上赋值即崩)
+    ChunkCache.MAX_CHUNKS = Math.max(64, Math.min(ChunkCache.BASE_MAX_CHUNKS, ChunkCache.MAX_CHUNKS * 2));
     // 全局替换表 NPC 名解析注入（Lang.cs:102-110 GetFirstNPCNameOrNull：{Nurse}
     // 等 token → 场上第一名该类型城镇 NPC 的随机名；缺位保留 token——null 语义）
     // 全局替换表动态值（Lang.cs:126-144：WorldName/PlayerName/InventoryKey/
@@ -13546,29 +13547,48 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         }
       }
     }
-    // 视觉 1:1（Projectile.Kill 按类型分档）:
-    //   炸弹 28/手雷 30(:74881-74916):烟 31×20(scale1.5 vel×1.4) + 火 6×10 对
-    //     (scale2.5 noGrav vel×5 + scale1.5 vel×3) + gore 61-64×4(vel×0.4 对角±1)
-    //   炸药棍 29(:74943-75010):200×200 场——烟 50(scale2 vel×1.4) + 火 80 对
+    // 视觉 1:1（Projectile.Kill :74881-74935 / :74943-75004,尘/gore 全走原版引擎）:
+    //   炸弹 28/手雷 30:Resize(22,22) 盒——烟 31×20(scale1.5 vel×1.4) + 火 6×10 对
+    //     (scale2.5 noGrav vel×5 + scale1.5 vel×3) + gore 61-64×4(jitter 后 vel×0.4 对角±1)
+    //   炸药棍 29 族:Resize(240,240) 盒——烟 31×50(scale2 vel×1.4) + 火 6×80 对
     //     (scale3 noGrav vel×5 + scale2 vel×3) + gore 61-64×8(scale1.5 vel±1.5)
-    //   此前所有类型共用一套弱视觉且火粒子无重力缺失(用户报"没火焰粒子")。
-    //   dust 31=烟(灰) / dust 6=火把焰(黄橙闪烁) / gore 61-64=烟团碎片
-    const big = projId === 29 || projId === 470 || projId === 637;
-    const nSmoke = big ? 50 : 20;
-    const nFire = big ? 40 : 10;
-    this.spawnParticles(cx, cy, '#9A9A9A', nSmoke, 1.4,
-      { life: big ? 60 : 45, damp: 0.95, size: big ? 4 : 3 });                    // 烟(×1.4 慢散)
-    // 火对：noGravity ≈ grav 0 + 高阻尼直飞；色取 torch 焰双档(#FFD24A 亮黄/#FF9A3C 橙)
-    this.spawnParticles(cx, cy, '#FFD24A', nFire, 5,
-      { life: 30, grav: 0, damp: 0.9, size: big ? 6 : 5 });                       // 快火(vel×5 scale2.5/3)
-    this.spawnParticles(cx, cy, '#FF9A3C', nFire, 3,
-      { life: 38, grav: 0, damp: 0.92, size: big ? 5 : 4 });                       // 慢火(vel×3 scale1.5/2)
+    //   ★火光双机制(Dust.cs):尘 6 = ①DrawDust 强制白全亮(:38406,暗处自发光)
+    //   + ②烟雾族链尾 AddLight(:1081-1090 尾档 num60,num60×0.65,num60×0.4 钳 0.6
+    //   ——火尘逐粒照亮周围环境)。曾用通用 spawnParticles = 画在光照合成前被乘光
+    //   压暗且零发光,黑暗洞穴爆炸近黑(2026-08-19 用户报"没火光")。烟 31/gore
+    //   61-64 亦换 VanillaDust/GorePiece 引擎(fadeIn 老化/收缩族物理 1:1)
+    // 小族(:74881-74884 统一 Resize(22,22)):28/30/37/75/102/164/397/516/517/519/773
+    // 大族(:74943-74962):29(Kill 改 200 盒)/108(自身 260 盒)/470/637/1002(自身 10 盒)
+    //   /1086/1087(Kill 改 240 盒)——★链式引爆走 108 属大族(曾漏)
+    const big = projId === 29 || projId === 108 || projId === 470 || projId === 637
+      || projId === 1002 || projId === 1086 || projId === 1087;
+    const vd = this.vanillaDust;
+    if (vd) {
+      const B = projId === 29 ? 100 : (projId === 1086 || projId === 1087) ? 120
+        : projId === 108 ? 130 : big ? 5 : 11;   // 生成盒半宽(按型 Resize/自身盒)
+      const bx = cx - B, by = cy - B, bs = B * 2;
+      const nSmoke = big ? 50 : 20;
+      for (let i = 0; i < nSmoke; i++) {
+        const d = vd.spawn(bx, by, bs, bs, 31, 0, 0, 100, null, big ? 2 : 1.5);
+        if (d) { d.vx *= 1.4; d.vy *= 1.4; }
+      }
+      const nFire = big ? 80 : 10;
+      for (let i = 0; i < nFire; i++) {
+        const d1 = vd.spawn(bx, by, bs, bs, 6, 0, 0, 100, null, big ? 3 : 2.5);
+        if (d1) { d1.noGravity = true; d1.vx *= 5; d1.vy *= 5; }
+        const d2 = vd.spawn(bx, by, bs, bs, 6, 0, 0, 100, null, big ? 2 : 1.5);
+        if (d2) { d2.vx *= 3; d2.vy *= 3; }
+      }
+    }
     const nGore = big ? 8 : 4;
     for (let gi = 0; gi < nGore; gi++) {
-      const a = gi * (Math.PI * 2 / nGore) + Math.PI / 4;
-      const gv = big ? 1.5 : 1;
-      this.spawnParticles(cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, '#D8D8D0', 1, gv,
-        { life: 70, damp: 0.98, size: big ? 5 : 3 });
+      const sgnX = gi % 2 === 0 ? 1 : -1, sgnY = gi < 2 || gi >= 6 ? 1 : -1;   // 对角四向(大族 ×2 轮)
+      const gx = big ? cx - 24 : cx - 11, gy = big ? cy - 24 : cy - 11;
+      const g = GorePiece.newGore(61 + (Math.random() * 3 | 0), gx, gy, 0, 0, big ? 1.5 : 1);
+      if (g) {
+        if (big) { g.vx += sgnX * 1.5; g.vy += sgnY * 1.5; }
+        else { g.vx = g.vx * 0.4 + sgnX; g.vy = g.vy * 0.4 + sgnY; }
+      }
     }
     // 原版爆炸声 SoundID.Item14(Projectile.cs 手雷/炸弹/炸药等 20+ 处)——
     // 曾误用 roar(Boss 咆哮);首播静音已由 Sfx 合成分支+预热兜底

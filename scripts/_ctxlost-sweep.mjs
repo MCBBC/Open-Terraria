@@ -39,7 +39,7 @@ await new Promise((r) => setTimeout(r, 2500));
 // 重驱动应重新入图集(自愈)
 const reheal = await page.evaluate(() => {
   const g = window.__swGame, r = g.renderer;
-  return { entries: r.tintAtlas.size, pages: r.tintAtlas.pageCount, cloudGL: !!r.sky.cloudGL };
+  return { entries: r.tintAtlas.size, pages: r.tintAtlas.pageCount, cloudGL: !!r.glfx };
 });
 console.log('[2.5s 后自愈]', JSON.stringify(reheal));
 const fs = await import('node:fs');

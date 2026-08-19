@@ -75,7 +75,7 @@ export function hairFrameTinted(layer: DollHairLayer, row: number, color: { r: n
   const img = rect.img as HTMLImageElement;
   const sc = hairScratch ??= document.createElement('canvas');
   if (sc.width !== FRAME_W || sc.height !== FRAME_H) { sc.width = FRAME_W; sc.height = FRAME_H; }
-  const sctx = sc.getContext('2d')!;
+  const sctx = sc.getContext('2d', { willReadFrequently: true })!;  // 发色 scratch 纯 CPU 合成,不占 IOSurface
   sctx.imageSmoothingEnabled = false;
   sctx.clearRect(0, 0, FRAME_W, FRAME_H);
   sctx.drawImage(img, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, 0, FRAME_W, FRAME_H);

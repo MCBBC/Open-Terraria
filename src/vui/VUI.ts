@@ -47,7 +47,9 @@ export class VUI {
 
     window.addEventListener('resize', VUI.resize);
     window.addEventListener('mousemove', (e) => {
-      const r = c.getBoundingClientRect();
+      // ★用 VUI.canvas 当前引用:healCanvas 换画布后,闭包里的旧 c 已脱离 DOM
+      // (rect 全 0 → 鼠标坐标恒 0),必须取活画布
+      const r = VUI.canvas!.getBoundingClientRect();
       UIScale.mouseX = (e.clientX - r.left) / UIScale.scale;
       UIScale.mouseY = (e.clientY - r.top) / UIScale.scale;
     });
@@ -63,6 +65,25 @@ export class VUI {
     window.addEventListener('focus', () => { VUI.hasFocus = true; });
     // wheel 记 UI 侧增量；游戏侧 Input 另有自己的监听（分流在 main.ts 编排）
     window.addEventListener('wheel', (e) => { VUI.wheel += Math.sign(e.deltaY); }, { passive: true });
+  }
+
+  /** ui-canvas 自愈(2026-08-19 第五场双开:GPU 死后光标永不恢复——vui 画布
+   *  与 batch 一次性创建,contextlost 后所有 vui 绘制静默 no-op,游戏内该层
+   *  只画光标 = 症状恰好只剩光标;Renderer 看门狗只管主/辅助画布管不到这)。
+   *  每帧检查(一次 isContextLost 调用,零成本),死即原位换新画布重建 batch */
+  static healCanvas(): void {
+    const ctx = VUI.batch?.ctx as (CanvasRenderingContext2D & { isContextLost?: () => boolean }) | undefined;
+    if (!VUI.canvas || !ctx?.isContextLost?.()) return;
+    const old = VUI.canvas;
+    const c = document.createElement('canvas');
+    c.id = 'ui-canvas';
+    c.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:300;cursor:none;';
+    old.parentElement?.insertBefore(c, old);
+    old.remove();
+    VUI.canvas = c;
+    VUI.batch = new UISpriteBatch(c.getContext('2d')!);
+    VUI.resize();
+    console.warn('[VUI] ui-canvas 上下文死亡,已自愈重建(光标层)');
   }
 
   static resize() {
@@ -137,6 +158,7 @@ export class VUI {
   /** 每帧驱动（菜单期 rAF / 游戏内 Game 渲染末尾各调一次） */
   static frame(dtMs: number) {
     if (!VUI.canvas || !VUI.batch) return;
+    VUI.healCanvas();
     // 边沿处理：按下计数在 update 前消费（当帧视为按下）；抬起计数在 update 后消费
     // （下一帧才视为抬起）→ 快速点击（down/up 同帧间隙）至少被观察到
     // 「按下一帧 + 抬起一帧」，Click 不丢

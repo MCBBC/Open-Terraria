@@ -37,7 +37,7 @@ const inv = await page.evaluate(() => {
       MAX_CHUNKS: cc.MAX_CHUNKS ?? -1 },
     glfx: glfx ? { texs: glfx.texs?.size ?? -1, bytesMB: +((glfx.bytes ?? 0) / 1048576).toFixed(1),
       canvas: `${glfx.canvas?.width}x${glfx.canvas?.height}` } : null,
-    cloudGL: sky?.cloudGL ? { texs: sky.cloudGL.texs?.size ?? -1, quads: sky.cloudGL.quadsLastPass ?? -1 } : null,
+    cloudGL: r.glfx ? { texs: [...r.glfx.texs.keys()].filter((k) => k.startsWith('cloud:')).length } : null,
     tintCache: { count: r.tintCache?.size ?? -1 },
     cloudTintCache: { count: sky?.cloudTintCache?.size ?? -1 },
     biomeBg: r.biomeBg ? { keys: Object.keys(r.biomeBg).length } : null,

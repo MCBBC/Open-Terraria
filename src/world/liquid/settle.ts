@@ -21,7 +21,27 @@ export async function settleWorldLiquids(
    *  尘掷族）走 pass 链流——原版 gen 期 genRand≡Main.rand 同对象，#97 二次沉降
    *  自身耗掷 55,987（passchain stream 定标）。缺省=私有 mulberry32（兼容路径） */
   rng?: RNG,
+  /** 原版 #49 SettleLiquids 头的 oceanDepths 液体类型归水全扫（cs:16222-16229）。
+   *  ★仅 pass 49 有——#97 SettleLiquidsPart2（cs:21051）无此前导（QuickCleanup
+   *  cs:18005 有自己的窗口版）；由 liquidSettlePass 置 true，worker 尾部二次
+   *  沉降保持缺省 false。DDDDD 批补齐（四链现值该域无非水液体=惰性 1:1） */
+  oceanStrip = false,
 ): Promise<void> {
+  if (oceanStrip && mode === 'gen') {
+    // cs:16222-16229：全图（0..w × 0..h）扫描，oceanDepths（cs:10978：y ≤
+    // oceanLevel=(worldSurface+rockLayer)/2+40 且 x < 380 || x > w-380）内
+    // 液体>0 且类型≠水 → 归水。liquidType(0) 只写类型位不动量
+    const st = world.store;
+    const oceanLevel = (world.groundLevel + world.rockLevel) / 2 + 40;
+    for (let x = 0; x < st.w; x++) {
+      const inBand = x < 380 || x > st.w - 380;
+      if (!inBand) continue;
+      for (let y = 0; y <= Math.min(st.h - 1, Math.trunc(oceanLevel)); y++) {
+        const i = y * st.w + x;
+        if (st.liquid[i] > 0 && st.liquidType[i] !== 1) st.liquidType[i] = 1;
+      }
+    }
+  }
   const sim = new LiquidSim(world);
   if (rng) sim.passRand = (max) => rng.nextInt(max);
   // isGeneratingOrLoadingWorld（WorldGen.cs:11089 / WorldFile.cs:738）：生成与读档

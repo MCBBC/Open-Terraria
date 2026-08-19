@@ -1902,10 +1902,11 @@ export class Enemy extends Entity {
    *  卡墙（L61937）：落地 X == 起跳 X → direction 反转 + ai[2]=200 冷却（期间不索敌）。
    *  蚱蜢(377/446) 复用本 AI（ai0 额外 +3，跳得更频繁） */
   /** GetAttackDamage_ForProjectiles_MultiLerp（NPC.cs:7036-7039）：t = GetLerpValue(
-   *  Classic, Master, difficulty) 钳 [0,1]，Utils.MultiLerp 三值两段线性
-   *  （t=0/0.5/1 → 经典/专家/大师），(int) 截断 */
+   *  Classic, Master, difficulty) 钳 [0,1]——GDL 档位是浮点 Classic=1/Expert=2/
+   *  Master=3（ScaleStats.GDL），故 t=(difficulty−1)/2；Utils.MultiLerp 三值两段
+   *  线性（t=0/0.5/1 → 经典/专家/大师），(int) 截断 */
   private projDmgMultiLerp(normal: number, expert: number, master: number): number {
-    const t = Math.min(1, Math.max(0, this.difficulty / 2));
+    const t = Math.min(1, Math.max(0, (this.difficulty - 1) / 2));
     return Math.trunc(t < 0.5
       ? normal + (expert - normal) * t * 2
       : expert + (master - expert) * (t - 0.5) * 2);
@@ -1990,11 +1991,18 @@ export class Enemy extends Entity {
       flag3 = !!player && !player.dead && !inWater
         && Math.hypot(player.cx - this.cx, player.cy - this.cy) <= 200;
     }
-    // ai[2] 卡墙冷却期间不索敌（L61938）
-    if (this.ai2 > 0) this.ai2--;
-    // 激愤时索敌：direction 朝玩家；被动时保持现方向（confused 反向走 seekDirX）
-    if (flag3 && this.ai2 === 0 && player) {
-      this.facing = this.seekDirX(player);
+    // ai[2] 卡墙冷却倒数（cs:61873-61876 `if (ai[2] > 1f) ai[2] -= 1f`——**只减到
+    // 1 不归零**：0 仅首帧出现）。索敌时机 1:1（S 批 2026-08-19）：
+    //  首帧 ai[2]==0 → ai[0]=−100、ai[2]=1、TargetClosest（:61926-61931）；
+    //  每次起跳 flag3 且 ai[2]==1 → TargetClosest（:62042-62045，已接）；
+    //  wet 且 ai[2]==1 且 flag3 → TargetClosest（:61920-61923，已接）。
+    //  ★曾为"冷却归零后每帧重瞄"——金属矿史莱姆悬停段（:61133 direction=0）会被
+    //  逐帧覆盖，且追踪硬度高于原版
+    if (this.ai2 > 1) this.ai2 -= 1;
+    if (this.ai2 === 0) {
+      this.ai0 = -100;                                      // :61928
+      this.ai2 = 1;                                         // :61929
+      if (player) this.facing = this.seekDirX(player);      // :61930 TargetClosest
     }
     // 蚱蜢被动档（cs:61479）：无激愤时走"走路档"——0.2 慢爬不进跳循环
     if (grasshopper && !flag3) {
@@ -3579,17 +3587,22 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       return true;
     }
-    // 冲刺（ai2 < -6，cs:57153-57172）
-    this.ai2 -= 1;
-    // 落地判定读上一 tick 碰撞结果（原版 velocity.Y==0f 是碰撞后清零值）
-    if (this.vy === 0) this.ai2 = 60;
-    else if (this.ai2 < -WINDUP - 10) this.vy = Math.min(this.vy + 0.15, 24); // num41=10
-    this.reflectsProjectiles = true;
-    this.takenDamageMultiplier = 3;
-    if (this.justHit) this.ai2 = 60;
-    this.applyGravity(game);
-    moveAndCollide(this, game.world, this.vx, this.vy);
-    return true;
+    if (this.ai2 < -WINDUP) {
+      // 冲刺（ai2 < -6，cs:57153-57177）。★恢复态（ai2>0 且未到 0）原版整个 else
+      // 块无一命中 → 直接落回通用行走段（A 批修：曾无条件落进冲刺段把恢复态
+      // 也置 reflectsProjectiles=true——"复位后同 tick 又拉满"的残留根因之一）
+      this.ai2 -= 1;
+      // 落地判定读上一 tick 碰撞结果（原版 velocity.Y==0f 是碰撞后清零值）
+      if (this.vy === 0) this.ai2 = 60;
+      else if (this.ai2 < -WINDUP - 10) this.vy = Math.min(this.vy + 0.15, 24); // num41=10
+      this.reflectsProjectiles = true;
+      this.takenDamageMultiplier = 3;
+      if (this.justHit) this.ai2 = 60;
+      this.applyGravity(game);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return true;
+    }
+    return false;   // ai2>0 恢复倒数中：走通用行走段（cs else 块无命中即落穿）
   }
 
   /** AI_003 远程战士参数（NPC.cs:59464-60197 各 type 修正汇总，F2/F4/F9/F19/F20 批
@@ -5102,7 +5115,8 @@ export class Enemy extends Entity {
     //      252 连尘都不出,其余表外 1/40 血尘。反弹基 = 移动前速度（moveAxis 撞击
     //      清零,原版 oldVelocity 语义——曾误用撞后 this.vx=0 → 弹速恒最小档） ----
     const inCollideList = vid === 6 || vid === 619 || vid === 23 || vid === 42 || vid === 94
-      || vid === 139 || vid === 173 || vid === 176 || vid === 205 || isBee;
+      || vid === 139 || vid === 173 || vid === 176 || vid === 205 || isBee
+      || (vid >= 231 && vid <= 235);
     const ghost = !!this.vanilla?.noTileCollide;   // 5/23/139 等原版幽灵位移（无 tile 碰撞）
     const oldVx = this.vx, oldVy = this.vy;
     if (ghost) {
@@ -5165,7 +5179,10 @@ export class Enemy extends Entity {
       this.ai1 += (Math.random() * 15 + 5) * 0.1 * scale;
       if (vid === 176) this.ai1 += (Math.random() * 15 + 5) * 0.1 * scale;
       if (game.world.seedFlags?.getGoodWorld) this.ai1 += (Math.random() * 15 + 5) * 0.1 * scale;
-      if (player && !player.dead && player.stealth === 0 && player.itemAnimTicks === 0) this.ai1 = 0;
+      // 待机清零（:51168-51175 stealth==0 && itemAnimation==0;动画窗代理 =
+      // itemAnimTicks>0 || useTime>0,Player.ts:1859 同款口径）
+      if (player && !player.dead && !(player.stealth > 0)
+        && !(player.itemAnimTicks > 0 || player.useTime > 0)) this.ai1 = 0;
       if (this.ai1 >= 130) {
         if (player && !player.dead && this.canSeePlayer(st, player)) {
           const sxp = player.cx - this.cx + (Math.random() * 41 - 20);
@@ -9139,7 +9156,10 @@ export class Enemy extends Entity {
     // 类默认 -1120 当角度用 = 出生朝向固化 ~92°(2026-08-13 清查)——归 0 与 NewNPC
     // ai[]=0 一致：角 0(朝东)，首帧 ai[1]=0−1≤0 即 +0.06 推进直到 >3 才掷随机角
     //（原版无"==0 掷随机角"自愈——曾自创，审计 15.2 残余,2026-08-19）
-    if (this.ai0 < 0) this.ai0 = 0;
+    // ★只重置哨兵值：反射(:47482 ToRotation=atan2)与贴皮折角(:47459 ai[0]−π)都会
+    //  产生负角（原版照存，ToRotationVector2 任意角皆可）——曾 `ai0<0→0` 把反射
+    //  出的 −π(朝西)砸回 0(朝东) = 撞墙海马永远顶着墙（2026-08-19）
+    if (this.ai0 === -1120) this.ai0 = 0;
     // GetWaterLineIterate：中心列自中心格逐行上行越过液柱，回退一格；该格有液 →
     // 线 = 行×16 − trunc(上一格液量/16)（cs:1557-1571 原式即用 Y−1 格液量）
     const itx = Math.floor(this.cx / TILE);

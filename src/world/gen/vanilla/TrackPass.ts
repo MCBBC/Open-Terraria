@@ -33,6 +33,13 @@ import { idsByVanillaSheet } from './TileRunner';
 import { genSquareTileFrame, genTileFrame } from './FinalCleanupPass';
 import { TRACK_TILE, frameTrack } from '../../MinecartTrack';
 
+/** FFFFF 探针:placePath 逐列步进钩(harness _wwwrep 经 __setTrackStepProbe 安装;
+ *  缺省 undefined 零开销)。loop 1=清轨巷遍/2=铺轨遍。 */
+let __trackStepProbe: ((loop: number, k: number, x: number, y: number, ph: number) => void) | undefined;
+export function __setTrackStepProbe(fn: ((loop: number, k: number, x: number, y: number, ph: number) => void) | undefined): void {
+  __trackStepProbe = fn;
+}
+
 /** type → vanilla sheet(FinalCleanupPass.SWEEP_SHEET 同构;私有不可导出) */
 const SHEET_OF = new Int16Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) {
@@ -354,6 +361,7 @@ export class TrackGenerator {
     // 第一遍:清轨巷(cs:85-116)
     for (let i = 0; i < this.len; i++) {
       if (rng.int(0, 6) === 0) this.playerHeight = rng.int(5, 8);   // Next(7) / Next(5,9)
+      __trackStepProbe?.(1, i, this.hist[i]!.x, this.hist[i]!.y, this.playerHeight);
       const th = this.hist[i];
       for (let j = 0; j < this.playerHeight; j++) {
         for (let dy = -1; dy <= 1; dy++) {                            // wall 244 清除(cs:95-106)
@@ -370,6 +378,7 @@ export class TrackGenerator {
     // 第二遍:铺轨 + 帧链(cs:117-161)
     for (let k = 0; k < this.len; k++) {
       if (rng.int(0, 6) === 0) this.playerHeight = rng.int(5, 8);
+      __trackStepProbe?.(2, k, this.hist[k]!.x, this.hist[k]!.y, this.playerHeight);
       const th = this.hist[k];
       if (!st.inBounds(th.x, th.y)) continue;
       const idx = st.idx(th.x, th.y);

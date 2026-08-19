@@ -807,6 +807,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onQuit: () => ui.toast(Lang.text('Mods.SandboxWorld.Toast.QuitUnsupported')),
       onCredits: () => ui.toast(Lang.text('Mods.SandboxWorld.CreditsLine')),
       onMultiplayer: () => showMultiplayerSelect(),
+      // 素材包管理(自制:重制热补丁;面板动态 import 分块,HousingPanel 同模式)
+      onAssetPacks: () => {
+        const m = (window as unknown as { __swRemaster?: { manager: import('./remaster/RemasterManager').RemasterManager } }).__swRemaster?.manager;
+        if (!m) { ui.toast(Lang.text('Mods.SandboxWorld.Remaster.NotReady')); return; }
+        void import('./ui/RemasterPanel').then(({ openRemasterPanel }) => {
+          openRemasterPanel(root, m, { onToast: (msg) => ui.toast(msg) });
+        });
+      },
       // GOING_OLDSCHOOL B2：日月拖拽 → 菜单时钟跟手（Main.cs:62434-62446 反算 t01）
       onSunMoonGrab: (info) => menuBg?.setClockT(info.time01),
     });

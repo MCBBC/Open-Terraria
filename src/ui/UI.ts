@@ -38,7 +38,7 @@ function tooltipBgDataUrl(w: number, h: number): string | null {
   if (!tooltipBgTinted) {
     const t = document.createElement('canvas');
     t.width = img.width; t.height = img.height;
-    const tc = t.getContext('2d')!;
+    const tc = t.getContext('2d', { willReadFrequently: true })!;  // getImageData/toDataURL 烘焙,SHM 后备
     tc.imageSmoothingEnabled = false;
     tc.drawImage(img, 0, 0);
     const d = tc.getImageData(0, 0, t.width, t.height);
@@ -55,7 +55,7 @@ function tooltipBgDataUrl(w: number, h: number): string | null {
   const t = tooltipBgTinted, W = t.width, H = t.height;
   const c = document.createElement('canvas');
   c.width = Number(key.split('x')[0]); c.height = Number(key.split('x')[1]);
-  const x = c.getContext('2d')!;
+  const x = c.getContext('2d', { willReadFrequently: true })!;  // toDataURL 烘焙,SHM 后备
   x.imageSmoothingEnabled = false;
   x.drawImage(t, 0, 0, 10, 10, 0, 0, 10, 10);
   x.drawImage(t, W - 10, 0, 10, 10, c.width - 10, 0, 10, 10);
@@ -77,7 +77,7 @@ function invBgDataUrl(w: number, h: number): string | null {
   if (!invBgTinted) {
     const t = document.createElement('canvas');
     t.width = img.width; t.height = img.height;
-    const tc = t.getContext('2d')!;
+    const tc = t.getContext('2d', { willReadFrequently: true })!;  // getImageData/toDataURL 烘焙,SHM 后备
     tc.imageSmoothingEnabled = false;
     tc.drawImage(img, 0, 0);
     const d = tc.getImageData(0, 0, t.width, t.height);
@@ -94,7 +94,7 @@ function invBgDataUrl(w: number, h: number): string | null {
   const t = invBgTinted, W = t.width, H = t.height;
   const c = document.createElement('canvas');
   c.width = Math.max(20, Math.round(w)); c.height = Math.max(20, Math.round(h));
-  const x = c.getContext('2d')!;
+  const x = c.getContext('2d', { willReadFrequently: true })!;  // toDataURL 烘焙,SHM 后备不占 IOSurface
   x.imageSmoothingEnabled = false;
   // 四角(源 (0,0)/(W-10,0)/(0,H-10)/(W-10,H-10))
   x.drawImage(t, 0, 0, 10, 10, 0, 0, 10, 10);
@@ -192,7 +192,7 @@ function iconUrl(game: Game, id: number): string {
       if (ar) {
         const c = document.createElement('canvas');
         c.width = 32; c.height = 32;
-        const cx = c.getContext('2d')!;
+        const cx = c.getContext('2d', { willReadFrequently: true })!;  // 图标烘焙,SHM 后备
         cx.imageSmoothingEnabled = false;
         // 原版背包图标 = 贴图原始尺寸渲染（ItemSlot.Draw scale=1,只缩不放）：
         // 钱币 12px 圆点就该小,大翅膀才被压回 32。曾 min(32/sw,32/sh) 一律拉满
@@ -2837,7 +2837,7 @@ export class UI {
         let url = DEF_SHIELD_URLS.get(key);
         const sc = DEF_SHIELD_SCRATCH;
         if (!url && sc) {
-          const sx2 = sc.getContext('2d')!;
+          const sx2 = sc.getContext('2d', { willReadFrequently: true })!;  // toDataURL 烘焙,SHM 后备
           sc.width = 52; sc.height = 48;
           sx2.clearRect(0, 0, 52, 48);
           sx2.drawImage(shield.img, shield.sx + col * 52, shield.sy, 52, 48, 0, 0, 52, 48);

@@ -187,10 +187,10 @@ describe('AI_014 蝙蝠（batAI）', () => {
     drive(demon, 'batAI', g, p);
     expect(g.__projectiles).toHaveLength(1);
     const proj = g.__projectiles[0];
-    const dx = p.cx - demon.cx, dy = p.cy - demon.cy;
-    const d = Math.hypot(dx, dy);
-    expect(proj.x).toBeCloseTo(demon.cx + demon.vx * 5 + dx / d * 100, 3);
-    expect(proj.y).toBeCloseTo(demon.cy + demon.vy * 5 + dy / d * 100, 3);
+    // 弹向含 ±50 随机散布 → 用弹体自身速度方向回推期望出生点
+    const spd = Math.hypot(proj.vx, proj.vy);
+    expect(proj.x).toBeCloseTo(demon.cx + demon.vx * 5 + proj.vx / spd * 100, 3);
+    expect(proj.y).toBeCloseTo(demon.cy + demon.vy * 5 + proj.vy / spd * 100, 3);
   });
 });
 
@@ -282,9 +282,10 @@ describe('AI_056 地牢之魂 rotation 基向', () => {
     const spirit = mkEnemy(484, 40, 20);
     spirit.vx = 5; spirit.vy = -5;                 // 与目标方向不同的当前速度
     const p = mkPlayer(spirit.x + 300, spirit.y);
+    const scx = spirit.cx, scy = spirit.cy;        // 驱动前中心（AI 后积分会移动）
     drive(spirit, 'dungeonSpiritAI', g, p);
     expect(spirit.visAngle)
-      .toBeCloseTo(Math.atan2(p.cy - spirit.cy, p.cx - spirit.cx) - Math.PI / 2, 5);
+      .toBeCloseTo(Math.atan2(p.cy - scy, p.cx - scx) - Math.PI / 2, 5);
   });
 });
 
@@ -305,13 +306,13 @@ describe('AI_012 骷髅王手五态机（bossAI.skeletronHandAI）', () => {
 
   it('头悬浮态:ai[3] 300t 计满 → ai[2]=1（蓄升）', () => {
     const { g, head, hand } = mkFight();
-    head.ai1 = 0;                                  // 头悬浮
-    hand.ai3 = 299;
+    head.ai1 = 0;                                  // 头悬浮（类默认 -1120 ≠ 0 会走回侧位段）
+    hand.ai3 = 298;
     const p = mkPlayer(hand.x - 300, hand.y);
     handAI(hand, g, p);
-    expect(hand.ai3).toBe(300);
+    expect(hand.ai3).toBe(299);                    // 299 <300 未转段
     handAI(hand, g, p);
-    expect(hand.ai2).toBe(1);
+    expect(hand.ai2).toBe(1);                      // 300 → +1 进蓄升、ai[3] 归零
     expect(hand.ai3).toBe(0);
   });
 
@@ -355,10 +356,10 @@ describe('AI_012 骷髅王手五态机（bossAI.skeletronHandAI）', () => {
     handAI(hand, g, p);
     expect(hand.ai2).toBe(5);
     expect(Math.hypot(hand.vx, hand.vy)).toBeCloseTo(17, 5);
-    // 回冲越过玩家 X → 收尾回悬停
+    // 回冲越过玩家 X（vx<0 且已在玩家左侧）→ 收尾回悬停
     hand.ai2 = 5;
-    hand.vx = -10;                                 // 向左冲、玩家在左更远处? → 未越
-    hand.x = p.x + 500;
+    hand.vx = -10;
+    hand.x = p.x - 500;
     handAI(hand, g, p);
     expect(hand.ai2).toBe(0);
   });
@@ -385,21 +386,79 @@ describe('AI_026 charger + 620 陆地段', () => {
     expect(wolf.stuckT).toBe(0);                   // 近身清零
   });
 
-  it('620 陆地:夜 + 落地 + <600px 有视线 → 蓄力 60;20t 后 40 帧发 811（13 速）', () => {
+  it('155/329 扑跳:落地 + <100px + |vx|>3 + 朝玩家侧 → vy=−4（cs:63003-63012）', () => {
+    const g = makeGame(false);
+    // 铺地板（防跳梯悬崖档 −8 覆盖扑跳值——原版同序,跳梯在其后）
+    for (let x = 30; x < 60; x++) g.world.store.setTileSilent(x, 24, 1, 0, 0);
+    for (const id of [155, 329]) {
+      const e = mkEnemy(id, 40, 23);
+      e.y = 24 * 16 - e.h;
+      e.vx = 4; e.vy = 0; e.facing = 1;
+      drive(e, 'chargerAI', g, mkPlayer(e.x + 60, e.y));
+      expect(e.vy).toBeCloseTo(-4 + 0.1, 5);   // 扑跳 −4 + 本 tick 重力 0.1（低空档）
+    }
+    // 背向玩家侧不跳
+    const wolf = mkEnemy(155, 40, 23);
+    wolf.y = 24 * 16 - wolf.h;
+    wolf.vx = -4; wolf.vy = 0; wolf.facing = -1;
+    drive(wolf, 'chargerAI', g, mkPlayer(wolf.x + 60, wolf.y));
+    expect(wolf.vy).not.toBe(-4);
+  });
+
+  it('410 自爆:头顶 20px 内 800px 玩家 → 3 发 538 + 即灭（cs:62940-62977）', () => {
+    const g = makeGame(false);
+    const skl = mkEnemy(410, 40, 20);
+    skl.vy = 0;
+    drive(skl, 'chargerAI', g, mkPlayer(skl.x + 10, skl.y - 40));
+    expect(skl.dead).toBe(true);
+    expect(g.__projectiles.filter((x) => x.projId === 538)).toHaveLength(3);
+    expect(g.__projectiles.every((x) => x.vy < 0)).toBe(true);   // 上喷火花
+  });
+
+  it('423 蓄力冲:180t 冷却 + <500px 落地 → 蓄力态刹车;30t 反向 575（cs:62978-63022）', () => {
+    const g = makeGame(false);
+    const e = mkEnemy(423, 40, 20);
+    e.ai1 = 180; e.vx = 8; e.vy = 0; e.facing = 1;
+    const p = mkPlayer(e.x + 300, e.y);
+    drive(e, 'chargerAI', g, p);
+    expect(e.ai2).toBe(1);                          // 进蓄力态（本 tick 只置态不刹车）
+    drive(e, 'chargerAI', g, p);
+    expect(e.vx).toBeCloseTo(8 * 0.7, 5);           // 蓄力刹车 ×0.7/帧
+    for (let t = 0; t < 28; t++) drive(e, 'chargerAI', g, p);
+    expect(g.__projectiles.filter((x) => x.projId === 575)).toHaveLength(0);
+    drive(e, 'chargerAI', g, p);                    // ai[1]==30 → 反向弹
+    expect(g.__projectiles.filter((x) => x.projId === 575)).toHaveLength(1);
+    expect(g.__projectiles[0].vx).toBe(-7);         // spriteDirection(=facing 1) 反向
+  });
+
+  it('315 骑手弹:localAI[0] 每 480t 一发 1001（cs:62852-62867）', () => {
+    const g = makeGame(false);
+    const rider = mkEnemy(315, 40, 20);
+    rider.lai0 = 480;
+    rider.vy = 0;
+    drive(rider, 'chargerAI', g, mkPlayer(rider.x + 200, rider.y));
+    expect(g.__projectiles.filter((x) => x.projId === 1001)).toHaveLength(1);
+    expect(rider.lai0).toBe(0);
+    expect(rider.lightRGB).toEqual([0.4, 0.36, 0.2]);   // 南瓜灯头点光
+  });
+
+  it('620 陆地:夜 + 落地 + <600px 有视线 → 蓄力 60;20t 起齐射 811（连发,13 速）', () => {
     const g = makeGame(false);
     // 铺地板让鲨鱼落地（vy==0 起手门）
     for (let x = 30; x < 60; x++) g.world.store.setTileSilent(x, 30, 1, 0, 0);
     const shark = mkEnemy(620, 40, 28);
     shark.y = 30 * 16 - shark.h;
+    // 预置已过出生段（α255 首帧 vy=−6 跳起,落地前起手门不开——出生块另由 619 用例覆盖）
+    shark.bInit = true; shark.spawnAlpha = 0; shark.alphaFade = false;
     shark.vy = 0; shark.vx = 0; shark.ai1 = 0; shark.ai0 = 0;
     const p = mkPlayer(shark.x + 300, shark.y);
-    // 首 tick α255 出生跳（vy=−6）——落回地板后起手门（vy==0）才开
-    let guard = 0;
-    do { drive(shark, 'chargerAI', g, p); guard++; } while (shark.ai1 !== 60 && guard < 200);
+    drive(shark, 'chargerAI', g, p);
     expect(shark.ai1).toBe(60);                    // 起手:num8=60
     expect(shark.ai0).toBeGreaterThan(0);
+    // Drakin 式连发:num9 在 ai[1]∈(10,40] 且 %5==0 时取 ai[1]−1 → 出手帧
+    // 40/39/34/29/24/19/14（每 210t 一轮 7 连发;21 tick 覆盖前两发）
     for (let t = 0; t < 21; t++) drive(shark, 'chargerAI', g, p);
-    expect(g.__projectiles.filter((x) => x.projId === 811)).toHaveLength(1);
+    expect(g.__projectiles.filter((x) => x.projId === 811)).toHaveLength(2);
     const shot = g.__projectiles[0];
     const spd = Math.hypot(shot.vx, shot.vy);
     expect(spd).toBeGreaterThan(11);

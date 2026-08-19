@@ -304,7 +304,9 @@ describe('游泳化三族（AI_003 cs:56361/:56486 + AI_107 flag27 cs:64300）',
     expect(dry.w).toBe(18);
     expect(dry.h).toBe(40);
     expect(dry.kbResistOverride).toBeGreaterThan(0);          // 0.4 难度曲线（dry :56412）
-    expect(dry.ai3).toBe(0);                                  // 哨兵已消费
+    // 哨兵已消费（F14 批 2026-08-19：通用 ai[3] 卡死计数（NPC.cs:57472-57546）落地后，
+    // 白天驱散静置期（X 不动）ai[3] 会逐 tick 累计——原版同款，不再恒 0）
+    expect(dry.ai3).not.toBeCloseTo(-0.10101, 5);
   });
   it('586 僵尸人鱼：wet 不缩盒 + kbResist=0 + 水平收敛玩家', () => {
     const w = liquidWorld();

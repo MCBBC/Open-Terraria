@@ -40,6 +40,8 @@ export interface TitleMenuFlow {
   onCredits(): void;
   onQuit(): void;
   onMultiplayer(): void;
+  /** 素材包管理(自制:重制热补丁;mainFlow → RemasterPanel) */
+  onAssetPacks?(): void;
   /**
    * 日/月被抓住（含拖动中的每帧）。原版此点会写 Main.time 使日/月跟手
    * （Main.cs:62434-62446）；本仓菜单时钟写入入口缺失，主会话接线
@@ -152,6 +154,7 @@ export class TitleMenu {
         <div class="sw-title-btn" data-act="sp">${Lang.text('LegacyMenu.12')}</div>
         <div class="sw-title-btn" data-act="mp">${Lang.text('LegacyMenu.13')}</div>
         <div class="sw-title-btn" data-act="set">${Lang.text('LegacyMenu.14')}</div>
+        <div class="sw-title-btn" data-act="packs">${Lang.text('Mods.SandboxWorld.Remaster.MenuBtn')}</div>
         <div class="sw-title-btn" data-act="credits">${Lang.text('UI.Credits')}</div>
         <div class="sw-title-btn" data-act="quit">${Lang.text('LegacyMenu.15')}</div>
       </div>
@@ -180,6 +183,7 @@ export class TitleMenu {
     on('sp', () => flow.onSinglePlayer());
     on('mp', () => flow.onMultiplayer());
     on('set', () => flow.onSettings());
+    on('packs', () => flow.onAssetPacks?.());
     on('credits', () => flow.onCredits());
     on('quit', () => flow.onQuit());
     parent.appendChild(this.root);

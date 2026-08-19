@@ -241,7 +241,7 @@ export function soundTrackName(soundIdName: string): string | null {
 /** SoundID 常量名 → wav 变体列表（多变体整组返回，playSfxFiles 内部随机取一；
  *  单变体/未知名返回单元素数组或 null）。原版 LegacySoundStyle 播放时在变体组内
  *  随机取一（SoundEngine.PlaySound → SoundStyle.PlayVariations），不是恒取 _0 */
-export function vanillaSoundFiles(soundIdName: string | undefined): string[] | null {
+export function vanillaSoundFiles(soundIdName: string | null | undefined): string[] | null {
   if (!soundIdName) return null;
   const legacy = vanillaSoundName(soundIdName);
   if (legacy) return [legacy];

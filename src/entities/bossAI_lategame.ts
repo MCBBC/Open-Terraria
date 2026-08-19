@@ -12,6 +12,7 @@ import type { Player } from './Player';
 import type { Camera } from '../render/Camera';
 import type { Renderer } from '../render/Renderer';
 import { TILE } from '../core/constants';
+import { TILE_DEFS } from '../data/tiles';
 import { spawnPart, shoot, losClear, addEnemy } from './bossAI';
 import { Entity } from './Entity';
 import { projSprite } from './Arrow';
@@ -854,10 +855,13 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
           case 1: cx0 += span / 2; cy0 += num75 / 2; dirX = 0; dirY = span; axX = -1; axY = 0; break;
           case 2: cx0 += -span * 0.4; cy0 += -span * 0.4; dirX = span * 1.4; dirY = 0; axX = 1; axY = 1; break;
           case 3: cx0 += span * 0.4 + num75 / 2; cy0 += -span * 0.4; dirX = -span * 1.4; dirY = 0; axX = -1; axY = 1; break;
-          default: toPlayer = true;
-            cx0 += (line === 4 ? -span : span) * 0.4;
-            cy0 += (line === 4 ? -span : span) * 0.4;
-            dirX = (line === 4 ? 1 : -1) * span * 1.4; dirY = 0; break;
+          default:
+            // :46946-46955 第 4/5 线（flag2 专属）：偏移 ±(span·0.4, span·0.4)（第 5 线 X 再 +num75/2）
+            toPlayer = true;
+            if (line === 4) { cx0 += -span * 0.4; cy0 += span * 0.4; dirX = span * 1.4; }
+            else { cx0 += span * 0.4 + num75 / 2; cy0 += span * 0.4; dirX = -span * 1.4; }
+            dirY = 0;
+            break;
         }
         const al = Math.hypot(axX, axY) || 1;
         for (let t = 0; t <= 1.0001; t += 1 / num74) {
@@ -990,15 +994,24 @@ const QUEEN_MINION_VANILLA = [658, 659, 660]; // vanilla :46134-46146 蓝/粉/�
 // FALLBACK 仅作数据文件缺失时的防御(535 刺史莱姆/537 沙史莱姆/16 蓝史莱姆)。
 const QUEEN_MINION_FALLBACK = [535, 537, 16];
 
+/** TileID.Sets.Platforms（:43378 第二析取项）——平台四件套 sheet id（本仓 isPlatform
+ *  还含可站家具（工作台/铁砧等不在 Sets.Platforms）,故按 sheet 精确过滤） */
+const PLATFORM_SHEETS = new Set([19, 239, 380, 427]);
+function isPlatformSheetTile(game: GameHooks, x: number, y: number): boolean {
+  const st = game.world.store;
+  const d = TILE_DEFS[st.type[st.idx(x, y)]];
+  return !!d?.platform && PLATFORM_SHEETS.has(d.vanilla?.sheet ?? -1);
+}
+
 /** AddKingSlimeTeleportCacheTiles（NPC.cs:43371-43389）逐格验证：
- *  nactive 且（实心非顶面 或 平台族）且上一格非实心（1 格净空），落位
- *  (x*16+8, y*16−height/2) 无岩浆且到玩家 CanHitLine。 */
+ *  nactive 且（tileSolid && !tileSolidTop 或 Sets.Platforms）且上一格非实心
+ *  （1 格净空,非 7 格）,落位 (x*16+8, y*16−height/2) 无岩浆且到玩家 CanHitLine。 */
 function kingSlimeCacheTileOk(
   game: GameHooks, player: Player, e: Enemy, x: number, y: number,
 ): boolean {
   const st = game.world.store;
   if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
-  const ground = (st.isSolid(x, y) && !st.isPlatform(x, y)) || st.isPlatform(x, y);
+  const ground = (st.isSolid(x, y) && !st.isPlatform(x, y)) || isPlatformSheetTile(game, x, y);
   if (!ground) return false;
   if (!st.inBounds(x, y - 1) || st.isSolid(x, y - 1)) return false;   // 1 格净空（:43378）
   const li = st.idx(x, y);

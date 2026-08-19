@@ -234,7 +234,14 @@ describe('史后仆从 658/659 射击', () => {
   it('距离门：ΔX>500 不射（cs:61723/:61747）', () => {
     const { hooks, shots } = minionWorld({ x: 76, y: 58 });
     const e = Enemy.fromVanilla(658, 36 * TILE, 59 * TILE - 18)!;
-    for (let t = 0; t < 400; t++) e.fixedUpdate(1 / 60, hooks);
+    // ★2026-08-19 C 批 S1 修正（NPC.cs:61989-61992 per-type +5 计数）后 658 跳跃
+    // 频率对齐原版——旧断言的 400t 窗口内史莱姆已自行走进 500px 射程（原版同款
+    // 追击行为）。此处逐 tick 钉住 X 隔离"距离门"本身：出程恒不发射
+    const x0 = e.x;
+    for (let t = 0; t < 400; t++) {
+      e.x = x0;
+      e.fixedUpdate(1 / 60, hooks);
+    }
     expect(shots).toHaveLength(0);
   });
 });

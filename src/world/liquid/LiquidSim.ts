@@ -150,6 +150,12 @@ const CHECK2X2_SHEETS = new Set([138, 484, 664, 665, 711, 712]);
 /** Check2x2 巨石分支的上方箱族豁免（cs:48473-48490：BasicChest{21,467}+88+
  *  BasicChestFake{441,468}+470+475，原版 sheet id） */
 const CHEST_PROTECT_SHEETS = new Set([21, 467, 441, 468, 88, 470, 475]);
+/** Main.tileMoss（Main.cs:6956-6996，sheet id）——GetDesiredStalagtiteStyle 的
+ *  style0 族（石/苔锚都归 0 档） */
+const MOSS_SHEETS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+/** TileID.Sets.NotReallySolid（TileID.cs:355，sheet id）——CheckBanner 锚门的
+ *  排除族（开门10/高门387/闸门388） */
+const NOT_REALLY_SOLID_SHEETS = new Set([387, 388, 10]);
 /** PlatformProperTopFrame（cs:70198，帧宽 18）：平台合法顶帧段 [0,7]∪[12,16]∪[25,26] */
 function platformProperTopFrameGen(frameX: number): boolean {
   const n = Math.trunc(frameX / 18);
@@ -181,13 +187,19 @@ export class LiquidSim {
   private stuckAmount = 0; // 原版 ReInit 置 0（Liquid.cs:69）
   private disposed = false;
   /** LiquidBuffer 溢出缓冲（Liquid.cs:840-843 入队 / 799-807 清扫轮回灌，上限 49998）。
-   *  定长 Int32Array 对 + head/tail 环形语义(非环形,tail 到顶即丢——原版上限语义)——
-   *  ★曾用 Array.shift() 出队,O(n) × 万次回灌 = 沉降 O(n²) 主热点;头指针出队 O(1) */
+   *  LiquidBuffer.cs 逐行镜像：AddBuffer 尾接（!checkingLiquid 门）/ DelBuffer(0)
+   *  swap-remove（num--; buf[0]=buf[num]——尾元素补头位，非 FIFO）。★DDDDD 批
+   *  （2026-08-19）：m 链（中世界）r0 唤醒链把活动列表顶到 curMaxLiquid-1=24999，
+   *  缓冲器首次介入（maxBuf=1535）——曾用 head/tail 环形 FIFO + 回灌量=空余量
+   *  min(curMax-numLiquid, bufLen)，与原版（回灌量=当前活动数 numLiquid，
+   *  cs:1134 恒等式 curMaxLiquid-(curMaxLiquid-numLiquid)，1405/1456 双版一致；
+   *  DelBuffer swap-remove 出序 A,C,B…）双重错位 → 回灌时序整体漂移 → 全图湖面
+   * 蝴蝶薄膜高度差（#49 L=11707 全部 475 条单行薄膜带，小世界缓冲从不介入故全绿）。
+   *  swap-remove O(1) 无需压缩——O(n²) 热点教训照旧成立 */
   private static readonly BUFFER_CAP = 49998;
   private bufX = new Int32Array(LiquidSim.BUFFER_CAP);
   private bufY = new Int32Array(LiquidSim.BUFFER_CAP);
-  private bufHead = 0;   // 下一个出队位
-  private bufTail = 0;   // 下一个入队位(bufTail-bufHead = 元素数)
+  private bufCount = 0;  // LiquidBuffer.numLiquidBuffer
   /** 实心判定 LUT(热路径查表替代 TILE_DEFS 属性链;定义同源=构造时用原判定式逐 id 预计算):
    *  solidNP[id]=solid&&!platform(blocksLiquid/addWater/waterCheck 用);
    *  solidFull[id]=solid&&!platform&&!half&&!slope(solidTileFull 用) */
@@ -306,6 +318,13 @@ export class LiquidSim {
     const sh = SHEET_OF[t] ?? -1;
     if (CHECK2X2_SHEETS.has(sh)) this.check2x2Gen(x, y, t);           // cs:86688→Check2x2
     else if (sh === 485) this.checkSuperGen(x, y, t);                 // cs:86443→CheckSuper
+    // DDDDD 批（2026-08-19）新增在场证据成员（TileFrameImportant 大 switch）：
+    //  165 钟乳石（cs:85996→CheckStalactite）＝m 链 #49 A=2/T=2 债主（蛛网水杀的
+    //   3×3 帧扫触发：悬挂 2 格组支撑亡 → vanilla 杀 2 格 JS 未杀）；91 旗帜
+    //   （cs:86442→CheckBanner）＝s22222 #49 A=2 债主（底部格先亡 → 组帧校验破
+    //   → vanilla 杀整组）。余成员仍按 YYY 备案（在场证据再扩）
+    else if (sh === 165) this.checkStalactiteGen(x, y);               // cs:85996
+    else if (sh === 91) this.checkBannerGen(x, y, t);                 // cs:86442
   }
 
   /** SquareTileFrame（cs:80924）：3×3 逐格 TileFrame，列主序与原版逐条一致 */
@@ -436,6 +455,227 @@ export class LiquidSim {
       for (let l = -1; l < 3; l++) this.tileFrameGen(ax + k, ay + l); // cs:48266-48270
     }
   }
+
+  /* ── CheckStalactite / CheckBanner（DDDDD 批 2026-08-19，cs:39022-39189 /
+   *    cs:86442 派发；UpdateStalagtiteStyle 族 cs:38669-38899）──────────────
+   *  与 Check2x2/CheckSuper 同属 KillTile 尾 SquareTileFrame→TileFrame→
+   *  TileFrameImportant 的锚点拆除级联。★CheckStalactite 无 destroyObject
+   *  头闸（原版 cs:39022 直入，仅组杀段置闸）；CheckBanner 有头闸（cs:86442）。
+   *  UpdateStalagtiteStyle 的 style≠desired 时耗 genRand.Next(3)（cs:38689）并
+   *  整组重写 frameX——gen 期走 pass 链流（this.roll）。 */
+
+  /** InvalidTileForPilesOrSpeleothems（cs:38381-38393）：InWorld(x,y,2) 且活性
+   *  格 ∈ Boulders（复用 boulderFamilyIds 内部 id 集 = TileID.cs:195 全表） */
+  private invalidTileForPilesGen(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (x < 2 || y < 2 || x >= st.w - 2 || y >= st.h - 2) return false;
+    const i = this.idx(x, y);
+    return st.flags[i] !== 0 && this.boulderFamilyIds.has(st.type[i]!);
+  }
+
+  /** GetStalagtiteStyle（cs:38849-38898）：frameX/54 档位 → style */
+  private getStalactiteStyleGen(x: number, y: number): { style: number; fail: boolean } {
+    const st = this.world.store;
+    const n = Math.trunc((st.frameX[this.idx(x, y)] ?? 0) / 54);   // C# int 除法
+    const map: Record<number, number> = { 0: 7, 1: 0, 2: 11, 3: 12, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 8, 11: 9, 12: 10 };
+    const style = map[n];
+    return style === undefined ? { style: 0, fail: true } : { style, fail: false };
+  }
+
+  /** GetDesiredStalagtiteStyle（cs:38746-38847）：按 frameY 分支取支撑格 type
+   *  （裸读不查 active）→ 期望 style；支撑 type 不在族内 → fail（调方当 false 用） */
+  private getDesiredStalactiteStyleGen(x: number, j: number): { fail: boolean; desiredStyle: number; height: number; y: number } {
+    const st = this.world.store;
+    const i0 = this.idx(x, j);
+    const fy = st.frameY[i0] ?? 0;
+    let y = j;
+    let num = 0;        // 方位码：0 悬挂单格 1 立地单格 3 悬挂 2 格 4 立地 2 格
+    let height = 1;
+    let anchor = -1;    // 支撑格 type（裸读不查 active；越界=-1 走 fail 支）
+    const typeAt = (yy: number): number => (yy < 0 || yy >= st.h ? -1 : st.type[this.idx(x, yy)]!);
+    if (fy === 72) {
+      num = 0;
+      anchor = typeAt(y - 1);
+    } else if (fy === 90) {
+      num = 1;
+      anchor = typeAt(y + 1);
+    } else if (fy >= 36) {
+      if (fy === 54) y--;
+      height = 2;
+      num = 4;
+      anchor = typeAt(y + 2);
+    } else {
+      if (fy === 18) y--;
+      height = 2;
+      num = 3;
+      anchor = typeAt(y - 1);
+    }
+    if (anchor === 1 || MOSS_SHEETS.has(SHEET_OF[anchor] ?? -1)) {
+      let desiredStyle = 0;
+      if (num === 3 && st.wall[i0] === 62) desiredStyle = 11;       // 蛛网墙族悬钟乳石
+      return { fail: false, desiredStyle, height, y };
+    }
+    const sh = SHEET_OF[anchor] ?? -1;
+    let d = -1;
+    if (sh === 200) d = 10;
+    else if (sh === 164) d = 8;
+    else if (sh === 163) d = 9;
+    else if (sh === 117 || sh === 402 || sh === 403) d = 1;
+    else if (sh === 25 || sh === 398 || sh === 400) d = 2;
+    else if (sh === 203 || sh === 399 || sh === 401) d = 3;
+    else if (sh === 396 || sh === 397) d = 4;
+    else if (sh === 367) d = 6;
+    else if (sh === 368) d = 5;
+    else if (sh === 147 || sh === 161) d = 7;
+    if (d >= 0) return { fail: false, desiredStyle: d, height, y };
+    if ((num === 0 || num === 1) && sh === 225) return { fail: false, desiredStyle: 12, height, y };
+    return { fail: true, desiredStyle: 0, height, y };
+  }
+
+  /** UpdateStalagtiteStyle（cs:38669-38745）：style≠desired → Next(3) 选变体列
+   *  并整组重写 frameX；fail=false=维持。掷走 pass 链流（gen 期 genRand≡Main.rand） */
+  private updateStalagtiteStyleGen(x: number, j: number): boolean {
+    const st = this.world.store;
+    const g1 = this.getStalactiteStyleGen(x, j);                     // cs:38679
+    if (g1.fail) return false;
+    const g2 = this.getDesiredStalactiteStyleGen(x, j);              // cs:38684
+    if (g2.fail) return false;
+    if (g1.style !== g2.desiredStyle) {
+      let num = this.roll(3) * 18;                                   // cs:38689
+      const off: Record<number, number> = { 0: 54, 1: 216, 2: 270, 3: 324, 4: 378, 5: 432, 6: 486, 7: 0, 8: 540, 9: 594, 10: 648, 11: 108, 12: 162 };
+      num += off[g2.desiredStyle] ?? 0;
+      for (let i = g2.y; i < g2.y + g2.height; i++) {
+        if (i >= 0 && i < st.h) st.frameX[this.idx(x, i)] = num;     // cs:38737-38739
+      }
+    }
+    return true;
+  }
+
+  /** CheckStalactite（cs:39022-39189）四分支：frameY 72=悬挂单格 / 90=立地单格 /
+   *  ≥36=立地 2 格（54 为下格）/ <36=悬挂 2 格（18 为下格）。支撑门 + 组帧校验 +
+   *  InvalidTile 门 + UpdateStalagtiteStyle，任一破 → destroyObject 闸内整组杀 */
+  private checkStalactiteGen(x: number, j: number): void {
+    const st = this.world.store;
+    if (x < 0 || j < 0 || x >= st.w || j >= st.h) return;            // cs:39024 null 门
+    const i0 = this.idx(x, j);
+    const ty = st.type[i0]!;
+    let num = j;
+    const fy0 = st.frameY[i0] ?? 0;
+    if (fy0 === 72) {
+      let bad = false;
+      if (!this.solidTileFull(x, num - 1)) bad = true;               // cs:39043
+      if (!bad && !this.updateStalagtiteStyleGen(x, num)) bad = true;
+      if (bad) {
+        this.destroyObj = true;
+        if (st.type[this.idx(x, num)] === ty) this.killTileGen(x, num);
+        this.destroyObj = false;
+      }
+      return;
+    }
+    if (fy0 === 90) {
+      let bad = false;
+      if (!this.solidTileFull(x, num + 1)) bad = true;               // cs:39067
+      if (!bad && this.invalidTileForPilesGen(x, num + 1)) bad = true;
+      if (!bad && !this.updateStalagtiteStyleGen(x, num)) bad = true;
+      if (bad) {
+        this.destroyObj = true;
+        if (st.type[this.idx(x, num)] === ty) this.killTileGen(x, num);
+        this.destroyObj = false;
+      }
+      return;
+    }
+    if (fy0 >= 36) {
+      if (fy0 === 54) num--;                                         // cs:39091
+      const inA = num >= 0 && num < st.h, inB = num + 1 >= 0 && num + 1 < st.h;
+      const ia = inA ? this.idx(x, num) : -1, ib = inB ? this.idx(x, num + 1) : -1;
+      let bad = false;
+      if (!this.solidTileFull(x, num + 2)) bad = true;               // cs:39119
+      if (!inA || !inB || st.flags[ia] === 0 || st.flags[ib] === 0
+        || st.type[ib] !== st.type[ia]
+        || st.frameX[ib] !== st.frameX[ia]) bad = true;              // cs:39123-39131
+      if (!bad && this.invalidTileForPilesGen(x, num + 2)) bad = true;
+      if (!bad && !this.updateStalagtiteStyleGen(x, num)) bad = true;
+      if (bad) {
+        this.destroyObj = true;
+        if (inA && st.type[ia] === ty) this.killTileGen(x, num);
+        if (inB && st.type[ib] === ty) this.killTileGen(x, num + 1);
+        this.destroyObj = false;
+      }
+      return;
+    }
+    // frameY ∈ {0,18}：悬挂 2 格（cs:39138-39189）
+    if (fy0 === 18) num--;
+    const inA = num >= 0 && num < st.h, inB = num + 1 >= 0 && num + 1 < st.h;
+    const ia = inA ? this.idx(x, num) : -1, ib = inB ? this.idx(x, num + 1) : -1;
+    let bad = false;
+    if (!this.solidTileFull(x, num - 1)) bad = true;                 // cs:39173
+    if (!inA || !inB || st.flags[ia] === 0 || st.flags[ib] === 0
+      || st.type[ib] !== st.type[ia]
+      || st.frameX[ib] !== st.frameX[ia]) bad = true;
+    if (!bad && !this.updateStalagtiteStyleGen(x, num)) bad = true;
+    if (bad) {
+      this.destroyObj = true;
+      if (inA && st.type[ia] === ty) this.killTileGen(x, num);
+      if (inB && st.type[ib] === ty) this.killTileGen(x, num + 1);
+      this.destroyObj = false;
+    }
+  }
+
+  /** CheckBanner（cs:86442 派发 → WorldGen.CheckBanner）：1×3 竖排旗帜，
+   *  frameY/18 反解顶格 + 3 格组帧校验 + 上方锚（nactive + 实心族门 + 平台特例
+   *  380/Platforms）→ 任一破整组杀。tileSolid/tileSolidTop/Platforms 用
+   *  solid||platform / platform 近似（UUU 批同口径：平台族 vanilla 双 true） */
+  private checkBannerGen(x: number, j: number, type: number): void {
+    if (this.destroyObj) return;                                     // cs:86442 头闸
+    const st = this.world.store;
+    const i0 = this.idx(x, j);
+    let row = Math.trunc((st.frameY[i0] ?? 0) / 18);
+    let num2 = 0;
+    while (row >= 3) { row -= 3; num2++; }                           // 样式段（3 行/样式）
+    const num = j - row;                                             // 组顶格 y
+    const frameX = st.frameX[i0] ?? 0;
+    let bad = false;
+    for (let k = 0; k < 3; k++) {
+      const yy = num + k;
+      if (yy < 0 || yy >= st.h) { bad = true; continue; }            // 越界=新 Tile→失配
+      const q = this.idx(x, yy);
+      if (st.flags[q] === 0 || st.type[q] !== type
+        || st.frameY[q] !== k * 18 + num2 * 54
+        || st.frameX[q] !== frameX) bad = true;                      // cs:86452-86464
+    }
+    const ay = num - 1;
+    if (ay < 0 || ay >= st.h) bad = true;                            // 锚越界=新 Tile
+    else {
+      const q = this.idx(x, ay);
+      const act = st.flags[q] !== 0;
+      if (!act) bad = true;                                          // cs:86469 !nactive
+      else {
+        const t = st.type[q]!;
+        const d = TILE_DEFS[t];
+        const topSlope = st.slope[q] === 1 || st.slope[q] === 2;
+        const halfBrick = st.half[q] !== 0;
+        const bottomSlope = st.slope[q] === 3 || st.slope[q] === 4;
+        const tileSolid = !!(d && (d.solid || d.platform));          // vanilla tileSolid
+        const solidTop = !!d?.platform;                              // ≈ tileSolidTop
+        const isPlatform = !!d?.platform;                            // ≈ Sets.Platforms
+        const num3 = topSlope || halfBrick || tileSolid;             // cs:86471
+        const flag2 = !solidTop || (isPlatform && (halfBrick || topSlope));
+        let flag3 = num3 && flag2
+          && !NOT_REALLY_SOLID_SHEETS.has(SHEET_OF[t] ?? -1) && !bottomSlope;
+        if (isPlatform || SHEET_OF[t] === 380) flag3 = true;         // cs:86479 平台/花盆箱特例
+        if (!flag3) bad = true;                                      // cs:86481
+      }
+    }
+    if (!bad) return;
+    this.destroyObj = true;
+    for (let k = 0; k < 3; k++) {
+      const yy = num + k;
+      if (yy < 0 || yy >= st.h) continue;
+      if (st.type[this.idx(x, yy)] === type) this.killTileGen(x, yy);
+    }
+    this.destroyObj = false;
+    // cs:86491+ 的 type==91 掉落支（Item.NewItem 5673/...）：生成期不产实体，备案
+  }
   // ---- panic 模式（Liquid.cs:975-1070）：缓冲长期超限 → 逐行 QuickWater 强制收敛 ----
   private panicMode = false;
   private panicCounter = 0;
@@ -546,7 +786,7 @@ export class LiquidSim {
   }
 
   /** 溢出缓冲长度（Game 的生成期轮上限计算用，原版 LiquidBuffer.numLiquidBuffer） */
-  get bufferLen(): number { return this.bufTail - this.bufHead; }
+  get bufferLen(): number { return this.bufCount; }
 
   /** 运行期画质档分片数（Main.cs:12240-12243：17-10*gfxQuality；高质量单机=7）。
    *  生成/读档沉降保持 ReInit 态 10（构造默认）——Game 在创建运行实例后调用 */
@@ -595,22 +835,13 @@ export class LiquidSim {
       if (this.solidNP[t] === 1 && t !== this.id546) return;
     }
     if (this.numLiquid >= this.curMaxLiquid - 1) {
-      // 原版走 LiquidBuffer 缓冲、清扫轮回灌（Liquid.cs:840-843），超缓冲上限才丢
-      if (this.bufTail - this.bufHead < LiquidSim.BUFFER_CAP) {
-        if (this.bufTail === LiquidSim.BUFFER_CAP) {
-          // ★到顶且 head>0:前移压缩(原版 Array.shift 后 push 可重新装满;曾漏此步
-          // → 越界写静默丢条目,与原版容量语义不等价,A/B 哈希报警)
-          this.bufX.copyWithin(0, this.bufHead, this.bufTail);
-          this.bufY.copyWithin(0, this.bufHead, this.bufTail);
-          this.bufTail -= this.bufHead;
-          this.bufHead = 0;
-        }
-        this.bufX[this.bufTail] = x;
-        this.bufY[this.bufTail] = y;
-        this.bufTail++;
-        // LiquidBuffer.AddBuffer :115:入队即置 checkingLiquid——缺此则同 tick 同格
-        // 二次 AddWater 会重复入队(原版经 :13 checkingLiquid 门拒绝;清扫 :380
-        // 先清后 addWater 语义不变)
+      // LiquidBuffer.AddBuffer（cs:840-843 → LiquidBuffer.cs:12-19）：尾接 +
+      // 入队即置 checkingLiquid（重复入队门；!checkingLiquid 半边由本函数头部
+      // 早退保证——AddBuffer 的唯一调用点在 addWater 内）
+      if (this.bufCount < LiquidSim.BUFFER_CAP) {
+        this.bufX[this.bufCount] = x;
+        this.bufY[this.bufCount] = y;
+        this.bufCount++;
         this.checking[i] = 1;
       }
       return;
@@ -657,7 +888,7 @@ export class LiquidSim {
     // 自底向上逐行 QuickWater 强制沉降，每次调用处理 5 行，到顶后 WaterCheck 退出
     if (!this.quickSettle) {
       if (!this.panicMode) {
-        if (this.bufTail - this.bufHead >= 45000) {
+        if (this.bufCount >= 45000) {
           this.panicCounter++;
           if (this.panicCounter > 3600) {
             this.panicMode = true;
@@ -665,7 +896,7 @@ export class LiquidSim {
             this.panicY = st.h - 3;
             this.liquids.length = 0;
             this.numLiquid = 0;
-            this.bufHead = 0; this.bufTail = 0;
+            this.bufCount = 0;   // StartPanic 清 LiquidBuffer（cs:980）
           }
         } else {
           this.panicCounter = 0;
@@ -723,15 +954,24 @@ export class LiquidSim {
           this.delWater(l);
         }
       }
-      // LiquidBuffer 回灌：按剩余空位逐个重新入列（Liquid.cs:799-807）
-      if (this.bufTail > this.bufHead) {
-        const free = Math.min(this.curMaxLiquid - this.numLiquid, this.bufTail - this.bufHead);
-        for (let n = 0; n < free; n++) {
-          const bx = this.bufX[this.bufHead];
-          const by = this.bufY[this.bufHead];
-          this.bufHead++;
+      // LiquidBuffer 回灌（Liquid.cs:799-807 / 1405 :796-806）：回灌量
+      //  num8 = curMaxLiquid - (curMaxLiquid - numLiquid) = **numLiquid**（当前
+      //  活动数，反编译恒等式双版一致）——与空余量无关；满载时 AddWater 把弹出的
+      //  格重新尾接入队，与 DelBuffer(0) 的 swap-remove 构成同格轮转（净空转），
+      //  卸载后按 swap 序 A,C,B… 回灌。★曾按 FIFO 头指针 + 空余量上限（DDDDD 批
+      //  根因：中世界首触缓冲带，回灌时序整体错位）
+      if (this.bufCount > 0) {
+        const n = Math.min(this.numLiquid, this.bufCount);
+        for (let k = 0; k < n; k++) {
+          const bx = this.bufX[0];
+          const by = this.bufY[0];
           this.checking[this.idx(bx, by)] = 0;
           this.addWater(bx, by);
+          // DelBuffer(0)（LiquidBuffer.cs:24-29）：swap-remove——在 AddWater 之后
+          //（cs:1144-1147 顺序；重入队的同格被尾元素换回头位）
+          this.bufCount--;
+          this.bufX[0] = this.bufX[this.bufCount];
+          this.bufY[0] = this.bufY[this.bufCount];
         }
       }
       // 卡死检测：活动量长期不变 → 清空列表靠唤醒自愈（Liquid.cs:808-824）
@@ -1624,7 +1864,7 @@ export class LiquidSim {
     const st = this.world.store;
     this.liquids.length = 0;
     this.numLiquid = 0;
-    this.bufHead = 0; this.bufTail = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
+    this.bufCount = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
     this.checking.fill(0);
     for (let x = 1; x < st.w - 1; x++) {
       for (let y = st.h - 2; y > 0; y--) {

@@ -4,7 +4,11 @@ import { Enemy } from '../src/entities/Enemy';
 
 // 小动物 AI 全家族 1:1 回归（aiStyle 1/7/16/64/65/66/67/68/112/114/115/116/118）
 function critterWorld(playerAt: { x: number; y: number } | null, opts: { water?: boolean } = {}) {
-  const w = new World(80, 80, 42, 'open');
+  // ★高度 140（原 80）：StepUp/WetCollision/DrownCollision 均带 maxTilesY−40 世界底
+  // 钳（Collision.cs:1505/:3661/:1392 原版 1200+ 世界永不可见）——80 高测试世界把
+  // 40 行以下全屏蔽（StepUp 不抬=兔子卡台阶脸、wet 恒 false=水生族全瘫），
+  // 抬高后地板 60 行落在钳内（2026-08-19 1:1 修正批发现）
+  const w = new World(80, 140, 42, 'open');
   w.groundLevel = 42; // 真实世界由生成期赋值；测试默认 0 会让"地下"判定恒真
   const st = w.store;
   for (let x = 10; x <= 70; x++) st.setTileSilent(x, 60, 2); // 地板 y=60
@@ -49,9 +53,9 @@ describe('小动物 AI 家族', () => {
     expect(jumped).toBe(false);     // 1 格台阶不进跳档（沉入门 16>20 不过）
   });
 
-  it('兔 46（aiStyle 7）：2 格墙 → 跳档 vy=−5×1.2²（cs:54545-54561/:54619-54626）', () => {
+  it('兔 46（aiStyle 7）：2 格墙 → 跳档 vy=−5×1.2（TownCritter 补偿，cs:54545-54561/:54623-54626）', () => {
     const { w, hooks } = critterWorld(null);
-    // 前方 2 格高墙（行 58-59 两块叠起）——num27=59 行上一行语义下 t4(58) 实心 → 1 格墙档
+    // 前方 2 格高墙（行 58-59 两块叠起）——num27=脚上一行语义下 t4(58) 实心 → 1 格墙档 −5
     for (let y = 58; y <= 59; y++) w.store.setTileSilent(45, y, 2);
     const e = Enemy.fromVanilla(46, 40 * 16, 59 * 16)!;
     let jumpVy = 0;
@@ -59,9 +63,10 @@ describe('小动物 AI 家族', () => {
       e.fixedUpdate(1 / 60, hooks);
       if (e.vy < jumpVy) jumpVy = e.vy;
     }
-    // −5（1 格墙档）× 1.2（wet 无）× 1.2（TownCritter 补偿）= −7.2
-    expect(jumpVy).toBeLessThanOrEqual(-7.1);
-    expect(jumpVy).toBeGreaterThan(-7.3);
+    // −5（1 格墙档）× 1.2（TownCritter 补偿，非湿身无 wet 档）= −6，跳起当 tick
+    // 末加 GRAVITY 0.4 → 采样值 −5.6
+    expect(jumpVy).toBeLessThanOrEqual(-5.5);
+    expect(jumpVy).toBeGreaterThan(-5.7);
   });
 
   it('蚱蜢 377（aiStyle 1）：玩家 200px 外不蹦；靠近才激愤跳', () => {
@@ -195,21 +200,40 @@ describe('小动物 AI 家族', () => {
   });
 
   // 2026-08-19 1:1 修正（AI_118 cs:47432-47486）：出生 ai[0]=0（角 0 朝东）——首个
-  // 推进脉冲【确定性向东】直到 |v|>3 才掷随机角。无边界水池会把海马直送出池搁浅
-  // （原版同语义），故本测给池加左右墙验"角反射 + 悬浮"。
-  it('海马 626（aiStyle 118）：水中悬浮 + 撞墙角反射（cs:47470-47485）', () => {
+  // 推进脉冲【确定性向东】（+0.06/t 直到 |v|>3 掷随机角 450-600 计时）。无边界水池
+  // 会把海马直送出池搁浅（原版同语义）。反射（:47470-47485）为角向量分量取反，
+  // 反弹后航向随 t50 随机角而变（原版盲翻）——逃逸方向不作断言，另以直调单测验角反射。
+  it('海马 626（aiStyle 118）：水中悬浮 + 东向首脉冲抵墙（cs:47432-47463）', () => {
     const { w, hooks } = critterWorld(null, { water: true });
     for (let y = 45; y <= 60; y++) { w.store.setTileSilent(19, y, 2); w.store.setTileSilent(61, y, 2); }
-    const e = Enemy.fromVanilla(626, 40 * 16, 50 * 16)!;
-    let reflected = false;
-    const x0 = e.x;
-    for (let t = 0; t < 300; t++) {
+    const e = Enemy.fromVanilla(626, 58 * 16, 50 * 16)!;   // 贴东墙出生（首脉冲 ~40px 达墙）
+    let hitWallX = false, maxCyEarly = 0, wetAtPark = false;
+    for (let t = 0; t < 200; t++) {
       e.fixedUpdate(1 / 60, hooks);
-      if (e.x < x0 - 8) reflected = true;   // 东墙角反射（X 取反）后西行
+      if (e.x >= 955) hitWallX = true;          // 首脉冲（角 0 朝东）抵墙
+      maxCyEarly = Math.max(maxCyEarly, e.cy);  // 首脉冲纯水平（角 0）→ 无垂直分量
+      if (t === 100) wetAtPark = e.wet;         // 贴墙停车时仍在水
     }
-    expect(reflected).toBe(true);            // 撞 x=61 墙 → 角向量 X 翻转
-    expect(e.cy).toBeLessThan(56 * 16);      // 首脉冲纯水平（角 0）→ 悬浮不坠
-    expect(e.wet).toBe(true);                // 仍在池内
+    expect(hitWallX).toBe(true);                // 东向首脉冲确实撞墙（x 停在墙脸 960）
+    expect(maxCyEarly).toBeLessThan(56 * 16);   // noGravity=wet → 悬浮不坠
+    expect(wetAtPark).toBe(true);               // 贴墙停车仍在池内
+  });
+
+  it('海马 626 角反射直调：collideX → 角向量 X 取反 + 保速换向（cs:47470-47485）', () => {
+    const { hooks } = critterWorld(null, { water: true });
+    const e = Enemy.fromVanilla(626, 40 * 16, 50 * 16)!;
+    e.wet = true;          // 直调：跳过 npcLiquid 时序（fish-behavior 同款）
+    e.ai0 = 0.3;           // 朝东北
+    e.vx = 2; e.vy = 1;
+    e.hitWall = true;      // 预置 collideX（AI 读上一 tick 旗标）
+    e.fixedUpdate(1 / 60, hooks);
+    const want = Math.atan2(Math.sin(0.3), -Math.cos(0.3));   // atan2(sinθ, −cosθ)
+    expect(e.ai0).toBeCloseTo(want, 5);
+    // velocity = 新角向 × 原速率——本 tick 推进先 +0.06（:47450），速率含增量：
+    // |v| = hypot(2+0.06cos0.3, 1+0.06sin0.3)
+    const spd = Math.hypot(2 + 0.06 * Math.cos(0.3), 1 + 0.06 * Math.sin(0.3));
+    expect(e.vx).toBeCloseTo(Math.cos(want) * spd, 5);
+    expect(e.vy).toBeCloseTo(Math.sin(want) * spd, 5);
   });
 
   it('金鱼 55（aiStyle 16）：路由到 AI_016 游泳（水中活动）', () => {

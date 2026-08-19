@@ -50,6 +50,7 @@ import { runTileCleanupPass } from '../src/world/gen/vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from '../src/world/gen/vanilla/BrokenTrapCleanupPass';
 import { runFinalCleanupPass } from '../src/world/gen/vanilla/FinalCleanupPass';
 import { runMicroBiomesPass } from '../src/world/gen/vanilla/MicroBiomesPass';
+import { __setTrackStepProbe } from '../src/world/gen/vanilla/TrackPass';
 import { runTreePass } from '../src/world/gen/vanilla/TreePass';
 import { backfillHybridFrames } from './www-framebackfill';
 
@@ -474,6 +475,18 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       // 与 RNG 鸭子类型兼容（run 步内一切嵌套调用同流记录）。
       const spanOut = process.env.SW_WWW_SPAN_OUT && process.env.SW_WWW_SPAN_DUMP === String(step.dump)
         ? process.env.SW_WWW_SPAN_OUT : undefined;
+      // FFFFF:SW_WWW_SPAN_TRACK=1 → 掷序×TrackGenerator 逐列步进对照表
+      // (roll idx → loop/k/x/y/playerHeight 变更行;定位 vanilla span 内嵌的
+      //  独有掷在 TrackPass 语境中的精确落点)
+      const trackLog: string[] = [];
+      let spanRoll = 0;
+      if (spanOut && process.env.SW_WWW_SPAN_TRACK === '1') {
+        let lastStep = '';
+        __setTrackStepProbe((loop, k, x, y, ph) => {
+          const cur = `${loop} k=${k} (${x},${y}) ph=${ph}`;
+          if (cur !== lastStep) { trackLog.push(`roll ${spanRoll} → ${cur}`); lastStep = cur; }
+        });
+      }
       const spiderLog: string[] = [];
       if (process.env.SW_WWW_SPIDER) (globalThis as { __swSpiderVisit?: (cx: number, cy: number, k: string, b: number, a2: number, w: number) => void }).__swSpiderVisit = (cx, cy, k, b, a2, w) => spiderLog.push(`${w} ${k} ${cx},${cy} ${b}:${a2}`);
       const rngW = spanOut ? new Proxy(rng, {
@@ -482,7 +495,7 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
           // AAAAA：rng.vanilla（UnifiedRandom 直通）——next()=C# 裸 Next() 录 'n'
           if (prop === 'vanilla') {
             const ur = v as { next(): number };
-            return { next: () => { const r = ur.next(); if (process.env.SW_WWW_SPAN_DN !== '0') spanLines.push('n'); return r; } };
+            return { next: () => { const r = ur.next(); if (process.env.SW_WWW_SPAN_DN !== '0') { spanLines.push('n'); spanRoll++; } return r; } };
           }
           if (typeof v !== 'function') return v;
           const fname = String(prop);
@@ -495,7 +508,7 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
             // AAAAA：全样本流 d/n 通道（对齐 XXXX 织入的 vanilla span 格式——
             //   NextDouble()→'d'、裸 Next()→'n'；SW_WWW_SPAN_DN=0 可关）
             else if (process.env.SW_WWW_SPAN_DN !== '0' && (fname === 'next' || fname === 'chance' || fname === 'range')) line = 'd';
-            if (line) spanLines.push(line);
+            if (line) { spanLines.push(line); spanRoll++; }
             return r;
           };
         },
@@ -532,6 +545,8 @@ function makePlans(producersBox: { shrineSpots: Array<{ x: number; y: number }> 
       if (watchLog) { (globalThis as { __wwWatchFlush?: () => void }).__wwWatchFlush = () => { writeFileSync(process.env.SW_WWW_WATCH!, watchLog.join('\n') + '\n'); }; }
       await step.run(built.st, gs, spanOut ? rngW : rng, chests, world);
       (globalThis as { __swSeg?: (n: string, d?: unknown) => void }).__swSeg = undefined;
+      __setTrackStepProbe(undefined);
+      if (trackLog.length) writeFileSync(spanOut.replace(/\.txt$/, '.track.txt'), trackLog.join('\n') + '\n');
       if (houseLog.length) {
         (globalThis as { __swHouseStage?: (t: string, a: number, b: number, c: number, d: number) => void }).__swHouseStage = undefined;
         writeFileSync(process.env.SW_WWW_HOUSE!, houseLog.join('\n') + '\n');

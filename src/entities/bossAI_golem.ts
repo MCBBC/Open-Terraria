@@ -3,7 +3,8 @@
 //   挂载头 246 aiStyle 46                       NPC.cs:31273-31499(锚本体;嘴部火焰弹/眼激光)
 //   拳 247/248 aiStyle 47  AI_047_GolemFist    NPC.cs:19171-19446(肩锚归位→蓄力→直线冲拳→回位)
 //   自由头 249 aiStyle 48  GolemHeadFree       NPC.cs:31500-31741(自主悬浮+火焰弹/眼激光)
-//   SetDefaults:NPC.cs:12095-12149(245-249 属性)、17943-17960(245-249 scale *= 0.5)。
+//   SetDefaults:NPC.cs:12095-12149(245-249 属性);:17942-17962 = getGoodAdjustments
+//   (FTW 专属:245-249 scale×0.5、245-248 canDisplayBuffs=false——普通世界无此调整)。
 // 经典模式主链 1:1;getGoodWorld 分支已实装(balance +2/+3/蓄力 +100/本体+拳落体砸
 // 火把/FTW 断臂尘由砸火把取代);expert 分支保留注释;netcode/纯视觉尘(Gore/netOffset)跳过。
 //
@@ -25,8 +26,9 @@ import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 /** 原版 NPC 通用重力/maxFall(NPC.UpdateNPC 非 noGravity 族:0.3/2t、maxFall 10) */
 const GRAV = 0.3;
 const MAX_FALL = 10;
-/** SetDefaults 245-249 scale *= 0.5(NPC.cs:17943-17960)——族内所有像素偏移按此缩放 */
-const SCALE = 0.5;
+/** 运行时 scale(npc.scale 实例字段:普通世界 1 / FTW getGoodAdjustments :17942-17962 ×0.5)。
+ *  ★曾误读 :17943 为无条件 SetDefaults 段写成恒 0.5——普通世界头/拳锚点全缩半=部件嵌错位(2026-08-19 修) */
+const sc = (n: { vanillaScale?: number | null }): number => n.vanillaScale ?? 1;
 const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
 
 /** Boss 伤害/防御基值缓存(自由头切换 249 属性时从基值派生,防重复写膨胀) */
@@ -171,7 +173,9 @@ function hitSolid(game: GameHooks, e: Enemy): boolean {
 // ---------------------------------------------------------------------------
 
 /** 嘴部/额前火焰弹(:31329-31347 / :31430-31447 / :31596-31617):
- *  从 (e.center + (ox,oy)) 朝玩家中心 proj 258 */
+ *  从 (e.center + (ox,oy)) 朝玩家中心 proj 258。
+ *  出生音 Item20 = 弹幕 258 自身首 tick 播(Projectile.cs:22540-22541,
+ *  localAI[0]==0)——Arrow 无 per-弹出生音钩子,在发射点等效播(仅石巨人用 258) */
 function golemSpit(
   game: GameHooks, e: Enemy, player: Player, ox: number, oy: number,
   spd: number, dmg: number, projId: number,
@@ -180,20 +184,23 @@ function golemSpit(
   const dx = player.cx - sx, dy = player.cy - sy;
   const d = Math.hypot(dx, dy) || 1;
   shoot(game, sx, sy, (dx / d) * spd, (dy / d) * spd, dmg, projId);
+  game.playSfxWav?.('Item_20', 1, sx, sy);
 }
 
 /** 挂载头眼激光(:31459-31484):双侧眼(±18*scale,-22*scale)各一发 11 速;
- *  玩家在头正上/下方(localAI[1]==0)→ 双眼齐射,否则朝向侧单眼(±30*scale)12 速;伤 28,proj 259 */
+ *  玩家在头正上/下方(localAI[1]==0)→ 双眼齐射,否则朝向侧单眼(±30*scale)12 速;伤 28,proj 259。
+ *  出生音 Item33 = 弹 259 自身播(pcs:52356-52364;发射点等效) */
 function golemEyeLasers(game: GameHooks, e: Enemy, player: Player, side: number): void {
   const fire = (ox: number, spd: number) => {
-    const sx = e.cx + ox, sy = e.cy - 22 * SCALE;
+    const sx = e.cx + ox, sy = e.cy - 22 * sc(e);
     const dx = player.cx - sx, dy = player.cy - sy;
     const d = Math.hypot(dx, dy) || 1;
     const vx = (dx / d) * spd, vy = (dy / d) * spd;
     shoot(game, sx + vx * 3, sy + vy * 3, vx, vy, 28, 259, 300);
+    game.playSfxWav?.('Item_33', 1, sx, sy);
   };
-  if (side === 0) { fire(-18 * SCALE, 11); fire(18 * SCALE, 11); }
-  else fire(side * 30 * SCALE, 12);
+  if (side === 0) { fire(-18 * sc(e), 11); fire(18 * sc(e), 11); }
+  else fire(side * 30 * sc(e), 12);
 }
 
 /** 自由头眼激光(:31659-31717):双眼(±14*scale,-50*scale)各一发 proj 259;
@@ -203,8 +210,8 @@ function golemEyeLasersFree(
   game: GameHooks, e: Enemy, player: Player, noLos: boolean, r: number,
 ): void {
   for (let i = 0; i < 2; i++) {
-    const sx = e.cx + (i === 0 ? -14 : 14) * SCALE;
-    const sy = e.cy - 50 * SCALE;
+    const sx = e.cx + (i === 0 ? -14 : 14) * sc(e);
+    const sy = e.cy - 50 * sc(e);
     let dmg = 24, spd = 11;
     if (r < 0.5) { dmg += 1; spd += 0.25; }
     if (r < 0.4) { dmg += 1; spd += 0.25; }
@@ -224,6 +231,7 @@ function golemEyeLasersFree(
     const d = Math.hypot(dx, dy) || 1;
     const vx = (dx / d) * spd, vy = (dy / d) * spd;
     shoot(game, sx + vx * 3, sy + vy * 3, vx, vy, dmg, 259, 300);
+    game.playSfxWav?.('Item_33', 1, sx, sy);   // 弹 259 出生音(pcs:52356-52364)
   }
 }
 
@@ -240,8 +248,10 @@ function golemHeadGoFree(e: Enemy, game: GameHooks): void {
   e.ai3 = 1;          // 自由态标记(探针/部件锚定可观测)
   e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;
   e.hp = e.maxHp;     // 原版 249 满血登场
+  e.spin = 0;         // 新 249 rotation=0——远锚态变身残留 vx*0.1 旋转=永久歪头(终审修)
   game.spawnParticles(e.cx, e.cy, '#C04030', 16, 2.6, { life: 30 });
-  game.playSfx('roar', 1, e.cx, e.cy);   // :32587 style0 满响(曾 0.8,2026-08-18 对账修)
+  // 转换音:原版全程无声(HitEffect :85842-85847 仅 NewNPC 249;曾加 roar 系
+  // 对账行号 :32587 误引——该行属幻影龙 266 段,石巨人无此吼,2026-08-19 终审删)
 }
 
 export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
@@ -310,8 +320,12 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
     else if (n.vanillaId === 247) hasL = true;
     else if (n.vanillaId === 248) hasR = true;
   }
-  // dontTakeDamage = 挂载头在场(NPC.cs:19513):一阶段本体无敌,先打头/拳
-  if (hasHead) e.iframes = 2;
+  // dontTakeDamage = 挂载头在场(NPC.cs:19509/19513):一阶段本体无敌,先打头/拳。
+  // ★须用 dontTakeDamage 而非 iframes——Enemy.hurt 的 iframes 门有 pierce!==1
+  // 豁免(单发弹=箭/枪弹/多数随从绕过无敌帧),原版是挡全通道的
+  // dontTakeDamage(Enemy.hurt :10289 同门);曾用 iframes=2 = 一阶段可被
+  // 单发弹直杀本体跳阶段(2026-08-19 终审修)
+  e.dontTakeDamage = hasHead;
   // getGoodWorld 落体砸火把(:19510-19532):下落中(vy>0)扫过 AABB 的火把全部熄灭。
   // Y 上界用 width 是原版笔误,1:1 照抄
   if (game.world.seedFlags?.getGoodWorld && e.vy > 0) {
@@ -321,8 +335,8 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ---- 断臂尘(NPC.cs:19529-19595):原版整块被 !getGoodWorld 包住(FTW 下由砸火把
   //      取代,无断臂尘);此处每 10t 一簇粒子近似 ----
   if (!game.world.seedFlags?.getGoodWorld) {
-    if (!hasL && e.aiT % 10 === 0) game.spawnParticles(e.cx - 80 * SCALE, e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
-    if (!hasR && e.aiT % 10 === 0) game.spawnParticles(e.cx + 62 * SCALE, e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
+    if (!hasL && e.aiT % 10 === 0) game.spawnParticles(e.cx - 80 * sc(e), e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
+    if (!hasR && e.aiT % 10 === 0) game.spawnParticles(e.cx + 62 * sc(e), e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
   }
 
   // ---- 跳跃穿墙解除(NPC.cs:19569-19578):下落低于玩家顶 / 有视线且自身不在块内 ----
@@ -369,8 +383,10 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
       game.spawnParticles(e.cx, e.y + e.h, '#9A8FA0', 12, 2.2, { life: 40 });
       e.ai0 = 0;
     } else {
-      // 玩家在身下水平跨度内 → 收横向速度(夹住玩家下压),否则朝玩家加速钳 ±num7
-      if (e.x < player.x + player.w && e.x + e.w > player.x) {
+      // 玩家被【整段包含】于本体水平跨度 → 收横向速度夹住下压(:19666
+      // position.X < p.X && position.X+width > p.X+p.width——含玩家全宽,
+      // 曾写任意重叠门=过早减速,跳跃压制变味,2026-08-19 终审修)
+      if (e.x < player.x && e.x + e.w > player.x + player.w) {
         e.vx *= 0.9;
         if (e.y + e.h < player.y) e.vy += (0.2 * (num + 1)) / 2;
       } else {
@@ -388,8 +404,8 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ---- 玩家死亡 vs 远离（NPC.cs:19469-19475 / 19709-19721）----
   // 玩家死：仅 noTileCollide=true（无 despawn 无状态切换，AI 继续跑）；
   // 活人曼哈顿 >3000：瞬消（二次判定 TargetClosest 后）
-  if (!player) {
-    x.noTC = true;
+  if (!player || player.dead) {
+    x.noTC = true;   // :19469-19475 玩家死→穿墙(曾漏 player.dead 态)
   } else if (Math.abs(e.cx - player.cx) + Math.abs(e.cy - player.cy) > 3000) {
     e.dead = true; e.bossFled = true;
     return;
@@ -454,15 +470,17 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 血尽转自由态只在【本体活】时发生(hurt 246 放行有本体活门)——玩家先打头
   // 转自由,本体死后头自灭,两条路径与原版全场景吻合)
   const body = findBody(game);
-  if (!x.free && (!body || body.ai3 === 1 || body.hp <= 0)) { e.die(game); return; }
+  // 本体亡 → 全头自灭(:31521-31525 自由头同样查 golemBoss——曾 !x.free 豁免
+  // 自由头 = 先破头再杀本体留下无敌自由头永不退场=战斗软锁,2026-08-19 终审修)
+  if (!body || body.ai3 === 1 || body.hp <= 0) { e.die(game); return; }
 
   const num = balanceNum(game, player, 3);   // 挂载/自由头 getGoodWorld +3(:31277-31280/:31505-31508)
 
   if (!x.free && body) {
     // ================= 挂载态 aiStyle 46(NPC.cs:31273-31499) =================
     // noTileCollide = true(:31284);锚点 = 本体.Center + (-3*scale,-57*scale)(:31290-31308)
-    const dx = body.cx - 3 * SCALE - e.cx;
-    const dy = body.cy - 57 * SCALE - e.cy;
+    const dx = body.cx - 3 * sc(e) - e.cx;
+    const dy = body.cy - 57 * sc(e) - e.cy;
     const dist = Math.hypot(dx, dy);
     if (dist < 100) { e.spin = 0; e.vx = dx; e.vy = dy; }        // 100 内整帧贴锚
     else { e.vx = (dx / dist) * 100; e.vy = (dy / dist) * 100; e.spin = e.vx * 0.1; }
@@ -477,7 +495,7 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
         else { e.ai1 += (1 * (num - 1)) / 2; x.l0 = 0; }
         if (e.ai1 >= 300) {
           e.ai1 = 0;
-          golemSpit(game, e, player, 0, 10 * SCALE, 8, 18, 258);
+          golemSpit(game, e, player, 0, 10 * sc(e), 8, 18, 258);
         }
       } else if (e.ai0 === 1) {
         // ---- 眼部阶段(:31353-31486):嘴弹伤 24 + 眼激光 259(伤 28) ----
@@ -489,7 +507,7 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
         x.l0 = e.ai1 < 20 || e.ai1 > 280 ? 1 : 0;
         if (e.ai1 >= 300) {
           e.ai1 = 0;
-          golemSpit(game, e, player, x.l1 * 40 * SCALE, 10 * SCALE, 8, 24, 258);
+          golemSpit(game, e, player, x.l1 * 40 * sc(e), 10 * sc(e), 8, 24, 258);
         }
         e.ai2 += num733;
         if (e.hp < e.maxHp / 3) e.ai2 += num733;
@@ -540,7 +558,7 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (noLos) e.ai1 = 20;                       // :31593-31595 无视线时不蓄满
       if (e.ai1 >= 300) {                          // :31596-31617 嘴弹 proj 258(伤 20 速 8)
         e.ai1 = 0;
-        golemSpit(game, e, player, 0, -10 * SCALE, 8, 20, 258);
+        golemSpit(game, e, player, 0, -10 * sc(e), 8, 20, 258);
       }
       // 眼激光节奏(:31618-31658):基数 num,分档读本体残血(:31626-31645;r 与上方火焰弹
       // 同源);激光伤/速分档(:31683-31705,阈值 0.5/0.4/0.3/0.2/0.1)经 golemEyeLasersFree 传 r
@@ -561,8 +579,15 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
     // :31721-31740 排焰尘(纯视觉,略)
   }
 
-  e.x += e.vx;
-  e.y += e.vy;
+  // :31512-31520 穿墙开关(曾恒直积分):自由头看不到玩家 → 穿墙;有视线且已嵌块
+  // → 关穿墙走碰撞(撤出墙体的手段);有视线未嵌块保持穿墙直飞。挂载头恒穿墙(:31284)
+  const freeNoLos = !player || !losClear(game, e.cx, e.cy, player.cx, player.cy);
+  if (!x.free || freeNoLos || !hitSolid(game, e)) {
+    e.x += e.vx;
+    e.y += e.vy;
+  } else {
+    collideGround(e, game);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -587,8 +612,9 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ---- 锚主:golemBoss 缺失 → 自毁(NPC.cs:19182-19186) ----
   //  本体存活(含死亡演出)→ 锚本体;本体死透 → 锚自由头(任务约定"锚定本体(或头)")
   const body = findBody(game);
-  const head = findHead(game);
-  const anchor = body && !body.dead ? body : head;
+  // 锚主=本体(原版 golemBoss 单锚,:19182-19186 找不到即自灭;曾回退锚自由头
+  // = 本体死后拳不死=软锁一环,2026-08-19 终审修)
+  const anchor = body && !body.dead ? body : null;
   // 锚主全无 → 标准死(:19182-19186 原版 StrikeNPCNoInteraction 自杀——碎块/
   // 音效管线;曾直写 dead 静默,2026-08-19 对齐)
   if (!anchor) { e.die(game); return; }
@@ -600,8 +626,8 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
 
   // ---- 肩锚点(:19197-19199):锚主.Center + 锚主.velocity + (±84/78*scale, -9*scale) ----
   const offX = isLeft ? -84 : 78;
-  const tx = anchor.cx + anchor.vx + offX * SCALE;
-  const ty = anchor.cy + anchor.vy - 9 * SCALE;
+  const tx = anchor.cx + anchor.vx + offX * sc(e);
+  const ty = anchor.cy + anchor.vy - 9 * sc(e);
   const dx = tx - e.cx, dy = ty - e.cy;
   const dist = Math.hypot(dx, dy);
   e.facing = isLeft ? 1 : -1;               // 镜像朝向(原版贴图方向)

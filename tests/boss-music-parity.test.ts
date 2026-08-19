@@ -9,7 +9,7 @@
 //     + flag→MusicID 链（:12459-12503）；boss 兜底 Boss1(5)（:12283-12287）。
 // 本文件字面量表 = 原版权威，防回归；改表必须先核 1456 行号。
 import { describe, it, expect } from 'vitest';
-import { MUSIC, BOSS_MUSIC, bossMusicFor, pickMusic, newMusicState } from '../src/data/Music';
+import { MUSIC, BOSS_MUSIC, bossMusicFor, pickMusic, newMusicState, resolveEventMusic } from '../src/data/Music';
 import { INVASION_MUSIC } from '../src/world/Invasion';
 import { Game } from '../src/core/Game';
 
@@ -94,6 +94,18 @@ describe('Boss 唤起三件套冻结对账（NPC.cs/Player.cs/Main.cs 1456）', 
     expect(BOSS_MUSIC[263]).toBe(24);   expect(BOSS_MUSIC[264]).toBe(24); // 世花钩/蔓
     // Mechdusa（remix+getGood Main.cs:12288-12291 → 25）由 Game 选曲侧覆写，锚值在此
     expect(MUSIC.Boss5).toBe(25);
+  });
+
+  it('活链 resolveEventMusic：num3 槽 → MusicID（2026-08-19 修键号错位）', () => {
+    // ★链键曾写成 flag 号而 Game 存入 num3 号 → 17/24 族错曲；本组为各代表锚
+    expect(resolveEventMusic(new Set([4]))).toBe(MUSIC.Golem);    // 石巨人（曾错中 [4,13]=Boss3）
+    expect(resolveEventMusic(new Set([23]))).toBe(99);            // EoW（曾查无键=0 落群系曲）
+    expect(resolveEventMusic(new Set([24]))).toBe(104);           // 骷髅王（曾 0）
+    expect(resolveEventMusic(new Set([7]))).toBe(MUSIC.MoonLord); // 月总（曾 24 世花曲）
+    expect(resolveEventMusic(new Set([2]))).toBe(12);             // 血肉墙（MUSIC 无独立常量）
+    expect(resolveEventMusic(new Set([1]))).toBe(MUSIC.Boss1);    // Boss1 兜底
+    expect(resolveEventMusic(new Set([5]))).toBe(96);             // 蜂后（曾 17 石巨人曲）
+    expect(resolveEventMusic(new Set())).toBe(0);                 // 无事件曲
   });
 
   it('火把神小游戏曲 101 优先级：月事件 > 火把神 > Boss 曲（Main.cs:12477-12480/12914-12921）', () => {

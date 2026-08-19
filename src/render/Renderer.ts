@@ -562,7 +562,7 @@ function owlIdleFrame(e: Enemy): number {
   owlIdleStates.set(e, s);
   if (Math.trunc(s.counter) % 40 !== 0 || Math.random() * 80 < 1) s.counter += 1;
   if ((s.counter + 1) % 40 === 39) s.counter = 40 * Math.floor(Math.random() * 3);
-  const num113 = Math.trunc(s.counter % 40) / 10;
+  const num113 = Math.floor((s.counter % 40) / 10);   // C# 整除((int)counter%40/10)——曾浮点除致帧号 2.5/7.3
   const num114 = Math.trunc(s.counter / 40);
   if (num114 === 0) return num113 === 3 ? 1 : num113;
   if (num114 === 1) return num113 === 0 ? 0 : 2 + (num113 === 3 ? 1 : num113);
@@ -1765,6 +1765,13 @@ export class Renderer {
   /** GPU 看门狗(2026-08-18 用户实报"关掉另一窗口也不恢复"):熔断链终止后
    *  没有任何机制再触发恢复——低频巡检(20s),非熔断期发现死上下文即静默重建 */
   installGpuHealthWatchdog(): void {
+    // 僵尸画布三振(2026-08-19 第四场双开:GPU 进程活着,但主画布后备 1088×864
+    // 连败 7 次——内核预算见底时新画布的后备分不出来,重建即死 = tab 永不恢复。
+    // auto 模式熔断降级(60s 内 2 次熔断)对"进程活但分不出"不触发,故看门狗
+    // 自行判定:重建后 30s 内又死 ≥3 次 → 切 CPU 软渲染——主画布 willReadFrequently
+    // → SHM 后备,零 IOSurface,分配必成,页面至少活着)
+    let zombieStrikes = 0;
+    let lastRecreateAt = 0;
     setInterval(() => {
       if (this.gpuDegraded || !this.canvas.isConnected) return;
       const mainLost = (this.ctx as CanvasRenderingContext2D & { isContextLost?: () => boolean }).isContextLost?.() ?? false;
@@ -1772,8 +1779,19 @@ export class Renderer {
         this.recreateMainCanvas();
         this.recreateAuxCanvases();
         this.cbOnGpuRecover?.();
+        zombieStrikes = performance.now() - lastRecreateAt < 30_000 ? zombieStrikes + 1 : 1;
+        lastRecreateAt = performance.now();
+        if (zombieStrikes >= 3) {
+          zombieStrikes = 0;
+          console.warn('[Renderer] 主画布重建后三连死(GPU 后备分不出)——切 CPU 软渲染(SHM 后备,不占 IOSurface)');
+          if (options.data.renderMode === 'auto') {
+            this.setRenderMode(true);
+            this.cbOnRenderModeSwitch?.('cpu');
+          }
+        }
         console.warn('[Renderer] 看门狗:主画布死亡,已重建渲染面');
       } else {
+        zombieStrikes = 0;
         this.recreateAuxCanvases();
       }
     }, 20_000);
@@ -2088,6 +2106,10 @@ export class Renderer {
     };
     // 天空深化批帧数据挂点（月塔近距门/月总死亡戏剧/稀有云旗标/环境族 zone 门/涟漪采样）
     this.sky.frameCtx = { entities, world, scene: this.scene, player, clock, camX: cam.x, camY: cam.y, z, viewW, viewH };
+    // #A 云 GL 共享层注入:云与背景层共用 glfx 一个 WebGL 上下文(每帧注入,
+    // 退避/死亡期 acquireGL 返回 null → 当帧云走 2D cloudTint 兜底,自然恢复)
+    this.sky.cloudGlLayer = !this.cpuRender && (this.bgGlEnabled || this.sky.useGLClouds)
+      ? this.acquireGL() : null;
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
@@ -4130,7 +4152,10 @@ export class Renderer {
       const frameIdx = vanillaFrameIdx(e, frames);
       // Mechdusa:毁灭者头 134 换画 136 尾帧贴图（Main.cs:24980-24984 num153=136
       // + LoadNPC——头锁位倒挂(旋转 +π),头帧贴图方向不对,原版改用尾帧绘制）
-      const drawId = e.vanillaId === 134 && mechQueenUp() ? 136 : e.vanillaId;
+      // 石巨人:246 血尽原体变身自由态(ai3=1)后原版是 NewNPC 249——换画 NPC_249
+      // (帧 0/1 与 246 基础帧同构,customFrameIdx 直读不变;曾一直画 NPC_246)
+      const drawId = e.vanillaId === 134 && mechQueenUp() ? 136
+        : e.vanillaId === 246 && e.ai3 === 1 ? 249 : e.vanillaId;
       const r = this.atlas.vnpc(drawId, frameIdx);
       if (r) {
         const flying = !!e.vanilla?.noGravity; void flying; // 中心锚后地面/飞行统一,仅保留语义注释
@@ -6510,8 +6535,10 @@ export class Renderer {
       ctx.save();
       ctx.translate(px, py);
       ctx.rotate(rot);
+      // ×scale（:22630 绘制尺寸=贴图格×npc.scale——曾漏乘=16×16 原尺寸环配
+      // 8px 步长(FTW)互相叠压,2026-08-19 终审修）
       ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, chain.sh,
-        -chain.sw / 2, -chain.sh / 2, chain.sw, chain.sh);
+        (-chain.sw / 2) * scale, (-chain.sh / 2) * scale, chain.sw * scale, chain.sh * scale);
       ctx.restore();
     }
   }

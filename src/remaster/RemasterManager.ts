@@ -41,10 +41,12 @@ export class RemasterManager {
     return { packs: installed.length, files };
   }
 
-  /** 启停/卸载后的重放:restore 涉及文件并集 → 按安装序重放启用包。 */
-  private async replay(): Promise<void> {
+  /** 启停/卸载后的重放:restore 涉及文件并集 → 按安装序重放启用包。
+   *  extraFiles = 被移除 pack 的文件(已不在 installed 列表,不并入则其注入
+   *  无人还原——卸载后 vimages 仍停留 pack 图的根因)。 */
+  private async replay(extraFiles: string[] = []): Promise<void> {
     const installed = await loadInstalledPacks();
-    const allFiles = new Set<string>();
+    const allFiles = new Set<string>(extraFiles);
     for (const { pack } of installed) {
       for (const f of pack.sheets.keys()) allFiles.add(f);
     }
@@ -62,8 +64,10 @@ export class RemasterManager {
   }
 
   async remove(id: string): Promise<void> {
+    const target = (await loadInstalledPacks()).find(({ meta }) => meta.id === id);
+    const removedFiles = target ? [...target.pack.sheets.keys()] : [];
     await deletePack(id);
-    await this.replay();
+    await this.replay(removedFiles);
   }
 
   async list(): Promise<InstalledMeta[]> {

@@ -43,7 +43,8 @@ export class TintAtlas {
       this.scratchCv.width = Math.min(MAX_ENTRY, Math.max(16, Math.ceil(w / 16) * 16));
       this.scratchCv.height = Math.min(MAX_ENTRY, Math.max(16, Math.ceil(h / 16) * 16));
     }
-    const sc = this.scratchCv.getContext('2d')!;
+    // willReadFrequently:烘焙 scratch 纯 CPU 用途(从不进合成),SHM 后备不占 IOSurface
+    const sc = this.scratchCv.getContext('2d', { willReadFrequently: true })!;
     sc.clearRect(0, 0, w, h);
     paint(sc);
     page.ctx.drawImage(this.scratchCv, 0, 0, w, h, x, y, w, h);

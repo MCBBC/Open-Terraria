@@ -29,15 +29,26 @@ try {
   await page.setRequestInterception(true);
   page.on('request', (req) => {
     if (req.url().includes('/v1/images/edits')) {
-      req.respond({
-        status: 200, contentType: 'application/json',
-        body: JSON.stringify({ data: [{ b64_json: PNG_B64 }] }),
-      });
+      const cors = {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      };
+      if (req.method() === 'OPTIONS') {
+        req.respond({ status: 204, headers: cors });
+      } else {
+        req.respond({
+          status: 200, contentType: 'application/json', headers: cors,
+          body: JSON.stringify({ data: [{ b64_json: PNG_B64 }] }),
+        });
+      }
     } else req.continue();
   });
 
   await page.goto(`${ORIGIN}/remaster.html`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  // 等 catalog + 启动块(默认选中)双就绪——state.load() 是 IDB 异步,只等 catalog 会太早
   await page.waitForFunction(() => window.__remasterBridge?.catalog, { timeout: 30000 });
+  await page.waitForFunction(() => window.__remasterBridge?.curEntry(), { timeout: 30000 });
 
   // ---- ① 目录对拍 ----
   const cat = await page.evaluate(() => {

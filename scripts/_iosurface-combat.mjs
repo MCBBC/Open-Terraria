@@ -68,7 +68,7 @@ const inv = await page.evaluate(() => {
     glfxTexs: r.glfx?.texs?.size ?? -1,
     glfxMB: +((r.glfx?.bytes ?? 0) / 1048576).toFixed(1),
     domCanvases: dom.length, domList: dom,
-    cloudGLAlive: !!r.sky?.cloudGL,
+    cloudGLAlive: !!r.glfx,
   };
 }).catch((e) => ({ err: String(e).slice(0, 200) }));
 console.log(JSON.stringify(inv, null, 1));

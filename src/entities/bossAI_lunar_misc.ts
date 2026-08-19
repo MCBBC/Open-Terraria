@@ -77,8 +77,9 @@ const angleTowards = (a: number, b: number, maxStep: number): number => {
   while (d < -Math.PI) d += TAU;
   return Math.abs(d) <= maxStep ? b : a + Math.sign(d) * maxStep;
 };
-/** expert 门(本工程恒 false,Game.ts expertMode:false) */
-const EXPERT = false;
+/** expert 门（Main.expertMode → world.isExpert 真难度；曾硬编码 false 恒关——
+ *  飞蛾族三处专家档 :40110/:40367/:40420 在专家世界应生效） */
+const expertMode = (game: GameHooks): boolean => game.world.isExpert;
 /** 直积分(原版 noTileCollide 族;NPC.cs UpdateNPC :91400 段共享位移的穿墙分支) */
 const fly = (e: Enemy): void => { e.x += e.vx; e.y += e.vy; };
 
@@ -858,7 +859,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
     bounceAxis(e, preVx, preVy);
     const dx = p.cx - e.cx, dy = p.cy - 20 - e.cy;
     e.ai2 += 1 / 45;
-    if (EXPERT) e.ai2 += 1 / 60;
+    if (expertMode(game)) e.ai2 += 1 / 60;   // :40110-40113
     const d = Math.hypot(dx, dy);
     const spd = 4 + e.ai2 + d / 120;
     e.vx = (e.vx * 19 + (dx / (d || 1)) * spd) / 20;
@@ -961,7 +962,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   let dx = gx - e.cx, dy = gy - e.cy;
   const d = Math.hypot(dx, dy);
   if (d < 4) {
-    const hatchT = EXPERT ? Math.round(70 * 0.75) : 70;
+    const hatchT = expertMode(game) ? Math.round(70 * 0.75) : 70;   // :40367-40370 ×0.75
     e.ai3 += 1;
     if (e.ai3 === hatchT) {
       const egg = spawnPart(game, e, 478);
@@ -985,7 +986,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
 // 900t(专家 600)孵化 → Transform 479;受击 -10..20(普通双扣);末期 75% 起抽搐跳。
 // ---------------------------------------------------------------------------
 export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) {
-  const hatchT = EXPERT ? 600 : 900;                      // num1440
+  const hatchT = expertMode(game) ? 600 : 900;             // num1440（:40420）
   // 仅归一哨兵 -1120（原版 ai[0] 出生 0）——受击扣减（:40426-40429，普通双扣
   // 10..20×2）可把进度推入负值推迟孵化，负值必须跨帧保留；
   // 曾用 `ai0<0 → 0` 把负进度每帧清零 = 受击扣减永不生效
@@ -999,7 +1000,7 @@ export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) 
   }
   if (e.justHit) {                                        // :40419-40425
     e.ai0 -= rndRange(10, 21);
-    if (!EXPERT) e.ai0 -= rndRange(10, 21);
+    if (!expertMode(game)) e.ai0 -= rndRange(10, 21);      // :40427
   }
   e.ai0 += 1;
   if (e.ai0 >= hatchT) {
@@ -1141,8 +1142,8 @@ export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | n
   if (e.ai0 !== -1 && (e.ai0 < 0 || e.ai0 > 4)) e.ai0 = 0;
   // noGravity 运行时位（:40688 起始 true / -1 石化态 :40699 置 false）——
   // StrikeNPC :82217 受击档（def.flying=false 覆盖不到，2026-08-17 补）
-  // ---- 专家受击石化(:40692-40697,EXPERT 恒 false 不可达,代码保留) ----
-  if (e.justHit && EXPERT && rnd(6) === 0) { e.ai0 = -1; e.ai1 = 0; }
+  // ---- 专家受击石化(:40692-40697) ----
+  if (e.justHit && expertMode(game) && rnd(6) === 0) { e.ai0 = -1; e.ai1 = 0; }
   e.noGravity = e.ai0 !== -1;   // 转移 tick 即置 false（原版 -1 分支同 tick 生效）
 
   if (e.ai0 === -1) {

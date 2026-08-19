@@ -5,7 +5,6 @@ import { hitPlayer, playEnemyHitSound, projOverlap, tryReflectProjectile } from 
 import { moveAndCollide } from '../physics/TileCollision';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';
-import { BuffType } from '../stats/Buffs';
 import { prefetchProjectiles } from './Arrow';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -840,17 +839,11 @@ export class Dart extends Entity {
     //      ProjLight() 1:1 标量循环结算（SetDefaults light × 乘区/绝对通道表）——
     //      曾在此处自报 st.light 造成双重注入，且多条数值与原版不符（96 灰 vs 原版绿、
     //      257 手调蓝、596/814 原版根本无光）已全数摘除
-    // ---- 1080 鸟粪拖尾（AI_200 :37637-37653：每更新 2 粒尘 329,半数 noGravity
-    //      随弹速/半速飘）----
-    if (st.poop) {
-      game.spawnParticles(this.cx, this.cy, '#E8E4D8', 2, 0.5, { life: 22, damp: 0.95 });
-    }
     // ---- 撞实心块 ----
     const tx = Math.floor(this.cx / TILE);
     const ty = Math.floor(this.cy / TILE);
     if (game.world.store.isSolid(tx, ty)) {
       if (st.rocket) { this.rocketKill(game); return; }  // 303 火箭撞块即爆（Kill 段）
-      if (st.poop) { this.poopKill(game, false); return; }   // 1080 鸟粪撞块（Kill 段无 buff）
       if (st.noTile) { /* 300 圣锤/299 暗影焰 tileCollide=false:穿墙 */ }
       else { this.dead = true; return; }
     }
@@ -858,21 +851,8 @@ export class Dart extends Entity {
     // iframes 去重——无敌帧内命中不扣血但弹体照常销毁,原版语义) ----
     if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
       if (st.rocket) { this.rocketKill(game); return; }
-      if (st.poop) { this.poopKill(game, true); return; }    // 1080 鸟粪砸头（Stinky 600t）
       hitPlayer(this, game, this.damage);
       this.dead = true;
-    }
-  }
-
-  /** 1080 鸟粪 Kill（Projectile.cs:67579-67600）：玩家相交 → ApplyBuffTo(Stinky 120,
-   *  600t) + Item177 + 30 粒尘 329（Y 半速上飘,半数 noGravity 近似）；无伤害 */
-  private poopKill(game: GameHooks, onPlayer: boolean): void {
-    this.dead = true;
-    const cx = this.cx, cy = this.cy;
-    game.playSfxFiles(['Item_177'], 1, cx, cy);
-    game.spawnParticles(cx, cy, '#E8E4D8', 30, 1.6, { life: 34, damp: 0.94, grav: -0.05 });
-    if (onPlayer) {
-      game.player.buffs.apply(BuffType.Stinky, 10);   // buff 120, 600t
     }
   }
 
@@ -951,7 +931,6 @@ interface DartStyle {
   home?: { spd: number; lerp: number; range: number };   // 293 追踪(AI_051)
   noTex?: boolean;                       // 贴图空桩,纯尘埃视觉(299)
   pulse?: boolean;                       // alpha/scale 呼吸(115)
-  poop?: boolean;                        // 1080 鸟粪:命中玩家/撞块 Kill → Stinky+尘(无伤害)
   fallback?: string;                     // 贴图未就绪短线色
 }
 
@@ -1071,12 +1050,6 @@ const DART_STYLE: Record<number, DartStyle> = {
   814: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, noTile: true, life: 180,
     trail: { color: '#C83848', count: 1 },
     sfx: ['Item_171'], fallback: '#B03040' },
-  // 1080 鸟粪（AI_024 鸟 :25398-25407 / AI_068 飞行鸭 :34863-34873 直构；SetDefaults
-  //    Projectile.cs:9794-9802：10×10 aiStyle200 penetrate-1 ignoreWater alpha255）：
-  //    AI_200_BirdDroppings（:37630-37666）vy+=0.3 钳 16、每更新 2 粒尘 329、
-  //    命中玩家即 Kill；Kill（:67579-67600）玩家相交 → Stinky buff120 600t +
-  //    Item177 + 30 粒尘 329（无伤害）
-  1080: { w: 10, h: 10, rot: 'none', grav: 0.3, life: 3600, poop: true, fallback: '#E8E4D8' },
 };
 
 /**

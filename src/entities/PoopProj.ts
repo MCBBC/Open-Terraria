@@ -9,9 +9,8 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
-import { projSprite } from './Arrow';
-import { TILE } from '../core/constants';
 import { BuffType } from '../stats/Buffs';
+import { TILE } from '../core/constants';
 
 export class PoopProj extends Entity {
   w = 10; h = 10;
@@ -27,22 +26,11 @@ export class PoopProj extends Entity {
     this.vy = 0;
   }
 
-  draw(r: Renderer, _cam: Camera): void {
-    const ctx = r.canvas.getContext('2d');
-    if (!ctx) return;
-    const img = projSprite(this.projId);
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
-    if (img && (img as HTMLImageElement).naturalWidth > 0) {
-      const iw = (img as HTMLImageElement).naturalWidth;
-      const ih = (img as HTMLImageElement).naturalHeight;
-      ctx.drawImage(img, -iw / 2, -ih / 2, iw, ih);   // 原生尺寸;AI_200 无 rotation
-    } else {
-      ctx.fillStyle = '#CFC5A5';
-      ctx.fillRect(-5, -5, 10, 10);
-    }
-    ctx.restore();
+  draw(_r: Renderer, _cam: Camera): void {
+    // ★本体隐形:SetDefaults alpha=255(Projectile.cs:9799)+ GetAlpha 默认式
+    // ((255−alpha)/255 → 全透明,:76836)+ 全文件零 alpha 衰减 + 无专属绘制分支
+    // ——可视效果 = 尘 329 尾迹(2/tick)与 Kill 迸溅本身;Projectile_1080.png(8×8)
+    // 为无引用死资源。曾画贴图 = 多一个可见实体偏差(review 2026-08-19 抓出)
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {

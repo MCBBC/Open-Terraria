@@ -89,7 +89,7 @@ if (shot) {
     }
     // GL 画布自检(preserveDrawingBuffer 留有上一帧;★GL y 原点在底,顶行 = height-1)
     let glPix = '无实例';
-    const glc = g.renderer.sky.cloudGL?.canvas;
+    const glc = g.renderer.glfx?.canvas;
     if (glc && glc.width > 0) {
       try {
         const gctx = glc.getContext('webgl2');

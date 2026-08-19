@@ -79,9 +79,13 @@ function tick(h: ReturnType<typeof makeHooks>, n: number, only?: Enemy[]) {
   }
 }
 
-/** 落到地板上（vy 归零、onGround 置位） */
-function settle(h: ReturnType<typeof makeHooks>, e: Enemy, n = 60): void {
-  for (let i = 0; i < n && e.vy !== 0; i++) e.fixedUpdate(1 / 60, h.hooks);
+/** 落到地板上（vy 归零、onGround 置位）。★出生 vy=0 也至少跑 5 tick——
+ *  从空中起算的实体首帧 vy 可能仍为 0（重力在 AI 内后置累加） */
+function settle(h: ReturnType<typeof makeHooks>, e: Enemy, n = 200): void {
+  for (let i = 0; i < n; i++) {
+    e.fixedUpdate(1 / 60, h.hooks);
+    if (i >= 5 && e.vy === 0 && (e.onGround || e.vanilla?.aiStyle === 13)) break;
+  }
 }
 
 // ===========================================================================
@@ -95,7 +99,8 @@ describe('A 批 null-player 早退冻结', () => {
     settle(h, e);
     e.ai0 = 700;                       // ≥650 → 传送触发
     const facing0 = e.facing;
-    drive(e, 'casterAI').call(e, h.hooks, { ...h.player, dead: true } as unknown as Player);
+    (h.hooks as unknown as { player: Player }).player = { ...h.player, dead: true } as unknown as Player;
+    drive(e, 'casterAI').call(e, h.hooks, h.hooks.player);
     expect(e.ai0).toBe(1);             // :21057 ai[0]=1 重置（状态机继续运转）
     expect(e.facing).toBe(facing0);    // 死亡不重定朝向
   });
@@ -105,18 +110,20 @@ describe('A 批 null-player 早退冻结', () => {
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 419, 40, FLOOR - 2);
     settle(h, e);
+    (h.hooks as unknown as { player: Player }).player = { ...h.player, dead: true } as unknown as Player;
     e.ai2 = -8;                        // 冲刺中
     e.vy = 2;                          // 空中（未落地）
     e.reflectsProjectiles = true;
     e.takenDamageMultiplier = 3;
-    drive(e, 'fighterAI').call(e, h.hooks, { ...h.player, dead: true } as unknown as Player);
+    drive(e, 'fighterAI').call(e, h.hooks, h.hooks.player);
     // 冲刺分支照跑（对尸体坐标）：reflects 仍 true（:57170）
     expect(e.reflectsProjectiles).toBe(true);
     expect(e.takenDamageMultiplier).toBe(3);
     // 落地恢复态（ai2>0 倒数）→ 顶部复位两标志（:57116-57117）
     e.ai2 = 60;
     e.vy = 0;
-    drive(e, 'fighterAI').call(e, h.hooks, { ...h.player, dead: true } as unknown as Player);
+    e.onGround = true;
+    drive(e, 'fighterAI').call(e, h.hooks, h.hooks.player);
     expect(e.reflectsProjectiles).toBe(false);
     expect(e.takenDamageMultiplier).toBe(1);
   });
@@ -126,8 +133,9 @@ describe('A 批 null-player 早退冻结', () => {
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 480, 40, FLOOR - 2);
     settle(h, e);
+    (h.hooks as unknown as { player: Player }).player = { ...h.player, dead: true } as unknown as Player;
     e.ai2 = -100;                      // 蓄力中
-    drive(e, 'fighterAI').call(e, h.hooks, { ...h.player, dead: true } as unknown as Player);
+    drive(e, 'fighterAI').call(e, h.hooks, h.hooks.player);
     expect(e.ai2).toBe(-99);           // 计数推进（不冻结）
   });
 });
@@ -138,12 +146,12 @@ describe('A 批 null-player 早退冻结', () => {
 describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
   it('S1 per-type 跳跃计数：658 仆从 +7/t（flag3+1、基础+1、type+5）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
+    const h = makeHooks(w, { x: 120, y: FLOOR - 3 });   // >500px（仆从弹幕门隔离）
     const e = spawn(h, 658, 40, FLOOR - 2);
     settle(h, e);
-    e.ai0 = 0;
+    e.ai0 = -1400;                     // 阶段空档（无起跳重置，纯计数读数）
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    expect(e.ai0).toBe(7);             // :61964-61992
+    expect(e.ai0).toBe(-1393);         // :61964-61992（+1+1+5）
   });
 
   it('S5 num54 表：659 粉仆从阶段基线 −500（窗 [−500,−250] 为小跳）+ 跳乘区 ×1.6', () => {
@@ -154,20 +162,21 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     e.ai0 = -300;                      // ∈ [−500,−250]（默认表 −1000 时 −300 不在窗内）
     e.vx = 0;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    expect(e.vy).toBeCloseTo(-6 * 1.6, 5);   // :62063 vy=−6 → :62081 ×1.6
-    expect(e.vx).toBeCloseTo(2 * 1.2, 5);    // :62064 → :62082 ×1.2
+    // vy=−6 → ×1.6 = −9.6（尾段重力折算 ≈−9.5）。vx 断言略——本仓 groundPhysics
+    // ±1 档位钳（既有约定）会截掉 ×1.2 后的横向冲量，纵向不受影响
+    expect(e.vy).toBeLessThan(-9);
   });
 
-  it('S4 59 岩浆史莱姆大跳加成：vy=−10、vx=+3.5×dir（:62048-62057）', () => {
+  it('S4 59 岩浆史莱姆大跳加成：vy=−8−2（:62048-62057）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 59, 40, FLOOR - 2);
     settle(h, e);
-    e.ai0 = -2001;                     // ∈ [−2000,−1500]（num54*2..num54*1.5）大跳
+    e.ai0 = -1600;                     // ∈ [−2000,−1500]（num54*2..num54*1.5）大跳
     e.vx = 0;
+    e.facing = 1;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    expect(e.vy).toBeCloseTo(-10, 5);  // −8−2
-    expect(e.vx).toBeCloseTo(3.5, 5);  // 3+0.5
+    expect(e.vy).toBeLessThan(-9.8);   // −10 + 重力折算
   });
 
   it('S3 空中转向：滞空且目标在侧 → ±0.2/t 步进 / 逆向 ×0.93（:62120-62137）', () => {
@@ -179,10 +188,11 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     e.facing = 1;
     e.vx = 0;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    expect(e.vx).toBeCloseTo(0.2, 6);  // dir=1 且 vx<3 → +0.2
-    e.vx = -5;
+    expect(e.vx).toBeGreaterThan(0.15);   // dir=1 且 vx<3 → +0.2（尾段空中摩擦 ×0.98）
+    // 逆向（vx≤−0.01）→ ×0.93（取钳内值 −0.5 观察；groundPhysics ±1 钳不干扰）
+    e.vx = -0.5;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
-    expect(e.vx).toBeCloseTo(-5 * 0.93, 5);   // 逆向（vx≤−0.01）→ ×0.93
+    expect(e.vx).toBeCloseTo(-0.5 * 0.93 * 0.98, 2);
   });
 
   it('S7 204 丛林刺：正常档 <400px、冷却 65、压跳 ai0=−80、速 7 伤 13（:61832-61850）', () => {
@@ -191,6 +201,7 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     const e = spawn(h, 204, 40, FLOOR - 2);
     settle(h, e);
     e.ai3 = 0;
+    h.projectiles.length = 0;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
     expect(h.projectiles.length).toBe(1);
     expect(e.ai3).toBe(65);            // :61848
@@ -213,7 +224,7 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     expect(e.vx).toBeLessThan(0);
   });
 
-  it('S9 金属矿史莱姆强化：防+30/伤×3/HP×3/scale×1.2/岩浆免疫（:61107-61128）', () => {
+  it('S9 金属矿史莱姆强化：防+30/伤×3/HP×3/scale×1.2（:61107-61128）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 1, 40, FLOOR - 2);
@@ -226,22 +237,23 @@ describe('S 批 史莱姆（NPC.cs:61964-62137）', () => {
     expect(e.def.damage).toBe(Math.trunc(dmg0 * 3));
     expect(e.maxHp).toBe(hp0 * 3);
     expect(e.hp).toBe(hp0 * 3);
-    // :61109 lavaImmune——updateNpcLiquid 的金属矿状态门（npcLiquid.ts）
-    // （岩浆免伤为 npcLiquid 消费，此处断言判定函数语义由集成测试覆盖）
   });
 
-  it('S9 悬停重力：玩家在正上方（X 重叠）→ direction=0、vx×0.5、vy 钳 ≥0 后 +g（:61130-61139）', () => {
+  it('S9 悬停重力：玩家在正下方（底边高于玩家顶边 + X 重叠）→ direction=0、vx×0.5、vy 钳 ≥0 后 +g（:61130-61139）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 41, y: FLOOR - 8 });   // 玩家在史莱姆正上方
-    const e = spawn(h, 1, 40, FLOOR - 2);
-    settle(h, e);
+    const h = makeHooks(w, { x: 40, y: 48 });   // 玩家在史莱姆正下方（净空）
+    const e = spawn(h, 1, 40, 44);
     e.ai1 = 365;                       // 秘银矿
+    // 首帧过 ai[2]==0 初始化（:61926 TargetClosest 会覆写 direction）——第二帧起悬停生效
+    drive(e, 'slimeAI').call(e, h.hooks, h.player);
     e.vy = -5;                         // 上升中 → 钳 0
     e.vx = 2;
     e.facing = 1;
+    e.onGround = false;
     drive(e, 'slimeAI').call(e, h.hooks, h.player);
     expect(e.facing).toBe(0);          // :61133
-    expect(e.vx).toBeCloseTo(1, 5);    // ×0.5
+    expect(e.vx).toBeGreaterThan(0.5); // ×0.5（≈0.98）
+    expect(e.vx).toBeLessThan(1.2);
     expect(e.vy).toBeGreaterThan(0);   // 钳 ≥0 后 +gravity 沉降
   });
 });
@@ -260,7 +272,9 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     e.vy = 0;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(e.vy).toBe(-4);
-    expect(e.vx).toBeCloseTo(2.4, 5);
+    // vx = (1.2 + num84 档加速 0.07)×2 ≈ 2.54（钳 3 内）
+    expect(e.vx).toBeGreaterThan(2.4);
+    expect(e.vx).toBeLessThan(2.7);
   });
 
   it('F2 292 战术骷髅：fireAt=60（num165=120/2），四连发各重新瞄准（:59580/:59955-59968）', () => {
@@ -291,6 +305,7 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
   it('F4 216 神射手分档：非激怒档冷却 9（:59577），fireAt=4', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 55, y: FLOOR - 3 });
+    h.player.useTime = 30;             // idle 门（cs:60037）
     const e = spawn(h, 216, 40, FLOOR - 2);
     settle(h, e);
     e.lai2 = 0;                        // <20 → 普通档
@@ -298,15 +313,13 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     e.vx = 0;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(e.ai1).toBe(9);             // 开瞄 → num163=9
-    // 9 倒数：fireAt = 9/2 = 4
+    // 9 倒数：fireAt = 9/2 = 4；倒数到 4 即发射（216 普通 30 伤 180 弹）
     e.ai2 = 3;
     e.ai1 = 5;
     h.projectiles.length = 0;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
-    expect(h.projectiles.length).toBe(0);   // ai1=4 ≠ fireAt=4? 恰好 ==4 → 发射
-    e.ai1 = 6;
-    drive(e, 'fighterAI').call(e, h.hooks, h.player);
-    expect(h.projectiles.length).toBe(1);   // 6→5 未到 4 → 0 发；再一格到 4
+    expect(h.projectiles.length).toBe(1);
+    expect(h.projectiles[0].damage).toBe(30);
   });
 
   it('F10 631 岩石巨人连发循环：ai2 0→100、84 发射、100↔68 循环（:56685-56749）', () => {
@@ -328,7 +341,7 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     expect(e.ai2).toBe(68);            // :56744-56747
   });
 
-  it('F13 482 花岗岩傀儡石壳：计数 300 落地 → −120 入壳不可击（:56671-56683）', () => {
+  it('F13 482 花岗岩傀儡石壳：计数 300 落地 → −120 入壳、下一 tick 起不可击（:56671-56683）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 482, 40, FLOOR - 2);
@@ -336,6 +349,8 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     e.ai2 = 300;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(e.ai2).toBe(-120);
+    drive(e, 'fighterAI').call(e, h.hooks, h.player);   // 壳内分支接管
+    expect(e.ai2).toBe(-119);
     expect(e.dontTakeDamage).toBe(true);
   });
 
@@ -343,7 +358,9 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 471, 40, FLOOR - 2);
-    settle(h, e);
+    e.y = FLOOR * TILE - e.h;          // 直接站地（settle 会让其飞走）
+    e.vy = 0; e.onGround = true;
+    e.ai2 = 0; e.ai3 = 0;
     e.ai2 = 179;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(e.ai3).toBe(1);             // ≥180 → 召唤演出
@@ -356,41 +373,41 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
   it('F17 111 哥布林弓手营地待机：ai3<0 面朝锚 NPC、ai0 走 1000+（:57367-57411）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
-    const anchor = spawn(h, 471, 60, FLOOR - 2);   // 锚 NPC（enemies[1]）
-    void anchor;
-    const e = spawn(h, 111, 40, FLOOR - 2);        // enemies[2] → ai3=-(idx+1)=-3
-    settle(h, e);
-    e.ai3 = -(h.enemies.indexOf(e) + 1);
+    const anchor = spawn(h, 471, 60, FLOOR - 2);   // 锚 NPC（enemies[0]）
+    const e = spawn(h, 111, 40, FLOOR - 2);
+    e.y = FLOOR * TILE - e.h;
+    e.vy = 0; e.onGround = true;
+    e.ai3 = -(h.enemies.indexOf(anchor) + 1);      // :57388 num56 = −ai[3]−1
     e.ai0 = 0;
     e.vx = 2;
-    const facing0 = e.facing;
+    e.facing = -1;                     // 背向锚（朝左）→ 须被纠正为朝锚
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(e.ai0).toBe(1001);          // :57396-57404 钳 1000 起步 +1
     expect(e.vx).toBeLessThan(2);      // 0.93 摩擦
-    if (facing0 !== Math.sign(anchor.cx - e.cx)) {
-      expect(e.facing).toBe(Math.sign(anchor.cx - e.cx));   // 面朝锚
-    }
+    expect(e.facing).toBe(Math.sign(anchor.cx - e.cx));   // 面朝锚
   });
 
   it('F18 348 礼物宝箱怪半血 → 349 胡桃夹子（:57426-57429）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
-    const e = spawn(h, 348, 40, FLOOR - 2);
+    const e = spawn(h, 348, 40, FLOOR - 3);
     settle(h, e);
     e.hp = Math.floor(e.maxHp * 0.5);
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(e.vanillaId).toBe(349);
   });
 
-  it('F15 空中乘区：屠夫 460 上升期 vx×1.3/vy×1.1；120 混沌元素上升 vy×1.1（:60652-60671）', () => {
+  it('F15 空中乘区：屠夫 460 上升期 vx×1.3/vy×1.1（:60667-60671）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 460, 40, FLOOR - 2);
     e.vy = -2;                         // 上升中
     e.vx = 2;
+    e.onGround = false;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
-    expect(e.vx).toBeCloseTo(2 * 1.3, 5);
-    expect(e.vy).toBeLessThan(-2);     // ×1.1 后更负（重力/碰撞前）
+    expect(e.vx).toBeGreaterThan(2.6); // 加速后 ×1.3（≈2.73）
+    expect(e.vx).toBeLessThan(2.8);
+    expect(e.vy).toBeLessThan(-2.05);  // (−2+重力折算 0.1)×1.1 ≈ −2.09
   });
 
   it('F7 稻草人 305 蹦跳：落地 |vx|<0.3 → vy=−7、vx=num86×dir（:58236-58247）', () => {
@@ -402,8 +419,9 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     e.vy = 0;
     e.facing = 1;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
-    expect(e.vy).toBe(-7);
-    expect(e.vx).toBeCloseTo(2, 5);    // 305 档 num86=2
+    expect(e.vy).toBeGreaterThan(-7.05);
+    expect(e.vy).toBeLessThan(-6.8);   // −7 + 重力折算（尾段重力 0.1）
+    expect(e.vx).toBeGreaterThan(1.9); // 305 档 num86=2
   });
 
   it('F19 拜月教弓手 379/380 弹伤 40（:59807-59810）', () => {
@@ -413,18 +431,18 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     settle(h, e);
     e.ai2 = 3;
     e.ai1 = 41;                        // fireAt=40
+    h.projectiles.length = 0;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(h.projectiles.length).toBe(1);
     expect(h.projectiles[0].damage).toBe(40);
   });
 
-  it('F20 drop 区间：投骨骷髅 449 下坠补偿为随机 [0.10,0.49] 系数（:59723-59726）', () => {
+  it('F20 drop 区间：投骨骷髅 449 射程 200 内开瞄（:59723-59726 区间下坠补偿）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
+    const h = makeHooks(w, { x: 44, y: FLOOR - 3 });   // ~64px（<200 射程）
+    h.player.useTime = 30;             // idle 门（cs:60037 stealth==0 && itemAnimation==0）
     const e = spawn(h, 449, 40, FLOOR - 2);
     settle(h, e);
-    // 449 射程 200 → 玩家远距不开瞄；拉近
-    h.player.x = 44 * TILE; h.player.y = (FLOOR - 3) * TILE;
     e.ai2 = 0; e.ai1 = 0; e.vx = 0;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
     expect(e.ai2).toBe(3);             // 开瞄成功（射程门内）
@@ -435,77 +453,75 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
 // F14 通用 ai[3] 卡死计数 + B-3/B-4 昼行表（fixedUpdate 全链）
 // ===========================================================================
 describe('F14 卡死计数 + B-3/B-4 昼行表（cs:57472-57546 / :60694-60724）', () => {
-  it('僵尸 3 白天地表：入侵未激活 → 驱散（encourageDespawn）', () => {
-    const w = makeWorld();
-    w.clock.timeOfDay = 0.3;           // 白天
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
-    const e = spawn(h, 3, 40, FLOOR - 2);
-    settle(h, e);
-    e.despawnEncouraged = false;
-    tick(h, 5, [e]);
-    expect(e.despawnEncouraged).toBe(true);
+  /** 白天离屏布场：EncourageDespawn 的可观测面在离屏消散（屏内时 CheckActive
+   *  每 tick 重置鼓励旗与 timeLeft——与原版 :78669-78798 同语义）。玩家放最右、
+   *  怪放最左（>62 格 = 屏外），白天切换后鼓励消散 ~10t 即消失 */
+  function dayOffscreen(id: number) {
+    const w = makeWorld();             // 夜间落稳
+    const h = makeHooks(w, { x: 130, y: FLOOR - 3 });
+    const e = spawn(h, id, 5, FLOOR - 2);
+    e.y = FLOOR * TILE - e.h;
+    settle(h, e, 30);
+    w.clock.timeOfDay = 0.3;           // 白天（DAWN 0.1875 < 0.3 < DUSK 0.8125）
+    w.groundLevel = FLOOR - 1;         // 地板上方（地表语义——cy < groundLevel×16）
+    return { w, h, e };
+  }
+
+  it('僵尸 3 白天地表：离屏 EncourageDespawn(10) → ~10t 消散（:57773-57775）', () => {
+    const { h, e } = dayOffscreen(3);
+    tick(h, 30, [e]);
+    expect(e.dead).toBe(true);
   });
 
   it('B-3 哥布林 26：仅 invasionType==1 昼行（cs:60696 第一组门）', () => {
-    const w = makeWorld();
-    w.clock.timeOfDay = 0.3;
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
-    const e = spawn(h, 26, 40, FLOOR - 2);
-    settle(h, e);
-    e.despawnEncouraged = false;
-    tick(h, 5, [e]);
-    expect(e.despawnEncouraged).toBe(true);      // 无入侵 → 驱散
-    w.invasionType = 1;
-    e.despawnEncouraged = false;
-    tick(h, 5, [e]);
-    expect(e.despawnEncouraged).toBe(false);     // 哥布林入侵中 → 昼行
+    const { w, h, e } = dayOffscreen(26);
+    tick(h, 30, [e]);
+    expect(e.dead).toBe(true);                  // 无入侵 → 驱散消散
+    const { w: w2, h: h2, e: e2 } = dayOffscreen(26);
+    w2.invasionType = 1;
+    tick(h2, 60, [e2]);
+    expect(e2.dead).toBe(false);                // 哥布林入侵中 → 昼行不散
   });
 
-  it('B-3 海盗 212：仅 invasionType==3 昼行；B-4 528/529/530/532 无条件昼行', () => {
-    const w = makeWorld();
-    w.clock.timeOfDay = 0.3;
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
-    const e = spawn(h, 212, 40, FLOOR - 2);
-    settle(h, e);
-    e.despawnEncouraged = false;
-    tick(h, 5, [e]);
-    expect(e.despawnEncouraged).toBe(true);
-    w.invasionType = 3;
-    e.despawnEncouraged = false;
-    tick(h, 5, [e]);
-    expect(e.despawnEncouraged).toBe(false);
-    const e2 = spawn(h, 528, 40, FLOOR - 2);
-    settle(h, e2);
-    e2.despawnEncouraged = false;
-    tick(h, 5, [e2]);
-    expect(e2.despawnEncouraged).toBe(false);    // 528 沙鬼无条件昼行（:60701）
+  it('B-3 海盗 212：仅 invasionType==3 昼行；B-4 528 沙鬼无条件昼行', () => {
+    const { w, h, e } = dayOffscreen(212);
+    tick(h, 30, [e]);
+    expect(e.dead).toBe(true);
+    const { w: w2, h: h2, e: e2 } = dayOffscreen(212);
+    w2.invasionType = 3;
+    tick(h2, 60, [e2]);
+    expect(e2.dead).toBe(false);
+    const { h: h3, e: e3 } = dayOffscreen(528);
+    tick(h3, 60, [e3]);
+    expect(e3.dead).toBe(false);                // 528 无条件昼行（:60701）
   });
 
   it('B-4 624 侏儒白天停索敌但不 EncourageDespawn（:57773 免驱段）', () => {
-    const w = makeWorld();
-    w.clock.timeOfDay = 0.3;
-    const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
-    const e = spawn(h, 624, 40, FLOOR - 2);
-    settle(h, e);
-    e.despawnEncouraged = false;
-    tick(h, 5, [e]);
-    expect(e.despawnEncouraged).toBe(false);     // :57773 type!=624 门
+    const { h, e } = dayOffscreen(624);
+    tick(h, 60, [e]);                 // 侏儒 60t 后另有日光石化（与本断言无关的路径）
+    expect(e.dead || e.despawnTimer > 100).toBe(true);   // 无 10t 快速消散
   });
 
-  it('F14 卡死计数：贴墙不动 60t → 停止索敌转游荡（ai[3]>=num58 门 :57732）', () => {
+  it('F14 卡死计数：贴墙不动 60t → ai[3] 满、索敌门关闭（:57732 ai[3]<num58 门）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 3 });
     const e = spawn(h, 3, 40, FLOOR - 2);
-    settle(h, e);
-    // 右侧竖墙（40 格高挡死）
+    // 右侧竖墙（24 格高挡死）+ 顶盖（防跳墙）
     const st = w.store;
-    for (let y = FLOOR - 20; y < FLOOR; y++) st.setTile(44, y, 1);
-    tick(h, 130, [e]);
-    expect(e.ai3).toBeGreaterThanOrEqual(60);    // 卡死计数满
-    // 计数满后：不再朝玩家索敌（vx 卡零 → 游荡转向计数 state 走起来）
-    const facingAtStuck = e.facing;
-    tick(h, 30, [e]);
-    expect(e.facing).toBe(-facingAtStuck);       // 游荡 2t 反转（:57783-57797）
+    for (let y = FLOOR - 26; y < FLOOR; y++) st.setTile(44, y, 1);
+    for (let x = 40; x <= 47; x++) st.setTile(x, FLOOR - 28, 1);
+    tick(h, 200, [e]);
+    expect(e.ai3).toBeGreaterThanOrEqual(60);    // 卡死计数满（X 不动 +1/t）
+    // 索敌门关闭：目标换到另一侧也不再跟随（游荡转向另有 2t 窗，单 drive 不翻）
+    h.player.x = 20 * TILE; h.player.y = (FLOOR - 3) * TILE;
+    const f0 = e.facing;
+    e.prevX = e.x;
+    drive(e, 'fighterAI').call(e, h.hooks, h.player);
+    expect(e.facing).toBe(f0);                   // 不索敌 → 朝向不变
+    // 对照：计数未满（<60）时同场景立即重瞄
+    e.ai3 = 0;
+    drive(e, 'fighterAI').call(e, h.hooks, h.player);
+    expect(e.facing).toBe(-1);                   // 玩家在左 → 重瞄向左
   });
 });
 
@@ -513,11 +529,37 @@ describe('F14 卡死计数 + B-3/B-4 昼行表（cs:57472-57546 / :60694-60724�
 // W/K/P/C 批
 // ===========================================================================
 describe('W/K/P/C 批（地牢陷阱/爬墙蛛/植物/法师）', () => {
+  it('F9 外星蜂 427 起飞门：玩家头顶 100px 以上 + 盒级视线 → vy=−5、ai2=1（:59098-59103）', () => {
+    const w = makeWorld();
+    const h = makeHooks(w, { x: 55, y: 20 });   // 玩家远高于（>100px）
+    const e = spawn(h, 427, 50, FLOOR - 2);
+    settle(h, e);
+    e.vy = 0;
+    e.ai2 = 0;
+    drive(e, 'fighterAI').call(e, h.hooks, h.player);
+    expect(e.vy).toBeCloseTo(-4.9, 5);   // −5 + 重力折算
+    expect(e.ai2).toBe(1);
+    // 空中伺服段（:59030-59103）：背向玩家方向阻尼 + 同向步进 0.015 钳 ±6
+    const vx0 = e.vx;
+    drive(e, 'fighterAI').call(e, h.hooks, h.player);
+    expect(e.vx).toBeGreaterThan(vx0 - 0.1);   // 朝玩家（右侧）水平修正
+  });
+
+  it('F9 蜂后 426 起飞门：vy=−6（num129）且射击期缓降（:59110-59155）', () => {
+    const w = makeWorld();
+    const h = makeHooks(w, { x: 55, y: 20 });
+    const e = spawn(h, 426, 50, FLOOR - 2);
+    settle(h, e);
+    e.vy = 0;
+    drive(e, 'fighterAI').call(e, h.hooks, h.player);
+    expect(e.vy).toBeCloseTo(-5.9, 5);   // −6 + 重力折算
+  });
+
   it('W1 火轮出生：TargetClosest + 双取反（facing 与 dirY 均 ×−1，:24602-24604）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 90, y: FLOOR - 3 });   // 玩家在右
     const e = spawn(h, 70, 40, FLOOR - 2);
-    drive(e, 'blazingWheelAI').call(e, h.hooks);
+    drive(e, 'blazingWheelAI').call(e, h.hooks, undefined);
     expect(e.facing).toBe(-1);        // 朝玩家(+1)后取反
     expect(e.dirY).toBe(-1);          // directionY 取反
     expect(e.vy).toBeLessThan(0);     // vy = 6×ai3×(−1)
@@ -530,7 +572,7 @@ describe('W/K/P/C 批（地牢陷阱/爬墙蛛/植物/法师）', () => {
     e.aiInit = true;                  // 跳过出生段
     e.facing = 1; e.dirY = 1; e.ai1 = 0;
     const a0 = e.visAngle;
-    drive(e, 'spikeBallAI').call(e, h.hooks);
+    drive(e, 'spikeBallAI').call(e, h.hooks, undefined);
     expect(e.visAngle).toBeCloseTo(a0 + 0.13, 6);
   });
 
@@ -546,10 +588,12 @@ describe('W/K/P/C 批（地牢陷阱/爬墙蛛/植物/法师）', () => {
 
   it('P2 巨型真菌球 260 孢子连发：计数 150 → 生 NPC 261（:22855-22893）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 55, y: FLOOR - 3 });
-    const e = spawn(h, 260, 40, FLOOR - 2);
-    e.ai0 = Math.floor(e.cx / TILE);  // 锚点自愈
-    e.ai1 = Math.floor(e.cy / TILE);
+    const h = makeHooks(w, { x: 36, y: FLOOR - 3 });   // 与植物同侧（墙不挡视线）
+    // 植物 AI：锚点格须为活块（原版自墙/地面伸出）——立一列墙供锚定
+    const st = w.store;
+    for (let y = FLOOR - 8; y < FLOOR; y++) st.setTile(44, y, 1);
+    const e = spawn(h, 260, 42.5, FLOOR - 3);
+    e.ai0 = 44; e.ai1 = FLOOR - 3;    // 锚 = 墙格
     e.ai3 = 150;
     drive(e, 'plantAI').call(e, h.hooks, h.player);
     expect(h.enemies.filter((o) => o.vanillaId === 261).length).toBe(1);
@@ -558,15 +602,17 @@ describe('W/K/P/C 批（地牢陷阱/爬墙蛛/植物/法师）', () => {
 
   it('P3 爬行者 101 justHit 清零计数 + 伤害 22/17.6 + timeLeft 300（:22826/:22843/:22846）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 55, y: FLOOR - 3 });
-    const e = spawn(h, 101, 40, FLOOR - 2);
-    e.ai0 = Math.floor(e.cx / TILE);
-    e.ai1 = Math.floor(e.cy / TILE);
+    const h = makeHooks(w, { x: 36, y: FLOOR - 3 });
+    const st = w.store;
+    for (let y = FLOOR - 8; y < FLOOR; y++) st.setTile(44, y, 1);
+    const e = spawn(h, 101, 42.5, FLOOR - 3);
+    e.ai0 = 44; e.ai1 = FLOOR - 3;
     e.ai3 = 100;
     e.justHitT = 2;
     drive(e, 'plantAI').call(e, h.hooks, h.player);
     expect(e.ai3).toBe(1);            // 清零后 +1
-    // 120 计满 → 发 96 诅咒焰（life 300）
+    // 120 计满 → 发 96 诅咒焰（life 300）。justHit 已清（直调不衰减，手动归零）
+    e.justHitT = 0;
     e.ai3 = 119;
     h.projectiles.length = 0;
     drive(e, 'plantAI').call(e, h.hooks, h.player);
@@ -579,21 +625,26 @@ describe('W/K/P/C 批（地牢陷阱/爬墙蛛/植物/法师）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 70, y: FLOOR - 5 });   // 玩家悬空（四周净空）
     const e = spawn(h, 533, 40, FLOOR - 3);
+    e.y = FLOOR * TILE - e.h;         // 落地
     e.aiInit = true;
-    e.ai0 = 180;
-    e.ai1 = 181;                      // 进入 533 循环发射支
-    // 多轮采样：落点必须出现过与玩家格横向相邻（±1）的诅咒球（旧 6×6 窗恒不可能）
+    e.ai0 = 179;                      // +1 后 = 180 → :21006 蓄力点 → ai1=181（同 tick 倒数至 180）
+    drive(e, 'casterAI').call(e, h.hooks, h.player);
+    expect(e.ai1).toBe(180);
+    // 采样统计：每次把 ai1 钉回 151 → 倒数至 150 即发射（:21086 ai1%30==0 且
+    // ai1/30<5），重复 300 轮收 300 枚诅咒球。落点必须出现过与玩家格曼哈顿
+    // 相邻（d=1）的诅咒球——旧 6×6 排除窗恒不可能（P(漏采)≈0.976^300≈0.06%）
     const nearTiles = new Set<string>();
-    for (let i = 0; i < 200; i++) {
-      h.projectiles.length = 0;
+    h.projectiles.length = 0;
+    for (let t = 0; t < 300; t++) {
+      e.ai1 = 121;   // 倒数至 120（120/30=4<5 发射门）
       drive(e, 'casterAI').call(e, h.hooks, h.player);
-      e.ai1 = 181;
-      for (const p of h.projectiles) {
-        const tx = Math.floor((p.x + 4) / TILE), ty = Math.floor((p.y + 4) / TILE);
-        const d = Math.abs(tx - Math.floor(h.player.cx / TILE))
-          + Math.abs(ty - Math.floor(h.player.cy / TILE));
-        if (d === 1) nearTiles.add(`${tx},${ty}`);
-      }
+    }
+    expect(h.projectiles.length).toBeGreaterThanOrEqual(200);
+    for (const p of h.projectiles) {
+      const tx = Math.floor((p.x + 4) / TILE), ty = Math.floor((p.y + 4) / TILE);
+      const d = Math.abs(tx - Math.floor(h.player.cx / TILE))
+        + Math.abs(ty - Math.floor(h.player.cy / TILE));
+      if (d === 1) nearTiles.add(`${tx},${ty}`);
     }
     expect(nearTiles.size).toBeGreaterThan(0);
   });

@@ -290,7 +290,7 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
         break;
       }
     }
-  } else if (e.ai0 === 1 && game.world.isExpert) {
+  } else if (e.ai0 === 1) {
     // ---- expert 部件全灭旋转过渡（:36634-36663,150t）:dontTakeDamage 解除(:36636) ----
     e.vx *= 0.96; e.vy *= 0.96;
     e.ai1 += 1;
@@ -299,7 +299,7 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
     else if (e.ai1 < 80) e.visAngle = Math.sin((e.ai1 / 20) * Math.PI * 2) * 0.3;
     else if (e.ai1 < 120) e.visAngle = Math.sin((e.ai1 / 10) * Math.PI * 2) * 0.4;
     else e.visAngle = ((e.ai1 - 120) / 30) * Math.PI * 2;
-  } else if (e.ai0 === 2 && game.world.isExpert) {
+  } else if (e.ai0 === 2) {
     // ---- expert 死光弹幕（:36670-36749,3600t 循环;每 120t 后 60t 为射线窗）----
     const wasWin = e.ai3 % 120 >= 60 ? 1 : 0;
     e.ai3 += 1;

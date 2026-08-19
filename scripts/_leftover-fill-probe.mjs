@@ -26,7 +26,8 @@ const res = await page.evaluate(async () => {
   // ---- ① 鸟粪弹:鸟悬玩家正上 → 掷出 → 落到玩家 → Stinky ----
   {
     // 清理可能的既有小动物,生成鸟并钉在玩家上方(有视线)
-    p.luckState.brokenMirrorBadLuck = true;   // luck=−0.25:鸟粪只在负幸运时掷(1/5×25%/tick)
+    p.luckState.brokenMirrorBadLuckTime = 3600;   // luck=−0.25:鸟粪只在负幸运时掷(1/5×25%/tick)
+    p.luckState.ladyBugLuckTimeLeft = -43200;     // 再叠瓢虫霉运,保证 luck<0
     const bird = g.spawnNpcByVanilla(74, p.x + 20, p.y - 120);
     if (!bird) { out.poop = { err: 'spawn bird fail' }; }
     else {
@@ -80,19 +81,27 @@ const res = await page.evaluate(async () => {
 
   // ---- ③ 鸮待机状态机:钉静止 → 连续采样帧序列应走 band(0,1,2,1...) ----
   {
-    g.world.clock.isDay = false;   // 夜间鸮栖息站定
-    const owl = g.spawnNpcByVanilla(611, p.x - 80, p.y - 40);
+    g.world.clock.timeOfDay = 0;        // 午夜(isDay 是 timeOfDay 派生 getter,直接赋值无效)
+    g.world.weather.cloudAlpha = 0;     // + 晴空:夜间晴空鸮才栖息(白天/阴天恒起飞,:25456)
+    const st2 = g.world.store;
+    let gy = Math.floor(p.y / 16);
+    const ox2 = Math.floor((p.x - 80) / 16);
+    for (let y = Math.max(4, gy - 6); y < Math.min(st2.h - 4, gy + 30); y++) {
+      if (st2.isSolid(ox2, y)) { gy = y; break; }
+    }
+    const owl = g.spawnNpcByVanilla(611, p.x - 80, gy * 16 - 1);
     if (!owl) out.owl = { err: 'spawn fail' };
     else {
-      owl.vx = 0; owl.vy = 0; owl.ai0 = 0; owl.facing = -1;
-      owl.x = p.x - 80; owl.y = p.y - 40;   // 近似钉位(AI 会自动起飞——连续重钉)
+      owl.owlAirborneInit = true;   // 跳过出生即飞(测试直接站定)
+      owl.ai0 = 0; owl.vx = 0; owl.vy = 0;
+      owl.y = gy * 16 - owl.h; owl.x = p.x - 80;
+      await new Promise((r) => setTimeout(r, 300));
       const seq = [];
       for (let i = 0; i < 40; i++) {
-        owl.vx = 0; owl.vy = 0; owl.ai0 = 0;
         seq.push(mod.vanillaFrameIdx(owl, 13));
         await new Promise((r) => setTimeout(r, 100));
       }
-      out.owl = { seq: seq.filter((_, i) => i % 2 === 0) };   // 每 200ms 取一样本(20t)
+      out.owl = { seq: seq.filter((_, i) => i % 2 === 0), ai0: owl.ai0 };   // 每 200ms 取一样本(20t)
       owl.dead = true;
     }
   }

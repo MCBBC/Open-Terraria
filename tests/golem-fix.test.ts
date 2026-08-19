@@ -100,3 +100,18 @@ describe('boss bar 头像', () => {
     expect(BOSS_HEAD_INDEX[249]).toBe(5);
   });
 });
+
+describe('数据对齐(1456 :12095-12149;曾提取自 1405 旧值)', () => {
+  it('族血量取 1456 终值(本体 15000/头 25000/拳 10000/自由头 16000)', () => {
+    const g = makeGame(makeWorld());
+    expect(Enemy.fromVanilla(245, 0, 0)!.maxHp).toBe(15000);
+    expect(Enemy.fromVanilla(246, 0, 0)!.maxHp).toBe(25000);
+    expect(Enemy.fromVanilla(247, 0, 0)!.maxHp).toBe(10000);
+    expect(Enemy.fromVanilla(249, 0, 0)!.maxHp).toBe(16000);
+    void g;
+  });
+  it('普通世界 scale=1(FTW ×0.5 由 getGoodAdjustments 管,勿在数据层恒置)', () => {
+    const body = Enemy.fromVanilla(245, 0, 0)!;
+    expect(body.vanilla?.scale ?? 1).toBe(1);   // ★曾误加恒 scale:0.5 → 贴图/盒缩半
+  });
+});

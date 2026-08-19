@@ -22,6 +22,7 @@ export interface QuadOpts {
   tint?: readonly [number, number, number] | null;   // RGB 乘法(默认无)
   rot?: number;                                      // 弧度,绕 dst 中心
   smooth?: boolean;                                  // 采样过滤(默认 true=2D 默认平滑开)
+  flipX?: boolean;                                   // 水平镜像(u0/u1 交换;云族用)
 }
 
 interface TexEntry { tex: WebGLTexture; w: number; h: number; stamp: number; bytes: number; mipped: boolean }
@@ -160,16 +161,20 @@ export class GLSpriteLayer {
       e.preventDefault();               // 保留恢复资格(部分驱动可自动恢复)
       this.unavailable = true;
       this.diedAt = performance.now();
+      this.objectsStale = true;
       console.warn('[GLSpriteLayer] GL 上下文丢失——标记不可用,消费方回退 2D,5s 后允许重建');
     });
     this.canvas.addEventListener('webglcontextrestored', () => {
       // 内容(纹理/程序)已全部蒸发:仍按死亡处理,由消费方整体重建更干净
       this.unavailable = true;
       this.diedAt = performance.now();
+      this.objectsStale = true;   // restore 后 isContextLost()=false 但旧对象已蒸发
     });
   }
   /** 上下文死亡时刻(重建退避用;0=未死) */
   diedAt = 0;
+  /** 对象陈旧旗:lost/restored 后旧对象已蒸发或不属于恢复后的上下文——dispose 跳过 delete */
+  objectsStale = false;
 
   /** 画布尺寸(与主画布同尺寸;DPR 内部像素) */
   resize(w: number, h: number): void {
@@ -261,7 +266,7 @@ export class GLSpriteLayer {
     if (this.scratch.width !== w || this.scratch.height !== h) {
       this.scratch.width = w; this.scratch.height = h;
     }
-    const sc = this.scratch.getContext('2d')!;
+    const sc = this.scratch.getContext('2d', { willReadFrequently: true })!;  // 纯上传中转,SHM 后备不占 IOSurface
     sc.clearRect(0, 0, w, h);
     sc.drawImage(src as CanvasImageSource, x, y, w, h, 0, 0, w, h);
     gl.bindTexture(gl.TEXTURE_2D, e.tex);
@@ -335,8 +340,10 @@ export class GLSpriteLayer {
       ? (e.mipped ? this.samp.linear! : this.samp.linearNoMip!)
       : this.samp.nearest!);
     const px = 0.5 / e.w, py = 0.5 / e.h;
-    const u0 = (sx + px) / e.w, v0 = (sy + py) / e.h;
-    const u1 = (sx + sw - px) / e.w, v1 = (sy + sh - py) / e.h;
+    const v0 = (sy + py) / e.h, v1 = (sy + sh - py) / e.h;
+    const ua = (sx + px) / e.w, ub = (sx + sw - px) / e.w;
+    // flipX = u 区间反向(顶点位置不变,采样镜像)
+    const u0 = opts?.flipX ? ub : ua, u1 = opts?.flipX ? ua : ub;
     gl.uniform4f(this.uni.uSrc, u0, v0, u1 - u0, v1 - v0);
     this.setCommon(dx, dy, dw, dh, opts);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -392,7 +399,7 @@ export class GLSpriteLayer {
   dispose(): void {
     if (!this.gl) return;
     // 上下文已丢失 → 驱动侧资源已蒸发,delete 只会打 INVALID_OPERATION 噪声
-    if (!this.gl.isContextLost()) for (const [, e] of this.texs) this.gl.deleteTexture(e.tex);
+    if (!this.gl.isContextLost() && !this.objectsStale) for (const [, e] of this.texs) this.gl.deleteTexture(e.tex);
     this.texs.clear();
     this.bytes = 0;
     this.canvas.width = 0;
