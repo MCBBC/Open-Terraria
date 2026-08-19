@@ -2675,7 +2675,8 @@ export class Renderer {
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
     drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-      world.weather?.windSpeedCurrent ?? 0, this.waterStyle);
+      world.weather?.windSpeedCurrent ?? 0, this.waterStyle,
+      (x, y) => this.waterfalls.checkForWaterfall(x, y));
   }
 
   /** 浸润带·实心层 pass（TileDrawing.Draw :528-529 solidLayer=true 语义）——
@@ -2690,7 +2691,8 @@ export class Renderer {
     const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
     const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
-    drawLiquidBehindTilesOnly(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this.waterStyle);
+    drawLiquidBehindTilesOnly(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this.waterStyle,
+      (x, y) => this.waterfalls.checkForWaterfall(x, y));
   }
 
   /** 导线覆盖层(Main.cs:43543-43954 DrawWires 移植:四色行/连接掩码/多色淡化/致动器覆盖) */

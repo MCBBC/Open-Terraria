@@ -51,6 +51,13 @@ export class WaterfallRenderer {
   private lastFind = -1;
   private findFrame = 0;
 
+  /** CheckForWaterfall(WaterfallManager.cs:95):活动瀑布格线性查——
+   *  浸润带的"半砖+侧液>160+瀑布→让位"门消费(:3906) */
+  checkForWaterfall(x: number, y: number): boolean {
+    for (const f of this.falls) if (f.x === x && f.y === y) return true;
+    return false;
+  }
+
   /** 扫描触发（WaterfallManager.cs FindWaterfalls 90-168，每 30 帧一次）。view 为可见 tile 窗口。
    *  原版条件：halfBrick 唇缘格 + 上方近干/实心 + 一侧液量>160 且对侧空 */
   findWaterfalls(st: TileStore, tx0: number, ty0: number, tx1: number, ty1: number, frame: number) {

@@ -228,6 +228,7 @@ export function drawVanillaLiquids(
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number,
   nowMs: number, isBackground = false, windSpeed = 0, waterStyle = 0,
+  hasWaterfallAt?: (x: number, y: number) => boolean,
 ): void {
   if (!atlas) { _liqDebug.atlasReady = false; return; }
   const PAD = 2;
@@ -596,7 +597,7 @@ export function drawVanillaLiquids(
   //   仅下方有水 → 格底 16×4 横条(:4089-4093)
   //   仅左侧有水 → 格左 4px 竖条(:4113-4116);仅右侧 → 格右 4px(:4118-4121)
   //   左右都有   → 整格 16 宽(:4108-4111);深度按液体量 num6=(256-max)/32*2 从底收
-  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle);
+  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;
@@ -653,13 +654,14 @@ export function drawLiquidBehindTilesOnly(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number, waterStyle = 0,
+  hasWaterfallAt?: (x: number, y: number) => boolean,
 ): void {
-  // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 审计登记):
-  //  ①:3906 半砖+侧液>160+CheckForWaterfall 跳过门(需瀑布管理器接入,瀑布盖
-  //    半砖场景边缘);②:3921 type 546 自液体特例;③:3910 BlocksWaterDrawingBehindSelf
-  //    族门;④:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D
-  //    近似代价高;洞穴暗背景下视觉差极小)。其余分支(含 flag5 自身液体/坡面
-  //    边角门/半砖墙后门/蜂蜜 alpha/致动门)均已对齐。
+  // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
+  //  ①:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D 近似
+  //    代价太高,用户裁定保留);②:4171-4182 flag6 多水型混合 DrawPartialLiquid——
+  //    依赖 Main.liquidAlpha[] 喷泉水型 crossfade 子系统(±0.2/帧过渡),本仓水型
+  //    为瞬时切换无过渡态,该循环恒不触发=与"无喷泉过渡"的原版行为一致;
+  //  ③lavaOpacity(lavaVision 熔岩潜水镜未移植,恒用默认 1f)。
   // Liquid_N 贴图(16×16 纯液体块;水 Liquid_0 多 style 但取首 16px)
   const texCache = new Map<number, ImageBitmap | HTMLImageElement | null>();
   const texFor = (vt: number) => {
@@ -694,6 +696,12 @@ export function drawLiquidBehindTilesOnly(
       const slope = st.slope[i];
       // blockType(num4)语义:0=整块 / 1=半砖 / 2-5=坡面(:3907 blockType())
       const num4 = slope !== 0 ? slope : (st.half[i] ? 1 : 0);
+      const sheet = def.vanilla?.sheet ?? -1;
+      // :3910 BlocksWaterDrawingBehindSelf(TileID.cs:357):玻璃54/回声541/彩纸328/
+      // 雪落459/假人470 —— 平面格(slope==0)整块挡水,不画背后的带
+      if (slope === 0 && (sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 470)) continue;
+      // :3923-3925 传送带(379)自身格有液体 → 整格跳过
+      if (sheet === 379 && st.liquid[i] > 0) continue;
 
       // 四邻液体(TileDrawing.cs:3861-3900;379=conveyor 按 vanilla 视为无液体)。
       // ★零分配版(2026-08-18):旧 lq() 每调用 new {lq,lt} ×4/格——水邻屏每帧
@@ -722,21 +730,35 @@ export function drawLiquidBehindTilesOnly(
       let fL = Lq > 0 && !slopeBlocksLeft;
       let fR = Rq > 0 && !slopeBlocksRight;
       const fU = Uq > 0 && !slopeBlocksUp;
-      const fD = Dq > 240 && !slopeBlocksDown;
+      let fD = Dq > 240 && !slopeBlocksDown;
       // ★flag5 自身格液体(:3943-3963,2026-08-19 用户实报"半格方块浸润未处理"):
       //   半砖/坡面格【自己格内】的液体也画浸润(半砖需 >160)——本格既是容器
       //   又是方块,水搁在半砖上时原版从本格取液位画带,旧实现只读四邻 = 整类缺失
       const selfLq = st.liquid[i];
-      const f5 = selfLq > 0 && num4 !== 0 && (num4 !== 1 || selfLq > 160);
+      // :3921-3939 Grate(546 格栅)自液体特例:格栅透水,自身格液体 → 三向旗
+      // 全开+液位直取本格(原版走独立 else 支,四邻旗/液位不参与;fU 恒 false)
+      const grateSelf = sheet === 546 && selfLq > 0;
+      let f5: boolean;
+      if (grateSelf) {
+        fL = true; fR = true; fD = true;
+        f5 = true;
+      } else {
+        f5 = selfLq > 0 && num4 !== 0 && (num4 !== 1 || selfLq > 160);
+      }
       if (!fL && !fR && !fU && !fD && !f5) continue; // :4054 五旗全空跳过
+      // :3906 半砖+侧液>160+瀑布 → 让位瀑布(瀑布本体覆盖半砖,带不画)
+      if (st.half[i] && (Lq > 160 || Rq > 160) && hasWaterfallAt?.(x, y)) continue;
 
       // 液体类型与最大液位(:3940-3965 取最高液位邻居;顺序 L→R→U→D 严格大于才覆盖)
       let maxLq = 0, lt = 0;
-      if (fL && Lq > maxLq) { maxLq = Lq; lt = toVanillaType(Lqt); }
-      if (fR && Rq > maxLq) { maxLq = Rq; lt = toVanillaType(Rqt); }
-      if (fU && Uq > maxLq) { maxLq = Uq; lt = toVanillaType(Uqt); }
-      if (fD && Dq > maxLq) { maxLq = Dq; lt = toVanillaType(Dqt); }
-      if (f5 && selfLq > maxLq) { maxLq = selfLq; lt = toVanillaType(st.liquidType[i] || 1); }
+      if (grateSelf) { maxLq = selfLq; lt = toVanillaType(st.liquidType[i] || 1); }
+      else {
+        if (fL && Lq > maxLq) { maxLq = Lq; lt = toVanillaType(Lqt); }
+        if (fR && Rq > maxLq) { maxLq = Rq; lt = toVanillaType(Rqt); }
+        if (fU && Uq > maxLq) { maxLq = Uq; lt = toVanillaType(Uqt); }
+        if (fD && Dq > maxLq) { maxLq = Dq; lt = toVanillaType(Dqt); }
+        if (f5 && selfLq > maxLq) { maxLq = selfLq; lt = toVanillaType(st.liquidType[i] || 1); }
+      }
       // ★坡面边角门(:4155-4162):slope4 左侧无液无实心 / slope3 右侧同 → 整带不画
       if (slope === 4 && Lq === 0 && !st.isSolid(x - 1, y)) continue;
       if (slope === 3 && Rq === 0 && !st.isSolid(x + 1, y)) continue;
@@ -821,9 +843,10 @@ export function drawLiquidBehindTilesOnly(
       }
 
       // ---- 不透明度(:4126-4151) ----
-      // 地上=1.0(有墙压 0.6,墙 21→0.9);地下=0.5 基线;蜂蜜恒 1(:4141 max(0.5*1.7,1))
+      // 地上=1.0(有墙压 0.6,墙 21→0.9);地下基线 0.5;
+      // 岩浆=lavaOpacity(默认 1f,lavaVision 未移植恒 1)/蜂蜜=max(0.5×1.7,1)=1
       let alpha = 0.5;
-      if (lt === 2) alpha = 1.0;
+      if (lt === 1 || lt === 2) alpha = 1.0;
       if (y <= Math.floor(groundLevel)) {
         alpha = 1.0;
         const wi = st.wall[i];

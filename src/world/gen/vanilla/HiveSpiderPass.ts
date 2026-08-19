@@ -599,9 +599,10 @@ function placeTightWebs(st: TileStore, rng: RNG, x: number, y: number): boolean 
   const gi = st.idx(x, y);
   if (st.liquid[gi] > 0 && st.liquidType[gi] === 4) return false;   // anyShimmer（+1 编码 4）
   if (st.flags[gi] && st.type[gi] === LARVA) return false;          // cs:38345 type==231
-  rng.int(0, 1); // preferSmall（PlaceUncheckedStalactite 小型分支 IL +0063-00A5：
-  //   单格 (x,y) frameY=54——★UUUU 试接后 #63 残差 2→1130 实证本语境小型分支另有
-  //   前置门/写位（未及定谳），回退两格垂网形；2 格残量备案见 UUUU 批报告）
+  rng.int(0, 1); // preferSmall 掷（cs:38349 genRand.Next(2)）——★XXXX 定谳：spiders
+  //   语境该旗**不可达**（IL +005C ldarg.s spiders → brfalse +151；+0063 起即 spiders
+  //   两格写分支并 ret）——UUUU"小型分支 IL +0063"系误读（+0063=spiders 分支起点），
+  //   其试接 2→1130 正因建模了原版永不执行的支。掷保留仅保流位，写侧恒两格垂网。
   const variation = rng.int(0, 2);
   if (!solidTile(st, x, y - 1)) return false;
   if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;

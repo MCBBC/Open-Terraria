@@ -16,6 +16,9 @@ export class Input {
   uiBlocking = false;     // 背包/合成等打开时为 true
   wheelDelta = 0;
   keydownHandlers: Array<(code: string) => void> = [];
+  /** 键沿观察口（行为录制用：Game 构造接 recLog('key')——down=false 为 keyup）。
+   *  只在 keydown/keyup 边沿各调一次（keydown 有 e.repeat 门），轮询零影响 */
+  onKeyEvent?: (code: string, down: boolean) => void;
 
   private el: HTMLElement;
   /** 已注册监听(destroy 时全部移除——window 强引用曾把整个旧 Game 钉死,
@@ -41,11 +44,15 @@ export class Input {
       if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
       this.keys.add(e.code);
       this.keydownHandlers.forEach((fn) => fn(e.code));
+      this.onKeyEvent?.(e.code, true);   // 行为录制：键沿（e.repeat 已滤）
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
       // F2 无敌+无限魔力(调试,Game) / F1 像素画导入(Game,自 F2 迁入)——防浏览器快捷
       if (e.code === 'F2' || e.code === 'F1') e.preventDefault();
     }) as EventListener);
-    onWin('keyup', ((e: KeyboardEvent) => { this.keys.delete(e.code); }) as EventListener);
+    onWin('keyup', ((e: KeyboardEvent) => {
+      this.keys.delete(e.code);
+      this.onKeyEvent?.(e.code, false);  // 行为录制：键沿（松开）
+    }) as EventListener);
     onWin('blur', (() => { this.keys.clear(); this.touchKeys.clear(); this.mouseHeld = false; }) as EventListener);
     onEl('mousemove', ((e: MouseEvent) => {
       const r = this.el.getBoundingClientRect();

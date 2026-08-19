@@ -3472,12 +3472,13 @@ export function runDungeonPass(
     if (typAt(num26, num27) === TILE_BY_KEY['v_190_glowing_mushroom_block']) return false;
     if (wallAt(num26, num27) === 350) return false;
     // 压板（:9104-9110）：PlaceTile(135, style)——墙>0（地牢内）style 2，否则
-    // Next(2,4)∈{2,3}；样式写 frameX=style*18（1×1 横排样式）、fy 归零
-    // （★chTile 不重置帧——被 KillTile 的墙砖残留帧会渗进样式位）
+    // Next(2,4)∈{2,3}；★XXXX 轴修正：135 样式在 **frameY**（style*18；fx 归零）——
+    // 金标 077 对拍 8 格 gold=(0,36)（style2）vs js=(36,0) 定罪（岩浆陷阱 style7=
+    // frameY 126 同轴佐证；PlaceTile 1×1 族样式轴=frameY）
     const pStyle = wallAt(x2, num) > 0 ? 2 : ri(2, 3);
     chTile(st.idx(x2, num), TILE_BY_KEY['v_135_pressure_plates'], false);
-    st.frameX[st.idx(x2, num)] = pStyle * 18;
-    st.frameY[st.idx(x2, num)] = 0;
+    st.frameX[st.idx(x2, num)] = 0;
+    st.frameY[st.idx(x2, num)] = pStyle * 18;
     st.flags[st.idx(num26, num27)] = 0;                         // KillTile（生成期 noItem）
     chTile(st.idx(num26, num27), TILE_BY_KEY['v_137_traps'], false);
     // 朝向（:9069-9085 num32 + :9119-9121 `if (num32==1) frameX += 18`）：
@@ -3628,7 +3629,7 @@ export function runDungeonPass(
           return;
         }
       } else if (num18 === 2) {
-        if (iVase > -1 && place2xXD(num3, j, DG_ITEM_TILE[iVase], 3)) { dgFurnResult = 'ok'; return; }
+        if (iVase > -1 && place2xXD(num3, j, DG_ITEM_TILE[iVase], 3, DG_ITEM_STYLE[iVase] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 3) {
         if (iBook > -1) place3x4D(num3, j, DG_ITEM_TILE[iBook]);
       } else if (num18 === 4) {
@@ -3663,7 +3664,7 @@ export function runDungeonPass(
       } else if (num18 === 11) {
         if (iCand > -1 && place2x2D(num3, j, DG_ITEM_TILE[iCand])) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 12) {
-        if (iClock > -1 && place2xXD(num3, j, DG_ITEM_TILE[iClock], 5)) { dgFurnResult = 'ok'; return; }
+        if (iClock > -1 && place2xXD(num3, j, DG_ITEM_TILE[iClock], 5, DG_ITEM_STYLE[iClock] ?? 0)) { dgFurnResult = 'ok'; return; }
       }
     }
   }
@@ -3730,10 +3731,27 @@ export function runDungeonPass(
     return true;
   }
   // Place2xX（cs:39705 钟104 h5/雕像105 h3）
-  function place2xXD(x: number, y: number, t: number, hgt: number): boolean {
+  // ★XXXX 帧补：num=style*36（105 族 style≥55 时 num-=1980*num4/num2+=54*num4 回卷，
+  //   cs:39717-39723）；左列 fx=num、右列 +18；fy=num2+row*18（自顶行 0）。
+  //   曾无 style 参数帧落 0——金标 077 对拍 105 族 18 格（三座粉花瓶 1410 style48
+  //   (329,763)(159,879)(171,879) gold=(1728+col*18,row*18) js=(0,0)）定罪。
+  function place2xXD(x: number, y: number, t: number, hgt: number, style = 0): boolean {
     for (let j = y - hgt + 1; j <= y; j++) if (!dgClr(x, j) || !dgClr(x + 1, j)) return false;
     if (!solidTile2D(x, y + 1) || !solidTile2D(x + 1, y + 1)) return false;
-    for (let j = y - hgt + 1; j <= y; j++) { dgWr(x, j, t); dgWr(x + 1, j, t); }
+    let num = style * 36, num2 = 0;
+    if (t === STATUE) {
+      const num4 = Math.trunc(style / 55);
+      num -= 1980 * num4;
+      num2 += 54 * num4;
+    }
+    for (let j = 0; j < hgt; j++) {
+      const yy = y - hgt + 1 + j;
+      dgWr(x, yy, t); dgWr(x + 1, yy, t);
+      st.frameX[st.idx(x, yy)] = num;
+      st.frameY[st.idx(x, yy)] = num2 + j * 18;
+      st.frameX[st.idx(x + 1, yy)] = num + 18;
+      st.frameY[st.idx(x + 1, yy)] = num2 + j * 18;
+    }
     return true;
   }
   // Place1xX（cs:39203 路灯93 h3）

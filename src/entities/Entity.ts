@@ -80,10 +80,14 @@ export class EntityManager {
   projectiles: Entity[] = [];
   props: Entity[] = [];   // 场景物件（墓碑等不可拾取物理实体）
   critters: Entity[] = []; // 小动物（无害被动生物）
+  /** 出生观察口（行为录制：Game 构造接 recLog('spawn')；缺省 undefined 零开销）。
+   *  player 不经 EntityManager（独立字段），天然不录 */
+  onAdd?: (e: Entity, bucket: string) => void;
 
   add(e: Entity, bucket: 'enemies' | 'drops' | 'npcs' | 'projectiles' | 'props' | 'critters') {
     e.id = this.nextId++;
     this[bucket].push(e);
+    if (this.onAdd) this.onAdd(e, bucket);   // 行为录制：实体生成
   }
 
   update(dt: number, game: GameHooks) {

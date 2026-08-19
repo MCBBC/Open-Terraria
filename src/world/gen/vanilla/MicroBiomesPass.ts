@@ -32,10 +32,14 @@
 //    的前提是全管线宝箱按原版注册序入 sink(2026-08-17 由栅格扫描归正;上游 pass
 //    债务期个别箱位/缺箱仍会错位,见 docs 尾批 2-A 备案)
 //  - Main.tileDungeon 用 dungeon 砖 tile 近似(41/43/44),容器用 chest 族 key 近似
-//  - 剑冢 ShapeData 枚举序:.NET HashSet<Point16> 不可移植,藤蔓(382)/铺草(3/73)
-//    两步按行主序近似——掷骰总数一致,逐格落点可能分叉
-//  - Mahogany SetTile(383/384)/PlaceWall(78) 的 TileFrame/SquareWallFrame 帧写
-//    未移植(帧落 0;四通道无帧,dump 对拍不受影响,渲染端帧备案)
+//  - ★XXXX 剑冢 ShapeData 枚举序裁决（撤销旧"不可移植"豁免）：.NET HashSet<T>
+//    枚举序=槽分配序（Enumerator 线性扫 _slots[0..count] 跳死槽），Add-only 序列
+//    ≡插入序；ShapeData.Subtract 只 Remove 不重插（EnchantedSwordBiome.cs:91 后
+//    无 Add）⇒ 枚举序=幸存者插入序 ≡ JS Set 语义。ShrineShape（Set+delete 保序）
+//    逐位等价，无需表驱动。实证：全样本流（int+d+n）对拍金标种子剑段两侧零分叉
+//    （9293480 剑冢被 0.5 放置门跳过——旧"34.5k 剑冢 HashSet 掷"归因证伪，真源=
+//    营地/矿爆 PlaceWall/SetFrames 帧掷族+inActive 旗标混用+薄冰误保护（本批修）
+//    +矿轨 WorldUtils.TileFrame 帧链（TrackPass 域，备案移交））。
 //  - TurnGoldChestIntoDeadMansChest 的 1/3 战利品前插(Item 5007)无 chest sink,掷骰保留、
 //    写入跳过
 import { TileStore, LIQUID_TYPE } from '../../TileStore';
@@ -145,12 +149,13 @@ const condIsSolid = (st: TileStore, x: number, y: number): boolean => {
   return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!);
 };
 /** WorldGen.SolidOrSlopedTile(cs:70046):active && 生成期 tileSolid && !tileSolidTop
- *  && !inActive(half/slope 不排除)。Modifiers.IsSolid(Modifiers.cs:551)消费 */
+ *  && !inActive()（half/slope 不排除）。Modifiers.IsSolid(Modifiers.cs:551)消费。
+ *  ★XXXX：!inActive() 读 bit 0x40（生成期恒假）——致动旗标(0x800)不是排除项，
+ *  曾 `!(wire & WIRE_ACTUATOR)` 误排致动格（ShapeRunner 固体占比门错翻案） */
 const solidOrSlopedAt = (st: TileStore, x: number, y: number): boolean => {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform
-    && !(st.wire[i]! & WIRE_ACTUATOR);
+  return st.flags[i] !== 0 && vanGenSolidType(st.type[i]!) && !TILE_DEFS[st.type[i]!]?.platform;
 };
 /** 原版 SolidTile(i,j)(WorldGen.cs:70155-70172):active && 生成期 tileSolid && !tileSolidTop
  *  && !halfBrick && slope==0 && !inActive()。countTiles(nextCount cs:9559)/MiningExplosives
@@ -1551,9 +1556,10 @@ export function placeThinIcePatch(
   }
   // structures.AddStructure((ox-25, oy-25, 50, 50), 8)(cs:32)——★原版是
   // AddStructure（StructureMap.cs:72-79,只入 _structures 不入 _protectedStructures,
-  // **不参与 CanPlace 互斥**,仅 GetBoundingBox 消费）。为保持本 pass 原局部互斥
-  // 行为（薄冰斑挡后续野营地/矿爆点/剑冢）不回归,仍登记进全局保护图,备案。
-  addProtectedStructure(gs, { x0: ox - 25, y0: oy - 25, x1: ox + 25, y1: oy + 25 }, 0);
+  // **不参与 CanPlace 互斥**,仅 GetBoundingBox 消费）。XXXX：曾"为保持局部互斥
+  // 行为"登记进全局保护图（pad 0 备案偏差）——span 对拍 @92722 实证该偏差真伤：
+  // 薄冰斑 (1125,691) 的保护矩形挡掉了原版放行的 MiningExplosives try
+  // (1082→1102,711)（van 一路 'a 3' 矿板帧掷 vs js 直接下一 try）。撤登记。
   return true;
 }
 
@@ -1619,9 +1625,10 @@ function setThinIce(st: TileStore, rng: RNG, x: number, y: number): void {
 const SWORD_CHANCE_ENTRANCE = 0.3333333;
 const SWORD_CHANCE_REAL = 1.0;
 
-/** 相对坐标点集(≈Terraria.WorldBuilding/ShapeData)。原版 HashSet<Point16> 枚举序
- *  不可移植,此处 JS Set 保插入序 = 形状行主序——藤蔓/铺草两步(ACTION 消耗掷骰)
- *  逐格结果可能分叉,掷骰总数一致,已在文件头备案 */
+/** 相对坐标点集(≈Terraria.WorldBuilding/ShapeData)。XXXX 裁决：.NET
+ *  HashSet<Point16> 枚举序=槽分配序——Add-only ≡ 插入序；Subtract(仅 Remove，
+ *  之后无 Add)后 ≡ 幸存者插入序。JS Set 插入序+delete 保序逐位等价（见文件头
+ *  裁决注），旧"不可移植"豁免撤销 */
 class ShrineShape {
   private readonly s = new Set<number>();
   private static key(dx: number, dy: number): number { return (dy + 256) * 1024 + (dx + 256); }

@@ -237,6 +237,7 @@ import { TILE_PARTICLE_RULES } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks } from '../entities/types';
+import { BehaviorRecorder } from '../debug/BehaviorRecorder';
 import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
@@ -796,6 +797,11 @@ export class Game implements GameHooks {
   private forceHalloweenForToday = false;
   private forceXMasForToday = false;
   private tickCount = 0;
+  /** 行为录制器（长按 F5 录制窗 / 短按 F5 报告尾）：常开环形 8192 条，
+   *  log 恒安全（无窗也写——追溯能力）。GameHooks.recLog 的本体实现 */
+  recorder = new BehaviorRecorder();
+  /** GameHooks.recLog：实体侧一行式接入（game.recLog?.('hurt', {...})） */
+  recLog(k: string, d: unknown): void { this.recorder.log(k, d); }
 
   // 挖掘状态
   private mining: { x: number; y: number; progress: number } | null = null;
@@ -2283,6 +2289,34 @@ export class Game implements GameHooks {
     // 怪物专属声效随首次受击懒加载
     this.input = new Input(this.renderer.canvas);
     this.cb = cb;
+    // ---- 行为录制接线（长按 F5 录制窗；详见 debug/BehaviorRecorder 头注）----
+    // tick/世界元信息源（构造期闭包读运行时字段，换世界自动跟随）
+    this.recorder.tickSource = () => this.tickCount;
+    this.recorder.worldInfo = () => ({
+      worldName: this.world?.name ?? '',
+      seed: this.world?.seed ?? 0,
+      w: this.world?.w ?? 0, h: this.world?.h ?? 0,
+      hardMode: !!this.world?.flags?.hardMode,
+      dayTime: this.world?.clock?.isDay ?? true,
+    });
+    // 键沿：只录操作键（移动/跳/交互/快捷栏），其余（聊天/F 键等）忽略降噪
+    const REC_KEYS = new Set(['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD',
+      'ArrowUp', 'ArrowDown', 'ShiftLeft', 'ShiftRight', 'KeyE',
+      'Digit0', 'Digit1', 'Digit2', 'Digit3', 'Digit4',
+      'Digit5', 'Digit6', 'Digit7', 'Digit8', 'Digit9']);
+    this.input.onKeyEvent = (code, down) => {
+      if (REC_KEYS.has(code)) this.recorder.log('key', { c: code, down });
+    };
+    // 实体出生（player 不经 EntityManager，天然除外）
+    this.entities.onAdd = (e, bucket) => {
+      const en = e as Entity & { vanillaId?: number | null };
+      this.recorder.log('spawn', {
+        b: bucket, id: e.id, vid: en.vanillaId ?? null,
+        x: Math.round(e.x), y: Math.round(e.y),
+      });
+    };
+    // 探针口（puppeteer / 控制台）：__swRec.toggle()/.buffer/.export()
+    (window as unknown as { __swRec?: BehaviorRecorder }).__swRec = this.recorder;
     // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）。
     // 背包打开时不切栏（原版 inventory 开启时数字键归 UI 导航）
     this.input.keydownHandlers.push((code) => {
@@ -9763,6 +9797,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // CheckTileBreakability==2 早退（KillTile :63579-63582）：上方保护族 → 不破坏
     // （爆炸/液体冲毁同门；成就计数亦不应触发，故在 byPlayer 段之前）
     if (this.tileAboveProtected(x, y)) return;
+    // 行为录制：格破坏（过了保护门才记——树/罐等分支只改清格方式，本质同为破坏）
+    this.recLog('tile', { x, y, from: TILE_DEFS[type]?.key ?? type, to: 0, cause: byPlayer ? 'mine' : 'other' });
     if (byPlayer) {
       const sheet = TILE_DEFS[type]?.vanilla?.sheet;
       if (sheet != null) this.achievements.notifyTileDestroyed(sheet);
@@ -10733,6 +10769,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (!(friendly(tx, ty) || friendly(tx - 1, ty) || friendly(tx + 1, ty)
         || friendly(tx, ty - 1) || friendly(tx, ty + 1))) return;
       st.setWall(tx, ty, wallId);
+      this.recLog('tile', { x: tx, y: ty, from: WALL_DEFS[oldWall]?.key ?? oldWall, to: WALL_DEFS[wallId]?.key ?? wallId, cause: 'wallSwap' });   // 行为录制：墙替换
       this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 6, 1.5); // KillWall_MakeWallDust×10 近似
       this.sfx.play('chop', 1, tx * TILE + 8, ty * TILE + 8);               // KillWall_PlaySounds
       this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -10743,6 +10780,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
     // WorldGen.PlaceWall（:75189-75205）：仅 wall==0 可放；成功才继续
     st.setWall(tx, ty, wallId);
+    this.recLog('tile', { x: tx, y: ty, from: 0, to: WALL_DEFS[wallId]?.key ?? wallId, cause: 'wall' });   // 行为录制：新放墙
     this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
     this.player.inv.removeAt(this.player.inv.selected, 1);
     // 同上：冷却 = useTime/wallSpeed（钳 3 倒数聚合 :25628-25632）
