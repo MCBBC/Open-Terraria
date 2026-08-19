@@ -372,7 +372,7 @@ export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | 
   if ((id === 390 || id === 416) && !e.bInit) {
     e.bInit = true;
     const mount = spawnPart(game, e, id === 390 ? 391 : 415);
-    if (mount) e.master = mount;
+    if (mount) { e.master = mount; e.drawBehindMaster = true; }   // 坐骑槽序在后=画骑手前(与部件 master 锚反)
   }
   if (!e.bInit && (id === 392 || id === 393 || id === 394)) e.bInit = true;
 

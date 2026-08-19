@@ -1193,8 +1193,16 @@ export type CounterweightSpawn =
   | { kind: 'second-yoyo' }
   | { kind: 'counterweight'; type: number; kb: number; secondary: boolean };
 
+/** 悠悠球袋配重球颜色掷骰（Player.cs:14176/:14200——1/7→黑配重 1079,
+ *  否则 556+Next(6) 彩色族）。2026-08-19 从 equipStats getter 迁出：原版
+ *  ResetEffects 每帧清零后 UpdateEquips 重掷 = 使用期随机；getter 每访问掷
+ *  会随记忆化冻结成"每套装备一次"，消费端掷 = 每次命中独立（与原采样等价）。 */
+export function rollYoyoCounterweight(): number {
+  return Math.floor(Math.random() * 7) === 0 ? 1079 : 556 + Math.floor(Math.random() * 6);
+}
+
 export function counterweightDecision(
-  eq: { yoyoGlove: boolean; counterWeight: number; vanityCounterWeight: number },
+  eq: { yoyoGlove: boolean; counterWeight: number; vanityCounterWeight: number; yoyoBag?: boolean },
   play: readonly CounterweightPlayView[],
   kb: number,
 ): CounterweightSpawn {
@@ -1211,10 +1219,14 @@ export function counterweightDecision(
     if (yoyos >= 1) return { kind: 'second-yoyo' };   // num >= 0（:11973-11985）
     return { kind: 'none' };   // 手套分支已占用 else-if（:11986）——无球在场不掷配重
   }
-  if (eq.counterWeight > 0 && weights < yoyos) {
+  if ((eq.counterWeight > 0 || eq.yoyoBag) && weights < yoyos) {
     return {
       kind: 'counterweight',
-      type: eq.vanityCounterWeight !== 0 ? eq.vanityCounterWeight : eq.counterWeight,   // :11990-11994
+      // :11990-11994 vanity 优先 → 功能槽直置(5547 黑/3309-14 彩) → 悠悠球袋
+      // 现场掷(原版每帧 UpdateEquips 掷,消费端掷=每次命中独立)
+      type: eq.vanityCounterWeight !== 0 ? eq.vanityCounterWeight
+        : eq.counterWeight !== 0 ? eq.counterWeight
+        : rollYoyoCounterweight(),
       kb: (kb + 6) / 2,   // :11987
       secondary: weights > 0,   // :11995-12003 已有在场 → ai0=1
     };

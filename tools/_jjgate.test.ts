@@ -54,6 +54,8 @@ function labelOf(file: string, line: number): string {
     };
   }
   const roomsAt: string[] = [];
+  (globalThis as { __swHouseRooms?: (ox: number, oy: number, rooms: string) => void }).__swHouseRooms
+    = (ox, oy, rooms) => { roomsAt.push(`${ox},${oy}: ${rooms}`); };
   const RNGp = RNG.prototype as unknown as Record<string, unknown>;
   const oReseed = RNGp.reseed as (this: unknown, s: number) => void;
   let stop = false;
@@ -87,4 +89,7 @@ function labelOf(file: string, line: number): string {
   console.log(`gate 拒绝事件 (近 ${XY}): ${near.length}`);
   console.log(near.slice(0, 40).join('\n'));
   writeFileSync(`/tmp/jjgate-${SEED}.txt`, hits.join('\n') + '\n');
+  writeFileSync(`/tmp/jjgate-${SEED}-rooms.txt`, roomsAt.join('\n') + '\n');
+  const nearR = roomsAt.filter((l) => l.startsWith(`${XY[0]},${XY[1]}:`));
+  console.log(`房形 (近 ${XY}): ${nearR.join(' | ')}`);
 }, 900_000);

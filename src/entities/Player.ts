@@ -20,7 +20,7 @@ import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
 import type { WingFrameState } from '../data/vanillaWingVisuals';
 import { accFxOfInternal } from '../data/vanillaAccFx';
 import { dyeEntryOf } from '../data/vanillaDyes';
-import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
+import { ARMOR_SET_BONUSES, type ArmorSetBonus } from '../data/vanillaArmorSets';
 import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
@@ -110,6 +110,92 @@ function insideUnbreakableWallsScan(st: import('../world/TileStore').TileStore, 
   }
   return true;
 }
+
+/** equipStats 形状(getter/computeEquipStats 共用;2026-08-19 记忆化改造时从内联注释放别) */
+export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
+    dmgMelee: number; dmgRanged: number; dmgMagic: number;
+    critMelee: number; critRanged: number; critMagic: number;
+    moveMult: number; meleeSpeed: number;
+    accRunSpeed: number;   // 靴族 accRunSpeed 原值（0=未装备）
+    bootFx: 'hellfire' | 'sail' | 'cold' | 'desert' | 'fairy' | null;   // 跑靴奔跑尘型（:36285 switch 按装备 vid）
+    bootDyeVid: number;   // 鞋染料 vid（cShoe——尘色）
+    autoReuseGlove: boolean; // 力量手套族：近战武器自动连挥（Player.cs:52040-52042）
+    extraFall: number; lavaMax: number; armorPen: number;
+    rocketBoots: number; autoJump: boolean; fireWalk: boolean;
+    noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
+    frostBurn: boolean;   // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
+    huntressT2: boolean;  // 女猎手 T2/T3（setHuntressT2 :16119/:16149）：爆炸机关弹 Oiled 门
+    anglerSetSpawnReduction: boolean;   // 渔夫套：生成环 ×1.3/×0.7（NPC.cs:627-630）
+    iceSkate: boolean;   // 冰刀族 950/1861/1862/5000：冰面不滑+加速（:26237-26255）
+    waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
+    jumpOpts: string[];
+    wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
+    dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
+    jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
+    canFloat: boolean;   // canFloatInWater（:2594——仅两源：甲件 4404 水上漂靴 :12842-12846 ∪ buff265 脚蹼药水 :9592；注意 flipper 饰品不授予）
+    killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
+    infoAccs: InfoAccGates;  // 信息饰品门禁(DrawInfoAccs)
+    treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
+    arrowDmg: number; ammoSaveDenom: number; kbGlove: boolean; yoyoString: boolean;
+    /** 线饰品线色（Player.stringColor，UpdateVisibleAccessory :36441-36449）：0=无；
+     *  1-12/13/14/27/28/30=油漆域线色，29=魔法线鼠标文字色闪烁。钓线/悠悠球线消费 */
+    stringColor: number;
+    // ↑省弹掷骰分母（0=无；4=25% 星旋胸 2758 / 5=20% ammoCost80·chloro80·蘑菇矿胸
+    //  1549·化石套·弹药储备药水 / 10=10% 女猎手 3804/4983——PickAmmo :52791-52804
+    //  各档独立掷 Next(N)==0，消费侧按激活档逐档掷）
+    magmaStone: boolean;   // 近战命中点燃（岩浆石/火焰护手；StatusNPC:10866/Player.cs:6184）
+    quiver: boolean;
+    moltenQuiver: boolean;
+    arrowStack: number;      // 箭袋 additiveStack（仅箭，:14785）
+    shroomiteType: 'arrow' | 'bullet' | 'rocket' | null;
+    shroomiteSet: boolean; vortexSet: boolean; nebulaSet: boolean; beetleOff: boolean;
+    beetleDef: boolean;
+    wolfAcc: boolean; boc: boolean;
+    tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
+    autoPaint: boolean;    // 喷漆器族 2216/3061/5126：放置后自动上漆（:14720-14734）
+    chiselSpeed: boolean;  // 古凿 4056/5126：pickSpeed-0.25（:12610-12612/:13981）
+    toolbelt: boolean;     // 工具腰带 407：装备生效 blockRange+1（:14873-14876）
+    flowerBoots: boolean;   // 花靴 3017/仙灵靴 3993（Player.cs:12688 行走生花）
+    stepStool: boolean;     // 折叠凳 4341/造物之手 5126（:14077-14080 HasAStool,HeightBoost 26）
+    /** 配重球物品 id（Player.counterWeight，int——0=无；556-561 彩色/1079 黑）：
+     *  悠悠球袋族装备映射（UpdateEquips :14174-14226），Counterweight() 消费 */
+    counterWeight: number;
+    /** 悠悠球袋(3366/5541):配重球颜色在使用端掷(rollYoyoCounterweight,
+     *  原版 :14176/:14200 每帧重掷=使用期随机;曾放 getter 每访问掷,记忆化时迁出) */
+    yoyoBag: boolean;
+    /** 虚荣配重球 id（Player.vanityCounterWeight，ApplyEquipVanity :13800-13803：
+     *  社交槽 13-19 彩色配重球 3309-3314 → 556+vid-3309；黑球 5547 无虚荣档） */
+    vanityCounterWeight: number;
+    /** 悠悠球手套（3334/3366/5541 → Player.yoyoGlove，:14187/:14211/:14225）：
+     *  悠悠球命中时掷同型二号球（Counterweight() :11973 手套分支） */
+    yoyoGlove: boolean;
+    /** 魔法线（5540/5541 → Player.magicString，:14196/:14213）：松手回收时
+     *  原球转 -3 隐身幽灵 + 掷 75% 伤/击退的脱离态克隆（AI_099 :65110-65116） */
+    magicString: boolean;
+    manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
+    manaRegenBonus: number; manaRegenDelayBonus: number;
+    setBonus: ArmorSetBonus | null;   // ARMOR_SET_BONUSES 表值(activeArmorSetBonus 返回型)
+    manaCostMul: number;
+    // ---- 召唤师链（vanillaSummonStats：ApplyEquipFunctional type if-chain 1:1）----
+    minionSlots: number;   // maxMinions += N（散件+套装合计）
+    minionDmg: number;     // minionDamage += X（加算乘区，散件+套装合计）
+    minionKB: number;      // minionKB += N
+    sentrySlots: number;   // maxTurrets += N
+    fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
+    /** 浮漂饰品弹型覆写（Player.overrideFishingBobber :1920；-1=无，986-993=5139-5146） */
+    overrideFishingBobber: number;
+    runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
+    enduranceEq: number; solarSet: boolean;
+    shieldItem?: boolean;   // 日曜套(:16224-16295)
+    whipRange: number;     // whipRangeMultiplier += X
+    whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
+    summonSet: SummonSetFx | null;
+    // ---- 呼吸族（GrantArmorBenefits/ApplyEquipFunctional 行为型）----
+    divingHelm: boolean;   // accDivingHelm（Player.cs:12829/14652）：breathCDMax ×6
+    merman: boolean;       // accMerman（:15019/14587/14855）：水中不耗气
+    arcticDivingGear: boolean; // 1861（:14701）：专家雪原冷水 Chilled 免疫（:27692）
+    jellyfishGlow: boolean;    // 1860（:14682-14688）：浸水发光
+};
 
 export class Player extends Entity {
   w = 20; h = 42;        // 原版 Player 构造(Player.cs:55083-55084 width=20 height=42;
@@ -522,88 +608,44 @@ export class Player extends Entity {
     return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
   }
 
-  get equipStats(): {
-    def: number; mana: number; hpPerSec: number;
-    dmgMelee: number; dmgRanged: number; dmgMagic: number;
-    critMelee: number; critRanged: number; critMagic: number;
-    moveMult: number; meleeSpeed: number;
-    accRunSpeed: number;   // 靴族 accRunSpeed 原值（0=未装备）
-    bootFx: 'hellfire' | 'sail' | 'cold' | 'desert' | 'fairy' | null;   // 跑靴奔跑尘型（:36285 switch 按装备 vid）
-    bootDyeVid: number;   // 鞋染料 vid（cShoe——尘色）
-    autoReuseGlove: boolean; // 力量手套族：近战武器自动连挥（Player.cs:52040-52042）
-    extraFall: number; lavaMax: number; armorPen: number;
-    rocketBoots: number; autoJump: boolean; fireWalk: boolean;
-    noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
-    frostBurn: boolean;   // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
-    huntressT2: boolean;  // 女猎手 T2/T3（setHuntressT2 :16119/:16149）：爆炸机关弹 Oiled 门
-    anglerSetSpawnReduction: boolean;   // 渔夫套：生成环 ×1.3/×0.7（NPC.cs:627-630）
-    iceSkate: boolean;   // 冰刀族 950/1861/1862/5000：冰面不滑+加速（:26237-26255）
-    waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
-    jumpOpts: string[];
-    wing: { logic: number; slot: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
-    dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
-    jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
-    canFloat: boolean;   // canFloatInWater（:2594——仅两源：甲件 4404 水上漂靴 :12842-12846 ∪ buff265 脚蹼药水 :9592；注意 flipper 饰品不授予）
-    killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
-    infoAccs: InfoAccGates;  // 信息饰品门禁(DrawInfoAccs)
-    treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
-    arrowDmg: number; ammoSaveDenom: number; kbGlove: boolean; yoyoString: boolean;
-    /** 线饰品线色（Player.stringColor，UpdateVisibleAccessory :36441-36449）：0=无；
-     *  1-12/13/14/27/28/30=油漆域线色，29=魔法线鼠标文字色闪烁。钓线/悠悠球线消费 */
-    stringColor: number;
-    // ↑省弹掷骰分母（0=无；4=25% 星旋胸 2758 / 5=20% ammoCost80·chloro80·蘑菇矿胸
-    //  1549·化石套·弹药储备药水 / 10=10% 女猎手 3804/4983——PickAmmo :52791-52804
-    //  各档独立掷 Next(N)==0，消费侧按激活档逐档掷）
-    magmaStone: boolean;   // 近战命中点燃（岩浆石/火焰护手；StatusNPC:10866/Player.cs:6184）
-    quiver: boolean;
-    moltenQuiver: boolean;
-    arrowStack: number;      // 箭袋 additiveStack（仅箭，:14785）
-    shroomiteType: 'arrow' | 'bullet' | 'rocket' | null;
-    shroomiteSet: boolean; vortexSet: boolean; nebulaSet: boolean; beetleOff: boolean;
-    beetleDef: boolean;
-    wolfAcc: boolean; boc: boolean;
-    tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
-    autoPaint: boolean;    // 喷漆器族 2216/3061/5126：放置后自动上漆（:14720-14734）
-    chiselSpeed: boolean;  // 古凿 4056/5126：pickSpeed-0.25（:12610-12612/:13981）
-    toolbelt: boolean;     // 工具腰带 407：装备生效 blockRange+1（:14873-14876）
-    flowerBoots: boolean;   // 花靴 3017/仙灵靴 3993（Player.cs:12688 行走生花）
-    stepStool: boolean;     // 折叠凳 4341/造物之手 5126（:14077-14080 HasAStool,HeightBoost 26）
-    /** 配重球物品 id（Player.counterWeight，int——0=无；556-561 彩色/1079 黑）：
-     *  悠悠球袋族装备映射（UpdateEquips :14174-14226），Counterweight() 消费 */
-    counterWeight: number;
-    /** 虚荣配重球 id（Player.vanityCounterWeight，ApplyEquipVanity :13800-13803：
-     *  社交槽 13-19 彩色配重球 3309-3314 → 556+vid-3309；黑球 5547 无虚荣档） */
-    vanityCounterWeight: number;
-    /** 悠悠球手套（3334/3366/5541 → Player.yoyoGlove，:14187/:14211/:14225）：
-     *  悠悠球命中时掷同型二号球（Counterweight() :11973 手套分支） */
-    yoyoGlove: boolean;
-    /** 魔法线（5540/5541 → Player.magicString，:14196/:14213）：松手回收时
-     *  原球转 -3 隐身幽灵 + 掷 75% 伤/击退的脱离态克隆（AI_099 :65110-65116） */
-    magicString: boolean;
-    manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
-    manaRegenBonus: number; manaRegenDelayBonus: number;
-    setBonus: ReturnType<typeof activeArmorSetBonus> | null;
-    manaCostMul: number;
-    // ---- 召唤师链（vanillaSummonStats：ApplyEquipFunctional type if-chain 1:1）----
-    minionSlots: number;   // maxMinions += N（散件+套装合计）
-    minionDmg: number;     // minionDamage += X（加算乘区，散件+套装合计）
-    minionKB: number;      // minionKB += N
-    sentrySlots: number;   // maxTurrets += N
-    fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
-    /** 浮漂饰品弹型覆写（Player.overrideFishingBobber :1920；-1=无，986-993=5139-5146） */
-    overrideFishingBobber: number;
-    runAccMul: number; maxRunMul: number; runSlowMul: number;   // 暗影套移动四参数(:26195-26201)
-    enduranceEq: number; solarSet: boolean;
-    shieldItem?: boolean;   // 日曜套(:16224-16295)
-    whipRange: number;     // whipRangeMultiplier += X
-    whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
-    summonSet: SummonSetFx | null;
-    // ---- 呼吸族（GrantArmorBenefits/ApplyEquipFunctional 行为型）----
-    divingHelm: boolean;   // accDivingHelm（Player.cs:12829/14652）：breathCDMax ×6
-    merman: boolean;       // accMerman（:15019/14587/14855）：水中不耗气
-    arcticDivingGear: boolean; // 1861（:14701）：专家雪原冷水 Chilled 免疫（:27692）
-    jellyfishGlow: boolean;    // 1860（:14682-14688）：浸水发光
-  } {
+
+  get equipStats(): PlayerEquipStats {
+    // ★记忆化(2026-08-19 367s trace 剖析:207 个调用点大量逐帧访问,每次现建
+    //   200+ 字段对象+遍历装备表 = 0.22% 自耗时 + MajorGC 每 5s 的分配 churn 主源)。
+    //   内容哈希键失效(输入清单见 equipStatsKey——★改 computeEquipStats 的输入
+    //   必须同步键 + tests/equip-stats-cache.test.ts 六路锁);返回对象冻结
+    //   (全仓零改写已审计,冻结把将来误写变成显式 TypeError)
+    const key = this.equipStatsKey();
+    if (this._equipStatsCache && key === this._equipStatsKey) return this._equipStatsCache;
+    this._equipStatsKey = key;
+    const stats = this.computeEquipStats();
+    Object.freeze(stats);
+    Object.freeze(stats.jumpOpts);
+    if (stats.wing) Object.freeze(stats.wing);
+    this._equipStatsCache = stats;
+    return stats;
+  }
+  private _equipStatsCache: PlayerEquipStats | null = null;
+  private _equipStatsKey = '';
+
+  /** equipStats 内容键(输入清单 = computeEquipStats 读到的全部可变状态):
+   *  甲/饰品/社交 20 槽 + 染料 10 槽物品 id + extraAccessory(恶魔心→第 6 饰品位)
+   *  + usedGummyWorm + panicTime>0(受击加速 300t 窗口,布尔) + buffs.active 键集合
+   *  (getter 对 buffs 的用法全是存在性判定 has()——时长到期=键集合变化自然失效)。
+   *  内容键对一切写入方(测试直写槽位/控制台/未来新代码)天然免疫,无事件式失效可漏。 */
+  private equipStatsKey(): string {
+    const inv = this.inv;
+    let k = '';
+    for (let i = 0; i < inv.armor.length; i++) k += (inv.armor[i]?.id ?? 0) + '.';
+    for (let i = 0; i < inv.dye.length; i++) k += (inv.dye[i]?.id ?? 0) + '.';
+    k += inv.extraAccessory ? 'E' : 'e';
+    k += this.usedGummyWorm ? 'G' : 'g';
+    k += this.panicTime > 0 ? 'P' : 'p';
+    for (const bt of this.buffs.active.keys()) k += bt + ',';
+    return k;
+  }
+
+  private computeEquipStats(): PlayerEquipStats {
     /** 当前套装匹配（armor[0-2] 的 hs/bs/ls 槽序号 → ARMOR_SET_BONUSES；通配 `${hs}|${bs}|*` 兜底） */
     function activeArmorSetBonus(self: Player) {
       const st0 = statOfInternal(self.inv.armor[0]?.id ?? -1);
@@ -656,6 +698,7 @@ export class Player extends Entity {
     let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false;
     let counterWeight = 0, vanityCounterWeight = 0;   // int 物品 id（0=无）
+    let yoyoBag = false;   // 悠悠球袋(3366/5541):配重球颜色使用端掷(见类型注释)
     let yoyoGlove = false, magicString = false;
     let autoPaint = false, chiselSpeed = false, toolbelt = false;
     let flowerBoots = false;
@@ -700,17 +743,18 @@ export class Player extends Entity {
       const funcStr = statOfInternal(s.id)?.str;
       if ((funcStr ?? 0) > 0) stringColor = funcStr!;
       // ---- 悠悠球袋族（Player.cs:14174-14226 ApplyEquipFunctional if-chain；提取器
-      //      default 区间段抓不到，此处 vid 直表）。counterWeight=0 才掷骰
-      //（:14176/:14200）：原版 ResetEffects(:18288) 每帧清零后 UpdateEquips 重掷，
-      //      本 getter 每访问重算 = 每访问一次新掷，命中消费点采样分布等价 ----
+      //      default 区间段抓不到，此处 vid 直表）。★配重球掷骰(1/7→1079 黑/
+      //      556+Next(6) 彩,:14176/:14200)2026-08-19 迁消费端 rollYoyoCounterweight:
+      //      原版 ResetEffects 每帧清零重掷 = 使用期随机;getter 记忆化会把它冻结成
+      //      "每套装备一次",故此处只标 yoyoBag 旗,Counterweight 命中时掷 ----
       if (accVid === 3366) {   // 悠悠球袋（:14174-14189）
-        if (counterWeight === 0) counterWeight = Math.floor(Math.random() * 7) === 0 ? 1079 : 556 + Math.floor(Math.random() * 6);
+        yoyoBag = true;
         yoyoGlove = true;
         yoyoString = true;
       }
       if (accVid === 5540) magicString = true;   // 魔法线（:14195-14197）
-      if (accVid === 5541) {   // 魔法悠悠球袋（:14199-14214 段：1/7 掷同 3366 + 全套旗）
-        if (counterWeight === 0) counterWeight = Math.floor(Math.random() * 7) === 0 ? 1079 : 556 + Math.floor(Math.random() * 6);
+      if (accVid === 5541) {   // 魔法悠悠球袋（:14199-14214 段：袋旗同 3366 + 全套旗）
+        yoyoBag = true;
         yoyoGlove = true;
         yoyoString = true;
         magicString = true;
@@ -1024,7 +1068,7 @@ export class Player extends Entity {
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
       beetleDef,
       wolfAcc, boc,
-      tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, vanityCounterWeight,
+      tileSpeed, wallSpeed, tileRange, autoPaint, chiselSpeed, toolbelt, pStone, counterWeight, vanityCounterWeight, yoyoBag,
       yoyoGlove, magicString,   // 悠悠球袋族（UpdateEquips :14174-14226）
       flowerBoots, stepStool,
       manaMagnet, magicCuffs, manaFlower,

@@ -1549,6 +1549,9 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     }
 
     houseObjCells.clear();   // 家具登记表生命周期=本屋
+    // JJJJ：dormant 房形探针（rooms 定形后）
+    (globalThis as { __swHouseRooms?: (ox: number, oy: number, rooms: string) => void }).__swHouseRooms
+      ?.(ox, oy, rooms.map((r) => `${r.x},${r.y},${r.w},${r.h}`).join(';'));
     // ---- ★builder 构造掷（Wood/Ice/Jungle/DesertHouseBuilder ctor →
     //   PotentiallyConvertToSeedHouse,HouseBuilder.cs:224）：普通种子恒耗
     //   **1 颗 NextFloat**（>0.4f 早退；≤0.4f 走特殊种子转换表，普通种子

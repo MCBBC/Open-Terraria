@@ -37,38 +37,33 @@ describe('悠悠球袋族装备映射（Player.cs:14174-14226）', () => {
     expect(s.vanityCounterWeight).toBe(0);
   });
 
-  it('3366 悠悠球袋 → counterWeight 随机（1/7→1079 否则 556+Next(6)）+ yoyoGlove + yoyoString', () => {
+  it('3366 悠悠球袋 → yoyoBag 旗 + yoyoGlove + yoyoString（掷骰迁消费端,getter 恒 0）', () => {
     const p = mkPlayer();
     equip(p, 3, 3366);
-    // 多次访问（原版 ResetEffects 每帧清零 + UpdateEquips 每帧重掷,采样分布等价）
-    const seen = new Set<number>();
-    for (let i = 0; i < 60; i++) seen.add(p.equipStats.counterWeight);
-    expect([...seen].every((v) => CW_TYPES.includes(v))).toBe(true);
-    expect(seen.size).toBeGreaterThan(1);   // 确在重掷（非首次定死）
+    // 2026-08-19 equipStats 记忆化:配重球颜色掷骰迁 rollYoyoCounterweight(原版
+    // ResetEffects 每帧重掷=使用期随机;getter 每访问掷会被缓存冻结成每套装备一次)
+    expect(p.equipStats.counterWeight).toBe(0);
+    expect(p.equipStats.yoyoBag).toBe(true);
     expect(p.equipStats.yoyoGlove).toBe(true);
     expect(p.equipStats.yoyoString).toBe(true);
     expect(p.equipStats.magicString).toBe(false);
   });
 
-  it('3366 掷骰逐支 1:1：Next(7)==0 → 1079；否则 556+Next(6)', () => {
-    const p = mkPlayer();
-    equip(p, 3, 3366);
+  it('掷骰逐支 1:1（rollYoyoCounterweight）：Next(7)==0 → 1079；否则 556+Next(6)', async () => {
+    const { rollYoyoCounterweight } = await import('../src/entities/WeaponProj');
     vi.spyOn(Math, 'random').mockReturnValue(0.1);   // Next(7)=floor(0.7)=0 → 1079
-    expect(p.equipStats.counterWeight).toBe(1079);
+    expect(rollYoyoCounterweight()).toBe(1079);
     vi.spyOn(Math, 'random').mockReturnValue(0.5);   // Next(7)=3≠0 → 556+Next(6)=556+3
-    expect(p.equipStats.counterWeight).toBe(559);
+    expect(rollYoyoCounterweight()).toBe(559);
   });
 
-  it('counterWeight==0 门（:14176/:14200）：同帧后槽袋不再重掷（3366+5541 双袋只掷一次）', () => {
+  it('双袋（3366+5541）→ yoyoBag 幂等置位（掷骰迁消费端后 :14176/:14200 的==0 门自然消失）', () => {
     const p = mkPlayer();
     equip(p, 3, 3366);
     equip(p, 4, 5541);
-    // 序列：3366 掷 Next(7)=1≠0 → Next(6)=1 → 557；5541 见非 0 跳过（若误掷 → Next(7)=6≠0,
-    // Next(6)=5 → 561 可辨）
-    vi.spyOn(Math, 'random')
-      .mockReturnValueOnce(0.2).mockReturnValueOnce(0.3)
-      .mockReturnValueOnce(0.9).mockReturnValueOnce(0.9);
-    expect(p.equipStats.counterWeight).toBe(557);
+    expect(p.equipStats.yoyoBag).toBe(true);
+    expect(p.equipStats.counterWeight).toBe(0);
+    expect(p.equipStats.magicString).toBe(true);   // 5541 全套旗叠加
   });
 
   it('3334 悠悠球手套 → 仅 yoyoGlove（:14223-14226）', () => {
@@ -107,12 +102,11 @@ describe('悠悠球袋族装备映射（Player.cs:14174-14226）', () => {
     expect(p.equipStats.yoyoGlove).toBe(false);
   });
 
-  it('5541 魔法悠悠球袋 → 全套（随机 counterWeight + glove + string + magicString）', () => {
+  it('5541 魔法悠悠球袋 → 全套旗（yoyoBag + glove + string + magicString;掷骰在消费端）', () => {
     const p = mkPlayer();
     equip(p, 3, 5541);
-    const seen = new Set<number>();
-    for (let i = 0; i < 60; i++) seen.add(p.equipStats.counterWeight);
-    expect([...seen].every((v) => CW_TYPES.includes(v))).toBe(true);
+    expect(p.equipStats.counterWeight).toBe(0);
+    expect(p.equipStats.yoyoBag).toBe(true);
     expect(p.equipStats.yoyoGlove).toBe(true);
     expect(p.equipStats.yoyoString).toBe(true);
     expect(p.equipStats.magicString).toBe(true);

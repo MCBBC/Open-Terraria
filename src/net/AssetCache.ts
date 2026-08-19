@@ -4,11 +4,15 @@
 // 弹窗在 src/ui/AssetDownloadUI.ts。本模块只做:门控/版本/优先级清单枚举/
 // SW 消息协议/进度状态。
 //
-// ★版本 = fnv1a32(vanilla.json + vanilla-ui.json 内容 + CACHE_BUSTER)。
-//   贴图清单变了 → JSON 变 → bundle 变 → version 变 → 新缓存整批重建。
-//   只改 sounds/fonts/audios 内容时 JSON 不变 → 需手动 bump CACHE_BUSTER。
+// ★版本 = fnv1a32(vanilla.json + vanilla-ui.json 内容 + CACHE_BUSTER
+//   [+ zip manifest contentHash,2026-08-19])。贴图清单变了 → JSON 变 → bundle 变
+//   → version 变 → 新缓存整批重建;zip 模式下 contentHash 覆盖全部打包输入
+//   (sounds/audios/fonts 内容变更自动换版本,根治"手动 bump CACHE_BUSTER"痛点)。
 //   l10n 已豁免(2026-08-16 裸键事故):sw.js 对 /l10n/ 走网络优先+离线回退,
 //   重建语言包即时生效,不再依赖版本号/CACHE_BUSTER。
+// ★zip 快路径(2026-08-19):public/assets-zip/manifest.json 存在 → 分片
+//   warm-zip(SW 内 fflate 解压直写缓存,12003 请求→~10);manifest 缺失/dev/
+//   SW 无 fflate(warm-zip-unavailable)→ 整会话回退逐文件 legacy warm。
 import vanillaJson from '../../public/sprites/vanilla.json';
 import vanillaUiJson from '../../public/sprites/vanilla-ui.json';
 import assetsIndexJson from '../../public/assets-index.json';
@@ -45,6 +49,40 @@ export function assetVersion(
   buster = CACHE_BUSTER,
 ): string {
   return fnv1a32(JSON.stringify(vanilla) + '|' + JSON.stringify(ui) + '|' + buster).toString(36);
+}
+
+// ---- zip 分片计划(纯函数,可测) ----
+
+/** pack-assets.mjs 产物 manifest.json 形状(条目名 = SW cache key 相对路径) */
+export interface ZipManifestPart {
+  file: string;         // p<i>-<hash8>.zip(内容寻址)
+  phase: string;        // menu / game-sprites / sounds / music
+  files: number; bytes: number; zipBytes: number;
+  entries: string[];
+  inputHash: string;
+}
+export interface ZipManifest {
+  algoVersion: number; contentHash: string; totalFiles: number; totalBytes: number;
+  parts: ZipManifestPart[];
+}
+
+/** zip 模式缓存版本 = fnv1a32(基础版本 | manifest contentHash)——zip 内容变即
+ *  换缓存名,旧缓存由 SW activate/init gc 清除 */
+export function composeVersion(base: string, contentHash: string): string {
+  return fnv1a32(base + '|' + contentHash).toString(36);
+}
+
+const PART_PHASE_MAP: Record<string, AssetPhase> = {
+  menu: 'menu', 'game-sprites': 'game-sprites', sounds: 'sounds', music: 'music',
+};
+/** zip 模式相位(按各片 files 累计映射;片 phase 由 pack 按首条目目录写) */
+export function zipPhaseAt(parts: ZipManifestPart[], done: number): AssetPhase | 'done' {
+  let acc = 0;
+  for (const p of parts) {
+    acc += p.files;
+    if (done < acc) return PART_PHASE_MAP[p.phase] ?? 'misc-sprites';
+  }
+  return 'done';
 }
 
 // ---- 优先级清单枚举(纯函数,可测;顺序即下载优先级 P0→P4) ----
@@ -141,6 +179,9 @@ const state: AssetCacheState = {
 
 let plan = priorityPlan();
 state.total = plan.urls.length;
+/** zip 分片计划(InitAssetCache 拉到 manifest 才置;null=legacy 逐文件模式) */
+let zipPlan: ZipManifest | null = null;
+let partCursor = 0;             // 下一片下标(zip 模式;对应 legacy 的 chunkCursor)
 const progressCbs = new Set<(s: AssetCacheState) => void>();
 
 export function assetCacheState(): AssetCacheState { return { ...state }; }
@@ -204,6 +245,23 @@ export async function initAssetCache(): Promise<void> {
   if (typeof isSecureContext !== 'undefined' && !isSecureContext) return; // 纯 http 非 localhost 降级
   try {
     state.version = assetVersion();
+    // zip manifest 拉取(3s 超时;路径不匹配 ASSET_RE → SW 天然放行不缓存;
+    // cache:'reload' 防部署后读到旧 manifest)。失败=legacy 逐文件(dev/旧部署)
+    try {
+      const ctrl: RequestInit = { cache: 'reload' };
+      if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal) {
+        ctrl.signal = AbortSignal.timeout(3000);
+      }
+      const res = await fetch('assets-zip/manifest.json', ctrl);
+      if (res.ok) {
+        const m = (await res.json()) as ZipManifest;
+        if (m && m.algoVersion === 1 && Array.isArray(m.parts) && m.parts.length > 0) {
+          zipPlan = m;
+          state.version = composeVersion(state.version, m.contentHash);
+          state.total = m.totalFiles;
+        }
+      }
+    } catch { /* legacy */ }
     // updateViaCache:'none':SW 脚本本身绕过 HTTP 缓存——否则部署新版 sw.js 后
     // 浏览器最长 24h 仍跑旧 SW(标准坑,2026-08-13)
     const reg = await navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' });
@@ -233,8 +291,9 @@ function onSwMessage(e: MessageEvent): void {
     if (typeof d.cached === 'number' && d.version === state.version) {
       state.done = Math.min(d.cached, state.total);
       // 满缓存直接判定完成——免得每次进菜单空跑 23 个块(SW keys() 扫一遍×23)
-      if (state.done >= state.total && chunkCursor === 0) {
+      if (state.done >= state.total && (zipPlan ? partCursor === 0 : chunkCursor === 0)) {
         chunkCursor = plan.urls.length;
+        partCursor = zipPlan ? zipPlan.parts.length : 0;
         state.warming = false;
         state.phase = 'done';
       }
@@ -243,17 +302,40 @@ function onSwMessage(e: MessageEvent): void {
       emit();
     }
   } else if (d.type === 'warm-progress') {
-    // done 为绝对值(SW 侧 base 偏移);failed 为当前块计数,跨块累计
+    // done 为绝对值(SW 侧 base 偏移);failed 为当前块/片计数,跨批累计
     state.done = Math.min(d.done ?? 0, state.total);
     state.failed = chunkFailedAcc + (d.failed ?? 0);
     state.warming = true;
-    state.phase = state.done >= state.total ? 'done' : phaseAt(state.done);
+    state.phase = state.done >= state.total ? 'done'
+      : (d.tag === 'zip' && zipPlan ? zipPhaseAt(zipPlan.parts, state.done) : phaseAt(state.done));
     lastProgressAt = Date.now();
     emit();
   } else if (d.type === 'warm-done') {
     chunkFailedAcc += d.failed ?? 0;
     state.failed = chunkFailedAcc;
-    if ((d.done ?? 0) > chunkCursor) chunkCursor = d.done;  // 块完成→接力下一块
+    if (d.tag === 'zip' && zipPlan) {
+      // 片完成→按绝对 done 推进片游标(乱序/重复回包幂等)
+      let acc = 0;
+      partCursor = 0;
+      for (const p of zipPlan.parts) {
+        acc += p.files;
+        if ((d.done ?? 0) >= acc) partCursor++;
+        else break;
+      }
+    } else if ((d.done ?? 0) > chunkCursor) chunkCursor = d.done;  // 块完成→接力下一块
+    sendChunk();
+  } else if (d.type === 'warm-zip-unavailable') {
+    // SW 侧无 fflate(旧部署 vendor 缺失)→ 整会话回退逐文件;版本退回基础版
+    // (缓存名随之换——zip 版缓存里已有条目作废重下,罕见路径可接受)
+    zipPlan = null;
+    partCursor = 0;
+    chunkCursor = 0;
+    chunkFailedAcc = 0;
+    autoRetries = 0;
+    state.version = assetVersion();
+    state.total = plan.urls.length;
+    state.done = 0;
+    state.warming = true;
     sendChunk();
   }
 }
@@ -269,7 +351,45 @@ let chunkCursor = 0;      // 下一块在 plan.urls 的起始下标
 let chunkFailedAcc = 0;   // 跨块累计失败
 let autoRetries = 0;      // 全量跑完仍有失败时的自动补拉轮数(限速期偶发失败自愈)
 
+/** 分批发送 dispatcher:zip 模式走分片,legacy 走分块 */
 function sendChunk(): void {
+  if (zipPlan) { sendPart(); return; }
+  sendChunkLegacy();
+}
+
+/** zip 模式:单片下发(SW 下载+解压+逐条落缓存;片内 have-set 断点续传) */
+function sendPart(): void {
+  const parts = zipPlan!.parts;
+  if (partCursor >= parts.length) {
+    // 全片完成仍有失败 → 自动补拉轮(同 legacy:重扫只补失败)
+    if (chunkFailedAcc > 0 && autoRetries < 3) {
+      autoRetries++;
+      chunkFailedAcc = 0;
+      state.failed = 0;
+      partCursor = 0;
+      sendPart();
+      return;
+    }
+    state.warming = false;
+    state.phase = 'done';
+    state.done = state.total;
+    emit();
+    return;
+  }
+  const part = parts[partCursor];
+  const base = parts.slice(0, partCursor).reduce((a, p) => a + p.files, 0);
+  state.warming = true;
+  state.phase = zipPhaseAt(parts, state.done);
+  lastProgressAt = Date.now();
+  postToSw({
+    type: 'warm-zip',
+    part: { file: part.file, files: part.files, entries: part.entries },
+    base,
+    total: state.total,
+  });
+}
+
+function sendChunkLegacy(): void {
   const slice = plan.urls.slice(chunkCursor, chunkCursor + CHUNK);
   if (!slice.length) {
     // 全量跑完仍有失败 → 自动重拉一轮(keys() 过滤=只补失败项,极快);
@@ -309,8 +429,14 @@ function startWatchdog(): void {
 export function warmAllAssets(force = false): void {
   if (!state.enabled) return;
   if (state.warming) return;
-  if (!force && state.done >= state.total && chunkCursor >= plan.urls.length) return; // 已完成(幂等)
-  if (force) { chunkCursor = 0; state.done = 0; state.phase = phaseAt(0); }
+  const finished = zipPlan ? partCursor >= zipPlan.parts.length : chunkCursor >= plan.urls.length;
+  if (!force && state.done >= state.total && finished) return; // 已完成(幂等)
+  if (force) {
+    chunkCursor = 0;
+    partCursor = 0;
+    state.done = 0;
+    state.phase = zipPlan ? zipPhaseAt(zipPlan.parts, 0) : phaseAt(0);
+  }
   chunkFailedAcc = 0;
   autoRetries = 0;
   sendChunk();
@@ -320,4 +446,14 @@ export function warmAllAssets(force = false): void {
 export function __setPlanForTest(urls: string[], phases: Array<{ phase: AssetPhase; start: number; end: number }>): void {
   plan = { urls, phases };
   state.total = urls.length;
+}
+
+/** 测试注入 zip 分片计划(null = 回 legacy) */
+export function __setZipPlanForTest(m: ZipManifest | null): void {
+  zipPlan = m;
+  partCursor = 0;
+  chunkCursor = 0;
+  state.total = m ? m.totalFiles : plan.urls.length;
+  state.done = 0;
+  state.failed = 0;
 }

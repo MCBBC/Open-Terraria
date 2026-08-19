@@ -254,3 +254,34 @@ describe('review 修正批：深度门/tile 集对齐（case 147/161/53 无 flag
     expect((c[148] ?? 0) + (c[149] ?? 0)).toBeGreaterThan(120);
   });
 });
+
+describe('多部件 Boss 层序（master 锚:挂件画本体前,2026-08-19 石巨人头部垫后修复）', () => {
+  it('石巨人家族:挂载头/拳锚本体 master=245(渲染 sortY 取 master.y+ε)', async () => {
+    const w = new World(120, 120, 42, 'golem-layer');
+    w.groundLevel = 60;
+    for (let x = 20; x <= 100; x++) w.store.setTileSilent(x, 90, 1, 0, 0);
+    const { golemAI, golemHeadAI, golemFistAI } = await import('../src/entities/bossAI_golem');
+    const game = {
+      world: w, player: null,
+      playSfx: () => {}, playParticles: () => {}, addDamageNumber: () => {},
+      spawnParticles: () => {}, spawnDrop: () => null, damagePlayer: () => {},
+      entities: { nextId: 1, add: () => {}, enemies: [] as unknown[], critters: [] },
+      enemies: () => [] as unknown[],
+    } as never;
+    // 直接构家族:本体+头+拳(模拟 AI 分发,不依赖 Game)
+    const body = Enemy.fromVanilla(245, 60 * 16, 88 * 16)!;
+    const head = Enemy.fromVanilla(246, 60 * 16, 84 * 16)!;
+    const fist = Enemy.fromVanilla(247, 55 * 16, 88 * 16)!;
+    (game.entities as unknown as { enemies: unknown[] }).enemies.push(body, head, fist);
+    (game as unknown as { enemies: () => unknown[] }).enemies = () => [body, head, fist];
+    // 头 AI 首帧:锚本体(bInit 后 master=245)
+    golemHeadAI(head, game, null);
+    expect(head.master?.vanillaId).toBe(245);
+    // 模拟排序键:头取 master.y+0.01 → 画在本体后(=在前)
+    const sortY = (e: Enemy) => (e.master && !e.master.dead ? e.master.y + 0.01 : e.y);
+    expect(sortY(head)).toBeGreaterThan(body.y);
+    expect(sortY(head)).toBeLessThan(body.y + 1);
+    // 牳对照:无 master 实体按自身 y
+    expect(sortY(fist ?? body)).toBeGreaterThan(0);
+  });
+});

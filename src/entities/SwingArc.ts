@@ -15,7 +15,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { projSprite } from './Arrow';
-import { playEnemyHitSound } from './projTargets';
+import { playEnemyHitSound, playerCanHitEnemy } from './projTargets';
 import { prettyStarSparkle } from '../render/Renderer';
 
 interface ArcOwner { cx: number; cy: number; x: number; y: number; w: number; h: number; facing: number; dead: boolean }
@@ -98,6 +98,7 @@ export class SwingArc extends Entity {
     }
     // 命中：穿透（型号表）+ 同敌单跳（usesLocalNPCImmunity 族）
     for (const ent of game.enemies()) {
+      if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892——睡渔夫 376 等友好 NPC 玩家弹无效）
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || this.hitSet.has(e.id)) continue;
       const reach = 85 * this.scaleCur;
@@ -328,6 +329,7 @@ export class TrueNightsEdgeSlash extends Entity {
     if (this.damage > 0) {
       const reach = 85 * this.scaleCur;
       for (const ent of game.enemies()) {
+        if (!playerCanHitEnemy(ent, game)) continue;   // friendly 门（Damage_PVE_Inner :11892）
         const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
         if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
         const ex = this.cx + Math.cos(this.rot) * reach * 0.5;
@@ -504,8 +506,13 @@ export class NightsEdgeFly extends Entity {
  *  num8=|vel|+Late(0.5..1)×40（下限 60）绕锚点旋转 num7=π+sign(vx)×phase×2π
  *  （phase=GetLerpValue(0,1,counter/60)）；rotation=num7+vel角+π/2（ai0<0 反旋）；
  *  Opacity 淡入 0-5/淡出 115-120。
- *  绘制：本体 = 【ai[1] 物品贴图】（:30181 LoadItem(ai[1])，基角 −π/4×spriteDir）
- *  + 彩带拖尾（VertexStrip→canvas polyline，trailColor 见档案表）。
+ *  绘制链（DrawProjDirect 内顺序）：① 彩带拖尾（FinalFractalHelper.Draw :28040
+ *  → VertexStrip：截面沿刃轴向 ±trailWidth、StripColors 逐剑固定色渐隐）→
+ *  ② 白残影 ×3（:30381 循环 + :30174 933 档 num156=60/num155=−15 → num159=
+ *  45/30/15，60 越界跳过）→ ③ 本体 =【ai[1] 物品贴图】（:29945-29953 LoadItem、
+ *  origin=中心、基角 −π/4×spriteDir；GetAlpha :76047 = White×Opacity ×num182
+ *  淡入 0-20/淡出 68-60）→ ④ 1.25× 白叠绘（:30841 色 (255,255,255,127)×Opacity
+ *  ×num186）→ ⑤ 刃尖星芒（:30845 DrawPrettyStarSparkle，15-45 counter 窗）。
  *  档案表（FinalFractalHelper.cs:81-168：剑物品 id → 全刃长/拖尾色）。 */
 const FRACTAL_PROFILES: Record<number, { len: number; color: [number, number, number] }> = {
   65: { len: 48, color: [236, 62, 192] }, 1123: { len: 48, color: [255, 231, 69] },  // 1123=Main.OurFavoriteColor（Main.cs:868）
@@ -536,6 +543,30 @@ export function randomFractalProfile(excludeZenith = true): number {
   return id;
 }
 
+/** GetFinalFractalProfile（:192-199）：缺项回退 50f/Color.White */
+export function fractalProfile(id: number): { len: number; color: [number, number, number] } {
+  return FRACTAL_PROFILES[id] ?? { len: 50, color: [255, 255, 255] };
+}
+
+/** 拖尾衰减因子（FinalFractalProfile.StripColors :54-59 逐字）：
+ *  result = trailColor × (1 − GetLerpValue(0, 0.98, progressOnStrip))；result.A /= 2。
+ *  XNA Color×float 四通道同乘 → rgb 与 A 同乘本因子、A 额外减半（预乘混合下
+ *  rgb:alpha = 2:1——draw 的两 pass 精确等价来源）。progress = i/(oldPos.Length−1)
+ *  = i/59（VertexStrip.PrepareStrip :63，恒除 60−1——幼年拖尾不缩分母）。 */
+export function fractalStripFade(progress: number): number {
+  return 1 - Math.max(0, Math.min(1, progress / 0.98));
+}
+
+/** 白残影 alpha（Main.cs:30606-30611）：Color.White × GetLerpValue(0, 60, 60−num159)
+ *  × Opacity × GetLerpValue(0,20,counter−num159) × GetLerpValue(68,60,counter−num159)
+ *  （rgb:alpha = 1:1 → 单 pass source-over；t = 历史时刻的 localAI[0] −− 原版按
+ *  索引差近似，非真实计数差——逐字沿用） */
+export function fractalGhostAlpha(counter: number, num159: number, opacity: number): number {
+  const t = counter - num159;
+  return ZenithSword.lerpV(0, 60, 60 - num159) * opacity
+    * ZenithSword.lerpV(0, 20, t) * ZenithSword.lerpV(68, 60, t);
+}
+
 export class ZenithSword extends Entity {
   w = 32; h = 32;
   damage: number;
@@ -551,8 +582,12 @@ export class ZenithSword extends Entity {
   private owner: ArcOwner;
   private hitCd = new Map<number, number>();
   /** oldPos/oldRot 拖尾环（TrailCacheLength=60、TrailingMode=4，ProjectileID.cs:293）：
-   *  每条目 [cx, cy, rot] 每 update 压一条（extraUpdates=1 → 每帧 2 条） */
+   *  每条目 [cx, cy, rot] 每 update 压一条（extraUpdates=1 → 每帧 2 条）；
+   *  在 AI 位移【前】压栈（Projectile.Update 内 :15728 拖尾段先于 AI_182）——
+   *  最新条 = 上一 update 末态（滞后本体一 update），首条 = 出生点 */
   private trail: number[] = [];
+  /** oldSpriteDirection 环（残影镜像 XOR 用，:30572-30577）——与 trail 同步压/裁 */
+  private trailDirs: number[] = [];
   /** TrailingMode 4 玩家位移补偿（:15828-15841 numUpdates==0 时 oldPos += 玩家帧位移） */
   private lastOwnerX = 0;
   private lastOwnerY = 0;
@@ -572,11 +607,17 @@ export class ZenithSword extends Entity {
     this.knockback = kb;
     this.lastOwnerX = owner.x;
     this.lastOwnerY = owner.y;
+    // 出生点（NewProjectile position=发射点，Player.cs:48118）——拖尾首条锚
+    // （原版 AI_182 首帧即把 Center 挪上轨道，oldPos[0] 留在出生点：拖尾从玩家
+    // 处甩出一段再入轨的视觉来源）。近似取 MountedCenter（枪口在其 ~50px 内）
+    this.x = owner.cx - this.w / 2;
+    this.y = owner.cy - this.h / 2;
   }
 
   /** GetLerpValue(from,to,t,clamped) 语义——线性后钳 [0,1]（递减区间 from>to 同式，
-   *  曾按 min/max 早退写反：900→0 区间 t≥900 应得 0 非 1） */
-  private static lerpV(a: number, b: number, t: number): number {
+   *  曾按 min/max 早退写反：900→0 区间 t≥900 应得 0 非 1）。公开供模块级
+   *  档案/残影纯函数复用 */
+  static lerpV(a: number, b: number, t: number): number {
     if (a === b) return t >= a ? 1 : 0;
     const v = (t - a) / (b - a);
     return Math.max(0, Math.min(1, v));
@@ -599,6 +640,12 @@ export class ZenithSword extends Entity {
 
   private step(game: GameHooks): void {
     if (this.counter === 0) game.playSfxFiles(['Item_169'], 1, this.cx, this.cy);   // :40439
+    // TrailingMode 4 记录（:15841-15843）：oldPos[0]/oldRot[0]/oldSpriteDirection[0]
+    // 在 Projectile.Update 内先于 AI_182 压栈——记录上一 update 末态
+    this.trail.push(this.cx, this.cy, this.rot);
+    if (this.trail.length > 60 * 3) this.trail.splice(0, this.trail.length - 60 * 3);
+    this.trailDirs.push(this.spriteDir);
+    if (this.trailDirs.length > 60) this.trailDirs.splice(0, this.trailDirs.length - 60);
     const spd = Math.hypot(this.vx, this.vy);
     const lv = ZenithSword.lerpV(900, 0, spd * 2);      // GetLerpValue(900,0,|vel|×2)
     this.counter += 0.7 + (2 - 0.7) * lv;               // Lerp(0.7,2,lv)
@@ -626,22 +673,52 @@ export class ZenithSword extends Entity {
       this.rot = Math.PI + num6 * phase * (-Math.PI * 2) + va + Math.PI / 2;   // 反旋（:40488-40494）
       this.spriteDir = this.vx > 0 ? -1 : 1;
     }
-    this.trail.push(this.cx, this.cy, this.rot);
-    if (this.trail.length > 60 * 3) this.trail.splice(0, this.trail.length - 60 * 3);
     this.opacity = ZenithSword.lerpV(0, 5, this.counter) * ZenithSword.lerpV(120, 115, this.counter);
-    const prof = FRACTAL_PROFILES[this.ai1] ?? { len: 50, color: [255, 255, 255] as [number, number, number] };
-    this.lightRGB = [prof.color[0] / 255 * 0.5 * this.opacity, prof.color[1] / 255 * 0.5 * this.opacity, prof.color[2] / 255 * 0.5 * this.opacity];
-    // 拖尾尘（profile.dustMethod → StripDust :52-66：刃尖 center+(rot−π/2)向×
-    // trailWidth×Lerp(0.5,1,rand)、尘 278；1/9×num11 掷，num11=1+|v|/100 中段峰值）
+    const prof = fractalProfile(this.ai1);
+    // 光照（:40493-40496，num2<1 门 :40478）：Center 点 trailColor×0.5×Opacity +
+    // MountedCenter 点 Lerp(Vector3.One, trailColor, 0.7)×Opacity×0.15（后者每剑
+    // 叠加——齐射时玩家侧聚成暖白光晕）
     if (phase < 1) {
-      const num11 = Math.max(1, Math.round((1 + spd / 100)
-        * ZenithSword.lerpV(0, 0.5, phase) * ZenithSword.lerpV(1, 0.5, phase)));
-      if (Math.random() < num11 / 9) {
-        const tipR = prof.len / 2 * (0.5 + Math.random() * 0.5);
-        game.spawnParticles(this.cx + Math.cos(this.rot - Math.PI / 2) * tipR,
-          this.cy + Math.sin(this.rot - Math.PI / 2) * tipR,
-          `rgb(${prof.color[0]},${prof.color[1]},${prof.color[2]})`,
-          1, 1.2, { life: 20 });
+      this.lightRGB = [prof.color[0] / 255 * 0.5 * this.opacity, prof.color[1] / 255 * 0.5 * this.opacity, prof.color[2] / 255 * 0.5 * this.opacity];
+      game.addLightAt?.(this.owner.cx, this.owner.cy,
+        (1 + (prof.color[0] / 255 - 1) * 0.7) * this.opacity * 0.15,
+        (1 + (prof.color[1] / 255 - 1) * 0.7) * this.opacity * 0.15,
+        (1 + (prof.color[2] / 255 - 1) * 0.7) * this.opacity * 0.15);
+    } else {
+      this.lightRGB = null;
+    }
+    // 拖尾尘（:40480-40492 调用点 → StripDust :38-52）：每 update num11 次独立掷
+    // Next(9)==0，命中出 Next(1,4)=1-3 粒尘 278（Dust.NewDustPerfect：alpha 100、
+    // color=Lerp(trailColor,White,rand×0.3)、scale 0.4、fadeIn 0.4+rand×0.3、
+    // noGravity、velocity += (rot−π/2+π/2·spriteDir)向×(3+rand×4)）；
+    // 位置 = Center + 刃向×trailWidth×Lerp(0.5,1,rand)（刃中段→刃尖）
+    if (phase < 1) {
+      let num11 = 1 + Math.floor(spd / 100);
+      num11 = Math.floor(num11 * ZenithSword.lerpV(0, 0.5, phase) * ZenithSword.lerpV(1, 0.5, phase));
+      if (num11 < 1) num11 = 1;
+      const bdx = Math.cos(this.rot - Math.PI / 2), bdy = Math.sin(this.rot - Math.PI / 2);
+      const dist = (prof.len / 2) * (0.5 + Math.random() * 0.5);
+      const px = this.cx + bdx * dist, py = this.cy + bdy * dist;
+      for (let i = 0; i < num11; i++) {
+        if (Math.floor(Math.random() * 9) !== 0) continue;      // Next(9)==0（1/9）
+        const dAng = this.rot - Math.PI / 2 + Math.PI / 2 * this.spriteDir;
+        for (let k = 0, cnt = 1 + Math.floor(Math.random() * 3); k < cnt; k++) {
+          const wf = Math.random() * 0.3;   // Color.Lerp(trailColor, White, rand×0.3)
+          // spawn() 对 w=0 的盒内散布退化为确定 +4（(rand×1|0)+4）→ 传 −4 抵消
+          const d = game.spawnDust?.(px - 4, py - 4, 0, 0, 278, 0, 0, 100,
+            {
+              r: Math.round(prof.color[0] + (255 - prof.color[0]) * wf),
+              g: Math.round(prof.color[1] + (255 - prof.color[1]) * wf),
+              b: Math.round(prof.color[2] + (255 - prof.color[2]) * wf),
+              a: 255,
+            }, 0.4, true);
+          if (!d) break;
+          d.scale = 0.4;
+          d.fadeIn = 0.4 + Math.random() * 0.3;
+          const dsp = 3 + Math.random() * 4;   // velocity += dir×(3+rand×4)（覆写池抖动）
+          d.vx = Math.cos(dAng) * dsp;
+          d.vy = Math.sin(dAng) * dsp;
+        }
       }
     }
     // 命中：lance 线形判定（Projectile.cs:14333-14363）——当前刃线 ±40 厚 20 +
@@ -703,40 +780,63 @@ export class ZenithSword extends Entity {
 
   draw(r: { canvas: HTMLCanvasElement; atlas?: unknown }): void {
     const ctx = r.canvas.getContext('2d');
-    if (!ctx || this.opacity <= 0.01) return;
-    const prof = FRACTAL_PROFILES[this.ai1] ?? { len: 50, color: [255, 255, 255] as [number, number, number] };
-    // 彩带拖尾（VertexStrip→分段 polyline，lighter；StripColors :76-79 沿程
-    // 渐隐 ×(1−GetLerpValue(0,0.98,progress))、A/2——尾端淡出）
-    if (this.trail.length >= 6) {
+    if (!ctx) return;
+    const prof = fractalProfile(this.ai1);
+    const tw = prof.len / 2;   // trailWidth = 全刃长/2（StripWidth :61-64 恒宽——沿程无宽度变化）
+    const icon = (r.atlas as unknown as { vicon?: (id: number) => { img: ImageBitmap | HTMLImageElement; sx: number; sy: number; sw: number; sh: number } | null } | undefined)?.vicon?.(this.ai1) ?? null;
+    // 本体淡入淡出包络（:30799-30801 num182 与 :30840 num186 同式同参 t=localAI[0]）
+    const num182 = ZenithSword.lerpV(0, 20, this.counter) * ZenithSword.lerpV(68, 60, this.counter);
+    const n = this.trail.length / 3;
+
+    // ---- ① 彩带拖尾（FinalFractalHelper.Draw :175-190 → VertexStrip :50-67）----
+    // 顶点对 = oldPos[i]+Size/2 ± (oldRot[i]−π/2)单位向 × trailWidth（AddVertexPair
+    // :153-159——截面沿【刃轴向】随剑旋转，非运动法向）；progressOnStrip =
+    // i/(60−1)（:63，恒除 59——幼年拖尾全程近满色）。颜色（StripColors :54-59
+    // 逐字）：result = trailColor × (1−GetLerpValue(0,0.98,progress))、result.A/=2
+    // ——XNA Color×float 四通道同乘 → 预乘混合（主弹幕批次 BlendState.AlphaBlend
+    // 预乘语义，Main.cs:22032；本项目 Renderer.ts:245 既定结论）下 rgb:alpha=2:1
+    // → canvas 两 pass 精确等价：source-over α=f/2（背景只衰减 f/2）+ lighter
+    // α=f/2（加色）——rgb 合计 = trailColor×f 全亮、无 Opacity 因子（剑亡即整条
+    // 消失，原版拖尾不随 Opacity 淡出）。四边形按 GPU 索引序新→旧叠画。
+    if (n >= 2) {
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = prof.len / 2;
-      const n = this.trail.length / 3;
-      for (let i = 0; i < n - 1; i++) {
-        const fade = (i + 1) / n;          // 尾（最旧 i=0）→ 0、头（最新）→ 1
-        const a = 0.5 * fade * this.opacity;
-        if (a <= 0.02) continue;
-        ctx.strokeStyle = `rgba(${prof.color[0]},${prof.color[1]},${prof.color[2]},${a})`;
+      ctx.fillStyle = `rgb(${prof.color[0]},${prof.color[1]},${prof.color[2]})`;
+      for (let i = n - 1; i >= 1; i--) {
+        const f = fractalStripFade((n - 0.5 - i) / (60 - 1));
+        if (f <= 0.02) continue;
+        const x1 = this.trail[i * 3], y1 = this.trail[i * 3 + 1], r1 = this.trail[i * 3 + 2];
+        const x0 = this.trail[i * 3 - 3], y0 = this.trail[i * 3 - 2], r0 = this.trail[i * 3 - 1];
+        const d1x = Math.cos(r1 - Math.PI / 2) * tw, d1y = Math.sin(r1 - Math.PI / 2) * tw;
+        const d0x = Math.cos(r0 - Math.PI / 2) * tw, d0y = Math.sin(r0 - Math.PI / 2) * tw;
         ctx.beginPath();
-        ctx.moveTo(this.trail[i * 3], this.trail[i * 3 + 1]);
-        ctx.lineTo(this.trail[i * 3 + 3], this.trail[i * 3 + 4]);
-        ctx.stroke();
+        ctx.moveTo(x1 + d1x, y1 + d1y);
+        ctx.lineTo(x0 + d0x, y0 + d0y);
+        ctx.lineTo(x0 - d0x, y0 - d0y);
+        ctx.lineTo(x1 - d1x, y1 - d1y);
+        ctx.closePath();
+        const a = 0.5 * f;   // A = (255×f)/2（result.A /= 2）
+        ctx.globalAlpha = a;
+        ctx.fill();                                    // 覆盖 pass：dst×(1−f/2)
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fill();                                    // 加色 pass：+trailColor×f/2
+        ctx.globalCompositeOperation = 'source-over';
       }
+      ctx.globalAlpha = 1;
       ctx.restore();
     }
-    // 本体 = ai[1] 物品贴图（Main.cs:29945-29955：LoadItem(ai[1])、origin=中心、
-    // num152=−π/4×spriteDir 加进 rotation23；spriteDir=−1 配 FlipHorizontally——
-    // 局部系先镜像再旋转，刀尖恒指 (rot−π/2) 向（拖尾尘/辉光同向）。曾把
-    // num152 符号写反且不镜像：贴图垂直于轨迹 90°（2026-08-19 天顶剑审查）
-    const icon = (r.atlas as unknown as { vicon?: (id: number) => { img: ImageBitmap | HTMLImageElement; sx: number; sy: number; sw: number; sh: number } | null } | undefined)?.vicon?.(this.ai1);
-    const drawIcon = (scale: number, alpha: number) => {
+
+    // ---- 贴图绘制原语（:29945-29953：LoadItem(ai[1])、Frame() 全幅、origin=中心、
+    // 基角 −π/4×【当前】spriteDir 加进旋转；镜像=局部系 scale(−1,1)（XNA Flip源
+    // 矩形后旋转 = canvas 先 rotate 后镜像），刀尖恒指 (rot−π/2) 向）----
+    const drawIcon = (x: number, y: number, rot: number, mirror: boolean, scale: number, alpha: number, additive = false) => {
+      if (alpha <= 0.01) return;
       ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      if (additive) ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      ctx.translate(this.cx, this.cy);
-      ctx.rotate(this.rot - Math.PI / 4 * this.spriteDir);
-      if (this.spriteDir === -1) ctx.scale(-1, 1);
+      ctx.translate(x, y);
+      ctx.rotate(rot);
+      if (mirror) ctx.scale(-1, 1);
       if (icon) {
         const dw = icon.sw * scale, dh = icon.sh * scale;
         ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh, -dw / 2, -dh / 2, dw, dh);
@@ -745,13 +845,45 @@ export class ZenithSword extends Entity {
         ctx.fillRect(-16 * scale, -16 * scale, 32 * scale, 32 * scale);
       }
       ctx.restore();
-      ctx.globalAlpha = 1;
     };
-    drawIcon(1, this.opacity);
-    // 1.25× 白色残影叠绘（Main.cs:30840-30842：(255,255,255,127)×Opacity×num186，
-    // num186=GetLerpValue(0,20,counter)×GetLerpValue(68,60,counter)）
-    const num186 = ZenithSword.lerpV(0, 20, this.counter) * ZenithSword.lerpV(68, 60, this.counter);
-    if (num186 > 0.02) drawIcon(1.25, this.opacity * num186 * 0.5);
+
+    // ---- ② 白残影 ×3（:30381 循环 + :30174-30181 933 档：num156=60、num154=0、
+    // num155=−15 → num159∈{60,45,30,15}；60 ≥ oldPos.Length=60 越界跳过 :30383）。
+    // 色（:30606-30611，替换通用乘子）：White × GetLerpValue(0,60,60−num159) ×
+    // Opacity × num170(counter−num159)（rgb:alpha=1:1 单 pass）；旋转 = oldRot +
+    // (−π/4×当前 spriteDir)（:30614 num152 取现值）；镜像 = 历史与当前
+    // spriteDirection 异号（:30572-30577 XOR）；scale = Lerp(1,1,·)=1 ----
+    for (let num159 = 60; num159 > 0; num159 -= 15) {
+      if (num159 >= 60) continue;
+      const j = n - 1 - num159;
+      if (j < 0) continue;
+      drawIcon(this.trail[j * 3], this.trail[j * 3 + 1],
+        this.trail[j * 3 + 2] - Math.PI / 4 * this.spriteDir,
+        (this.trailDirs[j] === -1) !== (this.spriteDir === -1), 1,
+        fractalGhostAlpha(this.counter, num159, this.opacity));
+    }
+    // ---- ③ 本体（:30761-30803）：GetAlpha(:76047-76050)=White×Opacity ×num182
+    // （rgb:alpha=1:1 → 单 pass source-over，不受场景光照染色的全亮白）----
+    drawIcon(this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
+      1, this.opacity * num182);
+    // ---- ④ 1.25× 白叠绘（:30839-30841）：色 (255,255,255,127)×Opacity×num186——
+    // 预乘 rgb:alpha = 255:127 → 两 pass：source-over α=(127/255)·ov（覆盖）
+    // + lighter α=(128/255)·ov（加色）＝ rgb×ov 全量、背景衰减仅 (127/255)·ov ----
+    const ov = this.opacity * num182;
+    drawIcon(this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
+      1.25, 127 / 255 * ov);
+    drawIcon(this.cx, this.cy, this.rot - Math.PI / 4 * this.spriteDir, this.spriteDir === -1,
+      1.25, 128 / 255 * ov, true);
+    // ---- ⑤ 刃尖星芒（:30842-30845）：DrawPrettyStarSparkle(Opacity, dir, Center+
+    // (rot−π/2)向×trailWidth, White×num186, trailColor(A/2)×num186, localAI[0],
+    // 15,30,30,45, 0, (5,2), (1,1))——15-45 counter 窗内十字星芒 ----
+    if (this.opacity > 0.01 && num182 > 0.01) {
+      prettyStarSparkle(ctx, this.opacity,
+        this.cx + Math.cos(this.rot - Math.PI / 2) * tw,
+        this.cy + Math.sin(this.rot - Math.PI / 2) * tw,
+        [255, 255, 255], prof.color, this.counter,
+        15, 30, 30, 45, 0, [5, 2], [1, 1], num182, num182);
+    }
   }
 }
 

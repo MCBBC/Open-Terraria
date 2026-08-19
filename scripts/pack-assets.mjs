@@ -68,11 +68,16 @@ export function planParts(files, sizes, opts = {}) {
 }
 
 
-/** 纯函数：条目名→字节 map → zip Uint8Array（逐文件分级：已压缩格式 store-only） */
+/** 纯函数：条目名→字节 map → zip Uint8Array（逐文件分级：已压缩格式 store-only）。
+ *  ★mtime 钉 2000-01-01：fflate zipSync 默认内嵌当前时间 → 跨进程字节不确定
+ *   （同内容每次重打换名，HTTP 缓存白白失效）；钉死后同输入=同字节=同名 */
+const ZIP_EPOCH = new Date('2000-01-01T00:00:00Z').getTime();
 export function buildZip(entryMap) {
   const input = {};
   for (const [name, bytes] of Object.entries(entryMap)) {
-    input[name] = STORE_EXT.has(fileExt(name)) ? [bytes, { level: 0 }] : [bytes, { level: 6 }];
+    input[name] = STORE_EXT.has(fileExt(name))
+      ? [bytes, { level: 0, mtime: ZIP_EPOCH }]
+      : [bytes, { level: 6, mtime: ZIP_EPOCH }];
   }
   return zipSync(input);
 }
@@ -87,7 +92,7 @@ export function makeManifest(partsMeta, contentHash) {
     totalBytes,
     parts: partsMeta.map((p, i) => ({
       file: p.file, phase: p.phase, files: p.files, bytes: p.bytes,
-      zipBytes: p.zipBytes, entries: p.entries,
+      zipBytes: p.zipBytes, entries: p.entries, inputHash: p.inputHash,
     })),
   };
 }
@@ -95,7 +100,8 @@ export function makeManifest(partsMeta, contentHash) {
 const sha1 = (buf) => createHash('sha1').update(buf).digest('hex');
 const hash8 = (buf) => createHash('sha1').update(buf).digest('hex').slice(0, 8);
 
-// ================= CLI =================
+// ================= CLI（import 守卫——单测导入只拿纯函数） =================
+function main() {
 function loadJson(p) { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; } }
 
 const t0 = Date.now();
@@ -143,15 +149,18 @@ for (const f of files) sizes[f] = statSync(join(PUB, f)).size;
 const parts = planParts(files, sizes);
 const prevByEntries = new Map();
 for (const p of prevManifest?.parts ?? []) prevByEntries.set(p.entries.join('\n'), p);
+/** 逐片输入指纹 = sha1(条目路径:文件hash 行) —— 复用必须内容与清单双不变
+ *  （曾只比条目清单 → 文件内容变了仍复用旧 zip 的 bug） */
+const partInputHash = (entries) => sha1(entries.map((e) => `${e}:${hashes[e]}`).join('\n'));
 
 const partsMeta = [];
 let repacked = 0, reusedParts = 0, zipBytesTotal = 0;
 for (let i = 0; i < parts.length; i++) {
   const { entries, bytes } = parts[i];
-  const key = entries.join('\n');
-  const prev = prevByEntries.get(key);
-  if (prev && existsSync(join(OUT_DIR, prev.file))) {
-    partsMeta.push({ ...prev, entries });
+  const inputHash = partInputHash(entries);
+  const prev = prevByEntries.get(entries.join('\n'));
+  if (prev && prev.inputHash === inputHash && existsSync(join(OUT_DIR, prev.file))) {
+    partsMeta.push({ ...prev, entries, inputHash });
     reusedParts++;
     zipBytesTotal += prev.zipBytes;
     continue;
@@ -164,7 +173,7 @@ for (let i = 0; i < parts.length; i++) {
   writeFileSync(join(OUT_DIR, file), zipped);
   partsMeta.push({
     file, phase: phaseOf(entries[0]), files: entries.length, bytes,
-    zipBytes: zipped.length, entries,
+    zipBytes: zipped.length, entries, inputHash,
   });
   zipBytesTotal += zipped.length;
   repacked++;
@@ -203,3 +212,7 @@ console.log(`[pack-assets] ${partsMeta.length} 片（重打 ${repacked} / 复用
 for (const p of partsMeta) {
   console.log(`  ${p.file}  ${p.phase.padEnd(12)} ${String(p.files).padStart(5)} 文件  ${(p.bytes / 1048576).toFixed(1)}MB → ${(p.zipBytes / 1048576).toFixed(1)}MB`);
 }
+}
+
+import { pathToFileURL } from 'node:url';
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main();

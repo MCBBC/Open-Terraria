@@ -30,6 +30,7 @@ const PROBES = [
   { name: 'cutbait', file: 'scripts/_cutbait-probe.mjs', timeoutMs: 420_000 },   // 镐破坏装饰组→蚯蚓族出生/姿势/cap
   { name: 'l10n-subst', file: 'scripts/_l10n-subst-probe.mjs', timeoutMs: 240_000 }, // {InputTrigger_*} 全局替换(蠕虫罐头 171 条 tooltip)
   { name: 'f6panel', file: 'scripts/_f6panel-probe.mjs', timeoutMs: 240_000 },   // F6 面板 boss 可见性(置顶+中文搜索)
+  { name: 'golem-layer', file: 'scripts/_golem-layer-probe.mjs', timeoutMs: 360_000 }, // 石巨人部件层序(master 锚)
 ];
 
 const argv = process.argv.slice(2);

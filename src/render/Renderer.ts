@@ -132,7 +132,11 @@ import { drawVanillaLiquids, drawLiquidBehindTilesOnly } from './VanillaLiquidRe
 import { waterWaves, ensureWaveTextures, injectEntity, type WaveEntitySample } from './WaterWaves';
 import { renderEnv } from './VanillaTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
-import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
+import { drawWindSwayTiles, litNatureVisibility, treeSwayFrame } from './WindSway';
+
+/** 临时树木探针出口（Game 注入 recorder；验证后随探针整体撤除） */
+export let treeProbeSink: ((cells: number[][], probes: number[][]) => void) | null = null;
+export function setTreeProbeSink(f: ((cells: number[][], probes: number[][]) => void) | null): void { treeProbeSink = f; }
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
@@ -2203,7 +2207,8 @@ export class Renderer {
     // 渲染共享态(chunk 烘焙的风摆/风门读取):风速 + worldSurface
     renderEnv.wind = world.weather?.windSpeedCurrent ?? 0;
     renderEnv.worldSurface = world.groundLevel;
-    const ctx = this.ctx;
+    const mainCtx = this.ctx;
+    let ctx = mainCtx;   // 世界层切换期指向 worldCtx（光照分层，见 beginWorldLayer）
     const viewW = this.canvas.width, viewH = this.canvas.height;
     cam.viewW = viewW; cam.viewH = viewH;
     cam.tickPunch();   // PunchCameraModifier 冲击位移衰减（鹿角怪等震屏源）
@@ -2316,6 +2321,15 @@ export class Renderer {
     // 1.6 天塔柱滤镜：原"天空层子集近似"已上移为全屏后处理（步骤 7d，
     //     SceneState → Filters.Scene["Monolith*"] 整屏合成语义 1:1）
 
+    // ==== 世界层切换（光照分层 2026-08-19）：天空(1/1.5/1.55)已画在主画布；
+    //      世界内容(tile/墙/水/实体/粒子)画进离屏 worldCanvas，光照 multiply
+    //      只乘世界层（按其 alpha 成形）——原版 tile/NPC 绘入 RenderTarget 乘光、
+    //      sky 直绘 backbuffer 的分层语义。此前全屏乘光把夜空按月光地板
+    //      (~21/255)整体压暗：月亮 241→~20、星星/夜空同步压黑（用户实报
+    //      "夜里的月亮不亮"根因）====
+    const worldLayer = this.beginWorldLayer(viewW, viewH);
+    if (worldLayer) ctx = worldLayer;
+
     ctx.save();
     // 世界变换：平移 + 缩放（以屏幕中心为相机中心）
     // 像素风关键：tile/实体用最近邻采样保持锐利（光照层单独用平滑）
@@ -2392,8 +2406,10 @@ export class Renderer {
     //   master.y+ε → 紧随本体之后(在前);挂件间保插入序(=出生序,头/拳原生
     //   顺序)。2026-08-19 修"石巨人一阶段头跑到背后"
     const sortY = (e: Entity): number => {
-      const m = (e as Enemy).master;
-      return m && !m.dead ? m.y + 0.01 : e.y;
+      const en = e as Enemy;
+      if (en.drawBehindMaster) return en.y;          // 骑手族(390/416):坐骑画骑手前(槽序),回落自然 y
+      const m = en.master ?? en.wormFollow;          // wormFollow=链前段:逐段锚前段=链序即槽序
+      return m && !m.dead ? m.y + 0.01 : en.y;
     };
     const sorted = [...entities].sort((a, b) => sortY(a) - sortY(b));
     for (const e of sorted) {
@@ -2458,6 +2474,39 @@ export class Renderer {
         crimson: !!this.scene?.zoneCrimson,
         hallow: !!this.scene?.zoneHallow,
       });
+      // ══ 临时树木录制探针（2026-08-19；验证后撤）══
+      // 摆动层刚画完（冠+烘焙干已合成、光照/水未叠）：对前 3 个冠格取交界带
+      // 亮度矩阵（干心±10 世界px × 行 B−2..B+1），逐帧喂 recorder。
+      if (treeProbeSink && treeSwayFrame.on && treeSwayFrame.cells.length) {
+        const zq = z;
+        const cells = treeSwayFrame.cells.slice(0, 12).map((c) => [c.x, c.y, c.fx, Math.round(c.sway * 1000) / 1000]);
+        // 探针只做前 3 个【顶冠】（fx 22/0 派干列；枝不做）
+        const probes: number[][] = [];
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.imageSmoothingEnabled = false;
+        for (const c of treeSwayFrame.cells) {
+          if (probes.length >= 3) break;
+          if (c.fx !== 22 && c.fx !== 0) continue;
+          const B = (c.y + 1) * TILE;
+          const sx = Math.round((c.x * TILE - camRX) * zq + viewW / 2);
+          const lums: number[] = [];
+          for (let dy = -2; dy <= 1; dy++) {
+            const sy = Math.round((B + dy - camRY) * zq + viewH / 2);
+            if (sx < 0 || sy < 0 || sx + Math.round(20 * zq) >= viewW || sy >= viewH) { lums.push(-1); continue; }
+            const d = ctx.getImageData(sx, sy, Math.round(20 * zq), 1).data;
+            // 20 世界px 均匀采样 10 点亮度
+            for (let k = 0; k < 10; k++) {
+              const px = Math.min(d.length / 4 - 1, Math.round(k * (d.length / 4 - 1) / 9)) * 4;
+              lums.push(Math.round((d[px] + d[px + 1] + d[px + 2]) / 3));
+            }
+          }
+          probes.push([c.x, c.y, ...lums]);
+        }
+        ctx.restore();
+        treeProbeSink(cells, probes);
+      }
+      // ══ 临时探针结束 ══
       // 自然层粒子（原版 Gore：落叶/滴水——DrawGores 在 tile 层后实体前）
       natureParticles.draw(ctx, this.atlas);
     }
@@ -2637,6 +2686,10 @@ export class Renderer {
       ctx.fillRect(0, 0, viewW, viewH);
       ctx.restore();
     }
+
+    // ==== 世界层收口：恢复主画布 ctx，光照在 worldCanvas 上成形后叠回 ====
+    this.endWorldLayer(mainCtx);
+    ctx = mainCtx;
 
     // 7. 光照合成
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
@@ -9848,12 +9901,60 @@ export class Renderer {
     }
   }
 
+  // ==== 世界层（光照分层 2026-08-19）====
+  /** 世界层画布：tile/墙/水/实体/粒子绘入此层；compositeLight 把光照 multiply
+   *  按层 alpha 成形后叠回主画布。天空层（渐变/星/日月/云/群系背景）直绘主画布
+   *  不进光照——原版 tile/NPC 绘入 RenderTarget 乘光、sky 直绘 backbuffer 的分层
+   *  语义。此前全屏乘光令夜空按月光地板(~21/255)压暗，月亮/星星近不可见
+   *  （2026-08-19 用户实报"夜里的月亮不亮"）。逃生门 ?worldlayer=0 回旧全屏乘光 */
+  private worldCanvas: HTMLCanvasElement | null = null;
+  private worldCtxLayer: CanvasRenderingContext2D | null = null;
+  private lightMaskCanvas: HTMLCanvasElement | null = null;
+  private lightMaskCtxLayer: CanvasRenderingContext2D | null = null;
+  private worldLayerActive = false;
+  worldLayerEnabled = typeof location !== 'undefined'
+    ? new URLSearchParams(location.search).get('worldlayer') !== '0' : true;
+
+  /** render() 世界段入口调用：切换 this.ctx → 世界层（返回 null = 逃生门关闭，
+   *  调用方继续用主画布 ctx）。每帧清屏；尺寸跟随主画布。 */
+  private beginWorldLayer(viewW: number, viewH: number): CanvasRenderingContext2D | null {
+    if (!this.worldLayerEnabled || typeof document === 'undefined') { this.worldLayerActive = false; return null; }
+    if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
+      this.worldCanvas = document.createElement('canvas');
+      this.worldCtxLayer = this.worldCanvas.getContext('2d')!;
+      this.lightMaskCanvas = document.createElement('canvas');
+      this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
+    }
+    if (this.worldCanvas.width !== viewW || this.worldCanvas.height !== viewH) {
+      this.worldCanvas.width = viewW; this.worldCanvas.height = viewH;   // resize 自带清屏
+      this.lightMaskCanvas.width = viewW; this.lightMaskCanvas.height = viewH;
+    } else {
+      const w = this.worldCtxLayer;
+      w.setTransform(1, 0, 0, 1, 0, 0);
+      w.clearRect(0, 0, viewW, viewH);
+    }
+    this.worldLayerActive = true;
+    this.ctx = this.worldCtxLayer;
+    return this.worldCtxLayer;
+  }
+
+  /** render() 世界段收口：恢复 this.ctx → 主画布（光照合成在 compositeLight 内完成）。
+   *  ★worldLayerActive 不在此清——compositeLight 稍后要靠它选世界层路径；
+   *  下一帧 beginWorldLayer 会重置（逃生门路径在 begin 里置 false） */
+  private endWorldLayer(mainCtx: CanvasRenderingContext2D): void {
+    if (!this.worldLayerActive) return;
+    this.ctx = mainCtx;
+  }
+
   private compositeLight(
     cam: Camera, viewW: number, viewH: number,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
     rx: number, ry: number, rw: number, rh: number,
   ) {
-    if (this.fullbright) return; // 开灯：不做 multiply，全部原色
+    if (this.fullbright) { // 开灯：不做 multiply，全部原色（世界层仍须叠回主画布）
+      if (this.worldLayerActive && this.worldCanvas) this.ctx.drawImage(this.worldCanvas, 0, 0);
+      return;
+    }
     const z = cam.zoom;
     const ts = TILE;
     const tilesX = Math.ceil(viewW / z / ts) + 2;
@@ -9911,11 +10012,37 @@ export class Renderer {
       }
     }
     lc.putImageData(img, 0, 0);
+    const [sx, sy] = cam.worldToScreen(tx0 * ts, ty0 * ts);
+    // ==== 世界层路径（光照分层）：光照栅格先按世界层 alpha 成形，再 multiply 进
+    //      世界层（multiply 直画会把透明天空糊成光色——必须先掩膜）；最后把世界层
+    //      叠回主画布（天空之上）。天空/日月星辰不进光照 = 原版分层语义 ====
+    if (this.worldLayerActive && this.worldCtxLayer && this.lightMaskCtxLayer) {
+      const mctx = this.lightMaskCtxLayer;
+      mctx.setTransform(1, 0, 0, 1, 0, 0);
+      mctx.globalCompositeOperation = 'source-over';
+      mctx.clearRect(0, 0, viewW, viewH);
+      mctx.imageSmoothingEnabled = true;
+      mctx.drawImage(this.lightCanvas, sx, sy, tilesX * ts * z, tilesY * ts * z);
+      mctx.globalCompositeOperation = 'destination-in';
+      mctx.drawImage(this.worldCanvas!, 0, 0);
+      mctx.globalCompositeOperation = 'source-over';
+      const wctx = this.worldCtxLayer;
+      wctx.setTransform(1, 0, 0, 1, 0, 0);
+      wctx.save();
+      wctx.imageSmoothingEnabled = true;
+      wctx.globalCompositeOperation = 'multiply';
+      wctx.drawImage(this.lightMaskCanvas!, 0, 0);
+      wctx.restore();
+      wctx.globalCompositeOperation = 'source-over';
+      const ctx = this.ctx;   // = 主画布（endWorldLayer 已恢复）
+      ctx.drawImage(this.worldCanvas!, 0, 0);
+      return;
+    }
+    // ==== 旧路径（?worldlayer=0 逃生门）：全屏乘光（天空同被压暗） ====
     const ctx = this.ctx;
     ctx.save();
     ctx.imageSmoothingEnabled = true;
     ctx.globalCompositeOperation = 'multiply';
-    const [sx, sy] = cam.worldToScreen(tx0 * ts, ty0 * ts);
     ctx.drawImage(this.lightCanvas, sx, sy, tilesX * ts * z, tilesY * ts * z);
     ctx.restore();
     ctx.globalCompositeOperation = 'source-over';

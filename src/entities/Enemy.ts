@@ -359,6 +359,9 @@ export class Enemy extends Entity {
   realLifeHost: Enemy | null = null;
   /** 本段跟随的前一段（非空 = 本段是身体段，跳过 AI 只做跟随） */
   wormFollow: Enemy | null = null;
+  /** 层序反转标记（骑手族 390/416：坐骑由骑手生成、原版槽序=坐骑画骑手【前】——
+   *  与"部件画本体前"的 master 锚相反,排序时回落自然 y(骑手 y<坐骑 → 先画=在后)） */
+  drawBehindMaster = false;
   /** 上一 tick 位置（段跟随用：段复制前一段的旧位置 = 经典贪吃蛇链） */
   prevX = 0;
   /** 存活 tick 计数(侏儒石化等用) */

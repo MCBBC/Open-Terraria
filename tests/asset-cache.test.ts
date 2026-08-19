@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import {
   fnv1a32, assetVersion, menuWarmUrls, worldWarmUrls, miscWarmUrls,
   soundsWarmUrls, musicWarmUrls, priorityPlan, initAssetCache, assetCacheState,
+  composeVersion, zipPhaseAt, type ZipManifest, type ZipManifestPart,
 } from '../src/net/AssetCache';
 import vanillaJson from '../public/sprites/vanilla.json';
 import vanillaUiJson from '../public/sprites/vanilla-ui.json';
@@ -71,5 +72,42 @@ describe('门控(node 环境天然短路)', () => {
   it('initAssetCache 在无 serviceWorker 的环境安全 no-op', async () => {
     await initAssetCache();
     expect(assetCacheState().enabled).toBe(false);
+  });
+});
+
+// ---- zip 分片模式(2026-08-19) ----
+describe('zip 模式(纯函数)', () => {
+  const part = (phase: string, files: number): ZipManifestPart => ({
+    file: `p-${phase}.zip`, phase, files, bytes: files * 10, zipBytes: files * 5,
+    entries: [], inputHash: 'h',
+  });
+  const manifest: ZipManifest = {
+    algoVersion: 1, contentHash: 'abc123', totalFiles: 100, totalBytes: 1000,
+    parts: [part('menu', 20), part('game-sprites', 30), part('sounds', 25), part('music', 25)],
+  };
+
+  it('composeVersion:稳定/区分基础版与 contentHash', () => {
+    expect(composeVersion('v1', 'abc')).toBe(composeVersion('v1', 'abc'));
+    expect(composeVersion('v1', 'abc')).not.toBe(composeVersion('v1', 'abd'));
+    expect(composeVersion('v1', 'abc')).not.toBe(composeVersion('v2', 'abc'));
+  });
+
+  it('zipPhaseAt:按片 files 累计映射相位,越界=done', () => {
+    expect(zipPhaseAt(manifest.parts, 0)).toBe('menu');
+    expect(zipPhaseAt(manifest.parts, 19)).toBe('menu');
+    expect(zipPhaseAt(manifest.parts, 20)).toBe('game-sprites');
+    expect(zipPhaseAt(manifest.parts, 55)).toBe('sounds');
+    expect(zipPhaseAt(manifest.parts, 80)).toBe('music');
+    expect(zipPhaseAt(manifest.parts, 100)).toBe('done');
+    expect(zipPhaseAt(manifest.parts, 9999)).toBe('done');
+  });
+
+  it('manifest 超集断言:五目录覆盖 priorityPlan(除 l10n 条目)', () => {
+    // pack 扫的是目录超集;priorityPlan 的 url(除 l10n/)必须全部可由五目录产出
+    const dirs = ['fonts/', 'sprites/vanilla-ui/', 'sprites/vanilla/', 'sounds/', 'audios/music/'];
+    for (const u of priorityPlan().urls) {
+      if (u.startsWith('l10n/')) continue;   // l10n 有意排除(网络优先可变)
+      expect(dirs.some((d) => u.startsWith(d)), `无目录可承载 ${u}`).toBe(true);
+    }
   });
 });
