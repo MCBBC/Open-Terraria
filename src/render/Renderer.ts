@@ -22,6 +22,7 @@ import { FancyResourceBars } from './FancyResourceBars';
 import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
+import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale } from '../ui/MobileControls';
 import { TEAM_COLORS } from '../stats/Pvp';
@@ -2275,23 +2276,30 @@ export class Renderer {
     // 退避/死亡期 acquireGL 返回 null → 当帧云走 2D cloudTint 兜底,自然恢复)
     this.sky.cloudGlLayer = !this.cpuRender && (this.bgGlEnabled || this.sky.useGLClouds)
       ? this.acquireGL() : null;
+    // ColorOfTheSkies(Main.cs:63361 SetBackColor 曲线+月相地板+血月/日食+
+    // 晨昏地平线渗入)——天空侧唯一色源(2026-08-20 原版化落地):
+    // 天空贴图×本值 / 远景层×本值(:56194)/云 cloudColor/环境实体 GetColor bg。
+    // ★观感耦合铁律:合成架构与色链单源化同批落地(2026-08-19 分批教训)
+    const cots = colorOfTheSkies(clock.timeOfDay, clock.dayCount, !!clock.eclipse,
+      !!(clock as { bloodMoon?: boolean }).bloodMoon,
+      (clock as { moonPhase?: number }).moonPhase);
+    this.colorOfTheSkies = cots;
+    this.sky.cots = cots;
+    // 晨昏地平线渗入光种(SetBackColor 尾 :63356 ModifyHorizonLight):可见性
+    // 由 SkyRenderer 同公式算好——此处写入帧状态供 skySeed/colorOfTheSkies 消费
+    // (光照引擎 tick 在 update 段,读到的状态滞后一帧,窗口沿缓变无感)
+    const hv = this.sky.horizonVis;
+    setFrameHorizon(hv ? { sunrise: hv.sunrise, sunset: hv.sunset, phase: this.sky.horizonPhase } : null);
+    // 云量压暗(Main.cs:62990-62999 num3=1−cloudAlpha·0.9·atmo,地板之前——
+    // 月亮穿云仍有地板光)
+    const cloudA = this.sky.weatherRef?.cloudAlpha ?? 0;
+    setFrameCloudDim(cloudA > 0 ? Math.max(0, 1 - cloudA * 0.9 * this.sky.atmoValue(cam.y)) : 1);
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
     if (this.scene) {
-      // 昼夜色调（≈ColorOfTheSkies：白天白、夜晚压暗偏蓝、晨昏暖色）——
-      // ★2026-08-20 定案保留本手搓档:与全屏乘光链配套校准过的稳定观感
-      // (用户定案"下午版本非常稳定非常好";cots 全链替换方案已回滚)
-      const df = clock.dayFactor;
-      const t = clock.timeOfDay;
-      let tr = 1, tg = 1, tb = 1;
-      if (df < 1) {
-        const dusk = t > 0.68 && t < 0.82 ? 1 - Math.abs(t - 0.75) / 0.07 : t > 0.18 && t < 0.32 ? 1 - Math.abs(t - 0.25) / 0.07 : 0;
-        const night = 1 - df;
-        tr = 1 - 0.70 * night + 0.10 * dusk;
-        tg = 1 - 0.66 * night - 0.22 * dusk;
-        tb = 1 - 0.50 * night - 0.40 * dusk;
-      }
+      // 远景层 tint = ColorOfTheSkies/255(×ColorOfSurfaceBackgrounds :56194)
+      const tr = cots[0] / 255, tg = cots[1] / 255, tb = cots[2] / 255;
       // GL 路径:离屏画布整段画完单次合成(层序/透明度与 2D 完全一致);
       // 2D 回退路径保留(?bggl=0 / GL 不可用)
       let bgDone = false;
@@ -9910,12 +9918,14 @@ export class Renderer {
   private lightMaskCanvas: HTMLCanvasElement | null = null;
   private lightMaskCtxLayer: CanvasRenderingContext2D | null = null;
   private worldLayerActive = false;
-  /** ★2026-08-20 定案:worldLayer 默认【关】——月光会话(1b369fe2)把光照分层
-   *  设为默认后夜景全面回归(半透明实体 α 膨胀/远景云观感漂移,用户实报"一改
-   *  全部炸掉");稳定基线 = 下午版全屏乘光。分层路径保留为 ?worldlayer=1
-   *  选择加入(合成已改 GL 精确乘,旧 mask-multiply 的 α 膨胀已修) */
+  /** ★2026-08-20 原版化落地:worldLayer 分层默认【开】(原版语义:天空/日月/
+   *  星/远景直绘 backbuffer,世界内容按光照乘色)——合成已改 GL 双纹理精确乘
+   *  (顶点色语义,α 无损),且与 ColorOfTheSkies 色链单源化【同批】落地(分批
+   *  切换曾致夜景全面漂移,教训固化)。逃生门 ?worldlayer=0 回旧全屏乘光 */
   worldLayerEnabled = typeof location !== 'undefined'
-    ? new URLSearchParams(location.search).get('worldlayer') === '1' : false;
+    ? new URLSearchParams(location.search).get('worldlayer') !== '0' : true;
+  /** 本帧 ColorOfTheSkies(0-255;render 每帧写入)——天空侧唯一色源,详见 render() 1.5 段注 */
+  colorOfTheSkies: [number, number, number] = [255, 255, 255];
   /** 世界层×光照 GL 精确乘(?wgl=0 逃生门;GL 不可用自动回退 2D 三步)。
    *  Canvas2D 'multiply' 无法表达"乘色保 α"(blend 的 (1-αd)Cs 项 + α 膨胀),
    *  原版顶点色语义只能双纹理 shader——见 GLWorldLight 头注 */

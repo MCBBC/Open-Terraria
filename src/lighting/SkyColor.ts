@@ -3,6 +3,7 @@
 // 原版 Main.time:昼 0-54000(4:30-18:00),夜 54000-86400。此处做时间映射,
 // 不改 Clock 本身(SkyRenderer/音频仍吃 World.dayFactor)。
 import { MOON_FLOOR } from './lightTables';
+import { modifyHorizonLight } from './Horizon';
 
 /** timeOfDay → 原版 Main.time(0-86400) */
 export function toVanillaTime(timeOfDay: number, isDay: boolean): number {
@@ -20,8 +21,10 @@ export function moonPhase(dayCount: number): number {
   return Math.max(0, dayCount) % 8;
 }
 
-/** SetBackColor 五段昼夜曲线(Main.cs:62889-63362 主体)→ [R,G,B] 0-255 */
-export function setBackColor(mainTime: number, isDay: boolean, phase: number, bloodMoon = false): [number, number, number] {
+/** SetBackColor 五段昼夜曲线(Main.cs:62889-63362 主体)→ [R,G,B] 0-255。
+ *  cloudDim(缺省 1)= 云量压暗 :62990-62999 num3=1−cloudAlpha·0.9·atmo,
+ *  施加位置在月相地板【之前】(地板保证月亮穿云,原版序:曲线→云暗→地板) */
+export function setBackColor(mainTime: number, isDay: boolean, phase: number, bloodMoon = false, cloudDim = 1): [number, number, number] {
   let r: number, g: number, b: number;
   if (isDay) {
     if (mainTime < 13500) {
@@ -60,6 +63,8 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number, bl
       r = 20 * p + 5; g = 30 * p + 5; b = 30 * p + 5;
     }
   }
+  // 云量压暗(:62990-62999,三通道同乘;地板之前)
+  if (cloudDim < 1) { r *= cloudDim; g *= cloudDim; b *= cloudDim; }
   // 月相地板(Main.cs:63230-63266):每通道下限；血月恒 25（:63266-63277）
   const floor = bloodMoon ? 25 : MOON_FLOOR[phase % 8];
   r = Math.max(r, floor); g = Math.max(g, floor); b = Math.max(b, floor);
@@ -77,16 +82,36 @@ export function tileColor(bg: readonly [number, number, number]): [number, numbe
   ];
 }
 
+// ---- 地平线可见性帧状态(2026-08-20 原版化:ModifyHorizonLight 渗入天空色/光种) ----
+// SetBackColor 尾(Main.cs:63356)在月相地板/日食之后调用 HorizonRenderer.
+// ModifyHorizonLight——晨昏时地块光种子也带梯度色。可见性依赖 cloudAlpha/atmo
+// (渲染侧量),光照引擎 tick 不便携带 → 模块级每帧状态由 Renderer.render() 写入,
+// 读取方(skySeed/colorOfTheSkies)默认消费;首帧/测试环境为 null 即无渗入。
+let frameHorizon: { sunrise: number; sunset: number; phase: number } | null = null;
+export function setFrameHorizon(v: { sunrise: number; sunset: number; phase: number } | null): void {
+  frameHorizon = v;
+}
+export function getFrameHorizon(): { sunrise: number; sunset: number; phase: number } | null {
+  return frameHorizon;
+}
+// 云量压暗帧状态(Main.cs:62990-62999:num3 = 1−cloudAlpha·0.9·atmo,三通道同乘,
+// 在月相地板【之前】——雨天天空/远景/光种子同步变暗;由 Renderer 每帧写入)
+let frameCloudDim = 1;
+export function setFrameCloudDim(v: number): void {
+  frameCloudDim = v;
+}
+
 /** 一次调用得到天空光种子(0-1 RGB)。eclipse=true 时按 Main.cs:63282-63305 压暗：
  *  eclipseLight = min(1, 白天 Main.time/1242)（约 25 游戏秒到满暗）；R×(1-0.925L)
- *  G×(1-0.96L) B×(1-1.0L)——蓝色通道清零、红色保留 7.5% 的血红暮色 */
+ *  G×(1-0.96L) B×(1-1.0L)——蓝色通道清零、红色保留 7.5% 的血红暮色。
+ *  尾接 ModifyHorizonLight(:63356,帧状态由 Renderer 写入,晨昏梯度渗入) */
 export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bloodMoon = false, moonPhaseNow?: number): [number, number, number] {
   // ★昼夜窗口对齐 Clock（DAWN=0.1875/DUSK=0.8125，昼 4:30-19:30）——曾用
   // (0.25,0.75) 两端各差 1.5h，18:00-19:30 天空光差 ~4.4 倍
   const isDay = timeOfDay > 0.1875 && timeOfDay < 0.8125;
   const t = toVanillaTime(timeOfDay, isDay);
   void dayCount;
-  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon);
+  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim);
   if (eclipse && isDay) {
     const L = Math.min(1, t / 1242);
     bg = [
@@ -95,7 +120,35 @@ export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bl
       bg[2] * (1 - 1 * L),
     ];
   }
+  if (frameHorizon && (frameHorizon.sunrise > 0 || frameHorizon.sunset > 0)) {
+    bg = modifyHorizonLight([bg[0], bg[1], bg[2]], frameHorizon.sunrise, frameHorizon.sunset, frameHorizon.phase);
+  }
   return tileColor(bg);
+}
+
+/** ColorOfTheSkies(Main.cs:63361)——天空侧唯一色源(2026-08-20 原版化落地):
+ *  · 天空渐变贴图 × 本值 · 远景群系层 × 本值(:56194) · 云 cloudColor(:58752 族)
+ *  · 环境天空实体 GetColor bg · 天空光种子 skySeed = tileColor(本值)(:62608)
+ *  含月相地板/血月/日食/晨昏地平线渗入(帧状态)。返回 0-255。 */
+export function colorOfTheSkies(
+  timeOfDay: number, dayCount: number, eclipse = false, bloodMoon = false, moonPhaseNow?: number,
+): [number, number, number] {
+  const isDay = timeOfDay > 0.1875 && timeOfDay < 0.8125;
+  const t = toVanillaTime(timeOfDay, isDay);
+  void dayCount;
+  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim);
+  if (eclipse && isDay) {
+    const L = Math.min(1, t / 1242);
+    bg = [
+      bg[0] * (1 - 0.925 * L),
+      bg[1] * (1 - 0.96 * L),
+      bg[2] * (1 - 1 * L),
+    ];
+  }
+  if (frameHorizon && (frameHorizon.sunrise > 0 || frameHorizon.sunset > 0)) {
+    bg = modifyHorizonLight([bg[0], bg[1], bg[2]], frameHorizon.sunrise, frameHorizon.sunset, frameHorizon.phase);
+  }
+  return [bg[0], bg[1], bg[2]];
 }
 
 // ---- 全局闪烁驱动(火把动态时钟源,由引擎每 tick 推进) ----

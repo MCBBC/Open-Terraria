@@ -109,6 +109,8 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
   if (!st.flags[ii] || SHEET_OF[st.type[ii]] !== pileSheet) return false;
   const frameX = st.frameX[ii] | 0;
   const frameY = st.frameY[ii] | 0;
+  const __p3 = (globalThis as { __swP3x2Log?: (s: string) => void }).__swP3x2Log;
+  __p3?.(`C3X2 ${i},${j} sheet${pileSheet} fx${frameX} fy${frameY}`);
   const num3 = Math.trunc(frameY / 36);                    // cs:49204
   const num4 = frameY % 36;
   const num = j - Math.trunc(num4 / 18);                   // cs:49208
@@ -147,6 +149,7 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
       const bs = SHEET_OF[st.type[st.idx(k, num8)]];
       if (bs === 2 || bs === 477 || bs === 492) grassBelow = true;
     }
+    __p3?.(`CONV? ${i},${j} anchor(${n5},${num}) anchorFx${st.frameX[st.idx(n5, num)]} grassBelow=${grassBelow ? 1 : 0}`);
     if (!grassBelow) {
       const t186 = INTERNAL_OF_SHEET.get(186) ?? st.type[ii];
       for (let k = n5; k < n5 + 3; k++) {
@@ -244,6 +247,7 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
   if (enclosed) return;
   // CanBeClearedDuringGeneration=false 的泥（沙漠沙岩族等）不转（cs:75265）
   if (NOT_CLEARABLE.has(st.type[i])) return;
+  { const __sg = (globalThis as { __swSpreadLog?: (x: number, y: number, d: number, g: number) => void }).__swSpreadLog; __sg?.(x, y, dirt, grass); }
   st.type[i] = grass;
   // ★NNNNN：cs:75288 SquareTileFrame(i,j)——TileFrame 头清位 + 186/187 大石堆
   // Check3x2 一致性/支撑校验级联（#73 5 格残差根因；flag2 转化支/树杀手前置在本
