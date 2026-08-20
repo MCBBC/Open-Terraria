@@ -1,5 +1,6 @@
 // DOM overlay UI：主菜单 / HUD 快捷栏 / 背包+配饰栏 / 合成 / 宝箱 / Buff栏 / 暂停 / Tooltip / Toast
 import type { Game } from '../core/Game';
+import { options } from '../core/Options';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { OPENABLE_BAG_VIDS, openBagItem } from '../data/vanillaOpenBags';
 import { TILE_DEFS } from '../data/tiles';
@@ -353,6 +354,7 @@ const CSS = `
   padding:9px 13px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:280px;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   text-shadow: 1px 1px 0 rgba(0,0,0,0.85); line-height:1.5; }   /* 原版 MouseText 字体+字影（:20256 DrawColorCodedStringWithShadow） */
+.sw-tooltip-nobox { background:transparent; }   /* 悬停文本框:关（SettingsEnabled_OpaqueBoxBehindTooltips=false，无底板纯文字原版支） */
 .sw-tooltip-lines { display:inline; }   /* 文字层容器：脉冲 brightness 只作用于此（面板恒定） */
 .sw-yoyo-logo { width:16px; height:16px; image-rendering:pixelated; vertical-align:-3px;
   filter:drop-shadow(1px 0 #000) drop-shadow(-1px 0 #000) drop-shadow(0 1px #000) drop-shadow(0 -1px #000); } /* OneDropLogo 五层影（:20263-20289） */
@@ -818,6 +820,12 @@ export class UI {
     this.tooltip = el('div', 'sw-tooltip');
     this.tooltip.style.display = 'none';
     this.root.appendChild(this.tooltip);
+    // 悬停文本框开关（Main.SettingsEnabled_OpaqueBoxBehindTooltips，Main.cs:249
+    // 默认 true；IngameOptions.cs:846-855）：关 = 无底板纯文字（原版 :20256 支）。
+    // 经 applyTooltipBg 统一落底（内联 style 会盖 class 规则——九宫底也在那里）
+    const applyTooltipBox = () => this.applyTooltipBg();
+    applyTooltipBox();
+    options.onChange(applyTooltipBox);   // UI 单例长存，无退订点
 
     game.openChest = (c) => this.openChestPanel(c);
     // 当前打开箱子引用（Game 提取机通电 Wiring.cs:2571 Chest.UsingChest 判定用）
@@ -1106,12 +1114,22 @@ export class UI {
   /** 右键开包（ItemSlot.TryOpenContainer :1642-1660 + Player.Open* 1:1）：
    *  掷骰 → 产出入包（装不下落地 = GetOrDropItem :6813-6826 noGrabDelay 语义）→
    *  stack-- → SoundEngine.PlaySound(7)（Sfx 'pickup' = Grab.wav）。宝藏袋族
-   *  （BOSS_BAG_IDS）走 Game 持用左键链，本方法回落 false 不动它 */
+   *  （BOSS_BAG_IDS）走 Game 持用左键链，本方法回落 false 不动它。
+   *  锁盒钥匙门（:1693-1704）：金锁盒 3085 消耗金钥匙 327（Player.ConsumeItem
+   *  :8846 槽序 0→57，含虚空袋兜底）；黑曜石锁盒 4879 只验暗影钥匙 329 不消耗
+   *  （HasItemInInventoryOrOpenVoidBag :54963——持虚空透镜 4131 才查 bank4） */
   private tryOpenContainer(cur: { id: number; stack: number }, i: number): void {
     const game = this.game;
     const inv = game.player.inv;
     const vid = vanillaIdOfItemKey(ITEM_DEFS[cur.id]?.key ?? '');
     const px = game.player.cx, py = game.player.cy;
+    // 虚空袋可达门（Player.useVoidBag :22892-22901 = 背包含 4131）
+    const voidLensIid = invIndexOfVanilla(4131);
+    const useVoidBag = voidLensIid >= 0 && inv.countOf(voidLensIid) > 0;
+    const bank4Has = (vidX: number): boolean => {
+      const iid = invIndexOfVanilla(vidX);
+      return iid >= 0 && game.player.banks[3].some((s) => s && s.id === iid && s.stack > 0);
+    };
     const opened = openBagItem(vid, (id, n) => {
       const key = VANILLA_ITEM_KEY_BY_ID[id];
       if (!key) return;                       // vanilla.json 缺条目防御（bagItemIdRegistered 可查）
@@ -1119,7 +1137,26 @@ export class UI {
       if (iid === undefined) return;
       const left = inv.add(iid, n ?? 1);
       if (left > 0) game.spawnDrop(px, py, key, left, 0, -2); // 溢出落地（:6817-6820）
-    }, { hardMode: !!game.world.flags.hardMode });            // OpenPresent :6654 硬模式门读档
+    }, {
+      hardMode: !!game.world.flags.hardMode,   // OpenPresent :6654 硬模式门读档
+      remixWorld: !!game.world.seedFlags?.remix,
+      getGoodWorld: !!game.world.seedFlags?.getGoodWorld,
+      skyblockLowTiles: !!game.world.seedFlags?.skyblock,   // WorldGen.Skyblock.lowTiles（空岛匣 2197 支）
+      // 金钥匙消耗：先背包槽序 0→57（Inventory.remove 同序），后虚空袋 bank4
+      consumeItem: (vidX) => {
+        const iid = invIndexOfVanilla(vidX);
+        if (iid >= 0 && inv.remove(iid, 1)) return true;
+        if (useVoidBag && iid >= 0) {
+          const s = game.player.banks[3].find((b) => b && b.id === iid && b.stack > 0);
+          if (s) { s.stack--; if (s.stack <= 0) game.player.banks[3][game.player.banks[3].indexOf(s)] = null; return true; }
+        }
+        return false;
+      },
+      hasItem: (vidX) => {
+        const iid = invIndexOfVanilla(vidX);
+        return iid >= 0 && (inv.countOf(iid) > 0 || (useVoidBag && bank4Has(vidX)));
+      },
+    });
     if (opened) {
       inv.removeAt(i, 1);                      // item.stack--（:1651-1655，归零由 Inventory 处理）
       game.sfx.play('pickup', 1);              // PlaySound(7) = Grab（:1656）
@@ -1462,12 +1499,17 @@ export class UI {
    *  银行家舍入——ShopEntry.price 已算好，这里反查货架条目即可；显示侧 min-1
    *  门 Main.cs:20341-20343 在此同款）。非货架物品（玩家自带物悬停）→ 原版
    *  hoverItem 是商店快照同款也显示买入价，此处按 expectedPrices(货架价×pa) 近似 */
-  private shopTooltipContext(def: (typeof ITEM_DEFS)[number], vid: number, stack: number): { buy: boolean; priceCopper: number } | null {
+  private shopTooltipContext(def: (typeof ITEM_DEFS)[number], vid: number, stack: number): { buy: boolean; priceCopper: number; medalPrice?: number } | null {
     if (!this.game.npcShopOpen) return null;   // Main.npcShop<=0 早退（:20310-20312）
     // 货架条目（isAShopItem）→ 买入价（expectedPrices 同链 :20312 calcForBuying）
     const g = this.game as unknown as {
       shopEntryPriceOf?: (vid: number) => number | null;
+      shopEntryMedalPriceOf?: (vid: number) => number | null;
     };
+    // 勋章条目（hoverItem.shopSpecialCurrency≠-1，Main.cs:20313-20316）：价格行
+    // 走 GetPriceText 勋章文案（枚数 + Currency.DefenderMedals），不进铜币四档着色
+    const medal = g.shopEntryMedalPriceOf?.(vid);
+    if (medal != null) return { buy: true, priceCopper: medal, medalPrice: medal };
     const listed = g.shopEntryPriceOf?.(vid);
     if (listed != null) return { buy: true, priceCopper: Math.max(1, listed) };
     // 玩家自带物在商店内 → 卖出价（:20312 calcForSelling → :20324-20326 ÷5 min1 ×stack）
@@ -1504,8 +1546,17 @@ export class UI {
   }
 
   /** tooltip 九宫底应用（Inventory_Back13 × (23,25,81)×0.925，:20252-20255）：
-   *  素材未就绪时挂一次性 onload 补刷（首次悬停竞态走兜底色） */
+   *  素材未就绪时挂一次性 onload 补刷（首次悬停竞态走兜底色）。
+   *  悬停文本框开关（SettingsEnabled_OpaqueBoxBehindTooltips，默认 true）：关 =
+   *  无底板纯文字（原版 :20256 支）——内联清底，display:none 阶段也先清 */
   private applyTooltipBg(): void {
+    if (!options.data.opaqueBoxBehindTooltips) {
+      this.tooltip.style.background = 'transparent';
+      this.tooltip.style.border = 'none';
+      this.tooltip.classList.add('sw-tooltip-nobox');
+      return;
+    }
+    this.tooltip.classList.remove('sw-tooltip-nobox');
     if (this.tooltip.style.display !== 'block') return;
     const w = Math.ceil(this.tooltip.offsetWidth), h = Math.ceil(this.tooltip.offsetHeight);
     const bgUrl = tooltipBgDataUrl(w, h);
@@ -1996,13 +2047,7 @@ export class UI {
           if (this.game.player.inv.currentLoadout === k) return;
           this.game.player.inv.trySwitchingLoadout(k);
           this.game.sfx.play('menuTick', 1); // SoundID 12（TrySwitchingLoadout）
-          // 切套白闪（GetColorByLoadout :2554-2559：Remap(dt,0,30,0.5,0)³→白）
-          // ★ class 必须播完即摘：display:none→block 会使 CSS 动画重播，
-          //   残留 class 会导致此后每次打开背包全体槽位白闪
-          this.invPanel.classList.remove('sw-loadout-flash');
-          void this.invPanel.offsetWidth;
-          this.invPanel.classList.add('sw-loadout-flash');
-          setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
+          this.flashLoadoutSwitch();
           this.refreshAll();
         });
         row.appendChild(b);
@@ -3283,6 +3328,17 @@ export class UI {
   private npcDialog: NpcDialog | null = null;
   private npcShop: NpcShop | null = null;
 
+  /** 配装切换白闪（GetColorByLoadout :2554-2559：Remap(dt,0,30,0.5,0)³→白）。
+   *  背包按钮与 Loadout1/2/3 热键（onLoadoutSwitched 回调）共用。
+   *  ★ class 必须播完即摘：display:none→block 会使 CSS 动画重播，
+   *    残留 class 会导致此后每次打开背包全体槽位白闪 */
+  flashLoadoutSwitch(): void {
+    this.invPanel.classList.remove('sw-loadout-flash');
+    void this.invPanel.offsetWidth;
+    this.invPanel.classList.add('sw-loadout-flash');
+    setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
+  }
+
   showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null): void {
     if (!this.npcDialog) {
       this.npcDialog = new NpcDialog(this.root, (id) => {
@@ -3301,7 +3357,7 @@ export class UI {
     this.npcHappiness?.close();   // 心情浮层随对话框一并关闭
   }
 
-  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; buyback?: number }>, copper: number, happinessPct?: number): void {
+  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number; medal?: number; buyback?: number }>, copper: number, happinessPct?: number, medals?: number): void {
     if (!this.npcShop) {
       this.npcShop = new NpcShop(this.root,
         // 行点击 = 有货商店格（PickItemMovementAction case 15 ItemSlot.cs:1426-1439）：
@@ -3329,7 +3385,7 @@ export class UI {
       ...it,
       iconUrl: this.game ? iconUrl(this.game, it.vanillaId) || '' : '',
     }));
-    this.npcShop.open(title, entries, copper, happinessPct);
+    this.npcShop.open(title, entries, copper, happinessPct, medals);
     // 懒加载晚到升级(2026-08-13 枚举 review):开店瞬间 iconUrl miss(空串/程序化
     // 兜底)此前会冻结到关店——refreshAll 不触 npcShop。有界轮询就绪后原地补图,
     // 关店/超时即停(iconCache 只缓存命中,iconUrl 天然可升级)

@@ -12,18 +12,33 @@
 //   Enemy.ts dropCtx luck: p.luck）——src/stats/Luck.ts RecalculateLuck（:28672-28697）
 //   全来源已接：瓢虫 604/605（击杀坏运/触碰好运）、微光化币 coinLuck、火炬正确性
 //   torchLuck、花园地精、灯笼夜、幸运药水三档、风筝 buff 三档、银河珍珠、恶臭、
-//   幸运装备（币/马掌）、碎镜。掷骰消费 = Luck.RollLuck 同构（rollLuck/tryRoll/
-//   rollCoins 双轮极值/rollHeartsAndStars）。遗留登记（非 luck 链缺口）：
-//   四叶草族 5574/5575/5576 物品未入表（equipmentBasedLuckBonus 三槽空挂）;
+//   幸运装备（币/马掌/四叶草族 5574/5575/5576——Player.luckEquipmentBonus 口袋+
+//   装备位扫描，2026-08-20 接）、碎镜。掷骰消费 = Luck.RollLuck 同构（rollLuck/
+//   tryRoll/rollCoins 双轮极值/rollHeartsAndStars）。遗留登记（非 luck 链缺口）：
+//   四叶草获取链——5576 乌鸦 301 掉落 1/10（本表已载）/5574 割成熟药草 1/1000
+//   （DropBait.dropCloverRoll）/5575 微光转化 5574→5575（vanilla-shimmer 已载）;
 //   多人 closestPlayer 近似为本地玩家（原版 FindClosest,Enemy 侧注入点）。
 // 偏差（记录）：NotFromStatue 恒 true；
 // 天空盒/DST 联动条件恒 false；月事件四条件已实现（ctx.moonEvent 注入，见 evalCond）。
 // RedHatSkeletron/MissingTwin/EmpressOfLightIsGenuinelyEnraged 经 ctx.ai3/
-// anyNpcOfType 接通（Enemy 注入）；MechdusaKill/NamedNPC/
-// EyeOfCthulhuDefeatedAndNoAltarsInWorld 缺子系统恒 false（注释见 evalCond）。
+// anyNpcOfType 接通（Enemy 注入）；MechdusaKill（seedFlags 投影 ctx.mechdusaWorld）/
+// NamedNPC（TownNPC 死亡注入 ctx.npcGivenName）/EyeOfCthulhuDefeatedAndNoAltars
+// InWorld（ctx.noAltarsInWorld 读档祭坛普查）均接真值（2026-08-20，注释见 evalCond）。
 import dropData from '../data/vanilla-npcdrops.json';
 import npcValueJson from '../data/vanilla-npcvalue.json';
 import type { RNG } from '../core/rng';
+import { Lang } from '../i18n/Lang';
+
+// MechdusaKill 目标集（Conditions.cs:581：{127 毁灭者, 126 Retinazer 侧眼,
+// 125 Spazmatillum 侧眼, 134 Skeletron Prime}——同场任一「其它」存活即不放行）
+const MECHDUSA_TARGETS = [127, 126, 125, 134];
+// NamedNPC 构造实参（ItemDropDatabase.cs:732-734 仅有三处）——提取器剥了
+// "<类目>Names." 前缀，此处按原版全键拼回（Language.GetTextValue 比对侧）
+const NAMED_NPC_KEYS: Record<string, string> = {
+  Andrew: 'GuideNames.Andrew',
+  Whitney: 'SteampunkerNames.Whitney',
+  Jim: 'PainterNames.Jim',
+};
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Rule = any;
@@ -96,8 +111,20 @@ export interface NpcDropCtx {
    *  无距离门，单人 = 玩家存活非 ghost）。五个悠悠球掉落条件的数据源（Conditions.cs:1136-1244），
    *  Enemy 击杀处注入 */
   hasPlayerTarget?: boolean;
-  /** NPC.AnyNPCs(type)（Enemy 注入存活同型扫描；MissingTwin 条件数据源） */
+  /** NPC.AnyNPCs(type)（Enemy 注入存活同型扫描；MissingTwin/MechdusaKill 条件数据源） */
   anyNpcOfType?: (type: number) => boolean;
+  /** SpecialSeedFeatures.Mechdusa（SpecialSeedFeatures.cs:119-129 = remixWorld &&
+   *  getGoodWorld——getfixedboi 是唯一双真种子；Enemy 注入 world.seedFlags 投影）。
+   *  MechdusaKill 条件数据源（Conditions.cs:579-596） */
+  mechdusaWorld?: boolean;
+  /** WorldGen.Skyblock.noAltars（:3062/:3148/:3163-3166：读档全图普查 tile 26 恶魔
+   *  祭坛，无一存活才 true——1.4.5 skyblock 世专属）；Enemy 注入 Game 侧缓存扫描。
+   *  EyeOfCthulhuDefeatedAndNoAltarsInWorld 条件数据源（Conditions.cs:1422-1437） */
+  noAltarsInWorld?: boolean;
+  /** 死亡 NPC 具名（TownNPC.givenName；NamedNPC 条件数据源——Conditions.cs:957-981
+   *  `info.npc.HasGivenName && GivenName == Language[neededName]`，具名随机池抽中
+   *  Andrew/Whitney/Jim 时该 NPC 死亡掉专属纪念品）。Enemy 无名 → undefined 恒 false */
+  npcGivenName?: string;
   extras?: DropExtras;
 }
 
@@ -168,9 +195,16 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'DownedAllMechBosses': return downed(ctx, 134, 125, 127);
     case 'BeatAnyMechBoss': return downed(ctx, 134) || downed(ctx, 125) || downed(ctx, 127);
     case 'MechdusaKill':
-      // Conditions.cs:579：首需 SpecialSeedFeatures.Mechdusa（Mekdusa 秘密种子），
-      // 再需三王一眼 AnyNPCs 扫描。秘密种子系统未实装 → 恒 false
-      return false;
+      // Conditions.cs:579-596（ Mechdusa 秘密种子世界 + 三机械王 AnyNPCs 扫描）：
+      // !SpecialSeedFeatures.Mechdusa → false；目标集 {127 毁灭者,126 双子一眼,
+      // 125 双子另眼,134 Prime} 中【其它仍存活】任一在场 → false——即同场三王
+      // 全灭时最后倒下那只掉 5382（Mekdusa 召唤链前置物品）。掉落规则注册于
+      // 127/134/126+125（ItemDropDatabase.cs:441/:454/:469）
+      if (!ctx.mechdusaWorld) return false;
+      for (const t of MECHDUSA_TARGETS) {
+        if (t !== ctx.type && ctx.anyNpcOfType?.(t)) return false;
+      }
+      return true;
     case 'FromCertainWaveAndAbove': {
       // Conditions.cs:249-261：NPC.waveNumber >= neededWave（不查事件——无事件时
       // waveNumber=0 恒不满足；注册仅在冰女王专属掉落 1914 上，neededWave=15）
@@ -218,12 +252,26 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'SkyblockIsUp': case 'SkyblockIsUpNoSickle': return false;
     case 'WindyEnoughForKiteDrops': return !!ex?.windy;
     case 'EyeOfCthulhuDefeatedAndNoAltarsInWorld':
-      // Conditions.cs:1422：NPC.downedBoss1 && WorldGen.Skyblock.noAltars。
-      // flags.downedBoss1（downed_4? 否——Boss1=克眼）已有，但 noAltars 是天空盒世界
-      // 专属字段、本作无天空盒世界 → 恒 false
-      return false;
-    case 'NamedNPC': return false; // 需 NPC.HasGivenName/GivenName 具名城镇 NPC
-      // （Andrew/Whitney/Jim，ItemDropDatabase.cs:732-734）——具名系统未实装 → 恒 false
+      // Conditions.cs:1422-1437：NPC.downedBoss1 && WorldGen.Skyblock.noAltars——
+      // skyblock 世界的坠星补给（僵尸族 2/317/318/190-194/133 掉 43 坠星 1/50，
+      // ItemDropDatabase.cs:1086-1088）。downedBoss1 = EoC（world.flags.downed_4，
+      // 与 Game.shopCondOk 同口径含 downedEyeOfCthulhu 旧键）；noAltars = 读档普查
+      // 无恶魔祭坛（ctx.noAltarsInWorld，Enemy 注入）。
+      // ★登记：原版 EoC(type 4) 击杀会 NPCLoot_DropAltar（NPC.cs:79676-79679 →
+      // :80393-80403 掉 5532/5533 便携祭坛并置 noAltars=false 终结坠星供给）——
+      // 本仓未接该重置支，skyblock 世击杀 EoC 后坠星持续（行为偏差，非条件缺口）
+      return !!(ctx.flags['downed_4'] || ctx.flags.downedEyeOfCthulhu) && !!ctx.noAltarsInWorld;
+    case 'NamedNPC': {
+      // Conditions.cs:957-981：info.npc.HasGivenName && GivenName ==
+      // Language.GetTextValue(neededName)——【NPC 自身的随机具名】命中参数名才掉
+      // （Andrew=Redigit：向导掉绿帽 867 / Whitney：蒸汽朋克掉 4372 / Jim：画家掉
+      // 5290，ItemDropDatabase.cs:732-734）。提取器把 "GuideNames.Andrew" 键剥成
+      // "Andrew"（tools/extract-npcdrops.mjs condArg），此处按 NPC 类目拼回全键取
+      // 本地化名比对（zh 名池亦本地化——直比英文恒不中）
+      if (!ctx.npcGivenName) return false;
+      const key = NAMED_NPC_KEYS[String(args[0] ?? '')];
+      return key !== undefined && ctx.npcGivenName === Lang.text(key);
+    }
     case 'LivingFlames':
       // Conditions.cs:939 lifeMax>5 && value>0 && !friendly && hardMode && y>UnderworldLayer
       // && !IsInSimulation（后者仅图鉴模拟，运行时恒 false）——语义已 1:1

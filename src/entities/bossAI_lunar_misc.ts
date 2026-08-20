@@ -1343,7 +1343,8 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
   let flyPhase = false;
 
   if (e.ai0 === 0) {
-    // ---- 视线判别(:38974-39030) ----
+    // ---- 视线判别(:38974-39030)；态尾自旋 rotation += direction×0.3（:39030）----
+    e.visAngle += e.facing * 0.3;
     if (los) { e.ai0 = 1; }
     else {
       const dx = p.cx - e.cx, dy = p.cy - p.h / 4 - e.cy;
@@ -1391,6 +1392,7 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai0 = 5; e.ai1 = 0;
     }
   } else if (e.ai0 === 2) {
+    e.visAngle = e.vx * 0.1;   // rotation（:39076）
     // ---- 穿墙(:39071-39094):noTileCollide=true;3|6 速 3 步进;近 600 且离实心→0 ----
     flyPhase = true;
     const tx = p.cx - e.cx, ty = p.cy - e.cy;
@@ -1400,6 +1402,7 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.vy = (e.vy * 2 + (ty / d) * spd) / 3;
     if (d < 600 && !touchesSolid(game, e)) e.ai0 = 0;
   } else if (e.ai0 === 3) {
+    e.visAngle = e.vx * 0.1;   // rotation（:39096）
     // ---- 锚点侧移(:39096-39115):2|3 速 3 步进;撞轴→4;到点/超 800/通视线→0 ----
     const tx = e.ai1 - e.cx, ty = e.ai2 - e.cy;
     const d = Math.hypot(tx, ty) || 1;
@@ -1409,6 +1412,7 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
     if (e.hitWall || e.hitHead || e.onGround) { e.ai0 = 4; e.ai1 = 0; }
     if (d < spd || d > 800 || los) e.ai0 = 0;
   } else if (e.ai0 === 4) {
+    e.visAngle = e.vx * 0.1;   // rotation（:39121）
     // ---- 漂移弹壁(:39117-39175):弹壁 ×-0.8;2|3 速 20 步进;180t 或通视线→0 ----
     if (e.hitWall) e.vx *= -0.8;
     if (e.hitHead || e.onGround) e.vy *= -0.8;

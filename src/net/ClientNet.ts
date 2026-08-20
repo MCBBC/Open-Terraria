@@ -36,6 +36,10 @@ export interface RemotePlayerState {
   /** PvP（v7）：hostile 旗 + 队伍 0-5（msg13 flagBits[7] + 尾部 u8 team） */
   hostile: boolean;
   team: number;
+  /** 死亡计数（msg16 尾部 u16×2：PVE/PVP 分道——/death 命令族 AllDeath 汇总用；
+   *  HP 变化包捎带,死亡→复活周期恒有 ≥1 包） */
+  deathsPve: number;
+  deathsPvp: number;
   /** 权威 HP（msg16 镜像——Game 接线到 proxy.hp 供头顶血条/死亡表现） */
   hp: number;
   maxHp: number;
@@ -562,9 +566,16 @@ export class ClientNet {
       case Msg.PlayerLifeMana: {
         const slot = r.u8();
         const hp = r.i16(), maxHp = r.i16();
+        // 尾部死亡计数（旧 server 无尾段 → 保持 0;Player.cs numberOfDeaths 分道）
+        const deathsPve = r.remaining >= 2 ? r.u16() : undefined;
+        const deathsPvp = r.remaining >= 2 ? r.u16() : undefined;
         // 缓存进状态表（proxy.hp 接线在 Game.simulateRemotePlayers 每帧读取）
         const rp = this.players.get(slot);
-        if (rp) { rp.hp = hp; rp.maxHp = maxHp; }
+        if (rp) {
+          rp.hp = hp; rp.maxHp = maxHp;
+          if (deathsPve !== undefined) rp.deathsPve = deathsPve;
+          if (deathsPvp !== undefined) rp.deathsPvp = deathsPvp;
+        }
         if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
         return;
       }
@@ -870,14 +881,54 @@ export class ClientNet {
       .i16(kbx).i16(kby).u16(weaponId).u8(flags & 0xff).finish());
   }
 
-  /** 聊天发送（msg82 module1）：text + 尾部 u8 channel（0=房间广播/1=世界频道
-   *  跨房全服——v8 世界频道批;旧 server remaining=0 默认房间,语义不变） */
+  /** 聊天发送（msg82 module1）：text + 尾部 u8 channel + channel0 随附 RGB。
+   *  channel 0=房间（RGB=Player.ChatColor 难度色——白/中橙(255,153,0)/硬红
+   *  (255,38,25);旧 server 忽略尾段回退金色）/ 1=世界频道（跨房全服,v8 批） */
   sendChat(text: string, world = false) {
     const w = new NetWriter(Msg.NetModules);
     w.u16(NetModule.Text);
     w.str(text);
     w.u8(world ? 1 : 0);
+    if (!world) {
+      const c = this.chatColor();
+      w.u8(c[0]); w.u8(c[1]); w.u8(c[2]);
+    }
     this.send(w.finish());
+  }
+
+  /** 命令系统行广播（channel 2）：服务器以 slot=255 无名前缀 + 随附 RGB 中继
+   *  ——聊天命令（/roll 等）的执行结果行,发起端已本地回显故广播排除发送者 */
+  sendCommandLine(text: string, r: number, g: number, b: number) {
+    const w = new NetWriter(Msg.NetModules);
+    w.u16(NetModule.Text);
+    w.str(text);
+    w.u8(2);
+    w.u8(r); w.u8(g); w.u8(b);
+    this.send(w.finish());
+  }
+
+  /** 队伍频道（channel 3）：服务器按发送者 msg13 team 定向同队广播（队伍色） */
+  sendParty(text: string) {
+    const w = new NetWriter(Msg.NetModules);
+    w.u16(NetModule.Text);
+    w.str(text);
+    w.u8(3);
+    this.send(w.finish());
+  }
+
+  /** 玩家表情广播（msg120，M4）：服务器校验范围后中继 {slot, emoteId}，
+   *  各端在对应玩家代理头顶出泡（原版 C→S 120 → 服务器 msg91 全体广播） */
+  sendEmote(emoteId: number) {
+    this.send(new NetWriter(Msg.EmoteBubble).u8(emoteId).finish());
+  }
+
+  /** Player.ChatColor（Player.cs:32230-32238）：难度着色——中端 mcColor(1,0.6,0)=
+   *  (255,153,0) / 硬核 hcColor(1,0.15,0.1)=(255,38,25) / 经典·旅程 White */
+  private chatColor(): [number, number, number] {
+    const diff = (this.game.player as { appearance?: { difficulty?: number } }).appearance?.difficulty;
+    if (diff === 1) return [255, 153, 0];
+    if (diff === 2) return [255, 38, 25];
+    return [255, 255, 255];
   }
 
   /** 召唤类物品使用意图（v8 msg202，仅 serverAuth 房；SimHost 校验规则门后生成 NPC。
@@ -916,19 +967,25 @@ export class ClientNet {
     this.send(writeLeashedRetrieveRequest(ax, ay, kind));
   }
 
-  /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威） */
+  /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威）。尾部随附死亡计数
+   *  （u16×2 PVE/PVP——计数变化时绕过 HP 节流即发,/death 命令族汇总用） */
   private lastHpSent = -1;
   private lastHpAt = 0;
+  private lastDeathsSent = '';
   syncHp() {
     if (this.mySlot < 0) return;
-    const p = this.game.player as unknown as { hp: number; maxHp: number };
+    const p = this.game.player as unknown as { hp: number; maxHp: number; deathsPve: number; deathsPvp: number };
     const now = performance.now();
-    if (p.hp === this.lastHpSent) {
+    const deathsKey = `${p.deathsPve},${p.deathsPvp}`;
+    const deathsChanged = deathsKey !== this.lastDeathsSent;
+    if (p.hp === this.lastHpSent && !deathsChanged) {
       if (now - this.lastHpAt < 5000) return; // 满血心跳 5s
-    } else if (now - this.lastHpAt < 200) return;
+    } else if (p.hp === this.lastHpSent && now - this.lastHpAt < 200) return;
     this.lastHpSent = p.hp;
+    this.lastDeathsSent = deathsKey;
     this.lastHpAt = now;
-    this.send(new NetWriter(Msg.PlayerLifeMana).u8(this.mySlot).i16(p.hp).i16(p.maxHp).finish());
+    this.send(new NetWriter(Msg.PlayerLifeMana).u8(this.mySlot).i16(p.hp).i16(p.maxHp)
+      .u16(p.deathsPve & 0xffff).u16(p.deathsPvp & 0xffff).finish());
   }
 
   // ================= 物品/装备同步（msg5，对齐原版 SyncPlayerItem 语义） =================

@@ -15,9 +15,10 @@
 //   - Collision.CanHitLine（GrowMoreVines 的加权计数）→ 仅计数不判视线
 //   - PlayerLOS（球茎/蜂巢/蚁狮幼虫隐藏性）→ 玩家距离 >50 格视为不可见
 //   - 装饰变体帧（PlaceTile 后 TileFrame 随机化）→ 直接随机变体帧
-//   - Convert case 0（纯净化墙链）与 case 14-21（1.4.4+ 反转换）无消费方未移植；
-//     case 5/6/7/10/12/13 已补全（环境转换器/还原链备将来接入）；火把转换
-//     （Convert_ActuallyConvertTorch）已随 case 1/2/3/4/11 等全链接入
+//   - Convert case 0-21 全量移植（2026-08-20 环境转换器全族批）：case 0 绿溶液
+//     纯净化（Clentaminator 779/5134 消费）；case 14-21 1.4.4 Forced* 反转换
+//     （API 档，1456 运行时无消费方——照抄备用）；火把转换
+//     （Convert_ActuallyConvertTorch）已随各 case 全链接入
 import type { TileStore } from '../TileStore';
 import { TILE_DEFS } from '../../data/tiles';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
@@ -840,10 +841,24 @@ export class WorldEvolution {
   }
 
   // ================= Convert（cs:55113）=================
-  //  演化路径用 case 1/2/3/4/8/9/11；case 5/6/7/10/12/13 为环境转换器/还原链补全
-  //  （当前演化路径未消费,备 Clentaminator/神庙致动还原等将来接入）。
-  //  未移植：case 0（纯净化墙链,蘑菇墙 80→15/64 深度带）与 case 14-21（1.4.4+
-  //  丛林/沙/雪/蘑菇反转换）——无消费方,登记
+  //  演化路径用 case 1/2/3/4/8/9/11；case 0/5/6/7/10/12/13 为环境转换器/还原链
+  //  补全（case 0 = 绿溶液纯净 spray/AI_31 消费）；case 14-21 1.4.4 Forced*
+  //  反转换（1456 运行时无调用方，API 档照抄——BiomeConversionID.cs:22-36）。
+
+  /** WorldGen.Convert 尺寸重载（cs:55095-55110）：方形窗 ±size 遍历 + 菱形门
+   *  |k-i|+|l-j| < 6（恒 6 不随 size 变——size≥5 才扩窗）。环境转换器族
+   *  （溶液弹 size 2/3、三瓶水 size 4）全走本入口 */
+  convertArea(i: number, j: number, conversionType: number, size: number,
+    tiles = true, walls = true): void {
+    if (!tiles && !walls) return;
+    for (let k = i - size; k <= i + size; k++) {
+      for (let l = j - size; l <= j + size; l++) {
+        if (this.host.store.inBounds(k, l) && Math.abs(k - i) + Math.abs(l - j) < 6) {
+          this.convert(k, l, conversionType, tiles, walls);
+        }
+      }
+    }
+  }
 
   /** BlockBelowMakesSandConvertIntoHardenedSand（cs:87307-87327）：下方非 nactive
    *  或非实心 → 沙转硬化沙（防塌；nactive=active&&!inActive,已致动格视为不支撑） */
@@ -869,8 +884,11 @@ export class WorldEvolution {
     return false;
   }
 
-  /** Main.tileFrameImportant[type]——多帧物（家具/火把/门等）不可被"满转"吞并 */
+  /** Main.tileFrameImportant[type]——多帧物（家具/火把/门等）不可被"满转"吞并。
+   *  荆棘族 32/352/69/655 原版非重要帧（Main.cs 404 条 true 表无此四型）但本仓
+   *  TILE_DEFS 因渲染帧需求把 32 标了 framed——转换豁免按原版表覆写 */
   private frameImportant(sheet: number): boolean {
+    if (sheet === 32 || sheet === 352 || sheet === 69 || sheet === 655) return false;
     return !!TILE_DEFS[S(sheet)]?.framed;
   }
 
@@ -896,6 +914,11 @@ export class WorldEvolution {
     };
     // 火把可转门（TileID.Sets.Conversion.Torch，TileID.cs:42-74）
     const torchOk = torchStyle >= 0 && torchConvertible(conversionType, torchStyle);
+    // 后置转换（ActuallyConvertTile 现场重读 theTile——先 Kill 再转的独立 if 段
+    // （case 15/19/20/21）用本变体：被杀格不再补放,且与刚写入的新型比对）
+    const convTileLive = (to: number) => {
+      if (st.flags[ti] !== 0 && st.type[ti] !== S(to)) this.setType(i, j, S(to));
+    };
     switch (conversionType) {
       case 4: // 猩红化
         if (walls) {
@@ -1037,6 +1060,50 @@ export class WorldEvolution {
           && sheet !== 0) convTile(this.tileExposedToAir(i, j) ? 2 : 0);
         else if (CONV_THORN.has(sheet) && sheet !== 69) this.kill(i, j);
         break;
+      case 0: // 纯净化（cs:55555-55692：绿溶液 spray/AI_31 → conv 0——纯净还原 +
+        //  蘑菇墙 80 深度带 + 裂纹化石墙 292-295 归自然；tiles 只杀邪恶荆棘 32/352）
+        if (walls) {
+          if (wall === 69 || wall === 70 || wall === 81) {
+            // 邪恶/神圣草墙 → 地表原版草墙族（9/10 → 63，1/10 → 65；地下 64）
+            convWall(j < this.host.worldSurface ? (Math.random() * 10 < 9 ? 63 : 65) : 64);
+          } else if (wall === 262) convWall(61);   // 化石裂纹墙归自然（cs:55606-55617）
+          else if (wall === 274) convWall(185);
+          else if (wall === 292) convWall(204);
+          else if (wall === 293) convWall(205);
+          else if (wall === 294) convWall(206);
+          else if (wall === 295) convWall(207);
+          // 61/185/204-207 空 case 豁免（已是自然态,cs:55686-55688 尾空 case 组）
+          else if (!(wall === 61 || wall === 185 || (wall >= 204 && wall <= 207))) {
+            if (WALL_CONV_STONE.has(wall) && wall !== 349) convWall(349);
+            else if (WALL_CONV_NEW1.has(wall) && wall !== 212) convWall(212);
+            else if (WALL_CONV_NEW2.has(wall) && wall !== 213) convWall(213);
+            else if (WALL_CONV_NEW3.has(wall) && wall !== 214) convWall(214);
+            else if (WALL_CONV_NEW4.has(wall) && wall !== 215) convWall(215);
+            else if (wall === 80) {
+              // 蘑菇墙深度带（cs:55638-55652）：地表带/深岩带以下 → 土墙 15，
+              // 中段 → 草墙 64（genRand.Next(3) → Math.random 取整）
+              const h = st.h;
+              if (j < this.host.worldSurface + 4 + Math.floor(Math.random() * 3)
+                || j > (h + this.host.rockLevel) / 2 - 3 + Math.floor(Math.random() * 3)) convWall(15);
+              else convWall(64);
+            }
+            else if (WALL_CONV_HARD_SAND.has(wall) && wall !== 216) convWall(216);
+            else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 187) convWall(187);
+          }
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(0);                 // 普通/丛林火把（22 特判 21 已在 convTorch）
+        else if (sheet === 492) convTile(477);     // 高尔夫草 → 修剪草（cs:55657）
+        else if (CONV_JUNGLE_GRASS.has(sheet) && sheet !== 60) convTile(60);
+        else if (CONV_GRASS.has(sheet) && sheet !== 2 && sheet !== 477) convTile(2);
+        else if (CONV_STONE.has(sheet) && sheet !== 1) convTile(1);
+        else if (CONV_SAND.has(sheet) && sheet !== 53) convTile(53);
+        else if (CONV_HARD_SAND.has(sheet) && sheet !== 397) convTile(397);
+        else if (CONV_SANDSTONE.has(sheet) && sheet !== 396) convTile(396);
+        else if (CONV_ICE.has(sheet) && sheet !== 161) convTile(161);
+        else if (sheet === 70) convTile(60);       // 蘑菇草 → 丛林草（MushroomGrass {70}）
+        else if (sheet === 32 || sheet === 352) this.kill(i, j);  // 仅邪恶荆棘（丛林棘 69 保留）
+        break;
       case 8: // 叶绿生长（cs:55693-55700：泥/丛林草 → 叶绿矿 211）
         if (tiles && (sheet === 59 || sheet === 60)) this.setType(i, j, S(211));
         break;
@@ -1120,6 +1187,106 @@ export class WorldEvolution {
           else if (sheet !== 203 && !this.frameImportant(sheet)) convTile(203);
         }
         break;
+      case 14: // 强制神圣（ForcedHallow，cs:55972-56016：1.4.4 API 档,1456 无运行时调用方）
+        if (walls) {
+          if (WALL_CONV_NEW1.has(wall) && wall !== 200) convWall(200);
+          else if (WALL_CONV_NEW2.has(wall) && wall !== 201) convWall(201);
+          else if (WALL_CONV_NEW3.has(wall) && wall !== 202) convWall(202);
+          else if (WALL_CONV_NEW4.has(wall) && wall !== 203) convWall(203);
+          else if (wall !== 0 && wall !== 28) convWall(28);
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(20);
+        else if (CONV_THORN.has(sheet)) this.kill(i, j);
+        else if (sheet !== 117 && !this.frameImportant(sheet)) convTile(117);
+        break;
+      case 15: // 强制蘑菇（ForcedGlowingMushroom，cs:56017-56049）
+        if (walls) convWall(80);                   // 无条件（convWall 内含 wall≠0/≠80 门）
+        if (!tiles) break;
+        if (torchOk) convTorch(22);
+        else if (CONV_THORN.has(sheet)) this.kill(i, j);
+        if (!this.frameImportant(sheet)) {          // 独立 if（非 else）：露天蘑菇草 70 / 泥 59
+          convTileLive(this.tileExposedToAir(i, j) ? 70 : 59);
+        }
+        break;
+      case 16: // 强制沙漠（ForcedSand，cs:56050-56095）
+        if (walls) {
+          if ((WALL_CONV_HARD_SAND.has(wall) || WALL_CONV_DIRT.has(wall) || WALL_CONV_SNOW.has(wall))
+            && wall !== 216) convWall(216);
+          else if (wall !== 187) convWall(187);
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(16);
+        else if ((CONV_GRASS.has(sheet) || CONV_SAND.has(sheet) || CONV_SNOW.has(sheet) || CONV_DIRT.has(sheet))
+          && sheet !== 53) convTile(this.blockBelowHardensSand(i, j) ? 397 : 53);
+        else if (CONV_HARD_SAND.has(sheet) && sheet !== 397) convTile(397);
+        else if (CONV_THORN.has(sheet) && sheet !== 69) this.kill(i, j);
+        else if (sheet !== 396 && !this.frameImportant(sheet)) convTile(396);
+        break;
+      case 17: // 强制雪原（ForcedSnow，cs:56096-56132）
+        if (walls) {
+          if ((WALL_CONV_STONE.has(wall) || WALL_CONV_NEW1.has(wall) || WALL_CONV_NEW2.has(wall)
+            || WALL_CONV_NEW3.has(wall) || WALL_CONV_NEW4.has(wall) || WALL_CONV_ICE.has(wall)
+            || WALL_CONV_SANDSTONE.has(wall)) && wall !== 71) convWall(71);
+          else if (wall !== 40) convWall(40);
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(9);
+        else if ((CONV_GRASS.has(sheet) || CONV_SAND.has(sheet) || CONV_HARD_SAND.has(sheet)
+          || CONV_SNOW.has(sheet) || CONV_DIRT.has(sheet)) && sheet !== 147) convTile(147);
+        else if (CONV_THORN.has(sheet) && sheet !== 69) this.kill(i, j);
+        else if (sheet !== 161 && !this.frameImportant(sheet)) convTile(161);
+        break;
+      case 18: // 强制森林（ForcedDirt，cs:56133-56198）
+        if (walls) {
+          if ((WALL_CONV_HARD_SAND.has(wall) || WALL_CONV_SNOW.has(wall) || WALL_CONV_DIRT.has(wall))
+            && wall !== 2) convWall(2);
+          else if (WALL_CONV_NEW1.has(wall) && wall !== 212) convWall(212);
+          else if (WALL_CONV_NEW2.has(wall) && wall !== 213) convWall(213);
+          else if (WALL_CONV_NEW3.has(wall) && wall !== 214) convWall(214);
+          else if (WALL_CONV_NEW4.has(wall) && wall !== 215) convWall(215);
+          else if (wall !== 349) convWall(349);
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(0);
+        else if (CONV_GOLF_GRASS.has(sheet) && sheet !== 477) convTile(477);
+        else if (CONV_GRASS.has(sheet) && sheet !== 2 && sheet !== 477) convTile(2);
+        else if ((CONV_SAND.has(sheet) || CONV_HARD_SAND.has(sheet) || CONV_SNOW.has(sheet)
+          || CONV_DIRT.has(sheet)) && sheet !== 0) convTile(this.tileExposedToAir(i, j) ? 2 : 0);
+        else if (CONV_THORN.has(sheet)) this.kill(i, j);
+        else if (sheet !== 1 && !this.frameImportant(sheet)) convTile(1);
+        break;
+      case 19: // 强制丛林（ForcedJungle，cs:56199-56240）
+        if (walls && wall > 0) {
+          if (wall === 63 || wall === 69 || wall === 70 || wall === 81) convWall(64);
+          else if (wall !== 15) convWall(15);      // 蘑菇墙带（15 自身豁免）
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(21);
+        else if (CONV_THORN.has(sheet)) convTile(69);   // 荆棘转丛林棘（非击杀）
+        if (!this.frameImportant(sheet)) {          // 独立 if：露天丛林草 60 / 泥 59
+          convTileLive(this.tileExposedToAir(i, j) ? 60 : 59);
+        }
+        break;
+      case 20: // 强制神庙（ForcedTemple，cs:56241-56261）
+        if (walls) convWall(87);                   // 蜥蜴砖墙
+        if (tiles) {
+          if (torchOk) convTorch(21);
+          else if (sheet !== 69 && CONV_THORN.has(sheet)) convTile(69);
+          if (!this.frameImportant(sheet)) convTileLive(226);  // 蜥蜴砖
+        }
+        break;
+      case 21: { // 强制地牢（ForcedDungeon，cs:56262-56298：GenVars.CurrentDungeonGenVars
+        //  仅世界生成期非空——运行时取兜底蓝砖 41/墙 17（`?.brickTileType ?? 41`），
+        //  本仓地牢主题未入 World 状态,同取兜底）
+        const brickTile = 41, brickWall = 17;
+        if (walls) convWall(brickWall);
+        if (!tiles) break;
+        if (torchOk) convTorch(21);
+        else if (CONV_THORN.has(sheet)) this.kill(i, j);
+        if (!this.frameImportant(sheet)) convTileLive(brickTile);
+        break;
+      }
     }
   }
 

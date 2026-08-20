@@ -118,6 +118,10 @@ export interface GameHooks {
   dropContext?(): import('../drops/NpcDrops').DropExtras;
   /** 月事件上下文（南瓜月/霜月 wave-gate 掉落条件）：Game 实现，缺省按无事件（恒 false） */
   moonEventCtx?(): { kind: 1 | 2; wave: number } | null;
+  /** WorldGen.Skyblock.noAltars（:3062/:3146-3167 读档 Census → 全图无 tile 26 恶魔
+   *  祭坛才 true）：EyeOfCthulhuDefeatedAndNoAltarsInWorld 掉落条件数据源。Game 侧
+   *  进图时一次全图普查缓存（会话期内静态——原版同语义）；缺省按 false */
+  worldNoAltars?(): boolean;
   /** 环境判定（Game.scene，SceneMetrics 每 15t 以玩家为中心刷新；Boss 暴怒度/石巨人
    *  脱庙加成读 zoneJungle/zoneTemple——原版 Main.player[target].ZoneJungle/ZoneLihzhardTemple） */
   scene?: import('../world/SceneMetrics').SceneFlags;

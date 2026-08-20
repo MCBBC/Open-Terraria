@@ -1,13 +1,18 @@
 // 礼袋/礼盒右键开包引擎（Player.OpenPresent :6651-6770 / OpenLegacyPresent :6772-6788 /
 // OpenGoodieBag :9199-9282 / OpenHerbBag :9064-9138，1.4.5.6 逐支抄）。
+// 渔获匣 26 型号（OpenFishingCrate :7667-8921）在 vanillaFishingCrates.ts，
+// 锁盒两件（OpenLockBox :9031 / OpenShadowLockbox :9011）与蠕虫罐/牡蛎/麒麟蛋
+// （OpenCanofWorms :9140 / OpenOyster :9154 / OpenChilletEgg :9188）在本文件。
 // 入口门 = ItemSlot.RightClick :1514-1527（context==0 背包格 && mouseItem 空或不可叠 &&
 // OpenableBag）→ TryOpenContainer :1642-1660（掷骰 → stack-- → PlaySound(7)）。
 // 掷骰语义对齐 UnifiedRandom.Next：Next(n) = [0,n)、Next(a,b) = [a,b)。
 import { VANILLA_ITEM_KEY_BY_ID } from './items';
+import { openFishingCrate, FISHING_CRATE_VIDS } from './vanillaFishingCrates';
 
 /** ItemID.Sets.OpenableBag（ItemID.cs:1211 全量，右键可开包集合——UI 门禁用）。
- *  其中宝藏袋 3318-3332/3860-3862/4782/4957/5111 与木匣/钓鱼箱等走各自引擎
- *  （openBossBag / OpenLockBox / OpenFishingCrate），本引擎只接管 1869/1774/3093/599-601。 */
+ *  其中宝藏袋 3318-3332/3860-3862/4782/4957/5111 走 Game 持用链（openBossBag），
+ *  其余全族（礼盒/礼袋/草药袋/渔获匣 26 型/锁盒两件/蠕虫罐/牡蛎/麒麟蛋）由本
+ *  引擎 openBagItem 分派。 */
 export const OPENABLE_BAG_VIDS: ReadonlySet<number> = new Set<number>([
   3318, 3319, 3320, 3321, 3322, 3323, 3324, 3325, 3326, 3327, 3328, 3329, 3330, 3331, 3332,
   3860, 3861, 3862, 4782, 4957, 5111, 2334, 2335, 2336, 3203, 3204, 3205, 3206, 3207, 3208,
@@ -159,13 +164,91 @@ function openHerbBag(give: BagGive, rnd: BagRand): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// S 级开箱小件族（锁盒 / 蠕虫罐 / 牡蛎 / 麒麟蛋）
+// ---------------------------------------------------------------------------
+
+/** OpenLockBox（Player.cs:9031-9062）：金锁盒 3085——地牢武器 7 选 1 + 1/3 暗影钥匙
+ *  329 + 1/8 5465 + FTW 1/5 5515。switch(Next(7)) 的 0 支走 default=164（村正）。
+ *  金钥匙 327 的消耗门在分派层（ItemSlot.cs:1695-1698 ConsumeItem 先于开盒）。 */
+function openLockBox(give: BagGive, rnd: BagRand, remixWorld: boolean, getGoodWorld: boolean): void {
+  const roll = rnd.next(7);                                   // :9039
+  give([164, 3317, 155, 156, remixWorld ? 2623 : 157, 163, 113][roll]);
+  if (rnd.next(3) === 0) give(329);                           // :9051-9054 Shadow Key
+  if (rnd.next(8) === 0) give(5465);                          // :9055-9058 Bone Key
+  if (getGoodWorld && rnd.next(5) === 0) give(5515);          // :9059-9061 FTW 世界 5515
+}
+
+/** OpenShadowLockbox（Player.cs:9011-9029）：黑曜石锁盒 4879——地狱武器 5 选 1
+ *  （remixWorld 时 112→683）+ 1/5 5010。暗影钥匙 329 只验不耗（:1701-1704）。 */
+function openShadowLockbox(give: BagGive, rnd: BagRand, remixWorld: boolean): void {
+  let item = [274, 220, 112, 218, 3019][rnd.next(5)];         // :9018 NextFromList=Next(len)
+  if (remixWorld) item = [274, 220, 683, 218, 3019][rnd.next(5)]; // :9019-9022 重掷
+  give(item);
+  if (rnd.next(5) === 0) give(5010);                          // :9024-9027 硬鞍
+}
+
+/** OpenCanofWorms（Player.cs:9140-9151）：蠕虫罐 4345——蠕虫 2002×5-8 +
+ *  3/10 学者蠕虫 3191×1-2 + 1/20 金蠕虫 2895 */
+function openCanofWorms(give: BagGive, rnd: BagRand): void {
+  give(2002, rnd.next(5, 9));                                 // :9143
+  if (rnd.next(10) < 3) give(3191, rnd.next(1, 3));           // :9144-9147 ★Next(10)<3
+  if (rnd.next(20) === 0) give(2895);                         // :9148-9150
+}
+
+/** OpenOyster（Player.cs:9154-9185）：牡蛎 4410——3/4 无珍珠；1/4 出珍珠再分档：
+ *  1/10 黑珍珠 4414 / 3/10 白珍珠 4413 / 6/10 粉珍珠 4412。末尾无条件出
+ *  去壳牡蛎 4411（QuickSpawnItem 在珍珠 if 之外）。 */
+function openOyster(give: BagGive, rnd: BagRand): void {
+  if (rnd.next(4) === 0) {                                    // :9157
+    if (rnd.next(10) === 0) give(4414);                       // :9158-9160 黑珍珠
+    else if (rnd.next(3) === 0) give(4413);                   // :9161-9163 白珍珠
+    else give(4412);                                          // :9164-9166 粉珍珠
+  }
+  give(4411);                                                 // :9168
+}
+
+/** OpenChilletEgg（Player.cs:9188-9196）：麒麟蛋 6142——Next(2)==0 → 5666，
+ *  否则 5665（默认值 5665，掷 0 才覆写——勿写反） */
+function openChilletEgg(give: BagGive, rnd: BagRand): void {
+  give(rnd.next(2) === 0 ? 5666 : 5665);                      // :9191-9195
+}
+
+/** 钱槽 3213 持用契约（Item.cs:28953-28962 + Main.cs:37321-37333）：
+ *  原版使用 → 发射飞猪弹幕 525（useTime/useAnimation 28、UseSound Item59、不消耗），
+ *  右键弹幕 → chest=-2 开 piggy + PlayInteractiveProjectileOpenCloseSound(525)=Item59
+ *  （:37421-37423）。本仓无 525 悬停弹幕实体，Game 持用链按下表【直开】——
+ *  表值即测试桩（tests/fishing-crates.test.ts 钉 chest=-2/bank0/28/Item_59/不消耗）。 */
+export const MONEY_TROUGH_USE = {
+  openChestX: -2,          // player.chest = -2（存钱罐容器约定，与储物族 tile 同）
+  bankIndex: 0,            // player.banks[0] = piggy
+  useTime: 28,             // Item.cs:28960 useTime = useAnimation = 28
+  sound: 'Item_59',        // 使用音 = 开猪音（两处同 SoundID.Item59）
+} as const;
+
+/** 开包上下文（世界旗 + 锁盒钥匙门）：
+ *  - hardMode：OpenPresent :6654 硬模式门（读档旗）。
+ *  - consumeItem / hasItem：锁盒族钥匙门回调（3085 金钥匙 327【消耗】/
+ *    4879 暗影钥匙 329【只验不耗】，Player.ConsumeItem :8846 / HasItemInInventoryOrOpenVoidBag
+ *    :54963——UI 侧注入背包实现；缺省 = 视为无钥匙 → 两锁盒拒开返回 false）。
+ *  - remixWorld / getGoodWorld：Main 种子旗（don't dig up / FTW），作用于锁盒
+ *    与冰冻匣个别支。skyblockLowTiles：WorldGen.Skyblock.lowTiles（空岛匣 2197 支）。 */
+export interface BagOpenWorld {
+  hardMode: boolean;
+  consumeItem?: (vanillaId: number) => boolean;
+  hasItem?: (vanillaId: number) => boolean;
+  remixWorld?: boolean;
+  getGoodWorld?: boolean;
+  skyblockLowTiles?: boolean;
+}
+
 /** 右键开包分派（TryOpenContainer_GrantItems :1662-1721 同源子集）：
- *  返回 true = 已开（调用方做 stack-- + PlaySound(7)）；false = 非本引擎物品
- *  （宝藏袋/木匣/钓鱼箱等走各自链，UI 应回落原右键行为） */
+ *  返回 true = 已开（调用方做 stack-- + PlaySound(7)）；false = 非本引擎物品或
+ *  钥匙门未过（宝藏袋走 Game 持用链；原版 GrantItems 返回 false 时盒子不消耗） */
 export function openBagItem(
   vid: number,
   give: BagGive,
-  world: { hardMode: boolean },
+  world: BagOpenWorld,
   rng: BagRand = defaultRand,
 ): boolean {
   switch (vid) {
@@ -173,7 +256,26 @@ export function openBagItem(
     case 599: case 600: case 601: openLegacyPresent(give, world.hardMode, rng); return true;
     case 1774: openGoodieBag(give, rng); return true;
     case 3093: openHerbBag(give, rng); return true;
-    default: return false;
+    case 4345: openCanofWorms(give, rng); return true;        // :1677-1680
+    case 4410: openOyster(give, rng); return true;            // :1681-1684
+    case 6142: openChilletEgg(give, rng); return true;        // :1689-1692
+    case 3085:                                                // :1693-1698 金钥匙消耗门
+      if (!world.consumeItem?.(327)) return false;
+      openLockBox(give, rng, !!world.remixWorld, !!world.getGoodWorld);
+      return true;
+    case 4879:                                                // :1699-1704 暗影钥匙门槛门（不消耗）
+      if (!world.hasItem?.(329)) return false;
+      openShadowLockbox(give, rng, !!world.remixWorld);
+      return true;
+    default:
+      if (FISHING_CRATE_VIDS.has(vid)) {                      // :1668-1670 IsFishingCrate
+        openFishingCrate(vid, give, rng, {
+          remixWorld: world.remixWorld,
+          skyblockLowTiles: world.skyblockLowTiles,
+        });
+        return true;
+      }
+      return false;
   }
 }
 

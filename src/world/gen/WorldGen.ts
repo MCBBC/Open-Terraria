@@ -1514,7 +1514,7 @@ export function spreadingGrassPass(store: World['store'], gs: GenState) {
         if (flag2 && sheetAt(x, y) === 0) {
           // SpreadGrass(x, y, 0, 2, repeat)（cs:75210）——泥→草递归扩散，
           // 深度上限近似原版 grassSpread≤1000（try/catch 栈溢出回退）
-          spreadGrass(store, x, y, T.DIRT, T.GRASS, true);
+          spreadGrass(store, x, y, T.DIRT, T.GRASS, true, gs.worldSurface);
         }
         if (y > gs.worldSurfaceHigh) break;
         flag2 = false;

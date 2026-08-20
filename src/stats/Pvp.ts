@@ -8,14 +8,17 @@
 import type { BuffState } from './Buffs';
 import { BuffType } from './Buffs';
 
-/** Main.teamColor[0..5]（Main.cs:6610-6615）：0 白 / 1 红(218,59,59) / 2 绿 / 3 蓝 / 4 黄 / 5 粉紫 */
+/** Main.teamColor[0..5]（Main.cs:6610-6615）：0 白 / 1 红(218,59,59) / 2 绿(59,218,85)
+ *  / 3 蓝(59,149,218) / 4 黄(242,221,100) / 5 粉紫(224,100,242)。
+ *  2026-08-20 校对：2-5 档曾为近似色（88,219,84/59,137,255/255,199,0/216,127,255），
+ *  聊天队伍频道（PartyChatCommand 用同表）落地时按反编译源更正 */
 export const TEAM_COLORS: ReadonlyArray<readonly [number, number, number]> = [
   [255, 255, 255],
   [218, 59, 59],
-  [88, 219, 84],
-  [59, 137, 255],
-  [255, 199, 0],
-  [216, 127, 255],
+  [59, 218, 85],
+  [59, 149, 218],
+  [242, 221, 100],
+  [224, 100, 242],
 ];
 
 export function teamColorCss(team: number): string {

@@ -35,10 +35,13 @@
 //     登记→已接：微光化币（WorldItem.cs:1791-1810 钱币入微光消散 → coinLuckAmount
 //           面额放大 → LuckState.addCoinLuck 距离门+衰减；ItemDrop 钱币分支已接，
 //           回归见 tests/shimmer.test.ts「金币 73 入池」探针）。
+//     登记→已接（2026-08-20）：四叶草族 5574/5575/5576（Player.luckEquipmentBonus
+//           口袋+装备位扫描，Player.cs:12494-12530/:12628-12646；获取链 = 割成熟
+//           药草 1/1000（DropBait.dropCloverRoll）/乌鸦 301 掉 5576 1/10/微光
+//           5574→5575）+ 马掌族运气位从 158 单件扩到九件全集。
 //     仍登记：风筝/恶臭 buff 的授予物品（风筝族 4371 等/恶臭药水 1332/弹幕 1080）未移植;
-//           四叶草族 5574/5575/5576 物品未入表（luckEquipmentBonus 三槽空挂,
-//           Player.cs:12321-12332/:12628-12646）;瓢虫 releaseOwner 门（:82370
-//           玩家放生的瓢虫不给好运）——引擎无放生跟踪,当前全瓢虫视为野生,恒满足。
+//           瓢虫 releaseOwner 门（:82370 玩家放生的瓢虫不给好运）——引擎无放生
+//           跟踪,当前全瓢虫视为野生,恒满足。
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 

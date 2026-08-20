@@ -42,7 +42,11 @@ const isSolidTile = (st: TileStore, x: number, y: number): boolean =>
   })();
 
 /** countDirtTiles/nextDirtCount（cs:9618-9653）1:1：无实心且墙为泥土墙(2)/洞穴墙
- *  (59) 的连通腔计数；遇冰块(147/161)或 {244,83,3,187,216} 墙直接封顶 */
+ *  (59) 的连通腔计数；遇冰块(147/161)或 {244,83,3,187,216} 墙直接封顶。
+ *  ★VVVVV 织入定谳（#79 根因）：nextDirtCount 递归 **10 邻**——四正+四对角+
+ *  **(x±2,y) 跨列跳**。曾只推 8 邻——大腔经 ±2 跳连通到 ≥3500 域时 vanilla 封顶
+ *  拒蔓延（织入实证 (1486,266)→3500），JS 只数到 292 误放行 → 405 格多转。
+ *  栈序=递归逆序（结果序无关——计数封顶/陷阱命中均全域性质）。 */
 export function countDirtTiles(st: TileStore, sx: number, sy: number): number {
   let count = 0;
   const seen = new Set<number>();
@@ -62,8 +66,9 @@ export function countDirtTiles(st: TileStore, sx: number, sy: number): number {
       || st.wall[ii] === 187 || st.wall[ii] === 216) return MAX_TILE_COUNT;
     if (!isSolidTile(st, x, y) && (st.wall[ii] === WALL_DIRT || st.wall[ii] === 59)) {
       count++;
-      stack.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1],
-        [x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1], [x + 1, y + 1]);
+      stack.push([x + 2, y], [x - 2, y],
+        [x + 1, y + 1], [x + 1, y - 1], [x - 1, y + 1], [x - 1, y - 1],
+        [x, y + 1], [x, y - 1], [x + 1, y], [x - 1, y]);
     }
   }
   return count;
@@ -163,7 +168,7 @@ export function runGrassWallPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (w === WALL_GRASS_UNSAFE || w === WALL_FLOWER_UNSAFE) { near = true; break; }
           }
         }
-        if (near) spreadGrass(st, i, j, T.DIRT, T.GRASS, true);
+        if (near) spreadGrass(st, i, j, T.DIRT, T.GRASS, true, gs.worldSurface);
       }
     }
   }

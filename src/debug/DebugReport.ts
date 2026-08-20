@@ -628,6 +628,53 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     const mini = minimapShot(g.renderer?.minimap ?? null, g.renderer?.ctx ?? null,
       player ? (player.tx as number) : 0, player ? (player.ty as number) : 0);
     shot = { main: main.url, minimap: mini.url, mainOmitted: main.omitted, minimapOmitted: mini.omitted };
+    // ---- 芦苇/香蒲绘制区域放大截图（摆动残影排查专用，2026-08-20）----
+    // 找屏内第一株 sheet 519/27（香蒲/芦苇）→ 以整株包围盒（宽 4 格 × 高株高+2）
+    // 从主画布裁 4× 放大 PNG——两株以上取最近相机的。裁剪坐标=世界→屏幕换算。
+    try {
+      const rc = g.renderer?.canvas;
+      const cam2 = g.camera;
+      if (st && rc && cam2 && typeof document !== 'undefined' && p) {
+        const zoom = cam2.zoom as number;
+        const halfW = (cam2.viewW / zoom) / 2, halfH = (cam2.viewH / zoom) / 2;
+        const vx0 = Math.floor((cam2.x - halfW) / TILE), vx1 = Math.ceil((cam2.x + halfW) / TILE);
+        const vy0 = Math.floor((cam2.y - halfH) / TILE), vy1 = Math.ceil((cam2.y + halfH) / TILE);
+        let best: { x: number; topY: number; hgt: number; d: number } | null = null;
+        for (let y = vy0; y < vy1 && !best; y++) {
+          for (let x = vx0; x < vx1; x++) {
+            if (!st.inBounds(x, y)) continue;
+            const i = st.idx(x, y);
+            if (!st.flags[i]) continue;
+            const sh = sheetOf(st.type[i]);
+            if (sh !== 519 && sh !== 27) continue;
+            // 向上找整株顶（同型连续格）
+            let topY = y;
+            while (topY - 1 >= 0 && st.type[st.idx(x, topY - 1)] === st.type[i] && st.flags[st.idx(x, topY - 1)]) topY--;
+            let hgt = 0;
+            while (y + hgt < st.h && st.type[st.idx(x, y + hgt)] === st.type[i] && st.flags[st.idx(x, y + hgt)]) hgt++;
+            const d = Math.hypot((x * 16 + 8) - p.cx, (y * 16) - p.cy);
+            if (!best || d < best.d) best = { x, topY, hgt, d };
+            break; // 本行已找到，外层 !best 会停——逐行扫保证最近
+          }
+        }
+        if (best) {
+          const b = best as { x: number; topY: number; hgt: number; d: number };
+          const c2 = document.createElement('canvas');
+          const boxW = Math.round(4 * TILE * zoom), boxH = Math.round((b.hgt + 3) * TILE * zoom);
+          c2.width = Math.min(400, boxW); c2.height = Math.min(480, boxH);
+          const cc = c2.getContext('2d');
+          if (cc) {
+            cc.imageSmoothingEnabled = false;
+            const wxC = b.x * 16 + 8, wyTop = (b.topY - 1) * 16 + 4; // 包围盒中心/顶
+            const sx = Math.round((wxC - cam2.x) * zoom + rc.width / 2 - boxW / 2);
+            const sy = Math.round((wyTop - cam2.y) * zoom + rc.height / 2);
+            cc.drawImage(rc, sx, sy, boxW, boxH, 0, 0, boxW, boxH);
+            shot.reedShot = c2.toDataURL('image/png');
+            shot.reedInfo = { tileX: b.x, topY: b.topY, height: b.hgt, distToPlayer: Math.round(b.d), sx, sy, zoom };
+          }
+        }
+      }
+    } catch { shot.reedShot = null; }
   }
 
   // ---- tiles.focus：三焦点格（hover/相机中心/玩家脚下）贴图解析链 ----

@@ -7,6 +7,7 @@ import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { getUVForMasks } from './BlendFraming';
+import { frameMergesWith, halfNeighborConnects, normalizedVidOf, vanillaIdOf } from './TileMergeFamily';
 import { tileAnim } from './TileAnim';
 import {
   sourceRectOf, boosterAnimFrame, drawLeftDecoration, drawRightDecoration,
@@ -320,15 +321,23 @@ export function mask8(st: TileStore, x: number, y: number, type: number, same: (
     return need;
   };
   const at = (ax: number, ay: number) => st.inBounds(ax, ay) && same(st.type[st.idx(ax, ay)]);
+  const cHalf = !!st.half[st.idx(x, y)];
+  const cNum = normalizedVidOf(type);
   let m = 0;
-  // 四正交（:70-73）：类型同 + BlockStyle 双向放行
+  // 四正交（:70-73）：类型同 + BlockStyle 双向放行 + 半砖邻接覆写(WorldGen.cs:82398-82426)
   const sides: Array<[number, number, number]> = [[0, -1, 0], [-1, 0, 1], [1, 0, 2], [0, 1, 3]];
+  const DIRCHAR = ['U', 'L', 'R', 'D'] as const;
   for (const [dx, dy, di] of sides) {
     const [cNeed, nNeed] = NEED[di];
     if ((cE & cNeed) !== cNeed) continue;
     const oi = st.idx(x + dx, y + dy);
     if ((edges(oi) & nNeed) !== nNeed) continue;
-    if (!at(x + dx, y + dy)) continue;
+    if (!st.inBounds(x + dx, y + dy)) continue;
+    const ot = st.type[oi];
+    const chain = same(ot) || frameMergesWith(type, ot);
+    if (!chain) continue;
+    if (!halfNeighborConnects(DIRCHAR[di], cHalf, cNum, !!st.half[oi], vanillaIdOf(ot),
+      !!TILE_DEFS[ot]?.platform, true)) continue;
     m |= 1 << di;
   }
   // 角（:75-78）：两正交均在 + 对角格反向两向放行 + 类型同
@@ -347,7 +356,7 @@ export function mask8(st: TileStore, x: number, y: number, type: number, same: (
 
 /** auto 帧格的实际渲染帧（col,row）——与渲染端同一查找表，供纠错面板定位 */
 export function autoFrameAt(st: TileStore, x: number, y: number, type: number): { col: number; row: number } {
-  const entry = LOOKUP[mask8(st, x, y, type, (t) => t === type)];
+  const entry = LOOKUP[mask8(st, x, y, type, (t) => t === type || frameMergesWith(type, t))];
   if (!entry) return { col: DEFAULT_FRAME[0], row: DEFAULT_FRAME[1] };
   const v = ((x * 7) + (y * 11)) % 3 % entry.length;
   return { col: entry[v][0], row: entry[v][1] };
@@ -1009,10 +1018,19 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
         if (!ok) continue;
       }
       const om = nMeta(ot);
-      // 同型：石族按 isStone 互认，其余走 Merges 链
-      if (myStone ? !!om?.isStone : merges(ot)) same |= bit;
+      // 同型：石族按 isStone 互认，其余走 Merges 链；跨类型并上原版合并家族
+      // (TileMergeFamily:地牢砖↔沙等同 tileBrick 家族按已连接取帧——否则边缘帧
+      //  圆角透明像素在群系交界透出远景背景亮光,2026-08-20 用户实报根因)
+      // 正交四向再过半砖邻接覆写(WorldGen.cs:82398-82426:上邻半砖强制连/整砖配
+      // 异型半砖断/半砖配半砖任意型连/下邻半砖恒断)——原版在家族链之后覆写
+      const chainOK = (myStone ? !!om?.isStone : merges(ot)) || frameMergesWith(type, ot);
+      const gateOK = di >= 4 || halfNeighborConnects(
+        (['R', 'U', 'L', 'D'] as const)[di],
+        !!st.half[st.idx(x, y)], normalizedVidOf(type),
+        !!st.half[oi], vanillaIdOf(ot), !!TILE_DEFS[ot]?.platform, true);
+      if (chainOK && gateOK) same |= bit;
       // 合并位：邻居是 mergeWith 目标
-      if (myMerge != null && (TILE_DEFS[ot]?.vanilla?.sheet ?? -1) === myMerge) mergeMask |= bit;
+      if (myMerge != null && (TILE_DEFS[ot]?.vanilla?.sheet ?? -1) === myMerge && gateOK) mergeMask |= bit;
     }
     const strictness = myMeta?.isGrass ? 2 : myMerge != null ? 1 : 0;
     const uv = getUVForMasks(same, mergeMask, strictness, ((x * 7) + (y * 11)) % 3);

@@ -15,7 +15,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { Enemy } from '../../entities/Enemy';
 import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
-import { TileStore } from '../TileStore';
+import { TileStore, LIQUID_TYPE } from '../TileStore';
 import { mainExpertMode, netIdSpawnScale, scaleStatsWorld } from '../../stats/ScaleStats';
 import { spawnRateMultiplier } from '../JourneyPowers';
 import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollBadLuck, rollLuck } from '../../stats/Luck';
@@ -392,6 +392,58 @@ export class VanillaSpawner {
    *  落点：x=玩家±viewW、y=玩家上方 (1.5~0.75)×viewH 带 → 格门：
    *  x∈[10,w+10]、y∈[surface×0.3, surface]、周围 7×8 无实心、落点无房屋墙。
    *  选怪：1/200 蓝(-4)；专家 1/7 大(-7)、1/3 绿(-3)；普通 1/10 大、2/5 绿；默认蓝(1) */
+  /** NPC.Spawner.SpawnFaelings（NPC.cs:5895-5932 1:1；触发端 = 玩家入微光区
+   *  上升沿，Player.cs:16636 TrySpawningFaelings——Game.fixedUpdate 挂钩）：
+   *  场上无 677 时 Next(2,6)=2-5 只微光之灵；每只 ≤1000 次采样——spawnArea
+   *  （GetSpawnArea :841-877，0.7×全屏格 + 狙击镜扩圈）随机格须为微光液
+   *  （liquid>0 && shimmer），沿液柱上溯至液面格（y<50 即【整函数】中止
+   *  :5918-5922）；落点须 safeArea（0.52×全屏）外且屏外（CheckNotSpawningOnScreen）。
+   *  spawnAt 收到原版 NewNPC 的 (X, BottomY) 底锚像素坐标（677 由 Game 侧经
+   *  spawnNpcByVanilla 落 critters 桶）。 */
+  spawnFaelings(
+    px: number, py: number, viewHalfW: number, viewHalfH: number, rng: RNG,
+    anyFaeling: () => boolean, spawnAt: (x: number, y: number) => void,
+  ): void {
+    if (anyFaeling()) return;                                    // AnyNPCs(677) :5898-5901
+    const num = rng.int(2, 5);                                   // Main.rand.Next(2, 6)
+    const st = this.world.store;
+    // GetSpawnArea：0.7×全屏半轴 = viewHalf×1.4；safe 0.52×全屏 = ×1.04；
+    // 狙击镜扩圈（scopeNum3 由 Game 每帧写入；1254 双持/1299/scope 三档）
+    this.pX = Math.floor(px / TILE); this.pY = Math.floor(py / TILE);
+    this.viewHalfW = viewHalfW; this.viewHalfH = viewHalfH;
+    const sc = this.scopeNum3 > 0 ? Math.floor(viewHalfW / this.scopeNum3) : 0;
+    const scY = this.scopeNum3 > 0 ? Math.floor(viewHalfH / this.scopeNum3) : 0;
+    const rangeX = Math.max(1, Math.floor(viewHalfW * 1.4)) + sc;
+    const rangeY = Math.max(1, Math.floor(viewHalfH * 1.4)) + scY;
+    const safeX = Math.max(1, Math.floor(viewHalfW * 1.04)) + sc;
+    const safeY = Math.max(1, Math.floor(viewHalfH * 1.04)) + scY;
+    // WorldUtils.ClampToWorld（:875）
+    const areaL = Math.max(2, this.pX - rangeX), areaR = Math.min(st.w - 3, this.pX + rangeX);
+    const areaT = Math.max(2, this.pY - rangeY), areaB = Math.min(st.h - 3, this.pY + rangeY);
+    for (let i = 0; i < num; i++) {
+      for (let j = 0; j < 1000; j++) {                           // num2 = 1000
+        const x = rng.int(areaL, areaR - 1);                     // Next(Left, Right)
+        let y = rng.int(areaT, areaB - 1);
+        if (!st.inBounds(x, y)) continue;
+        const i0 = st.idx(x, y);
+        if (st.liquid[i0] <= 0 || st.liquidType[i0] !== LIQUID_TYPE.SHIMMER) continue;  // :5914
+        while (y >= 0 && st.liquid[st.idx(x, y)] > 0) {
+          // :5917-5922：当前格仍有液 → y<50 即整函数中止，再上移一格
+          //（循环出口 = 液面上方首个干格——落点即液面干格）
+          if (y < 50) return;
+          y--;
+        }
+        if (y < 50) return;
+        // !safeArea.Contains && CheckNotSpawningOnScreen（:5923）
+        if (!(Math.abs(x - this.pX) < safeX && Math.abs(y - this.pY) < safeY)
+          && this.tileClearOfPlayerScreens(x, y, px, py)) {
+          spawnAt(x * TILE + 8, y * TILE);                       // NewNPC :5924-5926
+          break;                                                 // :5927 本只落定
+        }
+      }
+    }
+  }
+
   slimeRainSpawns(px: number, py: number, nearbySlots: number, viewW: number, viewH: number, rng: RNG, expert: boolean): Enemy | null {
     const w = this.world;
     const worldSurface = w.groundLevel;
@@ -2581,9 +2633,10 @@ export class VanillaSpawner {
           this.currentSpawnY = this.pY;
           return D(50);
         }
-        // ---- Town Slime 695/696（:4281-4288）：!waterTile && num46>图宽/8（离
-        //      出生点）&& 落脚∈{2,147,60,161} && Next(200)==0 && 场上无 695/696
-        //      → 695 基础；RollLuck(100)<40 → 696（≈40% 换装档）----
+        // ---- Palworld 遇袭双宠 695/696（:4281-4288，曾误注 Town Slime）：!waterTile
+        //      && num46>图宽/8（离出生点）&& 落脚∈{2 草,147 雪,60 丛林草,161 冰}
+        //      && Next(200)==0 && 场上无 695/696 → 695 基础；RollLuck(100)<40 → 696
+        //      （幸运门换 Foxparks）。生成后 AI_127（Enemy.palAI）双僵尸威慑待援 ----
         if (!this.waterTile && num46 > st.w / 8
           && (t === T.GRASS || t === T.SNOW || t === T.JUNGLE_GRASS || t === T.ICE)
           && N(200) && !any(696) && !any(695)) {

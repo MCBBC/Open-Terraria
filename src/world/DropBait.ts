@@ -1,6 +1,7 @@
 // KillTile_DropBait 掷骰核心（WorldGen.cs:66304-66480 纯函数化）：
 // 分母表 + 帧带门 + 花靴 ×10000 + 金掷/序贯族型选择。出生姿势/上限计数在
-// Game.killTileDropBait（实体侧）。
+// Game.killTileDropBait（实体侧）。幸运四叶草 5574 掷（:66337-66340，独立 if）
+// 单独成 dropCloverRoll——虫族早退结构（单产物）之外可与之同年同击双中。
 export type BaitKind = 'worm' | 'hop' | 'grub' | 'lava';
 
 /** 掷一次产出；null = 无（tile 不在表内 / 帧带不命中 / 概率未中）。
@@ -44,4 +45,15 @@ export function dropBaitRoll(
 export function baitWormType(graveyard: boolean, gold: boolean): 357 | 448 | 606 {
   if (graveyard) return 606;
   return gold ? 448 : 357;
+}
+
+/** 幸运四叶草 5574 掷骰（KillTile_DropBait :66337-66340 `num3=1000（仅 tile 73
+ *  且 frameX<108——成熟药草株；花靴 ×10000 不及此表）→ genRand.Next(1000)==0 →
+ *  Item.NewItem 5574`）。与虫族掷骰【相互独立】（原版顺序独立 if：worm →
+ * clover → hop → grub → lava，本表单独成函数即此语义）。5575 枯萎四叶草的唯一
+ * 来源 = 5574 微光转化（ShimmerTransformToItem[5574]=5575）；5576 乌鸦羽 =
+ * 乌鸦 301 掉落 1/10（ItemDropDatabase.cs:959，vanilla-npcdrops.json 已载） */
+export function dropCloverRoll(sheet: number, fx: number, rand: () => number): boolean {
+  if (sheet !== 73 || fx >= 108) return false;
+  return rand() < 1 / 1000;
 }

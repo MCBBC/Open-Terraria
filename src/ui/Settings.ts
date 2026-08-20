@@ -4,6 +4,10 @@
 // 语言切换：网格按钮（原版语义=用当前语言显示所有语言名，Language.* 类别），
 // 点击后 Lang.setLanguage → 本面板经 Lang.onChange 重建（保留当前分栏）。
 import { options, cycleMinimapFrame } from '../core/Options';
+import {
+  KEYBIND_ACTIONS, bindsOf, assignBinding, resetBinding, resetAllKeybinds,
+  keybindActionLabel, keybindCodeLabel, type KeybindAction,
+} from '../core/Keybinds';
 import { TEAM_COLORS } from '../stats/Pvp';
 import { UIScale } from '../vui/draw/UIScale';
 import { UISfx } from '../vui/UISfx';
@@ -61,6 +65,12 @@ const CSS = `
 .sw-set-lang-grid button:hover { background: #4a5aa0; }
 .sw-set-lang-grid button.active { outline: 1px solid #ffd76e; background: #5a6ac0; }
 .sw-set-hint { color:#8a90b8; font-size:12px; }
+/* 键位行（M5）：action 名列宽 + 键按钮等宽 + 监听/未绑定态 */
+.sw-set-row.sw-kb-row > span:first-child { width: 118px; }
+.sw-kb-btn { min-width: 118px; text-align: center; flex: 1; }
+.sw-kb-reset { padding: 4px 10px; flex: none; }
+.sw-kb-unbound { color: #8a90b8; }
+.sw-kb-listening { color: #ffe8a0; outline: 1px solid #ffd76e; }
 `;
 
 export class SettingsPanel {
@@ -105,6 +115,7 @@ export class SettingsPanel {
       case 'sound': return Lang.text('LegacyMenu.65'); // 音量
       case 'ui': return Lang.text('Mods.SandboxWorld.Settings.Interface');
       case 'game': return Lang.text('Mods.SandboxWorld.Settings.Gameplay');
+      case 'controls': return Lang.menu(222);          // 按键绑定（UIManageControls）
       case 'data': return Lang.text('Mods.SandboxWorld.Settings.Data');
       default: return cat;
     }
@@ -113,7 +124,7 @@ export class SettingsPanel {
   private buildCats() {
     const cats = document.createElement('div');
     cats.className = 'sw-set-cats';
-    const list = ['sound', 'ui', 'game', ...(this.flow.onQuickLoad ? ['data'] : [])];
+    const list = ['sound', 'ui', 'game', 'controls', ...(this.flow.onQuickLoad ? ['data'] : [])];
     for (const c of list) {
       const div = document.createElement('div');
       div.dataset.cat = c;
@@ -128,6 +139,7 @@ export class SettingsPanel {
 
   private close(fn: () => void) {
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
+    this.cancelRebindListen();
     this.unsubLang?.();
     this.panel.remove();
     fn();
@@ -180,6 +192,62 @@ export class SettingsPanel {
     btn.addEventListener('click', () => { cycle(); btn.textContent = value(); });
     row.append(span, btn);
     return row;
+  }
+
+  /** 键位行（UIKeybindingListItem：action 名 + 当前键；点击进入监听，↺ 单项回默认） */
+  private keybindRow(action: KeybindAction): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'sw-set-row sw-kb-row';
+    const span = document.createElement('span');
+    span.textContent = keybindActionLabel(action);
+    const btn = document.createElement('button');
+    btn.className = 'sw-set-back sw-kb-btn';
+    const render = (): void => {
+      const codes = bindsOf(action);
+      btn.textContent = codes.length ? codes.map(keybindCodeLabel).join('/') : Lang.menu(195);
+      btn.classList.toggle('sw-kb-unbound', codes.length === 0);
+      btn.classList.toggle('sw-kb-listening', false);
+    };
+    btn.addEventListener('click', () => this.listenRebind(action, btn, render));
+    const reset = document.createElement('button');
+    reset.className = 'sw-set-back sw-kb-reset';
+    reset.textContent = '↺';
+    reset.addEventListener('click', () => {
+      void options.set('keybinds', resetBinding(options.data.keybinds, action));
+      render();
+    });
+    render();
+    row.append(span, btn, reset);
+    return row;
+  }
+
+  /** 监听下一键（PlayerInput.ListenFor + CheckRebindingProcessKeyboard :1495-1513：
+   *  键已在列表→移除（反选解绑）；否则整表替换为该键。Esc 取消。
+   *  capture 阶段拦截：面板 escHandler/main.ts 键盘链全不让位（含 F1-F12 防浏览器快捷） */
+  private rebindListener: ((e: KeyboardEvent) => void) | null = null;
+  private listenRebind(action: KeybindAction, btn: HTMLElement, refresh: () => void): void {
+    this.cancelRebindListen();
+    btn.textContent = Lang.text('Mods.SandboxWorld.Settings.ListeningKey');
+    btn.classList.add('sw-kb-listening');
+    const onKey = (e: KeyboardEvent): void => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.repeat) return;                       // 系统重发不算新键
+      this.cancelRebindListen();
+      if (e.code === 'Escape') { refresh(); return; }   // 取消
+      void options.set('keybinds', assignBinding(options.data.keybinds, action, e.code));
+      UISfx.click();                              // 原版绑定成功 SoundID 12 menuTick
+      refresh();
+    };
+    this.rebindListener = onKey;
+    window.addEventListener('keydown', onKey, true);
+  }
+
+  private cancelRebindListen(): void {
+    if (this.rebindListener) {
+      window.removeEventListener('keydown', this.rebindListener, true);
+      this.rebindListener = null;
+    }
   }
 
   /** 语言选择网格:显示名取各语言包自带的 Language.* 键(原版语义) */
@@ -260,6 +328,36 @@ export class SettingsPanel {
           () => { void options.set('minimapFrame', cycleMinimapFrame(d.minimapFrame)); },
         ),
         this.langGrid(),
+        // ---- M14 杂项（界面组；IngameOptions.cs:705/846/823）----
+        // 拾取提示（:705 Main.showItemText 默认 true；PopupText 拾取飘名链已接）
+        this.modeRow(
+          Lang.menu(71).replace(/[:：].*$/, ''),
+          () => String(d.showItemText),
+          () => Lang.menu(d.showItemText ? 71 : 72),
+          () => void options.set('showItemText', !d.showItemText),
+        ),
+        // 悬停文本框（:846 Main.SettingsEnabled_OpaqueBoxBehindTooltips 默认 true；
+        // 关=tooltip 无底板纯文字，已接 .sw-tooltip-nobox）
+        this.modeRow(
+          Lang.text('GameUI.HoverTextBoxesOn').replace(/[:：].*$/, ''),
+          () => String(d.opaqueBoxBehindTooltips),
+          () => Lang.text(d.opaqueBoxBehindTooltips ? 'GameUI.HoverTextBoxesOn' : 'GameUI.HoverTextBoxesOff'),
+          () => void options.set('opaqueBoxBehindTooltips', !d.opaqueBoxBehindTooltips),
+        ),
+        // 对话头像（:823 Main.DialoguePortraitPreference；CycleNPCPortraitMode :39724
+        // 序 Detailed→CloseUp→FullBodyRetro→Disabled。Disabled 已接；中间两态贴图
+        // 变体未导入暂渲染 Detailed 形）
+        this.modeRow(
+          Lang.text('UI.PortraitsDetailed').replace(/[:：].*$/, ''),
+          () => d.dialoguePortraitMode,
+          () => Lang.text(`UI.Portraits_${d.dialoguePortraitMode === 'detailed' ? 'Detailed'
+            : d.dialoguePortraitMode === 'closeUp' ? 'CloseUp'
+              : d.dialoguePortraitMode === 'fullBodyRetro' ? 'FullBodyRetro' : 'Disabled'}`),
+          () => void options.set('dialoguePortraitMode',
+            d.dialoguePortraitMode === 'detailed' ? 'closeUp'
+              : d.dialoguePortraitMode === 'closeUp' ? 'fullBodyRetro'
+                : d.dialoguePortraitMode === 'fullBodyRetro' ? 'disabled' : 'detailed'),
+        ),
       );
       const hint = document.createElement('div');
       hint.className = 'sw-set-hint';
@@ -360,6 +458,88 @@ export class SettingsPanel {
           row.append(span, btn);
           return row;
         })(),
+        // ---- M14 IngameOptions 杂项（IngameOptions.cs:647-848 逐项；行文案=原版官译）----
+        // 自动保存（:619 Main.autoSave 默认 true；DoUpdate_AutoSave :19589 墙钟触发）
+        this.modeRow(
+          Lang.menu(67).replace(/[:：].*$/, ''),
+          () => String(d.autoSave),
+          () => Lang.menu(d.autoSave ? 67 : 68),
+          () => void options.set('autoSave', !d.autoSave),
+        ),
+        // 自动保存间隔（原版恒 600000ms=10min 不可调；任务要求的 Web 便利扩展档）
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.AutoSaveInterval'),
+          () => String(d.autoSaveIntervalMin),
+          () => Lang.text('Mods.SandboxWorld.Settings.AutoSaveIntervalMin', d.autoSaveIntervalMin),
+          () => {
+            const steps = [5, 10, 20, 30];
+            void options.set('autoSaveIntervalMin', steps[(steps.indexOf(d.autoSaveIntervalMin) + 1) % steps.length] ?? 10);
+          },
+        ),
+        // 自动暂停（:628 Main.autoPause 默认 false；Web 语义=切 tab 暂停）
+        this.modeRow(
+          Lang.menu(69).replace(/[:：].*$/, ''),
+          () => String(d.autoPause),
+          () => Lang.menu(d.autoPause ? 69 : 70),
+          () => void options.set('autoPause', !d.autoPause),
+        ),
+        // 激活套装奖励键上下反转（:647 Main.ReversedUpDownArmorSetBonuses；
+        // 消费=Lang 替换键 ToggleArmorSetBonusKey）
+        this.modeRow(
+          Lang.menu(220).replace(/[:：].*$/, ''),
+          () => String(d.reversedUpDownArmorSetBonuses),
+          () => Lang.menu(d.reversedUpDownArmorSetBonuses ? 220 : 221),
+          () => void options.set('reversedUpDownArmorSetBonuses', !d.reversedUpDownArmorSetBonuses),
+        ),
+        // 智能门（:656 DoorOpeningHelper.PreferenceSettings；CyclePreferences :262
+        // 序 Enabled→GamepadOnly→Disabled。行为 N-A：玩家智能门系统未移植）
+        this.modeRow(
+          Lang.text('UI.SmartDoorsEnabled').replace(/[:：].*$/, ''),
+          () => d.doorOpeningPreference,
+          () => Lang.text(d.doorOpeningPreference === 'enabled' ? 'UI.SmartDoorsEnabled'
+            : d.doorOpeningPreference === 'gamepadOnly' ? 'UI.SmartDoorsGamepad' : 'UI.SmartDoorsDisabled'),
+          () => void options.set('doorOpeningPreference',
+            d.doorOpeningPreference === 'enabled' ? 'gamepadOnly'
+              : d.doorOpeningPreference === 'gamepadOnly' ? 'disabled' : 'enabled'),
+        ),
+        // 全物品自动连用（:689 Main.SettingsEnabled_AutoReuseAllItems；Player.cs:24182
+        // autoReuseAllWeapons——本仓挥击 canChain 门）
+        this.modeRow(
+          Lang.text('UI.AutoReuseAllOn').replace(/[:：].*$/, ''),
+          () => String(d.autoReuseAllItems),
+          () => Lang.text(d.autoReuseAllItems ? 'UI.AutoReuseAllOn' : 'UI.AutoReuseAllOff'),
+          () => void options.set('autoReuseAllItems', !d.autoReuseAllItems),
+        ),
+        // 事件进度条（:714 Main.invasionProgressMode 0/1/2；menu[124+mode] 官译）
+        this.modeRow(
+          Lang.menu(123).replace(/[:：].*$/, ''),
+          () => String(d.invasionProgressMode),
+          () => Lang.menu(124 + d.invasionProgressMode),
+          () => void options.set('invasionProgressMode', ((d.invasionProgressMode + 1) % 3) as 0 | 1 | 2),
+        ),
+        // 放置预览（:727 Main.placementPreview；行为 N-A：对象放置幽灵预览未移植）
+        this.modeRow(
+          Lang.menu(128).replace(/[:：].*$/, ''),
+          () => String(d.placementPreview),
+          () => Lang.menu(d.placementPreview ? 128 : 129),
+          () => void options.set('placementPreview', !d.placementPreview),
+        ),
+        // 突出显示新物品（:736 ItemSlot.Options.HighlightNewItems；行为 N-A：
+        // 背包 newAndShiny 追踪未移植）
+        this.modeRow(
+          Lang.inter(117).replace(/[:：].*$/, ''),
+          () => String(d.highlightNewItems),
+          () => Lang.inter(d.highlightNewItems ? 117 : 116),
+          () => void options.set('highlightNewItems', !d.highlightNewItems),
+        ),
+        // 图格网格（:745 Main.MouseShowBuildingGrid；DrawInterface_6_TileGridOption
+        // 已接——Renderer.drawBuildingGrid CursorRadial 十字）
+        this.modeRow(
+          Lang.menu(229).replace(/[:：].*$/, ''),
+          () => String(d.mouseShowBuildingGrid),
+          () => Lang.menu(d.mouseShowBuildingGrid ? 229 : 230),
+          () => void options.set('mouseShowBuildingGrid', !d.mouseShowBuildingGrid),
+        ),
       );
       const hint = document.createElement('div');
       hint.className = 'sw-set-hint';
@@ -369,6 +549,30 @@ export class SettingsPanel {
       scHint.className = 'sw-set-hint';
       scHint.textContent = Lang.text('Mods.SandboxWorld.Settings.SmartCursorHint');
       this.content.append(scHint);
+    } else if (this.cat === 'controls') {
+      // ---- 键位重映射（M5：UIKeybindingListItem 模式——点击监听下一键；
+      //      已绑定键反选解绑；Esc 取消；↺ 单项回默认）----
+      for (const a of KEYBIND_ACTIONS) this.content.append(this.keybindRow(a));
+      const btns = document.createElement('div');
+      btns.className = 'sw-set-btns';
+      const b = document.createElement('button');
+      b.className = 'sw-set-back';
+      b.style.textAlign = 'center';
+      b.textContent = Lang.text('Mods.SandboxWorld.Settings.ResetKeybinds');
+      b.addEventListener('click', () => {
+        void options.set('keybinds', resetAllKeybinds());
+        this.build();
+      });
+      btns.appendChild(b);
+      this.content.append(btns);
+      const hint = document.createElement('div');
+      hint.className = 'sw-set-hint';
+      hint.textContent = Lang.text('Mods.SandboxWorld.Settings.KeybindsHint');
+      this.content.append(hint);
+      const devHint = document.createElement('div');
+      devHint.className = 'sw-set-hint';
+      devHint.textContent = Lang.text('Mods.SandboxWorld.Settings.DevKeysHint');
+      this.content.append(devHint);
     } else if (this.cat === 'data' && this.flow.onQuickLoad) {
       const btns = document.createElement('div');
       btns.className = 'sw-set-btns';

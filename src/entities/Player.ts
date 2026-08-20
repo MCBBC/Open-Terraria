@@ -9,6 +9,7 @@ import {
 import { moveAndCollide } from '../physics/TileCollision';
 import { playerCanHitEnemy } from './projTargets';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
+import { vanillaIdOfItem } from '../stats/Shimmer';
 import { BuffState, BuffType } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -4677,8 +4678,9 @@ export class Player extends Entity {
    *        + 灯笼夜 0.3 + 地精 0.2 − 臭屁 0.25 + 装备 + 钱币 − 碎镜 0.25。
    *  不 clamp——luckMinimumCap=-0.7/luckMaximumCap=1（Player.cs:2952/2954）只喂 UI 计量
    *  （:3950-3957），聚合本体可超界（原版如此）。
-   *  来源接线：药水 buff 257 三档 / 灯笼夜 / 地精+火炬（Game 15t 扫描）/ 装备（幸运币 855
-   *  +0.05、马掌族 +0.05，Player.cs:12629-12647）已接；瓢虫 604/605（击杀=坏运
+   *  来源接线：药水 buff 257 三档 / 灯笼夜 / 地精+火炬（Game 15t 扫描）/ 装备（幸运币
+   *  {855,3034,3035} +0.05、马掌族九件 +0.05、四叶草族 5574/5575/5576 +0.03/−0.1/−0.1
+   *  ——luckEquipmentBonus，Player.cs:12628-12646）已接；瓢虫 604/605（击杀=坏运
    *  Enemy.hurt cs:82338、触碰=好运 ladybugAI cs:78730——旧注 359/360 为误记，实为蜗牛）、
    *  buff 383 风筝三档、buff 120 臭屁、银河珍珠 5340、碎镜 1085、微光化币——均已接
    *  （来源状态权威见 src/stats/Luck.ts 头注） */
@@ -4707,13 +4709,50 @@ export class Player extends Entity {
   get kiteLuckTier(): number {
     return this.buffs.kiteLuckLevel;
   }
-  /** equipmentBasedLuckBonus（Player.cs:12629-12647）：
-   *  幸运币 855 +0.05（hasLuck_LuckyCoin）/ 马掌族 +0.05（hasLuck_LuckyHorseshoe）。
-   *  四叶草 5574 +0.03 / 枯萎 5575 −0.1 / 乌鸦羽 5576 −0.1（RefreshInfoAccsFromItemType
-   *  :12321-12332）——三件物品未入物品表，登记 */
+  /** equipmentBasedLuckBonus（Player.cs:12628-12646，UpdateEquips 尾段逐旗加和）：
+   *  ★取值语义：五旗各是【bool】——每种类型只计一次（多槽同款不叠），旗间【加法】
+   *    非取最大（四叶草+0.03 / 枯萎−0.1 / 乌鸦羽−0.1 / 马掌族+0.05 / 幸运币+0.05，
+   *    Player.cs:12628-12646 五个独立 if）。
+   *  ★作用域：四叶草三旗经 RefreshInfoAccsFromItemType（:12321-12332）置位——
+   *    UpdateEquips :12494-12498 对【全背包 0-57 + 装备槽 armor[0-9]（经
+   *    GrantArmorBenefits :12683-12685）】逐槽刷新 → 口袋里带着就生效（原版
+   *    1.4 信息饰品同机制，非装备位限定）；马掌/幸运币旗在 ApplyEquipFunctional
+   *    （:12540-12546 仅 armor[3-9] 功能配饰槽）——装备位限定。
+   *  hasLuck_LuckyHorseshoe 物品全集（ApplyEquipFunctional 9 处赋值）：158/396/
+   *  1250/1251/1252/3250/3251/3252/5331（= accfx noFallDmg 集合减 6146）；
+   *  hasLuck_LuckyCoin：855/3034/3035（= accfx luckyCoin 集）。曾只判 158——
+   *  马掌族运气+0.05 对 396 黑曜石马掌/气球族/翱翔徽章全漏（2026-08-20 修） */
+  private static readonly LUCK_HORSESHOE_VIDS = new Set([158, 396, 1250, 1251, 1252, 3250, 3251, 3252, 5331]);
+  /** 四叶草族（RefreshInfoAccsFromItemType :12321-12332：hasLuck_LuckyClover/
+   *  WiltedClover/RavenFeather → :12628-12646 +0.03/−0.1/−0.1） */
+  private static readonly LUCK_CLOVER_BONUS: Record<number, number> = { 5574: 0.03, 5575: -0.1, 5576: -0.1 };
   get luckEquipmentBonus(): number {
-    let b = this.equipStats.luckyCoin ? 0.05 : 0;
-    if (this.hasHorseshoe) b += 0.05;
+    let b = this.equipStats.luckyCoin ? 0.05 : 0;      // :12640-12646 hasLuck_LuckyCoin
+    // hasLuck_LuckyHorseshoe = 精确九件集（ApplyEquipFunctional 赋值处），armor[3-9]
+    let horseshoe = false;
+    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax && !horseshoe; i++) {
+      const s = this.inv.armor[i];
+      if (s && Player.LUCK_HORSESHOE_VIDS.has(vanillaIdOfItem(s.id))) horseshoe = true;
+    }
+    if (horseshoe) b += 0.05;                          // :12628-12631
+    // 四叶草三旗：背包 0-57 + 装备槽 armor[0-9]（UpdateEquips :12494-12530 双扫描）
+    let clover = 0, wilted = 0, raven = 0;
+    const see = (vid: number) => {
+      if (vid === 5574) clover = 1;
+      else if (vid === 5575) wilted = 1;
+      else if (vid === 5576) raven = 1;
+    };
+    for (let i = 0; i < this.inv.slots.length; i++) {
+      const s = this.inv.slots[i];
+      if (s) see(vanillaIdOfItem(s.id));
+    }
+    for (let i = 0; i < 10; i++) {
+      const s = this.inv.armor[i];
+      if (s) see(vanillaIdOfItem(s.id));
+    }
+    if (clover) b += 0.03;                             // :12628 hasLuck_LuckyClover
+    if (wilted) b -= 0.1;                              // :12632-12635 hasLuck_WiltedClover
+    if (raven) b -= 0.1;                               // :12636-12639 hasLuck_RavenFeather
     return b;
   }
   inputDown = false;

@@ -1022,6 +1022,7 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
   const L = la(e);
   if (!e.bInit) {
     e.bInit = true; e.ai0 = 0;   // 原版 ai[0] 从 0 起步（Enemy 默认 -1120 是史莱姆族约定）
+    e.visAngle = 0;              // npc.rotation 默认 0（类字段默认 π 是 EoC 语境）
     // 弹体可见性：原版 33 SetDefaults alpha=255、30/665 AI 每帧强置 alpha=255
     // （cs:21494-21496）——精灵恒隐形，弹体视觉【全部】由尘迹承担（33=尘172×6/t
     // 蓝尘、30/665=尘27×4/t 阴影焰紫、25=尘6 火尘）。fromVanilla 对 alpha>=255 走

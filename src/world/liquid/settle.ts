@@ -45,6 +45,8 @@ export async function settleWorldLiquids(
   }
   const sim = new LiquidSim(world);
   if (rng) sim.passRand = (max) => rng.nextInt(max);
+  // XXXXX 批：级联帧引擎掷骰源（与 passRand 同一实例——int/nextInt/next 同流）
+  sim.passRng = rng ?? null;
   // isGeneratingOrLoadingWorld（WorldGen.cs:11089 / WorldFile.cs:738）：生成与读档
   // 两态都置位——CreateLiquidMergeTile 走 LiquidOverwriteStrip 分支不落块（防沉降期
   // 全图结黑曜石），运行期由 Game.liquid 保持 false 走落块路径

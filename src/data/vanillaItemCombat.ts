@@ -88,6 +88,13 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   //   一发共 3 发，num164=(animMax−anim)/itemTime=0/1/2）
   '4956': { useTime: 10 },
   '5669': { useTime: 10 },
+  // ---- 1.4.4 三溶液（Item.cs:42744-42752 DefaultToSolution(1015/1016/1017)——
+  //   辅助方法形参赋值提取器不解析，与湿/干炸弹同型缺口）。DefaultToSolution
+  //   （:47428-47438）：shoot = projectileId-145 → 870/871/872（PickAmmo 加法链
+  //   Clentaminator.shoot 145 + 870 = SandSpray 1015）；ammo=AmmoID.Solution 780 ----
+  '5392': { shoot: 870, ammo: 780, consumable: true },
+  '5393': { shoot: 871, ammo: 780, consumable: true },
+  '5394': { shoot: 872, ammo: 780, consumable: true },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };
@@ -343,6 +350,10 @@ export function resolveAmmoProjId(launcherVid: number, ammoVid: number, useAmmo:
   if (launcherVid === 1946) return 338 + ammoVid - 771;
   if (launcherVid === 3930) return 715 + ammoVid - 771;
   if (useAmmo === 771) return (launcherShoot ?? 0) + (ammoShoot ?? 0);   // 火箭加法
+  // 溶液加法（Player.cs:52645-52647：useAmmo==AmmoID.Solution → projToShoot +=
+  // item.shoot——Clentaminator 145 + 溶液 shoot 0-4/870-872 → 145-149/1015-1017；
+  // 此前走"弹药 shoot 替换"尾链 → 绿溶液打出 projId 0 隐形弹，2026-08-20 修）
+  if (useAmmo === AMMO_SOLUTION) return (launcherShoot ?? 0) + (ammoShoot ?? 0);
   return ammoShoot ?? launcherShoot ?? 1;
 }
 

@@ -32,6 +32,7 @@ const PROBES = [
   { name: 'f6panel', file: 'scripts/_f6panel-probe.mjs', timeoutMs: 240_000 },   // F6 面板 boss 可见性(置顶+中文搜索)
   { name: 'golem-layer', file: 'scripts/_golem-layer-probe.mjs', timeoutMs: 360_000 }, // 石巨人部件层序(master 锚)
   { name: 'projstatus', file: 'scripts/_projstatus-probe.mjs', timeoutMs: 360_000 },   // 弹药命中 debuff(火矢/毒镖表驱动+实体链)
+  { name: 'bomb-dmg', file: 'scripts/_bomb-chain-probe.mjs', timeoutMs: 560_000 }, // 爆炸物全链(雷管/手雷 hurtBox+飘字)
 ];
 
 const argv = process.argv.slice(2);

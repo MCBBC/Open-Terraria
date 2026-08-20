@@ -85,6 +85,12 @@ export const enum Msg {
                        //   （-1 = 恢复）。旧 server 不识别此号 → default 忽略，AOI 退回
                        //   avatar 中心 = 优雅降级，故不升 PROTO_VER（同 NetModules 通道纪律）
   NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
+  EmoteBubble = 120,  // C→S→广播（M4 玩家表情,对齐原版 MessageID 120）：
+                      //   C→S {u8 emoteId(0-150)}；S→C {u8 slot, u8 emoteId}。
+                      //   原版：客户端 msg120 → 服务器权威 NewBubble + msg91 广播全体
+                      //   （含发送者）；本仓中继模型=发送端本地即刻出泡 + 服务器校验
+                      //   范围后中继其他端按 slot 出泡——观察行为等价,不升 PROTO_VER
+                      //   （旧 server default 忽略未知号,同 SpectateFocus=150 先例）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----
   RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems, u16 maxPlayers(v4),
@@ -167,6 +173,12 @@ export function rulesFromBits(bits: number): RoomRules {
 export const enum NetModule {
   Liquid = 0,   // 预留（v1 液体客户端本地）
   Text = 1,     // 聊天 {authorSlot, text, r, g, b}（author=255 无前缀，对齐原版 255=服务器）
+                //   C→S 载荷 {str text, u8 channel, [u8 r,g,b 尾段]}：
+                //   channel 0=房间聊天（默认,旧客户端无尾段;新客户端随附 RGB=Player.
+                //   ChatColor 难度色,新 server 采用/旧 server 忽略回退金色）/
+                //   1=世界频道（跨房全服,RGB 不附）/ 2=命令系统行（RGB 必附——服务器以
+                //   slot=255 无名前缀中继;发起端已本地回显,广播排除发送者）/
+                //   3=队伍频道（RGB 不附——服务器按 msg13 team 定向同队,队伍色）
   PingModule = 2, // 预留
   JoinLeave = 3,  // S→C 系统 {slot, joined}——加入/离开公告（原版 Lang.mp[19]/[20]，服务器广播）
   LeashedEntity = 13, // 拴绳实体（原版 LeashedEntity.NetModule，msg82 承载）：

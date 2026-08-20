@@ -1,6 +1,7 @@
 // 设置项单例 + KvStore 持久化（M6）。变更通过监听器下发到 Audio/Sfx/UIScale。
 import { kvGet, kvSet } from '../save/KvStore';
 import { DEFAULT_LANG, normalizeLang } from '../i18n/GameCulture';
+import { sanitizeKeybinds, type KeybindAction } from './Keybinds';
 
 /** 小地图边框皮肤全集（MinimapFrameManager.PopulateOptionsAndLoadContent 插入序，
  *  Terraria.GameContent.UI.Minimap/MinimapFrameManager.cs:32-42）。原版 1.4.5.6 的地图
@@ -62,6 +63,56 @@ export interface OptionsData {
   /** 渲染模式:gpu=硬件加速(默认);cpu=软渲染(willReadFrequently,零 GPU 预算,
    *  多开/弱 GPU 稳定);auto=GPU 优先,连续崩溃自动切 CPU,稳定 2 分钟回 GPU */
   renderMode: 'gpu' | 'cpu' | 'auto';
+  // ---- M5 键位重映射（自定义层；缺 action = DEFAULT_KEYBINDS，见 core/Keybinds.ts）----
+  keybinds: Record<string, string[]>;
+  // ---- M14 IngameOptions 杂项（IngameOptions.cs:647-848 逐项，注释=原版默认+消费点）----
+  /** 激活套装奖励键反转（Main.ReversedUpDownArmorSetBonuses，:647；默认 false）——
+   *  消费：Lang 全局替换键 ToggleArmorSetBonusKey（Lang.cs:161 Key.DOWN↔Key.UP），
+   *  本仓 Game.afterWorldLoad 的 reversedArmorBonusKey 注入 */
+  reversedUpDownArmorSetBonuses: boolean;
+  /** 智能门偏好（DoorOpeningHelper.PreferenceSettings，:656；默认 EnabledForEverything，
+   *  CyclePreferences :262-276 循环序 Disabled→Enabled→GamepadOnly→Disabled）。
+   *  行为 N-A：玩家智能门(走过自动开门)系统未移植，设置先持久化 */
+  doorOpeningPreference: 'enabled' | 'gamepadOnly' | 'disabled';
+  /** 全物品自动连用（Main.SettingsEnabled_AutoReuseAllItems，:689；默认 false）——
+   *  消费：Player.cs:24182 autoReuseAllWeapons；本仓 Game 挥击复用门 */
+  autoReuseAllItems: boolean;
+  /** 拾取提示（Main.showItemText，:705；默认 true）——消费：PopupText 族；
+   *  本仓 Game.showPickupLabel 门 */
+  showItemText: boolean;
+  /** 事件进度条（Main.invasionProgressMode，:714；Main() 静默初始化=2，非字段 0！）：
+   *  0=关 / 1=定时(160t 窗) / 2=开(近场常显)。消费：CheckInvasionProgressDisplay
+   *  :46965+DrawInvasionProgress :47077；本仓 Game 入侵条数据源 */
+  invasionProgressMode: 0 | 1 | 2;
+  /** 放置预览（Main.placementPreview，:727；默认 true）——消费：TileDrawing.cs:742
+   *  TileObject.DrawPreview(多格家具放置幽灵)。行为 N-A：对象放置幽灵预览系统
+   *  未移植，设置先持久化 */
+  placementPreview: boolean;
+  /** 突出显示新物品（ItemSlot.Options.HighlightNewItems，:736；默认 true）——消费：
+   *  ItemSlot.cs:1995 item.newAndShiny 高亮。行为 N-A：背包 newAndShiny 追踪未移植，
+   *  设置先持久化 */
+  highlightNewItems: boolean;
+  /** 图格网格（Main.MouseShowBuildingGrid，:745；默认 false）——消费：
+   *  DrawInterface_6_TileGridOption Main.cs:45634-45671（CursorRadial 鼠标格十字，
+   *  站立不动渐显 0.7α/移动>6px 淬灭）；本仓 Renderer.drawBuildingGrid */
+  mouseShowBuildingGrid: boolean;
+  /** 对话头像偏好（Main.DialoguePortraitPreference，:823；CycleNPCPortraitMode
+   *  :39724 循环序 Detailed→CloseUp→FullBodyRetro→Disabled；默认 Detailed）——
+   *  消费：DrawNPCPortrait；本仓 NpcDialog（Disabled=不画头像；CloseUp/FullBodyRetro
+   *  贴图变体未导入暂渲染 Detailed 形） */
+  dialoguePortraitMode: 'detailed' | 'closeUp' | 'fullBodyRetro' | 'disabled';
+  /** 悬停文本框（Main.SettingsEnabled_OpaqueBoxBehindTooltips，:848；默认 true）——
+   *  消费：物品 tooltip 背板；本仓 UI .sw-tooltip 底色 */
+  opaqueBoxBehindTooltips: boolean;
+  // ---- S 级：自动保存/自动暂停（IngameOptions.cs:619/628）----
+  /** 自动保存（Main.autoSave，Main.cs:1196 默认 true）——DoUpdate_AutoSave :19589
+   *  墙钟 600000ms 触发 WorldGen.saveAndPlay */
+  autoSave: boolean;
+  /** 自动保存间隔（分钟；原版恒 10 分钟不可调，此处为任务要求的 Web 便利扩展档） */
+  autoSaveIntervalMin: number;
+  /** 自动暂停（Main.autoPause，Main.cs:1280 默认 false）——Web 语义=切 tab
+   *  (visibilitychange hidden) 暂停、回来自动恢复 */
+  autoPause: boolean;
 }
 
 const KEY = 'sandboxworld.options';
@@ -88,6 +139,20 @@ export class OptionsStore {
     swayInWind: true,
     resourceBarStyle: 'fancy',
     minimapFrame: 'Default',
+    keybinds: {},
+    reversedUpDownArmorSetBonuses: false,   // Main.cs:253
+    doorOpeningPreference: 'enabled',       // DoorOpeningHelper.cs:216
+    autoReuseAllItems: false,               // Main.cs:241
+    showItemText: true,                     // Main.cs:1194
+    invasionProgressMode: 2,                // Main() 静默初始化 Main.cs:65992
+    placementPreview: true,                 // Main.cs:1298
+    highlightNewItems: true,                // ItemSlot.cs:31
+    mouseShowBuildingGrid: false,           // Main.cs:257
+    dialoguePortraitMode: 'detailed',
+    opaqueBoxBehindTooltips: true,          // Main.cs:249
+    autoSave: true,                         // Main.cs:1196
+    autoSaveIntervalMin: 10,                // 原版 600000ms 恒值
+    autoPause: false,                       // Main.cs:1280
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -121,6 +186,23 @@ export class OptionsStore {
       // (SelectionHolder.SetActiveFrame(string) 未命中 → Options.Values.First() = Default)
       if (!(MINIMAP_FRAME_SKINS as readonly string[]).includes(this.data.minimapFrame)) {
         this.data.minimapFrame = 'Default';
+      }
+      // 键位表清洗（未知 action/非字符串项剔除；空表=全默认）
+      this.data.keybinds = sanitizeKeybinds(this.data.keybinds);
+      // M14 枚举归一化（旧档/手改坏值 → 原版默认）
+      const DOOR_PREFS = ['enabled', 'gamepadOnly', 'disabled'] as const;
+      if (!DOOR_PREFS.includes(this.data.doorOpeningPreference as typeof DOOR_PREFS[number])) {
+        this.data.doorOpeningPreference = 'enabled';
+      }
+      const PORTRAITS = ['detailed', 'closeUp', 'fullBodyRetro', 'disabled'] as const;
+      if (!PORTRAITS.includes(this.data.dialoguePortraitMode as typeof PORTRAITS[number])) {
+        this.data.dialoguePortraitMode = 'detailed';
+      }
+      if (this.data.invasionProgressMode !== 0 && this.data.invasionProgressMode !== 1) {
+        this.data.invasionProgressMode = 2;
+      }
+      if (!Number.isFinite(this.data.autoSaveIntervalMin) || this.data.autoSaveIntervalMin < 1) {
+        this.data.autoSaveIntervalMin = 10;
       }
     } catch { /* 无存档用默认 */ }
     this.emit();

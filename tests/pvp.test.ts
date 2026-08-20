@@ -179,7 +179,7 @@ describe('死因 player 文案（DeathSource.Player）', () => {
 describe('队伍色（Main.cs:6610-6615）', () => {
   it('六色对表', () => {
     expect(TEAM_COLORS[1]).toEqual([218, 59, 59]);
-    expect(TEAM_COLORS[4]).toEqual([255, 199, 0]);
+    expect(TEAM_COLORS[4]).toEqual([242, 221, 100]);
     expect(TEAM_COLORS.length).toBe(6);
   });
 });

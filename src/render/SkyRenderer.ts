@@ -12,6 +12,48 @@ const AMB_TINT_CACHE = new Map<string, HTMLCanvasElement>();
 export function clearAmbientTintCache(): void {
   for (const c of AMB_TINT_CACHE.values()) { c.width = 0; c.height = 0; }
   AMB_TINT_CACHE.clear();
+  for (const c of EVENT_TINT_CACHE.values()) { c.width = 0; c.height = 0; }
+  for (const c of eventTintFree) { c.width = 0; c.height = 0; }
+  EVENT_TINT_CACHE.clear();
+  eventTintFree.length = 0;
+}
+/** 事件天幕（史莱姆剪影/UFO）乘色缓存:键 = 纹理 id + 1/16 量化 rgb。工作集 =
+ *  4 史莱姆贴图 × 5 深度档 × 慢变 cots 桶(≈20-40)+ UFO 2 张——真 LRU 命中重插,
+ *  cap 64 + 复用池 8(cloudTint 同款防画布出生风暴) */
+const EVENT_TINT_CACHE = new Map<string, HTMLCanvasElement>();
+const eventTintFree: HTMLCanvasElement[] = [];
+function eventTintedSprite(
+  tex: ImageBitmap | HTMLImageElement, r: number, g: number, b: number, family: string,
+): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
+  const key = `${family}:${texId(tex as object)}:${r >> 4},${g >> 4},${b >> 4}`;
+  const hit = EVENT_TINT_CACHE.get(key);
+  if (hit) {
+    EVENT_TINT_CACHE.delete(key);
+    EVENT_TINT_CACHE.set(key, hit);       // LRU 重插尾
+    return hit;
+  }
+  let c = eventTintFree.pop();
+  if (!c) c = document.createElement('canvas');
+  if (c.width !== tex.width || c.height !== tex.height) { c.width = tex.width; c.height = tex.height; }
+  const cx = c.getContext('2d')!;
+  cx.globalCompositeOperation = 'copy';
+  cx.drawImage(tex as CanvasImageSource, 0, 0);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${r},${g},${b})`;
+  cx.fillRect(0, 0, c.width, c.height);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(tex as CanvasImageSource, 0, 0);
+  EVENT_TINT_CACHE.set(key, c);
+  if (EVENT_TINT_CACHE.size > 64) {
+    const first = EVENT_TINT_CACHE.keys().next().value;
+    if (first !== undefined) {
+      const evicted = EVENT_TINT_CACHE.get(first);
+      EVENT_TINT_CACHE.delete(first);
+      if (evicted && eventTintFree.length < 8) eventTintFree.push(evicted);
+    }
+  }
+  return c;
 }
 import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
@@ -21,6 +63,8 @@ import { texId } from './texId';
 import { horizonPhaseOf, sunColorOf, moonDrawColor } from '../lighting/Horizon';
 import { applyBiomeToSun, applyBiomeToMoon } from '../lighting/SkyColor';
 import { AuroraSky } from './AuroraSky';
+import { SlimeSky, slimeSilhouetteTint, slimeProject } from './SlimeSky';
+import { MartianSky, ufoTintColor, ufoProject } from './MartianSky';
 
 // 天空关键色 [时刻, 顶色, 底色]（时刻 0-1）
 const SKY_KEYS: Array<[number, string, string]> = [
@@ -825,6 +869,9 @@ export interface SkyFrameCtx {
     /** 地狱顶（tile；= UnderworldLayer，0 缺省时以 h-200 回退） */
     lavaLine: number;
     crimson: boolean;
+    /** 入侵类型（World.invasionType 结构透传；4 = 火星——MartianSky 激活门
+     *  Main.cs:58757-58763 invasionType==4 轮询） */
+    invasionType?: number;
     flags: Record<string, boolean>;
     /** Main.dayRate(星空 fadeIn/坠星推进用,缺省 1) */
     dayRate?: () => number;
@@ -841,6 +888,10 @@ export interface SkyFrameCtx {
   scene: {
     zoneDesert: boolean; zoneBeach: boolean; zoneJungle: boolean;
     zoneCorrupt: boolean; zoneCrimson: boolean; zoneHallow: boolean;
+    /** SceneMetrics 派生位（结构透传）：ZoneRain = raining && SurfaceAtmospherics
+     *  （SceneMetrics.cs:700）/ ZoneSnow（:682）——暴风雪色罩双门
+     *  （SceneState.cs:102 flag = ZoneRain && ZoneSnow）与 AuroraSky 同源 */
+    zoneRain?: boolean; zoneSnow?: boolean; zoneSandstorm?: boolean;
     /** 群系光照影响(Game 每 tick 平滑写入;日月绘制色 SetBackColor 群系块消费) */
     biomeLightInfluence?: {
       corrupt: number; crimson: number; jungle: number; mushroom: number; graveyard: number;
@@ -992,6 +1043,53 @@ export function horizonCloudShadeApprox(
     0.65, 0.65,                        // uv → R = |0.3,0.3| ≈ 0.424
     cel.intensity,
   );
+}
+
+// ================= 沙尘暴/暴风雪全屏色罩（SandstormSky.cs / BlizzardSky.cs 1:1） =================
+// 原版是 SkyManager 自定义天空层（ScreenEffectInitializer.cs:71-72 注册）：Draw
+// (SandstormSky.cs:49-60 / BlizzardSky.cs:48-60) 以 MagicPixel 全屏 alpha 混合一张
+// 色罩,强度驱动与 SceneState.cs:177-181 的滤镜链同源（Severity / cloudAlpha）。
+// 本仓载体 = GLScreenFilters 的 SkyWeatherTint pass（滤镜链头——天空层在 FilterManager
+// EndCapture 之下）+ 2D fillRect 兜底（source-over = XNA AlphaBlend 同式）。
+
+/** Blizzard 激活门（SceneState.cs:102/120 一比一,纯函数供测试）：
+ *  flag = metrics.ZoneRain && metrics.ZoneSnow;ManageSpecialBiomeVisuals("Blizzard",
+ *  Main.UseStormEffects && flag)——UseStormEffects（Main.cs:407 默认 true,设置项
+ *  「风暴效果」）本仓未接设置面,恒 true。 */
+export function blizzardSkyGate(zoneRain: boolean, zoneSnow: boolean): boolean {
+  return zoneRain && zoneSnow;
+}
+
+/** Sandstorm 激活门（Sandstorm.ShowSandstormVisuals Sandstorm.cs:132-139 的本仓
+ *  等价门,与 Game.weatherHooks.sandstormVisuals 同源）：
+ *  Happening && 沙漠带 && bgDelay<50（背景样式切换缓冲 <50 帧 → 玩家在地表带内
+ *  近似 = 玩家 tileY < groundLevel+30）。 */
+export function sandstormSkyGate(
+  happening: boolean, zoneDesert: boolean, playerTileY: number, groundLevel: number,
+): boolean {
+  return happening && zoneDesert && playerTileY < groundLevel + 30;
+}
+
+/** SandstormSky.Draw :53-55 色罩参数（纯函数,0-1 浮点供测试与 GL/2D 双路径）：
+ *  num = min(1, Severity×1.5);color = Vector4(0.85,0.66,0.33,1)×0.8×cots ×opacity×num
+ *  ——★XNA 此处四通道【全乘】opacity×num（rgb 与 α 同时缩放）,AlphaBlend 再以
+ *  src.rgb×src.a 合成 → 有效叠加量 ∝ (opacity×num)²,逐字照抄。 */
+export function sandstormSkyTint(
+  severity: number, opacity: number, cots: readonly [number, number, number],
+): { color: [number, number, number]; alpha: number } {
+  const k = Math.min(1, severity * 1.5) * opacity;
+  const cr = cots[0] / 255, cg = cots[1] / 255, cb = cots[2] / 255;
+  return { color: [0.85 * 0.8 * cr * k, 0.66 * 0.8 * cg * k, 0.33 * 0.8 * cb * k], alpha: 1 * 0.8 * k };
+}
+
+/** BlizzardSky.Draw :52-54 色罩参数（纯函数）：num = min(1, cloudAlpha×2);
+ *  color = Vector4(1)×cots ×opacity×0.7×num（同样四通道全乘）。 */
+export function blizzardSkyTint(
+  cloudAlpha: number, opacity: number, cots: readonly [number, number, number],
+): { color: [number, number, number]; alpha: number } {
+  const k = Math.min(1, cloudAlpha * 2) * opacity;
+  const cr = cots[0] / 255, cg = cots[1] / 255, cb = cots[2] / 255;
+  return { color: [cr * 0.7 * k, cg * 0.7 * k, cb * 0.7 * k], alpha: 1 * 0.7 * k };
 }
 
 export class SkyRenderer {
@@ -1189,6 +1287,17 @@ export class SkyRenderer {
   private sun3TexImg(): ImageBitmap | HTMLImageElement | null {
     if (!this.sun3Tex) this.sun3Tex = onBitmap(loadTex('Sun3.png'), (b) => { this.sun3Tex = b; });
     return this.sun3Tex.width > 0 ? this.sun3Tex : null;
+  }
+  /** 太阳本体横向光晕(DrawSun :171-185;★A=0 系反编译伪影,贴图满内容) */
+  private flareT1: HTMLImageElement | null = null;
+  private flareT2: HTMLImageElement | null = null;
+  private flareTexImg(kind: 1 | 2): HTMLImageElement | null {
+    if (kind === 1) {
+      if (!this.flareT1) this.flareT1 = loadTex('Misc_Sunflare_flare1.png');
+      return this.flareT1.width > 0 ? this.flareT1 : null;
+    }
+    if (!this.flareT2) this.flareT2 = loadTex('Misc_Sunflare_flare2.png');
+    return this.flareT2.width > 0 ? this.flareT2 : null;
   }
   /** 骷髅头太阳 Sun2(Main.cs:62365-62369:!gameMenu && player.head==12 →
    *  TextureAssets.Sun2;头槽 12=物品 237 太阳镜,经 frameCtx.player.headArmorSlot
@@ -1579,6 +1688,27 @@ export class SkyRenderer {
   /** 极光天空（AuroraSky.cs 1:1；激活门由 Game.updateWeather 接线） */
   readonly aurora = new AuroraSky();
 
+  // ---- 事件天幕（SlimeSky/MartianSky：史莱姆雨剪影族 + 火星 UFO）----
+  /** SlimeSky（SlimeSky.cs 1:1；激活门 = weatherRef.slimeRain 边沿,StartSlimeRain/
+   *  StopSlimeRain 的 Activate/Deactivate 语义,Main.cs:64221/:64261） */
+  readonly slimeSky = new SlimeSky();
+  /** MartianSky（MartianSky.cs 1:1；激活门 = invasionType==4 轮询,Main.cs:58757-58763） */
+  readonly martianSky = new MartianSky();
+  /** 上帧 slimeRain 门（StartSlimeRain 事件语义的沿检测） */
+  private slimeWasOn = false;
+  /** Images/Misc/Sky_Slime_1-4（四帧竖排;0/1 常规 2/3 稀有档） */
+  private slimeTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null, null, null];
+  /** [0]=Extra_5 近档 28×42 三帧 / [1]=Extra_6 远档 70×90 三帧 */
+  private martianTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null];
+  /** [0]=Glow_90 / [1]=Glow_91（与主贴图同尺寸,同源矩形辉光叠画） */
+  private martianGlowTexs: Array<ImageBitmap | HTMLImageElement | null> = [null, null];
+
+  // ---- 沙尘暴/暴风雪色罩状态（SandstormSky/BlizzardSky 的 _opacity 渐变对） ----
+  /** ManageSpecialBiomeVisuals 边沿 + Update ±ElapsedGameTime 秒渐变（两罩同构
+   *  SandstormSky.cs:24-47：leaving 减到 0 → isActive=false） */
+  private sandTintState = { active: false, leaving: false, opacity: 0 };
+  private blizzTintState = { active: false, leaving: false, opacity: 0 };
+
   /** 塔天空激活时的云量乘子（GetCloudAlpha()；sky.draw 每帧写，drawVanillaClouds 读） */
   private towerCloudMul = 1;
 
@@ -1784,6 +1914,201 @@ export class SkyRenderer {
       moonFrac,
       dtSec: dtMs / 1000,
     });
+  }
+
+  // ================= 事件天幕（SlimeSky/MartianSky 1:1） =================
+
+  /** 事件天幕激活动轮询 + 60Hz 推进（激活边沿 = 原版 Activate/Deactivate 调用点） */
+  private stepEventSkies(frames: number, camX: number, camY: number, viewW: number, viewH: number): void {
+    const fc = this.frameCtx;
+    const zQ = fc?.z ?? 1;
+    const maxTilesX = fc?.world?.w ?? Math.max(1, Math.round(this.fx.worldW));
+    const maxTilesY = fc?.world?.h ?? Math.max(1, Math.round(this.fx.worldH));
+    // Slime：StartSlimeRain/StopSlimeRain 的 Activate("Slime")/Deactivate（:64221/:64261）
+    // ——事件驱动语义:雨再开时无条件 Activate(重生成+!isLeaving,即便上次还在
+    // 排空;StartSlimeRain 对已在下的雨 return),故以 wasOn 沿驱动激活半边
+    const slimeOn = !!this.weatherRef?.slimeRain;
+    if (slimeOn && (!this.slimeSky.isActive || (this.slimeSky.isLeaving && !this.slimeWasOn))) {
+      this.slimeSky.activate({
+        maxTilesX, maxTilesY, surfacePx: this.fx.surfaceY,
+        screenTopY: camY - viewH / 2 / zQ, screenHeight: viewH,
+      });
+    } else if (!slimeOn && this.slimeSky.isActive && !this.slimeSky.isLeaving) {
+      this.slimeSky.deactivate();
+    }
+    this.slimeWasOn = slimeOn;
+    // Martian：invasionType==4 轮询（Main.cs:58757-58763 同式）
+    const martianOn = (fc?.world?.invasionType ?? 0) === 4;
+    if (martianOn && !this.martianSky.isActive) {
+      this.martianSky.activate(maxTilesX);
+    } else if (!martianOn && this.martianSky.isActive && !this.martianSky.isLeaving) {
+      this.martianSky.deactivate();
+    }
+    for (let f = 0; f < frames; f++) {      // SkyManager.Update 逐 tick（dayRate=1）
+      this.slimeSky.update();
+      this.martianSky.update();
+    }
+  }
+
+  /** SlimeSky.Draw（:162-228）：深度档着色 + 视差投影 + X 4000 环绕 + ±1000 剔除。
+   *  原版按 SkyManager 深度窗分段画（DrawToDepth 各段并集 = 全量）;本仓单段全画,
+   *  远→近序（数组天然按 i 升序 = Depth 升序）等价。 */
+  private drawSlimeSky(
+    ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number,
+  ): void {
+    const sky = this.slimeSky;
+    if (!sky.isActive) return;
+    const zQ = this.frameCtx?.z ?? 1;
+    if (camY - viewH / 2 / zQ > 10000) return;                     // :164 screenPosition.Y>10000
+    const cots = this.cots;
+    if (!cots) return;
+    for (const s of sky.entities) {
+      if (!s.active) continue;                                     // :191
+      const tex = this.slimeTex(s.tex);
+      if (!tex || !(tex.width > 0) || tex.width === 0) continue;
+      const p = slimeProject(s.x, s.y, s.depth, camX, camY, viewW, viewH);
+      if (p.x < -1000 || p.x > viewW + 1000 || p.y < -1000 || p.y > viewH + 1000) continue;  // :222
+      const col = slimeSilhouetteTint(cots, s.depth);              // :193-212
+      const sprite = eventTintedSprite(tex,
+        Math.round(col.r * 255), Math.round(col.g * 255), Math.round(col.b * 255), `slime${s.tex}`);
+      if (!sprite) continue;
+      const fh = tex.height / 4;                                   // :43 FrameHeight = 高/4
+      const scale = (1 / s.depth) * 2;                             // :224 vector2.X×2
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, col.a));
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(sprite, 0, Math.floor(s.frame / 6) * fh, tex.width, fh,   // :61 帧行 = frame/6
+        p.x, p.y, tex.width * scale, fh * scale);                  // origin (0,0)
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** MartianSky.Draw（:258-300）：主贴图 ×(cots×0.9+0.1)×Opacity + 辉光白 ×Opacity,
+   *  同变换同源帧叠画;origin (0,0) 绕左上旋。 */
+  private drawMartianSky(
+    ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number,
+  ): void {
+    const sky = this.martianSky;
+    if (!sky.isActive) return;
+    const zQ = this.frameCtx?.z ?? 1;
+    if (camY - viewH / 2 / zQ > 10000) return;                     // :260
+    const cots = this.cots;
+    if (!cots) return;
+    const tint = ufoTintColor(cots);                               // :283
+    const tr = Math.round(tint.r * 255), tg = Math.round(tint.g * 255), tb = Math.round(tint.b * 255);
+    for (const u of sky.ufos) {
+      if (!u.active) continue;                                     // :291
+      const p = ufoProject(u.x, u.y, u.depth, camX, camY, viewW, viewH);
+      if (p.x < -1000 || p.x > viewW + 1000 || p.y < -1000 || p.y > viewH + 1000) continue;
+      const tex = this.martianTex(u.tex);
+      if (!tex || !(tex.width > 0) || tex.width === 0) continue;
+      const fh = tex.height / 3;                                   // :152 FrameHeight = 高/3
+      const scale = (1 / u.depth) * 5 * u.scale;                   // :293 vector2.X×5×Scale
+      const alpha = Math.max(0, Math.min(1, u.opacity));
+      const row = Math.floor(u.frame / 4) * fh;                    // :187 源帧行 = frame/4
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(u.rotation);
+      ctx.imageSmoothingEnabled = true;
+      const sprite = eventTintedSprite(tex, tr, tg, tb, `martian${u.tex}`);
+      if (sprite) {
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(sprite, 0, row, tex.width, fh, 0, 0, tex.width * scale, fh * scale);
+      }
+      const glow = this.martianGlowTex(u.glow);
+      if (glow && glow.width > 0) {                                // :294-297 Color.White×Opacity
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(glow as CanvasImageSource, 0, row, tex.width, fh, 0, 0, tex.width * scale, fh * scale);
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  private slimeTex(i: number): ImageBitmap | HTMLImageElement | null {
+    const t = this.slimeTexs[i];
+    if (!t) loadBitmapOnly(`vanilla/Misc_Sky_Slime_${i + 1}.png`,
+      () => !!this.slimeTexs[i], (x) => { this.slimeTexs[i] = x; });
+    return t;
+  }
+
+  private martianTex(i: number): ImageBitmap | HTMLImageElement | null {
+    const t = this.martianTexs[i];
+    if (!t) loadBitmapOnly(`vanilla/Extra_${i === 0 ? 5 : 6}.png`,
+      () => !!this.martianTexs[i], (x) => { this.martianTexs[i] = x; });
+    return t;
+  }
+
+  private martianGlowTex(i: number): ImageBitmap | HTMLImageElement | null {
+    const t = this.martianGlowTexs[i];
+    if (!t) loadBitmapOnly(`vanilla/Glow_${i === 0 ? 90 : 91}.png`,
+      () => !!this.martianGlowTexs[i], (x) => { this.martianGlowTexs[i] = x; });
+    return t;
+  }
+
+  // ================= 沙尘暴/暴风雪色罩状态机（ManageSpecialBiomeVisuals + Update） =================
+
+  /** 单罩状态推进（SandstormSky/BlizzardSky.Update :24-47 同构,纯边沿+渐变） */
+  private static stepTintState(st: { active: boolean; leaving: boolean; opacity: number },
+    gate: boolean, dtSec: number): void {
+    if (gate !== st.active) {                                      // ManageSpecialBiomeVisuals :123-133
+      if (gate) { st.active = true; st.leaving = false; }          // Activate(:59-63)
+      else st.leaving = true;                                      // Deactivate(:65-68)
+    }
+    if (!st.active) return;
+    if (st.leaving) {                                              // :30-37
+      st.opacity -= dtSec;
+      if (st.opacity < 0) { st.active = false; st.opacity = 0; }
+    } else {                                                       // :39-46
+      st.opacity += dtSec;
+      if (st.opacity > 1) st.opacity = 1;
+    }
+  }
+
+  /** 每帧驱动（sky.draw 头部调用;门输入与粒子系统/SceneState 同源） */
+  stepWeatherTints(dtSec: number): void {
+    const fc = this.frameCtx;
+    const wr = this.weatherRef;
+    const scene = fc?.scene;
+    const player = fc?.player;
+    // SceneState.cs:120:ManageSpecialBiomeVisuals("Blizzard", UseStormEffects && ZoneRain && ZoneSnow)
+    const blizzOn = blizzardSkyGate(!!scene?.zoneRain, !!scene?.zoneSnow);
+    // Sandstorm:ShowSandstormVisuals 本仓等价门（Game.weatherHooks.sandstormVisuals 同源）
+    const sandOn = sandstormSkyGate(
+      !!wr?.sandstorm.happening, !!scene?.zoneDesert,
+      player ? player.cy / 16 : Infinity, fc?.world?.groundLevel ?? 0);
+    SkyRenderer.stepTintState(this.sandTintState, sandOn, dtSec);
+    SkyRenderer.stepTintState(this.blizzTintState, blizzOn, dtSec);
+  }
+
+  /** 色罩 pass 输出（Renderer.drawScreenFilterChain 头插;无 cots/零强度 → 空） */
+  weatherTintPasses(): import('./GLScreenFilters').ScreenFxPass[] {
+    const out: import('./GLScreenFilters').ScreenFxPass[] = [];
+    const cots = this.cots;
+    if (!cots) return out;
+    const wr = this.weatherRef;
+    if (this.sandTintState.opacity > 0.001) {
+      const t = sandstormSkyTint(wr?.sandstorm.severity ?? 0, this.sandTintState.opacity, cots);
+      out.push({ kind: 'SkyWeatherTint', color: t.color, alpha: t.alpha });
+    }
+    if (this.blizzTintState.opacity > 0.001) {
+      const t = blizzardSkyTint(wr?.cloudAlpha ?? 0, this.blizzTintState.opacity, cots);
+      out.push({ kind: 'SkyWeatherTint', color: t.color, alpha: t.alpha });
+    }
+    return out;
+  }
+
+  /** 2D 兜底（GL 不可用路径;source-over = XNA AlphaBlend 同式,精确非近似） */
+  drawWeatherTint2D(ctx: CanvasRenderingContext2D, viewW: number, viewH: number): void {
+    for (const p of this.weatherTintPasses()) {
+      if (p.kind !== 'SkyWeatherTint') continue;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, p.alpha));
+      ctx.fillStyle = `rgb(${Math.round(p.color[0] * 255)},${Math.round(p.color[1] * 255)},${Math.round(p.color[2] * 255)})`;
+      ctx.fillRect(0, 0, viewW, viewH);
+      ctx.restore();
+    }
   }
 
   /** 派对气球绘制（PartySky.Update/Draw :130-198 精简核：上升 + 风漂移 + 视差 1/depth） */
@@ -2150,6 +2475,11 @@ export class SkyRenderer {
     this.clearTowerSky();
     this.clearMoonlordDrama();
     this.aurora.reset();   // SkyManager.Reset(AuroraSky.cs:435-439)
+    this.slimeSky.reset();         // SkyManager.Reset 同批(SlimeSky.Reset :242-245)
+    this.martianSky.reset();       // (MartianSky.Reset :342-345)
+    this.slimeWasOn = false;
+    this.sandTintState = { active: false, leaving: false, opacity: 0 };
+    this.blizzTintState = { active: false, leaving: false, opacity: 0 };
   }
 
   /** SetPositionInWorldBasedOnScreenSpace（AmbientSky.cs:47-51）：
@@ -2451,6 +2781,11 @@ export class SkyRenderer {
     // NPC 缓存之前 = tile 之前——本仓 pre-world 变换段等价；白闪走帧尾
     // drawMoonlordWhiteFlash（Renderer 7c' 段））
     this.drawMoonlordDrama(ctx, camX, camY, viewW, viewH, this.frameCtx?.z ?? 1);
+    // 事件天幕（SlimeSky/MartianSky）：激活轮询 + 60Hz 推进 + 绘制——SkyManager
+    // DrawToDepth 深度交错段的本仓等价槽（群系背景之上、tile 之下,与 Ambience 同层）
+    this.stepEventSkies(ticks, camX, camY, viewW, viewH);
+    this.drawSlimeSky(ctx, viewW, viewH, camX, camY);
+    this.drawMartianSky(ctx, viewW, viewH, camX, camY);
     if (!this.ambEntities.length) return;
     // atmo（Game.updateWeather 同公式，Main.cs:62622）——CommonDraw :76 color × atmo
     const atmo = Math.max(0, Math.min(1,
@@ -3153,6 +3488,10 @@ export class SkyRenderer {
         };
       }
     }
+    // 沙尘暴/暴风雪色罩状态机（SandstormSky/BlizzardSky 的门轮询+_opacity 渐变;
+    // pass 由 Renderer.drawScreenFilterChain 于帧尾(7d)头插消费——此处先更新状态,
+    // 帧内序正确)
+    this.stepWeatherTints(dtMs / 1000);
     const t = clock.timeOfDay;
     const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
     const dayTimeTicks = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
@@ -3415,8 +3754,11 @@ export class SkyRenderer {
             ctx.restore();
           }
         }
-        // 注:DrawSun 的 flare1/flare2 两档原版 A 恒 0 不可见(见 sunVisibilities 段
-        // 考据注),可见晨昏耀斑全部走 drawLensFlare(drawWorldFx 链),此处不画
+        // DrawSun 的 flare1/flare2:贴图是满 alpha 矩形(532×215/1166×254,无软边)
+        // → 直接画=方片框(用户实报)。反编译 A=0 可能非伪影而是有意屏蔽——
+        // 这两张图是 LensFlare shader 的输入素材,不经 shader 处理不该直画。
+        // 太阳旁的横向光效由 drawLensFlare 链的 pointblurry 元素(scale 1.0,
+        // 距离 0.6)承担,该链已修好并正常工作。
       }
     } else {
       this.sunScreen = null;

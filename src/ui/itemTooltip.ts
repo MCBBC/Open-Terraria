@@ -50,7 +50,7 @@ export interface TooltipContext {
   research?: { have: number; need: number } | null;
   /** 商店上下文（npcShop>0，:20309-20402）：买入价（buy=true）/卖出价（铜计）。
    *  null=非商店。价格行按最高币种着色（:20380-20397 四档） */
-  shop?: { buy: boolean; priceCopper: number } | null;
+  shop?: { buy: boolean; priceCopper: number; medalPrice?: number } | null;
   /** 专家/大师物品旗（item.expert / rare==-13，:21146-21157 GameUI.Expert/Master） */
   expert?: boolean;
   master?: boolean;
@@ -346,6 +346,14 @@ export function assembleTooltipLines(
   // （:20380-20397 铂 220,220,198 / 金 224,201,92 / 银 181,192,193 / 铜 246,138,96；
   //  价格 0 → tip[51] 无价值 灰 120,120,120）
   if (ctx.shop) {
+    // 勋章条目（shopSpecialCurrency≠-1，Main.cs:20313-20316 → CustomCurrency
+    // SingleCoin.GetPriceText :103-107）：「买入价: N 护卫奖章」，色 (240,100,120)
+    if (ctx.shop.medalPrice !== undefined) {
+      out.push({
+        text: `${T('LegacyTooltip.50')} ${ctx.shop.medalPrice} ${T('Currency.DefenderMedals').toLowerCase()}`,
+        color: 'rgb(240,100,120)', tag: 'shopprice',
+      });
+    } else {
     const pc = ctx.shop.priceCopper;
     if (pc > 0) {
       const plat = Math.floor(pc / 1000000), gold = Math.floor(pc % 1000000 / 10000);
@@ -355,6 +363,7 @@ export function assembleTooltipLines(
       out.push({ text: `${T(ctx.shop.buy ? 'LegacyTooltip.50' : 'LegacyTooltip.49')} ${coinText(pc)}`, color, tag: 'shopprice' });
     } else {
       out.push({ text: T('LegacyTooltip.51'), color: 'rgb(120,120,120)', tag: 'noworth' });
+    }
     }
   }
   return out;

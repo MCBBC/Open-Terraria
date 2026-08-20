@@ -6,51 +6,91 @@ const SRC = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria';
 const itemSrc = readFileSync(`${SRC}/Item.cs`, 'utf8');
 const chestSrc = readFileSync(`${SRC}/Chest.cs`, 'utf8');
 
-// ---- ① 物品 value:SetDefaults1-5 的 `case N:` 块内首个 `value = D;`(break/return 前最贴近的) ----
+// ---- ① 物品 value:SetDefaults1-5 的 `case N:` 块内 value 赋值（嵌套 switch 迷你求值）----
+// 2026-08-20 重构：旧版扁平 case 标签有两坑——①【嵌套 switch(type) 的内层 case】
+// 被当独立块（DD2 杖族 3818-3834 内层 3819/3825/… 的 value 覆写污染外层 fall-through
+// 继承 → T1 杖错抄 T2 价）②段边界取「下一个任意深度 case」（蜂王掉落族 2883-2888
+// 定义在外层 case 的内层 switch 里，深度过滤又整段漏收）。现按花括号深度建标签表：
+// 每个 case 标签的段 = 到【同深度或更浅的下一个标签 / 所在块闭合】为止；段内做
+// C# 序模拟：共享体 value 赋值 + 更深层 `case <自身id>:` 块内覆写，晚写胜出。
 const values = {};
 {
   const body = itemSrc.slice(itemSrc.indexOf('public void SetDefaults1'), itemSrc.indexOf('public void SetDefaults(int Type'));
-  // \t+case:SetDefaults1-3 段双 tab、4/5 段单 tab（旧 `\t\tcase` 漏扫 4/5 段
-  // 致 90 条 price:null——2026-08-13 修）
-  const caseRe = /\t+case (\d+):\n/g;
+  const lines = body.split('\n');
+  // 全深度收集 case 标签（含嵌套 switch 内层——蜂王族 2883+/石头人族等整段住在里面）
   const marks = [];
-  let m;
-  while ((m = caseRe.exec(body))) marks.push({ id: Number(m[1]), at: m.index });
-  for (let i = 0; i < marks.length; i++) {
-    const end = i + 1 < marks.length ? marks[i + 1].at : marks[i].at + 4000;
-    const seg = body.slice(marks[i].at, end);
-    const v = seg.match(/value = (\d+)[fL]?;/);
-    if (v) { values[marks[i].id] = Number(v[1]); continue; }
-    // buyPrice(plat, gold, silver, copper) 左锚缺省:值 = Σ arg[i]·100^(3-i)
-    const bp = seg.match(/value = buyPrice\(([\d\s,]+)\)/);
-    if (bp) {
-      const args = bp[1].split(',').map((s) => Number(s.trim()));
-      values[marks[i].id] = args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length);
-      continue;
-    }
-    // 1.4.4+ 新形态 SetShopValues(rarity, buyPrice(...)/sellPrice(...)) → value=第 2 参
-    // (Item.cs:48198-48202;sellPrice=buyPrice 同式×5 :49019-49022)
-    // 旧提取器只认 `value =` 前缀 → 158 条 price:null 兜底 100 铜甩卖(2026-08-13 修)
-    const sv = seg.match(/SetShopValues\([^,]+, (buyPrice|sellPrice)\(([\d\s,]*)\)\)/);
-    if (sv) {
-      const args = sv[2] ? sv[2].split(',').map((x) => Number(x.trim())) : [];
-      let val = args.length ? args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length) : 0;
-      if (sv[1] === 'sellPrice') val *= 5;
-      values[marks[i].id] = val;
-    }
-    // helper 内部统一 value（DefaultToTorch → value=60,Item.cs:48094）
-    if (values[marks[i].id] === undefined && /DefaultToTorch\(/.test(seg)) {
-      values[marks[i].id] = 60;
+  let depth = 0; // 首行 'public void…' 无花括号，方法体 '{' 在第二行
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
+    const cm = line.match(/^\t+case (\d+):$/);
+    if (cm) marks.push({ id: Number(cm[1]), li, depth });
+    for (const ch of line) {
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
     }
   }
-  // fall-through case 组（`case 4041: case 4042: … 共用一体`）：纯空块（seg 仅
-  // case 行）倒序继承下一块的值（C# 语义;旧提取器只给组尾赋值,2026-08-13 修）
-  for (let i = marks.length - 2; i >= 0; i--) {
-    if (values[marks[i].id] !== undefined) continue;
-    const seg = body.slice(marks[i].at, marks[i + 1].at);
-    if (/^\t+case \d+:\s*$/.test(seg)) {
-      values[marks[i].id] = values[marks[i + 1].id];
+  const valueOf = (seg) => {
+    let v;
+    let innerCase = 0;   // 0=共享体；>0=更深层 case 对应 id
+    let d = 0;
+    for (const line of seg.split('\n')) {
+      const ic = line.match(/^\t+case (\d+):$/);
+      if (ic && d >= 1) innerCase = Number(ic[1]);
+      if (line.includes('break;') && d >= 1) innerCase = 0; // 简化：块结束回落共享体
+      const v1 = line.match(/value = (\d+)[fL]?;/);
+      const v2 = line.match(/value = (?:Item\.)?(buyPrice|sellPrice)\(([\d\s,]*)\)/);
+      const v3 = line.match(/SetShopValues\([^,]+, (?:(\d+)|(?:Item\.)?(buyPrice|sellPrice)\(([\d\s,]*)\))\)/);
+      let got;
+      if (v1) got = Number(v1[1]);
+      else if (v2) {
+        const args = v2[2] ? v2[2].split(',').map((x) => Number(x.trim())) : [];
+        got = args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length);
+        if (v2[1] === 'sellPrice') got *= 5;   // Item.cs:49019-49022 sellPrice = ×5
+      } else if (v3) {
+        if (v3[1] !== undefined) got = Number(v3[1]);
+        else {
+          const args = v3[3] ? v3[3].split(',').map((x) => Number(x.trim())) : [];
+          got = args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length);
+          if (v3[2] === 'sellPrice') got *= 5;
+        }
+      }
+      if (got !== undefined && (innerCase === 0 || innerCase === seg.__id)) v = got;
+      for (const ch of line) {
+        if (ch === '{') d++;
+        else if (ch === '}') { d--; if (d <= 0) innerCase = 0; }
+      }
     }
+    if (v === undefined && /DefaultToTorch\(/.test(seg)) v = 60; // Item.cs:48094
+    return v;
+  };
+  // 段边界：从标签行起，到「下一个【同深度或更浅】标签」或「所在块闭合（深度跌
+  // 破标签深度）」为止——更深的标签是段内嵌套 switch，留给 valueOf 以 __id 分流
+  const segEndOf = (i) => {
+    const d0 = marks[i].depth;
+    let d = d0;
+    for (let li = marks[i].li + 1; li < lines.length; li++) {
+      const line = lines[li];
+      const cm = line.match(/^\t+case (\d+):$/);
+      if (cm && d <= d0) return li;              // 同/浅层标签 = 兄弟块起点
+      for (const ch of line) {
+        if (ch === '{') d++;
+        else if (ch === '}') { d--; if (d < d0) return li; } // 所在块闭合
+      }
+    }
+    return lines.length;
+  };
+  const segTextOf = (i) => lines.slice(marks[i].li, segEndOf(i)).join('\n');
+  // fall-through 组求值：纯标签 mark（`case A: case B: … 共用体`）借用组尾块的
+  // 代码段、以【自己的 id】求值——嵌套 switch(type) 的 `case <自身id>:` 覆写对
+  // 每件各自生效（DD2 杖族 T1/T2/T3 三档价即出自此结构）
+  const eff = marks.map(() => -1);
+  for (let i = marks.length - 1; i >= 0; i--) {
+    eff[i] = /^\t+case \d+:\s*$/.test(segTextOf(i)) ? (eff[i + 1] ?? i) : i;
+  }
+  for (let i = 0; i < marks.length; i++) {
+    const seg = Object.assign(segTextOf(eff[i]), { __id: marks[i].id });
+    const v = valueOf(seg);
+    if (v !== undefined) values[marks[i].id] = v;
   }
 }
 
@@ -90,6 +130,9 @@ function parseGate(text) {
   if (/!\s*Main\.hardMode|!hardMode/.test(t) && !/[^!]\bhardMode/.test(t.replace(/!Main\.hardMode/g,''))) push('!hardMode');
   else if (has('hardMode')) push('hardMode');
   if (has('downedMechBossAny')) push('downedMechBossAny');
+  // NPC.downedGolemBoss（酒保 num11 门 = hardMode && downedGolemBoss → T3 杖 60 勋章/
+  // 3871-3882 配饰 50 勋章/3828 永恒水晶 4 铂金,Chest.cs:2944-2946/:3003-3128）
+  if (has('downedGolemBoss')) push('downedGolemBoss');
   if (has('downedMechBoss1')) push('downedMechBoss1');
   if (has('downedMechBoss2')) push('downedMechBoss2');
   if (has('downedMechBoss3')) push('downedMechBoss3');
@@ -181,13 +224,28 @@ const shops = {};
     const stock = [];
     let gateStack = [];
     const chainByDepth = new Map(); // depth → 前支门列表（else-if 链累积）
+    const localBool = new Map();    // `bool flag = <expr>;` 声明 → 门（case 21 酒保
+    //   flag/num11 两旗,旧提取器 `if (flag)` 无 token → skip → 勋章条目整段丢弃）
     let d = 2; // case 体起始深度
+    let lastEntry = -1;             // 最近一条 SetDefaults 的 stock 下标（shopCustomPrice/
+    //   shopSpecialCurrency 赋值行归属）
+    let customPriceWrites = 0;      // 同一条目被多次赋价（3828 永恒水晶三档 if/else-if）
+    //   → 提取器不表条件变价,放空交运行时直判（Game.shopStockFor Chest.cs:2947-2959）
     for (let li = li0; li < li1; li++) {
       const line = lines[li];
       const isElse = /^\s*else\b/.test(line);
+      // `bool <ident> = <expr>;`（Chest.cs:2943-2944 case 21 首两行）→ 解析成门挂在
+      // 名字上,后续 `if (<ident>)` 反查。仅收可映射 expr,不可映射不登记（if 时仍 skip）
+      const varM = line.match(/^\t+bool (\w+) = (.+);\s*$/);
+      if (varM && !localBool.has(varM[1])) {
+        const g = parseGate(varM[2]);
+        if (g !== null && g !== 'skip') localBool.set(varM[1], g);
+      }
       const ifM = line.match(/if \((.+)\)/);
       if (ifM) {
-        const own = parseGate(ifM[1]);
+        // 局部旗名先展开（`if (flag)` → flag 的定义门）再走 parseGate
+        const condText = localBool.has(ifM[1].trim()) ? localBool.get(ifM[1].trim()) : ifM[1];
+        const own = localBool.has(ifM[1].trim()) ? condText : parseGate(ifM[1]);
         let gate = own;
         if (isElse) {
           const preds = chainByDepth.get(d) ?? [];
@@ -213,6 +271,31 @@ const shops = {};
         // 全部未闭合门的条件 AND（原版嵌套 if 语义）：任一门 'skip' → 整条丢弃
         const open = gateStack.filter((g) => g.depth <= d).map((g) => g.cond).filter(Boolean);
         stock.push({ id: Number(defM[1]), cond: open.length ? open.join('&&') : null });
+        lastEntry = stock.length - 1;
+        customPriceWrites = 0;
+      }
+      // ---- shopCustomPrice / shopSpecialCurrency（Item.cs:268/:270 字段；
+      //   Chest.cs case 21 酒保全段 shopCustomPrice=N + shopSpecialCurrency=
+      //   CustomCurrencyID.DefenderMedals = 护卫勋章币种条目）----
+      if (lastEntry >= 0) {
+        const cpM = line.match(/array\[num\]\.shopCustomPrice = (?:(\d+)|(?:Item\.)?buyPrice\(([\d\s,]*)\));/);
+        if (cpM) {
+          customPriceWrites++;
+          // 纯数字 = 原样（勋章条目时单位=勋章枚数,BuyItem(price, currency) 直比；
+          // buyPrice(...) = 换算铜币（GetStoreValue → BuyItem(price) 铜币直比）
+          let val;
+          if (cpM[1] !== undefined) val = Number(cpM[1]);
+          else {
+            const args = cpM[2] ? cpM[2].split(',').map((x) => Number(x.trim())) : [];
+            val = args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length);
+          }
+          // 单次赋值才落表；多档变价（3828）留空给运行时三档直判
+          if (customPriceWrites === 1) stock[lastEntry].customPrice = val;
+          else delete stock[lastEntry].customPrice;
+        }
+        if (/array\[num\]\.shopSpecialCurrency = CustomCurrencyID\.DefenderMedals;/.test(line)) {
+          stock[lastEntry].currency = 'DefenderMedals';
+        }
       }
       for (const ch of line) {
         if (ch === '{') d++;
@@ -234,7 +317,11 @@ for (const [npcId, slot] of Object.entries(SHOP_SLOT)) {
   // 任一开门含 'skip'（未映射条件，如 HasItem/随机掷骰）→ 整条丢弃（AND 语义）；
   // cond=null（无开门）= 恒上架，保留
   const stock = (shops[slot] ?? []).filter((s) => s.cond === null || !s.cond.split('&&').includes('skip'));
-  out[npcId] = stock.map((s) => ({ id: s.id, price: values[s.id] ?? null, cond: s.cond }));
+  out[npcId] = stock.map((s) => ({
+    id: s.id, price: values[s.id] ?? null, cond: s.cond,
+    ...(s.customPrice !== undefined ? { customPrice: s.customPrice } : {}),
+    ...(s.currency !== undefined ? { currency: s.currency } : {}),
+  }));
 }
 writeFileSync('src/data/vanilla-shopstock.json', JSON.stringify({ values, shops: out }));
 const total = Object.values(out).reduce((a, s) => a + s.length, 0);

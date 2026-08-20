@@ -22,8 +22,9 @@
 //   全键 = "TownNPCMood_" + NPCID.Search.GetName(netID) + "." + 文案子键；
 //   {BiomeName} ← TownNPCMoodBiomes.<nameKey>（BiomeNameByKey :189-192）；
 //   {NPCName} ← NPC.GetFullnameByID（→ Lang.npcName）。
-//   633 变身态（altTexture==2）另有 TownNPCMood_BestiaryGirlTransformed 分节，
-//   本作未实装变身态，恒用基础分节。
+//   633 变身态（altTexture==2，血月夜/满月夜——图鉴进度无关）另有
+//   TownNPCMood_BestiaryGirlTransformed 分节（computeHappiness 入参 altTexture2
+//   切换，2026-08-20 接；对话侧 Lycantrope 池与商店门另见 Game.ts）。
 
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 
@@ -138,6 +139,9 @@ export interface HappinessInput {
   nearby: number[];
   /** 本 NPC 是否公主（663） */
   isPrincess: boolean;
+  /** 633 狼人变身态（npc.altTexture==2）——报告分节名换 *Transformed 后缀
+   *  （AddHappinessReportText :197-200：type==633 && altTexture==2 时追加）。 */
+  altTexture2?: boolean;
   /** 公主动态抽 Love 的随机源（:22-36 Main.rand.Next） */
   rand?: () => number;
 }
@@ -149,9 +153,12 @@ export interface HappinessResult {
   report: HappinessReportLine[];
 }
 
-/** 心情文案分节名（AddHappinessReportText :196） */
-export function npcMoodCategory(npcVanillaId: number): string {
-  return `TownNPCMood_${NPC_NAME_BY_ID[npcVanillaId] ?? ''}`;
+/** 心情文案分节名（AddHappinessReportText :194-201）：
+ *  "TownNPCMood_" + NPCID.Search.GetName(netID)；633 变身态（altTexture==2）
+ *  追加 "Transformed" → TownNPCMood_BestiaryGirlTransformed 分节（:197-200） */
+export function npcMoodCategory(npcVanillaId: number, transformed = false): string {
+  const name = NPC_NAME_BY_ID[npcVanillaId] ?? '';
+  return `TownNPCMood_${name}${transformed && npcVanillaId === 633 ? 'Transformed' : ''}`;
 }
 
 /** GetShoppingSettings / ProcessMood 1:1 */
@@ -159,7 +166,7 @@ export function computeHappiness(inp: HappinessInput): HappinessResult {
   let mul = 1.0;
   const report: HappinessReportLine[] = [];
   const line = (sub: string, extra?: Partial<HappinessReportLine>) => {
-    report.push({ key: `${npcMoodCategory(inp.npcVanillaId)}.${sub}`, ...extra });
+    report.push({ key: `${npcMoodCategory(inp.npcVanillaId, inp.altTexture2)}.${sub}`, ...extra });
   };
   // remix/旅行商(368)/骷髅商(453)/城镇宠物/IsNotReallyTownNPC(老人37)——1.0 且无报告（:107-110）
   if (inp.npcVanillaId === 368 || inp.npcVanillaId === 453 || inp.npcVanillaId === 37) {

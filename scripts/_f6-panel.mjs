@@ -1,6 +1,6 @@
-// F6 召唤面板 + F2 无敌 调试工具冒烟（_ 一次性探针，tools/run-diag.mjs 运行）：
+// F6 召唤面板 + Shift+F2 无敌 调试工具冒烟（_ 一次性探针，tools/run-diag.mjs 运行）：
 //   F6 键真实开面板 → DOM 存在/行数 >0 → 面板内点名生成(世吞链/Boss 槽/城镇NPC) →
-//   清怪 → Esc 收面板；F2 键真实切无敌 → damage 免伤 + 血蓝回满。
+//   清怪 → Esc 收面板；Shift+F2 键真实切无敌 → damage 免伤 + 血蓝回满。
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -86,13 +86,13 @@ await new Promise((r) => setTimeout(r, 200));
 out = await page.evaluate(() => ({ open: !!window.__swGame.summonPanel?.open, blocking: window.__swGame.input.uiBlocking }));
 check('Esc 收面板 + 解除 uiBlocking', !out.open && !out.blocking);
 
-// ---- F2 真实按键无敌 ----
+// ---- Shift+F2 真实按键无敌（F2=Loadout2 原版配装热键） ----
 out = await page.evaluate(() => {
   const g = window.__swGame;
   g.player.hp = 10; g.player.mana = 0;
   return {};
 });
-await page.keyboard.press('F2');
+await page.keyboard.press('Shift+F2');
 out = await page.evaluate(() => {
   const g = window.__swGame;
   const p = g.player;
@@ -100,13 +100,13 @@ out = await page.evaluate(() => {
   g.fixedUpdate(1 / 60);                    // tick 头回满
   return { god: p.debugGod, dmgRet, hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana };
 });
-check('F2 开无敌：damage 早退', out.god && out.dmgRet === false);
-check('F2 血蓝回满', out.hp === out.maxHp && out.mana === out.maxMana,
+check('Shift+F2 开无敌：damage 早退', out.god && out.dmgRet === false);
+check('Shift+F2 血蓝回满', out.hp === out.maxHp && out.mana === out.maxMana,
   `hp=${out.hp}/${out.maxHp} mana=${out.mana}/${out.maxMana}`);
 
-await page.keyboard.press('F2');   // 关闭无敌
+await page.keyboard.press('Shift+F2');   // 关闭无敌
 out = await page.evaluate(() => window.__swGame.player.debugGod);
-check('F2 再按关闭', !out);
+check('Shift+F2 再按关闭', !out);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) console.log('页面异常:', errors.slice(0, 3));

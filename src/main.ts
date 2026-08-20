@@ -20,6 +20,7 @@ import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
 import { Lang } from './i18n/Lang';
 import { options } from './core/Options';
+import { isBound } from './core/Keybinds';
 import { VuiDemoState } from './vui/states/VuiDemoState';
 import { createFlow } from './mainFlow';
 import type { FlowHandle } from './mainFlow';
@@ -200,6 +201,55 @@ window.addEventListener('keydown', (e) => {
   const tgt = e.target as HTMLElement | null;
   const typing = !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable);
   if (typing && e.code !== 'Escape') return;
+  // ---- Inventory 动作（M5 键位表：默认 Escape+KeyE 双键——历史行为 E 同开背包；
+  //      判定在 code 无关处，重绑后跟随。原链：Esc=暂停菜单，其余键=开背包）----
+  if (isBound('Inventory', e.code)) {
+    e.preventDefault();
+    if (game.summonPanel?.open) {
+      // F6 召唤面板打开时,Esc 先收面板不进暂停链
+      game.summonPanel.close();
+      game.input.uiBlocking = false;
+    } else if (game.renderer.fullMap.open) {
+      game.renderer.fullMap.open = false;
+    } else if (pausePanel) {
+      pausePanel.remove();
+      pausePanel = null;
+      game.paused = false;
+      ui.closeInventory();
+      game.input.uiBlocking = false;
+    } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
+      ui.closeInventory();
+    } else if (e.code === 'Escape') {
+      game.paused = true;
+      pausePanel = ui.showPause({
+        onResume: () => {
+          pausePanel?.remove();
+          pausePanel = null;
+          game!.paused = false;
+        },
+        onSave: () => flow.doSave(),
+        onExport: () => flow.doExportSave(),
+        onSettings: () => flow.openSettings(true),
+        onBestiary: () => flow.openBestiary(),
+        onQuit: () => {
+          pausePanel = null;
+          game!.paused = false;
+          inGame = false;
+          flow.quitToMenu();
+        },
+      });
+    } else {
+      ui.openInventory();
+    }
+    return;
+  }
+  // ---- MapFull 动作（M5，原版 cMapFull 切换全屏地图；本键曾为自制"音乐静音"
+  //      热键——音量调节在设置面板，自造行为退役）----
+  if (isBound('MapFull', e.code)) {
+    e.preventDefault();
+    game.toggleFullMap();
+    return;
+  }
   switch (e.code) {
     case 'KeyS':
       // Ctrl+S 快速存档（原 F6 让位召唤面板后迁入）
@@ -208,54 +258,15 @@ window.addEventListener('keydown', (e) => {
         flow.doSave();
       }
       break;
-    case 'KeyE':
-    case 'Escape':
-      e.preventDefault();
-      if (game.summonPanel?.open) {
-        // F6 召唤面板打开时,Esc 先收面板不进暂停链
-        game.summonPanel.close();
-        game.input.uiBlocking = false;
-        break;
-      }
-      if (game.renderer.fullMap.open) {
-        game.renderer.fullMap.open = false;
-        break;
-      }
-      if (pausePanel) {
-        pausePanel.remove();
-        pausePanel = null;
-        game.paused = false;
-        ui.closeInventory();
-        game.input.uiBlocking = false;
-      } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
-        ui.closeInventory();
-      } else if (e.code === 'Escape') {
-        game.paused = true;
-        pausePanel = ui.showPause({
-          onResume: () => {
-            pausePanel?.remove();
-            pausePanel = null;
-            game!.paused = false;
-          },
-          onSave: () => flow.doSave(),
-          onExport: () => flow.doExportSave(),
-          onSettings: () => flow.openSettings(true),
-          onBestiary: () => flow.openBestiary(),
-          onQuit: () => {
-            pausePanel = null;
-            game!.paused = false;
-            inGame = false;
-            flow.quitToMenu();
-          },
-        });
-      } else {
-        ui.openInventory();
-      }
-      break;
     case 'F3':
-      e.preventDefault();
-      game.renderer.debugMode = !game.renderer.debugMode;
-      ui.toast(game.renderer.debugMode ? '调试面板已开启（碰撞盒高亮）' : '调试面板已关闭');
+      // 调试碰撞盒面板迁 Shift+F3（2026-08-20：裸 F3 让位原版 Loadout3 配装热键
+      // （PlayerInput.cs:1925），Game 键位派发接管；grep scripts/_*.mjs 零 F3
+      // 键引用，无探针破坏）
+      if (e.shiftKey) {
+        e.preventDefault();
+        game.renderer.debugMode = !game.renderer.debugMode;
+        ui.toast(game.renderer.debugMode ? '调试面板已开启（碰撞盒高亮）' : '调试面板已关闭');
+      }
       break;
     case 'F4':
       e.preventDefault();
@@ -296,13 +307,6 @@ window.addEventListener('keydown', (e) => {
     case 'F10':
       e.preventDefault();
       game.teleportToMouse();
-      break;
-    case 'KeyM':
-      if (game.renderer.fullMap.open) {
-        game.renderer.fullMap.open = false;
-      } else {
-        ui.toast(audio.toggleMute() ? '音乐已关闭' : '音乐已开启');
-      }
       break;
   }
 });

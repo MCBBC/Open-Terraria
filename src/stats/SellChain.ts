@@ -37,7 +37,11 @@ const ITEM_VALUES = (shopstockJson as { values: Record<string, number> }).values
 //       return value;                                                  // :49499
 //   }
 //   ```
-// shopCustomPrice 未实装（本仓无店主自定义价）→ 恒回落 item.value。
+// shopCustomPrice 只挂在【货架条目实例】上（Chest.SetupShop 赋值）——买入即
+// netDefaults → ResetStats 清空（Item.cs:48551，ItemSlot.cs:1912），玩家包内
+// 物品恒无此字段 → 本函数（卖出链）恒回落 item.value，1:1。
+// 商店侧的 shopCustomPrice 优先级在 Game.shopStockFor 消费（vanilla-shopstock
+// json customPrice 字段；勋章条目单位=枚数，见 stats/DefenderMedals.ts）。
 // 缺表条目（如 2 泥土/9 木板/3 手里剑）= 原版 value 0 = 不可卖。
 // ---------------------------------------------------------------------------
 export function itemStoreValue(vid: number): number {
@@ -96,8 +100,11 @@ export interface ExpectedPrices {
 
 // ---------------------------------------------------------------------------
 // Player.GetItemExpectedPrice（Player.cs:34907-34946）逐行对照
-//   shopSpecialCurrency 分支（:34909-34913）走 CustomCurrencyManager——本仓无自定义
-//   币种商店，登记不实装，直接进铜币主链。
+//   shopSpecialCurrency 分支（:34909-34913）走 CustomCurrencyManager.GetPrices →
+//   CustomCurrencySystem.GetItemExpectedPrice（:266-271：双价 = GetStoreValue 原值，
+//   无折扣/快乐度乘区）——护卫勋章条目（酒保 550）在 Game.openNpcShop/npcShopBuy
+//   分流消费（stats/DefenderMedals.ts），本铜币主链不承载（卖出侧玩家物品恒
+//   shopSpecialCurrency=-1，同 shopCustomPrice 的 ResetStats 语义）。
 // ---------------------------------------------------------------------------
 export function expectedPrices(storeValue: number, s: SellSettings = {}): ExpectedPrices {
   const pa = s.priceAdjustment ?? 1;              // NotInShop = 1f（ShoppingSettings.cs:11-14）

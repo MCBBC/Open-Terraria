@@ -37,7 +37,12 @@ export type ScreenFxPass =
   | { kind: 'FilterGraveyard'; intensity: number; progress: number; opacity: number }
   | { kind: 'FilterBloodMoon'; color: readonly [number, number, number]; intensity: number; opacity: number }
   | { kind: 'FilterTest2'; opacity: number }
-  | { kind: 'FilterCRT'; screenH: number; zoom: number; opacity: number };
+  | { kind: 'FilterCRT'; screenH: number; zoom: number; opacity: number }
+  /** 沙尘暴/暴风雪全屏色罩（SandstormSky.cs:49-60 / BlizzardSky.cs:48-60 的
+   *  MagicPixel 全屏 alpha 混合,参数由 SkyRenderer.sandstormSkyTint/blizzardSkyTint
+   *  按原版公式算好）。注意:这不是 FilterManager 滤镜(是 SkyManager 天空层),
+   *  故 cots 已含在 color/alpha 内、不参与链尾 uTint 乘(EndCapture :194 不经过) */
+  | { kind: 'SkyWeatherTint'; color: readonly [number, number, number]; alpha: number };
 
 const VERT = `
 attribute vec2 aPos;              // 单位 quad (0..1)^2
@@ -185,6 +190,20 @@ void main() {
   gl_FragColor = vec4(mix(col.rgb, scan, uOpacity) * uTint, 1.0);  // :1230
 }`;
 
+/** SkyWeatherTint（非 shader 移植——SandstormSky/BlizzardSky 的 SpriteBatch
+ *  MagicPixel 全屏绘制）:out = src.rgb×src.a + dst×(1−src.a) = mix(dst, color, α)。
+ *  不含 uTint:cots 已按天空层公式折入 color/alpha(SkyManager 层,非 EndCapture 链) */
+const FRAG_SKY_TINT = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform vec3 uColor;              // src.rgb(含 cots×强度系数)
+uniform float uOpacity;           // src.a(=同一强度系数)
+void main() {
+  vec4 s = texture2D(uScreen, vUv);
+  gl_FragColor = vec4(mix(s.rgb, uColor, uOpacity), 1.0);
+}`;
+
 const FRAGS: Record<ScreenFxPass['kind'], string> = {
   FilterHeatDistortion: FRAG_HEAT,
   FilterMiniTower: FRAG_MINITOWER,
@@ -192,6 +211,7 @@ const FRAGS: Record<ScreenFxPass['kind'], string> = {
   FilterBloodMoon: FRAG_BLOODMOON,
   FilterTest2: FRAG_TEST2,
   FilterCRT: FRAG_CRT,
+  SkyWeatherTint: FRAG_SKY_TINT,
 };
 
 /** 各 pass 的 GLSL 源（测试锁字节码衍生常量用；键=ScreenShader.cso pass 名） */
@@ -395,6 +415,9 @@ export class GLScreenFilters {
         gl.uniform1f(entry.uni.uOpacity, p.opacity);
       } else if (p.kind === 'FilterTest2') {
         gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else if (p.kind === 'SkyWeatherTint') {
+        gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
+        gl.uniform1f(entry.uni.uOpacity, p.alpha);
       } else {
         gl.uniform1f(entry.uni.uScreenH, p.screenH);
         gl.uniform1f(entry.uni.uZoom, p.zoom);

@@ -10,6 +10,10 @@
 // 城镇宠物声音增量（2026-08-18）：637/638/656 补 HitSound/DeathSound（1456
 // SetDefaults :17142-17180/:17230-17244，提取器漏——637 猫 Hit1/Death6、
 // 638 狗 Hit1/Death1、656 兔 Hit1/Death6；消费端 TownNPC.hurt/checkDead 数据驱动）。
+// 血鳗鱼/Palworld 双宠增量（2026-08-20）：622/623（血鳗鱼身/尾，1456 SetDefaults
+// :16922-16960——血月夜钓鱼怪 621 的 15 身+1 尾 worm 链段，1405 无此族）、696
+// （Foxsparks，:17701-17714）手补；695 HitSound/DeathSound 勘误为 PalCattivaPain
+// （:17696-17697，原提取器兜底 NPCHit1）。
 // aiStyle 与 AI_XXX 方法的对应见 NPC.cs AI() 分发；此处先覆盖高频家族，
 // 未移植 AI 家族的 aiStyle 回退到最接近的已移植行为（注释标注）。
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';

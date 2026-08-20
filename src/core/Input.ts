@@ -1,4 +1,6 @@
 // 键盘/鼠标输入。UI 打开时屏蔽游戏输入。
+import { bindsOf, type KeybindAction } from './Keybinds';
+
 export class Input {
   keys = new Set<string>();
   /** 虚拟按键（移动端控件注入——MobileControls 持有）。down() 与物理键盘同权：
@@ -15,7 +17,8 @@ export class Input {
   rightDown = false;
   uiBlocking = false;     // 背包/合成等打开时为 true
   wheelDelta = 0;
-  keydownHandlers: Array<(code: string) => void> = [];
+  /** keydown 边沿回调（含原生事件——Shift+F1/F2/F3 调试键迁移需要 e.shiftKey） */
+  keydownHandlers: Array<(code: string, e: KeyboardEvent) => void> = [];
   /** 键沿观察口（行为录制用：Game 构造接 recLog('key')——down=false 为 keyup）。
    *  只在 keydown/keyup 边沿各调一次（keydown 有 e.repeat 门），轮询零影响 */
   onKeyEvent?: (code: string, down: boolean) => void;
@@ -43,11 +46,12 @@ export class Input {
       const tgt = e.target as HTMLElement | null;
       if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
       this.keys.add(e.code);
-      this.keydownHandlers.forEach((fn) => fn(e.code));
+      this.keydownHandlers.forEach((fn) => fn(e.code, e));
       this.onKeyEvent?.(e.code, true);   // 行为录制：键沿（e.repeat 已滤）
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
-      // F2 无敌+无限魔力(调试,Game) / F1 像素画导入(Game,自 F2 迁入)——防浏览器快捷
-      if (e.code === 'F2' || e.code === 'F1') e.preventDefault();
+      // F1/F2/F3 = 配装热键（原版 Loadout1/2/3）；调试键已迁 Shift+F1/F2/F3——
+      // 防浏览器快捷（帮助/搜索等）
+      if (e.code === 'F1' || e.code === 'F2' || e.code === 'F3') e.preventDefault();
     }) as EventListener);
     onWin('keyup', ((e: KeyboardEvent) => {
       this.keys.delete(e.code);
@@ -144,6 +148,14 @@ export class Input {
 
   down(code: string): boolean {
     return !this.uiBlocking && (this.keys.has(code) || this.touchKeys.has(code));
+  }
+
+  /** 按键位表查 action 电平（M5：全消费点经 bindsOf 读用户自定义；uiBlocking 门同 down）。
+   *  ★移动端虚拟键仍注入物理 code——用户重绑移动键后虚拟摇杆不跟随（Web 桌面为主，
+   *  移动端控件键位适配另行处理） */
+  downAction(action: KeybindAction): boolean {
+    return bindsOf(action).some((c) => this.keys.has(c) || this.touchKeys.has(c))
+      && !this.uiBlocking;
   }
 
   /** 每帧末调用，处理一次性输入（滚轮切换快捷栏） */

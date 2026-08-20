@@ -319,11 +319,16 @@ function squareTileFrameGen(st: TileStore, x: number, y: number): void {
  *  cs:75223-75244 邪恶草族滩带门 / dirt==0 地表门：本入口调用方（MossPass 苔藓、
  *  GrassWallPass/WorldGen 草皮）dirt 恒非 0、grass 恒非邪恶草族（邪恶草走
  *  MushroomPass.spreadGrassOnce，含该门），零影响故不复制。 */
-export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true): void {
+export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true, wsSurface = Number.POSITIVE_INFINITY): void {
   // InWorld(i,j,10)（cs:75218）
   if (x < 10 || x >= st.w - 10 || y < 10 || y >= st.h - 10) return;
   const i = st.idx(x, y);
   if (!st.flags[i] || st.type[i] !== dirt) return;   // active && type==dirt（cs:75218）
+  // ★VVVVV（cs:75224-29 生成期早退门）：dirt==0（原版泥 id——本仓 T.DIRT）时
+  //   j ≥ worldSurface 拒转（growGrassUnderground 生成期恒 false；s22222 #79 残
+  //   10 格=GrassWall 段② ws=325 域内 j≥325 泥块 vanilla 拒转、本仓缺门误转）。
+  //   dirt≠泥调用方（MossPass 石族）零影响。
+  if (dirt === T.DIRT && y >= wsSurface) return;
   // 3×3 窗口 clamp 到世界界（cs:75240-75247）
   const x0 = Math.max(0, x - 1), x1 = Math.min(st.w, x + 2);
   const y0 = Math.max(0, y - 1), y1 = Math.min(st.h, y + 2);
@@ -356,7 +361,7 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
       const ni = st.idx(m, n);
       if (st.flags[ni] && st.type[ni] === dirt && grassSpreadState.n < 1000) {
         grassSpreadState.n++;
-        spreadGrass(st, m, n, dirt, grass, true);
+        spreadGrass(st, m, n, dirt, grass, true, wsSurface);
         grassSpreadState.n--;
       }
     }

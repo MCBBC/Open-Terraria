@@ -28,6 +28,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { matureHerbPlants } from './StructuresPass';
 import { growTree } from './TreePass';
+import { genSquareTileFrame } from './FinalCleanupPass';
 
 // ---------- 内部 tile id → 原版 sheet id 查找表（模块级一次构建，热循环零分配） ----------
 const SHEET = new Int16Array(TILE_DEFS.length).fill(-1);
@@ -873,8 +874,11 @@ function placeDye(st: TileStore, rng: RNG, x: number, y: number, style: number):
     st.half[i0] = 0;
     st.slope[i0] = 0;
   }
-  squareTileFrame(st, rng, x, y);                                      // case 帧恒调（cs:60068）
-  if (st.flags[i0] & 1) squareTileFrame(st, rng, x, y);                // 尾奏（cs:60283：目标格活性）
+  // ★VVVVV（12345 #84 T0>28×7）：SquareTileFrame 双跑改走 FinalCleanupPass 引擎
+  //   全分派（TileFrameImportant 全族 Check*——本文件旧本地帧只派 571/519/549，
+  //   邻格陶罐 28 的 CheckPot 杀链缺失 → 229 蜂蜜块非实心期支撑失守的罐漏杀）。
+  genSquareTileFrame(st, rng, x, y);                                   // case 帧恒调（cs:60068）
+  if (st.flags[i0] & 1) genSquareTileFrame(st, rng, x, y);             // 尾奏（cs:60283：目标格活性）
   return ok;
 }
 
@@ -1000,10 +1004,12 @@ function tryGrowGlowTulip(st: TileStore, rng: RNG, i: number, j: number): boolea
       st.setTileSilent(x, y, GLOW_TULIP, 0, 0);
       st.half[k0] = 0;
       st.slope[k0] = 0;
-      squareTileFrame(st, rng, x, y);                                     // 尾奏（已放置→活性）
+      // ★VVVVV：尾奏帧链走引擎全分派（PlaceTile 尾 SquareTileFrame=TileFrameImportant
+      //   全族——旧本地帧只派 571/519/549，邻格陶罐 CheckPot 杀链缺失）
+      genSquareTileFrame(st, rng, x, y);                                 // 尾奏（已放置→活性）
       return true;
     }
-    if (st.flags[k0] & 1) squareTileFrame(st, rng, x, y);               // 尾奏（未放置但目标活性）
+    if (st.flags[k0] & 1) genSquareTileFrame(st, rng, x, y);             // 尾奏（未放置但目标活性）
   }
   return false;
 }
@@ -1059,7 +1065,7 @@ function tryPlaceChilletEgg(st: TileStore, rng: RNG, i: number, j: number): bool
       if (!solidTile2(st, a, y + 1)) ok = false;
     }
     if (!ok) {
-      if (st.flags[k0] & 1) squareTileFrame(st, rng, x, y);             // 尾奏（未放置但目标活性）
+      if (st.flags[k0] & 1) genSquareTileFrame(st, rng, x, y);          // 尾奏（未放置但目标活性）
       continue;
     }
     for (let a = 0; a < 2; a++) {
@@ -1494,9 +1500,19 @@ function tileFrame184(st: TileStore, rng: RNG, x: number, y: number): void {
   else killTile(st, x, y);                                              // 无苔藓邻格 → 移除
 }
 
-/** PlaceTile case 184（cs:59727-59744）+ SquareTileFrame 的本格重帧 */
+/** PlaceTile case 184（cs:59727-59744）+ SquareTileFrame 的本格重帧。
+ *  ★VVVVV 补 PlaceTile 前置清（cs:59499-59501 !active → Clear(Tile|TilePaint|Slope)）：
+ *  非活性残坡格（门洞 active(false) 类写入遗留 slope）须先清坡再写——
+ *  #94 S0>1/2/3×4 根因（vanilla 清 0、本仓残值保留）。 */
 function placeMossSprout(st: TileStore, rng: RNG, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;
+  {
+    const pi = st.idx(x, y);
+    if (!st.flags[pi]) {
+      st.type[pi] = 0; st.frameX[pi] = 0; st.frameY[pi] = 0;
+      st.half[pi] = 0; st.slope[pi] = 0; st.paint[pi] = 0;
+    }
+  }
   const mossAdj = (dx: number, dy: number): boolean =>
     st.inBounds(x + dx, y + dy) && TILE_MOSS.has(sheetAt(st, x + dx, y + dy))
     && solidTile(st, x + dx, y + dy);
@@ -1612,28 +1628,15 @@ function placeBamboo(st: TileStore, rng: RNG, gs: GenState, x: number, y: number
   return false;
 }
 
-/** SquareTileFrame（cs:80924）的子集实现：3×3 内只重帧本组放置的类型 */
+/** SquareTileFrame（cs:80924）——XXXXX 批（2026-08-20）改派 FinalCleanupPass 引擎
+ *  （genSquareTileFrame 全量 TileFrameImportant 分派）。旧三臂子集（571/519/549）
+ *  漏掉了 case 28 CheckPot 等帧杀级联：12345 #87 金标实证——placeJunglePlant 放置
+ *  (385,683) 的 3×3 帧扫在 vanilla 触发 (386,682) 残缺罐 CheckPot 整组杀（释放
+ *  (386,683) 供后续列放置 61——金标 a61/JS 恒 a28），级联杀不发生 → 后续 61/69
+ *  孢子门掷流错位（T61↔69×257 互换带）。掷走 ctx.rng=pass 流（184 恒掷等）。
+ *  checkBamboo/checkCatTail/checkUnderwaterPlant 保留（growCheckSeaweed 等直调）。 */
 function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
-  // 3×3 列优先（cs:80926-80934 的调用序）：x-1 列三行 → x 列三行 → x+1 列三行
-  for (let d = 0; d < 9; d++) {
-    const dx = ((d / 3) | 0) - 1, dy = (d % 3) - 1;
-    const nx = x + dx, ny = y + dy;
-    if (!st.inBounds(nx, ny)) continue;
-    const kk = st.idx(nx, ny);
-    if (!st.flags[kk]) {
-      // TileFrame 头（cs:82077-82082）：非活跃格清 half/slope/块漆（type 保留——
-      // 生成期 liquid 分支因 generatingWorld 短路）。OOOO 批：槽 87 残 8 格 S0>n 根因
-      st.half[kk] = 0;
-      st.slope[kk] = 0;
-      st.paint[kk] = 0;
-      continue;
-    }
-    const s = SHEET[st.type[kk]];
-    if (s === 571) checkBamboo(st, rng, nx, ny);
-    else if (s === 519) checkCatTail(st, rng, nx, ny);
-    else if (s === 549) checkUnderwaterPlant(st, rng, nx, ny);
-    // 184 的重帧仅在放置时调用（LongMoss pass）；518 的 CheckLilyPad 恒 no-op 未移植
-  }
+  genSquareTileFrame(st, rng, x, y);
 }
 
 /** PlaceLilyPad（cs:59109）1:1 */

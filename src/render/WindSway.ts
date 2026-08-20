@@ -14,6 +14,7 @@
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
 import { drawVanillaCell, drawTreeCell, scanTreeType, type TreeStyleData } from './VanillaTiler';
+import { frameMergesWith } from './TileMergeFamily';
 import { natureParticles, getTreeLeaf, leafEmits, dripGoreFor } from './NatureParticles';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
@@ -307,7 +308,7 @@ function drawCell(
   const fx = st.frameX[st.idx(x, y)], fy = st.frameY[st.idx(x, y)];
   const draw = (dpx: number, dpy: number) => {
     drawVanillaCell(ctx, atlas, rec.sheet, rec.frame, rec.fw, rec.fh, st, x, y, type,
-      (t) => t === type, dpx, dpy, fx, fy, trees);
+      (t) => t === type || frameMergesWith(type, t), dpx, dpy, fx, fy, trees);
   };
   if (rot === 0 && offX === 0 && offY === 0) {
     draw(px, py);
@@ -445,10 +446,11 @@ function multiGrassAnchor(sheet: number, fx: number, fy: number): boolean {
     default: return fy === 0 && fx % 36 === 0; // 485/489/490/521-527
   }
 }
-/** 旋转量系数 num（DrawMultiTileGrassInWind switch :9099-9116：27→0.07；521-527→0
+/** 旋转量系数 num（DrawMultiTileGrassInWind switch :9099-9116：初始 0.07，27 与 519
+ *  都不落 default（27 只设 color/flag2；519 只重算 flag）→ 两者皆 0.07；521-527→0
  *  且 flag=false——num3 归 0 后 offY 同为 0，完全静态，走特殊路径只为不入普通层） */
 function multiGrassRotFactor(sheet: number): number {
-  if (sheet === 27) return 0.07;
+  if (sheet === 27 || sheet === 519) return 0.07;
   if (sheet >= 521 && sheet <= 527) return 0;
   return 0.15;
 }
@@ -462,11 +464,21 @@ function drawMultiGrass(
   const i0 = st.idx(ax, ay);
   let sx: number, sy: number;
   if (rec.sheet === 519) {
-    // 香蒲：锚点在底部，向上数同型格（ClimbCatTail + num3 -= sizeY-1）
+    // 香蒲 519：整株只在【基座格】触发（路由 :687-693 `frameX/18 <= 4` 才加特殊点
+    // ——茎 90/108/过渡 126-162/顶花 180+ 帧格不加）。曾缺此门：一株 N 格各触发
+    // 一段"从本格到顶"的顶段绘制，hFrac 按各自段高算 → 同一行多份错位旋转
+    // = 摆动残影（2026-08-20 用户实拍扇面拖尾定位）
+    if (Math.floor(st.frameX[i0] / 18) > 4) return;
+    // ClimbCatTail（:8967-8984）：向上数同型格，遇顶花帧（frameX>=180）计入即止
     sy = 1;
-    while (ay - sy >= 0 && st.type[st.idx(ax, ay - sy)] === type && st.flags[st.idx(ax, ay - sy)]) sy++;
+    while (ay - sy >= 0) {
+      const ti = st.idx(ax, ay - sy);
+      if (st.type[ti] !== type || !st.flags[ti]) break;
+      sy++;
+      if (st.frameX[ti] >= 180) break;
+    }
     sx = 1;
-    if (sy <= 1) return;
+    // 单格幼苗（sy=1）原版同样绘制（DrawMultiTileGrassInWind sizeY=1）——不 return
     ay -= sy - 1; // topLeftY
   } else {
     if (!multiGrassAnchor(rec.sheet, st.frameX[i0], st.frameY[i0])) return;

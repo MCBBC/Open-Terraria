@@ -376,6 +376,10 @@ import { leashedBubbleVisible } from '../entities/LeashedCritter';
 import { applyHeldProjPointing, heldProjFrameBegin, noteHeldProjEntity } from './heldProj';
 import { PAINT_TOOLS, paintToolOffset } from './CursorItemIcon';
 import type { Entity } from '../entities/Entity';
+import {
+  BigProgressBarSystem, drawBigProgressBar, refLifeMaxOf,
+  type BarContext, type BarNpc, type CollectInfo,
+} from './BossBars';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
 
@@ -549,7 +553,10 @@ const CASTER_STATE_FRAME_TYPES = new Set([29, 32, 45, 172, 281, 282, 283, 284, 2
 //   rotation=atan2(vy,vx)，vx>0 再 FlipHorizontally——drawEnemy 独占分支自带翻转，
 //   登记进 rotationDriven 以禁用通用 facing 镜像)、125/126=双子、127-131=Prime 头+四部件、
 // 134-136=毁灭者链、261-265=世花族(孢子/本体/钩蔓/触须)、370=猪鲨、396/397=月总头/手、657=史莱姆皇后(飞行倾斜)
-const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 116, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136, 246, 247, 248, 249, 261, 262, 263, 264, 265, 370, 396, 397, 657]);
+const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 116, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136, 246, 247, 248, 249, 261, 262, 263, 264, 265, 370, 372, 373, 396, 397, 477, 478, 479, 657]);
+// ★372/373 鲨鱼龙（sharkronAI 已按 :35222-35315 写 spin）、477-479 飞蛾魔族
+// （mothron 三 AI 已按 :39935-40614 全 14 式写 spin）——2026-08-20 审计前写了
+// spin 却不在本集 = 无消费（spin 通道本集独占）
 
 // Main.wofDrawFrameIndex（Main.cs:820 静态；同屏只有一只血肉墙，模块级等价）。
 // 原版在 DrawWOFBody 内自增（:37861-37863），bossAI_wof 未维护 → 渲染侧持有。
@@ -2748,6 +2755,12 @@ export class Renderer {
     //     不受光照；drawPlayer 收集、此处消费）
     this.flushWingGlow(cam, z);
 
+    // 7a-bis. 图格网格（DrawInterface_6_TileGridOption Main.cs:45634-45671 1:1）：
+    // 开关=Main.MouseShowBuildingGrid（IngameOptions.cs:745）；智能光标激活时不画；
+    // CursorRadial 贴图（AssetInitializer.cs:800 = Images/UI/Radial）画在鼠标格
+    // 中心，α 随玩家速度淬灭（站立 Lerp(0,0.7,1-v/6)，每帧 0.2 缓动，关时 -0.05）
+    this.drawBuildingGrid(ctx, cam, player, hover?.smart === true, mouseX, mouseY);
+
     // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画，
     //     颜色手动乘该格光照（Lighting.GetColor 语义）
     if (hover?.smart) {
@@ -2872,22 +2885,14 @@ export class Renderer {
     }
     if (this.debugMode) this.drawDebugOverlay(ctx, cam, viewW, viewH, player, entities, mouseX, mouseY, hover);
 
-    // 10. Boss 血条（BigProgressBarSystem.TryFindingNPCToTrack：屏幕矩形外扩 5000px
-    // 与 boss 命中盒相交才跟踪显示——远离重生点时不应残留血条）
-    if (boss && Math.abs(boss.cx - cam.x) < viewW / 2 / z + 5000 && Math.abs(boss.cy - cam.y) < viewH / 2 / z + 5000) {
-      this.drawBossBar(ctx, viewW, viewH, boss, entities);
-    } else if (!boss) {
-      // 491 荷兰飞盗船聚合血条（PirateShipBigProgressBar：总 = SetDefaults(492).lifeMax×4
-      // = 8000 恒定；当前 = 4 炮 life 之和；BigProgressBarSystem 字典 {491,492} 驱动）
-      const ship = (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead && n.vanillaId === 491);
-      if (ship && Math.abs(ship.cx - cam.x) < viewW / 2 / z + 5000 && Math.abs(ship.cy - cam.y) < viewH / 2 / z + 5000) {
-        const cannons = (entities as Enemy[]).filter((n) => n instanceof Enemy && !n.dead
-          && n.vanillaId === 492 && n.ai0 === ship.id);
-        const hp = cannons.reduce((sum, n) => sum + Math.max(0, n.hp), 0);
-        this.drawBossBar(ctx, viewW, viewH, {
-          name: Lang.npcName(491) ?? '荷兰飞盗船', hp, maxHp: 8000, cx: ship.cx, cy: ship.cy,
-        }, entities);
-      }
+    // 10. Boss 血条（BigProgressBarSystem 1:1——BossBars.ts 全量分派：无当前条时
+    // 全场扫描，屏幕矩形外扩 5000px 相交的 NPC 中取离玩家最近者，按 netID 分派
+    // 15 类特化条（双子合血/世吞恒定分母/克脑+爬行者/石巨人两件/月总四件/四塔盾量
+    // /火星碟/海盗船 4 炮/鹿角怪敌意门/NeverValid 压制）+ Common 兜底；数值一律由
+    // 条自身聚合——Game 侧 boss 槽旧参数（含 EoW ×150 近似分母）自此退役）
+    {
+      const snap = this.bossBars.tick(this.buildBarContext(entities, player, world, cam, viewW, viewH));
+      if (snap) this.drawBossBar(ctx, viewW, viewH, snap);
     }
     // 入侵进度条（DrawInvasionProgress Main.cs:47071 语义；布局与 Boss 条并列居中，
     // 原版右下角黄条——偏差记录）
@@ -4468,7 +4473,7 @@ export class Renderer {
         const tiltOnly5 = stR === 5 && (idR === 23 || idR === 42 || idR === 139 || idR === 176 || idR === 205
           || idR === 210 || idR === 211 || (idR >= 231 && idR <= 235));
         const rotationDriven = !tiltOnly5
-          && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 21 || stR === 23
+          && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 9 || stR === 19 || stR === 21 || stR === 23
             || stR === 40 || stR === 56);
         if (e.vanilla?.aiStyle === 21) {
           // AI_021 刺球（type 72，cs:24685/:24704）：rotation ±direction×directionY×0.13/t
@@ -4487,7 +4492,7 @@ export class Renderer {
           // 蜜蜂 210/211 倾斜 vx*0.2；其余（噬魂怪族等）朝目标/速度方向转头。
           // 全族统一转头会让黄蜂蜜蜂飞行中整只倒转=贴图翻转观感
           const id5 = e.vanillaId;
-          if (id5 === 42 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235) || id5 === 61) ctx.rotate(e.vx * 0.1);  // 61 秃鹫 FindFrame(:74240)
+          if (id5 === 42 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235)) ctx.rotate(e.vx * 0.1);
           else if (id5 === 23 || id5 === 139) ctx.rotate(e.visAngle);   // 探针/陨石头转头（cs:50962-51026,曾误并 139 入 tilt 档）
           else if (id5 === 210 || id5 === 211) ctx.rotate(e.vx * 0.2);
           else ctx.rotate(e.visAngle);
@@ -4496,6 +4501,22 @@ export class Renderer {
         else if (e.vanilla?.aiStyle === 40) ctx.rotate(e.visAngle); // AI_040 爬墙蜘蛛:npc.rotation 随移动/期望速度角(cs:29865/29919),531 +π/2
         else if (e.vanilla?.aiStyle === 23) ctx.rotate(e.visAngle); // AI_023 飞行武器:冲刺角 atan2+0.785 / 蓄转递增(cs:25336-25390)
         else if (e.vanilla?.aiStyle === 56) ctx.rotate(e.visAngle); // AI_056 地牢之魂:rotation=atan2(v)-π/2(cs:32927)
+        else if (stR === 19) ctx.rotate(e.visAngle);   // AI_019 蚁狮 69:rotation=atan2(瞄准)+π/2 钳±0.8(cs:24477-24486);spriteDirection 恒默认→禁镜像(rotationDriven)
+        else if (stR === 17 && idR === 61) ctx.rotate(e.vx * 0.1);  // 秃鹫 FindFrame(cs:74235-74240):rotation=vx×0.1 每帧含飞行;spriteDirection=direction 仍镜像——曾误挂 aiStyle5 分支=死代码(61 是 aiStyle17)
+        else if (stR === 22) ctx.rotate(e.visAngle);   // AI_022 幽灵族:169 冰雪元素瞄准角(cs:24970-24979+spriteDirection=direction)/268 灵液粘怪 vx×0.1(cs:25004)——AI 已写 visAngle 但渲染分支未接(2026-08-20 旋转三件套审计);其余族员原版不旋转(恒 0)
+        else if (stR === 44) ctx.rotate(e.visAngle);   // AI_044 飞鱼/飞蚁狮 224/509/581/587——findFrameRotation 层喂值:509/581 vx×0.1(cs:31107/:31140)、224/587 ±vy×0.2(FindFrame cs:75460-75468);spriteDirection 仍镜像
+        else if (stR === 16) ctx.rotate(e.visAngle);   // AI_016 鱼族:通用 vy×dir×0.1 钳±0.2/692 貌鱼瞄准钳±0.3/海豚跃出 vy×dir×0.3 钳±2π/5+空中翻滚(cs:23664-24076 尾段);spriteDirection 仍镜像
+        else if (stR === 39) ctx.rotate(e.visAngle);   // AI_039 陆龟族 153/154/417:弹射态恒速自旋(ai[2]=0.3/t)、下落态衰减、复位归零(cs:29562-29645);spriteDirection 仍镜像
+        else if (stR === 9) ctx.rotate(e.visAngle);    // AI_009 弹跳球族:rotation += 0.1/0.4×direction(bouncingBallAI 已写 cs:21473/:21549);spriteDirection 恒默认→禁镜像(rotationDriven)
+        else if (stR === 60 || stR === 62 || stR === 63) ctx.rotate(e.visAngle);  // AI_060/062/063 冰雪女王/玩具直升机/弗洛科——AI 已写(冰后 vx×0.05/0.01/+=0.2 cs:33601-33853;直升机 |vx|×dir×0.1 :34158;弗洛科 +=dir×0.3 与 vx×0.15 :34239/:34254)曾无消费门=半断链;spriteDirection 仍镜像
+        else if (stR === 95 || stR === 96 || stR === 97) ctx.rotate(e.visAngle);  // AI_095-097 小星细胞/水流入侵者/星云悬浮脑——AI 已写(+=vx×0.1 / vx×0.1 / |vx|×dir×0.1)曾无消费门;spriteDirection 仍镜像
+        else if (stR === 85) ctx.rotate(e.visAngle);   // AI_085 星细胞/星云头蟹/致命球:0 态 +=dir×0.3 自旋、2/3/4 态 vx×0.1(cs:39030/:39076/:39096/:39121);spriteDirection 仍镜像
+        else if (idR === 301) ctx.rotate(e.visAngle);  // 渡鸦(FindFrame :74287 vx×0.1;aiStyle1 战士族逐 id 接)
+        else if (stR === 14 && (idR === 156 || idR === 226)) ctx.rotate(e.visAngle);  // 红恶魔/飞蛇(FindFrame :74604/:75510 vx×0.1;蝙蝠族逐 id)
+        else if (stR === 115 && idR === 603) ctx.rotate(e.visAngle);  // 海鸥2(FindFrame :74550+ 空中 vx×0.1/水面与静止 0)
+        else if (stR === 7 && (idR === 230 || idR === 593)) ctx.rotate(e.visAngle);  // 走路金鱼/金色走路金鱼(FindFrame :76585+ 高速下落 −=vy×0.01 抬头、落地归零)
+        else if (stR === 3 && (idR === 461 || idR === 469)) ctx.rotate(e.visAngle);  // 深渊来客(空中 (rot×4+瞄准)/5 平滑+翻面取反 :76025+)/被附身者(冲刺态 atan2+π/2 :76365+)
+        else if (stR === 2 && idR === 133) ctx.rotate(e.visAngle);   // 游荡眼(FindFrame :74760+ 随速度角、左行 +π;其余 aiStyle2 恶魔眼族不旋转)
         else if (e.vanilla?.aiStyle === 13) ctx.rotate(e.visAngle); // AI_013 植物族:头随朝玩家伸展方向旋转(cs:22778-22794);spriteDirection 仍翻转→不进 rotationDriven
         else if (stR === 93) ctx.rotate(e.visAngle);   // AI_093 荷兰飞盗船:rotation=vx*0.025(cs:41011);spriteDirection=-sign(vx) 仍镜像
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
@@ -9898,6 +9919,40 @@ export class Renderer {
     ctx.restore();
   }
 
+  /** 图格网格 α 状态机（Main.MouseBuildingGridAlpha Main.cs:271；on 每 0.2 帧
+   *  缓动到速度目标，off -0.05/帧淬灭） */
+  private _buildingGridAlpha = 0;
+
+  /** DrawInterface_6_TileGridOption（Main.cs:45634-45671）1:1：开关开且智能光标
+   *  未用且玩家存活 → 鼠标格中心画 CursorRadial（=Images/UI/Radial.png，
+   *  AssetInitializer.cs:800），White×0.5×α；α 目标 = Lerp(0,0.7,clamp(1-速度/6)) */
+  private drawBuildingGrid(
+    ctx: CanvasRenderingContext2D, cam: Camera, player: Player,
+    smartCursorUsed: boolean, mouseX: number, mouseY: number,
+  ): void {
+    const on = options.data.mouseShowBuildingGrid && !smartCursorUsed && !player.dead;
+    if (on) {
+      const speed = Math.hypot(player.vx, player.vy);      // player.velocity.Length()
+      const target = 0.7 * Math.max(0, Math.min(1, 1 - speed / 6));
+      this._buildingGridAlpha += (target - this._buildingGridAlpha) * 0.2;
+    } else {
+      this._buildingGridAlpha = Math.max(0, this._buildingGridAlpha - 0.05);
+    }
+    const alpha = this._buildingGridAlpha;
+    if (alpha <= 0.01) return;
+    const tex = this.atlas ? this.atlas.vui('UI_Radial.png') : null;
+    if (!tex) return;
+    const [wx, wy] = cam.screenToWorld(mouseX, mouseY);
+    const tx = Math.floor(wx / 16), ty = Math.floor(wy / 16);   // MouseWorld.ToTileCoordinates
+    const [sx, sy] = cam.worldToScreen(tx * 16, ty * 16);
+    // 原版 position + (8,8)：贴图原点 size/2 → 中心对齐格心
+    ctx.save();
+    ctx.globalAlpha = 0.5 * alpha;
+    ctx.drawImage(tex.img, tex.sx, tex.sy, tex.sw, tex.sh,
+      sx + 8 - tex.sw / 2, sy + 8 - tex.sh / 2, tex.sw, tex.sh);
+    ctx.restore();
+  }
+
   private drawSmartCursor(
     ctx: CanvasRenderingContext2D, cam: Camera, hover: HoverTarget, viewH: number, z: number,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
@@ -10036,7 +10091,10 @@ export class Renderer {
     viewW: number, viewH: number, z: number,
   ): void {
     const mono = this.monoFilters;
-    if (!mono.anyInUse && !mono.heatInUse) return;
+    // 沙尘暴/暴风雪色罩(SkyWeatherTint,SkyRenderer 状态机产出;头插=天空层在
+    // FilterManager 滤镜链之下——SandstormSky/BlizzardSky 是 SkyManager 层非滤镜)
+    const wxTints = this.sky.weatherTintPasses();
+    if (!mono.anyInUse && !mono.heatInUse && wxTints.length === 0) return;
     // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
     // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
     // 语义等价——vanilla 垫值只是为比屏幕大的离屏采集目标)
@@ -10044,7 +10102,7 @@ export class Renderer {
     const screenPos: [number, number] = [cam.x - screenRes[0] / 2, cam.y - screenRes[1] / 2];
     const gl = this.screenFxLayer();
     if (gl) {
-      const passes: ScreenFxPass[] = [];
+      const passes: ScreenFxPass[] = [...wxTints];
       if (mono.heatVisible) {
         passes.push({
           kind: 'FilterHeatDistortion', screenRes, screenPos,
@@ -10079,7 +10137,8 @@ export class Renderer {
         return;
       }
     }
-    // 2D 回退链(同序:heat 先)
+    // 2D 回退链(同序:色罩先——天空层在最下)
+    if (wxTints.length) this.sky.drawWeatherTint2D(ctx, viewW, viewH);
     if (mono.heatVisible) {
       mono.drawHeat2D(ctx, this.canvas, viewW, viewH,
         { x: screenPos[0], y: screenPos[1] }, { x: screenRes[0], y: screenRes[1] },
@@ -11418,87 +11477,56 @@ export class Renderer {
     ctx.fillText(`${invasion.name}  ${invasion.label ?? pctTxt}`, viewW / 2, y + 15);
   }
 
-  /** Boss 头像贴图索引（NPCID.Sets.BossHeadTextures，NPCID.cs:4861 全量对照）：
-   *  npc type → NPC_Head_Boss_N。未列出的 boss（-1）原版不显示头像 */
-  private static readonly BOSS_HEAD_INDEX: Record<number, number> = {
-    4: 0, 13: 2, 344: 3, 370: 4, 246: 5, 249: 5, 345: 6, 50: 7, 396: 8, 395: 9,
-    325: 10, 262: 11, 327: 13, 222: 14, 125: 15, 126: 20, 346: 17, 127: 18,
-    35: 19, 68: 19, 113: 22, 266: 23, 439: 24, 440: 24, 134: 25, 491: 26, 517: 27,
-    422: 28, 507: 29, 493: 30, 549: 35, 564: 32, 565: 32, 576: 33, 577: 33,
-    551: 34, 548: 36, 636: 37, 657: 38, 668: 39,
-  };
+  // ---- Boss 血条（BossBars.ts：BigProgressBarSystem 15 类特化条 1:1）----
 
-  /** Boss 血条 1:1（BigProgressBarHelper.DrawFancyBar，BigProgressBarHelper.cs:18-57）：
-   *  UI_BossBar.png（516×348 = 1 列 × 6 行 58px 帧）——行3 背景（×0.2）→ 行2 填充
-   *  2px 段横向拉伸（宽=456×ratio 取偶）→ 行1 填充端盖（x+num2-2）→ 行0 整框 →
-   *  头像（NPC_Head_Boss_N，锚=框左上+(4,20)+图标半宽）→ 血量文本。
-   *  布局：456×22 居中于 (W/2, H-50)——底部中央（原版语义；旧实现顶部自绘红条）。
-   *  多 Boss 面板：原版 BigProgressBarSystem 同时只跟踪一个 NPC（TryFindingNPCToTrack
-   *  单目标），我们也只收到单个 boss——单 Boss 路径即完整语义。盾量重载（行4/5，
-   *  LunarPillar 等）按塔盾条另走，未在本条复用（登记） */
+  /** BossBarSystem 实例（BigProgressBarSystem 的 _currentBar/_info 跟踪态） */
+  private readonly bossBars = new BigProgressBarSystem();
+  /** BarNpc 投影暂存（每帧复用，防 alloc 抖动——泄漏家族清扫口径） */
+  private readonly _barNpcs: BarNpc[] = [];
+
+  /** Enemy → BarNpc 投影 + 世界上下文（专家/FTW/downed/塔盾）打包 */
+  private buildBarContext(
+    entities: Entity[], player: Player, world: World,
+    cam: Camera, viewW: number, viewH: number,
+  ): BarContext {
+    const buf = this._barNpcs;
+    buf.length = 0;
+    for (const e of entities) {
+      if (!(e instanceof Enemy) || e.vanillaId == null) continue;
+      buf.push({
+        id: e.id, type: e.vanillaId, active: !e.dead,
+        life: e.hp, lifeMax: e.maxHp,
+        ai0: e.ai0, ai1: e.ai1, ai2: e.ai2, ai3: e.ai3, localAI3: e.lai3,
+        x: e.x, y: e.y, w: e.w, h: e.h, cx: e.cx, cy: e.cy,
+        difficulty: e.difficulty,
+      });
+    }
+    const z = cam.zoom;
+    const sw = viewW / z, sh = viewH / z;
+    return {
+      npcs: buf,
+      playerCx: player.cx, playerCy: player.cy,
+      screen: { x: cam.x - sw / 2, y: cam.y - sh / 2, w: sw, h: sh },
+      expertMode: world.isExpert,
+      getGoodWorld: !!world.seedFlags?.getGoodWorld,
+      shieldMax: shieldMax(world),
+      shieldOf: (towerId) => world.lunarEvent.shield[TOWER_KEY[towerId]] ?? 0,
+      refLifeMax: refLifeMaxOf,
+    };
+  }
+
+  /** Boss 血条绘制（BigProgressBarHelper.DrawFancyBar 两重载合并——生命条
+   *  行0-3 + 盾量叠层行4/5；布局 456×22 居中 (W/2,H-50)，头像净左上 =
+   *  框左上-(32,24)+(4,20)，盾>0 时文本显盾量） */
   private drawBossBar(
-    ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
-    boss: { name: string; hp: number; maxHp: number; cx: number; cy: number },
-    entities: Entity[] = [],
+    ctx: CanvasRenderingContext2D, viewW: number, viewH: number, info: CollectInfo,
   ) {
     if (!this.atlas) return;
-    const bar = this.atlas.vui('UI_UI_BossBar.png');
-    const FH = 58, BW = 456, BH = 22, IX = 32, IY = 24;
-    const rect = { x: Math.round(viewW / 2 - BW / 2), y: Math.round(viewH - 50 - BH / 2), w: BW, h: BH };
-    const vec = { x: rect.x - IX, y: rect.y - IY };
-    let fill = Math.floor(BW * Math.max(0, Math.min(1, boss.hp / boss.maxHp)));
-    fill -= fill % 2;                                            // num2 -= num2 % 2
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    if (bar) {
-      // 行3 背景 ×0.2
-      ctx.globalAlpha = 0.2;
-      ctx.drawImage(bar.img, bar.sx, bar.sy + 3 * FH, bar.sw, FH, vec.x, vec.y, bar.sw, FH);
-      ctx.globalAlpha = 1;
-      // 行2 填充段（2px 源横向拉伸到 num2 宽）
-      ctx.drawImage(bar.img, bar.sx + IX, bar.sy + 2 * FH + IY, 2, BH, rect.x, rect.y, Math.max(2, fill), BH);
-      // 行1 端盖
-      ctx.drawImage(bar.img, bar.sx + IX, bar.sy + 1 * FH + IY, 2, BH, rect.x + Math.max(0, fill - 2), rect.y, 2, BH);
-      // 行0 整框（含头像背景槽）
-      ctx.drawImage(bar.img, bar.sx, bar.sy, bar.sw, FH, vec.x, vec.y, bar.sw, FH);
-    } else {
-      // 贴图未就绪兜底：几何暗条（不闪断）
-      ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(rect.x, rect.y, BW, BH);
-      ctx.fillStyle = '#C03030';
-      ctx.fillRect(rect.x, rect.y, Math.max(2, fill), BH);
-    }
-    // 头像：boss 参数无类型信息——从实体表反查同 hp/位置的 Enemy 取 vanillaId
-    const src = (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead
-      && Math.abs(n.hp - boss.hp) < 1 && Math.abs(n.maxHp - boss.maxHp) < 1
-      && Math.abs(n.cx - boss.cx) < 64 && Math.abs(n.cy - boss.cy) < 64);
-    const headIdx = src?.vanillaId != null ? Renderer.BOSS_HEAD_INDEX[src.vanillaId] : undefined;
-    if (headIdx !== undefined) {
-      const head = this.atlas.vmisc(`vanilla/NPC_Head_Boss_${headIdx}.png`);
-      if (head) {
-        // vector2 = (4,20) + 图标半宽，origin = 图标半宽 → 净左上 = vec + (4,20)
-        ctx.drawImage(head.img, head.sx, head.sy, head.sw, head.sh,
-          vec.x + 4, vec.y + 20, head.sw, head.sh);
-      }
-    }
-    // 血量文本（DrawHealthText :59-68：中缝 "/"、左当前右上限）
-    ctx.font = 'bold 13px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
-    const cy2 = rect.y + rect.h / 2 + 5;
-    ctx.strokeText('/', rect.x + rect.w / 2, cy2);
-    ctx.fillStyle = '#FFF';
-    ctx.fillText('/', rect.x + rect.w / 2, cy2);
-    ctx.textAlign = 'right';
-    ctx.strokeText(`${Math.ceil(boss.hp)}`, rect.x + rect.w / 2 - 5, cy2);
-    ctx.fillText(`${Math.ceil(boss.hp)}`, rect.x + rect.w / 2 - 5, cy2);
-    ctx.textAlign = 'left';
-    ctx.strokeText(`${boss.maxHp}`, rect.x + rect.w / 2 + 5, cy2);
-    ctx.fillText(`${boss.maxHp}`, rect.x + rect.w / 2 + 5, cy2);
-    ctx.textAlign = 'start';
-    ctx.restore();
-    void boss.name;
+    drawBigProgressBar(ctx, {
+      bar: this.atlas.vui('UI_UI_BossBar.png'),
+      head: info.headIndex >= 0
+        ? this.atlas.vmisc(`vanilla/NPC_Head_Boss_${info.headIndex}.png`) : null,
+    }, viewW, viewH, info);
   }
 
 }

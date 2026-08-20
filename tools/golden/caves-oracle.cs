@@ -10511,8 +10511,12 @@ var streamPts = new List<string>();
 uint StreamHash()
 {
     var t = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
-    var sa = (int[])t.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
-    var ix = (uint)t.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
+    // ★WWWWW（HHHHH 移交）：dungeon 段 r 已被换 DgCR 计数包装（:5759）——直读其
+    //   SeedArray/inext 会 ArgumentException（STREAM_PRINT 在 dungeonL 首崩）。
+    //   解包 inner 后再反射=DgStreamFNV/DgFlow 同款口径（零 DgCR 时行为不变）。
+    var rtS = ((object)r) is DgCR dcS ? dcS.inner : (object)r;
+    var sa = (int[])t.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rtS)!;
+    var ix = (uint)t.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(rtS)!;
     uint h = 0x811c9dc5;
     foreach (var v in sa) { for (int b = 0; b < 4; b++) h = (h ^ (uint)((v >> (8 * b)) & 0xff)) * 16777619u; }
     for (int b = 0; b < 4; b++) h = (h ^ (uint)((ix >> (8 * b)) & 0xff)) * 16777619u;

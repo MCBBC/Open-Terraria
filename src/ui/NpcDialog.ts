@@ -4,7 +4,8 @@
 // 台词与商店内容在 Game 侧生成(NPC.GetChat / Chest.SetupShop 1:1),本文件纯渲染。
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'happiness' | 'status' | 'close';
+import { options } from '../core/Options';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
 
 /** 心情报告条目（Game 侧已做 l10n 渲染的成品文案 + 价格乘子） */
 export interface HappinessInfo {
@@ -34,12 +35,21 @@ export interface ShopEntry {
   /** 原版 item id(图标) */
   vanillaId: number;
   name: string;
-  /** 铜币计价(item.value) */
+  /** 铜币计价(item.value；勋章条目 = 勋章枚数) */
   price: number;
+  /** 护卫勋章价（shopSpecialCurrency=DefenderMedals 条目；渲染走勋章文案，
+   *  支付分流 Game.npcShopBuy 扣勋章——CustomCurrencyID.DefenderMedals 全链） */
+  medal?: number;
   /** 卖回货架条目下标（Chest.AddItemToShop buyOnce 克隆；购买时回传 npcShopBuy
    *  区分常规货——同 vid 双行时 data-id 撞号，以此区分） */
   buyback?: number;
   iconUrl: string | null;
+}
+
+/** 勋章价格文案（CustomCurrencySingleCoin.GetPriceText :103-107：
+ *  price + Language[Currency.DefenderMedals].ToLower()，色 (240,100,120)） */
+export function medalPriceText(price: number): string {
+  return `${price} ${Lang.text('Currency.DefenderMedals').toLowerCase()}`;
 }
 
 const CSS = `
@@ -80,6 +90,7 @@ const CSS = `
 }
 .sw-shop-title { text-align: center; color: #ffe8a0; font-size: 15px; margin-bottom: 8px; }
 .sw-shop-coins { text-align: right; color: #ffd76e; font-size: 13px; margin-bottom: 6px; }
+.sw-shop-medals { color: #f06478; margin-left: 8px; }   /* 勋章持有（CurrencyTextColor 240,100,120） */
 .sw-shop-list { display: flex; flex-direction: column; gap: 4px; max-height: 50vh; overflow-y: auto; }
 .sw-shop-item {
   display: flex; align-items: center; gap: 10px; padding: 5px 8px;
@@ -152,7 +163,12 @@ export class NpcDialog {
     // ★原版画法（Main.cs DrawNPCPortrait :39745）：200×200 原尺寸画在圆形底框上、
     //  头部居中——贴图自带 ~50% 透明留白是圆框设计的一部分；本仓是矩形头像框，
     //  整图塞入头像只占一半 → 打开时 canvas 按 alpha 内容包围盒裁剪 + 等比铺满
-    const portraitHtml = portrait
+    // 对话头像偏好（Main.DialoguePortraitPreference，IngameOptions.cs:823-836；
+    // CycleNPCPortraitMode :39724 序 Detailed→CloseUp→FullBodyRetro→Disabled）：
+    // Disabled=不画；CloseUp/FullBodyRetro 走 Profile/Retro 变体贴图——变体未
+    // 导入，暂按 Detailed 现行画法渲染（登记：素材变体缺口）
+    const portraitOn = !!portrait && options.data.dialoguePortraitMode !== 'disabled';
+    const portraitHtml = portraitOn
       ? `<canvas class="sw-npc-portrait" width="152" height="184"></canvas>`
       : '';
     panel.innerHTML = `<div class="sw-npc-body">${portraitHtml}<div class="sw-npc-main">`
@@ -166,7 +182,7 @@ export class NpcDialog {
     });
     this.parent.appendChild(panel);
     this.panel = panel;
-    if (portrait) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait);
+    if (portraitOn) this.drawPortrait(panel.querySelector('canvas.sw-npc-portrait') as HTMLCanvasElement | null, portrait!);
     this.escHandler = (e: KeyboardEvent) => { if (e.code === 'Escape') this.onButton('close'); };
     window.addEventListener('keydown', this.escHandler);
   }
@@ -230,23 +246,30 @@ export class NpcShop {
     private onBuy: (vanillaId: number, buybackIndex?: number, bulk?: boolean) => void,
     private onClose: () => void) {}
 
-  open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null) {
+  open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null, medals?: number) {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-shop';
+    // 支付能力判定按条目币种分流：勋章条目比勋章持有（medals），铜币条目比铜币
+    const afford = (it: ShopEntry): boolean =>
+      it.medal !== undefined ? (medals ?? 0) >= it.medal : copper >= it.price;
     const rows = items.map((it) => `
-      <div class="sw-shop-item${copper < it.price ? ' poor' : ''}" data-id="${it.vanillaId}"${it.buyback !== undefined ? ` data-bb="${it.buyback}"` : ''} data-ok="${copper >= it.price ? 1 : 0}">
+      <div class="sw-shop-item${afford(it) ? '' : ' poor'}" data-id="${it.vanillaId}"${it.buyback !== undefined ? ` data-bb="${it.buyback}"` : ''} data-ok="${afford(it) ? 1 : 0}">
         ${it.iconUrl ? `<img src="${it.iconUrl}">` : '<span style="width:26px;height:26px;display:inline-block"></span>'}
-        <span class="nm">${it.name}</span><span class="pr">${formatCopper(it.price)}</span>
+        <span class="nm">${it.name}</span><span class="pr">${it.medal !== undefined ? medalPriceText(it.medal) : formatCopper(it.price)}</span>
       </div>`).join('');
     // 快乐度表情 + 价格百分比（Main.cs:41231-41243 商店标题旁 NPCHappiness 贴图 +
     //  priceAdjustment.ToString("P0")；DOM 版用表情档位代替贴图帧）
     const happy = happinessPct != null
       ? `<span class="sw-shop-happy ${happinessFace(happinessPct).cls}">${happinessFace(happinessPct).face} ${happinessPct}</span>`
       : '';
+    // 勋章持有并列显示（CustomCurrencyManager.DrawSavings :28-63：双货币店在
+    //  钱币行旁画勋章图标+数量；仅本店有勋章条目时传值）
+    const medalLine = medals !== undefined
+      ? ` <span class="sw-shop-medals">🏅 ×${medals}</span>` : '';
     panel.innerHTML = `
       <div class="sw-shop-title">${title}${happy}</div>
-      <div class="sw-shop-coins">${formatCopper(copper)}</div>
+      <div class="sw-shop-coins">${formatCopper(copper)}${medalLine}</div>
       <div class="sw-shop-list">${rows}</div>
       <div class="sw-shop-foot"><button class="sw-set-back" style="background:#3a4680;color:#e8e8f4;border:1px solid #7d92d6;border-radius:4px;padding:5px 16px;cursor:pointer;font-family:inherit;">${Lang.inter(52)}</button></div>`;
     panel.querySelectorAll('.sw-shop-item').forEach((el) => {

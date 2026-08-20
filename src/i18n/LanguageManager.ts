@@ -298,6 +298,14 @@ class LanguageManager {
     return this.pack.variations.get(baseKey)?.get(variant) ?? null;
   }
 
+  /** 类目全键(保插入序——Language.FindAll(filter) 的有序等价,聊天 /help 命令
+   *  描述列表用:HelpCommand.GetCommandAliasesByID 按 ChatCommandDescription 类
+   *  目的键序逐条拼接,语言包文件序即权威序) */
+  keysFromCategory(category: string): string[] {
+    const list = this.pack.groupedKeys.get(category);
+    return list ? [...list] : [];
+  }
+
   /** 类别内取模循环取值(对标 IndexedFromCategory,LanguageManager.cs:431) */
   indexedFromCategory(category: string, index: number): string | null {
     const list = this.pack.groupedKeys.get(category);

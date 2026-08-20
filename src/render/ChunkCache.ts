@@ -3,6 +3,7 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
+import { frameMergesWith } from './TileMergeFamily';
 import { swayBakeSkip } from './WindSway';
 import { TILE_ANIM_RATE, tileAnim, campfireYOffset } from './TileAnim';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
@@ -678,7 +679,9 @@ export class ChunkCache {
             ctx, this.autotiler.atlas, def.vanilla.sheet, def.vanilla.frame,
             def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
             st, x, y, type,
-            (t) => t === type, // 同 id 融合判定（后续可扩 mergeWith）
+            // 同 id 融合 + 原版跨类型合并家族（TileMergeFamily:砖/沙/冰雪族互连,
+            // 群系交界按已连接取帧——边缘帧圆角透明像素会透出远景背景亮光）
+            (t) => t === type || frameMergesWith(type, t),
             px, py, st.frameX[i], fy,
             { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
               worldSurface: this.world.groundLevel, worldW: this.world.w },

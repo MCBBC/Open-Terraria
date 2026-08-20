@@ -198,6 +198,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onWorldReady: () => { ui.hideProgress(); enterGame(g); maybeDev(g); applyAppearance(g); },
       onInventoryChanged: () => { g.prefetchInvProjectiles(); ui.refreshAll(); },
       onBuffsChanged: () => ui.refreshBuffs(),
+      // 自动保存（Main.autoSave 墙钟到点 → DoUpdate_AutoSave :19589 saveAndPlay）
+      onAutoSave: () => doSave(),
+      // 配装热键切换白闪（GetColorByLoadout :2554-2559；背包按钮同款）
+      onLoadoutSwitched: () => ui.flashLoadoutSwitch(),
       onToast: (m) => ui.toast(m),
       onAchievementPopup: (name, title) => ui.achievementPopup(name, title),
       onHousingCursor: (m) => {
@@ -214,7 +218,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onNpcDialog: (name, chat, buttons, portrait) => ui.showNpcDialog(name, chat, buttons, portrait),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onReforgeOpen: () => ui.showReforge(),
-      onNpcShop: (title, items, copper, happinessMul) => ui.showNpcShop(title, items, copper, happinessMul),
+      onNpcShop: (title, items, copper, happinessMul, medals) => ui.showNpcShop(title, items, copper, happinessMul, medals),
       // NPC 快乐度详情浮层（ReportHappiness.Interact）
       onNpcHappiness: (info) => ui.showNpcHappiness(info),
       onReadSign: (text) => ui.showSign(text),

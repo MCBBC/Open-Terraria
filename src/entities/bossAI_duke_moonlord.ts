@@ -1377,7 +1377,7 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
   if (e.ai0 !== -1 && e.ai0 !== 2 && Math.floor(Math.random() * 200) === 0) {
     game.playSfxWav?.(`Zombie_${93 + Math.floor(Math.random() * 7)}`, 1, e.cx, e.cy);
   }
-  if (!e.bInit) { e.bInit = true; e.ai0 = -1; e.ai1 = 0; e.ai2 = 0; } // :36780-36785
+  if (!e.bInit) { e.bInit = true; e.ai0 = -1; e.ai1 = 0; e.ai2 = 0; e.lai3 = 1; } // :36780-36785（localAI[3]=1 首帧哨兵——MoonLordProgressBar.IsInBadAI 的 type398&&localAI[3]==0 剔除门消费）
   // 原版 checkDead(:78859-78867):血尽 → ai0=2 死亡演出,满血续命 600t 后真死
   if (e.hp <= 0 && e.ai0 !== 2) { e.ai0 = 2; e.ai1 = 0; e.hp = e.maxHp; e.iframes = 2; }
 

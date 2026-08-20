@@ -26,6 +26,9 @@ import {
   type TownShotParams,
 } from '../data/vanillaTownAttack';
 import { TownShot } from './TownShot';
+import { resolveDrops, npcValueOf, type NpcDropCtx } from '../drops/NpcDrops';
+import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { RNG } from '../core/rng';
 import { visEffectFrames, mouseTextColorApprox, type Enemy } from './Enemy';
 import { spawnVanillaEnemy } from './bossAI';
 import { Lang } from '../i18n/Lang';
@@ -369,7 +372,7 @@ export function knockbackCap(kb: number): number {
 // 四攻击态入参 ：54897/:55169/:55319/:55466）；num3 = 攻击频率门除数（:55859
 // num123=(int)(AttackAverageChance×num3)，钳 ≥1 后 rand(num123)==0）。两者在同一
 // isLikeATownNPC 块内逐项累计。块内不属本函数的条目：防御档 :53401-53412
-// （dryadWard +20/15/10 按难度——树妖结界 buff 本仓无载体，hurt 侧防御链另批）、
+// （dryadWard +20/15/10 按难度——载体 dryadWardT 已接（2026-08-20），hurt() 内联）、
 // type==209 num3÷3（:53548，attackUpdate 消费点内联）、对话中 num3×0.8（:55617，
 // 本仓 talking 恒不入攻击态——触发门 :835 已挡，不可达登记）。
 /** 进度强化链输入（全 bool；各字段 = 原版静态位/实例位，括注声明行+置位点） */
@@ -599,12 +602,13 @@ export class TownNPC extends Entity {
   /** 溺水跳出记录的跳点 X（:54427 localAI[3]=position.X；回到该点 → 转身防横跳） */
   private jumpBackX = Number.NaN;
 
-  // ---- 社交/表演态（AI_007 ai[0]∈{2,3,4,6,7,9,16,17}，NPC.cs:55630-55835 掷骰
+  // ---- 社交/表演态（AI_007 ai[0]∈{2,3,4,6,7,9,16,17,19}，NPC.cs:55630-55835 掷骰
   //      + :54660-54748 推进 + FindFrame :69577-70152 表演帧）----
   /** 当前社交态（null=无）。kind 对应原版 ai[0]：2 发呆 / 3,4 结对聊天（发起/
-   *  应答）/ 6 派对舞 / 7 面向玩家 / 9 驻足看家具 / 16,17 石头剪刀布（发起/应答） */
+   *  应答）/ 6 派对舞 / 7 面向玩家 / 9 驻足看家具 / 16,17 石头剪刀布（发起/应答）/
+   *  19 回应玩家表情（EmoteBubble.CheckForNPCsToReactToEmoteBubble 置入 :161-166） */
   social: {
-    kind: 2 | 3 | 4 | 6 | 7 | 9 | 16 | 17;
+    kind: 2 | 3 | 4 | 6 | 7 | 9 | 16 | 17 | 19;
     t: number;            // ai[1] 态倒计时
     other: TownNPC | null;  // ai[2] 对偶 NPC（3/4/16/17）
     frameT: number;       // frameCounter（表演帧时间线，逐 tick +1）
@@ -695,6 +699,10 @@ export class TownNPC extends Entity {
   lavaCd = 0;
   /** NPC 互殴专属冷却(原版 immune[255]=30,GetHurtByOtherNPCs :93667;初始 0) */
   private npcVsCd = 0;
+  /** 树妖结界 buff 165 剩余 tick（原版 buffType/buffTime 单槽近似——树妖祝福
+   *  光环每 10t 续 120（弹 586 AI_111 :38806-38812）；hurt 防御 +20/15/10
+   *  （:53401-53411）+ 荆棘反伤 num5/3（:93666-93681）两消费枝的载体） */
+  dryadWardT = 0;
   /** 溺水呼吸(NPC.CheckDrowning :96118:初始 200,水内每 7t -1,离水 +3/t) */
   private breath = 200;
   private breathCounter = 0;
@@ -744,7 +752,12 @@ export class TownNPC extends Entity {
     const prog = townNpcProgressionFromWorld(game.world);
     prog.tipsy = this.tipsy;
     const defBase = VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15;
-    const def = defBase + townNpcProgressionBoost(prog).defenseBonus;
+    let def = defBase + townNpcProgressionBoost(prog).defenseBonus;
+    // 树妖结界防御枝（AI_007 头部 :53401-53411）：dryadWard → 大师 +20 / 专家 +15 /
+    // 其余 +10（与原版同读当帧难度档）
+    if (this.dryadWardT > 0) {
+      def += game.world.isMaster ? 20 : game.world.isExpert ? 15 : 10;
+    }
     dmg = Math.max(1, Math.round(dmg - def * 0.5));
     this.hp -= dmg;
     this.iframes = 10;
@@ -786,12 +799,51 @@ export class TownNPC extends Entity {
       const deathFiles = vanillaSoundFiles(VANILLA_NPCS[String(this.vanillaId)]?.DeathSound) ?? ['NPC_Killed_1'];
       game.playSfxFiles?.([this.vanillaId === 229 && this.shimmered ? 'NPC_Killed_6' : deathFiles[0]], 1);
       this.voodooSkeletronOnDeath(game);
+      // 掉落求值（NPC.checkDead → NPCLoot_DropItems :79653，ItemDropDatabase 城镇
+      // NPC 条目）：具名纪念品（NamedNPC——Andrew 向导 867 绿帽 / Whitney 蒸汽朋克
+      // 4372 / Jim 画家 5290，1/1）+ 帽子族 1/8（207/227/441 帽 3349/3350/3351）+
+      // 裁缝 260/公主 5065(hardMode) 等。钱币/心星管线跳过（城镇 NPC value=0）
+      this.townNpcDeathDrops(game);
     } else {
       // StrikeNPC 受击音 = per-NPC HitSound 满响（曾硬编码 NPC_Hit_1 ×0.6）
       const hitFiles = vanillaSoundFiles(VANILLA_NPCS[String(this.vanillaId)]?.HitSound) ?? ['NPC_Hit_1'];
       game.playSfxFiles?.(hitFiles, 1);
     }
     return true;
+  }
+
+  /** 城镇 NPC 死亡掉落（NPC.checkDead → NPCLoot_DropItems :79653——vanilla-
+   *  nppcdrops.json 城镇条目求值；Enemy.die 同链紧凑版）。ctx 与 Enemy 侧同构：
+   *  friendly=true、value=0（城镇 NPC NPC_VALUE 表无值 → 不掉钱）、boss=false、
+   *  npcGivenName=givenName（NamedNPC 条件——具名池抽中 Andrew/Whitney/Jim 才掉
+   *  专属纪念品，Conditions.cs:957-981）。心/星/钱管线 value=0 不产。 */
+  private townNpcDeathDrops(game: GameHooks): void {
+    const w = game.world;
+    const p = game.player;
+    // 运行时掷骰流（Enemy 侧用 UnifiedRandom 注入的同一 RNG 类；城镇死亡无
+    // 重播需求，随机种子即可）
+    const rng = new RNG((Math.random() * 0x7fffffff) | 0);
+    const ctx: NpcDropCtx = {
+      rng, netId: this.vanillaId, type: this.vanillaId,
+      isExpert: w.isExpert, isMaster: w.isMaster,
+      hardMode: !!w.flags.hardMode, crimson: !!w.crimson,
+      flags: w.flags,
+      x: this.cx, y: this.cy,
+      worldSurfaceTile: w.groundLevel, rockLayerTile: w.rockLevel,
+      underworldTileY: w.lavaLine || w.h - 200,
+      maxTilesX: w.w, maxTilesY: w.h,
+      lifeMax: this.maxHp, friendly: true, boss: false,
+      damage: VANILLA_NPCS[String(this.vanillaId)]?.damage ?? 10,
+      value: npcValueOf(this.vanillaId),
+      hp: p.hp, hpMax: p.maxHp, mana: p.mana, manaMax: p.maxMana,
+      luck: p.luck,
+      npcGivenName: this.givenName || undefined,
+      extras: game.dropContext?.(),
+    };
+    for (const d of resolveDrops(ctx).drops) {
+      const key = VANILLA_ITEM_KEY_BY_ID[d.id];
+      if (key) game.spawnDrop(this.cx, this.cy, key, d.n, 0, -2);
+    }
   }
 
   /** 裁缝巫毒娃娃 1307 死亡召唤（NPC.cs:78958-78967）：!day && type==54 &&
@@ -1481,8 +1533,9 @@ export class TownNPC extends Entity {
           this.facing *= -1;
         }
       }
-      if ((s.kind === 6 || s.kind === 7) && s.t > 0) {
-        // 对玩家态（:54722-54744）：玩家失效（>200px/无 LOS）→ t=0；否则面向玩家
+      if ((s.kind === 6 || s.kind === 7 || s.kind === 19) && s.t > 0) {
+        // 对玩家态（:54713 ai0∈{6,7,18,19} 共段 + :54722-54744）：玩家失效
+        // （>200px/无 LOS）→ t=0；否则面向玩家
         const pl = (game as unknown as { player?: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player;
         if (!pl || pl.dead
           || Math.hypot(pl.x + pl.w / 2 - this.cx, pl.y + pl.h / 2 - this.cy) > 200
@@ -1715,8 +1768,10 @@ export class TownNPC extends Entity {
         if (t >= 300) s.frameT = 0;
         break;
       }
-      case 7: {
-        // 面向玩家（:69721-69760）：16t/160t 冒 NewBubbleNPC——★第二参是【时长 tick】
+      case 7:
+      case 19: {
+        // 面向玩家 / 回应玩家表情（:69680 ai[0]==7||ai[0]==19 同帧带 :69721-69760）：
+        // 16t/160t 冒 NewBubbleNPC——★第二参是【时长 tick】
         // 非表情 id（EmoteBubble.cs:134 签名 NewBubbleNPC(anchor, time, other)，表情
         // 由 PickNPCEmote 随机选；112/60 此前误当表情 id）；[16,128) 与 [160,220)
         // 说话帧 −2 交替
@@ -2021,12 +2076,14 @@ export class TownNPC extends Entity {
    *    每 7t life-=2,归零一击 StrikeNPC(2);离水 breath+3/t cap 200
    *  ③ 敌怪互殴(GetHurtByOtherNPCs :93605-93690):任一 !friendly 且 damage>0 的
    *    NPC 接触 → StrikeNPC(DamageVar(attacker.damage), 6, 方向),immune[255]=30;
-   *    dryadWard 荆棘反伤(num5/3)与 HurtingBees 未接,略
+   *    后置两枝（2026-08-20 补）：dryadWard 荆棘反伤(⌊实伤/3⌋,:93666-93681) +
+   *    HurtingBees 蜂攻击者受【本体 damage】反蜇(:93682-93696)
    *  Enemy.def.damage 已含难度缩放(ScaleStats),DamageVar≈1(Classic)直用。 */
   private envHurtUpdate(world: import('../world/World').World, game: GameHooks): void {
     if (this.dead) return;
     const st = world.store;
     if (this.npcVsCd > 0) this.npcVsCd--;
+    if (this.dryadWardT > 0) this.dryadWardT--;    // buffTime 165 逐 tick 衰减
     // ② 溺水(:96118-96154;DrownCollision=头部浸水,headSubmerged 同式)
     const submerged = this.wet && st.liquidType[st.idx(
       Math.max(0, Math.min(st.w - 1, Math.floor(this.cx / TILE))),
@@ -2047,18 +2104,38 @@ export class TownNPC extends Entity {
       this.breath = Math.min(200, this.breath + 3);
       this.breathCounter = 0;
     }
-    // ③ 敌怪互殴(:93605-93690)
+    // ③ 敌怪互殴(:93605-93690)——BeHurtByOtherNPC 全段（含 dryadWard 荆棘 +
+    //    HurtingBees 蜂反蜇两后置枝，:93666-93681）
     if (this.npcVsCd <= 0) {
       for (const ent of game.enemies()) {
         const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
-          damage?: number; def?: { damage?: number } };
+          damage?: number; def?: { damage?: number }; vanillaId?: number };
         if (e.dead) continue;
         const dmg = e.damage ?? e.def?.damage ?? 0;
         if (dmg <= 0) continue;
         if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
         const dir = e.x + e.w / 2 > this.cx ? -1 : 1; // :93662 攻击者在右侧 → 向左击退
         this.npcVsCd = 30;                              // immune[255]=30
+        const hpBefore = this.hp;
         this.hurt(dmg, dir * 6, 0, game);               // kb=6(:93661)
+        // 实伤 num5 = StrikeNPCNoInteraction 返回值（hp 差值等价，致死钳到扣血额）
+        const dealt = Math.max(0, hpBefore - Math.max(0, this.hp));
+        // 干掉攻击者引用（荆棘/反蜇两枝共享；反蜇伤害源 = 本体 npc.damage）
+        const strikeBack = (amount: number): void => {
+          const foe = e as unknown as import('./Enemy').Enemy;
+          if (typeof foe.hurt !== 'function') return;
+          foe.hurt(amount, -dir * 6, 0, game, 0, false, 1);   // StrikeNPCNoInteraction
+        };
+        // :93666-93681 dryadWard 荆棘：反伤 ⌊dealt/3⌋（kb6 反向，攻击者同 30t 冷却）
+        if (this.dryadWardT > 0 && dealt > 0) {
+          strikeBack(Math.trunc(dealt / 3));
+        }
+        // :93682-93696 HurtingBees：蜂攻击者额外受【本体 damage】反蜇
+        // （npc.damage = 攻击型城镇 NPC 战斗伤害，atkParams 取档）
+        if (e.vanillaId === 210 || e.vanillaId === 211) {
+          const myDmg = this.atkParams(TOWN_ATTACK_TYPE[this.vanillaId] as 0 | 1 | 2 | 3)?.dmg ?? 0;
+          strikeBack(myDmg);
+        }
         break;
       }
     }
@@ -2361,6 +2438,17 @@ export class TownNPC extends Entity {
       if (pl && !pl.dead
         && Math.hypot(pl.cx - this.cx, pl.cy - this.cy) <= radius) {
         pl.buffs.apply(BuffType.DryadsWard, 2);   // AddBuff(165,120)=2s
+      }
+      // :38806-38812 城镇 NPC 同链：每 10t（FindBuffIndex(165)==-1 或余 ≤20 →
+      // AddBuff(165,120)）——dryadWardT 载体（防 +20/15/10 + 荆棘反伤）。
+      // 敌怪 DryadBane(186) 支登记未接（敌怪 buff 系统无 186 栏）
+      if (a % 10 === 0) {
+        for (const ent of (game.npcs?.() ?? [])) {
+          const tn = ent as TownNPC;
+          if (!(tn instanceof TownNPC) || tn === this || tn.dead) continue;
+          if (Math.hypot(tn.cx - this.cx, tn.cy - this.cy) > radius) continue;
+          if (tn.dryadWardT <= 20) tn.dryadWardT = 120;
+        }
       }
     }
     if (this.rng() < 0.25 && a >= 5) {           // :38754 rand(4)==0
