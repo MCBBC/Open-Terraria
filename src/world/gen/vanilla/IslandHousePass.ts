@@ -142,6 +142,20 @@ function islandHouse(
         const variant = rng.int(0, 2); // PlaceDoor 每行独立 genRand.Next(3)
         st.setTileSilent(doorX, floorY - 2 + dy, T.DOOR_CLOSED, variant * 18, 486 + dy * 18);
       }
+      // ★QQQQQ（m20260811 #69 定谳）：case10 成功支尾 SquareTileFrame(doorX,floorY)
+      //   （cs:59895/59902）——3×3 TileFrame 头对非活跃格清 halfBrick/slope/块漆
+      //   （cs:82077-82082）。门洞清空（cs:79940-46 只 active(false) 不动 half）格上
+      //   的岛面旧半砖位靠这步复位：金标 (5206,184) 活性半砖泥土 → 门洞清空 → 级联
+      //   复位 half=0（dump69 H=0）；JS 曾直写门无级联 → 半砖残留 H0>1 单格。
+      //   活性格的 Check* 派发（门格 CheckDoorClosed 等）在本几何恒验证通过（金标
+      //   门存活），不移植——备案。
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (!st.inBounds(doorX + dx, floorY + dy)) continue;
+          const fi = st.idx(doorX + dx, floorY + dy);
+          if (!st.flags[fi]) { st.half[fi] = 0; st.slope[fi] = 0; st.paint[fi] = 0; }
+        }
+      }
     }
   }
   // 对侧补柱(cs L48264-48273)：与壳填同款五连——active/liquid=0/type/wall=0/

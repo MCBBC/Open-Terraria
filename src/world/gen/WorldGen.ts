@@ -996,11 +996,12 @@ function pilesPass({ store, rng }: GenCtx) {
 // 无原版对应物）整段退役（WWW 批定罪 #76 自因 1048 格；与 #78 Spawn_Point 自造
 // 清理盒同类自创写入）。杂草/花/藤/蘑菇由后续槽 86-91（GrassPlants/Vines/Flowers/
 // Mushrooms，均 1:1）承担，雪原不长草测试不受影响。
-function vanillaSurfaceDecor({ store, rng }: GenCtx) {
+function vanillaSurfaceDecor({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   rng.reseed(gs.seed); // ▶Traps cs:18769
-  runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
+  // SSSSS：CheckChest 语境需箱注册表（CanDestroyChest 有物箱不可毁）
+  runTrapsPass(store, rng, gs, world.chests); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
 }
 
 // 宝石系统（原版序 GemCaves → ExposedGems → SpeleothemsAndGemTrees；

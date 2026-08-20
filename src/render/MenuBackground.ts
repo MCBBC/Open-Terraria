@@ -40,6 +40,14 @@ export class MenuBackground {
   setClockT(time01: number): void {
     this.clock.timeOfDay = ((time01 % 1) + 1) % 1;
   }
+
+  /** 标题屏日月拖拽写垂直偏移（Main.cs:62430 sunModY=(short)(mouseY−num4) /
+   *  :62440 moonModY=(short)(mouseY−num7)）：透传 SkyRenderer.setCelestialModY
+   *  ——画布日/月绘制位（:62376/:62395）与屏位锚（:62458）都吃 modY，
+   *  松手后每帧 ×0.999 缓回（:62415-62416，sky.draw 日月段尾） */
+  setCelestialModY(dayTime: boolean, modY: number): void {
+    this.sky.setCelestialModY(dayTime, modY);
+  }
   private camX = 0;
   private imgs = new Map<number, ImageBitmap | HTMLImageElement>();
   private variantIdx = Math.floor(Math.random() * FOREST_VARIANTS.length);

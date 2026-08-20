@@ -113,6 +113,11 @@ export interface SceneFlags {
   zoneMeteor: boolean;
   zoneGraveyard: boolean;
   zoneShadowCandle: boolean;   // tile 646 暗影蜡烛（NPC.cs:328-333）
+  /** 群系光照影响(0-1,Game 每 tick 写入:SetBackColor 群系变色的输入;
+   *  蘑菇/墓园为帧平滑值 Main.cs:61380-61404/SceneState.cs:412-418) */
+  biomeLightInfluence?: {
+    corrupt: number; crimson: number; jungle: number; mushroom: number; graveyard: number;
+  };
   zoneDungeon: boolean;
   zoneTemple: boolean;
   zoneBeach: boolean;
@@ -416,5 +421,56 @@ export function scanScene(
     honeyBlockCount,
     partyMonolithCount,
     bestOreSheet: bestOreS, bestOreX: bestOrePx, bestOreY: bestOrePy,
+  };
+}
+
+// ============================================================================
+// 群系光照影响计数(2026-08-20 原版化:SetBackColor 群系变色 1:1 的数据源)
+// ============================================================================
+
+/** 群系影响扫描结果(原始计数;除以 Max/平滑在消费侧——见 Game.update)。
+ *  上限常量(SceneMetrics.cs:28-62):CorruptionTileMax=1000/CrimsonTileMax=1000/
+ *  JungleTileMax=700/MushroomTileMax=160/GraveyardTileMin=16/GraveyardTileMax=36 */
+export interface BiomeLightCounts {
+  evil: number;      // EvilTileCount(AggregateTileCounts :614)
+  blood: number;     // BloodTileCount(:615)
+  jungle: number;    // JungleTileCount(:613)
+  mushroom: number;  // MushroomTileCount(:620)
+  graveyard: number; // GraveyardTileCount(:622-623:墓碑 − 向日葵/2 钳 0)
+}
+
+/** 可视域群系计数(Main.UpdateSceneMetrics → SceneMetrics.Scan VisualScanArea):
+ *  窗口 = GetAreaToLight(Main.cs:63363-63380:floor(左)−1 .. floor(右)+2 的
+ *  可视 tile 矩形)再 Inflate(28,28)(:61979)——与 Zone 窗(169×124)不同源。
+ *  每 15tick 随场景扫描刷新(原版每帧,计数随相机缓变,250ms 采样无感)。 */
+export function scanBiomeLightCounts(
+  world: World, camX: number, camY: number, viewWpx: number, viewHpx: number,
+): BiomeLightCounts {
+  const st = world.store;
+  const hw = viewWpx / 2, hh = viewHpx / 2;   // 调用方传世界像素(camX 同系)
+  const x0 = Math.max(0, Math.floor((camX - hw) / 16) - 1 - 28);
+  const x1 = Math.min(st.w - 1, Math.floor((camX + hw) / 16) + 2 + 28);
+  const y0 = Math.max(0, Math.floor((camY - hh) / 16) - 1 - 28);
+  const y1 = Math.min(st.h - 1, Math.floor((camY + hh) / 16) + 2 + 28);
+  const counts = new Map<number, number>();
+  let sunflower = 0, tomb = 0;
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      const t = st.type[i];
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+      if (t === SUNFLOWER) sunflower++;
+      else if (GRAVEYARD_TILES.has(t)) tomb++;
+    }
+  }
+  // 向日葵压制 ×(−10)(AggregateTileCounts :588-592;infectedSeed ×3 无种子映射恒 ×1)
+  const sunflowerMul = -10;
+  return {
+    evil: Math.max(0, countSet(counts, EVIL_TILES) + sunflower * sunflowerMul),
+    blood: Math.max(0, countSet(counts, BLOOD_TILES) + sunflower * sunflowerMul),
+    jungle: countSet(counts, JUNGLE_TILES),
+    mushroom: countSet(counts, MUSHROOM_TILES),
+    graveyard: Math.max(0, tomb - (sunflower >> 1)),
   };
 }

@@ -828,7 +828,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         });
       },
       // GOING_OLDSCHOOL B2：日月拖拽 → 菜单时钟跟手（Main.cs:62434-62446 反算 t01）
-      onSunMoonGrab: (info) => menuBg?.setClockT(info.time01),
+      //   + sunModY/moonModY 垂直跟手写点（:62430/:62440——画布日/月与 DOM 命中层
+      //   同吃 modY，松手后 SkyRenderer 每帧 ×0.999 缓回 :62415-62416）
+      onSunMoonGrab: (info) => {
+        menuBg?.setClockT(info.time01);
+        menuBg?.setCelestialModY(info.dayTime, info.modY);
+      },
     });
     installLegacyShim();
   }

@@ -146,7 +146,7 @@ import { resetMechQueen, anyMechBossUp } from '../entities/mechQueen';
 import { spawnMechQueenEnsemble, spawnSkeletronCaster } from '../entities/bossAI';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
-import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
+import { scanScene, EMPTY_SCENE, scanBiomeLightCounts, type SceneFlags } from '../world/SceneMetrics';
 import { scanLuckScene, rollLuck, rollOnlyBadLuckExtreme } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode, damageVar } from '../stats/ScaleStats';
 import {
@@ -1877,6 +1877,11 @@ export class Game implements GameHooks {
   private lastWasDay: boolean | null = null;
   /** 环境采样结果（SceneMetrics；BGM/群系背景共用），每 15 tick 刷新 */
   scene: SceneFlags = { ...EMPTY_SCENE };
+  /** 可视域群系计数(15tick 刷新;SetBackColor 群系变色数据源) */
+  private biomeCounts = { evil: 0, blood: 0, jungle: 0, mushroom: 0, graveyard: 0 };
+  /** 蘑菇光照影响平滑值(Main.SmoothedMushroomLightInfluence :61380-61404:
+   *  有值时 ±0.01/tick 逼近 count/160,无值 −0.02/tick 衰减,钳 0-1) */
+  private mushroomSmooth = 0;
   /** 屏内旗激活的 npcId 集（旗 buff 乘区消费） */
   private _bannerNpcs = new Set<number>();
   private musicState: MusicState = newMusicState();
@@ -3565,6 +3570,21 @@ export class Game implements GameHooks {
     // 世界声监听器（原版 Main.Camera.Center）：世界坐标声按此衰减（2500px，LegacySoundPlayer）
     this.sfx.suppress = false;   // 安全网：afterWorldLoad 中段抛异常导致门未解除时，首 tick 自动恢复有声
     this.sfx.setListener(this.camera.x, this.camera.y);
+    // ---- 群系光照影响逐 tick 平滑 + 写 scene(Main.cs:61380-61404 每帧语义;
+    //      计数 15t 采样。墓园强度复用 weather 段单字段,其 target 已改吃可视窗计数) ----
+    {
+      const target = this.biomeCounts.mushroom / 160;
+      if (target > 0) this.mushroomSmooth += target > this.mushroomSmooth ? 0.01 : -0.01;
+      else this.mushroomSmooth -= 0.02;
+      this.mushroomSmooth = Math.max(0, Math.min(1, this.mushroomSmooth));
+      this.scene.biomeLightInfluence = {
+        corrupt: this.biomeCounts.evil / 1000,
+        crimson: this.biomeCounts.blood / 1000,
+        jungle: this.biomeCounts.jungle / 700,
+        mushroom: this.mushroomSmooth,
+        graveyard: this.graveyardIntensity,
+      };
+    }
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
     if (this.tickCount % 15 === 0) {
       // 城镇 NPC 计数为"距离盒"语义（SceneMetrics.cs:755-757/:12/:18：
@@ -3576,6 +3596,13 @@ export class Game implements GameHooks {
         return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1200;
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
+      // 可视域群系计数(Main.UpdateSceneMetrics VisualScanArea 链——SetBackColor
+      // 群系变色 1:1 数据源,窗口=可视 tile 矩形±1..2 再 Inflate(28))
+      {
+        const zc = this.camera.zoom;
+        this.biomeCounts = scanBiomeLightCounts(w, this.camera.x, this.camera.y,
+          this.renderer.canvas.width / zc, this.renderer.canvas.height / zc);
+      }
       // 屏内旗扫描（SceneMetrics.cs:420-443）——每 20tick 随 scene 刷新,旗 buff npc 集
       const bpx = Math.floor(this.player.cx / TILE), bpy = Math.floor(this.player.cy / TILE);
       this._bannerNpcs = scanBannerNpcs(w.store, bpx - 100, bpy - 70, bpx + 100, bpy + 70);
@@ -4968,6 +4995,9 @@ export class Game implements GameHooks {
           const k = 12 / Math.hypot(vx, vy);
           vx *= k; vy *= k;
           this.entities.add(new FallingStar(sx, sy, vx, vy, 180, homing, true), 'projectiles');
+          // Star.StarFall(Projectile.cs:50204 AI_148 出生帧):玩家在地表上方时
+          // 最近背景星标 falling(带尾迹滑落)——2026-08-20 星空原版化接通
+          if (player.y < w.groundLevel * TILE) this.renderer.sky.starFallAt(sx, st.w);
         }
       }
       // 流星夜（boost>3）附魔夜行者 484（NPC.cs:2316-2319：云≤55 无云背景 RollLuck(2)==0）
@@ -13027,10 +13057,22 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     const viewCY = cam ? cam.y : this.player.cy;
     const atmoBase = (viewCY / 16 - (65 + 10 * (w.w / 4200) ** 2)) / Math.max(1, gl / 5);
     const atmo = Math.max(0, Math.min(1, atmoBase));
-    // 墓园强度逼近（SceneState.cs:415-418 MoveTowards 0.02/0.1）
-    const gyTarget = Math.max(0, Math.min(1, (this.scene.graveyardTileCount - 16) / (36 - 16)));
+    // 墓园强度逼近（SceneState.cs:415-418 MoveTowards 0.02/0.1）——target 改吃
+    // 可视窗计数(Main 同源 SceneMetrics.Scan VisualScanArea,2026-08-20 对齐;
+    // 曾用 Zone 窗 graveyardTileCount,窗口不同计数口径不同)
+    const gyTarget = Math.max(0, Math.min(1, (this.biomeCounts.graveyard - 16) / (36 - 16)));
     const gyStep = this.graveyardIntensity < gyTarget ? 0.02 : 0.1;
     this.graveyardIntensity += Math.max(-gyStep, Math.min(gyStep, gyTarget - this.graveyardIntensity));
+    // AuroraSky 激活门(SceneState.cs:102/117-119 一比一):flag = ZoneRain&&ZoneSnow
+    // (暴雪态);flag5 = UseStormEffects(Main.cs:407 恒 true)&&flag;flag6 = !dayTime
+    // && !flag5 && GraveyardVisualIntensity<0.5 → ManageSpecialBiomeVisuals("Aurora",
+    // ZoneSnow && flag6)。翻转守卫在 AuroraSky.setActive 内(ManageSpecialBiomeVisuals
+    // :123-133 的 inZone != IsActive() 语义,含淡出中重入不重 Activate 的原版怪癖)
+    {
+      const stormFlag = !!this.scene?.zoneRain && !!this.scene?.zoneSnow;   // :102 flag
+      this.renderer?.sky?.aurora.setActive(
+        !!this.scene?.zoneSnow && !w.clock.isDay && !stormFlag && this.graveyardIntensity < 0.5);
+    }
     // 白天 tick 进度（原版 time 0-54000 ↔ 我们 timeOfDay 白天前半段 0.25-0.75 线性）
     const dayTimeTicks = w.clock.isDay ? ((w.clock.timeOfDay - 0.25) / 0.5) * 54000 : 0;
     // 行为录制：雨切换沿（原版 StartRain/StopRain 无公告——沿检测是唯一锚点）

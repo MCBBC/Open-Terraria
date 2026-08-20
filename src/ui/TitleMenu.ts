@@ -45,9 +45,11 @@ export interface TitleMenuFlow {
   /**
    * 日/月被抓住（含拖动中的每帧）。原版此点会写 Main.time 使日/月跟手
    * （Main.cs:62434-62446）；本仓菜单时钟写入入口缺失，主会话接线
-   * `menuBg.setClockT(info.time01)` 后即 1:1。成就触发不经此钩子（内部自理）。
+   * `menuBg.setClockT(info.time01)` 后即 1:1。modY = mouseY−基准y
+   * （:62430/:62440 的 sunModY/moonModY 写点——`menuBg.setCelestialModY` 透传
+   * SkyRenderer 后画布日/月垂直跟手）。成就触发不经此钩子（内部自理）。
    */
-  onSunMoonGrab?(info: { dayTime: boolean; time01: number }): void;
+  onSunMoonGrab?(info: { dayTime: boolean; time01: number; modY: number }): void;
 }
 
 const CSS = `
@@ -251,7 +253,7 @@ export class TitleMenu {
     }
     // DoClassicTitleScreenAchievement（AchievementsHelper.cs:382-385 → GOING_OLDSCHOOL 'Do'）
     this.classicTitleAchievement();
-    this.flow.onSunMoonGrab?.({ dayTime: isDay, time01: t01 });
+    this.flow.onSunMoonGrab?.({ dayTime: isDay, time01: t01, modY: this.modY });
   }
 
   /**

@@ -24,15 +24,35 @@ self.onmessage = async (e: MessageEvent) => {
   let failed = 0;
   for (const job of d.jobs) {
     if (!job.missing.length) continue;
-    // 片下载:重试 ×3;cache:'reload' 绕截断体被 ETag 钉死;zipBytes 长度校验
+    // 片下载:重试 ×3;cache:'reload' 绕截断体被 ETag 钉死;zipBytes 长度校验。
+    // ★流式读 res.body:下载中即向页面上报字节增量(≥512KB 或 200ms 一报,
+    //   页面拼 "已下载 X MB / 目标 Y MB" 实时进度)
     let buf: ArrayBuffer | null = null;
     for (let a = 0; a < 3 && !buf; a++) {
       try {
         // ★根相对:worker 自身 URL 在 /assets/ 下,裸相对会解析成 /assets/assets-zip/
         const res = await fetch('/assets-zip/' + job.file, { cache: 'reload' });
-        if (res.ok) {
-          const b = await res.arrayBuffer();
-          if (b.byteLength === job.zipBytes) buf = b;
+        if (res.ok && res.body) {
+          const reader = res.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let got = 0, lastPost = 0, lastPostAt = 0;
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value); got += value.length;
+            const now = Date.now();
+            if (got - lastPost >= 512 * 1024 || now - lastPostAt >= 200) {
+              lastPost = got; lastPostAt = now;
+              self.postMessage({ type: 'dl', got });   // 片内累计,页面按片清算
+            }
+          }
+          if (got === job.zipBytes) {
+            const out = new Uint8Array(got);
+            let off = 0;
+            for (const c of chunks) { out.set(c, off); off += c.length; }
+            buf = out.buffer;
+            if (lastPost !== got) self.postMessage({ type: 'dl', got });
+          }
         }
       } catch { /* 重试 */ }
       if (!buf && a < 2) await sleep(300 * (a + 1));

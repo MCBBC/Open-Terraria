@@ -97,3 +97,80 @@ describe('地表远景背景锚点（Main.cs DrawSurfaceBG :58749/:58860）', ()
     expect(BiomeBackground.ieeeRemOf(144, 96)).toBeCloseTo(-48, 10);   // 1.5 取偶 2
   });
 });
+
+// ---- 海洋专属背景层（2026-08-20 补齐）----
+// 原版考据：海洋 bgStyle=4 无前景树层组——front 槽 4 仅变更换屏黑闪 overlay
+// （Main.cs:58994-58996 DrawChangeOverlay(10)，BackgroundChangeFlashInfo）；
+// 群系背景全在 Step2 far 槽 3（Main.cs:59348-59351 bgAlphaFarBackLayer[3] →
+// DrawSurfaceBG_DrawBackMountainsLayer(oceanBG)），几何 = Step2 共用档
+// parallax 0.2 / scale 1.15 / topY num3×1400+1260 + 贴图专属 Y 偏移
+// （GetLayerYOffset :59172：283→-800、332/340→-25、其余 0）。
+// 贴图变体 WorldGen.setBG case 7 :7513-7541（style 0-7 → 28/110/111/209/210/283/332/340）。
+// 渐隐带（SunGradients.cs:218）仅当 oceanBG==283 时点亮 (157,192,255)。
+describe('海洋背景层（Main.cs:59348-59351 Step2 far 槽 3）', () => {
+  const OCEAN_TEX = [28, 110, 111, 209, 210, 283, 332, 340];
+  const FOREST_TREE_TEX = [50, 51, 52, 53, 54, 55, 91, 92, 173, 174, 175];
+  interface ORec { n: number; dy: number }
+  /** zoneBeach 场景沉降到 bgStyle=4 后,按 oceanStyle 出图并记录 (贴图号, dy) */
+  function oceanDraw(oceanStyle: number): ORec[] {
+    const recs: ORec[] = [];
+    const bg = new BiomeBackground();
+    // 假图携带贴图号（1024×600 = 海洋变体真实尺寸;img() stub 防 Node 无 Image）
+    (bg as unknown as { img: (n: number) => HTMLImageElement | null }).img = (n: number) => {
+      if (n < 0) return null;
+      return { width: 1024, height: 600, complete: true, __n: n } as unknown as HTMLImageElement;
+    };
+    const ctx = {
+      save: () => {}, restore: () => {},
+      drawImage: (im: { __n?: number }, sx: number, sy: number, sw: number, sh: number,
+        dx: number, dy: number, dw: number) => { recs.push({ n: im.__n ?? -1, dy }); },
+      fillRect: () => {}, fillStyle: '', globalAlpha: 1, imageSmoothingEnabled: true,
+      fill: () => {},
+    } as unknown as CanvasRenderingContext2D;
+    const world = new World(400, 600, 7, 'ocean-bg');
+    world.groundLevel = 100; world.rockLevel = 200;
+    (bg as unknown as { ugStyle: number; ugOld: number; ugAlpha: number }).ugStyle = -1;
+    (bg as unknown as { ugStyle: number; ugOld: number; ugAlpha: number }).ugOld = -1;
+    (bg as unknown as { ugStyle: number; ugOld: number; ugAlpha: number }).ugAlpha = 0;
+    const cam = { x: 3000, y: 100 * 16 - 200, zoom: 1.25 };
+    const scene = { zoneBeach: true, tileX: 20, tileY: 90 } as never;
+    // 一次 draw dtMs=501（30.06 帧）：bgDelay 累满 30 → bgStyle 切 4 + alpha 满
+    bg.draw(ctx, world, scene, cam, 1512, 862, [1, 1, 1], 501);
+    (bg as unknown as { oceanStyle: number }).oceanStyle = oceanStyle;
+    recs.length = 0;
+    bg.draw(ctx, world, scene, cam, 1512, 862, [1, 1, 1], 16.7);
+    return recs;
+  }
+  it('海洋层 = 单张 oceanBG（Step2 几何 num3×1400+1260+专属偏移）,无 forest 树层兜底', () => {
+    const camTopY = 100 * 16 - 200 - 862 / 2 / 1.25;
+    const num3 = -(camTopY - 300) / (100 * 16);
+    // style 5 → 贴图 283（offset -800）
+    const r5 = oceanDraw(5).filter((r) => OCEAN_TEX.includes(r.n));
+    expect(r5.length).toBeGreaterThan(0);
+    expect(r5.every((r) => r.n === 283)).toBe(true);
+    expect(r5.some((r) => Math.abs(r.dy - (num3 * 1400 + 1260 - 800)) < 1.01)).toBe(true);
+    // style 0 → 贴图 28（default 偏移 0）
+    const r0 = oceanDraw(0).filter((r) => OCEAN_TEX.includes(r.n));
+    expect(r0.every((r) => r.n === 28)).toBe(true);
+    expect(r0.some((r) => Math.abs(r.dy - (num3 * 1400 + 1260)) < 1.01)).toBe(true);
+    // ★原版海洋无前景树层组——forest 兜底贴图恒不出现（曾画 fs.t[0]/fs.t[2]）
+    for (const r of oceanDraw(2)) {
+      expect(FOREST_TREE_TEX.includes(r.n)).toBe(false);
+    }
+  });
+  it('渐隐带仅 @oceanBG==283 点亮（SunGradients.cs:218,权重 = 前槽 alphaFront[4]）', () => {
+    const bands = (style: number) => {
+      const bg = new BiomeBackground();
+      // surfaceGradientBands 读森林四槽选型表——未播种时空数组下标炸,直接铺默认档
+      (bg as unknown as { forestStyles: number[] }).forestStyles = [0, 0, 0, 0];
+      (bg as unknown as { oceanStyle: number }).oceanStyle = style;
+      const a = (bg as unknown as { alphaFront: number[] }).alphaFront;
+      a[4] = 1;
+      return bg.surfaceGradientBands();
+    };
+    expect(bands(5)).toContainEqual({ rgb: [157, 192, 255], alpha: 1 });
+    for (const st of [0, 1, 2, 3, 4, 6, 7]) {
+      expect(bands(st).some((b) => b.rgb[1] === 192 && b.rgb[2] === 255)).toBe(false);
+    }
+  });
+});

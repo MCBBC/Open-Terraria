@@ -24,7 +24,7 @@ export function moonPhase(dayCount: number): number {
 /** SetBackColor 五段昼夜曲线(Main.cs:62889-63362 主体)→ [R,G,B] 0-255。
  *  cloudDim(缺省 1)= 云量压暗 :62990-62999 num3=1−cloudAlpha·0.9·atmo,
  *  施加位置在月相地板【之前】(地板保证月亮穿云,原版序:曲线→云暗→地板) */
-export function setBackColor(mainTime: number, isDay: boolean, phase: number, bloodMoon = false, cloudDim = 1): [number, number, number] {
+export function setBackColor(mainTime: number, isDay: boolean, phase: number, bloodMoon = false, cloudDim = 1, biome: BiomeInfluence | null = null): [number, number, number] {
   let r: number, g: number, b: number;
   if (isDay) {
     if (mainTime < 13500) {
@@ -65,6 +65,12 @@ export function setBackColor(mainTime: number, isDay: boolean, phase: number, bl
   }
   // 云量压暗(:62990-62999,三通道同乘;地板之前)
   if (cloudDim < 1) { r *= cloudDim; g *= cloudDim; b *= cloudDim; }
+  // 群系块(:63002-63228,云暗后/地板前;帧状态)
+  if (biome) {
+    const bg2: [number, number, number] = [r, g, b];
+    applyBiomeToBg(bg2, biome);
+    r = bg2[0]; g = bg2[1]; b = bg2[2];
+  }
   // 月相地板(Main.cs:63230-63266):每通道下限；血月恒 25（:63266-63277）
   const floor = bloodMoon ? 25 : MOON_FLOOR[phase % 8];
   r = Math.max(r, floor); g = Math.max(g, floor); b = Math.max(b, floor);
@@ -100,6 +106,119 @@ let frameCloudDim = 1;
 export function setFrameCloudDim(v: number): void {
   frameCloudDim = v;
 }
+// 闪电白帧状态(Main.cs:63346-63355:bgColor 三通道向 1 lerp lightning——
+// 闪白走 ColorOfTheSkies 链:天空贴图/远景/光种子同步闪亮;由 Renderer 写入。
+// 位置在日食后、地平线渗入前,与原版序一致)
+let frameLightning = 0;
+export function setFrameLightning(v: number): void {
+  frameLightning = v;
+}
+// ---- 极光渗入帧状态(AuroraSky.ModifyTileColor,SetBackColor 尾 Main.cs:63360;
+// 调用序:HorizonRenderer.ModifyHorizonLight(:63356)→ ModifyTileColor(:63360)→
+// ColorOfTheSkies 赋值(:63361),即晨昏地平线渗入【之后】。intensity=0.08 调用点
+// 参数;门 = AuroraSky._opacity>0(:412)且月相≠QuarterAtLeft(:414-416);
+// lerp 目标 = _lastSkyColor 强制 A=255(:417-418),amount = opacity×0.08(:419)) ----
+export interface AuroraFrameState {
+  /** _lastSkyColor(0-255,DrawAuroraSky :376-379 写入) */
+  rgb: readonly [number, number, number];
+  /** _opacity */
+  opacity: number;
+  /** 实时月相(ModifyTileColor 读 Main.GetMoonPhase()) */
+  phase: number;
+}
+let frameAurora: AuroraFrameState | null = null;
+export function setFrameAurora(v: AuroraFrameState | null): void {
+  frameAurora = v;
+}
+/** 极光渗入(Color.Lerp 逐通道,:419)——供 skySeed/colorOfTheSkies 尾段复用 */
+function applyAuroraTileColor(bg: [number, number, number], a: AuroraFrameState): void {
+  if (a.phase === 3 /* MoonPhase.QuarterAtLeft :415 */) return;
+  const amt = a.opacity * 0.08;                       // :419 opacity×intensity(0.08)
+  bg[0] += (a.rgb[0] - bg[0]) * amt;
+  bg[1] += (a.rgb[1] - bg[1]) * amt;
+  bg[2] += (a.rgb[2] - bg[2]) * amt;
+}
+
+// ---- 群系影响(SetBackColor :63002-63228 四块 1:1,2026-08-20 原版化) ----
+/** 群系光照影响(0-1;Game 每 tick 平滑后经 scene 注入,Renderer 写帧状态) */
+export interface BiomeInfluence {
+  corrupt: number; crimson: number; jungle: number; mushroom: number; graveyard: number;
+}
+let frameBiome: BiomeInfluence | null = null;
+export function setFrameBiome(v: BiomeInfluence | null): void {
+  frameBiome = v;
+}
+/** 群系块作用到 bgColor(:63002-63228 逐式;序:墓园→腐化→猩红→丛林→蘑菇,
+ *  在云暗后/月相地板前)。in place 修改。 */
+function applyBiomeToBg(bg: [number, number, number], bio: BiomeInfluence): void {
+  const m255 = (v: number) => Math.max(15, v);   // 各块 min 15
+  if (bio.graveyard > 0) {
+    const k = 1 - bio.graveyard * 0.6;           // :63003-63010
+    bg[0] *= k; bg[1] *= k; bg[2] *= k;
+  }
+  if (bio.corrupt > 0) {
+    const I = bio.corrupt;                        // :63045-63070
+    bg[0] = m255(bg[0] - 90 * I * (bg[0] / 255));
+    bg[1] = m255(bg[1] - 140 * I * (bg[1] / 255));
+    bg[2] = m255(bg[2] - 70 * I * (bg[2] / 255));
+  }
+  if (bio.crimson > 0) {
+    const I = bio.crimson;                        // :63078-63096(R 用 G 归一——原文如此)
+    bg[0] = m255(bg[0] - 40 * I * (bg[1] / 255));
+    bg[1] = m255(bg[1] - 110 * I * (bg[1] / 255));
+    bg[2] = m255(bg[2] - 140 * I * (bg[2] / 255));
+  }
+  if (bio.jungle > 0) {
+    const I = bio.jungle;                         // :63102-63129
+    bg[0] = m255(bg[0] - 40 * I * (bg[0] / 255));
+    bg[2] = m255(bg[2] - 70 * I * (bg[2] / 255));
+  }
+  if (bio.mushroom > 0) {
+    const I = bio.mushroom;                       // :63140-63167
+    bg[1] = m255(bg[1] - 250 * I * (bg[1] / 255));
+    bg[0] = m255(bg[0] - 250 * I * (bg[0] / 255));
+    bg[2] = m255(bg[2] - 250 * I * (bg[2] / 255));
+  }
+}
+
+/** 群系块作用到 sunColor(:63060-63075/:63093-63100/:63120-63134/:63170-63213) */
+export function applyBiomeToSun(sun: [number, number, number], bio: BiomeInfluence): void {
+  const m255 = (v: number) => Math.max(15, v);
+  if (bio.corrupt > 0) {
+    const I = bio.corrupt;
+    sun[0] = m255(sun[0] - 100 * I * (sun[0] / 255));
+    sun[1] = m255(sun[1] - 100 * I * (sun[1] / 255));
+  }
+  if (bio.crimson > 0) {
+    const I = bio.crimson;
+    sun[1] = m255(sun[1] - 90 * I * (sun[1] / 255));
+    sun[2] = m255(sun[2] - 110 * I * (sun[2] / 255));
+  }
+  if (bio.jungle > 0) {
+    const I = bio.jungle;
+    sun[0] = m255(sun[0] - 30 * I * (sun[0] / 255));
+    sun[2] = m255(sun[2] - 10 * I * (sun[2] / 255));
+  }
+  if (bio.mushroom > 0) {
+    const I = bio.mushroom;
+    sun[1] = m255(sun[1] - 10 * I * (sun[1] / 255));
+    sun[0] = m255(sun[0] - 30 * I * (sun[0] / 255));
+    sun[2] = m255(sun[2] - 10 * I * (sun[2] / 255));
+  }
+}
+
+/** 群系块作用到 moonColor(仅蘑菇 :63200-63228;★跨通道归一——G 用 R、R 用 G,
+ *  原文如此;原版先快照三通道再逐式计算——逐字保留快照语义) */
+export function applyBiomeToMoon(moon: [number, number, number], bio: BiomeInfluence): void {
+  const m255 = (v: number) => Math.max(15, v);
+  if (bio.mushroom > 0) {
+    const I = bio.mushroom;
+    const r0 = moon[0], g0 = moon[1], b0 = moon[2];
+    moon[1] = m255(g0 - 140 * I * (r0 / 255));
+    moon[0] = m255(r0 - 170 * I * (g0 / 255));
+    moon[2] = m255(b0 - 190 * I * (b0 / 255));
+  }
+}
 
 /** 一次调用得到天空光种子(0-1 RGB)。eclipse=true 时按 Main.cs:63282-63305 压暗：
  *  eclipseLight = min(1, 白天 Main.time/1242)（约 25 游戏秒到满暗）；R×(1-0.925L)
@@ -111,7 +230,7 @@ export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bl
   const isDay = timeOfDay > 0.1875 && timeOfDay < 0.8125;
   const t = toVanillaTime(timeOfDay, isDay);
   void dayCount;
-  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim);
+  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim, frameBiome);
   if (eclipse && isDay) {
     const L = Math.min(1, t / 1242);
     bg = [
@@ -120,9 +239,14 @@ export function skySeed(timeOfDay: number, dayCount: number, eclipse = false, bl
       bg[2] * (1 - 1 * L),
     ];
   }
+  if (frameLightning > 0) {
+    const L = Math.min(1, frameLightning);
+    bg = [bg[0] + (255 - bg[0]) * L, bg[1] + (255 - bg[1]) * L, bg[2] + (255 - bg[2]) * L];
+  }
   if (frameHorizon && (frameHorizon.sunrise > 0 || frameHorizon.sunset > 0)) {
     bg = modifyHorizonLight([bg[0], bg[1], bg[2]], frameHorizon.sunrise, frameHorizon.sunset, frameHorizon.phase);
   }
+  if (frameAurora) applyAuroraTileColor(bg, frameAurora);   // :63360(ModifyHorizonLight 后)
   return tileColor(bg);
 }
 
@@ -136,7 +260,7 @@ export function colorOfTheSkies(
   const isDay = timeOfDay > 0.1875 && timeOfDay < 0.8125;
   const t = toVanillaTime(timeOfDay, isDay);
   void dayCount;
-  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim);
+  let bg = setBackColor(t, isDay, moonPhaseNow ?? moonPhase(dayCount), bloodMoon, frameCloudDim, frameBiome);
   if (eclipse && isDay) {
     const L = Math.min(1, t / 1242);
     bg = [
@@ -145,9 +269,14 @@ export function colorOfTheSkies(
       bg[2] * (1 - 1 * L),
     ];
   }
+  if (frameLightning > 0) {
+    const L = Math.min(1, frameLightning);
+    bg = [bg[0] + (255 - bg[0]) * L, bg[1] + (255 - bg[1]) * L, bg[2] + (255 - bg[2]) * L];
+  }
   if (frameHorizon && (frameHorizon.sunrise > 0 || frameHorizon.sunset > 0)) {
     bg = modifyHorizonLight([bg[0], bg[1], bg[2]], frameHorizon.sunrise, frameHorizon.sunset, frameHorizon.phase);
   }
+  if (frameAurora) applyAuroraTileColor(bg, frameAurora);   // :63360(ModifyHorizonLight 后)
   return [bg[0], bg[1], bg[2]];
 }
 

@@ -22,7 +22,7 @@ import { FancyResourceBars } from './FancyResourceBars';
 import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
-import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim } from '../lighting/SkyColor';
+import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
 import { mobileUiScale } from '../ui/MobileControls';
 import { TEAM_COLORS } from '../stats/Pvp';
@@ -2272,6 +2272,8 @@ export class Renderer {
     // oceanFrontAlpha = bgAlphaFrontLayer[4] 海滩杀云门，Cloud.cs:401）
     this.sky.frameCtx = { entities, world, scene: this.scene, player, clock, camX: cam.x, camY: cam.y, z, viewW, viewH,
       oceanFrontAlpha: this.biomeBg.frontLayer()[4] };
+    // BackgroundDrawers 带表(SunGradients.cs:175-189 取数闭包注入)
+    this.sky.biomeBgBands = () => this.biomeBg.surfaceGradientBands();
     // #A 云 GL 共享层注入:云与背景层共用 glfx 一个 WebGL 上下文(每帧注入,
     // 退避/死亡期 acquireGL 返回 null → 当帧云走 2D cloudTint 兜底,自然恢复)
     this.sky.cloudGlLayer = !this.cpuRender && (this.bgGlEnabled || this.sky.useGLClouds)
@@ -2291,9 +2293,23 @@ export class Renderer {
     const hv = this.sky.horizonVis;
     setFrameHorizon(hv ? { sunrise: hv.sunrise, sunset: hv.sunset, phase: this.sky.horizonPhase } : null);
     // 云量压暗(Main.cs:62990-62999 num3=1−cloudAlpha·0.9·atmo,地板之前——
-    // 月亮穿云仍有地板光)
+    // 月亮穿云仍有地板光)+闪电白(:63346-63355 bg 向 1 lerp,天空/远景/光种
+    // 同步闪亮——旧全屏白闪 overlay 已退役)
     const cloudA = this.sky.weatherRef?.cloudAlpha ?? 0;
     setFrameCloudDim(cloudA > 0 ? Math.max(0, 1 - cloudA * 0.9 * this.sky.atmoValue(cam.y)) : 1);
+    setFrameLightning(this.sky.weatherRef?.lightning ?? 0);
+    // 群系影响(SetBackColor :63002-63228 四块;scene.biomeLightInfluence 由
+    // Game 每 tick 平滑写入)——cots/skySeed 经帧状态自动消费
+    setFrameBiome(this.scene?.biomeLightInfluence ?? null);
+    // 极光 tileColor 渗入(SetBackColor 尾 Main.cs:63360 AuroraSky.ModifyTileColor
+    // ×0.08,序在 ModifyHorizonLight :63356 之后)——极光态由 SkyRenderer 上帧
+    // draw 写入(_opacity/_lastSkyColor),月相取实时值(ModifyTileColor 读
+    // Main.GetMoonPhase()),与 horizonVis 同一帧滞后模式
+    {
+      const aurSt = this.sky.aurora.tileColorState();   // opacity≤0 → null(:412 门)
+      const aurPhase = (clock as { moonPhase?: number }).moonPhase ?? 0;
+      setFrameAurora(aurSt ? { rgb: aurSt.rgb, opacity: aurSt.opacity, phase: aurPhase } : null);
+    }
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）

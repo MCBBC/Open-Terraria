@@ -25,9 +25,10 @@ const CSS = `
   background: #141028; border: 2px solid #7d92d6;
   box-shadow: 0 0 0 2px #0a0e1e;
   padding: 6px 12px; color: #e8ecf8; font-size: 13px;
-  pointer-events: none; transition: opacity .6s;
+  cursor: pointer; transition: opacity .6s;   /* 可点开下载详情面板(2026-08-19) */
   image-rendering: pixelated;
 }
+.sw-asset-badge:hover { border-color: #ffd76e; }
 .sw-asset-badge .spin {
   width: 12px; height: 12px; border: 2px solid #7d92d6; border-top-color: #ffd76e;
   /* steps(8):8 档跳变旋转 = 像素感(非平滑圆角旋转) */
@@ -71,6 +72,24 @@ const CSS = `
   font-family: inherit; font-size: 14px;
 }
 .sw-asset-retry:hover { background: #4a3a7a; }
+/* 下载详情面板(点击徽标打开;同 gate 面板语言) */
+.sw-asset-panel {
+  position: fixed; right: 14px; bottom: 56px; z-index: 45;
+  width: min(460px, 90vw); text-align: center; color: #e8ecf8;
+  background-color: #241a4e; background-size: 100% 100%; image-rendering: pixelated;
+  border: 2px solid #7d92d6; box-shadow: 0 0 0 2px #0a0e1e, 0 10px 32px rgba(0,0,0,0.7);
+  padding: 20px 22px 16px;
+}
+.sw-asset-panel .sw-asset-mb {
+  font-size: 16px; margin-top: 4px;
+  text-shadow: 2px 0 0 #000, -2px 0 0 #000, 0 2px 0 #000, 0 -2px 0 #000;
+}
+.sw-asset-panel .sw-asset-close {
+  margin-top: 12px; background: #3a2a5a; color: #fff; border: 2px solid #7d92d6;
+  box-shadow: 0 0 0 2px #0a0e1e; padding: 6px 22px; cursor: pointer;
+  font-family: inherit; font-size: 13px;
+}
+.sw-asset-panel .sw-asset-close:hover { background: #4a3a7a; }
 `;
 
 let styleEl: HTMLStyleElement | null = null;
@@ -141,7 +160,16 @@ let badgeFading = false;
 let badgePending = false;
 
 function fmtPct(s: AssetCacheState): string {
+  // zip 模式(有字节账)百分比也按字节——与条宽/MB 文案同源,防三处数字跳变
+  if (s.bytesTotal > 0) return `${Math.floor(Math.min(1, s.bytesDone / s.bytesTotal) * 100)}%`;
   return s.total > 0 ? `${Math.floor((s.done / s.total) * 100)}%` : '…';
+}
+const mb = (b: number): string => (b / 1048576).toFixed(1);
+/** 进度主文案:zip 模式(有字节账)用 MB,legacy 回退文件数 */
+function fmtProgress(s: AssetCacheState): string {
+  return s.bytesTotal > 0
+    ? `${mb(s.bytesDone)} MB / ${mb(s.bytesTotal)} MB`
+    : `${s.done}/${s.total}`;
 }
 function phaseText(s: AssetCacheState): string {
   // 相位文案 = Mods.SandboxWorld.AssetDl.*(自制资产管线,原版无对应键)
@@ -172,10 +200,11 @@ export function mountAssetBadge(): void {
   badgeEl.innerHTML = '<div class="spin"></div><span class="txt"></span>';
   badgeEl.title = Lang.text('Mods.SandboxWorld.AssetDl.BadgeTitle');
   document.body.appendChild(badgeEl);
+  badgeEl.addEventListener('click', () => toggleAssetPanel());   // 点开下载详情
   const txt = badgeEl.querySelector('.txt') as HTMLElement;
   const update = (st: AssetCacheState) => {
     if (!badgeEl) return;
-    badgeEl.title = Lang.text('Mods.SandboxWorld.AssetDl.CountDetail', st.done, st.total, st.failed);
+    badgeEl.title = `${fmtProgress(st)} · ${phaseText(st)}`;
     // 失败终态(3 轮自动重试后仍有缺):不淡出,常显失败数——菜单上就能看到
     // 异常,不必点单人游戏才发现(2026-08-13 可靠性 review)
     if (st.phase === 'done' && st.failed > 0) {
@@ -197,6 +226,64 @@ export function unmountAssetBadge(): void {
   badgeUnsub?.(); badgeUnsub = null;
   badgeEl?.remove(); badgeEl = null;
   badgeFading = false;
+  closeAssetPanel();   // 徽标淡出后详情面板一并收起
+}
+
+// ---- 下载详情面板(点击徽标开/关;2026-08-19) ----
+
+let panelEl: HTMLElement | null = null;
+let panelUnsub: (() => void) | null = null;
+
+export function toggleAssetPanel(): void {
+  if (panelEl) closeAssetPanel();
+  else openAssetPanel();
+}
+
+function openAssetPanel(): void {
+  if (panelEl || typeof document === 'undefined') return;
+  ensureStyle();
+  panelEl = document.createElement('div');
+  panelEl.className = 'sw-asset-panel';
+  panelEl.innerHTML = `
+    <div class="sw-asset-title" style="font-size:15px;letter-spacing:2px;">正在下载游戏资源</div>
+    <div class="sw-asset-barwrap">
+      <div class="outer"></div>
+      <div class="slot"><div style="width:0%"></div></div>
+    </div>
+    <div class="sw-asset-mb"></div>
+    <div class="sw-asset-note"></div>
+    <button class="sw-asset-retry" style="display:none">重新下载</button>
+    <button class="sw-asset-close">关闭</button>`;
+  document.body.appendChild(panelEl);
+  ensurePanelBg(panelEl);
+  const bar = panelEl.querySelector('.slot > div') as HTMLElement;
+  const mbEl = panelEl.querySelector('.sw-asset-mb') as HTMLElement;
+  const note = panelEl.querySelector('.sw-asset-note') as HTMLElement;
+  const retry = panelEl.querySelector('.sw-asset-retry') as HTMLElement;
+  (panelEl.querySelector('.sw-asset-close') as HTMLElement).addEventListener('click', closeAssetPanel);
+  retry.addEventListener('click', () => {
+    retry.style.display = 'none';
+    warmAllAssets(true);
+  });
+  const update = (st: AssetCacheState): void => {
+    if (!panelEl) return;
+    bar.style.width = st.bytesTotal > 0
+      ? `${Math.min(100, Math.floor((st.bytesDone / st.bytesTotal) * 100))}%`
+      : (st.total > 0 ? `${Math.floor((st.done / st.total) * 100)}%` : '0%');
+    mbEl.textContent = `${fmtProgress(st)} · ${fmtPct(st)}`;
+    note.textContent = st.failed > 0
+      ? `下载失败 ${st.failed} 项(点"重新下载"只补缺,已下载部分不会重复下载)`
+      : `${phaseText(st)} · 已下载部分不会重复下载`;
+    retry.style.display = st.failed > 0 && !st.warming ? '' : 'none';
+    if (st.phase === 'done') closeAssetPanel();   // 完成即收起
+  };
+  update(assetCacheState());
+  panelUnsub = onAssetProgress(update);
+}
+
+function closeAssetPanel(): void {
+  panelUnsub?.(); panelUnsub = null;
+  panelEl?.remove(); panelEl = null;
 }
 
 // ---- 单人游戏门槛弹窗 ----
@@ -241,11 +328,16 @@ export function gateAssetsOrRun(action: () => void): void {
   };
   gateUnsub = onAssetProgress((st) => {
     if (!gateEl) return;
-    bar.style.width = st.total > 0 ? `${Math.floor((st.done / st.total) * 100)}%` : '0%';
-    pct.textContent = `${fmtPct(st)} · ${phaseText(st)}(${st.done}/${st.total})`;
+    // ★进度条与文案双口径:zip 模式按下载字节(用户感知的"下了多少 MB"),
+    // legacy 回退文件数;条宽与文案同源防跳变
+    const frac = st.bytesTotal > 0
+      ? Math.min(1, st.bytesDone / st.bytesTotal)
+      : (st.total > 0 ? st.done / st.total : 0);
+    bar.style.width = `${Math.floor(frac * 100)}%`;
+    pct.textContent = `${fmtPct(st)} · ${phaseText(st)} · ${fmtProgress(st)}`;
     retry.style.display = st.failed > 0 && !st.warming ? '' : 'none';
     if (assetsComplete()) { close(); action(); }
   });
-  pct.textContent = `${fmtPct(s)} · ${phaseText(s)}(${s.done}/${s.total})`;
+  pct.textContent = `${fmtPct(s)} · ${phaseText(s)} · ${fmtProgress(s)}`;
   if (s.failed > 0 && !s.warming) retry.style.display = '';
 }

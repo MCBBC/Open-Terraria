@@ -104,13 +104,12 @@ function killTileGenPile(st: TileStore, x: number, y: number): void {
 
 /** Check3x2（cs:49190-49868）type∈{186,187} 全量。返回是否发生了整组杀除。 */
 function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number): boolean {
+  if (destroyObjectP) return false;                // cs:49192 头门（杀除期再入早退）
   if (!st.inBounds(i, j)) return false;
   const ii = st.idx(i, j);
   if (!st.flags[ii] || SHEET_OF[st.type[ii]] !== pileSheet) return false;
   const frameX = st.frameX[ii] | 0;
   const frameY = st.frameY[ii] | 0;
-  const __p3 = (globalThis as { __swP3x2Log?: (s: string) => void }).__swP3x2Log;
-  __p3?.(`C3X2 ${i},${j} sheet${pileSheet} fx${frameX} fy${frameY}`);
   const num3 = Math.trunc(frameY / 36);                    // cs:49204
   const num4 = frameY % 36;
   const num = j - Math.trunc(num4 / 18);                   // cs:49208
@@ -149,7 +148,6 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
       const bs = SHEET_OF[st.type[st.idx(k, num8)]];
       if (bs === 2 || bs === 477 || bs === 492) grassBelow = true;
     }
-    __p3?.(`CONV? ${i},${j} anchor(${n5},${num}) anchorFx${st.frameX[st.idx(n5, num)]} grassBelow=${grassBelow ? 1 : 0}`);
     if (!grassBelow) {
       const t186 = INTERNAL_OF_SHEET.get(186) ?? st.type[ii];
       for (let k = n5; k < n5 + 3; k++) {
@@ -164,6 +162,7 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
   }
   if (!flag) return false;                                 // cs:49416
   // cs:49421-49435：destroyObject 门内整组 KillTile（仅仍为该 type 的 active 格）
+  destroyObjectP = true;
   for (let k = n5; k < n5 + 3; k++) {
     for (let l = num; l < num8; l++) {
       if (!st.inBounds(k, l)) continue;
@@ -171,6 +170,7 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
       if (st.flags[idx] && SHEET_OF[st.type[idx]] === pileSheet) killTileGenPile(st, k, l);
     }
   }
+  destroyObjectP = false;
   // 掉落表（cs:49436-49855）全走 Main.rand/Item.NewItem——生成期世界物品不在 8 通道
   // 金标域且本种子 frameX=648 不命中 187 遗物档（918-970），略。
   // cs:49856-49862：destroyObject=false 后 5×5 TileFrame 复扫（可连锁杀邻组）
@@ -183,10 +183,12 @@ function check3x2PileFull(st: TileStore, i: number, j: number, pileSheet: number
 }
 
 /** SquareTileFrame 语境的 TileFrame 子集（cs:82067+）：界内 5 格 padding（cs:82069）、
- *  非活跃清 half/slope/块漆（cs:82077-82082）、frameImportant 中仅 186/187 大石堆有
- *  清除语义（Check3x2）；其余 frameImportant/仙人掌/藤蔓分支在本管线触发时点（树
- *  未生成/沙上无草/藤悬于草下）不产生 8 通道可观测写——LivingTreePass.squareTile
- *  FrameGen 同款口径。 */
+ *  非活跃清 half/slope/块漆（cs:82077-82082）、frameImportant 中 186/187 大石堆
+ *  （Check3x2）与 185 小堆（CheckPile/Check2x1，QQQQQ 补——12345 链 #73 活树房
+ *  蛙卵石堆孤儿半 T0>185 实证 NNNN"其余分支零可观测写"论断对 185 不成立）有
+ *  清除语义；其余 frameImportant/仙人掌/藤蔓分支在本管线触发时点（树未生成/沙上
+ *  无草/藤悬于草下）不产生 8 通道可观测写——LivingTreePass.squareTileFrameGen 同
+ *  款口径。 */
 function tileFrameScoped(st: TileStore, x: number, y: number): void {
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;
   const i = st.idx(x, y);
@@ -198,6 +200,101 @@ function tileFrameScoped(st: TileStore, x: number, y: number): void {
   }
   const sh = SHEET_OF[st.type[i]];
   if (sh === 186 || sh === 187) check3x2PileFull(st, x, y, sh);
+  else if (sh === 185) checkPileGen(st, x, y);
+}
+
+/** vanilla destroyObject（WorldGen 静态位）的本语境镜像：Check2x1/Check3x2 杀除期
+ *  间置真——期间再入两者头门早退（cs:46981/49192）；CheckPile 无此门（cs:46891
+ *  无 destroyObject 查询——Check2x1 杀除的 KillTile 尾级联仍可触发它，bug-for-bug）。 */
+let destroyObjectP = false;
+
+/** KillTile 尾 SquareTileFrame（cs:63964）——185/186/187 杀的级联可连带杀邻堆 */
+function killPileTail(st: TileStore, x: number, y: number): void {
+  killTileGenPile(st, x, y);
+  squareTileFrameGen(st, x, y);
+}
+
+/** Snow/Ice 支撑族（CheckPile cs:46940-46947 / Check2x1 cs:47061-47070）：
+ *  Snow={147}（TileID.cs:24）Ice={161,163,164,200}（:28）+ 显式 162/224 */
+const PILE_SNOW_OK = new Set([147, 161, 163, 164, 200, 162, 224]);
+/** Sand/HardenedSand/Sandstone 支撑族（TileID.cs:30-34） */
+const PILE_SAND_OK = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
+
+/** CheckPile（cs:46891）1:1（type 185 派发语境）：fy==18 → Check2x1（2 宽堆）；
+ *  无支撑（SolidTileAllowBottomSlope）→ 杀；雪堆(36-47)/沙堆(54-59,73-76) 支撑
+ *  类型门 → 杀。下方格 inactive → 不查（cs:46928-46932 早退）。杀=零掷（185 尘掷
+ *  0/掉落被 isGeneratingOrLoadingWorld noItem=true 免）。 */
+function checkPileGen(st: TileStore, x: number, y: number): void {
+  const i = st.idx(x, y);
+  const fx = st.frameX[i] | 0, fy = st.frameY[i] | 0;
+  const sheet = SHEET_OF[st.type[i]];
+  if (fy === 18 || sheet === 649) { check2x1Gen(st, x, y, sheet); return; }
+  if (!solidTileAllowBottomSlope(st, x, y + 1)) { killPileTail(st, x, y); return; }
+  if (sheet !== 185) return;
+  const num = Math.trunc(fx / 18);
+  if (!st.inBounds(x, y + 1)) return;
+  const bi = st.idx(x, y + 1);
+  if (!st.flags[bi]) return;                       // cs:46928 !active() → return
+  const below = SHEET_OF[st.type[bi]];
+  if ((num >= 36 && num <= 47) || (num >= 54 && num <= 59) || (num >= 73 && num <= 76)) {
+    const ok = (num >= 36 && num <= 47) ? PILE_SNOW_OK.has(below) : PILE_SAND_OK.has(below);
+    if (!ok) killPileTail(st, x, y);
+  }
+}
+
+/** Check2x1（cs:46979-47371）type 185 语境 1:1：2 宽堆配对完整性 + 支撑双门 +
+ *  草地变体转化（fx∈[1368,1458] → -1368）+ 支撑类型门（num5 组：25-30 雪/41-46,
+ *  62-64 沙）→ 失败杀两格（destroyObject 闸 + 尾 SquareTileFrame×2）。 */
+function check2x1Gen(st: TileStore, x: number, y: number, sheet: number): void {
+  if (destroyObjectP) return;                      // cs:46981
+  const ii = st.idx(x, y);
+  const fx = st.frameX[ii] | 0, fy = st.frameY[ii] | 0;
+  let num2 = Math.trunc(fx / 18);
+  num2 %= 2;
+  const num = x - num2;                            // 左锚
+  if (!st.inBounds(num, y) || !st.inBounds(num + 1, y)) return;
+  let flag = true;
+  const iL = st.idx(num, y), iR = st.idx(num + 1, y);
+  const fxL = st.frameX[iL] | 0;
+  if ((st.frameX[iR] | 0) === fxL + 18
+    && SHEET_OF[st.type[iL]] === sheet && SHEET_OF[st.type[iR]] === sheet
+    && st.flags[iL] && st.flags[iR]) flag = false; // cs:47005 配对完整
+  // cs:47044-47055 else 支（type 29/103/462 专属桌门不触及 185）
+  if (!solidTileAllowBottomSlope(st, num, y + 1)) flag = true;
+  if (!solidTileAllowBottomSlope(st, num + 1, y + 1)) flag = true;
+  if (sheet === 185) {
+    // cs:47058-47065 草地变体转化（转化判读支撑行现值——与 Check3x2 的 187 门同构）
+    if (st.inBounds(num, y + 1) && st.inBounds(num + 1, y + 1)) {
+      const bl = SHEET_OF[st.type[st.idx(num, y + 1)]];
+      const br = SHEET_OF[st.type[st.idx(num + 1, y + 1)]];
+      if (fxL >= 1368 && fxL <= 1458 && bl !== 2 && br !== 2 && bl !== 477 && br !== 477 && bl !== 492 && br !== 492) {
+        st.frameX[iL] = (fxL - 1368) as never;
+        st.frameX[iR] = ((st.frameX[iR] | 0) - 1368) as never;
+      }
+    }
+    // cs:47067-47096 支撑门（巨石族 + num5 组类型门；下格 inactive → continue）
+    const num5 = Math.trunc((st.frameX[iL] | 0) / 36) + (Math.trunc(fy / 18) - 1) * 52;
+    for (let j = num; j <= num + 1; j++) {
+      if (!st.inBounds(j, y + 1)) continue;
+      const bj = st.idx(j, y + 1);
+      if (st.flags[bj] && BOULDER_SHEETS.has(SHEET_OF[st.type[bj]])) { flag = true; break; }
+      if (!st.flags[bj]) continue;
+      const bt = SHEET_OF[st.type[bj]];
+      if (num5 >= 25 && num5 <= 30) {
+        if (!PILE_SNOW_OK.has(bt)) flag = true;
+      } else if ((num5 >= 41 && num5 <= 46) || (num5 >= 62 && num5 <= 64)) {
+        if (!PILE_SAND_OK.has(bt)) flag = true;
+      }
+    }
+  }
+  if (!flag) return;                               // cs:47098
+  destroyObjectP = true;                           // cs:47110
+  if (SHEET_OF[st.type[iL]] === sheet && st.flags[iL]) killPileTail(st, num, y);
+  if (SHEET_OF[st.type[iR]] === sheet && st.flags[iR]) killPileTail(st, num + 1, y);
+  // 掉落表（cs:47119+）：isGeneratingOrLoadingWorld 强制 noItem（cs:63585）→ 零掷零物
+  destroyObjectP = false;                          // cs:47366
+  squareTileFrameGen(st, num, y);                  // cs:47367-47368 尾复扫
+  squareTileFrameGen(st, num + 1, y);
 }
 
 /** SquareTileFrame（cs:80924-80934）：列优先 3×3 调用序。 */
@@ -247,7 +344,6 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
   if (enclosed) return;
   // CanBeClearedDuringGeneration=false 的泥（沙漠沙岩族等）不转（cs:75265）
   if (NOT_CLEARABLE.has(st.type[i])) return;
-  { const __sg = (globalThis as { __swSpreadLog?: (x: number, y: number, d: number, g: number) => void }).__swSpreadLog; __sg?.(x, y, dirt, grass); }
   st.type[i] = grass;
   // ★NNNNN：cs:75288 SquareTileFrame(i,j)——TileFrame 头清位 + 186/187 大石堆
   // Check3x2 一致性/支撑校验级联（#73 5 格残差根因；flag2 转化支/树杀手前置在本

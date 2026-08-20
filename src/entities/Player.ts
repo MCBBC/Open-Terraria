@@ -364,6 +364,19 @@ export class Player extends Entity {
   itemUseTurn = false;
   dead = false;
   respawnTimer = 0;
+  /** sunScorchCounter（Player.cs:2228）：吸血鬼种子"阳光炽灼"蓄能 0-300（每 tick
+   *  updateSunScorchValues 推进）。消费：耀斑强度 AdjustIntensity
+   *  （NextHorizonRenderer.cs:398-406，SkyRenderer.drawLensFlare 经 frameCtx.player
+   *  透传读）与热浪扭曲门（SceneState.cs:122 flag7 / :187-191 强度 lerp×4——本仓
+   *  无 HeatDistortion 滤镜，未接）。★玩法链缺口：写入端 VampireSeedSunlightExposure
+   *  （:28191-28238）属 Main.vampireSeed 秘密种子链，本仓未移植 → counter 无路径 >0 */
+  sunScorchCounter = 0;
+  /** vampireBurningInSunlight（Player.cs:2676）：恒 false 接线位。原版唯一置 true 点
+   *  = VampireSeedSunlightExposure（:28228，vampireSeed 且露天白天自脚下向上扫 15 格
+   *  无墙）；清 false 点 ResetEffects(:18549)/死亡(:28103)——恒 false 等价覆盖。
+   *  连锁债（均未移植，登记）：Molten 套 buffImmune[24] 门(:15883)、死亡文案
+   *  ByOther(22)(:19187)、ArmorSetBonuses.cs:287 */
+  vampireBurningInSunlight = false;
   /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费）
    *  ——兼作散飞体渐隐（GetImmuneAlpha :53253：(255−值)/255，>125 直接全透明） */
   immuneAlpha = 0;
@@ -1178,6 +1191,13 @@ export class Player extends Entity {
     const s0 = statOfInternal(a[0]?.id ?? -1), s1 = statOfInternal(a[1]?.id ?? -1), s2 = statOfInternal(a[2]?.id ?? -1);
     return s0?.hs === 70 && s1?.bs === 46 && s2?.ls === 42;
   }
+  /** player.head 语义（Player.cs:25336 = armor[0].headSlot；:35315-35322 时装头
+   *  armor[10].headSlot ≥ 0 时覆盖）——displayArmor()[0] 即"时装优先"同式。
+   *  消费：SkyRenderer 太阳分支（Main.cs:62365 head==12 太阳镜 → Sun2 骷髅头太阳）。
+   *  头槽 12 = 物品 237 太阳镜（Item.cs:4273 headSlot=12, vanity） */
+  get headArmorSlot(): number {
+    return statOfInternal(this.inv.displayArmor()[0] ?? -1)?.hs ?? -1;
+  }
   /** 近战攻速倍率（CapAttackSpeeds + TurnAttackSpeedToUseTimeMultiplier，Player.cs
    *  :28555-28574 1:1）：meleeSpeed 加法总和（装备 0.12 档 + 词缀 77-80 + 套装 + buff）
    *  封顶 3 后取倒数，作为 useAnimation/useTime 的时长乘数。原"猛爪手套 ×2"档已废——
@@ -1893,8 +1913,12 @@ export class Player extends Entity {
       } else {
         this.updateDeathParts(game);    // UpdateDead :16878-16888 翻滚解体
       }
+      this.updateSunScorchValues();     // UpdateDead 尾（Player.cs:16928）：死亡档衰减 −2
       return;
     }
+    // UpdateSunScorch 调用点（Player.Update :25349，UpdateEquips(i) 后一行）——
+    // 本仓仅移植数值容器（见 updateSunScorchValues 注释的玩法链缺口清单）
+    this.updateSunScorchValues();
 
     // 水平（敏捷 Buff 提速 + 装备移速（赫尔墨斯靴族 runSpeed/词缀 73-76）；蜂蜜比水更黏滞）
     const eqEarly = this.equipStats;
@@ -4887,6 +4911,24 @@ export class Player extends Entity {
         this.ghostFrame = (this.ghostFrame + 1) % 4;
       }
     }
+  }
+
+  /** UpdateSunScorchValues（Player.cs:28094-28106 一比一，仅数值容器）：常态档
+   *  counter += burning ? 1 : −6；死亡档（UpdateDead :16928 调用）burning 清 false、
+   *  衰减放缓为 −2；一律钳 0-300。
+   *  ★未移植段（登记）：①炽灼音环 :28107-28121（SoundID.VampireSizzle 循环,
+   *    Volume=GetLerpValue(0,120,counter)——counter 恒 0 时为死代码）；②UpdateSunScorch
+   *    :28144-28189 的 120 档点火链（清 buffImmune + VampireOnFire 粒子 + AddBuff
+   *    24/23/32 + 卸坐骑/清翅膀 + 成就 33 探头）；③写入端 VampireSeedSunlightExposure
+   *    :28191-28238——均依赖 Main.vampireSeed 秘密种子（本仓无该旗标）。 */
+  updateSunScorchValues(): void {
+    let num = 6;                                        // :28100
+    if (this.dead) {                                    // :28101-28105
+      this.vampireBurningInSunlight = false;
+      num = 2;
+    }
+    this.sunScorchCounter = Math.max(0, Math.min(300,   // :28106 Clamp(±, 0, 300)
+      this.sunScorchCounter + (this.vampireBurningInSunlight ? 1 : -num)));
   }
 
   /** boss 存活在场（GetRespawnTime :38388-38398 扫描结果——Game 死亡分支每帧写入；

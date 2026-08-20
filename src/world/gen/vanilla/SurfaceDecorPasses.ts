@@ -90,6 +90,10 @@ const WALL_HOUSE = new Set([
 const DYE_PLANT_ABOVE = new Set([3, 51, 61, 73, 74, 184]);
 /** PlaceDye 上/下格豁免族（cs:54013/54024，多 697/703） */
 const DYE_PLANT_SIDE = new Set([3, 51, 697, 61, 703, 73, 74, 184]);
+/** Conversion.Sand∪HardenedSand∪Sandstone（TileID.cs:30-34）——Check3x2 187 底材质门 */
+const SAND_FAM_3X2 = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
+/** TileID.Sets.Conversion.Ice（TileID.cs:28）——Check3x2 186 底材质门 */
+const ICE_SET = new Set([161, 163, 164, 200]);
 /** TileID.Sets.BreakableWhenPlacing（TileID.cs:379）——PlaceTile(656) 放置分支的
  *  可覆写族（cs:59519 !active || tileCut || BreakableWhenPlacing） */
 const BREAKABLE_WHEN_PLACING = new Set([324, 186, 187, 185, 165, 530, 233, 227, 485, 81, 624]);
@@ -245,31 +249,124 @@ const TREE_GROUND_NORM = new Set([23, 661, 477, 60, 70, 109, 147, 199, 662, 492]
 /** VanityTreeGroundTest（cs:30474）：Conversion.Grass{2,23,199,109,477,492} 去 23/199（无归一化） */
 const VANITY_GROUND = new Set([2, 109, 477, 492]);
 
-/** TileFrame 生成期树域子集（cs:82067 边界 + inactive 早退；TileFrameCosmetic
- *  生成期跳过；PlantCheck(3/73 on 草)恒 no-op）。宝石树 583-589/灰烬树 634 在
- *  地下/地狱，花圃扫描窗（地表 ±30）不可达；棕榈 323 只长在沙族上、花圃击杀门
- *  要求下方草 2，恒不触发——均不派发（CheckPalmTree 在本域亦恒 no-op）。 */
-function frameCellTree(st: TileStore, x: number, y: number): void {
+/** TileFrame 生成期树域+堆域子集（cs:82067 边界；TileFrameCosmetic 生成期跳过；
+ *  PlantCheck(3/73 on 草)恒 no-op）。宝石树 583-589/灰烬树 634 在地下/地狱，花圃
+ *  扫描窗（地表 ±30）不可达；棕榈 323 只长在沙族上、花圃击杀门要求下方草 2，恒
+ *  不触发——均不派发（CheckPalmTree 在本域亦恒 no-op）。
+ *  ★RRRRR 2026-08-20：①非活性格补 TileFrame 头清（cs:82078-82082 half/slope/块漆）；
+ *  ②补 Check3x2 186/187 堆级联（#90 根因：花圃杀堆底格→帧结构破→整堆 KillTile，
+ *  golden 187→dead×51 真身）；185 CheckPile 级联暂不派发（本种子仅 1 格
+ *  185→dead，备案观察）。 */
+function frameCellTree(st: TileStore, rng: RNG, x: number, y: number): void {
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;   // cs:82069 边界
   const k = st.idx(x, y);
-  if (!st.flags[k]) return;                                          // inactive 早退
+  if (!st.flags[k]) {                                                // cs:82078 inactive 头清
+    st.half[k] = 0; st.slope[k] = 0; st.paint[k] = 0;
+    return;
+  }
   const s = SHEET[st.type[k]];
-  if (s === 5) checkTreeAt(st, x, y, false);
-  else if (s === 596 || s === 616) checkTreeAt(st, x, y, true);
+  if (s === 5) checkTreeAt(st, rng, x, y, false);
+  else if (s === 596 || s === 616) checkTreeAt(st, rng, x, y, true);
+  else if (s === 186 || s === 187) check3x2PileSweep(st, rng, x, y, s);
 }
 
-/** SquareTileFrame（cs:80926-80934）列优先 3×3 调用序 */
-function squareFrameTree(st: TileStore, x: number, y: number): void {
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -1; dy <= 1; dy++) frameCellTree(st, x + dx, y + dy);
+/** Check3x2 的 186/187 支（cs:49190-49346 结构/底材复核 + cs:49348-49364 草底
+ *  降帧支 + cs:49385-49399 击杀段）。帧结构推堆原点：top=y-(frameY%36)/18、
+ *  left=x-(frameX/18)%3、样式列 num6=⌊frameX/18/3⌋；六格任一缺格/错帧 → flag；
+ *  三列底 SolidTileAllowBottomSlope+巨石排除+按样式列材质门；flag → 六格同型
+ *  KillTile（destroyObject 语义=级联内不再入本函数）。 */
+let pile3x2Destroying = false;
+function check3x2PileSweep(st: TileStore, rng: RNG, x: number, y: number, sheet: number): void {
+  if (pile3x2Destroying) return;                                     // cs:49194 destroyObject
+  const k0 = st.idx(x, y);
+  const num3 = (st.frameY[k0] / 36) | 0;
+  const num4 = st.frameY[k0] % 36;
+  const top = y - ((num4 / 18) | 0);
+  let num5 = (st.frameX[k0] / 18) | 0;
+  let num6 = 0;
+  while (num5 > 2) { num5 -= 3; num6++; }
+  num5 = x - num5;
+  const num7 = num6 * 54;
+  const num8 = top + 2;
+  let flag = false;
+  for (let k = num5; k < num5 + 3; k++) {
+    for (let l = top; l < num8; l++) {
+      // 六格结构复核（vanilla null→new Tile=非活性→flag）
+      if (!st.inBounds(k, l)) { flag = true; continue; }
+      const kk = st.idx(k, l);
+      if (!st.flags[kk] || SHEET[st.type[kk]] !== sheet
+        || st.frameX[kk] !== (k - num5) * 18 + num7 || st.frameY[kk] !== (l - top) * 18 + num3 * 36) flag = true;
+    }
+    if (!st.inBounds(k, num8)) continue;                              // 原版越界=支撑真（cs:70214）+null 底免材质门
+    const bi = st.idx(k, num8);
+    if (!solidAllowBottomSlope(st, k, num8)) { flag = true; continue; }          // cs:49325/49282
+    if (st.flags[bi] && BOULDERS.has(SHEET[st.type[bi]])) { flag = true; continue; }  // InvalidTileForPiles
+    if (!st.flags[bi]) continue;                                      // cs:49329/49290 非活性底免材质门
+    const b = SHEET[st.type[bi]];
+    if (sheet === 187) {                                              // cs:49331-49346 材质按样式列
+      const ok = num6 <= 5 ? (b === 59 || b === 60 || b === 226)          // Mud∪丛林草/砖
+        : num6 <= 8 ? (b === 57 || b === 58 || b === 75 || b === 76)      // 骨/灰烬族
+          : num6 >= 29 ? SAND_FAM_3X2.has(b)                              // 沙族（29-34）
+            : true;
+      if (!ok) flag = true;
+    } else {                                                          // 186（cs:49291-49323）
+      const ok = num6 >= 26 && num6 <= 31 ? (b === 147 || ICE_SET.has(b) || b === 162 || b === 224)
+        : num6 >= 32 ? (b === 59 || b === 70)
+          : true;
+      if (!ok) flag = true;
+    }
+  }
+  // 187→186 草底降帧支（cs:49348-49364）：顶行帧 756-900 且三底列全非草族
+  if (sheet === 187 && st.inBounds(num5, top) && st.inBounds(num5 + 2, top + 2)) {
+    const kTop = st.idx(num5, top);
+    if (st.frameX[kTop] >= 756 && st.frameX[kTop] <= 900) {
+      const grassy = (k: number): boolean => {
+        if (!st.flags[k]) return false;
+        const s = SHEET[st.type[k]];
+        return s === 2 || s === 477 || s === 492;
+      };
+      if (!grassy(st.idx(num5, top + 2)) && !grassy(st.idx(num5 + 1, top + 2)) && !grassy(st.idx(num5 + 2, top + 2))) {
+        for (let m = num5; m < num5 + 3; m++) {
+          for (let l = top; l < top + 2; l++) {
+            const kk = st.idx(m, l);
+            st.frameX[kk] = st.frameX[kk]! - 378;
+            st.type[kk] = PILE_LARGE;                                 // → 186
+          }
+        }
+      }
+    }
+  }
+  if (!flag) return;
+  pile3x2Destroying = true;                                           // cs:49386 destroyObject=true
+  for (let m = num5; m < num5 + 3; m++) {
+    for (let l = top; l < num8; l++) {
+      if (!st.inBounds(m, l)) continue;
+      const kk = st.idx(m, l);
+      if (st.flags[kk] && SHEET[st.type[kk]] === sheet) {
+        st.setTileSilent(m, l, 0);                                    // KillTile 生成期子集
+        squareFrameTree(st, rng, m, l);                               // cs:63967 尾扫（树级联仍可达）
+      }
+    }
+  }
+  pile3x2Destroying = false;
+  // cs:49856-49862：destroyObject 复位后 5×5 TileFrame 复扫（连锁杀邻组/邻树）
+  for (let m = num5 - 1; m < num5 + 4; m++) {
+    for (let l = top - 1; l < top + 4; l++) frameCellTree(st, rng, m, l);
   }
 }
 
-/** KillTile + 尾部 SquareTileFrame（cs:63559 的生成期有效子集）——树坍塌入口 */
-export function killTileTree(st: TileStore, x: number, y: number): void {
+/** SquareTileFrame（cs:80926-80934）列优先 3×3 调用序 */
+function squareFrameTree(st: TileStore, rng: RNG, x: number, y: number): void {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) frameCellTree(st, rng, x + dx, y + dy);
+  }
+}
+
+/** KillTile + 尾部 SquareTileFrame（cs:63559 的生成期有效子集）——树/堆坍塌入口 */
+export function killTileTree(st: TileStore, rng: RNG, x: number, y: number): void {
   if (!activeAt(st, x, y)) return;
   st.setTileSilent(x, y, 0);
-  squareFrameTree(st, x, y);
+  squareFrameTree(st, rng, x, y);
 }
 
 /** CheckTree（cs:54598-54808）/ CheckTreeWithSettings·Vanity（cs:54430-54597）1:1。
@@ -277,7 +374,7 @@ export function killTileTree(st: TileStore, x: number, y: number): void {
  *  R3 杀后不再重帧——两版 cs 差异逐条保留）。帧读写走 cfx/cfy 虚拟值：
  *  原版 KillTile 置 frameX/Y=-1 后续规则仍重读（死格重帧对输出无影响，
  *  但尾部传播判定消费），Uint16 数组无法存 -1 故用虚拟值跟踪。 */
-function checkTreeAt(st: TileStore, x: number, y: number, vanity: boolean): void {
+function checkTreeAt(st: TileStore, rng: RNG, x: number, y: number, vanity: boolean): void {
   const k = st.idx(x, y);
   const frameX0 = st.frameX[k], frameY0 = st.frameY[k];
   const self = SHEET[st.type[k]];
@@ -296,7 +393,7 @@ function checkTreeAt(st: TileStore, x: number, y: number, vanity: boolean): void
     if (dead) return;                                      // 原版 KillTile inactive 早退
     st.setTileSilent(x, y, 0);
     dead = true; cfx = -1; cfy = -1;
-    squareFrameTree(st, x, y);                             // cs:63950 KillTile 尾扫
+    squareFrameTree(st, rng, x, y);                        // cs:63950 KillTile 尾扫
   };
   const wr = (nfx: number, nfy: number): void => {
     cfx = nfx; cfy = nfy;
@@ -359,10 +456,10 @@ function checkTreeAt(st: TileStore, x: number, y: number, vanity: boolean): void
   }
   // 尾部传播（cs:54798-54806 / 54593-54601）：双帧均变才四邻重帧
   if (cfx !== frameX0 && cfy !== frameY0 && frameX0 >= 0 && frameY0 >= 0) {
-    frameCellTree(st, x - 1, y);
-    frameCellTree(st, x + 1, y);
-    frameCellTree(st, x, y - 1);
-    frameCellTree(st, x, y + 1);
+    frameCellTree(st, rng, x - 1, y);
+    frameCellTree(st, rng, x + 1, y);
+    frameCellTree(st, rng, x, y - 1);
+    frameCellTree(st, rng, x, y + 1);
   }
 }
 
@@ -737,24 +834,20 @@ function placeTileHead(st: TileStore, x: number, y: number, num: number): boolea
 /** PlaceDye（cs:54004）1:1：style 门（上方豁免族/下方支撑/液体/墙）。
  *  调用点=plantDye 的 PlaceTile(227)（cs:71336 等）——头段前奏+case 帧链
  *  （cs:60068 恒调）+尾奏帧链（cs:60283 目标格活性即调）一并镜像
- *  （RRRRR 2026-08-20：#84 Hf13/Sl1 根因=头尾两段全缺——失败尝试同样清场） */
+ *  （RRRRR 2026-08-20：#84 Hf13/Sl1 根因=头尾两段全缺——失败尝试同样清场；
+ *  PlaceDye 早退不截帧链——case/尾奏两调用照走） */
 function placeDye(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   if (!st.inBounds(x, y + 1) || !st.inBounds(x, y - 1)) return false;
   const i0 = st.idx(x, y);
-  if (!placeTileHead(st, x, y, 227)) return false;
+  if (!placeTileHead(st, x, y, 227)) return false;                     // 倒木守卫：即刻 false（零帧链）
   let ok = false;
+  const aboveBlocked = activeAt(st, x, y - 1) && !DYE_PLANT_SIDE.has(sheetAt(st, x, y - 1));
   if (style === 7) {
     // 垂吊株：钉在天花板下
-    if (activeAt(st, x, y + 1) && !DYE_PLANT_SIDE.has(sheetAt(st, x, y + 1))) {
-      squareTileFrame(st, rng, x, y);                                   // case 帧（cs:60068）
-      return false;
+    if (!(activeAt(st, x, y + 1) && !DYE_PLANT_SIDE.has(sheetAt(st, x, y + 1)))) {
+      if (solidTile(st, x, y - 1) && !activeAt(st, x, y + 1)) ok = true;
     }
-    if (solidTile(st, x, y - 1) && !activeAt(st, x, y + 1)) ok = true;
-  } else {
-    if (activeAt(st, x, y - 1) && !DYE_PLANT_SIDE.has(sheetAt(st, x, y - 1))) {
-      squareTileFrame(st, rng, x, y);                                   // case 帧（cs:60068）
-      return false;
-    }
+  } else if (!aboveBlocked) {
     if (style === 6) {
       // 冰刺株（style 6）：须长在仙人掌 80 顶上且两侧空（nactive = active）
       if (activeAt(st, x, y + 1) && sheetAt(st, x, y + 1) === 80
@@ -1300,7 +1393,7 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
                 st.type[t5] = GRASS;                                    // 基座矿石/石 → 草
                 if (oreLike(t6)) st.type[t6] = GRASS;
               }
-              killTileTree(st, m, n);   // 干基被杀 → CheckTree 级联整树坍塌（原版语义，见文件头）
+              killTileTree(st, rng, m, n);   // 干基/堆底被杀 → CheckTree/Check3x2 级联坍塌（原版语义，见文件头）
               if (rng.int(0, 1) === 0) {                                // Next(2)
                 st.slope[t5] = 0;
                 st.half[t5] = 0;

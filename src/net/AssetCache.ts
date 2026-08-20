@@ -172,10 +172,14 @@ export interface AssetCacheState {
   failed: number;
   phase: AssetPhase | 'done' | 'idle';
   warming: boolean;
+  /** 下载字节账(zip 模式;bytesTotal=0 → 无字节信息,UI 回退文件数口径) */
+  bytesDone: number;
+  bytesTotal: number;
 }
 
 const state: AssetCacheState = {
   enabled: false, version: '', total: 0, done: 0, failed: 0, phase: 'idle', warming: false,
+  bytesDone: 0, bytesTotal: 0,
 };
 
 let plan = priorityPlan();
@@ -183,6 +187,8 @@ state.total = plan.urls.length;
 /** zip 分片计划(InitAssetCache 拉到 manifest 才置;null=legacy 逐文件模式) */
 let zipPlan: ZipManifest | null = null;
 let zipRun = 0;                 // 直给循环代次号(force 重启 → 旧循环在下个检查点自行退出)
+let dlCommitted = 0;            // 已完成片累计字节(页面侧 MB 账)
+let dlPartGot = 0;              // 当前片最近上报的片内累计
 let zipFailedAcc = 0;           // 失败总数(终态>0 → 停机等"重新下载";不自动回卷)
 const progressCbs = new Set<(s: AssetCacheState) => void>();
 
@@ -367,6 +373,8 @@ async function startZipWarm(): Promise<void> {
       return { file: p.file, zipBytes: p.zipBytes, missing };
     });
     state.done = Math.min(base, state.total);
+    state.bytesDone = 0;
+    state.bytesTotal = jobs.reduce((a, j) => a + (j.missing.length ? j.zipBytes : 0), 0);
     if (state.done >= state.total) {   // 已全就位(被清后自愈完成/重复调用)
       state.warming = false;
       state.phase = 'done';
@@ -382,8 +390,16 @@ async function startZipWarm(): Promise<void> {
       if (myRun !== zipRun) return;   // 已被 force 重启取代,丢弃旧 worker 消息
       const d = ev.data as {
         type: string; names?: string[]; bufs?: ArrayBuffer[];
-        mime?: string[]; failed?: number; done?: number;
+        mime?: string[]; failed?: number; done?: number; got?: number;
       };
+      if (d.type === 'dl' && d.got) {
+        // worker 报的是【当前片内累计】——页面按 已提交片+当前片 清算(片重试
+        // 从 0 重报,Math.max 吸收回卷;partDone 时提交并入账)
+        dlPartGot = Math.max(dlPartGot, d.got);
+        state.bytesDone = Math.min(dlCommitted + dlPartGot, state.bytesTotal);
+        emit();
+        return;
+      }
       if (d.type === 'files' && d.names && d.bufs) {
         if (!state.warming) return;   // 终态后残留批次('done' 与 files 处理异步交错)不回计
         for (let i = 0; i < d.names.length; i++) {
@@ -395,6 +411,8 @@ async function startZipWarm(): Promise<void> {
         state.phase = state.done >= state.total ? 'done' : zipPhaseAt(zipPlan!.parts, state.done);
         emit();
       } else if (d.type === 'partDone') {
+        dlCommitted += dlPartGot;   // 当前片字节入账(片下载失败也按已流部分计)
+        dlPartGot = 0;
         zipFailedAcc += d.failed ?? 0;
         state.failed = zipFailedAcc;
         emit();
@@ -476,6 +494,10 @@ export function warmAllAssets(force = false): void {
     chunkCursor = 0;
     state.done = 0;
     state.failed = 0;
+    state.bytesDone = 0;
+    state.bytesTotal = 0;
+    dlCommitted = 0;
+    dlPartGot = 0;
     state.phase = zipPlan ? zipPhaseAt(zipPlan.parts, 0) : phaseAt(0);
   }
   chunkFailedAcc = 0;

@@ -78,6 +78,10 @@ const SHEET379 = sheetId(379);
 const WIRE_RED = TileStore.WIRE_RED;
 const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
 
+/** SSSSS 批临时探针（用毕即删）：placeTrap/placeSandTrap 调用账 + KillTile 杀账 */
+export let __ssLog: string[] | null = null;
+export function __setSsLog(a: string[] | null): void { __ssLog = a; }
+
 /** GenVars.boulderPetsPlaced（cs:9302 宠物巨石计数，每局生成清零） */
 let boulderPetsPlaced = 0;
 
@@ -90,67 +94,285 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (d.framed && ((d.w ?? 1) > 1 || (d.h ?? 1) > 1)) MULTI_DEFS.set(i, { w: d.w!, h: d.h! });
 }
 export function killTileWhole(st: TileStore, x: number, y: number, rng?: RNG): void {
-  // ★KillTile 级联（cs:63983 尾部 SquareTileFrame(i,j) → 3×3 TileFrame 重帧）：
-  //   邻接多格物体经锚校验失败整块碎裂。golden 四站点实证：
-  //   ①镖锚(3788,414)杀木块→上方陶罐右支撑列悬空→整塌；
-  //   ②(493,450)杀泥→邻陶罐(494..495,448..449)双支撑列完好→存活（±1 列非无条件塌）；
-  //   ③沙陷阱(2587,624)杀砂岩→正上仙人掌塌→其 KillTile 再 SquareTileFrame→
-  //     左邻钟乳石(2586,622..623)顶锚悬空→塌（锚校验按附着向：165 族查上方，
-  //     余者查底行下方逐列）；
-  //   ④(401,389)杀泥→旁侧陶罐底行不骑该列→存活。
-  //   ★PPPP 补：165 族改走 CheckStalactite 帧分派（vanilla TileFrameImportant
-  //   case 165 的真语义——矩形锚搜对**单格短钟乳石**必失败（非完整 1×2 矩形），
-  //   (2546,787) 沙穴掏空杀顶板后短钟乳石存活实证）。支撑已失分支短路不掷
-  //   （cs:38690 前置门），流安全。
-  killObjectAt(st, x, y);
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) {
+  if (__ssLog) {
+    const before: number[] = [];
+    for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
       const ux = x + dx, uy = y + dy;
-      if (!st.inBounds(ux, uy)) continue;
-      const ui = st.idx(ux, uy);
-      const ut = st.type[ui];
-      // KillTile 尾 SquareTileFrame（cs:63953→80924）九宫重帧：TileFrame 对失活格
-      //   清 half/slope（cs:82078-82082，零掷零杀）——PPPP 补（曾缺 → (3952,861)
-      //   镖锚杀邻帧本应清的失活残坡 s2 存活）
-      if (!st.flags[ui]) { st.half[ui] = 0; st.slope[ui] = 0; continue; }
-      if (sheetOf(ut) === 165 && rng) { checkStalactite(st, rng, ux, uy); continue; }
-      if (!MULTI_DEFS.has(ut)) continue;
-      // 找含 (ux,uy) 的完整块锚
-      const m = MULTI_DEFS.get(ut)!;
-      for (let ay = uy; ay > uy - m.h; ay--) {
-        let hit = false;
-        for (let ax = ux; ax > ux - m.w; ax--) {
-          let full = true;
-          for (let ddy = 0; ddy < m.h && full; ddy++) {
-            for (let ddx = 0; ddx < m.w; ddx++) {
-              if (!st.inBounds(ax + ddx, ay + ddy) || st.type[st.idx(ax + ddx, ay + ddy)] !== ut) { full = false; break; }
-            }
+      if (st.inBounds(ux, uy) && st.flags[st.idx(ux, uy)]) before.push(st.idx(ux, uy), sheetOf(st.type[st.idx(ux, uy)]!));
+    }
+    killTileWholeCore(st, x, y, rng);
+    const killed: string[] = [];
+    for (let q = 0; q < before.length; q += 2) {
+      const ii = before[q]!;
+      if (!st.flags[ii]) killed.push(`${ii % st.w},${Math.floor(ii / st.w)}:${before[q + 1]}`);
+    }
+    if (killed.length) __ssLog.push(`kill ${x},${y} -> ${killed.join(' ')}`);
+    return;
+  }
+  killTileWholeCore(st, x, y, rng);
+}
+function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void {
+  // ★KillTile 级联（cs:63983 尾部 SquareTileFrame(i,j) → 3×3 TileFrame 重帧）。
+  //   SSSSS 批（2026-08-20）按 vanilla TileFrame 真分派重构（12345 #76 双根因：
+  //   ①镖锚杀地基 → 上方压板 Check1x1 支撑杀缺失（cs:45226→86307）；
+  //   ②残缺巨石块帧锚 Check2x2 完整性杀缺失（cs:48405）——旧"整块搜索+支撑列"
+  //   近似对残块必空转）。陶罐/雕像族仍走旧近似（9293480 golden 四站点实证）。
+  killObjectAt(st, x, y);
+  // SquareTileFrame 调用序（cs:80925-80933）列优先
+  for (const [dx, dy] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]] as const) {
+    const ux = x + dx, uy = y + dy;
+    // TileFrame 头界（cs:82069）：5 格 padding
+    if (ux <= 5 || uy <= 5 || ux >= st.w - 5 || uy >= st.h - 5) continue;
+    const ui = st.idx(ux, uy);
+    const ut = st.type[ui];
+    // TileFrame 失活格清 half/slope/块漆（cs:82077-82082，零掷零杀）
+    if (!st.flags[ui]) { st.half[ui] = 0; st.slope[ui] = 0; st.paint[ui] = 0; continue; }
+    const sh = sheetOf(ut);
+    if (sh === 165 && rng) { checkStalactite(st, rng, ux, uy); continue; }
+    if (CHECK1X1_SHEETS.has(sh)) { check1x1Gen(st, ux, uy, rng); continue; }
+    if (CHEST_SHEETS.has(sh)) { checkChestGen(st, ux, uy, rng); continue; }
+    if (CHECK2X2_SHEETS.has(sh)) { check2x2Gen(st, ux, uy, rng); continue; }
+    if (sh === 185) { checkPileTrap(st, ux, uy); continue; }
+    if (!MULTI_DEFS.has(ut)) continue;
+    // 找含 (ux,uy) 的完整块锚
+    const m = MULTI_DEFS.get(ut)!;
+    for (let ay = uy; ay > uy - m.h; ay--) {
+      let hit = false;
+      for (let ax = ux; ax > ux - m.w; ax--) {
+        let full = true;
+        for (let ddy = 0; ddy < m.h && full; ddy++) {
+          for (let ddx = 0; ddx < m.w; ddx++) {
+            if (!st.inBounds(ax + ddx, ay + ddy) || st.type[st.idx(ax + ddx, ay + ddy)] !== ut) { full = false; break; }
           }
-          if (!full) continue;
-          // 锚校验：165 族（钟乳石）顶锚，余者底锚。★巨石族（含滚地仙人掌 484）
-          //   须全支撑列悬空才塌（golden site A 双列杀→塌 / site B 右列杀→存）；
-          //   陶罐/雕像等任意列悬空即塌（site ①右列杀→塌 / site ②双列存→存）。
-          let ok = true;
-          let anyBad = false, allBad = true;
-          const ceiling = sheetOf(ut) === 165;
-          for (let c = 0; c < m.w; c++) {
-            const sx = ax + c, sy = ceiling ? ay - 1 : ay + m.h;
-            const bad = !st.inBounds(sx, sy) || !st.flags[st.idx(sx, sy)] || !vanGenSolidType(st.type[st.idx(sx, sy)]!);
-            if (bad) anyBad = true; else allBad = false;
-          }
-          ok = isBoulderType(ut) ? !allBad : !anyBad;
-          if (!ok) {
-            for (let ddy = 0; ddy < m.h; ddy++) {
-              for (let ddx = 0; ddx < m.w; ddx++) st.setTileSilent(ax + ddx, ay + ddy, 0);
-            }
-          }
-          hit = true;
-          break;
         }
-        if (hit) break;
+        if (!full) continue;
+        // 锚校验（旧近似，陶罐/雕像/186/187 族）：165 族（钟乳石）顶锚，余者底锚。
+        //   ★巨石族（含滚地仙人掌 484）须全支撑列悬空才塌（golden site A 双列杀→塌 /
+        //   site B 右列杀→存）；陶罐/雕像等任意列悬空即塌（site ①右列杀→塌 /
+        //   site ②双列存→存）。巨石族现先走 check2x2Gen 精确分派，此处仅兜底。
+        let ok = true;
+        let anyBad = false, allBad = true;
+        const ceiling = sh === 165;
+        for (let c = 0; c < m.w; c++) {
+          const sx = ax + c, sy = ceiling ? ay - 1 : ay + m.h;
+          const bad = !st.inBounds(sx, sy) || !st.flags[st.idx(sx, sy)] || !vanGenSolidType(st.type[st.idx(sx, sy)]!);
+          if (bad) anyBad = true; else allBad = false;
+        }
+        ok = isBoulderType(ut) ? !allBad : !anyBad;
+        if (!ok) {
+          for (let ddy = 0; ddy < m.h; ddy++) {
+            for (let ddx = 0; ddx < m.w; ddx++) st.setTileSilent(ax + ddx, ay + ddy, 0);
+          }
+        }
+        hit = true;
+        break;
+      }
+      if (hit) break;
+    }
+  }
+}
+
+// ---- vanilla TileFrame 分派族（SSSSS 批） ----
+/** Check1x1 分派族（TileFrameImportant cs:86300-86308：36/135/141/210/239/428/
+ *  593/624/650/656/700/701 → Check1x1）——1×1 落地物 */
+const CHECK1X1_SHEETS = new Set([36, 135, 141, 210, 239, 428, 593, 624, 650, 656, 700, 701]);
+/** Check2x2 分派族（cs:86402 {335,411,490,564,565,594} + cs:86672-86688
+ *  {132,138,142,143,288-295,484,664,665,711,712}）。★713-716（熔岩/蜘蛛/地牢
+ *  巨石）在 cs:86410 break 列表=零分派，不在本族 */
+const CHECK2X2_SHEETS = new Set([132, 138, 142, 143, 288, 289, 290, 291, 292, 293, 294, 295, 335, 411, 484, 490, 564, 565, 594, 664, 665, 711, 712]);
+/** BasicChest{21,467}（TileID.cs:315）→ CheckChest（cs:81400+） */
+const CHEST_SHEETS = new Set([21, 467]);
+/** Main.tileTable（Main.cs:6828+ 全 75 项，= tileSolidTop ∖ {16,134,239}） */
+const TILE_TABLE = new Set([14, 18, 19, 87, 88, 101, 114, 275, 276, 277, 278, 279, 280, 281, 285, 286, 296, 297, 298, 299,
+  309, 310, 339, 358, 359, 361, 362, 363, 364, 376, 380, 391, 392, 393, 394, 405, 413, 414, 427, 469, 532, 533, 538,
+  542, 544, 550, 551, 553, 554, 555, 556, 558, 559, 582, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610,
+  611, 612, 619, 629, 632, 640, 643, 644, 645, 710]);
+/** vanilla destroyObject（WorldGen 静态位）本 pass 语境镜像：Check2x2/CheckChest
+ *  杀除期置真，期间再入两者头门早退（cs:48407/CheckChest 头），杀除毕复位 */
+let destroyObjectT = false;
+/** Chest.CanDestroyChest 语境（cs:590）：有物箱不可毁（锚键 y*w+x）。
+ *  runTrapsPass 由 world.chests 灌入；杀箱时同步注销（Chest.DestroyChest） */
+let chestItemAnchors: Set<number> | null = null;
+let chestList: Array<{ x: number; y: number; items: unknown[] }> | null = null;
+export function __setTrapsChestAnchors(s: Set<number> | null): void { chestItemAnchors = s; }
+
+/** Check1x1（cs:45226-45244）1:1：地基 SolidTileAllowBottomSlope 失效或巨石地基
+ *  → KillTile。★SSSSS 补（12345 #76 根因①：镖锚杀地基后上方压板须碎——
+ *  (2956,523) golden 实证）。624 Abigail 花专属门非生成期产物不移植。 */
+function check1x1Gen(st: TileStore, x: number, y: number, rng?: RNG): void {
+  if (!solidTileAllowBottomSlope(st, x, y + 1)) { killTileWholeCore(st, x, y, rng); return; }
+  const gi = st.idx(x, y + 1);
+  if (st.inBounds(x, y + 1) && st.type[gi]! >= 0 && isBoulderType(st.type[gi]!)) killTileWholeCore(st, x, y, rng);
+}
+
+/** CheckChest（cs:81400+）1:1：帧锚 2×2 + 完整性（列模 2/行 18 帧位）+ 逐列支撑门
+ *  （!active||!tileSolid）——★支撑失败须 Chest.CanDestroyChest（有物箱 false）才
+ *  置 flag（SSSSS 补：m20260811 #76 T21>0×8——生成期战利品箱永不塌）。杀除循环
+ *  覆盖锚下 2×3 行（cs 原样）只杀 type 匹配格。 */
+function checkChestGen(st: TileStore, x: number, y: number, rng?: RNG): void {
+  if (destroyObjectT) return;
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  let num = Math.trunc(st.frameX[i]! / 18);
+  let num2 = y - Math.trunc(st.frameY[i]! / 18);
+  while (num > 1) num -= 2;
+  num = x - num;
+  let flag = false;
+  for (let k = num; k <= num + 1; k++) {
+    for (let l = num2; l <= num2 + 1; l++) {
+      let num3 = -1;
+      if (st.inBounds(k, l)) num3 = Math.trunc(st.frameX[st.idx(k, l)]! / 18);
+      while (num3 > 1) num3 -= 2;
+      const ki = st.idx(k, l);
+      if (!st.inBounds(k, l) || !st.flags[ki] || st.type[ki] !== t
+        || num3 !== k - num || st.frameY[ki] !== (l - num2) * 18) flag = true;
+    }
+    const si = st.idx(k, num2 + 2);
+    const supBad = !st.inBounds(k, num2 + 2) || !st.flags[si] || !vanGenSolidType(st.type[si]!);
+    if (supBad && !(chestItemAnchors && chestItemAnchors.has(num2 * st.w + num))) flag = true;
+  }
+  if (!flag) return;
+  destroyObjectT = true;
+  for (let m = num; m <= num + 1; m++) {
+    for (let n = num2; n <= num2 + 2; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const mi = st.idx(m, n);
+      if (st.type[mi] === t && st.flags[mi]) killTileWholeCore(st, m, n, rng);
+    }
+  }
+  // Chest.DestroyChest（cs:575+）：注销箱注册表（锚在本块内）
+  if (chestList) {
+    for (let q = chestList.length - 1; q >= 0; q--) {
+      const c = chestList[q]!;
+      if (c.x >= num && c.x <= num + 1 && c.y >= num2 && c.y <= num2 + 2) {
+        chestList.splice(q, 1);
+        chestItemAnchors?.delete(c.y * st.w + c.x);
       }
     }
   }
+  destroyObjectT = false;
+}
+
+/** Check2x2（cs:48405-48588）1:1：帧锚（fx/18 wrap +2、fy%36/18）→ 2×2 完整性
+ *  （active+type+帧位精确）→ 支撑门（非巨石族逐列 tileSolid||tileTable 且禁半砖；
+ *  巨石族=顶格非箱族 且 双底列 !SolidTileAllowBottomSlope）→ flag 则 destroyObject
+ *  期杀锚内 type 匹配格。★SSSSS 补（12345 #76 根因②：(1792-1793,617) 残缺滚地
+ *  仙人掌 2×2 因 (1792,618) 被沙陷阱直杀 → 完整性破 → 顶行两格碎——旧近似对
+ *  残块空转）。 */
+function check2x2Gen(st: TileStore, x: number, y: number, rng?: RNG): void {
+  if (destroyObjectT) return;                                   // cs:48407
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  const boulder = isBoulderType(t);
+  let num = 0;
+  let num2 = -Math.trunc(st.frameX[i]! / 18);
+  if (num2 < -1) { num2 += 2; num = 36; }
+  num2 += x;
+  const num5 = Math.trunc(st.frameY[i]! / 36);
+  const num6 = y - Math.trunc((st.frameY[i]! % 36) / 18);
+  let flag = false;
+  for (let k = num2; k <= num2 + 1; k++) {
+    for (let l = num6; l <= num6 + 1; l++) {
+      const ki = st.idx(k, l);
+      if (!st.inBounds(k, l) || !st.flags[ki] || st.type[ki] !== t
+        || st.frameX[ki] !== (k - num2) * 18 + num
+        || st.frameY[ki] !== (l - num6) * 18 + num5 * 36) { flag = true; break; }
+    }
+    if (!boulder) {
+      const si = st.idx(k, num6 + 2);
+      const sh2 = st.inBounds(k, num6 + 2) ? sheetOf(st.type[si]!) : -1;
+      if (!st.inBounds(k, num6 + 2) || !st.flags[si]
+        || (!vanGenSolidType(st.type[si]!) && !TILE_TABLE.has(sh2)) || st.half[si]) flag = true;
+    }
+  }
+  if (boulder) {
+    const c1 = st.inBounds(num2, num6 - 1) ? sheetOf(st.type[st.idx(num2, num6 - 1)]!) : 0;
+    const c2 = st.inBounds(num2 + 1, num6 - 1) ? sheetOf(st.type[st.idx(num2 + 1, num6 - 1)]!) : 0;
+    const chestish = (c: number) => CHEST_SHEETS.has(c) || c === 88 || c === 441 || c === 468 || c === 470 || c === 475;
+    if (!chestish(c1) && !chestish(c2)
+      && !solidTileAllowBottomSlope(st, num2, num6 + 2) && !solidTileAllowBottomSlope(st, num2 + 1, num6 + 2)) flag = true;
+  }
+  if (!flag) return;
+  destroyObjectT = true;
+  for (let k = num2; k <= num2 + 1; k++) {
+    for (let l = num6; l <= num6 + 1; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const ki = st.idx(k, l);
+      if (st.type[ki] === t && st.flags[ki]) killTileWholeCore(st, k, l, rng);
+    }
+  }
+  destroyObjectT = false;
+}
+
+/** Snow/Ice 与 Sand 支撑族（CheckPile cs:46940-46947——与 Spread.ts 同表副本） */
+const PILE_SNOW_OK = new Set([147, 161, 163, 164, 200, 162, 224]);
+const PILE_SAND_OK = new Set([53, 112, 116, 234, 397, 398, 402, 399, 396, 400, 403, 401]);
+
+/** CheckPile（cs:46891）type 185 语境（Spread.ts checkPileGen 同构副本，杀尾换
+ *  本 pass 全分派级联）：fy==18 → Check2x1；无支撑杀；雪/沙堆支撑类型门。
+ *  SSSS 补（m20260811 #76 T0>185 残堆）。杀=零掷（185 尘掷 0 + noItem） */
+function checkPileTrap(st: TileStore, x: number, y: number): void {
+  const i = st.idx(x, y);
+  const fx = st.frameX[i] | 0, fy = st.frameY[i] | 0;
+  if (fy === 18) { check2x1Trap(st, x, y); return; }
+  if (!solidTileAllowBottomSlope(st, x, y + 1)) { killTileWholeCore(st, x, y); return; }
+  const num = Math.trunc(fx / 18);
+  if (!st.inBounds(x, y + 1)) return;
+  const bi = st.idx(x, y + 1);
+  if (!st.flags[bi]) return;
+  const below = sheetOf(st.type[bi]!);
+  if ((num >= 36 && num <= 47) || (num >= 54 && num <= 59) || (num >= 73 && num <= 76)) {
+    const ok = (num >= 36 && num <= 47) ? PILE_SNOW_OK.has(below) : PILE_SAND_OK.has(below);
+    if (!ok) killTileWholeCore(st, x, y);
+  }
+}
+
+/** Check2x1（cs:46979-47371）type 185 语境（Spread.ts check2x1Gen 同构副本）：
+ *  2 宽配对完整性 + 支撑双门 + 草地变体转化 + num5 组支撑门 → 失败杀两格。 */
+let destroyObjectP2 = false;
+function check2x1Trap(st: TileStore, x: number, y: number): void {
+  if (destroyObjectP2) return;
+  const ii = st.idx(x, y);
+  const fx = st.frameX[ii] | 0, fy = st.frameY[ii] | 0;
+  let num2 = Math.trunc(fx / 18);
+  num2 %= 2;
+  const num = x - num2;
+  if (!st.inBounds(num, y) || !st.inBounds(num + 1, y)) return;
+  let flag = true;
+  const iL = st.idx(num, y), iR = st.idx(num + 1, y);
+  const fxL = st.frameX[iL] | 0;
+  if ((st.frameX[iR] | 0) === fxL + 18
+    && sheetOf(st.type[iL]!) === 185 && sheetOf(st.type[iR]!) === 185
+    && st.flags[iL] && st.flags[iR]) flag = false;
+  if (!solidTileAllowBottomSlope(st, num, y + 1)) flag = true;
+  if (!solidTileAllowBottomSlope(st, num + 1, y + 1)) flag = true;
+  // 草地变体转化（cs:47058-47065）
+  if (st.inBounds(num, y + 1) && st.inBounds(num + 1, y + 1)) {
+    const bl = sheetOf(st.type[st.idx(num, y + 1)]!);
+    const br = sheetOf(st.type[st.idx(num + 1, y + 1)]!);
+    if (fxL >= 1368 && fxL <= 1458 && bl !== 2 && br !== 2 && bl !== 477 && br !== 477 && bl !== 492 && br !== 492) {
+      st.frameX[iL] = (fxL - 1368) as never;
+      st.frameX[iR] = ((st.frameX[iR] | 0) - 1368) as never;
+    }
+  }
+  const num5 = Math.trunc((st.frameX[iL] | 0) / 36) + (Math.trunc(fy / 18) - 1) * 52;
+  for (let j = num; j <= num + 1; j++) {
+    if (!st.inBounds(j, y + 1)) continue;
+    const bj = st.idx(j, y + 1);
+    if (st.flags[bj] && BOULDER_SHEETS.has(sheetOf(st.type[bj]!))) { flag = true; break; }
+    if (!st.flags[bj]) continue;
+    const bt = sheetOf(st.type[bj]!);
+    if (num5 >= 25 && num5 <= 30) {
+      if (!PILE_SNOW_OK.has(bt)) flag = true;
+    } else if ((num5 >= 41 && num5 <= 46) || (num5 >= 62 && num5 <= 64)) {
+      if (!PILE_SAND_OK.has(bt)) flag = true;
+    }
+  }
+  if (!flag) return;
+  destroyObjectP2 = true;
+  if (sheetOf(st.type[iL]!) === 185 && st.flags[iL]) killTileWholeCore(st, num, y);
+  if (sheetOf(st.type[iR]!) === 185 && st.flags[iR]) killTileWholeCore(st, num + 1, y);
+  destroyObjectP2 = false;
 }
 function killObjectAt(st: TileStore, x: number, y: number): void {
   const t = st.type[st.idx(x, y)];
@@ -306,6 +528,11 @@ function placePlate(st: TileStore, x: number, y: number, style: number): boolean
 
 /** placeTrap 主体（cs:8875-9460，普通种子路径）。type: 0 飞镖 / 1 巨石 / 2 炸药桶 / 3 热喷泉 */
 export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
+  const r = placeTrapCore(st, rng, gs, x2, y2, type);
+  if (__ssLog) __ssLog.push(`trap ${x2},${y2} req=${type} -> ${r}`);
+  return r;
+}
+function placeTrapCore(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
   // 微光回避（cs:8884，用原始 y2 掷点）：距 shimmerPosition <100 拒（未生成时 (0,0)）
   const shx = gs.shimmerX >= 0 ? gs.shimmerX : 0, shy = gs.shimmerY >= 0 ? gs.shimmerY : 0;
   if (Math.hypot(x2 - shx, y2 - shy) < 100) return false;
@@ -328,6 +555,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (type === -1 && rng.int(0, 19) === 0) type = 2;
   else if (type === -1 && py > gs.lavaLine + 30 && rng.int(0, 5) !== 0) type = 3;
   else if (type === -1) type = rng.int(0, 1);
+  if (__ssLog) __ssLog.push(`scan ${x2},${y2} py=${py} t=${type} lava=${lava ? 1 : 0} deep=${deep ? 1 : 0}`);
   // 共同守卫（cs:8961-8985）
   if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
   if (lava && type !== 3) return false;
@@ -535,6 +763,11 @@ function isCracked(t: number): boolean {
 /** PlaceSandTrap（cs:35505-35781）：地下沙漠蜂窝墙内的塌沙陷阱（1456 全尾段） */
 /** PlaceSandTrap（cs:35505-35781）——导出仅供探针对账 */
 export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
+  const r = placeSandTrapCore(st, rng, i, j);
+  if (__ssLog) __ssLog.push(`sand ${i},${j} -> ${r}`);
+  return r;
+}
+function placeSandTrapCore(st: TileStore, rng: RNG, i: number, j: number): boolean {
   const num2 = 4, num3 = 25;
   let k = j;
   while (k < st.h - 200 && !st.flags[st.idx(i, k)]) k++;              // cs:35515 UnderworldLayer
@@ -683,11 +916,20 @@ export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): bo
 
 /** pass 76 Traps 主体（cs:18769-18898）：w*0.05 次 placeTrap + w*0.003 次 PlaceSandTrap。
  *  两段计数均为裸 double 比较（cs:18800/18866 `for i < num`，不取整） */
-export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Array<{ x: number; y: number; items: unknown[] }>): void {
   // ★pass 头 tileSolid 翻转（cs:18773 `Main.tileSolid[379] = false`）：
   //   本仓生成期不放置 379,行为无差,存档时间线。pass 尾 cs:18897 还原 true。
   flipGenSolid([379], false);
   boulderPetsPlaced = 0;   // GenVars.boulderPetsPlaced 每局清零
+  destroyObjectT = false; destroyObjectP2 = false;
+  // CheckChest 语境：有物箱锚集（CanDestroyChest cs:590 有物=不可毁）
+  chestList = chests ?? null;
+  chestItemAnchors = new Set();
+  if (chests) for (const c of chests) {
+    if (c.items.some((it) => it && (it as { id: number; stack: number }).id > 0 && (it as { id: number; stack: number }).stack > 0)) {
+      chestItemAnchors.add(c.y * st.w + c.x);
+    }
+  }
   const trapTries = st.w * 0.05;
   for (let n = 0; n < trapTries; n++) {
     for (let k = 0; k < 1150; k++) {
@@ -712,4 +954,5 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   // ★pass 尾还原（cs:18897 `Main.tileSolid[379] = true`）
   flipGenSolid([379], true);
+  chestList = null; chestItemAnchors = null;
 }

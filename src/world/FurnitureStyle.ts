@@ -34,10 +34,15 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     case 242: return [Math.floor(style / 27) * 108, (style % 27) * 72];
     case 245: return [style * 36, 0];
     case 246: return [0, style * 36];
-    // 187 Decos3x2 Group2（TileObjectData :3303 StyleWrapLimit=35）：每行 35 组换行
-    // ——LivingTree 叶下地被 style 47-51（cs:28695）在第二行（Y=54）。此前 default
-    // 单轴 style*54 → style≥35 越界 1890 表宽
-    case 187: return [(style % 35) * 54, Math.floor(style / 35) * 36]; // Y 步=块高 36(16+2+18,非均匀行高)
+    // 187 Decos3x2 Group2：Place3x2 原文 `frameX = 54*style`（cs:52185）**无 wrap**
+    // ——Tiles_187.png 实宽 1890（35 组），style≥35（活树叶下 47-49/叶顶 50-51,
+    // cs:28695/28696）帧写到表宽外。★QQQQQ 定谳：vanilla 金标真值就是越界帧
+    // （s22222 织入探针 (1444..1446,227) fx=2646=fy0/18=style49；9293480
+    // /tmp/tttt-fr/063.fr 113 格 fx∈[2646,2790] 同证）——渲染按 canvas 越界源矩形
+    // 静默（vanilla XNA 夹边采样=边缘杂色，同为"非正常贴图"）。曾按贴图 35 列
+    // wrap → style49 写 (756,36) → 恰落入 Check3x2 草地变体转化带 [756,900]
+    // （cs:49383）→ SpreadingGrass 级联误转化 187→186（s22222 #73 T187>186×6）。
+    case 187: return [style * 54, 0];
     // 15 椅子（TileObjectData :4132-4164 Style1x2、StyleHorizontal=false、
     //  StyleWrapLimit=2、StyleMultiplier=2、PaddingFix(0,2)）：FullHeight=(16+2)+(18+2)+2
     //  =40——style 竖排 Y 步 40（Tiles_15 72×2038 行带 0/40/80…实测；曾误写 38

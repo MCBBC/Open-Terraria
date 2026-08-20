@@ -54,6 +54,12 @@ const MUSHROOM_STYLES: Array<[number, number, number]> = [
 const DESERT_STYLES: Array<[number, number, number]> = [
   [21, 20, -1], [108, 109, -1], [207, 208, -1], [217, 218, -1],
 ];
+/** 海洋单层贴图变体（WorldGen.setBG case 7 :7513-7541：style 0-7 → Main.oceanBG，
+ *  worldgen 期 setBG(7, random.Next(8)) :7973 掷骰；海洋层 = 单张贴图无树层组） */
+const OCEAN_STYLES = [28, 110, 111, 209, 210, 283, 332, 340];
+/** 海洋层专属 Y 偏移（DrawSurfaceBG_GetLayerYOffset :59172：case 283→-800 :59220-21、
+ *  case 332/340→-25 :59222-25、28/110/111/209/210 走 default 0） */
+const OCEAN_YOFF: Record<number, number> = { 283: -800, 332: -25, 340: -25 };
 /** 地下带状背景横向视差（Main.cs:1172 caveParallax 默认 0.88;设置项 "Parallax" 可调） */
 const CAVE_PARALLAX = 0.88;
 
@@ -188,6 +194,11 @@ export class BiomeBackground {
     return v;
   }
 
+  /** Main.oceanBG 等价读数（WorldGen.setBG case 7 :7513-7541 style→贴图映射） */
+  private oceanTexId(): number {
+    return OCEAN_STYLES[this.oceanStyle] ?? OCEAN_STYLES[0];
+  }
+
   /** 世界派生随机档（原版 worldgen 期掷骰的运行时重建） */
   private forestStyles: number[] = [];
   private corruptStyle = 0;
@@ -197,6 +208,8 @@ export class BiomeBackground {
   private hallowStyle = 0;
   private mushroomStyle = 0;
   private desertStyle = 0;
+  /** 海洋贴图变体档（≈WorldGen.oceanBG style 0-7；seedFor 重建） */
+  private oceanStyle = 0;
   private iceBack = 0;
   private jungleBack = 0;
   private hellBack = 0;
@@ -234,14 +247,16 @@ export class BiomeBackground {
    *  后台取齐,跨群系旅行不闪空。fire-and-forget */
   warm(scene: SceneFlags): void {
     if (this.seededFor === -1) return; // 尚未播种(preloadInitial/draw 先行),跳过防取错风格
-    const styles: Array<[number, number, number]> = [];
+    const styles: number[][] = [];
     if (scene.zoneCorrupt) styles.push(CORRUPT_STYLES[this.corruptStyle]);
     else if (scene.zoneCrimson) styles.push(CRIMSON_STYLES[this.crimsonStyle]);
     else if (scene.zoneJungle) styles.push(JUNGLE_STYLES[this.jungleStyle]);
     else if (scene.zoneSnow) styles.push(SNOW_STYLES[this.snowStyle]);
     else if (scene.zoneHallow) styles.push(HALLOW_STYLES[this.hallowStyle]);
     else if (scene.zoneGlowshroom) styles.push(MUSHROOM_STYLES[this.mushroomStyle]);
-    else if (scene.zoneDesert || scene.zoneBeach) styles.push(DESERT_STYLES[this.desertStyle]);
+    else if (scene.zoneDesert) styles.push(DESERT_STYLES[this.desertStyle]);
+    // 海洋 = 单张 oceanBG 贴图（Step2 far 槽 3，Main.cs:59348-59351）
+    else if (scene.zoneBeach) styles.push([this.oceanTexId()]);
     if (!styles.length) return; // 森林已在 preloadInitial 就位
     void this.loadBg(styles[0].filter((n) => n >= 0));
   }
@@ -273,6 +288,8 @@ export class BiomeBackground {
     this.hallowStyle = seedPick(s, 25, HALLOW_STYLES.length);
     this.mushroomStyle = seedPick(s, 26, MUSHROOM_STYLES.length);
     this.desertStyle = seedPick(s, 27, DESERT_STYLES.length);
+    // 海洋（WorldGen.cs:7973 setBG(7, random.Next(8)) 的运行时重建）
+    this.oceanStyle = seedPick(s, 28, OCEAN_STYLES.length);
     this.iceBack = seedPick(s, 31, 4);
     this.jungleBack = seedPick(s, 32, 2);
     this.hellBack = seedPick(s, 33, 3);
@@ -335,8 +352,10 @@ export class BiomeBackground {
       this.alphaFront[l] += (target - this.alphaFront[l]) >= 0 ? Math.min(frames * 0.05, target - this.alphaFront[l]) : Math.max(-frames * 0.05, target - this.alphaFront[l]);
       if (Math.abs(target - this.alphaFront[l]) < 0.001) this.alphaFront[l] = target;
     }
-    // 远山层 alpha（bgStyle→far 槽映射简化为同号）
-    const farTarget = FAR_TEX[this.bgStyle] !== undefined ? this.bgStyle : -1;
+    // 远山层 alpha（bgStyle→far 槽映射简化为同号；海洋 = Step2 专属 far 槽 3，
+    // UpdateBGVisibility_BackLayer case 4 :63636-63638，本仓按同号 Ocean 槽驱动）
+    const farTarget = FAR_TEX[this.bgStyle] !== undefined || this.bgStyle === Ocean
+      ? this.bgStyle : -1;
     for (let l = 0; l < 16; l++) {
       const target = l === farTarget ? 1 : 0;
       this.alphaFar[l] += target > this.alphaFar[l] ? Math.min(frames * 0.05, target - this.alphaFar[l]) : Math.max(-frames * 0.05, target - this.alphaFar[l]);
@@ -432,11 +451,22 @@ export class BiomeBackground {
           { alpha, tint: tintOn });
       }
     };
-    // 远山层（bgAlphaFarBackLayer；parallax 0.15/scale 1，:59240）
+    // 远山层 Step1（bgAlphaFarBackLayer；parallax 0.15/scale 1，:59240）
     const farTex = FAR_TEX[this.bgStyle];
     if (farTex !== undefined) {
       const a = this.alphaFar[this.bgStyle];
       drawLayer({ tex: farTex, scale: 1, parallax: 0.15, topA: 1300, topB: 1090 }, a);
+    } else if (this.bgStyle === Ocean) {
+      // ★海洋专属层 = Step2 far 槽 3（Main.cs:59348-59351 bgAlphaFarBackLayer[3] →
+      // DrawSurfaceBG_DrawBackMountainsLayer(oceanBG)）。几何取 Step2 共用档
+      // （:58919-58937 treeMntBGSet1[1] 设置块）：parallax 0.2 / scale 1.15×num4 /
+      // topY = num3×1400+1260，再叠贴图专属 Y 偏移（DrawSurfaceBG_GetLayerYOffset
+      // :59172，283→-800/332/340→-25/其余 0）。原版海洋【无】前景树层组——
+      // front 槽 4 只画变更换屏闪光 overlay（:58994-58996 DrawChangeOverlay(10)，
+      // BackgroundChangeFlashInfo 黑闪,本仓未实装=常态不画），曾经 forest 兜底
+      // 画树层是本仓自造,已移除;群系背景全由本层承担。
+      const ot = this.oceanTexId();
+      drawLayer({ tex: ot, scale: 1.15, parallax: 0.2, topA: 1400, topB: 1260 + (OCEAN_YOFF[ot] ?? 0) }, this.alphaFar[Ocean]);
     }
     // 前景群系层
     const style = this.bgStyle;
@@ -473,12 +503,9 @@ export class BiomeBackground {
       const d = this.pickStyle('desert', DESERT_STYLES, this.desertStyle, world);
       drawLayer({ tex: d[0], scale: 1.25, parallax: 0.37, topA: 1800, topB: 1750 }, a);
       drawLayer({ tex: d[1], scale: 1.34, parallax: 0.49, topA: 2100, topB: 2150 }, a);
-    } else if (style === Ocean) {
-      // 海洋：原版仅 overlay 无群系层（forest 兜底）
-      const fs = this.pickStyle('forest-ocean', FOREST_STYLES, this.forestStyles[0], world);
-      drawLayer({ tex: fs.t[0], scale: 1.2, parallax: 0.25, topA: 1600, topB: 1400 }, a);
-      drawLayer({ tex: fs.t[2], scale: 1.4, parallax: 0.27, topA: 1800, topB: 1500 }, a);
     }
+    // Ocean(4) 无前景群系层组：原版 front 槽 4 仅变更换屏 overlay（见上方远山区
+    // 海洋分支考据注释），群系背景 = Step2 far 层一张 oceanBG,已在上文绘制。
     void s; void viewH;
   }
 
@@ -766,4 +793,48 @@ export class BiomeBackground {
       }
     }
   }
+  // ---- SunGradients.BackgroundDrawers(SunGradients.cs:175-189,2026-08-20 原版化)----
+  /** 13 项渐变带表:[颜色, bgAlphaFrontLayer 槽, 纹理判定集]——活动槽的选型
+   *  纹理表包含判定 id 时,以 colorgradientdither 在背景树顶画渐隐带(把
+   *  群系背景结构顶部融进天空)。Draw() 见 SkyRenderer.drawHorizonGradients。 */
+  surfaceGradientBands(): Array<{ rgb: readonly [number, number, number]; alpha: number }> {
+    const out: Array<{ rgb: readonly [number, number, number]; alpha: number }> = [];
+    const has = (ids: readonly number[], check: readonly number[]) =>
+      check.some((c) => ids.includes(c));
+    // 森林四槽(0/10/11/12 = treeBGSet1-4):每槽双带 @176/@179
+    const forestSlots = [Forest1, Forest2, Forest3, Forest4];
+    for (const slot of forestSlots) {
+      const seg = slot === Forest1 ? 0 : slot === Forest2 ? 1 : slot === Forest3 ? 2 : 3;
+      const st = FOREST_STYLES[this.forestStyles[seg] % FOREST_STYLES.length];
+      const ids = [...st.m, ...st.t];
+      const a = this.alphaFront[slot];
+      if (a > 0) {
+        if (has(ids, [176])) out.push({ rgb: [116, 191, 255], alpha: a });
+        if (has(ids, [179])) out.push({ rgb: [157, 192, 255], alpha: a });
+      }
+    }
+    // 沙漠 @248
+    if (this.alphaFront[Desert] > 0
+      && has(DESERT_STYLES[this.desertStyle].filter((n) => n >= 0), [248])) {
+      out.push({ rgb: [184, 211, 245], alpha: this.alphaFront[Desert] });
+    }
+    // 雪原 @263/268/269
+    if (this.alphaFront[Snow] > 0 && has(SNOW_STYLES[this.snowStyle], [263, 268, 269])) {
+      out.push({ rgb: [169, 241, 255], alpha: this.alphaFront[Snow] });
+    }
+    // 丛林双带 @59/@284
+    if (this.alphaFront[Jungle] > 0) {
+      const jids = JUNGLE_STYLES[this.jungleStyle];
+      if (has(jids, [59])) out.push({ rgb: [220, 255, 109], alpha: this.alphaFront[Jungle] });
+      if (has(jids, [284])) out.push({ rgb: [141, 232, 131], alpha: this.alphaFront[Jungle] });
+    }
+    // 海洋 @283（SunGradients.cs:218 BackgroundDrawers 末项:new Color(157,192,255),
+    // weight = bgAlphaFrontLayer[4]【前】槽,Ocean() :221-224 yield Main.oceanBG——
+    // 仅当本世界海洋变体贴图 == 283 时点带;其余 7 个海洋变体(28/110/111/209/210/332/340)无带)
+    if (this.alphaFront[Ocean] > 0 && this.oceanTexId() === 283) {
+      out.push({ rgb: [157, 192, 255], alpha: this.alphaFront[Ocean] });
+    }
+    return out;
+  }
+
 }

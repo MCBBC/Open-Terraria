@@ -19,6 +19,8 @@ import { UnifiedRandom } from '../core/rng';
 import type { GLSpriteLayer } from './GLSpriteLayer';
 import { texId } from './texId';
 import { horizonPhaseOf, sunColorOf, moonDrawColor } from '../lighting/Horizon';
+import { applyBiomeToSun, applyBiomeToMoon } from '../lighting/SkyColor';
+import { AuroraSky } from './AuroraSky';
 
 // 天空关键色 [时刻, 顶色, 底色]（时刻 0-1）
 const SKY_KEYS: Array<[number, string, string]> = [
@@ -36,6 +38,16 @@ const SKY_KEYS: Array<[number, string, string]> = [
 
 function lerpColor(a: string, b: string, t: number): string {
   return mix(a, b, t);
+}
+
+/** 原版星结构(Star.cs 字段 1:1;position 为 1920×1200 天空空间) */
+interface SkyStar {
+  x: number; y: number;
+  rot: number; scale: number; type: number;
+  twinkle: number; twSpeed: number; rotSpeed: number;
+  falling: boolean; hidden: boolean;
+  fvx: number; fvy: number; fallTime: number;
+  fadeIn: number;
 }
 
 /** 原版日月贴图(Main.cs:62279 DrawSunAndMoon):Sun.png 整图 114×114;
@@ -758,7 +770,7 @@ export function moonlordThrowSeq(seed: number): Array<{ angle: number; rotV: num
 
 // ================= 晨昏耀斑贴图（Misc/Sunflare/*） =================
 
-type SunflareTex = 'flare1' | 'flare2' | 'bokeh' | 'spectra' | 'pointblurry' | 'pointsharp' | 'colorgradient';
+type SunflareTex = 'flare1' | 'flare2' | 'bokeh' | 'spectra' | 'pointblurry' | 'pointsharp' | 'colorgradient' | 'colorgradientdither';
 
 const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
   flare1: 'Misc_Sunflare_flare1.png',
@@ -768,6 +780,7 @@ const SUNFLARE_TEX_FILE: Record<SunflareTex, string> = {
   pointblurry: 'Misc_Sunflare_Lens_PointBlurry.png',
   pointsharp: 'Misc_Sunflare_Lens_PointSharp.png',
   colorgradient: 'Misc_Sunflare_colorgradient.png',
+  colorgradientdither: 'Misc_Sunflare_colorgradientdither.png',
 };
 
 /** 镜头元素乘色缓存（lighter 叠加前先 multiply 着色——LensFlareElement.Color :422 等） */
@@ -813,6 +826,8 @@ export interface SkyFrameCtx {
     lavaLine: number;
     crimson: boolean;
     flags: Record<string, boolean>;
+    /** Main.dayRate(星空 fadeIn/坠星推进用,缺省 1) */
+    dayRate?: () => number;
     /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；稀有云门消费 theConstant/tenthAnniversary） */
     seedFlags?: { theConstant?: boolean; tenthAnniversary?: boolean };
     store: {
@@ -825,8 +840,23 @@ export interface SkyFrameCtx {
   scene: {
     zoneDesert: boolean; zoneBeach: boolean; zoneJungle: boolean;
     zoneCorrupt: boolean; zoneCrimson: boolean; zoneHallow: boolean;
+    /** 群系光照影响(Game 每 tick 平滑写入;日月绘制色 SetBackColor 群系块消费) */
+    biomeLightInfluence?: {
+      corrupt: number; crimson: number; jungle: number; mushroom: number; graveyard: number;
+    };
   } | null;
-  player: { cx: number; cy: number; vx?: number } | null;
+  player: {
+    cx: number; cy: number; vx?: number;
+    /** 阳光炽灼蓄能（Player.cs:2228；0-300）——drawLensFlare AdjustIntensity 的
+     *  sunScorchCounter 分支（NextHorizonRenderer.cs:398-406）消费 */
+    sunScorchCounter?: number;
+    /** player.head 语义头槽号（Player.cs:25336/:35315-35322 时装优先）——太阳分支
+     *  head==12（物品 237 太阳镜）→ Sun2 骷髅头太阳（Main.cs:62365） */
+    headArmorSlot?: number;
+    /** AdvancedShadows 位置历史环（Player.cs:4123-4141；[len−1]=最新）——耀斑
+     *  元素布点公式的玩家残影项（LensFlareElement.cs:34-37）消费 */
+    advancedShadows?: ReadonlyArray<{ x: number; y: number }>;
+  } | null;
   clock: { dayCount: number; timeOfDay: number; isDay: boolean } | null;
   camX: number; camY: number; z: number; viewW: number; viewH: number;
   /** Main.bgAlphaFrontLayer[4]（海洋群系前景层渐变，BiomeBackground.frontLayer()[4]
@@ -834,10 +864,211 @@ export interface SkyFrameCtx {
   oceanFrontAlpha?: number;
 }
 
+/** AdjustIntensity（NextHorizonRenderer.cs:393-408 一比一，纯函数供测试）：
+ *  常态 intensity = (temporal×celestial)³；sunScorchCounter>0（吸血鬼种子阳光
+ *  炽灼,Player.cs:2228）时**整体替换**为 lerp(0,300,counter) 的 1−(1−lerp)² 曲线
+ *  （counter=300 → 1；150 → 0.75；1 → ≈0.0067），再 ×celestial ×5（正午耀斑
+ *  放大 5 倍的"阳光灼眼"档）。counter 透传链：Player.updateSunScorchValues →
+ *  Renderer.render frameCtx.player.sunScorchCounter → drawLensFlare。 */
+export function adjustFlareIntensity(temporalIntensity: number, celestialVisibility: number,
+  sunScorchCounter: number): number {
+  let num = temporalIntensity;                          // :395
+  num *= celestialVisibility;                           // :396
+  num *= num * num;                                     // :397 → (t·c)³
+  if (sunScorchCounter > 0) {                           // :399
+    let lerpValue = lerpValueClamped(0, 300, sunScorchCounter);   // :401 GetLerpValue(clamped)
+    lerpValue = 1 - lerpValue;                          // :402
+    num = 1 - lerpValue * lerpValue;                    // :403
+    num *= celestialVisibility;                         // :404
+    num *= 5;                                           // :405
+  }
+  return num;
+}
+
+/** Main.cs:62415-62416：sunModY/moonModY = (short)(modY × 0.999)——double→short
+ *  截断向零（C# 显式转换语义）+ int16 回卷；纯函数供测试。 */
+export function decayCelestialModY(modY: number): number {
+  const t = Math.trunc(modY * 0.999);
+  return (t << 16) >> 16;       // 截断值取低 16 位按符号扩展（unchecked short 强转）
+}
+
+/** LensFlareElement.Draw :34-37 玩家残影项（纯函数供测试）：最近 0 帧 vs
+ *  min(4, count−1) 帧前位置差 v（世界坐标），在"太阳→屏心"屏向单位轴上的投影 ×|v|。
+ *  count≤1 → v=(0,0) → 恒 0（SafeNormalize(UnitX)·|v|=0）；本仓残影环
+ *  Player.advancedShadows 尾插 ≤31 项（[len−1]=最新，对应原版 _advancedShadows
+ *  环的 GetAdvancedShadow(0)，Player.cs:4123-4131），60/31 环深差不影响
+ *  min(4,·) 取样。该系统 = 移动残影（Starboard 彩虹拖尾/鱼龙坐骑尾迹等
+ *  PlayerDrawLayers :2711+ 消费），非 shadowDodge 躲闪。 */
+export function flareShadowTerm(shadows: ReadonlyArray<{ x: number; y: number }> | undefined,
+  sunX: number, sunY: number, cx: number, cy: number): number {
+  const arr = shadows;
+  const n = arr?.length ?? 0;
+  if (!arr || n <= 1) return 0;
+  const newest = arr[n - 1];
+  const older = arr[n - 1 - Math.min(4, n - 1)];        // :36 GetAdvancedShadow(Math.Min(4, count−1))
+  let vx = newest.x - older.x, vy = newest.y - older.y;
+  const vLen = Math.hypot(vx, vy);
+  if (vLen === 0) { vx = 1; vy = 0; }                   // :37 v.SafeNormalize(Vector2.UnitX)
+  else { vx /= vLen; vy /= vLen; }
+  let dx = sunX - cx, dy = sunY - cy;
+  const dLen = Math.hypot(dx, dy);
+  if (dLen === 0) { dx = 0; dy = -1; }                  // (sun−center).SafeNormalize(−UnitY)
+  else { dx /= dLen; dy /= dLen; }
+  return (vx * dx + vy * dy) * vLen;                    // :37 Dot(...) × v.Length()
+}
+
 export class SkyRenderer {
-  private stars: Array<{ x: number; y: number; s: number }> = [];
-  /** 原版云贴图（Cloud.cs:114-146）：0-3 常态/4-8 高层薄云/9-13 远空灰云/
-   *  14-17 低空白云/18-21 雨云·风暴云/22-40 稀有云（RollRareCloud 世界旗标门） */
+  // ---- 原版星空(Star.cs + Main.DrawStarsInBackground :62467-62606,2026-08-20
+  //      全量 1:1 替换方块近似)----
+  private stars: SkyStar[] = [];
+  private numStars = 0;
+  private starTexs: Array<ImageBitmap | HTMLImageElement | null> = new Array(4).fill(null);
+  /** Star.SpawnStars(:86-135):数量 200-400(FastRandom 随机种子=每次进图重掷),
+   *  位置 X Next(1921)/Y Next(1201)、type Next(0,4)、1/40 概率 scale×2+速度减半 */
+  private spawnStar(s: number): void {
+    const R = () => Math.random();
+    const next = (min: number, max?: number) => max === undefined
+      ? Math.floor(R() * min) : min + Math.floor(R() * (max - min));
+    const star: SkyStar = {
+      x: next(1921), y: next(1201),
+      rot: next(628) * 0.01,
+      scale: next(70, 130) * 0.006,
+      type: next(0, 4),
+      twinkle: next(60, 101) * 0.01,
+      twSpeed: next(30, 110) * 0.0001,
+      rotSpeed: next(5, 50) * 0.0001,
+      falling: false, hidden: false, fvx: 0, fvy: 0, fallTime: 0, fadeIn: 0,
+    };
+    if (next(2) === 0) star.twSpeed *= -1;
+    if (next(2) === 0) star.rotSpeed *= -1;
+    if (next(40) === 0) { star.scale *= 2; star.twSpeed /= 2; star.rotSpeed /= 2; }
+    if (s >= 0) this.stars[s] = star; else this.stars.push(star);
+  }
+  /** SpawnStars(-1) 全量生成(单星重生走 spawnStar(i) 的 10 次探位版:
+   *  取与既有星最小间距最大化的 X——SpawnStars :110-130) */
+  private spawnStars(): void {
+    this.stars = [];
+    this.numStars = 200 + Math.floor(Math.random() * 200);   // Next(200,400)
+    for (let i = 0; i < this.numStars; i++) this.spawnStar(-1);
+  }
+  /** Star.Update(:70-113):fadeIn 夜间渐显(6.1728395e-5·dayRate·10/tick)、
+   *  twinkle 0.6-1.0 往返、rotation 环绕;falling 支三倍速+0.5/tick 自旋 */
+  private updateStar(s: SkyStar, dayRate: number): void {
+    if (s.falling && !s.hidden) {
+      s.fallTime += dayRate;
+      const k = (dayRate + 99) / 100;
+      s.x += s.fvx * k; s.y += s.fvy * k;
+      if (s.y > 1500) s.hidden = true;
+      s.twinkle += s.twSpeed * 3;
+      if (s.twinkle > 1) { s.twinkle = 1; s.twSpeed *= -1; }
+      else if (s.twinkle < 0.6) { s.twinkle = 0.6; s.twSpeed *= -1; }
+      s.rot += 0.5;
+      if (s.rot > 6.28) s.rot -= 6.28;
+      return;
+    }
+    if (s.fadeIn > 0) {
+      s.fadeIn = Math.max(0, s.fadeIn - 6.1728395e-5 * dayRate * 10);
+    }
+    s.twinkle += s.twSpeed;
+    if (s.twinkle > 1) { s.twinkle = 1; s.twSpeed *= -1; }
+    else if (s.twinkle < 0.6) { s.twinkle = 0.6; s.twSpeed *= -1; }
+    s.rot += s.rotSpeed;
+    if (s.rot > 6.28) s.rot -= 6.28;
+    if (s.rot < 0) s.rot += 6.28;
+  }
+  /** Star.UpdateStars(:137-163):昼 time≥27000 重生 hidden 星;逐星 Update */
+  private updateStars(dayRate: number, isDay: boolean, dayTicks: number): void {
+    if (!this.stars.length) this.spawnStars();
+    if (isDay && dayTicks >= 27000) {
+      for (let i = 0; i < this.numStars; i++) {
+        if (this.stars[i].hidden) { this.spawnStar(i); this.stars[i].fadeIn = 1; }
+      }
+    }
+    for (let i = 0; i < this.numStars; i++) this.updateStar(this.stars[i], dayRate);
+  }
+  /** Star.StarFall(:57-81):离 x 最近且未 falling/hidden 的星标 falling
+   *  (AI_148 StarSpawner 出生时触发,Projectile.cs:50204——玩家在地表上方才调) */
+  starFallAt(worldX: number, worldWidth: number): void {
+    if (!this.stars.length) return;
+    const num3 = worldX / worldWidth * 1920;
+    let best = -1, bestD = -1;
+    for (let i = 0; i < this.numStars; i++) {
+      const s = this.stars[i];
+      if (s.hidden || s.falling) continue;
+      const d = Math.abs(s.x - num3);
+      if (bestD === -1 || d < bestD) { best = i; bestD = d; }
+    }
+    if (best >= 0) {
+      const s = this.stars[best];
+      s.fallTime = 0;
+      s.falling = true;
+      s.fvy = (700 + Math.floor(Math.random() * 301)) * 0.01;
+      s.fvx = (Math.floor(Math.random() * 801) - 400) * 0.01;
+    }
+  }
+  private starTex(i: number): ImageBitmap | HTMLImageElement | null {
+    let t = this.starTexs[i];
+    if (t === null) {
+      t = loadTex(`Star_${i}.png`);
+      this.starTexs[i] = t;
+    }
+    return t.width > 0 ? t : null;
+  }
+  /** Main.DrawStar(:62481-62604)逐式:亮度=(255−bg.R−100)·twinkle·(1−fadeIn)
+   *  三通道均值×1.4 钳 255;位置 (pos/1920,·/1200)×屏+(0,bgTopY),X/Y 环绕;
+   *  坠星带 8 段尾迹(fallTime 钳 30,逐段 ×0.4 位移衰减)。shimmer 分支
+   *  (:62521-62542)依赖 shimmerAlpha>0——本仓无微光天空态,恒 0=原版跳过=1:1 */
+  private drawStar(
+    ctx: CanvasRenderingContext2D, i: number, starOpacity: number,
+    viewW: number, viewH: number, bgTopY: number,
+  ): void {
+    const s = this.stars[i];
+    if (!s || s.hidden) return;
+    const cots = this.cots;
+    const bgR = cots ? cots[0] : 255, bgG = cots ? cots[1] : 255, bgB = cots ? cots[2] : 255;
+    const num2 = 1 - s.fadeIn;
+    const r0 = (255 - bgR - 100) * s.twinkle * num2;
+    const g0 = (255 - bgG - 100) * s.twinkle * num2;
+    const b0 = (255 - bgB - 100) * s.twinkle * num2;
+    let lum = Math.floor((r0 + g0 + b0) / 3);
+    if (lum <= 0) return;
+    lum = Math.min(255, Math.floor(lum * 1.4));
+    const alpha = Math.max(0, Math.min(1, (lum / 255) * starOpacity));
+    // 位置映射(:62544-62549)
+    let px = s.x / 1920 * viewW;
+    let py = s.y / 1200 * viewH + bgTopY;
+    if (!s.falling) {
+      if (px < 0) px += viewW;
+      if (px > viewW) px -= viewW;
+      if (py < 0) py += viewH;
+      if (py > viewH) py -= viewH;
+    }
+    const tex = this.starTex(s.type);
+    if (!tex) return;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(s.rot);
+    ctx.imageSmoothingEnabled = true;   // 星为软边贴图
+    const size = tex.width * s.scale;
+    if (s.falling) {
+      // 尾迹(:62574-62595):fallTime 钳 30,逐段 fallSpeed·j·0.4 位移+scale/alpha 衰减
+      let ft = Math.min(s.fallTime, 30);
+      for (let j = 1; j < ft; j++) {
+        const tx = px - s.fvx * j * 0.4, ty = py - s.fvy * j * 0.4;
+        const sc = s.scale * (1 - j / 30);
+        const a = alpha * (1 - j / 30);
+        ctx.save();
+        ctx.globalAlpha = a;
+        ctx.translate(tx, ty);
+        ctx.drawImage(tex, -tex.width * sc / 2, -tex.height * sc / 2, tex.width * sc, tex.height * sc);
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(tex, -size / 2, -size / 2, size, tex.height * s.scale);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
   private cloudTexs: Array<ImageBitmap | HTMLImageElement | null> = new Array(41).fill(null);
   private vclouds: VanillaCloud[] = [];
   /** 风——原版风场模型(Main.cs:10800/58222-58310):
@@ -854,9 +1085,7 @@ export class SkyRenderer {
   };
 
   constructor() {
-    for (let i = 0; i < 120; i++) {
-      this.stars.push({ x: Math.random(), y: Math.random() * 0.7, s: Math.random() < 0.2 ? 2 : 1 });
-    }
+    this.spawnStars();
     // 云贴图五族(Cloud_0-21)首用懒加载:绘制/选型路径经 cloudTex(i) 触发,未就绪
     // 跳帧自愈(云淡入本身 >1s,无可见差异)。此前构造器全量装载 22 张——雨云/
     // 风暴云(18-21)无雨天气永不出现,白载;且 SkyRenderer 在菜单+进图各构造一次,
@@ -878,9 +1107,33 @@ export class SkyRenderer {
   }
 
   sunTex: ImageBitmap | HTMLImageElement;
+  /** 日食太阳(Main.cs:62345-62348 eclipse → TextureAssets.Sun3) */
+  private sun3Tex: ImageBitmap | HTMLImageElement | null = null;
+  private sun3TexImg(): ImageBitmap | HTMLImageElement | null {
+    if (!this.sun3Tex) this.sun3Tex = onBitmap(loadTex('Sun3.png'), (b) => { this.sun3Tex = b; });
+    return this.sun3Tex.width > 0 ? this.sun3Tex : null;
+  }
+  /** 骷髅头太阳 Sun2(Main.cs:62365-62369:!gameMenu && player.head==12 →
+   *  TextureAssets.Sun2;头槽 12=物品 237 太阳镜,经 frameCtx.player.headArmorSlot
+   *  注入——菜单态 frameCtx=null 即 !gameMenu 门同式) */
+  private sun2Tex: ImageBitmap | HTMLImageElement | null = null;
+  private sun2TexImg(): ImageBitmap | HTMLImageElement | null {
+    if (!this.sun2Tex) this.sun2Tex = onBitmap(loadTex('Sun2.png'), (b) => { this.sun2Tex = b; });
+    return this.sun2Tex.width > 0 ? this.sun2Tex : null;
+  }
+  /** Extra[280] 墨镜叠层(Main.cs:62380-62385:Sun2 档于太阳上再画一张,
+   *  color3 = (color.R,color.G,color.B,100)——非日食 color 恒白) */
+  private extra280Tex: ImageBitmap | HTMLImageElement | null = null;
+  private extra280TexImg(): ImageBitmap | HTMLImageElement | null {
+    if (!this.extra280Tex) this.extra280Tex = onBitmap(loadTex('Extra_280.png'), (b) => { this.extra280Tex = b; });
+    return this.extra280Tex.width > 0 ? this.extra280Tex : null;
+  }
   // ---- 2026-08-20 原版地平线系统(NextHorizonRenderer)----
   /** 本帧晨昏可见性(draw() 开头算好,日/月/渐变/光斑消费) */
   private horizonVisCache: { sunrise: number; sunset: number; celestial: number } | null = null;
+  /** BackgroundDrawers 带表注入(Renderer 每帧注入 biomeBg.surfaceGradientBands;
+   *  SunGradients.BackgroundDrawers 13 项的取数闭包) */
+  biomeBgBands: (() => Array<{ rgb: readonly [number, number, number]; alpha: number }>) | null = null;
   /** 上一帧晨昏可见性(渲染器读去写 setFrameHorizon——帧序上 render 先画天空
    *  后写状态,光照引擎下一帧消费) */
   get horizonVis(): { sunrise: number; sunset: number; celestial: number } | null {
@@ -934,6 +1187,29 @@ export class SkyRenderer {
     const lerpV = Math.max(0, Math.min(1, (camTopTiles - 40) / Math.max(1, this.fx.surfaceY / 16 - 40)));
     const val = (1 - lerpV) * num;
     const gy = Math.max(0, val) - num;
+    // BackgroundDrawers(SunGradients.cs:175-189):群系背景树顶渐隐带,画在
+    // 晨昏渐变【之前】(DrawHorizon :99-102 序)。带色×ColorOfSurfaceBackgrounds
+    // (=cots)×weight;gradientRect(BackgroundGradientDrawer.GetGradientRect :70-74:
+    // y = max(0,(worldSurface·16−screenPos.Y−2400)·0.1)−400)
+    const bands = this.biomeBgBands?.() ?? [];
+    if (bands.length && this.cots) {
+      const dither = this.sunflareTexLoad('colorgradientdither');
+      if (dither && dither.width > 0) {
+        const screenTopD = camY - viewH / 2 / (this.frameCtx?.z ?? 1);
+        const gy2 = Math.max(0, (this.fx.surfaceY * 16 - screenTopD - 2400) * 0.10000000149011612) - num;
+        for (const b of bands) {
+          if (b.alpha <= 0) continue;
+          const im = this.tintTex(dither,
+            b.rgb[0] * this.cots[0] / 255, b.rgb[1] * this.cots[1] / 255, b.rgb[2] * this.cots[2] / 255,
+            `band${b.rgb[0]}_${b.rgb[1]}`);
+          ctx.save();
+          ctx.globalAlpha = Math.min(1, b.alpha);
+          ctx.imageSmoothingEnabled = true;
+          ctx.drawImage(im, 0, 0, dither.width, dither.height, 0, gy2, viewW, viewH + num);
+          ctx.restore();
+        }
+      }
+    }
     const su = vis.sunrise, sd = vis.sunset;
     // ★XNA 语义(Color.White×vis 全通道乘):贡献 = tex.rgb·vis²+dst·(1−vis)
     //   ——rgb 与 α【都】乘 vis;仅 globalAlpha=vis 是 vis¹(渐隐边缘偏亮)。
@@ -1223,6 +1499,9 @@ export class SkyRenderer {
     this.weatherRef = w;
   }
 
+  /** 极光天空（AuroraSky.cs 1:1；激活门由 Game.updateWeather 接线） */
+  readonly aurora = new AuroraSky();
+
   /** 塔天空激活时的云量乘子（GetCloudAlpha()；sky.draw 每帧写，drawVanillaClouds 读） */
   private towerCloudMul = 1;
 
@@ -1407,6 +1686,27 @@ export class SkyRenderer {
       ctx.restore();
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** 极光绘制(AuroraSky.cs Draw/DrawAuroraSky):帧参数组装 + 地表门输入。
+   *  月锚 = Main.LastCelestialBodyPosition(Main.cs:62458-62459 月屏位/ScreenSize;
+   *  AuroraSky.cs:129-130 Y 侧再乘 (1920/1080)/(屏宽/屏高) 纵横比较正)——
+   *  moonScreen 由本帧月亮分支写入(满月分支带 1/2 磁吸月位 :356-358 消费)。 */
+  private drawAurora(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    camY: number, dtMs: number, nightTicks: number, isDay: boolean, moonPhase: number): void {
+    const zQ = this.frameCtx?.z ?? 1;
+    const camTopTiles = (camY - viewH / 2 / zQ) / 16;   // Main.screenPosition.Y/16
+    const ms = this.moonScreen;
+    const moonFrac = ms
+      ? { x: ms.x / viewW, y: (ms.y / viewH) * (1920 / 1080) / (viewW / viewH) }
+      : null;
+    this.aurora.draw(ctx, viewW, viewH, {
+      nightTicks, isDay, moonPhase,
+      camTopTiles,
+      surfaceTiles: this.fx.surfaceY / 16,
+      moonFrac,
+      dtSec: dtMs / 1000,
+    });
   }
 
   /** 派对气球绘制（PartySky.Update/Draw :130-198 精简核：上升 + 风漂移 + 视差 1/depth） */
@@ -1684,6 +1984,7 @@ export class SkyRenderer {
     this.butterflyDay = -1;
     this.clearTowerSky();
     this.clearMoonlordDrama();
+    this.aurora.reset();   // SkyManager.Reset(AuroraSky.cs:435-439)
   }
 
   /** SetPositionInWorldBasedOnScreenSpace（AmbientSky.cs:47-51）：
@@ -2383,15 +2684,31 @@ export class SkyRenderer {
   /** 夜月屏位(月亮分支每帧写入,r=月盘半径;Renderer.compositeLight 消费——
    *  光照图注入月盘满光,月区乘法≈恒等=原版"月亮不吃乘光"语义) */
   moonScreen: { x: number; y: number; r: number } | null = null;
+  /** sunModY/moonModY（Main.cs:1244/:1246 static short）：日月垂直抓取偏移——
+   *  绘制位 = 基准 y + modY（:62376/:62395），LastCelestialBodyPosition（:62458,
+   *  即 sunScreen/moonScreen）与命中盒（:62413）同源。游戏内无写点（拖拽彩蛋仅
+   *  gameMenu,:62417）→ 恒 0；标题屏写点 = setCelestialModY（TitleMenu 拖拽 →
+   *  mainFlow.onSunMoonGrab → MenuBackground.setCelestialModY）。每帧 ×0.999 衰减
+   *  （:62415-62416，见 sky.draw 日月段尾） */
+  private sunModY = 0;
+  private moonModY = 0;
+  /** 标题屏拖拽写点（Main.cs:62430 sunModY=(short)(mouseY−num4) / :62440
+   *  moonModY=(short)(mouseY−num7)）——本方法 short 截断同式 */
+  setCelestialModY(dayTime: boolean, modY: number): void {
+    const t = Math.trunc(modY);
+    const s = (t << 16) >> 16;
+    if (dayTime) this.sunModY = s; else this.moonModY = s;
+  }
   private sunflareTex: Partial<Record<SunflareTex, HTMLImageElement>> = {};
 
   /** GetVisibilities（NextHorizonRenderer.cs:199-239 一比一）：
    *  atmo ×(1-cloudAlpha)² ×(1-蘑菇光影响[无→1])；日出窗 = time∈(0,2700)↑·(3600,10800)↓；
    *  日落窗 = 54000−10800..−3600 ↑ 与 −3600..54000 ↓²；夜/日食清零 */
   private sunVisibilities(dayTimeTicks: number, isDay: boolean, eclipse: boolean, atmo: number,
-    cloudAlpha: number): { sunset: number; sunrise: number; celestial: number } {
+    cloudAlpha: number, mushroom = 0): { sunset: number; sunrise: number; celestial: number } {
     const celestial = this.celestialEffectPower(dayTimeTicks, isDay);   // :315-325
     let vis = atmo * (1 - cloudAlpha) * (1 - cloudAlpha);               // :205-209
+    vis *= 1 - mushroom;                                                // :210(蘑菇影响)
     let sunrise = vis, sunset = vis;
     if (isDay) {
       // :215-223（Remap 单调钳位插值）
@@ -2468,23 +2785,29 @@ export class SkyRenderer {
     // SunVisibilityEnabled 门（HorizonHelper.cs:42 = _targetUpToDate）：首帧采样未就绪
     // 时不画光斑（原版同）——进世界后第二帧起生效
     if (!this.sunVisSampled) return;
-    // AdjustIntensity（:393-408）：intensity = (temporal×celestial)³（无 sunScorch），
+    // AdjustIntensity（:393-408，纯函数 adjustFlareIntensity）：常态
+    //  intensity = (temporal×celestial)³；sunScorchCounter>0 分支整体替换为
+    //  1−(1−lerp(0,300,counter))² 曲线 ×celestial ×5（吸血鬼种子阳光炽灼档）——
     //  再 × 遮挡可见度（原版在 shader 采样 SunVisibilityPixel alpha）。
     //  ★2026-08-20 校勘：旧实现多乘一次 celestial（(t·c)³·c ≠ (t·c)³,晨昏耀斑
     //  整体过暗——"以前有移植不代表准确"的实证件）
     const occ = this.sunVisibility;
-    const num = (sunrise * celestial) ** 3 * occ;
-    const num2 = (sunset * celestial) ** 3 * occ;
+    const scorch = this.frameCtx?.player?.sunScorchCounter ?? 0;
+    const num = adjustFlareIntensity(sunrise, celestial, scorch) * occ;
+    const num2 = adjustFlareIntensity(sunset, celestial, scorch) * occ;
     if (num <= 0.01 && num2 <= 0.01) return;
     const cx = viewW / 2, cy = viewH / 2;
     // :46-49 轴角 + Main.screenPosition.Y·0.001(世界屏顶 Y——旧误用 sun.y 屏幕坐标)
     const baseRot = Math.atan2(cy - sun.y, cx - sun.x) + this.lastScreenTopY * 0.001;
+    // 玩家残影项（LensFlareElement.cs:34-37）：本仓等价 = Player.advancedShadows
+    // 位置历史环（翅膀 45 彩虹拖尾同源数据）；无残影（环 ≤1 项）恒 0
+    const shadowD = flareShadowTerm(this.frameCtx?.player?.advancedShadows, sun.x, sun.y, cx, cy) * -0.0002;
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'lighter';
     ctx.imageSmoothingEnabled = true;
-    if (num2 > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num2, 'sunset');
-    if (num > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num, 'sunrise');
+    if (num2 > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num2, 'sunset', shadowD);
+    if (num > 0.01) this.drawLensFlareSet(ctx, sun.x, sun.y, cx, cy, baseRot, num, 'sunrise', shadowD);
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -2492,9 +2815,11 @@ export class SkyRenderer {
   /** DrawSunsetFlare / DrawSunriseFlare 元素表（:410-541 逐元素 1:1）。
    *  元素定位（LensFlareElement.Draw :28-52）：i ∈ [0,RepeatTimes)——
    *  scale = ScaleStart+ScaleOverIndex·i；alpha = Color×(1+IntensityOverIndex·i)×intensity；
-   *  d = (DistanceStart+DistanceAlongIndex·i)%1；pos = Lerp(sun,center,d*2)；rot = 轴角+Rotation */
+   *  d = (DistanceStart+DistanceAlongIndex·i+玩家残影项)%1（:43 num2 += num·−0.0002；
+   *  %1 保号=C# 语义,残影项可为负→元素沿轴外推）；pos = Lerp(sun,center,d*2)；rot = 轴角+Rotation */
   private drawLensFlareSet(ctx: CanvasRenderingContext2D, sunX: number, sunY: number,
-    cx: number, cy: number, baseRot: number, intensity: number, which: 'sunset' | 'sunrise'): void {
+    cx: number, cy: number, baseRot: number, intensity: number, which: 'sunset' | 'sunrise',
+    shadowD = 0): void {
     type Row = [SunflareTex, number, number, number, number, number, [number, number, number], number, number, number];
     // [贴图, Repeat, ScaleStart, ScaleOver, DistStart, DistStep, RGB, 强度乘, IntensityOverIndex, Rotation]
     const sets: Row[] = which === 'sunset' ? [
@@ -2523,8 +2848,8 @@ export class SkyRenderer {
         const scale = scaleStart + scaleOver * i;                       // :40
         const a = mul * (1 + ioi * i) * intensity;                      // :41
         if (a <= 0.01) continue;
-        let d = distStart + distStep * i;                               // :42-43
-        d = ((d % 1) + 1) % 1;
+        let d = distStart + distStep * i + shadowD;                     // :42-43 num2 += num·−0.0002
+        d %= 1;                                                         // :44 %1 保号（残影项可负）
         const px = sunX + (cx - sunX) * (d * 2);                        // :45
         const py = sunY + (cy - sunY) * (d * 2);
         ctx.save();
@@ -2663,12 +2988,16 @@ export class SkyRenderer {
     // +调色板相位(Main.HorizonPhase)——日/月绘制、晨昏渐变与 Renderer.
     // setFrameHorizon(光种渗入)共用;镜头光斑走 drawWorldFx 链不变
     this.horizonVisCache = this.sunVisibilities(dayTimeTicks, isDay, !!clock.eclipse,
-      this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0);
+      this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0,
+      this.frameCtx?.scene?.biomeLightInfluence?.mushroom ?? 0);
     this.horizonPhase = horizonPhaseOf(Math.max(0, Math.min(7, clock.moonPhase ?? 0)), isDay, dayTimeTicks);
     // Main.screenPosition.Y(屏顶世界 Y)与 zoom——天空贴图 bgTopY/日月轨迹/
     // 镜头光斑轴角微扰共用
     const zQ = this.frameCtx?.z ?? 1;
     const screenTopWorld = camY - viewH / 2 / zQ;
+    // bgTopY(Main.cs:61483:−screenPosition.Y/(worldSurface·16−600)·200;worldSurface≤30 → 0)
+    const skyBgTopY = this.fx.surfaceY > 30
+      ? -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200 : 0;
     // 镜头光斑可见性复用（drawWorldFx）
     this.lastDayTimeTicks = isDay ? dayTimeTicks : 0;
     this.lastEclipse = !!clock.eclipse;
@@ -2695,9 +3024,8 @@ export class SkyRenderer {
     if (skyTex && skyTex.width > 0 && this.cots) {
       const tinted = this.tintSkyTex(skyTex);
       ctx.imageSmoothingEnabled = true;
-      const bgTopY0 = -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200;
       const dh0 = Math.max(viewH, skyTex.height);
-      ctx.drawImage(tinted, 0, 0, skyTex.width, skyTex.height, 0, bgTopY0, viewW, dh0);
+      ctx.drawImage(tinted, 0, 0, skyTex.width, skyTex.height, 0, skyBgTopY, viewW, dh0);
     } else {
       const grad = ctx.createLinearGradient(0, 0, 0, viewH);
       grad.addColorStop(0, top);
@@ -2721,11 +3049,8 @@ export class SkyRenderer {
     if (this.horizonVisCache && (this.horizonVisCache.sunrise > 0.003 || this.horizonVisCache.sunset > 0.003)) {
       this.drawHorizonGradients(ctx, viewW, viewH, camY, this.horizonVisCache, this.horizonPhase);
     }
-    // 闪电白（原版 Main.cs:63346：bgColor 向白 lerp lightning——纯闪白不画贴图）
-    if (this.weatherRef && this.weatherRef.lightning > 0) {
-      ctx.fillStyle = `rgba(255,255,255,${Math.min(1, this.weatherRef.lightning * 0.85)})`;
-      ctx.fillRect(0, 0, viewW, viewH);
-    }
+    // 闪电白已改走 ColorOfTheSkies 链(Main.cs:63346-63355:bgColor 三通道向 1
+    // lerp lightning,天空/远景/光种子同步闪亮)——旧全屏白闪 overlay 退役
     // 墓地天空压暗（Main.cs:62990-62996 SetBackColor GraveyardInfluence）：bgColor
     // 三通道 ×(1 − 0.6×intensity)——晴空/夜空整体转灰暗；强度为 Game 平滑后的
     // GraveyardVisualIntensity（weather.graveyardVisual），>0 即生效（remix 分支不适用）
@@ -2791,20 +3116,24 @@ export class SkyRenderer {
     }
 
     const isNight = t < 0.27 || t > 0.78;
-    // 星星
+    // 星星(DrawStarsInBackground :62467-62606 + DrawStar :62481-62604,2026-08-20
+    // 全量 1:1——贴图/亮度公式/位置映射/坠星尾迹;旧方块近似退役)
     if (isNight) {
-      const fade = Math.min(1, Math.max(0, (t < 0.5 ? (0.27 - t) / 0.05 : (t - 0.78) / 0.05)));
-      // 墓地星光衰减（Main.cs:62469-62478 DrawStarsInBackground）：亮度 ×(1 − 1.4×intensity)，
-      // ≤0 直接跳过星群（intensity ≥ ~0.71 起星空完全被雾吞掉；太阳/月亮照画）
+      // 墓园雾吞(:62471-62479):×(1−1.4·I),≤0 整群跳过
       const starDim = Math.max(0, 1 - gyIntensity * 1.4);
-      ctx.globalAlpha = 0.9 * fade * starDim;
-      ctx.fillStyle = '#E8ECFF';
-      for (const s of this.stars) {
-        const sx = ((s.x * viewW * 2 - camX * 0.1) % (viewW * 2) + viewW * 2) % (viewW * 2);
-        if (sx > viewW) continue;
-        ctx.fillRect(sx, s.y * viewH, s.s, s.s);
+      // 可见性门(:62491-62493):天空够暗才画(remixWorld 恒画)——
+      // 255·(1−cloudAlpha·atmo) − ColorOfTheSkies.R − 25 > 0
+      const cotsR = this.cots ? this.cots[0] : 255;
+      const visGate = 255 * (1 - (this.weatherRef?.cloudAlpha ?? 0) * this.atmoValue(camY)) - cotsR - 25;
+      if (starDim > 0 && visGate > 0) {
+        const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
+        this.updateStars(dayRate, isDay, dayTimeTicks);
+        for (let i = 0; i < this.numStars; i++) this.drawStar(ctx, i, starDim, viewW, viewH, skyBgTopY);
       }
-      ctx.globalAlpha = 1;
+    } else {
+      // 昼间也推进(昼 time≥27000 重生 hidden 星,UpdateStars :148-155)
+      const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
+      this.updateStars(dayRate, isDay, dayTimeTicks);
     }
 
     // ---- 月塔天空装饰层（Nebula/Solar/Stardust/Vortex Sky：远景段黑幕盖星，
@@ -2817,49 +3146,100 @@ export class SkyRenderer {
     // 昼夜时间(我们 0.25/0.75 边界 → 原版 day 0-54000 / night 0-32400)
     const nightTime = !isDay ? ((((t - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
     // 云遮蔽系数(DrawSunAndMoon :62352-62360/:62378-62383:num12/num13 =
-    // 1-蘑菇影响-cloudAlpha×1.5×atmo,钳 0)
+    // 1-蘑菇影响-cloudAlpha×1.5×atmo,钳 0;蘑菇影响 Game 平滑值经 scene 注入)
     const cloudAlpha = this.weatherRef?.cloudAlpha ?? 0;
     const atmoD = this.atmoValue(camY);
-    const sunDim = Math.max(0, 1 - cloudAlpha * 1.5 * atmoD);
-    // bgTopY(Main.cs:61483:−screenPosition.Y/(worldSurface·16−600)·200)——
-    // 日/月轨迹 y = bgTopY + dip·250 + 180(:62290/:62301);★旧移植漏此项,
-    // 日月整体偏低 ~200px(校勘 2026-08-20)。screenTopWorld 在 draw() 头部算好
-    const bgTopY = -screenTopWorld / Math.max(1, this.fx.surfaceY - 600) * 200;
+    const bio = this.frameCtx?.scene?.biomeLightInfluence;
+    const mushI = bio?.mushroom ?? 0;
+    const sunDim = Math.max(0, 1 - mushI - cloudAlpha * 1.5 * atmoD);
+    // 日/月轨迹 y = bgTopY + dip·250 + 180(:62290/:62301);★旧移植漏 bgTopY,
+    // 日月整体偏低 ~200px(校勘 2026-08-20)——skyBgTopY 在 draw() 头部算好共用
+    const bgTopY = skyBgTopY;
+    // LastCelestialBodyPosition（:62458）基准暂存：绘制用衰减前 modY（:62376），
+    // 帧尾 decay 后以衰减值写 sunScreen/moonScreen（:62458-62459 逐帧序）
+    let sunBase: { x: number; y: number } | null = null;
+    let moonBase: { x: number; y: number; r: number } | null = null;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     if (isDay) {
       this.moonScreen = null;
-      const tex = this.sunTex;
+      // 日食换贴图(:62354-62364:eclipse → Sun3;else if !gameMenu && player.head==12 →
+      // Sun2 骷髅头太阳——头槽 12=物品 237 太阳镜;frameCtx.player 存在即游戏内
+      // (菜单不注入 frameCtx = !gameMenu 门),headArmorSlot=时装优先的 player.head 语义)
+      let tex: ImageBitmap | HTMLImageElement = this.sunTex;
+      const s3 = this.sun3TexImg();
+      let flag2 = false;              // Sun2 档（Extra[280] 墨镜叠层门,:62380）
+      if (clock.eclipse && s3 && s3.width > 0) tex = s3;
+      else {
+        const s2 = this.sun2TexImg();                              // :62365-62370
+        if (this.frameCtx?.player?.headArmorSlot === 12 && s2) { tex = s2; flag2 = true; }
+      }
       if ((tex.width > 0) && tex.width > 0) {
         // 原版:x = time/54000*(屏宽+图宽*2)-图宽(横穿);y = bgTopY + |t*2-1|²*250+180(正午最高);
         // scale = (1.2-|t*2-1|²*0.4)*1.1;rotation = t*2-7.3(t=time/54000)
+        // ★:62289 num3 恒用基础 Sun 宽度算——换皮(Sun3/Sun2 64×64)只换绘制贴图,
+        //   x 在 value 重指前已定;曾误用换皮贴图宽 → 日食/墨镜太阳横穿轨迹漂移
+        //   (基础贴图未就绪兜底 114 = Sun.png 原生宽)
         const ft = dayTimeTicks / 54000;
         const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
-        const x = ft * (viewW + tex.width * 2) - tex.width;
+        const sw = this.sunTex.width || 114;
+        const x = ft * (viewW + sw * 2) - sw;
         const y = bgTopY + dip * 250 + 180;
+        const yD = y + this.sunModY;  // :62376 绘制位 = 基准 y + sunModY
         const scale = (1.2 - dip * 0.4) * 1.1;
-        this.sunScreen = { x, y };    // 镜头光斑轴锚（NextHorizonRenderer.GetCelestialBodyPosition）
-        // 双通道(:62364-62374):①本体 = 非日食恒纯白全 α;②叠层 = sunColor×n12
-        // 染色、α = sunColor.B×n12(晨昏给太阳镀日光色,云天渐隐)
-        const [scr, scg, scb] = sunColorOf(dayTimeTicks);
+        sunBase = { x, y };           // 镜头光斑轴锚基准（:62458 衰减后 +sunModY 再写 sunScreen）
+        // 双通道(:62352-62374):①本体 = 非日食恒纯白全 α;日食 = 暗紫
+        //   (255·n12, sunG·n12, sunB·n12, 255·n12);②叠层 = sunColor×n12 染色、
+        //   α = sunColor.B×n12;flag 档(日食 Sun3 :62362-62364 / 太阳镜 Sun2 :62371-62373)
+        //   为 (B−60)·n12
+        // sunColor 群系修正(:63060-63213 腐化/猩红/丛林/蘑菇四块)
+        const sunCol: [number, number, number] = sunColorOf(dayTimeTicks);
+        if (bio) applyBiomeToSun(sunCol, bio);
+        const scr = sunCol[0], scg = sunCol[1], scb = sunCol[2];
+        const ecl = !!clock.eclipse;
+        const flag = ecl || flag2;    // :62371(换皮档 → color2 α=(B−60)·n12)
         const pass2 = () => {
+          const p2a = (flag ? scb - 60 : scb) * sunDim / 255;
+          if (p2a <= 0) return;
           ctx.save();
-          ctx.globalAlpha = Math.max(0, Math.min(1, (scb * sunDim) / 255));
-          ctx.translate(x, y);
+          ctx.globalAlpha = Math.max(0, Math.min(1, p2a));
+          ctx.translate(x, yD);
           ctx.rotate(ft * 2 - 7.3);
-          // color2.RGB = sunColor×n12(:62368-62371)——染色值本身也乘 n12
+          // color2.RGB = sunColor×n12(:62368-62371/:62373)——染色值本身也乘 n12
           const im = (scr > 250 && scg > 250 && scb > 250) ? tex
             : this.tintTex(tex, scr * sunDim, scg * sunDim, scb * sunDim, 'sun');
           ctx.drawImage(im, -tex.width / 2 * scale, -tex.height / 2 * scale, tex.width * scale, tex.height * scale);
           ctx.restore();
         };
-        // 通道①:本体(纯白,α=1)
+        // 通道①:本体
         ctx.save();
-        ctx.translate(x, y);
-        ctx.rotate(ft * 2 - 7.3);
-        ctx.drawImage(tex, -tex.width / 2 * scale, -tex.height / 2 * scale, tex.width * scale, tex.height * scale);
+        if (ecl) {
+          ctx.globalAlpha = Math.max(0, Math.min(1, sunDim));
+          // 暗紫乘染(255·n12, sunG·n12, sunB·n12)
+          const p1 = this.tintTex(tex, 255 * sunDim, scg * sunDim, scb * sunDim, 'sun3');
+          ctx.translate(x, yD);
+          ctx.rotate(ft * 2 - 7.3);
+          ctx.drawImage(p1, -tex.width / 2 * scale, -tex.height / 2 * scale, tex.width * scale, tex.height * scale);
+        } else {
+          ctx.translate(x, yD);
+          ctx.rotate(ft * 2 - 7.3);
+          ctx.drawImage(tex, -tex.width / 2 * scale, -tex.height / 2 * scale, tex.width * scale, tex.height * scale);
+        }
         ctx.restore();
         pass2();
+        // Extra[280] 墨镜叠层(:62380-62385):Sun2 档(color=通道①,非日食恒白 →
+        // color3=(255,255,255,100)),同 vector/rotation/origin/scale 再画一张
+        if (flag2) {
+          const e280 = this.extra280TexImg();
+          if (e280) {
+            ctx.save();
+            ctx.globalAlpha = 100 / 255;
+            ctx.translate(x, yD);
+            ctx.rotate(ft * 2 - 7.3);
+            ctx.drawImage(e280, -e280.width / 2 * scale, -e280.height / 2 * scale, e280.width * scale, e280.height * scale);
+            ctx.restore();
+          }
+        }
         // 注:DrawSun 的 flare1/flare2 两档原版 A 恒 0 不可见(见 sunVisibilities 段
         // 考据注),可见晨昏耀斑全部走 drawLensFlare(drawWorldFx 链),此处不画
       }
@@ -2874,21 +3254,27 @@ export class SkyRenderer {
         const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
         const x = ft * (viewW + mw * 2) - mw;
         const y = bgTopY + dip * 250 + 180;
+        const yD = y + this.moonModY;   // :62395 position = (num6, num7 + moonModY)
         const scale = 1.2 - dip * 0.4;
         const phase = Math.max(0, Math.min(7, clock.moonPhase)); // MoonPhase.cs:3-13(0=满…4=空;旧 dayCount%8 致首夜亏凸月+导入脱钩)
         // 月绘制色(:62378-62383 + SetBackColor:63354-63359):非血月恒白,
         // 血月红移;云遮蔽 ×(1-cloudAlpha·1.5·atmo)。★XNA moonColor*=num13 是
         // 全通道乘:贡献 = tex.rgb·mr·num13²(rgb 与 α 都乘)——染色值也乘 sunDim
-        const [mr, mg, mb] = moonDrawColor(nightTime, !!(clock as { bloodMoon?: boolean }).bloodMoon);
+        const moonCol: [number, number, number] = moonDrawColor(nightTime,
+          !!(clock as { bloodMoon?: boolean }).bloodMoon);
+        // 月色群系修正(蘑菇跨通道块 :63200-63228;★原文快照语义逐字保留)
+        if (bio) applyBiomeToMoon(moonCol, bio);
+        const mr = moonCol[0], mg = moonCol[1], mb = moonCol[2];
         const moonA = sunDim;
         const moonPlain = sunDim >= 0.999 && mr > 250 && mg > 250 && mb > 250;
         // ★夜月屏位登记(2026-08-20):compositeLight 在光照图注入月盘满光
         //   ——原版月亮直绘 backbuffer 不吃乘光,全屏乘光链曾把月亮压到
         //   月光地板(~0.075,"夜里的月亮不亮");月盘区乘法≈恒等即恢复原色
-        this.moonScreen = { x, y, r: (mw / 2) * scale };
+        //   (:62458 语义:基准 y + 帧尾衰减后 moonModY——见下方 decay 段)
+        moonBase = { x, y, r: (mw / 2) * scale };
         ctx.save();
         ctx.globalAlpha = moonA;
-        ctx.translate(x, y);
+        ctx.translate(x, yD);
         ctx.rotate(ft * 2 - 7.3);
         // 原版:竖条第 moonPhase 帧(0,MW*moonPhase,MW,MW),原点为中心;
         // 染色 = 月色×sunDim(全通道乘语义),晴夜白月直绘快速路径
@@ -2902,11 +3288,25 @@ export class SkyRenderer {
       }
     }
     ctx.restore();
+    // sunModY/moonModY 每帧 ×0.999 衰减（Main.cs:62415-62416，short 截断——
+    // 游戏内无写点恒 0 为 no-op；标题屏拖拽残留在切进世界后同式缓回 0）。
+    // ★帧序对齐原版：绘制用衰减前值（:62376/:62395），LastCelestialBodyPosition
+    // （:62458 = sunScreen/moonScreen 语义）用衰减后值
+    this.sunModY = decayCelestialModY(this.sunModY);
+    this.moonModY = decayCelestialModY(this.moonModY);
+    if (sunBase) this.sunScreen = { x: sunBase.x, y: sunBase.y + this.sunModY };
+    if (moonBase) this.moonScreen = { x: moonBase.x, y: moonBase.y + this.moonModY, r: moonBase.r };
 
     // 云：原版素材与规则（Cloud.cs / NextHorizonRenderer.DrawCloud）；
     // 塔天空激活时云量乘 GetCloudAlpha() = (1-fade)*0.3+0.7（各 Sky 同式 :116-119）
     this.towerCloudMul = this.towerCloudAlphaMul();
     this.drawVanillaClouds(ctx, viewW, viewH, isNight, dtMs, camX, camY);
+
+    // ---- 极光（AuroraSky.cs：SkyManager maxDepth==MaxValue 层 = DrawSurfaceBG 内
+    //      首个 DrawToDepth(1/0.09)，Main.cs:58829——即远距云(DrawClouds_Distant
+    //      :58757)之后、云背景层之前；日月 :56310 画于其前【以反编译序为准】）----
+    this.drawAurora(ctx, viewW, viewH, camY, dtMs, nightTime, isDay,
+      Math.max(0, Math.min(7, clock.moonPhase ?? 0)));
 
     // 派对气球（PartySky：BirthdayParty.PartyIsUp 时 SkyManager 激活）
     this.drawPartyBalloons(ctx, viewW, viewH, camX, dtMs);
