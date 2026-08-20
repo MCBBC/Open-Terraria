@@ -18,7 +18,7 @@ await new Promise((r) => setTimeout(r, 1500));
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };
 
-const out = await page.evaluate(() => {
+const out = await page.evaluate(async () => {
   const g = window.__swGame;
   const st = g.world.store;
   const px0 = Math.floor(g.player.cx / 16);
@@ -38,6 +38,12 @@ const out = await page.evaluate(() => {
   for (let i = 0; i < 3000; i++) { g.fixedUpdate(1 / 60); if (g.player.hp < 60) g.player.hp = g.player.maxHp; }
   const slime = g.entities.enemies.find((e) => e.vanillaId === 1 && !e.dead);
   if (!slime) return { slime: 0 };
+  // NPC_1.png 懒加载等待:下方 60 次同步 fixedUpdate 阻塞事件循环,onload 无机会
+  // 触发——不等待则 vnpc 恒 null,史莱姆整帧不画,染色采样全取到天空色(2026-08-20)
+  for (let i = 0; i < 100 && !g.renderer.atlas.vimages.has('vanilla/NPC_1.png'); i++) {
+    g.renderer.atlas.vnpc(1, 0);
+    await new Promise((r) => setTimeout(r, 100));
+  }
   slime.x = g.player.cx - 60; slime.y = (py0 - 4) * 16;
   slime.vx = 0; slime.vy = 0;
   slime.ai0 = -1120; // 钳住 hop

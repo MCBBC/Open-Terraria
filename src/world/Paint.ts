@@ -373,7 +373,8 @@ const leaf = (hueMin: number, hueMax: number, satMin: number, satMax: number, in
   minSat: fr32(satMin), maxSat: fr32(satMax), invert,
 });
 
-/** 具名设置 26 项（TreePaintSystemData.cs:16-245 逐字段 1:1；行号锚见各条） */
+/** 特判组具名设置 24 项（TreePaintSystemData.cs:16-245 逐字段 1:1；行号锚见各条。
+ *  全类 26 项 = 本 24 + DefaultNoSpecialGroups(:5-8,null 哨兵) + ForWalls(:10-14,WALL_PAINT_SETTINGS)） */
 export const SPECIAL_PAINT_SETTINGS = {
   DefaultDirt: leaf(0.03, 0.08, 0.38, 0.53, true),                     // :16-24
   CullMud: leaf(0.42, 0.55, 0.2, 0.27, true, 0.5),                     // :26-35

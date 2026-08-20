@@ -113,12 +113,27 @@ describe('washShapeValue（WaterDistortionObject obj50 复原）', () => {
   });
   it('顺流方向且 sinφ<0 的点产生正强度', () => {
     // radial=(1,0) 方向、flow=(−1,0)+0.5 → flowSigned=(−0.5,0) → dot(−f,rad)=1 → 1−0.2=0.8
-    // r=0.2·25.12=5.024 < 12.56 → φ=frac(5.024/2π+0.5)·2π−π
+    // r=0.2·25.12=5.024 < 2π → max(r,2π) 钳（obj50 #27）→ φ≈−0.0039 → 弱正尾迹。
+    // ★金标 = SM2 解释器直跑 obj50 字节码同探针输出 0.0025482763275909716
+    //  （旧公式无内圈钳 → φ 全域摆动 → 0.76 错值，2026-08-20 复核定罪）
     const v = washShapeValue(0.2, 0, -0.5, 0, 1);
-    expect(v).toBeGreaterThan(0);
-    const frac = (5.024 * 0.159155 + 0.5) % 1;
-    const phi = frac * 6.28319 - 3.14159;
-    expect(v).toBeCloseTo(Math.max(-Math.sin(phi), 0) * 0.8, 9);
+    expect(v).toBeCloseTo(0.002542446963370625, 10);
+  });
+  it('内圈 max(r,2π) 钳：r<2π 各点 φ 恒定（obj50 #27 字节码锚）', () => {
+    // |uvc|=0.1/0.2/0.24 全部 → φ = frac(2π·0.159155+0.5)·2π−π 同值 → 同强度
+    const a = washShapeValue(0.1, 0, -0.5, 0, 1);
+    const b = washShapeValue(0.2, 0, -0.5, 0, 1);
+    const c = washShapeValue(0.24, 0, -0.5, 0, 1);
+    expect(a).toBeCloseTo(b, 12);
+    expect(b).toBeCloseTo(c, 12);
+    expect(a).toBeCloseTo(0.002542446963370625, 10);
+  });
+  it('中圈（2π≤r<4π）不钳：φ 随 r 变化（字节码 #28 frac 链）', () => {
+    // r=8.79（|uvc|=0.35）与 r=11.3（0.45）强度不同且均与解释器探针一致
+    const v1 = washShapeValue(0.35, 0, -0.5, 0, 1);
+    const v2 = washShapeValue(0.45, 0, -0.5, 0, 0.5);
+    expect(v1).toBe(0);                                       // interp 探针 = 0
+    expect(v2).toBeCloseTo(0.3811240724031751, 9);            // interp 0.38112507
   });
   it('远处（r≥4π）恒小负角 → 微弱尾迹', () => {
     // |uvc|=0.6 → r=15.07 ≥ 4π → φ=−0.00637111 → −sinφ = +0.0063711

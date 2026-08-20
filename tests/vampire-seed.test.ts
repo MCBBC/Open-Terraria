@@ -257,3 +257,37 @@ describe('炽灼音环（Player.cs:28107-28121）', () => {
     expect(sizzle.created).toBe(0);
   });
 });
+
+// ---- 世界生成终段冒烟（RandomizeWorldSpawn + PlaceTorchesAroundSpawn，
+//      WorldGen.cs:22625-22631；4200×1200 标准尺寸——小尺寸世界生成管线本身不支
+//      持（1300×400 恒挂,非本链回归））----
+describe('吸血鬼世界生成终段', () => {
+  it('出生点重掷到地下带 + 周边火把落位', async () => {
+    const { generateWorld } = await import('../src/world/gen/WorldGen');
+    const w = await generateWorld({
+      width: 4200, height: 1200,
+      seedText: 'what a horrible night to have a curse', evil: 0,
+    });
+    expect(w.seedFlags.vampireSeed).toBe(true);
+    // RandomizeWorldSpawn：出生行落 [worldSurface+200, surface+200+rockLevel)
+    // （cs:24100-24101 + CheckForGoodTeleportationSpot 签名 startY/rangeY）
+    expect(w.spawnY).toBeGreaterThanOrEqual(Math.floor(w.groundLevel) + 200);
+    expect(w.spawnY).toBeLessThan(Math.floor(w.groundLevel) + 200 + Math.floor(w.rockLevel));
+    // PlaceTorchesAroundSpawn：出生点 ±130 格内出现火把（tile 4）
+    const st = w.store;
+    const torchSheet = 4;
+    let torches = 0;
+    for (let dx = -130; dx <= 130; dx++) {
+      for (let dy = -130; dy <= 130; dy++) {
+        const x = w.spawnX + dx, y = w.spawnY + dy;
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        if (st.flags[i]) {
+          const { TILE_DEFS: TD } = await import('../src/data/tiles');
+          if (TD[st.type[i]]?.vanilla?.sheet === torchSheet) torches++;
+        }
+      }
+    }
+    expect(torches).toBeGreaterThan(0);
+  }, 300000);
+});

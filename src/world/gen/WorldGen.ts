@@ -2,6 +2,8 @@
 // 分帧执行以显示进度。纯函数式 pass，每个 pass 直接写 TileStore（生成期用 silent 写入）。
 import { RNG, translateSeed } from '../../core/rng';
 import type { TileStore } from '../TileStore';
+import { TileStore as TileStoreRT } from '../TileStore';   // 运行时 SOLID_LUT（type-only 会被剥）
+import { hurtTiles } from '../../stats/TouchDamage';
 import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { World, worldSizeFor, type WorldSize } from '../World';
 import { randomEpitaph } from '../../i18n/RandomText';   // 墓园 pass 碑文（WorldGen.cs:25161）
@@ -320,6 +322,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   }
 
   finalize(ctx);
+  // 吸血鬼种子终段（WorldGen.cs:22625-22631：GenerateWorld 尾部全部 GenPass 之后
+  // vampireSeed → RandomizeWorldSpawn + PlaceTorchesAroundSpawn + PutMonsterVanityInChests）
+  vampireSeedFinishPass(ctx);
   // ★终扫(finalize 之后):finalize 的幽灵 type 净化会把"flags=0 但 type 残留"
   // 的多格物体清成 0 → 在清扫 pass 之后【再造残片】(2026-08-13 缺位断言实锤:
   // 生成后 pot 残片 1 处,补扫即清零)。清扫幂等且廉价,此处兜底。
@@ -1703,4 +1708,187 @@ export function spawnPointPass({ store, rng, world }: GenCtx) {
   //   为逐位一致已整段移除（WWW 批 2026-08-18）——玩家卡块由消费端抬高处理。
   // ★pass 尾还原（cs:19731 `Main.tileSolid[379] = true`）
   flipGenSolid([379], true);
+}
+
+// ===================== 吸血鬼种子终段（WorldGen.cs:22625-22631） =====================
+
+/** RandomizeWorldSpawn 36 格生物群系规避表（cs:24097-24101 原序；种内变体剔除
+ *  （noTraps→135 / notTheBees→60 / worldIsInfected→23/199/25/203）在调用侧按
+ *  seedFlags 过滤——sheet id） */
+const VAMP_SPAWN_AVOID_SHEETS = [60, 70, 23, 199, 661, 662, 161, 147, 162, 41, 43, 44,
+  226, 57, 633, 53, 397, 396, 25, 163, 112, 398, 400, 203, 200, 234, 399, 401, 117,
+  164, 116, 402, 403, 379, 135, 37];
+
+/** 地牢砖/墙判定（DungeonUtils.IsConsideredDungeonTile/Wall：Main.tileDungeon 表 +
+ *  wallDungeon {7,8,9,94-99}）——GetRight/LeftMostDungeonTile（cs:24027-24072）用 */
+function isDungeonCell(st: World['store'], x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (st.flags[i]) {
+    const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
+    if (sh === 41 || sh === 43 || sh === 44 || (sh! >= 481 && sh! <= 483)) return true;
+  }
+  const wv = st.wall[i];
+  return wv === 7 || wv === 8 || wv === 9 || (wv >= 94 && wv <= 99);
+}
+
+/** 吸血鬼种子终段（cs:22625-22631）：RandomizeWorldSpawn（cs:24073-24160 出生点
+ *  重掷到 [worldSurface+200, rockLayer] 地下带 + 地牢对侧 X 域 + 60 格群系规避 +
+ *  避液/避墙/实心底）+ PlaceTorchesAroundSpawn（cs:25167-25266 出生点周边火把）。
+ *  ★PutMonsterVanityInChests（cs:25010-25064，1/7 箱注入怪物时装 1752-1778/4738-4742）
+ *    登记 GAP：物品族未全量入库。落点检查为 Utils.CheckForGoodTeleportationSpot
+ *  （cs:55234-55370）的精简核：保 SolidCollision 盒净空/avoidWalls/群系规避/
+ *  100 格内坠落实心底/mostlySolidFloor/避液避岩浆避伤害块；SlopeCollision 逐帧
+ *  下坠与四向 16px 逃逸探针省略（像素级等效,误差 <1 格） */
+function vampireSeedFinishPass(ctx: GenCtx): void {
+  const { store: st, world, rng } = ctx;
+  if (!world.seedFlags?.vampireSeed) return;
+  const gs = ctxGs[0];
+  if (!gs) return;
+  const W = st.w;
+  // ---- RandomizeWorldSpawn（cs:24081-24091：X 域 = 地牢对侧；GetRight/LeftMost
+  //      DungeonTile 以 dungeonX ±170 带近似 GenVars 地牢外边界） ----
+  const margin = Math.floor(W / 10);                       // cs:24080 num
+  const dX = world.dungeonX || Math.floor(W * (gs.dungeonSide === 1 ? 0.66 : 0.33));
+  const edgeScan = (fromLeft: boolean): number => {
+    const lo = Math.max(10, dX - 170), hi = Math.min(W - 10, dX + 170);
+    let found = fromLeft ? lo : hi;
+    if (fromLeft) {
+      for (let x = lo; x <= hi; x++) {
+        for (let y = Math.floor(gs.worldSurface); y < Math.min(st.h - 40, gs.worldSurface + 220); y++) {
+          if (isDungeonCell(st, x, y)) { found = x; break; }
+        }
+      }
+    } else {
+      for (let x = hi; x >= lo; x--) {
+        for (let y = Math.floor(gs.worldSurface); y < Math.min(st.h - 40, gs.worldSurface + 220); y++) {
+          if (isDungeonCell(st, x, y)) { found = x; break; }
+        }
+      }
+    }
+    return found;
+  };
+  // cs:24084-24090（dungeonSide <= Left(-1) → 域起点 = 右缘地牢砖；否则起点 = margin，
+  // 终点 = 左缘地牢砖）
+  const x0 = gs.dungeonSide <= -1 ? edgeScan(true) : margin;
+  const x1 = gs.dungeonSide <= -1 ? W - x0 - margin : edgeScan(false) - margin;
+  const y0 = Math.floor(gs.worldSurface) + 200;            // cs:24100 teleportStartY
+  const y1 = y0 + Math.floor(gs.rockLevel);                // cs:24101 teleportRangeY
+  // ★CheckForGoodTeleportationSpot 签名是 (startX, rangeX, startY, rangeY)——
+  //   y = startY + Next(rangeY)（cs:55258），即带 = [surface+200, surface+200+rockLayer)
+  //   而非到 rockLayer（曾误读为终点,1200 高世界带宽为负恒早退）
+  if (x1 <= x0 || y1 <= y0) return;
+  // 群系规避内表（内部 tile id；sheetId 缺席项 0 剔除）
+  const sf = world.seedFlags;
+  const avoidSheets = new Set(VAMP_SPAWN_AVOID_SHEETS.filter((s) =>
+    !(sf.noTraps && s === 135) && !(sf.notTheBees && s === 60)
+    && !(sf.infectedSeed && (s === 23 || s === 199 || s === 25 || s === 203))));
+  const avoidIds = new Set<number>();
+  for (const s of avoidSheets) { const id = sheetId(s); if (id > 0) avoidIds.add(id); }
+  // ---- CheckForGoodTeleportationSpot 精简核（cs:55234-55370）----
+  const solidAt = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && st.isActive(x, y) && TileStoreRT.SOLID_LUT[st.type[st.idx(x, y)]] === 1;
+  let spawnX = world.spawnX, spawnY = world.spawnY;
+  for (let attempt = 0; attempt < 5000; attempt++) {
+    const ax = Math.max(45, Math.min(W - 45, x0 + rng.nextIntRange(0, x1 - x0)));
+    const ay = Math.max(45, Math.min(st.h - 45, y0 + rng.nextIntRange(0, y1 - y0)));
+    // avoidWalls（cs:55267：锚格 wall>0 拒）+ 墙 87（神庙,肉前）/ 地牢墙（骷髅前）
+    const wall = st.wall[st.idx(ax, ay)];
+    if (wall > 0) continue;
+    // SolidCollision 盒净空（teleporteeSize 20×42 → 锚格上方 2×3 带无实心）
+    let clear = true;
+    for (let dx = 0; dx < 2 && clear; dx++) {
+      for (let dy = -2; dy <= 0 && clear; dy++) {
+        if (solidAt(ax + dx, ay + dy)) clear = false;
+      }
+    }
+    if (!clear) continue;
+    // tilesToAvoid（60 半径盒扫,cs:452-482）
+    let bad = false;
+    outerAvoid:
+    for (let i = -60; i <= 60; i += 1) {
+      for (let j = -60; j <= 60; j += 1) {
+        const x = ax + i, y = ay + j;
+        if (!st.inBounds(x, y)) continue;
+        const idx = st.idx(x, y);
+        if (st.flags[idx] && avoidIds.has(st.type[idx])) { bad = true; break outerAvoid; }
+      }
+    }
+    if (bad) continue;
+    // 坠落扫描（cs:55285-55302：≤100 格内找到实心底；mostlySolidFloor ±1 至少一侧实心）
+    let fall = -1;
+    for (let d = 0; d < 100; d++) {
+      if (solidAt(ax, ay + d)) { fall = d; break; }
+    }
+    if (fall < 0 || fall >= 99) continue;
+    const floorY = ay + fall;
+    if (!solidAt(ax - 1, floorY) && !solidAt(ax + 1, floorY)) continue;
+    // 避液/避岩浆/避伤害块（盒 + 底格；hurtTiles 盒扫描 TouchDamage 表）
+    if (st.liquid[st.idx(ax, floorY)] > 0) continue;
+    let liquidBad = false;
+    for (let dx = 0; dx < 2 && !liquidBad; dx++) {
+      for (let dy = -2; dy <= 0 && !liquidBad; dy++) {
+        const ii = st.idx(ax + dx, ay + dy);
+        if (st.liquid[ii] > 0) liquidBad = true;           // avoidAnyLiquid
+      }
+    }
+    if (liquidBad) continue;
+    if (hurtTiles(st, (ax - 1) * 16, (floorY - 3) * 16, 32, 48, false)) continue;   // avoidHurtTiles
+    spawnX = ax;
+    spawnY = floorY;   // 消费端 (spawnY-3)*16 落在地板上（同地表出生口径）
+    break;
+  }
+  world.spawnX = spawnX; world.spawnX0 = spawnX;
+  world.spawnY = Math.max(4, spawnY); world.spawnY0 = Math.max(4, spawnY);
+  // ---- PlaceTorchesAroundSpawn（cs:25167-25266：2000 掷,半径 1→120 逐帧扩张,
+  //      随机点水平走到贴墙,距既有火把 ≥20 才放;群系风格表 cs:25240-25262） ----
+  const TORCH = TILE_BY_KEY['torch']!;
+  const isNearby = (x: number, y: number, sheet: number, dist: number): boolean => {
+    const id = sheetId(sheet);
+    if (!id) return false;
+    for (let i = x - dist; i <= x + dist; i++) {
+      for (let j = y - dist; j <= y + dist; j++) {
+        if (st.inBounds(i, j) && st.flags[st.idx(i, j)] && st.type[st.idx(i, j)] === id) return true;
+      }
+    }
+    return false;
+  };
+  let radius = 1;
+  for (let i = 0; i < 2000; i++) {
+    if (radius < 120) radius++;
+    let tx = rng.nextIntRange(spawnX - radius, spawnX + radius);
+    let ty = rng.nextIntRange(spawnY - radius, spawnY + radius);
+    let retries = 200;
+    while (retries-- > 0 && !(tx > 50 && ty > 50 && tx < st.w - 50 && ty < st.h - 50)) {
+      tx = rng.nextIntRange(spawnX - radius, spawnX + radius);
+      ty = rng.nextIntRange(spawnY - radius, spawnY + radius);
+    }
+    if (retries <= 0) break;
+    const dir = rng.nextIntRange(0, 2) === 0 ? 1 : -1;
+    const ti = st.idx(tx, ty);
+    if (st.flags[ti] === 0 && st.liquid[ti] === 0) {
+      let budget = Math.floor(st.w / 2);
+      while (st.flags[st.idx(tx, ty)] === 0 && st.inBounds(tx, ty)) {
+        if (--budget <= 0) break;
+        tx += dir;
+        if (!(tx > 50 && ty > 50 && tx < st.w - 50 && ty < st.h - 50)) { tx -= dir; break; }
+      }
+      if (budget <= 0) continue;
+      tx -= dir;
+      if (isNearby(tx, ty, 4, 20)) continue;   // distance=20（cs:25180;skyblock 才 15）
+      // 群系风格（cs:25240-25262 IsTileNearby(·,25) 链:丛林 21/丛林草 22/雪 9×2/
+      // 沙 16/黑檀沙 18/猩红沙 19）
+      let style = 0;
+      if (isNearby(tx, ty, 60, 25)) style = 21;
+      else if (isNearby(tx, ty, 70, 25)) style = 22;
+      else if (isNearby(tx, ty, 161, 25)) style = 9;
+      else if (isNearby(tx, ty, 147, 25)) style = 9;
+      else if (isNearby(tx, ty, 53, 25)) style = 16;
+      else if (isNearby(tx, ty, 25, 25)) style = 18;
+      else if (isNearby(tx, ty, 203, 25)) style = 19;
+      st.setTileSilent(tx, ty, TORCH, 0, style * 22);
+    } else {
+      i--;   // cs:25268 命中实格不消耗次数
+    }
+  }
 }

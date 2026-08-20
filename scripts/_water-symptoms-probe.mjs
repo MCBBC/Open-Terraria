@@ -25,19 +25,44 @@ const setup = await page.evaluate(() => {
   const dirt = window.__swTileByKey('dirt');
   const stone = window.__swTileByKey('stone');
   const sx = 2080, sy = Math.floor(g.world.groundLevel) - 26;
-  // 挖 28×12 空腔(保留 stone 盆底),四周留天然土做背景墙视觉对照;盆内灌满水
-  for (let x = sx; x < sx + 28; x++) {
-    for (let y = sy; y < sy + 12; y++) st.setTile(x, y, 0, 0);
+  // 挖 28×12 空腔 + stone 全封闭盆(底/左右壁) + 石墙背景(wall=1)——保水 + 缝隙检测对比色
+  for (let x = sx - 1; x < sx + 29; x++) {
+    for (let y = sy - 1; y < sy + 13; y++) { st.setTile(x, y, 0, 0); st.setWall(x, y, 0); }
   }
+  for (let x = sx - 1; x < sx + 29; x++) st.setTile(x, sy + 12, stone, 0);
+  for (let y = sy; y < sy + 12; y++) { st.setTile(sx - 1, y, stone, 0); st.setTile(sx + 28, y, stone, 0); }
   for (let x = sx; x < sx + 28; x++) {
-    st.setTile(x, sy + 12, stone, 0);              // 盆底
-    for (let y = sy; y < sy + 12; y++) st.setLiquid(x, y, 255, 1);
+    for (let y = sy; y < sy + 12; y++) { st.setWall(x, y, 1); st.setLiquid(x, y, 255, 1); }
   }
-  // 半砖组:盆内中部沉一条 dirt 半砖行(水上露出上半)——水面在 sy+3 附近
+  // 半砖组:盆内中部沉一条 dirt 半砖行;半砖格自身带部分液(:512-515 IsHalfBrick&&IsSolid
+  // 且 num23>0.5 → 钳 0.5 场景),上方整格水
   for (let k = 0; k < 4; k++) {
     st.setTile(sx + 12 + k, sy + 4, dirt, 0);
     st.setHalfBrick(sx + 12 + k, sy + 4, true);
-    st.setLiquid(sx + 12 + k, sy + 4, 0, 1);       // 半砖格本身无液(水漫过其上)
+    st.setLiquid(sx + 12 + k, sy + 4, 200, 1);
+    st.setLiquid(sx + 12 + k, sy + 3, 255, 1);     // 半砖正上方整格水
+  }
+  // 第二盆(右移 16):部分液位 113(用户 debug 报告值)的【表面行】场景——水线在
+  // 盆内第 3 格,半砖行贴水线
+  const bx0 = sx + 16;
+  for (let x = bx0 - 1; x < bx0 + 13; x++) {
+    for (let y = sy - 1; y < sy + 13; y++) { st.setTile(x, y, 0, 0); st.setWall(x, y, 0); }
+  }
+  for (let x = bx0 - 1; x < bx0 + 13; x++) st.setTile(x, sy + 12, stone, 0);
+  for (let y = sy; y < sy + 12; y++) { st.setTile(bx0 - 1, y, stone, 0); st.setTile(bx0 + 12, y, stone, 0); }
+  for (let x = bx0; x < bx0 + 12; x++) {
+    for (let y = sy; y < sy + 12; y++) { st.setWall(x, y, 1); st.setLiquid(x, y, 255, 1); }
+    // 排到液位 113:上方两格清液 → 顶格留 113(等稳定后再校;先设 113+255+255)
+  }
+  for (let x = bx0; x < bx0 + 12; x++) {
+    st.setLiquid(x, sy, 0, 1); st.setLiquid(x, sy + 1, 0, 1);
+    st.setLiquid(x, sy + 2, 113, 1);
+  }
+  // 半砖贴水线(bx0+4..+6 半砖格 = 表面格,自带液 113 → 钳 0.5 场景)
+  for (let k = 0; k < 3; k++) {
+    st.setTile(bx0 + 4 + k, sy + 2, dirt, 0);
+    st.setHalfBrick(bx0 + 4 + k, sy + 2, true);
+    st.setLiquid(bx0 + 4 + k, sy + 2, 113, 1);
   }
   g.player.x = (sx + 14) * 16; g.player.y = (sy + 2) * 16;
   window.__sx = sx; window.__sy = sy;
@@ -69,17 +94,27 @@ const measure = () => page.evaluate(() => {
   const data = ctx.getImageData(ix0, iy0, iw, ih).data;
   const W = iw, H = ih;
   const px = (x, y) => { const i = (y * W + x) * 4; return [data[i], data[i + 1], data[i + 2]]; };
-  const isWater = (p) => p[2] > p[0] + 24 && p[2] > 60;
+  const isWater = (p) => p[2] > p[0] + 12 && p[2] > p[1] + 8;   // 暗水也认(B 主导);石墙=近灰
   // 水平缝:某行整行(排除两端 2px)非水比例 > 0.9
-  let hSeams = 0; const hSeamAt = [];
+  let hSeams = 0; const hSeamAt = []; const hSeamCol = [];
   for (let y = 0; y < H; y++) {
-    let nw = 0; for (let x = 2; x < W - 2; x++) if (!isWater(px(x, y))) nw++;
-    if (nw / (W - 4) > 0.9) { hSeams++; hSeamAt.push(y); }
+    let nw = 0; const nonW = [];
+    for (let x = 2; x < W - 2; x++) if (!isWater(px(x, y))) { nw++; if (nonW.length < 9) nonW.push(px(x, y)); }
+    if (nw / (W - 4) > 0.9) {
+      hSeams++;
+      const med = nonW[Math.floor(nonW.length / 2)];
+      hSeamAt.push(y); hSeamCol.push(med);
+    }
   }
-  let vSeams = 0; const vSeamAt = [];
+  let vSeams = 0; const vSeamAt = []; const vSeamCol = [];
   for (let x = 0; x < W; x++) {
-    let nw = 0; for (let y = 2; y < H - 2; y++) if (!isWater(px(x, y))) nw++;
-    if (nw / (H - 4) > 0.9) { vSeams++; vSeamAt.push(x); }
+    let nw = 0; const nonW = [];
+    for (let y = 2; y < H - 2; y++) if (!isWater(px(x, y))) { nw++; if (nonW.length < 9) nonW.push(px(x, y)); }
+    if (nw / (H - 4) > 0.9) {
+      vSeams++;
+      const med = nonW[Math.floor(nonW.length / 2)];
+      vSeamAt.push(x); vSeamCol.push(med);
+    }
   }
   // 症状2:半砖行(sy+4)——半砖上沿应贴水;统计半砖 tile 顶部 8px 带内非水像素占比
   const [hx0, hy0] = w2s((sx + 12) * 16, (sy + 4) * 16);
@@ -95,8 +130,30 @@ const measure = () => page.evaluate(() => {
   for (let i = 0; i < td.length; i += 4) { tn++; if (!(td[i + 2] > td[i] + 24 && td[i + 2] > 60)) tnw++; }
   return {
     zoom: z, camX: cam.x, camY: cam.y, cvs: [cv.width, cv.height],
-    seam: { W, H, hSeams, hSeamAt: hSeamAt.slice(0, 8), vSeams, vSeamAt: vSeamAt.slice(0, 8) },
+    seam: { W, H, hSeams, hSeamAt: hSeamAt.slice(0, 10), hSeamCol: hSeamCol.slice(0, 5), vSeams, vSeamAt: vSeamAt.slice(0, 10), vSeamCol: vSeamCol.slice(0, 5) },
     half: { nonWaterTop8: hnw / hn, nonWaterAbove: tnw / tn },
+    surface: (() => {
+      // 第二盆表面带:液位 113 格(sy+2)上下各一格——统计该带内"非水非土"像素
+      // (缝隙=墙色透出行)。取 bx0+7..+11 远离半砖的纯水列
+      const bxx = sx + 16;
+      const [cx0, cy0] = w2s((bxx + 7) * 16, (sy + 1) * 16 + 4);
+      const [cx1, cy1] = w2s((bxx + 11) * 16, (sy + 4) * 16);
+      const dd = ctx.getImageData(Math.round(cx0), Math.round(cy0), Math.round(cx1 - cx0), Math.round(cy1 - cy0)).data;
+      const isDirt = (r, g2, b2) => b2 < g2 + 6 && g2 < r + 6;   // 棕土近似(R≥G≥B)
+      let gap = 0, n = 0;
+      const rows = [];
+      const WW = Math.round(cx1 - cx0);
+      for (let yy = 0; yy < Math.round(cy1 - cy0); yy++) {
+        let rowGap = 0;
+        for (let xx = 0; xx < WW; xx++) {
+          const i = (yy * WW + xx) * 4;
+          n++;
+          if (!isWater([dd[i], dd[i + 1], dd[i + 2]]) && !isDirt(dd[i], dd[i + 1], dd[i + 2])) { rowGap++; gap++; }
+        }
+        if (rowGap / WW > 0.8) rows.push(yy);
+      }
+      return { gapRatio: +(gap / Math.max(1, n)).toFixed(4), fullGapRows: rows.slice(0, 12) };
+    })(),
   };
 });
 

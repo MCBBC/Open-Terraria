@@ -2338,13 +2338,14 @@ export class Renderer {
         if (glbg) {
           glbg.resize(this.canvas.width, this.canvas.height);
           glbg.begin();
-          this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
+          // ★只画地表层(2026-08-20 地下背景光照修复):地下层须进世界层吃光
+          this.biomeBg.draw(new GLBgBlit(glbg), world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
           glbg.end();
           ctx.drawImage(glbg.canvas, 0, 0);
           bgDone = true;
         }
       }
-      if (!bgDone) this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
+      if (!bgDone) this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
       // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后、实体前）
       this.sky.drawCloudsNear(ctx, viewW, viewH, cam.y);
     }
@@ -2363,6 +2364,17 @@ export class Renderer {
     //      "夜里的月亮不亮"根因）====
     const worldLayer = this.beginWorldLayer(viewW, viewH);
     if (worldLayer) ctx = worldLayer;
+
+    // 1.5b 地下分层背景画进世界层(★2026-08-20 光照修复):原版 Main.cs:52327+
+    //  地下背景逐 16px 段 Lighting.GetColor 采光(暗段跳过/部分亮段 9-slice 渐变)
+    //  ——与本层 lightCanvas 乘法等价(屏空间同源)。此前画在主画布 = worldLayer
+    //  分层后不吃光:洞里恒亮且与时间无关(用户实报"地底下远景背景居然是亮的")。
+    //  地表层仍在主画布(天空侧,只吃 cots 染,原版 ColorOfSurfaceBackgrounds 语义)。
+    //  旧路径(?worldlayer=0)此处画主画布,其后的全屏乘光天然把它压暗=原行为。
+    if (this.scene) {
+      const mainCtx2 = this.ctx;   // 世界层 ctx(或主画布)
+      this.biomeBg.draw(mainCtx2, world, this.scene, cam, viewW, viewH, [1, 1, 1], 0, 'underground');
+    }
 
     ctx.save();
     // 世界变换：平移 + 缩放（以屏幕中心为相机中心）
@@ -4558,22 +4570,23 @@ export class Renderer {
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
         if (e.colorRGBA && e.colorRGBA[3] > 0) {
-          // XNA 预乘混合等价（BlendState.AlphaBlend：out = texel×colorRGB + D×(1-colorA/255)）。
-          // 普通 drawImage 会把染色 RGB 再乘 alpha（蓝色糊成灰绿）——改为两步：
-          // ① 原始精灵 destination-out 按 colorA 削弱底下内容 ② lighter 全量加染色精灵
+          // 原版 GetColor pass = 标准 AlphaBlend：src = texel.rgb×color.rgb(×光照,
+          // type1 分支 color.rgb×light.rgb/255),srcA = texel.a×color.A/255 →
+          // out = src + D×(1−srcA)。★2026-08-20 修:旧 destination-out+lighter
+          // 两步是主画布直绘时代的等价写法;世界层化(2026-08-19 光照分层)后
+          // 本 ctx 是透明离屏层——lighter 在透明 dst 上把 α 饱和成 1,史莱姆
+          // 变成不透明纯色块(染色过浓+透明度异常);destination-out 乱削同层
+          // 底下实体。透明层上普通 source-over×(colorA/255) 与 XNA 逐位等价
+          // (先混后乘光 = 先乘后混,乘法分配律),乘光由层合成统一补上
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
           // 与基础层同锚（底锚=−帧高+原版恒 +4 下沉，见主路径注；曾残留旧底锚
           // pad 变量在恒+4 改造时漏改——染色层 ReferenceError）
           const anchorY2 = grounded ? -r.sh + 4 / scale : -r.sh / 2;
           const anchorY = anchorY2 + eocOff; // 与基础层同锚——曾残留旧底锚条件,
           // 基础/染色两层错位 → 史莱姆"彩色+灰影"双画
-          ctx.globalCompositeOperation = 'destination-out';
           ctx.globalAlpha = e.colorRGBA[3] / 255;
-          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = 1;
           if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -r.sw / 2, anchorY, r.sw, r.sh);
-          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
         // KS 中心，随速度反向摆动（zero=-vy / -vx*2）+ rotation=vx*0.05，
@@ -5639,15 +5652,17 @@ export class Renderer {
     ctx.rotate(e.visAngle);
     ctx.scale(scale, scale);
     if (slave && slave.colorRGBA && slave.colorRGBA[3] > 0) {
-      // 气球壳染色（与史莱姆染色同款两步：destination-out 削弱 + lighter 加色）
-      const tinted = this.tintedSprite('npc594shell', { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA);
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.globalAlpha = slave.colorRGBA[3] / 255;
+      // 气球壳随奴隶（Main.cs:23390-23393 三遍的前两遍）：
+      // ① nPC.GetAlpha：帧 0 ×(1−slaveAlpha/255) 白雾遍（史莱姆 175 → 0.31）
+      // ② nPC.GetColor：标准 AlphaBlend×colorA/255——同 drawEnemy 主染色 pass
+      //    2026-08-20 修正(透明世界层上 lighter α 饱和 = 不透明纯色块,
+      //    destination-out 乱削本体)
+      ctx.globalAlpha = 1 - Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255;
       ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 1;
+      const tinted = this.tintedSprite('npc594shell', { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA);
+      ctx.globalAlpha = slave.colorRGBA[3] / 255;
       if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -fw / 2, 0, fw, fh);
-      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
     }
     ctx.drawImage(img, variant * fw, 0, fw, fh, -fw / 2, 0, fw, fh);
     ctx.restore();

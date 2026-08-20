@@ -828,8 +828,9 @@ export interface SkyFrameCtx {
     flags: Record<string, boolean>;
     /** Main.dayRate(星空 fadeIn/坠星推进用,缺省 1) */
     dayRate?: () => number;
-    /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；稀有云门消费 theConstant/tenthAnniversary） */
-    seedFlags?: { theConstant?: boolean; tenthAnniversary?: boolean };
+    /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；稀有云门 theConstant/tenthAnniversary,
+     *  CloudsEnd 月色/背景云累积器门 drunkWorld） */
+    seedFlags?: { theConstant?: boolean; tenthAnniversary?: boolean; drunkWorld?: boolean };
     store: {
       inBounds(x: number, y: number): boolean;
       isSolid(x: number, y: number): boolean;
@@ -915,6 +916,82 @@ export function flareShadowTerm(shadows: ReadonlyArray<{ x: number; y: number }>
   if (dLen === 0) { dx = 0; dy = -1; }                  // (sun−center).SafeNormalize(−UnitY)
   else { dx /= dLen; dy /= dLen; }
   return (vx * dx + vy * dy) * vLen;                    // :37 Dot(...) × v.Length()
+}
+
+// ================= HorizonClouds（PixelShader.cso obj62 逐指令;SM2 解释器核验） =================
+// 1.4.5.6 云晨昏染色的【唯一活路径】= CloudsEnd(NextHorizonRenderer.cs:328-361)把三通道
+// 全部云 DrawData 经 MiscShaderData["HorizonClouds"](DyeInitializer.cs:440)逐像素着色。
+// C# 侧 BetterColorsForClouds(:270-312 的"按高度沿 SunGradients 渐变")是【私有死代码】
+// (全工程零调用)——"云按高度沿梯度染色"在 1.4.5.6 不存在,真值以字节码为准。
+//
+// 公式（指令号 = fxPixel.txt obj62 反汇编序;SM2 解释器执行同探针逐值核对,锚见
+// tests/fx-pixelshader-parity.test.ts）:
+//   采样: up(0,−0.035) dn(0,+0.14) lf(−0.035,0) rt(+0.035,0) 中(t0)      #10-18
+//   coverage  = 1 − 0.2·Σα₅                                             #19-23
+//   thickness = 1 − 4·(C.r − 0.62)                                       #24-26
+//   A = max(thickness, coverage)                                         #27
+//   n1 = normalize(frag−云中心) n2 = normalize(天体−frag) d=|天体−frag|  #28-36
+//   B = max(dot(n1,n2), 1−(d/60)²)                                       #37-40
+//   R = |t0·2−1|                                                          #41-44
+//   distTerm = d≤50 ? d/50−1 : 0   ← #51 的第三源 = c3.x=0(非 c3.z=1!)    #48+51
+//   inner = (B·R−0.05)·A + 0.6·A + B·R − 0.3 + distTerm   ← #47 乘 A 非 B #45-53
+//   D = max(0.3, 1.3 − d/1800)                                            #49-50
+//   shade = inner · intensity · D³                                        #54-57
+//   r2 = tex·vColor; r1 = lerp(vColor, (uColor,1), 0.5)·tex.a             #58-62
+//   out = r2 + shade·(r1·vColor.a − r2)                                   #63-65
+
+/** HorizonHelper.cs:28-36 MoonColors（moonType 0-8;夜 uColor = 表×GetMoonStrength） */
+export const MOON_COLORS: ReadonlyArray<readonly [number, number, number]> = [
+  [230, 235, 255], [250, 235, 160], [230, 255, 230], [160, 240, 255], [180, 255, 255],
+  [230, 255, 230], [255, 180, 255], [255, 200, 180], [225, 180, 255],
+];
+
+/** HorizonClouds 逐像素 shade（纯函数;GLSL CLOUD_FRAG_SRC 的 JS 镜像,测试金标源）。
+ *  texSumA = 五采样 α 和(0-5);texR = 中心采样 R 通道(0-1);
+ *  fragX/Y = 画布像素位;drawX/Y = 云中心;celX/Y = 天体位;intensity = CloudsEnd num。 */
+export function horizonCloudShade(
+  texSumA: number, texR: number,
+  fragX: number, fragY: number, drawX: number, drawY: number,
+  celX: number, celY: number, uvX: number, uvY: number, intensity: number,
+): number {
+  const coverage = 1 - 0.2 * texSumA;
+  const thickness = 1 - 4 * (texR - 0.62);
+  const A = Math.max(thickness, coverage);
+  let d1x = fragX - drawX, d1y = fragY - drawY;
+  const l1 = Math.hypot(d1x, d1y);
+  if (l1 > 0) { d1x /= l1; d1y /= l1; } else { d1x = 0; d1y = 0; }
+  const d2x = celX - fragX, d2y = celY - fragY;
+  const dist = Math.hypot(d2x, d2y);
+  const n2x = dist > 0 ? d2x / dist : 0, n2y = dist > 0 ? d2y / dist : 0;
+  const B = Math.max(d1x * n2x + d1y * n2y, 1 - (dist / 60) ** 2);
+  const R = Math.hypot(uvX * 2 - 1, uvY * 2 - 1);
+  const distTerm = dist <= 50 ? dist / 50 - 1 : 0;
+  const inner = (B * R - 0.05) * A + 0.6 * A + B * R - 0.3 + distTerm;
+  const D = Math.max(0.3, 1.3 - dist / 1800);
+  return inner * intensity * D * D * D;
+}
+
+/** 2D 兜底单探针近似（GL 主路径逐像素精确;此处 Canvas2D 无逐像素通道）:
+ *  探针 = 云中心沿天体向 0.3·max(w,h)(几何上 shade 峰值区=云朝阳侧边缘),
+ *  uv=(0.65,0.65) → R≈0.42;A 取 0.4(texSumA=3 → coverage 0.4,texR=1 → 密核
+ *  thickness 负;密核 0/疏缘 1 的面积折中)。B/D/dist/强度精确。
+ *  【取舍登记】B·R 与 A 的逐纹素耦合不可分解——GL 主路径逐像素精确,兜底只
+ *  保证整朵染色量级/方向;shade 含正负,负值使整朵轻微偏离天体色(原语义)。 */
+export function horizonCloudShadeApprox(
+  cel: { posX: number; posY: number; intensity: number },
+  cx: number, cy: number, w: number, h: number, probeDist: number,
+): number {
+  void w; void h;
+  let n1x = cel.posX - cx, n1y = cel.posY - cy;
+  const nl = Math.hypot(n1x, n1y);
+  if (nl > 0) { n1x /= nl; n1y /= nl; } else { n1x = 1; n1y = 0; }
+  const fragX = cx + n1x * probeDist, fragY = cy + n1y * probeDist;
+  return horizonCloudShade(
+    3, 1,                              // texSumA=3 → coverage 0.4(A 折中);texR=1
+    fragX, fragY, cx, cy, cel.posX, cel.posY,
+    0.65, 0.65,                        // uv → R = |0.3,0.3| ≈ 0.424
+    cel.intensity,
+  );
 }
 
 export class SkyRenderer {
@@ -1772,11 +1849,73 @@ export class SkyRenderer {
     this.maintainClouds(viewW, viewH);
     const camTop = camY - viewH / 2;
     if (camTop >= this.fx.surfaceY + 16) return;
+    this.updateCloudCelestial(camY - viewH / 2);
     const { num3 } = this.cloudBgTop(camY, viewH);
     const distY = num3 * 750 + 830;                          // :59115（scAdj/pushBGTopHack=0）
     this.drawCloudPass(ctx, this.vclouds.filter((c) => c.scale < 1), 1, camY,
       (c) => c.y + distY);
     void isNight;
+  }
+  /** 上帧昼夜/月相（sky.draw 头部写入;CloudsEnd 天体色/强度输入） */
+  private lastMoonPhase = 0;
+  private lastIsDay = true;
+  /** Main.cloudBGAlpha（:58782-58792 漂移累积器：背景云活跃 +0.0005·dayRate/帧
+   *  钳 1,否则 − 同步钳 0;门 = !drunkWorld && ShouldDrawSurfaceBackground &&
+   *  camTop ≤ worldSurface+10 tile）。CloudsEnd 强度 ×clamp(1−值) */
+  private cloudBGAlpha = 0;
+  /** CloudsEnd 每帧天体态（HorizonClouds shader 输入;drawCloudPass 消费） */
+  private cloudCelestial: {
+    posX: number; posY: number; intensity: number;
+    r: number; g: number; b: number;
+  } | null = null;
+
+  /** CloudsEnd 天体态计算（NextHorizonRenderer.cs:328-361 逐式）：
+   *  uColor = dayTime ? (255,246,204) : GetMoonColor()×GetMoonStrength()（AuroraSky.
+   *  ModifyTileColor :410-418 极光活跃且月相≠QuarterAtLeft(3) 时向 _lastSkyColor
+   *  lerp opacity）;强度 = max(sunset,sunrise)×celestial,夜 max(·,celestial×0.15),
+   *  ×clamp(1−cloudBGAlpha);位置 = GetCelestialBodyPosition = sunScreen/moonScreen。 */
+  private updateCloudCelestial(camTop: number): void {
+    // cloudBGAlpha 累积器（:58781-58792;ShouldDrawSurfaceBackground ≈ 本方法调用门）
+    const dayRate = this.frameCtx?.world?.dayRate?.() ?? 1;
+    const camTopTiles = camTop / 16;
+    if (!this.frameCtx?.world?.seedFlags?.drunkWorld && camTopTiles <= this.fx.surfaceY / 16 + 10) {
+      const d = 0.0005 * dayRate;
+      this.cloudBGAlpha = this.weatherRef && this.weatherRef.cloudBGActive > 0
+        ? Math.min(1, this.cloudBGAlpha + d)
+        : Math.max(0, this.cloudBGAlpha - d);
+    }
+    const v = this.horizonVisCache;
+    const body = this.lastIsDay ? this.sunScreen : this.moonScreen;
+    if (!v || !body) { this.cloudCelestial = null; return; }
+    let num = Math.max(v.sunset, v.sunrise) * v.celestial;
+    if (!this.lastIsDay) num = Math.max(num, v.celestial * 0.15);   // :348-349
+    num *= Math.max(0, Math.min(1, 1 - this.cloudBGAlpha));         // :350
+    if (num <= 0.0015) { this.cloudCelestial = null; return; }
+    // uColor（GetCelestialBodyColors HorizonHelper.cs:109-113 + MoonColors 表 :28-36）
+    let r: number, g: number, b: number;
+    if (this.lastIsDay) {
+      r = 255; g = 246; b = 204;
+    } else {
+      const moonType = Math.max(0, Math.min(8, this.moonType));
+      const mc = MOON_COLORS[moonType];
+      r = mc[0]; g = mc[1]; b = mc[2];
+      if (this.fx.moonEventKind === 1) { r = 255; g = 225; b = 180; }        // pumpkinMoon
+      else if (this.fx.moonEventKind === 2) { r = 220; g = 220; b = 255; }   // snowMoon
+      if (this.frameCtx?.world?.seedFlags?.drunkWorld) { r = 255; g = 255; b = 255; }
+      // GetMoonStrength = Remap(|4−phase|, 0,4, 0,1) = |4−phase|/4
+      const ms = Math.abs(4 - this.lastMoonPhase) / 4;
+      r *= ms; g *= ms; b *= ms;
+    }
+    // AuroraSky.ModifyTileColor(ref tileColor, 1)（:410-418:极光活跃 && 月相≠3
+    // → lerp(tileColor, _lastSkyColor(A=255), opacity)）
+    const aur = this.aurora.tileColorState();
+    if (aur && this.lastMoonPhase !== 3) {
+      const t = Math.min(1, Math.max(0, aur.opacity));
+      r = r + (aur.rgb[0] - r) * t;
+      g = g + (aur.rgb[1] - g) * t;
+      b = b + (aur.rgb[2] - b) * t;
+    }
+    this.cloudCelestial = { posX: body.x, posY: body.y, intensity: num, r: r / 255, g: g / 255, b: b / 255 };
   }
   /** DrawClouds_Closer + _Closest（:58871/:58942——群系背景层之后）：
    *  pass2 scale∈[1,1.15)：cY = y×(H/600)+bgTopY+150；pass3 ≥1.15：cY = y×(H/600)−100+bgTopY×1.01−150 */
@@ -1836,12 +1975,25 @@ export class SkyRenderer {
       }
       r *= atmo; g *= atmo; b *= atmo;                       // DrawCloud :252-255
       const alpha = Math.min(1, Math.min(1, c.alpha * this.towerCloudMul) * globalCloudAlpha);
+      // ---- HorizonClouds（obj62 逐指令;CloudsEnd 对三通道全部 _drawData 施加）----
+      // GL 主路径 = 逐像素字节码公式(GLSpriteLayer.cloudQuad);2D 兜底 = 同公式
+      // 单探针标量近似(horizonCloudShadeApprox:几何/强度/衰减精确,A/R 固定)
+      const cel = this.cloudCelestial;
+      const cx = c.x + w / 2, cyPx = yOf(c) + h / 2;         // uDrawPosition = 云中心(DrawData.position,origin=半尺寸)
       if (gl) {
         const gtex = gl.texFromImage(`cloud:${c.type}`, tex);
         if (gtex) {
-          // GLSpriteLayer.quad 为左上角+宽高(旧 CloudGL 为中心+半宽高,几何等价)
-          gl.quad(gtex, 0, 0, gtex.w, gtex.h, c.x, yOf(c), w, h,
-            { alpha, tint: [r / 255, g / 255, b / 255], rot: c.rot, smooth: true, flipX: !!c.flip });
+          if (cel && gl.cloudFxOK) {
+            gl.cloudQuad(gtex, 0, 0, gtex.w, gtex.h, c.x, yOf(c), w, h, c.rot, !!c.flip, {
+              drawPos: [cx, cyPx],
+              celestial: [cel.posX, cel.posY, cel.intensity],
+              color: [cel.r, cel.g, cel.b],
+              vertColor: [r / 255, g / 255, b / 255, alpha],
+            });
+          } else {
+            gl.quad(gtex, 0, 0, gtex.w, gtex.h, c.x, yOf(c), w, h,
+              { alpha, tint: [r / 255, g / 255, b / 255], rot: c.rot, smooth: true, flipX: !!c.flip });
+          }
           continue;
         }
         // 纹理上传失败(极端):跳过本朵,不落 2D(避免同帧混路径叠画)
@@ -1849,10 +2001,23 @@ export class SkyRenderer {
       }
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.translate(c.x + w / 2, yOf(c) + h / 2);
+      ctx.translate(cx, cyPx);
       ctx.rotate(c.rot);
       if (c.flip) ctx.scale(-1, 1);
-      const tinted = this.cloudTint(tex, Math.round(r), Math.round(g), Math.round(b));
+      let tR = r, tG = g, tB = b, tA = alpha;
+      if (cel) {
+        // 2D 兜底:shade 单探针标量 + 字节码尾式 final = v + shade·(lerp(v,u,0.5)·v.a − v)
+        // (tex.rgb=1/tex.a=1 整朵近似;登记取舍见函数头)
+        const shade = horizonCloudShadeApprox(cel, cx, cyPx, w, h, Math.max(w, h) * 0.3);
+        const v0c = r / 255, v1c = g / 255, v2c = b / 255;
+        const lc = [v0c + (cel.r - v0c) * 0.5, v1c + (cel.g - v1c) * 0.5, v2c + (cel.b - v2c) * 0.5];
+        tR = Math.max(0, Math.min(255, 255 * (v0c + shade * (lc[0] * alpha - v0c))));
+        tG = Math.max(0, Math.min(255, 255 * (v1c + shade * (lc[1] * alpha - v1c))));
+        tB = Math.max(0, Math.min(255, 255 * (v2c + shade * (lc[2] * alpha - v2c))));
+        tA = Math.max(0, Math.min(1, alpha + shade * ((alpha + 1) * 0.5 * alpha - alpha)));
+      }
+      const tinted = this.cloudTint(tex, Math.round(tR), Math.round(tG), Math.round(tB));
+      ctx.globalAlpha = tA;
       ctx.drawImage(tinted, -w / 2, -h / 2, w, h);
       ctx.restore();
     }
@@ -2777,7 +2942,14 @@ export class SkyRenderer {
    *  原版为 Immediate 模式 shader（Main.cs:61760 末段后处理），强度经
    *  SunVisibilityPixel（HorizonHelper.UpdateSunVisibility 产出的 1×1 遮挡 alpha，
    *  miscShaderData.UseImage1 → shader 内乘光斑色）调制；本仓在世界变换段恒等变换
-   *  绘制，遮挡调制以 sunVisibility 乘 intensity（登记：层级偏早）。 */
+   *  绘制，遮挡调制以 sunVisibility 乘 intensity（登记：层级偏早）。
+   *  ★遮挡语义定谳（2026-08-20 PixelShader.cso obj69 逐指令,SM2 解释器执行核验）:
+   *  全 pass 共 6 条——texld r0 = 光斑贴图 t0;mul r0 × v0(元素顶点色);mov r1.xy=(0.5,0)
+   *  + texld r1 = s1(1×1 遮挡纹理 @ (0.5,0) 恒定采样);mul r0 × r1.w;输出。
+   *  即 final = 贴图.rgba × 元素色.rgba × occlusion.α ——【标量×每元素色】,
+   *  与本实现"intensity 预乘 occ → tintedSprite×globalAlpha"数学等价(乘法结合律;
+   *  解释器金标 tests/fx-pixelshader-parity.test.ts LensFlare 锚)。无渐变重采样
+   *  或其他项——现标量近似即字节码精确等价,非近似。 */
   private drawLensFlare(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
     sunset: number, sunrise: number, celestial: number): void {
     const sun = this.sunScreen;
@@ -2991,6 +3163,9 @@ export class SkyRenderer {
       this.atmoValue(camY), this.weatherRef?.cloudAlpha ?? 0,
       this.frameCtx?.scene?.biomeLightInfluence?.mushroom ?? 0);
     this.horizonPhase = horizonPhaseOf(Math.max(0, Math.min(7, clock.moonPhase ?? 0)), isDay, dayTimeTicks);
+    // CloudsEnd(HorizonClouds shader)输入态缓存:月相/昼夜(SkyRenderer.drawCloudPass 区消费)
+    this.lastMoonPhase = Math.max(0, Math.min(7, clock.moonPhase ?? 0));
+    this.lastIsDay = isDay;
     // Main.screenPosition.Y(屏顶世界 Y)与 zoom——天空贴图 bgTopY/日月轨迹/
     // 镜头光斑轴角微扰共用
     const zQ = this.frameCtx?.z ?? 1;

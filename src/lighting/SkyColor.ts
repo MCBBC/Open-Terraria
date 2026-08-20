@@ -157,19 +157,19 @@ function applyBiomeToBg(bg: [number, number, number], bio: BiomeInfluence): void
     bg[0] *= k; bg[1] *= k; bg[2] *= k;
   }
   if (bio.corrupt > 0) {
-    const I = bio.corrupt;                        // :63045-63070
+    const I = Math.min(1, bio.corrupt);  // >1f 钳 1(:6300x 系——漏钳=真实带计数≫1000→通道负→min15 全黑,2026-08-20)
     bg[0] = m255(bg[0] - 90 * I * (bg[0] / 255));
     bg[1] = m255(bg[1] - 140 * I * (bg[1] / 255));
     bg[2] = m255(bg[2] - 70 * I * (bg[2] / 255));
   }
   if (bio.crimson > 0) {
-    const I = bio.crimson;                        // :63078-63096(R 用 G 归一——原文如此)
+    const I = Math.min(1, bio.crimson);  // >1f 钳 1(:6300x 系——漏钳=真实带计数≫1000→通道负→min15 全黑,2026-08-20)
     bg[0] = m255(bg[0] - 40 * I * (bg[1] / 255));
     bg[1] = m255(bg[1] - 110 * I * (bg[1] / 255));
     bg[2] = m255(bg[2] - 140 * I * (bg[2] / 255));
   }
   if (bio.jungle > 0) {
-    const I = bio.jungle;                         // :63102-63129
+    const I = Math.min(1, bio.jungle);  // >1f 钳 1(:6300x 系——漏钳=真实带计数≫1000→通道负→min15 全黑,2026-08-20)
     bg[0] = m255(bg[0] - 40 * I * (bg[0] / 255));
     bg[2] = m255(bg[2] - 70 * I * (bg[2] / 255));
   }
@@ -185,17 +185,17 @@ function applyBiomeToBg(bg: [number, number, number], bio: BiomeInfluence): void
 export function applyBiomeToSun(sun: [number, number, number], bio: BiomeInfluence): void {
   const m255 = (v: number) => Math.max(15, v);
   if (bio.corrupt > 0) {
-    const I = bio.corrupt;
+    const I = Math.min(1, bio.corrupt);
     sun[0] = m255(sun[0] - 100 * I * (sun[0] / 255));
     sun[1] = m255(sun[1] - 100 * I * (sun[1] / 255));
   }
   if (bio.crimson > 0) {
-    const I = bio.crimson;
+    const I = Math.min(1, bio.crimson);
     sun[1] = m255(sun[1] - 90 * I * (sun[1] / 255));
     sun[2] = m255(sun[2] - 110 * I * (sun[2] / 255));
   }
   if (bio.jungle > 0) {
-    const I = bio.jungle;
+    const I = Math.min(1, bio.jungle);
     sun[0] = m255(sun[0] - 30 * I * (sun[0] / 255));
     sun[2] = m255(sun[2] - 10 * I * (sun[2] / 255));
   }

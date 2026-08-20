@@ -78,10 +78,6 @@ const SHEET379 = sheetId(379);
 const WIRE_RED = TileStore.WIRE_RED;
 const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
 
-/** SSSSS 批临时探针（用毕即删）：placeTrap/placeSandTrap 调用账 + KillTile 杀账 */
-export let __ssLog: string[] | null = null;
-export function __setSsLog(a: string[] | null): void { __ssLog = a; }
-
 /** GenVars.boulderPetsPlaced（cs:9302 宠物巨石计数，每局生成清零） */
 let boulderPetsPlaced = 0;
 
@@ -94,21 +90,6 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   if (d.framed && ((d.w ?? 1) > 1 || (d.h ?? 1) > 1)) MULTI_DEFS.set(i, { w: d.w!, h: d.h! });
 }
 export function killTileWhole(st: TileStore, x: number, y: number, rng?: RNG): void {
-  if (__ssLog) {
-    const before: number[] = [];
-    for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
-      const ux = x + dx, uy = y + dy;
-      if (st.inBounds(ux, uy) && st.flags[st.idx(ux, uy)]) before.push(st.idx(ux, uy), sheetOf(st.type[st.idx(ux, uy)]!));
-    }
-    killTileWholeCore(st, x, y, rng);
-    const killed: string[] = [];
-    for (let q = 0; q < before.length; q += 2) {
-      const ii = before[q]!;
-      if (!st.flags[ii]) killed.push(`${ii % st.w},${Math.floor(ii / st.w)}:${before[q + 1]}`);
-    }
-    if (killed.length) __ssLog.push(`kill ${x},${y} -> ${killed.join(' ')}`);
-    return;
-  }
   killTileWholeCore(st, x, y, rng);
 }
 function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void {
@@ -656,11 +637,6 @@ function placePlate(st: TileStore, x: number, y: number, style: number): boolean
 
 /** placeTrap 主体（cs:8875-9460，普通种子路径）。type: 0 飞镖 / 1 巨石 / 2 炸药桶 / 3 热喷泉 */
 export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
-  const r = placeTrapCore(st, rng, gs, x2, y2, type);
-  if (__ssLog) __ssLog.push(`trap ${x2},${y2} req=${type} -> ${r}`);
-  return r;
-}
-function placeTrapCore(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number, type = -1): boolean {
   // 微光回避（cs:8884，用原始 y2 掷点）：距 shimmerPosition <100 拒（未生成时 (0,0)）
   const shx = gs.shimmerX >= 0 ? gs.shimmerX : 0, shy = gs.shimmerY >= 0 ? gs.shimmerY : 0;
   if (Math.hypot(x2 - shx, y2 - shy) < 100) return false;
@@ -683,7 +659,6 @@ function placeTrapCore(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: nu
   if (type === -1 && rng.int(0, 19) === 0) type = 2;
   else if (type === -1 && py > gs.lavaLine + 30 && rng.int(0, 5) !== 0) type = 3;
   else if (type === -1) type = rng.int(0, 1);
-  if (__ssLog) __ssLog.push(`scan ${x2},${y2} py=${py} t=${type} lava=${lava ? 1 : 0} deep=${deep ? 1 : 0}`);
   // 共同守卫（cs:8961-8985）
   if (x2 < 3 || py < 3 || x2 > st.w - 4 || py > st.h - 4) return false;   // InWorld(x2,num,3)
   if (lava && type !== 3) return false;
@@ -891,11 +866,6 @@ function isCracked(t: number): boolean {
 /** PlaceSandTrap（cs:35505-35781）：地下沙漠蜂窝墙内的塌沙陷阱（1456 全尾段） */
 /** PlaceSandTrap（cs:35505-35781）——导出仅供探针对账 */
 export function placeSandTrap(st: TileStore, rng: RNG, i: number, j: number): boolean {
-  const r = placeSandTrapCore(st, rng, i, j);
-  if (__ssLog) __ssLog.push(`sand ${i},${j} -> ${r}`);
-  return r;
-}
-function placeSandTrapCore(st: TileStore, rng: RNG, i: number, j: number): boolean {
   const num2 = 4, num3 = 25;
   let k = j;
   while (k < st.h - 200 && !st.flags[st.idx(i, k)]) k++;              // cs:35515 UnderworldLayer

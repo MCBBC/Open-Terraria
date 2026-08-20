@@ -142,3 +142,20 @@ describe('耀斑玩家残影项(LensFlareElement.cs:34-37)', () => {
     expect(flareShadowTerm(histV, 1000, 500, 500, 500)).toBeCloseTo(0, 6);
   });
 });
+
+describe('群系影响 >1 钳制(Main.cs:63006/:63057/:63107——漏钳=真实带计数≫1000 全黑)', () => {
+  const BIO2 = (o: Partial<BiomeInfluence>): BiomeInfluence =>
+    ({ corrupt: 0, crimson: 0, jungle: 0, mushroom: 0, graveyard: 0, ...o });
+  it('腐化 I=5 ≡ I=1(正午白 → (165,115,185),不再 min15 全黑)', () => {
+    expect(setBackColor(27000, true, 0, false, 1, BIO2({ corrupt: 5 }))).toEqual([165, 115, 185]);
+  });
+  it('猩红 I=8 ≡ I=1 → (215,145,115);丛林 I=3 ≡ I=1 → (215,255,185)', () => {
+    expect(setBackColor(27000, true, 0, false, 1, BIO2({ crimson: 8 }))).toEqual([215, 145, 115]);
+    expect(setBackColor(27000, true, 0, false, 1, BIO2({ jungle: 3 }))).toEqual([215, 255, 185]);
+  });
+  it('sunColor 腐化 I=9 ≡ I=1 → (155,155,255)', () => {
+    const sun: [number, number, number] = [255, 255, 255];
+    applyBiomeToSun(sun, BIO2({ corrupt: 9 }));
+    expect(sun).toEqual([155, 155, 255]);
+  });
+});

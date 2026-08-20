@@ -43,9 +43,10 @@
 // · 实体注入（WaterShaderData.DrawWaves :181-334；洗掠形状 = "WaterDistortionObject"
 //   着色器，PixelShader.cso obj50 逐指令复原）：
 //     radial = normalize(uv−0.5)；flow = normalize(vColor.xy−0.5)
-//     r = |uv−0.5|·25.12；r≥4π → φ=−0.00637111，否则 φ = frac(r/2π+0.5)·2π−π
+//     r = |uv−0.5|·25.12；r≥4π → φ=−0.00637111，否则 φ = frac(max(r,2π)/2π+0.5)·2π−π
 //     s = vColor.z · max(dot(−flow,radial)−0.2, 0) · min(sin φ, 0)
-//     输出 (s,0,0,s)，预乘 AlphaBlend：out = src.rgb + dst.rgb·(1−src.a)
+//     输出 (s,0,0,s)，非预乘 AlphaBlend（TileBatch blendState=null → XNA 默认）：
+//     out = src.rgb·src.a + dst.rgb·(1−src.a)
 //   NPC（:192-230，恒开）：num = |vel/(h,w)|²·(0.3+0.7·1024/(h·w)) 钳 0.08 +
 //   |vel−oldVel|·0.5；流方向 = normalize(vel.RotatedBy(−rotation)/(h,w))；
 //   quad (2w,2h) @ Center−v̂·10；wetCount≠0 涟漪走【raw Color 重载】：
@@ -159,7 +160,11 @@ export function waterDistortionIntensity(
 }
 
 /** WaterDistortionObject 实体洗掠强度（纯函数，obj50 复原）。
- *  uvcX/uvcY = quad 局部 uv − 0.5；flowX/flowY = vColor.xy − 0.5；strength = vColor.z。 */
+ *  uvcX/uvcY = quad 局部 uv − 0.5；flowX/flowY = vColor.xy − 0.5；strength = vColor.z。
+ *  ★内圈 max(r, 2π) 钳(2026-08-20 字节码复核)：obj50 #27 `max r1.z, r0.z, c1.x(6.28)`
+ *  在 frac 前钳 r——r<2π(内圈 |uvc|<0.25)的 φ 恒 ≈ −0.0039（frac(2π·0.159155+0.5)），
+ *  旧实现直接用原 r 算 frac → 内圈 φ 全域摆动 → 洗掠图案内圈错形（SM2 解释器
+ *  执行字节码探针定罪：r=2.512 处 interp=0.00255 vs 旧公式=0）。 */
 export function washShapeValue(
   uvcX: number, uvcY: number, flowX: number, flowY: number, strength: number,
 ): number {
@@ -172,12 +177,13 @@ export function washShapeValue(
   const r = rlen * 25.12;                                   // c0.w
   const dotTerm = Math.max(-fx * radx - fy * rady - 0.2, 0);
   let phi: number;
-  if (r >= 12.56) {                                         // ≥ 4π → 恒小负角（远处尾迹）
+  if (r >= 12.56) {                                         // #29 cmp max(r,2π)−4π≥0 → 恒小负角
     phi = -0.00637111;
   } else {
-    let frac = (r * 0.159155 + 0.5) % 1;                    // r/2π + 0.5 → frac
+    const rEff = Math.max(r, 6.28);                         // #27 max(r, c1.x=2π)
+    let frac = (rEff * 0.15915494 + 0.5) % 1;               // r/2π + 0.5 → frac(float32 1/2π)
     if (frac < 0) frac += 1;
-    phi = frac * 6.28319 - 3.14159;                         // ·2π − π ∈ [−π, π)
+    phi = frac * 6.2831853 - 3.1415927;                     // ·2π − π(float32 π 常量)
   }
   const sinPhi = Math.sin(phi);
   return strength * dotTerm * (sinPhi >= 0 ? 0 : -sinPhi);  // min(sin,0) 取负半波
@@ -397,7 +403,12 @@ class WaterWaveSystem {
   }
 
   /** 位移采样（FilterWaterDistortion obj19 公式）。
-   *  worldX/worldY = 世界 px；out = [dxPx, dyPx]（canvas px，z=1 时=原版屏幕 px）。 */
+   *  worldX/worldY = 世界 px；out = [dxPx, dyPx]（canvas px，z=1 时=原版屏幕 px）。
+   *  ★噪声坐标单位修正(2026-08-20 用户实报"静水自然扰动缺失"定罪)：字节码
+   *  obj19 #13-#17 的采样坐标 = 屏幕px/noise尺寸·{0.1,0.2} = 【噪声 UV】(0..1
+   *  = 整张贴图)，而 noiseAt 的入参是【texel】。旧实现把 UV 值直接喂 texel 采样
+   *  → 全屏落在第 0-1 个 texel 内 = 场恒定 → 静水只剩 ±0.1px 时间漂移抖动。
+   *  正确换算：texel = uv·256(贴图边长)，即 px·{0.1,0.2} 与 prog·0.04·256。 */
   sampleDisplace(worldX: number, worldY: number, out: [number, number]): void {
     out[0] = 0; out[1] = 0;
     if (this.quality === 0 || !_noiseData) return;
@@ -406,8 +417,9 @@ class WaterWaveSystem {
     const u = px / _noiseW, v = py / _noiseH;   // uv = 屏幕px/noise 尺寸（c0）
     const prog = this.progress;
     const d1v = v * 0.1 + prog * 0.04;          // n1 的 v 漂移（X 无漂移）
-    const gx = noiseAt(0, u * 0.1, d1v) - noiseAt(0, u * 0.2, v * 0.2 - prog * 0.04);
-    const gy = noiseAt(1, u * 0.1, d1v) - noiseAt(1, u * 0.2, v * 0.2 - prog * 0.04);
+    // texel 坐标（noiseAt 吃 texel；×贴图边长 256）
+    const gx = noiseAt(0, u * 0.1 * _noiseW, d1v * _noiseH) - noiseAt(0, u * 0.2 * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
+    const gy = noiseAt(1, u * 0.1 * _noiseW, d1v * _noiseH) - noiseAt(1, u * 0.2 * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     // 涟漪高度项：h' = bufR − 0.5（(1−0.4·bufB)=1，1456 bufB=0），钳 ±0.3 取负入 DISPY
     const h = this._readR(px, py);
     const hClamp = Math.min(0.3, Math.max(-0.3, h - 0.5));
@@ -425,15 +437,21 @@ class WaterWaveSystem {
     const py = (worldY - this._camY) * this._zoom;
     const u = px / _noiseW, v = py / _noiseH;
     const prog = this.progress;
-    const gx = noiseAt(0, u * 0.1, v * 0.1 + prog * 0.04) - noiseAt(0, u * 0.2, v * 0.2 - prog * 0.04);
-    const gy = noiseAt(1, u * 0.1, v * 0.1 + prog * 0.04) - noiseAt(1, u * 0.2, v * 0.2 - prog * 0.04);
+    const gx = noiseAt(0, (u * 0.1) * _noiseW, (v * 0.1 + prog * 0.04) * _noiseH) - noiseAt(0, (u * 0.2) * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
+    const gy = noiseAt(1, (u * 0.1) * _noiseW, (v * 0.1 + prog * 0.04) * _noiseH) - noiseAt(1, (u * 0.2) * _noiseW, (v * 0.2 - prog * 0.04) * _noiseH);
     const h = this._readR(px, py) - 0.5;
     return Math.min(1, Math.abs(0.3 * h + Math.hypot(gx, gy)) * 0.75 * 0.3333);
   }
 
   /** 实体洗掠注入（WaterDistortionObject obj50 + DrawWaves 调用参数）。
    *  center = 世界中心 px（NPC/玩家已含 −v̂·10 偏移；弹幕为裸 Center）；
-   *  quadW/H = 世界 px；flowX/Y = 已归一化流方向；strength = vColor.z。 */
+   *  quadW/H = 世界 px；flowX/Y = 已归一化流方向；strength = vColor.z。
+   *  ★混合模型修正(2026-08-20 字节码+TileBatch 复核)：DrawWaves 的
+   *  tileBatch.Begin()(:190) → TileBatch.Begin :220-227 → _spriteBatch.Begin(
+   *  Deferred, blendState=null) —— null = XNA SpriteBatch 默认
+   *  BlendState.AlphaBlend（非预乘：out.rgb = src.rgb·src.a + dst.rgb·(1−src.a)）。
+   *  shader 输出 (s,0,0,s) → R 通道实际沉积 = s·s（旧实现按预乘 (One,InvSrcAlpha)
+   *  写 s = 大 ~25× 过强）。 */
   injectWash(centerX: number, centerY: number, quadW: number, quadH: number,
     flowX: number, flowY: number, strength: number): void {
     if (this.quality === 0) return;
@@ -455,9 +473,9 @@ class WaterWaveSystem {
         const s = washShapeValue(uvcX, uvcY, flowSignedX, flowSignedY, strength);
         if (s <= 0) continue;
         const i = y * w + x;
-        const inv = 1 - s;              // 预乘 AlphaBlend：out = src + dst·(1−a)，src=(s,0,0,s)
-        R[i] = q256(s + R[i] * inv);    // 写入 unorm8 目标 → 1/256 量化
-        G[i] = q256(G[i] * inv);
+        const inv = 1 - s;              // 非预乘 AlphaBlend：out = src.rgb·a + dst·(1−a)
+        R[i] = q256(s * s + R[i] * inv);   // src=(s,0,0,s) → R 沉积 s·s
+        G[i] = q256(G[i] * inv);           // src.g=0
       }
     }
   }
@@ -513,7 +531,8 @@ class WaterWaveSystem {
       + (R[yb * w + xa] * (1 - fx) + R[yb * w + xb] * fx) * fy;
   }
 
-  /** 涟漪队列光栅化（DrawWaves :314-327；预乘 AlphaBlend，形状旋转于中心） */
+  /** 涟漪队列光栅化（DrawWaves :314-327；非预乘 AlphaBlend——同 injectWash 复核，
+   *  out.rgb = src.rgb·src.a + dst·(1−src.a)，src = shape·WaveData，a = shape·num） */
   private _drawRipples(): void {
     if (!this.gates.ripple || !_rippleData) { _rqCount = 0; return; }
     const z = this._zoom;
@@ -539,8 +558,8 @@ class WaterWaveSystem {
           const a = shapeV * num;
           const inv = 1 - a;
           const i = y * w + x;
-          R[i] = q256(shapeV * rCol + R[i] * inv);   // unorm8 写入量化
-          G[i] = q256(shapeV * gCol + G[i] * inv);
+          R[i] = q256(shapeV * rCol * a + R[i] * inv);   // 非预乘:src.rgb·a（unorm8 量化）
+          G[i] = q256(shapeV * gCol * a + G[i] * inv);
         }
       }
     }

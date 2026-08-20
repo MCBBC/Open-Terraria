@@ -61,13 +61,91 @@ void main() {
   outColor = vec4(c.rgb * uTint * a, a);             // 预乘输出
 }`;
 
+// ---- HorizonClouds 像素着色器（Terraria 1.4.5.6 PixelShader.cso obj62 逐指令 1:1；
+//      行号 = fxPixel.txt 反汇编 :2929-2998。云晨昏天体染色主路径——
+//      CloudsEnd（NextHorizonRenderer.cs:328-361）对三通道全部 _drawData 施加本 pass）----
+const CLOUD_VERT_SRC = `#version 300 es
+uniform vec2 uCanvas;
+uniform vec4 uSrc;    // uv 基 + uv 跨度
+uniform vec4 uDst;    // 目标基 + 尺寸(像素)
+uniform float uRot;
+layout(location=0) in vec2 aPos;
+out vec2 vUv;
+out vec2 vScreen;     // t1：旋转后画布像素位（shader 的 n1/dist 几何输入）
+void main() {
+  vec2 c = vec2(0.5);
+  vec2 d = aPos - c;
+  float s = sin(uRot), co = cos(uRot);
+  vec2 p = c + vec2(d.x * co - d.y * s, d.x * s + d.y * co);
+  vUv = vec2(uSrc.x + p.x * uSrc.z, uSrc.y + p.y * uSrc.w);
+  vec2 screen = vec2(uDst.x + p.x * uDst.z, uDst.y + p.y * uDst.w);
+  vScreen = screen;
+  gl_Position = vec4(screen.x / uCanvas.x * 2.0 - 1.0,
+                     1.0 - screen.y / uCanvas.y * 2.0, 0.0, 1.0);
+}`;
+
+const CLOUD_FRAG_SRC = `#version 300 es
+precision highp float;   // dist/D³ 大数链,fp16 精度不足
+uniform sampler2D uTex;        // s0 = 云贴图(LinearWrap → wrap2 采样器 REPEAT 双轴)
+uniform vec4 uVertColor;       // v0 = cloudColor×globalCloudAlpha(DrawData 顶点色)
+uniform vec3 uCelestialCol;    // c0 = uColor(GetCelestialBodyColors 天体色)
+uniform vec2 uDrawPos;         // c1 = uDrawPosition(云中心,画布 px)
+uniform vec3 uCelestial;       // c2 = uShaderSpecificData.xyz: 天体位 px + 强度
+in vec2 vUv;
+in vec2 vScreen;
+out vec4 outColor;
+void main() {
+  // :2941-2949 五点采样：上(0,−0.035) 下(0,0.14) 左(−0.035,0) 右(+0.035,0) 中
+  vec4 up = texture(uTex, vUv + vec2(0.0, -0.035));
+  vec4 dn = texture(uTex, vUv + vec2(0.0, 0.14));
+  vec4 lf = texture(uTex, vUv + vec2(-0.035, 0.0));
+  vec4 rt = texture(uTex, vUv + vec2(0.035, 0.0));
+  vec4 cc = texture(uTex, vUv);
+  float coverage = 1.0 - 0.2 * (up.a + dn.a + lf.a + rt.a + cc.a);   // :2950-2954
+  float thickness = 1.0 - 4.0 * (cc.r - 0.62);                       // :2955-2957
+  float A = max(thickness, coverage);                                // :2958
+  vec2 d1 = vScreen - uDrawPos;                                      // :2959
+  float l1 = dot(d1, d1);
+  vec2 n1 = l1 > 0.0 ? d1 * inversesqrt(l1) : vec2(0.0);             // :2960-2962
+  vec2 d2 = uCelestial.xy - vScreen;                                 // :2963
+  float l2 = dot(d2, d2);
+  vec2 n2 = l2 > 0.0 ? d2 * inversesqrt(l2) : vec2(0.0);             // :2964-2966
+  float dist = l2 > 0.0 ? sqrt(l2) : 0.0;                            // :2967 rcp
+  float B = max(dot(n1, n2), 1.0 - (dist * 0.0166667) * (dist * 0.0166667));  // :2968-2971 (d/60)²
+  float R = length(vUv * 2.0 - 1.0);                                 // :2972-2975
+  float distTerm = dist <= 50.0 ? dist / 50.0 - 1.0 : 0.0;           // :2979+2982 cmp(else 分支=c3.x=0 非 −1!)
+  float inner = (B * R - 0.05) * A + 0.6 * A + B * R - 0.3 + distTerm;  // :2976-2984 (#47 用 r1.x=A)
+  float D = max(0.3, 1.3 - dist * 0.000555556);                      // :2980-2981 (c4.x=1/1800)
+  float shade = inner * uCelestial.z * D * D * D;                    // :2985-2988
+  vec4 r1 = mix(uVertColor, vec4(uCelestialCol, 1.0), 0.5) * cc.a;   // :2989-2992
+  vec4 r2 = cc * uVertColor;                                          // :2993
+  vec4 col = r2 + shade * (r1 * uVertColor.a - r2);                   // :2994-2995
+  outColor = vec4(col.rgb * col.a, col.a);                            // 预乘输出(blend ONE/1−srcα)
+}`;
+
+/** HorizonClouds 每云 uniform（drawCloudPass 组装；vColor=既有云色链结果） */
+export interface CloudFx {
+  /** c1 uDrawPosition：云中心（画布 px = dst 左上 + 半宽高） */
+  drawPos: readonly [number, number];
+  /** c2.xyz：天体屏幕位 px（GetCelestialBodyPosition）+ CloudsEnd 强度 num */
+  celestial: readonly [number, number, number];
+  /** c0 uColor：日 (255,246,204)/月 GetMoonColor×GetMoonStrength（0..1） */
+  color: readonly [number, number, number];
+  /** v0 顶点色（cloudColor×globalCloudAlpha，rgba 0..1） */
+  vertColor: readonly [number, number, number, number];
+}
+
 export class GLSpriteLayer {
   readonly canvas: HTMLCanvasElement;
   private gl: WebGL2RenderingContext | null = null;
   private prog: WebGLProgram | null = null;
   private uni: Record<string, WebGLUniformLocation | null> = {};
+  /** HorizonClouds 第二程序（obj62 1:1；编译失败→ cloudFxOK=false 走普通 quad） */
+  private progCloud: WebGLProgram | null = null;
+  private uniCloud: Record<string, WebGLUniformLocation | null> = {};
+  cloudFxOK = false;
   private vao: WebGLVertexArrayObject | null = null;
-  private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null };
+  private samp: { nearest: WebGLSampler | null; linear: WebGLSampler | null; repeat: WebGLSampler | null; linearNoMip: WebGLSampler | null; wrap2: WebGLSampler | null };
   private texs = new Map<string, TexEntry>();
   private stamp = 0;
   /** 字节预算(★2026-08-18:曾按条数 96 限额——96 张多 MB 纹理+mip 链可达 GB 级,
@@ -85,7 +163,7 @@ export class GLSpriteLayer {
     this.canvas = document.createElement('canvas');
     this.canvas.width = 0;
     this.canvas.height = 0;
-    this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null };
+    this.samp = { nearest: null, linear: null, repeat: null, linearNoMip: null, wrap2: null };
     this.init();
   }
 
@@ -135,6 +213,24 @@ export class GLSpriteLayer {
     for (const n of ['uCanvas', 'uSrc', 'uDst', 'uRot', 'uTex', 'uAlpha', 'uTint']) {
       this.uni[n] = gl.getUniformLocation(prog, n);
     }
+    // HorizonClouds 程序（独立编译;失败不致命——cloudQuad 回退普通 quad）
+    const cvs = compile(gl.VERTEX_SHADER, CLOUD_VERT_SRC);
+    const cfs = compile(gl.FRAGMENT_SHADER, CLOUD_FRAG_SRC);
+    if (cvs && cfs) {
+      const cp = gl.createProgram()!;
+      gl.attachShader(cp, cvs);
+      gl.attachShader(cp, cfs);
+      gl.linkProgram(cp);
+      if (gl.getProgramParameter(cp, gl.LINK_STATUS)) {
+        this.progCloud = cp;
+        this.cloudFxOK = true;
+        for (const n of ['uCanvas', 'uSrc', 'uDst', 'uRot', 'uTex', 'uVertColor', 'uCelestialCol', 'uDrawPos', 'uCelestial']) {
+          this.uniCloud[n] = gl.getUniformLocation(cp, n);
+        }
+      } else {
+        console.warn('[GLSpriteLayer] HorizonClouds 程序链接失败:', gl.getProgramInfoLog(cp));
+      }
+    }
     // 单位 quad(TRIANGLE_STRIP)
     const vao = gl.createVertexArray()!;
     gl.bindVertexArray(vao);
@@ -160,6 +256,26 @@ export class GLSpriteLayer {
     // LINEAR 档 MIN 带 mipmap(缩放对齐 Skia 盒式降采样),MAG 恒 LINEAR
     this.samp.linear = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.CLAMP_TO_EDGE);
     this.samp.repeat = mkSampler(gl.LINEAR_MIPMAP_LINEAR, gl.LINEAR, gl.REPEAT);
+    // wrap2:双轴 REPEAT(HorizonClouds obj62 ±0.035/0.14 uv 偏移采样须 wrap——
+    // 原版 MiscShaderData 默认 SamplerState.LinearWrap;WebGL2 NPOT REPEAT 合法)
+    this.samp.wrap2 = (() => {
+      const s = gl.createSampler()!;
+      gl.samplerParameteri(s, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      return s;
+    })();
+    // linearNoMip:无 mip 线性(quad/tileX 的 noMip 纹理分流;此前从未创建——
+    // bindSampler(0, null) 会解绑采样器落回纹理参数,侥幸同语义,现补齐)
+    this.samp.linearNoMip = (() => {
+      const s = gl.createSampler()!;
+      gl.samplerParameteri(s, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.samplerParameteri(s, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return s;
+    })();
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -388,6 +504,38 @@ export class GLSpriteLayer {
     gl.uniform1f(this.uni.uAlpha, opts?.alpha ?? 1);
     const t = opts?.tint ?? WHITE3;
     gl.uniform3f(this.uni.uTint, t[0], t[1], t[2]);
+  }
+
+  /** HorizonClouds 云 quad（obj62 逐像素公式;整朵云一个 draw call,uniform 每云一发）。
+   *  fx 缺失/程序编译失败 → 调用方应回退普通 quad(本方法不回退,保持路径单一)。 */
+  cloudQuad(
+    e: TexEntry, sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    rot: number, flipX: boolean, fx: CloudFx,
+  ): void {
+    if (this.unavailable || !this.gl || !this.progCloud || sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0) return;
+    const gl = this.gl;
+    gl.useProgram(this.progCloud);
+    gl.bindTexture(gl.TEXTURE_2D, e.tex);
+    // 原版 LinearWrap(双轴 wrap);mip 分流同 quad
+    gl.bindSampler(0, e.mipped ? this.samp.wrap2! : this.samp.linearNoMip!);
+    const px = 0.5 / e.w, py = 0.5 / e.h;
+    const v0 = (sy + py) / e.h, v1 = (sy + sh - py) / e.h;
+    const ua = (sx + px) / e.w, ub = (sx + sw - px) / e.w;
+    const u0 = flipX ? ub : ua, u1 = flipX ? ua : ub;
+    gl.uniform4f(this.uniCloud.uSrc, u0, v0, u1 - u0, v1 - v0);
+    gl.uniform4f(this.uniCloud.uDst, dx, dy, dw, dh);
+    gl.uniform1f(this.uniCloud.uRot, rot);
+    gl.uniform1i(this.uniCloud.uTex, 0);
+    gl.uniform2f(this.uniCloud.uCanvas, this.canvas.width, this.canvas.height);
+    gl.uniform4f(this.uniCloud.uVertColor, fx.vertColor[0], fx.vertColor[1], fx.vertColor[2], fx.vertColor[3]);
+    gl.uniform3f(this.uniCloud.uCelestialCol, fx.color[0], fx.color[1], fx.color[2]);
+    gl.uniform2f(this.uniCloud.uDrawPos, fx.drawPos[0], fx.drawPos[1]);
+    gl.uniform3f(this.uniCloud.uCelestial, fx.celestial[0], fx.celestial[1], fx.celestial[2]);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindSampler(0, null);
+    // 程序切换回基础 quad 程序(uniform 属程序态;后续 quad() 假定 prog 在位)
+    gl.useProgram(this.prog);
   }
 
   private evictLRU(keepKey: string): void {

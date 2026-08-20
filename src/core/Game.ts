@@ -3577,21 +3577,6 @@ export class Game implements GameHooks {
     // 世界声监听器（原版 Main.Camera.Center）：世界坐标声按此衰减（2500px，LegacySoundPlayer）
     this.sfx.suppress = false;   // 安全网：afterWorldLoad 中段抛异常导致门未解除时，首 tick 自动恢复有声
     this.sfx.setListener(this.camera.x, this.camera.y);
-    // ---- 群系光照影响逐 tick 平滑 + 写 scene(Main.cs:61380-61404 每帧语义;
-    //      计数 15t 采样。墓园强度复用 weather 段单字段,其 target 已改吃可视窗计数) ----
-    {
-      const target = this.biomeCounts.mushroom / 160;
-      if (target > 0) this.mushroomSmooth += target > this.mushroomSmooth ? 0.01 : -0.01;
-      else this.mushroomSmooth -= 0.02;
-      this.mushroomSmooth = Math.max(0, Math.min(1, this.mushroomSmooth));
-      this.scene.biomeLightInfluence = {
-        corrupt: this.biomeCounts.evil / 1000,
-        crimson: this.biomeCounts.blood / 1000,
-        jungle: this.biomeCounts.jungle / 700,
-        mushroom: this.mushroomSmooth,
-        graveyard: this.graveyardIntensity,
-      };
-    }
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
     if (this.tickCount % 15 === 0) {
       // 城镇 NPC 计数为"距离盒"语义（SceneMetrics.cs:755-757/:12/:18：
@@ -3698,6 +3683,25 @@ export class Game implements GameHooks {
         this.cb.onMusic?.(music);
       }
     }
+    // ---- 群系光照影响逐 tick 平滑 + 写 scene(★必须在上面 15t 场景替换【之后】:
+    //      scanScene 产新对象不带 biomeLightInfluence,写在替换前 = 每 15t 有
+    //      1 帧字段 undefined → cots/光种掉回无群系态 → 腐化/猩红 4Hz 爆闪,
+    //      用户实报 2026-08-20;Main.cs:61380-61404 每帧语义,计数 15t 采样;
+    //      墓园强度复用 weather 段单字段,其 target 已改吃可视窗计数) ----
+    {
+      const target = this.biomeCounts.mushroom / 160;
+      if (target > 0) this.mushroomSmooth += target > this.mushroomSmooth ? 0.01 : -0.01;
+      else this.mushroomSmooth -= 0.02;
+      this.mushroomSmooth = Math.max(0, Math.min(1, this.mushroomSmooth));
+      this.scene.biomeLightInfluence = {
+        corrupt: this.biomeCounts.evil / 1000,
+        crimson: this.biomeCounts.blood / 1000,
+        jungle: this.biomeCounts.jungle / 700,
+        mushroom: this.mushroomSmooth,
+        graveyard: this.graveyardIntensity,
+      };
+    }
+
     const player = this.player;
 
     // ---- 八音盒录音（Player.cs:15053-15366 ApplyEquipFunctional 1:1）：配饰槽

@@ -192,7 +192,7 @@ describe('applyPaintTint：TileShader.cso SM2 字节码真值（fxTile.txt 行�
 describe('特判组 per-type 设置表（TreePaintSystemData.cs 1:1）', () => {
   const fr = Math.fround; // 表常量在 f32 域（C# f 后缀 → shader 常量同域）
 
-  it('具名设置 26 项逐字段（:16-245）', () => {
+  it('特判组具名设置 24 项逐字段（:16-245；另 DefaultNoSpecialGroups/ForWalls 两非特判档）', () => {
     const S = SPECIAL_PAINT_SETTINGS;
     const all = (invert: boolean, off: number, h0: number, h1: number, s0: number, s1: number) => ({
       useSpecialGroups: true, useWallShaderHacks: false,
@@ -220,7 +220,7 @@ describe('特判组 per-type 设置表（TreePaintSystemData.cs 1:1）', () => {
     expect({ ...S.PalmTreeCorruption }).toEqual(all(false, 0, 0, 1, 0.4, 1));              // :219-226
     expect({ ...S.PalmTreeCrimson }).toEqual(all(false, 0.5, 1 / 3, 19 / 36, 0, 1));       // :228-236
     expect({ ...S.PalmTreeHallow }).toEqual(all(false, 0, 0.5, 11 / 18, 0, 1));            // :238-245
-    expect(Object.keys(S)).toHaveLength(26);
+    expect(Object.keys(S)).toHaveLength(24);   // 24 特判组 + 2 非特判 default = TreePaintSystemData 全 26
   });
 
   it('getTilePaintSettings：23 表型逐条 + 表外 null（:252-324）', () => {
