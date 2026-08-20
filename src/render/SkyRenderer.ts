@@ -1899,8 +1899,8 @@ export class SkyRenderer {
       const moonType = Math.max(0, Math.min(8, this.moonType));
       const mc = MOON_COLORS[moonType];
       r = mc[0]; g = mc[1]; b = mc[2];
-      if (this.fx.moonEventKind === 1) { r = 255; g = 225; b = 180; }        // pumpkinMoon
-      else if (this.fx.moonEventKind === 2) { r = 220; g = 220; b = 255; }   // snowMoon
+      if (this.fx.moonEventKind === 2) { r = 255; g = 225; b = 180; }        // pumpkinMoon(MOON_KIND_PUMPKIN=2)
+      else if (this.fx.moonEventKind === 1) { r = 220; g = 220; b = 255; }   // snowMoon(MOON_KIND_FROST=1)
       if (this.frameCtx?.world?.seedFlags?.drunkWorld) { r = 255; g = 255; b = 255; }
       // GetMoonStrength = Remap(|4−phase|, 0,4, 0,1) = |4−phase|/4
       const ms = Math.abs(4 - this.lastMoonPhase) / 4;

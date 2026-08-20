@@ -2564,9 +2564,11 @@ export class Renderer {
       this.weatherFx.draw(this, world);
     }
 
-    // 2d''.7 天空深化批世界内绘制：雨点落水涟漪（世界坐标）+ 晨昏镜头光斑（全屏）
+    // 2d''.7 天空深化批世界内绘制：雨点落水涟漪（世界坐标）
+    //      （晨昏镜头光斑 drawWorldFx 已挪帧尾 :2729 后——★曾画在世界层内被
+    //      lightCanvas 乘光:晨昏光照暗 → 加性耀斑被乘成黑矩形,用户实报
+    //      2026-08-20;原版耀斑是 backbuffer 后处理不吃 tile 光)
     //      （月总死亡白闪已挪帧尾 7c' 段，Main.cs:61763）
-    this.sky.drawWorldFx(ctx, cam.x, cam.y, z, viewW, viewH);
 
     // 3.5 入驻旗帜（Main.cs:40152 DrawNPCHousesInWorld：有家 NPC 在家坐标上方
     // 挂 House_Banner 旗布 + 叠画 NPC 头像；实体层之前画，让 NPC 从旗前走过）
@@ -2702,8 +2704,21 @@ export class Renderer {
     //     （尘埃错位+放大；与 :1446 全亮孪生 pass 同坐标系）
     this.drawVanillaDustPass(false, cam, player);
 
-    // 6c. LitNature 晨昏光晕（NextNatureRenderer :105-170：原版像素着色器，此处
-    //     可见性公式 1:1 + 太阳位暖色加性光晕近似；vis=0 时零开销）
+    // ==== 世界层收口：恢复主画布 ctx，光照在 worldCanvas 上成形后叠回 ====
+    this.endWorldLayer(mainCtx);
+    ctx = mainCtx;
+
+    // 7. 光照合成
+    this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+
+    // 7a'. 晨昏镜头光斑(NextHorizonRenderer.DrawLensFlare :362-408,原版
+    //      backbuffer 后处理不吃 tile 光——从世界层内挪出到光照合成后;曾画
+    //      世界层内被乘光 → 加性耀斑变黑矩形,用户实报 2026-08-20)
+    this.sky.drawWorldFx(ctx, cam.x, cam.y, z, viewW, viewH);
+
+    // 7a''. LitNature 晨昏光晕（NextNatureRenderer :105-170：原版像素着色器
+    //       后处理——从世界层内挪出到光照合成后;曾画在世界层内被乘光:晨昏
+    //       时光照暗 → 加性光晕被乘成不可见,与耀斑同类错误 2026-08-20 审计）
     const litVis = litNatureVisibility(clock);
     if (litVis > 0.003) {
       const ft = ((clock.timeOfDay - 0.25) / 0.5);
@@ -2720,13 +2735,6 @@ export class Renderer {
       ctx.fillRect(0, 0, viewW, viewH);
       ctx.restore();
     }
-
-    // ==== 世界层收口：恢复主画布 ctx，光照在 worldCanvas 上成形后叠回 ====
-    this.endWorldLayer(mainCtx);
-    ctx = mainCtx;
-
-    // 7. 光照合成
-    this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
 
     // 7c. 食人怪 259/260 茎蔓强制亮彩（Main.cs:22467-22477）：光照合成后绘制——
     //     主 pass 跳过该族，下限色 (max(R,100),max(G,150),255) 不被全屏乘光压掉

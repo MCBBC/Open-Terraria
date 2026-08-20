@@ -14,7 +14,7 @@ import type { TileStore } from '../src/world/TileStore';
 
 const RUN = process.env.SW_VV === '1';
 const KEY = process.env.SW_VV_KEY ?? 'ss12345';
-const BDIR = `/tmp/ss-b/${KEY}/trapsIn`;
+const BDIR = process.env.SW_VV_BDIR ?? `/tmp/ss-b/${KEY}/trapsIn`;
 const G2 = process.env.SW_VV_G2 ?? (KEY === 'ss12345' ? '/tmp/sw-slp/g12345' : '/tmp/sw-slp/g-m20260811');
 const N0 = statSync(`${BDIR}/flags.bin`).size;
 const H = process.env.SW_VV_H ? Number(process.env.SW_VV_H) : 1200;
@@ -79,12 +79,10 @@ it('probe', async () => {
   // 用杀账+放置账近似）；185 漏放点邻域 (2320..2360,240..265) 放置账
   const pilesLog: string[] = [];
   (globalThis as { __swPilesCap?: (x: number, y: number, t: number, s: number, z: number, k: number) => void }).__swPilesCap = (x, y, t, s, z, k) => {
-    const near = (x >= 3100 && x <= 3160 && y >= 760 && y <= 790)
+    const near = (y >= 300 && y <= 400)                       // m 链 #77 残差带（185 面）
+      || (x >= 3100 && x <= 3160 && y >= 760 && y <= 790)
       || (x >= 1330 && x <= 1370 && y >= 90 && y <= 115)
-      || (x >= 1215 && x <= 1255 && y >= 460 && y <= 495)
-      || (x >= 2320 && x <= 2360 && y >= 240 && y <= 265)
-      || (x >= 810 && x <= 850 && y >= 315 && y <= 345)
-      || (x >= 1225 && x <= 1250 && y >= 470 && y <= 495);
+      || (x >= 1215 && x <= 1255 && y >= 460 && y <= 495);
     if (near) pilesLog.push(`place(${x},${y}) sh${t} style${s} size${z} fx${k}`);
   };
   runTrapsPass(st, rng, gs, chests);
@@ -174,7 +172,8 @@ it('probe', async () => {
   for (const k of kills) {
     const m = /^k\((\d+),(\d+)\) s(\d+)$/.exec(k)!;
     const x = +m[1]!, y = +m[2]!;
-    if ((x >= 3100 && x <= 3160 && y >= 760 && y <= 790)
+    if ((y >= 300 && y <= 400)
+      || (x >= 3100 && x <= 3160 && y >= 760 && y <= 790)
       || (x >= 1330 && x <= 1370 && y >= 90 && y <= 115)
       || (x >= 1215 && x <= 1255 && y >= 460 && y <= 495)) console.log(`  ${k}`);
   }

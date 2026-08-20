@@ -830,36 +830,108 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
 /** WebsInSpiderCavesAndHoney pass（L20140）1:1：
  *  墙86 蜂巢腔 → 液体转蜂蜜 + 1/3 钟乳石(165)；墙62 蜘蛛巢 → 清液体 +
  *  空格 9/10 放蛛网 51（±2-4 内有实心才放） */
+/** PlaceUncheckedStalactite（cs:38368-38688）非 spiders 语境 1:1——
+ *  ★VVVVV（#85 Webs_And_Honey 主根因）：wall 86 的 PlaceTight(spiders:false)
+ *  曾硬编码"蜂巢单格 fx=162+var*18 fy=72"——①每调 PlaceTight 恒耗 2 掷
+ *  （实参求值 Next(2) preferSmall + Next(3) variation，cs:38349——与放置成败
+ *  无关；旧版仅在实心门内耗 1 掷=流位漂移）②家族分派整缺（沙 0/石 54/巢 162/
+ *  硬沙 378/泥 432/丛林泥 486；preferSmall 单格 fy72 vs 双格 fy0/18——蜂巢 225
+ *  恒单格）③地面支（钟乳石笋 fy90 单格/fy36+54 双格上长）整缺④尾部
+ *  CheckStalactite 复核缺（支撑 fail→整对杀+style 重定型 1×Next(3) 掷）。
+ *  写侧 ClearSlope（cs:38382 等）+CopyPaintAndCoating（锚格漆拷贝）。 */
+const STAL_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);   // Main.tileMoss
+function placeUncheckedStalactiteGen(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
+  const SHEETC = (tx: number, ty: number): number => {
+    if (!st.inBounds(tx, ty)) return -1;
+    const i = st.idx(tx, ty);
+    return st.flags[i] ? (TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) : -1;
+  };
+  const put = (px: number, py: number, fx: number, fy: number, fromPaint: number): void => {
+    if (!st.inBounds(px, py)) return;
+    st.setTileSilent(px, py, DECO165, fx, fy);
+    st.slope[st.idx(px, py)] = 0; st.half[st.idx(px, py)] = 0;   // ClearSlope
+    st.paint[st.idx(px, py)] = fromPaint;                        // CopyPaintAndCoating
+  };
+  const act = (tx: number, ty: number): boolean => st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0;
+  if (solidTile(st, x, y - 1) && !act(x, y) && !act(x, y + 1)) {
+    // —— 天花板支（cs:38373）：锚=上格 ——
+    const up = SHEETC(x, y - 1);
+    const fromPaint = st.paint[st.idx(x, y - 1)];
+    const fams: Array<[Set<number>, number]> = [
+      [new Set([147, 161, 163, 164, 200]), 0],                                   // 沙
+      [new Set([1, 117, 25, 203]), 54],                                          // 石（+moss 并集）
+      [new Set([396, 397]), 378], [new Set([368]), 432], [new Set([367]), 486],
+    ];
+    for (const [set, base] of fams) {
+      if (!set.has(up) && !(base === 54 && STAL_MOSS.has(up))) continue;
+      if (preferSmall) put(x, y, base + variation * 18, 72, fromPaint);
+      else { put(x, y, base + variation * 18, 0, fromPaint); put(x, y + 1, base + variation * 18, 18, fromPaint); }
+    }
+    if (up === 225) put(x, y, 162 + variation * 18, 72, fromPaint);              // 蜂巢恒单格
+    return;
+  }
+  // —— 地面支（cs:38528）：!spiders && SolidTile(y+1) && 双格净空 ——
+  if (!solidTile(st, x, y + 1) || act(x, y) || act(x, y - 1)) return;
+  const down = SHEETC(x, y + 1);
+  const fromPaint = st.paint[st.idx(x, y + 1)];
+  if (down === 1 || STAL_MOSS.has(down) || down === 117 || down === 25 || down === 203) {
+    if (preferSmall) put(x, y, 54 + variation * 18, 90, fromPaint);
+    else { put(x, y - 1, 54 + variation * 18, 36, fromPaint); put(x, y, 54 + variation * 18, 54, fromPaint); }
+  }
+  if (down === 225) put(x, y, 162 + variation * 18, 90, fromPaint);
+  const floorFams: Array<[number, number]> = [[396, 378], [397, 378], [368, 432], [367, 486]];
+  for (const [t2, base] of floorFams) {
+    if (down !== t2) continue;
+    if (preferSmall) put(x, y, base + variation * 18, 90, fromPaint);
+    else { put(x, y - 1, base + variation * 18, 36, fromPaint); put(x, y, base + variation * 18, 54, fromPaint); }
+  }
+}
+
+/** PlaceTight(spiders:false)（cs:38329-38357）——WebsAndHoney 的 wall 86 支 */
+function placeTightGen(st: TileStore, rng: RNG, x: number, y: number): void {
+  const gi = st.idx(x, y);
+  if (st.liquid[gi] > 0 && st.liquidType[gi] === 4) return;      // anyShimmer
+  if (st.flags[gi] && st.type[gi] === LARVA) return;             // type==231
+  // ★实参求值序（C# 左→右）：Next(2)=preferSmall 先、Next(3)=variation 后——
+  //   两掷与放置门无关恒耗（#85 流位根因）
+  const preferSmall = rng.int(0, 1) === 0;
+  const variation = rng.int(0, 2);
+  placeUncheckedStalactiteGen(st, x, y, preferSmall, variation);
+  if (st.flags[st.idx(x, y)] && st.type[st.idx(x, y)] === DECO165) {
+    checkStalactite(st, rng, x, y);                              // cs:38353-38356
+  }
+}
+
 export function runWebsInSpiderCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   for (let i = 100; i < st.w - 100; i++) {
     for (let j = Math.floor(gs.worldSurface); j < st.h - 100; j++) {
       const idx = st.idx(i, j);
       if (st.wall[idx] === 86) {
-        if (st.liquid[idx] > 0) st.liquidType[idx] = 3; // honey
-        if (rng.int(0, 2) === 0) {
-          // PlaceTight(spiders:false) → PlaceUncheckedStalactite（cs:38373-38402）：
-          // 帧按上方实心块类型分派——蜂巢腔内上方必是蜂巢块 225 → 蜂蜜滴单格
-          // fx=162+变体×18（162/180/198）、fy=72。此前错用雪地冰锥帧(0..36, 双格 fy 0/18)
-          // ——蜂巢里挂出一串冰锥的根因
-          if (solidTile(st, i, j - 1) && st.inBounds(i, j) && !st.flags[st.idx(i, j)]
-            && st.inBounds(i, j + 1) && !st.flags[st.idx(i, j + 1)]) {
-            const fx = 162 + rng.int(0, 2) * 18;
-            st.setTileSilent(i, j, DECO165, fx, 72);
-          }
-        }
+        if (st.liquid[idx] > 0) st.liquidType[idx] = 3; // honey(true)（cs:20155）
+        if (rng.int(0, 2) === 0) placeTightGen(st, rng, i, j);
       }
       if (st.wall[idx] === 62) {
-        st.liquid[idx] = 0; st.liquidType[idx] = 0;
+        st.liquid[idx] = 0; st.liquidType[idx] = 0;     // liquid=0+lava(false)（cs:20166）
       }
       if (st.wall[idx] === 62 && !st.flags[idx] && rng.int(0, 9) !== 0) {
-        const r = rng.int(2, 4);
+        const r = rng.int(2, 4);                        // Next(2,5)（cs:20174）
         let nearSolid = false;
-        for (let k = i - r; k <= i + r && !nearSolid; k++) {
+        for (let k = i - r; k <= i + r; k++) {
           for (let l = j - r; l <= j + r; l++) {
             if (solidTile(st, k, l)) { nearSolid = true; break; }
           }
         }
-        if (nearSolid) st.setTileSilent(i, j, COBWEB, 0, 0);
+        if (nearSolid) {
+          // PlaceTile(i,j,51) 1:1（cs:20181）：液体门（本语境 liquid 刚清=恒过，备案）
+          // + 前置清（cs:59500 !active→Clear 残值 type/帧/坡/半砖/漆——残值 type
+          // 参与上游判定须抹）+ default 支 active+type（帧 0/0）+ 尾 SquareTileFrame
+          // （cs:60281——邻格 165/28/185 等 Check* 级联）。pass 尾 TileFrame(i,j)
+          // （cs:20182）：51 非 tileFrameImportant/非仙人掌藤族 → no-op（备案）。
+          st.type[idx] = 0; st.frameX[idx] = 0; st.frameY[idx] = 0;
+          st.half[idx] = 0; st.slope[idx] = 0; st.paint[idx] = 0;
+          st.type[idx] = COBWEB; st.flags[idx] = 1;
+          genSquareTileFrame(st, rng, i, j);
+        }
       }
     }
   }
