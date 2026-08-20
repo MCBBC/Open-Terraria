@@ -5,6 +5,12 @@ export interface GameHooks {
   world: World;
   /** 主角(投射物命中判定用) */
   player: import('./Player').Player;
+  /** M11 敌怪索敌候选玩家（原版 TargetClosest 扫 Main.player[0..254] 255 槽，
+   *  NPC.cs:78456-78464）。Game 实现 = [本地玩家, ...remotePlayerProxies]（联机
+   *  访客代理——真 Player 实例，位置/死亡/装备经 msg13/16/5 同步）；缺省 undefined
+   *  时 Enemy.targetClosest 回退 [player]（单机/测试 mock 零回归）。顺序即槽序
+   *  近似（本地=房主槽 0 最先，原版平距严格 < 比较取先扫描者） */
+  candidatePlayers?(): import('./Player').Player[];
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];
   /** 城镇 NPC 自卫弹入投射物桶(attackUpdate 消费) */

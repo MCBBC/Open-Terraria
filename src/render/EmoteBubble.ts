@@ -85,6 +85,20 @@ export function drawEmotes(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTM
   }
 }
 
+/** MakeLocalPlayerEmote（EmoteBubble.cs:279-293）1:1——死亡门恒置（netMode!=2）;
+ *  本地出泡 + NPC 回应（原版 netMode==0 支）;联机时另发 msg120（原版 SendData(120)
+ *  → 服务器权威 NewBubble + msg91 全体回环,中继模型 = 本地即刻出泡 + sendEmote
+ *  中继其他端,观察行为等价） */
+export function makeLocalPlayerEmote(
+  anchor: EmoteBubbleInstance['npc'], emoteId: number,
+  opts: { dead: boolean; sendEmote?: (emoteId: number) => void; reactToNpcs?: () => void },
+): void {
+  if (opts.dead) return;
+  spawnEmote(anchor, emoteId, 360);
+  opts.reactToNpcs?.();
+  opts.sendEmote?.(emoteId);
+}
+
 /** CheckForNPCsToReactToEmoteBubble（EmoteBubble.cs:152-167）1:1：
  *  附近城镇 NPC（aiStyle7 城镇族）对玩家表情起回应——条件：ai[0]<2（游走/站定,
  *  社交/攻击/坐姿等态不打断）且（玩家可对话且 <200px 或 无视线遮挡）→
@@ -93,13 +107,14 @@ export function drawEmotes(ctx: CanvasRenderingContext2D, img: ImageBitmap | HTM
 export function checkForNPCsToReactToEmoteBubble(
   player: { cx: number; cy: number; x: number; y: number; w: number; h: number },
   npcs: readonly TownNPC[],
-  canHitLine: (x1: number, y1: number, x2: number, y2: number) => boolean,
+  canHitLine: (x1: number, y1: number, w1: number, h1: number, x2: number, y2: number, w2: number, h2: number) => boolean,
 ): void {
   for (const n of npcs) {
     if (n.dead || n.bound || !(n.ai0 < 2)) continue;   // aiStyle==7 && townNPC（入参即城镇池）
     const dist = Math.hypot(player.cx - n.cx, player.cy - n.cy);
     // CanBeTalkedTo && Distance(Center) < 200 || !CanHitLine(Top→Top)
-    const reacts = (dist < 200) || !canHitLine(n.x, n.y, player.x, player.y);
+    const reacts = (dist < 200)
+      || !canHitLine(n.x, n.y, 0, 0, player.x, player.y, 0, 0);
     if (!reacts) continue;
     const direction = n.x < player.x ? 1 : -1;
     n.social = { kind: 19, t: 220, other: null, frameT: 0, prevFrame: 0, rpsA: 0, rpsB: 0 };

@@ -268,7 +268,10 @@ export function newGenState(w: number, h: number): GenState {
     caveHouseCount: -1, underworldChestCount: -1, caveChestCount: -1, desertHouseCount: -1,
     generatedShadowKey: false, generatedRamRune: false,
     orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）
-    logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）
+    logX: -1, logY: -1,  // ★XXXXX 批（s22222 #90 根因）：GenerateWorld setup 显式
+                         // `GenVars.logX = -1; logY = -1`（cs:11225-11226）——字段进程
+                         // 默认 0 但 pass 期初值恒 -1。曾误用 0：无倒木种子 Flowers
+                         // 首 spot 误跳 (0,0)（region 空转 4 掷）→ 全 pass 花圃掷流漂移
     larvaX: [], larvaY: [],                                    // BeeLarva pass（cs:21018）消费
     oasisX: [], oasisY: [], oasisW: [], numOasis: 0,           // Oasis pass（cs:16327）登记
     genW: w, genH: h,                                           // StructureMap 越界判定（StructureMap.cs:28）

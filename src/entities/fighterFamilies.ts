@@ -527,14 +527,22 @@ export function attemptToFindTeleportSpot(
         }
       }
       if (!clear) continue;
-      // :18926-18945 telefrag 预防：落点外扩 N 格与玩家 AABB（含 20t 速度外推并集）不相交
+      // :18926-18945 telefrag 预防：落点外扩 N 格与玩家 AABB（含 20t 速度外推并集）
+      // 不相交——原版 :18933-18940 扫【全部 255 玩家槽】（M11 起含联机访客代理）
       const ext = telefragPreventionDistanceInTiles * TILE;
       const box = { x: num5 * TILE - ext, y: i * TILE - ext, w: TILE + ext * 2, h: TILE + ext * 2 };
-      const p = game.player as Player;
-      const ux = p.x + p.vx * 20, uy = p.y + p.vy * 20;                 // num4=20（:18884）
-      const px0 = Math.min(p.x, ux), px1 = Math.max(p.x + p.w, ux + p.w);
-      const py0 = Math.min(p.y, uy), py1 = Math.max(p.y + p.h, uy + p.h);
-      if (px0 < box.x + box.w && px1 > box.x && py0 < box.y + box.h && py1 > box.y) {
+      let telefragged = false;
+      for (const p of game.candidatePlayers?.() ?? [game.player as Player]) {
+        if (!p || p.dead) continue;                                    // :18932 active && !dead
+        const ux = p.x + p.vx * 20, uy = p.y + p.vy * 20;               // num4=20（:18884）
+        const px0 = Math.min(p.x, ux), px1 = Math.max(p.x + p.w, ux + p.w);
+        const py0 = Math.min(p.y, uy), py1 = Math.max(p.y + p.h, uy + p.h);
+        if (px0 < box.x + box.w && px1 > box.x && py0 < box.y + box.h && py1 > box.y) {
+          telefragged = true;
+          break;
+        }
+      }
+      if (telefragged) {
         found = false;
         break;
       }
@@ -593,8 +601,9 @@ function nearBooksSearchWall(
     tileSolid = tileActive && st.isSolid(x, y);
     if (tileActive && TILE_DEFS[t]?.vanilla?.sheet === 50) {
       // :19040-19044 书格 16×16 外扩 80px 与玩家并集盒相交 → 弃书终止本列
-      const p = game.player as Player;
-      if (p && !p.dead) {
+      // （原版 :19049-19064 扫全部 255 玩家槽——M11 起含联机访客代理）
+      for (const p of game.candidatePlayers?.() ?? [game.player as Player]) {
+        if (!p || p.dead) continue;                                    // :19052 active && !dead
         const ux0 = Math.min(p.x, p.x + p.vx * 20), ux1 = Math.max(p.x + p.w, p.x + p.w + p.vx * 20);
         const uy0 = Math.min(p.y, p.y + p.vy * 20), uy1 = Math.max(p.y + p.h, p.y + p.h + p.vy * 20);
         if (x * TILE - 80 < ux1 && x * TILE + TILE + 80 > ux0

@@ -43,13 +43,30 @@ export class ChatMonitor {
 
   /** Main.NewText(text, R, G, B)。width = NewTextMultiline WidthLimit（px，-1 不限：
    *  RemadeChatMonitor.AddNewMessage 的 widthLimitInPixels——消息容器按该宽度折行，
-   *  广播盒公告 = 460） */
+   *  广播盒公告 = 460）。
+   *  文字内联色标签 [c/RRGGBB:text]（ColorTagHandler——/boss伤害 报告的本人行
+   *  [c/FFAF00:] 高亮）：无标签走 textContent 快路径,有标签解析为着色 span */
   message(text: string, r = 255, g = 255, b = 255, width = -1): void {
     const line = document.createElement('div');
     line.className = 'sw-chat-line';
     line.style.color = `rgb(${r},${g},${b})`;
     if (width > 0) line.style.maxWidth = `${width}px`;
-    line.textContent = text;
+    if (text.includes('[c/')) {
+      // [c/hex:内容] → span#FFAF00;其余原样（未知标签按字面保留,同原版 chat tag 解析）
+      const re = /\[c\/([0-9A-Fa-f]{6}):((?:[^\[\]]|\[[^c][^\]]*\])*)\]/g;
+      let last = 0, m: RegExpExecArray | null;
+      while ((m = re.exec(text)) !== null) {
+        if (m.index > last) line.appendChild(document.createTextNode(text.slice(last, m.index)));
+        const span = document.createElement('span');
+        span.style.color = `#${m[1]}`;
+        span.textContent = m[2];
+        line.appendChild(span);
+        last = m.index + m[0].length;
+      }
+      if (last < text.length) line.appendChild(document.createTextNode(text.slice(last)));
+    } else {
+      line.textContent = text;
+    }
     this.root.appendChild(line);
     this.nodes.push(line);
     this.timers.push(window.setTimeout(() => this.remove(line), ChatMonitor.SHOW_MS));

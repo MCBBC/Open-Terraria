@@ -119,6 +119,7 @@ import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, projGravSpec, resolveAmmoProjId, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
+import { setItemVariantWorld, bossSummonDisabledVid, activeVariantStatsOfVid } from '../data/vanillaItemVariants';
 import { FOOD_PARTICLE_COLORS, DRINK_PARTICLE_COLORS } from '../data/vanillaFoodColors';
 import {
   setLucySinks, tickLucyCooldowns, lucyEnterWorld, lucyTryIdle, lucyTryWithCooldown, create as lucyCreate,
@@ -166,7 +167,13 @@ import { tileRunner } from '../world/gen/vanilla/TileRunner';
 import { growTree, growPalmTree, growVanityTree, growAshTree, growGemTree } from '../world/gen/vanilla/TreePass';
 import type { GenState } from '../world/gen/vanilla/GenState';
 import { lastGenState } from '../world/gen/WorldGen';
-import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
+import { spawnEmote, tickEmotes, checkForNPCsToReactToEmoteBubble, makeLocalPlayerEmote } from '../render/EmoteBubble';
+// M3 聊天命令系统（Terraria.Chat.Commands 全目录）+ Boss 伤害统计（/boss伤害）
+import { createOutgoingMessage, executeCommand, chatColorOfDifficulty, type OutgoingChatMessage } from '../chat/ChatCommands';
+import {
+  bossDamageUpdate, recentBossReports, resetBossDamage, bossDamageKilled,
+  bindBossDamageHost, bossDamageSink, bossDamageAddDamage, setPendingStrikeOwner,
+} from '../chat/BossDamageTracker';
 import { createDeathText, newNpcName } from '../i18n/RandomText';
 import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } from '../stats/Pvp';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
@@ -1418,12 +1425,14 @@ export class Game implements GameHooks {
     }
   }
 
-  /** msg42 回包（房主）：访客打击权威结算——按 netId 找真身应用 hurt（防御减算在此一次） */
-  private netApplyStrike(netId: number, rawDmg: number, kbx: number, kby: number) {
+  /** msg42 回包（房主）：访客打击权威结算——按 netId 找真身应用 hurt（防御减算在此一次）。
+   *  M3：尾部 fromSlot（服务器回填打击者）经 pendingStrikeOwner 归账 Boss 伤害统计 */
+  private netApplyStrike(netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number) {
     const localId = netIdLocal(netId);
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
       if (e.netPuppet || e.id !== localId) continue;
+      if (fromSlot !== undefined) setPendingStrikeOwner(fromSlot);
       e.hurt(rawDmg, kbx, kby, this);
       const dealt = Math.max(1, Math.round(rawDmg - (e.def.defense ?? 0) * 0.5));
       this.addDamageNumber(e.cx, e.y, dealt, false, '#FF7060');
@@ -1818,6 +1827,16 @@ export class Game implements GameHooks {
   }
   /** 远端玩家渲染代理（net.players → drawPlayer 可用形状，net 激活时每帧同步） */
   private remotePlayerProxies: import('../entities/Player').Player[] = [];
+
+  /** M11 敌怪索敌：候选玩家表（原版 TargetClosest 扫 Main.player[0..254] 255 槽，
+   *  NPC.cs:78456-78464 的本地等价）。房主权威模型下敌怪 AI 只在房主端跑——
+   *  本表让索敌含访客（访客会被追击；接触伤害由各访客端 netPuppetContact 对
+   *  傀儡本地结算，victim-settles）。顺序 = [本地(=房主槽 0), …代理]：原版平距
+   *  比较取严格小于（:78511 `num < distance`），平距时先扫描的槽胜——本地在前
+   *  对齐槽序。傀儡敌怪（访客端）fixedUpdate 早退不跑 AI，不消费本表。 */
+  candidatePlayers(): import('../entities/Player').Player[] {
+    return [this.player, ...this.remotePlayerProxies];
+  }
   /** tile key → id 反查表（调试句柄/wld 导入映射用） */
   tileByKey = TILE_BY_KEY;
 
@@ -2754,6 +2773,11 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // 物品变体世界态灌入（ItemVariants：remix/getGood/mechdusa 世界 24 件物品取
+    // 变体参数——itemCombat/vanillaStatOfVid 取数口叠层；Player.RefreshItems +
+    // Recipe.UpdateItemVariants（Player.cs:34880/Recipe.cs:531）的本仓等价物，
+    // 三条进世界路径均汇到此处，2026-08-20）
+    setItemVariantWorld(w.seedFlags ?? null);
     this._autoSaveAt = 0;              // 自动保存墙钟重起（换世界 Stopwatch.Reset）
     this._autoPausedByFocus = false;
     // WorldGen.Skyblock 普查（CountTiles :71160 逐列扫至 X==maxTilesX-1 →
@@ -2807,6 +2831,15 @@ export class Game implements GameHooks {
     lucyEnterWorld();
     // Mechdusa queen 登记复位（WorldGen.clearWorld :6907 NPC.mechQueen=-1）
     resetMechQueen();
+    // M3 Boss 伤害统计复位 + 宿主注入（NPCDamageTracker.Reset :196-204;换世界清账）
+    resetBossDamage();
+    bindBossDamageHost({
+      npcName: (t) => Lang.npcName(t) ?? `NPC ${t}`,
+      ownerName: (slot) => slot < 0
+        ? ((this.player as { appearance?: { name?: string } }).appearance?.name ?? '玩家')
+        : (this.net?.players.get(slot)?.name ?? ''),
+    });
+    bossDamageSink.add = bossDamageAddDamage;
     // 摇树状态复位（WorldGen.clearWorld :6896 ResetTreeShakes）+ 绑当前 store
     // （getTreeShake 渲染查询的树底归位需要）
     this.treeShakes.reset();
@@ -5423,6 +5456,8 @@ export class Game implements GameHooks {
       }
     }
     tickEmotes();
+    // M3 Boss 伤害统计推进（NPCDamageTracker.Update,Main.cs:17749——有 tracker 才扫实体表）
+    this.tickBossDamage();
     this.tickNpcEmotes();
     this.tickInfoAccs();
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;
@@ -5939,9 +5974,13 @@ export class Game implements GameHooks {
     const f = itemFuncOfVid(+m[1]);
     if (!f || !(f.pick || f.axe || f.hammer)) return undefined;
     const c = itemCombat(+m[1]);
+    // 变体锤力覆写（remix 世界 5283 灰烬木锤 hammer 45→35，Item.cs:41913-41917；
+    //  damage/useTime 走 itemCombat 变体叠层已自动覆盖）
+    const vsHammer = activeVariantStatsOfVid(+m[1])?.hammer;
+    const hammer = vsHammer ?? f.hammer;
     return {
       type: f.pick ? 'pick' : f.axe ? 'axe' : 'hammer',
-      power: f.pick ?? f.axe ?? f.hammer,
+      power: f.pick ?? f.axe ?? hammer,
       damage: c?.damage ?? 5,
       speed: c?.useAnimation ?? 100,   // ResetStats 缺省 useAnimation=100（Item.cs:48627；
       useTime: c?.useTime ?? 20,       // 武器 case 必设字段，此兜底近死代码——原 25/30 中位无据
@@ -5949,7 +5988,7 @@ export class Game implements GameHooks {
       // 双工具副力（单工具时与主 power 同值，dualToolResolve 只在多力时改道）
       pickPower: f.pick ?? undefined,
       axePower: f.axe ?? undefined,
-      hammerPower: f.hammer ?? undefined,
+      hammerPower: hammer ?? undefined,
     } as NonNullable<(typeof ITEM_DEFS)[number]['tool']>;
   }
 
@@ -8224,10 +8263,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     } else if (heldDef && [556, 544, 557].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
       // 机械三王召唤物（原版 556/544/557，Player.cs:43117-43179 ItemCheck_：
-      //  门仅 !IsItDay()——**无 hardMode 门**，困难模式前的夜晚原版即可召唤
+      //  门仅 !IsItDay()——**无 hardmode 门**，困难模式前的夜晚原版即可召唤
       //  （系统语义如此,1:1 保留;此前多挂的 hardMode 合取已删）。
-      //  白天静默不可用（同原版不消耗））
-      if (this.world.clock.isDay) {
+      //  白天静默不可用（同原版不消耗）。
+      //  ★ItemVariants.DisabledBossSummon（mechdusa 世界 = remix×getGood，即
+      //   getfixedboi）：Item.cs:7855/:7987/:8000 分支收回 useStyle4/consumable/
+      //   useTime 45 → 物品整支不可用（点击无动作、不消耗、无提示）；
+      //   Player.cs:43125/:43143/:43159 使用门为同门二次防线（2026-08-20））
+      if (bossSummonDisabledVid(viIdFromKey(heldDef.key))) {
+        // 静默不可用（三王均由 5334 奥库瑞姆剃刀的 mechQueen 链召唤接管）
+      } else if (this.world.clock.isDay) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else {
         const mvid = viIdFromKey(heldDef.key);
@@ -18351,6 +18396,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   onEnemyKilled(key: string, enemy?: Enemy) {
+    // M3 Boss 伤害统计：Boss 击杀置 killed（DoDeathEvents_CelebrateBossDeath →
+    // NPCDamageTracker.BossKilled :79821——报告文案"被击杀"而非"逃脱"）
+    if (enemy?.def?.boss) bossDamageKilled(enemy);
     // 骷髅王红帽变体死亡调侃（NPC.checkDead :78835-78837：type 35 且 ai[3]==1 →
     // SkeletronText.Taunt1 红字广播，Chippy 彩蛋"<骷髅王>今天就到此为止…"）
     if (enemy?.vanillaId === 35 && enemy.ai3 === 1) {
@@ -20990,17 +21038,104 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   chatInput: ChatInput | null = null;
 
   /** 聊天发送（v8 世界频道批）：房间频道本地即时回显（服务器不回发发送者,
-   *  原版同语义）;世界频道回显来自服务器全服广播（含自己,约 1RTT） */
+   *  原版同语义）;世界频道回显来自服务器全服广播（含自己,约 1RTT）。
+   *  M3：'/' 命令先行解析（ChatCommandProcessor.CreateOutgoingMessage 发起端等价）
+   *  ——识别为命令则本地执行 + 结果行走 channel2/3 广播,不再落普通聊天。 */
   private sendChat(text: string, world: boolean) {
     const net = this.net;
     if (!net?.active) return;
+    const msg = createOutgoingMessage(text);
+    if (msg.command !== 'Say') {
+      this.executeChatCommand(msg);
+      return;
+    }
     if (world) {
       net.sendChat(text, true);
       return;
     }
     net.sendChat(text, false);
     const name = (this.player as { appearance?: { name?: string } }).appearance?.name ?? '玩家';
-    this.cb.onChat?.(`<${name}> ${text}`, 255, 220, 120);
+    // Say 色度 = Player.ChatColor 难度色（与服务器中继其他端的着色一致）
+    const rgb = chatColorOfDifficulty((this.player as { appearance?: { difficulty?: number } }).appearance?.difficulty);
+    this.cb.onChat?.(`<${name}> ${text}`, rgb[0], rgb[1], rgb[2]);
+  }
+
+  /** M3 聊天命令执行（各命令 ProcessIncomingMessage 的发起端本地执行——服务器
+   *  纯中继模型,结果单源广播防 RNG 漂移,见 src/chat/ChatCommands.ts 头注） */
+  private executeChatCommand(msg: OutgoingChatMessage): void {
+    const net = this.net;
+    const name = (this.player as { appearance?: { name?: string } }).appearance?.name ?? '玩家';
+    // 活跃名单（Main.player[0..255] active 的槽位序等价:本地 + 远端按 slot 排序）
+    const roster: Array<{ slot: number; name: string; pve: number; pvp: number }> = [];
+    const mySlot = net?.mySlot ?? 0;
+    roster.push({ slot: mySlot, name, pve: this.player.deathsPve, pvp: this.player.deathsPvp });
+    if (net) {
+      for (const [slot, rp] of [...net.players.entries()].sort((a, b) => a[0] - b[0])) {
+        if (slot === mySlot || !rp.active) continue;
+        roster.push({ slot, name: rp.name, pve: rp.deathsPve, pvp: rp.deathsPvp });
+      }
+    }
+    const byName = new Map(roster.map((r) => [r.name, r]));
+    const result = executeCommand(msg, {
+      playerName: name,
+      team: this.player.team,
+      localPlayerDead: this.player.dead,
+      multiplayer: !!net?.active,
+      activePlayers: roster.map((r) => r.name),
+      playerDeaths: (n) => byName.get(n) ?? { pve: 0, pvp: 0 },
+      bossReports: recentBossReports(name),
+    });
+    // 仅发起端显示（Help/ListPlayers/队伍错误——原版 SendChatMessageToClient）
+    for (const ln of result.local) this.newText(ln.text, ln.color[0], ln.color[1], ln.color[2]);
+    // 全体广播：本地回显 + channel2 系统行中继其他端（原版 BroadcastChatMessage）
+    for (const ln of result.broadcast) {
+      this.newText(ln.text, ln.color[0], ln.color[1], ln.color[2]);
+      net?.sendCommandLine(ln.text, ln.color[0], ln.color[1], ln.color[2]);
+    }
+    // 队伍定向：本地以 `<名>` 前缀回显（原版 SendChatMessageToClientAs 作者名前缀）
+    if (result.party) {
+      for (const ln of result.party) {
+        this.newText(`<${name}> ${ln.text}`, ln.color[0], ln.color[1], ln.color[2]);
+        net?.sendParty(ln.text);
+      }
+    }
+    // 表情（RPS/Emoji：netMode0 本地 NewBubble / netMode1 msg120 广播）
+    if (result.emote != null) this.makeLocalPlayerEmote(result.emote);
+  }
+
+  /** M4 表情：EmoteBubble.MakeLocalPlayerEmote（EmoteBubble.cs:279-293）1:1——
+   *  死亡门;单机本地出泡 + NPC 回应;联机 msg120 广播（原版服务器 msg91 回环,
+   *  中继模型 = 发送端即刻出泡,其他端经 msg120 slot 回环出泡） */
+  makeLocalPlayerEmote(emoteId: number): void {
+    makeLocalPlayerEmote(this.player, emoteId, {
+      dead: this.player.dead,
+      sendEmote: (id) => this.net?.sendEmote(id),
+      reactToNpcs: () => this.reactNpcsToPlayerEmote(),
+    });
+  }
+
+  /** CheckForNPCsToReactToEmoteBubble（EmoteBubble.cs:152-167）——附近城镇 NPC
+   *  起 ai[0]=19 回应态（TownNPC.social kind 19,面向玩家 + 帧 16 冒回应泡） */
+  private reactNpcsToPlayerEmote(): void {
+    const npcs = this.entities.npcs.filter(
+      (n) => n instanceof TownNPC && !n.dead) as TownNPC[];
+    checkForNPCsToReactToEmoteBubble(
+      this.player, npcs,
+      (x1, y1, w1, h1, x2, y2, w2, h2) => canHitLine(this.world.store, x1, y1, w1, h1, x2, y2, w2, h2),
+    );
+  }
+
+  /** M3 Boss 伤害统计推进（NPCDamageTracker.Update,Main.cs:17749 每 tick）——
+   *  有进行中 tracker 才扫在场类型集（CheckActive 的 npcsFoundForCheckActive 等价） */
+  private tickBossDamage(): void {
+    bossDamageUpdate(() => {
+      const present = new Set<number>();
+      for (const ent of this.entities.enemies) {
+        const e = ent as Enemy;
+        if (!e.dead && e.vanillaId != null) present.add(e.vanillaId);
+      }
+      return present;
+    });
   }
 
   /** 加入联机服务器（mainFlow 的加入流程调用；world 就绪回调内进 loadWorld）。
@@ -21093,7 +21228,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
         onProjDespawn: (ids) => this.netRemoveProjPuppets(ids),
         // onSSC 不再即用——msg201 改暂存（net.pendingSSC），loadWorld 完成后应用（终审 H1 竞态）
-        onStrike: (netId, dmg, kbx, kby) => this.netApplyStrike(netId, dmg, kbx, kby),
+        onStrike: (netId, dmg, kbx, kby, fromSlot) => this.netApplyStrike(netId, dmg, kbx, kby, fromSlot),
+        // M4 msg120：其他端玩家表情——锚到对应远端代理头顶出泡 360t
+        onEmoteBubble: (slot, emoteId) => {
+          const proxy = this.remotePlayerProxies.find(
+            (pr) => (pr as unknown as { __netSlot?: number }).__netSlot === slot);
+          if (proxy) spawnEmote(proxy, emoteId, 360);
+        },
         onStrikePlayer: (fromSlot, _targetSlot, dmg, _kbx, _kby, weaponId, flags) =>
           this.netApplyStrikePlayer(fromSlot, dmg, weaponId, flags),
         onHp: (slot, hp, maxHp) => {

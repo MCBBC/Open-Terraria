@@ -2,6 +2,7 @@
 // damage/knockBack/useTime/useAnimation/shoot/useAmmo/shootSpeed/ammo/consumable/noMelee/autoReuse/mana
 import combatJson from './vanilla-itemcombat.json';
 import { projectileData, AI_ANCHORED, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_GRENADE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
+import { activeVariantStatsOfVid } from './vanillaItemVariants';
 
 export interface ItemCombat {
   damage?: number;
@@ -79,9 +80,9 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '4827': { shoot: 906, noMelee: true },
   '4908': { shoot: 910, noMelee: true },
   '4909': { shoot: 911, noMelee: true },
-  // 5334 奥库瑞姆剃刀（Item.cs:42276-42287）：consumable/useStyle4/useTime 45 在
-  //   `Variant == EnabledVariant` 条件块内——提取器不解析条件块，整条缺失
-  '5334': { consumable: true, useTime: 45, useAnimation: 45 },
+  // （5334 奥库瑞姆剃刀 consumable/useTime 45 已移出本表——Item.cs:42279-42285
+  //   在 `Variant == EnabledVariant` 条件块内，仅 mechdusa 世界生效；现由
+  //   vanillaItemVariants.ts ITEM_VARIANT_STATS[5334] 变体层提供）
   // 天顶剑 4956 / 真铜短剑 5669（Item.cs:39974-39992 / 5669 同构 case）：
   //   `useTime = useAnimation / 3f` 算式提取器不解析 → useTime 缺失（combatWeapon
   //   缺省回退 useAnimation=30 = 挥一次只发一发剑弹；原版 30 帧动画内每 10 帧
@@ -102,9 +103,23 @@ for (const k of Object.keys(EXTRACT_PATCH)) {
   TABLE[k] = { ...(RAW[k] ?? {}), ...EXTRACT_PATCH[k] } as ItemCombat;
 }
 
-/** 原版 item id → 战斗数据（无条目返回 null） */
+/** 原版 item id → 战斗数据（无条目返回 null）。
+ *  世界态变体叠层（Item.cs SetDefaults 各 Variant 分支的运行时等价物）：
+ *  remix/getGood/mechdusa 秘密种子世界取变体参数，普通世界取常规值——
+ *  变体表与上下文见 vanillaItemVariants.ts（Game.afterWorldLoad 灌入） */
 export function itemCombat(vanillaId: number): ItemCombat | null {
-  return TABLE[String(vanillaId)] ?? null;
+  const base = TABLE[String(vanillaId)];
+  const vs = activeVariantStatsOfVid(vanillaId);
+  if (!vs) return base ?? null;
+  const out: ItemCombat = { ...(base ?? {}), ...(vs.combat ?? {}) };
+  // Rebalanced 乘区（197/4060，:3808-3812/:35653-35657）：C# `(int)(v * f)` 截断
+  if (vs.damageMul !== undefined) {
+    out.damage = Math.trunc((base?.damage ?? 0) * vs.damageMul);
+  }
+  if (vs.useTimeMul !== undefined) {
+    out.useTime = Math.trunc((base?.useTime ?? 0) * vs.useTimeMul);
+  }
+  return out;
 }
 
 /** 弓类 AmmoID.Arrow = 40（AmmoID.cs:116） */

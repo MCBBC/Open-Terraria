@@ -9,6 +9,7 @@
 //   1905：Player.PlaceThing_XMasTreeTops :41053-41136 + WorldGen :39239-39500。
 import { describe, it, expect } from 'vitest';
 import { itemCombat } from '../src/data/vanillaItemCombat';
+import { setItemVariantWorld } from '../src/data/vanillaItemVariants';
 import { canStartInvasion, INVASION_PIRATE } from '../src/world/Invasion';
 import { World } from '../src/world/World';
 import {
@@ -57,14 +58,20 @@ describe('5644 占卜球（Item.cs:44324 + Player.cs:43011-43030）', () => {
 });
 
 describe('5334 奥库瑞姆剃刀（Item.cs:42276 + NPC.cs:19724）', () => {
-  it('数据面：Variant 条件块提取缺口已补（consumable/useTime 45）', () => {
+  it('数据面：consumable/useTime 45 仅 mechdusa 世界（Variant Enabled 条件块）', () => {
+    setItemVariantWorld(null);                 // 普通世界：Item.cs:42279 条件块不设——整支不可用
+    expect(itemCombat(5334)).toBeNull();
+    setItemVariantWorld({ remix: true, getGoodWorld: true });   // mechdusa（getfixedboi）
     const c = itemCombat(5334)!;
     expect(c.consumable).toBe(true);
     expect(c.useTime).toBe(45);
+    setItemVariantWorld(null);
   });
 
   it('无 shoot → 不落战斗派发（combatWeapon 不接管，走 5334 专属分支）', () => {
+    setItemVariantWorld({ remix: true, getGoodWorld: true });
     expect(itemCombat(5334)!.shoot).toBeUndefined();
+    setItemVariantWorld(null);
   });
 });
 

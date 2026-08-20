@@ -401,8 +401,9 @@ export function planteraHookAI(e: Enemy, game: GameHooks, player: Player | null)
 export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
   const l = la(e);
   // 玩家死(:31875-31883) → flag51 = 反向离场。框架在玩家死亡时传 null,
-  // 而原版 flag51 分支仍读取尸体坐标 → 从 game 取回原对象(Enemy.eocAI 同款)
-  const p = player ?? (game as unknown as { player: Player }).player ?? null;
+  // 而原版 flag51 分支仍读取尸体坐标 → 从索敌目标取回原对象(Enemy.eocAI 同款;
+  // M11：Main.player[target] 可为访客代理,无目标史再回退本地)
+  const p = player ?? e.targetRef(game);
   const flag51 = !p || p.dead;
   if (!p) {   // 原版不可能无 player(Main.player[target] 恒有对象);防御性减速漂移
     e.vx *= 0.95;

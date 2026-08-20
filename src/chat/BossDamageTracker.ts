@@ -24,12 +24,13 @@ import { Lang } from '../i18n/Lang';
 /** 贡献条目（CreditEntry :21-59） */
 interface CreditEntry { damage: number; kind: 'player' | 'world'; name: string }
 
-export interface TrackerNpc {
-  type: number;
-  boss: boolean;
-  life: number;
+/** 受击 NPC 结构视图（Enemy/TownNPC 结构兼容——伤害漏斗直传实体,免逐击建对象） */
+export interface TrackerNpcLike {
+  vanillaId: number | null;
+  hp: number;
   /** realLife 主段（GetRealActiveNPC 归并；null=自身即主体） */
-  realLifeHost: TrackerNpc | null;
+  realLifeHost: TrackerNpcLike | null;
+  def?: { boss?: boolean };
 }
 
 export interface TrackerHost {
@@ -101,15 +102,13 @@ class BossTracker {
     return bossDamageHost.npcName(this.type);
   }
 
-  /** KillTimeMessage（:18-20） */
-  killTimeMessage(): string {
-    return Lang.text(this.killed ? 'BossDamageCommand.KillTime' : 'BossDamageCommand.KillTimeEscaped');
-  }
+  /** KillTimeMessage（:18-20）：killed 只换文案——getReport 内直接取键 */
   /** IncludeDamageFor（:54-68） */
-  includeDamageFor(npc: TrackerNpc): boolean {
-    if (BOSS_TYPE_FOR_MOB.get(npc.type) === this.type) return true;
-    if (!this.overrides) return npc.type === this.type;
-    return this.overrides.types.includes(npc.type);
+  includeDamageFor(npc: TrackerNpcLike): boolean {
+    const type = npc.vanillaId ?? -1;
+    if (BOSS_TYPE_FOR_MOB.get(type) === this.type) return true;
+    if (!this.overrides) return type === this.type;
+    return this.overrides.types.includes(type);
   }
 
   /** IsActive（:79-95）：族内任一类型在场（npcsFoundForCheckActive 等价） */
@@ -124,12 +123,13 @@ class BossTracker {
   onBossKilled(): void { this.killed = true; }   // OnBossKilled（:73-76）
   tick(): void { this.ticks++; }                 // Tick（:261-264）
 
-  /** AddDamage（:266-271）+ GetOrAddEntry（:240-261）：owner 越界 = 世界伤害；
-   *  玩家按当前名字聚合（改名换人位不继承旧账） */
+  /** AddDamage（:266-271）+ GetOrAddEntry（:240-261）：owner=255 = 世界伤害
+   *  （陷阱·减益·环境,WorldCreditName"陷阱与减益"）;其余按 ownerName(槽位) 出的
+   *  当前名字聚合（-1=本地玩家;改名换人位不继承旧账） */
   add(owner: number, damage: number, ownerName: (slot: number) => string): void {
     this.lastHitTime = this.ticks;
     let entry: CreditEntry;
-    if (owner < 0 || owner >= 255) {
+    if (owner === 255) {
       entry = this.list.find((e) => e.kind === 'world')
         ?? (() => { const w: CreditEntry = { damage: 0, kind: 'world', name: Lang.text('BossDamageCommand.WorldCreditName') }; this.list.push(w); return w; })();
     } else {
@@ -206,49 +206,77 @@ export function bindBossDamageHost(host: Partial<TrackerHost> & { ownerName?: (s
   if (host.ownerName) bossDamageHost.ownerName = host.ownerName;
 }
 
-function getRealActive(npc: TrackerNpc): TrackerNpc | null {
+function getRealActive(npc: TrackerNpcLike): TrackerNpcLike | null {
   // GetRealActiveNPC（:123-136）：realLife 归主段；主段失活 → null
   let n = npc;
   if (n.realLifeHost) n = n.realLifeHost;
   return n;
 }
 
-function tryGetTrackerFor(npc: TrackerNpc): BossTracker | null {
+function tryGetTrackerFor(npc: TrackerNpcLike): BossTracker | null {
   for (const t of activeTrackers) if (t.includeDamageFor(npc)) return t;
   return null;
 }
 
-/** NPCDamageTracker.AddDamage（:176-181 + CreateTrackerFor :154-167） */
-export function bossDamageAddDamage(npc: TrackerNpc, owner: number, damage: number): void {
+/** NPCDamageTracker.AddDamage（:176-181 + CreateTrackerFor :154-167）。
+ *  flag2 门（NPC.cs:82128-82130）：世界伤害 ≥9999（内部死亡管线的 9999 哨兵,
+ *  如天亮自灭/生成消散）不入账 */
+export function bossDamageAddDamage(npc: TrackerNpcLike, owner: number, damage: number): void {
+  if (owner === 255 && damage >= 9999) return;
   const real = getRealActive(npc);
-  if (!real || real.life <= 0) return;
+  if (!real || real.hp <= 0) return;
+  const type = real.vanillaId ?? -1;
   let tracker = tryGetTrackerFor(real);
   if (!tracker) {
-    if (!CUSTOM_BOSS_DEFS.get(real.type) && !real.boss) return;
-    tracker = new BossTracker(real.type, CUSTOM_BOSS_DEFS.get(real.type) ?? null);
+    if (!CUSTOM_BOSS_DEFS.get(type) && !real.def?.boss) return;
+    tracker = new BossTracker(type, CUSTOM_BOSS_DEFS.get(type) ?? null);
     activeTrackers.push(tracker);
   }
-  tracker.add(owner, Math.min(damage, real.life), bossDamageHost.ownerName ?? (() => ''));
+  tracker.add(owner, Math.min(damage, real.hp), bossDamageHost.ownerName ?? (() => ''));
 }
 
 /** NPCDamageTracker.BossKilled（:189-194 + BossDamageTracker.OnBossKilled） */
-export function bossDamageKilled(npc: TrackerNpc): void {
+export function bossDamageKilled(npc: TrackerNpcLike): void {
   const real = getRealActive(npc);
   if (!real) return;
   const tracker = tryGetTrackerFor(real);
   tracker?.onBossKilled();
 }
 
-/** NPCDamageTracker.Update（:208-235）。presentType = 本帧在场 npc 类型集
- *  （NPC.cs:7202-7215 npcsFoundForCheckActive 每帧重扫的等价注入） */
-export function bossDamageUpdate(presentTypes: ReadonlySet<number>): void {
+// ---- 伤害漏斗注入点（entityNet 同模式：entities 层不反向依赖 Game/聊天层）----
+/** owner 约定：-1=本地玩家 / 255=世界（陷阱·减益·环境）/ 0-254=远端玩家 net 槽位
+ *  （房主结算访客 msg42 打击时 Game 置 pendingStrikeOwner） */
+export const bossDamageSink = {
+  add: null as null | ((npc: TrackerNpcLike, owner: number, damage: number) => void),
+};
+
+/** 下一击归账覆写（远端访客伤害：msg42 打击到达时 Game 置打击者槽位,Enemy.hurt
+ *  漏斗消费一次即清——fromPlayer 标记无法区分本地/远端,房主侧由此归账） */
+let pendingStrikeOwner: number | null = null;
+export function setPendingStrikeOwner(slot: number | null): void { pendingStrikeOwner = slot; }
+export function consumePendingStrikeOwner(): number | null {
+  const o = pendingStrikeOwner;
+  pendingStrikeOwner = null;
+  return o;
+}
+
+/** 进行中 tracker 数（>0 才需要本帧在场类型集——Game 侧免常态扫实体表） */
+export function activeBossTrackerCount(): number { return activeTrackers.length; }
+
+/** NPCDamageTracker.Update（:208-235）。presentTypes = 惰性在场 npc 类型集
+ *  （NPC.cs:7202-7215 npcsFoundForCheckActive 每帧重扫的等价注入;无进行中
+ *  tracker 时跳过扫描——RecentAttempts 过期仍按 tick 推进） */
+export function bossDamageUpdate(presentTypes: () => ReadonlySet<number>): void {
   for (const t of activeTrackers) t.tick();
   for (const t of recentFinished) t.tick();
-  // CheckActive（:229-234 + BossDamageTracker.CheckActive :70-74）：族全不在场即停
-  for (let i = activeTrackers.length - 1; i >= 0; i--) {
-    if (!activeTrackers[i].isActive(presentTypes)) {
-      const t = activeTrackers.splice(i, 1)[0];
-      stopTracking(t);
+  if (activeTrackers.length > 0) {
+    const present = presentTypes();
+    // CheckActive（:229-234 + BossDamageTracker.CheckActive :70-74）：族全不在场即停
+    for (let i = activeTrackers.length - 1; i >= 0; i--) {
+      if (!activeTrackers[i].isActive(present)) {
+        const t = activeTrackers.splice(i, 1)[0];
+        stopTracking(t);
+      }
     }
   }
   while (recentFinished.length > 1 && recentFinished[0].timeSinceLastHit > EXTRA_RECENT_TRACKER_EXPIRY_TIME) {

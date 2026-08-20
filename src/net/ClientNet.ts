@@ -17,6 +17,7 @@ import type { LeashedNetMsg } from '../entities/LeashedCritter';
 import type { World } from '../world/World';
 import { World as WorldCtor } from '../world/World';
 import { Lang } from '../i18n/Lang';
+import { chatColorOfDifficulty } from '../chat/ChatCommands';
 
 /** 远端玩家状态（对齐原版 msg13 同步集：控制位+位置+速度；Player 实例由 Game 持有池） */
 export interface RemotePlayerState {
@@ -109,8 +110,11 @@ export interface ClientNetHooks {
   onProjDespawn?: (netIds: number[]) => void;
   /** SSC 角色档到达（v6 msg201，--ssc 启用；Game 应用覆盖本地角色） */
   onSSC?: (recordJson: string) => void;
-  /** 打击到达（msg42；房主权威结算） */
-  onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number) => void;
+  /** 打击到达（msg42；房主权威结算）。fromSlot=打击者槽位（服务器回填,Boss 伤害
+   *  统计归账;旧 server 无尾段=0 房主） */
+  onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number) => void;
+  /** 其他端玩家表情到达（msg120；Game 在对应远端代理头顶出泡 360t） */
+  onEmoteBubble?: (slot: number, emoteId: number) => void;
   /** PvP 近战命中意向到达（v7 msg44；被打方本地结算——Game 过 InOpposingTeam 门禁后走
    *  damagePlayer(pvp)）。fromSlot=攻击者槽位（服务器回填）；flags bit0=crit
    *  bits1-4=武器浸剂 meleeEnchant（StatusPvP 消费） */
@@ -354,6 +358,7 @@ export class ClientNet {
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
               hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
+              deathsPve: 0, deathsPvp: 0,
             };
             this.players.set(slot, p);
           }
@@ -398,6 +403,7 @@ export class ClientNet {
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
             fresh: true, active: true, lastFresh: performance.now(),
             hostile, team, hp: 100, maxHp: 100, sleeping: false,
+            deathsPve: 0, deathsPvp: 0,
           };
           this.players.set(slot, p);
         }
@@ -541,7 +547,19 @@ export class ClientNet {
         const netId = r.u32();
         const dmg = r.i16();
         const kbx = r.f32(), kby = r.f32();
-        this.hooks.onStrike?.(netId, dmg, kbx, kby);
+        // 尾部 u8 fromSlot（服务器回填打击者槽位——旧 server 无尾段 = 0 房主）：
+        // 房主 BossDamageTracker 的访客伤害归账用（原版服务器端 owner 同义）
+        const fromSlot = r.remaining > 0 ? r.u8() : 0;
+        this.hooks.onStrike?.(netId, dmg, kbx, kby, fromSlot);
+        return;
+      }
+      case Msg.EmoteBubble: {
+        // msg120 S→C：{u8 slot, u8 emoteId}——其他端玩家表情,锚到对应代理头顶
+        const slot = r.u8();
+        const emoteId = r.u8();
+        if (emoteId >= 0 && emoteId < 151 && slot !== this.mySlot) {
+          this.hooks.onEmoteBubble?.(slot, emoteId);
+        }
         return;
       }
       case Msg.StrikePlayer: {
@@ -922,13 +940,11 @@ export class ClientNet {
     this.send(new NetWriter(Msg.EmoteBubble).u8(emoteId).finish());
   }
 
-  /** Player.ChatColor（Player.cs:32230-32238）：难度着色——中端 mcColor(1,0.6,0)=
-   *  (255,153,0) / 硬核 hcColor(1,0.15,0.1)=(255,38,25) / 经典·旅程 White */
-  private chatColor(): [number, number, number] {
+  /** Player.ChatColor（Player.cs:32230-32238）：难度着色（共享 chatColorOfDifficulty
+   *  ——Game.sendChat 本地回显同源,单点校对） */
+  private chatColor(): readonly [number, number, number] {
     const diff = (this.game.player as { appearance?: { difficulty?: number } }).appearance?.difficulty;
-    if (diff === 1) return [255, 153, 0];
-    if (diff === 2) return [255, 38, 25];
-    return [255, 255, 255];
+    return chatColorOfDifficulty(diff);
   }
 
   /** 召唤类物品使用意图（v8 msg202，仅 serverAuth 房；SimHost 校验规则门后生成 NPC。

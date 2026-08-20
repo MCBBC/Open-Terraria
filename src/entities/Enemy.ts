@@ -2,6 +2,9 @@
 // + 原版 NPC 数据驱动路径（vanillaId）：属性/AI/音效/贴图来自 vanilla-npcs.json（SetDefaults 提取）
 import { Entity } from './Entity';
 import { entityNet } from '../net/entitySyncHooks';
+// M3 Boss 伤害统计漏斗（/boss伤害;NPC.StrikeNPC→NPCDamageTracker.AddDamage :82129-82130。
+// entityNet 同模式注入——entities 层不反向依赖聊天层,单机默认 null 零开销）
+import { bossDamageSink, consumePendingStrikeOwner } from '../chat/BossDamageTracker';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { paintColor } from '../world/Paint';
 import { liquidCollision, drownCollision } from '../stats/TouchDamage';
@@ -656,7 +659,8 @@ export class Enemy extends Entity {
     const st = game.world.store;
     const w = game.world;
     // 原版 target 即便玩家死亡仍指向其槽位（:51532 TargetClosest 后舵机照用其坐标）
-    const tgt = (game as unknown as { player: Player }).player ?? null;
+    // M11：target 槽 = 本帧索敌目标（联机可为访客代理），无目标史回退本地
+    const tgt = this.targetRef(game);
     if (!tgt) return;
     // ---- 链维护（:51874-51914）----
     const linkAlive = (s: Enemy | null): boolean =>
@@ -1184,6 +1188,61 @@ export class Enemy extends Entity {
   canTargetPlayerAt(player: Player, range: number): boolean {
     return this.effectiveTargetDist(player) < range;
   }
+  // ================= M11 多人索敌（TargetClosest 全玩家槽，NPC.cs:78456-78472） =================
+  /** 原版 NPC.target 槽位的本地等价：TargetClosest 每 AI tick 刷新的当前目标玩家。
+   *  粘性：无候选（全员 dead/ghost）时保留上一目标（原版 target 字段不清零，
+   *  SetTargetTrackingValues 直接沿用旧槽位 :78527-78528 → 尸体坐标照消费）。
+   *  null = 从未有过目标（原版 target=-1 初值，:6374）。
+   *  傀儡敌怪（访客端）fixedUpdate 早退不跑 AI，恒 null。 */
+  targetPlayer: Player | null = null;
+  /** TryTrackingTarget 选距原式（NPC.cs:78503-78505 逐字符照抄）：
+   *    num = |p.x + p.w/2 − position.X + width/2| + |p.y + p.h/2 − position.Y + height/2|
+   *  ★基准是 NPC **左上角 position** 加自宽半偏置，非两中心间曼哈顿（x 项恒等于
+   *  |Δ中心 + width|——对比较两名玩家仍是原式口径，勿"修正"成中心距）。
+   *  :78510/:78512 realDist 同式重算（不带 aggro/镇静罚项），但 SetTargetTracking
+   *  Values 形参未被使用（死参数）——不落地。 */
+  private targetMetric(p: Player): number {
+    return Math.abs(p.x + p.w / 2 - this.x + this.w / 2)
+      + Math.abs(p.y + p.h / 2 - this.y + this.h / 2);
+  }
+  /** TargetClosest 1:1（NPC.cs:78456-78472 主循环 + TryTrackingTarget :78501-78536
+   *  选距段）：扫候选玩家（active && !dead && !ghost——ghost⊆dead，本仓无独立
+   *  ghost 位；active 门=候选表构造即活，Game.candidatePlayers），取最小者写
+   *  this.targetPlayer。fixedUpdate 头部每 AI tick 调（原版各 AI 族每帧调）。
+   *  - aggro 减量 :78507 / 镇静 +1000 罚项 :78508-78510（CALMING_NO_AGGRO_TYPES
+   *    × Calming buff——代理无 buff 同步，访客永不触发罚项，数据链限制）；
+   *  - :78511 `!t || num < distance`：首个候选必取，平距取先扫描者（严格 <，
+   *    候选序 [本地(槽 0), …代理] 对齐原版槽序）；
+   *  - 无候选【不清目标】（粘性，见 targetPlayer 注）。
+   *  未落地段：①tankPet 嘲讽宠支（:78518-78535，本仓无 tankPet 实体）；
+   *  ②SetTargetTrackingValues 朝向/转身门（:78516-78572）——direction/directionY
+   *  的赋值与 aggro 不转身门在各 AI 族 seekDirX(目标) 消费同一语义（本仓架构：
+   *  TargetClosest 只选目标不抢朝向）；③netUpdate 网络位（房主权威模型无此链）。 */
+  private targetClosest(game: GameHooks): void {
+    const cands = game.candidatePlayers?.()
+      ?? [(game as unknown as { player?: Player }).player];
+    let distance = 0, t = false;
+    for (const p of cands) {
+      if (!p || p.dead) continue;
+      let num = this.targetMetric(p);                       // :78503-78505
+      num -= p.aggro ?? 0;                                  // :78507 num -= aggro（真 Player 恒数值；?? 0 护测试桩）
+      if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
+        && !!p.buffs?.has(BuffType.Calming)) num += 1000;   // :78508-78510
+      if (!t || num < distance) {                           // :78511
+        t = true; distance = num; this.targetPlayer = p;
+      }
+    }
+  }
+  /** 原版各 AI 族 `Main.player[npc.target]` 读法：当前索敌目标优先，无目标史
+   *  回退本地玩家（原版 :78526-78528 target<0 钳 0 → 槽 0 = 房主本地）。
+   *  fallback = 该 AI 族的分发传参（分发层已把死亡滤成 null 时的兜底链尾）。
+   *  单机无代理 = 恒本地玩家（targetPlayer 即本地），零回归。
+   *  game 可选（AI_020 火轮等签名 game?: GameHooks——undefined 时仅剩粘性目标） */
+  targetRef(game?: GameHooks, fallback?: Player | null): Player | null {
+    return this.targetPlayer
+      ?? (game as unknown as { player?: Player } | undefined)?.player
+      ?? fallback ?? null;
+  }
   /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
    *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
   lightRGB: [number, number, number] | null = null;
@@ -1397,7 +1456,15 @@ export class Enemy extends Entity {
       if (this.spawnAlpha === 0) this.alphaFade = false;
     }
 
-    const player = (game as unknown as { player: Player }).player;
+    // M11 索敌：TargetClosest 每 AI tick 刷新（原版各 AI 族帧首调用，NPC.cs:78456）。
+    // player 语义升级 = 原版 Main.player[npc.target]：优先本帧索敌目标（联机含访客
+    // 代理——房主端敌怪会追击访客），无目标史回退本地（原版 target 钳 0 → 槽 0）。
+    // 单机无代理 = 恒本地玩家，分发行为零回归。
+    // ★localPlayer 独立保留：接触伤害/蜂蜜 buff 走本地玩家结算（victim-settles——
+    // damagePlayer 只扣本地血；访客被撞由其端 netPuppetContact 对傀儡本地结算）。
+    const localPlayer = (game as unknown as { player: Player }).player;
+    this.targetClosest(game);
+    const player = this.targetRef(game);
     const hasPlayer = !!player && !player.dead;
 
     // ---- 原版数据驱动路径：按 aiStyle 分发到已移植的 AI 家族（分发后落入共享尾段） ----
@@ -1434,7 +1501,7 @@ export class Enemy extends Entity {
           break;                                                        // AI_003 战士族（原版通用核）
         // EoC 传参例外:玩家死亡也要传原对象(cs:19931 dead 判定走逃离分支,
         // 冲刺计时合法冻结;传 null 会让 aiT 照走、状态机停摆 → 首冲时长翻倍)
-        case 4: this.eocAI(game, (game as unknown as { player: Player }).player ?? null); break; // AI_004 克苏鲁之眼（NPC.cs:19909）
+        case 4: this.eocAI(game, player ?? null); break;   // AI_004 克苏鲁之眼（NPC.cs:19909）；M11：分发级索敌目标（联机可为访客）
         case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
         case 6:
           // AI_006 蠕虫族（头）；412 爬尾虫走专属核（bossAI_lunar_misc：
@@ -1444,7 +1511,7 @@ export class Enemy extends Entity {
           break;
         // 玩家死亡也传原对象（A 批 2026-08-19）：法师族对尸体坐标继续运转（cs:20786
         // TargetClosest→:78539 dead 时 faceTarget=false 只冻结朝向,传送采样/弹幕照跑）
-        case 8: this.casterAI(game, (game as unknown as { player: Player }).player ?? null); break; // AI_008 法师族（传送+弹幕）
+        case 8: this.casterAI(game, player ?? null); break; // AI_008 法师族（传送+弹幕）；M11：分发级索敌目标（尸体语义同 case 4）
         case 10: this.cursedSkullAI(game, p); break;                     // AI_010 诅咒头骨（地牢飞行族）
         case 11:
           // 68 守卫走专用分支（bossAI.skeletronBossAI 注释"守卫分支已在 skeletronHeadAI"
@@ -1467,7 +1534,7 @@ export class Enemy extends Entity {
           if (this.vanillaId === 221) this.squidFindFrame(); // 鱿鱼帧机（:74652-74662，AI 后同序）
           break;
         // 玩家死亡传原对象（A 批）：幽灵对尸体坐标继续追击（cs:24726 无 dead 早退）
-        case 22: this.ghostAI(game, (game as unknown as { player: Player }).player ?? null); break; // AI_022 幽灵族（穿墙缓速）
+        case 22: this.ghostAI(game, player ?? null); break; // AI_022 幽灵族（穿墙缓速）；M11：分发级索敌目标（尸体照追）
         case 13: this.plantAI(game, p); break;                          // AI_013 植物/攀爬者族（锚点伸展）
         case 15: kingSlimeAI(this, game, p); break;                       // AI_015 史莱姆王(大跳+小史莱姆)
         case 54: brainOfCthulhuAI(this, game, p); break;                  // AI_054 克脑(爬行者环→瞬移冲刺)
@@ -1477,7 +1544,7 @@ export class Enemy extends Entity {
         case 32: skeletronPrimeAI(this, game, p); break;                  // AI_032 机械骷髅王头 127(4 部件/旋冲/白天狂暴)
         case 33: case 34: case 35: case 36: primePartAI(this, game, p); break; // AI_033-036 Prime 部件(锯/激光/钳/炮)
         case 37: destroyerAI(this, game, p); break;                       // AI_037 毁灭者 134(80 段链穿地/探针激光)
-        case 27: wallOfFleshAI(this, game, (game as unknown as { player: Player }).player ?? null); break; // AI_027 血肉墙(空腔扫描/速度血量档/Leech 轮)
+        case 27: wallOfFleshAI(this, game, player ?? null); break; // AI_027 血肉墙(空腔扫描/速度血量档/Leech 轮)；M11：分发级索敌目标
         case 28: wofEyeAI(this, game, p); break;                          // AI_028 血肉墙之眼(钉墙吸附/激光连射 83)
         case 29: hungryAI(this, game, p); break;                          // AI_029 饥饿者(挂墙环绕→受击脱落扑咬)
         case 84: lunaticCultistAI(this, game, p); break;                  // AI_084 拜月教邪教徒(瞬移+四系弹幕轮换)
@@ -1806,13 +1873,16 @@ export class Enemy extends Entity {
     if (this.confusedT > 0) this.confusedT -= dt;
 
     // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
-    // 否则 damagePlayer(0) 仍会击退/闪红，表现为"兔子撞我有攻击性"
-    if (hasPlayer && this.aabbOverlaps(player) && this.def.damage > 0) {
+    // 否则 damagePlayer(0) 仍会击退/闪红，表现为"兔子撞我有攻击性"。
+    // M11：恒对【本地玩家】判定/结算（victim-settles：damagePlayer 只扣本地血；
+    // 索敌目标可为访客代理，但访客的接触伤害由其端 netPuppetContact 对傀儡
+    // 权威位本地结算——此处若用目标代理会误扣本地玩家的血）
+    if (localPlayer && !localPlayer.dead && this.aabbOverlaps(localPlayer) && this.def.damage > 0) {
       // 蜂蜜史莱姆（NPC 1 且 ai[1]=1125，Player.cs:30902-30908 接触分支最前）：
       // AddBuff(48 Honey, 1800t=30s) 后 continue——**免接触伤害/击退/无敌帧**，
       // 语义是"蹭一身蜜"而非攻击（此前仅 SLIME_ITEM_COLORS 染色，接触照常掉血）
       if (this.vanillaId === 1 && this.ai1 === 1125) {
-        player.buffs?.apply(BuffType.Honey, 30);
+        localPlayer.buffs?.apply(BuffType.Honey, 30);
       } else {
         game.damagePlayer(this.def.damage, this.cx, this.cy, this, true);
       }
@@ -1841,12 +1911,15 @@ export class Enemy extends Entity {
       // ——事件建筑离屏消失会让 UpdateLunarApocalypse 永远等不到塔死）
     } else if (!this.def.boss || this.despawnEncouraged) {
       // 屏内判定跳过死亡玩家（原版 CheckActive 只用 active 玩家重置 timeLeft：
-      // 尸体位置不算"屏内"——此前死亡玩家照常重置，Boss 鼓励消散全部失效）
-      const pp = player && !player.dead ? player : null;
-      const dxp = pp ? Math.abs(pp.cx - this.cx) : Infinity;
-      const dyp = pp ? Math.abs(pp.cy - this.cy) : Infinity;
+      // 尸体位置不算"屏内"——此前死亡玩家照常重置，Boss 鼓励消散全部失效）。
+      // M11：原版 :78703-78720 扫全部 255 槽——任一活跃玩家在屏内即重置；
+      // 联机下访客在屏内同样压制 despawn（单机 = 仅本地，零回归）
+      const cands = (game.candidatePlayers?.() ?? [localPlayer as Player])
+        .filter((q) => !!q && !q.dead);
+      const onScreen = cands.some((q) =>
+        Math.abs(q.cx - this.cx) < TILE * 62 && Math.abs(q.cy - this.cy) < TILE * 35);
       // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
-      if (dxp < TILE * 62 && dyp < TILE * 35
+      if (onScreen
         // flag2 强真名单（:78735-78758）:EoW 头 13/毁灭者头 134 族等恒视屏内
         || (this.vanillaId != null && ALWAYS_ACTIVE_IDS.has(this.vanillaId))) {
         this.despawnTimer = 750;
@@ -3182,14 +3255,15 @@ export class Enemy extends Entity {
     }
     // 原始玩家对象（A 批 2026-08-19）：分发入口把死亡玩家滤成 null，但原版 TargetClosest
     // 对死者只冻结朝向（faceTarget=false，:78539-78542），坐标消费（索敌门/传送采样/
-    // 冲刺瞄准）继续走尸体坐标——下列子段一律用 rawPlayer
-    const rawPlayer = (game as unknown as { player?: Player }).player ?? player;
+    // 冲刺瞄准）继续走尸体坐标——下列子段一律用 rawPlayer。
+    // M11：rawPlayer = 当前索敌目标（Main.player[npc.target]，联机可为访客代理）
+    const rawPlayer = this.targetRef(game, player);
     // ---- 111 僵尸威慑态（AI_003 :57368-57407，AI_127_Pal 生成的双僵尸 ai[3]<0）：
     //      TargetClosest(不转面) + 受击/玩家 <200px 解除（转普通僵尸 ai0=0）；
     //      威慑期 directionY=-1、vx ×0.93（<0.1 归零）、恒面向被威慑宠、
     //      ai0 计 1000→1300 循环（无行为效果），本 tick 到此为止（不追不跳） ----
     if (this.vanillaId === 111 && this.menacePal && !this.menacePal.dead) {
-      const rawP = (game as unknown as { player?: Player }).player;
+      const rawP = this.targetRef(game);
       if (this.justHit || (rawP && !rawP.dead && Math.hypot(rawP.cx - this.cx, rawP.cy - this.cy) < 200)) {
         this.menacePal = null;                       // :57372-57377 ai[3]=0, ai[0]=0
         this.ai0 = 0;
@@ -4466,9 +4540,10 @@ export class Enemy extends Entity {
     if (vid === null) return;
     const st = game.world.store;
     const raining = game.world.weather.raining;
-    // Transform 内 TargetClosest（:81875）→ direction 朝玩家；离场玩家保旧向
+    // Transform 内 TargetClosest（:81875）→ direction 朝玩家；离场玩家保旧向。
+    // M11：TargetClosest = 当前索敌目标（联机可为访客），无目标史回退本地
     const retarget = (): void => {
-      const p = game.player;
+      const p = this.targetRef(game);
       if (p && !p.dead) this.facing = p.cx >= this.cx ? 1 : -1;
     };
     if (vid === 230 && this.wet) {
@@ -5555,8 +5630,9 @@ export class Enemy extends Entity {
       }
     }
     // flag（cs:50682-50686）= 目标玩家死亡（原版 TargetClosest 后仍指向尸体——
-    // 分发入口滤成 null 时经 rawPlayer 取原对象,A 批先例）
-    const rawPlayer = (game as unknown as { player?: Player }).player ?? player;
+    // 分发入口滤成 null 时经 rawPlayer 取原对象,A 批先例）。
+    // M11：rawPlayer = 当前索敌目标（Main.player[npc.target]，联机可为访客代理）
+    const rawPlayer = this.targetRef(game, player);
     const flag = !rawPlayer || rawPlayer.dead;
     // ---- 速度/加速表（cs:50687-50766,审计蜂群#1 速度表 2026-08-19 已铺,
     //      本批补齐 252 鹦鹉视线档 + 231-235 基速 3.5 与 ×(1-scale) 乘区）：
@@ -6090,8 +6166,9 @@ export class Enemy extends Entity {
    *  ai[1]/ai[2] = 出生中心格快照（:24606-24607，netcode 语义，无本地消费） */
   private blazingWheelAI(game?: GameHooks) {
     if (!this.aiInit) { this.aiInit = true;
-      // :24602 TargetClosest（有玩家即朝向；无目标 direction 保持 0→1 兜底）
-      const p = (game as unknown as { player?: Player } | undefined)?.player;
+      // :24602 TargetClosest（有玩家即朝向；无目标 direction 保持 0→1 兜底）。
+      // M11：索敌目标优先（联机可为访客），无目标史回退本地
+      const p = this.targetRef(game);
       if (p) this.facing = this.seekDirX(p);
       this.facing *= -1;                    // :24603 direction ×−1
       this.dirY *= -1;                      // :24604 directionY ×−1（W1 双取反）
@@ -6136,9 +6213,9 @@ export class Enemy extends Entity {
    *  2026-08-19——npc.rotation 累计角写入 visAngle，渲染侧未消费仅保状态） */
   private spikeBallAI(game: GameHooks) {
     if (!this.aiInit) { this.aiInit = true;
-      if ((game as unknown as { player?: Player }).player) {
-        const p = (game as unknown as { player: Player }).player;
-        this.facing = this.seekDirX(p);                       // :24678 TargetClosest
+      {
+        const p = this.targetRef(game);                       // M11：索敌目标优先
+        if (p) this.facing = this.seekDirX(p);                // :24678 TargetClosest
       }
       this.dirY = 1;                                          // :24679
       this.ai0 = 1;                                           // :24680
@@ -8213,7 +8290,7 @@ export class Enemy extends Entity {
             count++; ux += (this.cx - e.cx) / d; uy += (this.cy - e.cy) / d;
           }
         }
-        const pp: Player | null = (game as unknown as { player: Player | null }).player ?? player ?? null;
+        const pp: Player | null = this.targetRef(game, player);   // M11：索敌目标优先
         if (pp && boxDist(pp) <= 150) {
           const d = Math.hypot(this.cx - pp.cx, this.cy - pp.cy) || 1;
           count++; ux += (this.cx - pp.cx) / d; uy += (this.cy - pp.cy) / d;
@@ -8300,7 +8377,7 @@ export class Enemy extends Entity {
     }
     if (this.ai0 < 0) this.ai0 = 0;
     if (this.ai1 < 0) this.ai1 = 0;
-    const player = (game as unknown as { player: Player }).player;
+    const player = this.targetRef(game);   // M11：索敌目标优先（TargetClosest 目标）
     if (this.vy === 0) {
       // ---- 贴地：状态机 + 蠕动推进（:34498-34551）----
       if (this.ai0 === 1) {
@@ -8403,7 +8480,7 @@ export class Enemy extends Entity {
     if (this.ai0 < 0 || this.ai0 > 2) this.ai0 = 0;
     // 出生定向（:34636-34645）：ai[0]==0 → TargetClosest + directionY=1 + ai[0]=1
     if (this.ai0 === 0) {
-      const pl = (game as unknown as { player: Player }).player;
+      const pl = this.targetRef(game);   // M11：索敌目标优先（TargetClosest 目标）
       if (pl && !pl.dead && this.facing === 0) this.facing = pl.cx >= this.cx ? 1 : -1;
       if (this.facing === 0) this.facing = 1;
       this.dirY = 1;
@@ -9137,8 +9214,9 @@ export class Enemy extends Entity {
       this.ai1 = s;
     }
     // 位置参考 = 真身（含尸体——原版 Main.player[target] 不因死亡失位；主 switch 传参
-    // 玩家死亡即 null，故走 game.player 兜底，与 case 4 EoC 例外同型）
-    const pp: Player | null = (game as unknown as { player: Player | null }).player ?? player ?? null;
+    // 玩家死亡即 null，故走 targetRef 兜底，与 case 4 EoC 例外同型）。
+    // M11：Main.player[target] = 当前索敌目标（联机可为访客代理）
+    const pp: Player | null = this.targetRef(game, player);
     const alive = !!pp && !pp.dead;
     const tgt = alive ? pp : null;
     if (this.ai0 === 0) {
@@ -9464,8 +9542,9 @@ export class Enemy extends Entity {
     const st = game.world.store;
     const HOVER_T = 60, CHARGE_WIND = 90, CHARGE_T = 180, BLOOD_WIND = 90, BLOOD_T = 90;
     const SUMMON_T = 180, FLY_SPD = 7.5, FLY_ACC = 0.15;
-    // 位置参考 = 真身（含尸体——同 690 处理；Main.player[target] 不因死亡失位）
-    const pp: Player | null = (game as unknown as { player: Player | null }).player ?? player ?? null;
+    // 位置参考 = 真身（含尸体——同 690 处理；Main.player[target] 不因死亡失位）。
+    // M11：target = 当前索敌目标（联机可为访客代理）
+    const pp: Player | null = this.targetRef(game, player);
     const alive = !!pp && !pp.dead;
     // 目标失效（:47526-47530）：白天或非血月 → 无目标悬停
     const w = game.world;
@@ -9672,7 +9751,7 @@ export class Enemy extends Entity {
    *  视线；掷弹 813（血云 90t 后出鱿鱼）。100 次尝试。 */
   private bloodNautilusCallForHelp(game: GameHooks) {
     const st = game.world.store;
-    const pp: Player | null = (game as unknown as { player: Player | null }).player ?? null;
+    const pp: Player | null = this.targetRef(game);   // M11：索敌目标优先（联机可为访客）
     if (!pp || pp.dead) return;
     if (Math.hypot(pp.cx - this.cx, pp.cy - this.cy) > 2000) return;
     const squids = (game.enemies() as Enemy[]).filter((n) => !n.dead && n.vanillaId === 619).length;
@@ -9808,8 +9887,9 @@ export class Enemy extends Entity {
           count++; ux += (this.cx - e.cx) / d; uy += (this.cy - e.cy) / d;
         }
       }
-      // 玩家 150px（原版无 !dead 门——尸体照算；分发层死亡传 null，回 game.player）
-      const pp: Player | null = (game as unknown as { player: Player | null }).player ?? player ?? null;
+      // 玩家 150px（原版无 !dead 门——尸体照算；分发层死亡传 null，回 targetRef）。
+      // M11：索敌目标优先（联机可为访客代理）
+      const pp: Player | null = this.targetRef(game, player);
       if (pp && boxDist(pp) <= 150) {
         const d = Math.hypot(this.cx - pp.cx, this.cy - pp.cy) || 1;
         count++; ux += (this.cx - pp.cx) / d; uy += (this.cy - pp.cy) / d;
@@ -11145,6 +11225,12 @@ export class Enemy extends Entity {
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
+    // M3 Boss 伤害统计（NPC.StrikeNPC :82129-82130 → NPCDamageTracker.AddDamage：
+    // min(dmg, life) 溢杀不膨胀;owner -1=本地/255=世界,远端访客由 pendingStrikeOwner
+    // （netApplyStrike 置 msg42 fromSlot）覆写。须在扣血前取 life——原版同位）
+    if (bossDamageSink.add) {
+      bossDamageSink.add(this, consumePendingStrikeOwner() ?? (fromPlayer ? -1 : 255), dmg);
+    }
     // realLife 共享生命（StrikeNPC :82132-82137）：伤害扣主段,本段 hp/maxHp 镜像
     // ——毁灭者族打任意节都扣头 80000 总血,节不可单独打死
     if (this.realLifeHost && !this.realLifeHost.dead) {

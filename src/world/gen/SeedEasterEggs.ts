@@ -40,7 +40,13 @@ const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [
   // + SpecialSeedValues = {5162021, 5162011}（TranslateSeed 数字种子直出）
   [/^(celebrationmk10|5162021|5162011)$/i, (f) => { f.tenthAnniversary = true; }],
   [/^dontdigup$/i, (f) => { f.remix = true; }],
-  [/^getfixedboi$/i, (f) => { f.everything = true; f.drunkWorld = true; f.getGoodWorld = true; f.notTheBees = true; }],
+  // getfixedboi（WorldSeedOption_Everything）：依赖表全开 7 项（Remix/Drunk/
+  //  NotTheBees/NoTraps/DontStarve/Anniversary/ForTheWorthy，OnEnabledStateChanged
+  //  逐依赖置位）→ remix 必真。remix×getGood = SpecialSeedFeatures.Mechdusa
+  //  （物品变体 Stronger/Weaker/DisabledBossSummon/Enabled 全激活，2026-08-20 补）。
+  //  noTraps/theConstant/tenthAnniversary 仍不置——既有各消费门按「殊途同归」
+  //  校准（见 WorldGen.graveyardSeedGate 注），维持不动
+  [/^getfixedboi$/i, (f) => { f.everything = true; f.drunkWorld = true; f.getGoodWorld = true; f.notTheBees = true; f.remix = true; }],
   [/^skyblock$/i, (f) => { f.skyblock = true; }],  // 1.4.5.6 WorldGenerationOptions 新增
   // 吸血鬼秘密种子（SecretSeed.vampirism，WorldGen.cs:404 哈希注册——明文为社区
   // 试出的 "what a horrible night to have a curse"；归一化后任意大小写/分隔变体命中）

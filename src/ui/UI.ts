@@ -118,6 +118,7 @@ import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/v
 import { bannerNpcOfItem } from '../world/Banners';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
+import { activeVariantOfVid, variantRareOfVid, VARIANT_L10N_KEY } from '../data/vanillaItemVariants';
 import { assembleTooltipLines } from './itemTooltip';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
@@ -130,6 +131,7 @@ import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventor
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
+import { openEmoteMenu } from './EmoteMenu';
 import { CharCreation } from './CharCreation';
 import type { Appearance } from '../player/Appearance';
 import type { ChestData } from '../world/World';
@@ -397,6 +399,8 @@ export class UI {
   private toastTimer: number | null = null;
   /** 图鉴面板入口（背包按钮/暂停菜单注入；见 BestiaryPanel） */
   onBestiary?: () => void;
+  /** 表情窗口入口（M4：背包表情角按钮 → Game.openEmoteMenu——原版 DrawEmoteIcon） */
+  onEmoteMenu?: () => void;
   /** 住房面板入口（背包内房屋按钮 → HousingPanel；分配/查询走 game.housingMode） */
   onHousing?: () => void;
 
@@ -830,6 +834,26 @@ export class UI {
     game.openChest = (c) => this.openChestPanel(c);
     // 当前打开箱子引用（Game 提取机通电 Wiring.cs:2571 Chest.UsingChest 判定用）
     game.openChestRef = () => this.openChest;
+    // M4 表情窗口入口（背包表情角按钮 onEmoteMenu——原版 DrawEmoteIcon Main.cs:41854
+    // → IngameFancyUI.OpenUIState(UIEmotesMenu)）。打开期间暂停世界+阻断输入
+    // （IngameFancyUI 语义,同 BestiaryPanel 惯例;关闭恢复先前态）
+    this.onEmoteMenu = () => {
+      const g = this.game;
+      if (!g || document.querySelector('.sw-emote-menu')) return;
+      const wasPaused = g.paused;
+      const wasBlocking = g.input.uiBlocking;
+      g.paused = true;
+      g.input.uiBlocking = true;
+      openEmoteMenu(this.root, {
+        gateFlags: () => g.world.flags as Record<string, boolean | undefined>,
+        makeLocalPlayerEmote: (id) => g.makeLocalPlayerEmote(id),
+        playTick: () => UISfx.sfx.play('menuTick', 1),
+        onBack: () => {
+          if (!wasPaused) g.paused = false;
+          if (!wasBlocking) g.input.uiBlocking = false;
+        },
+      });
+    };
   }
 
   slotEl(i: number, where: SlotWhere): HTMLElement {
@@ -1380,6 +1404,9 @@ export class UI {
         const v = def.value ?? 0;
         rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
       }
+      // 变体稀有度覆写（Item.cs SetDefaults Variant 分支：remix 世界 112→6/
+      //  157→8/725→1 等 10 件；普通世界无覆写）
+      rare = variantRareOfVid(vid) ?? rare;
     }
     // 词缀稀有度档位偏移（Item.Prefix :593-600：value≥1.05 档 +1、≥1.2 档 +2 等）
     if (s.prefix) {
@@ -1394,7 +1421,19 @@ export class UI {
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
     // 名称行（GetHoverName :420-427：不加粗、堆叠>1 追加 " (N)"；稀有度色）
     const stackSuffix = s.stack > 1 ? ` (${s.stack})` : '';
-    let html = `<span style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}${stackSuffix}</span>`;
+    // 变体名后缀（ItemVariants：remix/getGood/mechdusa 世界激活件显示官方变体名
+    //  ——ItemVariant.Stronger「更强」等，l10n 官方键随产物内置。★1456 客户端
+    //  ItemVariant.Description 仅为 NetworkText 数据面，无 tooltip 渲染消费——
+    //  此后缀为本仓可读性标注（任务 M2 项 4），颜色取对话框蓝灰弱化）
+    const variantSuffix = def.key.startsWith('vi_')
+      ? (() => {
+        const kind = activeVariantOfVid(parseInt(def.key.slice(3), 10));
+        if (!kind) return '';
+        const label = Lang.text(VARIANT_L10N_KEY[kind]);
+        return label ? ` <span style="color:#7899ec">(${label})</span>` : '';
+      })()
+      : '';
+    let html = `<span style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}${stackSuffix}</span>${variantSuffix}`;
     if (s.favorited) html += ` <span style="color:#ffb347">★</span>`;
     // ---- 统计行（MouseText_DrawItemTooltip_GetLinesInfo，Main.cs:20488-20920 1:1，
     //      构建器在 ui/itemTooltip.ts）：vi_ 全量——伤害[+类型后缀]/暴击/速度档/击退档/
@@ -1814,8 +1853,14 @@ export class UI {
     const def = ITEM_DEFS[s.id];
     let rare = 0;
     if (def.key.startsWith('vi_')) rare = ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0;
+    // 变体稀有度/名后缀（同 showTooltipFor）
+    const rv = def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1;
+    if (rv >= 0) rare = variantRareOfVid(rv) ?? rare;
+    const rvKind = rv >= 0 ? activeVariantOfVid(rv) : null;
+    const rvLabel = rvKind ? Lang.text(VARIANT_L10N_KEY[rvKind]) : '';
     const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
-    let html = `<b style="color:${this.rarityColor(rare)}">${prefixName}${Lang.itemNameByKey(def.key)}</b>`;
+    let html = `<b style="color:${this.rarityColor(rare)}">${prefixName}${Lang.itemNameByKey(def.key)}</b>`
+      + (rvLabel ? ` <span style="color:#7899ec">(${rvLabel})</span>` : '');
     if (s.prefix) for (const ln of prefixLines(s.prefix)) {
       html += `<br><span style="color:${ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)'}">${ln.text}</span>`;
     }
@@ -2078,6 +2123,21 @@ export class UI {
         this.onBestiary?.();
       });
       row.appendChild(bBst);
+      // 表情入口（M4：原版 DrawEmoteIcon Main.cs:41854 背包角按钮——图鉴角钮旁,
+      // Images/UI/Emotes 双帧(常态/悬停),左键 IngameFancyUI.OpenUIState(UIEmotesMenu)）。
+      // 打开逻辑经 Game 注入 onEmoteMenu（暂停世界+uiBlocking 同 BestiaryPanel 惯例）
+      const bEmote = el('button', 'sw-btn');
+      bEmote.title = Lang.has('GameUI.Emote') ? Lang.text('GameUI.Emote') : 'GameUI.Emote';
+      bEmote.style.cssText = 'margin:0; width:34px; height:30px; padding:0; flex:none;'
+        + 'background:url(sprites/vanilla-ui/UI_Emotes.png) 0 0 / 200% 100%;'
+        + 'image-rendering:pixelated; border:1px solid #6a5a8a;';
+      bEmote.addEventListener('mouseenter', () => { bEmote.style.backgroundPosition = '100% 0'; });
+      bEmote.addEventListener('mouseleave', () => { bEmote.style.backgroundPosition = '0 0'; });
+      bEmote.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.onEmoteMenu?.();
+      });
+      row.appendChild(bEmote);
       // 住房入口（原版 DrawInterface_33_Housing：背包侧房屋按钮开 NPC 头像列 +
       //  "?"查询器；点击世界分配/查询走 game.housingMode，2026-08-15 B 方案）
       const bHouse = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Housing.Button'));

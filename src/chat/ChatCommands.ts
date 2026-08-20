@@ -72,6 +72,15 @@ export interface ChatCommandResult {
   consumed: boolean;
 }
 
+/** Player.ChatColor（Player.cs:32230-32238）：难度着色——中端 mcColor(1,0.6,0)=
+ *  (255,153,0) / 硬核 hcColor(1,0.15,0.1)=(255,38,25) / 经典·旅程 White。
+ *  ClientNet.sendChat 与 Game.sendChat 本地回显共用 */
+export function chatColorOfDifficulty(difficulty: number | undefined): readonly [number, number, number] {
+  if (difficulty === 1) return [255, 153, 0];
+  if (difficulty === 2) return [255, 38, 25];
+  return [255, 255, 255];
+}
+
 /** Utils.ParseCommandPrefix（Utils.cs:2935-2951）1:1：
  *  前缀忽略大小写全等,或 前缀+空格+余文;remainder=空格后全文 */
 export function parseCommandPrefix(text: string, prefix: string): { remainder: string } | null {
@@ -190,7 +199,7 @@ export function executeCommand(msg: OutgoingChatMessage, ctx: ChatCommandContext
         return res;
       }
       if (msg.text === '') return res;
-      res.party = [{ text: msg.text, color: TEAM_COLOR[ctx.team] ?? TEAM_COLOR[0] }];
+      res.party = [{ text: msg.text, color: TEAM_COLORS[ctx.team] ?? TEAM_COLORS[0] }];
       return res;
     }
     case 'Roll': {    // RollCommand :11-15

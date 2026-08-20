@@ -22,7 +22,8 @@
 //
 // 等价边界（备案原版行号）：
 //   - 奖牌/魔力掉落点位挂在水晶 548 上（原版 DropItemInstanced/NewItem 同锚）。
-//   - NPCDamageTracker（伤害统计）不移植（原版仅 /damage 指令用）。
+//   - NPCDamageTracker（伤害统计）已随 M3 聊天命令系统移植（/boss伤害,
+//     src/chat/BossDamageTracker.ts——2026-08-20 摘除本登记）。
 import type { World } from './World';
 
 /** 波次公告（Game 侧用 invasionWaveText 组文案，同月事件链路） */

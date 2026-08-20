@@ -5,6 +5,7 @@
 //   acc: 1 功能配饰 / 0 社交配饰（vanity=true；无功能效果）
 import statsJson from './vanilla-itemstats.json';
 import { ITEM_DEFS } from './items';
+import { activeVariantStatsOfVid } from './vanillaItemVariants';
 
 export interface VanillaItemStat {
   s?: 'h' | 'b' | 'l';
@@ -29,12 +30,20 @@ const STATS = statsJson as Record<string, VanillaItemStat>;
 // UpdateEquips :14219-14222 counterWeight 直置 + ApplyEquipVanity :13800-13803 虚荣档）
 for (let _v = 3309; _v <= 3314; _v++) STATS[String(_v)] ??= { acc: 1 };
 
-/** 原版 item id → 盔甲/配饰属性 */
-export function vanillaStatOfVid(vid: number): VanillaItemStat | null {
-  return STATS[String(vid)] ?? null;
+// 世界态变体防御覆写（Item.cs :41852-41875：remix 世界灰烬木三件 def 全降 1）
+// ——取数口叠层（vanillaItemCombat.itemCombat 同法），上下文由 Game.afterWorldLoad 灌入
+function overlayVariantDefense(vid: number, s: VanillaItemStat | null): VanillaItemStat | null {
+  const vs = activeVariantStatsOfVid(vid);
+  if (s && vs?.defense !== undefined) return { ...s, def: vs.defense };
+  return s;
 }
 
-/** 内部 item id → 属性（ITEM_DEFS 缓存） */
+/** 原版 item id → 盔甲/配饰属性（含变体防御覆写） */
+export function vanillaStatOfVid(vid: number): VanillaItemStat | null {
+  return overlayVariantDefense(vid, STATS[String(vid)] ?? null);
+}
+
+/** 内部 item id → 属性（ITEM_DEFS 缓存）+ 内部 id → 原版 id 伴表 */
 const STAT_BY_IID = (() => {
   const m = new Map<number, VanillaItemStat>();
   for (let i = 0; i < ITEM_DEFS.length; i++) {
@@ -48,8 +57,22 @@ const STAT_BY_IID = (() => {
   return m;
 })();
 
+const VID_BY_IID = (() => {
+  const m = new Map<number, number>();
+  for (let i = 0; i < ITEM_DEFS.length; i++) {
+    const d = ITEM_DEFS[i];
+    if (!d) continue;
+    const vid = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    if (vid >= 0) m.set(i, vid);
+  }
+  return m;
+})();
+
 export function statOfInternal(id: number): VanillaItemStat | null {
-  return STAT_BY_IID.get(id) ?? null;
+  const s = STAT_BY_IID.get(id) ?? null;
+  if (!s) return null;
+  const vid = VID_BY_IID.get(id);
+  return vid === undefined ? s : overlayVariantDefense(vid, s);
 }
 
 /** 盔甲部位槽序（0 头 / 1 身 / 2 腿；非盔甲 -1） */
