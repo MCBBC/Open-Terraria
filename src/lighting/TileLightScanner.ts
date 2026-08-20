@@ -609,8 +609,9 @@ export class TileLightScanner {
     const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse,
       !!(w.clock as { bloodMoon?: boolean }).bloodMoon,
       (w.clock as { moonPhase?: number }).moonPhase);
-    // 地狱脉动(ApplyHellLight:3266-3271)
-    const hellV = 0.55 + Math.sin(performance.now() * 0.002) * 0.08; // GlobalTimeWrappedHourly 近似
+    // 地狱脉动(ApplyHellLight:3266-3271:0.55 + Sin(GlobalTimeWrappedHourly×2f)×0.08
+    // ——周期 π 秒的呼吸;曾误写 now×0.002 = 周期 87 分钟恒静,2026-08-20 校勘)
+    const hellV = 0.55 + Math.sin(this.flicker.globalTimeWrappedHourly * 2) * 0.08;
     const hellR = hellV, hellG = hellV * 0.6, hellB = hellV * 0.2;
     // 岩浆闪烁基础(ApplyLiquidLight:118-131)
     const lavaV = 0.55 + (270 - this.flicker.mouseTextColor) / 900;

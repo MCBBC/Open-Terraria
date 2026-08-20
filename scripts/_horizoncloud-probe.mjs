@@ -25,7 +25,7 @@ await page.evaluate(() => {
 await new Promise((r) => setTimeout(r, 8000));
 const out = await page.evaluate(() => {
   const g = window.__swGame;
-  const sky = g.renderer.sky ?? g.sky;
+  const sky = g.renderer ? g.renderer.sky : g.sky;
   const cel = sky ? (sky.cloudCelestial ?? null) : null;
   return {
     cel: cel ? { ...cel } : null,
@@ -37,3 +37,4 @@ const out = await page.evaluate(() => {
 console.log('天体态:', JSON.stringify(out));
 await page.screenshot({ path: '/Users/vinlic/.claude/jobs/8405c930/tmp/horizoncloud.png' });
 await browser.close();
+// 第二段:GL 云层状态 + 太阳近旁云像素采样

@@ -3626,10 +3626,14 @@ export function runDungeonPass(
           if (place3x3D(num3, j, ALCHEMY)) { if (fTr) console.log(`DG FU ALCH ok @${num3},${j}`); dgFurnResult = 'alch'; return; }
         } else if (place3x3D(num3, j, BEWITCH)) { dgFurnResult = 'bew'; return; }
       } else if (num18 === 0) {
-        if (place3x2D(num3, j, DG_ITEM_TILE[iTable])) {
+        if (place3x2D(num3, j, DG_ITEM_TILE[iTable], DG_ITEM_STYLE[iTable] ?? 0)) {
           if (iChair > -1) {
-            if (inW(num3 - 2, j, 0) && actAt(num3 - 2, j) === 0) place1x2D(num3 - 2, j, DG_ITEM_TILE[iChair]);
-            if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) place1x2D(num3 + 2, j, DG_ITEM_TILE[iChair]);
+            if (inW(num3 - 2, j, 0) && actAt(num3 - 2, j) === 0 && place1x2D(num3 - 2, j, DG_ITEM_TILE[iChair], DG_ITEM_STYLE[iChair] ?? 0)) {
+              // cs:591-592 左椅朝向翻转：放置成功 → 两格 frameX += 18
+              st.frameX[st.idx(num3 - 2, j)] = (st.frameX[st.idx(num3 - 2, j)] ?? 0) + 18;
+              st.frameX[st.idx(num3 - 2, j - 1)] = (st.frameX[st.idx(num3 - 2, j - 1)] ?? 0) + 18;
+            }
+            if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) place1x2D(num3 + 2, j, DG_ITEM_TILE[iChair], DG_ITEM_STYLE[iChair] ?? 0);
           }
           for (let n = num3 - 1; n <= num3 + 1; n++) {
             if (rn(2) !== 0 || !inW(n, j - 2, 0) || actAt(n, j - 2) !== 0) continue;
@@ -3644,11 +3648,15 @@ export function runDungeonPass(
           return;
         }
       } else if (num18 === 1) {
-        if (place2x1D(num3, j, DG_ITEM_TILE[iWork])) {
+        if (place2x1D(num3, j, DG_ITEM_TILE[iWork], DG_ITEM_STYLE[iWork] ?? 0)) {
           if (iChair > -1) {
             if (rn(2) === 0) {
-              if (inW(num3 - 1, j, 0) && actAt(num3 - 1, j) === 0) place1x2D(num3 - 1, j, DG_ITEM_TILE[iChair]);
-            } else if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) place1x2D(num3 + 2, j, DG_ITEM_TILE[iChair]);
+              if (inW(num3 - 1, j, 0) && actAt(num3 - 1, j) === 0 && place1x2D(num3 - 1, j, DG_ITEM_TILE[iChair], DG_ITEM_STYLE[iChair] ?? 0)) {
+                // cs:668-671 左椅翻转（工作台分支，桌分支同型）
+                st.frameX[st.idx(num3 - 1, j)] = (st.frameX[st.idx(num3 - 1, j)] ?? 0) + 18;
+                st.frameX[st.idx(num3 - 1, j - 1)] = (st.frameX[st.idx(num3 - 1, j - 1)] ?? 0) + 18;
+              }
+            } else if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) place1x2D(num3 + 2, j, DG_ITEM_TILE[iChair], DG_ITEM_STYLE[iChair] ?? 0);
           }
           for (let n = num3; n <= num3 + 1; n++) {
             if (rn(2) !== 0 || !inW(n, j - 1, 0) || actAt(n, j - 1) !== 0) continue;
@@ -3667,10 +3675,14 @@ export function runDungeonPass(
       } else if (num18 === 3) {
         if (iBook > -1) place3x4D(num3, j, DG_ITEM_TILE[iBook]);
       } else if (num18 === 4) {
-        // ★cs:794-807 椅分支：Next(2) 方向掷（镜像帧；掷必耗）
+        // ★cs:794-807 椅分支：Next(2) 方向掷（0=翻转镜像帧 +=18；掷必耗）
         if (iChair > -1) {
-          rn(2);
-          place1x2D(num3, j, DG_ITEM_TILE[iChair]);
+          const flip = rn(2) === 0;
+          place1x2D(num3, j, DG_ITEM_TILE[iChair], DG_ITEM_STYLE[iChair] ?? 0);
+          if (flip) {
+            st.frameX[st.idx(num3, j)] = (st.frameX[st.idx(num3, j)] ?? 0) + 18;
+            st.frameX[st.idx(num3, j - 1)] = (st.frameX[st.idx(num3, j - 1)] ?? 0) + 18;
+          }
           if (inW(num3, j, 0) && actAt(num3, j) !== 0 && st.type[st.idx(num3, j)] === DG_ITEM_TILE[iChair]) {
             dgFurnResult = 'ok'; return;
           }
@@ -3682,11 +3694,11 @@ export function runDungeonPass(
           if (place4x2D(num3, j, DG_ITEM_TILE[iBed], dir)) { dgFurnResult = 'ok'; return; }
         }
       } else if (num18 === 6) {
-        if (iPiano > -1 && place3x2D(num3, j, DG_ITEM_TILE[iPiano])) { dgFurnResult = 'ok'; return; }
+        if (iPiano > -1 && place3x2D(num3, j, DG_ITEM_TILE[iPiano], DG_ITEM_STYLE[iPiano] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 7) {
-        if (iDress > -1 && place3x2D(num3, j, DG_ITEM_TILE[iDress])) { dgFurnResult = 'ok'; return; }
+        if (iDress > -1 && place3x2D(num3, j, DG_ITEM_TILE[iDress], DG_ITEM_STYLE[iDress] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 8) {
-        if (iSofa > -1 && place3x2D(num3, j, DG_ITEM_TILE[iSofa])) { dgFurnResult = 'ok'; return; }
+        if (iSofa > -1 && place3x2D(num3, j, DG_ITEM_TILE[iSofa], DG_ITEM_STYLE[iSofa] ?? 0)) { dgFurnResult = 'ok'; return; }
       } else if (num18 === 9) {
         // ★cs:833-842 浴缸分支：Next(2) direction 掷
         if (iTub > -1) {
@@ -3723,18 +3735,29 @@ export function runDungeonPass(
     st.slope[i] = 0; st.half[i] = 0;
   };
   const dgClr = (x: number, y: number): boolean => inW(x, y, 0) && st.flags[st.idx(x, y)] === 0;
-  // Place3x2（cs:52097 桌14/钢琴87/梳妆台88/长凳89）
-  function place3x2D(x: number, y: number, t: number): boolean {
+  // Place3x2（cs:52097 桌14/钢琴87/梳妆台88/长凳89/篝火215）
+  // ★VVVVV 帧补（cs:52183-52234）：frameX=54*style+col*18、frameY=0(顶)/18(底)。
+  //   曾 dgWr 只写 type 帧全 0——下游 Piles/FinalCleanup 的 Check3x2 完整性门按
+  //   帧锚反解原点必得假原点 → 整物误杀（#77 首差 m 链钢琴 87×6 / 12345 链
+  //   长凳 89×6 根因；vanilla 金标帧完好存活）。style 缺省 0（塔篝火原文）。
+  function place3x2D(x: number, y: number, t: number, style = 0): boolean {
     if (x < 5 || x > w - 5 || y < 5 || y > h - 5) return false;
     for (let i = x - 1; i < x + 2; i++) {
       for (let j = y - 1; j < y + 1; j++) if (!dgClr(i, j)) return false;
       if (!solidTile2D(i, y + 1)) return false;
     }
-    for (let i = x - 1; i < x + 2; i++) for (let j = y - 1; j < y + 1; j++) dgWr(i, j, t);
+    const bx = 54 * style;
+    for (let i = x - 1; i < x + 2; i++) for (let j = y - 1; j < y + 1; j++) {
+      dgWr(i, j, t);
+      const fi = st.idx(i, j);
+      st.frameX[fi] = bx + (i - (x - 1)) * 18;
+      st.frameY[fi] = j === y - 1 ? 0 : 18;
+    }
     return true;
   }
   // Place2x1（cs:47371 工作台18；103 骷髅=桌上版）
-  function place2x1D(x: number, y: number, t: number): boolean {
+  // ★VVVVV 帧补（cs:47405-47413）：frameX=36*style+0/18、frameY=0
+  function place2x1D(x: number, y: number, t: number, style = 0): boolean {
     const skull = t === dgTileOfSheet(103);
     for (let i = x; i <= x + 1; i++) {
       if (!dgClr(i, y)) return false;
@@ -3743,12 +3766,25 @@ export function runDungeonPass(
       else if (!solidTile2D(i, y + 1)) return false;
     }
     dgWr(x, y, t); dgWr(x + 1, y, t);
+    const bx = 36 * style;
+    st.frameX[st.idx(x, y)] = bx;
+    st.frameX[st.idx(x + 1, y)] = bx + 18;
+    st.frameY[st.idx(x, y)] = 0;
+    st.frameY[st.idx(x + 1, y)] = 0;
     return true;
   }
   // Place1x2（cs:46665 椅15）
-  function place1x2D(x: number, y: number, t: number): boolean {
+  // ★VVVVV 帧补（cs:46685-46691）：frameY=40*style+0(上)/18(下)、frameX=0
+  //   （type 20 苗的随机 fx 不适用椅）。曾零帧——Check1x2 完整性链按 40 行剥
+  //   锚必败（#77 引擎补 Check1x2 臂后地牢椅将全误杀，故同批补帧）。
+  function place1x2D(x: number, y: number, t: number, style = 0): boolean {
     if (!solidTile2D(x, y + 1) || !dgClr(x, y - 1) || !dgClr(x, y)) return false;
     dgWr(x, y - 1, t); dgWr(x, y, t);
+    const by = 40 * style;
+    st.frameY[st.idx(x, y - 1)] = by;
+    st.frameY[st.idx(x, y)] = by + 18;
+    st.frameX[st.idx(x, y - 1)] = 0;
+    st.frameX[st.idx(x, y)] = 0;
     return true;
   }
   // PlaceOnTable1x1（cs:45346 蜡烛33/水瓶49/书50/瓶13）

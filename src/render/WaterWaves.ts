@@ -114,8 +114,8 @@ export function waveSourceGates(q: number): WaveSourceGates {
   };
 }
 
-/** damp = exp2(−0.0551416)（c2.x；(1−B)=1 恒定——B 通道 1456 已死） */
-export const WATER_DAMP = Math.pow(2, -0.0551416);
+/** damp = exp2(c2.x)（obj49 def c2.x float32 = −0.0551415532827；(1−B)=1 恒定——B 通道 1456 已死） */
+export const WATER_DAMP = Math.pow(2, -0.0551415532827);
 
 /** unorm8 通道量化（渲染目标 R8G8B8A8 存储 = 1/256 步；★动力学一部分——
  *  小速度被 8bit 量化截断是涟漪能量汇，浮点缓冲会出"永生驻波"） */
@@ -174,16 +174,16 @@ export function washShapeValue(
   const flen = Math.hypot(flowX, flowY);
   if (flen === 0) return 0;
   const fx = flowX / flen, fy = flowY / flen;              // normalize(flow)
-  const r = rlen * 25.12;                                   // c0.w
+  const r = rlen * 25.1200008392334;                        // c0.w(float32 字节码精确值)
   const dotTerm = Math.max(-fx * radx - fy * rady - 0.2, 0);
   let phi: number;
-  if (r >= 12.56) {                                         // #29 cmp max(r,2π)−4π≥0 → 恒小负角
-    phi = -0.00637111;
+  if (r >= 12.5600004196167) {                              // c1.y ·(−1):#29 cmp 恒小负角
+    phi = -0.00637111347169;                                // c2.z float32 精确值
   } else {
-    const rEff = Math.max(r, 6.28);                         // #27 max(r, c1.x=2π)
-    let frac = (rEff * 0.15915494 + 0.5) % 1;               // r/2π + 0.5 → frac(float32 1/2π)
+    const rEff = Math.max(r, 6.28000020980835);             // #27 max(r, c1.x)
+    let frac = (rEff * 0.15915493671 + 0.5) % 1;            // r/2π + 0.5 → frac(c1.z float32)
     if (frac < 0) frac += 1;
-    phi = frac * 6.2831853 - 3.1415927;                     // ·2π − π(float32 π 常量)
+    phi = frac * 6.28318548202515 - 3.14159274101257;       // ·2π − π(c2.x/c2.y float32)
   }
   const sinPhi = Math.sin(phi);
   return strength * dotTerm * (sinPhi >= 0 ? 0 : -sinPhi);  // min(sin,0) 取负半波

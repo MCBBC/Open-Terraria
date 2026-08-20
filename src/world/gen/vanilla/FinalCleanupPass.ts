@@ -531,7 +531,11 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     // KKKKK：新击杀族同列（自读帧族——嵌合基座伪杀/互喂风险，C3X2 同款处置；
     //   #101 槽 frameSparse=false 不受影响，真实行为由生产管线承载）
     || (sheet >= 82 && sheet <= 84) || sheet === 233 || sheet === 236 || sheet === 238
-    || sheet === 702 || CHECK2XX_TYPES.has(sheet))) {
+    || sheet === 702 || CHECK2XX_TYPES.has(sheet)
+    // VVVVV：Check1x2 椅族/CheckOrb 珠族/484 巨石仙人掌同列（自读帧族）
+    || sheet === 15 || sheet === 20 || sheet === 216 || sheet === 338 || sheet === 390
+    || sheet === 493 || sheet === 497 || sheet === 590 || sheet === 595 || sheet === 615
+    || sheet === 12 || sheet === 31 || sheet === 639 || sheet === 696 || sheet === 484)) {
     return true;   // UUUU：178 同列读帧族（sparse 模式下嵌合帧会伪杀 CheckAndAdjust）
   }
   switch (sheet) {
@@ -581,6 +585,14 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     case 36: case 135: case 141: case 210: case 239: case 428:
     case 593: case 624: case 650: case 656: case 700: case 701:
       check1x1Sweep(st, ctx, x, y); return true;
+    // VVVVV 批补（cs:86278-86286 / cs:85990-85994）：Check1x2 椅族 +
+    //   CheckOrb 珠族——#77 岛屋椅 15（202 日光板 Piles 期翻转）与暗影珠 31
+    //   （2×2 部分残缺）金标实证（两链双根因）
+    case 15: case 20: case 216: case 338: case 390: case 493:
+    case 497: case 590: case 595: case 615:
+      check1x2Sweep(st, ctx, x, y, sheet); return true;
+    case 12: case 31: case 639: case 696:
+      checkOrbSweep(st, ctx, x, y, sheet); return true;
     case 324:
       if (!solidAllowBottom(st, x, y + 1) || invalidForPiles(st, x, y + 1)) killTileGen(st, ctx, x, y);
       return true;
@@ -589,7 +601,9 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   同归 Check2x2。本批定向补 **138+411**（9293480 #101/#105 金标在场成员：
     //   DeadMans 巨石 138 三块 + 矿爆起爆器 411 轨道巷杀级联）；其余成员维持未派发
     //   备案（零掷不可见族，见文件头清单）。
-    case 138: case 411:
+    // VVVVV 批补：+484 滚地仙人掌（m20260811 #77 金标实证 (3579,1241) 残块
+    //   Check2x2 完整性杀；BOULDER_SHEETS 成员走巨石支=尘掷 0）。
+    case 138: case 411: case 484:
       check2x2Sweep(st, ctx, x, y, sheet);
       return true;
     case 373: case 374: case 375: case 461: case 709: {   // IsADripTile（cs:85750）
@@ -1355,6 +1369,91 @@ function check1x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void
   if (!solidAllowBottom(st, x, y + 1)) { killTileGen(st, ctx, x, y); return; }
   const below = rawSheetAt(st, x, y + 1);
   if (below >= 0 && BOULDER_SHEETS.has(below)) killTileGen(st, ctx, x, y);
+}
+
+/** Check1x2（cs:43377-43545，椅 15/苗 20/216/338/390/493/497/590/595/615）——
+ *  VVVVV 批补派发（#77 岛屋椅 15 双链金标实证：Piles 头 202 日光板翻转非实心
+ *  （cs:18906）→ 支撑失守 → vanilla 杀两椅格、JS 无臂永生）。
+ *  锚：fy 40 进制剥行（num3=行）；余 18（下半格）→ 上移一。完整性=fy 链
+ *  （40n/40n+18）+双格 raw type 匹配；支撑=!SolidTileAllowBottomSlope(num+2)
+ *  且非平台族（tileSolidTop 兜底——TileID.Sets.Platforms 原文）。type 20（橡实
+ *  苗——生成期无放置源，备案死支）变体重帧带 genRand.Next(3)。杀=destroyObject
+ *  闸内两格 KillTile（type==type raw 门）+尾复位。掉落（GetItemDrop_Chair 纯表/
+ *  216/338/390/493/497 常量 id）零掷。 */
+function check1x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                             // cs:43380
+  let num = y;
+  let bad = true;
+  let num2 = st.frameY[st.idx(x, num)] ?? 0;                                 // null tile → 0
+  let num3 = 0;
+  while (num2 >= 40) { num2 -= 40; num3++; }                                 // 40 行剥
+  if (num2 === 18) num--;                                                    // cs:43398 下半锚上移
+  if (st.frameY[st.idx(x, num)] === 40 * num3
+    && st.frameY[st.idx(x, num + 1)] === 40 * num3 + 18
+    && rawSheetAt(st, x, num) === sheet && rawSheetAt(st, x, num + 1) === sheet) bad = false;   // cs:43406
+  const belowSheet = rawSheetAt(st, x, num + 2);
+  if (!solidAllowBottom(st, x, num + 2) && !PLATFORMS.has(belowSheet)) bad = true;              // cs:43409
+  if (sheet === 20) {                                                        // cs:43411-43463 苗变体（生成期死支，1:1 保留）
+    const num5 = Math.trunc((st.frameX[st.idx(x, num)] ?? 0) / 54);
+    let num6 = -1;
+    switch (belowSheet) {
+      case 2: case 477: num6 = 0; break;
+      case 147: num6 = 1; break;
+      case 60: num6 = 2; break;
+      case 23: case 661: num6 = 3; break;
+      case 199: case 662: num6 = 4; break;
+      case 109: case 492: num6 = 5; break;
+      case 53: num6 = 6; break;
+      case 116: num6 = 7; break;
+      case 234: num6 = 8; break;
+      case 112: num6 = 9; break;
+      case 633: num6 = 10; break;
+      default: bad = true; break;
+    }
+    if (!bad && num5 !== num6 && ctx.rng) {
+      const num7 = 54 * num6 + ctx.rng.nextInt(3) * 18;                      // cs:43459 genRand
+      st.frameX[st.idx(x, num)] = num7;
+      st.frameX[st.idx(x, num + 1)] = num7;
+    }
+  }
+  if (!bad) return;
+  ctx.destroyObject = true;                                                  // cs:43485
+  if (rawSheetAt(st, x, num) === sheet) killTileGen(st, ctx, x, num);
+  if (rawSheetAt(st, x, num + 1) === sheet) killTileGen(st, ctx, x, num + 1);
+  ctx.destroyObject = false;                                                 // cs:43545 尾复位
+}
+
+/** CheckOrb（cs:54187-54275，12/31/639/696）——VVVVV 批补派发（#77 暗影珠 31
+ *  金标实证：2×2 珠体有一格已被上游杀（g76 死格）→ 完整性破 → vanilla 杀余
+ *  3 格、JS 无臂永生）。锚：fx∈{0,36} 为左列（36=猩红心左列基），否则 i-1；
+ *  fy≠0 → j-1。完整性=2×2 四格 nactive+raw type 匹配；12/639 加下两格
+ *  SolidTileAllowBottomSlope（31/696 无支撑门）。杀=raw type 匹配格 KillTile。
+ *  掉落走 Main.rand（cs:54249 Next(5)）不耗 genRand；31 尘掷 0。 */
+function checkOrbSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                             // cs:54198
+  const fx = st.frameX[st.idx(x, y)] ?? 0;
+  const num = (fx !== 0 && fx !== 36) ? x - 1 : x;                           // cs:54201
+  const num2 = (st.frameY[st.idx(x, y)] ?? 0) !== 0 ? y - 1 : y;             // cs:54202
+  let dead = false;
+  for (let k = 0; k < 2; k++) {
+    for (let l = 0; l < 2; l++) {
+      if (!nactiveAt(st, num + k, num2 + l) || rawSheetAt(st, num + k, num2 + l) !== sheet) {
+        dead = true; break;                                                  // cs:54211
+      }
+    }
+    if (dead) break;
+    if (sheet === 12 || sheet === 639) {
+      if (!solidAllowBottom(st, num + k, num2 + 2)) { dead = true; break; }  // cs:54219
+    }
+  }
+  if (!dead) return;
+  ctx.destroyObject = true;                                                  // cs:54238
+  for (let m = num; m < num + 2; m++) {
+    for (let n = num2; n < num2 + 2; n++) {
+      if (rawSheetAt(st, m, n) === sheet) killTileGen(st, ctx, m, n);        // cs:54241 raw type 门
+    }
+  }
+  ctx.destroyObject = false;                                                 // cs:54269 尾复位
 }
 
 /** Check3x2（cs:49190）：3x2 完整性 + 分型支撑门 + 187 地基门/转 186 + 488 再生 */

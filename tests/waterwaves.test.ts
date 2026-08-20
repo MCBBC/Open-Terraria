@@ -73,8 +73,8 @@ describe('waveProcessorStep（WaterProcessor obj49 复原）', () => {
     // w=(0.5)·3.333=1.667; H=1.667²=2.78 → newH=2.676 → enc>1 → 钳 1
     expect(r[0]).toBe(1);
   });
-  it('damp 常量 = exp2(−0.0551416)', () => {
-    expect(WATER_DAMP).toBeCloseTo(0.9624999694393103, 12);
+  it('damp 常量 = exp2(c2.x float32 = −0.0551415532827)', () => {
+    expect(WATER_DAMP).toBeCloseTo(Math.pow(2, -0.0551415532827), 12);
   });
 });
 
@@ -117,7 +117,7 @@ describe('washShapeValue（WaterDistortionObject obj50 复原）', () => {
     // ★金标 = SM2 解释器直跑 obj50 字节码同探针输出 0.0025482763275909716
     //  （旧公式无内圈钳 → φ 全域摆动 → 0.76 错值，2026-08-20 复核定罪）
     const v = washShapeValue(0.2, 0, -0.5, 0, 1);
-    expect(v).toBeCloseTo(0.002542446963370625, 10);
+    expect(v).toBeCloseTo(0.0025482763275909716, 7);   // float32 常量(1/2π)舍入 ±1e-7
   });
   it('内圈 max(r,2π) 钳：r<2π 各点 φ 恒定（obj50 #27 字节码锚）', () => {
     // |uvc|=0.1/0.2/0.24 全部 → φ = frac(2π·0.159155+0.5)·2π−π 同值 → 同强度
@@ -126,14 +126,14 @@ describe('washShapeValue（WaterDistortionObject obj50 复原）', () => {
     const c = washShapeValue(0.24, 0, -0.5, 0, 1);
     expect(a).toBeCloseTo(b, 12);
     expect(b).toBeCloseTo(c, 12);
-    expect(a).toBeCloseTo(0.002542446963370625, 10);
+    expect(a).toBeCloseTo(0.0025482763275909716, 7);
   });
   it('中圈（2π≤r<4π）不钳：φ 随 r 变化（字节码 #28 frac 链）', () => {
     // r=8.79（|uvc|=0.35）与 r=11.3（0.45）强度不同且均与解释器探针一致
     const v1 = washShapeValue(0.35, 0, -0.5, 0, 1);
     const v2 = washShapeValue(0.45, 0, -0.5, 0, 0.5);
     expect(v1).toBe(0);                                       // interp 探针 = 0
-    expect(v2).toBeCloseTo(0.3811240724031751, 9);            // interp 0.38112507
+    expect(v2).toBeCloseTo(0.3811250681947874, 8);            // interp 直跑金标(float32 舍入 ±2e-8)
   });
   it('远处（r≥4π）恒小负角 → 微弱尾迹', () => {
     // |uvc|=0.6 → r=15.07 ≥ 4π → φ=−0.00637111 → −sinφ = +0.0063711
