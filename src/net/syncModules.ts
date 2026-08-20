@@ -6,9 +6,8 @@
 //   NetPingModule.cs           —— 地图 ping 中继（Vector2 位置；Main.cs:56016 TriggerPing）
 //   NetBestiaryModule.cs       —— 图鉴进度（Kill=计数/Sight=首遇/Chat=首聊三子型）
 //   NetTeleportPylonModule.cs  —— 晶塔增删广播 + 玩家传送请求
-//   ParticleOrchestraSettings.cs（22B）—— 编排粒子（本仓唯一已移植类型 WoF 山羊火焰
-//                                   原版 Mount.cs:3892 clientOnly:true 不上网——
-//                                   故不做 NetParticlesModule，见任务报告）
+//   ParticleOrchestraSettings.cs（22B）—— 编排粒子（原版同步面 = 全部编排特效，
+//                                   纯 dust 不上网；本仓子集与审计结论见 module8 段注）
 // 字段编码尽量贴原版（7bit 计数 / packed coord），方向与信任边界见各函数注释；
 // 模块 id 对齐 NetworkInitializer.cs 注册序（protocol.ts NetModule 表）。
 import { Msg, NetModule, NetWriter, NetReader } from './protocol';
@@ -198,8 +197,9 @@ export const enum PylonSub {
 
 export type PylonNetMsg =
   | { sub: PylonSub.PylonWasAdded | PylonSub.PylonWasRemoved; x: number; y: number; type: number }
-  /** C→S {x,y,type}；S→房主 追加 u8 requesterSlot（服务器权威回填——同 msg42 fromSlot 手法） */
-  | { sub: PylonSub.PlayerRequestsTeleport; x: number; y: number; type: number; requesterSlot: number }
+  /** C→S {x,y,type}（requesterSlot 省缺=0——客户端原生帧无此段）；S→房主 追加
+   *  u8 requesterSlot（服务器权威回填——同 msg42 fromSlot 手法） */
+  | { sub: PylonSub.PlayerRequestsTeleport; x: number; y: number; type: number; requesterSlot?: number }
   /** 房主回执：上行带路由位 targetSlot（服务器剥除后定向转发）；下行 ok=false 时
    *  fail = Net.* 文案键（ChatHelper.SendChatMessageToClient 同源） */
   | { sub: PylonSub.TeleportResult; targetSlot: number; x: number; y: number; type: number; ok: boolean; fail: string | null };
@@ -217,7 +217,7 @@ export function writePylonModule(msg: PylonNetMsg): Uint8Array {
   }
   w.u8(msg.sub);
   w.i16(msg.x); w.i16(msg.y); w.u8(msg.type);
-  if (msg.sub === PylonSub.PlayerRequestsTeleport) w.u8(msg.requesterSlot & 0xff);
+  if (msg.sub === PylonSub.PlayerRequestsTeleport) w.u8((msg.requesterSlot ?? 0) & 0xff);
   return w.finish();
 }
 
@@ -240,6 +240,86 @@ export function readPylonModule(r: NetReader): PylonNetMsg | null {
     return { sub, x, y, type, requesterSlot };
   }
   return { sub, x, y, type };
+}
+
+// ================= module8 编排粒子（NetParticlesModule.cs + ParticleOrchestraSettings.cs） =================
+//
+// 原版语义：编排特效（ParticleOrchestrator.RequestParticleSpawn/Broadcast*）经
+// 22B 载荷全网广播（服务器 Broadcast 排除发送者,客户端 SpawnParticlesDirect）。
+// 纯 dust 永不上网（各端本地模拟）。原版广播全集（1456 全量扫）：
+//   剑刃轨迹族（NightsEdge/TrueNightsEdge/Excalibur/TrueExcalibur/TerraBlade/
+//   StardustPunch/MoonLordWhipHit/PrincessWeapon/PaladinsHammer… Projectile.cs:12196+）、
+//   近战编排（SlapHand/WaffleIron/ClassyCane/FlyMeal Player.cs:43687+）、
+//   微光族（ShimmerTownNPC/ShimmerTownNPCSend/ShimmerBlock/ShimmerArrow）、
+//   杂项（ItemTransfer Chest.cs:302 / LoadoutChange / Digestion / VampireOnFire /
+//   HeroicisSetSpawnSound / TownSlimeTransform / FakeFish 族…）。
+// 本仓现状：无 ParticleOrchestrator 编排器系统（唯一移植的编排视觉 = WoF 山羊火焰
+// FlameParticles——原版 Mount.cs:3892 clientOnly:true 不上网）；上表生产者在本地
+// 均未走编排通道（剑刃命中等用本地 dust/贴图特效）。照子集落地 = 通道 1:1 编解码 +
+// 服务器中继就位，生产/消费子集先接微光族两型（TownNPC shimmerRise 链本地已有
+// 同款视觉,NPC.cs:53674/:56004 原版广播位 1:1）；其余型到达时静默忽略（前向兼容）。
+
+/** ParticleOrchestraType.cs 摘录（本仓已接消费/生产子集；全表 72 型见源文件） */
+export const enum ParticleOrchestraType {
+  ShimmerTownNPC = 32,      // 城镇 NPC 微光转化到位（NPC.cs:53674 / Player.cs:28402）
+  ShimmerTownNPCSend = 33,  // 微光上升态远距落点传送（NPC.cs:56004）
+}
+
+/** ParticleOrchestraSettings（21B：Vector2 pos + Vector2 move + i32 unique + u8 invoker） */
+export interface ParticleSettings {
+  posX: number; posY: number;
+  moveX: number; moveY: number;
+  uniqueInfo: number;
+  /** IndexOfPlayerWhoInvokedThis（服务器中继保留原值——本仓消费端不使用） */
+  invoker: number;
+}
+
+export function writeParticleModule(type: number, s: ParticleSettings): Uint8Array {
+  const w = new NetWriter(Msg.NetModules);
+  w.u16(NetModule.Particles);
+  w.u8(type & 0xff);
+  w.f32(s.posX); w.f32(s.posY);
+  w.f32(s.moveX); w.f32(s.moveY);
+  w.i32(s.uniqueInfo | 0);
+  w.u8(s.invoker & 0xff);
+  return w.finish();
+}
+
+export function readParticleModule(r: NetReader): { type: number; settings: ParticleSettings } {
+  const type = r.u8();
+  return {
+    type,
+    settings: {
+      posX: r.f32(), posY: r.f32(),
+      moveX: r.f32(), moveY: r.f32(),
+      uniqueInfo: r.i32(),
+      invoker: r.u8(),
+    },
+  };
+}
+
+// ================= module100 天空氛围（NetAmbienceModule.cs + AmbienceServer.cs） =================
+//
+// 原版语义：dedServ 上跑 AmbienceServer——600-7200t（10-120s）一次：主条件表
+// （全局昼夜/天气/事件）→ FindPlayerThatCanSeeBackgroundAmbience（在场玩家随机
+// 取一位,高度门 = 天空带/地狱带）→ 严格列表（次级 Zone 门）为空或 60% 掷 →
+// 放宽列表 → 均匀选族 → BroadcastOrLoopback {playerId, Main.rand.Next() 种子,
+// type}。客户端 AmbientSky.Spawn(player, type, seed)：FastRandom(seed) 驱动各族
+// 构造器随机——全端同 seed 同实体。本仓：room.ts 侧 AmbienceServer 1:1
+// （pickAmbientFamily 复用 SkyRenderer 纯函数,Zone 门经 scanScene）,客户端
+// 联机时关本地调度只消费广播（原版客户端无本地调度器）。
+
+export function writeAmbienceModule(playerSlot: number, seed: number, type: number): Uint8Array {
+  const w = new NetWriter(Msg.NetModules);
+  w.u16(NetModule.Ambience);
+  w.u8(playerSlot & 0xff);
+  w.i32(seed | 0);
+  w.u8(type & 0xff);
+  return w.finish();
+}
+
+export function readAmbienceModule(r: NetReader): { playerSlot: number; seed: number; type: number } {
+  return { playerSlot: r.u8(), seed: r.i32(), type: r.u8() };
 }
 
 // ================= msg203 PingProbe（玩家列表面板 RTT 数据源；本仓自有通道） =================

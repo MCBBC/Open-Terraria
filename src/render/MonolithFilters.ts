@@ -127,12 +127,15 @@ type FilterKind = 'miniTower' | 'moonLord' | 'graveyard' | 'bloodMoon' | 'sepia'
 
 interface MonoFilterDef {
   key: string;            // Filters.Scene 键（ScreenEffectInitializer.cs）
-  sceneKey: string;       // 激活来源（SceneState.cs:111-128）
+  sceneKey: string;       // 激活来源（SceneState.cs:109-128）
   priority: number;
   kind: FilterKind;
   /** FilterMiniTower 的 UseColor + UseOpacity（ScreenEffectInitializer.cs:18-21） */
   color?: readonly [number, number, number];
   useOpacity?: number;
+  /** MoonLordScreenShaderData.aimAtPlayer（:8-9）：true=MonolithMoonLord 目标=
+   *  SceneMetrics.Center（玩家屏幕位）；false=场景 MoonLord 滤镜目标=核心位 */
+  aimAtPlayer?: boolean;
 }
 
 export const MONOLITH_FILTER_DEFS: readonly MonoFilterDef[] = [
@@ -142,7 +145,10 @@ export const MONOLITH_FILTER_DEFS: readonly MonoFilterDef[] = [
   { key: 'MonolithStardust', sceneKey: 'MonolithStardust', priority: PRIORITY_MEDIUM, kind: 'miniTower', color: [0, 0.5, 1], useOpacity: 0.5 },
   { key: 'MonolithSolar', sceneKey: 'MonolithSolar', priority: PRIORITY_MEDIUM, kind: 'miniTower', color: [1, 0.7, 0], useOpacity: 0.3 },
   // 月总柱（SceneState.cs:115；MoonLordScreenShaderData :21-44 aimAtPlayer）
-  { key: 'MonolithMoonLord', sceneKey: 'MonolithMoonLord', priority: PRIORITY_MEDIUM, kind: 'moonLord' },
+  { key: 'MonolithMoonLord', sceneKey: 'MonolithMoonLord', priority: PRIORITY_MEDIUM, kind: 'moonLord', aimAtPlayer: true },
+  // 月总战滤镜（SceneState.cs:109；ScreenEffectInitializer.cs:22 VeryHigh，
+  // MoonLordScreenShaderData("FilterMoonLord", aimAtPlayer:false)——目标=核心位）
+  { key: 'MoonLord', sceneKey: 'MoonLord', priority: PRIORITY_VERYHIGH, kind: 'moonLord', aimAtPlayer: false },
   // 墓地雾（SceneState.cs:124 `GraveyardVisualIntensity > 0`；ScreenEffectInitializer.cs:25
   // 注册位于 MonolithMoonLord 之后、BloodMoon 之前——同 Medium 按此序合成）
   { key: 'Graveyard', sceneKey: 'Graveyard', priority: PRIORITY_MEDIUM, kind: 'graveyard' },
@@ -217,6 +223,13 @@ export const MONOLITH_FILTER_AUDIT: readonly FilterAuditRow[] = [
     note: '未端口：字节码=绕 uTargetPosition 的色散(split ±0.01·sin(2π·frac(t·10/π+0.5)−π)，'
       + '径向门 min(d·0.0005,1))+0.15/0.7/0.15 三采样合成+V·3 亮度推色+800px 掩码带，'
       + '~35 指令重度跨通道(wzyx)置换——沿用 canvas 径向紫晕近似',
+  },
+  {
+    key: 'MoonLord(月总战滤镜)', pass: 'FilterMoonLord', disasm: ':103-158', glExact: false,
+    note: '同 MonolithMoonLord 的 pass（ScreenEffectInitializer.cs:22-24 唯一差异=aimAtPlayer:false，'
+      + 'UseTargetPosition=Moon Lord Core(npc type 398).Center——MoonLordScreenShaderData.cs:42-45）；'
+      + '激活门=SceneState.cs:109 ClosestNPCPosition[398]≠Zero（全场 NPC 扫描 SceneMetrics.cs:739-763，'
+      + '非仅视区）；EffectPriority.VeryHigh → 合成序在 Medium 柱族之后。canvas 同款径向紫晕近似',
   },
   {
     key: 'Sepia', pass: 'FilterSepia', disasm: ':176-247', glExact: false,
@@ -386,6 +399,11 @@ export interface MonolithEnv {
   cloudAlpha: number;        // Main.cloudAlpha
   /** SceneState.cs:110 flag4：四天塔在附近时压掉柱滤镜（引擎暂无塔邻接，默认 false） */
   lunarTowersNear?: boolean;
+  /** Moon Lord Core（NPC type 398）世界 px 中心；null=不存在。
+   *  SceneState.cs:109 激活门 = ClosestNPCPosition[398] ≠ Zero（SceneMetrics.cs:739-763
+   *  全场 NPC 扫描——不限视区，核心在屏外滤镜仍激活）；同时是 MoonLord 滤镜
+   *  UseTargetPosition（MoonLordScreenShaderData.cs:42-45） */
+  moonLordCore?: { x: number; y: number } | null;
   /** 主玩星旋世界种旗（Main.onlyDontStarveWorld；引擎恒 false，保留字段对齐 :125 的 XOR） */
   onlyDontStarveWorld?: boolean;
   /** 玩家微光浸没（SceneState.cs:331 的 shimmering && UndergroundForShimmering 项） */
@@ -458,6 +476,7 @@ export class MonolithFilters {
     m.set('MonolithStardust', !flag4 && scan.activeMonolithType === 2);  // :113
     m.set('MonolithSolar', !flag4 && scan.activeMonolithType === 3);     // :114
     m.set('MonolithMoonLord', !flag4 && scan.activeMonolithType === 4);  // :115
+    m.set('MoonLord', !!env.moonLordCore);                               // :109
     m.set('Graveyard', (env.graveyardIntensity ?? 0) > 0);               // :124
     m.set('BloodMoon', env.worldBloodMoon || scan.bloodMoonMonolith);    // :116
     // Sepia（:125）：onlyDontStarveWorld ^ (dontStarveShader || RadioThingMonolith)
@@ -614,18 +633,24 @@ export class MonolithFilters {
 
   /** 全屏滤镜合成（FilterManager.EndCapture :136-176 的 canvas 等价）：
    *  依 EffectPriority 升序叠加（Medium 先、VeryHigh 后）。
-   *  playerScreen = 玩家屏幕坐标（MonolithMoonLord aimAtPlayer 的 target）。 */
+   *  playerScreen = 玩家屏幕坐标（MonolithMoonLord aimAtPlayer 的 target）；
+   *  moonLordCoreScreen = 月总核心屏幕坐标（场景 MoonLord 滤镜 aimAtPlayer=false
+   *  的 UseTargetPosition；无核心时回退玩家位）。 */
   draw(
     ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
     viewW: number, viewH: number,
     playerScreen: { x: number; y: number },
+    moonLordCoreScreen?: { x: number; y: number },
   ): void {
     // MONOLITH_FILTER_DEFS 已按优先级升序声明（Medium → VeryHigh）
     for (const f of this.filters) {
       if (f.opacity <= 0) continue;   // Filter.IsVisible（Filter.cs:63-70）
       switch (f.def.kind) {
         case 'miniTower': this.drawMiniTower(ctx, f, viewW, viewH); break;
-        case 'moonLord': this.drawMoonLord(ctx, f, viewW, viewH, playerScreen); break;
+        case 'moonLord':
+          this.drawMoonLord(ctx, f, viewW, viewH,
+            f.def.aimAtPlayer === false && moonLordCoreScreen ? moonLordCoreScreen : playerScreen);
+          break;
         case 'graveyard': this.drawGraveyard(ctx, f, viewW, viewH, playerScreen); break;
         case 'bloodMoon': this.drawBloodMoon(ctx, f, viewW, viewH); break;
         case 'sepia': this.drawSepia(ctx, canvas, f, viewW, viewH); break;
@@ -649,12 +674,13 @@ export class MonolithFilters {
     ctx.restore();
   }
 
-  /** FilterMoonLord（aimAtPlayer）：径向压暗近似（shader 二进制不在源码，
-   *  深紫向外衰减——沿用既有近似基色 0.35/0.30/0.42） */
+  /** FilterMoonLord：径向压暗近似（shader 二进制不在源码，
+   *  深紫向外衰减——沿用既有近似基色 0.35/0.30/0.42）。target=aimAtPlayer ?
+   *  玩家屏幕位（SceneMetrics.Center）: 核心屏幕位（npc[398].Center） */
   private drawMoonLord(ctx: CanvasRenderingContext2D, f: FilterState, w: number, h: number,
-    playerScreen: { x: number; y: number }): void {
+    target: { x: number; y: number }): void {
     const r = Math.hypot(w, h) * 0.6;
-    const grad = ctx.createRadialGradient(playerScreen.x, playerScreen.y, r * 0.2, playerScreen.x, playerScreen.y, r);
+    const grad = ctx.createRadialGradient(target.x, target.y, r * 0.2, target.x, target.y, r);
     grad.addColorStop(0, 'rgba(89,77,107,0)');
     grad.addColorStop(1, `rgba(89,77,107,${(0.35 * f.opacity).toFixed(3)})`);
     ctx.save();

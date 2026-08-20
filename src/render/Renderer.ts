@@ -373,6 +373,7 @@ import { dyeApplyOf, applyDyePass, type DyeApply } from '../data/vanillaDyes';
 import { defaultUniforms, getPass, runPassOnImageData, sampleImageData, type SM2Uniforms } from '../fx/SM2Effect';
 import { VanillaDust } from '../fx/VanillaDust';
 import { flameParticles, flameFadeOutFactor } from '../fx/FlameParticles';
+import { MapPingStore } from '../net/syncModules';
 import { leashedBubbleVisible } from '../entities/LeashedCritter';
 import { applyHeldProjPointing, heldProjFrameBegin, noteHeldProjEntity } from './heldProj';
 import { PAINT_TOOLS, paintToolOffset } from './CursorItemIcon';
@@ -1709,6 +1710,50 @@ export function sleepingTransformOps(
   ];
 }
 
+// ---- 地图键族纯函数（Player.cs:24596-24653 消费侧 1:1；测试锁步进/边界用） ----
+
+/** mapStyle 三态（Main.cs:874：0=隐藏 1=小地图 2=覆盖式） */
+export const MAP_STYLE_MIN = 0;
+export const MAP_STYLE_MAX = 2;
+
+/** MapStyle 键循环（Player.cs:24641-24645 mapStyle++ → >2 回 0；音效 12 由键沿侧播） */
+export function cycleMapStyle(cur: number): number {
+  return cur + 1 > MAP_STYLE_MAX ? MAP_STYLE_MIN : cur + 1;
+}
+
+/** MapAlpha 步进 ±0.015（Player.cs:24608-24615；钳 [0.01,1] = Main.cs:54961-54968
+ *  DrawMap 原地钳的等价折入——活值恒在界内，步进后一并夹取） */
+export const MAP_ALPHA_STEP = 0.015;
+export const MAP_ALPHA_MIN = 0.01;
+export function stepMapAlpha(cur: number, dir: 1 | -1): number {
+  return Math.min(1, Math.max(MAP_ALPHA_MIN, cur + dir * MAP_ALPHA_STEP));
+}
+
+/** 箱名合成（DrawMap_FindChestName Main.cs:56103-56115 1:1）：
+ *  无箱记录 → chestNames[0]（默认"宝箱"族名）；命名箱 → "类型名: 名字"；
+ *  未命名 → 类型名。live 路径 name 恒 null/''（本仓 ChestData 无 name 字段、
+ *  无重命名链——引擎级缺口，同 CursorItemIcon.containerHover 登记口径） */
+export function mapChestHoverName(chest: { typeName: string; name: string | null }): string {
+  if (chest.name != null && chest.name !== '') {
+    return `${chest.typeName}: ${chest.name}`;
+  }
+  return chest.typeName;
+}
+
+/** 悬停格 → 显示名（Main.cs:55254-55356 mapFullscreen 悬停链的类型名支）。
+ *  sheet 21/441 → LegacyChestType.{frameX/36}；467/468 → LegacyChestType2.{frameX/36}
+ *  （Lang.cs:502-508 数组源）；88 梳妆台 → LegacyDresserType.{frameX/54}（:55313-55339，
+ *  命名支同上恒不进）；其余 → 地图图例名（Lang.GetMapObjectName Lang.cs:77 ≈ tileName）。
+ *  返回 null = 无名可显。探索门（Map.Light>40 :55254）由调用侧迷雾判。 */
+export function mapTileHoverName(sheet: number, frameX: number): string | null {
+  const key = sheet === 21 || sheet === 441 ? `LegacyChestType.${Math.floor(frameX / 36)}`
+    : sheet === 467 || sheet === 468 ? `LegacyChestType2.${Math.floor(frameX / 36)}`
+    : sheet === 88 ? `LegacyDresserType.${Math.floor(frameX / 54)}`
+    : null;
+  if (key) return Lang.has(key) ? Lang.text(key) : null;
+  return Lang.tileName(sheet);   // GetMapObjectName 图例名等价（Tiles.* 分节名）
+}
+
 export class Renderer {
   /** GL 合成层(#1 背景族 + #2 全屏地图共用;docs/webgl2-migration-plan.md) */
   glfx: GLSpriteLayer | null = null;
@@ -2057,6 +2102,19 @@ export class Renderer {
     anchorU: 0, anchorV: 0, anchorMX: 0, anchorMY: 0,
   };
 
+  // ---- 地图样式三态（Main.mapStyle，Main.cs:874 默认 1；Player.cs:24636-24648
+  //      MapStyle 键循环 0↔1↔2。0=隐藏 1=右上小地图 2=全屏覆盖式。运行期态，
+  //      原版不持久化（config.json 无对应键），本仓同款会话态） ----
+  mapStyle: 0 | 1 | 2 = 1;
+  /** 小地图透明度（Main.mapMinimapAlpha :892 默认 1；PageUp/Down ±0.015）。
+   *  初始化读 options（Renderer 构造时 options.load 已完成——mainFlow 启动即
+   *  void load()，进世界远晚于其 resolve） */
+  minimapAlpha = options.data.mapMinimapAlpha;
+  /** 覆盖式地图缩放（Main.mapOverlayScale :894 默认 2.5；钳 [屏宽/世界宽, 16×zoom]） */
+  mapOverlayScale = 2.5;
+  /** 覆盖式地图透明度（Main.mapOverlayAlpha :896 默认 0.35） */
+  mapOverlayAlpha = options.data.mapOverlayAlpha;
+
   // ---- M6 拍照模式（F4）：CaptureInterface 挂点 + 截图重渲通道门 ----
   /** 界面实例（激活态由 main.ts 的 ToggleCameraMode 键派发翻转;本文件只承
    *  frame() 单调用点——见 render() 第 9 段前的 M6 分区注释） */
@@ -2221,6 +2279,7 @@ export class Renderer {
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
+    this._frameEntities = entities;   // _moonLordCore（月总滤镜）drawScreenFilterChain 消费
     this.mainPlayer = player;   // 克脑镜像（Main.cs:24799-24843 以玩家中心镜像）等取用
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
@@ -2271,6 +2330,10 @@ export class Renderer {
       heatZoneSandstorm: !!this.scene?.zoneSandstorm,
       heatSunScorch: player.sunScorchCounter,
       useHeatDistortion: true,   // Main.UseHeatDistortion（Main.cs:409 默认 true）
+      // 月总战滤镜激活门（SceneState.cs:109 ClosestNPCPosition[398]≠Zero——
+      // SceneMetrics.cs:739-763 全场 NPC 扫描，核心屏外也激活）：取首个在场
+      // 核心（vanillaId 398）中心；drawScreenFilterChain 同源取其屏幕位
+      moonLordCore: this._moonLordCorePos(entities),
     });
     this._monoFrameMs = this._liquidNow;
 
@@ -2807,6 +2870,13 @@ export class Renderer {
     //     视区扫描（本帧 monoScan）→ SceneState.cs:105-128/:122-123 激活 →
     //     Filter.Opacity 1/s 斜坡。GL 路径 = ScreenShader.cso SM2 字节码逐指令
     //     1:1（GLScreenFilters）；GL 不可用回退 canvas 近似（MonolithFilters.draw）
+    // 7d-bis. 覆盖式地图（mapStyle==2，DrawMap :54988-55018：世界之上、界面/滤镜链
+    // 之下——Main.cs:61670-61684 画在 DoDraw_WallsTilesNPCs 之后）。全屏地图打开时
+    // 不画（mapFullscreen 与 mapStyle 互斥，:45171）
+    if (this.mapStyle === 2 && !this.fullMap.open && this.minimap && !this._capturePass) {
+      this.drawMapOverlay(ctx, cam, world, player, entities, viewW, viewH, z);
+    }
+
     this.drawScreenFilterChain(ctx, cam, player, viewW, viewH, z);
 
     // 8. 飘字（受光照影响后画）。数字类 = 原版位图字体（Combat_Text/Combat_Crit
@@ -10250,11 +10320,30 @@ export class Renderer {
         (performance.now() / 1000) % 3600);
     }
     if (mono.anyInUse) {
+      // 月总核心屏幕位（MoonLord 滤镜 UseTargetPosition=npc[398].Center，
+      // MoonLordScreenShaderData.cs:42-45——aimAtPlayer=false 支）
+      const core = this._moonLordCorePos(this._frameEntities);
       mono.draw(ctx, this.canvas, viewW, viewH, {
         x: (player.cx - cam.x) * z + viewW / 2,
         y: (player.cy - cam.y) * z + viewH / 2,
-      });
+      }, core ? {
+        x: (core.x - cam.x) * z + viewW / 2,
+        y: (core.y - cam.y) * z + viewH / 2,
+      } : undefined);
     }
+  }
+
+  /** 本帧实体列表快照（_moonLordCorePos 消费用；render() 每帧刷新） */
+  private _frameEntities: Entity[] = [];
+  /** Moon Lord Core（NPC 398）中心世界 px；null=不在场。
+   *  SceneState.cs:109 的 ClosestNPCPosition[398] 全场扫描等价（每帧线性
+   *  查找，实体列表 ≤ 数百——与视区扫描无涉，屏外核心也返回） */
+  private _moonLordCorePos(entities: Entity[]): { x: number; y: number } | null {
+    for (const e of entities) {
+      const en = e as Entity & { vanillaId?: number | null; dead?: boolean };
+      if (!en.dead && en.vanillaId === 398) return { x: (e as Enemy).cx, y: (e as Enemy).cy };
+    }
+    return null;
   }
 
   /** render() 世界段入口调用：切换 this.ctx → 世界层（返回 null = 逃生门关闭，
@@ -10591,6 +10680,15 @@ export class Renderer {
 
   private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock, entities: Entity[] = []) {
     if (!this.minimap) return;
+    // mapStyle 门（Main.cs:54941 else-if 链：mapStyle==1 才画小地图；0=隐藏/2=覆盖式
+    // 另走 drawMapOverlay）。隐藏时上报零矩形 + 清 UI 悬停（Game 小地图点击检测不命中）
+    if (this.mapStyle !== 1) {
+      this.minimapRect = { x: -1, y: -1, w: 0, h: 0 };
+      this.minimapUiHover = false;
+      return;
+    }
+    // 透明度钳（Main.cs:54961-54968：活值越界原地夹回 [0.01,1]）
+    this.minimapAlpha = Math.min(1, Math.max(0.01, this.minimapAlpha));
     const now = performance.now();
     if (now - this._lastMapFlush >= mapUpdateMinIntervalMs()) {
       this._lastMapFlush = now;
@@ -10620,15 +10718,17 @@ export class Renderer {
     const sy = Math.max(0, Math.min(world.h - viewTiles, Math.floor(py - viewTiles / 2)));
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    // 框底黑垫（MinimapFrame.DrawBackground：MinimapPosition=(ox+4,oy+4)，-6 → 244×244 黑 * mapMinimapAlpha）
-    ctx.fillStyle = '#000';
+    // 框底黑垫（MinimapFrame.DrawBackground：MinimapPosition=(ox+4,oy+4)，-6 → 244×244 黑 * mapMinimapAlpha :179）
+    ctx.fillStyle = `rgba(0,0,0,${this.minimapAlpha})`;
     ctx.fillRect(ox - 2, oy - 2, size + 4, size + 4);
     // 迷雾数据推进(★CPU 化遗漏:旧 drawFog 在 HUD 路径每帧调 getFogCanvas
     // 推进分带重建;改造后 ensureFogData 只在全屏地图被调,HUD 路径没人建
     // 迷雾 = 入场全图无雾(用户实报)。此处补推:每帧调一次,脏矩形/分带
     // 逻辑内建,首帧全雾,探索即增量清)
     this.ensureFogData(world);
-    // 地图内容+迷雾合成(CPU pix blit ≤512² 小窗 + 迷雾逐像素合成)
+    // 地图内容+迷雾合成(CPU pix blit ≤512² 小窗 + 迷雾逐像素合成)——
+    // 内容与头像层 × mapMinimapAlpha（b=255×α，Main.cs:54970 MapRenderer/heads 同乘）
+    ctx.globalAlpha = this.minimapAlpha;
     const hud = this.mmHudBlit(world, sx, sy, viewTiles);
     if (hud) ctx.drawImage(hud, ox, oy, size, size);
     // 头像层(原版 mapStyle1 支 :55140 + DrawNPCMapIcons2 :55602):玩家头/城镇 NPC 头/
@@ -10644,6 +10744,7 @@ export class Renderer {
       entities.filter((e) => e instanceof TownNPC) as TownNPC[],
       entities.filter((e) => e instanceof Enemy) as Enemy[], world);
     ctx.restore();
+    ctx.globalAlpha = 1;   // 框前景/按钮/时间文字不随 α（MinimapFrame.cs:182-188 恒 White）
     // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
     const { skin, tex } = this.minimapSkinAssets();
     const fx = ox + 4 + skin.fo[0], fy = oy + 4 + skin.fo[1];
@@ -11245,42 +11346,14 @@ export class Renderer {
       // 2D 回退:CPU ImageData → 开图期临时整幅画布(关闭即弃,GPU 只在开图期占用)。
       // ★dirty 版本门重灌:曾一次性建死——建画布时若小地图条带重建未完成(大世界
       // buildStriped 分帧),后续重建内容永远进不了这张画布 = 2D 兜底也残留空图
-      if (this.minimap?.image) {
-        const dirtyNow = this.minimap.dirtyChunks.size;
-        if (!this._fm2dMap) {
-          this._fm2dMap = document.createElement('canvas');
-          this._fm2dMap.width = this.minimap.w;
-          this._fm2dMap.height = this.minimap.h;
-          this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
-          this._fm2dDirtyAt = dirtyNow;
-        } else if (dirtyNow !== this._fm2dDirtyAt) {
-          this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
-          this._fm2dDirtyAt = dirtyNow;
-        }
-      }
+      this.fm2dMapEnsure();
       if (this._fm2dMap) {
         ctx.imageSmoothingEnabled = fm.zoom >= 1;
         ctx.drawImage(this._fm2dMap, cx0, cy0, mapW, mapH);
         ctx.imageSmoothingEnabled = false;
       }
       // 迷雾(2D 回退):同款临时画布 + 行带增量
-      const fogImg2 = this.ensureFogData(world);
-      if (fogImg2 && (!this._fm2dFog || this._fm2dFogRowSeen < this.fogRebuildRow)) {
-        if (!this._fm2dFog) {
-          this._fm2dFog = document.createElement('canvas');
-          this._fm2dFog.width = this.fogW;
-          this._fm2dFog.height = this.fogH;
-          this._fm2dFogRowSeen = 0;
-        }
-        const rows = Math.min(this.fogRebuildRow - this._fm2dFogRowSeen, this.fogH);
-        if (rows > 0) {
-          const region = new ImageData(this.fogW, rows);
-          const dst32 = new Uint32Array(region.data.buffer);
-          dst32.set(this.fogP32!.subarray(this._fm2dFogRowSeen * this.fogW, (this._fm2dFogRowSeen + rows) * this.fogW));
-          this._fm2dFog.getContext('2d')!.putImageData(region, 0, this._fm2dFogRowSeen);
-          this._fm2dFogRowSeen = this.fogRebuildRow;
-        }
-      }
+      this.fm2dFogEnsure(world);
       if (this._fm2dFog) {
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(this._fm2dFog, cx0, cy0, this._fm2dFog.width * 2 * fm.zoom, this._fm2dFog.height * 2 * fm.zoom);
@@ -11315,12 +11388,96 @@ export class Renderer {
     }
     // 操作提示
     this.drawPylonMapLayer(ctx, cx0, cy0, mouseX, mouseY);
+    // 地图 ping 图标层（PingMapLayer——MapIconOverlay 注册序 Pylons→Pings :349-351，
+    // 画在晶塔层之上）
+    this.drawMapPingLayer(ctx, cx0, cy0);
     ctx.font = '13px sans-serif';
     ctx.fillStyle = '#C8C0D8';
     ctx.textAlign = 'center';
     ctx.fillText(Lang.text('Mods.SandboxWorld.Map.Hint'), viewW / 2, viewH - 16);
   }
   private _mapInit = false;
+
+  /** 全幅地图 2D 画布（drawFullMap 2D 回退与 drawMapOverlay 共用；dirty 版本门重灌
+   *  ——建画布时若小地图条带重建未完成(大世界 buildStriped 分帧),后续重建内容
+   *  要能进得了这张画布,否则残留空图） */
+  private fm2dMapEnsure(): HTMLCanvasElement | null {
+    if (!this.minimap?.image) return null;
+    const dirtyNow = this.minimap.dirtyChunks.size;
+    if (!this._fm2dMap) {
+      this._fm2dMap = document.createElement('canvas');
+      this._fm2dMap.width = this.minimap.w;
+      this._fm2dMap.height = this.minimap.h;
+      this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
+      this._fm2dDirtyAt = dirtyNow;
+    } else if (dirtyNow !== this._fm2dDirtyAt) {
+      this._fm2dMap.getContext('2d')!.putImageData(this.minimap.image, 0, 0);
+      this._fm2dDirtyAt = dirtyNow;
+    }
+    return this._fm2dMap;
+  }
+
+  /** 全幅迷雾 2D 画布（同上共用；行带增量重建） */
+  private fm2dFogEnsure(world: World): HTMLCanvasElement | null {
+    const fogImg = this.ensureFogData(world);
+    if (!fogImg || !this.fogP32) return null;
+    if (!this._fm2dFog || this._fm2dFogRowSeen < this.fogRebuildRow) {
+      if (!this._fm2dFog) {
+        this._fm2dFog = document.createElement('canvas');
+        this._fm2dFog.width = this.fogW;
+        this._fm2dFog.height = this.fogH;
+        this._fm2dFogRowSeen = 0;
+      }
+      const rows = Math.min(this.fogRebuildRow - this._fm2dFogRowSeen, this.fogH);
+      if (rows > 0) {
+        const region = new ImageData(this.fogW, rows);
+        const dst32 = new Uint32Array(region.data.buffer);
+        dst32.set(this.fogP32.subarray(this._fm2dFogRowSeen * this.fogW, (this._fm2dFogRowSeen + rows) * this.fogW));
+        this._fm2dFog.getContext('2d')!.putImageData(region, 0, this._fm2dFogRowSeen);
+        this._fm2dFogRowSeen = this.fogRebuildRow;
+      }
+    }
+    return this._fm2dFog;
+  }
+
+  /** 覆盖式地图（mapStyle==2，Main.cs:54988-55018 + 合成段 :55049-55112）：
+   *  世界视图之上、界面层之下整屏铺开——scale 钳 [屏宽/世界宽, 16×zoom]（:54991-54998
+   *  下界=全图入屏、上界=与世界视图同 1 tile=16·zoom px），α=mapOverlayAlpha 钳
+   *  [0.01,1]（:54999-55006）；锚点=相机中心 tile 屏幕居中 + 10tile 地图边框偏移
+   *  （num6/num7=10，:55011-55018）。头像层同链（:55057-55112：num39=
+   *  min(1,(s·0.2·2+1)/3)×UIScale）。原版画序=NPC/图块之后玩家弹幕之前——本仓
+   *  世界单 pass，画在滤镜链之前（滤镜 EndCapture 语义保持在其上），
+   *  实体被覆盖为其与原版唯一可见差（报告登记）。 */
+  private drawMapOverlay(
+    ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player,
+    entities: Entity[], viewW: number, viewH: number, z: number,
+  ): void {
+    // 原地钳（:54991-55006——越界值直接改写活值，键步进的界由此保证）
+    this.mapOverlayScale = Math.max(viewW / world.w, Math.min(16 * z, this.mapOverlayScale));
+    this.mapOverlayAlpha = Math.min(1, Math.max(0.01, this.mapOverlayAlpha));
+    const s = this.mapOverlayScale;
+    const num = -(cam.x / TILE) * s + viewW / 2 + 10 * s;
+    const num2 = -(cam.y / TILE) * s + viewH / 2 + 10 * s;
+    const map = this.fm2dMapEnsure();
+    const fog = this.fm2dFogEnsure(world);
+    ctx.save();
+    ctx.globalAlpha = this.mapOverlayAlpha;
+    if (map) {
+      ctx.imageSmoothingEnabled = s >= 1;
+      ctx.drawImage(map, num, num2, world.w * s, world.h * s);
+    }
+    if (fog) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(fog, num, num2, this.fogW * 2 * s, this.fogH * 2 * s);
+    }
+    ctx.imageSmoothingEnabled = false;
+    this.drawMapHeads(ctx, player, Math.min(1, (s * 0.2 * 2 + 1) / 3) * 1.1,
+      (wx) => num + wx / TILE * s,
+      (wy) => num2 + wy / TILE * s,
+      entities.filter((e) => e instanceof TownNPC) as TownNPC[],
+      entities.filter((e) => e instanceof Enemy) as Enemy[], world);
+    ctx.restore();
+  }
   /** 2D 兜底地图画布最近重灌时的 minimap 脏块计数（变化才重灌） */
   private _fm2dDirtyAt = -1;
   /** GL 全屏地图合成判死时刻（0=健康；中心恒黑 3 帧置位 → 60s 内 2D 兜底） */
@@ -11455,6 +11612,36 @@ export class Renderer {
   private _lastPlayer: Player | null = null;
   /** 传送预选标记（Game 写入） */
   tpMark: { x: number; y: number } | null = null;
+  /** 地图 ping 存储（Main.Pings 语义；Game.mapPings 注入——drawMapPingLayer 消费） */
+  mapPings: import('../net/syncModules').MapPingStore | null = null;
+
+  /** 全屏地图 ping 图标层（Terraria.Map/PingMapLayer.cs 1:1）：
+   *  Images/UI/MapPing（UI_MapPing.png 18×90 = 18×18 × 5 帧行动画），
+   *  10fps 帧 = (存活秒 ×10) %5，居中对齐（Alignment.Center），15s 过期移除，
+   *  容量 100（满员丢弃——store 侧门）。位置 = tile 坐标 float（TriggerPing
+   *  换算语义,本仓地图无 10 tile 衬边故直接 (mouse-c0)/zoom） */
+  private drawMapPingLayer(ctx: CanvasRenderingContext2D, cx0: number, cy0: number) {
+    const store = this.mapPings;
+    if (!store || !store.pings.length) return;
+    const fm = this.fullMap;
+    const now = performance.now();
+    const icon = this.atlas ? this.atlas.vui('UI_MapPing.png') : null;
+    const FW = 18, FH = 18;
+    for (const p of store.live(now)) {
+      const frame = MapPingStore.frameOf(p, now);
+      const mx = cx0 + p.x * fm.zoom, my = cy0 + p.y * fm.zoom;
+      if (icon) {
+        ctx.drawImage(icon.img, icon.sx, icon.sy + frame * FH, FW, FH,
+          mx - FW / 2, my - FH / 2, FW, FH);
+      } else {
+        // 贴图未就绪兜底：绿色同心圆占位（懒加载次帧补上真图标）
+        ctx.strokeStyle = '#8CF5A9';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(mx, my, 6, 0, Math.PI * 2); ctx.stroke();
+        ctx.beginPath(); ctx.arc(mx, my, 2.5, 0, Math.PI * 2); ctx.stroke();
+      }
+    }
+  }
 
   /** 调试叠加层：碰撞盒高亮 + 状态信息 */
   private drawDebugOverlay(

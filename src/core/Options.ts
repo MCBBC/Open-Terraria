@@ -42,6 +42,11 @@ export interface OptionsData {
   resourceBarStyle: 'classic' | 'fancy'; // 资源条样式（PlayerResourceSetsManager2：'New' Fancy 金框为原版 1.4.4+ 默认 / 'Default' Classic 朴素）
   /** 小地图边框皮肤（MinimapFrameManager：config.json "MinimapFrame" 字符串键，默认 Default） */
   minimapFrame: MinimapFrameSkin;
+  /** 小地图透明度（Main.mapMinimapAlpha，Main.cs:892 默认 1；MapAlphaUp/Down 键
+   *  ±0.015 步进，DrawMap :54961-54968 钳 [0.01,1]。原版不持久化——本仓 Web 便利档持久化） */
+  mapMinimapAlpha: number;
+  /** 覆盖式地图透明度（Main.mapOverlayAlpha，Main.cs:896 默认 0.35；同上钳/步进） */
+  mapOverlayAlpha: number;
   /** 玩家对决开关（Player.hostile 的持久化镜像——原版 hostile 纯会话态不存档;
    *  本仓单机无进服概念,进游戏时从 options 灌入 Player.hostile,便于常开） */
   pvpEnabled: boolean;
@@ -145,6 +150,8 @@ export class OptionsStore {
     swayInWind: true,
     resourceBarStyle: 'fancy',
     minimapFrame: 'Default',
+    mapMinimapAlpha: 1,      // Main.cs:892
+    mapOverlayAlpha: 0.35,   // Main.cs:896
     keybinds: {},
     reversedUpDownArmorSetBonuses: false,   // Main.cs:253
     doorOpeningPreference: 'enabled',       // DoorOpeningHelper.cs:216
@@ -193,6 +200,15 @@ export class OptionsStore {
       // (SelectionHolder.SetActiveFrame(string) 未命中 → Options.Values.First() = Default)
       if (!(MINIMAP_FRAME_SKINS as readonly string[]).includes(this.data.minimapFrame)) {
         this.data.minimapFrame = 'Default';
+      }
+      // 地图透明度钳 [0.01,1]（Main.cs:54961-54968/:54999-55006 DrawMap 原地钳同款；
+      // 旧档无键走默认，NaN/越界回默认）
+      for (const k of ['mapMinimapAlpha', 'mapOverlayAlpha'] as const) {
+        const def = k === 'mapMinimapAlpha' ? 1 : 0.35;
+        if (typeof this.data[k] !== 'number' || !Number.isFinite(this.data[k])) {
+          this.data[k] = def;
+        }
+        this.data[k] = Math.min(1, Math.max(0.01, this.data[k]));
       }
       // 键位表清洗（未知 action/非字符串项剔除；空表=全默认）
       this.data.keybinds = sanitizeKeybinds(this.data.keybinds);

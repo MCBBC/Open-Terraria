@@ -208,7 +208,7 @@ import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bes
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
-import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
+import { Renderer, Particle, DamageNumber, Minimap, cycleMapStyle, stepMapAlpha } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
@@ -1682,15 +1682,49 @@ export class Game implements GameHooks {
     return { x: proxy.cx + proxy.netOffX, y: proxy.y + proxy.h + proxy.netOffY - 21 };
   }
 
-  /** HandleSpectatingControls（:16931-16978）tick 半边：死亡退出 + 鼠标左右切换
-   *  （原版 JustPressed.MouseLeft/MouseRight :16948-16955）+ 目标失效回退。
-   *  键位半边（Space/Escape 退出、←/→ 切换）走 keydownHandlers（事件天然边沿，
-   *  Input 无 keyEdge API）。手持 5644 切换播 Item197/198（:16961-16971）；
-   *  失败的 NoMoreTargets 相机推挤未实装（屏震近似暂略）。观战期间本方法吞掉
-   *  mouseDown/rightDown = 冻结使用/交互输入（原版观战中 control* 不入玩家模拟） */
+  /** CanDeathSpectate（Player.cs:3933-3943）：dead && !ghost && deadTime ≥
+   *  DeadSpectatingLockoutTime(60)（:1526）。本仓映射：deadTime = respawnTimer
+   *  （死亡起每 tick 递增、respawnPlayer 归零——同源计时）、ghost = isGhostPhase
+   *  （硬核幽灵相）。适用域 = 联机（原版 UpdateDead 尾 :16921 Main.netMode==1 门；
+   *  单机死亡走死亡画面无观战——SpectateNextPlayer :17044 netMode==0 恒 false） */
+  private canDeathSpectate(): boolean {
+    return !!this.net?.active && this.player.dead
+      && !this.player.isGhostPhase(this.world)
+      && this.player.respawnTimer >= 60;
+  }
+
+  /** HandleSpectatingControls（:16931-16978）tick 半边：死亡观战（includeSelf 自机
+   *  分支）+ 鼠标左右切换（原版 JustPressed.MouseLeft/MouseRight :16948-16955）+
+   *  目标失效回退。键位半边（Space/Escape 退出、←/→ 切换）走 keydownHandlers
+   *  （事件天然边沿，Input 无 keyEdge API）。手持 5644 切换播 Item197/198
+   *  （:16961-16971，!dead 门——死亡态不播）；失败的 NoMoreTargets 相机推挤未实装
+   *  （原版同样 !dead 门，屏震近似暂略）。观战期间本方法吞掉 mouseDown/rightDown
+   *  = 冻结使用/交互输入（原版观战中 control* 不入玩家模拟）。
+   *  死亡分支（UpdateDead 尾 :16920-16924 netMode==1 && CanDeathSpectate →
+   *  HandleSpectatingControls）：锁定期(<60t)/硬核幽灵不接管——期间维持 KillMe
+   *  :38302 的清观战（幂等）；解锁后照常鼠标环选，includeSelf=dead 语义见
+   *  spectateCycle；spectatingSlot=-1（自尸镜头）时同样接管（原版不看 spectating
+   *  值，HandleSpectatingControls 无条件跑） */
   private handleSpectatingControls() {
     const inp = this.input;
-    if (this.player.dead) { this.setSpectating(-1); return; }             // Ghost() 清观战（:6349）
+    if (this.player.dead) {
+      if (!this.canDeathSpectate()) {
+        this.setSpectating(-1);   // KillMe :38302 死亡清观战 / Ghost() :6349（幂等）
+        return;
+      }
+      let step = 0;
+      if (inp.mouseDown) { step++; inp.mouseDown = false; }
+      if (inp.rightDown) { step--; inp.rightDown = false; }
+      if (step !== 0) this.spectateCycle(step);
+      // 目标彻底失效（死亡滞留超窗/离场）→ 换下一个；全空 → 回自尸（-1）。
+      // includeSelf 恒 false：回退是服务器半 SpectateNextClosestPlayer（:24424-24427）
+      // 的本端近似，ClosestSpectatablePlayerTo（:17023-17037）恒排除 whoAmI
+      if (this.spectatingSlot >= 0 && this.spectatingSlot !== this.net?.mySlot
+        && !this.canSpectateNet(this.spectatingSlot) && !this.spectateNextPlayer(1, false)) {
+        this.setSpectating(-1);
+      }
+      return;
+    }
     let step = 0;
     if (inp.mouseDown) { step++; inp.mouseDown = false; }
     if (inp.rightDown) { step--; inp.rightDown = false; }
@@ -1702,14 +1736,19 @@ export class Game implements GameHooks {
     }
   }
 
-  /** HandleSpectatingControls 切换段（:16960-16971）：SpectateNextPlayer + 手持
-   *  5644 时 Item197（成功）/Item198（失败）——键位（keydownHandlers）与鼠标
+  /** HandleSpectatingControls 切换段（:16960-16971）：SpectateNextPlayer(num, dead)
+   *  ——★includeSelf=dead（:16960）：死亡态环选含自机，环一圈经 mySlot 时停回自尸
+   *  镜头（setSpectating 把 mySlot 归一为 -1）；存活态（占卜球 5644 观战）跳过自机
+   *  ——自己不是观战目标。手持 5644 时 Item197（成功）/Item198（失败），原版
+   *  !dead 门（:16961/:16968）死亡态不播——键位（keydownHandlers）与鼠标
    *  （tick 半边）两路共用（原版音效块在 HandleSpectatingControls 内，两路都播） */
   private spectateCycle(step: number): boolean {
-    const ok = this.spectateNextPlayer(step, false);
-    const held = this.player.inv.heldItem();
-    if (held && viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 5644) {
-      this.playSfxFile(ok ? 'Item_197' : 'Item_198');
+    const ok = this.spectateNextPlayer(step, this.player.dead);
+    if (!this.player.dead) {
+      const held = this.player.inv.heldItem();
+      if (held && viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 5644) {
+        this.playSfxFile(ok ? 'Item_197' : 'Item_198');
+      }
     }
     return ok;
   }
@@ -1977,6 +2016,11 @@ export class Game implements GameHooks {
   private _mapPressX = 0;
   private _mapPressY = 0;
   private _tpTarget: { x: number; y: number } | null = null;
+  /** 地图双击检测（Main.cs:54926-54931 _lastPingMouseDownTime/_lastPingMousePosition：
+   *  0.5s 内两次按压位移 <2px → TriggerPing） */
+  private _lastMapClickAt = 0;
+  private _lastMapClickX = 0;
+  private _lastMapClickY = 0;
   // ---- 传送晶塔（Player.cs:31707-31747 / TeleportPylonsSystem.cs）----
   /** 已放置晶塔缓存（scanPylons 整表扫——右键晶塔/放置/破坏时刷新；原版
    *  UpdatePylonsListAndBroadcastChanges 每 10s 扫 TileEntity 表的等价） */
@@ -2453,24 +2497,33 @@ export class Game implements GameHooks {
         }
       }
       // 观战键位半边（HandleSpectatingControls :16933-16955——keydown 天然边沿；
-      // 退出=Jump/Inv 族 → Space/Escape；切换=Left/Right（音效走 spectateCycle 共用段））
-      if (this.spectatingSlot >= 0 && this.player) {
+      // 退出=Jump/Inv 族 → Space/Escape；切换=Left/Right（音效走 spectateCycle 共用段）。
+      // 死亡观战（CanDeathSpectate）下 spectatingSlot=-1（自尸镜头）同样接管——
+      // 原版 UpdateDead 尾无条件跑 HandleSpectatingControls，环选可从自尸起跳；
+      // 死亡态退出键 setSpectating(-1) 与现状同值 = 无操作（:16937 幂等））
+      if ((this.spectatingSlot >= 0 || this.canDeathSpectate()) && this.player) {
         if (isBound('Jump', code) || isBound('Inventory', code)) this.setSpectating(-1);
         else if (isBound('Right', code)) this.spectateCycle(1);
         else if (isBound('Left', code)) this.spectateCycle(-1);
       }
-      // 缩放调节：全屏地图打开 → MapZoomIn/Out 缩地图（原版地图键族语义，步进与
-      // 滚轮同 0.85/1.18）；关闭 → 全部回落视野缩放（迁移前 Equal/NumpadAdd 双键
-      // 均缩视野的行为保持）
-      if (this.renderer.fullMap.open) {
-        if (isBound('MapZoomIn', code)) {
-          this.renderer.zoomFullMapAt(this.renderer.fullMap.zoom * 1.18, this.input.mouseX, this.input.mouseY);
-        } else if (isBound('MapZoomOut', code)) {
-          this.renderer.zoomFullMapAt(this.renderer.fullMap.zoom * 0.85, this.input.mouseX, this.input.mouseY);
+      // ---- 地图键族（Player.cs:24596-24653）----
+      // MapStyle（Tab）循环地图样式 0隐藏↔1小地图↔2覆盖式（:24636-24648 mapStyle++
+      // >2 回 0 + 音效 12）；全屏地图打开时不响应（原版同段在 mapFullscreen 分支之外，
+      // :24585-24595）。按住电平（MapZoom/MapAlpha 连续步进）归 updateMapKeys 每 tick。
+      if (!this.renderer.fullMap.open && this.player && isBound('MapStyle', code)) {
+        this.renderer.mapStyle = cycleMapStyle(this.renderer.mapStyle) as 0 | 1 | 2;
+        this.sfx.play('menuTick', 1);   // SoundID 12（:24640）
+      }
+      // 缩放键边沿：ViewZoom（引擎扩展键）恒缩视野；MapZoom 在样式 0（地图隐藏）时
+      // 回落视野缩放（迁移前 Equal/NumpadAdd 双键均缩视野的行为保持）——样式 1/2
+      // 由 updateMapKeys 电平接管（小地图/覆盖式缩放，勿在边沿重复步进）
+      if (!this.renderer.fullMap.open) {
+        if (isBound('ViewZoomIn', code)) this.setZoom(this.camera?.zoomTarget + 0.15);
+        if (isBound('ViewZoomOut', code)) this.setZoom(this.camera?.zoomTarget - 0.15);
+        if (this.renderer.mapStyle === 0) {
+          if (isBound('MapZoomIn', code)) this.setZoom(this.camera?.zoomTarget + 0.15);
+          if (isBound('MapZoomOut', code)) this.setZoom(this.camera?.zoomTarget - 0.15);
         }
-      } else {
-        if (isBound('ViewZoomIn', code) || isBound('MapZoomIn', code)) this.setZoom(this.camera?.zoomTarget + 0.15);
-        if (isBound('ViewZoomOut', code) || isBound('MapZoomOut', code)) this.setZoom(this.camera?.zoomTarget - 0.15);
       }
       // MapFull（M）：切换全屏地图（原版 cMapFull；开图对焦主角复用小地图点击链）
       if (isBound('MapFull', code) && this.player && !this.input.uiBlocking) {
@@ -3030,6 +3083,7 @@ export class Game implements GameHooks {
     this.scanTriggerTiles();
     this.lighting = new LightingEngine(w);
     this.renderer.lighting = this.lighting; // 岩浆瀑布 AddLight 等渲染端光源注入
+    this.renderer.mapPings = this.mapPings; // 地图 ping 图标层（PingMapLayer）
     this.liquid = new LiquidSim(w);
     this.liquid.setRuntimeCycles();   // Main.cs:12240-12243 运行期画质档（生成期保持 ReInit=10）
     // module0 液体上报链（原版 Liquid.NetSendLiquid）：模拟变化（AddWater/DelWater
@@ -3965,7 +4019,24 @@ export class Game implements GameHooks {
           // 地图绘制：mapW = world.w * zoom（1 tile = zoom 像素）——直接除 zoom 得 tile 坐标
           const tx = Math.floor((inp.mouseX - cx0) / fm.zoom);
           const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
-          if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
+          // 地图 ping（Main.cs:54926-54931 双击检测：0.5s 内两次按压位移 <2px →
+          // TriggerPing）。与两点传送共存：快速双击=ping（取消预选），慢速两次
+          // 点击=传送确认——本仓传送是自研扩展，原版全屏地图双击槽位本就归 ping
+          const nowMs = performance.now();
+          if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h
+            && nowMs - this._lastMapClickAt < 500
+            && Math.hypot(inp.mouseX - this._lastMapClickX, inp.mouseY - this._lastMapClickY) < 2) {
+            this._lastMapClickAt = nowMs;
+            this._lastMapClickX = inp.mouseX;
+            this._lastMapClickY = inp.mouseY;
+            this.triggerMapPing(
+              (inp.mouseX - cx0) / fm.zoom, (inp.mouseY - cy0) / fm.zoom);
+            this._tpTarget = null;
+            this.renderer.tpMark = null;
+          } else if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
+            this._lastMapClickAt = nowMs;
+            this._lastMapClickX = inp.mouseX;
+            this._lastMapClickY = inp.mouseY;
             // 晶塔图标优先（TeleportPylonsMapLayer.cs:77-127：点中图标 → 门禁 → 传送/
             // 失败文案；图标悬停时原版取消普通选点 cancelWormHole :97）
             if (this.tryPylonMapTeleport(tx, ty)) {
@@ -4005,8 +4076,11 @@ export class Game implements GameHooks {
     }
     if (!inp.mouseDown) this._annoLatch = false;
     // ---- 观战控制（tick 半边）：吞鼠标输入 + 目标失效回退（键位半边在 keydownHandlers）；
-    //      观战期间移动输入冻结（原版 spectating>=0 时 control* 不入玩家模拟）----
-    if (this.spectatingSlot >= 0) this.handleSpectatingControls();
+    //      观战期间移动输入冻结（原版 spectating>=0 时 control* 不入玩家模拟）。
+    //      死亡观战（UpdateDead 尾 :16920-16924）在 spectatingSlot=-1（自尸镜头）
+    //      时同样接管——原版不看 spectating 值无条件跑（死亡玩家本无移动输入，
+    //      下方冻结段不适用）----
+    if (this.spectatingSlot >= 0 || this.canDeathSpectate()) this.handleSpectatingControls();
     if (this.spectatingSlot >= 0) {
       player.inputX = 0;
       player.inputJump = false;
@@ -4488,6 +4562,8 @@ export class Game implements GameHooks {
 
     // ---- 智能光标（每帧 lookup；结果供 updateUse 覆盖目标格 + 渲染黄框） ----
     this.updateSmartCursor();
+    // ---- 地图键族电平（Player.cs:24596-24653：按住连续步进，详见 updateMapKeys） ----
+    this.updateMapKeys();
     // ---- 指针物品/交互图标（DrawInterface_40 数据面）：五字段重置 → 悬停扫描 →
     //      余辉验证（ItemIconCacheVerification :45929 每帧）。绘制在 Renderer 尾段 ----
     this.tickCursorIcon();
@@ -6567,6 +6643,45 @@ export class Game implements GameHooks {
    * Ctrl 按下沿翻转（Toggle）/跟随（Hold）；切换播音效 12（menuTick）。
    * 必须在 updateUse 之前跑——同帧 lookup 结果即被挖掘/放置路径覆盖 tx/ty。
    */
+  /** 地图键族电平（Player.cs:24596-24653 每帧消费侧，按住连续步进）：
+   *  全屏地图 → MapZoomIn/Out ×1.05/0.95（:24587-24594；原版直乘 mapFullscreenScale、
+   *  mapFullscreenPos 不动 = 屏幕中心锚定）；样式 1 小地图 → ×1.025/0.975（:24600-24607
+   *  钳 0.2..3）+ MapAlphaUp/Down ±0.015（:24608-24615，钳界在 Renderer 绘制侧同折）；
+   *  样式 2 覆盖式 → ×1.05/0.95 + ±0.015（:24619-24634）。样式 0（隐藏）无地图可调。
+   *  uiBlocking 豁免：原版此段在 Player.Update 无 playerInventory 门——背包打开时
+   *  地图键照常生效（故不走 downAction 的 uiBlocking 路径）。α 持久化走 options.set
+   *  （落盘自带 400ms 防抖；emit 侧仅音量/UIScale 四赋值，60t/s 持按安全）。 */
+  private updateMapKeys(): void {
+    const inp = this.input, r = this.renderer;
+    if (!inp || !this.world) return;
+    const held = (a: Parameters<typeof bindsOf>[0]) =>
+      bindsOf(a).some((c) => inp.keys.has(c) || inp.touchKeys.has(c));
+    if (r.fullMap.open) {
+      const viewW = r.canvas.width, viewH = r.canvas.height;
+      if (held('MapZoomIn')) r.zoomFullMapAt(r.fullMap.zoomTarget * 1.05, viewW / 2, viewH / 2);
+      else if (held('MapZoomOut')) r.zoomFullMapAt(r.fullMap.zoomTarget * 0.95, viewW / 2, viewH / 2);
+      return;
+    }
+    if (r.mapStyle === 1) {
+      if (held('MapZoomIn')) r.minimapZoom = Math.min(3, r.minimapZoom * 1.025);      // :24600-24602
+      if (held('MapZoomOut')) r.minimapZoom = Math.max(0.2, r.minimapZoom * 0.975);   // :24603-24606
+      if (held('MapAlphaUp') || held('MapAlphaDown')) {                               // :24608-24615
+        r.minimapAlpha = stepMapAlpha(r.minimapAlpha, held('MapAlphaUp') ? 1 : -1);
+        void options.set('mapMinimapAlpha', r.minimapAlpha);
+      }
+    } else if (r.mapStyle === 2) {
+      const z = this.camera?.zoom ?? 1;
+      if (held('MapZoomIn')) r.mapOverlayScale = Math.min(16 * z, r.mapOverlayScale * 1.05);   // :24619-24621
+      if (held('MapZoomOut')) {                                                                 // :24622-24625
+        r.mapOverlayScale = Math.max(r.canvas.width / this.world.w, r.mapOverlayScale * 0.95);
+      }
+      if (held('MapAlphaUp') || held('MapAlphaDown')) {                               // :24627-24634
+        r.mapOverlayAlpha = stepMapAlpha(r.mapOverlayAlpha, held('MapAlphaUp') ? 1 : -1);
+        void options.set('mapOverlayAlpha', r.mapOverlayAlpha);
+      }
+    }
+  }
+
   private updateSmartCursor() {
     const inp = this.input;
     const sc = this.smartCursor;
@@ -15354,12 +15469,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 传送——客户端权威移动模型），拒 → sub3 fail（请求端 ServerMessage 文案）
       if (!this.net?.policy.isHost) return;
       const target: TeleportPylonInfo = { x: msg.x, y: msg.y, type: msg.type };
-      const rp = this.net.players.get(msg.requesterSlot);
+      const requesterSlot = msg.requesterSlot ?? 0;   // S→房主中继帧必带；缺省 0 兜底
+      const rp = this.net.players.get(requesterSlot);
       const ptx = Math.floor((rp?.x ?? 0) / TILE), pty = Math.floor((rp?.y ?? 0) / TILE);
       const check = this.pylonGateCheck(target, ptx, pty);
       this.net.sendPylonMessage({
         sub: PylonSub.TeleportResult,
-        targetSlot: msg.requesterSlot,
+        targetSlot: requesterSlot,
         x: msg.x, y: msg.y, type: msg.type,
         ok: check.ok,
         fail: check.ok ? null : check.fail,
@@ -21275,6 +21391,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 硬核角色已消亡（Player.cs:16894 difficulty==2 死亡后 ghost=true 不再重生；
     // 本仓最小集 = hardcoreDead 标记 → 不允许重生，死亡画面停留）
     if (p.appearance?.hardcoreDead) return;
+    // Spawn 清观战（Player.cs:37186-37187）：复活即回自机镜头——死亡观战遗留的
+    // spectatingSlot 不清会带着冻结输入的存活观战态重生（msg150 focus(-1)
+    // 同时把服务器 AOI 焦点还原到自身，原版由双端各自 Spawn 清字段等价）
+    this.setSpectating(-1);
     // Player.Spawn :37223-37235：pvpDeath → 满血 + immuneTime=300（5s）并清标记；
     // 否则 ReviveFromDeath 180t（Player.cs:37229-37235;旧 90t/1.5s）
     const wasPvpDeath = p.lastPvpDeath;

@@ -245,7 +245,10 @@ export class BestiaryTracker {
   /** NPCWasNearPlayerTracker.RegisterWasNearby（首遇置位即可，幂等）。
    *  返回是否首次（联机 Sight 首遇才广播——原版 tracker 内 flag 门 :30-38） */
   registerSight(netId: number): boolean {
-    return this.sights.add(bestiaryCreditId(netId));
+    const id = bestiaryCreditId(netId);
+    if (this.sights.has(id)) return false;
+    this.sights.add(id);
+    return true;
   }
 
   /** SetWasSeenDirectly（:40-46）——module4 下发/进房补发直写 */
@@ -255,7 +258,10 @@ export class BestiaryTracker {
 
   /** NPCWasChatWithTracker.RegisterChatStartWith（幂等）。返回是否首次（同上） */
   registerChat(netId: number): boolean {
-    return this.chats.add(bestiaryCreditId(netId));
+    const id = bestiaryCreditId(netId);
+    if (this.chats.has(id)) return false;
+    this.chats.add(id);
+    return true;
   }
 
   /** SetWasChatWithDirectly（:21-27）——module4 下发/进房补发直写 */

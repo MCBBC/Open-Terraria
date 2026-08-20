@@ -162,12 +162,17 @@ const IS_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 61
 /** WorldGen.CanKillTile(i,j)（cs:62260+,162 薄冰语境可达子集）：
  *  上邻树干族（IsATreeTrunk/323,带帧位例外）→ false;wall350 → false;
  *  Boulders+CheckBoulderChest / 门/祭坛等族在 162 语境不可达,略。 */
+/** cs:62308-62316 上邻保护族（switch：tile.type != type → false）——箱 21/祭坛 26/
+ *  72 仙人掌籽? /77 席地垫? /88 梳妆台/467 宝箱变体/488 倒木（"在 162 语境不可达"
+ *  论断对箱下金币堆不成立——12345 #99 (2447,588) 箱下 162 vanilla 存活实证） */
+const UP_PROTECT_FAMILY = new Set([21, 26, 72, 77, 88, 467, 488]);
 function canKillTile(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   if (st.wall[i] === 350) return false;
   const up = st.idx(x, y - 1);
   if (st.flags[up]) {
     const sh = SHEET_OF[st.type[up]] ?? -1;
+    if (UP_PROTECT_FAMILY.has(sh) && SHEET_OF[st.type[i]] !== sh) return false;
     if (IS_TREE_TRUNK.has(sh) || sh === 323) {
       // 帧位例外（cs:62282-84：fx∈{66,88} 的侧枝列与 fy≥198 干身放行）
       const fx = st.frameX[up]!, fy = st.frameY[up]!;

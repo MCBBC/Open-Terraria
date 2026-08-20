@@ -26,6 +26,8 @@ import {
   readMapPing, writeMapPing,
   readBestiaryModule, writeBestiaryModule, type BestiaryNetEvent,
   readPylonModule, writePylonModule, type PylonNetMsg,
+  readParticleModule, writeParticleModule, type ParticleSettings,
+  readAmbienceModule,
   readPingProbe, writePingProbeEcho,
   type LiquidCell,
 } from './syncModules';
@@ -160,6 +162,11 @@ export interface ClientNetHooks {
   onPylonMessage?: (msg: PylonNetMsg) => void;
   /** module2 地图 ping 到达（他端标记；Game 入 Pings store→渲染层 15s 动画） */
   onMapPing?: (x: number, y: number) => void;
+  /** module8 编排粒子到达（Game 侧按 type 派发本地视觉；未知型忽略） */
+  onParticleOrchestra?: (type: number, settings: ParticleSettings) => void;
+  /** module100 天空氛围到达（服务器 AmbienceServer 掷点；Game 解析锚玩家位 →
+   *  SkyRenderer.spawnAmbientNet 同 seed 重放） */
+  onAmbienceSpawn?: (playerSlot: number, seed: number, type: number) => void;
   /** msg203 全房 RTT 表到达（玩家列表面板数据源） */
   onPingTable?: (table: Array<{ slot: number; rttMs: number }>) => void;
 }
@@ -554,6 +561,18 @@ export class ClientNet {
           // HandleTeleportRequest——本仓 sub3 回执 = 传送批准/失败文案）
           const msg = readPylonModule(r);
           if (msg) this.hooks.onPylonMessage?.(msg);
+        } else if (moduleId === NetModule.Particles) {
+          // module8 编排粒子（原版 NetParticlesModule.Deserialize :17-31：客户端
+          // SpawnParticlesDirect——视觉派发在 Game 侧按 type 走,未知型静默忽略）
+          const m = readParticleModule(r);
+          if (Number.isFinite(m.settings.posX) && Number.isFinite(m.settings.posY)) {
+            this.hooks.onParticleOrchestra?.(m.type, m.settings);
+          }
+        } else if (moduleId === NetModule.Ambience) {
+          // module100 天空氛围（原版 NetAmbienceModule.Deserialize :21-39：非 dedServ
+          // → AmbientSky.Spawn(player, type, seed)；锚玩家位由 Game 从镜像表解析）
+          const m = readAmbienceModule(r);
+          this.hooks.onAmbienceSpawn?.(m.playerSlot, m.seed, m.type);
         }
         return;
       }
@@ -1089,6 +1108,12 @@ export class ClientNet {
   /** 晶塔消息（房主差集广播 sub0/1 · 访客传送请求 sub2 · 房主门禁回执 sub3） */
   sendPylonMessage(msg: PylonNetMsg) {
     this.send(writePylonModule(msg));
+  }
+
+  /** 编排粒子上行（原版 BroadcastOrRequestParticleSpawn :77-88：本地已直生,净额
+   *  只发服务器——服务器 Broadcast 排除发送者；装饰类 prio=1 由服务器侧定） */
+  sendParticleOrchestra(type: number, settings: ParticleSettings) {
+    this.send(writeParticleModule(type, settings));
   }
 
   // ================= M9 旅程力量/研究（msg82 module5/6/9；net/journeySync.ts） =================

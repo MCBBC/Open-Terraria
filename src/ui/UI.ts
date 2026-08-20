@@ -131,6 +131,7 @@ import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventor
 import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import { openResearchPanel, closeResearchPanel } from './ResearchUI';
 import { openJourneyPowersPanel } from './JourneyPowersUI';
+import { openPlayerListPanel } from './PlayerListPanel';
 import { openEmoteMenu } from './EmoteMenu';
 import { CharCreation } from './CharCreation';
 import type { Appearance } from '../player/Appearance';
@@ -378,6 +379,30 @@ export interface CompatReport {
   worldName: string; wldVersion: number; size: [number, number];
   tilesDegraded: CompatEntry[]; tilesCleared: CompatEntry[]; itemsSkipped: CompatEntry[];
 }
+
+// ---- PvP 背包快切钮（DrawPVPIcons Main.cs:42074-42195 1:1） ----
+// 布局：PvP 剑图标（UI_PVP_0，4 列×6 行 38px 帧——列=hostile?2:0 + hover?1:0、行=队伍，
+// :42094/:42112-42113）+ 其下 2 列×3 行 20px 队伍格（:42129 x=num2+i%2*20 / y=num3+i/2*20，
+// 图标 UI_PVP_1 六帧 18×18 裁 16 宽 :42185-42192，悬停高亮 UI_PVP_2 20×20 @-2 :42188）。
+// 点击：teamCooldown=300t（:42106/:42171 teamCooldownLen Main.cs:1026）+ 音效 12（MenuTick）
+// + hostile 翻转/team=i；原版发 msg30/157，本仓走 msg13 快速通道（ClientNet.sendPvpState）。
+// 文案键：UI.PvpIcon_{Active,Inactive}（:42100）+ UI.TeamIcon{Name}_{Active,Inactive}（:42160，
+// Name ∈ None/Red/Green/Blue/Yellow/Pink——第 5 队 ID=Purple 但文案键历史遗留为 Pink，
+// PlayerTeamID.cs:20）。TeamChangeAllowed 恒 true（Player.cs:4303-4306，misc[84] 拒绝支死码）。
+
+/** 队伍钮序（:42127 for i<6）+ 文案键名（:42141-42159 switch） */
+export const PVP_TEAM_BUTTONS: readonly { team: number; name: string }[] = [
+  { team: 0, name: 'None' }, { team: 1, name: 'Red' }, { team: 2, name: 'Green' },
+  { team: 3, name: 'Blue' }, { team: 4, name: 'Yellow' }, { team: 5, name: 'Pink' },
+];
+
+/** PvP 剑帧（UI_PVP_0 :42094/:42112-42113）：col=(hostile?2:0)+(hover?1:0)、row=team(0-5) */
+export function pvpIconFrame(hostile: boolean, hover: boolean, team: number): readonly [number, number] {
+  return [(hostile ? 2 : 0) + (hover ? 1 : 0), Math.max(0, Math.min(5, team))];
+}
+
+/** 队伍切换冷却（teamCooldownLen=300t × 1000/60ms，:1026；冷却期无悬停提示/不可点） */
+export const PVP_COOLDOWN_MS = 5000;
 
 export class UI {
   devMode = false; // 开发者模式：进世界时全道具入包 + 出生点展示区
@@ -2053,7 +2078,14 @@ export class UI {
   private eqPageBtns: HTMLButtonElement[] = [];
   /** 背包侧"堆叠至附近宝箱"钮（ChestStack：左键堆叠/右键循环模式；开箱时隐藏） */
   private quickStackBtn!: HTMLButtonElement;
+  /** 多人玩家列表入口（联机态显示；面板本体在 PlayerListPanel.ts） */
+  private playerListBtn: HTMLButtonElement | null = null;
   private equipPage = 0;
+  /** PvP 剑钮 + 6 队伍钮（DrawPVPIcons Main.cs:42074；refreshPvpButtons 刷帧/提示） */
+  private pvpSwordBtn!: HTMLButtonElement;
+  private pvpTeamBtns: HTMLButtonElement[] = [];
+  /** 队伍/PvP 切换冷却截止（teamCooldown 300t 的墙钟等价；:42106/:42171） */
+  private pvpCooldownUntil = 0;
 
   /** 页签切换（原版 EquipPage 0=装备 2=杂项；DrawInventory :40614） */
   setEquipPage(page: number): void {
@@ -2064,6 +2096,54 @@ export class UI {
       b.style.borderColor = k === page ? '#ffd75a' : '#6a5a8a';
     });
     this.refreshAll();
+  }
+
+  // ---- PvP/队伍快切钮行为（DrawPVPIcons Main.cs:42074-42195） ----
+
+  /** 刷新剑帧/队伍格悬停高亮/提示文案（帧式 :42094/:42112-42113，冷却期无提示 :42099/:42135） */
+  refreshPvpButtons(): void {
+    if (!this.pvpSwordBtn || !this.game?.player) return;
+    const p = this.game.player;
+    const cool = performance.now() < this.pvpCooldownUntil;
+    const swordHover = !cool && this.pvpSwordBtn.matches(':hover');
+    const [col, row] = pvpIconFrame(p.hostile, swordHover, p.team);
+    // background-position 百分比 = col/(4-1)、row/(6-1)（38px 帧裁 36×37）
+    this.pvpSwordBtn.style.backgroundPosition = `${(col / 3) * 100}% ${(row / 5) * 100}%`;
+    this.pvpSwordBtn.title = cool ? '' : Lang.text(p.hostile ? 'UI.PvpIcon_Active' : 'UI.PvpIcon_Inactive');
+    PVP_TEAM_BUTTONS.forEach((tb, k) => {
+      const cell = this.pvpTeamBtns[k];
+      const hover = !cool && cell.matches(':hover');
+      // 悬停高亮 = UI_PVP_2 垫底（:42186-42188）；提示 = TeamIcon{Name}_{Active|Inactive}（:42160）
+      cell.style.backgroundImage = hover ? 'url(sprites/vanilla-ui/UI_PVP_2.png)' : 'none';
+      cell.title = cool ? '' : Lang.text(`UI.TeamIcon${tb.name}_${p.team === tb.team ? 'Active' : 'Inactive'}`);
+    });
+  }
+
+  /** PvP 剑点击：hostile 翻转 + 冷却 300t + 音效 12（:42104-42110）。
+   *  原版 SendData(30)；本仓 msg13 快速通道（ClientNet.sendPvpState）+ options 持久化
+   *  （Settings 页 PvP 行同款链）。 */
+  private pvpToggleHostile(): void {
+    const p = this.game.player;
+    if (performance.now() < this.pvpCooldownUntil) return;   // teamCooldown 门
+    this.pvpCooldownUntil = performance.now() + PVP_COOLDOWN_MS;
+    this.game.sfx.play('menuTick', 1);                       // SoundID 12（:42107）
+    p.hostile = !p.hostile;
+    void options.set('pvpEnabled', p.hostile);
+    this.game.net?.sendPvpState();
+    this.refreshPvpButtons();
+  }
+
+  /** 队伍格点击：team=i + 冷却 + 音效 12（:42163-42182）。TeamChangeAllowed 恒 true
+   *  （Player.cs:4303-4306）——misc[84] 拒绝文案支为死码不入。原版 SendData(157)。 */
+  private pvpSetTeam(team: number): void {
+    const p = this.game.player;
+    if (p.team === team || performance.now() < this.pvpCooldownUntil) return;
+    this.pvpCooldownUntil = performance.now() + PVP_COOLDOWN_MS;
+    this.game.sfx.play('menuTick', 1);                       // SoundID 12（:42172）
+    p.team = team;
+    void options.set('pvpTeam', team);
+    this.game.net?.sendPvpState();
+    this.refreshPvpButtons();
   }
 
   private buildInventoryPanel() {
@@ -2169,6 +2249,16 @@ export class UI {
         this.refreshAll();
       });
       row.appendChild(this.quickStackBtn);
+      // 多人玩家列表（原版 PC 无面板——/playing 命令与服务器控制台独占；本仓自有
+      // QoL 件：名字/队伍色/RTT。仅联机态显示（refreshAllNow 逐刷），单机隐藏
+      this.playerListBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.PlayerList.Title'));
+      this.playerListBtn.style.cssText = 'margin:0; padding:4px 10px; font-size:12px; display:none;';
+      this.playerListBtn.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.closeInventory();
+        openPlayerListPanel(this.game);
+      });
+      row.appendChild(this.playerListBtn);
       // 成就入口 = 背包内 AchievementAdvisor 卡（AchievementsUI.createAchievementAdvisor，
       // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
       // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
@@ -2350,6 +2440,53 @@ export class UI {
     this.achAdvisorEl.style.alignSelf = 'flex-start';
     body.appendChild(this.achAdvisorEl);
     this.invPanel.appendChild(body);
+
+    // ---- PvP/队伍快切钮（DrawPVPIcons Main.cs:42074-42195：背包右下角；
+    //      原版 ShouldPVPDraw=netMode==1 仅联机画，本仓常开=设置页 PvP/队伍同款
+    //      语义（单机调试便利 + 联机 msg13 同步）） ----
+    const pvpWrap = el('div');
+    pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:flex-end; margin-top:2px;';
+    // PvP 剑（:42112-42116：38px 帧裁 Width-2/Height-1 → 36×37）
+    this.pvpSwordBtn = el('button', 'sw-btn');
+    this.pvpSwordBtn.style.cssText = 'margin:0; width:36px; height:37px; padding:0; flex:none;'
+      + 'border:none; background:url(sprites/vanilla-ui/UI_PVP_0.png); background-size:400% 600%;'
+      + 'background-position:0% 0%; image-rendering:pixelated; cursor:pointer;';
+    this.pvpSwordBtn.addEventListener('mouseenter', () => this.refreshPvpButtons());
+    this.pvpSwordBtn.addEventListener('mouseleave', () => this.refreshPvpButtons());
+    this.pvpSwordBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.pvpToggleHostile();
+    });
+    pvpWrap.appendChild(this.pvpSwordBtn);
+    // 队伍 2×3 格（:42127-42133：20px 步进；图标 18×18 裁 16 宽 :42185/:42191；
+    // 悬停高亮 UI_PVP_2 20×20 垫底 @(:42188)）——60-38=22px 间距（:42119 num3+=60）
+    const teamGrid = el('div');
+    teamGrid.style.cssText = 'display:grid; grid-template-columns:repeat(2,20px);'
+      + 'grid-auto-rows:20px; margin-top:22px;';
+    this.pvpTeamBtns = [];
+    for (const tb of PVP_TEAM_BUTTONS) {
+      const cell = el('button', 'sw-btn');
+      cell.style.cssText = 'margin:0; width:20px; height:20px; padding:0; flex:none;'
+        + 'border:none; background:none; background-color:transparent;'
+        + 'image-rendering:pixelated; cursor:pointer;';
+      const icon = el('div');
+      icon.style.cssText = 'position:absolute; left:2px; top:1px; width:16px; height:18px;'
+        + `background:url(sprites/vanilla-ui/UI_PVP_1.png); background-size:600% 100%;`
+        + `background-position:${tb.team * 20}% 0%; image-rendering:pixelated; pointer-events:none;`;
+      cell.style.position = 'relative';
+      cell.appendChild(icon);
+      cell.addEventListener('mouseenter', () => this.refreshPvpButtons());
+      cell.addEventListener('mouseleave', () => this.refreshPvpButtons());
+      cell.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.pvpSetTeam(tb.team);
+      });
+      teamGrid.appendChild(cell);
+      this.pvpTeamBtns.push(cell);
+    }
+    pvpWrap.appendChild(teamGrid);
+    this.invPanel.appendChild(pvpWrap);
+    this.refreshPvpButtons();
 
     // 防御计数器（原版 DrawDefenseCounter Main.cs:41555-41623：Extra_58 盾 3×2 帧
     // [普通/专家/大师 × 底/辉光] + 数值【居中叠在盾上】(:41598 vector-测量宽*0.5+2y);
@@ -2907,6 +3044,7 @@ export class UI {
     this.refreshHotbar();
     this.moveGhost();
     this.paintTrash();
+    this.refreshPvpButtons();
     try {
       this.achAdvisorEl?.update();
     } catch (e) {
@@ -2924,6 +3062,8 @@ export class UI {
       this.quickStackBtn.textContent = full.split('\n')[0];
       this.quickStackBtn.title = full;
     }
+    // 多人玩家列表钮：仅联机态显示（单机无名单可列）
+    if (this.playerListBtn) this.playerListBtn.style.display = this.game.net?.active ? '' : 'none';
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {
       const slotEl = this.slotEl(i, 'inv');

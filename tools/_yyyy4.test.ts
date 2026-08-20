@@ -10,14 +10,16 @@ import { TileStore } from '../src/world/TileStore';
 import { generateWorld, __setGenStateForProbe, lastGenState } from '../src/world/gen/WorldGen';
 import { snapshotGenSolid, restoreGenSolid } from '../src/world/gen/vanilla/GenSolid';
 import { runPilesPass } from '../src/world/gen/vanilla/PilesPass';
-import { runVinesPass, runFlowersPass } from '../src/world/gen/vanilla/SurfaceDecorPasses';
+import { runVinesPass, runFlowersPass, runLongMossPass } from '../src/world/gen/vanilla/SurfaceDecorPasses';
+import { runTileCleanupPass } from '../src/world/gen/vanilla/TileCleanupPass';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 
 const RUN = process.env.SW_YY4 === 'cap' || process.env.SW_YY4 === 'rep';
-const G2 = '/tmp/sw-slp/g-m20260811';
-const DIR = '/tmp/yyyyy-m20260811';
-const W = 6400, H = 1800, N = W * H;
-const SEED = 20260811;
+const G2 = process.env.SW_YY4_G2 ?? '/tmp/sw-slp/g-m20260811';
+const DIR = process.env.SW_YY4_DIR ?? '/tmp/yyyyy-m20260811';
+const W = Number(process.env.SW_YY4_W ?? 6400), H = Number(process.env.SW_YY4_H ?? 1800), N = W * H;
+const SEED = Number(process.env.SW_YY4_SEED ?? 20260811);
+const EVILN = Number(process.env.SW_YY4_EVIL ?? 0);
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number') SHEET[i] = s; }
@@ -64,6 +66,15 @@ function diffStore(tag: string, idx: number, st: TileStore): Row {
     if (via !== jia) { r.dIa++; mark(i); }
   }
   if (firstI >= 0) r.first = `(${firstI % W},${Math.floor(firstI / W)})`;
+  if (process.env.SW_YY4_DUMPCELLS) {
+    const out: string[] = [];
+    for (let i = 0; i < N; i++) {
+      const vt = c.a[i]! ? c.t[i]! : 0;
+      const jt = (st.flags[i]! & 1) ? (SHEET[st.type[i]!] >= 0 ? SHEET[st.type[i]!]! : 9999) : 0;
+      if (vt !== jt || c.a[i]! !== (st.flags[i]! & 1)) out.push(`(${i % W},${Math.floor(i / W)}) v${vt}/a${c.a[i]} j${jt}/a${st.flags[i]! & 1}`);
+    }
+    writeFileSync(process.env.SW_YY4_DUMPCELLS, out.join('\n') + '\n');
+  }
   r.pairs = [...pair.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, n]) => [k, n] as [string, number]);
   console.log(`${tag} vs #${idx} ${DUMPNAME.get(idx)}: A=${r.dA} T=${r.dT} W=${r.dW} L=${r.dL} Hf=${r.dHf} Sl=${r.dSl} Lt=${r.dLt} Ia=${r.dIa} ${r.first || '✓'}`);
   if (r.pairs.length) console.log(`  pairs: ${r.pairs.map(([k, n]) => `${k}×${n}`).join(' ')}\n  samples: ${r.samples.join(' | ')}`);
@@ -75,7 +86,7 @@ function diffStore(tag: string, idx: number, st: TileStore): Row {
   if (process.env.SW_YY4 === 'cap') {
     let done = false;
     await generateWorld({
-      width: W, height: H, seedText: String(SEED), evil: 0,
+      width: W, height: H, seedText: String(SEED), evil: EVILN as 0 | 1,
       onWorldPartial: (w, i, name) => {
         const SLOT = Number(process.env.SW_YY4_SLOT ?? 31);
         if (done || i !== SLOT) return;
@@ -152,7 +163,21 @@ function diffStore(tag: string, idx: number, st: TileStore): Row {
   const pileLog: string[] = [];
   (globalThis as { __swPilesCap?: (x: number, y: number, t: number, s: number, z: number, k: number) => void })
     .__swPilesCap = (x, y, t, s, z, k) => { pileLog.push(`${spanLines.length} ${x},${y} t${t} s${s} z${z}`); };
-  if (process.env.SW_YY4_PASS === 'flowers') {
+  if (process.env.SW_YY4_PASS === 'tilecleanup') {
+    const chests = JSON.parse(readFileSync(`${DIR}/s${process.env.SW_YY4_SLOT ?? 31}/chests.json`, 'utf8'));
+    const kc: string[] = [];
+    (globalThis as { __swKillCap?: (x: number, y: number, sheet: number) => void }).__swKillCap = (x, y, sh) => {
+      if ((x >= 616 && x <= 623 && y >= 1068 && y <= 1074) || (x >= 3716 && x <= 3722 && y >= 1090 && y <= 1096) || (x >= 2444 && x <= 2452 && y >= 585 && y <= 591)) kc.push(`${x},${y} s${sh}\n${(new Error().stack ?? '').split('\n').slice(1, 9).join(' <- ')}`);
+    };
+    runTileCleanupPass(st, rngW, gs, chests);
+    (globalThis as { __swKillCap?: unknown }).__swKillCap = undefined;
+    console.log('  [killwin] ' + (kc.join(' | ') || '(none)'));
+  } else if (process.env.SW_YY4_PASS === 'longmoss') {
+    const lmRolls = { n: 0 };
+    const rngM = new Proxy(rngW, { get(t, p2) { const v = Reflect.get(t, p2, t); if (typeof v === 'function') return (...a: number[]) => { lmRolls.n++; return (v as (...b: number[]) => number).apply(t, a); }; return v; } }) as RNG;
+    runLongMossPass(st, rngM, gs);
+    console.log(`  [longmoss] rolls=${lmRolls.n}`);
+  } else if (process.env.SW_YY4_PASS === 'flowers') {
     const flLog: string[] = [];
     (globalThis as { __swFlCap?: (m: number, n: number, tag: string) => void }).__swFlCap = (m, n, tag) => { flLog.push(`${spanLines.length} ${m},${n} ${tag}`); };
     runFlowersPass(st, rngW, gs);

@@ -246,6 +246,34 @@ export function trackVolumeFor(file: string, ambientVol: number, masterVol: numb
   return AMBIENT_FILES.has(file) ? ambientVol : masterVol;
 }
 
+// ---------------------------------------------------------------------------
+// SoundPlayOverrides 对账（Terraria.Audio/SoundPlayOverrides.cs 全文 + 全调用点，
+// 2026-08-20 审计核销）。★结论：原版**没有** SoundID→别的音效/音调的替换表——
+// 结构体仅一个字段 `float? Volume`，是 PlayTrackedSound/PlayTrackedLoopedSound 的
+// 按次音量覆写参数（SoundEngine.cs:121/:137 → SoundPlayer.cs:11/:28，>10000px
+// 屏心粗筛丢弃 → ActiveSound 构造：Volume=1f → UseOverrides(ActiveSound.cs:36-42
+// 有值即覆盖) → 首播 Sound.Volume = DetermineIntendedVolume(ActiveSound.cs:138-161)
+// = clamp( 距离衰减(1−d/2500，非 global) × Style.Volume × Volume覆写 × 音轨
+// (sound|ambient|music), 0, 1 )。覆写挂在 ActiveSound 实例上，SoundEngine.Update
+// （SoundPlayer.cs:101-115）每帧重算——外部逐帧改 activeSound.Volume/Position
+// 持续生效。
+// 调用点全表（1456 全量 grep 恰好 1 条，即"覆写表"全集）：
+//   Player.cs:28111-28114 吸血鬼种子阳光炽灼嘶声环 —— style=SoundID.VampireSizzle
+//   （CreateTrackable("sizzle").WithVolume(1f)，SoundID.cs:1039，默认
+//   SoundType.Sound → soundVolume=master）、position=玩家 Center、
+//   loopingCondition=VampireSizzleTracker.IsActiveAndInGame（!gameMenu &&
+//   vampireSeed && sunScorchCounter>0）、Volume 覆写=GetLerpValue(0,120,
+//   sunScorchCounter,true)；此后每帧 activeSound.Volume=lerp / Position=Center
+//   （:28117-28119）。一次性 PlayTrackedSound 路径全游戏零 override 调用方。
+// 本仓接线（覆写即查表落地）：Player.updateSunScorchValues → GameHooks.
+// startLoopSfx('sizzle', lerp, 1) → playLoopFile(vol=lerp[Volume 覆写],
+// base=1[Style.Volume]) → startLoopFile 目标音量 = min(1, vol×base×
+// trackVolumeFor(master))——乘区序与 DetermineIntendedVolume 逐项一致；
+// 循环条件=counter 归零拆轨 ≈ loopingCondition。断言见 tests/sound-overrides.test.ts。
+// 遗留（不 bind，登记）：非 global 轨的距离衰减/Pan 在本仓循环轨未建模——sizzle
+// 对本机玩家恒 d≈0（相机跟人），仅"吸血鬼种子+联机存活态观战他人"边缘态有差。
+// ---------------------------------------------------------------------------
+
 // ---- 资源包音效覆盖（M13）----
 // 包内 Sounds/<X>（wav/mp3/ogg）→ 键 'X'（sounds/<X>.wav 的 file 部分）。
 // 优先级高于基础源；多包同键由 ResourcePackManager 按优先级序预合并后整表下发。

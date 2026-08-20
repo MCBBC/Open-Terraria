@@ -220,6 +220,16 @@ export const enum NetModule {
   LeashedEntity = 13, // 拴绳实体（原版 LeashedEntity.NetModule，msg82 承载）：
                       //   sub1=FullSync（新增/section 激活全量）/ sub2=PartialSync（周期位置）/
                       //   sub0=Remove——仅房主上行，服务器登记后按条带定向补发（见 net/leashedSync.ts）
+  Particles = 8,  // 编排粒子（原版 NetParticlesModule——注册序 id=8；net/syncModules.ts）：
+                  //   {u8 type, ParticleOrchestraSettings 21B}＝原版 22B 载荷 1:1（type +
+                  //   f32×4 pos/move + i32 uniqueInfo + u8 invoker）。原版同步面 = 全部
+                  //   ParticleOrchestra 编排特效（剑刃轨迹/物品转移/微光爆发族……），
+                  //   纯 dust 不上网；本仓已移植的编排消费/生产子集见 syncModules.ts 头注
+  Ambience = 100, // 天空氛围（原版 NetAmbienceModule——注册序 id=3 被 JoinLeave 占用，
+                  //   依 CreativePowerPermissions=9 先例走仓库私有大号 id；语义 1:1）：
+                  //   S→C {u8 playerSlot, i32 seed, u8 skyEntityType}——服务器 AmbienceServer
+                  //   10-120s 一次选玩家锚 + 选族掷点（room.ts 侧 AmbienceServer 1:1），
+                  //   各端同 seed 重放出同一只鸟群/飞艇（FastRandom(seed) 同构）
 }
 
 // ================= Writer（小端，定宽；字符串 = u16 长度 + UTF-8） =================

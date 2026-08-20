@@ -172,12 +172,15 @@ describe('FilterHeatDistortion 像素公式（obj18 字节码/preshader）', () 
 });
 
 describe('monolith 审计结论表（MONOLITH_FILTER_AUDIT）', () => {
-  it('六个 pass GL 字节码 1:1 就位，三个登记未端口', () => {
+  it('六个 pass GL 字节码 1:1 就位，三个 pass 登记未端口', () => {
     const exact = MONOLITH_FILTER_AUDIT.filter((r) => r.glExact).map((r) => r.pass).sort();
     expect(exact).toEqual(['FilterBloodMoon', 'FilterCRT', 'FilterGraveyard',
       'FilterHeatDistortion', 'FilterMiniTower', 'FilterTest2']);
+    // FilterMoonLord 两行：MonolithMoonLord（柱）+ MoonLord（月总战滤镜，
+    // SceneState.cs:109）同 pass 同字节码（ScreenEffectInitializer.cs:22-24 唯一
+    // 差异=aimAtPlayer）——未端口登记共用
     const pending = MONOLITH_FILTER_AUDIT.filter((r) => !r.glExact).map((r) => r.pass);
-    expect(pending).toEqual(['FilterMoonLord', 'FilterSepia', 'FilterNoir']);
+    expect(pending).toEqual(['FilterMoonLord', 'FilterMoonLord', 'FilterSepia', 'FilterNoir']);
   });
 
   it('登记项均注明未端口根因（非空 note）', () => {

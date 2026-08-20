@@ -1651,7 +1651,10 @@ function placeMossSprout(st: TileStore, rng: RNG, x: number, y: number): void {
     st.setTileSilent(x, y, MOSS_SPROUT, 0, rng.int(0, 2) * 18);
     placed = true;
   }
-  if (placed) tileFrame184(st, rng, x, y);
+  // ★YYYYY：PlaceTile(184) 尾 SquareTileFrame（cs:60285）改走引擎全分派——九宫内
+  //   非活跃格 head-clear（m #94 (3436,618) 残 slope2 清除实证）+ 邻格 184 逐格
+  //   Next(3) 重帧（中心 1 掷与 tileFrame184(self) 同流位）。
+  if (placed) genSquareTileFrame(st, rng, x, y);
 }
 
 /** LongMoss pass（cs:20915-20961）1:1：苔藓块四向冒芽 */

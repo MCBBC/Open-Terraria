@@ -938,7 +938,10 @@ function checkAlchSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, shee
     const g = ALCH_GROUND[col];
     if (g) {                                                                 // 列 0-6；列外无 case
       if (!g.has(sheetAt2(st, x, y + 1))) bad = true;
-      if (isLava) bad = true;                                                // 各 case 的 lava 门
+      // cs:46000-46065：case 0-4/6 有 lava 门；★case 5 无岩浆枯杀款（cs:46062-65
+      //   雪族阶段以 82 豁免 break + 83↔84 bloom 切换替代——YYYYY：曾全域套用岩浆
+      //   必枯 → 12345 #99 (619,1071)/(3719,1093) t82@stage5 岩浆误杀，vanilla 存活）
+      if (isLava && col !== 5) bad = true;
       if (col === 5) {                                                       // cs:46025-42 成熟转换
         if (sheet !== 82 && isLava) {
           if (st.liquid[i]! > 16) {
