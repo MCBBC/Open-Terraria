@@ -50,7 +50,11 @@ void main() {
   vec2 lu = (px - uLightRect.xy) / uLightRect.zw;
   lu = clamp(lu, vec2(0.0), vec2(1.0));
   vec3 l = texture2D(uLight, lu).rgb;
-  gl_FragColor = vec4(w.rgb * l * w.a, w.a);   // 预乘输出(canvas premultipliedAlpha)
+  // ★预乘管线(canvas 源):pixelStorei(UNPACK_PREMULTIPLY=true) 上传即预乘 rgb·a,
+  //   再乘光 (rgb·a)·l ≡ (rgb·l)·a 输出恰为预乘语义——曾漏设 UNPACK 声明
+  //   (默认 false=期望非预乘)而 Chrome/Mac 对 canvas 源保持预乘直拷,shader 又
+  //   手动 ×a → 半透明像素 α² 双重变暗(史莱姆 0.58²≈42% 暗化,2026-08-20 实测)
+  gl_FragColor = vec4(w.rgb * l, w.a);
 }`;
 
   constructor() {
@@ -151,6 +155,8 @@ void main() {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texWorld);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // 预乘上传声明:canvas 源内部即预乘,显式 true = 驱动零转换直拷(实现无关)
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, world);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texLight);

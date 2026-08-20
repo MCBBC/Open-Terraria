@@ -33,6 +33,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
+import { ParticleOrchestraType } from '../net/syncModules';
 import { mainExpertMode, mainDifficulty, getAttackDamageScaledByDifficulty, scaleStatsWorld, GDL } from '../stats/ScaleStats';
 import { journeyPowers } from '../world/JourneyPowers';
 
@@ -1463,33 +1464,11 @@ export class Player extends Entity {
     this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
     this.oldX = this.x; this.oldY = this.y;   // oldPosition（尘埃 customData 跟随差值）
     // ---- 派对染发剂彩纸（UpdateHairDyeDust Player.cs:23994-24023；2026-08-14 接通，
-    //      原 HairDyeColor.ts §4 登记偏差销核）门=hairDye==派对 shaderId 且非死亡/
-    //      石化/冰冻（本仓 shimmering≈frozen 语义）；fixedUpdate 本身只在非暂停时跑 ----
-    if (this.hairDye === PARTY_HAIR_DYE_SHADER_ID && !this.dead && !this.shimmering) {
-      const jit = () => 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;   // 1±0.5
-      if (Math.random() < 1 / 45) {
-        // 尘 139-142（Next(139,143) 上界排除）：盒 width×8、scale 1.2×(0.7±0.3)、
-        // 速度 ×(1±0.5)+±0.5、vy−1、+自身速度×0.2
-        const d = game.vanillaDust?.spawn(this.x, this.y, this.w, 8,
-          139 + Math.floor(Math.random() * 4), 0, 0, 0, null, 1.2);
-        if (d) {
-          d.vx = d.vx * jit() + jit() - 0.5 + this.vx * 0.2;
-          d.vy = d.vy * jit() + jit() - 0.5 - 1 + this.vy * 0.2;
-          d.scale *= 0.7 + (Math.floor(Math.random() * 61) - 30) * 0.01;
-        }
-      }
-      if (Math.random() < 1 / 225) {
-        // 内脏 gore 276-282（Next(276,283) 上界排除）：NewGore 自带抖动后再
-        // ×(1±0.5)+±0.5、vy−1、scale×(1±0.2)、+自身速度×0.2
-        const g = GorePiece.newGore(276 + Math.floor(Math.random() * 7),
-          this.x + Math.random() * this.w, this.y + Math.random() * 8, 0, 0, 1, false);
-        if (g) {
-          g.vx = g.vx * jit() + jit() - 0.5 + this.vx * 0.2;
-          g.vy = g.vy * jit() + jit() - 0.5 - 1 + this.vy * 0.2;
-          g.scale *= 1 + (Math.floor(Math.random() * 41) - 20) * 0.01;
-        }
-      }
-    }
+    //      原 HairDyeColor.ts §4 登记偏差销核）——抽为方法：MP 远端代理不走
+    //      Player.fixedUpdate（Game.stepRemoteProxy 只跑移动子集）,代理彩纸在
+    //      Game.simulateRemotePlayers 同门补掷（原版各端对全部 Main.player 跑此尘）。
+    //      fixedUpdate 本身只在非暂停时跑 ----
+    this.updateHairDyeDust(game);
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
     this.miscCounter++;
@@ -3201,6 +3180,37 @@ export class Player extends Entity {
     // 每帧自登记（挂墙 :49797-49801 / 锚定段 :49954-49957），下 tick 消费前重建
     this.grappling[0] = null;
     this.grapCount = 0;
+  }
+
+  /** 派对染发剂彩纸（UpdateHairDyeDust Player.cs:23994-24023 1:1）：
+   *  门=hairDye==派对 shaderId 且非死亡/石化/冰冻（本仓 shimmering≈frozen 语义）。
+   *  独立方法供 MP 远端代理同门补掷（代理不走 fixedUpdate,原版各端对全部
+   *  Main.player 跑此尘——本地/远端双消费,2026-08-20 补远端） */
+  updateHairDyeDust(game: GameHooks): void {
+    if (this.hairDye !== PARTY_HAIR_DYE_SHADER_ID || this.dead || this.shimmering) return;
+    const jit = () => 1 + (Math.floor(Math.random() * 101) - 50) * 0.01;   // 1±0.5
+    if (Math.random() < 1 / 45) {
+      // 尘 139-142（Next(139,143) 上界排除）：盒 width×8、scale 1.2×(0.7±0.3)、
+      // 速度 ×(1±0.5)+±0.5、vy−1、+自身速度×0.2
+      const d = game.vanillaDust?.spawn(this.x, this.y, this.w, 8,
+        139 + Math.floor(Math.random() * 4), 0, 0, 0, null, 1.2);
+      if (d) {
+        d.vx = d.vx * jit() + jit() - 0.5 + this.vx * 0.2;
+        d.vy = d.vy * jit() + jit() - 0.5 - 1 + this.vy * 0.2;
+        d.scale *= 0.7 + (Math.floor(Math.random() * 61) - 30) * 0.01;
+      }
+    }
+    if (Math.random() < 1 / 225) {
+      // 内脏 gore 276-282（Next(276,283) 上界排除）：NewGore 自带抖动后再
+      // ×(1±0.5)+±0.5、vy−1、scale×(1±0.2)、+自身速度×0.2
+      const g = GorePiece.newGore(276 + Math.floor(Math.random() * 7),
+        this.x + Math.random() * this.w, this.y + Math.random() * 8, 0, 0, 1, false);
+      if (g) {
+        g.vx = g.vx * jit() + jit() - 0.5 + this.vx * 0.2;
+        g.vy = g.vy * jit() + jit() - 0.5 - 1 + this.vy * 0.2;
+        g.scale *= 1 + (Math.floor(Math.random() * 41) - 20) * 0.01;
+      }
+    }
   }
 
   /** CheckCrackedBrickBreak（Player.cs:23040-23110 全 1:1）：跑动/下落撞上地牢
@@ -4938,6 +4948,10 @@ export class Player extends Entity {
     this.iframes = Math.max(this.iframes, PLAYER_IFRAME_TICKS);
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
     game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+    // module8 广播（Player.cs:28402 BroadcastOrRequestParticleSpawn(ShimmerTownNPC,
+    // PositionInWorld = Bottom)）——原版在 Teleport 之后取 base.Bottom（= 新位脚底）,
+    // 此处 x/y 已更新,同语义照抄
+    game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShimmerTownNPC, this.cx, this.y + this.h);
   }
 
   /** ApplyTouchDamage（Player.cs:28507）1:1:直接伤害(护甲结算)→灼烧/流血 buff→

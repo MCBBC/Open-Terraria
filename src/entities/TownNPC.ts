@@ -28,6 +28,7 @@ import {
 import { TownShot } from './TownShot';
 import { resolveDrops, npcValueOf, type NpcDropCtx } from '../drops/NpcDrops';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { ParticleOrchestraType } from '../net/syncModules';
 import { RNG } from '../core/rng';
 import { visEffectFrames, mouseTextColorApprox, type Enemy } from './Enemy';
 import { spawnVanillaEnemy } from './bossAI';
@@ -2044,6 +2045,9 @@ export class TownNPC extends Entity {
       game.spawnParticles(this.cx, this.cy, '#BEF5FF', 4, 3.2, { life: 34, grav: -0.12 });
       game.spawnParticles(this.cx, this.cy, '#FF96FF', 4, 3.2, { life: 34, grav: -0.12 });
       game.playSfx('manaCrystal', 1, this.cx, this.cy);
+      // module8 广播（NPC.cs:53674 BroadcastParticleSpawn(ShimmerTownNPC, Center)）：
+      // 本地视觉上方三行已生,此处只发服务器中继——他端经 Spawn_ShimmerTownNPC 同款爆发
+      game.broadcastParticleOrchestra?.(ParticleOrchestraType.ShimmerTownNPC, this.cx, this.cy);
       if (this.shimmered) game.achievements?.notifyProgressionEvent(43);   // :53667-53669
     }
     return true;
@@ -2063,12 +2067,18 @@ export class TownNPC extends Entity {
     if (!spot) return;
     const nx = spot.x * TILE - this.w / 2, ny = spot.y * TILE - this.h;   // ShimmerHelper.cs:9
     const dist = Math.hypot(nx - this.x, ny - this.y);
+    const oldX = this.x, oldY = this.y;
+    const oldCx = oldX + this.w / 2, oldCy = oldY + this.h / 2;   // 传送前中心（:55995 vector2+Size/2）
     this.x = nx;
     this.y = ny;
     if (dist >= SHIMMER_RISE_TELEPORT_DIST) {
       this.shimmerRisePause = SHIMMER_RISE_PAUSE;                 // :56004
       game.spawnParticles(this.cx, this.cy, '#BEAFFF', 14, 1.2, { life: 30, grav: -0.05 });
       game.spawnParticles(this.cx, this.cy, '#BEF5FF', 10, 1.2, { life: 30, grav: -0.05 });
+      // module8 广播（NPC.cs:55994 ShimmerTownNPCSend：旧中心位 + 位移向量
+      //（= 新旧左上差,与新旧中心差同值））
+      game.broadcastParticleOrchestra?.(
+        ParticleOrchestraType.ShimmerTownNPCSend, oldCx, oldCy, nx - oldX, ny - oldY);
     }
   }
 

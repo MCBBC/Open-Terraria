@@ -2212,8 +2212,10 @@ export function placePlantTile(st: TileStore, rng: RNG, x: number, y: number, nu
   }
   if (WALL_ALLOWS_PLANTS.has(st.wall[i]) && WALL_ALLOWS_PLANTS.has(st.wall[bi])) {
     let fx: number;
+    let fxScaled = true;   // 表支/草丛支写 fx*18；蘑菇支 144/270 为绝对帧（cs:59561-59570）
     if (rng.int(0, 49) === 0 || ((num === 24 || num === 201) && rng.int(0, 39) === 0)) {
-      fx = num === 201 ? 270 : 144;                                       // 蘑菇/恶魔蘑菇帧
+      fx = num === 201 ? 270 : 144;                                       // 蘑菇/恶魔蘑菇帧（绝对值）
+      fxScaled = false;
     } else if (rng.int(0, 34) === 0 || (st.wall[i] >= 63 && st.wall[i] <= 70)) {
       // cs:59583-59592：14 元表**无条件先掷**，随后 num==201→16 元表 / num==637→5 元表
       // **二次掷覆写**（前值弃但掷已耗）——TTTTT 织入定谳（按 num 选表单掷每个
@@ -2225,7 +2227,9 @@ export function placePlantTile(st: TileStore, rng: RNG, x: number, y: number, nu
     } else {
       fx = rng.int(0, 5);                                                 // Next(6) 草丛
     }
-    st.setTileSilent(x, y, plantTileOf(num), fx * 18, 0);
+    // ★AAAAAA：蘑菇支 144/270 原版写绝对 frameX（cs:59561/:59566）——曾统一 ×18
+    //   致 2592/4860（金标 144/270；s3/s24/s637 帧债）。
+    st.setTileSilent(x, y, plantTileOf(num), fxScaled ? fx * 18 : fx, 0);
     squareTileFrame(st, rng, x, y);                                       // cs:60281 尾部帧
     return true;
   }
@@ -2276,8 +2280,10 @@ function placeJunglePlant(st: TileStore, rng: RNG, gs: GenState, x: number, y: n
       ? rng.int(0, 1) * 18 + 108
       : rng.int(0, 12) * 18 + 180;                                        // Next(13)
   } else {
-    fx = rng.int(0, 5);                                                   // Next(6)
+    fx = rng.int(0, 5) * 18;                                              // Next(6)*18（cs:59649）
   }
+  // ★AAAAAA：cs:59649 基础草丛支 frameX=Next(6)*18——曾漏 ×18（金标 18*style、
+  //   本仓裸 style 索引；s61 帧债 4981 格主源）。
   st.setTileSilent(x, y, JUNGLE_SHORT, fx, 0);
   squareTileFrame(st, rng, x, y);                                         // cs:60281 PlaceTile 成功尾部帧
 }

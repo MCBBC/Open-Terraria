@@ -232,8 +232,9 @@ import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
 import {
-  MapPingStore, BestiarySub, PylonSub,
-  type LiquidCell, type BestiaryNetEvent, type PylonNetMsg,
+  MapPingStore, BestiarySub, PylonSub, ParticleOrchestraType,
+  type LiquidCell, type BestiaryNetEvent, type PylonNetMsg, type ParticleSettings,
+  type InstancedLootEntry,
 } from '../net/syncModules';
 import {
   applyJourneyWorldState, type JourneyWorldState, type JourneyPersonalState,
@@ -260,7 +261,7 @@ import { natureParticles } from '../render/NatureParticles';
 import { TILE_PARTICLE_RULES } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
-import type { GameHooks } from '../entities/types';
+import type { GameHooks, LootPlayerCtx } from '../entities/types';
 import { BehaviorRecorder } from '../debug/BehaviorRecorder';
 import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
@@ -1148,13 +1149,15 @@ export class Game implements GameHooks {
     net.sendProjectileBatch(snaps);
   }
 
-  /** 双向：本地真掉落诞生上报 + 消失（拾取/寿命）广播——扫描差分 */
+  /** 双向：本地真掉落诞生上报 + 消失（拾取/寿命）广播——扫描差分。
+   *  netLocalOnly（per-client instanced 副本,module14 发放）跳过——本端私有,
+   *  上报会把各端私有袋合并成一个共享实例（原版 instanced=true 不入同步面） */
   private netDropSweep() {
     const net = this.net!;
     const cur = new Map<number, ItemDrop>();
     for (const ent of this.entities.drops) {
       const d = ent as ItemDrop;
-      if (d.netPuppet) continue;
+      if (d.netPuppet || d.netLocalOnly) continue;
       if (!d.netId) {
         d.netId = makeNetId(net.mySlot, d.id);
         net.sendItemOp(0, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy);
@@ -1371,6 +1374,60 @@ export class Game implements GameHooks {
     }
   }
 
+  /** MP 掉落结算玩家表（GameHooks.lootPlayers 实现；Enemy 死亡结算消费）：
+   *  [本地(net.mySlot), …远端代理]——代理 hp/maxHp/mana/luck 自 msg16 尾段镜像
+   *  （RemotePlayerState），位置为权威 msg13 位。interacting = 敌怪.interactionSlots
+   *  （本地 hurt fromPlayer + msg42 fromSlot 双源登记）。单机（net 不活跃）不实现
+   *  本表语义——hooks 常开,以 net.active 门控返回 undefined 走单人路径 */
+  lootPlayers(enemy: Enemy): LootPlayerCtx[] | undefined {
+    const net = this.net;
+    if (!net?.active) return undefined;
+    const out: LootPlayerCtx[] = [{
+      slot: net.mySlot, x: this.player.cx, y: this.player.cy, dead: this.player.dead,
+      luck: this.player.luck, hp: this.player.hp, hpMax: this.player.maxHp,
+      mana: this.player.mana, manaMax: this.player.maxMana,
+      interacting: enemy.interactionSlots.has(net.mySlot),
+    }];
+    for (const [slot, rp] of net.players) {
+      if (!rp.active) continue;
+      out.push({
+        slot, x: rp.x + 10, y: rp.y + 21,   // 碰撞盒左上 → 中心（Player 20×42，Player.cs:55083）
+        dead: rp.dead,
+        luck: rp.luck, hp: rp.hp, hpMax: rp.maxHp,
+        mana: rp.mana, manaMax: rp.manaMax,
+        interacting: enemy.interactionSlots.has(slot),
+      });
+    }
+    return out;
+  }
+
+  /** per-client 掉落发放（GameHooks.grantInstancedLoot 实现；结算端=本端房主）：
+   *  targetSlot=mySlot → 本地 netLocalOnly 实例（不上报 msg21,仅本端可见可拾——
+   *  原版 msg90 instanced+reservedFor 语义）;访客槽 → module14 上行,服务器定向转发 */
+  grantInstancedLoot(targetSlot: number, x: number, y: number, itemKey: string,
+    stack: number, vx: number, vy: number): void {
+    const net = this.net;
+    if (!net?.active) return;
+    if (targetSlot === net.mySlot) {
+      const d = this.spawnDrop(x, y, itemKey, stack, vx, vy);
+      if (d) d.netLocalOnly = true;
+      return;
+    }
+    net.sendInstancedLoot([{ targetSlot, key: itemKey, stack, x, y, vx, vy }]);
+  }
+
+  /** module14 回包（访客）：房主发放的 per-client 掉落到达——本端私有实例。
+   *  服务器已按 targetSlot 过滤,此处再验一次（伪造帧防御,双端同判） */
+  private netApplyInstancedLoot(entries: InstancedLootEntry[]) {
+    const net = this.net;
+    if (!net?.active) return;
+    for (const e of entries) {
+      if (e.targetSlot !== net.mySlot) continue;
+      const d = this.spawnDrop(e.x, e.y, e.key, Math.max(1, e.stack), e.vx, e.vy);
+      if (d) d.netLocalOnly = true;
+    }
+  }
+
   /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类；kind0-4 纯视觉，5-8 本地跑确定性 AI） */
   private netApplyProjSnaps(snaps: ProjSnap[]) {
     for (const s of snaps) {
@@ -1454,13 +1511,18 @@ export class Game implements GameHooks {
   }
 
   /** msg42 回包（房主）：访客打击权威结算——按 netId 找真身应用 hurt（防御减算在此一次）。
-   *  M3：尾部 fromSlot（服务器回填打击者）经 pendingStrikeOwner 归账 Boss 伤害统计 */
+   *  M3：尾部 fromSlot（服务器回填打击者）经 pendingStrikeOwner 归账 Boss 伤害统计；
+   *  per-client 批：同 slot 登记 interactionSlots（NPC.ApplyInteraction 等价——
+   *  hurt fromPlayer 只标本地玩家,访客打击的交互位在此补） */
   private netApplyStrike(netId: number, rawDmg: number, kbx: number, kby: number, fromSlot?: number) {
     const localId = netIdLocal(netId);
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
       if (e.netPuppet || e.id !== localId) continue;
-      if (fromSlot !== undefined) setPendingStrikeOwner(fromSlot);
+      if (fromSlot !== undefined) {
+        setPendingStrikeOwner(fromSlot);
+        e.applyNetInteraction(fromSlot, this);
+      }
       e.hurt(rawDmg, kbx, kby, this);
       setPendingStrikeOwner(null);   // hurt 早退路径（iframes/已死）不残留——防串账
       const dealt = Math.max(1, Math.round(rawDmg - (e.def.defense ?? 0) * 0.5));
@@ -1688,7 +1750,7 @@ export class Game implements GameHooks {
    *  （硬核幽灵相）。适用域 = 联机（原版 UpdateDead 尾 :16921 Main.netMode==1 门；
    *  单机死亡走死亡画面无观战——SpectateNextPlayer :17044 netMode==0 恒 false） */
   private canDeathSpectate(): boolean {
-    return !!this.net?.active && this.player.dead
+    return !!this.net?.active && !!this.player?.dead
       && !this.player.isGhostPhase(this.world)
       && this.player.respawnTimer >= 60;
   }
@@ -4019,16 +4081,14 @@ export class Game implements GameHooks {
           // 地图绘制：mapW = world.w * zoom（1 tile = zoom 像素）——直接除 zoom 得 tile 坐标
           const tx = Math.floor((inp.mouseX - cx0) / fm.zoom);
           const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
-          // 地图 ping（Main.cs:54926-54931 双击检测：0.5s 内两次按压位移 <2px →
-          // TriggerPing）。与两点传送共存：快速双击=ping（取消预选），慢速两次
-          // 点击=传送确认——本仓传送是自研扩展，原版全屏地图双击槽位本就归 ping
+          // 地图 ping（Main.cs:54926-54931 双击语义）——★修复(2026-08-20 用户报):
+          // 曾按原版把"快速双击"槽位给了 ping 并取消传送预选,直接废掉了自研的
+          // 同点两击传送调试功能(用户快速双击只看到 ping 气泡)。调试功能优先:
+          // 普通点击全归传送(第一次预选/第二次确认,不限速);ping 改走 Ctrl+点击
+          // (联机标记功能保留,原版双击槽位在调试构建下让位)
           const nowMs = performance.now();
           if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h
-            && nowMs - this._lastMapClickAt < 500
-            && Math.hypot(inp.mouseX - this._lastMapClickX, inp.mouseY - this._lastMapClickY) < 2) {
-            this._lastMapClickAt = nowMs;
-            this._lastMapClickX = inp.mouseX;
-            this._lastMapClickY = inp.mouseY;
+            && (inp.keys.has('ControlLeft') || inp.keys.has('ControlRight'))) {
             this.triggerMapPing(
               (inp.mouseX - cx0) / fm.zoom, (inp.mouseY - cy0) / fm.zoom);
             this._tpTarget = null;
@@ -4043,8 +4103,8 @@ export class Game implements GameHooks {
               this._tpTarget = null;
               this.renderer.tpMark = null;
             } else if (this._tpTarget && this._tpTarget.x === tx && this._tpTarget.y === ty) {
-              // 第二次点击同一点 → 先就位目标区域贴图再传送(落地即完美,
-              // 不出现 fallback 色块闪烁);失败不关图、保留标记可重试
+              // 第二次点击同一点（不限双击速度）→ 先就位目标区域贴图再传送
+              // (落地即完美,不出现 fallback 色块闪烁);失败不关图、保留标记可重试
               void this.teleportWhenReady(tx, ty);
             } else {
               this._tpTarget = { x: tx, y: ty };
@@ -15494,6 +15554,47 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** module8 编排粒子到达（原版客户端 SpawnParticlesDirect → Spawn_<type>）。
+   *  本仓已接消费子集 = 微光族两型（视觉与产生端本地 spawnParticles 同款爆发）；
+   *  其余型静默忽略（生产者未移植,前向兼容——表头注记全量清单） */
+  netApplyParticleOrchestra(type: number, s: ParticleSettings): void {
+    if (type === ParticleOrchestraType.ShimmerTownNPC) {
+      // Spawn_ShimmerTownNPC :1696-1752（= TownNPC shimmerRise 到场三色爆发同款）
+      this.spawnParticles(s.posX, s.posY, '#BEAFFF', 12, 3.2, { life: 34, grav: -0.12 });
+      this.spawnParticles(s.posX, s.posY, '#BEF5FF', 4, 3.2, { life: 34, grav: -0.12 });
+      this.spawnParticles(s.posX, s.posY, '#FF96FF', 4, 3.2, { life: 34, grav: -0.12 });
+      this.sfx.play('manaCrystal', 1, s.posX, s.posY);
+    } else if (type === ParticleOrchestraType.ShimmerTownNPCSend) {
+      // Spawn_ShimmerTownNPCSend :1657-1694（= TownNPC shimmerLandAt ≥560px 双色爆发同款）
+      this.spawnParticles(s.posX, s.posY, '#BEAFFF', 14, 1.2, { life: 30, grav: -0.05 });
+      this.spawnParticles(s.posX, s.posY, '#BEF5FF', 10, 1.2, { life: 30, grav: -0.05 });
+    }
+  }
+
+  /** GameHooks.broadcastParticleOrchestra 实现（实体侧 → module8 上行;单机静默） */
+  broadcastParticleOrchestra(type: number, x: number, y: number, moveX = 0, moveY = 0): void {
+    this.net?.sendParticleOrchestra(type, {
+      posX: x, posY: y, moveX, moveY,
+      uniqueInfo: 0,
+      invoker: this.net.mySlot & 0xff,
+    });
+  }
+
+  /** module100 天空氛围到达（原版 AmbientSky.Spawn(player, type, seed)）：锚玩家位
+   *  从 msg13 镜像解析（Player.Center 语义——盒左上 + 半宽高;20×42 缺省档）,
+   *  SkyRenderer 帧首以 seed 确定性重放（全端同实体） */
+  netApplyAmbience(playerSlot: number, seed: number, type: number): void {
+    let ax: number, ay: number;
+    if (playerSlot === this.net?.mySlot) {
+      ax = this.player.cx; ay = this.player.cy;
+    } else {
+      const rp = this.net?.players.get(playerSlot);
+      if (!rp) return;   // 未知槽（已离场）——静默丢弃（氛围为装饰,无重放价值）
+      ax = rp.x + 10; ay = rp.y + 21;
+    }
+    this.renderer.sky.queueAmbientNet(type, seed, ax, ay);
+  }
+
   // ================= 生成 =================
 
   /** 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
@@ -21452,6 +21553,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       : null;
     // Main.netMode != 0 近似（DyeInitializer.cs:334 队伍发色剂单机恒白）
     this.renderer.netActive = !!this.net?.active;
+    // module100 天空氛围：联机 = 服务器 AmbienceServer 独占掷族（本地调度门关）
+    this.renderer.sky.ambientRemoteDriven = !!this.net?.active;
     this.renderer.render(
       cam, this.world, this.world.clock, this.chunks,
       L.r, L.g, L.b, L.rx, L.ry, L.rw, L.rh,
@@ -21762,6 +21865,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const rp = net.players.get(slot);
           if (rp) { rp.hp = hp; rp.maxHp = maxHp; }
         },
+        // module14 per-client 掉落（房主发放,服务器定向转发——本端私有实例落地）
+        onInstancedLoot: (entries) => this.netApplyInstancedLoot(entries),
         // ---- M9 旅程力量/研究（msg82 module5/6/9；net/journeySync.ts）----
         onJourneyWorldState: (s) => this.netApplyJourneyWorld(s),
         onJourneyPersonalState: (slot, s) => {
@@ -21789,11 +21894,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         },
         onJourneyPermission: () => journeyBrowserNotifyResearchChanged(),
-        // ---- MP 同步轻件包（net/syncModules.ts：module0/2/4/7 + msg203）----
+        // ---- MP 同步轻件包（net/syncModules.ts：module0/2/4/7/8/100 + msg203）----
         onLiquidSync: (cells) => this.netApplyLiquid(cells),
         onBestiaryEvent: (events) => this.netApplyBestiary(events),
         onPylonMessage: (msg) => this.netApplyPylon(msg),
         onMapPing: (x, y) => this.mapPings.add(x, y, performance.now()),
+        onParticleOrchestra: (type, settings) => this.netApplyParticleOrchestra(type, settings),
+        onAmbienceSpawn: (slot, seed, type) => this.netApplyAmbience(slot, seed, type),
       });
       net.connect(url, hostToken);
       // R10：30s 握手超时（fail 内统一 clearTimeout,终审 B4 修正：原 void timer 空转）
@@ -21909,12 +22016,16 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             const parsed = JSON.parse(rp.appearance) as Record<string, unknown>;
             if (parsed && typeof parsed.hair === 'number') proxy.appearance = parsed as never;
             // hairDye（msg4 外观 JSON 携带，2026-08-14）：Renderer.hairDyeRenderColor
-            // 读 Player.hairDye → 远端发色实时生效；派对染发剂彩纸走代理
-            // fixedUpdate（本地模拟同款 1/45 尘）自然同步
+            // 读 Player.hairDye → 远端发色实时生效；派对染发剂彩纸 2026-08-20 接通
+            // （代理不走 Player.fixedUpdate——原版各端对全部 Main.player 跑
+            // UpdateHairDyeDust,此处同门补掷）
             if (parsed && typeof parsed.hairDye === 'number') proxy.hairDye = parsed.hairDye;
           } catch { /* 保持默认外观 */ }
         }
       }
+      // 派对染发剂彩纸（UpdateHairDyeDust Player.cs:23994-24023）：远端代理每 tick
+      // 与本地同门补掷（1/45 尘 + 1/225 gore;hairDye 经 msg4 外观 JSON 同步）
+      proxy.updateHairDyeDust(this);
       // 物品/装备（msg5）：拷入代理背包——手持物 holdStyle/挥舞动画/盔甲纸娃娃渲染依赖。
       // 数组直接共享（代理只读不写，远端真权威在各自客户端）
       const bag = net.remoteItems.get(slot);

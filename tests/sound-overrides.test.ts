@@ -111,7 +111,7 @@ describe('覆写表全集 = 1 条（Player.cs:28111-28114 吸血鬼炽灼嘶声�
   it('SoundID.VampireSizzle 素材在库（CreateTrackable("sizzle")，SoundID.cs:1039）', () => {
     const wav = fileURLToPath(new URL('../public/sounds/sizzle.wav', import.meta.url));
     const head = readFileSync(wav).subarray(0, 4);
-    expect([...head]).toEqual([0x52, 0x49, 0x56, 0x45]);   // 'RIFF'
+    expect([...head]).toEqual([0x52, 0x49, 0x46, 0x46]);   // 'RIFF'
   });
 
   it('SoundType.Sound（CreateTrackable 默认 :1180）→ master 轨，不被环境音滑杆吞', () => {
@@ -128,7 +128,8 @@ describe('覆写表全集 = 1 条（Player.cs:28111-28114 吸血鬼炽灼嘶声�
 });
 
 // ---------- 表项接线（Player.updateSunScorchValues，Player.cs:28107-28121） ----------
-/** 最小 GameHooks：记录 startLoopSfx(file, vol, base) 与句柄 setVolume 序列 */
+/** 最小 GameHooks：记录 startLoopSfx(file, vol, base) 与句柄 setVolume 序列
+ *  （stopped 须读时求值——勿解构提前固化） */
 function sizzleHooks() {
   const calls: Array<[string, number, number]> = [];
   const vols: number[] = [];
@@ -144,7 +145,7 @@ function sizzleHooks() {
       };
     },
   } as unknown as GameHooks;
-  return { game, calls, vols, get stopped() { return stopped; } };
+  return { game, calls, vols, getStopped: () => stopped };
 }
 
 function burningPlayer(counter: number): Player {
@@ -165,21 +166,21 @@ describe('表项接线：updateSunScorchValues 的覆写参数', () => {
   it('每帧覆写跟随（:28117-28118 activeSound.Volume = lerpValue）', () => {
     const { game, vols } = sizzleHooks();
     const p = burningPlayer(99);                       // 起轨 lerp=100/120 → 每帧 +1 跟随
-    p.updateSunScorchValues(game);                     // 100：起轨
+    p.updateSunScorchValues(game);                     // 100：起轨 + 同帧首随
     p.updateSunScorchValues(game);                     // 101：setVolume
     p.updateSunScorchValues(game);                     // 102：setVolume
-    expect(vols).toEqual([101 / 120, 102 / 120]);
+    expect(vols).toEqual([100 / 120, 101 / 120, 102 / 120]);
   });
 
   it('counter 归零拆轨（loopingCondition：IsActiveAndInGame counter>0 门）', () => {
-    const { game, stopped } = sizzleHooks();
+    const hooks = sizzleHooks();
     const p = burningPlayer(5);
-    p.updateSunScorchValues(game);                     // 6：起轨
-    expect(stopped).toBe(0);
+    p.updateSunScorchValues(hooks.game);               // 6：起轨
+    expect(hooks.getStopped()).toBe(0);
     p.vampireBurningInSunlight = false;
-    p.updateSunScorchValues(game);                     // 6−6=0：lerp=0 → 拆轨
+    p.updateSunScorchValues(hooks.game);               // 6−6=0：lerp=0 → 拆轨
     expect(p.sunScorchCounter).toBe(0);
-    expect(stopped).toBe(1);
+    expect(hooks.getStopped()).toBe(1);
   });
 
   it('死亡档衰减 −2（:28100-28105 UpdateDead 调用链）、存活档 −6', () => {

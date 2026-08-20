@@ -54,6 +54,12 @@ export class ItemDrop extends Entity {
   shimmered = false;
   /** 微光浸入进度 0-1（:27/:806-840 +0.01/t，>0.9 触发 GetShimmered；离池衰减） */
   shimmerTime = 0;
+  /** 本端私有实例（原版 Item.instanced，MessageBuffer.cs:1468 case 90 落位）：
+   *  per-client 掉落（Boss 袋族）各端经 module14 各得一份——不上报 msg21
+   *  （netDropSweep/SimHost.dropSweep 跳过），仅本端玩家可见可拾（原版
+   *  playerIndexTheItemIsReservedFor=Main.myPlayer 语义——各端只持有自己的副本,
+   *  天然互不可见）。拾取后入包照常（转为随身物品,跨端同步走 msg5） */
+  netLocalOnly = false;
 
   constructor(x: number, y: number, itemId: number, stack = 1, vx = 0, vy = -2) {
     super();

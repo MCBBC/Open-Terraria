@@ -689,6 +689,17 @@ export class MonolithFilters {
     ctx.restore();
   }
 
+  /** moonLord 族单滤补画（GL 链激活时：该族未入 GL 端口但无需读源像素——
+   *  在 drawChain 结果上直接叠画；sepia/noir 需 getImageData 读源，维持
+   *  GL 路径跳过=审计表既有约定）。target 由调用方按 aimAtPlayer 选定。 */
+  drawMoonLordPass(
+    ctx: CanvasRenderingContext2D, f: FilterState, w: number, h: number,
+    target: { x: number; y: number },
+  ): void {
+    if (f.opacity <= 0 || f.def.kind !== 'moonLord') return;
+    this.drawMoonLord(ctx, f, w, h, target);
+  }
+
   /** FilterGraveyard（ScreenEffectInitializer.cs:25）：HLSL 二进制不在反编译源码，
    *  仅源码内可见参数——UseProgress = Lerp(0,0.75,intensity)、UseIntensity(1.2)、
    *  UseTargetPosition(SceneMetrics.Center)（SceneState.cs:132-138）。canvas 近似：

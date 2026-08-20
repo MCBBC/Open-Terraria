@@ -7,6 +7,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
+import { genRangeFrame } from './FinalCleanupPass';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 
 const TREE = TILE_BY_KEY['tree']!;              // tile 5
@@ -506,6 +507,10 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   // 树冠标记帧（cs:30932-30967）：12/13 fx=22 否则 fx=0；fy=198+22*k
   const crownFx = rng.int(0, 12) !== 0 ? 22 : 0;
   st.setTileSilent(x, num - height, p.treeTile, crownFx, 198 + rng.int(0, 2) * 22);
+  // ★AAAAAA：cs:30999 尾段 RangeFrame(x-2, num-height-1, x+2, num+1)——区域帧扫
+  //   （扫域=四周再外扩 1 格）。区域内的 184 苔芽每访恒掷 Next(3)（(734,760) 成树
+  //   尾 5 掷差=JS 缺此扫的 #103 首分歧实证）+ CheckTreeWithSettings(583-589) 重帧。
+  genRangeFrame(st, rng, x - 2, num - height - 1, x + 2, num + 1);
   return true;
 }
 

@@ -13,7 +13,7 @@ import type { GameHooks } from './types';
 import { Clock } from '../world/World';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
-import { vanillaNpc, vanillaSoundFiles, type VanillaNpc } from '../data/vanillaNpcs';
+import { vanillaNpc, vanillaSoundFiles, NPC_STATIC_ALPHA, type VanillaNpc } from '../data/vanillaNpcs';
 import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS } from '../data/vanillaNpcAmbience';
 import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 
@@ -334,6 +334,13 @@ export class Enemy extends Entity {
   /** NPC.AnyInteractions（NPC.cs:5431 playerInteraction[who] 任一 true）——本仓 hurt 调用方
    *  全为玩家武器/弹幕/荆棘链 → hurt 生效即等价玩家交互；雕像门 :79651 消费 */
   playerInteracted = false;
+  /** npc.playerInteraction[slot] 的 MP 位图（NPC.cs:80843-80851 ApplyInteraction）：
+   *  per-client 掉落族（Boss 袋/大师宠物）只发交互过的端（CommonCode.cs:44/:71
+   *  `npc.playerInteraction[i] || !interactionRequired`）。本地玩家 = hurt fromPlayer
+   *  注入 net.mySlot；访客 = Game.netApplyStrike（msg42 fromSlot）。蠕虫链按
+   *  realLife/链体传播、双子 125/126 互标（:80821-80841）。单人净空 = 表缺席,
+   *  per-client 族退化为单掷直掉 */
+  interactionSlots = new Set<number>();
   /** 鞭 tag（Projectile.ApplyTag → npc.whipTimeLeft 系）：剩余 tick 与附加伤害
    *  （240t=4 秒；随从命中被 tag 敌伤害 +whipTagDmg） */
   whipTagT = 0;
@@ -965,7 +972,7 @@ export class Enemy extends Entity {
     // （ScaleStats.getGoodAdjustments :17945/:17950/:17955）。原版两处消费
     // （染色门 :92026 / 鞭标 VFX 门 :92135）本仓均未移植——字段先行保数据链一致
     e.canDisplayBuffs = seedS.canDisplayBuffs !== false;
-    e.spawnAlpha = v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255）
+    e.spawnAlpha = NPC_STATIC_ALPHA[id] ?? v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255；2026-08-20 补全表：史莱姆 175 等曾恒 0=浊暗）
     // alpha=255 = 出生全透明渐显标记（13-15 世吞 / 134-136 毁灭者；其余 alpha 为
     // 静态不透明度,勿动）：置 alphaFade 交渐显路径逐 tick 减回 0。EoW 族保持原版
     // 初值 255（AI_006 尾段 :52650-52670 移动门 -42/t，见 fixedUpdate 渐显段）；
@@ -1230,6 +1237,23 @@ export class Enemy extends Entity {
         && !!p.buffs?.has(BuffType.Calming)) num += 1000;   // :78508-78510
       if (!t || num < distance) {                           // :78511
         t = true; distance = num; this.targetPlayer = p;
+      }
+    }
+  }
+  /** MP 交互登记（NPC.ApplyInteraction :80843-80859 等价）：slot 打击过本怪 →
+   *  per-client 掉落族（Boss 袋/大师宠物）的发放门。realLife 链（:80845 打到
+   *  realLife 宿主——共享生命蠕虫族任一段被打全族登记）以链体遍历覆盖;
+   *  双子 125/126 互标（:80829-80837——另一半的交互位同置,双活同打各得袋） */
+  applyNetInteraction(slot: number, game?: GameHooks): void {
+    this.interactionSlots.add(slot);
+    let head: Enemy = this;
+    while (head.wormFollow) head = head.wormFollow;
+    for (let s: Enemy | null = head; s; s = s.wormNext) s.interactionSlots.add(slot);
+    if (this.vanillaId === 125 || this.vanillaId === 126) {
+      const other = this.vanillaId === 125 ? 126 : 125;
+      for (const o of game?.enemies?.() ?? []) {
+        const e2 = o as Enemy;
+        if (e2 !== this && !e2.dead && e2.vanillaId === other) e2.interactionSlots.add(slot);
       }
     }
   }
@@ -11281,6 +11305,10 @@ export class Enemy extends Entity {
       const pl = game.player as Player | null;
       pl?.addDPS(dmg);
       this.playerInteracted = true;  // AnyInteractions（playerInteraction 位）——雕像门 :79651
+      // MP：本地玩家交互登记（ApplyInteraction 等价——per-client 掉落发放门;
+      //  单人无 net 净空,interactionSlots 恒空不参与结算）
+      const net = (game as unknown as { net?: { active: boolean; mySlot: number } }).net;
+      if (net?.active) this.applyNetInteraction(net.mySlot, game);
     }
     // 毁灭者身段受击出探针（HitEffect :90265-90281：135 身段存活受击时,ai[2]==0
     // （本段未出过探针）掷 1/25（Mechdusa 合体态 1/50）→ 置 ai[2]=1 并于段底中心
@@ -11491,6 +11519,30 @@ export class Enemy extends Entity {
         // （曾错接 p.appearance.difficulty：专家掉落/宝袋被角色难度误触发）
         // vanillaNetId 默认 0=无变体：netId/value 查表都要把 0 归一到 type
         const netId = this.vanillaNetId !== 0 ? this.vanillaNetId : this.vanillaId;
+        // MP 掉落结算玩家表（2026-08-20 per-client 批）：结算端（房主/SimHost）注入
+        // [本地+代理]/在线端——closestPlayer 的 luck/hp/mana 注入（NPCLoot :79634
+        // Player.FindClosest：曼哈顿中心距,active&&!dead,严格 < 取先扫描槽）与
+        // per-client 族（bossBag/masterAll）发放门的数据源。undefined = 单人
+        // （表缺席,resolveDrops lootPlayers 缺席——今日行为零变化）
+        const lootPlayers = game.lootPlayers?.(this);
+        // closestPlayer 三元组：luck（钱币/心星/地牢魂/规则掷骰 Luck 链）+ hp/mana
+        // （心星条件 statLife<statLifeMax2 / statMana<statManaMax2,:80334-:80345）。
+        // 单人 = 本地玩家（表缺席时回退 p.*，与旧实现逐字节同源）
+        let closestLuck = p.luck, closestHp = p.hp, closestHpMax = p.maxHp,
+          closestMana = p.mana, closestManaMax = p.maxMana;
+        if (lootPlayers) {
+          let best = -1;
+          for (let i = 0; i < lootPlayers.length; i++) {
+            const c = lootPlayers[i];
+            if (c.dead) continue;
+            const d = Math.abs(c.x - this.cx) + Math.abs(c.y - this.cy);
+            if (best < 0 || d < best) {
+              best = d;
+              closestLuck = c.luck; closestHp = c.hp; closestHpMax = c.hpMax;
+              closestMana = c.mana; closestManaMax = c.manaMax;
+            }
+          }
+        }
         const ctx: NpcDropCtx = {
           rng,
           netId,
@@ -11512,8 +11564,12 @@ export class Enemy extends Entity {
           value: this.spawnedFromStatue ? 0
             : (netId === this.vanillaId ? (this.def.value ?? npcValueOf(netId)) : npcValueOf(netId)),
           statueSpawned: this.spawnedFromStatue,
-          hp: p.hp, hpMax: p.maxHp, mana: p.mana, manaMax: p.maxMana,
-          luck: p.luck,
+          hp: closestHp, hpMax: closestHpMax, mana: closestMana, manaMax: closestManaMax,
+          luck: closestLuck,
+          // per-client 族（bossBag/masterAll）求值开关 + 四塔碎片堆叠加成
+          // （DropOneByOne :63-64 ActivePlayersCount）
+          lootPlayers: lootPlayers?.map((c) => ({ slot: c.slot, interacting: c.interacting })),
+          activePlayers: lootPlayers ? Math.max(1, lootPlayers.length) : 1,
           moonEvent: game.moonEventCtx?.() ?? undefined,
           ai3: this.ai3, // NPC ai[3]：RedHatSkeletron / 光之女皇暴怒掉落条件
           ai1: this.ai1, // NPC ai[1]：史莱姆体内物品 id（SlimeBodyItemDropRule 数据源，
@@ -11537,11 +11593,11 @@ export class Enemy extends Entity {
         const unmapped = (id: number) => {
           if (!UNMAPPED_WARNED.has(id)) { UNMAPPED_WARNED.add(id); console.warn(`[NpcDrops] 物品 ${id} 无 key 映射，跳过`); }
         };
-        const spawn = (id: number, n: number): ItemDrop | null => {
+        const spawn = (id: number, n: number, px?: number, py?: number, vx0?: number, vy0?: number): ItemDrop | null => {
           const key = VANILLA_ITEM_KEY_BY_ID[id];
           if (!key) { unmapped(id); return null; }
-          const v = dropVelocity(rng, id);
-          const drop = game.spawnDrop(this.cx, this.cy, key, n, v.vx, v.vy);
+          const v = vx0 !== undefined ? { vx: vx0, vy: vy0 ?? 0 } : dropVelocity(rng, id);
+          const drop = game.spawnDrop(px ?? this.cx, py ?? this.cy, key, n, v.vx, v.vy);
           // 心(58)/星(184) 标记为 pickup：触碰回血/回蓝，不进背包
           if (drop) {
             if (id === 58) drop.pickup = 'heart';
@@ -11551,6 +11607,33 @@ export class Enemy extends Entity {
         };
         const res = resolveDrops(ctx);
         for (const d of res.drops) {
+          // ---- per-client 族分发（CommonCode.cs:35-88 netMode==2 段 1:1）----
+          // scope 由 resolveDrops 仅在 lootPlayers 在场（MP 结算端）时标记
+          if (d.scope === 'local') {
+            // DropItemLocalPerClientAndSetNPCMoneyTo0：求值端单掷已过 → 每个交互端
+            // 各得一份 instanced 副本（原版 msg90 定向;位置/初速各端同值——服务器
+            // 序列化同一份 item 数据）。金钱清零在求值侧（out.zeroValue）
+            const key = VANILLA_ITEM_KEY_BY_ID[d.id];
+            if (!key) { unmapped(d.id); continue; }
+            const v = dropVelocity(rng, d.id);
+            if (lootPlayers && game.grantInstancedLoot) {
+              for (const c of lootPlayers) {
+                if (!c.interacting) continue;   // npc.playerInteraction[slot]（:44）
+                game.grantInstancedLoot(c.slot, this.cx, this.cy, key, d.n, v.vx, v.vy);
+              }
+            } else {
+              spawn(d.id, d.n);   // 防御：MP 求值但发放钩子缺失（理论不可达）→ 世界掉落兜底
+            }
+            continue;
+          }
+          if (d.scope === 'perPlayer') {
+            // DropItemForEachInteractingPlayerOnThePlayer：掷骰在求值侧逐玩家完成
+            // （NpcDrops masterAll,槽序）→ 命中者头顶落【普通广播物品】
+            // （Item.NewItem noBroadcast:false,:73——他人理论可抢,原版同款）
+            const c = lootPlayers?.find((q) => q.slot === d.slot);
+            spawn(d.id, d.n, c ? c.x : this.cx, c ? c.y : this.cy);
+            continue;
+          }
           const drop = spawn(d.id, d.n);
           // 凝胶染色（CommonCode.ModifyItemDropFromNPC）：gel(item 23) 由 type 1 掉落且
           // netID∉{-1,-2,-5,-6} → item.color = npc.color（当前渐变色）

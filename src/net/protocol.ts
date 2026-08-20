@@ -225,6 +225,12 @@ export const enum NetModule {
                   //   f32×4 pos/move + i32 uniqueInfo + u8 invoker）。原版同步面 = 全部
                   //   ParticleOrchestra 编排特效（剑刃轨迹/物品转移/微光爆发族……），
                   //   纯 dust 不上网；本仓已移植的编排消费/生产子集见 syncModules.ts 头注
+  InstancedLoot = 14, // per-client 掉落（原版 msg90 InstancedItem 的本仓 module 化,依
+                  //   LeashedEntity=13 先例取 13+1；掉落结算权威端【仅房主/SimHost】上行,
+                  //   服务器按 targetSlot 定向转发——其他端不可见不可拾）。语义 =
+                  //   CommonCode.DropItemLocalPerClientAndSetNPCMoneyTo0（CommonCode.cs:35-58）：
+                  //   Boss 袋族（bossBag 规则）各交互端各得一份 instanced 副本,
+                  //   接收端本地生成 netLocalOnly 掉落（不上报 msg21——仅本端玩家可见可拾）
   Ambience = 100, // 天空氛围（原版 NetAmbienceModule——注册序 id=3 被 JoinLeave 占用，
                   //   依 CreativePowerPermissions=9 先例走仓库私有大号 id；语义 1:1）：
                   //   S→C {u8 playerSlot, i32 seed, u8 skyEntityType}——服务器 AmbienceServer

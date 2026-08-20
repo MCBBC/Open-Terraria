@@ -1,6 +1,23 @@
 // 实体与 Game 交互的接口（避免循环依赖，只放类型）
 import type { World } from '../world/World';
 
+/** MP 掉落结算玩家表条目（GameHooks.lootPlayers；2026-08-20 per-client 批）。
+ *  原版对应：closestPlayer = Player.FindClosest（Player.cs:11666-11689 曼哈顿
+ *  中心距,active&&!dead）——luck/hp/mana 注入取最近者；per-client 族
+ *  （bossBag/masterAll）按 interacting（npc.playerInteraction[slot]）门控 */
+export interface LootPlayerCtx {
+  slot: number;
+  /** 玩家中心 px（perPlayer 掉落落点 = player.position,CommonCode.cs:73） */
+  x: number; y: number;
+  dead: boolean;
+  /** Player.luck（msg16 尾段镜像；旧端无尾段缺省 0） */
+  luck: number;
+  hp: number; hpMax: number;
+  mana: number; manaMax: number;
+  /** npc.playerInteraction[slot]（打击过该 NPC） */
+  interacting: boolean;
+}
+
 export interface GameHooks {
   world: World;
   /** 主角(投射物命中判定用) */
@@ -11,6 +28,20 @@ export interface GameHooks {
    *  时 Enemy.targetClosest 回退 [player]（单机/测试 mock 零回归）。顺序即槽序
    *  近似（本地=房主槽 0 最先，原版平距严格 < 比较取先扫描者） */
   candidatePlayers?(): import('./Player').Player[];
+  /** MP 掉落结算玩家表（NPCLoot :79634 closestPlayer / per-client 族的数据源；
+   *  2026-08-20 per-client 批）。Game 实现 = [本地(slot=mySlot) + 远端代理
+   *  （msg13 位 + msg16 尾段 hp/mana/luck 镜像）]；SimHost 实现 = room.onlineClients
+   *  × enemy 交互集。interacting = npc.playerInteraction[slot]（Enemy.interactionSlots）。
+   *  返回 undefined = 单人语义（结算走旧路径,resolveDrops lootPlayers 缺席零变化） */
+  lootPlayers?(enemy: import('./Enemy').Enemy): LootPlayerCtx[] | undefined;
+  /** per-client 掉落发放（CommonCode.DropItemLocalPerClientAndSetNPCMoneyTo0
+   *  netMode==2 段的等价）：targetSlot=本端 → 本地 netLocalOnly 掉落（不同步,
+   *  仅本端玩家可拾,原版 instanced=true + reservedFor=myPlayer 语义）；访客槽 →
+   *  module14 定向下发。结算端（房主/SimHost）调用 */
+  grantInstancedLoot?(
+    targetSlot: number, x: number, y: number, itemKey: string,
+    stack: number, vx: number, vy: number,
+  ): void;
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];
   /** 城镇 NPC 自卫弹入投射物桶(attackUpdate 消费) */
@@ -69,6 +100,11 @@ export interface GameHooks {
   ): void;
   /** 拾取物品后刷新 UI（掉落物实体调用） */
   notifyInventoryChanged(): void;
+  /** 编排粒子广播（ParticleOrchestrator.BroadcastOrRequestParticleSpawn 联机半边：
+   *  调用方本地视觉已生成,此钩子只送服务器中继（module8,排除发送者广播）。
+   *  type = ParticleOrchestraType 注册序（net/syncModules）；moveX/Y = 位移型
+   *  编排的 MovementVector（ShimmerTownNPCSend）;缺省 = 单机/无网静默 */
+  broadcastParticleOrchestra?(type: number, x: number, y: number, moveX?: number, moveY?: number): void;
   /** 原版 Dust 池（翅膀尘埃批引入；Game 本体实例化，缺省 = 不生成） */
   vanillaDust?: import('../fx/VanillaDust').VanillaDust;
   /** 世界坐标光源（翅膀 28 的 Bottom 微光等实体侧 AddLight） */

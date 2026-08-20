@@ -10,7 +10,8 @@
 //     死亡，Player.cs:11475/:32923/:36990/:37068/:42313/:42446/:33101）——落地仍挂
 //  3. 钩爪 damage=0 且 AI_007 无 NPC 目标段 → 钩中敌人无任何效果（蝙蝠钩亦然；
 //     蝙蝠钩特性 = 牵引 14（Player.cs:22565-22566），非自动瞄准）
-//  4. 绳渲染 = 线段+钩头（原版 ChainID 分节链贴图）——视觉近似，玩法数值 1:1
+//  4. 绳渲染已 1:1 分节链贴图（src/data/grappleChains.ts，ChainID 表；见
+//     tests/grapple-chain.test.ts）——仅贴图未就绪时回退线段+方块（下帧自愈）
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';

@@ -17,7 +17,8 @@
 //   tryRoll/rollCoins 双轮极值/rollHeartsAndStars）。遗留登记（非 luck 链缺口）：
 //   四叶草获取链——5576 乌鸦 301 掉落 1/10（本表已载）/5574 割成熟药草 1/1000
 //   （DropBait.dropCloverRoll）/5575 微光转化 5574→5575（vanilla-shimmer 已载）;
-//   多人 closestPlayer 近似为本地玩家（原版 FindClosest,Enemy 侧注入点）。
+//   多人 luck 已按 closestPlayer 注入（Enemy 侧 FindClosest 1:1,lootPlayers 表
+//   承载,2026-08-20 per-client 批一并落地——旧"近似为本地玩家"登记撤销）。
 // 偏差（记录）：NotFromStatue 恒 true；
 // 天空盒/DST 联动条件恒 false；月事件四条件已实现（ctx.moonEvent 注入，见 evalCond）。
 // RedHatSkeletron/MissingTwin/EmpressOfLightIsGenuinelyEnraged 经 ctx.ai3/
@@ -95,8 +96,18 @@ export interface NpcDropCtx {
   statueSpawned?: boolean;
   /** 玩家血蓝（心/星条件 statLife<statLifeMax2 等） */
   hp: number; hpMax: number; mana: number; manaMax: number;
-  /** 玩家幸运（Player.luck，RecalculateLuck :28671；luck=0 时全链退化为 rand.Next 语义） */
+  /** 玩家幸运（Player.luck，RecalculateLuck :28671；luck=0 时全链退化为 rand.Next 语义）。
+   *  MP 掉落结算端（房主/SimHost）注入 closestPlayer 的 luck（Player.FindClosest
+   *  选最近者,Player.cs:11666-11689；NpcDrops.ts:11-20 登记的单人近似由本表替代） */
   luck?: number;
+  /** MP 掉落结算玩家表（结算端构造：Game = [本地+msg13/16 代理],SimHost = 在线端 ×
+   *  enemy 交互集）。在场 = per-client 族语义启用（bossBag/masterAll 按原版
+   *  CommonCode.cs:35-88 的 netMode==2 段求值,ResolvedDrop 带 scope）;
+   *  缺席 = 单人语义（scope 不标,直接掉——今日行为零变化） */
+  lootPlayers?: Array<{ slot: number; interacting: boolean }>;
+  /** Main.CurrentFrameFlags.ActivePlayersCount（DropOneByOne 四塔碎片的每玩家堆叠
+   *  加成,DropOneByOne.cs:63-64）；单人缺省 1 */
+  activePlayers?: number;
   /** 月事件（南瓜月/霜月）上下文：kind 1=霜月 2=南瓜月；wave=当前波（无事件缺省 0）。
    *  四个 wave-gate 掉落条件的数据源（Conditions.cs:55-229），Game 击杀掉落处注入 */
   moonEvent?: { kind: 1 | 2; wave: number };
@@ -128,7 +139,18 @@ export interface NpcDropCtx {
   extras?: DropExtras;
 }
 
-export interface ResolvedDrop { id: number; n: number; }
+export interface ResolvedDrop {
+  id: number; n: number;
+  /** per-client 族标记（仅 ctx.lootPlayers 在场=MP 结算端时设置）：
+   *  'local'（DropLocalPerClientAndResetsNPCMoneyTo0,bossBag 族）= 求值端单掷已过,
+   *    结算层对每个交互端各发一份 instanced 副本（msg90/module14 语义）；
+   *  'perPlayer'（DropPerPlayerOnThePlayer,masterAll 族）= 已按玩家独立掷,
+   *    slot=受奖玩家,结算层在其头顶落普通世界掉落（广播物品）。
+   *  undefined = 单人语义/共享世界掉落（照常） */
+  scope?: 'local' | 'perPlayer';
+  /** scope='perPlayer' 时的受奖玩家槽位 */
+  slot?: number;
+}
 export interface NpcDropOutcome {
   drops: ResolvedDrop[];
   /** 规则内 BossBag/local/perPlayer 清零 → 钱币管线跳过 */
@@ -376,8 +398,14 @@ function tryRoll(ctx: NpcDropCtx, rule: Rule): boolean {
   return rollLuck(ctx, denom, num);
 }
 
-function pushDrop(out: NpcDropOutcome, id: number, n: number) {
-  if (n > 0) out.drops.push({ id, n });
+function pushDrop(out: NpcDropOutcome, id: number, n: number, scope?: 'local' | 'perPlayer', slot?: number) {
+  if (n > 0) out.drops.push(scope ? { id, n, scope, slot } : { id, n });
+}
+
+/** DropPerPlayerOnThePlayer 的逐玩家独立掷（CommonCode.cs:70 `rng.Next(denom)<num`，
+ *  不走 Luck）；denom=1 时 Next(1)=0<1 恒中（与 VanillaDrop 求值语义一致） */
+function rollPerPlayer(ctx: NpcDropCtx, denom: number, num: number): boolean {
+  return ctx.rng.int(0, Math.max(1, denom) - 1) < num;
 }
 
 function condPass(rule: Rule, ctx: NpcDropCtx): boolean | null {
@@ -440,12 +468,14 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       break;
     }
     case 'bossBag': {
-      // BossBag = DropBasedOnExpertMode(DropNothing, local(bag)+value=0)；
+      // BossBag = DropBasedOnExpertMode(DropNothing, DropLocalPerClientAndResetsNPCMoneyTo0(bag)+value=0)；
       // DropNothing 状态 = DoesntFillConditions（非专家分支不进 OnSuccess 链）
       if (rule.cond && !evalCond(rule.cond.name, rule.cond.args ?? [], ctx)) { state = 'failedCond'; break; }
       if (ctx.isExpert) {
-        // local 规则 rng.Next(1)<1 恒过 → 掉袋 + 清 value
-        pushDrop(out, rule.item, 1);
+        // local 规则 rng.Next(1)<1 恒过 → 掉袋 + 清 value。
+        // MP：结算端标记 scope='local'——各交互端各得一份 instanced 副本
+        // （CommonCode.cs:35-58 netMode==2 段,原版掷骰单次所有端同结果）
+        pushDrop(out, rule.item, 1, ctx.lootPlayers ? 'local' : undefined);
         out.zeroValue = true;
         state = 'success';
       } else state = 'failedCond';
@@ -456,13 +486,19 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       else state = 'failedCond';
       break;
     }
-    case 'masterAll': { // DropBasedOnMasterMode(DropNothing, perPlayer(item, denom, IsMasterMode))
+    case 'masterAll': { // DropBasedOnMasterMode(DropNothing, DropPerPlayerOnThePlayer(item, denom, IsMasterMode))
       if (ctx.isMaster) {
         // DropPerPlayerOnThePlayer → CommonCode.DropItemForEachInteractingPlayerOnThePlayer
-        // （CommonCode.cs:57-70）：掷骰 rng.Next(denom)<1（不走 Luck）；且无论掷中与否
-        // 收尾 `npc.value = 0f`——即大师模式 Boss 掉宠物这条恒清钱币（曾漏：宠物+钱币双掉）
+        // （CommonCode.cs:60-88）：服务器段=逐交互玩家独立掷 rng.Next(denom)<1（不走 Luck,
+        // 同一 rng 流按槽序）；单人段=单掷。无论掷中与否收尾 `npc.value = 0f`——即
+        // 大师模式 Boss 掉宠物/遗物这条恒清钱币（曾漏：宠物+钱币双掉）
         out.zeroValue = true;
-        if ((rule.denom ?? 1) > 1 && ctx.rng.int(0, (rule.denom ?? 1) - 1) < 1) {
+        if (ctx.lootPlayers) {
+          for (const pl of [...ctx.lootPlayers].sort((a, b) => a.slot - b.slot)) {
+            if (!pl.interacting) continue;      // npc.playerInteraction[slot]（:71）
+            if (rollPerPlayer(ctx, rule.denom ?? 1, 1)) pushDrop(out, rule.item, 1, 'perPlayer', pl.slot);
+          }
+        } else if (rollPerPlayer(ctx, rule.denom ?? 1, 1)) {
           pushDrop(out, rule.item, 1);
         }
         state = 'success';
@@ -470,13 +506,32 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       break;
     }
     case 'local': case 'perPlayer': {
-      // DropLocalPerClientAndResetsNPCMoneyTo0：rng.Next 掷骰 + value 清零（单人化=直接掉）
+      // 直接注册的 DropLocalPerClient/DropPerPlayerOnThePlayer（1.4.5.6 注册表为空——
+      // 两族全部经由 BossBag/masterAll 包装注册,提取器保留 kind 供重建后命中）：
+      // 'local'=单掷+逐交互端 instanced 副本 + value 清零（仅掷中时,CommonCode.cs:46-58）；
+      // 'perPlayer'=逐玩家独立掷 + 落该玩家 + value 恒清（:60-88）
       if (rule.cond && !evalCond(rule.cond.name, rule.cond.args ?? [], ctx)) { state = 'failedCond'; break; }
-      if (ctx.rng.int(0, Math.max(1, rule.denom ?? 1) - 1) < 1) {
-        pushDrop(out, rule.item, ctx.rng.int(rule.min ?? 1, rule.max ?? 1));
+      if (rule.k === 'local') {
+        if (ctx.rng.int(0, Math.max(1, rule.denom ?? 1) - 1) < 1) {
+          pushDrop(out, rule.item, ctx.rng.int(rule.min ?? 1, rule.max ?? 1), ctx.lootPlayers ? 'local' : undefined);
+          out.zeroValue = true;
+          state = 'success';
+        } else state = 'failedRoll';
+      } else {
         out.zeroValue = true;
-        state = 'success';
-      } else state = 'failedRoll';
+        if (ctx.lootPlayers) {
+          for (const pl of [...ctx.lootPlayers].sort((a, b) => a.slot - b.slot)) {
+            if (!pl.interacting) continue;
+            if (rollPerPlayer(ctx, rule.denom ?? 1, 1)) {
+              pushDrop(out, rule.item, ctx.rng.int(rule.min ?? 1, rule.max ?? 1), 'perPlayer', pl.slot);
+            }
+          }
+          state = 'success';
+        } else if (rollPerPlayer(ctx, rule.denom ?? 1, 1)) {
+          pushDrop(out, rule.item, ctx.rng.int(rule.min ?? 1, rule.max ?? 1));
+          state = 'success';
+        } else state = 'failedRoll';
+      }
       break;
     }
     case 'gate': {
@@ -525,7 +580,9 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       {
         const expert = ctx.isExpert;
         const chunks = ctx.rng.int(12, 20);                    // Next(12, 21)
-        const players = 1;                                     // Main.CurrentFrameFlags.ActivePlayersCount（单人）
+        // Main.CurrentFrameFlags.ActivePlayersCount（:63-64 每活跃玩家 +1/块——
+        // MP 结算端注入表长;单人缺省 1）
+        const players = Math.max(1, ctx.activePlayers ?? 1);
         const minStack = (expert ? 1 : 1) + players * (expert ? 1 : 0);
         const maxStack = (expert ? 4 : 3) + players * (expert ? 1 : 0);
         for (let i = 0; i < chunks; i++) {

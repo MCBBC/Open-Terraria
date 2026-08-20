@@ -12,7 +12,8 @@
 //
 // 等价边界（与原版差异，见 tests/grapple.test.ts 头注）：
 //  · 挂墙当帧不计牵引（本仓玩家先于弹桶积分——锚点表下一 tick 才被消费，16.7ms）
-//  · 绳渲染为线段+钩头方块（原版 Chain 分节贴图，ChainID 表）——视觉近似，玩法数值 1:1
+//  · 链/钩头渲染已 1:1 分节贴图（src/data/grappleChains.ts，ChainID 表）；贴图未就绪
+//    或缺失时回退旧线段+方块渲染（下帧自愈，全表贴图已解包=恒不触发）
 //  · 935 皇后钩瞬移走 moveAndCollide 逐步步进（原版 TileCollision 150 步 ×12px 同构）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
@@ -26,6 +27,10 @@ import {
 import type { HookProjStats } from '../data/grappleHooks';
 import { TILE_DEFS } from '../data/tiles';
 import { projectileData } from '../data/vanillaProjectiles';
+import {
+  hookChainOf, hookHeadOf, SKELETRON_HAND_ROT,
+} from '../data/grappleChains';
+import type { HookChainSpec } from '../data/grappleChains';
 
 /** ai[0] 三态（AI_007 各分支） */
 export const GRAPPLE_FLY = 0;    // :49705 分支
@@ -78,6 +83,13 @@ export class GrappleProj extends Entity {
   /** 锚定格（挂墙后写入；回收前保留） */
   latchX = -1;
   latchY = -1;
+  /** 446 反重力钩 localAI[0]（0..27 循环，Projectile.cs:49686-49696）——链贴图
+   *  帧行 = ⌊lai0/7⌋ ∈ 0..3（Main.cs:28895-28900），纯视觉 */
+  lai0 = 0;
+  /** 652 静态钩钩头帧（6 帧循环，Projectile.cs:49697-49704；projFrames=6 Main.cs:8450）——纯视觉 */
+  headFrame = 0;
+  /** 652 帧计数器（++frameCounter >= 7 推帧） */
+  private frameCounter = 0;
   /** 本帧是否处于锚定态的锚点登记源（GetGrapplingForces 只取 ai0==2） */
   get latched(): boolean { return this.ai0 === GRAPPLE_LATCH; }
 
@@ -140,6 +152,19 @@ export class GrappleProj extends Entity {
     }
     // :49668-49671 距玩家超 2500 → Kill
     if (dist > HOOK_KILL_DISTANCE) { this.kill(); return; }
+    // :49681-49684 256 骷髅王之手：rotation 覆写 = atan2 + 3.9250002（钩头绘制用；
+    //  通用 atan2−1.57 在 :49658 已赋）——纯视觉，GetGrapplingForces 仅 865 消费 rotation
+    if (this.projType === 256) this.rot = Math.atan2(dy, dx) + SKELETRON_HAND_ROT;
+    // :49685-49696 446 反重力钩：localAI[0] 每 tick +1、≥28 归 0（链帧行驱动）——纯视觉。
+    //  同段 AddLight(mountedCenter,(0,0.4,0.3))+PlotTileLine 沿线发光移至 draw()（本仓
+    //  光照引擎经 Renderer 暴露，draw 期注册 perFrame 点光同效）
+    if (this.projType === 446) { this.lai0 += 1; if (this.lai0 >= 28) this.lai0 = 0; }
+    // :49697-49704 652 静态钩：++frameCounter ≥7 → 推帧（6 帧循环）——纯视觉
+    if (this.projType === 652 && ++this.frameCounter >= 7) {
+      this.frameCounter = 0;
+      this.headFrame += 1;
+      if (this.headFrame >= 6) this.headFrame = 0;
+    }
 
     if (this.ai0 === GRAPPLE_FLY) {
       this.stepFly(game, dist);
@@ -253,11 +278,155 @@ export class GrappleProj extends Entity {
     this.playerRef()?.unregisterGrapple(this);
   }
 
-  // ---- 渲染（视觉近似：链 = 线段 + 钩头；原版 Chain 分节 ChainID 表）----
-  draw(r: { ctx: CanvasRenderingContext2D }, _cam: unknown): void {
+  // ---- 渲染（Main.cs DrawProjDirect 链段 if-else 链 :28188-29206 + 通用钩头绘制 1:1）----
+  draw(r: GrappleDrawHost, _cam: unknown): void {
     const p = this.playerRef();
     if (!p) return;
     const ctx = r.ctx;
+    const spec = hookChainOf(this.projType);
+    const atlas = r.atlas ?? null;
+    // 链贴图（ensureVImage 懒加载：未就绪返回 null → 本帧走旧线段兜底，下帧自愈）
+    const img = spec && atlas ? asImg(atlas.ensureVImage(`vanilla/${spec.tex}`)) : null;
+    const glow = spec?.glowTex && atlas ? asImg(atlas.ensureVImage(`vanilla/${spec.glowTex}`)) : null;
+    const head = atlas ? asImg(atlas.ensureVImage(`vanilla/Projectile_${this.projType}.png`)) : null;
+    if (spec && img) this.drawChain(r, p, spec, img, glow);
+    else this.drawLegacyChain(ctx, p);                       // 兜底（全表贴图已解包，恒不触发）
+    if (spec?.lineLight) this.emitLineLight(r, p, spec.lineLight); // 446/646-649 端点+沿线发光
+    if (head) this.drawHead(ctx, head);
+    else this.drawLegacyHead(ctx);                            // 兜底
+  }
+
+  /** 分节链拼装（各分支几何统一参数化，见 src/data/grappleChains.ts 逐型号行号） */
+  private drawChain(r: GrappleDrawHost, p: Player, spec: HookChainSpec,
+    img: Img2D, glow: Img2D | null): void {
+    const ctx = r.ctx;
+    const mcx = p.cx, mcy = p.cy;                    // MountedCenter（:49659 同源）
+    let px = this.cx, py = this.cy;                  // vectorN = 弹体中心（各分支同）
+    let dx = mcx - px, dy = mcy - py;
+    const texW = img.width, texH = img.height;
+    const frameH = spec.frameRows ? (spec.frameH ?? texH / 4) : 0;
+    const stepPx = spec.step ?? (spec.frameRows ? frameH : texH); // num112 = 贴图高
+    const stopDist = spec.stop ?? stepPx + 1;        // 大分支 :28932 `< num112 + 1f`
+    // 旋转 = 初始链向 atan2 − 1.57（各分支循环外一次；256 另 −0.785）。
+    // 32 型取偏移前方向（:28196 早于 :28203 反退）；大分支 hookBack 族取偏移后
+    // 方向（:28915 rotation16 在 num113 偏移块之后）
+    const preRot = Math.atan2(dy, dx) - Math.PI / 2 + (spec.rotOff ?? 0);
+    if (spec.backOff != null) {                      // 32 型起点反退 8（:28198-28208）
+      if (dx === 0 && dy === 0) return;              // :28202-28204 零向量不铺链
+      const k = spec.backOff / Math.hypot(dx, dy);
+      px -= dx * k; py -= dy * k;
+      dx = mcx - px; dy = mcy - py;
+    }
+    if (spec.hookBack != null) {                     // 大分支锚端偏移 num113（:28890-28900）
+      const a = this.rot - Math.PI / 2;              // vector19 = (cos(rot−1.57), sin(rot−1.57))
+      px -= Math.cos(a) * spec.hookBack;
+      py -= Math.sin(a) * spec.hookBack;
+      const ux = mcx - px, uy = mcy - py;
+      const ul = Math.hypot(ux, uy) || 1;
+      px -= (ux / ul) * stepPx / 2;                  // center -= 归一化链向 × num112/2
+      py -= (uy / ul) * stepPx / 2;
+      dx = mcx - px; dy = mcy - py;
+    }
+    const rot = spec.backOff != null ? preRot
+      : Math.atan2(dy, dx) - Math.PI / 2 + (spec.rotOff ?? 0);
+    const fo: [number, number] = spec.frameOrigin ?? [texW / 2, texH / 8]; // 帧行 origin
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    if (spec.alphaFactor != null) ctx.globalAlpha = spec.alphaFactor; // 396 ×155/255
+    let ci = 0;
+    for (;;) {
+      const dist = Math.hypot(dx, dy);
+      if (!Number.isFinite(dist) || dist < stopDist) break;   // NaN 门 + 残距停铺
+      if (spec.segLightCycle) {          // 332：推进前取格、四色循环（:28796-28814）
+        const c = spec.segLightCycle[ci % 4];
+        r.lighting?.addLight(Math.floor(px / TILE), Math.floor(py / TILE), c[0], c[1], c[2]);
+      }
+      const k = stepPx / dist;
+      px += dx * k; py += dy * k;                   // 推进一节
+      dx = mcx - px; dy = mcy - py;
+      const skip = spec.skipFirst === true && ci === 0;       // 865/935 首节不绘制
+      if (!skip) {
+        const row = spec.frameRows === 'seg' ? ci % 4
+          : spec.frameRows === 'tick7' ? Math.floor(this.lai0 / 7) : -1;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(rot);
+        if (row >= 0) {
+          ctx.drawImage(img, 0, row * frameH, texW, frameH, -fo[0], -fo[1], texW, frameH);
+          if (glow) {
+            ctx.globalAlpha = 127 / 255;
+            ctx.drawImage(glow, 0, row * frameH, texW, frameH, -fo[0], -fo[1], texW, frameH);
+            ctx.globalAlpha = spec.alphaFactor ?? 1;
+          }
+        } else {
+          ctx.drawImage(img, -texW / 2, -texH / 2);           // origin = 贴图中心
+          if (glow) {                                         // 646-649 发光层（α=127/255）
+            ctx.globalAlpha = 127 / 255;
+            ctx.drawImage(glow, -glow.width / 2, -glow.height / 2);
+            ctx.globalAlpha = spec.alphaFactor ?? 1;
+          }
+        }
+        ctx.restore();
+      }
+      if (spec.segLight) {               // 488：推进后取格（:28971 AddLight(center)）
+        const c = spec.segLight;
+        r.lighting?.addLight(Math.floor(px / TILE), Math.floor(py / TILE), c[0], c[1], c[2]);
+      }
+      ci++;
+    }
+    ctx.restore();
+  }
+
+  /** 钩头本体（通用绘制公式 Main.cs:29886 同构：pivot = (盒左+贴图宽/2+n144,
+   *  盒上+盒高/2)、origin = (贴图宽/2, 盒高/2+n143)、rotation = AI_007 的
+   *  proj.rotation、无翻转（AI_007 不改 spriteDirection）） */
+  private drawHead(ctx: CanvasRenderingContext2D, head: Img2D): void {
+    const hs = hookHeadOf(this.projType);
+    const frames = hs.frames ?? 1;
+    const rowH = Math.floor(head.height / frames);
+    const row = frames > 1 ? this.headFrame : 0;
+    const n143 = hs.n143 ?? 0, n144 = hs.n144 ?? 0;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(this.x + head.width / 2 + n144, this.y + this.projH / 2);
+    ctx.rotate(this.rot);
+    ctx.drawImage(head, 0, row * rowH, head.width, rowH,
+      -head.width / 2, -(this.projH / 2 + n143), head.width, rowH);
+    ctx.restore();
+  }
+
+  /** 446/646-649 端点 + 沿线 8px 逐格发光（AI_007 :49685-49727 原版 AI 期执行，
+   *  本仓移至 draw 期——Renderer.lighting perFrame 点光同效；
+   *  PlotTileLine = Utils.cs:2428 + PlotLine :2329 + CastLightOpen 门 :729-743） */
+  private emitLineLight(r: GrappleDrawHost, p: Player, rgb: readonly [number, number, number]): void {
+    const lt = r.lighting;
+    if (!lt) return;
+    const hx = this.cx, hy = this.cy, mx = p.cx, my = p.cy;
+    lt.addLight(Math.floor(mx / TILE), Math.floor(my / TILE), rgb[0], rgb[1], rgb[2]); // mountedCenter
+    lt.addLight(Math.floor(hx / TILE), Math.floor(hy / TILE), rgb[0], rgb[1], rgb[2]); // Center
+    const st = r.world?.store;
+    if (!st) return;
+    // ±width/2(4px) 垂直带 → tile 偏移（通常 (0,0)/(±1,0)）
+    const len = Math.hypot(mx - hx, my - hy) || 1;
+    const ox = (-(my - hy) / len) * 4, oy = ((mx - hx) / len) * 4;
+    const stx = Math.floor(hx / TILE), sty = Math.floor(hy / TILE);
+    const etx = Math.floor(mx / TILE), ety = Math.floor(my / TILE);
+    const minOX = Math.floor((hx - ox) / TILE) - stx, minOY = Math.floor((hy - oy) / TILE) - sty;
+    const maxOX = Math.floor((hx + ox) / TILE) - stx, maxOY = Math.floor((hy + oy) / TILE) - sty;
+    // CastLightOpen：界外停；!nactive || solidTop || !solid → 加光
+    // （tileSolid ≈ solid∪platform、tileSolidTop ≈ platform → 门化简 = !isActive || !solid）
+    const plot = (x: number, y: number): boolean => {
+      if (!st.inBounds(x, y)) return false;
+      if (st.isActive(x, y) && TILE_DEFS[st.get(x, y)]?.solid === true) return true;
+      lt.addLight(x, y, rgb[0], rgb[1], rgb[2]);
+      return true;
+    };
+    plotLine(stx, sty, etx, ety,
+      (x, y) => plotLine(x + minOX, y + minOY, x + maxOX, y + maxOY, plot, false), true);
+  }
+
+  /** 兜底：链贴图未就绪/缺失时旧"线段"渲染（等价边界；下帧自愈） */
+  private drawLegacyChain(ctx: CanvasRenderingContext2D, p: Player): void {
     const chain = HOOK_CHAIN_COLOR[this.projType] ?? '#9a92b8';
     ctx.save();
     ctx.strokeStyle = chain;
@@ -266,13 +435,68 @@ export class GrappleProj extends Entity {
     ctx.moveTo(p.x + p.w / 2, p.y + 12);
     ctx.lineTo(this.cx, this.cy);
     ctx.stroke();
-    ctx.fillStyle = this.ai0 === GRAPPLE_LATCH ? '#E8E4F8' : chain;
-    ctx.fillRect(this.x, this.y, this.projW, this.projH);
     ctx.restore();
+  }
+
+  /** 兜底：钩头贴图未就绪/缺失时旧"方块"渲染 */
+  private drawLegacyHead(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = this.ai0 === GRAPPLE_LATCH ? '#E8E4F8' : (HOOK_CHAIN_COLOR[this.projType] ?? '#9a92b8');
+    ctx.fillRect(this.x, this.y, this.projW, this.projH);
   }
 }
 
-/** 各型号线色（视觉近似——原版为 ChainID 分节链贴图，本仓等价线段） */
+/** draw() 宿主（Renderer 的结构子集；测试可注入 mock） */
+export interface GrappleDrawHost {
+  ctx: CanvasRenderingContext2D;
+  /** SpriteAtlas 懒加载取图（未就绪返回 null） */
+  atlas?: { ensureVImage(file: string): CanvasImageSource | null } | null;
+  /** 光照引擎（332/488 段光 + 446/646-649 沿线光；无则跳过） */
+  lighting?: { addLight(x: number, y: number, r: number, g: number, b: number): void } | null;
+  /** 世界（沿线光的 CastLightOpen 实心门用） */
+  world?: { store: ChainLightStore } | null;
+}
+
+/** 沿线光的 tile 存取子集 */
+interface ChainLightStore {
+  inBounds(x: number, y: number): boolean;
+  isActive(x: number, y: number): boolean;
+  get(x: number, y: number): number;
+}
+
+/** 带尺寸的贴图（HTMLImageElement/ImageBitmap） */
+type Img2D = CanvasImageSource & { width: number; height: number };
+function asImg(src: CanvasImageSource | null): Img2D | null {
+  if (!src) return null;
+  const w = (src as Img2D).width, h = (src as Img2D).height;
+  return Number.isFinite(w) && Number.isFinite(h) && w > 0 && h > 0 ? (src as Img2D) : null;
+}
+
+/** Utils.PlotLine（:2329-2368）1:1：Bresenham，jump=true 跳过阶梯次点，终点不绘 */
+function plotLine(x0: number, y0: number, x1: number, y1: number,
+  plot: (x: number, y: number) => boolean, jump = true): boolean {
+  if (x0 === x1 && y0 === y1) return plot(x0, y0);
+  const steep = Math.abs(y1 - y0) > Math.abs(x1 - x0);
+  if (steep) {
+    let t = x0; x0 = y0; y0 = t;
+    t = x1; x1 = y1; y1 = t;
+  }
+  const dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+  let err = (dx / 2) | 0;
+  let y = y0;
+  const sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  const emit = (i: number): boolean => (steep ? plot(y, i) : plot(i, y));
+  for (let i = x0; i !== x1; i += sx) {
+    if (!emit(i)) return false;
+    err -= dy;
+    if (err >= 0) continue;
+    y += sy;
+    if (!jump && !emit(i)) return false;
+    err += dx;
+  }
+  return true;
+}
+
+/** 兜底线色（贴图缺失时旧渲染用；正常路径不走） */
 const HOOK_CHAIN_COLOR: Record<number, string> = {
   13: '#9a92b8', 32: '#7BB254', 73: '#5A8FE8', 74: '#E85A5A', 165: '#D8D8E0',
   230: '#A02BE0', 231: '#E8B23A', 232: '#3A6AE8', 233: '#2ACC66', 234: '#D03A3A',

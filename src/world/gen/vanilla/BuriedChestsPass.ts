@@ -22,6 +22,7 @@ const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
 const SNOW = TILE_BY_KEY['snow']!;
 const ICE = TILE_BY_KEY['ice']!;
 const THIN_ICE = TILE_BY_KEY['thin_ice']!;
+const FROZEN_SLIME = TILE_BY_KEY['v_197_frozen_slime_block']!;
 const ALTAR = TILE_BY_KEY['v_26_altars']!;
 const TALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 const LARVA = TILE_BY_KEY['v_231_larva']!;
@@ -811,14 +812,33 @@ function placeBuriedChestInner(
   // (tile467&&style24) || (无主件 && 位置 && 脚下冰系)。★原版显式传 style 11
   // 也进本池（HouseBuilder 冰屋正是此路径）——旧实现 style===undefined 单门漏此
   const tBelow = st.type[st.idx(i, gy)];
+  // ★AAAAAA：cs:36112 冰系地基四元 {147,161,162,197}——197 冻胶块曾漏。
   if ((tile === CHEST && argStyle === 11) || (tile === CHEST2 && argStyle === 24)
     || (!mainId && gy >= gs.worldSurface + 25 && gy <= st.h - 205
-      && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE))) {
+      && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE || tBelow === FROZEN_SLIME))) {
     flags.ice = true;
+    // ★AAAAAA：cs:36118 `if (chestTileType == 21) num9 = 11;`——冰箱帧（fx=36*11）
+    //   曾漏（loot/掷流全对但帧写 style1）→ #101 DeadMans 金箱 style 过滤错位
+    //   （(1546,552) 等四箱金标 sty11 vs 本仓 sty1 实证）。
+    if (tile === CHEST) style = 11;
     if (!mainId) {
       mainId = [670, 724, 950, 1319, 987, 1579][rng.int(0, 5)]; // cs:36121-36125
       if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机
       if (rng.int(0, 49) === 0) mainId = 669; // 1/50 鱼
+    }
+  }
+  // ---- 天空箱降档门（cs:36180-36189，原版位于 hell 门后）：style12 的落定格
+  //   （i-1, gy-1）邻墙非 244 → num9=0 + num10=0 + wooden flag（地表蓄水池支的
+  //   天空箱坠到地表土墙带走此门——(532,234) 金标 sty0/木制回旋镖 loot vs 本仓
+  //   sty12/天空 loot 帧债实证）；邻墙 244 → flag6 天空主题。零掷（getGood 分支
+  //   普通 seed 不达）。
+  if (tile === CHEST && style === 12) {
+    if (st.wall[st.idx(i - 1, gy - 1)] !== 244) {
+      style = 0;
+      mainId = 0; mainKey = null;
+      flags.wooden = true; flags.sky = false;
+    } else {
+      flags.sky = true;
     }
   }
   // ---- 沙漠箱门（cs:36066-36091 1:1）：三析取——(tile467&&style10) ||

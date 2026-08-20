@@ -526,8 +526,15 @@ export function runGemTreesPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (treeType) growGemTree(st, rng, x, y, treeType);
       }
       // 地下钟乳石（:22239-22262）：非海洋、空格、1/5 → 上下邻石族清坡 + PlaceTight
+      //   ★AAAAAA：族判定读**裸 type**（ghost 含）——原版 `Main.tile[i, j±1].type == 1
+      //   ||…` 不查 active()，非活性格的残留 type（(570,437) ghost s1 实证）也命中
+      //   清坡；曾 sheetActive 只读活性 → 漏清 5 格 slope 残差（#103 尾差）。
       if (!oceanDepths(x, y) && !st.flags[st.idx(x, y)] && rng.nextInt(5) === 0) {
-        const above = sheetActive(x, y - 1), below = sheetActive(x, y + 1);
+        const ghostSheet = (xx: number, yy: number): number => {
+          if (!st.inBounds(xx, yy)) return -1;
+          return SHEET[st.type[st.idx(xx, yy)]] ?? -1;
+        };
+        const above = ghostSheet(x, y - 1), below = ghostSheet(x, y + 1);
         if (rockFamily(above) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {
           st.slope[st.idx(x, y - 1)] = 0;
         }

@@ -12,6 +12,7 @@ import { TEAM_COLORS } from '../src/stats/Pvp';
 import { PVP_TEAM_BUTTONS, pvpIconFrame, PVP_COOLDOWN_MS } from '../src/ui/UI';
 import {
   cycleMapStyle, stepMapAlpha, MAP_ALPHA_MIN, MAP_ALPHA_STEP, MAP_STYLE_MAX, MAP_STYLE_MIN,
+  mapChestHoverName, mapHoverNameKey,
 } from '../src/render/Renderer';
 import { options } from '../src/core/Options';
 
@@ -140,5 +141,28 @@ describe('③ MapStyle/MapAlpha 键族（Player.cs:24596-24653）', () => {
     expect(clamp(2, 1)).toBe(1);
     expect(clamp(0, 0.35)).toBeCloseTo(0.01, 9);
     expect(clamp(NaN as unknown as number, 0.35)).toBeCloseTo(0.35, 9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ④ 全图箱名 hover（Main.cs:55227-55360 + DrawMap_FindChestName :56103-56115）
+// ---------------------------------------------------------------------------
+describe('④ 全图箱名 hover（DrawMap_FindChestName）', () => {
+  it('命名箱 "类型名: 名字"、未命名类型名（:56110-56114）', () => {
+    expect(mapChestHoverName({ typeName: '宝箱', name: '战利品' })).toBe('宝箱: 战利品');
+    expect(mapChestHoverName({ typeName: '宝箱', name: '' })).toBe('宝箱');
+    expect(mapChestHoverName({ typeName: '金宝箱', name: null })).toBe('金宝箱');
+  });
+
+  it('箱族 l10n 键映射（:55257-55313）：21/441 → chestType、467/468 → chestType2、88 → dresserType（frameX/54）', () => {
+    expect(mapHoverNameKey(21, 0)).toBe('LegacyChestType.0');
+    expect(mapHoverNameKey(21, 18)).toBe('LegacyChestType.0');        // 2×2 右帧 +18 同档
+    expect(mapHoverNameKey(21, 190)).toBe('LegacyChestType.5');       // 36px 步进
+    expect(mapHoverNameKey(441, 36)).toBe('LegacyChestType.1');
+    expect(mapHoverNameKey(467, 0)).toBe('LegacyChestType2.0');
+    expect(mapHoverNameKey(468, 36)).toBe('LegacyChestType2.1');
+    expect(mapHoverNameKey(88, 0)).toBe('LegacyDresserType.0');
+    expect(mapHoverNameKey(88, 198)).toBe('LegacyDresserType.3');     // 54px 步进
+    expect(mapHoverNameKey(11, 0)).toBeNull();                        // 非箱族 → 图例名分支
   });
 });

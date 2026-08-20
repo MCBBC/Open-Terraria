@@ -1740,16 +1740,22 @@ export function mapChestHoverName(chest: { typeName: string; name: string | null
   return chest.typeName;
 }
 
-/** 悬停格 → 显示名（Main.cs:55254-55356 mapFullscreen 悬停链的类型名支）。
+/** 悬停格 → l10n 键（Main.cs:55254-55356 mapFullscreen 悬停链的类型名支）。
  *  sheet 21/441 → LegacyChestType.{frameX/36}；467/468 → LegacyChestType2.{frameX/36}
- *  （Lang.cs:502-508 数组源）；88 梳妆台 → LegacyDresserType.{frameX/54}（:55313-55339，
- *  命名支同上恒不进）；其余 → 地图图例名（Lang.GetMapObjectName Lang.cs:77 ≈ tileName）。
- *  返回 null = 无名可显。探索门（Map.Light>40 :55254）由调用侧迷雾判。 */
+ *  （Lang.cs:502-508 数组源）；88 梳妆台 → LegacyDresserType.{frameX/54}（:55313-55339）；
+ *  其余箱外格 → null（走图例名分支）。frameX 档取整 = 2×2 箱左右帧（+18）同档。 */
+export function mapHoverNameKey(sheet: number, frameX: number): string | null {
+  if (sheet === 21 || sheet === 441) return `LegacyChestType.${Math.floor(frameX / 36)}`;
+  if (sheet === 467 || sheet === 468) return `LegacyChestType2.${Math.floor(frameX / 36)}`;
+  if (sheet === 88) return `LegacyDresserType.${Math.floor(frameX / 54)}`;
+  return null;
+}
+
+/** 悬停格 → 显示名：箱族 = mapHoverNameKey（命名支经 mapChestHoverName，live 恒
+ *  name=null——无重命名链）；其余 → 地图图例名（Lang.GetMapObjectName Lang.cs:77
+ *  ≈ tileName）。返回 null = 无名可显。探索门（Map.Light>40 :55254）由调用侧迷雾判。 */
 export function mapTileHoverName(sheet: number, frameX: number): string | null {
-  const key = sheet === 21 || sheet === 441 ? `LegacyChestType.${Math.floor(frameX / 36)}`
-    : sheet === 467 || sheet === 468 ? `LegacyChestType2.${Math.floor(frameX / 36)}`
-    : sheet === 88 ? `LegacyDresserType.${Math.floor(frameX / 54)}`
-    : null;
+  const key = mapHoverNameKey(sheet, frameX);
   if (key) return Lang.has(key) ? Lang.text(key) : null;
   return Lang.tileName(sheet);   // GetMapObjectName 图例名等价（Tiles.* 分节名）
 }
@@ -2129,6 +2135,9 @@ export class Renderer {
   mapPylonTile: { x: number; y: number } | null = null;
   /** 地图悬停晶塔的物品名（本帧；null=未悬停）——原版地图层 text 提示位 */
   pylonHoverName: string | null = null;
+  /** 全屏地图悬停格名（本帧；null=未悬停/无名）——Main.cs:55227-55360 悬停链的
+   *  单槽 text（:55282+ 宝箱族覆盖晶塔名：本仓以"晶塔层让位"实现同序） */
+  fullMapHoverName: string | null = null;
 
   /** 全屏地图缩放：以鼠标位置为锚点（鼠标下的地图点不动，不乱飞） */
   zoomFullMapAt(newZoom: number, mouseX: number, mouseY: number) {
@@ -10303,12 +10312,24 @@ export class Renderer {
             passes.push({ kind: 'FilterCRT', screenH: screenRes[1], zoom: z, opacity: f.opacity });
             break;
           default:
-            break;   // moonLord/sepia/noir 未入 GL 端口(审计登记,2D 近似兜底)
+            break;   // moonLord/sepia/noir 未入 GL 端口(审计登记;moonLord 在 GL 链
+                     // 上方补画见下,sepia/noir 需读源像素维持跳过)
         }
       }
       if (passes.length > 0 && gl.drawChain(this.canvas, passes,
         [this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255])) {
         ctx.drawImage(gl.canvas, 0, 0);
+        // moonLord 族补画（无像素读取，GL 链结果上直叠——VeryHigh 序在 Medium
+        // 柱族之后即补画在后，次序同原版 EndCapture 链表）
+        const core4 = this._moonLordCorePos(this._frameEntities);
+        const playerScr = { x: (player.cx - cam.x) * z + viewW / 2, y: (player.cy - cam.y) * z + viewH / 2 };
+        for (const f of mono.visibleFilters()) {
+          if (f.def.kind !== 'moonLord') continue;
+          mono.drawMoonLordPass(ctx, f, viewW, viewH,
+            f.def.aimAtPlayer === false && core4 ? {
+              x: (core4.x - cam.x) * z + viewW / 2, y: (core4.y - cam.y) * z + viewH / 2,
+            } : playerScr);
+        }
         return;
       }
     }
@@ -11387,10 +11408,40 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
     // 操作提示
+    // 悬停格名（Main.cs:55227-55360 mapFullscreen 支）：mouse → tile（传送同式
+    // (mouseX-cx0)/zoom）；界内 + 已探索（Map.Light>40 :55254 的迷雾二值等价）
+    // → 类型名链 mapTileHoverName；宝箱族经 mapChestHoverName（命名支暂恒 name=null，
+    // 见该函数注）。单槽 text：设值时晶塔名让位（原版 :55282+ 覆盖 MapIcons 先写值）
+    this.fullMapHoverName = null;
+    {
+      const tx = Math.floor((mouseX - cx0) / fm.zoom);
+      const ty = Math.floor((mouseY - cy0) / fm.zoom);
+      if (tx >= 0 && ty >= 0 && tx < world.w && ty < world.h
+        && (!world.explored || world.explored[ty * world.w + tx])) {
+        const st = world.store;
+        const i = st.idx(tx, ty);
+        if (st.flags[i]) {
+          const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+          const name = mapTileHoverName(sheet, st.frameX[i]);
+          if (name) {
+            this.fullMapHoverName = sheet === 21 || sheet === 441 || sheet === 467
+              || sheet === 468 || sheet === 88
+              ? mapChestHoverName({ typeName: name, name: null })
+              : name;
+          }
+        }
+      }
+    }
     this.drawPylonMapLayer(ctx, cx0, cy0, mouseX, mouseY);
     // 地图 ping 图标层（PingMapLayer——MapIconOverlay 注册序 Pylons→Pings :349-351，
     // 画在晶塔层之上）
     this.drawMapPingLayer(ctx, cx0, cy0);
+    if (this.fullMapHoverName) {
+      ctx.font = '13px sans-serif';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.fullMapHoverName, mouseX, mouseY - 14);
+    }
     ctx.font = '13px sans-serif';
     ctx.fillStyle = '#C8C0D8';
     ctx.textAlign = 'center';
@@ -11542,7 +11593,7 @@ export class Renderer {
         this.pylonHoverName = Lang.itemName(pylonItemTypeFromStyle(py.type));
       }
     }
-    if (this.pylonHoverName) {
+    if (this.pylonHoverName && !this.fullMapHoverName) {   // 单槽 text：箱名悬停让位（:55282+ 后写覆盖）
       ctx.font = '13px sans-serif';
       ctx.fillStyle = '#FFFFFF';
       ctx.textAlign = 'center';

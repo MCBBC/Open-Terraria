@@ -25,6 +25,13 @@
 import { TileStore } from '../../TileStore';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
+import { genKillTile } from './FinalCleanupPass';
+import type { RNG } from '../../../core/rng';
+import { RNG as RNGCtor } from '../../../core/rng';
+
+/** 兜底流（探针直调无 rng 时——引擎 killTileGen 无 ctx.rng 时尘掷退化 0，与旧零掷
+ *  行为兼容；管线/重放一律显式传 rng） */
+const makeRng = (): RNG => new RNGCtor(0);
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
 const SHEET_TO_INTERNAL = new Map<number, number>();
@@ -74,11 +81,12 @@ function isItATrigger(st: TileStore, i: number): boolean {
   return false;
 }
 
-/** 生成期 KillTile(cs:63559):仅清活性/类型,保留液体 */
-function killTile(st: TileStore, x: number, y: number): void {
-  if (!st.inBounds(x, y)) return;
-  if (!st.flags[st.idx(x, y)]) return;
-  st.setTileSilent(x, y, 0);
+/** 生成期 KillTile(cs:63559)+尾 SquareTileFrame 级联——AAAAAA：改派 FCP 引擎
+ *  （genKillTile：尘掷表 + 九宫级联）。曾"仅清活性/类型"零级联——孤儿 411 起爆器
+ *  另半 2×2 残留（#104 T0>411×2：(1098,711) 金标 Check2x2 完整性杀整件、本仓只杀
+ *  红线列）。105 为末 pass 槽内掷差不外溢。 */
+function killTile(st: TileStore, rng: RNG, x: number, y: number): void {
+  genKillTile(st, rng, x, y);
 }
 
 /** Tile.ResetToType(Tile.cs:279-289):liquid=0、sTileHeader=32(active,线/致动/已致动全清)、
@@ -97,7 +105,7 @@ function resetToType(st: TileStore, x: number, y: number, type: number): void {
 }
 
 /** ClearBrokenTraps(cs:26984-27102)。startIdx = y*w+x 编码 */
-function clearBrokenTraps(st: TileStore, startIdx: number, visited: Set<number>): void {
+function clearBrokenTraps(st: TileStore, rng: RNG, startIdx: number, visited: Set<number>): void {
   const { w, h } = st;
   let t: number[] = []; // 当前处理队列(=原版 t)
   let t2: number[] = [startIdx]; // 下一层队列(=原版 t2)
@@ -159,25 +167,26 @@ function clearBrokenTraps(st: TileStore, startIdx: number, visited: Set<number>)
       }
     }
     if (isItATrap(st, cur) && st.type[cur] !== STATUE) {
-      killTile(st, x, y); // 105 雕像豁免(cs:27094)
+      killTile(st, rng, x, y); // 105 雕像豁免(cs:27094)
     } else if (isItATrigger(st, cur)) {
       if (st.type[cur] === TRACK) {
         st.frameX[cur] = 1; // 矿轨压板 → 普通轨(cs:27100)
       } else {
-        killTile(st, x, y);
+        killTile(st, rng, x, y);
       }
     }
   }
 }
 
-export function runBrokenTrapCleanupPass(st: TileStore): void {
+export function runBrokenTrapCleanupPass(st: TileStore, rng?: RNG): void {
   const { w, h } = st;
+  const nrng = rng ?? makeRng();
   const visited = new Set<number>(); // 原版 pointsWeAlreadyWentOver(跨网络累积,红线格入册)
   for (let i = 50; i < w - 50; i++) {
     for (let j = 50; j < h - 50; j++) {
       const idx = st.idx(i, j);
       if (st.wire[idx] & WIRE_RED && !visited.has(idx)) {
-        clearBrokenTraps(st, idx, visited);
+        clearBrokenTraps(st, nrng, idx, visited);
       }
     }
   }

@@ -220,101 +220,13 @@ export function rollRareCloud(f: RareCloudFlags, rnd: () => number): number {
 }
 
 // ================= AmbientSky 天空实体（AmbientSky.cs FadingSkyEntity 全族 17/19） =================
-
-/** 天空装饰族（AmbienceServer.cs:60-84 十七族 + Meteor :1316 已由 spawnSkyMeteor 单接）。
- *  BoneSerpent（:1078）为空类且 Spawn 分发 :1446-1531 无 case——原版死代码，不实装。 */
-export type AmbientFamily =
-  | 'birds' | 'wyvern' | 'airship' | 'airballoon' | 'eyeball' | 'butterflies'
-  | 'lostkite' | 'vulture' | 'bats' | 'pixieposse' | 'seagulls' | 'slimeBalloons'
-  | 'gastropod' | 'pegasus' | 'eos' | 'crimera' | 'hellbats';
-
-/** 选族判定输入（AmbienceServer 各判定 + 玩家高度带；新增字段均可选，向后兼容） */
-export interface AmbientSpawnInput {
-  dayTime: boolean;
-  /** Main.IsItRaining = cloudAlpha>0（Main.cs:2659） */
-  raining: boolean;
-  eclipse: boolean;
-  bloodMoon: boolean;
-  pumpkinMoon: boolean;
-  snowMoon: boolean;
-  /** 次级条件（AmbienceServer.cs:77-84）：各族 Zone 门 */
-  zoneHallow: boolean;
-  /** 玩家在可见天空高度带（AmbienceServer.cs:190-193：position.Y ≤ worldSurface*16+1600） */
-  playerAtSkyHeight: boolean;
-  /** Main.rand.Next(5) 掷点 0-4（:119：<3 时走放宽列表 → 60% 概率忽略次级条件） */
-  roll5: number;
-  /** source2.ElementAt(Next(num)) 的均匀选点 0-1 */
-  pick: number;
-  // ---- 全族扩展（天空视觉深化批；均缺省 false → 只影响对应族） ----
-  zoneDesert?: boolean;       // Vulture（:77）
-  zoneBeach?: boolean;        // Seagulls（:79）
-  zoneJungle?: boolean;       // Bats（:84）
-  zoneCorrupt?: boolean;      // EaterOfSouls（:82）
-  zoneCrimson?: boolean;      // Crimera（:83）
-  /** Main.hardMode（Wyvern 门 :61） */
-  hardMode?: boolean;
-  /** Main.IsItAHappyWindyDay = _shouldUseWindyDayMusic（Main.cs:2976） */
-  windyDay?: boolean;
-  /** IsSunset（:39-46：白天 time>40500 → timeOfDay>0.625）——Bats 黄昏支 :68 */
-  sunset?: boolean;
-  /** NPC.TooWindyForButterflies（NPC.cs:6801：|windSpeedTarget|≥0.4） */
-  tooWindyForButterflies?: boolean;
-  /** NPC.butterflyChance<6（:65；每日黎明掷，<6 仅约 13% 的日子） */
-  butterflyChanceLow?: boolean;
-  /** 玩家地狱高度带（:195-198：position.Y ≥ (UnderworldLayer-100)×16）——Hellbats 专属高度门 */
-  playerAtHellHeight?: boolean;
-  /** 月总在场（AnActiveSkyConflictsWithAmbience :1362-1369 → Ambience 整体禁出） */
-  moonLordActive?: boolean;
-}
-
-/**
- * 天空装饰选族纯函数（AmbienceServer.Update :96-129 一比一，全 17 族）：
- *  ① source = 主条件（:60-76）成立的族（注册序 = Dictionary 插入序）；
- *  ② source2 严格列表 = 高度门（:87-94：Hellbats 走地狱带门、其余走天空带门）
- *     + 有次级条件且满足（:117）；
- *  ③ 严格列表空或 roll5<3（60%）→ 放宽到「高度门 + 无次级条件或满足」（:119-123）；
- *  ④ 均匀选点（:126）。
- *  月总天空冲突（:1362-1369）在 :1383 直接 Deactivate——此处以 null 表达。
- */
-export function pickAmbientFamily(i: AmbientSpawnInput): AmbientFamily | null {
-  if (i.moonLordActive) return null;                                // :1362-1369/:1383
-  const sunny = !i.raining && i.dayTime && !i.eclipse;              // :30-37 IsSunnyDay
-  const calmNight = !i.raining && !i.dayTime && !i.bloodMoon && !i.pumpkinMoon && !i.snowMoon; // :48-55
-  const windy = i.windyDay ?? false;
-  const sunset = i.sunset ?? false;
-  const butterfliesOK = sunny && !windy && !(i.tooWindyForButterflies ?? false)
-    && (i.butterflyChanceLow ?? false);                            // :65
-  /** [族, 主条件, 次级条件(undefined=无), 是否地狱高度门]——顺序 = _spawnConditions 注册序 :60-76 */
-  const table: Array<[AmbientFamily, boolean, boolean | undefined, boolean]> = [
-    ['birds', sunny, undefined, false],                             // :60
-    ['wyvern', sunny && (i.hardMode ?? false), undefined, false],   // :61
-    ['airship', sunny && windy, undefined, false],                  // :62
-    ['airballoon', sunny && !windy, undefined, false],              // :63
-    ['eyeball', !i.dayTime, undefined, false],                      // :64
-    ['butterflies', butterfliesOK, undefined, false],               // :65
-    ['lostkite', i.dayTime && !i.eclipse && windy, undefined, false], // :66
-    ['vulture', sunny, i.zoneDesert ?? false, false],               // :67 + :77
-    ['bats', (sunset && sunny) || calmNight, i.zoneJungle ?? false, false], // :68 + :84
-    ['pixieposse', sunny || calmNight, i.zoneHallow, false],        // :69 + :78
-    ['seagulls', sunny, i.zoneBeach ?? false, false],               // :70 + :79
-    ['slimeBalloons', sunny && windy, undefined, false],            // :71
-    ['gastropod', calmNight, i.zoneHallow, false],                  // :72 + :80
-    ['pegasus', sunny, i.zoneHallow, false],                        // :73 + :81
-    ['eos', sunny || calmNight, i.zoneCorrupt ?? false, false],     // :74 + :82
-    ['crimera', sunny || calmNight, i.zoneCrimson ?? false, false], // :75 + :83
-    ['hellbats', true, undefined, true],                            // :76（:89-91 地狱高度门）
-  ];
-  const source = table.filter((row) => row[1]);
-  if (!source.length) return null;                                  // :108-111
-  const heightOk = (row: typeof source[number]) =>
-    row[3] ? (i.playerAtHellHeight ?? false) : i.playerAtSkyHeight; // :87-94
-  let pool = source.filter((row) => heightOk(row) && row[2] === true);   // :117 严格列表
-  if (pool.length === 0 || i.roll5 < 3) {                           // :119
-    pool = source.filter((row) => heightOk(row) && row[2] !== false);    // :121 放宽列表
-  }
-  if (!pool.length) return null;
-  return pool[Math.min(pool.length - 1, Math.floor(i.pick * pool.length))][0];  // :126
-}
+// 选族纯函数/类型已抽出共享模块（MP 氛围联机批：server/src/room.ts 的 AmbienceServer
+// 复用同表——room 无法经本文件导入 SpriteAtlas 资产链）；此处 re-export 兼容既有消费方
+export {
+  type AmbientFamily, type AmbientSpawnInput, pickAmbientFamily,
+  AMBIENT_FAMILY_SKY_TYPE, ambientFamilyOfSkyType,
+} from './ambientFamilies';
+import { type AmbientFamily, type AmbientSpawnInput, pickAmbientFamily, ambientFamilyOfSkyType } from './ambientFamilies';
 
 /** 单体族参数表（AmbientSky.cs 各类构造器 1:1；纯数据供测试对账） */
 export interface AmbientFamilyParams {
@@ -2455,6 +2367,12 @@ export class SkyRenderer {
   /** NPC.butterflyChance（NPC.cs:94583-94599 每日黎明掷）——按 dayCount 重掷 */
   private butterflyDay = -1;
   private butterflyChance = 999999;
+  /** MP 氛围联机（module100）：true = 服务器 AmbienceServer 驱动（原版客户端无本地
+   *  调度器——本地掷族关闭,只消费广播 + 本地推进既有实体）；Game 进联机时置位 */
+  ambientRemoteDriven = false;
+  /** module100 到达的待生成族（onAmbienceSpawn 随时入队；drawAmbience 帧首消费——
+   *  生成需要当帧相机位做屏幕空间→世界投影,与本地路径同源） */
+  private pendingAmbientSpawns: Array<{ family: AmbientFamily; seed: number; anchorX: number; anchorY: number }> = [];
   /** 最近天空色（GetColor 的 bgColor = Main.ColorOfTheSkies；sky.draw 每帧写入） */
   private lastSkyTop = '#4A90E0';
   private lastSkyBottom = '#B8DCF5';
@@ -2523,15 +2441,16 @@ export class SkyRenderer {
   }
 
   private mkAmbient(kind: AmbientFamily, sx: number, sy: number, depth: number, dir: 1 | -1,
-    life: number, camX: number, camY: number, texKey: string, rows: number, variant: number): AmbientEnt {
+    life: number, camX: number, camY: number, texKey: string, rows: number, variant: number,
+    r: () => number = Math.random): AmbientEnt {
     const spec = AMBIENT_FAMILY_PARAMS[kind];
     const [x, y] = this.ambientWorldPos(sx, sy, depth, camX, camY);
     return {
       kind, x, y, depth, dir, life, bornAt: this.ambFrame,
       fadeIn: spec.fadeIn, fadeOut: spec.fadeOut,
-      frame: spec.frameRandom ? Math.floor(Math.random() * rows) : 0,
+      frame: spec.frameRandom ? Math.floor(r() * rows) : 0,
       rows, framingSpeed: spec.framingSpeed || 0x7fffffff,
-      frameOffset: spec.frameOffset ? Math.floor(Math.random() * rows) : 0,
+      frameOffset: spec.frameOffset ? Math.floor(r() * rows) : 0,
       opacity: 0, vx: 0, vy: 0, rotation: 0,
       brightness: spec.brightness, depthScaleAdj: spec.depthScaleAdj ?? 0,
       grayDepthFade: !!spec.grayDepthFade, texKey, variant,
@@ -2540,9 +2459,12 @@ export class SkyRenderer {
     };
   }
 
-  /** 生成一族（AmbientSky.Spawn :1425-1537 分发 → 各类构造器/CreateGroup 1:1） */
-  private spawnAmbientFamily(kind: AmbientFamily, camX: number, camY: number): void {
-    const r = Math.random;
+  /** 生成一族（AmbientSky.Spawn :1425-1537 分发 → 各类构造器/CreateGroup 1:1）。
+   *  r = 随机源（本地路径 Math.random；module100 广播路径 = seed 确定性 PRNG——
+   *  全端同 seed 同实体,FastRandom(seed) 同义）。anchor = 出生域锚玩家位
+   *  （缺省本地玩家；远端锚玩家 = msg13 镜像位,Player.Center 语义） */
+  private spawnAmbientFamily(kind: AmbientFamily, camX: number, camY: number,
+    r: () => number = Math.random, anchor?: { x: number; y: number }): void {
     const spec = AMBIENT_FAMILY_PARAMS[kind];
     const group = AMBIENT_GROUP_SPEC[kind];
     const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
@@ -2552,13 +2474,13 @@ export class SkyRenderer {
       : (wind > 0 ? 1 : -1);
     // VirtualCamera（VirtualCamera.cs:5-14）：Position = 玩家中心 − 2048、Size = 4096²
     // （Main.cs:3753-3755 HiDef 档）——出生域以玩家为锚，与渲染视口无关
-    const px = this.amb.playerX;
+    const px = anchor?.x ?? this.amb.playerX;
     const vcamX = px - VIRTUAL_CAM_HALF;                       // vcam.Position.X
-    const vcamY = this.amb.playerY - VIRTUAL_CAM_HALF;         // vcam.Position.Y
+    const vcamY = (anchor?.y ?? this.amb.playerY) - VIRTUAL_CAM_HALF;   // vcam.Position.Y
     // :452-459（各族同构）：Effects==None（顺风）→ 左沿外 100；Flip → 右沿(Position.X+Size.X)外 100
     const edgeX = dir > 0 ? vcamX - 100 : vcamX + VIRTUAL_CAM_SIZE + 100;
     const mk = (sx: number, sy: number, d: number, l: number, key: string, rows: number, variant: number) =>
-      this.mkAmbient(kind, sx, sy, d, dir, l, camX, camY, key, rows, variant);
+      this.mkAmbient(kind, sx, sy, d, dir, l, camX, camY, key, rows, variant, r);
     const randLife = () => (spec.life[0] + Math.floor(r() * (spec.life[1] - spec.life[0]))) * 60;
 
     // EOCSkyEntity 族（eyeball/eos/crimera :1238-1258）：3/4 折线 / 1/4 追玩家；不走常规 y 带
@@ -2621,6 +2543,30 @@ export class SkyRenderer {
     const d = depth();
     const tex = this.ambientTexKey(kind, r, d);
     this.ambEntities.push(mk(edgeX, bandY(), d, randLife(), tex.key, tex.rows, tex.variant));
+  }
+
+  /** module100 广播路径入口（NetAmbienceModule → AmbientSky.Spawn :1425 1:1）：
+   *  type = SkyEntityType 注册序；seed = 服务器 Main.rand.Next() 掷（FastRandom
+   *  位级不需复刻——全端只需同 seed 同实体,仓库 mulberry32 确定性等价）；
+   *  anchorX/Y = 锚玩家中心（Game 从 msg13 镜像解析）。入队下一帧 drawAmbience
+   *  消费（生成需当帧相机投影）。未知型（Meteor/BoneSerpent/未来型）静默忽略 */
+  queueAmbientNet(type: number, seed: number, anchorX: number, anchorY: number): void {
+    const family = ambientFamilyOfSkyType(type);
+    if (!family) return;
+    if (this.pendingAmbientSpawns.length > 16) this.pendingAmbientSpawns.shift();   // 防积压
+    this.pendingAmbientSpawns.push({ family, seed, anchorX, anchorY });
+  }
+
+  /** seed → [0,1) 确定性随机源（mulberry32；module100 广播重放专用——本地路径
+   *  仍走 Math.random 保持原分布） */
+  private static seededFloat(seed: number): () => number {
+    let s = (seed | 0) || 1;
+    return () => {
+      s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
   }
 
   /** StartFadingOut（AmbientSky.cs:170-176）：把出生点前推到"淡出已开始"的时刻 */
@@ -2734,6 +2680,8 @@ export class SkyRenderer {
    * （原版 SkyManager「Ambience」天空层叠在 DrawBG 之上、tile 之前）。
    * 调度 1:1 AmbienceServer.Update :96-129：到期一次尝试（间隔 Next(600,7200)=10-120s），
    * 选族走 pickAmbientFamily（全 17 族）；Main.rand.Next(5)<3（60%）放宽次级条件。
+   * MP（module100）：服务器 AmbienceServer 独占掷族（原版 dedServ 侧同构）——本地
+   * 调度门关（ambientRemoteDriven），帧首消费广播队列（同 seed 重放）。
    */
   drawAmbience(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
     camX: number, camY: number, dtMs = 16.7): void {
@@ -2741,11 +2689,20 @@ export class SkyRenderer {
     const ticks = Math.max(1, Math.round(dtMs / (1000 / 60)));
     const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
     const moonlord = this.moonLordPresent();   // :1362-1369 月总天空冲突 → Ambience 禁出
+    // module100 广播重放（NetAmbienceModule → Spawn：不查本地条件/月总门——服务器
+    // 已掷过,客户端照生（原版 Deserialize 同样直生））
+    if (this.pendingAmbientSpawns.length) {
+      for (const p of this.pendingAmbientSpawns) {
+        this.spawnAmbientFamily(p.family, camX, camY,
+          SkyRenderer.seededFloat(p.seed), { x: p.anchorX, y: p.anchorY });
+      }
+      this.pendingAmbientSpawns.length = 0;
+    }
     for (let f = 0; f < ticks; f++) {
       this.ambFrame++;
       if (this.ambNextAttempt > 0) {
         this.ambNextAttempt -= 1;                                   // :100-104
-      } else if (!moonlord) {
+      } else if (!moonlord && !this.ambientRemoteDriven) {
         this.ambNextAttempt = 600 + Math.floor(Math.random() * 6600);  // :133 Next(600,7200)
         const a = this.amb;
         const fam = pickAmbientFamily({

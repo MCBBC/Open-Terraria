@@ -1091,11 +1091,12 @@ function tileCleanupPass({ store, rng, world }: GenCtx) {
   runTileCleanupPass(store, rng, gs, world.chests);
 }
 
-function brokenTrapCleanupPass({ store, world }: GenCtx) {
+function brokenTrapCleanupPass({ store, rng, world }: GenCtx) {
   // cs:22286 门：!noTraps || tenthAnniversary || notTheBees——普通世界恒跑
   const f = world.seedFlags;
   if (f?.noTraps && !f?.tenthAnniversary && !f?.notTheBees) return;
-  runBrokenTrapCleanupPass(store);
+  // ★AAAAAA：透传 rng——KillTile 改派引擎（尘掷表+级联，#104 孤儿 411 案）
+  runBrokenTrapCleanupPass(store, rng);
 }
 
 function finalCleanupPass({ store, rng, world }: GenCtx) {

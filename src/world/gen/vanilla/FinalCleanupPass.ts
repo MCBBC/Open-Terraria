@@ -40,7 +40,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS, TILE_BY_KEY } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
-import { flipGenSolid, genSolidType } from './GenSolid';
+import { flipGenSolid, genSolidType, vanGenSolidType } from './GenSolid';
 import { checkStalactite } from './ShimmerPass';
 
 /** sheet(=原版 tile id)→ 内部 id;未实装时 0(空格)安全退化 */
@@ -195,6 +195,97 @@ const NO_ATTACH = new Set([
 ]);
 /** TileID.Sets.IsADripTile（:157） */
 const IS_DRIP = new Set([373, 374, 375, 461, 709]);
+/** InvalidTileForPilesOrSpeleothems（cs:36001：Boulders ∪ {26 祭坛, 237}）——
+ *  AAAAAA：引擎 Check2x1 的 185 支补用 */
+const INVALID_PILES = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716, 26, 237]);
+/** 185 堆变体带 25-30 的底格族（cs:47073：Snow ∪ Ice ∪ {162,224}） */
+const PILE_SNOW_ICE = new Set([147, 161, 162, 163, 164, 200, 224]);
+/** 185 堆变体带 41-46/62-64 的底格族（cs:47085：Sand ∪ HardenedSand ∪ Sandstone） */
+const PILE_SAND = new Set([53, 112, 116, 234, 396, 397, 398, 399, 400, 401, 402, 403]);
+/** Main.tileStone（Main.cs:7378/7902-7921）：平台连接判定的"石质"归一 id 集 */
+const TILE_STONE = new Set([63, 64, 65, 66, 67, 68, 130, 131, 566]);
+/** ForbidsSloping（cs:81484）：裸 type（ghost 含）查 */
+const FORBIDS_SLOPING = new Set([21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597]);
+/** sheet id → 生成期 Main.tileSolid（vanGenSolidType 的 sheet 直查版；无内部实装的
+ *  sheet 用原版碰撞表语义兜底 true（连接 id 只来自实心邻格，罕见）） */
+const SOLID_BY_SHEET = new Map<number, boolean>();
+{
+  let seen = -1;
+  for (let q = 0; q < TILE_DEFS.length; q++) {
+    const s2 = SWEEP_SHEET[q];
+    if (s2 === undefined || s2 === seen) continue;
+    seen = s2;
+    SOLID_BY_SHEET.set(s2, vanGenSolidType(q));
+  }
+}
+const genSolidSheet = (sh: number): boolean => SOLID_BY_SHEET.get(sh) ?? true;
+
+/** 平台连接帧（TileFrameImportant Platforms 支，cs:86110-86230 生成期零 culling 镜像）。
+ *  num9=左邻/num8=右邻连接 id（同型平台→type 自身；石质→1；其余实心→其 type；非实心→-1）；
+ *  连接码写入 frameX（0/18/36/54/72/90/108/126/144/180/216/234/252/270/288/342/360/
+ *  378/396/414/432/450/468）。HandleRopeEndFraming 尾调用（cs:82022）生成期柱内无
+ *  绳族/380/314 邻 → no-op 备案。 */
+function framePlatformSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  void ctx;
+  const i = st.idx(x, y);
+  const sh = SWEEP_SHEET[st.type[i]]!;
+  const at = (dx: number, dy: number): { act: boolean; sh2: number; half: boolean; slope: number } => {
+    if (!st.inBounds(x + dx, y + dy)) return { act: false, sh2: -1, half: false, slope: 0 };
+    const k = st.idx(x + dx, y + dy);
+    return { act: !!st.flags[k], sh2: SWEEP_SHEET[st.type[k]] ?? -1, half: !!st.half[k], slope: st.slope[k]! };
+  };
+  const L = at(-1, 0), R = at(1, 0), BL = at(-1, 1), BR = at(1, 1), TL = at(-1, -1), TR = at(1, -1);
+  let num9 = -1, num8 = -1;                                     // 左/右连接 id
+  if (L.act) num9 = TILE_STONE.has(L.sh2) ? 1 : (!PLATFORMS.has(L.sh2) ? L.sh2 : sh);
+  if (R.act) num8 = TILE_STONE.has(R.sh2) ? 1 : (!PLATFORMS.has(R.sh2) ? R.sh2 : sh);
+  if (num8 >= 0 && !genSolidSheet(num8)) num8 = -1;             // !Main.tileSolid
+  if (num9 >= 0 && !genSolidSheet(num9)) num9 = -1;
+  if (num9 === sh && L.half !== !!st.half[i]) num9 = -1;
+  if (num8 === sh && R.half !== !!st.half[i]) num8 = -1;
+  if (num9 !== -1 && num9 !== sh && st.half[i]) num9 = -1;
+  if (num8 !== -1 && num8 !== sh && st.half[i]) num8 = -1;
+  if (num9 === -1 && TL.act && TL.sh2 === sh && TL.slope === 1) num9 = sh;
+  if (num8 === -1 && TR.act && TR.sh2 === sh && TR.slope === 2) num8 = sh;
+  if (num9 === sh && L.slope === 2 && num8 !== sh) num8 = -1;
+  if (num8 === sh && R.slope === 1 && num9 !== sh) num9 = -1;
+  const forbids = FORBIDS_SLOPING.has(at(0, -1).sh2);           // ForbidsSloping(x, y-1) 裸 type
+  const selfSlope = st.slope[i]!;
+  let fx: number;
+  if (selfSlope === 1) {
+    if (PLATFORMS.has(R.sh2) && R.slope === 0 && !R.half) fx = 468;
+    else if (forbids) fx = 468;
+    else if (!BR.act && (!PLATFORMS.has(BR.sh2) || BR.slope === 2)) {
+      fx = (L.act || (PLATFORMS.has(TL.sh2) && TL.slope === 1)) ? 360 : 432;
+    } else {
+      fx = (L.act || (PLATFORMS.has(TL.sh2) && TL.slope === 1)) ? 180 : 396;
+    }
+  } else if (selfSlope === 2) {
+    if (PLATFORMS.has(L.sh2) && L.slope === 0 && !L.half) fx = 450;
+    else if (forbids) fx = 450;
+    else if (!BL.act && (!PLATFORMS.has(BL.sh2) || BL.slope === 1)) {
+      fx = (R.act || (PLATFORMS.has(TR.sh2) && TR.slope === 2)) ? 342 : 414;
+    } else {
+      fx = (R.act || (PLATFORMS.has(TR.sh2) && TR.slope === 2)) ? 144 : 378;
+    }
+  } else if (num9 === sh && num8 === sh) {
+    fx = L.slope === 2 && R.slope === 1 ? 252 : L.slope === 2 ? 216 : R.slope === 1 ? 234 : 0;
+  } else if (num9 === sh && num8 === -1) {
+    fx = L.slope !== 2 ? 18 : 270;
+  } else if (num9 === -1 && num8 === sh) {
+    fx = R.slope !== 1 ? 36 : 288;
+  } else if (num9 !== sh && num8 === sh) {
+    fx = 54;
+  } else if (num9 === sh && num8 !== sh) {
+    fx = 72;
+  } else if (num9 !== sh && num9 !== -1 && num8 === -1) {
+    fx = 108;
+  } else if (num9 !== -1 || num8 === sh || num8 === -1) {
+    fx = 90;
+  } else {
+    fx = 126;
+  }
+  st.frameX[i] = fx;
+}
 /** Check3x2 平台顶支族（cs:49234） */
 const C3X2_PLATFORM = new Set([285, 286, 298, 299, 310, 339, 538, 532, 544, 533, 555, 556, 582, 619, 629, 361, 362, 363, 364]);
 /** Check3x2 全 case 族（cs:86713 组） */
@@ -501,6 +592,21 @@ export function genTileFrame(st: TileStore, rng: RNG, x: number, y: number): voi
   tileFrameGen(st, ctx, x, y, true);
 }
 
+/** AAAAAA 批新增纯导出：WorldGen.RangeFrame(startX, startY, endX, endY)（cs:81139）
+ *  生成期入口——(startX-1..endX+1)×(startY-1..endY+1) 逐格 TileFrame(resetFrame=false)。
+ *  GrowTreeWithSettings 尾扫（cs:30999）等消费端：区域帧扫触发的 184 苔芽 Next(3)
+ *  掷（每访恒掷）与 CheckTreeWithSettings 重帧此前整缺（#103 (734,760) 宝石树
+ *  尾 5×Next(3) 掷流差实证）。Framing.WallFrame(i,j) 侧 resetFrame=false 恒零掷
+ *  （cs:81147→Framing.cs:386 仅 resetFrame 时 Next(0,3)），墙帧通道不模拟。 */
+export function genRangeFrame(st: TileStore, rng: RNG, x0: number, y0: number, x1: number, y1: number): void {
+  const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: false, stats: undefined };
+  for (let x = x0 - 1; x <= x1 + 1; x++) {
+    for (let y = y0 - 1; y <= y1 + 1; y++) {
+      tileFrameGen(st, ctx, x, y, false);
+    }
+  }
+}
+
 const roll3 = (ctx: SweepCtx): number => {
   if (ctx.stats) ctx.stats.roll184++;
   return ctx.rng ? ctx.rng.int(0, 2) : 0;
@@ -551,6 +657,12 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     || sheet === 493 || sheet === 497 || sheet === 590 || sheet === 595 || sheet === 615
     || sheet === 12 || sheet === 31 || sheet === 639 || sheet === 696 || sheet === 484)) {
     return true;   // UUUU：178 同列读帧族（sparse 模式下嵌合帧会伪杀 CheckAndAdjust）
+  }
+  // ★AAAAAA：平台连接帧（TileFrameImportant 的 Platforms 早支，cs:86110-86230）——
+  //   生成期 GetTileMergeCulling 恒全 false（invisibleBlock 位），按零 culling 镜像。
+  if (PLATFORMS.has(sheet)) {
+    framePlatformSweep(st, ctx, x, y);
+    return true;
   }
   switch (sheet) {
     case 518: checkLilyPadSweep(st, ctx, x, y); return true;
@@ -1359,6 +1471,35 @@ function check2x1Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
       if (!st.flags[bi] || !TILE_TABLE.has(SWEEP_SHEET[st.type[bi]])
         || st.half[bi] || slopeOf(st, xx, y + 1) === 1 || slopeOf(st, xx, y + 1) === 2) ok = false;
     }
+  } else if (!solidAllowBottom(st, x0, y + 1) || !solidAllowBottom(st, x0 + 1, y + 1)) {
+    // ★AAAAAA：cs:47039-47048 else 支——非桌族（含 185/16/18…）双底格
+    //   SolidTileAllowBottomSlope 支撑门曾整缺（#105 (2776,526) 沙堆右底 dirt 不实
+    //   → 金标杀/本仓存活 8 格实证）。
+    ok = false;
+  }
+  if (sheet === 185) {
+    // cs:47051-47058：草地变体转化（fx∈[1368,1458] 且双底格非草族{2,477,492} → -1368）
+    const li = st.idx(x0, y), ri = st.idx(x0 + 1, y);
+    if (st.frameX[li]! >= 1368 && st.frameX[li]! <= 1458) {
+      const bl = SWEEP_SHEET[st.type[st.idx(x0, y + 1)]], br = SWEEP_SHEET[st.type[st.idx(x0 + 1, y + 1)]];
+      if (bl !== 2 && br !== 2 && bl !== 477 && br !== 477 && bl !== 492 && br !== 492) {
+        st.frameX[li] -= 1368;
+        st.frameX[ri] -= 1368;
+      }
+    }
+    // cs:47060-47090：变体带号（fx/36 + (fy/18-1)*52）→ 底格雪/沙族门
+    const num5 = Math.floor(st.frameX[li]! / 36) + (Math.floor(st.frameY[li]! / 18) - 1) * 52;
+    for (let j = x0; j <= x0 + 1; j++) {
+      if (INVALID_PILES.has(SWEEP_SHEET[st.type[st.idx(j, y + 1)]])) { ok = false; break; }
+      const bi = st.idx(j, y + 1);
+      if (!st.flags[bi]) continue;
+      const b2 = SWEEP_SHEET[st.type[bi]];
+      if (num5 >= 25 && num5 <= 30) {
+        if (!PILE_SNOW_ICE.has(b2)) ok = false;
+      } else if ((num5 >= 41 && num5 <= 46) || (num5 >= 62 && num5 <= 64)) {
+        if (!PILE_SAND.has(b2)) ok = false;
+      }
+    }
   }
   if (ok) return;
   // 掉落帧带读（cs:47105-47109）：左格失活 → 取右格 frameX
@@ -1942,15 +2083,18 @@ function checkCatTailSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): 
   }
   num++;
   const num3 = num;
-  if (num2 - num3 > 40 /* catTailDistance */) flag = true;
+  // ★AAAAAA：catTailDistance=8（cs:4347 静态值）——曾误 40；地基→fy 档位表
+  //   cs:58822-58841（2/477→0、53→18、199/234/662→54、23/112/661→72、70→90）
+  //   曾整体错一档（36/54/72）+ 幻影 90 支——placeCatTail 侧写对档后本扫把
+  //   蘑菇草 70 基的香蒲重帧成 72（s519 367 格帧债唯一源）。
+  if (num2 - num3 > 8 /* catTailDistance */) flag = true;
   const g = sheetAt2(st, x, num2);
   let fy = -1;
   if (g === 2 || g === 477) fy = 0;
   else if (g === 53) fy = 18;
-  else if (g === 199 || g === 234 || g === 662) fy = 36;
-  else if (g === 23 || g === 112 || g === 661) fy = 54;
-  else if (g === 70) fy = 72;
-  else if (g === 90) fy = 90;
+  else if (g === 199 || g === 234 || g === 662) fy = 54;
+  else if (g === 23 || g === 112 || g === 661) fy = 72;
+  else if (g === 70) fy = 90;
   if (!st.flags[st.idx(x, num2)] || (st.wire[st.idx(x, num2)] & 32)) flag = true;
   if (fy < 0) flag = true;
   if (st.inBounds(x, num2 - 1) && st.liquid[st.idx(x, num2 - 1)]! < 127) flag = true;   // 生成期恒真分支

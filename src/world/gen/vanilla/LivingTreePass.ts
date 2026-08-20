@@ -37,6 +37,7 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { flipGenSolid, genSolidType } from './GenSolid';
+import { genSquareTileFrame } from './FinalCleanupPass';
 
 /** 世界树对拍探针开关（种子等价期临时；默认关闭零开销） */
 const LT_TRACE = typeof process !== 'undefined' && !!process.env.LT_TRACE;
@@ -152,10 +153,13 @@ function deactivate(st: TileStore, x: number, y: number): void {
 }
 
 /** WorldGen.PlaceTile(x, y, 19, …, style)（cs:28312/28741/29063/29103）：平台 1×1，
- *  变体竖排 Y 步 18（与 DungeonPass/HellFortPass 的平台帧一致——此前误写 X 轴） */
-function placePlatform(st: TileStore, x: number, y: number, style: number): void {
+ *  变体竖排 Y 步 18（与 DungeonPass/HellFortPass 的平台帧一致——此前误写 X 轴）。
+ *  ★AAAAAA：PlaceTile 成功尾 SquareTileFrame（cs:60281）——平台连接码写 frameX
+ *  （引擎 framePlatformSweep；曾缺 = s19 帧债活木树支）。 */
+function placePlatform(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
   if (!st.inBounds(x, y)) return;
   st.setTileSilent(x, y, PLATFORM, 0, style * 18);
+  genSquareTileFrame(st, rng, x, y);
 }
 /** TileID.Sets.Boulders（TileID.cs:195）——InvalidTileForPilesOrSpeleothems 用 */
 const PILE_BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
@@ -676,7 +680,7 @@ function growLivingTreeMakePassage(
           if (!isDungeonWall(wlR) && (wlR > 0 || num4 >= worldSurface)) st.wall[st.idx(i + 1, num4)] = WALL_LIVING_WOOD;
           if (num4 === j && flag4) {
             deactivate(st, i, num4 + 1);
-            placePlatform(st, i, num4 + 1, 23);   // 生命木平台（cs:29109）
+            placePlatform(st, rng, i, num4 + 1, 23);   // 生命木平台（cs:29109）
           }
         }
       } else {
@@ -715,7 +719,7 @@ function growLivingTreeMakePassage(
         for (let k = minl; k <= minr; k++) {
           if (k > num10 - 2 && k <= num10 + 1) {
             deactivate(st, k, num4 + 1);
-            placePlatform(st, k, num4 + 1, style);
+            placePlatform(st, rng, k, num4 + 1, style);
           }
         }
       } else {

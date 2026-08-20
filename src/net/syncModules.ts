@@ -322,6 +322,59 @@ export function readAmbienceModule(r: NetReader): { playerSlot: number; seed: nu
   return { playerSlot: r.u8(), seed: r.i32(), type: r.u8() };
 }
 
+// ================= module14 per-client 掉落（原版 msg90 InstancedItem 的定向化） =================
+//
+// 原版语义（CommonCode.DropItemLocalPerClientAndSetNPCMoneyTo0,CommonCode.cs:35-58）:
+// 服务器（netMode==2）对 Boss 袋族掉落：单掷通过后对**每个曾交互该 NPC 的玩家**
+// NetMessage.SendData(90, i, ...) 定向发一份——客户端 case 90 落
+// instanced=true + playerIndexTheItemIsReservedFor=Main.myPlayer（MessageBuffer.cs:1468-1471）
+// = 本端私有实例,他人不可见不可拾。1.4.5.6 该规则族的全部注册 = ItemDropRule.
+// BossBag/BossBagByCondition（18 条 bossBag）。本仓以 module14 承载同语义：
+// 房主/SimHost 上行 {u8 n, n×[u8 targetSlot, str key, u16 stack, f32×4 x/y/vx/vy]},
+// 服务器校验（仅权威端可发/key 白名单/maxStack 钳位/NaN 清洗）后按 targetSlot
+// **定向**转发（非广播）——同载荷复用为 S→C。旧端未知 moduleId 忽略（先例同上）。
+
+export interface InstancedLootEntry {
+  targetSlot: number;
+  key: string;
+  stack: number;
+  x: number; y: number;
+  vx: number; vy: number;
+}
+
+/** 单帧批量上限（Boss 死亡一帧每交互玩家一份袋——防脏流超帧） */
+export const INSTANCED_LOOT_PER_FRAME = 16;
+
+export function writeInstancedLootModule(entries: InstancedLootEntry[]): Uint8Array {
+  const w = new NetWriter(Msg.NetModules);
+  w.u16(NetModule.InstancedLoot);
+  w.u8(Math.min(entries.length, INSTANCED_LOOT_PER_FRAME));
+  for (let i = 0; i < entries.length && i < INSTANCED_LOOT_PER_FRAME; i++) {
+    const e = entries[i];
+    w.u8(e.targetSlot & 0xff);
+    w.str(e.key.slice(0, 64));
+    w.u16(Math.max(1, Math.min(0xffff, e.stack)));
+    w.f32(e.x); w.f32(e.y);
+    w.f32(e.vx); w.f32(e.vy);
+  }
+  return w.finish();
+}
+
+export function readInstancedLootModule(r: NetReader): InstancedLootEntry[] {
+  const n = r.u8();
+  const out: InstancedLootEntry[] = [];
+  for (let i = 0; i < n && i < INSTANCED_LOOT_PER_FRAME; i++) {
+    out.push({
+      targetSlot: r.u8(),
+      key: r.str(),
+      stack: r.u16(),
+      x: r.f32(), y: r.f32(),
+      vx: r.f32(), vy: r.f32(),
+    });
+  }
+  return out;
+}
+
 // ================= msg203 PingProbe（玩家列表面板 RTT 数据源；本仓自有通道） =================
 //
 // 原版无玩家列表面板（仅 /playing 命令与服务器控制台），无 ping 显示——本面板的

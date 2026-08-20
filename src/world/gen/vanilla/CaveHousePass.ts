@@ -326,7 +326,9 @@ function placeFurniture(st: TileStore, key: string, x: number, y: number, style 
     case 241:                       // Place4x3Wall(cs:44874)：(x-1,y-1) 4×3
       return placeWallArt(st, x - 1, y - 1, 4, 3, t, (dx) => style * 54 + dx * 18, (dy) => dy * 18);
     case 242:                       // Place6x4Wall(cs:44959)：(x-2,y-2) 6×4
-      return placeWallArt(st, x - 2, y - 2, 6, 4, t, (dx) => (style % 27) * 72 + dx * 18, (dy) => Math.floor(style / 27) * 108 + dy * 18);
+      // ★AAAAAA：cs:44982-44987 num4=style/27*108 为 **frameX** 基、num5=style%27*72
+      //   为 **frameY** 基——曾两基转置（s242 48 格帧债）。
+      return placeWallArt(st, x - 2, y - 2, 6, 4, t, (dx) => Math.floor(style / 27) * 108 + dx * 18, (dy) => (style % 27) * 72 + dy * 18);
     case 34: {                      // PlaceChand(cs:52753)：(x-1,y) 3×3 吊挂；门=九格 !active
       //   + (x,y-1) nactive && tileSolid && !tileSolidTop——【无下方承地门】(吊灯
       //   悬顶),曾误走 placeFloorObject 的 below 检查 → 房内吊灯全灭(room1 实锤)
@@ -338,7 +340,9 @@ function placeFurniture(st: TileStore, key: string, x: number, y: number, style 
       }
       for (let dx = -1; dx <= 1; dx++) {
         for (let dy = 0; dy < 3; dy++) {
-          st.setTileSilent(x + dx, y + dy, t, Math.floor(style / 36) * 108 + (dx + 1) * 18, style * 54 + dy * 18);
+          // ★AAAAAA：HouseBuilder.cs:459-465 PlaceTile(34) 后对九格 frameX += 54
+          //   （洞穴小屋吊灯专用列偏移——曾漏，s34 297 格帧债唯一源）。
+          st.setTileSilent(x + dx, y + dy, t, Math.floor(style / 36) * 108 + (dx + 1) * 18 + 54, style * 54 + dy * 18);
         }
       }
       regHouseObj(st, x - 1, y, 3, 3, 'chand');
@@ -1258,6 +1262,9 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
       //   出口平台照写壳行(该语境 tileSolid[19] 表值对门不可见/门恒过),恢复恒写。
       st.setTileSilent(sx, sy, PLATFORM, 0, def.platformStyle * 18);
       st.slope[st.idx(sx, sy)] = dir === 1 ? 1 : 2;
+      // ★AAAAAA：HouseBuilder.cs:518 SetSlope 后 SetFrames(frameNeighbors:true)——
+      //   中心+四邻 TileFrame（平台连接码写入 frameX；引擎 framePlatformSweep）
+      genFrameNeighbors(st, rng, sx, sy, 'setTile');
     }
     // 顶步上方 4×1 平台(HouseBuilder.cs:519)：Gen(Chain(Clear(), PlaceWall(WallType),
     //   PlaceTile(19)))——★PlaceWall 逐格走墙重帧掷（Actions.Clear 清 tile+wall+liquid
@@ -1271,6 +1278,8 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
       st.liquidType[st.idx(cx, cy)] = 0;
       placeWallRolled(st, rng, cx, cy, def.wall);
       st.setTileSilent(cx, cy, PLATFORM, 0, def.platformStyle * 18);
+      // HouseBuilder.cs:519 尾 SetFrames(frameNeighbors:true)——AAAAAA 补
+      genFrameNeighbors(st, rng, cx, cy, 'setTile');
     }
   }
 }
@@ -1370,7 +1379,7 @@ function findVerticalExit(st: TileStore, rectX: number, rectY: number, rectW: nu
   return null;
 }
 
-function placePlatforms(st: TileStore, rooms: Rect[], def: ThemeDef): void {
+function placePlatforms(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): void {
   const top = rooms[0], bot = rooms[rooms.length - 1];
   // 顶层顶壁(isUp:候选自壁上 5 格起);帧同楼梯(C6):HouseBuilder.cs:574
   //   PlaceTile(19, PlatformStyle) → frameY = 18*style。
@@ -1379,6 +1388,9 @@ function placePlatforms(st: TileStore, rooms: Rect[], def: ThemeDef): void {
   const tryPlatform = (x: number, y: number) => {
     if (st.inBounds(x, y)) {
       st.setTileSilent(x, y, PLATFORM, 0, def.platformStyle * 18);
+      // ★AAAAAA：HouseBuilder.cs:574 链尾 SetFrames(frameNeighbors:true)——
+      //   平台连接码（引擎 framePlatformSweep）写入 frameX。
+      genFrameNeighbors(st, rng, x, y, 'setTile');
     }
   };
   const exitT = findVerticalExit(st, top.x + 2, top.y, top.w - 4, true);
@@ -1704,7 +1716,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     placeDoors(st, rng, rooms, def);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('do', ox, oy, 0, __rn());
-    placePlatforms(st, rooms, def);
+    placePlatforms(st, rng, rooms, def);
     kstage();   // WWWW：帧杀（本阶段带帧写 → 九宫 Check*；ar 蚀变裸写不触发故无调用）
     __st?.('pl', ox, oy, 0, __rn());
     // 5) 支撑梁

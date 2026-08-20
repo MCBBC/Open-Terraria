@@ -28,8 +28,9 @@ import {
   readPylonModule, writePylonModule, type PylonNetMsg,
   readParticleModule, writeParticleModule, type ParticleSettings,
   readAmbienceModule,
+  readInstancedLootModule, writeInstancedLootModule, INSTANCED_LOOT_PER_FRAME,
+  type InstancedLootEntry, type LiquidCell,
   readPingProbe, writePingProbeEcho,
-  type LiquidCell,
 } from './syncModules';
 import type { LeashedNetMsg } from '../entities/LeashedCritter';
 import type { World } from '../world/World';
@@ -62,6 +63,11 @@ export interface RemotePlayerState {
   /** 权威 HP（msg16 镜像——Game 接线到 proxy.hp 供头顶血条/死亡表现） */
   hp: number;
   maxHp: number;
+  /** 权威 mana/luck（msg16 尾段镜像,2026-08-20 per-client 批——掉落结算的
+   *  closestPlayer luck/心星条件数据源;旧端无尾段缺省 0） */
+  mana: number;
+  manaMax: number;
+  luck: number;
   /** msg13 flagBits[0]（原版 bitsByte26[0]）:躺床态 */
   sleeping: boolean;
 }
@@ -169,6 +175,9 @@ export interface ClientNetHooks {
   onAmbienceSpawn?: (playerSlot: number, seed: number, type: number) => void;
   /** msg203 全房 RTT 表到达（玩家列表面板数据源） */
   onPingTable?: (table: Array<{ slot: number; rttMs: number }>) => void;
+  /** module14 per-client 掉落到达（房主/SimHost 经服务器定向转发——原版 msg90
+   *  InstancedItem 等价;Boss 袋族各端私有实例。Game 侧 netLocalOnly 落地） */
+  onInstancedLoot?: (entries: InstancedLootEntry[]) => void;
 }
 
 export class ClientNet {
@@ -391,10 +400,14 @@ export class ClientNet {
           this.hooks.onWorldReady(this.pendingWorld);
           this.pendingWorld = null;
           // R2 修复：进世界后重发外观——连接时 player 可能尚未创建/外观未应用，
-          // 此刻 Game.player 必然就绪（onWorldReady 已被 loadWorld 消费）
-          const p3 = this.game.player as { appearance?: unknown } | undefined;
+          // 此刻 Game.player 必然就绪（onWorldReady 已被 loadWorld 消费）。
+          // hairDye 同步并入（与 PlayerSlot 时刻同构——否则这发重发会把 8-14 批
+          // 发色剂字段冲掉：接收端 Game 只在 parsed.hairDye 为 number 时更新，
+          // 缺键=保持旧值,但重发前若玩家带档发色剂则远端要等 applyAppearance 补发）
+          const p3 = this.game.player as { appearance?: unknown; hairDye?: number } | undefined;
           if (p3?.appearance) {
-            this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot).str(JSON.stringify(p3.appearance)).finish());
+            this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot)
+              .str(JSON.stringify({ ...(p3.appearance as Record<string, unknown>), hairDye: p3.hairDye ?? 0 })).finish());
           }
         }
         return;
@@ -411,7 +424,7 @@ export class ClientNet {
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
               hostile: false, team: 0, hp: 100, maxHp: 100, sleeping: false,
-              deathsPve: 0, deathsPvp: 0,
+              deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0,
             };
             this.players.set(slot, p);
           }
@@ -456,7 +469,7 @@ export class ClientNet {
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
             fresh: true, active: true, lastFresh: performance.now(),
             hostile, team, hp: 100, maxHp: 100, sleeping: false,
-            deathsPve: 0, deathsPvp: 0,
+            deathsPve: 0, deathsPvp: 0, mana: 0, manaMax: 0, luck: 0,
           };
           this.players.set(slot, p);
         }
@@ -573,6 +586,11 @@ export class ClientNet {
           // → AmbientSky.Spawn(player, type, seed)；锚玩家位由 Game 从镜像表解析）
           const m = readAmbienceModule(r);
           this.hooks.onAmbienceSpawn?.(m.playerSlot, m.seed, m.type);
+        } else if (moduleId === NetModule.InstancedLoot) {
+          // module14 per-client 掉落（原版 msg90 InstancedItem 语义——服务器按
+          // targetSlot 定向转发;非本端条目为异常流,Game 侧再验后静默丢弃）
+          const entries = readInstancedLootModule(r);
+          if (entries.length) this.hooks.onInstancedLoot?.(entries);
         }
         return;
       }
@@ -703,12 +721,19 @@ export class ClientNet {
         // 尾部死亡计数（旧 server 无尾段 → 保持 0;Player.cs numberOfDeaths 分道）
         const deathsPve = r.remaining >= 2 ? r.u16() : undefined;
         const deathsPvp = r.remaining >= 2 ? r.u16() : undefined;
+        // 尾部 mana/luck（2026-08-20 per-client 批——掉落结算 closestPlayer 数据源;
+        // 旧 server/旧端无尾段 → 缺省 0,心星条件按未满档退化,登记兼容语义）
+        let mana: number | undefined, manaMax: number | undefined, luck: number | undefined;
+        if (r.remaining >= 8) { mana = r.i16(); manaMax = r.i16(); luck = r.f32(); }
         // 缓存进状态表（proxy.hp 接线在 Game.simulateRemotePlayers 每帧读取）
         const rp = this.players.get(slot);
         if (rp) {
           rp.hp = hp; rp.maxHp = maxHp;
           if (deathsPve !== undefined) rp.deathsPve = deathsPve;
           if (deathsPvp !== undefined) rp.deathsPvp = deathsPvp;
+          if (mana !== undefined) rp.mana = mana;
+          if (manaMax !== undefined) rp.manaMax = manaMax;
+          if (luck !== undefined && Number.isFinite(luck)) rp.luck = luck;
         }
         if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
         return;
@@ -1187,13 +1212,15 @@ export class ClientNet {
   }
 
   /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威）。尾部随附死亡计数
-   *  （u16×2 PVE/PVP——计数变化时绕过 HP 节流即发,/death 命令族汇总用） */
+   *  （u16×2 PVE/PVP——计数变化时绕过 HP 节流即发,/death 命令族汇总用）+
+   *  mana/luck（i16×2+f32,2026-08-20 per-client 批——房主掉落结算 closestPlayer
+   *  数据源;luck 随 5s 心跳/HP 变化包捎带,旧 server 无尾段忽略） */
   private lastHpSent = -1;
   private lastHpAt = 0;
   private lastDeathsSent = '';
   syncHp() {
     if (this.mySlot < 0) return;
-    const p = this.game.player as unknown as { hp: number; maxHp: number; deathsPve: number; deathsPvp: number };
+    const p = this.game.player as unknown as { hp: number; maxHp: number; deathsPve: number; deathsPvp: number; mana: number; maxMana: number; luck: number };
     const now = performance.now();
     const deathsKey = `${p.deathsPve},${p.deathsPvp}`;
     const deathsChanged = deathsKey !== this.lastDeathsSent;
@@ -1204,7 +1231,18 @@ export class ClientNet {
     this.lastDeathsSent = deathsKey;
     this.lastHpAt = now;
     this.send(new NetWriter(Msg.PlayerLifeMana).u8(this.mySlot).i16(p.hp).i16(p.maxHp)
-      .u16(p.deathsPve & 0xffff).u16(p.deathsPvp & 0xffff).finish());
+      .u16(p.deathsPve & 0xffff).u16(p.deathsPvp & 0xffff)
+      .i16(Math.max(-32768, Math.min(32767, p.mana)))
+      .i16(Math.max(-32768, Math.min(32767, p.maxMana)))
+      .f32(Number.isFinite(p.luck) ? p.luck : 0).finish());
+  }
+
+  /** per-client 掉落上行（module14；结算端=房主——服务器按 targetSlot 定向转发,
+   *  其他端不可见。CommonCode.DropItemLocalPerClientAndSetNPCMoneyTo0 的 msg90 段） */
+  sendInstancedLoot(entries: InstancedLootEntry[]) {
+    for (let off = 0; off < entries.length; off += INSTANCED_LOOT_PER_FRAME) {
+      this.send(writeInstancedLootModule(entries.slice(off, off + INSTANCED_LOOT_PER_FRAME)));
+    }
   }
 
   // ================= 物品/装备同步（msg5，对齐原版 SyncPlayerItem 语义） =================
