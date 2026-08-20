@@ -1904,8 +1904,8 @@ export class Enemy extends Entity {
    *  - WorldGen.Skyblock.{lowTiles,noHellstone,noFossils,noLifeCrystals} 六处（:60757/
    *    :60806/:60813/:60822/:60827/:60859/:60892）——天空盒世界未实装恒 false
    *  - Item.GetRandomVoiceItem（:60828-60830，天空盒子分支内）——连带跳过
-   *  - Main.vampireSeed（:60920-60923 地下 1/13 → 9 木头）——1.4.5 vampirism 哈希
-   *    秘密种子无文本映射（SeedFlags 无位，参照 infectedSeed 预留位惯例） */
+   *  - Main.vampireSeed :60920-60923 已接（sf.vampireSeed——SeedEasterEggs
+   *    "what a horrible night to have a curse"） */
   private slimeRollContainedItem(game: GameHooks): void {
     const vid = this.vanillaId;
     if (vid === null || !Enemy.SLIME_CAN_CONTAIN_ITEMS.has(vid)) return;
@@ -1980,8 +1980,10 @@ export class Enemy extends Entity {
           this.ai1 = 147;                           // :60914-60916 ftw 地下 → 棘刺丛林史莱姆物
         } else if (i === 0 && sf.remix && this.ai0 !== -999 && roll(3) === 0) {
           this.ai1 = 75;                            // :60917-60919 首掷 remix → 生命水晶星史莱姆
+        } else if (sf.vampireSeed && !sf.remix && roll(13) === 0 && yTile > surfaceY) {
+          // Main.vampireSeed（:60920-60923）：吸血鬼种子世界地下 1/13 → 持木头(9)
+          this.ai1 = 9;
         }
-        // Main.vampireSeed（:60920-60923）：哈希秘密种子无载体，跳过
       }
     }
   }

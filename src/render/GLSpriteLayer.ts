@@ -98,6 +98,16 @@ export class GLSpriteLayer {
     // now-diedAt>5000,diedAt=0 时恒真 = 每帧重建(playsoft --disable-gpu 下
     // WebGL2 必失败 → 60 张/秒 createElement 风暴,暂停中也持续)
     if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
+    // 软件渲染器判不可用(SwiftShader/llvmpipe:上下文可建但软跑纹理采样劣于
+    // 2D 回退路径——背景/云消费方均有 2D 兜底;--disable-gpu 场景 2026-08-20)
+    try {
+      const renderer = String(gl.getParameter(gl.RENDERER) ?? '');
+      if (/swiftshader|software|llvmpipe|basic render/i.test(renderer)) {
+        this.unavailable = true; this.diedAt = performance.now();
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+        return;
+      }
+    } catch { /* RENDERER 查询失败按硬件处理 */ }
     this.gl = gl;
     const compile = (type: number, src: string): WebGLShader | null => {
       const sh = gl.createShader(type)!;

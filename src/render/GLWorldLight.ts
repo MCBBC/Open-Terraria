@@ -79,6 +79,17 @@ void main() {
       preserveDrawingBuffer: true,
     })) as WebGLRenderingContext | null;
     if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
+    // 软件渲染器(SwiftShader/llvmpipe 等)判不可用:上下文能建但全屏双纹理
+    // 采样每帧毫秒级,劣于 2D 三步回退——直接走 unavailable 让消费方回退 2D
+    // (--disable-gpu 全域软渲染实测场景,2026-08-20)
+    try {
+      const renderer = String(gl.getParameter(gl.RENDERER) ?? '');
+      if (/swiftshader|software|llvmpipe|basic render/i.test(renderer)) {
+        this.unavailable = true; this.diedAt = performance.now();
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+        return;
+      }
+    } catch { /* RENDERER 查询失败按硬件处理 */ }
     this.gl = gl;
     const compile = (type: number, src: string): WebGLShader | null => {
       const sh = gl.createShader(type)!;

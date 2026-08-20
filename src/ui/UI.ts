@@ -2399,8 +2399,13 @@ export class UI {
         };
         (ui.icon as HTMLImageElement).src = want;
       }
+      // 吸血鬼世界隐藏火系 buff 倒计时（Main.cs:42715 TryGetBuffTime：vampireSeed 且
+      // buffType∈{24,23,32} 且 buffTime<10【tick】→ 不出文字——日光炽灼三连每帧 3t
+      // 续期恒 <10t，图标上永不显示秒数）
+      const vampHideTime = !!this.game.world.seedFlags?.vampireSeed
+        && [24, 23, 32].includes(BUFF_DEFS[t].vanillaBuff) && left * 60 < 10;
       const s = Math.ceil(left);
-      ui.time.textContent = s >= 60
+      ui.time.textContent = vampHideTime ? '' : s >= 60
         ? (s % 60
           ? Lang.text('Mods.SandboxWorld.Time.MinSec', Math.floor(s / 60), s % 60)
           : Lang.text('Mods.SandboxWorld.Time.Minutes', Math.floor(s / 60)))

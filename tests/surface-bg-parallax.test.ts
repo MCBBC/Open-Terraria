@@ -43,6 +43,17 @@ function surfBg(cam: { x: number; y: number; zoom: number }) {
   return r.recs;
 }
 
+/** ComputeScAdj(Main.cs:63389-63413)+pushBGTopHack(=30 in-game,:58722-58774)
+ *  ——2026-08-20 审计补齐:表面背景 Y 链第 3/4 项 */
+const scAdjOf = (camTopY: number, viewH: number, zoom: number, groundLevel: number, h: number) => {
+  const screenH = viewH / zoom;
+  const num = (groundLevel * 16) / Math.max(1, camTopY + screenH);
+  let k = (h * 0.15 * 16 - camTopY) * 0.00025;
+  if (k < 0) k = 0;
+  return num * (0.45 - k * k) * (h <= 1200 ? -500 : h <= 1800 ? -300 : -150);
+};
+const PUSH = 30;
+
 describe('地表远景背景锚点（Main.cs DrawSurfaceBG :58749/:58860）', () => {
   it('Y 锚 = num3×topA+topB，num3 用 zoom 修正屏顶（曾 /1 占位 → 整体下移）', () => {
     const cam = { x: 3000, y: 100 * 16 - 200, zoom: 1.25 };
@@ -50,17 +61,18 @@ describe('地表远景背景锚点（Main.cs DrawSurfaceBG :58749/:58860）', ()
     expect(recs.length).toBeGreaterThan(0);
     const camTopY = cam.y - 862 / 2 / 1.25;                 // screenPosition.Y
     const num3 = -(camTopY - 300) / (100 * 16);
+    const scAdj = scAdjOf(camTopY, 862, 1.25, 100, 600);
     // 森林专属远山两档（:60716-60717 topA 1300/1600, topB 1090/1350——调试实证
-    // 首帧 alphaFront 仅 0.05 时树层同绘,两档均在 recs）
-    const y0 = num3 * 1300 + 1090;
-    const y1 = num3 * 1600 + 1350;
-    expect(recs.some((c) => Math.abs(c.dy - y0) < 1.01)).toBe(true);
+    // 首帧 alphaFront 仅 0.05 时树层同绘,两档均在 recs;+scAdj+push(2026-08-20)
+    const y0 = num3 * 1300 + 1090 + scAdj + PUSH;
+    const y1 = num3 * 1600 + 1350 + scAdj + PUSH;
+    expect(recs.some((c) => Math.abs(c.dy - y0) < 1.01), `dys=${recs.map((c) => Math.round(c.dy)).join(",")} want=${Math.round(y0)}`).toBe(true);
     expect(recs.some((c) => Math.abs(c.dy - y1) < 1.01)).toBe(true);
     // 旧实现（cam.y - 862/2）算出的同档 topY 必差 ~70px——若退回 /1 占位,
     // 修正档坐标恒不出现（实measured 差 70px = 用户可见的"Y 偏下"量）
     const camTopOld = cam.y - 862 / 2;
     const num3Old = -(camTopOld - 300) / (100 * 16);
-    const y0Old = num3Old * 1300 + 1090;
+    const y0Old = num3Old * 1300 + 1090 + scAdj + PUSH;
     expect(Math.abs(y0Old - y0)).toBeGreaterThan(30);
     expect(recs.some((c) => Math.abs(c.dy - y0Old) < 1)).toBe(false);
   });
@@ -148,11 +160,12 @@ describe('海洋背景层（Main.cs:59348-59351 Step2 far 槽 3）', () => {
     const r5 = oceanDraw(5).filter((r) => OCEAN_TEX.includes(r.n));
     expect(r5.length).toBeGreaterThan(0);
     expect(r5.every((r) => r.n === 283)).toBe(true);
-    expect(r5.some((r) => Math.abs(r.dy - (num3 * 1400 + 1260 - 800)) < 1.01)).toBe(true);
+    const scAdjO = scAdjOf(100 * 16 - 200 - 862 / 2 / 1.25, 862, 1.25, 100, 600);
+    expect(r5.some((r) => Math.abs(r.dy - (num3 * 1400 + 1260 - 800 + scAdjO + PUSH)) < 1.01)).toBe(true);
     // style 0 → 贴图 28（default 偏移 0）
     const r0 = oceanDraw(0).filter((r) => OCEAN_TEX.includes(r.n));
     expect(r0.every((r) => r.n === 28)).toBe(true);
-    expect(r0.some((r) => Math.abs(r.dy - (num3 * 1400 + 1260)) < 1.01)).toBe(true);
+    expect(r0.some((r) => Math.abs(r.dy - (num3 * 1400 + 1260 + scAdjO + PUSH)) < 1.01)).toBe(true);
     // ★原版海洋无前景树层组——forest 兜底贴图恒不出现（曾画 fs.t[0]/fs.t[2]）
     for (const r of oceanDraw(2)) {
       expect(FOREST_TREE_TEX.includes(r.n)).toBe(false);

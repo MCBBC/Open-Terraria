@@ -112,12 +112,32 @@ export function killTileWhole(st: TileStore, x: number, y: number, rng?: RNG): v
   killTileWholeCore(st, x, y, rng);
 }
 function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void {
-  // ★KillTile 级联（cs:63983 尾部 SquareTileFrame(i,j) → 3×3 TileFrame 重帧）。
-  //   SSSSS 批（2026-08-20）按 vanilla TileFrame 真分派重构（12345 #76 双根因：
-  //   ①镖锚杀地基 → 上方压板 Check1x1 支撑杀缺失（cs:45226→86307）；
-  //   ②残缺巨石块帧锚 Check2x2 完整性杀缺失（cs:48405）——旧"整块搜索+支撑列"
-  //   近似对残块必空转）。陶罐/雕像族仍走旧近似（9293480 golden 四站点实证）。
+  // ★KillTile 1:1 头链（cs:63559-63990）。SSSSS 批（2026-08-20）补三件：
+  //   ①CheckTileBreakability 门（cs:62403——容器上格保护/魔金矿/仙人掌基座/
+  //     巨石骑箱 fail + 含 loot 箱拒杀）——m20260811 #76 双站点实证
+  //     ((3073-3074,688-691) 井穿箱+箱下木与丛林草全存)；
+  //   ②AttemptFossilShattering（cs:63526——杀化石 404 时 3×3 邻化石掷
+  //     Next(15|4)==0 连锁杀，★掷流）——m20260811 (3703,483) 实证；
+  //   ③fail 支类型转化（cs:63787-63810 草→土/丛林草→泥/苔→石…）。
+  //   12345 #76 双根因（Check1x1 压板支撑杀 + Check2x2 残缺巨石帧锚杀）见
+  //   cascade3x3T 分派注释。陶罐/雕像族仍走旧近似（9293480 golden 四站点实证）。
+  if (!st.inBounds(x, y)) return;
+  const ci = st.idx(x, y);
+  if (!st.flags[ci]) return;                          // cs:63573 !active()
+  const br = checkBreakabilityT(st, x, y);
+  if (br === 2) return;                               // cs:63584 num==2 拒杀
+  // cs:63756 化石碎裂在杀除本格**之前**（邻化石支撑判读本格仍活性）
+  if (rng && sheetOf(st.type[ci]!) === 404) attemptFossilShatterT(st, x, y, rng, br === 1);
+  if (br === 1) { failConvertT(st, x, y); cascade3x3T(st, x, y, rng); return; }
   killObjectAt(st, x, y);
+  cascade3x3T(st, x, y, rng);
+}
+
+/** KillTile 尾 SquareTileFrame（cs:63983→80924）3×3 TileFrame 分派级联。
+ *  SSSSS 批按 vanilla TileFrame 真分派重构（12345 #76 双根因：①镖锚杀地基 →
+ *  上方压板 Check1x1 支撑杀缺失（cs:45226→86307）；②残缺巨石块帧锚 Check2x2
+ *  完整性杀缺失（cs:48405）——旧"整块搜索+支撑列"近似对残块必空转）。 */
+function cascade3x3T(st: TileStore, x: number, y: number, rng?: RNG): void {
   // SquareTileFrame 调用序（cs:80925-80933）列优先
   for (const [dx, dy] of [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 0], [0, 1], [1, -1], [1, 0], [1, 1]] as const) {
     const ux = x + dx, uy = y + dy;
@@ -173,6 +193,114 @@ function killTileWholeCore(st: TileStore, x: number, y: number, rng?: RNG): void
 }
 
 // ---- vanilla TileFrame 分派族（SSSSS 批） ----
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169） */
+const PREVENTS_REMOVAL = new Set([5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634]);
+/** IsAContainer（cs:48831）：BasicDresser{88}+{470,475}+BasicChest{21,467}+Fake{441,468} */
+const CONTAINER_SHEETS = new Set([88, 470, 475, 21, 467, 441, 468]);
+/** Main.tileMoss（Main.cs tileMoss[x]=true 全 11 项）与 TileID.Sets.tileMossBrick（:309） */
+const TILE_MOSS = new Set([179, 180, 181, 182, 183, 381, 534, 536, 539, 625, 627]);
+const TILE_MOSS_BRICK = new Set([512, 513, 514, 515, 516, 517, 535, 537, 540, 626, 628]);
+/** fossilBreak（WorldGen 静态位，cs:63528 再入闸） */
+let fossilBreakT = false;
+const isLockedDoorT = (st: TileStore, i: number): boolean =>
+  st.type[i] === DOOR10 && st.frameY[i]! >= 594 && st.frameY[i]! <= 646 && st.frameX[i]! < 54;
+
+/** CheckTileBreakability（cs:62403-62520）Traps 语境 1:1：2=拒杀 / 1=fail /
+ *  0=可杀。★含 loot 箱拒杀门（SSSSS 证据补——反编译无此分支，x86 金标四链
+ *  Traps 全程零箱杀 + m20260811 双井穿站点箱存活实证；语义=Chest.CanDestroyChest
+ *  cs:590 有物不可毁，游戏内同规则"有物箱不可开采"）。 */
+function checkBreakabilityT(st: TileStore, x: number, y: number): 0 | 1 | 2 {
+  const i = st.idx(x, y);
+  const t = st.type[i]!;
+  const sh = sheetOf(t);
+  if (st.inBounds(x, y + 1)) {
+    const bi = st.idx(x, y + 1);
+    if (st.flags[bi] && isLockedDoorT(st, bi)) return 2;          // cs:62424
+  }
+  if (!vanGenSolidType(t) && !SOLID_TOP.has(sh)) {
+    // ★SSSSS 证据门：含 loot 箱拒杀（锚=帧列模 2/帧行 18，同 CheckChest 锚）
+    if (CHEST_SHEETS.has(sh) && chestItemAnchors) {
+      let num = Math.trunc(st.frameX[i]! / 18);
+      while (num > 1) num -= 2;
+      const ax = x - num, ay = y - Math.trunc(st.frameY[i]! / 18);
+      if (chestItemAnchors.has(ay * st.w + ax)) return 2;
+    }
+    return 0;                                                     // cs:62427 非实心早退
+  }
+  if (st.inBounds(x, y - 1) && st.flags[st.idx(x, y - 1)]) {
+    const ai = st.idx(x, y - 1);
+    const at = st.type[ai]!, ash = sheetOf(at);
+    const scanForContainer = !CONTAINER_SHEETS.has(sh);
+    // CheckTileBreakability_HasReasonToReturnEarly（cs:62524）
+    if (sh !== ash && (ash === 77 || PREVENTS_REMOVAL.has(ash))) return 2;
+    if (isLockedDoorT(st, ai)) return 2;
+    if (scanForContainer && CONTAINER_SHEETS.has(ash)) return 2;
+    if (ash === 80 && at !== t) {                                 // cs:62445 仙人掌基座
+      const n = Math.trunc(st.frameX[ai]! / 18);
+      if (n === 0 || n === 1 || n === 4 || n === 5) return 2;
+    }
+    if (t === DOOR10 && isLockedDoorT(st, i)) return 1;
+    if (isBoulderType(t) && checkBoulderChestT(st, x, y)) return 1; // cs:62455
+  }
+  return 0;
+}
+
+/** CheckBoulderChest（cs:48810）：巨石 2×2 锚上方两格 ∈ 容器/魔金矿/禁拆族 → true */
+function checkBoulderChestT(st: TileStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  let num = -Math.trunc(st.frameX[i]! / 18);
+  if (num < -1) num += 2;
+  num += x;
+  const num2 = y - Math.trunc((st.frameY[i]! % 36) / 18);
+  const t = st.type[i]!;
+  for (const cx of [num, num + 1]) {
+    if (!st.inBounds(cx, num2 - 1)) continue;
+    const ci = st.idx(cx, num2 - 1);
+    if (!st.flags[ci]) continue;
+    const ct = st.type[ci]!, csh = sheetOf(ct);
+    if (sheetOf(t) !== csh && (csh === 77 || PREVENTS_REMOVAL.has(csh))) return true;
+    if (isLockedDoorT(st, ci)) return true;
+    if (CONTAINER_SHEETS.has(csh)) return true;
+  }
+  return false;
+}
+
+/** AttemptFossilShattering（cs:63526）1:1：杀化石时 3×3 邻化石掷 Next(maxValue)==0
+ *  连锁杀。maxValue：邻下格非实心=4；正上格（!fail）=4；余 15。★掷流敏感 */
+function attemptFossilShatterT(st: TileStore, x: number, y: number, rng: RNG, fail: boolean): void {
+  if (fossilBreakT) return;
+  fossilBreakT = true;
+  for (let k = x - 1; k <= x + 1; k++) {
+    for (let l = y - 1; l <= y + 1; l++) {
+      let maxValue = 15;
+      if (!solidTileV(st, k, l + 1)) maxValue = 4;
+      else if (k === x && l === y - 1 && !fail) maxValue = 4;
+      if ((k !== x || l !== y) && st.inBounds(k, l)) {
+        const ki = st.idx(k, l);
+        if (st.flags[ki] && sheetOf(st.type[ki]!) === 404 && rng.int(0, maxValue - 1) === 0) {
+          killTileWholeCore(st, k, l, rng);
+        }
+      }
+    }
+  }
+  fossilBreakT = false;
+}
+
+/** KillTile fail 支类型转化（cs:63787-63810）：草族→土/丛林草→泥/苔→石/苔砖→石砖。
+ *  转化后原格存活（cs:63812 SquareTileFrame 后 return）。 */
+function failConvertT(st: TileStore, x: number, y: number): void {
+  const i = st.idx(x, y);
+  const sh = sheetOf(st.type[i]!);
+  const conv: Record<number, number> = { 2: 0, 23: 0, 109: 0, 199: 0, 477: 0, 492: 0, 633: 57, 60: 59, 661: 59, 662: 59, 70: 59 };
+  if (sh in conv) {
+    const to = conv[sh]!;
+    st.type[i] = sheetId(to);
+    return;
+  }
+  if (TILE_MOSS.has(sh)) st.type[i] = STONE1;
+  else if (TILE_MOSS_BRICK.has(sh)) st.type[i] = sheetId(38);
+}
+
 /** Check1x1 分派族（TileFrameImportant cs:86300-86308：36/135/141/210/239/428/
  *  593/624/650/656/700/701 → Check1x1）——1×1 落地物 */
 const CHECK1X1_SHEETS = new Set([36, 135, 141, 210, 239, 428, 593, 624, 650, 656, 700, 701]);
@@ -921,7 +1049,7 @@ export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState, chests?: Arr
   //   本仓生成期不放置 379,行为无差,存档时间线。pass 尾 cs:18897 还原 true。
   flipGenSolid([379], false);
   boulderPetsPlaced = 0;   // GenVars.boulderPetsPlaced 每局清零
-  destroyObjectT = false; destroyObjectP2 = false;
+  destroyObjectT = false; destroyObjectP2 = false; fossilBreakT = false;
   // CheckChest 语境：有物箱锚集（CanDestroyChest cs:590 有物=不可毁）
   chestList = chests ?? null;
   chestItemAnchors = new Set();

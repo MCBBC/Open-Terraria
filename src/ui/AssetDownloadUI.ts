@@ -194,6 +194,9 @@ export function mountAssetBadge(): void {
     return;
   }
   if (s.phase === 'done') return; // 已完成不挂
+  // ★完成标志在(内容版本键命中)干脆不挂——reload 后"徽标挂载又 0.7s 淡出"的
+  //   闪现源(缓存真被系统清理的罕见窗口由门槛弹窗兜底,徽标只是装饰)
+  if (assetsCompleteFast()) return;
   ensureStyle();
   badgeEl = document.createElement('div');
   badgeEl.className = 'sw-asset-badge';

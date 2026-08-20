@@ -8,7 +8,7 @@ import { TILE_ANIM_RATE, tileAnim, campfireYOffset } from './TileAnim';
 import { cageAnimRate, cageFamilyOf } from './CritterCage';
 import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
-import { paintColor } from '../world/Paint';
+import { applyPaintTint, applyPaintTintSpecial, getTilePaintSettings, type LeafPaintSettings } from '../world/Paint';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
 import type { World } from '../world/World';
@@ -31,43 +31,123 @@ export interface ChunkPair {
   cell: number;
 }
 
-// ---- 油漆乘色着色画布（ChunkCache 静态烘焙消费，world/Paint.applyPaintTint） ----
-// 原版走 GPU shader（TilePaintSystemV2.cs:69-82）；Canvas 2D 用三段合成等价实现：
-//   ① 摘出待着色区域 → ② multiply（负相 30 用 difference 反转）填色 →
-//   ③ destination-in 按原区域 alpha 裁回（multiply 会把透明像素变成实色，必须裁）
-// 全局单例：每 chunk 烘焙是串行的，16×16 复用零分配
+// ---- 油漆逐像素着色（ChunkCache 静态烘焙消费，world/Paint 字节码真值） ----
+// 原版走 GPU shader（TilePaintSystemV2.cs:69-82 PrepareShader → TileShader.cso 45 pass）；
+// Canvas 2D 等价 = applyPaintTint/applyPaintTintSpecial 逐像素调制（min/max 排序槽，
+// 2026-08-20 接线替换旧 multiply 乘色三段合成）。chunk 烘焙非每帧，ImageData 循环
+// 成本可接受；fround 序与 UNORM 取整已在函数内做，循环只搬运字节、不重算。
 const tintCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
 if (tintCanvas) { tintCanvas.width = TILE; tintCanvas.height = TILE; }
 const tintCtx = tintCanvas ? tintCanvas.getContext('2d', { willReadFrequently: true }) : null;  // 纯 CPU scratch:SHM 后备不占 IOSurface(第六场双开 16x16 失败的当事画布)
 
-/** 对 canvas 的 (readX,readY) 16×16 区域按 paint 着色,回写到 ctx 的 (writeX,writeY)。
+/** 对 canvas 的 (readX,readY) 16×16 区域按 paint 逐像素着色,回写到 ctx 的 (writeX,writeY)。
  *  ★读/写坐标分离(2026-08-18 atlas 化 review 修):atlas 页路径读=页内绝对、写=cell 内
  *  局部(ctx 挂 translate(ox,oy));旧签名读写同参 → 回写落 (ox+px,oy+py) 双重偏移,
- *  ox>0 的 cell 油漆被 clip 挡掉 = 静默丢失(新世界无油漆的对拍探针抓不到) */
+ *  ox>0 的 cell 油漆被 clip 挡掉 = 静默丢失(新世界无油漆的对拍探针抓不到)。
+ *  isWall=true → 墙档(负相 30 走 Pass44 陡化反转;GetWallSettings 恒 DefaultNoSpecial
+ *  Groups_ForWalls,墙无特判组);special=特判组设置(特判表类型 + paint 1-12 生效,
+ *  函数内自带 paint 域守卫)。只写 RGB 不动 alpha:透明像素跳过 = 旧 destination-in
+ *  裁回语义。putImageData 无视 transform/clip → 经 scratch 中转再 drawImage 回写。 */
 function tintRegion(ctx: CanvasRenderingContext2D, src: HTMLCanvasElement, readX: number, readY: number, paint: number,
-  writeX = readX, writeY = readY): void {
+  writeX = readX, writeY = readY, isWall = false, special?: LeafPaintSettings): void {
   if (!tintCtx || !tintCanvas) return;
-  tintCtx.globalCompositeOperation = 'source-over';
-  tintCtx.clearRect(0, 0, TILE, TILE);
-  tintCtx.drawImage(src, readX, readY, TILE, TILE, 0, 0, TILE, TILE);
-  if (paint === 30) {
-    // 负相漆：difference × 白 = 反转（MapHelper.MapColor :1849-1851 同式）
-    tintCtx.globalCompositeOperation = 'difference';
-    tintCtx.fillStyle = '#ffffff';
+  const img = (src.getContext('2d') as CanvasRenderingContext2D).getImageData(readX, readY, TILE, TILE);
+  const d = img.data;
+  if (special) {
+    for (let p = 0; p < d.length; p += 4) {
+      if (d[p + 3] === 0) continue;
+      const c = applyPaintTintSpecial(d[p], d[p + 1], d[p + 2], paint, special);
+      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2];
+    }
   } else {
-    // 其余：multiply × paintColor = 逐通道乘色（白漆 26 乘白 ≡ 原色，自然等价）
-    tintCtx.globalCompositeOperation = 'multiply';
-    const [tr, tg, tb] = paintColor(paint);
-    tintCtx.fillStyle = `rgb(${tr},${tg},${tb})`;
+    for (let p = 0; p < d.length; p += 4) {
+      if (d[p + 3] === 0) continue;
+      const c = applyPaintTint(d[p], d[p + 1], d[p + 2], paint, isWall);
+      d[p] = c[0]; d[p + 1] = c[1]; d[p + 2] = c[2];
+    }
   }
-  tintCtx.fillRect(0, 0, TILE, TILE);
-  tintCtx.globalCompositeOperation = 'destination-in';
-  tintCtx.drawImage(src, readX, readY, TILE, TILE, 0, 0, TILE, TILE);
-  tintCtx.globalCompositeOperation = 'source-over';
+  tintCtx.putImageData(img, 0, 0);
   // 不 clearRect 直接覆盖回写：着色像素与本区域原内容 alpha 完全一致，
   // source-over 叠加即替换色值；clearRect 反而会打穿邻格溢出的跨格精灵
   ctx.drawImage(tintCanvas, writeX, writeY);
 }
+
+// ---- 树干/棕榈油漆特判组 style 派生（TileDrawing.cs 1:1） ----
+// 原版 GetTileDrawTexture（TileDrawing.cs:1460-1478）只在 type 5/323 算 TileStyle
+// （5 → GetTreeBiome :1468 / 323 → GetPalmTreeBiome :1471），其余类型恒 0。
+
+/** GetTreeVariant（TileDrawing.cs:1801-1829）：树底第一格（非树格）类型 → 变体。
+ *  地面格未激活/越界 → -1（:1803-1805 null/!active 门；-1 落 style switch 的 _ → WoodPurity）。
+ *  worldSurface=Main.worldSurface（本仓 world.groundLevel，GenVars.worldSurface 落档） */
+export function treeGroundVariant(st: World['store'], x: number, y: number, worldSurface: number): number {
+  if (!st.inBounds(x, y)) return -1;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return -1;                                  // :1803-1805 !active
+  switch (TILE_DEFS[st.type[i]]?.vanilla?.sheet) {
+    case 23: case 661: return 0;                                // :1809-1811 腐化草
+    case 60: return y > worldSurface ? 5 : 1;                   // :1812-1817 丛林地表 1/地下 5
+    case 70: return 6;                                          // :1818-1819 蘑菇草
+    case 109: case 492: return 2;                               // :1820-1822 神圣草
+    case 147: return 3;                                         // :1823-1824 雪原
+    case 199: case 662: return 4;                               // :1825-1827 猩红草
+    default: return -1;                                         // :1828-1829
+  }
+}
+
+/** GetTreeBiome（TileDrawing.cs:1758-1798）：树干格帧 → 列修正 → 向下扫到树底 → 变体。
+ *  列修正是枝/顶标记帧的枝干在邻列（:1763-1793 frameX/frameY 四段 switch）。 */
+export function treeTrunkPaintStyle(st: World['store'], x: number, y: number, tileFrameX: number, tileFrameY: number,
+  worldSurface: number): number {
+  let col = x;
+  if (tileFrameX === 66 && tileFrameY <= 45) col++;             // :1763-1765
+  if (tileFrameX === 88 && tileFrameY >= 66 && tileFrameY <= 110) col--; // :1767-1769
+  if (tileFrameY >= 198) {
+    if (tileFrameX === 66) col--;                               // :1771-1777
+    else if (tileFrameX === 44) col++;                          // :1778-1780
+  } else if (tileFrameY >= 132) {
+    if (tileFrameX === 22) col--;                               // :1783-1789
+    else if (tileFrameX === 44) col++;                          // :1790-1792
+  }
+  let row = y; // :1795 扫描：当前列自本行向下走到第一个非树格（越界=不激活，同 C# OOB 空格）
+  for (; st.inBounds(col, row); row++) {
+    const i = st.idx(col, row);
+    if (!st.flags[i] || st.type[i] !== TREE_VANILLA.trunk) break;
+  }
+  return treeGroundVariant(st, col, row, worldSurface);         // :1798
+}
+
+/** GetPalmTreeBiome+GetPalmTreeVariant（TileDrawing.cs:1749-1756/:3519-3543）：
+ *  向下扫到棕榈底 → 沙型(0/1/2/3) → 绿洲列 +4（★-1 也 +4 成 3 的原版行为 1:1 保留）。 */
+export function palmTreePaintStyle(st: World['store'], x: number, y: number, worldW: number): number {
+  let row = y; // :1752 扫描：type == 323 连续段
+  for (; st.inBounds(x, row); row++) {
+    const i = st.idx(x, row);
+    if (!st.flags[i] || st.type[i] !== TREE_VANILLA.palm) break;
+  }
+  let variant = -1;                                             // :3520
+  const gi = st.inBounds(x, row) ? st.idx(x, row) : -1;
+  if (gi >= 0 && st.flags[gi]) {
+    switch (TILE_DEFS[st.type[gi]]?.vanilla?.sheet) {
+      case 53: variant = 0; break;                              // :3522-3524 沙
+      case 234: variant = 1; break;                             // :3525-3527 猩红沙
+      case 116: variant = 2; break;                             // :3528-3530 珍珠沙
+      case 112: variant = 3; break;                             // :3531-3533 腐化沙
+    }
+  }
+  if (x >= 380 && x <= worldW - 380) variant += 4;              // :3534-3537 IsPalmOasisTree(:27352-27359)
+  return variant;                                               // :3538
+}
+
+/** 树干(5)/棕榈(323) 内部 id 解析（按 vanilla.sheet 反查；模块加载时一次） */
+const TREE_VANILLA = (() => {
+  let trunk = -1, palm = -1;
+  for (let id = 0; id < TILE_DEFS.length; id++) {
+    const s = TILE_DEFS[id]?.vanilla?.sheet;
+    if (s === 5 && trunk < 0) trunk = id;
+    else if (s === 323 && palm < 0) palm = id;
+  }
+  return { trunk, palm };
+})();
 
 export class ChunkCache {
   chunks = new Map<number, ChunkPair>();
@@ -667,9 +747,12 @@ export class ChunkCache {
     }
     ctx.globalAlpha = 1; // 致动幽灵 alpha 复位(防影响后续 pass)
 
-    // ---- 油漆乘色 pass：墙层 + tile 层分别着色 ----
+    // ---- 油漆逐像素 pass：墙层 + tile 层分别着色（TileShader.cso 真值） ----
     // 原版 tile/wall 各自经 tileShader 按格取 paint（TilePaintSystemV2）；
-    // Canvas 等价实现见 tintRegion（乘色模型见 world/Paint.applyPaintTint 注释）。
+    // Canvas 等价 = tintRegion 逐像素 applyPaintTint/applyPaintTintSpecial。
+    // 分发判据（Main.cs:58064-58083）：特判组 ⟺ paint∈[1,12] ∧ 类型在
+    // getTilePaintSettings 表内【都】成立；墙恒无特判组（isWall 只影响负相 30 档）。
+    // style 派生仅 5/323（GetTreeBiome/GetPalmTreeBiome，TileDrawing.cs:1460-1478）。
     // ★ 等价边界：原版按"绘制调用"着色（多格物件整张贴图随锚格上色）；
     //   本实现按 16×16 格区域着色——涂多格家具/树只有被涂格区域显色（登记）
     //   (atlas 化:src=页画布,区域坐标须用页内绝对 ox+lx*TILE)
@@ -679,9 +762,19 @@ export class ChunkCache {
         if (!st.inBounds(x, y)) continue;
         const i = st.idx(x, y);
         const pw = st.paintWall[i];
-        if (pw > 0 && st.wall[i] !== 0) tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw, lx * TILE, ly * TILE);
+        if (pw > 0 && st.wall[i] !== 0) {
+          tintRegion(wctx, wall, ox + lx * TILE, oy + ly * TILE, pw, lx * TILE, ly * TILE, true);
+        }
         const pt = st.paint[i];
-        if (pt > 0 && st.flags[i] && st.type[i] !== 0) tintRegion(ctx, tile, ox + lx * TILE, oy + ly * TILE, pt, lx * TILE, ly * TILE);
+        if (pt > 0 && st.flags[i] && st.type[i] !== 0) {
+          const vt = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
+          let style = 0;
+          if (vt === 5) style = treeTrunkPaintStyle(st, x, y, st.frameX[i], st.frameY[i], this.world.groundLevel);
+          else if (vt === 323) style = palmTreePaintStyle(st, x, y, this.world.w);
+          // 表外类型(null)或 paint 非 1-12(函数内守卫) → 普通组 applyPaintTint
+          const special = pt >= 1 && pt <= 12 ? getTilePaintSettings(vt ?? -1, style) ?? undefined : undefined;
+          tintRegion(ctx, tile, ox + lx * TILE, oy + ly * TILE, pt, lx * TILE, ly * TILE, false, special);
+        }
       }
     }
 

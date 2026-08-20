@@ -348,8 +348,16 @@ export class SM2Pass {
         case 0x0D: write(S(0, 0) >= S(1, 0) ? 1 : 0, S(0, 1) >= S(1, 1) ? 1 : 0, S(0, 2) >= S(1, 2) ? 1 : 0, S(0, 3) >= S(1, 3) ? 1 : 0); break;
         case 0x0E: write(2 ** S(0, 0), 2 ** S(0, 1), 2 ** S(0, 2), 2 ** S(0, 3)); break;
         case 0x0F: write(Math.log2(S(0, 0)), Math.log2(S(0, 1)), Math.log2(S(0, 2)), Math.log2(S(0, 3))); break;
-        case 0x12: write(S(0, 0) * S(2, 0) + (1 - S(0, 0)) * S(1, 0), S(0, 1) * S(2, 1) + (1 - S(0, 1)) * S(1, 1),
-          S(0, 2) * S(2, 2) + (1 - S(0, 2)) * S(1, 2), S(0, 3) * S(2, 3) + (1 - S(0, 3)) * S(1, 3)); break;
+        // LRP(d3d9 lrp - ps):dst = src0·src1 + (1−src0)·src2(src0=权重,src1=终点,
+        // src2=起点;HLSL lerp(a,b,w) → lrp dst, w, b, a)。2026-08-20 Aurora 对拍
+        // 定谳:曾实现为 src0·src2+(1−src0)·src1(与 cmp 操作数序混淆)——对拍
+        // pass Aurora :3149(fxc 产物 lrp r1.y, r0.y, c5.w(=1), r0.x(=A) 只可能
+        // 是 lerp(A,1,f1))不符,修正为规范序。影响面:lrp 族 12 pass
+        // (ArmorAcid/Hades/HighContrastGlow/LivingRainbow/Loki/Mushroom/
+        // ShiftingSands/Solar×2/Wisp/ForceField/RainbowTownSlime×2)染料烘焙向
+        // 真字节码语义偏移;金标测试(ArmorColored/HallowBoss)不含 lrp,不受影响。
+        case 0x12: write(S(0, 0) * S(1, 0) + (1 - S(0, 0)) * S(2, 0), S(0, 1) * S(1, 1) + (1 - S(0, 1)) * S(2, 1),
+          S(0, 2) * S(1, 2) + (1 - S(0, 2)) * S(2, 2), S(0, 3) * S(1, 3) + (1 - S(0, 3)) * S(2, 3)); break;
         case 0x13: write(S(0, 0) - Math.floor(S(0, 0)), S(0, 1) - Math.floor(S(0, 1)), S(0, 2) - Math.floor(S(0, 2)), S(0, 3) - Math.floor(S(0, 3))); break;
         case 0x20: { const p = Math.pow(Math.abs(S(0, 0)), S(1, 0)); write(p, p, p, p); break; }
         case 0x21: write(S(0, 1) * S(1, 2) - S(0, 2) * S(1, 1), S(0, 2) * S(1, 0) - S(0, 0) * S(1, 2), S(0, 0) * S(1, 1) - S(0, 1) * S(1, 0), 0); break;

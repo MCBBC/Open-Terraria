@@ -21,6 +21,7 @@ import { VanillaResourceBars } from './ResourceBars';
 import { FancyResourceBars } from './FancyResourceBars';
 import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
+import { GLScreenFilters, type ScreenFxPass } from './GLScreenFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { colorOfTheSkies, setFrameHorizon, setFrameCloudDim, setFrameLightning, setFrameBiome, setFrameAurora } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS, sheetOf } from '../player/SmartCursor';
@@ -2240,6 +2241,15 @@ export class Renderer {
       // Main.cs:9210-9222 的 tileFlame 表无 85 → flameCount=0，循环零次 = **原版死
       // 代码**（1.4.5.6 实测不渲染任何火苗），无物可移植，勿再登记
       graveyardIntensity: world.weather?.graveyardVisual ?? 0,
+      // HeatDistortion 门（SceneState.cs:122-123）：TileCenter=scene.tileY
+      //（SceneMetrics.cs:334 同源）、maxTilesY=store.h、沙漠三条件、sunScorch
+      heatTileCenterY: this.scene?.tileY ?? 0,
+      heatMaxTilesY: world.store.h,
+      heatZoneDesert: !!this.scene?.zoneDesert,
+      heatZoneRain: !!this.scene?.zoneRain,
+      heatZoneSandstorm: !!this.scene?.zoneSandstorm,
+      heatSunScorch: player.sunScorchCounter,
+      useHeatDistortion: true,   // Main.UseHeatDistortion（Main.cs:409 默认 true）
     });
     this._monoFrameMs = this._liquidNow;
 
@@ -2742,16 +2752,13 @@ export class Renderer {
     // 授 Obstructed(163) → headcovered → 目标 0.95/步进 0.3 的黑幕逼近，玩家矩形开孔
     this.updateAndDrawScreenObstruction(ctx, cam, viewW, viewH, player);
 
-    // 7d. 天塔柱族全屏滤镜（FilterManager.EndCapture :136-176：世界整屏合成、
-    //     HUD 之前；EffectPriority 升序 → Medium 先 VeryHigh 后）。开关链：
-    //     电路/右键 → SwitchMonolith 翻帧 → SceneMetrics 视区扫描（本帧 monoScan）
-    //     → SceneState.cs:105-128 激活 → Filter.Opacity 1/s 斜坡
-    if (this.monoFilters.anyInUse) {
-      this.monoFilters.draw(ctx, this.canvas, viewW, viewH, {
-        x: (player.cx - cam.x) * z + viewW / 2,
-        y: (player.cy - cam.y) * z + viewH / 2,
-      });
-    }
+    // 7d. 全屏滤镜链（FilterManager.EndCapture :136-176：世界整屏合成、HUD 之前；
+    //     EffectPriority 升序 → HeatDistortion(Low) 先 → Medium 柱族 → VeryHigh
+    //     CRT/Test2 后）。开关链：电路/右键 → SwitchMonolith 翻帧 → SceneMetrics
+    //     视区扫描（本帧 monoScan）→ SceneState.cs:105-128/:122-123 激活 →
+    //     Filter.Opacity 1/s 斜坡。GL 路径 = ScreenShader.cso SM2 字节码逐指令
+    //     1:1（GLScreenFilters）；GL 不可用回退 canvas 近似（MonolithFilters.draw）
+    this.drawScreenFilterChain(ctx, cam, player, viewW, viewH, z);
 
     // 8. 飘字（受光照影响后画）。数字类 = 原版位图字体（Combat_Text/Combat_Crit
     //    xnb 提取,见 render/CombatTextFont）:5 层绘制（±targetScale 四向暗化影 +
@@ -9969,6 +9976,98 @@ export class Renderer {
     }
     this.worldLight = inst;
     return inst;
+  }
+
+  /** 屏幕滤镜链 GL 后端(?sfxgl=0 逃生门;ScreenShader.cso SM2 字节码 1:1) */
+  private screenFx: GLScreenFilters | null = null;
+  private screenFxRetryAt = 0;
+  private screenFxEnabled = (() => {
+    try { return typeof location !== 'undefined' && new URLSearchParams(location.search).get('sfxgl') !== '0'; }
+    catch { return false; }
+  })();
+  /** 同 worldLightLayer 哨兵模式(活实例直取;死亡 5s 退避;初始化失败 30s 闩) */
+  private screenFxLayer(): GLScreenFilters | null {
+    if (!this.screenFxEnabled || this.isCpuRender()) return null;
+    if (this.screenFx) {
+      if (!this.screenFx.unavailable && !this.screenFx.diedAt) return this.screenFx;
+      if (performance.now() - this.screenFx.diedAt < 5000) { this.screenFx = null; return null; }
+      this.screenFx.dispose();
+      this.screenFx = null;
+    }
+    if (performance.now() < this.screenFxRetryAt) return null;
+    const inst = new GLScreenFilters();
+    if (inst.unavailable) {
+      inst.dispose();
+      this.screenFxRetryAt = performance.now() + 30_000;
+      return null;
+    }
+    this.screenFx = inst;
+    return inst;
+  }
+
+  /** 7d 滤镜链合成：HeatDistortion(Low) → 柱族(Medium) → CRT/Test2(VeryHigh)。
+   *  GL 优先(字节码 1:1,含 ColorOfTheSkies 链乘 EndCapture :172/:194);
+   *  失败回退 2D(heat 半分辨率扭曲 + MonolithFilters canvas 近似) */
+  private drawScreenFilterChain(
+    ctx: CanvasRenderingContext2D, cam: Camera, player: Player,
+    viewW: number, viewH: number, z: number,
+  ): void {
+    const mono = this.monoFilters;
+    if (!mono.anyInUse && !mono.heatInUse) return;
+    // uScreenResolution=UnscaledScreenSize(screen/RenderZoom ScreenShaderData.cs:96);
+    // uScreenPosition=屏幕左上世界px(本仓屏幕即全幅,无 offScreenRange=200 垫,
+    // 语义等价——vanilla 垫值只是为比屏幕大的离屏采集目标)
+    const screenRes: [number, number] = [viewW / z, viewH / z];
+    const screenPos: [number, number] = [cam.x - screenRes[0] / 2, cam.y - screenRes[1] / 2];
+    const gl = this.screenFxLayer();
+    if (gl) {
+      const passes: ScreenFxPass[] = [];
+      if (mono.heatVisible) {
+        passes.push({
+          kind: 'FilterHeatDistortion', screenRes, screenPos,
+          intensity: mono.heatIntensity, opacity: mono.heatOpacity,
+          time: (performance.now() / 1000) % 3600,   // GlobalTimeWrappedHourly(Main.cs:16777)
+        });
+      }
+      for (const f of mono.visibleFilters()) {
+        switch (f.def.kind) {
+          case 'miniTower':   // UseOpacity×Filter.Opacity(ScreenShaderData.cs:84)
+            passes.push({ kind: 'FilterMiniTower', color: f.def.color!, opacity: f.def.useOpacity! * f.opacity });
+            break;
+          case 'graveyard':   // SceneState.cs:134/:138 固定参数
+            passes.push({ kind: 'FilterGraveyard', intensity: 1.2, progress: mono.graveyardProgress, opacity: f.opacity });
+            break;
+          case 'bloodMoon':   // UseOpacity=BloodMoonScreenShaderData.Update;UseIntensity 恒 1
+            passes.push({ kind: 'FilterBloodMoon', color: f.def.color!, intensity: 1, opacity: mono.bloodMoonUseOpacity * f.opacity });
+            break;
+          case 'retro':
+            passes.push({ kind: 'FilterTest2', opacity: f.opacity });
+            break;
+          case 'crt':
+            passes.push({ kind: 'FilterCRT', screenH: screenRes[1], zoom: z, opacity: f.opacity });
+            break;
+          default:
+            break;   // moonLord/sepia/noir 未入 GL 端口(审计登记,2D 近似兜底)
+        }
+      }
+      if (passes.length > 0 && gl.drawChain(this.canvas, passes,
+        [this.colorOfTheSkies[0] / 255, this.colorOfTheSkies[1] / 255, this.colorOfTheSkies[2] / 255])) {
+        ctx.drawImage(gl.canvas, 0, 0);
+        return;
+      }
+    }
+    // 2D 回退链(同序:heat 先)
+    if (mono.heatVisible) {
+      mono.drawHeat2D(ctx, this.canvas, viewW, viewH,
+        { x: screenPos[0], y: screenPos[1] }, { x: screenRes[0], y: screenRes[1] },
+        (performance.now() / 1000) % 3600);
+    }
+    if (mono.anyInUse) {
+      mono.draw(ctx, this.canvas, viewW, viewH, {
+        x: (player.cx - cam.x) * z + viewW / 2,
+        y: (player.cy - cam.y) * z + viewH / 2,
+      });
+    }
   }
 
   /** render() 世界段入口调用：切换 this.ctx → 世界层（返回 null = 逃生门关闭，

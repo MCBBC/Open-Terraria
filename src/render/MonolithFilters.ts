@@ -8,6 +8,7 @@
 //    反编译源码里；凡源码里有的数值——颜色/不透明度/强度/斜坡率/深度系数——全部照抄并注行号）。
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
+import { noiseData } from './GLScreenFilters';
 
 // ---------------------------------------------------------------------------
 // 1) 天塔柱族 tile 表（内部 id ↔ 原版 sheet）
@@ -158,6 +159,79 @@ export const MONOLITH_FILTER_DEFS: readonly MonoFilterDef[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// 3b) 天塔柱滤镜 vs ScreenShader.cso SM2 字节码审计结论表（2026-08-20）
+//
+// 反汇编：node tools/disasm-fx.mjs ../terraria-assets/ScreenShader.cso <out>
+//（"disasm:" 列 = 反汇编输出行号；fxScreen.txt 与 tools 同步再生）。
+// glExact=true 的走 GLScreenFilters（GLSL 逐指令 1:1）；false = GL 不可用时
+// 的 canvas 近似即最终态（差异登记在 note）。
+// ---------------------------------------------------------------------------
+export interface FilterAuditRow {
+  /** Filters.Scene 键 */
+  key: string;
+  /** ScreenShader.cso pass 名（ScreenEffectInitializer.cs） */
+  pass: string;
+  /** 反汇编输出行号锚 */
+  disasm: string;
+  /** GL 字节码 1:1 端口就位 */
+  glExact: boolean;
+  note: string;
+}
+
+export const MONOLITH_FILTER_AUDIT: readonly FilterAuditRow[] = [
+  {
+    key: 'MonolithVortex/Nebula/Stardust/Solar', pass: 'FilterMiniTower', disasm: ':483-508',
+    glExact: true,
+    note: '字节码=tgt=(s=V+min−1)≥0?lerp(color,1−color,s):(V+min)·color，out=lerp(px,tgt·px.a,op)；'
+      + '旧 canvas 近似=multiply(white,color,a) 已由 GL 路径替换（2D 回退仍近似）',
+  },
+  {
+    key: 'Graveyard', pass: 'FilterGraveyard', disasm: ':159-175', glExact: true,
+    note: '字节码=纯去饱和 lerp(px,gray=(Σrgb)·1.2/3·progress,op)；无径向雾、无色偏——'
+      + '旧近似(multiply 冷灰+径向雾)为自创，GL 路径已替换',
+  },
+  {
+    key: 'BloodMoon', pass: 'FilterBloodMoon', disasm: ':429-482', glExact: true,
+    note: '字节码=V+min 分档(sum≤1→sum·color / 否则 1−(1−color)(1.5−0.5sum)) −0.5·sum，'
+      + '×(diff+1/6)+0.5·sum，α 抛物线 0.3A+0.7A²，径向 (len(uv−.5)≥.3)?1−2(d−.3):1 不夹下界；'
+      + '旧近似=multiply(白,color,op·深度) 已替换',
+  },
+  {
+    key: 'Test2(复古柱)', pass: 'FilterTest2', disasm: ':1122-1152', glExact: true,
+    note: '字节码=GB 四阶调色板：x=clamp((V+min)·0.55−0.1,0,∞)，档 0.25/0.5/0.75 → '
+      + 'c3(15,56,15)/c4(48,98,48)/c5(139,172,15)/c2(155,188,15)，out=lerp(px,pal,op)；'
+      + '旧近似(luma 四档+错误调色板)已替换',
+  },
+  {
+    key: 'CRT', pass: 'FilterCRT', disasm: ':1182-1238', glExact: true,
+    note: '字节码=交叉桶形畸变(1+(uv·op/7)²,opacity 缩放)+越界遮黑(bottom/left/top 不含右)'
+      + '+sincos 扫描线(fract(y·screenH·zoom·0.222656)·2π−π,cos×0.13/sin×0.16 RGB 相位)；'
+      + '旧近似(3px 扫描线+暗角)已替换',
+  },
+  {
+    key: 'HeatDistortion', pass: 'FilterHeatDistortion', disasm: ':839-871', glExact: true,
+    note: '本批新增：双噪声场差分重采样（详见 GLScreenFilters FRAG_HEAT + heat 公式锚）',
+  },
+  {
+    key: 'MonolithMoonLord', pass: 'FilterMoonLord', disasm: ':103-158', glExact: false,
+    note: '未端口：字节码=绕 uTargetPosition 的色散(split ±0.01·sin(2π·frac(t·10/π+0.5)−π)，'
+      + '径向门 min(d·0.0005,1))+0.15/0.7/0.15 三采样合成+V·3 亮度推色+800px 掩码带，'
+      + '~35 指令重度跨通道(wzyx)置换——沿用 canvas 径向紫晕近似',
+  },
+  {
+    key: 'Sepia', pass: 'FilterSepia', disasm: ':176-247', glExact: false,
+    note: '未端口：DSTNoise 采样+HSV(max/min 饱和度链)+vignette(radial 1.1 系数)+双 lerp，'
+      + '~40 指令；C# 侧参数链(SepiaScreenShaderData.Update)已 1:1（sepiaParams），'
+      + 'canvas 近似=亮度棕调+progress 染色',
+  },
+  {
+    key: 'Noir', pass: 'FilterNoir', disasm: ':248-341', glExact: false,
+    note: '未端口：exp/log 胶片颗粒(19.83/32/1024 系数族)+NoirNoise(PointWrap)+去饱和，'
+      + '~35 指令；canvas 近似=grayscale+程序化噪点 overlay',
+  },
+];
+
+// ---------------------------------------------------------------------------
 // 4) 原版数学小工具（Utils.cs / MathHelper.cs）
 // ---------------------------------------------------------------------------
 
@@ -175,6 +249,51 @@ export function remap(v: number, fromMin: number, fromMax: number, toMin: number
 export function moveTowards(current: number, target: number, maxDelta: number): number {
   if (Math.abs(target - current) <= maxDelta) return target;
   return current + Math.sign(target - current) * maxDelta;
+}
+
+// ---- HeatDistortion 公式锚（ScreenShader.cso obj18 :839-871；GLScreenFilters
+//      FRAG_HEAT 与 drawHeat2D 同用本组纯函数，防两处漂移）----
+
+/** preshader lit20/lit21（:865-866）：c1 = +0.04·uTime（c2 = −c1） */
+export const HEAT_TIME_SCROLL = 0.04;
+/** def c6.y（:857）：delta = nA − nB − 0.5 的中心偏置 */
+export const HEAT_DELTA_BIAS = -0.5;
+
+/** 噪声采样 UV（:846-849,851）：world=uScreenRes·uv+uScreenPos；nuv=world/噪声尺寸×0.5 */
+export function heatNoiseUv(
+  uvX: number, uvY: number,
+  screenRes: readonly [number, number] | { x: number; y: number },
+  screenPos: readonly [number, number] | { x: number; y: number },
+  noiseW: number, noiseH: number,
+): [number, number] {
+  const rx = 'x' in screenRes ? screenRes.x : screenRes[0];
+  const ry = 'y' in screenRes ? screenRes.y : screenRes[1];
+  const px = 'x' in screenPos ? screenPos.x : screenPos[0];
+  const py = 'y' in screenPos ? screenPos.y : screenPos[1];
+  return [((uvX * rx + px) / noiseW) * 0.5, ((uvY * ry + py) / noiseH) * 0.5];
+}
+
+/** preshader c3（:867 flat-slot 语义）= (uIntensity·uOpacity)/uScreenResolution.xy */
+export function heatOffset(
+  intensity: number, opacity: number,
+  screenRes: readonly [number, number] | { x: number; y: number },
+): [number, number] {
+  const s = intensity * opacity;
+  const rx = 'x' in screenRes ? screenRes.x : screenRes[0];
+  const ry = 'y' in screenRes ? screenRes.y : screenRes[1];
+  return [s / rx, s / ry];
+}
+
+/** :856-858：uvOut = uv + (nA − nB + HEAT_DELTA_BIAS)·offset（nA/nB=噪声 .rg） */
+export function heatUvOut(
+  uvX: number, uvY: number,
+  nAx: number, nAy: number, nBx: number, nBy: number,
+  offset: readonly [number, number],
+): [number, number] {
+  return [
+    uvX + (nAx - nBx + HEAT_DELTA_BIAS) * offset[0],
+    uvY + (nAy - nBy + HEAT_DELTA_BIAS) * offset[1],
+  ];
 }
 
 /** Utils.GetDayTimeAsDirectionIn24HClock（Utils.cs:738-757）：
@@ -274,6 +393,19 @@ export interface MonolithEnv {
   /** Main.GraveyardVisualIntensity（SceneState.cs:415-418 平滑后的墓地视觉强度 0-1；
    *  Game.updateWeather 每帧写入 world.weather.graveyardVisual，Renderer 注入） */
   graveyardIntensity?: number;
+  /** ---- HeatDistortion（SceneState.cs:122-123 激活门 / :186-207 强度）---- */
+  /** SceneMetrics.TileCenter.Y（玩家中心 tile Y，SceneMetrics.cs:334） */
+  heatTileCenterY?: number;
+  /** Main.maxTilesY = world.store.h（flag2 地狱带 = maxY-320） */
+  heatMaxTilesY?: number;
+  /** metrics.ZoneDesert / ZoneRain / ZoneSandstorm（flag3 沙漠带三条件 :104） */
+  heatZoneDesert?: boolean;
+  heatZoneRain?: boolean;
+  heatZoneSandstorm?: boolean;
+  /** perspectivePlayer.sunScorchCounter（Player.cs:2228 吸血鬼阳光炽灼 0-300） */
+  heatSunScorch?: number;
+  /** Main.UseHeatDistortion（Main.cs:409 默认 true 的视频开关） */
+  useHeatDistortion?: boolean;
 }
 
 interface FilterState { def: MonoFilterDef; active: boolean; opacity: number }
@@ -303,9 +435,18 @@ export class MonolithFilters {
   /** 天塔柱类型 → 滤镜激活（SceneState.cs:111-115） */
   miniTowerActive = -1;
 
+  // ---- HeatDistortion 滤镜态（EffectPriority.Low，ScreenEffectInitializer.cs:40）----
+  /** Filter.Active（SceneState.cs:123 ManageSpecialBiomeVisuals 门） */
+  heatActive = false;
+  /** Filter.Opacity（FilterManager.cs:95-101 同款 1/s 斜坡，与柱族共用速率） */
+  heatOpacity = 0;
+  /** UseIntensity num8（SceneState.cs:186-204） */
+  heatIntensity = 0;
+
   reset(): void {
     for (const f of this.filters) { f.active = false; f.opacity = 0; }
     this.shimmerAlpha = 0; this.shimmerDarken = 0; this.shimmerBrightenDelay = 0;
+    this.heatActive = false; this.heatOpacity = 0; this.heatIntensity = 0;
   }
 
   /** 激活矩阵（SceneState.cs:111-128） */
@@ -341,6 +482,36 @@ export class MonolithFilters {
         : Math.max(f.opacity - dt * OPACITY_RATE, 0);
     }
     this.miniTowerActive = scan.activeMonolithType;
+
+    // ---- HeatDistortion（SceneState.cs:122-123 激活门 + :183-207 强度）----
+    // flag2 地狱带 = TileCenter.Y > maxTilesY-320；flag3 沙漠带 = 地表且 ZoneDesert
+    // 且非雨非沙暴（:103-104）；flag7 三者并集 + sunScorch>0（:122）
+    const tcY = env.heatTileCenterY ?? 0;
+    const maxTY = env.heatMaxTilesY ?? 0;
+    const heatFlag2 = tcY > maxTY - 320;                                    // :103
+    const heatFlag3 = tcY < env.worldSurface && !!env.heatZoneDesert
+      && !env.heatZoneRain && !env.heatZoneSandstorm;                       // :104
+    this.heatActive = (env.useHeatDistortion ?? true)
+      && (heatFlag2 || heatFlag3 || (env.heatSunScorch ?? 0) > 0);          // :122-123
+    this.heatOpacity = this.heatActive
+      ? Math.min(this.heatOpacity + dt * OPACITY_RATE, 1)
+      : Math.max(this.heatOpacity - dt * OPACITY_RATE, 0);                  // FilterManager 斜坡
+    if (this.heatActive) {
+      let num8 = 0;
+      const scorch = env.heatSunScorch ?? 0;
+      if (scorch > 0) {
+        num8 = Math.max(num8, smoothStep(0, 300, scorch) * 4);              // :187-191 GetLerpValue
+      }
+      if (heatFlag2) {
+        const val2 = Math.min(1, (tcY - (maxTY - 320)) / 120) * 2;         // :192-197
+        num8 = Math.max(num8, val2);
+      } else if (heatFlag3) {
+        // :198-204 num9 = tileColor.rgb 平均——Main.tileColor 全源码无赋值
+        //（Main.cs:1224 声明即 C# 默认 0）→ num9≡0 → val3≡0 = 1.4.5.6 死支
+        num8 = Math.max(num8, 0);
+      }
+      this.heatIntensity = num8;                                            // :205 UseIntensity
+    }
 
     // 微光三态（SceneState.cs:328-345）：state 1 → 开；state 2 显式关（压掉其它微光源）
     let flag = scan.shimmerMonolithState === 1 || !!env.zoneShimmer;      // :331
@@ -386,6 +557,18 @@ export class MonolithFilters {
   /** 任一滤镜仍在淡入/淡出（Filter.IsInUse Filter.cs:49-56） */
   get anyInUse(): boolean {
     return this.filters.some((f) => f.active || f.opacity > 0);
+  }
+  /** HeatDistortion 在用（Active 或淡出中） */
+  get heatInUse(): boolean {
+    return this.heatActive || this.heatOpacity > 0;
+  }
+  /** HeatDistortion 可见（Filter.IsVisible Filter.cs:63-70：Opacity>0 且 !IsHidden） */
+  get heatVisible(): boolean {
+    return this.heatOpacity > 0 && this.heatIntensity > 0;
+  }
+  /** 可见滤镜（opacity>0）按合成序（GL 链/canvas 回退共用） */
+  visibleFilters(): FilterState[] {
+    return this.filters.filter((f) => f.opacity > 0);
   }
 
   // -------------------------------------------------------------------------
@@ -615,6 +798,66 @@ export class MonolithFilters {
     ctx.globalAlpha = 1;
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // -------------------------------------------------------------------------
+  // 7) HeatDistortion canvas 2D 回退（GL 不可用/cpu 渲染时；公式与
+  //    GLScreenFilters FRAG_HEAT 同源 = ScreenShader.cso obj18 逐指令）
+  // -------------------------------------------------------------------------
+
+  /** 半分辨率逐像素扭曲（噪声双线性 + wrap = LinearWrap 同款）。
+   *  screenPos=屏幕左上世界px（uScreenPosition）、screenRes=(viewW/z, viewH/z)
+   *  （uScreenResolution=UnscaledScreenSize）、time=GlobalTimeWrappedHourly */
+  drawHeat2D(
+    ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
+    w: number, h: number,
+    screenPos: { x: number; y: number }, screenRes: { x: number; y: number },
+    time: number,
+  ): void {
+    if (!this.heatVisible) return;
+    const nd = noiseData();
+    if (!nd) return;   // 噪声图未载入：该帧不扭曲（渐入无感）
+    const low = this.lowCanvas(w, h);
+    const lw = low.width, lh = low.height;
+    const lctx = low.getContext('2d')!;
+    lctx.clearRect(0, 0, lw, lh);
+    lctx.drawImage(canvas, 0, 0, lw, lh);
+    const img = lctx.getImageData(0, 0, lw, lh);
+    const d = img.data;
+    const scroll = HEAT_TIME_SCROLL * time;                  // preshader c1/c2
+    const [offX, offY] = heatOffset(this.heatIntensity, this.heatOpacity, screenRes);
+    const sample = (u: number, v: number, ch: number): number => {
+      const fx = (u - Math.floor(u)) * nd.w - 0.5, fy = (v - Math.floor(v)) * nd.h - 0.5;
+      const x0 = Math.floor(fx), y0 = Math.floor(fy);
+      const tx = fx - x0, ty = fy - y0;
+      const X0 = ((x0 % nd.w) + nd.w) % nd.w, X1 = (X0 + 1) % nd.w;
+      const Y0 = ((y0 % nd.h) + nd.h) % nd.h, Y1 = (Y0 + 1) % nd.h;
+      const p = (xx: number, yy: number) => nd.data[(yy * nd.w + xx) * 4 + ch] / 255;
+      const a = p(X0, Y0) + (p(X1, Y0) - p(X0, Y0)) * tx;
+      const b = p(X0, Y1) + (p(X1, Y1) - p(X0, Y1)) * tx;
+      return a + (b - a) * ty;
+    };
+    for (let py = 0; py < lh; py++) {
+      const v = py / lh;
+      for (let px = 0; px < lw; px++) {
+        const u = px / lw;
+        const [wx, wy] = heatNoiseUv(u, v, screenRes, screenPos, nd.w, nd.h);
+        // delta = tex(nuv+(0,+0.04t)) − tex(nuv+(0,−0.04t)) − 0.5（:854-858）
+        const nAx = sample(wx, wy + scroll, 0), nAy = sample(wx, wy + scroll, 1);
+        const nBx = sample(wx, wy - scroll, 0), nBy = sample(wx, wy - scroll, 1);
+        const [oux, ouy] = heatUvOut(u, v, nAx, nAy, nBx, nBy, [offX, offY]);
+        const sx = ((oux % 1) + 1) % 1 * lw;                       // s0 wrap 等价
+        const sy = ((ouy % 1) + 1) % 1 * lh;
+        const x0 = sx | 0, y0 = sy | 0;
+        const i = (py * lw + px) * 4, j = (y0 * lw + x0) * 4;
+        d[i] = d[j]; d[i + 1] = d[j + 1]; d[i + 2] = d[j + 2];
+      }
+    }
+    lctx.putImageData(img, 0, 0);
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(low, 0, 0, w, h);
     ctx.restore();
   }
 }

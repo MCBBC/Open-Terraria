@@ -18,6 +18,13 @@ export interface SeedFlags {
   graveyardBloodmoonStart?: boolean; // SecretSeed.graveyardBloodmoonStart（WorldGen.cs:356，
   //  哈希注册无文本种子）——墓园 pass 的第二触发源（:18117-18120），预留位恒 false
   //  时行为与原版普通世界一致
+  vampireSeed?: boolean;     // SecretSeed.vampirism → Main.vampireSeed（WorldGen.cs:404
+  //  哈希注册 "4eijvDtfcSl66CDifYSVP3WBZm9OLBoW"、:550 InitializeSecretSeeds 置位，
+  //  Main.cs:327 声明、NetMessage.cs:363/MessageBuffer.cs:611 联机同步、WorldFile.cs
+  //  :1420/:2469 落盘）。明文 = "what a horrible night to have a curse"（Castlevania II
+  //  致敬；Secrets.ToSecret = BCrypt 哈希不可逆——原版凭哈希匹配，wiki 社区试出）。
+  //  匹配口径同其它条目：去全部非字母数字后小写比对。运行时消费见 Player
+  //  vampireSeedSunlightExposure（Player.cs:28191-28238 阳光炽灼全链）等
 }
 
 const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [
@@ -35,6 +42,9 @@ const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [
   [/^dontdigup$/i, (f) => { f.remix = true; }],
   [/^getfixedboi$/i, (f) => { f.everything = true; f.drunkWorld = true; f.getGoodWorld = true; f.notTheBees = true; }],
   [/^skyblock$/i, (f) => { f.skyblock = true; }],  // 1.4.5.6 WorldGenerationOptions 新增
+  // 吸血鬼秘密种子（SecretSeed.vampirism，WorldGen.cs:404 哈希注册——明文为社区
+  // 试出的 "what a horrible night to have a curse"；归一化后任意大小写/分隔变体命中）
+  [/^whatahorriblenighttohaveacurse$/i, (f) => { f.vampireSeed = true; }],
 ];
 
 export function parseSeed(rawSeed: string): { flags: SeedFlags; seedText: string; /** UI 展示用特殊世界名（无则 null） */ specialName: string | null } {

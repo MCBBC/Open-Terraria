@@ -403,6 +403,12 @@ export class BiomeBackground {
   draw(
     target: CanvasRenderingContext2D | BGBlit, world: World, scene: SceneFlags,
     cam: Cam, viewW: number, viewH: number, tint: [number, number, number], dtMs: number,
+    /** 渲染相位(2026-08-20 地下背景光照修复):surface=只画地表层(主画布,天空
+     *  侧,cots 染);underground=只画地下层(★须画进 Renderer 世界层=被光照图乘
+     *  ——原版 Main.cs:52327 起地下背景逐 16px 段 Lighting.GetColor 点亮,暗段
+     *  跳过/部分亮段 9-slice 渐变,与屏空间 lightCanvas 乘法等价;曾画主画布
+     *  =worldLayer 分层后不吃光,洞里恒亮且与时间无关)。缺省两者都画(旧序) */
+    phase: 'all' | 'surface' | 'underground' = 'all',
   ) {
     this.update(world, scene, dtMs);
     const b: BGBlit = typeof (target as BGBlit).img === 'function'
@@ -414,10 +420,12 @@ export class BiomeBackground {
     const camTopY = cam.y - viewH / 2 / cam.zoom;
     const camLeftX = cam.x - viewW / 2 / cam.zoom;
     // 深度门（DrawClouds_Closest :59073 系各层共门 screenPosition.Y < ws×16+16）
-    if (camTopY < world.groundLevel * 16 + 16) {
+    if (phase !== 'underground' && camTopY < world.groundLevel * 16 + 16) {
       this.drawSurface(b, world, cam, camTopY, camLeftX, viewW, viewH, tint);
     }
-    this.drawUnderground(b, world, cam, camTopY, viewW, viewH, dtMs);
+    if (phase !== 'surface') {
+      this.drawUnderground(b, world, cam, camTopY, viewW, viewH, dtMs);
+    }
   }
 
   // ---- 地表层 ----
@@ -428,6 +436,29 @@ export class BiomeBackground {
     this.seedFor(world); // 兜底：即便 update 未先行播种也不崩（HMR/首帧边界）
     // 垂直视差系数（DrawSurfaceBG :58749：num3 = -(screenPosition.Y-300)/(worldSurface*16)）
     const num3 = -(camTopY - 300) / (world.groundLevel * 16);
+    // scAdj(DrawBG :63418 ComputeScAdj :63389-63413):世界深度视差补偿——
+    // num=worldSurface·16/(screenY+screenH),k=max((maxTilesY·0.15·16−screenY)·
+    // 0.00025,0)²,按世界高度档 ×(−500/−300/−150)。screenY=屏顶世界 Y。
+    // pushBGTopHack(DrawCloudsBG :58722-58774):num=30 in-game / 0 gameMenu(本渲染器
+    // 仅 in-game,菜单 0 档注释备案);drunkWorldGen 内 onlyShimmerOcean −240(该
+    // 秘密种子未实装,恒不可达) / vampireSeed −100 / !notTheBees −180。
+    // ★2026-08-20 审计补齐:此前两层都漏,表面背景整体垂直偏移(小世界 ≈
+    // −154+30px);与 tree 层 topY=num3·topA+topB+scAdj+push 同式(Main.cs
+    // :58840 系 treeMntBGSet 赋值块)
+    const worldH = world.store?.h ?? 1200;   // 无 store(桩)按小世界档
+    const screenTopYv = camTopY;
+    const screenHworld = viewH / cam.zoom;   // 世界像素屏高
+    const scNum = (world.groundLevel * 16) / Math.max(1, screenTopYv + screenHworld);
+    let scK = (worldH * 0.15 * 16 - screenTopYv) * 0.00025;
+    if (scK < 0) scK = 0;
+    const scAdj = scNum * (0.45 - scK * scK)
+      * (worldH <= 1200 ? -500 : worldH <= 1800 ? -300 : -150);
+    // Main.cs:58722-58732（drunkWorldGen = seedFlags.drunkWorld——05162020/
+    // drunkworld/getfixedboi 置位；notTheBees 同表；onlyShimmerOcean 秘密种子未实装）
+    const sfSeed = world.seedFlags ?? {};
+    const pushHack = sfSeed.drunkWorld
+      ? (sfSeed.vampireSeed ? -100 : !sfSeed.notTheBees ? -180 : 30)
+      : 30;
     const [tr0, tg0, tb0] = tint;
     const tintOn: readonly [number, number, number] | null
       = tr0 >= 0.999 && tg0 >= 0.999 && tb0 >= 0.999 ? null : [tr0, tg0, tb0];
@@ -441,7 +472,7 @@ export class BiomeBackground {
       // loops 保屏）。曾用 cam.x(中心)——差 viewW/2/zoom×parallax 常量相位偏移
       const startX = -BiomeBackground.ieeeRemOf(camLeftX * l.parallax, wScaled) - wScaled / 2 - wScaled;
       const loops = Math.ceil(viewW / wScaled) + 3;
-      const topY = num3 * l.topA + l.topB; // 屏幕空间 y（vanilla bgTopY 语义）
+      const topY = num3 * l.topA + l.topB + scAdj + pushHack; // 屏幕空间 y（vanilla bgTopY 语义,含 scAdj+pushHack）
       // ★+1px 保险重叠:浮点视差位置(startX 取模 cam.x*parallax)+非整数缩放
       // (naturalWidth×1.25)下,相邻背景图独立光栅化在接缝处留 1px 缺口(发丝缝),
       // 双线性平滑还会把边缘混透明放大缝。外扩 1px 让邻图覆盖接缝

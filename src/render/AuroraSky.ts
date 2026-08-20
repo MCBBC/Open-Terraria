@@ -7,11 +7,19 @@
 //  (DrawClouds_Distant :58757)之后、云背景层之前;日月(:56310 DrawSunAndMoon)画于其【前】。
 // tileColor 渗入:SetBackColor 尾(Main.cs:63360)ModifyHorizonLight(:63356)之后。
 //
-// 原版渲染走 GameShaders.Misc["Aurora"](编译像素着色器,DyeInitializer.cs:485-487,
-//  噪声贴图 Extra_286/287)+ VertexStrip 三角带;本仓 Canvas2D 以 CPU 侧顶点色
-// (color/color2×num28,即 AddVertexPair 的逐段顶点数据 :401)重建条带几何,
-//  shader 专属部分(specificData X/Y/Z/W、噪声采样、uTime 调制)不可复刻——
-//  逐处以【shader 推断】标注。
+// 像素级(已落地,SM2 字节码逐指令 1:1):
+//  原版走 GameShaders.Misc["Aurora"](DyeInitializer.cs:485-487:technique "Aurora",
+//  uImage0=Extra_286(256²)/uImage1=Extra_287(128²),SamplerState.LinearWrap)+
+//  VertexStrip 三角带。像素公式取自反编译字节码(tools/disasm-fx.mjs 产出的
+//  fxPixel.txt "-- pass Aurora" 段,行号 :3109-3172;解释器侧同源字节码
+//  src/data/fxPixelShader.json → src/fx/SM2Effect.ts,tests 用其对拍)。
+//  顶点流:VertexStrip.AddVertexPair(:193-202)texcoord=底(uv_x,d,d)/顶(uv_x,0,d),
+//  d=|v−v2| 参考空间厚度 → 像素公式里的 grad=t0.y/t0.z(上缘 0→下缘 1);
+//  v0=color×num28(XNA Color*float = byte 截断钳位)。
+//  合成:父批次 BlendState.AlphaBlend(预乘 One/InvSrcAlpha,Main.cs:56292/:61473)
+//  × 着色器 α 恒 0(:3170)→ RGB 纯加法;RasterizerState.CullNone(:56292)+
+//  PrepareIndices(includeBacksides)(VertexStrip.cs:122-150 正反两组同三角形)
+//  → 每像素画两次 → 本仓 'lighter' drawImage×2 等价。
 
 /** Utils.Remap(Utils.cs:313,clamped)= Lerp(toMin,toMax,GetLerpValue(fromMin,fromMax,v)) */
 export function remap(v: number, fromMin: number, fromMax: number, toMin: number, toMax: number): number {
@@ -43,12 +51,21 @@ export function hslToRgb255(hue: number, saturation: number, luminosity: number)
 }
 
 /** 参考画布(Vector2(1920,1080),AuroraSky.cs:126)——所有带几何在此空间,渲染时
- *  统一乘 scale=屏宽/1920(:127-128 transform=背景矩阵×CreateScale(scale);【shader
- *  推断】背景矩阵按无相机平移的屏空间处理) */
+ *  统一乘 scale=屏宽/1920(:127-128 transform=背景矩阵×CreateScale(scale);【推断】
+ *  背景矩阵按无相机平移的屏空间处理) */
 export const AURORA_REF_W = 1920;
 export const AURORA_REF_H = 1080;
 /** 每带段数(num6=140,AuroraSky.cs:135) */
 export const AURORA_SEG = 140;
+/** 像素烘焙采样密度(相对屏空间;公式与密度无关,逐烘焙像素仍按屏坐标精确求值)。
+ *  2026-08-20 Chrome/M 系 1920×1080 实测(scripts/_aurora-perf.mjs,经 run-diag):
+ *   q=0.5 逐像素覆盖版 21-40ms/帧 → 跨度+286 预混列+增量属性 11.7-21.7ms
+ *   → q=0.25 终态 3.4-7.1ms/帧(满月 3 带 ≈3.6;双带高族 ≈7)。
+ *  视觉无损性:Extra_287 在带内是 ~16× 放大采样(密度无损);Extra_286 横向
+ *  ×20 频率本就 2.7 纹素/屏px(GPU 侧即缩小采样),q=0.25 加深至 ~10.7:1,
+ *  由预混+线性升采样平滑,探针实测列标准差 7.4(帘状竖纹结构保留)、竖缝 0、
+ *  4px 块边差 0.92 vs 块内 0.68(轻微,噪声内容下不可辨)。 */
+export const AURORA_QUALITY = 0.25;
 
 /** 月相(MoonPhase.cs:Full=0…ThreeQuartersAtRight=7) */
 export const enum AuroraMoonPhase {
@@ -66,7 +83,7 @@ export interface AuroraMode {
   emptyLike: boolean;
   /** flag3=Half 族(HalfAtLeft/ThreeQuartersAtRight) */
   halfLike: boolean;
-  /** flag4(:152-156,luminosity=1+shader specificData.X=0.3)——仅 shader 数据,luminosity 恒 1 */
+  /** flag4(:152-156,sd.X=0.3 → 着色器亮度乘 1.3;luminosity 恒 1 不变) */
   dim: boolean;
   /** flag5=双带族(ThreeQuartersAtLeft/QuarterAtRight) */
   twoBand: boolean;
@@ -130,7 +147,157 @@ export function auroraLastSkyColor(moonPhase: number, globalTime: number): [numb
   return hslToRgb255(hue, m.saturation, 0.5);
 }
 
-// ================= AuroraSky 实例(CustomSky 状态机 + Canvas2D 条带) =================
+/** UseShaderSpecificData 的 Vector4(AuroraSky.cs:139-189 逐条同序;后写覆写前写):
+ *  X=flag4 的 0.3(:155,着色器端亮度乘 1+X)、Y=分带竖向参数、Z=0.2 仅
+ *  flag2&&!flag3(:167)——字节码不读 Z/W(全 pass 无 c4.z/c4.w 引用),纯遗留。
+ *  表:Full (0,.5/…)·i1/i2=.4;3QL/QR i0=.3,i1=.5;HalfL/3QR X=.3,i0=.7→.6→.8;
+ *  Empty i0=.7→.6→.8 + Z=.2。 */
+export function auroraSpecificData(m: AuroraMode, i: number): [number, number, number, number] {
+  let x = 0, y = 0, z = 0;                                     // :139 Vector4(0,0,0,0)
+  if (i === 0) y = 0;                                          // :140-143
+  if (i === 1) y = 0.7;                                        // :144-147
+  if (i === 2) y = 0.8;                                        // :148-151
+  if (m.dim) x = 0.3;                                          // :152-156 flag4
+  if (m.emptyLike) {                                           // :157-169 flag2
+    if (i !== 0) y = Math.fround(0.4 + i * 0.2);               // :161-164(C# float 运算位)
+    if (!m.halfLike) z = 0.2;                                  // :165-168 !flag3
+  }
+  if (m.full && i !== 0) y = 0.4;                              // :170-173
+  if (m.twoBand && i === 0) y = 0.3;                           // :174-177
+  if (m.twoBand && i === 1) y = 0.5;                           // :178-181
+  if (m.full && i === 0) y = 0.5;                              // :182-185
+  if (m.emptyLike && i === 0) y = 0.7;                         // :186-189
+  return [x, y, z, 0];
+}
+
+// ================= Aurora 像素公式(pass Aurora SM2 字节码逐指令) =================
+// 反汇编锚(工具产出全文 fxPixel.txt "-- pass Aurora",ps_2_0):
+//   def c5=(1.2,3,6,1) :3125  c6=(0,20,0.7,1) :3126  c7=(0.1,0.7,0.3,0.9) :3127
+//   c4=uShaderSpecificData :3173;s0=uImage0(Extra_286) s1=uImage1(Extra_287)
+//   (CTAB 符号);c0..c3 由 D3DX preshader(:3174-3179)逐帧算出:
+//     T  = uTime.x+uTime.x → +sd.y     (add_s×2;t4 = 2·uTime + sd.y)
+//     c0 = T·lit(−0.01)  c1 = T·lit(+0.01)  c2 = T·lit(−0.02)  c3 = T·lit(+0.02)
+// 反汇编器/解释器约定:无 swizzle 后缀的源操作数 = .xxxx 复制(编码 0x00)。
+// def 常量按 float32 位取值(下述字面量 = f32 精确十进制)。
+
+/** def c5/c6/c7 的 float32 精确值(:3125-3127)——字节码位级输入 */
+export const AURORA_F32 = {
+  pow1_2: 1.2000000476837158,   // c5.x
+  mul3: 3, mul6: 6, mul20: 20,  // c5.y / c5.z / c6.y(整数精确)
+  nz: 0.699999988079071,        // c6.z = 0.7
+  one: 1,                       // c5.w / c6.w
+  add01: 0.10000000149011612,   // c7.x = 0.1
+  mul07: 0.699999988079071,     // c7.y = 0.7
+  add03: 0.30000001192092896,   // c7.z = 0.3
+  mul09: 0.8999999761581421,    // c7.w = 0.9
+} as const;
+
+/** 噪声采样 UV+preshader 常量(:3132-3144、:3174-3179)。
+ *  返回 [u1x,u1y, u2x,u2y, u3x,u3y]:s0 Extra_286 两路(横 20/6 倍频 + 时间对角
+ *  漂移)、s1 Extra_287(t0.x, grad)。uTime=Main.GlobalTimeWrappedHourly
+ *  (MiscShaderData.Apply :91)。 */
+export function auroraNoiseUV(t0x: number, t0y: number, t0z: number,
+  uTime: number, sdY: number): [number, number, number, number, number, number] {
+  const T = uTime + uTime + sdY;                 // preshader :3174-3175(t4)
+  const z = t0x + sdY;                           // :3133 add r0.z, t0.x, c4.y
+  const invD = 1 / t0z;                          // :3138 rcp r0.z, t0.z
+  const grad = t0y * invD;                       // :3139 mul r2.y, r0.z, t0.y
+  return [
+    z * AURORA_F32.mul20 + T * -0.02,            // :3132/:3134-3135 mad ×20 + c2
+    T * 0.02,                                    // :3132 mov r0.y, c3
+    z * AURORA_F32.mul6 + T * -0.01,             // :3136-3137 mad ×6 + c0
+    T * 0.01,                                    // :3140 mov r1.y, c1
+    t0x,                                         // :3141 mov r2.x, t0
+    grad,                                        // :3139
+  ];
+}
+
+/** 强度链(:3145-3166,n1/n2=Extra_286 两路 R 通道、n3=Extra_287 R 通道,均 0..1):
+ *  A = 1−0.7·n1³ → B = lrp(A,1,grad+0.1) → C = lrp(lrp(B,1,sdY),1,grad·sdY)
+ *  E = max(1−n2⁴,0) → F = lrp(E,1,sdY) → G = lrp(F,1,grad·sdY)
+ *  intensity = (0.1+0.9·C)·(0.3+0.7·G)·(3·grad)·n3^1.2
+ *  (lrp 无钳:grad+0.1 可到 1.1 → 外插,:3149)。 */
+export function auroraIntensity(n1: number, n2: number, n3: number,
+  grad: number, sdY: number): number {
+  const n1sq = n1 * n1;                          // :3145
+  const a = AURORA_F32.nz * (n1 * n1sq) * -1 + 1; // :3146-3147 mad r0·(−c6.z)+c6.w
+  const f1 = grad + AURORA_F32.add01;            // :3148 mad t0.y,r0.z,c7.x
+  const b = f1 + (1 - f1) * a;                   // :3149 lrp(1, A, f1)
+  const b2 = sdY * (1 - b) + b;                  // :3150-3151 mad c4.y,1−B,+B
+  const f2 = grad * sdY;                         // :3152 mul r2.y,c4.y
+  const c = f2 + (1 - f2) * b2;                  // :3153 lrp(1, b2, f2)
+  const t15 = AURORA_F32.add01 + AURORA_F32.mul09 * c;   // :3154 mad c7.w,c7.x
+  const n2sq = n2 * n2;                          // :3155
+  const d = n2sq * -n2sq + 1;                    // :3156 mad ·(−r0.z)+c5.w → 1−n2⁴
+  const e = d > 0 ? d : 0;                       // :3157 max(·, c6.x=0)
+  const f = sdY * (1 - e) + e;                   // :3158-3159 mad c4.y,1−E,+E
+  const g = f2 + (1 - f2) * f;                   // :3160 lrp(1, F, f2)
+  const t16 = AURORA_F32.add03 + AURORA_F32.mul07 * g;   // :3161 mad c7.y,c7.z
+  return (t15 * t16) * ((grad * AURORA_F32.mul3) * Math.pow(n3, AURORA_F32.pow1_2));  // :3162-3166
+}
+
+/** 完整像素输出(:3167-3171):oC0.rgb = sat(intensity·v0.rgb·(1+sd.x)),α=c6.x=0
+ *  (UNORM 钳 0..1)。v0=插值后的顶点色(Color×num28 已 byte 截断/255)。 */
+export function auroraPixel(n1: number, n2: number, n3: number, grad: number,
+  sdX: number, sdY: number, vr: number, vg: number, vb: number): [number, number, number] {
+  const k = auroraIntensity(n1, n2, n3, grad, sdY) * (1 + sdX);  // :3167-3169
+  const sat = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v); // :3171 oC0 UNORM
+  return [sat(k * vr), sat(k * vg), sat(k * vb)];
+}
+
+// ---- 噪声面(Extra_286/287 R 通道,LinearWrap 双线性 → 红通道平面浮点缓存) ----
+let tex286: Float32Array | null = null;   // 256×256
+let tex287: Float32Array | null = null;   // 128×128
+let noiseState = 0;                       // 0 未启动 / 1 在途或失败 / 2 就绪
+
+function loadRedPlane(src: string, w: number, done: (p: Float32Array) => void): void {
+  const img = new Image();
+  img.onload = (): void => {
+    try {
+      const c = document.createElement('canvas');
+      c.width = w; c.height = w;
+      const g = c.getContext('2d', { willReadFrequently: true });
+      if (!g) return;
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, w, w).data;
+      const plane = new Float32Array(w * w);
+      for (let i = 0; i < plane.length; i++) plane[i] = d[i * 4] / 255;
+      done(plane);
+    } catch { /* 保持未就绪 */ }
+  };
+  img.src = src;
+}
+
+/** 首次 draw 触发噪声面懒加载(同源静态资源;remaster 热替换不追踪,备案) */
+function ensureNoise(): void {
+  if (noiseState !== 0) return;
+  if (typeof Image === 'undefined' || typeof document === 'undefined') { noiseState = 1; return; }
+  noiseState = 1;
+  let pending = 2;
+  const one = (): void => { if (--pending === 0) noiseState = 2; };
+  loadRedPlane('sprites/vanilla/Extra_286.png', 256, (p) => { tex286 = p; one(); });
+  loadRedPlane('sprites/vanilla/Extra_287.png', 128, (p) => { tex287 = p; one(); });
+}
+
+/** 噪声面是否就绪(探针/测试用) */
+export function auroraNoiseReady(): boolean { return noiseState === 2; }
+
+/** Extra_286 在 v 恒定(带内时间常量)时的纵向预混列:col[x] = 上下行按 fy 混合。
+ *  逐像素只剩横向一维 lerp(热路径内联);与 :3142/:3143 的 wrap 双线性在数学上
+ *  等价(仅 fp 结合次序不同,差 ~1e-7,远小于 GPU f32 与 f64 的固有差)。
+ *  287 无常量维 → 热路径内联全二维 wrap 双线性。 */
+function blendColumns(t: Float32Array, v: number, out: Float32Array): void {
+  const y = v * 256 - 0.5;
+  const y0 = Math.floor(y);
+  const fy = y - y0;
+  const ra = (y0 & 255) * 256, rb = ((y0 + 1) & 255) * 256;
+  for (let x = 0; x < 256; x++) {
+    const a = t[ra + x], c = t[rb + x];
+    out[x] = a + (c - a) * fy;
+  }
+}
+
+// ================= AuroraSky 实例(CustomSky 状态机 + 逐像素光栅) =================
 
 /** 条带采样缓冲(预分配;3 带 × 141 段,零每帧分配) */
 const MAX_BANDS = 3;
@@ -143,7 +310,8 @@ export interface AuroraDrawOpts {
   isDay: boolean;
   /** 月相 0-7 */
   moonPhase: number;
-  /** Main.GlobalTimeWrappedHourly(秒,%3600;缺省 performance.now 推导) */
+  /** Main.GlobalTimeWrappedHourly(秒,%3600;缺省 performance.now 推导)——
+   *  兼作像素公式的 uTime(MiscShaderData.Apply :91) */
   globalTime?: number;
   /** 屏顶 tile Y(地表门用,Main.cs:58775 screenPosition.Y/16) */
   camTopTiles: number;
@@ -173,16 +341,26 @@ export class AuroraSky {
   private sBotY = new Float32Array(SAMPLES);
   private sTopX = new Float32Array(SAMPLES);
   private sTopY = new Float32Array(SAMPLES);
+  /** t0.x = AddVertexPair 的 uv_x(:401 num10,含 flag5 i==1 重映射终值) */
+  private sU = new Float32Array(SAMPLES);
+  /** t0.z = |v−v2| 参考空间厚度(AddVertexPair :199 Vector2.Distance;底=t0.y 同值) */
+  private sD = new Float32Array(SAMPLES);
   /** 底边顶点色 color.RGB(0-255;顶边 color2 恒白——luminosity 全分支恒 1,见下) */
   private sR = new Float32Array(SAMPLES);
   private sG = new Float32Array(SAMPLES);
   private sB = new Float32Array(SAMPLES);
   /** num28 = num16·skyOpacity·num18·num4(:380)顶点 α */
   private sA = new Float32Array(SAMPLES);
-  /** 条带纹理(141×2:row0=底边色、row1=顶边色【白】;逐带 putImageData 复用) */
-  private stripCanvas: HTMLCanvasElement | null = null;
-  private stripCtx: CanvasRenderingContext2D | null = null;
-  private stripData: ImageData | null = null;
+  /** 逐像素烘焙离屏(grow-only 复用;α=255 黑底,'lighter' 加法直读 rgb) */
+  private bandCanvas: HTMLCanvasElement | null = null;
+  private bandCtx: CanvasRenderingContext2D | null = null;
+  private bandImg: ImageData | null = null;
+  private bandBuf32: Uint32Array | null = null;
+  /** 三角形顶点暂存(x,y,u,ty,tz,r,g,b)×4 顶点(段四边形),零分配 */
+  private triV = new Float64Array(32);
+  /** 286 两路纵向预混列(每带每帧重建;v=c3x/c1x 带内常量) */
+  private colR1 = new Float32Array(256);
+  private colR2 = new Float32Array(256);
 
   /** Activate/Deactivate(:424-433)。翻转守卫=ManageSpecialBiomeVisuals
    *  (SceneState.cs:123-133)的 `inZone != IsActive()` 语义——淡出中 _isActive
@@ -252,10 +430,12 @@ export class AuroraSky {
       ? (performance.now() / 1000) % 3600 : 0);
     // :126-128 参考空间 → 屏空间:scale = 屏宽/1920(背景矩阵按恒等屏空间处理【推断】)
     const scale = viewW / AURORA_REF_W;
-    for (let i = 0; i < m.bands; i++) {
-      this.computeBand(i, m, globalTime, skyOpacity, scale);
-      this.rasterBand(ctx, i, m.bands);
-    }
+    ensureNoise();                                        // 噪声面懒加载(首 draw 触发)
+    for (let i = 0; i < m.bands; i++) this.computeBand(i, m, globalTime, skyOpacity, scale);
+    // 纹理未就位帧跳过:加载窗 ≤ 数十 ms,而 skyOpacity 淡入 ≥ 数秒,视觉不可见;
+    // 失败(资源缺失)则极光不画——像素公式的采样器是硬依赖,不做近似降级。
+    if (noiseState !== 2) return;
+    this.rasterBands(ctx, m, globalTime);
   }
 
   /** 单带逐段几何/颜色(AuroraSky.cs:132-402 段循环 1:1;num* 命名保持反编译对照)。
@@ -274,8 +454,8 @@ export class AuroraSky {
     const num7 = m.hueFreq;
     const num8 = m.hueOffset;
     const num19 = flag3 ? num5 + i * 0.05 : num5;
-    // specificData(X/Y/Z/W,:139-189)为 shader 专属参数(带 Y:0/0.7/0.8、flag4 X=0.3、
-    //  flag2 Z=0.2 等)——Canvas2D 无对应通道,不落地【shader 推断:不可复刻】
+    // specificData(X/Y/Z/W :139-189)→ auroraSpecificData()(像素公式消费:
+    // X=亮度乘 1+X、Y=UV/lerp 竖向参数;Z/W 字节码不读)
     const moonX = this._moonFrac.x, moonY = this._moonFrac.y;
     const base = i * (AURORA_SEG + 1);
     const TAU = Math.PI * 2;
@@ -388,10 +568,13 @@ export class AuroraSky {
         if (i === 1) { vx -= num29 * num30; tx -= num29 * num30; num28 -= num10 * num10 * 0.36; }
         if (i === 2) { vx += num29 * num30; tx += num29 * num30; num28 -= num10 * num10 * 0.36; }
       }
-      // AddVertexPair(v,v2,num10,color*num28,color2*num28)(:401)→采样落盘(屏空间)
-      // (sR/sG/sB 已由 hslInto 直写;color2=白由 rasterBand 行1 生成)
+      // AddVertexPair(v,v2,num10,color*num28,color2*num28)(:401)→采样落盘:
+      // 位置×scale(参考→屏);texcoord 的 d=|v−v2| 在参考空间(矩阵缩放前)。
+      const d = Math.sqrt((vx - tx) * (vx - tx) + (vy - ty) * (vy - ty));  // :199
       this.sBotX[o] = vx * scale; this.sBotY[o] = vy * scale;
       this.sTopX[o] = tx * scale; this.sTopY[o] = ty * scale;
+      this.sU[o] = num10;
+      this.sD[o] = d;
       this.sA[o] = Math.max(0, Math.min(1, num28));       // Color*float 负值钳 0
     }
   }
@@ -418,55 +601,190 @@ export class AuroraSky {
     this.sB[o] = Math.round(b(hue - 1 / 3, t, q) * 255);
   }
 
-  /** 单带光栅:141×2 条带纹理(底边色→白)→140 段仿射切片(顶点色 Gouraud 等价)。
-   *  像素=(color.RGB·num28, α=num28) 非预乘入 ImageData;source-over 合成
-   *  = color·num28²+dst·(1−num28) —— XNA AlphaBlend(地表背景批次态,Main.cs:56294)
-   *  ×顶点色(Shader 输出 RGB 已乘顶点色)的逐字结果【shader 推断:shader 输出
-   *  是否再乘顶点色无源码可证,取标准乘法语义】。 */
-  private rasterBand(ctx: CanvasRenderingContext2D, band: number, bands: number): void {
-    if (!this.stripData) {
-      if (typeof document === 'undefined') return;
-      this.stripCanvas = document.createElement('canvas');
-      this.stripCanvas.width = AURORA_SEG + 1;
-      this.stripCanvas.height = 2;
-      this.stripCtx = this.stripCanvas.getContext('2d');
-      if (!this.stripCtx) return;
-      this.stripData = this.stripCtx.createImageData(AURORA_SEG + 1, 2);
+  /** 全带逐像素光栅:141 段×2 三角形(PrepareIndices :135-140)扫描线跨度覆盖 +
+   *  仿射增量插值(t0x/t0y/t0z/v0.rgb)→ SM2 公式 → 离屏 ImageData → 'lighter'×2。
+   *  覆盖:逐扫描线解三边与 sx 的交点得闭区间跨度(内部 E>0);相邻三角形共享边
+   *  系数互为精确取负 → 交点 bitwise 同值 → 跨度相接零缝隙(交点恰落像素中心时
+   *  双画,测度零;加法合成下不可见)。
+   *  性能(2026-08-20 Chrome/M 系实测):q=0.5 逐像素覆盖版 21-40ms/帧 →
+   *  跨度+286 纵向预混列+增量属性后见 AURORA_QUALITY 注释。 */
+  private rasterBands(ctx: CanvasRenderingContext2D, m: AuroraMode, globalTime: number): void {
+    const n = m.bands * (AURORA_SEG + 1);
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (let o = 0; o < n; o++) {
+      let v = this.sBotX[o]; if (v < minX) minX = v; if (v > maxX) maxX = v;
+      v = this.sTopX[o]; if (v < minX) minX = v; if (v > maxX) maxX = v;
+      v = this.sBotY[o]; if (v < minY) minY = v; if (v > maxY) maxY = v;
+      v = this.sTopY[o]; if (v < minY) minY = v; if (v > maxY) maxY = v;
     }
-    const sd = this.stripData;
-    const d = sd.data;
-    const base = band * (AURORA_SEG + 1);
-    for (let k = 0; k <= AURORA_SEG; k++) {
-      const o = base + k;
-      const a = this.sA[o];
-      const ab = Math.round(a * 255);                     // α=num28
-      let p = k * 8;                                      // row0=下缘 color·num28
-      d[p] = Math.max(0, Math.min(255, Math.round(this.sR[o] * a)));
-      d[p + 1] = Math.max(0, Math.min(255, Math.round(this.sG[o] * a)));
-      d[p + 2] = Math.max(0, Math.min(255, Math.round(this.sB[o] * a)));
-      d[p + 3] = ab;
-      p = ((AURORA_SEG + 1) + k) * 8;                     // row1=上缘 color2(白)·num28
-      const w = ab;
-      d[p] = w; d[p + 1] = w; d[p + 2] = w; d[p + 3] = ab;
+    if (!Number.isFinite(minX)) return;
+    const q = AURORA_QUALITY;
+    const bx = Math.floor(minX) - 1, by = Math.floor(minY) - 1;
+    const bw = Math.ceil(maxX) + 1 - bx, bh = Math.ceil(maxY) + 1 - by;
+    const ow = Math.max(1, Math.round(bw * q)), oh = Math.max(1, Math.round(bh * q));
+    if (!this.bandCanvas) {
+      this.bandCanvas = document.createElement('canvas');
+      this.bandCtx = this.bandCanvas.getContext('2d');
     }
-    this.stripCtx!.putImageData(sd, 0, 0);
-    const strip = this.stripCanvas!;
-    ctx.save();
+    const cv = this.bandCanvas, g = this.bandCtx;
+    if (!g) return;
+    if (cv.width < ow || cv.height < oh) {
+      cv.width = Math.max(cv.width, ow); cv.height = Math.max(cv.height, oh);
+      this.bandImg = null;                                 // 尺寸变 → 重建
+    }
+    if (!this.bandImg) {
+      this.bandImg = g.createImageData(cv.width, cv.height);
+      this.bandBuf32 = new Uint32Array(this.bandImg.data.buffer);
+    }
+    this.bandBuf32!.fill(0xFF000000, 0, ow * oh);          // α=255 黑底('lighter' 加 0)
+
+    const V = this.triV;
+    for (let i = 0; i < m.bands; i++) {
+      const sd = auroraSpecificData(m, i);
+      const sdX = sd[0], sdY = sd[1];
+      const T = globalTime + globalTime + sdY;             // preshader :3174-3175
+      const c3x = T * 0.02, c1x = T * 0.01, c2x = -c3x, c0x = -c1x;  // :3176-3179
+      // 286 两路 v 坐标带内恒量(c3x/c1x)→ 纵向预混列(见 blendColumns)
+      blendColumns(tex286!, c3x, this.colR1);
+      blendColumns(tex286!, c1x, this.colR2);
+      const base = i * (AURORA_SEG + 1);
+      for (let k = AURORA_SEG; k >= 1; k--) {
+        const o1 = base + k, o2 = o1 - 1;
+        const a1 = this.sA[o1], a2 = this.sA[o2];
+        if (a1 <= 0 && a2 <= 0) continue;                  // 两端 num28≤0 → 顶点色黑,零贡献
+        // 顶点(x,y,u,ty,tz,r,g,b);色 = XNA Color*float 的 byte 截断(int cast)→/255
+        V[0] = this.sBotX[o1]; V[1] = this.sBotY[o1];
+        V[2] = this.sU[o1]; V[3] = this.sD[o1]; V[4] = this.sD[o1];
+        V[5] = (this.sR[o1] * a1 | 0) / 255; V[6] = (this.sG[o1] * a1 | 0) / 255; V[7] = (this.sB[o1] * a1 | 0) / 255;
+        V[8] = this.sTopX[o1]; V[9] = this.sTopY[o1];
+        V[10] = this.sU[o1]; V[11] = 0; V[12] = this.sD[o1];
+        const w1 = (255 * a1 | 0) / 255; V[13] = w1; V[14] = w1; V[15] = w1;   // color2=白×num28
+        V[16] = this.sBotX[o2]; V[17] = this.sBotY[o2];
+        V[18] = this.sU[o2]; V[19] = this.sD[o2]; V[20] = this.sD[o2];
+        V[21] = (this.sR[o2] * a2 | 0) / 255; V[22] = (this.sG[o2] * a2 | 0) / 255; V[23] = (this.sB[o2] * a2 | 0) / 255;
+        V[24] = this.sTopX[o2]; V[25] = this.sTopY[o2];
+        V[26] = this.sU[o2]; V[27] = 0; V[28] = this.sD[o2];
+        const w2 = (255 * a2 | 0) / 255; V[29] = w2; V[30] = w2; V[31] = w2;
+        // PrepareIndices :135-140 前向两三角(后 6 索引=同三角背向,CullNone 重画
+        // 两次 → 合成端 drawImage×2)
+        this.rasterTri(0, 8, 16, bx, by, q, ow, oh, sdX, sdY, c2x, c0x);
+        this.rasterTri(16, 8, 24, bx, by, q, ow, oh, sdX, sdY, c2x, c0x);
+      }
+    }
+    g.putImageData(this.bandImg, 0, 0, 0, 0, ow, oh);
+    const prevOp = ctx.globalCompositeOperation;
+    const prevSmooth = ctx.imageSmoothingEnabled;
+    ctx.globalCompositeOperation = 'lighter';              // α=0×One/InvSrcAlpha → 加法
     ctx.imageSmoothingEnabled = true;
-    const baseM = ctx.getTransform();   // 调用方基变换(段间还原锚)
-    for (let k = AURORA_SEG; k >= 1; k--) {
-      // 段 k:采样 k(num10=k/140)→k−1;源列 (k−1..k) 跨段线性 = 顶点色插值。
-      // 矩阵序:CTM = 基变换 × 段仿射(transform 后乘——先段后基)
-      const a = base + k, b = base + k - 1;
-      const ax = this.sBotX[a], ay = this.sBotY[a];
-      const uX = this.sBotX[b] - ax, uY = this.sBotY[b] - ay;   // u:沿带(下缘)
-      const vX = this.sTopX[a] - ax, vY = this.sTopY[a] - ay;   // v:下缘→上缘
-      ctx.setTransform(baseM);
-      ctx.transform(uX, uY, vX, vY, ax, ay);
-      ctx.drawImage(strip, k - 1, 0, 2, 2, 0, 0, 1, 1);
+    ctx.drawImage(cv, 0, 0, ow, oh, bx, by, bw, bh);
+    ctx.drawImage(cv, 0, 0, ow, oh, bx, by, bw, bh);       // includeBacksides+CullNone ×2
+    ctx.globalCompositeOperation = prevOp;
+    ctx.imageSmoothingEnabled = prevSmooth;
+  }
+
+  /** 单三角形扫描线跨度光栅(V[b0/b1/b2] 顶点;离屏像素中心反投回屏坐标,
+   *  属性沿跨度增量步进——属性精度 1e-12 级漂移,覆盖判定仍逐线精确求交)。 */
+  private rasterTri(b0: number, b1: number, b2: number,
+    bx: number, by: number, q: number, ow: number, oh: number,
+    sdX: number, sdY: number, c2x: number, c0x: number): void {
+    const V = this.triV;
+    const v0x = V[b0], v0y = V[b0 + 1], v1x = V[b1], v1y = V[b1 + 1], v2x = V[b2], v2y = V[b2 + 1];
+    const e1x = v1x - v0x, e1y = v1y - v0y, e2x = v2x - v0x, e2y = v2y - v0y;
+    const det = e1x * e2y - e1y * e2x;
+    if (det === 0) return;                                 // 零面积三角形 GPU 不光栅化
+    // 边系数 A·px+B·py+C(内部>0;det<0 时整组精确取负)
+    let a0 = -e1y, b0c = e1x, c0v = e1y * v0x - e1x * v0y;
+    let a1 = -(v2y - v1y), b1c = v2x - v1x, c1v = (v2y - v1y) * v1x - (v2x - v1x) * v1y;
+    let a2 = -(v0y - v2y), b2c = v0x - v2x, c2v = (v0y - v2y) * v2x - (v0x - v2x) * v2y;
+    if (det < 0) {
+      a0 = -a0; b0c = -b0c; c0v = -c0v;
+      a1 = -a1; b1c = -b1c; c1v = -c1v;
+      a2 = -a2; b2c = -b2c; c2v = -c2v;
     }
-    ctx.setTransform(baseM);
-    ctx.restore();
-    void bands;
+    // 属性仿射梯度(attr = a0 + gx·dx + gy·dy;6 通道:u/t0y/t0z/r/g/b)
+    const inv = 1 / det;
+    const g1 = (p: number): number => (V[b1 + p] - V[b0 + p]) * e2y - e1y * (V[b2 + p] - V[b0 + p]);
+    const g2 = (p: number): number => e1x * (V[b2 + p] - V[b0 + p]) - (V[b1 + p] - V[b0 + p]) * e2x;
+    const gux = g1(2) * inv, guy = g2(2) * inv;
+    const gtx = g1(3) * inv, gty = g2(3) * inv;
+    const gzx = g1(4) * inv, gzy = g2(4) * inv;
+    const grx = g1(5) * inv, gry = g2(5) * inv;
+    const ggx = g1(6) * inv, ggy = g2(6) * inv;
+    const gbx = g1(7) * inv, gby = g2(7) * inv;
+    const u00 = V[b0 + 2], ty00 = V[b0 + 3], tz00 = V[b0 + 4];
+    const r00 = V[b0 + 5], g00 = V[b0 + 6], b00 = V[b0 + 7];
+    // 离屏行范围(像素中心反投:sy = by+(oy+0.5)/q)
+    const ymin = Math.min(v0y, v1y, v2y), ymax = Math.max(v0y, v1y, v2y);
+    let oy0 = Math.ceil((ymin - by) * q - 0.5), oy1 = Math.floor((ymax - by) * q - 0.5);
+    if (oy0 < 0) oy0 = 0; if (oy1 > oh - 1) oy1 = oh - 1;
+    if (oy0 > oy1) return;
+    const q1 = 1 / q;
+    const du = gux * q1, dty = gty * q1, dtz = gzy * q1;
+    const dr = grx * q1, dg = ggx * q1, db = gbx * q1;
+    const du1 = du * AURORA_F32.mul20, du2 = du * AURORA_F32.mul6;
+    const data = this.bandImg!.data;
+    const colR1 = this.colR1, colR2 = this.colR2, t287 = tex287!;
+    const kx = 1 + sdX;                                    // :3167-3169 ×(1+sdX)
+    for (let oy = oy0; oy <= oy1; oy++) {
+      const sy = by + (oy + 0.5) * q1;
+      // 三边与 sx 的交点 → 覆盖跨度 [enter, exit](内部 E>0;A>0 边给下界,
+      //  A<0 边给上界,A==0 水平边只做整线通过/拒绝)
+      let enter = -Infinity, exit = Infinity;
+      let t = b0c * sy + c0v;
+      if (a0 > 0) { const xc = -t / a0; if (xc > enter) enter = xc; }
+      else if (a0 < 0) { const xc = -t / a0; if (xc < exit) exit = xc; }
+      else if (t < 0) continue;
+      t = b1c * sy + c1v;
+      if (a1 > 0) { const xc = -t / a1; if (xc > enter) enter = xc; }
+      else if (a1 < 0) { const xc = -t / a1; if (xc < exit) exit = xc; }
+      else if (t < 0) continue;
+      t = b2c * sy + c2v;
+      if (a2 > 0) { const xc = -t / a2; if (xc > enter) enter = xc; }
+      else if (a2 < 0) { const xc = -t / a2; if (xc < exit) exit = xc; }
+      else if (t < 0) continue;
+      if (enter > exit) continue;
+      let px0 = Math.ceil((enter - bx) * q - 0.5);
+      let px1 = Math.floor((exit - bx) * q - 0.5);
+      if (px0 < 0) px0 = 0; if (px1 > ow - 1) px1 = ow - 1;
+      if (px0 > px1) continue;
+      // 跨度起点属性(px0 像素中心屏坐标)
+      const dx0 = bx + (px0 + 0.5) * q1 - v0x, dy0 = sy - v0y;
+      let u = u00 + gux * dx0 + guy * dy0;
+      let tyv = ty00 + gtx * dx0 + gty * dy0;
+      let tz = tz00 + gzx * dx0 + gzy * dy0;
+      let r = r00 + grx * dx0 + gry * dy0;
+      let g = g00 + ggx * dx0 + ggy * dy0;
+      let b = b00 + gbx * dx0 + gby * dy0;
+      let u1x = (u + sdY) * AURORA_F32.mul20 + c2x;        // :3133/:3134-3135
+      let u2x = (u + sdY) * AURORA_F32.mul6 + c0x;         // :3136-3137
+      let idx = (oy * ow + px0) * 4;
+      for (let x = px0; x <= px1; x++, idx += 4) {
+        // grad = t0.y/t0.z(:3138 rcp + :3139 mul)
+        const gv = tyv * (1 / tz);
+        // n1/n2:286 预混列横向 wrap 线性(:3142/:3143,v 方向已按带内常量预混)
+        const x1 = u1x * 256 - 0.5; let i1 = Math.floor(x1);
+        const f1v = x1 - i1;
+        const va = colR1[i1 & 255], vb = colR1[(i1 + 1) & 255];
+        const n1 = va + (vb - va) * f1v;
+        const x2 = u2x * 256 - 0.5; let i2 = Math.floor(x2);
+        const f2v = x2 - i2;
+        const wa = colR2[i2 & 255], wb = colR2[(i2 + 1) & 255];
+        const n2 = wa + (wb - wa) * f2v;
+        // n3:287 全二维 wrap 双线性(:3141/:3144)
+        const x3 = u * 128 - 0.5, y3 = gv * 128 - 0.5;
+        let i3 = Math.floor(x3); let j3 = Math.floor(y3);
+        const fx3 = x3 - i3, fy3 = y3 - j3;
+        const ta = t287[(j3 & 127) * 128 + (i3 & 127)], tb = t287[(j3 & 127) * 128 + ((i3 + 1) & 127)];
+        const tc = t287[((j3 + 1) & 127) * 128 + (i3 & 127)], td = t287[((j3 + 1) & 127) * 128 + ((i3 + 1) & 127)];
+        const n3 = ta + (tb - ta) * fx3 + ((tc + (td - tc) * fx3) - (ta + (tb - ta) * fx3)) * fy3;
+        // 强度链+色尾(:3145-3171;auroraIntensity 为唯一公式源,V8 内联热路径)
+        const k = auroraIntensity(n1, n2, n3, gv, sdY) * kx;
+        data[idx] = r * k * 255;                           // :3171 UNORM 钳(Uint8Clamped)
+        data[idx + 1] = g * k * 255;
+        data[idx + 2] = b * k * 255;
+        u += du; tyv += dty; tz += dtz; r += dr; g += dg; b += db;
+        u1x += du1; u2x += du2;
+      }
+    }
   }
 }

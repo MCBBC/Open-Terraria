@@ -91,6 +91,18 @@ export interface GameHooks {
   startTrackedLoop?(
     name: string, vol: number, x: number, y: number,
   ): { stop(): void; setPos(px: number, py: number): void } | null;
+  /** 常驻循环轨按 wav 文件（SoundEngine.PlayTrackedLoopedSound 的音量跟随档——
+   *  吸血鬼炽灼音环 SoundID.VampireSizzle（Player.cs:28107-28121）Volume 每帧 =
+   *  GetLerpValue(0,120,sunScorchCounter)；Game 实现 = Sfx.playLoopFile，
+   *  句柄 setVolume 每帧跟随 / stop 拆轨（loopingCondition =
+   *  VampireSizzleTracker.IsActiveAndInGame，Terraria.Audio/VampireSizzleTracker.cs）；
+   *  缺省无循环音（测试 mock 兼容） */
+  startLoopSfx?(
+    file: string, vol: number, base?: number,
+  ): {
+    stop(): void; setVolume(v: number): void;
+    readonly playing: boolean; readonly dead: boolean;
+  } | null;
   /** 矿车碾过压板轨道（Minecart.HitTrackSwitch → Wiring.HitSwitch，Minecart.cs:1287-1294）。
    *  Game 实现：路由到 Wiring.hitSwitch（压板/轨道族直接 TripWire） */
   hitTrackSwitch?(i: number, j: number): void;

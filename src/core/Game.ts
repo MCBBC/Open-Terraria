@@ -3054,9 +3054,11 @@ export class Game implements GameHooks {
         if (n.home) { t.home = { x: n.home[0], y: n.home[1] }; t.leashHome = true; }
         this.entities.add(t, 'npcs');
       }
-      // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）
-      if (!savedNpcs.some((n) => n.key === 'guide')) {
-        this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
+      // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）；吸血鬼种子世界
+      // 起始 NPC 换动物学家（:19981-19986 vampireSeed → NewNPC 633 homeless）
+      const starterKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : 'guide';
+      if (!savedNpcs.some((n) => n.key === starterKey)) {
+        this.entities.add(new TownNPC(starterKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
       // 守卫老人：存档未击败骷髅王时按原地牢口位置恢复（存档无条目则重扫地牢口）
       if (this.world.dungeonX > 0 && !this.skeletronDowned()
@@ -3066,9 +3068,12 @@ export class Game implements GameHooks {
       // bound 救援 NPC 已由存档条目覆盖（含 bound 态与已获救态），不再重新放置
     } else {
       // 新世界：向导随世界出生(WorldGen.cs:20036)——唯一初始城镇 NPC,无家(homeless)。
-      // 商人/护士等由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)
-      if (!this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === 'guide' && !n.dead)) {
-        this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
+      // 商人/护士等由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)。
+      // 吸血鬼种子（vampireSeed）：起始 NPC = 动物学家 633（WorldGen.cs:19981-19986，
+      // else-if 链在 infectedSeed 后截胡——替代向导出生、homeless、direction=1）
+      const starterNpcKey = this.world.seedFlags?.vampireSeed ? 'zoologist' : 'guide';
+      if (!this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === starterNpcKey && !n.dead)) {
+        this.entities.add(new TownNPC(starterNpcKey, this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
       }
       // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
       if (this.world.dungeonX > 0 && !this.skeletronDowned()) {
@@ -3378,6 +3383,8 @@ export class Game implements GameHooks {
     this.running = false;
     // 天气：雨声层静音 + 环境循环轨停拆 + 渲染器 detach（防下个世界复用旧状态）
     this.stopWeatherLoops();
+    // 吸血鬼炽灼音环拆轨（Player 实例弃用前必经——防菜单/下个世界残留嘶声）
+    this.player?.stopSizzleLoop();
     this.renderer.weatherFxActive = false;
     this.renderer.weatherFx.detach();
     this.renderer.sky.weatherRef = null;
@@ -14221,11 +14228,32 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       return;
     }
     // L57505：num10 = rand(7)（expert 才 -1，WorldGen.cs:57482-57486——曾漏实现此偏移）
-    const num10 = R(7) - (this.world.isExpert ? 1 : 0);
+    let num10 = R(7) - (this.world.isExpert ? 1 : 0);
     // 载入期液体收敛(waterCheck→killTile→breakTile→smashPot)可能砸水边瓦罐,
     // 此时 player 尚未创建(afterWorldLoad 尾部)——无主角视为"受伤"走蘑菇分支,
     // 掉落物随后被 entities.clear() 清掉,无泄漏
     const pl = this.player;
+    // ---- 玩家火把计数（WorldGen.cs:57487-57504）：FindClosest 玩家背包前 50 格
+    //      createTile∈TileID.Sets.Torches（TileID.cs:401 = {4}——彩色/生物群系火把
+    //      全是 tile 4 的 style 变体）的 stack 累计——吸血鬼世界阈值 20→30
+    //      （:57490-57492 num12），不足(flag5)时 num10 强制 1=火把档（:57507-57510） ----
+    const vampireSeed = !!w.seedFlags?.vampireSeed;
+    const torchThreshold = vampireSeed ? 30 : 20;
+    let torchCount = 0;
+    if (pl) {
+      for (let k = 0; k < pl.inv.slots.length && k < 50; k++) {
+        const s = pl.inv.slots[k];
+        if (!s || s.stack <= 0) continue;
+        const def = ITEM_DEFS[s.id];
+        const vid = def ? (def.vid ?? viIdFromKey(def.key)) : -1;
+        if (vid >= 0 && itemFuncOfVid(vid)?.createTile === 4) {
+          torchCount += s.stack;
+          if (torchCount >= torchThreshold) break;
+        }
+      }
+    }
+    const torchShort = torchCount < torchThreshold;   // :57506 flag5
+    if (torchShort && vampireSeed) num10 = 1;         // :57507-57510
     if (num10 === 0 && (!pl || pl.hp < pl.maxHp)) {
       // 心 pickup（WorldGen.cs:57511-57531）：1 颗 + 1/2 第二颗；
       // 专家模式（大师也算）再 1/2、1/2 两颗
@@ -14237,10 +14265,36 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       return;
     }
-    if (num10 === 1 || num10 === 0) {
-      // 火把（原版 num10==0 时需背包火把<20，火把计数略；液体中→荧光棒 282）
+    // 吸血鬼木头档（WorldGen.cs:57532-57544）：flag2||flag = 非地狱（:57102-57103
+    // 定义：flag2=j<UnderworldLayer / flag=j<rockLayer，普通世界前者覆盖后者）
+    // && 1/6 → 木头 10-30（沙漠罐 4-6 → Boreal 2503/罐 7-9 → Palm 620/其余 Wood 9）
+    // ——吸血鬼地下开局生命线
+    if (vampireSeed && y < underworldY && R(6) === 0) {
+      let woodType = 9;
+      if (style >= 4 && style <= 6) woodType = 2503;
+      else if (style >= 7 && style <= 9) woodType = 620;
+      drop(woodType, 10 + R(21));
+      return;
+    }
+    if (num10 === 1 || (num10 === 0 && torchShort)) {
+      // 火把档（WorldGen.cs:57545-57605）：基数 2-6（专家 +1-6，吸血鬼 +2-6 :57554）；
+      // 类型按玩家群系/罐 style 换彩火把（神圣 4387/猩红 4386/腐化 4385/沙漠 4388×1.5/
+      // 丛林罐 974/丛林火把 4383/蘑菇 5293，各 +2-6 根）；液体中改荧光棒（沙漠罐 286）
+      let n13 = 2 + R(5);
+      if (this.world.isExpert) n13 += 1 + R(6);
+      if (vampireSeed) n13 += 2 + R(5);
+      let type3 = 8;
+      let type4 = 282;
+      const zone = this.scene;
+      if (zone?.zoneHallow) { n13 += 2 + R(5); type3 = 4387; }
+      else if ((style >= 22 && style <= 24) || zone?.zoneCrimson) { n13 += 2 + R(5); type3 = 4386; }
+      else if ((style >= 16 && style <= 18) || zone?.zoneCorrupt) { n13 += 2 + R(5); type3 = 4385; }
+      else if (style >= 7 && style <= 9) { n13 += 2 + R(5); n13 = Math.floor(n13 * 1.5); type3 = 4388; }
+      else if (style >= 4 && style <= 6) { type3 = 974; type4 = 286; }
+      else if (style >= 34 && style <= 36) { n13 += 2 + R(5); type3 = 4383; }
+      else if (zone?.zoneGlowshroom) { n13 += 2 + R(5); type3 = 5293; }
       const inLiquid = w.store.liquid[w.store.idx(x, y)] > 0;
-      drop(inLiquid ? 282 : 8, 2 + R(5));
+      drop(inLiquid ? type4 : type3, n13);
       return;
     }
     switch (num10) {
@@ -15129,9 +15183,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 渔夫(cs:65292)：savedAngler（睡渔夫 376 解救置位）——解救后死亡的重生门
         return !!this.world.flags['savedAngler'];
       case 'zoologist':
-        // 动物学家(cs:65375)：图鉴完成度 ≥10%（Main.GetBestiaryProgressReport = 已解锁条目/
-        // 总条目；数据层 data/Bestiary.ts。原版另有 vampireSeed 世界分支——种子系统未实装）
-        return this.world.bestiary.completion().percent >= 0.1;
+        // 动物学家(cs:65375)：vampireSeed 世界直通（!infectedSeed 前置——本仓该位恒
+        // false 预留，SeedEasterEggs 注释），否则图鉴完成度 ≥10%
+        // （Main.GetBestiaryProgressReport = 已解锁条目/总条目；数据层 data/Bestiary.ts）
+        return (!!this.world.seedFlags?.vampireSeed && !this.world.seedFlags?.infectedSeed)
+          || this.world.bestiary.completion().percent >= 0.1;
       case 'party_girl':
         // 派对女孩(cs:65249-65253)：unlockedPartyGirlSpawn 直通（十周年/醉酒世界
         // 置位，普通种子恒假）或每轮 1/40 重掷（另需在场 NPC ≥20，见优先级链）
@@ -16564,6 +16620,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             if (out[i][0] >= 4430 && out[i][0] <= 4441) out.splice(i, 1);
           }
           add(dryadMoonPhaseStock(phase, !!this.world.flags.hardMode));
+          // 吸血鬼+感染世界肉前补火把+邪恶彩火把（Chest.cs:1698-1705：!hardMode &&
+          // vampireSeed && infectedSeed → 8 + (crimson ? 4386 Ichor : 4385 Cursed)——
+          // infectedSeed 无文本映射恒 false，1:1 保留死分支）
+          if (!this.world.flags.hardMode && !!this.world.seedFlags?.vampireSeed
+            && !!this.world.seedFlags?.infectedSeed) {
+            add([8]);
+            add([this.world.crimson ? 4386 : 4385]);
+          }
           break;
         }
         case 54: // 裁缝套装（:1795-1923）
@@ -16627,6 +16691,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           if (partyIsUp(this.partyState)) add([5466]);                    // 派对蜂群雷 :3354
           // 兽耳尾套装（:3358-3379 四相位对——原 switch 直取，无进度门）
           add([[4768, 4769], [4770, 4771], [4772, 4773], [4560, 4775]][Math.floor(phase / 2)]);
+          // 吸血鬼世界上架火把（Chest.cs:3381-3384 vampireSeed && !infectedSeed →
+          // SetDefaults(8)——动物学家开局即有火把供给）
+          if (!!this.world.seedFlags?.vampireSeed && !this.world.seedFlags?.infectedSeed) add([8]);
           if (this.player.golferScoreAccumulated >= 2000) add([4744]);    // :1951 猎人斗篷
           break;
         }
@@ -19073,6 +19140,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** PlayTrackedLoopedSound 实现（GameHooks.startTrackedLoop——AI_016 引信嘶声） */
   startTrackedLoop(name: string, vol: number, x: number, y: number) {
     return this.sfx.startTrackedLoop(name as SfxName, vol, x, y);
+  }
+
+  /** 常驻循环轨按 wav 文件（GameHooks.startLoopSfx——吸血鬼炽灼音环
+   *  SoundID.VampireSizzle，Player.cs:28107-28121；SfxLoop setVolume 每帧跟随） */
+  startLoopSfx(file: string, vol: number, base = 1) {
+    return this.sfx.playLoopFile(file, vol, base);
   }
 
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number) {

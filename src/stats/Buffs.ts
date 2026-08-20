@@ -475,11 +475,12 @@ export class BuffState {
    *  -32）：Player.fixedUpdate 在 buffs.tick 前按本帧 inputX!==0 写入（inputX 由
    *  Game.ts:2890 先于 :2931 fixedUpdate 注入，即原版 Update 时序的当帧输入） */
   electrifiedMoving = false;
-  /** Main.vampireSeed（Main.cs:327；Dracula 秘密种子世界位，NetMessage :363 同步）：
+  /** Main.vampireSeed（Main.cs:327；秘密种子世界位，NetMessage :363 同步）：
    *  On Fire!(24) 对玩家从 -8 提到 -100 lifeRegen（50 HP/s，Player.cs:18798-18802；
-   *  drippingSlime 再翻到 -200 :18803-18805——Slimed(137) 未移植,登记）。本仓
-   *  秘密种子系统未实装（世界创建链无种子位），常 false；分支按原版数值落地，
-   *  种子接线后置 true 即活（另 Main.cs:42715 buff 图标 <10t 不显示秒数,UI 侧未接） */
+   *  drippingSlime 再翻到 -200 :18803-18805——Slimed(137) 未移植,登记）。
+   *  接线 = Player.updateSunScorch 每帧自 world.seedFlags.vampireSeed 刷新
+   *  （SeedEasterEggs "what a horrible night to have a curse"）。另 Main.cs:42715
+   *  buff 图标 <10t 不显示秒数（buff 24/23/32）已接 UI.refreshBuffs */
   vampireSeed = false;
   lanternAccum = 0;
   /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */

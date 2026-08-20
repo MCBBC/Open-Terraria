@@ -237,6 +237,7 @@ export class WorldCreationPanel {
       : flags.tenthAnniversary ? 'Seed_Celebration'
       : flags.noTraps ? 'Seed_NoTraps'
       : flags.remix ? 'Seed_Remix'
+      : flags.vampireSeed ? 'Seed_Secret'   // 秘密种子通用图标（吸血鬼 1.4.5 无专属图标）
       : 'Seed_Normal';
     (this.seedIcon as HTMLImageElement).src = `sprites/vanilla-ui/UI_WorldCreation_${key}.png`;
   }

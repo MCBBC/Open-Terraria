@@ -2086,8 +2086,13 @@ export function placePlantTile(st: TileStore, rng: RNG, x: number, y: number, nu
     if (rng.int(0, 49) === 0 || ((num === 24 || num === 201) && rng.int(0, 39) === 0)) {
       fx = num === 201 ? 270 : 144;                                       // 蘑菇/恶魔蘑菇帧
     } else if (rng.int(0, 34) === 0 || (st.wall[i] >= 63 && st.wall[i] <= 70)) {
-      const list = num === 201 ? FLOWER_FX_LIST_201 : num === 637 ? FLOWER_FX_LIST_637 : FLOWER_FX_LIST;
-      fx = list[rng.int(0, list.length - 1)];
+      // cs:59583-59592：14 元表**无条件先掷**，随后 num==201→16 元表 / num==637→5 元表
+      // **二次掷覆写**（前值弃但掷已耗）——TTTTT 织入定谳（按 num 选表单掷每个
+      // 637/201 样式放置少掷 1；修真序后 3757/3757 逐掷全等）
+      let fx2 = FLOWER_FX_LIST[rng.int(0, FLOWER_FX_LIST.length - 1)];
+      if (num === 201) fx2 = FLOWER_FX_LIST_201[rng.int(0, FLOWER_FX_LIST_201.length - 1)];
+      if (num === 637) fx2 = FLOWER_FX_LIST_637[rng.int(0, FLOWER_FX_LIST_637.length - 1)];
+      fx = fx2;
     } else {
       fx = rng.int(0, 5);                                                 // Next(6) 草丛
     }

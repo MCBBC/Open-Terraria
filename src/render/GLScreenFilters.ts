@@ -1,0 +1,420 @@
+// 屏幕后处理滤镜 GL 模块（ScreenShader.cso SM2 字节码逐指令 1:1）。
+//
+// 唯一真值 = 反编译 SM2 字节码（../terraria-assets/ScreenShader.cso；
+// `node tools/disasm-fx.mjs ../terraria-assets/ScreenShader.cso <out>` 反汇编，
+// 本文件行号注释 = 反汇编输出行号）。本模块覆盖的 pass：
+//   FilterHeatDistortion :839  FilterMiniTower :483  FilterGraveyard :159
+//   FilterBloodMoon     :429  FilterTest2     :1122  FilterCRT       :1182
+// （FilterMoonLord :103 / FilterSepia :176 / FilterNoir :248 未入——见
+//  MonolithFilters 审计结论表。）
+//
+// C# 注入侧（uniform 取值来源）：
+//   ScreenEffectInitializer.cs:15-47（pass 名/UseColor/UseOpacity/UseIntensity）
+//   ScreenShaderData.Apply()（uTime=GlobalTimeWrappedHourly、
+//   uScreenResolution=UnscaledScreenSize=screen/RenderZoom、
+//   uScreenPosition=UnscaledScreenPosition−offScreenRange(=200)、
+//   uOpacity=CombinedOpacity=UseOpacity×Filter.Opacity、uImageSize1=噪声图尺寸）
+//   FilterManager.EndCapture（链式叠加 + 每级 ×ColorOfTheSkies :172/:194）。
+//
+// 采样态：s1=Images/Misc/noise(256²,POT)→LinearWrap（ScreenShaderData.cs:175-178）；
+// s0=链上前级目标，XNA 设备默认 LinearWrap——NPOT 画布 WebGL1 只能 CLAMP，
+// 故片元内 mod(uv,1) 手工重复等价 wrap（差异=0，采样前已折回）。
+
+/** 一条滤镜链中的一个 pass（字段=已折入 preshader 的语义 uniform） */
+export type ScreenFxPass =
+  | {
+    kind: 'FilterHeatDistortion';
+    /** c4=UnscaledScreenSize(viewW/z, viewH/z)；c5=屏幕左上世界px（ScreenShaderData.cs:96-98） */
+    screenRes: [number, number];
+    screenPos: [number, number];
+    /** preshader：c0=1/uImageSize1、c1/c2=±0.04·uTime、c3=(uIntensity·uOpacity)/c4 */
+    intensity: number;
+    opacity: number;
+    /** uTime=GlobalTimeWrappedHourly（秒，%3600 Main.cs:16777） */
+    time: number;
+  }
+  | { kind: 'FilterMiniTower'; color: readonly [number, number, number]; opacity: number }
+  | { kind: 'FilterGraveyard'; intensity: number; progress: number; opacity: number }
+  | { kind: 'FilterBloodMoon'; color: readonly [number, number, number]; intensity: number; opacity: number }
+  | { kind: 'FilterTest2'; opacity: number }
+  | { kind: 'FilterCRT'; screenH: number; zoom: number; opacity: number };
+
+const VERT = `
+attribute vec2 aPos;              // 单位 quad (0..1)^2
+varying vec2 vUv;
+void main() {
+  vUv = aPos;                      // y 翻转同 GLWorldLight（canvas y 向下）
+  gl_Position = vec4(aPos.x * 2.0 - 1.0, 1.0 - aPos.y * 2.0, 0.0, 1.0);
+}`;
+
+// ---- 各 pass 片元着色器（GLSL 100；常量/指令序照抄字节码） ----
+
+/** FilterHeatDistortion（obj18 :839-871）：双噪声场差分 → 屏幕重采样 */
+const FRAG_HEAT = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;      // s0
+uniform sampler2D uNoise;       // s1 = Images/Misc/noise
+uniform vec2 uScreenRes;        // c4
+uniform vec2 uScreenPos;        // c5
+uniform vec2 uNoiseRcp;         // c0 = 1/uImageSize1（preshader rcp）
+uniform float uTimeScroll;      // c1 = 0.04*uTime（c2 = -c1）
+uniform vec2 uOffset;           // c3 = (uIntensity*uOpacity)/uScreenRes
+uniform vec3 uTint;             // ColorOfTheSkies（EndCapture :194）
+void main() {
+  vec2 world = vUv * uScreenRes + uScreenPos;                     // :846-847
+  vec2 halfNuv = world * uNoiseRcp * 0.5;                         // :848-849,851
+  vec2 nB = texture2D(uNoise, halfNuv + vec2(0.0, -uTimeScroll)).rg; // :852-854(c2)
+  vec2 nA = texture2D(uNoise, halfNuv + vec2(0.0,  uTimeScroll)).rg; // :850,855(c1)
+  vec2 delta = nA - nB - 0.5;                                     // :856-857(def c6.y=-0.5)
+  vec2 uvOut = vUv + delta * uOffset;                             // :858
+  uvOut = mod(uvOut, 1.0);                    // s0 设备默认 wrap 的手工等价
+  gl_FragColor = vec4(texture2D(uScreen, uvOut).rgb * uTint, 1.0); // :859
+}`;
+
+/** FilterMiniTower（obj12 :483-508）：V+min 亮度度量驱动的柱色推色 */
+const FRAG_MINITOWER = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform vec3 uColor;            // c0（ScreenEffectInitializer.cs:18-21）
+uniform float uOpacity;         // c1 = UseOpacity×Filter.Opacity
+uniform vec3 uTint;
+void main() {
+  vec4 s = texture2D(uScreen, vUv);                               // :489
+  float V = max(max(s.r, s.g), s.b);                              // :490-491
+  float mn = min(min(s.r, s.g), s.b);                             // :492-493
+  float sum = V + mn;                                             // :494
+  float k = sum - 1.0;                                            // :495(def c3.z)
+  vec3 hi = mix(uColor, vec3(1.0) - uColor, k);                   // :496-497(c2=1-color preshader)
+  vec3 lo = sum * uColor;                                         // :499
+  vec3 tgt = k >= 0.0 ? hi : lo;                                  // :498,500(cmp r2.x=k/2)
+  gl_FragColor = vec4(mix(s.rgb, tgt * s.a, uOpacity) * uTint, 1.0); // :501-502
+}`;
+
+/** FilterGraveyard（obj6 :159-175）：intensity 标定灰度 + progress 去饱和 */
+const FRAG_GRAVEYARD = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform float uIntensity;       // c1（SceneState.cs:138 UseIntensity(1.2)）
+uniform float uProgress;        // c2（SceneState.cs:134 Lerp(0,0.75,强度)）
+uniform float uOpacity;         // c0
+uniform vec3 uTint;
+void main() {
+  vec4 s = texture2D(uScreen, vUv);                                // :165
+  float gray = (s.r + s.g + s.b) * uIntensity * 0.333333;          // :166-168,169(c3)
+  vec3 desat = mix(s.rgb, vec3(gray), uProgress);                  // :170
+  gl_FragColor = vec4(mix(s.rgb, desat * s.a, uOpacity) * uTint, 1.0); // :171-172
+}`;
+
+/** FilterBloodMoon（obj11 :429-482）：V+min 分档染色 + 径向衰减 + alpha 抛物线 */
+const FRAG_BLOODMOON = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform vec3 uColor;            // c2（UseColor(2,-0.8,-0.6) :27）
+uniform float uIntensity;       // c4（BloodMoon 恒 1）
+uniform float uOpacity;         // c3 = UseOpacity(BloodMoonScreenShaderData.Update)×Opacity
+uniform vec3 uTint;
+void main() {
+  vec4 s = texture2D(uScreen, vUv);                               // :437
+  // :438-445 c = uv-0.5（c0=1/sceneSize、c5=uImageSize0、c6=0 → EndCapture 默认恒等）
+  vec2 c = vUv - 0.5;
+  float d = length(c);
+  float radial = (d - 0.3) >= 0.0 ? 1.0 - 2.0 * (d - 0.3) : 1.0;  // :446-448(不夹下界)
+  float V = max(max(s.r, s.g), s.b);                              // :449-450
+  float mn = min(min(s.r, s.g), s.b);                             // :451-452
+  float sum = V + mn;                                             // :453
+  vec3 hi = vec3(1.0) - (vec3(1.0) - uColor) * (1.5 - 0.5 * sum); // :456-457(c1=1-color)
+  vec3 lo = sum * uColor;                                         // :459
+  vec3 base = (0.5 * (1.0 - sum)) >= 0.0 ? lo : hi;               // :458,460(sum<=1→lo)
+  base += -0.5 * sum;                                             // :461
+  vec3 tgt = base * ((V - mn) + 0.166667) + 0.5 * sum;            // :454-455,462,466
+  float amt = (1.0 - 0.5 * sum) * uIntensity * 0.7;               // :463-465
+  vec3 A = s.a * tgt;                                             // :468
+  vec3 mid = 0.3 * A + 0.7 * A * A;                               // :469-471
+  vec3 outc = mix(s.rgb, mid, amt);                               // :472
+  gl_FragColor = vec4(mix(s.rgb, radial * outc, uOpacity) * uTint, 1.0); // :473-474
+}`;
+
+/** FilterTest2（obj25 :1122-1152）：复古柱 GB 四阶调色板（V+min 度量） */
+const FRAG_TEST2 = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform float uOpacity;         // c0
+uniform vec3 uTint;
+void main() {
+  vec4 s = texture2D(uScreen, vUv);                                // :1133
+  float V = max(max(s.r, s.g), s.b);                               // :1134-1135
+  float mn = min(min(s.r, s.g), s.b);                              // :1136-1137
+  float x = max((V + mn) * 0.55 - 0.1, 0.0);                       // :1138-1140(c1)
+  vec3 pal = x >= 0.75 ? vec3(0.607843, 0.737255, 0.058824)        // c2 :1141-1143
+           : x >= 0.5  ? vec3(0.545098, 0.674510, 0.058824)        // c5 :1146
+           : x >= 0.25 ? vec3(0.188235, 0.384314, 0.188235)        // c4 :1147
+                       : vec3(0.058824, 0.219608, 0.058824);       // c3 :1146
+  gl_FragColor = vec4(mix(s.rgb, pal, uOpacity) * uTint, 1.0);     // :1148
+}`;
+
+/** FilterCRT（obj27 :1182-1238）：不透明度缩放交叉桶形 + 边缘遮黑 + RGB 相位扫描线 */
+const FRAG_CRT = `
+precision highp float;
+varying vec2 vUv;
+uniform sampler2D uScreen;
+uniform float uScreenH;         // c2.y = uScreenResolution.y（viewH/z）
+uniform float uZoom;            // c4
+uniform float uOpacity;         // c3
+uniform vec3 uTint;
+void main() {
+  // c0=uImageSize0/uSceneSize、c1=倒数（EndCapture 默认恒等 :1234-1237）
+  vec2 p = vUv * 2.0 - 1.0;                                        // :1193-1194
+  vec2 q = p * uOpacity;                                           // :1195-1196
+  vec2 q2 = (q / 7.0) * (q / 7.0);                                 // :1197-1198(c6.z=1/7)
+  vec2 dst = p * vec2(1.0 + q2.y, 1.0 + q2.x);                     // :1199 交叉桶形
+  vec2 duv = dst * 0.5 + 0.5;                                      // :1202
+  // :1200-1215 边缘检测：bottom(dst.y>=1)/left(duv.x<=0)/top(duv.y<=0) 任一越界→黑
+  float outSide = (dst.y * 0.5 - 0.5 >= 0.0 || duv.x <= 0.0 || duv.y <= 0.0) ? 1.0 : 0.0;
+  vec2 suv = mod(duv, 1.0);                    // s0 wrap 等价（右缘越界采到左缘）
+  vec4 col = outSide > 0.5 ? vec4(0.0) : texture2D(uScreen, suv);  // :1210,1215
+  // :1216 cmp -uMultiChunkScene(false) → 恒取畸变采样
+  float ph = fract(vUv.y * uScreenH * uZoom * 0.222656) * 6.283185 - 3.141593; // :1217-1221
+  float mx = 1.0 + (cos(ph) - 1.0) * 0.13;                         // :1224-1225(c7.z)
+  float my = 1.0 + (sin(ph) - 1.0) * 0.16;                         // :1223,1227(c7.x)
+  vec3 scan = vec3(col.r * mx, col.g * my, col.b * mx);            // :1226-1228
+  gl_FragColor = vec4(mix(col.rgb, scan, uOpacity) * uTint, 1.0);  // :1230
+}`;
+
+const FRAGS: Record<ScreenFxPass['kind'], string> = {
+  FilterHeatDistortion: FRAG_HEAT,
+  FilterMiniTower: FRAG_MINITOWER,
+  FilterGraveyard: FRAG_GRAVEYARD,
+  FilterBloodMoon: FRAG_BLOODMOON,
+  FilterTest2: FRAG_TEST2,
+  FilterCRT: FRAG_CRT,
+};
+
+/** 各 pass 的 GLSL 源（测试锁字节码衍生常量用；键=ScreenShader.cso pass 名） */
+export const SCREEN_FX_FRAGS: Readonly<Record<string, string>> = FRAGS;
+
+/** 噪声贴图（Images/Misc/noise → public/sprites/vanilla/Misc_noise.png，256²） */
+let noiseImage: HTMLImageElement | null = null;
+let noisePixels: { w: number; h: number; data: Uint8ClampedArray } | null = null;
+function loadNoise(): HTMLImageElement | null {
+  if (noiseImage) return noiseImage;
+  if (typeof document === 'undefined') return null;
+  const im = new Image();
+  im.src = 'sprites/vanilla/Misc_noise.png';
+  noiseImage = im;
+  return im;
+}
+
+/** 噪声像素数据（2D 回退路径逐像素采样用；未就绪返回 null） */
+export function noiseData(): { w: number; h: number; data: Uint8ClampedArray } | null {
+  if (noisePixels) return noisePixels;
+  const im = noiseImage ?? loadNoise();
+  if (!im || !im.complete || im.naturalWidth === 0) return null;
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = im.naturalWidth; c.height = im.naturalHeight;
+  const cx = c.getContext('2d', { willReadFrequently: true })!;
+  cx.drawImage(im, 0, 0);
+  noisePixels = { w: c.width, h: c.height, data: cx.getImageData(0, 0, c.width, c.height).data };
+  return noisePixels;
+}
+
+export class GLScreenFilters {
+  readonly canvas: HTMLCanvasElement;
+  private gl: WebGLRenderingContext | null = null;
+  private progs = new Map<ScreenFxPass['kind'], { prog: WebGLProgram; uni: Record<string, WebGLUniformLocation | null> }>();
+  private texScreen: WebGLTexture | null = null;
+  private texNoise: WebGLTexture | null = null;
+  private noiseReady = false;
+  private noiseW = 256;
+  private noiseH = 256;
+  private staging: HTMLCanvasElement | null = null;
+  /** 上下文丢失/初始化失败时间戳(0=健在);调用方 5s 退避后可重建 */
+  diedAt = 0;
+  /** GL 永不可用——调用方直接走 2D 回退不再重建 */
+  unavailable = false;
+
+  constructor() {
+    this.canvas = document.createElement('canvas');
+    this.canvas.width = 0;
+    this.canvas.height = 0;
+    this.init();
+  }
+
+  dispose(): void {
+    const gl = this.gl;
+    if (gl && !gl.isContextLost()) {
+      gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+    this.gl = null;
+    this.progs.clear();
+  }
+
+  private init(): void {
+    const gl = (this.canvas.getContext('webgl2', {
+      alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
+      preserveDrawingBuffer: true,
+    }) || this.canvas.getContext('webgl', {
+      alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
+      preserveDrawingBuffer: true,
+    })) as WebGLRenderingContext | null;
+    if (!gl) { this.unavailable = true; this.diedAt = performance.now(); return; }
+    this.gl = gl;
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+    gl.disable(gl.BLEND);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    this.texScreen = gl.createTexture();
+    this.texNoise = gl.createTexture();
+    for (const t of [this.texScreen, this.texNoise]) {
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    }
+    // 噪声 POT 256² → REPEAT 合法（LinearWrap 同 ScreenShaderData.cs:175-178）
+    gl.bindTexture(gl.TEXTURE_2D, this.texNoise);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    loadNoise();
+  }
+
+  private program(kind: ScreenFxPass['kind']): { prog: WebGLProgram; uni: Record<string, WebGLUniformLocation | null> } | null {
+    const gl = this.gl!;
+    const hit = this.progs.get(kind);
+    if (hit) return hit;
+    const compile = (type: number, src: string): WebGLShader | null => {
+      const sh = gl.createShader(type)!;
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.warn(`[GLScreenFilters] ${kind} shader 编译失败:`, gl.getShaderInfoLog(sh));
+        return null;
+      }
+      return sh;
+    };
+    const vs = compile(gl.VERTEX_SHADER, VERT);
+    const fs = compile(gl.FRAGMENT_SHADER, FRAGS[kind]);
+    if (!vs || !fs) { this.unavailable = true; this.diedAt = performance.now(); return null; }
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      console.warn(`[GLScreenFilters] ${kind} 链接失败:`, gl.getProgramInfoLog(prog));
+      this.unavailable = true; this.diedAt = performance.now();
+      return null;
+    }
+    gl.useProgram(prog);
+    const loc = gl.getAttribLocation(prog, 'aPos');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const names = ['uScreen', 'uNoise', 'uTint', 'uScreenRes', 'uScreenPos', 'uNoiseRcp',
+      'uTimeScroll', 'uOffset', 'uColor', 'uOpacity', 'uIntensity', 'uProgress', 'uScreenH', 'uZoom'];
+    const uni: Record<string, WebGLUniformLocation | null> = {};
+    for (const n of names) uni[n] = gl.getUniformLocation(prog, n);
+    const entry = { prog, uni };
+    this.progs.set(kind, entry);
+    return entry;
+  }
+
+  /** 噪声纹理就绪（图未载入前 Heat pass 跳过——该帧无扭曲,渐入无感） */
+  private ensureNoise(): boolean {
+    const gl = this.gl!;
+    if (this.noiseReady) return true;
+    const im = noiseImage;
+    if (!im || !im.complete || im.naturalWidth === 0) return false;
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, this.texNoise);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    this.noiseW = im.naturalWidth;
+    this.noiseH = im.naturalHeight;
+    this.noiseReady = true;
+    return true;
+  }
+
+  /**
+   * 合成一条滤镜链（passes 按 EffectPriority 升序——FilterManager.EndCapture :136-176：
+   * 逐级把前级结果作为 s0 再滤；每级乘 ColorOfTheSkies）。结果写回 this.canvas，
+   * 调用方 ctx.drawImage(this.canvas, 0, 0)。
+   */
+  drawChain(source: HTMLCanvasElement, passes: readonly ScreenFxPass[],
+    tint: readonly [number, number, number]): boolean {
+    const gl = this.gl;
+    if (!gl || this.diedAt || this.unavailable || passes.length === 0) return false;
+    const w = source.width, h = source.height;
+    if (w === 0 || h === 0) return false;
+    const needNoise = passes.some((p) => p.kind === 'FilterHeatDistortion');
+    if (needNoise && !this.ensureNoise()) {
+      // 噪声未就绪：跳过 Heat pass 本帧（保持其余链）
+      passes = passes.filter((p) => p.kind !== 'FilterHeatDistortion');
+      if (passes.length === 0) return false;
+    }
+    if (this.canvas.width !== w || this.canvas.height !== h) {
+      this.canvas.width = w; this.canvas.height = h;
+    }
+    gl.viewport(0, 0, w, h);
+    let src = source;
+    for (let i = 0; i < passes.length; i++) {
+      const p = passes[i];
+      const entry = this.program(p.kind);
+      if (!entry) return false;
+      // 链式：第 0 级采主画布，之后采 staging（前级 GL 结果的拷贝）
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.texScreen);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
+      gl.useProgram(entry.prog);
+      const loc = gl.getAttribLocation(entry.prog, 'aPos');
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      gl.uniform1i(entry.uni.uScreen, 0);
+      if (p.kind === 'FilterHeatDistortion') {
+        gl.uniform1i(entry.uni.uNoise, 1);
+        gl.uniform2f(entry.uni.uScreenRes, p.screenRes[0], p.screenRes[1]);
+        gl.uniform2f(entry.uni.uScreenPos, p.screenPos[0], p.screenPos[1]);
+        gl.uniform2f(entry.uni.uNoiseRcp, 1 / this.noiseW, 1 / this.noiseH);
+        gl.uniform1f(entry.uni.uTimeScroll, 0.04 * p.time);
+        const s = p.intensity * p.opacity;
+        gl.uniform2f(entry.uni.uOffset, s / p.screenRes[0], s / p.screenRes[1]);
+      } else if (p.kind === 'FilterMiniTower') {
+        gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else if (p.kind === 'FilterGraveyard') {
+        gl.uniform1f(entry.uni.uIntensity, p.intensity);
+        gl.uniform1f(entry.uni.uProgress, p.progress);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else if (p.kind === 'FilterBloodMoon') {
+        gl.uniform3f(entry.uni.uColor, p.color[0], p.color[1], p.color[2]);
+        gl.uniform1f(entry.uni.uIntensity, p.intensity);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else if (p.kind === 'FilterTest2') {
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      } else {
+        gl.uniform1f(entry.uni.uScreenH, p.screenH);
+        gl.uniform1f(entry.uni.uZoom, p.zoom);
+        gl.uniform1f(entry.uni.uOpacity, p.opacity);
+      }
+      gl.uniform3f(entry.uni.uTint, tint[0], tint[1], tint[2]);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      if (gl.isContextLost()) { this.diedAt = performance.now(); return false; }
+      if (i + 1 < passes.length) {
+        // 前级结果拷入 staging 作下一级源（不能把渲染目标自身再绑为采样源）
+        if (!this.staging) this.staging = document.createElement('canvas');
+        if (this.staging.width !== w || this.staging.height !== h) {
+          this.staging.width = w; this.staging.height = h;
+        }
+        const sctx = this.staging.getContext('2d')!;
+        sctx.clearRect(0, 0, w, h);
+        sctx.drawImage(this.canvas, 0, 0);
+        src = this.staging;
+      }
+    }
+    return true;
+  }
+}

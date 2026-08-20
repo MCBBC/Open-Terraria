@@ -1,0 +1,21 @@
+import puppeteer from 'puppeteer-core';
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
+const page = await browser.newPage();
+await page.goto(process.env.SW_ORIGIN ?? 'http://localhost:5202', { waitUntil: 'networkidle0' });
+await page.evaluate(() => { const s = document.querySelector('select'); s.selectedIndex = 0; s.parentElement.querySelector('button').click(); });
+await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
+await new Promise((r) => setTimeout(r, 1000));
+await page.evaluate(() => {
+  const g = window.__swGame;
+  const st = g.world.store;
+  g.player.y = (st.h - 60) * 16; g.player.vy = 0;
+  for (let i = 0; i < 60; i++) g.fixedUpdate(1 / 60);
+});
+await new Promise((r) => setTimeout(r, 2000));
+await page.screenshot({ path: '/tmp/heat-on.png' });
+await page.evaluate(() => { const m = window.__swGame.renderer.monoFilters; m.heatOpacity = 0; m.heatIntensity = 0; });
+await new Promise((r) => setTimeout(r, 300));
+await page.screenshot({ path: '/tmp/heat-off.png' });
+await browser.close();
+console.log('shots saved');

@@ -15,6 +15,7 @@ import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import type { TileStore } from '../world/TileStore';
+import { TileStore as TileStoreRT } from '../world/TileStore';   // 运行时 SOLID_LUT（type-only import 会被剥）
 import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } from '../stats/InfoAccs';
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
@@ -365,17 +366,18 @@ export class Player extends Entity {
   dead = false;
   respawnTimer = 0;
   /** sunScorchCounter（Player.cs:2228）：吸血鬼种子"阳光炽灼"蓄能 0-300（每 tick
-   *  updateSunScorchValues 推进）。消费：耀斑强度 AdjustIntensity
+   *  updateSunScorchValues 推进；写入端 vampireSeedSunlightExposure 已接，见
+   *  updateSunScorch——非吸血鬼世界恒 0）。消费：耀斑强度 AdjustIntensity
    *  （NextHorizonRenderer.cs:398-406，SkyRenderer.drawLensFlare 经 frameCtx.player
-   *  透传读）与热浪扭曲门（SceneState.cs:122 flag7 / :187-191 强度 lerp×4——本仓
-   *  无 HeatDistortion 滤镜，未接）。★玩法链缺口：写入端 VampireSeedSunlightExposure
-   *  （:28191-28238）属 Main.vampireSeed 秘密种子链，本仓未移植 → counter 无路径 >0 */
+   *  透传读）、炽灼音环音量（updateSunScorchValues）、120 档点火链（updateSunScorch）
+   *  与热浪扭曲门（SceneState.cs:122 flag7 / :187-191 强度 lerp×4——本仓无
+   *  HeatDistortion 滤镜，登记） */
   sunScorchCounter = 0;
-  /** vampireBurningInSunlight（Player.cs:2676）：恒 false 接线位。原版唯一置 true 点
-   *  = VampireSeedSunlightExposure（:28228，vampireSeed 且露天白天自脚下向上扫 15 格
-   *  无墙）；清 false 点 ResetEffects(:18549)/死亡(:28103)——恒 false 等价覆盖。
-   *  连锁债（均未移植，登记）：Molten 套 buffImmune[24] 门(:15883)、死亡文案
-   *  ByOther(22)(:19187)、ArmorSetBonuses.cs:287 */
+  /** vampireBurningInSunlight（Player.cs:2676）：阳光暴露位。置 true =
+   *  vampireSeedSunlightExposure（:28228，vampireSeed 且露天白天自脚下向上扫 15 格
+   *  透光墙）；清 false = 帧首重置（ResetEffects :18549 等价位）/死亡(:28103)。
+   *  消费：counter 步进方向（±1/−6）、Molten 套 buffImmune[24] 门(:15883)、
+   *  死亡文案 ByOther(22)(:19187)、点火链门(:28153) */
   vampireBurningInSunlight = false;
   /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费）
    *  ——兼作散飞体渐隐（GetImmuneAlpha :53253：(255−值)/255，>125 直接全透明） */
@@ -703,6 +705,11 @@ export class Player extends Entity {
     k += inv.extraAccessory ? 'E' : 'e';
     k += this.usedGummyWorm ? 'G' : 'g';
     k += this.panicTime > 0 ? 'P' : 'p';
+    // 吸血鬼炽灼三态（computeEquipStats 读 vampireBurningInSunlight/sunScorchCounter：
+    // Molten buffImmune[24] 反门 :15883 + 120 档卸翅膀/火箭靴 :28186-28187——翻转帧
+    // 必须失效缓存，否则 Molten 玩家点火帧拿着旧免疫把 AddBuff(24) 挡掉）
+    k += this.vampireBurningInSunlight
+      ? (this.sunScorchCounter >= 120 ? 'S' : 'V') : 'v';
     for (const bt of this.buffs.active.keys()) k += bt + ',';
     return k;
   }
@@ -1054,6 +1061,9 @@ export class Player extends Entity {
       if (sb.solar) solarSet = true;
       if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
       if (sb.fireWalk) fireWalk = true;
+      // Molten 套 buffImmune[24] 门（Player.cs:15883 UpdateArmorSetsOld：裸 Molten
+      // 三件套免疫 On Fire!——★阳光炽灼中不免疫，:15882 vampireBurningInSunlight 反门）
+      if (sb.name === 'Molten' && !this.vampireBurningInSunlight) immuneBuffs.add(24);
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.anglerSet) anglerSetSpawnReduction = true;   // 渔夫套生成环（NPC.cs:627-630）
       if (sb.ammoCost80) ammoSaveDenom = ammoSaveDenom ? Math.min(ammoSaveDenom, 5) : 5;
@@ -1091,7 +1101,9 @@ export class Player extends Entity {
     const immuneDirty = immuneBuffs.size > 0
       || this.buffs.immuneVanilla.size > 0
       || this.buffs.has(BuffType.ObsidianSkin)
-      || this.buffs.has(BuffType.Wet);
+      || this.buffs.has(BuffType.Wet)
+      // Molten 套 24 免疫（Player.cs:15883）——炽灼翻转时也要失效重建（key 的 V 档）
+      || (sb?.name === 'Molten');
     if (immuneDirty) {
       this.buffs.immuneVanilla = new Set(immuneBuffs);
       if (this.buffs.has(BuffType.ObsidianSkin)) this.buffs.immuneVanilla.add(24);   // :9577
@@ -1102,6 +1114,14 @@ export class Player extends Entity {
         this.buffs.immuneVanilla.add(323);
         this.buffs.immuneVanilla.add(67);
       }
+    }
+    // 吸血鬼炽灼 120 档卸翅膀/火箭靴（Player.cs:28186-28187 wingsLogic=0;
+    // rocketBoots=0——原版在 UpdateEquips 后直清字段；本仓 wing/rocketBoots 出自本
+    // getter，等价实现 = 炽灼档（burning 且 counter≥120）下归零，equipStatsKey 的
+    // S/V/v 档保证翻转帧失效重算）
+    if (this.vampireBurningInSunlight && this.sunScorchCounter >= 120) {
+      wing = null;
+      rocketBoots = 0;
     }
     return {
       def, mana, hpPerSec: life / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）
@@ -1507,10 +1527,14 @@ export class Player extends Entity {
       // ——故不进 damage(),死亡原因仍是 ByOther 默认包
       const dot = this.buffs.consumeDotChunk();
       if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46', true);
-      // DoT 致死（:19142-19156）：suffocating→ByOther(7)；tongued 已在自身路径；其余一律
-      // Burned(8)——原版 else 分支不区分火/毒/流血（含炽热狱石/陨石的灼烧与着火）
-      if (this.hp <= 0) this.lastDamageCause = this.buffs.has(BuffType.Suffocation)
-        ? { kind: 'suffocated' } : { kind: 'burned' };
+      // DoT 致死（:19142-19156 + :19186-19201）：suffocating→ByOther(7)；tongued 已在
+      // 自身路径；其余按 :19187 链——vampireBurningInSunlight 优先 VampireBurningInDaylight
+      // ByOther(22)（吸血鬼种子日光灼死文案），再 poisoned/venom→9、electrified→10、
+      // 默认 Burned(8)（不区分火/毒/流血——含炽热狱石/陨石的灼烧与着火）
+      if (this.hp <= 0) this.lastDamageCause = this.vampireBurningInSunlight
+        ? { kind: 'vampire' }
+        : this.buffs.has(BuffType.Suffocation)
+          ? { kind: 'suffocated' } : { kind: 'burned' };
     }
     // 恐慌项链加速窗口倒计时
     if (this.panicTime > 0) this.panicTime -= dt;
@@ -1913,12 +1937,13 @@ export class Player extends Entity {
       } else {
         this.updateDeathParts(game);    // UpdateDead :16878-16888 翻滚解体
       }
-      this.updateSunScorchValues();     // UpdateDead 尾（Player.cs:16928）：死亡档衰减 −2
+      this.updateSunScorchValues(game);  // UpdateDead 尾（Player.cs:16928）：死亡档衰减 −2
       return;
     }
-    // UpdateSunScorch 调用点（Player.Update :25349，UpdateEquips(i) 后一行）——
-    // 本仓仅移植数值容器（见 updateSunScorchValues 注释的玩法链缺口清单）
-    this.updateSunScorchValues();
+    // UpdateSunScorch 调用点（Player.Update :25349，UpdateEquips(i) 后一行——
+    // 本仓 fixedUpdate 中段，先于下方首个 equipStats 读取，等价原版
+    // UpdateEquips→UpdateSunScorch→UpdateArmorSets 帧内序）
+    this.updateSunScorch(game);
 
     // 水平（敏捷 Buff 提速 + 装备移速（赫尔墨斯靴族 runSpeed/词缀 73-76）；蜂蜜比水更黏滞）
     const eqEarly = this.equipStats;
@@ -4913,15 +4938,56 @@ export class Player extends Entity {
     }
   }
 
-  /** UpdateSunScorchValues（Player.cs:28094-28106 一比一，仅数值容器）：常态档
-   *  counter += burning ? 1 : −6；死亡档（UpdateDead :16928 调用）burning 清 false、
-   *  衰减放缓为 −2；一律钳 0-300。
-   *  ★未移植段（登记）：①炽灼音环 :28107-28121（SoundID.VampireSizzle 循环,
-   *    Volume=GetLerpValue(0,120,counter)——counter 恒 0 时为死代码）；②UpdateSunScorch
-   *    :28144-28189 的 120 档点火链（清 buffImmune + VampireOnFire 粒子 + AddBuff
-   *    24/23/32 + 卸坐骑/清翅膀 + 成就 33 探头）；③写入端 VampireSeedSunlightExposure
-   *    :28191-28238——均依赖 Main.vampireSeed 秘密种子（本仓无该旗标）。 */
-  updateSunScorchValues(): void {
+  /** UpdateSunScorch（Player.cs:28144-28189 一比一）：暴露判定 → counter 推进 →
+   *  120 档点火链。原版 whoAmI==Main.myPlayer 门 = 本仓 Player 仅主角实例跑
+   *  fixedUpdate（联机代理不走本链）。非吸血鬼世界 vampireSeedSunlightExposure
+   *  直出 → burning 恒 false → counter 恒 0，链尾整段死代码 */
+  private updateSunScorch(game: GameHooks): void {
+    // BuffState.vampireSeed（Main.vampireSeed，Main.cs:327）——OnFire -50HP/s 特档
+    // （Player.cs:18798-18802）的开关；世界常量,每帧自 seedFlags 刷新
+    this.buffs.vampireSeed = !!game.world.seedFlags?.vampireSeed;
+    this.vampireSeedSunlightExposure(game);             // :28150
+    const prev = this.sunScorchCounter;                 // :28151（点火沿探测用）
+    this.updateSunScorchValues(game);                   // :28152
+    if (!this.vampireBurningInSunlight || this.sunScorchCounter < 120) return;   // :28153-28156
+    if (prev < 120) {                                   // :28157-28171 首越 120 档：
+      // PlayerFrame() 探头 head==124 && body==85 && legs==72（怪物套装视觉槽——
+      // 帧函数按 armor 槽序号重写 head/body/legs 后比对，本仓直接读等价的
+      // hs/bs/ls）→ AchievementsHelper.NotifyProgressionEvent(33) = FEAR_THE_SUN
+      const st0 = statOfInternal(this.inv.armor[0]?.id ?? -1);
+      const st1 = statOfInternal(this.inv.armor[1]?.id ?? -1);
+      const st2 = statOfInternal(this.inv.armor[2]?.id ?? -1);
+      if (st0?.hs === 124 && st1?.bs === 85 && st2?.ls === 72) {
+        game.achievements?.notifyProgressionEvent(33);
+      }
+    }
+    // Array.Clear(buffImmune)（:28168）：点火帧清全部免疫——黑曜石头骨/十字章盾族
+    //  当帧全部失效（原版下一帧 UpdateEquips 重建、再被本行清——本仓 immuneVanilla
+    //  随 equipStats 键失效重建，等价；见 equipStatsKey 的 S/V 档）
+    this.buffs.immuneVanilla.clear();
+    if (!this.buffs.has(BuffType.OnFire)) {             // :28170-28178 !onFire 才发
+      // ParticleOrchestrator VampireOnFire（:28178）= Spawn_VampireOnFire
+      // （ParticleOrchestrator.cs:2352-2355）——仅播 SoundID.Item20，无粒子体
+      game.playSfxWav?.('Item_20', 1, this.cx, this.y + this.h / 2);
+    }
+    // AddBuff 24/23/32 各 3【tick】= 0.05s（:28179-28181，AddBuff time 参为帧——
+    // 每帧续期；24 OnFire/23 Cursed/32 Slow）
+    this.buffs.apply(BuffType.OnFire, 3 / 60);
+    this.buffs.apply(BuffType.Cursed, 3 / 60);
+    this.buffs.apply(BuffType.Slow, 3 / 60);
+    if (this.mount.active) this.mount.tryDismount(this);   // :28182-28185 mount.TryDismount
+    // wingsLogic = 0; rocketBoots = 0（:28186-28187）——本仓 wing/rocketBoots 出自
+    // equipStats（缓存键含炽灼档，见 computeEquipStats 尾部 S 档），本行无需直写
+  }
+
+  /** UpdateSunScorchValues（Player.cs:28094-28106 逐式 + :28107-28121 炽灼音环）：
+   *  常态档 counter += burning ? 1 : −6；死亡档（UpdateDead :16928 调用）burning
+   *  清 false、衰减放缓为 −2；一律钳 0-300。音环 = SoundID.VampireSizzle
+   *  （CreateTrackable("sizzle").WithVolume(1)，SoundID.cs:1039——public/sounds/
+   *  sizzle.wav 在库）：lerp = GetLerpValue(0,120,counter) 起轨并每帧跟随；
+   *  loopingCondition（VampireSizzleTracker.IsActiveAndInGame = !gameMenu &&
+   *  vampireSeed && counter>0）≈ counter 归零拆轨 */
+  updateSunScorchValues(game?: GameHooks): void {
     let num = 6;                                        // :28100
     if (this.dead) {                                    // :28101-28105
       this.vampireBurningInSunlight = false;
@@ -4929,6 +4995,100 @@ export class Player extends Entity {
     }
     this.sunScorchCounter = Math.max(0, Math.min(300,   // :28106 Clamp(±, 0, 300)
       this.sunScorchCounter + (this.vampireBurningInSunlight ? 1 : -num)));
+    // ---- :28107-28121 炽灼音环（SoundEngine.PlayTrackedLoopedSound + 每帧
+    //      Volume/Position 更新；本仓常驻循环轨 playLoopFile + setVolume 同构） ----
+    const lerpValue = Math.max(0, Math.min(1, this.sunScorchCounter / 120));   // GetLerpValue(0,120,·,true)
+    if (!this._sizzleLoop && !this._sizzleFailed && lerpValue !== 0 && game?.startLoopSfx) {
+      this._sizzleLoop = game.startLoopSfx('sizzle', lerpValue, 1);           // :28109-28115
+      if (!this._sizzleLoop) this._sizzleFailed = true;   // 无钩子/无素材：本实例不再重试
+    }
+    if (this._sizzleLoop) {
+      if (this._sizzleLoop.dead) {                       // 终态（stop/加载失败）拆轨
+        if (!this._sizzleLoop.playing) this._sizzleFailed = true;  // 起振前死=加载失败，不再重建
+        this._sizzleLoop.stop();
+        this._sizzleLoop = null;
+      } else if (this.sunScorchCounter <= 0) {           // counter 归零（条件出）拆轨
+        this._sizzleLoop.stop();
+        this._sizzleLoop = null;
+      } else {
+        this._sizzleLoop.setVolume(lerpValue);           // :28118 activeSound.Volume
+      }
+    }
+  }
+
+  /** 炽灼音环句柄（SfxLoop 同构面；Game.destroy/退世界拆轨用——防菜单残留） */
+  private _sizzleLoop: {
+    stop(): void; setVolume(v: number): void;
+    readonly playing: boolean; readonly dead: boolean;
+  } | null = null;
+  private _sizzleFailed = false;
+  /** 拆炽灼音环（Game.destroy → 本体调；Player 实例弃用前必经） */
+  stopSizzleLoop(): void {
+    this._sizzleLoop?.stop();
+    this._sizzleLoop = null;
+  }
+
+  /** VampireSeedSunlightExposure（Player.cs:28191-28238 逐式）：吸血鬼种子世界
+   *  的阳光暴露判定——地表 + 白天 + 无雨/日食/墓园/蘑菇地 + 月总天幕强度 ≤0.5 +
+   *  不在水里 + 未持遮阳物（雨伞 946/悲剧之伞 4707）+ 非蝙蝠坐骑（56），则自脚下
+   *  向上扫 ≤15 格找"透光墙"（无墙/玻璃 21/回声墙 318）→ vampireBurningInSunlight */
+  private vampireSeedSunlightExposure(game: GameHooks): void {
+    const w = game.world;
+    const num = Math.floor(this.cx / 16);               // :28192 (int)Center.X/16
+    let num2 = Math.floor((this.y + this.h - 1) / 16);  // :28193 (int)(Bottom.Y-1)/16
+    // 帧首清位（ResetEffects :18549 vampireBurningInSunlight=false 的等价位——
+    // 原版在 Player.Update 开头清、本链末尾置，本仓两步并到本函数首行）
+    this.vampireBurningInSunlight = false;
+    if (!w.seedFlags?.vampireSeed) return;              // :28195-28198 !Main.vampireSeed
+    const num3 = 0.5;                                   // :28199
+    // :28200 白天/露天六门（worldSurface 为 tile 行；ZoneGraveyard/ZoneGlowshroom
+    // 来自 SceneMetrics——本仓 game.scene 每 15t 以玩家为中心刷新）
+    const scene = game.scene;
+    let flag = num2 < w.groundLevel && w.clock.isDay && !w.weather.raining
+      && !w.clock.eclipse && !scene?.zoneGraveyard && !scene?.zoneGlowshroom;
+    // :28201-28204 月总天幕（SceneMetrics.MoonLordSkyIntensity = 1−SmoothStep(3000,
+    // 6000,距核)，SceneMetrics.cs:297-305；>0.5 → 距核<4500 → 天被月总遮黑不灼）
+    if (flag) {
+      let ml: { cx: number; cy: number } | null = null;
+      for (const e of game.enemies()) {
+        const en = e as { vanillaId?: number | null; cx?: number; cy?: number };
+        if (en?.vanillaId === 398) { ml = { cx: en.cx ?? 0, cy: en.cy ?? 0 }; break; }
+      }
+      if (ml) {
+        const d = Math.hypot(this.cx - ml.cx, this.cy - ml.cy);
+        if (1 - Math.max(0, Math.min(1, (d - 3000) / 3000)) > num3) flag = false;
+      }
+    }
+    if (!flag || this.inWater) return;                  // :28206-28209（wet 判定 = 水；
+    //  原版 wet 不含岩浆/蜂蜜——本仓 inWater 同口径，见 :1673 注释）
+    const heldVid = this.heldVid();                     // :28210 遮阳物二选一
+    let flag2 = heldVid === 946 || heldVid === 4707;    // Umbrella/Tragic Umbrella
+    if (this.mount.active && this.mount.type === 56) flag2 = false;   // :28211-28213 蝙蝠坐骑上伞失效
+    if (flag2) return;                                  // :28214-28216 持伞免灼
+    // ---- :28217-28238 自脚下向上 15 格透光墙扫描 ----
+    const st = w.store;
+    let num4 = 15;
+    while (num4 > 0) {
+      if (!st.inBounds(num, num2)) break;               // :28221 tile==null ≈ 出界
+      const wi = st.idx(num, num2);
+      const wall = st.wall[wi];
+      const type = st.type[wi];
+      const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
+      // 透光墙：无墙 0 / 玻璃 21 / 回声墙 318（回声涂层 invisibleWall 系统未建恒
+      // false，:28225 末项化简掉——登记见 world/Paint.ts:129）
+      if (wall === 0 || wall === 21 || wall === 318) {
+        this.vampireBurningInSunlight = true;           // :28228
+        break;
+      }
+      num4--;                                           // :28231
+      num2--;                                           // :28232
+      // :28233-28237 上方一格 SolidTile3 且本格非沙(54)/回声块(541) → 屋顶，停扫
+      // （tile.* 读的是本格（自减前），SolidTile3 读的是上一格——照抄原版结构）
+      const above = st.inBounds(num, num2)
+        ? st.isActive(num, num2) && TileStoreRT.SOLID_LUT[st.type[st.idx(num, num2)]] === 1
+        : false;
+      if (above && sheet !== 54 && sheet !== 541) break;
+    }
   }
 
   /** boss 存活在场（GetRespawnTime :38388-38398 扫描结果——Game 死亡分支每帧写入；

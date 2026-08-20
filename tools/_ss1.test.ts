@@ -119,6 +119,7 @@ function diffStore(idx: number, st: TileStore): Row {
   const slug = SLOT === 'traps' ? 'trapsIn' : 'grassIn';
   const goldIdx = SLOT === 'traps' ? 76 : 79;
   const snap = loadSnap(`${BDIR}/${slug}`);
+  (globalThis as { __ssGwLog?: string[] }).__ssGwLog = [];
   restoreGenSolid(new Map(snap.gensolid));
   const log: string[] = [];
   __setSsLog(log);
@@ -132,7 +133,20 @@ function diffStore(idx: number, st: TileStore): Row {
   else runGrassWallPass(snap.st, rng, snap.gs);
   __setSsLog(null);
   writeFileSync(`${BDIR}/${SLOT}.log`, log.join('\n'));
+  const gwlog = (globalThis as { __ssGwLog?: string[] }).__ssGwLog ?? [];
+  if (gwlog.length) writeFileSync(`${BDIR}/${SLOT}.gw.log`, gwlog.join('\n'));
+  (globalThis as { __ssGwLog?: string[] }).__ssGwLog = undefined;
   const r = diffStore(goldIdx, snap.st);
+  if (process.env.SW_SS_CELLS) {
+    const le16 = (p: string) => { const b = readFileSync(p); return new Uint16Array(b.buffer.slice(0)); };
+    const gw = le16(gPath(goldIdx, 'wal')), gt = le16(gPath(goldIdx, 'typ'));
+    const cells: string[] = [];
+    for (let i = 0; i < N; i++) {
+      if (gw[i] !== snap.st.wall[i] || gt[i] !== SHEET[snap.st.type[i]!]) cells.push(`${i % W},${(i / W) | 0} w${gw[i]}>${snap.st.wall[i]} t${gt[i]}>${SHEET[snap.st.type[i]!] ?? -1}`);
+    }
+    writeFileSync(process.env.SW_SS_CELLS, cells.join('\n'));
+    console.log(`  cells file: ${cells.length} -> ${process.env.SW_SS_CELLS}`);
+  }
   const bad = r.dA || r.dT || r.dW || r.dL || r.dHf || r.dSl || r.dLt || r.dIa;
   console.log(`${SLOT} vs golden ${String(goldIdx).padStart(3)} ${DUMPNAME.get(goldIdx)}: ${bad ? '✗ ' + r.first : '✓ 全零'}`);
   console.log(`  A=${r.dA} T=${r.dT} W=${r.dW} L=${r.dL} Hf=${r.dHf} Sl=${r.dSl} Lt=${r.dLt} Ia=${r.dIa}`);
