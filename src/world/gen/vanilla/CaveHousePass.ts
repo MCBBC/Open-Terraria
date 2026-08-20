@@ -1252,6 +1252,9 @@ function placeStairs(st: TileStore, rng: RNG, rooms: Rect[], def: ThemeDef): voi
     else from = { x: cur.x, y: cur.y + 1 };
     const steps = (cur.y + cur.h - 1) - from.y;
     const dir = leftGap > rightGap ? -1 : 1;
+    // ★AAAAAA 备案：梯步连接帧依赖 vanilla ModShapes.All 对 HashSet<Point16> 的
+    //   枚举序（非插入序也非倒序——底/顶两向试验 984/970 格均不合）。UUUU 剑冢
+    //   HashSet 枚举序同款备案；梯步 fx 帧残差在案（八通道零影响）。
     for (let s = 0; s < steps; s++) {
       const sx = from.x + dir * (s + 1), sy = from.y + s;
       if (!st.inBounds(sx, sy)) continue;

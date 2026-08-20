@@ -363,7 +363,7 @@ import { runOasisPass } from './vanilla/OasisPass';
 import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
 import { runTileCleanupPass, sheetId } from './vanilla/TileCleanupPass';
 import { runBrokenTrapCleanupPass } from './vanilla/BrokenTrapCleanupPass';
-import { runFinalCleanupPass } from './vanilla/FinalCleanupPass';
+import { runFinalCleanupPass, genSquareTileFrame } from './vanilla/FinalCleanupPass';
 import { runMultitileFragmentSweepPass } from './vanilla/MultitileFragmentSweep';
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
@@ -1888,6 +1888,9 @@ function vampireSeedFinishPass(ctx: GenCtx): void {
       else if (isNearby(tx, ty, 25, 25)) style = 18;
       else if (isNearby(tx, ty, 203, 25)) style = 19;
       st.setTileSilent(tx, ty, TORCH, 0, style * 22);
+      // ★AAAAAA：PlaceTile(4) 成功尾 SquareTileFrame（cs:60281）→ CheckTorch 附着向
+      //   fx（地板0/左22/右44/墙0；曾恒 0 = s4 帧债主源）。
+      genSquareTileFrame(st, rng, tx, ty);
     } else {
       i--;   // cs:25268 命中实格不消耗次数
     }

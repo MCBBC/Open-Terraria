@@ -10482,16 +10482,41 @@ export class Renderer {
         return;
       }
       const mctx = this.lightMaskCtxLayer;
+      // ★CPU 逐像素精确乘（2026-08-20 史莱姆浊暗终案：Canvas multiply 三步法对
+      //   半透明像素留 (1-αd)·光 洗色——PDF 混合的 Cs 项无法在 Canvas 2D 消去。
+      //   光照数组与 lightCanvas 同源（4-tap 双线性），直接在 worldCanvas 像素上
+      //   乘：out.rgb=rgb×光、α 原样（原版顶点色语义，与 GL 路径逐位一致）。
+      //   ~1.3M px 全屏 ×4-tap ≈ 8-15ms/帧——仅 GL 不可用回退时承受）
+      const wimg = this.worldCtxLayer!.getImageData(0, 0, viewW, viewH);
+      const wd = wimg.data;
+      const lxRatio = w2 / (tilesX * ts * z), lyRatio = h2 / (tilesY * ts * z);
+      for (let py = 0; py < viewH; py++) {
+        let ly = (py - sy) * lyRatio;
+        if (ly < 0) ly = 0; else if (ly > h2 - 1) ly = h2 - 1;
+        const lyi = ly | 0;
+        const lyj = Math.min(h2 - 1, lyi + 1), fy = ly - lyi;
+        for (let px = 0; px < viewW; px++) {
+          const i = (py * viewW + px) * 4;
+          const a = wd[i + 3];
+          if (a === 0) continue;                     // 纯透明区不乘（rgb 无意义）
+          let lx = (px - sx) * lxRatio;
+          if (lx < 0) lx = 0; else if (lx > w2 - 1) lx = w2 - 1;
+          const lxi = lx | 0;
+          const lxj = Math.min(w2 - 1, lxi + 1), fx2 = lx - lxi;
+          const o00 = (lyi * w2 + lxi) * 4, o10 = (lyi * w2 + lxj) * 4;
+          const o01 = (lyj * w2 + lxi) * 4, o11 = (lyj * w2 + lxj) * 4;
+          const w00 = (1 - fx2) * (1 - fy), w10 = fx2 * (1 - fy);
+          const w01 = (1 - fx2) * fy, w11 = fx2 * fy;
+          for (let c = 0; c < 3; c++) {
+            const l = img.data[o00 + c] * w00 + img.data[o10 + c] * w10
+              + img.data[o01 + c] * w01 + img.data[o11 + c] * w11;
+            wd[i + c] = Math.min(255, (wd[i + c] * l) / 255);
+          }
+        }
+      }
       mctx.setTransform(1, 0, 0, 1, 0, 0);
       mctx.globalCompositeOperation = 'source-over';
-      mctx.clearRect(0, 0, viewW, viewH);
-      mctx.imageSmoothingEnabled = true;
-      mctx.drawImage(this.worldCanvas!, 0, 0);              // ① 世界层副本(含 α)
-      mctx.globalCompositeOperation = 'multiply';
-      mctx.drawImage(this.lightCanvas, sx, sy, lw, lh);     // ② 全 α 光照乘色
-      mctx.globalCompositeOperation = 'destination-in';
-      mctx.drawImage(this.worldCanvas!, 0, 0);              // ③ 精确恢复 α
-      mctx.globalCompositeOperation = 'source-over';
+      mctx.putImageData(wimg, 0, 0);
       this.ctx.drawImage(this.lightMaskCanvas!, 0, 0);
       return;
     }

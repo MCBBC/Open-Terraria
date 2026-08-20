@@ -8,7 +8,6 @@
 import { describe, it, expect } from 'vitest';
 import { hitTownNpcs } from '../src/entities/projTargets';
 import { TownNPC } from '../src/entities/TownNPC';
-import { Inventory } from '../src/items/Inventory';
 import { World } from '../src/world/World';
 import { Game } from '../src/core/Game';
 import { TILE } from '../src/core/constants';
@@ -30,7 +29,7 @@ function hooks(npcs: TownNPC[], killGuide = false, killClothier = false): GameHo
 }
 
 function npcAt(key: string, tx = 10, ty = 10): TownNPC {
-  return new TownNPC(key, tx * TILE, ty * TILE, new Inventory());
+  return new TownNPC(key, tx * TILE, ty * TILE);   // 构造签名 3 参(Inventory 已内置)
 }
 
 /** 与 NPC 实际盒重叠的弹（勿按构造传入 y 定位） */
@@ -89,6 +88,7 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
     g.playSfxFiles = () => {};
     g.net = undefined;
     g.remotePlayerProxies = [];
+    (g as unknown as { scene: unknown }).scene = {};   // dropContext 读 zone 旗标(M11 后)
     g.player = {
       cx: -9999, cy: -9999, w: 12, h: 28, dead: true, hp: 100, maxHp: 100,
       equipStats: { killGuide, killClothier: false },
@@ -101,7 +101,7 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
     const guide = npcAt('guide', 10, 10);
     const g = shell([guide], false);
     const [ex, ey] = tileOf(guide);
-    g['explodeAt'](ex, ey, 100, 0, false, 64, 0, 28);
+    (g as unknown as { explodeAt: (...a: unknown[]) => void }).explodeAt(ex, ey, 100, 0, false, 64, 0, 28);
     expect(guide.hp).toBe(guide.maxHp);
   });
 
@@ -109,7 +109,7 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
     const guide = npcAt('guide', 10, 10);
     const g = shell([guide], true);
     const [ex, ey] = tileOf(guide);
-    g['explodeAt'](ex, ey, 1000, 0, false, 64, 0, 28);
+    (g as unknown as { explodeAt: (...a: unknown[]) => void }).explodeAt(ex, ey, 1000, 0, false, 64, 0, 28);
     expect(guide.hp).toBeLessThan(guide.maxHp);
   });
 
@@ -118,7 +118,7 @@ describe('explodeAt 爆炸对城镇 NPC（同巫毒门）', () => {
     const merch = npcAt('merchant', 11, 10);
     const g = shell([guide, merch], true);
     const [ex, ey] = tileOf(guide);
-    g['explodeAt'](ex, ey, 5000, 0, false, 96, 0, 28);
+    (g as unknown as { explodeAt: (...a: unknown[]) => void }).explodeAt(ex, ey, 5000, 0, false, 96, 0, 28);
     expect(merch.hp).toBe(merch.maxHp);
   });
 });

@@ -769,6 +769,27 @@ export function drawLiquidBehindTilesOnly(
       let fR = Rq > 0 && !slopeBlocksRight;
       const fU = Uq > 0 && !slopeBlocksUp;
       let fD = Dq > 240 && !slopeBlocksDown;
+      // ★半砖邻格的"视觉水"计入侧向旗(2026-08-20 用户终验三轮定谳):半砖格自身
+      //   liquid 恒 0(原版 UpdateLiquid 下灌门 Liquid.cs:568 同样挡半砖格,两版一致;
+      //   本世界 4004 个"上格有水半砖格"全 dry、0 个含液),但其上格有液时液体渲染
+      //   器按 IsHalfBrick 强制满格画水(LiquidRenderer.cs:193-230/:121)——邻格上半
+      //   8px 视觉上是水。本格与其相接的侧缘(D1 半砖接缝补丁 (144,0,4,8) 的设计
+      //   透明角等)由此包水:侧旗放行 → 与上水并存时走默认整格带 (0,4,16,16),
+      //   接缝透明角透出水色——用户实测原版观感"半透明水色"而非透视差背景。
+      //   原版 band 门读 tile.liquid 原始值(此构型为 0);本扩展改读"视觉液位",
+      //   【登记为定性偏差】(液位取 255——IsHalfBrick 视觉恒满格,与上格实际液位
+      //   无关;带画在贴图之后仅透过透明像素可见,越界部分被贴图遮挡无副作用)。
+      if (!fL || !fR) {
+        const halfNbVisualWater = (dx: number): boolean => {
+          const nx = x + dx;
+          if (!st.inBounds(nx, y) || !st.inBounds(nx, y - 1)) return false;
+          const ni = st.idx(nx, y);
+          if (!st.flags[ni] || !st.half[ni] || TILE_DEFS[st.type[ni]]?.platform) return false;
+          return st.liquid[st.idx(nx, y - 1)] > 0;
+        };
+        if (!fL && halfNbVisualWater(-1)) { fL = true; Lq = 255; }
+        if (!fR && halfNbVisualWater(1)) { fR = true; Rq = 255; }
+      }
       // ★flag5 自身格液体(:3943-3963,2026-08-19 用户实报"半格方块浸润未处理"):
       //   半砖/坡面格【自己格内】的液体也画浸润(半砖需 >160)——本格既是容器
       //   又是方块,水搁在半砖上时原版从本格取液位画带,旧实现只读四邻 = 整类缺失

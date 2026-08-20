@@ -47,7 +47,10 @@ export class Camera {
   /** 每帧渲染前调用：ApplyTo(cameraPosition)（Main.cs:62091）——本帧全部修饰器
    *  合成位移写入 punchX/punchY，worldToScreen 统一叠加；屏幕尺寸按当前视野/zoom 折算 */
   tickPunch(): void {
-    const off = this.modifiers.applyTo(this.x, this.y, this.viewW / this.zoom, this.viewH / this.zoom);
+    // ★复审 R3 P2:原版 OriginalCameraCenter = 视口左上+屏尺寸/2 = 视口中心;
+    //   Camera.x/y 本就是视口中心 → 传 0 屏尺寸即以中心为基准(曾再叠加半屏
+    //   → 鹿角怪震屏距离衰减象限不对称+偏弱)
+    const off = this.modifiers.applyTo(this.x, this.y, 0, 0);
     this.punchX = off.x;
     this.punchY = off.y;
   }

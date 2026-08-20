@@ -4799,6 +4799,15 @@ export class Player extends Entity {
       const s = this.inv.armor[i];
       if (s) see(vanillaIdOfItem(s.id));
     }
+    // 虚空袋扫描(Player.cs:12525-12535):背包持有 4131 虚空透镜时 bank4 逐槽
+    // WorksInVoidBag(默认全真,SetFactory.cs:97-107 仅两只海螺除外)→ 袋内四叶草
+    // 同样置旗——复审 R1 P2(曾漏,袋内 5574 少 +0.03)
+    const hasVoidLens = this.inv.slots.some((s) => s && vanillaIdOfItem(s.id) === 4131);
+    if (hasVoidLens && this.banks[4]) {
+      for (const s of this.banks[4]) {
+        if (s) see(vanillaIdOfItem(s.id));
+      }
+    }
     if (clover) b += 0.03;                             // :12628 hasLuck_LuckyClover
     if (wilted) b -= 0.1;                              // :12632-12635 hasLuck_WiltedClover
     if (raven) b -= 0.1;                               // :12636-12639 hasLuck_RavenFeather

@@ -1645,20 +1645,25 @@ function placeMossSprout(st: TileStore, rng: RNG, x: number, y: number): void {
   let placed = false;
   if (mossAdj(-1, 0) || mossAdj(1, 0) || mossAdj(0, -1) || mossAdj(0, 1)) {
     st.setTileSilent(x, y, MOSS_SPROUT, 0, rng.int(0, 2) * 18);         // frameX = style*18 = 0
+    // 门内尾帧（cs:59736）——AAAAAA 与成功尾帧各自独立
+    genSquareTileFrame(st, rng, x, y);
     placed = true;
   }
   if (brickAdj(-1, 0) || brickAdj(1, 0) || brickAdj(0, -1) || brickAdj(0, 1)) {
     st.setTileSilent(x, y, MOSS_SPROUT, 0, rng.int(0, 2) * 18);
+    genSquareTileFrame(st, rng, x, y);                                  // cs:59743
     placed = true;
   }
-  // ★YYYYY：PlaceTile(184) 尾 SquareTileFrame（cs:60285）改走引擎全分派——九宫内
-  //   非活跃格 head-clear（m #94 (3436,618) 残 slope2 清除实证）+ 邻格 184 逐格
-  //   Next(3) 重帧（中心 1 掷与 tileFrame184(self) 同流位）。
+  // ★AAAAAA：PlaceTile 通用成功尾（cs:60281 `if (tile.active()) SquareTileFrame`）——
+  //   每次成功放置在门内 STF 之外**再跑一遍**九宫扫（中心 184 再掷 1 + 邻格 184/165
+  //   重帧掷）。曾单 STF 模型（YYYYY）→ m 链 pass94 掷数 86,781 vs vanilla 142,033
+  //   （差额 55,252 ≈ 31,325 放置 × 尾扫 1.77 掷）——LongMoss 掷缺口唯一源。
   if (placed) genSquareTileFrame(st, rng, x, y);
 }
 
 /** LongMoss pass（cs:20915-20961）1:1：苔藓块四向冒芽 */
 export function runLongMossPass(st: TileStore, rng: RNG, _gs: GenState): void {
+  const cap = (globalThis as { __swLmCap?: (x: number, y: number) => void }).__swLmCap;
   for (let i = 5; i < st.w - 5; i++) {
     for (let j = 5; j < st.h - 5; j++) {
       if (!activeAt(st, i, j)) continue;
@@ -1666,7 +1671,10 @@ export function runLongMossPass(st: TileStore, rng: RNG, _gs: GenState): void {
       for (let k = 0; k < 4; k++) {
         const nx = k === 0 ? i - 1 : k === 1 ? i + 1 : i;
         const ny = k === 2 ? j - 1 : k === 3 ? j + 1 : j;
-        if (!activeAt(st, nx, ny)) placeMossSprout(st, rng, nx, ny);
+        if (!activeAt(st, nx, ny)) {
+          if (cap) cap(nx, ny);
+          placeMossSprout(st, rng, nx, ny);
+        }
       }
     }
   }

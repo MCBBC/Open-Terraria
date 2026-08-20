@@ -183,9 +183,14 @@ export class RemasterRuntime {
       restored.push(file);
       this.appliedFiles = this.appliedFiles.filter((f) => f !== file);
     }));
-    // 清 buff 覆盖
-    for (const url of this.buffIcons.values()) URL.revokeObjectURL(url);
-    this.buffIcons.clear();
+    // 清 buff 覆盖——★只清本次恢复文件对应的键(曾全量 clear:本 runtime 与素材
+    //   重制包共享,禁用任一资源包会把重制包仍在用的 Buff 图一并干掉——复审 R3 P2)
+    for (const f of list) {
+      const bm = BUFF_RE.exec(f);
+      if (!bm) continue;
+      const url = this.buffIcons.get(Number(bm[1]));
+      if (url) { URL.revokeObjectURL(url); this.buffIcons.delete(Number(bm[1])); }
+    }
     // tile/wall 重烘
     for (const f of restored) if (TILE_WALL_RE.test(f)) this.onSheetReplaced?.(f);
     if (restored.length) {

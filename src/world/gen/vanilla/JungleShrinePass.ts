@@ -4,6 +4,7 @@
 // 与蜂巢墙(86/87);jungleHut 每世界五选一 [119,120,158,175,45]→墙 [23,24,42,45,10];
 // 实体壳 + 空腔(墙) + 腔内火把(样式3) + 底部入口 + 泥地基 + 金字塔顶;
 // 神龛中心记录 → 常春藤宝箱(style 10,主件序 GetNextJungleChestItem)。
+import { genSquareTileFrame } from './FinalCleanupPass';
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -114,6 +115,8 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
         const ty = rng.int(y - halfH, y + halfH - 3);
         if (!st.flags[st.idx(tx, ty)]) {
           st.setTileSilent(tx, ty, TORCH, 0, 3 * 22);
+          // ★AAAAAA：PlaceTile(4) 成功尾 SquareTileFrame → CheckTorch 附着向 fx
+          genSquareTileFrame(st, rng, tx, ty);
           break;
         }
       }

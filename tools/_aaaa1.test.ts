@@ -14,22 +14,24 @@ import type { GenState } from '../src/world/gen/vanilla/GenState';
 
 const MODE = process.env.SW_A1 ?? '';
 const DIR = process.env.SW_A1_DIR ?? '/tmp/aaaaaa-929';
-const W = 4200, H = 1200, N = W * H;
-const SEED = 9293480;
+const W = Number(process.env.SW_A1_W ?? 4200), H = Number(process.env.SW_A1_H ?? 1200), N = W * H;
+const SEED = Number(process.env.SW_A1_SEED ?? 9293480);
+const EVILN = Number(process.env.SW_A1_EVIL ?? 0);
+const GOLD_WIRE = process.env.SW_A1_GW ?? '/tmp/tttt-frw/101_Micro_Biomes.wire';
+const GOLD_FR = process.env.SW_A1_GF2 ?? '/tmp/tttt-fr/101_Micro_Biomes.fr';
+const GOLD_CHEST = process.env.SW_A1_GC ?? '/tmp/tttt-fr/101_Micro_Biomes.chest.tsv';
+const GOLD_G2 = process.env.SW_A1_G2 ?? '/tmp/sw-slp/g';
 
 const SHEET = new Int32Array(TILE_DEFS.length).fill(-1);
 for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number') SHEET[i] = s; }
 
-const GOLD_WIRE = '/tmp/tttt-frw/101_Micro_Biomes.wire';
-const GOLD_FR = '/tmp/tttt-fr/101_Micro_Biomes.fr';
-const GOLD_CHEST = '/tmp/tttt-fr/101_Micro_Biomes.chest.tsv';
 
 (MODE !== '' ? it : it.skip)('aaaa1 slot52 capture / channel diff', async () => {
   mkdirSync(DIR, { recursive: true });
   if (MODE === 'cap') {
     let done = false;
     await generateWorld({
-      width: W, height: H, seedText: String(SEED), evil: 0 as 0 | 1,
+      width: W, height: H, seedText: String(SEED), evil: EVILN as 0 | 1,
       onWorldPartial: (w, i, name) => {
         if (done || name !== '蜥蜴祭坛') return;
         done = true;
@@ -52,7 +54,7 @@ const GOLD_CHEST = '/tmp/tttt-fr/101_Micro_Biomes.chest.tsv';
   // rep 模式：新捕基座 → runMicroBiomesPass → 对拍 dump101（8 通道）。
   // SW_A1_GF=1 → 入口注入金标帧（对照：JS 帧的残差=帧债成分）。
   if (MODE === 'rep') {
-    const G2 = '/tmp/sw-slp/g';
+    const G2 = GOLD_G2;
     const st = new TileStore(W, H);
     const ld = (n: string) => new Uint8Array(readFileSync(`${DIR}/${n}`).buffer.slice(0));
     const ld16 = (n: string) => new Uint16Array(readFileSync(`${DIR}/${n}`).buffer.slice(0));
@@ -144,6 +146,7 @@ const GOLD_CHEST = '/tmp/tttt-fr/101_Micro_Biomes.chest.tsv';
       console.log(lines.join('\n'));
     }
     const DUMP = process.env.SW_A1_DUMP ?? '101_Micro_Biomes';
+      void G2;
     const rd = (e: string) => new Uint8Array(readFileSync(`${G2}/${DUMP}.${e}`).buffer.slice(0));
     const rd16 = (e: string) => new Uint16Array(readFileSync(`${G2}/${DUMP}.${e}`).buffer.slice(0));
     const c = { t: rd16('typ'), a: rd('act'), w: rd16('wal'), l: rd('liq'), hf: rd('half'), sl: rd('slope'), lt: rd('lty'), ia: rd('inact') };

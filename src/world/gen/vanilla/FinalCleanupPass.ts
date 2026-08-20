@@ -665,6 +665,7 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     return true;
   }
   switch (sheet) {
+    case 4: checkTorchSweep(st, ctx, x, y); return true;    // AAAAAA：CheckTorch（TileID.Sets.Torches={4}）
     case 518: checkLilyPadSweep(st, ctx, x, y); return true;
     case 519: checkCatTailSweep(st, ctx, x, y); return true;
     case 549: checkSeaweedSweep(st, ctx, x, y); return true;
@@ -744,9 +745,18 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
       checkTreeSweep(st, ctx, x, y);
       return true;
     // YYYYY 批补：596/616 观赏树（CheckTreeWithSettings·Vanity cs:54430）——m #90
-    //   花圃 15 格 616 整树坍塌实证。583-589/634（Gem/Ash 树）未实证不派发（备案）。
+    //   花圃 15 格 616 整树坍塌实证。
     case 596: case 616:
       checkTreeSweep(st, ctx, x, y, true);
+      return true;
+    // ★AAAAAA：583-589/634（Gem/Ash 树，cs:86627-86652）——genRangeFrame 尾扫
+    //   （GrowTreeWithSettings cs:30999）与 #105 终扫的 CheckTreeWithSettings 重帧
+    //   此前缺派发（s634 18 格帧债：灰烬树基座干身 fx 66→0 重帧实证）。
+    case 583: case 584: case 585: case 586: case 587: case 588: case 589:
+      checkTreeSweep(st, ctx, x, y, false, GEM_TREE_GROUND);
+      return true;
+    case 634:
+      checkTreeSweep(st, ctx, x, y, false, ASH_TREE_GROUND);
       return true;
     case 34:
       checkChandSweep(st, ctx, x, y, sheet);
@@ -899,8 +909,14 @@ const TREE_GROUND_NORM = new Set([23, 661, 477, 60, 70, 109, 147, 199, 662, 492]
 /** VanityTreeGroundTest（cs:30474）：{2,109,477,492}——无归一化（去 23/199） */
 const VANITY_GROUND = new Set([2, 109, 477, 492]);
 /** vanity=true：CheckTreeWithSettings·Vanity（cs:54430-54597）分支——地面谓词换
- *  VANITY_GROUND、R3 杀后不再重帧（两版 cs 差异逐条保留，checkTreeAt 同源）。 */
-function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, vanity = false): void {
+ *  VANITY_GROUND、R3 杀后不再重帧（两版 cs 差异逐条保留，checkTreeAt 同源）。
+ *  groundSet（AAAAAA）：CheckTreeWithSettings 的自定义 GroundTest 谓词集
+ *  （583-589 宝石树=GemTreeGroundTest cs:30455 Stone∪Moss 换算表；634 灰烬树=
+ *  AshTreeGroundTest cs:30480 {633}）。 */
+const GEM_TREE_GROUND = new Set([1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
+const ASH_TREE_GROUND = new Set([633]);
+function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, vanity = false,
+  groundSet?: Set<number>): void {
   const k = st.idx(x, y);
   const frameX0 = st.frameX[k]!, frameY0 = st.frameY[k]!;
   const self = SWEEP_SHEET[st.type[k]];
@@ -911,8 +927,8 @@ function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, vani
   };
   const num2 = typeAt(x - 1, y), num3 = typeAt(x + 1, y), num = typeAt(x, y - 1);
   let num4 = typeAt(x, y + 1);
-  if (!vanity && TREE_GROUND_NORM.has(num4)) num4 = 2;      // cs:54620-54636 归一化（仅 CheckTree）
-  const groundOk = vanity ? VANITY_GROUND.has(num4) : num4 === 2;
+  if (!vanity && !groundSet && TREE_GROUND_NORM.has(num4)) num4 = 2;   // cs:54620-54636 归一化（仅 CheckTree）
+  const groundOk = groundSet ? groundSet.has(num4) : vanity ? VANITY_GROUND.has(num4) : num4 === 2;
   let cfx = frameX0, cfy = frameY0;
   let dead = false;
   const kill = (): void => {
@@ -1287,6 +1303,51 @@ function frame136Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void
   else if (rightOk) st.frameX[i] = 36;
   else if (st.wall[i] > 0) st.frameX[i] = 54;
   else killTileGen(st, ctx, x, y);
+}
+
+/** case 4 火把（CheckTorch cs:86838-86922）：附着向 fx = 基(0/66)+{地板0,左22,右44}；
+ *  墙挂=基；无附着 → 杀。★AAAAAA 新增（曾无火把帧分派 = s4 184 格帧债）。 */
+function checkTorchSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  const i = st.idx(x, y);
+  const num = st.frameX[i]! >= 66 ? 66 : 0;
+  const typeOf = (xx: number, yy: number): number => (nactiveAt(st, xx, yy) ? sheetAt2(st, xx, yy) : -1);
+  const solidOf = (sh: number): boolean => {
+    const id = REV_SHEET_ID.get(sh);
+    return id !== undefined && genSolidType(id);
+  };
+  // num2 下格取型（cs:86873：平台族 TopEdgeCanBeAttachedTo(=solidAllowBottom) 或 非半砖非顶坡）
+  let num2 = -1;
+  if (nactiveAt(st, x, y + 1)) {
+    const bs = sheetAt2(st, x, y + 1);
+    if ((PLATFORMS.has(bs) && solidAllowBottom(st, x, y + 1))
+      || (!st.half[st.idx(x, y + 1)] && slopeOf(st, x, y + 1) !== 1 && slopeOf(st, x, y + 1) !== 2)) num2 = bs;
+  }
+  // num3 左 / num4 右取型（cs:86877/86881：slope==0 或 %2 不等于侧号）
+  let num3 = -1, num4 = -1;
+  if (nactiveAt(st, x - 1, y)) {
+    const sl = slopeOf(st, x - 1, y);
+    if (sl === 0 || sl % 2 !== 1) num3 = sheetAt2(st, x - 1, y);
+  }
+  if (nactiveAt(st, x + 1, y)) {
+    const sl = slopeOf(st, x + 1, y);
+    if (sl === 0 || sl % 2 !== 0) num4 = sheetAt2(st, x + 1, y);
+  }
+  if (num2 >= 0 && solidOf(num2) && (!NO_ATTACH.has(num2) || PLATFORMS.has(num2))) {
+    st.frameX[i] = num;
+    return;
+  }
+  if ((num3 >= 0 && solidOf(num3) && !NO_ATTACH.has(num3)) || (num3 >= 0 && IS_BEAM.has(num3))
+    || (IS_TREE_TRUNK.has(num3) && IS_TREE_TRUNK.has(typeOf(x - 1, y - 1)) && IS_TREE_TRUNK.has(typeOf(x - 1, y + 1)))) {
+    st.frameX[i] = 22 + num;
+    return;
+  }
+  if ((num4 >= 0 && solidOf(num4) && !NO_ATTACH.has(num4)) || (num4 >= 0 && IS_BEAM.has(num4))
+    || (IS_TREE_TRUNK.has(num4) && IS_TREE_TRUNK.has(typeOf(x + 1, y - 1)) && IS_TREE_TRUNK.has(typeOf(x + 1, y + 1)))) {
+    st.frameX[i] = 44 + num;
+    return;
+  }
+  if (st.wall[i] > 0) { st.frameX[i] = num; return; }
+  killTileGen(st, ctx, x, y);
 }
 
 /** case 178 宝石籽（cs:85844-85886）：CheckAndAdjustMultiDirectionalTile

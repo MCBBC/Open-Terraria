@@ -500,13 +500,13 @@ describe('PickAmmo 溶液链与消耗门', () => {
     // 异物品 swing（切枪）→ 视作首发扣
     expect(solutionConsumesThisShot(779, 5, { item: id + 1, t: 6, dur }, id)).toBe(true);
   });
-  it('消耗门 :52739：Terraformer 5134 三分免（Next(3)!=0 免）', () => {
+  it('消耗门 :52739：Terraformer 5134 三分免（Next(3)==0 免,复审 R1 P1 修正）', () => {
     const id = 7;
     const swing = { item: id, t: 26, dur: 31 };
-    const rndTrue = () => 0;      // Next(3)=0 → 不免 → 走动画门（26≥26 扣）
-    const rndFree = () => 0.5;    // Next(3)=1 → 免
-    expect(solutionConsumesThisShot(5134, 5, swing, id, rndTrue)).toBe(true);
+    const rndFree = () => 0;      // Next(3)=0 → 免耗（原版 :52739-52742 flag2）
+    const rndTrue = () => 0.5;    // Next(3)=1 → 不免 → 走动画门（26≥26 扣）
     expect(solutionConsumesThisShot(5134, 5, swing, id, rndFree)).toBe(false);
+    expect(solutionConsumesThisShot(5134, 5, swing, id, rndTrue)).toBe(true);
     expect(solutionConsumesThisShot(5134, 5, null, id, rndFree)).toBe(false);
   });
   it('useAmmo 门：背包无 ammo==780 的物品 → 扫描不命中（不发射）', () => {

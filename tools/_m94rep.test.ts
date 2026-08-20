@@ -27,16 +27,17 @@ const DIR = '/tmp/yyyyy-m20260811';
     for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number') SHEET[i] = s; }
     const REV = new Map<number, number>();
     for (let i = 0; i < TILE_DEFS.length; i++) { const s = TILE_DEFS[i]?.vanilla?.sheet; if (typeof s === 'number' && !REV.has(s)) REV.set(s, i); }
-    const t = b16('typ'), a = b8('act');
+    const t = b16('typ'), a = b8('act'), wch = b16('wal'), lch = b8('liq'), ltch = b8('lty'),
+      hch = b8('half'), sch = b8('slope'), iach = b8('inact');
     for (let i = 0; i < W * H; i++) {
       st.flags[i] = a[i]!;
       st.type[i] = a[i]! || t[i]! ? (REV.get(t[i]!) ?? 0) : 0;
-      st.wall[i] = b16('wal')[i]!;
-      st.liquid[i] = b8('liq')[i]!;
-      st.liquidType[i] = b8('liq')[i]! ? b8('lty')[i]! + 1 : 0;
-      st.half[i] = b8('half')[i]!;
-      st.slope[i] = b8('slope')[i]!;
-      st.wire[i] = b8('inact')[i]! ? 0x20 : 0;
+      st.wall[i] = wch[i]!;
+      st.liquid[i] = lch[i]!;
+      st.liquidType[i] = lch[i]! ? ltch[i]! + 1 : 0;
+      st.half[i] = hch[i]!;
+      st.slope[i] = sch[i]!;
+      st.wire[i] = iach[i]! ? 0x20 : 0;
     }
     st.frameX.set(ld16('frameX.bin')); st.frameY.set(ld16('frameY.bin'));
     st.wire.set(ld8('wire.bin')); st.paint.set(ld8('paint.bin'));
@@ -59,7 +60,12 @@ const DIR = '/tmp/yyyyy-m20260811';
       };
     },
   }) as RNG;
+  // AAAAAA 计数器：placeMossSprout 调用数（经 __swLmCap 钩子）
+  let lmCalls = 0;
+  (globalThis as { __swLmCap?: (x: number, y: number) => void }).__swLmCap = () => { lmCalls++; };
   runLongMossPass(st, rngW, gs);
+  (globalThis as { __swLmCap?: () => void }).__swLmCap = undefined;
+  console.log(`[lm] calls=${lmCalls} rolls=${lines.length}`);
   __setGenStateForProbe(null);
   writeFileSync('/tmp/aaaaaa-span-m94-js.txt', lines.join('\n') + '\n');
   console.log(`js rolls = ${lines.length}`);

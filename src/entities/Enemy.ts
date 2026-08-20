@@ -9572,9 +9572,10 @@ export class Enemy extends Entity {
         const ti = st.idx(x, y);
         const solidFace = st.flags[ti] !== 0 && TileStore.SOLID_LUT[st.type[ti]] === 1
           && !(st.wire[ti] & TileStore.WIRE_ACTUATED);   // WorldGen.SolidTile
-        // TileID.Sets.Platforms[type]（按 type 查，{19,239,380,427} 四件套）
+        // TileID.Sets.Platforms（TileID.cs:243:{19,427,435,436,437,438,439}——
+        // 复审 R2 P3:曾误用站台表 {19,239,380,427}(矿石条/花盆箱混入,队伍平台漏)
         const sheet = TILE_DEFS[st.type[ti]]?.vanilla?.sheet;
-        const platform = sheet === 19 || sheet === 239 || sheet === 380 || sheet === 427;
+        const platform = sheet === 19 || sheet === 427 || (sheet !== undefined && sheet >= 435 && sheet <= 439);
         if ((solidFace || platform)
           && (!solidTiles(x - 1, x + 1, y - 3, y - 1)
             || (!solidTiles(x, x, y - 3, y - 1) && !solidTiles(x + 1, x + 1, y - 3, y - 2)

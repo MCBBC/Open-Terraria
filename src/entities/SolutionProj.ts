@@ -39,7 +39,7 @@ export const SPRAY_PROJ_IDS = new Set(Object.keys(SPRAY_PROJ).map(Number));
 export const WATER_PROJ_CONV: Record<number, number> = { 69: 2, 70: 1, 621: 4 };
 
 /** 溶液消耗门（Player.cs:52739/:52815 两处 flag2 合成）：返回 true = 本发扣 1。
- *  · :52739 Terraformer 5134 掷 Next(3)!=0 → 免耗（2/3 免）
+ *  · :52739 Terraformer 5134 掷 Next(3)==0 → 免耗（1/3 免,flag2 语义）
  *  · :52815 (779||5134) && itemAnimation < itemAnimationMax - useTime → 免耗——
  *    useAnimation 30/useTime 5 下每轮 6 发仅前 2 发扣（swing.t 为剩余帧数，
  *    itemAnimation 等效 = dur - t）；首发（无 swing/异 item swing）恒扣 */
@@ -48,7 +48,9 @@ export function solutionConsumesThisShot(
   swing: { item: number; t: number; dur: number } | null,
   heldItemId: number, rnd: () => number = Math.random,
 ): boolean {
-  if (clentVid === 5134 && Math.floor(rnd() * 3) !== 0) return false;
+  // Terraformer 免耗掷:Player.cs:52739-52742 `Next(3)==0 → flag2(免耗)`——1/3 免、
+  // 2/3 扣耗(曾误抄姊妹行 3475/3540 的 `!= 0` 方向 → 消耗减半,复审 R1 P1)
+  if (clentVid === 5134 && Math.floor(rnd() * 3) === 0) return false;
   if (swing && swing.item === heldItemId && swing.t < swing.dur - useTime) return false;
   return true;
 }

@@ -2080,9 +2080,6 @@ export class Game implements GameHooks {
   private _tpTarget: { x: number; y: number } | null = null;
   /** 地图双击检测（Main.cs:54926-54931 _lastPingMouseDownTime/_lastPingMousePosition：
    *  0.5s 内两次按压位移 <2px → TriggerPing） */
-  private _lastMapClickAt = 0;
-  private _lastMapClickX = 0;
-  private _lastMapClickY = 0;
   // ---- 传送晶塔（Player.cs:31707-31747 / TeleportPylonsSystem.cs）----
   /** 已放置晶塔缓存（scanPylons 整表扫——右键晶塔/放置/破坏时刷新；原版
    *  UpdatePylonsListAndBroadcastChanges 每 10s 扫 TileEntity 表的等价） */
@@ -4086,7 +4083,6 @@ export class Game implements GameHooks {
           // 同点两击传送调试功能(用户快速双击只看到 ping 气泡)。调试功能优先:
           // 普通点击全归传送(第一次预选/第二次确认,不限速);ping 改走 Ctrl+点击
           // (联机标记功能保留,原版双击槽位在调试构建下让位)
-          const nowMs = performance.now();
           if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h
             && (inp.keys.has('ControlLeft') || inp.keys.has('ControlRight'))) {
             this.triggerMapPing(
@@ -4094,9 +4090,6 @@ export class Game implements GameHooks {
             this._tpTarget = null;
             this.renderer.tpMark = null;
           } else if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
-            this._lastMapClickAt = nowMs;
-            this._lastMapClickX = inp.mouseX;
-            this._lastMapClickY = inp.mouseY;
             // 晶塔图标优先（TeleportPylonsMapLayer.cs:77-127：点中图标 → 门禁 → 传送/
             // 失败文案；图标悬停时原版取消普通选点 cancelWormHole :97）
             if (this.tryPylonMapTeleport(tx, ty)) {
