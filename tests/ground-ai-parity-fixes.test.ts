@@ -6,6 +6,7 @@ import { World } from '../src/world/World';
 import { Enemy } from '../src/entities/Enemy';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
+import { alienFlightStep } from '../src/entities/fighterFamilies';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 
@@ -274,6 +275,7 @@ describe('F 批 战士族（NPC.cs:56646-60724）', () => {
     const h = makeHooks(w, { x: 45, y: FLOOR - 3 });   // ~80px
     const e = spawn(h, 31, 40, FLOOR - 2);
     settle(h, e);
+    e.x = 40 * TILE;   // settle 期间行走/跳跃漂移复位（ENEMY_GRAVITY 0.3 对齐后轨迹变化）
     e.facing = 1;
     e.vx = 1.2;
     e.vy = 0;
@@ -541,15 +543,19 @@ describe('W/K/P/C 批（地牢陷阱/爬墙蛛/植物/法师）', () => {
     const h = makeHooks(w, { x: 55, y: 20 });   // 玩家远高于（>100px）
     const e = spawn(h, 427, 50, FLOOR - 2);
     settle(h, e);
+    e.x = 50 * TILE; e.y = (FLOOR - 2) * TILE;   // 复位：0.1 缓降+伺服上调下 settle 期飞行爬升（原版悬停行为），落地态场景须显式摆位
     e.vy = 0;
     e.ai2 = 0;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
-    expect(e.vy).toBeCloseTo(-4.9, 5);   // −5 + 重力折算
+    expect(e.vy).toBeCloseTo(-4.975, 5);   // −5 + 飞行态重力 0.1（UpdateNPC_UpdateGravity :91910-91915）×0.25 高空系数
     expect(e.ai2).toBe(1);
-    // 空中伺服段（:59030-59103）：背向玩家方向阻尼 + 同向步进 0.015 钳 ±6
-    const vx0 = e.vx;
-    drive(e, 'fighterAI').call(e, h.hooks, h.player);
-    expect(e.vx).toBeGreaterThan(vx0 - 0.1);   // 朝玩家（右侧）水平修正
+    // 空中伺服段（:59030-59103）：背向玩家方向阻尼 + 同向步进 0.015 钳 ±6。
+    // 直调 alienFlightStep 断言方向性（走 fighterAI 全链时 settle 遗留空速会叠
+    // 其他段的空中摩擦，衰减量随 vx0 大小浮动 = 脆弱断言）
+    e.x = 50 * TILE;   // settle 行走漂移复位（玩家在右 5 格，num124>20）
+    e.vx = 1;
+    alienFlightStep(e, h.hooks, h.player);
+    expect(e.vx).toBeGreaterThan(1);   // 朝玩家（右侧，num124>20）同向步进 +0.015
   });
 
   it('F9 蜂后 426 起飞门：vy=−6（num129）且射击期缓降（:59110-59155）', () => {
@@ -557,9 +563,10 @@ describe('W/K/P/C 批（地牢陷阱/爬墙蛛/植物/法师）', () => {
     const h = makeHooks(w, { x: 55, y: 20 });
     const e = spawn(h, 426, 50, FLOOR - 2);
     settle(h, e);
+    e.x = 50 * TILE; e.y = (FLOOR - 2) * TILE;   // 同 427：复位到落地态
     e.vy = 0;
     drive(e, 'fighterAI').call(e, h.hooks, h.player);
-    expect(e.vy).toBeCloseTo(-5.9, 5);   // −6 + 重力折算
+    expect(e.vy).toBeCloseTo(-5.975, 5);   // −6 + 恒重力 0.1（:91911-91915）×0.25 高空系数
   });
 
   it('W1 火轮出生：TargetClosest + 双取反（facing 与 dirY 均 ×−1，:24602-24604）', () => {

@@ -33,7 +33,7 @@ export const ITEM_MAX_FALL = 7;
 // tick 尽后重力接管 → 恒速平台段+抛物线尾的原版曲线。
 export const PLAYER_JUMP_SPEED = 5.01;
 export const PLAYER_JUMP_TICKS = 15; // jumpHeight（:2378；恒速平台段 tick 数）
-export const ENEMY_GRAVITY = 0.32;   // 原版无此常量（NPC 重力 0.3 走 UpdateNPC_UpdateGravity），勿与 GRAVITY 混用
+export const ENEMY_GRAVITY = 0.3;    // NPC.cs:6026 static gravity=0.3（:91879 reset 同值）——玩家 0.4（Player.cs:2376）与 NPC 0.3 是两条线，勿混用
 
 // ---- 世界 ----
 export const CHUNK = 16; // chunk 边长（tile）

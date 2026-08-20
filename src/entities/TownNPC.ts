@@ -5,7 +5,7 @@
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
-import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
+import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS } from '../data/tiles';
@@ -1031,8 +1031,10 @@ export class TownNPC extends Entity {
     }
     if (this.shimmerRise && this.shimmerRiseUpdate(world, game, st0.liquid[si] > 0)) {
       // ai[0]==25 块整段 return（:53682）：AI_007 游走/坐姿/攻击/开门全跳过；
-      // 只补 UpdateNPC 尾段的重力 + 碰撞 + 找帧（:91521-91565，AI() 之后照常执行）
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      // 只补 UpdateNPC 尾段的重力 + 碰撞 + 找帧（:91521-91565，AI() 之后照常执行）。
+      // ★重力 = 0（UpdateNPC_UpdateGravity :91918-91922 aiStyle7 && ai[0]==25 档）：
+      //   微光上升演出期不坠，仅落速帽——曾加 ENEMY_GRAVITY = 上升被拽下坠
+      this.vy = Math.min(this.vy, MAX_FALL_SPEED);
       moveAndCollide(this, world, this.vx, this.vy);
       this.updateWalkFrame(game);
       return;
@@ -1054,7 +1056,7 @@ export class TownNPC extends Entity {
       const bp = (game as unknown as { player: Player }).player;
       if (bp && !bp.dead) this.facing = bp.cx < this.cx ? -1 : 1;
       this.vx = 0;
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      this.vy = Math.min(this.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(this, world, this.vx, this.vy);
       return;
     }
@@ -1323,11 +1325,11 @@ export class TownNPC extends Entity {
     // :54647-54650 TownCritter 的同款 ×1.2 分列）
     if (this.vy < 0 && this.wet) this.vy *= 1.2;
     // 湿身重力档（UpdateNPC_UpdateGravity :91940-91956）：浸水 0.2/蜜 0.1/
-    // 微光 0.15（常态 GRAVITY=0.4 为本仓全仓既有档）；落速帽 7/4/5.5 由
-    // updateNpcLiquid 第 6 段钳
+    // 微光 0.15；干侧 ENEMY_GRAVITY 0.3（NPC.cs:6026，2026-08-20 对齐批换正）；
+    // 落速帽 7/4/5.5 由 updateNpcLiquid 第 6 段钳
     const grav = this.wet
       ? (this.shimmerWet ? 0.15 : this.honeyWet ? 0.1 : 0.2)
-      : GRAVITY;
+      : ENEMY_GRAVITY;
     this.vy = Math.min(this.vy + grav, MAX_FALL_SPEED);
     moveAndCollide(this, world, this.vx, this.vy);
     if (this.hitWall) this.vx *= 0.5;

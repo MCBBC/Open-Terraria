@@ -188,7 +188,7 @@ describe('G2 携物变体梯', () => {
     e.x = snap.x; e.y = snap.y; e.vx = snap.vx; e.vy = snap.vy;
     e.ai1 = 3;                          // 石档：完全同初态重放
     slimeAI(e, h);
-    expect(e.vy - vy0).toBeCloseTo(0.4 * 2, 5);   // +2×GRAVITY（梯段，vy>0 门）
+    expect(e.vy - vy0).toBeCloseTo(0.3 * 2, 5);   // +2×ENEMY_GRAVITY（梯段，vy>0 门；NPC 重力 0.3，2026-08-20 对齐批）
   });
 
   it('751 云史莱姆：滞空恒 −0.6g（:61200-61204）', () => {
@@ -204,7 +204,7 @@ describe('G2 携物变体梯', () => {
     e.x = snap.x; e.y = snap.y; e.vx = snap.vx; e.vy = snap.vy;
     e.ai1 = 751;
     slimeAI(e, h);
-    expect(e.vy - vy0).toBeCloseTo(-0.4 * 0.6, 5);
+    expect(e.vy - vy0).toBeCloseTo(-0.3 * 0.6, 5);
   });
 
   it('150 蛛网史莱姆：1/120 在包围盒随机格放蛛网（:61205-61221；PlaceTile 51 无锚定门）', () => {
@@ -318,7 +318,7 @@ describe('G2 携物变体梯', () => {
     slimeAI(e, h);                     // 下一 tick 梯段反弹
     // 反弹 −vy×0.7（:61312）→ 共享段重力 +g 后即本 tick 碰撞前 vy（oldVelocity
     // 取自重力之后、碰撞之前——NPC.cs:91533→:93739 时序）
-    expect(e.preCollideVy).toBeCloseTo(-impact * 0.7 + 0.4, 5);
+    expect(e.preCollideVy).toBeCloseTo(-impact * 0.7 + 0.3, 5);
     expect(e.vy).toBeLessThan(-4);     // 空中上行（vy≠0 → 贴地门不触发、跳段不覆写）
     expect(e.vx).toBeCloseTo(0.4, 5);  // 两 tick 空中转向 0.2×2（弹跳未被摩擦/跳段篡改）
   });

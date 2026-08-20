@@ -12,6 +12,8 @@ import { TEAM_COLORS } from '../stats/Pvp';
 import { UIScale } from '../vui/draw/UIScale';
 import { UISfx } from '../vui/UISfx';
 import { Lang } from '../i18n/Lang';
+// M13 资源包页（UIResourcePackSelectionMenu/InfoMenu 复刻）
+import { buildResourcePackPage, RESOURCE_PACK_PAGE_CSS } from './ResourcePackPage';
 
 export interface SettingsFlow {
   /** 主菜单专属：继续存档 / 读档 / 导入 .wld / 开发者模式 */
@@ -83,7 +85,7 @@ export class SettingsPanel {
     if (!document.getElementById('sw-set-style')) {
       const style = document.createElement('style');
       style.id = 'sw-set-style';
-      style.textContent = CSS;
+      style.textContent = CSS + RESOURCE_PACK_PAGE_CSS;
       document.head.appendChild(style);
     }
     this.panel = document.createElement('div');
@@ -116,6 +118,7 @@ export class SettingsPanel {
       case 'ui': return Lang.text('Mods.SandboxWorld.Settings.Interface');
       case 'game': return Lang.text('Mods.SandboxWorld.Settings.Gameplay');
       case 'controls': return Lang.menu(222);          // 按键绑定（UIManageControls）
+      case 'packs': return Lang.text('UI.ResourcePacks'); // 资源包（原版同键）
       case 'data': return Lang.text('Mods.SandboxWorld.Settings.Data');
       default: return cat;
     }
@@ -124,7 +127,7 @@ export class SettingsPanel {
   private buildCats() {
     const cats = document.createElement('div');
     cats.className = 'sw-set-cats';
-    const list = ['sound', 'ui', 'game', 'controls', ...(this.flow.onQuickLoad ? ['data'] : [])];
+    const list = ['sound', 'ui', 'game', 'controls', 'packs', ...(this.flow.onQuickLoad ? ['data'] : [])];
     for (const c of list) {
       const div = document.createElement('div');
       div.dataset.cat = c;
@@ -573,6 +576,9 @@ export class SettingsPanel {
       devHint.className = 'sw-set-hint';
       devHint.textContent = Lang.text('Mods.SandboxWorld.Settings.DevKeysHint');
       this.content.append(devHint);
+    } else if (this.cat === 'packs') {
+      // ---- 资源包（M13）：双列启停/调序/信息 + zip 上传（ResourcePackPage）----
+      this.content.append(buildResourcePackPage());
     } else if (this.cat === 'data' && this.flow.onQuickLoad) {
       const btns = document.createElement('div');
       btns.className = 'sw-set-btns';

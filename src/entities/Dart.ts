@@ -825,8 +825,13 @@ export class Dart extends Entity {
       this.vx *= st.accel.mul; this.vy *= st.accel.mul;
     }
     if (st.grav !== undefined && this.age > (st.gravDelay ?? 0)) {
-      this.vy = Math.min(this.vy + st.grav, 16); // AI_001/AI_002 钳 16
+      this.vy = Math.min(this.vy + st.grav, st.vCap ?? 16); // AI_001/AI_002 钳 16；31 沙球钳 10（:55159）
       if (st.xDamp) this.vx *= st.xDamp;
+      if (st.xFrict) {            // 31 沙球侧摩（:55087-55100）：±N 向 0 收
+        if (this.vx < -st.xFrict) this.vx += st.xFrict;
+        else if (this.vx > st.xFrict) this.vx -= st.xFrict;
+        else this.vx = 0;
+      }
     }
     // ---- 旋转（各 aiStyle 权威语义,见 DART_STYLE 头注）----
     switch (st.rot) {
@@ -900,6 +905,20 @@ export class Dart extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
+    // ---- 31 沙球沿途击碎（:55106-55136 KillTile 清单，每 tick 扫重叠盒）：
+    //      水晶12/雕像105/钟乳石165/裸露宝石178/小石堆185/大石堆186-187/
+    //      魔力水晶639/生命水晶巨石665——沙球扫过即碎 ----
+    if (st.sandBall) {
+      const sst = game.world.store;
+      for (let bx = Math.floor(this.x / TILE); bx <= Math.floor((this.x + this.w - 0.01) / TILE); bx++) {
+        for (let by = Math.floor(this.y / TILE); by <= Math.floor((this.y + this.h - 0.01) / TILE); by++) {
+          if (!sst.inBounds(bx, by)) continue;
+          const t = sst.get(bx, by);
+          if (t === 12 || t === 105 || t === 165 || t === 178 || t === 185 || t === 186
+            || t === 187 || t === 639 || t === 665) game.breakTile?.(bx, by);
+        }
+      }
+    }
     // ---- 拖尾尘（原版每更新 NewDust;近似为低频 spawnParticles 防刷屏）----
     if (st.trail && (this.tick & 1) === 0) {
       game.spawnParticles(this.cx, this.cy, st.trail.color, st.trail.count, 0.4,
@@ -915,7 +934,23 @@ export class Dart extends Entity {
     if (game.world.store.isSolid(tx, ty)) {
       if (st.rocket) { this.rocketKill(game); return; }  // 303 火箭撞块即爆（Kill 段）
       if (st.noTile) { /* 300 圣锤/299 暗影焰 tileCollide=false:穿墙 */ }
-      else { this.dead = true; return; }
+      else {
+        // ---- 31 沙球落档（Projectile.cs :75430-75536）：落地放沙 53 ----
+        // 下方是轨道314/传送带421-422 不放（BlockBelowMakesSandFall 门与
+        // 421-422 上放沙失败掉物品的边角略——本仓无逐格落沙链）。
+        // 弹心已入实心格时向上找第一个空格（原版 TileCollision 令弹体停在格
+        // 外、放置格=弹心；本仓中心判死已入格半步）
+        if (st.sandBall) {
+          const sst = game.world.store;
+          const scx = Math.floor(this.cx / TILE);
+          let scy = Math.floor(this.cy / TILE);
+          while (scy > 0 && sst.get(scx, scy) !== 0) scy--;
+          const below = sst.inBounds(scx, scy + 1) ? sst.get(scx, scy + 1) : 0;
+          const noPlace = below === 314 || below === 421 || below === 422;
+          if (!noPlace && sst.inBounds(scx, scy) && sst.get(scx, scy) === 0) sst.setTile(scx, scy, 53);
+        }
+        this.dead = true; return;
+      }
     }
     // ---- 命中玩家(敌对):矩形相交即消耗弹体;伤害走 damagePlayer(防御减算/受击音/
     // iframes 去重——无敌帧内命中不扣血但弹体照常销毁,原版语义) ----
@@ -1125,6 +1160,11 @@ interface DartStyle {
   alpha0?: number;                       // 出生 alpha(255=渐入)
   fade?: 'speed' | number;               // 渐入速率
   grav?: number; gravDelay?: number; xDamp?: number;   // 重力档(ai0 门)
+  vCap?: number;                                        // 垂直速度上限（31 沙球 10）
+  /** 侧摩（31 沙球 AI_010 ai[0]==2 :55087-55100）：vx 每 tick ±N 向 0 收 */
+  xFrict?: number;
+  /** 31 沙球档：沿途 KillTile 清单击碎 + 落地 PlaceTile 沙 53（:75430-75536） */
+  sandBall?: boolean;
   accel?: { from: number; to: number; mul: number };   // 加速段(ai0 区间内每更新 ×mul)
   updates?: number;                      // extraUpdates(每 tick 完整更新次数)
   noTile?: boolean;                      // tileCollide=false 穿墙
@@ -1212,9 +1252,13 @@ const DART_STYLE: Record<number, DartStyle> = {
     sfx: ['Item_11'], fallback: '#FFF0B0' },
   // 303 火箭(骷髅爆破 293 :59893):14×20 aiStyle16 手雷族:重力 0.3 滚转,life180,Kill 128 盒爆炸
   303: { w: 14, h: 20, rot: 'roll', grav: 0.3, life: 180, rocket: 64, fallback: '#B8B8C0' },
-  // 31 沙球(蚁狮 69 :24520):10×10,重力 0.41(AI_010 :55083),spin 0.1(:55158);尘 32
-  31: { w: 10, h: 10, rot: 'spin', spinRate: 0.1, grav: 0.41,
-    trail: { color: '#D8C890', count: 1 }, fallback: '#D8C890' },
+  // 31 沙球(蚁狮 69 :24520 速12/伤10/timeLeft300/ai[0]=2 敌版):10×10。
+  // 蚁狮档(AI_010 ai[0]==2 :55081-55100):重力 0.2 + vx 侧摩 ±0.04 向 0 收 + vy 钳 10
+  // ——曾误用 ai[0]==1 落地态的 0.41(坠速翻倍,弧线错);spin 0.1 恒速(:55158);尘 32。
+  // 沿途击碎水晶/雕像/宝石/石堆族(KillTile :55110-55136);落地放沙 53(:75430-75536,
+  // 轨道 314/传送带 421-422 例外)——sandBall 档见撞块段
+  31: { w: 10, h: 10, rot: 'spin', spinRate: 0.1, grav: 0.2, xFrict: 0.04, vCap: 10, life: 300,
+    sandBall: true, trail: { color: '#D8C890', count: 1 }, fallback: '#D8C890' },
   // 471 骷髅骨(投骨骷髅 449-452 :59844):16×16,scale1.2,roll,重力 0.4@20+xDamp0.97(aiStyle2 通用尾 :21976)
   471: { w: 16, h: 16, rot: 'roll', scale: 1.2, grav: 0.4, gravDelay: 20, xDamp: 0.97, fallback: '#E0D8C8' },
   // 508 标枪(希腊骷髅 481 :59855):16×16,重力 0.3+xDamp0.98@ai0>60(:54589)

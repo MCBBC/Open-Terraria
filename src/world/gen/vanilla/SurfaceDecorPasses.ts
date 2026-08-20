@@ -256,8 +256,10 @@ const VANITY_GROUND = new Set([2, 109, 477, 492]);
  *  不触发——均不派发（CheckPalmTree 在本域亦恒 no-op）。
  *  ★RRRRR 2026-08-20：①非活性格补 TileFrame 头清（cs:82078-82082 half/slope/块漆）；
  *  ②补 Check3x2 186/187 堆级联（#90 根因：花圃杀堆底格→帧结构破→整堆 KillTile，
- *  golden 187→dead×51 真身）；185 CheckPile 级联暂不派发（本种子仅 1 格
- *  185→dead，备案观察）。 */
+ *  golden 187→dead×51 真身）。
+ *  ★YYYYY 2026-08-20：③补 CheckPile 185 小堆级联（TileFrameImportant case 185
+ *  cs:86016——12345 #90 残 1 (2184,232) 孤儿半实证：花圃杀右半 (2185,232) → 3×3
+ *  命中左半 → CheckPile→fy18→Check2x1 配对完整性失败 → KillTile（金标杀/JS 存活）。 */
 function frameCellTree(st: TileStore, rng: RNG, x: number, y: number): void {
   if (x <= 5 || y <= 5 || x >= st.w - 5 || y >= st.h - 5) return;   // cs:82069 边界
   const k = st.idx(x, y);
@@ -269,6 +271,7 @@ function frameCellTree(st: TileStore, rng: RNG, x: number, y: number): void {
   if (s === 5) checkTreeAt(st, rng, x, y, false);
   else if (s === 596 || s === 616) checkTreeAt(st, rng, x, y, true);
   else if (s === 186 || s === 187) check3x2PileSweep(st, rng, x, y, s);
+  else if (s === 185 || s === 649) checkPileSweep185(st, rng, x, y);
 }
 
 /** Check3x2 的 186/187 支（cs:49190-49346 结构/底材复核 + cs:49348-49364 草底
@@ -354,6 +357,117 @@ function check3x2PileSweep(st: TileStore, rng: RNG, x: number, y: number, sheet:
   for (let m = num5 - 1; m < num5 + 4; m++) {
     for (let l = top - 1; l < top + 4; l++) frameCellTree(st, rng, m, l);
   }
+}
+
+/* ── CheckPile（cs:46891）/ Check2x1（cs:46989）type185 小堆域（YYYYY 批）────
+ * frameCellTree 的 185/649 派发镜像（KillTile 尾级联走本地 squareFrameTree——
+ * 树/3x2 堆级联在 flowers 域仍可达，杀掷：185 尘掷 0）。destroyObject 与
+ * check3x2PileSweep 共用 pile3x2Destroying（原版同一 WorldGen 静态位：
+ * Check2x1 头门 cs:46994 / Check3x2 cs:49194；CheckPile 头无门=原版 bug-for-bug）。 */
+/** CheckPile 支撑族（cs:46940-46947）：Snow={147}∪Ice={161,163,164,200}∪{162,224} */
+const PILE185_SNOW_OK = new Set([147, 161, 163, 164, 200, 162, 224]);
+/** Sand/HardenedSand/Sandstone 族（TileID.cs:30-34，与 Check3x2 沙带同表） */
+const PILE185_SAND_OK = SAND_FAM_3X2;
+
+/** CheckPile（cs:46891）type185 派发语境：fy==18/649 → Check2x1；无支撑杀；
+ *  雪堆(36-47)/沙堆(54-59,73-76) 支撑类型门杀。下方格 inactive → 不查（早退）。
+ *  杀=零掷（185 尘掷 0；CheckPile 无 destroyObject 门）。 */
+function checkPileSweep185(st: TileStore, rng: RNG, x: number, y: number): void {
+  const i = st.idx(x, y);
+  const s = SHEET[st.type[i]];
+  if (st.frameY[i] === 18 || s === 649) { check2x1Sweep185(st, rng, x, y, s); return; }
+  if (!solidAllowBottomSlope(st, x, y + 1)) { killTileTree(st, rng, x, y); return; }
+  if (s !== 185) return;
+  const fx18 = Math.trunc((st.frameX[i] ?? 0) / 18);
+  if (!st.inBounds(x, y + 1)) return;                       // 原版 null tile → return
+  const bi = st.idx(x, y + 1);
+  if (!st.flags[bi]) return;                                // cs:46928 !active() → return
+  const below = SHEET[st.type[bi]];
+  if (fx18 >= 36 && fx18 <= 47) {
+    if (!PILE185_SNOW_OK.has(below)) killTileTree(st, rng, x, y);
+  } else if ((fx18 >= 54 && fx18 <= 59) || fx18 >= 73) {    // 54-59 ∪ 73-76（60-72 无查）
+    if (!PILE185_SAND_OK.has(below)) killTileTree(st, rng, x, y);
+  }
+}
+
+/** Check2x1 type185 语境（cs:46989-47371）：2 宽配对完整性 + 支撑双门 +
+ *  草地变体转化（fx∈[1368,1458]→-1368）+ num5 组支撑门（25-30 雪/41-46,62-64 沙）
+ *  → 失败杀两格 + 掉落掷（六带 fx 576-898——生成期 noItem 但 genRand 实参先求值
+ *  必耗掷，KKKK 'b 1 4' 定罪；与 FCP pileDropRollsGen 同源）+ 尾双 SquareTileFrame。 */
+function check2x1Sweep185(st: TileStore, rng: RNG, x: number, y: number, sheet: number): void {
+  if (pile3x2Destroying) return;                            // cs:46994 destroyObject（共享静态位）
+  const i = st.idx(x, y);
+  let num = x - (Math.trunc((st.frameX[i] ?? 0) / 18) % 2); // 左锚
+  if (!st.inBounds(num, y) || !st.inBounds(num + 1, y)) return;
+  const iL = st.idx(num, y), iR = st.idx(num + 1, y);
+  let flag = true;
+  if ((st.frameX[iR] ?? 0) === (st.frameX[iL] ?? 0) + 18
+    && SHEET[st.type[iL]] === sheet && SHEET[st.type[iR]] === sheet
+    && st.flags[iL] && st.flags[iR]) flag = false;          // cs:47005 配对完整
+  if (!solidAllowBottomSlope(st, num, y + 1)) flag = true;  // cs:47044-47055（else 支）
+  if (!solidAllowBottomSlope(st, num + 1, y + 1)) flag = true;
+  if (sheet === 185) {
+    // cs:47058-47065 草地变体转化（下方 type 裸读——active 不查，与原版一致）
+    if (st.inBounds(num, y + 1) && st.inBounds(num + 1, y + 1)) {
+      const bl = SHEET[st.type[st.idx(num, y + 1)]];
+      const br = SHEET[st.type[st.idx(num + 1, y + 1)]];
+      const fxL = st.frameX[iL] ?? 0;
+      if (fxL >= 1368 && fxL <= 1458 && bl !== 2 && br !== 2 && bl !== 477 && br !== 477 && bl !== 492 && br !== 492) {
+        st.frameX[iL] = (fxL - 1368) as never;
+        st.frameX[iR] = ((st.frameX[iR] ?? 0) - 1368) as never;
+      }
+    }
+    // cs:47067-47096 num5 组支撑门（巨石族 break；下格 inactive continue）
+    const num5 = Math.trunc((st.frameX[iL] ?? 0) / 36) + (Math.trunc((st.frameY[iL] ?? 0) / 18) - 1) * 52;
+    for (let j = num; j <= num + 1; j++) {
+      if (!st.inBounds(j, y + 1)) continue;
+      const bj = st.idx(j, y + 1);
+      if (st.flags[bj] && BOULDERS.has(SHEET[st.type[bj]])) { flag = true; break; }
+      if (!st.flags[bj]) continue;
+      const bt = SHEET[st.type[bj]];
+      if (num5 >= 25 && num5 <= 30) {
+        if (!PILE185_SNOW_OK.has(bt)) flag = true;
+      } else if ((num5 >= 41 && num5 <= 46) || (num5 >= 62 && num5 <= 64)) {
+        if (!PILE185_SAND_OK.has(bt)) flag = true;
+      }
+    }
+  }
+  if (!flag) return;                                        // cs:47098
+  let dropFx = st.frameX[iL] ?? 0;                          // cs:47105-47109 掉落帧带读
+  if (!st.flags[iL]) dropFx = st.frameX[iR] ?? 0;
+  pile3x2Destroying = true;                                 // cs:47110
+  if (SHEET[st.type[iL]] === sheet) killTileTree(st, rng, num, y);
+  if (SHEET[st.type[iR]] === sheet) killTileTree(st, rng, num + 1, y);
+  // cs:47135-47232 六带掉落掷（noItem 不免掷——实参先求值）
+  if (sheet === 185) {
+    if (dropFx >= 576 && dropFx <= 610) {                   // 明胶(71)
+      rng.nextIntRange(10, 100); rng.nextIntRange(20, 100);
+      if (rng.nextInt(3) !== 0) rng.nextIntRange(10, 100);
+      if (rng.nextInt(3) !== 0) rng.nextIntRange(20, 100);
+      if (rng.nextInt(2) === 0) rng.nextIntRange(10, 100);
+      if (rng.nextInt(2) === 0) rng.nextIntRange(20, 100);
+      if (rng.nextInt(3) === 0) rng.nextIntRange(10, 100);
+      if (rng.nextInt(3) === 0) rng.nextIntRange(20, 100);
+      if (rng.nextInt(4) === 0) rng.nextIntRange(10, 100);
+      if (rng.nextInt(4) === 0) rng.nextIntRange(20, 100);
+      if (rng.nextInt(5) === 0) rng.nextIntRange(10, 100);
+      if (rng.nextInt(5) === 0) rng.nextIntRange(20, 100);
+    } else if (dropFx >= 612 && dropFx <= 646) {            // 银(72)
+      rng.nextIntRange(10, 100);
+      if (rng.nextInt(2) === 0) rng.nextIntRange(20, 100);
+      if (rng.nextInt(3) === 0) rng.nextIntRange(30, 100);
+    } else if (dropFx >= 648 && dropFx <= 682) {            // 金(73)
+      rng.nextIntRange(1, 6);
+      if (rng.nextInt(2) === 0) rng.nextIntRange(2, 6);
+      if (rng.nextInt(3) === 0) rng.nextIntRange(3, 6);
+    } else if ((dropFx >= 684 && dropFx <= 718) || (dropFx >= 720 && dropFx <= 754) || (dropFx >= 756 && dropFx <= 790)
+      || (dropFx >= 792 && dropFx <= 826) || (dropFx >= 828 && dropFx <= 862) || (dropFx >= 864 && dropFx <= 898)) {
+      rng.nextIntRange(1, 4);                               // 181/180/177/179/178/182 六带同掷
+    }
+  }
+  pile3x2Destroying = false;                                // cs:47366
+  squareFrameTree(st, rng, num, y);                         // cs:47367-47368 尾复扫
+  squareFrameTree(st, rng, num + 1, y);
 }
 
 /** SquareTileFrame（cs:80926-80934）列优先 3×3 调用序 */

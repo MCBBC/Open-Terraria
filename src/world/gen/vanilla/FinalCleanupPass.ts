@@ -390,6 +390,10 @@ function makeTileDustRoll(ctx: SweepCtx, sheet: number, fx: number): void {
     case 641: case 370: case 171:
       r.nextInt(2);
       return;
+    // YYYYY：cs:67069 `(type==34||type==42) && genRand.Next(2)==0`——吊灯/棺木尘掷
+    case 34: case 42:
+      r.nextInt(2);
+      return;
     case 26: case 695:
       if (fx < 54) r.nextInt(2);
       return;
@@ -527,7 +531,8 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
   if (ctx.frameSparse && (
     sheet === 165 || sheet === 185 || sheet === 28 || sheet === 653 || sheet === 240
     || sheet === 440 || sheet === 485 || sheet === 72 || sheet === 178 || sheet === 138
-    || sheet === 411 || C3X2_TYPES.has(sheet)
+    || sheet === 411 || sheet === 752 || sheet === 5 || sheet === 34
+    || C3X2_TYPES.has(sheet)
     // KKKKK：新击杀族同列（自读帧族——嵌合基座伪杀/互喂风险，C3X2 同款处置；
     //   #101 槽 frameSparse=false 不受影响，真实行为由生产管线承载）
     || (sheet >= 82 && sheet <= 84) || sheet === 233 || sheet === 236 || sheet === 238
@@ -603,8 +608,22 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     //   备案（零掷不可见族，见文件头清单）。
     // VVVVV 批补：+484 滚地仙人掌（m20260811 #77 金标实证 (3579,1241) 残块
     //   Check2x2 完整性杀；BOULDER_SHEETS 成员走巨石支=尘掷 0）。
-    case 138: case 411: case 484:
+    // YYYYY 批补：+752 奇莱特蛋（TileFrameImportant case 752 cs:86433 break →
+    //   goto case 132 → Check2x2；12345 #97 (3127,926) 蛋下半被岩浆死杀 → 级联
+    //   Check2x2 孤儿上半杀——掷流 62,050=62,050 全等，纯零掷杀差实证。同组
+    //   172/360/505-527/543/568-570/580/598/620/652/654/713-716/751 同走该
+    //   break-goto——生成期在场成员均为零掷族，未实证不派发（备案）。
+    case 138: case 411: case 484: case 752:
       check2x2Sweep(st, ctx, x, y, sheet);
+      return true;
+    // YYYYY 批补（cs:86616/52826）：CheckTree 树坍塌 + CheckChand 吊灯——
+    //   s22222 #97 vanilla 杀链实证（KillTile 织入：CheckTree 系 118 杀/吊灯 8 杀，
+    //   引擎缺臂=JS 树 21 格存活/吊灯 3 格存活）。454 掉落掷族未实证不派发。
+    case 5:
+      checkTreeSweep(st, ctx, x, y);
+      return true;
+    case 34:
+      checkChandSweep(st, ctx, x, y, sheet);
       return true;
     case 373: case 374: case 375: case 461: case 709: {   // IsADripTile（cs:85750）
       const up = st.idx(x, y - 1);
@@ -684,6 +703,137 @@ function check2x2Sweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet
   ctx.destroyObject = false;                                                // cs:48800
   for (let k = num2 - 1; k < num2 + 3; k++) {
     for (let l = num6 - 1; l < num6 + 3; l++) tileFrameGen(st, ctx, k, l, false);   // cs:48801-07
+  }
+}
+
+/* ── CheckChand（cs:52826）type34/454 吊灯（YYYYY 批：s22222 #97 残杀链）────
+ * 3×3（34）/4×3（454）吊灯完整性 + 顶锚（num+1,num2-1 须 nactive+tileSolid+
+ * !tileSolidTop）；任一破 → destroyObject 闸内整组 KillTile（x 外层序）+
+ * 尾 5×4 TileFrame(reset=false) 复扫。454 掉落掷链（Main.rand.Next(9) 族）
+ * 未实证不派发（备案）。锚 tileSolidTop 以 platform 近似（checkBannerGen 先例）。 */
+function checkChandSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                            // cs:52831
+  const num3 = sheet === 454 ? 4 : 3;
+  const i0 = st.idx(x, y);
+  let num = Math.trunc(st.frameX[i0]! / 18);
+  let num4 = 0;
+  while (num >= num3) { num4++; num -= num3; }
+  const num5 = x - num;
+  const num6 = 18 * num3 * num4;
+  let num2 = Math.trunc(st.frameY[i0]! / 18);
+  let num7 = 0;
+  while (num2 >= 3) { num7++; num2 -= 3; }
+  if (num6 >= 108) num7 += 37 * Math.trunc(num6 / 108);                     // 换列 → 行 +37
+  const num8 = 54 * num7 - (num6 >= 108 ? 54 * Math.trunc(num6 / 108) * 37 : 0);
+  const top = y - num2;
+  let flag = false;
+  for (let k = num5; k < num5 + num3; k++) {
+    for (let l = top; l < top + 3; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }                     // 原版 null→new Tile=非活性
+      const q = st.idx(k, l);
+      if (!st.flags[q] || SWEEP_SHEET[st.type[q]] !== sheet
+        || st.frameX[q] !== (k - num5) * 18 + num6
+        || st.frameY[q] !== (l - top) * 18 + num8) flag = true;              // cs:52873-85
+    }
+  }
+  const ay = top - 1, ax = num5 + 1;
+  if (!st.inBounds(ax, ay) || !nactiveAt(st, ax, ay)) flag = true;           // cs:52888-93
+  else {
+    const at = st.type[st.idx(ax, ay)]!;
+    const d = TILE_DEFS[at];
+    if (!(genSolidType(at) && !d?.platform)) flag = true;
+  }
+  if (!flag) return;
+  ctx.destroyObject = true;                                                  // cs:52896
+  for (let m = num5; m < num5 + num3; m++) {
+    for (let n = top; n < top + 3; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const q = st.idx(m, n);
+      if (st.flags[q] && SWEEP_SHEET[st.type[q]] === sheet) killTileGen(st, ctx, m, n);
+    }
+  }
+  ctx.destroyObject = false;                                                 // cs:52988
+  for (let num19 = num5 - 1; num19 < num5 + num3 + 1; num19++) {
+    for (let num20 = top - 1; num20 < top + 4; num20++) tileFrameGen(st, ctx, num19, num20, false);   // cs:52990-94
+  }
+}
+
+/* ── CheckTree（cs:54598-54808，YYYYY 批：s22222 #97 树杀链 118 杀）──────────
+ * 与 SurfaceDecorPasses.checkTreeAt 同源 1:1（ vanity=false 支）；杀走引擎
+ * killTileGen（尘掷 0）+ 引擎九宫级联。帧读写走 cfx/cfy 虚拟值（死格 -1）。
+ * 583-589/596/616/634/323（Gem/Vanity/Ash/Palm 树）生成期在场成员未实证，
+ * 不派发（备案）。 */
+const TREE_GROUND_NORM = new Set([23, 661, 477, 60, 70, 109, 147, 199, 662, 492]);
+function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+  const k = st.idx(x, y);
+  const frameX0 = st.frameX[k]!, frameY0 = st.frameY[k]!;
+  const self = SWEEP_SHEET[st.type[k]];
+  const typeAt = (cx: number, cy: number): number => {
+    if (!st.inBounds(cx, cy)) return -1;                    // 原版 null tile → -1
+    const i = st.idx(cx, cy);
+    return st.flags[i] ? SWEEP_SHEET[st.type[i]]! : -1;     // inactive → -1
+  };
+  const num2 = typeAt(x - 1, y), num3 = typeAt(x + 1, y), num = typeAt(x, y - 1);
+  let num4 = typeAt(x, y + 1);
+  if (TREE_GROUND_NORM.has(num4)) num4 = 2;                 // cs:54620-54636 归一化
+  const groundOk = num4 === 2;
+  let cfx = frameX0, cfy = frameY0;
+  let dead = false;
+  const kill = (): void => {
+    if (dead) return;                                        // KillTile inactive 早退
+    dead = true; cfx = -1; cfy = -1;
+    killTileGen(st, ctx, x, y);                             // 含 cs:63967 尾九宫级联
+  };
+  const wr = (nfx: number, nfy: number): void => {
+    cfx = nfx; cfy = nfy;
+    if (!dead) { st.frameX[k] = nfx; st.frameY[k] = nfy; }
+  };
+  if (!groundOk && num4 !== self
+    && ((cfx === 0 && cfy <= 130) || (cfx === 22 && cfy <= 130) || (cfx === 44 && cfy <= 130))) kill();   // R1
+  if (cfx >= 22 && cfx <= 44 && cfy >= 132 && cfy <= 176) {
+    if (!groundOk) kill();                                   // R2 根须/基座侧格
+    else if ((cfx !== 22 || num2 !== self) && (cfx !== 44 || num3 !== self)) kill();
+  } else if ((cfx === 88 && cfy >= 0 && cfy <= 44) || (cfx === 66 && cfy >= 66 && cfy <= 130)
+    || (cfx === 110 && cfy >= 66 && cfy <= 110) || (cfx === 132 && cfy >= 0 && cfy <= 176)) {
+    const n5 = cfy % 66;                                     // R2else 侧枝干身重帧
+    if (num2 === self && num3 === self) wr(110, 66 + n5);
+    else if (num2 === self) wr(88, n5);
+    else if (num3 === self) wr(66, 66 + n5);
+    else wr(0, n5);
+  }
+  if (cfy >= 132 && cfy <= 176 && (cfx === 0 || cfx === 66 || cfx === 88)) {
+    const n6 = cfy % 66;                                     // R3 基座干身（杀后仍重帧）
+    if (!groundOk) kill();
+    if (num2 !== self && num3 !== self) wr(0, n6);
+    else if (num2 !== self) wr(0, 132 + n6);
+    else if (num3 !== self) wr(66, 132 + n6);
+    else wr(88, 132 + n6);
+  }
+  if ((cfx === 66 && (cfy === 0 || cfy === 22 || cfy === 44)) || (cfx === 44 && (cfy === 198 || cfy === 220 || cfy === 242))) {
+    if (num3 !== self) kill();                               // R4 侧枝贴干存活链
+  } else if ((cfx === 88 && (cfy === 66 || cfy === 88 || cfy === 110)) || (cfx === 66 && (cfy === 198 || cfy === 220 || cfy === 242))) {
+    if (num2 !== self) kill();
+  } else if (num4 === -1) {
+    kill();                                                  // cs:54747（|| num4==23 前置归一化致死代码）
+  } else if (num !== self && cfy < 198 && ((cfx !== 22 && cfx !== 44) || cfy < 132)) {
+    const n7 = cfy % 66;                                     // R4else3 干身孤立重帧
+    if (num2 === self || num3 === self) {
+      if (num4 === self) {
+        if (num2 === self && num3 === self) wr(132, 132 + n7);
+        else if (num2 === self) wr(132, n7);
+        else wr(132, 66 + n7);
+      } else {
+        if (num2 === self && num3 === self) wr(154, 132 + n7);
+        else if (num2 === self) wr(154, n7);
+        else wr(154, 66 + n7);
+      }
+    } else wr(110, n7);
+  }
+  if (cfx !== frameX0 && cfy !== frameY0 && frameX0 >= 0 && frameY0 >= 0) {
+    tileFrameGen(st, ctx, x - 1, y, false);                  // cs:54798-54806 尾部传播（双帧均变）
+    tileFrameGen(st, ctx, x + 1, y, false);
+    tileFrameGen(st, ctx, x, y - 1, false);
+    tileFrameGen(st, ctx, x, y + 1, false);
   }
 }
 

@@ -203,6 +203,11 @@ export class PetFollower extends Entity {
   private rollRot = 0;
   /** Wisp(211) 远距追击闩（原版 localAI[0]，:56867-56925） */
   private wispFar = false;
+  /** 被抚摸中（AI_026 flag9 = player.petting.proj == whoAmI，:55182）：闲逛/浮游
+   *  态全停（:3898 `ai[1]!=0 || flag9 → flag2=flag3=false`）+ 面向玩家站定。
+   *  Game 侧 Player.petAnimal 置位 / updatePettingAnimal 停止时复位（2026-08-20
+   *  接通——此前文件尾"④ AI_026 抚摸交互帧未移植"登记销核） */
+  beingPetted = false;
 
   constructor(x: number, y: number, public readonly projId: number,
     private ownerRef: () => OwnerRef | null) {
@@ -218,6 +223,20 @@ export class PetFollower extends Entity {
     const p = this.ownerRef();
     if (!p || p.dead) { this.dead = true; return; }
     this.animTick++;
+    // 被抚摸（AI_026 flag9）：闲逛/浮游停摆 + 面向玩家 + 速度衰减（地面族保留重力）
+    if (this.beingPetted) {
+      this.dir = Math.sign(p.cx - this.cx) || this.dir;
+      this.vx *= 0.8;
+      if (this.params?.family === 'ground') {
+        const e = this.params.e;
+        this.vy = Math.min(this.vy + (e.gravity ?? 0.4), e.fallCap ?? 10);
+        moveAndCollide(this, game.world, this.vx, this.vy);
+      } else {
+        this.vx = 0; this.vy = 0;
+      }
+      if (this.params) this.stepAnim(this.params);
+      return;
+    }
     const R = this.params;
     if (!R) { this.legacyAI(p); return; }   // 表外 id：回退登记见文件尾
     switch (R.family) {
@@ -562,7 +581,10 @@ export class PetFollower extends Entity {
   //    尖叫/黑暗戳人、1090 彩虹巨石微光粒子——纯视觉/彩蛋，未移植；
   //  ③ 地面族逐款帧窗口（958 行走 5-12、825 待机表情轮盘等）与 208 鹦鹉 0.95
   //    水平阻尼、1027 波浪帧段——按家族通用规则近似；
-  //  ④ AI_026 抚摸(petting)交互帧、尘/Gore 特效未移植。
+  //  ④ AI_026 抚摸(petting)：已接通（beingPetted 2026-08-20——flag9 闲逛/浮游停摆 +
+  //     面向玩家，全链在 Player.petAnimal/updatePettingAnimal + Game 右键链）。
+  //     残留：Pal 族(1093/1094/1098)专属 Joy 音效（1.4.5 Palworld 联动，素材
+  //     dd2 系无对应 wav，登记）。
   private legacyAI(p: OwnerRef): void {
     // 目标位：玩家肩后（朝向反向 ×22px，头侧 -26px）+ 正弦浮动（±4px，0.06/t）
     const bob = Math.sin(this.animTick * 0.06) * 4;

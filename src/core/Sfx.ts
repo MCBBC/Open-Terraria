@@ -246,9 +246,41 @@ export function trackVolumeFor(file: string, ambientVol: number, masterVol: numb
   return AMBIENT_FILES.has(file) ? ambientVol : masterVol;
 }
 
+// ---- 资源包音效覆盖（M13）----
+// 包内 Sounds/<X>（wav/mp3/ogg）→ 键 'X'（sounds/<X>.wav 的 file 部分）。
+// 优先级高于基础源；多包同键由 ResourcePackManager 按优先级序预合并后整表下发。
+// 替换/清空时须驱逐各实例已解码缓冲与失败负缓存——否则已播过的声音钉死旧源。
+const packSoundOverrides = new Map<string, Uint8Array>();
+const sfxInstances = new Set<Sfx>();
+
+/** 全量下发资源包音效覆盖（合并终态）。affected = 新旧键并集驱逐缓存。 */
+export function applySfxPackOverrides(sounds: ReadonlyMap<string, Uint8Array>): void {
+  const affected = new Set([...packSoundOverrides.keys(), ...sounds.keys()]);
+  packSoundOverrides.clear();
+  for (const [k, v] of sounds) packSoundOverrides.set(k, v);
+  for (const inst of sfxInstances) inst.evictSoundCache(affected);
+}
+
+/** 测试/调试探针：当前覆盖表只读视图 */
+export function sfxPackOverrideKeys(): string[] { return [...packSoundOverrides.keys()]; }
+
 export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
+
+  constructor() {
+    sfxInstances.add(this);   // 资源包覆盖下发时的缓冲驱逐对象
+  }
+
+  /** 资源包覆盖变更：驱逐受影响键的解码缓冲与失败负缓存（下次播放重取当前源）。
+   *  包级可见（applySfxPackOverrides 跨实例调用） */
+  evictSoundCache(files: Iterable<string>): void {
+    for (const f of files) {
+      this.buffers.delete(f);
+      this.failed.delete(f);
+    }
+  }
+
   /** 在途解码中的文件（防重复 fetch） */
   private pending = new Set<string>();
   /** 循环轨在途解码（Promise 去重，与 pending 互斥使用） */
@@ -276,13 +308,24 @@ export class Sfx {
   /** 单实例槽:file → 正在播的 source(onended 清) */
   private singlePlaying = new Map<string, AudioBufferSourceNode>();
 
-  /** 按需取缓冲：未命中时后台 fetch+decode，同步返回已就位缓冲或 null */
+  /** 按需取缓冲：未命中时后台 fetch+decode，同步返回已就位缓冲或 null。
+   *  资源包覆盖优先（M13，AssetSourceController.UseResourcePacks 的音频源同语义）：
+   *  包内 Sounds/<X> 先于 sprites/ 基础源查询——命中即用包字节，不走 fetch。 */
   private ensureBuffer(file: string): AudioBuffer | null {
     const buf = this.buffers.get(file);
     if (buf) return buf;
     if (this.pending.has(file) || this.failed.has(file)) return null;
     const ctx = this.ensure(true);
     if (!ctx) return null;
+    const override = packSoundOverrides.get(file);
+    if (override) {
+      this.pending.add(file);
+      ctx.decodeAudioData(override.slice().buffer)
+        .then((decoded) => { this.buffers.set(file, decoded); this.failed.delete(file); })
+        .catch(() => { this.failed.add(file); })
+        .finally(() => { this.pending.delete(file); });
+      return null;
+    }
     this.pending.add(file);
     fetch(`sounds/${file}.wav`)
       .then((r) => (r.ok ? r.arrayBuffer() : null))

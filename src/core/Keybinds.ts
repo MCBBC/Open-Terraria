@@ -44,7 +44,9 @@ export const KEYBIND_ACTIONS: readonly KeybindAction[] = [
  * - Grapple 默认空：原版默认 E 与本仓 E=物品栏冲突，用户可自行腾挪；
  * - MapZoomIn/Out 默认小键盘 +/-（原版 Add/Subtract），全屏地图打开时缩放地图，
  *   关闭时回落视野缩放（保持迁移前 Equal/NumpadAdd 双缩放视野的行为）；
- * - ToggleCameraMode 默认空：原版默认 F4 被调试键（全图迷雾消除）占用。
+ * - ToggleCameraMode 默认 F4（原版 PlayerInput.cs:1926）——调试键（全图迷雾
+ *   消除）已迁 Shift+F4 让位（2026-08-20；scripts/_fog*-probe.mjs 均直接调
+ *   world API 不按键,无探针破坏）。
  */
 export const DEFAULT_KEYBINDS: Record<KeybindAction, readonly string[]> = {
   Up: ['KeyW', 'ArrowUp'],
@@ -86,7 +88,7 @@ export const DEFAULT_KEYBINDS: Record<KeybindAction, readonly string[]> = {
   PreviousLoadout: [],
   NextLoadout: [],
   ToggleCreativeMenu: ['KeyC'],
-  ToggleCameraMode: [],
+  ToggleCameraMode: ['F4'],
 };
 
 const ACTION_SET: ReadonlySet<string> = new Set(KEYBIND_ACTIONS);

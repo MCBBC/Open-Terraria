@@ -7,8 +7,8 @@
 //     CreateTrackerFor：CustomBossDefinitions[type] 或 npc.boss 才建（:154-167）
 //   - AddDamage(npc, owner, dmg)：realLife 归主段（GetRealActiveNPC :123-136）；
 //     life<=0 早退；伤害 min(dmg, life)（:176-181 + AddDamage :263-268，溢杀不
-//     膨胀百分比）；owner 0-254=玩家（按名字聚合 GetOrAddEntry :240-261，改名
-//     换人位不继承）、255=世界伤害（陷阱与减益，WorldCreditEntry）
+//     膨胀百分比）；owner=-1 本地玩家/0-254 远端槽位（按名字聚合 GetOrAddEntry
+//     :240-261，改名换人位不继承）、255=世界伤害（陷阱与减益，WorldCreditEntry）
 //   - Update（Main.cs:17749 每 tick）：各 tracker 计时；CheckActive——该族 NPC
 //     全不在场（NPC.cs:7202-7215 npcsFoundForCheckActive 每帧重扫）即停；
 //     停止后非空 tracker 进 RecentAttempts 环（上限 3，:237-245），最旧的在
@@ -102,7 +102,6 @@ class BossTracker {
     return bossDamageHost.npcName(this.type);
   }
 
-  /** KillTimeMessage（:18-20）：killed 只换文案——getReport 内直接取键 */
   /** IncludeDamageFor（:54-68） */
   includeDamageFor(npc: TrackerNpcLike): boolean {
     const type = npc.vanillaId ?? -1;
@@ -260,9 +259,6 @@ export function consumePendingStrikeOwner(): number | null {
   return o;
 }
 
-/** 进行中 tracker 数（>0 才需要本帧在场类型集——Game 侧免常态扫实体表） */
-export function activeBossTrackerCount(): number { return activeTrackers.length; }
-
 /** NPCDamageTracker.Update（:208-235）。presentTypes = 惰性在场 npc 类型集
  *  （NPC.cs:7202-7215 npcsFoundForCheckActive 每帧重扫的等价注入;无进行中
  *  tracker 时跳过扫描——RecentAttempts 过期仍按 tick 推进） */
@@ -301,9 +297,3 @@ export function resetBossDamage(): void {
   activeTrackers = [];
   recentFinished = [];
 }
-
-// ---- 测试口：内部态暴露（仅 tests 用；游戏代码勿消费） ----
-export const __bossTrackerTest = {
-  activeCount(): number { return activeTrackers.length; },
-  recentCount(): number { return recentFinished.length; },
-};

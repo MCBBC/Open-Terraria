@@ -1,21 +1,32 @@
 // Journey 力量菜单（UICreativePowersMenu 的 DOM 版）。
-// 标杆 Terraria.GameContent.UI.States.UICreativePowersMenu.cs + CreativePowers.cs：
+// 标杆 Terraria.GameContent.UI.States/UICreativePowersMenu.cs + CreativePowers.cs：
 //   菜单结构 = 主条（复制/研究/时间/天气/个人 + 感染蔓延 toggle + 敌人难度滑杆）
 //   + 时间条（冻结 + 黎明/正午/黄昏/午夜 + 时间速度滑杆）
 //   + 天气条（风滑杆 + 冻结风 + 雨滑杆 + 冻结雨）+ 个人条（上帝/放置范围/刷怪率滑杆）。
 // 数值语义 1:1（滑杆映射/档位/持久化全走 JourneyPowers.ts 纯函数）；
 // 视觉为本仓面板风格（横滑杆代原版竖滑杆，偏差登记）。
 // 文案直接用原版 CreativePowers.* l10n 键（zh-Hans/en-US 均在 vanilla 包内）。
+//
+// M8（2026-08-20）：category 1 复制页 = 旅程物品浏览器
+//   （UICreativeInfiniteItemsDisplay 1:1：搜索框 + 11 互斥过滤器 + 固定排序链 +
+//    虚拟滚动图标网格——过滤/排序/搜索纯逻辑在 JourneyBrowser.ts）。
+// M9（2026-08-20）：联机同步——所有力量改动经 net/journeySync.ts 上报服务器权威态；
+//   权限门（PowerPermissionLevel）非授权点击拒绝提示；房主面板附权限调节区。
 import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
-import researchNeed from '../data/vanilla-research.json';
 import {
   JourneyPowersState, targetTimeRate, timeRateSliderOf, strengthOfDifficultySlider,
   spawnRateMultiplier, shouldDisableSpawns, windOfSlider, sliderOfWind,
   TIME_RATE_PRESETS, DIFFICULTY_PRESETS, SPAWN_RATE_PRESETS, WIND_PRESETS, RAIN_PRESETS,
+  JOURNEY_POWER_REGISTRY,
 } from '../world/JourneyPowers';
 import { Clock } from '../world/World';
+import { snapshotJourneyWorld } from '../net/journeySync';
+import {
+  JOURNEY_FILTER_KEYS, FILTER_L10N, runBrowserQuery,
+  type JourneyFilterKey,
+} from './JourneyBrowser';
 
 /** 背包内物品点击给 1 / shift 给整堆（原版 UIItemSlot 抓取语义的 UI 近似） */
 function giveItem(game: Game, internalId: number, stack: number): void {
@@ -56,6 +67,11 @@ function internalIdOfVid(vid: number): number {
   return vidReverse.get(vid) ?? 0;
 }
 
+/** PowerId 常量（CreativePowerManager.Initialize 注册序 :90-104 = JOURNEY_POWER_REGISTRY id） */
+const PID: Record<string, number> = Object.fromEntries(
+  JOURNEY_POWER_REGISTRY.map((p) => [p.cls, p.id]),
+) as Record<string, number>;
+
 const CSS = `
 .sw-jp-panel { pointer-events:auto; position:fixed; left:50%; top:50%;
   transform:translate(-50%,-50%); width:min(480px, 92vw); max-height:82vh;
@@ -77,10 +93,33 @@ const CSS = `
 .sw-jp-presets { display:flex; gap:3px; flex:none; }
 .sw-jp-presets button { margin:0; padding:2px 6px; font-size:11px; }
 .sw-jp-note { font-size:11px; color:#8a97c4; }
-.sw-jp-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(108px, 1fr));
-  gap:3px; max-height:220px; overflow-y:auto; }
-.sw-jp-grid button { margin:0; padding:3px 4px; font-size:11px; text-align:left;
-  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* ---- M8 浏览器（UICreativeInfiniteItemsDisplay 布局 1:1 的 DOM 化）---- */
+.sw-jp-search { display:flex; gap:4px; align-items:center; }
+.sw-jp-search input { flex:1; margin:0; font-size:12px; padding:4px 8px; }
+.sw-jp-search button { margin:0; padding:4px 8px; width:auto; font-size:12px; flex:none; }
+.sw-jp-filters { display:flex; flex-wrap:wrap; gap:3px; }
+.sw-jp-filters button { margin:0; padding:3px 7px; font-size:11px; flex:none; }
+.sw-jp-filters button.sel { background:linear-gradient(#5a6ad0,#3a4aa0); border-color:#8d9cf0; }
+.sw-jp-scroll { position:relative; overflow-y:auto; height:264px; flex:none;
+  background:rgba(18,24,48,0.55); border:1px solid #39406e; border-radius:4px; }
+.sw-jp-spacer { }   /* 高度 = 行数×44（撑滚动条） */
+.sw-jp-cells { position:absolute; left:0; top:0; right:0; }
+.sw-jp-cell { position:absolute; width:44px; height:44px; margin:0; padding:1px;
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
+  background:transparent; border:1px solid transparent; border-radius:4px; }
+.sw-jp-cell:hover { border-color:#8d9cf0; background:rgba(90,106,208,0.25); }
+.sw-jp-cell.partial { opacity:0.45; cursor:default; }   /* 原版 context 34 暗槽 */
+.sw-jp-cell.new::after { content:''; position:absolute; inset:0;
+  border:1px solid #ffd76a; border-radius:4px; pointer-events:none; }  /* newAndShiny */
+.sw-jp-cell canvas { image-rendering:pixelated; }
+.sw-jp-cell .fb { font-size:10px; color:#9fb0dd; line-height:1.1; text-align:center;
+  overflow:hidden; }
+/* ---- M9 权限区（房主）---- */
+.sw-jp-perm { display:flex; flex-direction:column; gap:4px; }
+.sw-jp-perm-grid { display:flex; flex-wrap:wrap; gap:3px; }
+.sw-jp-perm-grid button { margin:0; padding:2px 6px; font-size:11px; flex:none; }
+.sw-jp-perm-grid button.l1 { border-color:#c9a94e; }
+.sw-jp-perm-grid button.l0 { border-color:#c94e4e; opacity:0.85; }
 `;
 
 let cssInjected = false;
@@ -96,6 +135,14 @@ let panel: HTMLElement | null = null;
 let escHandler: ((e: KeyboardEvent) => void) | null = null;
 /** 主条当前类别（OpenMainSubCategory 枚举序：1 复制/2 研究/3 时间/4 天气/5 难度/6 个人） */
 let category = 0;
+/** 面板打开期间注册的清理回调（浏览器滚动监听/延迟刷新定时器） */
+let panelCleanup: Array<() => void> = [];
+
+/** M9：研究进度外部变化（队友上报）→ 面板开着则刷新浏览器（Game.onJourneyUnlock 调用） */
+export function journeyBrowserNotifyResearchChanged(): void {
+  browserRefresh?.();
+}
+let browserRefresh: (() => void) | null = null;
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
@@ -143,6 +190,34 @@ export function openJourneyPowersPanel(game: Game): void {
   const body = el('div', 'sw-jp-body');
   panel.appendChild(body);
 
+  // ---- M9 上报助手（单机 = 纯本地；联机 = 乐观生效 + 上报服务器权威态）----
+  const net = () => game.net;
+  /** IsAvailableForPlayer 门（CreativePowersHelper :182-197）；拒绝时 toast
+     原版仅悬停附注 CantUsePowerBecauseOfNoPermissionFromServer——DOM 以点击反馈近似 */
+  const usePower = (cls: string): boolean => {
+    const id = PID[cls];
+    if (id !== undefined && !game.journeyPowerAvailable(id)) {
+      game.cb.onToast?.(t('CreativePowers.CantUsePowerBecauseOfNoPermissionFromServer', '你无权使用此能力'));
+      return false;
+    }
+    return true;
+  };
+  /** 世界态上报（ASharedSliderPower.PushChange：本端缓存先行 + 服务器广播他人） */
+  const pushWorld = (): void => {
+    const w = game.world;
+    if (w?.isJourney && w.journeyPowers && w.weather) {
+      net()?.sendJourneyWorldState(snapshotJourneyWorld(w));
+    }
+  };
+  /** 个人态上报（APerPlayerTogglePower.SyncOnePlayer 语义） */
+  const pushPersonal = (jp: JourneyPowersState): void => {
+    net()?.sendJourneyPersonalState({
+      godmode: jp.godmode,
+      farPlacementRange: jp.farPlacementRange,
+      spawnRateSlider: jp.spawnRateSlider,
+    });
+  };
+
   const render = () => {
     const w = game.world;
     if (!w) return;
@@ -176,7 +251,9 @@ export function openJourneyPowersPanel(game: Game): void {
         : t('CreativePowers.StopBiomeSpread_Disabled', '感染蔓延已启用'));
     bSpread.addEventListener('mousedown', (e) => {
       e.stopPropagation();
+      if (!usePower('StopBiomeSpreadPower')) return;
       jp.stopBiomeSpread = !jp.stopBiomeSpread;
+      pushWorld();
       game.sfx.play('menuTick', 1);
       render();
     });
@@ -194,7 +271,9 @@ export function openJourneyPowersPanel(game: Game): void {
           : t('CreativePowers.FreezeTime_Disabled', '时间恢复流逝'));
       bFreeze.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        if (!usePower('FreezeTime')) return;
         w.journeyFreezeTime = !w.journeyFreezeTime;   // 复用 T 键同源状态（勿建第二套）
+        pushWorld();
         game.sfx.play('menuTick', 1);
         render();
       });
@@ -202,20 +281,23 @@ export function openJourneyPowersPanel(game: Game): void {
       body.appendChild(r1);
       // 四时段按钮（StartDayImmediately 族 :774-864；Main.SkipToTime :64657）
       const r2 = el('div', 'sw-jp-row');
-      const times: Array<[string, string, number, boolean]> = [
-        ['StartDayImmediately', '黎明', Clock.DAWN, true],
-        ['StartNoonImmediately', '正午', 0.5, true],
-        ['StartNightImmediately', '黄昏', Clock.DUSK, false],
-        ['StartMidnightImmediately', '午夜', 0, false],
+      const times: Array<[string, string, number, boolean, 1 | 2 | 3 | 4]> = [
+        ['StartDayImmediately', '黎明', Clock.DAWN, true, 1],
+        ['StartNoonImmediately', '正午', 0.5, true, 2],
+        ['StartNightImmediately', '黄昏', Clock.DUSK, false, 3],
+        ['StartMidnightImmediately', '午夜', 0, false, 4],
       ];
-      for (const [key, fb, tod, isDay] of times) {
+      for (const [key, fb, tod, isDay, which] of times) {
         const b = el('button', 'sw-btn', t(`CreativePowers.${key}`, fb));
         b.title = t(`CreativePowers.${key}_Description`, fb);
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
-          game.skipToTime(tod, isDay);   // Main.SkipToTime（:64657-64671）
+          // ASharedButtonPower.RequestUse：空载荷上报——服务器中继全员（含发起端）
+          // 各端本地 SkipToTime；单机直跳
+          if (!usePower(key)) return;
+          if (net()) net()!.sendJourneyTimeSkip(which);
+          else game.skipToTime(tod, isDay);   // Main.SkipToTime（:64657-64671）
           game.sfx.play('menuTick', 1);
-          render();
         });
         r2.appendChild(b);
       }
@@ -228,7 +310,9 @@ export function openJourneyPowersPanel(game: Game): void {
         const b = el('button', 'sw-btn', k);
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          if (!usePower('ModifyTimeRate')) return;
           w.journeyTimeRate = targetTimeRate(v);   // :931-946 点击档
+          pushWorld();
           game.sfx.play('menuTick', 1);
           render();
         });
@@ -244,7 +328,7 @@ export function openJourneyPowersPanel(game: Game): void {
         w.journeyTimeRate = targetTimeRate(+slider.value);
         val.textContent = timeRateText(w.journeyTimeRate);
       });
-      slider.addEventListener('change', () => { game.sfx.play('menuTick', 1); render(); });
+      slider.addEventListener('change', () => { pushWorld(); game.sfx.play('menuTick', 1); render(); });
       r3.appendChild(slider);
       const val = el('div', 'sw-jp-val', timeRateText(w.journeyTimeRate));
       r3.appendChild(val);
@@ -263,9 +347,11 @@ export function openJourneyPowersPanel(game: Game): void {
         const b = el('button', 'sw-btn', k);
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          if (!usePower('ModifyWindDirectionAndStrength')) return;
           const wind = windOfSlider(v);
           wx.windSpeedTarget = wind;
           wx.windSpeedCurrent = wind;   // :1197 current=target 同置
+          pushWorld();
           game.sfx.play('menuTick', 1);
           render();
         });
@@ -282,7 +368,7 @@ export function openJourneyPowersPanel(game: Game): void {
         wx.windSpeedCurrent = wind;
         val.textContent = windText(wind);
       });
-      slider.addEventListener('change', () => { game.sfx.play('menuTick', 1); render(); });
+      slider.addEventListener('change', () => { pushWorld(); game.sfx.play('menuTick', 1); render(); });
       r1.appendChild(slider);
       const val = el('div', 'sw-jp-val', windText(wx.windSpeedTarget));
       r1.appendChild(val);
@@ -292,7 +378,9 @@ export function openJourneyPowersPanel(game: Game): void {
           : t('CreativePowers.FreezeWindDirectionAndStrength_Disabled', '风况变化已启用'));
       bFreezeWind.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        if (!usePower('FreezeWindDirectionAndStrength')) return;
         jp.freezeWind = !jp.freezeWind;
+        pushWorld();
         game.sfx.play('menuTick', 1);
         render();
       });
@@ -310,7 +398,9 @@ export function openJourneyPowersPanel(game: Game): void {
         const b = el('button', 'sw-btn', k);
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          if (!usePower('ModifyRainPower')) return;
           applyRainSlider(game, v);
+          pushWorld();
           game.sfx.play('menuTick', 1);
           render();
         });
@@ -325,7 +415,7 @@ export function openJourneyPowersPanel(game: Game): void {
         applyRainSlider(game, +slider2.value);
         val2.textContent = rainText(wx.cloudAlpha);
       });
-      slider2.addEventListener('change', () => { game.sfx.play('menuTick', 1); render(); });
+      slider2.addEventListener('change', () => { pushWorld(); game.sfx.play('menuTick', 1); render(); });
       r2.appendChild(slider2);
       const val2 = el('div', 'sw-jp-val', rainText(wx.cloudAlpha));
       r2.appendChild(val2);
@@ -335,7 +425,9 @@ export function openJourneyPowersPanel(game: Game): void {
           : t('CreativePowers.FreezeRainPower_Disabled', '雨情变化已启用'));
       bFreezeRain.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        if (!usePower('FreezeRainPower')) return;
         jp.freezeRain = !jp.freezeRain;
+        pushWorld();
         game.sfx.play('menuTick', 1);
         render();
       });
@@ -356,7 +448,9 @@ export function openJourneyPowersPanel(game: Game): void {
         const b = el('button', 'sw-btn', label);
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          if (!usePower('DifficultySliderPower')) return;
           jp.difficultySlider = v;   // :1055-1077 四档点击
+          pushWorld();
           game.sfx.play('menuTick', 1);
           render();
         });
@@ -371,7 +465,7 @@ export function openJourneyPowersPanel(game: Game): void {
         jp.difficultySlider = +slider.value;
         val.textContent = difficultyText(strengthOfDifficultySlider(jp.difficultySlider));
       });
-      slider.addEventListener('change', () => { game.sfx.play('menuTick', 1); render(); });
+      slider.addEventListener('change', () => { pushWorld(); game.sfx.play('menuTick', 1); render(); });
       r1.appendChild(slider);
       const val = el('div', 'sw-jp-val', difficultyText(strengthOfDifficultySlider(jp.difficultySlider)));
       r1.appendChild(val);
@@ -388,7 +482,9 @@ export function openJourneyPowersPanel(game: Game): void {
           : t('CreativePowers.Godmode_Disabled', '无敌模式已禁用'));
       bGod.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        if (!usePower('GodmodePower')) return;
         jp.godmode = !jp.godmode;
+        pushPersonal(jp);
         game.sfx.play('menuTick', 1);
         render();
       });
@@ -402,7 +498,9 @@ export function openJourneyPowersPanel(game: Game): void {
           : t('CreativePowers.InfinitePlacementRange_Disabled', '正常放置范围'));
       bFar.addEventListener('mousedown', (e) => {
         e.stopPropagation();
+        if (!usePower('FarPlacementRangePower')) return;
         jp.farPlacementRange = !jp.farPlacementRange;
+        pushPersonal(jp);
         game.sfx.play('menuTick', 1);
         render();
       });
@@ -416,7 +514,9 @@ export function openJourneyPowersPanel(game: Game): void {
         const b = el('button', 'sw-btn', k);
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          if (!usePower('SpawnRateSliderPerPlayerPower')) return;
           jp.spawnRateSlider = v;   // :1683-1698 三档点击
+          pushPersonal(jp);
           game.sfx.play('menuTick', 1);
           render();
         });
@@ -431,36 +531,16 @@ export function openJourneyPowersPanel(game: Game): void {
         jp.spawnRateSlider = +slider.value;
         val.textContent = spawnRateText(jp.spawnRateSlider);
       });
-      slider.addEventListener('change', () => { game.sfx.play('menuTick', 1); render(); });
+      slider.addEventListener('change', () => { pushPersonal(jp); game.sfx.play('menuTick', 1); render(); });
       r3.appendChild(slider);
       const val = el('div', 'sw-jp-val', spawnRateText(jp.spawnRateSlider));
       r3.appendChild(val);
       body.appendChild(r3);
     } else if (category === 1) {
-      // 复制菜单（InfiniteItems——已研究物品自由取用）
-      const grid = el('div', 'sw-jp-grid');
-      const need = (researchNeed as unknown as { need: Record<string, number> }).need;
-      const vids = Object.keys(need).map(Number).filter((v) => game.research.isResearched(v));
-      body.appendChild(el('div', 'sw-jp-note',
-        t('Mods.SandboxWorld.JourneyPowers.DuplicateCount', `可复制物品 ${vids.length} 件`, vids.length)));
-      if (!vids.length) {
-        body.appendChild(el('div', 'sw-jp-note',
-          t('Mods.SandboxWorld.JourneyPowers.DuplicateEmpty', '尚未研究任何物品')));
-      }
-      for (const vid of vids) {
-        const internalId = internalIdOfVid(vid);
-        if (!internalId) continue;
-        const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
-        const b = el('button', 'sw-btn', Lang.itemName(vid) ?? `#${vid}`);
-        b.title = t('CreativePowers.ResearchButtonTooltip', '可以自由创造已经过充分研究的物品');
-        b.addEventListener('mousedown', (e) => {
-          e.stopPropagation();
-          giveItem(game, internalId, e.shiftKey ? (def?.maxStack ?? 999) : 1);
-          game.sfx.play('menuTick', 1);
-        });
-        grid.appendChild(b);
-      }
-      body.appendChild(grid);
+      // 复制菜单（UICreativeInfiniteItemsDisplay 1:1：搜索 + 过滤 + 排序 + 虚拟滚动）
+      buildJourneyBrowser(game, body);
+      // M9 权限区（联机 + 房主；原版权限由服务器配置文件承担，此处为房主 UI 直改）
+      if (net()?.active && net()!.policy.isHost) buildJourneyPermissions(game, body);
     } else if (category === 2) {
       // 研究入口（复用 ResearchUI）
       const r1 = el('div', 'sw-jp-row');
@@ -483,8 +563,231 @@ export function openJourneyPowersPanel(game: Game): void {
   game.sfx.play('menuTick', 1);
 }
 
+// ---------------------------------------------------------------------------
+// M8 浏览器（UICreativeInfiniteItemsDisplay.BuildInfinitesMenuContents :163-202 +
+// UIDynamicItemCollection 视口裁剪 :90-107 的 DOM 等价：44px 槽格 + 只渲染可视行±1）
+// ---------------------------------------------------------------------------
+
+/** 槽格边长（UIDynamicItemCollection.sizePerEntryX/Y = 44） */
+const CELL = 44;
+
+function buildJourneyBrowser(game: Game, body: HTMLElement): void {
+  const research = game.research;
+  // 搜索框（UIWrappedSearchBar——空文本 = UI.PlayerNameSlot 原版默认；右键清空→本仓 ✕ 钮）
+  const searchRow = el('div', 'sw-jp-search');
+  const input = el('input') as HTMLInputElement;
+  input.maxLength = 50;   // UISearchBar.MaxInputLength 默认 50
+  input.placeholder = t('UI.PlayerNameSlot', '名字：');
+  const clearBtn = el('button', 'sw-btn', '✕');
+  clearBtn.title = t('Mods.SandboxWorld.JourneyPowers.ClearSearch', '清空');
+  searchRow.appendChild(input);
+  searchRow.appendChild(clearBtn);
+  body.appendChild(searchRow);
+  // 过滤器条（UICreativeItemsInfiniteFilteringOptions：40px 按钮横排；互斥单选）
+  const filterRow = el('div', 'sw-jp-filters');
+  body.appendChild(filterRow);
+  const countLine = el('div', 'sw-jp-note');
+  body.appendChild(countLine);
+  const scroll = el('div', 'sw-jp-scroll');
+  const spacer = el('div', 'sw-jp-spacer');
+  const cellsLayer = el('div', 'sw-jp-cells');
+  scroll.appendChild(spacer);
+  scroll.appendChild(cellsLayer);
+  body.appendChild(scroll);
+
+  let search: string | null = null;
+  let activeFilter: JourneyFilterKey | null = null;   // 原版 UI 互斥单选（:87-99）
+  let list: number[] = [];
+  let rows = 0;
+  const filterButtons = new Map<JourneyFilterKey, HTMLButtonElement>();
+
+  /** 源集 = ForEachItemWithResearchProgress（ItemsSacrificedUnlocksTracker :48-57：
+   *  计数>0 的解析后 id——含未研究满的半程物品，原版暗槽展示不可取用） */
+  const sourceVids = (): number[] => research.resolvedIdsWithProgress();
+
+  const rebuild = () => {
+    list = runBrowserQuery(sourceVids(), {
+      search,
+      activeFilters: activeFilter ? [activeFilter] : [],
+    }, research);
+    const total = sourceVids().length;
+    countLine.textContent = list.length === total
+      ? t('Mods.SandboxWorld.JourneyPowers.DuplicateCount', `可复制物品 ${total} 件`, total)
+      : t('Mods.SandboxWorld.JourneyPowers.DuplicateFiltered',
+        `显示 ${list.length} / ${total} 件`, list.length, total);
+    layout();
+  };
+
+  let rafPending = false;
+  const renderVisible = () => {
+    rafPending = false;
+    const perLine = Math.max(1, Math.floor(scroll.clientWidth / CELL));
+    rows = Math.ceil(list.length / perLine);
+    spacer.style.height = `${rows * CELL}px`;
+    const st = scroll.scrollTop;
+    const first = Math.max(0, Math.floor(st / CELL) - 1);              // 上方多渲染 1 行
+    const last = Math.min(rows, Math.ceil((st + scroll.clientHeight) / CELL) + 1);  // 下方 1 行
+    cellsLayer.textContent = '';
+    for (let row = first; row < last; row++) {
+      for (let col = 0; col < perLine; col++) {
+        const idx = row * perLine + col;
+        if (idx >= list.length) break;
+        cellsLayer.appendChild(makeCell(game, list[idx], col * CELL, row * CELL));
+      }
+    }
+  };
+  const layout = () => {
+    if (rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(renderVisible);
+  };
+
+  // 搜索（OnSearchContentsChanged :556-560——逐字符即时过滤，无防抖）
+  input.addEventListener('input', () => {
+    search = input.value.trim() === '' ? null : input.value.trim();
+    rebuild();
+  });
+  clearBtn.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    input.value = '';
+    search = null;
+    rebuild();
+    input.focus();
+  });
+  // 过滤器按钮（singleFilterButtonClick :81-100：点非活动项先 Clear 再 Toggle；
+  // 点活动项 = 关闭 → 无活动过滤器）
+  for (const key of JOURNEY_FILTER_KEYS) {
+    const b = el('button', 'sw-btn', t(FILTER_L10N[key], key));
+    b.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      activeFilter = activeFilter === key ? null : key;
+      game.sfx.play('menuTick', 1);
+      for (const [k2, btn] of filterButtons) {
+        btn.classList.toggle('sel', k2 === activeFilter);
+      }
+      rebuild();
+    });
+    filterRow.appendChild(b);
+    filterButtons.set(key, b);
+  }
+  const onScroll = () => layout();
+  scroll.addEventListener('scroll', onScroll, { passive: true });
+  const onResize = () => layout();
+  window.addEventListener('resize', onResize);
+  // 图标懒加载重试（atlas.vicon 未就绪 → 文本兜底；三次延迟刷新覆盖后台解码窗口）
+  const timers = [320, 900, 2000].map((ms) =>
+    window.setTimeout(() => layout(), ms));
+  panelCleanup.push(() => {
+    scroll.removeEventListener('scroll', onScroll);
+    window.removeEventListener('resize', onResize);
+    for (const ti of timers) window.clearTimeout(ti);
+    browserRefresh = null;
+  });
+  browserRefresh = rebuild;
+  rebuild();
+  input.focus();
+}
+
+/** 单格（UICreativeItemGrid.DrawSlot :18-34：fully=context29 亮/部分=34 暗；
+ *  悬停/取用清 newly 高亮；partial 不可取） */
+function makeCell(game: Game, vid: number, x: number, y: number): HTMLButtonElement {
+  const research = game.research;
+  const info = research.tryGetSacrificeNumbers(vid);
+  const fully = info ? info.have >= info.need : false;
+  const newly = research.isNewlyResearched(vid);
+  const name = Lang.itemName(vid) ?? `#${vid}`;
+  const b = el('button', 'sw-jp-cell'
+    + (fully ? '' : ' partial')
+    + (newly && fully ? ' new' : ''));
+  b.style.left = `${x}px`;
+  b.style.top = `${y}px`;
+  b.title = fully
+    ? name
+    : `${name}（${info ? `${Math.min(info.have, info.need)}/${info.need}` : '?'}）`;
+  const ar = game.atlas?.vicon(vid);
+  if (ar) {
+    const c = el('canvas') as HTMLCanvasElement;
+    c.width = 36; c.height = 36;
+    const cx = c.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    const s = Math.min(36 / ar.sw, 36 / ar.sh);
+    const w = ar.sw * s, h = ar.sh * s;
+    cx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, (36 - w) / 2, (36 - h) / 2, w, h);
+    b.appendChild(c);
+  } else {
+    b.appendChild(el('div', 'fb', name.slice(0, 4)));
+  }
+  b.addEventListener('mouseenter', () => research.clearNewlyResearchedStatus(vid));
+  if (fully) {
+    b.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      const internalId = internalIdOfVid(vid);
+      if (!internalId) return;
+      const def = ITEM_DEFS[internalId] as { maxStack?: number } | undefined;
+      giveItem(game, internalId, e.shiftKey ? (def?.maxStack ?? 999) : 1);
+      game.sfx.play('menuTick', 1);
+    });
+  }
+  return b;
+}
+
+// ---------------------------------------------------------------------------
+// M9 权限区（房主；原版 NetCreativePowerPermissionsModule S→C + 服务器配置文件
+// journeypermission_<name>=<level>——本仓房主 UI 直改，语义等价配置行）
+// ---------------------------------------------------------------------------
+
+/** 各力量显示键（原版 powerNameKey——CreativePowers.cs 各类） */
+const POWER_LABEL_KEY: Record<string, string> = {
+  FreezeTime: 'CreativePowers.FreezeTime_Enabled',
+  StartDayImmediately: 'CreativePowers.StartDayImmediately',
+  StartNoonImmediately: 'CreativePowers.StartNoonImmediately',
+  StartNightImmediately: 'CreativePowers.StartNightImmediately',
+  StartMidnightImmediately: 'CreativePowers.StartMidnightImmediately',
+  GodmodePower: 'CreativePowers.Godmode_Enabled',
+  ModifyWindDirectionAndStrength: 'CreativePowers.ModifyWindDirectionAndStrength_Opened',
+  ModifyRainPower: 'CreativePowers.ModifyRainPower_Opened',
+  ModifyTimeRate: 'CreativePowers.ModifyTimeRate_Opened',
+  FreezeRainPower: 'CreativePowers.FreezeRainPower_Enabled',
+  FreezeWindDirectionAndStrength: 'CreativePowers.FreezeWindDirectionAndStrength_Enabled',
+  FarPlacementRangePower: 'CreativePowers.InfinitePlacementRange_Enabled',
+  DifficultySliderPower: 'CreativePowers.DifficultySlider_Opened',
+  StopBiomeSpreadPower: 'CreativePowers.StopBiomeSpread_Enabled',
+  SpawnRateSliderPerPlayerPower: 'CreativePowers.NPCSpawnRateSlider_Opened',
+};
+
+function buildJourneyPermissions(game: Game, body: HTMLElement): void {
+  const net = game.net!;
+  const box = el('div', 'sw-jp-perm');
+  box.appendChild(el('div', 'sw-jp-note', t('Mods.SandboxWorld.JourneyPowers.Permissions', '力量权限（点击切换：所有人 → 仅房主 → 锁定）')));
+  const grid = el('div', 'sw-jp-perm-grid');
+  box.appendChild(grid);
+  body.appendChild(box);
+  const levelText = (lv: number): string =>
+    lv === 2 ? t('Mods.SandboxWorld.JourneyPowers.PermEveryone', '所有人')
+      : lv === 1 ? t('Mods.SandboxWorld.JourneyPowers.PermHost', '仅房主')
+        : t('Mods.SandboxWorld.JourneyPowers.PermLocked', '锁定');
+  const paint = () => {
+    grid.textContent = '';
+    for (const p of JOURNEY_POWER_REGISTRY) {
+      const lv = net.journeyPermissions[p.id];
+      const b = el('button', 'sw-btn'
+        + (lv === 1 ? ' l1' : lv === 0 ? ' l0' : ''),
+        `${t(POWER_LABEL_KEY[p.cls], p.cls)}：${levelText(lv)}`);
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        const next = ((net.journeyPermissions[p.id] + 2) % 3) as 0 | 1 | 2;  // 2→1→0→2
+        net.sendJourneyPermission(p.id, next);
+        game.sfx.play('menuTick', 1);
+        paint();
+      });
+      grid.appendChild(b);
+    }
+  };
+  paint();
+}
+
 /** ModifyRainPower.UpdateInfoFromSliderValueCache（:1327-1337）：
- *  0 → StopRain(instant)；否则 StartRain(instant, slider)（strengthOverride） */
+ *  0 → StopRain(instant)；否则 StartRain(instant, slider)（strengthOverride=maxRaining=cloudAlpha） */
 function applyRainSlider(game: Game, v: number): void {
   const wx = game.world?.weather;
   if (!wx) return;
@@ -495,6 +798,9 @@ function applyRainSlider(game: Game, v: number): void {
 export function closeJourneyPowersPanel(): void {
   (window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame
     ?.input && ((window as unknown as { __swGame?: { input: { uiBlocking: boolean } } }).__swGame!.input.uiBlocking = false);
+  for (const fn of panelCleanup) fn();
+  panelCleanup = [];
+  browserRefresh = null;
   panel?.remove();
   panel = null;
   if (escHandler) { window.removeEventListener('keydown', escHandler); escHandler = null; }

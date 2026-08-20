@@ -137,6 +137,7 @@ import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, r
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
+import { CaptureInterface } from './CaptureMode';
 import { BiomeBackground, type BGBlit } from './BiomeBackground';
 import { GLSpriteLayer } from './GLSpriteLayer';
 import { GLWorldLight } from './GLWorldLight';
@@ -1742,6 +1743,8 @@ export class Renderer {
    *  原版为 FilterMoonLordShake 屏幕后处理（以激活点=玩家为靶心的红色扰动）；
    *  canvas 2D 以「靶心径向红晕 + 呼吸脉冲」近似（drawMoonLordShake） */
   moonLordShake: { t: number; x: number; y: number } | null = null;
+  /** 眼球伞云盖染料×光照烘焙缓存（key = 染料vid:帧:光照RGB；>96 项整清防膨胀） */
+  private readonly eyebrellaDyeCache = new Map<string, HTMLImageElement | HTMLCanvasElement | ImageBitmap>();
   lightCanvas: HTMLCanvasElement;
   lightCtx: CanvasRenderingContext2D;
   minimap: Minimap | null = null;
@@ -2054,6 +2057,14 @@ export class Renderer {
     anchorU: 0, anchorV: 0, anchorMX: 0, anchorMY: 0,
   };
 
+  // ---- M6 拍照模式（F4）：CaptureInterface 挂点 + 截图重渲通道门 ----
+  /** 界面实例（激活态由 main.ts 的 ToggleCameraMode 键派发翻转;本文件只承
+   *  frame() 单调用点——见 render() 第 9 段前的 M6 分区注释） */
+  readonly captureMode = new CaptureInterface();
+  /** 截图离屏重渲通道（CaptureMode.renderChunk 置位;激活时 render() 只画
+   *  世界+光照+滤镜链,界面层全跳——原版 DrawCapture 语义） */
+  _capturePass = false;
+
   /** 已放置传送晶塔（Game.refreshPylons 写入；地图图标层 TeleportPylonsMapLayer） */
   pylons: Array<{ x: number; y: number; type: number }> = [];
   /** 右键晶塔时的"当前塔"锚点（Main.MapPylonTile，连线起点；null=非晶塔会话） */
@@ -2192,7 +2203,10 @@ export class Renderer {
   ) {
     // 全屏地图关闭 → 释放整幅资源(GL 纹理 + 2D 临时画布;开图期才占 GPU,
     // 常态零占用——2026-08-18 CPU 化的核心收益点)
-    if (this._fmWasOpen && !this.fullMap.open) {
+    // ★M6 拍照模式:_capturePass 的全屏地图关闭是截图重渲的临时态
+    // (CaptureMode.renderChunk 换装),不触发释放——否则地图视角起拍会
+    // 把整幅地图+迷雾纹理全量重传一次(自愈但白耗)
+    if (this._fmWasOpen && !this.fullMap.open && !this._capturePass) {
       if (this.glfx && this.minimap) this.glfx.dropTexture(`mm:${this.minimap.uid}`);
       if (this.fogWorld) this.glfx?.dropTexture(`fog:${this.fogWorld.seed}`);
       this._fm2dMap = null;
@@ -2846,6 +2860,39 @@ export class Renderer {
     ctx.restore();
 
     this._lastPlayer = player;
+
+    // ==== M6 拍照模式（F4,CaptureInterface 1:1;src/render/CaptureMode.ts）====
+    // _capturePass=离屏截图重渲通道（CaptureMode.renderChunk 二次调用本 render）
+    // = 原版 DrawCapture（Main.cs:56145）独立管线：无任何界面层,到此收口
+    // （飘字第 8 段已画——capturePass 下 dmgNumbers 传 [] 本就为空）。
+    // active=相机模式激活：原版 DrawInterface_10_CheckCaptureManager
+    // （Main.cs:45584-45593）返回 false 截断后续界面层——小地图/信息饰品/
+    // Boss 条/入侵条/死亡文字隐藏;资源条+呼吸计+按钮组+选区+锁屏遮罩由
+    // captureMode.frame() 按原版层序续画（CaptureInterface.Draw :1010-1037,
+    // 含 GUIBarsDraw 重画与全屏地图先行支）。
+    // ★帧()内嵌套重渲的换装/回滚（canvas/ctx/fullMap/_capturePass/lighting 区）
+    // 全在 CaptureMode.renderChunk 的 try/finally,本文件零残留态
+    if (this._capturePass) return;
+    if (this.captureMode.active) {
+      this.captureMode.frame(this, {
+        cam, world, clock, chunks,
+        lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH,
+        player, entities, particles, swing, hover, flicker, remotePlayers, leashed,
+        dmgNumbers,
+      }, {
+        mouseX, mouseY,
+        mouseLeft: mouseDown,   // 电平近似;frame() 内 input 直连（mouseHeld）覆盖
+        mouseRight: false,      // 同上（render 无右键面,Input 直连后生效）
+        viewW, viewH,
+        worldW: world.w, worldH: world.h,
+        mapOpen: this.fullMap.open,
+        fm: { zoom: this.fullMap.zoom, panX: this.fullMap.panX, panY: this.fullMap.panY },
+        gravDir: player.gravDir,
+        mapEnabled: !!this.minimap,
+      });
+      return;
+    }
+
     // 9. 小地图
     this.drawMinimap(ctx, cam, world, player, clock, entities);
     // 9.45 信息饰品列(DrawInfoAccs;main 系列资源文本,原版右上 X=W-280)
@@ -9031,6 +9078,62 @@ export class Renderer {
         ctx.globalAlpha = 127 / 255;
         ctx.drawImage(src, -tex.width / 2, -tex.height / 2);
         ctx.restore();
+      }
+    }
+    // ---- 眼球伞云盖（DrawPlayer_38_EyebrellaCloud PlayerDrawLayers.cs:4139-4186）：
+    //      Projectile_238 竖 6 帧条、frame = miscCounter%18/6；pos = MountedCenter −
+    //      (0,h/2)+(0,−70)；两枚 ±3px 绕行拷贝（miscCounter%50/50×2π×±1）×0.65 +
+    //      主体一枚；色 = min(头顶光照,170) 各通道 + A100；shader=cHead（头盔染料） ----
+    if (p.eyebrellaCloud && !p.dead && this.atlas) {
+      const cloud = this.atlas.ensureVImage('vanilla/Projectile_238.png');
+      if (cloud && cloud.width > 0) {
+        const frameY = Math.trunc(p.miscCounter % 18 / 6);
+        const fh = Math.floor(cloud.height / 6);
+        // 头顶光照采样（Top+(0,−30)）→ min(通道,170)（:4162-4175）
+        const ltx = Math.floor((p.x + p.w / 2) / TILE), lty = Math.floor((p.y - 30) / TILE);
+        const lc = this.lighting ? this.lighting.lightAt(ltx, lty) : [255, 255, 255];
+        const cr = Math.min(170, lc[0] ?? 255), cg = Math.min(170, lc[1] ?? 255), cb2 = Math.min(170, lc[2] ?? 255);
+        // cHead 染料（dye[0]）+ 光照乘色 —— 离屏逐 (染料,帧,色) 组合缓存
+        const headDye = p.inv.dye[0];
+        const dyeVid = headDye ? viIdFromKey(ITEM_DEFS[headDye.id]?.key ?? '') ?? -1 : -1;
+        const key = `e:${dyeVid}:${frameY}:${cr}:${cg}:${cb2}`;
+        let src = this.eyebrellaDyeCache.get(key);
+        if (!src) {
+          const cv = document.createElement('canvas');
+          cv.width = cloud.width; cv.height = fh;
+          const c2 = cv.getContext('2d', { willReadFrequently: true });
+          if (c2) {
+            c2.drawImage(cloud, 0, frameY * fh, cloud.width, fh, 0, 0, cloud.width, fh);
+            const emu = dyeVid > 0 ? dyeApplyOf(dyeVid) : null;
+            if (emu) {
+              const id = c2.getImageData(0, 0, cv.width, cv.height);
+              emu.uniforms.uDirection = p.facing;
+              this.applyDyeToImageData(id.data, cv.width, cv.height, emu);
+              c2.putImageData(id, 0, 0);
+            }
+            // 光照乘色（Color(r,g,b) 调制）：multiply 后 destination-in 复原 alpha
+            c2.globalCompositeOperation = 'multiply';
+            c2.fillStyle = `rgb(${cr},${cg},${cb2})`;
+            c2.fillRect(0, 0, cv.width, cv.height);
+            c2.globalCompositeOperation = 'destination-in';
+            c2.drawImage(cloud, 0, frameY * fh, cloud.width, fh, 0, 0, cloud.width, fh);
+            src = cv;
+          } else src = cloud;
+          if (this.eyebrellaDyeCache.size > 96) this.eyebrellaDyeCache.clear();   // 光照维度防膨胀
+          this.eyebrellaDyeCache.set(key, src);
+        }
+        const vx = p.cx, vy = p.y + p.h / 2 - p.h * 0.5 - 70;   // MountedCenter − h/2 + (0,−70)
+        const num2 = (p.miscCounter % 50) / 50;
+        const drawCopy = (ox: number, oy: number, mul: number) => {
+          ctx.save();
+          ctx.globalAlpha = (100 / 255) * mul;
+          ctx.drawImage(src as CanvasImageSource,
+            vx + ox - cloud.width / 2, vy + oy - fh / 2, cloud.width, fh);
+          ctx.restore();
+        };
+        drawCopy(-3 * Math.cos(num2 * Math.PI * 2), -3 * Math.sin(num2 * Math.PI * 2), 0.65);
+        drawCopy(3 * Math.cos(num2 * Math.PI * 2), 3 * Math.sin(num2 * Math.PI * 2), 0.65);
+        drawCopy(0, 0, 1);
       }
     }
     // ---- 坐骑身前层（Mount.Draw frontTexture：玩家本体之后绘制）----

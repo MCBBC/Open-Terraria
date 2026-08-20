@@ -29,6 +29,7 @@ import { installCanvasWatch } from './render/CanvasWatch';
 import { RemasterRuntime } from './remaster/RemasterRuntime';
 import { assetVersion } from './net/AssetCache';
 import { RemasterManager } from './remaster/RemasterManager';
+import { initResourcePacks, type ResourcePackManager } from './resources/ResourcePackManager';
 import { setRemasterBuffIcon, clearIconCache } from './ui/UI';
 
 // canvas 分配哨兵(2026-08-18):出生率 >20/s 持续 10s → console.warn 带出生栈
@@ -152,8 +153,9 @@ async function loadAssets() {
     const rt = remasterRuntime;
     remasterRuntime.onApplied = (info) => {
       // UI 派生缓存:物品图标 dataURL 缓存按物品 id 键不自动失效(Atlas 替换须清);
-      // buff 栏直链 <img src> 经钩子取 runtime 的 objectURL 覆盖
-      if (info.hasItemAtlas) clearIconCache();
+      // buff 栏直链 <img src> 经钩子取 runtime 的 objectURL 覆盖。
+      // 资源包物品图(vanilla/Item_N.png,M13)同须清——vicon 整图直取后旧 dataURL 钉死
+      if (info.hasItemAtlas || info.files.some((f) => /^vanilla\/Item_\d+\.png$/.test(f))) clearIconCache();
       setRemasterBuffIcon((id) => rt.buffIconUrl(id));
     };
     try {
@@ -166,6 +168,18 @@ async function loadAssets() {
       ]);
     } catch (err) {
       console.warn('[remaster] 启动应用素材包失败(已跳过):', err);
+    }
+    // ---- 资源包(M13):与 remaster 共享同一注入 runtime(buff 钩子/弹幕覆盖/重烘链
+    //      合流);启用包在菜单显示前应用,zip 读不出来时静默降级会话态 ----
+    try {
+      const rpManager = initResourcePacks(remasterRuntime);
+      await Promise.race([
+        rpManager.applyInstalled(),
+        new Promise<void>((resolve) => setTimeout(resolve, 8000)),
+      ]);
+      (window as unknown as { __swResourcePacks?: ResourcePackManager }).__swResourcePacks = rpManager;
+    } catch (err) {
+      console.warn('[resourcepacks] 启动应用资源包失败(已跳过):', err);
     }
     const w = window as unknown as { __swRemaster?: { runtime: RemasterRuntime; manager: RemasterManager } };
     w.__swRemaster = { runtime: remasterRuntime, manager: remasterManager }; // 调试/探针/面板句柄
@@ -191,6 +205,30 @@ function enterGameHooks() {
       flow.game?.chunks?.onSheetReplaced(file);
     };
   }
+}
+
+// ---- M6 拍照模式接线（F4）：Input 直连 + DOM HUD 让位 ----
+// 原版相机模式激活时界面层从 Capture Manager Check 截断（Main.cs:45584-93）,
+// canvas 侧由 Renderer 集成点承担;DOM 侧快捷栏/选中名/buff 栏（原版 Hotbar/
+// MouseText/Resource-Buffs 层,均在截断层之后,Main.cs:44244 层序 + :42608 buff
+// 跳过）需随激活隐藏——否则快捷栏 fixed@top:0 遮挡相机按钮组且吞点击。
+// .sw-camera-hide 用 !important 压过 UI 内联 display（refreshBuffs 每秒重写）
+let cameraModeWired = false;
+function initCameraModeWiring(game: Game): boolean {
+  const cm = game.renderer.captureMode;
+  if (!cm.input) cm.input = game.input;   // mouseHeld/rightDown 电平面（render 无右键）
+  if (cameraModeWired) return true;
+  cameraModeWired = true;
+  const style = document.createElement('style');
+  style.textContent = '.sw-camera-hide { display: none !important; }';
+  document.head.appendChild(style);
+  cm.onActiveChange = (active) => {
+    const u = ui as unknown as { hotbarEl?: HTMLElement; hotbarNameEl?: HTMLElement; buffBar?: HTMLElement };
+    u.hotbarEl?.classList.toggle('sw-camera-hide', active);
+    u.hotbarNameEl?.classList.toggle('sw-camera-hide', active);
+    u.buffBar?.classList.toggle('sw-camera-hide', active);
+  };
+  return true;
 }
 
 // ---- 键盘：背包/暂停/保存 ----
@@ -243,11 +281,16 @@ window.addEventListener('keydown', (e) => {
     }
     return;
   }
-  // ---- MapFull 动作（M5，原版 cMapFull 切换全屏地图；本键曾为自制"音乐静音"
-  //      热键——音量调节在设置面板，自造行为退役）----
-  if (isBound('MapFull', e.code)) {
+  // MapFull（M）等其余键位动作在 Game 的 keydownHandlers 统一派发（M5）——
+  // 此处不再重复（曾双派发=开+关抵消）
+  // ---- M6 拍照模式（F4，PlayerInput.cs:1926 默认）：CaptureInterface.Update
+  //      :982-987 边沿门（死亡/幽灵不可开,再按可关;截图锁定中由
+  //      toggleCamera 内 CameraLock 门自拒）。input 直连 = 相机界面需要
+  //      mouseHeld/rightDown 电平（render 参数无右键面）;首次按下时绑一次。
+  //      ★Shift+F4 是迁入的迷雾调试键（下方 case 'F4'）,不触发相机模式 ----
+  if (!e.shiftKey && isBound('ToggleCameraMode', e.code) && initCameraModeWiring(game)) {
     e.preventDefault();
-    game.toggleFullMap();
+    game.renderer.captureMode.toggleRequest(game.player, game.world);
     return;
   }
   switch (e.code) {
@@ -269,18 +312,27 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'F4':
-      e.preventDefault();
-      game.world.explored.fill(1);
-      game.world.exploredDirty = null; // 全图变化无脏信息 → 渲染端整幅重建
-      game.world.exploredVersion++; // 使迷雾缓存失效重建
-      ui.toast('已消除全图迷雾');
+      // 调试全图迷雾消除迁 Shift+F4（2026-08-20：裸 F4 让位原版 ToggleCameraMode
+      // 拍照模式（PlayerInput.cs:1926 默认 F4,经下方 isBound('ToggleCameraMode')
+      // 派发）;grep scripts/_*.mjs 无 F4 按键依赖——_fogband/_fogwatch 两探针
+      // 直接调 world.explored API 不按键,无探针破坏）
+      if (e.shiftKey) {
+        e.preventDefault();
+        game.world.explored.fill(1);
+        game.world.exploredDirty = null; // 全图变化无脏信息 → 渲染端整幅重建
+        game.world.exploredVersion++; // 使迷雾缓存失效重建
+        ui.toast('已消除全图迷雾');
+      }
       break;
     case 'F5': {
       // 长按 F5 = 行为录制窗开关（按下计时，keyup 判时长——见文件尾 keyup 监听）；
       // 短按仍是一键调试报告（报告尾部带 behaviorTail 最近 2000 条事件）。
+      // Shift+F5 = 方块标注模式：点击画面直接标记问题格（红圈+序号），再按关闭；
+      // 标注会随 F5 报告 tiles.marks 自动带出（含格明细+邻域链）。
       // e.repeat 过滤：长按系统重发 keydown 不重置计时锚
       e.preventDefault();
       if (e.repeat) break;
+      if (e.shiftKey) { toggleAnnotate(); break; }  // 不设 f5DownAt → keyup no-op
       f5DownAt = performance.now();
       break;
     }
@@ -310,6 +362,20 @@ window.addEventListener('keydown', (e) => {
       break;
   }
 });
+
+// ---- M6 拍照模式滚轮门（Player.cs:24903-24907）：相机模式激活且非全屏地图
+//      时,滚轮 = 切换相机模式（CaptureInterface.Scrolling）而非视野缩放。
+//      capture 相位拦截：Game 的滚轮消费点在 update 段（先于渲染执行）,
+//      渲染端回写清零已晚一帧;地图开着时放行——滚轮归地图缩放（原版分支序）。
+//      pendingWheel ±120/notch = 原版 ScrollWheelDelta 计数语义 ----
+window.addEventListener('wheel', (e) => {
+  const g = flow.game;
+  const cm = g?.renderer.captureMode;
+  if (!g || !cm?.active) return;
+  if (g.renderer.fullMap.open) return;
+  cm.pendingWheel += Math.sign(e.deltaY) * 120;
+  e.stopPropagation();
+}, { capture: true, passive: true });
 
 // ---- F5 长按判时长（keydown 只记锚，keyup 结算）----
 let f5DownAt = 0;
@@ -360,7 +426,7 @@ function downloadText(filename: string, text: string) {
   URL.revokeObjectURL(a.href);
 }
 
-// ---- 方块标注模式（F5）：标记问题方块，导出标注 + 地图给开发者 ----
+// ---- 方块标注模式（Shift+F5）：标记问题方块，导出标注 + 地图给开发者 ----
 function toggleAnnotate() {
   const game = flow.game;
   if (!game) return;
@@ -384,10 +450,10 @@ function toggleAnnotate() {
       onExportFixes: exportTexFixes,
     });
     ui.updateAnnotateCount(game.marks.length);
-    ui.toast('标注模式已开启：点击方块标记，F5 关闭');
+    ui.toast('标注模式已开启：点击方块标记问题格（红圈+序号），按 F5 出报告自动携带标注；Shift+F5 关闭');
   } else {
     ui.closeAnnotatePanel();
-    ui.toast('标注模式已关闭');
+    ui.toast(game.marks.length ? `标注模式已关闭（${game.marks.length} 个标注保留，F5 报告仍会带出）` : '标注模式已关闭');
   }
 }
 

@@ -15,7 +15,7 @@ import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
 import { vanillaNpc, vanillaSoundFiles, type VanillaNpc } from '../data/vanillaNpcs';
 import { IDLE_SOUNDS, CHATTER_SOUNDS, CRITTER_SOUNDS } from '../data/vanillaNpcAmbience';
-import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
+import { ENEMY_GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 
 /** 镇静药水(物品 3090)的 npcTypeNoAggro 置位表（Player.cs:14144-14168：
  *  `if (currentItem.type == 3090)` 下逐项 npcTypeNoAggro[N]=true，共 23 类；
@@ -2366,10 +2366,10 @@ export class Enemy extends Entity {
           this.facing = 0;                                        // :61133 direction = 0
           this.vx *= 0.5;                                         // :61134
           if (this.vy < 0) this.vy = 0;                           // :61135-61138
-          this.vy += GRAVITY;                                     // :61139 gravity（叠加共享重力）
+          this.vy += ENEMY_GRAVITY;                                // :61139 gravity（叠加共享重力=npc.gravity 0.3）
         } else {
-          if (this.vy > 0) this.vy += GRAVITY;                    // :61143-61146
-          if (this.vy < 0) this.vy -= GRAVITY * 0.75;             // :61147-61150
+          if (this.vy > 0) this.vy += ENEMY_GRAVITY;              // :61143-61146
+          if (this.vy < 0) this.vy -= ENEMY_GRAVITY * 0.75;       // :61147-61150
         }
       } else if (a1 === 2) {
         // :61179-61186 泥史莱姆：贴地（vy==0）跳跳计数 +9/t——全梯最快档
@@ -2378,10 +2378,10 @@ export class Enemy extends Entity {
         this.def.defense = base.def + 16;                         // :61187-61188 木史莱姆 防御+16
       } else if (a1 === 3 && this.vy !== 0) {
         // :61192-61199 石史莱姆（整档门=滞空）：下坠期 +2g（叠加共享段 +g → 3g 沉坠）
-        if (this.vy > 0) this.vy += GRAVITY * 2;
+        if (this.vy > 0) this.vy += ENEMY_GRAVITY * 2;
       } else if (a1 === 751 && this.vy !== 0) {
         // :61200-61204 云史莱姆（整档门=滞空）：恒 −0.6g（净 +0.4g 缓落缓升）
-        this.vy -= GRAVITY * 0.6;
+        this.vy -= ENEMY_GRAVITY * 0.6;
       } else if (a1 === 150) {
         // :61205-61221 蛛网史莱姆：1/120 在自身包围盒随机格放蛛网。WorldGen.
         //  PlaceTile(51)（:59393）：非实心族免 EmptyTile 门 + 液体格拒绝（:59477-
@@ -2852,19 +2852,42 @@ export class Enemy extends Entity {
   }
 
   /** 原版 UpdateNPC_UpdateGravity（NPC.cs:91876-91953）通用重力档 1:1：
+   *  ⓪ per-type 覆写表（:91882-91922）：258 真菌瓢虫缓降 0.1/钳 3；425 漩涡步枪兵
+   *     飞行态（ai[2]==1）0.1；576/577 食人魔俯冲态（ai[0]>0 且 ai[1]==2）0.45/
+   *     钳 32；427 漩涡蜂飞行态（ai[2]==1）0.1/钳 4；426 漩涡蜂后恒 0.1/钳 3；
+   *     541 沙元素 0（AI_102 walker 内自管 0.1 档，尾段只钳不坠）——原表在通用
+   *     重力段而非各自 AI（2026-08-20 生物物理 review 补全，曾误登记"AI 自带档"）；
    *  ① 高空衰减（:91916-91934）：num=(maxTilesX/4200)²、num2=(y/16−(60+10·num))/
    *     (worldSurface/6) 钳 [0.25,1] → gravity×num2——空岛/太空高度下落明显变缓
    *     （worldSurface=world.groundLevel，LunarEvent.ts:143 同源换算）；
    *  ② wet 三档（:91936-91952）：0.2(水)/0.1(蜜)/0.15(微光)——原版为绝对值直替
    *     （覆盖①的高空系数），照抄 TownNPC.ts:1200 先例；落速帽 7/4/5.5 已由
    *     npcLiquid.ts 第 6 段每 tick 钳，此处不重复。
-   *  特例族（258/425/426/427/576/577/541/aiStyle7-ai25 的专属重力改写）由各自
-   *  AI 内自带档，不在此列。
-   *  ★GRAVITY=0.4 vs 原版 0.3 偏差已登记（constants.ts）勿动：①高空系数按原版
-   *  乘子直接叠加在现 GRAVITY 上；②wet 档取原版绝对值（0.2/0.1/0.15 对 0.4 基数
-   *  的减速比比原版更陡——与 TownNPC 先例一致，待重力专项统一）。 */
+   *  基数 = ENEMY_GRAVITY 0.3（NPC.cs:6026，2026-08-20 史莱姆跳跃高度/距离
+   *  对齐批换正——曾误用玩家 GRAVITY 0.4：跳跃矮 25%、滞空/距离短 25%）；
+   *  wet 档取原版绝对值（0.2/0.1/0.15）直替。 */
   applyGravity(game: GameHooks) {
-    let g = GRAVITY;
+    let g = ENEMY_GRAVITY;
+    let fallCap = MAX_FALL_SPEED;
+    // ⓪ per-type 覆写表（:91882-91922，else-if 同序；258/426 的 vy 钳在重力前生效）
+    const vid = this.vanillaId;
+    if (vid === 258) {
+      g = 0.1;
+      if (this.vy > 3) this.vy = 3;
+    } else if (vid === 425 && this.ai2 === 1) {
+      g = 0.1;
+    } else if ((vid === 576 || vid === 577) && this.ai0 > 0 && this.ai1 === 2) {
+      g = 0.45;
+      if (this.vy > 32) this.vy = 32;
+    } else if (vid === 427 && this.ai2 === 1) {
+      g = 0.1;
+      if (this.vy > 4) this.vy = 4;
+    } else if (vid === 426) {
+      g = 0.1;
+      if (this.vy > 3) this.vy = 3;
+    } else if (vid === 541) {
+      g = 0;
+    }
     // ① 高空衰减（worldSurface/6 与 (60+10num) 为原版双参，浮点同式；
     //    groundLevel<=0 的手工/测试世界无地表线 → 视作全重力，防 ÷0/NaN）
     const surf = game.world.groundLevel;
@@ -2876,8 +2899,8 @@ export class Enemy extends Entity {
       g *= alt;
     }
     // ② wet 三档（绝对值直替，覆盖高空系数——原版同序）
-    if (this.wet) g = this.shimmerWet ? 0.15 : this.honeyWet ? 0.1 : 0.2;
-    this.vy = Math.min(this.vy + g, MAX_FALL_SPEED);
+    if (this.wet) { g = this.shimmerWet ? 0.15 : this.honeyWet ? 0.1 : 0.2; fallCap = this.shimmerWet ? 5.5 : this.honeyWet ? 4 : 7; }
+    this.vy = Math.min(this.vy + g, fallCap);
   }
 
   private zombieAI(game: GameHooks, player: Player | null) {
@@ -3540,12 +3563,24 @@ export class Enemy extends Entity {
         // 胸口前 2 格墙：上方再 1 格也堵 → -8，否则 -7
         this.vy = solidAt(fx, fy - 3) ? -8 : -7;
       } else if (solidAt(fx, fy - 1)) {
-        this.vy = -6;                       // 脚前 1 格墙
-      } else if (this.y + this.h - fy * TILE > 20 && solidAt(fx, fy) && !st.half[st.idx(fx, fy)]) {
-        this.vy = -5;                       // 卡在格内下部（非半砖）
-      } else if (player && player.y + player.h < this.y
+        // 脚前 1 格墙：624 侏儒特例（:60508-60518）跳力 -8，头顶 8 格实心 →
+        // 掉头 + vx=3×direction（防跳进天花板夹缝）
+        if (this.vanillaId === 624) {
+          this.vy = -8;
+          const num205 = Math.floor((this.y + this.h) / TILE);
+          if (solidAt(Math.floor(this.cx / TILE), num205 - 8)) {
+            this.facing *= -1;
+            this.vx = 3 * this.facing;
+          }
+        } else {
+          this.vy = -6;
+        }
+      } else if (this.y + this.h - fy * TILE > 20 && solidAt(fx, fy)
+        && st.slope[st.idx(fx, fy)] !== 1 && st.slope[st.idx(fx, fy)] !== 2) {
+        this.vy = -5;                       // 卡在格内下部（非顶坡——原版 topSlope 门 :60523）
+      } else if (this.vanillaId !== 67 && player && player.y + player.h < this.y
         && !solidAt(fx, fy + 1) && !solidAt(fx + dir, fy + 1)) {
-        this.vy = -8;                       // 前方悬空且目标在上方 → 大跳 + 冲刺
+        this.vy = -8;                       // 前方悬空且目标在上方 → 大跳 + 冲刺（67 噬人藤不跳 :60527）
         this.vx *= 1.5;
       }
     }
@@ -8176,10 +8211,10 @@ export class Enemy extends Entity {
     // 线上（Collision.cs:1501，液面 = 行×16 − liquid/16 整除）：线下 → 上浮 0.8 钳 −4
     // 且不过线（num95=Center+1）；线上 → 只允许落到线。蛙另把走计时砍到 50（连窜）。
     // 撞墙/贴图边 → 掉头 ×−0.25。无液面可钉（中心上 2 行仍有液=深处/越界）→ vy−0.2。
-    // 重力走原版湿侧（UpdateNPC_UpdateGravity :91936：0.2/落速帽 7）——干侧 0.4 会让
-    // 钉面失衡下沉（0.4−0.2=净沉），此为 GRAVITY 偏差登记的定点补偿
+    // 重力走原版湿侧（UpdateNPC_UpdateGravity :91936：0.2/落速帽 7）——干侧
+    // ENEMY_GRAVITY 0.3（原版 npc.gravity，2026-08-20 对齐批换正）
     const pinSurface = (turtle || frog) && wet;
-    this.vy = Math.min(this.vy + (pinSurface ? 0.2 : GRAVITY), pinSurface ? 7 : MAX_FALL_SPEED);
+    this.vy = Math.min(this.vy + (pinSurface ? 0.2 : ENEMY_GRAVITY), pinSurface ? 7 : MAX_FALL_SPEED);
     if (pinSurface) {
       if (frog) this.ai1 = 50;
       const ctx = Math.floor(this.cx / TILE);

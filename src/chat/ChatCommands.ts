@@ -34,8 +34,7 @@ export const CHAT_DEATH: readonly [number, number, number] = [255, 25, 25];
 export const CHAT_WORLD: readonly [number, number, number] = [50, 255, 130];
 /** EmoteCommand.RESPONSE_COLOR */
 const EMOTE_COLOR: readonly [number, number, number] = [200, 100, 0];
-/** Main.teamColor（Main.cs:6610-6615）——与 stats/Pvp.TEAM_COLORS 同一权威表 */
-export { TEAM_COLORS as TEAM_COLOR } from '../stats/Pvp';
+/** Main.teamColor（Main.cs:6610-6615）——stats/Pvp.TEAM_COLORS 同一权威表 */
 import { TEAM_COLORS } from '../stats/Pvp';
 
 export interface ChatLine { text: string; color: readonly [number, number, number] }
@@ -144,12 +143,13 @@ function randNext(rand: () => number, min: number, max: number): number {
 }
 
 /** 表情 id 解析（EmojiCommand.ProcessOutgoingMessage :59-88）：
- *  数字直取(越界→-1 后静默)/本地化表情名(EqualsCommand 忽略大小写) */
+ *  整数字面量直取（int.Parse 语义:纯数字串,带空白不解析走名路径）/本地化表情名
+ *  （EqualsCommand 忽略大小写;EnglishValue 双语匹配遗留登记——本仓语言包合并后
+ *  仅当前语言值可命中）。越界/未命中 → -1 静默 */
 export function resolveEmojiId(text: string): number {
-  const n = Number(text);
-  if (text !== '' && Number.isInteger(n)) {
-    if (n >= 0 && n < EMOTE_COUNT) return n;
-    return -1;
+  if (/^[+-]?\d+$/.test(text)) {
+    const n = parseInt(text, 10);
+    return n >= 0 && n < EMOTE_COUNT ? n : -1;
   }
   const lower = text.toLowerCase();
   for (let i = 0; i < EMOTE_COUNT; i++) {

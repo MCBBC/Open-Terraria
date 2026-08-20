@@ -354,16 +354,16 @@ export function assembleTooltipLines(
         color: 'rgb(240,100,120)', tag: 'shopprice',
       });
     } else {
-    const pc = ctx.shop.priceCopper;
-    if (pc > 0) {
-      const plat = Math.floor(pc / 1000000), gold = Math.floor(pc % 1000000 / 10000);
-      const silver = Math.floor(pc % 10000 / 100);
-      const color = plat > 0 ? 'rgb(220,220,198)' : gold > 0 ? 'rgb(224,201,92)'
-        : silver > 0 ? 'rgb(181,192,193)' : 'rgb(246,138,96)';
-      out.push({ text: `${T(ctx.shop.buy ? 'LegacyTooltip.50' : 'LegacyTooltip.49')} ${coinText(pc)}`, color, tag: 'shopprice' });
-    } else {
-      out.push({ text: T('LegacyTooltip.51'), color: 'rgb(120,120,120)', tag: 'noworth' });
-    }
+      const pc = ctx.shop.priceCopper;
+      if (pc > 0) {
+        const plat = Math.floor(pc / 1000000), gold = Math.floor(pc % 1000000 / 10000);
+        const silver = Math.floor(pc % 10000 / 100);
+        const color = plat > 0 ? 'rgb(220,220,198)' : gold > 0 ? 'rgb(224,201,92)'
+          : silver > 0 ? 'rgb(181,192,193)' : 'rgb(246,138,96)';
+        out.push({ text: `${T(ctx.shop.buy ? 'LegacyTooltip.50' : 'LegacyTooltip.49')} ${coinText(pc)}`, color, tag: 'shopprice' });
+      } else {
+        out.push({ text: T('LegacyTooltip.51'), color: 'rgb(120,120,120)', tag: 'noworth' });
+      }
     }
   }
   return out;

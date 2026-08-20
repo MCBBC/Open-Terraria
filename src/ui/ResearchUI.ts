@@ -134,6 +134,8 @@ export function openResearchPanel(game: Game): void {
           // RegisterItemSacrifice：扣 1 + 计数（幂等早退在内核侧）
           if (consumeOne()) {
             r.sacrifice(vid, 1);
+            // M9 研究上报（CreativeUI.SacrificeItem :308：本地注册 + 发服务器中继）
+            game.net?.sendJourneyUnlock(vid, 1);
             game.cb.onInventoryChanged?.();
           }
           render();
@@ -146,7 +148,11 @@ export function openResearchPanel(game: Game): void {
           const remaining = info.need - info.have;
           let n = 0;
           while (n < stack && n < remaining && consumeOne()) { r.sacrifice(vid, 1); n++; }
-          if (n > 0) game.cb.onInventoryChanged?.();
+          if (n > 0) {
+            // M9：整包上报（原版按 SacrificeItem 单帧 num2——本 UI 逐件扣，合计上报）
+            game.net?.sendJourneyUnlock(vid, n);
+            game.cb.onInventoryChanged?.();
+          }
           render();
         });
         row.appendChild(b1);

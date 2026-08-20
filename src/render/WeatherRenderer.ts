@@ -153,6 +153,23 @@ export class WeatherRenderer {
     d.type = Math.floor(Math.random() * 3);       // waterStyle=0 → type 0-2（Rain.png 三型）
   }
 
+  /** Rain.NewRainForced（Rain.cs:134-171）1:1：无视 cloudAlpha 限量（池全量扫空位），
+   *  scale = 1+Next(-20,21)×0.01、velocity = 传入速度×scale、
+   *  rotation = atan2(vx, -vy)。消费方 = 眼球伞滴水（Player.DoEyebrellaRainEffect） */
+  newRainForced(x: number, y: number, vx: number, vy: number): void {
+    for (const d of this.pool) {
+      if (d.active) continue;
+      d.active = true;
+      d.x = x; d.y = y;
+      d.scale = 1 + (Math.floor(Math.random() * 41) - 20) * 0.01;
+      d.vx = vx * d.scale;
+      d.vy = vy * d.scale;
+      d.rotation = Math.atan2(d.vx, -d.vy);
+      d.type = Math.floor(Math.random() * 3);
+      return;
+    }
+  }
+
   /** 每帧：雨滴+雪粒更新 + 沙尘发射（在绘制前的逻辑阶段调用，或 draw 内合并——原版即 draw 时 update） */
   update(world: World, viewW: number, viewH: number, camX: number, camY: number, playerVx: number, playerVy: number) {
     if (!this.weather) return;

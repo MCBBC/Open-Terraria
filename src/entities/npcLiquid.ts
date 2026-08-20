@@ -246,8 +246,9 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
   b.liqFactor = liquidMoveFactor(b);
   // ---- 6. wet 落速帽（UpdateNPC_UpdateGravity :91936-91944）----
   // 原版 wet 时重力 0.3→0.2 且 maxFallSpeed 10→7（蜂蜜 0.1/4、微光 0.15/5.5；
-  // 岩浆走水档 else 分支）。本仓各 AI 内联 GRAVITY=0.4（全仓既有偏差，不逐点改），
-  // 这里补落速帽——配合 liqFactor ×0.5 位移后有效下沉 ≤3.5px/t，与原版同档
+  // 岩浆走水档 else 分支）。ENEMY_GRAVITY 已换 0.3（2026-08-20 对齐批），重力侧
+  // 由 applyGravity wet 档直替；此处落速帽保留（与 applyGravity 的 fallCap 同值幂等，
+  // 供自管重力的 AI 路径兜底）——配合 liqFactor ×0.5 位移后有效下沉 ≤3.5px/t
   if (b.wet) {
     const cap = b.shimmerWet ? 5.5 : b.honeyWet ? 4 : 7;
     if (b.vy > cap) b.vy = cap;

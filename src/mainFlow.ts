@@ -249,6 +249,22 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           ui.toast(Lang.text('Mods.SandboxWorld.ClothesWindow.Changed'));
         });
       },
+      // 造型师理发窗（Main.OpenHairWindow Main.cs:43073）：报价/付款走
+      // Game.hairRestylePrice/buyHairRestyle（发型 10 金 + 发色 2 金链），
+      // BuyHairWindow 成交后回写角色档 + 在线外观（Msg4 SyncPlayer 语义）
+      onHairWindow: () => {
+        const appearance = g.player.appearance;
+        if (!appearance) return;
+        ui.showHairWindow(appearance,
+          { priceOf: (a) => g.hairRestylePrice(a), buy: (a) => g.buyHairRestyle(a) },
+          async (a) => {
+            selectedAppearance = a;
+            g.player.appearance = a;
+            g.net?.resendAppearance();
+            if (selectedCharId != null) await charStore.update(selectedCharId, a);
+            ui.toast(Lang.text('Mods.SandboxWorld.ClothesWindow.Changed'));
+          });
+      },
     }, atlas);
     // 纸娃娃贴图预载按当前角色外观收窄(545 张全量 → ~30 张);外观本体在
     // onWorldReady 的 applyAppearance 才落位,预载期间读这里

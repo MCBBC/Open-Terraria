@@ -39,7 +39,7 @@
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
-import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
+import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { BuffType } from '../stats/Buffs';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, spawnVanillaEnemy, losClear, enemySpawnChain, addEnemy } from './bossAI';
@@ -526,7 +526,7 @@ export function lunaticDevoteeAI(e: Enemy, game: GameHooks, _player: Player | nu
   if (e.ai0 < 0 || e.ai0 >= 300) e.ai0 = 0;              // 原版 ai[0] 出生 0
   e.ai0 += 1;
   if (e.ai0 >= 300) e.ai0 = 0;                           // :38953-38956
-  e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
+  e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);
 }
 
@@ -551,7 +551,7 @@ export function cultistArcherStandbyAI(e: Enemy, game: GameHooks) {
   if (e.ai0 < 1000) e.ai0 = 1000;                        // :56599-56601 站立帧段
   e.ai0 += 1;
   if (e.ai0 >= 1300) e.ai0 = 1000;
-  e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
+  e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);
 }
 
@@ -656,7 +656,7 @@ export function bigMimicAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ---- 玩家全灭 → 7 隐身僵坐(:39526-39534) ----
   if (e.ai0 !== 7 && !p) { e.ai0 = 7; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
   const grounded = () => {
-    e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
+    e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(e, game.world, e.vx, e.vy);
   };
 
@@ -1046,7 +1046,7 @@ export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) 
       e.vx *= 1 + k * 2; e.vy *= 1 + k * 2;
     }
   }
-  e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
+  e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);
 }
 

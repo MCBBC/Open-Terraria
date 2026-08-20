@@ -8,6 +8,7 @@ import {
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { playerCanHitEnemy } from './projTargets';
+import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { BuffState, BuffType } from '../stats/Buffs';
@@ -538,6 +539,9 @@ export class Player extends Entity {
   private sharpenedCd = 0;
   /** BOC 受击脉冲（fixedUpdate 内消费：buff 321 + 困惑近敌） */
   bocPulse = 0;
+  /** Player.insanityShadowCooldown（Player.cs:1060；SpawnHallucination :13633 递减）：
+   *  骸骨头盔幻影生成节流——归零时重掷 Next(20,101) */
+  insanityShadowCooldown = 0;
   /** 原版 Player.insideUnbreakableWalls（Player.cs:2678；UpdateUnbreakableWallScan
    *  :28125-28141 更新）：getfixedboi 双地牢不可破墙内的越界判定——刷怪链
    *  tresspassingDualDungeon（NPC.cs:313）消费。普通世界恒 false */
@@ -1230,7 +1234,8 @@ export class Player extends Entity {
       * (this.buffs.has(BuffType.Werewolf) ? 1.051 : 1)      // 狼人 meleeSpeed += 5.1%（:11489）
       * (this.buffs.has(BuffType.Weak) ? 0.949 : 1)          // 虚弱 meleeSpeed -= 5.1%（:11507）
       * (1 + 0.1 * this.beetleOrbs)                          // 甲虫攻击球攻速（:10071+）
-      * (1 + this.buffs.wellFedMeleeSpeed);                  // 食物近战速 +5/7.5/10%（:11528+）
+      * (1 + this.buffs.wellFedMeleeSpeed)                   // 食物近战速 +5/7.5/10%（:11528+）
+      * (1 + this.buffs.hungerMeleeSpeed);                   // 饥饿/极饿近战速 -5/-10%（:11566+/:11589+）
     return raw > 3 ? 1 / 3 : 1 / raw;                        // :28566-28573
   }
   /** 全系伤害加成装备聚合（ApplyEquipFunctional dmgX 段；四系分道——summon 是独立
@@ -1244,6 +1249,7 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.Rage)) m += 0.1;
       if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
+      m += this.buffs.hungerDamage;      // 饥饿/极饿全系 -5/-10%（:11565+/:11588+，含召唤）
       m += 0.15 * this.nebula[0];        // 星云伤害 179-181 每级四系 +15%（:10118-10124）
       if (this.buffs.has(BuffType.WitheredWeapon)) m *= 0.5;   // 枯萎武器（:25715）
       // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4991：minionDamage += 0.15）
@@ -1266,6 +1272,7 @@ export class Player extends Entity {
       if (this.heldPsychoKnife) m += (1 - this.stealth) * 3;   // 变态刀潜行（:25487）
     }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
+    m += this.buffs.hungerDamage;    // 饥饿/极饿全系 -5/-10%（:11564+/:11587+）
     m += 0.15 * this.nebula[0];      // 星云四系 +15%/层
     // 猪鲨崽增益（Mount.cs UpdateEffects case 12 :4988-4992：melee/ranged/magic/minion
     // 四系各 += 0.15——湿身/半血以下/雨中露天的 MountFishronSpecial 态）
@@ -1338,6 +1345,7 @@ export class Player extends Entity {
       if (st.shroomiteSet || st.vortexSet) c += Math.round((1 - this.stealth) * (st.vortexSet ? 20 : 10)); // 潜行暴击
     }
     c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
+    c += this.buffs.hungerCrit;     // 饥饿/极饿全系暴击 -2/-4（:11562+/:11585+）
     return c;
   }
 
@@ -1516,6 +1524,34 @@ export class Player extends Entity {
     // 感电移动惩罚开关先行写入（Player.cs:18900 controlLeft||controlRight）——inputX
     // 已由 Game.fixedUpdate 注入（Game.ts:2890 → :2931），此处读到的即本帧输入
     this.buffs.electrifiedMoving = this.inputX !== 0;
+    // ---- The Constant 饥饿链上下文注入（Main.dontStarveWorld = seedFlags.theConstant；
+    //      remix 组合（"don't dig up"+constant）拉长 332/333 至 28800t；死亡态不推进
+    //      ——原版 UpdateDead 无 UpdateBuffs 链。表情 146/147/148 + Hungry 音经回调）----
+    this.buffs.dontStarveWorld = !this.dead && !!world.seedFlags?.theConstant;
+    this.buffs.remixHunger = !!(world.seedFlags?.theConstant && world.seedFlags?.remix);
+    this.buffs.starvingMaxHp = this.maxHp;
+    this.buffs.starvingZoneBoost = !!game.scene?.zoneDesert || !!game.scene?.zoneSnow;
+    if (!this.buffs.onHungerEvent) {
+      this.buffs.onHungerEvent = (kind) => {
+        // EmoteBubble.MakeLocalPlayerEmote（:11706/:11726——146 Peckish/147 Hungry/
+        // 148 Starving）；333→334 档附 SoundID.Hungry（:11728，Sounds/Custom/hungry）
+        if (kind === 'neutral') game.playerEmote?.(146);
+        else if (kind === 'hungry') game.playerEmote?.(147);
+        else {
+          game.playerEmote?.(148);
+          game.playSfxWav?.('hungry', 1);
+        }
+      };
+    }
+    // ---- 抚摸宠物状态推进（UpdatePettingAnimal :33015-33033——目标漂移/移动键停） ----
+    this.updatePettingAnimal();
+    // ---- 骸骨头盔幻影（Bone Helm 5100 功能配饰槽 → SpawnHallucination
+    //      Player.cs:12823 GrantArmorBenefits → :13627-13656；GrantArmorBenefits 循环
+    //      只扫 armor[0-9]（时装槽 10-19 走 ApplyEquipVanity 不触发））----
+    this.updateInsanityShadow(game);
+    // ---- 眼球伞 5101（armor[0] 头盔或 armor[10] 时装头任一，UpdateEquips :12661 门）
+    //      + 水晶鞋 5077（armor[13-19] 时装配饰槽，ApplyEquipVanity :13821 门） ----
+    this.updateDontStarveCosmetics(game, world);
     // 魂镰吸魂自持（Player.cs:9555-9558：soulDrain>0 → AddBuff(151, 2)——
     // Game 侧扫描每帧清零再 ++，无 3006 邻域供给即熄）
     if (this.soulDrain > 0) this.buffs.apply(BuffType.SoulDrain, 2);
@@ -1534,8 +1570,10 @@ export class Player extends Entity {
       // 默认 Burned(8)（不区分火/毒/流血——含炽热狱石/陨石的灼烧与着火）
       if (this.hp <= 0) this.lastDamageCause = this.vampireBurningInSunlight
         ? { kind: 'vampire' }
-        : this.buffs.has(BuffType.Suffocation)
-          ? { kind: 'suffocated' } : { kind: 'burned' };
+        : this.buffs.has(BuffType.Starving)
+          ? { kind: 'starved' }   // PlayerDeathReason.ByOther(18)（:19175，饥饿链 2026-08-20）
+          : this.buffs.has(BuffType.Suffocation)
+            ? { kind: 'suffocated' } : { kind: 'burned' };
     }
     // 恐慌项链加速窗口倒计时
     if (this.panicTime > 0) this.panicTime -= dt;
@@ -5148,6 +5186,241 @@ export class Player extends Entity {
 
   /** PlayerEyeHelper.Update（:32-37）：SetStateByPlayerInfo → UpdateEyeFrameToShow →
    *  _timeInState++。逐 tick 由 fixedUpdate 驱动（原版 Player.Update :25812 调用点） */
+  /** SpawnHallucination（Player.cs:13627-13656）1:1：Bone Helm（5100）在功能配饰槽
+   *  （armor[0-9]——GrantArmorBenefits :12521 循环域）→ cooldown 递减 → 归零重掷
+   *  Next(20,101) → 候选（CanBeChasedBy + 距离 ≤500 + CanHitLine）随机一只 →
+   *  RandomizeInsanityShadowFor(isHostile:false) → 964 号弹（damage 18 / kb 0） */
+  private updateInsanityShadow(game: GameHooks): void {
+    this.insanityShadowCooldown = Math.max(0, Math.min(100, this.insanityShadowCooldown - 1));
+    if (this.insanityShadowCooldown > 0) return;
+    this.insanityShadowCooldown = 20 + Math.floor(Math.random() * 81);   // Next(20,101)
+    // Bone Helm 检出（armor[0..9] 任一 vid 5100）
+    let hasBoneHelm = false;
+    for (let i = 0; i <= 9; i++) {
+      const it = this.inv.armor[i];
+      if (it && vanillaIdOfItem(it.id) === 5100) { hasBoneHelm = true; break; }
+    }
+    if (!hasBoneHelm) return;
+    // 候选敌怪（:13641-13649：CanBeChasedBy + Distance ≤ 500 + CanHitLine）
+    const store = game.world.store;
+    const candidates: Array<{ cx: number; cy: number }> = [];
+    for (const e of game.enemies() as unknown as Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean }>) {
+      if (e.dead || !playerCanHitEnemy(e, game)) continue;
+      if (Math.hypot(e.cx - this.cx, e.cy - this.cy) > 500) continue;
+      if (!canHitLine(store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+      candidates.push(e);
+    }
+    if (candidates.length === 0) return;
+    const t = candidates[Math.floor(Math.random() * candidates.length)];
+    game.spawnInsanityShadow?.(randomizeFriendlyInsanityShadow(t.cx, t.cy));
+  }
+
+  /** 眼球伞（DoEyebrellaRainEffect Player.cs:13888-13919 + eyebrellaCloud :12661）与
+   *  水晶鞋（DoGlassSlipperSparkles :13866-13887，ApplyEquipVanity :13821 门 =
+   *  armor[13-19] 时装配饰槽）——饥荒联动小件，每 tick。 */
+  private updateDontStarveCosmetics(game: GameHooks, world: import('../world/World').World): void {
+    const headVid = (slot: number) => {
+      const it = this.inv.armor[slot];
+      return it ? vanillaIdOfItem(it.id) : 0;
+    };
+    // ---- 眼球伞：armor[0]（头盔）或 armor[10]（时装头）任一 = 5101（:12660-12664）----
+    const eyebrella = headVid(0) === 5101 || headVid(10) === 5101;
+    this.eyebrellaCloud = eyebrella;
+    if (eyebrella && Math.random() * 4 < 1) {
+      // 头顶出生点：MountedCenter − height×0.5 + x∈[−0.5,0.5)×(width+18) − 30
+      // （坐骑 54 头顶偏移 −14×Directions 未建模——坐骑 54 = 月总头坐骑，登记）
+      const vx = this.cx + (-0.5 + Math.random()) * (this.w + 18);
+      const vy = this.cy - this.h * 0.5 - 30;
+      const tx = Math.floor(vx / 16), ty = Math.floor(vy / 16);
+      const st = world.store;
+      if (st.inBounds(tx, ty)) {
+        const i = st.idx(tx, ty);
+        const dj = TILE_DEFS[st.type[i]];
+        // WorldGen.SolidTile3 = active && !inActive && tileSolid && !tileSolidTop
+        // + tile.liquid <= 0（:13912-13916）
+        const solid3 = st.type[i] !== 0 && (st.wire[i] & 32) === 0   // TileStore.WIRE_ACTUATED
+          && !!dj?.solid && !dj?.platform;
+        if (!solid3 && st.liquid[i] <= 0) {
+          game.spawnRainForced?.(vx, vy, (world.weather?.windSpeedCurrent ?? 0) * 3, 9);
+        }
+      }
+    }
+    // ---- 水晶鞋：armor[13-19]（时装配饰槽）任一 = 5077（ApplyEquipVanity :13821）----
+    let slipper = false;
+    for (let i = 13; i <= 19; i++) {
+      const it = this.inv.armor[i];
+      if (it && vanillaIdOfItem(it.id) === 5077) { slipper = true; break; }
+    }
+    if (slipper) {
+      const D = game.vanillaDust;
+      const shoeDye = this.inv.dye[2];
+      const dyeVid = shoeDye ? vanillaIdOfItem(shoeDye.id) : -1;
+      if (D && Math.random() * 60 < 1) {
+        // 尘 204：CenteredRectangle(Center+(0,16×grav),20×8)、alpha 150、scale 0.3、
+        // fadeIn 1、velocity×0.1、noLight、shader=cShoe（:13868-13877）
+        const rx = this.cx - 10, ry = this.cy + 16 - 4;
+        const d = D.spawn(rx, ry, 20, 8, 204, 0, 0, 150, null, 0.3);
+        if (d) { d.fadeIn = 1; d.vx *= 0.1; d.vy *= 0.1; d.noLight = true; d.dyeVid = dyeVid; }
+      }
+      if (D && this.onGround && Math.abs(this.vx) + Math.abs(this.vy) > 1
+        && Math.random() * 10 < 1) {
+        // CanSpawnWalkingEffects 门（|vx|+|vy|>1）+ CenteredRectangle(Center+(−2×dir,16),6×8)
+        const rx = this.cx + (-2 * this.facing) - 3, ry = this.cy + 16 - 4;
+        const d = D.spawn(rx, ry, 6, 8, 204, 0, 0, 150, null, 0.3);
+        if (d) { d.fadeIn = 1; d.vx *= 0.1; d.vy *= 0.1; d.noLight = true; d.dyeVid = dyeVid; }
+      }
+    }
+  }
+
+  /** 眼球伞云盖标记（Player.cs:1884 eyebrellaCloud——渲染层 DrawPlayer_38 消费） */
+  eyebrellaCloud = false;
+
+  // ---- 虫洞药水（item 2997 WormholePotion：HasUnityPotion/TakeUnityPotion
+  //     Player.cs:41652-41697；消费链 = 观战键 B 传送 HandleSpectatingControls
+  //     :16942-16947，CanWormholeToSpectating :17002-17009）----
+  /** useVoidBag（Player.cs:22904-22902）：背包 58 格任一 4131 虚空袋 */
+  useVoidBag(): boolean {
+    for (let i = 0; i < 58; i++) {
+      const s = this.inv.slots[i];
+      if (s && s.stack > 0 && vanillaIdOfItem(s.id) === 4131) return true;
+    }
+    return false;
+  }
+  /** HasUnityPotion（:41652-41669）：背包 58 格任一 2997；持虚空袋时 bank4（banks[3]）也计 */
+  hasUnityPotion(): boolean {
+    for (let i = 0; i < 58; i++) {
+      const s = this.inv.slots[i];
+      if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) return true;
+    }
+    if (this.useVoidBag()) {
+      const b = this.banks[3];
+      for (let j = 0; j < b.length; j++) {
+        const s = b[j];
+        if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) return true;
+      }
+    }
+    return false;
+  }
+  /** TakeUnityPotion（:41672-41697）：扣 1 瓶（背包优先 → 空位 SetDefaults(0)；
+   *  持虚空袋时 bank4 兜底） */
+  takeUnityPotion(): void {
+    for (let i = 0; i < 58; i++) {
+      const s = this.inv.slots[i];
+      if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) {
+        s.stack--;
+        if (s.stack <= 0) this.inv.slots[i] = null;   // SetDefaults(0) = 清空
+        return;
+      }
+    }
+    if (!this.useVoidBag()) return;
+    const b = this.banks[3];
+    for (let j = 0; j < b.length; j++) {
+      const s = b[j];
+      if (s && vanillaIdOfItem(s.id) === 2997 && s.stack > 0) {
+        s.stack--;
+        if (s.stack <= 0) b[j] = null;
+        return;
+      }
+    }
+  }
+
+  // ---- 抚摸宠物链（Player.cs:32881-32942 PetAnimal/PetMount + :33009-33033
+  //     UpdatePettingAnimal + CanSnapToPosition :32945-32983；PlayerPettingInfo
+  //     Terraria.GameContent/PlayerPettingInfo.cs）----
+  /** 抚摸状态（Player.petting）。offsetFromPet = 目标 Bottom 的偏移（宠物在哪侧，
+   *  玩家站对侧）；targetBottom = 快照（>2px 漂移即停，:33020） */
+  readonly petting = {
+    isPetting: false,
+    isPetSmall: false,
+    offsetX: 0, offsetY: 0,
+    targetBottomX: 0, targetBottomY: 0,
+    /** 宠物跟随体存活校验回调（Game 注入——目标死亡/换宠返回 false） */
+    validTarget: null as null | (() => boolean),
+  };
+  /** 抚摸手臂动画档（ItemCheck_ApplyHoldStyle :49481-49508：miscCounter%14/7
+   *  两档——0=ThreeQuarters / 1=Full；角度 = −2π×0.3×dir（小宠 0.2）。
+   *  渲染侧无复合手臂层（引擎级缺口），仅暴露档位数据，登记） */
+  get pettingArmPhase(): number { return Math.trunc(this.miscCounter % 14 / 7); }
+
+  /** PetAnimal（:32901-32942）：snap 到宠物旁 → 置 petting 态。返回 false = 站位
+   *  不可达（CanSnapToPosition / 地面非实心）。target 形参 = 宠物跟随体。 */
+  petAnimal(game: GameHooks, target: {
+    cx: number; bottomY: number; valid: () => boolean; isSmall: boolean; reach: number;
+  }): boolean {
+    // 站位点 = 目标 Bottom + offsetFromPet（取整，:32906 Floor）+ 要求脚下实心
+    // （SolidTileAllowBottomSlope——斜坡底允许；本仓 solid 判定含半砖近似，登记）
+    const num = Math.sign(target.cx - this.cx) || 1;       // num = 宠在玩家右侧?1:-1
+    const ox = -num * target.reach;
+    const vx = Math.floor(target.cx + ox);
+    const vy = Math.floor(target.bottomY);
+    const st = game.world.store;
+    const gx = Math.floor(vx / 16), gy = Math.floor(vy / 16);
+    if (!st.inBounds(gx, gy)) return false;
+    if (!st.isSolid(gx, gy)) return false;   // SolidTileAllowBottomSlope 底面（实心底）
+    // 已在抚摸同位 → 二次交互 = 停止（:32917-32921）
+    if (this.petting.isPetting && Math.trunc(this.y + this.h) === vy
+      && Math.abs(Math.trunc(this.x) - Math.trunc(vx - this.w / 2)) < 2) {
+      this.stopPettingAnimal();
+      return false;
+    }
+    // CanSnapToPosition（:32945-32965）：目标盒无实心碰撞 + 可视直线（薄柱回退）
+    const nx = vx - this.w / 2, ny = vy - this.h;
+    if (!this.canSnapToPosition(game, nx - this.x, ny - this.y)) return false;
+    // StopVanityActions（:32923 坐/睡/抚摸互斥）+ RemoveAllGrapplingHooks（:32924）
+    this.sitting = false;
+    this.sleeping = false;
+    this.removeAllGrapplingHooks();
+    this.x = nx; this.y = ny;
+    this.vx = 0; this.vy = 0;
+    this.facing = num === 0 ? this.facing : -Math.sign(ox);   // 面向宠物（ChangeDir(sign(−offset))）
+    this.petting.isPetting = true;
+    this.petting.isPetSmall = target.isSmall;
+    this.petting.offsetX = ox;
+    this.petting.offsetY = 0;
+    this.petting.targetBottomX = target.cx + ox;
+    this.petting.targetBottomY = target.bottomY;
+    this.petting.validTarget = target.valid;
+    return true;
+  }
+
+  /** StopPettingAnimal（:33009-33012） */
+  stopPettingAnimal(): void {
+    this.petting.isPetting = false;
+    this.petting.validTarget = null;
+  }
+
+  /** CanSnapToPosition（:32945-32983）：!SolidCollision(pos+offset) + CanHit 直线，
+   *  失败回退宽 w−2 薄柱两向（TryAllowingSnappingToPosition :32986-33000）。
+   *  第三回退（TileCollision 横向试走）以同距实心盒检查等价（登记） */
+  private canSnapToPosition(game: GameHooks, offX: number, offY: number): boolean {
+    const st = game.world.store;
+    const tx = this.x + offX, ty = this.y + offY;
+    if (!solidCollisionBox(st, tx, ty, this.w, this.h)) {
+      return canHitLine(st, this.x, this.y, this.w, this.h, tx, ty, this.w, this.h);
+    }
+    // 薄柱回退（TryAllowingSnappingToPosition：w−2 宽两柱互见）
+    const thin = this.w - 2;
+    if (canHitLine(st, this.x + thin, this.y, 2, this.h, tx, ty, 2, this.h)) return true;
+    if (canHitLine(st, this.x + thin, this.y, 2, this.h, tx + thin, ty, 2, this.h)) return true;
+    return false;
+  }
+
+  /** UpdatePettingAnimal（:33015-33033）：目标失效/漂移 >2px/移动键/换向 → 停 */
+  private updatePettingAnimal(): void {
+    if (!this.petting.isPetting) return;
+    const ok = this.petting.validTarget?.() ?? false;
+    const drift = Math.hypot(
+      this.petting.targetBottomX - (this.x + this.w / 2),
+      this.petting.targetBottomY - (this.y + this.h));
+    if (!ok || drift > 2) { this.stopPettingAnimal(); return; }
+    const num = Math.sign(-this.petting.offsetX);
+    // controlLeft/Right/Up/Down/Jump（:33030——inputX 覆盖左右、inputUp/Down 上下）
+    if (this.inputX !== 0 || this.inputUp || this.inputDown
+      || this.inputJump || num !== this.facing) {
+      this.stopPettingAnimal();
+    }
+  }
+
   private updateEyeState(game: GameHooks): void {
     // SetStateByPlayerInfo（:75-122）——优先级：致盲 > 受击锁存 > 床 > 中度伤 > 醉 >
     // 毒 > 风暴眯眼 > 正常眨眼
@@ -5161,8 +5434,9 @@ export class Player extends Entity {
       this.switchEyeState(EYE_HURTDMG);      // :93-96 中度伤 = statLife ≤ statLifeMax2×0.25（:133-136）
     } else if (this.buffs.has(BuffType.Tipsy)) {
       this.switchEyeState(EYE_TIPSY);        // :98-101
-    } else if (this.buffs.has(BuffType.Poisoned) || this.buffs.has(BuffType.Venom)) {
-      this.switchEyeState(EYE_POISON);       // :103-106（starving 本仓无此 buff——缺省不触发）
+    } else if (this.buffs.has(BuffType.Poisoned) || this.buffs.has(BuffType.Venom)
+      || this.buffs.has(BuffType.Starving)) {
+      this.switchEyeState(EYE_POISON);       // :103-106 poisoned||venom||starving（饥饿链 2026-08-20 补）
     } else {
       // :108-120 风暴眯眼 = ZoneSandstorm || (ZoneSnow && IsItRaining)；behindBackWall
       // 抑制位本仓无追踪（恒 false，登记偏离）
@@ -5228,3 +5502,32 @@ const EYE_HURTDMG = 4;  // IsModeratelyDamaged
 const EYE_BLIND = 5;    // IsBlind
 const EYE_TIPSY = 6;    // IsTipsy
 const EYE_POISON = 7;   // IsPoisoned
+
+/** Collision.SolidCollision（Terraria/Collision.cs 同名方法 1:1）：盒内任一实心
+ *  非站顶格相交（半砖下移 8/高 8；扫描域 ±1/-1..+2 padding 同原版）。
+ *  抚摸链 CanSnapToPosition（Player.cs:32948）消费 */
+export function solidCollisionBox(
+  st: { inBounds(x: number, y: number): boolean; idx(x: number, y: number): number; type: unknown; isSolid(x: number, y: number): boolean },
+  px: number, py: number, w: number, h: number,
+): boolean {
+  const store = st as unknown as {
+    inBounds(x: number, y: number): boolean; idx(x: number, y: number): number;
+    type: Uint16Array; half: Uint8Array; isSolid(x: number, y: number): boolean;
+  };
+  const x0 = Math.max(0, Math.floor(px / 16) - 1);
+  const x1 = Math.floor((px + w) / 16) + 2;
+  const y0 = Math.max(0, Math.floor(py / 16) - 1);
+  const y1 = Math.floor((py + h) / 16) + 2;
+  for (let j = y0; j <= y1; j++) {
+    for (let i = x0; i <= x1; i++) {
+      if (!store.inBounds(i, j)) continue;
+      if (!store.isSolid(i, j)) continue;   // active && !inActive && tileSolid（含致动门）
+      const k = store.idx(i, j);
+      if (TILE_DEFS[store.type[k]]?.platform) continue;   // !tileSolidTop
+      let ty = j * 16, th = 16;
+      if (store.half[k]) { ty += 8; th -= 8; }            // halfBrick
+      if (px + w > i * 16 && px < i * 16 + 16 && py + h > ty && py < ty + th) return true;
+    }
+  }
+  return false;
+}

@@ -18,7 +18,7 @@ import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
-import { GRAVITY, MAX_FALL_SPEED } from '../core/constants';
+import { ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
@@ -942,7 +942,7 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (vid === 143) { num586 = 3; num587 = 0.7; }
   if (vid === 145) { num586 = 3.5; num587 = 0.8; }
   // 重力+位移先积分（原版 AI 读上一帧 velocity.Y==0 判落地，等价移动后判定）
-  e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
+  e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);
   const onG = e.onGround;   // moveAndCollide 落地即 vy=0（原版 velocity.Y==0 门）
 

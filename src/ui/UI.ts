@@ -3495,6 +3495,29 @@ export class UI {
     }, { initial: appearance, dresser: true });
   }
 
+  /** 造型师理发窗（Main.OpenHairWindow Main.cs:43073——OpenHairWindow 快照
+   *  oldHairStyle/oldHairColor，CancelHairWindow 回退）：只改发型+发色；
+   *  确认 = BuyHairWindow（付款失败 toast 拒付，面板保留可改） */
+  private hairPanel: CharCreation | null = null;
+  showHairWindow(appearance: Appearance,
+    quotes: { priceOf: (a: Appearance) => number; buy: (a: Appearance) => boolean },
+    onApply: (a: Appearance) => void): void {
+    this.hairPanel?.close();
+    this.hairPanel = new CharCreation(this.root, {
+      // 理发窗确认=购买（GameUI.BuyWithValue 动态报价）；取消/Esc=CancelHairWindow 回退
+      onCreate: (a) => {
+        if (!quotes.buy(a)) {
+          this.toast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
+          this.showHairWindow(appearance, quotes, onApply);   // 重建面板（购买被拒仍可改）
+          return;
+        }
+        this.hairPanel = null;
+        onApply(a);
+      },
+      onCancel: () => { this.hairPanel = null; },
+    }, { initial: appearance, hairSalon: true, priceOf: quotes.priceOf });
+  }
+
   /** M5：背包/快捷栏已 Canvas 化，DOM 仅保留 Buff 栏 + Toast */
   initInGameLite() {
     this.buildBuffBar();

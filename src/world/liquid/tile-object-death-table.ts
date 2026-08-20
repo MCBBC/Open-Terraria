@@ -48,8 +48,14 @@ export const TILE_OBJECT_DEATH: Readonly<Record<number, TodEntry>> = {
   79:{fw:72,fh:36,sh:1,swl:2,sm:2,sls:1,d:[1, 0],subs:{8:{d:[0, 0],alts:[[1,0,0,0]]},42:{d:[0, 0],alts:[[1,0,0,0]]},56:{d:[1, 0],alts:[[1,0,1,0]]},57:{d:[1, 0],alts:[[1,0,1,0]]},58:{d:[1, 0],alts:[[1,0,1,0]]},59:{d:[1, 0],alts:[[1,0,1,0]]},60:{d:[1, 0],alts:[[1,0,1,0]]},61:{d:[1, 0],alts:[[1,0,1,0]]},62:{d:[1, 0],alts:[[1,0,1,0]]},63:{d:[1, 0],alts:[[1,0,1,0]]},64:{d:[1, 0],alts:[[1,0,1,0]]}},alts:[[1,0,1,0]]},
   81:{fw:26,fh:28,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{},alts:[]},
   82:{fw:18,fh:22,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{1:{d:[1, 0],alts:[]},2:{d:[1, 0],alts:[]},3:{d:[1, 0],alts:[]},4:{d:[1, 0],alts:[]},5:{d:[0, 0],alts:[]},6:{d:[1, 0],alts:[]}},alts:[]},
-  83:{fw:18,fh:22,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{1:{d:[1, 0],alts:[]},2:{d:[1, 0],alts:[]},3:{d:[1, 0],alts:[]},4:{d:[1, 0],alts:[]},5:{d:[0, 0],alts:[]},6:{d:[1, 0],alts:[]}},alts:[]},
-  84:{fw:18,fh:22,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{1:{d:[1, 0],alts:[]},2:{d:[1, 0],alts:[]},3:{d:[1, 0],alts:[]},4:{d:[1, 0],alts:[]},5:{d:[0, 0],alts:[]},6:{d:[1, 0],alts:[]}},alts:[]},
+  // ★YYYYY（2026-08-20）：83/84 的 subs 清空——vanilla TileObjectSubTilesModule 拷贝
+  // 构造 bug（Terraria.Modules/TileObjectSubTilesModule.cs:15 `for (i < data.Count)` 遍历
+  // 【新列表】恒 0 次 → FullCopyFrom(82/83) 的 SubTiles 全丢）。运行时 GetTileData(83/84,
+  // style5) 落回 base d=[1,0]=岩浆死——x86 KT 织入实证（9293480 pass97 (3800,1085)/
+  // (3317,1097) t83@fx90 l255/lava 在 WaterCheck 被杀，/tmp/yyyyy-kt-a.txt）。82 是
+  // addTile 原件保留 sub5=[0,0]（灰烬草药种子 82 免疫、83/84 不免疫=原版真行为）。
+  83:{fw:18,fh:22,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{},alts:[]},
+  84:{fw:18,fh:22,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{},alts:[]},
   85:{fw:36,fh:36,sh:1,swl:0,sm:1,sls:1,d:[0, 0],subs:{},alts:[]},
   86:{fw:54,fh:36,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{},alts:[]},
   87:{fw:54,fh:36,sh:1,swl:0,sm:1,sls:1,d:[1, 0],subs:{15:{d:[0, 0],alts:[]},42:{d:[0, 0],alts:[]}},alts:[]},

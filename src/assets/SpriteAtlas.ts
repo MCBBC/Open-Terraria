@@ -368,8 +368,13 @@ export class SpriteAtlas {
 
   /** 原版物品图标。构建期已 shelf-pack 进少数 Item_Atlas_k.png 图集(ix/iy/iw/ih
    *  子矩形,见 scripts/vanilla-atlas.mjs);旧单体条目(无矩形字段)回退整图语义。
-   *  未加载时触发后台懒加载并返回 null(下帧生效) */
+   *  未加载时触发后台懒加载并返回 null(下帧生效)。
+   *  资源包覆盖(M13):包内 Images/Item_<id>.png 以独立键注入 vimages
+   *  (vanilla/Item_<id>.png——图集通道下盘上无此文件,仅资源包会产生该键),
+   *  命中则整图直取,绕过图集子矩形(原版资源包替换 = 资产级覆盖同语义) */
   vicon(itemId: number): DrawRect | null {
+    const packImg = this.vimages.get(`vanilla/Item_${itemId}.png`);
+    if (packImg) return { img: packImg, sx: 0, sy: 0, sw: packImg.width, sh: packImg.height };
     const m = this.vanilla.items[String(itemId)];
     if (!m) return null;
     const img = this.ensureVImage(m.icon);

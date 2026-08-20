@@ -1,5 +1,6 @@
 // 相机：跟随玩家 + 缓动 + 世界边界钳制
 import { TILE } from '../core/constants';
+import { CameraModifierStack } from './CameraModifierStack';
 
 export class Camera {
   x = 0; y = 0;         // 视野中心（世界 px）
@@ -38,23 +39,17 @@ export class Camera {
     if (this.worldH * TILE < halfH * 2) this.y = this.worldH * TILE / 2;
   }
 
-  /** PunchCameraModifier（Main.cs）近似：冲击向量随帧衰减,worldToScreen 统一叠加 */
+  /** CameraModifierStack（Main.instance.CameraModifiers，Terraria.Graphics.CameraModifiers
+   *  1:1，2026-08-20）：punch 旧"线性衰减近似"退役——现为标准修饰器栈
+   *  （PunchCameraModifier 余弦振动 × 线性包络 × 距离衰减），ApplyTo 每渲染帧一次 */
+  readonly modifiers = new CameraModifierStack();
   punchX = 0; punchY = 0;
-  private punchFrames = 0;
-  private punchVecX = 0; private punchVecY = 0;
-  addPunch(dirX: number, dirY: number, strength = 20, frames = 30): void {
-    const d = Math.hypot(dirX, dirY) || 1;
-    this.punchVecX += (dirX / d) * strength;
-    this.punchVecY += (dirY / d) * strength;
-    this.punchFrames = Math.max(this.punchFrames, frames);
-  }
-  /** 每帧渲染前调用：衰减位移（线性归零 + 向量残留 ×0.92） */
+  /** 每帧渲染前调用：ApplyTo(cameraPosition)（Main.cs:62091）——本帧全部修饰器
+   *  合成位移写入 punchX/punchY，worldToScreen 统一叠加；屏幕尺寸按当前视野/zoom 折算 */
   tickPunch(): void {
-    if (this.punchFrames <= 0) { this.punchX = this.punchY = 0; this.punchVecX = this.punchVecY = 0; return; }
-    this.punchFrames--;
-    this.punchX = this.punchVecX * (this.punchFrames / 30);
-    this.punchY = this.punchVecY * (this.punchFrames / 30);
-    this.punchVecX *= 0.92; this.punchVecY *= 0.92;
+    const off = this.modifiers.applyTo(this.x, this.y, this.viewW / this.zoom, this.viewH / this.zoom);
+    this.punchX = off.x;
+    this.punchY = off.y;
   }
   worldToScreen(wx: number, wy: number): [number, number] {
     return [(wx - this.x + this.punchX) * this.zoom + this.viewW / 2, (wy - this.y + this.punchY) * this.zoom + this.viewH / 2];

@@ -18,7 +18,7 @@
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
-import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
+import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { getKnockbackMultiplierScaledByDifficulty, getAttackDamageForProjectiles } from '../stats/ScaleStats';
@@ -695,7 +695,7 @@ export function psychoStealthStep(e: Enemy, game: GameHooks, p: Player | null): 
     if (p && !p.dead && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 170) e.ai2 = -16;
     // :56301-56304：自身被推动/下落超两档重力/受击 → 同样触发
     if (e.vx !== 0 || e.vy < 0 || e.vy > 2 || e.justHit) e.ai2 = -16;
-    e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);      // :56305 return（UpdateNPC :91519 重力）
+    e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);      // :56305 return（UpdateNPC :91519 重力=npc.gravity 0.3）
     moveAndCollide(e, game.world, e.vx, e.vy);
     return true;
   }
@@ -709,7 +709,7 @@ export function psychoStealthStep(e: Enemy, game: GameHooks, p: Player | null): 
       e.ai2 = 1;
       e.vx = e.facing * 2;
     }
-    e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);      // :56323 return
+    e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);      // :56323 return
     moveAndCollide(e, game.world, e.vx, e.vy);
     return true;
   }
@@ -768,11 +768,11 @@ export function nailheadHitScatter(e: Enemy, game: GameHooks, p: Player | null):
 
 /** Butcher 460 空中免击退（NPC.cs:57615-57624）：|vy| 超过一档重力步（正被击飞/
  *  下坠加速中）→ knockBackResist=0 完全免疫；否则 0.25 走难度曲线。
- *  原版阈值是 npc.gravity(0.3)（NPC.cs:6026），本仓战士重力步长 = GRAVITY，
- *  语义一致（自由落体 ≥2 tick 即超过）。 */
+ *  原版阈值是 npc.gravity(0.3)（NPC.cs:6026）= ENEMY_GRAVITY（2026-08-20
+ *  对齐批换正，曾用玩家 GRAVITY 0.4 近似）。 */
 export function butcherKbStep(e: Enemy): void {
   if (e.vanillaId !== 460) return;
-  if (e.vy < -GRAVITY || e.vy > GRAVITY) {
+  if (e.vy < -ENEMY_GRAVITY || e.vy > ENEMY_GRAVITY) {
     e.kbResistOverride = 0;                               // :57617-57620
   } else {
     e.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(0.25, e.difficulty); // :57623

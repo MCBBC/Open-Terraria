@@ -181,6 +181,22 @@ export const enum NetModule {
                 //   3=队伍频道（RGB 不附——服务器按 msg13 team 定向同队,队伍色）
   PingModule = 2, // 预留
   JoinLeave = 3,  // S→C 系统 {slot, joined}——加入/离开公告（原版 Lang.mp[19]/[20]，服务器广播）
+  CreativePowers = 5, // M9 旅程力量（原版 NetCreativePowersModule——NetworkInitializer.cs:17
+                      //   注册序 id=5）：世界侧力量全量态广播 + 个人侧（godmode/放置范围/
+                      //   刷怪率）按 slot 广播 + 时段跳跃中继。载荷见 net/journeySync.ts
+                      //   （原版按 powerId+子消息编码；本仓世界态聚合为单快照——语义等价
+                      //   记录于 journeySync.ts 头注）。旧端 default 忽略未知 moduleId，
+                      //   增量通道不升 PROTO_VER（同 LeashedEntity=13 先例）
+  CreativeUnlocksReport = 6, // M9 研究进度上报（原版 NetCreativeUnlocksPlayerReportModule——
+                      //   注册序 id=6）：C→S {u16 itemId, u16 amount} → S→C {u8 slot,
+                      //   u16 itemId, u16 amount}（排除发送者广播——原版 dedServ 同款）；
+                      //   接收端同队门（LocalPlayer.team>0 && 同队）才入本地 Research
+  CreativePowerPermissions = 9, // M9 力量权限（原版 NetCreativePowerPermissionsModule——
+                      //   注册序 id=9，S→C 专向）：{u8 sub0, u16 powerId, u8 level}；
+                      //   level 0=LockedForEveryone/1=CanBeChangedByHostAlone/
+                      //   2=CanBeChangedByEveryone（PowerPermissionLevel.cs，默认 2）。
+                      //   C→S 同载荷 = 房主改权限（原版无此上行——服务器配置文件承担，
+                      //   本仓以房主 UI 直改，语义对齐 journeypermission_* 配置行）
   LeashedEntity = 13, // 拴绳实体（原版 LeashedEntity.NetModule，msg82 承载）：
                       //   sub1=FullSync（新增/section 激活全量）/ sub2=PartialSync（周期位置）/
                       //   sub0=Remove——仅房主上行，服务器登记后按条带定向补发（见 net/leashedSync.ts）

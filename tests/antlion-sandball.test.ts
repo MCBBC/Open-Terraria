@@ -1,0 +1,123 @@
+// 蚁狮沙球（proj 31，ProjectileID.SandBallFalling 敌版 ai[0]=2）回归：
+// 用户实报"蚁狮发射的东西不对"。标杆 Projectile.cs——AI_010 ai[0]==2 档
+// （:55081-55100）：重力 0.2 + vx 侧摩 ±0.04 向 0 收 + vy 钳 10（曾误用
+// ai[0]==1 落地态的 0.41=坠速翻倍）；spin 0.1 恒速（:55158）；timeLeft 300；
+// 落地放沙 53（:75430-75536 PlaceTile，轨道314/传送带421-422 不放）；
+// 沿途 KillTile 清单（:55106-55136）：12/105/165/178/185-187/639/665。
+import { describe, it, expect } from 'vitest';
+import { World } from '../src/world/World';
+import { Player } from '../src/entities/Player';
+import { Inventory } from '../src/items/Inventory';
+import { Dart } from '../src/entities/Dart';
+import { TILE } from '../src/core/constants';
+import type { GameHooks } from '../src/entities/types';
+import type { World as WorldT } from '../src/world/World';
+
+const W = 120, H = 60, FLOOR = 50;
+
+function makeWorld(): World {
+  const w = new World(W, H, 11, 'sandball');
+  const st = w.store;
+  for (let x = 0; x < W; x++) st.setTile(x, FLOOR, 1);
+  return w;
+}
+
+interface Rec { breaks: Array<[number, number]>; }
+function makeHooks(w: World): { hooks: GameHooks; rec: Rec } {
+  const rec: Rec = { breaks: [] };
+  const player = new Player(80 * TILE, (FLOOR - 4) * TILE, new Inventory());
+  const hooks = {
+    world: w, player,
+    enemies: () => [], critters: () => [], npcs: () => [],
+    damagePlayer: () => {}, spawnDrop: () => null, addDamageNumber: () => {},
+    onEnemyKilled: () => {}, spawnEnemy: () => {}, spawnParticles: () => {},
+    spawnBurst: () => {}, addLightAt: () => {}, notifyInventoryChanged: () => {},
+    playSfx: () => {}, playSfxFiles: () => {}, playSfxWav: () => {},
+    showPickupLabel: () => {}, cutTile: () => {},
+    breakTile: (x: number, y: number) => { rec.breaks.push([x, y]); w.store.setTile(x, y, 0); },
+    scene: { zoneGraveyard: false },
+    entities: { nextId: 1, add: () => {} },
+  } as unknown as GameHooks;
+  return { hooks, rec };
+}
+
+function step(d: Dart, h: GameHooks, n: number): void {
+  for (let i = 0; i < n && !d.dead; i++) d.fixedUpdate(1 / 60, h);
+}
+
+describe('沙球物理（AI_010 ai[0]==2 档 :55081-55100）', () => {
+  it('重力 0.2（曾误 0.41）+ vy 钳 10', () => {
+    const w = makeWorld();
+    const { hooks } = makeHooks(w);
+    const d = new Dart(60 * TILE, 10 * TILE, 0, 0, 10, 31);
+    d.hostile = true;
+    // 空旷垂直下落 5 tick：vy = 0.2×5 = 1.0（0.41 档会是 2.05）
+    step(d, hooks, 5);
+    expect(d.vy).toBeCloseTo(1.0, 4);
+    // 长落钳 10（0.41 档钳 16）
+    step(d, hooks, 200);
+    expect(d.dead, '落到 FLOOR 上消亡').toBe(true);
+  });
+
+  it('vx 侧摩 ±0.04 向 0 收（水平缓停，弧线"飘"感来源）', () => {
+    const w = makeWorld();
+    const { hooks } = makeHooks(w);
+    const d = new Dart(60 * TILE, 10 * TILE, 8, 0, 10, 31);
+    d.hostile = true;
+    step(d, hooks, 10);
+    expect(d.vx).toBeCloseTo(8 - 0.4, 4);   // 10 tick × 0.04
+    // 摩到阈值内直接归零
+    const d2 = new Dart(60 * TILE, 10 * TILE, 0.02, 0, 10, 31);
+    step(d2, hooks, 1);
+    expect(d2.vx).toBe(0);
+  });
+
+  it('寿命 300（原版 timeLeft，曾 600）', () => {
+    const w = new World(W, H, 11, 'sandball-void');   // 全空世界：不触地
+    const { hooks } = makeHooks(w);
+    const d = new Dart(60 * TILE, 1 * TILE, 0, -0.01, 10, 31);
+    let t = 0;
+    while (!d.dead && t < 1000) { d.fixedUpdate(1 / 60, hooks); t++; }
+    expect(t).toBe(300);
+  });
+});
+
+describe('沙球落地放沙 + 沿途击碎（:75430-75536 / :55106-55136）', () => {
+  it('落地在空格上 → 放沙 53', () => {
+    const w = makeWorld();
+    const st = w.store;
+    const { hooks } = makeHooks(w);
+    const d = new Dart(60 * TILE, (FLOOR - 5) * TILE, 0, 2, 10, 31);
+    step(d, hooks, 30);
+    expect(d.dead).toBe(true);
+    const cy = FLOOR - 1;   // 落点上一格
+    expect(st.get(60, cy)).toBe(53);
+  });
+
+  it('下方是轨道 314 → 不放沙', () => {
+    const w = makeWorld();
+    const st = w.store;
+    st.setTile(60, FLOOR - 1, 314);   // 轨道占落点下方
+    st.setTile(60, FLOOR, 1);
+    const { hooks } = makeHooks(w);
+    const d = new Dart(60 * TILE, (FLOOR - 5) * TILE, 0, 2, 10, 31);
+    step(d, hooks, 30);
+    expect(st.get(60, FLOOR - 2)).toBe(0);   // 未放沙
+  });
+
+  it('沿途击碎水晶 12 / 雕像 105 / 小石堆 185', () => {
+    const w = makeWorld();
+    const st = w.store;
+    // 弹道路径上摆靶（x=60 列，从上往下穿过）
+    st.setTile(60, 10, 12);
+    st.setTile(60, 15, 105);
+    st.setTile(60, 20, 185);
+    const { hooks, rec } = makeHooks(w);
+    const d = new Dart(60 * TILE, 8 * TILE, 0, 3, 10, 31);
+    step(d, hooks, 60);
+    expect(rec.breaks.length).toBeGreaterThanOrEqual(3);
+    expect(rec.breaks.some(([x, y]) => x === 60 && y === 10)).toBe(true);
+    expect(rec.breaks.some(([x, y]) => x === 60 && y === 15)).toBe(true);
+    expect(rec.breaks.some(([x, y]) => x === 60 && y === 20)).toBe(true);
+  });
+});

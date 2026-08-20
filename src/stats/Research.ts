@@ -63,6 +63,10 @@ export interface SacrificeTotals { fullyResearchedItems: number; allItems: numbe
 export class Research {
   /** 解析后 id → 累计献祭数（= _sacrificesCountByItemIdCache） */
   private counts = new Map<number, number>();
+  /** ItemsSacrificedUnlocksTracker._newlyUnlocked（cs:18/136-141：跨线进集合，
+   *  IsNewlyResearched 供旅程浏览器 ByUnlockStatus 首序位 + 图标高亮；
+   *  不持久化——原版亦仅会话态（Save 只写 _sacrificeCountByItemPersistentId） */
+  private newly = new Set<number>();
   private _lastEditId = 0;
   /** AchievementsHelper._lastResearchVersion（cs:385） */
   private achVersion = -1;
@@ -107,6 +111,16 @@ export class Research {
     return n !== null && n.have >= n.need;
   }
 
+  /** IsNewlyResearched（cs:100-102）——解析链同上（浏览器传牺牲品 id 时先过 override） */
+  isNewlyResearched(itemId: number): boolean {
+    return this.newly.has(this.resolveId(itemId));
+  }
+
+  /** ClearNewlyResearchedStatus（cs:104-108）——浏览器悬停/取用后消高亮 */
+  clearNewlyResearchedStatus(itemId: number): void {
+    this.newly.delete(this.resolveId(itemId));
+  }
+
   get lastEditId(): number { return this._lastEditId; }
 
   // ---- 献祭 ----
@@ -123,6 +137,7 @@ export class Research {
     if (n.have >= n.need) return false;         // cs:126-129 已满直接返回
     const value = Math.min(n.have + Math.floor(amount), n.need);
     this.counts.set(id, value);
+    if (value >= n.need) this.newly.add(id);    // cs:134-136 _newlyUnlocked.Add
     this.markContentsDirty();
     this.save();                                // 每次有效推进即落盘（原版由世界脏标记承担）
     return value >= n.need;
@@ -134,6 +149,13 @@ export class Research {
     this.counts.set(this.resolveId(itemId), v);
     this.markContentsDirty();
     this.save();
+  }
+
+  /** 解析后 id 暴露（联机研究上报接收端 / 浏览器进度遍历用——只读视图） */
+  resolvedIdsWithProgress(): number[] {
+    const out: number[] = [];
+    for (const [id, v] of this.counts) if (v > 0) out.push(id);
+    return out;
   }
 
   // ---- 统计（成就 45 门）----
@@ -196,6 +218,7 @@ export class Research {
   /** Reset（cs:205-213）：清计数并置脏 */
   reset(): void {
     this.counts.clear();
+    this.newly.clear();                          // cs:211 _newlyUnlocked.Clear()
     this.markContentsDirty();
     this.save();
   }

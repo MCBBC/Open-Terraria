@@ -178,6 +178,7 @@ import { createDeathText, newNpcName } from '../i18n/RandomText';
 import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } from '../stats/Pvp';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
+import { InsanityShadowFriendly } from '../entities/InsanityShadowFriendly';
 import { CoinPortalProj } from '../entities/CoinPortalProj';
 import { DebrisProj } from '../entities/DebrisProj';
 import { crackedChainKill, isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
@@ -201,6 +202,7 @@ import { CRITTER_CATCH_BY_NPC, CRITTER_RELEASE_BY_ITEM } from '../data/critters'
 import { dropBaitRoll, baitWormType, dropCloverRoll } from '../world/DropBait';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
+import { PunchCameraModifier } from '../render/CameraModifierStack';
 import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bestiaryCreditId } from '../data/Bestiary';
 
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
@@ -229,11 +231,15 @@ import { WorldEvolution } from '../world/evolution/WorldEvolution';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
+import {
+  applyJourneyWorldState, type JourneyWorldState, type JourneyPersonalState,
+  type PowerPermissionLevel,
+} from '../net/journeySync';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
 import { bindsOf, isBound, keybindCodeLabel } from './Keybinds';
-import { openJourneyPowersPanel } from '../ui/JourneyPowersUI';
+import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
 import { GLSpriteLayer } from '../render/GLSpriteLayer';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
@@ -667,7 +673,7 @@ export function dropInventoryOnDeath(
 }
 
 /** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付） */
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
 
 export interface GameCallbacks {
   onWorldReady: () => void;
@@ -708,6 +714,9 @@ export interface GameCallbacks {
   /** 梳妆台右键更衣窗（Main.OpenClothesWindow Main.cs:43568）：1.4 起梳妆台不是
    *  储物容器（Player.cs:32461-32479 直接开更衣界面），外观随角色存档持久化 */
   onClothesWindow?: (appearance: import('../player/Appearance').Appearance) => void;
+  /** 造型师理发窗（Main.OpenHairWindow Main.cs:43073）：报价/购买走
+   *  Game.hairRestylePrice / Game.buyHairRestyle，流程层接 UI.showHairWindow */
+  onHairWindow?: () => void;
   /** 自动保存触发（Main.autoSave 墙钟到点，DoUpdate_AutoSave Main.cs:19589-19613
    *  600000ms → WorldGen.saveAndPlay）——流程层接 doSave */
   onAutoSave?: () => void;
@@ -1434,6 +1443,7 @@ export class Game implements GameHooks {
       if (e.netPuppet || e.id !== localId) continue;
       if (fromSlot !== undefined) setPendingStrikeOwner(fromSlot);
       e.hurt(rawDmg, kbx, kby, this);
+      setPendingStrikeOwner(null);   // hurt 早退路径（iframes/已死）不残留——防串账
       const dealt = Math.max(1, Math.round(rawDmg - (e.def.defense ?? 0) * 0.5));
       this.addDamageNumber(e.cx, e.y, dealt, false, '#FF7060');
       return;
@@ -6258,6 +6268,27 @@ export class Game implements GameHooks {
   private quickBuff(): void {
     const p = this.player;
     if (!p || p.dead) return;                                             // :5448
+    // ---- 虫洞药水拦截（HandleSpectatingControls Player.cs:16942-16947：
+    //      观战中按 QuickBuff 且 CanWormholeToSpectating（:17002-17009 =
+    //      !dead && 观战目标有效 && 同队 team>0）→ UnityTeleport + TakeUnityPotion，
+    //      不进常规 QuickBuff。地图点击侧（Main.cs:55406 全屏地图队友头像）本仓无
+    //      全屏地图，未接（登记）----
+    if (this.spectatingSlot >= 0 && this.net?.active && this.spectatingSlot !== this.net.mySlot) {
+      const rp = this.net.players.get(this.spectatingSlot);
+      if (rp?.active && p.team > 0 && p.team === rp.team && p.hasUnityPotion()) {
+        const proxy = this.remotePlayerProxies.find(
+          (r) => (r as unknown as { __netSlot?: number }).__netSlot === this.spectatingSlot);
+        if (proxy) {
+          // UnityTeleport（:41699-41710：Teleport(telePos, 3)）；telePos =
+          // position + 目标.Bottom − 自身.Bottom（HandleSpectatingControls :16943 /
+          // Main.cs:55446 同式）→ 等价落位目标左上角（双玩家同 width/height）
+          this.wormholeTeleportTo(proxy.x + proxy.netOffX, proxy.y + proxy.netOffY);
+          p.takeUnityPotion();
+          this.cb.onInventoryChanged?.();
+          return;
+        }
+      }
+    }
     let soundVid = -1;
     // ---- QuickBuff_PickBestFoodItem（:5474-5646）：26/206/207 优先级 1/2/3 ----
     let curPrio = 0;
@@ -6762,14 +6793,30 @@ export class Game implements GameHooks {
       // TileReachCheckSettings.Simple 射程内——inTileRange 同款盒）才消费右键——
       // 优先级高于地块交互（原版 petting 判定在 TileInteraction 之前）
       {
+        // 抚摸宠物（Main.cs:37404：右键悬停宠物投射物 → PetAnimal → 成就 21）。
+        // 全链 1:1（Player.petAnimal）：站位可达即吸附宠物旁开始抚摸（再次交互/移动
+        // 键停止）；宠物 num2 距离表 = Projectile.GetPettingInfo :36600-36620
+        // （默认 36；1093=24 / 1094=32 / 1098=48 小宠）。
         const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         const pet = [this.petFollower, this.lightPetFollower].find(
           (f) => f && !f.dead && Math.hypot(f.cx - wx, f.cy - wy) < 32
           && this.inTileRange(Math.floor(f.cx / TILE), Math.floor(f.cy / TILE)));
         if (pet) {
-          this.achievements.handleSpecialEvent(21,
-            { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
-          this.spawnParticles(pet.cx, pet.y, '#FF90B0', 4, 1.2, { life: 40 }); // 爱心尘近似
+          const num2 = pet.projId === 1093 ? 24 : pet.projId === 1094 ? 32
+            : pet.projId === 1098 ? 48 : 36;
+          const isSmall = pet.projId === 1098;
+          const started = this.player.petAnimal(this, {
+            cx: pet.cx, bottomY: pet.y + pet.h,
+            isSmall, reach: num2,
+            valid: () => !pet.dead,
+          });
+          if (started) {
+            pet.beingPetted = true;
+            this.achievements.handleSpecialEvent(21,
+              { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+          } else {
+            pet.beingPetted = false;
+          }
           this.sfx.play('menuTick', 1);
           this.input.rightDown = false;
         }
@@ -9939,7 +9986,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       - (this.player.usedAmbrosia ? 0.05 : 0)
       - (buffs.has(BuffType.KiteBuff) ? 0.15 : 0)
       - (this.player.equipStats.chiselSpeed ? 0.25 : 0)
-      - [0, 0.05, 0.10, 0.15][buffs.wellFedTier];
+      - [0, 0.05, 0.10, 0.15][buffs.wellFedTier]
+      + buffs.hungerPickSpeed;   // 饥饿/极饿 pickSpeed += 0.05/0.15（:11571/:11595——变慢，正号）
     // 原版 pickSpeed 无显式下限钳（全叠满可达 0.15），冷却下限兜底（此处 8t/drill 1t
     // ≈ ApplyItemTime val=max(val,1) 同位）
     // 钻头坐骑（drillPickTime=1）豁免手持工具的 8t 冷却下限——原版 PickTile 每束每
@@ -10529,7 +10577,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
       for (let dx = 0; dx < ow; dx++) {
         for (let dy = 0; dy < oh; dy++) {
-          st.setTile(ax + dx, ay + dy, 0);
+          // ★同类型门（2026-08-20 用户实报"打掉沙上花草连沙块一起消失"）：锚点盒
+          // 只清本物格，外国格（如 529 海燕麦 def 1×2 但原版单格写入 cs:58333——
+          // 锚点即本格、盒 [y,y+1] 曾无差别清掉下方沙）一律不动。多格物全格同
+          // 类型不受影响；盒内空气格本就无可清。
+          if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === type) {
+            st.setTile(ax + dx, ay + dy, 0);
+          }
         }
       }
       // 掉落:drop:null = 显式无掉落(原版装饰类,如 165 冰凌/蛛网卵袋);仅 undefined
@@ -14269,8 +14323,40 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 传送族触发（引导到期）：音效+尘+落点+消耗。语义对标 Player.cs:42297-42516 */
-  private fireRecallTeleport(c: { vid: number; kind: RecallKind; triggerAt: number; consume: boolean }): void {
+  /** 虫洞药水传送（Player.UnityTeleport :41699-41710 → Teleport(telePos, 3)）：
+   *  入口/出口双份 TeleportEffect style 3（Main.cs:13227-13260：Item6 音 + 50 尘 180
+   *  noGravity + 概率缩放/增速变体）、fallStart 重置、观战解除、相机直跟 */
+  private wormholeTeleportTo(destX: number, destY: number): void {
     const p = this.player;
+    const fx3 = (x: number, y: number) => {
+      this.sfx.play('mirror', 1, x + p.w / 2, y + p.h / 2);   // SoundID.Item6（魔镜音）
+      const D = this.vanillaDust;
+      if (!D) return;
+      for (let i = 0; i < 50; i++) {
+        const d = D.spawn(x, y, p.w, p.h, 180);
+        if (!d) continue;
+        d.noGravity = true;
+        for (let m = 0; m < 5; m++) {
+          if (Math.random() * 3 < 1) { d.vx *= 0.75; d.vy *= 0.75; }
+        }
+        if (Math.random() * 3 < 1) { d.vx *= 2; d.vy *= 2; d.scale *= 1.2; }
+        if (Math.random() * 3 < 1) { d.vx *= 2; d.vy *= 2; d.scale *= 1.2; }
+        if (Math.random() * 2 < 1) {
+          d.fadeIn = (75 + Math.floor(Math.random() * 25)) * 0.01;
+          d.scale = (25 + Math.floor(Math.random() * 50)) * 0.01;
+        }
+        d.scale *= 0.8;
+      }
+    };
+    fx3(p.x, p.y);                       // Entry（旧位）
+    p.x = destX; p.y = destY;
+    p.fallStartY = null;                 // fallStart 重置（:37026）
+    this.setSpectating(-1);              // SetOrRequestSpectating(-1)（:37019）
+    fx3(p.x, p.y);                       // Exit（新位）
+    this.camera.x = p.cx; this.camera.y = p.cy;
+  }
+
+  private fireRecallTeleport(c: { vid: number; kind: RecallKind; triggerAt: number; consume: boolean }): void {    const p = this.player;
     const st = this.world.store;
     let dest: { x: number; y: number } | null = null;
     if (c.kind === 'spawn') {
@@ -15101,6 +15187,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  // ================= M9 旅程力量联机（net/journeySync.ts；单机不经过此处） =================
+
+  /** 服务器权威世界态到达（msg82 module5 sub0）——幂等全量覆写本地聚合态 */
+  netApplyJourneyWorld(s: JourneyWorldState): void {
+    const w = this.world;
+    if (!w?.isJourney || !w.journeyPowers || !w.weather) return;
+    applyJourneyWorldState(w, s);
+  }
+
+  /** 个人态到达（module5 sub1，本端 slot）——godmode/放置范围/刷怪率滑杆 */
+  netApplyJourneyPersonal(s: JourneyPersonalState): void {
+    const w = this.world;
+    if (!w?.isJourney || !w.journeyPowers) return;
+    const jp = w.journeyPowers;
+    jp.godmode = s.godmode;
+    jp.farPlacementRange = s.farPlacementRange;
+    jp.spawnRateSlider = s.spawnRateSlider;
+  }
+
+  /** 力量权限查询（UI 门禁；单机恒 true——IsAvailableForPlayer netMode==0 放行 :189-192） */
+  journeyPowerAvailable(powerId: number): boolean {
+    return !this.net ? true : this.net.journeyPowerAvailable(powerId);
+  }
+
   // ================= 生成 =================
 
   /** 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
@@ -15871,6 +15981,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) }); // 收集税款
     // 哥布林工匠：重铸（NPCChatText_TinkererReforge Main.cs:39431）
     if (npc.npcKey === 'goblin_tinkerer') buttons.push({ id: 'reforge', label: Lang.inter(19) });
+    // 造型师：理发（NPCInteractions.StylistHairWindow :426-442——注册序在重铸之后、
+    // 染料商之前；标签 GameUI.HairStyle「发型」，Interact = Main.OpenHairWindow）
+    if (npc.vanillaId === 353) buttons.push({ id: 'hair', label: Lang.text('GameUI.HairStyle') });
     // 染料商：奇异植物换染料（NPCInteractions.DyeTraderRarePlant :444-463——
     // 注册序在重铸/发型窗之后；Condition = type 207 && Main.hardMode，
     // 标签 Lang.inter[107]「奇异植物」）
@@ -16524,6 +16637,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 原版 NPCChatText_TinkererReforge（Main.cs:39431）：关对话进重铸界面
       this.closeNpcDialog();
       this.cb.onReforgeOpen?.();
+      return;
+    }
+    // 造型师理发窗（StylistHairWindow.Interact = Main.OpenHairWindow Main.cs:43073：
+    // SoundID 10 menuOpen + 记 oldHairStyle/oldHairColor 快照——取消回退）
+    if (id === 'hair' && npc.vanillaId === 353) {
+      this.sfx.play('menuOpen');
+      this.cb.onHairWindow?.();
       return;
     }
     if (id === 'curse' && npc.npcKey === 'old_man') {
@@ -17841,10 +17961,15 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return this.startInvasionAndAnnounce(type, ignoreDelay);
   }
 
-  /** PunchCameraModifier 近似（GameHooks.punchCamera）：鹿角怪震屏源——
-   *  Camera.addPunch,渲染帧统一衰减(强度向量叠加,同 CameraModifiers 列表) */
+  /** PunchCameraModifier 1:1（GameHooks.punchCamera → Main.instance.CameraModifiers.Add）：
+   *  鹿角怪震屏源（NPC.cs:44568 族 strength 20 / cycles 6 / 30t / falloff 1000 / identity
+   *  "Deerclops"）。2026-08-20：旧"线性衰减单冲量近似"退役——Camera.modifiers 标准
+   *  修饰器栈（余弦振动 × 线性包络 × 距离衰减，CameraModifierStack.ts） */
   punchCamera(dirX: number, dirY: number, frames = 30, strength = 20): void {
-    this.camera.addPunch(dirX, dirY, strength, frames);
+    const d = Math.hypot(dirX, dirY) || 1;
+    this.camera.modifiers.add(new PunchCameraModifier(
+      this.player.cx, this.player.y + this.player.h, dirX / d, dirY / d,
+      strength, 6, frames, 1000, 'Deerclops'));
   }
 
   /** 季节旗标（checkXMas Main.cs:13054-13073 / checkHalloween :13093-13110：
@@ -18699,6 +18824,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   private updatePets(): void {
     this.petFollower = this.updatePetSlot(0, !this.petHidden, this.petFollower);
     this.lightPetFollower = this.updatePetSlot(1, !this.lightPetHidden, this.lightPetFollower);
+    // 抚摸态收口（Player.updatePettingAnimal 停止后清跟随体 flag——AI_026 flag9 复位）
+    if (!this.player.petting.isPetting) {
+      if (this.petFollower) this.petFollower.beingPetted = false;
+      if (this.lightPetFollower) this.lightPetFollower.beingPetted = false;
+    }
     if (this.lightPetFollower && !this.lightPetFollower.dead) {
       this.lighting.addLight(
         Math.floor(this.lightPetFollower.cx / TILE), Math.floor(this.lightPetFollower.cy / TILE),
@@ -20155,6 +20285,31 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (vid != null) this.achievements.notifyItemCraft(vid);
   }
 
+  // ---- 造型师理发（StylistHairWindow → OpenHairWindow Main.cs:43073 + 报价
+  //      :43198-43211 + BuyHairWindow :43105-43113）----
+  /** 理发报价（Main.cs:43198-43211 逐行）：发型改动 +100000（10 金）/ 发色改动
+   *  +20000（2 金）→ 折扣卡 ×0.8 截断 → ×快乐度 PriceAdjustment 截断 →
+   *  Round(price/10000)×10000（取整到金）。0 改动 = 0（免费「购买」） */
+  hairRestylePrice(next: { hair: number; hairColor: { r: number; g: number; b: number } }): number {
+    const cur = this.player.appearance;
+    if (!cur) return 0;
+    let price = 0;
+    if (next.hair !== cur.hair) price += 100000;                     // :43199-43202
+    if (next.hairColor.r !== cur.hairColor.r || next.hairColor.g !== cur.hairColor.g
+      || next.hairColor.b !== cur.hairColor.b) price += 20000;       // :43203-43206
+    if (this.player.equipStats.discount) price = Math.trunc(price * 0.8);   // :43207-43209
+    price = Math.trunc(price * (this.dialogHappiness?.priceMul ?? 1));      // :43210
+    return Math.round(price / 10000) * 10000;                        // :43211
+  }
+
+  /** BuyHairWindow（:43105-43113）：付款 + 音效 18（Coins）→ true；钱不够 false */
+  buyHairRestyle(next: { hair: number; hairColor: { r: number; g: number; b: number } }): boolean {
+    const price = this.hairRestylePrice(next);
+    if (price > 0 && (this.coinsOwned() < price || !this.spendCopper(price))) return false;
+    this.sfx.play('coin');   // SoundID 18（BuyHairWindow SoundEngine.PlaySound(18)）
+    return true;
+  }
+
   // ---- 重铸（哥布林工匠，Main.cs:41024-41042 + ReforgeItemInReforgeSlot :41346） ----
 
   /** 重铸费用 = value × stack ÷ 3 × 折扣（:41026-41032 discountAvailable 0.8）。
@@ -20923,7 +21078,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.renderer.scene = this.scene; // 群系背景（BiomeBackground）每帧注入最新环境采样
     this.renderer._worldPaused = this.paused; // 暂停镜像:冻结天气物理/滤镜状态机
     this.renderer.deathLostCoins = this.lostCoins; // 死亡 UI「掉了{0}」每帧注入
-    this.renderer.annotateMarks = this.annotateMode ? this.marks : null;
+    // 标注常显(不再只随标注模式):标记保留到清空为止,关面板后仍可在画面核对,
+    // F5 报告截图里也带红圈——用户流程:Shift+F5 标格 → F5 出报告
+    this.renderer.annotateMarks = this.marks.length ? this.marks : null;
     // 背包开合（Main.playerInventory 语义）→ 呼吸计锚点分支（Main.cs:42838/42845）
     this.renderer.playerInventory =
       (window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false;
@@ -21114,6 +21271,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     });
   }
 
+  /** GameHooks.playerEmote（实体侧 EmoteBubble.MakeLocalPlayerEmote 通道——
+   *  饥饿链 146/147/148 等玩家域触发点） */
+  playerEmote(id: number): void {
+    this.makeLocalPlayerEmote(id);
+  }
+
+  /** GameHooks.spawnInsanityShadow（Player.SpawnHallucination :13653 的
+   *  Projectile.NewProjectile(964, damage 18, kb 0)——InsanityShadowFriendly） */
+  spawnInsanityShadow(p: import('../entities/InsanityShadowFriendly').InsanitySpawnParams): void {
+    if (this.net && !this.net.policy.isHost) return;   // 访客端不生成（房主权威，同 spawnNpcByVanilla 门）
+    this.entities.add(new InsanityShadowFriendly(p, 18), 'projectiles');
+  }
+
+  /** GameHooks.spawnRainForced（Rain.NewRainForced——眼球伞 5101 滴水） */
+  spawnRainForced(x: number, y: number, vx: number, vy: number): void {
+    if (this.renderer.weatherFxActive) this.renderer.weatherFx.newRainForced(x, y, vx, vy);
+  }
+
   /** CheckForNPCsToReactToEmoteBubble（EmoteBubble.cs:152-167）——附近城镇 NPC
    *  起 ai[0]=19 回应态（TownNPC.social kind 19,面向玩家 + 帧 16 冒回应泡） */
   private reactNpcsToPlayerEmote(): void {
@@ -21242,6 +21417,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           const rp = net.players.get(slot);
           if (rp) { rp.hp = hp; rp.maxHp = maxHp; }
         },
+        // ---- M9 旅程力量/研究（msg82 module5/6/9；net/journeySync.ts）----
+        onJourneyWorldState: (s) => this.netApplyJourneyWorld(s),
+        onJourneyPersonalState: (slot, s) => {
+          // 原版 per-player 力量全员广播；本端仅消费自己的（他人 godmode 无可见面）
+          if (slot === net.mySlot) this.netApplyJourneyPersonal(s);
+        },
+        onJourneyTimeSkip: (which) => {
+          // StartDay/Noon/Night/MidnightImmediately 四钮（CreativePowers.cs:774-864）——
+          // 服务器中继后各端本地 SkipToTime（含发起端：发送时不本地执行）
+          const T: Record<1 | 2 | 3 | 4, [number, boolean]> = {
+            1: [Clock.DAWN, true], 2: [0.5, true], 3: [Clock.DUSK, false], 4: [0, false],
+          };
+          const [tod, isDay] = T[which];
+          this.skipToTime(tod, isDay);
+        },
+        onJourneyUnlock: (slot, itemId, amount) => {
+          // NetCreativeUnlocksPlayerReportModule.Deserialize :28-32：同队门
+          // （LocalPlayer.team>0 && 同队）→ RegisterItemSacrifice（队友名归集
+          // AnyNewlyUnlocksFromTeammates 图标未做 UI——偏差登记）
+          const myTeam = (this.player as unknown as { team: number }).team;
+          const theirTeam = net.players.get(slot)?.team ?? 0;
+          if (myTeam > 0 && myTeam === theirTeam) {
+            this.research.sacrifice(itemId, amount);
+            journeyBrowserNotifyResearchChanged();
+          }
+        },
+        onJourneyPermission: () => journeyBrowserNotifyResearchChanged(),
       });
       net.connect(url, hostToken);
       // R10：30s 握手超时（fail 内统一 clearTimeout,终审 B4 修正：原 void timer 空转）

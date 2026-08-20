@@ -125,6 +125,48 @@ export async function kvDelete(key: string): Promise<void> {
   } catch { /* IDB 不可用则忽略 */ }
 }
 
+// ---- 资源包 zip blob(kv store 复用,'rp:zip:' 前缀键;2026-08-20 M13) ----
+// ★不新开 object store(免 DB 版本升级 → 免多标签页 onblocked 阻塞窗口):
+// IDB object store 无模式,键上放 Blob 与字符串同存;kvGet/kvSet 只走字符串
+// 通道互不干扰。容量走 IndexedDB 配额(与 remaster blob store 同量级)。
+
+export async function rpPutZip(id: string, blob: Blob): Promise<boolean> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(blob, `rp:zip:${id}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    return true;
+  } catch { return false; }
+}
+
+export async function rpGetZip(id: string): Promise<Blob | null> {
+  try {
+    const db = await openDb();
+    return await new Promise<Blob | null>((resolve) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(`rp:zip:${id}`);
+      req.onsuccess = () => resolve(req.result instanceof Blob ? req.result : null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+export async function rpDeleteZip(id: string): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(`rp:zip:${id}`);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+  } catch { /* IDB 不可用忽略 */ }
+}
+
 // ---- remaster blob store(v2;素材包混合 sheet png 持久化) ----
 
 export interface RemasterPackRow {

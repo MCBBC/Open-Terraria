@@ -13,6 +13,14 @@ import {
   writeLeashedRetrieveRequest,
   readLeashedMessage, type LeashedEntityLike,
 } from './leashedSync';
+import {
+  writeJourneyWorldState, writeJourneyPersonalState, writeJourneyTimeSkip,
+  writeJourneyUnlockReport, writeJourneyPermission,
+  readJourneyWorldState, readJourneyPersonalState, readJourneyTimeSkip,
+  readJourneyUnlockRelay, readJourneyPermission,
+  type JourneyWorldState, type JourneyPersonalState,
+  PowerPermissionLevel, JOURNEY_POWER_COUNT, isPowerAvailableFor,
+} from './journeySync';
 import type { LeashedNetMsg } from '../entities/LeashedCritter';
 import type { World } from '../world/World';
 import { World as WorldCtor } from '../world/World';
@@ -126,6 +134,16 @@ export interface ClientNetHooks {
   onLeashedSync?: (msg: LeashedNetMsg) => void;
   /** 房间策略到达（进场时；门禁/提示用） */
   onPolicy?: (policy: RoomPolicyState) => void;
+  /** M9 旅程力量世界态到达（msg82 module5 sub0；服务器权威） */
+  onJourneyWorldState?: (s: JourneyWorldState) => void;
+  /** M9 旅程力量个人态到达（module5 sub1；任一玩家的 godmode/放置范围/刷怪率） */
+  onJourneyPersonalState?: (slot: number, s: JourneyPersonalState) => void;
+  /** M9 时段跳跃到达（module5 sub2；各端本地 skipToTime） */
+  onJourneyTimeSkip?: (which: 1 | 2 | 3 | 4) => void;
+  /** M9 研究进度上报中继到达（module6；接收端同队门在 Game 侧） */
+  onJourneyUnlock?: (slot: number, itemId: number, amount: number) => void;
+  /** M9 力量权限级到达（module9；本地 levels 已同步更新后回调） */
+  onJourneyPermission?: (powerId: number, level: PowerPermissionLevel) => void;
 }
 
 export class ClientNet {
@@ -134,6 +152,16 @@ export class ClientNet {
   players = new Map<number, RemotePlayerState>();
   /** 房间策略（RoomPolicy 到达前 = 自由房默认） */
   policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false, maxPlayers: 255, pvpAllowed: false, rules: DEFAULT_ROOM_RULES };
+  /** M9 力量权限级（module9 下发；默认全 CanBeChangedByEveryone——
+   *  CreativePowerManager.Register :40-41 初值）。索引 = powerId 0-14 */
+  journeyPermissions: PowerPermissionLevel[] = Array(JOURNEY_POWER_COUNT)
+    .fill(PowerPermissionLevel.CanBeChangedByEveryone);
+
+  /** CreativePowersHelper.IsAvailableForPlayer（:182-197）——UI 门禁查询 */
+  journeyPowerAvailable(powerId: number): boolean {
+    if (powerId < 0 || powerId >= JOURNEY_POWER_COUNT) return false;
+    return isPowerAvailableFor(this.journeyPermissions[powerId], this.policy.isHost);
+  }
 
   private ws: WebSocket | null = null;
   private parser = new FrameParser();
@@ -466,6 +494,29 @@ export class ClientNet {
           if (msg) {
             if (this.leashedReady) this.hooks.onLeashedSync?.(msg);
             else if (this.pendingLeashed.length < 256) this.pendingLeashed.push(msg);
+          }
+        } else if (moduleId === NetModule.CreativePowers) {
+          // M9 msg82 module5 旅程力量（= 原版 NetCreativePowersModule）
+          const sub = r.u8();
+          if (sub === 0) this.hooks.onJourneyWorldState?.(readJourneyWorldState(r));
+          else if (sub === 1) {
+            const { slot, state } = readJourneyPersonalState(r);
+            this.hooks.onJourneyPersonalState?.(slot, state);
+          } else if (sub === 2) {
+            const which = readJourneyTimeSkip(r);
+            if (which) this.hooks.onJourneyTimeSkip?.(which);
+          }
+        } else if (moduleId === NetModule.CreativeUnlocksReport) {
+          // M9 msg82 module6 研究上报中继（= 原版 NetCreativeUnlocksPlayerReportModule
+          // Deserialize :18-34：同队门由消费端判——Game 侧读 players[slot].team）
+          const m = readJourneyUnlockRelay(r);
+          this.hooks.onJourneyUnlock?.(m.slot, m.itemId, m.amount);
+        } else if (moduleId === NetModule.CreativePowerPermissions) {
+          // M9 msg82 module9 权限级（= 原版 NetCreativePowerPermissionsModule——S→C 专向）
+          const { powerId, level } = readJourneyPermission(r);
+          if (powerId >= 0 && powerId < JOURNEY_POWER_COUNT) {
+            this.journeyPermissions[powerId] = level;
+            this.hooks.onJourneyPermission?.(powerId, level);
           }
         }
         return;
@@ -938,6 +989,33 @@ export class ClientNet {
    *  各端在对应玩家代理头顶出泡（原版 C→S 120 → 服务器 msg91 全体广播） */
   sendEmote(emoteId: number) {
     this.send(new NetWriter(Msg.EmoteBubble).u8(emoteId).finish());
+  }
+
+  // ================= M9 旅程力量/研究（msg82 module5/6/9；net/journeySync.ts） =================
+
+  /** 世界态变更上报（本端乐观生效；服务器校验权限后广播他人——被拒时回发权威态纠正） */
+  sendJourneyWorldState(s: JourneyWorldState) {
+    this.send(writeJourneyWorldState(s));
+  }
+
+  /** 个人态上报（godmode/放置范围/刷怪率；服务器覆写 slot 广播——发送端已本地生效） */
+  sendJourneyPersonalState(s: JourneyPersonalState) {
+    this.send(writeJourneyPersonalState(this.mySlot, s));
+  }
+
+  /** 时段跳跃（StartDayImmediately 族——ASharedButtonPower.RequestUse 空载荷等价） */
+  sendJourneyTimeSkip(which: 1 | 2 | 3 | 4) {
+    this.send(writeJourneyTimeSkip(which));
+  }
+
+  /** 研究献祭上报（CreativeUI.SacrificeItem :308——本地注册 + 服务器中继） */
+  sendJourneyUnlock(itemId: number, amount: number) {
+    this.send(writeJourneyUnlockReport(itemId, amount));
+  }
+
+  /** 权限级变更（仅房主——原版服务器配置文件承担，本仓房主 UI 直改） */
+  sendJourneyPermission(powerId: number, level: PowerPermissionLevel) {
+    this.send(writeJourneyPermission(powerId, level));
   }
 
   /** Player.ChatColor（Player.cs:32230-32238）：难度着色（共享 chatColorOfDifficulty

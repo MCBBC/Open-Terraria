@@ -21,7 +21,7 @@
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
-import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
+import { TILE, ENEMY_GRAVITY, MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
 import { getAttackDamageForProjectiles } from '../stats/ScaleStats';
@@ -719,7 +719,7 @@ export function teslaTurretAI(e: Enemy, game: GameHooks, player: Player | null) 
     }
     e.lightRGB = [0.1 * (e.ai1 / 60), 0.5 * (e.ai1 / 60), 0.7 * (e.ai1 / 60)];
     e.lightRGBAt = { x: e.cx, y: e.cy - 10 };   // :35404 光源 = Center.Y−10
-    e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
+    e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(e, game.world, e.vx, e.vy);
     return;
   }
@@ -743,7 +743,7 @@ export function teslaTurretAI(e: Enemy, game: GameHooks, player: Player | null) 
     // [381,392] → num1090=0.8 → expert 档 28
     shootM(game, ox, oy, dx, dy, getAttackDamageForProjectiles(35, 28, e.difficulty), 435);
   }
-  e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
+  e.vy = Math.min(e.vy + ENEMY_GRAVITY, MAX_FALL_SPEED);
   moveAndCollide(e, game.world, e.vx, e.vy);
 }
 

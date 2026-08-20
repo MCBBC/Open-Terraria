@@ -5,7 +5,7 @@
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
 import { options } from '../core/Options';
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
 
 /** 心情报告条目（Game 侧已做 l10n 渲染的成品文案 + 价格乘子） */
 export interface HappinessInfo {

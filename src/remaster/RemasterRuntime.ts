@@ -162,6 +162,14 @@ export class RemasterRuntime {
 
   /** 恢复一批文件为原版(sprites/ 原路径重拉;卸载/重放的基底)。
    *  清 Buff 覆盖 + 弹幕 override 回原版 + tile/wall 重烘。 */
+  /** 清除一条注入映射(资源包禁用链,M13):删除后懒消费方经 ensureVImage/ensureUiImage
+   *  重拉 sprites/ 原路径(包专有键无盘文件→404 负缓存即正确终态)。restoreVanilla
+   *  只覆盖有盘文件的键,包专有键(如 vanilla/Item_N.png)须先清才能回退。 */
+  clearSheetEntry(file: string): void {
+    if (file.startsWith('vanilla-ui/')) this.atlas.uiimages.delete(file);
+    else this.atlas.vimages.delete(file);
+  }
+
   async restoreVanilla(files: Iterable<string>): Promise<void> {
     const list = [...new Set(files)];
     const restored: string[] = [];

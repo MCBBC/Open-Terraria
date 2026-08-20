@@ -1033,48 +1033,15 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
       if (myMerge != null && (TILE_DEFS[ot]?.vanilla?.sheet ?? -1) === myMerge && gateOK) mergeMask |= bit;
     }
     const strictness = myMeta?.isGrass ? 2 : myMerge != null ? 1 : 0;
-    // —— 原版 flag7 草族专属表前四开侧分支(WorldGen.cs:82957-83093)——
-    // 草族(2/23/60/70/109/199/477/492/661/662+苔)不走进 TEdit 通用表:
-    //  顶开+底连 → Y198 带(左泥右草 0-36 / 左草右泥 54-90);
-    //  底开+顶连 → Y216 带(同列分布);
-    //  左开+右连 → X72 竖带(上泥下草 Y144-180 / 上草下泥 Y90-126);
-    //  右开+左连 → X90 竖带(同)。
-    // 内分支未列组合(水面线草:上空+下泥+一侧水/异型——用户实报"水体和泥土
-    // 衔接漏光"根因)原版不进任何分支 → 表尾回退 (1,1)族全不透明内帧;TEdit
-    // grassRules 会选带 32-60px 透明缺口的边缘帧(Tiles_2/60 角帧实测)→ 透背景。
-    // C/D 第二内支反编译条件与第一支同文(死码),按 A/B 对称补全为上草下泥。
-    let grassFrame: { fx: number; fy: number } | null = null;
-    if (strictness === 2 && myMerge != null) {
-      const v = ((x * 7) + (y * 11)) % 3;
-      const connU = !!(same & 0x10), dirtU = !!(mergeMask & 0x10);
-      const connD = !!(same & 0x1000), dirtD = !!(mergeMask & 0x1000);
-      const connL = !!(same & 0x100), dirtL = !!(mergeMask & 0x100);
-      const connR = !!(same & 0x1), dirtR = !!(mergeMask & 0x1);
-      const FALLBACK: { fx: number; fy: number } = { fx: 18 + v * 18, fy: 18 };
-      if (!connU && !dirtU && (connD || dirtD)) {
-        if (dirtL && connR) grassFrame = { fx: v * 18, fy: 198 };
-        else if (connL && dirtR) grassFrame = { fx: 54 + v * 18, fy: 198 };
-        else grassFrame = FALLBACK;                                       // :82957 分支无尾 else → 表尾回退
-      } else if (!connD && !dirtD && (connU || dirtU)) {
-        if (dirtL && connR) grassFrame = { fx: v * 18, fy: 216 };
-        else if (connL && dirtR) grassFrame = { fx: 54 + v * 18, fy: 216 };
-        else grassFrame = FALLBACK;
-      } else if (!connL && !dirtL && (connR || dirtR)) {
-        if (dirtU && connD) grassFrame = { fx: 72, fy: 144 + v * 18 };
-        else if (connU && dirtD) grassFrame = { fx: 72, fy: 90 + v * 18 };
-        else grassFrame = FALLBACK;
-      } else if (!connR && !dirtR && (connL || dirtL)) {
-        if (dirtU && connD) grassFrame = { fx: 90, fy: 144 + v * 18 };
-        else if (connU && dirtD) grassFrame = { fx: 90, fy: 90 + v * 18 };
-        else grassFrame = FALLBACK;
-      }
-    }
+    // 注:2026-08-20 曾按 WorldGen.cs:82957-83093(flag7 草族表前四开侧分支)在
+    // 此拦截帧选择、未列组合回退 (1,1) 内帧——用户实报"草地贴图全错了":
+    // (1,1) 是埋土草帧(土棕底+绿斑,Tiles_2 逐像素实证),地表草行的草顶帧
+    // (18-54,0) 在反编译链中的来源无法可靠追溯(分支 C 存在同文死码,证明
+    // 该反编译帧表不可全信)。已整体回退,草渲染恢复 TEdit grassRules 既有
+    // 行为;水|草交界漏光另行定位(勿再走"回退内帧"路线)。
     const variant = ((x * 7) + (y * 11)) % 3;
-    let r = grassFrame ? atlas.vframeAt(sheet, grassFrame.fx, grassFrame.fy) : null;
-    if (!r) {
-      const uv = getUVForMasks(same, mergeMask, strictness, variant);
-      r = atlas.vframe(sheet, uv.col, uv.row);
-    }
+    const uv = getUVForMasks(same, mergeMask, strictness, variant);
+    const r = atlas.vframe(sheet, uv.col, uv.row);
     if (r) {
       const si = st.idx(x, y);
       const slope = st.slope[si];

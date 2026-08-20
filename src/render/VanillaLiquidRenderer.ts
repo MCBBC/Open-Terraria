@@ -612,7 +612,9 @@ export function drawVanillaLiquids(
   //   仅下方有水 → 格底 16×4 横条(:4089-4093)
   //   仅左侧有水 → 格左 4px 竖条(:4113-4116);仅右侧 → 格右 4px(:4118-4121)
   //   左右都有   → 整格 16 宽(:4108-4111);深度按液体量 num6=(256-max)/32*2 从底收
-  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt);
+  // solidLayer=false：DrawLiquidBehindTiles 背景 pass(:451-467,墙层之前)——坡面格
+  //   画【平面 Liquid 全矩形】(斜切区全覆盖,见 drawLiquidBehindTilesOnly 斜面表注释)
+  if (isBackground) drawLiquidBehindTilesOnly(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle, hasWaterfallAt, false);
 
   // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
   _liqDebug.calls++;
@@ -637,11 +639,17 @@ export function drawVanillaLiquids(
 // += 18*(slope-1)（:4539，表 72×16 = 4 列×18px 间距、16px 单元，像素实测四列
 // 分别为 slope 1 右下斜/2 左下斜/3 右上斜/4 左上斜）。
 // 原版该绘制有两个调用层（TileDrawing.cs:462 背景 pass / :529 实心层 pass）：
-// 背景 pass 对普通块仍走平面 Liquid（flag = !BlocksWaterDrawingBehindSelf，
-// :4528-4531），仅玻璃族(54/541/328/459/470)与实心层 pass 走斜面表。本仓只有
-// 一个浸润 pass（无实心层液体带），采用实心层语义对所有坡面格生效——即还原
-// 玩家可见结果（液体贴合坡面斜边）。【简化登记】坡面格与玻璃族的双 pass 差异
-// 未拆分；LiquidSlope 的 Y 直接复用平面带算出的 ry/rh（原版同源 liquidSize）。
+// DrawPartialLiquid(behindBlocks=!solidLayer) 的 flag=!BlocksWaterDrawingBehindSelf、
+// 非背景 pass 恒 false；flag||slope==0 → 平面 Liquid，否则斜面表。即：
+//   背景 pass：普通块坡面格 = 平面 Liquid 全矩形（斜切区整格覆盖！）；仅玻璃族
+//             (54/541/328/459/470)坡面走斜面表
+//   实心层 pass：一切坡面格走斜面表
+// 两层【并集】才是玩家可见结果——普通坡面格的斜切区由背景平面带整格填满，
+// 实心层斜面带再叠出贴坡水线。2026-08-20 用户标注 136 格（坡面+水邻 100%，
+// 世界"浮夸的羡慕顶峰"）实证旧实现缺背景平面带：斜面形状源矩形自纹理行 ry 起
+// （默认 ry=4），斜切区顶部 4 行艺术像素两层均无覆盖 → 透出远景背景亮光
+// （用户：两坡格各 4 透明像素+右侧 2 像素）。LiquidSlope 的 Y 直接复用平面带
+// 算出的 ry/rh（原版同源 liquidSize）。
 /** LiquidSlope 源矩形选择（纯函数）：slope 1..4 → 斜面表列 X = rx + 18*(slope-1)；
  *  slope 0 / 半砖 → null = 走平面 Liquid 表（:4531-4533 flag||num==0 直画分支）。 */
 export function liquidSlopeSource(
@@ -663,13 +671,15 @@ export function liquidSlopeSheet(vt: number, waterStyle = 0): string {
 /**
  * 浸润 pass:原版 TilesRenderer.DrawLiquidBehindTiles → DrawTile_LiquidBehindTile
  * (TileDrawing.cs:3859-4193)。对视区内每个实心方块格检查四邻液体,在方块格内画液体带。
- * 背景 pass 调用(画在方块贴图之下)——透明圆角像素透出液体色。
+ * solidLayer：true=实心层 pass(:528-529,墙后贴图前,坡面走 LiquidSlope 斜面表)；
+ *   false=背景 pass(:451-467,墙层前,普通坡面格走平面 Liquid 全矩形——斜切区
+ *   整格覆盖,与实心层斜面带取并集=原版玩家可见结果,见 liquidSlopeSource 头注释)。
  */
 export function drawLiquidBehindTilesOnly(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number, waterStyle = 0,
-  hasWaterfallAt?: (x: number, y: number) => boolean,
+  hasWaterfallAt?: (x: number, y: number) => boolean, solidLayer = true,
 ): void {
   // ★与原版 DrawTile_LiquidBehindTile 的定性保留偏差(2026-08-19 二轮清零后仅存):
   //  ①:4163-4166 地下半砖+上液"顶部顶点色×0"(逐 quad 垂直渐变,Canvas 2D 近似
@@ -714,7 +724,8 @@ export function drawLiquidBehindTilesOnly(
       const sheet = def.vanilla?.sheet ?? -1;
       // :3910 BlocksWaterDrawingBehindSelf(TileID.cs:357):玻璃54/回声541/彩纸328/
       // 雪落459/假人470 —— 平面格(slope==0)整块挡水,不画背后的带
-      if (slope === 0 && (sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 470)) continue;
+      const blocksWaterBehindSelf = sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 470;
+      if (slope === 0 && blocksWaterBehindSelf) continue;
       // :3923-3925 传送带(379)自身格有液体 → 整格跳过
       if (sheet === 379 && st.liquid[i] > 0) continue;
 
@@ -821,9 +832,13 @@ export function drawLiquidBehindTilesOnly(
       }
       if (rw <= 0 || rh <= 0) continue;
 
-      // ---- 斜面格换 LiquidSlope 表（TileDrawing.cs:4539-4552）----
-      // 源 X += 18*(slope-1)；平面表语义(ry/rh 不变)。半砖恒 slope=0 → 天然走平面。
-      const slopeSrc = liquidSlopeSource(slope, rx, ry, rw, rh);
+      // ---- 斜面格换 LiquidSlope 表（TileDrawing.cs:4526-4552 DrawPartialLiquid）----
+      // behindBlocks=!solidLayer → flag=!BlocksWaterDrawingBehindSelf,非背景恒 false;
+      // flag||slope==0 → 平面 Liquid,否则斜面表(X += 18*(slope-1))。
+      // ⇒ 背景 pass 普通坡面格走平面全矩形(斜切区整格覆盖);实心层 pass 一切坡面
+      //   格走斜面表。半砖恒 slope=0 → 双 pass 均平面。
+      const useSlopeTable = slope !== 0 && (solidLayer || blocksWaterBehindSelf);
+      const slopeSrc = useSlopeTable ? liquidSlopeSource(slope, rx, ry, rw, rh) : null;
       let drawTex: ImageBitmap | HTMLImageElement | null = tex;
       let srx = rx;
       if (slopeSrc) {
@@ -832,15 +847,30 @@ export function drawLiquidBehindTilesOnly(
         if (!drawTex) drawTex = tex; // 斜面表未就绪 → 退回平面带(下帧懒加载生效)
       }
 
-      // ---- 源矩形钳制到贴图边界(原版 XNA PointClamp 自动钳;Canvas 2D 需显式) ----
-      // Liquid_N 是 16×16 纯块;ry=4 起 + rh=16 会到 y=20 越界——XNA 读边缘像素,
-      // 我们钳 rh = tex.height - ry 保持等比(不画满时目标也同步缩)
-      // 【2026-08-14 回退:dstH=rh 拉伸方案实测令更多泥土格浸润恶化——用户报加重,先归零再排查】
+      // ---- 源矩形钳制到贴图边界(原版 XNA PointClamp = 越界读【边缘行/列】) ----
+      // Liquid_N 是 16×16 纯块;默认带 ry=4 起 + rh=16 读到 y=20——XNA PointClamp
+      // 采样越界行时取贴图末行(边缘重复),带仍是完整 16px。
+      // 【两轮教训:①钳短(2026-08-14 前):带只画 12px,水邻满带格(fU&&fR 走默认
+      //   (0,4,16,16) 全格带)底部 4px 无浸润 → 水面线坡面/泥土交界亮缝(2026-08-20
+      //   用户标注 #3 实证:y13 x10-15 透亮)。②拉伸 dstH=rh:均匀拉伸≠边缘重复,
+      //   水纹相位漂移显脏(2026-08-14 回退)。正解=主段画到贴图底,剩余段用末
+      //   【行/列】平铺补齐——与 PointClamp 逐像素等价。】
+      const texEdgeY = drawTex.height - 1;
       const srcH = Math.min(rh, drawTex.height - ry);
       const srcW = Math.min(rw, drawTex.width - srx);
       if (srcW <= 0 || srcH <= 0) continue;
-      const dstH = srcH; // 源=目标尺寸(原版 DrawPartialLiquid 同源同目标)
+      const dstH = srcH;
       const dstW = srcW;
+      /** 主段 + 越界余段(末行/列边缘重复,= XNA PointClamp) */
+      const drawBand = () => {
+        ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py, dstW, dstH);
+        if (rh > srcH) {
+          ctx.drawImage(drawTex, srx, texEdgeY, srcW, 1, px, py + dstH, dstW, rh - srcH);
+        }
+        if (rw > srcW) {
+          ctx.drawImage(drawTex, drawTex.width - 1, ry, 1, srcH, px + dstW, py, rw - srcW, dstH);
+        }
+      };
 
       // ---- 微光分支（TileDrawing.cs:4188-4191 num2==14）----
       // 原版 SetShimmerVertexColors 把四角顶点色【整体重置】为 White×opacity×
@@ -851,7 +881,7 @@ export function drawLiquidBehindTilesOnly(
       // 按源码对齐为"不透明直画 + 2×2 子块波色 multiply"（与前景 DrawShimmer 同式）。
       if (lt === 3) {
         ctx.globalAlpha = 1;
-        ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py, dstW, dstH);
+        drawBand();
         if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py, dstW, dstH,
           (performance.now() / 1000) * 60);
         continue;
@@ -871,7 +901,7 @@ export function drawLiquidBehindTilesOnly(
       // ★半砖+上格有液+有墙 → 整带不画(:4148-4151;地下半砖上的水由水体本体呈现)
       if (st.half[i] && Uq > 0 && st.wall[i] > 0) continue;
       ctx.globalAlpha = alpha;
-      ctx.drawImage(drawTex, srx, ry, srcW, srcH, px, py, dstW, dstH);
+      drawBand();
     }
   }
   ctx.globalAlpha = 1;

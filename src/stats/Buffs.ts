@@ -204,6 +204,16 @@ export enum BuffType {
   // ---- 树妖祝福（NPC 20 施放 Dryad's Ward 弹 586，AI_111 半径内玩家
   //      AddBuff(165,120) Projectile.cs:38797-38802；效果 Player.cs:9985-9991）----
   DryadsWard = 106,    // 树妖祝福(165)：lifeRegen+6(3 HP/s)/防御+8/thorns<1 时+0.5
+  // ---- The Constant 饥饿链（Player.cs:11636 UpdateHungerBuffs + :11743
+  //      UpdateStarvingState；BuffID 332/333/334 均在 debuff 表 Main.cs:8856-8858，
+  //      且都在护士不可移除排除表 BuffID.cs:32 → 不进本仓 DEBUFFS（护士不可清））----
+  NeutralHunger = 108, // 稍饿(332)：无敌数值效果——倒计时态（18000t=5min；
+                       //   remix（don't dig up）×constant 组合 28800t=8min，:11701/:11760）
+  Hunger = 109,        // 饥饿(333)：防-2/全系暴击-2/全系伤-5%/近战速-5%/召唤击退-0.5/
+                       //   镐速+5%（:11561-11571）；到期 → 极饿 5t + 表情 148 + Hungry 音
+  Starving = 110,      // 极饿(334)：防-4/暴击-4/伤-10%/近战速-10%/召唤击退-1/镐速+15%
+                       //   （:11584-11595）+ 持续掉血（:18957-18981）+ 每 120t 直接伤害
+                       //   statLifeMax2/50（沙漠/雪原 ×2，:19159-19176，死因 ByOther(18)）
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -340,14 +350,28 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.SolarShield3]: { vanillaBuff: 172, descKey: 'BuffDescription.SolarShield3', fallbackName: '日耀烈焰' },
   // 树妖祝福：名称/描述走原版键（zh-Hans"树妖祝福"/"自然的力量保护你"，12 语言现成）
   [BuffType.DryadsWard]: { vanillaBuff: 165, descKey: 'BuffDescription.DryadsWard', fallbackName: '树妖祝福' },
+  // 饥饿链三态（名称/描述 = 原版 BuffName/BuffDescription.{NeutralHunger,Hunger,Starving}）
+  [BuffType.NeutralHunger]: { vanillaBuff: 332, descKey: 'BuffDescription.NeutralHunger', fallbackName: '稍饿' },
+  [BuffType.Hunger]: { vanillaBuff: 333, descKey: 'BuffDescription.Hunger', fallbackName: '饥饿' },
+  [BuffType.Starving]: { vanillaBuff: 334, descKey: 'BuffDescription.Starving', fallbackName: '极饿' },
 };
 
-/** BuffID.Sets.IsFedState（BuffID.cs:34 = {26,206,207}——饱腹三档互斥：
- *  AddBuff 授予任一档前先删其它档，Player.cs:5080-5089） */
+/** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：
+ *  AddBuff 授予任一 fed-state 前先删栏内全部其它 fed-state，Player.cs:5080-5089。
+ *  吃食物（26/206/207）即清饥饿链——饥饿重置的真正机制（另有 TryToResetHungerToNeutral
+ *  :11672 走蘑菇 5/蛋奶酒 1912 直清） */
 const FED_STATE_VANILLA: ReadonlySet<number> = new Set([
   BUFF_DEFS[BuffType.WellFed].vanillaBuff,    // 26
   BUFF_DEFS[BuffType.WellFed2].vanillaBuff,   // 206
   BUFF_DEFS[BuffType.WellFed3].vanillaBuff,   // 207
+  BUFF_DEFS[BuffType.NeutralHunger].vanillaBuff,  // 332
+  BUFF_DEFS[BuffType.Hunger].vanillaBuff,         // 333
+  BUFF_DEFS[BuffType.Starving].vanillaBuff,       // 334
+]);
+/** 全部 fed-state BuffType（apply 换档删旧用——Player.cs:5082-5088 DelBuff 循环） */
+const FED_STATE_TYPES: ReadonlySet<BuffType> = new Set([
+  BuffType.WellFed, BuffType.WellFed2, BuffType.WellFed3,
+  BuffType.NeutralHunger, BuffType.Hunger, BuffType.Starving,
 ]);
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
@@ -494,6 +518,57 @@ export class BuffState {
   immuneVanilla = new Set<number>();
   /** DeadCellsPotionStation 在场(:5206 buff 时长×1.2) */
   deadCells = false;
+  // ---- The Constant 饥饿链上下文（Player.fixedUpdate 每帧写入；BuffID 332/333/334）----
+  /** Main.dontStarveWorld（"the constant" 种子）——饥饿链总开关（UpdateBuffs :9559 */
+  dontStarveWorld = false;
+  /** Main.remixWorld && Main.dontStarveWorld（"don't dig up"+constant 组合）——
+   *  332/333 时长 28800t（8min）替代 18000t（5min，:11701/:11760） */
+  remixHunger = false;
+  /** statLifeMax2（极饿掉血公式的分母基准，:18968/:19161）——Player 每帧写 */
+  starvingMaxHp = 100;
+  /** ZoneDesert || ZoneSnow（极饿周期直伤 ×2，:19166）——Player 每帧写 */
+  starvingZoneBoost = false;
+  /** 饥饿链事件回调（Player 注入：表情 146/147/148 + SoundID.Hungry）——
+   *  UpdateHungerBuffs :11705/:11726 的 EmoteBubble.MakeLocalPlayerEmote + :11728 PlaySound */
+  onHungerEvent: ((kind: 'neutral' | 'hungry' | 'starving') => void) | null = null;
+  /** 极饿周期直伤累加器（:19169 lifeRegenCount ≤ -120×num12 → HurtLifeRegen） */
+  private starvingHitAccum = 0;
+
+  /** UpdateStarvingState（Player.cs:11743-11768）：无任何 fed-state（26/206/207/332/
+   *  333/334）在栏 → 授予 332（remix 组合 28800t 否则 18000t）。原版在 UpdateBuffs
+   *  顶部逐 tick 调（withEmote=true——表情 146）。调用方保证 !dead。 */
+  updateStarvingState(withEmote: boolean): void {
+    if (!this.dontStarveWorld) return;
+    let fed = false;
+    for (const t of FED_STATE_TYPES) {
+      if ((this.active.get(t) ?? 0) > 0) { fed = true; break; }
+    }
+    if (!fed) {
+      this.apply(BuffType.NeutralHunger, (this.remixHunger ? 28800 : 18000) / 60);
+      if (withEmote) this.onHungerEvent?.('neutral');
+    }
+  }
+
+  /** UpdateHungerBuffs（Player.cs:11686-11741）：链尾转移。原版在 UpdateBuffs 效果
+   *  循环之后调（本实现挂在 tick 的递减循环后）：332 剩 ≤2t → 333；333 剩 ≤2t →
+   *  334（5t）+ Hungry 音；非 constant 世界三态一律即刻剥离（:11711/:11731/:11736）。 */
+  private updateHungerBuffs(): void {
+    const twoTicks = 2 / 60 + 1e-9;
+    const chainDur = (this.remixHunger ? 28800 : 18000) / 60;
+    for (const t of [BuffType.NeutralHunger, BuffType.Hunger, BuffType.Starving] as const) {
+      const left = this.active.get(t);
+      if (left === undefined || left <= 0) continue;
+      if (!this.dontStarveWorld) { this.active.delete(t); continue; }   // 非饥饿世界三态无意义
+      if (t === BuffType.NeutralHunger && left <= twoTicks) {
+        this.apply(BuffType.Hunger, chainDur);
+        this.onHungerEvent?.('hungry');                                  // 表情 147（:11706）
+      } else if (t === BuffType.Hunger && left <= twoTicks) {
+        this.apply(BuffType.Starving, 5 / 60);                           // 334 恒 5t（:11722/:11725）
+        this.onHungerEvent?.('starving');                                // 表情 148 + Hungry 音
+      }
+    }
+  }
+
   apply(type: BuffType, durationSec: number) {
     // buffImmune 门（AddBuff :5052——免疫则直接 return，不掉已有同类 buff）
     const vb = BUFF_DEFS[type]?.vanillaBuff;
@@ -502,7 +577,7 @@ export class BuffState {
     // 已在栏的其它档——吃高档后低档即刻被顶掉；仅饱腹三档互换，不碰 max 合并
     // 通用语义）。循环内 DelBuff 逆序问题原版用正序逐槽 DelBuff，本仓 Map 删键无碍
     if (vb !== undefined && FED_STATE_VANILLA.has(vb)) {
-      for (const t of [BuffType.WellFed, BuffType.WellFed2, BuffType.WellFed3]) {
+      for (const t of FED_STATE_TYPES) {
         if (t !== type) this.active.delete(t);
       }
     }
@@ -562,11 +637,16 @@ export class BuffState {
   /** 每逻辑帧（dt 秒）。返回本帧生命净变化（正=回复,负=持续伤害/DoT,无视无敌帧与防御） */
   tick(dt: number): number {
     let heal = 0;
+    // ---- 饥饿链（UpdateBuffs :9559-9561 顶部 UpdateStarvingState → 递减 → :11636
+    //      UpdateHungerBuffs；调用方（Player.fixedUpdate）保证 !dead 才进 tick 链 ----
+    this.updateStarvingState(true);
     for (const [t, time] of [...this.active]) {
       const left = time - dt;
       if (left <= 0) this.active.delete(t);
       else this.active.set(t, left);
     }
+    // 链尾转移（UpdateHungerBuffs :11636——在递减之后、效果聚合之前） */
+    this.updateHungerBuffs();
     // ---- UpdateBuffs 正项（Player.cs:9640+）：Regeneration lifeRegen+=4（2 HP/s）、
     //      Honey :18955 lifeRegen+=2（1 HP/s）、狼人 :11496 lifeRegen+=1（0.5 HP/s）。
     //      注意原版这些都在 NaturalLifeRegen 的 DoT 段（:18779+）**之前**求值——
@@ -602,6 +682,26 @@ export class BuffState {
       heal += d;
     }
     if (dots < 0) this.dotChunkOut += -dots;
+    // ---- 极饿 334 双重掉血（Player.cs:18957-18981 + :19159-19176）：
+    //      ① lifeRegen = -max(4, 120×statLifeMax2/3000)（同 DoT 语义：清正项后常驻流失）
+    //      ② 每 120t（2s）HurtLifeRegen(max(2, statLifeMax2/50) ×(ZoneDesert||ZoneSnow→×2))，
+    //        statLife≤0 → KillMe(ByOther(18)=饿死，死因链在 Player.fixedUpdate） */
+    if (this.active.has(BuffType.Starving)) {
+      if (heal > 0) heal = 0;                                  // :18960-18966 清正项
+      const num2 = Math.max(4, 120 * this.starvingMaxHp / 3000);
+      const drain = this.rateAccum(BuffType.Starving, num2 / 2, dt);
+      dots += drain;
+      heal += drain;
+      this.starvingHitAccum += dt;
+      if (this.starvingHitAccum >= 2) {
+        this.starvingHitAccum -= 2;
+        const num12 = Math.max(2, Math.floor(this.starvingMaxHp / 50));
+        const hit = num12 * (this.starvingZoneBoost ? 2 : 1);
+        dots -= hit;
+        heal -= hit;
+      }
+      if (dots < 0) this.dotChunkOut += -dots;
+    }
     // 蜂蜜对冲（Player.cs:18915-18922：lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s，
     // 且对冲后钳回 ≤0）——DoT 系统已实装,补上 buff-system-port 备忘里标"暂缺"的分支
     if (heal < 0 && this.active.has(BuffType.Honey)) {
@@ -674,7 +774,35 @@ export class BuffState {
     if (this.active.has(BuffType.Werewolf)) d += 3;         // 狼人 statDefense += 3（:11497）
     if (this.active.has(BuffType.DryadsWard)) d += 8;       // 树妖祝福 statDefense += 8（:9987）
     d += [0, 2, 3, 4][this.wellFedTier];                    // 食物 statDefense += 2/3/4（:11524+）
+    d += [0, -2, -4][this.hungerTier];                      // 饥饿 -2 / 极饿 -4（:11563/:11586）
     return d;
+  }
+  /** 饥饿档位：0 无 / 1 饥饿(333) / 2 极饿(334)（332 稍饿无属性效果） */
+  get hungerTier(): 0 | 1 | 2 {
+    if (this.active.has(BuffType.Starving)) return 2;
+    if (this.active.has(BuffType.Hunger)) return 1;
+    return 0;
+  }
+  /** 饥饿/极饿全系伤害 -5%/-10%（meleeDamage 等 += -0.05/-0.1，:11564+/:11587+） */
+  get hungerDamage(): number {
+    return [0, -0.05, -0.1][this.hungerTier];
+  }
+  /** 饥饿/极饿全系暴击 -2/-4（:11562+/:11585+） */
+  get hungerCrit(): number {
+    return [0, -2, -4][this.hungerTier];
+  }
+  /** 饥饿/极饿近战速度 -5%/-10%（meleeSpeed += -0.05/-0.1，:11566+/:11589+） */
+  get hungerMeleeSpeed(): number {
+    return [0, -0.05, -0.1][this.hungerTier];
+  }
+  /** 饥饿/极饿镐速 +5%/+15%（pickSpeed += 0.05/0.15，:11571/:11595——变慢挖掘） */
+  get hungerPickSpeed(): number {
+    return [0, 0.05, 0.15][this.hungerTier];
+  }
+  /** 召唤击退 buff 加算（MinionProj 裸 kb 之上加）：醉酒 +1（:11520）/
+   *  饥饿 -0.5（:11570）/ 极饿 -1（:11594） */
+  get minionKbBonus(): number {
+    return (this.active.has(BuffType.Tipsy) ? 1 : 0) + [0, -0.5, -1][this.hungerTier];
   }
   /** 魔力上限加成：水晶球预见 statManaMax2 += 20（:11481） */
   get manaMaxBonus(): number {

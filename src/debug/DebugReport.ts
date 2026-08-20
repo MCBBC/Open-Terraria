@@ -710,6 +710,36 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     } as Record<string, FocusTileChain | null>;
   }
 
+  // ---- tiles.marks：玩家标注格（Shift+F5 标注模式点击标记的问题格）----
+  // 每个标注带完整贴图解析链（与 focus 同款）+ 四邻摘要——用户在画面里直接
+  // 指认漏光/错帧格,F5 报告自动携带,免去"描述位置"的往返。
+  let marksSection: Array<Record<string, unknown> | null> | null = null;
+  const gMarks = (g as { marks?: Array<{ x: number; y: number }> }).marks;
+  if (st && Array.isArray(gMarks) && gMarks.length) {
+    marksSection = gMarks.map((m, i) => {
+      if (!st.inBounds(m.x, m.y)) return { no: i + 1, x: m.x, y: m.y, oob: true };
+      const nb: Record<string, unknown> = {};
+      const dirs: Array<[string, number, number]> = [['n', 0, -1], ['s', 0, 1], ['w', -1, 0], ['e', 1, 0],
+        ['nw', -1, -1], ['ne', 1, -1], ['sw', -1, 1], ['se', 1, 1]];
+      for (const [tag, dx, dy] of dirs) {
+        const nx = m.x + dx, ny = m.y + dy;
+        if (!st.inBounds(nx, ny)) { nb[tag] = null; continue; }
+        const ni = st.idx(nx, ny);
+        const nt = st.type[ni];
+        nb[tag] = nt === 0
+          ? { key: st.liquid[ni] ? `liquid${st.liquid[ni]}` : 'air' }
+          : { key: TILE_DEFS[nt]?.key ?? String(nt), sheet: TILE_DEFS[nt]?.vanilla?.sheet ?? null,
+              half: st.half ? !!st.half[ni] : false, slope: st.slope ? st.slope[ni] : 0,
+              liquid: st.liquid[ni] };
+      }
+      return {
+        no: i + 1, x: m.x, y: m.y,
+        chain: focusChain(st, atlas, enemies, m.x, m.y),
+        neighbors: nb,
+      };
+    });
+  }
+
   const wiring = g.wiring;
   const hitTop = (snap.hitTilesTop ?? []) as Array<{ x: number; y: number; type: number; damage: number; ttl: number }>;
 
@@ -781,6 +811,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       areaPlayer,
       visibleTop,
       focus: focusSection,
+      marks: marksSection,
     } : null,
     render: {
       camera: cam ? {

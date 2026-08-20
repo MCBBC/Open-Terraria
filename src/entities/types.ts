@@ -118,6 +118,15 @@ export interface GameHooks {
    *  尾巴）：实体侧一行式接入 `game.recLog?.('death', {...})`。缺省 undefined
    *  零开销；Game 本体实现 = recorder.log。恒安全（无窗也进环——追溯用） */
   recLog?(k: string, d: unknown): void;
+  /** 本地玩家表情气泡（EmoteBubble.MakeLocalPlayerEmote——饥饿链 146/147/148 等
+   *  Player 侧触发；Game 实现 = makeLocalPlayerEmote（含联机转发/邻近 NPC 回应）） */
+  playerEmote?(id: number): void;
+  /** 骸骨头盔幻影生成（Projectile 964 NewProjectile——Player.SpawnHallucination
+   *  :13627-13656 出参直传；Game 实现 = entities.add(InsanityShadowFriendly)） */
+  spawnInsanityShadow?(p: import('./InsanityShadowFriendly').InsanitySpawnParams): void;
+  /** 强制雨滴（Rain.NewRainForced Rain.cs:134-171——眼球伞 5101 滴水用；
+   *  Game 实现 = renderer.weatherFx.newRainForced） */
+  spawnRainForced?(x: number, y: number, vx: number, vy: number): void;
   /** 拾取物品时在主角旁飘出物品名 */
   showPickupLabel(itemKey: string): void;
   /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：Game 实现，缺省则这些条件按 false */

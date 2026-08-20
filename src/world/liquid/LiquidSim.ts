@@ -247,6 +247,9 @@ export class LiquidSim {
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return;
     const i = this.idx(x, y);
     if (!st.flags[i]) return; // cs:63574 !active() 早退
+    // YYYYY 批：杀事件探针钩（x86 KT 织入对拍用；未注册零开销）
+    (globalThis as { __swLqKill?: (x: number, y: number, sheet: number, fx: number, fy: number, liq: number, lty: number) => void })
+      .__swLqKill?.(x, y, SHEET_OF[st.type[i]] ?? -1, st.frameX[i] ?? 0, st.frameY[i] ?? 0, st.liquid[i], st.liquidType[i]);
     const sheet = SHEET_OF[st.type[i]] ?? -1;
     // cs:63904：蛛网(51)带蜘蛛墙(62) → Next(4)（结果只改 noItem，生成期本就 true）
     if (sheet === 51 && st.wall[i] === 62) this.roll(4);
