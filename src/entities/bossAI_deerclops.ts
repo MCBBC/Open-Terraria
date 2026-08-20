@@ -235,10 +235,11 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
   deerclopsMovement(e, game, p, halt, goHome, homeX, homeY);
 }
 
-/** PunchCameraModifier 近似（Main.instance.CameraModifiers） */
+/** PunchCameraModifier 1:1（NPC.cs:44568 族 new PunchCameraModifier(base.Center, dir,
+ *  20, 6, frames, 1000f, "Deerclops") + CameraModifiers.Add）——x/y = 震源
+ *  （base.Center，距离衰减 falloff 1000 的原点） */
 function punch(game: GameHooks, x: number, y: number, dirX: number, dirY: number, frames: number): void {
-  void x; void y;
-  game.punchCamera?.(dirX, dirY, frames);
+  game.punchCamera?.(dirX, dirY, frames, 20, x, y);
 }
 
 /** AI_123_Deerclops_MakeSpikesForward（:44776-44810）:ai1≥36 起每 4t 一根,前向 20 根 */

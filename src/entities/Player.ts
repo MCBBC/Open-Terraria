@@ -1527,7 +1527,8 @@ export class Player extends Entity {
     // ---- The Constant 饥饿链上下文注入（Main.dontStarveWorld = seedFlags.theConstant；
     //      remix 组合（"don't dig up"+constant）拉长 332/333 至 28800t；死亡态不推进
     //      ——原版 UpdateDead 无 UpdateBuffs 链。表情 146/147/148 + Hungry 音经回调）----
-    this.buffs.dontStarveWorld = !this.dead && !!world.seedFlags?.theConstant;
+    this.buffs.dontStarveWorld = !!world.seedFlags?.theConstant;
+    this.buffs.hungerPlayerAlive = !this.dead;   // 死亡冻结（UpdateDead 无 UpdateBuffs 链）
     this.buffs.remixHunger = !!(world.seedFlags?.theConstant && world.seedFlags?.remix);
     this.buffs.starvingMaxHp = this.maxHp;
     this.buffs.starvingZoneBoost = !!game.scene?.zoneDesert || !!game.scene?.zoneSnow;

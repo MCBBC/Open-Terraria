@@ -521,6 +521,9 @@ export class BuffState {
   // ---- The Constant 饥饿链上下文（Player.fixedUpdate 每帧写入；BuffID 332/333/334）----
   /** Main.dontStarveWorld（"the constant" 种子）——饥饿链总开关（UpdateBuffs :9559 */
   dontStarveWorld = false;
+  /** 玩家存活门（原版 UpdateDead 不跑 UpdateBuffs——死亡期饥饿链【冻结】而非剥离；
+   *  Player.fixedUpdate 每帧写 !dead） */
+  hungerPlayerAlive = true;
   /** Main.remixWorld && Main.dontStarveWorld（"don't dig up"+constant 组合）——
    *  332/333 时长 28800t（8min）替代 18000t（5min，:11701/:11760） */
   remixHunger = false;
@@ -538,7 +541,7 @@ export class BuffState {
    *  333/334）在栏 → 授予 332（remix 组合 28800t 否则 18000t）。原版在 UpdateBuffs
    *  顶部逐 tick 调（withEmote=true——表情 146）。调用方保证 !dead。 */
   updateStarvingState(withEmote: boolean): void {
-    if (!this.dontStarveWorld) return;
+    if (!this.dontStarveWorld || !this.hungerPlayerAlive) return;
     let fed = false;
     for (const t of FED_STATE_TYPES) {
       if ((this.active.get(t) ?? 0) > 0) { fed = true; break; }
@@ -559,6 +562,7 @@ export class BuffState {
       const left = this.active.get(t);
       if (left === undefined || left <= 0) continue;
       if (!this.dontStarveWorld) { this.active.delete(t); continue; }   // 非饥饿世界三态无意义
+      if (!this.hungerPlayerAlive) continue;                            // 死亡冻结（不剥离不转移）
       if (t === BuffType.NeutralHunger && left <= twoTicks) {
         this.apply(BuffType.Hunger, chainDur);
         this.onHungerEvent?.('hungry');                                  // 表情 147（:11706）
@@ -638,7 +642,7 @@ export class BuffState {
   tick(dt: number): number {
     let heal = 0;
     // ---- 饥饿链（UpdateBuffs :9559-9561 顶部 UpdateStarvingState → 递减 → :11636
-    //      UpdateHungerBuffs；调用方（Player.fixedUpdate）保证 !dead 才进 tick 链 ----
+    //      UpdateHungerBuffs；死亡态整体冻结（UpdateDead 无该链）----
     this.updateStarvingState(true);
     for (const [t, time] of [...this.active]) {
       const left = time - dt;
@@ -689,11 +693,11 @@ export class BuffState {
     if (this.active.has(BuffType.Starving)) {
       if (heal > 0) heal = 0;                                  // :18960-18966 清正项
       const num2 = Math.max(4, 120 * this.starvingMaxHp / 3000);
-      const drain = this.rateAccum(BuffType.Starving, num2 / 2, dt);
+      const drain = this.rateAccum(BuffType.Starving, -num2 / 2, dt);
       dots += drain;
       heal += drain;
       this.starvingHitAccum += dt;
-      if (this.starvingHitAccum >= 2) {
+      if (this.starvingHitAccum >= 2 - 1e-9) {   // 120t（2s）整数界——浮点累加 1/60×120 差 1e-15
         this.starvingHitAccum -= 2;
         const num12 = Math.max(2, Math.floor(this.starvingMaxHp / 50));
         const hit = num12 * (this.starvingZoneBoost ? 2 : 1);

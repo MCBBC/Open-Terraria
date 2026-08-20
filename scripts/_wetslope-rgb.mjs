@@ -3,15 +3,15 @@
 import puppeteer from 'puppeteer-core';
 import { readFileSync } from 'node:fs';
 
-const MAP = '/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (2).json';
+const MAP = '/Users/vinlic/Downloads/map-浮夸的羡慕顶峰 (4).json';
 const mapStr = readFileSync(MAP, 'utf8');
-const marksJson = JSON.parse(readFileSync('/Users/vinlic/Downloads/marks-浮夸的羡慕顶峰 (1).json', 'utf8'));
+const marksJson = JSON.parse(readFileSync('/Users/vinlic/Downloads/marks-浮夸的羡慕顶峰 (3).json', 'utf8'));
 const byNo = new Map(marksJson.marks.map((m) => [m.no, m]));
 const picks = process.env.SW_PICKS ? process.env.SW_PICKS.split(',').map(Number) : [1, 3, 24];
 
 const browser = await puppeteer.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile3',
+  headless: 'new', userDataDir: '/Users/vinlic/.claude/jobs/8405c930/tmp/wetslope-profile8',
   args: ['--no-first-run'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
@@ -28,8 +28,10 @@ for (const no of picks) {
   await page.evaluate((mx, my) => {
     const g = window.__swGame;
     g.player.debugGod = true;
-    g.player.x = mx * 16 + 8; g.player.y = my * 16 + 8;
+    // 玩家挪到标注格下方 4 格(实体内,防玩家精灵糊住采样窗);相机 follow 打桩钉死在标注格
+    g.player.x = mx * 16 + 8; g.player.y = (my + 4) * 16 + 8;
     g.camera.setZoomTarget(2); g.camera.zoom = 2;
+    g.camera.follow = function () {};   // 停跟随(实例打桩,只影响本页)
     g.camera.x = mx * 16 + 8; g.camera.y = my * 16 + 8;
     if (g.world.clock) g.world.clock.timeOfDay = 0.35;
     if (g.renderer) g.renderer.fullbright = true;

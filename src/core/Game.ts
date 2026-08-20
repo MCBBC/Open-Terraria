@@ -75,7 +75,7 @@ import {
 import {
   scanPylons, pylonAnchorAt, mapFocusRect, checkPylonTeleport,
   pylonItemTypeFromStyle, pylonStyleFromFrame, hasPylonOfType,
-  type TeleportPylonInfo, type NpcHomeLike,
+  type TeleportPylonInfo, type NpcHomeLike, type PylonTeleportCheck,
 } from '../world/TeleportPylons';
 import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
@@ -232,12 +232,18 @@ import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
 import {
+  MapPingStore, BestiarySub, PylonSub,
+  type LiquidCell, type BestiaryNetEvent, type PylonNetMsg,
+} from '../net/syncModules';
+import {
   applyJourneyWorldState, type JourneyWorldState, type JourneyPersonalState,
   type PowerPermissionLevel,
 } from '../net/journeySync';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS, wetFromBubbleContact } from '../stats/Buffs';
 import { options } from './Options';
+import { cround } from './csCompat';
+import { quickStackToChests, chestsInRangeOf, moveCoinsIntoBank } from '../stats/QuickStacking';
 import { bindsOf, isBound, keybindCodeLabel } from './Keybinds';
 import { openJourneyPowersPanel, journeyBrowserNotifyResearchChanged } from '../ui/JourneyPowersUI';
 import { gfxQuality, mapUpdateMinIntervalMs } from './GfxQuality';
@@ -674,6 +680,19 @@ export function dropInventoryOnDeath(
 
 /** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付） */
 export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'hair' | 'quest' | 'plant' | 'happiness' | 'status' | 'close';
+
+/** 造型师理发报价纯式（Main.cs:43198-43211 逐行）：
+ *  发型 100000 + 发色 20000 → 折扣 ×0.8 截断（:43208）→ ×PriceAdjustment 截断
+ *  （:43210）→ Round(/10000)×10000 取整到金（:43211）。0 改动 = 0（GameUI.Buy 免费） */
+export function hairRestylePriceRaw(hairChanged: boolean, colorChanged: boolean,
+  discountAvailable: boolean, priceAdjustment: number): number {
+  let price = 0;
+  if (hairChanged) price += 100000;
+  if (colorChanged) price += 20000;
+  if (discountAvailable) price = Math.trunc(price * 0.8);
+  price = Math.trunc(price * priceAdjustment);
+  return cround(price / 10000) * 10000;   // C# Math.Round 默认 ToEven（银行家舍入）
+}
 
 export interface GameCallbacks {
   onWorldReady: () => void;
@@ -3013,6 +3032,11 @@ export class Game implements GameHooks {
     this.renderer.lighting = this.lighting; // 岩浆瀑布 AddLight 等渲染端光源注入
     this.liquid = new LiquidSim(w);
     this.liquid.setRuntimeCycles();   // Main.cs:12240-12243 运行期画质档（生成期保持 ReInit=10）
+    // module0 液体上报链（原版 Liquid.NetSendLiquid）：模拟变化（AddWater/DelWater
+    // 记格——权威端）+ 桶/海绵族（setLiquid listener——任意端）→ net.reportLiquidChange
+    // → 60ms 节流广播（单机 net=null 零开销）
+    this.liquid.netChangeSink = (x, y) => this.net?.reportLiquidChange(x, y);
+    w.store.onLiquidChanged((x, y) => this.net?.reportLiquidChange(x, y));
     // 世界运行时演化（WorldGen.UpdateWorld 1:1）：草蔓延/藤蔓/药草/邪恶神圣扩散等
     this.evolution = new WorldEvolution({
       store: w.store,
@@ -3056,7 +3080,11 @@ export class Game implements GameHooks {
         if (key) this.spawnDrop(px, py, key, 1);
       },
       setBlackout: (on) => { this.blackout = on; },
-      onBestiaryUnlock: (netId) => { w.bestiary.registerSight(netId); },  // :37109-37116 记 664
+      onBestiaryUnlock: (netId) => {  // :37109-37116 记 664（module4 首遇广播）
+        if (w.bestiary.registerSight(netId)) {
+          this.net?.sendBestiaryEvent({ sub: BestiarySub.Sight, netId });
+        }
+      },
     });
     // 1456 AddWater/WaterCheck 尾部 KillTile（液体冲毁火把等）：走 breakTile（掉落+音效+帧刷新）
     this.liquid.killTile = (x, y) => {
@@ -4154,7 +4182,11 @@ export class Game implements GameHooks {
         if (e.dead || e instanceof TownNPC || e.vanillaId == null) continue;
         if (!countsAsACritter(e.vanillaId)) continue;
         if (e.x < px + pw && e.x + e.w > px && e.y < py + ph && e.y + e.h > py) {
-          w.bestiary.registerSight(e.vanillaNetId !== 0 ? e.vanillaNetId : e.vanillaId);
+          const nid = e.vanillaNetId !== 0 ? e.vanillaNetId : e.vanillaId;
+          // 首遇才广播（原版 tracker flag 门 :30-38——RegisterWasNearby 的 netMode==2 分支）
+          if (w.bestiary.registerSight(nid)) {
+            this.net?.sendBestiaryEvent({ sub: BestiarySub.Sight, netId: nid });
+          }
           this.achCheckBestiary();
         }
       }
@@ -4522,7 +4554,9 @@ export class Game implements GameHooks {
     }
 
     // ---- 液体（原版每 2 tick 一次 UpdateLiquid）----
-    if (this.tickCount % 2 === 0) {
+    // 联机访客不本地模拟（原版 netMode==1 客户端同语义）：权威端（中继房房主/
+    // 服务器房 SimHost）跑模拟经 module0 广播，本端 netApplyLiquid 直写收敛
+    if (this.tickCount % 2 === 0 && (!this.net || this.net.policy.isHost)) {
       this.liquid.step();
       // 液体直接写数组绕过 store 监听：有活动液体时手动通知光照衰减变化
       if (this.liquid.numLiquid > 0) this.lighting.liquidDirty = true;
@@ -13039,10 +13073,30 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.input.rightDown = false;
   }
 
-  /** 晶塔表刷新（放置/破坏晶塔与右键时调用） */
+  /** 晶塔表刷新（放置/破坏晶塔与右键时调用）。
+   *  联机：房主=权威扫描源（差集广播 module7——UpdatePylonsListAndBroadcastChanges
+   *  :60-85 的 Added/Removed 两差集）；访客不本地扫描（表由权威差集驱动，
+   *  netApplyPylon 维护——原版客户端表由服务器 OnPlayerJoining/广播独占维护） */
   refreshPylons(): void {
+    const net = this.net;
+    if (net?.active && !net.policy.isHost) return;
+    const prev = this.pylons;
     this.pylons = scanPylons(this.world);
     this.renderer.pylons = this.pylons;
+    if (net?.active && net.policy.isHost) {
+      const same = (a: TeleportPylonInfo, b: TeleportPylonInfo) =>
+        a.x === b.x && a.y === b.y && a.type === b.type;
+      for (const p of this.pylons) {
+        if (!prev.some((q) => same(p, q))) {
+          net.sendPylonMessage({ sub: PylonSub.PylonWasAdded, x: p.x, y: p.y, type: p.type });
+        }
+      }
+      for (const q of prev) {
+        if (!this.pylons.some((p) => same(p, q))) {
+          net.sendPylonMessage({ sub: PylonSub.PylonWasRemoved, x: q.x, y: q.y, type: q.type });
+        }
+      }
+    }
   }
 
   /** 晶塔整件破碎（TETeleportationPylon.Framing_CheckTile :77-125）：
@@ -13079,31 +13133,17 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (Math.abs(tx - (p.x + 1.5)) <= 2 && Math.abs(ty - (p.y + 2)) <= 2) { hit = p; break; }
     }
     if (!hit) return false;
-    // 当前塔：原版按"玩家可达范围内且过 NPC/群系门的塔"求（:155-192）——单人语义 =
-    // 玩家 ±60 格内的塔（IsPlayerNearAPylon）
+    // 联机访客：门禁在权威端（原版 HandleTeleportRequest 在服务器跑——服务器持有
+    // 全场 NPC 表）。发 sub2 请求（服务器附请求者 slot 定向房主），回执经
+    // netApplyPylon（TeleportResult）传送/报错。房主/单机照旧本地门禁直传
+    if (this.net?.active && !this.net.policy.isHost) {
+      this.net.sendPylonMessage({
+        sub: PylonSub.PlayerRequestsTeleport, x: hit.x, y: hit.y, type: hit.type,
+      });
+      return true;
+    }
     const ptx = Math.floor(this.player.x / TILE), pty = Math.floor(this.player.y / TILE);
-    const current = this.pylons.find((p) => {
-      const LX = ptx - 60, HX = ptx + 1 + 60, LY = pty - 60, HY = pty + 2 + 60;
-      return p.x + 2 >= LX && p.x <= HX && p.y + 3 >= LY && p.y <= HY;
-    }) ?? null;
-    const npcs: NpcHomeLike[] = this.entities.npcs
-      .filter((n): n is TownNPC => n instanceof TownNPC)
-      .filter((n) => !n.dead && !n.bound && n.home)
-      .map((n) => ({
-        homeX: n.home!.x, homeY: n.home!.y,
-        x: Math.floor(n.cx / TILE), y: Math.floor(n.cy / TILE),
-      }));
-    const check = checkPylonTeleport(this.world, {
-      playerTileX: ptx, playerTileY: pty,
-      target: hit,
-      current,
-      npcs,
-      targetScene: scanScene(this.world, hit.x * TILE + 24, hit.y * TILE + 32, 0),
-      currentScene: current
-        ? scanScene(this.world, current.x * TILE + 24, current.y * TILE + 32, 0)
-        : { ...EMPTY_SCENE },
-      downedPlantBoss: !!this.world.flags['downed_262'],
-    });
+    const check = this.pylonGateCheck(hit, ptx, pty);
     if (!check.ok) {
       // ChatHelper.SendChatMessageToClient → ChatColors.ServerMessage 255,240,20（:203-205）
       this.newText(Lang.text(check.fail!), 255, 240, 20);
@@ -13116,6 +13156,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.renderer.mapPylonTile = null;
     void this.teleportWhenReady(hit.x, hit.y);
     return true;
+  }
+
+  /** 晶塔门禁五连（HandleTeleportRequest :100-205）——单人/房主本地与访客请求
+   *  （module7 sub2 → 房主侧 netApplyPylon）共用。当前塔 = 玩家 ±60 格内的塔
+   *  （IsPlayerNearAPylon；原版 :155-192 按"可达范围内且过门"求——单人语义取近塔） */
+  private pylonGateCheck(hit: TeleportPylonInfo, ptx: number, pty: number): PylonTeleportCheck {
+    const current = this.pylons.find((p) => {
+      const LX = ptx - 60, HX = ptx + 1 + 60, LY = pty - 60, HY = pty + 2 + 60;
+      return p.x + 2 >= LX && p.x <= HX && p.y + 3 >= LY && p.y <= HY;
+    }) ?? null;
+    const npcs: NpcHomeLike[] = this.entities.npcs
+      .filter((n): n is TownNPC => n instanceof TownNPC)
+      .filter((n) => !n.dead && !n.bound && n.home)
+      .map((n) => ({
+        homeX: n.home!.x, homeY: n.home!.y,
+        x: Math.floor(n.cx / TILE), y: Math.floor(n.cy / TILE),
+      }));
+    return checkPylonTeleport(this.world, {
+      playerTileX: ptx, playerTileY: pty,
+      target: hit,
+      current,
+      npcs,
+      targetScene: scanScene(this.world, hit.x * TILE + 24, hit.y * TILE + 32, 0),
+      currentScene: current
+        ? scanScene(this.world, current.x * TILE + 24, current.y * TILE + 32, 0)
+        : { ...EMPTY_SCENE },
+      downedPlantBoss: !!this.world.flags['downed_262'],
+    });
   }
 
   /** DD2Event 宿主回调（OldOnesArmy.ts 纯逻辑 ↔ Game 副作用桥） */
@@ -15211,6 +15279,105 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return !this.net ? true : this.net.journeyPowerAvailable(powerId);
   }
 
+  // ================= MP 同步轻件包（module0/2/4/7） =================
+
+  /** 地图 ping 存储（Main.Pings / PingMapLayer 语义：15s 存活 · 10fps 五帧 · 容量 100）。
+   *  渲染层经 renderer.mapPings 读取（drawFullMap 图标层,画在晶塔层之上——
+   *  Main.cs:349-351 MapIconOverlay 注册序 Pylons→Pings） */
+  readonly mapPings = new MapPingStore();
+
+  /** TriggerPing（Main.cs:56016-56022）：本地 Pings.Add + 联机上报 */
+  triggerMapPing(x: number, y: number): void {
+    this.mapPings.add(x, y, performance.now());
+    this.net?.sendMapPing(x, y);
+  }
+
+  /** module0 液体到达（原版 NetLiquidModule.Deserialize :73-90 直写 liquid/
+   *  liquidType）。渲染直读 store 无需重烘 chunk；小地图逐带像素缓冲标脏 +
+   *  光照衰减标志。房主端收到访客桶操作时唤醒本地模拟（服务器收 sendWater →
+   *  Liquid.AddWater 同义——访客的格子要流入权威模拟） */
+  netApplyLiquid(cells: LiquidCell[]): void {
+    const st = this.world?.store;
+    if (!st) return;
+    const wake = !!this.net?.policy.isHost && !!this.liquid;
+    for (const cl of cells) {
+      if (!st.inBounds(cl.x, cl.y)) continue;
+      const i = st.idx(cl.x, cl.y);
+      st.liquid[i] = cl.liquid;
+      st.liquidType[i] = cl.liquidType;
+      if (wake && cl.liquid > 0) this.liquid.addWater(cl.x, cl.y);
+    }
+    if (this.lighting) this.lighting.liquidDirty = true;
+    const mm = this.renderer.minimap;
+    if (mm) {
+      for (const cl of cells) {
+        mm.dirtyChunks.add(ChunkCache.key(Math.floor(cl.x / CHUNK), Math.floor(cl.y / CHUNK)));
+      }
+    }
+  }
+
+  /** module4 图鉴事件到达：直写本地 tracker（SetKillCountDirectly 族——计数携
+   *  累计值覆写,遇/聊幂等置位）。100% 完成成就门与 achCheckBestiary 复查 */
+  netApplyBestiary(events: BestiaryNetEvent[]): void {
+    const b = this.world?.bestiary;
+    if (!b) return;
+    for (const e of events) {
+      if (e.sub === BestiarySub.Kill) b.setKillCountDirectly(bestiaryCreditId(e.netId), e.count);
+      else if (e.sub === BestiarySub.Sight) b.setSightDirectly(bestiaryCreditId(e.netId));
+      else b.setChatDirectly(bestiaryCreditId(e.netId));
+    }
+    this.achCheckBestiary();
+  }
+
+  /** module7 晶塔消息到达：Added/Removed 维护 pylons 表（访客端不本地扫描——
+   *  权威差集驱动）；UseRequest（仅房主收）= 访客传送请求 → 门禁五连后 sub3 回执；
+   *  TeleportResult（仅访客收）= 回执消费 */
+  netApplyPylon(msg: PylonNetMsg): void {
+    if (msg.sub === PylonSub.PylonWasAdded) {
+      if (!this.pylons.some((p) => p.x === msg.x && p.y === msg.y && p.type === msg.type)) {
+        this.pylons.push({ x: msg.x, y: msg.y, type: msg.type });
+        this.renderer.pylons = this.pylons;
+      }
+      return;
+    }
+    if (msg.sub === PylonSub.PylonWasRemoved) {
+      const i = this.pylons.findIndex((p) => p.x === msg.x && p.y === msg.y && p.type === msg.type);
+      if (i >= 0) {
+        this.pylons.splice(i, 1);
+        this.renderer.pylons = this.pylons;
+      }
+      return;
+    }
+    if (msg.sub === PylonSub.PlayerRequestsTeleport) {
+      // 房主侧 HandleTeleportRequest（:100-205）：请求者位 = 代理权威位（msg13
+      // 镜像——RemotePlayerState.x/y 碰撞盒左上）；门禁过 → sub3 ok（请求端本地
+      // 传送——客户端权威移动模型），拒 → sub3 fail（请求端 ServerMessage 文案）
+      if (!this.net?.policy.isHost) return;
+      const target: TeleportPylonInfo = { x: msg.x, y: msg.y, type: msg.type };
+      const rp = this.net.players.get(msg.requesterSlot);
+      const ptx = Math.floor((rp?.x ?? 0) / TILE), pty = Math.floor((rp?.y ?? 0) / TILE);
+      const check = this.pylonGateCheck(target, ptx, pty);
+      this.net.sendPylonMessage({
+        sub: PylonSub.TeleportResult,
+        targetSlot: msg.requesterSlot,
+        x: msg.x, y: msg.y, type: msg.type,
+        ok: check.ok,
+        fail: check.ok ? null : check.fail,
+      });
+      return;
+    }
+    if (msg.sub === PylonSub.TeleportResult) {
+      if (msg.ok) {
+        this.sfx.playWav('menuClose');
+        this.mapPylonTile = null;
+        this.renderer.mapPylonTile = null;
+        void this.teleportWhenReady(msg.x, msg.y);
+      } else if (msg.fail) {
+        this.newText(Lang.text(msg.fail), 255, 240, 20);
+      }
+    }
+  }
+
   // ================= 生成 =================
 
   /** 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
@@ -15946,8 +16113,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
   private openNpcDialog(npc: TownNPC, chatOverride?: string) {
     this.dialogNpc = npc;
-    // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记）
-    this.world.bestiary.registerChat(npc.vanillaId);
+    // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记；
+    // 首聊才广播——module4，原版 RegisterChatStartWith 的 flag 门 :26-34）
+    if (this.world.bestiary.registerChat(npc.vanillaId)) {
+      this.net?.sendBestiaryEvent({ sub: BestiarySub.Chat, netId: npc.vanillaId });
+    }
     this.achCheckBestiary();
     // 快乐度快照（Player.SetTalkNPC Player.cs:4189-4193：GetShoppingSettings 一次算好，
     // currentShoppingSettings 供商店价格/心情报告/成就共用）
@@ -17957,6 +18127,57 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   /** 实体侧入侵通道（GameHooks.startInvasionWithAnnounce）:火星探测器逃逸触发——
    *  与物品/自然 roll 同入口(逼近公告+invasionWarn);调用方已过 canStartInvasion
    *  门,失败静默 false(回退方自行 startInvasion) */
+  // ================= 附近箱子快速堆叠（Player.QuickStackAllChests Player.cs:22904-22911
+  // + Settings.CycleQuickStackMode :367-371，QuickStacking.ts 1:1，2026-08-20）=================
+  /** StackToChestsPreferredMode 当前档（options 持久化 = 原版 config.json
+   *  "StackToChestsPreferredMode" Main.cs:4244/4576） */
+  quickStackMode(): 'quick' | 'smart' {
+    return options.data.quickStackMode;
+  }
+
+  /** CycleQuickStackMode（Player.cs:367-371）：Quick ↔ Smart 二档循环（非三档——
+   *  原版枚举仅两成员）。UI 侧右键 ChestStack 钮触发（Main.cs:41297-41301 +
+   *  音效 10 + SaveSettings） */
+  cycleQuickStackMode(): void {
+    options.set('quickStackMode', this.quickStackMode() === 'quick' ? 'smart' : 'quick');
+  }
+
+  /** QuickStackAllChests（:22904-22911）：① 附近 bank（piggy/safe/forge/void vault
+   *  tile 29/97/463/491 盒扫 600px）合币 + 通用堆叠；② 附近宝箱（600px 欧氏）
+   *  quick/smart 堆叠。HasLockedInventory（占位物 4762 锁栏）本仓未实装，登记 */
+  quickStackAllChests(): void {
+    const p = this.player;
+    // ① bank 段（QuickStackToNearbyBanks :230-241）——bankSource 盒扫与合成侧同源
+    const num = Math.trunc(600 / 16 + 2);
+    const cx = Math.floor(p.cx / TILE), cy = Math.floor(p.cy / TILE);
+    const st = this.world.store;
+    const nearBanks: Array<Array<{ id: number; stack: number; prefix?: number } | null>> = [];
+    const seen = new Set<number>();
+    for (let j = cx - num; j <= cx + num; j++) {
+      for (let k = cy - num; k <= cy + num; k++) {
+        if (!st.inBounds(j, k)) continue;
+        const t = st.type[st.idx(j, k)];
+        const bi = [29, 97, 463, 491].indexOf(t);
+        if (bi < 0) continue;
+        if (seen.has(bi)) continue;
+        const bank = p.banks[bi];
+        if (!bank) continue;
+        // void vault（491）：背包持有 vault 物 5325 → 不计（ContainerIndexToPlayerBank :119-130）
+        if (bi === 3 && p.inv.slots.some((s) => s && vanillaIdOfItem(s.id) === 5325)) continue;
+        seen.add(bi);
+        nearBanks.push(bank);
+      }
+    }
+    for (const bank of nearBanks) {
+      moveCoinsIntoBank(p.inv, bank);
+      quickStackToChests(p.inv, [{ x: 0, y: 0, items: bank }], false);
+    }
+    // ② 宝箱段（QuickStackToNearbyChests :243-259）
+    quickStackToChests(p.inv, chestsInRangeOf(this.world.chests, p.x, p.y),
+      this.quickStackMode() === 'smart');
+    this.cb.onInventoryChanged?.();
+  }
+
   startInvasionWithAnnounce(type: number, ignoreDelay = false): boolean {
     return this.startInvasionAndAnnounce(type, ignoreDelay);
   }
@@ -17965,11 +18186,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  鹿角怪震屏源（NPC.cs:44568 族 strength 20 / cycles 6 / 30t / falloff 1000 / identity
    *  "Deerclops"）。2026-08-20：旧"线性衰减单冲量近似"退役——Camera.modifiers 标准
    *  修饰器栈（余弦振动 × 线性包络 × 距离衰减，CameraModifierStack.ts） */
-  punchCamera(dirX: number, dirY: number, frames = 30, strength = 20): void {
+  punchCamera(dirX: number, dirY: number, frames = 30, strength = 20,
+    srcX?: number, srcY?: number): void {
     const d = Math.hypot(dirX, dirY) || 1;
     this.camera.modifiers.add(new PunchCameraModifier(
-      this.player.cx, this.player.y + this.player.h, dirX / d, dirY / d,
-      strength, 6, frames, 1000, 'Deerclops'));
+      srcX ?? this.player.cx, srcY ?? this.player.y + this.player.h,
+      dirX / d, dirY / d, strength, 6, frames, 1000, 'Deerclops'));
   }
 
   /** 季节旗标（checkXMas Main.cs:13054-13073 / checkHalloween :13093-13110：
@@ -18563,8 +18785,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 雕像怪是偏差面）
     if (enemy && enemy.vanillaId != null
       && isNpcValidForBestiaryKillCredit(enemy.vanillaId, enemy.killBossFlag)) {
-      this.world.bestiary.registerKill(enemy.vanillaNetId !== 0 && enemy.vanillaNetId != null
-        ? enemy.vanillaNetId : enemy.vanillaId);
+      const killNetId = enemy.vanillaNetId !== 0 && enemy.vanillaNetId != null
+        ? enemy.vanillaNetId : enemy.vanillaId;
+      // 携累计值广播（module4——NPCKillsTracker.RegisterKill :24-32 服务器语义；
+      // 中继房房主=权威端，单机 net=null 零开销）
+      const killCount = this.world.bestiary.registerKill(killNetId);
+      this.net?.sendBestiaryEvent({ sub: BestiarySub.Kill, netId: killNetId, count: killCount });
       this.achCheckBestiary();
       // TryGrantingBestiary100Percent（AchievementsHelper.cs:80-87）：完成度达 100%
       // → HandleSpecialEvent(29 BOOK_WORM;此前 100% 不触发,2026-08-13 接）
@@ -20293,13 +20519,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   hairRestylePrice(next: { hair: number; hairColor: { r: number; g: number; b: number } }): number {
     const cur = this.player.appearance;
     if (!cur) return 0;
-    let price = 0;
-    if (next.hair !== cur.hair) price += 100000;                     // :43199-43202
-    if (next.hairColor.r !== cur.hairColor.r || next.hairColor.g !== cur.hairColor.g
-      || next.hairColor.b !== cur.hairColor.b) price += 20000;       // :43203-43206
-    if (this.player.equipStats.discount) price = Math.trunc(price * 0.8);   // :43207-43209
-    price = Math.trunc(price * (this.dialogHappiness?.priceMul ?? 1));      // :43210
-    return Math.round(price / 10000) * 10000;                        // :43211
+    return hairRestylePriceRaw(
+      next.hair !== cur.hair,
+      next.hairColor.r !== cur.hairColor.r || next.hairColor.g !== cur.hairColor.g
+        || next.hairColor.b !== cur.hairColor.b,
+      this.player.equipStats.discount,
+      this.dialogHappiness?.priceMul ?? 1);
   }
 
   /** BuyHairWindow（:43105-43113）：付款 + 音效 18（Coins）→ true；钱不够 false */
@@ -21444,6 +21669,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           }
         },
         onJourneyPermission: () => journeyBrowserNotifyResearchChanged(),
+        // ---- MP 同步轻件包（net/syncModules.ts：module0/2/4/7 + msg203）----
+        onLiquidSync: (cells) => this.netApplyLiquid(cells),
+        onBestiaryEvent: (events) => this.netApplyBestiary(events),
+        onPylonMessage: (msg) => this.netApplyPylon(msg),
+        onMapPing: (x, y) => this.mapPings.add(x, y, performance.now()),
       });
       net.connect(url, hostToken);
       // R10：30s 握手超时（fail 内统一 clearTimeout,终审 B4 修正：原 void timer 空转）

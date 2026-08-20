@@ -34,7 +34,8 @@ export interface GameHooks {
   startInvasionWithAnnounce?(type: number, ignoreDelay?: boolean): boolean;
   /** PunchCameraModifier 近似（Main.instance.CameraModifiers）：dirX/dirY 方向
    *  单位向量 + strength(缺省 20) + frames(缺省 30)——鹿角怪震屏源 */
-  punchCamera?(dirX: number, dirY: number, frames?: number, strength?: number): void;
+  punchCamera?(dirX: number, dirY: number, frames?: number, strength?: number,
+    srcX?: number, srcY?: number): void;   // src = PunchCameraModifier.startPosition（距离衰减原点）
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
   cutTile(x: number, y: number): void;
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */

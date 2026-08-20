@@ -659,6 +659,18 @@ export function liquidSlopeSource(
   return { sx: rx + 18 * (slope - 1), sy: ry, sw: rw, sh: rh };
 }
 
+/** 浸润带贴图选择（TileDrawing.cs:4526-4537 DrawPartialLiquid 纯函数化）：
+ *  flag = !BlocksWaterDrawingBehindSelf && !solidLayer（behindBlocks=!solidLayer 时
+ *  才保留 flag；实心层 pass 恒 false）；flag||slope==0 → 平面 Liquid，否则斜面表。
+ *  ⇒ 背景 pass 普通坡面格 = 平面全矩形（斜切区整格覆盖）；仅玻璃族坡面/实心层
+ *  pass 坡面格走 LiquidSlope 斜面形状。 */
+export function liquidBandUsesSlopeTable(
+  slope: number, solidLayer: boolean, blocksWaterBehindSelf: boolean,
+): boolean {
+  const flag = !blocksWaterBehindSelf && !solidLayer;
+  return !(flag || slope === 0);
+}
+
 /** LiquidSlope 表文件（与上方浸润 pass 的 Liquid_N 同一套 liquidType→style 映射：
  *  水=群系水色 0-13 / 岩浆=1 / 蜂蜜=11 / 微光=14，TextureAssets.LiquidSlope[15]） */
 export function liquidSlopeSheet(vt: number, waterStyle = 0): string {
@@ -833,11 +845,9 @@ export function drawLiquidBehindTilesOnly(
       if (rw <= 0 || rh <= 0) continue;
 
       // ---- 斜面格换 LiquidSlope 表（TileDrawing.cs:4526-4552 DrawPartialLiquid）----
-      // behindBlocks=!solidLayer → flag=!BlocksWaterDrawingBehindSelf,非背景恒 false;
-      // flag||slope==0 → 平面 Liquid,否则斜面表(X += 18*(slope-1))。
-      // ⇒ 背景 pass 普通坡面格走平面全矩形(斜切区整格覆盖);实心层 pass 一切坡面
-      //   格走斜面表。半砖恒 slope=0 → 双 pass 均平面。
-      const useSlopeTable = slope !== 0 && (solidLayer || blocksWaterBehindSelf);
+      // 贴图选择走 liquidBandUsesSlopeTable 纯函数(双 pass 语义,见其头注释);
+      // 源矩形 X += 18*(slope-1),Y 复用平面带 ry/rh(原版同源 liquidSize)。
+      const useSlopeTable = liquidBandUsesSlopeTable(slope, solidLayer, blocksWaterBehindSelf);
       const slopeSrc = useSlopeTable ? liquidSlopeSource(slope, rx, ry, rw, rh) : null;
       let drawTex: ImageBitmap | HTMLImageElement | null = tex;
       let srx = rx;

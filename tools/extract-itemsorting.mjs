@@ -28,7 +28,17 @@ const read = (p) => readFileSync(`${ROOT}/${p}`, 'utf8');
 
 const itemSrc = read('Terarria1456/Terraria/Item.cs');
 const itemidSrc = read('Terarria1456/Terraria.ID/ItemID.cs');
+const ammoSrc = read('Terarria1456/Terraria.ID/AmmoID.cs');
 const mainSrc = read('Terarria1456/Terraria/Main.cs');
+
+// AmmoID 常量（ammo = AmmoID.X 枚举赋值的数值解析——Item.cs 79 处枚举形，
+// 字面量正则扫不到；AmmoID.cs:112-146 `public static int X = N;`）
+const AMMO_ID = {};
+{
+  const re = /public static int (\w+) = (\d+);/g;
+  let m;
+  while ((m = re.exec(ammoSrc))) AMMO_ID[m[1]] = Number(m[2]);
+}
 
 // ---------- ItemID.Sets 数值表（CreateIntSet）与布尔表（CreateBoolSet） ----------
 function parseIntSets(src) {
@@ -38,7 +48,9 @@ function parseIntSets(src) {
   while ((m = re.exec(src))) {
     const name = m[1], def = Number(m[2]);
     const rest = m[3] ?? '';
-    const nums = rest.split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x));
+    // ★Number('')===0（非 NaN）——rest 首元素是空串，须先剔空再转数（曾致键值对
+    //  整体错位一格：Ropes 解析成 {0:965,1:3078}）
+    const nums = rest.split(',').map((x) => x.trim()).filter((x) => x !== '').map(Number);
     const map = new Map();
     for (let i = 0; i + 1 < nums.length; i += 2) map.set(nums[i], nums[i + 1]);
     sets[name] = { def, map };
@@ -131,7 +143,7 @@ const FIELDS = [
   ['vanity', /vanity = true;/, 'b'], ['mech', /mech = true;/, 'b'],
   ['damage', /\bdamage = (\d+);/, 'n'], ['pick', /\bpick = (\d+);/, 'n'],
   ['axe', /\baxe = (\d+);/, 'n'], ['hammer', /\bhammer = (\d+);/, 'n'],
-  ['ammo', /\bammo = (\d+);/, 'n'], ['shoot', /\bshoot = (-?\d+);/, 'n'],
+  ['ammo', /\bammo = (?:(\d+)|AmmoID\.(\w+));/, 'ammo'], ['shoot', /\bshoot = (-?\d+);/, 'n'],
   ['buffType', /\bbuffType = (-?\d+);/, 'n'], ['healLife', /\bhealLife = (\d+);/, 'n'],
   ['healMana', /\bhealMana = (\d+);/, 'n'], ['mountType', /\bmountType = (-?\d+);/, 'n'],
   ['headSlot', /\bheadSlot = (-?\d+);/, 'n'], ['bodySlot', /\bbodySlot = (-?\d+);/, 'n'],
@@ -165,10 +177,19 @@ for (let id = 0; id < ITEM_COUNT; id++) {
     isFood: IS_FOOD.has(id),
   };
   if (seg) {
+    // itemfunc 在档的键优先（其 2674/2676/2001/2422 等嵌套 switch/区间块已按源码
+    // 校对修补——本提取器同款文本正则会重得同样的错值，只补缺不覆盖）
     for (const [name, re, type] of FIELDS) {
       const m = seg.match(re);
       if (!m) continue;
+      const fKey = { melee: 'melee', ranged: 'ranged', magic: 'magic', summon: 'summon',
+        consumable: 'consumable', notAmmo: 'notAmmo', questItem: 'questItem',
+        damage: 'damage', pick: 'pick', axe: 'axe', hammer: 'hammer', shoot: 'shoot',
+        buffType: 'buffType', healLife: 'healLife', healMana: 'healMana',
+        createTile: 'createTile', createWall: 'createWall' }[name];
+      if (type !== 'b' && fKey && f[fKey] !== undefined) continue;
       if (type === 'b') it[name] = true;
+      else if (type === 'ammo') it[name] = m[1] !== undefined ? Number(m[1]) : (AMMO_ID[m[2]] ?? 0);
       else it[name] = Number(m[1]);
     }
   }

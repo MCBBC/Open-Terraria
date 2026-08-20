@@ -2051,6 +2051,8 @@ export class UI {
   private miscPageEl: HTMLElement | null = null;
   private loadoutBtns: HTMLButtonElement[] = [];
   private eqPageBtns: HTMLButtonElement[] = [];
+  /** 背包侧"堆叠至附近宝箱"钮（ChestStack：左键堆叠/右键循环模式；开箱时隐藏） */
+  private quickStackBtn!: HTMLButtonElement;
   private equipPage = 0;
 
   /** 页签切换（原版 EquipPage 0=装备 2=杂项；DrawInventory :40614） */
@@ -2147,6 +2149,26 @@ export class UI {
         this.onHousing?.();
       });
       row.appendChild(bHouse);
+      // 堆叠至附近宝箱（Main.cs:41281-41320：背包侧 ChestStack 钮——左键
+      // QuickStackAllChests + 音效 12 / 右键 CycleQuickStackMode + 音效 10 +
+      // SaveSettings；悬停文案 GameUI.QuickStackToNearby|SmartStackToNearby；
+      // 开箱/商店时不显示（chest != -1 / npcShop != 0 门）
+      this.quickStackBtn = el('button', 'sw-btn');
+      this.quickStackBtn.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
+      this.quickStackBtn.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.game.quickStackAllChests();
+        this.game.sfx.play('menuTick', 1);          // SoundID 12（:41292）
+        this.refreshAll();
+      });
+      this.quickStackBtn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.game.cycleQuickStackMode();             // CycleQuickStackMode（:41297-41301）
+        this.game.sfx.play('menuOpen', 1);          // SoundID 10 + SaveSettings
+        this.refreshAll();
+      });
+      row.appendChild(this.quickStackBtn);
       // 成就入口 = 背包内 AchievementAdvisor 卡（AchievementsUI.createAchievementAdvisor，
       // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
       // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
@@ -2692,6 +2714,7 @@ export class UI {
   closeChest() {
     this.openChest = null;
     this.chestPanel.style.display = 'none';
+    this.refreshAll();   // 堆叠钮等随开箱门（chest == -1）复显
   }
 
   // ============ 槽底贴图 / Loadout 染色 / 转移脉冲 / 金币跳字 ============
@@ -2890,6 +2913,16 @@ export class UI {
       this.achAdvisorEl?.remove();
       this.achAdvisorEl = null;   // 坏 advisor 自摘（成就顾问是 QoL 件，不拖垮背包刷新）
       console.warn('[UI] achAdvisor update failed, detached:', e);
+    }
+    // 堆叠至附近宝箱钮（Main.cs:41276 chest == -1 && npcShop == 0 门——开箱/商店
+    // 不显示；文案按当前模式 GameUI.QuickStackToNearby|SmartStackToNearby，首行作
+    // 标签、整段含"右键切换"提示进 title）
+    if (this.quickStackBtn) {
+      const smart = this.game.quickStackMode() === 'smart';
+      const full = Lang.text(smart ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
+      this.quickStackBtn.style.display = this.openChest ? 'none' : '';
+      this.quickStackBtn.textContent = full.split('\n')[0];
+      this.quickStackBtn.title = full;
     }
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {
@@ -3501,20 +3534,20 @@ export class UI {
   private hairPanel: CharCreation | null = null;
   showHairWindow(appearance: Appearance,
     quotes: { priceOf: (a: Appearance) => number; buy: (a: Appearance) => boolean },
-    onApply: (a: Appearance) => void): void {
+    onApply: (a: Appearance) => void, onCancel?: () => void): void {
     this.hairPanel?.close();
     this.hairPanel = new CharCreation(this.root, {
       // 理发窗确认=购买（GameUI.BuyWithValue 动态报价）；取消/Esc=CancelHairWindow 回退
       onCreate: (a) => {
         if (!quotes.buy(a)) {
           this.toast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
-          this.showHairWindow(appearance, quotes, onApply);   // 重建面板（购买被拒仍可改）
+          this.showHairWindow(appearance, quotes, onApply, onCancel);   // 重建面板（购买被拒仍可改）
           return;
         }
         this.hairPanel = null;
         onApply(a);
       },
-      onCancel: () => { this.hairPanel = null; },
+      onCancel: () => { this.hairPanel = null; onCancel?.(); },   // CancelHairWindow :43096 SetTalkNPC(-1)
     }, { initial: appearance, hairSalon: true, priceOf: quotes.priceOf });
   }
 

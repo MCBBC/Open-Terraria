@@ -28,7 +28,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { solidTile } from './HalfBrickPass';
 import { matureHerbPlants } from './StructuresPass';
 import { growTree } from './TreePass';
-import { genSquareTileFrame } from './FinalCleanupPass';
+import { genSquareTileFrame, genTileFrame, genKillTile } from './FinalCleanupPass';
 
 // ---------- 内部 tile id → 原版 sheet id 查找表（模块级一次构建，热循环零分配） ----------
 const SHEET = new Int16Array(TILE_DEFS.length).fill(-1);
@@ -226,12 +226,13 @@ function checkVinesAt(st: TileStore, x: number, y: number): void {
     }
   }
 }
-/** KillTile + 九宫 CheckVines 级联（蜂巢凹龛用） */
-function killTileVineCascade(st: TileStore, x: number, y: number): void {
+/** KillTile + 尾部 SquareTileFrame（cs:63559/63967 全分派引擎）——蜂巢凹龛用。
+ *  ★YYYYY：WWWW 时代的 vines-only 九宫（checkVinesAt）改派 FCP 引擎全分派——
+ *  m20260811 #89 残 5 格实证：凹龛击杀 2×2 陶罐一角 → vanilla case 28 CheckPot
+ *  整组杀（(4889,744-745) 三格 + (4741,778-779) 藤入清位），vines-only 级联漏。 */
+function killTileVineCascade(st: TileStore, rng: RNG, x: number, y: number): void {
   killTile(st, x, y);
-  for (let dy = -1; dy <= 1; dy++) {
-    for (let dx = -1; dx <= 1; dx++) checkVinesAt(st, x + dx, y + dy);
-  }
+  genSquareTileFrame(st, rng, x, y);
 }
 
 // ============================================================
@@ -272,6 +273,9 @@ function frameCellTree(st: TileStore, rng: RNG, x: number, y: number): void {
   else if (s === 596 || s === 616) checkTreeAt(st, rng, x, y, true);
   else if (s === 186 || s === 187) check3x2PileSweep(st, rng, x, y, s);
   else if (s === 185 || s === 649) checkPileSweep185(st, rng, x, y);
+  // ★YYYYY：27 向日葵（CheckSunflower 2×4 整组杀）走引擎单格分派（m20260811
+  // #90 (3889,366) 干基击杀级联实证——本地树域级联缺臂=掷流 307 差全漂）
+  else if (s === 27) genTileFrame(st, rng, x, y);
 }
 
 /** Check3x2 的 186/187 支（cs:49190-49346 结构/底材复核 + cs:49348-49364 草底
@@ -1388,7 +1392,7 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (ok) {
             for (let a = i; a < i + 2; a++) {
               for (let b = k + 1; b < k + 3; b++) {
-                killTileVineCascade(st, a, b);
+                killTileVineCascade(st, rng, a, b);
                 st.setTileSilent(a, b, HIVE, (a - i) * 18, (b - k - 1) * 18);
               }
             }
@@ -1471,6 +1475,7 @@ const DIRT = TILE_BY_KEY['dirt']!;
 /** Flowers pass（cs:20592-20742）1:1：地表花圃（非 remix 分支）。
  *  消费 GenVars.logX/logY（倒木锚点优先）——须在 FallenLogs 之后运行 */
 export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const flCap = (globalThis as { __swFlCap?: (m: number, n: number, tag: string) => void }).__swFlCap;
   const w = st.w, h = st.h;
   const spots = Math.floor(w * 0.004);
   for (let i = 0; i < spots; i++) {
@@ -1509,11 +1514,14 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
               || (s4 === 5 && m < w * 0.48) || m > w * 0.52;
             if (st.wall[t5] === 0 && st.flags[t5]
               && (s5 === 2 || (oreLike(t5) && !st.flags[t4])) && allowOver) {
+              flCap?.(m, n, `kill s4=${s4} s5=${s5} w5=${st.wall[t5]} nb=${[-1, 0, 1].map((dx) => [-1, 0, 1].map((dy) => { const q = st.idx(m + dx, n + 1 + dy); return `${SHEET[st.type[q]] ?? '?'}${st.flags[q] ? '' : 'x'}s${st.slope[q]}h${st.half[q]}l${st.liquid[q]}`; }).join(',')).join('|')}`);
               if (oreLike(t5)) {
                 st.type[t5] = GRASS;                                    // 基座矿石/石 → 草
                 if (oreLike(t6)) st.type[t6] = GRASS;
               }
-              killTileTree(st, rng, m, n);   // 干基/堆底被杀 → CheckTree/Check3x2 级联坍塌（原版语义，见文件头）
+              // ★YYYYY：干基/堆底/向日葵干格击杀改走引擎 KillTile（尘掷表——活性
+              //   目标如 27=10×Next(2)/格；m #90 掷差 80vs70 = 直接杀位漏尘掷）+ 全分派级联
+              genKillTile(st, rng, m, n);   // 干基/堆底被杀 → CheckTree/CheckSunflower 级联坍塌（原版语义，见文件头）
               if (rng.int(0, 1) === 0) {                                // Next(2)
                 st.slope[t5] = 0;
                 st.half[t5] = 0;
@@ -1526,6 +1534,7 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
                 && st.flags[t5] && st.slope[t5] === 0 && !st.half[t5]
                 && (s5 === 2 || s5 === 78 || s5 === 380 || s5 === 477 || s5 === 579 || st.type[t5] === GRASS)
                 && WALL_ALLOWS_PLANTS.has(st.wall[kk]) && WALL_ALLOWS_PLANTS.has(st.wall[t5])) {
+                flCap?.(m, n, `fit s5=${s5} wk=${st.wall[kk]}`);
                 let fx: number;
                 if (rng.int(0, 49) === 0) fx = 144;                     // 蘑菇 1/50
                 else if (rng.int(0, 34) === 0 || (st.wall[kk] >= 63 && st.wall[kk] <= 70)) {

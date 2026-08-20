@@ -9,7 +9,7 @@ import { join } from 'node:path';
 // @ts-ignore
 import { PNG } from 'pngjs';
 import { TORCH_FLAME_TILE, flameWobble, randomNextSeed } from '../src/render/TileFlames';
-import { liquidSlopeSource, liquidSlopeSheet } from '../src/render/VanillaLiquidRenderer';
+import { liquidBandUsesSlopeTable, liquidSlopeSource, liquidSlopeSheet } from '../src/render/VanillaLiquidRenderer';
 import { Renderer } from '../src/render/Renderer';
 
 const VANILLA = join(__dirname, '..', 'public', 'sprites', 'vanilla');
@@ -160,6 +160,21 @@ describe('③ LiquidSlope 斜面贴合（TileDrawing.cs:4526-4553 DrawPartialLiq
     expect(liquidSlopeSheet(2)).toBe('vanilla/LiquidSlope_11.png');
     expect(liquidSlopeSheet(3)).toBe('vanilla/LiquidSlope_14.png');
     expect(liquidSlopeSheet(0, 99)).toBe('vanilla/LiquidSlope_14.png'); // 钳 0-14
+  });
+
+  it('双 pass 贴图选择（:4526-4537）：背景 pass 普通坡面=平面全矩形（斜切区覆盖）；玻璃族坡面/实心层 pass=斜面表', () => {
+    // 实心层 pass（solidLayer=true）：一切坡面格走斜面表；平面格恒平面
+    expect(liquidBandUsesSlopeTable(1, true, false)).toBe(true);
+    expect(liquidBandUsesSlopeTable(4, true, false)).toBe(true);
+    expect(liquidBandUsesSlopeTable(0, true, false)).toBe(false);
+    // 背景 pass（solidLayer=false）：普通块坡面格走【平面 Liquid 全矩形】——
+    // 斜切区顶部艺术像素行由这条带整格覆盖（2026-08-20 用户 136 标注格根因：
+    // 旧实现背景 pass 也画斜面形状 → 斜切区顶部 4 行无覆盖透出远景背景）
+    expect(liquidBandUsesSlopeTable(1, false, false)).toBe(false);
+    expect(liquidBandUsesSlopeTable(2, false, false)).toBe(false);
+    // 背景 pass 玻璃族(54/541/328/459/470)坡面格：flag=false → 走斜面表
+    expect(liquidBandUsesSlopeTable(1, false, true)).toBe(true);
+    expect(liquidBandUsesSlopeTable(0, false, true)).toBe(false);   // 平面格玻璃族在入口已跳过
   });
 });
 

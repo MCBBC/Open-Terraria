@@ -175,7 +175,9 @@ describe('发色剂·渲染色公式抽查（DyeInitializer.cs 逐委托）', ()
 
   it('1982 队伍（:332-340）：单机 netMode=0 → 恒白；联机取 team 色', () => {
     expect(hairDyeColor(6, ctx({ team: 2, netActive: false }))).toEqual({ r: 255, g: 255, b: 255 });
-    expect(hairDyeColor(6, ctx({ team: 2, netActive: true }))).toEqual({ r: 88, g: 219, b: 84 });
+    // 1456 Main.cs:6612 teamColor[2] = (59,218,85)（1405 Main.cs:5103 同值）——
+    // 旧期望 (88,219,84) 两版反编译均不符（陈旧笔误，2026-08-20 校正）
+    expect(hairDyeColor(6, ctx({ team: 2, netActive: true }))).toEqual({ r: 59, g: 218, b: 85 });
   });
 
   it('1984 派对（:385-389）/ 1985 彩虹（:390-394）：直通色', () => {

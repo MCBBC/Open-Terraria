@@ -113,6 +113,12 @@ export interface OptionsData {
   /** 自动暂停（Main.autoPause，Main.cs:1280 默认 false）——Web 语义=切 tab
    *  (visibilitychange hidden) 暂停、回来自动恢复 */
   autoPause: boolean;
+  /** 快速堆叠模式（Player.Settings.StackToChestsPreferredMode，Player.cs:337；
+   *  config.json 键 "StackToChestsPreferredMode"（Main.cs:4244/4576 持久化），默认 Quick）。
+   *  背包侧"堆叠至附近宝箱"按钮行为：quick=只堆箱内已有类型 / smart=相似物品按
+   *  分类层送最匹配箱（QuickStacking.cs:421-440）；右键循环（Main.cs:41297-41301
+   *  CycleQuickStackMode + 音效 10 menuOpen） */
+  quickStackMode: 'quick' | 'smart';
 }
 
 const KEY = 'sandboxworld.options';
@@ -153,6 +159,7 @@ export class OptionsStore {
     autoSave: true,                         // Main.cs:1196
     autoSaveIntervalMin: 10,                // 原版 600000ms 恒值
     autoPause: false,                       // Main.cs:1280
+    quickStackMode: 'quick',                // Player.Settings.StackToChestsPreferredMode（QuickStackToNearbyChests）
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -203,6 +210,9 @@ export class OptionsStore {
       }
       if (!Number.isFinite(this.data.autoSaveIntervalMin) || this.data.autoSaveIntervalMin < 1) {
         this.data.autoSaveIntervalMin = 10;
+      }
+      if (this.data.quickStackMode !== 'quick' && this.data.quickStackMode !== 'smart') {
+        this.data.quickStackMode = 'quick';
       }
     } catch { /* 无存档用默认 */ }
     this.emit();

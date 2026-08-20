@@ -105,6 +105,11 @@ export const enum Msg {
                       //   语义生成（含 Boss 公告链）；非 serverAuth 房整包丢弃（中继房仍走
                       //   房主本地生成路径）。对齐设计文档 §P4"netMode==1 短路改发消息"。
                       //   不升 PROTO_VER（增量通道纪律,同 SpectateFocus=150 先例）
+  ServerPingProbe = 203, // S→C {f64 serverTs, u8 n, [u8 slot, u16 rttMs]×n}（玩家列表面板
+                      //   RTT 数据源——服务器 10s 主动探测 + 全房 RTT 表捎带）；
+                      //   C→S 回显 {f64 serverTs}（服务器 Date.now()-serverTs = 该端
+                      //   RTT，写下一帧探针表）。原版无玩家面板/ping 显示（仅 /playing
+                      //   命令）——本仓自有通道，旧端未知号默认忽略（150 先例）
 }
 
 // ================= v8 服务器房规则（RoomPolicy 尾部 ruleBits；docs/server-room-plan.md §6） =================
@@ -171,7 +176,10 @@ export function rulesFromBits(bits: number): RoomRules {
  *  旧双端 default 忽略未知 moduleId，新增通道不破坏在跑实例——故不升 PROTO_VER
  *  （升版会踢掉正在运行的旧 server 进程，共享开发环境不宜） */
 export const enum NetModule {
-  Liquid = 0,   // 预留（v1 液体客户端本地）
+  Liquid = 0,   // 液体网格同步（原版 NetLiquidModule——注册序 id=0；net/syncModules.ts）：
+                //   变化格 {i32 packed(x<<16|y), u8 liquid, u8 liquidType} 批量。房主
+                //   （中继房）/SimHost（服务器房）权威跑 LiquidSim → 60ms 节流上报
+                //   （原版 33ms/UpdateLiquid 末置换）；访客接收直写 store 不再本地模拟
   Text = 1,     // 聊天 {authorSlot, text, r, g, b}（author=255 无前缀，对齐原版 255=服务器）
                 //   C→S 载荷 {str text, u8 channel, [u8 r,g,b 尾段]}：
                 //   channel 0=房间聊天（默认,旧客户端无尾段;新客户端随附 RGB=Player.
@@ -179,8 +187,20 @@ export const enum NetModule {
                 //   1=世界频道（跨房全服,RGB 不附）/ 2=命令系统行（RGB 必附——服务器以
                 //   slot=255 无名前缀中继;发起端已本地回显,广播排除发送者）/
                 //   3=队伍频道（RGB 不附——服务器按 msg13 team 定向同队,队伍色）
-  PingModule = 2, // 预留
+  PingModule = 2, // 地图 ping（原版 NetPingModule——注册序 id=2；net/syncModules.ts）：
+                  //   {f32 x, f32 y}（全屏地图 tile 坐标）；C→S → 广播排除发送者，
+                  //   各端 Main.Pings 语义（15s 存活/10fps 五帧动画/容量 100）。
+                  //   触发 = 全屏地图双击（<0.5s && <2px，Main.cs:54926-54931）
   JoinLeave = 3,  // S→C 系统 {slot, joined}——加入/离开公告（原版 Lang.mp[19]/[20]，服务器广播）
+  Bestiary = 4,   // 图鉴进度（原版 NetBestiaryModule——注册序 id=4；net/syncModules.ts）：
+                  //   批量 {u16 n, [u8 sub(0杀/1遇/2聊), i16 netId, 7bit 计数(仅杀)]}。
+                  //   杀 = 权威端上行携累计值（NPCKillsTracker.RegisterKill 语义）；
+                  //   遇/聊 = 首次事件上行（tracker flag 门）；进房全量补发
+                  //   （三 tracker OnPlayerJoining）
+  TeleportPylon = 7, // 晶塔（原版 NetTeleportPylonModule——注册序 id=7；net/syncModules.ts）：
+                  //   sub0 加/sub1 删（房主差集广播→全房；进房全量）+ sub2 传送请求
+                  //   （访客→房主门禁五连）+ sub3 本仓扩展回执（房主→请求端：
+                  //   客户端权威移动模型下原版"服务器 Teleport+msg65"的等价落地）
   CreativePowers = 5, // M9 旅程力量（原版 NetCreativePowersModule——NetworkInitializer.cs:17
                       //   注册序 id=5）：世界侧力量全量态广播 + 个人侧（godmode/放置范围/
                       //   刷怪率）按 slot 广播 + 时段跳跃中继。载荷见 net/journeySync.ts

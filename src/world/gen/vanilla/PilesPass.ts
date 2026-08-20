@@ -379,7 +379,11 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
     // **2520(×0.6f)**+84(×0.02f)+630(×0.15f)——七段算术和与实测精确相等，IL 读数
     // 正确。RRRR 谷值 2519 系 SolidTile2 平台坡面豁免缺失（见 solidTile2 注）的
     // 补偿假象——残 2 格正是 (3384,854)/(212,922) 两顶坡平台锚。
-    const total = Math.ceil(w * 0.6);
+    // ★YYYYY（2026-08-20）：迭代数改 float32 语义（cs:19260 `num3=(float)w*0.6f`
+    // + cs:19261 `(float)num38 < num3`）——Math.ceil(double) 在 w=4200 偶然同值，
+    // w=6400 时 fround(6400×0.6f)=3840.0002441 → vanilla 3841 迭代 vs JS 3840
+    // （m #77 残 17 根因：⑤ 少 16 attempt 起手=掷流 251,225 处分叉，段⑥全漂）。
+    const total = Math.ceil(Math.fround(w * Math.fround(0.6)));
     for (let i = 0; i < total; i++) {
       let budget = attempts();
       let flag = false;
@@ -494,7 +498,8 @@ export function runPilesPass(st: TileStore, rng: RNG, gs: GenState): void {
 
   // ===== ⑦ 地表墙 2/40 小堆（cs:19472-19566）：w*0.15 =====
   {
-    const total = w * 0.15;
+    // ★YYYYY：同 ⑤ 的 float32 语义（fround(6400×0.15f)=960.0000610 → 961 迭代）
+    const total = Math.ceil(Math.fround(w * Math.fround(0.15)));
     for (let i = 0; i < total; i++) {
       let budget = attempts();
       let flag = false;

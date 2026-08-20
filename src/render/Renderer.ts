@@ -2698,18 +2698,20 @@ export class Renderer {
     ctx.globalAlpha = 1;
 
     // 5c.（已移至世界变换块外/光照合成前——见 restore 后 5c 注释）
-    // 6. 挖掘/放置光标：挖掘中黄色填充随进度加深（半透明黄 → 破坏完成时最深）
-    if (hover) {
+    // 6. 挖掘目标反馈：挖掘中白色边框 + 黄色填充随进度加深（半透明黄 → 破坏完成时最深）。
+    //    ★原版普通模式（智能光标关）空闲悬停无任何格框——格框仅 SmartCursorShowing
+    //    黄框（Main.cs:46016）；挖掘反馈原版为裂纹贴图（cracked overlay，未接——
+    //    黄进度填充作临时替身，仅挖掘进行时显示。曾空闲悬停恒画白框 = 自造 UI，
+    //    2026-08-20 用户实拍"吊灯底部静态残影"实为鼠标指向格的该框误认）
+    if (hover && mineProgress > 0) {
       ctx.strokeStyle = 'rgba(255,255,255,0.7)';
       ctx.lineWidth = 1 / z;
       ctx.strokeRect(hover.x * ts + 0.5, hover.y * ts + 0.5, ts - 1, ts - 1);
-      if (mineProgress > 0) {
-        // 进度 0→1，黄色 alpha 0.15→0.8 加深渐变（接近破坏时深黄）
-        ctx.globalAlpha = 0.15 + Math.min(1, mineProgress) * 0.65;
-        ctx.fillStyle = '#FFC419';
-        ctx.fillRect(hover.x * ts + 1, hover.y * ts + 1, ts - 2, ts - 2);
-        ctx.globalAlpha = 1;
-      }
+      // 进度 0→1，黄色 alpha 0.15→0.8 加深渐变（接近破坏时深黄）
+      ctx.globalAlpha = 0.15 + Math.min(1, mineProgress) * 0.65;
+      ctx.fillStyle = '#FFC419';
+      ctx.fillRect(hover.x * ts + 1, hover.y * ts + 1, ts - 2, ts - 2);
+      ctx.globalAlpha = 1;
     }
 
     // 6b. 洞穴探险/危险感/狩猎/群系视觉高亮（Main.cs:49500 段 Spelunker/Dangersense 溢色近似：

@@ -74,6 +74,25 @@ export function bestiaryCreditId(netId: number): string {
   return NPC_NAME_BY_ID[REDIRECT[netId] ?? netId] ?? String(netId);
 }
 
+let creditToNetIdCache: Map<string, number> | null = null;
+
+/** ContentSamples.NpcNetIdsByPersistentIds 等价（creditId → 规范 netId）：
+ *  取未被 REDIRECT 归并的最小 id（母体自名 == creditId；变体经 bestiaryCreditId
+ *  都指向母体名）——联机 module4 进房补发（tracker 全量 → netId 线上编码）用 */
+export function netIdOfCredit(creditId: string): number | undefined {
+  if (!creditToNetIdCache) {
+    creditToNetIdCache = new Map();
+    for (const key of Object.keys(NPC_NAME_BY_ID)) {
+      const id = Number(key);
+      if (!Number.isInteger(id) || id === 0) continue;
+      if (REDIRECT[id] !== undefined) continue;            // 归并变体非规范位
+      if (creditToNetIdCache.has(NPC_NAME_BY_ID[id])) continue;  // 首个（最小 id）胜
+      creditToNetIdCache.set(NPC_NAME_BY_ID[id], id);
+    }
+  }
+  return creditToNetIdCache.get(creditId);
+}
+
 /** NPC.CountsAsACritter（NPC.cs:6803-6812）——遇数扫描/小动物条目判定。
  *  lifeMax/damage 取 npcStats（1456 SetDefaults 全量含旧 json 缺失的 33 条，
  *  如 614 爆炸兔 hp5/dmg0 → 小动物） */
@@ -209,21 +228,39 @@ export class BestiaryTracker {
   readonly sights = new Set<string>();
   readonly chats = new Set<string>();
 
-  /** NPCKillsTracker.RegisterKill（杀数上限 999999999） */
-  registerKill(netId: number): void {
+  /** NPCKillsTracker.RegisterKill（杀数上限 999999999）。
+   *  返回累计值（联机 module4 上行携累计——原版 RegisterKill :24-32 广播即带 value） */
+  registerKill(netId: number): number {
     const id = bestiaryCreditId(netId);
     const next = Math.min((this.kills.get(id) ?? 0) + 1, KILL_CAP);
     this.kills.set(id, next);
+    return next;
   }
 
-  /** NPCWasNearPlayerTracker.RegisterWasNearby（首遇置位即可，幂等） */
-  registerSight(netId: number): void {
-    this.sights.add(bestiaryCreditId(netId));
+  /** SetKillCountDirectly（:36-43）——联机 module4 权威下发/进房补发直写（钳 0..上限） */
+  setKillCountDirectly(creditId: string, count: number): void {
+    this.kills.set(creditId, Math.max(0, Math.min(count, KILL_CAP)));
   }
 
-  /** NPCWasChatWithTracker.RegisterChatStartWith（幂等） */
-  registerChat(netId: number): void {
-    this.chats.add(bestiaryCreditId(netId));
+  /** NPCWasNearPlayerTracker.RegisterWasNearby（首遇置位即可，幂等）。
+   *  返回是否首次（联机 Sight 首遇才广播——原版 tracker 内 flag 门 :30-38） */
+  registerSight(netId: number): boolean {
+    return this.sights.add(bestiaryCreditId(netId));
+  }
+
+  /** SetWasSeenDirectly（:40-46）——module4 下发/进房补发直写 */
+  setSightDirectly(creditId: string): void {
+    this.sights.add(creditId);
+  }
+
+  /** NPCWasChatWithTracker.RegisterChatStartWith（幂等）。返回是否首次（同上） */
+  registerChat(netId: number): boolean {
+    return this.chats.add(bestiaryCreditId(netId));
+  }
+
+  /** SetWasChatWithDirectly（:21-27）——module4 下发/进房补发直写 */
+  setChatDirectly(creditId: string): void {
+    this.chats.add(creditId);
   }
 
   private anyGoldSeen(): boolean {

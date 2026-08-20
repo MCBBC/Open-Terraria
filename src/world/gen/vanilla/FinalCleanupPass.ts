@@ -150,7 +150,7 @@ function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean
 //   CheckRockGolemHead 579、693/694、235、442、128/269、91、35/139、386-389、
 //   92/93/453、Check2x2 族（★CCCCC 已派发 138/411——9293480 在场成员；余
 //   132/142/143/288-295/484/664/665/711/712/335/490/564/565/594/94-100/125/126/
-//   173/282/287/319/621/622 维持备案）、172/360/505-527、27、171、376/443/444、
+//   173/282/287/319/621/622 维持备案）、172/360/505-527、171、376/443/444、（★YYYYY 已派发 27 向日葵/34 吊灯/5 树/752 蛋）
 //   630/631、723/724。
 //   ★KKKKK 批（2026-08-19）新派发三族（#101 金标 14 格击杀实证，旧"零击杀"
 //   备案作废）：CheckAlch 药草 82/83/84（cs:45981）/ CheckJunglePlant
@@ -485,6 +485,14 @@ export function genSquareTileFrame(st: TileStore, rng: RNG, x: number, y: number
   squareTileFrame(st, ctx, x, y);
 }
 
+/** YYYYY 批新增纯导出：WorldGen.KillTile 生成期入口（尘掷表 + setTileSilent +
+ *  引擎九宫级联）——Flowers 等消费端对活性击杀目标（如 27 向日葵=10×Next(2)）的
+ *  掷位镜像；非活性早退零掷（与 killTileTree 语义一致处在其尘掷与全分派级联）。 */
+export function genKillTile(st: TileStore, rng: RNG, x: number, y: number): void {
+  const ctx: SweepCtx = { rng, destroyObject: false, frameSparse: false, stats: undefined };
+  killTileGen(st, ctx, x, y);
+}
+
 /** UUUU 批新增纯导出：WorldGen.TileFrame(i, j, resetFrame:true) 单格生成期入口
  *  （DeadMansChest ActuallyPlace* 族的字面镜像——cs:532/570/617 直调单格 TileFrame
  *  而非 SquareTileFrame）。零行为新增：仅包装私有 tileFrameGen。 */
@@ -531,7 +539,8 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
   if (ctx.frameSparse && (
     sheet === 165 || sheet === 185 || sheet === 28 || sheet === 653 || sheet === 240
     || sheet === 440 || sheet === 485 || sheet === 72 || sheet === 178 || sheet === 138
-    || sheet === 411 || sheet === 752 || sheet === 5 || sheet === 34
+    || sheet === 411 || sheet === 752 || sheet === 5 || sheet === 596 || sheet === 616
+    || sheet === 34 || sheet === 27
     || C3X2_TYPES.has(sheet)
     // KKKKK：新击杀族同列（自读帧族——嵌合基座伪杀/互喂风险，C3X2 同款处置；
     //   #101 槽 frameSparse=false 不受影响，真实行为由生产管线承载）
@@ -622,8 +631,19 @@ function frameImportantDispatch(st: TileStore, ctx: SweepCtx, x: number, y: numb
     case 5:
       checkTreeSweep(st, ctx, x, y);
       return true;
+    // YYYYY 批补：596/616 观赏树（CheckTreeWithSettings·Vanity cs:54430）——m #90
+    //   花圃 15 格 616 整树坍塌实证。583-589/634（Gem/Ash 树）未实证不派发（备案）。
+    case 596: case 616:
+      checkTreeSweep(st, ctx, x, y, true);
+      return true;
     case 34:
       checkChandSweep(st, ctx, x, y, sheet);
+      return true;
+    // YYYYY 批补（cs:86381 → cs:53768）：CheckSunflower 向日葵 2×4 整组杀——
+    //   m20260811 #90 花圃击杀 (3889,366) 干基 → vanilla 级联杀整株 2×4（尘掷
+    //   27→Next(2)×10/格），JS 单杀=掷流 1034 处分叉全漂（掷差 307）。
+    case 27:
+      checkSunflowerSweep(st, ctx, x, y, sheet);
       return true;
     case 373: case 374: case 375: case 461: case 709: {   // IsADripTile（cs:85750）
       const up = st.idx(x, y - 1);
@@ -764,7 +784,11 @@ function checkChandSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, she
  * 583-589/596/616/634/323（Gem/Vanity/Ash/Palm 树）生成期在场成员未实证，
  * 不派发（备案）。 */
 const TREE_GROUND_NORM = new Set([23, 661, 477, 60, 70, 109, 147, 199, 662, 492]);
-function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): void {
+/** VanityTreeGroundTest（cs:30474）：{2,109,477,492}——无归一化（去 23/199） */
+const VANITY_GROUND = new Set([2, 109, 477, 492]);
+/** vanity=true：CheckTreeWithSettings·Vanity（cs:54430-54597）分支——地面谓词换
+ *  VANITY_GROUND、R3 杀后不再重帧（两版 cs 差异逐条保留，checkTreeAt 同源）。 */
+function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, vanity = false): void {
   const k = st.idx(x, y);
   const frameX0 = st.frameX[k]!, frameY0 = st.frameY[k]!;
   const self = SWEEP_SHEET[st.type[k]];
@@ -775,8 +799,8 @@ function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): voi
   };
   const num2 = typeAt(x - 1, y), num3 = typeAt(x + 1, y), num = typeAt(x, y - 1);
   let num4 = typeAt(x, y + 1);
-  if (TREE_GROUND_NORM.has(num4)) num4 = 2;                 // cs:54620-54636 归一化
-  const groundOk = num4 === 2;
+  if (!vanity && TREE_GROUND_NORM.has(num4)) num4 = 2;      // cs:54620-54636 归一化（仅 CheckTree）
+  const groundOk = vanity ? VANITY_GROUND.has(num4) : num4 === 2;
   let cfx = frameX0, cfy = frameY0;
   let dead = false;
   const kill = (): void => {
@@ -802,12 +826,20 @@ function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): voi
     else wr(0, n5);
   }
   if (cfy >= 132 && cfy <= 176 && (cfx === 0 || cfx === 66 || cfx === 88)) {
-    const n6 = cfy % 66;                                     // R3 基座干身（杀后仍重帧）
-    if (!groundOk) kill();
-    if (num2 !== self && num3 !== self) wr(0, n6);
-    else if (num2 !== self) wr(0, 132 + n6);
-    else if (num3 !== self) wr(66, 132 + n6);
-    else wr(88, 132 + n6);
+    const n6 = cfy % 66;                                     // R3 基座干身
+    if (vanity) {
+      if (!groundOk) kill();                                 // CheckTreeWithSettings：杀后不重帧
+      else if (num2 !== self && num3 !== self) wr(0, n6);
+      else if (num2 !== self) wr(0, 132 + n6);
+      else if (num3 !== self) wr(66, 132 + n6);
+      else wr(88, 132 + n6);
+    } else {
+      if (!groundOk) kill();                                 // CheckTree：杀后仍重帧（写死格对象）
+      if (num2 !== self && num3 !== self) wr(0, n6);
+      else if (num2 !== self) wr(0, 132 + n6);
+      else if (num3 !== self) wr(66, 132 + n6);
+      else wr(88, 132 + n6);
+    }
   }
   if ((cfx === 66 && (cfy === 0 || cfy === 22 || cfy === 44)) || (cfx === 44 && (cfy === 198 || cfy === 220 || cfy === 242))) {
     if (num3 !== self) kill();                               // R4 侧枝贴干存活链
@@ -835,6 +867,46 @@ function checkTreeSweep(st: TileStore, ctx: SweepCtx, x: number, y: number): voi
     tileFrameGen(st, ctx, x, y - 1, false);
     tileFrameGen(st, ctx, x, y + 1, false);
   }
+}
+
+/* ── CheckSunflower（cs:53768）type27 向日葵 2×4（YYYYY 批：m #90 花圃杀链）──
+ * 完整性（type+fx 列 mod2+fy 行）+ 双列地面门（{2,477,492,109,60,633} ∪ SolidTile）
+ * → 破 → destroyObject 闸内 2×4 整组 KillTile（尘掷 27→Next(2)/格×10）。无尾扫
+ * （cs:53810 destroyObject=false 即返）；Item.NewItem(63) 生成期 noItem 零掷。 */
+function checkSunflowerSweep(st: TileStore, ctx: SweepCtx, x: number, y: number, sheet: number): void {
+  if (ctx.destroyObject) return;                                            // cs:53772
+  let flag = false;
+  const i0 = st.idx(x, y);
+  let num = Math.trunc(st.frameX[i0]! / 18);
+  const num2 = y - Math.trunc(st.frameY[i0]! / 18);
+  while (num > 1) num -= 2;
+  num = x - num;                                                            // num *= -1; num += i
+  for (let k = num; k < num + 2; k++) {
+    for (let l = num2; l < num2 + 4; l++) {
+      if (!st.inBounds(k, l)) { flag = true; continue; }                    // 原版 null→new Tile=非活性
+      const q = st.idx(k, l);
+      let num3 = Math.trunc(st.frameX[q]! / 18);
+      while (num3 > 1) num3 -= 2;
+      if (!nactiveAt(st, k, l) || SWEEP_SHEET[st.type[q]] !== sheet
+        || num3 !== k - num || st.frameY[q] !== (l - num2) * 18) flag = true;   // cs:53792-94
+    }
+    if (!st.inBounds(k, num2 + 4)) { flag = true; continue; }
+    const g = st.idx(k, num2 + 4);
+    const gs = SWEEP_SHEET[st.type[g]];
+    if (!nactiveAt(st, k, num2 + 4)
+      || (gs !== 2 && gs !== 477 && gs !== 492 && gs !== 109 && gs !== 60 && gs !== 633)) flag = true;   // cs:53781
+    if (!solidTile(st, k, num2 + 4)) flag = true;                           // cs:53786
+  }
+  if (!flag) return;
+  ctx.destroyObject = true;                                                 // cs:53799
+  for (let m = num; m < num + 2; m++) {
+    for (let n = num2; n < num2 + 4; n++) {
+      if (!st.inBounds(m, n)) continue;
+      const q = st.idx(m, n);
+      if (st.flags[q] && SWEEP_SHEET[st.type[q]] === sheet) killTileGen(st, ctx, m, n);
+    }
+  }
+  ctx.destroyObject = false;                                                // cs:53810（无尾扫）
 }
 
 // ============================================================

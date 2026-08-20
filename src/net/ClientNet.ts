@@ -21,6 +21,14 @@ import {
   type JourneyWorldState, type JourneyPersonalState,
   PowerPermissionLevel, JOURNEY_POWER_COUNT, isPowerAvailableFor,
 } from './journeySync';
+import {
+  readLiquidModule, writeLiquidModule, LIQUID_CELLS_PER_FRAME, packLiquidCoord,
+  readMapPing, writeMapPing,
+  readBestiaryModule, writeBestiaryModule, type BestiaryNetEvent,
+  readPylonModule, writePylonModule, type PylonNetMsg,
+  readPingProbe, writePingProbeEcho,
+  type LiquidCell,
+} from './syncModules';
 import type { LeashedNetMsg } from '../entities/LeashedCritter';
 import type { World } from '../world/World';
 import { World as WorldCtor } from '../world/World';
@@ -144,6 +152,16 @@ export interface ClientNetHooks {
   onJourneyUnlock?: (slot: number, itemId: number, amount: number) => void;
   /** M9 力量权限级到达（module9；本地 levels 已同步更新后回调） */
   onJourneyPermission?: (powerId: number, level: PowerPermissionLevel) => void;
+  /** module0 液体变化到达（权威端广播；Game 直写 store + 标脏光照） */
+  onLiquidSync?: (cells: LiquidCell[]) => void;
+  /** module4 图鉴事件到达（Game 侧直写 tracker——SetKillCountDirectly 族） */
+  onBestiaryEvent?: (events: BestiaryNetEvent[]) => void;
+  /** module7 晶塔消息到达（Added/Removed→Game.pylons 维护；TeleportResult→传送/文案） */
+  onPylonMessage?: (msg: PylonNetMsg) => void;
+  /** module2 地图 ping 到达（他端标记；Game 入 Pings store→渲染层 15s 动画） */
+  onMapPing?: (x: number, y: number) => void;
+  /** msg203 全房 RTT 表到达（玩家列表面板数据源） */
+  onPingTable?: (table: Array<{ slot: number; rttMs: number }>) => void;
 }
 
 export class ClientNet {
@@ -518,7 +536,35 @@ export class ClientNet {
             this.journeyPermissions[powerId] = level;
             this.hooks.onJourneyPermission?.(powerId, level);
           }
+        } else if (moduleId === NetModule.Liquid) {
+          // module0 液体（原版 NetLiquidModule.Deserialize :73-90：逐格直写
+          // liquid/liquidType——本地不模拟,权威值覆盖）
+          const cells = readLiquidModule(r);
+          if (cells.length) this.hooks.onLiquidSync?.(cells);
+        } else if (moduleId === NetModule.PingModule) {
+          // module2 地图 ping（原版 NetPingModule → Main.Pings.Add）
+          const pos = readMapPing(r);
+          if (Number.isFinite(pos.x) && Number.isFinite(pos.y)) this.hooks.onMapPing?.(pos.x, pos.y);
+        } else if (moduleId === NetModule.Bestiary) {
+          // module4 图鉴（原版 NetBestiaryModule：三子型直写本地 tracker）
+          const events = readBestiaryModule(r);
+          if (events.length) this.hooks.onBestiaryEvent?.(events);
+        } else if (moduleId === NetModule.TeleportPylon) {
+          // module7 晶塔（原版 NetTeleportPylonModule：AddForClient/RemoveForClient/
+          // HandleTeleportRequest——本仓 sub3 回执 = 传送批准/失败文案）
+          const msg = readPylonModule(r);
+          if (msg) this.hooks.onPylonMessage?.(msg);
         }
+        return;
+      }
+      case Msg.ServerPingProbe: {
+        // msg203：服务器探针 {f64 serverTs, RTT 表}——原样回显 serverTs（服务器
+        // 测算本端 RTT）；表进 playerPings（面板数据源）
+        const { serverTs, table } = readPingProbe(r);
+        this.playerPings.clear();
+        for (const t of table) this.playerPings.set(t.slot, t.rttMs);
+        this.hooks.onPingTable?.(table);
+        this.send(writePingProbeEcho(serverTs));
         return;
       }
       case Msg.RoomPolicy: {
@@ -656,7 +702,9 @@ export class ClientNet {
         return;
       }
       case Msg.Ping:
-        return; // 忽略回显
+        // 心跳回显：顺手测本端 RTT（面板"自己"行数据；旧语义"忽略"不变）
+        this.rttMs = performance.now() - r.f64();
+        return;
       default:
         return; // 未知跳过（对齐原版）
     }
@@ -718,6 +766,7 @@ export class ClientNet {
     this.syncInventory(performance.now());
     this.syncHp();
     this.flushPending(); // P1.3 msg21 合帧冲洗
+    this.flushLiquidChanges(); // module0 液体 60ms 节流
     if (this.tileQueue.length) {
       // 每包最多 64 op（防超帧）
       const batch = this.tileQueue.splice(0, 64);
@@ -989,6 +1038,57 @@ export class ClientNet {
    *  各端在对应玩家代理头顶出泡（原版 C→S 120 → 服务器 msg91 全体广播） */
   sendEmote(emoteId: number) {
     this.send(new NetWriter(Msg.EmoteBubble).u8(emoteId).finish());
+  }
+
+  // ================= MP 同步轻件包（net/syncModules.ts：module0/2/4/7 + msg203） =================
+
+  /** 本端 RTT（Msg.Ping 回显差分，ms；Infinity=尚未测得） */
+  rttMs = Infinity;
+  /** 全房 RTT 表（msg203 探针携带；slot → ms。旧服务器无探针 → 恒空,面板显示"-"） */
+  playerPings = new Map<number, number>();
+
+  /** 液体变化格收集（LiquidSim.netChangeSink / 桶操作 listener → 此处；60ms 节流冲放） */
+  private liquidNetSet = new Map<number, { x: number; y: number }>();
+  private lastLiquidFlushAt = 0;
+
+  /** 液体变化上报入口（权威端模拟变化 / 任意端桶操作均经此收集） */
+  reportLiquidChange(x: number, y: number) {
+    this.liquidNetSet.set(packLiquidCoord(x, y), { x, y });
+  }
+
+  /** 60ms 节流冲放（tick() 调用；值在发送时刻读权威 store——原版 Serialize 同语义） */
+  flushLiquidChanges() {
+    if (!this.liquidNetSet.size || !this.gameWorld) return;
+    const now = performance.now();
+    if (now - this.lastLiquidFlushAt < 60) return;
+    this.lastLiquidFlushAt = now;
+    const st = this.gameWorld.store;
+    const cells: LiquidCell[] = [];
+    for (const p of this.liquidNetSet.values()) {
+      if (!st.inBounds(p.x, p.y)) continue;
+      const i = st.idx(p.x, p.y);
+      cells.push({ x: p.x, y: p.y, liquid: st.liquid[i], liquidType: st.liquidType[i] });
+    }
+    this.liquidNetSet.clear();
+    for (let off = 0; off < cells.length; off += LIQUID_CELLS_PER_FRAME) {
+      this.send(writeLiquidModule(cells.slice(off, off + LIQUID_CELLS_PER_FRAME)));
+    }
+  }
+
+  /** 地图 ping 上报（原版 TriggerPing Main.cs:56016-56022：本地 Pings.Add 由
+   *  Game 承担，netMode==1 时 SendToServer——本仓 net 活跃即等价） */
+  sendMapPing(x: number, y: number) {
+    this.send(writeMapPing(x, y));
+  }
+
+  /** 图鉴事件上报（杀=权威端携累计值；遇/聊=首次观察端） */
+  sendBestiaryEvent(e: BestiaryNetEvent) {
+    this.send(writeBestiaryModule([e]));
+  }
+
+  /** 晶塔消息（房主差集广播 sub0/1 · 访客传送请求 sub2 · 房主门禁回执 sub3） */
+  sendPylonMessage(msg: PylonNetMsg) {
+    this.send(writePylonModule(msg));
   }
 
   // ================= M9 旅程力量/研究（msg82 module5/6/9；net/journeySync.ts） =================

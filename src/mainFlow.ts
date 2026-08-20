@@ -263,7 +263,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             g.net?.resendAppearance();
             if (selectedCharId != null) await charStore.update(selectedCharId, a);
             ui.toast(Lang.text('Mods.SandboxWorld.ClothesWindow.Changed'));
-          });
+            g.closeNpcDialog();   // BuyHairWindow :43110 SetTalkNPC(-1)
+          },
+          () => g.closeNpcDialog());   // CancelHairWindow :43096（造型师 SetTalkNPC(-1)）
       },
     }, atlas);
     // 纸娃娃贴图预载按当前角色外观收窄(545 张全量 → ~30 张);外观本体在

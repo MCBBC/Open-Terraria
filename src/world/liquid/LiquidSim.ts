@@ -138,6 +138,10 @@ export class LiquidSim {
   world: World;
   /** 活动液体条目（原版 Main.liquid[]，dense 数组 + swap-remove） */
   private liquids: LiquidEntry[] = [];
+  /** 联机变化格收集（原版 Liquid.NetSendLiquid 的 sink 形态——AddWater/DelWater
+   *  两时刻记格，Liquid.cs:1189/:1583；null=单机/访客（不模拟）零开销）。
+   *  60ms 节流上报见 net/syncModules.ts module0 注 */
+  netChangeSink: ((x: number, y: number) => void) | null = null;
   numLiquid = 0;
   /** tile.checkingLiquid / tile.skipLiquid 位图 */
   private checking: Uint8Array;
@@ -544,6 +548,9 @@ export class LiquidSim {
     // 三字段全写，勿改成残留语义）
     this.liquids[this.numLiquid] = { x, y, kill: 0, delay: 0 };
     this.numLiquid++;
+    // NetSendLiquid（Liquid.cs:1188-1190：netMode==2 且入列成功才记——缓冲路径
+    // 此处未达，回灌出列再入时会补记）
+    this.netChangeSink?.(x, y);
     // 1456 AddWater 尾部（L1196-1211）：岩浆/水冲毁可死亡方块（火把/植物等 KillTile）。
     //  与 blocksLiquid 同理走 nactive（幽灵 type 不算实心）。★isGeneratingOrLoading
     //  World 门槛（L1199 `!tile.active() || isGeneratingOrLoadingWorld → return`）：
@@ -1183,6 +1190,8 @@ export class LiquidSim {
         this.shimmerCheck(x, y); // Liquid.cs:1576-1579 tile4.shimmer() → ShimmerCheck
       }
     }
+    // NetSendLiquid（Liquid.cs:1582-1584：DelWater 末尾、checkingLiquid(false) 前）
+    this.netChangeSink?.(x, y);
     // swap-remove（Liquid.cs:1193-1197）：只搬 x/y/kill，delay 保留本槽旧值（原版语义）
     this.numLiquid--;
     this.checking[i5] = 0;
