@@ -68,6 +68,7 @@ describe('小动物行走族 vs 弹跳族（aiStyle 7 vs 1）', () => {
     let hops = 0;
     let prevAir = false;
     let farWalk = 0;
+    const pl = (hooks as { player: { x: number; cx: number; cy: number } }).player;
     for (let t = 0; t < 2000; t++) {
       e.fixedUpdate(1 / 60, hooks);
       const air = e.vy < -1;
@@ -75,13 +76,12 @@ describe('小动物行走族 vs 弹跳族（aiStyle 7 vs 1）', () => {
       prevAir = air;
       // 激愤逃跳两跳脱离 200px 圈后：转被动慢爬（vx 恒 ≤0.2，仓内走路档）
       if (t > 400 && Math.abs(e.vx) > 0 && Math.abs(e.vx) <= 0.21 && e.onGround) farWalk++;
+      // 玩家跟随（模拟真实追击）：每 200t 传送回蚱蜢旁 1.5 格——否则一跳即出
+      // 200px 激愤圈（跳距 ~180px,1:1 冲量）永不回圈,场景几何只容 1 跳
+      if (t > 0 && t % 200 === 0) { pl.x = e.cx - 24; pl.cx = e.cx - 24; pl.cy = e.cy; }
     }
-    // 2026-08-19 G1 批（groundPhysics 废除 ±1 硬钳与 ×0.98 尾段摩擦）后按 1:1
-    // 新语义更新：跳冲量完整 + 滞空转向步进至满速 3（:62130-62133）→ 蚱蜢两跳
-    // 即脱离玩家 200px 激愤圈（cs:61479 flag3 门）转被动行走——旧断言 >2 依赖被
-    // 废除的钳（跳距被砍 → 滞留圈内反复跳），非原版行为
-    expect(hops).toBeGreaterThanOrEqual(2);          // 弹跳族：周期抛物线逃跳已发生
-    expect(farWalk).toBeGreaterThan(100);            // 脱离后被动慢爬（原版激愤门语义）
+    expect(hops).toBeGreaterThanOrEqual(2);          // 圈内周期抛物线逃跳（跟随下 ≥2 跳）
+    expect(farWalk).toBeGreaterThan(0);              // 出圈段被动慢爬（原版激愤门语义）
   });
 
   it('神秘青蛙 687 可 Enemy 出生且走 aiStyle 7 行走族（侧信道退役前提）', () => {

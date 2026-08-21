@@ -2037,6 +2037,10 @@ function placeEnchantedSwordShrine(
         }
       }
     }
+    // ★CCCCC：PlaceTile(3) 液体门（cs:59487-59496）——type 3（花）且格有液体 →
+    //   整体 return false 不落草（type 73 蘑菇不在拒绝表）。s22222 (740,352) 金标
+    //   v0 vs JS 落草实证（van PT 织入：PT 740 352 3 后无 SQ 无帧掷=门败直返）。
+    if (pickShort && st.liquid[pi]! > 0) return;
     st.setTileSilent(px, py, pickShort ? SHORT_PLANTS : TALL_PLANTS, frameX, 0);
   });
   // ⑰ structures.AddProtectedStructure(rectangle, 10)(cs:98/EnchantedSwordBiome.cs:110)

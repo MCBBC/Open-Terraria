@@ -7132,7 +7132,6 @@ export class Renderer {
         const li = (ty - lry) * lrw + (tx - lrx);
         lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
       }
-      console.log('[mlfloor] vid=' + e.vanillaId + ' tile=' + tx + ',' + ty + ' L=(' + lr + ',' + lg + ',' + lb + ') rect=' + lrx + ',' + lry + '+' + lrw + 'x' + lrh);
       // 差值色 = sprite×0.3×(255−light)/255（逐通道;全亮 → 0 跳过）
       const cr = Math.round(0.3 * (255 - lr));
       const cg = Math.round(0.3 * (255 - lg));

@@ -309,19 +309,23 @@ export const BOC_BAR: BigProgressBar = {
 // 5. GolemHeadProgressBar（245 拳 + 246 头在场件和 ÷ 两件参照和）
 // ---------------------------------------------------------------------------
 const GOLEM_VALID = new Set([245, 246]);
+// 自由态排除(2026-08-21 用户报"最后阶段底部血条不对"):本仓头原体变身自由态
+// vanillaId 仍 246(ai3=1),原版是 NewNPC(249) 新实体且 249→neverValid(条消失)。
+// 曾把自由头当 246 继续算条 = 自由头满血 ÷(245+246 参照和) 恒半条不死。
+const golemBarPiece = (n: BarNpc) => n.active && GOLEM_VALID.has(n.type) && n.ai3 !== 1;
 export const GOLEM_BAR: BigProgressBar = {
   key: 'golem',
   validateAndCollect(tracked, ctx) {
-    if (!tracked.active) {
-      const alt = ctx.npcs.find((n) => n.active && GOLEM_VALID.has(n.type));
-      if (!alt) return null;
+    if (!tracked.active || tracked.ai3 === 1) {
+      const alt = ctx.npcs.find(golemBarPiece);
+      if (!alt) return null;   // 原版 TryFindingAnotherGolemPiece 找不到 → 条消失
       return { ...GOLEM_BAR.validateAndCollect(alt, ctx)!, retrack: alt };
     }
     const refFist = ctx.refLifeMax(245, tracked.difficulty);
     const refHead = ctx.refLifeMax(246, tracked.difficulty);
     let life = 0;
     for (const n of ctx.npcs) {
-      if (n.active && GOLEM_VALID.has(n.type)) life += n.life;
+      if (golemBarPiece(n)) life += n.life;
     }
     return { life, lifeMax: refFist + refHead, headIndex: BOSS_HEAD_TEXTURES[246] };
   },

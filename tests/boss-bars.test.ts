@@ -250,6 +250,18 @@ describe('GolemHeadProgressBar', () => {
     expect(r.retrack).toBe(head);
     expect(r.life).toBe(100);
   });
+  it('自由态头(ai3=1,vanillaId 仍 246)不进条；仅存自由头 → 条消失(2026-08-21 用户报)', () => {
+    // 原版:246 血尽 NewNPC(249) → 249=neverValid 条消失;本仓头原体变身 vanillaId
+    // 恒 246,须按 ai3=1 排除——曾把自由头当 246 继续算 = 满血÷参照和恒半条不死
+    const freeHead = npc({ type: 246, life: 25000, lifeMax: 25000, ai3: 1 });
+    const r = GOLEM_BAR.validateAndCollect(freeHead, makeCtx({ npcs: [freeHead] }));
+    expect(r).toBeNull();
+    // 挂载态(ai3=0)正常进条
+    const mounted = npc({ type: 246, life: 100, ai3: 0 });
+    const r2 = GOLEM_BAR.validateAndCollect(mounted, makeCtx({ npcs: [mounted] }));
+    expect(r2).not.toBeNull();
+    expect(r2!.life).toBe(100);
+  });
 });
 
 // ---------------------------------------------------------------------------

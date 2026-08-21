@@ -71,6 +71,11 @@ export interface DebugSummonPanelHooks {
    *  （与自然 roll 命中同路径/同公告/同清旗点），不得绕过昼夜消费时序 */
   events?: Array<{ key: string; label: string }>;
   triggerEvent?: (key: string) => string | null;
+  /** 面板关闭回调（×按钮/任意 close 调用点）：Game 侧解冻 input.uiBlocking——
+   *  ★close() 拆 DOM 不经 Game.toggleSummonPanel，缺此钩子则 uiBlocking 恒 true
+   *  = 全部按键冻结（2026-08-21 修复；此前只有 F6 键 toggle 路径与 main.ts 的
+   *  ESC 路径显式解冻，点 × 关闭后键全冻、F6 再按又把面板开回来） */
+  onClose?: () => void;
 }
 
 const STYLE = `
@@ -162,9 +167,11 @@ export class DebugSummonPanel {
   }
 
   close(): void {
-    this.el?.remove();
+    if (!this.el) return;
+    this.el.remove();
     this.el = null;
     this.listEl = null;
+    this.hooks.onClose?.();   // 解冻 uiBlocking（见 hooks.onClose 注释）
   }
 
   private msg(text: string, color = '#8C8'): void {

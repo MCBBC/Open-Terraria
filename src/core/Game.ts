@@ -19655,6 +19655,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           { key: 'pirate', label: '海盗入侵' },
         ],
         triggerEvent: (key) => this.debugTriggerEvent(key),
+        // ×按钮/任意 close 调用点统一解冻（close 拆 DOM 不经本方法尾部的
+        // uiBlocking=open 同步——缺它则点 × 后按键全冻，2026-08-21）
+        onClose: () => { this.input.uiBlocking = false; },
       });
     }
     this.summonPanel.toggle();

@@ -44,15 +44,23 @@ const r = await page.evaluate(async () => {
   await new Promise((r2) => setTimeout(r2, 250));
   const afterLeave = { hover: ui.hoverFocus, grid: gridCnt() };
   // ③ 滚轮 → 窗口移动
-  for (let k = 0; k < 6; k++) {   // 焦点居中钳位:start=max(0,focus-4),滚过 4 格窗口才动
+  // 灵敏度：小 delta(<120) 不动；120 走 1 行；5×120 走 5 行
+  ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: 60, bubbles: true, cancelable: true }));
+  await new Promise((r2) => setTimeout(r2, 200));
+  const afterSmall = { focus: ui.craftFocus };          // 期望仍 0
+  ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
+  await new Promise((r2) => setTimeout(r2, 200));
+  const afterOne = { focus: ui.craftFocus };            // 期望 1
+  for (let k = 0; k < 5; k++) {
     ui.craftListEl.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
   }
   await new Promise((r2) => setTimeout(r2, 300));
-  const afterWheel = { start: startRow(), focus: ui.craftFocus, startChanged: startRow() !== s0 };
-  return { s0, focus0: f0, afterHover, afterLeave, afterWheel };
+  const afterWheel = { focus: ui.craftFocus };          // 期望 6
+  return { s0, focus0: f0, afterHover, afterLeave, afterSmall, afterOne, afterWheel };
 });
 console.log(JSON.stringify(r, null, 1));
 const ok = r.afterHover.start === r.s0 && r.afterHover.focus === r.focus0
-  && r.afterHover.hover >= 0 && r.afterLeave.hover === -1 && r.afterWheel.startChanged;
+  && r.afterHover.hover >= 0 && r.afterLeave.hover === -1
+  && r.afterSmall.focus === 0 && r.afterOne.focus === 1 && r.afterWheel.focus === 6;
 console.log(ok ? 'PASS: hover 不滚窗只切材料格;滚轮才滚动' : 'FAIL');
 await browser.close();

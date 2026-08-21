@@ -3276,10 +3276,19 @@ export class UI {
       const cl = this.craftListEl as HTMLElement & { __swCraftWheel?: boolean };
       if (!cl.__swCraftWheel) {
         cl.__swCraftWheel = true;
+        // delta 累积阈值（2026-08-21 用户报"滚动过于灵敏"）：每满 120 才走一行——
+        // 标准齿距 deltaY≈100 需 ~1.2 齿一行（稍钝），触控板小增量/惯性流按比例
+        // 缓行。方向反转清零（防反向先吃掉半程余量）。deltaMode 1(lines) 换算 ×40
+        let wheelAcc = 0;
         cl.addEventListener('wheel', (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
-          this.craftFocus = Math.max(0, this.craftFocus + (ev.deltaY > 0 ? 1 : -1));
+          const dy = (ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY);
+          if (wheelAcc !== 0 && Math.sign(dy) !== Math.sign(wheelAcc)) wheelAcc = 0;
+          wheelAcc += dy;
+          if (Math.abs(wheelAcc) < 120) return;
+          wheelAcc = 0;
+          this.craftFocus = Math.max(0, this.craftFocus + (dy > 0 ? 1 : -1));
           this.hoverFocus = -1;   // 滚动后鼠标下配方已变，预览态退场回落焦点
           this.refreshAll();
         }, { passive: false });
