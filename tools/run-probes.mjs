@@ -33,6 +33,7 @@ const PROBES = [
   { name: 'golem-layer', file: 'scripts/_golem-layer-probe.mjs', timeoutMs: 360_000 }, // 石巨人部件层序(master 锚)
   { name: 'projstatus', file: 'scripts/_projstatus-probe.mjs', timeoutMs: 360_000 },   // 弹药命中 debuff(火矢/毒镖表驱动+实体链)
   { name: 'bomb-dmg', file: 'scripts/_bomb-chain-probe.mjs', timeoutMs: 560_000 }, // 爆炸物全链(雷管/手雷 hurtBox+飘字)
+  { name: 'bomb-effects', file: 'scripts/_bomb-effects-probe.mjs', timeoutMs: 400_000 }, // 爆炸五维(小动物/玩家自伤/地形)
 ];
 
 const argv = process.argv.slice(2);

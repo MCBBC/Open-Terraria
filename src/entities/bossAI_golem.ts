@@ -472,7 +472,15 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
   const body = findBody(game);
   // 本体亡 → 全头自灭(:31521-31525 自由头同样查 golemBoss——曾 !x.free 豁免
   // 自由头 = 先破头再杀本体留下无敌自由头永不退场=战斗软锁,2026-08-19 终审修)
-  if (!body || body.ai3 === 1 || body.hp <= 0) { e.die(game); return; }
+  if (!body || body.ai3 === 1 || body.hp <= 0) {
+    // ★自由头 dontTakeDamage=true(:461)会挡 die→hurt 标准管线(hp=0+dead=false
+    //   挂空,下一帧 :458 hp=maxHp 复原=满血悬空+血条永挂——2026-08-21 用户报
+    //   "本体死头悬空血条还在")。原版 StrikeNPCNoInteraction(9999)(:31287-31290)
+    //   本就绕 dontTakeDamage 强制杀,对齐:先清旗标再走标准死管线
+    e.dontTakeDamage = false;
+    e.die(game);
+    return;
+  }
   // 挂载头锚本体（渲染层序用:实体 y 排序下头 y<本体 → 头先画=垫到身后,
   // 原版 NPC 按 whoAmI 槽序=部件恒在本体【前】——用户报"头跑到背后"根因,
   // 2026-08-19 修;与拳 e.master 同款链路）

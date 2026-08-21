@@ -2083,6 +2083,8 @@ export class UI {
   private eqPageBtns: HTMLButtonElement[] = [];
   /** 背包侧"堆叠至附近宝箱"钮（ChestStack：左键堆叠/右键循环模式；开箱时隐藏） */
   private quickStackBtn!: HTMLButtonElement;
+  /** ChestStack 钮悬停态（帧选 0/1 常态·悬停位） */
+  private qsHover = false;
   /** 多人玩家列表入口（联机态显示；面板本体在 PlayerListPanel.ts） */
   private playerListBtn: HTMLButtonElement | null = null;
   private equipPage = 0;
@@ -2097,8 +2099,11 @@ export class UI {
     this.equipPage = page;
     if (this.eqPageEl) this.eqPageEl.style.display = page === 0 ? 'flex' : 'none';
     if (this.miscPageEl) this.miscPageEl.style.display = page === 1 ? 'flex' : 'none';
+    // 页签高亮：按钮序 [装备,住房,杂项]——内部页 1(杂项) 高亮第 3 枚；
+    // 住房页签（第 2 枚）是覆盖层入口，永不高亮（原版 EquipPage 1 独立页语义）
+    const bi = page === 1 ? 2 : 0;
     this.eqPageBtns.forEach((b, k) => {
-      b.style.borderColor = k === page ? '#ffd75a' : '#6a5a8a';
+      b.style.borderColor = k === bi ? '#ffd75a' : '#6a5a8a';
     });
     this.refreshAll();
   }
@@ -2153,7 +2158,10 @@ export class UI {
 
   private buildInventoryPanel() {
     this.invPanel = el('div', 'sw-panel');
-    this.invPanel.style.cssText = 'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); display:none; max-height:88vh; overflow:auto;';
+    // 顶锚（2026-08-21 用户报"面板过高与左上工具栏重叠"）：原版背包从热键栏行
+    // 下方铺开（非垂直居中）——顶=热键栏底(20+52)+12px 间隙；max-height 同步
+    // 收口，内容超高走面板内滚动，永不遮热键栏
+    this.invPanel.style.cssText = 'position:fixed; left:50%; top:84px; transform:translateX(-50%); display:none; max-height:calc(100vh - 96px); overflow:auto;';
     // 原版背包无标题栏（DrawInventory 直接铺槽位）——标题行已摘（2026-08-13）
 
     // ---- 顶部：三套 Loadout 切换（DrawLoadoutButtons Main.cs:41386+：当前套高亮） ----
@@ -2185,24 +2193,27 @@ export class UI {
         row.appendChild(b);
         this.loadoutBtns.push(b);
       }
-      // 页签：装备 / 杂项（原版 EquipPage 0/2——时装并入装备页主列）
+      // 页签：装备 / 住房 / 杂项（原版 EquipPage 0/1/2——DrawPageIcons :42198 三枚
+      // 页签图标，页 1=住房 DrawNPCHousesInUI :40813。住房页签点击开 HousingPanel
+      // 覆盖层（Canvas 1:1 房屋列，2026-08-15 B 方案），装备/杂项切左列页）
       const spacer = el('div');
       spacer.style.flex = '1';
       row.appendChild(spacer);
       this.eqPageBtns = [];
-      for (const [label, page] of [[Lang.text('Mods.SandboxWorld.UI.Equipment'), 0], [Lang.text('Mods.SandboxWorld.Tabs.Misc'), 1]] as const) {
+      for (const [label, page] of [[Lang.text('Mods.SandboxWorld.UI.Equipment'), 0], [Lang.text('Mods.SandboxWorld.Housing.Button'), -1], [Lang.text('Mods.SandboxWorld.Tabs.Misc'), 1]] as const) {
         const b = el('button', 'sw-btn');
         b.textContent = label;
         b.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
+          if (page === -1) { this.onHousing?.(); return; }   // 住房页 = 原版 EquipPage 1
           this.setEquipPage(page);
         });
         row.appendChild(b);
-        this.eqPageBtns.push(b);
+        this.eqPageBtns.push(b);   // page -1（住房）不参与高亮——setEquipPage 按 0/1 着色
       }
-      // 图鉴入口（原版 BestiaryMenuButton Main.cs:41896-41910：背包侧按钮
-      // IngameFancyUI.OpenUIState(BestiaryUI)；打开逻辑由 main.ts 注入 onBestiary）
+      // 图鉴入口（原版 BestiaryMenuButton Main.cs:41896-41910 在右上 2×2 钮簇
+      // (498,278)；贴图 BestiaryMenuButton 未在素材集，暂留顶栏文字钮）
       const bBst = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Tabs.Bestiary'));
       bBst.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
       bBst.addEventListener('mousedown', (e) => {
@@ -2210,50 +2221,6 @@ export class UI {
         this.onBestiary?.();
       });
       row.appendChild(bBst);
-      // 表情入口（M4：原版 DrawEmoteIcon Main.cs:41854 背包角按钮——图鉴角钮旁,
-      // Images/UI/Emotes 双帧(常态/悬停),左键 IngameFancyUI.OpenUIState(UIEmotesMenu)）。
-      // 打开逻辑经 Game 注入 onEmoteMenu（暂停世界+uiBlocking 同 BestiaryPanel 惯例）
-      const bEmote = el('button', 'sw-btn');
-      bEmote.title = Lang.has('GameUI.Emote') ? Lang.text('GameUI.Emote') : 'GameUI.Emote';
-      bEmote.style.cssText = 'margin:0; width:34px; height:30px; padding:0; flex:none;'
-        + 'background:url(sprites/vanilla-ui/UI_Emotes.png) 0 0 / 200% 100%;'
-        + 'image-rendering:pixelated; border:1px solid #6a5a8a;';
-      bEmote.addEventListener('mouseenter', () => { bEmote.style.backgroundPosition = '100% 0'; });
-      bEmote.addEventListener('mouseleave', () => { bEmote.style.backgroundPosition = '0 0'; });
-      bEmote.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        this.onEmoteMenu?.();
-      });
-      row.appendChild(bEmote);
-      // 住房入口（原版 DrawInterface_33_Housing：背包侧房屋按钮开 NPC 头像列 +
-      //  "?"查询器；点击世界分配/查询走 game.housingMode，2026-08-15 B 方案）
-      const bHouse = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Housing.Button'));
-      bHouse.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
-      bHouse.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        this.onHousing?.();
-      });
-      row.appendChild(bHouse);
-      // 堆叠至附近宝箱（Main.cs:41281-41320：背包侧 ChestStack 钮——左键
-      // QuickStackAllChests + 音效 12 / 右键 CycleQuickStackMode + 音效 10 +
-      // SaveSettings；悬停文案 GameUI.QuickStackToNearby|SmartStackToNearby；
-      // 开箱/商店时不显示（chest != -1 / npcShop != 0 门）
-      this.quickStackBtn = el('button', 'sw-btn');
-      this.quickStackBtn.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
-      this.quickStackBtn.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        this.game.quickStackAllChests();
-        this.game.sfx.play('menuTick', 1);          // SoundID 12（:41292）
-        this.refreshAll();
-      });
-      this.quickStackBtn.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        this.game.cycleQuickStackMode();             // CycleQuickStackMode（:41297-41301）
-        this.game.sfx.play('menuOpen', 1);          // SoundID 10 + SaveSettings
-        this.refreshAll();
-      });
-      row.appendChild(this.quickStackBtn);
       // 多人玩家列表（原版 PC 无面板——/playing 命令与服务器控制台独占；本仓自有
       // QoL 件：名字/队伍色/RTT。仅联机态显示（refreshAllNow 逐刷），单机隐藏
       this.playerListBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.PlayerList.Title'));
@@ -2440,17 +2407,63 @@ export class UI {
       grid.appendChild(this.makeSlotEl(i, 'inv'));
     }
     right.appendChild(grid);
+    // ---- 右上钮簇（原版背包开时 2×2 30×30 裸图标：QuickStack(498,244)/Sort(534,244)/
+    //      Bestiary(498,278)/Emote(534,278)，Main.cs:41276-41355/:41815-41930——
+    //      位于背包格右下与合成区之间。本仓 Sort 未实装、Bestiary 贴图缺 →
+    //      簇内只落 QuickStack + Emote 两枚，右对齐两行）----
+    const clusterRow = el('div');
+    clusterRow.style.cssText = 'display:flex; justify-content:flex-end; gap:6px; margin:2px 0 4px;';
+    // 堆叠至附近宝箱（ChestStack 贴图 4 帧 = 悬停位+模式位：0 常态-quick/1 悬停-quick/
+    //  2 常态-smart/3 悬停-smart，Main.cs:41311 num80 += mode*2 + hover）——左键
+    // QuickStackAllChests + 音 12 / 右键 CycleQuickStackMode + 音 10；开箱/商店隐藏
+    this.quickStackBtn = el('button', 'sw-btn');
+    this.quickStackBtn.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none;'
+      + 'border:none; background:url(sprites/vanilla-ui/UI_ChestStack_0.png) 0 0 / 100% 100%;'
+      + 'image-rendering:pixelated; cursor:pointer;';
+    this.quickStackBtn.addEventListener('mouseenter', () => { this.qsHover = true; this.refreshAll(); });
+    this.quickStackBtn.addEventListener('mouseleave', () => { this.qsHover = false; this.refreshAll(); });
+    this.quickStackBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.game.quickStackAllChests();
+      this.game.sfx.play('menuTick', 1);          // SoundID 12（:41292）
+      this.refreshAll();
+    });
+    this.quickStackBtn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.game.cycleQuickStackMode();             // CycleQuickStackMode（:41297-41301）
+      this.game.sfx.play('menuOpen', 1);          // SoundID 10 + SaveSettings
+      this.refreshAll();
+    });
+    clusterRow.appendChild(this.quickStackBtn);
+    // 表情入口（原版簇位 (534,278)：EmoteMenuButton 双帧裸图标，左键开 UIEmotesMenu
+    // :41850；打开逻辑经 Game 注入 onEmoteMenu）
+    const bEmote = el('button', 'sw-btn');
+    bEmote.title = Lang.has('GameUI.Emote') ? Lang.text('GameUI.Emote') : 'GameUI.Emote';
+    bEmote.style.cssText = 'margin:0; width:30px; height:30px; padding:0; flex:none;'
+      + 'background:url(sprites/vanilla-ui/UI_Emotes.png) 0 0 / 200% 100%;'
+      + 'image-rendering:pixelated; border:none; cursor:pointer;';
+    bEmote.addEventListener('mouseenter', () => { bEmote.style.backgroundPosition = '100% 0'; });
+    bEmote.addEventListener('mouseleave', () => { bEmote.style.backgroundPosition = '0 0'; });
+    bEmote.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.onEmoteMenu?.();
+    });
+    clusterRow.appendChild(bEmote);
+    right.appendChild(clusterRow);
     body.appendChild(right);
     // 成就提示牌 → 物品格右侧（用户指定；alignSelf 防 body stretch 拉高卡片）
     this.achAdvisorEl.style.alignSelf = 'flex-start';
     body.appendChild(this.achAdvisorEl);
     this.invPanel.appendChild(body);
 
-    // ---- PvP/队伍快切钮（DrawPVPIcons Main.cs:42074-42195：背包右下角；
+    // ---- PvP/队伍快切钮（DrawPVPIcons Main.cs:42074-42195：原版背包右下角；
+    //      本仓按用户指定挂合成区右侧空位（absolute 不占流高，回收面板底部）；
     //      原版 ShouldPVPDraw=netMode==1 仅联机画，本仓常开=设置页 PvP/队伍同款
     //      语义（单机调试便利 + 联机 msg13 同步）） ----
     const pvpWrap = el('div');
-    pvpWrap.style.cssText = 'display:flex; flex-direction:column; align-items:flex-end; margin-top:2px;';
+    pvpWrap.style.cssText = 'position:absolute; right:0; top:4px;'
+      + 'display:flex; flex-direction:column; align-items:flex-end;';
     // PvP 剑（:42112-42116：38px 帧裁 Width-2/Height-1 → 36×37）
     this.pvpSwordBtn = el('button', 'sw-btn');
     this.pvpSwordBtn.style.cssText = 'margin:0; width:36px; height:37px; padding:0; flex:none;'
@@ -2490,7 +2503,7 @@ export class UI {
       this.pvpTeamBtns.push(cell);
     }
     pvpWrap.appendChild(teamGrid);
-    this.invPanel.appendChild(pvpWrap);
+    // 挂载移至合成区容器（craftWrap.appendChild(pvpWrap)，见 buildInventoryPanel 尾段）
     this.refreshPvpButtons();
 
     // 防御计数器（原版 DrawDefenseCounter Main.cs:41555-41623：Extra_58 盾 3×2 帧
@@ -2551,11 +2564,17 @@ export class UI {
     this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
     modernRow.appendChild(this.craftGridEl);
     right.appendChild(modernRow);
+    // 合成区容器（relative）：PvP/队伍钮绝对定位其右侧空位（2026-08-21 用户指定
+    // "上移到合成栏目右侧的空位，回收下方空间"）——不占流高度，面板底边随之回收
+    const craftWrap = el('div');
+    craftWrap.style.cssText = 'position:relative; min-height:130px;';   // min-height 防 PvP 列(≈125px)超出短列表底
+    right.appendChild(craftWrap);
     this.craftListEl = el('div');
     // 原版无滚动条——滚轮驱动焦点评动(CraftingUI 滚动列表),不走原生滚动;
     // 曾 overflow-y:auto + refreshAll 重建行后 scrollTop 归零 = 滚动位置每帧重置
     this.craftListEl.style.cssText = 'height:240px; overflow:hidden; width:520px;';
-    right.appendChild(this.craftListEl);
+    craftWrap.appendChild(this.craftListEl);
+    craftWrap.appendChild(pvpWrap);   // 顶部构建的 PvP/队伍列 → 合成区右侧（craftWrap 已在标题/搜索行之下，top:4 对齐列表顶）
     this.root.appendChild(this.invPanel);
   }
 
@@ -3058,14 +3077,14 @@ export class UI {
       console.warn('[UI] achAdvisor update failed, detached:', e);
     }
     // 堆叠至附近宝箱钮（Main.cs:41276 chest == -1 && npcShop == 0 门——开箱/商店
-    // 不显示；文案按当前模式 GameUI.QuickStackToNearby|SmartStackToNearby，首行作
-    // 标签、整段含"右键切换"提示进 title）
+    // 不显示；ChestStack 4 帧 = 悬停位+模式位（:41311 num80 += mode*2 + hover），
+    // 文案按当前模式进 title）
     if (this.quickStackBtn) {
-      const smart = this.game.quickStackMode() === 'smart';
-      const full = Lang.text(smart ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
+      const frame = (this.game.quickStackMode() === 'smart' ? 2 : 0) + (this.qsHover ? 1 : 0);
       this.quickStackBtn.style.display = this.openChest ? 'none' : '';
-      this.quickStackBtn.textContent = full.split('\n')[0];
-      this.quickStackBtn.title = full;
+      this.quickStackBtn.style.backgroundImage = `url(sprites/vanilla-ui/UI_ChestStack_${frame}.png)`;
+      this.quickStackBtn.title = Lang.text(this.game.quickStackMode() === 'smart'
+        ? 'GameUI.SmartStackToNearby' : 'GameUI.QuickStackToNearby');
     }
     // 多人玩家列表钮：仅联机态显示（单机无名单可列）
     if (this.playerListBtn) this.playerListBtn.style.display = this.game.net?.active ? '' : 'none';
@@ -3179,7 +3198,10 @@ export class UI {
     // 每键直调本方法,连续打字时 61 节点/键无上界累积(清空原本只在 refreshCrafting)
     this.craftListEl.replaceChildren();
     let avail = game.vanillaAvailableRecipes();
-    if (!avail.length) return;
+    if (!avail.length) {
+      this.craftListEl.style.height = '0px';   // 空列表收合（面板底部不留 240px 空腔）
+      return;
+    }
     // 搜索过滤（Modern 网格搜索栏：按成品名过滤）
     const q = this.craftSearchEl?.value.trim().toLowerCase() ?? '';
     if (q) {
@@ -3234,6 +3256,9 @@ export class UI {
       row.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
         this.craftFocus = idx; // 选中置焦（原版 focusRecipe=i）
+        // 点击行 = 合成（合成按钮已去除）。材料格存料先归还背包再统一扣料——
+        // 防"料在格里、背包不足"的假失败（换焦点路径已由 refreshCraftGrid 归还）
+        this.returnCraftGrid();
         game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1);
         this.refreshAll();
       });
@@ -3257,6 +3282,10 @@ export class UI {
     }
     // Modern 合成网格材料格（焦点配方）
     this.refreshCraftGrid(avail);
+    // 视口高度自适应（2026-08-21 用户报"背包面板底部空白大"）：240px 是鱼眼视口
+    // 上限，配方不足一屏时收缩到内容高——overflow:hidden 的 scrollHeight 仍返回
+    // 内容全高（行 transform 缩放不参与布局，行高恒定），面板底边随之贴内容
+    this.craftListEl.style.height = `${Math.min(240, this.craftListEl.scrollHeight)}px`;
   }
 
   /** 材料格覆盖计数：req（含组假 id）当前格内存量 */
@@ -3304,29 +3333,9 @@ export class UI {
       chip.addEventListener('contextmenu', (e) => e.preventDefault());
       this.craftGridEl.appendChild(chip);
     }
-    // 合成按钮（格子优先：格内材料齐备才可点）
-    const ready = focusR.items.every((req) => this.gridCovered(req.id) >= req.stack);
-    const btn = el('button', 'sw-btn', '⚒ ' + Lang.text('Mods.SandboxWorld.UI.Crafting'));
-    btn.style.cssText = `margin:0; padding:4px 10px; font-size:12px; ${ready ? '' : 'opacity:0.4;'}`;
-    if (ready) {
-      btn.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        // 扣格子材料（组假 id 依序扣组内成员）
-        for (const req of focusR.items) {
-          let need = req.stack;
-          const members = req.id >= 1000000 ? RECIPE_GROUP_ITEMS[String(reqIdShift(req.id))] ?? [] : [req.id];
-          for (const m of members) {
-            if (need <= 0) break;
-            const have = this.craftGrid.get(m) ?? 0;
-            const take = Math.min(have, need);
-            if (take > 0) { this.craftGrid.set(m, have - take); need -= take; }
-          }
-        }
-        this.game.vanillaCraftOutput(focusR);
-        this.refreshAll();
-      });
-    }
-    this.craftGridEl.appendChild(btn);
+    // 合成按钮已去除（2026-08-21 用户要求）：点击配方行即合成——材料格只作
+    // 存/取料暂存，行点击时格内存料先归还背包再走 vanillaCraft 统一扣料
+    // （hover 预选换焦点时 returnCraftGrid 已归还，此处兜"点击已聚焦行"路径）
   }
 
   /** 材料格放入：从背包按缺口拉取（组材料依序拉组内成员） */

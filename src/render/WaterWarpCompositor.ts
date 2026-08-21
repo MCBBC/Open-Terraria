@@ -140,8 +140,10 @@ export class WaterWarpCompositor {
   private warp2D(dst: CanvasRenderingContext2D, src: HTMLCanvasElement, st: WaterWarpFrameState): void {
     const b = lastWaterDrawBounds();
     if (!b) return;                      // 本 pass 无水体（离屏全透明）——零成本直通
-    const x0 = Math.max(0, b[0]), y0 = Math.max(0, b[1]);
-    const x1 = Math.min(src.width, b[2]), y1 = Math.min(src.height, b[3]);
+    // 外扩 24 设备 px：浸润带画进离屏层后足迹比水体格外伸 1 格（16 世界 px）；
+    // 分块覆盖域必须含带，否则 2D 回退丢带
+    const x0 = Math.max(0, b[0] - 24), y0 = Math.max(0, b[1] - 24);
+    const x1 = Math.min(src.width, b[2] + 24), y1 = Math.min(src.height, b[3] + 24);
     if (x1 <= x0 || y1 <= y0) return;
     const cell = FALLBACK_CELL;
     const cols = Math.ceil((x1 - x0) / cell), rows = Math.ceil((y1 - y0) / cell);

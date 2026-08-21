@@ -2603,7 +2603,17 @@ export class Renderer {
       keyMemo.set(e, k);
       return k;
     };
-    const sorted = [...entities].sort((a, b) => sortY(a) - sortY(b));
+    // ★投射物恒后于 NPC(2026-08-21 用户报"石巨人眼激光从脸背后出现"):
+    //   原版 DrawNPCs()(Main.cs:56474)先于 DrawProjectiles()(:56481)——普通弹
+    //   (含石巨人眼激光 259/火焰弹 258)恒画在全部 NPC 之上,与弹的 y 无关。
+    //   我方曾单键 y 排序:弹向上飞(y<NPC y)时先画被头贴图盖住=激光"从脸背后出现"。
+    //   等价实现:排序键加层级偏移——投射物(自带 draw 的非 NPC 实体)+1e6,
+    //   NPC/掉落/墓碑保持原 y。玩家仍在其后(drawPlayer 在实体循环外)。
+    const sorted = [...entities].sort((a, b) => {
+      const ka = sortY(a) + (a instanceof Enemy || a instanceof ItemDrop || a instanceof TownNPC || a instanceof Tombstone ? 0 : 1e6);
+      const kb = sortY(b) + (b instanceof Enemy || b instanceof ItemDrop || b instanceof TownNPC || b instanceof Tombstone ? 0 : 1e6);
+      return ka - kb;
+    });
     for (const e of sorted) {
       if (e instanceof Enemy && this.isBehindTilesEnemy(e)) this.drawEnemy(e, world, entities);
     }
@@ -3264,14 +3274,19 @@ export class Renderer {
     drawVanillaLiquids(warpCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
       world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, !!warpCtx);
     if (warpCtx) {
+      // ★浸润带画进离屏水层（2026-08-21 用户实报"半砖位没水直接透出背景"定谳修复）：
+      //   位移场按 out(p)=src(p+disp) 重采样——半砖顶 8px 水带/池底等【水贴地形】边界
+      //   采样落进地形区（水层内透明）= 水带被整段抹掉 = 空洞。浸润带 = 原版定义的
+      //   "水体足迹向实心格的延伸"（TileDrawing.cs:3859-4193），画进离屏层后位移采样
+      //   恒落在足迹内不再撕开。bg pass 带在水体之上（原层序）；fg pass 带以
+      //   destination-over 垫在水层之下——只填透明区，静水逐位不变。
+      if (this.atlas) {
+        drawLiquidBehindTilesOnly(warpCtx, this.atlas, world.store, world.groundLevel,
+          tx0, ty0, tx1, ty1, this.waterStyle, waterfallAt, false, isBackground ? 1 : 2);
+      }
       // 位移场扭曲合成（GL 优先；失败走 2D 分块回退）——身份变换、像素 1:1 进世界层
       this.waterWarp.endPass(this.ctx, isBackground, this._waveCss!,
         this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null);
-      // 背景浸润带：原版画进墙/方块层（不扭），跟随原"水体→浸润带"层序补画
-      if (isBackground && this.atlas) {
-        drawLiquidBehindTilesOnly(this.ctx, this.atlas, world.store, world.groundLevel,
-          tx0, ty0, tx1, ty1, this.waterStyle, waterfallAt, false);
-      }
     }
   }
 
@@ -4748,7 +4763,7 @@ export class Renderer {
         //   此处先烘焙；基础层直绘被门控跳过（合成精灵已含 base 项，双画=叠 base）
         const xnaColor = (e.colorRGBA && e.colorRGBA[3] > 0)
           ? this.xnaCombined(`npc${e.vanillaId}`, r, e.colorRGBA,
-              Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)
+              Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)  // ★用户校准态 ka=alpha/255（0.686）——原版推导值 1−alpha/255 待肉眼二选一
           : null;
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
         // EoC 锚点修正:NPC_4 每帧 110×166,眼球主体质心在帧内 y≈106(张嘴帧 113),
@@ -5890,7 +5905,7 @@ export class Renderer {
       //   空气背景透出保留；三步 lighter 兜底仅烘焙失败时用）
       const combined = this.xnaCombined('npc594shell',
         { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA,
-        Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255);
+        Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255);  // ★用户校准态（同主路径）
       if (combined) {
         ctx.globalAlpha = 1;
         ctx.drawImage(combined.c, combined.x, combined.y, combined.w, combined.h, -fw / 2, 0, fw, fh);
@@ -5969,18 +5984,30 @@ export class Renderer {
     ctx.translate(e.cx, e.y + e.h + (opts.yOff ?? 0));
     if (opts.rotate) ctx.rotate(opts.rotate);
     ctx.scale(scale * (mirrored ? -1 : 1), scale);
+    // ★有 color 的网格 NPC：base+color 两遍合一（xnaCombined，同通用路径——
+    //   旧三步 α 钳 1 丢空气背景透出，2026-08-21 同类扫描补齐）
+    const gridCombined = (e.colorRGBA && e.colorRGBA[3] > 0)
+      ? this.xnaCombined(`npc${e.vanillaId}`, { img, sx, sy, sw, sh }, e.colorRGBA,
+          Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)  // ★用户校准态（同主路径）
+      : null;
     ctx.globalAlpha = opacity;
-    ctx.drawImage(img, sx, sy, sw, sh, -originX, -originY, sw, sh);
-    // 原版 color 二次绘制（NPC.GetColor）：XNA 预乘混合两步还原（同通用路径）
+    if (!gridCombined) ctx.drawImage(img, sx, sy, sw, sh, -originX, -originY, sw, sh);
+    // 原版 color 二次绘制（NPC.GetColor）
     if (e.colorRGBA && e.colorRGBA[3] > 0) {
-      const tinted = this.tintedSprite(`npc${e.vanillaId}`, { img, sx, sy, sw, sh }, e.colorRGBA);
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.globalAlpha = e.colorRGBA[3] / 255;
-      ctx.drawImage(img, sx, sy, sw, sh, -originX, -originY, sw, sh);
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 1;
-      if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -originX, -originY, sw, sh);
-      ctx.globalCompositeOperation = 'source-over';
+      if (gridCombined) {
+        ctx.globalAlpha = 1;
+        ctx.drawImage(gridCombined.c, gridCombined.x, gridCombined.y, gridCombined.w, gridCombined.h,
+          -originX, -originY, sw, sh);
+      } else {
+        const tinted = this.tintedSprite(`npc${e.vanillaId}`, { img, sx, sy, sw, sh }, e.colorRGBA);
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = e.colorRGBA[3] / 255;
+        ctx.drawImage(img, sx, sy, sw, sh, -originX, -originY, sw, sh);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1;
+        if (tinted) ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -originX, -originY, sw, sh);
+        ctx.globalCompositeOperation = 'source-over';
+      }
     }
     // GlowMask 同布局网格叠画（原版以同一 source rect 二次 Draw，Glow 表与 NPC 表等大）
     if (opts.glowTex && this.atlas) {
@@ -10032,14 +10059,15 @@ export class Renderer {
    *  (1−occ)≈0.417 透出。此前三步 lighter 方案 α 被钳 1,纯天空背景丢失全部
    *  透出（绿史莱姆薄荷青=天空蓝透出,用户双截图+原版实机数值定谳：
    *  预测 24.8+0.417×248=148 vs 原版实测 B=146）。
-   *  ka 量化 8 档进键（渐显动画族防缓存风暴;静态 alpha 族恒定单键）。 */
+   *  ka 量化 64 档进键（渐显动画族防缓存风暴,误差 ≤0.8%;★曾 8 档=史莱姆
+   *  0.3137→0.375 基础项 +19.6% 误伤,2026-08-21 终审自查修正）。 */
   private xnaCombined(
     key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
     color: number[], ka: number,
   ): TintRect | null {
     const kc = color[3] / 255;
     const q = (v: number) => Math.round(v) & ~7;
-    const kaq = Math.round(Math.max(0, Math.min(1, ka)) * 8) / 8;
+    const kaq = Math.round(Math.max(0, Math.min(1, ka)) * 64) / 64;
     const k = `${key}|xna|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${q(color[0])},${q(color[1])},${q(color[2])}|${kaq}`;
     const w = Math.max(1, frame.sw), h = Math.max(1, frame.sh);
     return this.tintAtlas.bake(k, w, h, (cx) => {

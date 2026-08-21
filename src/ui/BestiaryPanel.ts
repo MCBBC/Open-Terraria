@@ -49,14 +49,16 @@ const bstTintCache = new Map<string, HTMLCanvasElement>();
 if (typeof document !== 'undefined') {
   document.addEventListener('sw:remaster-applied', () => bstTintCache.clear());
 }
-/** base 帧 + color 二次绘制（Main.cs:24527 + NPC.GetColor 逐像素乘；XNA AlphaBlend
- *  预乘语义 = destination-out 按 colorA 削弱 base + lighter 全量加染色帧——
- *  在离屏合成完再贴回，destination-out 不挖主画布的 MapBG 底图） */
+/** base 帧 + color 二次绘制合一（Main.cs:24527 + NPC.GetColor；XNA 预乘混合在
+ *  预乘空间恒等于单张精灵——premult = a·T·Cc + a·T·ka·(1−a·kc)、
+ *  α = 1−(1−a·ka)(1−a·kc)（Renderer.xnaCombined 同式，2026-08-21 同类扫描补齐）。
+ *  旧三步 lighter 的 α 钳 1 丢面板背景透出（史莱姆 175 果冻感）且漏 ka 基底衰减。
+ *  straight=premult/α 钳 255。在离屏合成完再贴回，α 保留 → 卡片底色透出 */
 function bstTintedFrame(
   img: ImageBitmap | HTMLImageElement, sheetId: number, npcId: number, fh: number, colorRGBA: number[],
   frameIdx = 0,
 ): HTMLCanvasElement | null {
-  const key = `${sheetId}|${npcId}|${fh}|${frameIdx}|${colorRGBA.join(',')}`;
+  const key = `${sheetId}|${npcId}|${fh}|${frameIdx}|${colorRGBA.join(',')}|x`;
   const hit = bstTintCache.get(key);
   if (hit) return hit;
   const w = (img as HTMLImageElement).width ?? (img as ImageBitmap).width;
@@ -66,29 +68,24 @@ function bstTintedFrame(
   const cx = c.getContext('2d');
   if (!cx) return null;
   cx.imageSmoothingEnabled = false;
-  // ① base 帧（白剪影原样）
   cx.drawImage(img, 0, frameIdx * fh, w, fh, 0, 0, w, fh);
-  // ② 染色帧：逐像素乘 colorRGB（alpha 保留）——同 Renderer.tintedSprite
-  const t = document.createElement('canvas');
-  t.width = w; t.height = fh;
-  const tx = t.getContext('2d')!;
-  tx.drawImage(img, 0, frameIdx * fh, w, fh, 0, 0, w, fh);
-  const d = tx.getImageData(0, 0, w, fh);
-  const [r, g, b] = colorRGBA;
-  for (let i = 0; i < d.data.length; i += 4) {
-    d.data[i] = (d.data[i] * r / 255) | 0;
-    d.data[i + 1] = (d.data[i + 1] * g / 255) | 0;
-    d.data[i + 2] = (d.data[i + 2] * b / 255) | 0;
+  const d = cx.getImageData(0, 0, w, fh);
+  // NPC.alpha 静态基线（SetDefaults；图鉴 dummy 与活体同值）——base 衰减系数
+  const npcAlpha = VANILLA_NPCS[String(npcId)]?.alpha ?? 0;
+  const ka = (255 - npcAlpha) / 255;
+  const kc = (colorRGBA[3] ?? 255) / 255;
+  const dd = d.data;
+  for (let i = 0; i < dd.length; i += 4) {
+    const a = dd[i + 3] / 255;
+    if (a === 0) continue;
+    const occ = 1 - (1 - a * ka) * (1 - a * kc);
+    const baseK = a * ka * (1 - a * kc);
+    dd[i] = Math.min(255, (a * dd[i] * (colorRGBA[0] / 255) + baseK * dd[i]) / occ);
+    dd[i + 1] = Math.min(255, (a * dd[i + 1] * (colorRGBA[1] / 255) + baseK * dd[i + 1]) / occ);
+    dd[i + 2] = Math.min(255, (a * dd[i + 2] * (colorRGBA[2] / 255) + baseK * dd[i + 2]) / occ);
+    dd[i + 3] = occ * 255;
   }
-  tx.putImageData(d, 0, 0);
-  // ③ 两步混合：destination-out 削 base × colorA + lighter 加染色帧
-  cx.globalCompositeOperation = 'destination-out';
-  cx.globalAlpha = (colorRGBA[3] ?? 255) / 255;
-  cx.drawImage(img, 0, frameIdx * fh, w, fh, 0, 0, w, fh);
-  cx.globalCompositeOperation = 'lighter';
-  cx.globalAlpha = 1;
-  cx.drawImage(t, 0, 0);
-  cx.globalCompositeOperation = 'source-over';
+  cx.putImageData(d, 0, 0);
   if (bstTintCache.size > 800) bstTintCache.clear();   // 有界（负 id 变体×色键）
   bstTintCache.set(key, c);
   return c;

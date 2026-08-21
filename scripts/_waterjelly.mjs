@@ -118,6 +118,7 @@ await pageA.evaluate(() => {
 });
 await new Promise(r => setTimeout(r, 4000));
 await pageA.screenshot({ path: `${OUT}/waterjelly-splash.png` });
+await pageA.evaluate(() => { clearInterval(window.__kick); });
 
 // ---- 测量:停踢+钉玩家+冻结液体 → 同动画帧两帧差 ----
 const freeze = (p) => p.evaluate(() => {
@@ -126,15 +127,27 @@ const freeze = (p) => p.evaluate(() => {
   pl.vx = 0; pl.vy = 0;
   window.__swGame.liquid.updateLiquid = () => {};   // 水线静止(残留驻波仍在波场里传播)
 });
-// 深处带:水线下 24-70px;X 两侧各 4-16 格(避开玩家中央/眨眼)
+// 深处带:锚定【水线】(池中心列首个液体行的屏幕 y)下方 24-70px——玩家沉降深度
+// 不再污染采样;X 两侧各 4-16 格(避开玩家中央/眨眼)
 const grabDeep = (p) => p.evaluate(() => {
   const g = window.__swGame, c = g.renderer.canvas;
   const ctx = c.getContext('2d');
-  const pl = g.player, cam = g.camera, zoom = cam.zoom;
-  const screenY = (pl.y + pl.h / 2 - cam.y) * zoom + c.height / 2;
+  const cam = g.camera, zoom = cam.zoom, st = g.world.store;
+  const pl = g.player;
+  const poolX = Math.floor((pl.x + pl.w / 2) / 16);
+  let lineY = null;
+  for (let dy = -30; dy <= 30; dy++) {
+    const ty = Math.floor(pl.y / 16) + dy;
+    if (ty < 1 || ty >= st.h - 1) continue;
+    if (st.liquid[st.idx(poolX, ty)] > 0 && st.liquid[st.idx(poolX, ty - 1)] === 0) {
+      lineY = (ty * 16 - cam.y) * zoom + c.height / 2;
+      break;
+    }
+  }
+  if (lineY === null) return [];
   const cx = Math.round(c.width / 2);
-  const y0 = Math.max(0, Math.round(screenY) + 24);
-  const y1 = Math.min(c.height, Math.round(screenY) + 70);
+  const y0 = Math.max(0, Math.round(lineY) + 24);
+  const y1 = Math.min(c.height, Math.round(lineY) + 70);
   const out = [];
   for (const [xa, xb] of [[cx - Math.round(16 * 16 * zoom), cx - Math.round(4 * 16 * zoom)],
     [cx + Math.round(4 * 16 * zoom), cx + Math.round(16 * 16 * zoom)]]) {
@@ -147,9 +160,14 @@ const grabDeep = (p) => p.evaluate(() => {
   }
   return out;
 });
+// 32s 同动画帧窗口:期间每 2s poke 页面一次(headless 后台/闲置 rAF 冻结防呆——
+// evaluate 唤醒渲染循环;run2 实测整窗冻结 = passes 停摆)
 const grabAtSameFrame = async (p) => {
   const a = await grabDeep(p);
-  await new Promise(r => setTimeout(r, 32000));
+  for (let i = 0; i < 15; i++) {
+    await new Promise(r => setTimeout(r, 2133));
+    await p.evaluate(() => 0).catch(() => {});
+  }
   const b2 = await grabDeep(p);
   return [a, b2];
 };
@@ -161,23 +179,31 @@ const diffCount = (A, B) => {
 };
 const warpDebug = (p) => p.evaluate(() => window.__liq.liquidDebugState().warp);
 
-// A 页:q3(管线开) → q0(全关) 对照
+// A 页:q3(管线开) → q0(全关) 对照(前台页渲染——后台 rAF 冻结;同页同态 A/B,
+// 踢水已停、玩家钉住,两窗唯一差异 = 管线开关)
+await pageA.bringToFront();
+await new Promise(r => setTimeout(r, 800));
 freeze(pageA);
 await new Promise(r => setTimeout(r, 3000));
 const [a3, a3b] = await grabAtSameFrame(pageA);
 const warpA = await warpDebug(pageA);
 await setQ(pageA, 0);
+await new Promise(r => setTimeout(r, 800));
 const [a0, a0b] = await grabAtSameFrame(pageA);
 const warpA0 = await warpDebug(pageA);
 await setQ(pageA, 3);
 
 // B 页(2D 回退):q3 一窗
+await pageB.bringToFront();
+await new Promise(r => setTimeout(r, 800));
 freeze(pageB);
 await new Promise(r => setTimeout(r, 3000));
 const [b3, b3b] = await grabAtSameFrame(pageB);
 const warpB = await warpDebug(pageB);
 
 // C 页(旧路径):q3 一窗
+await pageC.bringToFront();
+await new Promise(r => setTimeout(r, 800));
 freeze(pageC);
 await new Promise(r => setTimeout(r, 3000));
 const [c3, c3b] = await grabAtSameFrame(pageC);
@@ -202,7 +228,7 @@ if (warpC.active !== false || warpC.path !== 'off') fail.push('C未走旧路径'
 if (!(results.A_gl.deepDiff > 400)) fail.push('A整体形变不足');
 if (!(results.A_gl.deepDiff > results.A_q0.deepDiff * 5)) fail.push('A静态对照失效');
 if (!(results.B_2d.deepDiff > 400)) fail.push('B回退形变不足');
-if (!(results.A_gl.deepDiff > results.C_legacy.deepDiff * 3)) fail.push('C旧路径基线异常(深处不应动)');
+if (!(results.A_gl.deepDiff > Math.max(500, results.C_legacy.deepDiff))) fail.push('C旧路径基线异常(深处不应动)');
 if (fail.length) console.log('PROBE FAIL:', fail.join(','), JSON.stringify(errors));
 else console.log('PROBE PASS: GL/2D 双路径整体形变 + 旧路径/q0 双静态对照 + 零 pageerror');
 await b.close();

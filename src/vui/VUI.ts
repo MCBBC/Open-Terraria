@@ -238,14 +238,53 @@ export class VUI {
     if (isTouchDevice()) return;
     const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
     if (!tex) return;
-    VUI.batch.draw(tex, Math.round(lx), Math.round(ly), { color: rgb(255, 255, 255) });
+    const cc = VUI.cursorColorState();
+    // 双 pass 同 drawCursor（阴影垫底 + 本色）
+    VUI.batch.draw(tex, Math.round(lx) + 1, Math.round(ly) + 1, {
+      color: rgb(Math.round(cc.color.r * 0.2), Math.round(cc.color.g * 0.2),
+        Math.round(cc.color.b * 0.2), Math.round(cc.color.a * 0.5)),
+      scale: cc.scale * 1.1,
+    });
+    VUI.batch.draw(tex, Math.round(lx), Math.round(ly), { color: cc.color, scale: cc.scale });
   }
 
   /** 智能光标激活中（Game 每帧写入）：指针切换到 Cursors[12] 帧（Main.cs:47442-47513 num=11+smart） */
   static smartCursorOn = false;
 
+  /** 光标染色态（Main.CursorColor :51886-51906 1:1）：
+   *  mouseColor 默认 = RGB(255,50,95) 粉红（:66111——曾画纯白=丢染色链）；
+   *  cursorAlpha 在 0.6..1 呼吸（±0.015/t）；RGB×alpha、A=255×(alpha×0.3+0.7)、
+   *  scale=alpha×0.3+0.8 同步呼吸。hasRainbowCursor → HSL 环转（:47373-47375） */
+  static cursorAlpha = 1;
+  static cursorColorDirection = 1;
+  static rainbowCursor = false;   // Player.hasRainbowCursor（Game 每帧写入）
+
+  private static cursorColorState(): { color: ReturnType<typeof rgb>; scale: number } {
+    VUI.cursorAlpha += VUI.cursorColorDirection * 0.015;
+    if (VUI.cursorAlpha >= 1) { VUI.cursorAlpha = 1; VUI.cursorColorDirection = -1; }
+    if (VUI.cursorAlpha <= 0.6) { VUI.cursorAlpha = 0.6; VUI.cursorColorDirection = 1; }
+    if (VUI.rainbowCursor) {
+      // HSL 环转（Main.cs:47374 hslToRgb(hourly*0.25%1,1,0.5)；标准 HSL→RGB）
+      const h = (performance.now() / 1000 * 0.25) % 1;
+      const f = (n: number) => {
+        const k = (n + h * 12) % 12;
+        const v = 0.5 - Math.max(-1, Math.min(Math.min(k - 3, 9 - k), 1)) * 0.5;
+        return Math.round(v * 255);
+      };
+      return { color: rgb(f(0), f(8), f(4), 255), scale: 1 };
+    }
+    const a = VUI.cursorAlpha;
+    return {
+      color: rgb(Math.round(255 * a), Math.round(50 * a), Math.round(95 * a),
+        Math.round(255 * (a * 0.3 + 0.7))),
+      scale: a * 0.3 + 0.8,
+    };
+  }
+
   /** Canvas 原版光标：菜单与游戏内统一绘制（系统光标已被 #sw-cursor-style 全树隐藏）。
-   *  触屏设备不画指针（原版移动端同语义——触摸定位无需指针精灵） */
+   *  触屏设备不画指针（原版移动端同语义——触摸定位无需指针精灵）。
+   *  双 pass（Main.DrawCursor :47436-47439 鼠标分支）：①阴影垫底 = 同贴图
+   *  offset(+1,+1)、RGB×0.2/A×0.5、scale×1.1（深色描边观感来源）；②主 pass 本色。 */
   private static drawCursor() {
     if (!VUI.batch || !VUI.enabled) return;
     if (isTouchDevice()) return;
@@ -253,7 +292,15 @@ export class VUI {
     if (!tex) return;
     const x = Math.round(UIScale.mouseX);
     const y = Math.round(UIScale.mouseY);
-    VUI.batch.draw(tex, x, y, { color: rgb(255, 255, 255) });
+    const cc = VUI.cursorColorState();
+    // ① 阴影 pass（:47437）：色×0.2/A×0.5、offset(+1,+1)、scale×1.1
+    VUI.batch.draw(tex, x + 1, y + 1, {
+      color: rgb(Math.round(cc.color.r * 0.2), Math.round(cc.color.g * 0.2),
+        Math.round(cc.color.b * 0.2), Math.round(cc.color.a * 0.5)),
+      scale: cc.scale * 1.1,
+    });
+    // ② 主 pass（:47438）
+    VUI.batch.draw(tex, x, y, { color: cc.color, scale: cc.scale });
   }
 
   /** 当前鼠标下的 UI 元素（供游戏输入分流：非空则 UI 消费了指针） */

@@ -858,10 +858,12 @@ async function exportPack() {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'terraria-remaster-pack.zip';
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    const n = Object.values(entriesMeta).reduce((s, m) => s + Object.keys(m.frames).length, 0);
+    // ★下载与摘要解耦:headless 无下载授权时 a.click() 可能 pending——摘要/返回值
+    // 不依赖 click 完成(探针/自动化只取返回值)
+    setTimeout(() => { a.click(); setTimeout(() => URL.revokeObjectURL(url), 10_000); }, 0);
+    const n = Object.values(entriesMeta).reduce((sum, m) => sum + Object.keys(m.frames).length, 0);
     setStatus(`已导出:${sheets.length} 张 sheet / ${n} 帧 → ${a.download}`);
+    return { sheets: sheets.length, frames: n };
   } catch (err) {
     setStatus(`导出失败:${err.message}`);
     console.error('[export]', err);

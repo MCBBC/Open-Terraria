@@ -14393,10 +14393,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       }
     }
     const cx = tx * TILE + 8, cy = ty * TILE + 8;
+    // 原版语义 = Resize(hurtBox×2) 盒与实体 Hitbox 相交(中心距 < hurtBox+半宽)。
+    // ★曾用 R*TILE+16 距离圆:炸弹 80px(原版 11px,近 4 格外的怪也被炸)——半径混用
+    const hb = hurtBox ?? R * TILE;
     for (const e of this.entities.enemies) {
-      // 原版语义 = Resize(hurtBox×2) 盒与实体 Hitbox 相交(中心距 < hurtBox+半宽)。
-      // ★曾用 R*TILE+16 距离圆:炸弹 80px(原版 11px,近 4 格外的怪也被炸)——半径混用
-      const hb = hurtBox ?? R * TILE;
       const en = e as Enemy;
       // friendly NPC 门（爆炸伤害原版走 Damage_PVE_Inner :11892 flag 门——玩家
       // 炸弹对睡渔夫 376 等同样无效；下方城镇 NPC 段同门）
@@ -14409,25 +14409,37 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         this.addDamageNumber((en.cx ?? cx), (en.y ?? cy), hurt, false, '#FF8040');
       }
     }
+    // 小动物并入爆炸(原版 Damage_PVE 遍历 Main.npc 全表 :11869——critters 桶一体;
+    // 一击死走 hurt 单参 shim。曾只扫 enemies 桶=炸不到兔/鸟等,2026-08-21 补)
+    for (const cent of this.entities.critters) {
+      const c = cent as Enemy;
+      if (c.dead || !c.hurt) continue;
+      if (Math.abs((c.cx ?? cx) - cx) < hb + (cent.w >> 1)
+        && Math.abs((c.cy ?? cy) - cy) < hb + (cent.h >> 1)) {
+        playEnemyHitSound(this, c);
+        // 全参 hurt(小动物桶已全 Enemy 化——一击死由 lifeMax=5 自然达成)
+        c.hurt(Math.max(1, Math.round(damage * (1 + (Math.random() * 30 - 15) / 100))),
+          cx - (c.cx ?? cx), cy - (c.cy ?? cy), this, pen);
+        this.addDamageNumber((c.cx ?? cx), (cent.y ?? cy), 5, false, '#FF8040');
+      }
+    }
     // 城镇 NPC 爆炸窄门（Damage_PVE_Inner :11970-11972 同门：臭鸡蛋 318 非爆炸物
     // 不达此路径，实际生效的是巫毒——炸弹+向导巫毒娃娃炸死向导=经典肉山预备链）：
     // 向导 22 需装备向导巫毒娃娃 267（killGuide）、裁缝师 54 需裁缝娃 1307
     // （killClothier）；其余城镇 NPC 对玩家爆炸免疫（victim-settles 同盒判定）
     {
-      const hb2 = hurtBox ?? R * TILE;
       const eq = this.player.equipStats;
       for (const nent of this.entities.npcs) {
         const tn = nent as TownNPC;
         if (!(tn instanceof TownNPC) || tn.dead || tn.bound) continue;
         const doll = tn.vanillaId === 22 ? eq.killGuide : tn.vanillaId === 54 ? eq.killClothier : false;
         if (!doll && projId !== 318) continue;   // 与 hitTownNpcs 同式（318 非爆炸物实际不达）
-        if (Math.abs(tn.cx - cx) < hb2 + tn.w / 2 && Math.abs(tn.cy - cy) < hb2 + tn.h / 2) {
+        if (Math.abs(tn.cx - cx) < hb + tn.w / 2 && Math.abs(tn.cy - cy) < hb + tn.h / 2) {
           tn.hurt(damage, Math.sign(tn.cx - cx) * 2 || 1, 0, this);
         }
       }
     }
     const p = this.player;
-    const hb = hurtBox ?? R * TILE;
     // 爆炸炸死玩家的死亡归因 = ByProjectile（BombsHurtPlayers :13974）：投射物名
     // 取 Lang.GetProjectileName(projType)——掷出的炸弹/雷管/手雷按型号、电路炸药=108
     // Explosives、地雷=164 Landmine、链爆=108。此前漏设 → 死因残留上一次受击来源
@@ -20824,17 +20836,6 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     this.achNotifyCraft(outKey);
     this.sfx.play('pickup'); // SoundID 7 物品抓取（原版合成成品上鼠标的 grab 声）
     this.cb.onInventoryChanged();
-  }
-
-  /** 合成产出入包（vanillaCraft 的产出半段，供现代合成网格的格子合成复用） */
-  vanillaCraftOutput(r: VanillaRecipeLike): void {
-    const outKey = recipeItemKey(r.create);
-    if (!outKey) return;
-    const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack);
-    if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left);
-    this.achNotifyCraft(outKey);
-    this.sfx.play('pickup'); // SoundID 7（同 vanillaCraft）
-    this.cb.onInventoryChanged?.();
   }
 
   /** 成就：合成通知（AchievementsHelper.NotifyItemCraft——内部 item key 版） */

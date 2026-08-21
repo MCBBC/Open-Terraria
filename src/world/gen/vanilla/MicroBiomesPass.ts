@@ -587,7 +587,7 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   //   SolidTile2(x±,j+1)+Boulders 排除（186/187）
   const num8 = (num - 3) * (flag ? -1 : 1);
   if (rng.vanilla.next() % 10 !== 0) {
-    place3x2MB(st, rng, ox + num8, num4, LARGE_PILES);
+    place3x2MB(st, rng, ox + num8, num4, LARGE_PILES);               // style 0
   }
   // 篝火 215(cs:94-113,1/10 跳过)——`Next() % 10 != 0`(cs:94)
   // ★KKKKK：PlaceTile(215)→Place3x2+SquareTileFrame，成功后六格 frameY+=36
@@ -595,7 +595,7 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
   //   (2065,352)=36/(2065,353)=54）；锚判定=锚格(ox,num4) active&&type==215。
   //   曾左锚 [ox..ox+2] 且漏 +36（#101 T215 残 12 格根因）。
   if (rng.vanilla.next() % 10 !== 0) {
-    place3x2MB(st, rng, ox, num4, CAMPFIRE, true);
+    place3x2MB(st, rng, ox, num4, CAMPFIRE, 0, true);
     const ai = st.idx(ox, num4);
     if (st.flags[ai] && st.type[ai] === CAMPFIRE) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -617,10 +617,13 @@ function placeCampsite(st: TileStore, rng: RNG, gs: GenState, ox: number, oy: nu
  *  ★KKKKK 批重写：中心锚 (x-1..x+1)×(y-1..y)（Place3x2 字面）；门=3×2 区全
  *  失活（campfire 加液体排除,cs:52127-30）+ 逐列 i∈{x-1,x,x+1} 地面
  *  SolidTile2(i,y+1)（cs:52149）+ 186/187 的 InvalidTileForPilesOrSpeleothems
- *  排除（cs:52141）；帧 fx=col*18（style 0 → 54*style=0）、fy=0(顶)/18(底)。
+ *  排除（cs:52141）；帧 fx=col*18+54*style、fy=0(顶)/18(底)。
  *  SolidTile2（cs:70178）＝active∧tileSolid∧slope0∧!half——平台族 vanilla
- *  tileSolid 真，走 vanGenSolidType（HHHH 口径 SOLID∪{19,239,380,427,435-439}）。 */
-function place3x2MB(st: TileStore, rng: RNG, x: number, y: number, typeJs: number, campfire = false): void {
+ *  tileSolid 真，走 vanGenSolidType（HHHH 口径 SOLID∪{19,239,380,427,435-439}）。
+ *  ★CCCCC：双 SquareTileFrame——case 支恒调（cs:60026，门败也走）+ 尾
+ *  （cs:60284，tile.active() 时）——SQ 织入 12345 实证 186/215 每逢 PT 后
+ *  SQ×2（7+7 例全双帧）；曾单帧（且门败零帧）。 */
+function place3x2MB(st: TileStore, rng: RNG, x: number, y: number, typeJs: number, style = 0, campfire = false): void {
   if (x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return;        // cs:52099
   let ok = true;
   for (let i = x - 1; i <= x + 1; i++) {
@@ -637,14 +640,18 @@ function place3x2MB(st: TileStore, rng: RNG, x: number, y: number, typeJs: numbe
         && st.slope[g] === 0 && st.half[g] === 0)) ok = false;       // SolidTile2(i,y+1)（cs:52149）
     } else ok = false;                                               // OoB 地面列 → 拒
   }
-  if (!ok) return;
-  for (let i = x - 1; i <= x + 1; i++) {
-    for (let j = y - 1; j <= y; j++) {
-      if (!st.inBounds(i, j)) continue;
-      st.setTileSilent(i, j, typeJs, (i - x + 1) * 18, (j - y + 1) * 18);   // cs:52202-225
+  if (ok) {
+    for (let i = x - 1; i <= x + 1; i++) {
+      for (let j = y - 1; j <= y; j++) {
+        if (!st.inBounds(i, j)) continue;
+        st.setTileSilent(i, j, typeJs, style * 54 + (i - x + 1) * 18, (j - y + 1) * 18);   // cs:52202-225
+      }
     }
   }
-  genSquareTileFrame(st, rng, x, y);                                 // PlaceTile 尾（cs:60026）
+  genSquareTileFrame(st, rng, x, y);                                 // case 支恒调（cs:60026）
+  if (st.inBounds(x, y) && st.flags[st.idx(x, y)]) {
+    genSquareTileFrame(st, rng, x, y);                               // 尾（cs:60284——tile.active() 时）
+  }
 }
 
 /** MiningExplosivesBiome.Place(MiningExplosivesBiome.cs:10-76) */
@@ -815,8 +822,11 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
     if (st.inBounds(barX, barGround)) {
       const ai = st.idx(barX, barGround);
       const wasActive = st.flags[ai] !== 0;
-      st.type[ai] = 0; st.flags[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
-      st.slope[ai] = 0; st.half[ai] = 0;
+      // ★CCCCC：前奏 Clear 仅 !active 时（cs:59500）——活性格保留原格（曾无条件清）
+      if (!wasActive) {
+        st.type[ai] = 0; st.flags[ai] = 0; st.frameX[ai] = 0; st.frameY[ai] = 0;
+        st.slope[ai] = 0; st.half[ai] = 0;
+      }
       const gOK = (() => {
         if (!st.inBounds(barX, barGround + 1)) return false;
         const gi = st.idx(barX, barGround + 1);
@@ -830,11 +840,16 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
       if (gOK && !wasActive) {
         st.type[ai] = EXPLOSIVES; st.flags[ai] = 1;
         st.frameX[ai] = 0; st.frameY[ai] = 0;
-        // ★BBBBBB：PlaceTile(141) 尾 SquareTileFrame(i,j)（cs:60284）——九宫中心
-        //   resetFrame=true：184 苔藓邻格每访恒掷（22222 全序列对拍：van [3738,970]
-        //   矿爆尾 PT141 后 a3×6=九宫 184 访问掷，JS 漏致掷流前移 9 样本）
-        genSquareTileFrame(st, rng, barX, barGround);
       }
+      // ★CCCCC：case141 支=Place1x1+SquareTileFrame(i,j)（cs:60225-60227——Place1x1
+      //   后**恒调**，门败也走）。SQ 织入定罪：12345 首差 @roll105548 = PT141 后双
+      //   SQ（in-case+尾）而 JS 单帧 → 九宫 184 苔藓少掷一次，掷流自此分叉
+      //   （van SQ(1075,654)×2 + TF184(1075,653)×2 铁证；BBBBBB"41 vs 32 候选"
+      //   定罪系异常 span 误读，真链两侧候选 11=11 全同）。
+      genSquareTileFrame(st, rng, barX, barGround);
+      // ★BBBBBB 修正+CCCCC 补：尾 SquareTileFrame(i,j)（cs:60284）——tile.active()
+      //   时（含门败但锚格仍活性）——184 苔藓邻格每访恒掷
+      if (st.flags[ai]) genSquareTileFrame(st, rng, barX, barGround);
     }
   }
   // 起爆器 411:PlaceTile(..., forced: true)(cs:72)→case 411→Place2x2（cs:59766-59769）
@@ -845,6 +860,12 @@ function placeMiningExplosives(st: TileStore, rng: RNG, gs: GenState, ox: number
   //   位扫描 + 轨道行 735 直穿实证；AAAAA"findDown 首实心低一行"诊断更正——
   //   findDown 两侧同果 detGround=736，差在落块锚 detTop-1 起）。
   place2x2Direct(st, detX, detTop, DETONATOR);
+  // ★CCCCC：PlaceTile(411) 尾 SquareTileFrame(detX, detTop)（cs:60284）——锚格
+  //   active 时（Place2x2 写入含锚格；门败锚格被整平段清过 → 不掷）。SQ 织入：
+  //   van 每次 PT411 后恒一 SQ（19 次 SQ×1 + 9 次门败 SQ×0 实证）
+  if (st.inBounds(detX, detTop) && st.flags[st.idx(detX, detTop)]) {
+    genSquareTileFrame(st, rng, detX, detTop);
+  }
   // WorldUtils.WireLine(WorldUtils.cs:111-131):L 形红线
   {
     const sx = Math.min(barX, detX), ex = Math.max(barX, detX);
@@ -1571,6 +1592,12 @@ export class DeadMansChestBiome {
     //   差；138/411 的引擎派发已在本批 FinalCleanupPass 侧同补）。Tiles_138 36×38
     //   单变体四格分片帧（2026-08-13 只写锚定格修复保持）。
     place2x2Direct(st, cx, cy, BOULDER);
+    // ★CCCCC：PlaceTile(138) 尾 SquareTileFrame(cx, cy)（cs:60284）——锚格 active
+    //   时（Place2x2 写入含锚格）。SQ 织入：van PT138 后恒一 SQ（22 例 SQ×1），
+    //   九宫 184 苔藓随访随掷（如 (3650,387) 后 TF184(3661,379)×2 级联实证）
+    if (st.inBounds(cx, cy) && st.flags[st.idx(cx, cy)]) {
+      genSquareTileFrame(st, this.rng, cx, cy);
+    }
     this.placeWireLine({ x: b.x, y: b.y, dirX: 0, dirY: 1, steps: b.yPush });
   }
 
@@ -1958,15 +1985,13 @@ function placeEnchantedSwordShrine(
   //    否则 186 style15)。PlaceTile 锚 = (point2.X, point2.Y-15) 3×2 底行左锚
   const realSword = rng.next() <= SWORD_CHANCE_REAL;
   {
+    // ★CCCCC：剑冢剑改走 PlaceTile case 186/187 全链（Place3x2 门+双 SquareTileFrame）
+    //   ——曾裸写 3×2（门与帧全跳过）：Place3x2 区失活/地面门败时原版不落剑，
+    //   JS 恒落；且 case 支恒调+尾两帧的九宫 184 掷全漏（EnchantedSwordBiome.cs:99-106）
     const swordTile = realSword ? DECOS_GROUP2 : LARGE_PILES;
     const swordStyle = realSword ? 17 : 15;
     const sx = point2X, sy = point2Y - 15;
-    for (let dx = 0; dx < 3; dx++) {
-      for (let dy = 0; dy < 2; dy++) {
-        if (!st.inBounds(sx + dx, sy - 1 + dy)) continue;
-        st.setTileSilent(sx + dx, sy - 1 + dy, swordTile, swordStyle * 54 + dx * 18, dy * 18);
-      }
-    }
+    place3x2MB(st, rng, sx, sy, swordTile, swordStyle);
   }
   // ⑯ 土丘表面草(cs:96):Offset(0,-1)→OnlyTiles(2)→Offset(0,-1)→ActionGrass
   //    (ActionGrass.cs:14-22):目标格与上格皆空 → PlaceTile(SelectRandom{3,73})
@@ -2085,7 +2110,10 @@ export function placeLavaTrap(st: TileStore, gs: GenState, x: number, y: number,
   // PlaceTile(x, num10, 135, style 7)(cs:8720)——style 在 frameY(126)。
   // FFFFF 补 PlaceTile 尾 SquareTileFrame(i,j)(cs:60282):九宫邻格 184 苔藓
   // 'a 3' 掷(#101 尾段掷流 4 掷差定罪;174 竖井石门板邻域实际掷点)
+  // ★CCCCC：双帧——case135 支恒调（cs:60225-27）+ 尾（cs:60284）。SQ 织入：
+  //   van PT135 后 SQ×2 ×31 + SQ×1 ×4（门败/非活性），曾单帧
   st.setTileSilent(x, num10, PLATE, 0, 126);
+  genSquareTileFrame(st, rng0!, x, num10);
   genSquareTileFrame(st, rng0!, x, num10);
   // 线 + 致动石栅(cs:8721-8730):num8..num9-1 致动,num8..num10 红线
   for (let m = num8; m <= num10; m++) {

@@ -35,7 +35,13 @@ async function runOne(itemVid) {
       if (!proj && g.entities.projectiles.length > p0) proj = g.entities.projectiles[g.entities.projectiles.length - 1];
     }
     inp.mouseDown = false;
-    if (!proj) return { err: 'no proj', hp0 };
+    if (!proj) {
+      // 兜底:任意 30 弹(可能已爆出列表)→ 用 dead 哨兵重测伤害
+      const any30 = g.entities.projectiles.find((p) => p.projId === 30);
+      if (any30) { proj = any30; }
+      else return { err: 'no proj', hp0, useTime: g.player.useTime, mouseDown: inp.mouseDown,
+        heldKey: (await import('/src/data/items.ts')).ITEM_DEFS[g.player.inv.slots[g.player.inv.selected]?.id]?.key };
+    }
     for (let t = 0; t < 360; t++) { g.fixedUpdate(1 / 60); if (proj.dead) break; }
     return { hp0, hp1: enemy.hp, hurt: hp0 - enemy.hp, dead: enemy.dead, exploded: proj.dead };
   }, itemVid);
