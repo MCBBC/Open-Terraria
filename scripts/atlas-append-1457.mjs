@@ -1,0 +1,126 @@
+// 1457 新素材追加式集成:既有 vanilla.json 条目零改动(教训:全量重排会破坏
+// SW/索引缓存链,2026-08-21 贴图全错事故)。新素材走:
+//   ①49 新物品(6147-6195)→ 新页 Item_Atlas_2.png(shelf-pack,与 vanilla-atlas.mjs
+//     同机制:2048²/2px gutter/按高度降序) + items/itemNames 增键
+//   ②tile 753 → Tiles_753.png 单图 + tiles/tileNames 增键(元数据取 TEdit tiles.json)
+//   ③单图直引族拷贝:Projectile_1111-1135 / Buff_389-400 / Acc 新条 / Extra_304-315 /
+//     Glow_379-383(运行时懒加载按文件名命中,无需 json 键)
+// 用法:node scripts/atlas-append-1457.mjs   (在 game/ 下;幂等:已存在的键跳过)
+import { readFileSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PNG } from 'pngjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(here, '..');
+const ASSETS = join(ROOT, '..', 'terraria-assets', 'Images');
+const XNB_NEW = '/tmp/recon/xnb1457_new';
+const TEDIT = join(ROOT, '..', 'Terraria-Map-Editor', 'src', 'TEdit.Terraria', 'Data');
+const OUT_DIR = join(ROOT, 'public', 'sprites', 'vanilla');
+const OUT_JSON = join(ROOT, 'public', 'sprites', 'vanilla.json');
+
+const srcOf = (name) => existsSync(join(ASSETS, name)) ? join(ASSETS, name)
+  : existsSync(join(ASSETS, 'Accessories', name)) ? join(ASSETS, 'Accessories', name)
+  : existsSync(join(XNB_NEW, name)) ? join(XNB_NEW, name) : null;
+
+function pngSize(file) {
+  const b = readFileSync(file);
+  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+}
+
+const before = readFileSync(OUT_JSON, 'utf8');
+const v = JSON.parse(before);
+const items = JSON.parse(readFileSync(join(TEDIT, 'items.json'), 'utf8'));
+const tilesT = JSON.parse(readFileSync(join(TEDIT, 'tiles.json'), 'utf8'));
+const itemById = new Map(items.map((i) => [i.id, i]));
+const tileById = new Map(tilesT.map((t) => [t.id, t]));
+let copied = 0, missing = [];
+
+// ---- ① 49 新物品 → Item_Atlas_2 ----
+const ATLAS_W = 2048, ATLAS_H = 2048, GUTTER = 2;
+const NEW_ITEMS = [];
+for (let id = 6147; id <= 6195; id++) {
+  if (v.items[String(id)]) continue; // 幂等
+  const meta = itemById.get(id);
+  const src = srcOf(`Item_${id}.png`);
+  if (!meta || !src) { missing.push(`Item_${id}(${!meta ? 'meta' : 'png'})`); continue; }
+  NEW_ITEMS.push({ id, meta, src, ...pngSize(src) });
+}
+if (NEW_ITEMS.length) {
+  NEW_ITEMS.sort((a, b) => b.h - a.h);
+  const page = new PNG({ width: ATLAS_W, height: ATLAS_H });
+  let x = GUTTER, y = GUTTER, shelfH = 0;
+  for (const { id, meta, src, w: iw, h: ih } of NEW_ITEMS) {
+    if (x + iw + GUTTER > ATLAS_W) { x = GUTTER; y += shelfH + GUTTER; shelfH = 0; }
+    if (y + ih + GUTTER > ATLAS_H) { writeFileSync(join(OUT_DIR, 'Item_Atlas_3.png'), PNG.sync.write(page)); throw new Error('溢出到第 4 页——扩充脚本'); }
+    const png = PNG.sync.read(readFileSync(src));
+    PNG.bitblt(png, page, 0, 0, iw, ih, x, y);
+    v.items[String(id)] = { name: meta.name, key: meta.key, createTile: meta.createTile ?? null, icon: 'vanilla/Item_Atlas_2.png', ix: x, iy: y, iw, ih };
+    x += iw + GUTTER;
+    if (ih > shelfH) shelfH = ih;
+  }
+  writeFileSync(join(OUT_DIR, 'Item_Atlas_2.png'), PNG.sync.write(page));
+  console.log(`Item_Atlas_2.png: ${NEW_ITEMS.length} 新物品`);
+}
+
+// ---- ② tile 753 ----
+if (!v.tiles['753']) {
+  const meta = tileById.get(753);
+  const src = srcOf('Tiles_753.png');
+  if (meta && src) {
+    copyFileSync(src, join(OUT_DIR, 'Tiles_753.png')); copied++;
+    const base = {
+      name: meta.name, key: meta.key, sheet: 'vanilla/Tiles_753.png',
+      solid: !!meta.solid, blend: !!meta.blend, framed: !!meta.framed, light: !!meta.light,
+      color: meta.color ?? '#9A8FA0', placement: meta.placement ?? null,
+      grid: meta.textureGrid ?? [16, 16],
+      stride: meta.textureGrid
+        ? [meta.textureGrid[0] + (Array.isArray(meta.frameGap) ? meta.frameGap[0] : (meta.frameGap ?? 2)),
+           meta.textureGrid[1] + (Array.isArray(meta.frameGap) ? meta.frameGap[1] : (meta.frameGap ?? 2))]
+        : [18, 18],
+      frameSize: meta.frameSize ?? [[1, 1]], isStone: false, isGrass: false, mergeWith: null,
+    };
+    // cols/rows 与原管线一致:从 png 实际尺寸按 stride 推
+    const { w, h } = pngSize(src);
+    base.cols = Math.floor(w / base.stride[0]);
+    base.rows = Math.floor(h / base.stride[1]);
+    v.tiles['753'] = base;
+    v.tileNames['753'] = meta.name;
+    console.log('tile 753 增键:', meta.name, `${base.cols}x${base.rows}`);
+  } else missing.push(`Tiles_753(${!meta ? 'meta' : 'png'})`);
+}
+
+// ---- ③ 单图直引族 ----
+const SINGLES = [];
+for (let id = 1111; id <= 1135; id++) SINGLES.push(`Projectile_${id}.png`);
+for (let id = 389; id <= 400; id++) SINGLES.push(`Buff_${id}.png`);
+for (const id of [40, 41]) SINGLES.push(`Acc_Back_${id}.png`);
+SINGLES.push('Acc_Front_17.png', 'Acc_Neck_13.png', 'Acc_Neck_14.png',
+  'Acc_Shield_10.png', 'Acc_Shield_11.png', 'Acc_Shield_12.png', 'Acc_Waist_17.png');
+for (let id = 25; id <= 32; id++) SINGLES.push(`Acc_HandsOn_${id}.png`);
+for (let id = 16; id <= 18; id++) SINGLES.push(`Acc_HandsOff_${id}.png`);
+for (let id = 304; id <= 315; id++) SINGLES.push(`Extra_${id}.png`);
+for (let id = 379; id <= 383; id++) SINGLES.push(`Glow_${id}.png`);
+for (const name of SINGLES) {
+  const dst = join(OUT_DIR, name);
+  if (existsSync(dst)) continue;
+  const src = srcOf(name);
+  if (!src) { missing.push(name); continue; }
+  copyFileSync(src, dst); copied++;
+}
+console.log(`单图拷贝: ${copied} 张`);
+
+// ---- 写回 + 自验:既有键零改动 ----
+const after = JSON.stringify(v);
+const vAfter = JSON.parse(after);
+let drift = 0;
+for (const seg of ['tiles', 'items', 'walls', 'npcs', 'armorIndex', 'tileNames', 'itemNames']) {
+  for (const k of Object.keys(v[seg])) {
+    if (JSON.stringify(v[seg][k]) !== JSON.stringify(vAfter[seg][k])) drift++;
+  }
+}
+if (drift) throw new Error(`既有键被改动 ${drift} 处——中止写回`);
+writeFileSync(OUT_JSON, after);
+console.log(`vanilla.json: items ${Object.keys(v.items).length} / itemNames ${Object.keys(v.itemNames).length} / tiles ${Object.keys(v.tiles).length}`);
+if (missing.length) { console.log('缺失(未阻塞):', missing.join(', ')); }
+console.log('OK');

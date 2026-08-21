@@ -17,6 +17,7 @@ import { hitCritters, hitTownNpcs, playEnemyHitSound, playerCanHitEnemy, tryRefl
 import { applyProjStatus, applyMeleeImbue, applyFrostBurn, applyMagmaStoneProj } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 import { drawYoyoStringLine, stringColorOpts } from '../render/StringLine';
 import { BuffType } from '../stats/Buffs';
 
@@ -2824,13 +2825,12 @@ export class PowderProj extends Entity {
 
 // ================= Torch God 火把弹幕（proj 949，AI_184 cs:40100） =================
 
-/** 直线飞行火把：射程(rangePx)耗尽前穿墙，之后撞块即毁；命中玩家 20 伤。
+/** 直线飞行火把：射程(rangePx)耗尽前穿墙，之后撞块即毁；命中玩家 40×难度曲线伤。
  *  ai0=尘色/ai1=射程——尘迹省略（粒子钩子未接），伤害/碰撞 1:1 */
 export class TorchGodProj extends Entity {
   private sndT = 0;   // localAI[0] 首帧音哨兵
   w = 4; h = 4;
   vx: number; vy: number;
-  damage = 20;
   projId = 949;
   dead = false;
   private rangeLeft: number;
@@ -2872,7 +2872,11 @@ export class TorchGodProj extends Entity {
         kind: 'projectile',
         name: game.projectileName?.(this.projId) ?? '弹幕',
       };
-      p.damage(this.damage, Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
+      // 1457 :18000：`damage = (int)(40f × HostileProjectileDamageMultiplier.Sample(
+      // Main.Difficulty))`——经典 40/专家 60(×1.5)/大师 80(×2)（D-❌④ 2026-08-21 接线,
+      // 曾恒 20）。原版在生成掷处算定,难度事件期内不变 → 命中时算等价
+      p.damage(hostileProjectileDamage(40, mainDifficulty(game.world)),
+        Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
       this.dead = true;
       return;
     }

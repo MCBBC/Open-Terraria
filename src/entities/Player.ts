@@ -7,6 +7,7 @@ import {
   PLAYER_IFRAME_TICKS, TILE, RUN_ACCELERATION, RUN_SLOWDOWN,
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { wetCollision } from './npcLiquid';
 import { playerCanHitEnemy } from './projTargets';
 import { randomizeFriendlyInsanityShadow } from './InsanityShadowFriendly';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
@@ -1063,6 +1064,11 @@ export class Player extends Entity {
     //  huntressAmmoCost90=1/10（:12754）；女猎手旧衬衫 3878 → ammoCost80=1/5（:12797）。
     //  ★2758/3804 的 accfx dmg/crit 主属性走 vanilla-accfx（配饰循环不含盔甲三件，
     //  由 DD2_PIECE_FX/本表承载——已核对原版数值一致）----
+    // ★1457 叶绿素套水晶叶三修（OnHit :6986-7036,1456 :6615-6640）——叶绿素套
+    //  SetBonus 的水晶叶追踪弹（226 剑气→227 花瓣）三处门：①目标须 CanBeChasedBy
+    //  （:6991-6996,1456 无）②226 弹 !active 即跳过（:7000,1456 无 active 检）③
+    //  索敌半径 800→1200px（:7007）。本仓叶绿素套 SetBonus（水晶叶弹）未移植（仅
+    //  头盔单件省弹 1/5 在上表）→ 三修无宿主。备案：移植水晶叶套弹时按 1457 三门落地。
     const ARMOR_AMMO_SAVE_VID: Record<number, number> = {
       2758: 4, 1002: 5, 1549: 5, 4983: 10, 3804: 10, 3878: 5,
     };
@@ -1811,42 +1817,20 @@ export class Player extends Entity {
     // `if (chlorophyteBladeCounter > 0) chlorophyteBladeCounter--`）
     if (this.chlorophyteBladeCounter > 0) this.chlorophyteBladeCounter--;
 
-    // 液体检测：WetCollision(Collision.cs:1575-1650) AABB 语义 1:1——
-    // 身体中心下半盒(±10,±h/2)与液体盒相交 = wet;液面高度参与判定
-    // (liquid 255→液面=格顶,液少→液面下沉)。★曾用"脚底上方 4px 单点采样":
-    // 水下走坡/半砖时 y 随地形抬 1-2px → 采样点跳出水面 → inWater 翻转 →
-    // 误触发出/入水音效+粒子(用户实报"水下走动出现水花")
+    // 液体检测：Collision.WetCollision（Collision.cs:1575-1650）——**中心小盒**：
+    // 宽 min(10,w) × 高 min(h/2,h)，以身体中心居中（vector = Center−(num/2,num2/2)）。
+    // ★曾误移植为 [身体中心,脚底]×±10 的"下半盒"：wet 翻转点比原版深 ~10px（水面
+    //   到脚底才翻）→ 出入水涟漪生成点 center+5 高出水面 ~16px、圆环大半在空气
+    //   = 用户实报"角色出入水没涟漪、史莱姆正常"（NPC 侧 npcLiquid.wetCollision 是
+    //   正确居中盒故无此症）。2026-08-22 改与 NPC 侧共用同一实现（含坡面格+上液
+    //   满高计 :1635-1654 分支——旧手写盒缺该支，坡面涉水判定偏浅）。
+    //   居中盒同样解决旧"脚底单点采样"的水下走坡 1-2px 抖动翻转问题。
     const wasInWater = this.inWater;
     {
-      const bodyTop = this.y + this.h / 2;               // 身体中心(Collision.cs:1577)
-      const bodyBot = this.y + this.h;                   // 下半盒底
-      const bodyL = this.cx - 10, bodyR = this.cx + 10;  // num=10(:1579)
-      const ty0 = Math.max(0, Math.floor(this.y / TILE) - 1);
-      const ty1 = Math.min(world.store.h - 40, Math.floor((this.y + this.h) / TILE) + 2);
-      const tx0 = Math.max(0, Math.floor(this.cx / TILE) - 2);
-      const tx1 = Math.min(world.store.w - 1, Math.floor(this.cx / TILE) + 2);
-      let wet = false, honey = false;
-      for (let ty = ty0; ty <= ty1 && !wet; ty++) {
-        for (let tx = tx0; tx <= tx1; tx++) {
-          const ti = world.store.idx(tx, ty);
-          const lq = world.store.liquid[ti];
-          if (lq <= 0) continue;
-          // 液面高度(:1594-1597):num5=(256-liquid)/32 → 液面下沉 2px/档
-          const drop = ((256 - lq) / 32) * 2;
-          const surfaceY = ty * TILE + drop;
-          const boxH = TILE - drop;
-          // AABB 相交(:1600-1602):身体下半盒 vs 液体盒
-          if (bodyR > tx * TILE && bodyL < tx * TILE + TILE
-            && bodyBot > surfaceY && bodyTop < surfaceY + boxH) {
-            wet = true;
-            if (world.store.liquidType[ti] === 3) honey = true;
-            break;
-          }
-        }
-      }
+      const r = wetCollision(world.store, this.x, this.y, this.w, this.h);
       // :1418 wet 只认 !lava && !shimmer(蜜算 wet);岩浆里不能"游泳"
-      this.inWater = wet && !this.inLava;
-      this.inHoney = honey;
+      this.inWater = r.wet && !this.inLava;
+      this.inHoney = r.honey;
     }
     // 入水/出水瞬间：水花尘 + 水花声（Player.cs:27464-27636,2026-08-20 补齐——
     // 曾只播入水声、零粒子=用户报"入水出水效果非常轻微且出水几乎没有"）
@@ -2162,7 +2146,12 @@ export class Player extends Entity {
     // 1457: 移动减速 debuff 折算 strongestMoveSpeedDebuff（Update :26204-26210
     // moveSpeed *= strongestMoveSpeedDebuff → runAcceleration/maxRunSpeed 随之）——
     // 取最强单项不叠加（1456 else-if 乘法链在 Buffs.moveSpeedMult，已迁出）
-    const strongestSlow = this.buffs.strongestMoveSpeedDebuff;
+    // D2（2026-08-21）：盾举并入（:26155-26162 shieldRaised → min(1/3)）——Buffs
+    // getter 无 Player 访问,在此合成（maxRunSpeed getter :3816 同式）
+    const strongestSlow = Math.min(this.buffs.strongestMoveSpeedDebuff, this.shieldRaised ? 1 / 3 : 1);
+    // 1457 :26156-26161 盾举侧效：地面(vy==0)且 |vx|>3 → vx 每帧减半（Update 段、
+    // 无 dashDelay 门——冲刺滑行期举盾同样制动）。原版盾举态每帧 Update 重算
+    if (this.shieldRaised && this.vy === 0 && Math.abs(this.vx) > 3) this.vx /= 2;
     const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1)
       * (this.vortexStealthActive && this.stealth > 0 ? 0.3 : 1)   // 星璇潜行移速（:25563）
       * (duneBoost ? 1.75 : 1)
@@ -2337,8 +2326,14 @@ export class Player extends Entity {
       let runSlow = RUN_SLOWDOWN * this.equipStats.runSlowMul;   // 暗影套 ×1.75(:26195-26201)
       // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）
       if (duneBoost && !mnt) { maxRun *= 1.75; accRun *= 1.75; }
+      // D3（1457 :26206 runAcceleration *= moveSpeed）：步行支加速度也吃 moveSpeed
+      // 乘区——构成 = moveSpeedMult×装备 moveMult×strongestSlow（含盾举,上方合成）。
+      // ★勿整乘 speedMult：inHoney 0.5/星璇潜行 0.3 是场景因子,原版不走 moveSpeed 链
+      // （蜜减速在位移积分层 WetCollision;潜行只乘 accRun/maxRunSpeed :26046-26047）。
+      // 坐骑支不乘（:26329-26331 mount.Acceleration 覆写在乘区之后,不吃减速）
       let runAcc = mnt ? mnt.acceleration
-        : RUN_ACCELERATION * (duneBoost ? 1.75 : 1);
+        : RUN_ACCELERATION * (duneBoost ? 1.75 : 1)
+          * this.buffs.moveSpeedMult * this.equipStats.moveMult * strongestSlow;
       // ---- 地面材质链（Player.cs:26210-26255 原版 else-if 真序：sticky→powerrun→
       //      sand→slippy2→slippy；floorTileT 已带坡面门 :23466）----
       // sticky 蜂蜜块地面（:26210-26221）：maxRun/acc×0.25、slowdown×2 + 钳 ±maxRun
@@ -2697,6 +2692,12 @@ export class Player extends Entity {
       //      CarpetMovement :21568 + RocketBoots :26548-26628）----
       // 坐骑禁翼禁靴（Player.cs:26316-26322：mount.Active → rocketBoots=0、
       // CanUseWings 假族 wings=0——本仓坐骑恒属禁翼族）
+      // ★1457 翅膀"隐藏显形"门变更（ApplyEquipFunctional :15710-15716,1456 :12583）：
+      // `!hideVisibleAccessory[slot] || (vy≠0 && mount.CanUseWings)` → `(… && !mount.Active)`
+      // ——1456 骑【可飞】坐骑时被隐藏的翅膀下落中仍显形,1457 骑任何坐骑都不再显形。
+      // 本仓无 per-slot 隐藏字段（hideVisibleAccessory 未建模,见 :971 备案）→ 无宿主;
+      // 绘制侧 ShouldDrawWingsThatAreAlwaysAnimated（:30271,1457 未改,仍 mount.CanUseWings）
+      // 本仓以 !ridingMount 等价（坐骑恒禁翼族,两式同假）——下方 shouldDraw 同。
       const wings = eq.wing && !mnt2 ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
       const wingsLogic = eq.wing?.logic ?? 0;  // 不随坐骑清零（flag19 hover 档 :26477 用 wingsLogic）
       const hoverDown = this.inputDown;            // TryingToHoverDown（保持态近似省略）
@@ -2862,7 +2863,10 @@ export class Player extends Entity {
           const rSlow = RUN_SLOWDOWN * this.equipStats.runSlowMul;
           if (ix > 0 ? this.vx < mRun : this.vx > -mRun) {
             if (ix > 0 ? this.vx < -rSlow : this.vx > rSlow) this.vx += ix * rSlow;
-            this.vx += ix * RUN_ACCELERATION;
+            // D3（:26206）：原版此处 runAcceleration 已被 Update 乘过 moveSpeed 乘区
+            // （滑行分支消费的是乘后值）——同式补乘（duneBoost 沙地 ×1.75 同在乘区）
+            this.vx += ix * RUN_ACCELERATION * (duneBoost ? 1.75 : 1)
+              * this.buffs.moveSpeedMult * this.equipStats.moveMult * strongestSlow;
           }
         }
         const num13 = Math.max(eq.accRunSpeed > 0 ? eq.accRunSpeed : 3, 3 * eq.moveMult);
@@ -3813,7 +3817,7 @@ export class Player extends Entity {
    *  moveSpeed，debuff 已折入） */
   get maxRunSpeed(): number {
     return PLAYER_WALK_MAX * this.buffs.moveSpeedMult * this.equipStats.moveMult
-      * this.buffs.strongestMoveSpeedDebuff;
+      * Math.min(this.buffs.strongestMoveSpeedDebuff, this.shieldRaised ? 1 / 3 : 1);
   }
 
   /** Player.CCed（1457 Player.cs:6291/:21738 等消费；1456 为 frozen||webbed||stoned

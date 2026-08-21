@@ -8391,14 +8391,27 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
         // 弹药分道（Player.cs:3820 bowEffectiveDamage 拆分）：箭吃箭袋/射手/蘑菇矿箭头，
       // 弹/火箭吃对应蘑菇矿头；Archery 不再误伤枪械
       const rKind = bowC?.useAmmo === 97 ? 'bullet' : bowC?.useAmmo === 771 ? 'rocket' : bowC?.useAmmo === 283 ? 'other' : 'arrow';
-      let damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind)) + (ammoC?.damage ?? 0); // ⑥ pen 移 hit 时
-        let knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
-        if (isArrowKind && this.player.equipStats.quiver) knockback *= 1.1; // 箭袋击退 ×1.1（:52713）
-        // ---- PickAmmo 弹型解析 1:1（Player.cs:52635-52668，resolveAmmoProjId）----
-        let projId = resolveAmmoProjId(bowVid2, viIdFromKey(ammoDef.key), useAmmo, bowC?.shoot, ammoC?.shoot);
-        if (bowVid2 === 3019 && projId === 1) projId = 485;   // 炼狱天弓：木箭→狱翼箭（:52660-52663）
-        if (bowVid2 === 3052) projId = 495;                    // 暗影焰弓恒 495（:52664-52667）
-        if (isArrowKind && this.player.equipStats.moltenQuiver && projId === 1) damage += 2; // 熔箭袋木箭→火矢+2（:52700，火矢 proj 换体从略）
+      // ---- PickAmmo 弹型解析 1:1（Player.cs:52635-52668，resolveAmmoProjId）----
+      let projId = resolveAmmoProjId(bowVid2, viIdFromKey(ammoDef.key), useAmmo, bowC?.shoot, ammoC?.shoot);
+      if (bowVid2 === 3019 && projId === 1) projId = 485;   // 炼狱天弓：木箭→狱翼箭（:52660-52663）
+      if (bowVid2 === 3052) projId = 495;                    // 暗影焰弓恒 495（:52664-52667）
+      // 弹药加伤（1457 :54166-54190 先并入 num=item.damage 再统一乘算）：
+      //   熔火箭袋 +2（木箭→火矢 proj 2,proj 换体从略）。
+      //   ★review 所记"特殊硬币+5"实为【沙枪三色砂】（:54167-54182 projToShoot==42
+      //   SandBallGun 时黑檀砂 370/珍珠砂 408/猩红砂 1246 → 65/68/354 各 +5）——
+      //   沙枪 266 本仓未移植,projId 42 不可达,无宿主备案。
+      //   accSharpBarb 箭 +1（:54195-54198）= 1457 新配饰未移植,备案。
+      const ammoBonus = isArrowKind && this.player.equipStats.moltenQuiver && projId === 1 ? 2 : 0;
+      // 1457 :54200-54202：`Damage += (int)(num × GetWeaponDamageMultiplier(item))`——
+      // 弹药伤（含加伤）乘弹药伤害分道乘区（箭=bowEffective/弹=gunEffective…,本仓
+      // rangedDamageMult(rKind) 同源）。1456 加伤裸加不乘；本仓此前连 item.damage
+      // 也裸加,一并归位（D-❌② 2026-08-21）
+      let damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind))
+        + Math.trunc(((ammoC?.damage ?? 0) + ammoBonus) * this.player.rangedDamageMult(rKind)); // ⑥ pen 移 hit 时
+      // 1457 :54204-54207：纳米弹（projToShoot==285）总伤 ×1.25——(int) 截断
+      if (projId === 285) damage = Math.trunc(damage * 1.25);
+      let knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
+      if (isArrowKind && this.player.equipStats.quiver) knockback *= 1.1; // 箭袋击退 ×1.1（:52713）
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
         // 弓/枪面向鼠标（shoot>0 发射型同款 :46578）
         this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
@@ -10325,12 +10338,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     //      tileSpeed（砌砖刀/建筑背包）原版只作用【放置】（:39485），不进挖掘冷却----
     // pickSpeed 加法减量链（Player.cs:18363 基 1f，越小越快，乘在冷却上）：
     //   Mining 药水 -0.25（:9818）/ambrosia -0.05（:12457）/食物档 -5/10/15%（:11534+）/
-    //   风筝 buff -0.15（:9614）/chiselSpeed acc（古凿 4056/创造之手 5126）-0.25（:12610-12612）
+    //   风筝 buff -0.1（1457 :10004 削弱；1456 :9614 为 -0.15——D4 2026-08-21 补半边）
+    //   /chiselSpeed acc（古凿 4056/创造之手 5126）-0.25（:12610-12612）
     const buffs = this.player.buffs;
     let pickSpeed = 1
       - (buffs.has(BuffType.Mining) ? 0.25 : 0)
       - (this.player.usedAmbrosia ? 0.05 : 0)
-      - (buffs.has(BuffType.KiteBuff) ? 0.15 : 0)
+      - (buffs.has(BuffType.KiteBuff) ? 0.1 : 0)
       - (this.player.equipStats.chiselSpeed ? 0.25 : 0)
       - [0, 0.05, 0.10, 0.15][buffs.wellFedTier]
       + buffs.hungerPickSpeed;   // 饥饿/极饿 pickSpeed += 0.05/0.15（:11571/:11595——变慢，正号）
@@ -15564,19 +15578,20 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if ((!doll && !isFlyMeal) || !hitRect(tn.x, tn.y, tn.w, tn.h)) continue;
       this.swingHitSet.add(tn.id);
       const swBase = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')
-        * (this.player.buffs.has(BuffType.ImbueNano) ? 1.05 : 1)); // ⑥ pen 移 hit 时（挥击处传）
-        // 1457: Nano 灌注 ×1.05（ProcessHitAgainstNPC :44760-44764 meleeEnchant==6
-        // → GetNanoFlaskDamageBoost()=1.05,对城镇 NPC 命中同乘）
+        * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
       let swDmg = Math.max(1, Math.round(swBase * (1 + (Math.random() * 30 - 15) / 100)));
-      // 1457: FlyMeal 打 likeATownNPC ×2、type 18（商人,报告文本误标"向导"——
-      // NPCID 18=Merchant）再 ×2 = ×4（:44700-44708）。armorPenetrationPercent=1f
-      // 未接（TownNPC.hurt 无 pen 参,登记）
+      // 1457: FlyMeal 打 likeATownNPC ×2、type 18（护士,Nurse——17=商人 Merchant/
+      // 22=向导 Guide;批 1 注释误标"商人",review D6 勘误）再 ×2 = ×4（:44700-44708）。
+      // armorPenetrationPercent=1f 未接（TownNPC.hurt 无 pen 参,登记）
       if (isFlyMeal) {
         swDmg *= 2;
         if (tn.vanillaId === 18) swDmg *= 2;
         this.achievements.notifyProgressionEvent(42);   // :44741-44744 townNPC 门
       }
+      // D8（1457 :44760-44764）：Nano 灌注 ×1.05 乘在 DamageVar【后】（原版
+      // `(int)(num3 × GetNanoFlaskDamageBoost())`,meleeEnchant==6）——曾乘在
+      // ±15% 方差前,±1 舍入差。对城镇 NPC 命中同乘
+      if (this.player.buffs.has(BuffType.ImbueNano)) swDmg = Math.trunc(swDmg * 1.05);
       tn.hurt(swDmg, (Math.sign(tn.cx - p.cx) || this.player.facing) * 2, 0, this);
     }
     for (const ent of this.entities.enemies) {
@@ -15603,14 +15618,14 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
       // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）；
       // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）。
-      // 1457: Nano 灌注 ×1.05（ProcessHitAgainstNPC :44760-44764 meleeEnchant==6
-      // → GetNanoFlaskDamageBoost() = 1.05，crit 翻倍前的乘区）
       const baseDmg = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')
-        * (this.player.buffs.has(BuffType.ImbueNano) ? 1.05 : 1)); // ⑥ pen 移 hit 时（挥击处传）
+        * this.player.damageMult('melee')); // ⑥ pen 移 hit 时（挥击处传）
       this.player.onMeleeHit(); // 甲虫进攻套蓄能（命中结算前计数无碍）
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
-      const dmg = Math.max(1, Math.round(baseDmg * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
+      let dmg = Math.max(1, Math.round(baseDmg * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
+      // D8（1457 :44760-44764）：Nano 灌注 ×1.05（meleeEnchant==6 →
+      // GetNanoFlaskDamageBoost()=1.05）乘在 DamageVar【后】——曾乘在方差前,±1 舍入差
+      if (this.player.buffs.has(BuffType.ImbueNano)) dmg = Math.trunc(dmg * 1.05);
       const kdir = Math.sign(e.cx - p.cx) || this.player.facing;
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
@@ -15625,6 +15640,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.player.buffs.has(BuffType.ImbueIchor)) e.ichorT = Math.max(e.ichorT, 10 + Math.random() * 10);
       if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
       if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
+      // ★1457 骨弹换号（ProcessHitAgainstNPC :44748-44754：sItem.type==1166 骨剑/
+      // 1320 骨镐 近战命中 → 75% 基伤骨弹,1456 :43732-43738 为 proj 21,1457 换
+      // 1111 BoneArrow 友方款）。本仓该链本就未移植（全仓无 proj 21 命中派生）→
+      // 换弹号无宿主,两件物品已注册（vanilla.json）但无命中派生行为。备案：移植时
+      // 直接按 1111 落地（勿先补 21 再换号）。
       // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
       applyFrostBurn(this.player.equipStats.frostBurn, e as unknown as Record<string, number>);
       // 岩浆石/火焰护手（Player.cs:6184-6198 三段掷：1/4→6s / 3/8→4s / 3/8→1s OnFire3）
@@ -16637,8 +16657,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  (1920×1200,:754-758) 视野矩形外扩 320px 内,入侵组匹配当前 invasionType 的
    *  敌怪或 DangerThatPreventsOtherDangers 大危险族(NPCID.cs:4875 =
    *  {517,422,507,493,399,13,14,15})在场即阻止;②AnyBossHindersRespawnTime
-   *  (:39397)——本仓复用 bossNearOnDeath（在场 boss 全算,比原版 4000px+交战门
-   *  更严,方向安全）;③南瓜月/霜月(moonEvent.kind!=0)④DD2 进行中 */
+   *  (:39368-39397)——活值重算（D7 2026-08-21：原用死亡瞬间 bossNearOnDeath 快照,
+   *  死亡期间 boss 被杀/走远仍禁跳=过严、飞临却放行=过松）:boss(或 13/14/15
+   *  世界吞噬者体节——本仓 EoW 单体已带 boss 旗)在场且 |dx|+|dy|<4000px 即阻止;
+   *  395 火星飞碟核心豁免（原版 type!=395 门,核心未破时不可选中）;③南瓜月/霜月
+   *  (moonEvent.kind!=0)④DD2 进行中。★原版另有 `nPC.interactedWithPlayerLocally`
+   *  支（4000px 外曾与本地玩家交战过的 boss 也阻止）——本仓无该交战标记字段
+   *  （NPC 域）,备案待 NPC 域落地时接入 */
   private allowsRespawnTimerSkip(): boolean {
     const p = this.player;
     const hw = 960 + 320, hh = 600 + 320;                     // 视野半宽/半高 + Inflate(320)
@@ -16646,15 +16671,19 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     for (const en of this.entities.enemies) {
       if (en.dead) continue;
       const ex = en.x ?? 0, ey = en.y ?? 0, ew = en.w ?? 16, eh = en.h ?? 16;
-      if (!(ex < rx + hw * 2 && ex + ew > rx && ey < ry + hh * 2 && ey + eh > ry)) continue;
       const vid = (en as unknown as { vanillaId?: number }).vanillaId ?? -1;
+      // ② AnyBossHindersRespawnTime（活值,4000px 曼哈顿距离）
+      if (vid !== 395 && (en as unknown as { def?: { boss?: boolean } }).def?.boss) {
+        const bcx = ex + ew / 2, bcy = ey + eh / 2;
+        if (Math.abs(p.cx - bcx) + Math.abs(p.cy - bcy) < 4000) return false;
+      }
+      if (!(ex < rx + hw * 2 && ex + ew > rx && ey < ry + hh * 2 && ey + eh > ry)) continue;
       const grp = INVASION_GROUP[vid] ?? 0;
       if (grp > 0 && grp === this.world.invasionType) return false;
       if (Game.RESPAWN_BLOCKING_DANGER.has(vid)) return false;
     }
     if (this.world.moonEvent.kind !== 0) return false;
     if (this.world.oldOnesArmy.ongoing) return false;
-    if (p.bossNearOnDeath) return false;
     return true;
   }
 

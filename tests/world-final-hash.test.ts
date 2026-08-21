@@ -22,8 +22,14 @@
 //   (cs:47417-47430,碗落平台/solidTop 不再误杀)③FinalSeedCleanup fall-down 分支
 //   涂原格(i,j)+canKillTileFSC 补仙人掌80帧门/箱族 CanDestroyChest/锁门·音乐盒支
 //   (悬空沙下邻有货箱改走原格静态化,箱格不再被覆盖)④makeTemple Vector2 float32
-//   仿真+退化 hitbox 走钳位 setter(本种子无差,备案)⑤HellFort cell InWorld(10) 门/
-//   SolidTile 族 inActive 位(现世界尺寸不可达,备案)。
+//   仿真+退化 hitbox 走钳位 setter⑤HellFort cell InWorld(10) 门/SolidTile 族
+//   inActive 位。
+//   ★重捕结果=与批4 基线【逐位相同】(双种子四数组哈希均不变,回退对照实证)：
+//   ①只动 frameX（金标四数组外）——种子 9293480 上 69 处 sheet61 植物帧 18→144;
+//   ②两金标种子终态碗 103 均不踩逃生门(9293480 碗=0/1511931452 碗=8 且全过纯
+//   桌面门);③FSC 箱邻/仙人掌邻场景两种子未出现;④float32/钳位在两种子神庙无
+//   ULP 差。修复对这两粒种子是【行为保持】,分歧只在边界场景种子上显形——金标
+//   无需改值,重捕仅为换锚声明。
 import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';

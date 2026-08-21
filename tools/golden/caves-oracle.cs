@@ -14884,8 +14884,11 @@ Replay(); // ▶pass 头重播：SettleLiquidsPart2 cs:21051
                         //   同款门）。曾漏 active 门：非活性幽灵格（被杀植物的 60 丛林草残留）
                         //   被复活成活性泥 59 并连坐液体路径（settle2 act×153 根因）。
                         if (act[ni] == 0 || t == 0) continue;
-                        if (LS_BURN_AIR.Contains(t)) { typ[ni] = 0; act[ni] = 0; half[ni] = 0; slope[ni] = 0; }
-                        else if (LS_BURN_DIRT.Contains(t)) { typ[ni] = 59; act[ni] = 1; }
+                        // ★XXXXX（EEEEEE 镜像）：每次转化尾随 SquareTileFrame(i,j)
+                        //   （cs:1557/1562——3×3 帧扫把上方依附植物经 PlantCheck 锚亡杀链
+                        //   收割；级联走 Fc 引擎全分派，与 JS squareTileFrameGen 同源）
+                        if (LS_BURN_AIR.Contains(t)) { typ[ni] = 0; act[ni] = 0; half[ni] = 0; slope[ni] = 0; FcSquareTileFrame(nx, ny); }
+                        else if (LS_BURN_DIRT.Contains(t)) { typ[ni] = 59; act[ni] = 1; FcSquareTileFrame(nx, ny); }
                     }
             }
             else if (liqT[i5] == 2) HoneyCheck(x, y);

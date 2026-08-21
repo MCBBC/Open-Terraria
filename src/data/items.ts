@@ -1326,21 +1326,9 @@ for (const wi of Object.values(wallItemsJson as Record<string, { wall: number; k
   if (existing !== undefined) { ITEM_DEFS[existing].wallId = wi.wall; continue; }
   item({ key: wi.key, name: '', maxStack: 999, value: 1, wallId: wi.wall });
 }
-/** internal id → 稳定 id(保存方向;0=无映射,不应出现) */
-export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
-/** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */
-export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();
-for (let i = 0; i < ITEM_DEFS.length; i++) {
-  const k = ITEM_DEFS[i].key;
-  const vm = /^vi_(\d+)_/.exec(k);
-  // place_v_N_* 未在 PRIV 表登记时按 sheet 派生 20000+N(确定性,与表内显式号不冲突:
-  // 表尾已到 10500,20000+ 区段独占)——新注册 tile 的放置物不再逐个补表
-  const pm = !vm ? /^place_v_(\d+)_/.exec(k) : null;
-  const s = vm ? Number(vm[1]) : PRIV_ITEM_STABLE[k] ?? (pm ? 20000 + Number(pm[1]) : undefined);
-  if (s === undefined) { console.error(`[stable-id] item 缺稳定 id: ${k}`); continue; }
-  ITEM_STABLE_OF_INTERNAL[i] = s;
-  if (!ITEM_INTERNAL_OF_STABLE.has(s)) ITEM_INTERNAL_OF_STABLE.set(s, i);
-}
+// 稳定 id 表构建在【文件尾】（D1 修复,2026-08-21）——见文件尾 ITEM_STABLE_OF_INTERNAL 段。
+// 曾建在 :1330（墙面物品注册后）:其后追加的敌旗 290/钓鱼 35/具名 5 件落在表外,
+// serialize.ts `ITEM_STABLE_OF_INTERNAL[it.id] ?? 0` 存盘写 0 → 读档 id 0 静默丢失。
 // ---- 原版工具力表补齐(Item.cs SetDefaults 提取)→ vi_ 道具 tool 元数据 ----
 // 条件破坏链的道具入口:圣锤 80 砸祭坛/邪恶石 65 需梦魇镐/神庙砖 210 需 Picksaw 级等
 // ⚠ axe 单位=源码原值(斧力%÷5,如 Drax axe=22=110%)——消费端 int(axe*1.2);
@@ -1916,4 +1904,28 @@ if (VANILLA_ITEM_KEY_BY_ID[6153] === undefined) {
   const ik = 'vi_6153_GlacierFang';
   VANILLA_ITEM_KEY_BY_ID[6153] = ik;
   item({ key: ik, name: '', value: ITEMS_1457_VALUE[6153] ?? 1 });
+}
+
+// ---- 稳定 id 表构建【必须最后】（D1 修复,2026-08-21）----
+// internal id → 稳定 id(保存方向;0=无映射,不应出现)。serialize.ts:324/:399 存盘走
+// `ITEM_STABLE_OF_INTERNAL[it.id] ?? 0`、SaveFile.ts 读档走 ITEM_INTERNAL_OF_STABLE——
+// 表若建在注册中途,其后追加的 def（敌旗 290/钓鱼 35/具名 5,曾含 6153/6156/6158/6165）
+// 落在 Uint16Array 长度之外 → 读出 undefined → 存 0 → 读档 id 0 静默丢物。
+// ★本表必须建在本文件全部 item() 注册之后；新增注册段一律写在上方、勿移到本段后。
+// 零下标平移：只挪构建时机,ITEM_DEFS 数组序/内部 id 一律不变（平移事故先例,见
+// :980 注）。闸门测试：tests/item-retirement.test.ts「全 def 必有稳定 id」。
+/** internal id → 稳定 id(保存方向;0=无映射,不应出现) */
+export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
+/** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */
+export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();
+for (let i = 0; i < ITEM_DEFS.length; i++) {
+  const k = ITEM_DEFS[i].key;
+  const vm = /^vi_(\d+)_/.exec(k);
+  // place_v_N_* 未在 PRIV 表登记时按 sheet 派生 20000+N(确定性,与表内显式号不冲突:
+  // 表尾已到 10500,20000+ 区段独占)——新注册 tile 的放置物不再逐个补表
+  const pm = !vm ? /^place_v_(\d+)_/.exec(k) : null;
+  const s = vm ? Number(vm[1]) : PRIV_ITEM_STABLE[k] ?? (pm ? 20000 + Number(pm[1]) : undefined);
+  if (s === undefined) { console.error(`[stable-id] item 缺稳定 id: ${k}`); continue; }
+  ITEM_STABLE_OF_INTERNAL[i] = s;
+  if (!ITEM_INTERNAL_OF_STABLE.has(s)) ITEM_INTERNAL_OF_STABLE.set(s, i);
 }
