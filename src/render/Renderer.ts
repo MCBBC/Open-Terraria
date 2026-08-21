@@ -2918,6 +2918,25 @@ export class Renderer {
     //     合成后直画 = GetColor(White) 等价）
     this.drawVanillaDustPass(true, cam, player);
 
+    // 7d'. 飞灵 677 自发光多层渲染（DrawNPCDirect_Faeling :26306-26368 不走
+    //      GetAlpha——自发光色不受 tile 光照，须在光照合成后绘制。此前画在
+    //      实体层被光照覆层压暗 → 暗洞穴发光不可见，用户实报 2026-08-21）
+    {
+      const camRX2 = Math.round(cam.x * z) / z;
+      const camRY2 = Math.round(cam.y * z) / z;
+      ctx.save();
+      ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
+      ctx.scale(z, z);
+      ctx.translate(-camRX2, -camRY2);
+      ctx.imageSmoothingEnabled = false;
+      for (const ent of entities) {
+        if (ent instanceof Enemy && !ent.dead && ent.vanillaId === 677) {
+          this.drawFaeling(ent, world);
+        }
+      }
+      ctx.restore();
+    };
+
     // 7e. 全亮翅膀主纹理 + 叠画（mainGlow/overlay 队列——原版硬编码 DrawData 色
     //     不受光照；drawPlayer 收集、此处消费）
     this.flushWingGlow(cam, z);
@@ -5961,6 +5980,31 @@ export class Renderer {
     const scale = e.vanillaScale || 1;
     const cell = (col: number, row: number) => ({ sx: col * CW, sy: row * CH, sw: CW, sh: CH });
     const cx = e.cx, cy = e.cy;
+    // XNA SpriteBatch 的 Color 参数 = 逐像素乘算（modulate）。Canvas2D drawImage
+    // 无此功能 → 用离屏 canvas 做乘算调色后绘制。
+    const tintCanvas = document.createElement('canvas');
+    tintCanvas.width = CW; tintCanvas.height = CH;
+    const tintCtx = tintCanvas.getContext('2d')!;
+    const drawTinted = (col: number, row: number, dx: number, dy: number,
+      r: number, g: number, b: number, a: number, sc: number, additive: boolean) => {
+      const c = cell(col, row);
+      tintCtx.clearRect(0, 0, CW, CH);
+      tintCtx.drawImage(img, c.sx, c.sy, CW, CH, 0, 0, CW, CH);
+      // multiply 调色
+      tintCtx.globalCompositeOperation = 'multiply';
+      tintCtx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+      tintCtx.fillRect(0, 0, CW, CH);
+      // 恢复 alpha（multiply 会把透明像素变实色）
+      tintCtx.globalCompositeOperation = 'destination-in';
+      tintCtx.drawImage(img, c.sx, c.sy, CW, CH, 0, 0, CW, CH);
+      tintCtx.globalCompositeOperation = 'source-over';
+      ctx.save();
+      if (additive) ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, Math.min(1, a));
+      const w = CW * sc, h = CH * sc;
+      ctx.drawImage(tintCanvas, 0, 0, CW, CH, dx - w / 2, dy - h / 2, w, h);
+      ctx.restore();
+    };
     const draw = (col: number, row: number, dx: number, dy: number,
       r: number, g: number, b: number, alpha: number, sc: number, additive: boolean) => {
       const c = cell(col, row);
@@ -5968,14 +6012,13 @@ export class Renderer {
       if (additive) ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       const w = CW * sc, h = CH * sc;
-      // 世界坐标直画（canvas 已在世界变换内），中心锚
       ctx.drawImage(img, c.sx, c.sy, c.sw, c.sh, dx - w / 2, dy - h / 2, w, h);
       ctx.restore();
     };
 
     const [br, bg, bb] = hsl(num2, 1, 0.65);
 
-    // ① 拖尾残影
+    // ① 拖尾残影（列 2 白光晕 × 彩虹色 → drawTinted）
     const trailDepth = e.historyDepth();
     const num4 = Math.max(0, trailDepth - 6);
     const ox4 = e.histXAt(num4), oy4 = e.histYAt(num4);
@@ -5992,28 +6035,28 @@ export class Renderer {
       const vx2 = ox - e.x + spin * Math.cos(Math.PI);
       const vy2 = oy - e.y + (-num7) * Math.sin(Math.PI);
       const [tr, tg, tb] = hsl(num2 + num15 * 0.5, 1, 0.5);
-      draw(2, 0, e.x + vx2, e.y + vy2, tr * 255, tg * 255, tb * 255, num14 * 0.16,
+      drawTinted(2, 0, e.x + vx2, e.y + vy2, tr * 255, tg * 255, tb * 255, num14 * 0.16,
         scale * Math.max(0, Math.min(2.5, num14 * num14 * 2.5)), false);
     }
 
-    // ② 主光晕
+    // ② 主光晕（列 2 白光晕 × 白色加算 → draw 即可，无调制需求）
     draw(2, 0, cx, cy, 255, 255, 255, 1, scale, true);
 
-    // ③ 翅膀
+    // ③ 翅膀（列 1 白翅膀 × 白色 → draw 即可）
     draw(1, animRow, cx, cy, 255, 255, 255, 0.5, scale, false);
 
-    // ④ 本体
-    draw(0, animRow, cx, cy, br * 255, bg * 255, bb * 255, 0.5, scale, false);
+    // ④ 本体（列 0 灰图案 × 彩虹色调制 → drawTinted）
+    drawTinted(0, animRow, cx, cy, br * 255, bg * 255, bb * 255, 0.5, scale, false);
 
-    // ⑤ 闪烁
+    // ⑤ 闪烁（列 3 灰 sparkle × 彩虹→白 lerp → drawTinted）
     const num16 = Math.max(0, Math.min(1, Math.sin(tVis / 60) * 0.3 + 0.3));
     const num17 = 0.8 + Math.sin(tVis / 15 * Math.PI * 2) * 0.3;
     const glowRow = e.id % 5;
-    const gr = (br + 127.5) / 1.5, gg = (bg + 127.5) / 1.5, gb = (bb + 127.5) / 1.5;
-    draw(3, glowRow, cx, cy, gr, gg, gb, num16, scale * num17, false);
+    const gr = (br + 255) / 2, gg = (bg + 255) / 2, gb = (bb + 255) / 2;
+    drawTinted(3, glowRow, cx, cy, gr, gg, gb, num16, scale * num17, false);
 
-    // ⑥ 辅助闪烁
-    draw(3, 1, cx, cy, gr, gg, gb, num16, scale * num17, false);
+    // ⑥ 辅助闪烁（列 3 行 1，同色 → drawTinted）
+    drawTinted(3, 1, cx, cy, gr, gg, gb, num16, scale * num17, false);
   }
 
   private drawStatueMimic(e: Enemy) {

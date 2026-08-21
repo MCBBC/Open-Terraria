@@ -13,7 +13,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
-const src = readFileSync(`${ROOT}/Terarria1456/Terraria/Recipe.cs`, 'utf8');
+// SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；`SW_TREE=Terarria1457` 换树
+// 只读对比。配 `--out <path>` 落 /tmp，禁止直接覆盖现库（现库含手工修复，全量重跑=回滚）。
+const TREE = process.env.SW_TREE || 'Terarria1456';
+if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
+const src = readFileSync(`${ROOT}/${TREE}/Terraria/Recipe.cs`, 'utf8');
 
 // ---- 循环生成段（2026-08-13 补：SetupRecipes 内 7 处 `for` 循环 AddRecipe 段） ----
 // Recipe.cs 循环体里的 SetDefaults 参数是算式（2178+n / num5-4327+4334 / array[j,0] /
@@ -22,7 +26,7 @@ const src = readFileSync(`${ROOT}/Terarria1456/Terraria/Recipe.cs`, 'utf8');
 // ItemID.Sets.TextureCopyLoad = Factory.CreateIntSet(-1, k,v,...)（ItemID.cs:1090）：
 // 缺省 -1，其余键值对查表。
 const TEXTURE_COPY_LOAD = (() => {
-  const idSrc = readFileSync(`${ROOT}/Terarria1456/Terraria.ID/ItemID.cs`, 'utf8');
+  const idSrc = readFileSync(`${ROOT}/${TREE}/Terraria.ID/ItemID.cs`, 'utf8');
   const m = idSrc.match(/TextureCopyLoad\s*=\s*Factory\.CreateIntSet\((-?[\d\s,]+)\);/);
   if (!m) throw new Error('ItemID.Sets.TextureCopyLoad 提取失败');
   const nums = m[1].split(',').map((x) => parseInt(x.trim(), 10));
@@ -416,7 +420,7 @@ parseLinear(main);
 // 从 itemcombat json 无此字段——直接从 Item.cs 提取（正则取 `createTile = N;`/`createWall = N;`）
 
 // Item.cs createTile/createWall 扫描（SetDefaults1..5 分段 switch 内）
-const itemSrc = readFileSync(`${ROOT}/Terarria1456/Terraria/Item.cs`, 'utf8');
+const itemSrc = readFileSync(`${ROOT}/${TREE}/Terraria/Item.cs`, 'utf8');
 const CREATE_TILE = {};
 const CREATE_WALL = {};
 {
@@ -439,7 +443,7 @@ const CREATE_WALL = {};
 const PLATFORM_TILES = (() => {
   const s = new Set();
   // Main.cs 静态 Platforms[19]=true 等初始化
-  const mainSrc = readFileSync(`${ROOT}/Terarria1456/Terraria/Main.cs`, 'utf8');
+  const mainSrc = readFileSync(`${ROOT}/${TREE}/Terraria/Main.cs`, 'utf8');
   for (const m3 of mainSrc.matchAll(/Platforms\[(\d+)\]\s*=\s*true;/g)) s.add(+m3[1]);
   return s;
 })();
@@ -512,11 +516,15 @@ if (process.argv.includes('--append-loops')) {
 
 const doc = {
   count: out.length,
+  src: TREE,
   groups: GROUP_ID,
   groupItems: GROUP_ITEMS,
   tileCountsAs: TILE_COUNTS_AS,
   recipes: out,
 };
-writeFileSync(JSON_PATH, JSON.stringify(doc));
-console.error(`配方 ${out.length} 条 / 组 ${Object.keys(GROUP_ID).length} / 站点继承 ${Object.keys(TILE_COUNTS_AS).length}`);
+// --out <path>（2026-08-22）：对拍产物落 /tmp，缺省仍写现库路径（保持原行为）
+const outIdx = process.argv.indexOf('--out');
+const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : JSON_PATH;
+writeFileSync(OUT_PATH, JSON.stringify(doc));
+console.error(`[${TREE}] 配方 ${out.length} 条 / 组 ${Object.keys(GROUP_ID).length} / 站点继承 ${Object.keys(TILE_COUNTS_AS).length} → ${OUT_PATH}`);
 console.error('样例:', JSON.stringify(out[0]), JSON.stringify(out[1] ?? null));

@@ -45,6 +45,12 @@ const EVIL = Number(process.env.SW_F1_EVIL ?? '1') as 0 | 1;
   const oReseed = RNGp.reseed;
   RNGp.reseed = function (s: number) { const r = oReseed.call(this, s); if (on()) w.write(`${n} RESEED\n`); return r; };
 
+  // ★FFFFFF：JS 侧逐杀账（killTileGen 的 __swKillCap 钩子；与 oracle KILL_TRACE 同构）
+  const kw = createWriteStream('/tmp/fff-js-kills.txt');
+  (globalThis as { __swKillCap?: (x: number, y: number, sheet: number) => void }).__swKillCap = (x, y, s) => {
+    if (on()) kw.write(`K ${x} ${y} ${s}\n`);
+  };
+
   const t0 = Date.now();
   try {
     const res = chainCheckpoints(SEED, EVIL);
@@ -56,7 +62,9 @@ const EVIL = Number(process.env.SW_F1_EVIL ?? '1') as 0 | 1;
     RNGp.reseed = oReseed;
     (globalThis as { __cavesTrace?: unknown }).__cavesTrace = undefined;
     (globalThis as { __cavesGridExport?: unknown }).__cavesGridExport = undefined;
+    (globalThis as { __swKillCap?: unknown }).__swKillCap = undefined;
     await new Promise<void>((res) => w.end(() => res()));
+    await new Promise<void>((res) => kw.end(() => res()));
   }
   console.log(`rolls: ${n} -> ${OUT} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
 }, 900_000);

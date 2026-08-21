@@ -455,35 +455,21 @@ export class AuroraSky {
     //    computeBand 已产出带几何（sBotX/Y/sTopX/Y/sU/sD/sR/G/B/sA），
     //    展开为三角形顶点传 GLAurora 用 GPU shader 逐像素渲染。
     //    CPU rasterBands 保留为 GL 不可用时的兜底。
-    if (this.glAurora && !this.glAurora.unavailable) {
-      this.renderGL(ctx, viewW, viewH, m, globalTime, skyOpacity);
+    if (this.glAurora.ready) {
+      this.renderGL(ctx, viewW, viewH, m, globalTime);
       return;
     }
     this.rasterBands(ctx, m, globalTime);
   }
 
-  /** WebGL2 极光渲染：computeBand 几何 → 三角形顶点展开 → GLAurora GPU 渲染 */
+  /** WebGL2 极光渲染：computeBand 几何 → GLAurora GPU 渲染 → blit 到主画布 */
   private renderGL(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
-    m: AuroraMode, globalTime: number, skyOpacity: number): void {
-    // 需要外部 GL 上下文——缺则起自己的离屏 GL(成功后再取一次)
-    if (!this.glAurora['gl']) this.initOwnGL(viewW, viewH);
-    const gl: WebGL2RenderingContext | null = this.glAurora['gl'];
-    if (!gl) { this.rasterBands(ctx, m, globalTime); return; }
-
-    // 噪声贴图上传（首次）
-    if (!this.glNoiseReady && tex286 && tex287) {
-      this.glAurora.uploadNoise(gl, tex286, tex287);
-      this.glNoiseReady = true;
-    }
-
-    const sd = auroraSpecificData(m, 0);
-    const sdX = sd[0], sdY = sd[1];
-
-    // 展开三角形顶点：每带 140 段 × 2 三角 × 3 顶点 × 8 float
+    m: AuroraMode, globalTime: number): void {
+    if (!this.glAurora.ready) return;
+    // 展开三角形顶点：每带 140 段 × 6 顶点(2 三角) × 8 float
     const SEG = AURORA_SEG;
-    const vertsPerBand = SEG * 6 * 8;
-    const totalVerts = m.bands * vertsPerBand;
-    const vdata = new Float32Array(totalVerts);
+    const totalFloats = m.bands * SEG * 6 * 8;
+    const vdata = new Float32Array(totalFloats);
     let vi = 0;
     for (let i = 0; i < m.bands; i++) {
       const base = i * (SEG + 1);
@@ -491,49 +477,30 @@ export class AuroraSky {
         const o1 = base + k, o2 = base + k - 1;
         const a1 = this.sA[o1], a2 = this.sA[o2];
         if (a1 <= 0 && a2 <= 0) { vi += 48; continue; }
-        // 底部顶点 (grad=1)
-        const mkB = (o: number): number[] => [
-          this.sBotX[o], this.sBotY[o], this.sU[o], 1, this.sD[o],
-          (this.sR[o] * this.sA[o] | 0) / 255,
-          (this.sG[o] * this.sA[o] | 0) / 255,
-          (this.sB[o] * this.sA[o] | 0) / 255,
+        const mkV = (o: number, isTop: number): number[] => [
+          isTop ? this.sTopX[o] : this.sBotX[o],
+          isTop ? this.sTopY[o] : this.sBotY[o],
+          this.sU[o], isTop, this.sD[o],
+          (isTop ? 255 : this.sR[o] * this.sA[o] | 0) / 255,
+          (isTop ? 255 : this.sG[o] * this.sA[o] | 0) / 255,
+          (isTop ? 255 : this.sB[o] * this.sA[o] | 0) / 255,
         ];
-        // 顶部顶点 (grad=0, color2=白×num28)
-        const mkT = (o: number): number[] => [
-          this.sTopX[o], this.sTopY[o], this.sU[o], 0, this.sD[o],
-          (255 * this.sA[o] | 0) / 255,
-          (255 * this.sA[o] | 0) / 255,
-          (255 * this.sA[o] | 0) / 255,
-        ];
-        const b1 = mkB(o1), t1 = mkT(o1), b2 = mkB(o2), t2 = mkT(o2);
-        // 三角 1: b1, t1, b2
-        for (const v of [b1, t1, b2]) { vdata.set(v, vi); vi += 8; }
-        // 三角 2: t1, t2, b2
-        for (const v of [t1, t2, b2]) { vdata.set(v, vi); vi += 8; }
+        const b1 = mkV(o1, 0), t1 = mkV(o1, 1), b2 = mkV(o2, 0), t2 = mkV(o2, 1);
+        for (const v of [b1, t1, b2, t1, t2, b2]) { vdata.set(v, vi); vi += 8; }
       }
     }
     const vertexCount = vi / 8;
+    console.log('[AuroraGL] verts:', vertexCount, 'sBotX[0..2]:', this.sBotX[0], this.sBotX[1], this.sBotX[2], 'sBotY[0]:', this.sBotY[0], 'sA[0]:', this.sA[0]);
     if (vertexCount === 0) return;
-
-    // GL 渲染到自己的 canvas 再 blit（极光画在 ctx 主画布上）
-    this.glAurora.render(gl, vdata, vertexCount, viewW, viewH, globalTime, sdX, sdY);
-    // blit GL canvas → 2D ctx（additive）
-    const glCanvas = this.glAurora['canvas'];
-    if (glCanvas) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.drawImage(glCanvas, 0, 0, viewW, viewH);
-      ctx.drawImage(glCanvas, 0, 0, viewW, viewH);
-      ctx.restore();
-    }
-  }
-
-  private ownGL: WebGL2RenderingContext | null = null;
-  private initOwnGL(w: number, h: number): void {
-    if (this.ownGL) return;
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    this.ownGL = c.getContext('webgl2');
+    const sd = auroraSpecificData(m, 0);
+    this.glAurora.render(vdata, vertexCount, viewW, viewH,
+      globalTime, sd[0], sd[1], tex286!, tex287!);
+    // blit GL canvas → 主画布（additive，×2 = CullNone 双面）
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.drawImage(this.glAurora.canvas, 0, 0, viewW, viewH);
+    ctx.drawImage(this.glAurora.canvas, 0, 0, viewW, viewH);
+    ctx.restore();
   }
 
   /** 单带逐段几何/颜色(AuroraSky.cs:132-402 段循环 1:1;num* 命名保持反编译对照)。

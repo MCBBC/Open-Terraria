@@ -6832,30 +6832,53 @@ bool DgP3x3(int x, int y, int t)
     return true;
 }
 // Place3x3Wall（cs:44281 画240）：3×3 净空 + wall≠0
-bool DgP3x3Wall(int x, int y, int t)
+bool DgP3x3Wall(int x, int y, int t, int style = 0)
 {
     for (int i = x - 1; i < x + 2; i++)
         for (int j = y - 1; j < y + 2; j++)
             if (!DgClr(i, j) || wal[j * W + i] == 0) return false;
-    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 2; j++) DgWr(i, j, t);
+    // ★FFFFFF：帧写补齐（JS place3x3WallD，PPPP style 透传；cs:44304-44319）
+    int s3 = style, sy3 = 0;
+    while (s3 > 35) { sy3++; s3 -= 36; }
+    int bx3 = s3 * 54, by3 = sy3 * 54;
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 2; j++)
+    {
+        DgWr(i, j, t);
+        frX[j * W + i] = (ushort)(bx3 + (i - (x - 1)) * 18);
+        frY[j * W + i] = (ushort)(by3 + (j - (y - 1)) * 18);
+    }
     return true;
 }
 // Place4x3Wall（cs:44874 画241）：x-1..x+2 × y-1..y+1 净空 + wall≠0
-bool DgP4x3Wall(int x, int y, int t)
+bool DgP4x3Wall(int x, int y, int t, int style = 0)
 {
     for (int i = x - 1; i < x + 3; i++)
         for (int j = y - 1; j < y + 2; j++)
             if (!DgClr(i, j) || wal[j * W + i] == 0) return false;
-    for (int i = x - 1; i < x + 3; i++) for (int j = y - 1; j < y + 2; j++) DgWr(i, j, t);
+    // ★FFFFFF：帧写补齐（JS place4x3WallD；cs:44900-44914 X 纯列偏移/Y=style*54）
+    int by4 = style * 54;
+    for (int i = x - 1; i < x + 3; i++) for (int j = y - 1; j < y + 2; j++)
+    {
+        DgWr(i, j, t);
+        frX[j * W + i] = (ushort)((i - (x - 1)) * 18);
+        frY[j * W + i] = (ushort)(by4 + (j - (y - 1)) * 18);
+    }
     return true;
 }
 // Place6x4Wall（cs:44959 画242）：x-2..x+3 × y-2..y+1 净空 + wall≠0
-bool DgP6x4Wall(int x, int y, int t)
+bool DgP6x4Wall(int x, int y, int t, int style = 0)
 {
     for (int i = x - 2; i < x + 4; i++)
         for (int j = y - 2; j < y + 2; j++)
             if (!DgClr(i, j) || wal[j * W + i] == 0) return false;
-    for (int i = x - 2; i < x + 4; i++) for (int j = y - 2; j < y + 2; j++) DgWr(i, j, t);
+    // ★FFFFFF：帧写补齐（JS place6x4WallD；cs:44984-44998 X=⌊style/27⌋*108/Y=style%27*72）
+    int bx6 = style / 27 * 108, by6 = style % 27 * 72;
+    for (int i = x - 2; i < x + 4; i++) for (int j = y - 2; j < y + 2; j++)
+    {
+        DgWr(i, j, t);
+        frX[j * W + i] = (ushort)(bx6 + (i - (x - 2)) * 18);
+        frY[j * W + i] = (ushort)(by6 + (j - (y - 2)) * 18);
+    }
     return true;
 }
 // PlaceBanner（cs:46270 旗91）：(x,y-1) 活性+solid+非solidTop；(x,y..y+2) 净空 → 竖 3 格
@@ -10276,14 +10299,14 @@ void DgPaintings()
         // CanGenerateFeatureInArea fluff=3（7×7 区）非 2。
         if (n15 == 0)
         {
-            int e = DgPaintingEntry(x, y);
-            if (DgFeatArea3(x, y, 3) && !DgNearPicture(x, y)) DgPlacePainting(x, y, e);
+            var e = DgPaintingEntry(x, y);
+            if (DgFeatArea3(x, y, 3) && !DgNearPicture(x, y)) DgPlacePainting(x, y, e.tile, e.style);
         }
         else if (n15 == 1)
         {
-            int e = DgPaintingEntry(x, y);
+            var e = DgPaintingEntry(x, y);
             if (!DgFeatArea3(x, y, 3)) continue;
-            if (act[y * W + x] == 0) DgPlacePainting(x, y, e);
+            if (act[y * W + x] == 0) DgPlacePainting(x, y, e.tile, e.style);
             if (act[y * W + x] != 0) continue;
             int baseY = y;
             // ★OOO⑤（2026-08-18 镜像）：攀爬起点**链式**（vanilla :198/:221——第 m 轮从上轮
@@ -10303,7 +10326,7 @@ void DgPaintings()
                 {
                     e = DgPaintingEntry(x, ny);
                     if (Math.Abs(baseY - ny) >= 4 || DgNearPicture(x, ny)) break;
-                    DgPlacePainting(x, ny, e);
+                    DgPlacePainting(x, ny, e.tile, e.style);
                 }
             }
             nyPrev = baseY;
@@ -10321,15 +10344,15 @@ void DgPaintings()
                 {
                     e = DgPaintingEntry(x, ny);
                     if (Math.Abs(baseY - ny) >= 4 || DgNearPicture(x, ny)) break;
-                    DgPlacePainting(x, ny, e);
+                    DgPlacePainting(x, ny, e.tile, e.style);
                 }
             }
         }
         else if (n15 == 2)
         {
-            int e = DgPaintingEntry(x, y);
+            var e = DgPaintingEntry(x, y);
             if (!DgFeatArea3(x, y, 3)) continue;
-            if (act[y * W + x] == 0) DgPlacePainting(x, y, e);
+            if (act[y * W + x] == 0) DgPlacePainting(x, y, e.tile, e.style);
             if (act[y * W + x] != 0) continue;
             int baseX = x;
             int nxPrev = baseX;                 // ★OOO⑤：num16 链式（:265-291 同款）
@@ -10347,7 +10370,7 @@ void DgPaintings()
                 {
                     e = DgPaintingEntry(nx, y);
                     if (Math.Abs(baseX - nx) >= 4 || DgNearPicture(nx, y)) break;
-                    DgPlacePainting(nx, y, e);
+                    DgPlacePainting(nx, y, e.tile, e.style);
                 }
             }
             nxPrev = baseX;
@@ -10365,7 +10388,7 @@ void DgPaintings()
                 {
                     e = DgPaintingEntry(nx, y);
                     if (Math.Abs(baseX - nx) >= 4 || DgNearPicture(nx, y)) break;
-                    DgPlacePainting(nx, y, e);
+                    DgPlacePainting(nx, y, e.tile, e.style);
                 }
             }
         }
@@ -10398,10 +10421,10 @@ bool DgNearPicture2(int x, int y)
 // Paintings_PlacePainting + Paintings_GetPaintingEntry（style0：主墙→RandomDungeonPainting，变体墙→RandomBonePainting）
 // Paintings_GetPaintingEntry（DungeonGlobalPaintings.cs:327-360）：选型掷骰照原版序消耗
 //（style 不入哈希——DgPlaceSimple 不落帧；tile 型 240/241/242 入哈希）。
-int DgPaintingEntry(int x, int y)
+(int tile, int style) DgPaintingEntry(int x, int y)
 {
-    Console.WriteLine($"E {x} {y}");
-    int tile = 240;
+    // ★FFFFFF：style 透传（JS paintingEntry，PPPP——帧由 placer 落，style 入帧不入哈希）
+    int tile = 240, style = 0;
     if (wal[y * W + x] == dgWall)
     {
         int n = (int)r.Next(3);
@@ -10409,27 +10432,29 @@ int DgPaintingEntry(int x, int y)
         {
             int n2 = (int)r.Next(7);
             if (n2 == 6) n2 = (int)r.Next(7);
+            style = new[] { 12, 13, 14, 15, 18, 19, 23 }[n2];
         }
         else
         {
             tile = 242;
             int n2 = (int)r.Next(17);
+            style = n2 == 14 ? 15 : n2 == 15 ? 16 : n2 == 16 ? 30 : n2;
         }
     }
     else
     {
         int n = (int)r.Next(2);
-        if (n == 0) { int n3 = (int)r.Next(2); }
-        else { tile = 241; int n4 = (int)r.Next(9); }
+        if (n == 0) { style = 16 + (int)r.Next(2); }
+        else { tile = 241; style = (int)r.Next(9); }
     }
-    return tile;
+    return (tile, style);
 }
-void DgPlacePainting(int x, int y, int tile)
+void DgPlacePainting(int x, int y, int tile, int style)
 {
     // ★cs:59962-59985：240→Place3x3Wall / 241→Place4x3Wall / 242→Place6x4Wall（帧不入 dump）
-    if (tile == 240) DgP3x3Wall(x, y, tile);
-    else if (tile == 241) DgP4x3Wall(x, y, tile);
-    else if (tile == 242) DgP6x4Wall(x, y, tile);
+    if (tile == 240) DgP3x3Wall(x, y, tile, style);
+    else if (tile == 241) DgP4x3Wall(x, y, tile, style);
+    else if (tile == 242) DgP6x4Wall(x, y, tile, style);
     else DgPlaceSimple(x, y, tile);
     if (wal[y * W + x] == 87) dgLihzPlaced++;
 }
@@ -18125,9 +18150,9 @@ int FcDustAmount(int sheet, int fx)                // killTileDustAmount（cs:63
 }
 void FcDustRoll(int sheet, int fx)                 // MakeTileDust 每调的掷（cs:66744+；掷值只影响尘型→流位等价占位）
 {
-    // ★EEEEE 批引擎臂门：EE_NEWARMS=1 启用 AAAAAA-DDDDDD 全量臂+尘掷（ statues 段
+    // ★EEEEE 批引擎臂门：★FFFFFF 转正（2026-08-22 默认开）——AAAAAA-DDDDDD 全量臂+尘掷（ statues 段
     //   尚差 kill-account 级对拍，默认关=已验证 70/78 态；转录体在本文件不丢）
-    if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "1") return;
+    if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "0") return;
     switch (sheet)
     {
         case 2: case 477: case 27: case 243: case 244: case 204: case 478:
@@ -18164,8 +18189,9 @@ void FcKillTile(int x, int y)                      // killTileGen（尘掷+setTi
     int i = y * W + x;
     if (act[i] == 0) return;
     int sheet = typ[i];
-    // ★FFFFFF：KILL_TRACE 逐杀账（诊断专用）——`K x y sheet` + 调用栈两帧（臂定位）
-    if (KILLW != null)
+    // ★FFFFFF：KILL_TRACE 逐杀账（诊断专用）——`K x y sheet` + 调用栈两帧（臂定位）；
+    //   窗口=QRollWrap.On（beehives..microbiomes）与 JS 探针 __swKillCap 窗口同构
+    if (KILLW != null && QRollWrap.On)
     {
         var st2 = new System.Diagnostics.StackTrace(1, false);
         var frames = st2.GetFrames();
@@ -18271,7 +18297,7 @@ void FcTileFrame(int x, int y, bool reset = false)
 bool FcFrameImportant(int x, int y, int sh)
 {
     if (fcSparse && FC_SPARSE_SKIP.Contains(sh)) return true;   // 探针缺帧族跳过（_wwwrep 同构）
-    if (FC_PLATFORMS.Contains(sh) && Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") { FcFramePlatform(x, y); return true; }
+    if (FC_PLATFORMS.Contains(sh) && Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") { FcFramePlatform(x, y); return true; }
     switch (sh)
     {
         case 4: FcCheckTorch(x, y); return true;                             // ★AAAAAA：CheckTorch
@@ -18291,18 +18317,18 @@ bool FcFrameImportant(int x, int y, int sh)
         case 28: case 653: FcPot(x, y, sh); return true;
         case 240: case 440: Fc3x3Wall(x, y); return true;
         // ★DDDDDD：CheckSuper 通用臂（376 渔笼/443 间歇泉/444 蜂巢块/485）+ 画作墙检族
-        case 376: case 443: case 444: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckSuper(x, y, sh); return true;
-        case 485: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckSuper(x, y, sh); else FcSuper485(x, y); return true;   // ★门：默认走旧 485 专臂，EE_NEWARMS=1 走通用臂
-        case 245: case 246: case 241: case 242: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckWallArt(x, y, sh); return true;
+        case 376: case 443: case 444: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckSuper(x, y, sh); return true;
+        case 485: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckSuper(x, y, sh); else FcSuper485(x, y); return true;   // ★门：默认走旧 485 专臂，EE_NEWARMS=1 走通用臂
+        case 245: case 246: case 241: case 242: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckWallArt(x, y, sh); return true;
         case 136: FcFrame136(x, y); return true;
         case 129: case 149: FcFrame129(x, y); return true;
         case 529: FcFrame529(x, y); return true;
         case 81: FcFrame81(x, y); return true;
         // ★UUUU：178 宝石籽（reset 门掷）——FcTileFrame reset 参缺省 false
-        case 178: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcFrame178(x, y, fcReset); return true;
+        case 178: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcFrame178(x, y, fcReset); return true;
         // ★RRRR：门 + Check1x1 族
-        case 10: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckDoorClosed(x, y); return true;
-        case 11: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckDoorOpen(x, y); return true;
+        case 10: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckDoorClosed(x, y); return true;
+        case 11: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckDoorOpen(x, y); return true;
         case 36: case 135: case 141: case 210: case 239: case 428:
         case 593: case 624: case 650: case 656: case 700: case 701:
             if (Environment.GetEnvironmentVariable("EE_NO_1X1") == null) FcCheck1x1(x, y);
@@ -18317,21 +18343,21 @@ bool FcFrameImportant(int x, int y, int sh)
             return true;
         // ★CCCCC/VVVVV/YYYYY/DDDDDD：Check2x2 双支派发
         case 138: case 411: case 484: case 752: case 751:
-            if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1" || Environment.GetEnvironmentVariable("EE_NO_2X2") != null) { }
+            if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0" || Environment.GetEnvironmentVariable("EE_NO_2X2") != null) { }
             else FcCheck2x2(x, y, sh);
             return true;
         // ★YYYYY：CheckTree 树坍塌 + 观赏/宝石/灰烬树 + CheckChand 吊灯 + 向日葵
-        case 5: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y); return true;
-        case 596: case 616: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y, true); return true;
+        case 5: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckTree(x, y); return true;
+        case 596: case 616: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckTree(x, y, true); return true;
         case 583: case 584: case 585: case 586: case 587: case 588: case 589:
-            if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y, false, FC_GEM_TREE_GROUND); return true;
-        case 634: if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckTree(x, y, false, FC_ASH_TREE_GROUND); return true;
+            if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckTree(x, y, false, FC_GEM_TREE_GROUND); return true;
+        case 634: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckTree(x, y, false, FC_ASH_TREE_GROUND); return true;
         case 34: if (Environment.GetEnvironmentVariable("EE_NO_CHAND") == null) FcCheckChand(x, y, sh); return true;
         case 27: if (Environment.GetEnvironmentVariable("EE_NO_SUNF") == null) FcCheckSunflower(x, y, sh); return true;
         // ★KKKKK：CheckAlch 药草 + CheckJunglePlant
         case 82: case 83: case 84: if (Environment.GetEnvironmentVariable("EE_NO_ALCH") == null) FcCheckAlch(x, y, sh); return true;
         case 233: case 236: case 238: case 702:
-            if (Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") FcCheckJunglePlant(x, y, sh); return true;
+            if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckJunglePlant(x, y, sh); return true;
         case 324:
             if (!FcSolidAllowBottom(x, y + 1) || (FcAct(x, y + 1) && FC_BOULDERS.Contains(typ[(y + 1) * W + x]))) FcKillTile(x, y);
             return true;
@@ -18344,7 +18370,7 @@ bool FcFrameImportant(int x, int y, int sh)
         }
         default:
             if (FC_C3X2_TYPES.Contains(sh)) { Fc3x2(x, y, sh); return true; }
-            if (FC_CHECK2XX_TYPES.Contains(sh) && Environment.GetEnvironmentVariable("EE_NEWARMS") == "1") { FcCheck2xX(x, y, sh); return true; }   // ★KKKKK：2×N 竖排家具
+            if (FC_CHECK2XX_TYPES.Contains(sh) && Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") { FcCheck2xX(x, y, sh); return true; }   // ★KKKKK：2×N 竖排家具
             return false;
     }
 }
@@ -18541,7 +18567,7 @@ void Fc2x1(int x, int y, int sheet)                // Check2x1（cs:46989）
     bool ok = frX[y * W + x0 + 1] == frX[y * W + x0] + 18
         && typ[y * W + x0] == sheet && typ[y * W + x0 + 1] == sheet
         && act[y * W + x0] != 0 && act[y * W + x0 + 1] != 0;
-    bool eeLegacy = Environment.GetEnvironmentVariable("EE_NEWARMS") != "1";   // ★legacy 门=本批前 Fc2x1（29/103/462 同桌门、无 else 支/无 185 带/无尾双帧）
+    bool eeLegacy = Environment.GetEnvironmentVariable("EE_NEWARMS") == "0";   // ★legacy 门=本批前 Fc2x1（29/103/462 同桌门、无 else 支/无 185 带/无尾双帧）
     if (sheet == 103 && !eeLegacy)
     {
         // ★批4 review P1-2（1457 cs:47417-47430）：case103=桌面门【或】AnchorValid(Table)

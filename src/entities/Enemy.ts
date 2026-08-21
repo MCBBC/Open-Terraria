@@ -38,6 +38,7 @@ import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
 import { daybreakStacks } from './WeaponProj';
 import { npcCheckArmorPenetration } from './projStatus';
+import { playEnemyHitSound } from './projTargets';
 import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear, mechProbeLock } from './bossAI';
 import { mechQueenUp } from './mechQueen';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
@@ -2030,7 +2031,11 @@ export class Enemy extends Entity {
     // M11：恒对【本地玩家】判定/结算（victim-settles：damagePlayer 只扣本地血；
     // 索敌目标可为访客代理，但访客的接触伤害由其端 netPuppetContact 对傀儡
     // 权威位本地结算——此处若用目标代理会误扣本地玩家的血）
-    if (localPlayer && !localPlayer.dead && this.aabbOverlaps(localPlayer) && this.def.damage > 0) {
+    // ★1457 真眼(400)接触盒清空(GetMeleeCollisionData :96142-96145 同族语义:
+    //   真眼不造成任何接触伤害——官方报告"月总与真眼均不再造成接触伤害"的
+    //   真半边;damage 字段两版同为 60 非新改,改的是接触判定)
+    if (localPlayer && !localPlayer.dead && this.aabbOverlaps(localPlayer) && this.def.damage > 0
+      && this.vanillaId !== 400) {
       // 蜂蜜史莱姆（NPC 1 且 ai[1]=1125，Player.cs:30902-30908 接触分支最前）：
       // AddBuff(48 Honey, 1800t=30s) 后 continue——**免接触伤害/击退/无敌帧**，
       // 语义是"蹭一身蜜"而非攻击（此前仅 SLIME_ITEM_COLORS 染色，接触照常掉血）
@@ -11474,6 +11479,11 @@ export class Enemy extends Entity {
       this.dummyShake = Math.max(20, Math.min(120, dmg));
       this.dummyHitDir = Math.sign(kbx) || this.dummyHitDir;
       this.iframes = 8;
+      // 受击反馈(2026-08-21 用户报"子弹射假人无命中效果"):原版假人是 immortal
+      // 非 dontTakeDamage——StrikeNPC 走完整反馈(NPCHit15 音+伤害数字)后 life 不减。
+      // 曾只记摇晃早退 = 无音无数字,观感"没命中"。
+      playEnemyHitSound(game, this);
+      game.addDamageNumber(this.cx, this.y - 6, Math.round(dmg), false, '#FFD060');
       return true;
     }
     // 猪鲨爆裂泡泡（NPC 371，StrikeNPC cs:82102-82107）：伤害清零(num=0)不扣血，
