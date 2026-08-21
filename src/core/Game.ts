@@ -274,7 +274,11 @@ import { hitPlayer, playerCanHitEnemy, statusPlayer, playEnemyHitSound } from '.
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
-import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, type CounterweightCtx, type CounterweightPlayView } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj, DaybreakFlare, counterweightDecision, YoyoShotProj, type CounterweightCtx, type CounterweightPlayView } from '../entities/WeaponProj';
+// 1457 批 C 新弹实体（叶绿双剑 1126-1129/花瓣 1116/天雷 1117·1122/冰牙 1115 + 孢子云生成器）
+import { ChloroClaymoreBlade, ChloroSaberStab, ChloroSporeCloud, ChloroBladeSlam,
+  PetalstormShot, StormLightning, GlacierFangShot,
+  findSporeCloudSpawn, spawnChlorophyteSporeCloud } from '../entities/proj1457';
 // 环境转换器族（Clentaminator 779/5134 溶液弹 aiStyle 31 + 圣/邪/血水投掷瓶）
 import { SolutionProj, WaterSplashProj, SPRAY_PROJ_IDS, WATER_PROJ_CONV, solutionConsumesThisShot } from '../entities/SolutionProj';
 import { RainbowBolt } from '../entities/RainbowProj';
@@ -7492,9 +7496,12 @@ export class Game implements GameHooks {
           // chlorophyteBladeCounter :43161-43163 每帧递减）——计数空的那一击=奖励击：
           // ×1.5 伤 ×1.25 击退、水平出手，出手后 counter += itemAnimation×3
           // （useAnimation=32 → 96t ≈ 三次挥击的普通击）；非奖励击向下出手
-          // velocity=(dir,1)。★弹体 1457 由 229→1126（新弹未移植,Projectile 域），
-          // 本仓沿用 229 + shootSpeed 标量速度（原版 1126 裸 (dir,0/1) 速度由
-          // 其 AI 自放大,229 无该 AI → 归一化×shootSpeed 等价出手手感）----
+          // velocity=(dir,1)。★1457 批 C：弹体 229 代偿已删,真身 1126
+          // ChloroClaymoreBlade（AI_190 旋刃 :42734-43000）——裸 (dir,0/1) 出手速度
+          // 由 AI 自放大（scale 0.85→1.45、Center=MountedCenter−velocity 跟手）、
+          // 挥击尾撒 1128 孢子（×0.75 伤）、奖励（水平）击 num≥0.8 在刃尖前方
+          // FindChlorophyteSporeCloudSpawn 台面 → SpawnChlorophyteSporeCloud
+          // （1128 云 + 1129 大爆炸 ×1 伤 + Item167,:42616-42733）----
           if (heldVid === 1226) {
             this.player.facing = Math.cos(ang2) > 0 ? 1 : -1;
             const rewardHit = this.player.chlorophyteBladeCounter <= 0;      // :49409 flag9
@@ -7503,20 +7510,49 @@ export class Game implements GameHooks {
             const cKb = (this.swing.kb ?? cwMelee.knockback) * (rewardHit ? 1.25 : 1);  // :49414
             const cdir = this.player.facing;
             const cdvy = rewardHit ? 0 : 1;                                  // :49417 (dir, 0/1)
-            const cdl = Math.hypot(cdir, cdvy) || 1;
-            const csp = cwMelee.shootSpeed / this.player.attackSpeedMult;
-            const cstar = new Arrow(
+            const animMax = this.swing?.dur ?? cwMelee.useAnimation ?? 32;   // ai[1]=itemAnimationMax（:49422）
+            const blade = new ChloroClaymoreBlade(
               this.player.cx, this.player.cy - 4,
-              cdir / cdl * csp, cdvy / cdl * csp,
-              cDmg, cKb, cwMelee.shoot, null,
-              (() => { const g = projGravSpec(cwMelee.shoot); const cpd = projectileData(cwMelee.shoot);
-                return { grav: g.grav, gravDelay: g.delay, grav2: g.grav2, grav2At: g.grav2At,
-                  dragAlways: g.drag, life: cpd?.timeLeft ?? 600, pierce: Math.max(1, cpd?.penetrate ?? 1) }; })());
-            cstar.critChance = arcCrit;
-            cstar.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
-            this.entities.add(cstar, 'projectiles');
+              cdir, cdvy, cDmg, cKb, animMax, ps?.size ?? 1);                // ai[2]=itemScale（:49422）
+            blade.critChance = arcCrit;
+            blade.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            blade.spawnSpore = (sx, sy, svx, svy, life) => {
+              // NewProjectile 1128（:42940-42941）：伤 ×0.75（:42927 num27）
+              const spore = new ChloroSporeCloud(sx, sy, svx, svy,
+                Math.max(1, Math.round(cDmg * 0.75)), life);
+              spore.critChance = arcCrit;
+              spore.armorPen = blade.armorPen;
+              this.entities.add(spore, 'projectiles');
+            };
+            blade.spawnSlamCloud = (tipX, tipY) => {
+              // FindChlorophyteSporeCloudSpawn（:42565）→ SpawnChlorophyteSporeCloud（:42616）
+              const spot = findSporeCloudSpawn(this.world.store, tipX, tipY, cdir);
+              if (!spot) return;
+              const st = this.world.store;
+              spawnChlorophyteSporeCloud(st, spot.x, spot.y, cdir, cdir,
+                cDmg,
+                {
+                  spawnCloud: (sx, sy, svx, svy, dmg) => {
+                    const cloud = new ChloroSporeCloud(sx, sy, svx, svy, dmg, 0);
+                    cloud.critChance = arcCrit;
+                    cloud.armorPen = blade.armorPen;
+                    this.entities.add(cloud, 'projectiles');
+                  },
+                  spawnSlam: (sx, sy, dmg) => {
+                    const slam = new ChloroBladeSlam(sx, sy, 128, 96, dmg);   // ai[1]=128/ai[2]=96（:42728）
+                    slam.critChance = arcCrit;
+                    slam.armorPen = blade.armorPen;
+                    this.entities.add(slam, 'projectiles');
+                  },
+                  ownedClouds: () => this.entities.projectiles.filter(
+                    (q) => q instanceof ChloroSporeCloud && !q.dead).length,
+                  playSlamSound: (sx, sy) => this.sfxAt('explosion', sx, sy),  // Item167（:42732,表缺登记）
+                  dust: (sx, sy) => this.spawnParticles(sx, sy, '#3FA050', 4, 1.6, { life: 22, grav: -0.04, damp: 0.94 }),
+                });
+            };
+            this.entities.add(blade, 'projectiles');
             if (rewardHit) {
-              this.player.chlorophyteBladeCounter += (this.swing?.dur ?? cwMelee.useAnimation ?? 32) * 3;  // :49419-49421
+              this.player.chlorophyteBladeCounter += animMax * 3;  // :49419-49421
             }
             this.mining = null;
             return;
@@ -9146,6 +9182,25 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     }
   }
 
+  /** LimitPointToPlayerReachableArea（Player.cs:45832-45860）近似：鼠标世界点本就
+   *  在视口内（≤MaxWorldViewSize），只做世界边界内钳——6155/6173 出手落点用。 */
+  private limitPointToPlayerReach(x: number, y: number): { x: number; y: number } {
+    const st = this.world.store;
+    const cx = Math.min(Math.max(x, TILE * 2), (st.w - 2) * TILE);
+    const cy = Math.min(Math.max(y, TILE * 2), (st.h - 2) * TILE);
+    return { x: cx, y: cy };
+  }
+  /** Collision.CanHitLine(玩家中心→点) 转发（6155 吸附步进/6173 补雷走线门） */
+  private lineOfSightWalkable(x: number, y: number, fromX: number, fromY: number): boolean {
+    return canHitLine(this.world.store, fromX, fromY, 0, 0, x, y, 0, 0);
+  }
+  /** WorldGen.SolidTileNoPlatforms（:49700 退出实心块门） */
+  private solidPoint(x: number, y: number): boolean {
+    const st = this.world.store;
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+  }
+
   private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
     const inp = this.input;
     const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
@@ -9489,6 +9544,187 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.player.slowMagicUse = true;  // DoRunOutOfManaEffect :53258-53261
         }
         const pd = projectileData(cw.shoot);
+        // ---- 1457 批 C 新魔法武器五件（Item.cs:47405-47600 SetDefaults + Player.cs
+        //      49686-49745 出手链 + 各 AI 段,详见 entities/proj1457.ts 头注）----
+        // 6152 DaybloomStaff（:47411-47422 DefaultToMagicWeapon(1114,40,6)+useTime=4）：
+        //  useAnim 40/useTime 4 = 一挥多发的"日耀花"连射;出手门（Player.cs:2524 报告行
+        //  → :49xxx flag 块）itemAnimation < max−useTime×4 即动画末 16t 停发——
+        //  本仓 useTime 冷却模型天然 4t/发,补 swing 进度门复刻停发窗;1114 = aiStyle 24
+        //  火花弹（湿亡/×0.985 阻力/130t 后缩径消亡——Arrow dragAlways 近似）+
+        //  出手 ±4px 抖动/±0.157 旋向（:49946-49952）+ Damage ×0.8? 否——1114 无折价
+        if (critVid === 6152) {
+          const swT = this.swing?.t ?? 0, swDur = this.swing?.dur ?? 40;
+          if (swDur > 0 && swT > swDur - cw.useTime * 4) {   // 动画末 16t 停发（flag 门）
+            this.player.useTime = cw.useTime;
+            this.input.mouseDown = false;
+            break;
+          }
+          const jx = (Math.random() * 2 - 1) * 4, jy = (Math.random() * 2 - 1) * 4;   // NextVector2Circular(4,4)
+          const jr = (Math.random() * 2 - 1) * 0.15707963705062866;                  // RotatedByRandom(0.157)
+          const jc = Math.cos(jr), js = Math.sin(jr);
+          const bvx = (Math.cos(ang) * cw.shootSpeed) * jc - (Math.sin(ang) * cw.shootSpeed) * js;
+          const bvy = (Math.cos(ang) * cw.shootSpeed) * js + (Math.sin(ang) * cw.shootSpeed) * jc;
+          const bloom = new Arrow(px + jx, py + jy, bvx, bvy, cw.damage, cw.knockback, 1114, null,
+            { grav: 0, dragAlways: 0.985, life: 600, pierce: 1 });
+          bloom.critBonus = this.player.critChance('magic') + (itemCombat(critVid)?.crit ?? 0) + (ps?.crt ?? 0);
+          bloom.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          bloom.frostEligible = false;   // magic 弹不吃冰霜引擎
+          this.entities.add(bloom, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');                // UseSound=Item8（itemUseSound 表）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 6153 GlacierFang（:47423-47434 DefaultToMagicWeapon(1115,24,4)+channel=true）：
+        //  蓄力冰矛——channel 按住蓄力（ai0 0→60,GetSlowMagicUseRate 步进）,松手/满档
+        //  释放（伤 ×Remap(charge,0,60,1,4)/kb ×4/pen 1→3）。挂手弹独占分流
+        //  （AI_208 :37576-37750,同 ChargedBlaster channel 先例）
+        if (cw.shoot === 1115) {
+          const gfOwner = this.player;
+          const gfItemId = ITEM_BY_KEY[def.key];
+          const gf = new GlacierFangShot(px, py, Math.cos(ang), Math.sin(ang),
+            cw.damage, cw.knockback, {
+              channel: () => this.input.mouseHeld && !this.input.uiBlocking
+                && gfOwner.inv.heldItem()?.id === gfItemId && !gfOwner.dead,
+              aim: () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+              payMana: () => {
+                // CheckMana(pay:true)（:37613）——ManaV2 蓝不足照充（statMana=0）
+                const cost = cwCost;
+                if (this.player.mana >= cost) this.player.mana -= cost;
+                else { this.player.mana = 0; this.player.slowMagicUse = true; }
+              },
+              chargeRate: () => (this.player.slowMagicUse ? 1 : 0.4),   // GetSlowMagicUseRate :47434-47440
+            });
+          gf.critChance = critTotal;
+          gf.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          this.entities.add(gf, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(10);   // SetDummyItemTime(10)（:37609）
+          this.player.onManaItemUsed();
+          this.input.mouseDown = false;
+          break;
+        }
+        // 6154 Petalstorm（:47435-47446 DefaultToMagicWeapon(1116,42,5)+useStyle15）：
+        //  每击 3 瓣（Player.cs:48010-48026）：v=(Circular(1,1)+CircularEdge(3,2))(Y>0 取反)
+        //  ×2 + aim×2;ai1=(itemAnimation/max×0.66+miscCounter)%1 相位;出生点挂墙回中
+        if (cw.shoot === 1116) {
+          const p6154 = this.player;
+          const aimX6154 = Math.cos(ang) * cw.shootSpeed, aimY6154 = Math.sin(ang) * cw.shootSpeed;
+          for (let m = 0; m < 3; m++) {
+            const ax = Math.random() * 2 - 1, ay = Math.random() * 2 - 1;              // Circular(1,1)
+            const ea = Math.random() * Math.PI * 2;                                    // CircularEdge(3,2)
+            let evx = Math.cos(ea) * 3, evy = Math.sin(ea) * 2;
+            if (evy > 0) evy *= -1;                                                    // Y>0 取反（:48014）
+            // num22 = itemAnimation/max×0.66 + miscCounterNormalized（:48017）→ ai1=num22%1
+            // （miscCounterNormalized = Main.miscCounter 全局动画计数归一——本仓 tickCount/60 近似）
+            const phase = ((this.swing?.dur ? (this.swing.dur - (this.swing?.t ?? 0)) / this.swing.dur * 0.66 : 0)
+              + (this.tickCount / 60)) % 1;
+            let sx6154 = p6154.cx + p6154.facing * 15, sy6154 = p6154.cy + 3;          // :48018-48019
+            const stx = Math.floor(sx6154 / TILE), sty = Math.floor(sy6154 / TILE);
+            if (this.world.store.inBounds(stx, sty) && this.world.store.isSolid(stx, sty)) {
+              sx6154 = p6154.cx; sy6154 = p6154.cy;                                    // 挂墙回 MountedCenter（:48020-48025）
+            }
+            const petal = new PetalstormShot(sx6154, sy6154,
+              (ax + evx) * 2 + aimX6154, (ay + evy) * 2 + aimY6154,
+              cw.damage, cw.knockback, phase);
+            petal.critChance = critTotal;
+            petal.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            this.entities.add(petal, 'projectiles');
+          }
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');                // UseSound=MysticBloom（表缺登记）
+          this.input.mouseDown = false;
+          break;
+        }
+        // 6155 LightningStrike（:47447-47453 DefaultToStaff(1117,8,55,30)+SetWeaponValues
+        //  (150,10,10)）：落点 = 鼠标钳可达 → 沿 aim 步进吸附 → 退出实心块（≤16 步,
+        //  :49686-49702）;1117 Damage() ×0.8（Projectile.cs:13581-13586）已折算
+        if (cw.shoot === 1117) {
+          const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const lim = this.limitPointToPlayerReach(mwx, mwy);
+          let sx6155 = px, sy6155 = py;
+          const stepX = Math.cos(ang) * cw.shootSpeed, stepY = Math.sin(ang) * cw.shootSpeed;
+          for (let k = 0; k < 400; k++) {
+            sx6155 += stepX; sy6155 += stepY;
+            if (Math.hypot(sx6155 - lim.x, sy6155 - lim.y) < 20 + Math.abs(stepX) + Math.abs(stepY)) {
+              sx6155 = lim.x; sy6155 = lim.y;                // 吸附（:49695-49698）
+              break;
+            }
+            if (!this.lineOfSightWalkable(sx6155, sy6155, px, py)) break;   // CanHitLine 断即停
+          }
+          const ux = Math.cos(ang), uy = Math.sin(ang);
+          for (let k = 0; k < 16 && this.solidPoint(sx6155, sy6155); k++) {             // 退出实心（:49700-49703）
+            sx6155 -= ux; sy6155 -= uy;
+          }
+          const bolt6155 = new StormLightning(1117, sx6155, sy6155,
+            Math.max(1, Math.round(cw.damage * 0.8)), cw.knockback);
+          bolt6155.critChance = critTotal;
+          bolt6155.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+          bolt6155.mouseWorld = () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; };
+          this.entities.add(bolt6155, 'projectiles');
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');                // DefaultToStaff UseSound=Item43
+          this.input.mouseDown = false;
+          break;
+        }
+        // 6173 ArcSurge（:47556-47564 DefaultToStaff(1122,8,18,18)+useTime=6+
+        //  SetWeaponValues(180,4)+noUseGraphic）：主雷 = 鼠标钳可达 + 距离 <shootSpeed×20
+        //  沿 aim 外推 + ±20px 抖动;再向 GetSparkleGuitarTarget 前 2 个"在瞄准半平面"
+        //  的有效目标各补一颗（:49704-49745,落点沿视线走到遮挡为止）
+        if (cw.shoot === 1122) {
+          const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const lim = this.limitPointToPlayerReach(mwx, mwy);
+          const maxD = cw.shootSpeed * 20;                   // num205（:49708）
+          let sx6173 = lim.x, sy6173 = lim.y;
+          const d6173 = Math.hypot(lim.x - px, lim.y - py);
+          if (d6173 < maxD) {
+            sx6173 += Math.cos(ang) * (maxD - d6173);        // :49710-49712 外推
+            sy6173 += Math.sin(ang) * (maxD - d6173);
+          }
+          sx6173 += (Math.random() * 2 - 1) * 20; sy6173 += (Math.random() * 2 - 1) * 20;  // Circular(20,20)
+          const drop6173 = (bx: number, by: number) => {
+            const b = new StormLightning(1122, bx, by, cw.damage, cw.knockback);
+            b.critChance = critTotal;
+            b.armorPen = this.player.equipStats.armorPen + (ps?.arpen ?? 0);
+            this.entities.add(b, 'projectiles');
+          };
+          drop6173(sx6173, sy6173);
+          // 补雷（:49724-49743）：有效目标 = 800px 内可追敌（GetSparkleGuitarTarget 口径）
+          //  + 与 aim 点积 >0.5（前半平面）;落点沿视线 8px 步进走到遮挡/贴近
+          const cands: Array<{ cx: number; cy: number }> = [];
+          for (const q of this.entities.enemies) {
+            const e = q as { cx: number; cy: number; dead: boolean; maxHp: number };
+            if (e.dead || e.maxHp <= 5) continue;
+            if (Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) > 800) continue;
+            cands.push(e);
+          }
+          let extra = 0;
+          for (let ci = 0; ci < cands.length && extra < 2; ci++) {
+            const t = cands[Math.floor(Math.random() * cands.length)];
+            const dot = ((t.cx - px) / (Math.hypot(t.cx - px, t.cy - py) || 1)) * Math.cos(ang)
+              + ((t.cy - py) / (Math.hypot(t.cx - px, t.cy - py) || 1)) * Math.sin(ang);
+            if (dot < 0.5) continue;                         // :49730 前半平面门
+            let bx = px, by = py;
+            for (let k = 0; k < 200; k++) {
+              const ddx = t.cx - bx, ddy = t.cy - by;
+              const dl = Math.hypot(ddx, ddy) || 1;
+              if (dl <= 8) break;
+              const stp = Math.min(8, dl);
+              bx += ddx / dl * stp; by += ddy / dl * stp;
+              if (!this.lineOfSightWalkable(bx, by, px, py)) break;   // CanHitLine 走到遮挡（:49732-49734）
+            }
+            if (Math.hypot(bx - t.cx, by - t.cy) > 16) continue;      // :49737 未贴近 → 跳过
+            drop6173(bx, by);
+            extra++;
+          }
+          this.player.useTime = this.player.getSlowMagicUseTime(cw.useTime);
+          this.player.onManaItemUsed();
+          this.playUseSound(critVid, 'tink');                // UseSound=Item15
+          this.input.mouseDown = false;
+          break;
+        }
         // 彩虹枪 250（aiStyle 46）：专用弹链——隐形飞行头铺 251 彩虹段（40s 持续
         // 伤害带），通用 Arrow 无法表达铺段/恒速拱弧/静态免疫
         if (cw.shoot === 250) {
@@ -9799,6 +10035,29 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           this.input.mouseDown = false;
           break;
         }
+        // 1457 叶绿军刃 1227 重做（Item.cs:15140-15158 useStyle13/useAnim30/useTime6/
+        // shoot 1127/damage80/shootSpeed2.4/noMelee/noUseGraphic/autoReuse）：短剑直刺
+        // 弹 1127（AI_161 1127 支 :48483-48560）。出手向量（Player.cs:47745-47756）：
+        // aim 单位向量.RotatedBy(0.65×Remap(meleeSpeed,1,1/3,1,0.25)×(rand−0.5))
+        // ×(aim长−randDirection×0.5)；命中挂 397 孢子侵染 300t（projstatus 表）。
+        // 1227 melee+noMelee → 'shot' 兜底,在此单点分流（同 491/636 先例）
+        if (cw.shoot === 1127) {
+          const ms = this.player.attackSpeedMult > 0 ? 1 / this.player.attackSpeedMult : 1;   // meleeSpeed
+          const aimX = Math.cos(ang) * cw.shootSpeed;
+          const aimY = Math.sin(ang) * cw.shootSpeed;
+          const spread = 0.65 * (1 + (0.25 - 1) * Math.min(1, Math.max(0, (ms - 1) / (1 / 3 - 1))));  // Remap
+          const rot = Math.atan2(aimY, aimX) + spread * (Math.random() - 0.5);   // :47754
+          const len = Math.max(0.4, cw.shootSpeed - (Math.random() * 2 - 1) * 0.5);  // :47755（NextFloatDirection×0.5）
+          const stab = new ChloroSaberStab(Math.cos(rot), Math.sin(rot), len, ms,
+            cw.damage, cw.knockback);
+          stab.critChance = critTotal;
+          stab.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥ 近战含磨刀
+          this.entities.add(stab, 'projectiles');
+          this.player.useTime = cw.useTime;
+          this.playUseSound(critVid, 'swing');                 // UseSound 缺省（Item.cs 无 UseSound 行）
+          this.input.mouseDown = false;
+          break;
+        }
         // 491 飞刀（item 3030，aiStyle 9 Old 分支 AI_009_MagicMissiles_Old
         // :40753-40910，入口分流 :40520-40524）：channel 光标操控 + 松手回旋回收，
         // 直飞 Arrow 表达不了。3030 melee+noMelee → 本 'shot' 兜底（melee 族门
@@ -9929,6 +10188,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       this.entities.add(clone, 'projectiles');
     };
     yoyo.counterweight = (hx, hy, d, k) => this.playerCounterweight(hx, hy, d, k, yoyo);
+    // 1457 EverySomeYoyoHits per-hit 族伴生弹（Projectile.cs:13761-13870 NewProjectile；
+    //  掷流/索敌/扇形全在 YoyoProj.onYoyoHit 侧——此处只负责落桶）
+    yoyo.spawnShot = (spec) => {
+      this.entities.add(new YoyoShotProj(spec), 'projectiles');
+    };
   }
 
   /** 配重球运行上下文（CounterweightProj ctx——Game 闭包;魔法线克隆复用同物品 channel） */
@@ -15800,9 +16064,23 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
       // ★1457 骨弹换号（ProcessHitAgainstNPC :44748-44754：sItem.type==1166 骨剑/
       // 1320 骨镐 近战命中 → 75% 基伤骨弹,1456 :43732-43738 为 proj 21,1457 换
-      // 1111 BoneArrow 友方款）。本仓该链本就未移植（全仓无 proj 21 命中派生）→
-      // 换弹号无宿主,两件物品已注册（vanilla.json）但无命中派生行为。备案：移植时
-      // 直接按 1111 落地（勿先补 21 再换号）。
+      // 1111 BoneArrow 友方款）。1457 批 C：按备案直接以 1111 落地——出生点 =
+      // 挥击命中盒上半随机点（itemRectangle.Left+rand(W), Top+rand(H/2)）,
+      // 速度 = (dir×(1+rand×5), −1−rand×3),伤 = originalDamage×0.75（:44751-44753）;
+      // 1111 = aiStyle 2 抛物线骨弹（SetDefaults :10355-10362:16×16/scale1.2/melee）
+      const heldVidBone = this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1;
+      if (heldVidBone === 1166 || heldVidBone === 1320) {
+        const bx = e.x + Math.random() * e.w;
+        const by = e.y + Math.random() * (e.h / 2);
+        const bone = new Arrow(bx, by,
+          kdir * (1 + Math.random() * 5), -1 - Math.random() * 3,
+          Math.max(1, Math.round(baseDmg * 0.75)), kb, 1111, null,
+          { grav: 0.3, life: 1200, pierce: 1 });
+        bone.critChance = 0.04 + this.player.critChance('melee') / 100
+          + (itemCombat(heldVidBone)?.crit ?? 0) / 100;
+        bone.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+        this.entities.add(bone, 'projectiles');
+      }
       // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
       applyFrostBurn(this.player.equipStats.frostBurn, e as unknown as Record<string, number>);
       // 岩浆石/火焰护手（Player.cs:6184-6198 三段掷：1/4→6s / 3/8→4s / 3/8→1s OnFire3）

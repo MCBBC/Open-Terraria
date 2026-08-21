@@ -10,6 +10,15 @@ export interface SummonFx {
   dmg?: number;       // minionDamage += X（加算乘区）
   kb?: number;        // minionKB += N
   whipRange?: number; // whipRangeMultiplier += X
+  /** 1457 鞭 tag 栈族（ApplyEquipFunctional :13068-13083）：
+   *  tagEffectDuration += N（SilverBracer 6156 系 +2 → tag/proc/buff 时长 ×3） */
+  tagDur?: number;
+  /** maxTagEffects += N（6156/6158/6159 系各 +1——多鞭 mark 并存上限） */
+  maxTag?: number;
+  /** accSnakeBand（6157/6162/6186——每 3 挥中段补挥背包下一把鞭,需 maxTagEffects>1） */
+  snakeBand?: boolean;
+  /** accWickedArmlet（6159/6163/6179/6182——出鞭击退 +1,ItemCheck_Shoot :49159-49163） */
+  wickedArmlet?: boolean;
   /** OOA 配饰族（3809-3812）：dd2Accessory 布尔——全部佩戴只计一次（Player.cs:12571-12575） */
   dd2?: boolean;
 }
@@ -26,6 +35,26 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   3810: { dd2: true },              // 侍从盾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:12571——旧每件累加+4/+40%）
   3811: { dd2: true },              // 女猎手扣盾（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:12571——旧每件累加+4/+40%）
   3812: { dd2: true },              // 武僧腰带（OOA 布尔:全族只计一次 +1哨兵/+10%召唤伤,:12571——旧每件累加+4/+40%）
+
+  // ---- 1457 召唤师鞭 tag 配饰九件（ApplyEquipFunctional case 6156-6163/:14615-14632
+  //      + 组合件 6179/6182/6183 :14690-14715;数值段 :13068-13083）----
+  //  6156 SilverBracer:tagEffectDuration += 2（时长 ×3!）+ maxTagEffects++（:13068-13074,
+  //    minionDamage += 0f 死代码勿抄）;6157 SnakeBand:accSnakeBand;6158 MobiusStrip:
+  //    maxTagEffects++ + whipRangeMultiplier += 0.1;6159 WickedArmlet:maxTagEffects++;
+  //  组合件=旗标并集:6162 OuroborosRing = MobiusStrip+SnakeBand（:14624-14627）;
+  //  6163 TwilightGrasp = SilverBracer+WickedArmlet（:14628-14630 → 时长+2+双 +1）;
+  //  6179 ArmletOfRuin = WickedArmlet+accArmletOfRuin（:14690-14693）;6182 WickedClaws
+  //  = WickedArmlet+autoReuseGlove+meleeSpeed+0.12（:14705-14709）;6183 SilverShield
+  //  = SilverBracer+noKnockback+fireWalk（:14711-14715）
+  6156: { tagDur: 2, maxTag: 1 },                 // 银护腕（上锁盒 1/4,OpenLockBox :9452-9454）
+  6157: { snakeBand: true },                      // 蛇环
+  6158: { maxTag: 1, whipRange: 0.1 },            // 莫比乌斯带（石巨人袋 1/6,OpenBossBag :7516-7518）
+  6159: { maxTag: 1, wickedArmlet: true },        // 邪恶臂镯
+  6162: { maxTag: 1, whipRange: 0.1, snakeBand: true },   // 衔尾蛇环 = 6158+6157
+  6163: { tagDur: 2, maxTag: 2, wickedArmlet: true },     // 暮光之握 = 6156+6159
+  6179: { maxTag: 1, wickedArmlet: true },        // 毁灭臂镯 = 6159+accArmletOfRuin（旗在 Player 侧）
+  6182: { maxTag: 1, wickedArmlet: true },        // 邪恶之爪 = 6159+autoReuseGlove+近战速+12%（Player 侧）
+  6183: { tagDur: 2, maxTag: 1 },                 // 白银之盾 = 6156+免击退+火焰块（Player 侧）
 
   // ---- DD2 头盔散件（ApplyEquipFunctional :12709-12810:头盔 maxTurrets;2026-08-13 补——
   // 旧缺 8 件致哨兵上限卡 ~3。T1 头 3797/3800/3803/3806 各 +1;T3 头 3871/3874/3877/3880

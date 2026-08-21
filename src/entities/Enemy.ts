@@ -358,15 +358,11 @@ export class Enemy extends Entity {
    *  realLife/链体传播、双子 125/126 互标（:80821-80841）。单人净空 = 表缺席,
    *  per-client 族退化为单掷直掉 */
   interactionSlots = new Set<number>();
-  /** 鞭 tag（Projectile.ApplyTag → npc.whipTimeLeft 系）：剩余 tick 与附加伤害
-   *  （240t=4 秒；随从命中被 tag 敌伤害 +whipTagDmg） */
-  whipTagT = 0;
-  whipTagDmg = 0;
-  whipTagCrit = 0;
-  whipTagItem = 0;
-  /** 鞭 proc（proc 型鞭命中启用 240t，随从首跳触发后清零） */
-  whipProcT = 0;
-  whipProcItem = 0;
+  // 鞭 tag 态已于 1457 批 D 迁出（原 1456 单例 whipTagT/whipTagDmg/whipTagCrit/
+  // whipTagItem/whipProcT/whipProcItem 六字段 + tick 递减退役）——1457 TagEffectStack
+  // 挂玩家（Player.tagEffectStack,per-NPC 双表在栈内 Map）,查询走
+  // owner.tagEffectStack.anyTagged(id)/canProcOnNPC(type,id)。 WhipProj 命中侧写入、
+  // MinionProj/Arrow 命中侧消费。
   /** 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382） */
   stepUp = true;
   stepUpHolds = true; stepUpNpc = true;   // holdsMatching + IgnoredByNpcStepUp（NPC.cs:54382 flag22 恒 true（飞行 AI 不走地面段））
@@ -1539,8 +1535,6 @@ export class Enemy extends Entity {
     this.lightRGB = null; // 点光由 AI 每帧重写（不残留上一帧状态）
     this.lightRGBAt = null;
     if (this.hpBarT > 0) this.hpBarT--;
-    if (this.whipTagT > 0) this.whipTagT--;
-    if (this.whipProcT > 0) this.whipProcT--;
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
     this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）

@@ -1545,6 +1545,12 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
     // :37074-37107 ai1==40 清全部 456/462/455/452/454 弹 + NPC 400(+gore 619-622)
     if (e.ai1 === 40) mlClearDeathrayProjectiles(game);
     if (e.ai1 >= 60) { // :37109-37127 清除全部部件与自身
+      // ★离场非击败:原版 active=false 直清不播击败公告/不写 downed 旗
+      // (玩家全灭/离场语义)。曾 dead 直写 → Game boss 槽检测 dead 走击败流程
+      // = "月亮领主已被打败!"+downed_398 误置位(用户报 F6 召唤即"已被打败",
+      // 实为召唤头顶 150px 出生演出期玩家被部件碰撞秒杀 → ai0=3 清族误记账)。
+      // bossFled → Game boss 块播 BossFled toast、不写 downed(2026-08-22 修)
+      e.bossFled = true;
       for (const n of game.enemies() as Enemy[]) {
         if (!n.dead && (n.vanillaId === 396 || n.vanillaId === 397 || n.vanillaId === 400) && n.ai3 === e.id) n.dead = true;
       }

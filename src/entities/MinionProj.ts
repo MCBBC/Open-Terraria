@@ -678,7 +678,8 @@ export class MinionProj extends Entity {
           const bx = this.cx + this.facing * 40 - 40, by = this.cy - 20;
           if (en.x + en.w <= bx || en.x >= bx + 80 || en.y + en.h <= by || en.y >= by + 40) continue;
           if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
-          const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy);
+          const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy,
+            this.ownerRef());
           en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1); // 随从=单发弹语义(不设敌方帧)
           applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           this.attackFlash = 24;
@@ -734,7 +735,13 @@ export class MinionProj extends Entity {
       // 黑收成 OnTaggedHit 直伤通道（916 等价）
       en.hurtFx = (d: number) => { en.hurt(d, Math.sign(en.cx - this.cx), -1, game); };
       const res = resolveWhipTagHit(en, dmg, game,
-        (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
+        (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy,
+        this.ownerRef());
+      // 圣殿骑士背包 6176（accGolemSentryBackpack :12963-12967）：sentry/SentryShot
+      // 命中 10% 强制暴击（×2,与 TagCrit 暴击同通道）
+      let golemCrit = false;
+      const gOwn = this.ownerRef();
+      if (this.sentry && gOwn?.equipStats.accGolemSentryBackpack && Math.random() < 0.1) golemCrit = true;
       // 击退 = 武器 kb×0.5（本作接触系数）+ minionKB 加算（GetWeaponKnockback :52477-52482：
       // 大力士甲虫/纸莎草 +2——首版聚合了 equipStats.minionKB 但漏消费，终审补接；
       // buff 段 = 醉酒 +1 :11520 / 饥饿 -0.5 / 极饿 -1 :11570/:11594，2026-08-20 饥饿链补）
@@ -743,7 +750,8 @@ export class MinionProj extends Entity {
       const mkb = (o0?.equipStats?.minionKB ?? 0) + (o0?.buffs?.minionKbBonus ?? 0);
       const pen0 = ((owner0 as unknown as { equipStats?: { armorPen?: number } } | null)?.equipStats?.armorPen ?? 0)
         + (projectileData(this.projId)?.armorPenetration ?? 0); // StrikeNPC :12068:玩家AP+弹幕AP 两源
-      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
+      en.hurt(golemCrit ? res.dmg * 2 : res.dmg,
+        Math.sign(en.cx - this.cx) * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
       applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
       this.attackFlash = 24;
       anyHit = true;
@@ -811,13 +819,15 @@ export class MinionProj extends Entity {
     let bestD = maxRange;
     let tagged: EnemyLike | null = null;
     let taggedD = maxRange;
+    // 鞭 tag 查询走玩家栈（1457 TagEffectStack——敌实体不再存 tag 态）
+    const stack = p.tagEffectStack;
     for (const e of game.enemies()) {
-      const en = e as never as EnemyLike & { dead: boolean; whipTagT?: number };
+      const en = e as never as EnemyLike & { dead: boolean };
       if (!playerCanHitEnemy(e, game)) continue;   // CanBeChasedBy :91070——友好 NPC 不入索敌（防追踪睡渔夫）
       if (!en || en.dead) continue;
       const d = Math.hypot(en.cx - this.cx, en.cy - this.cy);
       if (d < bestD) { bestD = d; best = en; }
-      if (en.whipTagT && en.whipTagT > 0 && d < taggedD) { taggedD = d; tagged = en; }
+      if (stack.anyTagged(en.id) && d < taggedD) { taggedD = d; tagged = en; }
     }
     // 右键集火优先（OwnerMinionAttackTargetNPC 模板 :27431：有效且距本随从 <900）
     const focus = (p as unknown as { minionTargetId?: number }).minionTargetId ?? -1;
@@ -967,7 +977,7 @@ export class MinionProj extends Entity {
             // 2026-08-13 接通）;tag 伤 ×SummonTagDamageMultiplier 0.5（ProjectileID.cs:31）
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
-              SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
+              SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef());
             en.hurt(res.dmg, 0, 0, game, 0, false, 1, false, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443)
             applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           }
@@ -1655,7 +1665,7 @@ export class TigerPounce extends Entity {
       this.hitSet.add(en.id);
       en.hurtFx = (d: number) => { en.hurt(d, 0, -1, game); };
       const res = resolveWhipTagHit(en, Math.max(1, Math.round(this.damage * mul)), game,
-        add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy);
+        add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy, this.ownerRef());
       en.hurt(res.dmg, 0, -1, game); // knockBack=0（:46470 生成传 0）
     }
     void this.ownerRef;

@@ -30,6 +30,7 @@ import { dyeEntryOf } from '../data/vanillaDyes';
 import { ARMOR_SET_BONUSES, type ArmorSetBonus } from '../data/vanillaArmorSets';
 import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
+import { TagEffectStack } from './WhipTag';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { isCrackedSheet, isCrackedAt } from '../world/CrackedBricks';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
@@ -206,6 +207,11 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     minionDmg: number;     // minionDamage += X（加算乘区，散件+套装合计）
     minionKB: number;      // minionKB += N
     sentrySlots: number;   // maxTurrets += N
+    // ---- 1457 鞭 tag 栈族（ApplyEquipFunctional :13068-13083 + :14615-14648）----
+    maxTagEffects: number;   // Player.maxTagEffects（:1187,默认 1;6156/6158/6159 系各 +1,满配 4）
+    tagEffectDuration: number; // Player.tagEffectDuration（:1189,默认 1f;6156 系 +2f → ×3）
+    accSnakeBand: boolean;   // Player.accSnakeBand（:1191;6157/6162/6186——每 3 挥中段补挥下一把鞭）
+    accWickedArmlet: boolean;  // Player.accWickedArmlet（:1197;6159/6163/6179/6182——出鞭击退+1 :49159）
     fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
     /** 浮漂饰品弹型覆写（Player.overrideFishingBobber :1920；-1=无，986-993=5139-5146） */
     overrideFishingBobber: number;
@@ -220,6 +226,22 @@ export type PlayerEquipStats = {    def: number; mana: number; hpPerSec: number;
     merman: boolean;       // accMerman（:15019/14587/14855）：水中不耗气
     arcticDivingGear: boolean; // 1861（:14701）：专家雪原冷水 Chilled 免疫（:27692）
     jellyfishGlow: boolean;    // 1860（:14682-14688）：浸水发光
+    // ---- 1457 新配饰行为旗（ApplyEquipFunctional case 6166-6189 :14596-14739）----
+    accSentryBackpack: boolean;      // 6172/6175/6176/6177（:14613/:14671/:14679/:14683）
+    accGolemSentryBackpack: boolean; // 6176 TemplarSling（:14680）——sentry/SentryShot 10% 强制暴击
+    accHarpyCharm: boolean;          // 6166/6180/6181（:14598/:14695/:14700）——弧线引矢
+    accSeraphNecklace: boolean;      // 6180（:14697）——引矢冷却 ×0.8（:28671-28673）
+    hasPhoenixQuiver: boolean;       // 6181（:14701）——引矢标记箭 PhoenixQuivered（命中 323/300）
+    accSnappingStone: boolean;       // 6167（:14601）——远程命中脉冲
+    accPyroclast: boolean;           // 6178（:14688）——近战命中脉冲（45 伤/300px/323）
+    accArmletOfRuin: boolean;        // 6179（:14692）——tag 命中脉冲（150 伤/400px）
+    accPoisonBarb: boolean;          // 6165/6184/6185（:14610/:14717/:14722）——箭 100% 中毒 90t
+    accHoneyedBarb: boolean;         // 6184（:14718）——箭命中 20% 放蜂
+    catalystBand: boolean;           // 6185（:14724）——命中 398 AcceleratePoisons 300t
+    accSharpBarb: boolean;           // 6160（:14607;rangedCrit+8 走 accfx 主链,旗登记）
+    ammoCyclerMode: number;          // 6168/6169/6193/6194（:14635-14648）PlayerAmmoCyclingMode
+    mysticSashDodge: boolean;        // 6189（:14739）——受击闪避（批 1 段登记位）
+    accTimerCrit: boolean;           // 6170（:14604）——时间蓄能暴击（登记未接）
 };
 
 export class Player extends Entity {
@@ -462,6 +484,15 @@ export class Player extends Entity {
    *  效果实装（:9790-9802）：311 镰鞭=鞭攻速+35%、308 剑鞭=+25%、314 荆棘鞭=+12%
    *  ——Game 鞭 useTime 结算读取；312/365 登记持续期（效果端暂不接） */
   whipBuffs: Record<number, number> = {};
+  // ---- 1457 鞭 tag 栈（TagEffectStack,Player.cs:1867 字段 + :56750 init + :24785
+  //      Update）——每玩家 MRU 栈,容量 5;门控 maxTagEffects/tagEffectDuration 出
+  //      equipStats（配饰 6156/6158/6159 系）。 WhipProj 打 tag、随从/哨兵命中侧
+  //      resolveWhipTagHit 统一经此查询（敌实体不再存 tag 态） ----
+  tagEffectStack = new TagEffectStack(this);
+  /** Player.maxTagEffects（:1187,默认 1;ResetEffects :18633 重置→equipStats 聚合） */
+  get maxTagEffects(): number { return this.equipStats.maxTagEffects; }
+  /** Player.tagEffectDuration（:1189,默认 1f）——tag/proc/自 buff 时长乘区 */
+  get tagEffectDuration(): number { return this.equipStats.tagEffectDuration; }
   // ---- 信息显示运行态(Player.cs 对应字段) ----
   /** 各信息显示开关(Player.hideInfo[13] :776;按下标=图标序,随存档;
    *  唯一交互=背包界面点图标切换,Main.cs:46547-46573) */
@@ -802,6 +833,13 @@ export class Player extends Entity {
     let manaCostMul = 1;
     let divingHelm = false, merman = false;
     let arcticDivingGear = false, jellyfishGlow = false;
+    // ---- 1457 新配饰行为旗（ApplyEquipFunctional case 6166-6189 :14596-14739）----
+    let accSentryBackpack = false, accGolemSentryBackpack = false;
+    let accHarpyCharm = false, accSeraphNecklace = false, hasPhoenixQuiver = false;
+    let accSnappingStone = false, accPyroclast = false, accArmletOfRuin = false;
+    let accPoisonBarb = false, accHoneyedBarb = false, catalystBand = false;
+    let accSharpBarb = false, mysticSashDodge = false, accTimerCrit = false;
+    let ammoCyclerMode = 0;   // PlayerAmmoCyclingMode（PlayerAmmoCyclingMode.cs:None=0/AmmoSlots=1/FullInventory=2/Random=3）
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
@@ -857,6 +895,41 @@ export class Player extends Entity {
       if (accVid === 5547) counterWeight = 1079;              // 黑配重球（:14215-14218）
       if (accVid >= 3309 && accVid <= 3314) counterWeight = 556 + accVid - 3309;  // 彩色配重球（:14219-14222）
       if (accVid === 3334) yoyoGlove = true;                  // 悠悠球手套（:14223-14226）
+      // ---- 1457 新配饰行为旗（ApplyEquipFunctional case 6166-6189 :14596-14739;
+      //      数值主属性走下方 accfx/SUMMON_GEAR 链,此处只收行为布尔/模式）----
+      if (accVid === 6166) { accHarpyCharm = true; critRanged += 5; }              // 鹰妖护符（:14596-14599）
+      else if (accVid === 6167) accSnappingStone = true;                           // 拍击石（:14600-14602）
+      else if (accVid === 6170) accTimerCrit = true;                               // 计时暴击（:14603-14605,登记未接）
+      else if (accVid === 6160) { accSharpBarb = true; critRanged += 8; }          // 锐刺（:14606-14608 rangedCrit+8 :13062-13066）
+      else if (accVid === 6165) accPoisonBarb = true;                              // 毒刺（:14609-14611）
+      else if (accVid === 6168) { ammoCyclerMode = 1; }                            // 弹药循环·四格（:14634-14637）
+      else if (accVid === 6169) { ammoCyclerMode = 2; }                            // 弹药循环·全背包（:14638-14641）
+      else if (accVid === 6193) { ammoCyclerMode = 3; }                            // 弹药循环·随机（:14642-14645）
+      else if (accVid === 6194) { ammoCyclerMode = 0; }                            // 弹药循环·禁用（:14646-14648,仅 +8% 远程伤）
+      else if (accVid === 6172) accSentryBackpack = true;                          // 重携哨兵背包（:14612-14614）
+      else if (accVid === 6175) {                                                  // 侦察背包（:14670-14677）
+        accSentryBackpack = true;
+        dmgMelee += 0.05; dmgMagic += 0.05; dmgRanged += 0.05; minionDmg += 0.05;  //   四系伤+5%（:14673-14676;aggro-400 仇恨轴登记未接）
+      } else if (accVid === 6176) {                                                // 圣殿骑士背包（:14678-14681）
+        accSentryBackpack = true;
+        accGolemSentryBackpack = true;                                             //   sentry/SentryShot 10% 强制暴击（:12963-12967）
+      } else if (accVid === 6177) { accSentryBackpack = true; noKnockback = true; } // 皇家卫队背带（:14682-14685）
+      else if (accVid === 6178) { magmaStone = true; accPyroclast = true; }        // 焰爆石（:14686-14689）
+      else if (accVid === 6179) accArmletOfRuin = true;                            // 毁灭臂镯（:14690-14693;6159 旗走 SUMMON_GEAR）
+      else if (accVid === 6180) {                                                  // 炽天使项链（:14694-14698）
+        accHarpyCharm = true; longInvince = true; accSeraphNecklace = true;
+      } else if (accVid === 6181) {                                                // 凤凰箭袋（:14699-14704）
+        accHarpyCharm = true; hasPhoenixQuiver = true; moltenQuiver = true;
+        equipHasQuiver = true; arrowDmg += 0.1;
+      } else if (accVid === 6182) {                                                // 邪恶之爪（:14705-14710）
+        autoReuseGlove = true; meleeSpeed += 0.12;
+      } else if (accVid === 6183) { noKnockback = true; fireWalk = true; }         // 白银之盾（:14711-14715;6156 旗走 SUMMON_GEAR）
+      else if (accVid === 6184) { accPoisonBarb = true; accHoneyedBarb = true; bees = true; } // 蜜刺（:14716-14719 honeyCombItem→bees 受击放蜂）
+      else if (accVid === 6185) { accPoisonBarb = true; pStone = true; catalystBand = true; } // 催化指环（:14720-14725）
+      else if (accVid === 6186) { starCloak = true; }                              // 德鲁伊蛇斗篷（:14726-14729;6157 旗走 SUMMON_GEAR）
+      else if (accVid === 6187) { panic = true; longInvince = true; }              // 十字心项链（:14730-14733）
+      else if (accVid === 6188) noKnockback = true;                                // 复原之盾（:14734-14736;缓回+法40 登记未接——1457 case 只置 noKnockback）
+      else if (accVid === 6189) mysticSashDodge = true;                            // 神秘艺术腰布（:14737-14739）
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;
@@ -999,6 +1072,8 @@ export class Player extends Entity {
     // ---- 召唤师链（vanillaSummonStats：ApplyEquipFunctional armor[0-9] 单遍语义 =
     //      盔甲三件 + 配饰各扫一遍 SUMMON_GEAR；套装查 SUMMON_SET）----
     let minionSlots = 0, minionDmg = 0, minionKB = 0, sentrySlots = 0, whipRange = 0;
+    // 1457 鞭 tag 栈族（Player.maxTagEffects/tagEffectDuration/accSnakeBand :1187-1199）
+    let maxTagEffects = 1, tagEffectDuration = 1, accSnakeBand = false, accWickedArmlet = false;
     // 原版 ApplyEquipFunctional armor[0-9] 单遍 = 盔甲三件 + 配饰各扫（SummonFx 同表直查）
     const sumFx = (s: { id: number } | null): void => {
       if (!s) return;
@@ -1016,6 +1091,11 @@ export class Player extends Entity {
       if (fx.dmg) minionDmg += fx.dmg;
       if (fx.kb) minionKB += fx.kb;
       if (fx.whipRange) whipRange += fx.whipRange;
+      // 1457 鞭 tag 栈族（:13068-13083 if-chain 数值段）
+      if (fx.tagDur) tagEffectDuration += fx.tagDur;
+      if (fx.maxTag) maxTagEffects += fx.maxTag;
+      if (fx.snakeBand) accSnakeBand = true;
+      if (fx.wickedArmlet) accWickedArmlet = true;
     };
     let seenDd2 = false;
     for (let i = 0; i < 3; i++) sumFx(this.inv.armor[i]);
@@ -1202,9 +1282,15 @@ export class Player extends Entity {
       shieldItem,
       setBonus: sb, manaCostMul,
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
+      maxTagEffects, tagEffectDuration, accSnakeBand, accWickedArmlet,
       whipSpd: summonSet?.whipSpd ?? 1,
       summonSet,
       divingHelm, merman, arcticDivingGear, jellyfishGlow,
+      accSentryBackpack, accGolemSentryBackpack,
+      accHarpyCharm, accSeraphNecklace, hasPhoenixQuiver,
+      accSnappingStone, accPyroclast, accArmletOfRuin,
+      accPoisonBarb, accHoneyedBarb, catalystBand,
+      accSharpBarb, ammoCyclerMode, mysticSashDodge, accTimerCrit,
     };
   }
   get maxHp(): number {
@@ -3363,6 +3449,9 @@ export class Player extends Entity {
     for (const k of Object.keys(this.whipBuffs)) {
       if (--this.whipBuffs[Number(k)] <= 0) delete this.whipBuffs[Number(k)];
     }
+    // 鞭 tag 栈 Update（TagEffectStack.Update :24785——Limit(maxTagEffects) 超限驱逐
+    // + 各 state per-NPC 双表递减；1456 的敌侧单值递减已退役）
+    this.tagEffectStack.update();
 
     // 落地摔伤结算（Player.cs:25005-25091：25 格 + extraFall 起伤，超格数 ×10 线性；
     // 翼豁免 flag9=任一盔甲槽 wingSlot>-1；幸运马掌 noFallDmg；落在水里豁免）

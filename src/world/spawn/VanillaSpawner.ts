@@ -336,6 +336,8 @@ export class VanillaSpawner {
   trespassDual = false;
   /** BirthdayParty.PartyIsUp（Game 的 partyState 求值后传入——微光小动物链消费） */
   partyUp = false;
+  /** Star.starfallBoost（每夜 NightSetup 重掷，Game 注入——流星夜附魔夜爬虫支消费） */
+  starfallBoost = 1.0;
   setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean,
     invaders = false, activeIds: Set<number> = new Set(),
     moonEvent: MoonEventSpawnCtx | null = null,
@@ -2000,6 +2002,17 @@ export class VanillaSpawner {
     if (this.spawnFriendlyCycle && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
       (t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS)) {
       const grassFam = true;   // 外门即草族四 tile
+      // ---- 流星夜附魔夜爬虫（NPC.cs:2316-2319，case 2 链雨支之后萤火虫支之前）：
+      //  !dayTime && numClouds≤55 && cloudBGActive==0（天气机器未强制雨背景）&&
+      //  Star.starfallBoost>3 && flag10（地表，外门已含）&& RollLuck(2)==0 → 484。
+      //  ★曾在 Game 侧每 tick 50% 于 player.y-200 天上直刷、无上限无频率无瓦片门
+      //  = 星流夜"粉虫雨"洪水（用户实抓 535 只，2026-08-21）；归位本链继承生成
+      //  上限/频率/草地瓦片扫描门控（2026-08-22 修） ----
+      if (!this.dayTime && (this.world.weather.numClouds ?? 200) <= 55
+        && !this.world.weather.cloudBGActive && this.starfallBoost > 3
+        && rollLuck(this.playerLuck, 2, () => rng.next()) === 0) {
+        return D(484);
+      }
       // ---- 夜间猫头鹰（NPC.cs:2345-2354：!rain && 夜 && Next(5)==0 && flag10）：
       //      RollBadLuckExtreme(100)==0 → 689 金猫头鹰（1/100 近似），else 611 ----
       if (!this.dayTime && !this.world.weather.raining && grassFam && N(5)) {

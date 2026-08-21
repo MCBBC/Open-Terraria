@@ -3,7 +3,10 @@
 // 语义（GetItem 体内顺序执行、后命中覆盖前者）在运行期按原顺序复现。
 import { readFileSync, writeFileSync } from 'fs';
 
-const chest = readFileSync('/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria/Chest.cs', 'utf8');
+// SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；配 --out 落 /tmp（禁直接覆盖现库）
+const TREE = process.env.SW_TREE || 'Terarria1456';
+if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
+const chest = readFileSync(`/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria/Chest.cs`, 'utf8');
 
 function extractPool(fnName) {
   const start = chest.indexOf(`public static void ${fnName}`);
@@ -37,6 +40,8 @@ function extractPool(fnName) {
 
 const items = extractPool('SetupTravelShop_GetItem');
 const paintings = extractPool('SetupTravelShop_GetPainting');
-writeFileSync('src/data/vanilla-travelshop.json', JSON.stringify({ items, paintings }));
+const outIdx = process.argv.indexOf('--out');
+const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : 'src/data/vanilla-travelshop.json';
+writeFileSync(OUT_PATH, JSON.stringify({ items, paintings, src: TREE }));
 console.log('items:', items.length, 'paintings:', paintings.length,
   '| skip:', [...items, ...paintings].filter((e) => e.cond === 'skip').length);

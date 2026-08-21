@@ -18,8 +18,9 @@ import { projFrameImg, projFrameCount } from './Arrow';
 import { MinionProj } from './MinionProj';
 import { Arrow } from './Arrow';
 import {
-  WHIP_TAG, WHIP_TAG_CRIT, WHIP_TAG_BUFF, WHIP_HIT_BUFF, WHIP_HIT_SIDEKICK,
-  WHIP_SEGMENTS, WHIP_RANGE, WHIP_FALLOFF, WHIP_PROC_ITEMS, WHIP_EXTRA_UPDATES,
+  WHIP_TAG, WHIP_HIT_BUFF, WHIP_HIT_SIDEKICK,
+  WHIP_SEGMENTS, WHIP_RANGE, WHIP_FALLOFF, WHIP_PROC_ITEMS, WHIP_PROC_ONCE_ITEMS,
+  WHIP_EXTRA_UPDATES,
 } from './WhipTag';
 
 export {
@@ -76,7 +77,8 @@ export class WhipProj extends Entity {
   itemId: number;
   damage: number;
   knockback: number;
-  /** 词缀 bonusTagDamage（I:567——Game 侧注入，命中并进 whipTagDmg） */
+  /** 词缀 bonusTagDamage（I:567——Game 侧注入；1457 管线本为命中弹自带字段,
+   *  本仓挂 tag 态随 applyTagToNPC 传递（登记偏差,见 WhipTag.applyTagToNPC 注） */
   bonusTagDmg = 0;
   /** useAnimation（鞭 JSON anim；SetItemAnimation 攻速 buff 后的有效值） */
   anim: number;
@@ -128,6 +130,10 @@ export class WhipProj extends Entity {
     // 鞭攻速（SetItemAnimation：summonerWeaponSpeedBonus × whipUseTimeMultiplier 封顶
     //  3×——buff 311/308/314 来源，与 Game.ts useTime 同式）
     const o = owner();
+    // 邪恶臂镯族击退 +1（ItemCheck_Shoot :49159-49163：accWickedArmlet → KnockBack += 1;
+    //  6159 本体/6163 TwilightGrasp/6179 ArmletOfRuin/6182 WickedClaws 经 SUMMON_GEAR
+    //  旗聚合到 equipStats.accWickedArmlet——出鞭时刻定值,与原版 NewProjectile 前一致）
+    if (o?.equipStats.accWickedArmlet) this.knockback += 1;
     const swb = o ? (o.whipBuffs[311] ? 0.35 : 0) + (o.whipBuffs[308] ? 0.25 : 0)
       + (o.whipBuffs[314] ? 0.12 : 0) : 0;
     const whipAtk = Math.min(3, 1 + swb * (o?.equipStats.whipSpd ?? 1));
@@ -274,25 +280,27 @@ export class WhipProj extends Entity {
             ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
         // 衰减链（:12604-12678）：每次命中后鞭 damage 字段 ×falloff
         this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
-        // tag（TagEffectState.TryApplyTagToNPC :12758-12760 → ApplyTagToNPC :178-186）
-        e.whipTagT = 240; // WhipTagEffect TagDuration（WhipTagEffect.cs:15-18）
-        e.whipTagDmg = (WHIP_TAG[this.itemId] ?? 0) + (this.bonusTagDmg ?? 0); // +词缀 tagdmg(I:567 bonusTagDamage)
-        e.whipTagCrit = WHIP_TAG_CRIT[this.itemId] ?? 0;
-        e.whipTagItem = this.itemId;
-        // proc 启用（TryDoingOnHitEffects :12936-12940 case 913/1031/1032 首命中门；
-        //  :12971-12974 case 1035 无门）——TryEnableProcOnNPC 要求当前激活 tag 效果
-        //  与期望一致（TagEffectState.cs:170-176），本次命中刚写入 → 恒真
-        if (WHIP_PROC_ITEMS.has(this.itemId) && (this.itemId === 5480 || !this.procEnabled)) {
+        // tag（TryApplyTagToNPC :13635-13638 → TagEffectStack :80-87）：1457 起入玩家
+        // MRU 栈（时长 = TagDuration × tagEffectDuration,5479=480 其余 240;ImmuneToWhips
+        // 11 种敌门内跳过）;自 buff（AddTheBuff :53-60）随 tag 施加,非 manual 档 ×时长
+        const enVan = (e as unknown as { vanillaId?: number }).vanillaId ?? 0;
+        owner?.tagEffectStack.tryApplyTagToNPC(this.itemId, e.id, enVan, this.bonusTagDmg);
+        // proc 启用（TryDoingOnHitEffects :13968-14013）：{913,1031,1032} 首鞭门
+        //  localAI[0]==0；{847,1033,1035} 每鞭（1457 新增 1033 电鳗鞭）
+        if (WHIP_PROC_ITEMS.has(this.itemId) && (WHIP_PROC_ONCE_ITEMS.has(this.itemId) ? !this.procEnabled : true)) {
           this.procEnabled = true;
-          e.whipProcT = 240;
-          e.whipProcItem = this.itemId;
+          owner?.tagEffectStack.tryEnableProcOnNPC(this.itemId, e.id);
         }
-        // 5479（proj 1034）星座星：鞭命中即沿曲线撒星（:12966-12970 localAI[0]==0 门
-        //  + SpawnConstellationStarsTowards :13869-13881）——伤 = 本次命中伤×0.33，
-        //  沿鞭每 3 个控制点一颗、垂直曲线方向飞出
-        if (this.projId === 1034 && this.localAI0 === 0) {
+        // 5479（proj 1034）星座星：1457 改 proc 门控（:14001-14008）——localAI[0]==0 且
+        //  CanProcOnNPC(5479)（=随从命中过被 tag 敌,由 WhipTagEffect_Constellation
+        //  .OnTaggedHit 启用）才撒星,伤 = damage×2 基数 ×0.22/颗（:15013-15040,
+        //  1456 是首鞭无条件 ×0.33）;撒完 RemoveAllProcs(5479)。沿鞭每 3 控制点一颗、
+        //  垂直曲线方向飞出;生成点落实心砖回退玩家中心（:15031-15036,登记未接地形检测）
+        if (this.projId === 1034 && this.localAI0 === 0 && owner
+          && owner.tagEffectStack.canProcOnNPC(5479, e.id)) {
           this.localAI0 = 1;
-          const starDmg = Math.max(1, Math.round(dmg * 0.33));
+          owner.tagEffectStack.removeAllProcs(5479);
+          const starDmg = Math.max(1, Math.trunc(dmg * 2 * 0.22));
           const add = (el: unknown, b: string) =>
             (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(el, b);
           for (let i = 2; i < pts.length - 1; i += 3) {
@@ -310,10 +318,9 @@ export class WhipProj extends Entity {
         }
         // 鞭敌方直伤 debuff（ApplyWhipDebuffs :11067-11090 表驱动 1:1）
         applyWhipDebuffs(this.projId, e as unknown as Record<string, number>);
-        // 玩家 buff（tag 链 WhipTagEffect :42-51 与命中链 :12936-12951 两源，见表注释）
-        const tb = WHIP_TAG_BUFF[this.itemId];
+        // 玩家 buff——tag 链已随 applyTagToNPC 入栈（AddTheBuff ×tagEffectDuration）;
+        // 命中链（case 912/1028 :13981-13992）保持固定 180t 不缩放
         const hb = WHIP_HIT_BUFF[this.itemId];
-        if (tb && owner) owner.whipBuffs[tb] = 180;
         if (hb && owner) owner.whipBuffs[hb] = 180;
         if (WHIP_HIT_SIDEKICK[this.itemId] && owner) this.spawnSidekick(game, owner, this.itemId);
         game.addDamageNumber(p.x, p.y, dmg, false, '#FFD060');

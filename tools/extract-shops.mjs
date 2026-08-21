@@ -2,7 +2,10 @@
 // 数据源:Terarria1456 Item.cs SetDefaults1-5(switch-case 块) + Chest.cs SetupShop + NPCInteractions.cs Shop() 映射
 import { readFileSync, writeFileSync } from 'fs';
 
-const SRC = '/Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/Terraria';
+// SW_TREE（2026-08-22 增量对拍用）：缺省 Terarria1456 不变；配 --out 落 /tmp（禁直接覆盖现库）
+const TREE = process.env.SW_TREE || 'Terarria1456';
+if (!/^(Terarria14(56|57))$/.test(TREE)) throw new Error(`SW_TREE 非法: ${TREE}`);
+const SRC = `/Users/vinlic/Project/GLM/SandboxWorld/${TREE}/Terraria`;
 const itemSrc = readFileSync(`${SRC}/Item.cs`, 'utf8');
 const chestSrc = readFileSync(`${SRC}/Chest.cs`, 'utf8');
 
@@ -15,7 +18,9 @@ const chestSrc = readFileSync(`${SRC}/Chest.cs`, 'utf8');
 // C# 序模拟：共享体 value 赋值 + 更深层 `case <自身id>:` 块内覆写，晚写胜出。
 const values = {};
 {
-  const body = itemSrc.slice(itemSrc.indexOf('public void SetDefaults1'), itemSrc.indexOf('public void SetDefaults(int Type'));
+  // 1457 起 SetDefaults1-5 改 private（1456=public）——按可见性无关匹配（2026-08-22）
+  const sd1 = itemSrc.match(/(public|private|internal) void SetDefaults1\(/);
+  const body = itemSrc.slice(sd1.index, itemSrc.indexOf('public void SetDefaults(int Type'));
   const lines = body.split('\n');
   // 全深度收集 case 标签（含嵌套 switch 内层——蜂王族 2883+/石头人族等整段住在里面）
   const marks = [];
@@ -323,7 +328,9 @@ for (const [npcId, slot] of Object.entries(SHOP_SLOT)) {
     ...(s.currency !== undefined ? { currency: s.currency } : {}),
   }));
 }
-writeFileSync('src/data/vanilla-shopstock.json', JSON.stringify({ values, shops: out }));
+const outIdx = process.argv.indexOf('--out');
+const OUT_PATH = outIdx >= 0 ? process.argv[outIdx + 1] : 'src/data/vanilla-shopstock.json';
+writeFileSync(OUT_PATH, JSON.stringify({ values, shops: out, src: TREE }));
 const total = Object.values(out).reduce((a, s) => a + s.length, 0);
 console.log('item values:', Object.keys(values).length, '| stock entries:', total);
 for (const [id, s] of Object.entries(out)) console.log(`  npc ${id}: ${s.length} items, priced: ${s.filter((x) => x.price != null).length}`);

@@ -18,8 +18,10 @@ const out = await page.evaluate(async () => {
   // 放置假人 tile 378(玩家右侧 6 格地表)
   const dummyItem = idOf(/^vi_378_/) >= 0 ? idOf(/^vi_378_/) : idOf(/^vi_498_/); // 假人物品或人偶
   const tx = Math.floor(pl.cx / 16) + 6;
-  let ty = Math.floor(pl.cy / 16);
-  while (ty < st.h - 5 && !st.isSolid(tx, ty + 1)) ty++;
+  // 与玩家同地面:从玩家脚下格向右找同高地面(避免地形起伏高差)
+  let ty = Math.floor((pl.y + pl.h) / 16);   // 玩家脚下格
+  while (ty < st.h - 5 && !st.isSolid(tx, ty)) { ty++; }   // 右侧地形低则下移
+  while (ty > 5 && st.isSolid(tx, ty)) { ty--; }           // 高则上移到地表
   // 直接 setTile 378(绕放置门——探针)
   const T378 = window.__swTileByKey('v_378_target_dummy');
   st.setTile(tx, ty, T378);
@@ -38,7 +40,9 @@ const out = await page.evaluate(async () => {
   const gunInfo = gunDef ? { key: gunDef.key, vid: gunDef.vid } : { id: shotgun };
   g.camera.x = dummy.cx; g.camera.y = dummy.cy;
   await new Promise((r) => setTimeout(r, 250));
-  g.input.mouseX = g.renderer.canvas.width / 2; g.input.mouseY = g.renderer.canvas.height / 2;
+  // 鼠标指向假人**实际中心**(而非屏幕中心——相机中心=锚格,假人中心低 35px)
+  const [dsx, dsy] = [g.renderer.canvas.width / 2, g.renderer.canvas.height / 2 + 35];
+  g.input.mouseX = dsx; g.input.mouseY = dsy;
   g.input.mouseDown = true;
   const samples = [];
   const traj = [];

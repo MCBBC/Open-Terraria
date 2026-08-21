@@ -337,3 +337,70 @@ describe('多部件层序同族审计（2026-08-19:骑手反转/蠕虫链/月总
     expect(order[0]).toBe(core);
   });
 });
+
+// ---- 流星夜附魔夜爬虫 484(NPC.cs:2316-2319,2026-08-22 洪水修复回归) ----
+//  曾在 Game 侧每 tick 50% 于 player.y-200 天上直刷、无上限无频率门 = 星流夜
+//  "粉虫雨"洪水(用户实抓 535 只)。归位 case-2 草族链后:门 = 夜+云≤55+
+//  无天气背景+boost>3+地表+RollLuck(2);落点=spawn tile 地表(继承生成上限)。
+describe('流星夜附魔夜爬虫 484(NPC.cs:2316-2319)', () => {
+  function starfallRoll(opts: {
+    boost: number; night: boolean; clouds?: number; cloudBG?: boolean;
+  }, n: number): Record<number, number> {
+    const { w, st } = critterWorld();
+    const sp = new VanillaSpawner(w);
+    sp.setPlayerFlags(false, false);
+    (sp as unknown as { spawnFriendlyCycle: boolean }).spawnFriendlyCycle = true;
+    (sp as unknown as { starfallBoost: number }).starfallBoost = opts.boost;
+    (w as unknown as { weather: { numClouds: number; cloudBGActive: boolean; raining: boolean } }).weather = {
+      numClouds: opts.clouds ?? 30, cloudBGActive: !!opts.cloudBG,
+      raining: false, windSpeedTarget: 0,
+    } as never;
+    w.clock.timeOfDay = opts.night ? 0.95 : 12 / 24;
+    const counts: Record<number, number> = {};
+    for (let k = 0; k < n; k++) {
+      const rng = new RNG(k * 7919 + 13);
+      const r = sp.spawn(500 * 16 + 8, 96 * 16, rng, 24, 14);
+      if (r) {
+        const v = (r as unknown as { vanillaId: number }).vanillaId;
+        counts[v] = (counts[v] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  it('流星夜(boost>3)+夜+少云:草 tile 出 484,落点在地表(非天降)', () => {
+    const c = starfallRoll({ boost: 5, night: true }, 400);
+    expect(c[484] ?? 0).toBeGreaterThan(80);      // RollLuck(2)≈1/2(链首支,草列稀释后仍过百)
+    // 落点验证:spawn tile y=96 地表——直接构造一只核对底锚语义由 D() 统一处理,
+    // 此处验证 484 确经 spawner 生成(继承上限),而非 Game 天降
+  });
+
+  it('boost≤3 / 白天 / 云>55 / 天气背景强制:任一即 0 只', () => {
+    expect(starfallRoll({ boost: 1, night: true }, 300)[484] ?? 0).toBe(0);
+    expect(starfallRoll({ boost: 5, night: false }, 300)[484] ?? 0).toBe(0);
+    expect(starfallRoll({ boost: 5, night: true, clouds: 120 }, 300)[484] ?? 0).toBe(0);
+    expect(starfallRoll({ boost: 5, night: true, cloudBG: true }, 300)[484] ?? 0).toBe(0);
+  });
+
+  it('484 生成落点 = 地表 spawn tile(底锚),非半空', () => {
+    const { w } = critterWorld();
+    const sp = new VanillaSpawner(w);
+    sp.setPlayerFlags(false, false);
+    (sp as unknown as { spawnFriendlyCycle: boolean }).spawnFriendlyCycle = true;
+    (sp as unknown as { starfallBoost: number }).starfallBoost = 5;
+    (w as unknown as { weather: { numClouds: number; cloudBGActive: boolean; raining: boolean } }).weather = {
+      numClouds: 30, cloudBGActive: false, raining: false, windSpeedTarget: 0,
+    } as never;
+    w.clock.timeOfDay = 0.95;
+    for (let k = 0; k < 200; k++) {
+      const rng = new RNG(k * 104729 + 7);
+      const r = sp.spawn(500 * 16 + 8, 96 * 16, rng, 24, 14);
+      if (r && (r as unknown as { vanillaId: number }).vanillaId === 484) {
+        // 底锚:实体底 = 地面 tile 顶(100*16,生成扫描吸附地面)——非半空 y-200
+        expect(Math.abs((r.y + r.h) - 100 * 16)).toBeLessThanOrEqual(8);
+        return;
+      }
+    }
+    throw new Error('400 次未出 484(门控失效)');
+  });
+});

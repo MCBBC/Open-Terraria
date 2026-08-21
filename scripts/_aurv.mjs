@@ -4,7 +4,7 @@ const browser = await puppeteer.launch({
   args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 },
 });
 const page = await browser.newPage();
-page.on('console', m => { if (m.text().includes('GLAurora') || includes('AuroraGL')) console.log('[CC]', m.text()); });
+page.on('console', m => { if (m.text().includes('GLAurora') || m.text().includes('AuroraGL')) console.log('[CC]', m.text()); });
 await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5203') + '/?play=small', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 220000 });
 await new Promise(r => setTimeout(r, 1500));
