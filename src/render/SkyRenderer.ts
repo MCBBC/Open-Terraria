@@ -196,23 +196,40 @@ export interface RareCloudFlags {
   tenthAnniversaryWorld: boolean;
 }
 
-/** RollRareCloud（Cloud.cs:183-227 一比一，纯函数供测试）：22-40 掷点（十周年世界
- *  22-36），旗标门未过的类型重掷。稀有云贴图语义见 CloudID.cs:49-85（鸟/兔/世吞/
- *  克眼×2/金鱼/Redigit/心/南瓜王/骷髅/星/剑/树/飞龙/克脑/饥荒四角色）。 */
+/** CloudID.Sets.RareClouds_Normal（CloudID.cs:11-15，1457 新表）——普通世界稀有云池
+ *  （22-40 全部 + 41 Rare_Pixie）。 */
+export const RARE_CLOUDS_NORMAL: readonly number[] = [
+  22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+  32, 33, 34, 35, 36, 37, 38, 39, 40, 41,
+];
+
+/** CloudID.Sets.RareClouds_Celebration（CloudID.cs:17-21，1457 新表）——十周年世界池
+ *  （比 Normal 少 37-40 饥荒四角色）。 */
+export const RARE_CLOUDS_CELEBRATION: readonly number[] = [
+  22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+  32, 33, 34, 35, 36, 41,
+];
+
+/** RollRareCloud（1457 Cloud.cs:184-232 一比一，纯函数供测试）：掷点改走 CloudID.Sets
+ *  稀有云池表（普通=22-41、十周年=22-36+41；1456 为 Next(22,41)/Next(22,37) 硬编码），
+ *  旗标门未过的类型重掷。41 Rare_Pixie 为 1457 新类型，门=hardMode（:208-210）。
+ *  稀有云贴图语义见 CloudID.cs:49-85（鸟/兔/世吞/克眼×2/金鱼/Redigit/心/南瓜王/
+ *  骷髅/星/剑/树/飞龙/克脑/饥荒四角色/精灵）。 */
 export function rollRareCloud(f: RareCloudFlags, rnd: () => number): number {
   let num = -1;
   let ok = false;
   let guard = 0;
+  const pool = f.tenthAnniversaryWorld ? RARE_CLOUDS_CELEBRATION : RARE_CLOUDS_NORMAL;
   while (!ok && guard++ < 512) {
-    num = 22 + Math.floor(rnd() * (f.tenthAnniversaryWorld ? 15 : 19));   // :189 Next(22,41)/Next(22,37)
+    num = pool[Math.floor(rnd() * pool.length)];                         // :189 rand.Next(pool.Count)
     switch (num) {
       case 31: ok = f.downedBoss3; break;                                  // :195-197
       case 36: ok = f.downedBoss2 && f.crimson; break;                     // :198-200
       case 25: case 26: ok = f.downedBoss1; break;                         // :201-204
-      case 30: case 35: ok = f.hardMode; break;                            // :205-208
-      case 28: ok = Math.floor(rnd() * 10) === 0; break;                   // :209-214 1/10
+      case 30: case 35: case 41: ok = f.hardMode; break;                   // :205-210（41 为 1457 新增）
+      case 28: ok = Math.floor(rnd() * 10) === 0; break;                   // :211-216 1/10
       case 37: case 38: case 39: case 40:
-        ok = f.dontStarveWorld || Math.floor(rnd() * 10) === 0; break;     // :215-223
+        ok = f.dontStarveWorld || Math.floor(rnd() * 10) === 0; break;     // :217-225
       default: ok = true; break;
     }
   }

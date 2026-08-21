@@ -381,9 +381,10 @@ export async function recon() {
 
 // ---- --fix:应用 1457 终值(写前备份;shoot 白名单见 FIX_SHOOT_KEEP) ----
 // 1226/1227 叶绿双剑的 shoot 在 1457 指向新弹 1126/1127(ChlorophyteClaymoreBlade/
-// ChlorophyteSaberStab)——新弹 AI/贴图属"登记不实装"批,数据侧保留 1456 弹 id,
-// 其余数值照搬(伤害/攻速/noMelee/noUseGraphic 等),弹体替换随新弹批一并落。
-export const FIX_SHOOT_KEEP = new Set(['1226', '1227']);
+// ChlorophyteSaberStab)——1457 批 C 新弹已实装(entities/proj1457.ts + Game 1226/1227
+// 专支),白名单撤除:json shoot 已切 1457 终值,--fix 不再保留 1456 弹 id。
+// ★白名单机制保留(空集)——后续若再现"新弹未实装先切数据"的场景按同法登记。
+export const FIX_SHOOT_KEEP = new Set([]);
 
 async function main() {
   const { classB, drift, deferredDrift, legacy, handPatches, fixes, coverage } = await recon();

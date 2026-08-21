@@ -241,6 +241,17 @@ export enum BuffType {
                            //   AddPoison/AddBloodLoss/AddFlamable，不加成裸 Add）
   BlueLightning = 116,     // 蓝闪电(399,1457 新)：纯视觉——BlueLightningSmall 粒子 1/10
   RedLightning = 117,      // 红闪电(400,1457 新)：纯视觉——RedLightningSmall 粒子 1/10
+  // ---- 1457 召唤物/坐骑伴生 buff 六件（389-394,批 B 数据层登记 2026-08-22）----
+  // 授予侧 = 召唤弹 AI（批 C/D）：389→弹1112 / 390→弹1113 / 393→弹1118 / 394→弹1119
+  // （BuffID.CachedProjectileCounterBuffTextHandler :133-149 四对——buff 栏"余量"文案链）；
+  // 391/392 = 坐骑 buff,BuffID.Sets.MountType {391→64, 392→65}（Mounts.ts BUFF_TO_MOUNT
+  // 表 1457 侧待批 C 随坐骑本体接入）。贴图 Buff_389-394.png 已随素材库到位。
+  PalworldMinionTrustyCattiva = 118,     // 可靠的捣蛋猫(389,1457 新)
+  PalworldMinionTrustyFoxsparks = 119,   // 可靠的火绒狐(390,1457 新)
+  PalworldMountTrustyChillet = 120,      // 可靠的疾旋鼬(391,1457 新,坐骑 64)
+  PalworldMountTrustyChilletIgnis = 121, // 可靠的疾旋火鼬(392,1457 新,坐骑 65)
+  ClayPotMinion = 122,                   // 黏土蓓蕾(393,1457 新)
+  ForbiddenMinion = 123,                 // 禁戒遗迹(394,1457 新)
 }
 
 /** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
@@ -394,6 +405,14 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.AcceleratePoisons]: { vanillaBuff: 398, descKey: 'Mods.SandboxWorld.Buff.AcceleratePoisons.Desc', fallbackName: '毒素加速' },
   [BuffType.BlueLightning]: { vanillaBuff: 399, descKey: 'Mods.SandboxWorld.Buff.BlueLightning.Desc', fallbackName: '蓝色闪电' },
   [BuffType.RedLightning]: { vanillaBuff: 400, descKey: 'Mods.SandboxWorld.Buff.RedLightning.Desc', fallbackName: '红色闪电' },
+  // 1457 召唤物/坐骑伴生 buff 六件（389-394,名字/描述取 1457 官方 l10n 语料,
+  //  键在 tools/l10n-custom 两语补齐;图标 Buff_389-394.png 已到位）
+  [BuffType.PalworldMinionTrustyCattiva]: { vanillaBuff: 389, descKey: 'Mods.SandboxWorld.Buff.PalworldMinionTrustyCattiva.Desc', fallbackName: '可靠的捣蛋猫' },
+  [BuffType.PalworldMinionTrustyFoxsparks]: { vanillaBuff: 390, descKey: 'Mods.SandboxWorld.Buff.PalworldMinionTrustyFoxsparks.Desc', fallbackName: '可靠的火绒狐' },
+  [BuffType.PalworldMountTrustyChillet]: { vanillaBuff: 391, descKey: 'Mods.SandboxWorld.Buff.PalworldMountTrustyChillet.Desc', fallbackName: '可靠的疾旋鼬' },
+  [BuffType.PalworldMountTrustyChilletIgnis]: { vanillaBuff: 392, descKey: 'Mods.SandboxWorld.Buff.PalworldMountTrustyChilletIgnis.Desc', fallbackName: '可靠的疾旋火鼬' },
+  [BuffType.ClayPotMinion]: { vanillaBuff: 393, descKey: 'Mods.SandboxWorld.Buff.ClayPotMinion.Desc', fallbackName: '黏土蓓蕾' },
+  [BuffType.ForbiddenMinion]: { vanillaBuff: 394, descKey: 'Mods.SandboxWorld.Buff.ForbiddenMinion.Desc', fallbackName: '禁戒遗迹' },
 };
 
 /** BuffID.Sets.IsFedState（BuffID.cs:16 = {26,206,207,332,333,334}——含饥饿链三态：

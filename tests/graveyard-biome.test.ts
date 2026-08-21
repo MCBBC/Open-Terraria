@@ -153,11 +153,14 @@ describe('Chest.SetupShop 墓地限定商品（复合门）', () => {
     // 猩红世界支 59 = hardMode && zoneGraveyard && crimson
     expect(stock.some((e) => e.id === 59 && e.cond === 'hardMode&&zoneGraveyard&&crimson')).toBe(true);
   });
-  it('else-if 互斥链（Chest.cs:1784-1793）：裁缝 5577=墓地 else-if 242=白天——互斥不能双上架', () => {
+  it('1457：裁缝不再卖 5577（Pretty Mirror 移交造型师），242=纯白天门（Chest.cs:1808-1813）', () => {
     const stock = (shopstock as { shops: Record<string, Array<{ id: number; cond: string | null }>> }).shops['54'];
-    expect(stock.some((e) => e.id === 5577 && e.cond === 'zoneGraveyard')).toBe(true);
-    // 242 的有效门 = !zoneGraveyard && day（else 支取反前支）：墓地白天不得同时上架
-    expect(stock.some((e) => e.id === 242 && e.cond === '!zoneGraveyard&&day')).toBe(true);
+    // 1456 的 else-if 互斥链（5577=墓地 else-if 242=白天）1457 拆除——5577 整支删除
+    expect(stock.some((e) => e.id === 5577)).toBe(false);
+    expect(stock.some((e) => e.id === 242 && e.cond === 'day')).toBe(true);
+    // 5577 新东家 = 造型师 353 墓地门（Chest.cs:2780-2782）
+    const stylist = (shopstock as { shops: Record<string, Array<{ id: number; cond: string | null }>> }).shops['353'];
+    expect(stylist.some((e) => e.id === 5577 && e.cond === 'zoneGraveyard')).toBe(true);
     // 同款互斥：树妖 3218=crimson else 3217=!crimson（Chest.cs:1825-1833）
     const dryad = (shopstock as { shops: Record<string, Array<{ id: number; cond: string | null }>> }).shops['20'];
     expect(dryad.some((e) => e.id === 3218 && e.cond === 'crimson')).toBe(true);

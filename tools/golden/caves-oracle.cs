@@ -4896,11 +4896,16 @@ void AddShadowOrbGen(int ox, int oy, bool crimsonHeart)
     for (int i = ox - 1; i < ox + 1; i++)
         for (int j = oy - 1; j < oy + 1; j++)
             if (act[j * W + i] != 0 && typ[j * W + i] == 31) return;
+    // ★GGGGGG：帧写补齐（JS addShadowOrb 同源 cs:16035）——猩红 style 偏移 +36：
+    //   (x-1,y-1)=(fx,0) (x,y-1)=(18+fx,0) (x-1,y)=(fx,18) (x,y)=(18+fx,18)。
+    int fx = crimsonHeart ? 36 : 0;
     for (int i = 0; i < 2; i++)
         for (int j = 0; j < 2; j++)
         {
             int ti = (oy - 1 + j) * W + (ox - 1 + i);
             typ[ti] = 31; act[ti] = 1;
+            frX[ti] = (ushort)(fx + i * 18);
+            frY[ti] = (ushort)(j * 18);
         }
 }
 var heartPosG = new List<(int x, int y)>();
@@ -6241,6 +6246,7 @@ int dgWinGlass = dungeonTheme == 0 ? 91 : dungeonTheme == 1 ? 92 : 90;
 int dgWinClosed = dungeonTheme == 0 ? 96 : dungeonTheme == 1 ? 94 : 98;
 int dgWinEdge = dungeonTheme == 0 ? 8 : dungeonTheme == 1 ? 9 : 7;
 int dgWinPlatStyle = dungeonTheme == 0 ? 8 : dungeonTheme == 1 ? 7 : 6;
+int dgPlatformStyle = dungeonTheme == 0 ? 6 : dungeonTheme == 1 ? 8 : 7;   // ★GGGGGG：平台件 placeStyle（蓝6/绿8/粉7；Item 1384-1386）
 var dgClouds = new HashSet<ushort> { 189, 196, 460, 717, 718, 719 };
 bool DgCloudsNear(int cx, int cy, int dist)
 {
@@ -6720,7 +6726,9 @@ var TILE_LIGHTED = new HashSet<ushort> { 4,17,19,20,22,26,27,31,33,34,35,37,42,4
 void DgWr(int x, int y, int t) { int ti = y * W + x; act[ti] = 1; typ[ti] = (ushort)t; }
 bool DgClr(int x, int y) { return DgInWorld(x, y, 0) && act[y * W + x] == 0; }
 // Place3x2（cs:52097 桌14/钢琴87/梳妆台88/长凳89）：x-1..x+1 × y-1..y 净空 + 逐列 SolidTile2(y+1)
-bool DgP3x2(int x, int y, int t)
+// ★GGGGGG：帧写补齐（JS place3x2D VVVVV 帧补同源，cs:52183-52234）——frameX=54*style+col*18、
+//   frameY=0(顶)/18(底)。曾零帧 → Check3x2 完整性门假原点整物误杀（桌/钢琴/梳妆台/沙发族）。
+bool DgP3x2(int x, int y, int t, int style = 0)
 {
     if (x < 5 || x > W - 5 || y < 5 || y > H - 5) return false;
     for (int i = x - 1; i < x + 2; i++)
@@ -6728,11 +6736,18 @@ bool DgP3x2(int x, int y, int t)
         for (int j = y - 1; j < y + 1; j++) if (!DgClr(i, j)) return false;
         if (!DgSolid2(i, y + 1)) return false;
     }
-    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 1; j++) DgWr(i, j, t);
+    int bx = 54 * style;
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 1; j++)
+    {
+        DgWr(i, j, t);
+        frX[j * W + i] = (ushort)(bx + (i - (x - 1)) * 18);
+        frY[j * W + i] = (ushort)(j == y - 1 ? 0 : 18);
+    }
     return true;
 }
 // Place2x1（cs:47371 工作台18）：x..x+1 × y 净空 + 两列 SolidTile2(y+1)；103 骷髅=桌上版（tileTable 支撑）
-bool DgP2x1(int x, int y, int t)
+// ★GGGGGG：帧写补齐（JS place2x1D，cs:47405-47413）——frameX=36*style+{0,18}、frameY=0。
+bool DgP2x1(int x, int y, int t, int style = 0)
 {
     bool skull = t == 103;
     for (int i = x; i <= x + 1; i++)
@@ -6743,14 +6758,22 @@ bool DgP2x1(int x, int y, int t)
         else if (!DgSolid2(i, y + 1)) return false;
     }
     DgWr(x, y, t); DgWr(x + 1, y, t);
+    int bx = 36 * style;
+    frX[y * W + x] = (ushort)bx; frX[y * W + x + 1] = (ushort)(bx + 18);
+    frY[y * W + x] = 0; frY[y * W + x + 1] = 0;
     return true;
 }
 // Place1x2（cs:46665 椅15）：SolidTile2(x,y+1) 且 (x,y-1) 净空 → (x,y-1)+(x,y)
-bool DgP1x2(int x, int y, int t)
+// ★GGGGGG：帧写补齐（JS place1x2D，cs:46685-46691）——frameY=40*style+{0,18}、frameX=0
+//   （type 20 苗的随机 fx 不适用椅）。曾零帧——Check1x2 完整性链按 40 行剥锚必败。
+bool DgP1x2(int x, int y, int t, int style = 0)
 {
     if (!DgSolid2(x, y + 1) || !DgClr(x, y - 1)) return false;
     if (!DgClr(x, y)) return false;
     DgWr(x, y - 1, t); DgWr(x, y, t);
+    int by = 40 * style;
+    frY[(y - 1) * W + x] = (ushort)by; frY[y * W + x] = (ushort)(by + 18);
+    frX[(y - 1) * W + x] = 0; frX[y * W + x] = 0;
     return true;
 }
 // PlaceOnTable1x1（cs:45346 蜡烛33/水瓶49/书50/瓶13）：净空 + 下方 nactive 且 tileTable
@@ -6764,16 +6787,34 @@ bool DgPOnTable(int x, int y, int t)
     int bi = (y + 1) * W + x;
     if (act[bi] == 0 || inAct[bi] != 0 || !TILE_TABLE.Contains(typ[bi])) return false;
     DgWr(x, y, t);
-    if (t == 50) r.Next(5);                          // cs:45377 frameX=18*Next(5)
+    // ★GGGGGG：书 50 帧写补齐（cs:45377 frameX=18*Next(5)）——曾掷值弃置恒帧 0
+    //   （JS placeOnTableD 2026-08-18 补写同源；B 段 177 本书全带此掷，掷序不变）。
+    if (t == 50) frX[y * W + x] = (ushort)(18 * r.Next(5));
     return true;
 }
 // Place2xX（cs:39705 钟104 h5/雕像105 h3）：x..x+1 × y-h+1..y 净空 + 两列 SolidTile2
-bool DgP2xX(int x, int y, int t, int hgt)
+// ★GGGGGG：帧写补齐（JS place2xXD XXXX 帧补同源，cs:39717-39723）——num=style*36
+//   （105 族 style≥55 时 num-=1980*num4/num2+=54*num4 回卷）；左列 fx=num、右列 +18；
+//   fy=num2+row*18（自顶行 0）。曾无 style 帧落 0（金标 077 105 族 18 格定罪案）。
+bool DgP2xX(int x, int y, int t, int hgt, int style = 0)
 {
     for (int j = y - hgt + 1; j <= y; j++)
         if (!DgClr(x, j) || !DgClr(x + 1, j)) return false;
     if (!DgSolid2(x, y + 1) || !DgSolid2(x + 1, y + 1)) return false;
-    for (int j = y - hgt + 1; j <= y; j++) { DgWr(x, j, t); DgWr(x + 1, j, t); }
+    int num = style * 36, num2 = 0;
+    if (t == 105)
+    {
+        int num4 = style / 55;
+        num -= 1980 * num4;
+        num2 += 54 * num4;
+    }
+    for (int j = 0; j < hgt; j++)
+    {
+        int yy = y - hgt + 1 + j;
+        DgWr(x, yy, t); DgWr(x + 1, yy, t);
+        frX[yy * W + x] = (ushort)num; frY[yy * W + x] = (ushort)(num2 + j * 18);
+        frX[yy * W + x + 1] = (ushort)(num + 18); frY[yy * W + x + 1] = (ushort)(num2 + j * 18);
+    }
     return true;
 }
 // Place1xX（cs:39203 路灯93 h3）：单列净空+无液 + SolidTile2(x,y+1)
@@ -6821,6 +6862,8 @@ bool DgP2x2(int x, int y, int t)
     return true;
 }
 // Place3x3（cs:53549 354/355 分支A）：x-1..x+1 × y-2..y 净空 + 逐列 SolidTile2(y+1)
+// ★GGGGGG：帧写补齐（JS place3x3D，cs:53610-53652）——frameX/frameY=0/18/36 逐格
+//   （num2=style*54 地牢恒 0）。曾零帧——动画家具（炼金台 355/巫惑台 354）帧残缺。
 bool DgP3x3(int x, int y, int t)
 {
     for (int i = x - 1; i < x + 2; i++)
@@ -6828,7 +6871,12 @@ bool DgP3x3(int x, int y, int t)
         for (int j = y - 2; j < y + 1; j++) if (!DgClr(i, j)) return false;
         if (!DgSolid2(i, y + 1)) return false;
     }
-    for (int i = x - 1; i < x + 2; i++) for (int j = y - 2; j < y + 1; j++) DgWr(i, j, t);
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 2; j < y + 1; j++)
+    {
+        DgWr(i, j, t);
+        frX[j * W + i] = (ushort)((i - x + 1) * 18);
+        frY[j * W + i] = (ushort)((j - y + 2) * 18);
+    }
     return true;
 }
 // Place3x3Wall（cs:44281 画240）：3×3 净空 + wall≠0
@@ -7861,6 +7909,9 @@ void DgOuterPillar(int px, int py)
     if (py - 10 >= 10) { PlaceWall(px - 2, py - 10, 245); PlaceWall(px + 2, py - 10, 245); }
 }
 // PlaceTile(215)→Place3x2（cs:60020 case 215，零掷；3×2 净空+SolidTile2 门）
+// ★GGGGGG：帧写补齐（JS place3x2D VVVVV 帧补同源，cs:52183-52234）——曾零帧，
+//   下游 Piles 段 Check3x2 完整性门按帧锚反解得假原点 → 塔入口篝火 6 格整物误杀
+//   （seed2 (496-498,130-131) 案；JS 帧完好存活=掷流 60 掷分歧根因②）。
 bool DgPCampfire(int x, int y)
 {
     if (x < 5 || x > W - 5 || y < 5 || y > H - 5) return false;
@@ -7869,7 +7920,12 @@ bool DgPCampfire(int x, int y)
         for (int j = y - 1; j < y + 1; j++) if (!DgClr(i, j)) return false;
         if (!DgSolid2(i, y + 1)) return false;
     }
-    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 1; j++) DgWr(i, j, 215);
+    for (int i = x - 1; i < x + 2; i++) for (int j = y - 1; j < y + 1; j++)
+    {
+        DgWr(i, j, 215);
+        frX[j * W + i] = (ushort)((i - (x - 1)) * 18);
+        frY[j * W + i] = (ushort)(j == y - 1 ? 0 : 18);
+    }
     return true;
 }
 // DungeonWindowBasic.Window（:26-105）——GetWindowPlatformStyle 恒耗 1 骰（Next(1) 单元素）
@@ -7902,6 +7958,8 @@ void DgWindowBasic(int px, int py, int ww, int wh, int overrideGlass)
                 {
                     int ti = (cy + 1) * W + cx;
                     act[ti] = 1; typ[ti] = 19; DgClearSlope(ti);
+                    // ★GGGGGG：窗台平台帧补齐（JS dgWindowBasic 同源）——frameY=winPlatStyle*18。
+                    frY[ti] = (ushort)(dgWinPlatStyle * 18);
                 }
             }
         }
@@ -9281,12 +9339,17 @@ void DgDungeonPot(int x, int y)
         if (act[gi] == 0 || inAct[gi] != 0 || half[gi] != 0 || slope[gi] != 0 || !JVS(typ[gi])) { ok = false; break; }
     }
     if (!ok) return;
-    r.Next(3);                                          // PlacePot 变体掷（成功才掷）
+    // ★GGGGGG：变体掷值入帧（JS dgDungeonPot 同源）——variant=rn(3)*36、
+    //   frameX=dx*18+variant、frameY=(dy+1)*18+style*36。曾掷值弃置恒帧 0
+    //   → CheckPot 完整性门假原点整罐误杀。
+    int variant = r.Next(3) * 36;
     for (int dx = 0; dx < 2; dx++)
         for (int dy = -1; dy <= 0; dy++)
         {
             int ti = (y + dy) * W + x + dx;
             act[ti] = 1; typ[ti] = 28; DgClearSlope(ti);
+            frX[ti] = (ushort)(dx * 18 + variant);
+            frY[ti] = (ushort)((dy + 1) * 18 + style * 36);
         }
 }
 void DgPlatforms()
@@ -9345,6 +9408,7 @@ void DgPlatforms()
         {
             int ti = py * W + px;
             act[ti] = 1; typ[ti] = 19;
+            frY[ti] = (ushort)(18 * dgPlatformStyle);   // ★GGGGGG（DungeonGlobalPlatforms:158）
             px--;
             if (px <= 10) break;
         }
@@ -9352,6 +9416,7 @@ void DgPlatforms()
         {
             int ti = py * W + qx;
             act[ti] = 1; typ[ti] = 19;
+            frY[ti] = (ushort)(18 * dgPlatformStyle);   // ★GGGGGG（DungeonGlobalPlatforms:158）
             qx++;
             if (qx >= W - 10) break;
         }
@@ -9469,6 +9534,11 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
                 {
                     int ti = (cy + b) * W + cx + a;            // TileObject.Place：占格 active+type
                     act[ti] = 1; typ[ti] = chestTile;          // （可切格先 KillTile=无掷，覆盖等价）
+                    // ★GGGGGG：PlaceChestDirect 帧式补齐（cs:57864-57903；JS dgAddBuriedChest
+                    //   同源）——顶行 fy=0/底行 fy=18、列 fx=36*style+a*18。曾不写帧=残留
+                    //   旧帧 → CheckChest/帧锚臂读帧失真。
+                    frX[ti] = (ushort)(36 * style + a * 18);
+                    frY[ti] = (ushort)(b == 0 ? 0 : 18);
                 }
         }
         // —— 战利品掷骰（深/金/表三分支 + 尾段；与 JS rollChestLoot 同构 + Prefix(-1) 补齐）——
@@ -9729,10 +9799,23 @@ void DgBookshelves()
                             //   的 platformStyle（那是平台件样式）→ 书架长成主题平台贴图。
                             //   frameY 通道不在 typ/act/wal/liq dump 内，此处仅注释留档。
                             act[ti] = 1; typ[ti] = 19;
+                            // ★GGGGGG：书架平台帧补齐（Bookshelves.cs:112-138；JS 同源）——
+                            //   样式=shelfStyles 按墙变体三档（墙==variants[1]/[2] 换 [1]/[2]），
+                            //   frameY=18*shelfStyle。曾仅注释留档不写。
+                            {
+                                int swl = wal[y * W + x];
+                                int shelfStyle = swl == dgWallVariants[1] ? dgShelf[1] : swl == dgWallVariants[2] ? dgShelf[2] : dgShelf[0];
+                                frY[ti] = (ushort)(18 * shelfStyle);
+                            }
                             if (flag3)
                             {
                                 DgPOnTable(x, y - 1, 50);          // ★PlaceTile(50)→PlaceOnTable1x1（平台19 ∈ tileTable）
-                                if ((int)r.Next(50) == 0 && (double)y > (worldSurface + rockLayer) / 2.0) { }
+                                // GenerateDungeonBook（DU:437-446）：Next(50) 水书掷+深度门+
+                                // ★1456 typo 检查 typ[y,y]（X/Y 互换读对角格）——实战对角格
+                                // 几乎恒非书 → 帧恒不落；命中则 frameX=90 水书伪装帧。
+                                if ((int)r.Next(50) == 0 && (double)y > (worldSurface + rockLayer) / 2.0
+                                    && DgInWorld(y, y, 0) && typ[y * W + y] == 50)
+                                    frX[(y - 1) * W + x] = 90;
                             }
                             x += n7;
                             n10--;
@@ -9823,6 +9906,18 @@ void DgLights()
                     if (lgTr) Console.WriteLine($"DG LP x={x} cy={cy} typAbv={typ[(cy - 1) * W + x]}");
                     act[cy * W + x] = 1; typ[cy * W + x] = 42;
                     act[(cy + 1) * W + x] = 1; typ[(cy + 1) * W + x] = 42;
+                    // ★GGGGGG：Place1x2Top 帧式补齐（cs:46711-46717；JS dgLights 同源）——
+                    //   frameY=style*36（下格 +18）、frameX=0（亮档；灭档 frameX=18 由
+                    //   DgSwitch 2/3 掷写）。灯笼样式按墙变体三档（Lights:109-118）。
+                    //   曾不写帧=残留砖帧，样式全丢。
+                    {
+                        int wl = wal[cy * W + x];
+                        int lStyle = wl == dgWallVariants[1] ? dgLantern[1] : wl == dgWallVariants[2] ? dgLantern[2] : dgLantern[0];
+                        frY[cy * W + x] = (ushort)(lStyle * 36);
+                        frY[(cy + 1) * W + x] = (ushort)(lStyle * 36 + 18);
+                        frX[cy * W + x] = 0;
+                        frX[(cy + 1) * W + x] = 0;
+                    }
                     placed = true; num2 = 0; num4++;
                     DgSwitch(x, cy);
                 }
@@ -9842,9 +9937,20 @@ bool DgPlaceChand(int x, int y)
     if (!(DgInWorld(x, y - 1, 0) && act[(y - 1) * W + x] != 0
         && typ[(y - 1) * W + x] != 481 && typ[(y - 1) * W + x] != 482 && typ[(y - 1) * W + x] != 483      // 裂纹砖非实心（DC:344）
         && JGS(typ[(y - 1) * W + x]) && inAct[(y - 1) * W + x] == 0 && !dgSolidTop.Contains(typ[(y - 1) * W + x]))) return false;
+    // ★GGGGGG：PlaceChand 帧式补齐（cs:52753-52824；JS placeChand 同源）——样式=
+    //   蓝/绿/粉地牢吊灯 placeStyle 27/28/29；页列 num2=108*(style/36)（27-29 无分页=0）、
+    //   行基 num3=style*54（分页修正同式）；三列 fx=num2+{0,18,36}、三行 fy=num3+{0,18,36}。
+    int chStyle = 27 + dungeonTheme;
+    int chN2 = chStyle / 36 * 108;
+    int chN3 = chStyle * 54;
+    if (chN2 >= 108) chN3 -= 54 * (chN2 / 108) * 37;
     for (int a = x - 1; a < x + 2; a++)
         for (int b = y; b < y + 3; b++)
-        { int ti = b * W + a; act[ti] = 1; typ[ti] = 34; }
+        {
+            int ti = b * W + a; act[ti] = 1; typ[ti] = 34;
+            frX[ti] = (ushort)(chN2 + (a - (x - 1)) * 18);
+            frY[ti] = (ushort)(chN3 + (b - y) * 18);
+        }
     return true;
 }
 // Lights_GenerateSwitch（:144-193）：随机找开关位（Collision.CanHit 视线通）→ PlaceTile(136)
@@ -9872,7 +9978,9 @@ void DgSwitch(int x, int y)
             if (act[b * W + a] == 0) { act[b * W + a] = 1; typ[b * W + a] = 136; }
         }
         if (act[b * W + a] == 0) continue;
-        if ((int)r.Next(3) > 0) { }                             // frameX=18（不入哈希）
+        // ★GGGGGG：2/3 灯初始灭档帧写补齐（cs:186-190；JS dgSwitch 同源）——frameX=18
+        //   绝对写（灯笼 1×2 全格=亮灭档在 X；吊灯中心列本就 18 → 同款无操作照抄）。
+        if ((int)r.Next(3) > 0) { frX[y * W + x] = 18; frX[(y + 1) * W + x] = 18; }
         if (swTr) Console.WriteLine($"DG SWX i={i} a={a} b={b}");
         break;
     }
@@ -9996,10 +10104,14 @@ bool DgPlaceTrap0(int x2, int y2)
     else { if (!f5) return false; num26 = num28; num32 = 1; }
     if (typ[num27 * W + num26] == 190) return false;
     if (wal[num27 * W + num26] == 350) return false;
-    if (wal[num * W + x2] > 0) { int ti = num * W + x2; act[ti] = 1; typ[ti] = 135; }
-    else { int ti = num * W + x2; act[ti] = 1; typ[ti] = 135; r.Next(2, 4); }
+    // ★GGGGGG：压板/机关帧写补齐（JS 同源，XXXX 轴修正案）——压板 135：样式轴在
+    //   frameY（墙>0 恒 style2，否则 Next(2,4)∈{2,3}）、frameX=0；机关 137：朝向
+    //   num32==1（左锚）→ frameX=18 朝右、否则 0，frameY=0（飞镖档）。
+    int tiPp = num * W + x2;
+    if (wal[num * W + x2] > 0) { act[tiPp] = 1; typ[tiPp] = 135; frX[tiPp] = 0; frY[tiPp] = 2 * 18; }
+    else { int pRoll = r.Next(2, 4); act[tiPp] = 1; typ[tiPp] = 135; frX[tiPp] = 0; frY[tiPp] = (ushort)(pRoll * 18); }
     act[num27 * W + num26] = 0;                                // KillTile（生成期 noItem）
-    { int ti = num27 * W + num26; act[ti] = 1; typ[ti] = 137; }
+    { int ti = num27 * W + num26; act[ti] = 1; typ[ti] = 137; frX[ti] = (ushort)(num32 == 1 ? 18 : 0); frY[ti] = 0; }
     return true;
 }
 // —— DungeonGlobalGroundFurniture.GroundFurniture（Default，:187-253）——
@@ -10091,12 +10203,12 @@ bool DgFurnAt(int i, int j, ref int alch, ref int bew, bool stricter)
         }
         else if (num18 == 0)
         {
-            if (DgP3x2(num3, j, DgTileOf(iTable)))
+            if (DgP3x2(num3, j, DgTileOf(iTable), DgStyleOf(iTable)))
             {
                 if (iChair > -1)
                 {
-                    if (DgInWorld(num3 - 2, j, 0) && act[j * W + num3 - 2] == 0) DgP1x2(num3 - 2, j, DgTileOf(iChair));
-                    if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgP1x2(num3 + 2, j, DgTileOf(iChair));
+                    if (DgInWorld(num3 - 2, j, 0) && act[j * W + num3 - 2] == 0) DgP1x2(num3 - 2, j, DgTileOf(iChair), DgStyleOf(iChair));
+                    if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgP1x2(num3 + 2, j, DgTileOf(iChair), DgStyleOf(iChair));
                 }
                 for (int n = num3 - 1; n <= num3 + 1; n++)
                 {
@@ -10113,15 +10225,15 @@ bool DgFurnAt(int i, int j, ref int alch, ref int bew, bool stricter)
         }
         else if (num18 == 1)
         {
-            if (DgP2x1(num3, j, DgTileOf(iWork)))
+            if (DgP2x1(num3, j, DgTileOf(iWork), DgStyleOf(iWork)))
             {
                 if (iChair > -1)
                 {
                     if ((int)r.Next(2) == 0)
                     {
-                        if (DgInWorld(num3 - 1, j, 0) && act[j * W + num3 - 1] == 0) DgP1x2(num3 - 1, j, DgTileOf(iChair));
+                        if (DgInWorld(num3 - 1, j, 0) && act[j * W + num3 - 1] == 0) DgP1x2(num3 - 1, j, DgTileOf(iChair), DgStyleOf(iChair));
                     }
-                    else if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgP1x2(num3 + 2, j, DgTileOf(iChair));
+                    else if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgP1x2(num3 + 2, j, DgTileOf(iChair), DgStyleOf(iChair));
                 }
                 for (int n = num3; n <= num3 + 1; n++)
                 {
@@ -10136,15 +10248,21 @@ bool DgFurnAt(int i, int j, ref int alch, ref int bew, bool stricter)
                 return true;
             }
         }
-        else if (num18 == 2) { if (iVase > -1 && DgP2xX(num3, j, DgTileOf(iVase), 3)) return true; }
+        else if (num18 == 2) { if (iVase > -1 && DgP2xX(num3, j, DgTileOf(iVase), 3, DgStyleOf(iVase))) return true; }
         else if (num18 == 3) { if (iBook > -1) DgP3x4(num3, j, DgTileOf(iBook)); }
         else if (num18 == 4)
         {
-            // ★cs:794-807 椅分支：Next(2) 方向掷（frameX+18 镜像，帧不入 dump 但掷必耗）
+            // ★cs:794-807 椅分支：Next(2) 方向掷（0=翻转镜像帧 +=18；掷必耗）
+            // ★GGGGGG：镜像帧写补齐（JS num18===4 同源）——曾掷值弃置恒帧 0。
             if (iChair > -1)
             {
                 bool mir = (int)r.Next(2) == 0;
-                DgP1x2(num3, j, DgTileOf(iChair));
+                DgP1x2(num3, j, DgTileOf(iChair), DgStyleOf(iChair));
+                if (mir)
+                {
+                    frX[j * W + num3] += 18;
+                    frX[(j - 1) * W + num3] += 18;
+                }
                 if (DgInWorld(num3, j, 0) && act[j * W + num3] != 0 && typ[j * W + num3] == DgTileOf(iChair)) return true;
             }
         }
@@ -10157,9 +10275,9 @@ bool DgFurnAt(int i, int j, ref int alch, ref int bew, bool stricter)
                 if (DgP4x2(num3, j, DgTileOf(iBed), dir)) return true;
             }
         }
-        else if (num18 == 6) { if (iPiano > -1 && DgP3x2(num3, j, DgTileOf(iPiano))) return true; }
-        else if (num18 == 7) { if (iDress > -1 && DgP3x2(num3, j, DgTileOf(iDress))) return true; }
-        else if (num18 == 8) { if (iSofa > -1 && DgP3x2(num3, j, DgTileOf(iSofa))) return true; }
+        else if (num18 == 6) { if (iPiano > -1 && DgP3x2(num3, j, DgTileOf(iPiano), DgStyleOf(iPiano))) return true; }
+        else if (num18 == 7) { if (iDress > -1 && DgP3x2(num3, j, DgTileOf(iDress), DgStyleOf(iDress))) return true; }
+        else if (num18 == 8) { if (iSofa > -1 && DgP3x2(num3, j, DgTileOf(iSofa), DgStyleOf(iSofa))) return true; }
         else if (num18 == 9)
         {
             // ★cs:833-842 浴缸分支：Next(2) direction 掷
@@ -10171,7 +10289,7 @@ bool DgFurnAt(int i, int j, ref int alch, ref int bew, bool stricter)
         }
         else if (num18 == 10) { if (iLamp > -1 && DgP1xX(num3, j, DgTileOf(iLamp), 3)) return true; }
         else if (num18 == 11) { if (iCand > -1 && DgP2x2(num3, j, DgTileOf(iCand))) return true; }
-        else if (num18 == 12) { if (iClock > -1 && DgP2xX(num3, j, DgTileOf(iClock), 5)) return true; }
+        else if (num18 == 12) { if (iClock > -1 && DgP2xX(num3, j, DgTileOf(iClock), 5, DgStyleOf(iClock))) return true; }
     }
     return false;
 }
@@ -10194,6 +10312,26 @@ int DgTileOf(int item) => item switch
     2645 or 2646 or 2647 or 5748 => 93,
     3900 or 3901 or 3902 or 5746 => 104,
     _ => -1
+};
+// ★GGGGGG：item → placeStyle（JS DG_ITEM_STYLE 表镜像；PlaceTile style 入帧公式
+//   不掷骰——曾缺=钟 104/雕像 105/椅 15/桌族 3x2 全族帧落 0）。
+int DgStyleOf(int item) => item switch
+{
+    1396 => 13, 1399 => 14, 1402 => 15, 1509 => 17,
+    1397 => 10, 1400 => 11, 1403 => 12, 1510 => 14,
+    1398 => 11, 1401 => 12, 1404 => 13, 1511 => 15,
+    1405 => 1, 1406 => 2, 1407 => 3, 5743 => 46,
+    1408 => 46, 1409 => 47, 1410 => 48,
+    1414 => 1, 1415 => 2, 1416 => 3, 1512 => 5,
+    1470 => 5, 1471 => 6, 1472 => 7, 5740 => 47,
+    2376 => 11, 2377 => 12, 2378 => 13, 5750 => 47,
+    2386 => 5, 2387 => 6, 2388 => 7, 5741 => 47,
+    2402 => 6, 2403 => 7, 2404 => 8, 5753 => 51,
+    2658 => 21, 2659 => 22, 2660 => 23, 5739 => 47,
+    2664 => 22, 2665 => 23, 2666 => 24, 5742 => 47,
+    2645 => 24, 2646 => 25, 2647 => 26, 5748 => 47,
+    3900 => 30, 3901 => 31, 3902 => 32, 5746 => 48,
+    _ => 0
 };
 // PlaceTile 近似：目标格净空 + 有墙/侧邻/底邻锚 → 单格放置（帧不入哈希）
 bool DgPlaceSimple(int x, int y, int type)
@@ -11280,8 +11418,8 @@ bool PlaceTileGen(int i, int j, int type, int style)
     if (i < 0 || i >= W || j < 0 || j >= H) return false;
     switch (type)
     {
-        case 19:   // 平台（cs:60242 case 19）：1×1 无条件写
-            typ[j * W + i] = 19; act[j * W + i] = 1; return true;
+        case 19:   // 平台（cs:60242 case 19）：1×1 无条件写；★GGGGGG frameY=18*style
+            typ[j * W + i] = 19; act[j * W + i] = 1; frY[j * W + i] = (ushort)(18 * style); return true;
         case 10:   // 门（cs:59867）：上方 3 格实心 → 上行 PlaceDoor(i,j-1)；下方 3 格实心 → PlaceDoor(i,j+1)
         {
             if (!InB(i, j - 3) || !InB(i, j + 3)) return false;
@@ -11397,8 +11535,15 @@ bool PlaceTileGen(int i, int j, int type, int style)
             }
             if (ok)
             {
+                // ★GGGGGG：织机帧写补齐（JS place3x3 LivingTree 同源）——304 走
+                //   furnitureStyleBase default=[style*54,0]，style 恒 0 → 帧=格内 18px 步。
                 for (int c = i - 1; c <= i + 1; c++)
-                    for (int d = j - 2; d <= j; d++) { typ[d * W + c] = 304; act[d * W + c] = 1; }
+                    for (int d = j - 2; d <= j; d++)
+                    {
+                        typ[d * W + c] = 304; act[d * W + c] = 1;
+                        frX[d * W + c] = (ushort)((c - (i - 1)) * 18);
+                        frY[d * W + c] = (ushort)((d - (j - 2)) * 18);
+                    }
                 return true;
             }
             return false;
@@ -11435,11 +11580,22 @@ bool PlaceSmallPileGen(int i, int j, int pileStyle, int pileSize)
     {
         bool ok = SolidTileGen(i, j + 1) && SolidTileGen(i + 1, j + 1) && act[j * W + i] == 0 && act[j * W + i + 1] == 0;
         if (ok && (InvalidPiles(i, j + 1) || InvalidPiles(i + 1, j + 1))) ok = false;
-        if (ok) { typ[j * W + i] = 185; act[j * W + i] = 1; typ[j * W + i + 1] = 185; act[j * W + i + 1] = 1; return true; }
+        // ★GGGGGG：帧写补齐（JS placeSmallPile 同源 cs:46853-46875）——size1 双格
+        //   fx=style*36/{+18}、fy=18；曾零帧 → CheckPile/臂读帧失真。
+        if (ok)
+        {
+            typ[j * W + i] = 185; act[j * W + i] = 1;
+            typ[j * W + i + 1] = 185; act[j * W + i + 1] = 1;
+            frX[j * W + i] = (ushort)(pileStyle * 36); frY[j * W + i] = 18;
+            frX[j * W + i + 1] = (ushort)(pileStyle * 36 + 18); frY[j * W + i + 1] = 18;
+            return true;
+        }
     }
     else if (SolidTileGen(i, j + 1) && act[j * W + i] == 0)
     {
-        typ[j * W + i] = 185; act[j * W + i] = 1; return true;
+        typ[j * W + i] = 185; act[j * W + i] = 1;
+        frX[j * W + i] = (ushort)(pileStyle * 18); frY[j * W + i] = 0;   // ★GGGGGG（size0 fx=style*18）
+        return true;
     }
     return false;
 }
@@ -11455,9 +11611,16 @@ bool PlacePotGen(int x, int y, int style)
         if (!SolidTileGen(c, y + 1)) ok = false;
     }
     if (!ok) return false;
-    r.Next(3);
+    // ★GGGGGG：变体掷值入帧（JS placePotRow 同源 cs:54082）——variant=rn(3)*36、
+    //   frameX=dx*18+variant、frameY=(dy+1)*18+style*36。曾掷值弃置恒帧 0。
+    int variant = r.Next(3) * 36;
     for (int c = x; c < x + 2; c++)
-        for (int d = y - 1; d <= y; d++) { typ[d * W + c] = 28; act[d * W + c] = 1; }
+        for (int d = y - 1; d <= y; d++)
+        {
+            typ[d * W + c] = 28; act[d * W + c] = 1;
+            frX[d * W + c] = (ushort)((c - x) * 18 + variant);
+            frY[d * W + c] = (ushort)((d - y + 1) * 18 + style * 36);
+        }
     return true;
 }
 // WorldGen.IsTileNearby（cs:8828）：distance 方框内 active type（step 1——type!=235）
@@ -12707,17 +12870,21 @@ bool GrowLivingTreeG(int i, int j, bool patch)
             for (int num51 = num47; num51 <= num48; num51++)
             {
                 if (!GrowLivingTree_CanPlaceLeavesG(num50, num51)) continue;
+                // ★GGGGGG：叶块帧清零补齐（JS setLeaf 同源）——防旧 framed tile（187 地被等）
+                //   帧残留 → 臂读帧失真（altars 检查点 192 族 99 格帧差主根因）。
                 if (array7[num43])
                 {
                     double dx = (double)array5[num43] - (double)num50, dy = (double)array6[num43] - (double)num51;
                     if (Math.Sqrt(dx * dx + dy * dy) < (double)num44 * 0.9)
                     {
                         typ[num51 * W + num50] = 192; act[num51 * W + num50] = 1;
+                        frX[num51 * W + num50] = 0; frY[num51 * W + num50] = 0;
                     }
                 }
                 else if ((double)Math.Abs(array5[num43] - num50) + (double)Math.Abs(array6[num43] - num51) * num49 < (double)num44)
                 {
                     typ[num51 * W + num50] = 192; act[num51 * W + num50] = 1;
+                    frX[num51 * W + num50] = 0; frY[num51 * W + num50] = 0;
                 }
             }
             if ((int)r.Next(30) == 0)
@@ -13990,7 +14157,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
     }
     bool PlaceSmallPile(int ax, int ay, int pileStyle, int pileSize)
     {
-        if (pileTrace) Console.Error.WriteLine($"PLT small ({ax},{ay}) st={pileStyle} sz={pileSize} below1={(QQInW(ax, ay + 1) ? typ[(ay + 1) * W + ax] : -1)}");
+        if (pileTrace) Console.Error.WriteLine($"PLT small n={QRollWrap.N} ({ax},{ay}) st={pileStyle} sz={pileSize} below1={(QQInW(ax, ay + 1) ? typ[(ay + 1) * W + ax] : -1)}");
         if (!QQInW(ax, ay)) return false;
         int i = ay * W + ax;
         if (liq[i] > 0 && liqT[i] == 1) return false;      // anyLava 拒绝
@@ -14010,7 +14177,7 @@ Replay(); // ▶pass 头重播：Piles cs:18900
     bool PlacePile3x2(int ax, int ay, ushort type, int style)
     {
         bool pr3 = PlacePile3x2Core(ax, ay, type, style);
-        if (pileTrace) Console.Error.WriteLine($"PLT 3x2 ({ax},{ay}) t={type} st={style} ok={pr3}");
+        if (pileTrace) Console.Error.WriteLine($"PLT 3x2 n={QRollWrap.N} ({ax},{ay}) t={type} st={style} ok={pr3}");
         return pr3;
     }
     // ★FFFFFF：SolidTile2 坐标重载（cs:70497，SSSS 平台顶坡豁免）——此前误用
@@ -18342,9 +18509,13 @@ bool FcFrameImportant(int x, int y, int sh)
             if (Environment.GetEnvironmentVariable("EE_NO_ORB") == null) FcCheckOrb(x, y, sh);
             return true;
         // ★CCCCC/VVVVV/YYYYY/DDDDDD：Check2x2 双支派发
+        // ★GGGGGG：EE_NEWARMS 转正后此臂曾留空支=Check2x2 全族停摆（484 滚地仙人掌组
+        //   JS 杀/oracle 存——FFFFFF ③-1 纯臂差真身）。FcCheck2x2 与 JS check2x2Sweep
+        //   （UUUU/CCCCC/VVVVV/YYYYY/DDDDDD 五批验证件）逐谓词 diff 全等（锚反解/
+        //   完整性四格帧校验/巨石箱族豁免+底两列 SolidTileAllowBottomSlope/尾 4×4
+        //   TileFrame cs:48800-07），恢复派发；EE_NO_2X2 保留为退回门。
         case 138: case 411: case 484: case 752: case 751:
-            if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0" || Environment.GetEnvironmentVariable("EE_NO_2X2") != null) { }
-            else FcCheck2x2(x, y, sh);
+            if (Environment.GetEnvironmentVariable("EE_NO_2X2") == null) FcCheck2x2(x, y, sh);
             return true;
         // ★YYYYY：CheckTree 树坍塌 + 观赏/宝石/灰烬树 + CheckChand 吊灯 + 向日葵
         case 5: if (Environment.GetEnvironmentVariable("EE_NEWARMS") != "0") FcCheckTree(x, y); return true;

@@ -13,6 +13,7 @@
 //  SilverBracer 6156 族 +2f → ×3）。
 import { Arrow } from './Arrow';
 import { playerCanHitEnemy } from './projTargets';
+import { trySnapStrike } from '../stats/SnapStrike';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 
@@ -566,6 +567,11 @@ export function resolveWhipTagHit(
     if (changes.crit !== null) crit = changes.crit;
   }
   stack.onHit(ctx, baseDmg, game);                                 // :13711（calcDamage = num7）
+  // 毁灭臂镗 6179（Damage :13447-13450）：tag 伤害成立的命中 → kind2 脉冲
+  //（150×minionDamage/400px/2 目标,共用 360t 冷却）
+  if (changes.addProjectileTagDamage && owner?.equipStats.accArmletOfRuin) {
+    trySnapStrike(game, owner, 2, hx, hy, en.id);
+  }
   if (crit) dmg *= 2;
   return { dmg: Math.max(1, Math.round(dmg)), crit };
 }

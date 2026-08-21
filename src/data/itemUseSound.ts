@@ -11,11 +11,14 @@ const TABLE = sndJson as unknown as Record<string, string>;
 const SOUND_TRACKS = soundTracksJson as unknown as Record<string, string[]>;
 
 /** LegacySoundStyle 别名常量（SoundID.cs:971/973/:1075）→ wav（Betsy 之 wrath 0.4 音量档
- *  与原型同源，LeafBlower=Item_34） */
+ *  与原型同源，LeafBlower=Item_34）。1457 新增两件（SoundID.cs:816/:836，非 CreateTrackable
+ *  命名轨 → soundTrackName 解析不到，按 LeafBlower 先例映射直连轨） */
 const USE_SOUND_ALIASES: Record<string, string[]> = {
   DD2_BetsysWrathShot: ['dd2_betsy_fireball_shot_0', 'dd2_betsy_fireball_shot_1', 'dd2_betsy_fireball_shot_2'],
   DD2_BetsysWrathImpact: ['dd2_betsy_fireball_impact_0', 'dd2_betsy_fireball_impact_1', 'dd2_betsy_fireball_impact_2'],
   LeafBlower: ['Item_34'],
+  GlacierFang_Charging: ['Item_210'],   // LegacySoundStyle(2,210)（6153 冰川之牙）
+  MysticBloom: ['Item_60'],             // LegacySoundStyle(2,60).WithVolumePerceived(0.65)（6154 花瓣风暴）
 };
 
 /** 物品 → UseSound wav 文件名；无显式赋值/无法解析返回 null。

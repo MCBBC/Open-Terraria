@@ -116,7 +116,7 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     expect(p.manaRegenCount).toBe(17);  // 1457: 空魔 num10=0.5 → floor(34×0.5)（原 1456 ×0.2×1.15=7）
   });
 
-  it('用魔惩罚期：onManaItemUsed 后 delay=(1−0.5)×240+45 再 ×0.7=115.5，产额 0', () => {
+  it('用魔惩罚期：onManaItemUsed 置 delay 后 ManaV2 钳 4f(:19526-19537),衰减 −1=3,产额 0', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     p.baseMaxMana = 100;
@@ -126,12 +126,12 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.onManaItemUsed();                // :42131-42137 动画窗内每帧重置
     p.vx = 10;                         // 移动 → 不吃静止额外衰减
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenDelay).toBe(114);  // 1457 ApplyManaRegenerationDelay:floor(165×0.7)=115 后 −1 衰减
+    expect(p.manaRegenDelay).toBe(3);    // 1457 ManaV2:applyManaRegenerationDelay 钳 4 → 本 tick 衰减 −1 = 3
     expect(p.manaRegenCount).toBe(0);  // delay>0 → manaRegen=0（:19270-19271）
     expect(p.mana).toBe(50);
   });
 
-  it('魔力再生 buff：惩罚期钳 20（:19247-19250）+ 静止加成常开 + num2 恒 1', () => {
+  it('魔力再生 buff：ManaV2 双钳归 4（applyManaRegenerationDelay 钳 4f）+ 静止加成常开 + num2 恒 1', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     p.baseMaxMana = 100;
@@ -169,7 +169,7 @@ describe('魔力回复（UpdateManaRegen :19214-19302）', () => {
     p.onManaItemUsed();
     p.vx = 10;
     p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
-    expect(p.manaRegenDelay).toBeCloseTo(115 - 1 - 0.5, 6); // 1457: floor(115.5)=115 置值后 −1−0.5
+    expect(p.manaRegenDelay).toBeCloseTo(4 - 1 - 0.5, 6); // 1457 ManaV2: 钳 4 后衰减loor(115.5)=115 置值后 −1−0.5
   });
 });
 

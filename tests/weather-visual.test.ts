@@ -254,53 +254,59 @@ const rareFlags = (over: Partial<RareCloudFlags> = {}): RareCloudFlags => ({
   ...over,
 });
 
-describe('稀有云 RollRareCloud（Cloud.cs:183-227）', () => {
+describe('稀有云 RollRareCloud（1457 Cloud.cs:184-232，掷点走 CloudID.Sets 池表）', () => {
   it('无门类型 22-24/27/29/32-34 恒可出（default 直通）', () => {
-    // 固定掷点：22+floor(0.00*19)=22（default 接受）
+    // 固定掷点：pool[floor(0.00*20)]=22（default 接受）
     expect(rollRareCloud(rareFlags(), () => 0)).toBe(22);
-    expect(rollRareCloud(rareFlags(), () => 0.999)).toBe(40);   // 37-40：需饥荒世界或 1/10 → 掷 0 不中 → 重掷
+    expect(rollRareCloud(rareFlags(), () => 0.999)).toBe(41);   // pool[19]=41 精灵云：hardMode 门未过 → 重掷至守卫退出返回 41
   });
   it('克眼云 25/26 需 downedBoss1（:201-204）；未杀时重掷到无门类型', () => {
     let call = 0;
-    const alt = () => (call++ % 2 === 0 ? 3 / 19 : 0.55);   // 25（门未过）→ 重掷 32（default 直通）
-    expect(rollRareCloud(rareFlags({ downedBoss1: false }), alt)).toBe(32);
-    expect(rollRareCloud(rareFlags({ downedBoss1: true }), () => 3 / 19)).toBe(25);
+    const alt = () => (call++ % 2 === 0 ? 3 / 20 : 0.55);   // 25（门未过）→ 重掷 pool[11]=33（default 直通）
+    expect(rollRareCloud(rareFlags({ downedBoss1: false }), alt)).toBe(33);
+    expect(rollRareCloud(rareFlags({ downedBoss1: true }), () => 3 / 20)).toBe(25);
   });
   it('骷髅云 31 需 downedBoss3（:195-197）', () => {
-    const r = () => 9 / 19;   // 22+9=31
+    const r = () => 9 / 20;   // pool[9]=31
     expect(rollRareCloud(rareFlags({ downedBoss3: false }), r)).toBe(31);   // 守卫退出返回末值
     expect(rollRareCloud(rareFlags({ downedBoss3: true }), r)).toBe(31);
   });
   it('克脑云 36 需 downedBoss2 且猩红世界（:198-200）', () => {
-    const r = () => 14 / 19;  // 22+14=36
+    const r = () => 14 / 20;  // pool[14]=36
     expect(rollRareCloud(rareFlags({ downedBoss2: true, crimson: false }), r)).toBe(36);
     expect(rollRareCloud(rareFlags({ downedBoss2: true, crimson: true }), r)).toBe(36);
   });
   it('困难模式云 30/35 需 hardMode（:205-208）', () => {
-    expect(rollRareCloud(rareFlags({ hardMode: true }), () => 8 / 19)).toBe(30);   // 22+8=30
-    expect(rollRareCloud(rareFlags({ hardMode: true }), () => 13 / 19)).toBe(35); // 22+13=35
+    expect(rollRareCloud(rareFlags({ hardMode: true }), () => 8 / 20)).toBe(30);   // pool[8]=30
+    expect(rollRareCloud(rareFlags({ hardMode: true }), () => 13 / 20)).toBe(35); // pool[13]=35
   });
-  it('Redigit 云 28 1/10（:209-214）；饥荒云 37-40 需饥荒世界或 1/10（:215-223）', () => {
-    // 28：掷 r=6/19 → 28；第二掷（1/10 门）0.0 → 命中
+  it('精灵云 41 需 hardMode（1457 :208-210 新增 case）', () => {
+    const r = () => 19 / 20;  // pool[19]=41
+    expect(rollRareCloud(rareFlags({ hardMode: false }), r)).toBe(41);   // 门未过 → 守卫退出返回末值
+    expect(rollRareCloud(rareFlags({ hardMode: true }), r)).toBe(41);
+  });
+  it('Redigit 云 28 1/10（:211-216）；饥荒云 37-40 需饥荒世界或 1/10（:217-225）', () => {
+    // 28：掷 r=6/20 → pool[6]=28；第二掷（1/10 门）0.0 → 命中
     let c = 0;
-    const seq = () => (c++ === 0 ? 6 / 19 : 0);
+    const seq = () => (c++ === 0 ? 6 / 20 : 0);
     expect(rollRareCloud(rareFlags(), seq)).toBe(28);
     c = 0;
-    const seqMiss = () => (c++ === 0 ? 6 / 19 : 0.5);   // 1/10 门未中 → 重掷
-    expect(rollRareCloud(rareFlags(), seqMiss)).toBe(31);  // 重掷 22+floor(0.5*19)=31（需 downedBoss3）→ 再掷…
-    expect(rollRareCloud(rareFlags({ dontStarveWorld: true }), () => 0.999)).toBe(40);  // 饥荒直通
+    const seqMiss = () => (c++ === 0 ? 6 / 20 : 0.5);   // 1/10 门未中 → 重掷
+    expect(rollRareCloud(rareFlags(), seqMiss)).toBe(32);  // 重掷 pool[10]=32（default 直通）
+    expect(rollRareCloud(rareFlags({ dontStarveWorld: true }), () => 17 / 20)).toBe(39);  // 饥荒直通 pool[17]=39
   });
-  it('十周年世界：范围收窄 22-36（:189 Next(22,37)）——37-40 不可达', () => {
+  it('十周年世界：池收窄 RareClouds_Celebration（22-36+41）——37-40 不可达', () => {
     const out = new Set<number>();
     for (let i = 0; i < 2000; i++) out.add(rollRareCloud(rareFlags({ tenthAnniversaryWorld: true }), Math.random));
     expect(Math.max(...out)).toBeLessThanOrEqual(36);
     expect(Math.min(...out)).toBeGreaterThanOrEqual(22);
+    expect(out.has(37) || out.has(38) || out.has(39) || out.has(40)).toBe(false);
   });
-  it('旗标全开后全类型 22-40 可达（分布抽样）', () => {
+  it('旗标全开后全类型 22-41 可达（分布抽样）', () => {
     const out = new Set<number>();
     const f = rareFlags({ downedBoss1: true, downedBoss2: true, downedBoss3: true, hardMode: true, crimson: true });
     for (let i = 0; i < 20000; i++) out.add(rollRareCloud(f, Math.random));
-    expect(out.size).toBe(19);   // 22..40 全覆盖
+    expect(out.size).toBe(20);   // 22..41 全覆盖（1457 池表含 41 Rare_Pixie）
   });
 });
 

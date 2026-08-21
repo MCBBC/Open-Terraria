@@ -493,6 +493,20 @@ export class Player extends Entity {
   get maxTagEffects(): number { return this.equipStats.maxTagEffects; }
   /** Player.tagEffectDuration（:1189,默认 1f）——tag/proc/自 buff 时长乘区 */
   get tagEffectDuration(): number { return this.equipStats.tagEffectDuration; }
+  /** Player.repeatWhipSwings（:1199,初始 -1）——蛇环补挥计数（真挥 +1 :49184,
+   *  120t 无挥经 Update_SnakeBand :28623-28628 归 -1） */
+  repeatWhipSwings = -1;
+  /** Player.repeatWhipsResetCooldown（:1201） */
+  repeatWhipsResetCooldown = 0;
+  /** 拍击石系共用冷却（Player.accSnappingStoneCooldown :1215,360t——6167 拍击石/
+   *  6178 焰爆石/6179 毁灭臂镗三脉冲同轴,Update :28599-28610 递减+回充音登记未接） */
+  accSnappingStoneCooldown = 0;
+  /** 1457 相机平移档（Player.Settings.PanControl_Keyboard :359;ButtonControlMode.cs:
+   *  Hold=0/Click=1/OnAlways=2/OffAlways=3,缺省 Hold=旧行为。设置 UI 循环切换
+   *  CyclePanControl_KeyboardAndMouse :379-382 登记未接——控制台/测试可直写） */
+  panControlMode = 0;
+  /** Player.hasClickPanOn（:2837）——Click 档互动键（右键）切换的平移开关 */
+  hasClickPanOn = false;
   // ---- 信息显示运行态(Player.cs 对应字段) ----
   /** 各信息显示开关(Player.hideInfo[13] :776;按下标=图标序,随存档;
    *  唯一交互=背包界面点图标切换,Main.cs:46547-46573) */
@@ -705,7 +719,7 @@ export class Player extends Entity {
       if ((statOfInternal(it.id)?.wing ?? 0) > 0) slot = i % 10;
     }
     if (slot < 0) return -1;
-    const dye = this.inv.dye[slot];
+    const dye = this.inv.getEffectiveDye(slot);   // LoadoutShare（GetEffectiveDye :5736）
     if (!dye) return -1;
     return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
   }
@@ -714,7 +728,8 @@ export class Player extends Entity {
    *  兜底 cBody——dye[0..2] 对应头/身/腿；无染料 → 0=无 shader） */
   armorSetDyeVid(): number {
     const pick = Math.floor(Math.random() * 3);
-    const dye = this.inv.dye[pick === 0 ? 0 : pick === 1 ? 1 : 2] ?? this.inv.dye[1];
+    const dye = this.inv.getEffectiveDye(pick === 0 ? 0 : pick === 1 ? 1 : 2)
+      ?? this.inv.getEffectiveDye(1);   // LoadoutShare（GetEffectiveDye :5736）
     if (!dye) return -1;
     return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
   }
@@ -752,7 +767,9 @@ export class Player extends Entity {
     const inv = this.inv;
     let k = '';
     for (let i = 0; i < inv.armor.length; i++) {
-      const s = inv.armor[i];
+      // GetEffectiveArmor 口径（LoadoutShare）：跨配装收藏共享件入键——
+      // 他套收藏变动/卸下同步失效缓存
+      const s = inv.getEffectiveArmor(i);
       k += (s?.id ?? 0) + 'p' + (s?.prefix ?? 0) + '.';
     }
     for (let i = 0; i < inv.dye.length; i++) {
@@ -841,7 +858,7 @@ export class Player extends Entity {
     let accSharpBarb = false, mysticSashDodge = false, accTimerCrit = false;
     let ammoCyclerMode = 0;   // PlayerAmmoCyclingMode（PlayerAmmoCyclingMode.cs:None=0/AmmoSlots=1/FullInventory=2/Random=3）
     for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
-      const s = this.inv.armor[i];
+      const s = this.inv.getEffectiveArmor(i);
       if (!s) continue;
       const fx = accFxOfInternal(s.id);
       // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
@@ -902,10 +919,11 @@ export class Player extends Entity {
       else if (accVid === 6170) accTimerCrit = true;                               // 计时暴击（:14603-14605,登记未接）
       else if (accVid === 6160) { accSharpBarb = true; critRanged += 8; }          // 锐刺（:14606-14608 rangedCrit+8 :13062-13066）
       else if (accVid === 6165) accPoisonBarb = true;                              // 毒刺（:14609-14611）
-      else if (accVid === 6168) { ammoCyclerMode = 1; }                            // 弹药循环·四格（:14634-14637）
-      else if (accVid === 6169) { ammoCyclerMode = 2; }                            // 弹药循环·全背包（:14638-14641）
-      else if (accVid === 6193) { ammoCyclerMode = 3; }                            // 弹药循环·随机（:14642-14645）
-      else if (accVid === 6194) { ammoCyclerMode = 0; }                            // 弹药循环·禁用（:14646-14648,仅 +8% 远程伤）
+      else if (accVid === 6168) { ammoCyclerMode = 1; dmgRanged += 0.08; }         // 弹药循环·四格（:14634-14637）
+      else if (accVid === 6169) { ammoCyclerMode = 2; dmgRanged += 0.08; }         // 弹药循环·全背包（:14638-14641）
+      else if (accVid === 6193) { ammoCyclerMode = 3; dmgRanged += 0.08; }         // 弹药循环·随机（:14642-14645）
+      else if (accVid === 6194) { ammoCyclerMode = 0; dmgRanged += 0.08; }         // 弹药循环·禁用（:14646-14648）
+      //  ^ 四件共 accAmmoCyclerDamage → rangedDamage += 0.08（:13054-13057 UpdateEquips 段）
       else if (accVid === 6172) accSentryBackpack = true;                          // 重携哨兵背包（:14612-14614）
       else if (accVid === 6175) {                                                  // 侦察背包（:14670-14677）
         accSentryBackpack = true;
@@ -1049,7 +1067,7 @@ export class Player extends Entity {
     // ApplyEquipFunctional 只扫功能槽）。备案：功能槽侧原版有 hideVisibleAccessory 门
     //（:36362 !hide 才应用），本仓无 per-slot 隐藏字段未建模。
     for (let i = 13; i < 20; i++) {
-      const s = this.inv.armor[i];
+      const s = this.inv.getEffectiveArmor(i);
       if (!s) continue;
       const v = ITEM_DEFS[s.id];
       const vid = v?.vid ?? (v?.key?.startsWith('vi_') ? parseInt(v.key.slice(3), 10) : -1);
@@ -1098,15 +1116,15 @@ export class Player extends Entity {
       if (fx.wickedArmlet) accWickedArmlet = true;
     };
     let seenDd2 = false;
-    for (let i = 0; i < 3; i++) sumFx(this.inv.armor[i]);
+    for (let i = 0; i < 3; i++) sumFx(this.inv.getEffectiveArmor(i));
     // GrantArmorBenefits 盔甲三件扫描（Player.cs:12826-12831）：armor 268 潜水头盔 → accDivingHelm
     for (let i = 0; i < 3; i++) {
-      const s = this.inv.armor[i];
+      const s = this.inv.getEffectiveArmor(i);
       if (s && accFxOfInternal(s.id)?.divingHelm) divingHelm = true;
     }
     // 套装/头盔 type 检测（vid 直查）：蘑菇矿头 1546箭/1547弹/1548火箭（:13274-13288）
     const aVid = (i: number): number => {
-      const d = ITEM_DEFS[this.inv.armor[i]?.id ?? -1];
+      const d = ITEM_DEFS[this.inv.getEffectiveArmor(i)?.id ?? -1];
       return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
     };
     const [hVid, bVid, lVid] = [aVid(0), aVid(1), aVid(2)];
@@ -1118,7 +1136,7 @@ export class Player extends Entity {
     nebulaSet = hVid === 2760 && bVid === 2761 && lVid === 2762;
     beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲
     beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
-    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(this.inv.armor[i]);
+    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(this.inv.getEffectiveArmor(i));
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     // DD2 盔甲散件主属性（DD2_PIECE_FX——Player.cs:12709-12810 胸/腿件逐件扫描,2026-08-13）
     for (let _i = 0; _i < 3; _i++) {
@@ -1195,9 +1213,9 @@ export class Player extends Entity {
     let huntressT2 = false;
     // 召唤系套装（SUMMON_SET 槽序键；散件效果已在上扫，此处只叠套装层）
     const summonSet = (() => {
-      const st0 = statOfInternal(this.inv.armor[0]?.id ?? -1);
-      const st1 = statOfInternal(this.inv.armor[1]?.id ?? -1);
-      const st2 = statOfInternal(this.inv.armor[2]?.id ?? -1);
+      const st0 = statOfInternal(this.inv.getEffectiveArmor(0)?.id ?? -1);
+      const st1 = statOfInternal(this.inv.getEffectiveArmor(1)?.id ?? -1);
+      const st2 = statOfInternal(this.inv.getEffectiveArmor(2)?.id ?? -1);
       if (!st0?.hs || st1?.bs === undefined || st2?.ls === undefined) return null;
       const s = SUMMON_SET[`${st0.hs}|${st1.bs}|${st2.ls}`] ?? SUMMON_SET[`${st0.hs}|${st1.bs}|*`];
       if (!s) return null;
@@ -3452,6 +3470,12 @@ export class Player extends Entity {
     // 鞭 tag 栈 Update（TagEffectStack.Update :24785——Limit(maxTagEffects) 超限驱逐
     // + 各 state per-NPC 双表递减；1456 的敌侧单值递减已退役）
     this.tagEffectStack.update();
+    // 蛇环补挥计数复位（Update_SnakeBand :28623-28628：冷却 120t 走完归 -1）
+    if (this.repeatWhipsResetCooldown > 0 && --this.repeatWhipsResetCooldown === 0) {
+      this.repeatWhipSwings = -1;
+    }
+    // 拍击石系冷却递减（Update :28603——0 档回充音效登记未接）
+    if (this.accSnappingStoneCooldown > 0) this.accSnappingStoneCooldown--;
 
     // 落地摔伤结算（Player.cs:25005-25091：25 格 + extraFall 起伤，超格数 ×10 线性；
     // 翼豁免 flag9=任一盔甲槽 wingSlot>-1；幸运马掌 noFallDmg；落在水里豁免）
@@ -5201,6 +5225,13 @@ export class Player extends Entity {
     if (this.shimmering) return 0;
     if (this.iframes > 0 || this.dead) return 0;
     const eq = this.equipStats;
+    // 神秘艺术腰布 6189（Player.Hurt :38501-38504 mysticSashDodge 分支——1457 新,
+    // 排在黑带前）：10% 闪避 → SetImmuneTimeForAllTypes(longInvince?120:80)（:38342-38344;
+    // DoMysticSashDodge 紫尘/碎布 gore 登记未接——本仓 damage() 无 game 钩子）
+    if (eq.mysticSashDodge && Math.random() < 0.1) {
+      this.iframes = Math.max(this.iframes, eq.longInvince ? 120 : 80);
+      return 0;
+    }
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :9772 blackBelt 分支）
     if (eq.blackBelt && Math.random() < 0.1) return 0;
     // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）

@@ -17,6 +17,8 @@ import type { Player } from './Player';
 import { projFrameImg, projFrameCount } from './Arrow';
 import { MinionProj } from './MinionProj';
 import { Arrow } from './Arrow';
+import { ITEM_DEFS } from '../data/items';
+import { combatWeapon } from '../data/vanillaItemCombat';
 import {
   WHIP_TAG, WHIP_HIT_BUFF, WHIP_HIT_SIDEKICK,
   WHIP_SEGMENTS, WHIP_RANGE, WHIP_FALLOFF, WHIP_PROC_ITEMS, WHIP_PROC_ONCE_ITEMS,
@@ -103,6 +105,8 @@ export class WhipProj extends Entity {
   private hitSet = new Set<number>();
   /** 星座星每挥动一次门（case 1034 localAI[0]==0 :12966-12970） */
   private localAI0 = 0;
+  /** 蛇环补挥标记（补挥不再级联补挥;原版经 withAudioVisualFeedback=false 分支无动画自然不触发） */
+  isEcho = false;
   /** proc 启用门（case 913/1031/1032 localAI[0]==0 :12936-12940；1035 无门） */
   private procEnabled = false;
   private ownerRef: () => Player | null;
@@ -250,6 +254,44 @@ export class WhipProj extends Entity {
         lash.ai2 = 10 + this.ai2; // :45047（≥10 = 子鞭标记）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(lash, 'projectiles');
       }
+    }
+    // ---- 蛇环补挥（accSnakeBand,ItemCheck_ManageUsage :43041-43063）：真挥计数
+    //  repeatWhipSwings % 3 == 0 且物品动画过半（本仓代理 = 鞭 ai0 过 timeToFlyOut/2,
+    //  同一时刻）→ 补挥一鞭：maxTagEffects>1 时从手持+1 起扫背包取下一把 IsAWhip,
+    //  否则同件;伤 = GetWeaponDamage×0.25（min 3）/击退 ×0.25/朝向散布 ±0.314rad
+    //  （ItemCheck_Shoot !withAudioVisualFeedback 分支 :49168-49182）——无音效无动画。
+    //  登记偏差：原版 GetWeaponDamage 含玩家伤害乘区+词缀,本仓取鞭表基伤
+    //  （combatWeapon whip.dmg）×召唤乘区在 ctor 内,词缀不并入 ----
+    if (owner?.equipStats.accSnakeBand && !this.isEcho && this.ai2 < 10
+      && owner.repeatWhipSwings >= 0 && owner.repeatWhipSwings % 3 === 0
+      && prevAi0 < this.timeToFlyOut / 2 && this.ai0 >= this.timeToFlyOut / 2) {
+      let echoItem = this.itemId;
+      let echoProj = this.projId;
+      let echoDmg = this.damage;
+      let echoKb = this.knockback;
+      let echoAnim = this.anim;
+      let echoSpeed = this.speed;
+      if (owner.maxTagEffects > 1) {
+        const from = owner.inv.selected + 1;
+        for (let k = from; k < 50; k++) {
+          const s = owner.inv.slots[k];
+          if (!s) continue;
+          const d = ITEM_DEFS[s.id];
+          if (!d) continue;
+          const cw2 = combatWeapon(d);
+          if (cw2?.kind !== 'whip') continue;
+          echoItem = cw2.itemId; echoProj = cw2.shoot;
+          echoDmg = Math.max(1, Math.round(cw2.damage)); echoKb = cw2.knockback;
+          echoAnim = cw2.useTime; echoSpeed = cw2.shootSpeed;
+          break;
+        }
+      }
+      const echo = new WhipProj(owner.cx, owner.cy,
+        this.aimAng() + (Math.random() * 2 - 1) * 0.3141593, echoProj, echoItem,
+        Math.max(3, Math.round(echoDmg * 0.25)), echoKb * 0.25, echoAnim, echoSpeed,
+        () => owner, this.aimAng);
+      echo.isEcho = true;
+      (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(echo, 'projectiles');
     }
   }
 

@@ -130,7 +130,8 @@ export function mouseTextColorApprox(): number {
 
 /** AI_GlobalFiringDistanceCheck（1457 新增,NPC.cs:56405-56411）：
  *  `Utils.CenteredRectangle(targetPos.ToPoint(), Main.MaxWorldViewSize)` 再
- *  `Inflate(-50,-50)` → 以目标为中心的 1870×1150 视野矩形（半轴 935×575），
+ *  `Inflate(-50,-50)` → 以目标为中心的 1820×1100 视野矩形（每侧内缩 50 →
+ *  半轴 1920/2−50=910 × 1200/2−50=550；曾误读"尺寸−50"得 935×575，门放宽 25px），
  *  `Contains(shootPos.ToPoint())` = 射手在目标"最大世界视野"内才允许开火/索敌。
  *  Main.MaxWorldViewSize = Point(1920,1200)（Main.cs:758 恒量,单人等价）。
  *  Rectangle.Contains 语义：Left ≤ x < Right（XNA 左闭右开）;ToPoint = (int) 截断。
@@ -141,7 +142,7 @@ export function mouseTextColorApprox(): number {
 export function aiGlobalFiringDistanceCheck(sx: number, sy: number, tx: number, ty: number): boolean {
   const dx = Math.trunc(sx) - Math.trunc(tx);
   const dy = Math.trunc(sy) - Math.trunc(ty);
-  return dx >= -935 && dx < 935 && dy >= -575 && dy < 575;
+  return dx >= -910 && dx < 910 && dy >= -550 && dy < 550;
 }
 /** 661 帝皇蝶离神圣渐隐一步（NPC.cs:45240-45263 纯函数化，仅 type 661）：
  *  fading（目标失效 / 中心距 ≥300 / 目标玩家不在神圣，:45244-45252）→ ai2 +1，
@@ -405,7 +406,9 @@ export class Enemy extends Entity {
   // 火月怪 419（:24638 取 0..6 七份渐隐 + 帧行 5-7 循环）。
   // 定长预分配（性能审计"每帧分配热点"清单），零逐 tick 分配；联机傀儡路径同样推入
   // （fixedUpdate 头部早退分支内单独调用）——傀儡只有快照推进但拖尾同样需要历史。
-  private static readonly HIST_N = 10;
+  // 60 = TrailCacheLength[677]（NPCID.cs:4805，飞灵拖尾 num4=60-1-5=54 起步）；
+  // 其余族原版缺省 10（NPC.cs:8390）——消费端全部自带 ≤10 的循环上限，不受影响。
+  private static readonly HIST_N = 60;
   private histX = new Float64Array(Enemy.HIST_N);
   private histY = new Float64Array(Enemy.HIST_N);
   private histRot = new Float64Array(Enemy.HIST_N);

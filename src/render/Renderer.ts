@@ -4018,9 +4018,12 @@ export class Renderer {
 
   /**
    * DrawNPCDirect_Faeling（Main.cs:26306-26362）——NPC 677 四列×五行表：
-   *  列 0 = 主动画（行 = FindFrame 帧）、列 1 = 中层亮体、列 2 = 拖尾段、列 3 = 呼吸光晕
+   *  列 0 = 本体图案、列 1 = 翅膀、列 2 = 白色光晕体、列 3 = 闪烁 sparkle
    *  （行 whoAmI%5 与行 1 两张）。拖尾取 ShimmerFlyLeashedCritter.oldPositions
    *  （:56-62 临时换入 _dummy.oldPos），54→5 步进 3 共 17 段正弦环绕渐隐。
+   *  合成走 faelingPremultLayer（XNA 预乘语义，见 drawFaeling 块注）；原版
+   *  LeashedCritter.Draw → DrawNPCDirect 直通（:199）不走 GetAlpha = 全亮，
+   *  不乘光照（旧 lm 乘法已摘）；rotation = 0（CopyToDummy :176 硬置）。
    */
   private drawLeashedFaeling(
     ctx: CanvasRenderingContext2D,
@@ -4029,29 +4032,20 @@ export class Renderer {
   ) {
     const img = this.atlas ? this.atlas.ensureVImage('vanilla/NPC_677.png') : null;
     if (!img) return;
+    const cvs = this.faelingCanvases();
+    if (!cvs) return;
     void world;
-    const COLS = 4, ROWS = 5;                       // horizontalFrames=4, num=5（:26310-26311）
-    const cw = img.width / COLS, ch = img.height / ROWS;
+    const ROWS = 5;                                 // num=5（:26310-26311）
     const t = visEffectFrames();
     const cx = e.cx, cy = e.cy + 8;                 // dummy.Center = Center + (0,8)（CopyToDummy :171）
-    const num2 = (e.whoAmI * 0.11 + t / 360) % 1;   // :26312
-    const hue = (h: number) => hslRgb(h, 1, 0.5);
+    const num2 = (((e.whoAmI * 0.11 + t / 360) % 1) + 1) % 1;   // :26312
     const core = hslRgb(num2, 1, 0.65);
     const frame = Math.max(0, Math.min(ROWS - 1, e.frame));
-    const src = (col: number, row: number) => [col * cw, row * ch, cw, ch] as const;
-    const light = this.lighting ? this.lighting.lightAt(Math.floor(cx / 16), Math.floor(cy / 16)) : [255, 255, 255];
-    const lm = Math.max(0.15, Math.max(light[0], light[1], light[2]) / 255);
     const draw = (col: number, row: number, x: number, y: number, scale: number,
-      rgba: [number, number, number, number], flip: boolean) => {
-      const [sx, sy, sw, sh] = src(col, row);
-      ctx.save();
-      ctx.globalAlpha = Math.max(0, Math.min(1, rgba[3]));
-      ctx.translate(x, y);
-      ctx.scale((flip ? -1 : 1) * scale, scale);
-      ctx.drawImage(img, sx, sy, sw, sh, -cw / 2, -ch / 2, cw, ch);
-      ctx.restore();
-    };
-    // ---- 拖尾（:26321-26347）----
+      mr: number, mg: number, mb: number, ma: number, flip: boolean) =>
+      this.faelingPremultLayer(ctx, img, cvs[0], cvs[1], col, row, x, y,
+        mr, mg, mb, ma, scale, 0, flip);
+    // ---- 拖尾（:26321-26347）：列 2 光晕 × 彩虹 × num14×0.16，A=0 纯加算 ----
     const old = e.oldPositions;
     if (old && old.length > 0) {
       const num3 = old.length;                       // TrailCacheLength[677] = 60
@@ -4063,33 +4057,32 @@ export class Renderer {
       num9 = Math.floor(num9 / 5) * 5 / 100;         // (int)num9/5 → *5 → /100
       num8 *= num9; num7 *= num9;
       for (let i = num4; i >= 5; i -= 3) {
-        const ox = old[i].x - e.cx, oy = old[i].y - e.cy;
+        if (i >= old.length) continue;
         const num14 = remapClamped(i, 0, num3, 1, 0);
         const num15 = 1 - num14;
         // spinningpoint = (sin(whoAmI/17 + t/9 + num14·4π)·num8, -num7)·num15，再 RotatedBy(π)
         const spX = Math.sin(e.whoAmI / 17 + t / 9 + num14 * 2 * Math.PI * 2) * num8 * num15;
-        const spY = -num7 * num15;
-        const vx = ox + -spX, vy = oy + -spY;        // RotatedBy(π) = 取反
-        const c3 = hue((num2 + num15 * 0.5) % 1);
-        const a = num14 * 0.16 * lm;
-        const sc = e.scale * remapClamped(num14 * num14, 0, 1, 0, 2.5);
-        draw(2, 0, cx + vx, cy + vy, sc, [c3[0] * 255 * lm, c3[1] * 255 * lm, c3[2] * 255 * lm, a],
-          e.spriteDirection !== 1);
+        const spY = num7 * num15;
+        const vx = -spX, vy = spY;                   // RotatedBy(π) = 取反
+        const c3 = hslRgb((num2 + num15 * 0.5) % 1, 1, 0.5);
+        const k = num14 * 0.16;
+        draw(2, 0, cx + old[i].x - e.cx + vx, cy + old[i].y - e.cy + vy,
+          remapClamped(num14 * num14, 0, 1, 0, 2.5) * e.scale,
+          c3[0] * 255 * k, c3[1] * 255 * k, c3[2] * 255 * k, 0, e.spriteDirection !== 1);
       }
     }
     // ---- 三层本体 + 双光晕（:26348-26361）----
-    const whiteA = 0.5 * lm;                          // Color(255,255,255,0) 预乘 A=0 → 加性观感；乘光照
-    draw(2, 0, cx, cy, e.scale, [255 * lm, 255 * lm, 255 * lm, whiteA], e.spriteDirection !== 1);
-    draw(1, frame, cx, cy, e.scale, [255 * lm, 255 * lm, 255 * lm, whiteA], e.spriteDirection !== 1);
+    draw(2, 0, cx, cy, e.scale, 255, 255, 255, 0, e.spriteDirection !== 1);
+    draw(1, frame, cx, cy, e.scale, 255, 255, 255, 127 / 255, e.spriteDirection !== 1);
     draw(0, frame, cx, cy, e.scale,
-      [core[0] * 255 * lm, core[1] * 255 * lm, core[2] * 255 * lm, 0.5 * lm], e.spriteDirection !== 1);
+      core[0] * 255, core[1] * 255, core[2] * 255, 127 / 255, e.spriteDirection !== 1);
     const num16 = Math.max(0, Math.min(1, Math.sin(t / 60) * 0.3 + 0.3));   // :26354
     const num17 = 0.8 + Math.sin(t / 15 * Math.PI * 2) * 0.3;               // :26355
     const glowRowA = ((e.whoAmI % ROWS) + ROWS) % ROWS;
+    const gr = (core[0] + 1) * 127.5 * num16, gg = (core[1] + 1) * 127.5 * num16,
+      gb = (core[2] + 1) * 127.5 * num16;
     for (const row of [glowRowA, 1]) {
-      const c = mixRgb(core, [1, 1, 1], 0.5);
-      draw(3, row, cx, cy, e.scale * num17,
-        [c[0] * 255 * lm, c[1] * 255 * lm, c[2] * 255 * lm, num16 * lm], false);   // SpriteEffects.None
+      draw(3, row, cx, cy, e.scale * num17, gr, gg, gb, 63.5 / 255 * num16, false);   // SpriteEffects.None
     }
   }
 
@@ -5960,103 +5953,149 @@ export class Renderer {
    *  锚点 = Center+(0,-3)，逐片 origin (1-col, 1.5-row)×16（片内再内缩 1px 取整格） */
   /** 飞灵 677 多层复合渲染（Main.cs:26306-26368 DrawNPCDirect_Faeling 1:1）。
    *  贴图 88×110 = 4 列 × 5 行 22×22 格；4 列是 4 个【图层】非动画帧：
-   *  列 0 = 本体图案 / 列 1 = 翅膀 / 列 2 = 白色光晕体 / 列 3 = 闪烁 sparkle。
-   *  5 行 = 动画帧（FindFrame frame.Y 0..4 循环，frame.Y 是帧号）。
-   *  绘制顺序：①拖尾残影（旧位 × 列 2，彩虹色渐隐）②主光晕（列 2 行 0，白色加算）
-   *  ③翅膀（列 1 行 frame.Y，白 50%）④本体（列 0 行 frame.Y，彩虹 50%）
-   *  ⑤闪烁（列 3 行 whoAmI%5，脉冲缩放+彩虹）⑥辅助闪烁（列 3 行 1）。
-   *  在世界变换内调用——直接用世界坐标绘制。 */
+   *  列 0 = 本体图案（灰 191）/ 列 1 = 翅膀 / 列 2 = 白色光晕体（383px 大团）/
+   *  列 3 = 闪烁 sparkle。5 行 = 动画帧（FindFrame case 677 frame.Y 0..4，每 3t 一帧）。
+   *  ★合成语义 = XNA 预乘 alpha（SpriteBatch AlphaBlend = (One, InvSrcAlpha)）：
+   *  调制色 (r,g,b,a) 的 RGB 通道【全额加算】纹理预乘色，A 通道只衰减背景
+   *  dst×(1-texel.a×a)。Canvas source-over 会把 a 同时压到 RGB 上（贡献减半）——
+   *  旧实现本体/翅膀减半、拖尾/sparkle 非加算 = 用户实报"发光色很淡、与原版
+   *  完全不一致"的根因。精确模拟两步：①黑剪影 source-over alpha=a（背景按
+   *  纹理形状衰减）②染色纹理 'lighter' alpha=1（RGB 全额叠加）。
+   *  原版 677 无 Lighting.AddLight（AI 光分支在 else if，677 永不达）——"照亮
+   *  周围"的观感全部来自列 2 大白团的全额加算 + 自发光不走 GetAlpha（本 pass
+   *  在光照合成后 = 等价）。 */
+  private _faelingTint: HTMLCanvasElement | null = null;
+  private _faelingSil: HTMLCanvasElement | null = null;
+  /** 飞灵预乘合成单层绘制（DrawNPCDirect_Faeling 各层共享；ctx 须已在世界变换内）。
+   *  (mr,mg,mb)=调制 RGB(0-255)、ma=调制 A(0-1)、rot=旋转、fl=水平镜像。
+   *  两步：①黑剪影（纹理 alpha 形状）source-over alpha=ma → 背景衰减
+   *  dst×(1-texel.a×ma)；②染色纹理 'lighter' alpha=1 → RGB 全额加算。 */
+  private faelingPremultLayer(
+    ctx: CanvasRenderingContext2D, img: ImageBitmap | HTMLImageElement,
+    tintC: HTMLCanvasElement, silC: HTMLCanvasElement,
+    col: number, row: number, dx: number, dy: number,
+    mr: number, mg: number, mb: number, ma: number, sc: number,
+    rot: number, fl: boolean,
+  ): void {
+    const CW = 22, CH = 22;
+    const sx = col * CW, sy = row * CH;
+    const tintCtx = tintC.getContext('2d')!;
+    const silCtx = silC.getContext('2d')!;
+    ctx.save();
+    ctx.translate(dx, dy);
+    ctx.rotate(rot);
+    if (fl) ctx.scale(-1, 1);
+    // ① 背景衰减：黑剪影 source-over alpha=ma → 与 XNA InvSrcAlpha 项逐像素等价
+    if (ma > 0.004) {
+      silCtx.clearRect(0, 0, CW, CH);
+      silCtx.drawImage(img, sx, sy, CW, CH, 0, 0, CW, CH);
+      silCtx.globalCompositeOperation = 'source-in';
+      silCtx.fillStyle = '#000';
+      silCtx.fillRect(0, 0, CW, CH);
+      silCtx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = Math.max(0, Math.min(1, ma));
+      ctx.drawImage(silC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
+      ctx.globalAlpha = 1;
+    }
+    // ② RGB 加算：染色纹理（texel.rgb×调制色，alpha 不变）'lighter' 全额叠加。
+    //    mr=mg=mb=255 时免染色直画（列 2 光晕/列 1 翅膀）
+    const plain = mr >= 254.5 && mg >= 254.5 && mb >= 254.5;
+    if (!plain) {
+      tintCtx.clearRect(0, 0, CW, CH);
+      tintCtx.drawImage(img, sx, sy, CW, CH, 0, 0, CW, CH);
+      tintCtx.globalCompositeOperation = 'multiply';
+      tintCtx.fillStyle = `rgb(${Math.max(0, Math.min(255, Math.round(mr)))},${Math.max(0, Math.min(255, Math.round(mg)))},${Math.max(0, Math.min(255, Math.round(mb)))})`;
+      tintCtx.fillRect(0, 0, CW, CH);
+      tintCtx.globalCompositeOperation = 'destination-in';
+      tintCtx.drawImage(img, sx, sy, CW, CH, 0, 0, CW, CH);
+      tintCtx.globalCompositeOperation = 'source-over';
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(tintC, 0, 0, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
+    } else {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.drawImage(img, sx, sy, CW, CH, -CW * sc / 2, -CH * sc / 2, CW * sc, CH * sc);
+    }
+    ctx.restore();
+  }
+
+  /** 飞灵离屏 canvas 对（惰性建，实例级复用） */
+  private faelingCanvases(): [HTMLCanvasElement, HTMLCanvasElement] | null {
+    if (!this._faelingTint) {
+      const t = document.createElement('canvas'); t.width = 22; t.height = 22;
+      const s = document.createElement('canvas'); s.width = 22; s.height = 22;
+      this._faelingTint = t; this._faelingSil = s;
+    }
+    return this._faelingTint && this._faelingSil ? [this._faelingTint, this._faelingSil] : null;
+  }
+
   private drawFaeling(e: Enemy, world: World) {
+    void world;
     if (!this.atlas) return;
     const img = this.atlas.ensureVImage('vanilla/NPC_677.png');
     if (!img || !(img.width > 0)) return;
+    const cvs = this.faelingCanvases();
+    if (!cvs) return;
     const ctx = this.ctx;
-    const CW = 22, CH = 22;
-    const tVis = performance.now() / 1000 * 60;
-    const num2 = ((e.id * 0.11 + tVis / 360) % 1 + 1) % 1;
+    const tVis = visEffectFrames();
+    const num2 = (((e.id * 0.11 + tVis / 360) % 1) + 1) % 1;
     const hsl = (h: number, s: number, l: number): [number, number, number] =>
       Renderer.glowHslToRgb(((h % 1) + 1) % 1, s, l);
     const animRow = Math.max(0, Math.min(4, Math.floor(e.animT / 3) % 5));
     const scale = e.vanillaScale || 1;
-    const cell = (col: number, row: number) => ({ sx: col * CW, sy: row * CH, sw: CW, sh: CH });
+    const rot = e.visAngle;                 // 677 rotation = velocity.X × 0.3（AI 侧 :47473）
+    const flip = e.facing === 1;            // spriteDirection==1 → FlipHorizontally(:22984)
     const cx = e.cx, cy = e.cy;
-    // XNA SpriteBatch 的 Color 参数 = 逐像素乘算（modulate）。Canvas2D drawImage
-    // 无此功能 → 用离屏 canvas 做乘算调色后绘制。
-    const tintCanvas = document.createElement('canvas');
-    tintCanvas.width = CW; tintCanvas.height = CH;
-    const tintCtx = tintCanvas.getContext('2d')!;
-    const drawTinted = (col: number, row: number, dx: number, dy: number,
-      r: number, g: number, b: number, a: number, sc: number, additive: boolean) => {
-      const c = cell(col, row);
-      tintCtx.clearRect(0, 0, CW, CH);
-      tintCtx.drawImage(img, c.sx, c.sy, CW, CH, 0, 0, CW, CH);
-      // multiply 调色
-      tintCtx.globalCompositeOperation = 'multiply';
-      tintCtx.fillStyle = `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
-      tintCtx.fillRect(0, 0, CW, CH);
-      // 恢复 alpha（multiply 会把透明像素变实色）
-      tintCtx.globalCompositeOperation = 'destination-in';
-      tintCtx.drawImage(img, c.sx, c.sy, CW, CH, 0, 0, CW, CH);
-      tintCtx.globalCompositeOperation = 'source-over';
-      ctx.save();
-      if (additive) ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = Math.max(0, Math.min(1, a));
-      const w = CW * sc, h = CH * sc;
-      ctx.drawImage(tintCanvas, 0, 0, CW, CH, dx - w / 2, dy - h / 2, w, h);
-      ctx.restore();
-    };
-    const draw = (col: number, row: number, dx: number, dy: number,
-      r: number, g: number, b: number, alpha: number, sc: number, additive: boolean) => {
-      const c = cell(col, row);
-      ctx.save();
-      if (additive) ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      const w = CW * sc, h = CH * sc;
-      ctx.drawImage(img, c.sx, c.sy, c.sw, c.sh, dx - w / 2, dy - h / 2, w, h);
-      ctx.restore();
-    };
+    const half = (e.w || 22) / 2, halfH = (e.h || 22) / 2;
+    const drawPremult = (col: number, row: number, dx: number, dy: number,
+      mr: number, mg: number, mb: number, ma: number, sc: number, fl: boolean) =>
+      this.faelingPremultLayer(ctx, img, cvs[0], cvs[1], col, row, dx, dy,
+        mr, mg, mb, ma, sc, rot, fl);
 
     const [br, bg, bb] = hsl(num2, 1, 0.65);
 
-    // ① 拖尾残影（列 2 白光晕 × 彩虹色 → drawTinted）
-    const trailDepth = e.historyDepth();
-    const num4 = Math.max(0, trailDepth - 6);
-    const ox4 = e.histXAt(num4), oy4 = e.histYAt(num4);
-    const dist = Math.hypot(ox4 - e.x, oy4 - e.y);
-    let num9 = Math.max(0, Math.min(1, dist / Math.hypot(32, 16))) * 100;
-    num9 = Math.floor(num9 / 5) * 5 / 100;
-    const num7 = 32 * num9, num8 = 16 * num9;
-    for (let i = num4; i >= 5; i -= 3) {
-      if (i >= trailDepth) continue;
-      const ox = e.histXAt(i), oy = e.histYAt(i);
-      const num14 = Math.max(0, Math.min(1, i / Math.max(1, trailDepth)));
-      const num15 = 1 - num14;
-      const spin = Math.sin(e.id / 17 + tVis / 9 + num14 * 2 * Math.PI * 2) * num8;
-      const vx2 = ox - e.x + spin * Math.cos(Math.PI);
-      const vy2 = oy - e.y + (-num7) * Math.sin(Math.PI);
-      const [tr, tg, tb] = hsl(num2 + num15 * 0.5, 1, 0.5);
-      drawTinted(2, 0, e.x + vx2, e.y + vy2, tr * 255, tg * 255, tb * 255, num14 * 0.16,
-        scale * Math.max(0, Math.min(2.5, num14 * num14 * 2.5)), false);
+    // ① 拖尾残影（:26321-26347）：列 2 光晕 × 彩虹 × num14×0.16，A=0 纯加算。
+    //    num14 = Remap(i, 0, 60, 1, 0) = 1-i/60（越近本体越亮越大）——旧实现取反
+    //    （越旧越亮）；spin 向量 RotatedBy(π) = (-sin·num8, +num7)·num15——旧实现
+    //    漏 num15 因子且 Y 分量算成 0。
+    const num3 = 60;                                   // TrailCacheLength[677]（NPCID.cs:4805）
+    const num4 = num3 - 1 - 5;                         // 54
+    const depth = e.historyDepth();
+    if (depth > 6) {
+      const ox4 = e.histXAt(num4), oy4 = e.histYAt(num4);
+      const fromMax = Math.hypot(32, 16);
+      let num9 = Math.max(0, Math.min(1, Math.hypot(ox4 - e.x, oy4 - e.y) / fromMax)) * 100;
+      num9 = Math.floor(num9 / 5) * 5 / 100;           // (int)num9/5*5/100（:26325-26328）
+      const num7 = 32 * num9, num8 = 16 * num9;
+      for (let i = num4; i >= 5; i -= 3) {
+        if (i >= depth) continue;
+        const num14 = Math.max(0, Math.min(1, 1 - i / num3));
+        const num15 = 1 - num14;
+        const spin = Math.sin(e.id / 17 + tVis / 9 + num14 * 2 * Math.PI * 2) * num8 * num15;
+        // RotatedBy(π)：(x,y)→(-x,-y)；绘制中心 = oldPos 中心 + spin
+        const vx = -spin, vy = num7 * num15;
+        const [tr, tg, tb] = hsl(num2 + num15 * 0.5, 1, 0.5);
+        const k = num14 * 0.16;
+        drawPremult(2, 0, e.histXAt(i) + half + vx, e.histYAt(i) + halfH + vy,
+          tr * 255 * k, tg * 255 * k, tb * 255 * k, 0,
+          scale * Math.max(0, Math.min(2.5, num14 * num14 * 2.5)), flip);
+      }
     }
 
-    // ② 主光晕（列 2 白光晕 × 白色加算 → draw 即可，无调制需求）
-    draw(2, 0, cx, cy, 255, 255, 255, 1, scale, true);
+    // ② 主光晕（:26348）：Color(255,255,255,0) = 全额加算白，无背景衰减
+    drawPremult(2, 0, cx, cy, 255, 255, 255, 0, scale, flip);
+    // ③ 翅膀（:26350-26352）：White A/=2 = 127 → 加算白 + 背景 ×0.502
+    drawPremult(1, animRow, cx, cy, 255, 255, 255, 127 / 255, scale, flip);
+    // ④ 本体（:26353）：hsl(num2,1,0.65) A/=2 → 彩虹加算 + 背景 ×0.502
+    drawPremult(0, animRow, cx, cy, br * 255, bg * 255, bb * 255, 127 / 255, scale, flip);
 
-    // ③ 翅膀（列 1 白翅膀 × 白色 → draw 即可）
-    draw(1, animRow, cx, cy, 255, 255, 255, 0.5, scale, false);
-
-    // ④ 本体（列 0 灰图案 × 彩虹色调制 → drawTinted）
-    drawTinted(0, animRow, cx, cy, br * 255, bg * 255, bb * 255, 0.5, scale, false);
-
-    // ⑤ 闪烁（列 3 灰 sparkle × 彩虹→白 lerp → drawTinted）
+    // ⑤⑥ 闪烁（:26354-26361）：lerp(color,White,0.5)×num16 → RGB=(color+1)/2×num16、
+    //     A=63.5/255×num16；缩放 ×num17 脉冲；行 whoAmI%5 与行 1；SpriteEffects.None（不翻转）
     const num16 = Math.max(0, Math.min(1, Math.sin(tVis / 60) * 0.3 + 0.3));
     const num17 = 0.8 + Math.sin(tVis / 15 * Math.PI * 2) * 0.3;
-    const glowRow = e.id % 5;
-    const gr = (br + 255) / 2, gg = (bg + 255) / 2, gb = (bb + 255) / 2;
-    drawTinted(3, glowRow, cx, cy, gr, gg, gb, num16, scale * num17, false);
-
-    // ⑥ 辅助闪烁（列 3 行 1，同色 → drawTinted）
-    drawTinted(3, 1, cx, cy, gr, gg, gb, num16, scale * num17, false);
+    const glowRow = ((e.id % 5) + 5) % 5;
+    const gr = (br + 1) * 127.5 * num16, gg = (bg + 1) * 127.5 * num16, gb = (bb + 1) * 127.5 * num16;
+    drawPremult(3, glowRow, cx, cy, gr, gg, gb, 63.5 / 255 * num16, scale * num17, false);
+    drawPremult(3, 1, cx, cy, gr, gg, gb, 63.5 / 255 * num16, scale * num17, false);
   }
 
   private drawStatueMimic(e: Enemy) {

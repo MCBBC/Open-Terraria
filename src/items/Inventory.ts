@@ -192,6 +192,35 @@ export class Inventory {
     return this.slots[this.selected];
   }
 
+  /** GetEffectiveArmor（1457 Player.cs:5679-5734,LoadoutShare"收藏装备跨配装共享"）：
+   *  当前 Loadout 槽位为空时,跨三套 Loadout 同槽找【收藏】件共享——甲/配饰/时装全槽。
+   *  CanShareArmor（:5699-5727）的配件互斥深检（ItemSlot.CanEquipBothAccessories
+   *  物品对表）未建模,只做槽型门 armorAccepts（登记）;命中即用（sharedFromLoadout
+   *  高亮提示 UI 登记未接） */
+  getEffectiveArmor(slot: number): InvItem | null {
+    const cur = this.armor[slot] ?? null;
+    if (cur) return cur;
+    for (const lo of this.loadouts) {
+      const item = lo.armor[slot];
+      if (item && item.favorited) {
+        if (this.armorAccepts(slot, item.id)) return item;   // CanShareArmor 槽型门
+        break;                                               // :5688-5691 不兼容 → break
+      }
+    }
+    return cur;
+  }
+
+  /** GetEffectiveDye（1457 Player.cs:5736-5758）：染料槽同语义,无兼容门（原版直取） */
+  getEffectiveDye(slot: number): InvItem | null {
+    const cur = this.dye[slot] ?? null;
+    if (cur) return cur;
+    for (const lo of this.loadouts) {
+      const item = lo.dye[slot];
+      if (item && item.favorited) return item;
+    }
+    return cur;
+  }
+
   /** 该槽位是否为油漆（Item.PaintOrCoating，Item.cs:334-344）。
    *  涂层（paintCoating 4668/5344）系统未建——本仓 PaintOrCoating 仅 paint>0，涂层惰性 */
   private isPaintSlot(i: number): boolean {

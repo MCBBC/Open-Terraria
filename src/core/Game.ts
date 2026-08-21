@@ -128,6 +128,7 @@ import {
 import { itemUseSoundWav } from '../data/itemUseSound';
 import { hairDyeShaderOfItem } from '../data/vanillaHairDyes';
 import { applyFrostBurn, applyMagmaStoneSwing } from '../entities/projStatus';
+import { trySnapStrike } from '../stats/SnapStrike';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
@@ -858,6 +859,8 @@ export class Game implements GameHooks {
   private piranhaChanItemId = -1;
   private _scopeZoomed = false;
   private _scopePrevZoom = 1;
+  /** PanControl Click 档右键边沿检测（上一帧 rightDown;Main.cs:63753-63757 互动键切换） */
+  private _panPrevRight = false;
   /** 狙击镜 1858 / 侦察镜 4005 */
   private hasScopeAcc(): boolean {
     for (let i = 3; i < 10; i++) {
@@ -5740,14 +5743,30 @@ export class Game implements GameHooks {
       if (scoped) panNum = 0.5;                                     // :62216
       if (hVid === 1254) panNum = scoped ? 0.8 : 2 / 3;             // :62219-62226
       if (hVid === 1299) { panNum = 2 / 3; needRightClick = false; } // :62229-62231
-      if (panNum > 0 && (!needRightClick || this.input.rightDown)) { // :62245 (flag&&!mouseRight)→拦
-        const cam = this.camera;
-        const vx = Math.min(Math.max(this.input.mouseX / cam.viewW, 0), 1) * 2 - 1;
-        const vy = Math.min(Math.max(this.input.mouseY / cam.viewH, 0), 1) * 2 - 1;
-        cam.x += vx * (cam.viewW / cam.zoom) / 2 * panNum;
-        cam.y += vy * (cam.viewH / cam.zoom) / 2 * panNum;
+      // ---- 1457 PanControl 四档（Main.cs:63719-63778;ButtonControlMode.cs Hold=0/
+      //  Click=1/OnAlways=2/OffAlways=3,键盘缺省 Hold=旧行为）----
+      const panMode = player.panControlMode;
+      if (panMode !== 1) player.hasClickPanOn = false;              // :63722-63724
+      if (panNum > 0 && !(panMode === 3 && needRightClick)          // :63741-63743 OffAlways 恒关
+        && !(panMode === 0 && needRightClick && !this.input.rightDown)) { // :63745-63747 Hold 须右键
+        if (panMode === 2) needRightClick = false;                  // :63752-63754 OnAlways 免右键
+        // Click 档：右键边沿切换 hasClickPanOn（:63753-63757;CanToggle 门≈panNum>0
+        // 已隐含;切换音 SoundID 12 登记未接）
+        if (panMode === 1 && this.input.rightDown && !this._panPrevRight) {
+          player.hasClickPanOn = !player.hasClickPanOn;
+        }
+        if (player.hasClickPanOn) needRightClick = false;           // :63758-63760
+        const flag2 = panMode === 1 ? false : this.input.rightDown; // :63762-63764
+        if (!needRightClick || flag2) {                             // :63776-63778 (needsMouseRight&&!flag2)→拦
+          const cam = this.camera;
+          const vx = Math.min(Math.max(this.input.mouseX / cam.viewW, 0), 1) * 2 - 1;
+          const vy = Math.min(Math.max(this.input.mouseY / cam.viewH, 0), 1) * 2 - 1;
+          cam.x += vx * (cam.viewW / cam.zoom) / 2 * panNum;
+          cam.y += vy * (cam.viewH / cam.zoom) / 2 * panNum;
+        }
       }
     }
+    this._panPrevRight = this.input.rightDown;   // Click 档边沿检测推进
     this.camera.clamp();
     // Main.screenPosition/screenWidth/Height 快照（视区左上角世界坐标 + 画布尺寸）——
     // gore 屏幕坐标档（肉山死亡尘幕 NPC.cs:88307-88327）的求值源，实体 tick 前注入
@@ -9361,6 +9380,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             inp.mouseX - this.renderer.canvas.width / 2),
         );
         this.entities.add(whipObj, 'projectiles');
+        // 蛇环计数（ItemCheck_Shoot :49183-49186：真挥 repeatWhipSwings++ +
+        //  repeatWhipsResetCooldown=120——Update_SnakeBand :28623 冷却走完归 -1;
+        //  补挥本体在 WhipProj 动画中点判定 :43041-43063）
+        owner.repeatWhipSwings++;
+        owner.repeatWhipsResetCooldown = 120;
         // 鞭攻速（SetItemAnimation :4266：summonerWeaponSpeedBonus × whipUseTimeMultiplier，
         // 封顶 3×——summonerWeaponSpeedBonus 来自鞭 buff 311/308/314，黑曜套给 wutm）
         const swb = (owner.whipBuffs[311] ? 0.35 : 0) + (owner.whipBuffs[308] ? 0.25 : 0)
@@ -9695,7 +9719,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
           //  + 与 aim 点积 >0.5（前半平面）;落点沿视线 8px 步进走到遮挡/贴近
           const cands: Array<{ cx: number; cy: number }> = [];
           for (const q of this.entities.enemies) {
-            const e = q as { cx: number; cy: number; dead: boolean; maxHp: number };
+            const e = q as unknown as { cx: number; cy: number; dead: boolean; maxHp: number };
             if (e.dead || e.maxHp <= 5) continue;
             if (Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) > 800) continue;
             cands.push(e);
@@ -10987,6 +11011,34 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
    *  vy=Next(-50,-21)×0.1、vx=(0..25)×0.1×(−dir) 背玩家（TargetClosest 后
    *  direction*=−1 同构）。挂 breakTile 顶部（一切破坏路径：剑割/镐/爆炸/
    *  液体冲毁——185-187 非 tileCut 走镐破坏即此；noItem 不掷） */
+  /** KillTile_DropItems case 61/74/703（WorldGen.cs:65017-65025/:65660-65690）：
+   *  丛林植物帧级掉落——61@frameX144=丛林孢子(331)×2-3 / @162=丛林玫瑰(223) /
+   *  @108-126=1/20 肥料袋(208) / 其它帧 1/100 回力标(195)；74 仅 1/100；
+   *  703 按 frameX/18 分档（6-7=208 / 8=孢子 / 9=玫瑰 / 其它=195）。
+   *  曾 v_61/v_74 def drop:null=打掉无任何掉落（2026-08-22 用户报丛林孢子） */
+  private killTileDropItems(x: number, y: number, def: { vanilla?: { sheet?: number } } | undefined): void {
+    const sheet = def?.vanilla?.sheet;
+    if (sheet !== 61 && sheet !== 74 && sheet !== 703) return;
+    const st = this.world.store;
+    const fx = st.frameX[st.idx(x, y)];
+    let dropId = 0, stack = 1;
+    if (sheet === 61) {
+      if (fx === 144) { dropId = 331; stack = 2 + Math.floor(Math.random() * 2); }
+      else if (fx === 162) dropId = 223;
+      else if (fx >= 108 && fx <= 126) { if (Math.floor(Math.random() * 20) === 0) dropId = 208; }
+      else if (Math.floor(Math.random() * 100) === 0) dropId = 195;
+    } else if (sheet === 74) {
+      if (Math.floor(Math.random() * 100) === 0) dropId = 195;
+    } else {
+      const seg = Math.floor(fx / 18);
+      dropId = (seg === 6 || seg === 7) ? 208 : seg === 8 ? 331 : seg === 9 ? 223 : 195;
+    }
+    if (!dropId) return;
+    const key = VANILLA_ITEM_KEY_BY_ID[dropId];
+    if (!key) return;
+    this.spawnDrop(x * TILE + 8, y * TILE + 8, key, stack, 0, -2);
+  }
+
   private killTileDropBait(x: number, y: number, def: { vanilla?: { sheet?: number } } | undefined): void {
     const sheet = def?.vanilla?.sheet;
     if (sheet == null) return;
@@ -11050,6 +11102,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 同门，185-187 装饰组非 tileCut 走镐破坏即此；noItem（裂砖连锁）不掷）
     if (!noItem) {
       this.killTileDropBait(x, y, def);
+      this.killTileDropItems(x, y, def);
     }
 
     // 倒木（KillTile type 488 → mysticLogsEvent.FallenLogDestroyed，WorldGen.cs:49866）：
@@ -16085,6 +16138,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       applyFrostBurn(this.player.equipStats.frostBurn, e as unknown as Record<string, number>);
       // 岩浆石/火焰护手（Player.cs:6184-6198 三段掷：1/4→6s / 3/8→4s / 3/8→1s OnFire3）
       applyMagmaStoneSwing(this.player.equipStats.magmaStone, e as unknown as Record<string, number>);
+      // 焰爆石 6178（Player.cs:44694-44697 accPyroclast → TryMakingSnappingStoneStrike
+      // kind 1：45×近战伤/300px/2 目标弹 1131+323;共用 360t 冷却,见 stats/SnapStrike）
+      trySnapStrike(this, this.player, 1, e.cx, e.cy, e.id);
+      // 催化指环 6185（Player 侧 StatusNPC :6534-6537）：近战命中 398 300t
+      if (this.player.equipStats.catalystBand) {
+        e.acceleratePoisonsT = Math.max(e.acceleratePoisonsT ?? 0, 5);
+      }
       if (this.player.buffs.has(BuffType.ImbueParty)) {
         this.spawnParticles(e.cx, e.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 });
       }
@@ -16482,6 +16542,7 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck,
       !!w.seedFlags?.everything && this.player.insideUnbreakableWalls && ddCan < ddNeeds,
       partyIsUp(this.partyState));
+    this.vanillaSpawner.starfallBoost = this.starfallBoost;   // 流星夜附魔夜爬虫支（NPC.cs:2316）
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）。第三参 = NPC.cs:302 读
     // player.ZoneSandstorm（SceneMetrics zoneSandstorm 派生位——已含地表大气门，
     // 旧 zoneDesert&&<groundLevel+30 近似退役）

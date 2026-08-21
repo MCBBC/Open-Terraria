@@ -20,7 +20,7 @@ import { applyProjStatus } from './projStatus';
 import { projSprite } from './Arrow';
 
 /** 同敌命中去重/冷却表（WeaponProj.HitCooldown 同构——该类模块私有，此处独立一份） */
-class HitCd {
+class HitCdImpl {
   private map = new Map<number, number>();
   tick(): void {
     for (const [k, v] of this.map) {
@@ -35,6 +35,10 @@ class HitCd {
     return true;
   }
 }
+
+/** 1122 ArcSurge 的 IDStatic 免疫共享表（usesIDStaticNPCImmunity + cooldown 10,
+ *  :10567-10569——IDStatic 语义 = 全场同型一张表,非每弹一张） */
+const ID_STATIC_1122 = new HitCdImpl();
 
 /** 敌怪最小命中面（Enemy/TownNPC 共用形状） */
 interface HitTarget {
@@ -108,7 +112,7 @@ export class ChloroClaymoreBlade extends Entity {
   private rot = 0;
   private scl = 0.85;
   private cloudFired = false;   // num≥0.8 单次门（num14<num11 比较）
-  private hitCd = new HitCd();  // usesLocalNPCImmunity + localNPCHitCooldown −1（:10550-10556）
+  private hitCd = new HitCdImpl();  // usesLocalNPCImmunity + localNPCHitCooldown −1（:10550-10556）
   /** 挥击尾孢子生成（Game 注入：NewProjectile 1128——伤 ×0.75 已在 Game 侧折算） */
   spawnSpore: (x: number, y: number, vx: number, vy: number, life: number) => void = () => {};
   /** 砸地孢子云生成（Game 注入：FindChlorophyteSporeCloudSpawn+SpawnChlorophyteSporeCloud） */
@@ -224,7 +228,7 @@ export class ChloroSaberStab extends Entity {
   private readonly ms: number;   // ai[1] = meleeSpeed
   private t = 0;
   private rot = 0;
-  private hitCd = new HitCd();
+  private hitCd = new HitCdImpl();
 
   constructor(dirX: number, dirY: number, speed: number, meleeSpeed: number,
     damage: number, knockback: number) {
@@ -311,7 +315,8 @@ export class ChloroSporeCloud extends Entity {
   readonly projId = 1128;
   private readonly life: number;
   private t = 0;
-  private hitCd = new HitCd();
+  private readonly spawnFrame = Math.floor(Math.random() * 5);   // :33149 frame=rand(frames)
+  private hitCd = new HitCdImpl();
 
   constructor(cx: number, cy: number, vx: number, vy: number, damage: number, life: number) {
     super();
@@ -358,7 +363,12 @@ export class ChloroSporeCloud extends Entity {
     ctx.imageSmoothingEnabled = false;
     if (img && img.width > 0) {
       const dw = 30 * (0.25 + 0.85 * Math.min(1, T / 0.1)) * 1.1;
-      ctx.drawImage(img, -dw / 2, -dw / 2, dw, dw);
+      // projFrames[1128]=5（Main.cs:8865）——竖条 5 帧按出生随机帧定格（:33149-33151
+      // ai[0]==0 → frame=rand(frames),云体不播帧）
+      const fh = img.height / 5;
+      const fr = this.spawnFrame % 5;
+      ctx.drawImage(img, 0, Math.round(fr * fh), img.width, Math.round(fh),
+        -dw / 2, -dw / 2, dw, dw);
     } else {
       ctx.fillStyle = '#32C864';
       ctx.beginPath();
@@ -384,7 +394,7 @@ export class ChloroBladeSlam extends Entity {
   dead = false;
   readonly projId = 1129;
   private t = 0;
-  private hitCd = new HitCd();
+  private hitCd = new HitCdImpl();
 
   constructor(cx: number, cy: number, w: number, h: number, damage: number) {
     super();
@@ -432,7 +442,7 @@ export class PetalstormShot extends Entity {
   private frameCounter = 0;
   private rot = 0;
   private scl = 0.5;
-  private hitCd = new HitCd();
+  private hitCd = new HitCdImpl();
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, phase: number) {
     super();
@@ -450,7 +460,7 @@ export class PetalstormShot extends Entity {
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
-    if (this.t > this.life) { this.dead = true; return; }
+    if (this.t >= this.life) { this.dead = true; return; }      // timeLeft 120 → 120t 消亡
     if (++this.frameCounter >= 4) {                             // :41218-41223
       this.frameCounter = 0;
       this.frame = (this.frame + 1) % 8;
@@ -539,7 +549,7 @@ export class StormLightning extends Entity {
   private readonly life: number;
   private readonly searchR: number;
   private t = 0;
-  private hitCd = new HitCd();
+  private hitCd = new HitCdImpl();
   private sharedCd: HitCd | null;
   /** 跟鼠标回调（1117 无目标态；Game 注入） */
   mouseWorld?: () => { x: number; y: number };
@@ -554,13 +564,13 @@ export class StormLightning extends Entity {
     // :40363-40370（1117：num=30/num2=12；1122：缺省 240/32）
     this.life = projId === 1117 ? 30 : 240;
     this.searchR = projId === 1117 ? 12 : 32;
-    this.sharedCd = projId === 1122 ? new HitCd() : null;       // 1122 IDStatic 10（同型共享）
+    this.sharedCd = projId === 1122 ? ID_STATIC_1122 : null;     // 1122 IDStatic 10（全场同型一张表）
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
-    if (this.t > this.life) { this.dead = true; return; }       // :40445-40448
+    if (this.t >= this.life) { this.dead = true; return; }      // :40445-40448 ai[1]>=num Kill
     // 索敌（:40399-40421）：搜索半径内最近可追敌（1117 需 CanBeChasedBy 口径）
     let best: { cx: number; cy: number } | null = null;
     let bd = this.searchR;
@@ -654,7 +664,7 @@ export class GlacierFangShot extends Entity {
   private charge = 0;        // ai[0]
   private released = false;  // ai[1]==1
   private frame = 0;
-  private hitCd = new HitCd();
+  private hitCd = new HitCdImpl();
   private ctl: GlacierFangCtl;
 
   constructor(x: number, y: number, dirX: number, dirY: number, damage: number, knockback: number, ctl: GlacierFangCtl) {
@@ -687,7 +697,7 @@ export class GlacierFangShot extends Entity {
         this.vy = (m.y - p.cy) / d * spd;
       }
       if (Math.floor(this.charge) % 20 === 0 && this.charge > 0) {
-        game.playSfxAt?.('iceBreak', this.cx, this.cy);        // GlacierFang_Charging（:37610,表缺登记）
+        game.playSfxAt?.('shatter', this.cx, this.cy);         // GlacierFang_Charging（:37610,SfxName 表缺冰系键→shatter 近似,登记）
         this.ctl.payMana();                                    // CheckMana(pay:true)（:37613）
       }
       this.charge += this.ctl.chargeRate();                    // ai[0] += GetSlowMagicUseRate()（:37626）
@@ -733,7 +743,7 @@ export class GlacierFangShot extends Entity {
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.dead = true; return; }
     void p;
-    game.playSfxAt?.('iceBreak', this.cx, this.cy);            // GlacierFang_Muzzle（:37635,表缺登记）
+    game.playSfxAt?.('shatter', this.cx, this.cy);           // GlacierFang_Muzzle（:37635,SfxName 表缺冰系键→shatter 近似,登记）
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 10, 2.6, { life: 20, grav: 0, damp: 0.93 });
   }
 

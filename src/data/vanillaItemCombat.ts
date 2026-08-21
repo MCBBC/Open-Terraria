@@ -96,6 +96,23 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '5392': { shoot: 870, ammo: 780, consumable: true },
   '5393': { shoot: 871, ammo: 780, consumable: true },
   '5394': { shoot: 872, ammo: 780, consumable: true },
+  // ---- 1457 批 C 新魔法武器五件（DefaultToMagicWeapon/DefaultToStaff/SetWeaponValues
+  //   辅助方法形参赋值提取器不解析 → json 只收编了直写字段。逐件回填 1457 终值：
+  //   6152 DaybloomStaff（Item.cs:47411-47422 DefaultToMagicWeapon(1114,40,6)+useTime=4
+  //     +autoReuse+mana5+damage8+kb3+Item8）
+  //   6153 GlacierFang（:47423-47434 DefaultToMagicWeapon(1115,24,4)+mana10+damage11
+  //     +crit11+kb2+channel）
+  //   6154 Petalstorm（:47435-47446 DefaultToMagicWeapon(1116,42,5)+mana20+damage20
+  //     +kb3.5+useStyle15+autoReuse）
+  //   6155 LightningStrike（:47447-47453 DefaultToStaff(1117,8,55,30)→useAnim=useTime55/
+  //     speed8/autoReuse/40×40+SetWeaponValues(150,10,10)→damage150/kb10/crit10）
+  //   6173 ArcSurge（:47556-47564 DefaultToStaff(1122,8,18,18)+useTime=6 直写+
+  //     SetWeaponValues(180,4)→damage180/kb4+Item15+noUseGraphic）----
+  '6152': { shoot: 1114, useAnimation: 40, useTime: 4, shootSpeed: 6, mana: 5, damage: 8, knockBack: 3, noMelee: true, magic: true, autoReuse: true },
+  '6153': { shoot: 1115, useAnimation: 24, useTime: 24, shootSpeed: 4, mana: 10, damage: 11, knockBack: 2, crit: 11, noMelee: true, magic: true },
+  '6154': { shoot: 1116, useAnimation: 42, useTime: 42, shootSpeed: 5, mana: 20, damage: 20, knockBack: 3.5, noMelee: true, magic: true, autoReuse: true },
+  '6155': { shoot: 1117, useAnimation: 55, useTime: 55, shootSpeed: 8, mana: 30, damage: 150, knockBack: 10, crit: 10, noMelee: true, magic: true, autoReuse: true },
+  '6173': { shoot: 1122, useAnimation: 18, useTime: 6, shootSpeed: 8, mana: 18, damage: 180, knockBack: 4, noMelee: true, magic: true, autoReuse: true, noUseGraphic: true },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };
@@ -211,6 +228,11 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
       return null;
     }
     if (ai === AI_BOOMERANG) return { kind: 'boomerang', shoot, ...base };
+    // ★1457 叶绿军刃 1227 重做（Item.cs:15140-15158 shoot 228→1127）：1127 虽是
+    //   aiStyle 161 短剑刺族，但它是 ChloroSaberStab 专属弹（AI_161 1127 支带
+    //   meleeSpeed 节奏/397 孢子侵染/挥击音尘），不能落通用 SpearProj——归 'shot'
+    //   交 Game 专支（同 1226 归 melee 专支先例）
+    if (vid === 1227 && ai === AI_SHORTSWORD) return { kind: 'shot', shoot, ...base };
     if (ai === AI_SPEAR || ai === AI_SHORTSWORD || ai === AI_ANCHORED) return { kind: 'spear', shoot, ...base };
     // AI_ANCHORED(13):鱼叉 160/Golem拳 1297/KO加农 1314/链刀 1325/链斩 3012——
     // 原版锚在角色上伸缩(AI_013),归长矛前刺族近似;此前落入 shot 兜底=子弹射飞

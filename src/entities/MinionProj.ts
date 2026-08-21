@@ -681,7 +681,7 @@ export class MinionProj extends Entity {
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy,
             this.ownerRef());
           en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1); // 随从=单发弹语义(不设敌方帧)
-          applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
+          applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           this.attackFlash = 24;
         }
       }
@@ -752,7 +752,7 @@ export class MinionProj extends Entity {
         + (projectileData(this.projId)?.armorPenetration ?? 0); // StrikeNPC :12068:玩家AP+弹幕AP 两源
       en.hurt(golemCrit ? res.dmg * 2 : res.dmg,
         Math.sign(en.cx - this.cx) * (this.knockback + mkb), 0, game, pen0); // 裸kb+minionKB(:52477)——0.5 自造已摘
-      applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
+      applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
       this.attackFlash = 24;
       anyHit = true;
     }
@@ -979,7 +979,7 @@ export class MinionProj extends Entity {
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy, this.ownerRef());
             en.hurt(res.dmg, 0, 0, game, 0, false, 1, false, 1); // 哨兵射击=单发弹语义;penPercent=1(:12443)
-            applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
+            applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
           }
           // 原版是 tracked 循环声（每 tick 场内有敌即续播）——单次 wav 按命中节拍近似，
           // 每 tick 至多一声
@@ -1010,7 +1010,7 @@ export class MinionProj extends Entity {
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
                 en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
-                applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
+                applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 applyProjStatus(boomProj, en as unknown as Record<string, number>, { setHuntressT2: ownerH });
                 boom++;
               }
@@ -1096,7 +1096,7 @@ export class MinionProj extends Entity {
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
                   en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
-                  applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
+                  applyProjStatus(this.projId, en as unknown as Record<string, number>, { catalystBand: this.ownerRef()?.equipStats.catalystBand }); // StatusNPC(:10555)+6185 催化指环 398
                 }
               }
               game.spawnParticles(px, py, `hsl(${Math.floor(Math.random() * 360)},90%,65%)`, 8, 2.4, { life: 26 });
@@ -1163,6 +1163,62 @@ export class MinionProj extends Entity {
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(flame, 'projectiles');
       }
       return; // 喷火态跳过常规索敌/移动（position 锚玩家由 Game/悬停链处理近似）
+    }
+    // ---- 1457 禁戒魂灵 1119（6164 Forbidden Minion,aiStyle 206）----
+    // AI_206_ForbiddenMinion（Projectile.cs:38182-38395）1:1 折算：
+    //  · 悬停锚 = player.Top+(−dir×16,−25) + 群体环形偏移（:38195-38220,本仓
+    //    slot 槽位近似 index/total）；距玩家 >2000 瞬移（:38194）
+    //  · 索敌 800px + CanHitLine 门（:38199 Minion_FindTargetInRange + :38177
+    //    CustomEliminationCheck）；有敌 → 朝敌 MoveTowards(200) + rotation 朝敌
+    //  · 开火循环 ai[0]：归零且索敌 → 150;倒数到 120 发 1120 ForbiddenMinionShot
+    //    （GemStaffFeatures FastThenSlow 位,32 速朝敌）+ 反冲 velocity=−dir×0.3
+    //    （:38258-38277）;>120 段移速 ×Remap(ai0,150,120,1,0) 渐停（:38282-38286）
+    if (this.projId === 1119) {
+      const tgtF = this.nearestEnemy(game, 800);
+      // 悬停锚（:38196 vec = player.Top + (−dir×16,−25) + 群体偏移）
+      const orbA = this.age * 0.03 + this.slot * 1.7;
+      let hx = p.cx - p.facing * 16;
+      let hy = p.cy - p.h / 2 - 25 + Math.sin(orbA) * 10;
+      if (tgtF) {
+        // :38236-38244 朝敌 MoveTowards(200)+朝向/旋转
+        const dx = tgtF.cx - this.cx, dy = tgtF.cy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        hx = tgtF.cx - dx / d * Math.max(0, d - 120);
+        hy = tgtF.cy - dy / d * Math.max(0, d - 120);
+        this.facing = tgtF.cx > this.cx ? 1 : -1;
+        this.rot = Math.atan2(dy, dx) + (this.facing === -1 ? Math.PI : 0);
+      } else {
+        this.rot = 0;
+        this.facing = p.facing;
+      }
+      // 开火循环（:38258-38286）：shootCd 复用 ai[0] 语义（150 归零→150;120 出弹）
+      if (this.shootCd > 0) this.shootCd--;
+      if (tgtF && this.shootCd === 0) this.shootCd = 150;
+      if (tgtF && this.shootCd === 120) {
+        const dx = tgtF.cx - this.cx, dy = tgtF.cy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        const shot = new Arrow(this.cx - 5, this.cy - 5, dx / d * 32, dy / d * 32,
+          Math.max(1, Math.round(dmg0)), this.knockback, 1120, null,
+          { grav: 0, life: 300, pierce: 2, gem: { fastThenSlow: true } });
+        shot.whipTagShot = true;   // MinionShot（ProjectileID.Sets.MinionShot[1120] :291）
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
+        this.vx = -dx / d * 0.3 * 32;   // :38276 velocity = −vector5×0.3（vector5=32 速向）
+        this.vy = -dy / d * 0.3 * 32;
+      }
+      // 移动（:38282-38289）：v MoveTowards(锚向×16, 2);开火后段渐停
+      const mdx = hx - this.cx, mdy = hy - this.cy;
+      const mdl = Math.hypot(mdx, mdy) || 1;
+      const spd = 16 * (this.shootCd > 120
+        ? Math.max(0, 1 - (this.shootCd - 120) / 30) : 1);
+      const tvx = mdx / mdl * Math.min(spd, mdl), tvy = mdy / mdl * Math.min(spd, mdl);
+      this.vx += Math.max(-2, Math.min(2, tvx - this.vx));
+      this.vy += Math.max(-2, Math.min(2, tvy - this.vy));
+      this.x += this.vx; this.y += this.vy;
+      if (Math.hypot(this.cx - p.cx, this.cy - p.cy) > 2000) {   // :38194 瞬移门
+        this.x = p.cx; this.y = p.cy - 40;
+      }
+      this.contact(game, dmg0, 30);   // localNPCHitCooldown 30（:10452-10464）
+      return;
     }
     if (this.projId === 917 || this.projId === 1036) {
       // 生命与玩家 buff 绑定（AI_177 :42468：coolWhipBuff/cobWhipBuff → timeLeft=2 续命）

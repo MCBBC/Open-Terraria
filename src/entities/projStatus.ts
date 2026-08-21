@@ -70,6 +70,14 @@ export interface ProjStatusCtx {
   /** setHuntressT2(女猎手 T2/T3 套装,Player.cs:16119/16149)——爆炸机关弹 694-696
    *  的 Oiled 门(StatusNPC :10786)。由调用方从 Player.equipStats.huntressT2 传入 */
   setHuntressT2?: boolean;
+  /** 催化指环 6185（Player.catalystBand :1961）——任意弹命中 398 AcceleratePoisons
+   *  300t（Projectile.StatusNPC :11189-11193 + Player 侧 :6534-6537）。提取器 SKIP
+   *  档（运行时饰品门无 type==N），代码层并表 */
+  catalystBand?: boolean;
+  /** 毒刺 6165/6184/6185（accPoisonBarb :1223）——箭体命中 100% 中毒 90t
+   *  （StatusNPC :11183-11188,`arrow && !noEnchantments` 门）。箭侧调用方
+   *  （Arrow.ts,批 C 域）未接,登记 */
+  accPoisonBarb?: boolean;
 }
 
 /** 命中结算侧调用:按投射物型号掷骰并施加 debuff(AddBuff max 合并语义)。
@@ -84,6 +92,11 @@ const PROJ_STATUS_1457_HANDPATCH: Record<number, StatusEntry[]> = {
 
 export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy, ctx?: ProjStatusCtx): void {
   if (projId === undefined || projId < 0) return;
+  // 催化指环 6185（StatusNPC :11189-11193）：任意命中 398 AcceleratePoisons 300t=5s
+  //（无弹型门;398 ∈ SUPPORTED acceleratePoisonsT——可加速族 DoT ×2 消费在 Enemy DOTTally）
+  if (ctx?.catalystBand) {
+    if (5 > (enemy.acceleratePoisonsT ?? 0)) enemy.acceleratePoisonsT = 5;
+  }
   const entries = TABLE[String(projId)] ?? PROJ_STATUS_1457_HANDPATCH[projId];
   if (!entries) return;
   let pendingMut: { id: number; roll: number } | null = null;

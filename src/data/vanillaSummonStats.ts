@@ -55,6 +55,7 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   6179: { maxTag: 1, wickedArmlet: true },        // 毁灭臂镯 = 6159+accArmletOfRuin（旗在 Player 侧）
   6182: { maxTag: 1, wickedArmlet: true },        // 邪恶之爪 = 6159+autoReuseGlove+近战速+12%（Player 侧）
   6183: { tagDur: 2, maxTag: 1 },                 // 白银之盾 = 6156+免击退+火焰块（Player 侧）
+  6186: { snakeBand: true },                      // 德鲁伊蛇斗篷 = 6157+星星斗篷（:14726-14729,星斗篷旗 Player 侧）
 
   // ---- DD2 头盔散件（ApplyEquipFunctional :12709-12810:头盔 maxTurrets;2026-08-13 补——
   // 旧缺 8 件致哨兵上限卡 ~3。T1 头 3797/3800/3803/3806 各 +1;T3 头 3871/3874/3877/3880

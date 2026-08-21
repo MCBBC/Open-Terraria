@@ -171,12 +171,13 @@ describe('C 组 AI 数值/条件', () => {
     vi.restoreAllMocks();
   });
   it('AI_GlobalFiringDistanceCheck（:56405）：MaxWorldViewSize(1920×1200)−50 视野矩形,'
-    + '半轴 935×575,Rectangle.Contains 左闭右开（参数序 = 射手,目标）', () => {
-    expect(aiGlobalFiringDistanceCheck(934, 574, 0, 0)).toBe(true);
-    expect(aiGlobalFiringDistanceCheck(-934, -574, 0, 0)).toBe(true);
-    expect(aiGlobalFiringDistanceCheck(935, 0, 0, 0)).toBe(false);   // 右缘开
-    expect(aiGlobalFiringDistanceCheck(0, 575, 0, 0)).toBe(false);   // 下缘开
-    expect(aiGlobalFiringDistanceCheck(-935, 0, 0, 0)).toBe(true);   // 左缘闭
+    + '半轴 910×550(Inflate(-50) 每侧内缩,非尺寸-50),Rectangle.Contains 左闭右开（参数序 = 射手,目标）', () => {
+    expect(aiGlobalFiringDistanceCheck(909, 549, 0, 0)).toBe(true);   // 内缘
+    expect(aiGlobalFiringDistanceCheck(-910, -550, 0, 0)).toBe(true); // 左/上缘闭
+    expect(aiGlobalFiringDistanceCheck(910, 0, 0, 0)).toBe(false);    // 右缘开
+    expect(aiGlobalFiringDistanceCheck(0, 550, 0, 0)).toBe(false);    // 下缘开
+    expect(aiGlobalFiringDistanceCheck(935, 0, 0, 0)).toBe(false);    // 旧错值更拒
+    expect(aiGlobalFiringDistanceCheck(0, 575, 0, 0)).toBe(false);
     expect(aiGlobalFiringDistanceCheck(936, 0, 0, 0)).toBe(false);
     expect(aiGlobalFiringDistanceCheck(0, 576, 0, 0)).toBe(false);
   });
