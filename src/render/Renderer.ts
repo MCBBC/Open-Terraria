@@ -2494,9 +2494,15 @@ export class Renderer {
           bgDone = true;
         }
       }
-      if (!bgDone) this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
-      // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后、实体前）
+      if (!bgDone) {
+        this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7, 'surface');
+      }
+      // 云近双通道（DrawClouds_Closer/_Closest :58871/:58942——群系背景层之后）
       this.sky.drawCloudsNear(ctx, viewW, viewH, cam.y);
+      // 灯笼夜 near 带 + 派对气球（DrawRemainingDepth :59055 = 全部背景层【含群系
+      // 前景】之后的最末尾——曾画在云前=云盖灯/气球,用户实报）
+      this.sky.drawLanternsNear(ctx, viewW, viewH, cam.x, cam.y, 16.7);
+      this.sky.drawPartyBalloonsNear(ctx, viewW, viewH, cam.x, 16.7);
     }
 
     // 1.55 AmbientSky 天空实体（SkyManager「Ambience」层：群系背景之上、世界实体之下；
@@ -3176,6 +3182,12 @@ export class Renderer {
   private _cssW = 0;
   /** 果冻管线帧级换算态（updateWaterWaves 缓存；drawLiquids 消费——CSS/世界/设备三系互算） */
   private _waveCss: WaterWarpFrameState | null = null;
+  /** ?oldmult=1：CPU 乘光走优化前逐像素全重算旧循环（A/B 对拍/逃生门） */
+  static readonly legacyCpuMult = (() => {
+    try {
+      return typeof location !== 'undefined' && new URLSearchParams(location.search).has('oldmult');
+    } catch { return false; }
+  })();
   /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
   private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
@@ -3498,6 +3510,16 @@ export class Renderer {
   golfPower: { x: number; y: number; rel: number; ball: import('../entities/GolfBall').GolfBall } | null = null;
   /** 光照合成 ImageData 复用(尺寸变化才重建) */
   private _lightImg: ImageData | null = null;
+  /** CPU 乘光循环 x 侧采样参数缓存（只依赖 px，每帧预计算一次——原每像素重算；
+   *  2026-08-22 软渲染瓶颈分析：乘循环 5.7ms/帧=55% 帧时。尺寸变化才重建。
+   *  ★权重必须 Float64：Float32 存储会把 1−fx2 舍入 → 乘积末位漂移 →
+   *    逐位一致性破功（微基准实证 3 字节/4M 差） */
+  private _clXO: Int32Array | null = null;
+  private _clXO1: Int32Array | null = null;
+  private _clWX0: Float64Array | null = null;
+  private _clWX1: Float64Array | null = null;
+  /** 满亮行旗（光照图逐行 AND，255=整行全白 → 恒等乘行级跳过；尺寸随 h2 重建） */
+  private _clRowWhite: Uint8Array | null = null;
 
   /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
    *  优先原版 Tiles_85 样式块——四格 16×16 无缝拼到离屏画布再绘制
@@ -10701,7 +10723,9 @@ export class Renderer {
     if (!this.worldLayerEnabled || typeof document === 'undefined') { this.worldLayerActive = false; return null; }
     if (!this.worldCanvas || !this.worldCtxLayer || !this.lightMaskCanvas || !this.lightMaskCtxLayer) {
       this.worldCanvas = document.createElement('canvas');
-      this.worldCtxLayer = this.worldCanvas.getContext('2d')!;
+      // ★willReadFrequently：CPU 乘光回退路径每帧 getImageData 全屏（GL 路径则
+      //   texImage2D 上传）——提示 Skia 保持 CPU 光栅面，读取免 GPU 回读
+      this.worldCtxLayer = this.worldCanvas.getContext('2d', { willReadFrequently: true })!;
       this.lightMaskCanvas = document.createElement('canvas');
       this.lightMaskCtxLayer = this.lightMaskCanvas.getContext('2d')!;
     }
@@ -10826,29 +10850,99 @@ export class Renderer {
       const wimg = this.worldCtxLayer!.getImageData(0, 0, viewW, viewH);
       const wd = wimg.data;
       const lxRatio = w2 / (tilesX * ts * z), lyRatio = h2 / (tilesY * ts * z);
-      for (let py = 0; py < viewH; py++) {
-        let ly = (py - sy) * lyRatio;
-        if (ly < 0) ly = 0; else if (ly > h2 - 1) ly = h2 - 1;
-        const lyi = ly | 0;
-        const lyj = Math.min(h2 - 1, lyi + 1), fy = ly - lyi;
-        for (let px = 0; px < viewW; px++) {
-          const i = (py * viewW + px) * 4;
-          const a = wd[i + 3];
-          if (a === 0) continue;                     // 纯透明区不乘（rgb 无意义）
-          let lx = (px - sx) * lxRatio;
-          if (lx < 0) lx = 0; else if (lx > w2 - 1) lx = w2 - 1;
-          const lxi = lx | 0;
-          const lxj = Math.min(w2 - 1, lxi + 1), fx2 = lx - lxi;
-          const o00 = (lyi * w2 + lxi) * 4, o10 = (lyi * w2 + lxj) * 4;
-          const o01 = (lyj * w2 + lxi) * 4, o11 = (lyj * w2 + lxj) * 4;
-          const w00 = (1 - fx2) * (1 - fy), w10 = fx2 * (1 - fy);
-          const w01 = (1 - fx2) * fy, w11 = fx2 * fy;
-          for (let c = 0; c < 3; c++) {
-            const l = img.data[o00 + c] * w00 + img.data[o10 + c] * w10
-              + img.data[o01 + c] * w01 + img.data[o11 + c] * w11;
-            wd[i + c] = Math.min(255, (wd[i + c] * l) / 255);
+      if (Renderer.legacyCpuMult) {
+        // ?oldmult=1 逃生门：逐像素全重算旧循环（优化前基线，A/B 对拍用）
+        for (let py = 0; py < viewH; py++) {
+          let ly = (py - sy) * lyRatio;
+          if (ly < 0) ly = 0; else if (ly > h2 - 1) ly = h2 - 1;
+          const lyi = ly | 0;
+          const lyj = Math.min(h2 - 1, lyi + 1), fy = ly - lyi;
+          for (let px = 0; px < viewW; px++) {
+            const i = (py * viewW + px) * 4;
+            const a = wd[i + 3];
+            if (a === 0) continue;                     // 纯透明区不乘（rgb 无意义）
+            let lx = (px - sx) * lxRatio;
+            if (lx < 0) lx = 0; else if (lx > w2 - 1) lx = w2 - 1;
+            const lxi = lx | 0;
+            const lxj = Math.min(w2 - 1, lxi + 1), fx2 = lx - lxi;
+            const o00 = (lyi * w2 + lxi) * 4, o10 = (lyi * w2 + lxj) * 4;
+            const o01 = (lyj * w2 + lxi) * 4, o11 = (lyj * w2 + lxj) * 4;
+            const w00 = (1 - fx2) * (1 - fy), w10 = fx2 * (1 - fy);
+            const w01 = (1 - fx2) * fy, w11 = fx2 * fy;
+            for (let c = 0; c < 3; c++) {
+              const l = img.data[o00 + c] * w00 + img.data[o10 + c] * w10
+                + img.data[o01 + c] * w01 + img.data[o11 + c] * w11;
+              wd[i + c] = Math.min(255, (wd[i + c] * l) / 255);
+            }
           }
         }
+      } else {
+        // ★内循环外提（2026-08-22 软渲染瓶颈分析：本循环 ~5.7ms/帧=55% 帧时）：
+        //   x 侧采样参数只依赖 px → 每帧预计算一次（原每像素重算 (px−sx)·ratio、
+        //   钳位、|0、min、1−fx2 五步）；通道循环展开去 +c 寻址；img.data 提升
+        //   局部变量；行基址 i+=4 递增。★全部算式保持原操作数与运算顺序 →
+        //   输出逐位一致（w00=wx0*wy0 与原 (1-fx2)*(1-fy) 同操作数同单乘；
+        //   Uint8ClampedArray 赋值的钳位+舍入语义原样）。
+        const w2m1 = w2 - 1;
+        if (!this._clXO || this._clXO.length !== viewW) {
+          this._clXO = new Int32Array(viewW);
+          this._clXO1 = new Int32Array(viewW);
+          this._clWX0 = new Float64Array(viewW);
+          this._clWX1 = new Float64Array(viewW);
+        }
+        const cXO = this._clXO!, cXO1 = this._clXO1!;
+        const cWX0 = this._clWX0!, cWX1 = this._clWX1!;
+        for (let px = 0; px < viewW; px++) {
+          let lx = (px - sx) * lxRatio;
+          if (lx < 0) lx = 0; else if (lx > w2m1) lx = w2m1;
+          const lxi = lx | 0;
+          cXO[px] = lxi * 4;
+          cXO1[px] = Math.min(w2m1, lxi + 1) * 4;
+          cWX0[px] = 1 - (lx - lxi);
+          cWX1[px] = lx - lxi;
+        }
+      const ld = img.data;
+      const h2m1 = h2 - 1;
+      // ★满亮行旗（每帧对光照图全量 AND 一遍，w2×4×h2≈7K 字节，成本可忽略）：
+      //   整行全 255 → 该行任意采样恒等乘（l=255×权重和，权重和恒 1±ulp，
+      //   wd·l/255 与 wd 偏差 ≤1e-13 < 0.5 → 钳位写回必舍回原值）→ 白天地表
+      //   大面积行级跳过。★行级而非逐像素：夜晚/洞穴无满亮区时逐像素检查
+      //   实测反慢 9%（微基准），行旗对无满亮场景零成本
+      if (!this._clRowWhite || this._clRowWhite.length !== h2) {
+        this._clRowWhite = new Uint8Array(h2);
+      }
+      const rowWhite = this._clRowWhite!;
+      for (let ry = 0; ry < h2; ry++) {
+        let a = 255;
+        const base = ry * w2 * 4;
+        for (let k = 0; k < w2 * 4; k++) a &= ld[base + k];
+        rowWhite[ry] = a;
+      }
+      for (let py = 0; py < viewH; py++) {
+        let ly = (py - sy) * lyRatio;
+        if (ly < 0) ly = 0; else if (ly > h2m1) ly = h2m1;
+        const lyi = ly | 0;
+        const lyj = Math.min(h2m1, lyi + 1), fy = ly - lyi;
+        const rowA = lyi * w2 * 4, rowB = lyj * w2 * 4;
+        const wy0 = 1 - fy, wy1 = fy;
+        const skipRow = rowWhite[lyi] === 255 && rowWhite[lyj] === 255;
+        let i = py * viewW * 4;
+        if (skipRow) continue;         // 双 tap 行全满亮 → 整行恒等乘，直接跳过
+        for (let px = 0; px < viewW; px++, i += 4) {
+          const a = wd[i + 3];
+          if (a === 0) continue;                     // 纯透明区不乘（rgb 无意义）
+          const o00 = rowA + cXO[px], o10 = rowA + cXO1[px];
+          const o01 = rowB + cXO[px], o11 = rowB + cXO1[px];
+          const wx0 = cWX0[px], wx1 = cWX1[px];
+          const w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
+          let l = ld[o00] * w00 + ld[o10] * w10 + ld[o01] * w01 + ld[o11] * w11;
+          wd[i] = Math.min(255, (wd[i] * l) / 255);
+          l = ld[o00 + 1] * w00 + ld[o10 + 1] * w10 + ld[o01 + 1] * w01 + ld[o11 + 1] * w11;
+          wd[i + 1] = Math.min(255, (wd[i + 1] * l) / 255);
+          l = ld[o00 + 2] * w00 + ld[o10 + 2] * w10 + ld[o01 + 2] * w01 + ld[o11 + 2] * w11;
+          wd[i + 2] = Math.min(255, (wd[i + 2] * l) / 255);
+        }
+      }
       }
       mctx.setTransform(1, 0, 0, 1, 0, 0);
       mctx.globalCompositeOperation = 'source-over';

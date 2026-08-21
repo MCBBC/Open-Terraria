@@ -113,7 +113,7 @@ import {
   kiteAnchorPlace, kiteAnchorBreakDrop, critterAnchorAt, kiteAnchorAt,
   type FurnitureKind,
 } from '../world/FurnitureItems';
-import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE, placeableSheetsForItems } from '../data/items';
 import { ANGLER_QUEST_ITEMS, rollAnglerQuest, rollAnglerRewards, seededRng, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn, soundTrackFiles, TOWN_NPC_HEAD_INDEX, VANILLA_SPAWN_POOLS, vanillaSoundFiles } from '../data/vanillaNpcs';
@@ -469,6 +469,9 @@ const ACORN_ALT_BY_GROUND_SHEET: Record<number, number> = {
   2: 0, 477: 0, 147: 3, 60: 6, 23: 9, 661: 9, 199: 12, 662: 12,
   109: 15, 492: 15, 53: 18, 116: 21, 234: 24, 112: 27, 633: 30,
 };
+// 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366 的 createTile 表）——
+// 放置与 hasSupport 共用（书/水蜡/瓶等下方须 tileTable 桌面）
+const ON_TABLE_1X1_SHEETS = new Set([13, 33, 49, 50, 174, 372, 646]);
 // 草族"转化"放置族（BlockPlacementForAssortedThings :40379-40440）：种子/法杖
 // 的 createTile 落在这些草 tile 上时，放置语义 = 转化【已有】块而非铺空格——
 // 草种 62/圣种→泥土(0)；腐化/猩红种→泥土或泥(59)；丛林/蘑菇/661/662 种→泥(59)；
@@ -2887,6 +2890,53 @@ export class Game implements GameHooks {
     if (ids.size) prefetchProjectiles(ids);
   }
 
+  /** 可放置物品 → 图块/墙表预取（2026-08-21 用户报"合成工作台后放置:放置音效
+   *  即响、贴图过一会才显示"）。链路:放置物的 tile sheet 只在出生点扫描/传送
+   *  扫描/烘焙懒取时拉取,合成产出时该表多半未载（工作台 Tiles_18 不在出生画面
+   *  集内）→ 首放烘焙 ensureVImage miss → fallback 烤进 chunk → 表晚到 500ms
+   *  去抖重烘 = 可感白窗。合成/入包即预取（解析见 items.placeableSheetsForItems,
+   *  拉取走 atlas.preloadFiles 统一底层:已载早退+批内去重）,放置首烘即真图;
+   *  bakeTracker 晚到重烘链保留作兜底（只接预取仍在飞行/漏网的时序） */
+  prefetchPlaceableSheets(itemIds: Iterable<number>): void {
+    const a = this.atlas;
+    if (!a) return;
+    const { tileSheets, wallIds } = placeableSheetsForItems(itemIds);
+    if (!tileSheets.size && !wallIds.size) return;
+    const files: string[] = [];
+    for (const id of tileSheets) {
+      const m = a.vanilla.tiles[String(id)];
+      if (m && !a.vimages.has(m.sheet) && !this._sheetPrefetchInFlight.has(m.sheet)) {
+        files.push(m.sheet);
+      }
+    }
+    for (const id of wallIds) {
+      const m = a.vanilla.walls[String(id)];
+      if (m && !a.vimages.has(m.sheet) && !this._sheetPrefetchInFlight.has(m.sheet)) {
+        files.push(m.sheet);
+      }
+    }
+    if (!files.length) return;
+    for (const f of files) this._sheetPrefetchInFlight.add(f);
+    // 在飞去重:合成直调 + onInventoryChanged 全包扫描同 tick 命中同一表时
+    // 不发第二发请求（preloadFiles 只对 vimages 已载早退,不识在飞）
+    void a.preloadFiles(files).finally(() => {
+      for (const f of files) this._sheetPrefetchInFlight.delete(f);
+    });
+  }
+
+  private _sheetPrefetchInFlight = new Set<string>();
+
+  /** 背包全扫版（拾取/宝箱/商店/合成入包统一入口,与 prefetchInvProjectiles 同款
+   *  ≤50 格扫描）。常态近零成本:捡起的放置物其表几乎必然已载（从已渲染的放置物
+   *  上拆下来）,preloadFiles 对已载表早退——只有宝箱/商店新家具类才真正发请求 */
+  prefetchInvPlaceableSheets(): void {
+    // 同 prefetchInvProjectiles 的 player 守卫:存档异步加载链中可能先于赋值触发
+    if (!this.player?.inv) return;
+    const ids: number[] = [];
+    for (const s of this.player.inv.slots) if (s) ids.push(s.id);
+    if (ids.length) this.prefetchPlaceableSheets(ids);
+  }
+
   /** 全图液体沉降（薄封装 → settleWorldLiquids，主线程 fallback 与 worker 共用同一实现）。
    *  mode 语义见 src/world/liquid/settle.ts 头注释 */
   private settleLiquids(onProgress?: (p: number) => void, mode: 'gen' | 'load' = 'gen') {
@@ -5137,7 +5187,9 @@ export class Game implements GameHooks {
           // 离场逃走也会 roll，一并归位击杀分支，2026-08-18 修）
           if (this.boss.vanillaId === 13 || this.boss.vanillaId === 266
             || this.boss.vanillaId === 14 || this.boss.vanillaId === 15) {
-            if (!boss2Already || Math.random() < 0.5) this.meteorPending = true;
+            // ★1457 加 isThereAWorldSurface 门(NPC.cs:80269:worldSurface>50 的
+            // 极小/skyblock 世界不再落陨石;本仓常规生成恒真,skyblock 域生效)
+            if (w.groundLevel > 50 && (!boss2Already || Math.random() < 0.5)) this.meteorPending = true;
           }
         }
         // 骷髅王战斗结束（无论胜负）且未击败 → 守卫老人次日重新出现在地牢门口
@@ -12049,8 +12101,24 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
             //   ② hitReplace.AddDamage(1) 按 GetPickaxeDamage(最佳镐力) 积累,
             //      <100 只播尘/声/返还消耗品——HitTile 挖掘积累条,硬块需够力镐+多击,
             //      与挖矿同节奏;≥100 才真正 ReplaceTile
-            const bestPick = this.bestPickaxePower();
-            if (bestPick <= 0) return;
+            // 原版 GetBestPickaxe 返回 Item(:39190)——镐段冷却要它的 useTime,
+            // 故扫背包取"最佳镐"完整条目(力+useTime)
+            let bestPickItem: { pick: number; useTime: number } | null = null;
+            for (let i = 0; i < 50; i++) {
+              const sI = this.player.inv.slots[i];
+              if (!sI || sI.stack <= 0) continue;
+              const defI = ITEM_DEFS[sI.id];
+              if (!defI) continue;
+              const vidI = defI.vid ?? viIdFromKey(defI.key);
+              if (vidI < 0) continue;
+              const fI = itemFuncOfVid(vidI);
+              if (!fI?.pick || fI.pick <= 0) continue;
+              if (!bestPickItem || fI.pick > bestPickItem.pick) {
+                bestPickItem = { pick: fI.pick, useTime: fI.useTime ?? 15 };
+              }
+            }
+            if (!bestPickItem) return;   // :39191-39193 无镐不能替换
+            const bestPick = bestPickItem.pick;
             // 每击伤害 = 最佳镐力,按目标 d.pick 门槛归零(与 tryMine 同口径:
             // GetPickaxeDamage 数据侧等价——硬块镐力不足永不积累)
             const tileDefHere = TILE_DEFS[targetType];
@@ -12066,6 +12134,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
               return;
             }
             this.hitTiles.clear(tx, ty, 1);   // 清积累(同格新方块不继承旧伤害)
+            // 替换冷却 = 镐段+方块段双段(Player.cs:39235-39239 SetItemTime(num4+num5);
+            //  方块段由调用方 tileSpeed 设置,此处补镐段)
+            const pickSeg = Math.max(14, Math.round(bestPickItem.useTime / Math.max(0.5, this.player.attackSpeedMult)));
+            this.player.useTime += pickSeg;
             this.breakTile(tx, ty, true);   // 旧块完整掉落链(音效+成就同破坏)
           }
         }
@@ -12155,7 +12227,13 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       for (let dy2 = 0; dy2 < oh; dy2++) {
         const px = tx + dx2, py = ty + dy2;
         if (!st.inBounds(px, py)) return;
-        if (st.isActive(px, py)) return;
+        if (st.isActive(px, py)) {
+          // tileCut 族（草丛/花等 decor 近似，Main.tileCut）：放置先切后放
+          // （原版 Player.PlaceThing :5376-5390 对 tileCut 目标 KillTile——
+          //  曾直接拒绝=工作台压草丛放不下）
+          if (!(TILE_DEFS[st.get(px, py)]?.decor ?? false)) return;
+          st.setTile(px, py, 0);
+        }
         // 实心物不能与玩家重叠
         if (def.solid && this.overlapsEntity(px, py)) return;
       }
@@ -12166,10 +12244,10 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     // 矿车轨道（314）例外：无锚点可悬空铺设（TileObjectData 314 无 Anchor 项）
     const isTrack = def.vanilla?.sheet === TRACK_SHEET;
     const needSupport = !isTrack && (def.solid || def.platform || def.framed);
-    if (needSupport && !this.hasSupport(tx, ty, ow, oh)) return;
+    if (needSupport && !this.hasSupport(tx, ty, ow, oh, !!def.framed,
+      ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1))) return;
     // 桌面 1×1 族（PlaceOnTable1x1 WorldGen.cs:45346-45366：{13,33,49,50,78,174,372,646}
     //  非 78 分支 = 下方须 Main.tileTable 桌面集——书/水蜡/瓶等不能贴墙/悬空放）
-    const ON_TABLE_1X1_SHEETS = new Set([13, 33, 49, 50, 174, 372, 646]);
     if (ON_TABLE_1X1_SHEETS.has(def.vanilla?.sheet ?? -1)) {
       const below = st.inBounds(tx, ty + 1) ? st.get(tx, ty + 1) : 0;
       const belowSheet = below !== 0 ? TILE_DEFS[below]?.vanilla?.sheet ?? -1 : -1;
@@ -12427,17 +12505,33 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     return false;
   }
 
-  private hasSupport(x: number, y: number, w: number, h: number): boolean {
+  private hasSupport(x: number, y: number, w: number, h: number, framed = false, onTable = false): boolean {
     const st = this.world.store;
-    // 下方
+    // 下方逐格 SolidTile2（WorldGen.cs:70178 = active+tileSolid+无坡+无半砖+未致动；
+    //  家具族 Place2x1 :47391 / Place3x2 :52136 支撑行【全部】达标才可放——
+    //  曾"任一 isActive 即支撑"把杂草藤蔓算数=工作台放杂草上（2026-08-21 用户报）；
+    //  平台=solidTop 不在 SolidTile2 内=原版家具不能放平台；桌面族(onTable)例外=
+    //  下方须 tileTable（PlaceOnTable1x1 :45346）
+    let bottomAll = true;
     for (let dx = 0; dx < w; dx++) {
-      if (st.isActive(x + dx, y + h) || st.isSolid(x + dx, y + h) || st.wall[st.idx(x + dx, y + h)] !== 0) return true;
+      const bx = x + dx, by = y + h, bi = st.idx(bx, by);
+      const solid2 = st.isSolid(bx, by) && st.slope[bi] === 0 && !st.half[bi];
+      const tableBelow = onTable
+        && TILE_TABLE_SHEETS.has(TILE_DEFS[st.get(bx, by)]?.vanilla?.sheet ?? -1);
+      if (!solid2 && !tableBelow) { bottomAll = false; break; }
     }
-    // 上方（火把等贴墙物）
+    if (bottomAll) return true;
+    // 挂墙族（AnchorWall：旗/架/搁板——背后有墙即可）
+    for (let dy = 0; dy < h; dy++) {
+      for (let dx = 0; dx < w; dx++) {
+        if (st.wall[st.idx(x + dx, y + dy)] !== 0) return true;
+      }
+    }
+    if (framed) return false;   // 家具无侧/上锚（原版 Place2x1 只认支撑行/墙）
+    // 方块/平台：邻接吸附（原版块放置邻接门——上/侧任一 active,杂草也算邻接）
     for (let dx = 0; dx < w; dx++) {
       if (st.isActive(x + dx, y - 1)) return true;
     }
-    // 侧邻
     for (let dy = 0; dy < h; dy++) {
       if (st.isActive(x - 1, y + dy) || st.isActive(x + w, y + dy)) return true;
     }
@@ -15623,6 +15717,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // friendly NPC 玩家近战门（Player.ApplyItemToNPC :43605：friendly 且非
       // voodoo → return——睡渔夫 376/被缚救援族残留不可被玩家挥击）
       if (!playerCanHitEnemy(e, this)) continue;
+      // ★1457 真眼免近战(GetMeleeCollisionData :96142-96144:type==400 命中盒
+      // 清空——月总真眼不可被近战命中,只吃弹幕)
+      if (e.vanillaId === 400) continue;
       if (!hitRect(e.x, e.y, e.w, e.h)) continue;
       this.swingHitSet.add(e.id);
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit。
@@ -15658,7 +15755,11 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
       if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
       if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);
-      if (this.player.buffs.has(BuffType.ImbueFire)) e.onFireT = Math.max(e.onFireT, 3 + Math.random() * 4);
+      if (this.player.buffs.has(BuffType.ImbueFire)) {
+        e.onFireT = Math.max(e.onFireT, 3 + Math.random() * 4);
+        // ★1457 火浸剂伴发 PotentAcid(StatusNPC meleeEnchant==1 → AddBuff(395, 60t))
+        e.potentAcidT = Math.max(e.potentAcidT ?? 0, 1);
+      }
       if (this.player.buffs.has(BuffType.ImbueGold)) e.midasT = 2;
       if (this.player.buffs.has(BuffType.ImbueIchor)) e.ichorT = Math.max(e.ichorT, 10 + Math.random() * 10);
       if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
@@ -20292,6 +20393,9 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
   }
 
   /** 按原版 NPC id 出生（小动物入微光 NPC.GetShimmered→Transform、WorldItem 放生
+   *  ※1457 微光产物所有权变更登记(NPC.GetShimmered :92687-92689→WorldItem.SpawnShimmeredItem):
+   *    playerIndexTheItemIsReservedFor=Main.myPlayer 消失(→NewItemOwnership.None,微光产物
+   *    不再为微光玩家保留)——联机语义;本仓 WorldItem/所有权系统未移植(E 批),单机无行为差。
    *  ReleaseNPC 的落点）。联机访客拒绝——转化权威在房主（同 spawnEnemy 门禁）。
    *  入 critters 桶：spawnCritter 的 spawnVanilla 同语义（原版小动物表全量走桶） */
   spawnNpcByVanilla(id: number, x: number, y: number, style?: number, released = false): Enemy | null {
@@ -21105,8 +21209,12 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
     if (!consumeMaterials(this.player.inv, r, times, this._alchemyTable, this._craftSourcesCache())) return;
     const outKey = recipeItemKey(r.create);
     if (!outKey) return;
-    const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack * times);
+    const outId = ITEM_BY_KEY[outKey];
+    const left = this.player.inv.add(outId, r.createStack * times);
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left); // 背包装不下→掉落
+    // 可放置成品 → tile/wall sheet 预取（合成完成即拉,放置首烘即真图;
+    // 不等 onInventoryChanged 全包扫描——直调零时差,在飞去重防双发）
+    if (outId !== undefined) this.prefetchPlaceableSheets([outId]);
     this.achNotifyCraft(outKey);
     this.sfx.play('pickup'); // SoundID 7 物品抓取（原版合成成品上鼠标的 grab 声）
     this.cb.onInventoryChanged();

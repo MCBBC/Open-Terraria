@@ -89,7 +89,7 @@ export enum BuffType {
   Crate = 60,          // 宝匣(123,300s)：渔获箱率 +10%（cratePotion :9839）
   Gravitation = 61,    // 重力(18,180s)：Up 键切换 gravDir（:9720）
   // ---- R8 敌弹状态批（Projectile.StatusPlayer :11450+ 授予链）----
-  Chilled = 62,        // 冰寒(46)：移速 ×0.75（Player.cs:25659-25661）——霜月冰弹
+  Chilled = 62,        // 冰寒(46)：移速 ×0.75（1457 :26151-26153 折入 strongestMoveSpeedDebuff）——霜月冰弹
                        //   348 FrostWave / 349 FrostShard 命中授予（:11554-11576）
   Frozen = 63,         // 冰冻(47)：整帧封移动输入（player.frozen :9749，input 清零
                        //   同 :18474 重置段）——冰女王霜弹 348 概率授予
@@ -114,7 +114,7 @@ export enum BuffType {
   Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
   BrainOfConfusionBuff = 72,
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
-  Slow = 81,        // 缓慢(32)：moveSpeed ÷2（:25653-25655）——鹿角怪咆哮 800px 内
+  Slow = 81,        // 缓慢(32)：moveSpeed ÷2（1457 :26147-26149 折入 strongestMoveSpeedDebuff）——鹿角怪咆哮 800px 内
   Stoned = 82,      // 石化(156,美杜莎 480 蓄力直击 NPC.cs:56885-56888)：封全部输入
   ChaosState = 83,  // 混沌状态(88,混乱之杖 1326 :44913 AddBuff(88,360) 每次使用刷新)：
                     //   buff 期内再传送 → statLife-=max/7 可致死(:44904-44913,死因 13/14/15)
@@ -483,7 +483,7 @@ const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
   [BuffType.Frostburn, -8],   // lifeRegen-16（:18837）
   [BuffType.Frostburn2, -8],  // lifeRegen-16（:18850）
   [BuffType.CursedInferno, -12], // lifeRegen-24（:18862 onFire2 段）
-  [BuffType.Burning, -30],    // lifeRegen-60（:18875，另 moveSpeed×0.5 在 moveSpeedMult）
+  [BuffType.Burning, -30],    // lifeRegen-60（:18875，另 moveSpeed×0.5 在 strongestMoveSpeedDebuff）
   [BuffType.Suffocation, -20], // lifeRegen-40（:18889）
   [BuffType.Electrified, -4], // lifeRegen-8（:18899）；移动加成见 ELECTRIFIED_MOVE_EXTRA
 ];

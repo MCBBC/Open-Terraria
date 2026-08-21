@@ -911,7 +911,7 @@ item({ key: 'vi_5525_cursed_piper_flute', name: '', value: 1 });
 // ---- 阶段 5:v_ 图块放置物品自动注册 + 掉落连线 ----
 // 每个 v_ 图块注册 place_v_<key> 放置物品(tryPlace 走 vanilla style 帧语义);
 // 无掉落的 v_ 图块 drop 连到该物品(破坏可回收再放置)。
-import { TILE_DEFS } from './tiles';
+import { TILE_DEFS, TILE_BY_KEY } from './tiles';
 for (const td of TILE_DEFS) {
   if (!td.key.startsWith('v_')) continue;
   const ik = 'place_' + td.key;
@@ -1904,6 +1904,31 @@ if (VANILLA_ITEM_KEY_BY_ID[6153] === undefined) {
   const ik = 'vi_6153_GlacierFang';
   VANILLA_ITEM_KEY_BY_ID[6153] = ik;
   item({ key: ik, name: '', value: ITEMS_1457_VALUE[6153] ?? 1 });
+}
+
+// ---- 可放置物品 → 图块/墙 sheet 解析（合成/入包预取用,2026-08-21）----
+// 用户报"合成工作台后放置:音效即响、贴图过一会才显示"——放置物 tile sheet 走
+// 出生点扫描预载 + 烘焙懒取（ChunkCache bakeTracker）,合成产出时该表多半未载
+// （工作台 Tiles_18 不在出生画面扫描集内）→ 首放必经"fallback 烤进 chunk →
+// 表晚到 500ms 去抖重烘"的白窗。合成/入包时即按 def.tile/wallId 反查 sheet
+// 预取（纯函数 node 可测;消费方 Game.prefetchPlaceableSheets → atlas.preloadFiles,
+// 已载早退零重复请求）——放置首烘即真图;兜底 = bakeTracker 晚到重烘链（已在,
+// 只覆盖预取仍在飞行/漏网的时序）。
+/** 物品 id 集 → 需预取的图块 sheet 号集 + 原版墙 id 集（非放置物品/未注册 tile 跳过） */
+export function placeableSheetsForItems(itemIds: Iterable<number>): { tileSheets: Set<number>; wallIds: Set<number> } {
+  const tileSheets = new Set<number>();
+  const wallIds = new Set<number>();
+  for (const id of itemIds) {
+    const def = ITEM_DEFS[id];
+    if (!def) continue;
+    if (def.tile) {
+      const tid = TILE_BY_KEY[def.tile];
+      const vs = tid !== undefined ? TILE_DEFS[tid]?.vanilla?.sheet : undefined;
+      if (vs !== undefined) tileSheets.add(vs);
+    }
+    if (def.wallId) wallIds.add(def.wallId);
+  }
+  return { tileSheets, wallIds };
 }
 
 // ---- 稳定 id 表构建【必须最后】（D1 修复,2026-08-21）----

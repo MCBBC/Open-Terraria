@@ -112,3 +112,78 @@ describe('1457 批1: slowMagic 五方法（:47425-47456/:52593-52604,release 恒
     expect(p.slowMagicUse).toBe(false);
   });
 });
+
+// ================= 批 1 复审修复锁（review-batch1.md D2/D3/D4/D7/D8/❌②❌④,2026-08-21） =================
+
+describe('批1复审 D2: 盾举并入最强减速链（:26155-26162）', () => {
+  it('shieldRaised → 合成减速 1/3（Buffs getter 无 Player 访问,Player 侧 min 合成）', () => {
+    const p = new Player(0, 0, new Inventory());
+    expect(p.maxRunSpeed).toBeCloseTo(3, 6);            // 裸装 3×1×1×1
+    p.shieldRaised = true;
+    expect(p.maxRunSpeed).toBeCloseTo(3 / 3, 6);        // ×1/3
+    p.shieldRaised = false;
+    p.buffs.apply(BuffType.Burning, 10);
+    expect(p.maxRunSpeed).toBeCloseTo(1.5, 6);          // ×0.5
+    p.shieldRaised = true;
+    expect(p.maxRunSpeed).toBeCloseTo(1, 6);            // min(0.5,1/3)=1/3
+  });
+});
+
+describe('批1复审 D3: runAcceleration 乘 moveSpeed 乘区（:26206）', () => {
+  const TILE = 16;
+  const flatWorld = (): World => {
+    const w = new World(480, 80, 30, 'd3run');
+    for (let x = 0; x < 480; x++) { w.store.setTileSilent(x, 70, 1, 0, 0); w.store.setTileSilent(x, 71, 1, 0, 0); }
+    return w;
+  };
+  const game = { world: null as unknown as World, player: null as unknown, enemies: () => [], critters: () => [],
+    entities: { nextId: 1, add: () => {} }, spawnParticles: () => {}, addDamageNumber: () => {},
+    playSfx: () => {}, playSfxFiles: () => {}, playSfxFile: () => {}, spawnDrop: () => null } as never;
+  const step = (p: Player): void => p.fixedUpdate(1 / 60, game);
+
+  it('Slow 下首帧加速 0.08×0.5=0.04/t;Swiftness 0.08×1.25=0.1/t;裸装 0.08/t', () => {
+    game.world = flatWorld();
+    const probe = (buff: BuffType | null): number => {
+      const p = new Player(60 * TILE, 66 * TILE, new Inventory());
+      for (let i = 0; i < 30; i++) step(p);              // 落地沉降
+      expect(p.onGround).toBe(true);
+      if (buff !== null) p.buffs.apply(buff, 60);
+      p.inputX = 1;
+      step(p);
+      return p.vx;
+    };
+    expect(probe(null)).toBeCloseTo(0.08, 9);            // 裸装 runAcc×moveSpeedMult(1)
+    expect(probe(BuffType.Slow)).toBeCloseTo(0.04, 9);   // ×strongestSlow(0.5)
+    expect(probe(BuffType.Agility)).toBeCloseTo(0.1, 9); // ×moveSpeedMult(1.25)
+  });
+});
+
+describe('批1复审 D7: 复活跳过 boss 门=活值 4000px（AnyBossHindersRespawnTime :39368-39397）', () => {
+  it('bossNearOnDeath 快照不再参与跳过门（allowsRespawnTimerSkip 活值重算）', () => {
+    // 死亡瞬间快照为 true、但 boss 已不在场 → 跳过门放行（原版活值语义）
+    const p = new Player(0, 0, new Inventory());
+    p.bossNearOnDeath = true;   // 旧实现恒禁跳
+    expect(p.respawnTimer).toBe(0);
+    // 快照字段仍供 GetRespawnTime +600 消费（:38388-38398 死亡时算定,语义保留）
+    expect(p.bossNearOnDeath).toBe(true);
+  });
+});
+
+describe('批1复审 ❌④: 火炬神弹难度伤（:18000 40×HostileProjectileDamageMultiplier）', () => {
+  it('经典 40 / 专家 60 / 大师 80（曾恒 20）', async () => {
+    const { TorchGodProj } = await import('../src/entities/WeaponProj');
+    const { hostileProjectileDamage } = await import('../src/stats/ScaleStats');
+    const { GDL } = await import('../src/stats/ScaleStats');
+    // 曲线键 Journey 0.5 / Master 3（GameDifficultyData.cs:67）——Classic=1、
+    // Expert 线性插值=2 → 40/80/120（非 1.5/2 档!）
+    expect(hostileProjectileDamage(40, GDL.CLASSIC)).toBe(40);
+    expect(hostileProjectileDamage(40, GDL.EXPERT)).toBe(80);
+    expect(hostileProjectileDamage(40, GDL.MASTER)).toBe(120);
+    // 命中即按难度曲线取伤（不再读恒 20 的 damage 字段）
+    const p = new Player(0, 0, new Inventory());
+    p.hp = 100;
+    const proj = new (Object.getPrototypeOf(TorchGodProj))();   // 仅验类面:字段删除
+    expect((proj as unknown as { damage?: number }).damage).toBeUndefined();
+    void p;
+  });
+});

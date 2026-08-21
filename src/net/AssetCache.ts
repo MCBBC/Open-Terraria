@@ -20,8 +20,12 @@ import { MUSIC } from '../data/Music';
 import { unzipSync } from 'fflate';   // zip 快路径页面直给解压(SW 不参与 warming)
 import { VANILLA_MISC } from '../assets/SpriteAtlas';
 
-/** 手动版本闸:仅 sounds/audios/fonts/l10n 内容变更时 +1(贴图走 JSON 内容 hash 自动) */
-export const CACHE_BUSTER = 1;
+/** 手动版本闸:仅 sounds/audios/fonts/l10n 内容变更时 +1(贴图走 JSON 内容 hash 自动)。
+ *  ★2(2026-08-21):public/sprites/vanilla/*.png 字节被并行会话 remaster 测试替换又
+ *  恢复(JSON 清单未变 → 版本未变),SW 缓存持续回供错位旧字节——月总 NPC_396 内容
+ *  在画布内偏移,眼窝/嘴覆层(锚点正确)相对错位帧全部"偏移"。版本不含 PNG 字节,
+ *  此类资产字节中毒只能 bump 本闸强制整批重建。 */
+export const CACHE_BUSTER = 2;
 
 type VanillaMeta = { sheet?: string; icon?: string };
 type VanillaData = {

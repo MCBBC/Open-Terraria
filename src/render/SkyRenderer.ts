@@ -1850,6 +1850,12 @@ export class SkyRenderer {
     this.drawLanterns(ctx, viewW, viewH, camX, camY, dtMs, 'near');
   }
 
+  /** 派对气球 near 入口（PartySky 深 1.6..3.35 全 <5 = 全部背景层之前）——
+   *  Renderer 在 biomeBg.draw('surface') 之后调用（原版 DrawToDepth(1) 带 :59621） */
+  drawPartyBalloonsNear(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, dtMs: number): void {
+    this.drawPartyBalloons(ctx, viewW, viewH, camX, dtMs);
+  }
+
   // ================= 事件天幕（SlimeSky/MartianSky 1:1） =================
 
   /** 事件天幕激活动轮询 + 60Hz 推进（激活边沿 = 原版 Activate/Deactivate 调用点） */
@@ -3804,8 +3810,8 @@ export class SkyRenderer {
     this.drawAurora(ctx, viewW, viewH, camY, dtMs, nightTime, isDay,
       Math.max(0, Math.min(7, clock.moonPhase ?? 0)));
 
-    // 派对气球（PartySky：BirthdayParty.PartyIsUp 时 SkyManager 激活）
-    this.drawPartyBalloons(ctx, viewW, viewH, camX, dtMs);
+    // 派对气球（PartySky 深 1.6..3.35 全 <5 = 全部背景层之前）——由 Renderer 在
+    // 群系背景后调 drawPartyBalloonsNear（原版 DrawToDepth(1) 带 :59621；曾画山后）
     // 灯笼夜夜空（LanternSky：灯笼浮升层，需相机 Y 判地表门）——far 带（深度>5,
     // 远山之后）；near 带（深度≤5,山层之前）由 Renderer 在群系背景之后调
     // drawLanternsNear（原版 DrawToDepth(5) 前后带插入 :59310/:59322）

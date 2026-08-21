@@ -73,8 +73,9 @@ describe('城镇 NPC 受击链(巫毒门/hostile/环境)', () => {
       world.store.liquidType[world.store.idx(100, y)] = 2;
     }
     for (let t = 0; t < 5; t++) guide.fixedUpdate(1 / 60, game);
-    // hurt 扣防:50 - def(15)*0.5 = 42.5 → round 43
-    expect(guide.hp).toBe(250 - 43);
+    // hurt 扣防:50 - def(30)*0.5 = 35（★1456 向导 defense=30，NPC.cs:69207 case 22
+    // 段——曾按 1405 旧值 15 断言 43，2026-08-21 数据对账修正）
+    expect(guide.hp).toBe(250 - 35);
   });
 
   it('溺水(:96118):呼吸耗尽后每 7t 掉 2(不过防御)', () => {

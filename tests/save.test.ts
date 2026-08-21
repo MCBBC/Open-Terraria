@@ -5,7 +5,7 @@ import type { SaveData, SaveMeta, SaveStoreView } from '../src/save/serialize';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../src/data/items';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY, ITEM_DEFS, ITEM_STABLE_OF_INTERNAL } from '../src/data/items';
 import { T, W } from '../src/data/tiles';
 import { BUFF_DEFS, BuffType, buffTypeByVanilla } from '../src/stats/Buffs';
 import { packWorld } from '../src/workers/worldPacket';
@@ -61,6 +61,40 @@ describe('自有存档格式', () => {
     expect(back.player.baseMaxHp).toBe(420);
     expect(back.player.baseMaxMana).toBe(160);
     expect(back.player.mana).toBe(88);
+  });
+
+  it('D1 稳定 id 窖洞回归：表外注册物品（敌旗/钓鱼族/1457 新三件）存读不蒸发（2026-08-21）', () => {
+    // 曾病：稳定 id 表建在注册中途,敌旗 290/钓鱼 35/具名 5/1457 新三件落在
+    // Uint16Array 外 → 存盘 `?? 0` 写 0 → 读档 id 0 静默丢物。表已移 items.ts 文件尾。
+    const world = new World(64, 32, 42, '测试');
+    const inv = new Inventory();
+    const keys = [
+      'vi_1615_banner_b1',          // 敌旗族（同 vid 与 vanilla.json 自动键双注册）
+      'vi_2289_f2289',              // 钓鱼竿族
+      'vi_5573_torch_gods_potion',  // 具名 5 件之一
+      'vi_6156_SilverBracer',       // 1457 新（上锁盒 1/4）
+      'vi_6158_MobiusStrip',        // 1457 新（石巨人袋 1/6）
+      'vi_6165_PoisonBarb',         // 1457 新（木匣 1/20）
+    ];
+    for (const k of keys) {
+      const id = ITEM_BY_KEY[k];
+      expect(id, `键未注册: ${k}`).toBeDefined();
+      inv.add(id, 5);
+    }
+    const player = new Player(100, 100, inv);
+    const back = loadSave(saveGame(world, player, 0));
+    const gotStacks = keys.map((k) => {
+      const id = ITEM_BY_KEY[k];
+      const slot = back.player.inventory.find((s) => s && ITEM_STABLE_OF_INTERNAL[s.id] === ITEM_STABLE_OF_INTERNAL[id]);
+      return slot?.stack ?? 0;
+    });
+    expect(gotStacks, `有物品蒸发: ${keys.map((k, i) => `${k}=${gotStacks[i]}`).join(', ')}`)
+      .toEqual([5, 5, 5, 5, 5, 5]);
+    // 反查回的内部 id 必须是有效 vi_ def（读档链 ITEM_INTERNAL_OF_STABLE 归一）
+    for (const s of back.player.inventory) {
+      if (!s) continue;
+      expect(ITEM_DEFS[s.id]?.key ?? '').toMatch(/^vi_/);
+    }
   });
 
   it('旧档缺省上限字段不炸（100/20/20 由加载方兜底）', () => {
