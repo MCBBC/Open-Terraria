@@ -2570,13 +2570,79 @@ export class UI {
     modernRow.appendChild(this.craftGridEl);
     right.appendChild(modernRow);
     const craftWrap = el('div');
+    craftWrap.style.cssText = 'position:relative;';
     right.appendChild(craftWrap);
     this.craftListEl = el('div');
     // 原版无滚动条——滚轮驱动焦点评动(CraftingUI 滚动列表),不走原生滚动;
     // 曾 overflow-y:auto + refreshAll 重建行后 scrollTop 归零 = 滚动位置每帧重置
     this.craftListEl.style.cssText = 'height:240px; overflow:hidden; width:520px;';
     craftWrap.appendChild(this.craftListEl);
+    // 滚动条（2026-08-21 用户要求；原版鱼眼列表无此件=自造 QoL）：列表右缘
+    // 6px 竖槽+滑块，几何由 refreshVanillaCrafting 尾部按行窗占比刷；拖滑块/
+    // 点槽跳转，滚轮同列表口径
+    const track = el('div');
+    track.style.cssText = 'position:absolute; left:526px; top:0; bottom:0; width:6px;'
+      + 'background:rgba(24,20,52,0.65); border-radius:3px; cursor:pointer; display:none;';
+    const thumb = el('div');
+    thumb.style.cssText = 'position:absolute; left:0; width:6px; min-height:24px;'
+      + 'background:rgb(122,144,214); border-radius:3px; opacity:0.85; cursor:grab;';
+    track.appendChild(thumb);
+    track.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.craftScrollJump(e.clientY);            // 点槽/抓滑块统一按比例跳焦
+      const move = (ev: MouseEvent) => this.craftScrollJump(ev.clientY);
+      const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+    track.addEventListener('wheel', (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.craftWheelStep(ev.deltaY, ev.deltaMode);
+    }, { passive: false });
+    track.addEventListener('contextmenu', (e) => e.preventDefault());
+    craftWrap.appendChild(track);
+    this.craftTrackEl = track;
+    this.craftThumbEl = thumb;
     this.root.appendChild(this.invPanel);
+  }
+
+  /** 滚动条几何元（refreshVanillaCrafting 每刷更新；拖拽 move 消费） */
+  private craftTrackEl: HTMLElement | null = null;
+  private craftThumbEl: HTMLElement | null = null;
+  private craftScrollMeta = { len: 0, visRows: 0 };
+  /** 滚轮累积器（实例字段——列表元素每次进游戏重建，闭包累积器会随重建丢失半程量） */
+  private craftWheelAcc = 0;
+
+  /** 滚轮步进（delta 累积阈值 100：标准齿距 deltaY≈100=1 齿 1 行；触控板小增量
+   *  按比例缓行；deltaMode 1(lines) ×40 换算；方向反转清零防吃半程余量） */
+  private craftWheelStep(dyRaw: number, deltaMode: number): void {
+    const dy = deltaMode === 1 ? dyRaw * 40 : dyRaw;
+    if (this.craftWheelAcc !== 0 && Math.sign(dy) !== Math.sign(this.craftWheelAcc)) this.craftWheelAcc = 0;
+    this.craftWheelAcc += dy;
+    if (Math.abs(this.craftWheelAcc) < 100) return;
+    this.craftWheelAcc = 0;
+    this.craftFocus = Math.max(0, this.craftFocus + (dy > 0 ? 1 : -1));
+    this.hoverFocus = -1;   // 滚动后鼠标下配方已变，预览态退场回落焦点
+    this.refreshAll();
+  }
+
+  /** 滚动条跳转（clientY → 槽内比例 → 焦点行；拖滑块与点槽共用） */
+  private craftScrollJump(clientY: number): void {
+    const track = this.craftTrackEl;
+    const meta = this.craftScrollMeta;
+    if (!track || meta.len <= meta.visRows) return;
+    const r = track.getBoundingClientRect();
+    const H = Math.max(1, r.height);
+    const thumbH = Math.max(24, (meta.visRows / meta.len) * H);
+    const usable = Math.max(1, H - thumbH);
+    const ratio = Math.max(0, Math.min(1, (clientY - r.top - thumbH / 2) / usable));
+    const focus = Math.round(ratio * (meta.len - 1));
+    if (focus !== this.craftFocus) {
+      this.craftFocus = focus;
+      this.hoverFocus = -1;
+      this.refreshAll();
+    }
   }
 
   /** Buff 状态栏（对齐原版 DrawInterface_Resources_Buffs，Main.cs:42618-42640 +
@@ -3276,21 +3342,10 @@ export class UI {
       const cl = this.craftListEl as HTMLElement & { __swCraftWheel?: boolean };
       if (!cl.__swCraftWheel) {
         cl.__swCraftWheel = true;
-        // delta 累积阈值（2026-08-21 用户报"滚动过于灵敏"）：每满 120 才走一行——
-        // 标准齿距 deltaY≈100 需 ~1.2 齿一行（稍钝），触控板小增量/惯性流按比例
-        // 缓行。方向反转清零（防反向先吃掉半程余量）。deltaMode 1(lines) 换算 ×40
-        let wheelAcc = 0;
         cl.addEventListener('wheel', (ev) => {
           ev.preventDefault();
           ev.stopPropagation();
-          const dy = (ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY);
-          if (wheelAcc !== 0 && Math.sign(dy) !== Math.sign(wheelAcc)) wheelAcc = 0;
-          wheelAcc += dy;
-          if (Math.abs(wheelAcc) < 120) return;
-          wheelAcc = 0;
-          this.craftFocus = Math.max(0, this.craftFocus + (dy > 0 ? 1 : -1));
-          this.hoverFocus = -1;   // 滚动后鼠标下配方已变，预览态退场回落焦点
-          this.refreshAll();
+          this.craftWheelStep(ev.deltaY, ev.deltaMode);   // 累积阈值 100（craftWheelStep）
         }, { passive: false });
         // 移出列表清预览（行重建销毁不派发 leave，容器级兜底防残留）
         cl.addEventListener('mouseleave', () => {
@@ -3304,6 +3359,24 @@ export class UI {
     // 上限，配方不足一屏时收缩到内容高——overflow:hidden 的 scrollHeight 仍返回
     // 内容全高（行 transform 缩放不参与布局，行高恒定），面板底边随之贴内容
     this.craftListEl.style.height = `${Math.min(240, this.craftListEl.scrollHeight)}px`;
+    // 滚动条几何：thumb 高=可见窗占比（min 24px），top=窗口起点比例；内容不满
+    // 一屏（无滚动余地）整条隐藏
+    const meta = this.craftScrollMeta;
+    meta.len = avail.length;
+    meta.visRows = end - start;
+    const trk = this.craftTrackEl, thb = this.craftThumbEl;
+    if (trk && thb) {
+      if (meta.len <= meta.visRows) {
+        trk.style.display = 'none';
+      } else {
+        trk.style.display = '';
+        const H = Math.max(1, trk.clientHeight);
+        const thumbH = Math.max(24, (meta.visRows / meta.len) * H);
+        const maxStart = meta.len - meta.visRows;
+        thb.style.height = `${thumbH}px`;
+        thb.style.top = `${(Math.min(start, maxStart) / maxStart) * (H - thumbH)}px`;
+      }
+    }
   }
 
   /** 材料格覆盖计数：req（含组假 id）当前格内存量 */

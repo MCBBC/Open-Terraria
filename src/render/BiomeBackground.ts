@@ -163,6 +163,14 @@ export class BiomeBackground {
   private imgs = new Map<number, ImageBitmap | HTMLImageElement | null>();
   /** 地表风格状态（≈Main.bgStyle/bgDelay/bgAlphaFrontLayer/bgAlphaFarBackLayer） */
   bgStyle = 0;
+  /** 瞬切计数（instantBGTransitionCounter :63518；森林→森林同生成背景） */
+  private instantBG = 0;
+  /** 森林风格 → 该段 WorldGen 生成背景 ID（GetCurrentBackgroundOfStyle :8062
+   *  的 treeBG1..4 = treeStyle[0..3]；等值 ⇒ 视觉相同 ⇒ 过渡可瞬切） */
+  private forestBgId(world: World, style: number): number {
+    const seg = style === Forest1 ? 0 : style === Forest2 ? 1 : style === Forest3 ? 2 : 3;
+    return world.treeStyle?.[seg] ?? -1;
+  }
   private bgDelay = 0;
   private alphaFront = new Array(16).fill(0);
   private alphaFar = new Array(16).fill(0);
@@ -331,7 +339,7 @@ export class BiomeBackground {
   }
 
   /** 每帧状态推进：风格切换延迟 + alpha 渐变（UpdateBGVisibility ±0.05/帧，:63534/:63594） */
-  update(world: World, scene: SceneFlags, dtMs: number) {
+  update(world: World, scene: SceneFlags, dtMs: number, screenCenterTileX?: number) {
     this.seedFor(world);
     if (!this.caveBackTreeX) {
       // 森林四段边界：原版用 treeX[0..2]（WorldGen 生成）；优先用 world.treeX
@@ -340,17 +348,53 @@ export class BiomeBackground {
       ];
     }
     const frames = dtMs / (1000 / 60);
-    // 地表风格（DrawBG_HandleBackgroundTransition :63509：变更需 30 帧稳定）
-    const want = this.preferredStyle(scene, scene.tileX);
-    if (want !== this.bgStyle) {
-      this.bgDelay += frames;
-      if (this.bgDelay >= 30) { this.bgStyle = want; this.bgDelay = 0; }
-    } else this.bgDelay = 0;
-    // 前景层 alpha
+    // 地表风格过渡全链（DrawBG :63438-63449 + HandleBackgroundTransition :63508-63527）：
+    // ① bgDelay<0 = 负冷却：计数归零期间锁风格（:63440-63442），防边界来回抖动
+    // ② 森林→森林且两段 WorldGen 生成背景相同（treeStyle 相等）→ 瞬切
+    //    （:63510-63520 instantBGTransitionCounter=1 + transitionSpeed=1 一帧吸合；
+    //    曾缺 = 跨 treeX 段界多走 20 帧交叉渐变 = 用户实报"衔接有问题"）
+    // ③ 等待帧数：新风格是森林 60 帧、否则 30（:63522 num = flag2?60:30——曾恒 30）
+    // ④ 切换后：进森林 bgDelay=0 无冷却；否则 -60 负冷却 60 帧（:63524-63527，曾缺）
+    // ⑤ 等待期回摆：preferred 折返时 bgDelay 逐帧衰减而非清零（:63443-63444）
+    const want = this.preferredStyle(scene, screenCenterTileX ?? scene.tileX);
+    let speed = 0.05;
+    const isForestStyle = (st: number) => st === Forest1 || st === Forest2 || st === Forest3 || st === Forest4;
+    if (this.bgDelay < 0) {
+      this.bgDelay = Math.min(0, this.bgDelay + frames);
+    } else if (want !== this.bgStyle) {
+      if (isForestStyle(this.bgStyle) && isForestStyle(want)
+        && this.forestBgId(world, this.bgStyle) === this.forestBgId(world, want)) {
+        this.instantBG = 2;   // 瞬切（原 counter=1；帧率浮动保险 2 帧，speed=1 吸合）
+      } else {
+        this.bgDelay += frames;
+        const num = isForestStyle(want) ? 60 : 30;
+        if (this.bgDelay > num) {
+          this.bgDelay = isForestStyle(want) ? 0 : -60;
+          this.bgStyle = want;
+        }
+      }
+    } else if (this.bgDelay > 0) {
+      this.bgDelay = Math.max(0, this.bgDelay - frames);
+    }
+    if (this.instantBG > 0) {
+      this.instantBG--;
+      this.bgStyle = want;
+      speed = 1;
+    }
+    // 前景层 alpha（UpdateBGVisibility_FrontLayer :63534-63551）：升 0.05/帧；
+    // 降侧有沙漠变体互换豁免（:63566-63582 IsDesertVariantSwap {2,5,13,14}）——
+    // 新沙漠变体未到 1 前旧变体 alpha 持平（防跨腐化/猩红沙漠行走时的暗闪）
     for (let l = 0; l < 16; l++) {
       const target = l === this.bgStyle ? 1 : 0;
-      this.alphaFront[l] += (target - this.alphaFront[l]) >= 0 ? Math.min(frames * 0.05, target - this.alphaFront[l]) : Math.max(-frames * 0.05, target - this.alphaFront[l]);
-      if (Math.abs(target - this.alphaFront[l]) < 0.001) this.alphaFront[l] = target;
+      if (target === 1) {
+        this.alphaFront[l] = Math.min(1, this.alphaFront[l] + speed * frames);
+      } else if (this.alphaFront[l] !== 0) {
+        const dvSwap = (this.bgStyle === 2 || this.bgStyle === 5 || this.bgStyle === 13 || this.bgStyle === 14)
+          && (l === 2 || l === 5 || l === 13 || l === 14) && l !== this.bgStyle;
+        if (!dvSwap || this.alphaFront[this.bgStyle] < 1) {
+          this.alphaFront[l] = Math.max(0, this.alphaFront[l] - speed * frames);
+        }
+      }
     }
     // 远山层 alpha（bgStyle→far 槽映射简化为同号；海洋 = Step2 专属 far 槽 3，
     // UpdateBGVisibility_BackLayer case 4 :63636-63638，本仓按同号 Ocean 槽驱动）
@@ -410,7 +454,10 @@ export class BiomeBackground {
      *  =worldLayer 分层后不吃光,洞里恒亮且与时间无关)。缺省两者都画(旧序) */
     phase: 'all' | 'surface' | 'underground' = 'all',
   ) {
-    this.update(world, scene, dtMs);
+    // 森林四段分界用【屏幕中心】tile（GetPreferredBGStyleForPlayer :63664
+    // num2=(screenPosition.X+screenWidth/2)/16）——非玩家 tile（曾用=提前/滞后
+    // 半屏 ~30 格切换）。群系 zone 判定仍是玩家中心（SceneMetrics 同原版）
+    this.update(world, scene, dtMs, Math.floor(cam.x / 16));
     const b: BGBlit = typeof (target as BGBlit).img === 'function'
       ? (target as BGBlit) : new CanvasBgBlit(this, target as CanvasRenderingContext2D);
     // Main.screenPosition 语义 = 屏幕【左上角】的世界坐标 = 中心 - 半屏/zoom。

@@ -246,6 +246,11 @@ void main() {
     gl.bindTexture(gl.TEXTURE_2D, this.texWave);
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // ★LUMINANCE 每像素 1 字节,默认 UNPACK_ALIGNMENT=4 要求行 4 字节对齐——
+    //   波场宽非 4 倍数时驱动期望带填充的 buffer > 实际 → INVALID_OPERATION:
+    //   "ArrayBufferView not big enough"(每帧刷屏,2026-08-21 用户实报)。
+    //   对齐 1 = 紧密排列,与 bytes 长度 w*h 精确匹配
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.LUMINANCE, w, h, 0, gl.LUMINANCE, gl.UNSIGNED_BYTE, bytes);
   }
 
