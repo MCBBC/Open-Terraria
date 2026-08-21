@@ -122,7 +122,7 @@ describe('includeSelf 环选（SpectateNextPlayer :17049-17072，:17067 (num2 !=
 });
 
 describe('spectateCycle 接线（:16960 SpectateNextPlayer(num, dead) + 音效 !dead 门）', () => {
-  const SCRYING_ORB = 6926;   // vi_5644_ScryingOrb（ITEM_DEFS 索引）
+  const SCRYING_ORB = 6884;   // vi_5644_ScryingOrb(ITEM_DEFS 真实索引,曾误写 6926)
 
   it('死亡态环到自机 → -1；手持 5644 也不播 Item197/198（:16961/:16968 !dead 门）', () => {
     const g = shell({ dead: true, respawnTimer: 100, slot: 1, players: { 1: { active: true, dead: false } } });

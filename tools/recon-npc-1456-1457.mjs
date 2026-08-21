@@ -8,7 +8,7 @@
 //      node tools/recon-npc-1456-1457.mjs --fix   (应用 A 类修正到 json,先备份)
 import { readFileSync, writeFileSync, copyFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -236,86 +236,88 @@ function parseTree(npcCsPath, mainCsPath) {
   return { results, frames, unparsedConds, unparsedAssigns, blockCount: blocks.length };
 }
 
-const a56 = parseTree('Terarria1456/Terraria/NPC.cs', 'Terarria1456/Terraria/Main.cs');
-const a57 = parseTree('Terarria1457/Terraria/NPC.cs', 'Terarria1457/Terraria/Main.cs');
-const json = JSON.parse(readFileSync(join(ROOT, 'game/public/sprites/vanilla-npcs.json'), 'utf8'));
+// ---- 对账主体(库模式可导入;CLI 直跑打印+--fix) ----
+export function recon() {
+  const a56 = parseTree('Terarria1456/Terraria/NPC.cs', 'Terarria1456/Terraria/Main.cs');
+  const a57 = parseTree('Terarria1457/Terraria/NPC.cs', 'Terarria1457/Terraria/Main.cs');
+  const json = JSON.parse(readFileSync(join(ROOT, 'game/public/sprites/vanilla-npcs.json'), 'utf8'));
+  const coverage = {
+    blocks56: a56.blockCount, blocks57: a57.blockCount,
+    ids56: Object.keys(a56.results).filter((k) => Object.keys(a56.results[k]).length).length,
+    jsonEntries: Object.keys(json).length,
+    frames: a56.frames.length,
+    unparsedConds: a56.unparsedConds.length + a57.unparsedConds.length,
+    unparsedAssigns: a56.unparsedAssigns.length + a57.unparsedAssigns.length,
+  };
+  const idsWith = (t) => Object.keys(t.results).filter((k) => Object.keys(t.results[k]).length).map(Number);
 
-const idsWith = (t) => Object.keys(t.results).filter((k) => Object.keys(t.results[k]).length).map(Number);
-console.log(`== 覆盖 ==`);
-console.log(`1456: blocks=${a56.blockCount} idsWithStats=${idsWith(a56).length} frames=${a56.frames.length}`);
-console.log(`1457: blocks=${a57.blockCount} idsWithStats=${idsWith(a57).length} frames=${a57.frames.length}`);
-console.log(`json: entries=${Object.keys(json).length}`);
-if (a56.unparsedConds.length) console.log(`1456 未解析条件(${a56.unparsedConds.length}):`, a56.unparsedConds.slice(0, 8).join(' | '));
-if (a57.unparsedConds.length) console.log(`1457 未解析条件(${a57.unparsedConds.length}):`, a57.unparsedConds.slice(0, 8).join(' | '));
-if (a56.unparsedAssigns.length) console.log(`1456 非字面量赋值(${a56.unparsedAssigns.length}):`, a56.unparsedAssigns.slice(0, 6).join(' ; '));
-if (a57.unparsedAssigns.length) console.log(`1457 非字面量赋值(${a57.unparsedAssigns.length}):`, a57.unparsedAssigns.slice(0, 6).join(' ; '));
-
-// 抽查锚点(已知正确值)
-const spot = { 1: 'lifeMax 25/dmg 7/def 2', 16: 'lifeMax 60/dmg 15/def 5', 454: '10000/100/15', 525: 'lifeMax 3000' };
-for (const id of Object.keys(spot)) {
-  const r = a56.results[id];
-  console.log(`spot ${id}:`, r ? `lifeMax=${r.lifeMax} damage=${r.damage} defense=${r.defense}` : 'MISS');
-}
-
-const classA = [];   // json 对 1456 漂移(含缺失)
-const classA3 = [];  // json 独有字段(手补/提取盲区——仅审阅)
-const classB = [];   // 1456→1457 变更
-const fixes = [];    // --fix 载荷:[id, key, value]
-const numEq = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 1e-6;
-const allIds = new Set([...idsWith(a56), ...idsWith(a57), ...Object.keys(json).map(Number)]);
-for (const id of [...allIds].sort((a, b) => a - b)) {
-  const j = json[id] ?? null;
-  const r56 = a56.results[id] ?? null;
-  const r57 = a57.results[id] ?? null;
-  // CLASS B:1456 vs 1457(键并集;含 frames)
-  const bkeys = new Set([...Object.keys(r56 ?? {}), ...Object.keys(r57 ?? {})]);
-  for (const k of bkeys) {
-    const v56 = r56?.[k], v57 = r57?.[k];
-    if (v56 !== v57) classB.push(`[${id}] ${k}: 1456=${JSON.stringify(v56)} → 1457=${JSON.stringify(v57)}`);
-  }
-  if ((a56.frames[id] ?? null) !== (a57.frames[id] ?? null)) {
-    classB.push(`[${id}] frames: 1456=${a56.frames[id] ?? '无'} → 1457=${a57.frames[id] ?? '无'}`);
-  }
-  if (!r56 || !j) continue;
-  // CLASS A:json vs 1456(仅 1456 提取面内的键)
-  const isSound = (k) => k === 'HitSound' || k === 'DeathSound';
-  for (const k of Object.keys(r56)) {
-    const v56 = r56[k], vj = j[k];
-    if (vj === undefined) {
-      classA.push(`[${id}] ${k}: json缺 → 1456=${JSON.stringify(v56)}`);
-      fixes.push([id, k, v56]);
-      continue;
+  const classA = [];   // json 对 1456 漂移(含缺失)
+  const classA3 = [];  // json 独有字段(手补/提取盲区——仅审阅)
+  const classB = [];   // 1456→1457 变更
+  const fixes = [];    // --fix 载荷:[id, key, value]
+  const numEq = (a, b) => typeof a === 'number' && typeof b === 'number' && Math.abs(a - b) < 1e-6;
+  const allIds = new Set([...idsWith(a56), ...idsWith(a57), ...Object.keys(json).map(Number)]);
+  for (const id of [...allIds].sort((a, b) => a - b)) {
+    const j = json[id] ?? null;
+    const r56 = a56.results[id] ?? null;
+    const r57 = a57.results[id] ?? null;
+    // CLASS B:1456 vs 1457(键并集;含 frames)
+    const bkeys = new Set([...Object.keys(r56 ?? {}), ...Object.keys(r57 ?? {})]);
+    for (const k of bkeys) {
+      const v56 = r56?.[k], v57 = r57?.[k];
+      if (v56 !== v57) classB.push(`[${id}] ${k}: 1456=${JSON.stringify(v56)} → 1457=${JSON.stringify(v57)}`);
     }
-    const eq = isSound(k)
-      ? soundResolve(vj) === soundResolve(v56)
-      : numEq(vj, v56) || norm(k, vj) === norm(k, v56);
-    if (!eq) {
-      classA.push(`[${id}] ${k}: json=${JSON.stringify(vj)} → 1456=${JSON.stringify(v56)}`);
-      fixes.push([id, k, v56]);
+    if ((a56.frames[id] ?? null) !== (a57.frames[id] ?? null)) {
+      classB.push(`[${id}] frames: 1456=${a56.frames[id] ?? '无'} → 1457=${a57.frames[id] ?? '无'}`);
+    }
+    if (!r56 || !j) continue;
+    // CLASS A:json vs 1456(仅 1456 提取面内的键)
+    const isSound = (k) => k === 'HitSound' || k === 'DeathSound';
+    for (const k of Object.keys(r56)) {
+      const v56 = r56[k], vj = j[k];
+      if (vj === undefined) {
+        classA.push(`[${id}] ${k}: json缺 → 1456=${JSON.stringify(v56)}`);
+        fixes.push([id, k, v56]);
+        continue;
+      }
+      const eq = isSound(k)
+        ? soundResolve(vj) === soundResolve(v56)
+        : numEq(vj, v56) || norm(k, vj) === norm(k, v56);
+      if (!eq) {
+        classA.push(`[${id}] ${k}: json=${JSON.stringify(vj)} → 1456=${JSON.stringify(v56)}`);
+        fixes.push([id, k, v56]);
+      }
+    }
+    for (const k of Object.keys(j)) {
+      if (KEYS.includes(k) && r56[k] === undefined && !(k in (r56 ?? {}))) classA3.push(`[${id}] ${k}: json独有=${JSON.stringify(j[k])}`);
     }
   }
-  for (const k of Object.keys(j)) {
-    if (KEYS.includes(k) && r56[k] === undefined && !(k in (r56 ?? {}))) classA3.push(`[${id}] ${k}: json独有=${JSON.stringify(j[k])}`);
-  }
+
+  return { classA, classA3, classB, fixes, coverage, results56: a56.results, frames: a56.frames };
 }
 
-console.log(`\n== CLASS A: json→1456 漂移 ${classA.length} 条 ==`);
-for (const l of classA) console.log(l);
-console.log(`\n== CLASS A3: json 独有字段(手补/盲区,仅审阅) ${classA3.length} 条 ==`);
-for (const l of classA3.slice(0, 60)) console.log(l);
-if (classA3.length > 60) console.log(`… +${classA3.length - 60} more`);
-console.log(`\n== CLASS B: 1456→1457 变更 ${classB.length} 条(移植确认清单) ==`);
-for (const l of classB) console.log(l);
-
-// ---- --fix:应用 A 类修正(浮点尾差取 6 位小数;写前备份) ----
-if (process.argv.includes('--fix')) {
-  const JSON_PATH = join(ROOT, 'game/public/sprites/vanilla-npcs.json');
-  copyFileSync(JSON_PATH, '/tmp/recon/vanilla-npcs.json.bak');
-  for (const [id, k, raw] of fixes) {
-    const v = typeof raw === 'number' && !Number.isInteger(raw)
-      ? Math.round(raw * 1e6) / 1e6 : raw;
-    json[id][k] = v;
+function main() {
+  const { classA, classA3, classB, fixes, coverage } = recon();
+  console.log(`== 覆盖 == 1456 blocks=${coverage.blocks56} ids=${coverage.ids56} frames=${coverage.frames} / json=${coverage.jsonEntries} / 未解析条件${coverage.unparsedConds} 非字面量${coverage.unparsedAssigns}`);
+  console.log(`\n== CLASS A: json→1456 漂移 ${classA.length} 条 ==`);
+  for (const l of classA) console.log(l);
+  console.log(`\n== CLASS A3: json 独有字段(手补/盲区,仅审阅) ${classA3.length} 条 ==`);
+  for (const l of classA3.slice(0, 60)) console.log(l);
+  if (classA3.length > 60) console.log(`… +${classA3.length - 60} more`);
+  console.log(`\n== CLASS B: 1456→1457 变更 ${classB.length} 条(移植确认清单) ==`);
+  for (const l of classB) console.log(l);
+  // ---- --fix:应用 A 类修正(浮点尾差取 6 位小数;写前备份) ----
+  if (process.argv.includes('--fix')) {
+    const JSON_PATH = join(ROOT, 'game/public/sprites/vanilla-npcs.json');
+    copyFileSync(JSON_PATH, '/tmp/recon/vanilla-npcs.json.bak');
+    const json = JSON.parse(readFileSync(JSON_PATH, 'utf8'));
+    for (const [id, k, raw] of fixes) {
+      const v = typeof raw === 'number' && !Number.isInteger(raw)
+        ? Math.round(raw * 1e6) / 1e6 : raw;
+      json[id][k] = v;
+    }
+    writeFileSync(JSON_PATH, JSON.stringify(json));
+    console.log(`\n== FIX: 已应用 ${fixes.length} 条修正 → vanilla-npcs.json(备份 /tmp/recon/vanilla-npcs.json.bak)==`);
   }
-  writeFileSync(JSON_PATH, JSON.stringify(json));
-  console.log(`\n== FIX: 已应用 ${fixes.length} 条修正 → vanilla-npcs.json(备份 /tmp/recon/vanilla-npcs.json.bak)==`);
 }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

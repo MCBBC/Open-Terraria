@@ -794,8 +794,12 @@ async function exportPack() {
     const bySheet = new Map();
     for (const [key, p] of Object.entries(state.progress)) {
       const e = catalog.byKey.get(key);
-      // frames 空(无法逐帧)但存在整图记录(-1)的条目也要导出
-      if (!e || (!e.frames.length && !p.frames[-1])) continue;
+      if (!e) continue;
+      // 有任何记录(逐帧或整图 -1)才导出;frames 空(排除类)必须靠 -1 记录。
+      // ★tile/wall 整图模式(B)有 frames 但只验收了 -1——旧条件 `!frames.length &&`
+      // 会把这类条目整条跳过(整图重制成果导不出的盲区)
+      const hasFrameRec = e.frames.some((f) => p.frames[f.frameIdx] !== undefined);
+      if (!hasFrameRec && p.frames[-1] === undefined) continue;
       let arr = bySheet.get(e.sheet);
       if (!arr) { arr = []; bySheet.set(e.sheet, arr); }
       arr.push(e);
@@ -818,7 +822,7 @@ async function exportPack() {
         const wholeRec = p.frames[-1];
         if (wholeRec && wholeRec.status !== 'untouched') {
           if (wholeRec.status === 'accepted') {
-            const px = framePixelsMem.get(`${e.key}|-1`) ?? (await getFramePixels(e.key, -1));
+            const px = candSel(`${e.key}|-1`) ?? (await getFramePixels(e.key, -1));
             if (px) {
               cx.putImageData(new ImageData(new Uint8ClampedArray(px), img.width, img.height), 0, 0);
               meta.frames[`${e.key}#-1`] = { status: 'accepted', rect: [0, 0, img.width, img.height], hash: frameHash(extractFramePixels(img, { x: 0, y: 0, w: img.width, h: img.height, frameIdx: 0 }).data), prompt: wholeRec.prompt, gen: wholeRec.gen };
@@ -832,7 +836,7 @@ async function exportPack() {
           if (!rec || rec.status === 'untouched') { meta.complete = false; continue; }
           const origHash = frameHash(extractFramePixels(img, f).data);
           if (rec.status === 'accepted') {
-            const px = framePixelsMem.get(`${e.key}|${f.frameIdx}`) ?? (await getFramePixels(e.key, f.frameIdx));
+            const px = candSel(`${e.key}|${f.frameIdx}`) ?? (await getFramePixels(e.key, f.frameIdx));
             if (!px) { meta.complete = false; continue; }
             cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), f.x, f.y);
             meta.frames[`${e.key}#${f.frameIdx}`] = { status: 'accepted', rect: [f.x, f.y, f.w, f.h], hash: origHash, prompt: rec.prompt, gen: rec.gen };
@@ -861,6 +865,7 @@ async function exportPack() {
   } catch (err) {
     setStatus(`导出失败:${err.message}`);
     console.error('[export]', err);
+    return { error: String(err.message || err) };
   }
 }
 $('btn-export').onclick = () => void exportPack();
@@ -903,7 +908,7 @@ $('btn-apply').onclick = async () => {
   const framesMeta = {};
   let any = false;
   for (const f of curEntry.frames) {
-    const px = framePixelsMem.get(`${curEntry.key}|${f.frameIdx}`);
+    const px = candSel(`${curEntry.key}|${f.frameIdx}`);
     if (!px) continue;
     cx.putImageData(new ImageData(new Uint8ClampedArray(px), f.w, f.h), f.x, f.y);
     framesMeta[f.frameIdx] = { status: 'accepted', rect: [f.x, f.y, f.w, f.h], hash: '' };
@@ -951,7 +956,9 @@ $('set-close').onclick = () => {
 // ---- E:动画预览(重制帧优先轮播;多帧条目显示) ----
 let animTimer = 0, animIdx = 0;
 function updateAnimbar() {
-  $('animbar').style.display = (!wholeMode && curEntry && curEntry.frames.length > 1 && sheetImg) ? 'flex' : 'none';
+  const show = !wholeMode && curEntry && curEntry.frames.length > 1 && sheetImg;
+  $('animbar').style.display = show ? 'flex' : 'none';
+  if (!show && animTimer) $('btn-anim').click();   // 隐藏即停表,防空转空画
 }
 function animTick() {
   if (!curEntry || !sheetImg) return;

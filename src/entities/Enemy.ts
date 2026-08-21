@@ -4915,30 +4915,39 @@ export class Enemy extends Entity {
     const bx = Math.floor(this.cx / TILE), by = Math.floor((this.y + this.h - 1) / TILE);
     let rooted = false;
     for (let i = -1; i <= 1; i++) if (st.isSolid(bx + i, by)) { rooted = true; break; }
-    // ---- 开火（cs:24474-24541 在 rooted 判定【之前】——埋沙栖息中照常装填开火;
-    //      冷却每 tick 递减不受玩家存活门限。曾放在 rooted return 之后 = 蚁狮
-    //      几乎永不射沙球,审计 4.1,2026-08-19）----
+    // ---- 开火（cs:24474-24541 在 rooted 判定【之前】——埋沙栖息中照常装填开火）----
+    //  原版 ai[0] = 【倒计时】：>0 每 tick −1（==200 即装填后第一 tick 播音）；
+    //  ==0 且 flag25（锥门）且 CanHit → 装填 ai[0]=200 + 射沙球（proj 31 ai[0]=2
+    //  敌版档/timeLeft300）。flag25 只在 directionY<0（玩家在上方）时重算——
+    //  玩家不在上方保留旧值（与 rotation 保留语义同构）。曾写反成 ai0 递增计数、
+    //  且冷却只在玩家存活时累计（原版 :24502 无条件递减）、多加"玩家在上方"射门
+    //  （原版无）——2026-08-21 A 区遗留清偿按字面重写
+    //  ★flag25 是局部变量每 tick 重置 false（:24476）——玩家不在上方
+    //  （directionY≥0）时恒 false=本 tick 不射；锥门无跨 tick 锁存
+    //  （曾用 lai2 锁存=自创语义，review 自查纠正）
+    let flag25 = false;
     if (player && !player.dead) {
-      this.ai0 += 1;
       // 仰角锥门（:24477-24479）：rotation = atan2(dy,dx)+π/2（自正上方起算的
-      // 瞄准角），flag25 = rotation∈[-1.2,1.2]（±68.75°）才允许直射。原文字面
-      // `!(!(rot<-1.2)&&!(rot>1.2))` 是标准反编译形态非伪迹——else 分支
-      // （:24526-24533）是传送带特例（tile 421/422，沿钳制角 ±0.8 盲射），本仓
-      // 传送带机制未移植故不接（G6 定谳 2026-08-19：1405 的 NPC.AI 主体反编译
-      // 缺失无法对读，1456 单版语义自洽按字面接）
+      // 瞄准角），flag25 = rotation∈[-1.2,1.2]（±68.75°）。else 分支（:24526-24533）
+      // 是传送带特例（tile 421/422），本仓传送带机制未移植故不接（G6 定谳）
       const aimRot = Math.atan2(player.cy - this.cy, player.cx - this.cx) + Math.PI / 2;
       // ★瞄准倾斜（cs:24477-24486，玩家在上方 directionY<0 时每帧执行）：
       //  rotation = atan2(瞄准向量)+π/2 钳 ±0.8（玩家正上方=0 直立），玩家不在
       //  上方时保留上次倾角（原版 AI 不复位）。2026-08-20 用户实报"蚁狮贴图不
       //  倾斜"——曾只借 aimRot 做锥门从未写回视觉角
-      if (player.cy < this.cy) this.visAngle = Math.max(-0.8, Math.min(0.8, aimRot));
-      const inCone = aimRot >= -1.2 && aimRot <= 1.2;
-      if (this.ai0 >= 200 && player.cy < this.cy && inCone && this.canSeePlayer(st, player)) {
-        this.ai0 = 0;
-        game.playSfxFiles?.(['Item_5'], 1, this.cx, this.cy);   // :24503 开火音（bowShoot 同轨）
+      if (player.cy < this.cy) {
+        this.visAngle = Math.max(-0.8, Math.min(0.8, aimRot));
+        flag25 = aimRot >= -1.2 && aimRot <= 1.2;
+      }
+      // 直射门（:24508-24521）：冷却尽 + 锥内 + CanHit → 装填 200 + 射
+      if (this.ai0 <= 0 && flag25 && this.canSeePlayer(st, player)) {
+        this.ai0 = 200;
+        game.playSfxFiles?.(['Item_5'], 1, this.cx, this.cy);   // :24503（==200 第一 tick 音）
         this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10, 31);
       }
     }
+    // 倒计时递减（:24502 无条件——玩家死/ absent 也走到 0）
+    if (this.ai0 > 0) this.ai0 -= 1;
     if (rooted) {
       this.vy = -0.2;
       this.x += this.vx;
@@ -8040,8 +8049,10 @@ export class Enemy extends Entity {
       }
     }
     // 形态链：行走鸭族湿身/坠落 → 飞形（cs:53585-53589，|vy|>4 或 wet）
+    //  ai0/ai1 归零（原版 Transform(363,0,0) 新形起步——走形站计时 200-400 若
+    //  继承进飞形 = ai1 恒 ≥300 → 起飞即进入降落段，水面模式反复惊飞秒落抖动）
     if ((vid === 362 || vid === 364 || vid === 602 || vid === 608) && (wet || Math.abs(this.vy) > 4)) {
-      this.tryTransformTo(vid + 1, st, false, game);
+      if (this.tryTransformTo(vid + 1, st, false, game)) { this.ai0 = 0; this.ai1 = 0; }
       return;
     }
     if (this.ai0 === 0) {
@@ -8775,7 +8786,11 @@ export class Enemy extends Entity {
     if (this.hitWall) { this.vx *= -0.5; this.facing *= -1; }
     if (this.ai1 >= 300 && (this.hitHead || this.onGround || inWater)) {
       this.ai0 = 0;
-      this.ai1 = 200 + Math.random() * 200;
+      // ★原版 :34996 ai[1]=0f——落地即清飞行计时（曾误用 Transform 第三参
+      // 200+Next(200)（那是给新走形的初始站计时）→ 落水后 ai1 恒 200-400，
+      // 惊飞（ai0=1）→ 几 tick 就 ai1≥300 → 又落水 → 循环 =
+      // 用户实报"鸭子在水中飞/游之间抽搐"根因，2026-08-21）
+      this.ai1 = 0;
       // 回行走形（cs:35000 Transform(type-1)，363→362/365→364/603→602/609→608）
       // 仅 !wet 落地/撞顶才变形;落水只回 ai0=0 水面漂浮态（行走形遇水又变回
       // → 曾水陆互变死循环抖动,审计 9.2,2026-08-19）

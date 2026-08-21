@@ -243,7 +243,7 @@ describe('G6 蚁狮仰角锥门', () => {
     const p = h.player as Player;
     p.x = e.cx + dx - p.w / 2;
     p.y = e.cy + dy - p.h / 2;
-    e.ai0 = 199;                         // 下一 tick 到 200 → 冷却尽
+    e.ai0 = 0;                           // 冷却尽（原版倒计时语义：==0 才装填射击）
     drive(e, 'antlionAI').call(e, h.hooks, p);
     return h.rec.projectiles.length;
   }

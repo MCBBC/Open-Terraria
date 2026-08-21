@@ -131,8 +131,9 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
   return { head, body, legs };
 }
 import { WeatherRenderer } from './WeatherRenderer';
-import { drawVanillaLiquids, drawLiquidBehindTilesOnly } from './VanillaLiquidRenderer';
-import { waterWaves, ensureWaveTextures, injectEntity, type WaveEntitySample } from './WaterWaves';
+import { drawVanillaLiquids, drawLiquidBehindTilesOnly, clearWaterWarpDebug } from './VanillaLiquidRenderer';
+import { waterWaves, ensureWaveTextures, injectEntity, waveTexReady, type WaveEntitySample } from './WaterWaves';
+import { WaterWarpCompositor, type WaterWarpFrameState } from './WaterWarpCompositor';
 import { renderEnv } from './VanillaTiler';
 import { drawTileFlames, drawHeldItemFlame, FLAME_ITEMS, currentTileFrameSeed, randomInt, clearTileFlamesCache } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
@@ -3133,6 +3134,10 @@ export class Renderer {
   private _waveQ = -1;
   /** 主画布 CSS 宽缓存(resize 时刷新;热路径免逐帧 clientWidth 布局读取) */
   private _cssW = 0;
+  /** 果冻管线帧级换算态（updateWaterWaves 缓存；drawLiquids 消费——CSS/世界/设备三系互算） */
+  private _waveCss: WaterWarpFrameState | null = null;
+  /** 水体果冻后处理编排器（离屏水层 + GLWaterDistortion 位移场扭曲；?wwarp=0 逃生门） */
+  private readonly waterWarp = new WaterWarpCompositor();
   private updateWaterWaves(
     cam: Camera, world: World, player: Player, entities: Entity[],
     remotePlayers: Player[], viewW: number, viewH: number, z: number,
@@ -3140,7 +3145,6 @@ export class Renderer {
     ensureWaveTextures(this.atlas);
     const q = options.data.waveQuality;
     if (q !== this._waveQ) { this._waveQ = q; waterWaves.setQuality(q); }
-    if (waterWaves.quality === 0) { waterWaves.disable(); return; }
 
     // 模拟系用 CSS 像素（与原版"backbuffer/4"的设备无关语义对齐——DPR 高时波速
     // 不变）；绘制侧换算 world = cssPx/cssZoom
@@ -3150,6 +3154,11 @@ export class Renderer {
     const cssZoom = z / cssScale;
     const cssW = Math.round(viewW / cssScale), cssH = Math.round(viewH / cssScale);
     const camL = cam.x - viewW / (2 * z), camT = cam.y - viewH / (2 * z);
+    // 果冻管线帧态（quality=0 关闭时也缓存——drawLiquids 的激活判定只读 quality，
+    // 帧态在激活时必然新鲜：active ⇒ 本函数已跑到这里）
+    this._waveCss = { cssW, cssH, cssScale, cssZoom, camL, camT };
+    if (waterWaves.quality === 0) { waterWaves.disable(); return; }
+
     waterWaves.setCamera(camL, camT, cssZoom);
 
     // 帧间隔（progress/步进节奏用真实流逝；PreDraw min(2 步)在 frame 内把守）
@@ -3240,10 +3249,30 @@ export class Renderer {
     // 底边 +5 行（原版 Main.cs:42900-42908 屏下 +5/+4 边距）：P3 不处理窗口底部 10 行，
     // 外扩后未构建带落在屏幕外，防止视口底缘液体类型错画
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
+    // ==== 果冻后处理管线（原版 waterTarget/backWaterTarget + FilterWaterDistortion
+    //      双离屏语义；激活 = WaveQuality>0 + 噪声就绪 + 非 CPU 渲染。见
+    //      WaterWarpCompositor / GLWaterDistortion 头注）====
+    // 前景水 = waterTarget（位移场扭曲合成回世界层，吃光照）；背景水 = backWaterTarget
+    // 同扭（原版两层的像素都在被前景水 alpha 门控的全屏 filter 里一起扭）；浸润带 =
+    // 墙/方块层渲染不参与扭曲 → 管线激活时改在合成后直画（层序不变）。
+    const waterfallAt = (x: number, y: number) => this.waterfalls.checkForWaterfall(x, y);
+    const warpOn = !this.isCpuRender() && this._waveCss !== null
+      && waterWaves.quality > 0 && waveTexReady() && this.waterWarp.active();
+    const warpCtx = warpOn ? this.waterWarp.beginPass(this.ctx, isBackground) : null;
+    if (!warpOn) clearWaterWarpDebug();
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
-    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
-      world.weather?.windSpeedCurrent ?? 0, this.waterStyle,
-      (x, y) => this.waterfalls.checkForWaterfall(x, y));
+    drawVanillaLiquids(warpCtx ?? this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
+      world.weather?.windSpeedCurrent ?? 0, this.waterStyle, waterfallAt, !!warpCtx);
+    if (warpCtx) {
+      // 位移场扭曲合成（GL 优先；失败走 2D 分块回退）——身份变换、像素 1:1 进世界层
+      this.waterWarp.endPass(this.ctx, isBackground, this._waveCss!,
+        this.atlas?.ensureVImage('vanilla/Misc_noise.png') ?? null);
+      // 背景浸润带：原版画进墙/方块层（不扭），跟随原"水体→浸润带"层序补画
+      if (isBackground && this.atlas) {
+        drawLiquidBehindTilesOnly(this.ctx, this.atlas, world.store, world.groundLevel,
+          tx0, ty0, tx1, ty1, this.waterStyle, waterfallAt, false);
+      }
+    }
   }
 
   /** 浸润带·实心层 pass（TileDrawing.Draw :528-529 solidLayer=true 语义）——
@@ -4715,6 +4744,12 @@ export class Renderer {
         if (e.vanillaId === 116 && e.vx > 0) ctx.scale(-1, 1); // 116 spriteDirection=sign(vx)（FindFrame case 116 自带翻转）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
+        // ★有 color 的 NPC：base+color 两遍合一为单张合成精灵（xnaCombined 注），
+        //   此处先烘焙；基础层直绘被门控跳过（合成精灵已含 base 项，双画=叠 base）
+        const xnaColor = (e.colorRGBA && e.colorRGBA[3] > 0)
+          ? this.xnaCombined(`npc${e.vanillaId}`, r, e.colorRGBA,
+              Math.min(255, Math.max(e.spawnAlpha, 0)) / 255)
+          : null;
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
         // EoC 锚点修正:NPC_4 每帧 110×166,眼球主体质心在帧内 y≈106(张嘴帧 113),
         // 帧中心 83——原版通用锚点(帧中心==碰撞盒中心)会让 100×110 的盒偏在
@@ -4731,7 +4766,7 @@ export class Renderer {
         // 568/569 出生态紫雾（本体绘制层，先于本体画——Main.cs:26060-26076 拷贝循环
         // 在 vector72 本体 draw 之前）
         if (e.vanillaId === 568 || e.vanillaId === 569) this.drawWitherBirth(ctx, e, r, scale);
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
+        if (!xnaColor) ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // ---- EoC 冲刺残影（Main.cs:25469-25481 1:1）：门 = ai[0]==3 且 ai[1]≥4
         //      （P2 连冲态 4 / 悬下方回冲态 5）→ 沿 oldPos 画 9 层鬼影，每层 RGBA
         //      × 0.5×(10−i)/20（越旧越淡），同一帧/旋转，锚点同本体（中心+eocOff）。
@@ -4759,27 +4794,22 @@ export class Renderer {
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
         if (e.colorRGBA && e.colorRGBA[3] > 0) {
-          // ★XNA 预乘混合精确 emulation（2026-08-20 史莱姆"浊暗"终案根因）：
-          // XNA content pipeline 贴图预乘 + AlphaBlend(One,InvSrcAlpha) 下
-          // GetColor pass：贡献 = T·a·color.rgb（type1 分支 rgb= color×light，
-          // 【不乘 color.A】），衰减 = dst×(1−T.a·color.A)。Canvas source-over
-          // 的贡献与衰减被 ga 刚性耦合（out=src·ga+dst·(1−ga)），ga=colorA/255
-          // 把贡献也乘了 0.392 → 蓝通道暗 ~2.6×（用户三连报"依然暗"真根因；
-          // 此前 alpha 表/GL 预乘两修均真实但非主因）。三步拆解逐位精确：
+          if (xnaColor) {
+            // ★单张合成（base+color 两遍恒等,见 xnaCombined 长注）——α=occ 使
+            //   空气背景 0.417 透出保留（三步 lighter 方案 α 钳 1 丢失它=过暗残因）
+            ctx.globalAlpha = 1;
+            ctx.drawImage(xnaColor.c, xnaColor.x, xnaColor.y, xnaColor.w, xnaColor.h,
+              -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
+            ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+          } else {
+          // 兜底（合成烘焙失败,如贴图缺帧）：三步拆解——
           //   ② destination-out(同贴图, ga=colorA/255) → dst×(1−T.a·kc) 精确衰减
-          //   ③ lighter(tinted, ga=fade) → +T·a·color.rgb 预乘加法贡献
-          // （基础 pass GetAlpha rgb/A 同乘 ka → 现有 ga=ka source-over 已精确）
+          //   ③ lighter(tinted, ga=1) → +T·a·color.rgb 预乘加法贡献
+          // （GetColor rgb 不乘 color.A——ga=colorA/255 会把贡献也乘 0.392）
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
-          // 与基础层同锚（底锚=−帧高+原版恒 +4 下沉，见主路径注；曾残留旧底锚
-          // pad 变量在恒+4 改造时漏改——染色层 ReferenceError）
           const anchorY2 = grounded ? -r.sh + 4 / scale : -r.sh / 2;
-          const anchorY = anchorY2 + eocOff; // 与基础层同锚——曾残留旧底锚条件,
-          // 基础/染色两层错位 → 史莱姆"彩色+灰影"双画
+          const anchorY = anchorY2 + eocOff;
           if (tinted) {
-            // ★color.A 与 npc.alpha 无关（GetColor :94917 num4 = color.A−(255−light.A)
-            //   恒 color.A；rgb 分支同样不乘 (255−alpha)/255）——衰减/贡献都不乘
-            //   fade（spawnAlpha=静态 175 时 fade=0.314 会把两层全压暗回旧观感，
-            //   2026-08-20 信标抓包实锤 α=150=0.275+0.314）
             ctx.globalCompositeOperation = 'destination-out';
             ctx.globalAlpha = e.colorRGBA[3] / 255;
             ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
@@ -4789,7 +4819,7 @@ export class Renderer {
             ctx.globalCompositeOperation = 'source-over';
           }
           ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
-          ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+          }
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
         // KS 中心，随速度反向摆动（zero=-vy / -vx*2）+ rotation=vx*0.05，
@@ -5856,22 +5886,28 @@ export class Renderer {
     ctx.scale(scale, scale);
     if (slave && slave.colorRGBA && slave.colorRGBA[3] > 0) {
       // 气球壳随奴隶（Main.cs:23390-23393 三遍的前两遍）：
-      // ① nPC.GetAlpha：帧 0 ×(1−slaveAlpha/255) 白雾遍（史莱姆 175 → 0.31）
-      // ② nPC.GetColor：XNA 预乘精确三步（destination-out 衰减 + lighter 贡献）
-      //    ——同 drawEnemy 主染色 pass（2026-08-20 终案，见该处长注）
-      const fadeS = 1 - Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255;
-      ctx.globalAlpha = fadeS;
-      ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
-      const tinted = this.tintedSprite('npc594shell', { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA);
-      if (tinted) {
-        // 同主路径：color.A 不乘 fade（见 drawEnemy 染色 pass 长注）
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.globalAlpha = slave.colorRGBA[3] / 255;
-        ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
-        ctx.globalCompositeOperation = 'lighter';
+      // ① GetAlpha + ② GetColor 两遍合一（xnaCombined，同 drawEnemy 主路径——
+      //   空气背景透出保留；三步 lighter 兜底仅烘焙失败时用）
+      const combined = this.xnaCombined('npc594shell',
+        { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA,
+        Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255);
+      if (combined) {
         ctx.globalAlpha = 1;
-        ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -fw / 2, 0, fw, fh);
-        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(combined.c, combined.x, combined.y, combined.w, combined.h, -fw / 2, 0, fw, fh);
+      } else {
+        const fadeS = 1 - Math.min(255, Math.max(slave.spawnAlpha, 0)) / 255;
+        ctx.globalAlpha = fadeS;
+        ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
+        const tinted = this.tintedSprite('npc594shell', { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA);
+        if (tinted) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.globalAlpha = slave.colorRGBA[3] / 255;
+          ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.globalAlpha = 1;
+          ctx.drawImage(tinted.c, tinted.x, tinted.y, tinted.w, tinted.h, -fw / 2, 0, fw, fh);
+          ctx.globalCompositeOperation = 'source-over';
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -9983,6 +10019,48 @@ export class Renderer {
 
   /** 全亮模式（F9）：跳过光照合成，画面无暗影 */
   fullbright = false;
+
+  /** XNA base+color 两遍合一烘焙（2026-08-20 史莱姆"过暗"终案）：
+   *  XNA 预乘管线（content pipeline 贴图预乘 + AlphaBlend(One,InvSrcAlpha)）下,
+   *  GetAlpha 遍（rgb/A 同乘 ka=(255−alpha)/255）叠 GetColor 遍（rgb=color×light
+   *  不乘 color.A,α=color.A）的两次混合,在预乘空间逐位恒等于单张精灵：
+   *    premult = T.a·T·Cc + T.a·T·ka·(1−T.a·kc)
+   *    α_out   = 1−(1−T.a·ka)(1−T.a·kc)
+   *  Canvas 存 straight=premult/α（>255 钳 255——仅最亮 texel×暗背景组合差
+   *  ~18%,亮天空场景被 XNA backbuffer 自身钳位补偿,终值差 ≤1%）。
+   *  ★单次 source-over 即在【任意】背景精确重现两遍合成——含空气背景的
+   *  (1−occ)≈0.417 透出。此前三步 lighter 方案 α 被钳 1,纯天空背景丢失全部
+   *  透出（绿史莱姆薄荷青=天空蓝透出,用户双截图+原版实机数值定谳：
+   *  预测 24.8+0.417×248=148 vs 原版实测 B=146）。
+   *  ka 量化 8 档进键（渐显动画族防缓存风暴;静态 alpha 族恒定单键）。 */
+  private xnaCombined(
+    key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+    color: number[], ka: number,
+  ): TintRect | null {
+    const kc = color[3] / 255;
+    const q = (v: number) => Math.round(v) & ~7;
+    const kaq = Math.round(Math.max(0, Math.min(1, ka)) * 8) / 8;
+    const k = `${key}|xna|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${q(color[0])},${q(color[1])},${q(color[2])}|${kaq}`;
+    const w = Math.max(1, frame.sw), h = Math.max(1, frame.sh);
+    return this.tintAtlas.bake(k, w, h, (cx) => {
+      cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, w, h);
+      const im = cx.getImageData(0, 0, w, h);
+      const d = im.data;
+      for (let i = 0; i < d.length; i += 4) {
+        const a = d[i + 3] / 255;
+        if (a === 0) continue;
+        const occ = 1 - (1 - a * kaq) * (1 - a * kc);
+        const baseK = a * kaq * (1 - a * kc);   // base 贡献系数（乘 texel）
+        for (let c = 0; c < 3; c++) {
+          const T = d[i + c];
+          const C = (c === 0 ? color[0] : c === 1 ? color[1] : color[2]) / 255;
+          d[i + c] = Math.min(255, (a * T * C + baseK * T) / occ);
+        }
+        d[i + 3] = occ * 255;
+      }
+      cx.putImageData(im, 0, 0);
+    });
+  }
 
   /**
    * 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor 1:1）：

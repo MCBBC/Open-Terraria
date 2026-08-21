@@ -594,14 +594,14 @@ describe('getGoodAdjustments 整族（NPC.cs:17874-18027）', () => {
     expect(e.maxHp).toBe(16800);                      // (8000×1.5=12000)×2×0.7
     expect(e.def.defense).toBe(21);                   // 12+3(getGood)+6(Tweaks :18293)
   });
-  it('39-41 族 FTW+remix：scale=1.1f 赋值×1.2 → 盒 22×1.32=29 / hp (250+150)×2=800', () => {
+  it('39-41 族 FTW+remix：scale=1.1f 赋值×1.2 → 盒 22×1.32=29 / hp (300+150)×2=900', () => {
     worldOf(0, { getGoodWorld: true, remix: true });
     const e = Enemy.fromVanilla(39, 0, 0)!;
     expect(e.w).toBe(29); expect(e.h).toBe(29);
     expect(e.vanillaScale).toBeCloseTo(1.32, 5);
-    expect(e.maxHp).toBe(800);
-    expect(e.def.damage).toBe(68);                    // (30+4)×2，无 Tweaks 分支
-    expect(e.def.defense).toBe(16);                   // 10+2+4(remix)
+    expect(e.maxHp).toBe(900);
+    expect(e.def.damage).toBe(80);                    // (36+4)×2，无 Tweaks 分支
+    expect(e.def.defense).toBe(18);                   // 12+2+4(remix)
     worldOf(0, { getGoodWorld: true });               // 无 remix：1.1 赋值 → 盒 24
     expect(Enemy.fromVanilla(39, 0, 0)!.w).toBe(24);
   });

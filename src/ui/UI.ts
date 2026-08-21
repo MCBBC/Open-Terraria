@@ -298,6 +298,11 @@ const CSS = `
 .sw-slot.sm img { inset:4px; width:23px; height:23px; }
 .sw-slot.sm .cnt { font-size:10px; left:2px; }
 .sw-slot.sm::before { border-radius:2px; }
+/* Modern 合成网格材料格（38px 小槽）——.sw-slot img 默认按 52px 槽 inset8/36px,
+ *  38px 格继承后图标锚 (8,8)+36×36 向右下溢出 6px = 材料图标错位（2026-08-21 实报）。
+ *  38px 用 inset3/32px 居中（(38-32)/2=3），计数同 .sm 缩一号 */
+.sw-slot.chip img { inset:3px; width:32px; height:32px; }
+.sw-slot.chip .cnt { font-size:10px; left:3px; }
 /* ---- 快捷栏（原版 GUIHotbarDrawInner Main.cs:42996-43060 1:1）----
  * 贴图 52px：未选中 scale0.75（视觉 39px、y+6、alpha 147/255≈0.575）+ Back20；
  * 选中 scale1.0（52px、y=20、alpha1）+ Back14；x 步进 ⌊52×scale⌋+4（43/56）；
@@ -3186,10 +3191,16 @@ export class UI {
       if (filtered.length) avail = filtered;
     }
     // 小标题已摘——面板只留原版配方段,无需分区标识
-    const MAX_ROWS = 60; // 焦点 ±30（超出原版 middleY 视口即 alpha→0 :177）
-    const start = Math.max(0, Math.min(this.craftFocus - 30, avail.length - MAX_ROWS));
-    if (this.craftFocus >= avail.length) this.craftFocus = 0;
-    for (let idx = start; idx < Math.min(avail.length, start + MAX_ROWS); idx++) {
+    // ★视口跟随（2026-08-21 用户报"无法滚动到第 7 项以后"）：渲染窗以【可见行数】
+    // 为基、焦点居中——原版 availableRecipeY[focus]→0 即视口中心（CraftingUI.cs
+    // :383-404 行 Y=(i-focus)×65、middleY=屏高/600×250 ≈ ±5 行 :40969-40977）。
+    // 曾按 MAX_ROWS=60 取窗 min(focus-30, len-60)：len<60 时恒 start=0，240px
+    // overflow:hidden 容器永远只露前 ~8 行，滚轮只空转焦点、行窗不动。
+    const VIS_ROWS = 8;   // 240px 容器 ÷ ~30px 行 ≈ 8 可见行（原版 ±5 居中同义）
+    if (this.craftFocus > avail.length - 1) this.craftFocus = Math.max(0, avail.length - 1);   // 钳尾不回卷（ScrollCraftingList :582-589 钳 [0,len-1]）
+    const start = Math.max(0, this.craftFocus - (VIS_ROWS >> 1));
+    const end = Math.min(avail.length, start + VIS_ROWS + 4);   // 下缘 +4：鱼眼淡出余量
+    for (let idx = start; idx < end; idx++) {
       const { r, count } = avail[idx];
       const dy = idx - this.craftFocus; // 相对焦点的连续偏移（原版 availableRecipeY）
       const scale = Math.max(0.75, 100 / (Math.abs(dy) + 100));
@@ -3210,6 +3221,16 @@ export class UI {
       }).join(' ·'));
       mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
       row.appendChild(mats);
+      row.addEventListener('mouseenter', () => {
+        // 悬停预选（Main.cs:41740-41744 HoverOverCraftingItemButton 点击分支：
+        // focusRecipe != 悬停行时点击 → focusRecipe = recipeIndex + 音 12）。
+        // DOM 侧把"点击才预选"提前到 hover 即预选——材料格/详情立即显示该配方
+        //（原版点击换焦点后本次点击不合成,防误触;此处 hover 无合成语义,零风险）
+        if (this.craftFocus !== idx) {
+          this.craftFocus = idx;
+          this.refreshAll();
+        }
+      });
       row.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
         this.craftFocus = idx; // 选中置焦（原版 focusRecipe=i）
@@ -3259,7 +3280,7 @@ export class UI {
     this.craftGridEl.textContent = '';
     if (!focusR) return;
     for (const req of focusR.items) {
-      const chip = el('div', 'sw-slot');
+      const chip = el('div', 'sw-slot chip');   // chip=38px 材料格（.sw-slot img 默认 52px 槽几何会溢出）
       // context 22 槽底 = Inventory_Back4（ItemSlot.cs:2101-2123）
       chip.style.cssText += 'width:38px; height:38px;'
         + 'background-image:url(sprites/vanilla-ui/Inventory_Back4.png);';

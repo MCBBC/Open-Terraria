@@ -51,27 +51,36 @@ try {
   await page.waitForFunction(() => window.__remasterBridge?.curEntry(), { timeout: 30000 });
 
   // ---- ① 目录对拍 ----
-  const cat = await page.evaluate(() => {
+  const cat = await page.evaluate(async () => {
     const b = window.__remasterBridge;
     const by = b.catalog.byCategory;
+    const jf = (p2) => fetch(p2).then((r) => r.json());
+    const vanilla = await jf('sprites/vanilla.json');
+    const ui = await jf('sprites/vanilla-ui.json');
+    const npcs = await jf('sprites/vanilla-npcs.json');
     return {
-      total: b.catalog.entries.length,
       tile: by.get('tile').length, wall: by.get('wall').length,
       npc: by.get('npc').length, item: by.get('item').length,
       proj: by.get('projectile').length, ui: by.get('ui').length,
       gore: by.get('gore').length, buff: by.get('buff').length,
-      glow: by.get('glow').length, misc: by.get('misc').length,
+      glow: by.get('glow').length,
+      // 动态基线(素材库随并行会话重打包漂移:items 6119→6059 等)
+      baseTile: Object.keys(vanilla.tiles).length,
+      baseWall: Object.keys(vanilla.walls).length,
+      baseNpc: Object.keys(npcs).length,
+      baseItem: Object.keys(vanilla.items).length,
+      baseUi: Object.keys(ui.files).length,
     };
   });
-  chk('目录规模:tile 753', cat.tile === 753, `got ${cat.tile}`);
-  chk('目录规模:wall 366', cat.wall === 366, `got ${cat.wall}`);
-  chk('目录规模:npc 694(693+696 兜底)', cat.npc === 694, `got ${cat.npc}`);
-  chk('目录规模:item 6119', cat.item === 6119, `got ${cat.item}`);
+  chk('目录规模:tile=vanilla.tiles 全量', cat.tile === cat.baseTile, `${cat.tile}/${cat.baseTile}`);
+  chk('目录规模:wall=vanilla.walls 全量', cat.wall === cat.baseWall, `${cat.wall}/${cat.baseWall}`);
+  chk('目录规模:npc≥vanilla-npcs(网格兜底)', cat.npc >= cat.baseNpc, `${cat.npc}/${cat.baseNpc}`);
+  chk('目录规模:item=vanilla.items 全量', cat.item === cat.baseItem, `${cat.item}/${cat.baseItem}`);
   chk('目录规模:gore 1403', cat.gore === 1403, `got ${cat.gore}`);
   chk('目录规模:buff 388', cat.buff === 388, `got ${cat.buff}`);
   chk('目录规模:glow 379', cat.glow === 379, `got ${cat.glow}`);
   chk('目录规模:projectile > 1000', cat.proj > 1000, `got ${cat.proj}`);
-  chk('目录规模:ui > 1400(过滤纸娃娃)', cat.ui > 1400 && cat.ui <= 1509, `got ${cat.ui}`);
+  chk('目录规模:ui=vanilla-ui 全量(整图类不滤,纸娃娃灰显)', cat.ui === cat.baseUi, `${cat.ui}/${cat.baseUi}`);
 
   // 默认选中蓝史莱姆
   const sel = await page.evaluate(() => {
@@ -190,6 +199,17 @@ try {
   chk('F:gotoNextTodo 跳过已完成条目', eff.navKey !== null && eff.navKey !== 'npc:1' && eff.navKey !== 'npc:594', eff.navKey);
   chk('D:同帧两次生成 → 候选 2 个(不覆盖)', eff.candList === 2 && eff.candSel === 1, JSON.stringify({ candList: eff.candList, candSel: eff.candSel }));
   chk('A/F:API 计量在工作', eff.stats.calls >= 4, JSON.stringify(eff.stats));
+
+  // ---- ③e 导出回归锁:内存候选存在时 exportPack 走选中候选(曾有 {list,sel}
+  //      对象被当像素用 → new ImageData 长度不匹配抛错的 bug) ----
+  const exp = await page.evaluate(async () => {
+    const b = window.__remasterBridge;
+    // 当前条目已 remaster(内存有候选)且验收一张 → exportPack 必须处理候选对象
+    await b.accept();
+    const r = await b.exportPack();
+    return { error: r?.error ?? null, sheets: r?.sheets ?? 0, frames: r?.frames ?? 0 };
+  });
+  chk('exportPack 处理内存候选不炸(返回摘要)', exp.error === null && exp.sheets > 0, JSON.stringify(exp));
 
   // ---- ④ 导出链路 zip round-trip(PK 头+manifest+sheet 字节) ----
   const zipBytes = await page.evaluate(async () => {

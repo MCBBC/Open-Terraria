@@ -32,8 +32,11 @@ describe('remaster catalog 基础规模', () => {
   it('类别条目数与素材库对拍', () => {
     expect(catalog.byCategory.get('tile')!.length).toBe(Object.keys(vanilla.tiles).length);
     expect(catalog.byCategory.get('wall')!.length).toBe(Object.keys(vanilla.walls).length);
-    // npc = npcData 693 条 + 网格兜底(696 缺 SetDefaults 登记,由 NPC_GRIDS 补建)
-    expect(catalog.byCategory.get('npc')!.length).toBe(Object.keys(npcData).length + 1);
+    // npc = npcData 全量 + 网格表里有而 npcData 无的兜底(vanilla-npcs.json 随
+    // 并行 NPC 补录增长,696 等已入 SetDefaults → 兜底为 0;断言动态算)
+    const npcExpect = Object.keys(npcData).length
+      + Object.keys(NPC_GRIDS).filter((id) => !npcData[id]).length;
+    expect(catalog.byCategory.get('npc')!.length).toBe(npcExpect);
     expect(catalog.byCategory.get('item')!.length).toBe(Object.keys(vanilla.items).length);
     expect(catalog.byCategory.get('ui')!.length).toBe(Object.keys(uiFiles).length);
     // projectile = index 里的 Projectile_*.png 总数
